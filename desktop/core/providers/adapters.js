@@ -325,6 +325,7 @@ export async function generateVideo({
       requestedDuration: duration,
       allowed,
       resolution,
+      aspectRatio,
       timeoutMs,
       label,
       onEvent
@@ -400,6 +401,56 @@ export async function generateVideo({
 }
 
 /**
+ * 查任务的地址。
+ *
+ * 官方写明了是 /query/video_generation?task_id=…，但中转平台经常改路径
+ * 而且文档里只给了「提交」那一步。与其让用户卡在这儿，不如把几种常见写法
+ * 挨个试一遍，通了就记住 —— 同一家后面所有任务都直接用它。
+ */
+const queryUrlCache = new Map();
+
+const QUERY_SHAPES = [
+  (base, id) => `${base}/query/video_generation?task_id=${encodeURIComponent(id)}`,
+  (base, id) => `${base}/video_generation/${encodeURIComponent(id)}`,
+  (base, id) => `${base}/query/video_generation/${encodeURIComponent(id)}`,
+  (base, id) => `${base}/video_generation?task_id=${encodeURIComponent(id)}`,
+  (base, id) => `${base}/tasks/${encodeURIComponent(id)}`
+];
+
+async function resolveQueryUrl(provider, providerId, taskId, label, onEvent) {
+  const base = baseUrlOf(provider);
+  const configured = provider.endpoints?.videoQuery;
+  if (configured) return `${interpolate(configured, provider)}?task_id=${encodeURIComponent(taskId)}`;
+
+  // 缓存键带上 baseUrl：换了中转地址就该重新探，不能拿旧路径去套新家
+  const cacheKey = `${providerId}::${base}`;
+  const cached = queryUrlCache.get(cacheKey);
+  if (cached) return cached(base, taskId);
+
+  for (const shape of QUERY_SHAPES) {
+    const url = shape(base, taskId);
+    try {
+      const res = await send(
+        { provider: providerId, label: `${label}·探查询路径`, method: 'GET', url, timeoutMs: 20000 },
+        null
+      );
+      // 404/405 说明路径不对，继续试；其他状态（哪怕任务还在跑）说明路径是对的
+      if (res.status !== 404 && res.status !== 405) {
+        queryUrlCache.set(cacheKey, shape);
+        onEvent?.({ type: 'note', message: `查任务路径：${url.replace(taskId, '…')}` });
+        return url;
+      }
+    } catch {
+      /* 连不上就试下一个 */
+    }
+  }
+  throw new Error(
+    `${label}：任务提交成功（${taskId}），但没试出查询任务的接口路径。` +
+      `请到「API 联调台」用这家的「查任务状态」模板手动确认路径，再告诉我改一下。`
+  );
+}
+
+/**
  * 海螺（MiniMax）的图生视频：三步。
  *
  *   ① POST /video_generation          → task_id
@@ -423,6 +474,7 @@ async function generateVideoMiniMax({
   requestedDuration,
   allowed,
   resolution,
+  aspectRatio = '16:9',
   timeoutMs,
   label,
   onEvent
@@ -438,6 +490,7 @@ async function generateVideoMiniMax({
 
   // ① 提交。H3 和 Hailuo 系的请求结构不是一回事，按模型名分流。
   const isH3 = /(^|[-_])H3([-_]|$)/i.test(model);
+  const vd = provider.videoDefaults || {};
   let body;
 
   if (isH3) {
@@ -447,7 +500,9 @@ async function generateVideoMiniMax({
     const content = [{ type: 'text', text: prompt }];
     const images = [firstFrameUrl, ...refImages].filter(Boolean).slice(0, 9);
     for (const url of images) content.push({ type: 'image_url', image_url: { url } });
-    body = { model, content, duration, resolution };
+    body = { model, content, duration, resolution: vd.resolution || resolution };
+    // 中转家（如秘塔）多要一个 ratio 字段，官方 H3 没有
+    if (vd.ratio) body.ratio = aspectRatio;
   } else {
     body = { model, prompt, duration, resolution };
     if (firstFrameUrl) body.first_frame_image = firstFrameUrl;
@@ -476,8 +531,8 @@ async function generateVideoMiniMax({
   if (!taskId) throw new Error(`${label}：提交后没拿到 task_id`);
   onEvent?.({ type: 'note', message: `海螺任务已提交：${taskId}` });
 
-  // ② 轮询
-  const queryUrl = endpoint(provider, 'videoQuery', '{{baseUrl}}/query/video_generation');
+  // ② 轮询。中转家往往不写查任务的路径，所以第一次先探出正确的那个。
+  const queryUrl = await resolveQueryUrl(provider, providerId, taskId, label, onEvent);
   const finalStatus = await poll(
     async (attempt) => {
       const res = await send(
@@ -485,7 +540,7 @@ async function generateVideoMiniMax({
           provider: providerId,
           label: `${label}·轮询 #${attempt}`,
           method: 'GET',
-          url: `${queryUrl}?task_id=${encodeURIComponent(taskId)}`,
+          url: queryUrl,
           timeoutMs: 30000
         },
         null

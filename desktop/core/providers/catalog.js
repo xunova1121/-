@@ -623,6 +623,96 @@ export const PROVIDERS = [
     ]
   },
 
+  // ───────────────────────── 秘塔 MiniMax H3 中转 ─────────────────────────
+  {
+    id: 'metaso',
+    name: '秘塔 metaso（MiniMax H3 中转）',
+    docs: 'https://metaso.cn/minimax-h3',
+    // 注意是 /api/minimax/v2 —— v2 而不是官方的 v1，路径也不同
+    baseUrl: 'https://metaso.cn/api/minimax/v2',
+    family: 'minimax',
+    auth: { type: 'bearer', secret: 'METASO_API_KEY' },
+    secrets: [
+      { name: 'METASO_API_KEY', label: 'API Key', required: true, hint: '控制台里 mk- 开头的那串' }
+    ],
+    capabilities: ['t2v', 'i2v', 'r2v'],
+    editableBaseUrl: true,
+    endpoints: {
+      videoCreate: '{{baseUrl}}/video_generation'
+      // 查任务和取文件的路径官方示例里没给。适配器会依次试几个常见写法，
+      // 试通哪个就用哪个，并把结果打进日志 —— 见 adapters.js 的 resolveQueryUrl。
+    },
+    /**
+     * 请求体和 MiniMax 官方 H3 大体一致（content[] 多模态），但多两个字段：
+     *   ratio       "16:9" 这类宽高比
+     *   resolution  官方示例用 "2K"
+     * 时长档位按示例是 5 秒起，和官方 H3 的 6 秒不一样 —— 别照搬。
+     */
+    videoDefaults: { resolution: '2K', ratio: true },
+    models: [
+      {
+        id: 'MiniMax-H3',
+        capability: 'r2v',
+        label: 'MiniMax H3（2K，全模态，最多 9 张参考图）',
+        durations: [5, 10, 15],
+        multimodal: true
+      }
+    ],
+    // 这家只做视频，没有对话接口可探。自检直接提交一个最小任务代价太高，
+    // 所以走「能不能通过鉴权」这一层：路径对了但参数不全会回 4xx 而不是 401。
+    probe: {
+      label: '连通性自检（提交一个缺参数的请求，看鉴权是否通过）',
+      method: 'POST',
+      url: '{{baseUrl}}/video_generation',
+      body: { model: 'MiniMax-H3' }
+    },
+    templates: [
+      {
+        id: 't2va',
+        label: '文生视频 t2va（官方示例同款）',
+        capability: 't2v',
+        method: 'POST',
+        url: '{{baseUrl}}/video_generation',
+        body: {
+          model: 'MiniMax-H3',
+          content: [
+            {
+              type: 'text',
+              text: '史诗级太空歌剧院线预告：女舰长独自站在巨大观景窗前，最后一支舰队正在集结并跃迁离去，强光爆闪、舰桥震动，她被留在原地。'
+            }
+          ],
+          resolution: '2K',
+          duration: 5,
+          ratio: '16:9'
+        }
+      },
+      {
+        id: 'i2v',
+        label: '图生视频（带参考图）',
+        capability: 'i2v',
+        method: 'POST',
+        url: '{{baseUrl}}/video_generation',
+        body: {
+          model: 'MiniMax-H3',
+          content: [
+            { type: 'text', text: '镜头缓慢推进，人物走向栈桥尽头' },
+            { type: 'image_url', image_url: { url: 'https://example.com/first-frame.png' } },
+            { type: 'image_url', image_url: { url: 'https://example.com/character-sheet.png' } }
+          ],
+          resolution: '2K',
+          duration: 5,
+          ratio: '16:9'
+        }
+      },
+      {
+        id: 'query',
+        label: '查任务状态（路径待确认，先在这里试）',
+        method: 'GET',
+        url: '{{baseUrl}}/query/video_generation?task_id=PUT_TASK_ID_HERE'
+      }
+    ]
+  },
+
   // ───────────────────────── 视频专线 ─────────────────────────
   {
     id: 'kling',

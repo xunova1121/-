@@ -148,6 +148,38 @@ const upstream = http.createServer((req, res) => {
     return res.end(Buffer.from('fake-mp4'));
   }
 
+  // ── 秘塔中转风格：提交路径同名，但查任务走 /video_generation/{taskId} ──
+  if (url.pathname === '/ms/video_generation' && req.method === 'POST') {
+    let raw = '';
+    req.on('data', (c) => (raw += c));
+    req.on('end', () => {
+      upstream.msBody = JSON.parse(raw || '{}');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ task_id: 'ms-9' }));
+    });
+    return undefined;
+  }
+  // 官方那条路径在这家不存在 —— 必须回 404，探测才有意义
+  if (url.pathname === '/ms/query/video_generation') {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ error: 'not found' }));
+  }
+  if (url.pathname === '/ms/video_generation/ms-9') {
+    upstream.msQueryHits = (upstream.msQueryHits || 0) + 1;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({
+      task_id: 'ms-9',
+      status: upstream.msQueryHits >= 2 ? 'Success' : 'Processing',
+      video_url: upstream.msQueryHits >= 2 ? `${upstreamUrl}/out.mp4` : undefined
+    }));
+  }
+
+  // 提交能成，但查任务的路径一个都不存在 —— 用来验证报错是否给得出下一步
+  if (url.pathname === '/msbad/video_generation' && req.method === 'POST') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ task_id: 'lost-1' }));
+  }
+
   // ── 以下是给"整条流水线打桩"用的 OpenAI 兼容接口 ──
 
   if (url.pathname === '/v3/chat/completions') {
@@ -749,6 +781,37 @@ await adapters.generateVideo({
 check('Hailuo 系仍用 first_frame_image，没被 H3 的改动带偏',
   Boolean(upstream.mmCreateBody.first_frame_image) && !upstream.mmCreateBody.content,
   JSON.stringify(Object.keys(upstream.mmCreateBody)));
+
+section('秘塔中转（路径未知时的自适应）');
+settings.patch({ baseUrls: { metaso: `${upstreamUrl}/ms` } });
+vault.setSecret('METASO_API_KEY', 'mk-test');
+
+const msVideo = await adapters.generateVideo({
+  providerId: 'metaso',
+  model: 'MiniMax-H3',
+  prompt: '女舰长站在观景窗前',
+  refImages: ['https://x.invalid/a.png'],
+  duration: 5,
+  aspectRatio: '16:9'
+});
+check('提交用 content[] 结构', Array.isArray(upstream.msBody?.content));
+check('带上了这家特有的 ratio 字段', upstream.msBody?.ratio === '16:9', JSON.stringify(upstream.msBody?.ratio));
+check('分辨率用这家的默认值 2K，而不是全局的 720P',
+  upstream.msBody?.resolution === '2K', upstream.msBody?.resolution);
+check('时长 5 秒原样发出（这家档位是 5 而不是官方的 6）',
+  upstream.msBody?.duration === 5, `${upstream.msBody?.duration}`);
+check('官方查询路径 404 后自动试出正确路径', /out\.mp4$/.test(msVideo.url), msVideo.url);
+check('探出来的路径被缓存，第二次不再重复试', upstream.msQueryHits >= 2);
+
+// 全都试不通时要给可执行的下一步，而不是一句"失败了"
+settings.patch({ baseUrls: { metaso: `${upstreamUrl}/msbad` } });
+let msErr = null;
+await adapters
+  .generateVideo({ providerId: 'metaso', model: 'MiniMax-H3', prompt: 'x', duration: 5 })
+  .catch((e) => (msErr = e));
+check('路径全试不通时，报错里带上 task_id 和下一步该干什么',
+  /任务提交成功/.test(msErr?.message || '') && /联调台/.test(msErr?.message || ''),
+  msErr?.message?.slice(0, 120));
 
 // ─────────────────────── 8. 上线前体检 ───────────────────────
 
