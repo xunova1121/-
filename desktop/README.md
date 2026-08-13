@@ -38,15 +38,28 @@ GitHub Actions 每次推送都会用 Windows 机器打好包，发到 **Releases
 - 日常构建 → [`snapshot`](../../releases/tag/snapshot) 预发布，**链接固定**，永远指向最新一次
 - 打了 `v` 开头的 tag → 另出一条正式 Release
 
-两个 exe 挑一个下，不用都下：
+挑一个下，不用都下：
 
-| 文件 | 说明 |
-|---|---|
-| `FutureDream-Setup-*.exe` | 安装版，可选安装目录，自动建桌面快捷方式 |
-| `FutureDream-Portable-*.exe` | 免安装版，双击即用，可放 U 盘带走 |
+| 文件 | 大小 | 前提 | 说明 |
+|---|---|---|---|
+| `FutureDream-Lite-NodeOnly.zip` | **约 0.2 MB** | 装了 Node 18+ | **嫌下载慢就下这个。** 解压双击 `启动.bat`，功能一模一样 |
+| `FutureDream-Setup-*.exe` | 约 90 MB | 无 | 安装版，可选目录，自动建桌面快捷方式 |
+| `FutureDream-Portable-*.exe` | 约 90 MB | 无 | 免安装版，双击即用，可放 U 盘带走 |
 
-首次打开 Windows SmartScreen 会拦一下（包没做代码签名），
-点「更多信息 → 仍要运行」即可。
+两个 exe 大，是因为里面塞了一整个 Chromium（Electron 外壳）。
+应用自身零运行时依赖，全部源码加起来才一百多 KB —— 所以已经有 Node 的话，
+Lite 包是**快几百倍**的那条路，往后每次更新也只下这 0.2 MB。
+没 Node 就一句 `winget install OpenJS.NodeJS.LTS`，装一次管到底。
+
+> Lite 包和 exe 的区别只有外壳：exe 里密钥用 Windows DPAPI 加密（绑当前用户账户），
+> Lite 包退化为本机 AES-256-GCM。功能、界面、流水线完全相同。
+
+首次打开 exe 时 Windows SmartScreen 会拦一下（包没做代码签名），
+点「更多信息 → 仍要运行」即可。Lite 包不会被拦。
+
+**下载还是慢**：GitHub 在国内时快时慢，把下载链接前面拼一个公共代理前缀通常会好很多
+（如 `https://ghfast.top/` + 原链接）。这类是第三方公共镜像，可用性和内容都不由本项目控制，
+介意的话就直连或自己挂代理。
 
 > 为什么不用 Actions Artifacts：那份存储有独立配额，满了就传不上去
 > （这个仓库踩过一次）。Release 附件不占那份配额，链接也更稳定。

@@ -58,9 +58,27 @@ jobs:
           # 未签名的包，跳过 electron-builder 的公证/签名流程
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
+      # 应用本身零运行时依赖，源码整包也就一百多 KB ——
+      # 比 Electron 安装包小三个数量级。国内下 GitHub 本来就慢，
+      # 已经装了 Node 的人没必要为了同一个应用去拖 90MB 的 Electron。
+      - name: 打一个绿色源码包（只要 Node，几百 KB）
+        shell: pwsh
+        run: |
+          $stage = "dist/portable-src/FutureDream"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item -Recurse core, ui, scripts -Destination $stage
+          # 启动脚本是中文名，用通配符拷，免得 PowerShell 的编码问题在这里绊一跤
+          Copy-Item package.json, README.md -Destination $stage
+          Copy-Item *.bat -Destination $stage
+          # 附件名必须是纯 ASCII：GitHub 会把非 ASCII 字符替换成点，
+          # 中文名传上去会变成一串 "...zip"，谁也认不出那是什么
+          Compress-Archive -Path "dist/portable-src/FutureDream" `
+            -DestinationPath "dist/FutureDream-Lite-NodeOnly.zip" -CompressionLevel Optimal -Force
+          Remove-Item -Recurse -Force dist/portable-src
+
       - name: 列出产物
-        run: dir dist
-        shell: cmd
+        shell: pwsh
+        run: Get-ChildItem dist -File | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
 
       # ── 发布 ──
       # 用 runner 自带的 gh CLI，不引第三方 action。
@@ -86,19 +104,34 @@ jobs:
           cat > notes.md <<NOTES
           构建自 \`${GITHUB_REF_NAME}\` 分支，提交 \`${GITHUB_SHA:0:7}\`。
 
-          ## 下载哪个
+          ## 下载哪个（挑一个就行）
 
-          | 文件 | 说明 |
-          |---|---|
-          | \`FutureDream-Setup-*.exe\` | 安装版，可选安装目录，自动建桌面快捷方式 |
-          | \`FutureDream-Portable-*.exe\` | 免安装版，双击即用，可放 U 盘带走 |
+          | 文件 | 大小 | 前提 | 说明 |
+          |---|---|---|---|
+          | \`FutureDream-Lite-NodeOnly.zip\` | **约 0.2 MB** | 装了 Node 18+ | **嫌慢就下这个。** 解压后双击 \`启动.bat\`，功能完全一样 |
+          | \`FutureDream-Setup-*.exe\` | 约 90 MB | 无 | 安装版，可选目录，建桌面快捷方式 |
+          | \`FutureDream-Portable-*.exe\` | 约 90 MB | 无 | 免安装版，双击即用，可放 U 盘 |
 
-          两个都是 64 位，二选一即可，不用都下。
+          两个 exe 之所以大，是因为里面塞了一整个 Chromium（Electron 外壳）。
+          应用自身零运行时依赖，源码总共才一百多 KB —— 所以已经有 Node 的话，
+          绿色版是**快几百倍**的那条路。没有 Node：\`winget install OpenJS.NodeJS.LTS\`，
+          装一次以后所有更新都只下那 0.2 MB。
+
+          ### 下载还是慢？
+
+          GitHub 在国内时快时慢。把下载链接前面拼一个公共代理前缀通常能好很多，例如：
+
+          \`\`\`
+          https://ghfast.top/  +  原始下载链接
+          https://gh-proxy.com/ +  原始下载链接
+          \`\`\`
+
+          这些是第三方公共镜像，我不控制它们的可用性和内容，介意的话就直连或者挂代理。
 
           ## 首次打开
 
           Windows SmartScreen 会拦一下（这个包没做代码签名）——
-          点「更多信息 → 仍要运行」。
+          点「更多信息 → 仍要运行」。绿色版不会被拦。
 
           打开后先去左侧「服务商与密钥」配一把 API Key 才能用；
           最省事的是只配火山引擎方舟一家，剧本／出图／视频／一致性复核都走它。
@@ -108,9 +141,9 @@ jobs:
           # snapshot 是滚动的：已存在就换掉旧附件，不存在才新建
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "$TITLE" --notes-file notes.md --target "$GITHUB_SHA"
-            gh release upload "$TAG" dist/*.exe --clobber
+            gh release upload "$TAG" dist/*.exe dist/*.zip --clobber
           else
-            gh release create "$TAG" dist/*.exe \
+            gh release create "$TAG" dist/*.exe dist/*.zip \
               --title "$TITLE" \
               --notes-file notes.md \
               --target "$GITHUB_SHA" \
