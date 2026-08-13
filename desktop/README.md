@@ -33,21 +33,23 @@ lumenx 是 Next.js + Python/FastAPI + FFmpeg 的网页平台。在 Windows 上�
 
 ### 方式一：下现成的安装包（本机什么都不用装）
 
-GitHub Actions 每次推送都会用 Windows 机器打好包：
+GitHub Actions 每次推送都会用 Windows 机器打好包，发到 **Releases**：
 
-- **Actions** 标签页 → 点最近一次「构建 Windows 安装包」 → 页面底部
-  **Artifacts** 里下载 `未来创梦-Windows.zip`
-- 或者仓库打了 `v` 开头的 tag 之后，去 **Releases** 页面下载
+- 日常构建 → [`snapshot`](../../releases/tag/snapshot) 预发布，**链接固定**，永远指向最新一次
+- 打了 `v` 开头的 tag → 另出一条正式 Release
 
-解压后两个 exe 挑一个：
+两个 exe 挑一个下，不用都下：
 
-| 文件名带 | 说明 |
+| 文件 | 说明 |
 |---|---|
-| `Setup` | 安装版，可选安装目录，自动建桌面快捷方式 |
-| `Portable` | 免安装版，双击即用，可放 U 盘带走 |
+| `FutureDream-Setup-*.exe` | 安装版，可选安装目录，自动建桌面快捷方式 |
+| `FutureDream-Portable-*.exe` | 免安装版，双击即用，可放 U 盘带走 |
 
 首次打开 Windows SmartScreen 会拦一下（包没做代码签名），
 点「更多信息 → 仍要运行」即可。
+
+> 为什么不用 Actions Artifacts：那份存储有独立配额，满了就传不上去
+> （这个仓库踩过一次）。Release 附件不占那份配额，链接也更稳定。
 
 ### 方式二：源码直接跑（改代码时用这个）
 
