@@ -184,6 +184,9 @@ async function handleApi(req, res, url) {
       node: process.version,
       platform: process.platform,
       vaultBackend: vault.backendName(),
+      // 有一份读不出来的旧密钥文件时，界面要能说清楚怎么办 ——
+      // 光报"连不上"等于把用户堵在门外
+      vault: vault.status(),
       electron: Boolean(process.versions.electron)
     });
   }

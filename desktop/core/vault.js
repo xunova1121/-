@@ -72,23 +72,73 @@ function decrypt(buf) {
 }
 
 let cache = null;
+/** 文件在，但这个模式下解不开时的原因；空字符串表示一切正常 */
+let lockedReason = '';
 
+/**
+ * 读保险箱。**这个函数不允许抛异常。**
+ *
+ * 早期版本在"文件是 DPAPI 加密的、但当前是命令行模式"时直接往外抛，
+ * 而 /api/catalog 会走到这里 —— 于是整个界面起不来，只剩一句
+ * "连不上本地服务"。服务其实好好的，坏的只是一份读不出来的密钥文件，
+ * 而用户连进去重填密钥的机会都没有。
+ *
+ * 现在读不出来就当"没有密钥"，把原因记下来交给界面去说清楚。
+ * 能进得去、能重填，才叫可恢复。
+ */
 function load() {
   if (cache) return cache;
   try {
     cache = JSON.parse(decrypt(fs.readFileSync(VAULT_FILE)));
+    lockedReason = '';
   } catch (err) {
-    if (err.code === 'VAULT_BACKEND_MISMATCH') throw err;
+    lockedReason = err.code === 'VAULT_BACKEND_MISMATCH' ? err.message : '';
     cache = {};
   }
   return cache;
 }
 
+/** 丢掉内存里的缓存，下次访问重新读盘。自检要用，也方便手改文件后不重启生效。 */
+export function reload() {
+  cache = null;
+  lockedReason = '';
+  return load();
+}
+
+/** 给界面看的保险箱状态：用的哪种加密、有没有读不出来的旧文件 */
+export function status() {
+  load();
+  return {
+    backend: backendName(),
+    locked: Boolean(lockedReason),
+    reason: lockedReason,
+    // 重填一次就好了，而且新写的这份两种模式都读得出来 —— 这句话得说出去
+    fix: lockedReason
+      ? '两条路：① 用安装版/免安装版 exe 打开（那边有 DPAPI，能解开这份旧的）；' +
+        '② 就在这里把密钥重新填一遍 —— 重填后会改用本机 AES-256-GCM 存，' +
+        '这种格式桌面版也读得出来，以后两边都能用。旧文件会自动备份成 credentials.enc.dpapi-backup，不会被直接覆盖掉。'
+      : ''
+  };
+}
+
 function persist() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
+
+  // 旧文件是另一种后端加密的、这次读不出来：覆盖前先留一份。
+  // 不然用户在命令行模式下重填一次密钥，桌面版那份就永久没了。
+  if (lockedReason) {
+    try {
+      fs.copyFileSync(VAULT_FILE, `${VAULT_FILE}.dpapi-backup`);
+    } catch {
+      /* 备份失败不该拦住用户重填密钥，尽力而为 */
+    }
+  }
+
   const tmp = `${VAULT_FILE}.tmp`;
   fs.writeFileSync(tmp, encrypt(JSON.stringify(cache ?? {})), { mode: 0o600 });
   fs.renameSync(tmp, VAULT_FILE); // 原子替换，断电不会留半个文件
+  // 刚写的这份当前模式一定读得出来，锁解除
+  lockedReason = '';
 }
 
 /** 取明文密钥 —— 只允许后端适配器调用，绝不出现在 HTTP 响应里 */

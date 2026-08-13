@@ -119,6 +119,25 @@ export async function go(id) {
   }
 }
 
+/** 起不来时也要给出下一步，而不是一句"连不上" */
+function showBootError(reachable, message) {
+  if (reachable) {
+    toast(`本地服务是通的，但有一项没读出来：${message}`, 'err');
+    return;
+  }
+  const host = $('#view-inner');
+  if (host) {
+    clear(host).append(
+      h('div', { class: 'empty' },
+        h('b', {}, '连不上本地服务'),
+        h('div', {}, message),
+        h('div', { style: 'margin-top:10px;font-size:12px' },
+          '常见原因：启动.bat 那个黑窗口被关掉了，或者端口被别的程序占用。把窗口重开一次即可。'))
+    );
+  }
+  toast(`连不上本地服务：${message}`, 'err');
+}
+
 function initTheme() {
   const saved = localStorage.getItem('fd.theme') || 'dark';
   document.documentElement.dataset.theme = saved;
@@ -140,7 +159,13 @@ async function boot() {
   try {
     await refreshCatalog();
   } catch (err) {
-    toast(`连不上本地服务：${err.message}`, 'err');
+    // "连不上"和"接口报错"是两回事。早期版本一律说成前者，
+    // 于是一份读不出来的密钥文件被报成"连不上本地服务"——
+    // 服务好好的，用户却被堵在门外，连进去重填密钥的机会都没有。
+    const reachable = await fetch('/api/health').then((r) => r.ok).catch(() => false);
+    showBootError(reachable, err.message);
+    // 服务是通的就照常进界面：具体哪个页面能不能用，让那个页面自己说
+    if (reachable) await go(state.current);
     return;
   }
   await go(state.current);

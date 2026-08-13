@@ -15,17 +15,33 @@ export default {
 
     const root = h('div', { class: 'stack' });
 
+    // 有一份读不出来的旧密钥文件（典型情况：先用 exe 存过 DPAPI 密钥，
+    // 后来改用只带 Node 的绿色版打开）。这时候最要紧的是让用户知道怎么脱身，
+    // 而不是让他对着一排"未配置"发愣。
+    const vaultLocked = state.health?.vault?.locked;
+    if (vaultLocked) {
+      root.append(
+        h('div', { class: 'fail-box' },
+          h('div', { class: 'fail-head' }, '有一份旧密钥读不出来'),
+          h('div', { class: 'fail-row' }, h('span', { class: 'fail-msg' }, state.health.vault.reason)),
+          h('div', { class: 'fail-row' }, h('span', { class: 'fail-msg' }, state.health.vault.fix)),
+          h('div', { class: 'fail-tip' },
+            '下面的卡片现在都显示"未配置"—— 那是因为读不出来，不是被删了。重新填一次就能继续用。')
+        )
+      );
+    }
+
     root.append(
       h('div', { class: 'panel' },
         h('h2', { class: 'panel-title' },
           '凭据保险箱',
-          h('span', { class: `badge ${secretsInfo.backend === 'dpapi' ? 'ok' : 'warn'}` },
-            secretsInfo.backend === 'dpapi' ? 'Windows DPAPI' : 'AES-256-GCM')
+          h('span', { class: `badge ${vaultLocked ? 'warn' : secretsInfo.backend === 'dpapi' ? 'ok' : 'warn'}` },
+            vaultLocked ? '旧文件读不出' : secretsInfo.backend === 'dpapi' ? 'Windows DPAPI' : 'AES-256-GCM')
         ),
         h('p', { class: 'panel-hint' },
           secretsInfo.backend === 'dpapi'
             ? '密钥用 Windows DPAPI 加密，绑定当前用户账户 —— 文件被拷到别的机器或别的用户下解不开。'
-            : '当前是命令行模式，密钥用本机 AES-256-GCM 加密。这能挡住"文件被顺手拷走"，挡不住已经拿到你登录态的人。用桌面应用打开可自动升级为 DPAPI。')
+            : '当前是命令行模式，密钥用本机 AES-256-GCM 加密。这能挡住"文件被顺手拷走"，挡不住已经拿到你登录态的人。这种格式桌面版也读得出来，两边通用。')
       )
     );
 

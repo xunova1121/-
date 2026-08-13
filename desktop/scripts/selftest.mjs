@@ -365,6 +365,59 @@ check('未知占位符原样保留', vault.expandSecrets('{{NOPE}}') === '{{NOPE
 
 // ─────────────────────── 2. 日志脱敏 ───────────────────────
 
+section('保险箱读不出来时不能把人堵在门外');
+{
+  // 复现用户踩的那条路：先用桌面版（DPAPI）存过密钥，
+  // 后来改用只带 Node 的绿色版打开 —— 那份文件在命令行模式下解不开。
+  const { VAULT_FILE } = await import('../core/paths.js');
+  const savedVault = fs.existsSync(VAULT_FILE) ? fs.readFileSync(VAULT_FILE) : null;
+
+  // 伪造一份 DPAPI 格式的文件：前六个字节是 'DPAPI1'，后面是什么无所谓 ——
+  // 命令行模式压根走不到解密那一步
+  fs.writeFileSync(VAULT_FILE, Buffer.concat([Buffer.from('DPAPI1'), Buffer.from('whatever')]));
+  vault.reload();
+
+  let threw = null;
+  let masked = null;
+  try {
+    masked = vault.listMasked();
+  } catch (err) {
+    threw = err;
+  }
+  check('读不出来不再往外抛异常（抛了就整个界面起不来）', threw === null, threw?.message);
+  check('读不出来时当作"没有密钥"，而不是崩掉', Array.isArray(masked) && masked.length === 0);
+  check('取单个密钥也不抛', vault.getSecret('ARK_API_KEY') === '');
+
+  const st = vault.status();
+  check('状态里说明白了是被锁住了', st.locked === true, JSON.stringify(st));
+  check('原因是人话', /DPAPI/.test(st.reason), st.reason);
+  check('给了两条具体出路，而不是只报错', /桌面版|exe/.test(st.fix) && /重新填/.test(st.fix), st.fix);
+
+  // health 接口必须还能通 —— 界面靠它判断"服务到底通没通"
+  const health = await (await fetch(`${appUrl}/api/health`)).json();
+  check('这种情况下 /api/health 仍然是 200 且带上锁定状态',
+    health.ok === true && health.vault?.locked === true, JSON.stringify(health.vault));
+
+  // 目录接口也不能塌：它会去问每家凭据齐没齐
+  const cat = await fetch(`${appUrl}/api/catalog`);
+  check('/api/catalog 不会因为读不出密钥就 500', cat.status === 200, `HTTP ${cat.status}`);
+
+  // 重填一次就该恢复，而且旧文件要留个备份
+  vault.setSecret('ARK_API_KEY', 'sk-refilled-in-cli-mode');
+  check('在命令行模式下重填密钥能存进去', vault.getSecret('ARK_API_KEY') === 'sk-refilled-in-cli-mode');
+  check('重填之后锁解除', vault.status().locked === false);
+  check('旧的 DPAPI 文件被备份了，没有直接覆盖掉',
+    fs.existsSync(`${VAULT_FILE}.dpapi-backup`));
+  check('备份的确实是原来那份',
+    fs.readFileSync(`${VAULT_FILE}.dpapi-backup`).subarray(0, 6).toString() === 'DPAPI1');
+
+  // 还原，别影响后面的自检
+  fs.rmSync(`${VAULT_FILE}.dpapi-backup`, { force: true });
+  if (savedVault) fs.writeFileSync(VAULT_FILE, savedVault);
+  else fs.rmSync(VAULT_FILE, { force: true });
+  vault.reload();
+}
+
 section('日志脱敏');
 const redacted = logbus.redactHeaders({ Authorization: 'Bearer sk-test-secret-value-1234', 'X-Foo': 'bar' });
 check('Authorization 被打码', !redacted.Authorization.includes('secret-value'), redacted.Authorization);

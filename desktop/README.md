@@ -52,7 +52,12 @@ Lite 包是**快几百倍**的那条路，往后每次更新也只下这 0.2 MB�
 没 Node 就一句 `winget install OpenJS.NodeJS.LTS`，装一次管到底。
 
 > Lite 包和 exe 的区别只有外壳：exe 里密钥用 Windows DPAPI 加密（绑当前用户账户），
-> Lite 包退化为本机 AES-256-GCM。功能、界面、流水线完全相同。
+> Lite 包用本机 AES-256-GCM。功能、界面、流水线完全相同。
+>
+> **两边换着用要注意一件事**：DPAPI 那份 Lite 包读不出来（它没有 DPAPI），
+> 反过来 AES 那份 exe 是读得出来的。所以先用 exe 存过密钥、后来改用 Lite 包打开时，
+> 密钥会显示"未配置"—— 应用照常能进，「服务商与密钥」页顶部会说清楚原因和两条出路：
+> 换回 exe 打开，或者就地重填一次（重填后存成 AES 格式，两边都能读，旧文件自动备份）。
 
 首次打开 exe 时 Windows SmartScreen 会拦一下（包没做代码签名），
 点「更多信息 → 仍要运行」即可。Lite 包不会被拦。
@@ -341,5 +346,5 @@ desktop/
 │  ├─ app.css              视觉系统（调色间配色 · 钨丝暖底 + 日光冷蓝）
 │  └─ views/               项目 / 创作台 / 设定集 / 联调台 / 服务商 / 请求记录 / 设置
 ├─ electron/               桌面外壳
-└─ scripts/selftest.mjs    打桩自检，193 项
+└─ scripts/selftest.mjs    打桩自检，208 项
 ```
