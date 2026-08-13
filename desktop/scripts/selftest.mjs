@@ -721,6 +721,26 @@ check('单镜临时指定的分辨率发出去了（方舟是拼在文本里的 
 check('画幅也一并发出（竖屏短剧靠它）', / --ratio 16:9/.test(vidText), vidText.slice(-60));
 check('记下了本次出视频的清晰度', shot1v?.videoResolution === '1080p', shot1v?.videoResolution);
 
+section('手动补入（中转平台查不到任务时的救援路径）');
+{
+  const shot = afterAssets.shots[1];
+  const evs = await ndjson(`/projects/${project.id}/shots/${shot.id}/attach`, {
+    url: `${upstreamUrl}/out.mp4`,
+    kind: 'video'
+  });
+  const p2 = evs.find((e) => e.type === 'finished')?.project;
+  const s2 = p2?.shots?.find((x) => x.id === shot.id);
+  // 任务在人家平台上跑完了、钱也花了，只是我们查不到状态 ——
+  // 这条路保证那段视频不至于烂在那儿
+  check('贴一个地址就能把视频补到这一镜上', Boolean(s2?.videoPath), JSON.stringify(evs.slice(-1)));
+  check('如实标成手动补入，不冒充模型出的', s2?.videoModelUsed === '手动补入');
+
+  const bad = await ndjson(`/projects/${project.id}/shots/${shot.id}/attach`, { url: '随便写的' });
+  check('不是 http 地址时直接说清楚，而不是去下载一个鬼东西',
+    /http\(s\) 开头/.test(bad.find((e) => e.type === 'error')?.message || ''),
+    JSON.stringify(bad.slice(-1)));
+}
+
 section('设定集编辑');
 const propRegen = await ndjson(
   `/projects/${project.id}/bible/prop/${encodeURIComponent('执法记录仪')}/regenerate`,
@@ -1226,6 +1246,29 @@ check('404「模型不存在」被指认成模型问题，而不是 baseUrl', /�
 check('报错里带了服务端原话', /does not exist/.test(explained), explained);
 
 // ─────────────────────── 9. Windows 文件名 ───────────────────────
+
+section('HTTP 200 里藏着的错误');
+{
+  const { bodyError, isAuthError } = await import('../core/providers/adapters.js');
+
+  // 秘塔真实回过这一段：HTTP 层看着没事，错误全在 body 里。
+  // 不认这种的话，轮询会把它当成"任务还没好"，一直等到超时。
+  const metaso = {
+    type: 'error',
+    error: { type: 'authorized_error', message: 'login fail: Please carry a valid API key in the Authorization header (1004)', http_code: '401' },
+    request_id: '933af6b6'
+  };
+  check('认得出 {"type":"error"} 这一族', /login fail/.test(bodyError(metaso)), bodyError(metaso));
+  check('把它判成鉴权问题（和"路径不对"要分开报）', isAuthError(bodyError(metaso)));
+  check('认得出 MiniMax 的 base_resp',
+    /余额不足/.test(bodyError({ base_resp: { status_code: 1008, status_msg: '余额不足' } })));
+  check('认得出 {"code":x,"msg":"…"} 这一族',
+    /没权限/.test(bodyError({ code: 1004, msg: '没权限' })));
+  check('code 为 0 不算错', bodyError({ code: 0, msg: 'ok' }) === '');
+  check('正常的任务响应不会被误判成错误',
+    bodyError({ task_id: 'x', status: 'Processing' }) === '');
+  check('空响应也不至于炸', bodyError(null) === '' && bodyError('x') === '');
+}
 
 section('网络层错误说人话');
 {

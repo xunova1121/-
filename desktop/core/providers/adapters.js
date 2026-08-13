@@ -497,8 +497,49 @@ const QUERY_SHAPES = [
   (base, id) => `${base}/video_generation/${encodeURIComponent(id)}`,
   (base, id) => `${base}/query/video_generation/${encodeURIComponent(id)}`,
   (base, id) => `${base}/video_generation?task_id=${encodeURIComponent(id)}`,
-  (base, id) => `${base}/tasks/${encodeURIComponent(id)}`
+  (base, id) => `${base}/tasks/${encodeURIComponent(id)}`,
+  (base, id) => `${base}/task/${encodeURIComponent(id)}`,
+  (base, id) => `${base}/video_generation/query?task_id=${encodeURIComponent(id)}`,
+  (base, id) => `${base}/query?task_id=${encodeURIComponent(id)}`
 ];
+
+/**
+ * 这段 body 是不是在报错。
+ *
+ * 国内这一圈网关有个共同脾气：**HTTP 200，错误藏在 body 里**。
+ * 秘塔就回过这个：
+ *   {"type":"error","error":{"type":"authorized_error",
+ *    "message":"login fail: ... (1004)","http_code":"401"}}
+ * 不认这种的话，轮询会把它当成"任务还没好"，一直等下去。
+ */
+export function bodyError(json) {
+  if (!json || typeof json !== 'object') return '';
+
+  // MiniMax 家族：业务码放 base_resp
+  if (json.base_resp && json.base_resp.status_code !== 0) {
+    return `${json.base_resp.status_msg}（code ${json.base_resp.status_code}）`;
+  }
+  // {"type":"error","error":{...}} 这一族
+  if (json.type === 'error' || json.error) {
+    const e = json.error || {};
+    const msg = e.message || e.msg || json.message || '';
+    const code = e.http_code || e.code || e.type || '';
+    if (msg) return `${msg}${code ? `（${code}）` : ''}`;
+  }
+  // {"code":1004,"msg":"..."} 这一族。注意 code 为 0 / "0" / "ok" 都算正常
+  const code = json.code ?? json.errCode ?? json.err_code;
+  const ok = code === undefined || code === null || code === 0 || code === '0' || code === 'ok';
+  if (!ok) {
+    const msg = json.msg || json.message || json.error_msg || '';
+    if (msg) return `${msg}（code ${code}）`;
+  }
+  return '';
+}
+
+/** 这条报错是不是在说"密钥不对/没带上"——和"路径不对"完全是两回事 */
+export function isAuthError(text) {
+  return /401|403|unauthor|authoriz|login fail|api key|apikey|token|鉴权|密钥|未授权/i.test(String(text || ''));
+}
 
 /** 从各家五花八门的响应里把状态词抠出来 */
 export function readTaskState(json) {
@@ -534,6 +575,13 @@ function looksLikeTask(json, taskId) {
   return false;
 }
 
+/** 带上 task_id 的错误：上层要靠它把"任务还在天上飘着"记到镜头里 */
+function taskError(message, taskId) {
+  const err = new Error(message);
+  err.taskId = taskId;
+  return err;
+}
+
 async function resolveQueryUrl(provider, providerId, taskId, label, onEvent) {
   const base = baseUrlOf(provider);
   const configured =
@@ -552,6 +600,7 @@ async function resolveQueryUrl(provider, providerId, taskId, label, onEvent) {
   if (cached) return cached(base, taskId);
 
   const tried = [];
+  const authRejected = [];
   for (const shape of QUERY_SHAPES) {
     const url = shape(base, taskId);
     try {
@@ -564,20 +613,44 @@ async function resolveQueryUrl(provider, providerId, taskId, label, onEvent) {
         onEvent?.({ type: 'note', message: `查任务路径：${url.replace(taskId, '…')}` });
         return url;
       }
+      // 这个地址**存在**、只是不认我们的密钥 —— 和"路径不对"是两回事，
+      // 混在一起报会让人去查错误的东西
+      const said = bodyError(res.json);
+      if (res.status === 401 || res.status === 403 || (said && isAuthError(said))) {
+        authRejected.push(`${url.replace(taskId, '…')} → ${said || `HTTP ${res.status}`}`);
+      }
       tried.push(
-        `${url.replace(taskId, '…')} → HTTP ${res.status}，${
-          res.json ? `响应 ${JSON.stringify(res.json).slice(0, 120)}` : '不是 JSON'
+        `${url.replace(taskId, '…')} → HTTP ${res.status}${said ? `，${said}` : ''}${
+          !said && res.json ? `，响应 ${JSON.stringify(res.json).slice(0, 100)}` : ''
         }`
       );
     } catch (err) {
       tried.push(`${url.replace(taskId, '…')} → ${err.message}`);
     }
   }
-  throw new Error(
+  // 全都被挡在鉴权外面 = 路径可能是对的，但这家查任务时要的密钥形式和提交时不一样。
+  // 这种情况下让用户去改路径是南辕北辙，得直说是鉴权的问题。
+  if (authRejected.length && authRejected.length === tried.length) {
+    throw taskError(
+      `${label}：任务提交成功（task_id ${taskId}），但每个查询地址都回"密钥不对"：\n  ${authRejected.join(
+        '\n  '
+      )}\n` +
+        `注意提交那一步是通的，所以密钥本身没问题 —— 是这家**查任务时要的鉴权形式和提交时不一样**` +
+        `（有的中转要把 key 放在 URL 参数里，有的只认 POST）。\n` +
+        `到「API 联调台」用 task_id ${taskId} 试出能查通的写法，` +
+        `再到「服务商与密钥 → 接口地址（高级）」把它填进「查视频任务」那一栏。\n` +
+        `实在查不到也别急：片子多半已经在平台上出好了，` +
+        `把地址复制过来用分镜卡片里的「手动补入」贴进去就行。`,
+      taskId
+    );
+  }
+  throw taskError(
     `${label}：任务提交成功（task_id ${taskId}），但没有一个候选路径能查到它。\n` +
       `试过这些：\n  ${tried.join('\n  ')}\n` +
       `任务本身多半在厂商那边跑着 —— 到「API 联调台」用 task_id ${taskId} 手动查一次，` +
-      `把能查到的那个地址告诉我，我把它写进目录里。`
+      `把能查到的那个地址填到「服务商与密钥 → 接口地址（高级）→ 查视频任务」，填完立刻生效。\n` +
+      `或者直接去平台上复制视频地址，用分镜卡片里的「手动补入」贴回来。`,
+    taskId
   );
 }
 
@@ -734,6 +807,22 @@ async function generateVideoMiniMax({
         null
       );
       const json = checkBiz(res, '轮询');
+
+      // HTTP 200 但 body 里在报错 —— 国内网关的常见脾气。
+      // 当成"任务还没好"会一直等下去；鉴权错更是等到天荒地老也不会变。
+      const said = bodyError(json);
+      if (said) {
+        queryUrlCache.delete(`${providerId}::${baseUrlOf(provider)}`);
+        throw new Error(
+          isAuthError(said)
+            ? `${label}：查任务时被拒了 —— ${said}\n` +
+              `提交那一步是通的，所以密钥本身没问题，是这家**查任务要的鉴权形式和提交时不一样**。\n` +
+              `到「API 联调台」用 task_id ${taskId} 试出能查通的写法，` +
+              `再填到「服务商与密钥 → 接口地址（高级）→ 查视频任务」。`
+            : `${label}：查任务失败 —— ${said}（task_id ${taskId}）`
+        );
+      }
+
       const state = readTaskState(json);
 
       /**

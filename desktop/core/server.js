@@ -392,6 +392,20 @@ async function handleApi(req, res, url) {
       return undefined;
     }
 
+    // ── 手动补入：中转平台查不到任务时，从平台复制地址贴回来 ──
+    if (b && c === 'shots' && d && e === 'attach' && method === 'POST') {
+      const body = await readBody(req);
+      const stream = ndjson(res);
+      req.on('close', () => stream.end());
+      try {
+        const project = await studio.attachShotMedia(b, d, body, (ev) => stream.send(ev));
+        stream.end({ type: 'finished', project });
+      } catch (err) {
+        stream.end({ type: 'error', message: err.message });
+      }
+      return undefined;
+    }
+
     // ── 设定集条目：重出 / 新增 / 删除 ──
     if (b && c === 'bible' && d) {
       const kind = d; // char | scene | prop

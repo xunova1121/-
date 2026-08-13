@@ -926,6 +926,45 @@ export default {
                     ? h('div', { class: 'shot-used' },
                         `出视频用了 ${shot.videoModelUsed}${shot.videoResolution ? ` · ${shot.videoResolution}` : ''}`)
                     : null,
+                  // 任务提交成功但查不到状态：片子多半在厂商平台上好好地躺着。
+                  // 与其让它烂在那儿，不如给一条把地址贴回来的路。
+                  sc.video && shot.pendingTask
+                    ? h('div', { class: 'fail-box', style: 'margin-top:10px' },
+                        h('div', { class: 'fail-head' }, '有一个任务查不到状态'),
+                        h('div', { class: 'fail-row' },
+                          h('span', { class: 'fail-who' }, 'task_id'),
+                          h('span', { class: 'fail-msg mono' }, shot.pendingTask.taskId)),
+                        h('div', { class: 'fail-tip' },
+                          `提交是成功的（${shot.pendingTask.provider}），片子多半已经在平台上出好了。` +
+                          '去平台复制视频地址，粘到下面补回来 —— 钱已经花了，别让它丢在那儿。'),
+                        (() => {
+                          const input = h('input', {
+                            type: 'text', class: 'mono', placeholder: 'https://…/xxx.mp4',
+                            style: 'font-size:11px;margin-top:8px'
+                          });
+                          const btn = h('button', {
+                            class: 'btn sm', style: 'margin-top:6px',
+                            onclick: async () => {
+                              const url = input.value.trim();
+                              if (!url) return toast('先把地址粘进来', 'err');
+                              btn.disabled = true;
+                              try {
+                                let err = null;
+                                await stream(`/projects/${project.id}/shots/${shot.id}/attach`,
+                                  { url, kind: 'video' }, (ev) => { if (ev.type === 'error') err = ev.message; });
+                                if (err) throw new Error(err);
+                                toast(`第 ${shot.index} 镜已补入`, 'ok');
+                                jobNotify('done');
+                              } catch (e) {
+                                toast(e.message, 'err');
+                              } finally {
+                                btn.disabled = false;
+                              }
+                            }
+                          }, '手动补入这段视频');
+                          return h('div', {}, input, btn);
+                        })())
+                    : null,
                   // 把真正发给视频模型的提示词摊开 —— 片段和剧本对不上时，先看这里
                   sc.video && shot.videoPrompt
                     ? h('details', { class: 'shot-prompt' },

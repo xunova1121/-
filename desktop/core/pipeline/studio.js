@@ -772,6 +772,16 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
       });
       onEvent?.({ type: 'shot', shotId: shot.id, status: 'done' });
     } catch (err) {
+      // 报错里带了 task_id 的话记下来：任务多半在厂商那边跑完了，
+      // 只是我们查不到。留着这个号，用户能去平台上把片子捞回来。
+      const taskId = err.taskId || (err.message.match(/task_id\s+(\S+)/) || [])[1];
+      if (taskId) {
+        store.update(projectId, (p) => {
+          const t = p.shots.find((s) => s.id === shot.id);
+          if (t) t.pendingTask = { taskId, provider: r.video.provider, at: new Date().toISOString() };
+          return p;
+        });
+      }
       onEvent?.({ type: 'shot', shotId: shot.id, status: 'failed', message: err.message });
     }
   }
@@ -783,6 +793,48 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
     return p;
   });
   onEvent?.({ type: 'stage', stage: 'video', status: 'done', message: `${done}/${after.shots.length} 段就绪` });
+  return store.read(projectId);
+}
+
+/**
+ * 手动把一段视频 / 一张图补到某一镜上。
+ *
+ * 为什么需要这个：中转平台只公开"提交"接口的情况是真实存在的（秘塔就是），
+ * 任务在人家平台上跑完了、片子也在，我们却查不到状态。
+ * 这种时候最要紧的不是继续猜路径，而是**别让已经花钱出好的东西丢掉** ——
+ * 从平台上复制地址粘进来，这一镜就补齐了，流水线可以继续往下走。
+ */
+export async function attachShotMedia(projectId, shotId, { url, kind = 'video' } = {}, onEvent) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const shot = project.shots.find((s) => s.id === shotId);
+  if (!shot) throw new Error(`没有这一镜：${shotId}`);
+  if (!/^https?:\/\//i.test(String(url || ''))) throw new Error('请粘一个 http(s) 开头的地址');
+
+  const dir = store.assetDir(projectId);
+  const dest = path.join(dir, kind === 'video' ? `${shot.id}.mp4` : `${shot.id}.png`);
+  onEvent?.({ type: 'shot', shotId, status: 'running', message: '下载中…' });
+  await saveMedia({ url }, dest, onEvent);
+
+  const modelRef = kind === 'video' ? null : await toModelRef(dest, { onEvent });
+  store.update(projectId, (p) => {
+    const t = p.shots.find((s) => s.id === shotId);
+    if (!t) return p;
+    if (kind === 'video') {
+      t.videoPath = dest;
+      t.videoModelUsed = '手动补入';
+      t.status = 'video-ready';
+    } else {
+      t.imagePath = dest;
+      t.imageRef = modelRef;
+      t.modelUsed = '手动补入';
+      t.status = 'image-ready';
+    }
+    // 补上了就不再是"任务在天上飘着"
+    delete t.pendingTask;
+    return p;
+  });
+  onEvent?.({ type: 'shot', shotId, status: 'done', message: '已补入' });
   return store.read(projectId);
 }
 
