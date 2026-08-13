@@ -405,7 +405,30 @@ check('通过后的分数被记下来', shot1?.consistency?.score === 92);
 const assetsBadShot = afterAssets?.shots?.[1];
 check('第二镜也出图了', Boolean(assetsBadShot?.imagePath));
 
-// ─────────────────────── 8. Windows 文件名 ───────────────────────
+// ─────────────────────── 8. 上线前体检 ───────────────────────
+
+section('上线前体检');
+const preflightEvents = await ndjson('/preflight', { include: ['chat', 'vision', 't2i'] });
+const byId = Object.fromEntries(
+  preflightEvents.filter((e) => e.type === 'check' && e.status !== 'running').map((e) => [e.id, e])
+);
+check('对话这条腿通了', byId.chat?.status === 'ok', JSON.stringify(byId.chat));
+check('出图这条腿通了', byId.t2i?.status === 'ok', JSON.stringify(byId.t2i));
+check(
+  '视觉模型没描述出测试图时判为 warn 而不是 ok',
+  byId.vision?.status === 'warn',
+  `实际 ${byId.vision?.status}`
+);
+check('每条结果都带上了用的服务商和模型', Object.values(byId).every((r) => r.provider && r.model));
+const verdict = preflightEvents.find((e) => e.type === 'summary');
+check('给出了总体结论', Boolean(verdict?.verdict), JSON.stringify(verdict));
+check('有 warn 时结论不谎报"都通"', /留意/.test(verdict?.verdict || ''), verdict?.verdict);
+
+// 打桩服务没有 /v3/models，正好用来验证"拿不到列表时给的是人话而不是空下拉"
+const modelList = await (await fetch(`${appUrl}/api/providers/volcengine/models`)).json();
+check('拿不到模型列表时说明白该去哪儿找', modelList.ok === false && /控制台|手动填写/.test(modelList.reason), JSON.stringify(modelList));
+
+// ─────────────────────── 9. Windows 文件名 ───────────────────────
 
 section('Windows 文件名规则');
 check('非法字符被替换', safeFileName('a<b>c:d"e/f\\g|h?i*j') === 'a_b_c_d_e_f_g_h_i_j');
@@ -466,7 +489,7 @@ check(
   pathnameOffenders.map((f) => path.relative(PROJECT_ROOT, f)).join('、')
 );
 
-// ─────────────────────── 10. 本地服务的防护 ───────────────────────
+// ─────────────────────── 11. 本地服务的防护 ───────────────────────
 
 section('本地服务防护');
 const traversal = await fetch(`${appUrl}/media?p=${encodeURIComponent('/etc/passwd')}`);

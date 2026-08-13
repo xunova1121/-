@@ -22,6 +22,7 @@ import * as ffmpeg from './ffmpeg.js';
 import * as providers from './providers/index.js';
 import * as adapters from './providers/adapters.js';
 import * as studio from './pipeline/studio.js';
+import * as preflight from './preflight.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -222,10 +223,30 @@ async function handleApi(req, res, url) {
     }
   }
 
+  // ---- 体检 ----
+  if (a === 'preflight') {
+    if (method === 'GET') return json(res, 200, { checks: preflight.CHECKS });
+    if (method === 'POST') {
+      const opts = await readBody(req);
+      const stream = ndjson(res);
+      req.on('close', () => stream.end());
+      try {
+        await preflight.run(opts, (ev) => stream.send(ev));
+        stream.end({ type: 'finished' });
+      } catch (err) {
+        stream.end({ type: 'error', message: err.message });
+      }
+      return undefined;
+    }
+  }
+
   // ---- 服务商 ----
   if (a === 'providers' && b) {
     if (c === 'probe' && method === 'POST') {
       return json(res, 200, await providers.probe(b));
+    }
+    if (c === 'models' && method === 'GET') {
+      return json(res, 200, await preflight.listModels(b));
     }
     if (c === 'template' && d && method === 'GET') {
       return json(res, 200, providers.draftFromTemplate(b, d));

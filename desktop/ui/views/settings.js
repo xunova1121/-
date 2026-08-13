@@ -4,7 +4,11 @@
  * 能力路由是拆开的（剧本、复核、出图、视频、配音各选各的），
  * 因为各家强项差得很远，绑死一家反而处处将就。
  */
-import { h, api, toast } from '../lib.js';
+import { h, clear, api, stream, toast, fmtMs } from '../lib.js';
+
+function statusGlyph(status) {
+  return { running: '◐', ok: '✓', warn: '!', fail: '✕', skip: '–' }[status] || '·';
+}
 
 const CAP_META = [
   ['chat', '剧本与分镜', 'chatProvider', 'chatModel', '读剧本、拆分镜、写设定集。长文本能力优先'],
@@ -22,6 +26,15 @@ export default {
 
     // ── 能力路由 ──
     const routeGrid = h('div', { class: 'route-grid' });
+
+    // 同一家可能被四五条能力共用，列表拉一次就够
+    const modelCache = new Map();
+    async function fetchModels(providerId) {
+      if (modelCache.has(providerId)) return modelCache.get(providerId);
+      const r = await api(`/providers/${providerId}/models`);
+      modelCache.set(providerId, r);
+      return r;
+    }
 
     for (const [cap, label, provKey, modelKey, hint] of CAP_META) {
       const candidates = providers.filter((p) => (p.capabilities || []).includes(cap));
@@ -72,15 +85,141 @@ export default {
       );
       paintModels(settings[provKey]);
 
+      // 「模型 ID 到底填什么」是配置这一步最大的卡点。
+      // 与其让用户去控制台翻，不如拿他的密钥去问一次这家实际开通了哪些。
+      const fetchHint = h('div', { class: 'field-hint' }, hint);
+      const fetchBtn = h('button', {
+        class: 'btn ghost sm',
+        title: '用你的密钥去问这家实际开通了哪些模型',
+        onclick: async (e) => {
+          const btn = e.target;
+          const providerId = provSel.value;
+          btn.disabled = true;
+          btn.textContent = '拉取中…';
+          try {
+            const r = await fetchModels(providerId);
+            if (!r.ok || !r.models.length) {
+              fetchHint.textContent = r.reason || '没拿到模型列表';
+              fetchHint.style.color = 'var(--caution)';
+            } else {
+              const current = pending[modelKey] || settings[modelKey];
+              modelSel.innerHTML = '';
+              for (const id of r.models) {
+                modelSel.append(h('option', { value: id, selected: id === current }, id));
+              }
+              modelSel.append(h('option', { value: '__custom__' }, '自定义（手动填写）…'));
+              if (!r.models.includes(current)) {
+                modelSel.append(h('option', { value: current, selected: true }, `${current}（当前，不在列表里）`));
+              }
+              fetchHint.textContent = `拉到 ${r.models.length} 个可用模型${r.models.includes(current) ? '' : '；当前这个不在列表里，建议换一个'}`;
+              fetchHint.style.color = r.models.includes(current) ? 'var(--good)' : 'var(--caution)';
+            }
+          } catch (err) {
+            fetchHint.textContent = err.message;
+            fetchHint.style.color = 'var(--alarm)';
+          } finally {
+            btn.disabled = false;
+            btn.textContent = '拉取可用模型';
+          }
+        }
+      }, '拉取可用模型');
+
       routeGrid.append(
         h('div', { class: 'field' },
           h('label', {}, label),
           h('div', { class: 'row' }, h('div', {}, provSel), h('div', {}, modelSel)),
           customInput,
-          h('div', { class: 'field-hint' }, hint)
+          h('div', { style: 'margin-top:6px' }, fetchBtn),
+          fetchHint
         )
       );
     }
+
+    // ── 上线前体检 ──
+    // 流水线跑一趟要几分钟到几十分钟。与其等第 04 步才发现视频模型 ID 填错，
+    // 不如在这里用最小代价把五条腿挨个点一遍。
+    const { checks } = await api('/preflight');
+    const checkBoxes = new Map();
+    const resultHost = h('div', { class: 'preflight-list' });
+
+    const optionRow = h('div', { class: 'preflight-opts' },
+      ...checks.map((c) => {
+        const box = h('input', { type: 'checkbox', checked: c.defaultOn });
+        checkBoxes.set(c.id, box);
+        return h('label', { class: 'preflight-opt', title: c.note },
+          box,
+          h('span', {}, c.label),
+          h('span', { class: 'preflight-cost' }, c.cost)
+        );
+      })
+    );
+
+    const runBtn = h('button', {
+      class: 'btn primary',
+      onclick: async () => {
+        const include = [...checkBoxes.entries()].filter(([, b]) => b.checked).map(([id]) => id);
+        if (!include.length) return toast('至少勾一项', 'err');
+        runBtn.disabled = true;
+        runBtn.textContent = '体检中…';
+        clear(resultHost);
+        const rows = new Map();
+        try {
+          await stream('/preflight', { include }, (ev) => {
+            if (ev.type === 'check') {
+              let row = rows.get(ev.id);
+              if (!row) {
+                row = h('div', { class: 'preflight-row' });
+                rows.set(ev.id, row);
+                resultHost.append(row);
+              }
+              const meta = checks.find((c) => c.id === ev.id);
+              clear(row);
+              row.className = `preflight-row ${ev.status}`;
+              row.append(
+                h('span', { class: 'preflight-dot' }, statusGlyph(ev.status)),
+                h('div', { class: 'preflight-body' },
+                  h('div', { class: 'preflight-head' },
+                    h('b', {}, meta?.label || ev.id),
+                    h('span', { class: 'preflight-route' }, `${ev.provider} / ${ev.model || '未配置'}`),
+                    ev.ms ? h('span', { class: 'preflight-ms' }, fmtMs(ev.ms)) : null
+                  ),
+                  ev.detail ? h('div', { class: 'preflight-detail' }, ev.detail) : null,
+                  ev.message ? h('div', { class: 'preflight-msg' }, ev.message) : null,
+                  ev.hint ? h('div', { class: 'preflight-hint' }, `→ ${ev.hint}`) : null
+                )
+              );
+            }
+            if (ev.type === 'poll') {
+              const row = rows.get('i2v');
+              if (row) row.querySelector('.preflight-detail')?.replaceChildren(`轮询第 ${ev.attempt} 次…`);
+            }
+            if (ev.type === 'summary') {
+              resultHost.append(
+                h('div', { class: `preflight-verdict ${ev.failed ? 'bad' : ev.warned ? 'warn' : 'good'}` }, ev.verdict)
+              );
+              toast(ev.verdict, ev.failed ? 'err' : 'ok');
+            }
+            if (ev.type === 'error') toast(ev.message, 'err');
+          });
+        } catch (err) {
+          toast(err.message, 'err');
+        } finally {
+          runBtn.disabled = false;
+          runBtn.textContent = '开始体检';
+        }
+      }
+    }, '开始体检');
+
+    root.append(
+      h('div', { class: 'panel' },
+        h('h2', { class: 'panel-title' }, '上线前体检'),
+        h('p', { class: 'panel-hint' },
+          '按下面的路由配置，把五条能力各真跑一次最小调用。哪条不通、服务端原话是什么、下一步该改哪里，一次说清 —— 比跑到第 04 步才发现模型 ID 填错省事得多。'),
+        optionRow,
+        h('div', { class: 'inline', style: 'margin:12px 0' }, runBtn),
+        resultHost
+      )
+    );
 
     root.append(
       h('div', { class: 'panel' },
