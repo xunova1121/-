@@ -105,16 +105,31 @@ async function uploadVia(gateway, localPath, onEvent) {
 }
 
 /** 把远端产物或 base64 落到本地。二进制不能走 execute()（那条通道是按文本设计的）。 */
-export async function saveMedia({ url, base64 }, destPath, onEvent) {
+export async function saveMedia({ url, base64, downloadHeaders }, destPath, onEvent) {
   fs.mkdirSync(path.dirname(destPath), { recursive: true });
   let buf;
   const started = Date.now();
   if (base64 && !url) {
     buf = Buffer.from(base64, 'base64');
   } else {
-    const res = await fetch(url, { signal: AbortSignal.timeout(300000) });
+    // 多数厂商给的是公网直链；OpenAI 的 /videos/{id}/content 例外 ——
+    // 不带 Authorization 会拿到一个 401 的 JSON，然后被当成 mp4 存下来，
+    // 表现是"视频下好了但打不开"。
+    const res = await fetch(url, {
+      headers: downloadHeaders || undefined,
+      signal: AbortSignal.timeout(300000)
+    });
     if (!res.ok) throw new Error(`下载失败 HTTP ${res.status}：${url}`);
     buf = Buffer.from(await res.arrayBuffer());
+
+    // 说好是视频/图片，回来的却是一段 JSON —— 多半是鉴权或参数出了问题。
+    // 存下来只会得到一个打不开的文件，不如当场说清楚。
+    const type = res.headers.get('content-type') || '';
+    if (/json|text\/html/i.test(type)) {
+      throw new Error(
+        `下载到的不是媒体文件（Content-Type: ${type}）：${buf.toString('utf8').slice(0, 200)}`
+      );
+    }
   }
   fs.writeFileSync(destPath, buf);
   logbus.record({
@@ -582,17 +597,32 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
   if (bibleRefs.labels.length) {
     onEvent?.({ type: 'note', message: `参考设定集：${bibleRefs.labels.join('、')}` });
   }
-  const video = await adapters.generateVideo({
-    providerId,
-    model,
-    prompt: videoPrompt,
-    firstFrameUrl: firstFrame,
-    refImages: bibleRefs.images,
-    duration: shot.duration,
-    resolution: opts.resolution || null,
-    label: `重出视频 #${shot.index}`,
-    onEvent: (ev) => onEvent?.({ ...ev, shotId })
-  });
+  let video;
+  try {
+    video = await adapters.generateVideo({
+      providerId,
+      model,
+      prompt: videoPrompt,
+      firstFrameUrl: firstFrame,
+      refImages: bibleRefs.images,
+      duration: shot.duration,
+      resolution: opts.resolution || null,
+      label: `重出视频 #${shot.index}`,
+      onEvent: (ev) => onEvent?.({ ...ev, shotId })
+    });
+  } catch (err) {
+    // 和批量那条路一样：提交成功但取不回来时，把 task_id 记住。
+    // 钱已经花了，任务在厂商那边，不能让它变成黑洞。
+    const taskId = err.taskId || (err.message.match(/task_id\s+(\S+)/) || [])[1];
+    if (taskId) {
+      store.update(projectId, (p) => {
+        const t = p.shots.find((s) => s.id === shotId);
+        if (t) t.pendingTask = { taskId, provider: providerId, at: new Date().toISOString() };
+        return p;
+      });
+    }
+    throw err;
+  }
 
   const dest = path.join(store.assetDir(projectId), `${shot.id}.mp4`);
   await saveMedia(video, dest, onEvent);
@@ -838,6 +868,96 @@ export async function attachShotMedia(projectId, shotId, { url, kind = 'video' }
   return store.read(projectId);
 }
 
+/**
+ * 待认领的任务：提交成功了，但当时没能把片子取回来。
+ *
+ * 这类任务是流水线里最讨厌的一种状态 —— 钱花了、东西在厂商那边好好地放着，
+ * 我们这边却一直缺一块，而且既不算"失败"（重跑要再花一次钱），
+ * 也不算"完成"。所以把它单列成一类，给两条出路：重查一次，或者贴地址补入。
+ */
+export function listPendingTasks(projectId) {
+  const project = store.read(projectId);
+  if (!project) return [];
+  return (project.shots || [])
+    .filter((s) => s.pendingTask && !s.videoPath)
+    .map((s) => ({ shotId: s.id, index: s.index, ...s.pendingTask }));
+}
+
+/**
+ * 把待认领的任务重新查一遍。
+ *
+ * **不重新生成，只是再问一次**，所以不产生生成费用。
+ * 用户刚在「接口地址（高级）」里填对路径之后点这一下，
+ * 之前所有卡住的镜头能一次性收回来。
+ */
+export async function recheckPendingTasks(projectId, { onEvent } = {}) {
+  const pending = listPendingTasks(projectId);
+  if (!pending.length) throw new Error('没有待认领的任务');
+
+  onEvent?.({ type: 'stage', stage: 'video', status: 'running', message: `重查 ${pending.length} 个任务…` });
+  const dir = store.assetDir(projectId);
+  let claimed = 0;
+
+  for (const task of pending) {
+    onEvent?.({ type: 'shot', shotId: task.shotId, status: 'running', message: `查 ${task.taskId}…` });
+    try {
+      const r = await adapters.queryTaskOnce({
+        providerId: task.provider,
+        taskId: task.taskId,
+        label: `重查 #${task.index}`,
+        onEvent: (ev) => onEvent?.({ ...ev, shotId: task.shotId })
+      });
+
+      if (r.done && r.url) {
+        const dest = path.join(dir, `${task.shotId}.mp4`);
+        await saveMedia({ url: r.url }, dest, onEvent);
+        store.update(projectId, (p) => {
+          const t = p.shots.find((s) => s.id === task.shotId);
+          if (t) {
+            t.videoPath = dest;
+            t.status = 'video-ready';
+            delete t.pendingTask;
+          }
+          return p;
+        });
+        claimed += 1;
+        onEvent?.({ type: 'shot', shotId: task.shotId, status: 'done', message: '已收回' });
+      } else if (r.failed) {
+        // 厂商那边确实失败了：把它从待认领里摘掉，这一镜该重跑
+        store.update(projectId, (p) => {
+          const t = p.shots.find((s) => s.id === task.shotId);
+          if (t) delete t.pendingTask;
+          return p;
+        });
+        onEvent?.({ type: 'shot', shotId: task.shotId, status: 'failed', message: r.reason });
+      } else {
+        onEvent?.({
+          type: 'shot',
+          shotId: task.shotId,
+          status: 'failed',
+          message: r.reason || `还是查不到（状态 ${r.state || '空'}）`
+        });
+      }
+    } catch (err) {
+      onEvent?.({ type: 'shot', shotId: task.shotId, status: 'failed', message: err.message });
+    }
+  }
+
+  const after = store.read(projectId);
+  const done = after.shots.filter((s) => s.videoPath).length;
+  store.update(projectId, (p) => {
+    p.stageStatus.video = done === p.shots.length ? 'done' : done ? 'partial' : 'pending';
+    return p;
+  });
+  onEvent?.({
+    type: 'stage',
+    stage: 'video',
+    status: 'done',
+    message: `收回 ${claimed}/${pending.length} 个`
+  });
+  return store.read(projectId);
+}
+
 // ═══════════════════════ 阶段五：配音 ═══════════════════════
 
 export async function generateVoice(projectId, { onEvent } = {}) {
@@ -901,6 +1021,20 @@ export async function compose(projectId, { onEvent } = {}) {
   const withVideo = ordered.filter((s) => s.videoPath);
   const segments = withVideo.map((s) => s.videoPath);
   if (!segments.length) throw new Error('没有可合成的视频片段');
+
+  // 缺镜也允许合成 —— 卡在"必须全齐"上，一个取不回来的任务就能让整部片子出不来。
+  // 但必须说清楚少了哪几镜，别让人以为这就是完整成片。
+  const missing = ordered.filter((s) => !s.videoPath);
+  if (missing.length) {
+    const pending = missing.filter((s) => s.pendingTask).length;
+    onEvent?.({
+      type: 'note',
+      message:
+        `缺 ${missing.length} 镜（${missing.map((s) => `#${s.index}`).join(' ')}），本次先按现有的 ` +
+        `${segments.length} 段合成。` +
+        (pending ? `其中 ${pending} 镜的任务还在"待认领"里，去把它们收回来再合一次会更完整。` : '')
+    });
+  }
 
   // 裁剪是唯一能精确命中目标时长的办法：模型给 5 秒而分镜只要 3.5 秒时切掉多余的。
   // 关掉则保留完整片段 —— 运动更自然，但成片会比计划长。

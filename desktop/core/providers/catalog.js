@@ -37,9 +37,13 @@ function openaiCompatible({
   optional = false,
   editableBaseUrl = true,
   capabilities = ['chat', 'vision'],
-  hint = ''
+  hint = '',
+  // 剩下的原样并进去：像 OpenAI 的视频接口那样"兼容家族但多一套东西"的情况，
+  // 不必为它单独抄一份完整定义。（早期版本这里会把多给的字段悄悄丢掉。）
+  ...extra
 }) {
   return {
+    ...extra,
     id,
     name,
     docs,
@@ -107,7 +111,7 @@ export const PROVIDERS = [
     docs: 'https://platform.openai.com/docs/api-reference',
     baseUrl: 'https://api.openai.com/v1',
     secret: 'OPENAI_API_KEY',
-    capabilities: ['chat', 'vision', 't2i', 'i2i', 'tts'],
+    capabilities: ['chat', 'vision', 't2i', 'i2i', 't2v', 'i2v', 'tts'],
     hint: 'sk- 开头；用兼容网关时把 baseUrl 一并改掉',
     models: [
       { id: 'gpt-4o', capability: 'vision', label: 'GPT-4o（带视觉，做一致性复核）' },
@@ -119,8 +123,35 @@ export const PROVIDERS = [
       { id: 'dall-e-3', capability: 't2i', label: 'DALL·E 3' },
       { id: 'gpt-4o-mini-tts', capability: 'tts', label: 'GPT-4o mini TTS（可指定语气）' },
       { id: 'tts-1-hd', capability: 'tts', label: 'TTS-1 HD（音质好）' },
-      { id: 'tts-1', capability: 'tts', label: 'TTS-1（快）' }
-    ]
+      { id: 'tts-1', capability: 'tts', label: 'TTS-1（快）' },
+      // Sora：OpenAI 的视频接口。时长只收 4/8/12 秒这三档
+      { id: 'sora-2', capability: 'i2v', label: 'Sora 2（视频，4/8/12 秒）', durations: [4, 8, 12] },
+      { id: 'sora-2-pro', capability: 'i2v', label: 'Sora 2 Pro（质量更高，更贵）', durations: [4, 8, 12] }
+    ],
+    /**
+     * OpenAI 的视频不是"聊天补全"那一套，走自己的 /videos 三步：
+     *   ① POST /videos            → {"id":"video_…","status":"queued"}
+     *   ② GET  /videos/{id}       → status: queued / in_progress / completed / failed
+     *   ③ GET  /videos/{id}/content → 直接回 mp4 二进制
+     *
+     * 第③步和别家最大的不同：**下载也要带 Authorization**。
+     * 别家给的是公网直链，拿着就能下；这里必须带着密钥去取，
+     * 所以适配层会把鉴权头一路传到落盘那一步。
+     */
+    videoApi: 'openai-videos',
+    videoEndpoints: {
+      create: '{{baseUrl}}/videos',
+      status: '{{baseUrl}}/videos/{id}',
+      content: '{{baseUrl}}/videos/{id}/content'
+    },
+    videoDefaults: {
+      // Sora 收的是像素尺寸而不是 720p 这种档位，所以这里列的是尺寸
+      resolution: '1280x720',
+      resolutions: ['1280x720', '720x1280', '1024x1792', '1792x1024'],
+      // 参考图只收一张（input_reference）
+      maxImages: 1,
+      refNote: 'Sora 的参考图只收 1 张（首帧），其余设定集参考图由提示词里的冻结描述承担'
+    }
   }),
 
   // ───────────────────────── 火山引擎方舟 ─────────────────────────

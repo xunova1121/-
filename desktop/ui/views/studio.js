@@ -436,7 +436,13 @@ export default {
         case 'assets':
           return { done: shots.filter((s) => s.imagePath).length, total: shots.length, unit: '张镜头图' };
         case 'video':
-          return { done: shots.filter((s) => s.videoPath).length, total: shots.length, unit: '段视频' };
+          return {
+            done: shots.filter((s) => s.videoPath).length,
+            total: shots.length,
+            unit: '段视频',
+            // 提交成功但取不回来的：既不算完成也不算失败，单独数一份
+            pending: shots.filter((s) => s.pendingTask && !s.videoPath).length
+          };
         case 'voice': {
           const need = shots.filter((s) => s.dialogue?.trim());
           return { done: need.filter((s) => s.audioPath).length, total: need.length, unit: '条配音' };
@@ -516,6 +522,32 @@ export default {
 
       const runnable = !jobBusy();
       const isCostly = selectedStage === 'video';
+      const pendingCount = stageProgress('video').pending || 0;
+
+      /**
+       * 待认领的任务：提交成功了、钱花了、片子在厂商那边，我们没取回来。
+       *
+       * 这类状态最要命的地方在于它**卡住整条流水线**：既不算完成（合成时缺一块），
+       * 也不算失败（重跑要再花一次钱）。所以给一个零成本的出口 ——
+       * 重查一次不产生任何生成费用，刚在「接口地址」里填对路径的话，
+       * 这一下能把之前卡住的全收回来。
+       */
+      const pendingBox = pendingCount && selectedStage === 'video'
+        ? h('div', { class: 'fail-box', style: 'margin-top:12px' },
+            h('div', { class: 'fail-head' }, `${pendingCount} 个任务已提交，但没取回来`),
+            // 纯文本节点里写 ** 只会原样印出来 —— 要强调就用元素
+            h('div', { class: 'fail-tip' },
+              '这些镜头的片子多半已经在厂商平台上出好了 —— 钱花了，只是我们查不到状态。重查一次 ',
+              h('b', {}, '不重新生成、不花钱'),
+              '；如果你刚在「服务商与密钥 → 接口地址（高级）」里填对了查任务的地址，这一下就能把它们全收回来。'),
+            h('div', { class: 'inline', style: 'margin-top:10px' },
+              h('button', {
+                class: 'btn sm primary',
+                disabled: !runnable,
+                onclick: () => recheckTasks()
+              }, '重查待认领任务（不花钱）'),
+              h('button', { class: 'btn ghost sm', onclick: () => go('providers') }, '去填查任务地址')))
+        : null;
 
       add(stageDetail,
         h('div', { class: 'stage-detail-head' },
@@ -552,6 +584,7 @@ export default {
               h('div', { class: 'progress-text' }, `${done} / ${total} ${unit}（${pct}%）`)
             )
           : h('div', { class: 'progress-text' }, '这一步还没有可统计的产出'),
+        pendingBox,
         missing.length
           ? h('div', { class: 'stage-missing' },
               h('span', { class: 'eyebrow' }, `还缺 ${missing.length} 项`),
@@ -620,6 +653,34 @@ export default {
           failed ? `${failed} 项失败，看流水线下面的失败原因` : `完成，用时 ${fmtMs(spent)}`,
           failed ? 'err' : 'ok'
         );
+      }
+    }
+
+    /** 重查待认领的任务。只是再问一次，不重新生成，所以不花钱。 */
+    async function recheckTasks() {
+      if (jobBusy()) return;
+      job.projectId = project.id;
+      job.stage = 'video';
+      job.live.clear();
+      job.log = [];
+      job.failures = [];
+      job.startedAt = Date.now();
+      jobNotify('start');
+      try {
+        await stream(`/projects/${project.id}/tasks/recheck`, {}, (ev) => {
+          trackLive(ev);
+          if (ev.type === 'error') job.failures.push({ who: '重查', message: ev.message });
+          const text = describe(ev);
+          if (text) job.log.push({ type: ev.type, text });
+          jobNotify('tick');
+        });
+      } catch (err) {
+        job.failures.push({ who: '重查', message: err.message });
+      } finally {
+        job.stage = null;
+        job.live.clear();
+        jobNotify('done');
+        toast(job.failures.length ? '有任务还是没收回来，看下面的原因' : '重查完成', job.failures.length ? 'err' : 'ok');
       }
     }
 
@@ -926,8 +987,7 @@ export default {
                     ? h('div', { class: 'shot-used' },
                         `出视频用了 ${shot.videoModelUsed}${shot.videoResolution ? ` · ${shot.videoResolution}` : ''}`)
                     : null,
-                  // 任务提交成功但查不到状态：片子多半在厂商平台上好好地躺着。
-                  // 与其让它烂在那儿，不如给一条把地址贴回来的路。
+                  // 任务提交成功但查不到状态时，把 task_id 亮出来
                   sc.video && shot.pendingTask
                     ? h('div', { class: 'fail-box', style: 'margin-top:10px' },
                         h('div', { class: 'fail-head' }, '有一个任务查不到状态'),
@@ -936,34 +996,47 @@ export default {
                           h('span', { class: 'fail-msg mono' }, shot.pendingTask.taskId)),
                         h('div', { class: 'fail-tip' },
                           `提交是成功的（${shot.pendingTask.provider}），片子多半已经在平台上出好了。` +
-                          '去平台复制视频地址，粘到下面补回来 —— 钱已经花了，别让它丢在那儿。'),
-                        (() => {
-                          const input = h('input', {
-                            type: 'text', class: 'mono', placeholder: 'https://…/xxx.mp4',
-                            style: 'font-size:11px;margin-top:8px'
-                          });
-                          const btn = h('button', {
-                            class: 'btn sm', style: 'margin-top:6px',
-                            onclick: async () => {
-                              const url = input.value.trim();
-                              if (!url) return toast('先把地址粘进来', 'err');
-                              btn.disabled = true;
-                              try {
-                                let err = null;
-                                await stream(`/projects/${project.id}/shots/${shot.id}/attach`,
-                                  { url, kind: 'video' }, (ev) => { if (ev.type === 'error') err = ev.message; });
-                                if (err) throw new Error(err);
-                                toast(`第 ${shot.index} 镜已补入`, 'ok');
-                                jobNotify('done');
-                              } catch (e) {
-                                toast(e.message, 'err');
-                              } finally {
-                                btn.disabled = false;
-                              }
+                          '用上面的「重查待认领任务」再问一次，或者直接在下面贴地址补回来。'))
+                    : null,
+                  // 手动补入**常驻**，不以"有没有记下 task_id"为前提。
+                  // 逃生口设成有条件的，等于在最需要它的时候没有它 ——
+                  // 早期版本失败的镜头根本没记 task_id，于是界面上什么都不显示。
+                  sc.image || sc.video
+                    ? (() => {
+                        const kind = sc.video ? 'video' : 'image';
+                        const input = h('input', {
+                          type: 'text', class: 'mono',
+                          placeholder: kind === 'video' ? 'https://…/xxx.mp4' : 'https://…/xxx.png',
+                          style: 'font-size:11px'
+                        });
+                        const btn = h('button', {
+                          class: 'btn sm', style: 'margin-top:6px',
+                          onclick: async () => {
+                            const url = input.value.trim();
+                            if (!url) return toast('先把地址粘进来', 'err');
+                            btn.disabled = true;
+                            try {
+                              let err = null;
+                              await stream(`/projects/${project.id}/shots/${shot.id}/attach`,
+                                { url, kind }, (ev) => { if (ev.type === 'error') err = ev.message; });
+                              if (err) throw new Error(err);
+                              toast(`第 ${shot.index} 镜已补入`, 'ok');
+                              jobNotify('done');
+                            } catch (e) {
+                              toast(e.message, 'err');
+                            } finally {
+                              btn.disabled = false;
                             }
-                          }, '手动补入这段视频');
-                          return h('div', {}, input, btn);
-                        })())
+                          }
+                        }, kind === 'video' ? '补入这段视频' : '补入这张图');
+                        return h('details', { class: 'shot-prompt', style: 'margin-top:10px' },
+                          h('summary', {}, kind === 'video' ? '手动补入视频（贴地址）' : '手动补入图片（贴地址）'),
+                          h('div', { class: 'shot-prompt-body' },
+                            h('div', { style: 'margin-bottom:6px' },
+                              '厂商那边已经出好、这边取不回来时用这个：去平台复制地址粘进来，' +
+                              '这一镜就补齐了，不用重跑（省一次钱）。'),
+                            input, btn));
+                      })()
                     : null,
                   // 把真正发给视频模型的提示词摊开 —— 片段和剧本对不上时，先看这里
                   sc.video && shot.videoPrompt
@@ -1004,11 +1077,16 @@ export default {
       clear(stageName).append(`当前：${meta?.label || ''}`);
       shotHint.textContent = HINTS[selectedStage] || '这一步的产出不在分镜网格里，切到对应的页面看。';
       const miss = (project.shots || []).filter((s) => (selectedStage === 'video' ? !s.videoPath : !s.imagePath)).length;
+      const pend = (project.shots || []).filter((s) => s.pendingTask && !s.videoPath).length;
       clear(shotBadge);
       if (miss) {
         shotBadge.append(
           h('span', { class: 'badge warn' }, selectedStage === 'video' ? `${miss} 镜缺视频` : `${miss} 镜缺图`)
         );
+      }
+      // "待认领"和"缺"要分开说：前者是钱花了没取回来，后者是压根没跑
+      if (pend && selectedStage === 'video') {
+        shotBadge.append(h('span', { class: 'badge warn' }, `${pend} 个任务待认领`));
       }
       paintShots();
     }

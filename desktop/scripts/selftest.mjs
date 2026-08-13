@@ -33,6 +33,7 @@ const settings = await import('../core/settings.js');
 const providersMod = await import('../core/providers/index.js');
 const store = await import('../core/store.js');
 const styleModule = await import('../core/styles.js');
+const studioModule = await import('../core/pipeline/studio.js');
 
 let passed = 0;
 let failed = 0;
@@ -247,6 +248,39 @@ const upstream = http.createServer((req, res) => {
   }
 
   // ── 以下是给"整条流水线打桩"用的 OpenAI 兼容接口 ──
+
+  // ── OpenAI 的视频（Sora）：POST /videos → GET /videos/{id} → GET /videos/{id}/content ──
+  if (url.pathname === '/oa/videos' && req.method === 'POST') {
+    let raw = '';
+    req.on('data', (c) => (raw += c));
+    req.on('end', () => {
+      upstream.soraBody = JSON.parse(raw || '{}');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ id: 'video_abc', object: 'video', status: 'queued', progress: 0 }));
+    });
+    return undefined;
+  }
+  if (url.pathname === '/oa/videos/video_abc/content') {
+    // 关键：不带 Authorization 就回 401 的 JSON —— 真实接口就是这样，
+    // 少带头会存下一个打不开的"mp4"
+    if (!/^Bearer /.test(req.headers.authorization || '')) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: { message: 'missing api key' } }));
+    }
+    upstream.soraDownloadAuth = req.headers.authorization;
+    res.writeHead(200, { 'Content-Type': 'video/mp4' });
+    return res.end(Buffer.from('fake-sora-mp4'));
+  }
+  if (url.pathname === '/oa/videos/video_abc') {
+    upstream.soraPolls = (upstream.soraPolls || 0) + 1;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({
+      id: 'video_abc',
+      status: upstream.soraPolls >= 2 ? 'completed' : 'in_progress',
+      progress: upstream.soraPolls >= 2 ? 100 : 40,
+      seconds: '8'
+    }));
+  }
 
   if (url.pathname === '/v3/chat/completions') {
     let raw = '';
@@ -1246,6 +1280,92 @@ check('路径全试不通时，报错里带上 task_id 和下一步该干什么'
   msErr?.message?.slice(0, 120));
 
 // ─────────────────────── 8. 上线前体检 ───────────────────────
+
+section('待认领的任务不能变成黑洞');
+{
+  // 提交成功、片子在厂商那边、我们没取回来 —— 这种状态既不算完成也不算失败，
+  // 卡住整条流水线。必须有一条零成本的出路。
+  const shot = afterAssets.shots[0];
+  store.update(project.id, (p) => {
+    const t = p.shots.find((x) => x.id === shot.id);
+    if (t) {
+      delete t.videoPath;
+      t.pendingTask = { taskId: '424010985738629', provider: 'metaso', at: new Date().toISOString() };
+    }
+    return p;
+  });
+
+  const pending = studioModule.listPendingTasks(project.id);
+  check('待认领的任务列得出来', pending.length === 1 && pending[0].taskId === '424010985738629',
+    JSON.stringify(pending));
+
+  // 让打桩服务能查到这个任务，模拟"用户刚把查询地址填对了"
+  settings.patch({ baseUrls: { metaso: `${upstreamUrl}/msv2` } });
+  adapters.resetQueryUrlCache();
+  upstream.msv2Hits = 5; // 直接给终态，重查是"查一次"不是轮询
+
+  const evs = await ndjson(`/projects/${project.id}/tasks/recheck`, {});
+  const after = evs.find((e) => e.type === 'finished')?.project;
+  const claimed = after?.shots?.find((x) => x.id === shot.id);
+  check('重查一次就把片子收回来了', Boolean(claimed?.videoPath), JSON.stringify(evs.slice(-2)));
+  check('收回来之后不再挂着"待认领"', !claimed?.pendingTask);
+  check('重查只查不生成（没有新的提交请求）', upstream.msv2Submits === undefined || upstream.msv2Submits === 0);
+  check('列表随之清空', studioModule.listPendingTasks(project.id).length === 0);
+
+  settings.patch({ baseUrls: { metaso: `${upstreamUrl}/ms` } });
+  adapters.resetQueryUrlCache();
+}
+
+section('OpenAI 的视频接口（Sora）');
+{
+  settings.patch({ baseUrls: { openai: `${upstreamUrl}/oa` } });
+  vault.setSecret('OPENAI_API_KEY', 'sk-openai-test');
+  upstream.soraPolls = 0;
+
+  const sora = await adapters.generateVideo({
+    providerId: 'openai',
+    model: 'sora-2',
+    prompt: '女舰长站在观景窗前',
+    firstFrameUrl: 'https://x.invalid/f.png',
+    duration: 7,
+    aspectRatio: '16:9'
+  });
+
+  check('提交用的是 /videos，不是 chat 那套', Boolean(upstream.soraBody?.prompt), JSON.stringify(upstream.soraBody));
+  check('时长按 Sora 的档位对齐（4/8/12，7 秒进 8 秒）',
+    upstream.soraBody?.seconds === '8', upstream.soraBody?.seconds);
+  check('首帧图走 input_reference', Boolean(upstream.soraBody?.input_reference));
+  check('轮到 completed 才收工', upstream.soraPolls >= 2, `${upstream.soraPolls} 次`);
+  check('拿到的是 /content 地址', /\/videos\/video_abc\/content$/.test(sora.url || ''), sora.url);
+
+  // 这条最要紧：OpenAI 的下载地址必须带密钥，别家都不用。
+  // 少带头会下到一个 401 的 JSON，然后被当成 mp4 存下来 —— 文件在，就是打不开。
+  check('下载地址带回了鉴权头', /^Bearer /.test(sora.downloadHeaders?.Authorization || ''),
+    JSON.stringify(Object.keys(sora.downloadHeaders || {})));
+
+  const dest = path.join(SANDBOX, 'sora.mp4');
+  await studioModule.saveMedia(sora, dest);
+  check('带着头能把 mp4 下下来', fs.readFileSync(dest, 'utf8') === 'fake-sora-mp4');
+  check('下载时确实带了密钥', /^Bearer sk-openai-test$/.test(upstream.soraDownloadAuth || ''));
+
+  // 不带头会拿到 JSON —— 必须当场报错，而不是存成一个打不开的文件
+  let jsonErr = null;
+  await studioModule
+    .saveMedia({ url: sora.url }, path.join(SANDBOX, 'bad.mp4'))
+    .catch((e) => (jsonErr = e));
+  check('下到 JSON 时当场报错，不存成打不开的 mp4',
+    /下载失败 HTTP 401|不是媒体文件/.test(jsonErr?.message || ''), jsonErr?.message?.slice(0, 80));
+
+  // 竖屏短剧配个横向尺寸等于白出一条片子
+  upstream.soraPolls = 0;
+  await adapters.generateVideo({
+    providerId: 'openai', model: 'sora-2', prompt: 'x', duration: 4, aspectRatio: '9:16'
+  });
+  check('画幅是竖屏时尺寸自动换成竖的',
+    upstream.soraBody?.size === '720x1280', upstream.soraBody?.size);
+
+  settings.patch({ baseUrls: { openai: '' } });
+}
 
 section('上线前体检');
 const preflightEvents = await ndjson('/preflight', { include: ['chat', 'vision', 't2i'] });

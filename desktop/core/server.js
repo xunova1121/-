@@ -392,6 +392,22 @@ async function handleApi(req, res, url) {
       return undefined;
     }
 
+    // ── 待认领的任务：查一次，不重新生成，所以不花钱 ──
+    if (b && c === 'tasks' && d === 'recheck' && method === 'POST') {
+      const stream = ndjson(res);
+      req.on('close', () => stream.end());
+      try {
+        const project = await studio.recheckPendingTasks(b, { onEvent: (ev) => stream.send(ev) });
+        stream.end({ type: 'finished', project });
+      } catch (err) {
+        stream.end({ type: 'error', message: err.message });
+      }
+      return undefined;
+    }
+    if (b && c === 'tasks' && method === 'GET') {
+      return json(res, 200, { pending: studio.listPendingTasks(b) });
+    }
+
     // ── 手动补入：中转平台查不到任务时，从平台复制地址贴回来 ──
     if (b && c === 'shots' && d && e === 'attach' && method === 'POST') {
       const body = await readBody(req);

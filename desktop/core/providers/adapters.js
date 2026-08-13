@@ -10,6 +10,7 @@
 import { getProvider, resolveResolution, videoResolutions } from './catalog.js';
 import { allowedDurations, alignDuration } from '../duration.js';
 import { send, sendAsync, baseUrlOf, interpolate, diagnose } from './index.js';
+import { buildAuthHeaders } from './auth.js';
 import { poll } from '../http-client.js';
 import * as settings from '../settings.js';
 
@@ -379,6 +380,25 @@ export async function generateVideo({
     onEvent?.({
       type: 'note',
       message: `${provider.name} 的合法时长只有 ${allowed.join('/')} 秒，${duration}s 已对齐到 ${actualDuration}s`
+    });
+  }
+
+  // OpenAI 的视频不走 chat 那套协议，自己一条路
+  if (provider.videoApi === 'openai-videos') {
+    return generateVideoOpenAI({
+      provider,
+      providerId,
+      model,
+      prompt,
+      images,
+      duration: actualDuration,
+      requestedDuration: duration,
+      allowed,
+      resolution: finalResolution,
+      aspectRatio: finalRatio,
+      timeoutMs,
+      label,
+      onEvent
     });
   }
 
@@ -756,6 +776,141 @@ async function submitWithMediaBackoff({ providerId, provider, url, images, build
       count = next;
     }
   }
+}
+
+/**
+ * OpenAI 的视频（Sora）：自己一套，三步。
+ *
+ *   ① POST /videos              → {"id":"video_…","status":"queued"}
+ *   ② GET  /videos/{id}         → queued / in_progress / completed / failed
+ *   ③ GET  /videos/{id}/content → **直接回 mp4 二进制**
+ *
+ * 和别家最大的不同在第③步：别人给的是公网直链，拿着就能下；
+ * 这里的地址必须**带着 Authorization** 才取得到。
+ * 所以这里把鉴权头一路带回去交给落盘那一步 —— 少了它，
+ * 下载会拿到一个 401 的 JSON，然后存成一个打不开的"mp4"。
+ */
+async function generateVideoOpenAI({
+  provider,
+  providerId,
+  model,
+  prompt,
+  images,
+  duration,
+  requestedDuration,
+  allowed,
+  resolution,
+  aspectRatio,
+  timeoutMs,
+  label,
+  onEvent
+}) {
+  const ep = (key, fallback) => interpolate(provider.videoEndpoints?.[key] || fallback, provider);
+
+  // Sora 收的是像素尺寸而不是 720p 这种档位，所以得让尺寸和画幅方向对上 ——
+  // 竖屏短剧配了个 1280x720 出来，等于白出一条横片。
+  const wantPortrait = (() => {
+    const [w, h] = String(aspectRatio || '16:9').split(':').map(Number);
+    return w && h ? h > w : false;
+  })();
+  const sizes = provider.videoDefaults?.resolutions || [];
+  const isPortrait = (sz) => {
+    const [w, h] = String(sz).split('x').map(Number);
+    return w && h ? h > w : false;
+  };
+  let size = resolution;
+  if (sizes.length && isPortrait(size) !== wantPortrait) {
+    const match = sizes.find((sz) => isPortrait(sz) === wantPortrait);
+    if (match) {
+      onEvent?.({ type: 'note', message: `画幅是 ${aspectRatio}，尺寸从 ${size} 换成 ${match}` });
+      size = match;
+    }
+  }
+
+  const body = { model, prompt, seconds: String(duration), size };
+  // 首帧参考图：JSON 里给 URL 或 data URI 都行
+  if (images[0]) body.input_reference = images[0];
+
+  const created = await send(
+    { provider: providerId, label: `${label}·提交`, method: 'POST', url: ep('create', '{{baseUrl}}/videos'), body, timeoutMs: 60000 },
+    onEvent
+  );
+  if (!created.ok) fail(`${label}·提交`, created);
+
+  const id = created.json?.id;
+  if (!id) throw new Error(`${label}：提交后没拿到视频任务 id（响应 ${JSON.stringify(created.json).slice(0, 200)}）`);
+  onEvent?.({ type: 'note', message: `Sora 任务已提交：${id}` });
+
+  const statusUrl = ep('status', '{{baseUrl}}/videos/{id}').replace('{id}', encodeURIComponent(id));
+  const finalJson = await poll(
+    async (attempt) => {
+      const res = await send(
+        { provider: providerId, label: `${label}·轮询 #${attempt}`, method: 'GET', url: statusUrl, timeoutMs: 30000 },
+        null
+      );
+      const said = bodyError(res.json);
+      if (said) throw taskError(`${label}：查任务失败 —— ${said}（id ${id}）`, id);
+
+      const state = String(res.json?.status || '').toLowerCase();
+      onEvent?.({ type: 'poll', attempt, state: state || '读不出状态', progress: res.json?.progress });
+      if (state === 'completed') return { done: true, value: res.json };
+      if (state === 'failed') {
+        const why = res.json?.error?.message || '厂商未说明原因';
+        throw taskError(`${label}：任务失败 —— ${why}（id ${id}）`, id);
+      }
+      return { done: false, value: res.json };
+    },
+    { intervalMs: settings.get('pollIntervalMs'), timeoutMs }
+  );
+
+  const contentUrl = ep('content', '{{baseUrl}}/videos/{id}/content').replace('{id}', encodeURIComponent(id));
+  return {
+    url: contentUrl,
+    // 关键：这个地址不带密钥取不到，落盘时必须把头带上
+    downloadHeaders: buildAuthHeaders(provider),
+    actualDuration: Number(finalJson?.seconds) || duration,
+    requestedDuration,
+    allowedDurations: allowed,
+    resolution: size,
+    raw: finalJson
+  };
+}
+
+/**
+ * 只查一次某个任务，不轮询。
+ *
+ * 用在"待认领任务"上：任务当初提交成功了，但当时查不到状态（路径没探对、
+ * 或者中转平台抽风），于是那一镜一直空着。与其让它烂在那儿，不如给一个
+ * **零成本**的重查入口 —— 查一次不产生任何生成费用，而且用户如果刚在
+ * 「接口地址（高级）」里填对了路径，这一下就能把所有待认领的任务一次性收回来。
+ */
+export async function queryTaskOnce({ providerId, taskId, label = '查任务', onEvent } = {}) {
+  const provider = getProvider(providerId);
+  if (!provider) throw new Error(`未知服务商：${providerId}`);
+
+  const url = await resolveQueryUrl(provider, providerId, taskId, label, onEvent);
+  const res = await send(
+    { provider: providerId, label: `${label}·查一次`, method: 'GET', url, timeoutMs: 30000 },
+    null
+  );
+
+  const json = res.json || {};
+  const said = bodyError(json);
+  if (said) return { done: false, url: null, state: '', reason: said, queryUrl: url, raw: json };
+
+  const state = readTaskState(json);
+  const media = firstMediaUrl(json, { extensions: ['.mp4', '.mov'] }) || firstMediaUrl(json);
+  const failed = ['fail', 'failed', 'error', 'canceled', 'cancelled'].includes(state);
+
+  return {
+    done: Boolean(media),
+    url: media,
+    state,
+    failed,
+    reason: failed ? `任务在厂商那边失败了（${state}）` : '',
+    queryUrl: url,
+    raw: json
+  };
 }
 
 /**
