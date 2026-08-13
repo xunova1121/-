@@ -30,6 +30,7 @@ const { createSSEParser } = await import('../core/http-client.js');
 const { safeFileName } = await import('../core/paths.js');
 const consistency = await import('../core/pipeline/consistency.js');
 const settings = await import('../core/settings.js');
+const providersMod = await import('../core/providers/index.js');
 
 let passed = 0;
 let failed = 0;
@@ -99,6 +100,21 @@ const upstream = http.createServer((req, res) => {
     req.on('data', (c) => (raw += c));
     req.on('end', () => {
       const body = JSON.parse(raw || '{}');
+
+      // 学方舟的脾气：模型没开通就回 404，而不是 400/403。
+      // 探测器要能靠这个把"能用的"和"不能用的"分开。
+      if (!ALLOWED_MODELS.has(body.model)) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(
+          JSON.stringify({
+            error: {
+              code: 'NotFound',
+              message: `The model or endpoint ${body.model} does not exist or you do not have access to it.`
+            }
+          })
+        );
+      }
+
       const system = JSON.stringify(body.messages?.[0]?.content || '');
       let content;
       if (system.includes('美术总监')) {
@@ -145,6 +161,9 @@ const upstream = http.createServer((req, res) => {
 
   res.writeHead(404).end();
 });
+
+/** 打桩账号"开通"了哪些模型。候选清单里的其余 ID 都会被回 404。 */
+const ALLOWED_MODELS = new Set(['doubao-1-5-pro-32k-250115', 'doubao-seed-1-6-250615']);
 
 /** 最小合法 PNG（1×1 透明），用来当"模型出的图" */
 const PIXEL_PNG = Buffer.from(
@@ -427,6 +446,31 @@ check('有 warn 时结论不谎报"都通"', /留意/.test(verdict?.verdict || '
 // 打桩服务没有 /v3/models，正好用来验证"拿不到列表时给的是人话而不是空下拉"
 const modelList = await (await fetch(`${appUrl}/api/providers/volcengine/models`)).json();
 check('拿不到模型列表时说明白该去哪儿找', modelList.ok === false && /控制台|手动填写/.test(modelList.reason), JSON.stringify(modelList));
+
+section('候选模型逐个探测');
+const candEvents = await ndjson('/providers/volcengine/candidates', {});
+const candDone = candEvents.find((e) => e.type === 'finished');
+check('把能用的挑出来了', candDone?.available?.length === 2, JSON.stringify(candDone?.available));
+check(
+  '挑出来的正是打桩账号开通的那两个',
+  candDone?.available?.includes('doubao-1-5-pro-32k-250115') &&
+    candDone?.available?.includes('doubao-seed-1-6-250615'),
+  JSON.stringify(candDone?.available)
+);
+check('没开通的被排除', candDone?.rejected?.length > 5, `只排除了 ${candDone?.rejected?.length} 个`);
+check('每探一个都实时上报', candEvents.filter((e) => e.type === 'candidate').length === candDone?.tried);
+
+// 方舟式的 404「模型不存在」不能被翻译成"去改 baseUrl"
+const badModel = await ndjson('/debug/send', {
+  provider: 'volcengine',
+  method: 'POST',
+  url: `${upstreamUrl}/v3/chat/completions`,
+  body: JSON.stringify({ model: 'doubao-pro-32k', messages: [{ role: 'user', content: 'hi' }] })
+});
+const badDone = badModel.find((e) => e.type === 'done');
+const explained = providersMod.diagnose({ status: 404, json: badDone?.json, raw: '' });
+check('404「模型不存在」被指认成模型问题，而不是 baseUrl', /模型或推理接入点不存在/.test(explained), explained);
+check('报错里带了服务端原话', /does not exist/.test(explained), explained);
 
 // ─────────────────────── 9. Windows 文件名 ───────────────────────
 

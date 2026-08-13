@@ -152,8 +152,32 @@ export const PROVIDERS = [
       successStates: ['succeeded'],
       failureStates: ['failed', 'canceled']
     },
-    // 方舟的模型 ID 带版本日期后缀，且随发布不断变化；下面这些是常见写法，
-    // 但**以你控制台里看到的为准**。任何一项都可以在设置里改成 ep- 开头的推理接入点。
+    /**
+     * 待探测的候选模型 ID。
+     *
+     * 方舟支持直接填公开模型 ID（不必建 ep- 推理接入点），但前提是该模型
+     * 在你账号下已开通；ID 还带版本日期后缀，随发布不断变化。
+     * 这份清单是**候选**不是断言 —— 「设置 → 拉取可用模型」拿不到列表时，
+     * 会用极小请求（max_tokens=1）把它们逐个点一遍，告诉你哪些真能用。
+     * 只探对话类：出图/视频每探一次都要真出图，那是真金白银，交给体检去验。
+     */
+    candidates: [
+      'doubao-seed-1-6-250615',
+      'doubao-seed-1-6-flash-250615',
+      'doubao-seed-1-6-thinking-250615',
+      'doubao-1-5-pro-32k-250115',
+      'doubao-1-5-pro-256k-250115',
+      'doubao-1-5-lite-32k-250115',
+      'doubao-1-5-vision-pro-32k-250115',
+      'doubao-1-5-thinking-pro-250415',
+      'doubao-pro-32k-241215',
+      'doubao-pro-4k-240515',
+      'doubao-lite-32k-240828',
+      'deepseek-v3-241226',
+      'deepseek-r1-250120',
+      'kimi-k2-250711'
+    ],
+    // 展示用的默认清单；以探测结果 / 你控制台里看到的为准
     models: [
       { id: 'doubao-seed-1-6-250615', capability: 'vision', label: '豆包 Seed 1.6（多模态，一致性复核主力）' },
       { id: 'doubao-1-5-pro-32k-250115', capability: 'chat', label: '豆包 1.5 Pro 32K（剧本分析）' },

@@ -248,6 +248,18 @@ async function handleApi(req, res, url) {
     if (c === 'models' && method === 'GET') {
       return json(res, 200, await preflight.listModels(b));
     }
+    // 逐个探测候选模型：请求多、耗时长，用 NDJSON 边探边报
+    if (c === 'candidates' && method === 'POST') {
+      const stream = ndjson(res);
+      req.on('close', () => stream.end());
+      try {
+        const result = await preflight.probeCandidates(b, (ev) => stream.send(ev));
+        stream.end({ type: 'finished', ...result });
+      } catch (err) {
+        stream.end({ type: 'error', message: err.message });
+      }
+      return undefined;
+    }
     if (c === 'template' && d && method === 'GET') {
       return json(res, 200, providers.draftFromTemplate(b, d));
     }

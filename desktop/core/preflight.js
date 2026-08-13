@@ -121,6 +121,75 @@ export async function listModels(providerId) {
   };
 }
 
+/**
+ * 逐个探测候选模型 ID。
+ *
+ * 有些厂商（方舟就是）不提供 /models 列表接口，于是"模型 ID 该填什么"
+ * 就成了一道只能靠翻控制台解决的题。这里换个思路：直接拿候选清单去试，
+ * 用 max_tokens=1 的最小请求，通了就是真能用 —— 把猜测变成事实。
+ *
+ * 只探对话类模型：出图/视频每探一次都会真出一张图或一段视频，
+ * 那是实打实的开销，不该由一个"看看有啥能用"的动作产生。
+ */
+export async function probeCandidates(providerId, onEvent) {
+  const provider = getProvider(providerId);
+  if (!provider) throw new Error(`未知服务商：${providerId}`);
+
+  const cred = credentialStatus(provider);
+  if (!cred.ready) return { available: [], tried: 0, reason: `缺少凭据：${cred.missing.join('、')}` };
+
+  const ids =
+    provider.candidates?.length
+      ? provider.candidates
+      : (provider.models || [])
+          .filter((m) => !m.capability || m.capability === 'chat' || m.capability === 'vision')
+          .map((m) => m.id);
+
+  if (!ids.length) return { available: [], tried: 0, reason: '这家没有可探测的候选模型' };
+
+  const url = interpolate(provider.endpoints?.chat || '{{baseUrl}}/chat/completions', provider);
+  const available = [];
+  const rejected = [];
+
+  // 三个一批：太快容易撞限流，一个一个又太慢
+  const BATCH = 3;
+  for (let i = 0; i < ids.length; i += BATCH) {
+    const batch = ids.slice(i, i + BATCH);
+    await Promise.all(
+      batch.map(async (model) => {
+        try {
+          const res = await send(
+            {
+              provider: providerId,
+              label: `探测 ${model}`,
+              method: 'POST',
+              url,
+              body: { model, messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 },
+              timeoutMs: 20000
+            },
+            null
+          );
+          if (res.ok) available.push(model);
+          else rejected.push({ model, status: res.status });
+          onEvent?.({ type: 'candidate', model, ok: res.ok, status: res.status });
+        } catch (err) {
+          rejected.push({ model, status: 0, error: err.message });
+          onEvent?.({ type: 'candidate', model, ok: false, status: 0 });
+        }
+      })
+    );
+  }
+
+  return {
+    available: available.sort(),
+    rejected,
+    tried: ids.length,
+    reason: available.length
+      ? ''
+      : '候选清单里没有一个能用。可能是这些模型都没开通，也可能是方舟改了命名 —— 到控制台「开通管理」看一眼，或直接用 ep- 推理接入点。'
+  };
+}
+
 async function runOne(checkId, ctx, onEvent) {
   const { providerId, model } = route(checkId);
   const provider = getProvider(providerId);

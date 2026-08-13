@@ -88,6 +88,62 @@ export default {
       // 「模型 ID 到底填什么」是配置这一步最大的卡点。
       // 与其让用户去控制台翻，不如拿他的密钥去问一次这家实际开通了哪些。
       const fetchHint = h('div', { class: 'field-hint' }, hint);
+      const probeSlot = h('span', {});
+
+      function fillModels(ids) {
+        const current = pending[modelKey] || settings[modelKey];
+        modelSel.innerHTML = '';
+        for (const id of ids) modelSel.append(h('option', { value: id, selected: id === current }, id));
+        modelSel.append(h('option', { value: '__custom__' }, '自定义（手动填写）…'));
+        const known = ids.includes(current);
+        if (!known) modelSel.append(h('option', { value: current, selected: true }, `${current}（当前，不在列表里）`));
+        fetchHint.textContent = `${ids.length} 个可用${known ? '' : '；当前这个不在里面，建议换一个'}`;
+        fetchHint.style.color = known ? 'var(--good)' : 'var(--caution)';
+      }
+
+      /** 列不出来就试出来：拿候选清单逐个发 max_tokens=1 的最小请求 */
+      function showProbeOffer(providerId) {
+        if (probeSlot.firstChild) return;
+        probeSlot.append(
+          h('button', {
+            class: 'btn ghost sm',
+            style: 'margin-left:6px',
+            title: '这家不提供模型列表，改用候选清单逐个试。每个只发一个 token，几乎不花钱',
+            onclick: async (e) => {
+              const btn = e.target;
+              btn.disabled = true;
+              let done = 0;
+              try {
+                let result = null;
+                await stream(`/providers/${providerId}/candidates`, {}, (ev) => {
+                  if (ev.type === 'candidate') {
+                    done += 1;
+                    btn.textContent = `探测中 ${done}…`;
+                  }
+                  if (ev.type === 'finished') result = ev;
+                  if (ev.type === 'error') toast(ev.message, 'err');
+                });
+                if (result?.available?.length) {
+                  modelCache.set(providerId, { ok: true, models: result.available, reason: '' });
+                  fillModels(result.available);
+                  fetchHint.textContent = `试出 ${result.available.length}/${result.tried} 个能用`;
+                  fetchHint.style.color = 'var(--good)';
+                  toast(`探测完成：${result.available.length} 个可用`, 'ok');
+                } else {
+                  fetchHint.textContent = result?.reason || '一个都没试通';
+                  fetchHint.style.color = 'var(--alarm)';
+                }
+              } catch (err) {
+                toast(err.message, 'err');
+              } finally {
+                btn.disabled = false;
+                btn.textContent = '逐个探测';
+              }
+            }
+          }, '逐个探测')
+        );
+      }
+
       const fetchBtn = h('button', {
         class: 'btn ghost sm',
         title: '用你的密钥去问这家实际开通了哪些模型',
@@ -101,18 +157,10 @@ export default {
             if (!r.ok || !r.models.length) {
               fetchHint.textContent = r.reason || '没拿到模型列表';
               fetchHint.style.color = 'var(--caution)';
+              // 拿不到列表不等于没办法：直接拿候选清单去试
+              showProbeOffer(providerId);
             } else {
-              const current = pending[modelKey] || settings[modelKey];
-              modelSel.innerHTML = '';
-              for (const id of r.models) {
-                modelSel.append(h('option', { value: id, selected: id === current }, id));
-              }
-              modelSel.append(h('option', { value: '__custom__' }, '自定义（手动填写）…'));
-              if (!r.models.includes(current)) {
-                modelSel.append(h('option', { value: current, selected: true }, `${current}（当前，不在列表里）`));
-              }
-              fetchHint.textContent = `拉到 ${r.models.length} 个可用模型${r.models.includes(current) ? '' : '；当前这个不在列表里，建议换一个'}`;
-              fetchHint.style.color = r.models.includes(current) ? 'var(--good)' : 'var(--caution)';
+              fillModels(r.models);
             }
           } catch (err) {
             fetchHint.textContent = err.message;
@@ -129,7 +177,7 @@ export default {
           h('label', {}, label),
           h('div', { class: 'row' }, h('div', {}, provSel), h('div', {}, modelSel)),
           customInput,
-          h('div', { style: 'margin-top:6px' }, fetchBtn),
+          h('div', { style: 'margin-top:6px' }, fetchBtn, probeSlot),
           fetchHint
         )
       );
