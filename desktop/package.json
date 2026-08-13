@@ -31,7 +31,6 @@
       "icon": "build/icon.ico"
     },
     "compression": "maximum",
-    "//electronLanguages": "Electron 默认打进 50 多种语言包，白占十几 MB。国内用户下载本来就慢，只留中英两种。",
     "electronLanguages": ["zh-CN", "en-US"],
     "nsis": {
       "oneClick": false,

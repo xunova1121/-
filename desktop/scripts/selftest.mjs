@@ -1075,6 +1075,37 @@ check('报错里带了服务端原话', /does not exist/.test(explained), explai
 
 // ─────────────────────── 9. Windows 文件名 ───────────────────────
 
+section('打包配置');
+{
+  // 自检跑在打包**之前**，所以配置写错该在这里就拦下来 ——
+  // 让它跑到 electron-builder 才炸，等于白等三分钟队列 + 一次构建，
+  // 而且失败的那次 Release 不会更新，用户下到的还是上一版。
+  const pkg = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'package.json'), 'utf8'));
+
+  // electron-builder 是严格 schema 校验：多一个它不认识的键就整个拒绝。
+  // 我在这儿栽过一次 —— 想给配置加行注释，写了个 "//electronLanguages"，
+  // JSON 本身合法，构建直接红。配置文件里没有"注释"这回事。
+  const commentKeys = [];
+  const walk = (obj, at) => {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return;
+    for (const [k, v] of Object.entries(obj)) {
+      if (k.startsWith('//')) commentKeys.push(`${at}${k}`);
+      walk(v, `${at}${k}.`);
+    }
+  };
+  walk(pkg.build, 'build.');
+  check('打包配置里没有注释键（electron-builder 见了会整个拒绝）',
+    commentKeys.length === 0, commentKeys.join('、'));
+
+  check('打包配置带上了应用运行真正需要的目录',
+    ['electron/**', 'core/**', 'ui/**'].every((f) => (pkg.build?.files || []).includes(f)),
+    JSON.stringify(pkg.build?.files));
+  check('两个 Windows 产物的文件名不会撞车',
+    pkg.build?.nsis?.artifactName && pkg.build?.portable?.artifactName
+      && pkg.build.nsis.artifactName !== pkg.build.portable.artifactName,
+    `${pkg.build?.nsis?.artifactName} / ${pkg.build?.portable?.artifactName}`);
+}
+
 section('Windows 文件名规则');
 check('非法字符被替换', safeFileName('a<b>c:d"e/f\\g|h?i*j') === 'a_b_c_d_e_f_g_h_i_j');
 check('设备名被规避', safeFileName('CON') === '_CON');

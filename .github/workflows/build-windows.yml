@@ -138,16 +138,49 @@ jobs:
           详细步骤见 [desktop/README.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/desktop/README.md)。
           NOTES
 
+          # 一个附件一个附件地传，并且带重试。
+          #
+          # 踩过的坑：`gh release upload --clobber` 一把梭传三个文件，
+          # GitHub 的附件接口偶尔回 500（替换已有附件时尤其容易），
+          # 加上 set -e，整步就红了 —— 包明明都打好了，却一个也没发出去，
+          # 用户那边看到的还是上一版。
+          #
+          # --clobber 是"先删再传"，卡住的旧附件会让它一直 500，
+          # 所以重试前先显式删一次。
+          upload_one() {
+            local file="$1" name
+            name="$(basename "$file")"
+            for attempt in 1 2 3; do
+              if gh release upload "$TAG" "$file" --clobber; then
+                echo "  ✓ $name"
+                return 0
+              fi
+              echo "  ! $name 第 $attempt 次没传上去，删掉残留的同名附件再试"
+              gh release delete-asset "$TAG" "$name" --yes >/dev/null 2>&1 || true
+              sleep $((attempt * 5))
+            done
+            echo "  ✗ $name 三次都没传上去"
+            return 1
+          }
+
           # snapshot 是滚动的：已存在就换掉旧附件，不存在才新建
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "$TITLE" --notes-file notes.md --target "$GITHUB_SHA"
-            gh release upload "$TAG" dist/*.exe dist/*.zip --clobber
           else
-            gh release create "$TAG" dist/*.exe dist/*.zip \
+            gh release create "$TAG" \
               --title "$TITLE" \
               --notes-file notes.md \
               --target "$GITHUB_SHA" \
               $PRERELEASE
           fi
 
+          failed=0
+          for f in dist/*.exe dist/*.zip; do
+            upload_one "$f" || failed=1
+          done
+
           echo "下载地址：https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+
+          # 有附件没传上去就让这一步红着 —— 但前面传成功的那些已经在 Release 上了，
+          # 至少不会出现"全都没发出去还以为发了"
+          exit $failed
