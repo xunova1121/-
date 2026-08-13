@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>未来创梦 · AI 短剧工作台</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <div id="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-slate" aria-hidden="true"></div>
+          <div>
+            <div class="brand-name">未来创梦</div>
+            <div class="brand-sub eyebrow">FUTUREDREAM STUDIO</div>
+          </div>
+        </div>
+
+        <nav class="nav" id="nav" aria-label="主导航"></nav>
+
+        <div class="sidebar-foot">
+          <div class="stat-row"><span>数据目录</span><code id="foot-datadir" title="">—</code></div>
+          <div class="stat-row"><span>凭据加密</span><code id="foot-vault">—</code></div>
+          <div class="stat-row"><span>FFMPEG</span><code id="foot-ffmpeg">—</code></div>
+          <div class="stat-row" style="margin-top:4px">
+            <span>外观</span>
+            <button class="btn ghost sm" id="btn-theme" style="padding:2px 8px;font-size:10.5px">切换</button>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <h1 id="view-title">创作台</h1>
+          <div class="topbar-right">
+            <div class="chain" id="chain" title="当前能力路由：每种能力用哪家哪个模型"></div>
+            <button class="btn ghost sm" id="btn-refresh">刷新</button>
+          </div>
+        </header>
+        <section class="view" id="view"><div class="view-inner" id="view-inner"></div></section>
+      </main>
+    </div>
+
+    <div class="toast-stack" id="toasts" role="status" aria-live="polite"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

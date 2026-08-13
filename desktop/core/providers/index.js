@@ -1,0 +1,215 @@
+/**
+ * 服务商运行时：解析模板 → 补鉴权 → 发请求 →（异步任务的话）轮询到终态。
+ */
+import { PROVIDERS, getProvider, publicCatalog, CAPABILITIES } from './catalog.js';
+import { buildAuthHeaders, credentialStatus, AuthError } from './auth.js';
+import { getSecret } from '../vault.js';
+import { execute, poll, HttpError } from '../http-client.js';
+import * as settings from '../settings.js';
+
+export { PROVIDERS, getProvider, CAPABILITIES, AuthError, credentialStatus };
+
+export function baseUrlOf(provider) {
+  const override = settings.get('baseUrls')?.[provider.id];
+  return (override || provider.baseUrl || '').replace(/\/+$/, '');
+}
+
+/** 目录 + 每家的凭据配齐状态，一次给前端 */
+export function catalogForUI() {
+  const overrides = {};
+  for (const p of PROVIDERS) overrides[p.id] = { baseUrl: baseUrlOf(p) };
+  return publicCatalog(overrides).map((p) => ({
+    ...p,
+    credentials: credentialStatus(getProvider(p.id))
+  }));
+}
+
+/** 把 {{baseUrl}} 之类的结构占位符展开（密钥占位符留给发送时展开） */
+export function interpolate(text, provider, vars = {}) {
+  if (typeof text !== 'string') return text;
+  return text.replace(/\{\{\s*baseUrl\s*\}\}/g, baseUrlOf(provider)).replace(
+    /\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g,
+    (whole, name) => (name in vars ? String(vars[name]) : whole)
+  );
+}
+
+/**
+ * 生成一份可以直接丢进联调台编辑器的请求草稿。
+ * 鉴权头用占位符形式，界面上看得见"这里会带什么"，但看不到密钥本身。
+ */
+export function draftFromTemplate(providerId, templateId, vars = {}) {
+  const provider = getProvider(providerId);
+  if (!provider) throw new Error(`未知服务商：${providerId}`);
+  const tpl = (provider.templates || []).find((t) => t.id === templateId) || provider.templates?.[0];
+  if (!tpl) throw new Error(`${provider.name} 没有可用模板`);
+
+  return {
+    provider: provider.id,
+    label: tpl.label,
+    method: tpl.method || 'POST',
+    url: interpolate(tpl.url, provider, vars),
+    headers: { ...buildAuthHeaders(provider, { placeholder: true }), ...(tpl.headers || {}) },
+    body: tpl.body ? JSON.stringify(tpl.body, null, 2) : '',
+    stream: Boolean(tpl.stream),
+    async: Boolean(tpl.async),
+    capability: tpl.capability || null
+  };
+}
+
+/**
+ * 发送一个联调台请求。
+ *
+ * headers 里如果已经带了 Authorization（用户手写或从模板带来的占位符），
+ * 就按用户写的来 —— 占位符形式的会在这里换成真家伙。
+ */
+export async function send(spec, onEvent) {
+  const provider = getProvider(spec.provider);
+  const headers = { ...(spec.headers || {}) };
+
+  const authKey = Object.keys(headers).find((k) => k.toLowerCase() === 'authorization');
+  const authValue = authKey ? String(headers[authKey]) : '';
+
+  // 三种情况要区分清楚，早期版本把它们混成一种，导致手写的 {{占位符}} 被整个删掉：
+  //   {{NAME}}  用户/模板写的密钥占位符 → 原样留着，发送时由保险箱展开
+  //   <...>     我们自己塞的说明性占位（如"本地签发的 JWT"）→ 现算替换
+  //   空        没写鉴权头 → 按服务商规则补上
+  const secretRefs = [...authValue.matchAll(/\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}/g)].map((m) => m[1]);
+  const isGeneratedHint = /<[^>]+>/.test(authValue);
+
+  if (provider && (!authValue || isGeneratedHint)) {
+    if (authKey) delete headers[authKey];
+    Object.assign(headers, buildAuthHeaders(provider));
+  } else if (secretRefs.length) {
+    // 占位符指向的密钥没配的话，与其让服务端回一个语焉不详的 401，不如当场说清楚
+    const missing = secretRefs.filter((name) => !getSecret(name));
+    if (missing.length) {
+      throw new AuthError(`缺少凭据：${missing.join('、')}，请到「服务商与密钥」里填好`, missing);
+    }
+  }
+
+  const timeoutMs = Number(spec.timeoutMs) || settings.get('requestTimeoutMs');
+  return execute(
+    {
+      provider: spec.provider || 'custom',
+      label: spec.label || '',
+      method: spec.method,
+      url: provider ? interpolate(spec.url, provider) : spec.url,
+      headers,
+      body: spec.body,
+      stream: spec.stream,
+      timeoutMs
+    },
+    onEvent
+  );
+}
+
+function getByPath(obj, path) {
+  if (!path) return undefined;
+  return path.split('.').reduce((acc, k) => (acc == null ? undefined : acc[k]), obj);
+}
+
+/**
+ * 提交异步任务并轮询到终态。
+ * 国内这几家视频模型全是这个套路，差别只在字段名，所以字段名写在 catalog 里。
+ */
+export async function sendAsync(spec, onEvent) {
+  const provider = getProvider(spec.provider);
+  const cfg = provider?.taskPoll;
+  const submitted = await send(spec, onEvent);
+
+  if (!cfg || !submitted.ok) return { submitted, polled: null, task: null };
+
+  const taskId = getByPath(submitted.json, cfg.idPath);
+  if (!taskId) {
+    onEvent?.({ type: 'note', message: `响应里没找到任务 ID（期望路径 ${cfg.idPath}），不再轮询` });
+    return { submitted, polled: null, task: null };
+  }
+
+  onEvent?.({ type: 'note', message: `任务已提交：${taskId}，开始轮询…` });
+
+  const pollUrl = interpolate(cfg.url, provider).replace('{taskId}', encodeURIComponent(taskId));
+  const success = new Set((cfg.successStates || []).map((s) => s.toLowerCase()));
+  const failure = new Set((cfg.failureStates || []).map((s) => s.toLowerCase()));
+
+  const final = await poll(
+    async (attempt) => {
+      const res = await send(
+        { provider: spec.provider, method: cfg.method || 'GET', url: pollUrl, label: `轮询 #${attempt}` },
+        null
+      );
+      const state = String(getByPath(res.json, cfg.statusPath) ?? '').toLowerCase();
+      onEvent?.({ type: 'poll', attempt, state, status: res.status });
+      if (success.has(state)) return { done: true, value: res };
+      if (failure.has(state)) {
+        throw new HttpError(`任务失败：${state} — ${JSON.stringify(res.json).slice(0, 300)}`);
+      }
+      return { done: false, value: res.json };
+    },
+    {
+      intervalMs: settings.get('pollIntervalMs'),
+      timeoutMs: settings.get('pollTimeoutMs')
+    }
+  );
+
+  onEvent?.({ type: 'note', message: '任务完成' });
+  return { submitted, polled: final, task: { id: taskId, url: pollUrl } };
+}
+
+/** 一键自检：这家配通了没 */
+export async function probe(providerId) {
+  const provider = getProvider(providerId);
+  if (!provider) throw new Error(`未知服务商：${providerId}`);
+  if (!provider.probe) return { skipped: true, reason: '该服务商未定义自检请求' };
+
+  const cred = credentialStatus(provider);
+  if (!cred.ready) {
+    return { ok: false, reason: `缺少凭据：${cred.missing.join('、')}`, missing: cred.missing };
+  }
+
+  const started = Date.now();
+  try {
+    const res = await send(
+      {
+        provider: provider.id,
+        label: '连通性自检',
+        method: provider.probe.method,
+        url: interpolate(provider.probe.url, provider),
+        body: provider.probe.body,
+        timeoutMs: 20000
+      },
+      null
+    );
+    return {
+      ok: res.ok,
+      status: res.status,
+      latencyMs: Date.now() - started,
+      logId: res.logId,
+      reason: res.ok ? '' : diagnose(res)
+    };
+  } catch (err) {
+    return { ok: false, status: 0, latencyMs: Date.now() - started, reason: err.message };
+  }
+}
+
+/**
+ * 把常见的失败翻译成人话。联调最费时间的从来不是发请求，是看懂为什么不通。
+ */
+export function diagnose(res) {
+  const body = res.json ? JSON.stringify(res.json) : String(res.raw || '');
+  const code = res.json?.code || res.json?.error?.code || '';
+  switch (res.status) {
+    case 401:
+      return 'API Key 无效或未生效（401）。检查密钥有没有复制到多余空格，以及是不是填到了别家服务商下面。';
+    case 403:
+      return `没有权限（403）。常见原因：模型未开通、账号欠费、或该地域不支持。${code ? `服务端码：${code}` : ''}`;
+    case 404:
+      return '路径不存在（404）。多半是 baseUrl 末尾多了 /v1 或少了 /v1，在服务商设置里改。';
+    case 429:
+      return '限流（429）。降低并发，或在设置里把轮询间隔调大。';
+    case 400:
+      return `请求体不合法（400）：${body.slice(0, 200)}`;
+    default:
+      if (res.status >= 500) return `服务端错误（${res.status}），通常重试即可：${body.slice(0, 200)}`;
+      return body.slice(0, 300);
+  }
+}
