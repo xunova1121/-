@@ -56,6 +56,9 @@ export default {
         h('span', { class: `dot ${p.credentials.ready ? 'ok' : ''}` }),
         p.credentials.ready ? '已配置' : '缺密钥');
 
+      // 自检失败的原因现在会带上服务端原话，多行且长，塞 toast 里看不全 —— 留在卡片上
+      const reasonEl = h('div', { class: 'probe-reason', style: 'display:none' });
+
       const card = h('div', { class: 'provider-card' },
         h('div', { class: 'provider-head' },
           h('div', { style: 'min-width:0' },
@@ -65,6 +68,7 @@ export default {
           statusEl
         ),
         h('div', { class: 'cap-list' }, (p.capabilities || []).map((c) => h('span', { class: 'cap' }, c))),
+        reasonEl,
         ...inputs,
         baseInput ? h('div', { class: 'field' }, h('label', {}, '接口根地址'), baseInput,
           h('div', { class: 'field-hint' }, '走内网网关或换中转线路时改这里。改完先自检再用。')) : null,
@@ -104,17 +108,26 @@ export default {
                   try {
                     const r = await api(`/providers/${p.id}/probe`, { method: 'POST' });
                     clear(statusEl);
+                    clear(reasonEl);
                     if (r.skipped) {
-                      toast(r.reason);
+                      reasonEl.style.display = '';
+                      reasonEl.append(r.reason);
                     } else if (r.ok) {
                       statusEl.className = 'badge ok';
                       statusEl.append(h('span', { class: 'dot ok' }), `连通 ${fmtMs(r.latencyMs)}`);
+                      reasonEl.style.display = '';
+                      reasonEl.className = 'probe-reason ok';
+                      reasonEl.append(r.model ? `用模型 ${r.model} 试通了。` : '连通。');
                       toast(`${p.name} 连通，${fmtMs(r.latencyMs)}`, 'ok');
                     } else {
                       statusEl.className = 'badge err';
                       statusEl.append(h('span', { class: 'dot err' }), '不通');
-                      statusEl.title = r.reason || '';
-                      toast(`${p.name}：${r.reason || `HTTP ${r.status}`}`, 'err');
+                      reasonEl.style.display = '';
+                      reasonEl.className = 'probe-reason err';
+                      // 自检用的是哪个模型，是排查这类问题的第一条线索
+                      if (r.model) reasonEl.append(h('div', { class: 'probe-model' }, `自检用的模型：${r.model}`));
+                      reasonEl.append(r.reason || `HTTP ${r.status}`);
+                      toast(`${p.name} 自检未通过，原因见卡片`, 'err');
                     }
                   } catch (err) {
                     toast(err.message, 'err');

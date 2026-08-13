@@ -531,6 +531,22 @@ td.wrap { white-space: normal; max-width: 380px; }
   background: var(--surface-2); color: var(--ink-faint); border: 1px solid var(--line-soft);
 }
 
+/* 自检结果留在卡片上：失败原因带服务端原话，是多行长文本，toast 装不下 */
+.probe-reason {
+  font-size: 12px; line-height: 1.6;
+  padding: 10px 12px; border-radius: var(--r);
+  background: var(--surface-2); color: var(--ink-dim);
+  border: 1px solid var(--line);
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 220px; overflow: auto;
+}
+.probe-reason.ok  { color: var(--good);  border-color: color-mix(in srgb, var(--good) 30%, transparent);  background: var(--good-wash); }
+.probe-reason.err { color: var(--ink);   border-color: color-mix(in srgb, var(--alarm) 34%, transparent); background: var(--alarm-wash); }
+.probe-model {
+  font-family: var(--code); font-size: 11px;
+  color: var(--ink-faint); margin-bottom: 6px;
+}
+
 /* ══════════════════════ Toast ══════════════════════ */
 
 .toast-stack {

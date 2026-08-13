@@ -155,6 +155,26 @@ export async function sendAsync(spec, onEvent) {
   return { submitted, polled: final, task: { id: taskId, url: pollUrl } };
 }
 
+/**
+ * 自检请求体：把示例里的 model 换成用户实际路由到这家的模型。
+ * 一家可能承担多种能力（剧本 + 出图 + 视频），优先用对话类的，
+ * 因为自检发的就是一次最小对话。
+ */
+function probeBody(provider) {
+  const body = provider.probe?.body;
+  if (!body || !body.model) return body;
+
+  const s = settings.all();
+  const preferred = [
+    [s.chatProvider, s.chatModel],
+    [s.visionProvider, s.visionModel],
+    [s.imageProvider, s.imageModel],
+    [s.videoProvider, s.videoModel]
+  ].find(([id, model]) => id === provider.id && model);
+
+  return preferred ? { ...body, model: preferred[1] } : body;
+}
+
 /** 一键自检：这家配通了没 */
 export async function probe(providerId) {
   const provider = getProvider(providerId);
@@ -166,6 +186,10 @@ export async function probe(providerId) {
     return { ok: false, reason: `缺少凭据：${cred.missing.join('、')}`, missing: cred.missing };
   }
 
+  // 自检要测"你真正会用到的那个模型"，而不是目录里写死的示例。
+  // 否则会出现"自检不过但其实能用"，或者更糟的"自检过了但生产用的模型根本不存在"。
+  const body = probeBody(provider);
+
   const started = Date.now();
   try {
     const res = await send(
@@ -174,7 +198,7 @@ export async function probe(providerId) {
         label: '连通性自检',
         method: provider.probe.method,
         url: interpolate(provider.probe.url, provider),
-        body: provider.probe.body,
+        body,
         timeoutMs: 20000
       },
       null
@@ -182,6 +206,7 @@ export async function probe(providerId) {
     return {
       ok: res.ok,
       status: res.status,
+      model: body?.model || null,
       latencyMs: Date.now() - started,
       logId: res.logId,
       reason: res.ok ? '' : diagnose(res)
@@ -197,19 +222,29 @@ export async function probe(providerId) {
 export function diagnose(res) {
   const body = res.json ? JSON.stringify(res.json) : String(res.raw || '');
   const code = res.json?.code || res.json?.error?.code || '';
+  // 服务端自己说的话永远比我们的猜测准，务必带上。
+  // 早期版本把 404 一律解释成"baseUrl 少了 /v1"，结果火山方舟"模型不存在"也回 404，
+  // 用户照着提示去改 baseUrl，越改越错 —— 猜错的提示比不提示更坏。
+  const said =
+    res.json?.error?.message || res.json?.message || res.json?.msg || body.slice(0, 240) || '';
+  const tail = said ? `\n服务端原话：${said}` : '';
+
   switch (res.status) {
     case 401:
-      return 'API Key 无效或未生效（401）。检查密钥有没有复制到多余空格，以及是不是填到了别家服务商下面。';
+      return `API Key 无效或未生效（401）。检查密钥有没有复制到多余空格，以及是不是填到了别家服务商的卡片里。${tail}`;
     case 403:
-      return `没有权限（403）。常见原因：模型未开通、账号欠费、或该地域不支持。${code ? `服务端码：${code}` : ''}`;
+      return `没有权限（403）。常见原因：模型未开通、账号欠费、或该地域不支持。${code ? `服务端码：${code}。` : ''}${tail}`;
     case 404:
-      return '路径不存在（404）。多半是 baseUrl 末尾多了 /v1 或少了 /v1，在服务商设置里改。';
+      // 按可能性排序：模型 ID 写错远比 baseUrl 写错常见，尤其是方舟这种要填推理接入点的
+      return /model|endpoint|ep-/i.test(said)
+        ? `模型或推理接入点不存在（404）。到「设置 → 能力路由」把模型改成你控制台里真实存在的 ID —— 火山方舟通常是 ep- 开头的推理接入点，或带版本号的完整模型名。${tail}`
+        : `路径不存在（404）。两种可能：① 模型 ID 在你账号下不存在；② baseUrl 末尾多了或少了 /v1。${tail}`;
     case 429:
-      return '限流（429）。降低并发，或在设置里把轮询间隔调大。';
+      return `限流（429）。降低并发，或在「设置」里把轮询间隔调大。${tail}`;
     case 400:
-      return `请求体不合法（400）：${body.slice(0, 200)}`;
+      return `请求体不合法（400）。${tail}`;
     default:
-      if (res.status >= 500) return `服务端错误（${res.status}），通常重试即可：${body.slice(0, 200)}`;
-      return body.slice(0, 300);
+      if (res.status >= 500) return `服务端错误（${res.status}），通常重试即可。${tail}`;
+      return `HTTP ${res.status}。${tail}`;
   }
 }

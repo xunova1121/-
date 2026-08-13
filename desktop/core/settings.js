@@ -16,7 +16,7 @@ const DEFAULTS = {
    * 视频看谁家额度多，一致性复核必须挑带视觉的。
    */
   chatProvider: 'volcengine',
-  chatModel: 'doubao-pro-32k',
+  chatModel: 'doubao-1-5-pro-32k-250115',
   visionProvider: 'volcengine',
   visionModel: 'doubao-seed-1-6-250615',
   imageProvider: 'volcengine',

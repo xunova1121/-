@@ -130,7 +130,10 @@ export const PROVIDERS = [
         name: 'ARK_API_KEY',
         label: 'API Key',
         required: true,
-        hint: '方舟控制台 → API Key。注意 model 字段可以填推理接入点 ep-xxxx，也可以直接填模型名'
+        hint:
+          '方舟控制台 → API Key。⚠ 光有 Key 还不够：方舟的 model 字段必须填**你自己账号里**的推理接入点 ID' +
+          '（ep- 开头，在「在线推理」页创建）或带版本号的完整模型名。像 doubao-pro-32k 这种短名早已下线，' +
+          '填了会返回 404「模型不存在」。改的地方在「设置 → 能力路由」，选「自定义（手动填写）」。'
       }
     ],
     capabilities: ['chat', 'vision', 't2i', 'i2i', 't2v', 'i2v', 'r2v'],
@@ -149,9 +152,12 @@ export const PROVIDERS = [
       successStates: ['succeeded'],
       failureStates: ['failed', 'canceled']
     },
+    // 方舟的模型 ID 带版本日期后缀，且随发布不断变化；下面这些是常见写法，
+    // 但**以你控制台里看到的为准**。任何一项都可以在设置里改成 ep- 开头的推理接入点。
     models: [
-      { id: 'doubao-seed-1-6-250615', capability: 'vision', label: '豆包 Seed 1.6（多模态，一致性校验主力）' },
-      { id: 'doubao-pro-32k', capability: 'chat', label: '豆包 Pro 32K（剧本分析）' },
+      { id: 'doubao-seed-1-6-250615', capability: 'vision', label: '豆包 Seed 1.6（多模态，一致性复核主力）' },
+      { id: 'doubao-1-5-pro-32k-250115', capability: 'chat', label: '豆包 1.5 Pro 32K（剧本分析）' },
+      { id: 'doubao-1-5-lite-32k-250115', capability: 'chat', label: '豆包 1.5 Lite 32K（便宜）' },
       { id: 'doubao-seedream-3-0-t2i-250415', capability: 't2i', label: 'Seedream 3.0 文生图' },
       { id: 'doubao-seededit-3-0-i2i-250628', capability: 'i2i', label: 'SeedEdit 3.0 图生图（保角色用这个）' },
       { id: 'doubao-seedance-1-0-pro-250528', capability: 'i2v', label: 'Seedance 1.0 Pro 图生视频' },
@@ -162,7 +168,7 @@ export const PROVIDERS = [
       method: 'POST',
       url: '{{baseUrl}}/chat/completions',
       body: {
-        model: 'doubao-pro-32k',
+        model: 'doubao-1-5-pro-32k-250115',
         messages: [{ role: 'user', content: 'ping' }],
         max_tokens: 4
       }
@@ -176,7 +182,7 @@ export const PROVIDERS = [
         url: '{{baseUrl}}/chat/completions',
         stream: true,
         body: {
-          model: 'doubao-pro-32k',
+          model: 'doubao-1-5-pro-32k-250115',
           stream: true,
           messages: [{ role: 'user', content: '把这段话拆成三个分镜：执法艇在太湖上巡航' }]
         }
