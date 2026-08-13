@@ -173,15 +173,52 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
   if (shot.camera) parts.push(`镜头：${shot.camera}`);
   if (bible?.style?.palette) parts.push(`主色调：${bible.style.palette}`);
 
+  const refs = collectReferences(bible, shot);
+
   return {
     prompt: parts.filter(Boolean).join('，'),
     negative: bible?.style?.negative || '',
     // 镜头种子 = 角色种子（有主角时）+ 镜号偏移。
     // 完全用同一颗种子会导致每镜构图雷同，加镜号偏移既保风格又留变化。
     seed: (cast[0]?.seed ?? scene?.seed ?? 0) + (shot.index || 0),
-    refImages: [scene?.sheetUrl, ...cast.map((c) => c.sheetUrl)].filter(Boolean),
+    refImages: refs.images,
+    refLabels: refs.labels,
     cast: cast.map((c) => c.name),
     scene: scene?.name || null
+  };
+}
+
+/**
+ * 这一镜该带哪些设定集参考图。
+ *
+ * 单独重出一张图或一段视频时，最容易出的错就是"只带了角色设定图" ——
+ * 于是人对了，可背景换了个地方、手里的刀换了个样式，接回全片照样出戏。
+ * 参考图必须和提示词取自同一份设定集，否则重出的那一镜就是全片里唯一的孤儿。
+ *
+ * 顺序有讲究：场景基准图放第一张。多数厂商对首张参考图给的权重最高，
+ * 而人物已经被首帧图锁住了，最需要被"提醒"的反倒是环境。
+ *
+ * limit 默认 9，是目前收图最多的 H3 的上限；别家在适配层里会自己再截断。
+ */
+export function collectReferences(bible, shot, { limit = 9 } = {}) {
+  const picked = [];
+  const scene = matchScene(bible, shot);
+  if (scene?.sheetUrl) picked.push({ kind: 'scene', name: scene.name, url: scene.sheetUrl });
+  for (const c of matchCharacters(bible, shot)) {
+    if (c.sheetUrl) picked.push({ kind: 'character', name: c.name, url: c.sheetUrl });
+  }
+  for (const p of matchProps(bible, shot)) {
+    if (p.sheetUrl) picked.push({ kind: 'prop', name: p.name, url: p.sheetUrl });
+  }
+
+  const seen = new Set();
+  const unique = picked.filter((r) => !seen.has(r.url) && seen.add(r.url)).slice(0, limit);
+  const glyph = { scene: '景', character: '角', prop: '道' };
+  return {
+    refs: unique,
+    images: unique.map((r) => r.url),
+    // 界面上直接显示"这次带了谁"，用户才知道重出为什么像/不像
+    labels: unique.map((r) => `${glyph[r.kind]}·${r.name}`)
   };
 }
 
@@ -328,6 +365,9 @@ export async function generateConsistentImage({
   const verifyEnabled = settings.get('consistencyVerify') !== false;
   const assembled = assemblePrompt(bible, shot);
   const cast = matchCharacters(bible, shot);
+  // 参考图这层可以在设置里关掉（省一次上传、少一点费用），但关掉之后
+  // 就只剩"文字描述 + 种子"在撑一致性了 —— 提示里说清楚是哪一种。
+  const refImages = settings.get('useReferenceImages') === false ? [] : assembled.refImages;
 
   let attempt = 0;
   let last = null;
@@ -348,11 +388,11 @@ export async function generateConsistentImage({
       prompt: assembled.prompt,
       negative: assembled.negative,
       seed,
-      refImages: assembled.refImages,
+      refImages,
       label: `出图 #${shot.index}`,
       onEvent
     });
-    last = { ...image, seed, prompt: assembled.prompt };
+    last = { ...image, seed, prompt: assembled.prompt, refLabels: refImages.length ? assembled.refLabels : [] };
 
     if (!verifyEnabled || !cast.length || !image.url) {
       return { ...last, verification: { skipped: true }, trail };

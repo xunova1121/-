@@ -7,7 +7,7 @@
  *
  * 各家踩过的坑写在对应分支的注释里 —— 这些都是联调时最费时间的部分。
  */
-import { getProvider } from './catalog.js';
+import { getProvider, resolveResolution, videoResolutions } from './catalog.js';
 import { allowedDurations, alignDuration } from '../duration.js';
 import { send, sendAsync, baseUrlOf, interpolate, diagnose } from './index.js';
 import { poll } from '../http-client.js';
@@ -65,6 +65,23 @@ function sizeToRatio(size) {
     ['1:1', 1], ['2:3', 2 / 3], ['3:4', 3 / 4], ['9:16', 9 / 16]
   ];
   return table.reduce((best, cur) => (Math.abs(cur[1] - ratio) < Math.abs(best[1] - ratio) ? cur : best))[0];
+}
+
+/**
+ * 画幅 → 出图尺寸。
+ * 竖屏短剧必须出竖图，横图裁成竖屏会把人裁掉半张脸 ——
+ * 所以出图和出视频共用「设置 → 画幅」这一个开关。
+ */
+const RATIO_SIZES = {
+  '21:9': '1512*648',
+  '16:9': '1280*720',
+  '4:3': '1024*768',
+  '1:1': '1024*1024',
+  '3:4': '768*1024',
+  '9:16': '720*1280'
+};
+export function ratioToSize(ratio) {
+  return RATIO_SIZES[ratio] || RATIO_SIZES['16:9'];
 }
 
 function endpoint(provider, key, fallback) {
@@ -156,7 +173,7 @@ export async function generateImage({
   model,
   prompt,
   negative = '模糊, 低质量, 畸变, 多余手指, 文字水印, 多人',
-  size = '1280*720',
+  size = null,
   seed = null,
   refImages = [],
   timeoutMs = 300000,
@@ -166,6 +183,7 @@ export async function generateImage({
   const provider = getProvider(providerId);
   if (!provider) throw new Error(`未知服务商：${providerId}`);
   const family = provider.family || 'openai';
+  size = size || ratioToSize(settings.get('aspectRatio') || '16:9');
 
   switch (family) {
     case 'dashscope': {
@@ -289,8 +307,8 @@ export async function generateVideo({
   firstFrameUrl = null,
   refImages = [],
   duration = 5,
-  resolution = '720P',
-  aspectRatio = '16:9',
+  resolution = null,
+  aspectRatio = null,
   timeoutMs = 600000,
   label = '出视频',
   onEvent = null
@@ -298,6 +316,24 @@ export async function generateVideo({
   const provider = getProvider(providerId);
   if (!provider) throw new Error(`未知服务商：${providerId}`);
   const family = provider.family || 'openai';
+
+  // 分辨率：调用方指定 > 设置里选的 > 这家的默认档。
+  // 统一在这里翻译成该厂商认识的写法，各分支只管把 finalResolution 塞进自己的字段。
+  const wanted = resolution || settings.get('videoResolution');
+  const finalResolution = resolveResolution(provider, wanted) || '720P';
+  const known = videoResolutions(provider);
+  if (
+    wanted &&
+    wanted !== 'auto' &&
+    known.length &&
+    !known.some((r) => r.toLowerCase() === String(wanted).toLowerCase())
+  ) {
+    onEvent?.({
+      type: 'note',
+      message: `${provider.name} 不支持 ${wanted}（它只认 ${known.join('/')}），本次按 ${finalResolution} 出`
+    });
+  }
+  const finalRatio = aspectRatio || settings.get('aspectRatio') || '16:9';
   const supportsR2V = (provider.capabilities || []).includes('r2v');
   const useRef = supportsR2V && refImages.length > 0 && !firstFrameUrl;
 
@@ -324,8 +360,8 @@ export async function generateVideo({
       duration: actualDuration,
       requestedDuration: duration,
       allowed,
-      resolution,
-      aspectRatio,
+      resolution: finalResolution,
+      aspectRatio: finalRatio,
       timeoutMs,
       label,
       onEvent
@@ -341,7 +377,7 @@ export async function generateVideo({
         body: {
           model,
           input: { prompt, img_url: firstFrameUrl || refImages[0] },
-          parameters: { resolution, duration: actualDuration }
+          parameters: { resolution: finalResolution, duration: actualDuration }
         }
       };
       break;
@@ -369,14 +405,14 @@ export async function generateVideo({
           images: useRef ? refImages.slice(0, 3) : [firstFrameUrl || refImages[0]],
           prompt,
           duration: actualDuration,
-          aspect_ratio: aspectRatio
+          aspect_ratio: finalRatio
         }
       };
       break;
 
     default: {
       // 火山方舟 Seedance：参数不走独立字段，而是拼在 text 里的 --key value
-      const flags = `--resolution ${resolution.toLowerCase()} --dur ${actualDuration} --ratio ${aspectRatio}`;
+      const flags = `--resolution ${finalResolution.toLowerCase()} --dur ${actualDuration} --ratio ${finalRatio}`;
       const content = [{ type: 'text', text: `${prompt} ${flags}` }];
       for (const img of [firstFrameUrl, ...refImages].filter(Boolean).slice(0, 4)) {
         content.push({ type: 'image_url', image_url: { url: img } });
@@ -397,7 +433,14 @@ export async function generateVideo({
   const url = firstMediaUrl(polled?.json ?? submitted.json, { extensions: ['.mp4', '.mov', '.webm'] })
     || firstMediaUrl(polled?.json ?? submitted.json);
   if (!url) throw new Error(`${label}：响应里没有视频 URL`);
-  return { url, actualDuration, requestedDuration: duration, allowedDurations: allowed, raw: polled?.json ?? submitted.json };
+  return {
+    url,
+    actualDuration,
+    requestedDuration: duration,
+    allowedDurations: allowed,
+    resolution: finalResolution,
+    raw: polled?.json ?? submitted.json
+  };
 }
 
 /**
@@ -500,7 +543,7 @@ async function generateVideoMiniMax({
     const content = [{ type: 'text', text: prompt }];
     const images = [firstFrameUrl, ...refImages].filter(Boolean).slice(0, 9);
     for (const url of images) content.push({ type: 'image_url', image_url: { url } });
-    body = { model, content, duration, resolution: vd.resolution || resolution };
+    body = { model, content, duration, resolution };
     // 中转家（如秘塔）多要一个 ratio 字段，官方 H3 没有
     if (vd.ratio) body.ratio = aspectRatio;
   } else {
@@ -581,7 +624,14 @@ async function generateVideoMiniMax({
 
   // 海螺的下载地址只活 9 小时，所以上层必须立刻落盘 —— 它本来就是这么做的
   onEvent?.({ type: 'note', message: '拿到下载地址（9 小时后失效，正在落盘）' });
-  return { url, actualDuration: duration, requestedDuration, allowedDurations: allowed, raw: finalStatus };
+  return {
+    url,
+    actualDuration: duration,
+    requestedDuration,
+    allowedDurations: allowed,
+    resolution,
+    raw: finalStatus
+  };
 }
 
 // ──────────────────────────────── 配音 ────────────────────────────────

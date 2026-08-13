@@ -159,6 +159,14 @@ export const PROVIDERS = [
       failureStates: ['failed', 'canceled']
     },
     /**
+     * Seedance 的分辨率是拼在提示词里的 --resolution 标志，不是独立字段。
+     * 档位就这三档，写小写 —— 方舟对大小写敏感。
+     */
+    videoDefaults: {
+      resolution: '720p',
+      resolutions: ['480p', '720p', '1080p']
+    },
+    /**
      * 待探测的候选模型 ID。
      *
      * 方舟支持直接填公开模型 ID（不必建 ep- 推理接入点），但前提是该模型
@@ -321,6 +329,11 @@ export const PROVIDERS = [
       t2i: '{{baseUrl}}/api/v1/services/aigc/text2image/image-synthesis',
       i2v: '{{baseUrl}}/api/v1/services/aigc/video-generation/video-synthesis',
       tts: '{{baseUrl}}/api/v1/services/aigc/multimodal-generation/generation'
+    },
+    // 万相的档位写大写 P，和方舟正好相反，所以两边各自声明，不做统一
+    videoDefaults: {
+      resolution: '720P',
+      resolutions: ['480P', '720P', '1080P']
     },
     taskPoll: {
       url: '{{baseUrl}}/api/v1/tasks/{taskId}',
@@ -523,6 +536,11 @@ export const PROVIDERS = [
      * 下载地址只活 9 小时，务必落盘 —— 这一点应用本来就在做。
      */
     videoFlow: { steps: 3, urlTtlHours: 9 },
+    // 官方 H3 支持到 2K；Hailuo 系最高 1080P。取并集，选了模型不支持的档位服务端会直接报错说清楚。
+    videoDefaults: {
+      resolution: '1080P',
+      resolutions: ['512P', '768P', '1080P', '2K']
+    },
     models: [
       // H3 是全模态：一次能收最多 9 张图 + 3 段视频 + 3 段音频，出 2K、原生立体声、最长 15 秒。
       // 请求结构和 Hailuo 系不同（content[] 多模态数组），适配器按模型名分流。
@@ -648,7 +666,12 @@ export const PROVIDERS = [
      *   resolution  官方示例用 "2K"
      * 时长档位按示例是 5 秒起，和官方 H3 的 6 秒不一样 —— 别照搬。
      */
-    videoDefaults: { resolution: '2K', ratio: true },
+    videoDefaults: {
+      resolution: '768P',
+      ratio: true,
+      // 服务端原话：仅支持 480p、512p、768P 或 2K。注意大小写不统一，按它给的原样发。
+      resolutions: ['480p', '512p', '768P', '2K']
+    },
     models: [
       {
         id: 'MiniMax-H3',
@@ -658,13 +681,19 @@ export const PROVIDERS = [
         multimodal: true
       }
     ],
-    // 这家只做视频，没有对话接口可探。自检直接提交一个最小任务代价太高，
-    // 所以走「能不能通过鉴权」这一层：路径对了但参数不全会回 4xx 而不是 401。
+    /**
+     * 这家只做视频，没有便宜的接口可探。真提交一个任务要花钱，
+     * 所以故意发一个缺参数的请求：
+     *   401/403 → 密钥不对
+     *   400/422 → **鉴权通过了、路径也对**，只是参数不全 —— 这就算连通
+     * paramErrorMeansOk 就是告诉自检别把后一种当失败。
+     */
     probe: {
-      label: '连通性自检（提交一个缺参数的请求，看鉴权是否通过）',
+      label: '连通性自检（发一个缺参数的请求，看鉴权是否通过）',
       method: 'POST',
       url: '{{baseUrl}}/video_generation',
-      body: { model: 'MiniMax-H3' }
+      body: { model: 'MiniMax-H3' },
+      paramErrorMeansOk: true
     },
     templates: [
       {
@@ -681,7 +710,7 @@ export const PROVIDERS = [
               text: '史诗级太空歌剧院线预告：女舰长独自站在巨大观景窗前，最后一支舰队正在集结并跃迁离去，强光爆闪、舰桥震动，她被留在原地。'
             }
           ],
-          resolution: '2K',
+          resolution: '768P',
           duration: 5,
           ratio: '16:9'
         }
@@ -699,7 +728,7 @@ export const PROVIDERS = [
             { type: 'image_url', image_url: { url: 'https://example.com/first-frame.png' } },
             { type: 'image_url', image_url: { url: 'https://example.com/character-sheet.png' } }
           ],
-          resolution: '2K',
+          resolution: '768P',
           duration: 5,
           ratio: '16:9'
         }
@@ -844,6 +873,30 @@ export function providersWith(capability) {
   return PROVIDERS.filter((p) => (p.capabilities || []).includes(capability));
 }
 
+/** 这家视频接口认哪些分辨率档位。空数组 = 它不收这个字段，别瞎发。 */
+export function videoResolutions(provider) {
+  return provider?.videoDefaults?.resolutions || [];
+}
+
+/**
+ * 把用户选的分辨率翻译成**这一家认识的那个写法**。
+ *
+ * 各家的大小写完全不统一：方舟要 `720p`，万相要 `720P`，秘塔要 `768P` 但 `480p`。
+ * 用户在设置里选一次之后不该因为换了家就失效，所以这里按大小写不敏感匹配，
+ * 匹配上就用**厂商自己的原样拼写**发出去。
+ *
+ * 匹配不上（比如从秘塔的 2K 切到方舟，方舟根本没有 2K）就退回该家默认档，
+ * 而不是把一个必然报错的值发过去 —— 换个服务商就整条流水线报错，太蠢了。
+ */
+export function resolveResolution(provider, requested) {
+  const list = videoResolutions(provider);
+  const fallback = provider?.videoDefaults?.resolution || null;
+  if (!list.length) return fallback;
+  if (!requested || requested === 'auto') return fallback;
+  const hit = list.find((r) => r.toLowerCase() === String(requested).toLowerCase());
+  return hit || fallback;
+}
+
 /** 前端要的精简版：不含任何密钥，只有结构 */
 export function publicCatalog(overrides = {}) {
   return PROVIDERS.map((p) => ({
@@ -857,6 +910,8 @@ export function publicCatalog(overrides = {}) {
     secrets: p.secrets,
     capabilities: p.capabilities,
     models: p.models,
+    // 界面上的分辨率下拉直接读这个，免得前端再抄一份档位清单
+    videoDefaults: p.videoDefaults || null,
     probe: p.probe || null,
     templates: p.templates || [],
     taskPoll: p.taskPoll || null

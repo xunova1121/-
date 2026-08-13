@@ -224,6 +224,30 @@ const upstream = http.createServer((req, res) => {
     return undefined;
   }
 
+  // 方舟风格的视频任务：提交拿 id，再按同一路径 + /{id} 轮询
+  if (url.pathname === '/v3/contents/generations/tasks' && req.method === 'POST') {
+    let raw = '';
+    req.on('data', (c) => (raw += c));
+    req.on('end', () => {
+      upstream.lastVideoBody = JSON.parse(raw || '{}');
+      upstream.videoCalls = (upstream.videoCalls || 0) + 1;
+      upstream.videoPolls = 0;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ id: 'ark-task-1' }));
+    });
+    return undefined;
+  }
+  if (url.pathname.startsWith('/v3/contents/generations/tasks/')) {
+    upstream.videoPolls = (upstream.videoPolls || 0) + 1;
+    const done = upstream.videoPolls >= 2;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({
+      id: 'ark-task-1',
+      status: done ? 'succeeded' : 'running',
+      content: done ? { video_url: `${upstreamUrl}/out.mp4` } : undefined
+    }));
+  }
+
   if (url.pathname === '/v3/images/generations') {
     let raw = '';
     req.on('data', (c) => (raw += c));
@@ -441,6 +465,26 @@ check('种子 = 角色种子 + 镜号', assembled.seed === 1003);
 check('参考图带上了场景和角色', assembled.refImages.length === 2);
 check('负向词透传', assembled.negative === '崩脸');
 
+// 参考图必须和提示词取自同一份设定集：单独重出时少带一样，
+// 这一镜就会成为全片里唯一对不上的那张
+const withProp = {
+  ...bible,
+  props: [{ name: '执法记录仪', appearance: '黑色方形', sheetUrl: 'https://x.invalid/p.png' }]
+};
+const refs = consistency.collectReferences(withProp, {
+  index: 3, scene: '码头', characters: ['阿澜'], description: '阿澜举起执法记录仪'
+});
+check('参考图包含场景 + 角色 + 道具三类', refs.images.length === 3, JSON.stringify(refs.labels));
+check('场景基准图排在第一张（首图权重最高）', refs.refs[0].kind === 'scene');
+check('每一张都标了是谁，界面能显示', refs.labels.join('') === '景·码头角·阿澜道·执法记录仪', refs.labels.join('/'));
+check('没有设定图的角色不会塞空值进去',
+  consistency.collectReferences(bible, { index: 1, characters: ['老陈'], description: '老陈' }).images.length === 0);
+check('同一张图不会重复带',
+  consistency.collectReferences(
+    { characters: [{ name: 'A', sheetUrl: 'u' }, { name: 'B', sheetUrl: 'u' }] },
+    { index: 1, characters: ['A', 'B'], description: 'A 和 B' }
+  ).images.length === 1);
+
 const noName = consistency.assemblePrompt(bible, { index: 1, description: '老陈坐在码头', characters: [] });
 check('没显式点名时按描述文本兜底匹配', noName.prompt.includes('灰布褂'));
 
@@ -534,6 +578,37 @@ check(
   upstream.imagePrompts.at(-1)
 );
 check('临时模型确实生效', upstream.lastImageBody?.model === 'my-custom-image-model', upstream.lastImageBody?.model);
+
+// 单独重出的图同样吃设定集，并且把带了哪几张记在镜头上，界面才好显示
+const shot1c = regened?.shots?.find((s) => s.id === shot1.id);
+// 打桩服务里所有图返回的都是同一张 pixel.png，转成 data: URI 后角色图和场景图
+// 完全相同，会被"同一张不重复带"那条规则合并掉 —— 所以这里只验"记下来了"，
+// 三类参考图各自被带上由上面 collectReferences 的单元检查负责。
+check('单独重出图时记下了带了哪些设定集参考',
+  (shot1c?.bibleRefs || []).length > 0, JSON.stringify(shot1c?.bibleRefs));
+
+// ── 单独重出视频：这条路最容易漏带设定集，只给首帧的话后几秒就跑偏 ──
+settings.patch({ videoProvider: 'volcengine', videoModel: 'doubao-seedance-1-0-pro-250528' });
+const vidEvents = await ndjson(`/projects/${project.id}/shots/${shot1.id}/regenerate`, {
+  kind: 'video',
+  resolution: '1080p'
+});
+const afterVideo = vidEvents.find((e) => e.type === 'finished')?.project;
+const shot1v = afterVideo?.shots?.find((s) => s.id === shot1.id);
+const vidContent = upstream.lastVideoBody?.content || [];
+const vidText = vidContent.find((c) => c.type === 'text')?.text || '';
+const vidImages = vidContent.filter((c) => c.type === 'image_url');
+
+check('单镜视频重出跑通', Boolean(shot1v?.videoPath), JSON.stringify(vidEvents.slice(-1)));
+check('提示词里有剧本内容，不只是运镜（图文不搭就是这儿漏的）',
+  vidText.includes('阿澜'), vidText.slice(0, 80));
+check('首帧之外还带上了设定集参考图', vidImages.length >= 2, `${vidImages.length} 张`);
+check('镜头上记下了这次带了哪些设定集参考',
+  (shot1v?.videoRefs || []).length > 0, JSON.stringify(shot1v?.videoRefs));
+check('单镜临时指定的分辨率发出去了（方舟是拼在文本里的 --resolution）',
+  / --resolution 1080p/.test(vidText), vidText.slice(-60));
+check('画幅也一并发出（竖屏短剧靠它）', / --ratio 16:9/.test(vidText), vidText.slice(-60));
+check('记下了本次出视频的清晰度', shot1v?.videoResolution === '1080p', shot1v?.videoResolution);
 
 section('设定集编辑');
 const propRegen = await ndjson(
@@ -796,8 +871,34 @@ const msVideo = await adapters.generateVideo({
 });
 check('提交用 content[] 结构', Array.isArray(upstream.msBody?.content));
 check('带上了这家特有的 ratio 字段', upstream.msBody?.ratio === '16:9', JSON.stringify(upstream.msBody?.ratio));
-check('分辨率用这家的默认值 2K，而不是全局的 720P',
-  upstream.msBody?.resolution === '2K', upstream.msBody?.resolution);
+check('没指定分辨率时用这家自己的默认档（768P），不是别家的写法',
+  upstream.msBody?.resolution === '768P', upstream.msBody?.resolution);
+
+// 分辨率可选：用户选的档位要真的发出去
+await adapters.generateVideo({
+  providerId: 'metaso', model: 'MiniMax-H3', prompt: 'x', duration: 5, resolution: '2K'
+});
+check('调用方指定 2K 时按 2K 发', upstream.msBody?.resolution === '2K', upstream.msBody?.resolution);
+
+// 各家大小写不统一：选 480P 也要翻成这家原样的 480p
+await adapters.generateVideo({
+  providerId: 'metaso', model: 'MiniMax-H3', prompt: 'x', duration: 5, resolution: '480P'
+});
+check('大小写不同也能对上，按厂商原样拼写发出（480p）',
+  upstream.msBody?.resolution === '480p', upstream.msBody?.resolution);
+
+// 这家没有的档位不能硬发过去 —— 必然报错，还不如退回默认
+await adapters.generateVideo({
+  providerId: 'metaso', model: 'MiniMax-H3', prompt: 'x', duration: 5, resolution: '1080P'
+});
+check('这家不支持的档位退回默认档，不是把必错的值发出去',
+  upstream.msBody?.resolution === '768P', upstream.msBody?.resolution);
+
+// 全局设置也要生效（不传 resolution 时读设置）
+settings.patch({ videoResolution: '2K' });
+await adapters.generateVideo({ providerId: 'metaso', model: 'MiniMax-H3', prompt: 'x', duration: 5 });
+check('设置里选的档位对未指定的调用生效', upstream.msBody?.resolution === '2K', upstream.msBody?.resolution);
+settings.patch({ videoResolution: 'auto' });
 check('时长 5 秒原样发出（这家档位是 5 而不是官方的 6）',
   upstream.msBody?.duration === 5, `${upstream.msBody?.duration}`);
 check('官方查询路径 404 后自动试出正确路径', /out\.mp4$/.test(msVideo.url), msVideo.url);

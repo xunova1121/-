@@ -424,6 +424,7 @@ export async function generateAssets(projectId, { only = null, chapterId = null,
           t.imageRef = modelRef;
           t.seed = result.seed;
           t.prompt = result.prompt;
+          t.bibleRefs = result.refLabels || [];
           t.consistency = {
             score: result.verification?.score ?? null,
             pass: result.verification?.pass ?? null,
@@ -491,7 +492,13 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
   // 不指定种子时换一颗：同种子重采样大概率复现同一个错误
   const seed = Number.isFinite(opts.seed) ? opts.seed : assembled.seed + Math.floor(Math.random() * 9973) + 1;
 
+  // 单独重出同样要带设定集：提示词从冻结设定装配，参考图带上场景 + 角色 + 道具。
+  // 少带一样，重出的这一镜就会成为全片里唯一对不上的那一张。
+  const refImages = settings.get('useReferenceImages') === false ? [] : assembled.refImages;
   onEvent?.({ type: 'shot', shotId, status: 'running', message: `第 ${shot.index} 镜重出（${providerId} / ${model}）…` });
+  if (refImages.length) {
+    onEvent?.({ type: 'note', message: `参考设定集：${assembled.refLabels.join('、')}` });
+  }
 
   const image = await adapters.generateImage({
     providerId,
@@ -499,7 +506,7 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
     prompt: opts.prompt?.trim() || assembled.prompt,
     negative: assembled.negative,
     seed,
-    refImages: settings.get('useReferenceImages') === false ? [] : assembled.refImages,
+    refImages,
     label: `重出 #${shot.index}`,
     onEvent
   });
@@ -528,6 +535,7 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
       t.seed = seed;
       t.prompt = opts.prompt?.trim() || assembled.prompt;
       t.modelUsed = `${providerId} / ${model}`;
+      t.bibleRefs = refImages.length ? assembled.refLabels : [];
       t.consistency = {
         score: verification.score ?? null,
         pass: verification.pass ?? null,
@@ -564,15 +572,24 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
   onEvent?.({ type: 'shot', shotId, status: 'running', message: `第 ${shot.index} 镜重出视频（${providerId} / ${model}）…` });
 
   const firstFrame = shot.imageRef || (await toModelRef(shot.imagePath, { onEvent }));
-  const cast = consistency.matchCharacters(project.bible, shot);
+  // 首帧只定住第一格，后面几秒全靠提示词和参考图撑着。
+  // 所以这里和批量出视频走完全一样的一套：设定集提示词 + 场景/角色/道具参考图。
+  const bibleRefs =
+    settings.get('useReferenceImages') === false
+      ? { images: [], labels: [] }
+      : consistency.collectReferences(project.bible, shot);
   const videoPrompt = opts.prompt?.trim() || consistency.assembleVideoPrompt(project.bible, shot);
+  if (bibleRefs.labels.length) {
+    onEvent?.({ type: 'note', message: `参考设定集：${bibleRefs.labels.join('、')}` });
+  }
   const video = await adapters.generateVideo({
     providerId,
     model,
     prompt: videoPrompt,
     firstFrameUrl: firstFrame,
-    refImages: cast.map((c) => c.sheetUrl).filter(Boolean),
+    refImages: bibleRefs.images,
     duration: shot.duration,
+    resolution: opts.resolution || null,
     label: `重出视频 #${shot.index}`,
     onEvent: (ev) => onEvent?.({ ...ev, shotId })
   });
@@ -585,6 +602,8 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
       t.videoPath = dest;
       t.videoPrompt = videoPrompt;
       t.videoModelUsed = `${providerId} / ${model}`;
+      t.videoResolution = video.resolution || null;
+      t.videoRefs = bibleRefs.labels;
       t.actualDuration = video.actualDuration || shot.duration;
       t.status = 'video-ready';
     }
@@ -713,9 +732,12 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
     onEvent?.({ type: 'shot', shotId: shot.id, status: 'running', message: `第 ${shot.index} 镜出视频…` });
     try {
       const firstFrame = shot.imageRef || (await toModelRef(shot.imagePath, { onEvent }));
-      // 角色设定图一并带上：支持 r2v 的厂商（Vidu）能靠它把人物锁得更死
-      const cast = consistency.matchCharacters(project.bible, shot);
-      const refs = cast.map((c) => c.sheetUrl).filter(Boolean);
+      // 设定集参考图一并带上（场景 + 角色 + 道具）：
+      // 支持 r2v 的厂商（Vidu、H3）能靠它把人和环境一起锁住
+      const bibleRefs =
+        settings.get('useReferenceImages') === false
+          ? { images: [], labels: [] }
+          : consistency.collectReferences(project.bible, shot);
 
       const videoPrompt = consistency.assembleVideoPrompt(project.bible, shot);
       onEvent?.({ type: 'shot', shotId: shot.id, status: 'running', message: `提交任务：${videoPrompt.slice(0, 60)}…` });
@@ -725,7 +747,7 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
         model: r.video.model,
         prompt: videoPrompt,
         firstFrameUrl: firstFrame,
-        refImages: refs,
+        refImages: bibleRefs.images,
         duration: shot.duration,
         label: `视频 #${shot.index}`,
         // 轮询事件本身不带镜头信息，补上 shotId，前端才知道这是哪一镜在等
@@ -740,6 +762,8 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
           t.videoPath = dest;
           t.videoPrompt = videoPrompt;
           t.videoModelUsed = `${r.video.provider} / ${r.video.model}`;
+          t.videoResolution = video.resolution || null;
+          t.videoRefs = bibleRefs.labels;
           // 厂商档位可能把 4s 顶成 5s。如实记下来，别让界面上的总时长撒谎。
           t.actualDuration = video.actualDuration || shot.duration;
           t.status = 'video-ready';

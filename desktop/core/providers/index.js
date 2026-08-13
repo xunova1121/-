@@ -203,13 +203,25 @@ export async function probe(providerId) {
       },
       null
     );
+    // 有些服务商没有便宜的接口可探，自检就故意发一个缺参数的请求。
+    // 这种情况下 400/422 恰恰说明"鉴权过了、路径对了"，只是参数不全 ——
+    // 判成失败会让用户白白去查一个根本不存在的问题。
+    const paramErrorOk =
+      provider.probe.paramErrorMeansOk && (res.status === 400 || res.status === 422);
+    const ok = res.ok || paramErrorOk;
+
     return {
-      ok: res.ok,
+      ok,
       status: res.status,
       model: body?.model || null,
       latencyMs: Date.now() - started,
       logId: res.logId,
-      reason: res.ok ? '' : diagnose(res)
+      note: paramErrorOk
+        ? `鉴权与路径都正常（服务端只是在挑参数：${
+            res.json?.base_resp?.status_msg || res.json?.message || res.json?.error?.message || `HTTP ${res.status}`
+          }）`
+        : '',
+      reason: ok ? '' : diagnose(res)
     };
   } catch (err) {
     return { ok: false, status: 0, latencyMs: Date.now() - started, reason: err.message };

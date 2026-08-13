@@ -27,6 +27,10 @@ export default {
     // ── 能力路由 ──
     const routeGrid = h('div', { class: 'route-grid' });
 
+    // 视频那一行换了服务商，下面的分辨率档位要跟着换 —— 各家档位完全不一样，
+    // 留着上一家的选项会让人选中一个必然报错的值
+    let repaintResolutions = () => {};
+
     // 同一家可能被四五条能力共用，列表拉一次就够
     const modelCache = new Map();
     async function fetchModels(providerId) {
@@ -76,6 +80,7 @@ export default {
             pending[provKey] = e.target.value;
             paintModels(e.target.value);
             pending[modelKey] = modelSel.value;
+            if (cap === 'i2v') repaintResolutions();
           }
         },
         candidates.map((p) =>
@@ -275,6 +280,57 @@ export default {
         h('p', { class: 'panel-hint' },
           '每种能力单独挑服务商。各家强项差别很大 —— 剧本用便宜的长文本模型就够，出图和一致性复核才值得上好的。'),
         routeGrid
+      )
+    );
+
+    // ── 画面规格 ──
+    // 分辨率各家写法不统一（方舟 720p、万相 720P、秘塔 768P/2K），所以这里直接
+    // 列出**当前视频服务商自己声明的那几档**，不做统一映射 —— 用户看到什么就发什么。
+    const resSel = h('select', { onchange: (e) => (pending.videoResolution = e.target.value) });
+    const resHint = h('div', { class: 'field-hint' });
+
+    repaintResolutions = () => {
+      const providerId = pending.videoProvider || settings.videoProvider;
+      const p = providers.find((x) => x.id === providerId);
+      const list = p?.videoDefaults?.resolutions || [];
+      const current = pending.videoResolution || settings.videoResolution || 'auto';
+      resSel.innerHTML = '';
+
+      if (!list.length) {
+        resSel.append(h('option', { value: 'auto', selected: true }, '跟随服务商默认'));
+        resSel.disabled = true;
+        resHint.textContent = `${p?.name || providerId} 的接口不收分辨率字段（清晰度由模型档位决定），这里不用选。`;
+        return;
+      }
+
+      resSel.disabled = false;
+      resSel.append(
+        h('option', { value: 'auto', selected: current === 'auto' },
+          `跟随服务商默认（${p.videoDefaults.resolution}）`)
+      );
+      for (const r of list) {
+        resSel.append(h('option', { value: r, selected: r.toLowerCase() === String(current).toLowerCase() }, r));
+      }
+      resHint.textContent = `${p.name} 支持 ${list.join(' / ')}。选了这家没有的档位会自动退回默认档，不会让整条流水线报错。`;
+    };
+    repaintResolutions();
+
+    const RATIOS = ['16:9', '9:16', '1:1', '4:3', '21:9'];
+    const ratioSel = h('select', { onchange: (e) => (pending.aspectRatio = e.target.value) },
+      RATIOS.map((r) => h('option', { value: r, selected: r === (settings.aspectRatio || '16:9') },
+        r === '9:16' ? '9:16（竖屏短剧）' : r === '16:9' ? '16:9（横屏）' : r))
+    );
+
+    root.append(
+      h('div', { class: 'panel' },
+        h('h2', { class: 'panel-title' }, '画面规格'),
+        h('p', { class: 'panel-hint' },
+          '分辨率越高越贵、出得越慢。建议先用低档跑通全流程、确认分镜和人设都对，最后一遍再拉到高档重出。'),
+        h('div', { class: 'grid2' },
+          h('div', { class: 'field' }, h('label', {}, '视频分辨率'), resSel, resHint),
+          h('div', { class: 'field' }, h('label', {}, '画幅'), ratioSel,
+            h('div', { class: 'field-hint' }, '竖屏短剧选 9:16。这个比例同时作用于出图和出视频，免得成片里两者打架。'))
+        )
       )
     );
 

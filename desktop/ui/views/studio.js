@@ -593,25 +593,42 @@ export default {
     // ───────────── 分镜网格 ─────────────
     const shotHost = h('div', {});
 
-    /** 出图/出视频的服务商 + 模型下拉，重出时用 */
+    /**
+     * 出图/出视频的服务商 + 模型下拉，重出时用。
+     * 视频这一路多一个分辨率档位 —— 单镜返工往往就是为了"这一镜换个清晰度再试"，
+     * 没必要为它跑一趟设置页。档位跟着所选服务商走，各家写法不一样。
+     */
     function modelPicker(capability, defaults) {
       const candidates = state.catalog.providers.filter((p) => (p.capabilities || []).includes(capability));
       const provSel = h('select', { class: 'mini' },
         h('option', { value: '' }, `默认（${defaults.provider}）`),
         ...candidates.map((p) => h('option', { value: p.id }, p.name)));
       const modelSel = h('select', { class: 'mini' }, h('option', { value: '' }, '默认模型'));
+      const resSel = capability === 'i2v' ? h('select', { class: 'mini' }) : null;
+
       const refill = () => {
         const p = state.catalog.providers.find((x) => x.id === (provSel.value || defaults.provider));
         clear(modelSel).append(h('option', { value: '' }, `默认（${defaults.model}）`));
         for (const m of (p?.models || []).filter((m) => !m.capability || m.capability === capability)) {
           modelSel.append(h('option', { value: m.id }, m.label || m.id));
         }
+        if (resSel) {
+          const list = p?.videoDefaults?.resolutions || [];
+          clear(resSel).append(h('option', { value: '' }, list.length ? '默认清晰度' : '该家不可选'));
+          resSel.disabled = !list.length;
+          for (const r of list) resSel.append(h('option', { value: r }, r));
+        }
       };
       provSel.addEventListener('change', refill);
       refill();
+
       return {
-        el: h('div', { class: 'shot-model-row' }, provSel, modelSel),
-        values: () => ({ provider: provSel.value || undefined, model: modelSel.value || undefined })
+        el: h('div', { class: 'shot-model-row' }, provSel, modelSel, resSel),
+        values: () => ({
+          provider: provSel.value || undefined,
+          model: modelSel.value || undefined,
+          resolution: resSel?.value || undefined
+        })
       };
     }
 
@@ -733,8 +750,21 @@ export default {
                   h('label', { style: 'margin-top:10px' }, '出视频用'),
                   vidPicker.el,
                   vidBtn,
+                  // 单独重出同样吃设定集：把"带了哪几张参考图"摊开，
+                  // 不然重出来还是不像的时候，根本不知道是提示词的问题还是压根没带参考图
+                  h('div', { class: 'shot-used' },
+                    '单独重出会自动带上本镜的设定集：场景基准图 + 出场角色设定图 + 点到的道具图'),
+                  shot.bibleRefs?.length
+                    ? h('div', { class: 'shot-used' }, `上次出图参考：${shot.bibleRefs.join('、')}`)
+                    : null,
+                  shot.videoRefs?.length
+                    ? h('div', { class: 'shot-used' }, `上次出视频参考：${shot.videoRefs.join('、')}`)
+                    : null,
                   shot.modelUsed ? h('div', { class: 'shot-used' }, `出图用了 ${shot.modelUsed}`) : null,
-                  shot.videoModelUsed ? h('div', { class: 'shot-used' }, `出视频用了 ${shot.videoModelUsed}`) : null,
+                  shot.videoModelUsed
+                    ? h('div', { class: 'shot-used' },
+                        `出视频用了 ${shot.videoModelUsed}${shot.videoResolution ? ` · ${shot.videoResolution}` : ''}`)
+                    : null,
                   // 把真正发给视频模型的提示词摊开 —— 片段和剧本对不上时，先看这里
                   shot.videoPrompt
                     ? h('details', { class: 'shot-prompt' },
