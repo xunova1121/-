@@ -493,8 +493,10 @@ export function resetQueryUrlCache() {
 }
 
 const QUERY_SHAPES = [
-  (base, id) => `${base}/query/video_generation?task_id=${encodeURIComponent(id)}`,
+  // MiniMax v2 / 秘塔这一族：GET /video_generation/{task_id}，回 {"task":{…}}。
+  // 放在第一个是因为它已经被实测确认过，先试它能少发几个请求。
   (base, id) => `${base}/video_generation/${encodeURIComponent(id)}`,
+  (base, id) => `${base}/query/video_generation?task_id=${encodeURIComponent(id)}`,
   (base, id) => `${base}/query/video_generation/${encodeURIComponent(id)}`,
   (base, id) => `${base}/video_generation?task_id=${encodeURIComponent(id)}`,
   (base, id) => `${base}/tasks/${encodeURIComponent(id)}`,
@@ -541,16 +543,28 @@ export function isAuthError(text) {
   return /401|403|unauthor|authoriz|login fail|api key|apikey|token|鉴权|密钥|未授权/i.test(String(text || ''));
 }
 
-/** 从各家五花八门的响应里把状态词抠出来 */
+/**
+ * 从各家五花八门的响应里把状态词抠出来。
+ *
+ * 外面套一层是常事，而且套的名字各不相同：
+ *   MiniMax v2 / 秘塔  {"task":{"id":…,"status":"succeeded","content":{"url":…}}}
+ *   百炼               {"output":{"task_status":"SUCCEEDED"}}
+ *   一堆中转           {"data":{"status":…}}
+ * 少看一层就等于读不出状态，然后一路轮询到超时 —— 这个坑踩过一次，
+ * 表现是"视频在厂商平台早就出好了，流水线还在转"。
+ */
 export function readTaskState(json) {
   const raw =
     json?.status ??
     json?.state ??
     json?.task_status ??
+    json?.task?.status ??
+    json?.task?.state ??
     json?.data?.status ??
     json?.data?.state ??
     json?.data?.task_status ??
     json?.output?.task_status ??
+    json?.result?.status ??
     '';
   return String(raw || '').toLowerCase();
 }
@@ -915,12 +929,14 @@ async function generateVideoMiniMax({
 
   // 海螺的下载地址只活 9 小时，所以上层必须立刻落盘 —— 它本来就是这么做的
   onEvent?.({ type: 'note', message: '拿到下载地址（9 小时后失效，正在落盘）' });
+  // 厂商如实回了时长和分辨率就用它的 —— 界面上"模型实出"那一栏要的正是这个真实值
+  const task = finalStatus.task || finalStatus.data || finalStatus;
   return {
     url,
-    actualDuration: duration,
+    actualDuration: Number(task.duration) || duration,
     requestedDuration,
     allowedDurations: allowed,
-    resolution,
+    resolution: task.resolution || resolution,
     raw: finalStatus
   };
 }

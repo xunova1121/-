@@ -181,6 +181,32 @@ const upstream = http.createServer((req, res) => {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ error: 'not found' }));
   }
+  // 用户实测拿回来的真实形状：外面套一层 task，状态和地址都在里面。
+  // 少看一层就读不出状态，然后一路轮到超时 —— 这个坑必须钉死。
+  if (url.pathname === '/msv2/video_generation' && req.method === 'POST') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ task_id: '424010985738629' }));
+  }
+  if (url.pathname === '/msv2/video_generation/424010985738629') {
+    upstream.msv2Hits = (upstream.msv2Hits || 0) + 1;
+    const done = upstream.msv2Hits >= 2;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({
+      task: {
+        id: '424010985738629',
+        model: 'MiniMax-H3',
+        status: done ? 'succeeded' : 'processing',
+        created_at: 1785125529,
+        content: done ? { url: `${upstreamUrl}/out.mp4` } : {},
+        resolution: '2K',
+        duration: 5,
+        ratio: '16:9',
+        task_type: 'generation',
+        modality: 'video'
+      }
+    }));
+  }
+
   if (url.pathname === '/ms/video_generation/ms-9') {
     upstream.msQueryHits = (upstream.msQueryHits || 0) + 1;
     const done = upstream.msQueryHits >= 2;
@@ -1125,6 +1151,21 @@ const oddState = await adapters.generateVideo({
 });
 check('completed 也算终态（不是只认 success）', Boolean(oddState.url), oddState.url);
 upstream.msState = null;
+
+// ── 秘塔实测确认的响应形状：{"task":{"status":…,"content":{"url":…}}} ──
+adapters.resetQueryUrlCache();
+settings.patch({ baseUrls: { metaso: `${upstreamUrl}/msv2` } });
+upstream.msv2Hits = 0;
+const v2 = await adapters.generateVideo({
+  providerId: 'metaso', model: 'MiniMax-H3', prompt: 'x', duration: 5,
+  firstFrameUrl: 'https://x.invalid/f.png'
+});
+check('套了一层 task 也能读出状态并拿到视频', /out\.mp4$/.test(v2.url || ''), v2.url);
+check('轮到 succeeded 才算完，没有提前收工', upstream.msv2Hits >= 2, `${upstream.msv2Hits} 次`);
+check('厂商回的真实时长被采纳（不是我们对齐前那个数）', v2.actualDuration === 5, `${v2.actualDuration}`);
+check('厂商回的真实分辨率被采纳', v2.resolution === '2K', v2.resolution);
+settings.patch({ baseUrls: { metaso: `${upstreamUrl}/ms` } });
+adapters.resetQueryUrlCache();
 
 // ── 探路径必须看内容，不能只看 HTTP 200 ──
 // 中转平台常常对任何路径都回 200（首页、错误页、空对象都算）。

@@ -348,6 +348,16 @@ OpenAI 兼容的那些只要给 baseUrl 和密钥名，一行工厂函数搞定�
 查任务那条支持写 `{taskId}` 指定任务号的位置，不写就自动加 `?task_id=`。
 填完立刻生效，不用等我改目录再发一版。
 
+**外面套的那层也要看。** 各家套的名字还不一样：
+
+```
+MiniMax v2 / 秘塔   {"task":   {"status":"succeeded","content":{"url":…}}}
+百炼                {"output": {"task_status":"SUCCEEDED"}}
+一堆中转            {"data":   {"status":…}}
+```
+
+少看一层就等于读不出状态，然后一路轮到超时。现在这几层都认。
+
 **还有一类要分开看：HTTP 200，但错误藏在 body 里。** 国内这一圈网关都有这毛病，
 比如秘塔回过 `{"type":"error","error":{"message":"login fail: ...(1004)","http_code":"401"}}`。
 把它当成"任务还没好"就会一直等下去，而鉴权错等到天荒地老也不会变。
@@ -427,5 +437,5 @@ desktop/
 │  ├─ app.css              视觉系统（调色间配色 · 钨丝暖底 + 日光冷蓝）
 │  └─ views/               项目 / 创作台 / 设定集 / 联调台 / 服务商 / 请求记录 / 设置
 ├─ electron/               桌面外壳
-└─ scripts/selftest.mjs    打桩自检，241 项
+└─ scripts/selftest.mjs    打桩自检，245 项
 ```
