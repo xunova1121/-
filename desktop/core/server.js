@@ -449,6 +449,8 @@ function summarize(r) {
 
 export function createServer() {
   ensureDirs();
+  // 上次删项目时被 Windows 文件占用打断的残骸，开机顺手扫掉
+  store.sweepOrphans();
   return http.createServer(async (req, res) => {
     const denied = guard(req);
     if (denied) return json(res, 403, { error: denied });

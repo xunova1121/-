@@ -31,6 +31,7 @@ const { safeFileName } = await import('../core/paths.js');
 const consistency = await import('../core/pipeline/consistency.js');
 const settings = await import('../core/settings.js');
 const providersMod = await import('../core/providers/index.js');
+const store = await import('../core/store.js');
 
 let passed = 0;
 let failed = 0;
@@ -488,6 +489,32 @@ check('同一张图不会重复带',
 const noName = consistency.assemblePrompt(bible, { index: 1, description: '老陈坐在码头', characters: [] });
 check('没显式点名时按描述文本兜底匹配', noName.prompt.includes('灰布褂'));
 
+// ─────────────────────── 6.5 项目的增删 ───────────────────────
+
+section('项目增删（删完立刻消失，不用重启）');
+{
+  const p1 = store.create({ title: '待删项目', styleId: 'anime', targetDuration: 90 });
+  fs.writeFileSync(path.join(store.assetDir(p1.id), 'a.png'), 'x');
+  check('新建后在列表里', store.list().some((x) => x.id === p1.id));
+  check('列表带上了画风和时长（项目页要显示）',
+    store.list().find((x) => x.id === p1.id)?.styleId === 'anime'
+      && store.list().find((x) => x.id === p1.id)?.targetDuration === 90);
+
+  const r = await fetch(`${appUrl}/api/projects/${p1.id}`, { method: 'DELETE' });
+  check('删除接口返回 200', r.status === 200, `HTTP ${r.status}`);
+  check('删完当场就不在列表里了（不需要重启）', !store.list().some((x) => x.id === p1.id));
+
+  // Windows 上文件被占用时 rmSync 会抛，那种情况下至少要保证 project.json 已经没了 ——
+  // 列表里看不见它，功能上就算删掉了，残骸交给下次启动清。
+  const p2 = store.create({ title: '半删项目' });
+  const dir2 = store.projectDir(p2.id);
+  fs.rmSync(path.join(dir2, 'project.json'));
+  check('没有 project.json 的目录不会出现在列表里', !store.list().some((x) => x.id === p2.id));
+  check('启动时的残骸清理会把它删掉', store.sweepOrphans() >= 1 && !fs.existsSync(dir2));
+
+  check('删不存在的项目不报错', store.remove('no-such-project') === true);
+}
+
 // ─────────────────────── 7. 整条流水线（对着打桩服务跑）───────────────────────
 
 section('流水线端到端（打桩，不花钱）');
@@ -602,7 +629,12 @@ const vidImages = vidContent.filter((c) => c.type === 'image_url');
 check('单镜视频重出跑通', Boolean(shot1v?.videoPath), JSON.stringify(vidEvents.slice(-1)));
 check('提示词里有剧本内容，不只是运镜（图文不搭就是这儿漏的）',
   vidText.includes('阿澜'), vidText.slice(0, 80));
-check('首帧之外还带上了设定集参考图', vidImages.length >= 2, `${vidImages.length} 张`);
+// 方舟 Seedance 只收 1 张首帧图。多塞几张过去整个任务会被判非法参数直接失败 ——
+// "出视频一直失败"最常见的就是这个原因。所以这里必须只发 1 张，并说清楚为什么。
+check('方舟只发 1 张首帧图（多发会让任务提交直接失败）', vidImages.length === 1, `${vidImages.length} 张`);
+check('被截掉的参考图有说明，不是悄悄丢掉',
+  vidEvents.some((e) => e.type === 'note' && /最多收 1 张图/.test(e.message || '')),
+  JSON.stringify(vidEvents.filter((e) => e.type === 'note').map((e) => e.message).slice(0, 3)));
 check('镜头上记下了这次带了哪些设定集参考',
   (shot1v?.videoRefs || []).length > 0, JSON.stringify(shot1v?.videoRefs));
 check('单镜临时指定的分辨率发出去了（方舟是拼在文本里的 --resolution）',

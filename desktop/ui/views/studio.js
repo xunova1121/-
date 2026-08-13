@@ -1,13 +1,16 @@
 /**
- * 创作台：项目、画风、章节、流水线阶段轨、分镜网格。
+ * 创作台：剧本、时长、章节、流水线阶段轨、分镜网格。
  * 阶段编号是真序列 —— 设定集必须在分镜之前跑，因为分镜要引用已冻结的人设。
+ *
+ * 项目的新建/切换/删除、以及画风，都在「项目」页 ——
+ * 那些是项目级的事，和"这一部片子怎么往下做"混在一页上只会挡路。
  */
 import { h, clear, add, api, stream, toast, mediaUrl, fmtMs } from '../lib.js';
 
 let running = null;
 
 export default {
-  async render({ state }) {
+  async render({ state, go }) {
     const stages = state.catalog.stages.filter((s) => s.id !== 'export');
     const { presets } = await api('/styles');
     const projects = await api('/projects');
@@ -22,126 +25,55 @@ export default {
     const root = h('div', { class: 'stack' });
     const rerender = () => document.querySelector('#btn-refresh').click();
 
-    // ───────────── 项目 ─────────────
-    const projectSel = h(
-      'select',
-      {
-        onchange: (e) => {
-          state.projectId = e.target.value;
-          localStorage.setItem('fd.projectId', e.target.value);
-          rerender();
-        }
-      },
-      projects.map((p) =>
-        h('option', { value: p.id, selected: p.id === state.projectId }, `${p.title}（${p.shots} 镜）`)
-      )
-    );
-
-    const newTitle = h('input', { type: 'text', placeholder: '例：太湖夜巡' });
-    const newDuration = h('input', { type: 'number', value: 60, min: 5, max: 3600 });
-    let newStyleId = 'ink';
-
-    /** 画风缩略图：用配色和纹理现画，不外链图片，离线也能看 */
-    function swatchEl(s) {
-      const { from, to, accent, texture } = s.swatch;
-      const overlays = {
-        ink: `radial-gradient(ellipse at 30% 70%, ${accent}55 0%, transparent 55%)`,
-        flat: `linear-gradient(180deg, transparent 55%, ${accent}66 55%)`,
-        fine: `repeating-linear-gradient(45deg, ${accent}22 0 3px, transparent 3px 8px)`,
-        photo: `radial-gradient(circle at 70% 30%, ${accent}88 0%, transparent 45%)`,
-        grain: `repeating-linear-gradient(0deg, ${accent}18 0 1px, transparent 1px 3px)`,
-        neon: `radial-gradient(circle at 25% 75%, ${accent}cc 0%, transparent 40%), radial-gradient(circle at 75% 25%, ${to}aa 0%, transparent 40%)`,
-        soft: `radial-gradient(circle at 50% 40%, ${accent}77 0%, transparent 60%)`,
-        noir: `linear-gradient(105deg, transparent 0 12%, ${accent}44 12% 16%, transparent 16% 28%, ${accent}44 28% 32%, transparent 32%)`,
-        wash: `radial-gradient(ellipse at 60% 40%, ${accent}66 0%, transparent 50%)`
-      };
-      return h('div', {
-        class: 'style-swatch',
-        style: `background: ${overlays[texture] || ''}, linear-gradient(135deg, ${from}, ${to});`
-      });
-    }
-
-    function stylePicker(currentId, onPick) {
-      const grid = h('div', { class: 'style-grid' });
-      for (const s of presets) {
-        const card = h(
-          'button',
-          {
-            class: `style-card ${s.id === currentId ? 'active' : ''}`,
-            title: s.anchor || '自己写风格描述',
-            onclick: () => {
-              currentId = s.id;
-              onPick(s.id);
-              for (const el of grid.children) el.classList.remove('active');
-              card.classList.add('active');
-            }
-          },
-          swatchEl(s),
-          h('div', { class: 'style-name' }, s.name),
-          h('div', { class: 'style-hint' }, s.hint)
-        );
-        grid.append(card);
-      }
-      return grid;
-    }
-
-    root.append(
-      h(
-        'div',
-        { class: 'panel' },
-        h('h2', { class: 'panel-title' }, '项目'),
-        projects.length
-          ? h('div', { class: 'row' },
-              h('div', {}, h('label', {}, '当前项目'), projectSel),
-              h('div', { class: 'shrink' },
-                h('button', {
-                  class: 'btn danger',
-                  onclick: async () => {
-                    if (!state.projectId) return;
-                    if (!confirm('删除这个项目？已生成的图和视频会一并删掉，无法恢复。')) return;
-                    await api(`/projects/${state.projectId}`, { method: 'DELETE' });
-                    state.projectId = null;
-                    localStorage.removeItem('fd.projectId');
-                    toast('已删除', 'ok');
-                    rerender();
-                  }
-                }, '删除项目'))
-            )
-          : h('p', { class: 'panel-hint' }, '还没有项目。填个名字，选个画风，从下面开始。'),
-        h('div', { class: 'row', style: 'margin-top:12px' },
-          h('div', {}, h('label', {}, '新建项目'), newTitle),
-          h('div', { class: 'shrink', style: 'width:160px' }, h('label', {}, '目标时长（秒）'), newDuration)),
-        h('label', {}, '画风'),
-        stylePicker('ink', (id) => (newStyleId = id)),
-        h('div', { class: 'inline', style: 'margin-top:12px' },
-          h('button', {
-            class: 'btn',
-            onclick: async () => {
-              const title = newTitle.value.trim();
-              if (!title) return toast('先起个名字', 'err');
-              const p = await api('/projects', {
-                method: 'POST',
-                body: { title, styleId: newStyleId, targetDuration: Number(newDuration.value) || 60 }
-              });
-              state.projectId = p.id;
-              localStorage.setItem('fd.projectId', p.id);
-              toast('已创建', 'ok');
-              rerender();
-            }
-          }, '创建'))
-      )
-    );
-
     if (!project) {
-      root.append(h('div', { class: 'empty' }, h('b', {}, '还没有选中项目'), '创建一个，然后把剧本贴进来。'));
+      root.append(
+        h('div', { class: 'empty' },
+          h('b', {}, '还没有选中项目'),
+          h('div', {}, '先去「项目」页新建一个，或者打开一个已有的。'),
+          h('div', { class: 'inline', style: 'margin-top:12px;justify-content:center' },
+            h('button', { class: 'btn primary', onclick: () => go('projects') }, '去项目页')))
+      );
       return root;
     }
 
-    // ───────────── 剧本 + 画风 ─────────────
+    // ───────────── 当前项目（一行，够用就行）─────────────
+    const styleName = presets.find((s) => s.id === (project.styleId || 'ink'))?.name || '自定义';
+    root.append(
+      h('div', { class: 'project-bar' },
+        h('div', { class: 'project-bar-main' },
+          h('b', {}, project.title),
+          h('span', { class: 'badge' }, styleName),
+          project.style ? h('span', { class: 'badge' }, project.style) : null,
+          projects.length > 1 ? h('span', { class: 'badge' }, `共 ${projects.length} 个项目`) : null),
+        h('button', { class: 'btn ghost sm', onclick: () => go('projects') }, '切换项目 / 改画风'))
+    );
+
+    /**
+     * 当前选中的流水线阶段。
+     *
+     * 它不只是"看哪一步"，还决定**下面显示哪些参数**：
+     * 在出图那一步摆一堆秒数和视频模型，是逼人在一屏噪音里找那一个按钮。
+     * 每一步只留这一步真正用得上的。
+     */
+    let selectedStage = localStorage.getItem('fd.stage') || 'bible';
+
+    /** 这一阶段该显示哪些参数 */
+    function scope(stage = selectedStage) {
+      return {
+        // 时长是视频的输入：几秒的片段由它决定。分镜那步也要，因为拆镜时就在分配预算。
+        duration: stage === 'script' || stage === 'video',
+        image: stage === 'assets',
+        video: stage === 'video',
+        // 设定集那步的产出在「设定集」页，分镜网格帮不上忙
+        shots: stage !== 'bible'
+      };
+    }
+
+    // ───────────── 剧本 ─────────────
+    // 画风不在这儿 —— 建项目时已经定过了，摆两遍只会让人怀疑到底哪个算数。
+    // 要改去「项目」页，那里会顺便提醒"设定集是按画风冻结的，改完得重跑第 01 步"。
     const scriptArea = h('textarea', { rows: 9 }, project.script || '');
     const shotCount = h('input', { type: 'number', value: 8, min: 2, max: 60 });
-    const extraStyle = h('input', { type: 'text', value: project.style || '', placeholder: '在预设之上补充，例：冷调、雨天、低机位' });
-    let pickedStyle = project.styleId || 'ink';
 
     root.append(
       h(
@@ -150,8 +82,6 @@ export default {
         h('h2', { class: 'panel-title' }, '剧本'),
         h('p', { class: 'panel-hint' }, '小说片段、大纲、完整剧本都行。写完记得保存，再从下面第 01 步开始。'),
         scriptArea,
-        h('div', { style: 'margin-top:14px' }, h('label', {}, '画风'), stylePicker(pickedStyle, (id) => (pickedStyle = id))),
-        h('div', { class: 'field', style: 'margin-top:10px' }, h('label', {}, '补充描述（可留空）'), extraStyle),
         h('div', { class: 'row', style: 'margin-top:11px' },
           h('div', { class: 'shrink', style: 'width:150px' }, h('label', {}, '每章目标镜数'), shotCount),
           h('div', {}),
@@ -161,12 +91,12 @@ export default {
               onclick: async () => {
                 await api(`/projects/${project.id}`, {
                   method: 'PATCH',
-                  body: { script: scriptArea.value, styleId: pickedStyle, style: extraStyle.value.trim() }
+                  body: { script: scriptArea.value }
                 });
                 toast('已保存', 'ok');
                 rerender();
               }
-            }, '保存剧本与画风'))
+            }, '保存剧本'))
         )
       )
     );
@@ -227,7 +157,7 @@ export default {
                   project = await api(`/projects/${project.id}`);
                   toast(project.shots.length ? '已按目标重新分配每镜时长' : '目标时长已保存', 'ok');
                   await paintDuration();
-                  paintShots();
+                  applyScope();
                   paintTrack();
                 } catch (err) {
                   toast(err.message, 'err');
@@ -245,14 +175,14 @@ export default {
     }
 
     await paintDuration();
-    root.append(
-      h('div', { class: 'panel' },
-        h('h2', { class: 'panel-title' }, '时长'),
-        h('p', { class: 'panel-hint' },
-          '目标时长是「输入」：分镜数由它反推，拆分镜时会把预算交给模型，让它自己分配节奏 —— 紧张段用短镜，抒情段用长镜。'),
-        durationHost
-      )
+    // 时长只在"分镜"和"视频"两步露面 —— 别的步骤看它没用，还会让人以为要先改它
+    const durationPanel = h('div', { class: 'panel' },
+      h('h2', { class: 'panel-title' }, '时长'),
+      h('p', { class: 'panel-hint' },
+        '目标时长是「输入」：分镜数由它反推，拆分镜时会把预算交给模型，让它自己分配节奏 —— 紧张段用短镜，抒情段用长镜。'),
+      durationHost
     );
+    root.append(durationPanel);
 
     // ───────────── 章节（长篇才出现）─────────────
     const chapterInfo = await api(`/projects/${project.id}/chapters`).catch(() => null);
@@ -394,9 +324,37 @@ export default {
     // 点阶段是「查看」，不是「开跑」—— 每一步都真花钱，误点一下代价不小。
     // 要跑必须在下面的详情面板里明确按运行。
     const progressLog = h('div', { class: 'stream-log', style: 'display:none' });
+    const failHost = h('div', {});
     const track = h('div', { class: 'stage-track' });
+
+    /**
+     * 失败汇总。
+     *
+     * 报错里带的是服务端原话，所以这里原样摊开，不做二次加工 ——
+     * "出视频一直失败"这种问题，答案几乎总在那句原话里，
+     * 而它一旦被几十条轮询日志顶走，就只能靠猜了。
+     */
+    function paintFailures(list) {
+      clear(failHost);
+      if (!list.length) return;
+      failHost.append(
+        h('div', { class: 'fail-box' },
+          h('div', { class: 'fail-head' }, `${list.length} 项没成功`),
+          list.slice(0, 12).map((f) =>
+            h('div', { class: 'fail-row' },
+              h('span', { class: 'fail-who' }, f.who),
+              h('span', { class: 'fail-msg' }, f.message))),
+          list.length > 12 ? h('div', { class: 'fail-row' }, `…另外 ${list.length - 12} 项`) : null,
+          h('div', { class: 'inline', style: 'margin-top:10px' },
+            h('button', { class: 'btn ghost sm', onclick: () => go('logs') }, '看完整请求记录'),
+            h('button', { class: 'btn ghost sm', onclick: () => go('settings') }, '去体检一遍')),
+          h('div', { class: 'fail-tip' },
+            '排查顺序：① 上面那句服务端原话；② 「设置 → 上线前体检」把这条能力真跑一次最小调用；' +
+            '③ 模型 ID 是否是你账号里真实开通的那个。')
+        )
+      );
+    }
     const stageDetail = h('div', { class: 'stage-detail' });
-    let selectedStage = localStorage.getItem('fd.stage') || 'bible';
 
     /** 这一阶段做完了多少：给详情面板和阶段轨共用 */
     function stageProgress(id) {
@@ -440,6 +398,7 @@ export default {
                 localStorage.setItem('fd.stage', s.id);
                 paintTrack();
                 paintStageDetail();
+                applyScope();
               }
             },
             h('span', { class: 'stage-num' }, String(i + 1).padStart(2, '0')),
@@ -549,22 +508,40 @@ export default {
       clear(progressLog);
 
       const started = Date.now();
+      // 失败的镜头单独记一份：日志会被几十条轮询刷走，而"为什么失败"恰恰是
+      // 最该留在眼前的一条。视频那一步尤其如此，跑十几分钟最后只看到一行红字。
+      const failures = [];
+      clear(failHost);
       try {
         await stream(
           `/projects/${project.id}/stage/${stageId}`,
           { shotCount: Number(shotCount.value) || 8, ...extra },
           (ev) => {
             trackLive(ev);
+            if ((ev.type === 'shot' || ev.type === 'sheet') && ev.status === 'failed') {
+              const shot = (project.shots || []).find((s) => s.id === ev.shotId);
+              failures.push({
+                who: ev.name || (shot ? `第 ${shot.index} 镜` : ev.shotId),
+                message: ev.message || '未说明原因'
+              });
+            }
             const text = describe(ev);
             if (!text) return;
             progressLog.append(h('div', { class: `ev-${ev.type}` }, text));
             progressLog.scrollTop = progressLog.scrollHeight;
             if (ev.type === 'finished' && ev.project) project = ev.project;
-            if (ev.type === 'error') toast(ev.message, 'err');
+            // 整步就没跑起来（缺前置产出、缺密钥、服务不通）也是失败，一样要摊开
+            if (ev.type === 'error') failures.push({ who: '整步', message: ev.message });
           }
         );
-        toast(`完成，用时 ${fmtMs(Date.now() - started)}`, 'ok');
+        if (failures.length) {
+          paintFailures(failures);
+          toast(`${failures.length} 项失败，看下面的失败原因`, 'err');
+        } else {
+          toast(`完成，用时 ${fmtMs(Date.now() - started)}`, 'ok');
+        }
       } catch (err) {
+        paintFailures([{ who: '整步', message: err.message }]);
         toast(err.message, 'err');
       } finally {
         running = null;
@@ -573,7 +550,7 @@ export default {
         project = (await api(`/projects/${project.id}`).catch(() => project)) || project;
         paintTrack();
         paintStageDetail();
-        paintShots();
+        applyScope();
       }
     }
 
@@ -586,7 +563,8 @@ export default {
           '按顺序跑。点阶段是「查看」这一步的产出，要跑得在下面明确按运行 —— 每一步都真花钱，不该一点就走。'),
         track,
         stageDetail,
-        progressLog
+        progressLog,
+        failHost
       )
     );
 
@@ -647,7 +625,7 @@ export default {
           }
         );
         toast(`第 ${shot.index} 镜已重出`, 'ok');
-        paintShots();
+        applyScope();
       } catch (err) {
         toast(err.message, 'err');
       } finally {
@@ -663,6 +641,7 @@ export default {
         return;
       }
       const grid = h('div', { class: 'shot-grid' });
+      const sc = scope();
       for (const shot of project.shots.slice().sort((a, b) => a.index - b.index)) {
         const c = shot.consistency;
         const flagged = c?.needsReview;
@@ -677,8 +656,9 @@ export default {
           thumb = h('span', {}, shot.status === 'failed' ? '生成失败' : '待生成');
         }
 
-        const imgPicker = modelPicker('t2i', state.catalog.routing.image);
-        const vidPicker = modelPicker('i2v', state.catalog.routing.video);
+        // 用不上的那个下拉干脆不建，省得白拉一遍模型列表
+        const imgPicker = sc.image ? modelPicker('t2i', state.catalog.routing.image) : null;
+        const vidPicker = sc.video ? modelPicker('i2v', state.catalog.routing.video) : null;
         const imgBtn = h('button', { class: 'btn sm', onclick: () => regenerate(shot, 'image', imgPicker, imgBtn) },
           shot.imagePath ? '重出图' : '出图');
         const vidBtn = h('button', {
@@ -724,49 +704,55 @@ export default {
                 shot.videoPath ? h('span', { class: 'badge ok' }, '视频已出') : shot.imagePath ? h('span', { class: 'badge' }, '待出视频') : null
               ),
               shot.dialogue ? h('div', { class: 'shot-desc', style: 'color:var(--ink-faint)' }, `「${shot.dialogue}」`) : null,
-              // 单镜重出：批量出图总有零星失败或不满意的，为几张图重跑整个阶段既慢又要重烧
+              // 单镜重出：批量出图总有零星失败或不满意的，为几张图重跑整个阶段既慢又要重烧。
+              // 只摆当前这一步用得上的参数 —— 在出图那步看到"秒"和视频模型，
+              // 只会让人以为得先把它们配好。
               h('details', { class: 'shot-redo' },
-                h('summary', {}, '单独重出'),
+                h('summary', {}, sc.video ? '单独重出这一镜的视频' : sc.image ? '单独重出这一镜的图' : '单独重出'),
                 h('div', { class: 'shot-redo-body' },
-                  h('label', {}, '本镜时长（秒）'),
-                  (() => {
-                    const durInput = h('input', {
-                      type: 'number', min: 1, max: 30, step: 0.5, value: shot.duration,
-                      style: 'font-size:11px;padding:4px 6px',
-                      onchange: async () => {
-                        const next = project.shots.map((x) =>
-                          x.id === shot.id ? { ...x, duration: Number(durInput.value) || x.duration } : x);
-                        await api(`/projects/${project.id}`, { method: 'PATCH', body: { shots: next } });
-                        project = await api(`/projects/${project.id}`);
-                        await paintDuration();
-                        toast(`第 ${shot.index} 镜改为 ${durInput.value} 秒`, 'ok');
-                      }
-                    });
-                    return durInput;
-                  })(),
-                  h('label', { style: 'margin-top:10px' }, '出图用'),
-                  imgPicker.el,
-                  imgBtn,
-                  h('label', { style: 'margin-top:10px' }, '出视频用'),
-                  vidPicker.el,
-                  vidBtn,
+                  sc.duration
+                    ? [
+                        h('label', {}, '本镜时长（秒）'),
+                        (() => {
+                          const durInput = h('input', {
+                            type: 'number', min: 1, max: 30, step: 0.5, value: shot.duration,
+                            style: 'font-size:11px;padding:4px 6px',
+                            onchange: async () => {
+                              const next = project.shots.map((x) =>
+                                x.id === shot.id ? { ...x, duration: Number(durInput.value) || x.duration } : x);
+                              await api(`/projects/${project.id}`, { method: 'PATCH', body: { shots: next } });
+                              project = await api(`/projects/${project.id}`);
+                              await paintDuration();
+                              toast(`第 ${shot.index} 镜改为 ${durInput.value} 秒`, 'ok');
+                            }
+                          });
+                          return durInput;
+                        })()
+                      ]
+                    : null,
+                  sc.image ? h('label', { style: 'margin-top:10px' }, '出图用') : null,
+                  sc.image ? imgPicker.el : null,
+                  sc.image ? imgBtn : null,
+                  sc.video ? h('label', { style: 'margin-top:10px' }, '出视频用') : null,
+                  sc.video ? vidPicker.el : null,
+                  sc.video ? vidBtn : null,
                   // 单独重出同样吃设定集：把"带了哪几张参考图"摊开，
                   // 不然重出来还是不像的时候，根本不知道是提示词的问题还是压根没带参考图
                   h('div', { class: 'shot-used' },
                     '单独重出会自动带上本镜的设定集：场景基准图 + 出场角色设定图 + 点到的道具图'),
-                  shot.bibleRefs?.length
+                  sc.image && shot.bibleRefs?.length
                     ? h('div', { class: 'shot-used' }, `上次出图参考：${shot.bibleRefs.join('、')}`)
                     : null,
-                  shot.videoRefs?.length
+                  sc.video && shot.videoRefs?.length
                     ? h('div', { class: 'shot-used' }, `上次出视频参考：${shot.videoRefs.join('、')}`)
                     : null,
-                  shot.modelUsed ? h('div', { class: 'shot-used' }, `出图用了 ${shot.modelUsed}`) : null,
-                  shot.videoModelUsed
+                  sc.image && shot.modelUsed ? h('div', { class: 'shot-used' }, `出图用了 ${shot.modelUsed}`) : null,
+                  sc.video && shot.videoModelUsed
                     ? h('div', { class: 'shot-used' },
                         `出视频用了 ${shot.videoModelUsed}${shot.videoResolution ? ` · ${shot.videoResolution}` : ''}`)
                     : null,
                   // 把真正发给视频模型的提示词摊开 —— 片段和剧本对不上时，先看这里
-                  shot.videoPrompt
+                  sc.video && shot.videoPrompt
                     ? h('details', { class: 'shot-prompt' },
                         h('summary', {}, '看发给视频模型的提示词'),
                         h('div', { class: 'shot-prompt-body' }, shot.videoPrompt))
@@ -780,22 +766,54 @@ export default {
       shotHost.append(grid);
     }
 
-    paintShots();
-    const missing = (project.shots || []).filter((s) => !s.imagePath).length;
+    // 分镜面板的标题和说明也跟着阶段走：同一张网格，在出图那步和出视频那步
+    // 要看的东西不是一回事
+    const shotBadge = h('span', {});
+    const shotHint = h('p', { class: 'panel-hint' });
+    const stageName = h('span', { class: 'badge beam' });
+
+    const HINTS = {
+      script: '分镜是后面所有步骤的清单。每镜的时长在这里分配，加起来就是计划时长。',
+      assets:
+        '「一致性」是把成图和角色设定图交给多模态模型比对后的分数。低于阈值会自动换种子重试；不满意的展开「单独重出」，还能临时换一家模型 —— 有些镜头就是某家画不好，换一家比反复重试有效。',
+      video:
+        '以镜头图为首帧、配上从设定集装配的提示词生成片段。哪一镜在跑、轮询到第几次都会实时显示在缩略图上；失败的那几镜可以单独重出，还能临时换清晰度或换一家。',
+      voice: '按台词逐条合成配音。没有台词的镜头会跳过。',
+      compose: 'FFmpeg 按分镜顺序拼接，按时长策略裁剪。这一步不花钱，跑错了重跑就行。'
+    };
+
+    /** 阶段换了：把只属于某一步的参数收起来，分镜卡片也重画一遍 */
+    function applyScope() {
+      const sc = scope();
+      durationPanel.style.display = sc.duration ? '' : 'none';
+      const meta = stages.find((x) => x.id === selectedStage);
+      clear(stageName).append(`当前：${meta?.label || ''}`);
+      shotHint.textContent = HINTS[selectedStage] || '这一步的产出不在分镜网格里，切到对应的页面看。';
+      const miss = (project.shots || []).filter((s) => (selectedStage === 'video' ? !s.videoPath : !s.imagePath)).length;
+      clear(shotBadge);
+      if (miss) {
+        shotBadge.append(
+          h('span', { class: 'badge warn' }, selectedStage === 'video' ? `${miss} 镜缺视频` : `${miss} 镜缺图`)
+        );
+      }
+      paintShots();
+    }
+
     root.append(
       h('div', { class: 'panel' },
         h('h2', { class: 'panel-title' },
           '分镜',
-          missing ? h('span', { class: 'badge warn' }, `${missing} 镜缺图`) : null,
+          stageName,
+          shotBadge,
           project.outputs?.video
             ? h('a', { class: 'badge ok', href: mediaUrl(project.outputs.video), target: '_blank' }, '成片已就绪')
             : null
         ),
-        h('p', { class: 'panel-hint' },
-          '「一致性」是把成图和角色设定图交给多模态模型比对后的分数。低于阈值会自动换种子重试；不满意的可以展开「单独重出」，还能临时换一家模型 —— 有些镜头就是某家画不好，换一家比反复重试有效。'),
+        shotHint,
         shotHost
       )
     );
+    applyScope();
 
     return root;
   }

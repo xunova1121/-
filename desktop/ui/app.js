@@ -4,6 +4,7 @@
  */
 import { h, $, clear, api, toast } from './lib.js';
 
+import projectsView from './views/projects.js';
 import studio from './views/studio.js';
 import bible from './views/bible.js';
 import debug from './views/debug.js';
@@ -12,6 +13,7 @@ import logs from './views/logs.js';
 import settingsView from './views/settings.js';
 
 const VIEWS = [
+  { id: 'projects', label: '项目', view: projectsView },
   { id: 'studio', label: '创作台', view: studio },
   { id: 'bible', label: '设定集', view: bible },
   { id: 'debug', label: 'API 联调台', view: debug },

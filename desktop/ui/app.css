@@ -547,6 +547,57 @@ td.wrap { white-space: normal; max-width: 380px; }
   color: var(--ink-faint); margin-bottom: 6px;
 }
 
+/* ══════════════════════ 失败汇总 ══════════════════════ */
+
+/* 服务端原话原样摊开。轮询日志刷得飞快，而"为什么失败"必须留在眼前 */
+.fail-box {
+  border: 1px solid color-mix(in srgb, var(--alarm) 40%, var(--line));
+  background: color-mix(in srgb, var(--alarm) 7%, var(--surface));
+  border-radius: var(--r); padding: 12px 14px; margin-top: 12px;
+}
+.fail-head {
+  font-size: 11px; font-weight: 600; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--alarm); margin-bottom: 8px;
+}
+.fail-row {
+  display: flex; gap: 10px; align-items: baseline;
+  padding: 5px 0; border-top: 1px solid var(--line);
+  font-size: 12px; line-height: 1.5;
+}
+.fail-row:first-of-type { border-top: 0; }
+.fail-who { font-family: var(--code); font-size: 11px; color: var(--ink-dim); white-space: nowrap; }
+.fail-msg { color: var(--ink); word-break: break-word; }
+.fail-tip { font-size: 11px; color: var(--ink-faint); line-height: 1.6; margin-top: 8px; }
+
+/* ══════════════════════ 项目 ══════════════════════ */
+
+/* 创作台顶上的一行：只回答"我现在在做哪一部、什么画风"，其余交给项目页 */
+.project-bar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--surface); padding: 10px 14px;
+}
+.project-bar-main { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; flex: 1; min-width: 0; }
+.project-bar-main b { font-family: var(--display); font-size: 15px; color: var(--ink); }
+
+.project-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 14px;
+}
+.project-card {
+  border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--surface); overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.project-card.current { border-color: var(--beam); box-shadow: 0 0 0 2px var(--beam-wash); }
+.project-card .style-swatch { aspect-ratio: 16 / 5; }
+.project-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 7px; }
+.project-head { display: flex; align-items: center; gap: 8px; }
+.project-head b { font-family: var(--display); font-size: 14.5px; color: var(--ink); }
+.project-meta { display: flex; gap: 6px; flex-wrap: wrap; }
+.project-progress { font-family: var(--code); font-size: 11px; color: var(--ink-dim); }
+.project-time { font-size: 11px; color: var(--ink-faint); }
+.project-style-edit { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; }
+
 /* ══════════════════════ 画风选择 ══════════════════════ */
 
 /* 缩略图用配色 + 纹理现画，不外链图片：离线可用，也不拿别人的作品当示例 */

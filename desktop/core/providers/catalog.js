@@ -164,7 +164,15 @@ export const PROVIDERS = [
      */
     videoDefaults: {
       resolution: '720p',
-      resolutions: ['480p', '720p', '1080p']
+      resolutions: ['480p', '720p', '1080p'],
+      /**
+       * ⚠ Seedance 的图生视频只收**一张首帧图**（首尾帧模式最多两张，且要带 role）。
+       * 多塞几张参考图过去会直接被判非法参数，任务提交就失败 ——
+       * 这是"出视频一直失败"最常见的一个原因。
+       * 一致性在这条路上靠首帧图本身 + 提示词里的冻结设定描述兜住。
+       */
+      maxImages: 1,
+      refNote: '方舟 Seedance 只收 1 张首帧图，其余设定集参考图改由提示词里的冻结描述承担'
     },
     /**
      * 待探测的候选模型 ID。
@@ -333,7 +341,10 @@ export const PROVIDERS = [
     // 万相的档位写大写 P，和方舟正好相反，所以两边各自声明，不做统一
     videoDefaults: {
       resolution: '720P',
-      resolutions: ['480P', '720P', '1080P']
+      resolutions: ['480P', '720P', '1080P'],
+      // 万相的 img_url 是单数字段，本来也只收一张
+      maxImages: 1,
+      refNote: '通义万相只收 1 张首帧图'
     },
     taskPoll: {
       url: '{{baseUrl}}/api/v1/tasks/{taskId}',
@@ -539,7 +550,9 @@ export const PROVIDERS = [
     // 官方 H3 支持到 2K；Hailuo 系最高 1080P。取并集，选了模型不支持的档位服务端会直接报错说清楚。
     videoDefaults: {
       resolution: '1080P',
-      resolutions: ['512P', '768P', '1080P', '2K']
+      resolutions: ['512P', '768P', '1080P', '2K'],
+      // H3 收最多 9 张；Hailuo 系走 first_frame_image + subject_reference，适配器里另有处理
+      maxImages: 9
     },
     models: [
       // H3 是全模态：一次能收最多 9 张图 + 3 段视频 + 3 段音频，出 2K、原生立体声、最长 15 秒。
@@ -670,7 +683,8 @@ export const PROVIDERS = [
       resolution: '768P',
       ratio: true,
       // 服务端原话：仅支持 480p、512p、768P 或 2K。注意大小写不统一，按它给的原样发。
-      resolutions: ['480p', '512p', '768P', '2K']
+      resolutions: ['480p', '512p', '768P', '2K'],
+      maxImages: 9
     },
     models: [
       {
@@ -757,6 +771,8 @@ export const PROVIDERS = [
     ],
     capabilities: ['t2v', 'i2v', 'r2v'],
     endpoints: { i2v: '{{baseUrl}}/v1/videos/image2video' },
+    // image2video 的 image 是单数字段
+    videoDefaults: { maxImages: 1, refNote: '可灵图生视频只收 1 张首帧图' },
     taskPoll: {
       url: '{{baseUrl}}/v1/videos/image2video/{taskId}',
       method: 'GET',
@@ -805,6 +821,8 @@ export const PROVIDERS = [
     secrets: [{ name: 'VIDU_API_KEY', label: 'API Key', required: true }],
     capabilities: ['i2v', 'r2v'],
     endpoints: { i2v: '{{baseUrl}}/img2video', r2v: '{{baseUrl}}/reference2video' },
+    // reference2video 收多张参考图 —— 这是跨镜头一致性最好的一条路
+    videoDefaults: { maxImages: 3 },
     taskPoll: {
       url: '{{baseUrl}}/tasks/{taskId}/creations',
       method: 'GET',

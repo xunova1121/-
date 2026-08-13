@@ -113,14 +113,73 @@ export function list() {
       title: p.title,
       updatedAt: p.updatedAt,
       shots: p.shots?.length || 0,
+      // 项目页要显示画风和时长，不然一列同名项目根本分不出谁是谁
+      styleId: p.styleId || 'ink',
+      style: p.style || '',
+      targetDuration: p.targetDuration || 0,
+      chapters: p.chapters?.length || 0,
+      hasBible: Boolean(p.bible),
+      videos: p.shots?.filter((s) => s.videoPath).length || 0,
+      images: p.shots?.filter((s) => s.imagePath).length || 0,
+      output: Boolean(p.outputs?.video),
       stageStatus: p.stageStatus
     }))
     .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
 }
 
+/**
+ * 删项目。
+ *
+ * Windows 上删文件夹远没有 Linux 上那么听话：只要还有人开着里面的文件
+ * （界面上正在播的那段 mp4、正在显示的那张图，都算），就会抛 EBUSY / EPERM。
+ * 早期版本直接 rmSync 一把梭，遇到占用就整条请求 500，
+ * 界面上什么都不变 —— 于是看起来"删不掉，非得重启"。
+ *
+ * 两处改动：
+ *   ① 带重试：Node 的 maxRetries/retryDelay 专门对付这种短暂占用，
+ *      浏览器一松手（界面在发请求前会先清掉 src）通常第二次就过了；
+ *   ② 先删 project.json：万一 assets 里某个文件死活删不掉，
+ *      项目也已经从列表里消失了，不会留一个点开就报错的僵尸条目。
+ *      剩下的目录下次启动时顺手清掉。
+ */
 export function remove(id) {
-  fs.rmSync(dirOf(id), { recursive: true, force: true });
+  const dir = dirOf(id);
+  if (!fs.existsSync(dir)) return true;
+
+  try {
+    fs.rmSync(fileOf(id), { force: true, maxRetries: 5, retryDelay: 120 });
+  } catch {
+    /* project.json 都删不掉的话，下面整目录删一次还有机会 */
+  }
+
+  try {
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
+  } catch (err) {
+    // 目录还在但 project.json 已经没了 —— 列表里看不到它，功能上已经算删掉了。
+    // 如实说一声，别假装什么都没发生，也别让整个请求失败。
+    return { ok: true, leftover: dir, reason: err.message };
+  }
   return true;
+}
+
+/**
+ * 清理残骸：没有 project.json 的项目目录。
+ * 上一次删除被文件占用打断时会留下这种目录，启动时顺手扫一遍就干净了。
+ */
+export function sweepOrphans() {
+  ensureDirs();
+  let swept = 0;
+  for (const d of fs.readdirSync(PROJECTS_DIR, { withFileTypes: true })) {
+    if (!d.isDirectory()) continue;
+    if (fs.existsSync(path.join(PROJECTS_DIR, d.name, 'project.json'))) continue;
+    try {
+      fs.rmSync(path.join(PROJECTS_DIR, d.name), { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      swept += 1;
+    } catch {
+      /* 还占着就下次再说，不值得为它拦住启动 */
+    }
+  }
+  return swept;
 }
 
 export function assetDir(id) {
