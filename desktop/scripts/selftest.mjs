@@ -10,6 +10,14 @@ import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// file:// URL → 本地路径必须走 fileURLToPath。
+// 用 new URL(import.meta.url).pathname 在 Windows 上会得到 `/D:/a/...`
+// （盘符前多一道斜杠），再 path.resolve 一下就变成 `D:\D:\a\...` 然后 ENOENT。
+// 这和本文件第 9 节要防的是同一族的坑 —— 写这段检查时自己先踩了一次。
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = path.resolve(HERE, '..');
 
 // 自检用独立数据目录，绝不碰用户真实的 %APPDATA%\FutureDream
 const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'futuredream-selftest-'));
@@ -422,7 +430,7 @@ const sourceFiles = [];
     if (entry.isDirectory()) walk(full);
     else if (/\.(mjs|js|cjs)$/.test(entry.name)) sourceFiles.push(full);
   }
-})(path.resolve(path.dirname(new URL(import.meta.url).pathname), '..'));
+})(PROJECT_ROOT);
 
 // 先剥注释再匹配：这个文件和 main.js 的注释里都写着那个反面例子，
 // 不剥的话检查器会指着自己的说明文字报警。
@@ -442,9 +450,21 @@ const offenders = sourceFiles
 check(
   '没有"动态 import 拼绝对路径"的写法（Windows 上会崩）',
   offenders.length === 0,
-  offenders.map((f) => path.relative(process.cwd(), f)).join('、')
+  offenders.map((f) => path.relative(PROJECT_ROOT, f)).join('、')
 );
 check('扫到了源文件（检查本身没空转）', sourceFiles.length > 15, `只扫到 ${sourceFiles.length} 个`);
+
+// 同一族的另一个坑：new URL(...).pathname 在 Windows 上带盘符前缀斜杠。
+// 这段检查本身第一版就栽在这里，所以顺手也纳入守卫。
+const PATHNAME_TRAP = /new\s+URL\s*\([^)]*\)\s*\.pathname/;
+const pathnameOffenders = sourceFiles
+  .filter((f) => !f.endsWith('selftest.mjs'))
+  .filter((f) => PATHNAME_TRAP.test(stripComments(fs.readFileSync(f, 'utf8'))));
+check(
+  '没有用 new URL(...).pathname 当本地路径（Windows 上会多出盘符斜杠）',
+  pathnameOffenders.length === 0,
+  pathnameOffenders.map((f) => path.relative(PROJECT_ROOT, f)).join('、')
+);
 
 // ─────────────────────── 10. 本地服务的防护 ───────────────────────
 
