@@ -7,7 +7,57 @@
  */
 import { h, clear, add, api, stream, toast, mediaUrl, fmtMs } from '../lib.js';
 
-let running = null;
+/**
+ * 正在跑的流水线任务。
+ *
+ * 刻意放在模块级、而不是某一次 render 的闭包里 —— 一步动辄跑十几分钟，
+ * 中途切去别的页面看一眼是再正常不过的事。
+ *
+ * 早期版本把运行状态、进度、DOM 全绑在渲染闭包里，于是切走再回来会出现三件怪事：
+ *   ① 界面停在"运行中"，因为新的这次渲染读到的 running 还是旧值，而通知它的人已经没了；
+ *   ② 进度和"正在生成哪一镜"全喂给了一堆早就从文档里摘下来的元素；
+ *   ③ 跑完了没人告诉新渲染去重新拉一次项目 —— 图和视频"要退出去再进来才看得到"。
+ *
+ * 现在状态归状态、视图归视图：任务往这里写，当前挂着的那次渲染注册一个回调来听。
+ */
+const job = {
+  projectId: null,
+  /** 正在跑的阶段 id；null = 没有整步任务在跑 */
+  stage: null,
+  /** 正在单独重出的镜头 */
+  shots: new Set(),
+  /** shotId → { status, message, attempt } */
+  live: new Map(),
+  /** 进度文本。切回来要能接着看，所以留在这儿而不是只写进 DOM */
+  log: [],
+  failures: [],
+  startedAt: 0,
+  /** 只保留最新一次渲染的回调 —— 旧的那次已经不在文档里了，没必要留着 */
+  onUpdate: null
+};
+
+function jobBusy() {
+  return Boolean(job.stage) || job.shots.size > 0;
+}
+
+function jobNotify(kind) {
+  try {
+    job.onUpdate?.(kind);
+  } catch {
+    /* 视图已经被换掉了，通知失败无所谓 */
+  }
+}
+
+/** 换项目时把上一份任务状态丢掉，别让 A 项目的进度显示在 B 项目上 */
+function jobReset(projectId) {
+  if (job.projectId === projectId) return;
+  job.projectId = projectId;
+  job.stage = null;
+  job.shots.clear();
+  job.live.clear();
+  job.log = [];
+  job.failures = [];
+}
 
 export default {
   async render({ state, go }) {
@@ -110,6 +160,8 @@ export default {
       const info = await api(`/projects/${project.id}/duration`).catch(() => null);
       if (!info) return;
       const { summary, policy, presets, suggestedShots } = info;
+      // 厂商接受的时长档位，从 /api/catalog 拿（跟着当前路由到的视频模型走）
+      const steps = state.catalog.videoDurations || [];
       clear(durationHost);
 
       const targetInput = h('input', { type: 'number', min: 5, max: 3600, value: summary.target || 60 });
@@ -167,9 +219,21 @@ export default {
               }
             }, project.shots?.length ? '按目标重排时长' : '保存目标'))
         ),
+        // 档位这件事必须**提前**说。等跑完才在日志里解释一句"已对齐到 5 秒"，
+        // 用户看到的就是"我设了 4 秒，它不听话"。
+        steps.length
+          ? h('div', { class: 'note-line' },
+              `当前视频模型（${state.catalog.routing.video.model}）只接受 ${steps.join(' / ')} 秒这几档。` +
+                `每镜时长会**向上取整**到最近的档位 —— 设 4 秒就按 ${steps.find((x) => x >= 4) || steps.at(-1)} 秒出，` +
+                `宁可多出来一点合成时裁掉，也不要少了把动作或台词切断。` +
+                (policy === 'trim'
+                  ? '合成时按每镜的计划时长裁剪，所以**成片总长仍然是你设的目标**，多出来的那部分被切掉了。'
+                  : '当前策略是保留完整片段，所以成片会比计划长。想卡准目标就去「设置 → 时长策略」改成裁剪。')
+            )
+          : null,
         h('div', { class: 'field-hint' },
           project.shots?.length
-            ? `每镜时长可以在分镜卡片里单独改。厂商只接受固定档位（5/10 秒之类），所以"模型实出"通常比"计划"长 —— 合成时按策略裁剪。`
+            ? `每镜时长可以在分镜卡片里单独改。"模型实出"是厂商按档位实际给的长度，通常比"计划"长。`
             : `还没拆分镜。按这个目标，建议拆 ${suggestedShots} 个镜头左右，拆分镜时会把时长预算一并交给模型。`)
       );
     }
@@ -229,17 +293,17 @@ export default {
               h('div', { class: 'inline' },
                 h('button', {
                   class: 'btn sm',
-                  disabled: Boolean(running),
+                  disabled: jobBusy(),
                   onclick: () => runStage('script', { chapterId: ch.id })
                 }, shots.length ? '重拆分镜' : '拆分镜'),
                 h('button', {
                   class: 'btn sm',
-                  disabled: Boolean(running) || !shots.length,
+                  disabled: jobBusy() || !shots.length,
                   onclick: () => runStage('assets', { chapterId: ch.id })
                 }, '出图'),
                 h('button', {
                   class: 'btn sm',
-                  disabled: Boolean(running) || !withImg,
+                  disabled: jobBusy() || !withImg,
                   onclick: () => runStage('video', { chapterId: ch.id })
                 }, '出视频')
               )
@@ -279,7 +343,8 @@ export default {
     // ───────────── 实时进度 ─────────────
     // 出视频一镜要几分钟，中间全靠轮询。不把"现在轮到谁、轮询到第几次"显示出来，
     // 用户看到的就是一个卡住不动的界面，只能猜是不是死了。
-    const live = new Map(); // shotId → { status, message }
+    jobReset(project.id);
+    const live = job.live; // 状态在模块级，切页面不丢
     const liveBadge = h('span', {});
     const liveEls = new Map(); // shotId → 卡片上那块状态区
 
@@ -312,7 +377,7 @@ export default {
       const busy = [...live.values()].filter((v) => v.status === 'running').length;
       const finished = [...live.values()].filter((v) => v.status === 'done').length;
       clear(liveBadge);
-      if (running) {
+      if (jobBusy()) {
         liveBadge.append(
           h('span', { class: 'badge beam' }, h('span', { class: 'spin' }, '◐'),
             busy ? `正在生成 · 已完成 ${finished}` : `运行中 · 已完成 ${finished}`)
@@ -391,7 +456,7 @@ export default {
           h(
             'button',
             {
-              class: `stage-chip ${status} ${running === s.id ? 'running' : ''} ${selectedStage === s.id ? 'selected' : ''}`,
+              class: `stage-chip ${status} ${job.stage === s.id ? 'running' : ''} ${selectedStage === s.id ? 'selected' : ''}`,
               title: s.hint,
               onclick: () => {
                 selectedStage = s.id;
@@ -406,7 +471,7 @@ export default {
             total ? h('span', { class: 'stage-count' }, `${done}/${total}`) : null,
             status === 'done' ? h('span', { class: 'dot ok' }) : null,
             status === 'partial' ? h('span', { class: 'dot warn' }) : null,
-            running === s.id ? h('span', { class: 'spin' }, '◐') : null
+            job.stage === s.id ? h('span', { class: 'spin' }, '◐') : null
           )
         );
       });
@@ -416,7 +481,7 @@ export default {
           {
             class: 'stage-chip',
             style: 'margin-left:auto;border-color:var(--beam)',
-            disabled: Boolean(running),
+            disabled: jobBusy(),
             title: '从设定集一路跑到合成，中间任一步失败就停下，已完成的都在盘上',
             onclick: () => {
               if (!confirm('一键跑完会依次跑完六步，视频那步按镜数计费，可能是这条流水线最大的一笔开销。确定？')) return;
@@ -448,7 +513,7 @@ export default {
           .filter((x) => !x.sheetPath);
       }
 
-      const runnable = !running;
+      const runnable = !jobBusy();
       const isCostly = selectedStage === 'video';
 
       add(stageDetail,
@@ -498,60 +563,119 @@ export default {
       );
     }
 
+    /**
+     * 跑一个阶段。
+     *
+     * 注意这里**不碰任何 DOM**，只往模块级的 job 里写、然后喊一声。
+     * 谁在听、听完画到哪儿，是视图自己的事 —— 中途切走再回来，
+     * 换的只是听众，任务本身不受影响。
+     */
     async function runStage(stageId, extra = {}) {
-      if (running) return;
-      running = stageId;
-      live.clear();
-      paintTrack();
-      paintStageDetail();
-      progressLog.style.display = '';
-      clear(progressLog);
+      if (jobBusy()) return;
+      job.projectId = project.id;
+      job.stage = stageId;
+      job.live.clear();
+      job.log = [];
+      job.failures = [];
+      job.startedAt = Date.now();
+      jobNotify('start');
 
-      const started = Date.now();
-      // 失败的镜头单独记一份：日志会被几十条轮询刷走，而"为什么失败"恰恰是
-      // 最该留在眼前的一条。视频那一步尤其如此，跑十几分钟最后只看到一行红字。
-      const failures = [];
-      clear(failHost);
       try {
         await stream(
           `/projects/${project.id}/stage/${stageId}`,
           { shotCount: Number(shotCount.value) || 8, ...extra },
           (ev) => {
             trackLive(ev);
+            // 失败的镜头单独记一份：日志会被几十条轮询刷走，而"为什么失败"恰恰是
+            // 最该留在眼前的一条。视频那一步尤其如此，跑十几分钟最后只看到一行红字。
             if ((ev.type === 'shot' || ev.type === 'sheet') && ev.status === 'failed') {
               const shot = (project.shots || []).find((s) => s.id === ev.shotId);
-              failures.push({
+              job.failures.push({
                 who: ev.name || (shot ? `第 ${shot.index} 镜` : ev.shotId),
                 message: ev.message || '未说明原因'
               });
             }
-            const text = describe(ev);
-            if (!text) return;
-            progressLog.append(h('div', { class: `ev-${ev.type}` }, text));
-            progressLog.scrollTop = progressLog.scrollHeight;
-            if (ev.type === 'finished' && ev.project) project = ev.project;
             // 整步就没跑起来（缺前置产出、缺密钥、服务不通）也是失败，一样要摊开
-            if (ev.type === 'error') failures.push({ who: '整步', message: ev.message });
+            if (ev.type === 'error') job.failures.push({ who: '整步', message: ev.message });
+
+            const text = describe(ev);
+            if (text) {
+              job.log.push({ type: ev.type, text });
+              // 日志留个上限，跑几百镜不至于把内存堆爆
+              if (job.log.length > 400) job.log.splice(0, job.log.length - 400);
+            }
+            jobNotify('tick');
           }
         );
-        if (failures.length) {
-          paintFailures(failures);
-          toast(`${failures.length} 项失败，看下面的失败原因`, 'err');
-        } else {
-          toast(`完成，用时 ${fmtMs(Date.now() - started)}`, 'ok');
-        }
       } catch (err) {
-        paintFailures([{ who: '整步', message: err.message }]);
-        toast(err.message, 'err');
+        job.failures.push({ who: '整步', message: err.message });
       } finally {
-        running = null;
-        live.clear();
-        clear(liveBadge);
-        project = (await api(`/projects/${project.id}`).catch(() => project)) || project;
+        const spent = Date.now() - job.startedAt;
+        const failed = job.failures.length;
+        job.stage = null;
+        job.live.clear();
+        jobNotify('done');
+        toast(
+          failed ? `${failed} 项失败，看流水线下面的失败原因` : `完成，用时 ${fmtMs(spent)}`,
+          failed ? 'err' : 'ok'
+        );
+      }
+    }
+
+    /**
+     * 任务有动静时重画。这是视图和任务之间**唯一**的接口。
+     *
+     * done 的时候必须重新拉一次项目：新出的图和视频在服务端已经落盘了，
+     * 手里这份 project 还是旧的 —— "要退出去再进来才看得到"就是这么来的。
+     */
+    async function onJobUpdate(kind) {
+      if (kind === 'start') {
+        clear(progressLog);
+        painted = 0;
+        clear(failHost);
+        progressLog.style.display = '';
         paintTrack();
         paintStageDetail();
-        applyScope();
+        return;
       }
+      if (kind === 'tick') {
+        paintLog();
+        return;
+      }
+      // done
+      paintLog();
+      clear(liveBadge);
+      paintFailures(job.failures);
+      project = (await api(`/projects/${project.id}`).catch(() => project)) || project;
+      await paintDuration();
+      paintTrack();
+      paintStageDetail();
+      applyScope();
+    }
+
+    // 已经画到 job.log 的第几条。轮询事件来得密，每次全量重画会让滚动明显发卡
+    let painted = 0;
+
+    /** 把 job.log 画到面板上。平时只补新增的几条；切回来时整份重画一次 */
+    function paintLog({ full = false } = {}) {
+      if (!job.log.length) {
+        progressLog.style.display = 'none';
+        painted = 0;
+        return;
+      }
+      progressLog.style.display = '';
+      // 只保留最后 120 条：再多也没人看，DOM 还会拖慢滚动
+      if (full || painted > job.log.length) {
+        clear(progressLog);
+        painted = Math.max(0, job.log.length - 120);
+      }
+      for (const line of job.log.slice(painted)) {
+        progressLog.append(h('div', { class: `ev-${line.type}` }, line.text));
+      }
+      painted = job.log.length;
+      while (progressLog.childElementCount > 120) progressLog.removeChild(progressLog.firstChild);
+      progressLog.scrollTop = progressLog.scrollHeight;
+      for (const shotId of job.live.keys()) paintLive(shotId);
     }
 
     paintTrack();
@@ -611,26 +735,42 @@ export default {
     }
 
     async function regenerate(shot, kind, picker, btn) {
+      if (job.shots.has(shot.id)) return;
+      job.projectId = project.id;
+      job.shots.add(shot.id);
+      job.live.set(shot.id, { status: 'running', message: '提交中…' });
       btn.disabled = true;
       const label = btn.textContent;
       btn.textContent = '生成中…';
+      const failures = [];
       try {
         await stream(
           `/projects/${project.id}/shots/${shot.id}/regenerate`,
           { kind, ...picker.values() },
           (ev) => {
-            if (ev.type === 'finished' && ev.project) project = ev.project;
-            if (ev.type === 'error') toast(ev.message, 'err');
-            if (ev.type === 'note' || ev.type === 'poll') btn.textContent = '生成中…';
+            // 单镜重出的事件不带 shotId（后端只往流里写这一镜的），补上再走同一套
+            trackLive({ ...ev, shotId: ev.shotId || shot.id });
+            if (ev.type === 'error') failures.push({ who: `第 ${shot.index} 镜`, message: ev.message });
+            const text = describe({ ...ev, shotId: shot.id });
+            if (text) job.log.push({ type: ev.type, text });
+            jobNotify('tick');
           }
         );
-        toast(`第 ${shot.index} 镜已重出`, 'ok');
-        applyScope();
       } catch (err) {
-        toast(err.message, 'err');
+        failures.push({ who: `第 ${shot.index} 镜`, message: err.message });
       } finally {
+        job.shots.delete(shot.id);
+        job.live.delete(shot.id);
         btn.disabled = false;
         btn.textContent = label;
+        if (failures.length) {
+          job.failures = failures;
+          toast(failures[0].message, 'err');
+        } else {
+          toast(`第 ${shot.index} 镜已重出`, 'ok');
+        }
+        // 重出完必须重新拉项目：新文件在服务端，手里这份还是旧的
+        jobNotify('done');
       }
     }
 
@@ -648,10 +788,13 @@ export default {
         const failed = shot.status === 'failed' || !shot.imagePath;
 
         let thumb;
+        // 重出的文件路径不变，光靠 URL 相同浏览器就会拿缓存 —— 带上项目的更新时间戳，
+        // 内容一变链接就变。（服务端也回了 no-store，两头都堵上）
+        const v = Date.parse(project.updatedAt || '') || 0;
         if (shot.videoPath) {
-          thumb = h('video', { src: mediaUrl(shot.videoPath), controls: true, preload: 'metadata' });
+          thumb = h('video', { src: `${mediaUrl(shot.videoPath)}&v=${v}`, controls: true, preload: 'metadata' });
         } else if (shot.imagePath) {
-          thumb = h('img', { src: `${mediaUrl(shot.imagePath)}&v=${shot.seed || 0}`, alt: `第 ${shot.index} 镜`, loading: 'lazy' });
+          thumb = h('img', { src: `${mediaUrl(shot.imagePath)}&v=${v}`, alt: `第 ${shot.index} 镜`, loading: 'lazy' });
         } else {
           thumb = h('span', {}, shot.status === 'failed' ? '生成失败' : '待生成');
         }
@@ -666,6 +809,10 @@ export default {
           disabled: !shot.imagePath,
           onclick: () => regenerate(shot, 'video', vidPicker, vidBtn)
         }, shot.videoPath ? '重出视频' : '出视频');
+
+        // 厂商的时长档位：设 4 秒而模型只出 5/10 秒时，得在这儿就说清楚
+        const steps = state.catalog.videoDurations || [];
+        const aligned = steps.find((x) => x >= shot.duration) || steps.at(-1);
 
         const liveEl = h('div', { class: 'shot-live', style: 'display:none' });
         liveEls.set(shot.id, liveEl);
@@ -727,7 +874,12 @@ export default {
                             }
                           });
                           return durInput;
-                        })()
+                        })(),
+                        // 档位对不上时当场说明，别让用户跑完才发现"我设的不是这个数"
+                        steps.length && aligned && aligned !== shot.duration
+                          ? h('div', { class: 'shot-used' },
+                              `模型只出 ${steps.join('/')} 秒，这一镜会按 ${aligned} 秒生成，合成时再裁回 ${shot.duration} 秒`)
+                          : null
                       ]
                     : null,
                   sc.image ? h('label', { style: 'margin-top:10px' }, '出图用') : null,
@@ -814,6 +966,20 @@ export default {
       )
     );
     applyScope();
+
+    // 从现在起，任务的动静由这次渲染来听。
+    // 上一次渲染的回调在这里被顶掉 —— 它的 DOM 早就不在文档里了，留着只是浪费。
+    job.onUpdate = onJobUpdate;
+
+    // 切走的时候任务可能还在跑：把攒下的进度、正在生成哪一镜、失败原因，
+    // 原样接上。这一步才是"回来还看得到状态"的关键。
+    if (job.projectId === project.id) {
+      paintLog({ full: true });
+      if (job.failures.length) paintFailures(job.failures);
+      if (jobBusy()) {
+        toast(job.stage ? '这一步还在后台跑，进度已接上' : '还有镜头在重出，进度已接上', 'ok');
+      }
+    }
 
     return root;
   }

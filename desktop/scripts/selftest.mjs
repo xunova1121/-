@@ -176,11 +176,13 @@ const upstream = http.createServer((req, res) => {
   }
   if (url.pathname === '/ms/video_generation/ms-9') {
     upstream.msQueryHits = (upstream.msQueryHits || 0) + 1;
+    const done = upstream.msQueryHits >= 2;
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({
       task_id: 'ms-9',
-      status: upstream.msQueryHits >= 2 ? 'Success' : 'Processing',
-      video_url: upstream.msQueryHits >= 2 ? `${upstreamUrl}/out.mp4` : undefined
+      // msState 用来模拟中转平台自创的终态词
+      status: done ? upstream.msState || 'Success' : 'Processing',
+      video_url: done ? `${upstreamUrl}/out.mp4` : undefined
     }));
   }
 
@@ -1049,6 +1051,17 @@ check('试出来的上限被记住，第二镜直接按 1 张发',
   JSON.stringify(upstream.msImageCounts));
 upstream.msMediaLimit = 99;
 
+// 中转平台自创状态词是常事。漏判一个，任务明明成了却一直轮询到超时 ——
+// 用户看到的就是"视频生成了，但流水线上不显示"。
+upstream.msQueryHits = 0;
+upstream.msState = 'completed';
+const oddState = await adapters.generateVideo({
+  providerId: 'metaso', model: 'MiniMax-H3', prompt: 'x', duration: 5,
+  firstFrameUrl: 'https://x.invalid/f.png'
+});
+check('completed 也算终态（不是只认 success）', Boolean(oddState.url), oddState.url);
+upstream.msState = null;
+
 // 全都试不通时要给可执行的下一步，而不是一句"失败了"
 settings.patch({ baseUrls: { metaso: `${upstreamUrl}/msbad` } });
 let msErr = null;
@@ -1219,6 +1232,28 @@ check(
 );
 
 // ─────────────────────── 11. 本地服务的防护 ───────────────────────
+
+section('界面能不能拿到该拿的东西');
+{
+  const cat = await (await fetch(`${appUrl}/api/catalog`)).json();
+  // 厂商只接受固定档位。界面要能**提前**说"你设 4 秒会按 5 秒出"，
+  // 而不是等跑完在日志里补一句 —— 那时候用户已经觉得"它不听我的"了。
+  check('目录里带上了当前视频模型的合法时长档位',
+    Array.isArray(cat.videoDurations) && cat.videoDurations.length > 0, JSON.stringify(cat.videoDurations));
+
+  // 重出的图和视频文件名不变。响应带缓存的话，界面上还是旧的那张 ——
+  // "明明重出了却没变"就是这么来的
+  const anyImage = store.list()[0];
+  if (anyImage) {
+    const proj = store.read(anyImage.id);
+    const shot = (proj.shots || []).find((x) => x.imagePath);
+    if (shot) {
+      const media = await fetch(`${appUrl}/media?p=${encodeURIComponent(shot.imagePath)}`);
+      check('媒体响应明确禁止缓存', media.headers.get('cache-control') === 'no-store',
+        media.headers.get('cache-control'));
+    }
+  }
+}
 
 section('本地服务防护');
 const traversal = await fetch(`${appUrl}/media?p=${encodeURIComponent('/etc/passwd')}`);

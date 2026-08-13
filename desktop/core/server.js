@@ -162,12 +162,20 @@ function serveMedia(req, res, url) {
       'Content-Type': type,
       'Content-Range': `bytes ${start}-${end}/${stat.size}`,
       'Accept-Ranges': 'bytes',
-      'Content-Length': end - start + 1
+      'Content-Length': end - start + 1,
+      // 重出的图/视频文件名不变，浏览器一缓存就会拿旧的糊弄你 ——
+      // "明明重出了却还是原来那张"多半就是这么来的
+      'Cache-Control': 'no-store'
     });
     fs.createReadStream(full, { start, end }).pipe(res);
     return;
   }
-  res.writeHead(200, { 'Content-Type': type, 'Content-Length': stat.size, 'Accept-Ranges': 'bytes' });
+  res.writeHead(200, {
+    'Content-Type': type,
+    'Content-Length': stat.size,
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'no-store'
+  });
   fs.createReadStream(full).pipe(res);
 }
 
@@ -203,6 +211,9 @@ async function handleApi(req, res, url) {
         hint: store.STAGE_HINTS[id] || ''
       })),
       durationPresets: duration.DURATION_PRESETS,
+      // 厂商只接受固定档位（5/10 秒之类）。提前告诉界面，
+      // 免得用户设了 4 秒、出来 5 秒，事后才在日志里看到一句解释
+      videoDurations: adapters.routedVideoDurations(),
       ffmpeg: ffmpeg.locate()
     });
   }

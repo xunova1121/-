@@ -329,7 +329,14 @@ export const PROVIDERS = [
     family: 'dashscope',
     auth: { type: 'bearer', secret: 'DASHSCOPE_API_KEY' },
     secrets: [
-      { name: 'DASHSCOPE_API_KEY', label: 'API Key', required: true, hint: '百炼控制台 → API-KEY，sk- 开头' }
+      {
+        name: 'DASHSCOPE_API_KEY',
+        label: 'API Key',
+        required: true,
+        hint:
+          '百炼控制台 → API-KEY，sk- 开头。⚠ 密钥分区域：新加坡站签发的密钥在北京站一律 401，' +
+          '那种情况下把上面的接口根地址改成 https://dashscope-intl.aliyuncs.com 再自检。'
+      }
     ],
     capabilities: ['chat', 'vision', 't2i', 'i2i', 't2v', 'i2v', 'r2v', 'tts'],
     endpoints: {
@@ -378,11 +385,17 @@ export const PROVIDERS = [
       { id: 'cosyvoice-v1', capability: 'tts', label: 'CosyVoice v1' },
       { id: 'sambert-zhichu-v1', capability: 'tts', label: 'Sambert 知厨（旁白感）' }
     ],
+    /**
+     * 自检走"列模型"而不是"发一次对话"。
+     *
+     * 发对话就得指定一个模型，而百炼的模型是按需开通的 ——
+     * 示例里写死的那个你账号里没开，自检就红，可你的密钥完全没问题。
+     * 列模型只验鉴权，不挑模型，这类误报直接消失。
+     */
     probe: {
-      label: '连通性自检（一次最小对话）',
-      method: 'POST',
-      url: '{{baseUrl}}/compatible-mode/v1/chat/completions',
-      body: { model: 'qwen-turbo', messages: [{ role: 'user', content: 'ping' }], max_tokens: 4 }
+      label: '连通性自检（列出你账号里可用的模型）',
+      method: 'GET',
+      url: '{{baseUrl}}/compatible-mode/v1/models'
     },
     templates: [
       {

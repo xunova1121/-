@@ -160,6 +160,14 @@ export async function chat({
   return { text, raw: res.json, usage: res.json?.usage || null };
 }
 
+/** 当前路由到的视频模型接受哪些时长档位。界面用它提前提示，不用等跑完才知道。 */
+export function routedVideoDurations() {
+  const r = resolvedRouting();
+  const provider = getProvider(r.video?.provider);
+  if (!provider) return [];
+  return allowedDurations(provider, r.video.model);
+}
+
 // ──────────────────────────────── 出图 ────────────────────────────────
 
 /**
@@ -666,10 +674,23 @@ async function generateVideoMiniMax({
         null
       );
       const json = checkBiz(res, '轮询');
-      const state = String(json.status || json.data?.status || '').toLowerCase();
+      const state = String(json.status || json.data?.status || json.task_status || '').toLowerCase();
       onEvent?.({ type: 'poll', attempt, state });
-      if (['success', 'succeeded', 'finished'].includes(state)) return { done: true, value: json };
-      if (['fail', 'failed'].includes(state)) throw new Error(`${label}：任务失败（${state}）`);
+      // 各家的终态词不统一：Success / succeeded / finished / done / completed 都见过。
+      // 漏判一个，任务明明成了却一直轮询到超时 —— 用户看到的就是"生成了但不显示"。
+      if (['success', 'succeeded', 'finished', 'done', 'completed', 'ok'].includes(state)) {
+        return { done: true, value: json };
+      }
+      if (['fail', 'failed', 'error', 'canceled', 'cancelled'].includes(state)) {
+        throw new Error(
+          `${label}：任务失败（${state}）${json.status_msg || json.message ? ` — ${json.status_msg || json.message}` : ''}`
+        );
+      }
+      // 状态词不认识、但地址已经给出来了，就当成了 —— 中转平台经常自创状态词
+      if (!state && firstMediaUrl(json, { extensions: ['.mp4', '.mov'] })) {
+        onEvent?.({ type: 'note', message: '响应里没有状态字段，但已经能取到视频地址，按完成处理' });
+        return { done: true, value: json };
+      }
       return { done: false, value: json };
     },
     { intervalMs: settings.get('pollIntervalMs'), timeoutMs }
@@ -679,7 +700,16 @@ async function generateVideoMiniMax({
   let url = firstMediaUrl(finalStatus, { extensions: ['.mp4', '.mov'] }) || firstMediaUrl(finalStatus);
   if (!url) {
     const fileId = finalStatus.file_id || finalStatus.data?.file_id;
-    if (!fileId) throw new Error(`${label}：任务成功但既没有 URL 也没有 file_id`);
+    if (!fileId) {
+      // 中转平台把地址塞在哪个字段，各家不一样。找不到时把响应原样带出来 ——
+      // "任务成功了但界面上没有视频"这种问题，答案就在这段 JSON 里，
+      // 只说一句"没拿到地址"等于让人去猜。
+      throw new Error(
+        `${label}：任务已成功，但响应里既没有视频 URL 也没有 file_id。` +
+          `服务端返回的是：${JSON.stringify(finalStatus).slice(0, 400)}` +
+          `\n把这段发给我，或者到「API 联调台」用这家的「查任务状态」模板手动看一眼是哪个字段。`
+      );
+    }
     onEvent?.({ type: 'note', message: `取下载地址（file_id ${fileId}）…` });
     const fileUrl = endpoint(provider, 'fileRetrieve', '{{baseUrl}}/files/retrieve');
     const fileJson = checkBiz(
@@ -697,7 +727,11 @@ async function generateVideoMiniMax({
     );
     url = fileJson.file?.download_url || firstMediaUrl(fileJson);
   }
-  if (!url) throw new Error(`${label}：没能拿到视频下载地址`);
+  if (!url) {
+    throw new Error(
+      `${label}：第三步取文件也没拿到下载地址。服务端返回的是：${JSON.stringify(finalStatus).slice(0, 400)}`
+    );
+  }
 
   // 海螺的下载地址只活 9 小时，所以上层必须立刻落盘 —— 它本来就是这么做的
   onEvent?.({ type: 'note', message: '拿到下载地址（9 小时后失效，正在落盘）' });
