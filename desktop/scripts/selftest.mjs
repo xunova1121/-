@@ -548,6 +548,62 @@ check('长度受控，不超过视频模型的提示词舒适区', vp.length <= 
 const emptyCast = consistency.assembleVideoPrompt(vbible, { index: 1, description: '空镜：水面波光', characters: [], camera: '特写', motion: '静止' });
 check('空镜不硬塞角色', !/保持外貌不变/.test(emptyCast), emptyCast);
 
+section('时长控制');
+const durationMod = await import('../core/duration.js');
+const { getProvider } = await import('../core/providers/catalog.js');
+
+const ark = getProvider('volcengine');
+const seedanceSteps = durationMod.allowedDurations(ark, 'doubao-seedance-1-0-pro-250528');
+check('读得到厂商的合法时长档位', JSON.stringify(seedanceSteps) === '[5,10]', JSON.stringify(seedanceSteps));
+check('请求 4 秒向上对齐到 5 秒（宁多勿少，少了会切断动作）', durationMod.alignDuration(4, seedanceSteps) === 5);
+check('请求 6 秒向上对齐到 10 秒', durationMod.alignDuration(6, seedanceSteps) === 10);
+check('超出最大档位时取最大值而不是报错', durationMod.alignDuration(30, seedanceSteps) === 10);
+check('Vidu 是 4/8 档，和别家不同', JSON.stringify(durationMod.allowedDurations(getProvider('vidu'), 'viduq1')) === '[4,8]');
+
+check('60 秒按 4.5 秒均镜长反推出 13 个镜头', durationMod.planShotCount(60) === 13);
+check('目标很短时也至少给 2 镜', durationMod.planShotCount(3) === 2);
+
+const durShots = [
+  { duration: 3, actualDuration: 5 },
+  { duration: 6, actualDuration: 10 },
+  { duration: 4, actualDuration: 5 }
+];
+const sum = durationMod.summarize({ targetDuration: 15, shots: durShots.map((s) => ({ ...s, videoPath: 'x' })) }, { policy: 'trim' });
+check('计划时长是分镜之和', sum.planned === 13, `${sum.planned}`);
+check('模型实出时长按对齐后的算', sum.generated === 20, `${sum.generated}`);
+check('把厂商档位多吃的时间单列出来', sum.quantizationOverhead === 7, `${sum.quantizationOverhead}`);
+check('裁剪模式下成片等于计划时长', sum.final === 13, `${sum.final}`);
+const keepSum = durationMod.summarize({ targetDuration: 15, shots: durShots.map((s) => ({ ...s, videoPath: 'x' })) }, { policy: 'keep' });
+check('保留模式下成片等于模型实出', keepSum.final === 20, `${keepSum.final}`);
+
+// 不触上限时：比例应当原样保留
+const easy = durationMod.rescale([{ duration: 3 }, { duration: 6 }, { duration: 3 }], 18);
+check('重排后总时长命中目标', Math.abs(easy.reduce((a, b) => a + b.duration, 0) - 18) < 0.3,
+  JSON.stringify(easy.map((r) => r.duration)));
+check('保留原有的快慢节奏（长镜仍是短镜的两倍）',
+  Math.abs(easy[1].duration / easy[0].duration - 2) < 0.05,
+  JSON.stringify(easy.map((r) => r.duration)));
+
+// 触上限时：夹掉的余量必须分给还有余地的镜头，否则总时长会凭空少一截
+const capped = durationMod.rescale([{ duration: 3 }, { duration: 6 }, { duration: 3 }], 24);
+const ctotal = capped.reduce((a, b) => a + b.duration, 0);
+check('有镜头顶到上限时，余量被重新分配，总时长仍命中目标',
+  Math.abs(ctotal - 24) < 0.3, `${ctotal} → ${JSON.stringify(capped.map((r) => r.duration))}`);
+check('顶到上限的那一镜确实停在上限', capped[1].duration === 10, JSON.stringify(capped.map((r) => r.duration)));
+check('重排后不会低于模型能接受的最短时长', capped.every((r) => r.duration >= 3));
+
+// 目标超出物理可能时贴到边界，而不是给出一个假数字
+const impossible = durationMod.rescale([{ duration: 4 }, { duration: 4 }], 500);
+check('目标不可能达到时贴到上限而不是硬凑',
+  impossible.every((r) => r.duration === 10), JSON.stringify(impossible.map((r) => r.duration)));
+
+check('时长格式化成人话', durationMod.fmtSeconds(95) === '1 分 35 秒' && durationMod.fmtSeconds(120) === '2 分');
+
+// 分镜提示词里必须带上总时长预算，否则模型只按镜数拆，长度全凭运气
+const shotPromptSrc = fs.readFileSync(path.join(PROJECT_ROOT, 'core/pipeline/studio.js'), 'utf8');
+check('分镜提示词带了总时长预算', /TARGET_SECONDS/.test(shotPromptSrc));
+check('并且明确要求不要平均分配镜长', /不要平均分配/.test(shotPromptSrc));
+
 // ─────────────────────── 8. 上线前体检 ───────────────────────
 
 section('上线前体检');

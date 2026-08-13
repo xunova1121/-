@@ -24,6 +24,7 @@ import * as adapters from './providers/adapters.js';
 import * as studio from './pipeline/studio.js';
 import * as preflight from './preflight.js';
 import * as styles from './styles.js';
+import * as duration from './duration.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -198,6 +199,7 @@ async function handleApi(req, res, url) {
         label: store.STAGE_LABELS[id],
         hint: store.STAGE_HINTS[id] || ''
       })),
+      durationPresets: duration.DURATION_PRESETS,
       ffmpeg: ffmpeg.locate()
     });
   }
@@ -358,6 +360,31 @@ async function handleApi(req, res, url) {
       }
       if (e && method === 'DELETE') {
         return json(res, 200, studio.removeBibleEntry(b, kind, decodeURIComponent(e)));
+      }
+    }
+
+    // ── 时长 ──
+    if (b && c === 'duration') {
+      const p = store.read(b);
+      if (!p) return json(res, 404, { error: '项目不存在' });
+      const policy = settings.get('durationPolicy') || 'trim';
+      if (method === 'GET') {
+        return json(res, 200, {
+          summary: duration.summarize(p, { policy }),
+          policy,
+          presets: duration.DURATION_PRESETS,
+          suggestedShots: duration.planShotCount(p.targetDuration)
+        });
+      }
+      // 按目标时长重新分配每镜时长：保留原有的节奏比例，只做整体缩放
+      if (d === 'rescale' && method === 'POST') {
+        const { targetDuration } = await readBody(req);
+        const updated = store.update(b, (proj) => {
+          if (targetDuration) proj.targetDuration = Number(targetDuration);
+          proj.shots = duration.rescale(proj.shots, proj.targetDuration);
+          return proj;
+        });
+        return json(res, 200, { project: updated, summary: duration.summarize(updated, { policy }) });
       }
     }
 

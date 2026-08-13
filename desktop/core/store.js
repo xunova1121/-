@@ -45,7 +45,7 @@ export const STAGE_HINTS = {
   export: '导出到项目目录'
 };
 
-export function create({ title = '未命名项目', script = '', style = '', styleId = 'ink' } = {}) {
+export function create({ title = '未命名项目', script = '', style = '', styleId = 'ink', targetDuration = 60 } = {}) {
   ensureDirs();
   const id = `${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
   const project = {
@@ -58,6 +58,8 @@ export function create({ title = '未命名项目', script = '', style = '', sty
     styleId,
     /** 在预设之上补充的自定义描述（预设选 custom 时这里就是全部） */
     style,
+    /** 目标成片时长（秒）。这是输入，不是结果 —— 分镜数由它反推。 */
+    targetDuration: Number(targetDuration) || 60,
     logline: '',
     /**
      * 章节。长篇必须拆，否则一次几万字会超上下文、也没法中途重来。

@@ -18,6 +18,7 @@ import * as consistency from './consistency.js';
 import * as ffmpeg from '../ffmpeg.js';
 import { safeFileName } from '../paths.js';
 import * as chapters from './chapters.js';
+import * as duration from '../duration.js';
 
 export const extractJSON = consistency.extractJSON;
 
@@ -43,6 +44,9 @@ const SHOT_PROMPT = `你是动态漫画的分镜导演。把剧本拆成可直�
 
 要求：
 - shots 数量 {{SHOT_COUNT}} 个左右；
+- **全片总时长必须控制在 {{TARGET_SECONDS}} 秒左右（±10%）**，你自己在各镜之间分配：
+  紧张、动作、转场用 3 秒短镜；抒情、对话、定场用 5~6 秒长镜。
+  不要平均分配 —— 均分看着整齐，剪出来很呆板；
 - **不要**在 description 里重复角色外貌 —— 外貌由设定集统一注入，你重复写反而会冲突；
 - characters 和 scene 必须严格用下面设定集里给出的名字，不要自创；
 - duration 取 3~6 秒。
@@ -246,6 +250,17 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
   }
   const sourceScript = chapter ? chapter.script : project.script;
 
+  // 时长预算：分章时按本章字数占全片的比例分摊，长章自然分到更多秒数
+  const totalTarget = Number(project.targetDuration) || 60;
+  const targetSeconds = chapter
+    ? Math.max(
+        10,
+        Math.round(
+          (totalTarget * chapter.chars) / (chapterList.reduce((sum, c) => sum + c.chars, 0) || chapter.chars)
+        )
+      )
+    : totalTarget;
+
   const r = routing();
   onEvent?.({
     type: 'stage',
@@ -267,7 +282,9 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
   const { text } = await adapters.chat({
     providerId: r.chat.provider,
     model: r.chat.model,
-    system: SHOT_PROMPT.replace('{{SHOT_COUNT}}', String(shotCount)).replace('{{BIBLE}}', bibleDigest),
+    system: SHOT_PROMPT.replace('{{SHOT_COUNT}}', String(shotCount))
+      .replace('{{TARGET_SECONDS}}', String(targetSeconds))
+      .replace('{{BIBLE}}', bibleDigest),
     user: sourceScript,
     temperature: 0.7,
     jsonMode: true,
@@ -568,6 +585,7 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
       t.videoPath = dest;
       t.videoPrompt = videoPrompt;
       t.videoModelUsed = `${providerId} / ${model}`;
+      t.actualDuration = video.actualDuration || shot.duration;
       t.status = 'video-ready';
     }
     return p;
@@ -722,6 +740,8 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
           t.videoPath = dest;
           t.videoPrompt = videoPrompt;
           t.videoModelUsed = `${r.video.provider} / ${r.video.model}`;
+          // 厂商档位可能把 4s 顶成 5s。如实记下来，别让界面上的总时长撒谎。
+          t.actualDuration = video.actualDuration || shot.duration;
           t.status = 'video-ready';
         }
         return p;
@@ -802,8 +822,14 @@ export async function compose(projectId, { onEvent } = {}) {
   if (!project) throw new Error(`项目不存在：${projectId}`);
 
   const ordered = project.shots.slice().sort((a, b) => a.index - b.index);
-  const segments = ordered.map((s) => s.videoPath).filter(Boolean);
+  const withVideo = ordered.filter((s) => s.videoPath);
+  const segments = withVideo.map((s) => s.videoPath);
   if (!segments.length) throw new Error('没有可合成的视频片段');
+
+  // 裁剪是唯一能精确命中目标时长的办法：模型给 5 秒而分镜只要 3.5 秒时切掉多余的。
+  // 关掉则保留完整片段 —— 运动更自然，但成片会比计划长。
+  const policy = settings.get('durationPolicy') || 'trim';
+  const trims = policy === 'trim' ? withVideo.map((s) => Number(s.duration) || null) : null;
 
   const bin = ffmpeg.locate({ refresh: true });
   if (!bin.available) throw new Error(bin.hint);
@@ -812,13 +838,21 @@ export async function compose(projectId, { onEvent } = {}) {
   onEvent?.({ type: 'stage', stage: 'compose', status: 'running', message: `合成 ${segments.length} 段…` });
 
   const voiceTracks = ordered.filter((s) => s.audioPath).map((s) => s.audioPath);
+  if (trims) {
+    const saved = withVideo.reduce((sum, s) => sum + Math.max(0, duration.shotSeconds(s) - (Number(s.duration) || 0)), 0);
+    if (saved > 0.5) onEvent?.({ type: 'note', message: `按分镜时长裁剪，去掉厂商档位多出的 ${saved.toFixed(1)} 秒` });
+  }
+
   await ffmpeg.concat(segments, out, {
     audioTracks: voiceTracks,
+    trims,
     onProgress: (p) => onEvent?.({ type: 'progress', seconds: p.seconds })
   });
 
   store.update(projectId, (p) => {
     p.outputs.video = out;
+    p.outputs.durationPolicy = policy;
+    p.outputs.seconds = duration.summarize(p, { policy }).final;
     p.stageStatus.compose = 'done';
     p.stageStatus.export = 'done';
     return p;

@@ -28,6 +28,17 @@ const DEFAULTS = {
   ttsProvider: 'dashscope',
   ttsModel: 'qwen3-tts-flash',
 
+  // ───── 时长 ─────
+  /**
+   * 成片时长策略。
+   *   trim  按分镜时长裁剪，能精确命中目标；代价是可能切在动作中途
+   *   keep  保留模型给的完整片段，运动自然；代价是成片比计划长
+   * 默认 trim —— 用户设了目标时长，多半就是要卡住这个数。
+   */
+  durationPolicy: 'trim',
+  /** 新项目的默认目标时长（秒） */
+  defaultTargetDuration: 60,
+
   // ───── 一致性引擎 ─────
   /** 关掉就是纯"提示词 + 种子"，省一次视觉调用，但崩了不会自动发现 */
   consistencyVerify: true,

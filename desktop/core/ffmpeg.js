@@ -92,7 +92,7 @@ export function run(args, { onProgress, cwd } = {}) {
  * 用 concat demuxer 而不是 filter_complex —— 前者不重编码，快得多，
  * 代价是要求各片段编码参数一致（同一模型出的视频通常都一致）。
  */
-export async function concat(segments, outputPath, { audioPath, audioTracks, onProgress } = {}) {
+export async function concat(segments, outputPath, { audioPath, audioTracks, trims, onProgress } = {}) {
   if (!segments.length) throw new Error('没有可合成的片段');
 
   const cleanup = [];
@@ -106,6 +106,27 @@ export async function concat(segments, outputPath, { audioPath, audioTracks, onP
   };
 
   try {
+    // 按分镜时长裁剪：模型只给固定档位（5s/10s），想精确命中目标时长就得切。
+    // 用 -t 而不是重新编码整段 —— 只截时长，画质不动。
+    let clips = segments;
+    if (trims?.length) {
+      clips = [];
+      for (let i = 0; i < segments.length; i++) {
+        const want = trims[i];
+        if (!want || want <= 0) {
+          clips.push(segments[i]);
+          continue;
+        }
+        const cut = `${outputPath}.trim${i}.mp4`;
+        // 关键帧不一定落在切点上，所以这里必须重编码视频，copy 会切歪
+        await run(['-y', '-i', segments[i], '-t', String(want), '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', cut], {
+          onProgress
+        });
+        cleanup.push(cut);
+        clips.push(cut);
+      }
+    }
+
     // 多条配音先拼成一条整片音轨，再和视频合流
     let track = audioPath;
     const tracks = (audioTracks || []).filter((f) => f && fs.existsSync(f));
@@ -117,7 +138,7 @@ export async function concat(segments, outputPath, { audioPath, audioTracks, onP
       cleanup.push(track);
     }
 
-    const args = ['-y', '-f', 'concat', '-safe', '0', '-i', writeList(segments, 'concat')];
+    const args = ['-y', '-f', 'concat', '-safe', '0', '-i', writeList(clips, 'concat')];
     if (track && fs.existsSync(track)) {
       // 视频不重编码（快），音频统一转 AAC（各家出的容器不一定一致）
       args.push('-i', track, '-c:v', 'copy', '-c:a', 'aac', '-map', '0:v:0', '-map', '1:a:0', '-shortest');

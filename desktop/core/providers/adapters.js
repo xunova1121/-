@@ -8,6 +8,7 @@
  * 各家踩过的坑写在对应分支的注释里 —— 这些都是联调时最费时间的部分。
  */
 import { getProvider } from './catalog.js';
+import { allowedDurations, alignDuration } from '../duration.js';
 import { send, sendAsync, baseUrlOf, interpolate, diagnose } from './index.js';
 import * as settings from '../settings.js';
 
@@ -252,6 +253,17 @@ export async function generateVideo({
   const supportsR2V = (provider.capabilities || []).includes('r2v');
   const useRef = supportsR2V && refImages.length > 0 && !firstFrameUrl;
 
+  // 视频模型只接受固定档位（5/10、4/8 之类）。默认向上取：
+  // 宁可多出来一点合成时裁掉，也不要少了把动作或台词切断。
+  const allowed = allowedDurations(provider, model);
+  const actualDuration = alignDuration(duration, allowed);
+  if (actualDuration !== Math.round(duration)) {
+    onEvent?.({
+      type: 'note',
+      message: `${provider.name} 的合法时长只有 ${allowed.join('/')} 秒，${duration}s 已对齐到 ${actualDuration}s`
+    });
+  }
+
   let spec;
   switch (family) {
     case 'dashscope':
@@ -261,8 +273,7 @@ export async function generateVideo({
         body: {
           model,
           input: { prompt, img_url: firstFrameUrl || refImages[0] },
-          // 万相的时长目前只认 3~5 秒，超了会 400，所以在这里夹一下而不是让用户撞墙
-          parameters: { resolution, duration: Math.min(Math.max(Math.round(duration), 3), 5) }
+          parameters: { resolution, duration: actualDuration }
         }
       };
       break;
@@ -274,7 +285,7 @@ export async function generateVideo({
           model_name: model,
           image: firstFrameUrl || refImages[0],
           prompt,
-          duration: String(Math.min(Math.max(Math.round(duration), 5), 10)), // 可灵只收 "5" / "10"，还必须是字符串
+          duration: String(actualDuration), // 可灵收的是字符串，不是数字
           mode: 'std'
         }
       };
@@ -289,7 +300,7 @@ export async function generateVideo({
           model,
           images: useRef ? refImages.slice(0, 3) : [firstFrameUrl || refImages[0]],
           prompt,
-          duration: Math.min(Math.max(Math.round(duration), 4), 8),
+          duration: actualDuration,
           aspect_ratio: aspectRatio
         }
       };
@@ -297,7 +308,7 @@ export async function generateVideo({
 
     default: {
       // 火山方舟 Seedance：参数不走独立字段，而是拼在 text 里的 --key value
-      const flags = `--resolution ${resolution.toLowerCase()} --dur ${Math.round(duration)} --ratio ${aspectRatio}`;
+      const flags = `--resolution ${resolution.toLowerCase()} --dur ${actualDuration} --ratio ${aspectRatio}`;
       const content = [{ type: 'text', text: `${prompt} ${flags}` }];
       for (const img of [firstFrameUrl, ...refImages].filter(Boolean).slice(0, 4)) {
         content.push({ type: 'image_url', image_url: { url: img } });
@@ -318,7 +329,7 @@ export async function generateVideo({
   const url = firstMediaUrl(polled?.json ?? submitted.json, { extensions: ['.mp4', '.mov', '.webm'] })
     || firstMediaUrl(polled?.json ?? submitted.json);
   if (!url) throw new Error(`${label}：响应里没有视频 URL`);
-  return { url, raw: polled?.json ?? submitted.json };
+  return { url, actualDuration, requestedDuration: duration, allowedDurations: allowed, raw: polled?.json ?? submitted.json };
 }
 
 // ──────────────────────────────── 配音 ────────────────────────────────

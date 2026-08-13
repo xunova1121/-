@@ -245,5 +245,5 @@ desktop/
 │  ├─ app.css              视觉系统（调色间配色 · 钨丝暖底 + 日光冷蓝）
 │  └─ views/               六个页面
 ├─ electron/               桌面外壳
-└─ scripts/selftest.mjs    打桩自检，111 项
+└─ scripts/selftest.mjs    打桩自检，132 项
 ```

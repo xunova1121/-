@@ -579,6 +579,39 @@ td.wrap { white-space: normal; max-width: 380px; }
 .style-name { font-size: 12.5px; font-weight: 600; padding: 8px 10px 1px; font-family: var(--display); }
 .style-hint { font-size: 10.5px; color: var(--ink-faint); padding: 0 10px; line-height: 1.4; }
 
+/* ══════════════════════ 时长 ══════════════════════ */
+
+/* 三个数分开摆。混成一个数，就会出现"界面说 32 秒、成片 40 秒"这种谁也说不清的情况 */
+.duration-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px;
+}
+.duration-cell {
+  border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--ground); padding: 11px 13px;
+}
+.duration-cell.ok   { border-color: color-mix(in srgb, var(--good) 32%, var(--line)); }
+.duration-cell.warn { border-color: color-mix(in srgb, var(--caution) 38%, var(--line)); }
+.duration-k {
+  font-size: 10px; font-weight: 600; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--ink-faint);
+}
+.duration-v {
+  font-family: var(--code); font-size: 21px; font-variant-numeric: tabular-nums;
+  color: var(--ink); margin: 3px 0 2px; line-height: 1.15;
+}
+.duration-cell.warn .duration-v { color: var(--caution); }
+.duration-note { font-size: 10.5px; color: var(--ink-faint); line-height: 1.4; }
+
+.note-line {
+  margin-top: 11px; padding: 9px 12px; border-radius: var(--r);
+  font-size: 12px; line-height: 1.55;
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-dim);
+}
+.note-line.warn {
+  color: var(--caution); background: var(--caution-wash);
+  border-color: color-mix(in srgb, var(--caution) 30%, transparent);
+}
+
 /* ══════════════════════ 章节 ══════════════════════ */
 
 .chapter-preview { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }

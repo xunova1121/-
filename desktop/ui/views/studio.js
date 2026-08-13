@@ -38,6 +38,7 @@ export default {
     );
 
     const newTitle = h('input', { type: 'text', placeholder: '例：太湖夜巡' });
+    const newDuration = h('input', { type: 'number', value: 60, min: 5, max: 3600 });
     let newStyleId = 'ink';
 
     /** 画风缩略图：用配色和纹理现画，不外链图片，离线也能看 */
@@ -107,7 +108,9 @@ export default {
                 }, '删除项目'))
             )
           : h('p', { class: 'panel-hint' }, '还没有项目。填个名字，选个画风，从下面开始。'),
-        h('div', { class: 'field', style: 'margin-top:12px' }, h('label', {}, '新建项目'), newTitle),
+        h('div', { class: 'row', style: 'margin-top:12px' },
+          h('div', {}, h('label', {}, '新建项目'), newTitle),
+          h('div', { class: 'shrink', style: 'width:160px' }, h('label', {}, '目标时长（秒）'), newDuration)),
         h('label', {}, '画风'),
         stylePicker('ink', (id) => (newStyleId = id)),
         h('div', { class: 'inline', style: 'margin-top:12px' },
@@ -116,7 +119,10 @@ export default {
             onclick: async () => {
               const title = newTitle.value.trim();
               if (!title) return toast('先起个名字', 'err');
-              const p = await api('/projects', { method: 'POST', body: { title, styleId: newStyleId } });
+              const p = await api('/projects', {
+                method: 'POST',
+                body: { title, styleId: newStyleId, targetDuration: Number(newDuration.value) || 60 }
+              });
               state.projectId = p.id;
               localStorage.setItem('fd.projectId', p.id);
               toast('已创建', 'ok');
@@ -162,6 +168,89 @@ export default {
               }
             }, '保存剧本与画风'))
         )
+      )
+    );
+
+    // ───────────── 时长 ─────────────
+    // 三个数分开摆：目标是你要的，计划是分镜表算的，实际是厂商档位吃完剩的。
+    // 混成一个数就会出现"界面说 32 秒、成片 40 秒"这种谁也说不清的情况。
+    const durationHost = h('div', {});
+
+    async function paintDuration() {
+      const info = await api(`/projects/${project.id}/duration`).catch(() => null);
+      if (!info) return;
+      const { summary, policy, presets, suggestedShots } = info;
+      clear(durationHost);
+
+      const targetInput = h('input', { type: 'number', min: 5, max: 3600, value: summary.target || 60 });
+      const presetRow = h('div', { class: 'inline' },
+        presets.map((p) =>
+          h('button', {
+            class: `btn sm ${summary.target === p.seconds ? 'primary' : 'ghost'}`,
+            title: p.note,
+            onclick: () => { targetInput.value = p.seconds; }
+          }, p.label))
+      );
+
+      const over = summary.target && summary.planned > summary.target;
+      const cells = [
+        { k: '目标', v: summary.target ? `${summary.target}s` : '未设', note: '你要的长度' },
+        { k: '计划', v: `${summary.planned}s`, note: `${summary.shots} 镜相加`, cls: summary.target ? (summary.withinTolerance ? 'ok' : 'warn') : '' },
+        { k: '模型实出', v: `${summary.generated}s`, note: summary.quantizationOverhead > 0 ? `档位多出 ${summary.quantizationOverhead}s` : '与计划一致' },
+        { k: '成片', v: summary.videoReady ? `${summary.final}s` : '—', note: policy === 'trim' ? '按计划裁剪' : '保留完整片段' }
+      ];
+
+      add(durationHost,
+        h('div', { class: 'duration-grid' },
+          cells.map((c) =>
+            h('div', { class: `duration-cell ${c.cls || ''}` },
+              h('div', { class: 'duration-k' }, c.k),
+              h('div', { class: 'duration-v' }, c.v),
+              h('div', { class: 'duration-note' }, c.note)))),
+        summary.target && !summary.withinTolerance
+          ? h('div', { class: 'note-line warn' },
+              `计划时长比目标${over ? '长' : '短'} ${Math.abs(summary.delta)} 秒。可以按目标重新分配每镜时长 —— 会保留原有的快慢节奏，只做整体缩放。`)
+          : null,
+        h('div', { class: 'row', style: 'margin-top:12px' },
+          h('div', { class: 'shrink', style: 'width:150px' }, h('label', {}, '目标时长（秒）'), targetInput),
+          h('div', {}, h('label', {}, '常用长度'), presetRow),
+          h('div', { class: 'shrink' },
+            h('button', {
+              class: 'btn',
+              onclick: async (ev) => {
+                ev.target.disabled = true;
+                try {
+                  await api(`/projects/${project.id}/duration/rescale`, {
+                    method: 'POST',
+                    body: { targetDuration: Number(targetInput.value) }
+                  });
+                  project = await api(`/projects/${project.id}`);
+                  toast(project.shots.length ? '已按目标重新分配每镜时长' : '目标时长已保存', 'ok');
+                  await paintDuration();
+                  paintShots();
+                  paintTrack();
+                } catch (err) {
+                  toast(err.message, 'err');
+                } finally {
+                  ev.target.disabled = false;
+                }
+              }
+            }, project.shots?.length ? '按目标重排时长' : '保存目标'))
+        ),
+        h('div', { class: 'field-hint' },
+          project.shots?.length
+            ? `每镜时长可以在分镜卡片里单独改。厂商只接受固定档位（5/10 秒之类），所以"模型实出"通常比"计划"长 —— 合成时按策略裁剪。`
+            : `还没拆分镜。按这个目标，建议拆 ${suggestedShots} 个镜头左右，拆分镜时会把时长预算一并交给模型。`)
+      );
+    }
+
+    await paintDuration();
+    root.append(
+      h('div', { class: 'panel' },
+        h('h2', { class: 'panel-title' }, '时长'),
+        h('p', { class: 'panel-hint' },
+          '目标时长是「输入」：分镜数由它反推，拆分镜时会把预算交给模型，让它自己分配节奏 —— 紧张段用短镜，抒情段用长镜。'),
+        durationHost
       )
     );
 
@@ -596,7 +685,13 @@ export default {
             h('div', { class: 'shot-body' },
               h('div', { class: 'shot-head' },
                 h('span', { class: 'shot-no' }, `SH ${String(shot.index).padStart(3, '0')}`),
-                h('span', { class: 'shot-no' }, `${Number(shot.duration).toFixed(1)}s`)
+                h('span', { class: 'shot-no', title: shot.actualDuration && shot.actualDuration !== shot.duration
+                  ? `计划 ${shot.duration}s，模型实出 ${shot.actualDuration}s`
+                  : '计划时长' },
+                  `${Number(shot.duration).toFixed(1)}s`,
+                  shot.actualDuration && shot.actualDuration !== shot.duration
+                    ? h('span', { style: 'color:var(--caution)' }, ` →${shot.actualDuration}s`)
+                    : null)
               ),
               h('div', { class: 'shot-desc' }, shot.description || '（无描述）'),
               h('div', { class: 'shot-meta' },
@@ -616,7 +711,23 @@ export default {
               h('details', { class: 'shot-redo' },
                 h('summary', {}, '单独重出'),
                 h('div', { class: 'shot-redo-body' },
-                  h('label', {}, '出图用'),
+                  h('label', {}, '本镜时长（秒）'),
+                  (() => {
+                    const durInput = h('input', {
+                      type: 'number', min: 1, max: 30, step: 0.5, value: shot.duration,
+                      style: 'font-size:11px;padding:4px 6px',
+                      onchange: async () => {
+                        const next = project.shots.map((x) =>
+                          x.id === shot.id ? { ...x, duration: Number(durInput.value) || x.duration } : x);
+                        await api(`/projects/${project.id}`, { method: 'PATCH', body: { shots: next } });
+                        project = await api(`/projects/${project.id}`);
+                        await paintDuration();
+                        toast(`第 ${shot.index} 镜改为 ${durInput.value} 秒`, 'ok');
+                      }
+                    });
+                    return durInput;
+                  })(),
+                  h('label', { style: 'margin-top:10px' }, '出图用'),
                   imgPicker.el,
                   imgBtn,
                   h('label', { style: 'margin-top:10px' }, '出视频用'),

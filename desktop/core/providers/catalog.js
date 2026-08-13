@@ -196,9 +196,9 @@ export const PROVIDERS = [
       { id: 'doubao-seedream-4-0-250828', capability: 't2i', label: 'Seedream 4.0 文生图（最新）' },
       { id: 'doubao-seedream-3-0-t2i-250415', capability: 't2i', label: 'Seedream 3.0 文生图' },
       { id: 'doubao-seededit-3-0-i2i-250628', capability: 'i2i', label: 'SeedEdit 3.0 图生图（保角色用这个）' },
-      { id: 'doubao-seedance-1-0-pro-250528', capability: 'i2v', label: 'Seedance 1.0 Pro 图生视频' },
-      { id: 'doubao-seedance-1-0-lite-i2v-250428', capability: 'i2v', label: 'Seedance 1.0 Lite 图生视频' },
-      { id: 'doubao-seedance-1-0-lite-t2v-250428', capability: 't2v', label: 'Seedance 1.0 Lite 文生视频' }
+      { id: 'doubao-seedance-1-0-pro-250528', capability: 'i2v', label: 'Seedance 1.0 Pro 图生视频', durations: [5, 10] },
+      { id: 'doubao-seedance-1-0-lite-i2v-250428', capability: 'i2v', label: 'Seedance 1.0 Lite 图生视频', durations: [5, 10] },
+      { id: 'doubao-seedance-1-0-lite-t2v-250428', capability: 't2v', label: 'Seedance 1.0 Lite 文生视频', durations: [5, 10] }
     ],
     probe: {
       label: '连通性自检（一次最小对话）',
@@ -343,11 +343,11 @@ export const PROVIDERS = [
       { id: 'wanx2.1-t2i-plus', capability: 't2i', label: '通义万相 2.1 文生图 Plus' },
       { id: 'wanx-v1', capability: 't2i', label: '通义万相 v1（老版，便宜）' },
       { id: 'wanx2.1-imageedit', capability: 'i2i', label: '通义万相 图像编辑（保角色）' },
-      { id: 'wan2.2-i2v-flash', capability: 'i2v', label: '通义万相 2.2 图生视频 Flash' },
-      { id: 'wan2.2-i2v-plus', capability: 'i2v', label: '通义万相 2.2 图生视频 Plus' },
-      { id: 'wanx2.1-i2v-turbo', capability: 'i2v', label: '通义万相 2.1 图生视频 Turbo' },
-      { id: 'wanx2.1-i2v-plus', capability: 'i2v', label: '通义万相 2.1 图生视频 Plus' },
-      { id: 'wanx2.1-t2v-turbo', capability: 't2v', label: '通义万相 文生视频 Turbo' },
+      { id: 'wan2.2-i2v-flash', capability: 'i2v', label: '通义万相 2.2 图生视频 Flash', durations: [5] },
+      { id: 'wan2.2-i2v-plus', capability: 'i2v', label: '通义万相 2.2 图生视频 Plus', durations: [5] },
+      { id: 'wanx2.1-i2v-turbo', capability: 'i2v', label: '通义万相 2.1 图生视频 Turbo', durations: [3, 4, 5] },
+      { id: 'wanx2.1-i2v-plus', capability: 'i2v', label: '通义万相 2.1 图生视频 Plus', durations: [3, 4, 5] },
+      { id: 'wanx2.1-t2v-turbo', capability: 't2v', label: '通义万相 文生视频 Turbo', durations: [3, 4, 5] },
       { id: 'qwen3-tts-flash', capability: 'tts', label: 'Qwen3-TTS Flash（快）' },
       { id: 'qwen-tts', capability: 'tts', label: 'Qwen-TTS' },
       { id: 'cosyvoice-v2', capability: 'tts', label: 'CosyVoice v2（音色最多）' },
@@ -510,11 +510,11 @@ export const PROVIDERS = [
       failureStates: ['failed']
     },
     models: [
-      { id: 'kling-v2-1-master', capability: 'i2v', label: 'Kling 2.1 Master（质量最好）' },
-      { id: 'kling-v2-master', capability: 'i2v', label: 'Kling 2.0 Master' },
-      { id: 'kling-v1-6', capability: 'i2v', label: 'Kling 1.6（便宜）' },
-      { id: 'kling-v1-5', capability: 'i2v', label: 'Kling 1.5' },
-      { id: 'kling-v1', capability: 't2v', label: 'Kling 1.0 文生视频' }
+      { id: 'kling-v2-1-master', capability: 'i2v', label: 'Kling 2.1 Master（质量最好）', durations: [5, 10] },
+      { id: 'kling-v2-master', capability: 'i2v', label: 'Kling 2.0 Master', durations: [5, 10] },
+      { id: 'kling-v1-6', capability: 'i2v', label: 'Kling 1.6（便宜）', durations: [5, 10] },
+      { id: 'kling-v1-5', capability: 'i2v', label: 'Kling 1.5', durations: [5, 10] },
+      { id: 'kling-v1', capability: 't2v', label: 'Kling 1.0 文生视频', durations: [5, 10] }
     ],
     probe: {
       label: '连通性自检（查任务列表）',
@@ -558,10 +558,10 @@ export const PROVIDERS = [
       failureStates: ['failed']
     },
     models: [
-      { id: 'viduq1', capability: 'r2v', label: 'Vidu Q1（支持多张参考图锁人设）' },
-      { id: 'viduq1-classic', capability: 'i2v', label: 'Vidu Q1 Classic' },
-      { id: 'vidu2.0', capability: 'r2v', label: 'Vidu 2.0' },
-      { id: 'vidu1.5', capability: 'r2v', label: 'Vidu 1.5（便宜）' }
+      { id: 'viduq1', capability: 'r2v', label: 'Vidu Q1（支持多张参考图锁人设）', durations: [4, 8] },
+      { id: 'viduq1-classic', capability: 'i2v', label: 'Vidu Q1 Classic', durations: [4, 8] },
+      { id: 'vidu2.0', capability: 'r2v', label: 'Vidu 2.0', durations: [4, 8] },
+      { id: 'vidu1.5', capability: 'r2v', label: 'Vidu 1.5（便宜）', durations: [4, 8] }
     ],
     probe: { label: '连通性自检', method: 'GET', url: '{{baseUrl}}/tasks?limit=1' },
     templates: [
