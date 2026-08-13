@@ -31,23 +31,43 @@ lumenx 是 Next.js + Python/FastAPI + FFmpeg 的网页平台。在 Windows 上�
 
 ## 装和跑
 
-### 方式一：双击就能用（推荐先这样试）
+### 方式一：下现成的安装包（本机什么都不用装）
+
+GitHub Actions 每次推送都会用 Windows 机器打好包：
+
+- **Actions** 标签页 → 点最近一次「构建 Windows 安装包」 → 页面底部
+  **Artifacts** 里下载 `未来创梦-Windows.zip`
+- 或者仓库打了 `v` 开头的 tag 之后，去 **Releases** 页面下载
+
+解压后两个 exe 挑一个：
+
+| 文件名带 | 说明 |
+|---|---|
+| `Setup` | 安装版，可选安装目录，自动建桌面快捷方式 |
+| `Portable` | 免安装版，双击即用，可放 U 盘带走 |
+
+首次打开 Windows SmartScreen 会拦一下（包没做代码签名），
+点「更多信息 → 仍要运行」即可。
+
+### 方式二：源码直接跑（改代码时用这个）
 
 1. 装 Node 18 或更新版本：`winget install OpenJS.NodeJS.LTS`
 2. 双击 **`启动.bat`**
 
 浏览器会自己打开。端口被占用时会自动顺延，不用管。
+这一步**不需要 `npm install`** —— 后端只用 Node 内置模块。
 
-### 方式二：桌面应用
+### 方式三：自己打包
 
 ```powershell
 npm install          # 只装 electron 和打包工具，应用本身没有运行时依赖
 npm run dev          # 开发模式跑起来
-npm run build:win    # 出安装包和绿色版，产物在 dist\
+npm run build:win    # 出安装包和免安装版，产物在 dist\
 ```
 
-装成桌面应用后，密钥会自动升级为 **Windows DPAPI 加密**（绑定当前用户账户，
-文件拷到别的机器解不开）；命令行模式下退化为本机 AES-256-GCM。
+> 装成桌面应用后（方式一/三），密钥会自动升级为 **Windows DPAPI 加密**
+> （绑定当前用户账户，文件拷到别的机器解不开）；
+> 方式二的命令行模式下退化为本机 AES-256-GCM。
 
 ### FFmpeg（只有最后合成那步需要）
 

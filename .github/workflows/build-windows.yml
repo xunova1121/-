@@ -1,0 +1,90 @@
+# 让 GitHub 的 Windows 机器替你打包「未来创梦」，本机不用装任何工具链。
+#
+# 触发方式三选一：
+#   1. 推代码到任意分支 —— 每次推送都出一份最新的安装包
+#   2. Actions 页面手动点「Run workflow」
+#   3. 打 v 开头的 tag（如 v0.1.0）—— 额外发一个 Release，下载链接更稳定
+#
+# 产物在 Actions 运行页底部的 Artifacts 里，或 Releases 页面。
+name: 构建 Windows 安装包
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+    # 刻意不加 paths 过滤：GitHub 的路径过滤对 tag 推送同样生效，
+    # 加了会出现"打了 tag 却不发版"这种很难查的情况。
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 先跑自检再打包：源码本身有问题的话，没必要浪费几分钟去打一个坏包。
+      # 这也是唯一一次在真实 Windows 上验证路径规则、DPAPI 降级、端口顺延这些逻辑。
+      - name: 自检（65 项，不联外网）
+        run: node scripts/selftest.mjs
+
+      # 应用本身零运行时依赖，这一步装的只有 electron 和 electron-builder。
+      # 没有 lockfile，所以用 install 而不是 ci。
+      - name: 安装打包工具
+        run: npm install
+
+      - name: 打包（安装版 + 免安装版）
+        run: npm run build:win
+        env:
+          # 未签名的包，跳过 electron-builder 的公证/签名流程
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: 列出产物
+        run: dir dist
+        shell: cmd
+
+      - name: 上传安装包
+        uses: actions/upload-artifact@v4
+        with:
+          name: 未来创梦-Windows
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.blockmap
+            desktop/dist/latest.yml
+          if-no-files-found: error
+          retention-days: 30
+
+      # 打了 tag 才发 Release —— 日常推送只留 Artifact，不刷屏。
+      # 用 gh CLI 而不是第三方 action：windows runner 自带 gh，少一个供应链依赖。
+      - name: 发布 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > notes.md <<'NOTES'
+          ## 下载哪个
+
+          | 文件名带 | 说明 |
+          |---|---|
+          | `Setup` | 安装版，可选安装目录，自动建桌面快捷方式 |
+          | 不带 `Setup` | 免安装版，双击即用，可放 U 盘带走 |
+
+          首次打开 Windows SmartScreen 会拦一下（这个包没做代码签名）——
+          点「更多信息 → 仍要运行」即可。
+
+          打开后先去「服务商与密钥」配一把 API Key 才能用，配置方法见 desktop/README.md。
+          NOTES
+          gh release create "${GITHUB_REF_NAME}" dist/*.exe \
+            --title "未来创梦 ${GITHUB_REF_NAME}" \
+            --notes-file notes.md

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+
+# 打包时放进来的 ffmpeg.exe 不进版本库（几十 MB，且许可证独立）
+bin/*.exe
+
+# 本地临时
+*.log
+.DS_Store

@@ -24,15 +24,18 @@
     "files": ["electron/**", "core/**", "ui/**", "package.json"],
     "extraResources": [{ "from": "bin", "to": "bin", "filter": ["**/*"] }],
     "win": {
-      "target": ["nsis", "portable"],
-      "artifactName": "FutureDream-${version}-${arch}.${ext}"
+      "target": ["nsis", "portable"]
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "未来创梦"
+      "shortcutName": "未来创梦",
+      "artifactName": "FutureDream-Setup-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "FutureDream-Portable-${version}-${arch}.${ext}"
     }
   }
 }
