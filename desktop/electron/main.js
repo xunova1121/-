@@ -13,6 +13,19 @@ import { app, BrowserWindow, Menu, shell, dialog, safeStorage } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// 一律用静态 import。
+// 早期版本这里写的是 await import(path.join(here, '../core/vault.js'))，
+// 在 Linux 上跑得好好的，到 Windows 上一启动就炸：
+//   Only URLs with a scheme in: file, data, node, and electron are supported…
+//   Received protocol 'd:'
+// 原因是 path.join 在 Windows 上产出 `D:\...\core\vault.js`，
+// 而 ESM 的动态 import 在 Windows 上只认 file:// URL，不认盘符路径
+// （Linux 下 `/` 开头恰好是合法说明符，所以这个坑只在 Windows 现形）。
+// 相对说明符没有这个问题，也不需要拼路径 —— 直接静态导入最稳。
+import { attachSafeStorage } from '../core/vault.js';
+import { listen } from '../core/server.js';
+import { DATA_DIR } from '../core/paths.js';
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 let mainWindow = null;
@@ -31,10 +44,8 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 async function startServer() {
-  const vault = await import(path.join(here, '../core/vault.js'));
-  vault.attachSafeStorage(safeStorage);
-
-  const { listen } = await import(path.join(here, '../core/server.js'));
+  // 必须赶在保险箱第一次读盘之前接上 DPAPI，否则会先用 AES 兜底方案打开
+  attachSafeStorage(safeStorage);
   serverInfo = await listen();
   return serverInfo;
 }
@@ -46,10 +57,7 @@ function buildMenu() {
       submenu: [
         {
           label: '打开数据目录',
-          click: async () => {
-            const { DATA_DIR } = await import(path.join(here, '../core/paths.js'));
-            shell.openPath(DATA_DIR);
-          }
+          click: () => shell.openPath(DATA_DIR)
         },
         { type: 'separator' },
         { role: 'quit', label: '退出' }
@@ -137,7 +145,31 @@ async function createWindow() {
   mainWindow.on('closed', () => (mainWindow = null));
 }
 
+/**
+ * 冒烟自检：`electron . --smoke`
+ *
+ * 只把主进程和本地服务拉起来，探一下 /api/health 就退出，不开窗口。
+ * 加这个是因为吃过一次亏 —— 主进程里一个 Windows 专属的 ESM 加载错误
+ * （见文件顶部注释）躲过了全部 65 项单元自检，直到用户双击 exe 才炸出来。
+ * 单元测试测不到"Electron 主进程能不能起来"这件事，只有真的跑一次才行。
+ */
+async function runSmoke() {
+  try {
+    const { url } = await startServer();
+    const res = await fetch(`${url}/api/health`);
+    const health = await res.json();
+    if (!res.ok || !health.ok) throw new Error(`健康检查返回 ${res.status}`);
+    console.log(`[smoke] 通过 —— 服务 ${url}，凭据后端 ${health.vaultBackend}，Electron ${process.versions.electron}`);
+    app.exit(0);
+  } catch (err) {
+    console.error(`[smoke] 失败：${err.stack || err.message}`);
+    app.exit(1);
+  }
+}
+
 app.whenReady().then(async () => {
+  if (process.argv.includes('--smoke')) return runSmoke();
+
   try {
     await startServer();
   } catch (err) {
@@ -151,6 +183,8 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+
+  return undefined;
 });
 
 app.on('window-all-closed', () => {

@@ -37,13 +37,20 @@ jobs:
 
       # 先跑自检再打包：源码本身有问题的话，没必要浪费几分钟去打一个坏包。
       # 这也是唯一一次在真实 Windows 上验证路径规则、DPAPI 降级、端口顺延这些逻辑。
-      - name: 自检（65 项，不联外网）
+      - name: 自检（67 项，不联外网）
         run: node scripts/selftest.mjs
 
       # 应用本身零运行时依赖，这一步装的只有 electron 和 electron-builder。
       # 没有 lockfile，所以用 install 而不是 ci。
       - name: 安装打包工具
         run: npm install
+
+      # 真的把 Electron 主进程拉起来探一次 /api/health。
+      # 加这一步是因为吃过亏：主进程里一个 Windows 专属的 ESM 加载错误
+      # 躲过了全部单元自检，直到用户双击 exe 才炸出来 ——
+      # "主进程能不能起来"这件事，只有真跑一次才测得到。
+      - name: Electron 冒烟自检
+        run: npm run smoke
 
       - name: 打包（安装版 + 免安装版）
         run: npm run build:win

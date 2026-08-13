@@ -407,7 +407,46 @@ check('结尾的点被去掉', safeFileName('报告...') === '报告');
 check('空输入落到兜底名', safeFileName('   ') === 'untitled');
 check('中文原样保留', safeFileName('太湖夜巡') === '太湖夜巡');
 
-// ─────────────────────── 9. 本地服务的防护 ───────────────────────
+// ─────────────────────── 9. Windows 专属的加载陷阱 ───────────────────────
+
+section('Windows ESM 加载陷阱');
+// 曾经在 electron/main.js 里写过 await import(path.join(here, '../core/vault.js'))，
+// Linux 上正常，Windows 上一启动就死在
+//   "Received protocol 'd:'" —— ESM 的动态 import 在 Windows 只认 file:// URL。
+// 这类错误单元测试碰不到（主进程根本没被加载），所以在这里做静态检查兜底。
+const sourceFiles = [];
+(function walk(dir) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name.startsWith('.')) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) walk(full);
+    else if (/\.(mjs|js|cjs)$/.test(entry.name)) sourceFiles.push(full);
+  }
+})(path.resolve(path.dirname(new URL(import.meta.url).pathname), '..'));
+
+// 先剥注释再匹配：这个文件和 main.js 的注释里都写着那个反面例子，
+// 不剥的话检查器会指着自己的说明文字报警。
+function stripComments(code) {
+  return code
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    // 行注释：`//` 前面是冒号的不算（那是 https:// 这类 URL）
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
+// 匹配 import(<拼出来的路径表达式>)：只要不是字符串字面量、也没过 pathToFileURL，就算危险
+const RISKY_IMPORT = /\bimport\s*\(\s*(?!['"`])(?![^)]*pathToFileURL)[^)]*\b(path\.(join|resolve)|__dirname|here)\b/;
+const offenders = sourceFiles
+  // 检查器自己不算：正则字面量里本来就带着那个模式
+  .filter((f) => !f.endsWith('selftest.mjs'))
+  .filter((f) => RISKY_IMPORT.test(stripComments(fs.readFileSync(f, 'utf8'))));
+check(
+  '没有"动态 import 拼绝对路径"的写法（Windows 上会崩）',
+  offenders.length === 0,
+  offenders.map((f) => path.relative(process.cwd(), f)).join('、')
+);
+check('扫到了源文件（检查本身没空转）', sourceFiles.length > 15, `只扫到 ${sourceFiles.length} 个`);
+
+// ─────────────────────── 10. 本地服务的防护 ───────────────────────
 
 section('本地服务防护');
 const traversal = await fetch(`${appUrl}/media?p=${encodeURIComponent('/etc/passwd')}`);
