@@ -6,17 +6,31 @@
  * 用不上的项目管理控件。画风也归到这里 —— 它是建项目时定的，
  * 定完就不该在剧本旁边再摆一遍。
  */
-import { h, clear, api, toast } from '../lib.js';
+import { h, clear, api, stream, toast, mediaUrl } from '../lib.js';
 import { styleArtSVG } from '../style-art.js';
+import { openLightbox } from '../lightbox.js';
 
 /**
- * 画风缩略图。
+ * 画风缩略图。两种形态：
  *
- * 十二张画的是同一个镜头（湖畔、远山、栈桥上一个人影），只改画法和配色 ——
- * 并排看过去比较的是"这个风格会把画面变成什么样"，而不是"哪张图好看"。
- * 具体怎么画见 ui/style-art.js。
+ *   ① 还没出过预览图 → 用 style-art.js 现画的示意图（离线、免费、构图统一）；
+ *   ② 出过一次     → 换成**你自己模型出的真图**，一直用下去。
+ *
+ * 为什么不直接打包一批现成的图：网上找来的是别人的作品，随应用分发出去
+ * 版权说不清 —— 出问题的是用它的人。用你自己的模型出，图是你的，
+ * 而且顺带回答了更要紧的那个问题：这个画风在**你的模型**上到底长什么样。
  */
 export function swatchEl(s) {
+  if (s.previewPath) {
+    return h('div', { class: 'style-swatch' },
+      h('img', {
+        src: `${mediaUrl(s.previewPath)}&v=${Date.parse(s.previewAt || '') || 0}`,
+        alt: `${s.name} 预览图`,
+        loading: 'lazy'
+      }));
+  }
+  // 没出过预览图时用内置示意图
+
   return h('div', { class: 'style-swatch', html: styleArtSVG(s) });
 }
 
@@ -54,12 +68,60 @@ function relTime(iso) {
 
 export default {
   async render({ state, go }) {
-    const { presets } = await api('/styles');
+    let presets = (await api('/styles')).presets;
     let projects = await api('/projects');
     const styleName = (id) => presets.find((p) => p.id === id)?.name || '自定义';
 
     const root = h('div', { class: 'stack' });
     const listHost = h('div', {});
+    const styleHosts = []; // 页面上所有画风网格，出完预览图要一起换掉
+
+    /** 重画所有画风网格（出完预览图之后） */
+    async function refreshStyles() {
+      presets = (await api('/styles')).presets;
+      for (const { host, current, onPick } of styleHosts) {
+        clear(host).append(stylePicker(presets, current(), onPick));
+      }
+      paintList();
+    }
+
+    /**
+     * 出画风预览图 —— 用**你自己配的出图模型**。
+     *
+     * 不打包现成图片是刻意的：网上找来的是别人的作品，随应用分发出去版权说不清。
+     * 而且自己出的这张更有用 —— 它回答的是"这个画风在**我的模型**上长什么样"，
+     * 这才是选画风时真正想知道的事。
+     */
+    async function makePreviews(ids, statusEl, btn) {
+      const model = state.catalog.routing.image;
+      btn.disabled = true;
+      let done = 0;
+      let failed = 0;
+      for (const id of ids) {
+        const name = presets.find((x) => x.id === id)?.name || id;
+        statusEl.textContent = `正在出「${name}」（${done + 1}/${ids.length}）…`;
+        try {
+          let err = null;
+          await stream(`/styles/${id}/preview`, {}, (ev) => {
+            if (ev.type === 'error') err = ev.message;
+            if (ev.type === 'note') statusEl.textContent = `「${name}」：${ev.message}`;
+          });
+          if (err) throw new Error(err);
+          done += 1;
+        } catch (e) {
+          failed += 1;
+          statusEl.textContent = `「${name}」失败：${e.message}`;
+          // 一张失败不该拖垮剩下的，但也别闷头继续 —— 十二张全错就没必要跑完
+          if (failed >= 3) break;
+        }
+      }
+      btn.disabled = false;
+      await refreshStyles();
+      statusEl.textContent = failed
+        ? `出了 ${done} 张，${failed} 张失败（用的是 ${model.provider} / ${model.model}）`
+        : `${done} 张预览图已就绪，用的是 ${model.provider} / ${model.model}`;
+      toast(failed ? `${failed} 张没出成` : '预览图已更新', failed ? 'err' : 'ok');
+    }
 
     /**
      * 删项目。
@@ -181,6 +243,49 @@ export default {
       listHost.append(grid);
     }
 
+    /** 预览图工具条：出真图 / 只补没出过的 / 清掉 */
+    function previewBar() {
+      const status = h('span', { class: 'field-hint', style: 'margin:0' });
+      const missing = () => presets.filter((p) => !p.previewPath && p.id !== 'custom').map((p) => p.id);
+
+      const genAll = h('button', {
+        class: 'btn ghost sm',
+        onclick: () => {
+          const ids = presets.filter((p) => p.id !== 'custom').map((p) => p.id);
+          if (!confirm(`用你自己的出图模型出 ${ids.length} 张预览图？会真的调用 ${ids.length} 次出图接口，按你的计费方式扣费。`)) return;
+          makePreviews(ids, status, genAll);
+        }
+      }, '用我的模型出全部预览图');
+
+      const genMissing = h('button', {
+        class: 'btn ghost sm',
+        onclick: () => {
+          const ids = missing();
+          if (!ids.length) return toast('每个画风都已经有预览图了', 'ok');
+          if (!confirm(`补出 ${ids.length} 张缺的预览图？会调用 ${ids.length} 次出图接口。`)) return;
+          makePreviews(ids, status, genMissing);
+        }
+      }, '只补缺的');
+
+      const clearAll = h('button', {
+        class: 'btn ghost sm',
+        onclick: async () => {
+          if (!confirm('清掉全部预览图？清完会退回内置的示意图，随时可以再出。')) return;
+          for (const p of presets) await api(`/styles/${p.id}/preview`, { method: 'DELETE' }).catch(() => {});
+          await refreshStyles();
+          toast('已清空，退回示意图', 'ok');
+        }
+      }, '清掉预览图');
+
+      const have = presets.filter((p) => p.previewPath).length;
+      status.textContent = have
+        ? `${have} 个画风已有真图，其余是内置示意图`
+        : '现在显示的是内置示意图（同一个镜头的十二种画法）。想看真图就点左边，用你自己的模型出一遍。';
+
+      return h('div', { class: 'inline', style: 'margin-top:10px;flex-wrap:wrap' },
+        genAll, genMissing, have ? clearAll : null, status);
+    }
+
     // ── 新建 ──
     const newTitle = h('input', { type: 'text', placeholder: '例：太湖夜巡' });
     const newDuration = h('input', { type: 'number', value: 60, min: 5, max: 3600 });
@@ -195,7 +300,14 @@ export default {
           h('div', {}, h('label', {}, '片名'), newTitle),
           h('div', { class: 'shrink', style: 'width:160px' }, h('label', {}, '目标时长（秒）'), newDuration)),
         h('label', { style: 'margin-top:12px' }, '画风'),
-        stylePicker(presets, 'ink', (id) => (newStyleId = id)),
+        (() => {
+          const host = h('div', {});
+          const onPick = (id) => (newStyleId = id);
+          host.append(stylePicker(presets, 'ink', onPick));
+          styleHosts.push({ host, current: () => newStyleId, onPick });
+          return host;
+        })(),
+        previewBar(),
         h('div', { class: 'inline', style: 'margin-top:12px' },
           h('button', {
             class: 'btn primary',

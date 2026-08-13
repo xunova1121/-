@@ -547,6 +547,70 @@ td.wrap { white-space: normal; max-width: 380px; }
   color: var(--ink-faint); margin-bottom: 6px;
 }
 
+/* ══════════════════════ 看图 ══════════════════════ */
+
+/* 缩略图两百来像素，判断"这张脸对不对""手指有没有崩"根本不够看 */
+.lightbox {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(8, 6, 4, .93);
+  display: flex; flex-direction: column;
+  backdrop-filter: blur(3px);
+}
+.lb-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px; gap: 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.lb-counter, .lb-zoom {
+  font-family: var(--code); font-size: 11.5px; color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+.lb-actions { display: flex; align-items: center; gap: 6px; }
+.lb-btn {
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
+  border-radius: var(--r-sm); padding: 4px 10px;
+  font: inherit; font-size: 12px; line-height: 1.6; cursor: pointer; text-decoration: none;
+}
+.lb-btn:hover { background: var(--surface-3); }
+.lb-btn.close:hover { border-color: var(--alarm); color: var(--alarm); }
+
+.lb-stage {
+  flex: 1; min-height: 0;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+.lb-img {
+  max-width: 94%; max-height: 100%;
+  transform-origin: center center;
+  cursor: zoom-in;
+  user-select: none; -webkit-user-drag: none;
+  /* 棋盘格：透明背景的图不至于和黑底糊在一起 */
+  background:
+    repeating-conic-gradient(var(--surface-2) 0 25%, var(--surface) 0 50%) 50% / 18px 18px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .55);
+}
+.lb-nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 44px; height: 74px;
+  border: 1px solid var(--line); background: var(--surface);
+  color: var(--ink); font-size: 26px; line-height: 1; cursor: pointer;
+  border-radius: var(--r);
+}
+.lb-nav:hover { background: var(--surface-2); }
+.lb-nav.prev { left: 14px; }
+.lb-nav.next { right: 14px; }
+.lb-caption {
+  padding: 10px 18px 14px; text-align: center;
+  display: flex; flex-direction: column; gap: 3px;
+  font-size: 12.5px; color: var(--ink-dim);
+  background: var(--surface); border-top: 1px solid var(--line);
+}
+.lb-caption b { color: var(--ink); font-family: var(--display); font-size: 13.5px; }
+
+/* 能点开看的缩略图给个提示，不然没人知道可以点 */
+.zoomable { cursor: zoom-in; }
+
 /* ══════════════════════ 失败汇总 ══════════════════════ */
 
 /* 服务端原话原样摊开。轮询日志刷得飞快，而"为什么失败"必须留在眼前 */
@@ -627,7 +691,8 @@ td.wrap { white-space: normal; max-width: 380px; }
   color: var(--ink);
 }
 .style-swatch { width: 100%; aspect-ratio: 8 / 5; display: block; overflow: hidden; background: var(--ground); }
-.style-swatch svg { width: 100%; height: 100%; display: block; }
+.style-swatch svg,
+.style-swatch img { width: 100%; height: 100%; display: block; object-fit: cover; }
 .style-name { font-size: 12.5px; font-weight: 600; padding: 8px 10px 1px; font-family: var(--display); }
 .style-hint { font-size: 10.5px; color: var(--ink-faint); padding: 0 10px; line-height: 1.4; }
 

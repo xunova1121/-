@@ -241,7 +241,42 @@ async function handleApi(req, res, url) {
   }
 
   // ---- 画风预设 ----
-  if (a === 'styles' && method === 'GET') return json(res, 200, { presets: styles.STYLE_PRESETS });
+  if (a === 'styles') {
+    if (method === 'GET' && !b) return json(res, 200, { presets: styles.presetsForUI() });
+
+    // 用**用户自己的模型**出预览图。不打包现成图片是刻意的：
+    // 网上找来的是别人的作品，随应用分发出去版权说不清。
+    if (b && c === 'preview' && method === 'POST') {
+      const style = styles.getStyle(b);
+      if (!style) return json(res, 404, { error: `没有这个画风：${b}` });
+      const stream = ndjson(res);
+      req.on('close', () => stream.end());
+      try {
+        const r = adapters.resolvedRouting();
+        const { prompt, negative } = styles.previewPrompt(style);
+        stream.send({ type: 'note', message: `${style.name}：${r.image.provider} / ${r.image.model}` });
+        const image = await adapters.generateImage({
+          providerId: r.image.provider,
+          model: r.image.model,
+          prompt,
+          negative,
+          label: `画风预览·${style.name}`,
+          onEvent: (ev) => stream.send(ev)
+        });
+        const dest = styles.previewPath(b);
+        await studio.saveMedia(image, dest);
+        stream.end({ type: 'finished', id: b, path: dest });
+      } catch (err) {
+        stream.end({ type: 'error', message: err.message });
+      }
+      return undefined;
+    }
+
+    if (b && c === 'preview' && method === 'DELETE') {
+      fs.rmSync(styles.previewPath(b), { force: true });
+      return json(res, 200, { ok: true });
+    }
+  }
 
   // ---- 体检 ----
   if (a === 'preflight') {

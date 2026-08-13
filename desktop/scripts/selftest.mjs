@@ -32,6 +32,7 @@ const consistency = await import('../core/pipeline/consistency.js');
 const settings = await import('../core/settings.js');
 const providersMod = await import('../core/providers/index.js');
 const store = await import('../core/store.js');
+const styleModule = await import('../core/styles.js');
 
 let passed = 0;
 let failed = 0;
@@ -739,6 +740,35 @@ const stylesResp = await (await fetch(`${appUrl}/api/styles`)).json();
 check('画风预设列表拿得到', stylesResp.presets?.length >= 10, `${stylesResp.presets?.length} 个`);
 check('每个预设都有锚点和缩略图配色', stylesResp.presets.every((s) => s.id === 'custom' || (s.anchor && s.swatch?.from)));
 check('保留了自定义选项', stylesResp.presets.some((s) => s.id === 'custom'));
+
+// 预览图：用用户自己的模型出，不打包别人的作品
+{
+  const before = stylesResp.presets.find((x) => x.id === 'ink');
+  check('还没出过时 previewPath 是空的（界面退回内置示意图）', before.previewPath === null);
+
+  const evs = await ndjson('/styles/ink/preview', {});
+  const fin = evs.find((e) => e.type === 'finished');
+  check('能用当前出图模型出一张画风预览图', Boolean(fin?.path), JSON.stringify(evs.slice(-1)));
+  check('预览图真的落盘了', fin && fs.existsSync(fin.path));
+
+  const after = (await (await fetch(`${appUrl}/api/styles`)).json()).presets.find((x) => x.id === 'ink');
+  check('出完之后目录里带上了预览图路径', Boolean(after.previewPath), after.previewPath);
+  check('顺带给了出图时间，界面拿它做缓存版本号', Boolean(after.previewAt));
+
+  // 十二张用的是同一句场景描述，只换风格锚 —— 构图不变，比较的才是风格本身
+  const p1 = styleModule.previewPrompt(styleModule.getStyle('ink'));
+  const p2 = styleModule.previewPrompt(styleModule.getStyle('cyberpunk'));
+  check('预览图的场景描述十二张一致', 
+    p1.prompt.includes('湖畔栈桥') && p2.prompt.includes('湖畔栈桥'));
+  check('风格锚排在提示词最前面', p1.prompt.startsWith('国风水墨') && p2.prompt.startsWith('赛博朋克'),
+    p2.prompt.slice(0, 20));
+
+  const del = await fetch(`${appUrl}/api/styles/ink/preview`, { method: 'DELETE' });
+  check('能清掉预览图，退回内置示意图', del.status === 200 && !fs.existsSync(fin.path));
+
+  check('不存在的画风给 404 而不是崩掉',
+    (await fetch(`${appUrl}/api/styles/no-such-style/preview`, { method: 'POST' })).status === 404);
+}
 
 // 缩略图是照着 art 现画的（同一个镜头、十二种画法）。
 // 少一个字段不会报错，只会悄悄画出一张空白卡片 —— 所以在这里挡住。

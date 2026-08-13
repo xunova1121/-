@@ -8,6 +8,7 @@
  * （中途出场的配角、后加的道具、周边衍生品都走这里）。
  */
 import { h, clear, api, stream, toast, mediaUrl } from '../lib.js';
+import { openLightbox } from '../lightbox.js';
 
 const KINDS = [
   {
@@ -146,7 +147,26 @@ export default {
       refill();
 
       const img = item.sheetPath
-        ? h('img', { src: `${mediaUrl(item.sheetPath)}&v=${item.seed}`, alt: `${item.name} 参考图`, loading: 'lazy' })
+        ? h('img', {
+            class: 'zoomable',
+            src: `${mediaUrl(item.sheetPath)}&v=${item.seed}`,
+            alt: `${item.name} 参考图`,
+            loading: 'lazy',
+            title: '点开看大图',
+            // 设定图是全片的基准，比镜头图更该看清楚：脸和服装配色都要在这儿定下来
+            onclick: () => {
+              const all = [...(project.bible.characters || []), ...(project.bible.scenes || []), ...(project.bible.props || [])]
+                .filter((x) => x.sheetPath);
+              openLightbox(
+                all.map((x) => ({
+                  src: `${mediaUrl(x.sheetPath)}&v=${x.seed}`,
+                  title: x.name,
+                  note: x.appearance || ''
+                })),
+                all.findIndex((x) => x.name === item.name)
+              );
+            }
+          })
         : h('div', { class: 'ph' }, '未生成');
 
       const redoBtn = h('button', {

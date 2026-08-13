@@ -105,7 +105,7 @@ async function uploadVia(gateway, localPath, onEvent) {
 }
 
 /** 把远端产物或 base64 落到本地。二进制不能走 execute()（那条通道是按文本设计的）。 */
-async function saveMedia({ url, base64 }, destPath, onEvent) {
+export async function saveMedia({ url, base64 }, destPath, onEvent) {
   fs.mkdirSync(path.dirname(destPath), { recursive: true });
   let buf;
   const started = Date.now();

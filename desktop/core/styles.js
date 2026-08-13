@@ -13,6 +13,10 @@
  * 当示例。真想看这个风格出什么样，用「生成预览图」按钮拿你自己的模型出一张。
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { STYLE_DIR, safeFileName } from './paths.js';
+
 export const STYLE_PRESETS = [
   {
     id: 'ink',
@@ -135,6 +139,56 @@ export const STYLE_PRESETS = [
     art: { sky: ['#D8D8D8', '#A8A8A8'], hills: ['#8F8F8F', '#6A6A6A', '#4A4A4A'], water: '#7A7A7A', glow: '#BEBEBE', ink: '#2E2E2E', mode: 'photo' }
   }
 ];
+
+/**
+ * 画风预览图。
+ *
+ * 卡片上那张缩略图有两种形态：
+ *   ① 没出过预览图时，用 style-art.js 现画的示意图（离线、免费、构图统一）；
+ *   ② 出过一次之后，就换成**你自己模型出的真图**，一直用下去。
+ *
+ * 为什么不直接打包一批现成的图：网上找来的是别人的作品，随应用分发出去
+ * 版权说不清 —— 出问题的是用它的人。而用你自己的模型出，图是你的，
+ * 顺便还回答了一个更要紧的问题：这个画风在**你的模型**上到底长什么样。
+ *
+ * 十二张用的是同一句场景描述，只换风格锚 —— 和示意图一样的道理，
+ * 构图不变，比较的才是风格本身。
+ */
+const PREVIEW_SCENE =
+  '湖畔栈桥的远景：一个人背对镜头站在栈桥尽头远眺，远山三重，天边一轮日月，水面有倒影。' +
+  '画面里只有这一个人，不要文字、不要水印、不要分屏';
+
+export function previewPath(id) {
+  return path.join(STYLE_DIR, `${safeFileName(id, 'style')}.png`);
+}
+
+/** 这个画风出过预览图没有 */
+export function previewFor(id) {
+  const file = previewPath(id);
+  try {
+    const stat = fs.statSync(file);
+    return { path: file, at: stat.mtime.toISOString() };
+  } catch {
+    return null;
+  }
+}
+
+/** 出这一张预览图要发的提示词。风格锚在最前，和流水线里的装配顺序一致。 */
+export function previewPrompt(style) {
+  const anchor = style.anchor || style.name;
+  return {
+    prompt: [anchor, PREVIEW_SCENE, style.palette ? `主色调：${style.palette}` : ''].filter(Boolean).join('，'),
+    negative: style.negative || '模糊, 低质量, 畸变, 文字水印'
+  };
+}
+
+/** 带上预览图信息的预设列表，前端直接用 */
+export function presetsForUI() {
+  return STYLE_PRESETS.map((s) => {
+    const preview = previewFor(s.id);
+    return { ...s, previewPath: preview?.path || null, previewAt: preview?.at || null };
+  });
+}
 
 export function getStyle(id) {
   return STYLE_PRESETS.find((s) => s.id === id) || null;

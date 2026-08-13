@@ -37,6 +37,8 @@ export const PROJECTS_DIR = path.join(DATA_DIR, 'projects');
 export const OUTPUT_DIR = path.join(DATA_DIR, 'output');
 export const CACHE_DIR = path.join(DATA_DIR, 'cache');
 export const LOG_DIR = path.join(DATA_DIR, 'logs');
+/** 画风预览图：用用户自己的模型出的，出一次就一直用 */
+export const STYLE_DIR = path.join(DATA_DIR, 'style-previews');
 
 export const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 export const VAULT_FILE = path.join(DATA_DIR, 'credentials.enc');
@@ -48,7 +50,7 @@ export const BUNDLED_BIN = process.env.FUTUREDREAM_BIN_DIR
   : path.join(ROOT, 'bin');
 
 export function ensureDirs() {
-  for (const d of [DATA_DIR, PROJECTS_DIR, OUTPUT_DIR, CACHE_DIR, LOG_DIR]) {
+  for (const d of [DATA_DIR, PROJECTS_DIR, OUTPUT_DIR, CACHE_DIR, LOG_DIR, STYLE_DIR]) {
     fs.mkdirSync(d, { recursive: true });
   }
   return DATA_DIR;

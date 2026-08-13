@@ -6,6 +6,7 @@
  * 那些是项目级的事，和"这一部片子怎么往下做"混在一页上只会挡路。
  */
 import { h, clear, add, api, stream, toast, mediaUrl, fmtMs } from '../lib.js';
+import { openLightbox } from '../lightbox.js';
 
 /**
  * 正在跑的流水线任务。
@@ -794,7 +795,29 @@ export default {
         if (shot.videoPath) {
           thumb = h('video', { src: `${mediaUrl(shot.videoPath)}&v=${v}`, controls: true, preload: 'metadata' });
         } else if (shot.imagePath) {
-          thumb = h('img', { src: `${mediaUrl(shot.imagePath)}&v=${v}`, alt: `第 ${shot.index} 镜`, loading: 'lazy' });
+          // 点开看大图：缩略图两百来像素，判断"这张脸对不对""手指崩没崩"根本不够
+          thumb = h('img', {
+            class: 'zoomable',
+            src: `${mediaUrl(shot.imagePath)}&v=${v}`,
+            alt: `第 ${shot.index} 镜`,
+            loading: 'lazy',
+            title: '点开看大图（滚轮缩放，← → 翻页）',
+            onclick: () => {
+              const withImg = project.shots.filter((x) => x.imagePath).sort((a, b) => a.index - b.index);
+              openLightbox(
+                withImg.map((x) => ({
+                  src: `${mediaUrl(x.imagePath)}&v=${v}`,
+                  title: `SH ${String(x.index).padStart(3, '0')} · ${x.description || ''}`,
+                  note: [
+                    x.consistency?.score != null ? `一致性 ${x.consistency.score}` : '',
+                    x.modelUsed || '',
+                    x.seed ? `seed ${x.seed}` : ''
+                  ].filter(Boolean).join('  ·  ')
+                })),
+                withImg.findIndex((x) => x.id === shot.id)
+              );
+            }
+          });
         } else {
           thumb = h('span', {}, shot.status === 'failed' ? '生成失败' : '待生成');
         }
