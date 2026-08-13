@@ -371,7 +371,7 @@ export function chapterAdvice(script) {
 
 // ═══════════════════════ 阶段三：镜头出图（带一致性复核）═══════════════════════
 
-export async function generateAssets(projectId, { only = null, chapterId = null, onEvent } = {}) {
+export async function generateAssets(projectId, { only = null, chapterId = null, regenerate = false, onEvent } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
   if (!project.shots?.length) throw new Error('还没有分镜，先跑「分镜」');
@@ -381,7 +381,8 @@ export async function generateAssets(projectId, { only = null, chapterId = null,
   const maxRetries = settings.get('consistencyMaxRetries') ?? 2;
   const targets = project.shots
     .filter((s) => (chapterId ? s.chapterId === chapterId : true))
-    .filter((s) => (only ? only.includes(s.id) : !s.imagePath));
+    // regenerate 是「整步重跑」：连已经出好的也重来，界面上会先要一次确认
+    .filter((s) => (only ? only.includes(s.id) : regenerate || !s.imagePath));
 
   onEvent?.({ type: 'stage', stage: 'assets', status: 'running', message: `待出图 ${targets.length} 张` });
 
@@ -547,15 +548,16 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
 
   const firstFrame = shot.imageRef || (await toModelRef(shot.imagePath, { onEvent }));
   const cast = consistency.matchCharacters(project.bible, shot);
+  const videoPrompt = opts.prompt?.trim() || consistency.assembleVideoPrompt(project.bible, shot);
   const video = await adapters.generateVideo({
     providerId,
     model,
-    prompt: opts.prompt?.trim() || `${shot.motion}。${shot.camera}`,
+    prompt: videoPrompt,
     firstFrameUrl: firstFrame,
     refImages: cast.map((c) => c.sheetUrl).filter(Boolean),
     duration: shot.duration,
     label: `重出视频 #${shot.index}`,
-    onEvent
+    onEvent: (ev) => onEvent?.({ ...ev, shotId })
   });
 
   const dest = path.join(store.assetDir(projectId), `${shot.id}.mp4`);
@@ -564,6 +566,8 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
     const t = p.shots.find((s) => s.id === shotId);
     if (t) {
       t.videoPath = dest;
+      t.videoPrompt = videoPrompt;
+      t.videoModelUsed = `${providerId} / ${model}`;
       t.status = 'video-ready';
     }
     return p;
@@ -674,7 +678,7 @@ export function removeBibleEntry(projectId, kind, name) {
 
 // ═══════════════════════ 阶段四：出视频 ═══════════════════════
 
-export async function generateVideos(projectId, { only = null, chapterId = null, onEvent } = {}) {
+export async function generateVideos(projectId, { only = null, chapterId = null, regenerate = false, onEvent } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
 
@@ -682,7 +686,7 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
   const dir = store.assetDir(projectId);
   const targets = project.shots
     .filter((s) => (chapterId ? s.chapterId === chapterId : true))
-    .filter((s) => s.imagePath && (only ? only.includes(s.id) : !s.videoPath));
+    .filter((s) => s.imagePath && (only ? only.includes(s.id) : regenerate || !s.videoPath));
   if (!targets.length) throw new Error('没有可出视频的分镜（需要先有镜头图）');
 
   onEvent?.({ type: 'stage', stage: 'video', status: 'running', message: `待出视频 ${targets.length} 段` });
@@ -695,15 +699,19 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
       const cast = consistency.matchCharacters(project.bible, shot);
       const refs = cast.map((c) => c.sheetUrl).filter(Boolean);
 
+      const videoPrompt = consistency.assembleVideoPrompt(project.bible, shot);
+      onEvent?.({ type: 'shot', shotId: shot.id, status: 'running', message: `提交任务：${videoPrompt.slice(0, 60)}…` });
+
       const video = await adapters.generateVideo({
         providerId: r.video.provider,
         model: r.video.model,
-        prompt: `${shot.motion}。${shot.camera}`,
+        prompt: videoPrompt,
         firstFrameUrl: firstFrame,
         refImages: refs,
         duration: shot.duration,
         label: `视频 #${shot.index}`,
-        onEvent
+        // 轮询事件本身不带镜头信息，补上 shotId，前端才知道这是哪一镜在等
+        onEvent: (ev) => onEvent?.({ ...ev, shotId: shot.id })
       });
 
       const dest = path.join(dir, `${shot.id}.mp4`);
@@ -712,6 +720,8 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
         const t = p.shots.find((s) => s.id === shot.id);
         if (t) {
           t.videoPath = dest;
+          t.videoPrompt = videoPrompt;
+          t.videoModelUsed = `${r.video.provider} / ${r.video.model}`;
           t.status = 'video-ready';
         }
         return p;

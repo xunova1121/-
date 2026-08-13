@@ -514,6 +514,40 @@ check('每章各自有阶段状态', split.chapters.every((c) => c.stageStatus?.
 const shortAdvice = await (await fetch(`${appUrl}/api/projects/${project.id}/chapters`)).json();
 check('短片不建议分章', shortAdvice.advice?.suggested === false, `${shortAdvice.advice?.chars} 字`);
 
+section('视频提示词装配');
+// 早期版本这里只发「运镜 + 镜头语言」，模型只好自己脑补内容，片段和剧本对不上。
+const vshot = {
+  index: 7,
+  scene: '码头',
+  characters: ['阿澜'],
+  description: '阿澜快步走向栈桥尽头，回头张望',
+  camera: '跟拍',
+  motion: '镜头跟随人物移动',
+  dialogue: '快，来不及了。',
+  duration: 5
+};
+const vbible = {
+  style: { anchor: '武侠写意', negative: '崩脸' },
+  characters: [{ name: '阿澜', appearance: '短发，藏青立领制服，袖口两道银线，左胸编号牌', seed: 1, sheetUrl: 'x' }],
+  scenes: [{ name: '码头', appearance: '晨雾未散，冷白顶光，木质栈桥', seed: 2, sheetUrl: 'y' }],
+  props: []
+};
+const vp = consistency.assembleVideoPrompt(vbible, vshot);
+check('视频提示词包含画面内容（这是之前缺的那块）', vp.includes('快步走向栈桥'), vp);
+check('带上角色并要求保持外貌', /阿澜/.test(vp) && /保持外貌不变/.test(vp), vp);
+check('带上场景要点', /晨雾/.test(vp), vp);
+check('带上镜头语言与运镜', vp.includes('跟拍') && vp.includes('镜头跟随'), vp);
+check('有台词时提示口型自然', /口型/.test(vp), vp);
+check(
+  '不重复堆完整外貌（首帧已锁人，堆长描述会稀释运镜指令）',
+  !vp.includes('左胸编号牌'),
+  vp
+);
+check('长度受控，不超过视频模型的提示词舒适区', vp.length <= 380, `${vp.length} 字`);
+
+const emptyCast = consistency.assembleVideoPrompt(vbible, { index: 1, description: '空镜：水面波光', characters: [], camera: '特写', motion: '静止' });
+check('空镜不硬塞角色', !/保持外貌不变/.test(emptyCast), emptyCast);
+
 // ─────────────────────── 8. 上线前体检 ───────────────────────
 
 section('上线前体检');

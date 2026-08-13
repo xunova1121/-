@@ -2,7 +2,7 @@
  * 创作台：项目、画风、章节、流水线阶段轨、分镜网格。
  * 阶段编号是真序列 —— 设定集必须在分镜之前跑，因为分镜要引用已冻结的人设。
  */
-import { h, clear, api, stream, toast, mediaUrl, fmtMs } from '../lib.js';
+import { h, clear, add, api, stream, toast, mediaUrl, fmtMs } from '../lib.js';
 
 let running = null;
 
@@ -257,27 +257,108 @@ export default {
       root.append(h('div', { class: 'panel' }, h('h2', { class: 'panel-title' }, '章节'), chapterHost));
     }
 
+    // ───────────── 实时进度 ─────────────
+    // 出视频一镜要几分钟，中间全靠轮询。不把"现在轮到谁、轮询到第几次"显示出来，
+    // 用户看到的就是一个卡住不动的界面，只能猜是不是死了。
+    const live = new Map(); // shotId → { status, message }
+    const liveBadge = h('span', {});
+    const liveEls = new Map(); // shotId → 卡片上那块状态区
+
+    function trackLive(ev) {
+      if (!ev.shotId) return;
+      const prev = live.get(ev.shotId) || {};
+      if (ev.type === 'shot') {
+        live.set(ev.shotId, { status: ev.status, message: ev.message || '', attempt: prev.attempt });
+      } else if (ev.type === 'poll') {
+        live.set(ev.shotId, { ...prev, status: 'running', attempt: ev.attempt, message: `轮询第 ${ev.attempt} 次（${ev.state || '排队中'}）` });
+      } else if (ev.type === 'note') {
+        live.set(ev.shotId, { ...prev, status: 'running', message: ev.message });
+      } else {
+        return;
+      }
+      paintLive(ev.shotId);
+    }
+
+    function paintLive(shotId) {
+      const el = liveEls.get(shotId);
+      const info = live.get(shotId);
+      if (el && info) {
+        el.className = `shot-live ${info.status}`;
+        el.textContent =
+          info.status === 'running' ? (info.message || '生成中…')
+            : info.status === 'failed' ? `失败：${info.message || ''}`
+            : info.status === 'done' ? '完成' : info.message || '';
+        el.style.display = '';
+      }
+      const busy = [...live.values()].filter((v) => v.status === 'running').length;
+      const finished = [...live.values()].filter((v) => v.status === 'done').length;
+      clear(liveBadge);
+      if (running) {
+        liveBadge.append(
+          h('span', { class: 'badge beam' }, h('span', { class: 'spin' }, '◐'),
+            busy ? `正在生成 · 已完成 ${finished}` : `运行中 · 已完成 ${finished}`)
+        );
+      }
+    }
+
     // ───────────── 阶段轨 ─────────────
+    // 点阶段是「查看」，不是「开跑」—— 每一步都真花钱，误点一下代价不小。
+    // 要跑必须在下面的详情面板里明确按运行。
     const progressLog = h('div', { class: 'stream-log', style: 'display:none' });
     const track = h('div', { class: 'stage-track' });
+    const stageDetail = h('div', { class: 'stage-detail' });
+    let selectedStage = localStorage.getItem('fd.stage') || 'bible';
+
+    /** 这一阶段做完了多少：给详情面板和阶段轨共用 */
+    function stageProgress(id) {
+      const shots = project.shots || [];
+      const bible = project.bible;
+      switch (id) {
+        case 'bible': {
+          const all = bible ? [...bible.characters, ...bible.scenes, ...(bible.props || [])] : [];
+          return { done: all.filter((x) => x.sheetPath).length, total: all.length, unit: '张参考图' };
+        }
+        case 'script':
+          return { done: shots.length, total: shots.length || 0, unit: '个分镜' };
+        case 'assets':
+          return { done: shots.filter((s) => s.imagePath).length, total: shots.length, unit: '张镜头图' };
+        case 'video':
+          return { done: shots.filter((s) => s.videoPath).length, total: shots.length, unit: '段视频' };
+        case 'voice': {
+          const need = shots.filter((s) => s.dialogue?.trim());
+          return { done: need.filter((s) => s.audioPath).length, total: need.length, unit: '条配音' };
+        }
+        case 'compose':
+          return { done: project.outputs?.video ? 1 : 0, total: 1, unit: '支成片' };
+        default:
+          return { done: 0, total: 0, unit: '' };
+      }
+    }
 
     function paintTrack() {
       clear(track);
       stages.forEach((s, i) => {
         const status = project.stageStatus?.[s.id] || 'pending';
+        const { done, total } = stageProgress(s.id);
         track.append(
           h(
             'button',
             {
-              class: `stage-chip ${status} ${running === s.id ? 'running' : ''}`,
+              class: `stage-chip ${status} ${running === s.id ? 'running' : ''} ${selectedStage === s.id ? 'selected' : ''}`,
               title: s.hint,
-              disabled: Boolean(running),
-              onclick: () => runStage(s.id)
+              onclick: () => {
+                selectedStage = s.id;
+                localStorage.setItem('fd.stage', s.id);
+                paintTrack();
+                paintStageDetail();
+              }
             },
             h('span', { class: 'stage-num' }, String(i + 1).padStart(2, '0')),
             h('span', {}, s.label),
+            total ? h('span', { class: 'stage-count' }, `${done}/${total}`) : null,
             status === 'done' ? h('span', { class: 'dot ok' }) : null,
-            status === 'partial' ? h('span', { class: 'dot warn' }) : null
+            status === 'partial' ? h('span', { class: 'dot warn' }) : null,
+            running === s.id ? h('span', { class: 'spin' }, '◐') : null
           )
         );
       });
@@ -289,7 +370,10 @@ export default {
             style: 'margin-left:auto;border-color:var(--beam)',
             disabled: Boolean(running),
             title: '从设定集一路跑到合成，中间任一步失败就停下，已完成的都在盘上',
-            onclick: () => runStage('all')
+            onclick: () => {
+              if (!confirm('一键跑完会依次跑完六步，视频那步按镜数计费，可能是这条流水线最大的一笔开销。确定？')) return;
+              runStage('all');
+            }
           },
           h('span', { class: 'stage-num' }, '▶'),
           h('span', {}, '一键跑完')
@@ -297,10 +381,81 @@ export default {
       );
     }
 
+    /** 选中阶段的详情：产出统计 + 缺什么 + 明确的运行按钮 */
+    function paintStageDetail() {
+      clear(stageDetail);
+      const meta = stages.find((s) => s.id === selectedStage);
+      if (!meta) return;
+      const { done, total, unit } = stageProgress(selectedStage);
+      const pct = total ? Math.round((done / total) * 100) : 0;
+      const shots = project.shots || [];
+
+      // 这一阶段还缺哪些，列出来点得到
+      let missing = [];
+      if (selectedStage === 'assets') missing = shots.filter((s) => !s.imagePath);
+      else if (selectedStage === 'video') missing = shots.filter((s) => s.imagePath && !s.videoPath);
+      else if (selectedStage === 'voice') missing = shots.filter((s) => s.dialogue?.trim() && !s.audioPath);
+      else if (selectedStage === 'bible' && project.bible) {
+        missing = [...project.bible.characters, ...project.bible.scenes, ...(project.bible.props || [])]
+          .filter((x) => !x.sheetPath);
+      }
+
+      const runnable = !running;
+      const isCostly = selectedStage === 'video';
+
+      add(stageDetail,
+        h('div', { class: 'stage-detail-head' },
+          h('div', {},
+            h('div', { class: 'stage-detail-title' }, meta.label),
+            h('div', { class: 'stage-detail-hint' }, meta.hint)
+          ),
+          h('div', { class: 'inline' },
+            h('button', {
+              class: 'btn primary',
+              disabled: !runnable,
+              title: isCostly ? '视频按镜数计费，是这条流水线最大的开销' : '',
+              onclick: () => {
+                if (isCostly && missing.length > 3
+                  && !confirm(`将为 ${missing.length} 个镜头生成视频，按镜数计费且耗时较长。确定？`)) return;
+                runStage(selectedStage);
+              }
+            }, done ? `继续（还差 ${total - done}）` : '开始'),
+            done && done === total
+              ? h('button', {
+                  class: 'btn ghost',
+                  disabled: !runnable,
+                  onclick: () => {
+                    if (!confirm('这一步已经完成，重跑会覆盖已有产出并重新计费。确定？')) return;
+                    runStage(selectedStage, { regenerate: true });
+                  }
+                }, '整步重跑')
+              : null
+          )
+        ),
+        total
+          ? h('div', {},
+              h('div', { class: 'progress-bar' }, h('div', { class: 'progress-fill', style: `width:${pct}%` })),
+              h('div', { class: 'progress-text' }, `${done} / ${total} ${unit}（${pct}%）`)
+            )
+          : h('div', { class: 'progress-text' }, '这一步还没有可统计的产出'),
+        missing.length
+          ? h('div', { class: 'stage-missing' },
+              h('span', { class: 'eyebrow' }, `还缺 ${missing.length} 项`),
+              h('div', { class: 'inline', style: 'margin-top:6px' },
+                missing.slice(0, 20).map((m) =>
+                  h('span', { class: 'badge warn' }, m.name || `SH ${String(m.index).padStart(3, '0')}`)),
+                missing.length > 20 ? h('span', { class: 'badge' }, `…另外 ${missing.length - 20} 项`) : null)
+            )
+          : null
+      );
+    }
+
     async function runStage(stageId, extra = {}) {
       if (running) return;
       running = stageId;
+      live.clear();
       paintTrack();
+      paintStageDetail();
       progressLog.style.display = '';
       clear(progressLog);
 
@@ -310,6 +465,7 @@ export default {
           `/projects/${project.id}/stage/${stageId}`,
           { shotCount: Number(shotCount.value) || 8, ...extra },
           (ev) => {
+            trackLive(ev);
             const text = describe(ev);
             if (!text) return;
             progressLog.append(h('div', { class: `ev-${ev.type}` }, text));
@@ -323,19 +479,24 @@ export default {
         toast(err.message, 'err');
       } finally {
         running = null;
+        live.clear();
+        clear(liveBadge);
         project = (await api(`/projects/${project.id}`).catch(() => project)) || project;
         paintTrack();
+        paintStageDetail();
         paintShots();
       }
     }
 
     paintTrack();
+    paintStageDetail();
     root.append(
       h('div', { class: 'panel' },
-        h('h2', { class: 'panel-title' }, '流水线'),
+        h('h2', { class: 'panel-title' }, '流水线', liveBadge),
         h('p', { class: 'panel-hint' },
-          '按顺序跑。第 01 步「设定集」会把角色、场景、道具的外貌冻结下来并各出一张参考图 —— 后面每一镜都引用它，这是画面前后不脱节的根本原因，别跳过。'),
+          '按顺序跑。点阶段是「查看」这一步的产出，要跑得在下面明确按运行 —— 每一步都真花钱，不该一点就走。'),
         track,
+        stageDetail,
         progressLog
       )
     );
@@ -420,9 +581,18 @@ export default {
           onclick: () => regenerate(shot, 'video', vidPicker, vidBtn)
         }, shot.videoPath ? '重出视频' : '出视频');
 
+        const liveEl = h('div', { class: 'shot-live', style: 'display:none' });
+        liveEls.set(shot.id, liveEl);
+        const cached = live.get(shot.id);
+        if (cached) {
+          liveEl.style.display = '';
+          liveEl.className = `shot-live ${cached.status}`;
+          liveEl.textContent = cached.message || '';
+        }
+
         grid.append(
           h('article', { class: `shot-card ${flagged ? 'flagged' : ''} ${failed ? 'failed' : ''}` },
-            h('div', { class: 'shot-thumb' }, thumb),
+            h('div', { class: 'shot-thumb' }, thumb, liveEl),
             h('div', { class: 'shot-body' },
               h('div', { class: 'shot-head' },
                 h('span', { class: 'shot-no' }, `SH ${String(shot.index).padStart(3, '0')}`),
@@ -438,7 +608,8 @@ export default {
                       `一致性 ${c.score}`)
                   : null,
                 c?.attempts > 1 ? h('span', { class: 'badge warn' }, `重试 ${c.attempts - 1}`) : null,
-                flagged ? h('span', { class: 'badge warn' }, '待人工确认') : null
+                flagged ? h('span', { class: 'badge warn' }, '待人工确认') : null,
+                shot.videoPath ? h('span', { class: 'badge ok' }, '视频已出') : shot.imagePath ? h('span', { class: 'badge' }, '待出视频') : null
               ),
               shot.dialogue ? h('div', { class: 'shot-desc', style: 'color:var(--ink-faint)' }, `「${shot.dialogue}」`) : null,
               // 单镜重出：批量出图总有零星失败或不满意的，为几张图重跑整个阶段既慢又要重烧
@@ -451,7 +622,14 @@ export default {
                   h('label', { style: 'margin-top:10px' }, '出视频用'),
                   vidPicker.el,
                   vidBtn,
-                  shot.modelUsed ? h('div', { class: 'shot-used' }, `上次用了 ${shot.modelUsed}`) : null
+                  shot.modelUsed ? h('div', { class: 'shot-used' }, `出图用了 ${shot.modelUsed}`) : null,
+                  shot.videoModelUsed ? h('div', { class: 'shot-used' }, `出视频用了 ${shot.videoModelUsed}`) : null,
+                  // 把真正发给视频模型的提示词摊开 —— 片段和剧本对不上时，先看这里
+                  shot.videoPrompt
+                    ? h('details', { class: 'shot-prompt' },
+                        h('summary', {}, '看发给视频模型的提示词'),
+                        h('div', { class: 'shot-prompt-body' }, shot.videoPrompt))
+                    : null
                 )
               )
             )

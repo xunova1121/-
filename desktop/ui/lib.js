@@ -26,6 +26,21 @@ export function clear(el) {
   return el;
 }
 
+/**
+ * 安全追加：跳过 null / undefined / false。
+ *
+ * 原生 Element.append() 会把非节点参数**转成字符串**，所以
+ * `el.append(cond ? node : null)` 会在界面上真的印出一个 "null"。
+ * h() 早就处理了这种情况，但直接 append 的地方没有 —— 用这个。
+ */
+export function add(el, ...children) {
+  for (const child of children.flat(Infinity)) {
+    if (child === null || child === undefined || child === false) continue;
+    el.append(child instanceof Node ? child : String(child));
+  }
+  return el;
+}
+
 // ───────────────────────── 接口 ─────────────────────────
 
 export async function api(path, { method = 'GET', body } = {}) {

@@ -594,6 +594,70 @@ td.wrap { white-space: normal; max-width: 380px; }
 .chapter-title { font-size: 13.5px; font-weight: 600; font-family: var(--display); }
 .chapter-meta { font-family: var(--code); font-size: 10.5px; color: var(--ink-faint); margin-top: 2px; }
 
+/* ══════════════════════ 阶段详情与进度 ══════════════════════ */
+
+.stage-chip.selected { border-color: var(--beam); box-shadow: 0 0 0 2px var(--beam-wash); }
+.stage-count {
+  font-family: var(--code); font-size: 10px; font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+  border-left: 1px solid var(--line); padding-left: 7px;
+}
+
+.stage-detail {
+  border: 1px solid var(--line); border-radius: var(--r-lg);
+  background: var(--ground);
+  padding: 15px 17px;
+  margin-bottom: 14px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.stage-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.stage-detail-title { font-family: var(--display); font-size: 15px; font-weight: 650; }
+.stage-detail-hint { font-size: 12px; color: var(--ink-faint); margin-top: 3px; max-width: 60ch; line-height: 1.55; }
+
+.progress-bar {
+  height: 6px; border-radius: 3px;
+  background: var(--surface-2); overflow: hidden;
+  border: 1px solid var(--line);
+}
+.progress-fill {
+  height: 100%; background: var(--beam);
+  transition: width .3s ease;
+}
+.progress-text {
+  font-family: var(--code); font-size: 11px; font-variant-numeric: tabular-nums;
+  color: var(--ink-faint); margin-top: 6px;
+}
+
+.stage-missing { border-top: 1px solid var(--line-soft); padding-top: 11px; }
+
+/* 缩略图上覆一层实时状态：出视频一镜好几分钟，不显示就像卡死了 */
+.shot-live {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 6px 9px;
+  font-family: var(--code); font-size: 10.5px; line-height: 1.4;
+  background: color-mix(in srgb, var(--ground) 88%, transparent);
+  border-top: 1px solid var(--line);
+  color: var(--ink-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.shot-live.running { color: var(--beam); border-top-color: var(--beam); }
+.shot-live.done    { color: var(--good); border-top-color: color-mix(in srgb, var(--good) 40%, transparent); }
+.shot-live.failed  { color: var(--alarm); border-top-color: color-mix(in srgb, var(--alarm) 40%, transparent); }
+
+.shot-prompt { margin-top: 6px; }
+.shot-prompt summary {
+  font-size: 10.5px; color: var(--ink-faint); cursor: pointer; list-style: none;
+}
+.shot-prompt summary::-webkit-details-marker { display: none; }
+.shot-prompt summary::before { content: '▸ '; }
+.shot-prompt[open] summary::before { content: '▾ '; }
+.shot-prompt-body {
+  font-size: 11px; line-height: 1.55; color: var(--ink-dim);
+  background: var(--ground); border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm); padding: 7px 9px; margin-top: 5px;
+  white-space: pre-wrap; word-break: break-word;
+}
+
 /* ══════════════════════ 单镜重出 ══════════════════════ */
 
 select.mini {

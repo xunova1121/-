@@ -185,6 +185,52 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
   };
 }
 
+/**
+ * 视频提示词装配。
+ *
+ * 早期版本这里只发「运镜 + 镜头语言」，等于告诉模型"镜头缓推"却不说推的是什么 ——
+ * 模型只好自己脑补内容，出来的片段自然和剧本对不上。图生视频虽然有首帧兜底，
+ * 但首帧只定住第一格，后面几秒演什么完全由提示词决定。
+ *
+ * 所以这里把三样东西都给足：
+ *   画面在发生什么（description）→ 决定内容
+ *   角色是谁、什么打扮（简版锚）  → 决定人别在中途变样
+ *   怎么拍（camera + motion）     → 决定镜头运动
+ *
+ * 和出图提示词的区别是刻意的：这里**不重复完整外貌描述**。
+ * 首帧图已经把人锁死了，再堆一遍长描述只会挤占运镜指令的权重，
+ * 反而让模型分心去"重画"人物。
+ */
+export function assembleVideoPrompt(bible, shot, { maxChars = 380 } = {}) {
+  const parts = [];
+
+  if (shot.description) parts.push(shot.description);
+
+  // 角色只给名字 + 一句话特征，够让模型知道"画面里这个人要保持住"
+  const cast = matchCharacters(bible, shot);
+  for (const c of cast.slice(0, 2)) {
+    const brief = (c.appearance || '').split(/[，,。]/).slice(0, 2).join('，');
+    parts.push(brief ? `${c.name}（${brief}）保持外貌不变` : `${c.name} 保持外貌不变`);
+  }
+
+  const scene = matchScene(bible, shot);
+  if (scene) {
+    const brief = (scene.appearance || '').split(/[，,。]/).slice(0, 2).join('，');
+    if (brief) parts.push(brief);
+  }
+
+  if (shot.camera) parts.push(shot.camera);
+  parts.push(shot.motion || '镜头缓慢推进');
+
+  // 有台词的镜头提醒模型留出说话的节奏，别让人物僵立
+  if (shot.dialogue?.trim()) parts.push('人物有台词，口型与表情自然');
+
+  let prompt = parts.filter(Boolean).join('，');
+  // 视频模型的提示词普遍比图像模型短，超长会被截断或稀释，主动收一下
+  if (prompt.length > maxChars) prompt = `${prompt.slice(0, maxChars - 1)}…`;
+  return prompt;
+}
+
 /** 分镜里点名了谁。模型有时写"李队"有时写"李队长"，所以用包含匹配而不是全等。 */
 export function matchCharacters(bible, shot) {
   if (!bible?.characters?.length) return [];
