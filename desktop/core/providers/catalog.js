@@ -682,9 +682,13 @@ export const PROVIDERS = [
     capabilities: ['t2v', 'i2v', 'r2v'],
     editableBaseUrl: true,
     endpoints: {
-      videoCreate: '{{baseUrl}}/video_generation'
-      // 查任务和取文件的路径官方示例里没给。适配器会依次试几个常见写法，
-      // 试通哪个就用哪个，并把结果打进日志 —— 见 adapters.js 的 resolveQueryUrl。
+      videoCreate: '{{baseUrl}}/video_generation',
+      // 查任务和取文件的路径官方示例里没给。留空表示"自动探测"：
+      // 适配器会依次试几个常见写法，并且**验证返回的内容确实是一条任务记录**
+      // （只看 HTTP 200 会锁到错的地址，然后一路轮询到超时）。
+      // 探不出来就在「服务商与密钥 → 接口地址」里手填，填完立刻生效。
+      videoQuery: '',
+      fileRetrieve: ''
     },
     /**
      * 请求体和 MiniMax 官方 H3 大体一致（content[] 多模态），但多两个字段：
@@ -951,6 +955,8 @@ export function publicCatalog(overrides = {}) {
     models: p.models,
     // 界面上的分辨率下拉直接读这个，免得前端再抄一份档位清单
     videoDefaults: p.videoDefaults || null,
+    // 接口地址清单：中转平台的路径经常对不上，界面上要能让用户自己改
+    endpoints: p.endpoints || {},
     probe: p.probe || null,
     templates: p.templates || [],
     taskPoll: p.taskPoll || null

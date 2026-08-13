@@ -547,6 +547,20 @@ td.wrap { white-space: normal; max-width: 380px; }
   color: var(--ink-faint); margin-bottom: 6px;
 }
 
+/* 接口地址：默认收起来，改过的自动展开 */
+.endpoint-editor {
+  border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--ground); padding: 8px 12px; margin-top: 10px;
+}
+.endpoint-editor > summary {
+  cursor: pointer; font-size: 11.5px; color: var(--ink-dim);
+  list-style: none; user-select: none;
+}
+.endpoint-editor > summary::before { content: "▸ "; }
+.endpoint-editor[open] > summary::before { content: "▾ "; }
+.endpoint-editor .field { margin-top: 8px; }
+.endpoint-editor input { font-size: 11.5px; }
+
 /* ══════════════════════ 看图 ══════════════════════ */
 
 /* 缩略图两百来像素，判断"这张脸对不对""手指有没有崩"根本不够看 */

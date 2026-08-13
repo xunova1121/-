@@ -84,8 +84,13 @@ export function ratioToSize(ratio) {
   return RATIO_SIZES[ratio] || RATIO_SIZES['16:9'];
 }
 
+/**
+ * 解析一个接口地址。优先级：用户在界面上填的 > 目录里写的 > 兜底默认。
+ * 中转平台的路径经常和官方对不上，让用户能自己改是最快的一条路。
+ */
 function endpoint(provider, key, fallback) {
-  const raw = provider.endpoints?.[key] || fallback;
+  const override = settings.get('endpointOverrides')?.[`${provider.id}.${key}`];
+  const raw = override || provider.endpoints?.[key] || fallback;
   return interpolate(raw, provider);
 }
 
@@ -482,6 +487,11 @@ export async function generateVideo({
  */
 const queryUrlCache = new Map();
 
+/** 清掉探出来的查询路径缓存。改了 baseUrl 或手填了地址之后要用，自检也要用。 */
+export function resetQueryUrlCache() {
+  queryUrlCache.clear();
+}
+
 const QUERY_SHAPES = [
   (base, id) => `${base}/query/video_generation?task_id=${encodeURIComponent(id)}`,
   (base, id) => `${base}/video_generation/${encodeURIComponent(id)}`,
@@ -490,16 +500,58 @@ const QUERY_SHAPES = [
   (base, id) => `${base}/tasks/${encodeURIComponent(id)}`
 ];
 
+/** 从各家五花八门的响应里把状态词抠出来 */
+export function readTaskState(json) {
+  const raw =
+    json?.status ??
+    json?.state ??
+    json?.task_status ??
+    json?.data?.status ??
+    json?.data?.state ??
+    json?.data?.task_status ??
+    json?.output?.task_status ??
+    '';
+  return String(raw || '').toLowerCase();
+}
+
+/**
+ * 这段响应看着像不像"一条任务记录"。
+ *
+ * 光看 HTTP 200 是**不够**的 —— 这是踩出来的：中转平台常常对任何路径都回 200，
+ * 首页、错误页、一个空对象都算。探路径时只要不是 404 就锁上，
+ * 结果锁到一个跟任务毫无关系的地址，之后每次轮询都读到"没有状态"，
+ * 一路轮到十分钟超时。用户那边看到的就是
+ * "视频在厂商平台明明已经生成好了，流水线却一直转"。
+ *
+ * 所以判定改成看**内容**：提到了这个 task_id、或者有认得出的状态词、
+ * 或者直接给了视频地址 —— 三者有其一才算数。
+ */
+function looksLikeTask(json, taskId) {
+  if (!json || typeof json !== 'object') return false;
+  if (taskId && JSON.stringify(json).includes(String(taskId))) return true;
+  if (readTaskState(json)) return true;
+  if (firstMediaUrl(json, { extensions: ['.mp4', '.mov'] })) return true;
+  return false;
+}
+
 async function resolveQueryUrl(provider, providerId, taskId, label, onEvent) {
   const base = baseUrlOf(provider);
-  const configured = provider.endpoints?.videoQuery;
-  if (configured) return `${interpolate(configured, provider)}?task_id=${encodeURIComponent(taskId)}`;
+  const configured =
+    settings.get('endpointOverrides')?.[`${providerId}.videoQuery`] || provider.endpoints?.videoQuery;
+  if (configured) {
+    const resolved = interpolate(configured, provider);
+    // 用户填的地址里可以自己带 {taskId}；没带就按最常见的写法追加 ?task_id=
+    return resolved.includes('{taskId}')
+      ? resolved.replace('{taskId}', encodeURIComponent(taskId))
+      : `${resolved}${resolved.includes('?') ? '&' : '?'}task_id=${encodeURIComponent(taskId)}`;
+  }
 
   // 缓存键带上 baseUrl：换了中转地址就该重新探，不能拿旧路径去套新家
   const cacheKey = `${providerId}::${base}`;
   const cached = queryUrlCache.get(cacheKey);
   if (cached) return cached(base, taskId);
 
+  const tried = [];
   for (const shape of QUERY_SHAPES) {
     const url = shape(base, taskId);
     try {
@@ -507,19 +559,25 @@ async function resolveQueryUrl(provider, providerId, taskId, label, onEvent) {
         { provider: providerId, label: `${label}·探查询路径`, method: 'GET', url, timeoutMs: 20000 },
         null
       );
-      // 404/405 说明路径不对，继续试；其他状态（哪怕任务还在跑）说明路径是对的
-      if (res.status !== 404 && res.status !== 405) {
+      if (looksLikeTask(res.json, taskId)) {
         queryUrlCache.set(cacheKey, shape);
         onEvent?.({ type: 'note', message: `查任务路径：${url.replace(taskId, '…')}` });
         return url;
       }
-    } catch {
-      /* 连不上就试下一个 */
+      tried.push(
+        `${url.replace(taskId, '…')} → HTTP ${res.status}，${
+          res.json ? `响应 ${JSON.stringify(res.json).slice(0, 120)}` : '不是 JSON'
+        }`
+      );
+    } catch (err) {
+      tried.push(`${url.replace(taskId, '…')} → ${err.message}`);
     }
   }
   throw new Error(
-    `${label}：任务提交成功（${taskId}），但没试出查询任务的接口路径。` +
-      `请到「API 联调台」用这家的「查任务状态」模板手动确认路径，再告诉我改一下。`
+    `${label}：任务提交成功（task_id ${taskId}），但没有一个候选路径能查到它。\n` +
+      `试过这些：\n  ${tried.join('\n  ')}\n` +
+      `任务本身多半在厂商那边跑着 —— 到「API 联调台」用 task_id ${taskId} 手动查一次，` +
+      `把能查到的那个地址告诉我，我把它写进目录里。`
   );
 }
 
@@ -661,6 +719,8 @@ async function generateVideoMiniMax({
 
   // ② 轮询。中转家往往不写查任务的路径，所以第一次先探出正确的那个。
   const queryUrl = await resolveQueryUrl(provider, providerId, taskId, label, onEvent);
+  // 连着几次读不出状态，就别再耗着了 —— 见下面 unknownShape 的说明
+  let unknownShape = 0;
   const finalStatus = await poll(
     async (attempt) => {
       const res = await send(
@@ -674,8 +734,39 @@ async function generateVideoMiniMax({
         null
       );
       const json = checkBiz(res, '轮询');
-      const state = String(json.status || json.data?.status || json.task_status || '').toLowerCase();
-      onEvent?.({ type: 'poll', attempt, state });
+      const state = readTaskState(json);
+
+      /**
+       * 读不出状态就别装作在等。
+       *
+       * 之前这里会一直轮到十分钟超时，界面上显示"轮询第 105 次（排队中）"——
+       * 而任务在厂商那边早就出片了。真正的原因是这个地址根本不是任务查询接口，
+       * 或者它的字段名我们不认识。连续几次都读不出来就停下来，
+       * 把响应原样摊开，并且把探出来的路径作废，下次重新探。
+       */
+      if (!state && !firstMediaUrl(json, { extensions: ['.mp4', '.mov'] })) {
+        unknownShape += 1;
+        if (unknownShape === 1) {
+          onEvent?.({
+            type: 'note',
+            message: `这个地址返回的内容里读不出任务状态，原样是：${JSON.stringify(json).slice(0, 200)}`
+          });
+        }
+        if (unknownShape >= 3) {
+          queryUrlCache.delete(`${providerId}::${baseUrlOf(provider)}`);
+          throw new Error(
+            `${label}：连查了 ${unknownShape} 次都读不出任务状态，不再空等。\n` +
+              `查的地址：${queryUrl}\n` +
+              `它返回的是：${JSON.stringify(json).slice(0, 300)}\n` +
+              `任务多半在厂商那边跑着（task_id ${taskId}）。` +
+              `到「API 联调台」拿这个 task_id 手动查一次，把真正能查到的地址告诉我，我写进目录里。`
+          );
+        }
+      } else {
+        unknownShape = 0;
+      }
+
+      onEvent?.({ type: 'poll', attempt, state: state || '读不出状态' });
       // 各家的终态词不统一：Success / succeeded / finished / done / completed 都见过。
       // 漏判一个，任务明明成了却一直轮询到超时 —— 用户看到的就是"生成了但不显示"。
       if (['success', 'succeeded', 'finished', 'done', 'completed', 'ok'].includes(state)) {

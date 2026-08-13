@@ -17,6 +17,7 @@ import { UI_DIR, DATA_DIR, ensureDirs } from './paths.js';
 import * as settings from './settings.js';
 import * as vault from './vault.js';
 import * as logbus from './logbus.js';
+import * as httpClient from './http-client.js';
 import * as store from './store.js';
 import * as ffmpeg from './ffmpeg.js';
 import * as providers from './providers/index.js';
@@ -195,6 +196,8 @@ async function handleApi(req, res, url) {
       // 有一份读不出来的旧密钥文件时，界面要能说清楚怎么办 ——
       // 光报"连不上"等于把用户堵在门外
       vault: vault.status(),
+      // 桌面版才有系统代理这条路（Chromium 网络栈），命令行模式下没有
+      systemProxyAvailable: httpClient.systemProxyAvailable(),
       electron: Boolean(process.versions.electron)
     });
   }

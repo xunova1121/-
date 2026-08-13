@@ -6,9 +6,25 @@
  */
 import { h, clear, api, toast, fmtMs } from '../lib.js';
 
+/** 接口名 → 人话。中转平台的路径经常和官方对不上，得让人看懂在改什么 */
+const ENDPOINT_LABELS = {
+  chat: '对话',
+  models: '列模型',
+  images: '出图',
+  t2i: '文生图',
+  i2v: '图生视频',
+  r2v: '参考图生视频',
+  tts: '语音合成',
+  videoTasks: '视频任务',
+  videoCreate: '提交视频任务',
+  videoQuery: '查视频任务',
+  fileRetrieve: '取文件下载地址'
+};
+
 export default {
   async render({ state, refreshCatalog }) {
     const { providers } = state.catalog;
+    const overrides = state.catalog.settings.endpointOverrides || {};
     const secretsInfo = await api('/secrets');
     const configured = new Set(secretsInfo.items.map((i) => i.name));
     const previews = Object.fromEntries(secretsInfo.items.map((i) => [i.name, i.preview]));
@@ -44,6 +60,50 @@ export default {
             : '当前是命令行模式，密钥用本机 AES-256-GCM 加密。这能挡住"文件被顺手拷走"，挡不住已经拿到你登录态的人。这种格式桌面版也读得出来，两边通用。')
       )
     );
+
+    /**
+     * 接口地址（高级）。
+     *
+     * 加这块是因为踩过一次：中转平台只公开"提交任务"的地址，查任务的路径靠猜 ——
+     * 猜错就会出现"厂商那边早就出片了，这边还在轮询到超时"。
+     * 与其等我改目录再发一版，不如让你把在联调台里试通的那个地址直接填进来。
+     */
+    function endpointEditor(p) {
+      const keys = Object.keys(p.endpoints || {});
+      if (!keys.length) return null;
+      const filled = keys.filter((k) => overrides[`${p.id}.${k}`]).length;
+
+      const rows = keys.map((k) => {
+        const key = `${p.id}.${k}`;
+        return h('div', { class: 'field' },
+          h('label', {}, ENDPOINT_LABELS[k] || k),
+          h('input', {
+            type: 'text', class: 'mono', 'data-endpoint': key,
+            value: overrides[key] || '',
+            placeholder: p.endpoints[k] || '（目录里没写，留空则自动探测）'
+          }));
+      });
+
+      return h('details', { class: 'endpoint-editor', open: filled > 0 },
+        h('summary', {}, `接口地址（高级）${filled ? ` · 已自定义 ${filled} 条` : ''}`),
+        h('p', { class: 'field-hint' },
+          '留空 = 用目录里的默认值（查任务那条留空则自动探测）。' +
+          '地址里可以写 {{baseUrl}}；查任务那条还可以写 {taskId} 指定任务号的位置，不写就自动加 ?task_id=。'),
+        ...rows,
+        h('div', { class: 'inline', style: 'margin-top:8px' },
+          h('button', {
+            class: 'btn sm',
+            onclick: async (e) => {
+              const patch = {};
+              for (const el of e.target.closest('.endpoint-editor').querySelectorAll('input[data-endpoint]')) {
+                patch[el.dataset.endpoint] = el.value.trim();
+              }
+              await api('/settings', { method: 'POST', body: { endpointOverrides: patch } });
+              await refreshCatalog();
+              toast('接口地址已保存，下一次调用就用新的', 'ok');
+            }
+          }, '保存接口地址')));
+    }
 
     const grid = h('div', { class: 'grid2' });
 
@@ -88,6 +148,7 @@ export default {
         ...inputs,
         baseInput ? h('div', { class: 'field' }, h('label', {}, '接口根地址'), baseInput,
           h('div', { class: 'field-hint' }, '走内网网关或换中转线路时改这里。改完先自检再用。')) : null,
+        endpointEditor(p),
         h('div', { class: 'inline' },
           h('button', {
             class: 'btn',

@@ -170,8 +170,14 @@ const upstream = http.createServer((req, res) => {
     });
     return undefined;
   }
-  // 官方那条路径在这家不存在 —— 必须回 404，探测才有意义
+  // 官方那条路径在这家不存在。默认回 404；
+  // msJunk200 打开时改成"回 200 但内容跟任务无关"—— 这是真实中转平台的常见脾气，
+  // 也是"厂商那边早就出片了，这边还在轮询"的根源
   if (url.pathname === '/ms/query/video_generation') {
+    if (upstream.msJunk200) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ code: 0, msg: 'ok' }));
+    }
     res.writeHead(404, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ error: 'not found' }));
   }
@@ -191,6 +197,14 @@ const upstream = http.createServer((req, res) => {
   if (url.pathname === '/msbad/video_generation' && req.method === 'POST') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ task_id: 'lost-1' }));
+  }
+
+  // 提交成功、查任务的地址也"看着像"（提到了 task_id），但之后永远读不出状态。
+  // 用来验证：不会一路空等到超时。
+  if (url.pathname.startsWith('/msblind/')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    if (req.method === 'POST') return res.end(JSON.stringify({ task_id: 'blind-7' }));
+    return res.end(JSON.stringify({ task_id: 'blind-7', note: '这里没有 status 字段' }));
   }
 
   // ── 以下是给"整条流水线打桩"用的 OpenAI 兼容接口 ──
@@ -1092,6 +1106,48 @@ const oddState = await adapters.generateVideo({
 check('completed 也算终态（不是只认 success）', Boolean(oddState.url), oddState.url);
 upstream.msState = null;
 
+// ── 探路径必须看内容，不能只看 HTTP 200 ──
+// 中转平台常常对任何路径都回 200（首页、错误页、空对象都算）。
+// 只要不是 404 就锁上的话，会锁到一个跟任务无关的地址，
+// 然后每次轮询都读到"没有状态"，一路轮到十分钟超时 ——
+// 用户看到的就是"视频在厂商平台明明生成好了，流水线却一直转"。
+adapters.resetQueryUrlCache();
+upstream.msJunk200 = true;
+upstream.msQueryHits = 0;
+const junkOk = await adapters.generateVideo({
+  providerId: 'metaso', model: 'MiniMax-H3', prompt: 'x', duration: 5,
+  firstFrameUrl: 'https://x.invalid/f.png'
+});
+check('回 200 但内容不是任务记录的路径会被跳过，继续找对的那个', Boolean(junkOk.url), junkOk.url);
+upstream.msJunk200 = false;
+
+// 万一真的锁到了坏地址（比如它一开始装得像），也不能空等到超时
+adapters.resetQueryUrlCache();
+settings.patch({ baseUrls: { metaso: `${upstreamUrl}/msblind` } });
+let blindErr = null;
+await adapters
+  .generateVideo({ providerId: 'metaso', model: 'MiniMax-H3', prompt: 'x', duration: 5 })
+  .catch((e) => (blindErr = e));
+check('连着读不出状态就停下来，不再空等到超时',
+  /读不出任务状态/.test(blindErr?.message || ''), blindErr?.message?.slice(0, 120));
+check('停下来时把返回内容和 task_id 都摊开了',
+  /task_id/.test(blindErr?.message || '') && /它返回的是/.test(blindErr?.message || ''),
+  blindErr?.message?.slice(-160));
+settings.patch({ baseUrls: { metaso: `${upstreamUrl}/ms` } });
+
+// 用户在界面上填了查任务地址，就该直接用它，不再瞎猜
+adapters.resetQueryUrlCache();
+upstream.msQueryHits = 0;
+settings.patch({ endpointOverrides: { 'metaso.videoQuery': `${upstreamUrl}/ms/video_generation/{taskId}` } });
+const overridden = await adapters.generateVideo({
+  providerId: 'metaso', model: 'MiniMax-H3', prompt: 'x', duration: 5,
+  firstFrameUrl: 'https://x.invalid/f.png'
+});
+check('手填的查任务地址直接生效（{taskId} 会被替换）', Boolean(overridden.url), overridden.url);
+settings.patch({ endpointOverrides: { 'metaso.videoQuery': '' } });
+check('填空等于清掉覆盖，回到自动探测',
+  !settings.get('endpointOverrides')['metaso.videoQuery']);
+
 // 全都试不通时要给可执行的下一步，而不是一句"失败了"
 settings.patch({ baseUrls: { metaso: `${upstreamUrl}/msbad` } });
 let msErr = null;
@@ -1170,6 +1226,26 @@ check('404「模型不存在」被指认成模型问题，而不是 baseUrl', /�
 check('报错里带了服务端原话', /does not exist/.test(explained), explained);
 
 // ─────────────────────── 9. Windows 文件名 ───────────────────────
+
+section('网络层错误说人话');
+{
+  const { explainNetworkError } = await import('../core/http-client.js');
+  const mk = (code) => Object.assign(new Error('fetch failed'), { cause: { code } });
+  const timeout = explainNetworkError(mk('UND_ERR_CONNECT_TIMEOUT'), 'https://dashscope.aliyuncs.com/x');
+
+  // 连不上和"接口报错"完全是两回事：请求根本没发出去，密钥、模型一个都不沾边。
+  // 只甩一句 UND_ERR_CONNECT_TIMEOUT，用户会去翻密钥、换模型，全是白费。
+  check('连接超时说明白了和密钥无关', /和密钥、模型都没关系/.test(timeout), timeout.slice(0, 60));
+  check('连接超时带上了是哪个域名', /dashscope\.aliyuncs\.com/.test(timeout));
+  check('连接超时给了可执行的三步', /浏览器打开/.test(timeout) && /代理/.test(timeout));
+  check('域名解析失败单独一种说法', /域名解析不了/.test(explainNetworkError(mk('ENOTFOUND'), 'https://a.b/c')));
+  check('拒绝连接会提醒本地模型没起来',
+    /Ollama/.test(explainNetworkError(mk('ECONNREFUSED'), 'http://127.0.0.1:11434/v1')));
+  check('证书问题指向公司网络的根证书',
+    /根证书/.test(explainNetworkError(mk('CERT_HAS_EXPIRED'), 'https://a.b/c')));
+  check('没见过的错误码也不至于变成 undefined',
+    /连接失败/.test(explainNetworkError(mk('E_WHATEVER'), 'https://a.b/c')));
+}
 
 section('打包配置');
 {

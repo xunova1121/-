@@ -9,7 +9,7 @@
  * 在桌面应用里，密钥的加密密钥由操作系统托管并绑定当前用户账户，
  * 比裸 Node 模式下自管一个 key 文件安全一档。
  */
-import { app, BrowserWindow, Menu, shell, dialog, safeStorage } from 'electron';
+import { app, BrowserWindow, Menu, shell, dialog, safeStorage, net } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 // （Linux 下 `/` 开头恰好是合法说明符，所以这个坑只在 Windows 现形）。
 // 相对说明符没有这个问题，也不需要拼路径 —— 直接静态导入最稳。
 import { attachSafeStorage } from '../core/vault.js';
+import { attachElectronFetch } from '../core/http-client.js';
 import { listen } from '../core/server.js';
 import { DATA_DIR } from '../core/paths.js';
 
@@ -46,6 +47,8 @@ if (!app.requestSingleInstanceLock()) {
 async function startServer() {
   // 必须赶在保险箱第一次读盘之前接上 DPAPI，否则会先用 AES 兜底方案打开
   attachSafeStorage(safeStorage);
+  // Chromium 的网络栈会读系统代理；用不用由「设置 → 使用系统代理」决定
+  attachElectronFetch((url, init) => net.fetch(url, init));
   serverInfo = await listen();
   return serverInfo;
 }

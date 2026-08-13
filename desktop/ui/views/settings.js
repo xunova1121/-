@@ -379,6 +379,16 @@ export default {
     const pollInput = h('input', { type: 'number', value: settings.pollIntervalMs, min: 1000, step: 500,
       oninput: (e) => (pending.pollIntervalMs = Number(e.target.value)) });
 
+    // 系统代理：只有桌面版有这条路。Node 自带的 fetch 不读系统代理，
+    // 公司网络下就是连不上（UND_ERR_CONNECT_TIMEOUT），而这跟密钥毫无关系。
+    const proxyAvailable = state.health?.systemProxyAvailable;
+    const proxyBox = h('input', {
+      type: 'checkbox',
+      checked: settings.useSystemProxy === true,
+      disabled: !proxyAvailable,
+      onchange: (e) => (pending.useSystemProxy = e.target.checked)
+    });
+
     const ff = state.catalog.ffmpeg;
     root.append(
       h('div', { class: 'panel' },
@@ -397,7 +407,15 @@ export default {
           h('div', { class: 'field' }, h('label', {}, '单请求超时（毫秒）'), timeoutInput),
           h('div', { class: 'field' }, h('label', {}, '异步任务轮询间隔（毫秒）'), pollInput,
             h('div', { class: 'field-hint' }, '被限流（429）时把这个调大。'))
-        )
+        ),
+        h('div', { class: 'stack', style: 'gap:6px;margin-top:12px' },
+          check(proxyBox,
+            proxyAvailable
+              ? '走 Windows 的系统代理（公司网络连不上厂商时打开）'
+              : '走 Windows 的系统代理 —— 这是桌面版专有的，当前是命令行模式，用不了'),
+          h('div', { class: 'field-hint', style: 'margin:0' },
+            '默认关。关着的时候一律直连，和浏览器无关；如果厂商自检报 UND_ERR_CONNECT_TIMEOUT、' +
+            '但浏览器打得开那个域名，多半就是缺代理，打开这个开关再试。'))
       )
     );
 

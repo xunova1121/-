@@ -7,6 +7,26 @@
  */
 import { expandSecrets } from './vault.js';
 import * as logbus from './logbus.js';
+import * as settings from './settings.js';
+
+/**
+ * Electron 的 net.fetch 走的是 Chromium 的网络栈，**会读 Windows 的系统代理设置**；
+ * Node 自带的 fetch 不读，一律直连。公司网络必须走代理时，直连就是连不上
+ * （报 UND_ERR_CONNECT_TIMEOUT），而这跟密钥、模型一点关系都没有。
+ *
+ * 桌面版启动时会把它注进来，但**默认不用** —— 换网络栈是件有风险的事，
+ * 只在「设置 → 使用系统代理」打开时才切过去。命令行模式下没有它，保持直连。
+ */
+let electronFetch = null;
+export function attachElectronFetch(fn) {
+  if (typeof fn === 'function') electronFetch = fn;
+}
+export function fetchImpl() {
+  return settings.get('useSystemProxy') && electronFetch ? electronFetch : globalThis.fetch;
+}
+export function systemProxyAvailable() {
+  return Boolean(electronFetch);
+}
 
 export const DEFAULT_TIMEOUT_MS = 120000;
 
@@ -17,6 +37,47 @@ export class HttpError extends Error {
     this.status = status;
     this.bodyText = bodyText;
     this.url = url;
+  }
+}
+
+/**
+ * 网络层错误翻译成人话。
+ *
+ * 这一层的报错和"接口报错"完全是两回事：连都没连上，密钥、模型、参数一个都不沾边。
+ * 光甩一句 `连接失败：UND_ERR_CONNECT_TIMEOUT` 等于什么都没说 ——
+ * 用户会去翻密钥、换模型，全是白费。
+ */
+export function explainNetworkError(err, url = '') {
+  const code = err?.cause?.code || err?.code || '';
+  let host = '';
+  try {
+    host = new URL(url).host;
+  } catch {
+    /* url 本身就不合法的话，下面照样有话说 */
+  }
+  const where = host ? `「${host}」` : '这个地址';
+
+  switch (code) {
+    case 'UND_ERR_CONNECT_TIMEOUT':
+      return (
+        `连不上${where}（TCP 连接超时）。和密钥、模型都没关系 —— 请求根本没发出去。\n` +
+        `依次试：① 浏览器打开 https://${host || '该域名'} 看看通不通；` +
+        `② 通但应用连不上，多半是公司网络要走代理，Windows 上给启动脚本设 HTTPS_PROXY 环境变量；` +
+        `③ 浏览器也不通，就是这台机器到这个域名的网络被挡了，换网络或改用同一家的其他接入点。`
+      );
+    case 'ENOTFOUND':
+    case 'EAI_AGAIN':
+      return `域名解析不了${where}。检查网线/WiFi、DNS，以及接口根地址有没有写错（多打一个空格、少个字母都会这样）。`;
+    case 'ECONNREFUSED':
+      return `${where} 拒绝连接。地址或端口写错的可能性最大；如果是本地模型（Ollama/LM Studio），先确认它已经起来了。`;
+    case 'ECONNRESET':
+      return `连接被对方掐断（${where}）。常见于代理/防火墙中途拦截，或对方限流。重试一次看看是不是偶发。`;
+    case 'CERT_HAS_EXPIRED':
+    case 'UNABLE_TO_VERIFY_LEAF_SIGNATURE':
+    case 'SELF_SIGNED_CERT_IN_CHAIN':
+      return `HTTPS 证书验证不过（${code}）。多半是公司网络在做流量审计，需要把它的根证书装进系统信任库。`;
+    default:
+      return `连接失败：${code || err?.message || '未知网络错误'}${host ? `（${host}）` : ''}`;
   }
 }
 
@@ -140,7 +201,7 @@ export async function execute(spec, onEvent) {
 
   let response;
   try {
-    response = await fetch(url, {
+    response = await fetchImpl()(url, {
       method,
       headers: sentHeaders,
       body: bodyText,
@@ -152,7 +213,7 @@ export async function execute(spec, onEvent) {
     const aborted = err.name === 'AbortError';
     const message = aborted
       ? `请求超时（${timeoutMs}ms 未返回）`
-      : `连接失败：${err.cause?.code || err.message}`;
+      : explainNetworkError(err, url);
     const entry = logbus.record({
       ...logDraft,
       status: 0,

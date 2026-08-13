@@ -10,6 +10,15 @@ const DEFAULTS = {
   /** 各服务商的 baseUrl 覆盖：{ dashscope: 'https://…' } —— 走内网网关时改这里 */
   baseUrls: {},
   /**
+   * 单个接口地址的覆盖，键是 `<服务商>.<接口名>`，例如
+   * `{ 'metaso.videoQuery': 'https://metaso.cn/api/minimax/v2/query/xxx' }`。
+   *
+   * 为什么需要这个：中转平台常常只公开"提交"那一步的地址，查任务的路径要靠猜。
+   * 猜错了就会出现"厂商那边早就出片了，这边还在轮询"。
+   * 与其等我改目录，不如让你在界面上把查到的地址直接填进来 —— 填完立刻生效。
+   */
+  endpointOverrides: {},
+  /**
    * 能力路由：每种能力单独选厂商 + 模型。
    * 拆开而不是"选一家全包"，是因为各家强项差别很大 ——
    * 剧本用 DeepSeek/Qwen 便宜好用，出图火山 Seedream 稳，
@@ -69,6 +78,14 @@ const DEFAULTS = {
   uploadGateway: '',
   /** 留空则自动探测：先看 desktop/bin，再看 PATH */
   ffmpegPath: '',
+  /**
+   * 走 Windows 的系统代理（只有桌面版有这个能力）。
+   *
+   * Node 自带的 fetch 不读系统代理，一律直连 —— 公司网络下就是连不上，
+   * 报 UND_ERR_CONNECT_TIMEOUT。打开这个开关会改用 Electron 的网络栈，
+   * 它跟浏览器一样读系统代理。默认关：换网络栈有风险，不该悄悄替所有人换。
+   */
+  useSystemProxy: false,
   theme: 'dark',
   port: 5178
 };
@@ -83,7 +100,12 @@ export function all() {
   } catch {
     disk = {};
   }
-  cache = { ...DEFAULTS, ...disk, baseUrls: { ...DEFAULTS.baseUrls, ...(disk.baseUrls || {}) } };
+  cache = {
+    ...DEFAULTS,
+    ...disk,
+    baseUrls: { ...DEFAULTS.baseUrls, ...(disk.baseUrls || {}) },
+    endpointOverrides: { ...DEFAULTS.endpointOverrides, ...(disk.endpointOverrides || {}) }
+  };
   return cache;
 }
 
@@ -94,6 +116,11 @@ export function get(key) {
 export function patch(changes = {}) {
   const next = { ...all(), ...changes };
   if (changes.baseUrls) next.baseUrls = { ...all().baseUrls, ...changes.baseUrls };
+  if (changes.endpointOverrides) {
+    next.endpointOverrides = { ...all().endpointOverrides, ...changes.endpointOverrides };
+    // 填了空字符串等于"清掉这条覆盖，回到自动探测"
+    for (const [k, v] of Object.entries(next.endpointOverrides)) if (!v) delete next.endpointOverrides[k];
+  }
   cache = next;
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const tmp = `${SETTINGS_FILE}.tmp`;
