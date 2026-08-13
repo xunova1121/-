@@ -161,6 +161,7 @@ npm run selftest
 | 阿里云百炼 DashScope | 原生 | Qwen、Qwen-VL、通义万相出图/视频、CosyVoice 配音 |
 | DeepSeek / 智谱 GLM / Kimi / 硅基流动 | OpenAI 兼容 | 对话、视觉、出图 |
 | Ollama / LM Studio | OpenAI 兼容 | 本地模型，不用密钥 |
+| **MiniMax 海螺** | 原生（三步：提交→轮询→取文件） | Hailuo 图生视频/文生视频、image-01 出图、对话 |
 | 可灵 Kling | 原生（AK/SK 签 JWT） | 图生视频 |
 | Vidu | 原生（`Token` 而非 `Bearer`） | 参考图生视频（锁人设最好的一条路） |
 | 空白请求 | — | 任意 HTTP，调什么都行 |
@@ -245,5 +246,5 @@ desktop/
 │  ├─ app.css              视觉系统（调色间配色 · 钨丝暖底 + 日光冷蓝）
 │  └─ views/               六个页面
 ├─ electron/               桌面外壳
-└─ scripts/selftest.mjs    打桩自检，132 项
+└─ scripts/selftest.mjs    打桩自检，142 项
 ```

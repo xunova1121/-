@@ -10,6 +10,7 @@
 import { getProvider } from './catalog.js';
 import { allowedDurations, alignDuration } from '../duration.js';
 import { send, sendAsync, baseUrlOf, interpolate, diagnose } from './index.js';
+import { poll } from '../http-client.js';
 import * as settings from '../settings.js';
 
 /** 深度优先找响应里第一个媒体 URL。各家藏的深度都不一样，与其逐个写路径不如直接找。 */
@@ -52,6 +53,18 @@ function firstBase64(obj) {
     return null;
   };
   return walk(obj);
+}
+
+/** 海螺只认宽高比，不认像素尺寸。把 1280*720 这类换算过去。 */
+function sizeToRatio(size) {
+  const [w, h] = String(size).split(/[*x×]/).map(Number);
+  if (!w || !h) return '16:9';
+  const ratio = w / h;
+  const table = [
+    ['21:9', 21 / 9], ['16:9', 16 / 9], ['4:3', 4 / 3], ['3:2', 3 / 2],
+    ['1:1', 1], ['2:3', 2 / 3], ['3:4', 3 / 4], ['9:16', 9 / 16]
+  ];
+  return table.reduce((best, cur) => (Math.abs(cur[1] - ratio) < Math.abs(best[1] - ratio) ? cur : best))[0];
 }
 
 function endpoint(provider, key, fallback) {
@@ -185,6 +198,41 @@ export async function generateImage({
       return { url, base64: null, raw: polled?.json ?? submitted.json };
     }
 
+    case 'minimax': {
+      // 海螺出图用 aspect_ratio 而不是 size，返回在 data.image_urls 数组里
+      const body = {
+        model,
+        prompt: negative ? `${prompt}。避免出现：${negative}` : prompt,
+        aspect_ratio: sizeToRatio(size),
+        n: 1,
+        response_format: 'url'
+      };
+      if (seed !== null) body.seed = seed;
+      if (refImages.length) body.subject_reference = [{ type: 'character', image_file: refImages[0] }];
+
+      const res = await send(
+        {
+          provider: providerId,
+          label,
+          method: 'POST',
+          url: endpoint(provider, 'images', '{{baseUrl}}/image_generation'),
+          body,
+          timeoutMs
+        },
+        onEvent
+      );
+      if (!res.ok) fail(label, res);
+      // 海螺把业务错误塞在 base_resp 里，HTTP 仍然是 200 —— 不看这里会以为成功了
+      const status = res.json?.base_resp;
+      if (status && status.status_code !== 0) {
+        throw new Error(`${label} 失败：${status.status_msg}（code ${status.status_code}）`);
+      }
+      const url = res.json?.data?.image_urls?.[0] || firstMediaUrl(res.json);
+      const base64 = url ? null : firstBase64(res.json);
+      if (!url && !base64) throw new Error(`${label}：响应里既没有图片 URL 也没有 base64`);
+      return { url, base64, raw: res.json };
+    }
+
     case 'kling':
     case 'vidu':
       throw new Error(`${provider.name} 不提供出图能力，请在设置里把「出图」换成别家`);
@@ -264,6 +312,25 @@ export async function generateVideo({
     });
   }
 
+  // 海螺是三步流程，和别家的两步轮询不是一回事，单独走一条路径
+  if (family === 'minimax') {
+    return generateVideoMiniMax({
+      provider,
+      providerId,
+      model,
+      prompt,
+      firstFrameUrl,
+      refImages,
+      duration: actualDuration,
+      requestedDuration: duration,
+      allowed,
+      resolution,
+      timeoutMs,
+      label,
+      onEvent
+    });
+  }
+
   let spec;
   switch (family) {
     case 'dashscope':
@@ -330,6 +397,123 @@ export async function generateVideo({
     || firstMediaUrl(polled?.json ?? submitted.json);
   if (!url) throw new Error(`${label}：响应里没有视频 URL`);
   return { url, actualDuration, requestedDuration: duration, allowedDurations: allowed, raw: polled?.json ?? submitted.json };
+}
+
+/**
+ * 海螺（MiniMax）的图生视频：三步。
+ *
+ *   ① POST /video_generation          → task_id
+ *   ② GET  /query/video_generation    → status；成功后给 file_id
+ *   ③ GET  /files/retrieve?file_id=…  → download_url
+ *
+ * 比别家多出第③步，所以不能套通用的 taskPoll（那个假设轮询响应里就有 URL）。
+ * 新版接口据说也可能在第②步直接给 url —— 两种都接住，有 url 就跳过第③步。
+ *
+ * 还有个坑：海螺把业务错误放在 base_resp 里，HTTP 状态仍然是 200。
+ * 只看 res.ok 会把失败当成功，然后在"找不到 URL"处报一个莫名其妙的错。
+ */
+async function generateVideoMiniMax({
+  provider,
+  providerId,
+  model,
+  prompt,
+  firstFrameUrl,
+  refImages,
+  duration,
+  requestedDuration,
+  allowed,
+  resolution,
+  timeoutMs,
+  label,
+  onEvent
+}) {
+  const checkBiz = (res, step) => {
+    if (!res.ok) fail(`${label}·${step}`, res);
+    const base = res.json?.base_resp;
+    if (base && base.status_code !== 0) {
+      throw new Error(`${label}·${step} 失败：${base.status_msg}（code ${base.status_code}）`);
+    }
+    return res.json;
+  };
+
+  // ① 提交
+  const body = { model, prompt, duration, resolution };
+  if (firstFrameUrl) body.first_frame_image = firstFrameUrl;
+  // S2V 系列用主体参考锁人设，是海螺这边一致性最好的一条路
+  if (refImages.length && /S2V/i.test(model)) {
+    body.subject_reference = [{ type: 'character', image_file: refImages[0] }];
+  }
+
+  const created = checkBiz(
+    await send(
+      {
+        provider: providerId,
+        label: `${label}·提交`,
+        method: 'POST',
+        url: endpoint(provider, 'videoCreate', '{{baseUrl}}/video_generation'),
+        body,
+        timeoutMs: 60000
+      },
+      onEvent
+    ),
+    '提交'
+  );
+
+  const taskId = created.task_id || created.data?.task_id;
+  if (!taskId) throw new Error(`${label}：提交后没拿到 task_id`);
+  onEvent?.({ type: 'note', message: `海螺任务已提交：${taskId}` });
+
+  // ② 轮询
+  const queryUrl = endpoint(provider, 'videoQuery', '{{baseUrl}}/query/video_generation');
+  const finalStatus = await poll(
+    async (attempt) => {
+      const res = await send(
+        {
+          provider: providerId,
+          label: `${label}·轮询 #${attempt}`,
+          method: 'GET',
+          url: `${queryUrl}?task_id=${encodeURIComponent(taskId)}`,
+          timeoutMs: 30000
+        },
+        null
+      );
+      const json = checkBiz(res, '轮询');
+      const state = String(json.status || json.data?.status || '').toLowerCase();
+      onEvent?.({ type: 'poll', attempt, state });
+      if (['success', 'succeeded', 'finished'].includes(state)) return { done: true, value: json };
+      if (['fail', 'failed'].includes(state)) throw new Error(`${label}：任务失败（${state}）`);
+      return { done: false, value: json };
+    },
+    { intervalMs: settings.get('pollIntervalMs'), timeoutMs }
+  );
+
+  // ③ 取下载地址（第②步已经给了 url 就跳过）
+  let url = firstMediaUrl(finalStatus, { extensions: ['.mp4', '.mov'] }) || firstMediaUrl(finalStatus);
+  if (!url) {
+    const fileId = finalStatus.file_id || finalStatus.data?.file_id;
+    if (!fileId) throw new Error(`${label}：任务成功但既没有 URL 也没有 file_id`);
+    onEvent?.({ type: 'note', message: `取下载地址（file_id ${fileId}）…` });
+    const fileUrl = endpoint(provider, 'fileRetrieve', '{{baseUrl}}/files/retrieve');
+    const fileJson = checkBiz(
+      await send(
+        {
+          provider: providerId,
+          label: `${label}·取文件`,
+          method: 'GET',
+          url: `${fileUrl}?file_id=${encodeURIComponent(fileId)}`,
+          timeoutMs: 60000
+        },
+        onEvent
+      ),
+      '取文件'
+    );
+    url = fileJson.file?.download_url || firstMediaUrl(fileJson);
+  }
+  if (!url) throw new Error(`${label}：没能拿到视频下载地址`);
+
+  // 海螺的下载地址只活 9 小时，所以上层必须立刻落盘 —— 它本来就是这么做的
+  onEvent?.({ type: 'note', message: '拿到下载地址（9 小时后失效，正在落盘）' });
+  return { url, actualDuration: duration, requestedDuration, allowedDurations: allowed, raw: finalStatus };
 }
 
 // ──────────────────────────────── 配音 ────────────────────────────────

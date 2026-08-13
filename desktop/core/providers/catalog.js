@@ -486,6 +486,123 @@ export const PROVIDERS = [
     models: [{ id: 'qwen2.5:7b', capability: 'chat', label: 'Qwen2.5 7B（本地）' }]
   }),
 
+  // ───────────────────────── MiniMax 海螺 ─────────────────────────
+  {
+    id: 'minimax',
+    name: 'MiniMax 海螺（Hailuo 视频 / image-01）',
+    docs: 'https://platform.minimaxi.com/document',
+    // 国内站历史上是 api.minimax.chat，改版后是 api.minimaxi.com。
+    // 两个都可能可用，连不上就在这里换一个 —— 改完先点自检。
+    baseUrl: 'https://api.minimaxi.com/v1',
+    family: 'minimax',
+    auth: { type: 'bearer', secret: 'MINIMAX_API_KEY' },
+    secrets: [
+      { name: 'MINIMAX_API_KEY', label: 'API Key', required: true, hint: '控制台 → 账户管理 → 接口密钥' },
+      {
+        name: 'MINIMAX_GROUP_ID',
+        label: 'Group ID（可选）',
+        required: false,
+        hint: '部分接口（如语音）要求带 GroupId 查询参数，视频和出图一般不需要'
+      }
+    ],
+    capabilities: ['chat', 'vision', 't2i', 'i2v', 't2v'],
+    editableBaseUrl: true,
+    endpoints: {
+      chat: '{{baseUrl}}/text/chatcompletion_v2',
+      images: '{{baseUrl}}/image_generation',
+      videoCreate: '{{baseUrl}}/video_generation',
+      videoQuery: '{{baseUrl}}/query/video_generation',
+      fileRetrieve: '{{baseUrl}}/files/retrieve'
+    },
+    /**
+     * 海螺的视频是**三步**：
+     *   ① POST /video_generation            → task_id
+     *   ② GET  /query/video_generation      → status，成功后给 file_id（新版也可能直接给 url）
+     *   ③ GET  /files/retrieve?file_id=…    → download_url
+     * 比别家多一步，所以不走通用的 taskPoll，在 adapters 里单独实现。
+     * 下载地址只活 9 小时，务必落盘 —— 这一点应用本来就在做。
+     */
+    videoFlow: { steps: 3, urlTtlHours: 9 },
+    models: [
+      { id: 'MiniMax-Hailuo-2.3', capability: 'i2v', label: '海螺 2.3 图生视频（最新）', durations: [6, 10] },
+      { id: 'MiniMax-Hailuo-02', capability: 'i2v', label: '海螺 02 图生视频', durations: [6, 10] },
+      { id: 'I2V-01-Director', capability: 'i2v', label: 'I2V-01 Director（可写运镜指令）', durations: [6] },
+      { id: 'I2V-01-live', capability: 'i2v', label: 'I2V-01 live（二次元更好）', durations: [6] },
+      { id: 'I2V-01', capability: 'i2v', label: 'I2V-01', durations: [6] },
+      { id: 'T2V-01-Director', capability: 't2v', label: 'T2V-01 Director 文生视频', durations: [6] },
+      { id: 'T2V-01', capability: 't2v', label: 'T2V-01 文生视频', durations: [6] },
+      { id: 'S2V-01', capability: 'i2v', label: 'S2V-01（主体参考，锁人设强）', durations: [6] },
+      { id: 'image-01', capability: 't2i', label: 'image-01 文生图' },
+      { id: 'MiniMax-Text-01', capability: 'chat', label: 'MiniMax Text-01（长上下文）' },
+      { id: 'abab6.5s-chat', capability: 'chat', label: 'abab6.5s（便宜）' }
+    ],
+    probe: {
+      label: '连通性自检（一次最小对话）',
+      method: 'POST',
+      url: '{{baseUrl}}/text/chatcompletion_v2',
+      body: {
+        model: 'MiniMax-Text-01',
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 4
+      }
+    },
+    templates: [
+      {
+        id: 'chat',
+        label: '对话',
+        capability: 'chat',
+        method: 'POST',
+        url: '{{baseUrl}}/text/chatcompletion_v2',
+        stream: true,
+        body: {
+          model: 'MiniMax-Text-01',
+          stream: true,
+          messages: [{ role: 'user', content: '把这段话拆成三个分镜：执法艇在太湖上巡航' }]
+        }
+      },
+      {
+        id: 't2i',
+        label: '文生图 image-01',
+        capability: 't2i',
+        method: 'POST',
+        url: '{{baseUrl}}/image_generation',
+        body: {
+          model: 'image-01',
+          prompt: '国风水墨，太湖清晨，执法艇破雾而行',
+          aspect_ratio: '16:9',
+          n: 1,
+          response_format: 'url'
+        }
+      },
+      {
+        id: 'i2v',
+        label: '图生视频（第①步：提交任务）',
+        capability: 'i2v',
+        method: 'POST',
+        url: '{{baseUrl}}/video_generation',
+        body: {
+          model: 'MiniMax-Hailuo-02',
+          prompt: '镜头缓慢推进，水面波光流动',
+          first_frame_image: 'https://example.com/first-frame.png',
+          duration: 6,
+          resolution: '1080P'
+        }
+      },
+      {
+        id: 'video-query',
+        label: '图生视频（第②步：查任务）',
+        method: 'GET',
+        url: '{{baseUrl}}/query/video_generation?task_id=PUT_TASK_ID_HERE'
+      },
+      {
+        id: 'file-retrieve',
+        label: '图生视频（第③步：取下载地址）',
+        method: 'GET',
+        url: '{{baseUrl}}/files/retrieve?file_id=PUT_FILE_ID_HERE'
+      }
+    ]
+  },
+
   // ───────────────────────── 视频专线 ─────────────────────────
   {
     id: 'kling',

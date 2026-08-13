@@ -93,6 +93,55 @@ const upstream = http.createServer((req, res) => {
     );
   }
 
+  // ── MiniMax 海螺：三步视频流程 + 出图 ──
+  if (url.pathname === '/mm/video_generation') {
+    upstream.mmCreate = (upstream.mmCreate || 0) + 1;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ task_id: 'mm-task-7', base_resp: { status_code: 0, status_msg: 'success' } }));
+  }
+  if (url.pathname === '/mm/query/video_generation') {
+    upstream.mmPolls = (upstream.mmPolls || 0) + 1;
+    const done = upstream.mmPolls >= 2;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    // 成功时只给 file_id，不给 url —— 逼适配器走第三步
+    return res.end(JSON.stringify({
+      task_id: 'mm-task-7',
+      status: done ? 'Success' : 'Processing',
+      file_id: done ? 'mm-file-42' : undefined,
+      base_resp: { status_code: 0, status_msg: 'success' }
+    }));
+  }
+  if (url.pathname === '/mm/files/retrieve') {
+    upstream.mmRetrieve = (upstream.mmRetrieve || 0) + 1;
+    upstream.mmFileId = url.searchParams.get('file_id');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({
+      file: { file_id: 'mm-file-42', download_url: `${upstreamUrl}/out.mp4` },
+      base_resp: { status_code: 0, status_msg: 'success' }
+    }));
+  }
+  if (url.pathname === '/mm/image_generation') {
+    let raw = '';
+    req.on('data', (c) => (raw += c));
+    req.on('end', () => {
+      upstream.mmImageBody = JSON.parse(raw || '{}');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      // 业务失败也回 200，错误藏在 base_resp —— 适配器必须看这里
+      if (upstream.mmImageFail) {
+        return res.end(JSON.stringify({ base_resp: { status_code: 1008, status_msg: '余额不足' } }));
+      }
+      res.end(JSON.stringify({
+        data: { image_urls: [`${upstreamUrl}/pixel.png`] },
+        base_resp: { status_code: 0, status_msg: 'success' }
+      }));
+    });
+    return undefined;
+  }
+  if (url.pathname === '/out.mp4') {
+    res.writeHead(200, { 'Content-Type': 'video/mp4' });
+    return res.end(Buffer.from('fake-mp4'));
+  }
+
   // ── 以下是给"整条流水线打桩"用的 OpenAI 兼容接口 ──
 
   if (url.pathname === '/v3/chat/completions') {
@@ -603,6 +652,48 @@ check('时长格式化成人话', durationMod.fmtSeconds(95) === '1 分 35 秒' 
 const shotPromptSrc = fs.readFileSync(path.join(PROJECT_ROOT, 'core/pipeline/studio.js'), 'utf8');
 check('分镜提示词带了总时长预算', /TARGET_SECONDS/.test(shotPromptSrc));
 check('并且明确要求不要平均分配镜长', /不要平均分配/.test(shotPromptSrc));
+
+section('MiniMax 海螺三步视频流程');
+const adapters = await import('../core/providers/adapters.js');
+settings.patch({ baseUrls: { minimax: `${upstreamUrl}/mm` }, pollIntervalMs: 10 });
+vault.setSecret('MINIMAX_API_KEY', 'mm-key');
+
+const mmEvents = [];
+const mmVideo = await adapters.generateVideo({
+  providerId: 'minimax',
+  model: 'MiniMax-Hailuo-02',
+  prompt: '镜头缓推',
+  firstFrameUrl: 'https://x.invalid/f.png',
+  duration: 5,
+  onEvent: (ev) => mmEvents.push(ev)
+});
+check('三步都走到了：提交 → 轮询 → 取文件',
+  upstream.mmCreate === 1 && upstream.mmPolls >= 2 && upstream.mmRetrieve === 1,
+  `create=${upstream.mmCreate} polls=${upstream.mmPolls} retrieve=${upstream.mmRetrieve}`);
+check('第三步用的是第二步给的 file_id', upstream.mmFileId === 'mm-file-42', upstream.mmFileId);
+check('最终拿到下载地址', /out\.mp4$/.test(mmVideo.url), mmVideo.url);
+check('时长对齐到海螺的 6 秒档（请求 5 秒）', mmVideo.actualDuration === 6, `${mmVideo.actualDuration}`);
+check('轮询过程有上报，界面才能显示进度', mmEvents.some((e) => e.type === 'poll'));
+
+const mmImg = await adapters.generateImage({
+  providerId: 'minimax',
+  model: 'image-01',
+  prompt: '太湖清晨',
+  size: '1280*720'
+});
+check('海螺出图拿到 URL', /pixel\.png$/.test(mmImg.url), mmImg.url);
+check('像素尺寸被换算成宽高比（海螺只认比例）',
+  upstream.mmImageBody?.aspect_ratio === '16:9', JSON.stringify(upstream.mmImageBody?.aspect_ratio));
+check('负向词并进正向描述（海螺没有 negative_prompt 字段）',
+  /避免出现/.test(upstream.mmImageBody?.prompt || ''), upstream.mmImageBody?.prompt);
+
+// 海螺把业务错误放在 base_resp 里，HTTP 仍然 200。只看 res.ok 会把失败当成功。
+upstream.mmImageFail = true;
+let mmErr = null;
+await adapters.generateImage({ providerId: 'minimax', model: 'image-01', prompt: 'x' }).catch((e) => (mmErr = e));
+check('HTTP 200 但 base_resp 报错时判为失败', Boolean(mmErr), '没有抛错');
+check('错误信息带上服务端原话', /余额不足/.test(mmErr?.message || ''), mmErr?.message);
+upstream.mmImageFail = false;
 
 // ─────────────────────── 8. 上线前体检 ───────────────────────
 
