@@ -187,6 +187,19 @@ const upstream = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ task_id: '424010985738629' }));
   }
+  // 服务商在目录里自带的写法（{origin}/api/video-generation/{taskId}）要先被试到
+  if (url.pathname === '/api/video-generation/own-1') {
+    upstream.ownHits = (upstream.ownHits || 0) + 1;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({
+      task: { id: 'own-1', status: 'succeeded', content: { url: `${upstreamUrl}/out.mp4` } }
+    }));
+  }
+  if (url.pathname === '/msown/video_generation' && req.method === 'POST') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ task_id: 'own-1' }));
+  }
+
   if (url.pathname === '/msv2/video_generation/424010985738629') {
     upstream.msv2Hits = (upstream.msv2Hits || 0) + 1;
     const done = upstream.msv2Hits >= 2;
@@ -1164,6 +1177,19 @@ check('套了一层 task 也能读出状态并拿到视频', /out\.mp4$/.test(v2
 check('轮到 succeeded 才算完，没有提前收工', upstream.msv2Hits >= 2, `${upstream.msv2Hits} 次`);
 check('厂商回的真实时长被采纳（不是我们对齐前那个数）', v2.actualDuration === 5, `${v2.actualDuration}`);
 check('厂商回的真实分辨率被采纳', v2.resolution === '2K', v2.resolution);
+settings.patch({ baseUrls: { metaso: `${upstreamUrl}/ms` } });
+adapters.resetQueryUrlCache();
+
+// 服务商在目录里自带的路径要排在通用候选之前 —— 中转平台常有自己的一套，
+// 通用清单猜不到，但它自己知道
+adapters.resetQueryUrlCache();
+settings.patch({ baseUrls: { metaso: `${upstreamUrl}/msown` } });
+upstream.ownHits = 0;
+const own = await adapters.generateVideo({
+  providerId: 'metaso', model: 'MiniMax-H3', prompt: 'x', duration: 5,
+  firstFrameUrl: 'https://x.invalid/f.png'
+});
+check('目录里给这家声明的查询写法被优先试到', Boolean(own.url) && upstream.ownHits >= 1, own.url);
 settings.patch({ baseUrls: { metaso: `${upstreamUrl}/ms` } });
 adapters.resetQueryUrlCache();
 

@@ -437,5 +437,5 @@ desktop/
 │  ├─ app.css              视觉系统（调色间配色 · 钨丝暖底 + 日光冷蓝）
 │  └─ views/               项目 / 创作台 / 设定集 / 联调台 / 服务商 / 请求记录 / 设置
 ├─ electron/               桌面外壳
-└─ scripts/selftest.mjs    打桩自检，245 项
+└─ scripts/selftest.mjs    打桩自检，246 项
 ```

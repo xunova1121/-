@@ -684,7 +684,15 @@ export const PROVIDERS = [
     endpoints: {
       videoCreate: '{{baseUrl}}/video_generation',
       /**
-       * 查任务：`GET /video_generation/{task_id}`，实测确认过，响应长这样 ——
+       * 查任务：`GET {{baseUrl}}/query/video_generation/{task_id}`。
+       * 这是 MiniMax v2 官方文档写明的写法，**task_id 是路径段、不是查询参数**，
+       * 而这家的 baseUrl 已经以 /v2 结尾，所以直接拼在后面就对。
+       *
+       * 用 `?task_id=` 那种（v1 的写法）去问 v2 会很误导人：中转平台把它当成
+       * 未知路径裸转发给上游，上游拿中转 key 当然不认，回一句 login fail (1004) ——
+       * "路径不对"就这样伪装成了"密钥不对"。
+       *
+       * 响应长这样（用户实测）——
        *   {"task":{"id":…,"status":"succeeded","content":{"url":…},
        *            "resolution":"2K","duration":5}}
        * 注意状态和地址都在 **task 这一层里面**，少看一层就读不出状态，
@@ -699,6 +707,19 @@ export const PROVIDERS = [
       // 这家没有"取文件"这一步：地址直接在 task.content.url 里
       fileRetrieve: ''
     },
+    /**
+     * 这家自己的一套路径，排在通用候选之前试。
+     *
+     * 线索来自用户实测拿到的视频地址：
+     *   https://files.metaso.cn/api/video-generation/2087979924949516288/content
+     * 说明秘塔在 MiniMax 那套之外，还有自己的 /api/video-generation/{id} 这条线。
+     * 猜错了代价只有一次请求 —— 探测会验证返回的确实是一条任务记录才认。
+     */
+    videoQueryShapes: [
+      '{origin}/api/video-generation/{taskId}',
+      '{origin}/api/video-generation/{taskId}/status',
+      '{{baseUrl}}/query/video_generation/{taskId}'
+    ],
     /**
      * 请求体和 MiniMax 官方 H3 大体一致（content[] 多模态），但多两个字段：
      *   ratio       "16:9" 这类宽高比

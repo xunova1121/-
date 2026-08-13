@@ -492,12 +492,24 @@ export function resetQueryUrlCache() {
   queryUrlCache.clear();
 }
 
+/**
+ * 查任务的候选写法，按命中概率排序。
+ *
+ * 第一条是 MiniMax v2 官方文档写明的那条：
+ *   GET {base}/query/video_generation/{task_id}   →   {"task":{"status":…,"content":{"url":…}}}
+ * 注意 **task_id 是路径段，不是查询参数** —— 这是踩过的坑：
+ * 拿 `?task_id=` 那种写法去问 v2，中转平台会把它当成未知路径裸转发给上游，
+ * 上游拿我们的中转 key 当然不认，回一句 `login fail …(1004)`。
+ * 于是"路径不对"被伪装成了"密钥不对"。
+ *
+ * 第二条是给那些 baseUrl 还停在 /v1、但用的是 v2 模型（H3）的情况兜底。
+ * 后面几条是各家中转的自创写法，见一个记一个。
+ */
 const QUERY_SHAPES = [
-  // MiniMax v2 / 秘塔这一族：GET /video_generation/{task_id}，回 {"task":{…}}。
-  // 放在第一个是因为它已经被实测确认过，先试它能少发几个请求。
+  (base, id) => `${base}/query/video_generation/${encodeURIComponent(id)}`,
+  (base, id) => `${base.replace(/\/v1$/, '/v2')}/query/video_generation/${encodeURIComponent(id)}`,
   (base, id) => `${base}/video_generation/${encodeURIComponent(id)}`,
   (base, id) => `${base}/query/video_generation?task_id=${encodeURIComponent(id)}`,
-  (base, id) => `${base}/query/video_generation/${encodeURIComponent(id)}`,
   (base, id) => `${base}/video_generation?task_id=${encodeURIComponent(id)}`,
   (base, id) => `${base}/tasks/${encodeURIComponent(id)}`,
   (base, id) => `${base}/task/${encodeURIComponent(id)}`,
@@ -596,6 +608,20 @@ function taskError(message, taskId) {
   return err;
 }
 
+/** 把目录里声明的模板展开成一个具体地址 */
+function expandShape(tpl, base, taskId) {
+  let origin = base;
+  try {
+    origin = new URL(base).origin;
+  } catch {
+    /* baseUrl 不合法的话就退回原样，下面照样能拼 */
+  }
+  return tpl
+    .replaceAll('{{baseUrl}}', base)
+    .replaceAll('{origin}', origin)
+    .replaceAll('{taskId}', encodeURIComponent(taskId));
+}
+
 async function resolveQueryUrl(provider, providerId, taskId, label, onEvent) {
   const base = baseUrlOf(provider);
   const configured =
@@ -613,9 +639,16 @@ async function resolveQueryUrl(provider, providerId, taskId, label, onEvent) {
   const cached = queryUrlCache.get(cacheKey);
   if (cached) return cached(base, taskId);
 
+  // 目录里给这家单独声明的写法排在通用候选前面 —— 中转平台常有自己的一套路径，
+  // 通用清单猜不到，但它自己知道
+  const shapes = [
+    ...(provider.videoQueryShapes || []).map((tpl) => (b, id) => expandShape(tpl, b, id)),
+    ...QUERY_SHAPES
+  ];
+
   const tried = [];
   const authRejected = [];
-  for (const shape of QUERY_SHAPES) {
+  for (const shape of shapes) {
     const url = shape(base, taskId);
     try {
       const res = await send(
@@ -875,6 +908,7 @@ async function generateVideoMiniMax({
       if (['success', 'succeeded', 'finished', 'done', 'completed', 'ok'].includes(state)) {
         return { done: true, value: json };
       }
+      // v2 的状态词是 queued / running / succeeded / failed / cancelled
       if (['fail', 'failed', 'error', 'canceled', 'cancelled'].includes(state)) {
         throw new Error(
           `${label}：任务失败（${state}）${json.status_msg || json.message ? ` — ${json.status_msg || json.message}` : ''}`
