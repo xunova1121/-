@@ -547,6 +547,77 @@ td.wrap { white-space: normal; max-width: 380px; }
   color: var(--ink-faint); margin-bottom: 6px;
 }
 
+/* ══════════════════════ 画风选择 ══════════════════════ */
+
+/* 缩略图用配色 + 纹理现画，不外链图片：离线可用，也不拿别人的作品当示例 */
+.style-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 10px;
+  margin-top: 4px;
+}
+.style-card {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: var(--r);
+  padding: 0 0 9px;
+  cursor: pointer;
+  overflow: hidden;
+  text-align: left;
+  font: inherit;
+  color: var(--ink-dim);
+  transition: border-color .12s, transform .12s;
+}
+.style-card:hover { border-color: var(--ink-faint); transform: translateY(-1px); }
+.style-card:focus-visible { outline: 2px solid var(--beam); outline-offset: 2px; }
+.style-card.active {
+  border-color: var(--beam);
+  box-shadow: 0 0 0 2px var(--beam-wash);
+  color: var(--ink);
+}
+.style-swatch { width: 100%; aspect-ratio: 4 / 3; display: block; }
+.style-name { font-size: 12.5px; font-weight: 600; padding: 8px 10px 1px; font-family: var(--display); }
+.style-hint { font-size: 10.5px; color: var(--ink-faint); padding: 0 10px; line-height: 1.4; }
+
+/* ══════════════════════ 章节 ══════════════════════ */
+
+.chapter-preview { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.chapter-list { display: flex; flex-direction: column; gap: 7px; }
+.chapter-row {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 11px 14px;
+  border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--ground);
+}
+.chapter-row.done { border-color: color-mix(in srgb, var(--good) 30%, var(--line)); }
+.chapter-main { flex: 1; min-width: 180px; }
+.chapter-title { font-size: 13.5px; font-weight: 600; font-family: var(--display); }
+.chapter-meta { font-family: var(--code); font-size: 10.5px; color: var(--ink-faint); margin-top: 2px; }
+
+/* ══════════════════════ 单镜重出 ══════════════════════ */
+
+select.mini {
+  font-size: 11px; padding: 4px 6px; border-radius: var(--r-sm);
+  background: var(--ground); border: 1px solid var(--line); color: var(--ink);
+  width: 100%; min-width: 0;
+}
+
+.shot-redo { margin-top: 4px; border-top: 1px solid var(--line-soft); padding-top: 7px; }
+.shot-redo summary {
+  font-size: 11.5px; color: var(--ink-faint); cursor: pointer; list-style: none;
+  padding: 2px 0;
+}
+.shot-redo summary::-webkit-details-marker { display: none; }
+.shot-redo summary::before { content: '⟳ '; }
+.shot-redo summary:hover { color: var(--beam); }
+.shot-redo[open] summary { color: var(--ink-dim); }
+.shot-redo-body { display: flex; flex-direction: column; gap: 5px; padding-top: 6px; }
+.shot-redo-body label { margin-bottom: 0; }
+.shot-model-row { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.shot-used { font-family: var(--code); font-size: 10px; color: var(--ink-faint); margin-top: 4px; }
+
+.sheet-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 7px; }
+
 /* ══════════════════════ 上线前体检 ══════════════════════ */
 
 .preflight-opts { display: flex; gap: 8px; flex-wrap: wrap; }

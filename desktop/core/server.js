@@ -23,6 +23,7 @@ import * as providers from './providers/index.js';
 import * as adapters from './providers/adapters.js';
 import * as studio from './pipeline/studio.js';
 import * as preflight from './preflight.js';
+import * as styles from './styles.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -171,7 +172,7 @@ function serveMedia(req, res, url) {
 
 async function handleApi(req, res, url) {
   const seg = url.pathname.split('/').filter(Boolean); // ['api', ...]
-  const [, a, b, c, d] = seg;
+  const [, a, b, c, d, e, f] = seg;
   const method = req.method;
 
   // ---- 基础信息 ----
@@ -222,6 +223,9 @@ async function handleApi(req, res, url) {
       return json(res, 200, { ok: true, items: vault.listMasked() });
     }
   }
+
+  // ---- 画风预设 ----
+  if (a === 'styles' && method === 'GET') return json(res, 200, { presets: styles.STYLE_PRESETS });
 
   // ---- 体检 ----
   if (a === 'preflight') {
@@ -302,11 +306,14 @@ async function handleApi(req, res, url) {
   if (a === 'projects') {
     if (method === 'GET' && !b) return json(res, 200, store.list());
     if (method === 'POST' && !b) return json(res, 201, store.create(await readBody(req)));
-    if (b && method === 'GET') {
+    // 这三条必须加 !c 限定"路径到此为止"。
+    // 否则 DELETE /projects/:id/bible/prop/xxx 会命中这里，把整个项目删掉；
+    // GET /projects/:id/chapters 也会返回项目而不是章节。子路由都在下面。
+    if (b && !c && method === 'GET') {
       const p = store.read(b);
       return p ? json(res, 200, p) : json(res, 404, { error: '项目不存在' });
     }
-    if (b && method === 'PATCH') {
+    if (b && !c && method === 'PATCH') {
       const patch = await readBody(req);
       return json(
         res,
@@ -314,7 +321,59 @@ async function handleApi(req, res, url) {
         store.update(b, (p) => Object.assign(p, patch, { id: p.id }))
       );
     }
-    if (b && method === 'DELETE') return json(res, 200, { ok: store.remove(b) });
+    if (b && !c && method === 'DELETE') return json(res, 200, { ok: store.remove(b) });
+
+    // ── 单镜重出：图或视频，可临时换服务商/模型 ──
+    if (b && c === 'shots' && d && e === 'regenerate' && method === 'POST') {
+      const opts = await readBody(req);
+      const stream = ndjson(res);
+      req.on('close', () => stream.end());
+      try {
+        const run = opts.kind === 'video' ? studio.regenerateShotVideo : studio.regenerateShot;
+        const project = await run(b, d, opts, (ev) => stream.send(ev));
+        stream.end({ type: 'finished', project });
+      } catch (err) {
+        stream.end({ type: 'error', message: err.message });
+      }
+      return undefined;
+    }
+
+    // ── 设定集条目：重出 / 新增 / 删除 ──
+    if (b && c === 'bible' && d) {
+      const kind = d; // char | scene | prop
+      if (e && f === 'regenerate' && method === 'POST') {
+        const opts = await readBody(req);
+        const stream = ndjson(res);
+        req.on('close', () => stream.end());
+        try {
+          const project = await studio.regenerateSheet(b, kind, decodeURIComponent(e), opts, (ev) => stream.send(ev));
+          stream.end({ type: 'finished', project });
+        } catch (err) {
+          stream.end({ type: 'error', message: err.message });
+        }
+        return undefined;
+      }
+      if (!e && method === 'POST') {
+        return json(res, 201, await studio.addBibleEntry(b, kind, await readBody(req)));
+      }
+      if (e && method === 'DELETE') {
+        return json(res, 200, studio.removeBibleEntry(b, kind, decodeURIComponent(e)));
+      }
+    }
+
+    // ── 章节 ──
+    if (b && c === 'chapters') {
+      if (method === 'GET') {
+        const p = store.read(b);
+        if (!p) return json(res, 404, { error: '项目不存在' });
+        return json(res, 200, { chapters: p.chapters || [], advice: studio.chapterAdvice(p.script) });
+      }
+      if (d === 'split' && method === 'POST') {
+        const opts = await readBody(req);
+        return json(res, 200, studio.splitChapters(b, opts));
+      }
+      if (method === 'DELETE') return json(res, 200, studio.clearChapters(b));
+    }
 
     // 跑某一阶段，进度流式回传
     if (b && c === 'stage' && d && method === 'POST') {

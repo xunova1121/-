@@ -1,26 +1,49 @@
 /**
- * 设定集：已冻结的角色 / 场景 / 道具。
+ * 设定集：已冻结的角色 / 场景 / 道具与衍生品。
  *
  * 这一页是可以改的，而且值得改 —— 模型第一遍写的外貌描述往往偏笼统。
  * 手动把"藏青立领制服"这类具体的颜色和款式写进去，后面几十镜都跟着受益。
+ *
+ * 每条都能单独改描述、单独重出图、单独换模型，也能自己加条目
+ * （中途出场的配角、后加的道具、周边衍生品都走这里）。
  */
-import { h, clear, api, toast, mediaUrl } from '../lib.js';
+import { h, clear, api, stream, toast, mediaUrl } from '../lib.js';
+
+const KINDS = [
+  {
+    kind: 'char',
+    title: '角色',
+    hint: '每个角色一颗固定种子 + 一张设定图。出镜头图时设定图会作为参考图一起送进模型 —— 这比任何文字描述都更能锁住脸和衣服。'
+  },
+  {
+    kind: 'scene',
+    title: '场景',
+    hint: '场景基准图定住建筑、光线方向和色温。同一场景的不同镜头引用同一张，避免上一镜阴天下一镜晴天。'
+  },
+  {
+    kind: 'prop',
+    title: '道具与衍生品',
+    hint: '镜头描述里提到道具名时，对应的外观和参考图会自动拼进提示词。一把刀、一枚徽章跨镜头长得不一样，同样出戏。'
+  }
+];
 
 export default {
   async render({ state }) {
     if (!state.projectId) {
       return h('div', { class: 'empty' }, h('b', {}, '先去创作台选一个项目'), '设定集属于某个具体项目。');
     }
-    const project = await api(`/projects/${state.projectId}`);
+    let project = await api(`/projects/${state.projectId}`);
     const root = h('div', { class: 'stack' });
+    const rerender = () => document.querySelector('#btn-refresh').click();
 
     if (!project.bible) {
       return h('div', { class: 'empty' },
         h('b', {}, `「${project.title}」还没有设定集`),
-        '回创作台跑第 01 步，模型会读一遍剧本，把角色和场景的外貌固定下来并出参考图。');
+        '回创作台跑第 01 步，模型会读一遍剧本，把角色、场景、道具的外貌固定下来并各出一张参考图。');
     }
 
     const bible = project.bible;
+    const imageProviders = state.catalog.providers.filter((p) => (p.capabilities || []).includes('t2i'));
 
     // ── 全片风格锚 ──
     const anchorInput = h('textarea', { rows: 2 }, bible.style.anchor);
@@ -38,113 +61,148 @@ export default {
         h('div', { class: 'grid2' },
           h('div', { class: 'field' }, h('label', {}, '主色调'), paletteInput),
           h('div', { class: 'field' }, h('label', {}, '负向提示词'), negativeInput)
-        )
+        ),
+        h('button', {
+          class: 'btn primary',
+          onclick: async (e) => {
+            e.target.disabled = true;
+            const next = structuredClone(bible);
+            next.style.anchor = anchorInput.value.trim();
+            next.style.palette = paletteInput.value.trim();
+            next.style.negative = negativeInput.value.trim();
+            try {
+              await api(`/projects/${project.id}`, { method: 'PATCH', body: { bible: next } });
+              toast('风格锚已保存，下一批出图立刻生效', 'ok');
+            } catch (err) {
+              toast(err.message, 'err');
+            } finally {
+              e.target.disabled = false;
+            }
+          }
+        }, '保存风格锚')
       )
     );
 
-    // ── 角色 / 场景 ──
-    function section(title, hint, items, kind) {
-      if (!items.length) return null;
+    // ── 三类条目 ──
+    for (const { kind, title, hint } of KINDS) {
+      const items = kind === 'char' ? bible.characters : kind === 'scene' ? bible.scenes : bible.props || [];
       const grid = h('div', { class: 'sheet-grid' });
-      for (const item of items) {
-        const area = h('textarea', { rows: 5, style: 'font-size:11.5px' }, item.appearance);
-        area.dataset.kind = kind;
-        area.dataset.name = item.name;
-        grid.append(
-          h('div', { class: 'sheet-card' },
-            item.sheetPath
-              ? h('img', { src: mediaUrl(item.sheetPath), alt: `${item.name} 参考图`, loading: 'lazy' })
-              : h('div', { class: 'ph' }, '参考图未生成'),
-            h('div', { class: 'sheet-body' },
-              h('div', { class: 'sheet-name' }, item.name),
-              item.role ? h('div', { class: 'sheet-role' }, item.role) : null,
-              h('div', { style: 'margin-top:8px' }, area),
-              h('div', { class: 'sheet-seed' }, `seed ${item.seed}`)
-            )
-          )
-        );
-      }
-      return h('div', { class: 'panel' },
-        h('h2', { class: 'panel-title' }, title, h('span', { class: 'badge' }, `${items.length}`)),
-        h('p', { class: 'panel-hint' }, hint),
-        grid
-      );
-    }
 
-    const charSection = section(
-      '角色',
-      '每个角色一颗固定种子 + 一张设定图。出镜头图时，设定图会作为参考图一起送进模型 —— 这比任何文字描述都更能锁住脸和衣服。',
-      bible.characters,
-      'char'
-    );
-    const sceneSection = section(
-      '场景',
-      '场景基准图定住建筑、光线方向和色温。同一场景的不同镜头引用同一张，避免上一镜阴天下一镜晴天。',
-      bible.scenes,
-      'scene'
-    );
+      for (const item of items) grid.append(sheetCard(kind, item));
 
-    if (charSection) root.append(charSection);
-    if (sceneSection) root.append(sceneSection);
+      // 新增条目
+      const newName = h('input', { type: 'text', placeholder: '名称' });
+      const newDesc = h('input', { type: 'text', placeholder: '外观描述（越具体越好）' });
 
-    if (bible.props?.length) {
       root.append(
         h('div', { class: 'panel' },
-          h('h2', { class: 'panel-title' }, '道具', h('span', { class: 'badge' }, `${bible.props.length}`)),
-          h('p', { class: 'panel-hint' }, '镜头描述里提到道具名时，对应的外观描述会自动拼进提示词。'),
-          h('div', { class: 'table-wrap' },
-            h('table', {},
-              h('thead', {}, h('tr', {}, h('th', {}, '名称'), h('th', {}, '外观'), h('th', { class: 'mono' }, 'SEED'))),
-              h('tbody', {}, bible.props.map((p) =>
-                h('tr', {}, h('td', {}, p.name), h('td', { class: 'wrap' }, p.appearance), h('td', { class: 'mono' }, p.seed))
-              ))
-            )
+          h('h2', { class: 'panel-title' }, title, h('span', { class: 'badge' }, `${items.length}`)),
+          h('p', { class: 'panel-hint' }, hint),
+          items.length ? grid : h('div', { class: 'empty' }, '这一类还是空的，可以在下面手动加。'),
+          h('div', { class: 'row', style: 'margin-top:14px' },
+            h('div', { class: 'shrink', style: 'width:180px' }, newName),
+            h('div', {}, newDesc),
+            h('div', { class: 'shrink' },
+              h('button', {
+                class: 'btn',
+                onclick: async (e) => {
+                  if (!newName.value.trim()) return toast('先起个名字', 'err');
+                  e.target.disabled = true;
+                  try {
+                    await api(`/projects/${project.id}/bible/${kind}`, {
+                      method: 'POST',
+                      body: { name: newName.value.trim(), appearance: newDesc.value.trim() }
+                    });
+                    toast('已加入设定集，点它的「重出」出图', 'ok');
+                    rerender();
+                  } catch (err) {
+                    toast(err.message, 'err');
+                  } finally {
+                    e.target.disabled = false;
+                  }
+                }
+              }, `+ 加${title.slice(0, 2)}`))
           )
         )
       );
     }
 
-    // ── 操作 ──
-    root.append(
-      h('div', { class: 'panel' },
-        h('h2', { class: 'panel-title' }, '操作'),
-        h('p', { class: 'panel-hint' },
-          '改完记得保存。重新生成设定集会让人设整体漂移一次 —— 只在剧本大改后才这么做，已出的图不会自动跟着更新。'),
-        h('div', { class: 'inline' },
-          h('button', {
-            class: 'btn primary',
-            onclick: async (e) => {
-              const btn = e.target;
-              btn.disabled = true;
-              const next = structuredClone(bible);
-              next.style.anchor = anchorInput.value.trim();
-              next.style.palette = paletteInput.value.trim();
-              next.style.negative = negativeInput.value.trim();
-              for (const area of root.querySelectorAll('textarea[data-kind]')) {
-                const bucket = area.dataset.kind === 'char' ? next.characters : next.scenes;
-                const target = bucket.find((x) => x.name === area.dataset.name);
-                if (target) target.appearance = area.value.trim();
+    /** 一张设定卡：图 + 可改描述 + 换模型重出 + 删除 */
+    function sheetCard(kind, item) {
+      const area = h('textarea', { rows: 4, style: 'font-size:11.5px' }, item.appearance || '');
+      const provSel = h('select', { class: 'mini' },
+        h('option', { value: '' }, `默认（${state.catalog.routing.image.provider}）`),
+        ...imageProviders.map((p) => h('option', { value: p.id }, p.name)));
+      const modelSel = h('select', { class: 'mini' });
+
+      const refill = () => {
+        const p = state.catalog.providers.find((x) => x.id === (provSel.value || state.catalog.routing.image.provider));
+        clear(modelSel).append(h('option', { value: '' }, `默认（${state.catalog.routing.image.model}）`));
+        for (const m of (p?.models || []).filter((m) => !m.capability || m.capability === 't2i' || m.capability === 'i2i')) {
+          modelSel.append(h('option', { value: m.id }, m.label || m.id));
+        }
+      };
+      provSel.addEventListener('change', refill);
+      refill();
+
+      const img = item.sheetPath
+        ? h('img', { src: `${mediaUrl(item.sheetPath)}&v=${item.seed}`, alt: `${item.name} 参考图`, loading: 'lazy' })
+        : h('div', { class: 'ph' }, '未生成');
+
+      const redoBtn = h('button', {
+        class: 'btn sm',
+        onclick: async () => {
+          redoBtn.disabled = true;
+          const label = redoBtn.textContent;
+          redoBtn.textContent = '生成中…';
+          try {
+            await stream(
+              `/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}/regenerate`,
+              {
+                appearance: area.value.trim(),
+                provider: provSel.value || undefined,
+                model: modelSel.value || undefined
+              },
+              (ev) => {
+                if (ev.type === 'finished' && ev.project) project = ev.project;
+                if (ev.type === 'error') toast(ev.message, 'err');
               }
-              try {
-                await api(`/projects/${project.id}`, { method: 'PATCH', body: { bible: next } });
-                toast('设定已保存，下一批出图立刻生效', 'ok');
-              } catch (err) {
-                toast(err.message, 'err');
-              } finally {
-                btn.disabled = false;
+            );
+            toast(`${item.name} 已重出`, 'ok');
+            rerender();
+          } catch (err) {
+            toast(err.message, 'err');
+          } finally {
+            redoBtn.disabled = false;
+            redoBtn.textContent = label;
+          }
+        }
+      }, item.sheetPath ? '改完重出' : '生成');
+
+      return h('div', { class: 'sheet-card' },
+        img,
+        h('div', { class: 'sheet-body' },
+          h('div', { class: 'sheet-name' }, item.name),
+          item.role ? h('div', { class: 'sheet-role' }, item.role) : null,
+          h('div', { style: 'margin-top:8px' }, area),
+          h('div', { class: 'sheet-actions' }, provSel, modelSel),
+          h('div', { class: 'inline', style: 'margin-top:8px' },
+            redoBtn,
+            h('button', {
+              class: 'btn ghost sm',
+              title: '从设定集里移除',
+              onclick: async () => {
+                if (!confirm(`把「${item.name}」从设定集里删掉？已生成的镜头图不受影响。`)) return;
+                await api(`/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}`, { method: 'DELETE' });
+                toast('已删除', 'ok');
+                rerender();
               }
-            }
-          }, '保存设定'),
-          h('button', {
-            class: 'btn danger',
-            onclick: () => {
-              if (!confirm('重新生成会覆盖现有设定和参考图，已生成的镜头图不会自动更新，前后可能对不上。确定？')) return;
-              toast('回创作台点第 01 步「设定集」即可重跑');
-            }
-          }, '重新生成设定集…')
+            }, '删除')
+          ),
+          h('div', { class: 'sheet-seed' }, `seed ${item.seed}`)
         )
-      )
-    );
+      );
+    }
 
     return root;
   }

@@ -20,6 +20,7 @@
 import crypto from 'node:crypto';
 import * as adapters from '../providers/adapters.js';
 import * as settings from '../settings.js';
+import { resolveStyle } from '../styles.js';
 
 /** 由项目和名字派生稳定种子。同一项目里同一角色，永远同一颗种子。 */
 export function deriveSeed(projectId, name) {
@@ -60,7 +61,11 @@ const BIBLE_PROMPT = `你是动画片的美术总监。基于剧本，为每个�
     }
   ],
   "props": [
-    { "name": "道具名", "appearance": "外观描述（30字内）" }
+    {
+      "name": "道具名",
+      "appearance": "外观描述（30字内）",
+      "sheetPrompt": "用于生成该道具参考图的提示词：单个物体、纯色背景、无人物、产品图视角"
+    }
   ]
 }`;
 
@@ -70,13 +75,20 @@ const BIBLE_PROMPT = `你是动画片的美术总监。基于剧本，为每个�
  */
 export async function buildBible(project, { onEvent } = {}) {
   const routing = adapters.resolvedRouting();
+  const style = resolveStyle(project);
   onEvent?.({ type: 'note', message: `生成设定集（${routing.chat.provider} / ${routing.chat.model}）…` });
+
+  // 长篇只把前若干字交给模型定人设：设定集要的是"谁长什么样"，
+  // 不是完整剧情，喂全文既超上下文又稀释重点。
+  const source = project.chapters?.length
+    ? project.chapters.map((c) => c.script).join('\n\n').slice(0, 12000)
+    : project.script;
 
   const { text } = await adapters.chat({
     providerId: routing.chat.provider,
     model: routing.chat.model,
     system: BIBLE_PROMPT,
-    user: `画风要求：${project.style || '国风水墨'}\n\n剧本：\n${project.script}`,
+    user: `画风要求：${style.anchor}\n\n剧本：\n${source}`,
     temperature: 0.6,
     jsonMode: true,
     label: '生成设定集'
@@ -87,9 +99,12 @@ export async function buildBible(project, { onEvent } = {}) {
   const bible = {
     frozenAt: new Date().toISOString(),
     style: {
-      anchor: parsed.style?.anchor || project.style || '国风水墨，电影感构图',
-      palette: parsed.style?.palette || '',
+      // 用户选的预设优先于模型的发挥 —— 他挑「赛博朋克」就是要赛博朋克，
+      // 不该被模型读完剧本后改成别的
+      anchor: style.anchor || parsed.style?.anchor || '电影感构图',
+      palette: style.palette || parsed.style?.palette || '',
       negative:
+        style.negative ||
         parsed.style?.negative ||
         '模糊, 低质量, 畸变, 多余手指, 文字水印, 崩脸, 五官不对称, 风格突变'
     },
@@ -112,10 +127,15 @@ export async function buildBible(project, { onEvent } = {}) {
       sheetUrl: null,
       locked: true
     })),
+    // 道具和角色/场景一样也出参考图：一把刀、一枚徽章，跨镜头长得不一样同样出戏
     props: (parsed.props || []).map((p) => ({
       name: p.name,
       appearance: p.appearance || '',
-      seed: deriveSeed(project.id, `prop:${p.name}`)
+      sheetPrompt: p.sheetPrompt || `${p.appearance}，产品图，纯色背景，单个物体，无人物`,
+      seed: deriveSeed(project.id, `prop:${p.name}`),
+      sheetPath: null,
+      sheetUrl: null,
+      locked: true
     }))
   };
 

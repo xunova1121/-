@@ -107,13 +107,19 @@ export const PROVIDERS = [
     docs: 'https://platform.openai.com/docs/api-reference',
     baseUrl: 'https://api.openai.com/v1',
     secret: 'OPENAI_API_KEY',
-    capabilities: ['chat', 'vision', 't2i', 'i2i'],
+    capabilities: ['chat', 'vision', 't2i', 'i2i', 'tts'],
     hint: 'sk- 开头；用兼容网关时把 baseUrl 一并改掉',
     models: [
-      { id: 'gpt-4o', capability: 'vision', label: 'GPT-4o（带视觉，做一致性校验）' },
+      { id: 'gpt-4o', capability: 'vision', label: 'GPT-4o（带视觉，做一致性复核）' },
       { id: 'gpt-4o-mini', capability: 'chat', label: 'GPT-4o mini（便宜，跑分镜够用）' },
       { id: 'gpt-4.1', capability: 'chat', label: 'GPT-4.1' },
-      { id: 'gpt-image-1', capability: 't2i', label: 'GPT Image 1（文生图 / 图生图）' }
+      { id: 'gpt-4.1-mini', capability: 'chat', label: 'GPT-4.1 mini' },
+      { id: 'o4-mini', capability: 'chat', label: 'o4-mini（推理，拆复杂剧本）' },
+      { id: 'gpt-image-1', capability: 't2i', label: 'GPT Image 1（文生图 / 图生图）' },
+      { id: 'dall-e-3', capability: 't2i', label: 'DALL·E 3' },
+      { id: 'gpt-4o-mini-tts', capability: 'tts', label: 'GPT-4o mini TTS（可指定语气）' },
+      { id: 'tts-1-hd', capability: 'tts', label: 'TTS-1 HD（音质好）' },
+      { id: 'tts-1', capability: 'tts', label: 'TTS-1（快）' }
     ]
   }),
 
@@ -182,10 +188,17 @@ export const PROVIDERS = [
       { id: 'doubao-seed-1-6-250615', capability: 'vision', label: '豆包 Seed 1.6（多模态，一致性复核主力）' },
       { id: 'doubao-1-5-pro-32k-250115', capability: 'chat', label: '豆包 1.5 Pro 32K（剧本分析）' },
       { id: 'doubao-1-5-lite-32k-250115', capability: 'chat', label: '豆包 1.5 Lite 32K（便宜）' },
+      { id: 'doubao-seed-1-6-flash-250615', capability: 'chat', label: '豆包 Seed 1.6 Flash（最快）' },
+      { id: 'doubao-1-5-vision-pro-32k-250115', capability: 'vision', label: '豆包 1.5 Vision Pro' },
+      { id: 'deepseek-v3-241226', capability: 'chat', label: 'DeepSeek V3（方舟托管）' },
+      { id: 'deepseek-r1-250120', capability: 'chat', label: 'DeepSeek R1（方舟托管，推理强）' },
+      { id: 'kimi-k2-250711', capability: 'chat', label: 'Kimi K2（方舟托管）' },
+      { id: 'doubao-seedream-4-0-250828', capability: 't2i', label: 'Seedream 4.0 文生图（最新）' },
       { id: 'doubao-seedream-3-0-t2i-250415', capability: 't2i', label: 'Seedream 3.0 文生图' },
       { id: 'doubao-seededit-3-0-i2i-250628', capability: 'i2i', label: 'SeedEdit 3.0 图生图（保角色用这个）' },
       { id: 'doubao-seedance-1-0-pro-250528', capability: 'i2v', label: 'Seedance 1.0 Pro 图生视频' },
-      { id: 'doubao-seedance-1-0-lite-i2v-250428', capability: 'i2v', label: 'Seedance 1.0 Lite 图生视频' }
+      { id: 'doubao-seedance-1-0-lite-i2v-250428', capability: 'i2v', label: 'Seedance 1.0 Lite 图生视频' },
+      { id: 'doubao-seedance-1-0-lite-t2v-250428', capability: 't2v', label: 'Seedance 1.0 Lite 文生视频' }
     ],
     probe: {
       label: '连通性自检（一次最小对话）',
@@ -272,13 +285,22 @@ export const PROVIDERS = [
     // 若你的面板给的不是这个，在「服务商设置」里改一行即可，改完立刻生效。
     baseUrl: 'https://router.floatai.cn/v1',
     secret: 'FLOATAI_API_KEY',
-    capabilities: ['chat', 'vision', 't2i', 'i2i'],
-    hint: '控制台 → 令牌，sk- 开头。先用「列出可用模型」确认这张卡开通了哪些模型',
+    capabilities: ['chat', 'vision', 't2i', 'i2i', 'tts'],
+    hint: '控制台 → 令牌，sk- 开头。中转网关能用哪些模型完全看你这张卡，务必先点「拉取可用模型」',
     models: [
       { id: 'gpt-4o', capability: 'vision', label: 'GPT-4o（转发）' },
+      { id: 'gpt-4.1', capability: 'chat', label: 'GPT-4.1（转发）' },
       { id: 'claude-sonnet-4', capability: 'chat', label: 'Claude Sonnet 4（转发）' },
+      { id: 'claude-opus-4', capability: 'chat', label: 'Claude Opus 4（转发）' },
       { id: 'gemini-2.5-pro', capability: 'vision', label: 'Gemini 2.5 Pro（转发）' },
-      { id: 'deepseek-v3', capability: 'chat', label: 'DeepSeek V3（转发）' }
+      { id: 'gemini-2.5-flash', capability: 'vision', label: 'Gemini 2.5 Flash（转发）' },
+      { id: 'deepseek-v3', capability: 'chat', label: 'DeepSeek V3（转发）' },
+      { id: 'deepseek-r1', capability: 'chat', label: 'DeepSeek R1（转发）' },
+      { id: 'qwen-max', capability: 'chat', label: 'Qwen Max（转发）' },
+      { id: 'gpt-image-1', capability: 't2i', label: 'GPT Image 1（转发）' },
+      { id: 'dall-e-3', capability: 't2i', label: 'DALL·E 3（转发）' },
+      { id: 'flux-1.1-pro', capability: 't2i', label: 'FLUX 1.1 Pro（转发）' },
+      { id: 'tts-1-hd', capability: 'tts', label: 'TTS-1 HD（转发）' }
     ]
   }),
 
@@ -311,13 +333,26 @@ export const PROVIDERS = [
     models: [
       { id: 'qwen-max', capability: 'chat', label: 'Qwen Max（剧本分析质量最好）' },
       { id: 'qwen-plus', capability: 'chat', label: 'Qwen Plus（性价比高）' },
-      { id: 'qwen-vl-max', capability: 'vision', label: 'Qwen-VL Max（一致性校验）' },
+      { id: 'qwen-turbo', capability: 'chat', label: 'Qwen Turbo（最快最便宜）' },
+      { id: 'qwen-long', capability: 'chat', label: 'Qwen Long（长篇小说改编用这个）' },
+      { id: 'qwen-vl-max', capability: 'vision', label: 'Qwen-VL Max（一致性复核）' },
+      { id: 'qwen-vl-plus', capability: 'vision', label: 'Qwen-VL Plus（便宜些）' },
       { id: 'wan2.2-t2i-plus', capability: 't2i', label: '通义万相 2.2 文生图 Plus' },
       { id: 'wan2.2-t2i-flash', capability: 't2i', label: '通义万相 2.2 文生图 Flash' },
-      { id: 'wanx2.1-i2v-turbo', capability: 'i2v', label: '通义万相 图生视频 Turbo' },
-      { id: 'wanx2.1-i2v-plus', capability: 'i2v', label: '通义万相 图生视频 Plus' },
-      { id: 'qwen3-tts-flash', capability: 'tts', label: 'Qwen3-TTS Flash' },
-      { id: 'cosyvoice-v2', capability: 'tts', label: 'CosyVoice v2' }
+      { id: 'wanx2.1-t2i-turbo', capability: 't2i', label: '通义万相 2.1 文生图 Turbo' },
+      { id: 'wanx2.1-t2i-plus', capability: 't2i', label: '通义万相 2.1 文生图 Plus' },
+      { id: 'wanx-v1', capability: 't2i', label: '通义万相 v1（老版，便宜）' },
+      { id: 'wanx2.1-imageedit', capability: 'i2i', label: '通义万相 图像编辑（保角色）' },
+      { id: 'wan2.2-i2v-flash', capability: 'i2v', label: '通义万相 2.2 图生视频 Flash' },
+      { id: 'wan2.2-i2v-plus', capability: 'i2v', label: '通义万相 2.2 图生视频 Plus' },
+      { id: 'wanx2.1-i2v-turbo', capability: 'i2v', label: '通义万相 2.1 图生视频 Turbo' },
+      { id: 'wanx2.1-i2v-plus', capability: 'i2v', label: '通义万相 2.1 图生视频 Plus' },
+      { id: 'wanx2.1-t2v-turbo', capability: 't2v', label: '通义万相 文生视频 Turbo' },
+      { id: 'qwen3-tts-flash', capability: 'tts', label: 'Qwen3-TTS Flash（快）' },
+      { id: 'qwen-tts', capability: 'tts', label: 'Qwen-TTS' },
+      { id: 'cosyvoice-v2', capability: 'tts', label: 'CosyVoice v2（音色最多）' },
+      { id: 'cosyvoice-v1', capability: 'tts', label: 'CosyVoice v1' },
+      { id: 'sambert-zhichu-v1', capability: 'tts', label: 'Sambert 知厨（旁白感）' }
     ],
     probe: {
       label: '连通性自检（一次最小对话）',
@@ -401,10 +436,14 @@ export const PROVIDERS = [
     docs: 'https://open.bigmodel.cn/dev/api',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     secret: 'ZHIPU_API_KEY',
-    capabilities: ['chat', 'vision'],
+    capabilities: ['chat', 'vision', 't2i'],
     models: [
       { id: 'glm-4-plus', capability: 'chat', label: 'GLM-4 Plus' },
-      { id: 'glm-4v-plus', capability: 'vision', label: 'GLM-4V Plus（一致性校验）' }
+      { id: 'glm-4-flash', capability: 'chat', label: 'GLM-4 Flash（免费额度多）' },
+      { id: 'glm-4-long', capability: 'chat', label: 'GLM-4 Long（长篇改编）' },
+      { id: 'glm-4v-plus', capability: 'vision', label: 'GLM-4V Plus（一致性复核）' },
+      { id: 'cogview-4', capability: 't2i', label: 'CogView-4 文生图' },
+      { id: 'cogview-3-flash', capability: 't2i', label: 'CogView-3 Flash（免费）' }
     ]
   }),
   openaiCompatible({
@@ -422,10 +461,18 @@ export const PROVIDERS = [
     docs: 'https://docs.siliconflow.cn',
     baseUrl: 'https://api.siliconflow.cn/v1',
     secret: 'SILICONFLOW_API_KEY',
-    capabilities: ['chat', 'vision', 't2i'],
+    capabilities: ['chat', 'vision', 't2i', 'tts'],
     models: [
       { id: 'Qwen/Qwen2.5-72B-Instruct', capability: 'chat', label: 'Qwen2.5 72B' },
-      { id: 'Kwai-Kolors/Kolors', capability: 't2i', label: 'Kolors 文生图' }
+      { id: 'deepseek-ai/DeepSeek-V3', capability: 'chat', label: 'DeepSeek V3' },
+      { id: 'deepseek-ai/DeepSeek-R1', capability: 'chat', label: 'DeepSeek R1' },
+      { id: 'Qwen/Qwen2.5-VL-72B-Instruct', capability: 'vision', label: 'Qwen2.5-VL 72B（一致性复核）' },
+      { id: 'Kwai-Kolors/Kolors', capability: 't2i', label: 'Kolors 文生图（中文提示词友好）' },
+      { id: 'black-forest-labs/FLUX.1-dev', capability: 't2i', label: 'FLUX.1 dev' },
+      { id: 'black-forest-labs/FLUX.1-schnell', capability: 't2i', label: 'FLUX.1 schnell（快）' },
+      { id: 'stabilityai/stable-diffusion-3-5-large', capability: 't2i', label: 'SD 3.5 Large' },
+      { id: 'FunAudioLLM/CosyVoice2-0.5B', capability: 'tts', label: 'CosyVoice2（配音）' },
+      { id: 'fishaudio/fish-speech-1.5', capability: 'tts', label: 'Fish Speech 1.5' }
     ]
   }),
   openaiCompatible({
@@ -462,7 +509,13 @@ export const PROVIDERS = [
       successStates: ['succeed'],
       failureStates: ['failed']
     },
-    models: [{ id: 'kling-v2-master', capability: 'i2v', label: 'Kling 图生视频' }],
+    models: [
+      { id: 'kling-v2-1-master', capability: 'i2v', label: 'Kling 2.1 Master（质量最好）' },
+      { id: 'kling-v2-master', capability: 'i2v', label: 'Kling 2.0 Master' },
+      { id: 'kling-v1-6', capability: 'i2v', label: 'Kling 1.6（便宜）' },
+      { id: 'kling-v1-5', capability: 'i2v', label: 'Kling 1.5' },
+      { id: 'kling-v1', capability: 't2v', label: 'Kling 1.0 文生视频' }
+    ],
     probe: {
       label: '连通性自检（查任务列表）',
       method: 'GET',
@@ -504,7 +557,12 @@ export const PROVIDERS = [
       successStates: ['success'],
       failureStates: ['failed']
     },
-    models: [{ id: 'viduq1', capability: 'r2v', label: 'Vidu Q1（支持多张参考图锁人设）' }],
+    models: [
+      { id: 'viduq1', capability: 'r2v', label: 'Vidu Q1（支持多张参考图锁人设）' },
+      { id: 'viduq1-classic', capability: 'i2v', label: 'Vidu Q1 Classic' },
+      { id: 'vidu2.0', capability: 'r2v', label: 'Vidu 2.0' },
+      { id: 'vidu1.5', capability: 'r2v', label: 'Vidu 1.5（便宜）' }
+    ],
     probe: { label: '连通性自检', method: 'GET', url: '{{baseUrl}}/tasks?limit=1' },
     templates: [
       {

@@ -17,6 +17,7 @@ import * as adapters from '../providers/adapters.js';
 import * as consistency from './consistency.js';
 import * as ffmpeg from '../ffmpeg.js';
 import { safeFileName } from '../paths.js';
+import * as chapters from './chapters.js';
 
 export const extractJSON = consistency.extractJSON;
 
@@ -127,6 +128,29 @@ async function saveMedia({ url, base64 }, destPath, onEvent) {
   return destPath;
 }
 
+// ═══════════════════════ 设定集条目：三类共用的取值与提示词 ═══════════════════════
+
+const SHEET_LABEL = { char: '角色设定图', scene: '场景基准图', prop: '道具参考图' };
+
+export function bibleBucket(bible, kind) {
+  if (kind === 'char') return bible.characters || [];
+  if (kind === 'scene') return bible.scenes || [];
+  return bible.props || [];
+}
+
+/**
+ * 三类参考图的构图要求不同，分开写：
+ * 角色要正面半身好辨认五官，场景要空镜别混进人，道具要单体产品图。
+ * 混用一套模板的话，道具图里会莫名其妙站个人。
+ */
+function sheetPrompt(kind, bible, item) {
+  const anchor = bible.style.anchor;
+  const own = item.sheetPrompt || item.appearance || '';
+  if (kind === 'char') return `${anchor}，角色设定图，正面半身，中性表情，纯色浅灰背景，无其他人物。${own}`;
+  if (kind === 'scene') return `${anchor}，场景基准图，空镜无人物，广角。${own}`;
+  return `${anchor}，道具参考图，单个物体居中，纯色背景，无人物，产品图视角。${own}`;
+}
+
 // ═══════════════════════ 阶段一：设定集（冻结人设）═══════════════════════
 
 /**
@@ -146,28 +170,25 @@ export async function buildBible(projectId, { onEvent, regenerate = false } = {}
     return p;
   });
 
-  // 出参考图：角色在前（更重要），场景在后
+  // 出参考图：角色最重要排在最前，其次场景，最后道具
   const dir = store.assetDir(projectId);
   const r = routing();
   const targets = [
     ...bible.characters.map((c) => ({ kind: 'char', item: c })),
-    ...bible.scenes.map((s) => ({ kind: 'scene', item: s }))
+    ...bible.scenes.map((s) => ({ kind: 'scene', item: s })),
+    ...(bible.props || []).map((p) => ({ kind: 'prop', item: p }))
   ].filter(({ item }) => regenerate || !item.sheetPath);
 
   onEvent?.({ type: 'note', message: `待出参考图 ${targets.length} 张` });
 
   for (const { kind, item } of targets) {
     try {
-      onEvent?.({ type: 'sheet', name: item.name, status: 'running', message: `生成${kind === 'char' ? '角色设定图' : '场景基准图'}：${item.name}` });
-      const prompt =
-        kind === 'char'
-          ? `${bible.style.anchor}，角色设定图，正面半身，中性表情，纯色浅灰背景，无其他人物。${item.sheetPrompt}`
-          : `${bible.style.anchor}，场景基准图，空镜无人物，广角。${item.sheetPrompt}`;
+      onEvent?.({ type: 'sheet', name: item.name, kind, status: 'running', message: `生成${SHEET_LABEL[kind]}：${item.name}` });
 
       const image = await adapters.generateImage({
         providerId: r.image.provider,
         model: r.image.model,
-        prompt,
+        prompt: sheetPrompt(kind, bible, item),
         negative: bible.style.negative,
         seed: item.seed,
         label: `参考图·${item.name}`,
@@ -179,8 +200,7 @@ export async function buildBible(projectId, { onEvent, regenerate = false } = {}
       const modelRef = await toModelRef(dest, { onEvent });
 
       store.update(projectId, (p) => {
-        const bucket = kind === 'char' ? p.bible.characters : p.bible.scenes;
-        const target = bucket.find((x) => x.name === item.name);
+        const target = bibleBucket(p.bible, kind).find((x) => x.name === item.name);
         if (target) {
           target.sheetPath = dest;
           target.sheetUrl = modelRef;
@@ -194,8 +214,9 @@ export async function buildBible(projectId, { onEvent, regenerate = false } = {}
   }
 
   const after = store.read(projectId);
-  const ready = [...after.bible.characters, ...after.bible.scenes].filter((x) => x.sheetPath).length;
-  const total = after.bible.characters.length + after.bible.scenes.length;
+  const all = [...after.bible.characters, ...after.bible.scenes, ...(after.bible.props || [])];
+  const ready = all.filter((x) => x.sheetPath).length;
+  const total = all.length;
   store.update(projectId, (p) => {
     p.stageStatus.bible = ready === total ? 'done' : ready ? 'partial' : 'pending';
     return p;
@@ -206,13 +227,32 @@ export async function buildBible(projectId, { onEvent, regenerate = false } = {}
 
 // ═══════════════════════ 阶段二：分镜 ═══════════════════════
 
-export async function analyzeScript(projectId, { shotCount = 8, onEvent } = {}) {
+export async function analyzeScript(projectId, { shotCount = 8, chapterId = null, onEvent } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
   if (!project.bible) throw new Error('请先跑「设定集」—— 没有冻结人设，分镜会自己发挥外貌描述');
 
+  // 分章的项目一次只拆一章。不传章节 ID 时，挑第一个还没拆的，
+  // 让"连点几次"这种最自然的操作方式能一章章推进。
+  // 变量名不能叫 chapters —— 那是本文件顶部导入的模块名，遮住它会让
+  // chapters.shotIdFor 在运行时变成 undefined，而且只在分章路径上才炸
+  const chapterList = project.chapters || [];
+  let chapter = null;
+  if (chapterList.length) {
+    chapter = chapterId
+      ? chapterList.find((c) => c.id === chapterId)
+      : chapterList.find((c) => c.stageStatus?.script !== 'done') || chapterList[0];
+    if (!chapter) throw new Error(`没有这一章：${chapterId}`);
+  }
+  const sourceScript = chapter ? chapter.script : project.script;
+
   const r = routing();
-  onEvent?.({ type: 'stage', stage: 'script', status: 'running', message: `${r.chat.provider} / ${r.chat.model} 拆分镜中…` });
+  onEvent?.({
+    type: 'stage',
+    stage: 'script',
+    status: 'running',
+    message: `${chapter ? `${chapter.title}：` : ''}${r.chat.provider} / ${r.chat.model} 拆分镜中…`
+  });
 
   const bibleDigest = JSON.stringify(
     {
@@ -228,16 +268,18 @@ export async function analyzeScript(projectId, { shotCount = 8, onEvent } = {}) 
     providerId: r.chat.provider,
     model: r.chat.model,
     system: SHOT_PROMPT.replace('{{SHOT_COUNT}}', String(shotCount)).replace('{{BIBLE}}', bibleDigest),
-    user: project.script,
+    user: sourceScript,
     temperature: 0.7,
     jsonMode: true,
-    label: '拆分镜'
+    label: chapter ? `拆分镜·${chapter.title}` : '拆分镜'
   });
 
   const parsed = extractJSON(text);
   const shots = (parsed.shots || []).map((s, i) => ({
-    id: `shot-${String(i + 1).padStart(3, '0')}`,
-    index: s.index ?? i + 1,
+    id: chapters.shotIdFor(chapter?.id || null, i + 1),
+    // 全局镜号：章序 × 1000 + 章内序，3012 一眼看出是第 3 章第 12 镜
+    index: chapters.globalShotIndex(chapter?.index || 0, i + 1),
+    chapterId: chapter?.id || null,
     scene: s.scene || '',
     characters: Array.isArray(s.characters) ? s.characters : [],
     description: s.description || '',
@@ -255,19 +297,81 @@ export async function analyzeScript(projectId, { shotCount = 8, onEvent } = {}) 
   }));
 
   store.update(projectId, (p) => {
-    p.logline = parsed.logline || '';
-    p.shots = shots;
-    p.stageStatus.script = 'done';
+    if (!p.logline) p.logline = parsed.logline || '';
+    if (chapter) {
+      // 只换掉这一章的镜头，别的章已经出好的图不能被误伤
+      p.shots = [...p.shots.filter((s) => s.chapterId !== chapter.id), ...shots].sort((a, b) => a.index - b.index);
+      const ch = p.chapters.find((c) => c.id === chapter.id);
+      if (ch) {
+        ch.stageStatus.script = 'done';
+        ch.shotCount = shots.length;
+      }
+      p.stageStatus.script = p.chapters.every((c) => c.stageStatus.script === 'done') ? 'done' : 'partial';
+    } else {
+      p.shots = shots;
+      p.stageStatus.script = 'done';
+    }
     return p;
   });
 
-  onEvent?.({ type: 'stage', stage: 'script', status: 'done', message: `拆出 ${shots.length} 个分镜` });
+  onEvent?.({
+    type: 'stage',
+    stage: 'script',
+    status: 'done',
+    message: chapter ? `${chapter.title} 拆出 ${shots.length} 镜` : `拆出 ${shots.length} 个分镜`
+  });
   return store.read(projectId);
+}
+
+// ═══════════════════════ 章节 ═══════════════════════
+
+/**
+ * 把长剧本切成章节。设定集不受影响 —— 它挂在项目上，全片共享。
+ * 已经拆过分镜的章节会尽量保留状态（按标题匹配），避免重切一次前功尽弃。
+ */
+export function splitChapters(projectId, { targetChars } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  if (!project.script?.trim()) throw new Error('剧本是空的');
+
+  const fresh = chapters.autoSplit(project.script, { targetChars });
+  if (!fresh.length) throw new Error('没能切出章节');
+
+  return store.update(projectId, (p) => {
+    const old = new Map((p.chapters || []).map((c) => [c.title, c]));
+    p.chapters = fresh.map((c) => {
+      const prev = old.get(c.title);
+      // 正文没变才留住状态；改过的章节必须重拆，否则分镜和正文对不上
+      return prev && prev.script === c.script ? { ...c, stageStatus: prev.stageStatus, outputs: prev.outputs } : c;
+    });
+    const keep = new Set(p.chapters.filter((c) => c.stageStatus.script === 'done').map((c) => c.id));
+    p.shots = (p.shots || []).filter((s) => !s.chapterId || keep.has(s.chapterId));
+    p.stageStatus.script = p.chapters.every((c) => c.stageStatus.script === 'done') ? 'done' : 'pending';
+    return p;
+  });
+}
+
+export function clearChapters(projectId) {
+  return store.update(projectId, (p) => {
+    p.chapters = [];
+    p.shots = (p.shots || []).filter((s) => !s.chapterId);
+    return p;
+  });
+}
+
+/** 这段剧本值不值得分章 */
+export function chapterAdvice(script) {
+  return {
+    suggested: chapters.suggestsChapters(script),
+    chars: String(script || '').length,
+    threshold: chapters.LONG_FORM_THRESHOLD,
+    preview: chapters.autoSplit(script).map((c) => ({ id: c.id, title: c.title, chars: c.chars }))
+  };
 }
 
 // ═══════════════════════ 阶段三：镜头出图（带一致性复核）═══════════════════════
 
-export async function generateAssets(projectId, { only = null, onEvent } = {}) {
+export async function generateAssets(projectId, { only = null, chapterId = null, onEvent } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
   if (!project.shots?.length) throw new Error('还没有分镜，先跑「分镜」');
@@ -275,7 +379,9 @@ export async function generateAssets(projectId, { only = null, onEvent } = {}) {
 
   const dir = store.assetDir(projectId);
   const maxRetries = settings.get('consistencyMaxRetries') ?? 2;
-  const targets = project.shots.filter((s) => (only ? only.includes(s.id) : !s.imagePath));
+  const targets = project.shots
+    .filter((s) => (chapterId ? s.chapterId === chapterId : true))
+    .filter((s) => (only ? only.includes(s.id) : !s.imagePath));
 
   onEvent?.({ type: 'stage', stage: 'assets', status: 'running', message: `待出图 ${targets.length} 张` });
 
@@ -338,15 +444,245 @@ export async function generateAssets(projectId, { only = null, onEvent } = {}) {
   return store.read(projectId);
 }
 
+// ═══════════════════════ 单项重出 ═══════════════════════
+
+/**
+ * 重出某一镜的图。
+ *
+ * 批量出图必然有零星失败或不满意的 —— 为了三张图重跑整个阶段，
+ * 既慢又要重烧已经出好的那些。所以单独开一个入口，并且允许临时换模型：
+ * 有些镜头就是某家画不好，换一家往往比反复重试有效。
+ *
+ * @param {object} opts
+ * @param {string} [opts.provider] 临时换服务商，不传用全局路由
+ * @param {string} [opts.model]    临时换模型
+ * @param {string} [opts.prompt]   手写提示词，完全覆盖自动装配的那套
+ * @param {number} [opts.seed]     指定种子；不传则在原种子上偏移，避开上次那个坑
+ */
+export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const shot = project.shots.find((s) => s.id === shotId);
+  if (!shot) throw new Error(`没有这一镜：${shotId}`);
+  if (!project.bible) throw new Error('缺少设定集');
+
+  const r = routing();
+  const providerId = opts.provider || r.image.provider;
+  const model = opts.model || r.image.model;
+  const assembled = consistency.assemblePrompt(project.bible, shot);
+  // 不指定种子时换一颗：同种子重采样大概率复现同一个错误
+  const seed = Number.isFinite(opts.seed) ? opts.seed : assembled.seed + Math.floor(Math.random() * 9973) + 1;
+
+  onEvent?.({ type: 'shot', shotId, status: 'running', message: `第 ${shot.index} 镜重出（${providerId} / ${model}）…` });
+
+  const image = await adapters.generateImage({
+    providerId,
+    model,
+    prompt: opts.prompt?.trim() || assembled.prompt,
+    negative: assembled.negative,
+    seed,
+    refImages: settings.get('useReferenceImages') === false ? [] : assembled.refImages,
+    label: `重出 #${shot.index}`,
+    onEvent
+  });
+
+  const dest = path.join(store.assetDir(projectId), `${shot.id}.png`);
+  await saveMedia(image, dest, onEvent);
+  const modelRef = await toModelRef(dest, { onEvent });
+
+  // 复核这一镜，让分数跟着更新 —— 否则卡片上还挂着上一版的分数，会误导
+  let verification = { skipped: true };
+  const cast = consistency.matchCharacters(project.bible, shot);
+  if (settings.get('consistencyVerify') !== false && cast.length && image.url) {
+    verification = await consistency.verifyShot({
+      shotImageUrl: image.url,
+      character: cast[0],
+      threshold: settings.get('consistencyThreshold') ?? 75,
+      onEvent
+    });
+  }
+
+  store.update(projectId, (p) => {
+    const t = p.shots.find((s) => s.id === shotId);
+    if (t) {
+      t.imagePath = dest;
+      t.imageRef = modelRef;
+      t.seed = seed;
+      t.prompt = opts.prompt?.trim() || assembled.prompt;
+      t.modelUsed = `${providerId} / ${model}`;
+      t.consistency = {
+        score: verification.score ?? null,
+        pass: verification.pass ?? null,
+        needsReview: false, // 人工点的重出，就当人已经在看着了
+        issues: verification.issues || [],
+        attempts: 1
+      };
+      t.status = 'image-ready';
+      // 图换了，旧视频就对不上了，清掉免得合成时用了错的
+      if (t.videoPath) {
+        t.videoPath = null;
+        t.status = 'image-ready';
+      }
+    }
+    p.stageStatus.video = p.shots.some((s) => s.videoPath) ? 'partial' : 'pending';
+    return p;
+  });
+
+  onEvent?.({ type: 'shot', shotId, status: 'done', score: verification.score ?? null });
+  return store.read(projectId);
+}
+
+/** 重出某一镜的视频（图不动，只重跑视频那步） */
+export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent) {
+  const project = store.read(projectId);
+  const shot = project?.shots.find((s) => s.id === shotId);
+  if (!shot) throw new Error(`没有这一镜：${shotId}`);
+  if (!shot.imagePath) throw new Error('这一镜还没有图，先出图再出视频');
+
+  const r = routing();
+  const providerId = opts.provider || r.video.provider;
+  const model = opts.model || r.video.model;
+
+  onEvent?.({ type: 'shot', shotId, status: 'running', message: `第 ${shot.index} 镜重出视频（${providerId} / ${model}）…` });
+
+  const firstFrame = shot.imageRef || (await toModelRef(shot.imagePath, { onEvent }));
+  const cast = consistency.matchCharacters(project.bible, shot);
+  const video = await adapters.generateVideo({
+    providerId,
+    model,
+    prompt: opts.prompt?.trim() || `${shot.motion}。${shot.camera}`,
+    firstFrameUrl: firstFrame,
+    refImages: cast.map((c) => c.sheetUrl).filter(Boolean),
+    duration: shot.duration,
+    label: `重出视频 #${shot.index}`,
+    onEvent
+  });
+
+  const dest = path.join(store.assetDir(projectId), `${shot.id}.mp4`);
+  await saveMedia(video, dest, onEvent);
+  store.update(projectId, (p) => {
+    const t = p.shots.find((s) => s.id === shotId);
+    if (t) {
+      t.videoPath = dest;
+      t.status = 'video-ready';
+    }
+    return p;
+  });
+  onEvent?.({ type: 'shot', shotId, status: 'done' });
+  return store.read(projectId);
+}
+
+/**
+ * 重出设定集里的某一条（角色 / 场景 / 道具），可顺带改描述。
+ *
+ * 改完描述立刻能看到新图，这比"改完描述、重跑整个设定集、等五分钟"顺手得多，
+ * 而调设定本来就是个反复试的过程。
+ */
+export async function regenerateSheet(projectId, kind, name, opts = {}, onEvent) {
+  const project = store.read(projectId);
+  if (!project?.bible) throw new Error('还没有设定集');
+
+  const bucket = bibleBucket(project.bible, kind);
+  const item = bucket.find((x) => x.name === name);
+  if (!item) throw new Error(`设定集里没有「${name}」`);
+
+  // 顺手改描述：先落盘再出图，这样即使出图失败，改的字也留住了
+  if (opts.appearance !== undefined || opts.sheetPrompt !== undefined) {
+    store.update(projectId, (p) => {
+      const t = bibleBucket(p.bible, kind).find((x) => x.name === name);
+      if (t) {
+        if (opts.appearance !== undefined) t.appearance = opts.appearance;
+        if (opts.sheetPrompt !== undefined) t.sheetPrompt = opts.sheetPrompt;
+      }
+      return p;
+    });
+  }
+
+  const fresh = store.read(projectId);
+  const target = bibleBucket(fresh.bible, kind).find((x) => x.name === name);
+  const r = routing();
+  const providerId = opts.provider || r.image.provider;
+  const model = opts.model || r.image.model;
+  const seed = Number.isFinite(opts.seed) ? opts.seed : target.seed + Math.floor(Math.random() * 9973) + 1;
+
+  onEvent?.({ type: 'sheet', name, kind, status: 'running', message: `重出${SHEET_LABEL[kind]}：${name}` });
+
+  const image = await adapters.generateImage({
+    providerId,
+    model,
+    prompt: opts.prompt?.trim() || sheetPrompt(kind, fresh.bible, target),
+    negative: fresh.bible.style.negative,
+    seed,
+    label: `重出参考图·${name}`,
+    onEvent
+  });
+
+  const dest = path.join(store.assetDir(projectId), `ref-${kind}-${safeFileName(name)}.png`);
+  await saveMedia(image, dest, onEvent);
+  const modelRef = await toModelRef(dest, { onEvent });
+
+  store.update(projectId, (p) => {
+    const t = bibleBucket(p.bible, kind).find((x) => x.name === name);
+    if (t) {
+      t.sheetPath = dest;
+      t.sheetUrl = modelRef;
+      t.seed = seed;
+    }
+    return p;
+  });
+
+  onEvent?.({ type: 'sheet', name, kind, status: 'done' });
+  return store.read(projectId);
+}
+
+/**
+ * 往设定集里加一条（衍生品、后加的道具、中途出场的配角都走这里）。
+ * 加完不自动出图 —— 让用户先把描述写好，再点重出，省一次无效开销。
+ */
+export async function addBibleEntry(projectId, kind, { name, appearance = '', role = '' }) {
+  if (!name?.trim()) throw new Error('得起个名字');
+  const project = store.read(projectId);
+  if (!project?.bible) throw new Error('还没有设定集，先跑第 01 步');
+  if (bibleBucket(project.bible, kind).some((x) => x.name === name.trim())) {
+    throw new Error(`「${name}」已经在设定集里了`);
+  }
+
+  return store.update(projectId, (p) => {
+    bibleBucket(p.bible, kind).push({
+      name: name.trim(),
+      role,
+      appearance,
+      sheetPrompt: '',
+      seed: consistency.deriveSeed(p.id, `${kind}:${name.trim()}`),
+      sheetPath: null,
+      sheetUrl: null,
+      locked: true,
+      addedManually: true
+    });
+    return p;
+  });
+}
+
+export function removeBibleEntry(projectId, kind, name) {
+  return store.update(projectId, (p) => {
+    const bucket = bibleBucket(p.bible, kind);
+    const i = bucket.findIndex((x) => x.name === name);
+    if (i !== -1) bucket.splice(i, 1);
+    return p;
+  });
+}
+
 // ═══════════════════════ 阶段四：出视频 ═══════════════════════
 
-export async function generateVideos(projectId, { only = null, onEvent } = {}) {
+export async function generateVideos(projectId, { only = null, chapterId = null, onEvent } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
 
   const r = routing();
   const dir = store.assetDir(projectId);
-  const targets = project.shots.filter((s) => s.imagePath && (only ? only.includes(s.id) : !s.videoPath));
+  const targets = project.shots
+    .filter((s) => (chapterId ? s.chapterId === chapterId : true))
+    .filter((s) => s.imagePath && (only ? only.includes(s.id) : !s.videoPath));
   if (!targets.length) throw new Error('没有可出视频的分镜（需要先有镜头图）');
 
   onEvent?.({ type: 'stage', stage: 'video', status: 'running', message: `待出视频 ${targets.length} 段` });

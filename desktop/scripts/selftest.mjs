@@ -395,7 +395,7 @@ check(
   String(afterBible?.bible?.characters?.[0]?.sheetUrl || '').startsWith('data:image/png;base64,')
 );
 check('场景基准图也出了', Boolean(afterBible?.bible?.scenes?.[0]?.sheetPath));
-check('参考图出图次数 = 角色数 + 场景数', upstream.imageCalls === 2, `实际 ${upstream.imageCalls}`);
+check('参考图覆盖角色+场景+道具', upstream.imageCalls === 3, `实际 ${upstream.imageCalls}`);
 
 const scriptEvents = await ndjson(`/projects/${project.id}/stage/script`, { shotCount: 2 });
 const afterScript = scriptEvents.find((e) => e.type === 'finished')?.project;
@@ -423,6 +423,96 @@ check('通过后的分数被记下来', shot1?.consistency?.score === 92);
 
 const assetsBadShot = afterAssets?.shots?.[1];
 check('第二镜也出图了', Boolean(assetsBadShot?.imagePath));
+
+// ─────────────────────── 7.5 单项重出 / 设定集编辑 / 画风 / 章节 ───────────────────────
+
+section('单项重出');
+const beforeSeed = afterAssets.shots[0].seed;
+const regenEvents = await ndjson(`/projects/${project.id}/shots/${shot1.id}/regenerate`, {});
+const regened = regenEvents.find((e) => e.type === 'finished')?.project;
+const shot1b = regened?.shots?.find((s) => s.id === shot1.id);
+check('单镜重出成功', Boolean(shot1b?.imagePath), JSON.stringify(regenEvents.slice(-1)));
+check('换了种子（不指定时不复用上次那颗）', shot1b?.seed !== beforeSeed, `${beforeSeed} → ${shot1b?.seed}`);
+check('记下了用的是哪家哪个模型', Boolean(shot1b?.modelUsed), shot1b?.modelUsed);
+check('重出后不再标"待人工确认"', shot1b?.consistency?.needsReview === false);
+
+const overrideEvents = await ndjson(`/projects/${project.id}/shots/${shot1.id}/regenerate`, {
+  model: 'my-custom-image-model',
+  prompt: '完全手写的提示词'
+});
+check('可以临时换模型重出', Boolean(overrideEvents.find((e) => e.type === 'finished')));
+check(
+  '手写提示词原样发出去（负向词按厂商习惯并入正向，属预期）',
+  (upstream.imagePrompts.at(-1) || '').startsWith('完全手写的提示词'),
+  upstream.imagePrompts.at(-1)
+);
+check('临时模型确实生效', upstream.lastImageBody?.model === 'my-custom-image-model', upstream.lastImageBody?.model);
+
+section('设定集编辑');
+const propRegen = await ndjson(
+  `/projects/${project.id}/bible/prop/${encodeURIComponent('执法记录仪')}/regenerate`,
+  { appearance: '黑色方形，机身带红色录制指示灯' }
+);
+const afterProp = propRegen.find((e) => e.type === 'finished')?.project;
+const prop = afterProp?.bible?.props?.[0];
+check('道具能单独出图', Boolean(prop?.sheetPath), JSON.stringify(propRegen.slice(-1)));
+check('顺手改的描述被保存', /红色录制指示灯/.test(prop?.appearance || ''), prop?.appearance);
+check('道具提示词要求单体产品图', /单个物体/.test(upstream.imagePrompts.at(-1) || ''), upstream.imagePrompts.at(-1));
+
+const added = await (
+  await fetch(`${appUrl}/api/projects/${project.id}/bible/prop`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: '周边徽章', appearance: '圆形金属徽章' })
+  })
+).json();
+check('能往设定集里加衍生品', added.bible.props.some((p) => p.name === '周边徽章'));
+check('新加的条目也有自己的种子', Number.isFinite(added.bible.props.at(-1)?.seed));
+
+const removed = await (
+  await fetch(`${appUrl}/api/projects/${project.id}/bible/prop/${encodeURIComponent('周边徽章')}`, {
+    method: 'DELETE'
+  })
+).json();
+check('能删掉设定集条目', !removed.bible.props.some((p) => p.name === '周边徽章'));
+
+section('画风预设');
+const stylesResp = await (await fetch(`${appUrl}/api/styles`)).json();
+check('画风预设列表拿得到', stylesResp.presets?.length >= 10, `${stylesResp.presets?.length} 个`);
+check('每个预设都有锚点和缩略图配色', stylesResp.presets.every((s) => s.id === 'custom' || (s.anchor && s.swatch?.from)));
+check('保留了自定义选项', stylesResp.presets.some((s) => s.id === 'custom'));
+
+section('长篇分章');
+const longScript = ['第一章 起风', 'A'.repeat(1200), '第二章 落雨', 'B'.repeat(1200), '第三章 天晴', 'C'.repeat(1200)].join('\n\n');
+const longProject = await (
+  await fetch(`${appUrl}/api/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: '长篇自检', styleId: 'wuxia' })
+  })
+).json();
+await fetch(`${appUrl}/api/projects/${longProject.id}`, {
+  method: 'PATCH',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ script: longScript })
+});
+const advice = await (await fetch(`${appUrl}/api/projects/${longProject.id}/chapters`)).json();
+check('认出这是长篇，建议分章', advice.advice?.suggested === true);
+check('按作者写的章节标题切', advice.advice?.preview?.length === 3, JSON.stringify(advice.advice?.preview));
+check('章节标题被保留下来', /起风/.test(advice.advice?.preview?.[0]?.title || ''), advice.advice?.preview?.[0]?.title);
+
+const split = await (
+  await fetch(`${appUrl}/api/projects/${longProject.id}/chapters/split`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
+).json();
+check('切分结果落盘', split.chapters?.length === 3);
+check('每章各自有阶段状态', split.chapters.every((c) => c.stageStatus?.script === 'pending'));
+
+const shortAdvice = await (await fetch(`${appUrl}/api/projects/${project.id}/chapters`)).json();
+check('短片不建议分章', shortAdvice.advice?.suggested === false, `${shortAdvice.advice?.chars} 字`);
 
 // ─────────────────────── 8. 上线前体检 ───────────────────────
 

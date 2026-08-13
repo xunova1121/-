@@ -45,7 +45,7 @@ export const STAGE_HINTS = {
   export: '导出到项目目录'
 };
 
-export function create({ title = '未命名项目', script = '', style = '国风水墨' } = {}) {
+export function create({ title = '未命名项目', script = '', style = '', styleId = 'ink' } = {}) {
   ensureDirs();
   const id = `${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
   const project = {
@@ -54,8 +54,18 @@ export function create({ title = '未命名项目', script = '', style = '国风
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     script,
+    /** 选中的画风预设 id，见 core/styles.js */
+    styleId,
+    /** 在预设之上补充的自定义描述（预设选 custom 时这里就是全部） */
     style,
     logline: '',
+    /**
+     * 章节。长篇必须拆，否则一次几万字会超上下文、也没法中途重来。
+     * 但**设定集不拆**：它挂在项目上，全部章节共享同一份 ——
+     * 每章各自生成人设的话，第二章的角色就换脸了。
+     * 空数组表示短片模式，剧本直接放 project.script。
+     */
+    chapters: [],
     /** 冻结的设定集：{ style, characters[], scenes[], props[] }，见 pipeline/consistency.js */
     bible: null,
     shots: [],
