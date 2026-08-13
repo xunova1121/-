@@ -1,11 +1,13 @@
 # 让 GitHub 的 Windows 机器替你打包「未来创梦」，本机不用装任何工具链。
 #
 # 触发方式三选一：
-#   1. 推代码到任意分支 —— 每次推送都出一份最新的安装包
+#   1. 推代码到任意分支 —— 更新 snapshot 预发布，永远指向最新一次构建
 #   2. Actions 页面手动点「Run workflow」
-#   3. 打 v 开头的 tag（如 v0.1.0）—— 额外发一个 Release，下载链接更稳定
+#   3. 打 v 开头的 tag（如 v0.1.0）—— 发一个正式 Release
 #
-# 产物在 Actions 运行页底部的 Artifacts 里，或 Releases 页面。
+# 产物发到 Releases 页面，不走 Actions Artifacts ——
+# Artifacts 有独立的存储配额，满了就传不上去（这个仓库已经踩过一次），
+# 而 Release 附件不占那份配额，链接也更稳定、更好分享。
 name: 构建 Windows 安装包
 
 on:
@@ -31,7 +33,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       # 先跑自检再打包：源码本身有问题的话，没必要浪费几分钟去打一个坏包。
       # 这也是唯一一次在真实 Windows 上验证路径规则、DPAPI 降级、端口顺延这些逻辑。
@@ -53,38 +55,59 @@ jobs:
         run: dir dist
         shell: cmd
 
-      - name: 上传安装包
-        uses: actions/upload-artifact@v4
-        with:
-          name: 未来创梦-Windows
-          path: |
-            desktop/dist/*.exe
-            desktop/dist/*.blockmap
-            desktop/dist/latest.yml
-          if-no-files-found: error
-          retention-days: 30
-
-      # 打了 tag 才发 Release —— 日常推送只留 Artifact，不刷屏。
-      # 用 gh CLI 而不是第三方 action：windows runner 自带 gh，少一个供应链依赖。
-      - name: 发布 Release
-        if: startsWith(github.ref, 'refs/tags/v')
+      # ── 发布 ──
+      # 用 runner 自带的 gh CLI，不引第三方 action。
+      # tag 推送发正式版；日常推送更新同一个 snapshot 预发布，
+      # 这样下载链接永远是那一个，不会每次构建多出一条。
+      - name: 发布到 Releases
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cat > notes.md <<'NOTES'
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            TITLE="未来创梦 ${TAG}"
+            PRERELEASE=""
+          else
+            TAG="snapshot"
+            TITLE="未来创梦 开发快照"
+            PRERELEASE="--prerelease"
+          fi
+
+          cat > notes.md <<NOTES
+          构建自 \`${GITHUB_REF_NAME}\` 分支，提交 \`${GITHUB_SHA:0:7}\`。
+
           ## 下载哪个
 
-          | 文件名带 | 说明 |
+          | 文件 | 说明 |
           |---|---|
-          | `Setup` | 安装版，可选安装目录，自动建桌面快捷方式 |
-          | 不带 `Setup` | 免安装版，双击即用，可放 U 盘带走 |
+          | \`FutureDream-Setup-*.exe\` | 安装版，可选安装目录，自动建桌面快捷方式 |
+          | \`FutureDream-Portable-*.exe\` | 免安装版，双击即用，可放 U 盘带走 |
 
-          首次打开 Windows SmartScreen 会拦一下（这个包没做代码签名）——
-          点「更多信息 → 仍要运行」即可。
+          两个都是 64 位，二选一即可，不用都下。
 
-          打开后先去「服务商与密钥」配一把 API Key 才能用，配置方法见 desktop/README.md。
+          ## 首次打开
+
+          Windows SmartScreen 会拦一下（这个包没做代码签名）——
+          点「更多信息 → 仍要运行」。
+
+          打开后先去左侧「服务商与密钥」配一把 API Key 才能用；
+          最省事的是只配火山引擎方舟一家，剧本／出图／视频／一致性复核都走它。
+          详细步骤见 [desktop/README.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/desktop/README.md)。
           NOTES
-          gh release create "${GITHUB_REF_NAME}" dist/*.exe \
-            --title "未来创梦 ${GITHUB_REF_NAME}" \
-            --notes-file notes.md
+
+          # snapshot 是滚动的：已存在就换掉旧附件，不存在才新建
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TITLE" --notes-file notes.md --target "$GITHUB_SHA"
+            gh release upload "$TAG" dist/*.exe --clobber
+          else
+            gh release create "$TAG" dist/*.exe \
+              --title "$TITLE" \
+              --notes-file notes.md \
+              --target "$GITHUB_SHA" \
+              $PRERELEASE
+          fi
+
+          echo "下载地址：https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"

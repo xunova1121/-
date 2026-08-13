@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "未来创梦 —— AI 短剧工作台：剧本到成片的一致性流水线，内置第三方 API 联调台",
+  "author": "未来创梦",
   "main": "electron/main.js",
   "type": "module",
   "engines": {
@@ -12,6 +13,7 @@
     "start": "node core/server.js",
     "dev": "electron .",
     "selftest": "node scripts/selftest.mjs",
+    "icon": "node scripts/make-icon.mjs",
     "build:win": "electron-builder --win nsis portable"
   },
   "devDependencies": {
@@ -24,7 +26,8 @@
     "files": ["electron/**", "core/**", "ui/**", "package.json"],
     "extraResources": [{ "from": "bin", "to": "bin", "filter": ["**/*"] }],
     "win": {
-      "target": ["nsis", "portable"]
+      "target": ["nsis", "portable"],
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
