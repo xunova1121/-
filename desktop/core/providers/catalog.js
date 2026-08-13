@@ -684,7 +684,13 @@ export const PROVIDERS = [
       ratio: true,
       // 服务端原话：仅支持 480p、512p、768P 或 2K。注意大小写不统一，按它给的原样发。
       resolutions: ['480p', '512p', '768P', '2K'],
-      maxImages: 9
+      /**
+       * 转的是 H3（官方收 9 张），但这家自己会回「输入媒体数量超过限制 (2013)」，
+       * 文档里没写几张算超。所以这里只给一个保守的起点，真实上限由
+       * adapters.js 里的退让逻辑试出来并记住。
+       */
+      maxImages: 3,
+      refNote: '这家中转对图片张数另有限制，超了会自动减半重试'
     },
     models: [
       {
@@ -707,6 +713,8 @@ export const PROVIDERS = [
       method: 'POST',
       url: '{{baseUrl}}/video_generation',
       body: { model: 'MiniMax-H3' },
+      // 这个自检打的是视频接口，所以要替换成用户路由到这家的**视频**模型
+      capability: 'video',
       paramErrorMeansOk: true
     },
     templates: [

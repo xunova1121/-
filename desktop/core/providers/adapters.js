@@ -516,6 +516,63 @@ async function resolveQueryUrl(provider, providerId, taskId, label, onEvent) {
 }
 
 /**
+ * 中转平台到底收几张图，只有它自己知道。
+ *
+ * 秘塔就是个例子：转的是 H3（官方 9 张），但它自己回
+ * 「输入媒体数量超过限制 (2013)」—— 文档里没写几张算超。
+ * 目录里那个 maxImages 只能算一个起点，猜高了整步一直失败，猜低了白白丢掉一致性。
+ *
+ * 所以按"试出来"处理：撞到数量上限就减半重试，直到只剩首帧。
+ * 这种失败是**参数校验失败**，服务端还没开始出片，不产生费用，试几次不心疼。
+ * 试出来的值按 服务商 + baseUrl 记住，同一批后面的镜头直接用，不再重复撞墙。
+ *
+ * 缓存的 key 带上 baseUrl：同一家换个中转地址，限制就可能不一样。
+ */
+const mediaLimitCache = new Map();
+
+/** 这条报错是不是在说"图带多了" */
+function isMediaLimitError(message) {
+  return /媒体数量|输入媒体|媒体数|图片数量|number of (images|media)|media (count|number)|exceed.*(image|media)|2013/i.test(
+    String(message || '')
+  );
+}
+
+async function submitWithMediaBackoff({ providerId, provider, url, images, buildBody, checkBiz, label, onEvent }) {
+  const key = `${providerId}::${baseUrlOf(provider)}`;
+  const learned = mediaLimitCache.get(key);
+  let count = learned ? Math.min(learned, images.length) : images.length;
+  if (learned && images.length > learned) {
+    onEvent?.({
+      type: 'note',
+      message: `这家之前试出来最多收 ${learned} 张图，本次直接按 ${learned} 张发`
+    });
+  }
+
+  for (;;) {
+    const imgs = images.slice(0, count);
+    try {
+      const json = checkBiz(
+        await send(
+          { provider: providerId, label: `${label}·提交`, method: 'POST', url, body: buildBody(imgs), timeoutMs: 60000 },
+          onEvent
+        ),
+        '提交'
+      );
+      if (count < images.length) mediaLimitCache.set(key, count);
+      return json;
+    } catch (err) {
+      if (!isMediaLimitError(err.message) || count <= 1) throw err;
+      const next = Math.max(1, Math.floor(count / 2));
+      onEvent?.({
+        type: 'note',
+        message: `服务端嫌图带多了（${count} 张），改成 ${next} 张重试 —— 这次失败是参数校验，没开始出片，不计费`
+      });
+      count = next;
+    }
+  }
+}
+
+/**
  * 海螺（MiniMax）的图生视频：三步。
  *
  *   ① POST /video_generation          → task_id
@@ -557,40 +614,38 @@ async function generateVideoMiniMax({
   // ① 提交。H3 和 Hailuo 系的请求结构不是一回事，按模型名分流。
   const isH3 = /(^|[-_])H3([-_]|$)/i.test(model);
   const vd = provider.videoDefaults || {};
-  let body;
+  const createUrl = endpoint(provider, 'videoCreate', '{{baseUrl}}/video_generation');
 
-  if (isH3) {
-    // H3 是全模态：content[] 里按 type 区分 text / image_url / video_url / audio_url，
-    // 最多收 9 张图。对一致性引擎是实打实的利好 ——
-    // 首帧 + 角色设定图 + 场景基准图可以一起送，不用二选一。
-    const content = [{ type: 'text', text: prompt }];
-    for (const url of images) content.push({ type: 'image_url', image_url: { url } });
-    body = { model, content, duration, resolution };
-    // 中转家（如秘塔）多要一个 ratio 字段，官方 H3 没有
-    if (vd.ratio) body.ratio = aspectRatio;
-  } else {
-    body = { model, prompt, duration, resolution };
-    if (firstFrameUrl) body.first_frame_image = firstFrameUrl;
+  const buildBody = (imgs) => {
+    if (isH3) {
+      // H3 是全模态：content[] 里按 type 区分 text / image_url / video_url / audio_url。
+      // 官方收到 9 张，中转家常常收得更少 —— 具体几张由下面的退让逻辑试出来。
+      const content = [{ type: 'text', text: prompt }];
+      for (const url of imgs) content.push({ type: 'image_url', image_url: { url } });
+      const b = { model, content, duration, resolution };
+      // 中转家（如秘塔）多要一个 ratio 字段，官方 H3 没有
+      if (vd.ratio) b.ratio = aspectRatio;
+      return b;
+    }
+    const b = { model, prompt, duration, resolution };
+    if (imgs[0]) b.first_frame_image = imgs[0];
     // S2V 系列用主体参考锁人设，是 Hailuo 这边一致性最好的一条路
     if (refImages.length && /S2V/i.test(model)) {
-      body.subject_reference = [{ type: 'character', image_file: refImages[0] }];
+      b.subject_reference = [{ type: 'character', image_file: refImages[0] }];
     }
-  }
+    return b;
+  };
 
-  const created = checkBiz(
-    await send(
-      {
-        provider: providerId,
-        label: `${label}·提交`,
-        method: 'POST',
-        url: endpoint(provider, 'videoCreate', '{{baseUrl}}/video_generation'),
-        body,
-        timeoutMs: 60000
-      },
-      onEvent
-    ),
-    '提交'
-  );
+  const created = await submitWithMediaBackoff({
+    providerId,
+    provider,
+    url: createUrl,
+    images,
+    buildBody,
+    checkBiz,
+    label,
+    onEvent
+  });
 
   const taskId = created.task_id || created.data?.task_id;
   if (!taskId) throw new Error(`${label}：提交后没拿到 task_id`);

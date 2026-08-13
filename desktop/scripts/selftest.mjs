@@ -155,6 +155,15 @@ const upstream = http.createServer((req, res) => {
     req.on('data', (c) => (raw += c));
     req.on('end', () => {
       upstream.msBody = JSON.parse(raw || '{}');
+      upstream.msSubmits = (upstream.msSubmits || 0) + 1;
+      upstream.msImageCounts = upstream.msImageCounts || [];
+      const imgs = (upstream.msBody.content || []).filter((c) => c.type === 'image_url').length;
+      upstream.msImageCounts.push(imgs);
+      // 中转平台的真实脾气：图带多了就拒，而且文档里没写几张算多
+      if (imgs > (upstream.msMediaLimit ?? 99)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ message: '输入媒体数量超过限制 (2013)' }));
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ task_id: 'ms-9' }));
     });
@@ -955,6 +964,38 @@ check('时长 5 秒原样发出（这家档位是 5 而不是官方的 6）',
 check('官方查询路径 404 后自动试出正确路径', /out\.mp4$/.test(msVideo.url), msVideo.url);
 check('探出来的路径被缓存，第二次不再重复试', upstream.msQueryHits >= 2);
 
+// ── 图片张数：中转平台各有各的上限，而且不写在文档里 ──
+// 猜高了整步一直失败，猜低了白白丢掉一致性 —— 所以按"试出来"处理。
+upstream.msMediaLimit = 1;
+upstream.msImageCounts = [];
+const manyRefs = ['https://x.invalid/a.png', 'https://x.invalid/b.png', 'https://x.invalid/c.png'];
+const msNotes = [];
+const backoff = await adapters.generateVideo({
+  providerId: 'metaso',
+  model: 'MiniMax-H3',
+  prompt: 'x',
+  firstFrameUrl: 'https://x.invalid/f.png',
+  refImages: manyRefs,
+  duration: 5,
+  onEvent: (ev) => ev.type === 'note' && msNotes.push(ev.message)
+});
+check('图带多了不是直接失败，而是减半重试到能收为止', Boolean(backoff.url), backoff.url);
+check('确实一路退到 1 张', upstream.msImageCounts.at(-1) === 1, JSON.stringify(upstream.msImageCounts));
+check('退让过程说清楚了原因，并且讲明这次失败不计费',
+  msNotes.some((m) => /改成 1 张重试/.test(m) && /不计费/.test(m)),
+  JSON.stringify(msNotes.slice(0, 4)));
+
+// 试出来的上限要记住：同一批后面几十个镜头不该每个都去撞一次墙
+upstream.msImageCounts = [];
+await adapters.generateVideo({
+  providerId: 'metaso', model: 'MiniMax-H3', prompt: 'x',
+  firstFrameUrl: 'https://x.invalid/f.png', refImages: manyRefs, duration: 5
+});
+check('试出来的上限被记住，第二镜直接按 1 张发',
+  upstream.msImageCounts.length === 1 && upstream.msImageCounts[0] === 1,
+  JSON.stringify(upstream.msImageCounts));
+upstream.msMediaLimit = 99;
+
 // 全都试不通时要给可执行的下一步，而不是一句"失败了"
 settings.patch({ baseUrls: { metaso: `${upstreamUrl}/msbad` } });
 let msErr = null;
@@ -983,6 +1024,25 @@ check('每条结果都带上了用的服务商和模型', Object.values(byId).ev
 const verdict = preflightEvents.find((e) => e.type === 'summary');
 check('给出了总体结论', Boolean(verdict?.verdict), JSON.stringify(verdict));
 check('有 warn 时结论不谎报"都通"', /留意/.test(verdict?.verdict || ''), verdict?.verdict);
+
+// ── 自检替换模型：只能换同一类的 ──
+// 一家只被拿去出图/出视频时，自检打的仍是对话接口。
+// 早期版本把出图模型塞进 chat 请求，于是自检红了，可配置一点毛病没有 ——
+// 猜错的自检比不自检更坏。
+const savedRoute = { imageProvider: settings.get('imageProvider'), imageModel: settings.get('imageModel') };
+settings.patch({ imageProvider: 'volcengine', imageModel: 'doubao-seedream-3-0-t2i-250415' });
+settings.patch({ chatProvider: 'deepseek', chatModel: 'deepseek-chat' });
+const probeOnlyImage = await providersMod.probe('volcengine');
+check('这家只用来出图时，自检不会把出图模型塞进对话接口',
+  probeOnlyImage.model !== 'doubao-seedream-3-0-t2i-250415', probeOnlyImage.model);
+check('自检回报了它实际用的是哪个模型（红了才知道该查什么）', Boolean(probeOnlyImage.model), JSON.stringify(probeOnlyImage));
+
+// 但对话路由指到这家时，就该按用户真正会用的那个模型探
+settings.patch({ chatProvider: 'volcengine', chatModel: 'doubao-1-5-pro-32k-250115' });
+const probeChat = await providersMod.probe('volcengine');
+check('对话路由指到这家时，自检用的就是那个模型',
+  probeChat.model === 'doubao-1-5-pro-32k-250115', probeChat.model);
+settings.patch(savedRoute);
 
 // 打桩服务没有 /v3/models，正好用来验证"拿不到列表时给的是人话而不是空下拉"
 const modelList = await (await fetch(`${appUrl}/api/providers/volcengine/models`)).json();

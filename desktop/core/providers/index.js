@@ -157,20 +157,34 @@ export async function sendAsync(spec, onEvent) {
 
 /**
  * 自检请求体：把示例里的 model 换成用户实际路由到这家的模型。
- * 一家可能承担多种能力（剧本 + 出图 + 视频），优先用对话类的，
- * 因为自检发的就是一次最小对话。
+ *
+ * 关键是**只能换同一类的**。自检打的是哪个接口，就只认那一类的路由：
+ * 绝大多数自检打的是对话接口，这时候只能替换对话/视觉模型。
+ *
+ * 早期版本把出图和视频的路由也算进来，于是出现这种事：
+ * 百炼只被用来出图（比如 wanx2.1-i2v-turbo），自检却把这个模型名塞进
+ * compatible-mode 的 chat 接口 —— 百炼当然回错，自检红了，
+ * 可用户的配置一点毛病没有。猜错的自检比不自检更坏。
+ *
+ * 少数自检打的是别的接口（秘塔打的是视频提交），那种在目录里用
+ * probe.capability 标出来，按对应的路由替换。
  */
+const PROBE_ROUTES = {
+  chat: [['chatProvider', 'chatModel'], ['visionProvider', 'visionModel']],
+  video: [['videoProvider', 'videoModel']],
+  image: [['imageProvider', 'imageModel']],
+  tts: [['ttsProvider', 'ttsModel']]
+};
+
 function probeBody(provider) {
   const body = provider.probe?.body;
   if (!body || !body.model) return body;
 
   const s = settings.all();
-  const preferred = [
-    [s.chatProvider, s.chatModel],
-    [s.visionProvider, s.visionModel],
-    [s.imageProvider, s.imageModel],
-    [s.videoProvider, s.videoModel]
-  ].find(([id, model]) => id === provider.id && model);
+  const routes = PROBE_ROUTES[provider.probe.capability || 'chat'] || PROBE_ROUTES.chat;
+  const preferred = routes
+    .map(([pk, mk]) => [s[pk], s[mk]])
+    .find(([id, model]) => id === provider.id && model);
 
   return preferred ? { ...body, model: preferred[1] } : body;
 }

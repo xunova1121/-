@@ -117,7 +117,9 @@ export default {
                       statusEl.append(h('span', { class: 'dot ok' }), `连通 ${fmtMs(r.latencyMs)}`);
                       reasonEl.style.display = '';
                       reasonEl.className = 'probe-reason ok';
-                      reasonEl.append(r.model ? `用模型 ${r.model} 试通了。` : '连通。');
+                      // note 是"通了，但有话要说"：比如这家没有便宜的接口可探，
+                      // 自检发的是缺参数的请求，服务端挑参数恰好证明鉴权和路径都对
+                      reasonEl.append(r.note || (r.model ? `用模型 ${r.model} 试通了。` : '连通。'));
                       toast(`${p.name} 连通，${fmtMs(r.latencyMs)}`, 'ok');
                     } else {
                       statusEl.className = 'badge err';
