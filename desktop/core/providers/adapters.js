@@ -436,12 +436,25 @@ async function generateVideoMiniMax({
     return res.json;
   };
 
-  // ① 提交
-  const body = { model, prompt, duration, resolution };
-  if (firstFrameUrl) body.first_frame_image = firstFrameUrl;
-  // S2V 系列用主体参考锁人设，是海螺这边一致性最好的一条路
-  if (refImages.length && /S2V/i.test(model)) {
-    body.subject_reference = [{ type: 'character', image_file: refImages[0] }];
+  // ① 提交。H3 和 Hailuo 系的请求结构不是一回事，按模型名分流。
+  const isH3 = /(^|[-_])H3([-_]|$)/i.test(model);
+  let body;
+
+  if (isH3) {
+    // H3 是全模态：content[] 里按 type 区分 text / image_url / video_url / audio_url，
+    // 最多收 9 张图。对一致性引擎是实打实的利好 ——
+    // 首帧 + 角色设定图 + 场景基准图可以一起送，不用二选一。
+    const content = [{ type: 'text', text: prompt }];
+    const images = [firstFrameUrl, ...refImages].filter(Boolean).slice(0, 9);
+    for (const url of images) content.push({ type: 'image_url', image_url: { url } });
+    body = { model, content, duration, resolution };
+  } else {
+    body = { model, prompt, duration, resolution };
+    if (firstFrameUrl) body.first_frame_image = firstFrameUrl;
+    // S2V 系列用主体参考锁人设，是 Hailuo 这边一致性最好的一条路
+    if (refImages.length && /S2V/i.test(model)) {
+      body.subject_reference = [{ type: 'character', image_file: refImages[0] }];
+    }
   }
 
   const created = checkBiz(

@@ -95,9 +95,15 @@ const upstream = http.createServer((req, res) => {
 
   // ── MiniMax 海螺：三步视频流程 + 出图 ──
   if (url.pathname === '/mm/video_generation') {
-    upstream.mmCreate = (upstream.mmCreate || 0) + 1;
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ task_id: 'mm-task-7', base_resp: { status_code: 0, status_msg: 'success' } }));
+    let raw = '';
+    req.on('data', (c) => (raw += c));
+    req.on('end', () => {
+      upstream.mmCreate = (upstream.mmCreate || 0) + 1;
+      upstream.mmCreateBody = JSON.parse(raw || '{}');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ task_id: 'mm-task-7', base_resp: { status_code: 0, status_msg: 'success' } }));
+    });
+    return undefined;
   }
   if (url.pathname === '/mm/query/video_generation') {
     upstream.mmPolls = (upstream.mmPolls || 0) + 1;
@@ -694,6 +700,55 @@ await adapters.generateImage({ providerId: 'minimax', model: 'image-01', prompt:
 check('HTTP 200 但 base_resp 报错时判为失败', Boolean(mmErr), '没有抛错');
 check('错误信息带上服务端原话', /余额不足/.test(mmErr?.message || ''), mmErr?.message);
 upstream.mmImageFail = false;
+
+section('MiniMax H3 全模态');
+upstream.mmPolls = 0;
+const h3 = await adapters.generateVideo({
+  providerId: 'minimax',
+  model: 'MiniMax-H3',
+  prompt: '镜头缓推，人物走向栈桥尽头',
+  firstFrameUrl: 'https://x.invalid/frame.png',
+  refImages: ['https://x.invalid/char.png', 'https://x.invalid/scene.png'],
+  duration: 12,
+  onEvent: null
+});
+const h3body = upstream.mmCreateBody;
+check('H3 用 content[] 多模态结构，不是 first_frame_image',
+  Array.isArray(h3body?.content) && !h3body.first_frame_image, JSON.stringify(Object.keys(h3body || {})));
+check('第一项是文本提示词', h3body?.content?.[0]?.type === 'text');
+check('首帧和参考图一起送进去（H3 最多收 9 张，不用二选一）',
+  h3body.content.filter((c) => c.type === 'image_url').length === 3,
+  JSON.stringify(h3body.content.map((c) => c.type)));
+check('首帧排在参考图之前', h3body.content[1]?.image_url?.url?.includes('frame.png'));
+check('时长对齐到 H3 的 15 秒档（请求 12 秒）', h3.actualDuration === 15, `${h3.actualDuration}`);
+check('H3 也走同一套三步流程', /out\.mp4$/.test(h3.url), h3.url);
+
+// 超过 9 张要截断，否则服务端会直接拒
+upstream.mmPolls = 0;
+await adapters.generateVideo({
+  providerId: 'minimax',
+  model: 'MiniMax-H3',
+  prompt: 'x',
+  firstFrameUrl: 'https://x.invalid/f.png',
+  refImages: Array.from({ length: 20 }, (_, i) => `https://x.invalid/r${i}.png`),
+  duration: 6
+});
+check('参考图超过 9 张时截断到 9 张',
+  upstream.mmCreateBody.content.filter((c) => c.type === 'image_url').length === 9,
+  `${upstream.mmCreateBody.content.filter((c) => c.type === 'image_url').length} 张`);
+
+// Hailuo 系仍走旧结构，别被 H3 的改动带偏
+upstream.mmPolls = 0;
+await adapters.generateVideo({
+  providerId: 'minimax',
+  model: 'MiniMax-Hailuo-02',
+  prompt: 'x',
+  firstFrameUrl: 'https://x.invalid/f.png',
+  duration: 6
+});
+check('Hailuo 系仍用 first_frame_image，没被 H3 的改动带偏',
+  Boolean(upstream.mmCreateBody.first_frame_image) && !upstream.mmCreateBody.content,
+  JSON.stringify(Object.keys(upstream.mmCreateBody)));
 
 // ─────────────────────── 8. 上线前体检 ───────────────────────
 

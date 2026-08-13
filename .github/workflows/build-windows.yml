@@ -37,7 +37,7 @@ jobs:
 
       # 先跑自检再打包：源码本身有问题的话，没必要浪费几分钟去打一个坏包。
       # 这也是唯一一次在真实 Windows 上验证路径规则、DPAPI 降级、端口顺延这些逻辑。
-      - name: 自检（142 项，不联外网）
+      - name: 自检（150 项，不联外网）
         run: node scripts/selftest.mjs
 
       # 应用本身零运行时依赖，这一步装的只有 electron 和 electron-builder。

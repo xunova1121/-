@@ -505,7 +505,7 @@ export const PROVIDERS = [
         hint: '部分接口（如语音）要求带 GroupId 查询参数，视频和出图一般不需要'
       }
     ],
-    capabilities: ['chat', 'vision', 't2i', 'i2v', 't2v'],
+    capabilities: ['chat', 'vision', 't2i', 'i2v', 't2v', 'r2v'],
     editableBaseUrl: true,
     endpoints: {
       chat: '{{baseUrl}}/text/chatcompletion_v2',
@@ -524,6 +524,9 @@ export const PROVIDERS = [
      */
     videoFlow: { steps: 3, urlTtlHours: 9 },
     models: [
+      // H3 是全模态：一次能收最多 9 张图 + 3 段视频 + 3 段音频，出 2K、原生立体声、最长 15 秒。
+      // 请求结构和 Hailuo 系不同（content[] 多模态数组），适配器按模型名分流。
+      { id: 'MiniMax-H3', capability: 'r2v', label: 'H3 全模态（9 张参考图，2K，最长 15 秒）', durations: [6, 10, 15], multimodal: true },
       { id: 'MiniMax-Hailuo-2.3', capability: 'i2v', label: '海螺 2.3 图生视频（最新）', durations: [6, 10] },
       { id: 'MiniMax-Hailuo-02', capability: 'i2v', label: '海螺 02 图生视频', durations: [6, 10] },
       { id: 'I2V-01-Director', capability: 'i2v', label: 'I2V-01 Director（可写运镜指令）', durations: [6] },
@@ -584,6 +587,23 @@ export const PROVIDERS = [
           model: 'MiniMax-Hailuo-02',
           prompt: '镜头缓慢推进，水面波光流动',
           first_frame_image: 'https://example.com/first-frame.png',
+          duration: 6,
+          resolution: '1080P'
+        }
+      },
+      {
+        id: 'h3',
+        label: 'H3 全模态生视频（第①步，可带多张参考图）',
+        capability: 'r2v',
+        method: 'POST',
+        url: '{{baseUrl}}/video_generation',
+        body: {
+          model: 'MiniMax-H3',
+          content: [
+            { type: 'text', text: '镜头缓慢推进，人物走向栈桥尽头' },
+            { type: 'image_url', image_url: { url: 'https://example.com/character-sheet.png' } },
+            { type: 'image_url', image_url: { url: 'https://example.com/scene-plate.png' } }
+          ],
           duration: 6,
           resolution: '1080P'
         }
