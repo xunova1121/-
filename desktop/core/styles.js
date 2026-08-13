@@ -21,7 +21,8 @@ export const STYLE_PRESETS = [
     anchor: '国风水墨画风，宣纸质感，墨色浓淡分明，大量留白，写意笔触，电影感构图',
     negative: '3D渲染, 塑料质感, 过度饱和, 线条僵硬, 西方油画',
     palette: '墨黑、赭石、青灰',
-    swatch: { from: '#F2EDE2', to: '#3A4048', accent: '#6E7B85', texture: 'ink' }
+    swatch: { from: '#F2EDE2', to: '#3A4048', accent: '#6E7B85', texture: 'ink' },
+    art: { sky: ['#F7F3EA', '#EFE8DA'], hills: ['#9AA4AD', '#69737E', '#3A4048'], water: '#E6E1D5', glow: '#B9AFA0', ink: '#2A2E33', mode: 'wash', paper: true }
   },
   {
     id: 'anime',
@@ -30,7 +31,8 @@ export const STYLE_PRESETS = [
     anchor: '日式动画赛璐璐画风，清晰轮廓线，平涂上色，柔和高光，明快色彩',
     negative: '写实照片, 3D渲染, 线条模糊, 过度阴影, 恐怖谷',
     palette: '天蓝、暖橙、樱粉',
-    swatch: { from: '#BFE3FF', to: '#FFC9D6', accent: '#FF8A5B', texture: 'flat' }
+    swatch: { from: '#BFE3FF', to: '#FFC9D6', accent: '#FF8A5B', texture: 'flat' },
+    art: { sky: ['#BFE3FF', '#FFD9DE'], hills: ['#8FB8D8', '#5E86AC', '#3B5876'], water: '#9FD0EF', glow: '#FF8A5B', ink: '#22354A', mode: 'cel' }
   },
   {
     id: 'guofeng',
@@ -39,7 +41,8 @@ export const STYLE_PRESETS = [
     anchor: '中国古风工笔画，精细勾线，矿物质颜料，绢本设色，繁复纹样，唐宋气韵',
     negative: '现代元素, 简笔, 粗糙线条, 荧光色',
     palette: '朱砂、石青、藤黄',
-    swatch: { from: '#F6E7C8', to: '#8C3B32', accent: '#2E5E6B', texture: 'fine' }
+    swatch: { from: '#F6E7C8', to: '#8C3B32', accent: '#2E5E6B', texture: 'fine' },
+    art: { sky: ['#F6E7C8', '#EBD6A8'], hills: ['#7FA0A6', '#4E7A80', '#2E5E6B'], water: '#DCCBA0', glow: '#8C3B32', ink: '#3A2A1E', mode: 'line' }
   },
   {
     id: 'modern',
@@ -48,7 +51,8 @@ export const STYLE_PRESETS = [
     anchor: '现代都市写实风格，自然光影，浅景深，电影级调色，当代服装与建筑',
     negative: '古代服饰, 卡通, 夸张比例, 过曝',
     palette: '冷灰、玻璃蓝、暖黄路灯',
-    swatch: { from: '#D6DEE6', to: '#2B3440', accent: '#F2A65A', texture: 'photo' }
+    swatch: { from: '#D6DEE6', to: '#2B3440', accent: '#F2A65A', texture: 'photo' },
+    art: { sky: ['#D6DEE6', '#8FA0B2'], hills: ['#6E7E90', '#495A6B', '#2B3440'], water: '#43525F', glow: '#F2A65A', ink: '#1A2028', mode: 'photo' }
   },
   {
     id: 'cinematic',
@@ -57,7 +61,8 @@ export const STYLE_PRESETS = [
     anchor: '电影摄影质感，35mm 胶片颗粒，强反差布光，冷暖对比调色，宽银幕构图',
     negative: '平光, 廉价感, 数码噪点, 过度锐化',
     palette: '青影橙调',
-    swatch: { from: '#1B2733', to: '#C86B34', accent: '#5FA8D3', texture: 'grain' }
+    swatch: { from: '#1B2733', to: '#C86B34', accent: '#5FA8D3', texture: 'grain' },
+    art: { sky: ['#22303E', '#5A748A'], hills: ['#4A6B85', '#2E4658', '#18242D'], water: '#2A3E4E', glow: '#E08040', ink: '#0B1116', mode: 'film', grain: true, letterbox: true }
   },
   {
     id: 'cyberpunk',
@@ -66,7 +71,8 @@ export const STYLE_PRESETS = [
     anchor: '赛博朋克风格，霓虹灯牌，雨夜湿滑街道，高对比冷暖光，未来都市天际线',
     negative: '田园, 自然光, 低饱和, 古典建筑',
     palette: '洋红、青蓝、酸绿',
-    swatch: { from: '#12071F', to: '#FF2E93', accent: '#00E5FF', texture: 'neon' }
+    swatch: { from: '#12071F', to: '#FF2E93', accent: '#00E5FF', texture: 'neon' },
+    art: { sky: ['#12071F', '#31103F'], hills: ['#2A1140', '#1C0B2C', '#120719'], water: '#170A25', glow: '#FF2E93', ink: '#00E5FF', mode: 'neon', rain: true }
   },
   {
     id: 'wuxia',
@@ -75,7 +81,8 @@ export const STYLE_PRESETS = [
     anchor: '武侠写意风格，山水做背景，衣袂翻飞，刀光剑影，水墨与实景结合，气势开阔',
     negative: '现代服装, 科幻元素, 静态呆板',
     palette: '墨青、竹绿、月白',
-    swatch: { from: '#E8EDE6', to: '#2F4538', accent: '#8FA98F', texture: 'ink' }
+    swatch: { from: '#E8EDE6', to: '#2F4538', accent: '#8FA98F', texture: 'ink' },
+    art: { sky: ['#EDF1EA', '#DDE5DA'], hills: ['#96AC97', '#5F7A66', '#2F4538'], water: '#DCE4D9', glow: '#B7C7B3', ink: '#22301F', mode: 'wash', paper: true }
   },
   {
     id: 'pixar',
@@ -84,7 +91,8 @@ export const STYLE_PRESETS = [
     anchor: '三维动画电影风格，圆润造型，柔和次表面散射，全局光照，材质细腻，色彩明亮',
     negative: '二维平涂, 写实照片, 恐怖谷, 粗糙建模',
     palette: '奶油黄、天青、珊瑚粉',
-    swatch: { from: '#FFE9C2', to: '#4A90D9', accent: '#FF7B6B', texture: 'soft' }
+    swatch: { from: '#FFE9C2', to: '#4A90D9', accent: '#FF7B6B', texture: 'soft' },
+    art: { sky: ['#FFE9C2', '#8CC4EE'], hills: ['#7FB3E0', '#4A90D9', '#2F6DAE'], water: '#63A8DC', glow: '#FF7B6B', ink: '#274A6B', mode: 'soft' }
   },
   {
     id: 'noir',
@@ -93,7 +101,8 @@ export const STYLE_PRESETS = [
     anchor: '黑色电影风格，高反差黑白或极低饱和，硬光源，百叶窗条状阴影，烟雾，低角度构图',
     negative: '明快色彩, 平光, 甜美, 高饱和',
     palette: '黑白灰，仅保留极少暖色',
-    swatch: { from: '#EDEDED', to: '#0B0B0B', accent: '#8A8A8A', texture: 'noir' }
+    swatch: { from: '#EDEDED', to: '#0B0B0B', accent: '#8A8A8A', texture: 'noir' },
+    art: { sky: ['#E4E4E4', '#9A9A9A'], hills: ['#7A7A7A', '#454545', '#141414'], water: '#2C2C2C', glow: '#FFFFFF', ink: '#000000', mode: 'noir', blinds: true }
   },
   {
     id: 'watercolor',
@@ -102,7 +111,8 @@ export const STYLE_PRESETS = [
     anchor: '水彩绘本风格，透明颜料叠色，纸张纹理，边缘晕染，柔和轮廓，温暖童话感',
     negative: '硬边, 3D, 金属质感, 冷峻',
     palette: '淡黄、湖蓝、玫瑰',
-    swatch: { from: '#FFF6E5', to: '#7FB3D5', accent: '#E8A0BF', texture: 'wash' }
+    swatch: { from: '#FFF6E5', to: '#7FB3D5', accent: '#E8A0BF', texture: 'wash' },
+    art: { sky: ['#FFF6E5', '#DCEBF6'], hills: ['#B9D6E6', '#8FBFD8', '#7FB3D5'], water: '#CFE4F0', glow: '#E8A0BF', ink: '#5E7C90', mode: 'wash', paper: true }
   },
   {
     id: 'retro',
@@ -111,7 +121,8 @@ export const STYLE_PRESETS = [
     anchor: '八九十年代港片复古风格，暖旧色调，轻微褪色，霓虹招牌，颗粒感，怀旧氛围',
     negative: '现代高清, 冷色调, 极简, 无颗粒',
     palette: '暖棕、砖红、旧金',
-    swatch: { from: '#F0DCC0', to: '#7A3B2E', accent: '#D9A441', texture: 'grain' }
+    swatch: { from: '#F0DCC0', to: '#7A3B2E', accent: '#D9A441', texture: 'grain' },
+    art: { sky: ['#F0DCC0', '#C79A6E'], hills: ['#A9724F', '#8A4F38', '#5E2E22'], water: '#8A5A3E', glow: '#D9A441', ink: '#3A1D14', mode: 'film', grain: true }
   },
   {
     id: 'custom',
@@ -120,7 +131,8 @@ export const STYLE_PRESETS = [
     anchor: '',
     negative: '模糊, 低质量, 畸变, 多余手指, 文字水印',
     palette: '',
-    swatch: { from: '#CFCFCF', to: '#5A5A5A', accent: '#9A9A9A', texture: 'flat' }
+    swatch: { from: '#CFCFCF', to: '#5A5A5A', accent: '#9A9A9A', texture: 'flat' },
+    art: { sky: ['#D8D8D8', '#A8A8A8'], hills: ['#8F8F8F', '#6A6A6A', '#4A4A4A'], water: '#7A7A7A', glow: '#BEBEBE', ink: '#2E2E2E', mode: 'photo' }
   }
 ];
 

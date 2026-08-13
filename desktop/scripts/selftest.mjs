@@ -676,6 +676,25 @@ check('画风预设列表拿得到', stylesResp.presets?.length >= 10, `${styles
 check('每个预设都有锚点和缩略图配色', stylesResp.presets.every((s) => s.id === 'custom' || (s.anchor && s.swatch?.from)));
 check('保留了自定义选项', stylesResp.presets.some((s) => s.id === 'custom'));
 
+// 缩略图是照着 art 现画的（同一个镜头、十二种画法）。
+// 少一个字段不会报错，只会悄悄画出一张空白卡片 —— 所以在这里挡住。
+const ART_MODES = new Set(['wash', 'cel', 'line', 'photo', 'soft', 'film', 'neon', 'noir']);
+check('每个预设都带齐了缩略图的画面参数',
+  stylesResp.presets.every((s) => s.art?.sky?.length === 2 && s.art.hills?.length === 3 && s.art.water && s.art.glow && s.art.ink),
+  stylesResp.presets.filter((s) => !(s.art?.sky?.length === 2 && s.art.hills?.length === 3)).map((s) => s.id).join('、'));
+check('画法都是渲染器认识的那几种',
+  stylesResp.presets.every((s) => ART_MODES.has(s.art?.mode)),
+  stylesResp.presets.filter((s) => !ART_MODES.has(s.art?.mode)).map((s) => `${s.id}:${s.art?.mode}`).join('、'));
+
+// 渲染器在前端，这里直接把它 import 进来跑一遍：
+// SVG 里的 filter/gradient 全靠 id 引用，十二张放一页上 id 撞了会串成同一种滤镜
+const { styleArtSVG } = await import('../ui/style-art.js');
+const svgs = stylesResp.presets.map((s) => styleArtSVG(s));
+check('每个预设都画得出 SVG', svgs.every((x) => x.startsWith('<svg') && x.includes('</svg>')));
+const allIds = svgs.flatMap((x) => [...x.matchAll(/id="([a-z0-9]+)"/g)].map((m) => m[1]));
+check('滤镜/渐变的 id 全局不重复（撞了会串成同一种滤镜）',
+  new Set(allIds).size === allIds.length, `${allIds.length} 个 id，去重后 ${new Set(allIds).size} 个`);
+
 section('长篇分章');
 const longScript = ['第一章 起风', 'A'.repeat(1200), '第二章 落雨', 'B'.repeat(1200), '第三章 天晴', 'C'.repeat(1200)].join('\n\n');
 const longProject = await (

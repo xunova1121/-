@@ -589,7 +589,7 @@ td.wrap { white-space: normal; max-width: 380px; }
   display: flex; flex-direction: column;
 }
 .project-card.current { border-color: var(--beam); box-shadow: 0 0 0 2px var(--beam-wash); }
-.project-card .style-swatch { aspect-ratio: 16 / 5; }
+.project-card .style-swatch { aspect-ratio: 16 / 6; }
 .project-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 7px; }
 .project-head { display: flex; align-items: center; gap: 8px; }
 .project-head b { font-family: var(--display); font-size: 14.5px; color: var(--ink); }
@@ -603,7 +603,7 @@ td.wrap { white-space: normal; max-width: 380px; }
 /* 缩略图用配色 + 纹理现画，不外链图片：离线可用，也不拿别人的作品当示例 */
 .style-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
   gap: 10px;
   margin-top: 4px;
 }
@@ -626,7 +626,8 @@ td.wrap { white-space: normal; max-width: 380px; }
   box-shadow: 0 0 0 2px var(--beam-wash);
   color: var(--ink);
 }
-.style-swatch { width: 100%; aspect-ratio: 4 / 3; display: block; }
+.style-swatch { width: 100%; aspect-ratio: 8 / 5; display: block; overflow: hidden; background: var(--ground); }
+.style-swatch svg { width: 100%; height: 100%; display: block; }
 .style-name { font-size: 12.5px; font-weight: 600; padding: 8px 10px 1px; font-family: var(--display); }
 .style-hint { font-size: 10.5px; color: var(--ink-faint); padding: 0 10px; line-height: 1.4; }
 

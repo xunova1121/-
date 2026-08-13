@@ -7,25 +7,17 @@
  * 定完就不该在剧本旁边再摆一遍。
  */
 import { h, clear, api, toast } from '../lib.js';
+import { styleArtSVG } from '../style-art.js';
 
-/** 画风缩略图：用配色和纹理现画，不外链图片，离线也能看 */
+/**
+ * 画风缩略图。
+ *
+ * 十二张画的是同一个镜头（湖畔、远山、栈桥上一个人影），只改画法和配色 ——
+ * 并排看过去比较的是"这个风格会把画面变成什么样"，而不是"哪张图好看"。
+ * 具体怎么画见 ui/style-art.js。
+ */
 export function swatchEl(s) {
-  const { from, to, accent, texture } = s.swatch;
-  const overlays = {
-    ink: `radial-gradient(ellipse at 30% 70%, ${accent}55 0%, transparent 55%)`,
-    flat: `linear-gradient(180deg, transparent 55%, ${accent}66 55%)`,
-    fine: `repeating-linear-gradient(45deg, ${accent}22 0 3px, transparent 3px 8px)`,
-    photo: `radial-gradient(circle at 70% 30%, ${accent}88 0%, transparent 45%)`,
-    grain: `repeating-linear-gradient(0deg, ${accent}18 0 1px, transparent 1px 3px)`,
-    neon: `radial-gradient(circle at 25% 75%, ${accent}cc 0%, transparent 40%), radial-gradient(circle at 75% 25%, ${to}aa 0%, transparent 40%)`,
-    soft: `radial-gradient(circle at 50% 40%, ${accent}77 0%, transparent 60%)`,
-    noir: `linear-gradient(105deg, transparent 0 12%, ${accent}44 12% 16%, transparent 16% 28%, ${accent}44 28% 32%, transparent 32%)`,
-    wash: `radial-gradient(ellipse at 60% 40%, ${accent}66 0%, transparent 50%)`
-  };
-  return h('div', {
-    class: 'style-swatch',
-    style: `background: ${overlays[texture] || ''}, linear-gradient(135deg, ${from}, ${to});`
-  });
+  return h('div', { class: 'style-swatch', html: styleArtSVG(s) });
 }
 
 export function stylePicker(presets, currentId, onPick) {
