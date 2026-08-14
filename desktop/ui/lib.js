@@ -43,10 +43,33 @@ export function add(el, ...children) {
 
 // ───────────────────────── 接口 ─────────────────────────
 
+/**
+ * 配对码。
+ *
+ * 本机打开时是空的 —— 127.0.0.1 上不需要，谁能打开这个端口谁本来就已经坐在这台机器前。
+ * 手机从局域网连过来时才有：那条口子后面是你的 API 密钥和额度，
+ * 同一个 Wi-Fi 下的人不该随手就能驱动它。见 core/server.js 里的 guard。
+ */
+let authKey = '';
+
+export function setAuthKey(key) {
+  authKey = key || '';
+}
+
+export function getAuthKey() {
+  return authKey;
+}
+
+function authHeaders(extra) {
+  const h = { ...(extra || {}) };
+  if (authKey) h['X-FD-Key'] = authKey;
+  return Object.keys(h).length ? h : undefined;
+}
+
 export async function api(path, { method = 'GET', body } = {}) {
   const res = await fetch(`/api${path}`, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    headers: authHeaders(body ? { 'Content-Type': 'application/json' } : null),
     body: body ? JSON.stringify(body) : undefined
   });
   const text = await res.text();
@@ -67,7 +90,7 @@ export async function api(path, { method = 'GET', body } = {}) {
 export async function stream(path, body, onEvent, { signal } = {}) {
   const res = await fetch(`/api${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body || {}),
     signal
   });
@@ -162,5 +185,7 @@ export function statusBadge(status) {
 
 /** 媒体文件走后端的 /media 通道（限制在数据目录内），不能直接用 file:// */
 export function mediaUrl(localPath) {
-  return `/media?p=${encodeURIComponent(localPath)}`;
+  // <img src> / <video src> 没法带自定义头，所以配对码只能挂在查询串上
+  const key = authKey ? `&k=${encodeURIComponent(authKey)}` : '';
+  return `/media?p=${encodeURIComponent(localPath)}${key}`;
 }

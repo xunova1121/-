@@ -9,13 +9,20 @@
  *   negative  这个风格特有的负向词（水墨怕线条僵硬，写实怕塑料感）
  *   swatch    缩略图的配色与笔触参数，由界面用 CSS 渐变现画
  *
- * 缩略图刻意不用真实图片：一是离线可用、包体不膨胀，二是不会拿别人的作品
- * 当示例。真想看这个风格出什么样，用「生成预览图」按钮拿你自己的模型出一张。
+ * 卡片上那张图有三层，优先级从高到低：
+ *   ① 你自己模型出的预览图（「生成预览图」按钮）—— 最有用，它回答的是
+ *      "这个画风在**我的模型**上长什么样"；
+ *   ② 随应用带的示例图 ui/style-img/<id>.webp —— 一眼认出画风用；
+ *   ③ swatch/art 参数现画的示意图 —— 前两样都没有时的兜底，离线免费，
+ *      新加预设时不至于开天窗。
+ *
+ * ②这一层的图必须是**自己有权分发**的（用户自备或自己出的）。
+ * 从网上找来的图随应用发出去，版权风险落在用它的人头上。
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { STYLE_DIR, safeFileName } from './paths.js';
+import { STYLE_DIR, UI_DIR, safeFileName } from './paths.js';
 
 export const STYLE_PRESETS = [
   {
@@ -182,11 +189,30 @@ export function previewPrompt(style) {
   };
 }
 
+/**
+ * 随应用带的画风示例图。
+ *
+ * 在 ui/style-img/ 里放一张 <id>.webp 就会自动生效，不用改代码 ——
+ * 由后端**探一下文件在不在**再告诉前端，而不是让前端直接猜路径：
+ * 猜错就是一个碎掉的 <img>，而"某个画风没配图"是很正常的状态，
+ * 不该长得像出了故障。没有图的那几个照旧退回内置示意图。
+ */
+export function bundledArt(id) {
+  const file = path.join(UI_DIR, 'style-img', `${safeFileName(id, 'style')}.webp`);
+  return fs.existsSync(file) ? `/style-img/${encodeURIComponent(id)}.webp` : null;
+}
+
 /** 带上预览图信息的预设列表，前端直接用 */
 export function presetsForUI() {
   return STYLE_PRESETS.map((s) => {
     const preview = previewFor(s.id);
-    return { ...s, previewPath: preview?.path || null, previewAt: preview?.at || null };
+    return {
+      ...s,
+      previewPath: preview?.path || null,
+      previewAt: preview?.at || null,
+      // 注意不能叫 art —— 那个名字已经被内置示意图的画面参数占了
+      sample: bundledArt(s.id)
+    };
   });
 }
 

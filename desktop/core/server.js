@@ -10,7 +10,9 @@
  */
 import http from 'node:http';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { UI_DIR, DATA_DIR, ensureDirs } from './paths.js';
@@ -109,17 +111,115 @@ function ndjson(res) {
   };
 }
 
-/** 只有本机、只有自己的页面能调 */
-function guard(req) {
-  const host = (req.headers.host || '').split(':')[0];
-  if (!['127.0.0.1', 'localhost', '[::1]', '::1'].includes(host)) {
-    return '仅允许通过 127.0.0.1 访问';
+/**
+ * 这个地址算不算"局域网里的自己人"。
+ *
+ * 只认私网 IP 字面量，不认域名 —— 这一条是防 DNS rebinding 的：
+ * 攻击者可以让 evil.com 解析到 192.168.1.7，浏览器就会带着 Host: evil.com
+ * 往你手机所在的这台机器发请求。只要求 Host 必须是私网 IP 本身，这条路就断了。
+ */
+function isPrivateHost(host) {
+  if (/^10\.\d+\.\d+\.\d+$/.test(host)) return true;
+  if (/^192\.168\.\d+\.\d+$/.test(host)) return true;
+  if (/^169\.254\.\d+\.\d+$/.test(host)) return true;
+  const m = host.match(/^172\.(\d+)\.\d+\.\d+$/);
+  if (m && Number(m[1]) >= 16 && Number(m[1]) <= 31) return true;
+  // IPv6 链路本地 / 唯一本地地址
+  return /^(fe80|fc|fd)/i.test(host);
+}
+
+/**
+ * 谁能调这个服务。
+ *
+ * 本机那条监听（127.0.0.1）维持原样：能打开这个端口的人本来就坐在这台机器前。
+ * 手机那条监听是**另开的一个端口**，规矩严得多 ——
+ * 它后面是你的 API 密钥和额度，同一个 Wi-Fi 下的人不该随手就能驱动它。
+ */
+function guard(req, { lan = false } = {}) {
+  const hostHeader = req.headers.host || '';
+  const host = hostHeader.replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+  const loopback = ['127.0.0.1', 'localhost', '::1'].includes(host);
+
+  if (!lan && !loopback) return '仅允许通过 127.0.0.1 访问';
+  if (lan && !loopback && !isPrivateHost(host)) {
+    return `手机端只接受局域网地址，这个 Host 不是：${host}`;
   }
+
   const origin = req.headers.origin;
-  if (origin && !/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin) && origin !== 'null') {
-    return `拒绝跨站请求：${origin}`;
+  if (origin && origin !== 'null') {
+    const sameOrigin = origin === `http://${hostHeader}` || origin === `https://${hostHeader}`;
+    if (!sameOrigin && !/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) {
+      return `拒绝跨站请求：${origin}`;
+    }
   }
   return null;
+}
+
+/**
+ * 配对码校验（只在手机那条监听上做）。
+ *
+ * 两个细节值得写下来：
+ *   ① 也认查询串里的 k。<img src> / <video src> 没法带自定义头，
+ *      而手机端最主要的用途就是看图看片，不认它等于这个功能白做。
+ *   ② 错太多次就锁一阵子。配对码只有 8 位，局域网里慢慢试是能试出来的；
+ *      锁 10 分钟之后，暴力枚举的期望时间就变得不现实了。
+ */
+const KEY_ATTEMPTS = { bad: 0, until: 0 };
+const KEY_MAX_BAD = 10;
+const KEY_LOCK_MS = 10 * 60 * 1000;
+
+export function resetKeyLockout() {
+  KEY_ATTEMPTS.bad = 0;
+  KEY_ATTEMPTS.until = 0;
+}
+
+function checkKey(req, url) {
+  const expected = settings.get('lanToken') || '';
+  if (!expected) return '手机端还没生成配对码，去电脑上的「设置 → 手机遥控」打开一次';
+
+  if (KEY_ATTEMPTS.until > Date.now()) {
+    const mins = Math.ceil((KEY_ATTEMPTS.until - Date.now()) / 60000);
+    return `配对码错误次数过多，${mins} 分钟后再试`;
+  }
+
+  const given = req.headers['x-fd-key'] || url.searchParams.get('k') || '';
+  // 长度不同直接判错，不进 timingSafeEqual（它要求等长）
+  let ok = given.length === expected.length;
+  if (ok) {
+    ok = crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected));
+  }
+  if (!ok) {
+    KEY_ATTEMPTS.bad += 1;
+    if (KEY_ATTEMPTS.bad >= KEY_MAX_BAD) {
+      KEY_ATTEMPTS.until = Date.now() + KEY_LOCK_MS;
+      KEY_ATTEMPTS.bad = 0;
+    }
+    return '配对码不对';
+  }
+  KEY_ATTEMPTS.bad = 0;
+  return null;
+}
+
+/** 本机的局域网地址，用来在设置页里告诉用户"手机上该输什么" */
+export function lanAddresses() {
+  const out = [];
+  for (const [name, list] of Object.entries(os.networkInterfaces())) {
+    for (const ni of list || []) {
+      if (ni.internal) continue;
+      if (ni.family !== 'IPv4' && ni.family !== 4) continue;
+      if (!isPrivateHost(ni.address)) continue;
+      out.push({ name, address: ni.address });
+    }
+  }
+  return out;
+}
+
+/** 配对码用去掉易混字符的字母表：手机上是要一个一个敲进去的 */
+const TOKEN_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+export function newToken(len = 8) {
+  const bytes = crypto.randomBytes(len);
+  return Array.from(bytes, (b) => TOKEN_ALPHABET[b % TOKEN_ALPHABET.length]).join('');
 }
 
 function serveStatic(req, res, urlPath) {
@@ -181,7 +281,7 @@ function serveMedia(req, res, url) {
   fs.createReadStream(full).pipe(res);
 }
 
-async function handleApi(req, res, url) {
+async function handleApi(req, res, url, { lan = false } = {}) {
   const seg = url.pathname.split('/').filter(Boolean); // ['api', ...]
   const [, a, b, c, d, e, f] = seg;
   const method = req.method;
@@ -226,6 +326,31 @@ async function handleApi(req, res, url) {
       videoDurations: adapters.routedVideoDurations(),
       ffmpeg: ffmpeg.locate()
     });
+  }
+
+  // ---- 手机遥控 ----
+  if (a === 'lan') {
+    if (method === 'GET') return json(res, 200, lanStatus());
+    if (method === 'POST') {
+      // 开关和配对码只能在电脑上改。手机自己能换配对码的话，
+      // 拿到过一次码的人就能永久续期 —— 撤销权必须留在这台机器上。
+      if (lan) return json(res, 403, { error: '手机端不能改遥控设置，去电脑上的「设置 → 手机遥控」' });
+      const body = await readBody(req);
+      // 换配对码：手机丢了、或者给同事看过一次之后，得能一键作废
+      if (body.rotate) {
+        settings.patch({ lanToken: newToken() });
+        resetKeyLockout();
+        return json(res, 200, { ...lanStatus(), token: settings.get('lanToken') });
+      }
+      if (body.enabled === false) {
+        settings.patch({ lanAccess: false });
+        return json(res, 200, stopLan());
+      }
+      settings.patch({ lanAccess: true });
+      const status = await startLan();
+      // 配对码只在电脑这一侧回传：手机那一侧要是能查到它，配对码就等于没有
+      return json(res, 200, { ...status, token: settings.get('lanToken') });
+    }
   }
 
   // ---- 设置 ----
@@ -456,6 +581,21 @@ async function handleApi(req, res, url) {
         }
         return undefined;
       }
+      // 用本地图片当设定图。有些参照模型画不出来 —— 真人演员的照片、
+      // 客户给的产品图、已经定稿的三视图，你要的就是那一张，不是"像那一张"。
+      if (e && f === 'upload' && method === 'POST') {
+        // 图片走 base64 内联，比模型出图那条路的请求体大得多，限额得单独放宽
+        const body = await readBody(req, 16 * 1024 * 1024);
+        const stream = ndjson(res);
+        req.on('close', () => stream.end());
+        try {
+          const project = await studio.attachBibleSheet(b, kind, decodeURIComponent(e), body, (ev) => stream.send(ev));
+          stream.end({ type: 'finished', project });
+        } catch (err) {
+          stream.end({ type: 'error', message: err.message });
+        }
+        return undefined;
+      }
       if (!e && method === 'POST') {
         return json(res, 201, await studio.addBibleEntry(b, kind, await readBody(req)));
       }
@@ -548,19 +688,37 @@ function summarize(r) {
   };
 }
 
-export function createServer() {
+export function createServer({ lan = false } = {}) {
   ensureDirs();
   // 上次删项目时被 Windows 文件占用打断的残骸，开机顺手扫掉
   store.sweepOrphans();
   return http.createServer(async (req, res) => {
-    const denied = guard(req);
+    const denied = guard(req, { lan });
     if (denied) return json(res, 403, { error: denied });
 
     const url = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
+
+    /**
+     * 手机那条监听上，**除了手机端页面本身**，一切都要配对码。
+     *
+     * 页面文件放行是必须的：不放行就没法显示"请输入配对码"那一屏，
+     * 用户只会看到一个 401，不知道该干什么。页面里没有任何数据，
+     * 数据全在 /api 和 /media 后面 —— 那两条一步都不让。
+     */
+    if (lan) {
+      const isShell = url.pathname === '/m' || url.pathname.startsWith('/m/');
+      if (!isShell) {
+        const bad = checkKey(req, url);
+        if (bad) return json(res, 401, { error: bad });
+      }
+    }
+
     try {
+      // 手机端是独立的一套页面，不是把电脑版缩小 —— 见 ui/m/README 里的取舍
+      if (url.pathname === '/m' || url.pathname === '/m/') return serveStatic(req, res, '/m/index.html');
       if (url.pathname === '/media') return serveMedia(req, res, url);
       if (url.pathname.startsWith('/api/')) {
-        const out = await handleApi(req, res, url);
+        const out = await handleApi(req, res, url, { lan });
         if (out === undefined && !res.headersSent) {
           return json(res, 405, { error: `${req.method} 不支持` });
         }
@@ -577,6 +735,63 @@ export function createServer() {
       return undefined;
     }
   });
+}
+
+/**
+ * 手机遥控那条监听。
+ *
+ * 为什么是**另开一个端口**而不是把主监听改成 0.0.0.0：
+ *   ① 开关要能随时开关，不该为了让手机连一次就重启整个应用；
+ *   ② 两条口子的规矩不一样（本机免密、局域网必须配对码），
+ *      分成两个 server 实例，规矩就是各自写死的，不会因为一处判断写漏而串门；
+ *   ③ 关掉时是真的把端口关了，而不是留着一个"应该会拒绝"的监听。
+ */
+let lanServer = null;
+let lanPort = 0;
+
+export function lanStatus() {
+  return {
+    running: Boolean(lanServer),
+    port: lanPort,
+    hasToken: Boolean(settings.get('lanToken')),
+    addresses: lanAddresses(),
+    urls: lanServer ? lanAddresses().map((a) => `http://${a.address}:${lanPort}/m`) : []
+  };
+}
+
+export function startLan(port) {
+  if (lanServer) return lanStatus();
+  // 没有配对码就不开 —— 不带锁的门比没有门更糟，因为你会以为它锁着
+  if (!settings.get('lanToken')) settings.patch({ lanToken: newToken() });
+  return new Promise((resolve, reject) => {
+    const srv = createServer({ lan: true });
+    let p = port || (settings.get('port') || 5178) + 1;
+    let tried = 0;
+    srv.on('error', (err) => {
+      if (err.code === 'EADDRINUSE' && tried < 20) {
+        tried += 1;
+        p += 1;
+        srv.listen(p, '0.0.0.0');
+      } else {
+        reject(err);
+      }
+    });
+    srv.on('listening', () => {
+      lanServer = srv;
+      lanPort = p;
+      resolve(lanStatus());
+    });
+    srv.listen(p, '0.0.0.0');
+  });
+}
+
+export function stopLan() {
+  if (!lanServer) return lanStatus();
+  lanServer.close();
+  lanServer = null;
+  lanPort = 0;
+  resetKeyLockout();
+  return lanStatus();
 }
 
 /** 端口被占就顺延，最多试 20 个 —— 5178 撞车在开发机上太常见了 */

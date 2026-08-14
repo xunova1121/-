@@ -199,15 +199,81 @@ export default {
         }
       }, item.sheetPath ? '改完重出' : '生成');
 
+      /**
+       * 用本地图片当设定图。
+       *
+       * 有些参照是**模型画不出来的**：真人演员的照片、客户给的产品图、
+       * 已经定稿的角色三视图 —— 你要的就是这一张，不是"像这一张"。
+       *
+       * 传上来之后它和模型出的设定图完全同等：一致性复核拿它当基准，
+       * 每一镜出图都会把它作为参考图带上。也就是说，
+       * 传一张真人照片，后面所有镜头都会照着这个人画。
+       */
+      const fileInput = h('input', {
+        type: 'file',
+        accept: 'image/png,image/jpeg,image/webp',
+        style: 'display:none',
+        onchange: async () => {
+          const file = fileInput.files?.[0];
+          if (!file) return;
+          uploadBtn.disabled = true;
+          const label = uploadBtn.textContent;
+          uploadBtn.textContent = '读取中…';
+          try {
+            const dataUrl = await new Promise((resolve, reject) => {
+              const fr = new FileReader();
+              fr.onload = () => resolve(fr.result);
+              fr.onerror = () => reject(new Error('这个文件读不出来'));
+              fr.readAsDataURL(file);
+            });
+            uploadBtn.textContent = '上传中…';
+            let err = null;
+            await stream(
+              `/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}/upload`,
+              { dataUrl, fileName: file.name },
+              (ev) => {
+                if (ev.type === 'finished' && ev.project) project = ev.project;
+                if (ev.type === 'error') err = ev.message;
+              }
+            );
+            if (err) throw new Error(err);
+            toast(`${item.name} 已换成你传的图。后面出图都会照着它画`, 'ok');
+            rerender();
+          } catch (e) {
+            toast(e.message, 'err');
+          } finally {
+            fileInput.value = '';
+            uploadBtn.disabled = false;
+            uploadBtn.textContent = label;
+          }
+        }
+      });
+      const uploadBtn = h('button', {
+        class: 'btn ghost sm',
+        title: '真人照片、客户给的产品图、定稿的三视图 —— 这些模型画不出来，直接传上来当基准',
+        onclick: () => fileInput.click()
+      }, '传本地图');
+
       return h('div', { class: 'sheet-card' },
         img,
         h('div', { class: 'sheet-body' },
-          h('div', { class: 'sheet-name' }, item.name),
+          h('div', { class: 'sheet-name' },
+            item.name,
+            // 标明这张图是谁出的。过两天没人分得清哪张是模型出的、哪张是自己传的，
+            // 而这直接决定"重出一次"会不会把你传的图冲掉
+            item.sheetSource === 'upload'
+              ? h('span', { class: 'badge', title: item.sheetFileName || '你上传的图片' }, '自传图')
+              : null),
           item.role ? h('div', { class: 'sheet-role' }, item.role) : null,
           h('div', { style: 'margin-top:8px' }, area),
           h('div', { class: 'sheet-actions' }, provSel, modelSel),
+          item.sheetSource === 'upload'
+            ? h('div', { class: 'sheet-seed', style: 'margin-top:6px' }, '这张是你传的，点「改完重出」会用模型重画一张盖掉它')
+            : null,
           h('div', { class: 'inline', style: 'margin-top:8px' },
             redoBtn,
+            uploadBtn,
+            fileInput,
             h('button', {
               class: 'btn ghost sm',
               title: '从设定集里移除',

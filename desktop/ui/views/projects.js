@@ -12,14 +12,16 @@ import { openLightbox } from '../lightbox.js';
 import { ratioPicker } from '../ratios.js';
 
 /**
- * 画风缩略图。两种形态：
+ * 画风缩略图。三种形态，按优先级：
  *
- *   ① 还没出过预览图 → 用 style-art.js 现画的示意图（离线、免费、构图统一）；
- *   ② 出过一次     → 换成**你自己模型出的真图**，一直用下去。
+ *   ① 你自己模型出过的预览图 → 一直用它。这张最有价值，因为它回答的是
+ *      "这个画风在**我的模型**上长什么样"，而不是"别人那儿长什么样"。
+ *   ② 随应用带的示例图（ui/style-img/<id>.webp）→ 一眼就能认出画风。
+ *   ③ 都没有 → style-art.js 现画的示意图。离线、免费、构图统一，
+ *      新加一个画风预设时不至于开天窗。
  *
- * 为什么不直接打包一批现成的图：网上找来的是别人的作品，随应用分发出去
- * 版权说不清 —— 出问题的是用它的人。用你自己的模型出，图是你的，
- * 而且顺带回答了更要紧的那个问题：这个画风在**你的模型**上到底长什么样。
+ * 三层都留着是有原因的：示例图能让人**一眼选对**，自出的预览图能让人
+ * **选得准**，而示意图保证任何时候都不会出现一个碎掉的图框。
  */
 export function swatchEl(s) {
   if (s.previewPath) {
@@ -30,8 +32,11 @@ export function swatchEl(s) {
         loading: 'lazy'
       }));
   }
-  // 没出过预览图时用内置示意图
-
+  if (s.sample) {
+    return h('div', { class: 'style-swatch' },
+      h('img', { src: s.sample, alt: `${s.name} 示例`, loading: 'lazy' }));
+  }
+  // 两种真图都没有时用内置示意图
   return h('div', { class: 'style-swatch', html: styleArtSVG(s) });
 }
 
@@ -304,9 +309,16 @@ export default {
       }, '清掉预览图');
 
       const have = presets.filter((p) => p.previewPath).length;
-      status.textContent = have
-        ? `${have} 个画风已有真图，其余是内置示意图`
-        : '现在显示的是内置示意图（同一个镜头的十二种画法）。想看真图就点左边，用你自己的模型出一遍。';
+      const bundled = presets.filter((p) => !p.previewPath && p.sample).length;
+      // 说清楚现在这些图**是谁出的**：随应用带的示例图只能告诉你这个画风长什么样，
+      // 换成你自己模型出的那张，才能回答"它在我的模型上长什么样"——那才是选画风时真正要知道的
+      clear(status);
+      if (have) {
+        status.append(`${have} 个画风是你自己模型出的图${bundled ? `，${bundled} 个是随应用带的示例图` : ''}`);
+      } else {
+        // 注意别在文本节点里写 **粗体** —— 那是 Markdown，不是 HTML，会原样印出星号
+        status.append('现在显示的是随应用带的示例图。想知道这些画风在', h('b', {}, '你的模型'), '上长什么样，点左边出一遍。');
+      }
 
       return h('div', { class: 'inline', style: 'margin-top:10px;flex-wrap:wrap' },
         genAll, genMissing, have ? clearAll : null, status);

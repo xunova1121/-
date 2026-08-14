@@ -87,7 +87,16 @@ const DEFAULTS = {
    */
   useSystemProxy: false,
   theme: 'dark',
-  port: 5178
+  port: 5178,
+
+  // ───── 手机遥控（未完成，界面还没接上）─────
+  /**
+   * 允许手机从局域网连进来。默认关，而且是**另开一个端口**监听 ——
+   * 这条口子后面是 API 密钥和额度，规矩必须和本机那条分开写死。见 core/server.js。
+   */
+  lanAccess: false,
+  /** 配对码。开启时自动生成，手机连进来必须带上它。 */
+  lanToken: ''
 };
 
 let cache = null;

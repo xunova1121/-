@@ -451,7 +451,10 @@ label {
   display: grid; place-items: center; color: var(--ink-faint); font-size: 11.5px;
 }
 .sheet-body { padding: 11px 13px; }
-.sheet-name { font-size: 13px; font-weight: 650; font-family: var(--display); }
+.sheet-name {
+  font-size: 13px; font-weight: 650; font-family: var(--display);
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
 .sheet-role { font-size: 10.5px; color: var(--beam); font-family: var(--code); margin-top: 1px; }
 .sheet-desc {
   font-size: 11.5px; color: var(--ink-faint); margin-top: 7px;

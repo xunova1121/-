@@ -805,6 +805,8 @@ export async function regenerateSheet(projectId, kind, name, opts = {}, onEvent)
       t.sheetPath = dest;
       t.sheetUrl = modelRef;
       t.seed = seed;
+      // 之前可能是传上来的图，这次是模型出的 —— 标记得跟着换，否则界面会一直说"你传的"
+      t.sheetSource = 'model';
     }
     return p;
   });
@@ -817,6 +819,74 @@ export async function regenerateSheet(projectId, kind, name, opts = {}, onEvent)
  * 往设定集里加一条（衍生品、后加的道具、中途出场的配角都走这里）。
  * 加完不自动出图 —— 让用户先把描述写好，再点重出，省一次无效开销。
  */
+/** 认得出来的图片格式。除了这几种，别的一律不收 —— 存进去也是打不开的文件。 */
+const IMAGE_MIME = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/webp': '.webp'
+};
+
+/**
+ * 用本地图片当设定图。
+ *
+ * 这条路比"再出一张"更重要，因为有些参照是**模型画不出来的**：
+ * 真人演员的照片、客户给的产品图、已经定稿的角色三视图 ——
+ * 你要的就是这一张，不是"像这一张"。
+ *
+ * 传进来之后它和模型出的设定图完全同等：一致性引擎拿它当基准去比对，
+ * 每一镜的提示词从它派生，出图时作为参考图带上。也就是说
+ * **上传一张真人照片，后面所有镜头都会照着这个人画**。
+ *
+ * 落盘时特意不沿用模型出图那个文件名（ref-<kind>-<name>.png），
+ * 而是带上扩展名和 upload 标记：万一以后想知道"这张到底是谁出的"，
+ * 光看文件名就够，不用去翻 project.json。
+ */
+export async function attachBibleSheet(projectId, kind, name, { dataUrl, fileName = '' } = {}, onEvent) {
+  const project = store.read(projectId);
+  if (!project?.bible) throw new Error('还没有设定集');
+  const item = bibleBucket(project.bible, kind).find((x) => x.name === name);
+  if (!item) throw new Error(`设定集里没有「${name}」`);
+
+  const m = /^data:([^;,]+);base64,(.+)$/s.exec(String(dataUrl || ''));
+  if (!m) throw new Error('没读到图片内容（需要 data:image/...;base64, 开头的内容）');
+  const ext = IMAGE_MIME[m[1].toLowerCase()];
+  if (!ext) throw new Error(`不支持这种图片格式：${m[1]}。用 PNG / JPG / WebP。`);
+
+  const buf = Buffer.from(m[2], 'base64');
+  if (!buf.length) throw new Error('图片是空的');
+  // 内联给模型的上限是 7MB（见 toModelRef），这里卡在同一条线上，
+  // 免得存下来了、真要用的时候才报"超出上限"
+  if (buf.length > 7 * 1024 * 1024) {
+    throw new Error(`这张图 ${(buf.length / 1024 / 1024).toFixed(1)}MB，超过 7MB 就没法内联发给模型了。先压一下再传。`);
+  }
+
+  const dest = path.join(store.assetDir(projectId), `ref-${kind}-${safeFileName(name)}-upload${ext}`);
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.writeFileSync(dest, buf);
+  onEvent?.({ type: 'note', message: `已存下 ${path.basename(dest)}（${(buf.length / 1024).toFixed(0)} KB）` });
+
+  const modelRef = await toModelRef(dest, { onEvent });
+
+  store.update(projectId, (p) => {
+    const t = bibleBucket(p.bible, kind).find((x) => x.name === name);
+    if (t) {
+      // 旧的那张不删：万一传错了，用户还能自己去 assets 目录里找回来
+      t.sheetPath = dest;
+      t.sheetUrl = modelRef;
+      // 如实标明来源。界面要靠它说"这张是你传的"，
+      // 不然过两天没人分得清哪张是模型出的、哪张是自己传的
+      t.sheetSource = 'upload';
+      t.sheetFileName = fileName || path.basename(dest);
+      t.sheetAt = new Date().toISOString();
+    }
+    return p;
+  });
+
+  onEvent?.({ type: 'sheet', name, kind, status: 'done', message: '已用本地图片作为设定图' });
+  return store.read(projectId);
+}
+
 export async function addBibleEntry(projectId, kind, { name, appearance = '', role = '' }) {
   if (!name?.trim()) throw new Error('得起个名字');
   const project = store.read(projectId);

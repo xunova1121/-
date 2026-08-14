@@ -990,6 +990,54 @@ const removed = await (
 ).json();
 check('能删掉设定集条目', !removed.bible.props.some((p) => p.name === '周边徽章'));
 
+// 有些参照模型画不出来：真人演员的照片、客户给的产品图、已经定稿的三视图。
+// 传上来之后它必须和模型出的设定图**完全同等**，否则等于传了个寂寞。
+section('设定集可以用本地图片当基准');
+{
+  const charName = afterProp.bible.characters[0].name;
+  const png = PIXEL_PNG.toString('base64');
+  const up = await ndjson(
+    `/projects/${project.id}/bible/char/${encodeURIComponent(charName)}/upload`,
+    { dataUrl: `data:image/png;base64,${png}`, fileName: '演员定妆照.png' }
+  );
+  const after = up.find((e) => e.type === 'finished')?.project;
+  const who = after?.bible?.characters?.find((c) => c.name === charName);
+
+  check('传上来的图成了这个角色的设定图', Boolean(who?.sheetPath), JSON.stringify(up.slice(-1)));
+  check('文件名带 upload，一眼看得出这张不是模型出的',
+    /-upload\.png$/.test(who?.sheetPath || ''), who?.sheetPath);
+  check('落到了项目自己的 assets 目录里', fs.existsSync(who?.sheetPath || ''));
+  check('如实记下来源，界面靠它标「自传图」', who?.sheetSource === 'upload', who?.sheetSource);
+  check('记下了原始文件名', who?.sheetFileName === '演员定妆照.png', who?.sheetFileName);
+  // 这条是整个功能的意义所在：传完之后出图要真的照着它画
+  check('sheetUrl 一起换了（后面每一镜出图带的就是这张）',
+    Boolean(who?.sheetUrl) && who.sheetUrl.startsWith('data:image/png;base64,'), String(who?.sheetUrl).slice(0, 30));
+
+  const badType = await ndjson(
+    `/projects/${project.id}/bible/char/${encodeURIComponent(charName)}/upload`,
+    { dataUrl: 'data:application/pdf;base64,AAAA', fileName: 'x.pdf' }
+  );
+  check('不是图片就直接说清楚，而不是存一个打不开的文件',
+    /不支持这种图片格式/.test(badType.find((e) => e.type === 'error')?.message || ''),
+    JSON.stringify(badType.slice(-1)));
+
+  const noData = await ndjson(
+    `/projects/${project.id}/bible/char/${encodeURIComponent(charName)}/upload`, { dataUrl: '' });
+  check('没给内容时不静默成功',
+    /没读到图片内容/.test(noData.find((e) => e.type === 'error')?.message || ''), JSON.stringify(noData.slice(-1)));
+
+  const noSuch = await ndjson(
+    `/projects/${project.id}/bible/char/${encodeURIComponent('查无此人')}/upload`,
+    { dataUrl: `data:image/png;base64,${png}` });
+  check('传给不存在的条目会报错', /设定集里没有/.test(noSuch.find((e) => e.type === 'error')?.message || ''));
+
+  // 重出会盖掉自传图 —— 这是预期行为，但标记必须跟着换，否则界面会一直说"你传的"
+  const redo = await ndjson(
+    `/projects/${project.id}/bible/char/${encodeURIComponent(charName)}/regenerate`, {});
+  const redone = redo.find((e) => e.type === 'finished')?.project?.bible?.characters?.find((c) => c.name === charName);
+  check('模型重出之后来源标记跟着换回 model', redone?.sheetSource === 'model', redone?.sheetSource);
+}
+
 section('画风预设');
 const stylesResp = await (await fetch(`${appUrl}/api/styles`)).json();
 check('画风预设列表拿得到', stylesResp.presets?.length >= 10, `${stylesResp.presets?.length} 个`);
