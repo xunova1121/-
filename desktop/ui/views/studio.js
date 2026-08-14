@@ -1410,7 +1410,7 @@ export default {
     const suggestStatus = h('span', { class: 'field-hint', style: 'margin:0' });
     const suggestBtn = h('button', {
       class: 'btn ghost sm',
-      title: '模型读一遍每镜的画面描述，从技法库里挑。一次调用管全片，只改文案不出图',
+      title: '剧本模型读一遍每镜的画面描述，从技法库里挑。一次调用管全片，挑完再按前后镜顺一遍场（同场戏光线统一、连续动作运镜不掉头、机位不连着重复），只改文案不出图',
       onclick: async () => {
         if (!project.shots?.length) return toast('还没有分镜', 'err');
         if (!confirm(`让模型给这 ${project.shots.length} 镜挑技法？会覆盖已选的技法，一次对话调用，不出图。`)) return;

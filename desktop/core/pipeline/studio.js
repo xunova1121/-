@@ -592,7 +592,7 @@ export function updateShot(projectId, shotId, patch = {}) {
   return { project: store.read(projectId), changed, dropped };
 }
 
-const SKILL_PROMPT = `你是分镜师。下面给你一份分镜表和一份**技法卡清单**，
+export const SKILL_PROMPT = `你是分镜师。下面给你一份分镜表和一份**技法卡清单**，
 为每一镜挑出最合适的技法。
 
 判断依据：
@@ -602,12 +602,24 @@ const SKILL_PROMPT = `你是分镜师。下面给你一份分镜表和一份**�
 - 打斗、追逐           → 手持微晃 / 跟拍 / 低角度
 - 情绪特写             → 大特写 / 伦勃朗光 / 推镜
 
+连贯（这一段比"单镜挑得准"更要紧 —— 逐镜都对、连起来不成立，是最常见的失败）：
+- 每镜给了 link，说明它和**上一镜**的关系：
+  new-scene = 换场景；cut = 同场景换机位；continuous = 连续动作（推门→进门）
+- link 是 cut 的镜头，和上一镜**必须用同一张光线卡**。同一场戏里不能上一镜黄金时刻、
+  下一镜月光冷调 —— 那是一场戏拍了两个时段。除非画面描述里光线真的变了（开灯、天亮、进隧道）
+- link 是 continuous 的两镜，运镜要顺下去：推镜接推镜或固定镜头，**不要推镜接拉镜**
+- 不要连着三镜用同一张机位卡，景别要有起伏
+- 机位卡要和这一镜的 camera（景别）对得上：camera 是全景/远景就别选大特写
+- 荷兰角、希区柯克变焦、纯剪影这类强风格卡，全片最多两三次，而且要用在情绪顶点上
+
 规矩（必须遵守）：
 - 只能用清单里给出的 id，**不要自创**；
 - 标了「单选」的分类，每镜最多挑一个；
 - **宁缺毋滥**：这一镜没有明显该用的技法就少给或不给。
   每镜都堆五个技法，等于每镜都没有重点，反而不如不选；
-- 每镜 0~4 个。
+- 每镜 0~4 个；
+- 分镜表里 pick 为 false 的镜头**只是给你看上下文的**，不要为它们输出结果，
+  但你挑的技法要和它们已有的（skills 字段）接得上。
 
 严格只输出 JSON，不要解释、不要代码块：
 
@@ -631,13 +643,27 @@ const SKILL_PROMPT = `你是分镜师。下面给你一份分镜表和一份**�
  *   ③ **宁缺毋滥写进提示词**。不写这句，模型会给每一镜都堆满技法，
  *      每镜都有重点等于每镜都没重点。
  *
- * 挑完不直接生效前的东西：结果落盘到 shot.skills，但**不自动重出图** ——
- * 你可以先翻一遍，不满意的手改掉，再统一重出。
+ * ── "挑的对不上前面也对不上后面" ──
+ *
+ * "一次调用管全片"只是让模型**能**看到上下文，不等于它真的用了。
+ * 它实际上在做 N 道互相独立的分类题，不会回头看第 6 镜挑了什么。
+ * 所以这里做了三件事，缺一不可：
+ *
+ *   发过去的每镜带上 link（和上一镜的关系）、camera（景别）、duration，
+ *     不然它连"这两镜是同一场戏"都不知道；
+ *   提示词里明写连贯规矩（同场戏光线统一、连续动作运镜不掉头、机位别连着三镜重复）；
+ *   收回来之后再用 skills.harmonize() **确定性地**捋一遍。
+ *     只靠提示词是不够的 —— 模型会答应你，然后照样犯。
+ *
+ * 只重挑一部分（only）时，其余镜头照样发过去，标 pick:false 当上下文，
+ * 否则重挑的那几镜必然和没重挑的那几镜对不上 —— 它压根没看见它们。
  */
 export async function suggestSkills(projectId, { only = null, onEvent } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
-  const shots = (project.shots || []).filter((s) => (only ? only.includes(s.id) : true));
+  // link 要按**全片**推断：只拿要重挑的那几镜去推，"上一镜"就找错人了
+  const linked = continuity.withLinks(project.shots || []);
+  const shots = linked.filter((s) => (only ? only.includes(s.id) : true));
   if (!shots.length) throw new Error('还没有分镜');
 
   const catalog = skillsLib.catalogForUI();
@@ -649,23 +675,40 @@ export async function suggestSkills(projectId, { only = null, onEvent } = {}) {
     .join('\n');
 
   const r = routing();
-  onEvent?.({ type: 'stage', stage: 'script', status: 'running', message: `让模型给 ${shots.length} 镜挑技法…` });
+  // 挑技法走的是**剧本模型**（能力路由里的"剧本/文本"那一路），不是出图模型。
+  // 把它印出来：出了问题第一件要知道的事就是"这活儿是谁干的"。
+  onEvent?.({
+    type: 'stage',
+    stage: 'script',
+    status: 'running',
+    message: `让剧本模型 ${r.chat.model}（${r.chat.provider}）给 ${shots.length} 镜挑技法…`
+  });
+
+  const forModel = (s) => ({
+    id: s.id,
+    index: s.index,
+    scene: s.scene,
+    // 和上一镜是什么关系。没有这个字段，模型不知道哪两镜是同一场戏
+    link: s.link,
+    characters: s.characters,
+    description: s.description,
+    camera: s.camera,
+    duration: s.duration,
+    dialogue: s.dialogue
+  });
+  const wanted = new Set(shots.map((s) => s.id));
+  const payload = linked.map((s) =>
+    wanted.has(s.id)
+      ? { ...forModel(s), pick: true }
+      // 上下文镜头：把它已经选好的技法一并给出去，新挑的才有得接
+      : { ...forModel(s), pick: false, skills: s.skills || [] }
+  );
 
   const { text } = await adapters.chat({
     providerId: r.chat.provider,
     model: r.chat.model,
     system: SKILL_PROMPT.replace('{{SKILLS}}', listing),
-    user: JSON.stringify(
-      shots.map((s) => ({
-        id: s.id,
-        index: s.index,
-        scene: s.scene,
-        characters: s.characters,
-        description: s.description,
-        camera: s.camera,
-        dialogue: s.dialogue
-      }))
-    ),
+    user: JSON.stringify(payload),
     temperature: 0.3,
     jsonMode: true,
     label: '挑技法'
@@ -674,25 +717,59 @@ export async function suggestSkills(projectId, { only = null, onEvent } = {}) {
   const parsed = consistency.extractJSON(text);
   const picks = Array.isArray(parsed.shots) ? parsed.shots : [];
 
-  const applied = [];
+  const touched = [];
   store.update(projectId, (p) => {
     for (const pick of picks) {
       const target = p.shots.find((s) => s.id === pick.id);
-      if (!target) continue;
+      // 只认这次要重挑的那些镜头：模型有时会顺手把上下文镜头也答一遍，
+      // 那等于把你没打算动的镜头改掉了
+      if (!target || !wanted.has(target.id)) continue;
       // 和手选走同一条规整逻辑：互斥组只留一个、不认识的 id 丢掉。
       // 模型偶尔会自创 id 或者两个互斥的都给。
       const norm = skillsLib.normalize(pick.skills);
       target.skills = norm.ids;
       target.skillWhy = String(pick.why || '').trim();
-      applied.push({ index: target.index, names: skillsLib.labelsFor(norm.ids), why: target.skillWhy, dropped: norm.dropped });
+      touched.push({ id: target.id, index: target.index, dropped: norm.dropped });
     }
     return p;
+  });
+
+  // ── 顺场：模型答应了连贯规矩，但照样会犯，所以再确定性地捋一遍 ──
+  // 捋的时候看**全片**（含这次没重挑的镜头），写回时只写这次重挑的那些。
+  const fixedNotes = [];
+  {
+    const fresh = store.read(projectId);
+    const { shots: harmonized, notes } = skillsLib.harmonize(continuity.withLinks(fresh.shots || []));
+    const changes = harmonized.filter((h) => wanted.has(h.id));
+    if (changes.length) {
+      store.update(projectId, (p) => {
+        for (const h of changes) {
+          const target = p.shots.find((s) => s.id === h.id);
+          if (target) target.skills = h.skills;
+        }
+        return p;
+      });
+    }
+    for (const n of notes) if (wanted.has(harmonized.find((h) => h.index === n.index)?.id)) fixedNotes.push(n);
+  }
+
+  const final = store.read(projectId);
+  const applied = touched.map((t) => {
+    const s = final.shots.find((x) => x.id === t.id);
+    return { index: t.index, names: skillsLib.labelsFor(s?.skills || []), why: s?.skillWhy || '', dropped: t.dropped };
   });
 
   for (const a of applied.slice(0, 40)) {
     onEvent?.({
       type: 'note',
       message: `第 ${a.index} 镜：${a.names.join('、') || '不用技法'}${a.why ? ` —— ${a.why}` : ''}`
+    });
+  }
+  // 自动改了什么必须说出来 —— 否则你只会看到"和模型说的不一样"，却不知道是谁改的
+  for (const n of fixedNotes.slice(0, 20)) {
+    onEvent?.({
+      type: 'note',
+      message: `第 ${n.index} 镜顺场：${n.to ? `「${n.from}」改成「${n.to}」` : `去掉「${n.from}」`} —— ${n.why}`
     });
   }
 

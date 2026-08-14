@@ -226,6 +226,147 @@ export function fragmentsFor(ids = [], { target = 'video' } = {}) {
   return bySlot;
 }
 
+/**
+ * ── 顺场：让相邻几镜的技法对得上 ──
+ *
+ * normalize() 管的是**一镜之内**别自相矛盾（不能既仰拍又俯拍）。
+ * 这里管的是**镜与镜之间**：逐镜看每一镜都挑得挺像样，连起来却不成立。
+ *
+ * 为什么必须有这一层：挑技法是一次调用给全片，模型实际上是在做二十个
+ * 互相独立的分类题 —— 它不会回头看第 6 镜挑了什么。于是最常见的三种翻车：
+ *
+ *   ① 同一场戏里第 6 镜黄金时刻、第 7 镜月光冷调 —— 一场戏拍了两个时段。
+ *      这条尤其要命，因为出视频时的衔接约束里明写着"光线、天气、时间保持一致"，
+ *      技法卡和衔接约束**互相打架**，模型只能二选一，选哪个都不对；
+ *   ② "推门→进门"这种连续动作，前一镜推镜、后一镜拉镜 —— 动作接上了，镜头却掉头；
+ *   ③ 连着四镜大特写 —— 每镜都是重点等于没有重点。
+ *
+ * 只在"模型挑"这条路上跑，手选的一律不动：你手动选的东西被自动改掉，
+ * 比选错更让人恼火。
+ */
+
+/** 语义上相反的运镜。连续动作里前后接反了，观众会觉得镜头掉了个头。 */
+const OPPOSITE_MOVES = [
+  ['push-in', 'pull-out'],
+  ['static', 'handheld']
+];
+
+/** 强风格卡：用一次是风格，用五次是毛病 */
+const STRONG_STYLE = ['dutch', 'dolly-zoom', 'silhouette'];
+const STRONG_STYLE_BUDGET = 3;
+
+function groupIdOf(id) {
+  return getSkill(id)?.group || null;
+}
+
+function cardIn(ids, group) {
+  return (ids || []).find((id) => groupIdOf(id) === group) || null;
+}
+
+/**
+ * 按顺序捋一遍，把接不上的地方改掉。
+ *
+ * 入参每镜要有 { id, index, scene, camera, link, skills }。
+ * 返回改完的 skills 和一份**逐条说明**：自动改了什么必须说出来，
+ * 否则界面上你只会看到"和我想的不一样"，却不知道是谁改的。
+ */
+export function harmonize(shots = []) {
+  const list = shots.slice().sort((a, b) => (a.index || 0) - (b.index || 0));
+  const picks = new Map(list.map((s) => [s.id, [...(s.skills || [])]]));
+  const notes = [];
+
+  const replace = (shot, oldId, newId, why) => {
+    const ids = picks.get(shot.id) || [];
+    const i = ids.indexOf(oldId);
+    if (i === -1) return;
+    if (newId) ids[i] = newId;
+    else ids.splice(i, 1);
+    notes.push({
+      index: shot.index,
+      from: getSkill(oldId)?.name || oldId,
+      to: newId ? getSkill(newId)?.name || newId : null,
+      why
+    });
+  };
+
+  // ── ① 同一段戏里的光线只能有一套 ──
+  // 分段：换场景就断开。段内取用得最多的那张光线卡当准（并列时取最先出现的），
+  // 没挑光线的镜头**不动** —— 没挑等于没有约束，不该替它无中生有。
+  let segment = [];
+  const flushSegment = () => {
+    if (segment.length < 2) return (segment = []);
+    const tally = new Map();
+    for (const s of segment) {
+      const light = cardIn(picks.get(s.id), 'light');
+      if (light) tally.set(light, (tally.get(light) || 0) + 1);
+    }
+    if (tally.size < 2) return (segment = []);
+    let win = null;
+    for (const [id, n] of tally) if (!win || n > tally.get(win)) win = id;
+    for (const s of segment) {
+      const light = cardIn(picks.get(s.id), 'light');
+      if (light && light !== win) {
+        replace(s, light, win, `同一场戏的光线要统一（这一段共 ${segment.length} 镜）`);
+      }
+    }
+    segment = [];
+  };
+  for (let i = 0; i < list.length; i++) {
+    const s = list[i];
+    const isBreak = i === 0 || s.link === 'new-scene';
+    if (isBreak) flushSegment();
+    segment.push(s);
+  }
+  flushSegment();
+
+  // ── ② 连续动作里运镜不能掉头 ──
+  for (let i = 1; i < list.length; i++) {
+    if (list[i].link !== 'continuous') continue;
+    const prevMove = cardIn(picks.get(list[i - 1].id), 'move');
+    const move = cardIn(picks.get(list[i].id), 'move');
+    if (!prevMove || !move) continue;
+    const opposed = OPPOSITE_MOVES.some((p) => p.includes(prevMove) && p.includes(move) && prevMove !== move);
+    if (opposed) {
+      replace(list[i], move, prevMove, `上一镜是连续动作接过来的，运镜不能反着来`);
+    }
+  }
+
+  // ── ③ 机位卡不能和这一镜的景别打架 ──
+  for (const s of list) {
+    const cam = String(s.camera || '');
+    if (!/全景|远景/.test(cam) || /特写/.test(cam)) continue;
+    const ids = picks.get(s.id) || [];
+    if (ids.includes('close-up')) {
+      replace(s, 'close-up', null, `这一镜的景别是「${cam}」，和大特写对不上`);
+    }
+  }
+
+  // ── ④ 连着三镜以上同一个机位，把第三镜起的去掉 ──
+  // 去掉之后这一镜退回自己的景别（分镜表里的 camera），不会没得拍。
+  // 比的是**模型原本挑的**那一串，不是改到一半的结果 ——
+  // 拿改过的去比，去掉第三镜之后第四镜就"没有上一镜了"，五连拍会漏掉后面两镜
+  const angles = list.map((s) => cardIn(picks.get(s.id), 'angle'));
+  let run = 0;
+  for (let i = 0; i < list.length; i++) {
+    run = angles[i] && angles[i] === angles[i - 1] ? run + 1 : 0;
+    if (run >= 2) {
+      replace(list[i], angles[i], null, `连着 ${run + 1} 镜都是同一个机位，景别该有起伏`);
+    }
+  }
+
+  // ── ⑤ 强风格卡按全片配额发 ──
+  let budget = STRONG_STYLE_BUDGET;
+  for (const s of list) {
+    for (const id of [...(picks.get(s.id) || [])]) {
+      if (!STRONG_STYLE.includes(id)) continue;
+      if (budget > 0) budget--;
+      else replace(s, id, null, `「${getSkill(id)?.name || id}」全片已经用满 ${STRONG_STYLE_BUDGET} 次，用多了就不是风格了`);
+    }
+  }
+
+  return { shots: list.map((s) => ({ id: s.id, index: s.index, skills: picks.get(s.id) || [] })), notes };
+}
+
 /** 给界面用：分组好的完整清单 */
 export function catalogForUI() {
   const all = allSkills();

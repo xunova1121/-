@@ -314,15 +314,19 @@ const upstream = http.createServer((req, res) => {
       } else if (system.includes('分镜导演')) {
         content = JSON.stringify(SHOTS_REPLY);
       } else if (system.includes('分镜师')) {
-        // 挑技法：故意给一个自创 id 和一对互斥的，验证服务端会规整掉
+        // 挑技法。故意埋三个坑：
+        //   第 1 镜给一个自创 id + 一对互斥的 → 验证规整
+        //   第 2 镜给月光冷调 → 和第 1 镜同一场戏却换了时段，验证顺场会统一光线
+        //   第 2 镜给大特写 → 它的景别是全景，验证顺场会去掉对不上的机位卡
         const shots = JSON.parse(body.messages?.[1]?.content || '[]');
+        upstream.lastSkillPayload = shots;
         content = JSON.stringify({
           shots: shots.map((x, i) => ({
             id: x.id,
             skills: i === 0
               ? ['low-angle', 'high-angle', 'rembrandt', '我瞎编的技法']
-              : ['ots', 'mood-tense'],
-            why: i === 0 ? '情绪压迫，用仰拍加伦勃朗光' : '对话戏，过肩'
+              : ['close-up', 'moonlight', 'mood-tense'],
+            why: i === 0 ? '情绪压迫，用仰拍加伦勃朗光' : '夜里的对话戏'
           }))
         });
       } else if (system.includes('小说编辑')) {
@@ -1726,6 +1730,100 @@ section('让模型按描述挑技法');
   // 挑完不该顺手把图重出了 —— 先让人翻一遍
   check('只改文案不出图（先翻一遍，不满意手改掉再统一重出）',
     evs.every((e) => e.type !== 'sheet'), JSON.stringify(evs.map((e) => e.type)));
+
+  // ── "挑的对不上前面也对不上后面" ──
+  // 模型是在做 N 道互相独立的分类题，不给它上下文，它连"这两镜是同一场戏"都不知道
+  const sent = upstream.lastSkillPayload || [];
+  check('发过去的每镜带着 link（和上一镜什么关系）',
+    sent.length > 1 && sent[1].link === 'cut', JSON.stringify(sent.map((s) => s.link)));
+  check('发过去的每镜带着景别和时长（不然机位卡会和景别打架）',
+    sent.every((s) => s.camera !== undefined && s.duration !== undefined), JSON.stringify(sent[0]));
+  check('哪几镜要挑说清楚（pick）', sent.every((s) => s.pick === true), JSON.stringify(sent.map((s) => s.pick)));
+  check('提示词里写了同场戏光线要统一',
+    /同一场戏里不能上一镜黄金时刻/.test(studioModule.SKILL_PROMPT || ''), '');
+
+  // 光是把规矩写进提示词不够 —— 模型会答应你，然后照样犯
+  const s1 = after?.shots?.[1];
+  check('同一场戏里模型给的第二种光线被统一掉了',
+    (s1?.skills || []).includes('rembrandt') && !(s1?.skills || []).includes('moonlight'),
+    JSON.stringify(s1?.skills));
+  check('和景别打架的机位卡被去掉（全景 + 大特写）',
+    !(s1?.skills || []).includes('close-up'), JSON.stringify(s1?.skills));
+  check('自动改了什么会说出来，不是悄悄改',
+    evs.some((e) => e.type === 'note' && /顺场/.test(e.message || '')),
+    JSON.stringify(evs.filter((e) => /顺场/.test(e.message || '')).map((e) => e.message)));
+  // 出问题第一件要知道的事就是"这活儿是谁干的"
+  check('进度里说清楚是哪个模型在挑',
+    evs.some((e) => /剧本模型 .+挑技法/.test(e.message || '')),
+    JSON.stringify(evs.filter((e) => e.type === 'stage').map((e) => e.message)));
+}
+
+// 顺场：normalize 管一镜之内不自相矛盾，harmonize 管镜与镜之间接得上。
+// 这一段不联服务端，直接对着函数打，五条规矩一条一条验。
+section('技法顺场（镜与镜之间）');
+{
+  const skills = await import('../core/skills.js');
+  const seq = (arr) => skills.harmonize(arr).shots.map((s) => s.skills);
+
+  // ① 同一段戏的光线只能有一套。分段按 link=new-scene 断开
+  const light = skills.harmonize([
+    { id: 'a', index: 1, link: 'new-scene', skills: ['rembrandt'] },
+    { id: 'b', index: 2, link: 'cut', skills: ['moonlight'] },
+    { id: 'c', index: 3, link: 'cut', skills: ['rembrandt'] },
+    { id: 'd', index: 4, link: 'new-scene', skills: ['neon'] }
+  ]);
+  check('同一场戏里的光线被统一成占多数的那张',
+    light.shots[1].skills[0] === 'rembrandt', JSON.stringify(light.shots.map((s) => s.skills)));
+  check('换了场景就不再统一（新的一场本来就该换光）',
+    light.shots[3].skills[0] === 'neon', JSON.stringify(light.shots[3].skills));
+  check('没挑光线的镜头不会被硬塞一张',
+    seq([
+      { id: 'a', index: 1, link: 'new-scene', skills: ['rembrandt'] },
+      { id: 'b', index: 2, link: 'cut', skills: [] }
+    ])[1].length === 0);
+  check('统一光线时会说明改了什么', /光线要统一/.test(light.notes[0]?.why || ''), JSON.stringify(light.notes));
+
+  // ② 连续动作里运镜不能掉头："推门→进门"不该推镜接拉镜
+  const move = seq([
+    { id: 'a', index: 1, link: 'cut', skills: ['push-in'] },
+    { id: 'b', index: 2, link: 'continuous', skills: ['pull-out'] }
+  ]);
+  check('连续动作的后一镜不会反着运镜', move[1][0] === 'push-in', JSON.stringify(move));
+  const cutMove = seq([
+    { id: 'a', index: 1, link: 'cut', skills: ['push-in'] },
+    { id: 'b', index: 2, link: 'cut', skills: ['pull-out'] }
+  ]);
+  check('只是换机位的话，运镜本来就可以反着来', cutMove[1][0] === 'pull-out', JSON.stringify(cutMove));
+
+  // ③ 机位卡要和分镜表里的景别对得上
+  const cam = seq([{ id: 'a', index: 1, camera: '大全景', link: 'new-scene', skills: ['close-up', 'mood-epic'] }]);
+  check('全景镜头里的大特写被去掉，其余保留',
+    !cam[0].includes('close-up') && cam[0].includes('mood-epic'), JSON.stringify(cam));
+
+  // ④ 连着三镜同一机位 = 没有节奏
+  const angle = seq([
+    { id: 'a', index: 1, link: 'new-scene', skills: ['ots'] },
+    { id: 'b', index: 2, link: 'cut', skills: ['ots'] },
+    { id: 'c', index: 3, link: 'cut', skills: ['ots'] },
+    { id: 'd', index: 4, link: 'cut', skills: ['ots'] }
+  ]);
+  check('连着三镜以上同一个机位，从第三镜起去掉',
+    angle[0].length === 1 && angle[1].length === 1 && !angle[2].length && !angle[3].length,
+    JSON.stringify(angle));
+
+  // ⑤ 强风格卡用一次是风格，用五次是毛病
+  // 用希区柯克变焦来验：它是运镜卡，不会被上面那条"连三同机位"顺手削掉，
+  // 削到只剩两个就分不清是哪条规矩生效了
+  const strong = seq(
+    [1, 2, 3, 4, 5].map((i) => ({ id: `s${i}`, index: i, link: 'cut', skills: ['dolly-zoom'] }))
+  );
+  check('强风格卡全片限量，超出的去掉',
+    strong.filter((s) => s.includes('dolly-zoom')).length === 3, JSON.stringify(strong));
+
+  // 顺场只在"模型挑"这条路上跑：手选的东西被自动改掉，比选错更让人恼火
+  check('手动改技法不会被顺场碰',
+    typeof studioModule.updateShot === 'function' &&
+      !/harmonize/.test(studioModule.updateShot.toString()));
 }
 
 section('镜间衔接');
