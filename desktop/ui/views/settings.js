@@ -393,14 +393,55 @@ export default {
       onchange: (e) => (pending.useSystemProxy = e.target.checked)
     });
 
-    const ff = state.catalog.ffmpeg;
+    let ff = state.catalog.ffmpeg;
+
+    /**
+     * FFmpeg 这一块单独重画，因为它是"放个文件进去就该立刻好"的东西。
+     * 让人为了让应用发现一个文件而重启，是很没道理的一步。
+     */
+    const ffBadge = h('span', { class: 'badge' });
+    const ffText = h('p', { class: 'panel-hint' });
+    const ffWhere = h('div', { class: 'field-hint', style: 'margin-top:8px' });
+
+    function paintFfmpeg() {
+      clear(ffBadge).append(ff.available ? `FFmpeg ${ff.source}` : 'FFmpeg 未安装');
+      ffBadge.className = `badge ${ff.available ? 'ok' : 'warn'}`;
+      ffText.textContent = ff.available ? ff.version : ff.hint;
+      clear(ffWhere);
+      if (ff.available) {
+        ffWhere.append(h('span', { class: 'mono' }, ff.path));
+      } else if (ff.dropDir) {
+        // 把绝对路径印出来，别让人猜"本应用的 bin 目录"是哪个 ——
+        // 装完之后源码里那个 bin 根本不在安装目录里
+        ffWhere.append(
+          '把 ffmpeg.exe 放到这个目录（已经建好了），再点「重新检测」：',
+          h('div', { class: 'mono', style: 'margin-top:4px;user-select:all' }, ff.dropDir)
+        );
+      }
+    }
+
+    const ffRecheck = h('button', {
+      class: 'btn ghost sm',
+      onclick: async () => {
+        ffRecheck.disabled = true;
+        try {
+          ff = await api('/ffmpeg');
+          state.catalog.ffmpeg = ff;
+          paintFfmpeg();
+          toast(ff.available ? `找到了：${ff.path}` : '还是没找到，看下面那个目录对不对', ff.available ? 'ok' : 'err');
+        } finally {
+          ffRecheck.disabled = false;
+        }
+      }
+    }, '重新检测');
+
+    paintFfmpeg();
+
     root.append(
       h('div', { class: 'panel' },
-        h('h2', { class: 'panel-title' },
-          '本机环境',
-          h('span', { class: `badge ${ff.available ? 'ok' : 'warn'}` }, ff.available ? `FFmpeg ${ff.source}` : 'FFmpeg 未安装')
-        ),
-        h('p', { class: 'panel-hint' }, ff.available ? ff.version : ff.hint),
+        h('h2', { class: 'panel-title' }, '本机环境', ffBadge, ffRecheck),
+        ffText,
+        ffWhere,
         h('div', { class: 'grid2' },
           h('div', { class: 'field' }, h('label', {}, 'FFmpeg 路径'), ffmpegInput),
           h('div', { class: 'field' }, h('label', {}, '图片上传网关'), gatewayInput,

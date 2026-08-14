@@ -1852,6 +1852,46 @@ section('打包配置');
     pkg.build?.nsis?.artifactName && pkg.build?.portable?.artifactName
       && pkg.build.nsis.artifactName !== pkg.build.portable.artifactName,
     `${pkg.build?.nsis?.artifactName} / ${pkg.build?.portable?.artifactName}`);
+
+  /**
+   * bin\ 的落点。
+   *
+   * 这里栽过一次，而且是**只有装完才会现形**的那种：
+   * 源码里确实有 desktop\bin\，开发机上"把 ffmpeg.exe 放进本应用的 bin 目录"完全成立；
+   * 可 core\ 被打进 app.asar 之后，代码算出来的 ROOT\bin 是 asar **包内**的虚拟路径，
+   * 既不存在也没法往里放文件，而真正随包发出去的 bin 落在 resources\bin。
+   * 于是提示语让人放的地方，和程序找的地方，和文件真正能放的地方，三处都不一样。
+   */
+  check('bin 目录会随包发出去（extraResources，不能进 files —— 那会被塞进 asar）',
+    (pkg.build?.extraResources || []).some((r) => (r.from === 'bin' || r === 'bin')),
+    JSON.stringify(pkg.build?.extraResources));
+  check('bin 没有被误加进 files（进了 asar 就等于放不进去也找不到）',
+    !(pkg.build?.files || []).some((f) => String(f).startsWith('bin')),
+    JSON.stringify(pkg.build?.files));
+
+  const paths = await import('../core/paths.js');
+  check('找 ffmpeg 时不止看一个目录', paths.BIN_DIRS.length >= 2, JSON.stringify(paths.BIN_DIRS));
+  // 首选必须是数据目录：它是唯一**任何情况下都可写**的地方。
+  // 安装目录可能在 Program Files 下，普通用户写不进去。
+  check('首选的存放位置在数据目录里（安装目录可能只读）',
+    paths.BIN_DIRS[0] === paths.USER_BIN_DIR
+      && paths.USER_BIN_DIR.startsWith(paths.DATA_DIR),
+    `${paths.BIN_DIRS[0]}`);
+  check('这个目录启动时就建好了，不用用户自己先造一个',
+    fs.existsSync(paths.USER_BIN_DIR), paths.USER_BIN_DIR);
+  check('asar 包内的路径不会成为唯一候选（打包后那是个虚拟路径）',
+    paths.BIN_DIRS.some((d) => !d.includes('app.asar')), JSON.stringify(paths.BIN_DIRS));
+
+  // 没找到时的那句话必须能照着做：得有一个绝对路径，而不是"本应用的 bin 目录"
+  const ffmpegMod = await import('../core/ffmpeg.js');
+  const probe = ffmpegMod.locate({ refresh: true });
+  check('找过哪些地方要告诉用户（"没检测到"最气人的就是不知道它去哪儿找了）',
+    Array.isArray(probe.searched) && probe.searched.length >= 3, JSON.stringify(probe.searched));
+  if (!probe.available) {
+    check('提示语里印的是绝对路径，不是"本应用的 bin 目录"这种要靠猜的说法',
+      probe.hint.includes(paths.USER_BIN_DIR) && !/本应用的 bin/.test(probe.hint),
+      probe.hint);
+  }
 }
 
 section('Windows 文件名规则');

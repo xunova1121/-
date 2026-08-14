@@ -2,14 +2,19 @@
  * FFmpeg 封装。
  *
  * Windows 上 FFmpeg 是最容易卡住新手的一环：官方不提供安装包，解压后还得配 PATH。
- * 所以这里的探测顺序是：设置里手填的路径 → 应用自带的 bin\ffmpeg.exe → PATH。
- * 三条都不中时，不抛异常打断流程，而是把"没装 FFmpeg"作为一种状态回给界面，
+ * 所以这里会自己找：设置里手填的路径 → 几个 bin\ 目录 → PATH。
+ * 全都不中时，不抛异常打断流程，而是把"没装 FFmpeg"作为一种状态回给界面，
  * 让用户照样能跑到"视频生成"这一步，只是最后合成那步给出明确的安装指引。
+ *
+ * 提示语里那句"放进 bin 目录"曾经是错的：源码里的 desktop\bin\ 在开发机上没问题，
+ * 装完之后却指向 app.asar 内部 —— 一个既不存在、也没法往里放文件的虚拟路径。
+ * 现在首选数据目录下的 bin\（唯一保证可写的地方），而且提示语直接把**绝对路径**
+ * 印出来，不再让人猜"本应用的 bin 目录"到底是哪个。
  */
 import { spawn, spawnSync as nodeSpawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { BUNDLED_BIN } from './paths.js';
+import { BIN_DIRS, USER_BIN_DIR } from './paths.js';
 import * as settings from './settings.js';
 
 const EXE = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
@@ -19,10 +24,10 @@ let cached = null;
 export function locate({ refresh = false } = {}) {
   if (cached && !refresh) return cached;
 
-  const candidates = [];
   const configured = settings.get('ffmpegPath');
+  const candidates = [];
   if (configured) candidates.push(configured);
-  candidates.push(path.join(BUNDLED_BIN, EXE));
+  for (const dir of BIN_DIRS) candidates.push(path.join(dir, EXE));
   candidates.push(EXE); // 交给 PATH 解析
 
   for (const candidate of candidates) {
@@ -35,7 +40,9 @@ export function locate({ refresh = false } = {}) {
           available: true,
           path: candidate,
           version: (probe.stdout.split('\n')[0] || '').trim(),
-          source: candidate === configured ? 'settings' : isPath ? 'bundled' : 'PATH'
+          source: candidate === configured ? 'settings' : isPath ? 'bundled' : 'PATH',
+          searched: candidates,
+          dropDir: USER_BIN_DIR
         };
         return cached;
       }
@@ -49,9 +56,13 @@ export function locate({ refresh = false } = {}) {
     path: null,
     version: null,
     source: null,
+    // 找过哪些地方要说出来 —— "没检测到"最气人的地方就是不知道它去哪儿找了
+    searched: candidates,
+    dropDir: USER_BIN_DIR,
     hint:
-      '未检测到 FFmpeg。三选一：① 到 ffmpeg.org 下载 Windows 构建，把 ffmpeg.exe 放进本应用的 bin\\ 目录；' +
-      '② winget install Gyan.FFmpeg；③ 在「设置」里直接填 ffmpeg.exe 的完整路径。'
+      `未检测到 FFmpeg。最省事的一条：下载 Windows 构建，把 ffmpeg.exe 放进 ${USER_BIN_DIR}（这个目录已经建好了），` +
+      '放完点一下「重新检测」即可，不用重启、不用配 PATH。' +
+      '也可以 winget install Gyan.FFmpeg，或在下面直接填 ffmpeg.exe 的完整路径。'
   };
   return cached;
 }

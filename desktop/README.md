@@ -91,13 +91,30 @@ npm run build:win    # 出安装包和免安装版，产物在 dist\
 
 ### FFmpeg（只有最后合成那步需要）
 
-三选一，探测顺序也是这个顺序：
+最省事的一条：把 `ffmpeg.exe` 丢进 `%APPDATA%\FutureDream\bin\`，
+回「设置 → 本机环境」点一下「重新检测」。不用重启、不用配 PATH。
 
-1. 在「设置」里直接填 `ffmpeg.exe` 的完整路径
-2. 把 `ffmpeg.exe` 丢进本应用的 `bin\` 目录（绿色版就这么办）
-3. `winget install Gyan.FFmpeg`
+那个目录应用启动时会自动建好；不确定路径的话，**「设置 → 本机环境」里直接印着
+当前这台机器该放的绝对路径**，照着放就行。
+
+> ⚠ 别放进安装目录里的 `bin\`。装完之后 `core\` 在 `app.asar` 里，
+> 那个路径是包内的虚拟路径，既放不进去也找不到；安装目录本身还可能是只读的
+> （装在 Program Files 时）。`%APPDATA%\FutureDream\bin\` 是唯一任何情况下都可写的位置。
+> 从源码或解压即用版跑的话，`desktop\bin\` 仍然有效。
+
+完整探测顺序：
+
+1. 「设置」里手填的完整路径
+2. `%APPDATA%\FutureDream\bin\ffmpeg.exe` ← 推荐
+3. 安装包自带的 `resources\bin\ffmpeg.exe`
+4. 源码目录 `desktop\bin\ffmpeg.exe`
+5. 系统 PATH（`winget install Gyan.FFmpeg` 走这条）
+
+下载选 <https://www.gyan.dev/ffmpeg/builds/> 的 `essentials` 版本就够，
+解压后只要 `bin\ffmpeg.exe` 这一个文件。
 
 没装也能一路跑到「视频生成」，只是合成那步会给出明确提示，不会跑到一半才报错。
+末帧复核也会跳过并说一声（它要抠视频最后一帧，得靠 FFmpeg）。
 
 ### 自检
 

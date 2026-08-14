@@ -44,13 +44,45 @@ export const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 export const VAULT_FILE = path.join(DATA_DIR, 'credentials.enc');
 export const HISTORY_FILE = path.join(DATA_DIR, 'api-history.json');
 
-/** 便携版可以把 ffmpeg.exe 丢在 desktop/bin/ 下，免装免配 PATH */
-export const BUNDLED_BIN = process.env.FUTUREDREAM_BIN_DIR
-  ? path.resolve(process.env.FUTUREDREAM_BIN_DIR)
-  : path.join(ROOT, 'bin');
+/**
+ * 放 ffmpeg.exe 的地方。**首选是数据目录下的 bin\**。
+ *
+ * 这里踩过一个只在打包后才出现的坑：源码里确实有 desktop\bin\，
+ * 于是"把 ffmpeg.exe 放进本应用的 bin 目录"在开发机上是对的。
+ * 但装完之后完全不是那么回事 ——
+ *
+ *   · core\ 被打进 app.asar，所以 ROOT 变成 ...\resources\app.asar，
+ *     ROOT\bin 是个 **asar 包内的虚拟路径**，既不存在也没法往里放文件；
+ *   · 真正随包发出去的 bin（extraResources）落在 ...\resources\bin，
+ *     和代码找的地方差着一层；
+ *   · 就算找对了，那也在安装目录里 —— 装到 Program Files 时普通用户写不进去。
+ *
+ * 所以顺序改成：数据目录 > 随包目录 > 源码目录。
+ * 第一条是唯一**任何情况下都可写**的位置，也是提示语里该告诉用户的那一个。
+ */
+export const USER_BIN_DIR = path.join(DATA_DIR, 'bin');
+
+/** 随安装包发出来的 bin（electron-builder 的 extraResources 落点） */
+const PACKAGED_BIN = process.resourcesPath ? path.join(process.resourcesPath, 'bin') : null;
+
+/** 源码目录下的 bin —— 开发机和"解压即用"的免安装版走这条 */
+const SOURCE_BIN = path.join(ROOT, 'bin');
+
+/** 按优先级排好的候选目录，去重 */
+export const BIN_DIRS = [
+  process.env.FUTUREDREAM_BIN_DIR ? path.resolve(process.env.FUTUREDREAM_BIN_DIR) : null,
+  USER_BIN_DIR,
+  PACKAGED_BIN,
+  SOURCE_BIN
+].filter((d, i, all) => d && all.indexOf(d) === i);
+
+/** 兼容旧名字：仍指第一顺位 */
+export const BUNDLED_BIN = BIN_DIRS[0];
 
 export function ensureDirs() {
-  for (const d of [DATA_DIR, PROJECTS_DIR, OUTPUT_DIR, CACHE_DIR, LOG_DIR, STYLE_DIR]) {
+  // USER_BIN_DIR 也建出来：提示语里让人"把 ffmpeg.exe 放到这里"，
+  // 那这个目录就得真的存在 —— 让人自己先手动建一个目录是很糟的第一步
+  for (const d of [DATA_DIR, PROJECTS_DIR, OUTPUT_DIR, CACHE_DIR, LOG_DIR, STYLE_DIR, USER_BIN_DIR]) {
     fs.mkdirSync(d, { recursive: true });
   }
   return DATA_DIR;
