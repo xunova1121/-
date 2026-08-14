@@ -214,7 +214,18 @@ export function sheetPrompt(kind, bible, item, variant = null) {
    * 身份锚永远在场，"是不是同一个人"才压得住（见 pipeline/variants.js）。
    */
   const v = variant || variants.defaultVariant(item);
-  const override = (v?.sheetPrompt || item.sheetPrompt || '').trim();
+  /**
+   * ⚠ 只认**这一版自己**的覆盖，不再回落到 item.sheetPrompt。
+   *
+   * 同一个坑踩了两次：第一次是模型预填 item.sheetPrompt，改描述不生效；
+   * 修完之后加了变体层，迁移时把 item.sheetPrompt 复制进了默认变体，
+   * 而清理只清了 item 上那份 —— 变体里那份陈旧的覆盖又活了下来，
+   * 于是"改了描述、重出图还是旧的"原样复发。
+   *
+   * 现在覆盖只存在一个地方（变体上），改描述时连它一起清。
+   * 一个值有两个存放处、而只有一处会被更新，迟早出这种事。
+   */
+  const override = (v?.sheetPrompt || '').trim();
   const own = override || variants.describeWith(item, v) || item.appearance || '';
   if (kind === 'char') return `${anchor}，角色设定图，正面半身，中性表情，纯色浅灰背景，无其他人物。${own}`;
   if (kind === 'scene') return `${anchor}，场景基准图，空镜无人物，广角。${own}`;
@@ -1142,9 +1153,16 @@ export async function regenerateSheet(projectId, kind, name, opts = {}, onEvent)
   if (opts.appearance !== undefined || opts.sheetPrompt !== undefined) {
     store.update(projectId, (p) => {
       const t = bibleBucket(p.bible, kind).find((x) => x.name === name);
-      if (t) {
-        if (opts.appearance !== undefined) t.appearance = opts.appearance;
-        if (opts.sheetPrompt !== undefined) t.sheetPrompt = opts.sheetPrompt;
+      if (!t) return p;
+      if (opts.appearance !== undefined && opts.appearance !== t.appearance) {
+        t.appearance = opts.appearance;
+        // 描述改了，各版缓存的出图提示词全过时 —— 不清的话这次重出画的还是旧描述
+        t.sheetPrompt = '';
+        for (const v of variants.variantsOf(t)) v.sheetPrompt = '';
+      }
+      if (opts.sheetPrompt !== undefined) {
+        const target = variants.findVariant(t, opts.variantId) || variants.defaultVariant(t);
+        if (target) target.sheetPrompt = opts.sheetPrompt;
       }
       return p;
     });
@@ -1273,6 +1291,14 @@ export function updateBibleEntry(projectId, kind, name, patch = {}) {
     if (item.sheetPrompt) {
       item.sheetPrompt = '';
       changed.push('sheetPrompt');
+    }
+    // 身份锚变了，每一版缓存的出图提示词都过时了 —— 一起清掉。
+    // 只清 item 上那份的话，变体里那份会继续顶着，改描述照样不生效。
+    for (const v of variants.variantsOf(item)) {
+      if (v.sheetPrompt) {
+        v.sheetPrompt = '';
+        if (!changed.includes('sheetPrompt')) changed.push('sheetPrompt');
+      }
     }
   }
 

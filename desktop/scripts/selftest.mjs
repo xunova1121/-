@@ -770,11 +770,17 @@ check('镜头图已落盘', Boolean(shot1?.imagePath), JSON.stringify(assetEvent
 check('提示词里注入了风格锚', upstream.imagePrompts[0]?.startsWith('国风水墨'));
 check('提示词里注入了冻结的角色外貌', upstream.imagePrompts[0]?.includes('藏青立领制服'),
   upstream.imagePrompts[0]);
-// 带得动参考图时角色只给简版锚，把版面让给画面内容 —— 但服装配色这种
-// 最强的身份线索必须留住
-check('带参考图时角色描述被压缩，但保留了服装配色',
-  upstream.imagePrompts[0]?.includes('外貌以参考图为准')
-    && !upstream.imagePrompts[0]?.includes('左胸执法编号牌'),
+/**
+ * 不发参考图时**必须给完整外貌**。
+ *
+ * 这里挂过一次，而且是最坏的那种组合：分镜图默认不带参考图之后，
+ * 提示词却仍然被压成三段、末尾还挂着"外貌以参考图为准"——
+ * 而那张图根本没发。模型既没拿到图，又被砍掉了"袖口两道银线、左胸编号牌"
+ * 这些真正锁得住身份的细节，出来的人当然谁也不像。
+ */
+check('不发参考图时给的是完整外貌，且不出现"以参考图为准"',
+  upstream.imagePrompts[0]?.includes('左胸执法编号牌')
+    && !upstream.imagePrompts[0]?.includes('以参考图为准'),
   upstream.imagePrompts[0]);
 check('提示词里注入了场景设定', upstream.imagePrompts[0]?.includes('晨雾未散'));
 check('提示词里带上了道具（镜头描述提到了）', upstream.imagePrompts[0]?.includes('黑色方形'));
@@ -1243,7 +1249,12 @@ section('设定集：改文字不该花钱，改完重出那一张就行');
   const after = store.read(project.id).bible.characters.find((c) => c.name === name);
   check('生成设定集时不预填出图提示词（预填就等于永远盖住描述）', !after.sheetPrompt);
 
-  await patch(name, { sheetPrompt: '完全手写的出图提示词' });
+  // 出图提示词的覆盖存在**变体**上（条目上那份没人读了 —— 两个存放处只更新一处，
+  // 正是"改了描述、重出还是旧的"那个 bug 复发的根源）
+  await (await fetch(
+    `${appUrl}/api/projects/${project.id}/bible/char/${encodeURIComponent(name)}/variants/v-default`,
+    { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sheetPrompt: '完全手写的出图提示词' }) })).json();
   upstream.imagePrompts = [];
   await ndjson(`/projects/${project.id}/bible/char/${encodeURIComponent(name)}/regenerate`, {});
   check('明确写了出图提示词时它才顶上描述',
@@ -1251,11 +1262,34 @@ section('设定集：改文字不该花钱，改完重出那一张就行');
 
   // 再改描述 → 覆盖自动清掉，否则又回到"改了没用"的老路
   const cleared = await patch(name, { appearance: '换一版描述：墨绿风衣，寸头' });
+  const clearedItem = cleared.project.bible.characters.find((c) => c.name === name);
   check('再改描述时自动清掉那个覆盖（否则又回到"改了没用"）',
-    !cleared.project.bible.characters.find((c) => c.name === name)?.sheetPrompt);
+    !clearedItem?.sheetPrompt && !(clearedItem?.variants || []).some((v) => v.sheetPrompt),
+    JSON.stringify((clearedItem?.variants || []).map((v) => v.sheetPrompt)));
   upstream.imagePrompts = [];
   await ndjson(`/projects/${project.id}/bible/char/${encodeURIComponent(name)}/regenerate`, {});
   check('于是新描述又生效了', /墨绿风衣/.test(upstream.imagePrompts.at(-1) || ''), upstream.imagePrompts.at(-1));
+
+  /**
+   * 覆盖只能存在一个地方。
+   *
+   * 这个 bug 复发过一次：修好 item.sheetPrompt 之后加了变体层，
+   * 迁移时把它复制进了默认变体，而清理只清 item 那份 ——
+   * 变体里那份陈旧的覆盖又活了下来，"改描述不生效"原样复发。
+   * 同一个值有两个存放处、只有一处会被更新，迟早出这种事。
+   */
+  const vurl = `${appUrl}/api/projects/${project.id}/bible/char/${encodeURIComponent(name)}/variants/v-default`;
+  await fetch(vurl, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sheetPrompt: '藏在变体里的旧覆盖' })
+  });
+  await patch(name, { appearance: '再换一版：赤红斗篷，独眼' });
+  upstream.imagePrompts = [];
+  await ndjson(`/projects/${project.id}/bible/char/${encodeURIComponent(name)}/regenerate`, {});
+  check('藏在变体里的旧覆盖也会被清掉（这个 bug 复发过一次）',
+    /赤红斗篷/.test(upstream.imagePrompts.at(-1) || '')
+      && !/藏在变体里的旧覆盖/.test(upstream.imagePrompts.at(-1) || ''),
+    upstream.imagePrompts.at(-1));
 }
 
 /**

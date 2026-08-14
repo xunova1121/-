@@ -172,7 +172,7 @@ export default {
       const promptInput = h('textarea', {
         rows: 2, style: 'font-size:11px',
         placeholder: '留空 = 用上面的描述出图（推荐）。写了这里就以这里为准',
-        value: item.sheetPrompt || ''
+        value: (item.variants?.[0]?.sheetPrompt) || item.sheetPrompt || ''
       });
       /**
        * 音色：和种子一样是**身份的一部分**。

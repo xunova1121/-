@@ -141,8 +141,6 @@ export async function runRoutingCheck({ silent = false } = {}) {
     state.routingCheck = { error: err.message, capabilities: {} };
     return state.routingCheck;
   }
-  // 探出新结果就重新亮出来：上次关掉的是上次那批问题
-  bannerDismissed = false;
   paintChain();
   paintRoutingBanner();
   if (!silent) {
@@ -167,15 +165,47 @@ export function badRoutes() {
  * 顶部横幅。toast 会自己消失，而"密钥没配"是个**持续的状态**，
  * 不该在你去泡杯茶的功夫里悄悄划过去。
  */
-/** 这一轮被手动关掉的横幅。再探到新结果时会重新出现。 */
-let bannerDismissed = false;
+/**
+ * 关掉过的那批问题。
+ *
+ * 存的不是"关没关"这个布尔，而是**关掉的是哪一批问题**。
+ * 只存布尔的话，每次自动重探都会把它清掉 —— 密钥一直没配的话，
+ * 你点一次「知道了」，二十分钟后它又冒出来，点多少次都一样。
+ * 那不是提醒，那是骚扰。
+ *
+ * 存签名之后：同一批问题只提醒一次；出现**新的**问题才重新亮出来。
+ * 存进 localStorage，重开应用也记得 —— 你昨天说过知道了。
+ */
+const DISMISS_KEY = 'fd.routeBannerDismissed';
+
+function failureSignature(bad) {
+  return bad.map((b) => `${b.provider}:${b.reason}`).sort().join('|');
+}
+
+function isDismissed(bad) {
+  try {
+    return localStorage.getItem(DISMISS_KEY) === failureSignature(bad);
+  } catch {
+    return false;
+  }
+}
 
 function paintRoutingBanner() {
   const host = $('#route-banner');
   if (!host) return;
   clear(host);
   const bad = badRoutes();
-  if (!bad.length || bannerDismissed) {
+  if (!bad.length) {
+    // 全通了就把"知道了"的记号清掉 —— 下次真出问题时才提醒得动
+    try {
+      localStorage.removeItem(DISMISS_KEY);
+    } catch {
+      /* 无所谓 */
+    }
+    host.style.display = 'none';
+    return;
+  }
+  if (isDismissed(bad)) {
     host.style.display = 'none';
     return;
   }
@@ -222,9 +252,13 @@ function paintRoutingBanner() {
     // 只关这一次；下次探出新结果还会回来。
     h('button', {
       class: 'btn ghost sm',
-      title: '只关这一次。下次自动检测有新结果时还会出现',
+      title: '这批问题不用再提醒了。出现新的问题才会再冒出来',
       onclick: () => {
-        bannerDismissed = true;
+        try {
+          localStorage.setItem(DISMISS_KEY, failureSignature(bad));
+        } catch {
+          /* 隐私模式下写不了 localStorage，那就只关这一次 */
+        }
         paintRoutingBanner();
       }
     }, '知道了'),
@@ -234,7 +268,11 @@ function paintRoutingBanner() {
       onclick: async () => {
         await api('/settings', { method: 'POST', body: { autoCheckOnStart: false } });
         if (state.catalog?.settings) state.catalog.settings.autoCheckOnStart = false;
-        bannerDismissed = true;
+        try {
+          localStorage.setItem(DISMISS_KEY, failureSignature(bad));
+        } catch {
+          /* 写不了就算了 */
+        }
         paintRoutingBanner();
         toast('已关掉自动检测，可在「设置 → 本机环境」再打开', 'ok');
       }

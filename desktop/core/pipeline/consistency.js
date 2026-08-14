@@ -188,7 +188,20 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
    * 这和视频提示词的做法是一致的（见 assembleVideoPrompt）。
    */
   const refs = collectReferences(bible, shot);
-  const hasRefs = refs.images.length > 0 && settings.get('useReferenceImages') !== false;
+  /**
+   * ⚠ 这里必须问的是"参考图**会不会真的发出去**"，不是"设定集里有没有图"。
+   *
+   * 曾经只判了后者，于是分镜图默认不带参考图之后出现了最坏的一种组合：
+   * 提示词被压成三段、末尾还挂着一句"外貌以参考图为准"——
+   * **而那张参考图根本没发**。模型既没拿到图，又被砍掉了"袖口两道银线、
+   * 左胸编号牌"这些真正锁得住身份的细节，出来的人当然谁也不像。
+   * 表现就是"完全没按设定集出图，提示词是不是没用"。
+   *
+   * 所以这三个条件缺一不可：有图、没关掉参考图、而且这一步真的会发图。
+   */
+  const willSendRefs = settings.get('useEditModelForShots') === true;
+  const hasRefs =
+    refs.images.length > 0 && settings.get('useReferenceImages') !== false && willSendRefs;
 
   parts.push(shot.description || '');
 

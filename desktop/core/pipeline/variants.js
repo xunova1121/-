@@ -61,6 +61,9 @@ export function normalizeItem(item, kind = 'char') {
         sheetAt: item.sheetAt || null,
         sheetSource: item.sheetSource || null,
         sheetPromptUsed: item.sheetPromptUsed || '',
+        // 出图提示词的覆盖只存在**变体**上。迁移时从条目搬过来一次之后，
+        // 条目那份就不再有人读了（见 studio.sheetPrompt 里的注释）——
+        // 同一个值有两个存放处、只有一处会被更新，是那个 bug 复发的根源
         sheetPrompt: item.sheetPrompt || ''
       }
     ];
