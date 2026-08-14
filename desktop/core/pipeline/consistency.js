@@ -121,6 +121,13 @@ export async function buildBible(project, { onEvent } = {}) {
       // 这个字段留空，只有用户明确写了覆盖才有值。
       sheetPrompt: '',
       seed: deriveSeed(project.id, `char:${c.name}`),
+      /**
+       * 音色。和 seed 一样是**身份的一部分**：全片同一个角色同一个声音。
+       *
+       * 这里先留空，由 studio.assignVoices 按当前配音服务商的音色表分配 ——
+       * 目录里的音色 id 各家不一样，写死在这儿会在换服务商时全错。
+       */
+      voice: '',
       sheetPath: null,
       sheetUrl: null
     })),

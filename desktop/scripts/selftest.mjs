@@ -1760,6 +1760,82 @@ section('镜间衔接');
   check('带了衔接约束也不超长', withCtx.length <= 380, `${withCtx.length} 字`);
 }
 
+/**
+ * 声音也是身份的一部分。
+ *
+ * 全片一个音色，两个人对话时观众分不出谁在说话 ——
+ * 画面上做了四层一致性，声音上却是同一个人配了所有角色，
+ * 这个反差比画面不一致更出戏。而这个漏洞以前一直在：
+ * synthesizeSpeech 有 voice 参数，generateVoice 从来不传。
+ */
+section('每个角色一个音色');
+{
+  const vp = await (
+    await fetch(`${appUrl}/api/projects`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '音色自检' })
+    })
+  ).json();
+  store.update(vp.id, (p) => {
+    p.bible = {
+      style: { anchor: '国风', negative: '' },
+      characters: [
+        { name: '阿澜', appearance: '短发', seed: 1, voice: '' },
+        { name: '老周', appearance: '白须', seed: 2, voice: '' }
+      ],
+      scenes: [], props: []
+    };
+    p.shots = [
+      { id: 'a', index: 1, characters: ['阿澜'], speaker: '阿澜', dialogue: '快走', duration: 3, videoPath: 'x.mp4' },
+      { id: 'b', index: 2, characters: ['老周'], speaker: '老周', dialogue: '等等', duration: 4, videoPath: 'y.mp4' },
+      { id: 'c', index: 3, characters: [], speaker: '', dialogue: '三日后', duration: 2, videoPath: 'z.mp4' }
+    ];
+    return p;
+  });
+
+  const r = studioModule.assignVoices(vp.id);
+  const chars = store.read(vp.id).bible.characters;
+  check('每个角色都分到了音色', chars.every((c) => c.voice), JSON.stringify(chars.map((c) => c.voice)));
+  check('两个角色的音色不一样（一样的话对话时分不出谁在说）',
+    chars[0].voice !== chars[1].voice, `${chars[0].voice} / ${chars[1].voice}`);
+  check('旁白也有自己的声音，且不和角色撞',
+    r.narrator && !chars.some((c) => c.voice === r.narrator), r.narrator);
+
+  const fresh = store.read(vp.id);
+  check('按 speaker 取音色',
+    studioModule.voiceForShot(fresh, fresh.shots[0]).voice === chars[0].voice);
+  check('没标 speaker 时退到出场角色',
+    studioModule.voiceForShot(fresh, { characters: ['老周'], dialogue: 'x' }).voice === chars[1].voice);
+  check('没人出场就是旁白',
+    studioModule.voiceForShot(fresh, fresh.shots[2]).who === '旁白');
+
+  // 已经手选过的不该被自动分配覆盖 —— 你挑的比自动分的准，那是你听过的
+  store.update(vp.id, (p) => { p.bible.characters[0].voice = 'longwan'; return p; });
+  studioModule.assignVoices(vp.id);
+  check('手选过的音色不会被自动分配覆盖',
+    store.read(vp.id).bible.characters[0].voice === 'longwan');
+
+  // ── 字幕 ──
+  // 数据全在手上，只是排一遍时间轴 —— 而短剧没字幕基本不能发
+  const cues = studioModule.buildSubtitles(store.read(vp.id), { policy: 'trim' });
+  check('只给有台词的镜头出字幕', cues.length === 3, JSON.stringify(cues.length));
+  check('时间轴按合成时真正用的时长累加（错一个后面全偏）',
+    cues[0].start === 0 && cues[1].start === 3 && cues[2].start === 7,
+    JSON.stringify(cues.map((c) => c.start)));
+  check('每条结尾留一点空档，不和下一条贴在一起闪',
+    cues[0].end < cues[1].start, `${cues[0].end} vs ${cues[1].start}`);
+  const srt = studioModule.toSRT(cues);
+  check('SRT 格式正确（序号 + 时间轴 + 正文）',
+    /^1\n00:00:00,000 --> 00:00:02,850\n快走\n/.test(srt), srt.slice(0, 60));
+  check('时间戳是 SRT 的逗号毫秒写法，不是 WebVTT 的点',
+    !/\d\.\d{3} -->/.test(srt), srt.slice(0, 40));
+
+  // keep 策略下要用模型实出的时长，不是计划时长
+  store.update(vp.id, (p) => { p.shots[0].actualDuration = 5; return p; });
+  const keepCues = studioModule.buildSubtitles(store.read(vp.id), { policy: 'keep' });
+  check('keep 策略下按模型实出的时长排', keepCues[1].start === 5, JSON.stringify(keepCues.map((c) => c.start)));
+}
+
 section('时长控制');
 const durationMod = await import('../core/duration.js');
 const { getProvider } = await import('../core/providers/catalog.js');

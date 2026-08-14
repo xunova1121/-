@@ -112,6 +112,15 @@ export const PROVIDERS = [
     baseUrl: 'https://api.openai.com/v1',
     secret: 'OPENAI_API_KEY',
     capabilities: ['chat', 'vision', 't2i', 'i2i', 't2v', 'i2v', 'tts'],
+    // 音色是候选不是断言，界面上可以手填（见 dashscope 那份注释）
+    voices: [
+      { id: 'alloy', label: 'alloy（中性）' },
+      { id: 'echo', label: 'echo（男·沉）' },
+      { id: 'fable', label: 'fable（男·叙述感）' },
+      { id: 'onyx', label: 'onyx（男·厚重）' },
+      { id: 'nova', label: 'nova（女·明亮）' },
+      { id: 'shimmer', label: 'shimmer（女·柔）' }
+    ],
     hint: 'sk- 开头；用兼容网关时把 baseUrl 一并改掉',
     models: [
       { id: 'gpt-4o', capability: 'vision', label: 'GPT-4o（带视觉，做一致性复核）' },
@@ -419,6 +428,26 @@ export const PROVIDERS = [
       { id: 'cosyvoice-v2', capability: 'tts', label: 'CosyVoice v2（音色最多）' },
       { id: 'cosyvoice-v1', capability: 'tts', label: 'CosyVoice v1' },
       { id: 'sambert-zhichu-v1', capability: 'tts', label: 'Sambert 知厨（旁白感）' }
+    ],
+/**
+ * 音色清单。
+ *
+ * 和模型清单一样，这是**候选不是断言** —— 各家音色列表随版本变，
+ * 而且能不能用还看你账号开通了什么。界面上允许手填，填了就以你填的为准。
+ *
+ * 为什么要给每个角色单独配音色：这和"每个角色同一张脸"是完全一样的道理。
+ * 全片一个音色，两个人对话时观众分不出谁在说话 —— 画面上做了四层一致性，
+ * 声音上却是同一个人配了所有角色，这个反差比不一致更出戏。
+ */
+    voices: [
+      { id: 'Cherry', label: 'Cherry（女·清亮）', gender: 'f' },
+      { id: 'Serena', label: 'Serena（女·沉稳）', gender: 'f' },
+      { id: 'Chelsie', label: 'Chelsie（女·柔和）', gender: 'f' },
+      { id: 'Ethan', label: 'Ethan（男·明朗）', gender: 'm' },
+      { id: 'longwan', label: '龙婉（女·温柔，CosyVoice）', gender: 'f' },
+      { id: 'longcheng', label: '龙橙（男·磁性，CosyVoice）', gender: 'm' },
+      { id: 'longxiaochun', label: '龙小淳（女·知性，CosyVoice）', gender: 'f' },
+      { id: 'longhua', label: '龙华（男·浑厚，CosyVoice）', gender: 'm' }
     ],
     /**
      * 自检走"列模型"而不是"发一次对话"。
@@ -993,6 +1022,12 @@ export function providersWith(capability) {
 }
 
 /** 这家视频接口认哪些分辨率档位。空数组 = 它不收这个字段，别瞎发。 */
+/** 这家有哪些音色可选。空数组表示这家没给清单 —— 界面上退回手填。 */
+export function voicesOf(providerId) {
+  const p = typeof providerId === 'string' ? PROVIDERS.find((x) => x.id === providerId) : providerId;
+  return p?.voices || [];
+}
+
 export function videoResolutions(provider) {
   return provider?.videoDefaults?.resolutions || [];
 }
@@ -1031,6 +1066,8 @@ export function publicCatalog(overrides = {}) {
     models: p.models,
     // 界面上的分辨率下拉直接读这个，免得前端再抄一份档位清单
     videoDefaults: p.videoDefaults || null,
+    // 音色清单：每个角色配一个，界面要拿它渲染下拉
+    voices: p.voices || [],
     // 接口地址清单：中转平台的路径经常对不上，界面上要能让用户自己改
     endpoints: p.endpoints || {},
     probe: p.probe || null,

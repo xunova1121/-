@@ -25,6 +25,17 @@ export default {
     const root = h('div', { class: 'stack' });
     const pending = {};
 
+    const burnBox = h('input', {
+      type: 'checkbox',
+      checked: settings.burnSubtitles === true,
+      onchange: (e) => (pending.burnSubtitles = e.target.checked)
+    });
+
+    const check = (box, text) =>
+      h('label', {
+        style: 'display:flex;align-items:flex-start;gap:8px;text-transform:none;letter-spacing:0;font-size:12.5px;font-weight:400;color:var(--ink-dim);margin:0'
+      }, box, h('span', {}, text));
+
     // ── 能力路由 ──
     const routeGrid = h('div', { class: 'route-grid' });
 
@@ -353,6 +364,15 @@ export default {
           '分辨率越高越贵、出得越慢。建议先用低档跑通全流程、确认分镜和人设都对，最后一遍再拉到高档重出。'),
         h('div', { class: 'grid2' },
           h('div', { class: 'field' }, h('label', {}, '视频分辨率'), resSel, resHint),
+          h('div', { class: 'field' },
+            h('label', {}, '字幕'),
+            h('div', { class: 'stack', style: 'gap:4px' },
+              check(burnBox, '把字幕烧进画面'),
+              h('div', { class: 'field-hint', style: 'margin:0' },
+                '不勾也会在成片旁边生成 .srt（那一步不花钱、也不会失败）。' +
+                '烧字幕要 FFmpeg 编进了 libass、系统里还得有能显示中文的字体，缺哪个都会失败 —— ' +
+                '所以默认不开。就算开了，烧失败也只丢字幕、不丢成片。')))),
+        h('div', { class: 'grid2' },
           h('div', { class: 'field' }, h('label', {}, '默认画幅'), ratioSel,
             h('div', { class: 'field-hint' },
               '这是', h('b', {}, '新建项目时的默认值'),
@@ -371,10 +391,6 @@ export default {
     const retryInput = h('input', { type: 'number', min: 0, max: 5, value: settings.consistencyMaxRetries,
       oninput: (e) => (pending.consistencyMaxRetries = Number(e.target.value)) });
 
-    const check = (box, text) =>
-      h('label', {
-        style: 'display:flex;align-items:flex-start;gap:8px;text-transform:none;letter-spacing:0;font-size:12.5px;font-weight:400;color:var(--ink-dim);margin:0'
-      }, box, h('span', {}, text));
 
     root.append(
       h('div', { class: 'panel' },

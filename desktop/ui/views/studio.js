@@ -1002,6 +1002,12 @@ export default {
             type: 'text', placeholder: '出场角色，逗号分隔', value: (shot.characters || []).join('、')
           }),
           dialogue: h('input', { type: 'text', placeholder: '这一镜的台词（没有就留空）', value: shot.dialogue || '' }),
+          // 谁说的 —— 决定用哪个角色的音色。留空 = 旁白
+          speaker: h('select', {},
+            h('option', { value: '', selected: !shot.speaker }, '旁白'),
+            (project.bible?.characters || []).map((c) =>
+              h('option', { value: c.name, selected: c.name === shot.speaker },
+                `${c.name}${c.voice ? `（${c.voice}）` : ''}`))),
           // 和上一镜什么关系。它决定这一镜出视频时要不要把上一镜的末帧锁住 ——
           // 三种关系各有各的代价，见下面那行说明
           link: h('select', {},
@@ -1025,7 +1031,8 @@ export default {
                   dialogue: fields.dialogue.value,
                   link: fields.link.value,
                   skills: pickedSkills,
-                  variants: pickedVariants
+                  variants: pickedVariants,
+                  speaker: fields.speaker.value
                 }
               });
               project = r.project;
@@ -1070,6 +1077,8 @@ export default {
             h('div', {}, h('label', {}, '出场角色'), fields.characters)),
           h('label', {}, '台词'),
           fields.dialogue,
+          h('div', { class: 'shot-edit-grid' },
+            h('div', {}, h('label', {}, '谁说的'), fields.speaker)),
           // ── 这一镜谁穿哪套、场景是什么时段 ──
           // 只在真的有多版时才摆出来：大多数条目只有一版，摆一排"默认"是纯噪音
           (() => {
@@ -1259,7 +1268,10 @@ export default {
                 flagged ? h('span', { class: 'badge warn' }, '待人工确认') : null,
                 shot.videoPath ? h('span', { class: 'badge ok' }, '视频已出') : shot.imagePath ? h('span', { class: 'badge' }, '待出视频') : null
               ),
-              shot.dialogue ? h('div', { class: 'shot-desc', style: 'color:var(--ink-faint)' }, `「${shot.dialogue}」`) : null,
+              shot.dialogue
+                ? h('div', { class: 'shot-desc', style: 'color:var(--ink-faint)' },
+                    shot.speaker ? `${shot.speaker}：「${shot.dialogue}」` : `旁白：「${shot.dialogue}」`)
+                : null,
               // 单镜重出：批量出图总有零星失败或不满意的，为几张图重跑整个阶段既慢又要重烧。
               // 只摆当前这一步用得上的参数 —— 在出图那步看到"秒"和视频模型，
               // 只会让人以为得先把它们配好。

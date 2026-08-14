@@ -174,6 +174,21 @@ export default {
         placeholder: '留空 = 用上面的描述出图（推荐）。写了这里就以这里为准',
         value: item.sheetPrompt || ''
       });
+      /**
+       * 音色：和种子一样是**身份的一部分**。
+       * 全片一个音色，两个人对话时观众分不出谁在说话 ——
+       * 画面上做了四层一致性，声音上却是同一个人配了所有角色。
+       */
+      const voiceList = state.catalog.providers.find((x) => x.id === state.catalog.routing.tts?.provider)?.voices || [];
+      const voiceSel = kind === 'char'
+        ? h('select', { class: 'mini' },
+            h('option', { value: '' }, '（未指定，配音时自动分）'),
+            voiceList.map((v) => h('option', { value: v.id, selected: v.id === item.voice }, v.label || v.id)),
+            item.voice && !voiceList.some((v) => v.id === item.voice)
+              ? h('option', { value: item.voice, selected: true }, `${item.voice}（当前）`)
+              : null)
+        : null;
+
       const provSel = h('select', { class: 'mini' },
         h('option', { value: '' }, `默认（${state.catalog.routing.image.provider}）`),
         ...imageProviders.map((p) => h('option', { value: p.id }, p.name)));
@@ -301,7 +316,13 @@ export default {
       async function saveText(extra = {}) {
         const r = await api(`/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}`, {
           method: 'PATCH',
-          body: { name: nameInput.value, appearance: area.value, sheetPrompt: promptInput.value, ...extra }
+          body: {
+            name: nameInput.value,
+            appearance: area.value,
+            sheetPrompt: promptInput.value,
+            ...(voiceSel ? { voice: voiceSel.value } : {}),
+            ...extra
+          }
         });
         if (r.renamed) {
           // 改名会牵动分镜里的引用，改了几处要说出来 —— 悄悄改动别人的数据很吓人
@@ -451,6 +472,10 @@ export default {
           textNewer
             ? h('div', { class: 'sheet-seed', style: 'margin-top:6px;color:var(--caution)' },
                 '文字改过了，图还是按旧描述出的 —— 出图时提示词和参考图会打架。想让图跟上就点「改完重出」。')
+            : null,
+          voiceSel
+            ? h('div', { class: 'sheet-actions' },
+                h('span', { class: 'sheet-seed', style: 'flex:none' }, '音色'), voiceSel)
             : null,
           h('div', { class: 'sheet-actions' }, provSel, modelSel),
           item.sheetSource === 'upload'

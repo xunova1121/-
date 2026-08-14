@@ -14,6 +14,7 @@ import * as store from '../store.js';
 import * as settings from '../settings.js';
 import * as logbus from '../logbus.js';
 import * as adapters from '../providers/adapters.js';
+import * as catalog from '../providers/catalog.js';
 import { authHeadersForUrl } from '../providers/index.js';
 import * as consistency from './consistency.js';
 import * as continuity from './continuity.js';
@@ -42,6 +43,7 @@ const SHOT_PROMPT = `你是动态漫画的分镜导演。把剧本拆成可直�
       "camera": "镜头语言：特写 / 中景 / 全景 / 俯拍 / 跟拍 / 推镜 等",
       "motion": "给图生视频的运镜与动态提示，一句话",
       "dialogue": "旁白或台词，没有留空字符串",
+      "speaker": "这句台词是谁说的，填角色名；旁白或没有台词就留空字符串",
       "duration": 4
     }
   ]
@@ -434,6 +436,8 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
     camera: s.camera || '中景',
     motion: s.motion || '镜头缓慢推进',
     dialogue: s.dialogue || '',
+    // 谁说的。配音时按它取这个角色的音色 —— 空 = 旁白
+    speaker: s.speaker || '',
     duration: Number(s.duration) || 4,
     // 模型回的是**版本名**（它没法知道 id），这里翻成 id。
     // 翻不出来的直接丢掉：指向不存在的变体等于悄悄回退到默认，而界面上还显示着你选的那一版
@@ -502,6 +506,8 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
  */
 const SHOT_EDITABLE = [
   'description', 'camera', 'motion', 'dialogue', 'scene', 'characters', 'duration', 'link', 'skills',
+  // 这句台词是谁说的。决定用哪个角色的音色 —— 空字符串 = 旁白
+  'speaker',
   // { '阿澜': 'v-xxx', '码头': 'v-yyy' } —— 这一镜谁穿哪套、场景是什么时段
   'variants'
 ];
@@ -1220,7 +1226,7 @@ export async function regenerateSheet(projectId, kind, name, opts = {}, onEvent)
  * 这一层不是技术需要，是心理需要 —— 设定集是全片的地基，
  * 地基应该有一个明确的"我认可了"的动作，而不是模型写完就算数。
  */
-const BIBLE_EDITABLE = ['name', 'appearance', 'sheetPrompt', 'role'];
+const BIBLE_EDITABLE = ['name', 'appearance', 'sheetPrompt', 'role', 'voice'];
 
 export function updateBibleEntry(projectId, kind, name, patch = {}) {
   const project = store.read(projectId);
@@ -1842,12 +1848,86 @@ export async function recheckPendingTasks(projectId, { onEvent } = {}) {
 
 // ═══════════════════════ 阶段五：配音 ═══════════════════════
 
+/**
+ * 给每个角色分配一个音色。
+ *
+ * 这和"每个角色一颗固定种子"是同一件事，只是换到声音上：
+ * **全片一个音色，两个人对话时观众分不出谁在说话** ——
+ * 画面上做了四层一致性，声音上却是同一个人配了所有角色，
+ * 这个反差比画面不一致更出戏。
+ *
+ * 分配方式是按顺序轮着取，尽量不重样；已经手选过的不动
+ * （你挑的音色比自动分的准，那是你听过的）。
+ */
+export function assignVoices(projectId, { force = false } = {}) {
+  const project = store.read(projectId);
+  if (!project?.bible?.characters?.length) return { assigned: 0, voices: [] };
+
+  const r = routing();
+  const pool = catalog.voicesOf(r.tts.provider).map((v) => v.id);
+  if (!pool.length) return { assigned: 0, voices: [], reason: `${r.tts.provider} 没有内置音色清单，去设定集里手填` };
+
+  let i = 0;
+  const assigned = [];
+  const taken = new Set(
+    force ? [] : project.bible.characters.map((c) => c.voice).filter(Boolean)
+  );
+  store.update(projectId, (p) => {
+    for (const c of p.bible.characters) {
+      if (c.voice && !force) continue;
+      // 挑一个还没被占的；都占满了就从头轮
+      let pick = pool[i % pool.length];
+      for (let n = 0; n < pool.length && taken.has(pick); n++) pick = pool[(i + n + 1) % pool.length];
+      i += 1;
+      c.voice = pick;
+      taken.add(pick);
+      assigned.push({ name: c.name, voice: pick });
+    }
+    // 旁白也要有自己的声音，而且不该和任何角色重
+    if (!p.bible.narratorVoice || force) {
+      p.bible.narratorVoice = pool.find((v) => !taken.has(v)) || pool[0];
+    }
+    return p;
+  });
+  return { assigned: assigned.length, voices: assigned, narrator: store.read(projectId).bible.narratorVoice };
+}
+
+/** 这一镜的台词该用谁的声音 */
+export function voiceForShot(project, shot) {
+  const chars = project.bible?.characters || [];
+  // speaker 优先；没标就退到出场角色里的第一个；都没有就是旁白
+  const speaker = shot.speaker?.trim()
+    ? chars.find((c) => c.name === shot.speaker.trim())
+    : chars.find((c) => (shot.characters || []).includes(c.name));
+  return {
+    voice: speaker?.voice || project.bible?.narratorVoice || '',
+    who: speaker?.name || '旁白'
+  };
+}
+
 export async function generateVoice(projectId, { onEvent } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
   const r = routing();
   const dir = store.assetDir(projectId);
-  const targets = project.shots.filter((s) => s.dialogue?.trim() && !s.audioPath);
+
+  // 没分配过音色的话先分一次 —— 不分的话全片一个默认音色，
+  // 两个人对话时观众分不出谁在说话
+  if ((project.bible?.characters || []).some((c) => !c.voice)) {
+    const done = assignVoices(projectId);
+    if (done.assigned) {
+      onEvent?.({
+        type: 'note',
+        message: `已给 ${done.assigned} 个角色分配音色：${done.voices.map((v) => `${v.name}→${v.voice}`).join('、')}` +
+          `${done.narrator ? `，旁白→${done.narrator}` : ''}。不满意去「设定集」页逐个改`
+      });
+    } else if (done.reason) {
+      onEvent?.({ type: 'note', message: done.reason });
+    }
+  }
+
+  const fresh = store.read(projectId);
+  const targets = fresh.shots.filter((s) => s.dialogue?.trim() && !s.audioPath);
   if (!targets.length) {
     onEvent?.({ type: 'stage', stage: 'voice', status: 'done', message: '没有需要配音的台词' });
     return project;
@@ -1856,11 +1936,15 @@ export async function generateVoice(projectId, { onEvent } = {}) {
   onEvent?.({ type: 'stage', stage: 'voice', status: 'running', message: `待配音 ${targets.length} 条` });
   for (const shot of targets) {
     try {
+      const { voice, who } = voiceForShot(fresh, shot);
+      onEvent?.({ type: 'shot', shotId: shot.id, status: 'running', message: `第 ${shot.index} 镜配音（${who}${voice ? `·${voice}` : ''}）…` });
       const speech = await adapters.synthesizeSpeech({
         providerId: r.tts.provider,
         model: r.tts.model,
         text: shot.dialogue,
-        label: `配音 #${shot.index}`
+        // 角色的音色。不传的话全片是同一个声音 —— 这个漏洞以前一直在
+        ...(voice ? { voice } : {}),
+        label: `配音 #${shot.index}·${who}`
       });
       const dest = path.join(dir, `${shot.id}.mp3`);
       if (speech.url) {
@@ -1878,7 +1962,12 @@ export async function generateVoice(projectId, { onEvent } = {}) {
       }
       store.update(projectId, (p) => {
         const t = p.shots.find((s) => s.id === shot.id);
-        if (t) t.audioPath = dest;
+        if (t) {
+          t.audioPath = dest;
+          // 记下这条是谁、用了哪个音色：换了音色重配时，界面要说得清哪条是旧的
+          t.voiceUsed = voice || '';
+          t.speakerUsed = who;
+        }
         return p;
       });
       onEvent?.({ type: 'shot', shotId: shot.id, status: 'done', message: '配音完成' });
@@ -1894,6 +1983,49 @@ export async function generateVoice(projectId, { onEvent } = {}) {
 }
 
 // ═══════════════════════ 阶段六：合成 ═══════════════════════
+
+/**
+ * 生成 SRT 字幕。
+ *
+ * 这件事**几乎是免费的** —— 台词、每镜时长、裁剪策略全在手上，
+ * 只是把它们按时间轴排一遍。而短剧没字幕基本不能发。
+ *
+ * 时间轴必须和**合成时真正用的那个时长**一致：
+ * trim 策略下用分镜的计划时长，keep 策略下用模型实出的时长。
+ * 拿错一个，后面每一条字幕都会累积偏移 —— 越到片尾偏得越离谱。
+ */
+export function buildSubtitles(project, { policy = 'trim' } = {}) {
+  const shots = (project.shots || []).filter((s) => s.videoPath).sort((a, b) => a.index - b.index);
+  const cues = [];
+  let at = 0;
+  for (const shot of shots) {
+    const span = policy === 'trim'
+      ? Number(shot.duration) || Number(shot.actualDuration) || 0
+      : Number(shot.actualDuration) || Number(shot.duration) || 0;
+    const text = (shot.dialogue || '').trim();
+    if (text) {
+      // 字幕不占满整镜：结尾留 0.15 秒，避免和下一条贴在一起闪
+      cues.push({ start: at, end: Math.max(at + 0.5, at + span - 0.15), text, speaker: shot.speakerUsed || shot.speaker || '' });
+    }
+    at += span;
+  }
+  return cues;
+}
+
+function srtTime(seconds) {
+  const ms = Math.max(0, Math.round(seconds * 1000));
+  const h = String(Math.floor(ms / 3600000)).padStart(2, '0');
+  const m = String(Math.floor((ms % 3600000) / 60000)).padStart(2, '0');
+  const sec = String(Math.floor((ms % 60000) / 1000)).padStart(2, '0');
+  const milli = String(ms % 1000).padStart(3, '0');
+  return `${h}:${m}:${sec},${milli}`;
+}
+
+export function toSRT(cues) {
+  return cues
+    .map((c, i) => `${i + 1}\n${srtTime(c.start)} --> ${srtTime(c.end)}\n${c.text}\n`)
+    .join('\n');
+}
 
 export async function compose(projectId, { onEvent } = {}) {
   const project = store.read(projectId);
@@ -1941,8 +2073,42 @@ export async function compose(projectId, { onEvent } = {}) {
     onProgress: (p) => onEvent?.({ type: 'progress', seconds: p.seconds })
   });
 
+  /**
+   * 字幕。数据全在手上，只是排一遍时间轴 —— 而短剧没字幕基本不能发。
+   *
+   * 默认只出 .srt 不烧进画面：烧字幕要 libass + 一个能显示中文的字体，
+   * Windows 上字体路径千奇百怪，烧失败会把**整条合成**带崩。
+   * 想烧的话在「设置 → 画面规格」里打开，失败也只丢字幕、不丢成片。
+   */
+  let srtPath = null;
+  const cues = buildSubtitles(store.read(projectId), { policy });
+  if (cues.length) {
+    srtPath = path.join(store.projectDir(projectId), `${safeFileName(project.title)}.srt`);
+    fs.writeFileSync(srtPath, toSRT(cues), 'utf8');
+    onEvent?.({ type: 'note', message: `字幕已生成：${cues.length} 条 → ${path.basename(srtPath)}` });
+
+    if (settings.get('burnSubtitles') === true) {
+      try {
+        const burned = out.replace(/\.mp4$/, '.sub.mp4');
+        await ffmpeg.burnSubtitles(out, srtPath, burned, {
+          onProgress: (p) => onEvent?.({ type: 'progress', seconds: p.seconds })
+        });
+        fs.rmSync(out, { force: true });
+        fs.renameSync(burned, out);
+        onEvent?.({ type: 'note', message: '字幕已烧进画面' });
+      } catch (err) {
+        // 烧不上只丢字幕，不能丢成片 —— 片子已经在 out 上了
+        onEvent?.({
+          type: 'note',
+          message: `字幕没烧进去（${err.message}）。成片是好的，.srt 也在，播放器里挂上就行`
+        });
+      }
+    }
+  }
+
   store.update(projectId, (p) => {
     p.outputs.video = out;
+    p.outputs.subtitle = srtPath;
     p.outputs.durationPolicy = policy;
     p.outputs.seconds = duration.summarize(p, { policy }).final;
     p.stageStatus.compose = 'done';

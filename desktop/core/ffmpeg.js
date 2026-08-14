@@ -214,6 +214,27 @@ export async function grabFrame(videoPath, outPath, { at = 'end' } = {}) {
   return outPath;
 }
 
+/**
+ * 把 SRT 烧进画面。
+ *
+ * 默认不做，因为它有两个很容易翻车的前提：这份 FFmpeg 编进了 libass，
+ * 以及系统里有一个能显示中文的字体。缺哪个都会失败 ——
+ * 所以调用方必须把它当成"可能失败"的一步，失败只丢字幕、不丢成片。
+ *
+ * 路径要转义：Windows 的反斜杠和盘符冒号在 filter 表达式里都是特殊字符，
+ * 直接拼进去必挂。
+ */
+export async function burnSubtitles(videoPath, srtPath, outPath, { onProgress, fontName = '' } = {}) {
+  const esc = srtPath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
+  const style = fontName ? `:force_style='FontName=${fontName}'` : '';
+  await run(
+    ['-y', '-i', videoPath, '-vf', `subtitles='${esc}'${style}`, '-c:a', 'copy', outPath],
+    { onProgress }
+  );
+  if (!fs.existsSync(outPath)) throw new Error('FFmpeg 没有输出带字幕的文件');
+  return outPath;
+}
+
 export function status() {
   return locate({ refresh: true });
 }
