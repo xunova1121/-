@@ -203,7 +203,11 @@ export const PROVIDERS = [
        * 一致性在这条路上靠首帧图本身 + 提示词里的冻结设定描述兜住。
        */
       maxImages: 1,
-      refNote: '方舟 Seedance 只收 1 张首帧图，其余设定集参考图改由提示词里的冻结描述承担'
+      // 首尾帧模式：两张图各带一个 role（first_frame / last_frame）。
+      // 不带 role 的话它会当成两张参考图，而 Seedance 只收一张 —— 直接提交失败。
+      endFrame: true,
+      maxImagesWithEndFrame: 2,
+      refNote: '方舟 Seedance 只收 1 张首帧图（首尾帧衔接时 2 张），其余设定集参考图改由提示词里的冻结描述承担'
     },
     /**
      * 待探测的候选模型 ID。
@@ -858,7 +862,13 @@ export const PROVIDERS = [
     capabilities: ['t2v', 'i2v', 'r2v'],
     endpoints: { i2v: '{{baseUrl}}/v1/videos/image2video' },
     // image2video 的 image 是单数字段
-    videoDefaults: { maxImages: 1, refNote: '可灵图生视频只收 1 张首帧图' },
+    // image_tail 是可灵的末帧字段。有它才能做到"这一镜的结尾就是下一镜的开头"
+    videoDefaults: {
+      maxImages: 1,
+      endFrame: true,
+      maxImagesWithEndFrame: 2,
+      refNote: '可灵图生视频只收 1 张首帧图（用首尾帧衔接时 2 张）'
+    },
     taskPoll: {
       url: '{{baseUrl}}/v1/videos/image2video/{taskId}',
       method: 'GET',
@@ -906,9 +916,14 @@ export const PROVIDERS = [
     auth: { type: 'token', secret: 'VIDU_API_KEY' }, // Authorization: Token xxx，写成 Bearer 会 401
     secrets: [{ name: 'VIDU_API_KEY', label: 'API Key', required: true }],
     capabilities: ['i2v', 'r2v'],
-    endpoints: { i2v: '{{baseUrl}}/img2video', r2v: '{{baseUrl}}/reference2video' },
+    endpoints: {
+      i2v: '{{baseUrl}}/img2video',
+      r2v: '{{baseUrl}}/reference2video',
+      // 首尾帧是另一条接口：images[0] 是首帧、images[1] 是尾帧
+      se2v: '{{baseUrl}}/start-end2video'
+    },
     // reference2video 收多张参考图 —— 这是跨镜头一致性最好的一条路
-    videoDefaults: { maxImages: 3 },
+    videoDefaults: { maxImages: 3, endFrame: true, maxImagesWithEndFrame: 2 },
     taskPoll: {
       url: '{{baseUrl}}/tasks/{taskId}/creations',
       method: 'GET',

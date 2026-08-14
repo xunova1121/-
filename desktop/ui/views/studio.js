@@ -10,6 +10,17 @@ import { openLightbox } from '../lightbox.js';
 import { ratioLabel } from '../ratios.js';
 
 /**
+ * 两个场景名算不算同一个地方（和后端 pipeline/continuity.js 里那条规则一致）。
+ * 界面上要在**发请求之前**就把衔接关系显示出来，所以这条规则两边各有一份。
+ */
+function sameScene(a, b) {
+  const x = String(a || '').trim();
+  const y = String(b || '').trim();
+  if (!x || !y) return false;
+  return x === y || x.includes(y) || y.includes(x);
+}
+
+/**
  * 正在跑的流水线任务。
  *
  * 刻意放在模块级、而不是某一次 render 的闭包里 —— 一步动辄跑十几分钟，
@@ -851,7 +862,14 @@ export default {
       }
       const grid = h('div', { class: 'shot-grid' });
       const sc = scope();
-      for (const shot of project.shots.slice().sort((a, b) => a.index - b.index)) {
+      const ordered = project.shots.slice().sort((a, b) => a.index - b.index);
+      for (const [ordinal, shot] of ordered.entries()) {
+        // 上一镜。跨章不算 —— 跨章的"上一镜"不是同一段戏。
+        const prevShot =
+          ordinal > 0 && (ordered[ordinal - 1].chapterId || null) === (shot.chapterId || null)
+            ? ordered[ordinal - 1]
+            : null;
+        const link = shot.link || (!prevShot ? 'new-scene' : sameScene(prevShot.scene, shot.scene) ? 'cut' : 'new-scene');
         const c = shot.consistency;
         const flagged = c?.needsReview;
         const failed = shot.status === 'failed' || !shot.imagePath;
@@ -923,7 +941,12 @@ export default {
           characters: h('input', {
             type: 'text', placeholder: '出场角色，逗号分隔', value: (shot.characters || []).join('、')
           }),
-          dialogue: h('input', { type: 'text', placeholder: '这一镜的台词（没有就留空）', value: shot.dialogue || '' })
+          dialogue: h('input', { type: 'text', placeholder: '这一镜的台词（没有就留空）', value: shot.dialogue || '' }),
+          // 和上一镜什么关系。它决定这一镜出视频时要不要把上一镜的末帧锁住 ——
+          // 三种关系各有各的代价，见下面那行说明
+          link: h('select', {},
+            (state.catalog.links || []).map((l) =>
+              h('option', { value: l.id, selected: l.id === link, title: l.hint }, l.label)))
         };
 
         const saveEdit = h('button', {
@@ -939,7 +962,8 @@ export default {
                   motion: fields.motion.value,
                   scene: fields.scene.value,
                   characters: fields.characters.value,
-                  dialogue: fields.dialogue.value
+                  dialogue: fields.dialogue.value,
+                  link: fields.link.value
                 }
               });
               project = r.project;
@@ -969,7 +993,10 @@ export default {
         };
         descEl.onclick = openEdit;
 
-        editor.append(
+        // 用 add 而不是 editor.append：原生 append 不会摊平数组，也不会跳过 null ——
+        // 直接 append 的话，"和上一镜的关系"那一组会被转成字符串印在界面上，
+        // 第一镜（没有上一镜）还会真的显示一个 "null"。
+        add(editor,
           h('label', {}, '画面描述'),
           fields.description,
           h('div', { class: 'shot-edit-grid' },
@@ -979,6 +1006,18 @@ export default {
             h('div', {}, h('label', {}, '出场角色'), fields.characters)),
           h('label', {}, '台词'),
           fields.dialogue,
+          prevShot
+            ? [
+                h('label', { style: 'margin-top:8px' }, `和上一镜（SH ${String(prevShot.index).padStart(3, '0')}）的关系`),
+                fields.link,
+                // 说清楚代价：选「连续动作」要重出的是**上一镜**，不是这一镜 ——
+                // 末帧锁在上一镜身上，改完只重出这一镜是白重
+                h('div', { class: 'shot-edit-tip' },
+                  '「连续动作」会把这一镜的图锁成上一镜的末帧，两镜之间无缝；' +
+                  `改成它之后要重出的是 SH ${String(prevShot.index).padStart(3, '0')}，不是这一镜。` +
+                  '同场景换机位保持默认就好 —— 每一镜都接上的话，整部片子会变成一个没剪过的长镜头。')
+              ]
+            : null,
           h('div', { class: 'shot-edit-tip' },
             '只写画面，别写外貌 —— 长相由设定集定，写在这儿反而会和设定集打架。',
             shot.imagePath ? ' 改完这一镜已经出好的图不会变，要重出才生效。' : ''),
@@ -1029,6 +1068,27 @@ export default {
                   : null,
                 // 手改过的镜头值得标一下：出来的图和自动拆的分镜对不上时，先想到的就该是"我改过它"
                 shot.editedAt ? h('span', { class: 'badge' }, '文案已手改') : null,
+                // 衔接：在出视频那一步才有意义，出图那步摆着只是噪音
+                sc.video && prevShot
+                  ? h('span', {
+                      class: `badge ${link === 'continuous' ? 'beam' : ''}`,
+                      title: (state.catalog.links || []).find((l) => l.id === link)?.hint || ''
+                    }, `接 ${(state.catalog.links || []).find((l) => l.id === link)?.label || link}`)
+                  : null,
+                // 标了"连续动作"但末帧其实没锁上（换了家不收末帧的），必须说出来 ——
+                // 否则用户会一直以为这两镜是无缝的，直到把成片放出来
+                sc.video && shot.videoPath && shot.link === 'continuous' && shot.endFrameChained === false
+                  ? h('span', { class: 'badge warn', title: '这一家不收末帧图，这段是按普通图生视频出的，和下一镜之间是硬切' }, '末帧没锁上')
+                  : null,
+                // 末帧复核：视频的人设漂移几乎都在后半段，首帧永远是像的
+                shot.videoConsistency
+                  ? h('span', {
+                      class: `badge ${shot.videoConsistency.pass ? 'ok' : 'warn'}`,
+                      title: shot.videoConsistency.pass
+                        ? `末帧复核通过（${shot.videoConsistency.character}）`
+                        : `末帧和设定图对不上：${(shot.videoConsistency.issues || []).join('；') || '未说明'}`
+                    }, `末帧 ${shot.videoConsistency.score}`)
+                  : null,
                 c?.attempts > 1 ? h('span', { class: 'badge warn' }, `重试 ${c.attempts - 1}`) : null,
                 flagged ? h('span', { class: 'badge warn' }, '待人工确认') : null,
                 shot.videoPath ? h('span', { class: 'badge ok' }, '视频已出') : shot.imagePath ? h('span', { class: 'badge' }, '待出视频') : null

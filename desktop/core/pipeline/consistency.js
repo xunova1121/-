@@ -20,6 +20,7 @@
 import crypto from 'node:crypto';
 import * as adapters from '../providers/adapters.js';
 import * as settings from '../settings.js';
+import * as continuity from './continuity.js';
 import { resolveStyle } from '../styles.js';
 
 /** 由项目和名字派生稳定种子。同一项目里同一角色，永远同一颗种子。 */
@@ -237,8 +238,12 @@ export function collectReferences(bible, shot, { limit = 9 } = {}) {
  * 和出图提示词的区别是刻意的：这里**不重复完整外貌描述**。
  * 首帧图已经把人锁死了，再堆一遍长描述只会挤占运镜指令的权重，
  * 反而让模型分心去"重画"人物。
+ *
+ * 第四样东西是**上下文**（prev / next）：模型只看得见一张图和一句描述时，
+ * 它不知道自己是一部片子里的第 7 镜，于是每一镜都从头起势、各演各的。
+ * 这就是"逐镜都对、连起来不像一部片子"的根因。见 pipeline/continuity.js。
  */
-export function assembleVideoPrompt(bible, shot, { maxChars = 380 } = {}) {
+export function assembleVideoPrompt(bible, shot, { maxChars = 380, prev = null, next = null, link = null } = {}) {
   const parts = [];
 
   if (shot.description) parts.push(shot.description);
@@ -261,6 +266,10 @@ export function assembleVideoPrompt(bible, shot, { maxChars = 380 } = {}) {
 
   // 有台词的镜头提醒模型留出说话的节奏，别让人物僵立
   if (shot.dialogue?.trim()) parts.push('人物有台词，口型与表情自然');
+
+  // 衔接约束放在最后：它是对整段的约束，不是画面内容。
+  // 放前面会挤掉"演什么"的权重 —— 那才是这一镜的主语。
+  parts.push(...continuity.continuityLines(shot, { prev, next, link }));
 
   let prompt = parts.filter(Boolean).join('，');
   // 视频模型的提示词普遍比图像模型短，超长会被截断或稀释，主动收一下

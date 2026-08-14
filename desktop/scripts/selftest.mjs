@@ -799,6 +799,49 @@ check('单镜临时指定的分辨率发出去了（方舟是拼在文本里的 
 check('画幅也一并发出（竖屏短剧靠它）', / --ratio 16:9/.test(vidText), vidText.slice(-60));
 check('记下了本次出视频的清晰度', shot1v?.videoResolution === '1080p', shot1v?.videoResolution);
 
+// ── 尾帧衔接走到真实请求体 ──
+// 光有 continuity.js 里的判断没用，得确认它真的变成了发给厂商的那两张带 role 的图。
+{
+  const second = afterAssets.shots[1];
+  await fetch(`${appUrl}/api/projects/${project.id}/shots/${second.id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ link: 'continuous' })
+  });
+  const chained = await ndjson(`/projects/${project.id}/shots/${shot1.id}/regenerate`, { kind: 'video' });
+  const body = upstream.lastVideoBody || {};
+  const roles = (body.content || []).filter((c) => c.role).map((c) => c.role);
+  check('下一镜标了连续动作，这一镜就把它那张图锁成末帧',
+    roles.join(',') === 'first_frame,last_frame', JSON.stringify(roles));
+  // 方舟不带 role 会把两张图当成两张参考图，而 Seedance 只收一张 —— 直接提交失败
+  check('首尾帧两张图都带了 role（不带会被判非法参数）',
+    (body.content || []).filter((c) => c.type === 'image_url').every((c) => c.role));
+  check('界面能看到末帧到底锁上没有',
+    chained.find((e) => e.type === 'finished')?.project?.shots?.find((s) => s.id === shot1.id)?.endFrameChained === true);
+  check('事件流里说清楚了为什么这一镜多了一张图',
+    chained.some((e) => e.type === 'note' && /锁成本镜末帧/.test(e.message || '')),
+    JSON.stringify(chained.filter((e) => e.type === 'note').map((e) => e.message).slice(0, 4)));
+
+  // 末帧复核要么给出结论、要么明说跳过，但**绝不能拦住视频落盘** ——
+  // 质检坏了不该让已经花钱出好的片子丢掉。这条在装没装 FFmpeg 的机器上都成立。
+  const verdict = chained.find((e) => e.type === 'finished')?.project?.shots?.find((s) => s.id === shot1.id);
+  const saidSkip = chained.some((e) => e.type === 'note' && /末帧复核|抠末帧/.test(e.message || ''));
+  check('末帧复核要么有结论要么明说跳过，视频照常保存',
+    Boolean(verdict?.videoPath) && (Boolean(verdict?.videoConsistency) || saidSkip),
+    JSON.stringify({ video: Boolean(verdict?.videoPath), tail: verdict?.videoConsistency || null, saidSkip }));
+
+  // 换机位（默认）不该锁末帧，否则整片会变成一个没剪过的长镜头
+  await fetch(`${appUrl}/api/projects/${project.id}/shots/${second.id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ link: 'cut' })
+  });
+  await ndjson(`/projects/${project.id}/shots/${shot1.id}/regenerate`, { kind: 'video' });
+  check('改回换机位就不再锁末帧',
+    (upstream.lastVideoBody?.content || []).every((c) => !c.role),
+    JSON.stringify((upstream.lastVideoBody?.content || []).map((c) => c.role)));
+}
+
 section('手动补入（中转平台查不到任务时的救援路径）');
 {
   const shot = afterAssets.shots[1];
@@ -1066,6 +1109,75 @@ check('长度受控，不超过视频模型的提示词舒适区', vp.length <= 
 
 const emptyCast = consistency.assembleVideoPrompt(vbible, { index: 1, description: '空镜：水面波光', characters: [], camera: '特写', motion: '静止' });
 check('空镜不硬塞角色', !/保持外貌不变/.test(emptyCast), emptyCast);
+
+// ── 镜间衔接 ──
+// 一致性管的是"这一镜像不像"，衔接管的是"上一镜到这一镜接不接得上"。
+// 后者逐镜看根本发现不了，只有连起来放才露馅 —— 而那时候钱已经花完了。
+section('镜间衔接');
+{
+  const continuity = await import('../core/pipeline/continuity.js');
+
+  const s1 = { id: 'a', index: 1, scene: '码头', description: '阿澜走向栈桥' };
+  const s2 = { id: 'b', index: 2, scene: '码头', description: '阿澜蹲下查看缆绳' };
+  const s3 = { id: 'c', index: 3, scene: '值班室', description: '阿澜推开值班室的门' };
+
+  check('第一镜没有上一镜，按换场景算', continuity.deriveLink(s1, null) === 'new-scene');
+  check('同一场景默认按"换机位"，不是"连续动作"',
+    continuity.deriveLink(s2, s1) === 'cut', continuity.deriveLink(s2, s1));
+  check('换了场景就是换场景', continuity.deriveLink(s3, s2) === 'new-scene');
+  check('场景名写法不同也算同一个地方（码头 / 渔港码头）',
+    continuity.sameScene('码头', '渔港码头') && !continuity.sameScene('码头', '值班室'));
+  // 判断错的代价不对称：该切的接上了要重出整段，该接的切了顶多硬切一下还能看。
+  // 所以默认必须是 cut，continuous 只能是人明确选的。
+  check('人手选过的关系不会被推断盖掉',
+    continuity.deriveLink({ ...s2, link: 'continuous' }, s1) === 'continuous');
+
+  const linked = continuity.withLinks([s3, s1, s2]);
+  check('补 link 时按 index 排序，不按传入顺序',
+    linked.map((s) => s.id).join('') === 'abc', linked.map((s) => s.id).join(''));
+
+  // 提示词里的衔接约束：这是最便宜的一层，一分钱不多花
+  const cutLines = continuity.continuityLines(s2, { prev: s1, next: s3, link: 'cut' });
+  check('同场景换机位时要求不换天（光线/天气/时间一致）',
+    cutLines.some((l) => /光线、天气/.test(l)), JSON.stringify(cutLines));
+  check('同场景换机位时提醒不要越轴（最刺眼的连贯性错误）',
+    cutLines.some((l) => /越轴/.test(l)), JSON.stringify(cutLines));
+  check('告诉模型结尾要交到哪儿去（否则它会把动作做满，接不上下一镜）',
+    cutLines.some((l) => /结尾停在/.test(l)), JSON.stringify(cutLines));
+
+  const contLines = continuity.continuityLines(s2, { prev: s1, next: s3, link: 'continuous' });
+  check('连续动作要求从上一镜的状态继续，不要重新起势',
+    contLines.some((l) => /不要重新起势/.test(l)), JSON.stringify(contLines));
+
+  const newSceneLines = continuity.continuityLines(s3, { prev: s2, next: null, link: 'new-scene' });
+  check('换场景不硬接（硬接会把转场做糊）', newSceneLines.length === 0, JSON.stringify(newSceneLines));
+
+  // 末帧衔接：唯一能做到无缝的一招，但**只在明确标了连续动作时**才用
+  check('标了连续动作才锁末帧',
+    continuity.shouldChainEndFrame({ imagePath: 'x.png' }, 'continuous') === true);
+  check('换机位不锁末帧（锁了就等于不让镜位跳，整片变成一个长镜头）',
+    continuity.shouldChainEndFrame({ imagePath: 'x.png' }, 'cut') === false);
+  check('下一镜还没出图就没得锁',
+    continuity.shouldChainEndFrame({ imagePath: null }, 'continuous') === false);
+
+  // 跨章不算相邻：跨章的"上一镜"不是同一段戏
+  const nb = continuity.neighbors(
+    [{ ...s1, chapterId: 'ch1' }, { ...s2, chapterId: 'ch2' }],
+    'b'
+  );
+  check('跨章不当成上一镜', nb.prev === null);
+
+  // 装配进提示词
+  const withCtx = consistency.assembleVideoPrompt(vbible, vshot, {
+    prev: { description: '阿澜从值班室快步走出', scene: '码头' },
+    next: { description: '缆绳在浪里绷紧' },
+    link: 'cut'
+  });
+  check('视频提示词带上了衔接约束', /越轴/.test(withCtx) && /结尾停在/.test(withCtx), withCtx);
+  check('衔接约束排在画面内容之后（主语还是"这一镜演什么"）',
+    withCtx.indexOf('快步走向栈桥') < withCtx.indexOf('越轴'), withCtx);
+  check('带了衔接约束也不超长', withCtx.length <= 380, `${withCtx.length} 字`);
+}
 
 section('时长控制');
 const durationMod = await import('../core/duration.js');

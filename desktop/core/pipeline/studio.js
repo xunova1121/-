@@ -16,6 +16,7 @@ import * as logbus from '../logbus.js';
 import * as adapters from '../providers/adapters.js';
 import { authHeadersForUrl } from '../providers/index.js';
 import * as consistency from './consistency.js';
+import * as continuity from './continuity.js';
 import * as ffmpeg from '../ffmpeg.js';
 import { safeFileName } from '../paths.js';
 import * as chapters from './chapters.js';
@@ -397,7 +398,7 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
  *   ② **不自动重出**。改完立刻烧钱不是好事 —— 一般人会连着改好几镜再统一重出。
  *      所以只落盘、记一个 editedAt，重出由用户自己点。
  */
-const SHOT_EDITABLE = ['description', 'camera', 'motion', 'dialogue', 'scene', 'characters', 'duration'];
+const SHOT_EDITABLE = ['description', 'camera', 'motion', 'dialogue', 'scene', 'characters', 'duration', 'link'];
 
 export function updateShot(projectId, shotId, patch = {}) {
   const project = store.read(projectId);
@@ -413,6 +414,9 @@ export function updateShot(projectId, shotId, patch = {}) {
       value = Number(value);
       if (!Number.isFinite(value) || value <= 0) continue;
       value = Math.min(30, Math.max(0.5, value));
+    } else if (key === 'link') {
+      // 只认这三种关系。乱值会让"要不要锁末帧"的判断变成掷骰子。
+      if (!continuity.LINKS.includes(value)) continue;
     } else if (key === 'characters') {
       // 界面上是一行逗号分隔的文本，中英文逗号和顿号都得认
       value = Array.isArray(value)
@@ -433,7 +437,8 @@ export function updateShot(projectId, shotId, patch = {}) {
     shot.editedAt = new Date().toISOString();
     // 手改过的镜头，上一次的一致性分数是对**旧描述**打的，留着会误导。
     // 产物本身不删 —— 用户可能只是修个错别字，没必要把已经出好的图弄没。
-    if (changed.some((k) => k !== 'duration') && shot.consistency) {
+    // 时长和衔接关系改的不是画面内容，出好的图还是那张图，分数依然作数
+    if (changed.some((k) => k !== 'duration' && k !== 'link') && shot.consistency) {
       shot.consistency = { ...shot.consistency, stale: true };
     }
     store.save(project);
@@ -680,7 +685,9 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
     settings.get('useReferenceImages') === false
       ? { images: [], labels: [] }
       : consistency.collectReferences(project.bible, shot);
-  const videoPrompt = opts.prompt?.trim() || consistency.assembleVideoPrompt(project.bible, shot);
+  // 单独重出同样要吃上下文 —— 少了它，重出的这一镜会变成全片里唯一"自成一段"的那一镜
+  const ctx = await videoContextFor(project, shot, { onEvent });
+  const videoPrompt = opts.prompt?.trim() || ctx.videoPrompt;
   if (bibleRefs.labels.length) {
     onEvent?.({ type: 'note', message: `参考设定集：${bibleRefs.labels.join('、')}` });
   }
@@ -691,6 +698,7 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
       model,
       prompt: videoPrompt,
       firstFrameUrl: firstFrame,
+      lastFrameUrl: ctx.lastFrameUrl,
       refImages: bibleRefs.images,
       duration: shot.duration,
       resolution: opts.resolution || null,
@@ -722,11 +730,22 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
       t.videoModelUsed = `${providerId} / ${model}`;
       t.videoResolution = video.resolution || null;
       t.videoRefs = bibleRefs.labels;
+      t.link = ctx.link;
+      t.endFrameChained = Boolean(ctx.lastFrameUrl);
       t.actualDuration = video.actualDuration || shot.duration;
       t.status = 'video-ready';
     }
     return p;
   });
+
+  const tail = await verifyVideoTail(projectId, shot, dest, { onEvent });
+  if (tail) {
+    store.update(projectId, (p) => {
+      const t = p.shots.find((s) => s.id === shotId);
+      if (t) t.videoConsistency = tail;
+      return p;
+    });
+  }
   onEvent?.({ type: 'shot', shotId, status: 'done' });
   return store.read(projectId);
 }
@@ -833,6 +852,92 @@ export function removeBibleEntry(projectId, kind, name) {
 
 // ═══════════════════════ 阶段四：出视频 ═══════════════════════
 
+/**
+ * 这一镜的**上下文**：它接在谁后面、要交给谁。
+ *
+ * 出视频和出图最大的不同就在这儿。出图是一张一张互不相干的静态画面，
+ * 出视频却是在做一段**要和前后接得上**的运动。同一份提示词、同一张首帧，
+ * 缺了上下文的那一版，模型会把每一镜都当成独立短片来演：各自起势、各自收势，
+ * 于是逐镜看都对、连起来却像二十条不相干的素材。
+ *
+ * 这里一次把三样东西备齐：
+ *   ① 提示词里的衔接约束（不越轴、不换天、结尾停在能接上下一镜的状态）；
+ *   ② 末帧图 —— 只有标成"连续动作"的下一镜才锁，见 continuity.js 里为什么不全锁；
+ *   ③ 给界面看的说明，让"这一镜到底接没接上"是看得见的，而不是玄学。
+ */
+async function videoContextFor(project, shot, { onEvent } = {}) {
+  const { prev, next, link, nextLink } = continuity.neighbors(project.shots || [], shot.id);
+
+  const videoPrompt = consistency.assembleVideoPrompt(project.bible, shot, { prev, next, link });
+
+  let lastFrameUrl = null;
+  if (continuity.shouldChainEndFrame(next, nextLink)) {
+    try {
+      lastFrameUrl = next.imageRef || (await toModelRef(next.imagePath, { onEvent }));
+      onEvent?.({
+        type: 'note',
+        message: `第 ${next.index} 镜标成「连续动作」，把它那张图锁成本镜末帧 —— 两镜之间会是无缝的`
+      });
+    } catch (err) {
+      // 末帧拿不到不该拖垮这一镜：降级成普通图生视频，但要说清楚降级了
+      onEvent?.({ type: 'note', message: `取第 ${next.index} 镜的图当末帧失败（${err.message}），本镜按普通图生视频出` });
+    }
+  }
+
+  return { prev, next, link, nextLink, videoPrompt, lastFrameUrl };
+}
+
+/**
+ * 末帧复核：这一段片子演到最后，人还是不是那个人。
+ *
+ * 出图那步的复核只看一张静态图，而视频的漂移**几乎都发生在后半段** ——
+ * 首帧是我们给的，当然像；模型自己往后推五到十秒，脸就开始飘。
+ * 只验首帧等于没验。所以这里用 FFmpeg 抠出**最后一帧**再送去比对，
+ * 抓的就是"开头对、结尾不对"这种逐镜看根本看不出来的问题。
+ *
+ * 没装 FFmpeg 就跳过（如实说一声），不拦着流水线往下走。
+ */
+async function verifyVideoTail(projectId, shot, videoPath, { onEvent } = {}) {
+  if (settings.get('consistencyVerify') === false) return null;
+  const project = store.read(projectId);
+  const cast = consistency.matchCharacters(project.bible, shot).filter((c) => c.sheetPath);
+  if (!cast.length) return null;
+  if (!ffmpeg.locate().available) {
+    onEvent?.({ type: 'note', message: '没装 FFmpeg，跳过末帧复核（视频照常保存，装上之后重出这一镜即可复核）' });
+    return null;
+  }
+
+  const framePath = path.join(store.assetDir(projectId), `${shot.id}.tail.png`);
+  try {
+    await ffmpeg.grabFrame(videoPath, framePath, { at: 'end' });
+  } catch (err) {
+    onEvent?.({ type: 'note', message: `抠末帧失败，跳过末帧复核：${err.message}` });
+    return null;
+  }
+
+  try {
+    const target = cast[0];
+    const verdict = await consistency.verifyShot({
+      shotImageUrl: await toModelRef(framePath, { onEvent }),
+      character: { ...target, sheetUrl: await toModelRef(target.sheetPath, { onEvent }) },
+      threshold: settings.get('consistencyThreshold') ?? 75,
+      onEvent: (ev) => onEvent?.(ev.type === 'verify' ? { ...ev, character: `${ev.character}（末帧）` } : ev)
+    });
+    if (verdict.skipped) return null;
+    return {
+      score: verdict.score,
+      pass: verdict.pass,
+      issues: verdict.issues || [],
+      character: target.name,
+      framePath,
+      at: new Date().toISOString()
+    };
+  } catch (err) {
+    onEvent?.({ type: 'note', message: `末帧复核没跑成：${err.message}` });
+    return null;
+  }
+}
+
 export async function generateVideos(projectId, { only = null, chapterId = null, regenerate = false, onEvent } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
@@ -857,7 +962,9 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
           ? { images: [], labels: [] }
           : consistency.collectReferences(project.bible, shot);
 
-      const videoPrompt = consistency.assembleVideoPrompt(project.bible, shot);
+      // 上下文：接在谁后面、要交给谁。缺了它，每一镜都会被当成独立短片来演。
+      const ctx = await videoContextFor(project, shot, { onEvent });
+      const videoPrompt = ctx.videoPrompt;
       onEvent?.({ type: 'shot', shotId: shot.id, status: 'running', message: `提交任务：${videoPrompt.slice(0, 60)}…` });
 
       const video = await adapters.generateVideo({
@@ -865,6 +972,7 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
         model: r.video.model,
         prompt: videoPrompt,
         firstFrameUrl: firstFrame,
+        lastFrameUrl: ctx.lastFrameUrl,
         refImages: bibleRefs.images,
         duration: shot.duration,
         aspectRatio: project.aspectRatio || null,
@@ -883,12 +991,26 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
           t.videoModelUsed = `${r.video.provider} / ${r.video.model}`;
           t.videoResolution = video.resolution || null;
           t.videoRefs = bibleRefs.labels;
+          t.link = ctx.link;
+          // 末帧锁没锁上要如实记：界面上标着"连续动作"却其实没锁，
+          // 用户会一直以为这两镜是无缝的，直到把成片放出来
+          t.endFrameChained = Boolean(ctx.lastFrameUrl);
           // 厂商档位可能把 4s 顶成 5s。如实记下来，别让界面上的总时长撒谎。
           t.actualDuration = video.actualDuration || shot.duration;
           t.status = 'video-ready';
         }
         return p;
       });
+
+      // 末帧复核：漂移都发生在后半段，只验首帧等于没验
+      const tail = await verifyVideoTail(projectId, shot, dest, { onEvent });
+      if (tail) {
+        store.update(projectId, (p) => {
+          const t = p.shots.find((s) => s.id === shot.id);
+          if (t) t.videoConsistency = tail;
+          return p;
+        });
+      }
       onEvent?.({ type: 'shot', shotId: shot.id, status: 'done' });
     } catch (err) {
       // 报错里带了 task_id 的话记下来：任务多半在厂商那边跑完了，

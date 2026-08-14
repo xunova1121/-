@@ -154,6 +154,27 @@ export async function concat(segments, outputPath, { audioPath, audioTracks, tri
   return outputPath;
 }
 
+/**
+ * 从一段视频里抠一帧出来。
+ *
+ * 用途是末帧复核：视频的人设漂移几乎都发生在**后半段** ——
+ * 首帧是我们自己给的，当然像；模型往后推五到十秒，脸才开始飘。
+ * 只看首帧等于没看，所以默认抠的是最后一帧。
+ *
+ * `-sseof -0.2` 是从**结尾往回**定位，比先探时长再 seek 少一次调用，
+ * 而且对时长元数据不准的文件也管用（模型出的 mp4 时长经常和档位差一点）。
+ */
+export async function grabFrame(videoPath, outPath, { at = 'end' } = {}) {
+  if (!fs.existsSync(videoPath)) throw new Error(`视频不存在：${videoPath}`);
+  const args =
+    at === 'end'
+      ? ['-y', '-sseof', '-0.2', '-i', videoPath, '-frames:v', '1', '-q:v', '3', '-update', '1', outPath]
+      : ['-y', '-ss', String(Number(at) || 0), '-i', videoPath, '-frames:v', '1', '-q:v', '3', '-update', '1', outPath];
+  await run(args);
+  if (!fs.existsSync(outPath)) throw new Error('FFmpeg 没有抠出帧');
+  return outPath;
+}
+
 export function status() {
   return locate({ refresh: true });
 }

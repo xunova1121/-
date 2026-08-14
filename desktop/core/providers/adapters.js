@@ -340,6 +340,9 @@ export async function generateVideo({
   model,
   prompt,
   firstFrameUrl = null,
+  // 末帧：下一镜那张已经审过的图。给了它，这一段片子就会从 A 长到 B，
+  // 切到下一镜时画面完全对齐 —— 衔接里唯一能做到"无缝"的一招。见 pipeline/continuity.js。
+  lastFrameUrl = null,
   refImages = [],
   duration = 5,
   resolution = null,
@@ -379,13 +382,33 @@ export async function generateVideo({
    * 并且明确告诉用户被截掉了几张、一致性改由什么承担 ——
    * 悄悄丢掉会让人以为参考图生效了，悄悄全发出去则会让整步一直失败。
    */
+  /**
+   * 末帧要不要发。
+   *
+   * 不是每家都收。**收不了的时候必须说出来**，不能默默降级成普通 i2v ——
+   * 用户看到界面上标着"连续动作"，就会以为这两镜真的接上了，
+   * 直到把成片放出来才发现中间有一跳，那时候钱已经花完了。
+   */
+  const endFrame = lastFrameUrl && provider.videoDefaults?.endFrame ? lastFrameUrl : null;
+  if (lastFrameUrl && !endFrame) {
+    onEvent?.({
+      type: 'note',
+      message:
+        `${provider.name} 这一步不收末帧图，本镜按普通图生视频出 —— ` +
+        '两镜之间会是硬切，不是无缝衔接。要无缝的话换一家收末帧的（可灵、Vidu、方舟）。'
+    });
+  }
+
   const maxImages = provider.videoDefaults?.maxImages ?? 4;
-  const allImages = [firstFrameUrl, ...refImages].filter(Boolean);
-  const images = allImages.slice(0, maxImages);
+  // 末帧占一个名额，而且**优先于设定集参考图**：它是这两镜能不能对上的唯一保证，
+  // 参考图只是让人别变样，后者可以靠首帧和提示词兜。
+  const allImages = [firstFrameUrl, ...(endFrame ? [endFrame] : []), ...refImages].filter(Boolean);
+  const capacity = endFrame ? Math.max(maxImages, provider.videoDefaults?.maxImagesWithEndFrame ?? maxImages) : maxImages;
+  const images = allImages.slice(0, capacity);
   if (allImages.length > images.length) {
     onEvent?.({
       type: 'note',
-      message: `${provider.name} 这一步最多收 ${maxImages} 张图，已带上首帧，另外 ${
+      message: `${provider.name} 这一步最多收 ${capacity} 张图，已带上首帧${endFrame ? '和末帧' : ''}，另外 ${
         allImages.length - images.length
       } 张设定集参考图这次不发（${provider.videoDefaults?.refNote || '一致性由首帧图和提示词里的冻结设定承担'}）`
     });
@@ -468,6 +491,8 @@ export async function generateVideo({
         body: {
           model_name: model,
           image: images[0],
+          // 可灵管末帧叫 image_tail
+          ...(endFrame ? { image_tail: endFrame } : {}),
           prompt,
           duration: String(actualDuration), // 可灵收的是字符串，不是数字
           mode: 'std'
@@ -479,10 +504,13 @@ export async function generateVideo({
       spec = {
         url: useRef
           ? endpoint(provider, 'r2v', '{{baseUrl}}/reference2video')
-          : endpoint(provider, 'i2v', '{{baseUrl}}/img2video'),
+          : endFrame
+            // Vidu 的首尾帧是另一条接口，images 里第一张是首帧、第二张是尾帧
+            ? endpoint(provider, 'se2v', '{{baseUrl}}/start-end2video')
+            : endpoint(provider, 'i2v', '{{baseUrl}}/img2video'),
         body: {
           model,
-          images: useRef ? images : [images[0]],
+          images: useRef ? images : endFrame ? [images[0], endFrame] : [images[0]],
           prompt,
           duration: actualDuration,
           aspect_ratio: finalRatio
@@ -494,8 +522,15 @@ export async function generateVideo({
       // 火山方舟 Seedance：参数不走独立字段，而是拼在 text 里的 --key value
       const flags = `--resolution ${finalResolution.toLowerCase()} --dur ${actualDuration} --ratio ${finalRatio}`;
       const content = [{ type: 'text', text: `${prompt} ${flags}` }];
-      for (const img of images) {
-        content.push({ type: 'image_url', image_url: { url: img } });
+      if (endFrame) {
+        // 方舟的首尾帧模式：两张图都要带 role 标明身份，不带的话会被当成两张参考图，
+        // 而 Seedance 只收一张参考图 —— 于是整个任务直接提交失败
+        content.push({ type: 'image_url', image_url: { url: images[0] }, role: 'first_frame' });
+        content.push({ type: 'image_url', image_url: { url: endFrame }, role: 'last_frame' });
+      } else {
+        for (const img of images) {
+          content.push({ type: 'image_url', image_url: { url: img } });
+        }
       }
       spec = {
         url: endpoint(provider, 'videoTasks', '{{baseUrl}}/contents/generations/tasks'),

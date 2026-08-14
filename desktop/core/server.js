@@ -23,6 +23,7 @@ import * as ffmpeg from './ffmpeg.js';
 import * as providers from './providers/index.js';
 import * as adapters from './providers/adapters.js';
 import * as studio from './pipeline/studio.js';
+import * as continuity from './pipeline/continuity.js';
 import * as preflight from './preflight.js';
 import * as styles from './styles.js';
 import * as duration from './duration.js';
@@ -214,6 +215,12 @@ async function handleApi(req, res, url) {
         hint: store.STAGE_HINTS[id] || ''
       })),
       durationPresets: duration.DURATION_PRESETS,
+      // 镜与镜的衔接关系。界面要按它给下拉，也要按它解释"这两镜到底接不接得上"
+      links: continuity.LINKS.map((id) => ({
+        id,
+        label: continuity.LINK_LABELS[id],
+        hint: continuity.LINK_HINTS[id]
+      })),
       // 厂商只接受固定档位（5/10 秒之类）。提前告诉界面，
       // 免得用户设了 4 秒、出来 5 秒，事后才在日志里看到一句解释
       videoDurations: adapters.routedVideoDurations(),
