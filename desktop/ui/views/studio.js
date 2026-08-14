@@ -1080,6 +1080,18 @@ export default {
                 sc.video && shot.videoPath && shot.link === 'continuous' && shot.endFrameChained === false
                   ? h('span', { class: 'badge warn', title: '这一家不收末帧图，这段是按普通图生视频出的，和下一镜之间是硬切' }, '末帧没锁上')
                   : null,
+                // 首帧核对：厂商到底有没有吃我们给的那张分镜图。
+                // 对上了不用喊（那是应该的），对不上必须喊 —— 那意味着这一段
+                // 从第一帧起就和分镜没关系了，再怎么调提示词都白搭
+                sc.video && shot.headMatch?.verdict === 'mismatch'
+                  ? h('span', {
+                      class: 'badge warn',
+                      title:
+                        `视频第一帧和这一镜的图只有 ${shot.headMatch.similarity}% 像。` +
+                        '这家多半没吃我们给的首帧图（提示词和图打架时自己重画了，或者退化成了文生视频）。' +
+                        '换一家，或者把提示词里和画面冲突的话去掉再重出。'
+                    }, '首帧没吃')
+                  : null,
                 // 末帧复核：视频的人设漂移几乎都在后半段，首帧永远是像的
                 shot.videoConsistency
                   ? h('span', {
@@ -1145,6 +1157,14 @@ export default {
                   sc.video && shot.videoModelUsed
                     ? h('div', { class: 'shot-used' },
                         `出视频用了 ${shot.videoModelUsed}${shot.videoResolution ? ` · ${shot.videoResolution}` : ''}`)
+                    : null,
+                  // 对上了也把数字摆出来：这是个免费指标，看得见才建立得起信任
+                  sc.video && shot.headMatch
+                    ? h('div', { class: 'shot-used' },
+                        shot.headMatch.verdict === 'inconclusive'
+                          ? '首帧核对：画面太平（大片纯色），比不出结论'
+                          : `首帧核对：和这一镜的图 ${shot.headMatch.similarity}% 像` +
+                            `（${shot.headMatch.ok ? '厂商吃了这张首帧' : '⚠ 多半没吃'}）`)
                     : null,
                   // 任务提交成功但查不到状态时，把 task_id 亮出来
                   sc.video && shot.pendingTask

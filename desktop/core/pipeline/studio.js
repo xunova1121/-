@@ -18,6 +18,7 @@ import { authHeadersForUrl } from '../providers/index.js';
 import * as consistency from './consistency.js';
 import * as continuity from './continuity.js';
 import * as ffmpeg from '../ffmpeg.js';
+import * as imghash from '../imghash.js';
 import { safeFileName } from '../paths.js';
 import * as chapters from './chapters.js';
 import * as duration from '../duration.js';
@@ -738,11 +739,15 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
     return p;
   });
 
+  const head = await verifyVideoHead(shot, dest, { onEvent });
   const tail = await verifyVideoTail(projectId, shot, dest, { onEvent });
-  if (tail) {
+  if (head || tail) {
     store.update(projectId, (p) => {
       const t = p.shots.find((s) => s.id === shotId);
-      if (t) t.videoConsistency = tail;
+      if (t) {
+        if (head) t.headMatch = head;
+        if (tail) t.videoConsistency = tail;
+      }
       return p;
     });
   }
@@ -967,6 +972,39 @@ async function videoContextFor(project, shot, { onEvent } = {}) {
  *
  * 没装 FFmpeg 就跳过（如实说一声），不拦着流水线往下走。
  */
+/**
+ * 首帧核对：这段视频的第一帧，到底是不是我们给的那张分镜图。
+ *
+ * 图生视频名义上是"以这张图为第一帧往下演"，实际不总是这样：
+ * 有的厂商在提示词和图打架时会自己重画第一帧；有的在参数不对时
+ * 悄悄退化成文生视频，只把图当风格参考。两种情况的表现都是
+ * **片子和分镜图对不上**，而任务本身是"成功"的 ——
+ * 不比一比，你只会觉得"这家模型不行"，不会知道它压根没用你那张图。
+ *
+ * 这一层是**免费的**：走 FFmpeg 抠帧 + 感知哈希，不调模型、不花钱、
+ * 结果可复现。所以它不受「一致性复核」开关控制，只要有 FFmpeg 就做。
+ */
+async function verifyVideoHead(shot, videoPath, { onEvent } = {}) {
+  if (!shot.imagePath || !fs.existsSync(shot.imagePath)) return null;
+  try {
+    const r = await imghash.compareFirstFrame(videoPath, shot.imagePath);
+    if (!r) return null; // 没装 FFmpeg：这是"没检查"，不是"不匹配"
+    const message =
+      r.verdict === 'ok'
+        ? `首帧核对通过：这段视频确实是从第 ${shot.index} 镜那张图开始的（相似度 ${r.similarity}%）`
+        : r.verdict === 'mismatch'
+          ? `⚠ 首帧对不上（相似度只有 ${r.similarity}%）—— 这家多半没吃我们给的首帧图，` +
+            '要么在提示词和图打架时自己重画了，要么退化成了文生视频。' +
+            '换一家、或者把提示词里和画面冲突的话去掉再重出。'
+          : '首帧核对：这一镜画面太平（大片纯色），比不出结论 —— 不下判断，免得给个反的答案';
+    onEvent?.({ type: 'note', message });
+    return r;
+  } catch (err) {
+    onEvent?.({ type: 'note', message: `首帧核对没跑成：${err.message}` });
+    return null;
+  }
+}
+
 async function verifyVideoTail(projectId, shot, videoPath, { onEvent } = {}) {
   if (settings.get('consistencyVerify') === false) return null;
   const project = store.read(projectId);
@@ -1072,12 +1110,17 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
         return p;
       });
 
-      // 末帧复核：漂移都发生在后半段，只验首帧等于没验
+      // 两头都验：首帧看"厂商有没有吃我们那张图"（免费），
+      // 末帧看"演到最后人还是不是那个人"（要一次多模态调用）
+      const head = await verifyVideoHead(shot, dest, { onEvent });
       const tail = await verifyVideoTail(projectId, shot, dest, { onEvent });
-      if (tail) {
+      if (head || tail) {
         store.update(projectId, (p) => {
           const t = p.shots.find((s) => s.id === shot.id);
-          if (t) t.videoConsistency = tail;
+          if (t) {
+            if (head) t.headMatch = head;
+            if (tail) t.videoConsistency = tail;
+          }
           return p;
         });
       }

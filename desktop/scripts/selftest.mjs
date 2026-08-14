@@ -931,6 +931,91 @@ section('分镜文案可以手改（改一行字比重跑十次便宜）');
   store.remove(edited.id);
 }
 
+// 图生视频名义上是"以这张图为第一帧往下演"，实际不总是这样：
+// 有的厂商在提示词和图打架时自己重画第一帧，有的悄悄退化成文生视频。
+// 两种情况任务都"成功"，表现却是片子和分镜图对不上 —— 不比一比根本发现不了。
+section('首帧核对（免费，不调模型）');
+{
+  const imghash = await import('../core/imghash.js');
+
+  // 9×8 灰度：左半黑右半白。相邻像素的大小关系是确定的，哈希也就是确定的。
+  const gray = (fn) => Buffer.from(Array.from({ length: 72 }, (_, i) => fn(i % 9, Math.floor(i / 9))));
+  // 有纹理的画面：真实镜头图长这样，dHash 也只有在这种图上才有话可说
+  const textured = (seed) => gray((x, y) => (Math.imul(x + 1 + seed, y + 7 + seed * 31) * 2654435761) % 256);
+  const hA = imghash.dHashFromGray(textured(0));
+  check('同样的像素给同样的哈希（可复现，才能当阈值用）',
+    hA === imghash.dHashFromGray(textured(0)), hA);
+  check('哈希是 16 位十六进制（64 bit）', /^[0-9a-f]{16}$/.test(hA), hA);
+  // 整体压暗：dHash 比的是"相邻谁更亮"，这种变化不该影响结果 ——
+  // 视频编码后整体偏暗一点点是常态，用均值哈希会把这种无害差异算成不匹配
+  const dimmed = Buffer.from(textured(0).map((v) => Math.round(v * 0.6)));
+  check('整体压暗不影响结果（dHash 比的是相邻谁更亮，不是绝对亮度）',
+    imghash.hamming(hA, imghash.dHashFromGray(dimmed)) === 0,
+    String(imghash.hamming(hA, imghash.dHashFromGray(dimmed))));
+  check('换一张画面就认得出不一样（这才是"厂商没吃首帧"的样子）',
+    imghash.hamming(hA, imghash.dHashFromGray(textured(5))) > imghash.MATCH_THRESHOLD,
+    String(imghash.hamming(hA, imghash.dHashFromGray(textured(5)))));
+  check('长度不够时直接报错，不静默给个错哈希',
+    (() => { try { imghash.dHashFromGray(Buffer.alloc(10)); return false; } catch { return true; } })());
+
+  /**
+   * 纯色画面测不准，而且是**危险的那种不准**：
+   * 大片纯色算出来的哈希几乎全是 0，两个全 0 的哈希距离也是 0 ——
+   * 看上去像"完全一致"，实际是"没信息"。夜戏、纯黑开场、白底道具图都会踩到。
+   */
+  const flat = gray(() => 20);
+  check('纯色画面被判为没有信息量，不拿来下结论',
+    !imghash.informative(imghash.dHashFromGray(flat)), imghash.dHashFromGray(flat));
+  check('有纹理的画面才算数', imghash.informative(hA), `${imghash.bitCount(hA)} 个 1`);
+  check('相似度好懂：一模一样就是 100%', imghash.similarity(0) === 100 && imghash.similarity(64) === 0);
+  check('比不了的时候是无穷大，不是 0（0 会被当成"完全一致"）',
+    imghash.hamming('abc', null) === Number.POSITIVE_INFINITY);
+
+  // 没装 FFmpeg 时必须回 null——"没检查"和"检查了不匹配"是两回事，
+  // 混为一谈就会在没装 FFmpeg 的机器上把每一镜都误报成"首帧没吃"
+  const ffmpegMod = await import('../core/ffmpeg.js');
+  if (!ffmpegMod.locate({ refresh: true }).available) {
+    check('没装 FFmpeg 时回 null（这是"没检查"，不是"不匹配"）',
+      (await imghash.compareFirstFrame('a.mp4', 'b.png')) === null);
+  } else {
+    /**
+     * 这台机器上有 FFmpeg，那就真的跑一遍 —— 上面那些都是纯计算，
+     * 证明不了**发给 FFmpeg 的那几行参数是对的**。而参数写错的表现是
+     * "每一镜都报首帧没吃"，比不做还糟。
+     */
+    const dir = path.join(SANDBOX, 'imghash');
+    fs.mkdirSync(dir, { recursive: true });
+    const F = (n) => path.join(dir, n);
+    try {
+      // testsrc / testsrc2 是 FFmpeg 自带的测试图，两张画面完全不同，且可复现
+      await ffmpegMod.run(['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=320x180:rate=1',
+        '-frames:v', '1', F('shot.png')]);
+      await ffmpegMod.run(['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=1',
+        '-frames:v', '1', F('other.png')]);
+      await ffmpegMod.run(['-y', '-v', 'error', '-loop', '1', '-i', F('shot.png'), '-t', '1', '-r', '8',
+        '-pix_fmt', 'yuv420p', F('good.mp4')]);
+      await ffmpegMod.run(['-y', '-v', 'error', '-loop', '1', '-i', F('other.png'), '-t', '1', '-r', '8',
+        '-pix_fmt', 'yuv420p', F('bad.mp4')]);
+
+      const good = await imghash.compareFirstFrame(F('good.mp4'), F('shot.png'));
+      check('真跑一遍：首帧就是那张图时判 ok（编码带来的差异不该算不匹配）',
+        good?.verdict === 'ok', JSON.stringify(good && { v: good.verdict, d: good.distance }));
+
+      const bad = await imghash.compareFirstFrame(F('bad.mp4'), F('shot.png'));
+      check('真跑一遍：换成另一张画面就判 mismatch（这就是"厂商没吃首帧"）',
+        bad?.verdict === 'mismatch', JSON.stringify(bad && { v: bad.verdict, d: bad.distance }));
+      check('两者拉得开，阈值不是卡在噪声上',
+        bad.distance - good.distance > imghash.MATCH_THRESHOLD, `${good.distance} → ${bad.distance}`);
+
+      // 末帧复核那条路也验一下：抠帧的参数和这里不是同一组
+      await ffmpegMod.grabFrame(F('good.mp4'), F('tail.png'), { at: 'end' });
+      check('末帧抠得出来（末帧复核靠它）', fs.existsSync(F('tail.png')));
+    } catch (err) {
+      check('装了 FFmpeg 就该能跑通首帧核对', false, err.message);
+    }
+  }
+}
+
 section('画幅是每部片子自己的事，不是全局开关');
 {
   const vertical = store.create({ title: '竖屏短剧', aspectRatio: '9:16' });
@@ -1873,10 +1958,13 @@ section('打包配置');
   check('找 ffmpeg 时不止看一个目录', paths.BIN_DIRS.length >= 2, JSON.stringify(paths.BIN_DIRS));
   // 首选必须是数据目录：它是唯一**任何情况下都可写**的地方。
   // 安装目录可能在 Program Files 下，普通用户写不进去。
+  // 环境变量显式指定过就以它为准（便携版会这么用），否则首选必须是数据目录
+  const expectedFirst = process.env.FUTUREDREAM_BIN_DIR
+    ? path.resolve(process.env.FUTUREDREAM_BIN_DIR)
+    : paths.USER_BIN_DIR;
   check('首选的存放位置在数据目录里（安装目录可能只读）',
-    paths.BIN_DIRS[0] === paths.USER_BIN_DIR
-      && paths.USER_BIN_DIR.startsWith(paths.DATA_DIR),
-    `${paths.BIN_DIRS[0]}`);
+    paths.BIN_DIRS[0] === expectedFirst && paths.USER_BIN_DIR.startsWith(paths.DATA_DIR),
+    `${paths.BIN_DIRS[0]} / 期望 ${expectedFirst}`);
   check('这个目录启动时就建好了，不用用户自己先造一个',
     fs.existsSync(paths.USER_BIN_DIR), paths.USER_BIN_DIR);
   check('asar 包内的路径不会成为唯一候选（打包后那是个虚拟路径）',

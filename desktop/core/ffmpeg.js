@@ -72,6 +72,34 @@ function spawnSync(cmd, args) {
   return { ok: r.status === 0, stdout: r.stdout || '', stderr: r.stderr || '' };
 }
 
+/**
+ * 跑一次 FFmpeg 并把 **stdout 当二进制收回来**。
+ *
+ * run() 只收 stderr（进度在那儿），这条专门用来把像素数据直接读进内存：
+ * 抠一帧再存成文件再读回来是三次磁盘往返，而我们只要 72 个字节。
+ */
+export function runCapture(args) {
+  const bin = locate();
+  if (!bin.available) return Promise.reject(new Error(bin.hint));
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin.path, args, { windowsHide: true });
+    const out = [];
+    let stderr = '';
+    child.stdout.on('data', (d) => out.push(d));
+    child.stderr.on('data', (d) => {
+      stderr += d.toString();
+      if (stderr.length > 40000) stderr = stderr.slice(-20000);
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      const buf = Buffer.concat(out);
+      // FFmpeg 有时会以非 0 退出但该给的数据已经给全了（管道被提前关掉）
+      if (buf.length) return resolve(buf);
+      reject(new Error(`FFmpeg 退出码 ${code}：${stderr.slice(-600)}`));
+    });
+  });
+}
+
 export function run(args, { onProgress, cwd } = {}) {
   const bin = locate();
   if (!bin.available) {
