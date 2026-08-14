@@ -286,15 +286,45 @@ export default {
             h('div', { class: 'chapter-preview' },
               chapterInfo.advice.preview.map((c) =>
                 h('span', { class: 'badge' }, `${c.title}（${c.chars} 字）`))),
-            h('div', { class: 'inline', style: 'margin-top:12px' },
+            h('div', { class: 'inline', style: 'margin-top:12px;flex-wrap:wrap' },
               h('button', {
-                class: 'btn primary',
+                class: 'btn',
+                title: '按段落攒到目标字数就切。免费、瞬间、结果可复现',
                 onclick: async () => {
                   await api(`/projects/${project.id}/chapters/split`, { method: 'POST', body: {} });
-                  toast('已分章', 'ok');
+                  toast('已按字数分章', 'ok');
                   rerender();
                 }
-              }, '切分章节'))
+              }, '按字数切（免费）'),
+              // 按字数切不懂剧情，可能把一场戏从中间劈开。
+              // 让模型按情节单元切要花钱，但第一章结尾不会莫名其妙。
+              (() => {
+                const status = h('span', { class: 'field-hint', style: 'margin:0' });
+                const btn = h('button', {
+                  class: 'btn primary',
+                  title: '模型按情节单元切：时间跳跃、地点转换、视角切换。会真的调用模型，按你的计费方式扣费',
+                  onclick: async () => {
+                    if (!confirm('让模型读一遍全文来分章？长篇会分成好几段问，每段一次调用，按你的计费方式扣费。')) return;
+                    btn.disabled = true;
+                    let err = null;
+                    try {
+                      await stream(`/projects/${project.id}/chapters/smart-split`, {}, (ev) => {
+                        if (ev.type === 'note' || ev.type === 'stage') status.textContent = ev.message || '';
+                        if (ev.type === 'error') err = ev.message;
+                      });
+                      if (err) throw new Error(err);
+                      toast('模型已按情节分章', 'ok');
+                      rerender();
+                    } catch (e) {
+                      status.textContent = e.message;
+                      toast(e.message, 'err');
+                    } finally {
+                      btn.disabled = false;
+                    }
+                  }
+                }, '让模型按情节切');
+                return [btn, status];
+              })())
           );
           return;
         }
@@ -307,6 +337,8 @@ export default {
             h('div', { class: `chapter-row ${ch.stageStatus.script === 'done' ? 'done' : ''}` },
               h('div', { class: 'chapter-main' },
                 h('div', { class: 'chapter-title' }, ch.title),
+                // 模型分章时顺带给的梗概。按字数切没有这个，那就不显示
+                ch.summary ? h('div', { class: 'chapter-meta' }, ch.summary) : null,
                 h('div', { class: 'chapter-meta' },
                   `${ch.chars} 字`,
                   shots.length ? ` · ${shots.length} 镜` : ' · 未拆分镜',

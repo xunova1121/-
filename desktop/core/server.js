@@ -667,6 +667,19 @@ async function handleApi(req, res, url, { lan = false } = {}) {
         const opts = await readBody(req);
         return json(res, 200, studio.splitChapters(b, opts));
       }
+      // 让模型按情节切。长篇要滑窗问好几轮，所以走流式，进度看得见
+      if (d === 'smart-split' && method === 'POST') {
+        const opts = await readBody(req);
+        const stream = ndjson(res);
+        req.on('close', () => stream.end());
+        try {
+          const project = await studio.smartSplitChapters(b, { ...opts, onEvent: (ev) => stream.send(ev) });
+          stream.end({ type: 'finished', project });
+        } catch (err) {
+          stream.end({ type: 'error', message: err.message });
+        }
+        return undefined;
+      }
       if (method === 'DELETE') return json(res, 200, studio.clearChapters(b));
     }
 

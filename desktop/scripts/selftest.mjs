@@ -313,6 +313,15 @@ const upstream = http.createServer((req, res) => {
         content = JSON.stringify(BIBLE_REPLY);
       } else if (system.includes('分镜导演')) {
         content = JSON.stringify(SHOTS_REPLY);
+      } else if (system.includes('小说编辑')) {
+        // 分章：回原文里真实存在的片段当锚句。
+        // 模型要是"顺手润色"了引文，锚点就定位不到 —— 那条路单独有检查。
+        const user = String(body.messages?.[1]?.content || '');
+        const breaks = [];
+        for (const mark of ['乙段开始', '丙段开始']) {
+          if (user.includes(mark)) breaks.push({ anchor: mark, title: `${mark}的一章`, summary: '梗概' });
+        }
+        content = JSON.stringify({ breaks });
       } else if (system.includes('质检员')) {
         upstream.verifyCalls = (upstream.verifyCalls || 0) + 1;
         // 头两次判不合格，逼引擎走重试分支；第三次放行
@@ -1261,6 +1270,84 @@ check('每章各自有阶段状态', split.chapters.every((c) => c.stageStatus?.
 
 const shortAdvice = await (await fetch(`${appUrl}/api/projects/${project.id}/chapters`)).json();
 check('短片不建议分章', shortAdvice.advice?.suggested === false, `${shortAdvice.advice?.chars} 字`);
+
+/**
+ * 让模型按情节切。
+ *
+ * 按字数切不懂剧情，可能把一场戏从中间劈开。这条路花钱，但切在情节单元上。
+ * 最关键的一手是**让模型回原文片段而不是字符位置** —— 模型数不准字数。
+ */
+section('让模型按情节分章');
+{
+  const chaptersMod = await import('../core/pipeline/chapters.js');
+
+  // 纯函数部分：不依赖模型，所以能单独测
+  const text = `甲段正文${'甲'.repeat(500)}
+
+乙段开始，天亮了${'乙'.repeat(500)}
+
+丙段开始，三日后${'丙'.repeat(500)}`;
+  const cut = chaptersMod.splitAtAnchors(text, [
+    { anchor: '乙段开始', title: '天亮', summary: '天亮了' },
+    { anchor: '丙段开始', title: '三日后', summary: '过了三天' }
+  ], { minChars: 100 });
+  check('按锚句切出三章', cut.length === 3, JSON.stringify(cut.map((c) => c.title)));
+  check('第一章是锚句之前那段', cut[0].script.startsWith('甲段正文'), cut[0].script.slice(0, 12));
+  check('锚句成为下一章的开头（不是被吃掉）', cut[1].script.startsWith('乙段开始'), cut[1].script.slice(0, 12));
+  check('模型给的标题和梗概被保留', cut[1].title === '天亮' && cut[1].summary === '天亮了');
+
+  // 模型"顺手润色"引文是常见毛病，定位不到就该丢掉而不是猜一个位置
+  const bad = chaptersMod.splitAtAnchors(text, [{ anchor: '这句原文里没有', title: 'x' }], { minChars: 100 });
+  check('锚句在原文里找不到就丢掉（与其猜位置，不如少切一刀）', bad.length === 0);
+  check('太短的锚句不用（会命中一堆无关位置）',
+    chaptersMod.splitAtAnchors(text, [{ anchor: '乙', title: 'x' }], { minChars: 100 }).length === 0);
+
+  // 重叠窗口会把同一个断点报两次
+  const dup = chaptersMod.splitAtAnchors(text, [
+    { anchor: '乙段开始', title: 'A' }, { anchor: '乙段开始，天亮了', title: 'A2' }
+  ], { minChars: 100 });
+  check('重叠窗口报重的断点只切一次', dup.length === 2, JSON.stringify(dup.map((c) => c.title)));
+
+  // 滑窗：断点落在窗口边界上时，两边都只看到半截 —— 所以必须重叠
+  const wins = chaptersMod.windowsOf('x'.repeat(20000), { size: 8000, overlap: 800 });
+  check('长文被切成多个窗口', wins.length >= 3, `${wins.length} 个`);
+  check('窗口之间有重叠（断点正好在边界上时才不会两边都看半截）',
+    wins[1].start < wins[0].end, `${wins[0].end} vs ${wins[1].start}`);
+  check('窗口覆盖到全文结尾', wins.at(-1).end === 20000);
+  check('短文只出一个窗口', chaptersMod.windowsOf('短', { size: 8000 }).length === 1);
+
+  // 端到端：打桩模型按上面的规则回锚句
+  const novel = await (
+    await fetch(`${appUrl}/api/projects`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '模型分章自检' })
+    })
+  ).json();
+  await fetch(`${appUrl}/api/projects/${novel.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ script: text })
+  });
+  // targetChars 同时决定"两个断点挨多近就算重复"（取 1/3）。
+  // 这段测试文本每段只有 500 字，用默认的 3000 会把第二个断点当成重复丢掉 ——
+  // 那是对的行为，所以这里按文本的实际尺度给个小一点的值。
+  const evs = await ndjson(`/projects/${novel.id}/chapters/smart-split`, { targetChars: 600 });
+  const done = evs.find((e) => e.type === 'finished')?.project;
+  check('端到端跑通，模型给的断点真的切出了章节',
+    done?.chapters?.length === 3, JSON.stringify(done?.chapters?.map((c) => c.title)));
+  check('章节带上了模型给的标题', /乙段开始的一章/.test(done?.chapters?.[1]?.title || ''), done?.chapters?.[1]?.title);
+  check('进度看得见（长篇要问好几轮，不能一片空白）',
+    evs.some((e) => e.type === 'note' && /段/.test(e.message || '')),
+    JSON.stringify(evs.filter((e) => e.type === 'note').map((e) => e.message).slice(0, 3)));
+
+  // 一个锚点都定位不到时，要说清楚为什么，而不是抛一个看不懂的错
+  await fetch(`${appUrl}/api/projects/${novel.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ script: '一段没有任何断点标记的正文'.repeat(50) })
+  });
+  const none = await ndjson(`/projects/${novel.id}/chapters/smart-split`, { targetChars: 600 });
+  check('切不出来时给的是人话，还指了另一条路',
+    /按字数切/.test(none.find((e) => e.type === 'error')?.message || ''), JSON.stringify(none.slice(-1)));
+}
 
 section('视频提示词装配');
 // 早期版本这里只发「运镜 + 镜头语言」，模型只好自己脑补内容，片段和剧本对不上。

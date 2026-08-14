@@ -467,14 +467,110 @@ export function updateShot(projectId, shotId, patch = {}) {
  * 把长剧本切成章节。设定集不受影响 —— 它挂在项目上，全片共享。
  * 已经拆过分镜的章节会尽量保留状态（按标题匹配），避免重切一次前功尽弃。
  */
-export function splitChapters(projectId, { targetChars } = {}) {
+const CHAPTER_PROMPT = `你是小说编辑，正在为一部要改编成影片的作品划分章节。
+
+下面给你一段小说原文。找出其中**适合作为新一章开头**的位置。
+
+判断依据（按重要性排序）：
+- 时间跳跃（"三日后"、"次年春"）
+- 地点转换（一场戏结束，人物到了另一个地方）
+- 视角或叙事线切换
+- 一个完整情节单元的结束（冲突解决、悬念抛出）
+
+不要机械地按长度切。一场连续的戏**不能**从中间劈开。
+一般每 {{TARGET}} 字左右一章比较合适，但情节说了算，长一点短一点都正常。
+
+严格只输出 JSON，不要解释、不要代码块：
+
+{
+  "breaks": [
+    {
+      "anchor": "新一章的第一句原文，逐字照抄 10~25 个字，必须能在原文里一字不差地找到",
+      "title": "这一章的标题（6~14 字，要具体，别写'第二章'）",
+      "summary": "一句话梗概"
+    }
+  ]
+}
+
+要点：
+- **anchor 必须是原文里一字不差的片段**，不要润色、不要改标点，否则会被丢弃；
+- 只报"新一章从这里开始"的位置，不要把整段原文的开头也算进去；
+- 这段原文里没有合适的断点时，breaks 给空数组。`;
+
+/**
+ * 让模型分章。
+ *
+ * 按字数切（autoSplit）的好处是免费、瞬间、可复现，坏处是**它不懂剧情** ——
+ * 可能把一场戏从中间劈开，于是第一章结尾莫名其妙，第二章开头没头没脑。
+ *
+ * 两条路并存而不是替换：先用免费那条跑通全流程，觉得切得不好再花一次钱让模型切。
+ *
+ * 长篇塞不进上下文，所以**滑窗**：每次给模型一段带重叠的文本，
+ * 只问"这一段里哪些位置适合断章"，再把各窗口的答案拼起来。
+ * 重叠是必须的 —— 断点正好落在窗口边界上时，两边都只看到半截。
+ *
+ * 关键的一手是**让模型回原文片段而不是字符位置**：模型数不准字数，
+ * 报出来的偏移基本是错的；让它引一句原文，我们自己 indexOf 就精确了。
+ * 把模型不擅长的事留给代码。
+ */
+export async function smartSplitChapters(projectId, { targetChars = 3000, onEvent } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
-  if (!project.script?.trim()) throw new Error('剧本是空的');
+  const script = project.script?.trim();
+  if (!script) throw new Error('剧本是空的');
 
-  const fresh = chapters.autoSplit(project.script, { targetChars });
-  if (!fresh.length) throw new Error('没能切出章节');
+  const r = routing();
+  const windows = chapters.windowsOf(script, { size: 8000, overlap: 800 });
+  onEvent?.({
+    type: 'stage',
+    stage: 'script',
+    status: 'running',
+    message: `全文 ${script.length} 字，分 ${windows.length} 段交给模型判断断章点…`
+  });
 
+  const anchors = [];
+  for (const [i, win] of windows.entries()) {
+    onEvent?.({ type: 'note', message: `第 ${i + 1}/${windows.length} 段（${win.start}~${win.end} 字）…` });
+    try {
+      const { text } = await adapters.chat({
+        providerId: r.chat.provider,
+        model: r.chat.model,
+        system: CHAPTER_PROMPT.replace('{{TARGET}}', String(targetChars)),
+        user: win.text,
+        temperature: 0.2,
+        jsonMode: true,
+        label: `分章 ${i + 1}/${windows.length}`
+      });
+      const parsed = consistency.extractJSON(text);
+      const got = Array.isArray(parsed.breaks) ? parsed.breaks : [];
+      anchors.push(...got);
+      onEvent?.({ type: 'note', message: `这一段给出 ${got.length} 个断点` });
+    } catch (err) {
+      // 一段失败不该拖垮整篇：少切几刀总比整个功能报错强
+      onEvent?.({ type: 'note', message: `第 ${i + 1} 段没判成（${err.message}），跳过` });
+    }
+  }
+
+  const fresh = chapters.splitAtAnchors(script, anchors, { minChars: Math.floor(targetChars / 3) });
+  if (!fresh.length) {
+    throw new Error(
+      `模型没给出可用的断点（收到 ${anchors.length} 个，但没有一个能在原文里精确定位）。` +
+      '多半是它把引文润色过了。可以再试一次，或者用「按字数切」那条路。'
+    );
+  }
+
+  const saved = applyChapters(projectId, fresh);
+  onEvent?.({
+    type: 'stage',
+    stage: 'script',
+    status: 'done',
+    message: `切出 ${fresh.length} 章：${fresh.map((c) => c.title).join('、')}`
+  });
+  return saved;
+}
+
+/** 落盘章节，尽量保住已经跑完的那些章的状态（按标题 + 正文匹配） */
+function applyChapters(projectId, fresh) {
   return store.update(projectId, (p) => {
     const old = new Map((p.chapters || []).map((c) => [c.title, c]));
     p.chapters = fresh.map((c) => {
@@ -487,6 +583,16 @@ export function splitChapters(projectId, { targetChars } = {}) {
     p.stageStatus.script = p.chapters.every((c) => c.stageStatus.script === 'done') ? 'done' : 'pending';
     return p;
   });
+}
+
+export function splitChapters(projectId, { targetChars } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  if (!project.script?.trim()) throw new Error('剧本是空的');
+
+  const fresh = chapters.autoSplit(project.script, { targetChars });
+  if (!fresh.length) throw new Error('没能切出章节');
+  return applyChapters(projectId, fresh);
 }
 
 export function clearChapters(projectId) {

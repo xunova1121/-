@@ -77,11 +77,94 @@ export function autoSplit(script, { targetChars = TARGET_CHARS } = {}) {
   return numbered(chunks);
 }
 
+/**
+ * 把长文切成一个个窗口，交给模型逐段判断断章点。
+ *
+ * 十万字塞不进任何模型，所以只能分段问。**窗口之间要重叠**：
+ * 断章点正好落在窗口边界上时，两边都只看到半截，谁也认不出来。
+ * 重叠一段就能保证每个位置至少被完整看过一次。
+ */
+export function windowsOf(text, { size = 8000, overlap = 800 } = {}) {
+  const s = String(text || '');
+  if (!s) return [];
+  if (s.length <= size) return [{ start: 0, end: s.length, text: s }];
+
+  const out = [];
+  let start = 0;
+  const step = Math.max(1, size - overlap);
+  while (start < s.length) {
+    const end = Math.min(s.length, start + size);
+    out.push({ start, end, text: s.slice(start, end) });
+    if (end >= s.length) break;
+    start += step;
+  }
+  return out;
+}
+
+/**
+ * 按"锚句"切章。
+ *
+ * 为什么让模型回**原文片段**而不是字符位置：模型数不准字数。
+ * 让它报"第 12480 个字符处断章"，得到的数字基本是错的；
+ * 让它回"新的一章从『三日后，渡口起了雾』这句开始"，
+ * 我们自己 indexOf 一下就精确了 —— 把模型不擅长的事留给代码。
+ *
+ * 纯函数，不依赖模型，所以这段逻辑能脱离网络单独测。
+ */
+export function splitAtAnchors(script, anchors = [], { minChars = MIN_CHARS } = {}) {
+  const text = String(script || '').trim();
+  if (!text) return [];
+
+  const points = [];
+  for (const a of anchors) {
+    const quote = String(a?.anchor || '').trim();
+    if (quote.length < 4) continue; // 太短的片段会命中一堆无关位置
+    const at = text.indexOf(quote);
+    // 找不到就丢掉：模型偶尔会"顺手润色"引文，那种锚点不能用，
+    // 与其猜一个位置，不如少切一刀
+    if (at <= 0) continue;
+    points.push({ at, title: String(a.title || '').trim(), summary: String(a.summary || '').trim() });
+  }
+
+  points.sort((x, y) => x.at - y.at);
+
+  // 去重 + 去掉挨得太近的：重叠窗口会把同一个断点报两次
+  const kept = [];
+  for (const p of points) {
+    const prev = kept[kept.length - 1];
+    if (prev && p.at - prev.at < minChars) continue;
+    kept.push(p);
+  }
+  if (!kept.length) return [];
+
+  const chunks = [];
+  let cursor = 0;
+  let pending = { title: '', summary: '' };
+  for (const p of kept) {
+    const body = text.slice(cursor, p.at).trim();
+    if (body) chunks.push({ title: pending.title, summary: pending.summary, script: body });
+    cursor = p.at;
+    pending = { title: p.title, summary: p.summary };
+  }
+  const tailBody = text.slice(cursor).trim();
+  if (tailBody) {
+    // 尾巴太短就并进上一章，避免出现一个只有两行的"章节"
+    if (chunks.length && tailBody.length < minChars) {
+      chunks[chunks.length - 1].script += `\n\n${tailBody}`;
+    } else {
+      chunks.push({ title: pending.title, summary: pending.summary, script: tailBody });
+    }
+  }
+  return numbered(chunks);
+}
+
 function numbered(chunks) {
   return chunks.map((c, i) => ({
     id: `ch-${String(i + 1).padStart(2, '0')}`,
     index: i + 1,
     title: c.title || `第 ${i + 1} 章`,
+    // 模型分章时顺带给的一句话梗概。按字数切没有这个，留空
+    summary: c.summary || '',
     script: c.script,
     chars: c.script.length,
     stageStatus: { script: 'pending', assets: 'pending', video: 'pending', voice: 'pending', compose: 'pending' },
