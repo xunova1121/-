@@ -29,6 +29,7 @@ import * as continuity from './pipeline/continuity.js';
 import * as preflight from './preflight.js';
 import * as styles from './styles.js';
 import * as duration from './duration.js';
+import * as skillsLib from './skills.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -326,6 +327,22 @@ async function handleApi(req, res, url, { lan = false } = {}) {
       videoDurations: adapters.routedVideoDurations(),
       ffmpeg: ffmpeg.locate()
     });
+  }
+
+  // ---- 技法库（镜头运用 / 光线 / 动作 / 氛围）----
+  if (a === 'skills') {
+    if (method === 'GET') return json(res, 200, { groups: skillsLib.catalogForUI() });
+    if (method === 'POST' && !b) {
+      try {
+        return json(res, 201, { skill: skillsLib.addUserSkill(await readBody(req)), groups: skillsLib.catalogForUI() });
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
+    }
+    if (method === 'DELETE' && b) {
+      const ok = skillsLib.removeUserSkill(decodeURIComponent(b));
+      return json(res, ok ? 200 : 404, ok ? { ok, groups: skillsLib.catalogForUI() } : { error: '没有这张自定义技法卡' });
+    }
   }
 
   // ---- 手机遥控 ----

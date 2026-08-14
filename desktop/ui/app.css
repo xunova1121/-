@@ -987,3 +987,25 @@ select.mini {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 6px; border: 3px solid var(--ground); }
 ::-webkit-scrollbar-thumb:hover { background: var(--ink-faint); }
+
+/* ══════════════════════ 技法库 ══════════════════════ */
+
+/* 互斥组做成单选：不能同时仰拍又俯拍，那就不该让人点得下去 */
+.skill-picker { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.skill-group-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; margin-bottom: 3px; }
+.skill-group-name { font-size: 11px; font-weight: 650; font-family: var(--display); color: var(--ink-dim); }
+.skill-group-tag {
+  font-size: 9px; padding: 0 4px; border-radius: 3px;
+  border: 1px solid var(--line); color: var(--ink-faint);
+}
+.skill-group-hint { font-size: 9.5px; color: var(--ink-faint); }
+.skill-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.skill-chip {
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink-dim);
+  border-radius: 999px; padding: 2px 9px; font: inherit; font-size: 11px;
+  cursor: pointer; transition: border-color .12s, background .12s, color .12s;
+}
+.skill-chip:hover { border-color: var(--ink-faint); color: var(--ink); }
+.skill-chip.on { border-color: var(--beam); background: var(--beam-wash); color: var(--ink); font-weight: 600; }
+/* 自定义卡标一下，和内置的分得开 */
+.skill-chip.custom { border-style: dashed; }

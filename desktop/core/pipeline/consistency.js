@@ -21,6 +21,7 @@ import crypto from 'node:crypto';
 import * as adapters from '../providers/adapters.js';
 import * as settings from '../settings.js';
 import * as continuity from './continuity.js';
+import * as skills from '../skills.js';
 import { resolveStyle } from '../styles.js';
 
 /** 由项目和名字派生稳定种子。同一项目里同一角色，永远同一颗种子。 */
@@ -171,6 +172,16 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
   }
 
   parts.push(shot.description || '');
+
+  /**
+   * 技法卡。位置是有讲究的：紧跟画面描述，在主色调之前。
+   * 越靠后的描述越容易被稀释，而机位和光线是**直接决定这张图长什么样**的，
+   * 不能排在"主色调"后面陪跑。运镜类不进出图提示词 ——
+   * 对一张静态图说"镜头缓慢推进"没有意义，只会占掉画面描述的权重。
+   */
+  const skillParts = skills.fragmentsFor(shot.skills, { target: 'image' });
+  parts.push(...skillParts.look, ...skillParts.action, ...skillParts.mood);
+
   if (shot.camera) parts.push(`镜头：${shot.camera}`);
   if (bible?.style?.palette) parts.push(`主色调：${bible.style.palette}`);
 
@@ -262,7 +273,13 @@ export function assembleVideoPrompt(bible, shot, { maxChars = 380, prev = null, 
   }
 
   if (shot.camera) parts.push(shot.camera);
-  parts.push(shot.motion || '镜头缓慢推进');
+
+  // 技法卡：机位光线跟着画面走，运镜替代那句泛泛的默认运镜。
+  // 选了具体运镜还保留"镜头缓慢推进"，等于给模型两条互相打架的指令。
+  const sk = skills.fragmentsFor(shot.skills, { target: 'video' });
+  parts.push(...sk.look, ...sk.action, ...sk.mood);
+  if (sk.motion.length) parts.push(...sk.motion);
+  else parts.push(shot.motion || '镜头缓慢推进');
 
   // 有台词的镜头提醒模型留出说话的节奏，别让人物僵立
   if (shot.dialogue?.trim()) parts.push('人物有台词，口型与表情自然');

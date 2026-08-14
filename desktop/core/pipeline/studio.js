@@ -22,6 +22,7 @@ import * as imghash from '../imghash.js';
 import { safeFileName } from '../paths.js';
 import * as chapters from './chapters.js';
 import * as duration from '../duration.js';
+import * as skillsLib from '../skills.js';
 
 export const extractJSON = consistency.extractJSON;
 
@@ -401,7 +402,9 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
  *   ② **不自动重出**。改完立刻烧钱不是好事 —— 一般人会连着改好几镜再统一重出。
  *      所以只落盘、记一个 editedAt，重出由用户自己点。
  */
-const SHOT_EDITABLE = ['description', 'camera', 'motion', 'dialogue', 'scene', 'characters', 'duration', 'link'];
+const SHOT_EDITABLE = [
+  'description', 'camera', 'motion', 'dialogue', 'scene', 'characters', 'duration', 'link', 'skills'
+];
 
 export function updateShot(projectId, shotId, patch = {}) {
   const project = store.read(projectId);
@@ -410,6 +413,7 @@ export function updateShot(projectId, shotId, patch = {}) {
   if (!shot) throw new Error(`没有这一镜：${shotId}`);
 
   const changed = [];
+  const dropped = [];
   for (const key of SHOT_EDITABLE) {
     if (!(key in patch)) continue;
     let value = patch[key];
@@ -420,6 +424,13 @@ export function updateShot(projectId, shotId, patch = {}) {
     } else if (key === 'link') {
       // 只认这三种关系。乱值会让"要不要锁末帧"的判断变成掷骰子。
       if (!continuity.LINKS.includes(value)) continue;
+    } else if (key === 'skills') {
+      // 在**保存时**就把互斥组规整掉。存下一个自相矛盾的组合，
+      // 界面会显示两个互斥技法都选中、而实际只有一个生效 ——
+      // 界面和事实不一致，比少一个功能糟糕得多。
+      const norm = skillsLib.normalize(value);
+      dropped.push(...norm.dropped);
+      value = norm.ids;
     } else if (key === 'characters') {
       // 界面上是一行逗号分隔的文本，中英文逗号和顿号都得认
       value = Array.isArray(value)
@@ -428,7 +439,7 @@ export function updateShot(projectId, shotId, patch = {}) {
     } else {
       value = String(value ?? '').trim();
     }
-    const same = key === 'characters'
+    const same = key === 'characters' || key === 'skills'
       ? JSON.stringify(value) === JSON.stringify(shot[key] || [])
       : value === shot[key];
     if (same) continue;
@@ -446,7 +457,8 @@ export function updateShot(projectId, shotId, patch = {}) {
     }
     store.save(project);
   }
-  return { project: store.read(projectId), changed };
+  // 被规整掉的选择要如实回报，界面才能说清楚"为什么我选的那个没了"
+  return { project: store.read(projectId), changed, dropped };
 }
 
 // ═══════════════════════ 章节 ═══════════════════════

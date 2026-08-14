@@ -1299,6 +1299,86 @@ check('空镜不硬塞角色', !/保持外貌不变/.test(emptyCast), emptyCast)
 // ── 镜间衔接 ──
 // 一致性管的是"这一镜像不像"，衔接管的是"上一镜到这一镜接不接得上"。
 // 后者逐镜看根本发现不了，只有连起来放才露馅 —— 而那时候钱已经花完了。
+// 模型拆出来的 motion 大多是"镜头缓慢推进"这种放之四海皆准的话，
+// 真正让画面有电影感的是具体技法。术语人未必记得住，模型却认得很准。
+section('技法库');
+{
+  const skills = await import('../core/skills.js');
+
+  check('内置技法覆盖了六个分类', skills.SKILL_GROUPS.length === 6,
+    skills.SKILL_GROUPS.map((g) => g.name).join('、'));
+  check('每张卡都有真正发给模型的那句话',
+    skills.BUILTIN_SKILLS.every((s) => s.fragment && s.fragment.length >= 6),
+    skills.BUILTIN_SKILLS.filter((s) => !s.fragment || s.fragment.length < 6).map((s) => s.id).join('、'));
+  check('每张卡的分类都存在',
+    skills.BUILTIN_SKILLS.every((s) => skills.SKILL_GROUPS.some((g) => g.id === s.group)));
+  check('没有重复 id（重了会让人选错）',
+    new Set(skills.BUILTIN_SKILLS.map((s) => s.id)).size === skills.BUILTIN_SKILLS.length);
+  // 术语加视觉结果，比光给术语稳得多
+  check('术语卡把视觉结果也写进去了（"伦勃朗光"不如"暗侧颧骨下的三角光斑"）',
+    /三角形光斑/.test(skills.getSkill('rembrandt').fragment), skills.getSkill('rembrandt').fragment);
+
+  // 互斥：不能同时仰拍又俯拍
+  const norm = skills.normalize(['low-angle', 'high-angle', 'rembrandt', 'act-run', 'act-cry']);
+  check('互斥组只留第一张', norm.ids.includes('low-angle') && !norm.ids.includes('high-angle'),
+    JSON.stringify(norm.ids));
+  check('被丢掉的要说明原因（不能让人以为界面吞了他的选择）',
+    norm.dropped.some((d) => d.id === 'high-angle' && /只能选一个/.test(d.why)), JSON.stringify(norm.dropped));
+  check('非互斥组可以多选', norm.ids.includes('act-run') && norm.ids.includes('act-cry'));
+  check('不认识的 id 直接丢掉，不带进提示词',
+    skills.normalize(['no-such-skill']).ids.length === 0);
+
+  /**
+   * slot 决定片段拼到提示词哪个位置。运镜类不能进出图提示词 ——
+   * 对一张静态图说"镜头缓慢推进"没有意义，只会占掉画面描述的权重。
+   */
+  const forImage = skills.fragmentsFor(['push-in', 'low-angle', 'mood-tense'], { target: 'image' });
+  check('出图不带运镜（对静态图说"镜头推进"没意义，还挤占权重）',
+    forImage.motion.length === 0 && forImage.look.length === 1 && forImage.mood.length === 1,
+    JSON.stringify(forImage));
+  const forVideo = skills.fragmentsFor(['push-in', 'low-angle'], { target: 'video' });
+  check('出视频带运镜', forVideo.motion.length === 1, JSON.stringify(forVideo));
+
+  // 装进真实提示词
+  const shotWithSkills = { ...vshot, skills: ['dutch', 'blinds', 'act-smoke'] };
+  const imgPrompt = consistency.assemblePrompt(vbible, shotWithSkills).prompt;
+  check('出图提示词里有机位和光线', /荷兰角/.test(imgPrompt) && /百叶窗/.test(imgPrompt), imgPrompt.slice(0, 120));
+  check('技法排在主色调之前（越靠后越容易被稀释）',
+    !imgPrompt.includes('主色调') || imgPrompt.indexOf('荷兰角') < imgPrompt.indexOf('主色调'), imgPrompt);
+
+  const vidPrompt = consistency.assembleVideoPrompt(vbible, { ...vshot, skills: ['dolly-zoom'] });
+  check('选了具体运镜就不再发那句默认的"镜头缓慢推进"（两条指令会打架）',
+    /Dolly Zoom/.test(vidPrompt) && !/镜头缓慢推进/.test(vidPrompt), vidPrompt);
+  const vidNoSkill = consistency.assembleVideoPrompt(vbible, vshot);
+  check('没选运镜时仍然用分镜表里的那句', /镜头跟随人物移动/.test(vidNoSkill), vidNoSkill);
+
+  // 自定义卡：跨项目复用，所以存在数据目录而不是项目里
+  const made = await (
+    await fetch(`${appUrl}/api/skills`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '低速快门拖影', group: 'move', fragment: '低速快门，运动物体拉出拖影' })
+    })
+  ).json();
+  check('能自己加技法卡', Boolean(made.skill?.id), JSON.stringify(made).slice(0, 120));
+  check('自定义卡立刻能用', Boolean(skills.getSkill(made.skill.id)));
+  check('自定义卡也进提示词',
+    /拖影/.test(consistency.assembleVideoPrompt(vbible, { ...vshot, skills: [made.skill.id] })));
+  check('自定义卡存在数据目录里（换项目还在）',
+    fs.existsSync(path.join(SANDBOX, 'skills.json')));
+
+  const bad = await (
+    await fetch(`${appUrl}/api/skills`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '只有名字' })
+    })
+  ).json();
+  check('没写发给模型的那句话就拒绝（这种卡等于不起作用）', /不起作用|要写清楚/.test(bad.error || ''), JSON.stringify(bad));
+
+  const del = await fetch(`${appUrl}/api/skills/${encodeURIComponent(made.skill.id)}`, { method: 'DELETE' });
+  check('能删自定义卡', del.status === 200 && !skills.getSkill(made.skill.id));
+}
+
 section('镜间衔接');
 {
   const continuity = await import('../core/pipeline/continuity.js');

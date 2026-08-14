@@ -8,6 +8,7 @@
 import { h, clear, add, api, stream, toast, mediaUrl, fmtMs } from '../lib.js';
 import { openLightbox } from '../lightbox.js';
 import { ratioLabel } from '../ratios.js';
+import { skillPicker, customSkillForm } from '../skill-picker.js';
 
 /**
  * 两个场景名算不算同一个地方（和后端 pipeline/continuity.js 里那条规则一致）。
@@ -77,6 +78,8 @@ export default {
     const stages = state.catalog.stages.filter((s) => s.id !== 'export');
     const { presets } = await api('/styles');
     const projects = await api('/projects');
+    // 技法库：镜头运用、光线、动作、氛围。全局的，跨项目共用
+    let skillGroups = (await api('/skills').catch(() => null))?.groups || [];
     let project = null;
 
     if (!state.projectId && projects.length) state.projectId = projects[0].id;
@@ -928,6 +931,7 @@ export default {
         //（把"雨夜"写成"清晨"、把"特写"写成"全景"），后面每次重出都是在错的基础上重来。
         // 所以描述本身就是可点的：点一下直接改，比"发现不对 → 重跑整个分镜"快得多，也不会把别的镜头一起冲掉。
         const editor = h('div', { class: 'shot-edit', style: 'display:none' });
+        const pickedSkills = [...(shot.skills || [])];
         const descEl = h('div', {
           class: 'shot-desc editable',
           title: '点一下改这一镜的描述'
@@ -963,10 +967,13 @@ export default {
                   scene: fields.scene.value,
                   characters: fields.characters.value,
                   dialogue: fields.dialogue.value,
-                  link: fields.link.value
+                  link: fields.link.value,
+                  skills: pickedSkills
                 }
               });
               project = r.project;
+              // 互斥组会在服务端被规整掉，如实说一声，别让人以为界面吞了他的选择
+              for (const d of r.dropped || []) toast(`${d.why}，已忽略一项`, 'err');
               if (!r.changed?.length) {
                 toast('没有改动', 'ok');
               } else {
@@ -1006,6 +1013,43 @@ export default {
             h('div', {}, h('label', {}, '出场角色'), fields.characters)),
           h('label', {}, '台词'),
           fields.dialogue,
+          // ── 技法 ──
+          // 模型拆出来的 motion 大多是"镜头缓慢推进"这种放之四海皆准的话，
+          // 真正让画面有电影感的是具体手法。术语你未必天天记得住，模型却认得很准。
+          skillGroups.length
+            ? [
+                h('label', { style: 'margin-top:8px' }, '技法'),
+                (() => {
+                  const host = h('div', {});
+                  host.append(skillPicker(skillGroups, pickedSkills, () => {}));
+                  return host;
+                })(),
+                h('div', { class: 'shot-edit-tip' },
+                  '选完点「保存文案」才生效。运镜类只作用于视频，出图那一步不会有变化。'),
+                h('div', { class: 'inline', style: 'margin-top:6px' },
+                  h('button', {
+                    class: 'btn ghost sm',
+                    title: '同一场戏的镜头往往用同一套手法，一个个点太慢',
+                    onclick: async () => {
+                      const targets = ordered.filter((x) => x.id !== shot.id && sameScene(x.scene, shot.scene));
+                      if (!targets.length) return toast('同场景没有别的镜头', 'err');
+                      if (!confirm(`把这 ${pickedSkills.length} 个技法套到同场景的另外 ${targets.length} 个镜头上？会覆盖它们已选的技法。`)) return;
+                      for (const t of targets) {
+                        await api(`/projects/${project.id}/shots/${t.id}`, {
+                          method: 'PATCH', body: { skills: pickedSkills }
+                        });
+                      }
+                      project = await api(`/projects/${project.id}`);
+                      toast(`已套用到 ${targets.length} 个同场景镜头`, 'ok');
+                      paintShots();
+                    }
+                  }, '套用到同场景的其它镜'),
+                  customSkillForm(skillGroups, (groups) => {
+                    skillGroups = groups;
+                    paintShots();
+                  }))
+              ]
+            : null,
           prevShot
             ? [
                 h('label', { style: 'margin-top:8px' }, `和上一镜（SH ${String(prevShot.index).padStart(3, '0')}）的关系`),
@@ -1068,6 +1112,13 @@ export default {
                   : null,
                 // 手改过的镜头值得标一下：出来的图和自动拆的分镜对不上时，先想到的就该是"我改过它"
                 shot.editedAt ? h('span', { class: 'badge' }, '文案已手改') : null,
+                // 用了哪些技法要看得见 —— 出来的画面不对时，这是最先要排查的一项
+                ...(shot.skills || []).map((id) => {
+                  const card = skillGroups.flatMap((g) => g.skills || []).find((x) => x.id === id);
+                  return card
+                    ? h('span', { class: 'badge beam', title: card.fragment }, card.name)
+                    : null;
+                }),
                 // 衔接：在出视频那一步才有意义，出图那步摆着只是噪音
                 sc.video && prevShot
                   ? h('span', {
