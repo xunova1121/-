@@ -239,6 +239,25 @@ export async function generateImage({
    * 别让人以为参考图生效了 —— 那正是这个 bug 最坑的地方：
    * 界面上写着"已带上 3 张设定集参考图"，实际一张都没起作用。
    */
+  /**
+   * 路由到的出图模型本身就是个**编辑模型**时提醒一声。
+   *
+   * SeedEdit / 通义万相 imageedit 这类是"拿一张图去改"的模型。
+   * 把它选成「出图」那条路由、又没有参考图可给，它就只能自己发挥 ——
+   * 出来的东西和你要的那一镜没什么关系。这种配置错误不会报任何错，
+   * 只会让你觉得"这模型怎么乱画"，所以必须主动说出来。
+   */
+  const modelEntry = (provider.models || []).find((m) => m.id === model);
+  if (modelEntry?.capability === 'i2i' && !refImages.length) {
+    onEvent?.({
+      type: 'note',
+      message:
+        `⚠ ${model} 是图生图（编辑）模型，而这次没有参考图给它 —— ` +
+        '它只能自己发挥，画出来的多半不是你要的那一镜。' +
+        '去「设置 → 能力路由 → 出图」换成文生图模型（带 t2i 的那些）。'
+    });
+  }
+
   const wantsRef = refImages.length > 0;
   const supportsI2I = (provider.capabilities || []).includes('i2i');
   /**

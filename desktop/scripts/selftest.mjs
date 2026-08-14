@@ -794,6 +794,21 @@ check('提示词里仍然注入了冻结的外貌（没有参考图时靠它撑�
   upstream.imagePrompts.at(-1)?.includes('藏青立领制服'), upstream.imagePrompts.at(-1));
 
 /**
+ * 把**编辑模型**选成「出图」路由是个不报错的配置错误：
+ * SeedEdit 这类是"拿一张图去改"的模型，没有参考图给它就只能自己发挥，
+ * 画出来的和你要的那一镜没关系 —— 而你只会觉得"这模型怎么乱画"。
+ */
+{
+  const saved = settings.get('imageModel');
+  settings.patch({ imageModel: 'doubao-seededit-3-0-i2i-250628' });
+  const evs = await ndjson(`/projects/${project.id}/shots/${afterAssets.shots[0].id}/regenerate`, {});
+  check('把图生图模型选成「出图」路由时会提醒（这种错不报错，只会让人以为模型乱画）',
+    evs.some((e) => e.type === 'note' && /是图生图（编辑）模型/.test(e.message || '')),
+    JSON.stringify(evs.filter((e) => e.type === 'note').map((e) => e.message).slice(0, 4)));
+  settings.patch({ imageModel: saved });
+}
+
+/**
  * 打开「分镜图用图生图」之后才走参考图那条路。
  *
  * 这里同时盯着一个曾经把**整层参考图机制悄悄废掉**的 bug：
