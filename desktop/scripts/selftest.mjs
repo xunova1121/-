@@ -708,12 +708,32 @@ await fetch(`${appUrl}/api/projects/${project.id}`, {
   body: JSON.stringify({ script: '清晨，渔政执法员阿澜在码头做例行巡查。' })
 });
 
+// 设定集拆成两步：先写描述（一次对话，几秒），确认没问题再出图（几十张，又慢又贵）。
+// 合成一步的话，描述写偏一句，那几十张图就全白出了。
 const bibleEvents = await ndjson(`/projects/${project.id}/stage/bible`, {});
-const afterBible = bibleEvents.find((e) => e.type === 'finished')?.project;
-check('设定集跑通', Boolean(afterBible?.bible), JSON.stringify(bibleEvents.slice(-1)));
+const textOnly = bibleEvents.find((e) => e.type === 'finished')?.project;
+check('第一步只出文字，跑通', Boolean(textOnly?.bible), JSON.stringify(bibleEvents.slice(-1)));
+check('第一步不出图（图是下一步的事，这一步该几秒就回来）',
+  !textOnly?.bible?.characters?.[0]?.sheetPath);
+check('刚写出来的描述不锁 —— 先让人过一眼',
+  textOnly?.bible?.characters?.[0]?.locked === false, String(textOnly?.bible?.characters?.[0]?.locked));
+check('提示里告诉你下一步该干什么',
+  /过一遍描述/.test(bibleEvents.find((e) => e.type === 'stage' && e.status === 'done')?.message || ''),
+  JSON.stringify(bibleEvents.filter((e) => e.type === 'stage').map((e) => e.message)));
+
+const sheetEvents = await ndjson(`/projects/${project.id}/stage/sheets`, {});
+const afterBible = sheetEvents.find((e) => e.type === 'finished')?.project;
+check('第二步按描述出图', Boolean(afterBible?.bible), JSON.stringify(sheetEvents.slice(-1)));
 check('角色被冻结', afterBible?.bible?.characters?.[0]?.name === '阿澜');
 check('角色拿到了固定种子', typeof afterBible?.bible?.characters?.[0]?.seed === 'number');
 check('角色设定图已落盘', Boolean(afterBible?.bible?.characters?.[0]?.sheetPath));
+check('出完图自动冻结（这一张已经是定稿）', afterBible?.bible?.characters?.[0]?.locked === true);
+// "图和描述不符"时，第一件要确认的事就是"发出去的到底是哪句话"
+check('真正发出去的提示词摊在事件流里',
+  sheetEvents.some((e) => e.type === 'note' && /^提示词：/.test(e.message || '')),
+  JSON.stringify(sheetEvents.filter((e) => e.type === 'note').map((e) => e.message).slice(0, 3)));
+check('用过的提示词记在条目上（事后还能查）',
+  Boolean(afterBible?.bible?.characters?.[0]?.sheetPromptUsed));
 check(
   '设定图转成了模型可引用的形式',
   String(afterBible?.bible?.characters?.[0]?.sheetUrl || '').startsWith('data:image/png;base64,')
@@ -1137,6 +1157,43 @@ section('设定集：改文字不该花钱，冻结该由人说了算');
 
   const ghost = await patch('查无此人', { appearance: 'x' });
   check('改不存在的条目返回 400，不是静默成功', ghost.status === 400, JSON.stringify(ghost));
+
+  /**
+   * 这一段盯的是一个真出现过的 bug，而且是最难查的那种：
+   *
+   * 出图提示词以前取的是 `item.sheetPrompt || item.appearance`，
+   * 而 sheetPrompt 在生成设定集时就被模型填满了 —— 于是它**永远非空**。
+   * 结果：你改了描述、重出图，出来的还是照着旧描述画的，**怎么重出都没用**，
+   * 因为真正发出去的一直是那份你看不见、也没动过的 sheetPrompt。
+   */
+  await patch(name, { locked: false });
+  await patch(name, { appearance: '雪白长发，猩红斗篷，左眼戴单片镜' });
+  upstream.imagePrompts = [];
+  await ndjson(`/projects/${project.id}/bible/char/${encodeURIComponent(name)}/regenerate`, {});
+  const sent = upstream.imagePrompts.at(-1) || '';
+  check('改完描述再重出，发出去的提示词跟着变了（这条挂过一次）',
+    /猩红斗篷/.test(sent), sent.slice(0, 140));
+  check('旧描述不再出现在提示词里', !/藏青立领制服/.test(sent), sent.slice(0, 140));
+
+  // sheetPrompt 退回"可选覆盖"的身份：默认空，写了才顶上
+  const after = store.read(project.id).bible.characters.find((c) => c.name === name);
+  check('生成设定集时不预填出图提示词（预填就等于永远盖住描述）', !after.sheetPrompt);
+
+  await patch(name, { locked: false });
+  await patch(name, { sheetPrompt: '完全手写的出图提示词' });
+  upstream.imagePrompts = [];
+  await ndjson(`/projects/${project.id}/bible/char/${encodeURIComponent(name)}/regenerate`, {});
+  check('明确写了出图提示词时它才顶上描述',
+    /完全手写的出图提示词/.test(upstream.imagePrompts.at(-1) || ''), upstream.imagePrompts.at(-1));
+
+  // 再改描述 → 覆盖自动清掉，否则又回到"改了没用"的老路
+  await patch(name, { locked: false });
+  const cleared = await patch(name, { appearance: '换一版描述：墨绿风衣，寸头' });
+  check('再改描述时自动清掉那个覆盖（否则又回到"改了没用"）',
+    !cleared.project.bible.characters.find((c) => c.name === name)?.sheetPrompt);
+  upstream.imagePrompts = [];
+  await ndjson(`/projects/${project.id}/bible/char/${encodeURIComponent(name)}/regenerate`, {});
+  check('于是新描述又生效了', /墨绿风衣/.test(upstream.imagePrompts.at(-1) || ''), upstream.imagePrompts.at(-1));
 }
 
 section('设定集可以用本地图片当基准');

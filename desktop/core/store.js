@@ -23,10 +23,11 @@ function writeAtomic(file, data) {
   fs.renameSync(tmp, file);
 }
 
-export const STAGES = ['bible', 'script', 'assets', 'video', 'voice', 'compose', 'export'];
+export const STAGES = ['bible', 'sheets', 'script', 'assets', 'video', 'voice', 'compose', 'export'];
 
 export const STAGE_LABELS = {
-  bible: '设定集',
+  bible: '设定集描述',
+  sheets: '设定集出图',
   script: '分镜',
   assets: '镜头出图',
   video: '视频生成',
@@ -36,7 +37,11 @@ export const STAGE_LABELS = {
 };
 
 export const STAGE_HINTS = {
-  bible: '冻结角色与场景外貌，并出参考图 —— 后面所有镜头都引用它，这是一致性的地基',
+  // 写描述和出图分成两步，是因为代价差着量级：写描述是一次对话调用几秒钟，
+  // 出图是几十张又慢又贵。合成一步的话，你要等它全跑完才第一次看到那些描述 ——
+  // 而描述但凡写偏一句，那几十张图就全白出了。
+  bible: '读剧本，把角色与场景的外貌写成冻结描述。**先只出文字**，几秒钟的事',
+  sheets: '按已确认的描述出设定图。出完自动冻结 —— 后面所有镜头都引用它，这是一致性的地基',
   script: '按已冻结的设定拆分镜，分镜里只写画面不写外貌',
   assets: '逐镜出图，自动带上参考图并做一致性复核，不达标会重试',
   video: '以镜头图为首帧生成视频片段',
@@ -94,11 +99,32 @@ export function create({
 }
 
 export function read(id) {
+  let project;
   try {
-    return JSON.parse(fs.readFileSync(fileOf(id), 'utf8'));
+    project = JSON.parse(fs.readFileSync(fileOf(id), 'utf8'));
   } catch {
     return null;
   }
+  /**
+   * 老项目补上后加的阶段键。
+   *
+   * 「设定集」后来拆成了「描述」+「出图」两步，老项目的 stageStatus 里没有 sheets ——
+   * 缺键会让阶段轨上那一格永远显示"未开始"，哪怕图早就出好了。
+   * 在**读的时候**补而不是去改老文件：迁移脚本跑一半失败会留下半新半旧的数据，
+   * 而这种补法每次读都幂等。
+   */
+  const st = project.stageStatus || (project.stageStatus = {});
+  if (st.sheets === undefined) {
+    const items = [
+      ...(project.bible?.characters || []),
+      ...(project.bible?.scenes || []),
+      ...(project.bible?.props || [])
+    ];
+    const ready = items.filter((x) => x.sheetPath).length;
+    st.sheets = !items.length ? 'pending' : ready === items.length ? 'done' : ready ? 'partial' : 'pending';
+  }
+  for (const stage of STAGES) if (st[stage] === undefined) st[stage] = 'pending';
+  return project;
 }
 
 export function save(project) {

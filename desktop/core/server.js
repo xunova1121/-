@@ -690,6 +690,7 @@ async function handleApi(req, res, url, { lan = false } = {}) {
       req.on('close', () => stream.end());
       const runners = {
         bible: studio.buildBible,
+        sheets: studio.generateSheets,
         script: studio.analyzeScript,
         assets: studio.generateAssets,
         video: studio.generateVideos,

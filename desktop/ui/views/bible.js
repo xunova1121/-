@@ -157,6 +157,19 @@ export default {
         type: 'text', class: 'mini', value: item.name, readOnly: locked,
         title: '改名会同步更新所有分镜里对它的引用'
       });
+      /**
+       * 出图提示词：**可选的覆盖**，默认空。
+       *
+       * 摆出来是因为踩过一个很难查的坑：这个字段以前由模型预填，
+       * 而它一旦有值就会盖住上面的描述 —— 于是你改描述、重出图，
+       * 画的还是旧描述，怎么重出都没用。一个看不见、又会悄悄接管一切的字段，
+       * 是最坏的那种字段。现在它默认空、改描述会自动清掉，而且**看得见**。
+       */
+      const promptInput = h('textarea', {
+        rows: 2, style: 'font-size:11px', readOnly: locked,
+        placeholder: '留空 = 用上面的描述出图（推荐）。写了这里就以这里为准',
+        value: item.sheetPrompt || ''
+      });
       const provSel = h('select', { class: 'mini' },
         h('option', { value: '' }, `默认（${state.catalog.routing.image.provider}）`),
         ...imageProviders.map((p) => h('option', { value: p.id }, p.name)));
@@ -284,7 +297,7 @@ export default {
       async function saveText(extra = {}) {
         const r = await api(`/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}`, {
           method: 'PATCH',
-          body: { name: nameInput.value, appearance: area.value, ...extra }
+          body: { name: nameInput.value, appearance: area.value, sheetPrompt: promptInput.value, ...extra }
         });
         if (r.renamed) {
           // 改名会牵动分镜里的引用，改了几处要说出来 —— 悄悄改动别人的数据很吓人
@@ -360,6 +373,14 @@ export default {
               : null),
           item.role ? h('div', { class: 'sheet-role' }, item.role) : null,
           h('div', { style: 'margin-top:8px' }, area),
+          h('details', { class: 'shot-prompt', style: 'margin-top:6px' },
+            h('summary', {}, item.sheetPrompt ? '出图提示词（已自定义）' : '出图提示词（默认跟着上面的描述走）'),
+            h('div', { class: 'shot-prompt-body' },
+              promptInput,
+              item.sheetPromptUsed
+                ? h('div', { class: 'shot-used', style: 'margin-top:6px' },
+                    `上次真正发出去的：${item.sheetPromptUsed}`)
+                : null)),
           textNewer
             ? h('div', { class: 'sheet-seed', style: 'margin-top:6px;color:var(--caution)' },
                 '文字改过了，图还是按旧描述出的 —— 出图时提示词和参考图会打架。想让图跟上就点「改完重出」。')

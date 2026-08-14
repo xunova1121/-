@@ -191,9 +191,22 @@ export function bibleBucket(bible, kind) {
  * 角色要正面半身好辨认五官，场景要空镜别混进人，道具要单体产品图。
  * 混用一套模板的话，道具图里会莫名其妙站个人。
  */
-function sheetPrompt(kind, bible, item) {
+export function sheetPrompt(kind, bible, item) {
   const anchor = bible.style.anchor;
-  const own = item.sheetPrompt || item.appearance || '';
+  /**
+   * ⚠ 这一行曾经是 `item.sheetPrompt || item.appearance`，而那是个实打实的 bug：
+   *
+   * sheetPrompt 在生成设定集时就被模型填满了，于是它**永远非空**。
+   * 结果是你改了 appearance（描述）、重出图，出来的还是照着**旧描述**画的 ——
+   * 因为真正发出去的一直是那份没人动过的 sheetPrompt。
+   * 表现就是"我明明改了描述，图还是不符"，而且怎么重出都没用。
+   *
+   * 现在 sheetPrompt 退回它本来该有的身份：**可选的覆盖**，默认是空的。
+   * 描述是唯一的事实来源；只有你明确写了出图提示词，它才顶上。
+   * 改描述时会自动把这个覆盖清掉（见 updateBibleEntry）——
+   * 一个你看不见、又会悄悄接管一切的字段，是最坏的那种字段。
+   */
+  const own = (item.sheetPrompt || '').trim() || item.appearance || '';
   if (kind === 'char') return `${anchor}，角色设定图，正面半身，中性表情，纯色浅灰背景，无其他人物。${own}`;
   if (kind === 'scene') return `${anchor}，场景基准图，空镜无人物，广角。${own}`;
   return `${anchor}，道具参考图，单个物体居中，纯色背景，无人物，产品图视角。${own}`;
@@ -210,13 +223,48 @@ export async function buildBible(projectId, { onEvent, regenerate = false } = {}
   if (!project) throw new Error(`项目不存在：${projectId}`);
   if (!project.script?.trim()) throw new Error('剧本是空的，先写点东西');
 
-  onEvent?.({ type: 'stage', stage: 'bible', status: 'running', message: '正在冻结人设与场景…' });
+  onEvent?.({ type: 'stage', stage: 'bible', status: 'running', message: '正在读剧本、写人设与场景…' });
 
   const bible = project.bible && !regenerate ? project.bible : await consistency.buildBible(project, { onEvent });
+  // 刚写出来的描述**先不锁**：这一步的产出是文字，该由你过一遍再定。
+  // 出图那一步跑完才自动冻结。
+  for (const item of [...bible.characters, ...bible.scenes, ...(bible.props || [])]) {
+    if (!item.sheetPath) item.locked = false;
+  }
   store.update(projectId, (p) => {
     p.bible = bible;
+    p.stageStatus.bible = 'done';
     return p;
   });
+
+  const count = bible.characters.length + bible.scenes.length + (bible.props?.length || 0);
+  onEvent?.({
+    type: 'stage',
+    stage: 'bible',
+    status: 'done',
+    message: `写好了 ${count} 条设定。先去「设定集」页过一遍描述，确认没问题再跑下一步出图`
+  });
+  return store.read(projectId);
+}
+
+/**
+ * 阶段一·下半：按描述出设定图。
+ *
+ * 之所以和写描述**分成两步**，是因为它们的代价差着量级：
+ * 写描述是一次对话调用，几秒钟；出图是几十张图，又慢又贵。
+ * 合成一步的话，你只能等它全跑完，才第一次看到那些描述 ——
+ * 而描述但凡写偏一句，那几十张图就全白出了。
+ *
+ * 现在的顺序和人的判断顺序一致：先看字，字对了再出图，出完自动冻结。
+ * 之后想改，就解冻 → 改描述 → 重出这一张。
+ */
+export async function generateSheets(projectId, { onEvent, regenerate = false, only = null } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const bible = project.bible;
+  if (!bible) throw new Error('还没有设定集，先跑上一步把描述写出来');
+
+  onEvent?.({ type: 'stage', stage: 'sheets', status: 'running', message: '按描述出设定图…' });
 
   // 出参考图：角色最重要排在最前，其次场景，最后道具
   const dir = store.assetDir(projectId);
@@ -225,18 +273,26 @@ export async function buildBible(projectId, { onEvent, regenerate = false } = {}
     ...bible.characters.map((c) => ({ kind: 'char', item: c })),
     ...bible.scenes.map((s) => ({ kind: 'scene', item: s })),
     ...(bible.props || []).map((p) => ({ kind: 'prop', item: p }))
-  ].filter(({ item }) => regenerate || !item.sheetPath);
+  ]
+    .filter(({ item }) => (only ? only.includes(item.name) : true))
+    .filter(({ item }) => regenerate || !item.sheetPath);
 
+  if (!targets.length) throw new Error('没有要出的设定图（都出过了。想重出就勾上"全部重出"）');
   onEvent?.({ type: 'note', message: `待出参考图 ${targets.length} 张` });
 
   for (const { kind, item } of targets) {
     try {
       onEvent?.({ type: 'sheet', name: item.name, kind, status: 'running', message: `生成${SHEET_LABEL[kind]}：${item.name}` });
 
+      // 把真正发出去的提示词摊在事件流里 —— "图和描述不符"时，
+      // 第一件要确认的事就是"发出去的到底是哪句话"
+      const prompt = sheetPrompt(kind, bible, item);
+      onEvent?.({ type: 'note', message: `提示词：${prompt.slice(0, 120)}${prompt.length > 120 ? '…' : ''}` });
+
       const image = await adapters.generateImage({
         providerId: r.image.provider,
         model: r.image.model,
-        prompt: sheetPrompt(kind, bible, item),
+        prompt,
         negative: bible.style.negative,
         aspectRatio: project.aspectRatio || null,
         seed: item.seed,
@@ -255,6 +311,10 @@ export async function buildBible(projectId, { onEvent, regenerate = false } = {}
           target.sheetUrl = modelRef;
           target.sheetSource = 'model';
           target.sheetAt = new Date().toISOString();
+          target.sheetPromptUsed = prompt;
+          // 出完就冻结：这一张已经是"定稿"。之后要改就解冻 → 改描述 → 重出这一张
+          target.locked = true;
+          target.lockedAt = new Date().toISOString();
         }
         return p;
       });
@@ -269,10 +329,10 @@ export async function buildBible(projectId, { onEvent, regenerate = false } = {}
   const ready = all.filter((x) => x.sheetPath).length;
   const total = all.length;
   store.update(projectId, (p) => {
-    p.stageStatus.bible = ready === total ? 'done' : ready ? 'partial' : 'pending';
+    p.stageStatus.sheets = ready === total ? 'done' : ready ? 'partial' : 'pending';
     return p;
   });
-  onEvent?.({ type: 'stage', stage: 'bible', status: 'done', message: `参考图 ${ready}/${total} 就绪` });
+  onEvent?.({ type: 'stage', stage: 'sheets', status: 'done', message: `参考图 ${ready}/${total} 就绪，已冻结` });
   return store.read(projectId);
 }
 
@@ -1001,6 +1061,20 @@ export function updateBibleEntry(projectId, kind, name, patch = {}) {
   if (changed.some((k) => k === 'appearance' || k === 'sheetPrompt')) {
     item.textAt = new Date().toISOString();
   }
+  /**
+   * 改了描述、又没同时明确写出图提示词 → 把那个覆盖清掉。
+   *
+   * 不清的话就会出现这个应用里最难查的一种现象：
+   * 你改了描述、重出图，出来的还是照着**旧描述**画的，怎么重出都没用 ——
+   * 因为真正发出去的是那份你看不见、也没动过的 sheetPrompt。
+   * 一个隐形的、又会悄悄接管一切的字段，是最坏的那种字段。
+   */
+  if (changed.includes('appearance') && !changed.includes('sheetPrompt')) {
+    if (item.sheetPrompt) {
+      item.sheetPrompt = '';
+      changed.push('sheetPrompt');
+    }
+  }
   if (changed.includes('locked')) {
     item.lockedAt = item.locked ? new Date().toISOString() : null;
   }
@@ -1608,6 +1682,7 @@ export async function compose(projectId, { onEvent } = {}) {
 /** 一键跑完全流程。任一阶段失败就停在那儿，已完成的部分都在盘上。 */
 export async function runAll(projectId, { shotCount = 8, onEvent } = {}) {
   await buildBible(projectId, { onEvent });
+  await generateSheets(projectId, { onEvent });
   await analyzeScript(projectId, { shotCount, onEvent });
   await generateAssets(projectId, { onEvent });
   await generateVideos(projectId, { onEvent });

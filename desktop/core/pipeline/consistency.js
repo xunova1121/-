@@ -114,7 +114,11 @@ export async function buildBible(project, { onEvent } = {}) {
       name: c.name,
       role: c.role || '',
       appearance: c.appearance || '',
-      sheetPrompt: c.sheetPrompt || c.appearance || '',
+      // 刻意**不**存模型给的 sheetPrompt。它一旦有值就会顶掉 appearance，
+      // 于是改描述再重出图，画的还是旧描述 —— 这个坑踩过一次。
+      // 出图提示词由 appearance 现推（见 studio.sheetPrompt），
+      // 这个字段留空，只有用户明确写了覆盖才有值。
+      sheetPrompt: '',
       seed: deriveSeed(project.id, `char:${c.name}`),
       sheetPath: null,
       sheetUrl: null,
@@ -123,7 +127,7 @@ export async function buildBible(project, { onEvent } = {}) {
     scenes: (parsed.scenes || []).map((s) => ({
       name: s.name,
       appearance: s.appearance || '',
-      sheetPrompt: s.sheetPrompt || s.appearance || '',
+      sheetPrompt: '',
       seed: deriveSeed(project.id, `scene:${s.name}`),
       sheetPath: null,
       sheetUrl: null,
@@ -133,7 +137,7 @@ export async function buildBible(project, { onEvent } = {}) {
     props: (parsed.props || []).map((p) => ({
       name: p.name,
       appearance: p.appearance || '',
-      sheetPrompt: p.sheetPrompt || `${p.appearance}，产品图，纯色背景，单个物体，无人物`,
+      sheetPrompt: '',
       seed: deriveSeed(project.id, `prop:${p.name}`),
       sheetPath: null,
       sheetUrl: null,

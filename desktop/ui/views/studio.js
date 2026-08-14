@@ -136,8 +136,8 @@ export default {
         duration: stage === 'script' || stage === 'video',
         image: stage === 'assets',
         video: stage === 'video',
-        // 设定集那步的产出在「设定集」页，分镜网格帮不上忙
-        shots: stage !== 'bible'
+        // 设定集那两步的产出都在「设定集」页，分镜网格帮不上忙
+        shots: stage !== 'bible' && stage !== 'sheets'
       };
     }
 
@@ -1322,6 +1322,8 @@ export default {
     const stageName = h('span', { class: 'badge beam' });
 
     const HINTS = {
+      bible: '这一步只出文字，几秒钟就回来。去「设定集」页把描述过一遍，确认没问题再跑下一步出图。',
+      sheets: '按已确认的描述出设定图，出完自动冻结。之后想改：去「设定集」页解冻 → 改描述 → 重出那一张。',
       script: '分镜是后面所有步骤的清单。每镜的时长在这里分配，加起来就是计划时长。',
       assets:
         '「一致性」是把成图和角色设定图交给多模态模型比对后的分数。低于阈值会自动换种子重试；不满意的展开「单独重出」，还能临时换一家模型 —— 有些镜头就是某家画不好，换一家比反复重试有效。',
