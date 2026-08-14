@@ -5,6 +5,7 @@
  * 因为各家强项差得很远，绑死一家反而处处将就。
  */
 import { h, clear, api, stream, toast, fmtMs } from '../lib.js';
+import { RATIOS } from '../ratios.js';
 
 function statusGlyph(status) {
   return { running: '◐', ok: '✓', warn: '!', fail: '✕', skip: '–' }[status] || '·';
@@ -315,10 +316,11 @@ export default {
     };
     repaintResolutions();
 
-    const RATIOS = ['16:9', '9:16', '1:1', '4:3', '21:9'];
+    // 这里是**默认值**，不是最终值：每个项目可以有自己的画幅（新建项目时选，
+    // 项目页也能改）。手上同时有横屏宣传片和竖屏短剧时，靠这一个全局开关来回切迟早出错。
     const ratioSel = h('select', { onchange: (e) => (pending.aspectRatio = e.target.value) },
-      RATIOS.map((r) => h('option', { value: r, selected: r === (settings.aspectRatio || '16:9') },
-        r === '9:16' ? '9:16（竖屏短剧）' : r === '16:9' ? '16:9（横屏）' : r))
+      RATIOS.map((r) => h('option', { value: r.id, selected: r.id === (settings.aspectRatio || '16:9') },
+        `${r.label} · ${r.hint}`))
     );
 
     root.append(
@@ -328,8 +330,10 @@ export default {
           '分辨率越高越贵、出得越慢。建议先用低档跑通全流程、确认分镜和人设都对，最后一遍再拉到高档重出。'),
         h('div', { class: 'grid2' },
           h('div', { class: 'field' }, h('label', {}, '视频分辨率'), resSel, resHint),
-          h('div', { class: 'field' }, h('label', {}, '画幅'), ratioSel,
-            h('div', { class: 'field-hint' }, '竖屏短剧选 9:16。这个比例同时作用于出图和出视频，免得成片里两者打架。'))
+          h('div', { class: 'field' }, h('label', {}, '默认画幅'), ratioSel,
+            h('div', { class: 'field-hint' },
+              '这是', h('b', {}, '新建项目时的默认值'),
+              '：每部片子的画幅记在项目上，在「项目」页可以单独改。同时作用于出图和出视频，免得成片里两者打架。'))
         )
       )
     );

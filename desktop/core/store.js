@@ -45,7 +45,14 @@ export const STAGE_HINTS = {
   export: '导出到项目目录'
 };
 
-export function create({ title = '未命名项目', script = '', style = '', styleId = 'ink', targetDuration = 60 } = {}) {
+export function create({
+  title = '未命名项目',
+  script = '',
+  style = '',
+  styleId = 'ink',
+  targetDuration = 60,
+  aspectRatio = ''
+} = {}) {
   ensureDirs();
   const id = `${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
   const project = {
@@ -60,6 +67,13 @@ export function create({ title = '未命名项目', script = '', style = '', sty
     style,
     /** 目标成片时长（秒）。这是输入，不是结果 —— 分镜数由它反推。 */
     targetDuration: Number(targetDuration) || 60,
+    /**
+     * 画幅。**属于这一部片子**，不是全局设置 ——
+     * 一个人手上同时有横屏宣传片和竖屏短剧是常事，
+     * 挂在设置里就意味着每次切项目都得记得回去改一次，迟早出错。
+     * 留空表示跟随「设置 → 画幅」。
+     */
+    aspectRatio: aspectRatio || '',
     logline: '',
     /**
      * 章节。长篇必须拆，否则一次几万字会超上下文、也没法中途重来。
@@ -116,6 +130,7 @@ export function list() {
       // 项目页要显示画风和时长，不然一列同名项目根本分不出谁是谁
       styleId: p.styleId || 'ink',
       style: p.style || '',
+      aspectRatio: p.aspectRatio || '',
       targetDuration: p.targetDuration || 0,
       chapters: p.chapters?.length || 0,
       hasBible: Boolean(p.bible),

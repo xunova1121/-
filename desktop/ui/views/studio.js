@@ -7,6 +7,7 @@
  */
 import { h, clear, add, api, stream, toast, mediaUrl, fmtMs } from '../lib.js';
 import { openLightbox } from '../lightbox.js';
+import { ratioLabel } from '../ratios.js';
 
 /**
  * 正在跑的流水线任务。
@@ -94,9 +95,15 @@ export default {
         h('div', { class: 'project-bar-main' },
           h('b', {}, project.title),
           h('span', { class: 'badge' }, styleName),
+          // 画幅摆在这儿是为了**下手之前**就看见：横竖搞反的话，
+          // 整条流水线出完才发现，等于白跑一遍
+          h('span', {
+            class: 'badge',
+            title: project.aspectRatio ? ratioLabel(project.aspectRatio) : '这个项目没单独设，跟随「设置 → 画幅」'
+          }, project.aspectRatio || `${state.catalog?.settings?.aspectRatio || '16:9'}（跟随设置）`),
           project.style ? h('span', { class: 'badge' }, project.style) : null,
           projects.length > 1 ? h('span', { class: 'badge' }, `共 ${projects.length} 个项目`) : null),
-        h('button', { class: 'btn ghost sm', onclick: () => go('projects') }, '切换项目 / 改画风'))
+        h('button', { class: 'btn ghost sm', onclick: () => go('projects') }, '切换项目 / 改画风比例'))
     );
 
     /**
@@ -898,6 +905,88 @@ export default {
         const steps = state.catalog.videoDurations || [];
         const aligned = steps.find((x) => x >= shot.duration) || steps.at(-1);
 
+        // ── 手改这一镜的文案 ──
+        // 分镜描述是这一镜出图、出视频的**唯一输入**。模型拆分镜时写偏一句
+        //（把"雨夜"写成"清晨"、把"特写"写成"全景"），后面每次重出都是在错的基础上重来。
+        // 所以描述本身就是可点的：点一下直接改，比"发现不对 → 重跑整个分镜"快得多，也不会把别的镜头一起冲掉。
+        const editor = h('div', { class: 'shot-edit', style: 'display:none' });
+        const descEl = h('div', {
+          class: 'shot-desc editable',
+          title: '点一下改这一镜的描述'
+        }, shot.description || '（无描述）');
+
+        const fields = {
+          description: h('textarea', { rows: 3 }, shot.description || ''),
+          camera: h('input', { type: 'text', placeholder: '中景 / 特写 / 航拍…', value: shot.camera || '' }),
+          motion: h('input', { type: 'text', placeholder: '镜头缓慢推进…', value: shot.motion || '' }),
+          scene: h('input', { type: 'text', placeholder: '场景名（要和设定集里的一致）', value: shot.scene || '' }),
+          characters: h('input', {
+            type: 'text', placeholder: '出场角色，逗号分隔', value: (shot.characters || []).join('、')
+          }),
+          dialogue: h('input', { type: 'text', placeholder: '这一镜的台词（没有就留空）', value: shot.dialogue || '' })
+        };
+
+        const saveEdit = h('button', {
+          class: 'btn sm primary',
+          onclick: async () => {
+            saveEdit.disabled = true;
+            try {
+              const r = await api(`/projects/${project.id}/shots/${shot.id}`, {
+                method: 'PATCH',
+                body: {
+                  description: fields.description.value,
+                  camera: fields.camera.value,
+                  motion: fields.motion.value,
+                  scene: fields.scene.value,
+                  characters: fields.characters.value,
+                  dialogue: fields.dialogue.value
+                }
+              });
+              project = r.project;
+              if (!r.changed?.length) {
+                toast('没有改动', 'ok');
+              } else {
+                // 说清楚"存了但还没重出"—— 不自动重出是有意的：
+                // 一般人会连着改好几镜再统一重出，改一个字就烧一次钱不是好事。
+                toast(`第 ${shot.index} 镜已改。下次重出这一镜才会按新描述生成`, 'ok');
+              }
+              paintShots();
+            } catch (e) {
+              toast(e.message, 'err');
+              saveEdit.disabled = false;
+            }
+          }
+        }, '保存文案');
+
+        const closeEdit = () => {
+          editor.style.display = 'none';
+          descEl.style.display = '';
+        };
+        const openEdit = () => {
+          editor.style.display = '';
+          descEl.style.display = 'none';
+          fields.description.focus();
+        };
+        descEl.onclick = openEdit;
+
+        editor.append(
+          h('label', {}, '画面描述'),
+          fields.description,
+          h('div', { class: 'shot-edit-grid' },
+            h('div', {}, h('label', {}, '景别'), fields.camera),
+            h('div', {}, h('label', {}, '运镜'), fields.motion),
+            h('div', {}, h('label', {}, '场景'), fields.scene),
+            h('div', {}, h('label', {}, '出场角色'), fields.characters)),
+          h('label', {}, '台词'),
+          fields.dialogue,
+          h('div', { class: 'shot-edit-tip' },
+            '只写画面，别写外貌 —— 长相由设定集定，写在这儿反而会和设定集打架。',
+            shot.imagePath ? ' 改完这一镜已经出好的图不会变，要重出才生效。' : ''),
+          h('div', { class: 'inline', style: 'margin-top:8px' },
+            saveEdit,
+            h('button', { class: 'btn ghost sm', onclick: closeEdit }, '取消'))
+        );
+
         const liveEl = h('div', { class: 'shot-live', style: 'display:none' });
         liveEls.set(shot.id, liveEl);
         const cached = live.get(shot.id);
@@ -919,17 +1008,27 @@ export default {
                   `${Number(shot.duration).toFixed(1)}s`,
                   shot.actualDuration && shot.actualDuration !== shot.duration
                     ? h('span', { style: 'color:var(--caution)' }, ` →${shot.actualDuration}s`)
-                    : null)
+                    : null),
+                // 光靠"描述可点"没人发现得了，摆个明确的入口
+                h('button', { class: 'shot-edit-btn', title: '改这一镜的描述、景别、台词', onclick: openEdit }, '改文案')
               ),
-              h('div', { class: 'shot-desc' }, shot.description || '（无描述）'),
+              descEl,
+              editor,
               h('div', { class: 'shot-meta' },
                 shot.camera ? h('span', { class: 'badge' }, shot.camera) : null,
                 shot.scene ? h('span', { class: 'badge' }, shot.scene) : null,
                 ...(shot.characters || []).map((n) => h('span', { class: 'badge beam' }, n)),
                 c?.score !== null && c?.score !== undefined
-                  ? h('span', { class: `badge ${c.pass ? 'ok' : 'warn'}`, title: (c.issues || []).join('；') || '一致性复核通过' },
-                      `一致性 ${c.score}`)
+                  ? h('span', {
+                      class: `badge ${c.stale ? 'warn' : c.pass ? 'ok' : 'warn'}`,
+                      // 描述被手改过之后，这个分数是对**旧描述**打的 —— 说一声，别让它冒充现在的结论
+                      title: c.stale
+                        ? '这个分数是改文案之前打的，重出这一镜后才会重新复核'
+                        : (c.issues || []).join('；') || '一致性复核通过'
+                    }, `一致性 ${c.score}${c.stale ? '（已过时）' : ''}`)
                   : null,
+                // 手改过的镜头值得标一下：出来的图和自动拆的分镜对不上时，先想到的就该是"我改过它"
+                shot.editedAt ? h('span', { class: 'badge' }, '文案已手改') : null,
                 c?.attempts > 1 ? h('span', { class: 'badge warn' }, `重试 ${c.attempts - 1}`) : null,
                 flagged ? h('span', { class: 'badge warn' }, '待人工确认') : null,
                 shot.videoPath ? h('span', { class: 'badge ok' }, '视频已出') : shot.imagePath ? h('span', { class: 'badge' }, '待出视频') : null

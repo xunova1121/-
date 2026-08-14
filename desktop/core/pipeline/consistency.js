@@ -387,6 +387,8 @@ export async function generateConsistentImage({
       model: routing.image.model,
       prompt: assembled.prompt,
       negative: assembled.negative,
+      // 画幅跟着项目走：同一个人手上横屏宣传片和竖屏短剧并存是常事
+      aspectRatio: project.aspectRatio || null,
       seed,
       refImages,
       label: `出图 #${shot.index}`,

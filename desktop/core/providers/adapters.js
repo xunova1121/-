@@ -206,6 +206,7 @@ export async function generateImage({
   prompt,
   negative = '模糊, 低质量, 畸变, 多余手指, 文字水印, 多人',
   size = null,
+  aspectRatio = null,
   seed = null,
   refImages = [],
   timeoutMs = 300000,
@@ -215,7 +216,8 @@ export async function generateImage({
   const provider = getProvider(providerId);
   if (!provider) throw new Error(`未知服务商：${providerId}`);
   const family = provider.family || 'openai';
-  size = size || ratioToSize(settings.get('aspectRatio') || '16:9');
+  // 画幅优先用这个项目自己的；项目没设才回落到全局设置
+  size = size || ratioToSize(aspectRatio || settings.get('aspectRatio') || '16:9');
 
   switch (family) {
     case 'dashscope': {

@@ -235,6 +235,7 @@ export async function buildBible(projectId, { onEvent, regenerate = false } = {}
         model: r.image.model,
         prompt: sheetPrompt(kind, bible, item),
         negative: bible.style.negative,
+        aspectRatio: project.aspectRatio || null,
         seed: item.seed,
         label: `参考图·${item.name}`,
         onEvent
@@ -379,6 +380,65 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
     message: chapter ? `${chapter.title} 拆出 ${shots.length} 镜` : `拆出 ${shots.length} 个分镜`
   });
   return store.read(projectId);
+}
+
+/**
+ * 手改一镜的文案。
+ *
+ * 为什么值得单开一条接口：**分镜描述是这一镜出图和出视频的唯一输入**。
+ * 模型拆分镜时写偏一句 —— 把"雨夜"写成"清晨"、把"特写"写成"全景" ——
+ * 后面每一次重出都是在错的基础上重来，重十次也回不到对的画面。
+ * 改一行字比重跑十次便宜得多，也快得多。
+ *
+ * 两个刻意的设计：
+ *   ① **只认白名单字段**。整份 shots 数组回传是危险的：界面上那份可能是
+ *      十分钟前拉的，中间流水线刚写进去的 imagePath / videoPath 会被整条盖掉。
+ *      这里只动文案，产物字段一个都不碰。
+ *   ② **不自动重出**。改完立刻烧钱不是好事 —— 一般人会连着改好几镜再统一重出。
+ *      所以只落盘、记一个 editedAt，重出由用户自己点。
+ */
+const SHOT_EDITABLE = ['description', 'camera', 'motion', 'dialogue', 'scene', 'characters', 'duration'];
+
+export function updateShot(projectId, shotId, patch = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const shot = (project.shots || []).find((s) => s.id === shotId);
+  if (!shot) throw new Error(`没有这一镜：${shotId}`);
+
+  const changed = [];
+  for (const key of SHOT_EDITABLE) {
+    if (!(key in patch)) continue;
+    let value = patch[key];
+    if (key === 'duration') {
+      value = Number(value);
+      if (!Number.isFinite(value) || value <= 0) continue;
+      value = Math.min(30, Math.max(0.5, value));
+    } else if (key === 'characters') {
+      // 界面上是一行逗号分隔的文本，中英文逗号和顿号都得认
+      value = Array.isArray(value)
+        ? value.map((x) => String(x).trim()).filter(Boolean)
+        : String(value || '').split(/[,，、]/).map((x) => x.trim()).filter(Boolean);
+    } else {
+      value = String(value ?? '').trim();
+    }
+    const same = key === 'characters'
+      ? JSON.stringify(value) === JSON.stringify(shot[key] || [])
+      : value === shot[key];
+    if (same) continue;
+    shot[key] = value;
+    changed.push(key);
+  }
+
+  if (changed.length) {
+    shot.editedAt = new Date().toISOString();
+    // 手改过的镜头，上一次的一致性分数是对**旧描述**打的，留着会误导。
+    // 产物本身不删 —— 用户可能只是修个错别字，没必要把已经出好的图弄没。
+    if (changed.some((k) => k !== 'duration') && shot.consistency) {
+      shot.consistency = { ...shot.consistency, stale: true };
+    }
+    store.save(project);
+  }
+  return { project: store.read(projectId), changed };
 }
 
 // ═══════════════════════ 章节 ═══════════════════════
@@ -546,6 +606,7 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
     model,
     prompt: opts.prompt?.trim() || assembled.prompt,
     negative: assembled.negative,
+    aspectRatio: project.aspectRatio || null,
     seed,
     refImages,
     label: `重出 #${shot.index}`,
@@ -633,6 +694,7 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
       refImages: bibleRefs.images,
       duration: shot.duration,
       resolution: opts.resolution || null,
+      aspectRatio: project.aspectRatio || null,
       label: `重出视频 #${shot.index}`,
       onEvent: (ev) => onEvent?.({ ...ev, shotId })
     });
@@ -805,6 +867,7 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
         firstFrameUrl: firstFrame,
         refImages: bibleRefs.images,
         duration: shot.duration,
+        aspectRatio: project.aspectRatio || null,
         label: `视频 #${shot.index}`,
         // 轮询事件本身不带镜头信息，补上 shotId，前端才知道这是哪一镜在等
         onEvent: (ev) => onEvent?.({ ...ev, shotId: shot.id })

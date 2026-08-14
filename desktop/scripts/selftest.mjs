@@ -819,6 +819,106 @@ section('手动补入（中转平台查不到任务时的救援路径）');
     JSON.stringify(bad.slice(-1)));
 }
 
+// 分镜是自动拆的，拆偏一句后面每次重出都是在错的基础上重来。
+// 手改这条路必须**只动文案**：界面上那份 shots 可能是十分钟前拉的，
+// 整份回传会把中间刚写进去的 imagePath / videoPath 一起盖掉。
+section('分镜文案可以手改（改一行字比重跑十次便宜）');
+{
+  // 单开一个项目：这条路要验的是"别的字段一根汗毛都别动"，
+  // 借用正跑着的那个项目会把后面的检查搅浑
+  const edited = store.create({ title: '改文案' });
+  store.update(edited.id, (p) => {
+    p.shots = [{
+      id: 'e1', index: 1, scene: '码头', characters: ['阿澜'],
+      description: '清晨的码头，阿澜做例行巡查', camera: '中景', motion: '缓推',
+      dialogue: '', duration: 4, status: 'done',
+      imagePath: 'assets/e1.png', videoPath: 'assets/e1.mp4',
+      consistency: { score: 88, pass: true, attempts: 1, needsReview: false }
+    }];
+    return p;
+  });
+  const before = store.read(edited.id).shots[0];
+  const r = await (
+    await fetch(`${appUrl}/api/projects/${edited.id}/shots/e1`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        description: '雨夜的码头，阿澜举着手电筒照向水面',
+        camera: '特写',
+        characters: '阿澜、老周',
+        // 产物字段一起塞进来：必须被无视
+        imagePath: '被覆盖了.png',
+        videoPath: '也被覆盖了.mp4',
+        status: 'failed'
+      })
+    })
+  ).json();
+  const after = r.project?.shots?.[0];
+
+  check('描述改得动', after?.description === '雨夜的码头，阿澜举着手电筒照向水面', after?.description);
+  check('景别改得动', after?.camera === '特写', after?.camera);
+  check('出场角色按中文顿号/逗号拆成数组',
+    JSON.stringify(after?.characters) === JSON.stringify(['阿澜', '老周']), JSON.stringify(after?.characters));
+  check('已经出好的图不会被这次编辑弄没', after?.imagePath === before?.imagePath, after?.imagePath);
+  check('白名单之外的字段一个都不认（status 没被改成 failed）',
+    after?.status === before?.status, `${before?.status} → ${after?.status}`);
+  check('记下了手改时间（界面靠它标"文案已手改"）', Boolean(after?.editedAt));
+  check('回报了到底改了哪几项', Array.isArray(r.changed) && r.changed.includes('description'), JSON.stringify(r.changed));
+  // 分数是对**旧描述**打的，留着不说明就是在冒充现在的结论
+  check('旧的一致性分数被标成过时', after?.consistency?.stale === true, JSON.stringify(after?.consistency));
+
+  const same = await (
+    await fetch(`${appUrl}/api/projects/${edited.id}/shots/e1`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: '雨夜的码头，阿澜举着手电筒照向水面' })
+    })
+  ).json();
+  check('没改动就不算改动（不会白刷一次 editedAt）', same.changed.length === 0, JSON.stringify(same.changed));
+
+  const missing = await fetch(`${appUrl}/api/projects/${edited.id}/shots/no-such-shot`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ description: 'x' })
+  });
+  check('改一个不存在的镜头返回 404，不是静默成功', missing.status === 404, `HTTP ${missing.status}`);
+
+  // 单镜 PATCH 不能被整项目那条 PATCH 抢走 —— 抢走的话 shots 会被一个对象覆盖掉
+  check('整项目的 shots 数组还是数组', Array.isArray(store.read(edited.id).shots));
+  store.remove(edited.id);
+}
+
+section('画幅是每部片子自己的事，不是全局开关');
+{
+  const vertical = store.create({ title: '竖屏短剧', aspectRatio: '9:16' });
+  check('新建项目时能定画幅', store.read(vertical.id).aspectRatio === '9:16');
+  check('列表里带着画幅（项目卡片要显示）',
+    store.list().find((x) => x.id === vertical.id)?.aspectRatio === '9:16');
+
+  const legacy = store.create({ title: '没设画幅的老项目' });
+  check('不给就留空，表示跟随全局设置', legacy.aspectRatio === '');
+
+  // 同一台机器上同时有横屏宣传片和竖屏短剧是常事：
+  // 挂在设置里就意味着每次切项目都得记得回去改一次，迟早出错
+  settings.patch({ aspectRatio: '16:9' });
+  store.update(vertical.id, (p) => {
+    p.bible = { style: '水墨', characters: [], scenes: [], props: [] };
+    p.shots = [{
+      id: 's1', index: 1, description: '巷口', camera: '中景',
+      motion: '缓推', characters: [], scene: '', duration: 4, status: 'pending'
+    }];
+    return p;
+  });
+  upstream.lastImageBody = null;
+  const vEvents = await ndjson(`/projects/${vertical.id}/shots/s1/regenerate`, {});
+  check('出图按项目的画幅走，而不是全局的 16:9',
+    upstream.lastImageBody?.size === '720x1280',
+    `${upstream.lastImageBody?.size} / ${JSON.stringify(vEvents.slice(-1))}`);
+
+  store.remove(vertical.id);
+  store.remove(legacy.id);
+}
+
 section('设定集编辑');
 const propRegen = await ndjson(
   `/projects/${project.id}/bible/prop/${encodeURIComponent('执法记录仪')}/regenerate`,

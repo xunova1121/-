@@ -377,6 +377,18 @@ async function handleApi(req, res, url) {
     }
     if (b && !c && method === 'DELETE') return json(res, 200, { ok: store.remove(b) });
 
+    // ── 手改一镜的文案：自动拆的分镜有时不准，改一行字比重跑十次便宜 ──
+    // 只认白名单字段（见 pipeline/studio.js），不会碰 imagePath / videoPath 这些产物。
+    if (b && c === 'shots' && d && !e && method === 'PATCH') {
+      const patch = await readBody(req);
+      try {
+        const { project, changed } = studio.updateShot(b, d, patch);
+        return json(res, 200, { project, changed });
+      } catch (err) {
+        return json(res, 404, { error: err.message });
+      }
+    }
+
     // ── 单镜重出：图或视频，可临时换服务商/模型 ──
     if (b && c === 'shots' && d && e === 'regenerate' && method === 'POST') {
       const opts = await readBody(req);

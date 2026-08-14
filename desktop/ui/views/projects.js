@@ -9,6 +9,7 @@
 import { h, clear, api, stream, toast, mediaUrl } from '../lib.js';
 import { styleArtSVG } from '../style-art.js';
 import { openLightbox } from '../lightbox.js';
+import { ratioPicker } from '../ratios.js';
 
 /**
  * 画风缩略图。两种形态：
@@ -190,18 +191,39 @@ export default {
         // 已经跑过设定集的项目改画风必须重跑第 01 步才生效 —— 这句话得说出来。
         const styleHost = h('div', { class: 'project-style-edit', style: 'display:none' });
         let picked = p.styleId;
+        let pickedRatio = p.aspectRatio || '';
         styleHost.append(
+          h('label', {}, '影片比例'),
+          ratioPicker(pickedRatio, (id) => (pickedRatio = id), {
+            allowInherit: true,
+            fallback: state.catalog?.settings?.aspectRatio || '16:9'
+          }),
+          // 已经出过图还改比例，等于让新旧镜头长得不一样宽 —— 说清楚，别让人事后才发现
+          p.images
+            ? h('div', { class: 'field-hint' },
+                `这个项目已经出了 ${p.images} 张图。改比例只影响之后新出的，旧的要重出才会跟着变。`)
+            : null,
+          h('label', { style: 'margin-top:12px' }, '画风'),
           stylePicker(presets, p.styleId, (id) => (picked = id)),
           h('div', { class: 'inline', style: 'margin-top:10px' },
             h('button', {
               class: 'btn sm',
               onclick: async () => {
-                await api(`/projects/${p.id}`, { method: 'PATCH', body: { styleId: picked } });
+                const styleChanged = picked !== p.styleId;
+                await api(`/projects/${p.id}`, {
+                  method: 'PATCH',
+                  body: { styleId: picked, aspectRatio: pickedRatio }
+                });
                 projects = await api('/projects');
-                toast(p.hasBible ? '画风已改。设定集是按画风冻结的，要重跑第 01 步才生效' : '画风已改', 'ok');
+                toast(
+                  styleChanged && p.hasBible
+                    ? '已保存。设定集是按画风冻结的，要重跑第 01 步才生效'
+                    : '已保存',
+                  'ok'
+                );
                 paintList();
               }
-            }, '保存画风'),
+            }, '保存'),
             h('button', { class: 'btn ghost sm', onclick: () => (styleHost.style.display = 'none') }, '收起'))
         );
 
@@ -215,6 +237,10 @@ export default {
               ),
               h('div', { class: 'project-meta' },
                 h('span', { class: 'badge' }, styleName(p.styleId)),
+                p.aspectRatio
+                  ? h('span', { class: 'badge', title: '这一部片子的画幅' }, p.aspectRatio)
+                  : h('span', { class: 'badge', title: '没单独设，跟随「设置 → 画幅」' },
+                      `${state.catalog?.settings?.aspectRatio || '16:9'}（跟随设置）`),
                 p.targetDuration ? h('span', { class: 'badge' }, `${p.targetDuration}s`) : null,
                 p.chapters ? h('span', { class: 'badge' }, `${p.chapters} 章`) : null,
                 p.shots ? h('span', { class: 'badge' }, `${p.shots} 镜`) : h('span', { class: 'badge warn' }, '未拆分镜')
@@ -233,7 +259,7 @@ export default {
                   onclick: () => {
                     styleHost.style.display = styleHost.style.display === 'none' ? '' : 'none';
                   }
-                }, '改画风'),
+                }, '改画风 / 比例'),
                 h('button', { class: 'btn danger sm', onclick: () => removeProject(p.id, p.title) }, '删除')),
               styleHost
             )
@@ -290,6 +316,10 @@ export default {
     const newTitle = h('input', { type: 'text', placeholder: '例：太湖夜巡' });
     const newDuration = h('input', { type: 'number', value: 60, min: 5, max: 3600 });
     let newStyleId = 'ink';
+    // 画幅是**这一部片子**的属性，不是全局设置：
+    // 手上同时有横屏宣传片和竖屏短剧是常事，挂在设置里就意味着每次切项目都得记得回去改一次。
+    const defaultRatio = state.catalog?.settings?.aspectRatio || '16:9';
+    let newRatio = defaultRatio;
 
     root.append(
       h('div', { class: 'panel' },
@@ -299,6 +329,10 @@ export default {
         h('div', { class: 'row' },
           h('div', {}, h('label', {}, '片名'), newTitle),
           h('div', { class: 'shrink', style: 'width:160px' }, h('label', {}, '目标时长（秒）'), newDuration)),
+        h('label', { style: 'margin-top:12px' }, '影片比例'),
+        h('p', { class: 'field-hint', style: 'margin-top:0' },
+          '定完就一路带到底：出图按这个比例出，出视频也按这个比例出。中途改会和已经出好的镜头对不上，所以建的时候就选准。'),
+        ratioPicker(newRatio, (id) => (newRatio = id)),
         h('label', { style: 'margin-top:12px' }, '画风'),
         (() => {
           const host = h('div', {});
@@ -318,7 +352,12 @@ export default {
               try {
                 const p = await api('/projects', {
                   method: 'POST',
-                  body: { title, styleId: newStyleId, targetDuration: Number(newDuration.value) || 60 }
+                  body: {
+                    title,
+                    styleId: newStyleId,
+                    targetDuration: Number(newDuration.value) || 60,
+                    aspectRatio: newRatio
+                  }
                 });
                 toast('已创建，去创作台把剧本贴进来', 'ok');
                 await openProject(p.id);
