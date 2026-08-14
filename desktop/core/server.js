@@ -599,6 +599,16 @@ async function handleApi(req, res, url, { lan = false } = {}) {
       if (!e && method === 'POST') {
         return json(res, 201, await studio.addBibleEntry(b, kind, await readBody(req)));
       }
+      // 只改文字，不出图 —— 免费、立刻生效。
+      // 之前唯一的保存路径是「改完重出」，等于"想改一句描述就得重烧一张图"。
+      if (e && !f && method === 'PATCH') {
+        try {
+          const r = studio.updateBibleEntry(b, kind, decodeURIComponent(e), await readBody(req));
+          return json(res, 200, r);
+        } catch (err) {
+          return json(res, 400, { error: err.message });
+        }
+      }
       if (e && method === 'DELETE') {
         return json(res, 200, studio.removeBibleEntry(b, kind, decodeURIComponent(e)));
       }

@@ -55,7 +55,11 @@ export default {
       h('div', { class: 'panel' },
         h('h2', { class: 'panel-title' },
           '全片风格锚',
-          h('span', { class: 'badge' }, `冻结于 ${new Date(bible.frozenAt).toLocaleString('zh-CN')}`)
+          // frozenAt 可能没有（老项目、手改过的 project.json）——
+          // 没有就别显示，印一个 "Invalid Date" 比不印更糟
+          bible.frozenAt && Number.isFinite(Date.parse(bible.frozenAt))
+            ? h('span', { class: 'badge' }, `冻结于 ${new Date(bible.frozenAt).toLocaleString('zh-CN')}`)
+            : null
         ),
         h('p', { class: 'panel-hint' }, '这段话会出现在每一条绘图提示词的最前面。放在最前是有讲究的：越靠后的描述越容易被稀释掉。'),
         h('div', { class: 'field' }, h('label', {}, '风格描述'), anchorInput),
@@ -130,7 +134,29 @@ export default {
 
     /** 一张设定卡：图 + 可改描述 + 换模型重出 + 删除 */
     function sheetCard(kind, item) {
-      const area = h('textarea', { rows: 4, style: 'font-size:11.5px' }, item.appearance || '');
+      /**
+       * 冻结不是技术限制，是**你自己下的一个决定**。
+       *
+       * 早期版本里"冻结"等于生成完就锁死，而且唯一能保存文字的路径是
+       * 「改完重出」—— 于是想改一句描述就必须重烧一张图，不点那个按钮
+       * 改的字还会丢。"我明明改了，怎么没生效"就是这么来的。
+       *
+       * 现在分成三件互不牵连的事：
+       *   解冻   —— 允许改（防手滑而已，不花钱）
+       *   存文字 —— 免费，立刻生效，下一批出图就按新描述走
+       *   重出图 —— 花钱，什么时候想让图跟上文字，什么时候点
+       */
+      const locked = item.locked !== false;
+      const area = h('textarea', {
+        rows: 4,
+        style: 'font-size:11.5px',
+        readOnly: locked,
+        title: locked ? '已冻结。点下面的「解冻编辑」才能改' : '改完点「存文字」'
+      }, item.appearance || '');
+      const nameInput = h('input', {
+        type: 'text', class: 'mini', value: item.name, readOnly: locked,
+        title: '改名会同步更新所有分镜里对它的引用'
+      });
       const provSel = h('select', { class: 'mini' },
         h('option', { value: '' }, `默认（${state.catalog.routing.image.provider}）`),
         ...imageProviders.map((p) => h('option', { value: p.id }, p.name)));
@@ -254,11 +280,79 @@ export default {
         onclick: () => fileInput.click()
       }, '传本地图');
 
+      /** 只存文字，不出图。免费、立刻生效。 */
+      async function saveText(extra = {}) {
+        const r = await api(`/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}`, {
+          method: 'PATCH',
+          body: { name: nameInput.value, appearance: area.value, ...extra }
+        });
+        if (r.renamed) {
+          // 改名会牵动分镜里的引用，改了几处要说出来 —— 悄悄改动别人的数据很吓人
+          toast(`已改名为「${r.renamedTo}」，同步更新了 ${r.renamed} 处分镜引用`, 'ok');
+        }
+        return r;
+      }
+
+      const saveBtn = h('button', {
+        class: 'btn sm',
+        title: '只存文字，不出图，不花钱。下一批出图就按新描述走',
+        onclick: async () => {
+          saveBtn.disabled = true;
+          try {
+            const r = await saveText();
+            if (!r.renamed) toast(r.changed.length ? '已保存（没重出图，不花钱）' : '没有改动', 'ok');
+            rerender();
+          } catch (e) {
+            toast(e.message, 'err');
+          } finally {
+            saveBtn.disabled = false;
+          }
+        }
+      }, '存文字');
+
+      const freezeBtn = h('button', {
+        class: `btn ${locked ? 'ghost' : 'primary'} sm`,
+        title: locked ? '解开才能改。这一层只是防手滑，不花钱' : '把当前这份描述定下来',
+        onclick: async () => {
+          freezeBtn.disabled = true;
+          try {
+            // 冻结时顺手把文字一起存了 —— 改完还要记得先点一次「存文字」才能冻，
+            // 是那种一定会被忘掉的一步
+            if (locked) {
+              await api(`/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}`, {
+                method: 'PATCH', body: { locked: false }
+              });
+              toast('已解冻，可以改了', 'ok');
+            } else {
+              await saveText({ locked: true });
+              toast('已确认冻结。后面每一镜都按这份描述走', 'ok');
+            }
+            rerender();
+          } catch (e) {
+            toast(e.message, 'err');
+          } finally {
+            freezeBtn.disabled = false;
+          }
+        }
+      }, locked ? '解冻编辑' : '确认冻结');
+
+      // 文字改过、图还是按旧描述出的 —— 这是最容易被忽略的一种不一致：
+      // 提示词按新描述走，参考图却还是旧的那张，两边在打架
+      const textNewer = item.textAt && item.sheetAt && Date.parse(item.textAt) > Date.parse(item.sheetAt);
+
       return h('div', { class: 'sheet-card' },
         img,
         h('div', { class: 'sheet-body' },
           h('div', { class: 'sheet-name' },
-            item.name,
+            locked ? item.name : nameInput,
+            h('span', {
+              class: `badge ${locked ? 'ok' : 'warn'}`,
+              title: locked
+                ? item.lockedAt
+                  ? `冻结于 ${new Date(item.lockedAt).toLocaleString('zh-CN')}`
+                  : '已冻结'
+                : '编辑中：改完点「确认冻结」'
+            }, locked ? '已冻结' : '编辑中'),
             // 标明这张图是谁出的。过两天没人分得清哪张是模型出的、哪张是自己传的，
             // 而这直接决定"重出一次"会不会把你传的图冲掉
             item.sheetSource === 'upload'
@@ -266,11 +360,17 @@ export default {
               : null),
           item.role ? h('div', { class: 'sheet-role' }, item.role) : null,
           h('div', { style: 'margin-top:8px' }, area),
+          textNewer
+            ? h('div', { class: 'sheet-seed', style: 'margin-top:6px;color:var(--caution)' },
+                '文字改过了，图还是按旧描述出的 —— 出图时提示词和参考图会打架。想让图跟上就点「改完重出」。')
+            : null,
           h('div', { class: 'sheet-actions' }, provSel, modelSel),
           item.sheetSource === 'upload'
             ? h('div', { class: 'sheet-seed', style: 'margin-top:6px' }, '这张是你传的，点「改完重出」会用模型重画一张盖掉它')
             : null,
           h('div', { class: 'inline', style: 'margin-top:8px' },
+            freezeBtn,
+            locked ? null : saveBtn,
             redoBtn,
             uploadBtn,
             fileInput,

@@ -1077,6 +1077,59 @@ check('能删掉设定集条目', !removed.bible.props.some((p) => p.name === '�
 
 // 有些参照模型画不出来：真人演员的照片、客户给的产品图、已经定稿的三视图。
 // 传上来之后它必须和模型出的设定图**完全同等**，否则等于传了个寂寞。
+// 之前唯一能保存文字的路径是「改完重出」——"想改一句描述就得重烧一张图"，
+// 不点那个按钮改的字还会丢。"我明明改了，怎么没生效"就是这么来的。
+section('设定集：改文字不该花钱，冻结该由人说了算');
+{
+  const name = afterProp.bible.characters[0].name;
+  const url = (n) => `${appUrl}/api/projects/${project.id}/bible/char/${encodeURIComponent(n)}`;
+  const patch = (n, body) =>
+    fetch(url(n), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then((r) => r.json().then((j) => ({ status: r.status, ...j })));
+
+  const before = upstream.imagePrompts.length;
+  const saved = await patch(name, { appearance: '短发，藏青立领制服，袖口两道银线，左眉有疤' });
+  check('只改文字就能保存', /左眉有疤/.test(
+    saved.project?.bible?.characters?.find((c) => c.name === name)?.appearance || ''), JSON.stringify(saved.changed));
+  // 这是这条接口存在的全部理由：改字不该触发出图
+  check('存文字一次图都没出（不花钱）', upstream.imagePrompts.length === before,
+    `出图次数 ${before} → ${upstream.imagePrompts.length}`);
+  check('记下了文字改动时间（界面据此提醒"图还没跟上"）',
+    Boolean(saved.project.bible.characters.find((c) => c.name === name)?.textAt));
+  check('没改动就如实说没改动', (await patch(name, { appearance: '短发，藏青立领制服，袖口两道银线，左眉有疤' })).changed.length === 0);
+
+  // 冻结是人下的决定，不是"生成完就锁死"
+  const unlocked = await patch(name, { locked: false });
+  check('能解冻', unlocked.project.bible.characters.find((c) => c.name === name)?.locked === false);
+  const relocked = await patch(name, { locked: true });
+  const relockedItem = relocked.project.bible.characters.find((c) => c.name === name);
+  check('能重新冻结', relockedItem?.locked === true);
+  check('记下了冻结时间', Boolean(relockedItem?.lockedAt));
+
+  /**
+   * 改名必须同步分镜。分镜里的 characters[] / scene 存的是**名字**，
+   * 只改设定集不改分镜等于把所有引用一次性打断 ——
+   * 那些镜头会查不到人，出图时既不带参考图也不注入外貌，
+   * 而且**不会报错**，只是悄悄画成另一个人。这种坏法最难查。
+   */
+  const usedBefore = store.read(project.id).shots.filter((s) => (s.characters || []).includes(name)).length;
+  const renamed = await patch(name, { name: '阿澜队长' });
+  check('改得了名', renamed.project.bible.characters.some((c) => c.name === '阿澜队长'));
+  check('分镜里的引用同步改掉了（不同步就会悄悄画成另一个人）',
+    renamed.renamed === usedBefore && usedBefore > 0, `同步了 ${renamed.renamed} 处，应为 ${usedBefore}`);
+  check('分镜里已经查不到旧名字',
+    !store.read(project.id).shots.some((s) => (s.characters || []).includes(name)));
+
+  const dup = await patch('阿澜队长', { name: afterProp.bible.characters[1]?.name || '阿澜队长' });
+  if (afterProp.bible.characters[1]) {
+    check('重名直接拦下来，不产生两个同名条目', dup.status === 400, JSON.stringify(dup));
+  }
+  await patch('阿澜队长', { name }); // 改回去，后面的检查还要用
+
+  const ghost = await patch('查无此人', { appearance: 'x' });
+  check('改不存在的条目返回 400，不是静默成功', ghost.status === 400, JSON.stringify(ghost));
+}
+
 section('设定集可以用本地图片当基准');
 {
   const charName = afterProp.bible.characters[0].name;

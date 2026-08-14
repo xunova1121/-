@@ -252,6 +252,8 @@ export async function buildBible(projectId, { onEvent, regenerate = false } = {}
         if (target) {
           target.sheetPath = dest;
           target.sheetUrl = modelRef;
+          target.sheetSource = 'model';
+          target.sheetAt = new Date().toISOString();
         }
         return p;
       });
@@ -812,6 +814,9 @@ export async function regenerateSheet(projectId, kind, name, opts = {}, onEvent)
       t.seed = seed;
       // 之前可能是传上来的图，这次是模型出的 —— 标记得跟着换，否则界面会一直说"你传的"
       t.sheetSource = 'model';
+      // 这张图是"按哪一版文字"出的。界面拿它和 textAt 比，
+      // 就能指出"文字改过、图没跟上"这种提示词和参考图打架的情况
+      t.sheetAt = new Date().toISOString();
     }
     return p;
   });
@@ -824,6 +829,93 @@ export async function regenerateSheet(projectId, kind, name, opts = {}, onEvent)
  * 往设定集里加一条（衍生品、后加的道具、中途出场的配角都走这里）。
  * 加完不自动出图 —— 让用户先把描述写好，再点重出，省一次无效开销。
  */
+/**
+ * 改设定集条目的**文字**部分（不出图、不花钱）。
+ *
+ * 之前这里是个坑：设定集条目唯一能保存的路径是「改完重出」——
+ * 也就是说，**想改一句描述就必须重出一张图**。
+ * 于是"我明明改了，怎么没生效"变成了很自然的困惑：
+ * 改完没点那个按钮，字就丢了；点了，又白烧一次额度。
+ *
+ * 现在文字和图分开：
+ *   · 存文字   —— 免费、立刻生效（下一批出图就按新描述走）
+ *   · 重出图   —— 花钱，什么时候想让图跟上文字，什么时候点
+ *
+ * 「冻结」也从"生成完就锁死"改成**你自己说了算**：
+ * locked=true 时界面不让改（防手滑），点「解冻」就能改，改完再「确认冻结」。
+ * 这一层不是技术需要，是心理需要 —— 设定集是全片的地基，
+ * 地基应该有一个明确的"我认可了"的动作，而不是模型写完就算数。
+ */
+const BIBLE_EDITABLE = ['name', 'appearance', 'sheetPrompt', 'role', 'locked'];
+
+export function updateBibleEntry(projectId, kind, name, patch = {}) {
+  const project = store.read(projectId);
+  if (!project?.bible) throw new Error('还没有设定集');
+  const bucket = bibleBucket(project.bible, kind);
+  const item = bucket.find((x) => x.name === name);
+  if (!item) throw new Error(`设定集里没有「${name}」`);
+
+  const changed = [];
+  let renamedTo = null;
+
+  for (const key of BIBLE_EDITABLE) {
+    if (!(key in patch)) continue;
+    let value = patch[key];
+    if (key === 'locked') {
+      value = Boolean(value);
+    } else {
+      value = String(value ?? '').trim();
+      if (key === 'name') {
+        if (!value) continue;
+        if (value === item.name) continue;
+        if (bucket.some((x) => x.name === value)) throw new Error(`已经有一个叫「${value}」的了`);
+        renamedTo = value;
+      }
+    }
+    if (value === item[key]) continue;
+    item[key] = value;
+    changed.push(key);
+  }
+
+  if (!changed.length) return { project, changed: [], renamed: 0 };
+
+  // 文字改了、图还是按旧描述出的 —— 记一个时间戳，界面据此提醒"图没跟上"
+  if (changed.some((k) => k === 'appearance' || k === 'sheetPrompt')) {
+    item.textAt = new Date().toISOString();
+  }
+  if (changed.includes('locked')) {
+    item.lockedAt = item.locked ? new Date().toISOString() : null;
+  }
+
+  /**
+   * 改名必须同步分镜。
+   *
+   * 分镜里的 characters[] 和 scene 存的是**名字**，靠名字去设定集里查外貌和参考图。
+   * 只改设定集不改分镜，等于把所有引用一次性打断：
+   * 那些镜头会突然查不到人，出图时既不带参考图也不注入外貌 ——
+   * 而且不会报错，只是悄悄画成另一个人。这种坏法最难查。
+   */
+  let renamed = 0;
+  if (renamedTo) {
+    for (const shot of project.shots || []) {
+      if (kind === 'char' && Array.isArray(shot.characters)) {
+        const i = shot.characters.indexOf(name);
+        if (i !== -1) {
+          shot.characters[i] = renamedTo;
+          renamed += 1;
+        }
+      }
+      if (kind === 'scene' && shot.scene === name) {
+        shot.scene = renamedTo;
+        renamed += 1;
+      }
+    }
+  }
+
+  store.save(project);
+  return { project: store.read(projectId), changed, renamed, renamedTo };
+}
+
 /** 认得出来的图片格式。除了这几种，别的一律不收 —— 存进去也是打不开的文件。 */
 const IMAGE_MIME = {
   'image/png': '.png',
