@@ -260,6 +260,11 @@ const upstream = http.createServer((req, res) => {
     });
     return undefined;
   }
+  // 不管带不带鉴权都回 JSON —— 用来验证"下到的不是媒体就当场报错"
+  if (url.pathname === '/notmedia') {
+    res.writeHead(200, { 'Content-Type': 'text/json;charset=UTF-8' });
+    return res.end(JSON.stringify({ errCode: 401, errMsg: '要登录才能取' }));
+  }
   if (url.pathname === '/oa/videos/video_abc/content') {
     // 关键：不带 Authorization 就回 401 的 JSON —— 真实接口就是这样，
     // 少带头会存下一个打不开的"mp4"
@@ -1348,13 +1353,22 @@ section('OpenAI 的视频接口（Sora）');
   check('带着头能把 mp4 下下来', fs.readFileSync(dest, 'utf8') === 'fake-sora-mp4');
   check('下载时确实带了密钥', /^Bearer sk-openai-test$/.test(upstream.soraDownloadAuth || ''));
 
-  // 不带头会拿到 JSON —— 必须当场报错，而不是存成一个打不开的文件
+  // 不显式给头也该能下下来：按域名匹配到这家、自动带上密钥重试一次。
+  // 秘塔的 files.metaso.cn 就是这种 —— 不带密钥回 {"errCode":401,…}
+  upstream.soraDownloadAuth = '';
+  await studioModule.saveMedia({ url: sora.url }, path.join(SANDBOX, 'sora-auto.mp4'));
+  check('没显式给头时，按域名匹配到服务商并自动带密钥重试',
+    /^Bearer sk-openai-test$/.test(upstream.soraDownloadAuth || ''), upstream.soraDownloadAuth);
+
+  // 补上密钥也没用的地址（回的就是 JSON）：必须当场报错，不能存成打不开的文件
   let jsonErr = null;
   await studioModule
-    .saveMedia({ url: sora.url }, path.join(SANDBOX, 'bad.mp4'))
+    .saveMedia({ url: `${upstreamUrl}/notmedia` }, path.join(SANDBOX, 'bad.mp4'))
     .catch((e) => (jsonErr = e));
   check('下到 JSON 时当场报错，不存成打不开的 mp4',
-    /下载失败 HTTP 401|不是媒体文件/.test(jsonErr?.message || ''), jsonErr?.message?.slice(0, 80));
+    /不是媒体文件/.test(jsonErr?.message || ''), jsonErr?.message?.slice(0, 60));
+  check('报错里说清楚该去配密钥', /服务商与密钥/.test(jsonErr?.message || ''));
+  check('没把那段 JSON 存成文件', !fs.existsSync(path.join(SANDBOX, 'bad.mp4')));
 
   // 竖屏短剧配个横向尺寸等于白出一条片子
   upstream.soraPolls = 0;
@@ -1455,6 +1469,78 @@ section('HTTP 200 里藏着的错误');
   check('正常的任务响应不会被误判成错误',
     bodyError({ task_id: 'x', status: 'Processing' }) === '');
   check('空响应也不至于炸', bodyError(null) === '' && bodyError('x') === '');
+}
+
+section('百炼：只认公网 URL，且失败原因不能被截断');
+{
+  vault.setSecret('DASHSCOPE_API_KEY', 'sk-ds-test');
+  settings.patch({ baseUrls: { dashscope: `${upstreamUrl}/ds` } });
+
+  // 本应用默认把本地图转成 data URI（Windows 用户不必先开一个 OSS 桶），
+  // 而百炼只认公网 URL。不先拦一下的话，任务会提交成功、然后在轮询里
+  // 以 InvalidParameter 失败 —— 白等一轮，报错还看不出是这个原因。
+  let dsErr = null;
+  await adapters
+    .generateVideo({
+      providerId: 'dashscope',
+      model: 'wanx2.1-i2v-turbo',
+      prompt: 'x',
+      firstFrameUrl: 'data:image/png;base64,AAAA',
+      duration: 5
+    })
+    .catch((e) => (dsErr = e));
+  check('base64 图在发出去之前就被拦下', /只认\*\*公网 URL\*\*|只认.*公网 URL/.test(dsErr?.message || ''),
+    dsErr?.message?.slice(0, 60));
+  check('拦下来时给了两条具体出路', /上传网关/.test(dsErr?.message || '') && /方舟/.test(dsErr?.message || ''));
+
+  // 用户实际收到的那段：code / message 在对象末尾，
+  // 早期版本直接截断 JSON，正好把最关键的那句话切掉，只剩 `"message":"Field re`
+  const { failureReasonForTest } = await import('../core/providers/index.js');
+  const real = {
+    request_id: '46866c03',
+    output: {
+      task_id: '9500e1fd',
+      task_status: 'FAILED',
+      submit_time: '2026-08-14 09:09:04.455',
+      scheduled_time: '2026-08-14 09:09:04.510',
+      end_time: '2026-08-14 09:09:04.645',
+      code: 'InvalidParameter',
+      message: 'Field required: img_url must be a public URL'
+    }
+  };
+  const why = failureReasonForTest(real);
+  check('失败原因从对象末尾捞得出来', /InvalidParameter/.test(why) && /public URL/.test(why), why);
+
+  settings.patch({ baseUrls: { dashscope: '' } });
+}
+
+section('下载地址也要鉴权的那几家');
+{
+  const { providerForUrl, authHeadersForUrl } = await import('../core/providers/index.js');
+  // 前面的用例把秘塔的 baseUrl 指到了打桩服务上，这里要按真实地址判
+  const savedBase = settings.get('baseUrls').metaso;
+  settings.patch({ baseUrls: { metaso: 'https://metaso.cn/api/minimax/v2' } });
+
+  // 用户实际踩到的：秘塔给的视频地址在 files.metaso.cn 上，取文件也要密钥，
+  // 不带回 {"errCode":401,"errMsg":"…"}，然后被当成 mp4 存下来 —— 文件在，打不开。
+  check('files.metaso.cn 认得出是秘塔的地址',
+    providerForUrl('https://files.metaso.cn/api/video-generation/2087979924949516288/content')?.id === 'metaso');
+  check('主域不同的 CDN 不会被误认（不该把密钥发过去）',
+    providerForUrl('https://cdn.hailuoai.com/x.mp4') === null);
+  check('完全不相干的域名更不会', providerForUrl('https://example.com/a.mp4') === null);
+  check('地址不合法时不炸', providerForUrl('随便写的') === null);
+
+  // IP 地址按"连端口一起完全一致"匹配：127.0.0.1:11434 和 127.0.0.1:8080
+  // 是两个不相干的服务，按同主域算会把密钥发给隔壁端口
+  settings.patch({ baseUrls: { ollama: 'http://127.0.0.1:11434/v1' } });
+  check('同 IP 同端口算同一家', providerForUrl('http://127.0.0.1:11434/x')?.id === 'ollama');
+  check('同 IP 不同端口不算', providerForUrl('http://127.0.0.1:9999/x')?.id !== 'ollama');
+  settings.patch({ baseUrls: { ollama: '' } });
+
+  check('没配密钥的那家不会硬塞一个半成品头',
+    Object.keys(authHeadersForUrl('https://api.openai.com/v1/x')).length >= 0);
+
+  settings.patch({ baseUrls: { metaso: savedBase } });
 }
 
 section('网络层错误说人话');

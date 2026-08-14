@@ -14,6 +14,7 @@ import * as store from '../store.js';
 import * as settings from '../settings.js';
 import * as logbus from '../logbus.js';
 import * as adapters from '../providers/adapters.js';
+import { authHeadersForUrl } from '../providers/index.js';
 import * as consistency from './consistency.js';
 import * as ffmpeg from '../ffmpeg.js';
 import { safeFileName } from '../paths.js';
@@ -112,24 +113,49 @@ export async function saveMedia({ url, base64, downloadHeaders }, destPath, onEv
   if (base64 && !url) {
     buf = Buffer.from(base64, 'base64');
   } else {
-    // 多数厂商给的是公网直链；OpenAI 的 /videos/{id}/content 例外 ——
-    // 不带 Authorization 会拿到一个 401 的 JSON，然后被当成 mp4 存下来，
-    // 表现是"视频下好了但打不开"。
-    const res = await fetch(url, {
-      headers: downloadHeaders || undefined,
-      signal: AbortSignal.timeout(300000)
-    });
-    if (!res.ok) throw new Error(`下载失败 HTTP ${res.status}：${url}`);
-    buf = Buffer.from(await res.arrayBuffer());
+    /**
+     * 下载这一步比看上去麻烦：
+     *
+     * 多数厂商给的是公网直链，拿着就能下；但有两类不是 ——
+     *   · OpenAI 的 /videos/{id}/content 必须带 Authorization；
+     *   · 秘塔给的 files.metaso.cn/... 也要带，不带回 {"errCode":401,…}。
+     * 而这两种失败都长成"文件下下来了、就是打不开"，最难查。
+     *
+     * 策略：先按公网直链试（绝大多数情况，也不会把密钥发给不相干的域名）；
+     * 只有当它回 401/403、或者回了一段 JSON 时，才按域名匹配到对应的服务商，
+     * 带上密钥重试一次。密钥只会发给"和该服务商同一个主域"的地址。
+     */
+    const attempt = async (headers) => {
+      const res = await fetch(url, { headers: headers || undefined, signal: AbortSignal.timeout(300000) });
+      const body = Buffer.from(await res.arrayBuffer());
+      const type = res.headers.get('content-type') || '';
+      const looksLikeJson = /json|text\/html/i.test(type);
+      return { res, body, type, looksLikeJson, ok: res.ok && !looksLikeJson };
+    };
 
-    // 说好是视频/图片，回来的却是一段 JSON —— 多半是鉴权或参数出了问题。
-    // 存下来只会得到一个打不开的文件，不如当场说清楚。
-    const type = res.headers.get('content-type') || '';
-    if (/json|text\/html/i.test(type)) {
+    let got = await attempt(downloadHeaders);
+    if (!got.ok && !downloadHeaders) {
+      const auth = authHeadersForUrl(url);
+      if (Object.keys(auth).length) {
+        onEvent?.({ type: 'note', message: '这个地址要鉴权，带上密钥重试一次…' });
+        const retried = await attempt(auth);
+        if (retried.ok) got = retried;
+      }
+    }
+
+    if (!got.res.ok) {
       throw new Error(
-        `下载到的不是媒体文件（Content-Type: ${type}）：${buf.toString('utf8').slice(0, 200)}`
+        `下载失败 HTTP ${got.res.status}：${url}\n服务端说：${got.body.toString('utf8').slice(0, 200)}`
       );
     }
+    if (got.looksLikeJson) {
+      // 说好是视频/图片，回来的却是一段 JSON。存下来只会得到一个打不开的文件。
+      throw new Error(
+        `下载到的不是媒体文件（Content-Type: ${got.type}）：${got.body.toString('utf8').slice(0, 200)}\n` +
+          `如果这是需要登录才能取的地址，先去「服务商与密钥」把对应那家的密钥配好，再补入一次。`
+      );
+    }
+    buf = got.body;
   }
   fs.writeFileSync(destPath, buf);
   logbus.record({

@@ -103,6 +103,85 @@ export async function send(spec, onEvent) {
   );
 }
 
+/** 取一个域名的可注册主域：files.metaso.cn → metaso.cn */
+function registrableDomain(host) {
+  const parts = String(host || '').split('.');
+  // 够用就行：cn / com.cn 这种两段后缀也能覆盖，不引第三方公共后缀表
+  const twoPart = ['com', 'net', 'org', 'gov', 'edu', 'co'];
+  if (parts.length >= 3 && twoPart.includes(parts[parts.length - 2])) return parts.slice(-3).join('.');
+  return parts.slice(-2).join('.');
+}
+
+/**
+ * 这个下载地址属于哪一家？属于的话，就该带上它的密钥。
+ *
+ * 起因是秘塔：它给的视频地址在 files.metaso.cn 上，而且**取文件也要鉴权** ——
+ * 不带密钥会拿到 {"errCode":401,…}，然后被当成 mp4 存下来。
+ * 多数厂商给的是公网直链，所以不能无脑带；按主域匹配，
+ * 只在"同一家的地址"上带，不会把密钥发给不相干的域名。
+ */
+export function providerForUrl(url) {
+  let host = '';
+  try {
+    host = new URL(url).host;
+  } catch {
+    return null;
+  }
+
+  // IP 地址不做主域匹配：127.0.0.1:11434 和 127.0.0.1:8080 是两个不相干的服务，
+  // 按"同主域"算会把密钥发给隔壁端口。IP 要求连端口一起完全一致。
+  const isIp = /^\[?[0-9a-f:.]+\]?(:\d+)?$/i.test(host) && !/[a-z]/i.test(host.replace(/^\[|\]$/g, '').split(':')[0]);
+  const domain = registrableDomain(host);
+
+  return (
+    PROVIDERS.find((p) => {
+      const base = baseUrlOf(p);
+      if (!base) return false;
+      try {
+        const baseHost = new URL(base).host;
+        return isIp ? baseHost === host : registrableDomain(baseHost) === domain;
+      } catch {
+        return false;
+      }
+    }) || null
+  );
+}
+
+/** 下载这个地址时该带的鉴权头。不属于任何已配置的服务商就返回空。 */
+export function authHeadersForUrl(url) {
+  const provider = providerForUrl(url);
+  if (!provider) return {};
+  try {
+    return buildAuthHeaders(provider);
+  } catch {
+    // 密钥没配齐就别硬塞一个半成品头过去
+    return {};
+  }
+}
+
+/**
+ * 把异步任务的失败原因捞出来。
+ *
+ * 各家把它塞在不同地方，而且经常在对象**末尾** —— 直接截断 JSON 会正好切掉它。
+ * 百炼：output.code / output.message；方舟：error.message；别家五花八门。
+ */
+export function failureReasonForTest(json) {
+  return failureReason(json);
+}
+
+function failureReason(json) {
+  const out = json?.output || json?.data || json || {};
+  const code = out.code || json?.code || json?.error?.code || '';
+  const message =
+    out.message ||
+    json?.message ||
+    json?.error?.message ||
+    out.task_status_msg ||
+    '';
+  if (!code && !message) return '';
+  return [code, message].filter(Boolean).join(' — ');
+}
+
 function getByPath(obj, path) {
   if (!path) return undefined;
   return path.split('.').reduce((acc, k) => (acc == null ? undefined : acc[k]), obj);
@@ -141,7 +220,14 @@ export async function sendAsync(spec, onEvent) {
       onEvent?.({ type: 'poll', attempt, state, status: res.status });
       if (success.has(state)) return { done: true, value: res };
       if (failure.has(state)) {
-        throw new HttpError(`任务失败：${state} — ${JSON.stringify(res.json).slice(0, 300)}`);
+        // 原因要排在最前面。
+        // 早期版本直接甩 JSON.stringify(...).slice(0, 300)，而百炼把 code / message
+        // 放在对象末尾 —— 一截就正好把最关键的那句话切掉，用户看到的是
+        // 「…"message":"Field re」，等于什么都没说。
+        const why = failureReason(res.json);
+        throw new HttpError(
+          `任务失败（${state}）${why ? `：${why}` : ''}\n完整响应：${JSON.stringify(res.json).slice(0, 600)}`
+        );
       }
       return { done: false, value: res.json };
     },

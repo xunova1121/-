@@ -95,6 +95,24 @@ function endpoint(provider, key, fallback) {
   return interpolate(raw, provider);
 }
 
+/**
+ * 百炼这一族只认公网 URL，不收 base64 内联图。
+ *
+ * 而本应用默认把本地图转成 data URI 交给模型（Windows 用户不必先去开一个 OSS 桶）——
+ * 两者一撞，任务会**提交成功**然后在轮询里以 InvalidParameter 失败，
+ * 白等一轮，报错里也看不出是这个原因。所以在发出去之前就拦下来，把出路说清楚。
+ */
+function requirePublicUrl(url, label, what) {
+  if (!url || !String(url).startsWith('data:')) return;
+  throw new Error(
+    `${label}：阿里云百炼的${what}只认**公网 URL**，不收 base64 内联图，而这里给的是本地图转的 data URI。\n` +
+      `两条路：\n` +
+      `① 在「设置 → 图片上传网关」里填一个接收 multipart 上传、返回 {url} 的接口（自建图床或 OSS 直传），` +
+      `配好之后镜头图会先上传再把公网地址交给百炼；\n` +
+      `② 把这条能力换成收 base64 的那几家 —— 火山方舟、秘塔、MiniMax 都可以。`
+  );
+}
+
 function fail(label, res) {
   throw new Error(`${label} 失败（HTTP ${res.status}）：${diagnose(res)}`);
 }
@@ -206,6 +224,7 @@ export async function generateImage({
       const input = { prompt, negative_prompt: negative };
       if (refImages.length) {
         // 万相的图生图走 ref_img；一并把强度调低，保人设又不至于完全复制原图
+        requirePublicUrl(refImages[0], label, '参考图生图');
         input.ref_img = refImages[0];
       }
       const parameters = { size, n: 1 };
@@ -426,6 +445,10 @@ export async function generateVideo({
   let spec;
   switch (family) {
     case 'dashscope':
+      // 百炼只认公网 URL，不收 base64 内联图。不先拦一下的话，
+      // 任务会提交成功、然后在轮询里以 InvalidParameter 失败 ——
+      // 白等一轮，报错还看不出是这个原因。
+      requirePublicUrl(images[0], label, '图生视频');
       spec = {
         url: endpoint(provider, 'i2v', '{{baseUrl}}/api/v1/services/aigc/video-generation/video-synthesis'),
         headers: { 'X-DashScope-Async': 'enable' },
