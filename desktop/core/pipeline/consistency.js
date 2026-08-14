@@ -22,6 +22,7 @@ import * as adapters from '../providers/adapters.js';
 import * as settings from '../settings.js';
 import * as continuity from './continuity.js';
 import * as skills from '../skills.js';
+import * as speaker from './speaker.js';
 import * as variants from './variants.js';
 import { resolveStyle } from '../styles.js';
 
@@ -343,8 +344,17 @@ export function assembleVideoPrompt(bible, shot, { maxChars = 380, prev = null, 
   if (sk.motion.length) parts.push(...sk.motion);
   else parts.push(shot.motion || '镜头缓慢推进');
 
-  // 有台词的镜头提醒模型留出说话的节奏，别让人物僵立
-  if (shot.dialogue?.trim()) parts.push('人物有台词，口型与表情自然');
+  // ── 嘴要不要动，必须明说 ──
+  //
+  // 不说的话，视频模型默认会让人物讲话 —— 于是没有台词的镜头里，
+  // 角色也在那儿一张一合地"瞎说"，配上无声的音轨，像默片配错了画。
+  // 反过来，有台词的镜头不提醒，人物又会僵着不动。
+  //
+  // 判断依据是**净台词**而不是 dialogue 字段本身：
+  // "（远处传来汽笛声）"写在台词字段里，那不是台词，嘴不该动。
+  const said = speaker.spokenText(shot.dialogue);
+  if (said.kind === 'speech') parts.push('人物在说话，口型与表情自然');
+  else parts.push('人物不说话，嘴部保持闭合，不要出现说话口型');
 
   // 衔接约束放在最后：它是对整段的约束，不是画面内容。
   // 放前面会挤掉"演什么"的权重 —— 那才是这一镜的主语。

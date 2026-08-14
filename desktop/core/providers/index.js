@@ -256,7 +256,7 @@ export async function sendAsync(spec, onEvent) {
  * probe.capability 标出来，按对应的路由替换。
  */
 const PROBE_ROUTES = {
-  chat: [['chatProvider', 'chatModel'], ['visionProvider', 'visionModel']],
+  chat: [['chatProvider', 'chatModel'], ['directorProvider', 'directorModel'], ['visionProvider', 'visionModel']],
   video: [['videoProvider', 'videoModel']],
   image: [['imageProvider', 'imageModel']],
   tts: [['ttsProvider', 'ttsModel']]
@@ -292,6 +292,9 @@ export async function probeRouting() {
   const s = settings.all();
   const caps = {
     chat: s.chatProvider,
+    // 调度可以单配一家（挑技法、绑说话人、分章走它）。没配就是跟着剧本模型，
+    // 那一档下面会被去重掉，不会白探一次
+    director: s.directorProvider || s.chatProvider,
     vision: s.visionProvider,
     image: s.imageProvider,
     video: s.videoProvider,

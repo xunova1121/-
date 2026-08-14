@@ -1301,6 +1301,13 @@ export function resolvedRouting() {
   const s = settings.all();
   return {
     chat: { provider: s.chatProvider, model: s.chatModel },
+    // 调度（挑技法 / 绑说话人 / 分章）。没单独配就跟着剧本模型走 ——
+    // 多一个必填项换来的抱怨，比这点质量提升多得多
+    director: {
+      provider: s.directorProvider || s.chatProvider,
+      model: s.directorModel || s.chatModel,
+      followsChat: !s.directorProvider && !s.directorModel
+    },
     vision: { provider: s.visionProvider, model: s.visionModel },
     image: { provider: s.imageProvider, model: s.imageModel },
     video: { provider: s.videoProvider, model: s.videoModel },

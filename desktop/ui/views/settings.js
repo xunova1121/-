@@ -13,6 +13,16 @@ function statusGlyph(status) {
 
 const CAP_META = [
   ['chat', '剧本与分镜', 'chatProvider', 'chatModel', '读剧本、拆分镜、写设定集。长文本能力优先'],
+  /**
+   * 调度和剧本分开，是因为要的能力不是一回事：
+   * 写剧本是**生成**，写得顺就行；调度是**判断** —— 端着全片二十镜，
+   * 判断"这两镜是不是同一场戏"、"这句话是谁说的"。
+   * 便宜模型在判断题上会稳定地犯同一种错：每镜孤立地看都像那么回事，连起来全是矛盾。
+   * 调用次数又极少（全片各一次），所以这一行值得单配一个更聪明的。
+   */
+  ['chat', '调度（挑技法 / 绑说话人 / 分章）', 'directorProvider', 'directorModel',
+    '推荐火山方舟的 doubao-seed-1-6-thinking-250615（思考型）；DeepSeek R1、Qwen Max 也合适。不配就跟随剧本模型',
+    { follow: true }],
   ['vision', '一致性复核', 'visionProvider', 'visionModel', '把成图和角色设定图放一起比对，必须选带视觉的模型'],
   ['t2i', '出图', 'imageProvider', 'imageModel', '角色设定图和每一镜的画面'],
   ['i2v', '视频', 'videoProvider', 'videoModel', '以镜头图为首帧生成视频片段'],
@@ -52,11 +62,18 @@ export default {
       return r;
     }
 
-    for (const [cap, label, provKey, modelKey, hint] of CAP_META) {
+    for (const [cap, label, provKey, modelKey, hint, opts = {}] of CAP_META) {
       const candidates = providers.filter((p) => (p.capabilities || []).includes(cap));
       const modelSel = h('select', { onchange: (e) => (pending[modelKey] = e.target.value) });
 
       const paintModels = (providerId) => {
+        // 「跟随剧本模型」这一档没有自己的模型可选 —— 摆一个占位，
+        // 免得看起来像"还没选模型"
+        if (opts.follow && !providerId) {
+          modelSel.innerHTML = '';
+          modelSel.append(h('option', { value: '', selected: true }, '（跟随剧本模型）'));
+          return;
+        }
         const p = providers.find((x) => x.id === providerId);
         const models = (p?.models || []).filter((m) => !m.capability || m.capability === cap || cap === 'chat');
         modelSel.innerHTML = '';
@@ -95,6 +112,9 @@ export default {
             if (cap === 'i2v') repaintResolutions();
           }
         },
+        opts.follow
+          ? h('option', { value: '', selected: !settings[provKey] }, '跟随剧本模型')
+          : null,
         candidates.map((p) =>
           h('option', { value: p.id, selected: p.id === settings[provKey] },
             `${p.name}${p.credentials?.ready ? '' : ' ⚠ 未配密钥'}`)

@@ -559,6 +559,22 @@ async function handleApi(req, res, url, { lan = false } = {}) {
       return undefined;
     }
 
+    // ── 把台词绑到说话人身上 ──
+    // 先按台词署名和描述提示确定性地定（不花钱、比模型准），
+    // 只有"在场不止一个人又没线索"的那几条才交给调度模型按上下文判。
+    if (b && c === 'speakers' && d === 'bind' && method === 'POST') {
+      const opts = await readBody(req);
+      const stream = ndjson(res);
+      req.on('close', () => stream.end());
+      try {
+        const { project } = await studio.autoBindSpeakers(b, { ...opts, onEvent: (ev) => stream.send(ev) });
+        stream.end({ type: 'finished', project });
+      } catch (err) {
+        stream.end({ type: 'error', message: err.message });
+      }
+      return undefined;
+    }
+
     // ── 单镜重出：图或视频，可临时换服务商/模型 ──
     if (b && c === 'shots' && d && e === 'regenerate' && method === 'POST') {
       const opts = await readBody(req);

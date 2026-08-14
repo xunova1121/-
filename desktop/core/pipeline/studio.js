@@ -18,6 +18,7 @@ import * as catalog from '../providers/catalog.js';
 import { authHeadersForUrl } from '../providers/index.js';
 import * as consistency from './consistency.js';
 import * as continuity from './continuity.js';
+import * as speakerLib from './speaker.js';
 import * as ffmpeg from '../ffmpeg.js';
 import * as imghash from '../imghash.js';
 import { safeFileName } from '../paths.js';
@@ -488,6 +489,18 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
       p.shots = shots;
       p.stageStatus.script = 'done';
     }
+
+    // 顺手把台词署名认一遍：模型经常把说话人写在台词里
+    //（dialogue = "阿澜：设备正常。" 而 speaker 空着），留着它配音会连"阿澜冒号"一起念。
+    // 这一层纯文本判断，不花一次调用，所以拆完就做；
+    // 判不出来的那些留给「自动绑说话人」按钮去问模型。
+    for (const d of speakerLib.bindAll(p)) {
+      const t = p.shots.find((x) => x.id === d.id);
+      if (!t || !d.confident) continue;
+      t.speaker = d.speaker;
+      t.speakerBy = d.by;
+      if (d.line && d.line !== String(t.dialogue || '').trim()) t.dialogue = d.line;
+    }
     return p;
   });
 
@@ -580,6 +593,9 @@ export function updateShot(projectId, shotId, patch = {}) {
 
   if (changed.length) {
     shot.editedAt = new Date().toISOString();
+    // 手选过说话人就记一笔。没这一笔的话，"手动选了旁白"和"还没绑过"
+    // 在数据上长得一模一样（都是空字符串），自动绑定会把你选的旁白改掉
+    if (changed.includes('speaker')) shot.speakerBy = 'manual';
     // 手改过的镜头，上一次的一致性分数是对**旧描述**打的，留着会误导。
     // 产物本身不删 —— 用户可能只是修个错别字，没必要把已经出好的图弄没。
     // 时长和衔接关系改的不是画面内容，出好的图还是那张图，分数依然作数
@@ -681,7 +697,7 @@ export async function suggestSkills(projectId, { only = null, onEvent } = {}) {
     type: 'stage',
     stage: 'script',
     status: 'running',
-    message: `让剧本模型 ${r.chat.model}（${r.chat.provider}）给 ${shots.length} 镜挑技法…`
+    message: `让调度模型 ${r.director.model}（${r.director.provider}${r.director.followsChat ? '，跟随剧本模型' : ''}）给 ${shots.length} 镜挑技法…`
   });
 
   const forModel = (s) => ({
@@ -705,8 +721,8 @@ export async function suggestSkills(projectId, { only = null, onEvent } = {}) {
   );
 
   const { text } = await adapters.chat({
-    providerId: r.chat.provider,
-    model: r.chat.model,
+    providerId: r.director.provider,
+    model: r.director.model,
     system: SKILL_PROMPT.replace('{{SKILLS}}', listing),
     user: JSON.stringify(payload),
     temperature: 0.3,
@@ -855,8 +871,9 @@ export async function smartSplitChapters(projectId, { targetChars = 3000, onEven
     onEvent?.({ type: 'note', message: `第 ${i + 1}/${windows.length} 段（${win.start}~${win.end} 字）…` });
     try {
       const { text } = await adapters.chat({
-        providerId: r.chat.provider,
-        model: r.chat.model,
+        // 断章是判断题不是生成题，和挑技法、绑说话人一样走调度模型
+        providerId: r.director.provider,
+        model: r.director.model,
         system: CHAPTER_PROMPT.replace('{{TARGET}}', String(targetChars)),
         user: win.text,
         temperature: 0.2,
@@ -1995,16 +2012,166 @@ export function assignVoices(projectId, { force = false } = {}) {
   return { assigned: assigned.length, voices: assigned, narrator: store.read(projectId).bible.narratorVoice };
 }
 
-/** 这一镜的台词该用谁的声音 */
+const SPEAKER_PROMPT = `你是编剧。下面是一部片子的分镜表，**按顺序**给出。
+
+其中标了 need:true 的镜头有台词，但从台词和描述里看不出是谁说的。判断这几条各是谁说的。
+
+判断依据（按可靠性排序）：
+- **对话是轮流的**：上一句甲说完，紧接着这一句通常是乙回；连着两句同一个人说的比较少见
+- 台词里的称呼：台词是"周叔，你看那边"，那说话的就**不是**周叔
+- 画面描述里谁在做动作、谁在开口、镜头对着谁
+- 确实是画外解说、没有具体说话人的，speaker 填"旁白"
+
+规矩：
+- 只能用下面给出的角色名或"旁白"，**不要自创**；
+- 只回答 need 为 true 的镜头，其余是给你看上下文的（它们的 speaker 已经定了）。
+
+严格只输出 JSON，不要解释、不要代码块：
+
+{"shots":[{"id":"分镜 id，原样照抄","speaker":"角色名或旁白","why":"一句话说明依据"}]}
+
+这部片子里的角色：
+{{CAST}}`;
+
+/**
+ * 把台词绑到说话人身上。
+ *
+ * 两层，先便宜的后贵的：
+ *
+ *   ① **确定性**：台词自带的署名、画面描述里的提示、这一镜只有一个人 ——
+ *      这三种线索一分钱不花就能定，而且比模型准（它们是明写在文本里的事实）。
+ *      顺手把署名从台词里摘掉：留着它，配音会把"阿澜冒号"一起念出来。
+ *   ② **模型**：只有"在场不止一个人、又没有任何线索"的那几条才发给调度模型。
+ *      这类题的关键是**上下文**（对话轮流说），所以整条分镜表都发过去，
+ *      只标出哪几条要判 —— 单看一条台词，神仙也判不出是谁说的。
+ *
+ * 不动已经确定的：你手选过的说话人，和台词里白纸黑字写着的署名，都不该被模型改掉。
+ */
+export async function autoBindSpeakers(projectId, { useModel = true, onEvent } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const withLines = (project.shots || []).filter((s) => String(s.dialogue || '').trim());
+  if (!withLines.length) {
+    onEvent?.({ type: 'stage', stage: 'voice', status: 'done', message: '全片没有台词' });
+    return { project, bound: [] };
+  }
+
+  // ── 第一层：确定性 ──
+  const decided = speakerLib.bindAll(project);
+  const bound = [];
+  store.update(projectId, (p) => {
+    for (const d of decided) {
+      const t = p.shots.find((s) => s.id === d.id);
+      if (!t) continue;
+      if (d.confident) {
+        t.speaker = d.speaker;
+        t.speakerBy = d.by;
+        // 署名摘出来之后，台词字段留净台词 —— 不然界面上会看到
+        //「阿澜：阿澜：设备正常」这种重复（说话人已经单独一栏了）
+        if (d.line && d.line !== String(t.dialogue || '').trim()) t.dialogue = d.line;
+        bound.push({ index: t.index, speaker: t.speaker, by: d.by });
+      } else {
+        t.speakerBy = d.by;
+      }
+    }
+    return p;
+  });
+
+  const unsure = decided.filter((d) => !d.confident);
+  onEvent?.({
+    type: 'note',
+    message: `按台词署名和描述提示定了 ${bound.length} 条${unsure.length ? `，还有 ${unsure.length} 条看不出是谁说的` : ''}`
+  });
+
+  // ── 第二层：只把定不下来的交给模型 ──
+  if (unsure.length && useModel) {
+    const r = routing();
+    const fresh = store.read(projectId);
+    const cast = (fresh.bible?.characters || []).map((c) => `  ${c.name}${c.role ? `（${c.role}）` : ''}`).join('\n');
+    const need = new Set(unsure.map((d) => d.id));
+    const payload = withLines.map((s) => {
+      const cur = fresh.shots.find((x) => x.id === s.id) || s;
+      return {
+        id: s.id,
+        index: s.index,
+        scene: s.scene,
+        characters: s.characters,
+        description: s.description,
+        dialogue: speakerLib.spokenText(cur.dialogue).text,
+        speaker: need.has(s.id) ? '' : cur.speaker || '旁白',
+        need: need.has(s.id)
+      };
+    });
+
+    onEvent?.({
+      type: 'note',
+      message: `把这 ${unsure.length} 条连同上下文交给调度模型 ${r.director.model}（${r.director.provider}）…`
+    });
+    try {
+      const { text } = await adapters.chat({
+        providerId: r.director.provider,
+        model: r.director.model,
+        system: SPEAKER_PROMPT.replace('{{CAST}}', cast || '  （设定集里还没有角色）'),
+        user: JSON.stringify(payload),
+        temperature: 0.2,
+        jsonMode: true,
+        label: '绑说话人'
+      });
+      const picks = consistency.extractJSON(text)?.shots || [];
+      store.update(projectId, (p) => {
+        for (const pick of picks) {
+          if (!need.has(pick.id)) continue; // 只认要判的那几条
+          const t = p.shots.find((s) => s.id === pick.id);
+          if (!t) continue;
+          const hit = speakerLib.matchCharacter(pick.speaker, p.bible?.characters || []);
+          // 对不上设定集的名字就当旁白，而不是把一个不存在的名字写进去 ——
+          // 那样配音时会静悄悄退回旁白，你还以为绑上了
+          t.speaker = hit?.name || '';
+          t.speakerBy = 'model';
+          t.speakerWhy = String(pick.why || '').trim();
+          bound.push({ index: t.index, speaker: t.speaker, by: 'model', why: t.speakerWhy });
+        }
+        return p;
+      });
+    } catch (err) {
+      onEvent?.({ type: 'note', message: `模型这一层没跑成：${err.message}。定不下来的按旁白算` });
+    }
+  }
+
+  for (const b of bound.slice(0, 40)) {
+    onEvent?.({
+      type: 'note',
+      message: `第 ${b.index} 镜：${b.speaker || '旁白'}（${speakerLib.BY_LABELS[b.by] || b.by}${b.why ? `：${b.why}` : ''}）`
+    });
+  }
+  onEvent?.({
+    type: 'stage',
+    stage: 'voice',
+    status: 'done',
+    message: `${bound.length}/${withLines.length} 条台词已绑好说话人。不对的去分镜里手改，手改过的不会再被覆盖`
+  });
+  return { project: store.read(projectId), bound };
+}
+
+/**
+ * 这一镜的台词该用谁的声音、念哪一句。
+ *
+ * 旧版本的兜底是"没标 speaker 就取出场角色里的第一个" —— 那是错的：
+ * 两个人在场时，那就是一半几率挂错人，而且错得毫无提示。
+ * 现在按线索一层层找（见 pipeline/speaker.js），找不到就明确算旁白。
+ */
 export function voiceForShot(project, shot) {
   const chars = project.bible?.characters || [];
-  // speaker 优先；没标就退到出场角色里的第一个；都没有就是旁白
-  const speaker = shot.speaker?.trim()
-    ? chars.find((c) => c.name === shot.speaker.trim())
-    : chars.find((c) => (shot.characters || []).includes(c.name));
+  const r = speakerLib.resolve(project, shot);
+  const hit = r.speaker ? chars.find((c) => c.name === r.speaker) : null;
+  const said = speakerLib.spokenText(shot.dialogue);
   return {
-    voice: speaker?.voice || project.bible?.narratorVoice || '',
-    who: speaker?.name || '旁白'
+    voice: hit?.voice || project.bible?.narratorVoice || '',
+    who: hit?.name || '旁白',
+    // 念的是净台词：署名和表演提示都摘掉，否则会念出"阿澜冒号设备正常"
+    text: said.text,
+    kind: said.kind,
+    by: r.by
   };
 }
 
@@ -2030,7 +2197,21 @@ export async function generateVoice(projectId, { onEvent } = {}) {
   }
 
   const fresh = store.read(projectId);
-  const targets = fresh.shots.filter((s) => s.dialogue?.trim() && !s.audioPath);
+  // 只给**真台词**配音。台词字段里塞的音效提示（"（远处传来汽笛声）"）
+  // 要是丢给 TTS，就会出现"画面里没人张嘴，声音里却在念汽笛声"
+  const skipped = [];
+  const targets = fresh.shots.filter((s) => {
+    if (s.audioPath || !s.dialogue?.trim()) return false;
+    const said = speakerLib.spokenText(s.dialogue);
+    if (said.kind !== 'speech') {
+      skipped.push({ index: s.index, why: said.dropped[0] || s.dialogue.trim() });
+      return false;
+    }
+    return true;
+  });
+  for (const sk of skipped.slice(0, 10)) {
+    onEvent?.({ type: 'note', message: `第 ${sk.index} 镜跳过配音：「${sk.why}」是音效/提示，不是台词` });
+  }
   if (!targets.length) {
     onEvent?.({ type: 'stage', stage: 'voice', status: 'done', message: '没有需要配音的台词' });
     return project;
@@ -2039,12 +2220,13 @@ export async function generateVoice(projectId, { onEvent } = {}) {
   onEvent?.({ type: 'stage', stage: 'voice', status: 'running', message: `待配音 ${targets.length} 条` });
   for (const shot of targets) {
     try {
-      const { voice, who } = voiceForShot(fresh, shot);
+      const { voice, who, text } = voiceForShot(fresh, shot);
       onEvent?.({ type: 'shot', shotId: shot.id, status: 'running', message: `第 ${shot.index} 镜配音（${who}${voice ? `·${voice}` : ''}）…` });
       const speech = await adapters.synthesizeSpeech({
         providerId: r.tts.provider,
         model: r.tts.model,
-        text: shot.dialogue,
+        // 净台词。带着"阿澜："或者"（低声）"发过去，TTS 会一字不落地念出来
+        text,
         // 角色的音色。不传的话全片是同一个声音 —— 这个漏洞以前一直在
         ...(voice ? { voice } : {}),
         label: `配音 #${shot.index}·${who}`
@@ -2105,7 +2287,8 @@ export function buildSubtitles(project, { policy = 'trim' } = {}) {
     const span = policy === 'trim'
       ? Number(shot.duration) || Number(shot.actualDuration) || 0
       : Number(shot.actualDuration) || Number(shot.duration) || 0;
-    const text = (shot.dialogue || '').trim();
+    // 字幕显示的也是净台词：署名单独有 speaker 字段，念不出来的括注更不该显示
+    const text = speakerLib.spokenText(shot.dialogue).text;
     if (text) {
       // 字幕不占满整镜：结尾留 0.15 秒，避免和下一条贴在一起闪
       cues.push({ start: at, end: Math.max(at + 0.5, at + span - 0.15), text, speaker: shot.speakerUsed || shot.speaker || '' });

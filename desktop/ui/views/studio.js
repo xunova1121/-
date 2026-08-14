@@ -11,6 +11,21 @@ import { ratioLabel } from '../ratios.js';
 import { skillPicker, customSkillForm } from '../skill-picker.js';
 
 /**
+ * 说话人是**凭什么**定下来的。显示它是有用的：
+ * "模型按上下文判的"值得你回头看一眼，"台词里带的署名"基本不用管。
+ */
+const SPEAKER_BY = {
+  'dialogue-tag': '台词署名',
+  'description-cue': '描述提示',
+  'only-one': '独角戏',
+  'narrator-marked': '标了旁白',
+  ambiguous: '判不出',
+  'fallback-narrator': '无线索',
+  model: '模型判的',
+  existing: '拆分镜时标的'
+};
+
+/**
  * 两个场景名算不算同一个地方（和后端 pipeline/continuity.js 里那条规则一致）。
  * 界面上要在**发请求之前**就把衔接关系显示出来，所以这条规则两边各有一份。
  */
@@ -1270,7 +1285,7 @@ export default {
               ),
               shot.dialogue
                 ? h('div', { class: 'shot-desc', style: 'color:var(--ink-faint)' },
-                    shot.speaker ? `${shot.speaker}：「${shot.dialogue}」` : `旁白：「${shot.dialogue}」`)
+                    `${shot.speaker || '旁白'}：「${shot.dialogue}」${shot.speakerBy && shot.speakerBy !== 'manual' ? `（${SPEAKER_BY[shot.speakerBy] || shot.speakerBy}）` : ''}`)
                 : null,
               // 单镜重出：批量出图总有零星失败或不满意的，为几张图重跑整个阶段既慢又要重烧。
               // 只摆当前这一步用得上的参数 —— 在出图那步看到"秒"和视频模型，
@@ -1434,6 +1449,40 @@ export default {
       }
     }, '让模型挑技法');
 
+    /**
+     * 把台词绑到说话人身上。
+     *
+     * 不绑的后果很具体：配音全片一个声音，两个人对话时观众分不出谁在说话。
+     * 而让人一条条点下拉框也不现实 —— 二十镜十二条台词，谁点得下去。
+     * 先按台词署名和描述提示确定性地定（不花钱），剩下定不下来的才交给调度模型。
+     */
+    const bindStatus = h('span', { class: 'field-hint', style: 'margin:0' });
+    const bindBtn = h('button', {
+      class: 'btn ghost sm',
+      title: '按台词里的署名、画面描述里的提示自动认人；只有在场不止一个人又没线索的才交给调度模型按上下文判。手选过的不会被覆盖',
+      onclick: async () => {
+        const lines = (project.shots || []).filter((s) => s.dialogue?.trim());
+        if (!lines.length) return toast('全片没有台词', 'err');
+        bindBtn.disabled = true;
+        let err = null;
+        try {
+          await stream(`/projects/${project.id}/speakers/bind`, {}, (ev) => {
+            if (ev.type === 'note' || ev.type === 'stage') bindStatus.textContent = ev.message || '';
+            if (ev.type === 'error') err = ev.message;
+            if (ev.type === 'finished' && ev.project) project = ev.project;
+          });
+          if (err) throw new Error(err);
+          toast('说话人已绑好，不对的展开分镜手改', 'ok');
+          paintShots();
+        } catch (e) {
+          bindStatus.textContent = e.message;
+          toast(e.message, 'err');
+        } finally {
+          bindBtn.disabled = false;
+        }
+      }
+    }, '自动绑说话人');
+
     const shotBadge = h('span', {});
     const shotHint = h('p', { class: 'panel-hint' });
     const stageName = h('span', { class: 'badge beam' });
@@ -1446,7 +1495,7 @@ export default {
         '「一致性」是把成图和角色设定图交给多模态模型比对后的分数。低于阈值会自动换种子重试；不满意的展开「单独重出」，还能临时换一家模型 —— 有些镜头就是某家画不好，换一家比反复重试有效。',
       video:
         '以镜头图为首帧、配上从设定集装配的提示词生成片段。哪一镜在跑、轮询到第几次都会实时显示在缩略图上；失败的那几镜可以单独重出，还能临时换清晰度或换一家。',
-      voice: '按台词逐条合成配音。没有台词的镜头会跳过。',
+      voice: '按台词逐条合成配音，用的是各角色分到的音色。台词字段里写的音效提示（"（远处传来汽笛声）"）会被识别出来跳过 —— 那不是台词，念出来就成了"没人张嘴却在说话"。',
       compose: 'FFmpeg 按分镜顺序拼接，按时长策略裁剪。这一步不花钱，跑错了重跑就行。'
     };
 
@@ -1483,7 +1532,8 @@ export default {
             : null
         ),
         shotHint,
-        h('div', { class: 'inline', style: 'margin-bottom:10px;flex-wrap:wrap' }, suggestBtn, suggestStatus),
+        h('div', { class: 'inline', style: 'margin-bottom:10px;flex-wrap:wrap' },
+          suggestBtn, suggestStatus, bindBtn, bindStatus),
         shotHost
       )
     );

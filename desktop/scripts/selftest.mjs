@@ -329,6 +329,18 @@ const upstream = http.createServer((req, res) => {
             why: i === 0 ? '情绪压迫，用仰拍加伦勃朗光' : '夜里的对话戏'
           }))
         });
+      } else if (system.includes('编剧')) {
+        // 绑说话人：只有"在场不止一个人又没线索"的那几条会发过来。
+        // 故意也回一条 need=false 的，验证服务端不会拿它去覆盖已经定了的
+        const shots = JSON.parse(body.messages?.[1]?.content || '[]');
+        upstream.lastSpeakerPayload = shots;
+        content = JSON.stringify({
+          shots: shots.map((x) => ({
+            id: x.id,
+            speaker: x.need ? '老周' : '阿澜',
+            why: '上一句是阿澜说的，这句是回话'
+          }))
+        });
       } else if (system.includes('小说编辑')) {
         // 分章：回原文里真实存在的片段当锚句。
         // 模型要是"顺手润色"了引文，锚点就定位不到 —— 那条路单独有检查。
@@ -1754,7 +1766,7 @@ section('让模型按描述挑技法');
     JSON.stringify(evs.filter((e) => /顺场/.test(e.message || '')).map((e) => e.message)));
   // 出问题第一件要知道的事就是"这活儿是谁干的"
   check('进度里说清楚是哪个模型在挑',
-    evs.some((e) => /剧本模型 .+挑技法/.test(e.message || '')),
+    evs.some((e) => /调度模型 .+挑技法/.test(e.message || '')),
     JSON.stringify(evs.filter((e) => e.type === 'stage').map((e) => e.message)));
 }
 
@@ -1966,6 +1978,151 @@ section('每个角色一个音色');
   store.update(vp.id, (p) => { p.shots[0].actualDuration = 5; return p; });
   const keepCues = studioModule.buildSubtitles(store.read(vp.id), { policy: 'keep' });
   check('keep 策略下按模型实出的时长排', keepCues[1].start === 5, JSON.stringify(keepCues.map((c) => c.start)));
+}
+
+// 台词挂错人的代价很直接：两个人对话却是同一个声音，观众分不出谁在说话。
+// 而让人一条条点下拉框也不现实 —— 二十镜十二条台词，谁点得下去。
+section('台词绑谁说的');
+{
+  const spk = await import('../core/pipeline/speaker.js');
+
+  // ── 从台词文本里把署名拆出来 ──
+  const cases = [
+    ['阿澜：设备正常。', '阿澜', '设备正常。'],
+    ['阿澜说：“设备正常。”', '阿澜', '设备正常。'],
+    ['阿澜低声道：设备正常。', '阿澜', '设备正常。'],
+    ['“设备正常。”阿澜说', '阿澜', '设备正常。'],
+    ['【阿澜】设备正常。', '阿澜', '设备正常。'],
+    ['旁白：三日后。', '旁白', '三日后。']
+  ];
+  for (const [raw, who, line] of cases) {
+    const got = spk.parseAttribution(raw);
+    check(`拆得出署名：${raw}`, got.who === who && got.line === line, JSON.stringify(got));
+  }
+  check('拆不出来就原样留着，不瞎猜',
+    spk.parseAttribution('设备正常。').who === '' , JSON.stringify(spk.parseAttribution('设备正常。')));
+
+  // ── 名字对不上设定集是"静悄悄退回旁白"的主要来源 ──
+  const cast = [{ name: '老周', appearance: '白须' }, { name: '阿澜', appearance: '短发' }];
+  check('别名能对上（周叔 → 老周）', spk.matchCharacter('周叔', cast)?.name === '老周');
+  check('剥掉称谓前后缀再比（"周" → 老周）', spk.matchCharacter('周', cast)?.name === '老周');
+  // 同核的人不止一个时，指谁都说不准 —— 宁可判不出，也不能挑一个挂上去
+  check('称呼有歧义时不认',
+    spk.matchCharacter('周', [{ name: '老周' }, { name: '周叔' }]) === null);
+  check('不相干的名字不会被单字带上',
+    spk.matchCharacter('周', [{ name: '周边小贩' }]) === null);
+  check('显式别名字段也认',
+    spk.matchCharacter('澜姐', [{ name: '阿澜', aliases: ['澜姐'] }])?.name === '阿澜');
+
+  // ── "没有台词还瞎说"：台词字段里塞的根本不是台词 ──
+  check('音效提示不是台词，不配音',
+    spk.spokenText('（远处传来汽笛声）').kind === 'sound',
+    JSON.stringify(spk.spokenText('（远处传来汽笛声）')));
+  check('占位符不是台词', spk.spokenText('无').kind === 'sound');
+  check('空台词就是空', spk.spokenText('').kind === 'empty');
+
+  // ── "有台词还说不清楚"：署名和表演提示会被一字不落地念出来 ──
+  check('念的是净台词，不带署名',
+    spk.spokenText('阿澜：设备正常。').text === '设备正常。',
+    spk.spokenText('阿澜：设备正常。').text);
+  check('句中的表演提示也摘掉',
+    spk.spokenText('设备正常（顿了顿）后面呢').text === '设备正常后面呢',
+    spk.spokenText('设备正常（顿了顿）后面呢').text);
+  check('一长串省略号收成一个，不然 TTS 会硬念"点点点"',
+    spk.spokenText('这……。。。。算了').text === '这……算了',
+    spk.spokenText('这……。。。。算了').text);
+
+  // ── 一层层往下找 ──
+  const proj = { bible: { characters: cast } };
+  check('台词自带署名最优先',
+    spk.resolve(proj, { dialogue: '老周：等等', characters: ['阿澜', '老周'] }).by === 'dialogue-tag');
+  check('描述里的提示能认（"老周问道"）',
+    spk.resolve(proj, { dialogue: '等等', description: '老周问道', characters: ['阿澜', '老周'] }).speaker === '老周');
+  check('描述里只是"看着谁"不算说话线索',
+    spk.resolve(proj, { dialogue: '等等', description: '阿澜看着老周的背影', characters: ['阿澜', '老周'] }).by !== 'description-cue');
+  check('这一镜只有一个人就是他',
+    spk.resolve(proj, { dialogue: '等等', characters: ['阿澜'] }).speaker === '阿澜');
+  // 旧兜底是"取出场角色里的第一个"——两个人在场时那是一半几率挂错人
+  const amb = spk.resolve(proj, { dialogue: '等等', characters: ['阿澜', '老周'] });
+  check('在场不止一个又没线索时不猜，交给模型那一层',
+    amb.speaker === '' && amb.by === 'ambiguous' && amb.confident === false, JSON.stringify(amb));
+  check('手选过的不会被线索推翻（包括手动选的旁白）',
+    spk.resolve(proj, { dialogue: '老周：等等', speaker: '', speakerBy: 'manual', characters: ['老周'] }).speaker === '',
+    JSON.stringify(spk.resolve(proj, { dialogue: '老周：等等', speaker: '', speakerBy: 'manual' })));
+  check('音效提示不进模型那一批（不值得为它花一次调用）',
+    spk.resolve(proj, { dialogue: '（汽笛声）', characters: ['阿澜', '老周'] }).confident === true);
+
+  // ── 端到端：确定性一层 + 模型一层 ──
+  const sp = await (
+    await fetch(`${appUrl}/api/projects`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '说话人自检' })
+    })
+  ).json();
+  store.update(sp.id, (p) => {
+    p.bible = { style: { anchor: '国风', negative: '' }, characters: [
+      { name: '阿澜', appearance: '短发', seed: 1, voice: 'v1' },
+      { name: '老周', appearance: '白须', seed: 2, voice: 'v2' }
+    ], scenes: [], props: [], narratorVoice: 'v3' };
+    p.shots = [
+      { id: 's1', index: 1, characters: ['阿澜', '老周'], dialogue: '阿澜：设备正常。', duration: 3 },
+      { id: 's2', index: 2, characters: ['阿澜', '老周'], dialogue: '（远处传来汽笛声）', duration: 3 },
+      { id: 's3', index: 3, characters: ['阿澜', '老周'], dialogue: '等等。', duration: 3 },
+      { id: 's4', index: 4, characters: ['阿澜'], dialogue: '', duration: 3 }
+    ];
+    return p;
+  });
+
+  const bevs = await ndjson(`/projects/${sp.id}/speakers/bind`, {});
+  const bound = bevs.find((e) => e.type === 'finished')?.project;
+  const byId = Object.fromEntries((bound?.shots || []).map((x) => [x.id, x]));
+
+  check('台词里带的署名当场就定了，不花模型调用',
+    byId.s1?.speaker === '阿澜' && byId.s1?.speakerBy === 'dialogue-tag', JSON.stringify(byId.s1));
+  check('署名从台词里摘掉了（不然配音会念"阿澜冒号"）',
+    byId.s1?.dialogue === '设备正常。', byId.s1?.dialogue);
+  check('音效提示不绑说话人', byId.s2?.speakerBy === 'sound-cue', byId.s2?.speakerBy);
+  check('定不下来的那条交给了调度模型',
+    byId.s3?.speaker === '老周' && byId.s3?.speakerBy === 'model', JSON.stringify(byId.s3));
+  check('发给模型时把整条分镜表都给了，只标出要判哪几条',
+    (upstream.lastSpeakerPayload || []).length === 3 &&
+      upstream.lastSpeakerPayload.filter((x) => x.need).length === 1,
+    JSON.stringify((upstream.lastSpeakerPayload || []).map((x) => [x.id, x.need])));
+  check('模型顺手多答的那几条不会覆盖已经定了的',
+    byId.s1?.speaker === '阿澜', JSON.stringify(byId.s1));
+  check('依据会说出来，界面才知道哪条值得回头看',
+    bevs.some((e) => /模型按上下文判的|台词里带的署名/.test(e.message || '')),
+    JSON.stringify(bevs.filter((e) => e.type === 'note').map((e) => e.message).slice(0, 4)));
+
+  // 手选过的不该被再次自动绑定覆盖
+  await fetch(`${appUrl}/api/projects/${sp.id}/shots/s3`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ speaker: '阿澜' })
+  });
+  await ndjson(`/projects/${sp.id}/speakers/bind`, {});
+  const after2 = store.read(sp.id).shots.find((x) => x.id === 's3');
+  check('手改过之后再自动绑一次也不会被改回去',
+    after2.speaker === '阿澜' && after2.speakerBy === 'manual', JSON.stringify(after2));
+
+  // ── 配音只念真台词 ──
+  const fresh2 = store.read(sp.id);
+  check('配音取的是净台词',
+    studioModule.voiceForShot(fresh2, fresh2.shots[0]).text === '设备正常。',
+    studioModule.voiceForShot(fresh2, fresh2.shots[0]).text);
+  check('音效那条在配音这一步会被判成非台词',
+    studioModule.voiceForShot(fresh2, fresh2.shots[1]).kind !== 'speech');
+  check('说话人定了之后取的是他的音色',
+    studioModule.voiceForShot(fresh2, fresh2.shots[0]).voice === 'v1');
+
+  // ── 嘴要不要动，视频提示词里必须明说 ──
+  const silent = consistency.assembleVideoPrompt(fresh2.bible, fresh2.shots[3]);
+  const talking = consistency.assembleVideoPrompt(fresh2.bible, fresh2.shots[0]);
+  check('没台词的镜头明确要求不要出现说话口型（否则人物会在那儿瞎说）',
+    /不要出现说话口型/.test(silent), silent.slice(0, 120));
+  check('有台词的镜头才提口型', /人物在说话/.test(talking) && !/不要出现说话口型/.test(talking),
+    talking.slice(0, 120));
+  check('音效那条不算有台词，嘴也不该动',
+    /不要出现说话口型/.test(consistency.assembleVideoPrompt(fresh2.bible, fresh2.shots[1])));
 }
 
 section('时长控制');
@@ -2431,7 +2588,12 @@ section('开机自动探一遍路由到的服务商');
   const r = await (await fetch(`${appUrl}/api/routing/check`, { method: 'POST' })).json();
   const probesAfter = logbus.list({ limit: 200 }).filter((x) => /自检/.test(x.label || '')).length;
 
-  check('五种能力都给了结论', Object.keys(r.capabilities || {}).length === 5, JSON.stringify(Object.keys(r.capabilities || {})));
+  check('六种能力都给了结论（剧本、调度、复核、出图、视频、配音）',
+    Object.keys(r.capabilities || {}).length === 6, JSON.stringify(Object.keys(r.capabilities || {})));
+  // 调度没单配时跟着剧本模型走，不该多探一次同一家
+  check('调度没单配时跟随剧本模型',
+    r.capabilities?.director?.provider === r.capabilities?.chat?.provider,
+    JSON.stringify([r.capabilities?.director?.provider, r.capabilities?.chat?.provider]));
   check('记了时间（界面要显示"什么时候探的"）', Boolean(Date.parse(r.checkedAt || '')));
   // 这是自动跑的前提：一张图都不许出，一段视频都不许出
   check('自动探测不产生任何媒体（不然开个应用就烧钱）',

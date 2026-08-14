@@ -249,6 +249,13 @@ export const PROVIDERS = [
       { id: 'doubao-1-5-pro-32k-250115', capability: 'chat', label: '豆包 1.5 Pro 32K（剧本分析）' },
       { id: 'doubao-1-5-lite-32k-250115', capability: 'chat', label: '豆包 1.5 Lite 32K（便宜）' },
       { id: 'doubao-seed-1-6-flash-250615', capability: 'chat', label: '豆包 Seed 1.6 Flash（最快）' },
+      {
+        id: 'doubao-seed-1-6-thinking-250615',
+        capability: 'chat',
+        // 挑技法、绑说话人这类"读一遍全片再判断"的活儿，思考型模型强一档；
+        // 而且全片只调用一两次，贵一点也贵不到哪儿去
+        label: '豆包 Seed 1.6 Thinking（思考型，调度首选）'
+      },
       { id: 'doubao-1-5-vision-pro-32k-250115', capability: 'vision', label: '豆包 1.5 Vision Pro' },
       { id: 'deepseek-v3-241226', capability: 'chat', label: 'DeepSeek V3（方舟托管）' },
       { id: 'deepseek-r1-250120', capability: 'chat', label: 'DeepSeek R1（方舟托管，推理强）' },

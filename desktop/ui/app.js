@@ -63,7 +63,7 @@ function paintFooter() {
 /** 顶部信号链：一眼看清每种能力落到了哪家。排错时最先看这里。 */
 function paintChain() {
   const chain = clear($('#chain'));
-  const labels = { chat: '剧本', vision: '复核', image: '出图', video: '视频', tts: '配音' };
+  const labels = { chat: '剧本', director: '调度', vision: '复核', image: '出图', video: '视频', tts: '配音' };
   const providers = Object.fromEntries(state.catalog.providers.map((p) => [p.id, p]));
   for (const [cap, label] of Object.entries(labels)) {
     const route = state.catalog.routing[cap];
@@ -152,7 +152,14 @@ export async function runRoutingCheck({ silent = false } = {}) {
   return state.routingCheck;
 }
 
-const CAP_LABELS = { chat: '剧本与分镜', vision: '一致性复核', image: '出图', video: '视频', tts: '配音' };
+const CAP_LABELS = {
+  chat: '剧本与分镜',
+  director: '调度（挑技法 / 绑说话人）',
+  vision: '一致性复核',
+  image: '出图',
+  video: '视频',
+  tts: '配音'
+};
 
 export function badRoutes() {
   const caps = state.routingCheck?.capabilities || {};
