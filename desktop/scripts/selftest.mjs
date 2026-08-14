@@ -313,6 +313,18 @@ const upstream = http.createServer((req, res) => {
         content = JSON.stringify(BIBLE_REPLY);
       } else if (system.includes('分镜导演')) {
         content = JSON.stringify(SHOTS_REPLY);
+      } else if (system.includes('分镜师')) {
+        // 挑技法：故意给一个自创 id 和一对互斥的，验证服务端会规整掉
+        const shots = JSON.parse(body.messages?.[1]?.content || '[]');
+        content = JSON.stringify({
+          shots: shots.map((x, i) => ({
+            id: x.id,
+            skills: i === 0
+              ? ['low-angle', 'high-angle', 'rembrandt', '我瞎编的技法']
+              : ['ots', 'mood-tense'],
+            why: i === 0 ? '情绪压迫，用仰拍加伦勃朗光' : '对话戏，过肩'
+          }))
+        });
       } else if (system.includes('小说编辑')) {
         // 分章：回原文里真实存在的片段当锚句。
         // 模型要是"顺手润色"了引文，锚点就定位不到 —— 那条路单独有检查。
@@ -627,7 +639,18 @@ check('角色设定被注入', assembled.prompt.includes('藏青立领制服'));
 check('场景设定被注入', assembled.prompt.includes('晨雾'));
 check('提到的道具被带上', assembled.prompt.includes('黑色方形'));
 check('没出场的角色不注入', !assembled.prompt.includes('灰布褂'));
-check('镜头描述排在设定之后', assembled.prompt.indexOf('藏青') < assembled.prompt.indexOf('举起'));
+/**
+ * 画面描述必须排在人物/场景设定**之前**。
+ *
+ * 原来是反过来的，于是两个角色一个场景就是 250 字外貌铺在前面，
+ * 而这一镜真正要画的那句话只有二十来字、排在第 150 字之后 ——
+ * 模型读到那儿权重已经稀释干净了，出来的图"人是对的、可就是没在演这一镜"。
+ * 人设改由参考图压住（那本来就是更强的一层），文字把版面让给画面内容。
+ */
+check('画面描述排在人物设定之前（它才是这一镜的主语）',
+  assembled.prompt.indexOf('举起') < assembled.prompt.indexOf('藏青'),
+  assembled.prompt.slice(0, 100));
+check('风格锚仍然在最前面', assembled.prompt.startsWith('国风水墨'), assembled.prompt.slice(0, 30));
 check('种子 = 角色种子 + 镜号', assembled.seed === 1003);
 check('参考图带上了场景和角色', assembled.refImages.length === 2);
 check('负向词透传', assembled.negative === '崩脸');
@@ -754,10 +777,33 @@ const shot1 = afterAssets?.shots?.[0];
 
 check('镜头图已落盘', Boolean(shot1?.imagePath), JSON.stringify(assetEvents.slice(-2)));
 check('提示词里注入了风格锚', upstream.imagePrompts[0]?.startsWith('国风水墨'));
-check('提示词里注入了冻结的角色外貌', upstream.imagePrompts[0]?.includes('藏青立领制服'));
+check('提示词里注入了冻结的角色外貌', upstream.imagePrompts[0]?.includes('藏青立领制服'),
+  upstream.imagePrompts[0]);
+// 带得动参考图时角色只给简版锚，把版面让给画面内容 —— 但服装配色这种
+// 最强的身份线索必须留住
+check('带参考图时角色描述被压缩，但保留了服装配色',
+  upstream.imagePrompts[0]?.includes('外貌以参考图为准')
+    && !upstream.imagePrompts[0]?.includes('左胸执法编号牌'),
+  upstream.imagePrompts[0]);
 check('提示词里注入了场景设定', upstream.imagePrompts[0]?.includes('晨雾未散'));
 check('提示词里带上了道具（镜头描述提到了）', upstream.imagePrompts[0]?.includes('黑色方形'));
 check('出图请求带了角色设定图作参考', String(upstream.lastImageBody?.image || '').length > 0);
+
+/**
+ * 这一段盯的是一个把**整层参考图机制悄悄废掉**的 bug：
+ *
+ * 带参考图时代码只是往请求体里塞了个 image 字段，模型却还是文生图那个
+ * （Seedream 3.0 t2i）。文生图模型不认这个字段，参考图被直接忽略 ——
+ * 一致性引擎最关键的第③层等于没接上，表现就是"出的图不像设定集，怎么调都不像"。
+ * 而目录里明明有 SeedEdit i2i、设置里也有 imageEditModel，只是从来没人用它。
+ */
+check('带参考图时自动换成图生图模型（不换的话参考图会被文生图模型忽略）',
+  upstream.lastImageBody?.model === settings.get('imageEditModel'),
+  `${upstream.lastImageBody?.model} / 期望 ${settings.get('imageEditModel')}`);
+check('参考图真的发出去了', Boolean(upstream.lastImageBody?.image));
+check('换模型这件事说了出来（不说的话没人知道发的和界面写的不是一个）',
+  assetEvents.some((e) => e.type === 'note' && /出图模型换成/.test(e.message || '')),
+  JSON.stringify(assetEvents.filter((e) => e.type === 'note').map((e) => e.message).slice(0, 5)));
 
 check('复核不通过时确实重试了', shot1?.consistency?.attempts > 1, `attempts=${shot1?.consistency?.attempts}`);
 check('重试用的是不同种子（同种子会复现同一个错）', new Set(upstream.imageSeeds.slice(0, 3)).size === 3,
@@ -790,7 +836,10 @@ check(
   (upstream.imagePrompts.at(-1) || '').startsWith('完全手写的提示词'),
   upstream.imagePrompts.at(-1)
 );
-check('临时模型确实生效', upstream.lastImageBody?.model === 'my-custom-image-model', upstream.lastImageBody?.model);
+// 用户在卡片上专门挑了模型，就照他挑的发 —— 界面写着一个、实际发另一个，
+// 比参考图不生效更糟。所以显式指定模型时**不做**图生图自动切换。
+check('临时模型确实生效（显式指定时不被图生图切换顶掉）',
+  upstream.lastImageBody?.model === 'my-custom-image-model', upstream.lastImageBody?.model);
 
 // 单独重出的图同样吃设定集，并且把带了哪几张记在镜头上，界面才好显示
 const shot1c = regened?.shots?.find((s) => s.id === shot1.id);
@@ -1521,6 +1570,33 @@ section('技法库');
 
   const del = await fetch(`${appUrl}/api/skills/${encodeURIComponent(made.skill.id)}`, { method: 'DELETE' });
   check('能删自定义卡', del.status === 200 && !skills.getSkill(made.skill.id));
+}
+
+// 手选技法的问题不在于麻烦，在于你未必记得住那些术语 ——
+// 四十七张卡里永远只用那三张。模型读一遍描述就能挑，这是它擅长的事。
+section('让模型按描述挑技法');
+{
+  const evs = await ndjson(`/projects/${project.id}/skills/suggest`, {});
+  const after = evs.find((e) => e.type === 'finished')?.project;
+  const s0 = after?.shots?.[0];
+
+  check('模型挑的技法落到了分镜上', (s0?.skills || []).length > 0, JSON.stringify(s0?.skills));
+  // 模型偶尔自创 id、也会把两个互斥的都给出来 —— 走和手选同一条规整逻辑
+  check('自创的 id 被丢掉', !(s0?.skills || []).includes('我瞎编的技法'), JSON.stringify(s0?.skills));
+  check('互斥组只留一个（仰拍和俯拍不能同时成立）',
+    (s0?.skills || []).includes('low-angle') && !(s0?.skills || []).includes('high-angle'),
+    JSON.stringify(s0?.skills));
+  // 要判断的是"它为什么这么挑"，不是盯着一串 id 猜
+  check('留下了模型给的理由', /仰拍/.test(s0?.skillWhy || ''), s0?.skillWhy);
+  check('挑完的技法真的进了出图提示词',
+    /低机位仰拍/.test(consistency.assemblePrompt(after.bible, s0).prompt),
+    consistency.assemblePrompt(after.bible, s0).prompt.slice(0, 120));
+  check('进度里逐镜说清楚挑了什么、为什么',
+    evs.some((e) => e.type === 'note' && /第 \d+ 镜：/.test(e.message || '')),
+    JSON.stringify(evs.filter((e) => e.type === 'note').map((e) => e.message).slice(0, 3)));
+  // 挑完不该顺手把图重出了 —— 先让人翻一遍
+  check('只改文案不出图（先翻一遍，不满意手改掉再统一重出）',
+    evs.every((e) => e.type !== 'sheet'), JSON.stringify(evs.map((e) => e.type)));
 }
 
 section('镜间衔接');

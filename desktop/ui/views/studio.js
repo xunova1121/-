@@ -1144,6 +1144,8 @@ export default {
                   : null,
                 // 手改过的镜头值得标一下：出来的图和自动拆的分镜对不上时，先想到的就该是"我改过它"
                 shot.editedAt ? h('span', { class: 'badge' }, '文案已手改') : null,
+                // 模型挑技法时给的理由：要判断的是"它为什么这么挑"，不是盯着一串 id 猜
+                shot.skillWhy ? h('span', { class: 'badge', title: shot.skillWhy }, '技法由模型挑') : null,
                 // 用了哪些技法要看得见 —— 出来的画面不对时，这是最先要排查的一项
                 ...(shot.skills || []).map((id) => {
                   const card = skillGroups.flatMap((g) => g.skills || []).find((x) => x.id === id);
@@ -1317,6 +1319,40 @@ export default {
 
     // 分镜面板的标题和说明也跟着阶段走：同一张网格，在出图那步和出视频那步
     // 要看的东西不是一回事
+    /**
+     * 让模型给全片挑技法。
+     *
+     * 手选的问题不在于麻烦，在于**你未必记得住**：伦勃朗光、荷兰角、
+     * 希区柯克变焦这些术语不是天天用就想不起来 —— 四十七张卡里永远只用那三张。
+     * 挑完不自动重出图：先翻一遍，不满意的手改掉，再统一重出。
+     */
+    const suggestStatus = h('span', { class: 'field-hint', style: 'margin:0' });
+    const suggestBtn = h('button', {
+      class: 'btn ghost sm',
+      title: '模型读一遍每镜的画面描述，从技法库里挑。一次调用管全片，只改文案不出图',
+      onclick: async () => {
+        if (!project.shots?.length) return toast('还没有分镜', 'err');
+        if (!confirm(`让模型给这 ${project.shots.length} 镜挑技法？会覆盖已选的技法，一次对话调用，不出图。`)) return;
+        suggestBtn.disabled = true;
+        let err = null;
+        try {
+          await stream(`/projects/${project.id}/skills/suggest`, {}, (ev) => {
+            if (ev.type === 'note' || ev.type === 'stage') suggestStatus.textContent = ev.message || '';
+            if (ev.type === 'error') err = ev.message;
+            if (ev.type === 'finished' && ev.project) project = ev.project;
+          });
+          if (err) throw new Error(err);
+          toast('技法已挑好，翻一遍不满意的手改掉再重出图', 'ok');
+          paintShots();
+        } catch (e) {
+          suggestStatus.textContent = e.message;
+          toast(e.message, 'err');
+        } finally {
+          suggestBtn.disabled = false;
+        }
+      }
+    }, '让模型挑技法');
+
     const shotBadge = h('span', {});
     const shotHint = h('p', { class: 'panel-hint' });
     const stageName = h('span', { class: 'badge beam' });
@@ -1366,6 +1402,7 @@ export default {
             : null
         ),
         shotHint,
+        h('div', { class: 'inline', style: 'margin-bottom:10px;flex-wrap:wrap' }, suggestBtn, suggestStatus),
         shotHost
       )
     );

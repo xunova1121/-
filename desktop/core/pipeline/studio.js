@@ -521,6 +521,120 @@ export function updateShot(projectId, shotId, patch = {}) {
   return { project: store.read(projectId), changed, dropped };
 }
 
+const SKILL_PROMPT = `你是分镜师。下面给你一份分镜表和一份**技法卡清单**，
+为每一镜挑出最合适的技法。
+
+判断依据：
+- 情绪张力大、要压迫感 → 仰拍 / 荷兰角 / 顶光
+- 交代环境、定场       → 全景机位 / 拉镜 / 黄金时刻
+- 对话戏               → 过肩 / 平视 / 实用光源
+- 打斗、追逐           → 手持微晃 / 跟拍 / 低角度
+- 情绪特写             → 大特写 / 伦勃朗光 / 推镜
+
+规矩（必须遵守）：
+- 只能用清单里给出的 id，**不要自创**；
+- 标了「单选」的分类，每镜最多挑一个；
+- **宁缺毋滥**：这一镜没有明显该用的技法就少给或不给。
+  每镜都堆五个技法，等于每镜都没有重点，反而不如不选；
+- 每镜 0~4 个。
+
+严格只输出 JSON，不要解释、不要代码块：
+
+{"shots":[{"id":"分镜的 id，原样照抄","skills":["技法 id"],"why":"一句话说明为什么这么选"}]}
+
+技法卡清单：
+{{SKILLS}}`;
+
+/**
+ * 让模型按画面描述**自动挑技法**。
+ *
+ * 手选的问题不在于麻烦，在于**你未必记得住**：伦勃朗光、荷兰角、希区柯克变焦
+ * 这些术语，不是天天用就想不起来 —— 于是四十七张卡里你永远只用那三张。
+ * 模型读一遍描述就能把该用的挑出来，这是它真正擅长的事。
+ *
+ * 三个刻意的设计：
+ *   ① **一次调用管全片**。逐镜问一次，二十镜就是二十次调用，又慢又贵，
+ *      而且模型看不到上下文，容易每镜都挑同一套。
+ *   ② **让它给理由**。理由不进提示词，只显示给你看 ——
+ *      你要判断的是"它为什么这么挑"，而不是盯着一串 id 猜。
+ *   ③ **宁缺毋滥写进提示词**。不写这句，模型会给每一镜都堆满技法，
+ *      每镜都有重点等于每镜都没重点。
+ *
+ * 挑完不直接生效前的东西：结果落盘到 shot.skills，但**不自动重出图** ——
+ * 你可以先翻一遍，不满意的手改掉，再统一重出。
+ */
+export async function suggestSkills(projectId, { only = null, onEvent } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const shots = (project.shots || []).filter((s) => (only ? only.includes(s.id) : true));
+  if (!shots.length) throw new Error('还没有分镜');
+
+  const catalog = skillsLib.catalogForUI();
+  const listing = catalog
+    .map((g) => {
+      const items = g.skills.map((s) => `    ${s.id} = ${s.name}${s.hint ? `（${s.hint}）` : ''}`).join('\n');
+      return `  ${g.name}${g.exclusive ? '【单选】' : '【可多选】'}${g.slot === 'motion' ? '（只影响视频）' : ''}\n${items}`;
+    })
+    .join('\n');
+
+  const r = routing();
+  onEvent?.({ type: 'stage', stage: 'script', status: 'running', message: `让模型给 ${shots.length} 镜挑技法…` });
+
+  const { text } = await adapters.chat({
+    providerId: r.chat.provider,
+    model: r.chat.model,
+    system: SKILL_PROMPT.replace('{{SKILLS}}', listing),
+    user: JSON.stringify(
+      shots.map((s) => ({
+        id: s.id,
+        index: s.index,
+        scene: s.scene,
+        characters: s.characters,
+        description: s.description,
+        camera: s.camera,
+        dialogue: s.dialogue
+      }))
+    ),
+    temperature: 0.3,
+    jsonMode: true,
+    label: '挑技法'
+  });
+
+  const parsed = consistency.extractJSON(text);
+  const picks = Array.isArray(parsed.shots) ? parsed.shots : [];
+
+  const applied = [];
+  store.update(projectId, (p) => {
+    for (const pick of picks) {
+      const target = p.shots.find((s) => s.id === pick.id);
+      if (!target) continue;
+      // 和手选走同一条规整逻辑：互斥组只留一个、不认识的 id 丢掉。
+      // 模型偶尔会自创 id 或者两个互斥的都给。
+      const norm = skillsLib.normalize(pick.skills);
+      target.skills = norm.ids;
+      target.skillWhy = String(pick.why || '').trim();
+      applied.push({ index: target.index, names: skillsLib.labelsFor(norm.ids), why: target.skillWhy, dropped: norm.dropped });
+    }
+    return p;
+  });
+
+  for (const a of applied.slice(0, 40)) {
+    onEvent?.({
+      type: 'note',
+      message: `第 ${a.index} 镜：${a.names.join('、') || '不用技法'}${a.why ? ` —— ${a.why}` : ''}`
+    });
+  }
+
+  const missed = shots.length - applied.length;
+  onEvent?.({
+    type: 'stage',
+    stage: 'script',
+    status: 'done',
+    message: `${applied.length} 镜已挑好技法${missed > 0 ? `，${missed} 镜模型没给` : ''}。翻一遍，不满意的手改掉再重出图`
+  });
+  return { project: store.read(projectId), applied };
+}
+
 // ═══════════════════════ 章节 ═══════════════════════
 
 /**
@@ -790,6 +904,12 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
   const image = await adapters.generateImage({
     providerId,
     model,
+    /**
+     * 只有**没指定模型**时才自动切图生图模型。
+     * 用户在卡片上专门挑了一个模型，那就照他挑的发 ——
+     * 界面上写着一个模型、实际发的是另一个，比参考图不生效更糟。
+     */
+    editModel: opts.model ? null : undefined,
     prompt: opts.prompt?.trim() || assembled.prompt,
     negative: assembled.negative,
     aspectRatio: project.aspectRatio || null,

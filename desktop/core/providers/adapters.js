@@ -203,6 +203,19 @@ export function routedVideoDurations() {
 export async function generateImage({
   providerId,
   model,
+  /**
+   * 有参考图时改用的**图生图模型**。
+   *
+   * 这里曾经埋着一个把整层参考图机制悄悄废掉的 bug：
+   * 带上 refImages 时代码只是往请求体里塞了个 `image` 字段，
+   * **模型却还是文生图那个**（Seedream 3.0 t2i）。文生图模型不认这个字段，
+   * 于是参考图被直接忽略 —— 一致性引擎最关键的第③层等于没接上，
+   * 表现就是"出的图不像设定集，怎么调都不像"。
+   *
+   * 而目录里明明有 SeedEdit 3.0 i2i、设置里也有 imageEditModel 字段，
+   * 只是从来没人去用它。现在有参考图就自动切过去。
+   */
+  editModel,
   prompt,
   negative = '模糊, 低质量, 畸变, 多余手指, 文字水印, 多人',
   size = null,
@@ -218,6 +231,37 @@ export async function generateImage({
   const family = provider.family || 'openai';
   // 画幅优先用这个项目自己的；项目没设才回落到全局设置
   size = size || ratioToSize(aspectRatio || settings.get('aspectRatio') || '16:9');
+
+  /**
+   * 带了参考图 → 换成图生图模型。
+   *
+   * 只在这家真的支持 i2i、且配了图生图模型时才换；换不了的话如实说一声，
+   * 别让人以为参考图生效了 —— 那正是这个 bug 最坑的地方：
+   * 界面上写着"已带上 3 张设定集参考图"，实际一张都没起作用。
+   */
+  const wantsRef = refImages.length > 0;
+  const supportsI2I = (provider.capabilities || []).includes('i2i');
+  /**
+   * 三种意思要分清楚：
+   *   不传        → 跟随「设置 → 图生图模型」（默认行为）
+   *   传 null     → **明确不要换**。用户在卡片上专门挑了一个模型时走这条：
+   *                 界面写着一个模型、实际发的是另一个，比参考图不生效更糟
+   *   传具体模型  → 换成它
+   */
+  const i2iModel = editModel === null ? null : editModel || settings.get('imageEditModel');
+  if (wantsRef) {
+    if (supportsI2I && i2iModel && i2iModel !== model) {  // eslint-disable-line no-lonely-if
+      onEvent?.({ type: 'note', message: `带了 ${refImages.length} 张参考图，出图模型换成 ${i2iModel}（文生图模型不认参考图）` });
+      model = i2iModel;
+    } else if (!supportsI2I) {
+      onEvent?.({
+        type: 'note',
+        message: `${provider.name} 不支持图生图，这 ${refImages.length} 张参考图发不出去 —— ` +
+          '本镜的一致性只能靠提示词里的冻结描述撑着。要锁住脸就把「出图」换成支持图生图的一家。'
+      });
+      refImages = [];
+    }
+  }
 
   switch (family) {
     case 'dashscope': {

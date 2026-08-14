@@ -155,27 +155,57 @@ export async function buildBible(project, { onEvent } = {}) {
 /**
  * 提示词装配。
  *
- * 顺序是刻意的：风格锚在最前（决定整体观感），角色设定紧随其后（权重最高的主体），
- * 场景设定居中，镜头内容和运镜放最后。倒过来写的话，越靠后的描述越容易被稀释掉，
- * 人设就是这么漂的。
+ * 顺序：风格锚 → **画面描述** → 角色 → 场景 → 道具 → 技法 → 镜头 → 主色调。
+ * 越靠后越容易被稀释，所以排在前两位的是"整体观感"和"这一镜到底在演什么"。
+ * 人设由参考图压（第③层），不靠在提示词里堆字数 —— 见函数体里的说明。
  */
 export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
   const parts = [];
   if (includeStyle && bible?.style?.anchor) parts.push(bible.style.anchor);
 
   const cast = matchCharacters(bible, shot);
-  for (const c of cast) {
-    parts.push(`【${c.name}】${c.appearance}`);
-  }
-
   const scene = matchScene(bible, shot);
-  if (scene) parts.push(`【场景·${scene.name}】${scene.appearance}`);
+  const props = matchProps(bible, shot);
 
-  for (const prop of matchProps(bible, shot)) {
-    parts.push(`【${prop.name}】${prop.appearance}`);
-  }
+  /**
+   * ⚠ 顺序改过一次，因为原来那版有个很实际的毛病：**画面描述被埋了**。
+   *
+   * 原来是「风格锚 → 每个角色 60~90 字外貌 → 场景 90 字 → 道具 → 画面描述」，
+   * 两个角色一个场景就是 250 字，而这一镜真正要画的那句话往往只有二十来字，
+   * 排在第 150 字之后。模型读到那儿时权重已经被稀释干净了 ——
+   * 出来的图"人是对的、可就是没在演这一镜"。
+   *
+   * 现在画面描述紧跟风格锚，**它才是这一镜的主语**。
+   *
+   * 那人设靠什么压住？靠参考图 —— 像素级的参照本来就比文字强得多（第③层）。
+   * 所以带得动参考图时，角色只给「名字 + 一句话特征」，把版面让给画面内容；
+   * 只有在没有参考图可用时，才把完整外貌铺开兜底。
+   * 这和视频提示词的做法是一致的（见 assembleVideoPrompt）。
+   */
+  const refs = collectReferences(bible, shot);
+  const hasRefs = refs.images.length > 0 && settings.get('useReferenceImages') !== false;
 
   parts.push(shot.description || '');
+
+  for (const c of cast) {
+    if (hasRefs) {
+      // 留三段而不是两段：第三段往往正好是服装配色，而配色是最强的身份线索之一。
+      // 参考图给的是设定图（另一个姿势、另一个背景），文字仍然要把关键特征点住。
+      const brief = (c.appearance || '').split(/[，,。]/).slice(0, 3).join('，');
+      parts.push(brief ? `【${c.name}】${brief}，外貌以参考图为准` : `【${c.name}】外貌以参考图为准`);
+    } else {
+      parts.push(`【${c.name}】${c.appearance}`);
+    }
+  }
+
+  if (scene) {
+    const brief = (scene.appearance || '').split(/[，,。]/).slice(0, 3).join('，');
+    parts.push(`【场景·${scene.name}】${hasRefs ? brief : scene.appearance}`);
+  }
+
+  for (const prop of props) {
+    parts.push(`【${prop.name}】${prop.appearance}`);
+  }
 
   /**
    * 技法卡。位置是有讲究的：紧跟画面描述，在主色调之前。
@@ -188,8 +218,6 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
 
   if (shot.camera) parts.push(`镜头：${shot.camera}`);
   if (bible?.style?.palette) parts.push(`主色调：${bible.style.palette}`);
-
-  const refs = collectReferences(bible, shot);
 
   return {
     prompt: parts.filter(Boolean).join('，'),
@@ -415,6 +443,9 @@ export async function generateConsistentImage({
     const image = await adapters.generateImage({
       providerId: routing.image.provider,
       model: routing.image.model,
+      // 不传 = 跟随「设置 → 图生图模型」。有参考图时会自动换过去 ——
+      // 不换的话文生图模型会把参考图直接无视掉，一致性第③层等于没接上
+
       prompt: assembled.prompt,
       negative: assembled.negative,
       // 画幅跟着项目走：同一个人手上横屏宣传片和竖屏短剧并存是常事

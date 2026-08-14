@@ -189,6 +189,29 @@ export default {
       );
     }
 
+    /**
+     * 图生图模型单独摆一行。
+     *
+     * 它不是可有可无的选项 —— **一致性引擎第③层（参考图）全靠它**。
+     * 文生图模型不认参考图字段，带上也会被直接忽略；这里配好之后，
+     * 只要这一镜带了设定集参考图，出图就会自动切到它。
+     * 之前这个字段藏在设置文件里、代码里从没用过，于是参考图一张都没生效。
+     */
+    const editModelInput = h('input', {
+      type: 'text', class: 'mono',
+      value: settings.imageEditModel || '',
+      placeholder: '例：doubao-seededit-3-0-i2i-250628',
+      oninput: (e) => (pending.imageEditModel = e.target.value.trim())
+    });
+    routeGrid.append(
+      h('div', { class: 'field' },
+        h('label', {}, '图生图模型（带参考图时用）'),
+        editModelInput,
+        h('div', { class: 'field-hint' },
+          '一致性引擎的参考图这一层全靠它：带了设定集参考图的那一镜会自动切到这个模型出图。' +
+          '留空 = 不切，那样参考图会被文生图模型忽略，人设只能靠文字撑着。'))
+    );
+
     // ── 上线前体检 ──
     // 流水线跑一趟要几分钟到几十分钟。与其等第 04 步才发现视频模型 ID 填错，
     // 不如在这里用最小代价把五条腿挨个点一遍。

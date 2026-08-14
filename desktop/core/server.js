@@ -544,6 +544,21 @@ async function handleApi(req, res, url, { lan = false } = {}) {
       }
     }
 
+    // ── 让模型按画面描述给每一镜挑技法 ──
+    // 手选的问题不在麻烦，在于你未必记得住那些术语 —— 四十七张卡里永远只用那三张。
+    if (b && c === 'skills' && d === 'suggest' && method === 'POST') {
+      const opts = await readBody(req);
+      const stream = ndjson(res);
+      req.on('close', () => stream.end());
+      try {
+        const { project } = await studio.suggestSkills(b, { ...opts, onEvent: (ev) => stream.send(ev) });
+        stream.end({ type: 'finished', project });
+      } catch (err) {
+        stream.end({ type: 'error', message: err.message });
+      }
+      return undefined;
+    }
+
     // ── 单镜重出：图或视频，可临时换服务商/模型 ──
     if (b && c === 'shots' && d && e === 'regenerate' && method === 'POST') {
       const opts = await readBody(req);
