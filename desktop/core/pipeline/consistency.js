@@ -316,9 +316,32 @@ export function collectReferences(bible, shot, { limit = 9 } = {}) {
  * 第四样东西是**上下文**（prev / next）：模型只看得见一张图和一句描述时，
  * 它不知道自己是一部片子里的第 7 镜，于是每一镜都从头起势、各演各的。
  * 这就是"逐镜都对、连起来不像一部片子"的根因。见 pipeline/continuity.js。
+ *
+ * ── 两条后来才发现的坑（"出的视频和描述不一致、说的话也不一致"）──
+ *
+ * ① **静态构图类的技法不能再说一遍**。机位（仰拍/俯拍）和光线（伦勃朗光/顶光）
+ *    在**出图**那一步就已经烧进首帧图里了。图生视频时再讲一遍
+ *    "低机位仰拍，背景多为天空"，等于要求模型**重新构一次图** ——
+ *    而首帧已经把构图定死了，两边一打架，模型就开始偏离首帧自己发挥。
+ *    更糟的是这两类描述特别长（一条就四五十字），把真正该说的
+ *    "这一镜在演什么"从 20% 的篇幅挤到 8%。
+ *    所以带首帧时只发**运镜 + 动作 + 氛围**，构图交给那张已经审过的图。
+ *
+ * ② **要说什么话必须写出来**。旧版本只说了一句"人物在说话，口型与表情自然"，
+ *    却从不告诉模型**说的是哪句、谁在说**。于是：画面里两个人，
+ *    模型随便挑一个张嘴；台词是旁白的，画面里的人也跟着念。
+ *    这就是"说话的内容也不一致"。台词本来就在手上，发过去不要钱。
  */
-export function assembleVideoPrompt(bible, shot, { maxChars = 380, prev = null, next = null, link = null } = {}) {
+export function assembleVideoPrompt(
+  bible,
+  shot,
+  { maxChars = 380, prev = null, next = null, link = null, firstFrame = Boolean(shot?.imagePath) } = {}
+) {
   const parts = [];
+
+  // 没有首帧（纯文生视频）时，画风只能靠这句话带 —— 有首帧的话它已经在图里了，
+  // 再说一遍纯属占字数
+  if (!firstFrame && bible?.style?.anchor) parts.push(bible.style.anchor);
 
   if (shot.description) parts.push(shot.description);
 
@@ -337,24 +360,18 @@ export function assembleVideoPrompt(bible, shot, { maxChars = 380, prev = null, 
 
   if (shot.camera) parts.push(shot.camera);
 
-  // 技法卡：机位光线跟着画面走，运镜替代那句泛泛的默认运镜。
+  // 技法卡：运镜替代那句泛泛的默认运镜 ——
   // 选了具体运镜还保留"镜头缓慢推进"，等于给模型两条互相打架的指令。
+  //
+  // 机位和光线（look）**带首帧时不发**：它们已经在那张图里了，
+  // 再讲一遍是让模型重新构图，反而会偏离首帧（见函数头注释①）。
   const sk = skills.fragmentsFor(shot.skills, { target: 'video' });
-  parts.push(...sk.look, ...sk.action, ...sk.mood);
+  if (!firstFrame) parts.push(...sk.look);
+  parts.push(...sk.action, ...sk.mood);
   if (sk.motion.length) parts.push(...sk.motion);
   else parts.push(shot.motion || '镜头缓慢推进');
 
-  // ── 嘴要不要动，必须明说 ──
-  //
-  // 不说的话，视频模型默认会让人物讲话 —— 于是没有台词的镜头里，
-  // 角色也在那儿一张一合地"瞎说"，配上无声的音轨，像默片配错了画。
-  // 反过来，有台词的镜头不提醒，人物又会僵着不动。
-  //
-  // 判断依据是**净台词**而不是 dialogue 字段本身：
-  // "（远处传来汽笛声）"写在台词字段里，那不是台词，嘴不该动。
-  const said = speaker.spokenText(shot.dialogue);
-  if (said.kind === 'speech') parts.push('人物在说话，口型与表情自然');
-  else parts.push('人物不说话，嘴部保持闭合，不要出现说话口型');
+  parts.push(speechLine(bible, shot));
 
   // 衔接约束放在最后：它是对整段的约束，不是画面内容。
   // 放前面会挤掉"演什么"的权重 —— 那才是这一镜的主语。
@@ -364,6 +381,33 @@ export function assembleVideoPrompt(bible, shot, { maxChars = 380, prev = null, 
   // 视频模型的提示词普遍比图像模型短，超长会被截断或稀释，主动收一下
   if (prompt.length > maxChars) prompt = `${prompt.slice(0, maxChars - 1)}…`;
   return prompt;
+}
+
+/**
+ * 谁在说话、说的是哪句、其他人该不该张嘴。
+ *
+ * 三件事都要明说，少一件就会出对应的毛病：
+ *   不说"要不要说话" → 没台词的镜头人物也在那儿一张一合地瞎说；
+ *   不说"谁在说"     → 画面里两个人，模型随便挑一个张嘴；
+ *   不说"说什么"     → 口型和台词对不上（能出声的模型更是直接念错内容）。
+ *
+ * 旁白是最容易被忽略的一种：它有台词，但**画面里的人不该开口** ——
+ * 旧版本一律按"人物在说话"处理，于是每条旁白都配上一个跟着念的哑剧演员。
+ */
+function speechLine(bible, shot) {
+  const said = speaker.spokenText(shot.dialogue);
+  if (said.kind !== 'speech') return '画面中的人物不说话，嘴部保持闭合，不要出现说话口型';
+
+  const r = speaker.resolve({ bible }, shot);
+  if (!r.speaker) return '画外旁白，画面中的人物不说话，嘴部保持闭合';
+
+  // 台词太长会把提示词吃掉一大块，而口型只需要知道说的是什么、有多长
+  const line = said.text.length > 26 ? `${said.text.slice(0, 26)}…` : said.text;
+  const others = matchCharacters(bible, shot).filter((c) => c.name !== r.speaker);
+  return (
+    `只有${r.speaker}在说话，口型对上台词「${line}」` +
+    (others.length ? `，${others.map((c) => c.name).join('、')}保持沉默不开口` : '')
+  );
 }
 
 /** 分镜里点名了谁。模型有时写"李队"有时写"李队长"，所以用包含匹配而不是全等。 */

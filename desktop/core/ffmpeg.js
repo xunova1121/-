@@ -127,11 +127,73 @@ export function run(args, { onProgress, cwd } = {}) {
 }
 
 /**
+ * 读一个媒体文件的时长（秒）。读不出来回 null。
+ *
+ * 用 `-f null -` 而不是解析 `-i` 的报错输出：后者会以非 0 退出，
+ * 在 run() 里变成异常，调用方还得去 catch 一个"正常情况"。
+ */
+export async function probeDuration(file) {
+  if (!fs.existsSync(file)) return null;
+  try {
+    const { stderr } = await run(['-i', file, '-f', 'null', '-']);
+    const m = stderr.match(/Duration:\s*(\d+):(\d+):(\d+\.\d+)/);
+    if (!m) return null;
+    return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 把若干条配音按**各自该出现的时间点**摆成一条整片音轨。
+ *
+ * ── 为什么不能直接首尾相接 ──
+ *
+ * 早先是把每镜的配音顺次拼起来当整片音轨，这在数学上就是错的：
+ * 画面的长度是**分镜时长**（4 秒、5 秒），配音的长度是**这句话念多久**（2.1 秒）。
+ * 两者根本不相等，于是从第二镜开始音画就错位，而且**越往后错得越多** ——
+ * 第 10 镜的台词可能配在第 7 镜的画面上。
+ * 表现就是"说的话和画面对不上"，但因为是渐进的，前两镜看着还挺正常。
+ *
+ * 正确的做法是按时间轴摆：每条配音 adelay 到它那一镜的起点，再 amix 混起来。
+ * 这样音画对齐的依据和字幕完全一致（都用同一份时间轴），三者不会互相打架。
+ *
+ * ⚠ amix 必须写 normalize=0。默认它会把音量按输入条数均分 ——
+ * 二十条配音混完，每一句都只剩二十分之一的音量，听上去像"没配音"。
+ */
+export function voiceFilterGraph(entries) {
+  const filters = entries
+    .map((e, i) => {
+      const ms = Math.max(0, Math.round((Number(e.at) || 0) * 1000));
+      // adelay 要按声道给值，all=1 省得去数这条音频是单声道还是立体声
+      return `[${i}:a]adelay=${ms}:all=1[a${i}]`;
+    })
+    .join(';');
+  const mixIn = entries.map((_, i) => `[a${i}]`).join('');
+  return `${filters};${mixIn}amix=inputs=${entries.length}:dropout_transition=0:normalize=0[out]`;
+}
+
+export async function buildVoiceTrack(entries, outputPath, { onProgress } = {}) {
+  const usable = (entries || []).filter((e) => e?.path && fs.existsSync(e.path));
+  if (!usable.length) return null;
+
+  const args = ['-y'];
+  for (const e of usable) args.push('-i', e.path);
+  args.push('-filter_complex', voiceFilterGraph(usable), '-map', '[out]', '-c:a', 'aac', outputPath);
+  await run(args, { onProgress });
+  return outputPath;
+}
+
+/**
  * 把若干片段按顺序拼起来，可选叠一条整片音轨。
  * 用 concat demuxer 而不是 filter_complex —— 前者不重编码，快得多，
  * 代价是要求各片段编码参数一致（同一模型出的视频通常都一致）。
+ *
+ * 音轨有两种给法：
+ *   audioAt     [{ path, at }] —— 按时间点摆，**音画对齐的正确做法**
+ *   audioTracks 顺次拼接的老写法，只在没有时间轴信息时用（会错位，见上面）
  */
-export async function concat(segments, outputPath, { audioPath, audioTracks, trims, onProgress } = {}) {
+export async function concat(segments, outputPath, { audioPath, audioTracks, audioAt, trims, onProgress } = {}) {
   if (!segments.length) throw new Error('没有可合成的片段');
 
   const cleanup = [];
@@ -166,8 +228,14 @@ export async function concat(segments, outputPath, { audioPath, audioTracks, tri
       }
     }
 
-    // 多条配音先拼成一条整片音轨，再和视频合流
+    // 多条配音先合成一条整片音轨，再和视频合流
     let track = audioPath;
+    if (!track && audioAt?.length) {
+      track = `${outputPath}.voice.m4a`;
+      const built = await buildVoiceTrack(audioAt, track, { onProgress });
+      if (built) cleanup.push(track);
+      else track = null;
+    }
     const tracks = (audioTracks || []).filter((f) => f && fs.existsSync(f));
     if (!track && tracks.length) {
       track = `${outputPath}.voice.m4a`;

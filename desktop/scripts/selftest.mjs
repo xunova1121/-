@@ -916,6 +916,14 @@ check('方舟只发 1 张首帧图（多发会让任务提交直接失败）', v
 check('被截掉的参考图有说明，不是悄悄丢掉',
   vidEvents.some((e) => e.type === 'note' && /最多收 1 张图/.test(e.message || '')),
   JSON.stringify(vidEvents.filter((e) => e.type === 'note').map((e) => e.message).slice(0, 3)));
+// 台词从来没进过视频提示词：于是模型只知道"有人在说话"，说什么、谁在说全靠它猜。
+// 画面里两个人时，张嘴的那个有一半几率是错的
+check('台词本身写进了视频提示词（口型才对得上说的话）',
+  /设备正常/.test(vidText), vidText.slice(0, 160));
+check('说明了是谁在说', /只有阿澜在说话/.test(vidText), vidText.slice(0, 160));
+// 机位光线在出图那步已经烧进首帧图了，再讲一遍是让模型重新构图 —— 它会偏离首帧
+check('带首帧时不再重复讲机位光线（会和首帧打架）',
+  !/低机位仰拍|伦勃朗布光/.test(vidText), vidText.slice(0, 200));
 check('镜头上记下了这次带了哪些设定集参考',
   (shot1v?.videoRefs || []).length > 0, JSON.stringify(shot1v?.videoRefs));
 check('单镜临时指定的分辨率发出去了（方舟是拼在文本里的 --resolution）',
@@ -2119,10 +2127,61 @@ section('台词绑谁说的');
   const talking = consistency.assembleVideoPrompt(fresh2.bible, fresh2.shots[0]);
   check('没台词的镜头明确要求不要出现说话口型（否则人物会在那儿瞎说）',
     /不要出现说话口型/.test(silent), silent.slice(0, 120));
-  check('有台词的镜头才提口型', /人物在说话/.test(talking) && !/不要出现说话口型/.test(talking),
-    talking.slice(0, 120));
+  // 光说"人物在说话"是不够的：画面里两个人，模型会随便挑一个张嘴，
+  // 说的内容更是随它发挥 —— 谁在说、说哪句，都得写出来
+  check('有台词的镜头写清楚谁在说、说的是哪句',
+    /只有阿澜在说话/.test(talking) && /设备正常/.test(talking) && !/不要出现说话口型/.test(talking),
+    talking.slice(0, 160));
+  check('同框的其他人被要求闭嘴（不然两个人一起张嘴）',
+    /保持沉默不开口/.test(
+      consistency.assembleVideoPrompt(fresh2.bible, { ...fresh2.shots[0], characters: ['阿澜', '老周'] })
+    ));
   check('音效那条不算有台词，嘴也不该动',
     /不要出现说话口型/.test(consistency.assembleVideoPrompt(fresh2.bible, fresh2.shots[1])));
+}
+
+// 音画对不上的最大来源不在模型，在合成这一步：画面的长度是分镜时长，
+// 配音的长度是这句话念多久，两者不相等 —— 顺次拼接必然越拼越偏。
+section('配音按时间轴摆，不是顺次拼');
+{
+  const ff = await import('../core/ffmpeg.js');
+
+  const graph = ff.voiceFilterGraph([
+    { path: 'a.mp3', at: 0 },
+    { path: 'b.mp3', at: 4 },
+    { path: 'c.mp3', at: 9.5 }
+  ]);
+  check('每条配音都被推到它那一镜的起点上',
+    /\[0:a\]adelay=0:all=1/.test(graph) && /\[1:a\]adelay=4000:all=1/.test(graph) && /\[2:a\]adelay=9500:all=1/.test(graph),
+    graph);
+  // amix 默认按输入条数均分音量：二十条配音混完每句只剩 1/20，听上去像没配音
+  check('混音不做音量均分（默认会把每句压到 1/N）', /normalize=0/.test(graph), graph);
+  check('中途某镜没配音也不会让整条音轨提前结束', /dropout_transition=0/.test(graph), graph);
+
+  // 时间轴只能有一份：字幕、配音、裁剪各算各的，三者必然打架
+  const tp = await (
+    await fetch(`${appUrl}/api/projects`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '时间轴自检' })
+    })
+  ).json();
+  store.update(tp.id, (p) => {
+    p.bible = { style: { anchor: '国风', negative: '' }, characters: [], scenes: [], props: [], narratorVoice: 'v0' };
+    p.shots = [
+      { id: 't1', index: 1, dialogue: '第一句', duration: 4, actualDuration: 5, videoPath: 'a.mp4' },
+      { id: 't2', index: 2, dialogue: '', duration: 3, actualDuration: 5, videoPath: 'b.mp4' },
+      { id: 't3', index: 3, dialogue: '第三句', duration: 6, actualDuration: 10, videoPath: 'c.mp4' }
+    ];
+    return p;
+  });
+  const line = studioModule.timelineOf(store.read(tp.id), { policy: 'trim' });
+  check('时间轴按分镜时长累加', line.map((r) => r.start).join(',') === '0,4,7', JSON.stringify(line.map((r) => r.start)));
+  const cuesT = studioModule.buildSubtitles(store.read(tp.id), { policy: 'trim' });
+  check('字幕和时间轴用的是同一份起点（第三句在第 7 秒，不是第 4 秒）',
+    cuesT[1].start === 7, JSON.stringify(cuesT.map((c) => [c.text, c.start])));
+  // 没台词的第二镜不占字幕，但**占时间轴** —— 这正是顺次拼接会跳过的那一格
+  check('没台词的镜头照样占时间轴（顺次拼接就是在这儿开始错的）',
+    line[1].span === 3 && cuesT.length === 2, JSON.stringify([line[1].span, cuesT.length]));
 }
 
 section('时长控制');

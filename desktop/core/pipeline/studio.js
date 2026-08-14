@@ -2279,21 +2279,39 @@ export async function generateVoice(projectId, { onEvent } = {}) {
  * trim 策略下用分镜的计划时长，keep 策略下用模型实出的时长。
  * 拿错一个，后面每一条字幕都会累积偏移 —— 越到片尾偏得越离谱。
  */
-export function buildSubtitles(project, { policy = 'trim' } = {}) {
+/**
+ * 成片的时间轴：每一镜从第几秒开始、占多长。
+ *
+ * 字幕、配音、裁剪**必须共用这一份**。各算各的时间轴是错位的根源：
+ * 三处只要有一处用了另一种时长口径，音、画、字就会各走各的。
+ */
+export function timelineOf(project, { policy = 'trim' } = {}) {
   const shots = (project.shots || []).filter((s) => s.videoPath).sort((a, b) => a.index - b.index);
-  const cues = [];
+  const rows = [];
   let at = 0;
   for (const shot of shots) {
     const span = policy === 'trim'
       ? Number(shot.duration) || Number(shot.actualDuration) || 0
       : Number(shot.actualDuration) || Number(shot.duration) || 0;
+    rows.push({ shot, start: at, span });
+    at += span;
+  }
+  return rows;
+}
+
+export function buildSubtitles(project, { policy = 'trim' } = {}) {
+  const cues = [];
+  for (const { shot, start, span } of timelineOf(project, { policy })) {
     // 字幕显示的也是净台词：署名单独有 speaker 字段，念不出来的括注更不该显示
     const text = speakerLib.spokenText(shot.dialogue).text;
-    if (text) {
-      // 字幕不占满整镜：结尾留 0.15 秒，避免和下一条贴在一起闪
-      cues.push({ start: at, end: Math.max(at + 0.5, at + span - 0.15), text, speaker: shot.speakerUsed || shot.speaker || '' });
-    }
-    at += span;
+    if (!text) continue;
+    // 字幕不占满整镜：结尾留 0.15 秒，避免和下一条贴在一起闪
+    cues.push({
+      start,
+      end: Math.max(start + 0.5, start + span - 0.15),
+      text,
+      speaker: shot.speakerUsed || shot.speaker || ''
+    });
   }
   return cues;
 }
@@ -2347,14 +2365,43 @@ export async function compose(projectId, { onEvent } = {}) {
   const out = path.join(store.projectDir(projectId), `${safeFileName(project.title)}.mp4`);
   onEvent?.({ type: 'stage', stage: 'compose', status: 'running', message: `合成 ${segments.length} 段…` });
 
-  const voiceTracks = ordered.filter((s) => s.audioPath).map((s) => s.audioPath);
+  /**
+   * 配音按**各自该出现的时间点**摆，不是顺次拼。
+   *
+   * 顺次拼在数学上就是错的：画面长度是分镜时长（4 秒），配音长度是这句话念多久（2.1 秒），
+   * 两者不相等，于是从第二镜起就错位，而且越往后错得越多 ——
+   * 第 10 镜的台词会配在第 7 镜的画面上。这就是"说的话和画面对不上"，
+   * 而且因为是渐进的，前两镜看着还挺正常，很难往这儿想。
+   */
+  const timeline = timelineOf(store.read(projectId), { policy });
+  const audioAt = timeline
+    .filter((r) => r.shot.audioPath && fs.existsSync(r.shot.audioPath))
+    .map((r) => ({ path: r.shot.audioPath, at: r.start, index: r.shot.index, span: r.span }));
+
+  // 台词念不完的要当场说出来：这不是能自动修的事 —— 要么把这一镜拉长，
+  // 要么把台词改短，两个都是导演的决定。不说的话它只会表现为"后面几句压到了下一镜"。
+  const overruns = [];
+  for (const a of audioAt) {
+    const secs = await ffmpeg.probeDuration(a.path);
+    if (secs && a.span && secs > a.span + 0.25) overruns.push({ index: a.index, secs, span: a.span });
+  }
+  if (overruns.length) {
+    onEvent?.({
+      type: 'note',
+      message:
+        `有 ${overruns.length} 镜的台词比镜头长，会压到下一镜的画面上：` +
+        overruns.slice(0, 6).map((o) => `#${o.index}（念 ${o.secs.toFixed(1)}s／镜头 ${o.span}s）`).join('、') +
+        '。把这几镜的时长拉长，或者把台词改短一点。'
+    });
+  }
+
   if (trims) {
     const saved = withVideo.reduce((sum, s) => sum + Math.max(0, duration.shotSeconds(s) - (Number(s.duration) || 0)), 0);
     if (saved > 0.5) onEvent?.({ type: 'note', message: `按分镜时长裁剪，去掉厂商档位多出的 ${saved.toFixed(1)} 秒` });
   }
 
   await ffmpeg.concat(segments, out, {
-    audioTracks: voiceTracks,
+    audioAt,
     trims,
     onProgress: (p) => onEvent?.({ type: 'progress', seconds: p.seconds })
   });
