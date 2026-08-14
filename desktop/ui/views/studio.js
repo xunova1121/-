@@ -987,6 +987,7 @@ export default {
         // 所以描述本身就是可点的：点一下直接改，比"发现不对 → 重跑整个分镜"快得多，也不会把别的镜头一起冲掉。
         const editor = h('div', { class: 'shot-edit', style: 'display:none' });
         const pickedSkills = [...(shot.skills || [])];
+        const pickedVariants = { ...(shot.variants || {}) };
         const descEl = h('div', {
           class: 'shot-desc editable',
           title: '点一下改这一镜的描述'
@@ -1023,7 +1024,8 @@ export default {
                   characters: fields.characters.value,
                   dialogue: fields.dialogue.value,
                   link: fields.link.value,
-                  skills: pickedSkills
+                  skills: pickedSkills,
+                  variants: pickedVariants
                 }
               });
               project = r.project;
@@ -1068,6 +1070,38 @@ export default {
             h('div', {}, h('label', {}, '出场角色'), fields.characters)),
           h('label', {}, '台词'),
           fields.dialogue,
+          // ── 这一镜谁穿哪套、场景是什么时段 ──
+          // 只在真的有多版时才摆出来：大多数条目只有一版，摆一排"默认"是纯噪音
+          (() => {
+            const bible = project.bible;
+            if (!bible) return null;
+            const pool = [
+              ...(bible.characters || []).filter((c) => (shot.characters || []).includes(c.name)),
+              ...(bible.scenes || []).filter((sc) => sameScene(sc.name, shot.scene))
+            ].filter((x) => (x.variants || []).length > 1);
+            if (!pool.length) return null;
+            return [
+              h('label', { style: 'margin-top:8px' }, '这一镜用哪一版'),
+              h('div', { class: 'shot-edit-grid' },
+                pool.map((x) =>
+                  h('div', {},
+                    h('label', {}, x.name),
+                    (() => {
+                      const sel = h('select', {},
+                        (x.variants || []).map((v) =>
+                          h('option', {
+                            value: v.id,
+                            selected: (shot.variants?.[x.name] || x.variants[0].id) === v.id,
+                            title: v.appearance || ''
+                          }, v.sheetPath ? v.name : `${v.name}（还没出图）`)));
+                      pickedVariants[x.name] = shot.variants?.[x.name] || x.variants[0].id;
+                      sel.addEventListener('change', () => (pickedVariants[x.name] = sel.value));
+                      return sel;
+                    })()))),
+              h('div', { class: 'shot-edit-tip' },
+                '换的只是这一版的描述和参考图，脸和身份锚不变 —— 所以还是同一个人、同一个地方。')
+            ];
+          })(),
           // ── 技法 ──
           // 模型拆出来的 motion 大多是"镜头缓慢推进"这种放之四海皆准的话，
           // 真正让画面有电影感的是具体手法。术语你未必天天记得住，模型却认得很准。
@@ -1169,6 +1203,18 @@ export default {
                 shot.editedAt ? h('span', { class: 'badge' }, '文案已手改') : null,
                 // 模型挑技法时给的理由：要判断的是"它为什么这么挑"，不是盯着一串 id 猜
                 shot.skillWhy ? h('span', { class: 'badge', title: shot.skillWhy }, '技法由模型挑') : null,
+                // 用了非默认的那一版要看得见：出来的图"衣服不对"时，先看这里
+                ...Object.entries(shot.variants || {}).map(([who, vid]) => {
+                  const item = [
+                    ...(project.bible?.characters || []),
+                    ...(project.bible?.scenes || []),
+                    ...(project.bible?.props || [])
+                  ].find((x) => x.name === who);
+                  const v = (item?.variants || []).find((x) => x.id === vid);
+                  return v && v.id !== 'v-default'
+                    ? h('span', { class: 'badge', title: v.appearance || '' }, `${who}·${v.name}`)
+                    : null;
+                }),
                 // 用了哪些技法要看得见 —— 出来的画面不对时，这是最先要排查的一项
                 ...(shot.skills || []).map((id) => {
                   const card = skillGroups.flatMap((g) => g.skills || []).find((x) => x.id === id);

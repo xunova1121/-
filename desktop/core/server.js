@@ -284,7 +284,7 @@ function serveMedia(req, res, url) {
 
 async function handleApi(req, res, url, { lan = false } = {}) {
   const seg = url.pathname.split('/').filter(Boolean); // ['api', ...]
-  const [, a, b, c, d, e, f] = seg;
+  const [, a, b, c, d, e, f, g] = seg;
   const method = req.method;
 
   // ---- 基础信息 ----
@@ -633,6 +633,28 @@ async function handleApi(req, res, url, { lan = false } = {}) {
           stream.end({ type: 'error', message: err.message });
         }
         return undefined;
+      }
+      // ── 变体：另一套衣服 / 另一个时段 ──
+      if (e && f === 'variants' && method === 'POST') {
+        try {
+          return json(res, 201, studio.addVariant(b, kind, decodeURIComponent(e), await readBody(req)));
+        } catch (err) {
+          return json(res, 400, { error: err.message });
+        }
+      }
+      if (e && f === 'variants' && g && method === 'PATCH') {
+        try {
+          return json(res, 200, studio.updateVariant(b, kind, decodeURIComponent(e), g, await readBody(req)));
+        } catch (err) {
+          return json(res, 400, { error: err.message });
+        }
+      }
+      if (e && f === 'variants' && g && method === 'DELETE') {
+        try {
+          return json(res, 200, studio.removeVariant(b, kind, decodeURIComponent(e), g));
+        } catch (err) {
+          return json(res, 400, { error: err.message });
+        }
       }
       if (!e && method === 'POST') {
         return json(res, 201, await studio.addBibleEntry(b, kind, await readBody(req)));

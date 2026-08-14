@@ -23,6 +23,7 @@ import { safeFileName } from '../paths.js';
 import * as chapters from './chapters.js';
 import * as duration from '../duration.js';
 import * as skillsLib from '../skills.js';
+import * as variants from './variants.js';
 
 export const extractJSON = consistency.extractJSON;
 
@@ -191,7 +192,7 @@ export function bibleBucket(bible, kind) {
  * 角色要正面半身好辨认五官，场景要空镜别混进人，道具要单体产品图。
  * 混用一套模板的话，道具图里会莫名其妙站个人。
  */
-export function sheetPrompt(kind, bible, item) {
+export function sheetPrompt(kind, bible, item, variant = null) {
   const anchor = bible.style.anchor;
   /**
    * ⚠ 这一行曾经是 `item.sheetPrompt || item.appearance`，而那是个实打实的 bug：
@@ -206,7 +207,13 @@ export function sheetPrompt(kind, bible, item) {
    * 改描述时会自动把这个覆盖清掉（见 updateBibleEntry）——
    * 一个你看不见、又会悄悄接管一切的字段，是最坏的那种字段。
    */
-  const own = (item.sheetPrompt || '').trim() || item.appearance || '';
+  /**
+   * 变体优先：这一版的出图提示词 = 身份锚 + 这一版变的那部分。
+   * 身份锚永远在场，"是不是同一个人"才压得住（见 pipeline/variants.js）。
+   */
+  const v = variant || variants.defaultVariant(item);
+  const override = (v?.sheetPrompt || item.sheetPrompt || '').trim();
+  const own = override || variants.describeWith(item, v) || item.appearance || '';
   if (kind === 'char') return `${anchor}，角色设定图，正面半身，中性表情，纯色浅灰背景，无其他人物。${own}`;
   if (kind === 'scene') return `${anchor}，场景基准图，空镜无人物，广角。${own}`;
   return `${anchor}，道具参考图，单个物体居中，纯色背景，无人物，产品图视角。${own}`;
@@ -226,6 +233,8 @@ export async function buildBible(projectId, { onEvent, regenerate = false } = {}
   onEvent?.({ type: 'stage', stage: 'bible', status: 'running', message: '正在冻结人设与场景…' });
 
   const bible = project.bible && !regenerate ? project.bible : await consistency.buildBible(project, { onEvent });
+  // 刚生成的设定集还没有"变体"这一层，补上（老项目在 store.read 里补）
+  variants.normalizeBible(bible);
   store.update(projectId, (p) => {
     p.bible = bible;
     return p;
@@ -244,21 +253,20 @@ export async function buildBible(projectId, { onEvent, regenerate = false } = {}
    */
   const dir = store.assetDir(projectId);
   const r = routing();
-  const targets = [
-    ...bible.characters.map((c) => ({ kind: 'char', item: c })),
-    ...bible.scenes.map((s) => ({ kind: 'scene', item: s })),
-    ...(bible.props || []).map((p) => ({ kind: 'prop', item: p }))
-  ].filter(({ item }) => regenerate || !item.sheetPath);
+  // 按**变体**出图，不是按条目：一个角色三套衣服就是三张，
+  // 缺一张就少一个基准（见 pipeline/variants.js）
+  const targets = variants.sheetTargets(bible).filter(({ variant }) => regenerate || !variant.sheetPath);
 
   onEvent?.({ type: 'note', message: `待出参考图 ${targets.length} 张` });
 
-  for (const { kind, item } of targets) {
+  for (const { kind, item, variant } of targets) {
+    const label = variants.labelOf(item, variant);
     try {
-      onEvent?.({ type: 'sheet', name: item.name, kind, status: 'running', message: `生成${SHEET_LABEL[kind]}：${item.name}` });
+      onEvent?.({ type: 'sheet', name: label, kind, status: 'running', message: `生成${SHEET_LABEL[kind]}：${label}` });
 
       // 把真正发出去的提示词摊在事件流里 —— "图和描述不符"时，
       // 第一件要确认的事就是"发出去的到底是哪句话"
-      const prompt = sheetPrompt(kind, bible, item);
+      const prompt = sheetPrompt(kind, bible, item, variant);
       onEvent?.({ type: 'note', message: `提示词：${prompt.slice(0, 120)}${prompt.length > 120 ? '…' : ''}` });
 
       const image = await adapters.generateImage({
@@ -267,35 +275,38 @@ export async function buildBible(projectId, { onEvent, regenerate = false } = {}
         prompt,
         negative: bible.style.negative,
         aspectRatio: project.aspectRatio || null,
+        // 所有变体共用条目的身份种子 —— 换了衣服还是同一张脸
         seed: item.seed,
-        label: `参考图·${item.name}`,
+        label: `参考图·${label}`,
         onEvent
       });
 
-      const dest = path.join(dir, `ref-${kind}-${safeFileName(item.name)}.png`);
+      const dest = path.join(dir, `ref-${kind}-${safeFileName(item.name)}-${safeFileName(variant.id)}.png`);
       await saveMedia(image, dest, onEvent);
       const modelRef = await toModelRef(dest, { onEvent });
 
       store.update(projectId, (p) => {
         const target = bibleBucket(p.bible, kind).find((x) => x.name === item.name);
-        if (target) {
-          target.sheetPath = dest;
-          target.sheetUrl = modelRef;
-          target.sheetSource = 'model';
-          target.sheetAt = new Date().toISOString();
-          target.sheetPromptUsed = prompt;
+        const tv = target && variants.findVariant(target, variant.id);
+        if (tv) {
+          tv.sheetPath = dest;
+          tv.sheetUrl = modelRef;
+          tv.sheetSource = 'model';
+          tv.sheetAt = new Date().toISOString();
+          tv.sheetPromptUsed = prompt;
+          variants.normalizeItem(target, kind); // 条目上的镜像跟着更新
         }
         return p;
       });
-      onEvent?.({ type: 'sheet', name: item.name, status: 'done' });
+      onEvent?.({ type: 'sheet', name: label, status: 'done' });
     } catch (err) {
-      onEvent?.({ type: 'sheet', name: item.name, status: 'failed', message: err.message });
+      onEvent?.({ type: 'sheet', name: label, status: 'failed', message: err.message });
     }
   }
 
   const after = store.read(projectId);
-  const all = [...after.bible.characters, ...after.bible.scenes, ...(after.bible.props || [])];
-  const ready = all.filter((x) => x.sheetPath).length;
+  const all = variants.sheetTargets(after.bible);
+  const ready = all.filter((x) => x.variant.sheetPath).length;
   const total = all.length;
   store.update(projectId, (p) => {
     p.stageStatus.bible = ready === total ? 'done' : ready ? 'partial' : 'pending';
@@ -322,17 +333,14 @@ export async function buildBible(projectId, { onEvent, regenerate = false } = {}
  * 而且那时候你已经在出几十张分镜图了，回头补的代价比现在大得多。
  */
 export function bibleReadiness(project) {
-  const items = [
-    ...(project.bible?.characters || []).map((x) => ({ kind: 'char', ...x })),
-    ...(project.bible?.scenes || []).map((x) => ({ kind: 'scene', ...x })),
-    ...(project.bible?.props || []).map((x) => ({ kind: 'prop', ...x }))
-  ];
-  const missing = items.filter((x) => !x.sheetPath);
+  // 按**变体**算：一个角色三套衣服就是三张图，缺一张就少一个基准
+  const targets = variants.sheetTargets(project.bible);
+  const missing = targets.filter((t) => !t.variant.sheetPath);
   return {
-    total: items.length,
-    ready: items.length - missing.length,
-    missing: missing.map((x) => `${SHEET_LABEL[x.kind]}·${x.name}`),
-    ok: items.length > 0 && missing.length === 0
+    total: targets.length,
+    ready: targets.length - missing.length,
+    missing: missing.map((t) => `${SHEET_LABEL[t.kind]}·${variants.labelOf(t.item, t.variant)}`),
+    ok: targets.length > 0 && missing.length === 0
   };
 }
 
@@ -390,7 +398,13 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
     {
       characters: project.bible.characters.map((c) => ({ name: c.name, role: c.role })),
       scenes: project.bible.scenes.map((s) => ({ name: s.name })),
-      props: project.bible.props.map((p) => p.name)
+      props: project.bible.props.map((p) => p.name),
+      // 有多版的条目要把版本名列给模型，它才挑得出"这一镜穿哪套 / 什么时段"
+      变体: Object.fromEntries(
+        [...project.bible.characters, ...project.bible.scenes, ...(project.bible.props || [])]
+          .filter((x) => variants.variantsOf(x).length > 1)
+          .map((x) => [x.name, variants.variantsOf(x).map((v) => v.name)])
+      )
     },
     null,
     2
@@ -421,6 +435,20 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
     motion: s.motion || '镜头缓慢推进',
     dialogue: s.dialogue || '',
     duration: Number(s.duration) || 4,
+    // 模型回的是**版本名**（它没法知道 id），这里翻成 id。
+    // 翻不出来的直接丢掉：指向不存在的变体等于悄悄回退到默认，而界面上还显示着你选的那一版
+    variants: Object.fromEntries(
+      Object.entries(s.variants && typeof s.variants === 'object' ? s.variants : [])
+        .map(([who, vname]) => {
+          const item =
+            project.bible.characters.find((x) => x.name === who) ||
+            project.bible.scenes.find((x) => x.name === who) ||
+            (project.bible.props || []).find((x) => x.name === who);
+          const v = item && variants.variantsOf(item).find((x) => x.name === String(vname).trim());
+          return v ? [who, v.id] : null;
+        })
+        .filter(Boolean)
+    ),
     imagePath: null,
     imageRef: null,
     videoPath: null,
@@ -473,7 +501,9 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
  *      所以只落盘、记一个 editedAt，重出由用户自己点。
  */
 const SHOT_EDITABLE = [
-  'description', 'camera', 'motion', 'dialogue', 'scene', 'characters', 'duration', 'link', 'skills'
+  'description', 'camera', 'motion', 'dialogue', 'scene', 'characters', 'duration', 'link', 'skills',
+  // { '阿澜': 'v-xxx', '码头': 'v-yyy' } —— 这一镜谁穿哪套、场景是什么时段
+  'variants'
 ];
 
 export function updateShot(projectId, shotId, patch = {}) {
@@ -494,6 +524,20 @@ export function updateShot(projectId, shotId, patch = {}) {
     } else if (key === 'link') {
       // 只认这三种关系。乱值会让"要不要锁末帧"的判断变成掷骰子。
       if (!continuity.LINKS.includes(value)) continue;
+    } else if (key === 'variants') {
+      // 只留真实存在的条目 + 真实存在的变体：指向不存在的变体等于悄悄回退到默认，
+      // 而界面上还显示着你选的那一版
+      const next = {};
+      for (const [who, vid] of Object.entries(value && typeof value === 'object' ? value : {})) {
+        const item =
+          (project.bible?.characters || []).find((x) => x.name === who) ||
+          (project.bible?.scenes || []).find((x) => x.name === who) ||
+          (project.bible?.props || []).find((x) => x.name === who);
+        if (!item) continue;
+        if (!variants.findVariant(item, vid)) continue;
+        next[who] = vid;
+      }
+      value = next;
     } else if (key === 'skills') {
       // 在**保存时**就把互斥组规整掉。存下一个自相矛盾的组合，
       // 界面会显示两个互斥技法都选中、而实际只有一个生效 ——
@@ -509,8 +553,8 @@ export function updateShot(projectId, shotId, patch = {}) {
     } else {
       value = String(value ?? '').trim();
     }
-    const same = key === 'characters' || key === 'skills'
-      ? JSON.stringify(value) === JSON.stringify(shot[key] || [])
+    const same = key === 'characters' || key === 'skills' || key === 'variants'
+      ? JSON.stringify(value) === JSON.stringify(shot[key] || (key === 'variants' ? {} : []))
       : value === shot[key];
     if (same) continue;
     shot[key] = value;
@@ -941,10 +985,14 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
   let verification = { skipped: true };
   const cast = consistency.matchCharacters(project.bible, shot);
   if (settings.get('consistencyVerify') !== false && cast.length && image.url) {
+    // 和批量出图同一套规矩：拿这一镜用的那个变体当基准，
+    // 退回默认那版时告诉复核模型忽略服装差异
+    const cv = variants.pickVariant(cast[0], shot);
     verification = await consistency.verifyShot({
       shotImageUrl: image.url,
-      character: cast[0],
+      character: cv?.sheetUrl ? { ...cast[0], sheetUrl: cv.sheetUrl } : cast[0],
       threshold: settings.get('consistencyThreshold') ?? 75,
+      ignoreOutfit: !cv?.sheetUrl && Boolean(cv && cv.id !== variants.DEFAULT_VARIANT_ID),
       onEvent
     });
   }
@@ -1076,6 +1124,7 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
  * 而调设定本来就是个反复试的过程。
  */
 export async function regenerateSheet(projectId, kind, name, opts = {}, onEvent) {
+  // opts.variantId 指定重出哪一版；不给就是默认那版
   const project = store.read(projectId);
   if (!project?.bible) throw new Error('还没有设定集');
 
@@ -1097,43 +1146,56 @@ export async function regenerateSheet(projectId, kind, name, opts = {}, onEvent)
 
   const fresh = store.read(projectId);
   const target = bibleBucket(fresh.bible, kind).find((x) => x.name === name);
+  const variant = variants.findVariant(target, opts.variantId) || variants.defaultVariant(target);
+  const label = variants.labelOf(target, variant);
   const r = routing();
   const providerId = opts.provider || r.image.provider;
   const model = opts.model || r.image.model;
   const seed = Number.isFinite(opts.seed) ? opts.seed : target.seed + Math.floor(Math.random() * 9973) + 1;
 
-  onEvent?.({ type: 'sheet', name, kind, status: 'running', message: `重出${SHEET_LABEL[kind]}：${name}` });
+  onEvent?.({ type: 'sheet', name: label, kind, status: 'running', message: `重出${SHEET_LABEL[kind]}：${label}` });
+
+  const prompt = opts.prompt?.trim() || sheetPrompt(kind, fresh.bible, target, variant);
+  onEvent?.({ type: 'note', message: `提示词：${prompt.slice(0, 120)}${prompt.length > 120 ? '…' : ''}` });
 
   const image = await adapters.generateImage({
     providerId,
     model,
-    prompt: opts.prompt?.trim() || sheetPrompt(kind, fresh.bible, target),
+    prompt,
     negative: fresh.bible.style.negative,
     seed,
-    label: `重出参考图·${name}`,
+    label: `重出参考图·${label}`,
     onEvent
   });
 
-  const dest = path.join(store.assetDir(projectId), `ref-${kind}-${safeFileName(name)}.png`);
+  const dest = path.join(
+    store.assetDir(projectId),
+    `ref-${kind}-${safeFileName(name)}-${safeFileName(variant.id)}.png`
+  );
   await saveMedia(image, dest, onEvent);
   const modelRef = await toModelRef(dest, { onEvent });
 
   store.update(projectId, (p) => {
     const t = bibleBucket(p.bible, kind).find((x) => x.name === name);
-    if (t) {
-      t.sheetPath = dest;
-      t.sheetUrl = modelRef;
-      t.seed = seed;
+    const tv = t && variants.findVariant(t, variant.id);
+    if (tv) {
+      tv.sheetPath = dest;
+      tv.sheetUrl = modelRef;
       // 之前可能是传上来的图，这次是模型出的 —— 标记得跟着换，否则界面会一直说"你传的"
-      t.sheetSource = 'model';
+      tv.sheetSource = 'model';
+      tv.sheetFileName = '';
       // 这张图是"按哪一版文字"出的。界面拿它和 textAt 比，
       // 就能指出"文字改过、图没跟上"这种提示词和参考图打架的情况
-      t.sheetAt = new Date().toISOString();
+      tv.sheetAt = new Date().toISOString();
+      tv.sheetPromptUsed = prompt;
+      // 种子挂在**条目**上：所有变体共用它，换了衣服还是同一张脸
+      t.seed = seed;
+      variants.normalizeItem(t, kind);
     }
     return p;
   });
 
-  onEvent?.({ type: 'sheet', name, kind, status: 'done' });
+  onEvent?.({ type: 'sheet', name: label, kind, status: 'done' });
   return store.read(projectId);
 }
 
@@ -1237,6 +1299,82 @@ export function updateBibleEntry(projectId, kind, name, patch = {}) {
   return { project: store.read(projectId), changed, renamed, renamedTo };
 }
 
+/**
+ * 加一个变体（另一套衣服 / 另一个时段）。
+ *
+ * 不出图 —— 加完去点它的「重出」，或者跑一次设定集把缺的补齐。
+ * 加变体是几秒钟的事，出图是花钱的事，两者分开。
+ */
+export function addVariant(projectId, kind, name, { name: vname, appearance = '' } = {}) {
+  const project = store.read(projectId);
+  if (!project?.bible) throw new Error('还没有设定集');
+  const item = bibleBucket(project.bible, kind).find((x) => x.name === name);
+  if (!item) throw new Error(`设定集里没有「${name}」`);
+  if (variants.variantsOf(item).some((v) => v.name === String(vname || '').trim())) {
+    throw new Error(`「${name}」下已经有一个叫「${vname}」的了`);
+  }
+  const v = variants.makeVariant({ name: vname, appearance });
+  item.variants.push(v);
+  store.save(project);
+  return { project: store.read(projectId), variant: v };
+}
+
+export function updateVariant(projectId, kind, name, variantId, patch = {}) {
+  const project = store.read(projectId);
+  if (!project?.bible) throw new Error('还没有设定集');
+  const item = bibleBucket(project.bible, kind).find((x) => x.name === name);
+  if (!item) throw new Error(`设定集里没有「${name}」`);
+  const v = variants.findVariant(item, variantId);
+  if (!v) throw new Error(`「${name}」没有这一版：${variantId}`);
+
+  const changed = [];
+  for (const key of ['name', 'appearance', 'sheetPrompt']) {
+    if (!(key in patch)) continue;
+    const value = String(patch[key] ?? '').trim();
+    if (key === 'name' && !value) continue;
+    if (value === v[key]) continue;
+    v[key] = value;
+    changed.push(key);
+  }
+  // 和条目一样：改了描述就把出图提示词那个覆盖清掉，
+  // 否则又回到"改了描述、重出还是旧的"那条老路
+  if (changed.includes('appearance') && !changed.includes('sheetPrompt') && v.sheetPrompt) {
+    v.sheetPrompt = '';
+    changed.push('sheetPrompt');
+  }
+  if (changed.length) {
+    v.textAt = new Date().toISOString();
+    variants.normalizeItem(item, kind);
+    store.save(project);
+  }
+  return { project: store.read(projectId), changed };
+}
+
+export function removeVariant(projectId, kind, name, variantId) {
+  const project = store.read(projectId);
+  if (!project?.bible) throw new Error('还没有设定集');
+  const item = bibleBucket(project.bible, kind).find((x) => x.name === name);
+  if (!item) throw new Error(`设定集里没有「${name}」`);
+  if (variantId === variants.DEFAULT_VARIANT_ID) {
+    throw new Error('默认那版删不掉 —— 它是这个条目的身份基准。要整个不要就删条目本身。');
+  }
+  const before = item.variants.length;
+  item.variants = item.variants.filter((v) => v.id !== variantId);
+  if (item.variants.length === before) throw new Error(`没有这一版：${variantId}`);
+
+  // 分镜里指着这一版的引用要跟着清掉，否则它们会指向一个不存在的变体
+  let cleared = 0;
+  for (const shot of project.shots || []) {
+    if (shot.variants?.[name] === variantId) {
+      delete shot.variants[name];
+      cleared += 1;
+    }
+  }
+  variants.normalizeItem(item, kind);
+  store.save(project);
+  return { project: store.read(projectId), cleared };
+}
+
 /** 认得出来的图片格式。除了这几种，别的一律不收 —— 存进去也是打不开的文件。 */
 const IMAGE_MIME = {
   'image/png': '.png',
@@ -1260,11 +1398,13 @@ const IMAGE_MIME = {
  * 而是带上扩展名和 upload 标记：万一以后想知道"这张到底是谁出的"，
  * 光看文件名就够，不用去翻 project.json。
  */
-export async function attachBibleSheet(projectId, kind, name, { dataUrl, fileName = '' } = {}, onEvent) {
+export async function attachBibleSheet(projectId, kind, name, { dataUrl, fileName = '', variantId = null } = {}, onEvent) {
   const project = store.read(projectId);
   if (!project?.bible) throw new Error('还没有设定集');
   const item = bibleBucket(project.bible, kind).find((x) => x.name === name);
   if (!item) throw new Error(`设定集里没有「${name}」`);
+  const variant = variants.findVariant(item, variantId) || variants.defaultVariant(item);
+  if (!variant) throw new Error(`「${name}」没有可用的变体`);
 
   const m = /^data:([^;,]+);base64,(.+)$/s.exec(String(dataUrl || ''));
   if (!m) throw new Error('没读到图片内容（需要 data:image/...;base64, 开头的内容）');
@@ -1279,7 +1419,10 @@ export async function attachBibleSheet(projectId, kind, name, { dataUrl, fileNam
     throw new Error(`这张图 ${(buf.length / 1024 / 1024).toFixed(1)}MB，超过 7MB 就没法内联发给模型了。先压一下再传。`);
   }
 
-  const dest = path.join(store.assetDir(projectId), `ref-${kind}-${safeFileName(name)}-upload${ext}`);
+  const dest = path.join(
+    store.assetDir(projectId),
+    `ref-${kind}-${safeFileName(name)}-${safeFileName(variant.id)}-upload${ext}`
+  );
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.writeFileSync(dest, buf);
   onEvent?.({ type: 'note', message: `已存下 ${path.basename(dest)}（${(buf.length / 1024).toFixed(0)} KB）` });
@@ -1288,15 +1431,17 @@ export async function attachBibleSheet(projectId, kind, name, { dataUrl, fileNam
 
   store.update(projectId, (p) => {
     const t = bibleBucket(p.bible, kind).find((x) => x.name === name);
-    if (t) {
+    const tv = t && variants.findVariant(t, variant.id);
+    if (tv) {
       // 旧的那张不删：万一传错了，用户还能自己去 assets 目录里找回来
-      t.sheetPath = dest;
-      t.sheetUrl = modelRef;
+      tv.sheetPath = dest;
+      tv.sheetUrl = modelRef;
       // 如实标明来源。界面要靠它说"这张是你传的"，
       // 不然过两天没人分得清哪张是模型出的、哪张是自己传的
-      t.sheetSource = 'upload';
-      t.sheetFileName = fileName || path.basename(dest);
-      t.sheetAt = new Date().toISOString();
+      tv.sheetSource = 'upload';
+      tv.sheetFileName = fileName || path.basename(dest);
+      tv.sheetAt = new Date().toISOString();
+      variants.normalizeItem(t, kind);
     }
     return p;
   });

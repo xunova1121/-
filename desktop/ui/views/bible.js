@@ -10,6 +10,12 @@
 import { h, clear, api, stream, toast, mediaUrl } from '../lib.js';
 import { openLightbox } from '../lightbox.js';
 
+const VARIANT_META = {
+  char: { title: '造型', hint: '同一个人的不同穿搭。脸不变、种子不变，只换衣服', ph: '例：雨夜外套' },
+  scene: { title: '时段 / 内外景', hint: '同一个地方的不同光线。建筑不变，只换天气时段', ph: '例：内景·值班室' },
+  prop: { title: '状态', hint: '同一件东西的不同状态', ph: '例：破损' }
+};
+
 const KINDS = [
   {
     kind: 'char',
@@ -325,6 +331,103 @@ export default {
       // 提示词按新描述走，参考图却还是旧的那张，两边在打架
       const textNewer = item.textAt && item.sheetAt && Date.parse(item.textAt) > Date.parse(item.sheetAt);
 
+      /**
+       * 变体：另一套衣服 / 另一个时段。
+       *
+       * 关键是它们**共用条目的身份种子和身份锚** —— 换了衣服还是同一张脸，
+       * 换了时段还是同一个码头。拆成两个独立条目做不到这一点
+       * （见 core/pipeline/variants.js）。
+       */
+      const meta = VARIANT_META[kind];
+      const list = item.variants || [];
+      const variantHost = h('div', { class: 'variant-list' });
+      for (const v of list) {
+        const isDefault = v.id === 'v-default';
+        const vName = h('input', {
+          type: 'text', class: 'mini', value: v.name,
+          disabled: isDefault, title: isDefault ? '默认那版就是身份基准本身，名字不用改' : ''
+        });
+        const vDesc = h('input', {
+          type: 'text', class: 'mini',
+          placeholder: isDefault ? '默认那版不用写 —— 它就是上面的身份描述' : `只写变的那部分，${meta.ph}`,
+          value: v.appearance || '', disabled: isDefault
+        });
+        const vUrl = `/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}/variants/${v.id}`;
+        variantHost.append(
+          h('div', { class: 'variant-row' },
+            v.sheetPath
+              ? h('img', {
+                  class: 'variant-thumb zoomable',
+                  src: `${mediaUrl(v.sheetPath)}&v=${Date.parse(v.sheetAt || '') || item.seed}`,
+                  alt: v.name, loading: 'lazy',
+                  onclick: () => openLightbox([{ src: mediaUrl(v.sheetPath), title: `${item.name}·${v.name}`, note: v.appearance || '' }], 0)
+                })
+              : h('div', { class: 'variant-thumb ph' }, '未出图'),
+            h('div', { class: 'variant-main' }, vName, vDesc),
+            h('div', { class: 'variant-acts' },
+              isDefault ? null : h('button', {
+                class: 'btn ghost sm',
+                onclick: async () => {
+                  try {
+                    await api(vUrl, { method: 'PATCH', body: { name: vName.value, appearance: vDesc.value } });
+                    toast('已保存（不花钱）。想让图跟上就点它的「出图」', 'ok');
+                    rerender();
+                  } catch (e) { toast(e.message, 'err'); }
+                }
+              }, '存'),
+              h('button', {
+                class: 'btn sm',
+                title: '只重出这一版',
+                onclick: async (ev) => {
+                  ev.target.disabled = true;
+                  try {
+                    let err = null;
+                    await stream(
+                      `/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}/regenerate`,
+                      { variantId: v.id },
+                      (e2) => { if (e2.type === 'error') err = e2.message; }
+                    );
+                    if (err) throw new Error(err);
+                    toast(`${item.name}·${v.name} 已出`, 'ok');
+                    rerender();
+                  } catch (e) { toast(e.message, 'err'); ev.target.disabled = false; }
+                }
+              }, v.sheetPath ? '重出' : '出图'),
+              isDefault ? null : h('button', {
+                class: 'btn ghost sm',
+                onclick: async () => {
+                  if (!confirm(`删掉「${item.name}·${v.name}」这一版？指着它的分镜会退回默认那版。`)) return;
+                  try {
+                    const r = await api(vUrl, { method: 'DELETE' });
+                    toast(r.cleared ? `已删除，${r.cleared} 个分镜退回默认那版` : '已删除', 'ok');
+                    rerender();
+                  } catch (e) { toast(e.message, 'err'); }
+                }
+              }, '删'))
+          )
+        );
+      }
+
+      const newVName = h('input', { type: 'text', class: 'mini', placeholder: meta.ph });
+      const newVDesc = h('input', { type: 'text', class: 'mini', placeholder: '只写变的那部分' });
+      variantHost.append(
+        h('div', { class: 'variant-row new' },
+          h('div', { class: 'variant-main' }, newVName, newVDesc),
+          h('button', {
+            class: 'btn ghost sm',
+            onclick: async () => {
+              if (!newVName.value.trim()) return toast(`先起个名字，${meta.ph}`, 'err');
+              try {
+                await api(`/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}/variants`, {
+                  method: 'POST', body: { name: newVName.value, appearance: newVDesc.value }
+                });
+                toast('已加一版。点它的「出图」出这一版的设定图', 'ok');
+                rerender();
+              } catch (e) { toast(e.message, 'err'); }
+            }
+          }, '+ 加一版'))
+      );
+
       return h('div', { class: 'sheet-card' },
         img,
         h('div', { class: 'sheet-body' },
@@ -353,6 +456,12 @@ export default {
           item.sheetSource === 'upload'
             ? h('div', { class: 'sheet-seed', style: 'margin-top:6px' }, '这张是你传的，点「改完重出」会用模型重画一张盖掉它')
             : null,
+          h('details', { class: 'shot-prompt', style: 'margin-top:8px' },
+            h('summary', {}, `${meta.title}（${list.length} 版）`),
+            h('div', { class: 'shot-prompt-body' },
+              h('div', { style: 'margin-bottom:6px' }, meta.hint,
+                '。所有版共用同一颗种子和上面那段身份描述 —— 这才是"换了衣服还是同一个人"的原因。'),
+              variantHost)),
           h('div', { class: 'inline', style: 'margin-top:8px' },
             saveBtn,
             redoBtn,

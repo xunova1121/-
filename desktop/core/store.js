@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { PROJECTS_DIR, ensureDirs, safeFileName } from './paths.js';
+import { normalizeBible } from './pipeline/variants.js';
 
 function dirOf(id) {
   return path.join(PROJECTS_DIR, id);
@@ -111,6 +112,10 @@ export function read(id) {
    */
   const st = project.stageStatus || (project.stageStatus = {});
   for (const stage of STAGES) if (st[stage] === undefined) st[stage] = 'pending';
+
+  // 设定集条目补上"变体"这一层（老项目没有）。同样是读时补、幂等，
+  // 补出来的默认变体直接接管条目原有的那张设定图。见 pipeline/variants.js
+  normalizeBible(project.bible);
   return project;
 }
 

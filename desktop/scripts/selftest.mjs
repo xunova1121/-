@@ -1258,6 +1258,88 @@ section('设定集：改文字不该花钱，改完重出那一张就行');
   check('于是新描述又生效了', /墨绿风衣/.test(upstream.imagePrompts.at(-1) || ''), upstream.imagePrompts.at(-1));
 }
 
+/**
+ * 变体：同一个角色的不同穿搭、同一个场景的内景外景。
+ *
+ * 拆成两个独立条目是不行的 —— 两颗种子、两张各自发挥的设定图，
+ * 复核时还会互相判成不一致，换套衣服等于换了个人。
+ * 所以拆的是"永不变的身份锚"和"这一版变的那部分"。
+ */
+section('变体：换装 / 内外景');
+{
+  const vmod = await import('../core/pipeline/variants.js');
+  const charName = afterProp.bible.characters[0].name;
+  const url = (n) => `${appUrl}/api/projects/${project.id}/bible/char/${encodeURIComponent(n)}`;
+  const post = (path, body) =>
+    fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then((r) => r.json().then((j) => ({ status: r.status, ...j })));
+
+  // 老项目没有 variants，读的时候补一个默认的，并接管原有那张图
+  const item0 = store.read(project.id).bible.characters[0];
+  check('老条目自动补出默认变体', vmod.variantsOf(item0).length === 1, JSON.stringify(item0.variants?.length));
+  check('默认变体接管了条目原有的那张设定图',
+    vmod.defaultVariant(item0)?.sheetPath === item0.sheetPath, item0.sheetPath);
+
+  const made = await post(`${url(charName)}/variants`, { name: '雨夜外套', appearance: '深灰连帽雨衣，肩上湿痕' });
+  check('能加一版', Boolean(made.variant?.id), JSON.stringify(made).slice(0, 120));
+  const withV = store.read(project.id).bible.characters.find((c) => c.name === charName);
+  check('加完是两版', vmod.variantsOf(withV).length === 2);
+  // 这是整个设计的关键：换了衣服还得是同一张脸
+  check('变体不带自己的种子（共用条目的身份种子，脸才不变）',
+    made.variant.seed === undefined, JSON.stringify(made.variant.seed));
+
+  // 出图提示词 = 身份锚 + 这一版变的那部分，身份在前
+  const bibleNow = store.read(project.id).bible;
+  const prompt = studioModule.sheetPrompt('char', bibleNow, withV, made.variant);
+  // 前面那节把阿澜的身份锚改成了「墨绿风衣，寸头」，这里就按当时那份来断言
+  const anchorText = withV.appearance;
+  check('变体的出图提示词 = 身份锚 + 变体描述',
+    prompt.includes(anchorText) && /连帽雨衣/.test(prompt), prompt);
+  check('身份锚排在变体描述之前（越靠后越容易被稀释）',
+    prompt.indexOf(anchorText) < prompt.indexOf('连帽雨衣'), prompt);
+
+  // 设定图按变体算：加了一版就多缺一张
+  const rdy = studioModule.bibleReadiness(store.read(project.id));
+  check('设定图按变体计数，新加的那版算"还差一张"',
+    rdy.missing.some((m) => /雨夜外套/.test(m)), JSON.stringify(rdy.missing));
+
+  // 分镜指定用哪一版
+  const shotId = afterAssets.shots[0].id;
+  const patched = await (
+    await fetch(`${appUrl}/api/projects/${project.id}/shots/${shotId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ variants: { [charName]: made.variant.id } })
+    })
+  ).json();
+  const shotV = patched.project.shots.find((x) => x.id === shotId);
+  check('分镜能指定这一镜用哪一版', shotV?.variants?.[charName] === made.variant.id, JSON.stringify(shotV?.variants));
+  check('指向不存在的变体会被丢掉（否则界面显示着你选的、实际悄悄用了默认）',
+    !(await (
+      await fetch(`${appUrl}/api/projects/${project.id}/shots/${shotId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ variants: { [charName]: 'v-不存在' } })
+      })
+    ).json()).project.shots.find((x) => x.id === shotId)?.variants?.[charName]);
+
+  // 提示词和参考图都要跟着这一镜选的那版走
+  await fetch(`${appUrl}/api/projects/${project.id}/shots/${shotId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ variants: { [charName]: made.variant.id } })
+  });
+  const fresh = store.read(project.id);
+  const p2 = consistency.assemblePrompt(fresh.bible, fresh.shots.find((x) => x.id === shotId));
+  check('这一镜的提示词带上了选中那版的描述', /连帽雨衣/.test(p2.prompt), p2.prompt.slice(0, 160));
+
+  // 删变体：默认那版删不掉，其余删掉时要把分镜里的引用一起清干净
+  const delDefault = await fetch(
+    `${url(charName)}/variants/${vmod.DEFAULT_VARIANT_ID}`, { method: 'DELETE' });
+  check('默认那版删不掉（它是身份基准）', delDefault.status === 400);
+  const del = await (await fetch(`${url(charName)}/variants/${made.variant.id}`, { method: 'DELETE' })).json();
+  check('删掉一版时把分镜里指着它的引用一并清掉（否则指向一个不存在的变体）',
+    del.cleared >= 1 && !del.project.shots.find((x) => x.id === shotId)?.variants?.[charName],
+    JSON.stringify(del.cleared));
+}
+
 section('设定集可以用本地图片当基准');
 {
   const charName = afterProp.bible.characters[0].name;

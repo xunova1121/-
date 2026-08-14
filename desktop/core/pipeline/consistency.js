@@ -22,6 +22,7 @@ import * as adapters from '../providers/adapters.js';
 import * as settings from '../settings.js';
 import * as continuity from './continuity.js';
 import * as skills from '../skills.js';
+import * as variants from './variants.js';
 import { resolveStyle } from '../styles.js';
 
 /** 由项目和名字派生稳定种子。同一项目里同一角色，永远同一颗种子。 */
@@ -184,20 +185,29 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
 
   parts.push(shot.description || '');
 
+  /**
+   * 变体：这一镜里这个人穿哪套、这个场景是什么时段。
+   * 完整描述 = 身份锚 + 这一版变的那部分，身份永远在前
+   * （见 pipeline/variants.js 里为什么不能拆成两个条目）。
+   */
   for (const c of cast) {
+    const v = variants.pickVariant(c, shot);
+    const full = variants.describeWith(c, v);
     if (hasRefs) {
       // 留三段而不是两段：第三段往往正好是服装配色，而配色是最强的身份线索之一。
       // 参考图给的是设定图（另一个姿势、另一个背景），文字仍然要把关键特征点住。
-      const brief = (c.appearance || '').split(/[，,。]/).slice(0, 3).join('，');
+      const brief = full.split(/[，,。]/).slice(0, 3).join('，');
       parts.push(brief ? `【${c.name}】${brief}，外貌以参考图为准` : `【${c.name}】外貌以参考图为准`);
     } else {
-      parts.push(`【${c.name}】${c.appearance}`);
+      parts.push(`【${c.name}】${full}`);
     }
   }
 
   if (scene) {
-    const brief = (scene.appearance || '').split(/[，,。]/).slice(0, 3).join('，');
-    parts.push(`【场景·${scene.name}】${hasRefs ? brief : scene.appearance}`);
+    const sv = variants.pickVariant(scene, shot);
+    const full = variants.describeWith(scene, sv);
+    const brief = full.split(/[，,。]/).slice(0, 3).join('，');
+    parts.push(`【场景·${scene.name}】${hasRefs ? brief : full}`);
   }
 
   for (const prop of props) {
@@ -243,14 +253,17 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
  */
 export function collectReferences(bible, shot, { limit = 9 } = {}) {
   const picked = [];
+  // 带的是**这一镜选中那个变体**的图：夜戏就该带夜景基准图，
+  // 带白天那张等于给了模型一条互相打架的指令
+  const ref = (kind, item) => {
+    const v = variants.pickVariant(item, shot);
+    const url = v?.sheetUrl || item.sheetUrl;
+    if (url) picked.push({ kind, name: variants.labelOf(item, v) || item.name, url });
+  };
   const scene = matchScene(bible, shot);
-  if (scene?.sheetUrl) picked.push({ kind: 'scene', name: scene.name, url: scene.sheetUrl });
-  for (const c of matchCharacters(bible, shot)) {
-    if (c.sheetUrl) picked.push({ kind: 'character', name: c.name, url: c.sheetUrl });
-  }
-  for (const p of matchProps(bible, shot)) {
-    if (p.sheetUrl) picked.push({ kind: 'prop', name: p.name, url: p.sheetUrl });
-  }
+  if (scene) ref('scene', scene);
+  for (const c of matchCharacters(bible, shot)) ref('character', c);
+  for (const p of matchProps(bible, shot)) ref('prop', p);
 
   const seen = new Set();
   const unique = picked.filter((r) => !seen.has(r.url) && seen.add(r.url)).slice(0, limit);
@@ -354,7 +367,7 @@ export function matchProps(bible, shot) {
 const VERIFY_PROMPT = `你是动画制片的质检员。第一张图是**角色设定图（基准）**，第二张是**本镜成图**。
 
 判断第二张里的该角色，与基准相比是否是"同一个人"。重点看：发型发色、瞳色、脸型、服装款式与配色、标志性配饰。
-不要评价构图、姿态、表情、光线 —— 那些本来就该随镜头变化。
+不要评价构图、姿态、表情、光线 —— 那些本来就该随镜头变化。{{OUTFIT}}
 
 严格只输出 JSON：
 {"score": 0到100的整数, "verdict": "pass" 或 "fail", "issues": ["具体偏差，如 '服装配色由藏青变为墨绿'"]}
@@ -367,7 +380,14 @@ score ≥ {{THRESHOLD}} 判 pass。没有明显偏差时 issues 给空数组。`
  * 这一步会额外产生一次调用开销，但它换来的是"人设崩了能当场发现并自动重试"，
  * 而不是等全片合成完才看出第三镜换了张脸。可以在设置里关掉。
  */
-export async function verifyShot({ shotImageUrl, character, threshold = 75, onEvent }) {
+/**
+ * @param ignoreOutfit 基准图和本镜是**不同变体**（不同穿搭）时置真。
+ *
+ * 不置的话会出现一种必然失败：角色这一镜穿雨夜外套，而基准是制服那张 ——
+ * 复核模型会老老实实报"服装配色不符"，分数打不上去，引擎就一直换种子重试，
+ * 重到次数用尽还是不过。问题根本不在图上，在于比错了东西。
+ */
+export async function verifyShot({ shotImageUrl, character, threshold = 75, ignoreOutfit = false, onEvent }) {
   if (!character?.sheetUrl || !shotImageUrl) {
     return { skipped: true, reason: '缺少设定图或成图 URL' };
   }
@@ -378,7 +398,13 @@ export async function verifyShot({ shotImageUrl, character, threshold = 75, onEv
     const { text } = await adapters.chat({
       providerId: routing.vision.provider,
       model: routing.vision.model,
-      system: VERIFY_PROMPT.replace('{{THRESHOLD}}', String(threshold)),
+      system: VERIFY_PROMPT.replace('{{THRESHOLD}}', String(threshold)).replace(
+        '{{OUTFIT}}',
+        ignoreOutfit
+          ? '\n\n**注意：这一镜里该角色换了一套装扮，基准图上是另一套。请完全忽略服装和配色的差异，' +
+            '只判断脸型、五官、发型发色、瞳色、体型是不是同一个人。**'
+          : ''
+      ),
       user: `请比对角色「${character.name}」。设定要点：${character.appearance}`,
       images: [character.sheetUrl, shotImageUrl],
       temperature: 0,
@@ -471,10 +497,20 @@ export async function generateConsistentImage({
       return { ...last, verification: { skipped: true }, trail };
     }
 
+    /**
+     * 复核基准优先取**这一镜用的那个变体**的设定图；
+     * 那一版还没出图时退回默认那版，并告诉复核模型忽略服装差异 ——
+     * 否则"换了套衣服"必然被判不一致，重试到次数用尽也过不了。
+     */
+    const cv = variants.pickVariant(cast[0], shot);
+    const baseline = cv?.sheetUrl
+      ? { ...cast[0], sheetUrl: cv.sheetUrl }
+      : cast[0];
     const verification = await verifyShot({
       shotImageUrl: image.url,
-      character: cast[0],
+      character: baseline,
       threshold,
+      ignoreOutfit: !cv?.sheetUrl && Boolean(cv && cv.id !== variants.DEFAULT_VARIANT_ID),
       onEvent
     });
     trail.push({ attempt, seed, score: verification.score ?? null, issues: verification.issues || [] });
