@@ -26,6 +26,8 @@ const VIEWS = [
 export const state = {
   catalog: null,
   health: null,
+  /** 开机自检的结果：{ checkedAt, capabilities: { chat: {ok,reason,...} } } */
+  routingCheck: null,
   projectId: localStorage.getItem('fd.projectId') || null,
   current: localStorage.getItem('fd.view') || 'studio'
 };
@@ -67,20 +69,120 @@ function paintChain() {
     const route = state.catalog.routing[cap];
     const provider = providers[route?.provider];
     const ready = provider?.credentials?.ready;
+    // 开机自检的结果：null = 还没探 / 这家没探针，true = 通，false = 不通
+    const checked = state.routingCheck?.capabilities?.[cap];
+    const bad = ready && checked && checked.ok === false;
     chain.append(
       h(
         'span',
         {
-          class: `chain-seg ${ready ? '' : 'off'}`,
-          title: ready
-            ? `${provider.name} / ${route.model}`
-            : `${provider?.name || route?.provider || '未配置'} —— 缺少密钥，去「服务商与密钥」补上`
+          class: `chain-seg ${ready ? '' : 'off'} ${bad ? 'bad' : checked?.ok ? 'good' : ''}`,
+          title: !ready
+            ? `${provider?.name || route?.provider || '未配置'} —— 缺少密钥，去「服务商与密钥」补上`
+            : bad
+              ? `${provider.name} / ${route.model}\n✕ 连不通：${checked.reason}`
+              : checked?.ok
+                ? `${provider.name} / ${route.model}\n✓ 已连通${checked.latencyMs ? `（${checked.latencyMs}ms）` : ''}`
+                : `${provider.name} / ${route.model}`
         },
         `${label} `,
-        h('b', {}, provider ? provider.id : '—')
+        h('b', {}, provider ? provider.id : '—'),
+        bad ? h('span', { style: 'color:var(--alarm)' }, ' ✕') : checked?.ok ? h('span', { style: 'color:var(--good)' }, ' ✓') : null
       )
     );
   }
+}
+
+/**
+ * 打开应用时自动探一遍当前路由到的服务商。
+ *
+ * 为什么值得做：配置坏了的代价不是"自检红一下"，而是你兴冲冲跑到第 04 步、
+ * 等了两分钟、才被告知密钥没配 —— 那两分钟和那次失败都是白花的。
+ * **问题应该在你下手之前就摆在眼前。**
+ *
+ * 只发各家最便宜的探针（列模型 / max_tokens=1 / 列任务），不出图不出视频，
+ * 所以自动跑没有代价。跑在后台，不挡着界面先出来。
+ */
+export async function runRoutingCheck({ silent = false } = {}) {
+  try {
+    state.routingCheck = await api('/routing/check', { method: 'POST' });
+  } catch (err) {
+    state.routingCheck = { error: err.message, capabilities: {} };
+    return state.routingCheck;
+  }
+  paintChain();
+  paintRoutingBanner();
+  if (!silent) {
+    const bad = badRoutes();
+    if (bad.length) {
+      toast(`${bad.map((b) => b.label).join('、')} 连不通，先去「服务商与密钥」看看`, 'err');
+    }
+  }
+  return state.routingCheck;
+}
+
+const CAP_LABELS = { chat: '剧本与分镜', vision: '一致性复核', image: '出图', video: '视频', tts: '配音' };
+
+export function badRoutes() {
+  const caps = state.routingCheck?.capabilities || {};
+  return Object.entries(caps)
+    .filter(([, v]) => v.ok === false)
+    .map(([cap, v]) => ({ cap, label: CAP_LABELS[cap] || cap, ...v }));
+}
+
+/**
+ * 顶部横幅。toast 会自己消失，而"密钥没配"是个**持续的状态**，
+ * 不该在你去泡杯茶的功夫里悄悄划过去。
+ */
+function paintRoutingBanner() {
+  const host = $('#route-banner');
+  if (!host) return;
+  clear(host);
+  const bad = badRoutes();
+  if (!bad.length) {
+    host.style.display = 'none';
+    return;
+  }
+  host.style.display = '';
+
+  /**
+   * 按**服务商**归并，不按能力列。
+   *
+   * 一把密钥填错，会同时让复核、出图、视频三条能力都红 —— 逐条列的话，
+   * 同一句"API Key 无效"会重复三遍，看起来像三个问题，其实只有一个。
+   * 归并之后是"这一家不通，影响这三条"，和事实一致，也知道该去改哪儿。
+   */
+  const byProvider = new Map();
+  for (const b of bad) {
+    const key = b.provider || '未配置';
+    if (!byProvider.has(key)) byProvider.set(key, { name: b.providerName || key, caps: [], reason: b.reason });
+    byProvider.get(key).caps.push(b.label);
+  }
+
+  host.append(
+    h('b', {}, `${byProvider.size} 家服务商连不通`),
+    h('span', {},
+      [...byProvider.values()].map((p) =>
+        h('div', { title: p.reason },
+          h('b', { style: 'color:var(--ink)' }, p.name),
+          `（${p.caps.join('、')}）：`,
+          // 长诊断只留第一句，完整的挂在 title 上 —— 横幅是提醒，不是报告
+          (p.reason || '').split(/[。\n]/)[0]))),
+    h('button', {
+      class: 'btn ghost sm',
+      onclick: () => {
+        localStorage.setItem('fd.view', 'providers');
+        location.reload();
+      }
+    }, '去配密钥'),
+    h('button', {
+      class: 'btn ghost sm',
+      onclick: (e) => {
+        e.target.disabled = true;
+        runRoutingCheck().finally(() => (e.target.disabled = false));
+      }
+    }, '重新检测')
+  );
 }
 
 function paintNav() {
@@ -154,6 +256,8 @@ async function boot() {
     await refreshCatalog();
     await go(state.current);
     toast('已刷新', 'ok');
+    // 刷新时顺手重探一遍：多半就是刚去改完密钥或 baseUrl 回来的
+    if (state.catalog?.settings?.autoCheckOnStart !== false) runRoutingCheck({ silent: true });
   });
 
   try {
@@ -169,6 +273,15 @@ async function boot() {
     return;
   }
   await go(state.current);
+
+  /**
+   * 开机自检放在**界面出来之后**跑，而且不 await ——
+   * 它要发好几个网络请求，挡在前面的话，网络慢时应用看起来像卡死了。
+   * 结果回来再回填到信号链和顶部横幅上。
+   */
+  if (state.catalog?.settings?.autoCheckOnStart !== false) {
+    runRoutingCheck();
+  }
 }
 
 boot();

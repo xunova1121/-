@@ -448,6 +448,12 @@ async function handleApi(req, res, url, { lan = false } = {}) {
   }
 
   // ---- 服务商 ----
+  // 打开应用时自动跑这一条：只发各家最便宜的探针，不出图不出视频。
+  // 配置坏了的代价不是"自检红一下"，而是你跑到第 04 步等两分钟才被告知密钥没配。
+  if (a === 'routing' && b === 'check' && method === 'POST') {
+    return json(res, 200, await providers.probeRouting());
+  }
+
   if (a === 'providers' && b) {
     if (c === 'probe' && method === 'POST') {
       return json(res, 200, await providers.probe(b));

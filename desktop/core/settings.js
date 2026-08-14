@@ -86,6 +86,12 @@ const DEFAULTS = {
    * 它跟浏览器一样读系统代理。默认关：换网络栈有风险，不该悄悄替所有人换。
    */
   useSystemProxy: false,
+  /**
+   * 打开应用时自动探一遍当前路由到的服务商。
+   * 只发最便宜的探针（列模型 / max_tokens=1），不出图不出视频。
+   * 默认开：配置坏了应该在你下手之前就知道，而不是跑到第 04 步等两分钟才被告知。
+   */
+  autoCheckOnStart: true,
   theme: 'dark',
   port: 5178,
 

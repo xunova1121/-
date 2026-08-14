@@ -2043,6 +2043,46 @@ settings.patch(savedRoute);
 const modelList = await (await fetch(`${appUrl}/api/providers/volcengine/models`)).json();
 check('拿不到模型列表时说明白该去哪儿找', modelList.ok === false && /控制台|手动填写/.test(modelList.reason), JSON.stringify(modelList));
 
+// 配置坏了的代价不是"自检红一下"，而是你跑到第 04 步、等了两分钟，
+// 才被告知密钥没配。所以打开应用就自动探一遍 —— 前提是它必须**足够便宜**。
+section('开机自动探一遍路由到的服务商');
+{
+  const before = upstream.imagePrompts.length;
+  const probesBefore = logbus.list({ limit: 200 }).filter((x) => /自检/.test(x.label || '')).length;
+  const r = await (await fetch(`${appUrl}/api/routing/check`, { method: 'POST' })).json();
+  const probesAfter = logbus.list({ limit: 200 }).filter((x) => /自检/.test(x.label || '')).length;
+
+  check('五种能力都给了结论', Object.keys(r.capabilities || {}).length === 5, JSON.stringify(Object.keys(r.capabilities || {})));
+  check('记了时间（界面要显示"什么时候探的"）', Boolean(Date.parse(r.checkedAt || '')));
+  // 这是自动跑的前提：一张图都不许出，一段视频都不许出
+  check('自动探测不产生任何媒体（不然开个应用就烧钱）',
+    upstream.imagePrompts.length === before, `出图次数 ${before} → ${upstream.imagePrompts.length}`);
+  check('通的那家标成 ok', r.capabilities.chat?.ok === true, JSON.stringify(r.capabilities.chat));
+  check('结论里带上服务商名字（界面要说清楚是哪家不通）',
+    Boolean(r.capabilities.chat?.providerName), JSON.stringify(r.capabilities.chat));
+
+  /**
+   * 同一家被多条能力用到时只该探一次。
+   * 自检时 chat/vision/image/video 全指向 volcengine、tts 指向 dashscope，
+   * 所以这一趟最多两次请求 —— 探五遍同一个端点既慢又没意义。
+   */
+  check('同一家不重复探（四条能力同一家时只探一次）',
+    probesAfter - probesBefore <= 2, `这一趟发了 ${probesAfter - probesBefore} 次自检请求`);
+
+  // 密钥没配的那家要说"缺什么"，而不是笼统地说"连不上"——
+  // 后者会让人去查一个根本不存在的网络问题
+  const saved = settings.get('ttsProvider');
+  settings.patch({ ttsProvider: 'vidu' });
+  const r2 = await (await fetch(`${appUrl}/api/routing/check`, { method: 'POST' })).json();
+  check('没配密钥时直接点名缺哪个，而不是笼统说连不上',
+    r2.capabilities.tts?.ok === false && /缺少凭据/.test(r2.capabilities.tts?.reason || ''),
+    JSON.stringify(r2.capabilities.tts));
+  check('缺的密钥名也一起给出来（界面要能直接跳过去填）',
+    Array.isArray(r2.capabilities.tts?.missing) && r2.capabilities.tts.missing.length > 0,
+    JSON.stringify(r2.capabilities.tts?.missing));
+  settings.patch({ ttsProvider: saved });
+}
+
 section('候选模型逐个探测');
 const candEvents = await ndjson('/providers/volcengine/candidates', {});
 const candDone = candEvents.find((e) => e.type === 'finished');

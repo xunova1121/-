@@ -275,6 +275,63 @@ function probeBody(provider) {
   return preferred ? { ...body, model: preferred[1] } : body;
 }
 
+/**
+ * 把当前路由到的**几家**一次性探一遍。
+ *
+ * 这条和「上线前体检」是两件事，别混：
+ *   体检   会真的出一张图、出一段视频 —— 花钱、慢，所以必须由人点；
+ *   这一条 只发各家最便宜的那个探针（列模型 / max_tokens=1 / 列任务），
+ *          不产出任何媒体，所以可以在**打开应用时自动跑**。
+ *
+ * 为什么值得自动跑：配置坏了的代价不是"自检红一下"，而是你兴冲冲跑到第 04 步、
+ * 等了两分钟、才被告知密钥没配。**问题应该在你下手之前就摆在眼前。**
+ *
+ * 同一家被多个能力用到时只探一次 —— 探五遍同一个端点既慢又没意义。
+ */
+export async function probeRouting() {
+  const s = settings.all();
+  const caps = {
+    chat: s.chatProvider,
+    vision: s.visionProvider,
+    image: s.imageProvider,
+    video: s.videoProvider,
+    tts: s.ttsProvider
+  };
+
+  const unique = [...new Set(Object.values(caps).filter(Boolean))];
+  const results = new Map();
+  await Promise.all(
+    unique.map(async (id) => {
+      try {
+        results.set(id, await probe(id));
+      } catch (err) {
+        results.set(id, { ok: false, reason: err.message });
+      }
+    })
+  );
+
+  const out = {};
+  for (const [cap, providerId] of Object.entries(caps)) {
+    if (!providerId) {
+      out[cap] = { provider: null, ok: false, reason: '这一项还没选服务商' };
+      continue;
+    }
+    const provider = getProvider(providerId);
+    const r = results.get(providerId) || {};
+    out[cap] = {
+      provider: providerId,
+      providerName: provider?.name || providerId,
+      // 没定义探针的那几家不算失败 —— 它们只是没有便宜的接口可探
+      ok: r.skipped ? null : Boolean(r.ok),
+      skipped: Boolean(r.skipped),
+      reason: r.reason || r.note || '',
+      latencyMs: r.latencyMs ?? null,
+      missing: r.missing || null
+    };
+  }
+  return { checkedAt: new Date().toISOString(), capabilities: out };
+}
+
 /** 一键自检：这家配通了没 */
 export async function probe(providerId) {
   const provider = getProvider(providerId);

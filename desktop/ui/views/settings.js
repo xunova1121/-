@@ -393,6 +393,12 @@ export default {
       onchange: (e) => (pending.useSystemProxy = e.target.checked)
     });
 
+    const autoCheckBox = h('input', {
+      type: 'checkbox',
+      checked: settings.autoCheckOnStart !== false,
+      onchange: (e) => (pending.autoCheckOnStart = e.target.checked)
+    });
+
     let ff = state.catalog.ffmpeg;
 
     /**
@@ -454,6 +460,10 @@ export default {
             h('div', { class: 'field-hint' }, '被限流（429）时把这个调大。'))
         ),
         h('div', { class: 'stack', style: 'gap:6px;margin-top:12px' },
+          check(autoCheckBox,
+            '打开应用时自动探一遍当前路由到的服务商（只发最便宜的探针，不出图不出视频）'),
+          h('div', { class: 'field-hint', style: 'margin:0 0 6px 26px' },
+            '配置坏了的代价不是"自检红一下"，而是你跑到第 04 步、等了两分钟，才被告知密钥没配。'),
           check(proxyBox,
             proxyAvailable
               ? '走 Windows 的系统代理（公司网络连不上厂商时打开）'

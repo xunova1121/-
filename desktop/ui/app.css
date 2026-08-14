@@ -1009,3 +1009,21 @@ select.mini {
 .skill-chip.on { border-color: var(--beam); background: var(--beam-wash); color: var(--ink); font-weight: 600; }
 /* 自定义卡标一下，和内置的分得开 */
 .skill-chip.custom { border-style: dashed; }
+
+/* ══════════════════════ 开机自检横幅 ══════════════════════ */
+
+/* toast 会自己消失，而"密钥没配"是个持续状态 —— 不该在你去泡茶的功夫里悄悄划过去 */
+.route-banner {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 9px 22px;
+  background: var(--alarm-wash);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px; color: var(--ink-dim);
+}
+.route-banner b { color: var(--alarm); font-family: var(--display); }
+.route-banner > span { flex: 1; min-width: 220px; }
+
+/* 信号链上直接标出通没通：下手之前就该看得见 */
+.chain-seg.good b { color: var(--good); }
+.chain-seg.bad { background: var(--alarm-wash); }
+.chain-seg.bad b { color: var(--alarm); }
