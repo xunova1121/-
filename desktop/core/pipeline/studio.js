@@ -223,61 +223,33 @@ export async function buildBible(projectId, { onEvent, regenerate = false } = {}
   if (!project) throw new Error(`项目不存在：${projectId}`);
   if (!project.script?.trim()) throw new Error('剧本是空的，先写点东西');
 
-  onEvent?.({ type: 'stage', stage: 'bible', status: 'running', message: '正在读剧本、写人设与场景…' });
+  onEvent?.({ type: 'stage', stage: 'bible', status: 'running', message: '正在冻结人设与场景…' });
 
   const bible = project.bible && !regenerate ? project.bible : await consistency.buildBible(project, { onEvent });
-  // 刚写出来的描述**先不锁**：这一步的产出是文字，该由你过一遍再定。
-  // 出图那一步跑完才自动冻结。
-  for (const item of [...bible.characters, ...bible.scenes, ...(bible.props || [])]) {
-    if (!item.sheetPath) item.locked = false;
-  }
   store.update(projectId, (p) => {
     p.bible = bible;
-    p.stageStatus.bible = 'done';
     return p;
   });
 
-  const count = bible.characters.length + bible.scenes.length + (bible.props?.length || 0);
-  onEvent?.({
-    type: 'stage',
-    stage: 'bible',
-    status: 'done',
-    message: `写好了 ${count} 条设定。先去「设定集」页过一遍描述，确认没问题再跑下一步出图`
-  });
-  return store.read(projectId);
-}
-
-/**
- * 阶段一·下半：按描述出设定图。
- *
- * 之所以和写描述**分成两步**，是因为它们的代价差着量级：
- * 写描述是一次对话调用，几秒钟；出图是几十张图，又慢又贵。
- * 合成一步的话，你只能等它全跑完，才第一次看到那些描述 ——
- * 而描述但凡写偏一句，那几十张图就全白出了。
- *
- * 现在的顺序和人的判断顺序一致：先看字，字对了再出图，出完自动冻结。
- * 之后想改，就解冻 → 改描述 → 重出这一张。
- */
-export async function generateSheets(projectId, { onEvent, regenerate = false, only = null } = {}) {
-  const project = store.read(projectId);
-  if (!project) throw new Error(`项目不存在：${projectId}`);
-  const bible = project.bible;
-  if (!bible) throw new Error('还没有设定集，先跑上一步把描述写出来');
-
-  onEvent?.({ type: 'stage', stage: 'sheets', status: 'running', message: '按描述出设定图…' });
-
-  // 出参考图：角色最重要排在最前，其次场景，最后道具
+  /**
+   * 写描述和出设定图是**同一步**。
+   *
+   * 曾经拆成过两步（先出文字、人确认、再出图），道理上说得通，实际不好用：
+   * 多一次手动确认、多一个"图还没出"的中间态，而设定集本来就是
+   * "一口气出齐才有意义"的东西 —— 缺一张角色设定图，后面引用它的每一镜
+   * 都少一张参考图，一致性就是从那儿开始塌的。
+   *
+   * 不满意就在「设定集」页改描述、单独重出那一张 —— 那是随时能做的事，
+   * 不需要为它在流水线上专门开一站。
+   */
   const dir = store.assetDir(projectId);
   const r = routing();
   const targets = [
     ...bible.characters.map((c) => ({ kind: 'char', item: c })),
     ...bible.scenes.map((s) => ({ kind: 'scene', item: s })),
     ...(bible.props || []).map((p) => ({ kind: 'prop', item: p }))
-  ]
-    .filter(({ item }) => (only ? only.includes(item.name) : true))
-    .filter(({ item }) => regenerate || !item.sheetPath);
+  ].filter(({ item }) => regenerate || !item.sheetPath);
 
-  if (!targets.length) throw new Error('没有要出的设定图（都出过了。想重出就勾上"全部重出"）');
   onEvent?.({ type: 'note', message: `待出参考图 ${targets.length} 张` });
 
   for (const { kind, item } of targets) {
@@ -312,9 +284,6 @@ export async function generateSheets(projectId, { onEvent, regenerate = false, o
           target.sheetSource = 'model';
           target.sheetAt = new Date().toISOString();
           target.sheetPromptUsed = prompt;
-          // 出完就冻结：这一张已经是"定稿"。之后要改就解冻 → 改描述 → 重出这一张
-          target.locked = true;
-          target.lockedAt = new Date().toISOString();
         }
         return p;
       });
@@ -329,19 +298,60 @@ export async function generateSheets(projectId, { onEvent, regenerate = false, o
   const ready = all.filter((x) => x.sheetPath).length;
   const total = all.length;
   store.update(projectId, (p) => {
-    p.stageStatus.sheets = ready === total ? 'done' : ready ? 'partial' : 'pending';
+    p.stageStatus.bible = ready === total ? 'done' : ready ? 'partial' : 'pending';
     return p;
   });
-  onEvent?.({ type: 'stage', stage: 'sheets', status: 'done', message: `参考图 ${ready}/${total} 就绪，已冻结` });
+  onEvent?.({
+    type: 'stage',
+    stage: 'bible',
+    status: 'done',
+    message: ready === total
+      ? `设定集就绪：${total} 条设定，参考图 ${ready}/${total}`
+      : `参考图只出了 ${ready}/${total} 张。缺的那几张会让引用它的镜头少一张参考图，一致性从那儿开始塌 —— 去「设定集」页把缺的补出来再往下走`
+  });
   return store.read(projectId);
 }
 
 // ═══════════════════════ 阶段二：分镜 ═══════════════════════
 
-export async function analyzeScript(projectId, { shotCount = 8, chapterId = null, onEvent } = {}) {
+/**
+ * 设定集齐了没。
+ *
+ * 「所有设定图出齐再往下走」不是洁癖：缺一张角色设定图，后面引用它的每一镜
+ * 都少一张参考图、少一份复核基准，**一致性就是从那儿开始塌的**。
+ * 而且那时候你已经在出几十张分镜图了，回头补的代价比现在大得多。
+ */
+export function bibleReadiness(project) {
+  const items = [
+    ...(project.bible?.characters || []).map((x) => ({ kind: 'char', ...x })),
+    ...(project.bible?.scenes || []).map((x) => ({ kind: 'scene', ...x })),
+    ...(project.bible?.props || []).map((x) => ({ kind: 'prop', ...x }))
+  ];
+  const missing = items.filter((x) => !x.sheetPath);
+  return {
+    total: items.length,
+    ready: items.length - missing.length,
+    missing: missing.map((x) => `${SHEET_LABEL[x.kind]}·${x.name}`),
+    ok: items.length > 0 && missing.length === 0
+  };
+}
+
+export async function analyzeScript(projectId, { shotCount = 8, chapterId = null, force = false, onEvent } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
   if (!project.bible) throw new Error('请先跑「设定集」—— 没有冻结人设，分镜会自己发挥外貌描述');
+
+  // 设定图要出齐再往下走：缺一张，后面引用它的每一镜都少一张参考图、
+  // 少一份复核基准，一致性从那儿开始塌 —— 而那时候你已经在出几十张图了
+  const ready = bibleReadiness(project);
+  if (!ready.ok && !force) {
+    throw new Error(
+      `设定图还差 ${ready.missing.length} 张没出：${ready.missing.slice(0, 6).join('、')}` +
+        `${ready.missing.length > 6 ? ' 等' : ''}。\n` +
+        '缺的那几张会让引用它们的每一镜都少一张参考图，一致性从那儿开始塌。' +
+        '去「设定集」页把缺的补出来（或者删掉用不上的条目）再拆分镜。'
+    );
+  }
 
   // 分章的项目一次只拆一章。不传章节 ID 时，挑第一个还没拆的，
   // 让"连点几次"这种最自然的操作方式能一章章推进。
@@ -895,7 +905,11 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
 
   // 单独重出同样要带设定集：提示词从冻结设定装配，参考图带上场景 + 角色 + 道具。
   // 少带一样，重出的这一镜就会成为全片里唯一对不上的那一张。
-  const refImages = settings.get('useReferenceImages') === false ? [] : assembled.refImages;
+  // 和批量出图保持一致：分镜图默认不走图生图（编辑模型会把这一镜画成
+  // "被改过的角色设定图"）。开关在「设置 → 画面规格」。
+  const useEdit = settings.get('useEditModelForShots') === true;
+  const refImages =
+    !useEdit || settings.get('useReferenceImages') === false ? [] : assembled.refImages;
   onEvent?.({ type: 'shot', shotId, status: 'running', message: `第 ${shot.index} 镜重出（${providerId} / ${model}）…` });
   if (refImages.length) {
     onEvent?.({ type: 'note', message: `参考设定集：${assembled.refLabels.join('、')}` });
@@ -909,7 +923,7 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
      * 用户在卡片上专门挑了一个模型，那就照他挑的发 ——
      * 界面上写着一个模型、实际发的是另一个，比参考图不生效更糟。
      */
-    editModel: opts.model ? null : undefined,
+    editModel: opts.model || !useEdit ? null : undefined,
     prompt: opts.prompt?.trim() || assembled.prompt,
     negative: assembled.negative,
     aspectRatio: project.aspectRatio || null,
@@ -1144,7 +1158,7 @@ export async function regenerateSheet(projectId, kind, name, opts = {}, onEvent)
  * 这一层不是技术需要，是心理需要 —— 设定集是全片的地基，
  * 地基应该有一个明确的"我认可了"的动作，而不是模型写完就算数。
  */
-const BIBLE_EDITABLE = ['name', 'appearance', 'sheetPrompt', 'role', 'locked'];
+const BIBLE_EDITABLE = ['name', 'appearance', 'sheetPrompt', 'role'];
 
 export function updateBibleEntry(projectId, kind, name, patch = {}) {
   const project = store.read(projectId);
@@ -1159,9 +1173,7 @@ export function updateBibleEntry(projectId, kind, name, patch = {}) {
   for (const key of BIBLE_EDITABLE) {
     if (!(key in patch)) continue;
     let value = patch[key];
-    if (key === 'locked') {
-      value = Boolean(value);
-    } else {
+    {
       value = String(value ?? '').trim();
       if (key === 'name') {
         if (!value) continue;
@@ -1194,9 +1206,6 @@ export function updateBibleEntry(projectId, kind, name, patch = {}) {
       item.sheetPrompt = '';
       changed.push('sheetPrompt');
     }
-  }
-  if (changed.includes('locked')) {
-    item.lockedAt = item.locked ? new Date().toISOString() : null;
   }
 
   /**
@@ -1802,7 +1811,6 @@ export async function compose(projectId, { onEvent } = {}) {
 /** 一键跑完全流程。任一阶段失败就停在那儿，已完成的部分都在盘上。 */
 export async function runAll(projectId, { shotCount = 8, onEvent } = {}) {
   await buildBible(projectId, { onEvent });
-  await generateSheets(projectId, { onEvent });
   await analyzeScript(projectId, { shotCount, onEvent });
   await generateAssets(projectId, { onEvent });
   await generateVideos(projectId, { onEvent });

@@ -121,8 +121,7 @@ export async function buildBible(project, { onEvent } = {}) {
       sheetPrompt: '',
       seed: deriveSeed(project.id, `char:${c.name}`),
       sheetPath: null,
-      sheetUrl: null,
-      locked: true
+      sheetUrl: null
     })),
     scenes: (parsed.scenes || []).map((s) => ({
       name: s.name,
@@ -130,8 +129,7 @@ export async function buildBible(project, { onEvent } = {}) {
       sheetPrompt: '',
       seed: deriveSeed(project.id, `scene:${s.name}`),
       sheetPath: null,
-      sheetUrl: null,
-      locked: true
+      sheetUrl: null
     })),
     // 道具和角色/场景一样也出参考图：一把刀、一枚徽章，跨镜头长得不一样同样出戏
     props: (parsed.props || []).map((p) => ({
@@ -140,8 +138,7 @@ export async function buildBible(project, { onEvent } = {}) {
       sheetPrompt: '',
       seed: deriveSeed(project.id, `prop:${p.name}`),
       sheetPath: null,
-      sheetUrl: null,
-      locked: true
+      sheetUrl: null
     }))
   };
 
@@ -423,9 +420,22 @@ export async function generateConsistentImage({
   const verifyEnabled = settings.get('consistencyVerify') !== false;
   const assembled = assemblePrompt(bible, shot);
   const cast = matchCharacters(bible, shot);
-  // 参考图这层可以在设置里关掉（省一次上传、少一点费用），但关掉之后
-  // 就只剩"文字描述 + 种子"在撑一致性了 —— 提示里说清楚是哪一种。
-  const refImages = settings.get('useReferenceImages') === false ? [] : assembled.refImages;
+
+  /**
+   * 分镜图默认**不走图生图**。
+   *
+   * 道理上"带着角色设定图去出这一镜"该更一致，实际不是：
+   * SeedEdit 这类是**编辑**模型 —— 拿到一张图是在那张图上改，
+   * 而不是照着它另画一个场景。出来的会像"被改过的角色设定图"
+   * （人物居中、纯色背景还在），根本不是你要的那一镜。
+   *
+   * 所以默认走文生图 + 冻结描述 + 稳定种子。参考图那一层留给**出视频**
+   * （首帧图 + r2v 通道），那边它是真的有用。
+   * 想试图生图的话，「设置 → 画面规格」里有开关。
+   */
+  const useEdit = settings.get('useEditModelForShots') === true;
+  const refImages =
+    !useEdit || settings.get('useReferenceImages') === false ? [] : assembled.refImages;
 
   let attempt = 0;
   let last = null;
@@ -443,8 +453,8 @@ export async function generateConsistentImage({
     const image = await adapters.generateImage({
       providerId: routing.image.provider,
       model: routing.image.model,
-      // 不传 = 跟随「设置 → 图生图模型」。有参考图时会自动换过去 ——
-      // 不换的话文生图模型会把参考图直接无视掉，一致性第③层等于没接上
+      // 只有明确打开"分镜图用图生图"时才换模型；默认 null = 用路由到的文生图模型
+      editModel: useEdit ? undefined : null,
 
       prompt: assembled.prompt,
       negative: assembled.negative,

@@ -30,8 +30,25 @@ const DEFAULTS = {
   visionModel: 'doubao-seed-1-6-250615',
   imageProvider: 'volcengine',
   imageModel: 'doubao-seedream-3-0-t2i-250415',
-  /** 出角色设定图之后的镜头图，优先走图生图以保住人设 */
+  /**
+   * 图生图模型。**默认不用它出分镜图**（见下面那个开关）。
+   *
+   * 留着是因为「设定集」页单独重出一张设定图、以及以后需要图生图时用得上。
+   */
   imageEditModel: 'doubao-seededit-3-0-i2i-250628',
+  /**
+   * 分镜图要不要改用图生图模型（把设定图当参考图喂进去）。
+   *
+   * 默认**关**。道理上"带着角色设定图去出这一镜"应该更一致，实际不是：
+   * SeedEdit 这类模型是**编辑**模型 —— 它拿到一张图之后是在那张图上改，
+   * 而不是照着它另画一个场景。于是出来的分镜图会长得像"被改过的角色设定图"
+   * （人物居中、纯色背景还在），根本不是你要的那一镜。
+   *
+   * 关掉之后走的是文生图 + 冻结描述 + 稳定种子这条路，也就是这个应用
+   * 早期版本的做法 —— 实测下来分镜图的一致性反而更高、构图也正常。
+   * 参考图那一层仍然在**出视频**时发挥作用（首帧图 + r2v 通道）。
+   */
+  useEditModelForShots: false,
   videoProvider: 'volcengine',
   videoModel: 'doubao-seedance-1-0-pro-250528',
   ttsProvider: 'dashscope',

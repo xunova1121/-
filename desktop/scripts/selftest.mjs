@@ -731,30 +731,21 @@ await fetch(`${appUrl}/api/projects/${project.id}`, {
   body: JSON.stringify({ script: '清晨，渔政执法员阿澜在码头做例行巡查。' })
 });
 
-// 设定集拆成两步：先写描述（一次对话，几秒），确认没问题再出图（几十张，又慢又贵）。
-// 合成一步的话，描述写偏一句，那几十张图就全白出了。
+// 设定集是"写描述 + 出图"一整步。
+// 试过拆成两步（先出文字、人确认、再出图），道理上说得通、实际不好用：
+// 多一次手动确认、多一个"图还没出"的中间态，而设定集本来就是一口气出齐才有意义。
 const bibleEvents = await ndjson(`/projects/${project.id}/stage/bible`, {});
-const textOnly = bibleEvents.find((e) => e.type === 'finished')?.project;
-check('第一步只出文字，跑通', Boolean(textOnly?.bible), JSON.stringify(bibleEvents.slice(-1)));
-check('第一步不出图（图是下一步的事，这一步该几秒就回来）',
-  !textOnly?.bible?.characters?.[0]?.sheetPath);
-check('刚写出来的描述不锁 —— 先让人过一眼',
-  textOnly?.bible?.characters?.[0]?.locked === false, String(textOnly?.bible?.characters?.[0]?.locked));
-check('提示里告诉你下一步该干什么',
-  /过一遍描述/.test(bibleEvents.find((e) => e.type === 'stage' && e.status === 'done')?.message || ''),
-  JSON.stringify(bibleEvents.filter((e) => e.type === 'stage').map((e) => e.message)));
-
-const sheetEvents = await ndjson(`/projects/${project.id}/stage/sheets`, {});
-const afterBible = sheetEvents.find((e) => e.type === 'finished')?.project;
-check('第二步按描述出图', Boolean(afterBible?.bible), JSON.stringify(sheetEvents.slice(-1)));
+const afterBible = bibleEvents.find((e) => e.type === 'finished')?.project;
+check('设定集跑通', Boolean(afterBible?.bible), JSON.stringify(bibleEvents.slice(-1)));
 check('角色被冻结', afterBible?.bible?.characters?.[0]?.name === '阿澜');
 check('角色拿到了固定种子', typeof afterBible?.bible?.characters?.[0]?.seed === 'number');
-check('角色设定图已落盘', Boolean(afterBible?.bible?.characters?.[0]?.sheetPath));
-check('出完图自动冻结（这一张已经是定稿）', afterBible?.bible?.characters?.[0]?.locked === true);
+check('描述和设定图一步出齐', Boolean(afterBible?.bible?.characters?.[0]?.sheetPath));
+// 没有"冻结/解冻"这层了：设定集随时能改，改完重出那一张就行
+check('条目上没有冻结状态这回事', afterBible?.bible?.characters?.[0]?.locked === undefined);
 // "图和描述不符"时，第一件要确认的事就是"发出去的到底是哪句话"
 check('真正发出去的提示词摊在事件流里',
-  sheetEvents.some((e) => e.type === 'note' && /^提示词：/.test(e.message || '')),
-  JSON.stringify(sheetEvents.filter((e) => e.type === 'note').map((e) => e.message).slice(0, 3)));
+  bibleEvents.some((e) => e.type === 'note' && /^提示词：/.test(e.message || '')),
+  JSON.stringify(bibleEvents.filter((e) => e.type === 'note').map((e) => e.message).slice(0, 3)));
 check('用过的提示词记在条目上（事后还能查）',
   Boolean(afterBible?.bible?.characters?.[0]?.sheetPromptUsed));
 check(
@@ -787,23 +778,41 @@ check('带参考图时角色描述被压缩，但保留了服装配色',
   upstream.imagePrompts[0]);
 check('提示词里注入了场景设定', upstream.imagePrompts[0]?.includes('晨雾未散'));
 check('提示词里带上了道具（镜头描述提到了）', upstream.imagePrompts[0]?.includes('黑色方形'));
-check('出图请求带了角色设定图作参考', String(upstream.lastImageBody?.image || '').length > 0);
+/**
+ * 分镜图**默认走文生图**，不带参考图。
+ *
+ * 试过带：把设定图喂给 SeedEdit 这类**编辑**模型，它是在那张图上改，
+ * 而不是照着它另画一个场景 —— 出来的分镜图长得像"被改过的角色设定图"
+ * （人物居中、纯色背景还在），根本不是要的那一镜。
+ * 所以默认关掉，走"冻结描述 + 稳定种子"这条路；参考图那一层留给出视频。
+ */
+check('分镜图默认不带参考图（编辑模型会把这一镜画成"改过的设定图"）',
+  !upstream.lastImageBody?.image, String(upstream.lastImageBody?.image || '').slice(0, 40));
+check('分镜图用的是路由到的文生图模型，不被换掉',
+  upstream.lastImageBody?.model === settings.get('imageModel'), upstream.lastImageBody?.model);
+check('提示词里仍然注入了冻结的外貌（没有参考图时靠它撑一致性）',
+  upstream.imagePrompts.at(-1)?.includes('藏青立领制服'), upstream.imagePrompts.at(-1));
 
 /**
- * 这一段盯的是一个把**整层参考图机制悄悄废掉**的 bug：
+ * 打开「分镜图用图生图」之后才走参考图那条路。
  *
- * 带参考图时代码只是往请求体里塞了个 image 字段，模型却还是文生图那个
- * （Seedream 3.0 t2i）。文生图模型不认这个字段，参考图被直接忽略 ——
- * 一致性引擎最关键的第③层等于没接上，表现就是"出的图不像设定集，怎么调都不像"。
- * 而目录里明明有 SeedEdit i2i、设置里也有 imageEditModel，只是从来没人用它。
+ * 这里同时盯着一个曾经把**整层参考图机制悄悄废掉**的 bug：
+ * 带参考图时代码只往请求体塞了个 image 字段，模型却还是文生图那个 ——
+ * 文生图模型不认这个字段，参考图被直接忽略，而且不报任何错。
  */
-check('带参考图时自动换成图生图模型（不换的话参考图会被文生图模型忽略）',
-  upstream.lastImageBody?.model === settings.get('imageEditModel'),
-  `${upstream.lastImageBody?.model} / 期望 ${settings.get('imageEditModel')}`);
-check('参考图真的发出去了', Boolean(upstream.lastImageBody?.image));
-check('换模型这件事说了出来（不说的话没人知道发的和界面写的不是一个）',
-  assetEvents.some((e) => e.type === 'note' && /出图模型换成/.test(e.message || '')),
-  JSON.stringify(assetEvents.filter((e) => e.type === 'note').map((e) => e.message).slice(0, 5)));
+{
+  settings.patch({ useEditModelForShots: true });
+  upstream.lastImageBody = null;
+  const evs = await ndjson(`/projects/${project.id}/shots/${afterAssets.shots[0].id}/regenerate`, {});
+  check('打开开关后才带参考图', Boolean(upstream.lastImageBody?.image));
+  check('而且必须换成图生图模型（不换的话参考图会被文生图模型忽略）',
+    upstream.lastImageBody?.model === settings.get('imageEditModel'),
+    `${upstream.lastImageBody?.model} / 期望 ${settings.get('imageEditModel')}`);
+  check('换模型这件事说了出来（不说的话没人知道发的和界面写的不是一个）',
+    evs.some((e) => e.type === 'note' && /出图模型换成/.test(e.message || '')),
+    JSON.stringify(evs.filter((e) => e.type === 'note').map((e) => e.message).slice(0, 5)));
+  settings.patch({ useEditModelForShots: false });
+}
 
 check('复核不通过时确实重试了', shot1?.consistency?.attempts > 1, `attempts=${shot1?.consistency?.attempts}`);
 check('重试用的是不同种子（同种子会复现同一个错）', new Set(upstream.imageSeeds.slice(0, 3)).size === 3,
@@ -846,8 +855,8 @@ const shot1c = regened?.shots?.find((s) => s.id === shot1.id);
 // 打桩服务里所有图返回的都是同一张 pixel.png，转成 data: URI 后角色图和场景图
 // 完全相同，会被"同一张不重复带"那条规则合并掉 —— 所以这里只验"记下来了"，
 // 三类参考图各自被带上由上面 collectReferences 的单元检查负责。
-check('单独重出图时记下了带了哪些设定集参考',
-  (shot1c?.bibleRefs || []).length > 0, JSON.stringify(shot1c?.bibleRefs));
+check('默认不带参考图时如实记成空（不能假装带了）',
+  (shot1c?.bibleRefs || []).length === 0, JSON.stringify(shot1c?.bibleRefs));
 
 // ── 单独重出视频：这条路最容易漏带设定集，只给首帧的话后几秒就跑偏 ──
 settings.patch({ videoProvider: 'volcengine', videoModel: 'doubao-seedance-1-0-pro-250528' });
@@ -1157,7 +1166,7 @@ check('能删掉设定集条目', !removed.bible.props.some((p) => p.name === '�
 // 传上来之后它必须和模型出的设定图**完全同等**，否则等于传了个寂寞。
 // 之前唯一能保存文字的路径是「改完重出」——"想改一句描述就得重烧一张图"，
 // 不点那个按钮改的字还会丢。"我明明改了，怎么没生效"就是这么来的。
-section('设定集：改文字不该花钱，冻结该由人说了算');
+section('设定集：改文字不该花钱，改完重出那一张就行');
 {
   const name = afterProp.bible.characters[0].name;
   const url = (n) => `${appUrl}/api/projects/${project.id}/bible/char/${encodeURIComponent(n)}`;
@@ -1175,14 +1184,6 @@ section('设定集：改文字不该花钱，冻结该由人说了算');
   check('记下了文字改动时间（界面据此提醒"图还没跟上"）',
     Boolean(saved.project.bible.characters.find((c) => c.name === name)?.textAt));
   check('没改动就如实说没改动', (await patch(name, { appearance: '短发，藏青立领制服，袖口两道银线，左眉有疤' })).changed.length === 0);
-
-  // 冻结是人下的决定，不是"生成完就锁死"
-  const unlocked = await patch(name, { locked: false });
-  check('能解冻', unlocked.project.bible.characters.find((c) => c.name === name)?.locked === false);
-  const relocked = await patch(name, { locked: true });
-  const relockedItem = relocked.project.bible.characters.find((c) => c.name === name);
-  check('能重新冻结', relockedItem?.locked === true);
-  check('记下了冻结时间', Boolean(relockedItem?.lockedAt));
 
   /**
    * 改名必须同步分镜。分镜里的 characters[] / scene 存的是**名字**，
@@ -1215,7 +1216,6 @@ section('设定集：改文字不该花钱，冻结该由人说了算');
    * 结果：你改了描述、重出图，出来的还是照着旧描述画的，**怎么重出都没用**，
    * 因为真正发出去的一直是那份你看不见、也没动过的 sheetPrompt。
    */
-  await patch(name, { locked: false });
   await patch(name, { appearance: '雪白长发，猩红斗篷，左眼戴单片镜' });
   upstream.imagePrompts = [];
   await ndjson(`/projects/${project.id}/bible/char/${encodeURIComponent(name)}/regenerate`, {});
@@ -1228,7 +1228,6 @@ section('设定集：改文字不该花钱，冻结该由人说了算');
   const after = store.read(project.id).bible.characters.find((c) => c.name === name);
   check('生成设定集时不预填出图提示词（预填就等于永远盖住描述）', !after.sheetPrompt);
 
-  await patch(name, { locked: false });
   await patch(name, { sheetPrompt: '完全手写的出图提示词' });
   upstream.imagePrompts = [];
   await ndjson(`/projects/${project.id}/bible/char/${encodeURIComponent(name)}/regenerate`, {});
@@ -1236,7 +1235,6 @@ section('设定集：改文字不该花钱，冻结该由人说了算');
     /完全手写的出图提示词/.test(upstream.imagePrompts.at(-1) || ''), upstream.imagePrompts.at(-1));
 
   // 再改描述 → 覆盖自动清掉，否则又回到"改了没用"的老路
-  await patch(name, { locked: false });
   const cleared = await patch(name, { appearance: '换一版描述：墨绿风衣，寸头' });
   check('再改描述时自动清掉那个覆盖（否则又回到"改了没用"）',
     !cleared.project.bible.characters.find((c) => c.name === name)?.sheetPrompt);

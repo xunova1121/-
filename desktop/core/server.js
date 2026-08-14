@@ -652,6 +652,14 @@ async function handleApi(req, res, url, { lan = false } = {}) {
       }
     }
 
+    // ── 设定图齐了没 ──
+    // 界面在跑「分镜」之前就该知道还差几张，而不是点下去才被拦
+    if (b && c === 'bible-readiness' && method === 'GET') {
+      const p = store.read(b);
+      if (!p) return json(res, 404, { error: '项目不存在' });
+      return json(res, 200, studio.bibleReadiness(p));
+    }
+
     // ── 时长 ──
     if (b && c === 'duration') {
       const p = store.read(b);
@@ -711,7 +719,6 @@ async function handleApi(req, res, url, { lan = false } = {}) {
       req.on('close', () => stream.end());
       const runners = {
         bible: studio.buildBible,
-        sheets: studio.generateSheets,
         script: studio.analyzeScript,
         assets: studio.generateAssets,
         video: studio.generateVideos,

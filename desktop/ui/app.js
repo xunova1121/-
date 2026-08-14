@@ -103,6 +103,37 @@ function paintChain() {
  * 只发各家最便宜的探针（列模型 / max_tokens=1 / 列任务），不出图不出视频，
  * 所以自动跑没有代价。跑在后台，不挡着界面先出来。
  */
+/**
+ * 闲置多久之后重探一次。
+ *
+ * 为什么要重探：密钥会过期、额度会用完、公司网络会断 —— 而这些都发生在
+ * 你没动应用的那段时间里。开机探过一次就再也不管，等于只在第一分钟是准的。
+ *
+ * 只在**闲置**之后探，不按固定周期探：你正在敲字的时候没必要打扰，
+ * 而离开一阵子回来正是最该确认一下的时刻。
+ */
+const IDLE_RECHECK_MS = 20 * 60 * 1000;
+let lastActivity = Date.now();
+let idleTimer = null;
+
+function markActivity() {
+  lastActivity = Date.now();
+}
+
+function startIdleWatch() {
+  for (const ev of ['mousedown', 'keydown', 'wheel', 'touchstart']) {
+    window.addEventListener(ev, markActivity, { passive: true });
+  }
+  clearInterval(idleTimer);
+  idleTimer = setInterval(() => {
+    if (state.catalog?.settings?.autoCheckOnStart === false) return;
+    if (Date.now() - lastActivity < IDLE_RECHECK_MS) return;
+    // 探完把计时重新起头，免得一直闲置时每分钟探一次
+    lastActivity = Date.now();
+    runRoutingCheck({ silent: true });
+  }, 60 * 1000);
+}
+
 export async function runRoutingCheck({ silent = false } = {}) {
   try {
     state.routingCheck = await api('/routing/check', { method: 'POST' });
@@ -110,6 +141,8 @@ export async function runRoutingCheck({ silent = false } = {}) {
     state.routingCheck = { error: err.message, capabilities: {} };
     return state.routingCheck;
   }
+  // 探出新结果就重新亮出来：上次关掉的是上次那批问题
+  bannerDismissed = false;
   paintChain();
   paintRoutingBanner();
   if (!silent) {
@@ -134,12 +167,15 @@ export function badRoutes() {
  * 顶部横幅。toast 会自己消失，而"密钥没配"是个**持续的状态**，
  * 不该在你去泡杯茶的功夫里悄悄划过去。
  */
+/** 这一轮被手动关掉的横幅。再探到新结果时会重新出现。 */
+let bannerDismissed = false;
+
 function paintRoutingBanner() {
   const host = $('#route-banner');
   if (!host) return;
   clear(host);
   const bad = badRoutes();
-  if (!bad.length) {
+  if (!bad.length || bannerDismissed) {
     host.style.display = 'none';
     return;
   }
@@ -181,7 +217,28 @@ function paintRoutingBanner() {
         e.target.disabled = true;
         runRoutingCheck().finally(() => (e.target.disabled = false));
       }
-    }, '重新检测')
+    }, '重新检测'),
+    // 明知道没配也想先干别的，是很正常的事 —— 给一个关掉的口子。
+    // 只关这一次；下次探出新结果还会回来。
+    h('button', {
+      class: 'btn ghost sm',
+      title: '只关这一次。下次自动检测有新结果时还会出现',
+      onclick: () => {
+        bannerDismissed = true;
+        paintRoutingBanner();
+      }
+    }, '知道了'),
+    h('button', {
+      class: 'btn ghost sm',
+      title: '以后打开应用不再自动检测（「设置 → 本机环境」里可以再打开）',
+      onclick: async () => {
+        await api('/settings', { method: 'POST', body: { autoCheckOnStart: false } });
+        if (state.catalog?.settings) state.catalog.settings.autoCheckOnStart = false;
+        bannerDismissed = true;
+        paintRoutingBanner();
+        toast('已关掉自动检测，可在「设置 → 本机环境」再打开', 'ok');
+      }
+    }, '不再自动检测')
   );
 }
 
@@ -282,6 +339,9 @@ async function boot() {
   if (state.catalog?.settings?.autoCheckOnStart !== false) {
     runRoutingCheck();
   }
+  // 离开一阵子回来时再探一次：密钥过期、额度用完、网络断掉，
+  // 都发生在你没动它的那段时间里
+  startIdleWatch();
 }
 
 boot();

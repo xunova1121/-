@@ -271,6 +271,29 @@ export default {
     root.append(durationPanel);
 
     // ───────────── 章节（长篇才出现）─────────────
+    /**
+     * 设定图齐了没。
+     *
+     * 缺一张，后面引用它的每一镜都少一张参考图、少一份复核基准 ——
+     * 一致性就是从那儿开始塌的。所以在**下手之前**就把这件事摆出来，
+     * 而不是等你点了「分镜」才拦一下。
+     */
+    const readiness = project.bible
+      ? await api(`/projects/${project.id}/bible-readiness`).catch(() => null)
+      : null;
+    if (readiness && !readiness.ok && readiness.total) {
+      root.append(
+        h('div', { class: 'note-line warn' },
+          h('b', {}, `设定图还差 ${readiness.missing.length} 张`),
+          `：${readiness.missing.slice(0, 8).join('、')}${readiness.missing.length > 8 ? ' 等' : ''}。`,
+          '缺的那几张会让引用它们的每一镜都少一张参考图 —— 先把它们补出来再拆分镜。',
+          h('button', {
+            class: 'btn ghost sm', style: 'margin-left:8px',
+            onclick: () => go('bible')
+          }, '去设定集补'))
+      );
+    }
+
     const chapterInfo = await api(`/projects/${project.id}/chapters`).catch(() => null);
     const hasChapters = (project.chapters || []).length > 0;
 
