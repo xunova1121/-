@@ -9,6 +9,7 @@ import { h, clear, add, api, stream, toast, mediaUrl, fmtMs } from '../lib.js';
 import { openLightbox } from '../lightbox.js';
 import { ratioLabel } from '../ratios.js';
 import { skillPicker, customSkillForm } from '../skill-picker.js';
+import { stepsOf, stepProgress } from '../pipeline.js';
 
 /**
  * 说话人是**凭什么**定下来的。显示它是有用的：
@@ -90,7 +91,6 @@ function jobReset(projectId) {
 
 export default {
   async render({ state, go }) {
-    const stages = state.catalog.stages.filter((s) => s.id !== 'export');
     const { presets } = await api('/styles');
     const projects = await api('/projects');
     // 技法库：镜头运用、光线、动作、氛围。全局的，跨项目共用
@@ -136,38 +136,47 @@ export default {
     );
 
     /**
-     * 当前选中的流水线阶段。
+     * 当前在流水线的哪一步。这份状态在 app.js 的 state 上 ——
+     * 左边菜单要靠它高亮，这一页要靠它决定显示哪一块。
      *
-     * 它不只是"看哪一步"，还决定**下面显示哪些参数**：
-     * 在出图那一步摆一堆秒数和视频模型，是逼人在一屏噪音里找那一个按钮。
-     * 每一步只留这一步真正用得上的。
+     * 它不只是"看哪一步"，更决定**这一屏出现什么**：
+     * 早先这一页从剧本一路铺到分镜网格，想点第 04 步得先滚过三屏。
+     * 现在一步只显示这一步的东西，剩下的收起来。
      */
-    let selectedStage = localStorage.getItem('fd.stage') || 'bible';
+    const steps = stepsOf(state.catalog);
+    if (!steps.some((x) => x.id === state.stage)) state.stage = 'script-src';
 
-    /** 这一阶段该显示哪些参数 */
-    function scope(stage = selectedStage) {
+    /** 这一步该显示哪些东西 */
+    function scope(stage = state.stage) {
       return {
+        script: stage === 'script-src',
         // 时长是视频的输入：几秒的片段由它决定。分镜那步也要，因为拆镜时就在分配预算。
         duration: stage === 'script' || stage === 'video',
         image: stage === 'assets',
         video: stage === 'video',
-        // 设定集那两步的产出都在「设定集」页，分镜网格帮不上忙
-        shots: stage !== 'bible' && stage !== 'sheets'
+        compose: stage === 'compose',
+        // 设定集那步的产出在「设定集」页，分镜网格帮不上忙；剧本那步还没有分镜
+        shots: stage !== 'bible' && stage !== 'script-src' && stage !== 'compose'
       };
+    }
+
+    /** 让左边菜单上的对勾跟着最新的项目状态走 */
+    function syncNav() {
+      window.dispatchEvent(new CustomEvent('fd:project', { detail: { project } }));
     }
 
     // ───────────── 剧本 ─────────────
     // 画风不在这儿 —— 建项目时已经定过了，摆两遍只会让人怀疑到底哪个算数。
     // 要改去「项目」页，那里会顺便提醒"设定集是按画风冻结的，改完得重跑第 01 步"。
-    const scriptArea = h('textarea', { rows: 9 }, project.script || '');
+    const scriptArea = h('textarea', { rows: 14 }, project.script || '');
     const shotCount = h('input', { type: 'number', value: 8, min: 2, max: 60 });
 
-    root.append(
+    const scriptPanel =
       h(
         'div',
         { class: 'panel' },
         h('h2', { class: 'panel-title' }, '剧本'),
-        h('p', { class: 'panel-hint' }, '小说片段、大纲、完整剧本都行。写完记得保存，再从下面第 01 步开始。'),
+        h('p', { class: 'panel-hint' }, '小说片段、大纲、完整剧本都行。保存之后，去左边菜单里点第 02 步「设定集」往下走。'),
         scriptArea,
         h('div', { class: 'row', style: 'margin-top:11px' },
           h('div', { class: 'shrink', style: 'width:150px' }, h('label', {}, '每章目标镜数'), shotCount),
@@ -185,8 +194,7 @@ export default {
               }
             }, '保存剧本'))
         )
-      )
-    );
+      );
 
     // ───────────── 时长 ─────────────
     // 三个数分开摆：目标是你要的，计划是分镜表算的，实际是厂商档位吃完剩的。
@@ -247,7 +255,7 @@ export default {
                   toast(project.shots.length ? '已按目标重新分配每镜时长' : '目标时长已保存', 'ok');
                   await paintDuration();
                   applyScope();
-                  paintTrack();
+                  syncNav();
                 } catch (err) {
                   toast(err.message, 'err');
                 } finally {
@@ -277,13 +285,12 @@ export default {
 
     await paintDuration();
     // 时长只在"分镜"和"视频"两步露面 —— 别的步骤看它没用，还会让人以为要先改它
-    const durationPanel = h('div', { class: 'panel' },
+    const durationPanel = h('div', { class: 'panel', style: 'display:none' },
       h('h2', { class: 'panel-title' }, '时长'),
       h('p', { class: 'panel-hint' },
         '目标时长是「输入」：分镜数由它反推，拆分镜时会把预算交给模型，让它自己分配节奏 —— 紧张段用短镜，抒情段用长镜。'),
       durationHost
     );
-    root.append(durationPanel);
 
     // ───────────── 章节（长篇才出现）─────────────
     /**
@@ -296,8 +303,9 @@ export default {
     const readiness = project.bible
       ? await api(`/projects/${project.id}/bible-readiness`).catch(() => null)
       : null;
+    const readinessHost = h('div', {});
     if (readiness && !readiness.ok && readiness.total) {
-      root.append(
+      readinessHost.append(
         h('div', { class: 'note-line warn' },
           h('b', {}, `设定图还差 ${readiness.missing.length} 张`),
           `：${readiness.missing.slice(0, 8).join('、')}${readiness.missing.length > 8 ? ' 等' : ''}。`,
@@ -311,6 +319,7 @@ export default {
 
     const chapterInfo = await api(`/projects/${project.id}/chapters`).catch(() => null);
     const hasChapters = (project.chapters || []).length > 0;
+    let chapterPanel = null;
 
     if (chapterInfo && (hasChapters || chapterInfo.advice?.suggested)) {
       const chapterHost = h('div', {});
@@ -429,7 +438,7 @@ export default {
       }
 
       paintChapters();
-      root.append(h('div', { class: 'panel' }, h('h2', { class: 'panel-title' }, '章节'), chapterHost));
+      chapterPanel = h('div', { class: 'panel' }, h('h2', { class: 'panel-title' }, '章节'), chapterHost);
     }
 
     // ───────────── 实时进度 ─────────────
@@ -482,7 +491,6 @@ export default {
     // 要跑必须在下面的详情面板里明确按运行。
     const progressLog = h('div', { class: 'stream-log', style: 'display:none' });
     const failHost = h('div', {});
-    const track = h('div', { class: 'stage-track' });
 
     /**
      * 失败汇总。
@@ -513,106 +521,63 @@ export default {
     }
     const stageDetail = h('div', { class: 'stage-detail' });
 
-    /** 这一阶段做完了多少：给详情面板和阶段轨共用 */
-    function stageProgress(id) {
-      const shots = project.shots || [];
-      const bible = project.bible;
-      switch (id) {
-        case 'bible': {
-          const all = bible ? [...bible.characters, ...bible.scenes, ...(bible.props || [])] : [];
-          return { done: all.filter((x) => x.sheetPath).length, total: all.length, unit: '张参考图' };
-        }
-        case 'script':
-          return { done: shots.length, total: shots.length || 0, unit: '个分镜' };
-        case 'assets':
-          return { done: shots.filter((s) => s.imagePath).length, total: shots.length, unit: '张镜头图' };
-        case 'video':
-          return {
-            done: shots.filter((s) => s.videoPath).length,
-            total: shots.length,
-            unit: '段视频',
-            // 提交成功但取不回来的：既不算完成也不算失败，单独数一份
-            pending: shots.filter((s) => s.pendingTask && !s.videoPath).length
-          };
-        case 'voice': {
-          const need = shots.filter((s) => s.dialogue?.trim());
-          return { done: need.filter((s) => s.audioPath).length, total: need.length, unit: '条配音' };
-        }
-        case 'compose':
-          return { done: project.outputs?.video ? 1 : 0, total: 1, unit: '支成片' };
-        default:
-          return { done: 0, total: 0, unit: '' };
-      }
-    }
+    /** 这一步做完了多少。和左边菜单上的对勾共用同一份算法，不各算各的 */
+    const stageProgress = (id) => stepProgress(project, id);
 
-    function paintTrack() {
-      clear(track);
-      stages.forEach((s, i) => {
-        const status = project.stageStatus?.[s.id] || 'pending';
-        const { done, total } = stageProgress(s.id);
-        track.append(
-          h(
-            'button',
-            {
-              class: `stage-chip ${status} ${job.stage === s.id ? 'running' : ''} ${selectedStage === s.id ? 'selected' : ''}`,
-              title: s.hint,
-              onclick: () => {
-                selectedStage = s.id;
-                localStorage.setItem('fd.stage', s.id);
-                paintTrack();
-                paintStageDetail();
-                applyScope();
-              }
-            },
-            h('span', { class: 'stage-num' }, String(i + 1).padStart(2, '0')),
-            h('span', {}, s.label),
-            total ? h('span', { class: 'stage-count' }, `${done}/${total}`) : null,
-            status === 'done' ? h('span', { class: 'dot ok' }) : null,
-            status === 'partial' ? h('span', { class: 'dot warn' }) : null,
-            job.stage === s.id ? h('span', { class: 'spin' }, '◐') : null
-          )
-        );
-      });
-      track.append(
-        h(
-          'button',
-          {
-            class: 'stage-chip',
-            style: 'margin-left:auto;border-color:var(--beam)',
-            disabled: jobBusy(),
-            title: '从设定集一路跑到合成，中间任一步失败就停下，已完成的都在盘上',
-            onclick: () => {
-              if (!confirm('一键跑完会依次跑完六步，视频那步按镜数计费，可能是这条流水线最大的一笔开销。确定？')) return;
-              runStage('all');
-            }
-          },
-          h('span', { class: 'stage-num' }, '▶'),
-          h('span', {}, '一键跑完')
-        )
-      );
-    }
-
-    /** 选中阶段的详情：产出统计 + 缺什么 + 明确的运行按钮 */
+    /** 选中步骤的详情：产出统计 + 缺什么 + 明确的运行按钮 */
     function paintStageDetail() {
       clear(stageDetail);
-      const meta = stages.find((s) => s.id === selectedStage);
+      const meta = steps.find((s) => s.id === state.stage);
       if (!meta) return;
-      const { done, total, unit } = stageProgress(selectedStage);
+
+      // 剧本这一步没有服务端阶段可跑：它的"运行"就是保存，然后往下走一步
+      if (state.stage === 'script-src') {
+        const next = steps[1];
+        add(stageDetail,
+          h('div', { class: 'stage-detail-head' },
+            h('div', {},
+              h('div', { class: 'stage-detail-title' }, meta.label),
+              h('div', { class: 'stage-detail-hint' }, meta.hint)),
+            h('div', { class: 'inline' },
+              h('button', {
+                class: 'btn primary',
+                onclick: async () => {
+                  await api(`/projects/${project.id}`, { method: 'PATCH', body: { script: scriptArea.value } });
+                  project = await api(`/projects/${project.id}`);
+                  toast('剧本已保存', 'ok');
+                  syncNav();
+                  paintStageDetail();
+                }
+              }, '保存剧本'),
+              next
+                ? h('button', {
+                    class: 'btn ghost',
+                    disabled: !project.script?.trim(),
+                    onclick: () => window.dispatchEvent(new CustomEvent('fd:goto-stage', { detail: { id: next.id } }))
+                  }, `下一步：${next.label}`)
+                : null)),
+          h('div', { class: 'progress-text' },
+            project.script?.trim()
+              ? `已有剧本 ${project.script.trim().length} 字${(project.chapters || []).length ? `，分成 ${project.chapters.length} 章` : ''}`
+              : '还没有剧本 —— 贴进下面的框里保存即可'));
+        return;
+      }
+      const { done, total, unit } = stageProgress(state.stage);
       const pct = total ? Math.round((done / total) * 100) : 0;
       const shots = project.shots || [];
 
       // 这一阶段还缺哪些，列出来点得到
       let missing = [];
-      if (selectedStage === 'assets') missing = shots.filter((s) => !s.imagePath);
-      else if (selectedStage === 'video') missing = shots.filter((s) => s.imagePath && !s.videoPath);
-      else if (selectedStage === 'voice') missing = shots.filter((s) => s.dialogue?.trim() && !s.audioPath);
-      else if (selectedStage === 'bible' && project.bible) {
+      if (state.stage === 'assets') missing = shots.filter((s) => !s.imagePath);
+      else if (state.stage === 'video') missing = shots.filter((s) => s.imagePath && !s.videoPath);
+      else if (state.stage === 'voice') missing = shots.filter((s) => s.dialogue?.trim() && !s.audioPath);
+      else if (state.stage === 'bible' && project.bible) {
         missing = [...project.bible.characters, ...project.bible.scenes, ...(project.bible.props || [])]
           .filter((x) => !x.sheetPath);
       }
 
       const runnable = !jobBusy();
-      const isCostly = selectedStage === 'video';
+      const isCostly = state.stage === 'video';
       const pendingCount = stageProgress('video').pending || 0;
 
       /**
@@ -623,7 +588,7 @@ export default {
        * 重查一次不产生任何生成费用，刚在「接口地址」里填对路径的话，
        * 这一下能把之前卡住的全收回来。
        */
-      const pendingBox = pendingCount && selectedStage === 'video'
+      const pendingBox = pendingCount && state.stage === 'video'
         ? h('div', { class: 'fail-box', style: 'margin-top:12px' },
             h('div', { class: 'fail-head' }, `${pendingCount} 个任务已提交，但没取回来`),
             // 纯文本节点里写 ** 只会原样印出来 —— 要强调就用元素
@@ -647,6 +612,9 @@ export default {
             h('div', { class: 'stage-detail-hint' }, meta.hint)
           ),
           h('div', { class: 'inline' },
+            state.stage === 'bible'
+              ? h('button', { class: 'btn ghost', onclick: () => go('bible') }, '去设定集页看/改')
+              : null,
             h('button', {
               class: 'btn primary',
               disabled: !runnable,
@@ -654,7 +622,7 @@ export default {
               onclick: () => {
                 if (isCostly && missing.length > 3
                   && !confirm(`将为 ${missing.length} 个镜头生成视频，按镜数计费且耗时较长。确定？`)) return;
-                runStage(selectedStage);
+                runStage(state.stage);
               }
             }, done ? `继续（还差 ${total - done}）` : '开始'),
             done && done === total
@@ -663,7 +631,7 @@ export default {
                   disabled: !runnable,
                   onclick: () => {
                     if (!confirm('这一步已经完成，重跑会覆盖已有产出并重新计费。确定？')) return;
-                    runStage(selectedStage, { regenerate: true });
+                    runStage(state.stage, { regenerate: true });
                   }
                 }, '整步重跑')
               : null
@@ -787,7 +755,7 @@ export default {
         painted = 0;
         clear(failHost);
         progressLog.style.display = '';
-        paintTrack();
+        syncNav();
         paintStageDetail();
         return;
       }
@@ -801,7 +769,7 @@ export default {
       paintFailures(job.failures);
       project = (await api(`/projects/${project.id}`).catch(() => project)) || project;
       await paintDuration();
-      paintTrack();
+      syncNav();
       paintStageDetail();
       applyScope();
     }
@@ -831,18 +799,29 @@ export default {
       for (const shotId of job.live.keys()) paintLive(shotId);
     }
 
-    paintTrack();
     paintStageDetail();
-    root.append(
-      h('div', { class: 'panel' },
-        h('h2', { class: 'panel-title' }, '流水线', liveBadge),
-        h('p', { class: 'panel-hint' },
-          '按顺序跑。点阶段是「查看」这一步的产出，要跑得在下面明确按运行 —— 每一步都真花钱，不该一点就走。'),
-        track,
-        stageDetail,
-        progressLog,
-        failHost
-      )
+    /**
+     * 当前这一步的操作台。
+     *
+     * 横向的阶段轨拆掉了 —— 它现在在左边菜单里，而且带完成标记。
+     * 这里只留"这一步是什么、跑到哪儿了、点哪儿开跑"，
+     * 加上一个从头跑到尾的入口。
+     */
+    const stagePanel = h('div', { class: 'panel' },
+      h('h2', { class: 'panel-title' }, '这一步', liveBadge,
+        h('button', {
+          class: 'btn ghost sm',
+          style: 'margin-left:auto',
+          disabled: jobBusy(),
+          title: '从设定集一路跑到合成，中间任一步失败就停下，已完成的都在盘上',
+          onclick: () => {
+            if (!confirm('一键跑完会依次跑完全部步骤，视频那步按镜数计费，可能是这条流水线最大的一笔开销。确定？')) return;
+            runStage('all');
+          }
+        }, '▶ 一键跑完')),
+      stageDetail,
+      progressLog,
+      failHost
     );
 
     // ───────────── 分镜网格 ─────────────
@@ -930,7 +909,8 @@ export default {
     function paintShots() {
       clear(shotHost);
       if (!project.shots?.length) {
-        shotHost.append(h('div', { class: 'empty' }, h('b', {}, '还没有分镜'), '先跑第 01 步设定集，再跑第 02 步分镜。'));
+        shotHost.append(h('div', { class: 'empty' }, h('b', {}, '还没有分镜'),
+          '左边菜单里按顺序走：先「剧本」，再「设定集」，然后到「分镜」这一步点开始。'));
         return;
       }
       const grid = h('div', { class: 'shot-grid' });
@@ -951,7 +931,16 @@ export default {
         // 重出的文件路径不变，光靠 URL 相同浏览器就会拿缓存 —— 带上项目的更新时间戳，
         // 内容一变链接就变。（服务端也回了 no-store，两头都堵上）
         const v = Date.parse(project.updatedAt || '') || 0;
-        if (shot.videoPath) {
+        /**
+         * 这一步该看图还是看视频。
+         *
+         * 早先是"只要出了视频就一律显示播放器"。于是回到出图那一步想检查
+         * "这张脸对不对"，看到的却是一格视频封面 —— 而封面是压过的、
+         * 还可能是黑帧。判断画质、看手指崩没崩，必须看那张原图。
+         * 所以：出图那步看图，出视频那步看视频（还没出视频的仍然退回看图）。
+         */
+        const showVideo = sc.video && shot.videoPath;
+        if (showVideo) {
           thumb = h('video', { src: `${mediaUrl(shot.videoPath)}&v=${v}`, controls: true, preload: 'metadata' });
         } else if (shot.imagePath) {
           // 点开看大图：缩略图两百来像素，判断"这张脸对不对""手指崩没崩"根本不够
@@ -1501,6 +1490,7 @@ export default {
     const stageName = h('span', { class: 'badge beam' });
 
     const HINTS = {
+      'script-src': '剧本是整条流水线的输入。保存之后就可以往下走 —— 长篇建议先分章，后面每一步都能按章单独跑。',
       bible: '这一步只出文字，几秒钟就回来。去「设定集」页把描述过一遍，确认没问题再跑下一步出图。',
       sheets: '按已确认的描述出设定图，出完自动冻结。之后想改：去「设定集」页解冻 → 改描述 → 重出那一张。',
       script: '分镜是后面所有步骤的清单。每镜的时长在这里分配，加起来就是计划时长。',
@@ -1515,42 +1505,105 @@ export default {
     /** 阶段换了：把只属于某一步的参数收起来，分镜卡片也重画一遍 */
     function applyScope() {
       const sc = scope();
-      durationPanel.style.display = sc.duration ? '' : 'none';
-      const meta = stages.find((x) => x.id === selectedStage);
-      clear(stageName).append(`当前：${meta?.label || ''}`);
-      shotHint.textContent = HINTS[selectedStage] || '这一步的产出不在分镜网格里，切到对应的页面看。';
-      const miss = (project.shots || []).filter((s) => (selectedStage === 'video' ? !s.videoPath : !s.imagePath)).length;
+      applyStepPanels();
+      const meta = steps.find((x) => x.id === state.stage);
+      // 这一步在分镜网格里看的是什么、看了多少。
+      // 不再写"当前：分镜"——步骤名左边菜单里已经高亮着了，重复一遍是噪音
+      const prog = stepProgress(project, state.stage);
+      clear(stageName).append(
+        prog.total ? `${meta?.label || ''} ${prog.done}/${prog.total} ${prog.unit}` : meta?.label || ''
+      );
+      shotHint.textContent = HINTS[state.stage] || '这一步的产出不在分镜网格里，切到对应的页面看。';
+      const miss = (project.shots || []).filter((s) => (state.stage === 'video' ? !s.videoPath : !s.imagePath)).length;
       const pend = (project.shots || []).filter((s) => s.pendingTask && !s.videoPath).length;
       clear(shotBadge);
       if (miss) {
         shotBadge.append(
-          h('span', { class: 'badge warn' }, selectedStage === 'video' ? `${miss} 镜缺视频` : `${miss} 镜缺图`)
+          h('span', { class: 'badge warn' }, state.stage === 'video' ? `${miss} 镜缺视频` : `${miss} 镜缺图`)
         );
       }
       // "待认领"和"缺"要分开说：前者是钱花了没取回来，后者是压根没跑
-      if (pend && selectedStage === 'video') {
+      if (pend && state.stage === 'video') {
         shotBadge.append(h('span', { class: 'badge warn' }, `${pend} 个任务待认领`));
       }
       paintShots();
     }
 
-    root.append(
-      h('div', { class: 'panel' },
-        h('h2', { class: 'panel-title' },
-          '分镜',
-          stageName,
-          shotBadge,
-          project.outputs?.video
-            ? h('a', { class: 'badge ok', href: mediaUrl(project.outputs.video), target: '_blank' }, '成片已就绪')
-            : null
-        ),
-        shotHint,
-        h('div', { class: 'inline', style: 'margin-bottom:10px;flex-wrap:wrap' },
-          suggestBtn, suggestStatus, bindBtn, bindStatus),
-        shotHost
-      )
+    const shotsPanel = h('div', { class: 'panel' },
+      h('h2', { class: 'panel-title' },
+        '分镜',
+        stageName,
+        shotBadge
+      ),
+      shotHint,
+      // 这两个按钮只在用得上的那一步露面：在出图那步摆一个"自动绑说话人"，
+      // 只会让人以为得先把它按了才能出图
+      h('div', { class: 'inline', style: 'margin-bottom:10px;flex-wrap:wrap' },
+        suggestBtn, suggestStatus, bindBtn, bindStatus),
+      shotHost
     );
+
+    // ───────────── 成片 ─────────────
+    // 合成那一步的产出不在分镜网格里，得有个地方能直接看
+    const composePanel = h('div', { class: 'panel', style: 'display:none' },
+      h('h2', { class: 'panel-title' }, '成片'),
+      (() => {
+        const v = Date.parse(project.updatedAt || '') || 0;
+        if (!project.outputs?.video) {
+          return h('p', { class: 'panel-hint' }, '还没有成片。上面点「开始」，FFmpeg 会按分镜顺序拼接、按时长策略裁剪。这一步不花钱，跑错了重跑就行。');
+        }
+        return h('div', {},
+          h('video', {
+            src: `${mediaUrl(project.outputs.video)}&v=${v}`,
+            controls: true,
+            style: 'width:100%;max-height:62vh;border-radius:var(--r);background:#000'
+          }),
+          h('div', { class: 'inline', style: 'margin-top:10px;flex-wrap:wrap' },
+            h('a', { class: 'btn sm', href: mediaUrl(project.outputs.video), target: '_blank' }, '在新窗口打开'),
+            project.outputs.subtitle
+              ? h('a', { class: 'btn ghost sm', href: mediaUrl(project.outputs.subtitle), target: '_blank' }, '下载字幕 .srt')
+              : null,
+            h('span', { class: 'field-hint', style: 'margin:0' },
+              `${project.outputs.seconds ? `${project.outputs.seconds}s · ` : ''}` +
+              `${project.outputs.durationPolicy === 'trim' ? '按分镜时长裁剪' : '保留完整片段'}`)));
+      })()
+    );
+
+    /**
+     * 一步只显示这一步的东西。
+     *
+     * 这是这次改版的核心：早先所有面板一起铺在页面上，从剧本一路滚到分镜网格。
+     * 现在流水线在左边菜单里，右边只留当前这一步 —— 少滚三屏。
+     */
+    const stepPanels = {
+      'script-src': [scriptPanel, chapterPanel],
+      bible: [readinessHost],
+      script: [durationPanel, chapterPanel, shotsPanel],
+      assets: [shotsPanel],
+      video: [durationPanel, shotsPanel],
+      voice: [shotsPanel],
+      compose: [composePanel]
+    };
+    const allPanels = [scriptPanel, chapterPanel, readinessHost, durationPanel, shotsPanel, composePanel].filter(Boolean);
+
+    root.append(stagePanel, ...allPanels);
+
+    function applyStepPanels() {
+      const wanted = new Set((stepPanels[state.stage] || [shotsPanel]).filter(Boolean));
+      for (const el of allPanels) el.style.display = wanted.has(el) ? '' : 'none';
+    }
+
     applyScope();
+
+    /** 左边菜单点了别的步骤：不重新拉数据，只换显示 */
+    const onStageEvent = () => {
+      paintStageDetail();
+      applyScope();
+    };
+    window.addEventListener('fd:stage', onStageEvent);
+    // 这次渲染被换掉之后就别再听了，否则每切一次页面就多挂一个监听
+    root.addEventListener('fd:detach', () => window.removeEventListener('fd:stage', onStageEvent));
+    syncNav();
 
     // 从现在起，任务的动静由这次渲染来听。
     // 上一次渲染的回调在这里被顶掉 —— 它的 DOM 早就不在文档里了，留着只是浪费。
@@ -1609,7 +1662,9 @@ function promptPanel(project, shot, sc) {
               + '首帧是旧画面、提示词是新描述 —— 先重出这一镜的图，再出视频。')
           : null,
         block(
-          sc.video ? '现在出视频会发这条（按当前描述现算）' : '现在出图会发这条（按当前描述现算）',
+          sc.video
+            ? `现在出视频会发这条（按当前描述现算，${r.videoPromptMode === 'full' ? '完整' : '精准'}模式，${r.now.video.length} 字）`
+            : '现在出图会发这条（按当前描述现算）',
           sc.video ? r.now.video : r.now.image,
           'var(--good)'),
         (sc.video ? r.videoStale : r.imageStale)

@@ -3,6 +3,7 @@
  * 无构建、无框架，浏览器直接跑 ES 模块。
  */
 import { h, $, clear, api, toast } from './lib.js';
+import { stepsOf, stepProgress, stepState } from './pipeline.js';
 
 import projectsView from './views/projects.js';
 import studio from './views/studio.js';
@@ -29,8 +30,27 @@ export const state = {
   /** 开机自检的结果：{ checkedAt, capabilities: { chat: {ok,reason,...} } } */
   routingCheck: null,
   projectId: localStorage.getItem('fd.projectId') || null,
-  current: localStorage.getItem('fd.view') || 'studio'
+  current: localStorage.getItem('fd.view') || 'studio',
+  /**
+   * 当前在流水线的哪一步。放在全局而不是创作台的闭包里 ——
+   * 左边菜单要靠它高亮，创作台要靠它决定显示哪一块。
+   */
+  stage: localStorage.getItem('fd.stage') || 'script-src',
+  /** 当前项目的快照，只给左边菜单算对勾用。创作台跑完一步会更新它并重画菜单 */
+  project: null
 };
+
+/** 换一步：菜单和创作台共用这一条路 */
+export function goStage(id) {
+  state.stage = id;
+  localStorage.setItem('fd.stage', id);
+  if (state.current !== 'studio') {
+    go('studio');
+    return;
+  }
+  paintNav();
+  window.dispatchEvent(new CustomEvent('fd:stage', { detail: { id } }));
+}
 
 export async function refreshCatalog() {
   const [catalog, health] = await Promise.all([api('/catalog'), api('/health')]);
@@ -287,6 +307,14 @@ function paintRoutingBanner() {
   );
 }
 
+/**
+ * 左边菜单 = 页面 + **流水线**。
+ *
+ * 流水线挂在「创作台」下面，每一步后面跟着完成标记（✓ 齐了 / ◗ 差一些 / 空着没跑）。
+ * 这样两件事在同一处解决：现在做到哪一步了，以及点哪儿能到那一步。
+ * 早先流水线是创作台页里的一条横向轨道，而那一页从剧本一路铺到分镜网格 ——
+ * 想点第 04 步得先滚过三屏，这是最浪费时间的一种设计。
+ */
 function paintNav() {
   const nav = clear($('#nav'));
   VIEWS.forEach((v, i) => {
@@ -301,8 +329,50 @@ function paintNav() {
         h('span', {}, v.label)
       )
     );
+    if (v.id === 'studio') nav.append(paintPipelineNav());
   });
 }
+
+function paintPipelineNav() {
+  const box = h('div', { class: 'nav-sub' });
+  const project = state.project;
+  if (!project) {
+    box.append(h('div', { class: 'nav-sub-empty' }, '选一个项目后，这里显示流水线'));
+    return box;
+  }
+  stepsOf(state.catalog).forEach((step, i) => {
+    const st = stepState(project, step.id);
+    const { done, total } = stepProgress(project, step.id);
+    box.append(
+      h('button', {
+        class: `nav-step ${st} ${state.current === 'studio' && state.stage === step.id ? 'active' : ''}`,
+        title: step.hint || '',
+        onclick: () => goStage(step.id)
+      },
+        h('span', { class: 'nav-step-num' }, String(i + 1).padStart(2, '0')),
+        h('span', { class: 'nav-step-label' }, step.label),
+        // 数字比对勾多一层信息："8/12" 一眼看出还差四张，而对勾只说"没齐"
+        total > 1 ? h('span', { class: 'nav-step-count' }, `${done}/${total}`) : null,
+        h('span', { class: 'nav-step-mark' }, st === 'done' ? '✓' : st === 'partial' ? '◗' : ''))
+    );
+  });
+  return box;
+}
+
+/** 创作台跑完一步后喊一声，菜单上的对勾才跟着变 */
+export function refreshPipelineNav(project) {
+  if (project) state.project = project;
+  paintNav();
+}
+
+/**
+ * 视图之间靠事件说话，不互相 import —— app.js 已经 import 了每个视图，
+ * 视图再反过来 import app.js 会绕成一个环。
+ */
+window.addEventListener('fd:project', (e) => refreshPipelineNav(e.detail?.project || null));
+window.addEventListener('fd:goto-stage', (e) => {
+  if (e.detail?.id) goStage(e.detail.id);
+});
 
 export async function go(id) {
   const entry = VIEWS.find((v) => v.id === id) || VIEWS[0];
@@ -311,8 +381,10 @@ export async function go(id) {
   $('#view-title').textContent = entry.label;
   paintNav();
 
-  const host = clear($('#view-inner'));
-  host.append(h('div', { class: 'empty' }, '载入中…'));
+  const host = $('#view-inner');
+  // 让上一次渲染有机会摘掉它挂在 window 上的监听
+  host.firstElementChild?.dispatchEvent(new CustomEvent('fd:detach'));
+  clear(host).append(h('div', { class: 'empty' }, '载入中…'));
   try {
     const node = await entry.view.render({ state, go, refreshCatalog });
     clear(host).append(node);

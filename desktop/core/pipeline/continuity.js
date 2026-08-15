@@ -99,7 +99,7 @@ function brief(text, max = 34) {
  * 它根本不知道自己是一部片子里的第 7 镜，于是每一镜都从头起势 ——
  * 这就是"逐镜都对，连起来不像一部片子"的根因。
  */
-export function continuityLines(shot, { prev, next, link } = {}) {
+export function continuityLines(shot, { prev, next, link, brief: short = false } = {}) {
   const lines = [];
   const rel = link || deriveLink(shot, prev);
 
@@ -107,15 +107,20 @@ export function continuityLines(shot, { prev, next, link } = {}) {
     // 连续动作：不能重新起势，否则"推门→进门"会变成"推门→（重新站定）→进门"
     lines.push(`承接上一镜「${brief(prev.description)}」，从上一镜结束的状态继续，不要重新起势`);
   } else if (rel === 'cut' && prev) {
-    // 同场景换机位：画面可以完全不同，但**不能换天**
-    lines.push(`与上一镜同一场景，光线、天气、时间、环境陈设保持一致`);
-    // 越轴是连贯性里最常见也最刺眼的错：人物在上一镜往右走，这一镜就不能往左
+    // 越轴是连贯性里最常见也最刺眼的错：人物在上一镜往右走，这一镜就不能往左。
+    // 这条永远要发 —— 它是首帧图管不了的事（图只有一格，看不出运动方向）。
     lines.push('保持与上一镜相同的运动方向与视线方向，不要越轴');
+    // 同场景换机位：画面可以完全不同，但**不能换天**。
+    // 精简模式下省掉 —— 首帧图本身就带着这一场的光线和天气，模型照着图走已经够了
+    if (!short) lines.push('与上一镜同一场景，光线、天气、时间、环境陈设保持一致');
   }
 
   // 告诉它"要交到哪儿去"。少了这句，模型会把动作做完做满，
   // 结尾停在一个和下一镜完全接不上的状态上。
-  if (next && rel !== 'new-scene') {
+  // 精简模式下只在**下一镜要接着演**（连续动作）时才发：硬切的下一镜本来就可以另起，
+  // 为它多花二三十字不划算。
+  const nextRel = next ? deriveLink(next, shot) : null;
+  if (next && rel !== 'new-scene' && (!short || nextRel === 'continuous')) {
     lines.push(`结尾停在能接上「${brief(next.description)}」的状态`);
   }
 

@@ -199,6 +199,59 @@ body { background: var(--ground); }
   font-variant-numeric: tabular-nums;
 }
 
+/* ── 菜单里的流水线 ──
+   挂在「创作台」下面，缩进一格并靠一条竖线连起来，表明它们从属于那一页，
+   而不是七个平级的新页面。 */
+.nav-sub {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 2px 0 8px 20px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line-soft);
+}
+.nav-sub-empty { font-size: 11px; color: var(--ink-faint); padding: 6px 10px; line-height: 1.5; }
+
+.nav-step {
+  display: grid;
+  grid-template-columns: 18px 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: var(--r);
+  background: transparent;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.nav-step:hover { background: var(--surface-2); color: var(--ink); }
+.nav-step.active { background: var(--surface-2); color: var(--ink); font-weight: 600; }
+.nav-step.active .nav-step-num { color: var(--beam); }
+.nav-step:focus-visible { outline: 2px solid var(--beam); outline-offset: -2px; }
+
+.nav-step-num {
+  font-family: var(--code);
+  font-size: 9.5px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+.nav-step-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-step-count {
+  font-family: var(--code);
+  font-size: 10px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+/* 对勾这一列宽度固定，免得有勾没勾的两行文字左右跳 */
+.nav-step-mark { width: 12px; text-align: center; font-size: 12px; color: var(--ink-faint); }
+.nav-step.done .nav-step-mark { color: var(--good); }
+.nav-step.partial .nav-step-mark { color: var(--caution); }
+.nav-step.done .nav-step-count { color: var(--good); }
+
 .sidebar-foot {
   padding: 13px 16px;
   border-top: 1px solid var(--line-soft);

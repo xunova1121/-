@@ -66,6 +66,18 @@ const DEFAULTS = {
    * 参考图那一层仍然在**出视频**时发挥作用（首帧图 + r2v 通道）。
    */
   useEditModelForShots: false,
+  /**
+   * 视频提示词的详略。
+   *
+   *   precise（默认）  只说首帧图回答不了的部分：演什么动作、镜头怎么动、
+   *                    谁在说什么、和上一镜怎么接。八十来字。
+   *   full             再加上角色外貌锚、场景、景别、氛围、完整衔接约束。
+   *
+   * 默认精准，是因为带首帧时图已经回答了一大半问题（人、衣服、场景、光线、景别）。
+   * 用文字把这些复述一遍，模型就得在"照着图"和"照着字"之间选边 —— 而它经常选错，
+   * 表现就是"出来的视频和分镜图不像"。没有首帧的纯文生视频会自动按 full 走。
+   */
+  videoPromptMode: 'precise',
   videoProvider: 'volcengine',
   videoModel: 'doubao-seedance-1-0-pro-250528',
   ttsProvider: 'dashscope',

@@ -331,13 +331,30 @@ export function collectReferences(bible, shot, { limit = 9 } = {}) {
  *    却从不告诉模型**说的是哪句、谁在说**。于是：画面里两个人，
  *    模型随便挑一个张嘴；台词是旁白的，画面里的人也跟着念。
  *    这就是"说话的内容也不一致"。台词本来就在手上，发过去不要钱。
+ *
+ * ── 两种详略（videoPromptMode）──
+ *
+ * 提示词长不等于说得清。带首帧时，**图已经回答了一大半问题** ——
+ * 人长什么样、穿什么、在哪儿、什么光、什么景别，全在那张图里。
+ * 再用文字把这些复述一遍，模型就要在"照着图"和"照着字"之间选边，
+ * 而它经常选错。所以默认走**精准**：只说图回答不了的那部分 ——
+ * 演什么动作、镜头怎么动、谁在说什么、和上一镜怎么接。
+ *
+ *   precise（默认）  描述 + 动作 + 运镜 + 说话 + 一句衔接。八十来字。
+ *   full             再加上角色外貌锚、场景、景别、氛围、完整衔接约束。
+ *                    没有首帧的纯文生视频、或者厂商不吃首帧时用它。
+ *
+ * 没有首帧时**自动按 full 走**：那时候文字是唯一的信息来源，省不得。
  */
 export function assembleVideoPrompt(
   bible,
   shot,
-  { maxChars = 380, prev = null, next = null, link = null, firstFrame = Boolean(shot?.imagePath) } = {}
+  { maxChars = 0, prev = null, next = null, link = null, firstFrame = Boolean(shot?.imagePath), mode = null } = {}
 ) {
   const parts = [];
+  // 没有首帧时文字是唯一信息源，再"精准"也没法省
+  const full = !firstFrame || (mode || settings.get('videoPromptMode') || 'precise') === 'full';
+  const cap = maxChars || (full ? 380 : 200);
 
   // 没有首帧（纯文生视频）时，画风只能靠这句话带 —— 有首帧的话它已经在图里了，
   // 再说一遍纯属占字数
@@ -345,20 +362,23 @@ export function assembleVideoPrompt(
 
   if (shot.description) parts.push(shot.description);
 
-  // 角色只给名字 + 一句话特征，够让模型知道"画面里这个人要保持住"
-  const cast = matchCharacters(bible, shot);
-  for (const c of cast.slice(0, 2)) {
-    const brief = (c.appearance || '').split(/[，,。]/).slice(0, 2).join('，');
-    parts.push(brief ? `${c.name}（${brief}）保持外貌不变` : `${c.name} 保持外貌不变`);
-  }
+  // 角色外貌、场景、景别：**首帧图里全都有**，精准模式一律不说。
+  // 说了不但白占字数，还会让模型在"照着图"和"照着字"之间选边
+  if (full) {
+    const cast = matchCharacters(bible, shot);
+    for (const c of cast.slice(0, 2)) {
+      const brief = (c.appearance || '').split(/[，,。]/).slice(0, 2).join('，');
+      parts.push(brief ? `${c.name}（${brief}）保持外貌不变` : `${c.name} 保持外貌不变`);
+    }
 
-  const scene = matchScene(bible, shot);
-  if (scene) {
-    const brief = (scene.appearance || '').split(/[，,。]/).slice(0, 2).join('，');
-    if (brief) parts.push(brief);
-  }
+    const scene = matchScene(bible, shot);
+    if (scene) {
+      const brief = (scene.appearance || '').split(/[，,。]/).slice(0, 2).join('，');
+      if (brief) parts.push(brief);
+    }
 
-  if (shot.camera) parts.push(shot.camera);
+    if (shot.camera) parts.push(shot.camera);
+  }
 
   // 技法卡：运镜替代那句泛泛的默认运镜 ——
   // 选了具体运镜还保留"镜头缓慢推进"，等于给模型两条互相打架的指令。
@@ -367,7 +387,9 @@ export function assembleVideoPrompt(
   // 再讲一遍是让模型重新构图，反而会偏离首帧（见函数头注释①）。
   const sk = skills.fragmentsFor(shot.skills, { target: 'video' });
   if (!firstFrame) parts.push(...sk.look);
-  parts.push(...sk.action, ...sk.mood);
+  // 动作是"接下来几秒演什么"，永远要发；氛围（色调、留白）已经在图里，精准模式省掉
+  parts.push(...sk.action);
+  if (full) parts.push(...sk.mood);
   if (sk.motion.length) parts.push(...sk.motion);
   else parts.push(shot.motion || '镜头缓慢推进');
 
@@ -375,11 +397,11 @@ export function assembleVideoPrompt(
 
   // 衔接约束放在最后：它是对整段的约束，不是画面内容。
   // 放前面会挤掉"演什么"的权重 —— 那才是这一镜的主语。
-  parts.push(...continuity.continuityLines(shot, { prev, next, link }));
+  parts.push(...continuity.continuityLines(shot, { prev, next, link, brief: !full }));
 
   let prompt = parts.filter(Boolean).join('，');
   // 视频模型的提示词普遍比图像模型短，超长会被截断或稀释，主动收一下
-  if (prompt.length > maxChars) prompt = `${prompt.slice(0, maxChars - 1)}…`;
+  if (prompt.length > cap) prompt = `${prompt.slice(0, cap - 1)}…`;
   return prompt;
 }
 

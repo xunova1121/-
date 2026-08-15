@@ -1649,6 +1649,8 @@ export function promptsFor(projectId, shotId) {
     // 图比描述旧：出视频时首帧和提示词会互相打架，这个必须显眼
     imageOlderThanEdit: Boolean(shot.imagePath && edited && (!imagedAt || edited > imagedAt)),
     refs: consistency.collectReferences(project.bible, shot).labels,
+    // 界面要说清楚这条是按哪种详略算的 —— 不然"怎么这么短"又要问一遍
+    videoPromptMode: settings.get('videoPromptMode') || 'precise',
     link
   };
 }

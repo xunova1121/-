@@ -924,6 +924,10 @@ check('说明了是谁在说', /只有阿澜在说话/.test(vidText), vidText.sl
 // 机位光线在出图那步已经烧进首帧图了，再讲一遍是让模型重新构图 —— 它会偏离首帧
 check('带首帧时不再重复讲机位光线（会和首帧打架）',
   !/低机位仰拍|伦勃朗布光/.test(vidText), vidText.slice(0, 200));
+// 精准模式：首帧图已经回答了"人长什么样、在哪儿、什么景别"，文字再复述一遍，
+// 模型就得在"照着图"和"照着字"之间选边 —— 它经常选错
+check('精准模式不复述外貌和场景（首帧图里已经有了）',
+  !/保持外貌不变/.test(vidText), vidText.slice(0, 200));
 check('镜头上记下了这次带了哪些设定集参考',
   (shot1v?.videoRefs || []).length > 0, JSON.stringify(shot1v?.videoRefs));
 check('单镜临时指定的分辨率发出去了（方舟是拼在文本里的 --resolution）',
@@ -2144,6 +2148,49 @@ section('台词绑谁说的');
 // 配音的长度是这句话念多久，两者不相等 —— 顺次拼接必然越拼越偏。
 // 改完描述最容易得出的错误结论是"提示词没跟着变"——
 // 其实每次出视频都是现算的，只是界面上显示的是上一次发出去的那条。
+// 提示词长不等于说得清。带首帧时图已经回答了一大半问题，
+// 文字复述一遍只会让模型在"照着图"和"照着字"之间选边。
+section('视频提示词的详略');
+{
+  const bibleV = {
+    style: { anchor: '国风水墨', palette: '', negative: '' },
+    characters: [{ name: '阿澜', appearance: '二十七八岁，短发，藏青立领制服，袖口两道银线', variants: [] }],
+    scenes: [{ name: '码头', appearance: '晨雾未散的老渔港，木质栈桥，冷青色天光', variants: [] }],
+    props: []
+  };
+  const shotV = {
+    id: 'v1', index: 7, scene: '码头', characters: ['阿澜'],
+    description: '阿澜蹲下查看缆绳的断口', camera: '中景', motion: '镜头缓慢推进',
+    dialogue: '这是割的。', speaker: '阿澜', skills: ['low-angle', 'rembrandt', 'mood-tense', 'tracking'],
+    duration: 5, imagePath: 'x.png'
+  };
+  const prevV = { id: 'v0', index: 6, scene: '码头', description: '阿澜走向栈桥' };
+  const nextV = { id: 'v2', index: 8, scene: '码头', description: '老周磕了磕烟杆' };
+
+  const precise = consistency.assembleVideoPrompt(bibleV, shotV, { prev: prevV, next: nextV, link: 'cut', mode: 'precise' });
+  const fullOne = consistency.assembleVideoPrompt(bibleV, shotV, { prev: prevV, next: nextV, link: 'cut', mode: 'full' });
+
+  check('精准模式短得多', precise.length < fullOne.length * 0.6, `${precise.length} vs ${fullOne.length}`);
+  check('演什么排在第一位', precise.indexOf(shotV.description) === 0, precise.slice(0, 40));
+  check('精准模式保留：动作、运镜、说什么、不越轴',
+    /镜头跟随/.test(precise) && /口型对上台词/.test(precise) && /不要越轴/.test(precise), precise);
+  check('精准模式去掉：外貌、场景、景别、氛围（首帧图里都有）',
+    !/保持外貌不变/.test(precise) && !/晨雾/.test(precise) && !/中景/.test(precise) && !/色调偏冷/.test(precise),
+    precise);
+  check('完整模式该有的一样不少', /保持外貌不变/.test(fullOne) && /晨雾/.test(fullOne), fullOne.slice(0, 120));
+
+  // 没有首帧时文字是唯一信息源，再"精准"也省不得
+  const t2v = consistency.assembleVideoPrompt(bibleV, { ...shotV, imagePath: null }, { prev: prevV, link: 'cut', mode: 'precise' });
+  check('没有首帧时自动按完整走（文字是唯一信息源）',
+    /保持外貌不变/.test(t2v) && /国风水墨/.test(t2v), t2v.slice(0, 120));
+
+  // 硬切的下一镜本来就可以另起炉灶，为它多花二三十字不划算；连续动作才需要交接
+  const chained = consistency.assembleVideoPrompt(
+    bibleV, shotV, { prev: prevV, next: { ...nextV, link: 'continuous' }, link: 'cut', mode: 'precise' });
+  check('下一镜是连续动作时，才提"结尾停在能接上…的状态"',
+    /结尾停在/.test(chained) && !/结尾停在/.test(precise), `${chained.slice(-40)} || ${precise.slice(-40)}`);
+}
+
 section('改了描述，发出去的提示词跟着变');
 {
   const pp = await (
