@@ -2191,6 +2191,19 @@ section('视频提示词的详略');
     /结尾停在/.test(chained) && !/结尾停在/.test(precise), `${chained.slice(-40)} || ${precise.slice(-40)}`);
 }
 
+// 出图/出视频跑完之后，界面只该换**那一张卡片**。为此重新拉一遍整个项目
+// 既慢又会把正在编辑的输入框冲掉 —— 那就是"生成一下，我改的字没了"。
+section('只取一镜（界面按镜增量刷新）');
+{
+  const live = await (await fetch(`${appUrl}/api/projects/${project.id}`)).json();
+  const first = live.shots[0];
+  const one = await (await fetch(`${appUrl}/api/projects/${project.id}/shots/${first.id}`)).json();
+  check('能单独取到一镜', one.shot?.id === first.id, JSON.stringify(Object.keys(one)));
+  check('带上项目的更新时间戳（缩略图靠它破缓存）', Boolean(Date.parse(one.updatedAt || '')), one.updatedAt);
+  const missing = await fetch(`${appUrl}/api/projects/${project.id}/shots/不存在的镜`);
+  check('取不存在的镜是 404，不是 200 加个空对象', missing.status === 404, String(missing.status));
+}
+
 section('改了描述，发出去的提示词跟着变');
 {
   const pp = await (

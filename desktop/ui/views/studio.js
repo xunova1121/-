@@ -10,6 +10,7 @@ import { openLightbox } from '../lightbox.js';
 import { ratioLabel } from '../ratios.js';
 import { skillPicker, customSkillForm } from '../skill-picker.js';
 import { stepsOf, stepProgress } from '../pipeline.js';
+import bibleView from './bible.js';
 
 /**
  * 说话人是**凭什么**定下来的。显示它是有用的：
@@ -312,7 +313,7 @@ export default {
           '缺的那几张会让引用它们的每一镜都少一张参考图 —— 先把它们补出来再拆分镜。',
           h('button', {
             class: 'btn ghost sm', style: 'margin-left:8px',
-            onclick: () => go('bible')
+            onclick: () => window.dispatchEvent(new CustomEvent('fd:goto-stage', { detail: { id: 'bible' } }))
           }, '去设定集补'))
       );
     }
@@ -462,6 +463,12 @@ export default {
         return;
       }
       paintLive(ev.shotId);
+      // 这一镜出完了：立刻把**这一张卡**换成最新的（图/视频/复核分数都在里面），
+      // 别等整步跑完，也别重画整页
+      if (ev.type === 'shot' && ev.status === 'done') {
+        touchedShots.add(ev.shotId);
+        refreshShot(ev.shotId);
+      }
     }
 
     function paintLive(shotId) {
@@ -612,9 +619,7 @@ export default {
             h('div', { class: 'stage-detail-hint' }, meta.hint)
           ),
           h('div', { class: 'inline' },
-            state.stage === 'bible'
-              ? h('button', { class: 'btn ghost', onclick: () => go('bible') }, '去设定集页看/改')
-              : null,
+
             h('button', {
               class: 'btn primary',
               disabled: !runnable,
@@ -757,21 +762,125 @@ export default {
         progressLog.style.display = '';
         syncNav();
         paintStageDetail();
+        paintHud();
         return;
       }
       if (kind === 'tick') {
         paintLog();
+        paintHud();
         return;
       }
       // done
       paintLog();
       clear(liveBadge);
       paintFailures(job.failures);
-      project = (await api(`/projects/${project.id}`).catch(() => project)) || project;
-      await paintDuration();
+
+      /**
+       * 跑完之后**尽量不重画整页**。
+       *
+       * 重画整页有个很实际的代价：你正在某张卡片里改台词，一镜出完了，
+       * 整个网格被推倒重建 —— 输入框连同还没保存的字一起没了。
+       * 出图出视频动辄十几分钟，这段时间正是拿来改后面几镜文案的。
+       *
+       * 所以只有**镜头数量会变**的那一步（拆分镜）才整页重来；
+       * 其余情况逐镜替换那一张卡（见 refreshShot）。
+       */
+      const structural = job.stage === 'script' || job.stage === 'all' || job.stage === 'bible';
+      if (structural) {
+        project = (await api(`/projects/${project.id}`).catch(() => project)) || project;
+        await paintDuration();
+        applyScope();
+      } else {
+        // 逐镜补最新状态：跑的时候已经边跑边换了，这里兜底收一遍漏网的
+        await Promise.all([...touchedShots].map((id) => refreshShot(id)));
+        touchedShots.clear();
+        if (state.stage === 'video') paintDurationLine();
+      }
       syncNav();
       paintStageDetail();
-      applyScope();
+      paintHud();
+    }
+
+    /**
+     * 右下角那块常驻状态。
+     *
+     * 它解决的是"跑起来之后界面到底在干嘛"这件事 —— 以前答案在页面中部的
+     * 日志框里，而你往下翻去改分镜时它就看不见了。现在钉在右下角：
+     * 哪一步、第几个、正在跑哪一镜、失败几个，一直在。
+     * 而且它是**唯一**需要随进度重画的东西，其他地方一动不动。
+     */
+    function paintHud() {
+      const hud = document.querySelector('#job-hud');
+      if (!hud) return;
+      if (!jobBusy() && !job.failures.length) {
+        hud.hidden = true;
+        clear(hud);
+        return;
+      }
+      const meta = steps.find((x) => x.id === job.stage);
+      const running = [...job.live.entries()].filter(([, v]) => v.status === 'running');
+      const finished = [...job.live.values()].filter((v) => v.status === 'done').length;
+      const last = running[0]?.[1]?.message || '';
+      const shotOf = (id) => (project.shots || []).find((x) => x.id === id);
+
+      clear(hud);
+      hud.hidden = false;
+      add(hud,
+        h('div', { class: 'job-hud-head' },
+          jobBusy() ? h('span', { class: 'spin' }, '◐') : h('span', {}, '✓'),
+          h('b', {}, jobBusy() ? (meta?.label || (job.shots.size ? '单镜重出' : '运行中')) : '这一轮结束'),
+          h('button', {
+            class: 'job-hud-x',
+            title: '收起。任务照常在后台跑',
+            onclick: () => { hud.hidden = true; }
+          }, '×')),
+        running.length
+          ? h('div', { class: 'job-hud-line' },
+              running.slice(0, 2).map(([id, v]) => {
+                const sh = shotOf(id);
+                return h('div', {}, `${sh ? `第 ${sh.index} 镜` : ''} ${v.message || '生成中…'}`);
+              }))
+          : last ? h('div', { class: 'job-hud-line' }, last) : null,
+        h('div', { class: 'job-hud-foot' },
+          `已完成 ${finished}`,
+          job.failures.length ? h('span', { style: 'color:var(--alarm)' }, ` · 失败 ${job.failures.length}`) : null,
+          h('button', {
+            class: 'btn ghost sm',
+            style: 'margin-left:auto',
+            onclick: () => {
+              progressLog.style.display = progressLog.style.display === 'none' ? '' : 'none';
+              if (progressLog.style.display === '') progressLog.scrollIntoView({ block: 'center' });
+            }
+          }, '日志')));
+    }
+
+    /**
+     * 只把**一张卡片**换成最新的。
+     *
+     * 这是"生成的地方加载最新状态、别整篇重来"的落点：出完一镜就换那一镜，
+     * 其余卡片连同你正在编辑的输入框原样不动。
+     * 正在编辑的那张卡跳过 —— 换掉它等于把人家打了一半的字扔掉，
+     * 等编辑器关掉时再补。
+     */
+    const touchedShots = new Set();
+    const shotCards = new Map(); // shotId → { card, editing }
+
+    async function refreshShot(shotId) {
+      const entry = shotCards.get(shotId);
+      if (!entry?.card?.isConnected) return;
+      if (entry.editing) {
+        entry.pending = true; // 正在改文案，等改完再换
+        return;
+      }
+      const r = await api(`/projects/${project.id}/shots/${shotId}`).catch(() => null);
+      if (!r?.shot) return;
+      const i = (project.shots || []).findIndex((x) => x.id === shotId);
+      if (i === -1) return;
+      project.shots[i] = r.shot;
+      if (r.updatedAt) project.updatedAt = r.updatedAt;
+      const next = renderShotCard(project.shots[i]);
+      entry.card.replaceWith(next);
+      entry.card = next;
     }
 
     // 已经画到 job.log 的第几条。轮询事件来得密，每次全量重画会让滚动明显发卡
@@ -906,17 +1015,17 @@ export default {
       }
     }
 
-    function paintShots() {
-      clear(shotHost);
-      if (!project.shots?.length) {
-        shotHost.append(h('div', { class: 'empty' }, h('b', {}, '还没有分镜'),
-          '左边菜单里按顺序走：先「剧本」，再「设定集」，然后到「分镜」这一步点开始。'));
-        return;
-      }
-      const grid = h('div', { class: 'shot-grid' });
+    /**
+     * 画一张分镜卡。
+     *
+     * 单独抽出来是为了能**只换一张** —— 出完一镜就替换那一张，
+     * 其余卡片（包括你正在编辑的那个输入框）原样不动。
+     */
+    function renderShotCard(shot) {
       const sc = scope();
-      const ordered = project.shots.slice().sort((a, b) => a.index - b.index);
-      for (const [ordinal, shot] of ordered.entries()) {
+      const ordered = (project.shots || []).slice().sort((a, b) => a.index - b.index);
+      const ordinal = ordered.findIndex((x) => x.id === shot.id);
+      {
         // 上一镜。跨章不算 —— 跨章的"上一镜"不是同一段戏。
         const prevShot =
           ordinal > 0 && (ordered[ordinal - 1].chapterId || null) === (shot.chapterId || null)
@@ -1049,7 +1158,10 @@ export default {
                 // 一般人会连着改好几镜再统一重出，改一个字就烧一次钱不是好事。
                 toast(`第 ${shot.index} 镜已改。下次重出这一镜才会按新描述生成`, 'ok');
               }
-              paintShots();
+              // 只换这一张卡：整页重画会把别处正在编辑的输入框一起冲掉
+              const entry = shotCards.get(shot.id);
+              if (entry) entry.editing = false;
+              await refreshShot(shot.id);
             } catch (e) {
               toast(e.message, 'err');
               saveEdit.disabled = false;
@@ -1057,14 +1169,26 @@ export default {
           }
         }, '保存文案');
 
+        const mark = (editing) => {
+          const entry = shotCards.get(shot.id);
+          if (!entry) return;
+          entry.editing = editing;
+          // 编辑期间攒下的更新，等收工再补上 —— 否则打了一半的字会被生成结果冲掉
+          if (!editing && entry.pending) {
+            entry.pending = false;
+            refreshShot(shot.id);
+          }
+        };
         const closeEdit = () => {
           editor.style.display = 'none';
           descEl.style.display = '';
+          mark(false);
         };
         const openEdit = () => {
           editor.style.display = '';
           descEl.style.display = 'none';
           fields.description.focus();
+          mark(true);
         };
         descEl.onclick = openEdit;
 
@@ -1181,7 +1305,7 @@ export default {
           liveEl.textContent = cached.message || '';
         }
 
-        grid.append(
+        const card =
           h('article', { class: `shot-card ${flagged ? 'flagged' : ''} ${failed ? 'failed' : ''}` },
             h('div', { class: 'shot-thumb' }, thumb, liveEl),
             h('div', { class: 'shot-body' },
@@ -1409,8 +1533,23 @@ export default {
                 )
               )
             )
-          )
-        );
+          );
+        shotCards.set(shot.id, { card, editing: false, pending: false });
+        return card;
+      }
+    }
+
+    function paintShots() {
+      clear(shotHost);
+      shotCards.clear();
+      if (!project.shots?.length) {
+        shotHost.append(h('div', { class: 'empty' }, h('b', {}, '还没有分镜'),
+          '左边菜单里按顺序走：先「剧本」，再「设定集」，然后到「分镜」这一步点开始。'));
+        return;
+      }
+      const grid = h('div', { class: 'shot-grid' });
+      for (const shot of project.shots.slice().sort((a, b) => a.index - b.index)) {
+        grid.append(renderShotCard(shot));
       }
       shotHost.append(grid);
     }
@@ -1575,22 +1714,77 @@ export default {
      * 这是这次改版的核心：早先所有面板一起铺在页面上，从剧本一路滚到分镜网格。
      * 现在流水线在左边菜单里，右边只留当前这一步 —— 少滚三屏。
      */
+    /**
+     * 设定集直接挂在这一步里，不再单开一个菜单项。
+     *
+     * 它本来就是流水线的第 02 步 —— 独立成页之后，"跑设定集"在创作台、
+     * "看/改设定集"在另一页，同一件事被拆成两个地方，来回跳。
+     *
+     * 懒挂：只有真的切到这一步才渲染。设定集页要拉几十张图，
+     * 每次打开创作台都渲染一遍纯属浪费。
+     */
+    const biblePanel = h('div', { style: 'display:none' });
+    let bibleMounted = false;
+    async function mountBible() {
+      try {
+        const node = await bibleView.render({ state, go, rerender: mountBible });
+        clear(biblePanel).append(node);
+      } catch (err) {
+        clear(biblePanel).append(h('div', { class: 'empty' }, h('b', {}, '设定集没能打开'), err.message));
+      }
+    }
+
+    /**
+     * 视频这一步只给一行**只读**的时长摘要。
+     *
+     * 时长的可改之处只有一个：分镜。它是拆镜时的预算，改它等于重排每一镜的秒数 ——
+     * 在出完图之后的这一步摆一个"按目标重排时长"，等于邀请你把已经审过的分镜表推翻。
+     * 但完全不显示也不行：出视频前最该确认的就是"我这条片子到底多长"。
+     * 所以这里显示、那里修改，两处不重复。
+     */
+    const durationLine = h('div', { class: 'note-line', style: 'display:none' });
+    async function paintDurationLine() {
+      const info = await api(`/projects/${project.id}/duration`).catch(() => null);
+      if (!info) return;
+      const s2 = info.summary;
+      clear(durationLine);
+      add(durationLine,
+        h('b', {}, `计划 ${s2.planned}s`),
+        s2.target ? `（目标 ${s2.target}s）` : '',
+        ` · 模型实出 ${s2.generated}s · 合成后 ${s2.videoReady ? `${s2.final}s` : '—'}`,
+        h('button', {
+          class: 'btn ghost sm', style: 'margin-left:8px',
+          title: '时长是分镜那一步的预算：改它等于重排每一镜的秒数，所以只在那儿能改',
+          onclick: () => window.dispatchEvent(new CustomEvent('fd:goto-stage', { detail: { id: 'script' } }))
+        }, '去分镜改时长'));
+    }
+
     const stepPanels = {
       'script-src': [scriptPanel, chapterPanel],
-      bible: [readinessHost],
+      bible: [readinessHost, biblePanel],
       script: [durationPanel, chapterPanel, shotsPanel],
       assets: [shotsPanel],
-      video: [durationPanel, shotsPanel],
+      video: [shotsPanel],
       voice: [shotsPanel],
       compose: [composePanel]
     };
-    const allPanels = [scriptPanel, chapterPanel, readinessHost, durationPanel, shotsPanel, composePanel].filter(Boolean);
+    const allPanels = [scriptPanel, chapterPanel, readinessHost, biblePanel, durationPanel, shotsPanel, composePanel]
+      .filter(Boolean);
+    // 只读那一行摆在分镜面板顶上，跟着"视频"这一步出现
+    shotsPanel.insertBefore(durationLine, shotsPanel.firstChild.nextSibling);
 
     root.append(stagePanel, ...allPanels);
 
     function applyStepPanels() {
       const wanted = new Set((stepPanels[state.stage] || [shotsPanel]).filter(Boolean));
       for (const el of allPanels) el.style.display = wanted.has(el) ? '' : 'none';
+      if (wanted.has(biblePanel) && !bibleMounted) {
+        bibleMounted = true;
+        mountBible();
+      }
+      const showLine = state.stage === 'video';
+      durationLine.style.display = showLine ? '' : 'none';
+      if (showLine) paintDurationLine();
     }
 
     applyScope();

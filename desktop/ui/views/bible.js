@@ -35,13 +35,18 @@ const KINDS = [
 ];
 
 export default {
-  async render({ state }) {
+  /**
+   * `rerender` 由挂载方给：设定集现在挂在创作台的「设定集」那一步里，
+   * 重画应该只重画它自己，而不是把整页（包括你正在编辑的分镜）一起冲掉。
+   * 单独打开时退回全页刷新。
+   */
+  async render({ state, rerender: remount }) {
     if (!state.projectId) {
       return h('div', { class: 'empty' }, h('b', {}, '先去创作台选一个项目'), '设定集属于某个具体项目。');
     }
     let project = await api(`/projects/${state.projectId}`);
     const root = h('div', { class: 'stack' });
-    const rerender = () => document.querySelector('#btn-refresh').click();
+    const rerender = remount || (() => document.querySelector('#btn-refresh').click());
 
     if (!project.bible) {
       return h('div', { class: 'empty' },

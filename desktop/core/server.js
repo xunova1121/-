@@ -575,6 +575,17 @@ async function handleApi(req, res, url, { lan = false } = {}) {
       return undefined;
     }
 
+    // ── 单独取一镜 ──
+    // 出图/出视频跑完之后，界面只需要把**那一张卡片**换掉。
+    // 为此重新拉一遍整个项目（几十镜、连提示词带复核记录）既慢又会把
+    // 正在编辑的输入框冲掉 —— 那才是"生成一下，我改的字没了"的根源。
+    if (b && c === 'shots' && d && !e && method === 'GET') {
+      const project = store.read(b);
+      const shot = (project?.shots || []).find((s) => s.id === d);
+      if (!shot) return json(res, 404, { error: '没有这一镜' });
+      return json(res, 200, { shot, updatedAt: project.updatedAt });
+    }
+
     // ── 这一镜现在会发出去的提示词 ──
     // 界面上原来只看得到"上一次发出去的那条"，改完描述再看还是旧的，
     // 于是很容易以为"改了描述提示词不跟着变"。这条给的是**现算的**。
