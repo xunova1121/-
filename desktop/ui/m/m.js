@@ -21,6 +21,22 @@
  * 电脑上点「换一个」就能把丢了的手机踢下线。
  */
 
+/**
+ * Service Worker 只在**安全上下文**里注册。
+ *
+ * 这一条是实测出来的，不是照抄规范：从手机上访问 http://192.168.x.x:5179 时，
+ * `window.isSecureContext === false`，而且 `navigator.serviceWorker` **压根不存在** ——
+ * 浏览器在非安全源上直接不给这个接口。连带的后果是安卓 Chrome 不会提供
+ * 「安装应用」（WebAPK），「添加到主屏幕」只会得到一个开在标签页里的书签。
+ *
+ * 所以这里不硬试（试了也只是吞掉一个异常，还让人以为装上了），
+ * 而是在界面上说清楚：要真正的应用图标和独立窗口，装那个 apk。
+ */
+const canInstall = window.isSecureContext && 'serviceWorker' in navigator;
+if (canInstall) {
+  navigator.serviceWorker.register('/m/sw.js').catch(() => {});
+}
+
 const KEY_STORE = 'fd.m.key';
 const PROJ_STORE = 'fd.m.project';
 
@@ -308,7 +324,18 @@ function paintFlow() {
     box,
     h('div', { class: 'card' },
       h('div', { class: 'muted' },
-        '剧本、设定集描述、能力路由这些要坐下来改的东西，都在电脑上。这里管的是"跑到哪儿了"和"哪一镜不对"。'))
+        '剧本、设定集描述、能力路由这些要坐下来改的东西，都在电脑上。这里管的是"跑到哪儿了"和"哪一镜不对"。')),
+    // 浏览器在局域网 HTTP 上不给「安装应用」——这不是我们能绕开的，
+    // 与其让人对着"添加到主屏幕"得到一个书签，不如直说该装哪个
+    !canInstall
+      ? h('div', { class: 'card' },
+          h('b', {}, '想要独立图标？装安卓版'),
+          h('p', { class: 'muted', style: 'margin:6px 0 0' },
+            '现在这样在浏览器里用，功能一模一样。但浏览器在局域网 HTTP 上不提供「安装应用」，'
+            + '「添加到主屏幕」只会得到一个开在标签页里的书签。'
+            + '想要真正的图标、独立窗口、下载走系统下载器（素材包几百 MB，那边有断点和通知栏进度），'
+            + '去电脑上那个 GitHub 发布页下 FutureDream-Remote.apk 装一下 —— 里面装的就是这个页面。'))
+      : null
   ];
 }
 
@@ -602,7 +629,3 @@ async function boot() {
 
 boot();
 
-// 装到主屏之后要能离线打开壳子（数据当然还得连上电脑才有）
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/m/sw.js').catch(() => {});
-}

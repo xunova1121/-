@@ -3516,6 +3516,51 @@ section('一键跑完：从头 还是 从这一步往后');
     JSON.stringify(badFrom.slice(-1)));
 }
 
+// 安卓壳只是个 WebView，逻辑全在网页那边。但**打包配置写错**是会一直红着的，
+// 而 CI 打一次包三四分钟 —— 这几条在本地几秒钟就能拦下最常见的几种写错。
+section('安卓壳的打包配置');
+{
+  const AND = path.resolve(PROJECT_ROOT, 'android');
+  const read = (rel) => fs.readFileSync(path.join(AND, rel), 'utf8');
+
+  check('Gradle 工程该有的文件都在',
+    ['settings.gradle', 'build.gradle', 'app/build.gradle', 'app/src/main/AndroidManifest.xml']
+      .every((f) => fs.existsSync(path.join(AND, f))));
+
+  const appGradle = read('app/build.gradle');
+  check('包名和 Manifest 对得上', /namespace 'com\.futuredream\.remote'/.test(appGradle));
+  // release 包要自己的 keystore，而把私钥放进仓库是绝对不行的
+  check('只出 debug 包（用系统调试签名，下下来直接能装）',
+    !/signingConfigs/.test(appGradle), appGradle.match(/signingConfigs[\s\S]{0,80}/)?.[0] || '');
+
+  const manifest = read('app/src/main/AndroidManifest.xml');
+  check('声明了联网权限（不然 WebView 一片空白，还不报错）',
+    /android\.permission\.INTERNET/.test(manifest));
+  // 电脑上那条服务是 http://192.168.x.x:5179，没有证书 —— 安卓 9 起默认禁明文
+  check('放行了明文 HTTP（局域网那条服务没有证书）',
+    /usesCleartextTraffic="true"/.test(manifest));
+  check('入口 Activity 标了 exported（安卓 12 起不标直接装不上）',
+    /android:exported="true"/.test(manifest));
+
+  const java = read('app/src/main/java/com/futuredream/remote/MainActivity.java');
+  check('WebView 开了 JS 和 DOM storage（配对码和当前项目存在 localStorage 里）',
+    /setJavaScriptEnabled\(true\)/.test(java) && /setDomStorageEnabled\(true\)/.test(java));
+  // 素材包几百 MB，交给系统下载器才有断点、有通知栏进度、下完落进「下载」目录
+  check('下载交给系统下载器', /DownloadManager/.test(java) && /setDownloadListener/.test(java));
+  check('换了 Wi-Fi 之后能重填地址（IP 常变，不该只能卸载重装）',
+    /showSetup\(/.test(java) && /KEYCODE_BACK/.test(java));
+
+  for (const d of ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi']) {
+    check(`图标有 ${d} 这一档`, fs.existsSync(path.join(AND, `app/src/main/res/mipmap-${d}/ic_launcher.png`)));
+  }
+
+  const wf = fs.readFileSync(path.resolve(PROJECT_ROOT, '../.github/workflows/build-android.yml'), 'utf8');
+  check('CI 里真的跑了构建', /gradlew assembleDebug/.test(wf));
+  // 仓库里不放 gradle-wrapper.jar —— 来源说不清的二进制不该进仓库
+  check('wrapper 是 CI 现生成的，不是仓库里放一个 jar',
+    /gradle wrapper --gradle-version/.test(wf) && !fs.existsSync(path.join(AND, 'gradle/wrapper/gradle-wrapper.jar')));
+}
+
 section('手机遥控：先验它拒绝什么');
 {
   const srv = await import('../core/server.js');

@@ -164,4 +164,16 @@ for (const size of [192, 512]) {
   fs.writeFileSync(path.join(M_DIR, `icon-${size}.png`), encodePNG(size, size, draw(size)));
 }
 
+/**
+ * 安卓壳的启动图标。五档密度各一张 —— 只给一张的话，
+ * 低密度机器上会把大图缩下去，边缘发糊。
+ */
+const A_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../android/app/src/main/res');
+const DENSITIES = [['mdpi', 48], ['hdpi', 72], ['xhdpi', 96], ['xxhdpi', 144], ['xxxhdpi', 192]];
+for (const [density, size] of DENSITIES) {
+  const dir = path.join(A_DIR, `mipmap-${density}`);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'ic_launcher.png'), encodePNG(size, size, draw(size)));
+}
+
 console.log(`已生成 ${path.join(OUT_DIR, 'icon.ico')}（${sizes.join('/')}，共 ${(ico.length / 1024).toFixed(1)} KB）`);

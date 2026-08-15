@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  明文 HTTP 只放行**私网地址**。
+
+  电脑上那条服务是 http://192.168.x.x:5179，没有证书也不该有 ——
+  给局域网里的一台开发机签证书是件很麻烦的事，而这条口子本来就只在自家 Wi-Fi 里。
+  但"允许明文"必须限定范围：全局打开等于这个应用可以明文访问任何网站，
+  哪天真加了外网功能就会悄悄降级。所以这里只列私网段和 localhost。
+-->
+<network-security-config>
+  <domain-config cleartextTrafficPermitted="true">
+    <domain includeSubdomains="false">localhost</domain>
+    <domain includeSubdomains="false">127.0.0.1</domain>
+    <domain includeSubdomains="true">192.168.0.0</domain>
+    <domain includeSubdomains="true">10.0.0.0</domain>
+    <domain includeSubdomains="true">172.16.0.0</domain>
+  </domain-config>
+  <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
