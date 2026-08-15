@@ -1290,7 +1290,22 @@ export function listen(preferredPort, attempts = 20) {
 
   return new Promise((resolve, reject) => {
     const server = createServer();
-    let port = preferredPort || Number(process.env.PORT) || settings.get('port') || 5178;
+    /**
+     * ⚠ **端口 0 是有意义的**：它表示"随便给我一个空闲端口"（内核分配）。
+     *
+     * 原来写的是 `preferredPort || ...`，而 0 是假值 —— 于是 listen(0) 被悄悄
+     * 换成了 5178。所有测试脚手架都在用 listen(0)，也就都在抢同一个端口。
+     *
+     * Linux 上这个错**看不出来**：撞了端口会 EADDRINUSE 然后顺延，一切照常。
+     * Windows 上 `0.0.0.0:5178` 和 `127.0.0.1:5178` 可以同时存在，而发往
+     * 127.0.0.1 的连接会落到更具体的那个绑定上 —— 于是子进程报的是自己的端口，
+     * 请求却全被父进程接走了。表现是"服务器模式的测试全红，报错说只允许 127.0.0.1"，
+     * 而那正是**另一个进程**的规矩。这条让 Windows 打包红了一整轮。
+     */
+    const wantsEphemeral = preferredPort === 0;
+    let port = wantsEphemeral
+      ? 0
+      : preferredPort || Number(process.env.PORT) || settings.get('port') || 5178;
     let tried = 0;
     // 服务器模式要对外可达（前面通常还有一层 Caddy 反代）；桌面模式只听本机
     const bindHost = deploy.SERVER_MODE ? '0.0.0.0' : '127.0.0.1';
@@ -1306,15 +1321,18 @@ export function listen(preferredPort, attempts = 20) {
         reject(err);
       }
     });
-    server.on('listening', () =>
+    server.on('listening', () => {
+      // 端口 0 时真实端口只有内核知道，必须问 address()，不能报那个 0
+      const actual = server.address()?.port || port;
+      port = actual;
       resolve({
         server,
-        port,
+        port: actual,
         url: deploy.SERVER_MODE
           ? `https://${deploy.PUBLIC_HOST}`
-          : `http://127.0.0.1:${port}`
-      })
-    );
+          : `http://127.0.0.1:${actual}`
+      });
+    });
     tryListen();
   });
 }

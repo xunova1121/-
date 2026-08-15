@@ -3706,6 +3706,28 @@ section('安卓壳的打包配置');
  * 而放到公网上之后，**任何人都能打到这个端口**。所以这里验的全是拒绝，
  * 而且必须用裸 socket —— fetch 会把 Host 改回真实地址（上面那个坑刚踩过）。
  */
+/**
+ * 端口 0 = "随便给我一个空闲的"。
+ *
+ * 这条看着琐碎，但它让 Windows 的打包流水线红了一整轮：`preferredPort || ...`
+ * 里 0 是假值，于是 listen(0) 悄悄变成 5178，所有测试脚手架都在抢同一个端口。
+ * Linux 上撞了会顺延，完全看不出来；Windows 上 0.0.0.0:5178 和 127.0.0.1:5178
+ * 能共存，请求落到了**另一个进程**上，于是服务器模式的测试全红，
+ * 报的还是那个进程的规矩（"只允许 127.0.0.1"）—— 和真正的原因毫无关系。
+ */
+section('端口 0 要真的是"随便给一个"');
+{
+  const srvMod = await import('../core/server.js');
+  const a = await srvMod.listen(0);
+  const b = await srvMod.listen(0);
+  check('拿到的不是默认端口', a.port !== 5178 && a.port > 0, String(a.port));
+  check('两次拿到的不是同一个（不然并发跑测试必撞）', a.port !== b.port, `${a.port} vs ${b.port}`);
+  check('报出来的端口就是真实监听的那个',
+    a.port === a.server.address().port, `${a.port} vs ${a.server.address().port}`);
+  a.server.close();
+  b.server.close();
+}
+
 section('服务器模式：按公网的规矩');
 {
   const deployMod = await import('../core/deploy.js');
