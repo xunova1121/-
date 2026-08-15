@@ -12,7 +12,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // file:// URL → 本地路径必须走 fileURLToPath。
 // 用 new URL(import.meta.url).pathname 在 Windows 上会得到 `/D:/a/...`
@@ -3202,6 +3202,26 @@ check(
 );
 check('扫到了源文件（检查本身没空转）', sourceFiles.length > 15, `只扫到 ${sourceFiles.length} 个`);
 
+/**
+ * 同一个坑的第三种长相：**拼一段给别的进程执行的代码**，里面带 import 路径。
+ *
+ * 上面那条规矩只看 `import(...)`，而这种写法是
+ * `import * as x from ${JSON.stringify(path.join(...))}` 塞进 `node -e` 里 ——
+ * 静态 import，正则看不见，可它在 Windows 上一样崩：D:\a\... 会被当成协议名。
+ *
+ * 这个漏网之鱼让 Windows 打包流水线红了十几次，而报错是"起不来："后面空一片
+ * （子进程的堆栈全在 stderr，当时没收）。两处都补上了，规矩也补上。
+ */
+const SPAWN_IMPORT_TRAP = /JSON\.stringify\(\s*path\.(join|resolve)\(/;
+const spawnOffenders = sourceFiles
+  .filter((f) => !f.endsWith('selftest.mjs'))
+  .filter((f) => SPAWN_IMPORT_TRAP.test(stripComments(fs.readFileSync(f, 'utf8'))));
+check(
+  '拼给子进程执行的 import 路径也过了 pathToFileURL',
+  spawnOffenders.length === 0,
+  spawnOffenders.map((f) => path.relative(PROJECT_ROOT, f)).join('、')
+);
+
 // 同一族的另一个坑：new URL(...).pathname 在 Windows 上带盘符前缀斜杠。
 // 这段检查本身第一版就栽在这里，所以顺手也纳入守卫。
 const PATHNAME_TRAP = /new\s+URL\s*\([^)]*\)\s*\.pathname/;
@@ -3686,7 +3706,7 @@ section('服务器模式：按公网的规矩');
    */
   const TOKEN = 'a-very-long-access-token-1234567890';
   const boot = `
-    import * as srv from ${JSON.stringify(path.join(PROJECT_ROOT, 'core/server.js'))};
+    import * as srv from ${JSON.stringify(pathToFileURL(path.join(PROJECT_ROOT, 'core/server.js')).href)};
     const { port } = await srv.listen(0);
     console.log('PORT=' + port);
   `;
@@ -3702,18 +3722,23 @@ section('服务器模式：按公网的规矩');
   });
   const sport = await new Promise((resolve, reject) => {
     let out = '';
-    const timer = setTimeout(() => reject(new Error('服务器模式没起来')), 15000);
-    child.stdout.on('data', (d) => {
-      out += d.toString();
-      const m = out.match(/PORT=(\d+)/);
-      if (m) {
-        clearTimeout(timer);
-        resolve(Number(m[1]));
-      }
-    });
-    child.on('exit', () => {
+    const timer = setTimeout(() => reject(new Error(`服务器模式没起来：${out}`)), 15000);
+    // ⚠ stderr 也要收。只收 stdout 的话，子进程一崩就得到"起不来："后面空一片 ——
+    // 那是最没用的一种报错，而真正的原因（堆栈）全在 stderr 里。
+    // 这个坑让 Windows 的打包流水线红了十几次，每次都看不出为什么。
+    for (const stream of [child.stdout, child.stderr]) {
+      stream.on('data', (d) => {
+        out += d.toString();
+        const m = out.match(/PORT=(\d+)/);
+        if (m) {
+          clearTimeout(timer);
+          resolve(Number(m[1]));
+        }
+      });
+    }
+    child.on('exit', (code) => {
       clearTimeout(timer);
-      reject(new Error(`起不来：${out}`));
+      reject(new Error(`起不来（exit=${code}）：${out || '（子进程一个字都没输出）'}`));
     });
   });
 
@@ -3915,7 +3940,7 @@ section('服务器模式：按公网的规矩');
 section('密钥保险箱：口令派生');
 {
   const probe = `
-    import * as vault from ${JSON.stringify(path.join(PROJECT_ROOT, 'core/vault.js'))};
+    import * as vault from ${JSON.stringify(pathToFileURL(path.join(PROJECT_ROOT, 'core/vault.js')).href)};
     import fs from 'node:fs';
     vault.setSecret('K', 'sk-secret-value');
     console.log(JSON.stringify({
