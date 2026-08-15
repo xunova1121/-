@@ -59,6 +59,7 @@ function driftNotice(project, anchorInput, paletteInput, negativeInput) {
             onclick: async (e) => {
               e.target.disabled = true;
               try {
+                // cap:style-sync
                 const out = await api(`/projects/${project.id}/style/sync`, { method: 'POST' });
                 // 直接把输入框里的字换掉 —— 不整页重画，免得把正在改的别处冲掉
                 anchorInput.value = out.style.anchor;
@@ -308,6 +309,7 @@ export default {
           redoBtn.textContent = '生成中…';
           try {
             await stream(
+              // cap:sheet-regen
               `/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}/regenerate`,
               {
                 appearance: area.value.trim(),
@@ -387,6 +389,7 @@ export default {
 
       /** 只存文字，不出图。免费、立刻生效。 */
       async function saveText(extra = {}) {
+        // cap:bible-edit
         const r = await api(`/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}`, {
           method: 'PATCH',
           body: {

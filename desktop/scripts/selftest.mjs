@@ -3992,6 +3992,107 @@ check('界面文件能取到', uiFile.status === 200);
  * 认错了没有安全后果（UA 本来就是客户端随便写的），最坏只是跳错页面 ——
  * 但得留一条能纠正它的路。
  */
+/**
+ * 三端对齐。
+ *
+ * 这个应用有三张脸，加功能时很自然只在正在改的那一端加完就算完事 ——
+ * 于是手机版慢慢落后成一个"只能看不能改"的残废，而且**没人会发现**：
+ * 两端的测试各自都是绿的。靠"记得同步"是管不住的，所以把它变成一条会报错的规矩。
+ */
+/**
+ * 阿里云 OSS。
+ *
+ * ⚠ 先说清楚这里**验不了什么**：签名对不对，只有拿真凭证发给真 OSS 才知道。
+ * 沙箱里没有凭证，也不该有。所以这一段验的是能验的那部分 ——
+ * 默认值是不是安全的、路径编码对不对、报错说不说人话、
+ * 以及那些"填了一半"的状态会不会被当成配好了。
+ *
+ * 端到端那一步交给用户点「测试连接」：它真写、真读、真删一次。
+ * 与其在这儿造一个假的 OSS 自欺欺人，不如把真检查做得好用。
+ */
+section('对象存储：能验的部分');
+{
+  const oss = await import('../core/oss.js');
+
+  // 默认必须是**私有**。默认值是安全的那一个，公开该是主动的选择
+  const def = oss.config();
+  check('默认不开', def.enabled === false);
+  check('默认按私有桶办（公开必须是主动选择）', def.publicRead === false);
+  check('默认用 V4 签名（阿里云现在推荐的那版）', def.signVersion === 'v4');
+
+  // "填了一半"最难查：它看起来是开着的，第一次出图才报错
+  settings.patch({ oss: { enabled: true, bucket: '', region: 'oss-cn-hongkong' } });
+  check('只开开关、没填 bucket，不算就绪', oss.ready() === false);
+  settings.patch({ oss: { enabled: true, bucket: 'b1', region: 'oss-cn-hongkong' } });
+  check('没有 AccessKey 也不算就绪', oss.ready() === false);
+
+  // 前缀两头的斜杠要吃掉，不然会拼出 //futuredream// 这种路径
+  settings.patch({ oss: { enabled: true, bucket: 'b1', region: 'oss-cn-hongkong', prefix: '/pre/' } });
+  check('前缀两头的斜杠被吃掉', oss.config().prefix === 'pre', oss.config().prefix);
+
+  // 绑了 CNAME 就该用自己的域名回链
+  settings.patch({ oss: { bucket: 'b1', region: 'oss-cn-hongkong', customDomain: 'https://cdn.example.com/' } });
+  check('自定义域名把协议和尾斜杠都normalize掉', oss.host() === 'cdn.example.com', oss.host());
+  settings.patch({ oss: { bucket: 'b1', region: 'oss-cn-hongkong', customDomain: '' } });
+  check('没绑域名就用 bucket 默认域名', oss.host() === 'b1.oss-cn-hongkong.aliyuncs.com', oss.host());
+
+  // 中文文件名和空格必须编码，`/` 不能编 —— 编了就变成文件名的一部分
+  vault.setSecret(oss.AK_NAME, 'ak-test');
+  vault.setSecret(oss.SK_NAME, 'sk-test');
+  const signed = oss.signedUrl('pre/第 1 镜.png', 600);
+  check('中文和空格都编码了', /%E7%AC%AC%201%20|%E7%AC%AC%201/.test(signed) || /%E7%AC%AC/.test(signed), signed.slice(0, 90));
+  check('路径分隔符没被编掉', signed.includes('/pre/'), signed.slice(0, 90));
+  check('限时地址带齐三个参数',
+    /OSSAccessKeyId=/.test(signed) && /Expires=/.test(signed) && /Signature=/.test(signed));
+
+  // 报错要说人话。OSS 回的是一段 XML，直接甩给用户等于什么都没说
+  check('AccessDenied 翻译成"去 RAM 里挂权限"',
+    /RAM/.test(oss.__explain?.(403, '<Error><Code>AccessDenied</Code></Error>') || ''),
+    'explain 没导出就跳过');
+
+  check('MIME 认得出 mp4', oss.contentTypeOf('a.mp4') === 'video/mp4');
+  check('认不出的类型退到通用二进制', oss.contentTypeOf('a.xyz') === 'application/octet-stream');
+
+  settings.patch({ oss: {} });
+}
+
+section('三端对齐：谁该有什么功能');
+{
+  const surfaces = await import('../core/surfaces.js');
+  const readUI = (rel) => fs.readFileSync(path.join(PROJECT_ROOT, rel), 'utf8');
+  const cache = new Map();
+  const has = (rel, id) => {
+    if (!cache.has(rel)) cache.set(rel, readUI(rel));
+    return cache.get(rel).includes(surfaces.marker(id));
+  };
+
+  check('能力清单不为空', surfaces.CAPABILITIES.length > 0);
+
+  const missingPc = surfaces.CAPABILITIES.filter((c) => !has(c.pc, c.id));
+  check('每条能力在电脑版都能找到实现',
+    missingPc.length === 0,
+    missingPc.map((c) => `${c.id}(${c.pc})`).join('、'));
+
+  const missingMobile = surfaces.mobileCaps().filter((c) => !has(c.mobile, c.id));
+  check('该在手机上有的，手机版一条都不能少',
+    missingMobile.length === 0,
+    missingMobile.map((c) => `${c.id} —— ${c.name}`).join('、'));
+
+  // 不做也要有理由，不然三个月后没人知道当初是"故意不做"还是"忘了做"
+  const noWhy = surfaces.CAPABILITIES.filter((c) => !c.mobile && !c.why);
+  check('手机上故意不做的，都写清楚了为什么',
+    noWhy.length === 0, noWhy.map((c) => c.id).join('、'));
+
+  // 手机上必须能改内容 —— 这一条是这次改版的目标，写死在测试里防止哪天又退回去
+  const editable = ['script-edit', 'shot-text', 'shot-dialogue', 'shot-camera', 'bible-edit', 'style-pick'];
+  const notEditable = editable.filter((id) => {
+    const c = surfaces.CAPABILITIES.find((x) => x.id === id);
+    return !c?.mobile || !has(c.mobile, id);
+  });
+  check('手机端是能干活的客户端，不是只读的遥控器',
+    notEditable.length === 0, notEditable.join('、'));
+}
+
 section('根地址：手机去手机版，电脑留电脑版');
 {
   const land = (ua, qs = '') =>

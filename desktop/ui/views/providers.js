@@ -25,6 +25,7 @@ export default {
   async render({ state, refreshCatalog }) {
     const { providers } = state.catalog;
     const overrides = state.catalog.settings.endpointOverrides || {};
+    // cap:providers
     const secretsInfo = await api('/secrets');
     const configured = new Set(secretsInfo.items.map((i) => i.name));
     const previews = Object.fromEntries(secretsInfo.items.map((i) => [i.name, i.preview]));

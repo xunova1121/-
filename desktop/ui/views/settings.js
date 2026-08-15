@@ -331,6 +331,7 @@ export default {
 
     root.append(
       h('div', { class: 'panel' },
+        // cap:routing
         h('h2', { class: 'panel-title' }, '能力路由'),
         h('p', { class: 'panel-hint' },
           '每种能力单独挑服务商。各家强项差别很大 —— 剧本用便宜的长文本模型就够，出图和一致性复核才值得上好的。'),
@@ -670,6 +671,131 @@ export default {
           `配置文件：${state.health.dataDir}${state.health.platform === 'win32' ? '\\' : '/'}settings.json`)
       )
     );
+
+    /**
+     * ── 对象存储（阿里云 OSS）──
+     *
+     * 最实际的理由不是"省服务器硬盘"，而是**参考图必须是公网 URL**：
+     * 万相、即梦这些厂商的图生图通道只收 https 地址，不收本地文件也不收 base64。
+     * 角色设定图躺在本机硬盘上就永远发不出去 —— 一致性链路里最关键的那一环
+     * 因此断掉。有了 OSS，本地文件传上去就有了地址，这条路才通。
+     *
+     * AccessKey 走保险箱，和模型密钥同一套规矩：只在这台机器上，不落明文。
+     */
+    const ossHost = h('div', {});
+    async function paintOss() {
+      const cfg = await api('/oss').catch(() => null);
+      clear(ossHost);
+      if (!cfg) {
+        ossHost.append(h('p', { class: 'field-hint' }, '读不到对象存储的配置'));
+        return;
+      }
+
+      const enabled = h('input', { type: 'checkbox', checked: cfg.enabled });
+      const region = h('select', {},
+        ...cfg.regions.map((r) => h('option', { value: r.id, selected: r.id === cfg.region }, `${r.name}（${r.id}）`)));
+      const bucket = h('input', { type: 'text', value: cfg.bucket, placeholder: 'my-bucket' });
+      const prefix = h('input', { type: 'text', value: cfg.prefix, placeholder: 'futuredream' });
+      const domain = h('input', { type: 'text', value: cfg.customDomain, placeholder: '绑了 CNAME 才填，例：cdn.example.com' });
+      const publicRead = h('input', { type: 'checkbox', checked: cfg.publicRead });
+      const keyId = h('input', { type: 'password', placeholder: cfg.hasKeyId ? '已配置（留空表示不改）' : 'AccessKey ID' });
+      const keySecret = h('input', { type: 'password', placeholder: cfg.hasKeySecret ? '已配置（留空表示不改）' : 'AccessKey Secret' });
+      const status = h('div', { class: 'field-hint', style: 'margin-top:10px' },
+        cfg.ready ? `就绪：${cfg.host}` : '还没配齐');
+
+      const save = async () => {
+        // cap:oss-config
+        const secrets = {};
+        if (keyId.value.trim()) secrets.ALIYUN_OSS_KEY_ID = keyId.value.trim();
+        if (keySecret.value.trim()) secrets.ALIYUN_OSS_KEY_SECRET = keySecret.value.trim();
+        if (Object.keys(secrets).length) await api('/secrets', { method: 'POST', body: { secrets } });
+        await api('/settings', {
+          method: 'POST',
+          body: {
+            oss: {
+              enabled: enabled.checked,
+              region: region.value,
+              bucket: bucket.value.trim(),
+              prefix: prefix.value.trim(),
+              customDomain: domain.value.trim(),
+              publicRead: publicRead.checked
+            }
+          }
+        });
+        keyId.value = '';
+        keySecret.value = '';
+      };
+
+      ossHost.append(
+        h('div', { class: 'field' },
+          h('label', {}, h('span', { class: 'inline' }, enabled, ' 开启对象存储')),
+          h('div', { class: 'field-hint' },
+            '开了之后，出好的图和视频会传一份到 OSS，参考图也就有了公网地址 —— '
+            + '万相这类只收 https 地址的出图模型，靠的就是这个。')),
+        h('div', { class: 'grid2' },
+          h('div', { class: 'field' }, h('label', {}, '地域'), region),
+          h('div', { class: 'field' }, h('label', {}, 'Bucket'), bucket)),
+        h('div', { class: 'grid2' },
+          h('div', { class: 'field' }, h('label', {}, '路径前缀'), prefix),
+          h('div', { class: 'field' }, h('label', {}, '自定义域名'), domain)),
+        h('div', { class: 'grid2' },
+          h('div', { class: 'field' }, h('label', {}, 'AccessKey ID'), keyId),
+          h('div', { class: 'field' }, h('label', {}, 'AccessKey Secret'), keySecret)),
+        h('div', { class: 'field' },
+          h('label', {}, h('span', { class: 'inline' }, publicRead, ' 桶是公共读')),
+          h('div', { class: 'field-hint' },
+            '公共读给的是永久地址；不勾则给限时签名地址。默认按私有办 —— '
+            + '默认值必须是安全的那一个，想公开该是主动的选择。'
+            + '但注意：出图模型要拉参考图，那个地址得让它拉得到。')),
+        h('div', { class: 'inline' },
+          h('button', {
+            class: 'btn primary',
+            onclick: async (e) => {
+              e.target.disabled = true;
+              try {
+                await save();
+                toast('已保存', 'ok');
+                await paintOss();
+              } catch (err) {
+                toast(err.message, 'err');
+                e.target.disabled = false;
+              }
+            }
+          }, '保存'),
+          h('button', {
+            class: 'btn',
+            onclick: async (e) => {
+              e.target.disabled = true;
+              status.textContent = '正在传一个探针上去…';
+              try {
+                await save();
+                const r = await api('/oss/probe', { method: 'POST' });
+                status.textContent = (r.steps || [])
+                  .map((x) => `${x.step}${x.ok ? ' ✓' : ` ✕ ${x.message || ''}`}`)
+                  .join('　') + (r.ok ? `　—— 通了（签名 ${r.signVersion}，${r.host}）` : `　—— ${r.error || '没通'}`);
+                toast(r.ok ? '对象存储可用' : '没通，看下面那行', r.ok ? 'ok' : 'err');
+              } catch (err) {
+                status.textContent = err.message;
+                toast(err.message, 'err');
+              } finally {
+                e.target.disabled = false;
+                await refreshCatalog().catch(() => {});
+              }
+            }
+          }, '测试连接')),
+        status
+      );
+    }
+
+    root.append(
+      h('div', { class: 'panel' },
+        h('h2', { class: 'panel-title' }, '对象存储'),
+        h('p', { class: 'panel-hint' },
+          '真写、真读、真删一次才算通。只"看看能不能连上"是不够的 —— '
+          + '一把只读的 AccessKey 在任何测试里都表现正常，直到第一次出图完才报错，那时候钱已经花了。'),
+        ossHost)
+    );
+    paintOss();
 
     return root;
   }

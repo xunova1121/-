@@ -262,6 +262,7 @@ export default {
       let assembled = '';
       try {
         await stream(
+          // cap:debug-console
           '/debug/send',
           spec,
           (ev) => {

@@ -6,6 +6,7 @@ import { h, clear, api, toast, highlightJSON, fmtMs, fmtBytes, fmtTime, statusBa
 
 export default {
   async render() {
+    // cap:logs
     const data = await api('/logs?limit=120');
     const root = h('div', { class: 'stack' });
     const s = data.stats;

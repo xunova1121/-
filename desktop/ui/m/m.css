@@ -212,3 +212,112 @@ input {
 .toast.err { border-color: var(--alarm); color: var(--alarm); }
 .spin { display: inline-block; animation: sp 1s linear infinite; }
 @keyframes sp { to { transform: rotate(360deg); } }
+
+/* ══════════════════════ 能干活的那部分 ══════════════════════
+   手机端从"遥控器"变成"能改东西的客户端"之后加的这些控件，
+   有一条共同的规矩：**可点的东西不小于 44px**。拇指的接触面就是那么大，
+   比这小的按钮在路上颠簸时点不中 —— 而这一端本来就是给"在路上"设计的。 */
+
+.mfield { margin-bottom: 14px; }
+.mfield > label {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-dim);
+  margin-bottom: 6px;
+}
+
+/* 输入类一律 16px 起。iOS 上小于 16px 的输入框会在聚焦时把整页放大，
+   放大之后布局全乱，而且退不回去 —— 这不是审美问题，是能不能用的问题 */
+.mta, .msel, .editbox input {
+  width: 100%;
+  padding: 11px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.6;
+}
+.mta { resize: vertical; min-height: 64px; }
+.msel { min-height: 46px; }
+
+.editbox { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+
+/* 景别、运镜这些是从固定几项里选，用胶囊比下拉快得多 —— 一眼看全，一下点中 */
+.chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.chip {
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 14px;
+}
+.chip.on {
+  border-color: var(--beam);
+  background: var(--beam-wash);
+  color: var(--ink);
+}
+
+/* 分节标题：三类设定之间要有个喘气的地方 */
+.sec {
+  margin: 18px 4px 8px;
+  font-size: 12px;
+  letter-spacing: .12em;
+  color: var(--ink-faint);
+}
+
+/* 设定集条目的那张小图。固定尺寸，不然一行行高低不齐 */
+.sheet-thumb {
+  width: 68px;
+  height: 68px;
+  flex: 0 0 68px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.sheet-thumb.blank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+/* 画风选择：横向滑动的一排缩略图。竖着堆十二张要滚很久 */
+.style-mini {
+  display: flex;
+  gap: 9px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  margin-bottom: 10px;
+  -webkit-overflow-scrolling: touch;
+}
+.style-mini-card {
+  flex: 0 0 96px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--ink-dim);
+  overflow: hidden;
+  font: inherit;
+}
+.style-mini-card.on { border-color: var(--beam); color: var(--ink); }
+.style-mini-card img, .style-mini-blank {
+  display: block;
+  width: 100%;
+  height: 68px;
+  object-fit: cover;
+  background: var(--surface-3);
+}
+.style-mini-name { display: block; padding: 7px 4px; font-size: 12px; text-align: center; }
+
+.card.warn { border-color: color-mix(in srgb, var(--caution) 45%, var(--line)); }
+
+/* 五个页签之后，每个标签的字要收一点，不然在小屏上会折行 */
+.tabs .tab { font-size: 10.5px; }

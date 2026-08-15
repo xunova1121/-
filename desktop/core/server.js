@@ -32,6 +32,7 @@ import * as duration from './duration.js';
 import * as skillsLib from './skills.js';
 import * as zip from './zip.js';
 import * as deploy from './deploy.js';
+import * as oss from './oss.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -233,6 +234,15 @@ function checkKey(req, url) {
    * 那个混排口令一输进去就被毁掉，手机端根本登不进去。规矩应该定在这里，
    * 而不是让每个客户端各自猜。
    */
+  /**
+   * **没带口令**和**口令猜错了**是两件事，不能算同一笔。
+   *
+   * 打开页面时那一批请求本来就没有口令（还没登录呢），一次页面加载能发好几条 ——
+   * 都记成"猜错"的话，人还没开始输就已经用掉一半配额，十次一到直接锁十分钟，
+   * 而他什么都没做错。真正要防的是**拿着不同的码一个个试**，那一定是带了码的。
+   */
+  if (!raw) return '要配对码';
+
   const given = deploy.SERVER_MODE ? raw : raw.toUpperCase();
   // 长度不同直接判错，不进 timingSafeEqual（它要求等长）
   let ok = given.length === expected.length;
@@ -424,6 +434,37 @@ async function handleApi(req, res, url, { lan = false } = {}) {
   if (a === 'settings') {
     if (method === 'GET') return json(res, 200, settings.all());
     if (method === 'POST') return json(res, 200, settings.patch(await readBody(req)));
+  }
+
+  // ---- 对象存储（阿里云 OSS）----
+  if (a === 'oss') {
+    if (method === 'GET' && !b) {
+      const c = oss.config();
+      const k = oss.credentials();
+      return json(res, 200, {
+        ...c,
+        regions: oss.REGIONS,
+        host: c.bucket ? oss.host(c) : '',
+        // 只回"配没配"，绝不回密钥本身
+        hasKeyId: Boolean(k.accessKeyId),
+        hasKeySecret: Boolean(k.accessKeySecret),
+        ready: oss.ready()
+      });
+    }
+    /**
+     * 真写、真读、真删一次。
+     *
+     * 只"看看能不能连上"是不够的：真正会卡住人的是**写权限**。一把只读的
+     * AccessKey 在任何"测试连接"里都表现正常，直到第一次出图完才报错 ——
+     * 那时候钱已经花了。
+     */
+    if (method === 'POST' && b === 'probe') {
+      try {
+        return json(res, 200, await oss.probe());
+      } catch (err) {
+        return json(res, 200, { ok: false, steps: [], error: err.message });
+      }
+    }
   }
 
   // ---- 凭据 ----

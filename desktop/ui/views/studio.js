@@ -567,6 +567,7 @@ export default {
               h('button', {
                 class: 'btn primary',
                 onclick: async () => {
+                  // cap:script-edit
                   await api(`/projects/${project.id}`, { method: 'PATCH', body: { script: scriptArea.value } });
                   project = await api(`/projects/${project.id}`);
                   toast('剧本已保存', 'ok');
@@ -706,6 +707,7 @@ export default {
 
       try {
         await stream(
+          // cap:run-stage cap:run-from
           `/projects/${project.id}/stage/${stageId}`,
           { shotCount: Number(shotCount.value) || 8, ...extra },
           (ev) => {
@@ -1082,6 +1084,7 @@ export default {
       const failures = [];
       try {
         await stream(
+          // cap:shot-regen
           `/projects/${project.id}/shots/${shot.id}/regenerate`,
           { kind, ...picker.values() },
           (ev) => {
@@ -1229,6 +1232,7 @@ export default {
           onclick: async () => {
             saveEdit.disabled = true;
             try {
+              // cap:shot-text cap:shot-dialogue cap:shot-camera
               const r = await api(`/projects/${project.id}/shots/${shot.id}`, {
                 method: 'PATCH',
                 body: {
@@ -1809,6 +1813,7 @@ export default {
         }
         return h('div', {},
           h('video', {
+            // cap:film-view
             src: `${mediaUrl(project.outputs.video)}&v=${v}`,
             controls: true,
             style: 'width:100%;max-height:62vh;border-radius:var(--r);background:#000'
@@ -1819,6 +1824,7 @@ export default {
             // 成片、每镜片段、字幕、每条配音，外加一张分镜表
             h('a', {
               class: 'btn sm primary',
+              // cap:asset-pack
               href: `/api/projects/${project.id}/export.zip`,
               download: '',
               title: '成片 + 每镜片段 + 字幕 + 配音 + 分镜表，打成一个包'

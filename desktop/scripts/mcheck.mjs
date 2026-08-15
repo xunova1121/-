@@ -119,14 +119,46 @@ const shots = await page.locator('.shot').count();
 console.log('④ 分镜卡片数：', shots, shots === 2 ? '✓' : '✕');
 console.log('   台词和说话人：', /阿澜：「设备正常。」/.test(await page.locator('#app').innerText()) ? '✓' : '✕');
 
-// ⑤ 改文案：审片的完整回路是"看到不对 → 改一句 → 重出"，缺了中间那步等于白看
-await page.locator('button:has-text("改文案")').first().click();
+/**
+ * ⑤ 改这一镜。
+ *
+ * 审片的完整回路是"看到不对 → 改一句 → 重出"，缺了中间那步等于白看。
+ * 早先只放开描述和时长，理由是"别的在手机上改起来慢"—— 那个判断是错的：
+ * 最常当场想改的恰恰是台词和谁说的，一眼看得出不对，改起来也只是敲几个字。
+ */
+await page.locator('button:has-text("改这一镜")').first().click();
 await page.waitForTimeout(300);
-await page.locator('.shot textarea').first().fill('阿澜停在栈桥尽头远眺');
-await page.locator('button:has-text("保存文案")').first().click();
+const editBox = page.locator('.shot .editbox').first();
+await editBox.locator('textarea').nth(0).fill('阿澜停在栈桥尽头远眺');
+await editBox.locator('textarea').nth(1).fill('这里的缆绳被人动过。');
+await editBox.locator('select').selectOption('阿澜');
+await editBox.locator('.chip:has-text("全景")').click();
+await editBox.locator('button:has-text("保存")').first().click();
 await page.waitForTimeout(1200);
 const saved = store.read(proj.id).shots.find((x) => x.id === 's1');
-console.log('⑤ 手机上改文案存下来了吗：', saved.description === '阿澜停在栈桥尽头远眺' ? '存下了 ✓' : `✕ ${saved.description}`);
+console.log('⑤ 手机上改这一镜：');
+console.log('   描述：', saved.description === '阿澜停在栈桥尽头远眺' ? '存下了 ✓' : `✕ ${saved.description}`);
+console.log('   台词：', saved.dialogue === '这里的缆绳被人动过。' ? '存下了 ✓' : `✕ ${saved.dialogue}`);
+console.log('   谁说的：', saved.speaker === '阿澜' ? '存下了 ✓' : `✕ ${saved.speaker}`);
+console.log('   景别：', saved.camera === '全景' ? '存下了 ✓' : `✕ ${saved.camera}`);
+
+// ⑤b 剧本和设定集：这两样以前只能"回电脑上改"，现在手机上就能改
+await page.locator('.tab', { hasText: '剧本' }).click();
+await page.waitForTimeout(600);
+await page.locator('.card textarea').first().fill('阿澜在码头巡查，发现缆绳被割断。她想起三天前的那通电话。');
+await page.locator('button:has-text("保存剧本")').click();
+await page.waitForTimeout(1000);
+console.log('⑤b 手机上改剧本：',
+  /三天前的那通电话/.test(store.read(proj.id).script) ? '存下了 ✓' : '✕');
+console.log('   画风也能选：', (await page.locator('.style-mini-card').count()) > 3 ? '✓' : '✕');
+
+await page.locator('.tab', { hasText: '设定' }).click();
+await page.waitForTimeout(700);
+await page.locator('.card textarea').first().fill('短发，藏青立领制服，左眉有疤');
+await page.locator('button:has-text("保存描述")').first().click();
+await page.waitForTimeout(1000);
+const who = store.read(proj.id).bible.characters[0];
+console.log('⑤c 手机上改设定集：', /左眉有疤/.test(who.appearance || '') ? '存下了 ✓' : `✕ ${who.appearance}`);
 
 // ⑥ 成片 + 交给剪映的素材
 await page.locator('.tab', { hasText: '成片' }).click();

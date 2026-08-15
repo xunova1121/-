@@ -212,6 +212,7 @@ export default {
 
     async function openProject(id) {
       state.projectId = id;
+      // cap:project-switch
       localStorage.setItem('fd.projectId', id);
       await go('studio');
     }
@@ -262,6 +263,7 @@ export default {
                 }
                 await api(`/projects/${p.id}`, {
                   method: 'PATCH',
+                  // cap:style-pick
                   body: { styleId: picked, style: pickedText.trim(), aspectRatio: pickedRatio }
                 });
                 projects = await api('/projects');
@@ -454,6 +456,7 @@ export default {
               }
               e.target.disabled = true;
               try {
+                // cap:project-new
                 const p = await api('/projects', {
                   method: 'POST',
                   body: {

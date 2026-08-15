@@ -207,6 +207,9 @@ function explain(status, body) {
   return `OSS ${status} ${code || ''}${extra}${msg && !known[code] ? `：${msg}` : ''}`.trim();
 }
 
+/** 只为自检暴露：报错翻译是纯函数，值得单独验 */
+export const __explain = explain;
+
 async function send(method, key, body, extraHeaders = {}, { version } = {}) {
   const c = config();
   const { accessKeyId: ak, accessKeySecret: sk } = credentials();
