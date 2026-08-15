@@ -3222,6 +3222,25 @@ check(
   spawnOffenders.map((f) => path.relative(PROJECT_ROOT, f)).join('、')
 );
 
+/**
+ * Electron 不实现 window.prompt —— 调用会直接抛
+ * "prompt() is and will not be supported"。
+ *
+ * 这个坑的样子是：点了菜单**什么都不发生**，控制台之外没有任何线索。
+ * 而它写起来又特别自然（"就要一个输入框而已"），所以值得拦一道。
+ */
+const PROMPT_TRAP = /\b(window\.)?prompt\s*\(/;
+const promptOffenders = sourceFiles
+  .filter((f) => !f.endsWith('selftest.mjs'))
+  // 网页那边（ui/）是在真浏览器里跑的，prompt 能用；只有 Electron 主进程不行
+  .filter((f) => f.includes(`${path.sep}electron${path.sep}`))
+  .filter((f) => PROMPT_TRAP.test(stripComments(fs.readFileSync(f, 'utf8'))));
+check(
+  'Electron 里没有用 window.prompt（它不实现，点了没反应）',
+  promptOffenders.length === 0,
+  promptOffenders.map((f) => path.relative(PROJECT_ROOT, f)).join('、')
+);
+
 // 同一族的另一个坑：new URL(...).pathname 在 Windows 上带盘符前缀斜杠。
 // 这段检查本身第一版就栽在这里，所以顺手也纳入守卫。
 const PATHNAME_TRAP = /new\s+URL\s*\([^)]*\)\s*\.pathname/;

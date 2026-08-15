@@ -141,13 +141,63 @@ async function askRemote() {
 }
 
 /**
- * Electron 没有内置的"输入框对话框"，而为一个输入框拉一个新窗口 + 一套 IPC 太重。
- * 在当前页面里弹一个 prompt 就够 —— 这一步一辈子做一两次。
+ * 问一个地址。
+ *
+ * ⚠ **不能用 window.prompt** —— Electron 不实现它，调用会直接抛
+ * "prompt() is and will not be supported"。第一版就是这么写的，
+ * 结果是点了菜单什么都不发生，而且控制台之外看不到任何线索。
+ *
+ * 也不另开一个窗口 + 一套 IPC：为一个输入框拉一整套管道太重，
+ * 而且那套管道以后每次改都要动主进程、预加载、页面三处。
+ *
+ * 现在的做法是往当前页面注入一个浮层，等它自己 resolve ——
+ * executeJavaScript 会把 Promise 的结果带回来。整件事只在 main.js 里，
+ * 页面那边一个字都不用改。
  */
 async function promptRemoteUrl(current) {
-  const got = await mainWindow.webContents.executeJavaScript(
-    `window.prompt(${JSON.stringify('服务器地址（例：https://47.243.29.184.nip.io）')}, ${JSON.stringify(current)})`
-  );
+  const script = `
+    new Promise((resolve) => {
+      const box = document.createElement('div');
+      box.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;' +
+        'justify-content:center;background:rgba(0,0,0,.55);font:14px/1.6 system-ui,sans-serif';
+      const card = document.createElement('div');
+      card.style.cssText = 'width:min(520px,90vw);padding:22px;border-radius:12px;' +
+        'background:#1D1913;color:#EFE8DC;border:1px solid #352D23';
+      card.innerHTML =
+        '<div style="font-size:16px;font-weight:600;margin-bottom:6px">连接到服务器</div>' +
+        '<div style="color:#A99B86;font-size:12.5px;margin-bottom:14px">' +
+        '填你部署的那个地址。留空并确定 = 回到本机模式。</div>';
+      const input = document.createElement('input');
+      input.value = ${JSON.stringify(current || '')};
+      input.placeholder = 'https://47.243.29.184.nip.io';
+      input.style.cssText = 'width:100%;padding:10px 12px;border-radius:8px;border:1px solid #352D23;' +
+        'background:#262019;color:#EFE8DC;font:inherit';
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:16px';
+      const mk = (text, primary) => {
+        const b = document.createElement('button');
+        b.textContent = text;
+        b.style.cssText = 'padding:8px 16px;border-radius:8px;font:inherit;cursor:pointer;border:1px solid #352D23;' +
+          (primary ? 'background:#3E7CB1;color:#fff;border-color:#3E7CB1' : 'background:#262019;color:#EFE8DC');
+        return b;
+      };
+      const cancel = mk('取消', false);
+      const ok = mk('确定', true);
+      cancel.onclick = () => { box.remove(); resolve(null); };
+      ok.onclick = () => { const v = input.value.trim(); box.remove(); resolve(v); };
+      input.onkeydown = (e) => {
+        if (e.key === 'Enter') ok.click();
+        if (e.key === 'Escape') cancel.click();
+      };
+      row.append(cancel, ok);
+      card.append(input, row);
+      box.append(card);
+      document.body.append(box);
+      input.focus();
+      input.select();
+    })
+  `;
+  const got = await mainWindow.webContents.executeJavaScript(script, true).catch(() => null);
   if (got === null) return null;
   const url = String(got).trim();
   if (!url) return '';
