@@ -11,6 +11,7 @@
  */
 import { app, BrowserWindow, Menu, shell, dialog, safeStorage, net } from 'electron';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 // 一律用静态 import。
@@ -44,7 +45,60 @@ if (!app.requestSingleInstanceLock()) {
   });
 }
 
+/**
+ * 连远端服务器，还是在本机跑引擎。
+ *
+ * ── 这是"三端打通"真正的那一步 ──
+ *
+ * 账号密码解决的是"谁能进"，不解决"数据在哪"。电脑上一份、服务器上一份，
+ * 加了账号也还是两份互不相干的数据 —— 在电脑上写的剧本，手机上照样看不到。
+ *
+ * 真正打通只有一条路：**让服务器成为唯一的数据源**。所以这个壳子多了一种形态 ——
+ * 不在本机起引擎，而是把窗口指向那台服务器。这时候它和手机、和浏览器
+ * 是同一个客户端，看到的是同一份数据，因为压根只有一份。
+ *
+ * 本机模式一个字没动：不想租服务器的人不该为这个功能付出任何代价。
+ */
+const REMOTE_FILE = path.join(app.getPath('userData'), 'remote.json');
+
+// cap:remote-engine
+function remoteConfig() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(REMOTE_FILE, 'utf8'));
+    const url = String(raw.url || '').trim().replace(/\/+$/, '');
+    return url ? { url } : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveRemote(url) {
+  fs.mkdirSync(path.dirname(REMOTE_FILE), { recursive: true });
+  if (!url) {
+    try {
+      fs.unlinkSync(REMOTE_FILE);
+    } catch {
+      /* 本来就没有 */
+    }
+    return;
+  }
+  fs.writeFileSync(REMOTE_FILE, JSON.stringify({ url: url.replace(/\/+$/, '') }, null, 2), 'utf8');
+}
+
 async function startServer() {
+  const remote = remoteConfig();
+  if (remote) {
+    /**
+     * ⚠ 连远端时**不起本地引擎**。
+     *
+     * 起了会有两个后果，都不轻：一是白占端口和内存；二是更麻烦的 ——
+     * 本地那份和远端那份会各自有一套项目数据，而窗口里看到的是远端的，
+     * 于是"我明明存过"这类问题会变得完全无法解释。
+     * 要么全在这儿，要么全在那儿，不能一半一半。
+     */
+    serverInfo = { url: remote.url, port: 0, remote: true };
+    return serverInfo;
+  }
   // 必须赶在保险箱第一次读盘之前接上 DPAPI，否则会先用 AES 兜底方案打开
   attachSafeStorage(safeStorage);
   // Chromium 的网络栈会读系统代理；用不用由「设置 → 使用系统代理」决定
@@ -53,14 +107,74 @@ async function startServer() {
   return serverInfo;
 }
 
+/** 问一句要连哪台服务器。填空 = 回到本机模式 */
+async function askRemote() {
+  const current = remoteConfig()?.url || '';
+  const { response, checkboxChecked } = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    buttons: ['连接服务器…', '在本机跑（默认）', '取消'],
+    defaultId: 0,
+    cancelId: 2,
+    title: '引擎在哪儿跑',
+    message: current ? `现在连的是 ${current}` : '现在是在本机跑',
+    detail:
+      '连服务器：项目、密钥、成片都在那台机器上，手机和电脑看到的是同一份数据，'
+      + '关掉电脑也不影响它继续跑。\n\n'
+      + '在本机跑：数据全在这台电脑上，不需要服务器，但手机得和电脑在同一个 Wi-Fi。\n\n'
+      + '⚠ 两种模式的数据是分开的 —— 切过去看不到这边的项目，切回来也一样。',
+    checkboxLabel: '换模式后重启应用',
+    checkboxChecked: true
+  });
+  if (response === 2) return;
+
+  if (response === 1) {
+    saveRemote('');
+  } else {
+    const url = await promptRemoteUrl(current);
+    if (url === null) return;
+    saveRemote(url);
+  }
+  if (checkboxChecked) {
+    app.relaunch();
+    app.exit(0);
+  }
+}
+
+/**
+ * Electron 没有内置的"输入框对话框"，而为一个输入框拉一个新窗口 + 一套 IPC 太重。
+ * 在当前页面里弹一个 prompt 就够 —— 这一步一辈子做一两次。
+ */
+async function promptRemoteUrl(current) {
+  const got = await mainWindow.webContents.executeJavaScript(
+    `window.prompt(${JSON.stringify('服务器地址（例：https://47.243.29.184.nip.io）')}, ${JSON.stringify(current)})`
+  );
+  if (got === null) return null;
+  const url = String(got).trim();
+  if (!url) return '';
+  if (!/^https?:\/\//.test(url)) {
+    await dialog.showMessageBox(mainWindow, {
+      type: 'error',
+      message: '地址要带 http:// 或 https://',
+      detail: `你填的是：${url}`
+    });
+    return null;
+  }
+  return url;
+}
+
 function buildMenu() {
   const template = [
     {
       label: '文件',
       submenu: [
         {
-          label: '打开数据目录',
+          // 连远端时本机数据目录是空的，菜单里说清楚免得人去那儿找项目
+          label: serverInfo?.remote ? '打开本机数据目录（当前连的是服务器）' : '打开数据目录',
           click: () => shell.openPath(DATA_DIR)
+        },
+        {
+          label: '引擎在哪儿跑…',
+          click: () => askRemote()
         },
         { type: 'separator' },
         { role: 'quit', label: '退出' }
@@ -144,7 +258,31 @@ async function createWindow() {
     return { action: 'allow' };
   });
 
-  await mainWindow.loadURL(serverInfo.url);
+  /**
+   * 连远端时窗口标题要写出来。
+   *
+   * 两种模式的界面**长得一模一样**，而数据是分开的 —— 分不清自己连的是哪边，
+   * 就一定会出现"我明明存过"这种查不清的问题。标题栏是最便宜的一条提示。
+   */
+  if (serverInfo.remote) {
+    mainWindow.setTitle(`未来创梦 —— ${serverInfo.url}`);
+    mainWindow.on('page-title-updated', (e) => e.preventDefault());
+  }
+
+  await mainWindow.loadURL(serverInfo.url).catch(async (err) => {
+    // 远端连不上时别扔一张 Chromium 的错误页 —— 那上面没有一句能照着做的话
+    if (!serverInfo.remote) throw err;
+    await mainWindow.loadURL(
+      `data:text/html;charset=utf-8,${encodeURIComponent(
+        `<body style="background:#16130f;color:#b6ab9b;font:15px/1.7 sans-serif;padding:60px 40px">
+           <h2 style="color:#f2ece3">连不上 ${serverInfo.url}</h2>
+           <p>检查三件事：服务器是不是开着（<code>docker compose ps</code>）；
+           地址有没有写错；这台电脑能不能上网。</p>
+           <p style="color:#7d7365">菜单「文件 → 引擎在哪儿跑…」可以换地址，或者切回本机模式。</p>
+         </body>`
+      )}`
+    );
+  });
   mainWindow.on('closed', () => (mainWindow = null));
 }
 

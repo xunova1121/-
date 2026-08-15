@@ -787,6 +787,106 @@ export default {
       );
     }
 
+    /**
+     * ── 账号与设备 ──
+     *
+     * 那串 32 位口令能用，但它只回答"你知不知道那个秘密"。真正要回答的是：
+     * 谁进来了、怎么换、丢了一台怎么办。所以这里管的是后两件 ——
+     * 尤其是**踢掉一台不影响别的**，那是这套东西存在的全部理由。
+     */
+    const acctHost = h('div', {});
+    async function paintAccount() {
+      const me = await api('/account/me').catch(() => null);
+      clear(acctHost);
+      if (!me?.user) {
+        acctHost.append(h('p', { class: 'field-hint' },
+          '这台服务还在用访问口令。想换成账号密码：退出登录后，在登录屏上顺手填一个用户名和密码就行。'));
+        return;
+      }
+
+      const oldPw = h('input', { type: 'password', autocomplete: 'current-password' });
+      const newPw = h('input', { type: 'password', autocomplete: 'new-password' });
+      // cap:account-devices
+      const sessions = await api('/account/sessions').catch(() => ({ sessions: [] }));
+
+      const rows = h('div', {});
+      for (const s2 of sessions.sessions || []) {
+        const current = s2.id === sessions.current;
+        rows.append(
+          h('div', { class: 'row', style: 'padding:9px 0;border-bottom:1px solid var(--line-soft)' },
+            h('div', {},
+              h('b', {}, s2.device),
+              current ? h('span', { class: 'badge', style: 'margin-left:8px' }, '当前这台') : null,
+              h('div', { class: 'field-hint' },
+                `登录于 ${new Date(s2.createdAt).toLocaleString('zh-CN')}`)),
+            h('div', { class: 'shrink' },
+              h('button', {
+                class: 'btn ghost sm',
+                onclick: async (e) => {
+                  e.target.disabled = true;
+                  await api(`/account/sessions/${s2.id}`, { method: 'DELETE' });
+                  toast(current ? '已退出这台，马上要重新登录' : '已踢下线', 'ok');
+                  if (current) return location.reload();
+                  return paintAccount();
+                }
+              }, current ? '退出登录' : '踢下线')))
+        );
+      }
+
+      acctHost.append(
+        h('p', { class: 'field-hint' }, `当前账号：${me.user}`),
+        h('div', { class: 'grid2' },
+          h('div', { class: 'field' }, h('label', {}, '原密码'), oldPw),
+          h('div', { class: 'field' }, h('label', {}, '新密码（至少 8 位）'), newPw)),
+        h('div', { class: 'inline' },
+          h('button', {
+            class: 'btn',
+            onclick: async (e) => {
+              e.target.disabled = true;
+              try {
+                await api('/account/password', {
+                  method: 'POST',
+                  body: { oldPassword: oldPw.value, newPassword: newPw.value }
+                });
+                oldPw.value = '';
+                newPw.value = '';
+                // 改密码不踢已登录的设备 —— 否则每次改密码都要把所有设备重登一遍
+                toast('密码已改。已登录的设备不受影响，想全踢就点下面那个', 'ok');
+              } catch (err) {
+                toast(err.message, 'err');
+              } finally {
+                e.target.disabled = false;
+              }
+            }
+          }, '改密码')),
+        h('h3', { style: 'margin:18px 0 6px;font-size:13px' }, '登录着的设备'),
+        h('p', { class: 'field-hint' },
+          '一台设备一个会话。手机丢了就在这里把它踢下线 —— 不影响别的设备，也不用改密码。'),
+        rows,
+        h('div', { class: 'inline', style: 'margin-top:12px' },
+          h('button', {
+            class: 'btn ghost',
+            onclick: async (e) => {
+              // "除了我"会让人以为安全了，而那台"我"可能正是被别人拿着的那台
+              if (!confirm('把所有设备都踢下线？包括当前这台，之后要重新登录。')) return;
+              e.target.disabled = true;
+              await api('/account/sessions', { method: 'DELETE' });
+              location.reload();
+            }
+          }, '全部踢下线'))
+      );
+    }
+
+    root.append(
+      h('div', { class: 'panel' },
+        h('h2', { class: 'panel-title' }, '账号与设备'),
+        h('p', { class: 'panel-hint' },
+          '账号密码解决的是"谁能进"。数据在哪儿是另一件事 —— 想让电脑和手机看到同一份，'
+          + '要让电脑版也连服务器（菜单「文件 → 引擎在哪儿跑…」）。'),
+        acctHost)
+    );
+    paintAccount();
+
     root.append(
       h('div', { class: 'panel' },
         h('h2', { class: 'panel-title' }, '对象存储'),

@@ -33,6 +33,7 @@ import * as skillsLib from './skills.js';
 import * as zip from './zip.js';
 import * as deploy from './deploy.js';
 import * as oss from './oss.js';
+import * as accounts from './accounts.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -243,6 +244,14 @@ function checkKey(req, url) {
    */
   if (!raw) return '要配对码';
 
+  /**
+   * 会话凭证。**放在口令前面试**：建了账号之后，日常进来的都是它。
+   *
+   * 老那串口令继续有效 —— 已经部署好的服务不该因为升级一次就进不去，
+   * 而且第一次建账号时要靠它证明"你是这台服务器的主人"。
+   */
+  if (accounts.whoIs(raw)) return null;
+
   const given = deploy.SERVER_MODE ? raw : raw.toUpperCase();
   // 长度不同直接判错，不进 timingSafeEqual（它要求等长）
   let ok = given.length === expected.length;
@@ -434,6 +443,87 @@ async function handleApi(req, res, url, { lan = false } = {}) {
   if (a === 'settings') {
     if (method === 'GET') return json(res, 200, settings.all());
     if (method === 'POST') return json(res, 200, settings.patch(await readBody(req)));
+  }
+
+  /**
+   * ---- 账号 ----
+   *
+   * 这一组的路由规矩和别处不同，值得说清楚：
+   *
+   *   /account/login   **不能**要凭证 —— 它就是用来换凭证的
+   *   /account/setup   第一次建管理员，要拿那串访问口令证明"你是这台机器的主人"。
+   *                    没有这一条的话，一个刚上线还没建账号的服务，
+   *                    任何人都能抢先建一个管理员，然后你就进不去自己的服务器了
+   *   其余              照常要凭证（上面统一的 checkKey 已经拦过了）
+   */
+  if (a === 'account') {
+    if (b === 'login' && method === 'POST') {
+      const body = await readBody(req);
+      const out = accounts.login(body.user, body.password, { device: req.headers['user-agent'] || '' });
+      if (!out) {
+        // 不说"用户名不存在"还是"密码错了"—— 那等于帮人把用户名一个个试出来
+        return json(res, 401, { error: '用户名或密码不对' });
+      }
+      return json(res, 200, out);
+    }
+
+    if (b === 'setup' && method === 'POST') {
+      if (accounts.hasAccounts()) return json(res, 409, { error: '已经建过账号了，直接登录' });
+      const body = await readBody(req);
+      const proof = String(body.accessToken || req.headers['x-fd-key'] || '');
+      const expected = deploy.SERVER_MODE ? deploy.accessToken() : settings.get('lanToken') || '';
+      // 本机模式下没有口令这一说，坐在这台机器前就是证明
+      const needProof = deploy.SERVER_MODE || Boolean(settings.get('lanToken'));
+      if (needProof && (!proof || proof !== expected)) {
+        return json(res, 403, { error: '要先证明你是这台服务器的主人：把启动日志里那串访问口令填进来' });
+      }
+      try {
+        const created = accounts.createUser(body.user, body.password, { admin: true });
+        const session = accounts.login(body.user, body.password, { device: req.headers['user-agent'] || '' });
+        return json(res, 200, { ...created, ...session });
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
+    }
+
+    // 下面这些都要先登录。谁在问 —— 从凭证反查，不听客户端自报
+    const me = accounts.whoIs(req.headers['x-fd-key'] || url.searchParams.get('k') || '');
+
+    if (b === 'me' && method === 'GET') {
+      return json(res, 200, me ? { ...me, users: accounts.listUsers() } : { user: null });
+    }
+
+    if (!me) return json(res, 401, { error: '先登录' });
+
+    if (b === 'password' && method === 'POST') {
+      const body = await readBody(req);
+      try {
+        accounts.changePassword(me.user, body.oldPassword, body.newPassword);
+        return json(res, 200, { ok: true });
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
+    }
+
+    if (b === 'sessions' && method === 'GET') {
+      return json(res, 200, { sessions: accounts.sessionsOf(me.user), current: me.sessionId });
+    }
+    if (b === 'sessions' && c && method === 'DELETE') {
+      return json(res, 200, { ok: accounts.revoke(me.user, c) });
+    }
+    // 手机丢了、密码泄了：一次全踢，包括当前这台 ——
+    // "除了我" 会让人以为安全了，而那台"我"可能正是被别人拿着的那台
+    if (b === 'sessions' && method === 'DELETE') {
+      return json(res, 200, { revoked: accounts.revokeAll(me.user) });
+    }
+    if (b === 'users' && method === 'POST') {
+      const body = await readBody(req);
+      try {
+        return json(res, 200, accounts.createUser(body.user, body.password));
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
+    }
   }
 
   // ---- 对象存储（阿里云 OSS）----
@@ -1038,12 +1128,24 @@ export function createServer({ lan = false } = {}) {
      * 要口令才能进"，模式本来就不是秘密。
      */
     if (url.pathname === '/api/mode') {
-      return json(res, 200, { mode: deploy.SERVER_MODE ? 'server' : lan ? 'lan' : 'desktop' });
+      return json(res, 200, {
+        mode: deploy.SERVER_MODE ? 'server' : lan ? 'lan' : 'desktop',
+        // 建了账号就该问用户名密码，没建就还是问那串口令。
+        // 登录屏必须先知道该问什么 —— 而这一问必然发生在拿到凭证之前
+        auth: accounts.hasAccounts() ? 'account' : 'token'
+      });
     }
+
+    /**
+     * 登录和首次建账号这两条**必须在鉴权之前放行** —— 它们就是用来换凭证的，
+     * 要凭证才能进就成了死结。它们自己各有各的门槛：
+     * 登录要用户名密码，建账号要那串访问口令。
+     */
+    const isAuthDoor = url.pathname === '/api/account/login' || url.pathname === '/api/account/setup';
 
     if (lan) {
       const isShell = url.pathname === '/m' || url.pathname.startsWith('/m/');
-      if (!isShell) {
+      if (!isShell && !isAuthDoor) {
         const bad = checkKey(req, url);
         if (bad) return json(res, 401, { error: bad });
       }
@@ -1063,7 +1165,7 @@ export function createServer({ lan = false } = {}) {
       const isShell =
         !url.pathname.startsWith('/api/') && !url.pathname.startsWith('/media');
       const isAuthProbe = url.pathname === '/api/auth';
-      if (!isShell && !isAuthProbe) {
+      if (!isShell && !isAuthProbe && !isAuthDoor) {
         const bad = checkKey(req, url);
         if (bad) return json(res, 401, { error: bad });
       }

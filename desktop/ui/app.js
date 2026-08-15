@@ -455,45 +455,127 @@ const TOKEN_STORE = 'fd.accessToken';
  */
 function showLogin(reason = '') {
   const host = $('#view-inner');
-  clear(host).append(
-    h('div', { class: 'empty', style: 'max-width:420px;margin:8vh auto;text-align:left' },
-      h('b', { style: 'font-size:17px' }, '输入访问口令'),
-      h('p', { style: 'margin:10px 0 0;line-height:1.7' },
-        '这台服务器在公网上，所以要口令才能进。口令在第一次启动的日志里（',
-        h('code', {}, 'docker logs'),
-        '），或者由部署时的 FUTUREDREAM_ACCESS_TOKEN 指定。'),
-      reason ? h('p', { style: 'color:var(--alarm);margin:8px 0 0' }, reason) : null,
-      (() => {
-        const input = h('input', {
-          type: 'password',
-          class: 'mono',
-          placeholder: '32 位口令',
-          style: 'margin-top:14px'
+
+  /**
+   * 问什么，取决于这台服务处在哪个阶段：
+   *
+   *   还没建账号  问那串访问口令（启动日志里那个），并顺手让他把账号建了
+   *   建过账号    问用户名密码
+   *
+   * 探不到就按"口令"办 —— 那是老行为，最坏情况下人还是进得去。
+   * 界面能不能用，不该取决于一次探测成没成（这一条上次已经栽过一回）。
+   */
+  clear(host).append(h('div', { class: 'empty' }, '正在确认这台服务要什么…'));
+  Promise.race([
+    api('/mode').catch(() => null),
+    new Promise((r) => setTimeout(() => r(null), 2000))
+  ]).then((info) => paintLogin(info?.auth === 'account' ? 'account' : 'token', reason));
+}
+
+function paintLogin(kind, reason) {
+  const host = $('#view-inner');
+  const wrap = h('div', { class: 'empty', style: 'max-width:420px;margin:8vh auto;text-align:left' });
+
+  const field = (label, attrs) => {
+    const input = h('input', { ...attrs, style: 'margin-top:6px' });
+    return { input, node: h('div', { class: 'field', style: 'margin-top:12px' }, h('label', {}, label), input) };
+  };
+
+  if (kind === 'account') {
+    const u = field('用户名', { type: 'text', autocomplete: 'username' });
+    const p = field('密码', { type: 'password', autocomplete: 'current-password' });
+    const go = h('button', { class: 'btn primary', style: 'margin-top:14px;width:100%' }, '登录');
+    const submit = async () => {
+      go.disabled = true;
+      try {
+        // cap:account-login
+        const r = await api('/account/login', {
+          method: 'POST',
+          body: { user: u.input.value.trim(), password: p.input.value }
         });
-        const go2 = h('button', { class: 'btn primary', style: 'margin-top:10px;width:100%' }, '进入');
-        const submit = async () => {
-          const val = input.value.trim();
-          if (!val) return;
-          go2.disabled = true;
-          setAuthKey(val);
-          try {
-            await api('/auth');
-            localStorage.setItem(TOKEN_STORE, val);
-            location.reload();
-          } catch {
-            setAuthKey('');
-            go2.disabled = false;
-            showLogin('口令不对。多试几次会被锁一阵子。');
-          }
-        };
-        go2.onclick = submit;
-        input.onkeydown = (e) => {
-          if (e.key === 'Enter') submit();
-        };
-        setTimeout(() => input.focus(), 30);
-        return h('div', {}, input, go2);
-      })())
+        setAuthKey(r.token);
+        localStorage.setItem(TOKEN_STORE, r.token);
+        location.reload();
+      } catch (err) {
+        go.disabled = false;
+        paintLogin('account', err.message || '登录失败');
+      }
+    };
+    go.onclick = submit;
+    p.input.onkeydown = (e) => {
+      if (e.key === 'Enter') submit();
+    };
+    wrap.append(
+      h('b', { style: 'font-size:17px' }, '登录'),
+      reason ? h('p', { style: 'color:var(--alarm);margin:8px 0 0' }, reason) : null,
+      u.node, p.node, go
+    );
+    setTimeout(() => u.input.focus(), 30);
+    clear(host).append(wrap);
+    return;
+  }
+
+  // ── 还没建账号：先用启动日志里那串口令进来，顺手把账号建了 ──
+  const tok = field('访问口令', { type: 'password', class: 'mono', placeholder: '32 位口令' });
+  const newUser = field('用户名（可留空，只用口令进也行）', { type: 'text', autocomplete: 'username' });
+  const newPass = field('密码（至少 8 位）', { type: 'password', autocomplete: 'new-password' });
+  const go = h('button', { class: 'btn primary', style: 'margin-top:14px;width:100%' }, '进入');
+
+  const submit = async () => {
+    const val = tok.input.value.trim();
+    if (!val) return;
+    go.disabled = true;
+    setAuthKey(val);
+
+    // 填了用户名密码就顺手建账号：以后就不用再记那串 32 位的东西了
+    if (newUser.input.value.trim() && newPass.input.value) {
+      try {
+        const r = await api('/account/setup', {
+          method: 'POST',
+          body: { user: newUser.input.value.trim(), password: newPass.input.value, accessToken: val }
+        });
+        setAuthKey(r.token);
+        localStorage.setItem(TOKEN_STORE, r.token);
+        location.reload();
+        return;
+      } catch (err) {
+        setAuthKey('');
+        go.disabled = false;
+        paintLogin('token', `账号没建成：${err.message}`);
+        return;
+      }
+    }
+
+    try {
+      await api('/auth');
+      localStorage.setItem(TOKEN_STORE, val);
+      location.reload();
+    } catch {
+      setAuthKey('');
+      go.disabled = false;
+      paintLogin('token', '口令不对。多试几次会被锁一阵子。');
+    }
+  };
+  go.onclick = submit;
+  tok.input.onkeydown = (e) => {
+    if (e.key === 'Enter') submit();
+  };
+
+  wrap.append(
+    h('b', { style: 'font-size:17px' }, '输入访问口令'),
+    h('p', { style: 'margin:10px 0 0;line-height:1.7' },
+      '这台服务器在公网上，所以要口令才能进。口令在第一次启动的日志里（',
+      h('code', {}, 'docker compose logs app'),
+      '），或者由部署时的 FUTUREDREAM_ACCESS_TOKEN 指定。'),
+    reason ? h('p', { style: 'color:var(--alarm);margin:8px 0 0' }, reason) : null,
+    tok.node,
+    h('p', { class: 'field-hint', style: 'margin-top:16px' },
+      '顺手建个账号（可选）：以后用用户名密码登，就不用再记那串 32 位的东西了。'
+      + '而且每台设备一个会话 —— 手机丢了只踢那一台，不影响电脑。'),
+    newUser.node, newPass.node, go
   );
+  setTimeout(() => tok.input.focus(), 30);
+  clear(host).append(wrap);
 }
 
 /**

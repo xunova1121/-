@@ -183,6 +183,70 @@ await page2.locator('button:has-text("连接")').click();
 await page2.waitForTimeout(4000);
 check('照样进得去', !/访问口令|配对码/.test(await page2.locator('body').innerText()));
 
+/**
+ * 账号：从"只有一串口令"到"用户名密码 + 每台设备一个会话"。
+ *
+ * 在真浏览器里走一遍，因为这一段最容易坏在**界面**上：接口全对，
+ * 而登录屏问的还是口令、或者建完账号没自动登进去，用户照样卡在门口。
+ */
+console.log('\n账号');
+/**
+ * ⚠ 这两个上下文**直接打本机端口**，不做 Host 伪装。
+ *
+ * 伪装那套只在"从根地址进、被 302 带到本机"时才成立：一旦没有那次跳转，
+ * 页面 URL 还停在假域名上，子资源就得靠路由跨源改写 —— 而 Playwright
+ * 不允许，app.js 会被 ERR_BLOCKED_BY_CLIENT 挡掉，页面一片空白，
+ * 看起来和"登录屏没画出来"一模一样。
+ *
+ * 而服务端本来就放行 loopback（线上 Caddy 那一跳走的正是它），
+ * 所以直接打 127.0.0.1 既省事又更接近真实链路。
+ */
+const ctx3 = await b.newContext();
+const page3 = await ctx3.newPage();
+// 电脑版这一页的报错也要盯着 —— 上一版就是因为没盯，
+// 一个"函数被误删"的低级错误让整页全白，而所有接口检查都是绿的
+page3.on('pageerror', (e) => errs.push(`PC: ${e.message}`));
+// 电脑版那一屏才有"顺手建账号"，手机上只登录 —— 所以走 ?pc=1
+await page3.goto(`${base}/?pc=1`, { waitUntil: 'domcontentloaded' });
+await page3.waitForTimeout(2500);
+const loginText = await page3.locator('#view-inner').innerText().catch(() => '');
+check('还没建账号时，问的是口令', /访问口令/.test(loginText), loginText.slice(0, 120));
+check('并且顺手让你把账号建了', /顺手建个账号/.test(loginText), loginText.slice(0, 200));
+
+await page3.locator('input[type=password]').first().fill(TOKEN);
+await page3.locator('input[type=text]').first().fill('owner');
+await page3.locator('input[autocomplete=new-password]').fill('a-strong-password');
+await page3.locator('button:has-text("进入")').click();
+await page3.waitForTimeout(2500);
+const afterSetup = await page3.locator('body').innerText();
+check('建完直接就进去了（不用再登一次）', !/访问口令|登录/.test(afterSetup.slice(0, 200)), afterSetup.slice(0, 160));
+
+// 换一台设备：这次该问用户名密码了
+const ctx4 = await b.newContext({ ...devices['iPhone 13'] });
+const page4 = await ctx4.newPage();
+await page4.goto(`${base}/`, { waitUntil: 'domcontentloaded' });
+await page4.waitForTimeout(1500);
+const mLogin = await page4.locator('body').innerText();
+// ⚠ placeholder 不进 innerText —— 第一版断言盯着"用户名"三个字，
+// 而那三个字只在 placeholder 里，于是一个完全正确的界面被判成错的
+check('手机上问的也是用户名密码了',
+  (await page4.locator('input[autocomplete=username]').count()) === 1
+    && !/配对码|访问口令/.test(mLogin), mLogin.slice(0, 100));
+
+await page4.locator('input[autocomplete=username]').fill('owner');
+await page4.locator('input[type=password]').fill('a-strong-password');
+await page4.locator('button:has-text("登录")').click();
+await page4.waitForTimeout(2500);
+check('手机用账号登进去了', !/用户名或密码|登录/.test((await page4.locator('body').innerText()).slice(0, 120)));
+
+// 两台设备各自一个会话 —— 这是这套东西存在的理由
+const sessions = await page3.evaluate(async () => {
+  const key = localStorage.getItem('fd.accessToken');
+  const r = await fetch('/api/account/sessions', { headers: { 'X-FD-Key': key } });
+  return r.json();
+});
+check('列得出两台设备', (sessions.sessions || []).length === 2, JSON.stringify((sessions.sessions || []).map((x) => x.device)));
+
 check('全程没有页面报错', errs.length === 0, errs.slice(0, 3).join(' | '));
 
 await b.close();

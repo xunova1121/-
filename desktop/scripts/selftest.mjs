@@ -3717,12 +3717,12 @@ section('服务器模式：按公网的规矩');
     });
   });
 
-  const hit = (host, pathname, withKey = true) =>
+  const hit = (host, pathname, withKey = true, key = TOKEN) =>
     new Promise((resolve) => {
       const sock = net.connect(sport, '127.0.0.1', () => {
         sock.write(
           `GET ${pathname} HTTP/1.1\r\nHost: ${host}\r\n` +
-            (withKey ? `X-FD-Key: ${TOKEN}\r\n` : '') +
+            (withKey ? `X-FD-Key: ${key}\r\n` : '') +
             'Connection: close\r\n\r\n'
         );
       });
@@ -3768,6 +3768,75 @@ section('服务器模式：按公网的规矩');
   // 登录屏之前得能问"这台服务要我输什么"，否则那一屏只能瞎猜
   const modeCode = await hit('fd.example.com', '/api/mode', false);
   check('模式这一问不要口令（登录屏要靠它决定问什么）', modeCode === 200, String(modeCode));
+
+  /**
+   * 账号在服务器模式下的整条路。
+   *
+   * 最要紧的一条是**抢注**：一个刚上线还没建账号的服务，如果谁都能建管理员，
+   * 那么第一个扫到它的人就把你锁在自己的服务器外面了。所以建第一个账号
+   * 必须拿出那串访问口令 —— 它证明的是"你摸得到这台机器的启动日志"。
+   */
+  const post = (pathname, body, key) =>
+    new Promise((resolve) => {
+      const payload = JSON.stringify(body);
+      const sock = net.connect(sport, '127.0.0.1', () => {
+        sock.write(
+          `POST ${pathname} HTTP/1.1\r\nHost: fd.example.com\r\n` +
+            'Content-Type: application/json\r\n' +
+            (key ? `X-FD-Key: ${key}\r\n` : '') +
+            `Content-Length: ${Buffer.byteLength(payload)}\r\nConnection: close\r\n\r\n${payload}`
+        );
+      });
+      let buf = '';
+      sock.on('data', (d) => (buf += d));
+      sock.on('end', () => {
+        const status = Number(buf.split(' ')[1]);
+        let parsed = {};
+        try { parsed = JSON.parse(buf.slice(buf.indexOf('\r\n\r\n') + 4)); } catch { /* 不是 JSON */ }
+        resolve({ status, body: parsed });
+      });
+      sock.on('error', () => resolve({ status: 0, body: {} }));
+    });
+
+  const grab = await post('/api/account/setup', { user: 'attacker', password: 'i-was-here-first' });
+  check('没口令就抢不到管理员（不然第一个扫到的人把你锁在门外）',
+    grab.status === 403, `${grab.status} ${grab.body.error || ''}`);
+
+  const mine = await post('/api/account/setup', { user: 'owner', password: 'my-strong-password', accessToken: TOKEN });
+  check('拿得出口令才建得成', mine.status === 200 && mine.body.token, `${mine.status} ${mine.body.error || ''}`);
+  check('建完顺手就登上了（不用再登一次）', Boolean(mine.body.token) && mine.body.user === 'owner');
+
+  const again = await post('/api/account/setup', { user: 'second', password: 'another-password', accessToken: TOKEN });
+  check('建过一次就不能再走这条路', again.status === 409, String(again.status));
+
+  const login = await post('/api/account/login', { user: 'owner', password: 'my-strong-password' });
+  check('登录换得到凭证', login.status === 200 && Boolean(login.body.token), String(login.status));
+  const wrongPass = await post('/api/account/login', { user: 'owner', password: 'wrong-password' });
+  check('密码错了进不去', wrongPass.status === 401, String(wrongPass.status));
+  // 报"用户不存在"等于帮人把用户名一个个试出来
+  check('不告诉你是用户名错还是密码错', /用户名或密码/.test(wrongPass.body.error || ''), wrongPass.body.error);
+
+  check('会话凭证当口令使', (await hit('fd.example.com', '/api/projects', true, login.body.token)) === 200);
+  // 升级一次就把已部署的服务锁在门外，是最不能接受的一种改动
+  check('老那串口令仍然有效', (await hit('fd.example.com', '/api/projects')) === 200);
+
+  const modeNow = await post('/api/account/login', { user: 'owner', password: 'my-strong-password' });
+  check('建了账号之后，登录屏该改问用户名密码了',
+    modeNow.status === 200 && /account/.test(JSON.stringify(await fetchMode())), '');
+
+  async function fetchMode() {
+    return new Promise((resolve) => {
+      const sock = net.connect(sport, '127.0.0.1', () => {
+        sock.write('GET /api/mode HTTP/1.1\r\nHost: fd.example.com\r\nConnection: close\r\n\r\n');
+      });
+      let buf = '';
+      sock.on('data', (d) => (buf += d));
+      sock.on('end', () => {
+        try { resolve(JSON.parse(buf.slice(buf.indexOf('\r\n\r\n') + 4))); } catch { resolve({}); }
+      });
+      sock.on('error', () => resolve({}));
+    });
+  }
 
   child.kill();
 
@@ -4010,6 +4079,74 @@ check('界面文件能取到', uiFile.status === 200);
  * 端到端那一步交给用户点「测试连接」：它真写、真读、真删一次。
  * 与其在这儿造一个假的 OSS 自欺欺人，不如把真检查做得好用。
  */
+/**
+ * 账号与会话。
+ *
+ * 那串 32 位口令能用，但它只回答了"你知不知道那个秘密"，
+ * 而实际要回答的是四个问题：谁进来了、怎么换、丢了一台怎么办、记不记得住。
+ * 这一段验的就是这四条 —— 尤其是**踢掉一台不影响别的**，
+ * 那是这套东西存在的全部理由。
+ */
+section('账号：谁进来了、怎么踢出去');
+{
+  const acc = await import('../core/accounts.js');
+  acc.__reset();
+  check('一开始没有账号（那时候还是用口令进）', acc.hasAccounts() === false);
+
+  acc.createUser('alan', 'a-good-password');
+  check('建完就有了', acc.hasAccounts() === true);
+  check('第一个自动是管理员', acc.listUsers()[0].admin === true);
+
+  // 密码规则要拦在建的时候，不能等出事才说
+  let tooShort = '';
+  try { acc.createUser('bob', 'short'); } catch (e) { tooShort = e.message; }
+  check('太短的密码建不了', /至少 8 位/.test(tooShort), tooShort);
+  let dup = '';
+  try { acc.createUser('ALAN', 'another-password'); } catch (e) { dup = e.message; }
+  check('用户名不分大小写地防重（Alan 和 alan 是同一个人）', /已经存在/.test(dup), dup);
+
+  check('密码不明文存', !fs.readFileSync(path.join(SANDBOX, 'accounts.json'), 'utf8').includes('a-good-password'));
+  check('对的密码认得出', Boolean(acc.verifyPassword('alan', 'a-good-password')));
+  check('错的密码不认', acc.verifyPassword('alan', 'wrong-password') === null);
+  check('不存在的用户也不认', acc.verifyPassword('nobody', 'whatever') === null);
+
+  // 一台设备一个会话 —— 这是这套东西存在的理由
+  const s1 = acc.login('alan', 'a-good-password', { device: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0)' });
+  const s2 = acc.login('alan', 'a-good-password', { device: 'Mozilla/5.0 (Windows NT 10.0; Win64)' });
+  check('登两台，两个不同的凭证', s1.token !== s2.token);
+  check('凭证认得出是谁', acc.whoIs(s1.token)?.user === 'alan');
+  check('乱编的凭证不认', acc.whoIs('made-up-token') === null);
+
+  const list = acc.sessionsOf('alan');
+  check('列得出登了哪两台', list.length === 2, JSON.stringify(list.map((x) => x.device)));
+  // 一排看不出区别的条目，没人敢点删除
+  check('看得出是什么设备', list.some((x) => x.device === 'iPhone') && list.some((x) => x.device === 'Windows 电脑'),
+    JSON.stringify(list.map((x) => x.device)));
+
+  // 手机丢了只想踢那一台，不该牵连电脑 —— 这一条是整套设计的核心
+  const phone = list.find((x) => x.device === 'iPhone');
+  acc.revoke('alan', phone.id);
+  check('踢掉手机那台', acc.whoIs(s1.token) === null);
+  check('电脑那台不受影响', acc.whoIs(s2.token)?.user === 'alan');
+
+  // 改密码不该把已登录的设备全踢下线（那样每次改密码都要重新登所有设备）
+  acc.changePassword('alan', 'a-good-password', 'a-new-better-password');
+  check('改完密码，老密码不认了', acc.verifyPassword('alan', 'a-good-password') === null);
+  check('新密码认', Boolean(acc.verifyPassword('alan', 'a-new-better-password')));
+  check('已登录的设备不受影响', acc.whoIs(s2.token)?.user === 'alan');
+  let badOld = '';
+  try { acc.changePassword('alan', 'not-the-old-one', 'whatever-password'); } catch (e) { badOld = e.message; }
+  check('原密码不对就改不了', /原密码不对/.test(badOld), badOld);
+
+  // 密码泄了：一次全踢，**包括当前这台** ——
+  // "除了我"会让人以为安全了，而那台"我"可能正是被别人拿着的那台
+  acc.login('alan', 'a-new-better-password', { device: 'Android' });
+  const n = acc.revokeAll('alan');
+  check('一次全踢', n >= 1 && acc.whoIs(s2.token) === null, String(n));
+
+  acc.__reset();
+}
+
 section('对象存储：能验的部分');
 {
   const oss = await import('../core/oss.js');

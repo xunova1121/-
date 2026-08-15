@@ -350,7 +350,44 @@ const job = { running: false, label: '', message: '', fail: 0 };
 
 // ───────────────────────── 配对 ─────────────────────────
 
+/**
+ * 建了账号之后，这一屏问的是用户名密码。
+ *
+ * 手机上这个差别比电脑上更要紧：32 位混排口令在手机键盘上敲一次要半分钟，
+ * 而且极容易敲错 —— 而用户名密码是能记住、能用密码管理器填的。
+ */
+function paintAccountLogin(reason = '') {
+  const u = h('input', { type: 'text', class: 'code', placeholder: '用户名', autocapitalize: 'none', autocomplete: 'username' });
+  const p = h('input', { type: 'password', class: 'code', placeholder: '密码', autocomplete: 'current-password', style: 'margin-top:10px' });
+  const go = h('button', { class: 'btn primary block', style: 'margin-top:14px' }, '登录');
+  go.onclick = async () => {
+    if (!u.value.trim() || !p.value) return toast('用户名和密码都要填', 'err');
+    go.disabled = true;
+    try {
+      // cap:account-login
+      const r = await api('/account/login', { method: 'POST', body: { user: u.value.trim(), password: p.value } });
+      authKey = r.token;
+      rememberKey(r.token);
+      toast(`欢迎，${r.user}`, 'ok');
+      boot();
+    } catch (err) {
+      go.disabled = false;
+      toast(err.status === 401 ? '用户名或密码不对' : err.message, 'err');
+    }
+  };
+  p.onkeydown = (e) => {
+    if (e.key === 'Enter') go.click();
+  };
+  clear(app).append(
+    h('div', { class: 'pair' },
+      h('h1', {}, '未来创梦'),
+      h('p', { class: 'muted' }, '用电脑上建的那个账号登录。每台设备一个会话 —— 手机丢了，在电脑上把这一台踢掉就行，不影响别处。'),
+      reason ? h('p', { class: 'muted', style: 'color:var(--alarm)' }, reason) : null,
+      u, p, go));
+}
+
 function paintPair(reason = '') {
+  if (mode === 'account') return paintAccountLogin(reason);
   const server = mode === 'server';
   clear(app).append(
     h('div', { class: 'pair' },
@@ -1144,10 +1181,12 @@ async function boot() {
    *
    * 为一句文案赌上整个界面能不能打开，这笔账怎么算都不划算。两秒没回就往下走。
    */
-  mode = await Promise.race([
-    fetch('/api/mode').then((r) => (r.ok ? r.json() : null)).then((d) => d?.mode || 'lan'),
-    new Promise((resolve) => setTimeout(() => resolve('lan'), 2000))
-  ]).catch(() => 'lan');
+  const probed = await Promise.race([
+    fetch('/api/mode').then((r) => (r.ok ? r.json() : null)),
+    new Promise((resolve) => setTimeout(() => resolve(null), 2000))
+  ]).catch(() => null);
+  // 建了账号就问用户名密码，没建就还是问那串码。探不到按老行为办
+  mode = probed?.auth === 'account' ? 'account' : probed?.mode || 'lan';
 
   // 电脑上把带码的链接发到手机时，直接从地址里取，省得手敲
   const fromUrl = new URL(location.href).searchParams.get('k');
@@ -1167,9 +1206,11 @@ async function boot() {
     authKey = '';
     return paintPair(
       err.status === 401
-        ? mode === 'server'
-          ? '口令不对，或者服务器上换过了 —— 重新填一次。'
-          : '配对码失效了 —— 电脑上换过码，重新敲一次。'
+        ? mode === 'account'
+          ? '登录过期了，重新登一次。'
+          : mode === 'server'
+            ? '口令不对，或者服务器上换过了 —— 重新填一次。'
+            : '配对码失效了 —— 电脑上换过码，重新敲一次。'
         : err.message
     );
   }

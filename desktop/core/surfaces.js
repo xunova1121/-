@@ -144,6 +144,14 @@ export const CAPABILITIES = [
     mobile: 'ui/m/m.js'
   },
 
+  {
+    id: 'account-login',
+    name: '用账号密码登录',
+    api: 'POST /account/login',
+    pc: 'ui/app.js',
+    mobile: 'ui/m/m.js'
+  },
+
   // ── 只在电脑上做的事 ──
   {
     id: 'providers',
@@ -176,6 +184,22 @@ export const CAPABILITIES = [
     pc: 'ui/views/logs.js',
     mobile: null,
     why: '同上，排错用。手机上看一屏截断的 JSON 没有意义。'
+  },
+  {
+    id: 'account-devices',
+    name: '改密码 / 踢设备下线',
+    api: 'GET+DELETE /account/sessions',
+    pc: 'ui/views/settings.js',
+    mobile: null,
+    why: '手机丢了要在**别的设备**上踢它 —— 在丢了的那台上操作没有意义。放电脑上正合适。'
+  },
+  {
+    id: 'remote-engine',
+    name: '电脑版连服务器（三端共用一份数据）',
+    api: '（Electron 壳）',
+    pc: 'electron/main.js',
+    mobile: null,
+    why: '手机本来就是连服务器的，没有"要不要连"这个选择。'
   },
   {
     id: 'oss-config',
