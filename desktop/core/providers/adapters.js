@@ -86,6 +86,69 @@ export function ratioToSize(ratio) {
 }
 
 /**
+ * 把画幅换算成**这个模型真的收得下**的尺寸。
+ *
+ * ── 为什么不能只有一张换算表 ──
+ *
+ * 各家对尺寸的约束差很远，而且违规时的表现是**最坏的那一种**：
+ * 不报错，自己换一个尺寸出图。于是你选了 16:9，出来的是竖的或方的，
+ * 请求记录里明明白白写着 1280x720，任务也"成功"了 —— 这种情况没法靠看日志查出来。
+ *
+ * 两类约束：
+ *   enum  只收固定几个尺寸（OpenAI gpt-image-1、Seedream 3.0 那一类）
+ *         → 在同方向里挑比例最接近的那个
+ *   min/max 每边有上下限（Seedream 4.0 每边不低于 1280）
+ *         → 按比例放大到落进区间，再对齐到 step
+ *
+ * 目录里没声明约束的，维持原样发预设尺寸 —— 不猜。
+ */
+export function fitImageSize(ratio, constraint, fallback) {
+  const base = fallback || ratioToSize(ratio);
+  if (!constraint) return base;
+  const [rw, rh] = String(ratio || '16:9').split(':').map(Number);
+  if (!rw || !rh) return base;
+  const want = rw / rh;
+
+  if (Array.isArray(constraint.enum) && constraint.enum.length) {
+    const parse = (sz) => String(sz).split(/[*x×]/).map(Number);
+    const sameSide = constraint.enum.filter((sz) => {
+      const [w, h] = parse(sz);
+      return w && h && (w > h) === (rw > rh) && (w === h) === (rw === rh);
+    });
+    const pool = sameSide.length ? sameSide : constraint.enum;
+    return pool.reduce((best, cur) => {
+      const [bw, bh] = parse(best);
+      const [cw, ch] = parse(cur);
+      return Math.abs(cw / ch - want) < Math.abs(bw / bh - want) ? cur : best;
+    });
+  }
+
+  const min = Number(constraint.min) || 0;
+  const max = Number(constraint.max) || 0;
+  const step = Number(constraint.step) || 8;
+  if (!min && !max) return base;
+
+  // 短边顶到下限，长边跟着比例走；长边超上限就反过来压
+  let w = rw >= rh ? (min * rw) / rh : min;
+  let h = rw >= rh ? min : (min * rh) / rw;
+  if (max) {
+    const over = Math.max(w, h) / max;
+    if (over > 1) {
+      w /= over;
+      h /= over;
+    }
+  }
+  const round = (n) => Math.max(step, Math.round(n / step) * step);
+  return `${round(w)}*${round(h)}`;
+}
+
+/** 这个模型声明的尺寸约束（目录里写，改厂商规则不用动代码） */
+export function imageSizeConstraint(provider, model) {
+  const entry = (provider?.models || []).find((m) => m.id === model);
+  return entry?.imageSizes || provider?.imageSizes || null;
+}
+
+/**
  * 解析一个接口地址。优先级：用户在界面上填的 > 目录里写的 > 兜底默认。
  * 中转平台的路径经常和官方对不上，让用户能自己改是最快的一条路。
  */
@@ -230,7 +293,19 @@ export async function generateImage({
   if (!provider) throw new Error(`未知服务商：${providerId}`);
   const family = provider.family || 'openai';
   // 画幅优先用这个项目自己的；项目没设才回落到全局设置
-  size = size || ratioToSize(aspectRatio || settings.get('aspectRatio') || '16:9');
+  const wantRatio = aspectRatio || settings.get('aspectRatio') || '16:9';
+  if (!size) {
+    const preset = ratioToSize(wantRatio);
+    size = fitImageSize(wantRatio, imageSizeConstraint(provider, model), preset);
+    if (size !== preset) {
+      // 换过尺寸必须说一声：不说的话，你在请求记录里看到的尺寸和你选的画幅对不上，
+      // 会以为是这里算错了
+      onEvent?.({
+        type: 'note',
+        message: `${model} 的尺寸有约束，${wantRatio} 按 ${size.replace('*', '×')} 出（预设的 ${preset.replace('*', '×')} 它收不下，硬发会被它自己换成别的比例）`
+      });
+    }
+  }
 
   /**
    * 带了参考图 → 换成图生图模型。
@@ -292,7 +367,8 @@ export async function generateImage({
         requirePublicUrl(refImages[0], label, '参考图生图');
         input.ref_img = refImages[0];
       }
-      const parameters = { size, n: 1 };
+      // 百炼认的是 1280*720 这种星号写法；目录里的 enum 可能写成 x，统一一下
+      const parameters = { size: String(size).replace(/x/i, '*'), n: 1 };
       if (seed !== null) parameters.seed = seed;
       if (refImages.length) parameters.ref_strength = 0.55;
 

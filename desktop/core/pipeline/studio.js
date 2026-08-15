@@ -1719,7 +1719,7 @@ export function promptsFor(projectId, shotId) {
  *
  * 读文件头几十个字节就能量出来，不花钱。所以每张图都量。
  */
-function checkRatio(file, wanted, label, onEvent) {
+function checkRatio(file, wanted, label, onEvent, asked = null) {
   const size = imgsize.readSize(file);
   if (!size) return null;
   const verdict = imgsize.matchesRatio(size, wanted);
@@ -1733,7 +1733,8 @@ function checkRatio(file, wanted, label, onEvent) {
         '注意图生视频会继承首帧图的比例，不改的话成片也是这个比例。'
     });
   }
-  return { ...size, wanted, ok: verdict?.ok !== false };
+  // asked = 我们**发出去**的尺寸。和回来的一比就知道是"我们算错了"还是"厂商没听"
+  return { ...size, wanted, asked, ok: verdict?.ok !== false };
 }
 
 // ═══════════════════════ 阶段四：出视频 ═══════════════════════

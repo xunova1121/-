@@ -1458,7 +1458,8 @@ export default {
                       class: 'badge warn',
                       title:
                         `这张图是 ${shot.imageSize.width}×${shot.imageSize.height}，和项目画幅 ${shot.imageSize.wanted} 对不上。` +
-                        '这一家多半没吃尺寸参数。图生视频会继承首帧图的比例，不换一家重出的话成片也是这个比例。'
+                        (shot.imageSize.asked ? `我们发出去的是 ${String(shot.imageSize.asked).replace('*', '×')} —— 说明这一家没按我们给的尺寸出。` : '') +
+                        '图生视频会继承首帧图的比例，不换一家重出的话成片也是这个比例。'
                     }, `比例不符 ${shot.imageSize.width}×${shot.imageSize.height}`)
                   : null,
                 shot.imagePath && shot.editedAt && (!shot.imageAt || Date.parse(shot.editedAt) > Date.parse(shot.imageAt))

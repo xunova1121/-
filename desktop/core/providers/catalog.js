@@ -128,7 +128,13 @@ export const PROVIDERS = [
       { id: 'gpt-4.1', capability: 'chat', label: 'GPT-4.1' },
       { id: 'gpt-4.1-mini', capability: 'chat', label: 'GPT-4.1 mini' },
       { id: 'o4-mini', capability: 'chat', label: 'o4-mini（推理，拆复杂剧本）' },
-      { id: 'gpt-image-1', capability: 't2i', label: 'GPT Image 1（文生图 / 图生图）' },
+      {
+        id: 'gpt-image-1',
+        capability: 't2i',
+        label: 'GPT Image 1（文生图 / 图生图）',
+        // 官方只收这三个，给别的直接 400。与其让整步失败，不如按方向挑一个最接近的
+        imageSizes: { enum: ['1024x1024', '1536x1024', '1024x1536'] }
+      },
       { id: 'dall-e-3', capability: 't2i', label: 'DALL·E 3' },
       { id: 'gpt-4o-mini-tts', capability: 'tts', label: 'GPT-4o mini TTS（可指定语气）' },
       { id: 'tts-1-hd', capability: 'tts', label: 'TTS-1 HD（音质好）' },
@@ -260,8 +266,29 @@ export const PROVIDERS = [
       { id: 'deepseek-v3-241226', capability: 'chat', label: 'DeepSeek V3（方舟托管）' },
       { id: 'deepseek-r1-250120', capability: 'chat', label: 'DeepSeek R1（方舟托管，推理强）' },
       { id: 'kimi-k2-250711', capability: 'chat', label: 'Kimi K2（方舟托管）' },
-      { id: 'doubao-seedream-4-0-250828', capability: 't2i', label: 'Seedream 4.0 文生图（最新）' },
-      { id: 'doubao-seedream-3-0-t2i-250415', capability: 't2i', label: 'Seedream 3.0 文生图' },
+      {
+        id: 'doubao-seedream-4-0-250828',
+        capability: 't2i',
+        label: 'Seedream 4.0 文生图（最新）',
+        /**
+         * 4.0 每边不低于 1280、不高于 4096。
+         *
+         * 这条必须写出来：给它一个 1280×720（我们 16:9 的预设），短边 720 低于下限，
+         * 服务端不会报错，而是**自己换一个尺寸出图** —— 于是你选了横屏，
+         * 出来的却是竖的或方的，而请求记录里白纸黑字写着 1280x720。
+         * 这种"参数被悄悄改写"是最难查的一类，只能在发出去之前就换算好。
+         */
+        imageSizes: { min: 1280, max: 4096, step: 8 }
+      },
+      {
+        id: 'doubao-seedream-3-0-t2i-250415',
+        capability: 't2i',
+        label: 'Seedream 3.0 文生图',
+        // 3.0 收的是固定几档，给别的会就近似 —— 那也是一次悄悄的改写
+        imageSizes: {
+          enum: ['1024x1024', '1152x864', '864x1152', '1280x720', '720x1280', '1248x832', '832x1248', '1512x648', '648x1512']
+        }
+      },
       { id: 'doubao-seededit-3-0-i2i-250628', capability: 'i2i', label: 'SeedEdit 3.0 图生图（保角色用这个）' },
       { id: 'doubao-seedance-1-0-pro-250528', capability: 'i2v', label: 'Seedance 1.0 Pro 图生视频', durations: [5, 10] },
       { id: 'doubao-seedance-1-0-lite-i2v-250428', capability: 'i2v', label: 'Seedance 1.0 Lite 图生视频', durations: [5, 10] },

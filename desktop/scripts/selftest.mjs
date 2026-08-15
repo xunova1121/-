@@ -2253,6 +2253,45 @@ section('出图的画幅要真的对');
 }
 
 // 光有换算表不够：得确认**真正发到厂商那儿的请求体**里带着竖图尺寸
+// 尺寸给错时，厂商的表现是最坏的那一种：不报错，自己换一个尺寸出图。
+// 于是你选了横屏、出来的是竖的，而请求记录里白纸黑字写着你要的尺寸。
+section('尺寸要换算成这个模型收得下的');
+{
+  const adapters = await import('../core/providers/adapters.js');
+  const catalog = await import('../core/providers/catalog.js');
+  const ark = catalog.getProvider('volcengine');
+
+  const c4 = adapters.imageSizeConstraint(ark, 'doubao-seedream-4-0-250828');
+  check('4.0 声明了每边的上下限', c4?.min === 1280 && c4?.max === 4096, JSON.stringify(c4));
+  // 16:9 的预设是 1280×720，短边 720 低于 4.0 的下限 —— 直接发过去会被它自己改写
+  check('横屏在 4.0 上按 2272×1280 出，而不是把 720 发过去',
+    adapters.fitImageSize('16:9', c4) === '2272*1280', adapters.fitImageSize('16:9', c4));
+  check('竖屏还是竖的', adapters.fitImageSize('9:16', c4) === '1280*2272', adapters.fitImageSize('9:16', c4));
+  check('方的还是方的', adapters.fitImageSize('1:1', c4) === '1280*1280', adapters.fitImageSize('1:1', c4));
+  check('宽银幕不超上限',
+    Math.max(...adapters.fitImageSize('21:9', c4).split('*').map(Number)) <= c4.max,
+    adapters.fitImageSize('21:9', c4));
+
+  const c3 = adapters.imageSizeConstraint(ark, 'doubao-seedream-3-0-t2i-250415');
+  check('3.0 是固定几档，横屏正好命中 1280x720',
+    adapters.fitImageSize('16:9', c3) === '1280x720', adapters.fitImageSize('16:9', c3));
+  // 方向绝不能挑反 —— 挑反了就是"我选了横屏出来是竖屏"
+  check('挑档时先保方向：4:3 落在横的那一档',
+    adapters.fitImageSize('4:3', c3) === '1152x864', adapters.fitImageSize('4:3', c3));
+  check('3:4 落在竖的那一档', adapters.fitImageSize('3:4', c3) === '864x1152', adapters.fitImageSize('3:4', c3));
+
+  const oa = catalog.getProvider('openai');
+  const co = adapters.imageSizeConstraint(oa, 'gpt-image-1');
+  check('gpt-image-1 横屏挑 1536x1024（给别的尺寸它直接 400）',
+    adapters.fitImageSize('16:9', co) === '1536x1024', adapters.fitImageSize('16:9', co));
+  check('目录里没有重复的 gpt-image-1（下拉框会显示两遍）',
+    oa.models.filter((m) => m.id === 'gpt-image-1').length === 1,
+    String(oa.models.filter((m) => m.id === 'gpt-image-1').length));
+
+  // 没声明约束的照旧发预设，不猜
+  check('没声明约束就用预设', adapters.fitImageSize('16:9', null) === '1280*720', adapters.fitImageSize('16:9', null));
+}
+
 section('竖屏项目真的按竖屏出');
 {
   const vp = await (
