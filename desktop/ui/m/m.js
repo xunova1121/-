@@ -475,6 +475,16 @@ function paintFilm() {
         h('p', { class: 'muted', style: 'margin:6px 0 4px' },
           '精剪在剪映里做 —— 转场、音乐、花字那些它做得比我们好。这里负责把素材备齐：' +
           '每镜片段按顺序存下来，进剪映依次拖进时间线就是排好的初剪。'),
+        // 二十镜就是四十来个文件，逐个点等于没做这个功能
+        h('a', {
+          class: 'btn primary block',
+          style: 'display:flex;align-items:center;justify-content:center;text-decoration:none;margin:8px 0 4px',
+          href: `/api/projects/${project.id}/export.zip${authKey ? `?k=${encodeURIComponent(authKey)}` : ''}`,
+          download: ''
+        }, `打包下载全部（${clips.length + voices.length + (out?.video ? 1 : 0)} 个文件）`),
+        h('p', { class: 'muted', style: 'margin:0 0 8px' },
+          '包里还有一张分镜表，写着每个片段是哪一镜、多长、说了什么 —— ' +
+          '进剪映之后不用对着文件名猜。手机上会存进「文件」，在那儿解压再导入剪映。'),
         ...clips.map((s) =>
           assetRow(
             `第 ${s.index} 镜`,

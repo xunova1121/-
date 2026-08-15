@@ -15,7 +15,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-import { UI_DIR, DATA_DIR, ensureDirs } from './paths.js';
+import { UI_DIR, DATA_DIR, ensureDirs, safeFileName } from './paths.js';
 import * as settings from './settings.js';
 import * as vault from './vault.js';
 import * as logbus from './logbus.js';
@@ -30,6 +30,7 @@ import * as preflight from './preflight.js';
 import * as styles from './styles.js';
 import * as duration from './duration.js';
 import * as skillsLib from './skills.js';
+import * as zip from './zip.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -584,6 +585,64 @@ async function handleApi(req, res, url, { lan = false } = {}) {
       } catch (err) {
         stream.end({ type: 'error', message: err.message });
       }
+      return undefined;
+    }
+
+    /**
+     * 把这部片子的素材打成一个包。
+     *
+     * 一部二十镜的片子有四十来个文件（成片、每镜片段、字幕、每条配音），
+     * 逐个"存到手机"要点四十次 —— 没人会这么干。而这些素材的意义正在于
+     * **一起拿走**：进剪映之后按顺序拖进时间线，那就是初剪的起点。
+     *
+     * 走 GET 而不是 POST：手机上要能直接点一个链接下载，
+     * <a download> 发不了 POST，而配对码可以走查询串。
+     */
+    if (b && c === 'export.zip' && method === 'GET') {
+      const project = store.read(b);
+      if (!project) return json(res, 404, { error: '项目不存在' });
+
+      const shots = (project.shots || []).slice().sort((x, y) => x.index - y.index);
+      const entries = [];
+      if (project.outputs?.video) entries.push({ file: project.outputs.video, name: `成片_${safeFileName(project.title)}.mp4` });
+      if (project.outputs?.subtitle) entries.push({ file: project.outputs.subtitle, name: '字幕.srt' });
+      for (const sh of shots) {
+        if (sh.videoPath) entries.push({ file: sh.videoPath, name: `分镜片段/${zip.zipName(sh.index, sh.description, '.mp4')}` });
+        else if (sh.imagePath) entries.push({ file: sh.imagePath, name: `分镜图/${zip.zipName(sh.index, sh.description, '.png')}` });
+        if (sh.audioPath) entries.push({ file: sh.audioPath, name: `配音/${zip.zipName(sh.index, sh.speaker || '旁白', '.mp3')}` });
+      }
+
+      // 一张分镜表：进剪映之后想知道"第 7 个片段是哪一镜、说了什么"，
+      // 靠文件名不够，靠脑子记更不行
+      const sheet = [
+        `${project.title}`,
+        `画幅 ${project.aspectRatio || '跟随设置'} · ${shots.length} 镜`,
+        '',
+        ...shots.map((sh) =>
+          [
+            `${String(sh.index).padStart(2, '0')}  ${Number(sh.duration).toFixed(1)}s  ${sh.camera || ''}`,
+            `    ${sh.description || ''}`,
+            sh.dialogue ? `    ${sh.speaker || '旁白'}：${sh.dialogue}` : ''
+          ].filter(Boolean).join('\n'))
+      ].join('\n');
+      const sheetFile = path.join(store.projectDir(b), '分镜表.txt');
+      fs.writeFileSync(sheetFile, sheet, 'utf8');
+      entries.push({ file: sheetFile, name: '分镜表.txt' });
+
+      // 文件名里的中文要按 RFC 5987 编码，否则 Windows 上下下来是一串乱码
+      const fname = `${safeFileName(project.title)}-素材.zip`;
+      res.writeHead(200, {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': `attachment; filename="futuredream-assets.zip"; filename*=UTF-8''${encodeURIComponent(fname)}`,
+        'Cache-Control': 'no-store'
+      });
+      try {
+        await zip.writeZip(entries, res);
+      } catch (err) {
+        // 头已经发出去了，这里只能把连接断掉 —— 至少不会给一个"看着完整其实截断"的包
+        logbus.record({ provider: 'local', label: '打包素材', error: err.message });
+      }
+      res.end();
       return undefined;
     }
 

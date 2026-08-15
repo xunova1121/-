@@ -1815,6 +1815,14 @@ export default {
           }),
           h('div', { class: 'inline', style: 'margin-top:10px;flex-wrap:wrap' },
             h('a', { class: 'btn sm', href: mediaUrl(project.outputs.video), target: '_blank' }, '在新窗口打开'),
+            // 精剪在剪映/达芬奇里做，这里负责把素材一次性备齐：
+            // 成片、每镜片段、字幕、每条配音，外加一张分镜表
+            h('a', {
+              class: 'btn sm primary',
+              href: `/api/projects/${project.id}/export.zip`,
+              download: '',
+              title: '成片 + 每镜片段 + 字幕 + 配音 + 分镜表，打成一个包'
+            }, '打包全部素材'),
             project.outputs.subtitle
               ? h('a', { class: 'btn ghost sm', href: mediaUrl(project.outputs.subtitle), target: '_blank' }, '下载字幕 .srt')
               : null,

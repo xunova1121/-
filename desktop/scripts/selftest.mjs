@@ -3390,6 +3390,65 @@ section('全流程：竖屏短剧从剧本到合成');
  * 而这条后面挂着 API 密钥和额度，同一个 Wi-Fi 下的人不该随手就能驱动它。
  * 所以这一段验的全是**拒绝**：没码不给、错码不给、码只在电脑那侧看得到。
  */
+// 一部二十镜的片子有四十来个文件。逐个"存到手机"点四十次 —— 没人会这么干，
+// 而这些素材的意义正在于一起拿走：进剪映按顺序拖进时间线就是初剪的起点。
+section('把素材打成一个包');
+{
+  const zipMod = await import('../core/zip.js');
+
+  // CRC32 拿标准值对一下 —— 算错的话包能下下来、却解不开
+  check('CRC32 是对的', zipMod.crc32(Buffer.from('hello')) === 0x3610a686,
+    zipMod.crc32(Buffer.from('hello')).toString(16));
+  check('包内文件名以编号开头（解压出来按名字排序就是分镜顺序）',
+    zipMod.zipName(3, '阿澜蹲下查看缆绳', '.mp4') === '03_阿澜蹲下查看缆绳.mp4',
+    zipMod.zipName(3, '阿澜蹲下查看缆绳', '.mp4'));
+  check('路径里不能用的字符会被去掉（Windows 不收 \\ / : * ? " < > |）',
+    !/[\\/:*?"<>|]/.test(zipMod.zipName(7, 'a/b:c*d?e"f<g>h|i', '.mp3')),
+    zipMod.zipName(7, 'a/b:c*d?e"f<g>h|i', '.mp3'));
+
+  // 真打一个包出来，再用**另一套实现**（Node 自己不带解压，所以验结构）确认它是合法 zip
+  const zdir = path.join(SANDBOX, 'zip');
+  fs.mkdirSync(zdir, { recursive: true });
+  const f1 = path.join(zdir, 'a.txt');
+  const f2 = path.join(zdir, 'b.bin');
+  fs.writeFileSync(f1, 'hello world');
+  fs.writeFileSync(f2, Buffer.alloc(5000, 7));
+  const outFile = path.join(zdir, 'out.zip');
+  const ws = fs.createWriteStream(outFile);
+  const r = await zipMod.writeZip(
+    [
+      { file: f1, name: '分镜表.txt' },
+      { file: f2, name: '分镜片段/03_阿澜蹲下.mp4' },
+      { file: path.join(zdir, '不存在.mp4'), name: '缺的.mp4' }
+    ],
+    ws
+  );
+  await new Promise((res) => ws.end(res));
+  const buf = fs.readFileSync(outFile);
+
+  check('少一个文件不该让整个包下不下来', r.count === 2, JSON.stringify(r));
+  check('是个合法 zip（本地头 + 中央目录 + 结尾记录都在）',
+    buf.readUInt32LE(0) === 0x04034b50 && buf.includes(Buffer.from('PK\x01\x02')) && buf.includes(Buffer.from('PK\x05\x06')));
+  // 不压缩（STORE）：包里几乎全是 mp4/png，再压一遍省不下几个百分点却要吃掉几十秒 CPU
+  check('用的是不压缩，文件内容原样躺在包里',
+    buf.includes(Buffer.from('hello world')) && buf.includes(Buffer.alloc(5000, 7)));
+  check('中文名打了 UTF-8 标记（不打的话 Windows 上解出来是乱码）',
+    buf.readUInt16LE(6) === 0x0800, buf.readUInt16LE(6).toString(16));
+  check('包内带目录结构（分镜片段/ 单独一层）', buf.includes(Buffer.from('分镜片段/', 'utf8')));
+
+  // 走一遍真实接口
+  const live = await (await fetch(`${appUrl}/api/projects`)).json();
+  const res2 = await fetch(`${appUrl}/api/projects/${live[0].id}/export.zip`);
+  const zbuf = Buffer.from(await res2.arrayBuffer());
+  check('接口回的是 zip', res2.status === 200 && res2.headers.get('content-type') === 'application/zip',
+    `${res2.status} ${res2.headers.get('content-type')}`);
+  check('文件名按 RFC 5987 编码（中文片名不至于下成乱码）',
+    /filename\*=UTF-8''/.test(res2.headers.get('content-disposition') || ''),
+    res2.headers.get('content-disposition'));
+  check('包里有分镜表（进剪映后靠它认出哪个片段是哪一镜）',
+    zbuf.includes(Buffer.from('分镜表.txt', 'utf8')), String(zbuf.length));
+}
+
 section('画风：古风工笔 + 本地示例图');
 {
   const stylesMod = await import('../core/styles.js');
