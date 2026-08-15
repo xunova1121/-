@@ -959,18 +959,69 @@ export default {
      * 这里只留"这一步是什么、跑到哪儿了、点哪儿开跑"，
      * 加上一个从头跑到尾的入口。
      */
+    /**
+     * 一键跑完：必须先问"从哪儿开始"。
+     *
+     * 只给"从头跑"是不够用的 —— 日常最常见的情形是设定集和分镜早就审过了，
+     * 只想把后面几步串起来跑。从头跑一遍不但白花钱，还会**把你改过的分镜文案冲掉**
+     * （重拆分镜等于推翻重来）。所以摆两条路，并且把各自会跑哪几步写清楚。
+     */
+    const runChoice = h('div', { style: 'display:none;margin:8px 0 2px' });
+
+    function paintRunChoice() {
+      const order = ['bible', 'script', 'assets', 'video', 'voice', 'compose'];
+      const at = order.indexOf(state.stage);
+      const label = steps.find((x) => x.id === state.stage)?.label || '';
+      const rest = at >= 0 ? order.length - at : 0;
+      clear(runChoice);
+      add(runChoice,
+        h('div', { class: 'inline', style: 'flex-wrap:wrap' },
+          h('button', {
+            class: 'btn sm',
+            disabled: jobBusy(),
+            title: '设定集 → 分镜 → 出图 → 视频 → 配音 → 合成，六步全跑',
+            onclick: () => {
+              if (!confirm('从头跑完整条：会重跑设定集和分镜，已经审过、手改过的分镜文案会被覆盖。确定？')) return;
+              runChoice.style.display = 'none';
+              runStage('all');
+            }
+          }, `从头跑完整条（${order.length} 步）`),
+          at >= 0
+            ? h('button', {
+                class: 'btn sm primary',
+                disabled: jobBusy(),
+                title: '前面几步保留已有产出，不重跑、不重复计费',
+                onclick: () => {
+                  if (!confirm(`从「${label}」往后跑 ${rest} 步。视频那步按镜数计费，可能是最大的一笔开销。确定？`)) return;
+                  runChoice.style.display = 'none';
+                  runStage('all', { from: state.stage });
+                }
+              }, `从「${label}」往后跑（${rest} 步）`)
+            : null,
+          h('button', {
+            class: 'btn ghost sm',
+            onclick: () => { runChoice.style.display = 'none'; }
+          }, '取消')),
+        h('div', { class: 'field-hint', style: 'margin:6px 0 0' },
+          at >= 0
+            ? '从这一步往后跑：前面几步的产出原样保留，不重跑也不重复计费。日常用这条。'
+            : '当前这一步不在流水线里（比如「剧本」），只能从头跑。'));
+    }
+
     const stagePanel = h('div', { class: 'panel' },
       h('h2', { class: 'panel-title' }, '这一步', liveBadge,
         h('button', {
           class: 'btn ghost sm',
           style: 'margin-left:auto',
           disabled: jobBusy(),
-          title: '从设定集一路跑到合成，中间任一步失败就停下，已完成的都在盘上',
+          title: '一路跑到底。点开会先问从哪一步开始 —— 从头跑会覆盖已经审过的分镜',
           onclick: () => {
-            if (!confirm('一键跑完会依次跑完全部步骤，视频那步按镜数计费，可能是这条流水线最大的一笔开销。确定？')) return;
-            runStage('all');
+            const open = runChoice.style.display === 'none';
+            if (open) paintRunChoice();
+            runChoice.style.display = open ? '' : 'none';
           }
         }, '▶ 一键跑完')),
+      runChoice,
       stageDetail,
       progressLog,
       failHost

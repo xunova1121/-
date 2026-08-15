@@ -398,7 +398,9 @@ async function handleApi(req, res, url, { lan = false } = {}) {
 
     // 用**用户自己的模型**出预览图。不打包现成图片是刻意的：
     // 网上找来的是别人的作品，随应用分发出去版权说不清。
-    if (b && c === 'preview' && method === 'POST') {
+    // ⚠ 必须写 `!d`：否则 /styles/:id/preview/upload 会被这一条先接住，
+    // 于是"用本地图片"变成了"用模型再出一张"—— 花钱不说，回的还是 NDJSON 流
+    if (b && c === 'preview' && !d && method === 'POST') {
       const style = styles.getStyle(b);
       if (!style) return json(res, 404, { error: `没有这个画风：${b}` });
       const stream = ndjson(res);
@@ -422,6 +424,16 @@ async function handleApi(req, res, url, { lan = false } = {}) {
         stream.end({ type: 'error', message: err.message });
       }
       return undefined;
+    }
+
+    // 用本地图片当示例图。手上正好有一张想要的参照时，这比"再出一张"快得多
+    if (b && c === 'preview' && d === 'upload' && method === 'POST') {
+      try {
+        const body = await readBody(req, 16 * 1024 * 1024);
+        return json(res, 200, styles.attachPreview(b, body));
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
     }
 
     if (b && c === 'preview' && method === 'DELETE') {

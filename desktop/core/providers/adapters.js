@@ -297,7 +297,10 @@ export async function generateImage({
   if (!size) {
     const preset = ratioToSize(wantRatio);
     size = fitImageSize(wantRatio, imageSizeConstraint(provider, model), preset);
-    if (size !== preset) {
+    // 比的是**数值**不是字符串：预设写成 1280*720、目录里的档位写成 1280x720，
+    // 直接比字符串会把"没换"当成"换了"，于是每出一张图都要报一次假警
+    const same = (a2, b2) => String(a2).replace(/[x×]/i, '*') === String(b2).replace(/[x×]/i, '*');
+    if (!same(size, preset)) {
       // 换过尺寸必须说一声：不说的话，你在请求记录里看到的尺寸和你选的画幅对不上，
       // 会以为是这里算错了
       onEvent?.({

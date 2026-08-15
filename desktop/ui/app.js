@@ -161,11 +161,14 @@ export async function runRoutingCheck({ silent = false } = {}) {
   }
   paintChain();
   paintRoutingBanner();
+  // 只有**手动点「重新检测」**时才吭声。开机自动探那一次一律安静 ——
+  // 探针连不通有太多不是真问题的原因，为它弹一个红 toast 只会训练人无视提示
   if (!silent) {
     const bad = badRoutes();
-    if (bad.length) {
-      toast(`${bad.map((b) => b.label).join('、')} 连不通，先去「服务商与密钥」看看`, 'err');
-    }
+    toast(
+      bad.length ? `${bad.map((b) => b.label).join('、')} 连不通，去「服务商与密钥」看看` : '各家都连得通',
+      bad.length ? 'err' : 'ok'
+    );
   }
   return state.routingCheck;
 }
@@ -215,10 +218,28 @@ function isDismissed(bad) {
   }
 }
 
+/**
+ * 顶部那条"服务商连不通"的横幅，默认**不再出现**。
+ *
+ * 它当初的理由是对的：配置坏了应该在你下手之前就知道。但实际用下来，
+ * 探针连不通有太多**不是真问题**的原因 —— 公司网络慢、厂商临时抖一下、
+ * 某家压根没提供便宜的探测接口。而一条常驻的红色横幅压在页面顶上，
+ * 会让人很快学会无视所有横幅，包括真正要紧的那些。
+ *
+ * 信息本身没丢：顶部信号链上每条能力仍然带着 ✓ / ✕，鼠标悬停有原话，
+ * 「设置 → 本机环境」里也能手动再探一次。真到跑不动的那一步，
+ * 报错会带着服务端原话摊在失败框里 —— 那才是要读的时候。
+ *
+ * 想把横幅要回来：设置里打开 routeBannerOn（默认关）。
+ */
 function paintRoutingBanner() {
   const host = $('#route-banner');
   if (!host) return;
   clear(host);
+  if (state.catalog?.settings?.routeBannerOn !== true) {
+    host.style.display = 'none';
+    return;
+  }
   const bad = badRoutes();
   if (!bad.length) {
     // 全通了就把"知道了"的记号清掉 —— 下次真出问题时才提醒得动

@@ -3390,6 +3390,73 @@ section('全流程：竖屏短剧从剧本到合成');
  * 而这条后面挂着 API 密钥和额度，同一个 Wi-Fi 下的人不该随手就能驱动它。
  * 所以这一段验的全是**拒绝**：没码不给、错码不给、码只在电脑那侧看得到。
  */
+section('画风：古风工笔 + 本地示例图');
+{
+  const stylesMod = await import('../core/styles.js');
+  const gf = stylesMod.getStyle('guofeng');
+  check('古风工笔在预设里', Boolean(gf), JSON.stringify(gf?.name));
+  // 只写"精细勾线、矿物颜料"的话，模型画出来的往往是一张平铺纹样图 ——
+  // 满构图、没有空气、没有远近。让它成立的是设色 + 留白 + 逆光这三样
+  check('风格锚里有设色、留白、逆光这三样（缺一样就成了平铺纹样图）',
+    /青绿/.test(gf.anchor) && /留白|云雾/.test(gf.anchor) && /逆光/.test(gf.anchor), gf.anchor);
+  check('负向词挡住了最容易翻车的那几种', /满构图无留白/.test(gf.negative), gf.negative);
+  check('示意图的画法是勾线', gf.art?.mode === 'line', gf.art?.mode);
+
+  // 本地图片当示例图：手上正好有参照时，比再出一张快得多
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const up = await (await fetch(`${appUrl}/api/styles/guofeng/preview/upload`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataUrl: png })
+  })).json();
+  check('本地图片能设成示例图', up.bytes > 0 && fs.existsSync(up.path), JSON.stringify(up));
+  const listed = (await (await fetch(`${appUrl}/api/styles`)).json()).presets.find((p) => p.id === 'guofeng');
+  check('设完之后画风卡就用它了（优先于随应用带的那张）', Boolean(listed.previewPath), JSON.stringify(listed.previewPath));
+
+  const bad = await fetch(`${appUrl}/api/styles/guofeng/preview/upload`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataUrl: 'data:image/gif;base64,AA' })
+  });
+  check('不支持的格式当场说清楚，不是存一个打不开的文件', bad.status === 400, String(bad.status));
+
+  await fetch(`${appUrl}/api/styles/guofeng/preview`, { method: 'DELETE' });
+  check('删掉之后退回内置示意图',
+    !(await (await fetch(`${appUrl}/api/styles`)).json()).presets.find((p) => p.id === 'guofeng').previewPath);
+}
+
+// 一键跑完必须能选"从哪一步开始"：日常最常见的是设定集和分镜早就审过了，
+// 从头跑一遍不但白花钱，还会把改过的分镜文案冲掉
+section('一键跑完：从头 还是 从这一步往后');
+{
+  const rp = await (
+    await fetch(`${appUrl}/api/projects`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '从中间接着跑', script: '阿澜在码头巡查。' })
+    })
+  ).json();
+  store.update(rp.id, (p) => {
+    p.bible = { style: { anchor: '国风', negative: '' },
+      characters: [{ name: '阿澜', appearance: '短发', seed: 3, variants: [{ id: 'v-default', name: '默认造型', sheetPath: 'x.png' }], sheetPath: 'x.png' }],
+      scenes: [], props: [] };
+    p.shots = [{ id: 'k1', index: 1, characters: ['阿澜'], description: '阿澜走向栈桥', camera: '中景', duration: 4 }];
+    p.stageStatus = { ...p.stageStatus, bible: 'done', script: 'done' };
+    return p;
+  });
+
+  const before = JSON.stringify(store.read(rp.id).shots.map((x) => x.description));
+  const evs = await ndjson(`/projects/${rp.id}/stage/all`, { from: 'assets' });
+  const after = store.read(rp.id);
+
+  check('说清楚这一轮要跑哪几步',
+    evs.some((e) => /这一轮要跑：镜头出图 → 视频生成/.test(e.message || '')),
+    JSON.stringify(evs.filter((e) => e.type === 'note').map((e) => e.message).slice(0, 2)));
+  check('从中间起跑时，前面几步的产出原样保留（不重拆分镜、不冲掉手改的文案）',
+    JSON.stringify(after.shots.map((x) => x.description)) === before, before);
+  check('该跑的还是跑了', Boolean(after.shots[0].imagePath), JSON.stringify(after.shots[0].imagePath));
+
+  const badFrom = await ndjson(`/projects/${rp.id}/stage/all`, { from: '不存在的一步' });
+  check('给了不认识的步骤就直说，不是默默从头跑一遍（那会烧掉一大笔）',
+    badFrom.some((e) => e.type === 'error' && /不认识这一步/.test(e.message || '')),
+    JSON.stringify(badFrom.slice(-1)));
+}
+
 section('手机遥控：先验它拒绝什么');
 {
   const srv = await import('../core/server.js');

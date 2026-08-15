@@ -2582,11 +2582,41 @@ export async function compose(projectId, { onEvent } = {}) {
 }
 
 /** 一键跑完全流程。任一阶段失败就停在那儿，已完成的部分都在盘上。 */
-export async function runAll(projectId, { shotCount = 8, onEvent } = {}) {
-  await buildBible(projectId, { onEvent });
-  await analyzeScript(projectId, { shotCount, onEvent });
-  await generateAssets(projectId, { onEvent });
-  await generateVideos(projectId, { onEvent });
-  await generateVoice(projectId, { onEvent });
-  return compose(projectId, { onEvent });
+/** 一键跑完时按这个顺序走。名字和 store.STAGES 对齐，界面上说的"从哪一步开始"就是这里的 id */
+const RUN_ORDER = [
+  { id: 'bible', label: '设定集', run: (id, o) => buildBible(id, o) },
+  { id: 'script', label: '分镜', run: (id, o) => analyzeScript(id, o) },
+  { id: 'assets', label: '镜头出图', run: (id, o) => generateAssets(id, o) },
+  { id: 'video', label: '视频生成', run: (id, o) => generateVideos(id, o) },
+  { id: 'voice', label: '配音', run: (id, o) => generateVoice(id, o) },
+  { id: 'compose', label: '合成', run: (id, o) => compose(id, o) }
+];
+
+/**
+ * 一路跑到底。
+ *
+ * `from` 决定从哪一步起跑：
+ *   不给      从头跑完整条（第一次做片子，或者想推翻重来）
+ *   给了 id   从那一步往后跑 —— 这才是日常用得最多的：
+ *             设定集和分镜早就审过了，重跑一遍不但白花钱，
+ *             还会把你改过的分镜文案冲掉。
+ *
+ * 中间任一步抛错就停下，已经跑完的都在盘上 —— 不做"跳过失败继续跑"：
+ * 出图失败还硬着头皮去出视频，只会拿着半张图烧掉更贵的那一步。
+ */
+export async function runAll(projectId, { shotCount = 8, from = null, onEvent } = {}) {
+  const start = from ? RUN_ORDER.findIndex((s) => s.id === from) : 0;
+  if (from && start === -1) throw new Error(`不认识这一步：${from}`);
+  const plan = RUN_ORDER.slice(Math.max(0, start));
+  onEvent?.({
+    type: 'note',
+    message: `这一轮要跑：${plan.map((s) => s.label).join(' → ')}${start > 0 ? `（前面 ${start} 步跳过，保留已有产出）` : ''}`
+  });
+
+  let last = null;
+  for (const step of plan) {
+    // eslint-disable-next-line no-await-in-loop
+    last = await step.run(projectId, { shotCount, onEvent });
+  }
+  return last || store.read(projectId);
 }

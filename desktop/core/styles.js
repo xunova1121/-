@@ -48,12 +48,32 @@ export const STYLE_PRESETS = [
   {
     id: 'guofeng',
     name: '古风工笔',
-    hint: '精细勾线、矿物颜料',
-    anchor: '中国古风工笔画，精细勾线，矿物质颜料，绢本设色，繁复纹样，唐宋气韵',
-    negative: '现代元素, 简笔, 粗糙线条, 荧光色',
-    palette: '朱砂、石青、藤黄',
-    swatch: { from: '#F6E7C8', to: '#8C3B32', accent: '#2E5E6B', texture: 'fine' },
-    art: { sky: ['#F6E7C8', '#EBD6A8'], hills: ['#7FA0A6', '#4E7A80', '#2E5E6B'], water: '#DCCBA0', glow: '#8C3B32', ink: '#3A2A1E', mode: 'line' }
+    hint: '青绿设色、细勾线、云雾留白',
+    /**
+     * 这一条按"想要的成片长什么样"重写过一遍。
+     *
+     * 原来只写了"精细勾线、矿物质颜料、绢本设色"—— 都对，但模型据此画出来的
+     * 往往是一张**平铺的纹样图**：满构图、没有空气、没有远近。
+     * 真正让古风工笔成立的是另外三样，现在都写进去了：
+     *   青绿山水的设色（石青石绿打底，赭石压边）
+     *   云雾留白（远山三重、雾气切断中景，画面才有纵深）
+     *   暖金逆光（日出或日落，人物压成剪影般的深色轮廓）
+     * 顺序也讲究：先定画种和技法，再定色，最后定光 —— 越靠前权重越高。
+     */
+    anchor:
+      '中国古风工笔重彩，细笔勾线填色，绢本设色质感，青绿山水配色，'
+      + '远山三重云雾缭绕，大面积留白与雾气，暖金色逆光，飞檐楼阁与松柏点缀，电影感构图',
+    negative: '现代元素, 简笔, 粗糙线条, 荧光色, 3D渲染, 塑料质感, 满构图无留白, 西方油画笔触',
+    palette: '石青、石绿、赭石、暖金',
+    swatch: { from: '#F6E7C8', to: '#3E6B63', accent: '#D9A441', texture: 'fine' },
+    art: {
+      sky: ['#F7E9CC', '#EAD3A2'],
+      hills: ['#8FB3AC', '#5E8C84', '#3E6B63'],
+      water: '#E3D6B4',
+      glow: '#E8B45F',
+      ink: '#3A2A1E',
+      mode: 'line'
+    }
   },
   {
     id: 'modern',
@@ -200,6 +220,41 @@ export function previewPrompt(style) {
 export function bundledArt(id) {
   const file = path.join(UI_DIR, 'style-img', `${safeFileName(id, 'style')}.webp`);
   return fs.existsSync(file) ? `/style-img/${encodeURIComponent(id)}.webp` : null;
+}
+
+const IMAGE_MIME = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/webp': '.webp'
+};
+
+/**
+ * 用**本地图片**当这个画风的示例图。
+ *
+ * 为什么需要这条：画风卡上那张图有三层（自己出的预览 > 随应用带的示例 > 现画的示意图），
+ * 前两层都可能是空的 —— 随应用带的图必须是有权分发的，所以不是每个画风都有。
+ * 而你手上往往**正好有一张**想要的参照：截的一帧、客户给的稿、以前做过的成片。
+ * 让它直接变成这个画风的示例图，比"再去出一张"快得多，也准得多。
+ *
+ * 存的位置和模型出的预览图是同一个（STYLE_DIR/<id>.png），所以它天然优先于
+ * 随应用带的那张，删掉也是同一个按钮 —— 不给同一件事造两套开关。
+ */
+export function attachPreview(id, { dataUrl } = {}) {
+  const style = getStyle(id);
+  if (!style) throw new Error(`没有这个画风：${id}`);
+  const m = /^data:([^;,]+);base64,(.+)$/s.exec(String(dataUrl || ''));
+  if (!m) throw new Error('没读到图片内容（需要 data:image/...;base64, 开头的内容）');
+  if (!IMAGE_MIME[m[1].toLowerCase()]) throw new Error(`不支持这种图片格式：${m[1]}。用 PNG / JPG / WebP。`);
+  const buf = Buffer.from(m[2], 'base64');
+  if (!buf.length) throw new Error('图片是空的');
+
+  fs.mkdirSync(STYLE_DIR, { recursive: true });
+  const dest = previewPath(id);
+  // 统一落成 previewPath 那个名字（扩展名 .png 只是个文件名，浏览器按内容识别）——
+  // 换成别的名字就得再维护一套"到底该显示哪一张"的规则
+  fs.writeFileSync(dest, buf);
+  return { id, path: dest, at: new Date().toISOString(), bytes: buf.length };
 }
 
 /** 带上预览图信息的预设列表，前端直接用 */

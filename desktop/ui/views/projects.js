@@ -320,8 +320,49 @@ export default {
         status.append('现在显示的是随应用带的示例图。想知道这些画风在', h('b', {}, '你的模型'), '上长什么样，点左边出一遍。');
       }
 
+      /**
+       * 用本地图片当某个画风的示例图。
+       *
+       * 卡片上那张图有三层（自己出的 > 随应用带的 > 现画的示意图），
+       * 而随应用带的那层不是每个画风都有 —— 它必须是有权分发的图。
+       * 可你手上往往**正好有一张**想要的参照：截的一帧、客户给的稿、以前的成片。
+       * 让它直接变成示例图，比再去出一张快得多，也准得多。
+       */
+      const pickFile = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', style: 'display:none' });
+      const styleSel = h('select', { class: 'mini' },
+        presets.filter((p) => p.id !== 'custom').map((p) => h('option', { value: p.id }, p.name)));
+      pickFile.onchange = async () => {
+        const file = pickFile.files?.[0];
+        pickFile.value = '';
+        if (!file) return;
+        if (file.size > 12 * 1024 * 1024) return toast('这张图有点大（超过 12MB），换一张或先压一下', 'err');
+        const id = styleSel.value;
+        try {
+          const dataUrl = await new Promise((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(r.result);
+            r.onerror = () => reject(new Error('读不出这个文件'));
+            r.readAsDataURL(file);
+          });
+          await api(`/styles/${id}/preview/upload`, { method: 'POST', body: { dataUrl } });
+          await refreshStyles();
+          toast(`已把这张图设成「${presets.find((p) => p.id === id)?.name || id}」的示例图`, 'ok');
+        } catch (err) {
+          toast(err.message, 'err');
+        }
+      };
+
       return h('div', { class: 'inline', style: 'margin-top:10px;flex-wrap:wrap' },
-        genAll, genMissing, have ? clearAll : null, status);
+        genAll, genMissing, have ? clearAll : null,
+        h('span', { class: 'inline', style: 'gap:6px' },
+          styleSel,
+          h('button', {
+            class: 'btn ghost sm',
+            title: '手上有想要的参照图就直接用它 —— 比再去出一张快，也准',
+            onclick: () => pickFile.click()
+          }, '用本地图片当示例')),
+        pickFile,
+        status);
     }
 
     // ── 新建 ──
