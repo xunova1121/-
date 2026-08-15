@@ -3272,6 +3272,11 @@ section('全流程：竖屏短剧从剧本到合成');
     JSON.stringify(alanShots.map((sh) => sh.seed)));
   check('③ 出来的图量过尺寸，比例记在镜头上',
     cur.shots.every((sh) => sh.imageSize), JSON.stringify(cur.shots.map((sh) => sh.imageSize)));
+  // 换模型不报错，只是从某一镜起画风变了 —— 记下来才查得出
+  check('③ 每一镜都记着是哪家哪个模型出的（风格漂移最难查的一种原因）',
+    cur.shots.every((sh) => sh.modelUsed), JSON.stringify([...new Set(cur.shots.map((sh) => sh.modelUsed))]));
+  check('③ 全片同一个模型出的',
+    new Set(cur.shots.map((sh) => sh.modelUsed)).size === 1, JSON.stringify([...new Set(cur.shots.map((sh) => sh.modelUsed))]));
 
   // ④ 出视频
   const vidBefore = upstream.videoBodies.length;

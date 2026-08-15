@@ -1421,6 +1421,15 @@ export default {
                 // 这条必须摆在卡片上，不能藏在折叠面板里
                 // 出来的图比例不对：这个错会顺着首帧图传到视频，再传到成片。
                 // 越早看见越好 —— 发现得晚等于整条流水线白跑
+                // 这一镜是用另一个模型出的：画风会和其余镜头对不上，
+                // 而这件事不报任何错，只是"从某一镜开始变了"
+                shot.modelUsed && state.catalog?.routing?.image
+                  && shot.modelUsed !== `${state.catalog.routing.image.provider} / ${state.catalog.routing.image.model}`
+                  ? h('span', {
+                      class: 'badge warn',
+                      title: `这一镜是 ${shot.modelUsed} 出的，当前路由是 ${state.catalog.routing.image.provider} / ${state.catalog.routing.image.model}。不同模型画风对不上，要统一就用同一个模型重出`
+                    }, '另一个模型出的')
+                  : null,
                 shot.imageSize && shot.imageSize.ok === false
                   ? h('span', {
                       class: 'badge warn',

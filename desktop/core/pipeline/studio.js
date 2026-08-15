@@ -963,6 +963,7 @@ export async function generateAssets(projectId, { only = null, chapterId = null,
   if (!project.bible) throw new Error('缺少设定集');
 
   const dir = store.assetDir(projectId);
+  const r = routing();
   const maxRetries = settings.get('consistencyMaxRetries') ?? 2;
   const targets = project.shots
     .filter((s) => (chapterId ? s.chapterId === chapterId : true))
@@ -970,6 +971,30 @@ export async function generateAssets(projectId, { only = null, chapterId = null,
     .filter((s) => (only ? only.includes(s.id) : regenerate || !s.imagePath));
 
   onEvent?.({ type: 'stage', stage: 'assets', status: 'running', message: `待出图 ${targets.length} 张` });
+
+  /**
+   * 出图之前先说一句：这一批里有哪些角色/场景**还没有设定图**。
+   *
+   * 缺一张不会报错，只是那一镜少一份参考基准和一份复核依据 ——
+   * 表现是"别的镜头都挺像，就这几镜的人不对"，而且事后很难想到是这个原因。
+   */
+  const missingSheets = new Set();
+  for (const shot of targets) {
+    for (const c of consistency.matchCharacters(project.bible, shot)) {
+      if (!c.sheetPath) missingSheets.add(c.name);
+    }
+    const sc = consistency.matchScene(project.bible, shot);
+    if (sc && !sc.sheetPath) missingSheets.add(sc.name);
+  }
+  if (missingSheets.size) {
+    onEvent?.({
+      type: 'note',
+      message:
+        `⚠ 这一批里 ${[...missingSheets].join('、')} 还没有设定图 —— ` +
+        '引用到它们的镜头会少一张参考图、也少一份复核基准，出来多半不像。' +
+        '建议先回「设定集」那一步把它们补出来。'
+    });
+  }
 
   for (const shot of targets) {
     try {
@@ -998,6 +1023,9 @@ export async function generateAssets(projectId, { only = null, chapterId = null,
           t.imageAt = new Date().toISOString();
           // 真实宽高。比例不对时卡片上要挂个警示 —— 这个错会顺着首帧图传到视频
           t.imageSize = size || null;
+          // 这一镜是哪家哪个模型出的。中途换过模型是**风格漂移最常见的原因**，
+          // 而它不会报任何错 —— 只是第 6 镜起画风变了，你会以为是提示词的问题
+          t.modelUsed = `${r.image.provider} / ${r.image.model}`;
           t.bibleRefs = result.refLabels || [];
           t.consistency = {
             score: result.verification?.score ?? null,
@@ -1024,6 +1052,24 @@ export async function generateAssets(projectId, { only = null, chapterId = null,
   const after = store.read(projectId);
   const done = after.shots.filter((s) => s.imagePath).length;
   const flagged = after.shots.filter((s) => s.consistency?.needsReview).length;
+  /**
+   * 全片是不是用同一个模型出的。
+   *
+   * 换模型不会报任何错，只是从某一镜起画风变了 —— 而这是"风格不一致"里
+   * 最难自己想到的一种原因（大多数人会先去怀疑提示词）。所以跑完点一句。
+   */
+  {
+    const used = new Set((store.read(projectId).shots || []).filter((s) => s.modelUsed).map((s) => s.modelUsed));
+    if (used.size > 1) {
+      onEvent?.({
+        type: 'note',
+        message:
+          `⚠ 全片的图不是同一个模型出的（${[...used].join(' / ')}）。不同模型的画风对不上，` +
+          '连起来会看出"从某一镜开始变了"。要统一的话，用同一个模型把这些镜头重出一遍。'
+      });
+    }
+  }
+
   store.update(projectId, (p) => {
     p.stageStatus.assets = done === p.shots.length ? 'done' : done ? 'partial' : 'pending';
     return p;
