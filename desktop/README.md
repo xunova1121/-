@@ -818,6 +818,70 @@ Caddy 会自动去 Let's Encrypt 签证书并续期，不用碰 certbot。
 因为是 HTTPS，安卓 Chrome 这次**能真正「安装应用」**（WebAPK）——
 局域网那条路做不到的事，上了服务器反而顺带解决了。
 
+### 从零开一台：完整步骤
+
+**① 买机器。** 2 核 4G、50G 盘就够 —— 出图出视频都是调厂商接口，本机不吃算力，
+只有合成那一步吃 CPU。盘要留够：一部 20 镜的片子连中间产物大概几百 MB。
+
+**机房位置按你用的厂商挑**，这条比配置重要：服务器要去调火山方舟 / 百炼，
+那就别放在需要翻墙的地方；反过来主要用 OpenAI 的话，国内机器会很难受。
+
+**② 域名。** A 记录指到服务器 IP。⚠ 国内机房 + 域名要**备案**，没备案的域名在
+80/443 上会被拦掉；不想折腾就用香港 / 新加坡 / 日本的轻量服务器，免备案。
+
+**③ 连上去装 Docker。**
+
+```bash
+ssh root@你的IP
+curl -fsSL https://get.docker.com | sh
+```
+
+**④ 拉代码、配置、起服务。**
+
+```bash
+git clone <这个仓库> && cd <仓库>/desktop
+cp .env.example .env
+vi .env          # FD_HOST=你的域名   FD_VAULT_PASS=一串够长的口令
+docker compose up -d
+docker compose logs app | grep -A3 访问口令     # 把口令记下来
+```
+
+**⑤ 防火墙只开三个口。** 22（ssh）、80、443。应用那个 5178 **不要**对外开 ——
+它只需要被同一台机器上的 Caddy 连到。
+
+```bash
+ufw allow 22 && ufw allow 80 && ufw allow 443 && ufw enable
+```
+
+**⑥ 浏览器打开 `https://你的域名`**，输口令进去，在「服务商与密钥」里配一把 API Key。
+手机打开同一个地址，因为是 HTTPS，安卓 Chrome 会提示「安装应用」。
+
+### 日常怎么维护
+
+```bash
+docker compose logs -f app        # 看它在干什么
+docker compose restart app        # 重启
+docker compose down               # 停（数据在卷里，不会丢）
+
+# 更新到最新版
+git pull && docker compose up -d --build
+
+# 备份：项目、密钥、设置全在这一个卷里
+docker run --rm -v desktop_fd-data:/data -v $PWD:/out alpine \
+  tar czf /out/fd-backup-$(date +%F).tar.gz -C /data .
+
+# 换访问口令：改 .env 里的 FD_TOKEN，重启即可
+```
+
+**把电脑上已有的项目搬上去**：一个项目就是一个文件夹，
+`%APPDATA%\FutureDream\projects\<项目ID>\` 整个传到服务器的 `/data/projects/` 下。
+密钥要在服务器上重配一次 —— `credentials.enc` 是绑机器的，拷过去解不开。
+
+```bash
+scp -r "项目文件夹" root@你的IP:/tmp/proj
+ssh root@你的IP 'docker cp /tmp/proj $(docker compose ps -q app):/data/projects/'
+```
+
 ### 服务器模式和本机模式的规矩差在哪
 
 | | 本机 | 局域网（手机） | 服务器 |
