@@ -3456,12 +3456,28 @@ section('画风：古风工笔 + 本地示例图');
   const stylesMod = await import('../core/styles.js');
   const gf = stylesMod.getStyle('guofeng');
   check('古风工笔在预设里', Boolean(gf), JSON.stringify(gf?.name));
-  // 只写"精细勾线、矿物颜料"的话，模型画出来的往往是一张平铺纹样图 ——
-  // 满构图、没有空气、没有远近。让它成立的是设色 + 留白 + 逆光这三样
-  check('风格锚里有设色、留白、逆光这三样（缺一样就成了平铺纹样图）',
-    /青绿/.test(gf.anchor) && /留白|云雾/.test(gf.anchor) && /逆光/.test(gf.anchor), gf.anchor);
-  check('负向词挡住了最容易翻车的那几种', /满构图无留白/.test(gf.negative), gf.negative);
-  check('示意图的画法是勾线', gf.art?.mode === 'line', gf.art?.mode);
+  /**
+   * 大家说"古风工笔"时想要的，不是教科书里那种绢本工笔（平面、线描填色、装饰性），
+   * 而是新中式国潮插画：柔和渐变、没有粗黑轮廓、青绿米白、云海和一大片暖金天光。
+   * 写风格锚不能写门类名，要写**画面特征** —— 只写"工笔""勾线"就会画回前者。
+   */
+  check('风格锚写的是画面特征，不是门类名', !/勾线|绢本/.test(gf.anchor), gf.anchor);
+  check('渐变、无描边、青绿、云雾、暖金光晕，一样都不能少',
+    /渐变/.test(gf.anchor) && /没有粗黑描边/.test(gf.anchor) && /青绿/.test(gf.anchor)
+      && /云海|雾气/.test(gf.anchor) && /暖金/.test(gf.anchor), gf.anchor);
+  // "粗黑描边"是这个风格最容易翻的一次车：一根硬轮廓线下去，整张图就变成漫画了
+  check('负向词把描边和高饱和挡住了',
+    /粗黑描边/.test(gf.negative) && /高饱和/.test(gf.negative) && /满构图无留白/.test(gf.negative), gf.negative);
+  check('示意图也用渐变画法（用勾线等于在卡片上就把风格说错）', gf.art?.mode === 'soft', gf.art?.mode);
+
+  /**
+   * 构图特征**不能**写进风格锚。
+   *
+   * 参照图里那些最抓眼的东西 —— 背影、人物很小、一轮巨日 —— 是构图，不是风格。
+   * 风格锚会拼在每一镜提示词最前面，把构图写死等于全片二十个镜头全是背影。
+   */
+  check('构图不写进风格锚（否则全片都是背影）',
+    !/背影|巨日|落日圆盘|人物很小/.test(gf.anchor), gf.anchor);
 
   // 本地图片当示例图：手上正好有参照时，比再出一张快得多
   const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';

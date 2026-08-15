@@ -1186,3 +1186,10 @@ select.mini {
 .variant-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .variant-main input { font-size: 11px; padding: 3px 6px; }
 .variant-acts { display: flex; gap: 4px; flex: none; }
+
+/* 画风描述框：自定义时这就是全部风格，写不写差别很大，所以给它一点存在感 */
+.style-free { width: 100%; min-height: 58px; resize: vertical; }
+.style-free.required {
+  border-color: color-mix(in srgb, var(--caution) 45%, var(--line));
+  background: var(--caution-wash);
+}

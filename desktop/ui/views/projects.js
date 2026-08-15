@@ -40,8 +40,40 @@ export function swatchEl(s) {
   return h('div', { class: 'style-swatch', html: styleArtSVG(s) });
 }
 
-export function stylePicker(presets, currentId, onPick) {
+/**
+ * 画风选择器：一排卡片 + 一个描述框。
+ *
+ * 那个描述框以前根本没有 —— 于是「自定义」这张卡是**点得中、填不进去**的：
+ * 选了它，风格锚就是一句空话，出图全靠模型自由发挥。
+ *
+ * 现在它一直在，只是随选中的卡片换意思：
+ *   自定义   这段话**就是**全部风格描述
+ *   其它预设 这段话接在预设后面，用来补一句预设里没有的（"下雪"、"夜戏为主"）
+ * 两种情况在服务端本来就是同一个字段（styles.js resolveStyle），
+ * 界面上没道理分成两个概念。
+ */
+export function stylePicker(presets, currentId, onPick, opts = {}) {
+  const wrap = h('div', {});
   const grid = h('div', { class: 'style-grid' });
+  let picked = currentId;
+
+  const note = h('div', { class: 'field-hint' });
+  const box = h('textarea', {
+    rows: 2,
+    class: 'style-free',
+    placeholder: '例：雨夜为主，霓虹反光，镜头略带手持感'
+  });
+  box.value = opts.text || '';
+  box.oninput = () => opts.onText?.(box.value);
+
+  const paintNote = () => {
+    const custom = picked === 'custom';
+    note.textContent = custom
+      ? '这段话就是全片的风格描述，会写进设定集、出现在每一条提示词最前面 —— 写具体些：画种、设色、光线、镜头感。'
+      : '想在预设之外再补一句就写这里（可以留空），它会接在预设那段话后面，不会把预设顶掉。';
+    box.classList.toggle('required', custom && !box.value.trim());
+  };
+
   for (const s of presets) {
     const card = h(
       'button',
@@ -49,9 +81,12 @@ export function stylePicker(presets, currentId, onPick) {
         class: `style-card ${s.id === currentId ? 'active' : ''}`,
         title: s.anchor || '自己写风格描述',
         onclick: () => {
+          picked = s.id;
           onPick(s.id);
           for (const el of grid.children) el.classList.remove('active');
           card.classList.add('active');
+          paintNote();
+          if (s.id === 'custom') box.focus();
         }
       },
       swatchEl(s),
@@ -60,7 +95,10 @@ export function stylePicker(presets, currentId, onPick) {
     );
     grid.append(card);
   }
-  return grid;
+
+  paintNote();
+  wrap.append(grid, h('div', { class: 'field', style: 'margin-top:10px' }, box, note));
+  return wrap;
 }
 
 function relTime(iso) {
@@ -85,8 +123,8 @@ export default {
     /** 重画所有画风网格（出完预览图之后） */
     async function refreshStyles() {
       presets = (await api('/styles')).presets;
-      for (const { host, current, onPick } of styleHosts) {
-        clear(host).append(stylePicker(presets, current(), onPick));
+      for (const { host, current, onPick, text, onText } of styleHosts) {
+        clear(host).append(stylePicker(presets, current(), onPick, { text: text?.(), onText }));
       }
       paintList();
     }
@@ -196,6 +234,7 @@ export default {
         // （只换那一段，角色和场景不动）—— 但已经出过的图不会自己重画，这句话得说出来。
         const styleHost = h('div', { class: 'project-style-edit', style: 'display:none' });
         let picked = p.styleId;
+        let pickedText = p.style || '';
         let pickedRatio = p.aspectRatio || '';
         styleHost.append(
           h('label', {}, '影片比例'),
@@ -209,15 +248,21 @@ export default {
                 `这个项目已经出了 ${p.images} 张图。改比例只影响之后新出的，旧的要重出才会跟着变。`)
             : null,
           h('label', { style: 'margin-top:12px' }, '画风'),
-          stylePicker(presets, p.styleId, (id) => (picked = id)),
+          stylePicker(presets, p.styleId, (id) => (picked = id), {
+            text: pickedText,
+            onText: (v) => (pickedText = v)
+          }),
           h('div', { class: 'inline', style: 'margin-top:10px' },
             h('button', {
               class: 'btn sm',
               onclick: async () => {
-                const styleChanged = picked !== p.styleId;
+                const styleChanged = picked !== p.styleId || pickedText.trim() !== (p.style || '');
+                if (picked === 'custom' && !pickedText.trim()) {
+                  return toast('选了自定义就得写一段风格描述，不然出图没有方向', 'err');
+                }
                 await api(`/projects/${p.id}`, {
                   method: 'PATCH',
-                  body: { styleId: picked, aspectRatio: pickedRatio }
+                  body: { styleId: picked, style: pickedText.trim(), aspectRatio: pickedRatio }
                 });
                 projects = await api('/projects');
                 toast(
@@ -373,6 +418,7 @@ export default {
     // 手上同时有横屏宣传片和竖屏短剧是常事，挂在设置里就意味着每次切项目都得记得回去改一次。
     const defaultRatio = state.catalog?.settings?.aspectRatio || '16:9';
     let newRatio = defaultRatio;
+    let newStyleText = '';
 
     root.append(
       h('div', { class: 'panel' },
@@ -390,8 +436,9 @@ export default {
         (() => {
           const host = h('div', {});
           const onPick = (id) => (newStyleId = id);
-          host.append(stylePicker(presets, 'ink', onPick));
-          styleHosts.push({ host, current: () => newStyleId, onPick });
+          const onText = (v) => (newStyleText = v);
+          host.append(stylePicker(presets, 'ink', onPick, { text: newStyleText, onText }));
+          styleHosts.push({ host, current: () => newStyleId, onPick, text: () => newStyleText, onText });
           return host;
         })(),
         previewBar(),
@@ -401,6 +448,10 @@ export default {
             onclick: async (e) => {
               const title = newTitle.value.trim();
               if (!title) return toast('先起个名字', 'err');
+              // 自定义画风不写描述等于没选画风 —— 拦在这里，别等出完图才发现
+              if (newStyleId === 'custom' && !newStyleText.trim()) {
+                return toast('选了自定义就得写一段风格描述，不然出图没有方向', 'err');
+              }
               e.target.disabled = true;
               try {
                 const p = await api('/projects', {
@@ -408,6 +459,7 @@ export default {
                   body: {
                     title,
                     styleId: newStyleId,
+                    style: newStyleText.trim(),
                     targetDuration: Number(newDuration.value) || 60,
                     aspectRatio: newRatio
                   }
