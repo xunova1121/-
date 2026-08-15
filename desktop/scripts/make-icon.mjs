@@ -154,4 +154,14 @@ fs.writeFileSync(path.join(OUT_DIR, 'icon.ico'), ico);
 // electron-builder 在部分场景下会找 png，一并出一张最大的
 fs.writeFileSync(path.join(OUT_DIR, 'icon.png'), images.at(-1).png);
 
+/**
+ * 手机端（PWA）的图标。装到主屏之后就是这张，所以也得是自己画的 ——
+ * 这个仓库里不该出现来源不明的二进制素材。
+ */
+const M_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../ui/m');
+fs.mkdirSync(M_DIR, { recursive: true });
+for (const size of [192, 512]) {
+  fs.writeFileSync(path.join(M_DIR, `icon-${size}.png`), encodePNG(size, size, draw(size)));
+}
+
 console.log(`已生成 ${path.join(OUT_DIR, 'icon.ico')}（${sizes.join('/')}，共 ${(ico.length / 1024).toFixed(1)} KB）`);

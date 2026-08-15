@@ -4,7 +4,7 @@
  * 能力路由是拆开的（剧本、复核、出图、视频、配音各选各的），
  * 因为各家强项差得很远，绑死一家反而处处将就。
  */
-import { h, clear, api, stream, toast, fmtMs } from '../lib.js';
+import { h, clear, add, api, stream, toast, fmtMs } from '../lib.js';
 import { RATIOS } from '../ratios.js';
 
 function statusGlyph(status) {
@@ -550,6 +550,102 @@ export default {
           h('div', { class: 'field-hint', style: 'margin:0' },
             '默认关。关着的时候一律直连，和浏览器无关；如果厂商自检报 UND_ERR_CONNECT_TIMEOUT、' +
             '但浏览器打得开那个域名，多半就是缺代理，打开这个开关再试。'))
+      )
+    );
+
+    /**
+     * ── 手机遥控 ──
+     *
+     * 不需要任何服务器：手机和电脑在同一个 Wi-Fi 就够了。
+     * 这条口子另开一个端口监听（0.0.0.0），规矩和本机那条分开写死 ——
+     * 它后面挂着你的 API 密钥和额度，所以必须配对码，而且只认私网地址。
+     *
+     * 撤销权留在电脑上：手机丢了、给同事看过一次之后，点「换一个」就能把它踢下线。
+     */
+    const lanHost = h('div', {});
+    async function paintLan(fresh = null) {
+      const st = fresh || (await api('/lan').catch(() => null));
+      clear(lanHost);
+      if (!st) {
+        lanHost.append(h('p', { class: 'field-hint' }, '读不到手机遥控的状态'));
+        return;
+      }
+      const toggle = h('button', {
+        class: `btn ${st.running ? 'ghost' : 'primary'}`,
+        onclick: async (e) => {
+          e.target.disabled = true;
+          try {
+            const r = await api('/lan', { method: 'POST', body: { enabled: !st.running } });
+            if (r.token) lastToken = r.token;
+            await paintLan(r);
+            toast(r.running ? '手机遥控已打开' : '已关闭', 'ok');
+          } catch (err) {
+            toast(err.message, 'err');
+            e.target.disabled = false;
+          }
+        }
+      }, st.running ? '关闭手机遥控' : '打开手机遥控');
+
+      add(lanHost,
+        h('div', { class: 'inline', style: 'margin-bottom:10px' },
+          toggle,
+          st.running
+            ? h('button', {
+                class: 'btn ghost',
+                title: '把旧配对码作废。手机丢了、或者给别人看过一次之后用这个',
+                onclick: async () => {
+                  if (!confirm('换一个配对码？已经连上的手机会被踢下线，需要重新输入。')) return;
+                  const r = await api('/lan', { method: 'POST', body: { rotate: true } });
+                  lastToken = r.token || '';
+                  await paintLan(r);
+                  toast('配对码已更换', 'ok');
+                }
+              }, '换一个配对码')
+            : null),
+        st.running
+          ? h('div', {},
+              h('div', { class: 'field-hint', style: 'margin:0 0 6px' },
+                '手机连上同一个 Wi-Fi，用浏览器打开下面任意一个地址，把配对码敲进去。'
+                + '打开后点浏览器的「添加到主屏幕」，它就有了自己的图标，和 APP 一样全屏。'),
+              ...(st.urls || []).map((u) =>
+                h('div', { class: 'mono', style: 'font-size:13px;margin:3px 0' },
+                  u,
+                  h('button', {
+                    class: 'btn ghost sm', style: 'margin-left:8px',
+                    onclick: () => {
+                      // 带上配对码的完整地址：手机上少敲一次
+                      const full = lastToken ? `${u}?k=${lastToken}` : u;
+                      navigator.clipboard?.writeText(full);
+                      toast(lastToken ? '已复制（含配对码）' : '已复制', 'ok');
+                    }
+                  }, '复制'))),
+              lastToken
+                ? h('div', { style: 'margin-top:10px' },
+                    h('label', {}, '配对码'),
+                    h('div', { class: 'mono', style: 'font-size:22px;letter-spacing:.24em' }, lastToken),
+                    h('div', { class: 'field-hint' },
+                      '这串码只在这台电脑上显示。手机那一侧查不到它 —— 查得到的话，配对码就等于没有。'))
+                : h('div', { class: 'field-hint', style: 'margin-top:8px' },
+                    '配对码这次没回传（应用重启过）。点「换一个配对码」拿一串新的。'),
+              (st.addresses || []).length === 0
+                ? h('div', { class: 'note-line warn' }, '没找到局域网地址 —— 这台电脑可能没连 Wi-Fi/网线，或者被虚拟网卡挡住了。')
+                : null)
+          : h('div', { class: 'field-hint', style: 'margin:0' },
+              '默认关着。打开之后会',
+              h('b', {}, '另开一个端口'),
+              '监听局域网，只认私网地址、必须配对码，错 10 次锁 10 分钟。'
+              + '出门在外想用的话，装个 Tailscale 之类的组网工具就行，不用租服务器。'));
+    }
+    let lastToken = '';
+    paintLan();
+
+    root.append(
+      h('div', { class: 'panel' },
+        h('h2', { class: 'panel-title' }, '手机遥控'),
+        h('p', { class: 'panel-hint' },
+          '手机上看进度、审分镜、看成片，也能点「重出这一镜」。'
+          + '引擎始终在这台电脑上 —— 密钥、FFmpeg、几百 MB 的中间文件都不该跑到手机里去。'),
+        lanHost
       )
     );
 

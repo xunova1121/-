@@ -3383,6 +3383,68 @@ section('全流程：竖屏短剧从剧本到合成');
     JSON.stringify(finalP.stageStatus));
 }
 
+/**
+ * 手机遥控那条口子。
+ *
+ * 它和本机那条 127.0.0.1 的规矩完全不同：本机那条"能打开端口就是自己人"，
+ * 而这条后面挂着 API 密钥和额度，同一个 Wi-Fi 下的人不该随手就能驱动它。
+ * 所以这一段验的全是**拒绝**：没码不给、错码不给、码只在电脑那侧看得到。
+ */
+section('手机遥控：先验它拒绝什么');
+{
+  const srv = await import('../core/server.js');
+  const lan = await srv.startLan();
+  const token = settings.get('lanToken');
+  const base = `http://127.0.0.1:${lan.port}`;
+
+  check('开起来了，而且是另一个端口（不和本机那条共用规矩）',
+    lan.running && lan.port !== (settings.get('port') || 5178), JSON.stringify({ port: lan.port }));
+  check('自动生成了配对码（不带锁的门比没有门更糟）', Boolean(token) && token.length >= 8, String(token?.length));
+
+  const noKey = await fetch(`${base}/api/projects`);
+  check('没配对码：数据一律不给', noKey.status === 401, String(noKey.status));
+
+  const wrong = await fetch(`${base}/api/projects`, { headers: { 'X-FD-Key': 'NOTRIGHT' } });
+  check('错的配对码：也不给', wrong.status === 401, String(wrong.status));
+
+  const ok = await fetch(`${base}/api/projects`, { headers: { 'X-FD-Key': token } });
+  check('对的配对码：通', ok.status === 200, String(ok.status));
+
+  // <img src> 没法带自定义头，所以媒体接口也认查询串里的 k
+  const mediaNoKey = await fetch(`${base}/media?p=x.png`);
+  check('媒体接口没码也不给（手机上看图靠查询串带码）', mediaNoKey.status === 401, String(mediaNoKey.status));
+
+  // 页面本身必须放行：不放行就没法显示"请输入配对码"那一屏，
+  // 用户只会看到一个 401，不知道该干什么
+  const shell = await fetch(`${base}/m`);
+  check('手机端页面本身放行（不然只看到 401，不知道该干什么）', shell.status === 200, String(shell.status));
+  const shellText = await shell.text();
+  check('页面里没有任何数据，只有一个壳', !/apiKey|ARK_|sk-/.test(shellText));
+
+  for (const f of ['/m/m.js', '/m/m.css', '/m/manifest.webmanifest', '/m/sw.js', '/m/icon-192.png']) {
+    // eslint-disable-next-line no-await-in-loop
+    const r = await fetch(`${base}${f}`);
+    check(`装到主屏要的文件在：${f}`, r.status === 200, String(r.status));
+  }
+
+  // 撤销权必须留在电脑上：手机自己能换码的话，拿到过一次码的人就能永久续期
+  const rotateFromPhone = await fetch(`${base}/api/lan`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-FD-Key': token },
+    body: JSON.stringify({ rotate: true })
+  });
+  check('手机端不能改遥控设置（换码、开关都只能在电脑上）', rotateFromPhone.status === 403, String(rotateFromPhone.status));
+
+  // 手机那一侧查得到配对码的话，配对码就等于没有
+  const statusFromPhone = await (await fetch(`${base}/api/lan`, { headers: { 'X-FD-Key': token } })).json();
+  check('手机那一侧查不到配对码本身', !statusFromPhone.token && statusFromPhone.hasToken === true,
+    JSON.stringify(statusFromPhone));
+
+  srv.stopLan();
+  const afterStop = await fetch(`${base}/api/projects`, { headers: { 'X-FD-Key': token } }).then(() => 'still-up').catch(() => 'down');
+  check('关掉是真的把端口关了，不是留一个"应该会拒绝"的监听', afterStop === 'down', afterStop);
+}
+
 section('本地服务防护');
 const traversal = await fetch(`${appUrl}/media?p=${encodeURIComponent('/etc/passwd')}`);
 check('媒体接口拒绝数据目录之外的路径', traversal.status === 403);
