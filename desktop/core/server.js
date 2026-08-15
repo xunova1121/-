@@ -165,6 +165,21 @@ function guard(req, { lan = false } = {}) {
   return originGuard(req, hostHeader);
 }
 
+/**
+ * 是不是手机在敲门。
+ *
+ * 只用来决定"根地址跳不跳到 /m"，**不做任何安全判断** —— UA 是客户端随便写的，
+ * 拿它当门禁是错的。这里最坏的后果只是跳错页面，而地址栏里加个 `?pc=1` 就能纠正。
+ *
+ * 排除 iPad：它屏幕够大，电脑版那套用着更顺手；而新版 iPadOS 的 Safari
+ * UA 里本来就写着 Macintosh，本来也认不出来。
+ */
+function isPhone(req) {
+  const ua = req.headers['user-agent'] || '';
+  if (/iPad|Tablet/i.test(ua)) return false;
+  return /Android.*Mobile|iPhone|iPod|Windows Phone|Mobile Safari/i.test(ua);
+}
+
 /** 跨站防护：别人的网页不能拿你的浏览器往这个服务发请求 */
 function originGuard(req, hostHeader) {
   const origin = req.headers.origin;
@@ -559,11 +574,43 @@ async function handleApi(req, res, url, { lan = false } = {}) {
     }
     if (b && !c && method === 'PATCH') {
       const patch = await readBody(req);
-      return json(
-        res,
-        200,
-        store.update(b, (p) => Object.assign(p, patch, { id: p.id }))
-      );
+      /**
+       * 换画风时顺手把设定集里那段风格锚也换掉。
+       *
+       * 以前换完画风，出图纹丝不动 —— 因为风格锚是跑第 01 步时冻结进设定集的，
+       * 改 styleId 碰不到它。当时给的答复是"重跑第 01 步"，但那要重新生成
+       * 全部角色和场景，手改过的外貌描述全丢，为了换一句话代价太大。
+       *
+       * 风格锚本来就直接来自预设，不是模型产出的，所以只换这一段就够了。
+       * 只在**明确改了画风**时做 —— 改标题、改比例都不该动设定集。
+       */
+      const touchesStyle =
+        Object.prototype.hasOwnProperty.call(patch, 'styleId') ||
+        Object.prototype.hasOwnProperty.call(patch, 'style');
+      const next = store.update(b, (p) => {
+        Object.assign(p, patch, { id: p.id });
+        // patch 里自己带了 bible（设定集页面在存风格锚）就听它的，别打架
+        if (touchesStyle && !patch.bible) styles.syncBibleStyle(p);
+        return p;
+      });
+      return json(res, 200, next);
+    }
+
+    // 设定集里冻结的画风，和预设对得上吗；对不上就让用户一键换过来
+    if (b && c === 'style' && !d && method === 'GET') {
+      const p = store.read(b);
+      if (!p) return json(res, 404, { error: '项目不存在' });
+      return json(res, 200, styles.styleDrift(p));
+    }
+    if (b && c === 'style' && d === 'sync' && method === 'POST') {
+      const p = store.read(b);
+      if (!p) return json(res, 404, { error: '项目不存在' });
+      if (!p.bible) return json(res, 400, { error: '这个项目还没有设定集' });
+      const project = store.update(b, (x) => {
+        styles.syncBibleStyle(x);
+        return x;
+      });
+      return json(res, 200, { project, style: project.bible.style });
     }
     if (b && !c && method === 'DELETE') return json(res, 200, { ok: store.remove(b) });
 
@@ -960,6 +1007,20 @@ export function createServer({ lan = false } = {}) {
     }
 
     try {
+      /**
+       * 手机打开根地址，直接送到手机端那套页面去。
+       *
+       * 服务器模式下电脑和手机是**同一个地址**，没法像局域网那样在电脑上
+       * 显示一个 `.../m` 的二维码。不做这一跳，手机用户看到的是被压扁的
+       * 电脑版工作台 —— 能用，但很难用，而且没人会想到该在地址后面补个 /m。
+       *
+       * 认 UA 是有名的不可靠，所以只用它做"跳转"这一件事，
+       * 并留一条后路：`?pc=1` 强制看电脑版（平板上偶尔想要大屏那套）。
+       */
+      if (url.pathname === '/' && !url.searchParams.has('pc') && isPhone(req)) {
+        res.writeHead(302, { Location: `/m${url.search}` });
+        return res.end();
+      }
       // 手机端是独立的一套页面，不是把电脑版缩小 —— 见 ui/m/README 里的取舍
       if (url.pathname === '/m' || url.pathname === '/m/') return serveStatic(req, res, '/m/index.html');
       if (url.pathname === '/media') return serveMedia(req, res, url);

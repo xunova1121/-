@@ -192,8 +192,8 @@ export default {
         const current = p.id === state.projectId;
         const preset = presets.find((x) => x.id === p.styleId);
 
-        // 改画风：默认收着。改完立刻落盘，因为设定集是按画风冻结的，
-        // 已经跑过设定集的项目改画风必须重跑第 01 步才生效 —— 这句话得说出来。
+        // 改画风：默认收着。改完立刻落盘，设定集里冻结的那段风格锚会跟着换掉
+        // （只换那一段，角色和场景不动）—— 但已经出过的图不会自己重画，这句话得说出来。
         const styleHost = h('div', { class: 'project-style-edit', style: 'display:none' });
         let picked = p.styleId;
         let pickedRatio = p.aspectRatio || '';
@@ -222,7 +222,7 @@ export default {
                 projects = await api('/projects');
                 toast(
                   styleChanged && p.hasBible
-                    ? '已保存。设定集是按画风冻结的，要重跑第 01 步才生效'
+                    ? '已保存，设定集里的风格锚也跟着换了。已经出过的图要重出才会变'
                     : '已保存',
                   'ok'
                 );

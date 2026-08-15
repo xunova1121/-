@@ -27,7 +27,10 @@ import os from 'node:os';
 const PW = process.env.PLAYWRIGHT_PATH || 'playwright';
 let chromium;
 try {
-  ({ chromium } = await import(PW));
+  const mod = await import(PW);
+  // 全局装的那份是 CommonJS，`import` 进来时命名导出认不出来，全在 default 上
+  chromium = mod.chromium || mod.default?.chromium;
+  if (!chromium) throw new Error('这份 Playwright 里没有 chromium');
 } catch {
   console.error(
     '没找到 Playwright。这个脚本要拉一个真浏览器起来点按钮，先装一下：\n' +
@@ -165,6 +168,47 @@ const hud = await page.evaluate(() => {
 });
 // 右下角只在出结果时冒一次，而且要报出真实产出 —— "0 项完成"等于说白跑了
 check('右下角报了结果，且数字不是 0', /分镜完成/.test(hud) && !/\b0 /.test(hud), hud);
+
+// ── 换画风之后，设定集要认出"冻结的那段话过期了" ──
+// 这是真在浏览器里点：接口对了但提示没冒出来，用户照样看不见
+console.log('\n换画风之后');
+await page.evaluate(async (id) => {
+  await fetch(`/api/projects/${id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ styleId: 'guofeng' })
+  });
+  // 直接改设定集里那段话，模拟"预设后来被改进了"这种情况
+  const p = await (await fetch(`/api/projects/${id}`)).json();
+  p.bible.style.anchor = '老早以前那一段';
+  await fetch(`/api/projects/${id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bible: p.bible })
+  });
+}, proj.id);
+await step('设定集').click();
+await page.waitForTimeout(900);
+check('提示冒出来了', (await page.locator('.notice.warn').count()) > 0);
+const noticeText = await page.locator('.notice.warn').first().innerText().catch(() => '');
+check('把"现在是什么、换成什么"都摆出来了',
+  /老早以前那一段/.test(noticeText) && /青绿/.test(noticeText), noticeText.replace(/\n/g, ' ').slice(0, 160));
+
+await page.locator('.notice.warn button').first().click();
+await page.waitForTimeout(900);
+check('点完提示消失了', (await page.locator('.notice.warn').count()) === 0);
+
+/**
+ * 只看**看得见**的输入框。
+ *
+ * 各步的面板都留在 DOM 里、靠 display 切换，所以 `textarea` 的第一个
+ * 很可能是隐藏着的剧本框 —— 断言就会盯着一个用户根本看不到的东西。
+ * 同理，角色名在 input 的 value 里，innerText 抓不到它（第一版就栽在这儿：
+ * 那个"阿澜"其实是日志里的，不是角色卡上的）。
+ */
+const shown = () => page.locator('#view-inner textarea:visible');
+const values = async () => (await shown().evaluateAll((ns) => ns.map((n) => n.value)));
+const after = await values();
+check('输入框里的字当场换了（不用整页重画）', /青绿/.test(after[0] || ''), (after[0] || '').slice(0, 60));
+// 换一句话不该让手改过的角色描述陪葬
+check('角色描述没被冲掉', after.some((v) => v.includes('藏青立领制服')), JSON.stringify(after.slice(0, 6)));
 
 check('全程没有页面报错', errs.length === 0, errs.slice(0, 3).join(' | '));
 

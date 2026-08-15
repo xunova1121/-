@@ -3482,6 +3482,87 @@ section('画风：古风工笔 + 本地示例图');
     !(await (await fetch(`${appUrl}/api/styles`)).json()).presets.find((p) => p.id === 'guofeng').previewPath);
 }
 
+/**
+ * "我明明换成古风工笔了，出的图还是老样子。"
+ *
+ * 风格锚是跑第 01 步时**冻结**进设定集的 —— 这是对的，几十张图得引用同一段话。
+ * 但代价是换画风碰不到它，而且我把某个预设改好之后，老项目一辈子拿不到这个改进。
+ * 以前的答复是"重跑第 01 步"，那要重新生成全部角色场景，手改过的外貌全丢。
+ */
+section('换了画风，设定集里那段话要跟着换');
+{
+  const mk = async (styleId) => {
+    const p = await (await fetch(`${appUrl}/api/projects`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '换画风', script: '阿澜在码头巡查。', styleId })
+    })).json();
+    store.update(p.id, (x) => {
+      x.bible = {
+        frozenAt: new Date().toISOString(),
+        style: { ...styleModule.resolveStyle({ styleId, style: '' }) },
+        characters: [{ name: '阿澜', appearance: '短发，藏青立领制服', seed: 7, variants: [], sheetPath: 'a.png' }],
+        scenes: [{ name: '码头', appearance: '木栈桥' }],
+        props: []
+      };
+      return x;
+    });
+    return p.id;
+  };
+
+  const pid = await mk('ink');
+  check('刚冻结时对得上', !(await (await fetch(`${appUrl}/api/projects/${pid}/style`)).json()).drifted);
+
+  await fetch(`${appUrl}/api/projects/${pid}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ styleId: 'guofeng' })
+  });
+  const after = store.read(pid);
+  check('换画风时设定集里的风格锚跟着换了（以前得重跑第 01 步）',
+    /青绿/.test(after.bible.style.anchor), after.bible.style.anchor);
+  check('负向词也跟着换', /满构图无留白/.test(after.bible.style.negative), after.bible.style.negative);
+  // 换一句话不该让手改过的角色描述陪葬 —— 这才是以前"重跑第 01 步"最贵的地方
+  check('角色一个字没动', after.bible.characters[0].appearance === '短发，藏青立领制服');
+  check('种子没动（动了脸就变了）', after.bible.characters[0].seed === 7);
+  check('参考图没重出', after.bible.characters[0].sheetPath === 'a.png');
+  check('场景也没动', after.bible.scenes[0].appearance === '木栈桥');
+
+  // 改标题、改比例都不该碰设定集
+  const pid2 = await mk('guofeng');
+  store.update(pid2, (x) => ((x.bible.style.anchor = '我自己写的画风'), x));
+  await fetch(`${appUrl}/api/projects/${pid2}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: '改个名字', aspectRatio: '9:16' })
+  });
+  check('改别的字段时不动手写的风格锚', store.read(pid2).bible.style.anchor === '我自己写的画风');
+
+  // 预设本身被改进了（或者手写覆盖过）：认出来，但**不偷偷改** ——
+  // 直接盖掉，等于让人在设定集里改的每个字下次打开时凭空消失
+  const drift = await (await fetch(`${appUrl}/api/projects/${pid2}/style`)).json();
+  check('对不上时能认出来', drift.drifted === true, JSON.stringify(drift.current));
+  check('要先给人看清楚换成什么', /青绿/.test(drift.preset.anchor) && drift.name === '古风工笔',
+    JSON.stringify({ name: drift.name }));
+  check('光是查一下，不许自己动手', store.read(pid2).bible.style.anchor === '我自己写的画风');
+
+  const synced = await (await fetch(`${appUrl}/api/projects/${pid2}/style/sync`, { method: 'POST' })).json();
+  check('点了才换', /青绿/.test(synced.style.anchor) && /青绿/.test(store.read(pid2).bible.style.anchor));
+  check('换完就对上了', !(await (await fetch(`${appUrl}/api/projects/${pid2}/style`)).json()).drifted);
+
+  // 用户在预设之外补的那句话要留着，不能被预设顶掉
+  const pid3 = await mk('ink');
+  store.update(pid3, (x) => ((x.style = '雨天'), x));
+  await fetch(`${appUrl}/api/projects/${pid3}/style/sync`, { method: 'POST' });
+  const s3 = store.read(pid3).bible.style.anchor;
+  check('自己补的那句话还在', /国风水墨/.test(s3) && /雨天/.test(s3), s3);
+
+  // 没设定集的项目点同步：说清楚，别扔个 500
+  const bare = await (await fetch(`${appUrl}/api/projects`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: '还没跑设定集', script: '一段话。' })
+  })).json();
+  const noBible = await fetch(`${appUrl}/api/projects/${bare.id}/style/sync`, { method: 'POST' });
+  check('还没设定集时给一句人话', noBible.status === 400, String(noBible.status));
+}
+
 // 一键跑完必须能选"从哪一步开始"：日常最常见的是设定集和分镜早就审过了，
 // 从头跑一遍不但白花钱，还会把改过的分镜文案冲掉
 section('一键跑完：从头 还是 从这一步往后');
@@ -3858,6 +3939,40 @@ check('自己的页面放行', sameOrigin.status === 200);
 
 const uiFile = await fetch(`${appUrl}/index.html`);
 check('界面文件能取到', uiFile.status === 200);
+
+/**
+ * 服务器模式下电脑和手机是同一个地址，所以根地址得自己认人。
+ * 认错了没有安全后果（UA 本来就是客户端随便写的），最坏只是跳错页面 ——
+ * 但得留一条能纠正它的路。
+ */
+section('根地址：手机去手机版，电脑留电脑版');
+{
+  const land = (ua, qs = '') =>
+    fetch(`${appUrl}/${qs}`, { headers: { 'User-Agent': ua }, redirect: 'manual' })
+      .then((r) => ({ status: r.status, to: r.headers.get('location') }));
+
+  const iphone = await land('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1');
+  check('iPhone 打开根地址 → 手机版', iphone.status === 302 && iphone.to === '/m', JSON.stringify(iphone));
+
+  const android = await land('Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36');
+  check('安卓手机 → 手机版', android.status === 302 && android.to === '/m', JSON.stringify(android));
+
+  const pc = await land('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36');
+  check('电脑不跳', pc.status === 200, JSON.stringify(pc));
+
+  // 平板屏幕够大，电脑版那套更顺手
+  const ipad = await land('Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/604.1');
+  check('iPad 不跳', ipad.status === 200, JSON.stringify(ipad));
+
+  // 跳错了得有救 —— 不然手机上永远看不到电脑版
+  const forced = await land('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile Safari/604.1', '?pc=1');
+  check('?pc=1 强制看电脑版', forced.status === 200, JSON.stringify(forced));
+
+  // 访问口令是跟在地址后面传过来的，跳转时不能把它弄丢
+  const withKey = await land('Mozilla/5.0 (Linux; Android 14; Pixel 8) Chrome/120.0 Mobile Safari/537.36', '?k=ABC123');
+  check('跳转时把口令带过去（不然到了手机版还要重输）',
+    withKey.status === 302 && withKey.to === '/m?k=ABC123', JSON.stringify(withKey));
+}
 
 // ─────────────────────── 收尾 ───────────────────────
 

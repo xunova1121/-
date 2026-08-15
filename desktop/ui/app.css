@@ -894,6 +894,26 @@ td.wrap { white-space: normal; max-width: 380px; }
   border-color: color-mix(in srgb, var(--caution) 30%, transparent);
 }
 
+/* 画风和设定集对不上时的那条提示：要能一眼看清"现在是什么、要换成什么" */
+.notice {
+  margin: 10px 0 14px; padding: 12px 14px; border-radius: var(--r);
+  border: 1px solid var(--line); background: var(--surface-2);
+}
+.notice.warn {
+  border-color: color-mix(in srgb, var(--caution) 34%, var(--line));
+  background: var(--caution-wash);
+}
+.notice b { display: block; font-size: 13px; margin-bottom: 5px; }
+.notice p { margin: 0 0 10px; font-size: 12px; line-height: 1.6; color: var(--ink-dim); }
+.diff-pair { display: grid; gap: 8px; margin-bottom: 11px; }
+@media (min-width: 860px) { .diff-pair { grid-template-columns: 1fr 1fr; } }
+.diff-pair label { display: block; font-size: 11px; color: var(--ink-dim); margin-bottom: 3px; }
+.diff-pair code {
+  display: block; padding: 8px 10px; border-radius: var(--r-sm);
+  background: var(--surface); border: 1px solid var(--line);
+  font-size: 12px; line-height: 1.6; color: var(--ink); white-space: pre-wrap;
+}
+
 /* ══════════════════════ 章节 ══════════════════════ */
 
 .chapter-preview { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }

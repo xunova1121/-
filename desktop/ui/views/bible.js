@@ -16,6 +16,73 @@ const VARIANT_META = {
   prop: { title: '状态', hint: '同一件东西的不同状态', ph: '例：破损' }
 };
 
+/**
+ * "你选的画风，和设定集里冻结的那段话对不上了。"
+ *
+ * 两种情况会走到这里：换了画风；或者预设本身被改进了（比如给古风工笔补上留白和逆光）。
+ * 以前这两种情况都只能重跑第 01 步，代价是手改过的角色外貌全丢 —— 为了换一句话不值。
+ *
+ * 所以这里只换风格锚这一段，别的一个字不动。**必须让人先看见要换成什么**再点，
+ * 因为这会盖掉手写的风格描述；直接偷偷换掉，等于让人改的字凭空消失。
+ */
+function driftNotice(project, anchorInput, paletteInput, negativeInput) {
+  const host = h('div', {});
+
+  /**
+   * 重进这一步要重查一遍。
+   *
+   * 设定集面板只在第一次打开时挂载，之后切走再回来不重新拉数据 —— 那是有意的，
+   * 免得把正在改的字冲掉。但换画风恰恰是在**别的页面**做的，回来时面板还是老的，
+   * 提示永远冒不出来。所以这里单独听一下：只重查画风这一件事，别的一个字不动。
+   */
+  const onStage = () => {
+    if (!host.isConnected) return window.removeEventListener('fd:stage', onStage);
+    return run();
+  };
+  window.addEventListener('fd:stage', onStage);
+
+  const run = () => api(`/projects/${project.id}/style`)
+    .then((d) => {
+      clear(host);
+      if (!d.drifted) return;
+      host.append(
+        h('div', { class: 'notice warn' },
+          h('b', {}, `画风「${d.name}」的预设和这里冻结的不一样`),
+          h('p', {},
+            '风格锚是跑第 01 步时冻结的，所以换画风、或者预设本身有改进，都不会自动生效。'
+            + '按下面这个按钮只换这一段话，角色和场景的描述、参考图、种子一个都不动。'),
+          h('div', { class: 'diff-pair' },
+            h('div', {}, h('label', {}, '现在是'), h('code', {}, d.current.anchor)),
+            h('div', {}, h('label', {}, '换成'), h('code', {}, d.preset.anchor))),
+          h('button', {
+            class: 'btn sm',
+            onclick: async (e) => {
+              e.target.disabled = true;
+              try {
+                const out = await api(`/projects/${project.id}/style/sync`, { method: 'POST' });
+                // 直接把输入框里的字换掉 —— 不整页重画，免得把正在改的别处冲掉
+                anchorInput.value = out.style.anchor;
+                paletteInput.value = out.style.palette || '';
+                negativeInput.value = out.style.negative || '';
+                clear(host);
+                toast('画风已同步，下一批出图生效。已经出过的图要重出才会跟着变', 'ok');
+              } catch (err) {
+                toast(err.message, 'err');
+                e.target.disabled = false;
+              }
+            }
+          }, '换成预设的那一段')
+        )
+      );
+    })
+    .catch(() => {
+      /* 查不到就当没这回事，不能因为一个提示把整页挡住 */
+    });
+
+  run();
+  return host;
+}
+
 const KINDS = [
   {
     kind: 'char',
@@ -73,6 +140,7 @@ export default {
             : null
         ),
         h('p', { class: 'panel-hint' }, '这段话会出现在每一条绘图提示词的最前面。放在最前是有讲究的：越靠后的描述越容易被稀释掉。'),
+        driftNotice(project, anchorInput, paletteInput, negativeInput),
         h('div', { class: 'field' }, h('label', {}, '风格描述'), anchorInput),
         h('div', { class: 'grid2' },
           h('div', { class: 'field' }, h('label', {}, '主色调'), paletteInput),

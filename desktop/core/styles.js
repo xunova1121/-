@@ -292,3 +292,41 @@ export function resolveStyle(project) {
     palette: preset.palette
   };
 }
+
+/**
+ * 设定集里的风格锚和预设对不上了吗。
+ *
+ * 风格锚是在跑第 01 步时**冻结**进设定集的 —— 这是对的，后面几十张图都要引用同一段话，
+ * 它不能今天一个样明天一个样。但代价是：
+ *
+ *   ① 换了画风，老设定集里还是旧那段，出图纹丝不动 ——「我明明换成古风工笔了」；
+ *   ② 我把某个预设的提示词改好了（比如给古风工笔补上留白和逆光），
+ *      已经跑过设定集的项目一辈子拿不到这个改进。
+ *
+ * 以前这两种情况的答复都是"重跑第 01 步"，但那要重新生成全部角色和场景，
+ * 你手改过的外貌描述全没了 —— 为了换一句话，代价大得离谱。
+ *
+ * 而风格锚本来就**不是模型产出的**，它直接来自预设。所以完全可以只换这一段，
+ * 别的一个字不动。这个函数负责认出"该换了"，换不换由用户点。
+ */
+export function styleDrift(project) {
+  if (!project?.bible?.style) return { drifted: false };
+  const want = resolveStyle(project);
+  const cur = project.bible.style;
+  const drifted =
+    cur.anchor !== want.anchor || cur.negative !== want.negative || (cur.palette || '') !== (want.palette || '');
+  return { drifted, current: cur, preset: want, name: getStyle(project.styleId)?.name || '自定义' };
+}
+
+/**
+ * 把预设的风格锚盖回设定集。**只动 style 这一块**，角色、场景、道具原封不动。
+ *
+ * 会覆盖手写的风格描述 —— 所以这件事必须由用户主动点，绝不能在读取项目时
+ * 顺手做掉：那样别人在设定集里改的每一个字都会在下次打开时凭空消失。
+ */
+export function syncBibleStyle(project) {
+  const { drifted, preset } = styleDrift(project);
+  if (!drifted) return false;
+  project.bible.style = { ...project.bible.style, ...preset };
+  return true;
+}
