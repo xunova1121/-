@@ -4056,6 +4056,98 @@ section('对象存储：能验的部分');
   settings.patch({ oss: {} });
 }
 
+/**
+ * 接线：产物出来之后，到底有没有真的传上去。
+ *
+ * 用一个**桩 OSS** 验这一段。它验不了签名对不对（那要真凭证），
+ * 但能验所有真正会坏的接线：走没走这条路、key 拼得对不对、
+ * 传失败会不会把整步拖垮、参考图拿到的是不是公网地址。
+ * 这些每一条都出过或者极可能出问题，而签名反倒是一次性对了就一直对。
+ */
+section('对象存储：接线');
+{
+  const seen = [];
+  let failNext = false;
+  const stub = http.createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      const body = Buffer.concat(chunks);
+      if (req.method === 'PUT') {
+        if (failNext) {
+          res.writeHead(403, { 'Content-Type': 'application/xml' });
+          return res.end('<Error><Code>AccessDenied</Code></Error>');
+        }
+        seen.push({ key: decodeURIComponent(req.url.slice(1)), bytes: body.length, auth: req.headers.authorization || '', body });
+        res.writeHead(200);
+        return res.end();
+      }
+      if (req.method === 'DELETE') {
+        res.writeHead(204);
+        return res.end();
+      }
+      // 把存进去的原样回出来 —— 回一句 'ok' 的话，"读回的内容对不对"这一条就白测了
+      const want = decodeURIComponent(req.url.split('?')[0].slice(1));
+      const hit = seen.find((x) => x.key === want);
+      res.writeHead(hit ? 200 : 404, { 'Content-Type': 'application/octet-stream' });
+      return res.end(hit ? hit.body : 'missing');
+    });
+  });
+  await new Promise((r) => stub.listen(0, '127.0.0.1', r));
+  const stubBase = `http://127.0.0.1:${stub.address().port}`;
+  process.env.FUTUREDREAM_OSS_ENDPOINT = stubBase;
+
+  const ossMod = await import('../core/oss.js');
+  vault.setSecret(ossMod.AK_NAME, 'ak-x');
+  vault.setSecret(ossMod.SK_NAME, 'sk-x');
+  settings.patch({ oss: { enabled: true, bucket: 'b', region: 'oss-cn-hongkong', prefix: 'fd', publicRead: true } });
+  check('配齐了就算就绪', ossMod.ready() === true);
+
+  const put = await ossMod.putBuffer('a/b.png', Buffer.from('hello'), 'image/png');
+  check('传上去了', seen.length === 1 && seen[0].bytes === 5, JSON.stringify(seen[0] || {}));
+  check('前缀拼在最前面', put.key === 'fd/a/b.png', put.key);
+  check('带了签名头', /^OSS4-HMAC-SHA256 /.test(seen[0]?.auth || ''), (seen[0]?.auth || '').slice(0, 40));
+
+  // 真写真读真删 —— 一把只读的 key 在"能不能连上"里表现完全正常
+  const probe = await ossMod.probe();
+  check('自检三步都走到了', probe.ok === true && probe.steps.length === 3, JSON.stringify(probe.steps));
+
+  failNext = true;
+  const badProbe = await ossMod.probe();
+  check('没有写权限时当场说清楚，而不是等出图完才炸',
+    badProbe.ok === false && /RAM/.test(badProbe.error || ''), badProbe.error);
+  failNext = false;
+
+  /**
+   * 最要紧的一条：**传失败不能把整步弄垮**。
+   * 文件已经在本地了，流水线完全可以继续 —— 为了一个顺带做的事
+   * 把跑了十分钟的一步废掉，是拿主要目标去赌次要目标。
+   */
+  const studioMod = await import('../core/pipeline/studio.js');
+  const p1 = store.create({ title: '存储接线', script: '一段话。' });
+  const dest = path.join(SANDBOX, 'projects', p1.id, 'assets', 'x.png');
+  failNext = true;
+  const notes = [];
+  await studioMod.saveMedia({ base64: Buffer.from('imagedata').toString('base64') }, dest, (ev) => notes.push(ev.message));
+  check('传不上去，文件照样落了盘', fs.existsSync(dest));
+  check('而且说了一句为什么，不是闷声吞掉',
+    notes.some((m) => /对象存储没传上去/.test(m || '')), notes.join(' | '));
+  failNext = false;
+
+  const dest2 = path.join(SANDBOX, 'projects', p1.id, 'assets', 'y.png');
+  await studioMod.saveMedia({ base64: Buffer.from('imagedata2').toString('base64') }, dest2, () => {});
+  check('传成功之后能拿到公网地址（万相那类只收 https 的就靠它）',
+    /^http/.test(studioMod.publicUrlFor(dest2) || ''), String(studioMod.publicUrlFor(dest2)));
+
+  // 参考图那条路：配了 OSS 就不该再逼人去配一个"上传网关"，两者干的是同一件事
+  const ref = await studioMod.toModelRef(dest2, {});
+  check('参考图走公网地址，不再退回 base64', /^http/.test(ref), ref.slice(0, 60));
+
+  settings.patch({ oss: {} });
+  delete process.env.FUTUREDREAM_OSS_ENDPOINT;
+  stub.close();
+}
+
 section('三端对齐：谁该有什么功能');
 {
   const surfaces = await import('../core/surfaces.js');

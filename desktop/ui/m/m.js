@@ -138,6 +138,19 @@ async function stream(path, body, onEvent) {
   }
 }
 
+/**
+ * 界面自带的静态图（画风示例图）也要带口令。
+ *
+ * 这一端除了页面壳子本身，**每一条请求都要口令**（服务端 checkKey），
+ * 而 `<img src>` 加不了自定义头 —— 于是画风缩略图整排 401，
+ * 显示成一片空框。这类"图裂了"最容易被当成图片本身有问题，
+ * 而实际上是鉴权。凡是同源的资源地址，一律从这儿过一道。
+ */
+function asset(p) {
+  if (!p || /^data:|^https?:/.test(p)) return p;
+  return `${p}${p.includes('?') ? '&' : '?'}k=${encodeURIComponent(authKey)}`;
+}
+
 /** 图片和视频也要带配对码：<img> 没法加自定义头，所以走查询串 */
 function media(p, v) {
   return `/media?p=${encodeURIComponent(p)}${v ? `&v=${v}` : ''}${authKey ? `&k=${encodeURIComponent(authKey)}` : ''}`;
@@ -455,7 +468,7 @@ function styleCard() {
         }
       },
         preset.previewPath || preset.sample
-          ? h('img', { src: preset.previewPath ? media(preset.previewPath) : preset.sample, alt: preset.name, loading: 'lazy' })
+          ? h('img', { src: preset.previewPath ? media(preset.previewPath) : asset(preset.sample), alt: preset.name, loading: 'lazy' })
           : h('span', { class: 'style-mini-blank' }),
         h('span', { class: 'style-mini-name' }, preset.name));
       grid.append(card);

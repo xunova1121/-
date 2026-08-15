@@ -22,11 +22,12 @@ import * as speakerLib from './speaker.js';
 import * as imgsize from '../imgsize.js';
 import * as ffmpeg from '../ffmpeg.js';
 import * as imghash from '../imghash.js';
-import { safeFileName } from '../paths.js';
+import { safeFileName, PROJECTS_DIR } from '../paths.js';
 import * as chapters from './chapters.js';
 import * as duration from '../duration.js';
 import * as skillsLib from '../skills.js';
 import * as variants from './variants.js';
+import * as oss from '../oss.js';
 
 export const extractJSON = consistency.extractJSON;
 
@@ -70,13 +71,37 @@ function routing() {
 /**
  * 本地文件 → 模型能吃到的引用。
  *
- * 优先 data URI：Windows 用户不用为了跑通图生图先去开一个 OSS 桶。
- * 火山方舟、OpenAI、多数中转网关都收 base64；百炼的部分接口只认公网 URL，
- * 那种情况下在设置里填一个上传网关即可。
+ * 三条路，按这个顺序：
+ *
+ *   ① 自己填的上传网关   —— 明确配过就听他的，别自作主张换掉
+ *   ② 阿里云 OSS         —— 配好了就直接当图床用。这一条是后加的：
+ *                           以前配了 OSS 还要再去配一个"上传网关"才能让百炼
+ *                           拿到参考图，而那两样干的是同一件事，纯属多此一举。
+ *   ③ data URI           —— 兜底。Windows 用户不用为了跑通图生图先去开一个桶；
+ *                           火山方舟、OpenAI、多数中转网关都收 base64。
+ *
+ * 只有百炼那几个"只认公网 URL"的接口会卡在第三条上，那时候前两条随便配一个都行。
  */
 export async function toModelRef(localPath, { onEvent } = {}) {
   const gateway = settings.get('uploadGateway');
   if (gateway) return uploadVia(gateway, localPath, onEvent);
+
+  if (oss.ready()) {
+    try {
+      const known = publicUrlFor(localPath);
+      if (known) return known;
+      const rel = path.relative(PROJECTS_DIR, localPath).split(path.sep).join('/');
+      const key = rel.startsWith('..') ? `misc/${path.basename(localPath)}` : rel;
+      const put = await oss.putFile(localPath, key);
+      OSS_KEYS.set(localPath, put.key);
+      const url = put.url;
+      onEvent?.({ type: 'note', message: `参考图已上传到对象存储：${path.basename(localPath)}` });
+      return url;
+    } catch (err) {
+      // 传不上去就退回 base64 —— 多数厂商吃得下，总比整步失败强
+      onEvent?.({ type: 'note', message: `对象存储没传上去，改用内联图：${err.message}` });
+    }
+  }
 
   const buf = fs.readFileSync(localPath);
   const ext = path.extname(localPath).toLowerCase();
@@ -178,7 +203,71 @@ export async function saveMedia({ url, base64, downloadHeaders }, destPath, onEv
     responseBody: `<binary ${buf.length} bytes> → ${destPath}`
   });
   onEvent?.({ type: 'note', message: `已保存 ${path.basename(destPath)}（${(buf.length / 1024).toFixed(0)} KB）` });
+
+  await mirrorToOss(destPath, buf, onEvent);
   return destPath;
+}
+
+/**
+ * 把产物同步一份到对象存储。
+ *
+ * 挂在 saveMedia 的出口，是因为这里是**所有产物落盘的唯一咽喉** ——
+ * 图、视频、配音、参考图全从这儿过。挂十几个调用点迟早漏一个，
+ * 而漏掉的那一个会以"这张图在手机上打不开"的形式出现，极难定位。
+ *
+ * 两条刻意的规矩：
+ *
+ * ① **传失败不能让整步失败。** 文件已经在本地了，流水线完全可以继续 ——
+ *    为了一个"顺带做的事"把跑了十分钟的一步废掉，是拿主要目标去赌次要目标。
+ *    所以只发一条提示，不抛异常。
+ *
+ * ② **本地那份不删。** 删了之后一旦 OSS 配置改了、桶被清了、AccessKey 过期，
+ *    整个项目就成了一堆断链。对象存储在这里的角色是"多一份、并且有公网地址"，
+ *    不是"搬走"。真想省盘，该做的是单独一个清理动作，由人明确发起。
+ */
+async function mirrorToOss(destPath, buf, onEvent) {
+  if (!oss.ready()) return null;
+  try {
+    const rel = path.relative(PROJECTS_DIR, destPath).split(path.sep).join('/');
+    // 落在项目目录之外的（比如画风预览图）也传，只是换个前缀，免得和项目产物混在一起
+    const key = rel.startsWith('..') ? `misc/${path.basename(destPath)}` : rel;
+    const put = await oss.putBuffer(key, buf, oss.contentTypeOf(destPath));
+    OSS_KEYS.set(destPath, put.key);
+    onEvent?.({ type: 'note', message: `已同步到对象存储：${path.basename(destPath)}` });
+    return url;
+  } catch (err) {
+    onEvent?.({ type: 'note', message: `对象存储没传上去（不影响这一步）：${err.message}` });
+    return null;
+  }
+}
+
+/**
+ * 本地路径 → 对象存储里的 **key**。
+ *
+ * 存 key 而不是存 URL，有两个原因：
+ *
+ * ① 私有桶给的是**限时**地址，存下来过几个小时就打不开了，
+ *    而它看起来是一个正常的 https 链接 —— 又是一种"看着对、其实坏了"。
+ *    存 key 就能每次现签。
+ * ② 存了 URL 之后想拿回 key 只能去解析它，而解析 URL 拿路径这件事
+ *    本身就容易出错（这正是第一版写错的地方）。存源头，别存派生值。
+ *
+ * 放内存不落盘：它是缓存，不是数据。桶换了、前缀改了，重启一次就干净了。
+ */
+const OSS_KEYS = new Map();
+
+/**
+ * 参考图要发给出图模型时，优先给公网地址。
+ *
+ * 这是接 OSS 最实际的理由：万相这类厂商的图生图通道**只收 https 地址**，
+ * 本地文件和 base64 都不收（adapters.js requirePublicUrl）。
+ * 没有对象存储时，角色设定图就永远发不出去 —— 一致性链路里最关键那一环断掉。
+ */
+export function publicUrlFor(localPath) {
+  if (!localPath || !oss.ready()) return null;
+  const key = OSS_KEYS.get(localPath);
+  // 每次现签：私有桶那个地址是有期限的
+  return key ? oss.urlFor(key) : null;
 }
 
 // ═══════════════════════ 设定集条目：三类共用的取值与提示词 ═══════════════════════

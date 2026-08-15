@@ -226,7 +226,17 @@ async function send(method, key, body, extraHeaders = {}, { version } = {}) {
     ? signV1({ method, key, headers: base, c, ak, sk })
     : signV4({ method, key, headers: base, c, ak, sk });
 
-  const url = `https://${signHost(c)}/${encodePath(key)}`;
+  /**
+   * 自检里要能把请求打到一个桩服务上。
+   *
+   * 这不是"为了测试而开的后门"：它同时也是**兼容 OSS 协议的其它服务**
+   * （MinIO、自建网关）的入口。但默认必须是空的 —— 一个能被改写目标地址的
+   * 存储客户端，配错了就是把你的片子传到别人那儿去。
+   */
+  const override = (process.env.FUTUREDREAM_OSS_ENDPOINT || '').trim();
+  const url = override
+    ? `${override.replace(/\/+$/, '')}/${encodePath(key)}`
+    : `https://${signHost(c)}/${encodePath(key)}`;
   const res = await fetch(url, { method, headers, body: body || undefined });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
@@ -308,19 +318,26 @@ export async function remove(key) {
  */
 export function urlFor(key) {
   const c = config();
-  if (c.publicRead) return `https://${host(c)}/${encodePath(key)}`;
+  const override = (process.env.FUTUREDREAM_OSS_ENDPOINT || '').trim();
+  if (c.publicRead) {
+    return override
+      ? `${override.replace(/\/+$/, '')}/${encodePath(key)}`
+      : `https://${host(c)}/${encodePath(key)}`;
+  }
   return signedUrl(key, c.signedTtl);
 }
 
 /** 限时地址（V1 query 签名，各版本 OSS 都认，浏览器直接能打开） */
 export function signedUrl(key, ttl = 3600) {
   const c = config();
+  const override = (process.env.FUTUREDREAM_OSS_ENDPOINT || '').trim();
   const { accessKeyId: ak, accessKeySecret: sk } = credentials();
   const expires = Math.floor(Date.now() / 1000) + Math.max(60, ttl);
   const stringToSign = ['GET', '', '', String(expires), `/${c.bucket}/${key}`].join('\n');
   const sig = crypto.createHmac('sha1', sk).update(stringToSign).digest('base64');
   const q = new URLSearchParams({ OSSAccessKeyId: ak, Expires: String(expires), Signature: sig });
-  return `https://${host(c)}/${encodePath(key)}?${q}`;
+  const base = override ? override.replace(/\/+$/, '') : `https://${host(c)}`;
+  return `${base}/${encodePath(key)}?${q}`;
 }
 
 /**

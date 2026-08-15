@@ -55,7 +55,11 @@ const asset = (name, buf = PIXEL) => {
 };
 store.update(proj.id, (p) => {
   p.bible = { style: { anchor: '国风', negative: '' },
-    characters: [{ name: '阿澜', appearance: '短发', seed: 1, variants: [{ id: 'v-default', name: '默认造型', sheetPath: 'x.png' }], sheetPath: 'x.png' }],
+    // 参考图也用**真文件**：设定集那一页要渲染它的缩略图，
+    // 用假路径的话媒体接口一律 403，而"图裂了"正是这条链路最常坏的样子
+    characters: [{ name: '阿澜', appearance: '短发', seed: 1,
+      variants: [{ id: 'v-default', name: '默认造型', sheetPath: asset('sheet-alan.png') }],
+      sheetPath: asset('sheet-alan.png') }],
     scenes: [], props: [] };
   p.shots = [
     { id: 's1', index: 1, characters: ['阿澜'], description: '阿澜走向栈桥', camera: '中景', dialogue: '设备正常。', speaker: '阿澜', duration: 4, consistency: { score: 88, pass: true }, videoPath: asset('v1.mp4'), audioPath: asset('a1.mp3'), imagePath: asset('i1.png') },
@@ -89,10 +93,25 @@ console.log('错的配对码：', wrongKey.status === 401 ? '✓ 挡住了' : `�
 const b = await chromium.launch();
 const ctx = await b.newContext({ ...devices['iPhone 13'] });
 const page = await ctx.newPage();
+/**
+ * 盯着所有 4xx。
+ *
+ * 加这一条是因为踩过一次：手机端画风缩略图整排 401（<img> 带不了鉴权头），
+ * 页面看着"只是图没加载出来"，功能检查全绿 —— 而实际上那一整块是坏的。
+ * 有意为之的拒绝（下面第 ⑧ 步专门验"不带码要被挡住"）会被 expect401 放行。
+ */
+let expect401 = false;
+const unexpected4xx = [];
+page.on('response', (r) => {
+  if (r.status() < 400 || expect401) return;
+  unexpected4xx.push(`${r.status()} ${new URL(r.url()).pathname}`);
+});
 const errs = [];
 page.on('pageerror', (e) => errs.push(e.message));
 page.on('console', (m) => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
 
+// ①② 这两步是**故意**不带码 / 带错码的，那些 401 是预期结果
+expect401 = true;
 // ① 不带码打开 → 应该看到配对屏
 await page.goto(`${base}/m`);
 await page.waitForTimeout(1200);
@@ -103,6 +122,9 @@ await page.locator('input').fill('WRONGKEY');
 await page.locator('button:has-text("连接")').click();
 await page.waitForTimeout(900);
 console.log('② 敲错的码：', /配对码不对/.test(await page.locator('body').innerText()) ? '当场说清楚 ✓' : '✕');
+
+// 预期内的 401 到此为止 —— 不复位的话这条检查就永远是绿的，等于没测
+expect401 = false;
 
 // ③ 带码的链接（电脑上「复制」给的就是这个）
 await page.goto(`${base}/m?k=${token}`);
@@ -151,6 +173,11 @@ await page.waitForTimeout(1000);
 console.log('⑤b 手机上改剧本：',
   /三天前的那通电话/.test(store.read(proj.id).script) ? '存下了 ✓' : '✕');
 console.log('   画风也能选：', (await page.locator('.style-mini-card').count()) > 3 ? '✓' : '✕');
+// <img> 带不了鉴权头 —— 漏了口令的话整排缩略图 401，显示成一片空框，
+// 而"图裂了"最容易被当成图片本身有问题
+const broken = await page.locator('.style-mini-card img').evaluateAll(
+  (imgs) => imgs.filter((i) => i.complete && i.naturalWidth === 0).length);
+console.log('   缩略图有没有裂：', broken === 0 ? '都正常 ✓' : `✕ ${broken} 张裂了`);
 
 await page.locator('.tab', { hasText: '设定' }).click();
 await page.waitForTimeout(700);
@@ -185,6 +212,7 @@ const withK = await fetch(`${base}/media?p=${encodeURIComponent(shotImg)}&k=${to
 const withoutK = await fetch(`${base}/media?p=${encodeURIComponent(shotImg)}`);
 console.log('   带码取图：', withK.status === 200 ? '✓' : `✕ ${withK.status}`,
   '｜不带码：', withoutK.status === 401 ? '✓ 挡住' : `✕ ${withoutK.status}`);
+// 上面那条是 Node 直接发的，不经过页面，所以不会进 unexpected4xx —— 这里不用放行
 
 // ⑨ PWA 三件套
 const man = await fetch(`${base}/m/manifest.webmanifest`);
@@ -202,6 +230,7 @@ console.log('⑩ 小于 36px 的可点元素：', small.length ? JSON.stringify(
 
 // 第 ② 步是**故意**敲错配对码，那一次 401 是预期之内的，不算页面报错
 const realErrs = errs.filter((e) => !/401/.test(e));
+console.log('意料之外的 4xx：', unexpected4xx.length ? `✕ ${unexpected4xx.slice(0, 4).join('、')}` : '无 ✓');
 console.log('\n页面报错：', realErrs.length ? realErrs.slice(0, 4) : '无');
 await b.close();
 srv.stopLan();
