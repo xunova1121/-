@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const PW = process.env.PLAYWRIGHT_PATH || 'playwright';
 let chromium; let devices;
@@ -27,7 +28,8 @@ try {
   process.exit(2);
 }
 
-const ROOT = path.dirname(new URL(import.meta.url).pathname);
+// ⚠ 不能用 new URL(...).pathname —— Windows 上它会给出 /C:/... 这种带盘符斜杠的路径
+const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'fd-server-'));
 const TOKEN = 'ZzAaBbCcDdEeFf112233445566778899';
 const HOST = 'fd.example.com';
