@@ -207,17 +207,28 @@ function paintPair(reason = '') {
           : '这台手机要和电脑上的应用配对一次。电脑上打开「设置 → 手机遥控」，把那串 8 位配对码敲进来。'),
       reason ? h('p', { class: 'muted', style: 'color:var(--alarm)' }, reason) : null,
       (() => {
+        /**
+         * 输入框**不按模式收紧**，只按模式换提示文案。
+         *
+         * 上一版是按 mode 决定 maxlength 和自动大写的，于是多了一条要命的依赖：
+         * 只要 /api/mode 那一问没拿到（旧版本服务端没有这条、网络抖一下、
+         * 被什么东西挡了），它就退回"局域网"，输入框缩成 12 位、强制大写 ——
+         * 32 位的服务器口令**根本填不进去**，人就被锁在门外，而且完全看不出为什么。
+         *
+         * 界面能不能用，不该取决于一次探测成没成。所以一律按最宽的来：
+         * 装得下 64 位、不动大小写。局域网那个配对码本来就不挑大小写
+         * （服务端 checkKey 里统一处理），宽一点不会有任何副作用。
+         */
         const input = h('input', {
           class: 'code',
           type: 'text',
           inputmode: 'latin',
-          // 服务器口令大小写混排，自动首字母大写会当场把它改坏
-          autocapitalize: server ? 'none' : 'characters',
+          autocapitalize: 'none',
           autocorrect: 'off',
           spellcheck: false,
           autocomplete: 'off',
           placeholder: server ? '32 位访问口令' : 'ABCD2345',
-          maxlength: server ? 64 : 12
+          maxlength: 64
         });
         const go = h('button', { class: 'btn primary block', style: 'margin-top:14px' }, '连接');
         go.onclick = async () => {
@@ -633,23 +644,41 @@ async function reload() {
 function rememberKey(code) {
   try {
     localStorage.setItem(KEY_STORE, code);
-    if (mode === 'server') localStorage.setItem(PC_KEY_STORE, code);
+    localStorage.setItem(PC_KEY_STORE, code);
   } catch {
     /* 隐私模式下写不进去，那就这一次有效 */
   }
 }
 
+/**
+ * 两边存的口令互相当备份。
+ *
+ * 同样不看 mode：局域网那条路电脑版和手机版本来就不同源，读到的一定是空，
+ * 白读一次没有代价；而依赖 mode 的话，探测一失败就得重新手输一遍。
+ */
 function savedKey() {
   try {
-    return localStorage.getItem(KEY_STORE) || (mode === 'server' ? localStorage.getItem(PC_KEY_STORE) : '') || '';
+    return localStorage.getItem(KEY_STORE) || localStorage.getItem(PC_KEY_STORE) || '';
   } catch {
     return '';
   }
 }
 
 async function boot() {
-  // 先问清楚这台服务要的是配对码还是访问口令 —— 问不到就按局域网办（本机跑就是这一种）
-  mode = await fetch('/api/mode').then((r) => (r.ok ? r.json() : null)).then((d) => d?.mode || 'lan').catch(() => 'lan');
+  /**
+   * 先问清楚这台服务要的是配对码还是访问口令。
+   *
+   * ⚠ 这一问**必须有超时**。它只决定一句提示文案，却挡在整个界面前面 ——
+   * 一旦这个请求既不成功也不失败（代理吞了、网络半死不活、中间有东西挂着），
+   * 页面就永远停在"正在连接…"，用户看到的是一片死屏，
+   * 而且完全没有线索：明明网是通的，应用也活着。
+   *
+   * 为一句文案赌上整个界面能不能打开，这笔账怎么算都不划算。两秒没回就往下走。
+   */
+  mode = await Promise.race([
+    fetch('/api/mode').then((r) => (r.ok ? r.json() : null)).then((d) => d?.mode || 'lan'),
+    new Promise((resolve) => setTimeout(() => resolve('lan'), 2000))
+  ]).catch(() => 'lan');
 
   // 电脑上把带码的链接发到手机时，直接从地址里取，省得手敲
   const fromUrl = new URL(location.href).searchParams.get('k');
