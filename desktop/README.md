@@ -829,6 +829,11 @@ Caddy 会自动去 Let's Encrypt 签证书并续期，不用碰 certbot。
 **② 域名。** A 记录指到服务器 IP。⚠ 国内机房 + 域名要**备案**，没备案的域名在
 80/443 上会被拦掉；不想折腾就用香港 / 新加坡 / 日本的轻量服务器，免备案。
 
+**没有域名也能上。** 用 `<你的IP>.nip.io` —— 这个公共 DNS 会把
+`47.243.29.184.nip.io` 直接解析成 `47.243.29.184`，不用注册、不用配 A 记录，
+Caddy 照样签得到真证书。填进 `.env` 的 `FD_HOST` 就行。以后有了自己的域名再换，
+改一行重启即可。
+
 **③ 连上去装 Docker。**
 
 ```bash
@@ -839,15 +844,25 @@ curl -fsSL https://get.docker.com | sh
 **④ 拉代码、配置、起服务。**
 
 ```bash
-git clone <这个仓库> && cd <仓库>/desktop
+git clone <这个仓库> fd && cd fd
+git checkout claude/windows-app-third-party-api-8h0qec   # 代码在这个分支上
+cd desktop
 cp .env.example .env
 vi .env          # FD_HOST=你的域名   FD_VAULT_PASS=一串够长的口令
 docker compose up -d
 docker compose logs app | grep -A3 访问口令     # 把口令记下来
 ```
 
-**⑤ 防火墙只开三个口。** 22（ssh）、80、443。应用那个 5178 **不要**对外开 ——
-它只需要被同一台机器上的 Caddy 连到。
+**⑤ 防火墙有两层，两层都要开。** 这是最容易卡住的一步：
+
+- **云控制台的安全组** —— 虚拟机**外面**那层。阿里云 / 腾讯云 / AWS 都有，
+  默认只放行 22。控制台 → 实例 → 安全组 → 入方向，加 80 和 443。
+- **机器里的 ufw** —— 虚拟机**里面**那层。
+
+只开了 ufw 而忘了安全组，从机器上 `curl localhost` 一切正常，外面却完全连不上，
+Caddy 会一直签不到证书（日志里是 `Timeout during connect (likely firewall problem)`）。
+
+应用那个 5178 两层都**不要**开 —— 它只需要被同一台机器上的 Caddy 连到。
 
 ```bash
 ufw allow 22 && ufw allow 80 && ufw allow 443 && ufw enable
@@ -855,6 +870,32 @@ ufw allow 22 && ufw allow 80 && ufw allow 443 && ufw enable
 
 **⑥ 浏览器打开 `https://你的域名`**，输口令进去，在「服务商与密钥」里配一把 API Key。
 手机打开同一个地址，因为是 HTTPS，安卓 Chrome 会提示「安装应用」。
+
+### 起不来的时候，先看这三条
+
+**`docker compose ps` 里 app 是 `Restarting`。** 看 `docker compose logs app | tail -40`
+的**最后**几行 —— 前面通常一片成功（口令都打印出来了），真正的原因在最后。
+`grep 访问口令` 是看不到它的。
+
+**Caddy 日志里 `Timeout during connect (likely firewall problem)`。**
+外面连不进来，八成是上面 ⑤ 里的**安全组**没开。补开之后要注意：Let's Encrypt
+连着失败几次会被限流，Caddy 已经自己退到 **staging**（测试）证书上了 ——
+浏览器会报证书不受信任。放行端口之后重启 Caddy 让它重新去要正式证书：
+
+```bash
+docker compose restart caddy
+docker compose logs caddy | tail -20      # 看到 certificate obtained 就成了
+```
+
+还不行就把它攒下的证书状态清掉重来（只删证书，不动你的项目数据）：
+
+```bash
+docker compose down && docker volume rm desktop_caddy-data && docker compose up -d
+```
+
+**浏览器打开是 401 或者一片空白。** 那是正常的登录屏，填 ④ 里记下来的访问口令。
+口令丢了：`docker compose exec app cat /data/settings.json`，或者在 `.env` 里
+写一个新的 `FD_TOKEN=` 再 `docker compose up -d`。
 
 ### 日常怎么维护
 

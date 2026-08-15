@@ -1104,8 +1104,18 @@ if (invokedDirectly) {
       }
       console.log(`\n  按 Ctrl+C 停止。\n`);
 
-      // 自己开浏览器，用的是真实绑定到的端口 —— 启动脚本里写死端口会在端口顺延时打开空白页
-      if (process.env.FUTUREDREAM_NO_OPEN !== '1') {
+      /**
+       * 自己开浏览器，用的是真实绑定到的端口 —— 启动脚本里写死端口会在端口顺延时打开空白页。
+       *
+       * 服务器上不开：那台机器没有桌面，也没人坐在它前面。更要紧的是下面这一条 ——
+       *
+       * ⚠ spawn 找不到程序时**不是抛异常**，而是异步 emit 一个 'error' 事件。
+       *   没人听这个事件，Node 就把它变成未捕获异常，整个进程 exit(1)。
+       *   try/catch 包不住它。容器里没有 xdg-open，于是"启动成功"打印完就崩，
+       *   restart: unless-stopped 再把它拉起来 —— 无限重启。
+       *   所以这里必须挂 on('error')，而不是只靠 try/catch。
+       */
+      if (process.env.FUTUREDREAM_NO_OPEN !== '1' && !deploy.SERVER_MODE) {
         const { spawn } = await import('node:child_process');
         const cmd =
           process.platform === 'win32'
@@ -1114,9 +1124,17 @@ if (invokedDirectly) {
               ? ['open', [url]]
               : ['xdg-open', [url]];
         try {
-          spawn(cmd[0], cmd[1], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+          const child = spawn(cmd[0], cmd[1], {
+            detached: true,
+            stdio: 'ignore',
+            windowsHide: true
+          });
+          child.on('error', () => {
+            /* 打不开就算了，地址已经在上面打印出来了 —— 但绝不能因此把服务弄死 */
+          });
+          child.unref();
         } catch {
-          /* 打不开就算了，地址已经在上面打印出来了 */
+          /* 同上 */
         }
       }
     })

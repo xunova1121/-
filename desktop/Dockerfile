@@ -23,6 +23,9 @@ COPY package.json ./
 ENV FUTUREDREAM_DATA_DIR=/data
 ENV FUTUREDREAM_MODE=server
 ENV PORT=5178
+# 服务器上没有桌面，也没人坐在它前面。代码里已经不会去开浏览器了，
+# 这一行是第二道保险 —— 曾经就因为容器里没有 xdg-open 而无限重启
+ENV FUTUREDREAM_NO_OPEN=1
 VOLUME ["/data"]
 EXPOSE 5178
 

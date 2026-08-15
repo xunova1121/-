@@ -3671,6 +3671,55 @@ section('服务器模式：按公网的规矩');
   });
   check('没配域名就拒绝启动，并说清楚缺什么',
     badOut.code !== 0 && /FUTUREDREAM_PUBLIC_HOST/.test(badOut.out), badOut.out.slice(0, 200));
+
+  /**
+   * 起来之后要**活着**。
+   *
+   * 上面那些测的是 `srv.listen()` 这个函数，而线上跑的是 `node core/server.js` ——
+   * 中间那段"打印地址、顺手开个浏览器"的代码，被测试完整地绕过去了。
+   * 结果就是：容器里没有 xdg-open，spawn 异步 emit 'error'，没人听，
+   * 未捕获异常 exit(1)；restart 再拉起来，无限重启。日志里前面全是成功。
+   *
+   * 所以这里必须**照线上的方式启动进程**，并且把 PATH 清空 ——
+   * 让"打不开浏览器"在任何机器上都必然发生，而不是只在服务器上。
+   */
+  const aliveCheck = async (label, env) => {
+    const c = spawn(process.execPath, [path.join(PROJECT_ROOT, 'core/server.js')], {
+      env: { ...env, PATH: '', FUTUREDREAM_NO_OPEN: '' },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    let out = '';
+    c.stdout.on('data', (d) => (out += d));
+    c.stderr.on('data', (d) => (out += d));
+    const died = await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), 4000);
+      c.on('exit', (code) => {
+        clearTimeout(timer);
+        resolve(code);
+      });
+    });
+    c.kill();
+    check(`${label}：起来之后不许自己死掉`, died === null,
+      died === null ? '' : `exit=${died} ${out.slice(-300)}`);
+    return out;
+  };
+
+  const serverOut = await aliveCheck('服务器模式', {
+    ...process.env,
+    FUTUREDREAM_DATA_DIR: path.join(SANDBOX, 'servermode3'),
+    FUTUREDREAM_MODE: 'server',
+    FUTUREDREAM_PUBLIC_HOST: 'fd.example.com',
+    FUTUREDREAM_ACCESS_TOKEN: TOKEN
+  });
+  // 服务器上根本不该去开浏览器：那台机器没有桌面，也没人坐在它前面
+  check('服务器模式不去开浏览器', !/xdg-open|ENOENT/.test(serverOut), serverOut.slice(-200));
+
+  // 桌面模式**要**开浏览器，那就得保证开不起来的时候只是开不起来，而不是把服务弄死
+  await aliveCheck('本机模式（浏览器开不起来时）', {
+    ...process.env,
+    FUTUREDREAM_DATA_DIR: path.join(SANDBOX, 'desktopmode-noopen'),
+    FUTUREDREAM_MODE: 'desktop'
+  });
 }
 
 // 放到服务器上之后密钥不再只在你自己机器里 —— 这是固有代价，
