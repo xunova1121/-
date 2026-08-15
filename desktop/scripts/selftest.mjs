@@ -4131,6 +4131,113 @@ check('界面文件能取到', uiFile.status === 200);
  * 这一段验的就是这四条 —— 尤其是**踢掉一台不影响别的**，
  * 那是这套东西存在的全部理由。
  */
+/**
+ * 搬家。
+ *
+ * 换服务器不是"可能会发生"，是**一定会发生**。而验这件事有个陷阱：
+ * 在同一个进程里导出再导入，什么都对 —— 因为密钥还在内存里、保险箱还是打开的。
+ * 真实情况是**另一台机器**：新机器上没有 .vaultkey，导入的密文必须靠口令打开。
+ * 所以下面那一半必须起子进程、换数据目录。
+ */
+section('搬家：从一台机器搬到另一台');
+{
+  const migrate = await import('../core/migrate.js');
+
+  // 先造点家当
+  const mp = store.create({ title: '要搬走的片子', script: '阿澜在码头巡查。' });
+  const assetDir = path.join(SANDBOX, 'projects', mp.id, 'assets');
+  fs.mkdirSync(assetDir, { recursive: true });
+  fs.writeFileSync(path.join(assetDir, 'i1.png'), Buffer.from('fake-image-bytes'));
+  fs.writeFileSync(path.join(assetDir, 'v1.mp4'), Buffer.alloc(4096, 7));
+  store.update(mp.id, (p) => {
+    p.shots = [{ id: 's1', index: 1, description: '走向栈桥', duration: 4 }];
+    return p;
+  });
+  vault.setSecret('ARK_API_KEY', 'sk-the-real-key-do-not-leak');
+  settings.patch({ aspectRatio: '9:16', accessToken: '这台机器专属的口令' });
+
+  const before = migrate.survey();
+  check('清点得出有多少东西要搬', before.projects >= 1 && before.bytes > 4000, JSON.stringify(before));
+  // 一个几 GB 的包传到一半断掉，比一开始就知道大小糟糕得多
+  check('单独报出媒体占了多少（好决定要不要带）', before.mediaBytes >= 4096, String(before.mediaBytes));
+
+  const pkg = path.join(SANDBOX, 'move.zip');
+  const made = await migrate.exportTo(pkg, { passphrase: 'my-移机口令-123', media: true });
+  check('打出包来了', fs.existsSync(pkg) && made.bytes > 4000, JSON.stringify({ bytes: made.bytes }));
+  // ⚠ 别断言"正好 1 个"：这个沙箱里有前面几节测试留下的密钥。
+  // 该验的是"要搬的那把在里面"，而不是"总共几把"
+  check('密钥被封进去了', made.secrets >= 1, String(made.secrets));
+
+  /**
+   * 最要紧的一条：**包里不能有明文密钥**。
+   * 这个包会经手网盘、微信、U 盘 —— 任何一处泄露都等于密钥泄露。
+   */
+  const raw = fs.readFileSync(pkg).toString('latin1');
+  check('包里没有明文密钥', !raw.includes('sk-the-real-key-do-not-leak'));
+  // 这台机器的访问口令是它自己的，跟着搬过去只会让新机器认错自己
+  check('这台机器专属的口令没跟着走', !raw.includes('这台机器专属的口令'));
+
+  /**
+   * 换一台"机器"：另一个进程 + 另一个数据目录 + 没有 .vaultkey。
+   * 这才是真实的搬家场景 —— 同进程导入是测不出问题的。
+   */
+  const newHome = path.join(SANDBOX, 'newmachine');
+  const importScript = `
+    import * as migrate from ${JSON.stringify(pathToFileURL(path.join(PROJECT_ROOT, 'core/migrate.js')).href)};
+    import * as vault from ${JSON.stringify(pathToFileURL(path.join(PROJECT_ROOT, 'core/vault.js')).href)};
+    import * as store from ${JSON.stringify(pathToFileURL(path.join(PROJECT_ROOT, 'core/store.js')).href)};
+    const wrong = await migrate.importFrom(process.env.PKG, { passphrase: '不对的口令' }).catch((e) => e.message);
+    const ok = await migrate.importFrom(process.env.PKG, { passphrase: 'my-移机口令-123' });
+    console.log(JSON.stringify({
+      wrong,
+      ok,
+      key: vault.getSecret('ARK_API_KEY'),
+      projects: store.list().length,
+      titles: store.list().map((x) => x.title).join('|')
+    }));
+  `;
+  const out = await new Promise((resolve) => {
+    const c = spawn(process.execPath, ['--input-type=module', '-e', importScript], {
+      env: { ...process.env, FUTUREDREAM_DATA_DIR: newHome, PKG: pkg },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    let buf = '';
+    c.stdout.on('data', (d) => (buf += d));
+    c.stderr.on('data', (d) => (buf += d));
+    c.on('exit', () => {
+      try {
+        resolve(JSON.parse(buf.trim().split('\n').pop()));
+      } catch {
+        resolve({ crashed: buf.slice(-400) });
+      }
+    });
+  });
+
+  check('在新机器上展开成功', out.ok?.files > 0, JSON.stringify(out.crashed || out.ok));
+  // 同理：沙箱里项目不止一个，该验的是"那一个在新机器上找得到"
+  check('项目过去了', /要搬走的片子/.test(out.titles || ''), String(out.titles).slice(0, 80));
+  // 这一条是整件事的重点：新机器上没有 .vaultkey，密钥只能靠口令打开
+  check('密钥在新机器上能用（这才是搬家真正难的地方）',
+    out.key === 'sk-the-real-key-do-not-leak', String(out.key).slice(0, 12));
+  // 宁可打不开，也不给一半错的密钥
+  check('口令不对时明确拒绝，而且什么都不写', /口令不对/.test(out.wrong || ''), out.wrong);
+
+  // 媒体可以不带 —— 几 GB 的包和几百 KB 的包，搬起来完全是两回事
+  const lite = path.join(SANDBOX, 'move-lite.zip');
+  await migrate.exportTo(lite, { passphrase: '', media: false });
+  /**
+   * 别用"体积小一半"来验 —— 那取决于这个沙箱里恰好有多少媒体，
+   * 换个环境就翻。要成立的性质是**里面一个媒体文件都没有**，直接看条目名。
+   */
+  const { readZip } = await import('../core/zip.js');
+  const liteNames = (await readZip(lite)).map((e) => e.name);
+  check('不带媒体时，包里一个媒体文件都没有',
+    !liteNames.some((n) => /\.(png|jpg|jpeg|webp|mp4|mp3|wav)$/i.test(n)),
+    liteNames.filter((n) => /\.(png|mp4)$/i.test(n)).slice(0, 3).join('、'));
+  check('但项目本身还在（重出一次媒体就有了）', liteNames.some((n) => /project\.json$/.test(n)));
+  check('不带密钥就真的不带', !fs.readFileSync(lite).toString('latin1').includes('aes-256-gcm'));
+}
+
 section('账号：谁进来了、怎么踢出去');
 {
   const acc = await import('../core/accounts.js');

@@ -897,6 +897,44 @@ docker compose down && docker volume rm desktop_caddy-data && docker compose up 
 口令丢了：`docker compose exec app cat /data/settings.json`，或者在 `.env` 里
 写一个新的 `FD_TOKEN=` 再 `docker compose up -d`。
 
+### 换一台更快的服务器
+
+盘太慢、机房换地方、想换个更近的区 —— 换服务器不是"可能会发生"，是**一定会发生**。
+所以这件事有专门的一条路，不用手动 scp 一堆目录（拷漏一个就是
+"项目还在但密钥没了"这种查半天的怪事）。
+
+```bash
+# ① 旧服务器上打包
+docker compose exec app node scripts/migrate.mjs export /data/move.zip
+docker compose cp app:/data/move.zip ./move.zip
+
+# ② 传到新服务器 —— 两台机房之间直连，别绕道自己的笔记本
+scp move.zip root@新IP:~/
+
+# ③ 新服务器上照「从零开一台」装好，然后
+docker compose cp move.zip app:/data/move.zip
+docker compose exec app node scripts/migrate.mjs import /data/move.zip
+docker compose restart app
+```
+
+**密钥是这件事里唯一真正难的部分。** 它加密存着，而解密用的钥匙是**旧机器**上的
+一个文件。直接把密文拷过去，新机器打不开；把钥匙一起拷过去，等于钥匙和密文
+装在同一个包里 —— 那个包一旦经手网盘或 U 盘，密钥就等于明送。
+
+所以导出时会让你**设一个口令**：密钥当场解密、再用这个口令重新加密。
+口令只在你脑子里，不在包里，导入时填同一个。嫌麻烦就 `--no-secrets`，
+到新机器上重配一遍 API Key，也就几分钟。
+
+几个开关：
+
+| 开关 | 什么时候用 |
+|---|---|
+| `--no-media` | 只搬项目和分镜，不搬图和视频。包小几个数量级，到新机器重跑「镜头出图」就有了 |
+| `--no-secrets` | 不带密钥，新机器上重配 |
+
+**重名不覆盖。** 新机器上已有同名项目时，导入的那个会另存为新项目（标题带「（导入）」）。
+多几个重名项目可以手动删；被覆盖掉的东西找不回来 —— 这个取舍没有第二种选法。
+
 ### 日常怎么维护
 
 ```bash

@@ -176,3 +176,54 @@ export function safeZipEntry(file, name) {
 }
 
 export { path };
+
+/**
+ * 读 zip。
+ *
+ * 只认 STORE（不压缩）—— 因为**只有我们自己写的包会被读**，而写的那边
+ * 就是 STORE。真去支持 deflate 意味着要引 zlib 解流、处理各种历史怪癖，
+ * 而这里唯一的用途是搬家包。看到压缩过的条目就明确报错，
+ * 比默默给出一段乱数据强得多。
+ *
+ * 从**中央目录**读，不是顺着本地头一个个啃：本地头里的大小字段允许是 0
+ * （靠后面的 data descriptor 补），只有中央目录里那份一定是准的。
+ */
+export async function readZip(file) {
+  const buf = fs.readFileSync(file);
+
+  // 找中央目录结尾记录（EOCD）。它在文件末尾，注释最长 65535，所以从后往前扫
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= 0 && i > buf.length - 22 - 65535; i -= 1) {
+    if (buf.readUInt32LE(i) === 0x06054b50) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) throw new Error('这不是一个 zip 文件（找不到中央目录）');
+
+  const count = buf.readUInt16LE(eocd + 10);
+  let p = buf.readUInt32LE(eocd + 16);
+  const out = [];
+
+  for (let i = 0; i < count; i += 1) {
+    if (buf.readUInt32LE(p) !== 0x02014b50) throw new Error('中央目录坏了');
+    const method = buf.readUInt16LE(p + 10);
+    const size = buf.readUInt32LE(p + 24);
+    const nameLen = buf.readUInt16LE(p + 28);
+    const extraLen = buf.readUInt16LE(p + 30);
+    const commentLen = buf.readUInt16LE(p + 32);
+    const localOffset = buf.readUInt32LE(p + 42);
+    const name = buf.toString('utf8', p + 46, p + 46 + nameLen);
+
+    if (method !== 0) throw new Error(`条目「${name}」是压缩过的，这个读取器只认不压缩的包`);
+
+    // 本地头长度不固定（extra 字段各家写法不同），必须照本地头里那两个长度算
+    const lNameLen = buf.readUInt16LE(localOffset + 26);
+    const lExtraLen = buf.readUInt16LE(localOffset + 28);
+    const start = localOffset + 30 + lNameLen + lExtraLen;
+    out.push({ name, data: buf.subarray(start, start + size) });
+
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return out;
+}
