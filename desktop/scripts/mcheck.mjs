@@ -63,7 +63,9 @@ store.update(proj.id, (p) => {
     scenes: [], props: [] };
   p.shots = [
     { id: 's1', index: 1, characters: ['阿澜'], description: '阿澜走向栈桥', camera: '中景', dialogue: '设备正常。', speaker: '阿澜', duration: 4, consistency: { score: 88, pass: true }, videoPath: asset('v1.mp4'), audioPath: asset('a1.mp3'), imagePath: asset('i1.png') },
-    { id: 's2', index: 2, characters: ['阿澜'], description: '阿澜蹲下查看缆绳', camera: '特写', dialogue: '', duration: 3, videoPath: asset('v2.mp4'), imagePath: asset('i2.png') }
+    // 第二镜**只有图、还没出视频** —— 这是"出图完、视频还没跑"时的常态，
+    // 也是唯一能验"点图放大"那条路的状态（视频有原生控件，不该被拦）
+    { id: 's2', index: 2, characters: ['阿澜'], description: '阿澜蹲下查看缆绳', camera: '特写', dialogue: '', duration: 3, imagePath: asset('i2.png') }
   ];
   p.outputs = {
     video: asset('final.mp4'),
@@ -186,6 +188,34 @@ await page.locator('button:has-text("保存描述")').first().click();
 await page.waitForTimeout(1000);
 const who = store.read(proj.id).bible.characters[0];
 console.log('⑤c 手机上改设定集：', /左眉有疤/.test(who.appearance || '') ? '存下了 ✓' : `✕ ${who.appearance}`);
+
+/**
+ * ⑤d 点开看大图。
+ *
+ * 审片时最需要的动作就是放大 —— 而页面头上 user-scalable=no 把系统缩放
+ * 关掉了（不关的话点输入框会把整页放大且退不回去），所以这一层是自己做的，
+ * 也就必须自己测：打不开、关不掉、放大后拖没了，都是真会发生的事。
+ */
+await page.locator('.tab', { hasText: '分镜' }).click();
+await page.waitForTimeout(700);
+// 只有图片能点开 —— 视频有原生控件，拦它反而挡住播放
+await page.locator('img.shot-media').first().click();
+await page.waitForTimeout(400);
+const opened = await page.locator('.viewer').count();
+console.log('⑤d 点图能放大看：', opened === 1 ? '打开了 ✓' : '✕ 没打开');
+if (opened) {
+  const box = await page.locator('.viewer-img').boundingBox();
+  // 双击放大：变换加上去之后，元素的实际占地必须变大
+  await page.locator('.viewer-img').dblclick();
+  await page.waitForTimeout(350);
+  const zoomed = await page.locator('.viewer-img').boundingBox();
+  console.log('   双击放大：', zoomed.width > box.width * 1.5 ? `✓ ${Math.round(zoomed.width / box.width * 10) / 10}×` : '✕ 没变大');
+  await page.locator('.viewer-x').click();
+  await page.waitForTimeout(300);
+  console.log('   关得掉：', (await page.locator('.viewer').count()) === 0 ? '✓' : '✕ 关不掉');
+  // 关不掉比打不开更糟：整个界面被一层黑挡住，只能杀掉重开
+  console.log('   关掉后页面能滚：', (await page.evaluate(() => document.body.style.overflow)) === '' ? '✓' : '✕ 还锁着');
+}
 
 // ⑥ 成片 + 交给剪映的素材
 await page.locator('.tab', { hasText: '成片' }).click();

@@ -116,6 +116,13 @@ export const CAPABILITIES = [
     mobile: 'ui/m/m.js'
   },
   {
+    id: 'image-zoom',
+    name: '点开看大图',
+    api: '（纯前端）',
+    pc: 'ui/lightbox.js',
+    mobile: 'ui/m/m.js'
+  },
+  {
     id: 'asset-pack',
     name: '素材打包下载',
     api: 'GET /projects/:id/export.zip',

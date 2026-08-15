@@ -321,3 +321,59 @@ input {
 
 /* 五个页签之后，每个标签的字要收一点，不然在小屏上会折行 */
 .tabs .tab { font-size: 10.5px; }
+
+/* ── 全屏看图 ──
+   审片时最需要的动作就是放大："这个人的手怎么了"、"衣领花纹和上一镜对不上"，
+   不放大根本看不出来。而页面头上的 user-scalable=no 把系统缩放关掉了
+   （不关的话点输入框会把整页放大且退不回去），所以这一层是必须自己补的。 */
+.viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  overflow: hidden;
+  /* 手势全部自己处理：交给浏览器的话，拖动会变成页面滚动 */
+  touch-action: none;
+}
+.viewer-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transform-origin: center center;
+  will-change: transform;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.viewer-x {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 10px);
+  right: 12px;
+  z-index: 2;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, .55);
+  color: #fff;
+  font-size: 19px;
+  line-height: 1;
+}
+.viewer-hint {
+  position: absolute;
+  bottom: calc(env(safe-area-inset-bottom) + 22px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, .55);
+  color: rgba(255, 255, 255, .82);
+  font-size: 12px;
+  transition: opacity .3s;
+}
+.viewer-hint.gone { opacity: 0; }
+
+/* 能点开的图给一点"可以点"的暗示，不然没人知道它能点 */
+.shot-media[onclick], .sheet-thumb[onclick] { cursor: zoom-in; }

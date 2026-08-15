@@ -147,6 +147,7 @@ function onKey(e) {
   else if (e.key === '0') setZoom(1, true);
 }
 
+// cap:image-zoom
 export function close() {
   if (!box || !state) return;
   box.root.style.display = 'none';

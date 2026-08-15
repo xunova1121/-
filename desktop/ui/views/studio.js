@@ -97,18 +97,69 @@ function jobReset(projectId) {
 }
 
 export default {
+  /**
+   * ⚠ 这一页的请求**必须并行发**。
+   *
+   * 原来是一条 await 接一条：styles → projects → skills → project →
+   * duration → bible-readiness → chapters，八个串行波次。
+   * 在自己电脑上跑本地服务时每跳 1ms，完全看不出问题；
+   * 而放到远端服务器上，每跳一两百毫秒，光是排队就白等一秒多 ——
+   * 表现就是"点开工作流很慢"，而且慢在哪儿完全看不出来
+   * （每一条单看都很快，慢的是它们**排成了一队**）。
+   *
+   * 现在分三波：
+   *   ① 和项目无关的（styles / projects / skills）+ 已知 id 的项目本体
+   *   ② 依赖项目、但彼此无关的三条（duration / readiness / chapters）
+   *   ③ 用到的时候再 await
+   * 依赖关系决定波次，其余一律并行。量出来 1465ms → 见 scripts/perfcheck.mjs。
+   */
   async render({ state, go }) {
-    const { presets } = await api('/styles');
-    const projects = await api('/projects');
+    // 先发出去，等会儿再取结果 —— 这几条互不依赖
+    const stylesP = api('/styles');
+    const projectsP = api('/projects');
     // 技法库：镜头运用、光线、动作、氛围。全局的，跨项目共用
-    let skillGroups = (await api('/skills').catch(() => null))?.groups || [];
+    const skillsP = api('/skills').catch(() => null);
+    // 已经知道是哪个项目就一起发；不知道才得等 /projects 回来才能挑默认那个
+    const knownId = state.projectId;
+    const projectP = knownId ? api(`/projects/${knownId}`).catch(() => null) : null;
+
+    const { presets } = await stylesP;
+    const projects = await projectsP;
+    let skillGroups = (await skillsP)?.groups || [];
     let project = null;
 
     if (!state.projectId && projects.length) state.projectId = projects[0].id;
     if (state.projectId) {
-      project = await api(`/projects/${state.projectId}`).catch(() => null);
+      project = state.projectId === knownId
+        ? await projectP
+        : await api(`/projects/${state.projectId}`).catch(() => null);
       if (!project) state.projectId = null;
     }
+
+    /**
+     * 依赖项目、但三者互不依赖 —— 一起发出去，谁用到谁 await。
+     * 项目没打开时这三条根本不该发（发了也是白等一跳）。
+     */
+    /**
+     * 预取一份，但**只够用一次**。
+     *
+     * 时长这条会被反复调用（跑完一步要刷新数字）。如果每次都 await 同一个
+     * Promise，拿到的永远是进页面那一刻的快照 —— 跑完视频回来还显示"合成后 —"，
+     * 看着像没跑成。所以第一次用预取的，之后每次重新问。
+     */
+    let durationPrefetch = project ? api(`/projects/${project.id}/duration`).catch(() => null) : null;
+    const durationInfo = () => {
+      if (durationPrefetch) {
+        const p2 = durationPrefetch;
+        durationPrefetch = null;
+        return p2;
+      }
+      return project ? api(`/projects/${project.id}/duration`).catch(() => null) : Promise.resolve(null);
+    };
+    const readinessP = project?.bible
+      ? api(`/projects/${project.id}/bible-readiness`).catch(() => null)
+      : null;
+    const chaptersP = project ? api(`/projects/${project.id}/chapters`).catch(() => null) : null;
 
     const root = h('div', { class: 'stack' });
     const rerender = () => document.querySelector('#btn-refresh').click();
@@ -209,7 +260,7 @@ export default {
     const durationHost = h('div', {});
 
     async function paintDuration() {
-      const info = await api(`/projects/${project.id}/duration`).catch(() => null);
+      const info = await durationInfo();
       if (!info) return;
       const { summary, policy, presets, suggestedShots } = info;
       // 厂商接受的时长档位，从 /api/catalog 拿（跟着当前路由到的视频模型走）
@@ -307,9 +358,7 @@ export default {
      * 一致性就是从那儿开始塌的。所以在**下手之前**就把这件事摆出来，
      * 而不是等你点了「分镜」才拦一下。
      */
-    const readiness = project.bible
-      ? await api(`/projects/${project.id}/bible-readiness`).catch(() => null)
-      : null;
+    const readiness = await readinessP;
     const readinessHost = h('div', {});
     if (readiness && !readiness.ok && readiness.total) {
       readinessHost.append(
@@ -324,7 +373,7 @@ export default {
       );
     }
 
-    const chapterInfo = await api(`/projects/${project.id}/chapters`).catch(() => null);
+    const chapterInfo = await chaptersP;
     const hasChapters = (project.chapters || []).length > 0;
     let chapterPanel = null;
 
@@ -1888,7 +1937,7 @@ export default {
      */
     const durationLine = h('div', { class: 'note-line', style: 'display:none' });
     async function paintDurationLine() {
-      const info = await api(`/projects/${project.id}/duration`).catch(() => null);
+      const info = await durationInfo();
       if (!info) return;
       const s2 = info.summary;
       clear(durationLine);

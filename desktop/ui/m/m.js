@@ -156,6 +156,147 @@ function media(p, v) {
   return `/media?p=${encodeURIComponent(p)}${v ? `&v=${v}` : ''}${authKey ? `&k=${encodeURIComponent(authKey)}` : ''}`;
 }
 
+// ───────────────────────── 看图 ─────────────────────────
+
+/**
+ * 全屏看图：捏合缩放、双击放大、拖动、下滑关闭。
+ *
+ * ── 为什么要自己写，而不是靠浏览器自带的双指缩放 ──
+ *
+ * 页面头上写着 `user-scalable=no`。那不是随手加的：手机上一旦点中输入框，
+ * 系统会自动把页面放大到那个框上，放大之后**退不回去**，整个界面就歪了 ——
+ * 而这一端到处都是输入框。所以系统缩放必须关掉。
+ *
+ * 代价就是图也放不大了。而审片时最需要的恰恰是放大 ——「这个人的手怎么了」
+ * 「衣领的花纹和上一镜对不上」，不放大根本看不出来。所以这一层是必须补的。
+ *
+ * ── 手势 ──
+ *
+ *   单指   放大后拖动看别处；没放大时下滑关闭
+ *   双指   捏合缩放，围绕两指中点，不是围绕图心 —— 围绕图心的话
+ *          你想看的那个角落会在放大时跑出屏幕
+ *   双击   在 1 倍和 2.5 倍之间切，落点就是你点的那儿
+ */
+function openViewer(src, alt = '') {
+  let scale = 1;
+  let tx = 0;
+  let ty = 0;
+  let lastTap = 0;
+
+  const img = h('img', { class: 'viewer-img', src, alt });
+  const hint = h('div', { class: 'viewer-hint' }, '双指缩放 · 双击放大 · 下滑关闭');
+  const layer = h('div', { class: 'viewer' },
+    h('button', { class: 'viewer-x', onclick: () => close() }, '✕'),
+    img,
+    hint);
+
+  const apply = () => {
+    img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+  };
+  const close = () => {
+    layer.remove();
+    document.body.style.overflow = '';
+  };
+
+  // 放大之后不能让图被拖到看不见的地方 —— 拖出去就找不回来了
+  const clamp = () => {
+    const maxX = Math.max(0, (img.clientWidth * scale - window.innerWidth) / 2);
+    const maxY = Math.max(0, (img.clientHeight * scale - window.innerHeight) / 2);
+    tx = Math.min(maxX, Math.max(-maxX, tx));
+    ty = Math.min(maxY, Math.max(-maxY, ty));
+  };
+
+  let start = null;
+  layer.addEventListener('touchstart', (e) => {
+    hint.classList.add('gone');
+    if (e.touches.length === 2) {
+      const [a, b] = e.touches;
+      start = {
+        kind: 'pinch',
+        dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
+        scale,
+        // 围绕两指中点缩放：围绕图心的话，你正想看的那个角落会在放大时跑出屏幕
+        cx: (a.clientX + b.clientX) / 2 - window.innerWidth / 2 - tx,
+        cy: (a.clientY + b.clientY) / 2 - window.innerHeight / 2 - ty,
+        tx,
+        ty
+      };
+    } else if (e.touches.length === 1) {
+      start = { kind: 'pan', x: e.touches[0].clientX, y: e.touches[0].clientY, tx, ty };
+    }
+  }, { passive: true });
+
+  layer.addEventListener('touchmove', (e) => {
+    if (!start) return;
+    if (start.kind === 'pinch' && e.touches.length === 2) {
+      e.preventDefault();
+      const [a, b] = e.touches;
+      const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      const next = Math.min(6, Math.max(1, start.scale * (dist / start.dist)));
+      const k = next / start.scale;
+      tx = start.tx - start.cx * (k - 1);
+      ty = start.ty - start.cy * (k - 1);
+      scale = next;
+      clamp();
+      apply();
+    } else if (start.kind === 'pan' && e.touches.length === 1) {
+      const dx = e.touches[0].clientX - start.x;
+      const dy = e.touches[0].clientY - start.y;
+      if (scale > 1.02) {
+        e.preventDefault();
+        tx = start.tx + dx;
+        ty = start.ty + dy;
+        clamp();
+        apply();
+      } else if (dy > 90 && Math.abs(dx) < 60) {
+        // 没放大时下滑关闭 —— 这是手机上最自然的"退出看图"手势
+        close();
+      }
+    }
+  }, { passive: false });
+
+  layer.addEventListener('touchend', () => {
+    if (scale <= 1.02) {
+      scale = 1;
+      tx = 0;
+      ty = 0;
+      apply();
+    }
+    start = null;
+  });
+
+  // 双击：在 1 倍和 2.5 倍之间切，落点就是你点的那儿
+  layer.addEventListener('click', (e) => {
+    const now = Date.now();
+    if (now - lastTap < 300) {
+      if (scale > 1.02) {
+        scale = 1;
+        tx = 0;
+        ty = 0;
+      } else {
+        scale = 2.5;
+        tx = (window.innerWidth / 2 - e.clientX) * 1.5;
+        ty = (window.innerHeight / 2 - e.clientY) * 1.5;
+        clamp();
+      }
+      apply();
+      lastTap = 0;
+      return;
+    }
+    lastTap = now;
+    // 单击空白处关掉；点在图上不关，免得刚要拖就退出去了
+    if (e.target === layer) setTimeout(() => { if (lastTap) close(); }, 300);
+  });
+
+  document.body.style.overflow = 'hidden';
+  document.body.append(layer);
+}
+
+/** 能点开看大图的图片。cap:image-zoom */
+function zoomable(attrs, src, alt) {
+  return h('img', { ...attrs, src, alt, onclick: () => openViewer(src, alt) });
+}
+
 // ───────────────────────── 流水线定义（和电脑端同一套口径）─────────────────────────
 
 const STEPS = [
@@ -583,7 +724,7 @@ function bibleCard(kind, item, v) {
   return h('div', { class: 'card' },
     h('div', { class: 'row' },
       item.sheetPath
-        ? h('img', { class: 'sheet-thumb', src: media(item.sheetPath, v), loading: 'lazy', alt: item.name })
+        ? zoomable({ class: 'sheet-thumb', loading: 'lazy' }, media(item.sheetPath, v), item.name)
         : h('div', { class: 'sheet-thumb blank' }, '无图'),
       h('div', { class: 'grow' },
         h('b', {}, item.name),
@@ -663,7 +804,7 @@ function paintShots() {
       s.videoPath
         ? h('video', { class: `shot-media ${portrait ? 'portrait' : ''}`, src: media(s.videoPath, v), controls: true, preload: 'metadata', playsinline: true })
         : s.imagePath
-          ? h('img', { class: `shot-media ${portrait ? 'portrait' : ''}`, src: media(s.imagePath, v), loading: 'lazy', alt: `第 ${s.index} 镜` })
+          ? zoomable({ class: `shot-media ${portrait ? 'portrait' : ''}`, loading: 'lazy' }, media(s.imagePath, v), `第 ${s.index} 镜`)
           : h('div', { class: 'shot-media', style: 'display:flex;align-items:center;justify-content:center;color:var(--ink-faint);font-size:13px' }, '还没出图'),
       h('div', { class: 'shot-info' },
         h('div', { class: 'shot-no' }, `SH ${String(s.index).padStart(3, '0')} · ${Number(s.duration).toFixed(1)}s`),
