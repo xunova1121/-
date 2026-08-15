@@ -34,14 +34,35 @@ const srv = await import('/home/user/-/desktop/core/server.js');
 
 settings.patch({ autoCheckOnStart: false });
 const proj = store.create({ title: '手机端测试', aspectRatio: '9:16', script: '阿澜在码头巡查。' });
+/**
+ * 用**真文件**做素材，不是编几个路径。
+ * 媒体接口只放行数据目录之内的文件，而手机端的图和视频靠查询串带配对码 ——
+ * 拿假路径测的话，这条最容易坏的链路（图打不开）根本测不到。
+ */
+const assetDir = store.assetDir(proj.id);
+const PIXEL = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64'
+);
+const asset = (name, buf = PIXEL) => {
+  const f = path.join(assetDir, name);
+  fs.writeFileSync(f, buf);
+  return f;
+};
 store.update(proj.id, (p) => {
   p.bible = { style: { anchor: '国风', negative: '' },
     characters: [{ name: '阿澜', appearance: '短发', seed: 1, variants: [{ id: 'v-default', name: '默认造型', sheetPath: 'x.png' }], sheetPath: 'x.png' }],
     scenes: [], props: [] };
   p.shots = [
-    { id: 's1', index: 1, characters: ['阿澜'], description: '阿澜走向栈桥', camera: '中景', dialogue: '设备正常。', speaker: '阿澜', duration: 4, consistency: { score: 88, pass: true } },
-    { id: 's2', index: 2, characters: ['阿澜'], description: '阿澜蹲下查看缆绳', camera: '特写', dialogue: '', duration: 3 }
+    { id: 's1', index: 1, characters: ['阿澜'], description: '阿澜走向栈桥', camera: '中景', dialogue: '设备正常。', speaker: '阿澜', duration: 4, consistency: { score: 88, pass: true }, videoPath: asset('v1.mp4'), audioPath: asset('a1.mp3'), imagePath: asset('i1.png') },
+    { id: 's2', index: 2, characters: ['阿澜'], description: '阿澜蹲下查看缆绳', camera: '特写', dialogue: '', duration: 3, videoPath: asset('v2.mp4'), imagePath: asset('i2.png') }
   ];
+  p.outputs = {
+    video: asset('final.mp4'),
+    subtitle: asset('final.srt', Buffer.from('1\n00:00:00,000 --> 00:00:03,850\n设备正常。\n')),
+    seconds: 7,
+    durationPolicy: 'trim'
+  };
   p.stageStatus = { ...p.stageStatus, bible: 'done', script: 'done' };
   return p;
 });
@@ -94,26 +115,58 @@ const shots = await page.locator('.shot').count();
 console.log('④ 分镜卡片数：', shots, shots === 2 ? '✓' : '✕');
 console.log('   台词和说话人：', /阿澜：「设备正常。」/.test(await page.locator('#app').innerText()) ? '✓' : '✕');
 
-// ⑤ 成片
-await page.locator('.tab', { hasText: '成片' }).click();
-await page.waitForTimeout(500);
-console.log('⑤ 还没成片时：', /还没有成片/.test(await page.locator('#app').innerText()) ? '说清楚了 ✓' : '✕');
+// ⑤ 改文案：审片的完整回路是"看到不对 → 改一句 → 重出"，缺了中间那步等于白看
+await page.locator('button:has-text("改文案")').first().click();
+await page.waitForTimeout(300);
+await page.locator('.shot textarea').first().fill('阿澜停在栈桥尽头远眺');
+await page.locator('button:has-text("保存文案")').first().click();
+await page.waitForTimeout(1200);
+const saved = store.read(proj.id).shots.find((x) => x.id === 's1');
+console.log('⑤ 手机上改文案存下来了吗：', saved.description === '阿澜停在栈桥尽头远眺' ? '存下了 ✓' : `✕ ${saved.description}`);
 
-// ⑥ PWA 三件套
+// ⑥ 成片 + 交给剪映的素材
+await page.locator('.tab', { hasText: '成片' }).click();
+await page.waitForTimeout(700);
+const filmText = await page.locator('#app').innerText();
+console.log('⑥ 成片页：', /成片 mp4/.test(filmText) ? '有成片 ✓' : '✕');
+console.log('   字幕：', /字幕 \.srt/.test(filmText) ? '✓' : '✕');
+console.log('   每镜片段：', /第 1 镜/.test(filmText) && /第 2 镜/.test(filmText) ? '都列出来了 ✓' : '✕');
+console.log('   配音轨：', /配音/.test(filmText) ? '✓' : '✕');
+const saveBtns = await page.locator('a:has-text("存到手机")').count();
+console.log('   可一键存的素材数：', saveBtns, saveBtns >= 4 ? '✓' : '✕');
+
+// ⑦ 项目切换
+console.log('⑦ 单个项目时不摆下拉：', (await page.locator('.top-pick').count()) === 0 ? '✓' : '✕（多余的控件）');
+
+// ⑧ 往后全跑
+await page.locator('.tab', { hasText: '流水线' }).click();
+await page.waitForTimeout(500);
+console.log('⑧ 每步都能"往后全跑"：', (await page.locator('button:has-text("往后全跑")').count()) === 6 ? '✓' : '✕');
+
+// 手机上看图靠查询串带配对码 —— 这条链路坏了的表现是"全是碎图"，而页面本身一切正常
+const shotImg = store.read(proj.id).shots[0].imagePath;
+const withK = await fetch(`${base}/media?p=${encodeURIComponent(shotImg)}&k=${token}`);
+const withoutK = await fetch(`${base}/media?p=${encodeURIComponent(shotImg)}`);
+console.log('   带码取图：', withK.status === 200 ? '✓' : `✕ ${withK.status}`,
+  '｜不带码：', withoutK.status === 401 ? '✓ 挡住' : `✕ ${withoutK.status}`);
+
+// ⑨ PWA 三件套
 const man = await fetch(`${base}/m/manifest.webmanifest`);
 const sw = await fetch(`${base}/m/sw.js`);
 const icon = await fetch(`${base}/m/icon-192.png`);
-console.log('⑥ manifest / sw / icon：', [man.status, sw.status, icon.status].join(' '),
+console.log('⑨ manifest / sw / icon：', [man.status, sw.status, icon.status].join(' '),
   man.status === 200 && sw.status === 200 && icon.status === 200 ? '✓' : '✕');
 
-// ⑦ 触控目标够不够大（拇指按不中的按钮等于没有）
+// ⑩ 触控目标够不够大（拇指按不中的按钮等于没有）
 const small = await page.evaluate(() =>
   [...document.querySelectorAll('button, .tab, a.btn')]
     .map((el) => ({ t: el.innerText.trim().slice(0, 8), h: Math.round(el.getBoundingClientRect().height) }))
     .filter((x) => x.h > 0 && x.h < 36));
-console.log('⑦ 小于 36px 的可点元素：', small.length ? JSON.stringify(small) : '没有 ✓');
+console.log('⑩ 小于 36px 的可点元素：', small.length ? JSON.stringify(small) : '没有 ✓');
 
-console.log('\n页面报错：', errs.length ? errs.slice(0, 4) : '无');
+// 第 ② 步是**故意**敲错配对码，那一次 401 是预期之内的，不算页面报错
+const realErrs = errs.filter((e) => !/401/.test(e));
+console.log('\n页面报错：', realErrs.length ? realErrs.slice(0, 4) : '无');
 await b.close();
 srv.stopLan();
 process.exit(0);

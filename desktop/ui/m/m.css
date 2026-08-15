@@ -51,6 +51,21 @@ html, body {
   gap: 10px;
 }
 .top-title { font-weight: 600; font-size: 16px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 项目切换：手上同时做着几部片子是常事 */
+.top-pick {
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+}
+textarea { font-family: inherit; }
 
 /* ── 内容 ── */
 .body { flex: 1; padding: 12px 14px calc(env(safe-area-inset-bottom) + 76px); }

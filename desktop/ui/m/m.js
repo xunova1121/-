@@ -158,6 +158,7 @@ function stateOf(project, id) {
 
 const app = document.querySelector('#app');
 let project = null;
+let projects = [];
 let tab = 'flow';
 const job = { running: false, label: '', message: '', fail: 0 };
 
@@ -213,7 +214,16 @@ function paintPair(reason = '') {
 function paint() {
   clear(app).append(
     h('div', { class: 'top' },
-      h('div', { class: 'top-title' }, project?.title || '未来创梦'),
+      // 手上同时做着几部片子是常事 —— 写死"第一个项目"等于一半时候打开的是错的那部
+      projects.length > 1
+        ? h('select', {
+            class: 'top-pick',
+            onchange: async (e) => {
+              localStorage.setItem(PROJ_STORE, e.target.value);
+              await reload();
+            }
+          }, projects.map((p) => h('option', { value: p.id, selected: p.id === project?.id }, p.title)))
+        : h('div', { class: 'top-title' }, project?.title || '未来创梦'),
       h('button', {
         class: 'btn sm',
         onclick: async () => {
@@ -275,7 +285,20 @@ function paintFlow() {
           class: 'btn sm',
           disabled: job.running,
           onclick: () => runStage(s.id, s.label)
-        }, st === 'pending' ? '开始' : '继续'))
+        }, st === 'pending' ? '开始' : '继续'),
+        // 出门在外最想按的其实是这个：把剩下几步一次串完，回去直接看成片。
+        // 从这一步往后跑，前面几步的产出原样保留 —— 不重跑、不重复计费
+        h('button', {
+          class: 'btn sm',
+          disabled: job.running,
+          title: '从这一步一路跑到合成',
+          onclick: async () => {
+            const rest = STEPS.length - i;
+            // eslint-disable-next-line no-alert
+            if (!confirm(`从「${s.label}」一路跑到合成，共 ${rest} 步。视频那步按镜数计费，可能是最大的一笔开销。确定？`)) return;
+            runStage('all', `${s.label} → 合成`, { from: s.id });
+          }
+        }, '往后全跑'))
     );
   });
 
@@ -327,43 +350,147 @@ function paintShots() {
                 disabled: job.running,
                 onclick: () => regen(s, 'video')
               }, '重出这段视频')
-            : null)));
+            : null),
+        editRow(s)));
   });
 }
 
+/**
+ * 就地改这一镜的文案。
+ *
+ * 审片的完整回路是**看到不对 → 改一句 → 重出**，缺了中间那步，
+ * 手机端就只剩"看到不对，记在心里回去再说"—— 而回到电脑前你多半已经忘了是哪一镜。
+ *
+ * 只放开描述和时长两样。景别、技法、变体那些在手机上改起来又慢又容易点错，
+ * 而且它们不是"审片当场想改"的东西 —— 描述才是。
+ */
+function editRow(s) {
+  const box = h('div', { style: 'display:none;margin-top:10px' });
+  const desc = h('textarea', {
+    rows: 3,
+    style: 'width:100%;min-height:76px;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface-2);color:var(--ink);font:inherit;font-size:16px'
+  }, s.description || '');
+  const dur = h('input', { type: 'number', step: '0.5', min: '1', max: '20', value: String(s.duration ?? 4), style: 'max-width:110px' });
+
+  const save = h('button', { class: 'btn sm primary grow' }, '保存文案');
+  save.onclick = async () => {
+    save.disabled = true;
+    try {
+      await api(`/projects/${project.id}/shots/${s.id}`, {
+        method: 'PATCH',
+        body: { description: desc.value, duration: Number(dur.value) || s.duration }
+      });
+      toast('已保存。重出这一镜才会按新描述生成', 'ok');
+      await reload();
+    } catch (err) {
+      toast(err.message, 'err');
+      save.disabled = false;
+    }
+  };
+
+  const toggle = h('button', {
+    class: 'btn sm grow',
+    onclick: () => {
+      const open = box.style.display === 'none';
+      box.style.display = open ? '' : 'none';
+      toggle.textContent = open ? '收起' : '改文案';
+    }
+  }, '改文案');
+
+  box.append(
+    desc,
+    h('div', { class: 'row', style: 'margin-top:9px' },
+      h('span', { class: 'muted' }, '时长（秒）'),
+      dur),
+    h('div', { class: 'row', style: 'margin-top:9px' }, save),
+    h('div', { class: 'muted', style: 'margin-top:7px' },
+      '保存只改文案，不重出 —— 一般是连着改好几镜再统一重出，改一个字就烧一次钱不划算。')
+  );
+
+  return [h('div', { class: 'row', style: 'margin-top:8px' }, toggle), box];
+}
+
+/** 一个可以存到手机上的素材行 */
+function assetRow(label, note, href) {
+  return h('div', { class: 'row', style: 'padding:10px 0;border-bottom:1px solid var(--line-soft)' },
+    h('div', { class: 'grow' },
+      h('div', {}, label),
+      note ? h('div', { class: 'muted', style: 'margin-top:2px' }, note) : null),
+    h('a', {
+      class: 'btn sm',
+      href,
+      download: '',
+      target: '_blank',
+      style: 'display:flex;align-items:center;text-decoration:none'
+    }, '存到手机'));
+}
+
+/**
+ * 成片 + 交给剪映的素材。
+ *
+ * 为什么不在这儿做精剪：剪映的转场、音乐库、花字、封面是几百人做了几年的东西，
+ * 硬碰硬赢不了。我们该做的是**把素材备齐**，让你进剪映就能直接开工：
+ *   成片        直接发出去就能用的那一版
+ *   每镜片段    进剪映后按顺序拖进时间线，想换顺序、想剪掉半秒都在那边做
+ *   字幕 SRT    剪映专业版可以直接导入，省掉一次语音识别
+ *   每条配音    想重配某一句时用得上
+ *
+ * 手机上"存到相册"最稳的还是**长按视频 → 存储视频**，下载按钮在部分浏览器里
+ * 会存进"文件"而不是相册 —— 所以两条路都写出来，不替用户猜。
+ */
 function paintFilm() {
   const out = project?.outputs;
-  if (!out?.video) {
-    return h('div', { class: 'card muted' },
-      '还没有成片。流水线跑到第 06 步「合成」之后，这里就能直接看。');
-  }
-  const v = Date.parse(project.updatedAt || '') || 0;
-  return [
-    h('div', { class: 'card', style: 'padding:0;overflow:hidden' },
-      h('video', {
-        src: media(out.video, v),
-        controls: true,
-        playsinline: true,
-        style: 'width:100%;display:block;background:#000;max-height:70vh'
-      })),
-    h('div', { class: 'card' },
-      h('div', { class: 'row', style: 'margin-bottom:10px' },
-        h('b', { class: 'grow' }, '存到手机'),
-        out.seconds ? h('span', { class: 'muted' }, `${out.seconds}s`) : null),
-      h('p', { class: 'muted' },
-        '长按上面的画面选「存储视频」，或者点下面的链接下载。存进相册之后用剪映精剪 —— ' +
-        '转场、音乐、花字那些它做得比我们好，我们负责把素材备齐。'),
-      h('div', { class: 'row', style: 'margin-top:10px' },
-        h('a', { class: 'btn sm grow', href: media(out.video, v), download: '', target: '_blank', style: 'display:flex;align-items:center;justify-content:center;text-decoration:none' }, '下载成片'),
-        out.subtitle
-          ? h('a', { class: 'btn sm grow', href: media(out.subtitle, v), download: '', target: '_blank', style: 'display:flex;align-items:center;justify-content:center;text-decoration:none' }, '下载字幕')
-          : null))
-  ];
+  const v = Date.parse(project?.updatedAt || '') || 0;
+  const shots = (project?.shots || []).slice().sort((a, b) => a.index - b.index);
+  const clips = shots.filter((s) => s.videoPath);
+  const voices = shots.filter((s) => s.audioPath);
+
+  const head = out?.video
+    ? [
+        h('div', { class: 'card', style: 'padding:0;overflow:hidden' },
+          h('video', {
+            src: media(out.video, v),
+            controls: true,
+            playsinline: true,
+            style: 'width:100%;display:block;background:#000;max-height:70vh'
+          })),
+        h('div', { class: 'card' },
+          h('div', { class: 'row', style: 'margin-bottom:8px' },
+            h('b', { class: 'grow' }, '成片'),
+            out.seconds ? h('span', { class: 'muted' }, `${out.seconds}s`) : null),
+          h('p', { class: 'muted' },
+            '存到相册最稳的办法是长按上面的画面 → 存储视频；下面的按钮在有些浏览器里会存进「文件」而不是相册。'),
+          assetRow('成片 mp4', out.durationPolicy === 'trim' ? '按分镜时长裁剪过' : '保留了完整片段', media(out.video, v)),
+          out.subtitle ? assetRow('字幕 .srt', '剪映专业版可直接导入，省一次语音识别', media(out.subtitle, v)) : null)
+      ]
+    : [
+        h('div', { class: 'card muted' },
+          '还没有成片。流水线跑到最后一步「合成」之后，这里就能直接看。' +
+          (clips.length ? `不过 ${clips.length} 段镜头片段已经在下面了，现在就能拿去剪映。` : ''))
+      ];
+
+  const material = clips.length || voices.length
+    ? h('div', { class: 'card' },
+        h('b', {}, '交给剪映的素材'),
+        h('p', { class: 'muted', style: 'margin:6px 0 4px' },
+          '精剪在剪映里做 —— 转场、音乐、花字那些它做得比我们好。这里负责把素材备齐：' +
+          '每镜片段按顺序存下来，进剪映依次拖进时间线就是排好的初剪。'),
+        ...clips.map((s) =>
+          assetRow(
+            `第 ${s.index} 镜`,
+            `${Number(s.duration).toFixed(1)}s · ${(s.description || '').slice(0, 18)}`,
+            media(s.videoPath, v)
+          )),
+        ...voices.map((s) =>
+          assetRow(`第 ${s.index} 镜 配音`, `${s.speakerUsed || s.speaker || '旁白'}：${(s.dialogue || '').slice(0, 14)}`, media(s.audioPath, v))))
+    : null;
+
+  return [...head, material];
 }
 
 // ───────────────────────── 动作 ─────────────────────────
 
-async function runStage(stageId, label) {
+async function runStage(stageId, label, extra = {}) {
   if (job.running) return;
   job.running = true;
   job.label = label;
@@ -371,7 +498,7 @@ async function runStage(stageId, label) {
   job.fail = 0;
   paint();
   try {
-    await stream(`/projects/${project.id}/stage/${stageId}`, {}, (ev) => {
+    await stream(`/projects/${project.id}/stage/${stageId}`, extra, (ev) => {
       if (ev.type === 'error') {
         job.fail += 1;
         job.message = ev.message || '失败';
@@ -431,6 +558,7 @@ function updateLive() {
 
 async function reload() {
   const list = await api('/projects').catch(() => []);
+  projects = list;
   const wanted = localStorage.getItem(PROJ_STORE);
   const pick = list.find((p) => p.id === wanted) || list[0];
   project = pick ? await api(`/projects/${pick.id}`).catch(() => null) : null;
