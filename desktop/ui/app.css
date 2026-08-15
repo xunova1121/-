@@ -270,6 +270,11 @@ body { background: var(--ground); }
   color: var(--ink-dim);
 }
 .job-hud[hidden] { display: none; }
+/* 结果提示：成了描一道绿边，败了描一道红边。扫一眼就知道要不要去看 */
+.job-hud.good { border-color: color-mix(in srgb, var(--good) 55%, var(--line)); }
+.job-hud.bad { border-color: color-mix(in srgb, var(--alarm) 60%, var(--line)); }
+.job-hud.good .job-hud-head { color: var(--good); }
+.job-hud.bad .job-hud-head { color: var(--alarm); }
 .job-hud-head { display: flex; align-items: center; gap: 7px; color: var(--ink); font-size: 12.5px; }
 .job-hud-x {
   margin-left: auto;

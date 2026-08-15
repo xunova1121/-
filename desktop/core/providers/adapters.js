@@ -543,6 +543,9 @@ export async function generateVideo({
         body: {
           model,
           input: { prompt, img_url: images[0] },
+          // 万相图生视频的画幅**跟着首帧图走**，这里不额外塞尺寸字段 ——
+          // 百炼对未知参数是严格的，多给一个反而会把整个任务顶掉。
+          // 所以这条路上"比例对不对"取决于首帧图，而首帧图出完就量过了（见 checkRatio）
           parameters: { resolution: finalResolution, duration: actualDuration }
         }
       };
@@ -558,6 +561,10 @@ export async function generateVideo({
           ...(endFrame ? { image_tail: endFrame } : {}),
           prompt,
           duration: String(actualDuration), // 可灵收的是字符串，不是数字
+          // 画幅这一条以前整条路径都没发过 —— 竖屏项目会稳定地出成横片。
+          // 图生视频时可灵通常跟着首帧图走，但显式给上更保险，也不至于在
+          // 首帧图本身比例就不对时跟着一起错下去
+          aspect_ratio: finalRatio,
           mode: 'std'
         }
       };

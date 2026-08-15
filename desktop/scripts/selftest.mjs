@@ -372,6 +372,8 @@ const upstream = http.createServer((req, res) => {
     req.on('data', (c) => (raw += c));
     req.on('end', () => {
       upstream.lastVideoBody = JSON.parse(raw || '{}');
+      upstream.videoBodies = upstream.videoBodies || [];
+      upstream.videoBodies.push(upstream.lastVideoBody);
       upstream.videoCalls = (upstream.videoCalls || 0) + 1;
       upstream.videoPolls = 0;
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -401,8 +403,23 @@ const upstream = http.createServer((req, res) => {
       upstream.imagePrompts.push(body.prompt);
       upstream.imageSeeds = upstream.imageSeeds || [];
       upstream.imageSeeds.push(body.seed);
+      upstream.imageBodies = upstream.imageBodies || [];
+      upstream.imageBodies.push(body);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ data: [{ url: `${upstreamUrl}/pixel.png` }] }));
+    });
+    return undefined;
+  }
+
+  // OpenAI 兼容家族的 /audio/speech 直接回二进制音频
+  if (url.pathname === '/v3/audio/speech') {
+    let raw = '';
+    req.on('data', (c) => (raw += c));
+    req.on('end', () => {
+      upstream.ttsBodies = upstream.ttsBodies || [];
+      upstream.ttsBodies.push(JSON.parse(raw || '{}'));
+      res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
+      res.end(Buffer.from('ID3fake-audio'));
     });
     return undefined;
   }
@@ -2193,6 +2210,78 @@ section('视频提示词的详略');
 
 // 出图/出视频跑完之后，界面只该换**那一张卡片**。为此重新拉一遍整个项目
 // 既慢又会把正在编辑的输入框冲掉 —— 那就是"生成一下，我改的字没了"。
+// 画幅错了不是"看着别扭"这么简单：图生视频会继承首帧图的比例，
+// 于是这个错一路传到成片 —— 而任务全程"成功"，没有任何报错。
+section('出图的画幅要真的对');
+{
+  const imgsize = await import('../core/imgsize.js');
+
+  // 真造几张图出来量，不是对着常量断言
+  const dir = path.join(SANDBOX, 'imgsize');
+  fs.mkdirSync(dir, { recursive: true });
+  const mkPng = (w, h) => {
+    // 手搓一个只有 IHDR 的 PNG 头：读尺寸只看这一段
+    const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const ihdr = Buffer.alloc(25);
+    ihdr.writeUInt32BE(13, 0);
+    ihdr.write('IHDR', 4);
+    ihdr.writeUInt32BE(w, 8);
+    ihdr.writeUInt32BE(h, 12);
+    const f = path.join(dir, `${w}x${h}.png`);
+    fs.writeFileSync(f, Buffer.concat([sig, ihdr]));
+    return f;
+  };
+
+  check('量得出 PNG 的真实宽高',
+    JSON.stringify(imgsize.readSize(mkPng(720, 1280))) === '{"width":720,"height":1280}',
+    JSON.stringify(imgsize.readSize(mkPng(720, 1280))));
+  check('不是图就回 null，不瞎猜', imgsize.readSize(path.join(dir, '没有这个文件.png')) === null);
+
+  check('横竖搞反要被抓出来（9:16 的项目拿到 1280×720）',
+    imgsize.matchesRatio({ width: 1280, height: 720 }, '9:16')?.flipped === true);
+  check('对上了就是对上了', imgsize.matchesRatio({ width: 1280, height: 720 }, '16:9')?.ok === true);
+  // 厂商常把 720×1280 出成 704×1280（对齐到 16 的倍数），那不算比例不对，
+  // 为这个报警只会让人学会忽略警告
+  check('几个像素的对齐偏差不算错',
+    imgsize.matchesRatio({ width: 704, height: 1280 }, '9:16')?.ok === true,
+    JSON.stringify(imgsize.matchesRatio({ width: 704, height: 1280 }, '9:16')));
+
+  // 发出去的尺寸要跟着项目画幅走
+  const adapters = await import('../core/providers/adapters.js');
+  check('竖屏项目发出去的是竖图尺寸', adapters.ratioToSize('9:16') === '720*1280', adapters.ratioToSize('9:16'));
+  check('横屏项目发出去的是横图尺寸', adapters.ratioToSize('16:9') === '1280*720', adapters.ratioToSize('16:9'));
+}
+
+// 光有换算表不够：得确认**真正发到厂商那儿的请求体**里带着竖图尺寸
+section('竖屏项目真的按竖屏出');
+{
+  const vp = await (
+    await fetch(`${appUrl}/api/projects`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '竖屏短剧', aspectRatio: '9:16' })
+    })
+  ).json();
+  check('新建项目时的画幅存下来了', vp.aspectRatio === '9:16', vp.aspectRatio);
+
+  store.update(vp.id, (p) => {
+    p.bible = { style: { anchor: '国风', negative: '' },
+      characters: [{ name: '阿澜', appearance: '短发', seed: 7, variants: [{ id: 'v-default', name: '默认造型' }] }],
+      scenes: [], props: [] };
+    p.shots = [{ id: 'r1', index: 1, characters: ['阿澜'], description: '阿澜走向栈桥', camera: '中景', duration: 4 }];
+    return p;
+  });
+
+  upstream.lastImageBody = null;
+  await ndjson(`/projects/${vp.id}/stage/assets`, {});
+  check('出图请求体里是竖图尺寸（720x1280），不是默认横图',
+    upstream.lastImageBody?.size === '720x1280', String(upstream.lastImageBody?.size));
+
+  await ndjson(`/projects/${vp.id}/stage/video`, {});
+  const vtext = (upstream.lastVideoBody?.content || []).find((c) => c.type === 'text')?.text || '';
+  check('出视频也带着 9:16（方舟是拼在提示词末尾的 --ratio）',
+    / --ratio 9:16/.test(vtext), vtext.slice(-60));
+}
+
 section('只取一镜（界面按镜增量刷新）');
 {
   const live = await (await fetch(`${appUrl}/api/projects/${project.id}`)).json();
@@ -3106,6 +3195,148 @@ section('界面能不能拿到该拿的东西');
         media.headers.get('cache-control'));
     }
   }
+}
+
+/**
+ * 全流程走一遍。
+ *
+ * 前面每一段都在验"某一件事对不对"，这一段验的是**连起来还成不成立** ——
+ * 一条竖屏短剧从剧本一路跑到合成，每一步的产出都作为下一步的输入。
+ * 这类问题只有整条跑才暴露得出来：画幅在某一步丢了、风格锚在某一步没进提示词、
+ * 同一个角色在两镜之间换了种子。逐段测全绿、连起来照样出片失败，
+ * 就是因为没有这一段。
+ */
+section('全流程：竖屏短剧从剧本到合成');
+{
+  upstream.imageBodies = [];
+  upstream.videoBodies = [];
+  upstream.imagePrompts = [];
+
+  const e2e = await (
+    await fetch(`${appUrl}/api/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: '全流程·竖屏',
+        aspectRatio: '9:16',
+        styleId: 'ink',
+        script: '阿澜在码头巡查，发现缆绳被割断。老周从值班室走出来，问她出了什么事。',
+        targetDuration: 20
+      })
+    })
+  ).json();
+
+  // ① 设定集：文字 + 参考图一步出完
+  const bibleEvents = await ndjson(`/projects/${e2e.id}/stage/bible`, {});
+  let cur = store.read(e2e.id);
+  check('① 设定集跑完，角色/场景都冻结了',
+    cur.bible?.characters?.length > 0 && cur.bible?.scenes?.length > 0,
+    JSON.stringify({ c: cur.bible?.characters?.length, s: cur.bible?.scenes?.length }));
+  check('① 每个条目都出了参考图（缺一张，引用它的每一镜都少一份基准）',
+    [...cur.bible.characters, ...cur.bible.scenes, ...(cur.bible.props || [])].every((x) => x.sheetPath),
+    JSON.stringify([...cur.bible.characters, ...cur.bible.scenes].map((x) => Boolean(x.sheetPath))));
+  check('① 设定图也按竖屏出',
+    upstream.imageBodies.every((b) => b.size === '720x1280'),
+    JSON.stringify([...new Set(upstream.imageBodies.map((b) => b.size))]));
+  check('① 没有整步失败', !bibleEvents.some((e) => e.type === 'error'),
+    JSON.stringify(bibleEvents.filter((e) => e.type === 'error').map((e) => e.message)));
+
+  // ② 分镜
+  await ndjson(`/projects/${e2e.id}/stage/script`, { shotCount: 3 });
+  cur = store.read(e2e.id);
+  check('② 拆出了分镜', cur.shots.length > 0, String(cur.shots.length));
+  check('② 每一镜都引用设定集里已有的场景名（自创的名字会让场景基准图挂不上）',
+    cur.shots.every((sh) => !sh.scene || cur.bible.scenes.some((x) => x.name.includes(sh.scene) || sh.scene.includes(x.name))),
+    JSON.stringify(cur.shots.map((sh) => sh.scene)));
+  check('② 有台词的镜头当场就绑好了说话人（不用等你去点按钮）',
+    cur.shots.filter((sh) => sh.dialogue?.trim()).every((sh) => sh.speakerBy),
+    JSON.stringify(cur.shots.map((sh) => [sh.dialogue, sh.speaker, sh.speakerBy])));
+
+  // ③ 出图
+  const imgBefore = upstream.imageBodies.length;
+  await ndjson(`/projects/${e2e.id}/stage/assets`, {});
+  cur = store.read(e2e.id);
+  const shotImages = upstream.imageBodies.slice(imgBefore);
+  check('③ 每一镜都出了图', cur.shots.every((sh) => sh.imagePath), JSON.stringify(cur.shots.map((sh) => Boolean(sh.imagePath))));
+  check('③ 分镜图全是竖的（画幅在这一步最容易丢）',
+    shotImages.every((b) => b.size === '720x1280'), JSON.stringify([...new Set(shotImages.map((b) => b.size))]));
+  // 风格一致的地基：每一条出图提示词都得带着同一个风格锚，而且在开头
+  check('③ 每条出图提示词都以同一个风格锚开头（风格一致靠它）',
+    shotImages.every((b) => b.prompt.startsWith(cur.bible.style.anchor)),
+    JSON.stringify(shotImages.map((b) => b.prompt.slice(0, 12))));
+  // 同一个角色跨镜头必须是同一颗种子，否则每一镜都是一次新的抽卡
+  const alan = cur.bible.characters[0];
+  const alanShots = cur.shots.filter((sh) => (sh.characters || []).includes(alan.name));
+  check('③ 同一个角色在所有镜头里共用一颗种子',
+    new Set(alanShots.map((sh) => sh.seed)).size <= 1 || alanShots.every((sh) => sh.seed),
+    JSON.stringify(alanShots.map((sh) => sh.seed)));
+  check('③ 出来的图量过尺寸，比例记在镜头上',
+    cur.shots.every((sh) => sh.imageSize), JSON.stringify(cur.shots.map((sh) => sh.imageSize)));
+
+  // ④ 出视频
+  const vidBefore = upstream.videoBodies.length;
+  await ndjson(`/projects/${e2e.id}/stage/video`, {});
+  cur = store.read(e2e.id);
+  const vids = upstream.videoBodies.slice(vidBefore);
+  check('④ 每一镜都出了视频', cur.shots.every((sh) => sh.videoPath), JSON.stringify(cur.shots.map((sh) => Boolean(sh.videoPath))));
+  const vTexts = vids.map((b) => (b.content || []).find((c) => c.type === 'text')?.text || '');
+  check('④ 每一段视频都带着 9:16（画幅一路传到最后一步）',
+    vTexts.every((t) => / --ratio 9:16/.test(t)), JSON.stringify(vTexts.map((t) => t.slice(-24))));
+  check('④ 每一段都以自己那一镜的图为首帧（不然和分镜没关系）',
+    vids.every((b) => (b.content || []).some((c) => c.type === 'image_url')),
+    JSON.stringify(vids.map((b) => (b.content || []).filter((c) => c.type === 'image_url').length)));
+  check('④ 视频提示词里是这一镜的画面描述，不是泛泛的运镜',
+    vTexts.every((t, i) => t.includes((cur.shots[i]?.description || '').slice(0, 6))),
+    JSON.stringify(vTexts.map((t) => t.slice(0, 20))));
+  check('④ 没台词的镜头明确要求不要张嘴（不然人物会在那儿瞎说）',
+    cur.shots.every((sh, i) => Boolean(sh.dialogue?.trim()) || /不要出现说话口型/.test(vTexts[i] || '')),
+    JSON.stringify(cur.shots.map((sh, i) => [Boolean(sh.dialogue), /不要出现说话口型/.test(vTexts[i] || '')])));
+
+  // ⑤ 配音。
+  // 音色表是**跟着 TTS 服务商走**的，所以先在真实路由（百炼有音色表）下分配音色，
+  // 再把合成那一下指到桩上游 —— 这一段验的是流程，不是某一家的接口能不能连通。
+  const assigned = studioModule.assignVoices(e2e.id);
+  check('⑤ 每个角色分到不同音色（两个人同一个声音就分不出谁在说话）',
+    assigned.assigned > 0 && Boolean(assigned.narrator), JSON.stringify(assigned));
+  const ttsBefore = { p: settings.get('ttsProvider'), m: settings.get('ttsModel') };
+  settings.patch({ ttsProvider: 'volcengine', ttsModel: 'stub-tts' });
+  const voiceEvents = await ndjson(`/projects/${e2e.id}/stage/voice`, {});
+  cur = store.read(e2e.id);
+  const needVoice = cur.shots.filter((sh) => sh.dialogue?.trim());
+  check('⑤ 有台词的都配了音', needVoice.every((sh) => sh.audioPath),
+    JSON.stringify(voiceEvents.filter((e) => e.message).map((e) => e.message).slice(-4)));
+  check('⑤ 每个角色一个音色，旁白单独一个',
+    cur.bible.characters.every((c) => c.voice) && Boolean(cur.bible.narratorVoice),
+    JSON.stringify([cur.bible.characters.map((c) => c.voice), cur.bible.narratorVoice]));
+  // 念出去的必须是净台词：署名和括注留着，配音会把"阿澜冒号"一起念出来
+  check('⑤ 发给 TTS 的是净台词，不带署名和括注',
+    (upstream.ttsBodies || []).every((b) => !/[:：]/.test(String(b.input || '').slice(0, 8)) && !/[（(]/.test(b.input || '')),
+    JSON.stringify((upstream.ttsBodies || []).map((b) => b.input)));
+  settings.patch(ttsBefore.p ? { ttsProvider: ttsBefore.p, ttsModel: ttsBefore.m } : {});
+
+  // ⑥ 字幕时间轴：和配音摆放共用同一份，错一处后面全偏
+  const line = studioModule.timelineOf(cur, { policy: 'trim' });
+  const cues = studioModule.buildSubtitles(cur, { policy: 'trim' });
+  check('⑥ 字幕起点落在各自镜头的起点上',
+    cues.every((c) => line.some((r) => Math.abs(r.start - c.start) < 0.001)),
+    JSON.stringify([cues.map((c) => c.start), line.map((r) => r.start)]));
+
+  // ⑦ 合成：这台机器上没有 FFmpeg，那就必须给出**能照着做**的指引，而不是一句失败
+  const composeEvents = await ndjson(`/projects/${e2e.id}/stage/compose`, {});
+  const composeErr = composeEvents.find((e) => e.type === 'error')?.message || '';
+  const ffmpegReady = (await import('../core/ffmpeg.js')).locate({ refresh: true }).available;
+  if (ffmpegReady) {
+    check('⑦ 合成出片', Boolean(store.read(e2e.id).outputs?.video), composeErr);
+  } else {
+    check('⑦ 没装 FFmpeg 时，报的是"去哪儿放这个文件"而不是一句失败',
+      /ffmpeg\.exe|winget|FFmpeg/i.test(composeErr) && /bin/.test(composeErr), composeErr.slice(0, 160));
+  }
+
+  // ⑧ 整条流水线的状态要能自己说清楚跑到哪儿了
+  const finalP = store.read(e2e.id);
+  check('⑧ 前五步的状态都标成完成',
+    ['bible', 'script', 'assets', 'video', 'voice'].every((k) => finalP.stageStatus[k] === 'done'),
+    JSON.stringify(finalP.stageStatus));
 }
 
 section('本地服务防护');

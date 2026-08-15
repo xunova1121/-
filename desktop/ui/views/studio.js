@@ -62,6 +62,10 @@ const job = {
   /** 进度文本。切回来要能接着看，所以留在这儿而不是只写进 DOM */
   log: [],
   failures: [],
+  /** 这一轮成了几个。job.live 在收尾时会被清空，所以单独记一份 */
+  doneCount: 0,
+  /** 跑的是哪一步。结束时 stage 会被清成 null，而结果提示还要用它的名字 */
+  lastStage: null,
   startedAt: 0,
   /** 只保留最新一次渲染的回调 —— 旧的那次已经不在文档里了，没必要留着 */
   onUpdate: null
@@ -88,6 +92,8 @@ function jobReset(projectId) {
   job.live.clear();
   job.log = [];
   job.failures = [];
+  job.doneCount = 0;
+  job.lastStage = null;
 }
 
 export default {
@@ -466,6 +472,7 @@ export default {
       // 这一镜出完了：立刻把**这一张卡**换成最新的（图/视频/复核分数都在里面），
       // 别等整步跑完，也别重画整页
       if (ev.type === 'shot' && ev.status === 'done') {
+        job.doneCount += 1;
         touchedShots.add(ev.shotId);
         refreshShot(ev.shotId);
       }
@@ -612,10 +619,16 @@ export default {
               h('button', { class: 'btn ghost sm', onclick: () => go('providers') }, '去填查任务地址')))
         : null;
 
+      const ratio = project.aspectRatio || state.catalog?.settings?.aspectRatio || '16:9';
       add(stageDetail,
         h('div', { class: 'stage-detail-head' },
           h('div', {},
-            h('div', { class: 'stage-detail-title' }, meta.label),
+            h('div', { class: 'stage-detail-title' }, meta.label,
+              // 画幅在**下手之前**就得看见：竖屏短剧出成横的，整条流水线白跑
+              state.stage === 'assets' || state.stage === 'video'
+                ? h('span', { class: 'badge', style: 'margin-left:8px',
+                    title: '出图和出视频都按这个画幅。改它去「项目」页' }, `画幅 ${ratio}`)
+                : null),
             h('div', { class: 'stage-detail-hint' }, meta.hint)
           ),
           h('div', { class: 'inline' },
@@ -672,6 +685,8 @@ export default {
       if (jobBusy()) return;
       job.projectId = project.id;
       job.stage = stageId;
+      job.lastStage = stageId;
+      job.doneCount = 0;
       job.live.clear();
       job.log = [];
       job.failures = [];
@@ -725,6 +740,8 @@ export default {
       if (jobBusy()) return;
       job.projectId = project.id;
       job.stage = 'video';
+      job.lastStage = 'video';
+      job.doneCount = 0;
       job.live.clear();
       job.log = [];
       job.failures = [];
@@ -762,12 +779,12 @@ export default {
         progressLog.style.display = '';
         syncNav();
         paintStageDetail();
-        paintHud();
+        hideResult();
         return;
       }
       if (kind === 'tick') {
+        // 跑的过程只更新日志和**卡片自己的状态条**，右下角一声不吭
         paintLog();
-        paintHud();
         return;
       }
       // done
@@ -798,60 +815,63 @@ export default {
       }
       syncNav();
       paintStageDetail();
-      paintHud();
+      showResult({
+        ok: job.doneCount,
+        fail: job.failures.length,
+        label: steps.find((x) => x.id === job.lastStage)?.label || '这一轮'
+      });
     }
 
     /**
-     * 右下角那块常驻状态。
+     * 右下角的**结果**提示。
      *
-     * 它解决的是"跑起来之后界面到底在干嘛"这件事 —— 以前答案在页面中部的
-     * 日志框里，而你往下翻去改分镜时它就看不见了。现在钉在右下角：
-     * 哪一步、第几个、正在跑哪一镜、失败几个，一直在。
-     * 而且它是**唯一**需要随进度重画的东西，其他地方一动不动。
+     * 刻意不是一块常驻面板：跑的时候盯着一个不停跳数字的框没有意义，
+     * 而且它一直压在右下角会挡住分镜卡 —— 而生成那十几分钟正是拿来改文案的。
+     *
+     * "现在跑到哪一镜"这件事在**卡片上**说（每张卡自己的状态条），那儿才是它该在的地方。
+     * 这里只在**出结果**时冒一次：几成几败，成功的几秒后自己消失，
+     * 失败的留着不走 —— 失败原因是要读的，读完自己关。
      */
-    function paintHud() {
+    let hudTimer = null;
+    function showResult({ ok, fail, label }) {
       const hud = document.querySelector('#job-hud');
       if (!hud) return;
-      if (!jobBusy() && !job.failures.length) {
-        hud.hidden = true;
-        clear(hud);
-        return;
-      }
-      const meta = steps.find((x) => x.id === job.stage);
-      const running = [...job.live.entries()].filter(([, v]) => v.status === 'running');
-      const finished = [...job.live.values()].filter((v) => v.status === 'done').length;
-      const last = running[0]?.[1]?.message || '';
-      const shotOf = (id) => (project.shots || []).find((x) => x.id === id);
-
+      clearTimeout(hudTimer);
       clear(hud);
       hud.hidden = false;
+      hud.className = `job-hud ${fail ? 'bad' : 'good'}`;
       add(hud,
         h('div', { class: 'job-hud-head' },
-          jobBusy() ? h('span', { class: 'spin' }, '◐') : h('span', {}, '✓'),
-          h('b', {}, jobBusy() ? (meta?.label || (job.shots.size ? '单镜重出' : '运行中')) : '这一轮结束'),
+          h('span', {}, fail ? '✕' : '✓'),
+          h('b', {}, fail ? `${label}：${fail} 项失败` : `${label}完成`),
           h('button', {
             class: 'job-hud-x',
-            title: '收起。任务照常在后台跑',
             onclick: () => { hud.hidden = true; }
           }, '×')),
-        running.length
-          ? h('div', { class: 'job-hud-line' },
-              running.slice(0, 2).map(([id, v]) => {
-                const sh = shotOf(id);
-                return h('div', {}, `${sh ? `第 ${sh.index} 镜` : ''} ${v.message || '生成中…'}`);
-              }))
-          : last ? h('div', { class: 'job-hud-line' }, last) : null,
-        h('div', { class: 'job-hud-foot' },
-          `已完成 ${finished}`,
-          job.failures.length ? h('span', { style: 'color:var(--alarm)' }, ` · 失败 ${job.failures.length}`) : null,
-          h('button', {
-            class: 'btn ghost sm',
-            style: 'margin-left:auto',
-            onclick: () => {
-              progressLog.style.display = progressLog.style.display === 'none' ? '' : 'none';
-              if (progressLog.style.display === '') progressLog.scrollIntoView({ block: 'center' });
-            }
-          }, '日志')));
+        h('div', { class: 'job-hud-line' },
+          fail
+            ? (job.failures[0]?.message || '').slice(0, 120)
+            : `${ok} 项完成`),
+        fail
+          ? h('div', { class: 'job-hud-foot' },
+              h('button', {
+                class: 'btn ghost sm',
+                onclick: () => {
+                  progressLog.style.display = '';
+                  failHost.scrollIntoView({ block: 'center' });
+                  hud.hidden = true;
+                }
+              }, '看失败原因'))
+          : null);
+      // 成功的自己走；失败的留着 —— 那句报错是要读的
+      if (!fail) hudTimer = setTimeout(() => { hud.hidden = true; }, 6000);
+    }
+
+    function hideResult() {
+      const hud = document.querySelector('#job-hud');
+      if (!hud) return;
+      clearTimeout(hudTimer);
+      hud.hidden = true;
     }
 
     /**
@@ -978,6 +998,8 @@ export default {
     async function regenerate(shot, kind, picker, btn) {
       if (job.shots.has(shot.id)) return;
       job.projectId = project.id;
+      job.lastStage = kind === 'video' ? 'video' : 'assets';
+      job.doneCount = 0;
       job.shots.add(shot.id);
       job.live.set(shot.id, { status: 'running', message: '提交中…' });
       btn.disabled = true;
@@ -1397,6 +1419,16 @@ export default {
                 // 描述改了、图还是改之前那张。这时候去出视频，首帧是旧画面、
                 // 提示词是新描述，两边打架 —— 而模型多半跟着图走，于是"改了等于没改"。
                 // 这条必须摆在卡片上，不能藏在折叠面板里
+                // 出来的图比例不对：这个错会顺着首帧图传到视频，再传到成片。
+                // 越早看见越好 —— 发现得晚等于整条流水线白跑
+                shot.imageSize && shot.imageSize.ok === false
+                  ? h('span', {
+                      class: 'badge warn',
+                      title:
+                        `这张图是 ${shot.imageSize.width}×${shot.imageSize.height}，和项目画幅 ${shot.imageSize.wanted} 对不上。` +
+                        '这一家多半没吃尺寸参数。图生视频会继承首帧图的比例，不换一家重出的话成片也是这个比例。'
+                    }, `比例不符 ${shot.imageSize.width}×${shot.imageSize.height}`)
+                  : null,
                 shot.imagePath && shot.editedAt && (!shot.imageAt || Date.parse(shot.editedAt) > Date.parse(shot.imageAt))
                   ? h('span', {
                       class: 'badge warn',

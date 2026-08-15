@@ -19,6 +19,7 @@ import { authHeadersForUrl } from '../providers/index.js';
 import * as consistency from './consistency.js';
 import * as continuity from './continuity.js';
 import * as speakerLib from './speaker.js';
+import * as imgsize from '../imgsize.js';
 import * as ffmpeg from '../ffmpeg.js';
 import * as imghash from '../imghash.js';
 import { safeFileName } from '../paths.js';
@@ -297,6 +298,7 @@ export async function buildBible(projectId, { onEvent, regenerate = false } = {}
 
       const dest = path.join(dir, `ref-${kind}-${safeFileName(item.name)}-${safeFileName(variant.id)}.png`);
       await saveMedia(image, dest, onEvent);
+      checkRatio(dest, project.aspectRatio || settings.get('aspectRatio'), `${label} 的设定图`, onEvent);
       const modelRef = await toModelRef(dest, { onEvent });
 
       store.update(projectId, (p) => {
@@ -981,6 +983,7 @@ export async function generateAssets(projectId, { only = null, chapterId = null,
 
       const dest = path.join(dir, `${shot.id}.png`);
       await saveMedia(result, dest, onEvent);
+      const size = checkRatio(dest, project.aspectRatio || settings.get('aspectRatio'), `第 ${shot.index} 镜`, onEvent);
       const modelRef = await toModelRef(dest, { onEvent });
 
       store.update(projectId, (p) => {
@@ -993,6 +996,8 @@ export async function generateAssets(projectId, { only = null, chapterId = null,
           // 出图时间。和 editedAt 一比就知道"这张图是不是按现在这版描述出的" ——
           // 改完描述不重出图就去出视频，首帧是旧画面、提示词是新描述，两边必然打架
           t.imageAt = new Date().toISOString();
+          // 真实宽高。比例不对时卡片上要挂个警示 —— 这个错会顺着首帧图传到视频
+          t.imageSize = size || null;
           t.bibleRefs = result.refLabels || [];
           t.consistency = {
             score: result.verification?.score ?? null,
@@ -1093,6 +1098,7 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
 
   const dest = path.join(store.assetDir(projectId), `${shot.id}.png`);
   await saveMedia(image, dest, onEvent);
+  const size = checkRatio(dest, project.aspectRatio || settings.get('aspectRatio'), `第 ${shot.index} 镜`, onEvent);
   const modelRef = await toModelRef(dest, { onEvent });
 
   // 复核这一镜，让分数跟着更新 —— 否则卡片上还挂着上一版的分数，会误导
@@ -1119,6 +1125,7 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
       t.seed = seed;
       t.prompt = opts.prompt?.trim() || assembled.prompt;
       t.imageAt = new Date().toISOString();
+      t.imageSize = size || null;
       t.modelUsed = `${providerId} / ${model}`;
       t.bibleRefs = refImages.length ? assembled.refLabels : [];
       t.consistency = {
@@ -1296,6 +1303,7 @@ export async function regenerateSheet(projectId, kind, name, opts = {}, onEvent)
     `ref-${kind}-${safeFileName(name)}-${safeFileName(variant.id)}.png`
   );
   await saveMedia(image, dest, onEvent);
+  checkRatio(dest, project.aspectRatio || settings.get('aspectRatio'), `${name} 的设定图`, onEvent);
   const modelRef = await toModelRef(dest, { onEvent });
 
   store.update(projectId, (p) => {
@@ -1653,6 +1661,33 @@ export function promptsFor(projectId, shotId) {
     videoPromptMode: settings.get('videoPromptMode') || 'precise',
     link
   };
+}
+
+/**
+ * 出来的图到底是不是你要的画幅。
+ *
+ * 我们确实把尺寸发出去了，但"发出去了"和"厂商听了"是两回事：有的不认这个字段、
+ * 有的只支持几个固定尺寸会就近似、中转平台常常把它整个丢掉。三种情况长得一模一样 ——
+ * 任务成功、图也回来了，只是比例不对。而下一步图生视频会**继承首帧图的比例**，
+ * 于是这个错一路传到成片，最后你看到的是一条横片，还以为是视频模型的问题。
+ *
+ * 读文件头几十个字节就能量出来，不花钱。所以每张图都量。
+ */
+function checkRatio(file, wanted, label, onEvent) {
+  const size = imgsize.readSize(file);
+  if (!size) return null;
+  const verdict = imgsize.matchesRatio(size, wanted);
+  if (verdict && !verdict.ok) {
+    onEvent?.({
+      type: 'note',
+      message:
+        `⚠ ${label} 的画幅不对：要的是 ${wanted}，回来的是 ${verdict.got}` +
+        (verdict.flipped ? '（横竖反了）' : `（偏 ${verdict.offPercent}%）`) +
+        '。这一家多半没吃尺寸参数 —— 换一家出图，或者去「服务商与密钥」确认这个模型支持的尺寸。' +
+        '注意图生视频会继承首帧图的比例，不改的话成片也是这个比例。'
+    });
+  }
+  return { ...size, wanted, ok: verdict?.ok !== false };
 }
 
 // ═══════════════════════ 阶段四：出视频 ═══════════════════════
