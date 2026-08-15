@@ -427,6 +427,22 @@ export default {
       onchange: (e) => (pending.consistencyVerify = e.target.checked) });
     const refBox = h('input', { type: 'checkbox', checked: settings.useReferenceImages !== false,
       onchange: (e) => (pending.useReferenceImages = e.target.checked) });
+    /**
+     * 邻镜参考：让同一场戏的每一镜在光线、色调、质感上连得住。
+     *
+     * 三个选项的差别不在"效果好不好"，在**误差会不会累积** ——
+     * 这一点在前五镜完全看不出来，第十镜才露馅，所以必须在选的时候就说清楚。
+     */
+    const neighborSel = h('select', {
+      onchange: (e) => (pending.neighborRef = e.target.value)
+    },
+      h('option', { value: 'scene-anchor', selected: (settings.neighborRef || 'scene-anchor') === 'scene-anchor' },
+        '场景锚（推荐）—— 同场景每一镜都参照该场景的第一张'),
+      h('option', { value: 'prev', selected: settings.neighborRef === 'prev' },
+        '链式 —— 各自参照上一镜（会逐镜累积误差）'),
+      h('option', { value: 'off', selected: settings.neighborRef === 'off' },
+        '关掉 —— 只靠设定集参考图'));
+
     const thresholdInput = h('input', { type: 'number', min: 0, max: 100, value: settings.consistencyThreshold,
       oninput: (e) => (pending.consistencyThreshold = Number(e.target.value)) });
     const retryInput = h('input', { type: 'number', min: 0, max: 5, value: settings.consistencyMaxRetries,
@@ -442,6 +458,16 @@ export default {
           check(refBox, '出镜头图时带上角色设定图作为参考图（最关键的一层，建议保持开启）'),
           check(verifyBox, '每张成图做视觉复核（会多一次模型调用，换来自动纠错）')
         ),
+        h('div', { class: 'field', style: 'margin-top:14px' },
+          h('label', {}, '邻镜参考（同一场戏的画面连贯）'), neighborSel,
+          h('div', { class: 'field-hint' },
+            '「链式」是最容易想到的做法：第 2 镜参照第 1 镜，第 3 镜参照第 2 镜……'
+            + '但每次生成都有损耗，第 10 镜参照的已经是漂过八次的那张，而且回不去。'
+            + '「场景锚」让同场景每一镜都参照**同一张**：效果一样（都像同一张，自然彼此也像），'
+            + '误差却是常数而不是累加。只有标了「连续动作」的镜头才退回真链式 —— '
+            + '那时候要的是"上一帧的下一瞬间"，锚给不了。'),
+          h('div', { class: 'field-hint' },
+            '⚠ 这一层要「分镜图用图生图」开着才生效（文生图通道收不了参考图）。')),
         h('div', { class: 'grid2', style: 'margin-top:14px' },
           h('div', { class: 'field' }, h('label', {}, '复核通过分数线'), thresholdInput,
             h('div', { class: 'field-hint' }, '低于这个分数判定人设漂了，会换一颗种子重出。75 是比较稳的起点。')),

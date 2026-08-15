@@ -556,8 +556,35 @@ export async function generateConsistentImage({
    * 想试图生图的话，「设置 → 画面规格」里有开关。
    */
   const useEdit = settings.get('useEditModelForShots') === true;
-  const refImages =
-    !useEdit || settings.get('useReferenceImages') === false ? [] : assembled.refImages;
+  const refsOn = settings.get('useReferenceImages') !== false;
+  const baseRefs = !useEdit || !refsOn ? [] : assembled.refImages;
+
+  /**
+   * 邻镜参考：让这一镜的光线、色调、质感和同场景的其它镜连得住。
+   *
+   * ⚠ 参照的是**这一场景的第一张成图**，不是上一镜 —— 详见 continuity.neighborRef。
+   * 链式（1→2→3）每一步都在上一步的误差上再加一层，十镜之后参照物本身就不对了；
+   * 星形（1→2, 1→3, 1→4）误差是常数。两者"每一镜都和邻镜像"的效果一样，
+   * 但一个会漂，一个不会。
+   *
+   * 排在设定集参考图**后面**：谁是谁由设定集说了算，邻镜只负责"看起来是同一场戏"。
+   * 多数厂商对首张参考图权重最高，顺序在这里是有意义的。
+   */
+  const neighborMode = settings.get('neighborRef') || 'scene-anchor';
+  const neighbor = useEdit && refsOn ? continuity.neighborRef(project, shot, { mode: neighborMode }) : null;
+  /**
+   * 本地路径 → 模型收得下的引用（公网 URL 或 data URI）。
+   *
+   * 这一步在 studio.toModelRef 里，而 studio 又 import 了本模块 ——
+   * 静态 import 会成环。ESM 能处理环，但环里谁先求值取决于加载顺序，
+   * 出问题时是"某个函数莫名是 undefined"，极难查。
+   * 延迟到**调用时**再导入就没有这个问题：那时两边都已经加载完了。
+   */
+  const neighborUrl = neighbor
+    ? await (await import('./studio.js')).toModelRef(neighbor.path, { onEvent }).catch(() => null)
+    : null;
+  const refImages = neighborUrl ? [...baseRefs, neighborUrl] : baseRefs;
+  if (neighbor && neighborUrl) assembled.refLabels = [...assembled.refLabels, neighbor.label];
 
   let attempt = 0;
   let last = null;

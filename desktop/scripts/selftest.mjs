@@ -1869,6 +1869,85 @@ section('技法顺场（镜与镜之间）');
       !/harmonize/.test(studioModule.updateShot.toString()));
 }
 
+/**
+ * 邻镜参考：把「链」改成「星」。
+ *
+ * 链式（1→2→3→4）直觉上很对：每一镜都和前一镜像，全片就都像。
+ * **但它一定会漂** —— 每次生成都有损耗，第 4 镜参照的是漂过两次的第 3 镜，
+ * 到第 10 镜时参照物本身已经不对了，而且回不去：链上没有任何一环记得原样。
+ *
+ * 星形（1→2, 1→3, 1→4）效果一样（都像同一张，自然彼此也像），
+ * 误差却是**常数**而不是**累加**。这一节验的就是这个拓扑。
+ */
+section('邻镜参考：星形，不是链');
+{
+  const cont = await import('../core/pipeline/continuity.js');
+  const shots = [
+    { id: 'a', index: 1, scene: '码头', imagePath: 'i1.png' },
+    { id: 'b', index: 2, scene: '码头', imagePath: 'i2.png' },
+    { id: 'c', index: 3, scene: '码头', imagePath: 'i3.png' },
+    { id: 'd', index: 4, scene: '码头', imagePath: 'i4.png' },
+    { id: 'e', index: 5, scene: '值班室', imagePath: 'i5.png' },
+    { id: 'f', index: 6, scene: '值班室', imagePath: 'i6.png' }
+  ];
+  const proj = { shots };
+  const at = (id) => cont.neighborRef(proj, shots.find((s) => s.id === id));
+
+  check('第一镜没有邻居可参照', at('a') === null);
+  // 核心：2、3、4 全都参照第 1 张，而不是各自参照前一张
+  const chain = ['b', 'c', 'd'].map((id) => at(id)?.path);
+  check('同场景里每一镜都参照同一张锚（误差不累积）',
+    chain.every((p2) => p2 === 'i1.png'), JSON.stringify(chain));
+  check('而不是链式地各参照前一张',
+    !(chain[1] === 'i2.png' && chain[2] === 'i3.png'), JSON.stringify(chain));
+
+  // 换场景必须断链：画面本来就该变，硬拿上一场的图当参考只会污染新场景
+  check('换场景时不带上一场的图', at('e') === null, JSON.stringify(at('e')));
+  check('新场景自己起一个锚', at('f')?.path === 'i5.png', JSON.stringify(at('f')));
+
+  /**
+   * 同一个地方在片子里出现两次（码头 → 值班室 → 码头），
+   * 第二段该有自己的锚 —— 拿二十镜之前那张当参考，光线和时间早就变了。
+   */
+  const revisit = {
+    shots: [
+      ...shots,
+      { id: 'g', index: 7, scene: '码头', imagePath: 'i7.png' },
+      { id: 'h', index: 8, scene: '码头', imagePath: 'i8.png' }
+    ]
+  };
+  check('同一场景第二次出现时，锚是这一段自己的',
+    cont.neighborRef(revisit, revisit.shots[7])?.path === 'i7.png',
+    JSON.stringify(cont.neighborRef(revisit, revisit.shots[7])));
+
+  // 连续动作是唯一该用真链式的地方：要的是"上一帧的下一瞬间"，锚给不了
+  const act = {
+    shots: [
+      { id: 'a', index: 1, scene: '门口', imagePath: 'p1.png' },
+      { id: 'b', index: 2, scene: '门口', imagePath: 'p2.png' },
+      { id: 'c', index: 3, scene: '门口', link: 'continuous', imagePath: 'p3.png' }
+    ]
+  };
+  const cRef = cont.neighborRef(act, act.shots[2]);
+  check('连续动作退回真链式（接上一镜，不是锚）',
+    cRef?.path === 'p2.png' && cRef.kind === 'prev', JSON.stringify(cRef));
+
+  // 还没出图的镜头不能当锚
+  const partial = {
+    shots: [
+      { id: 'a', index: 1, scene: '码头' },
+      { id: 'b', index: 2, scene: '码头', imagePath: 'q2.png' },
+      { id: 'c', index: 3, scene: '码头' }
+    ]
+  };
+  check('没出图的镜头不会被当成锚',
+    cont.neighborRef(partial, partial.shots[2])?.path === 'q2.png',
+    JSON.stringify(cont.neighborRef(partial, partial.shots[2])));
+
+  check('关掉就真的不带', cont.neighborRef(proj, shots[2], { mode: 'off' }) === null);
+  check('想要老式链式也给得出', cont.neighborRef(proj, shots[2], { mode: 'prev' })?.path === 'i2.png');
+}
+
 section('镜间衔接');
 {
   const continuity = await import('../core/pipeline/continuity.js');

@@ -143,3 +143,67 @@ export function continuityLines(shot, { prev, next, link, brief: short = false }
 export function shouldChainEndFrame(nextShot, nextLink) {
   return Boolean(nextShot?.imagePath && nextLink === 'continuous');
 }
+
+
+/**
+ * ═══════════════ 邻镜参考：把「链」改成「星」 ═══════════════
+ *
+ * 常见的想法是链式：第 1 镜的图当第 2 镜的参考，第 2 镜的当第 3 镜的，一路传下去。
+ * 直觉上很对 —— 每一镜都和前一镜像，那全片就都像。
+ *
+ * **但它一定会漂。** 每一次生成都有损耗：色偏、细节丢失、压缩痕迹。
+ * 第 3 镜参照的是已经漂过一次的第 2 镜，第 4 镜参照的是漂过两次的第 3 镜……
+ * 到第 10 镜时，参照物本身已经面目全非，而且**回不去**——
+ * 链条上没有任何一环记得原本长什么样。拿移动的东西当基准，就是这个结果。
+ *
+ * 换个拓扑就解决了：**同一场景里的每一镜，都参照这个场景的第一张成图**。
+ *
+ *     链：  1 → 2 → 3 → 4 → 5      误差累加 5 次
+ *     星：  1 → 2, 1 → 3, 1 → 4    每一镜都只差 1 次，永不累积
+ *
+ * 效果上"每一镜都和邻镜像"照样成立（都像同一张，自然彼此也像），
+ * 而误差是**常数**不是**累加**。代价只有一个：场景锚那张必须是好的 ——
+ * 所以它同时也变成了唯一值得你回头审的那一张。
+ *
+ * 只有 continuous（动作不能断）才退回真正的链式：那时候要的是
+ * "上一帧的下一瞬间"，参照场景锚没有意义。而 continuous 本来就是少数。
+ */
+
+/** 这一镜该拿哪一张已有的成图当"邻居参考" */
+export function neighborRef(project, shot, { mode = 'scene-anchor' } = {}) {
+  if (mode === 'off') return null;
+  const shots = (project?.shots || []).slice().sort((a, b) => (a.index || 0) - (b.index || 0));
+  const at = shots.findIndex((s) => s.id === shot.id);
+  if (at <= 0) return null;
+
+  const link = shot.link || deriveLink(shot, shots[at - 1]);
+  // 换场景就断链：画面本来就该变，硬拿上一场的图当参考只会把新场景污染掉
+  if (link === 'new-scene') return null;
+
+  const prev = shots[at - 1];
+
+  /**
+   * 连续动作是唯一该用真链式的地方 —— 要的是"上一帧的下一瞬间"，
+   * 场景锚给不了这个。这一条本来就少，累积不了几次。
+   */
+  if (link === 'continuous') {
+    return prev?.imagePath ? { path: prev.imagePath, kind: 'prev', label: `接·第${prev.index}镜` } : null;
+  }
+  if (mode === 'prev') {
+    return prev?.imagePath ? { path: prev.imagePath, kind: 'prev', label: `邻·第${prev.index}镜` } : null;
+  }
+
+  /**
+   * 场景锚：**从这一镜往回找，直到场景变了为止**，取那一段里最早的一张成图。
+   * 往回找而不是从头找，是因为同一个场景可能在片子里出现两次
+   * （码头 → 值班室 → 码头），第二次那段该有自己的锚 ——
+   * 拿二十镜之前那张当参考，光线和时间早就不是一回事了。
+   */
+  let anchor = null;
+  for (let i = at - 1; i >= 0; i -= 1) {
+    const s = shots[i];
+    if (!sameScene(s.scene, shot.scene)) break;
+    if (s.imagePath) anchor = s;
+  }
+  return anchor ? { path: anchor.imagePath, kind: 'scene-anchor', label: `锚·第${anchor.index}镜` } : null;
+}
