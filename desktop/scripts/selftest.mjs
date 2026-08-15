@@ -7,6 +7,7 @@
  * 提示词装配顺序、Windows 文件名规则、以及媒体接口的目录穿越防护。
  */
 import http from 'node:http';
+import net from 'node:net';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -3610,6 +3611,39 @@ section('手机遥控：先验它拒绝什么');
   const statusFromPhone = await (await fetch(`${base}/api/lan`, { headers: { 'X-FD-Key': token } })).json();
   check('手机那一侧查不到配对码本身', !statusFromPhone.token && statusFromPhone.hasToken === true,
     JSON.stringify(statusFromPhone));
+
+  /**
+   * 按**手机真实的样子**发一遍：Host 是 192.168.x.x，不是 127.0.0.1。
+   *
+   * ⚠ 这一段必须用裸 socket。用 fetch 设 Host 是测不出来的 ——
+   * undici 会把它改回真实的目标地址，于是**每一条都变成 loopback**，
+   * 看起来全绿，实际上私网判断、DNS rebinding 防护一条都没验到。
+   * 这个坑我踩过：探针给出"evil.com 也放行"的假警报，而服务端压根没见过那个 Host。
+   */
+  const rawGet = (host, pathname = '/api/projects', withKey = true) =>
+    new Promise((resolve) => {
+      const sock = net.connect(lan.port, '127.0.0.1', () => {
+        sock.write(
+          `GET ${pathname} HTTP/1.1\r\n` +
+            `Host: ${host}\r\n` +
+            (withKey ? `X-FD-Key: ${token}\r\n` : '') +
+            'Connection: close\r\n\r\n'
+        );
+      });
+      let buf = '';
+      sock.on('data', (d) => (buf += d));
+      sock.on('end', () => resolve(Number(buf.split(' ')[1])));
+      sock.on('error', () => resolve(0));
+    });
+
+  check('手机常见地址放行（192.168.x.x）', (await rawGet(`192.168.1.7:${lan.port}`)) === 200);
+  check('私网 10 段放行', (await rawGet(`10.0.0.5:${lan.port}`)) === 200);
+  check('私网 172.16-31 段放行', (await rawGet(`172.20.1.9:${lan.port}`)) === 200);
+  check('172.35 不在私网范围里，挡住', (await rawGet(`172.35.1.9:${lan.port}`)) === 403);
+  // DNS rebinding：让 evil.com 解析到你的内网地址，浏览器就会带着 evil.com 这个 Host 打过来。
+  // 只认私网 IP **字面量**、不认域名，这条路才断得干净
+  check('域名一律挡住（DNS rebinding 走的就是这条）', (await rawGet(`evil.com:${lan.port}`)) === 403);
+  check('公网 IP 挡住', (await rawGet(`1.2.3.4:${lan.port}`)) === 403);
 
   srv.stopLan();
   const afterStop = await fetch(`${base}/api/projects`, { headers: { 'X-FD-Key': token } }).then(() => 'still-up').catch(() => 'down');
