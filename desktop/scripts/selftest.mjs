@@ -8,6 +8,7 @@
  */
 import http from 'node:http';
 import net from 'node:net';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -3560,6 +3561,152 @@ section('安卓壳的打包配置');
   // 仓库里不放 gradle-wrapper.jar —— 来源说不清的二进制不该进仓库
   check('wrapper 是 CI 现生成的，不是仓库里放一个 jar',
     /gradle wrapper --gradle-version/.test(wf) && !fs.existsSync(path.join(AND, 'gradle/wrapper/gradle-wrapper.jar')));
+}
+
+/**
+ * 服务器模式。
+ *
+ * 这一段和上面所有段落的前提都不一样：那些假设"能打到这个端口的人是自己人"，
+ * 而放到公网上之后，**任何人都能打到这个端口**。所以这里验的全是拒绝，
+ * 而且必须用裸 socket —— fetch 会把 Host 改回真实地址（上面那个坑刚踩过）。
+ */
+section('服务器模式：按公网的规矩');
+{
+  const deployMod = await import('../core/deploy.js');
+  check('默认不是服务器模式（本机跑的人不该被一道口令白挡）', deployMod.SERVER_MODE === false);
+  // 8 位配对码在局域网够用，公网上 40 bit 是能慢慢试出来的
+  check('服务器模式用的是长口令', deployMod.newAccessToken().length === 32, String(deployMod.newAccessToken().length));
+
+  /**
+   * ⚠ 必须**另起一个进程**来测。
+   *
+   * 一开始想用 `import('../core/server.js?server=1')` 拿一份新实例，但那是错的：
+   * 带 query 只会重新求值 server.js 自己，它 import 的 deploy.js 仍然是**老那份** ——
+   * 而模式是在 deploy.js 模块求值时从 env 读的。于是那个"服务器实例"其实还是桌面模式，
+   * 测出来一片红，却和真实部署毫无关系。
+   *
+   * 起子进程还有个额外好处：env 在进程启动时读，和线上一模一样。
+   */
+  const TOKEN = 'a-very-long-access-token-1234567890';
+  const boot = `
+    import * as srv from ${JSON.stringify(path.join(PROJECT_ROOT, 'core/server.js'))};
+    const { port } = await srv.listen(0);
+    console.log('PORT=' + port);
+  `;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', boot], {
+    env: {
+      ...process.env,
+      FUTUREDREAM_DATA_DIR: path.join(SANDBOX, 'servermode'),
+      FUTUREDREAM_MODE: 'server',
+      FUTUREDREAM_PUBLIC_HOST: 'fd.example.com',
+      FUTUREDREAM_ACCESS_TOKEN: TOKEN
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  const sport = await new Promise((resolve, reject) => {
+    let out = '';
+    const timer = setTimeout(() => reject(new Error('服务器模式没起来')), 15000);
+    child.stdout.on('data', (d) => {
+      out += d.toString();
+      const m = out.match(/PORT=(\d+)/);
+      if (m) {
+        clearTimeout(timer);
+        resolve(Number(m[1]));
+      }
+    });
+    child.on('exit', () => {
+      clearTimeout(timer);
+      reject(new Error(`起不来：${out}`));
+    });
+  });
+
+  const hit = (host, pathname, withKey = true) =>
+    new Promise((resolve) => {
+      const sock = net.connect(sport, '127.0.0.1', () => {
+        sock.write(
+          `GET ${pathname} HTTP/1.1\r\nHost: ${host}\r\n` +
+            (withKey ? `X-FD-Key: ${TOKEN}\r\n` : '') +
+            'Connection: close\r\n\r\n'
+        );
+      });
+      let buf = '';
+      sock.on('data', (d) => (buf += d));
+      sock.on('end', () => resolve(Number(buf.split(' ')[1])));
+      sock.on('error', () => resolve(0));
+    });
+
+  check('配的域名 + 口令：放行', (await hit('fd.example.com', '/api/projects')) === 200);
+  check('没口令：挡住（本机模式下这条是放行的，公网上不行）',
+    (await hit('fd.example.com', '/api/projects', false)) === 401);
+  check('错口令：挡住', (await hit('fd.example.com', '/api/projects?k=wrong', false)) === 401);
+  // 域名不对时口令对也不行 —— 别人拿自己的域名指到这台机器是最省事的一种攻击
+  check('别人的域名 + 对的口令：还是挡住', (await hit('evil.com', '/api/projects')) === 403);
+  check('裸 IP：挡住', (await hit('203.0.113.9', '/api/projects')) === 403);
+  // 健康检查会带出数据目录路径，公网上不能白给
+  check('健康检查也要口令', (await hit('fd.example.com', '/api/health', false)) === 401);
+  check('媒体接口也要口令', (await hit('fd.example.com', '/media?p=/etc/passwd', false)) === 401);
+  // 壳子必须放行，不然打开只看到 401，没人知道该干什么
+  check('页面壳子放行（不然看不到登录屏）', (await hit('fd.example.com', '/m', false)) === 200);
+  check('/api/auth 只回"口令对不对"，给登录页用',
+    (await hit('fd.example.com', '/api/auth')) === 200 && (await hit('fd.example.com', '/api/auth', false)) === 401);
+
+  child.kill();
+
+  // 配错了就不启动 ——"少配一项于是谁都能进"的服务比起不来危险得多，因为它看起来一切正常
+  const bad = spawn(process.execPath, ['--input-type=module', '-e', boot], {
+    env: {
+      ...process.env,
+      FUTUREDREAM_DATA_DIR: path.join(SANDBOX, 'servermode2'),
+      FUTUREDREAM_MODE: 'server',
+      FUTUREDREAM_ACCESS_TOKEN: TOKEN,
+      FUTUREDREAM_PUBLIC_HOST: ''
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  const badOut = await new Promise((resolve) => {
+    let out = '';
+    bad.stdout.on('data', (d) => (out += d));
+    bad.stderr.on('data', (d) => (out += d));
+    bad.on('exit', (code) => resolve({ code, out }));
+  });
+  check('没配域名就拒绝启动，并说清楚缺什么',
+    badOut.code !== 0 && /FUTUREDREAM_PUBLIC_HOST/.test(badOut.out), badOut.out.slice(0, 200));
+}
+
+// 放到服务器上之后密钥不再只在你自己机器里 —— 这是固有代价，
+// 但至少能让"解密用的钥匙"别和密文躺在同一块盘上
+section('密钥保险箱：口令派生');
+{
+  const probe = `
+    import * as vault from ${JSON.stringify(path.join(PROJECT_ROOT, 'core/vault.js'))};
+    import fs from 'node:fs';
+    vault.setSecret('K', 'sk-secret-value');
+    console.log(JSON.stringify({
+      backend: vault.backendName(),
+      roundTrip: vault.getSecret('K') === 'sk-secret-value',
+      keyFileOnDisk: fs.existsSync(process.env.FUTUREDREAM_DATA_DIR + '/.vaultkey'),
+      plainInCipher: fs.readFileSync(process.env.FUTUREDREAM_DATA_DIR + '/credentials.enc').includes('sk-secret')
+    }));
+  `;
+  const out = await new Promise((resolve) => {
+    const c = spawn(process.execPath, ['--input-type=module', '-e', probe], {
+      env: {
+        ...process.env,
+        FUTUREDREAM_DATA_DIR: path.join(SANDBOX, 'vaultpass'),
+        FUTUREDREAM_VAULT_PASS: '一个足够长的保险箱口令-abc123'
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    let buf = '';
+    c.stdout.on('data', (d) => (buf += d));
+    c.on('exit', () => resolve(JSON.parse(buf.trim().split('\n').pop() || '{}')));
+  });
+
+  check('用口令派生钥匙', /口令派生/.test(out.backend || ''), out.backend);
+  check('存进去再取出来还是同一个值', out.roundTrip === true);
+  // 这才是重点：能 ssh 进服务器的人拿到的只有密文，没有钥匙
+  check('磁盘上不留钥匙文件', out.keyFileOnDisk === false);
+  check('密文里没有明文', out.plainInCipher === false);
 }
 
 section('手机遥控：先验它拒绝什么');

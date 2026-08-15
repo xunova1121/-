@@ -31,6 +31,7 @@ import * as styles from './styles.js';
 import * as duration from './duration.js';
 import * as skillsLib from './skills.js';
 import * as zip from './zip.js';
+import * as deploy from './deploy.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -142,11 +143,30 @@ function guard(req, { lan = false } = {}) {
   const host = hostHeader.replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
   const loopback = ['127.0.0.1', 'localhost', '::1'].includes(host);
 
+  /**
+   * 服务器模式：Host 必须**正好是**你配的那个域名。
+   *
+   * 为什么这么严：这台机器在公网上，任何解析到它 IP 的域名都会把请求送进来。
+   * 只认一个域名，等于把"别人拿自己的域名指过来"这条路堵死；
+   * 而反向代理（Caddy）转发时会原样带上你的域名，所以正常访问不受影响。
+   * 代理自己那一跳走 127.0.0.1，也放行。
+   */
+  if (deploy.SERVER_MODE) {
+    const ok = loopback || (deploy.PUBLIC_HOST && host === deploy.PUBLIC_HOST);
+    if (!ok) return `这台服务器只认 ${deploy.PUBLIC_HOST || '（还没配域名）'}，这个 Host 不是：${host}`;
+    return originGuard(req, hostHeader);
+  }
+
   if (!lan && !loopback) return '仅允许通过 127.0.0.1 访问';
   if (lan && !loopback && !isPrivateHost(host)) {
     return `手机端只接受局域网地址，这个 Host 不是：${host}`;
   }
 
+  return originGuard(req, hostHeader);
+}
+
+/** 跨站防护：别人的网页不能拿你的浏览器往这个服务发请求 */
+function originGuard(req, hostHeader) {
   const origin = req.headers.origin;
   if (origin && origin !== 'null') {
     const sameOrigin = origin === `http://${hostHeader}` || origin === `https://${hostHeader}`;
@@ -176,7 +196,9 @@ export function resetKeyLockout() {
 }
 
 function checkKey(req, url) {
-  const expected = settings.get('lanToken') || '';
+  // 服务器模式用的是**长口令**（32 位），不是局域网那个 8 位配对码 ——
+  // 公网上 8 位配不上，40 bit 慢慢试是试得出来的
+  const expected = deploy.SERVER_MODE ? deploy.accessToken() : settings.get('lanToken') || '';
   if (!expected) return '手机端还没生成配对码，去电脑上的「设置 → 手机遥控」打开一次';
 
   if (KEY_ATTEMPTS.until > Date.now()) {
@@ -913,6 +935,30 @@ export function createServer({ lan = false } = {}) {
       }
     }
 
+    /**
+     * 服务器模式：除了页面壳子本身，**每一条**都要口令。
+     *
+     * 放行壳子是必须的 —— 不放行就没法显示"请输入访问口令"那一屏，
+     * 打开只看到一个 401，没人知道该干什么。壳子里没有任何数据，
+     * 数据全在 /api 和 /media 后面。
+     *
+     * /api/auth 也放行：登录页要有个地方能问"这个口令对不对"，
+     * 而它只回 ok / 不 ok，不带任何内容。
+     */
+    if (deploy.SERVER_MODE) {
+      const isShell =
+        !url.pathname.startsWith('/api/') && !url.pathname.startsWith('/media');
+      const isAuthProbe = url.pathname === '/api/auth';
+      if (!isShell && !isAuthProbe) {
+        const bad = checkKey(req, url);
+        if (bad) return json(res, 401, { error: bad });
+      }
+      if (isAuthProbe) {
+        const bad = checkKey(req, url);
+        return json(res, bad ? 401 : 200, bad ? { error: bad } : { ok: true, mode: 'server' });
+      }
+    }
+
     try {
       // 手机端是独立的一套页面，不是把电脑版缩小 —— 见 ui/m/README 里的取舍
       if (url.pathname === '/m' || url.pathname === '/m/') return serveStatic(req, res, '/m/index.html');
@@ -996,12 +1042,30 @@ export function stopLan() {
 
 /** 端口被占就顺延，最多试 20 个 —— 5178 撞车在开发机上太常见了 */
 export function listen(preferredPort, attempts = 20) {
+  /**
+   * 服务器模式下**配错就不启动**。
+   *
+   * 一个"少配了一项、于是谁都能进"的服务，比起不起来危险得多 ——
+   * 因为它看起来一切正常，没人会去查。所以宁可在这里退出，
+   * 把缺什么、怎么补印清楚。
+   */
+  if (deploy.SERVER_MODE) {
+    const cfg = deploy.checkConfig();
+    for (const note of cfg.notes || []) console.log(`[部署] ${note}`); // eslint-disable-line no-console
+    if (!cfg.ok) {
+      const msg = `服务器模式配置不完整，拒绝启动：\n  - ${cfg.problems.join('\n  - ')}`;
+      return Promise.reject(new Error(msg));
+    }
+  }
+
   return new Promise((resolve, reject) => {
     const server = createServer();
-    let port = preferredPort || settings.get('port') || 5178;
+    let port = preferredPort || Number(process.env.PORT) || settings.get('port') || 5178;
     let tried = 0;
+    // 服务器模式要对外可达（前面通常还有一层 Caddy 反代）；桌面模式只听本机
+    const bindHost = deploy.SERVER_MODE ? '0.0.0.0' : '127.0.0.1';
     const tryListen = () => {
-      server.listen(port, '127.0.0.1');
+      server.listen(port, bindHost);
     };
     server.on('error', (err) => {
       if (err.code === 'EADDRINUSE' && tried < attempts) {
@@ -1012,7 +1076,15 @@ export function listen(preferredPort, attempts = 20) {
         reject(err);
       }
     });
-    server.on('listening', () => resolve({ server, port, url: `http://127.0.0.1:${port}` }));
+    server.on('listening', () =>
+      resolve({
+        server,
+        port,
+        url: deploy.SERVER_MODE
+          ? `https://${deploy.PUBLIC_HOST}`
+          : `http://127.0.0.1:${port}`
+      })
+    );
     tryListen();
   });
 }

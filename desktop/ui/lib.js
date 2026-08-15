@@ -79,7 +79,8 @@ export async function api(path, { method = 'GET', body } = {}) {
   } catch {
     throw new Error(`接口返回的不是 JSON：${text.slice(0, 200)}`);
   }
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  // 状态码要带出去：调用方分得清"没登录"和"接口报错"，才知道下一步是弹登录屏还是报错
+  if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status });
   return data;
 }
 

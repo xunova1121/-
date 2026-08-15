@@ -2,7 +2,7 @@
  * 未来创梦 —— 前端外壳：路由、全局状态、顶部信号链。
  * 无构建、无框架，浏览器直接跑 ES 模块。
  */
-import { h, $, clear, api, toast } from './lib.js';
+import { h, $, clear, api, toast, setAuthKey } from './lib.js';
 import { stepsOf, stepProgress, stepState } from './pipeline.js';
 
 import projectsView from './views/projects.js';
@@ -443,8 +443,68 @@ function initTheme() {
   });
 }
 
+const TOKEN_STORE = 'fd.accessToken';
+
+/**
+ * 访问口令那一屏。
+ *
+ * 只有**服务器模式**才会看到它：那时候这个服务在公网上，任何人都能打到端口，
+ * 所以每一条请求都要带口令（见 core/deploy.js）。
+ * 本机跑的时候一律不出现 —— 能打开 127.0.0.1 这个端口的人本来就坐在这台机器前，
+ * 为他加一道口令只是白挡自己。
+ */
+function showLogin(reason = '') {
+  const host = $('#view-inner');
+  clear(host).append(
+    h('div', { class: 'empty', style: 'max-width:420px;margin:8vh auto;text-align:left' },
+      h('b', { style: 'font-size:17px' }, '输入访问口令'),
+      h('p', { style: 'margin:10px 0 0;line-height:1.7' },
+        '这台服务器在公网上，所以要口令才能进。口令在第一次启动的日志里（',
+        h('code', {}, 'docker logs'),
+        '），或者由部署时的 FUTUREDREAM_ACCESS_TOKEN 指定。'),
+      reason ? h('p', { style: 'color:var(--alarm);margin:8px 0 0' }, reason) : null,
+      (() => {
+        const input = h('input', {
+          type: 'password',
+          class: 'mono',
+          placeholder: '32 位口令',
+          style: 'margin-top:14px'
+        });
+        const go2 = h('button', { class: 'btn primary', style: 'margin-top:10px;width:100%' }, '进入');
+        const submit = async () => {
+          const val = input.value.trim();
+          if (!val) return;
+          go2.disabled = true;
+          setAuthKey(val);
+          try {
+            await api('/auth');
+            localStorage.setItem(TOKEN_STORE, val);
+            location.reload();
+          } catch {
+            setAuthKey('');
+            go2.disabled = false;
+            showLogin('口令不对。多试几次会被锁一阵子。');
+          }
+        };
+        go2.onclick = submit;
+        input.onkeydown = (e) => {
+          if (e.key === 'Enter') submit();
+        };
+        setTimeout(() => input.focus(), 30);
+        return h('div', {}, input, go2);
+      })())
+  );
+}
+
 async function boot() {
   initTheme();
+  // 存过就带上；服务器模式下没有它，下面第一条请求就会 401
+  try {
+    const saved = localStorage.getItem(TOKEN_STORE);
+    if (saved) setAuthKey(saved);
+  } catch {
+    /* 隐私模式下读不到，那就每次手输 */
+  }
   $('#btn-refresh').addEventListener('click', async () => {
     await refreshCatalog();
     await go(state.current);
@@ -456,6 +516,12 @@ async function boot() {
   try {
     await refreshCatalog();
   } catch (err) {
+    // 服务器模式下没带口令 / 口令不对，走登录屏而不是"连不上"那一屏 ——
+    // 这两件事的下一步动作完全不同
+    if (err.status === 401) {
+      showLogin(localStorage.getItem(TOKEN_STORE) ? '存着的口令失效了，重新输一次。' : '');
+      return;
+    }
     // "连不上"和"接口报错"是两回事。早期版本一律说成前者，
     // 于是一份读不出来的密钥文件被报成"连不上本地服务"——
     // 服务好好的，用户却被堵在门外，连进去重填密钥的机会都没有。

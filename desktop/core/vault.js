@@ -27,10 +27,33 @@ export function attachSafeStorage(impl) {
 }
 
 export function backendName() {
-  return safeStorage ? 'dpapi' : 'aes-256-gcm';
+  if (safeStorage) return 'dpapi';
+  return (process.env.FUTUREDREAM_VAULT_PASS || '').trim() ? 'aes-256-gcm+口令派生' : 'aes-256-gcm';
 }
 
+/**
+ * 加密用的钥匙。两种来源，差别很大：
+ *
+ *   钥匙文件（默认）  随机 32 字节存在 DATA_DIR/.vaultkey，权限 0600。
+ *                     挡得住"文件被顺手拷走"，挡不住能读这台机器文件的人 ——
+ *                     因为钥匙就在密文旁边。
+ *   口令派生          给了 FUTUREDREAM_VAULT_PASS 就用 scrypt 从它派生，
+ *                     **钥匙不落盘**。放到服务器上时该用这个：
+ *                     能 ssh 进去的人拿到的只有密文，没有钥匙。
+ *
+ * 盐固定成应用名而不是随机存一份：随机盐要存在磁盘上，而这里的全部意义
+ * 就是"磁盘上不留任何能解密的东西"。固定盐让同一个口令在任何机器上派生出
+ * 同一把钥匙 —— 这正是我们要的（换台机器、拿着密文和口令就能恢复），
+ * 代价是挡不住针对这个应用的彩虹表，所以口令本身必须够长。
+ */
 function localKey() {
+  const pass = (process.env.FUTUREDREAM_VAULT_PASS || '').trim();
+  if (pass) {
+    if (!derivedKey) {
+      derivedKey = crypto.scryptSync(pass, 'futuredream.vault.v1', 32);
+    }
+    return derivedKey;
+  }
   try {
     const raw = fs.readFileSync(KEY_FILE);
     if (raw.length === 32) return raw;
@@ -42,6 +65,9 @@ function localKey() {
   fs.writeFileSync(KEY_FILE, key, { mode: 0o600 });
   return key;
 }
+
+/** scrypt 很慢（那是它的目的），派生一次就够 */
+let derivedKey = null;
 
 function encrypt(plain) {
   if (safeStorage) {
