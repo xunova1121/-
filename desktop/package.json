@@ -13,6 +13,7 @@
     "start": "node core/server.js",
     "dev": "electron .",
     "selftest": "node scripts/selftest.mjs",
+    "uicheck": "node scripts/uicheck.mjs",
     "smoke": "electron . --smoke",
     "icon": "node scripts/make-icon.mjs",
     "build:win": "electron-builder --win nsis portable"

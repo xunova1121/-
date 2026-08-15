@@ -457,6 +457,17 @@ export default {
     const liveEls = new Map(); // shotId → 卡片上那块状态区
 
     function trackLive(ev) {
+      // 设定图出一张，设定集面板就跟一次 —— 不然要等整步跑完才看得到东西，
+      // 而设定集这一步动辄十几张图，全程干等着最难受。
+      // ⚠ 必须放在下面那个 `!ev.shotId` 的提前返回**之前**：
+      // sheet 事件带的是 name（哪个角色/场景），根本没有 shotId
+      if (ev.type === 'sheet') {
+        if (ev.status === 'done') {
+          job.doneCount += 1;
+          remountBible({ delay: 1200 });
+        }
+        return;
+      }
       if (!ev.shotId) return;
       const prev = live.get(ev.shotId) || {};
       if (ev.type === 'shot') {
@@ -793,19 +804,27 @@ export default {
       paintFailures(job.failures);
 
       /**
-       * 跑完之后**尽量不重画整页**。
+       * 跑完之后**尽量不重画整页**，但该重画的必须重画。
        *
-       * 重画整页有个很实际的代价：你正在某张卡片里改台词，一镜出完了，
-       * 整个网格被推倒重建 —— 输入框连同还没保存的字一起没了。
-       * 出图出视频动辄十几分钟，这段时间正是拿来改后面几镜文案的。
+       * 不重画整页的理由：你正在某张卡片里改台词，一镜出完了，整个网格被推倒重建 ——
+       * 输入框连同还没保存的字一起没了。出图出视频动辄十几分钟，
+       * 这段时间正是拿来改后面几镜文案的。
        *
-       * 所以只有**镜头数量会变**的那一步（拆分镜）才整页重来；
-       * 其余情况逐镜替换那一张卡（见 refreshShot）。
+       * 但有两步的产出**根本不在分镜卡里**：设定集出的是设定图、分镜出的是
+       * 一整张新的分镜表。这两步跑完只补几张卡等于什么都没补 ——
+       * 页面停在跑之前的样子，看着就像"跑完了什么也没有"。
+       *
+       * ⚠ 这里曾经判的是 `job.stage`，而 runStage 的 finally 里**先把它清成 null**
+       * 才通知 done —— 于是这个判断永远为假，设定集和分镜跑完页面一动不动。
+       * 现在用 lastStage（专门为收尾留的那份），并且项目数据无论如何都重新拉一次：
+       * 拉数据不碰 DOM，代价只有一次请求，而拉漏了就是"生成完没东西"。
        */
-      const structural = job.stage === 'script' || job.stage === 'all' || job.stage === 'bible';
+      project = (await api(`/projects/${project.id}`).catch(() => project)) || project;
+      const structural = ['script', 'all', 'bible'].includes(job.lastStage);
       if (structural) {
-        project = (await api(`/projects/${project.id}`).catch(() => project)) || project;
         await paintDuration();
+        // 设定集那一步的产出在设定集面板里，它是懒挂的 —— 不重挂就还是跑之前那份
+        remountBible();
         applyScope();
       } else {
         // 逐镜补最新状态：跑的时候已经边跑边换了，这里兜底收一遍漏网的
@@ -815,8 +834,12 @@ export default {
       }
       syncNav();
       paintStageDetail();
+      // 设定集、分镜这两步不是按镜头逐个报完成的，doneCount 会是 0 ——
+      // 报"0 项完成"等于告诉人家白跑了一趟。这两步按**产出**报数。
+      const prog = stepProgress(project, job.lastStage);
       showResult({
-        ok: job.doneCount,
+        ok: job.doneCount || prog.done,
+        unit: job.doneCount ? '项完成' : `${prog.unit || '项'}`,
         fail: job.failures.length,
         label: steps.find((x) => x.id === job.lastStage)?.label || '这一轮'
       });
@@ -833,7 +856,7 @@ export default {
      * 失败的留着不走 —— 失败原因是要读的，读完自己关。
      */
     let hudTimer = null;
-    function showResult({ ok, fail, label }) {
+    function showResult({ ok, fail, label, unit = '项完成' }) {
       const hud = document.querySelector('#job-hud');
       if (!hud) return;
       clearTimeout(hudTimer);
@@ -851,7 +874,7 @@ export default {
         h('div', { class: 'job-hud-line' },
           fail
             ? (job.failures[0]?.message || '').slice(0, 120)
-            : `${ok} 项完成`),
+            : `${ok} ${unit}`),
         fail
           ? h('div', { class: 'job-hud-foot' },
               h('button', {
@@ -1766,6 +1789,20 @@ export default {
      */
     const biblePanel = h('div', { style: 'display:none' });
     let bibleMounted = false;
+    let bibleTimer = null;
+
+    /**
+     * 让设定集面板跟上最新的盘上数据。
+     *
+     * 防抖是必要的：出设定图时事件一条接一条来，每条都重挂一次的话，
+     * 面板会一直闪，还会把你刚展开的那个条目收回去。
+     */
+    function remountBible({ delay = 0 } = {}) {
+      if (!bibleMounted) return;
+      clearTimeout(bibleTimer);
+      bibleTimer = setTimeout(() => mountBible(), delay);
+    }
+
     async function mountBible() {
       try {
         const node = await bibleView.render({ state, go, rerender: mountBible });
