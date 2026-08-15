@@ -496,11 +496,50 @@ function showLogin(reason = '') {
   );
 }
 
+/**
+ * 屏幕这么窄，八成是拿手机开的 —— 给一条去手机版的路。
+ *
+ * 服务端已经按 User-Agent 把手机从根地址转走了，但 UA 是出了名的不可靠：
+ * 装到主屏的快捷方式、微信里打开、平板横屏、改过 UA 的浏览器，都可能漏。
+ * 漏了的人看到的就是一整套按鼠标设计的界面，在手机上根本没法点。
+ *
+ * 所以这里补一条**看得见摸得着**的兜底：不自动跳（电脑上把窗口拉窄不该被踢走），
+ * 只在顶上摆一条能点的横幅，而且能关掉。口令两边共用一份，过去不用重输。
+ */
+function offerMobile() {
+  if (window.innerWidth > 720) return;
+  if (new URL(location.href).searchParams.has('pc')) return;
+  try {
+    if (sessionStorage.getItem('fd.noMobileTip')) return;
+  } catch {
+    /* 读不到就当没关过 */
+  }
+  const bar = h('div', { class: 'mobile-hint' },
+    h('span', {}, '屏幕比较窄 —— 手机版是照手机做的，点起来顺手得多'),
+    h('a', { class: 'btn sm primary', href: '/m' }, '去手机版'),
+    h('button', {
+      class: 'btn ghost sm',
+      title: '这次不提示',
+      onclick: () => {
+        bar.remove();
+        try {
+          sessionStorage.setItem('fd.noMobileTip', '1');
+        } catch {
+          /* 写不进去就只关这一次 */
+        }
+      }
+    }, '✕')
+  );
+  document.body.prepend(bar);
+}
+
 async function boot() {
   initTheme();
+  offerMobile();
   // 存过就带上；服务器模式下没有它，下面第一条请求就会 401
+  // 手机版存的是同一把口令（同源），从那边过来的人不用再输一次
   try {
-    const saved = localStorage.getItem(TOKEN_STORE);
+    const saved = localStorage.getItem(TOKEN_STORE) || localStorage.getItem('fd.m.key');
     if (saved) setAuthKey(saved);
   } catch {
     /* 隐私模式下读不到，那就每次手输 */

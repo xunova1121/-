@@ -16,7 +16,11 @@ import os from 'node:os';
 const PW = process.env.PLAYWRIGHT_PATH || 'playwright';
 let chromium; let devices;
 try {
-  ({ chromium, devices } = await import(PW));
+  const mod = await import(PW);
+  // 全局装的那份是 CommonJS，`import` 进来时命名导出认不出来，全在 default 上
+  chromium = mod.chromium || mod.default?.chromium;
+  devices = mod.devices || mod.default?.devices;
+  if (!chromium) throw new Error('这份 Playwright 里没有 chromium');
 } catch {
   console.error(
     '没找到 Playwright。先装一下：npm i -g playwright && npx playwright install chromium\n' +

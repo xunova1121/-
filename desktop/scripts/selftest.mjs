@@ -3731,6 +3731,28 @@ section('服务器模式：按公网的规矩');
   check('/api/auth 只回"口令对不对"，给登录页用',
     (await hit('fd.example.com', '/api/auth')) === 200 && (await hit('fd.example.com', '/api/auth', false)) === 401);
 
+  /**
+   * 手机端那一屏原来写死了局域网的规矩：强制转大写、最长 12 位。
+   * 服务器口令是 32 位大小写混排 —— 于是在服务器上**根本输不进去**，
+   * 而且报的是"配对码不对"，人只会以为自己抄错了。
+   */
+  const raw = (host, pathname, key) =>
+    new Promise((resolve) => {
+      const sock = net.connect(sport, '127.0.0.1', () => {
+        sock.write(`GET ${pathname} HTTP/1.1\r\nHost: ${host}\r\nX-FD-Key: ${key}\r\nConnection: close\r\n\r\n`);
+      });
+      let buf = '';
+      sock.on('data', (d) => (buf += d));
+      sock.on('end', () => resolve(Number(buf.split(' ')[1])));
+      sock.on('error', () => resolve(0));
+    });
+  // 大小写正是这 32 位里将近一半的熵，抹平等于白扔
+  check('服务器口令区分大小写', (await raw('fd.example.com', '/api/projects', TOKEN.toUpperCase())) === 401);
+  check('原样送进来才放行', (await raw('fd.example.com', '/api/projects', TOKEN)) === 200);
+  // 登录屏之前得能问"这台服务要我输什么"，否则那一屏只能瞎猜
+  const modeCode = await hit('fd.example.com', '/api/mode', false);
+  check('模式这一问不要口令（登录屏要靠它决定问什么）', modeCode === 200, String(modeCode));
+
   child.kill();
 
   // 配错了就不启动 ——"少配一项于是谁都能进"的服务比起不来危险得多，因为它看起来一切正常
@@ -3858,6 +3880,15 @@ section('手机遥控：先验它拒绝什么');
 
   const ok = await fetch(`${base}/api/projects`, { headers: { 'X-FD-Key': token } });
   check('对的配对码：通', ok.status === 200, String(ok.status));
+
+  // 配对码的字母表本来就只有大写，是给人在手机上一个一个敲的 ——
+  // 为大小写卡住用户毫无意义。规矩定在服务端，客户端就不用各自猜
+  const lower = await fetch(`${base}/api/projects`, { headers: { 'X-FD-Key': token.toLowerCase() } });
+  check('配对码不挑大小写（手机上敲的，别为这个卡人）', lower.status === 200, String(lower.status));
+
+  // 手机端那一屏要先知道自己该问什么，而这一问必然在拿到码之前
+  const mode = await (await fetch(`${base}/api/mode`)).json();
+  check('没码也能问清楚"这台服务要我输什么"', mode.mode === 'lan', JSON.stringify(mode));
 
   // <img src> 没法带自定义头，所以媒体接口也认查询串里的 k
   const mediaNoKey = await fetch(`${base}/media?p=x.png`);

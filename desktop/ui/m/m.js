@@ -39,6 +39,22 @@ if (canInstall) {
 
 const KEY_STORE = 'fd.m.key';
 const PROJ_STORE = 'fd.m.project';
+/**
+ * 服务器模式下电脑版和手机版是**同一个源**，口令自然该共用一份 ——
+ * 在电脑版输过一次，手机版再问一遍纯属折腾。局域网那条路两边不同源，用不上这个。
+ */
+const PC_KEY_STORE = 'fd.accessToken';
+
+/**
+ * 这台服务要我输的是什么。
+ *
+ *   lan    局域网配对码：8 位、只有大写、给人在手机上一个一个敲
+ *   server 公网访问口令：32 位、大小写混排、复制粘贴进来
+ *
+ * 这一屏原来写死了前者（强制转大写、maxlength 12），于是在服务器上
+ * **根本输不进去**：32 位口令被截断、大小写被抹平。
+ */
+let mode = 'lan';
 
 // ───────────────────────── 小工具 ─────────────────────────
 
@@ -181,37 +197,45 @@ const job = { running: false, label: '', message: '', fail: 0 };
 // ───────────────────────── 配对 ─────────────────────────
 
 function paintPair(reason = '') {
+  const server = mode === 'server';
   clear(app).append(
     h('div', { class: 'pair' },
       h('h1', {}, '未来创梦 · 手机端'),
       h('p', { class: 'muted' },
-        '这台手机要和电脑上的应用配对一次。电脑上打开「设置 → 手机遥控」，把那串 8 位配对码敲进来。'),
+        server
+          ? '这台服务器在公网上，要访问口令才能进。口令在服务器第一次启动的日志里，或者由部署时的 FUTUREDREAM_ACCESS_TOKEN 指定。'
+          : '这台手机要和电脑上的应用配对一次。电脑上打开「设置 → 手机遥控」，把那串 8 位配对码敲进来。'),
       reason ? h('p', { class: 'muted', style: 'color:var(--alarm)' }, reason) : null,
       (() => {
         const input = h('input', {
           class: 'code',
           type: 'text',
           inputmode: 'latin',
-          autocapitalize: 'characters',
+          // 服务器口令大小写混排，自动首字母大写会当场把它改坏
+          autocapitalize: server ? 'none' : 'characters',
+          autocorrect: 'off',
+          spellcheck: false,
           autocomplete: 'off',
-          placeholder: 'ABCD2345',
-          maxlength: 12
+          placeholder: server ? '32 位访问口令' : 'ABCD2345',
+          maxlength: server ? 64 : 12
         });
         const go = h('button', { class: 'btn primary block', style: 'margin-top:14px' }, '连接');
         go.onclick = async () => {
-          const code = input.value.trim().toUpperCase();
-          if (!code) return toast('先把配对码敲进来', 'err');
+          // 一律原样送出去：配对码不区分大小写这件事由服务端认（core/server.js checkKey），
+          // 客户端无脑转大写会把服务器那个混排口令毁掉
+          const code = input.value.trim();
+          if (!code) return toast(server ? '先把访问口令填进来' : '先把配对码敲进来', 'err');
           go.disabled = true;
           authKey = code;
           try {
             await api('/health');
-            localStorage.setItem(KEY_STORE, code);
+            rememberKey(code);
             toast('连上了', 'ok');
             boot();
           } catch (err) {
             authKey = '';
             go.disabled = false;
-            toast(err.status === 401 ? '配对码不对' : err.message, 'err');
+            toast(err.status === 401 ? (server ? '口令不对' : '配对码不对') : err.message, 'err');
           }
         };
         input.onkeydown = (e) => {
@@ -605,15 +629,37 @@ async function reload() {
 
 // ───────────────────────── 启动 ─────────────────────────
 
+/** 口令存哪儿：服务器上和电脑版共用一份，局域网那条各存各的 */
+function rememberKey(code) {
+  try {
+    localStorage.setItem(KEY_STORE, code);
+    if (mode === 'server') localStorage.setItem(PC_KEY_STORE, code);
+  } catch {
+    /* 隐私模式下写不进去，那就这一次有效 */
+  }
+}
+
+function savedKey() {
+  try {
+    return localStorage.getItem(KEY_STORE) || (mode === 'server' ? localStorage.getItem(PC_KEY_STORE) : '') || '';
+  } catch {
+    return '';
+  }
+}
+
 async function boot() {
+  // 先问清楚这台服务要的是配对码还是访问口令 —— 问不到就按局域网办（本机跑就是这一种）
+  mode = await fetch('/api/mode').then((r) => (r.ok ? r.json() : null)).then((d) => d?.mode || 'lan').catch(() => 'lan');
+
   // 电脑上把带码的链接发到手机时，直接从地址里取，省得手敲
   const fromUrl = new URL(location.href).searchParams.get('k');
   if (fromUrl) {
-    localStorage.setItem(KEY_STORE, fromUrl.toUpperCase());
-    // 存下来之后就把它从地址栏抹掉：截图、分享、浏览器历史里都不该留着配对码
+    // ⚠ 不能转大写：服务器口令大小写混排，转一下就废了
+    rememberKey(fromUrl);
+    // 存下来之后就把它从地址栏抹掉：截图、分享、浏览器历史里都不该留着口令
     history.replaceState(null, '', location.pathname);
   }
-  authKey = localStorage.getItem(KEY_STORE) || '';
+  authKey = savedKey();
   if (!authKey) return paintPair();
 
   try {
@@ -621,7 +667,13 @@ async function boot() {
   } catch (err) {
     localStorage.removeItem(KEY_STORE);
     authKey = '';
-    return paintPair(err.status === 401 ? '配对码失效了 —— 电脑上换过码，重新敲一次。' : err.message);
+    return paintPair(
+      err.status === 401
+        ? mode === 'server'
+          ? '口令不对，或者服务器上换过了 —— 重新填一次。'
+          : '配对码失效了 —— 电脑上换过码，重新敲一次。'
+        : err.message
+    );
   }
   await reload();
   return undefined;

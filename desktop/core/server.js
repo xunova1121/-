@@ -221,7 +221,19 @@ function checkKey(req, url) {
     return `配对码错误次数过多，${mins} 分钟后再试`;
   }
 
-  const given = req.headers['x-fd-key'] || url.searchParams.get('k') || '';
+  const raw = req.headers['x-fd-key'] || url.searchParams.get('k') || '';
+  /**
+   * 局域网那个 8 位配对码**不区分大小写**，服务器那个 32 位口令区分。
+   *
+   * 配对码的字母表本来就只有大写（见 TOKEN_ALPHABET）—— 它是给人在手机上
+   * 一个一个敲进去的，为大小写卡住用户毫无意义。而服务器口令是复制粘贴的，
+   * 大小写混排正是它熵的一部分，抹平等于白扔掉将近一半强度。
+   *
+   * 之前手机端为了配对码好敲，在**客户端**把输入无脑转成大写 —— 于是服务器上
+   * 那个混排口令一输进去就被毁掉，手机端根本登不进去。规矩应该定在这里，
+   * 而不是让每个客户端各自猜。
+   */
+  const given = deploy.SERVER_MODE ? raw : raw.toUpperCase();
   // 长度不同直接判错，不进 timingSafeEqual（它要求等长）
   let ok = given.length === expected.length;
   if (ok) {
@@ -974,6 +986,20 @@ export function createServer({ lan = false } = {}) {
      * 用户只会看到一个 401，不知道该干什么。页面里没有任何数据，
      * 数据全在 /api 和 /media 后面 —— 那两条一步都不让。
      */
+    /**
+     * 「这台服务要我输的是什么」—— 登录屏之前唯一放行的一条。
+     *
+     * 手机端那一屏原本写死了局域网的规矩：8 位、全大写、最长 12。放到服务器上
+     * 要输的却是 32 位大小写混排的访问口令，于是那一屏**根本输不进去**。
+     * 它必须先知道自己面对的是哪一种，而这一问必然发生在拿到口令之前。
+     *
+     * 只回一个模式名，不带任何数据 —— 而且登录屏上写着"这台服务器在公网上，
+     * 要口令才能进"，模式本来就不是秘密。
+     */
+    if (url.pathname === '/api/mode') {
+      return json(res, 200, { mode: deploy.SERVER_MODE ? 'server' : lan ? 'lan' : 'desktop' });
+    }
+
     if (lan) {
       const isShell = url.pathname === '/m' || url.pathname.startsWith('/m/');
       if (!isShell) {

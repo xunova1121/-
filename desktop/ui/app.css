@@ -894,6 +894,17 @@ td.wrap { white-space: normal; max-width: 380px; }
   border-color: color-mix(in srgb, var(--caution) 30%, transparent);
 }
 
+/* 窄屏上那条"去手机版"。压在最上面一行，别盖住内容 */
+.mobile-hint {
+  position: sticky; top: 0; z-index: 60;
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; font-size: 12px; line-height: 1.45;
+  background: var(--caution-wash); color: var(--ink);
+  border-bottom: 1px solid color-mix(in srgb, var(--caution) 30%, var(--line));
+}
+.mobile-hint span { flex: 1; min-width: 0; }
+.mobile-hint .btn { flex: none; }
+
 /* 画风和设定集对不上时的那条提示：要能一眼看清"现在是什么、要换成什么" */
 .notice {
   margin: 10px 0 14px; padding: 12px 14px; border-radius: var(--r);
