@@ -575,6 +575,17 @@ async function handleApi(req, res, url, { lan = false } = {}) {
       return undefined;
     }
 
+    // ── 这一镜现在会发出去的提示词 ──
+    // 界面上原来只看得到"上一次发出去的那条"，改完描述再看还是旧的，
+    // 于是很容易以为"改了描述提示词不跟着变"。这条给的是**现算的**。
+    if (b && c === 'shots' && d && e === 'prompts' && method === 'GET') {
+      try {
+        return json(res, 200, studio.promptsFor(b, d));
+      } catch (err) {
+        return json(res, 404, { error: err.message });
+      }
+    }
+
     // ── 单镜重出：图或视频，可临时换服务商/模型 ──
     if (b && c === 'shots' && d && e === 'regenerate' && method === 'POST') {
       const opts = await readBody(req);

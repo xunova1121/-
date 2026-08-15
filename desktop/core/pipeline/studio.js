@@ -990,6 +990,9 @@ export async function generateAssets(projectId, { only = null, chapterId = null,
           t.imageRef = modelRef;
           t.seed = result.seed;
           t.prompt = result.prompt;
+          // 出图时间。和 editedAt 一比就知道"这张图是不是按现在这版描述出的" ——
+          // 改完描述不重出图就去出视频，首帧是旧画面、提示词是新描述，两边必然打架
+          t.imageAt = new Date().toISOString();
           t.bibleRefs = result.refLabels || [];
           t.consistency = {
             score: result.verification?.score ?? null,
@@ -1115,6 +1118,7 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
       t.imageRef = modelRef;
       t.seed = seed;
       t.prompt = opts.prompt?.trim() || assembled.prompt;
+      t.imageAt = new Date().toISOString();
       t.modelUsed = `${providerId} / ${model}`;
       t.bibleRefs = refImages.length ? assembled.refLabels : [];
       t.consistency = {
@@ -1201,6 +1205,7 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
     if (t) {
       t.videoPath = dest;
       t.videoPrompt = videoPrompt;
+      t.videoAt = new Date().toISOString();
       t.videoModelUsed = `${providerId} / ${model}`;
       t.videoResolution = video.resolution || null;
       t.videoRefs = bibleRefs.labels;
@@ -1609,6 +1614,45 @@ export function removeBibleEntry(projectId, kind, name) {
   });
 }
 
+/**
+ * 这一镜**现在**会发出去的提示词长什么样。
+ *
+ * 为什么要有这个：界面上原来只能看到 `shot.videoPrompt` —— 那是**上一次实际发出去的**。
+ * 改完描述再去看，显示的还是旧那条，于是很自然会得出"我改了描述，提示词没跟着变"的结论。
+ * 其实提示词每次出视频都是现算的，只是没人给你看现算的结果。
+ *
+ * 顺便把"视频到底是照着什么生成的"说清楚 —— 是**两样东西**：
+ *   首帧图  这一镜出图那步的成果，定住第一格画面（人、衣服、场景、构图）
+ *   提示词  这里这条，定住之后几秒演什么、镜头怎么动、谁在说话
+ * 两样打架时，模型多半跟着图走 —— 所以改完描述只重出视频是不够的，
+ * 图也得按新描述重出一张，否则你会看到"画面还是旧的、动作有点新"的四不像。
+ */
+export function promptsFor(projectId, shotId) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const shot = (project.shots || []).find((s) => s.id === shotId);
+  if (!shot) throw new Error('没有这一镜');
+
+  const { prev, next, link } = continuity.neighbors(project.shots || [], shot.id);
+  const image = consistency.assemblePrompt(project.bible, shot);
+  const video = consistency.assembleVideoPrompt(project.bible, shot, { prev, next, link });
+
+  const edited = Date.parse(shot.editedAt || 0) || 0;
+  const imagedAt = Date.parse(shot.imageAt || 0) || 0;
+
+  return {
+    now: { image: image.prompt, video },
+    used: { image: shot.prompt || '', video: shot.videoPrompt || '' },
+    // 改过描述但没重出 → 现算的和上次用的不一样，说清楚哪一条会在重出时生效
+    imageStale: Boolean(shot.prompt && shot.prompt !== image.prompt),
+    videoStale: Boolean(shot.videoPrompt && shot.videoPrompt !== video),
+    // 图比描述旧：出视频时首帧和提示词会互相打架，这个必须显眼
+    imageOlderThanEdit: Boolean(shot.imagePath && edited && (!imagedAt || edited > imagedAt)),
+    refs: consistency.collectReferences(project.bible, shot).labels,
+    link
+  };
+}
+
 // ═══════════════════════ 阶段四：出视频 ═══════════════════════
 
 /**
@@ -1780,6 +1824,7 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
         if (t) {
           t.videoPath = dest;
           t.videoPrompt = videoPrompt;
+          t.videoAt = new Date().toISOString();
           t.videoModelUsed = `${r.video.provider} / ${r.video.model}`;
           t.videoResolution = video.resolution || null;
           t.videoRefs = bibleRefs.labels;

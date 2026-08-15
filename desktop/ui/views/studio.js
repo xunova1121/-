@@ -1281,6 +1281,15 @@ export default {
                   : null,
                 c?.attempts > 1 ? h('span', { class: 'badge warn' }, `重试 ${c.attempts - 1}`) : null,
                 flagged ? h('span', { class: 'badge warn' }, '待人工确认') : null,
+                // 描述改了、图还是改之前那张。这时候去出视频，首帧是旧画面、
+                // 提示词是新描述，两边打架 —— 而模型多半跟着图走，于是"改了等于没改"。
+                // 这条必须摆在卡片上，不能藏在折叠面板里
+                shot.imagePath && shot.editedAt && (!shot.imageAt || Date.parse(shot.editedAt) > Date.parse(shot.imageAt))
+                  ? h('span', {
+                      class: 'badge warn',
+                      title: '描述改过了，但这张图是改之前出的。直接出视频的话，首帧是旧画面、提示词是新描述，模型多半跟着图走 —— 先重出这一镜的图'
+                    }, '图比描述旧')
+                  : null,
                 shot.videoPath ? h('span', { class: 'badge ok' }, '视频已出') : shot.imagePath ? h('span', { class: 'badge' }, '待出视频') : null
               ),
               shot.dialogue
@@ -1398,12 +1407,16 @@ export default {
                             input, btn));
                       })()
                     : null,
-                  // 把真正发给视频模型的提示词摊开 —— 片段和剧本对不上时，先看这里
-                  sc.video && shot.videoPrompt
-                    ? h('details', { class: 'shot-prompt' },
-                        h('summary', {}, '看发给视频模型的提示词'),
-                        h('div', { class: 'shot-prompt-body' }, shot.videoPrompt))
-                    : null
+                  /**
+                   * 发给模型的提示词。
+                   *
+                   * 这里原来显示的是 shot.videoPrompt —— **上一次实际发出去的那条**。
+                   * 改完描述再来看，看到的还是旧文本，于是很自然会以为
+                   * "我改了描述，提示词并没有跟着变"。其实每次出视频都是现算的，
+                   * 只是没人把现算的结果给你看。所以这里改成点开时去问一次，
+                   * 两条都摆出来：现在会发的、上次发过的。
+                   */
+                  promptPanel(project, shot, sc)
                 )
               )
             )
@@ -1556,6 +1569,69 @@ export default {
     return root;
   }
 };
+
+/**
+ * 「这一镜到底照着什么生成」的那块面板。
+ *
+ * 视频是**两样东西**一起决定的，缺一个都解释不了看到的结果：
+ *   首帧图  出图那步的成果，定住第一格 —— 人、衣服、场景、构图
+ *   提示词  定住之后几秒演什么、镜头怎么动、谁在说话
+ * 两样打架时模型多半跟着图走。所以改完描述只重出视频是不够的，
+ * 图也得重出一张，否则会得到"画面还是旧的、动作有点新"的四不像。
+ */
+function promptPanel(project, shot, sc) {
+  if (!shot.imagePath && !shot.videoPath) return null;
+  const body = h('div', { class: 'shot-prompt-body' }, '点开加载…');
+  let loaded = false;
+
+  const box = h('details', { class: 'shot-prompt' },
+    h('summary', {}, '看这一镜发给模型的提示词'),
+    body);
+
+  box.addEventListener('toggle', async () => {
+    if (!box.open || loaded) return;
+    loaded = true;
+    try {
+      const r = await api(`/projects/${project.id}/shots/${shot.id}/prompts`);
+      const block = (title, text, tone) =>
+        h('div', { style: 'margin-bottom:10px' },
+          h('div', { class: 'field-hint', style: `margin:0 0 3px;${tone ? `color:${tone}` : ''}` }, title),
+          h('div', { class: 'mono', style: 'font-size:11.5px;line-height:1.6;white-space:pre-wrap' }, text || '（空）'));
+
+      clear(body);
+      add(body,
+        h('div', { class: 'field-hint', style: 'margin:0 0 8px' },
+          '视频照着两样东西生成：「首帧图」——出图那步的成果，定住第一格画面；'
+          + '「下面这条提示词」——定住之后几秒演什么。两样打架时，模型多半跟着图走。'),
+        r.imageOlderThanEdit
+          ? h('div', { class: 'badge warn', style: 'margin-bottom:8px;display:block;white-space:normal;line-height:1.6' },
+              '⚠ 这一镜的描述改过，但图还是改之前出的。直接出视频的话，'
+              + '首帧是旧画面、提示词是新描述 —— 先重出这一镜的图，再出视频。')
+          : null,
+        block(
+          sc.video ? '现在出视频会发这条（按当前描述现算）' : '现在出图会发这条（按当前描述现算）',
+          sc.video ? r.now.video : r.now.image,
+          'var(--good)'),
+        (sc.video ? r.videoStale : r.imageStale)
+          ? block(
+              sc.video ? '上一次出视频实际发的是（已过时）' : '上一次出图实际发的是（已过时）',
+              sc.video ? r.used.video : r.used.image,
+              'var(--caution)')
+          : h('div', { class: 'field-hint', style: 'margin:0' },
+              (sc.video ? r.used.video : r.used.image)
+                ? '和上一次发出去的完全一样 —— 描述没改过，或者改完已经重出过了。'
+                : '这一镜还没出过，上面这条就是它将要用的。'),
+        r.refs?.length
+          ? h('div', { class: 'field-hint', style: 'margin:6px 0 0' }, `随提示词一起发的设定集参考图：${r.refs.join('、')}`)
+          : null);
+    } catch (e) {
+      clear(body);
+      body.append(`取不到：${e.message}`);
+    }
+  });
+
+  return box;
+}
 
 function describe(ev) {
   switch (ev.type) {

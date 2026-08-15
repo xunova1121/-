@@ -2142,6 +2142,72 @@ section('台词绑谁说的');
 
 // 音画对不上的最大来源不在模型，在合成这一步：画面的长度是分镜时长，
 // 配音的长度是这句话念多久，两者不相等 —— 顺次拼接必然越拼越偏。
+// 改完描述最容易得出的错误结论是"提示词没跟着变"——
+// 其实每次出视频都是现算的，只是界面上显示的是上一次发出去的那条。
+section('改了描述，发出去的提示词跟着变');
+{
+  const pp = await (
+    await fetch(`${appUrl}/api/projects`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '提示词自检' })
+    })
+  ).json();
+  // 真写一张图出来：出视频那条路要把首帧读成 base64，假路径走不到厂商那一步
+  const png = path.join(SANDBOX, 'p1.png');
+  fs.writeFileSync(png, Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64'));
+  store.update(pp.id, (p) => {
+    p.bible = { style: { anchor: '国风水墨', negative: '' },
+      characters: [{ name: '阿澜', appearance: '短发，藏青制服', seed: 1, variants: [] }],
+      scenes: [], props: [] };
+    p.shots = [{
+      id: 'p1', index: 1, characters: ['阿澜'], description: '阿澜走向栈桥',
+      camera: '中景', motion: '镜头缓推', dialogue: '', duration: 4,
+      imagePath: png, imageAt: '2026-01-01T00:00:00.000Z',
+      videoPath: 'x.mp4'
+    }];
+    return p;
+  });
+
+  // 先把"上一次发出去的"设成当前这版描述算出来的，模拟刚出完视频的状态
+  const fresh0 = await (await fetch(`${appUrl}/api/projects/${pp.id}/shots/p1/prompts`)).json();
+  store.update(pp.id, (p) => {
+    p.shots[0].prompt = fresh0.now.image;
+    p.shots[0].videoPrompt = fresh0.now.video;
+    return p;
+  });
+
+  const before = await (await fetch(`${appUrl}/api/projects/${pp.id}/shots/p1/prompts`)).json();
+  check('没改过时，现算的和上次发的一致（不虚报"过时"）',
+    before.videoStale === false, JSON.stringify([before.now.video, before.used.video]));
+
+  await fetch(`${appUrl}/api/projects/${pp.id}/shots/p1`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ description: '阿澜蹲下查看缆绳的断口' })
+  });
+  const after = await (await fetch(`${appUrl}/api/projects/${pp.id}/shots/p1/prompts`)).json();
+
+  check('现算的提示词跟着新描述走',
+    after.now.video.includes('缆绳的断口') && !after.now.video.includes('走向栈桥'), after.now.video);
+  check('出图提示词也跟着变', after.now.image.includes('缆绳的断口'), after.now.image.slice(0, 80));
+  check('上一次实际发的原样保留，并标成已过时',
+    after.used.video.includes('走向栈桥') && after.videoStale === true, JSON.stringify([after.used.video, after.videoStale]));
+  // 视频照着两样东西生成：首帧图 + 提示词。改完描述不重出图，两边会打架
+  check('图比描述旧会被点出来（首帧是旧画面、提示词是新描述）',
+    after.imageOlderThanEdit === true, JSON.stringify([after.imageOlderThanEdit]));
+
+  // 真出一次视频之后，发出去的必须是新描述那条
+  const rev = await ndjson(`/projects/${pp.id}/shots/p1/regenerate`, { kind: 'video' });
+  const sentText = (upstream.lastVideoBody?.content || []).find((c) => c.type === 'text')?.text || '';
+  check('真正发给厂商的那条就是按新描述算的',
+    sentText.includes('缆绳的断口'), sentText.slice(0, 100));
+  const done = rev.find((e) => e.type === 'finished')?.project;
+  const p1 = done?.shots?.find((x) => x.id === 'p1');
+  check('重出之后不再显示"已过时"',
+    p1?.videoPrompt?.includes('缆绳的断口'), p1?.videoPrompt?.slice(0, 60));
+}
+
 section('配音按时间轴摆，不是顺次拼');
 {
   const ff = await import('../core/ffmpeg.js');
