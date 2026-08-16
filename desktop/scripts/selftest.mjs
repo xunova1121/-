@@ -1895,6 +1895,51 @@ section('技法顺场（镜与镜之间）');
  * 这一节最要紧的两条：**不配时行为一个字不变**（默默换掉用户选的模型
  * 是不能接受的，哪怕是"为你省钱"），以及**判定依据说得出口**。
  */
+/**
+ * 画面指纹（**还没接线**）。
+ *
+ * 这一层是为了回答"从第 6 镜开始画风变了"——色调偏了、对比度跳了。
+ * 这类漂移逐镜看每张都正常，连起来才露馅，而目前完全没有自动检查。
+ *
+ * ⚠ 它**不是人脸识别**：那需要一个人脸模型，而这个项目零依赖、不带 GPU。
+ * 拿色彩指纹冒充"人像不像"的判据是在骗自己。
+ *
+ * 模块本身写完了，接进复核流程那一步暂缓 —— 所以这里只验纯计算部分。
+ */
+section('画面指纹：可复现的相似度（未接线）');
+{
+  const palette = await import('../core/palette.js');
+  const px = (r, g, b) => {
+    const buf = Buffer.alloc(8 * 8 * 3);
+    for (let i = 0; i < 64; i += 1) {
+      buf[i * 3] = r; buf[i * 3 + 1] = g; buf[i * 3 + 2] = b;
+    }
+    return buf;
+  };
+
+  const warm = palette.fingerprintFromRGB(px(200, 150, 90));
+  const warm2 = palette.fingerprintFromRGB(px(200, 150, 90));
+  const cool = palette.fingerprintFromRGB(px(80, 120, 200));
+
+  // 可复现是这一层存在的全部理由 —— 视觉模型打的分会飘，没法当阈值用
+  check('同样的输入永远同一个指纹', JSON.stringify(warm) === JSON.stringify(warm2));
+  check('同一个调子 = 满分', palette.score(warm, warm2) === 100, String(palette.score(warm, warm2)));
+  check('冷暖两个调子拉得开', palette.score(warm, cool) < 50, String(palette.score(warm, cool)));
+
+  // 略微偏一点不该报警：正常的光线变化会让色调轻微移动
+  const warmish = palette.fingerprintFromRGB(px(195, 148, 95));
+  check('轻微色差不算漂移', palette.score(warm, warmish) > 80, String(palette.score(warm, warmish)));
+
+  check('像素不够时明确报错，不是回一个假指纹',
+    (() => { try { palette.fingerprintFromRGB(Buffer.alloc(10)); return false; } catch { return true; } })());
+
+  // 基准取平均而不是第一镜：第一镜万一是个夜戏特写，后面每一镜都会被判成漂移
+  const base = palette.baselineOf([{ palette: warm }, { palette: cool }]);
+  check('基准是已有指纹的平均', base && base.length === warm.length);
+  check('还没有任何指纹时给 null（"没法判断"不等于"不匹配"）',
+    palette.baselineOf([{}, {}]) === null);
+}
+
 section('镜头分级：贵的只用在看得出差别的地方');
 {
   const tiers = await import('../core/tiers.js');
