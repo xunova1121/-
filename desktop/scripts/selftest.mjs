@@ -1886,6 +1886,98 @@ section('技法顺场（镜与镜之间）');
  * 推门→进门→环视→停下，四镜是一件事。一镜一镜点四次容易漏掉中间那一镜，
  * 而漏掉的那一镜恰恰是断点，出完片才看得出来。
  */
+/**
+ * 镜头分级：贵模型只用在看得出差别的地方。
+ *
+ * 视频那一步按镜计费，而空镜、远景、过渡镜常占一部片子的三四成 ——
+ * 那些地方便宜模型和贵模型看不出差别，全片一律用最贵的等于白花钱。
+ *
+ * 这一节最要紧的两条：**不配时行为一个字不变**（默默换掉用户选的模型
+ * 是不能接受的，哪怕是"为你省钱"），以及**判定依据说得出口**。
+ */
+section('镜头分级：贵的只用在看得出差别的地方');
+{
+  const tiers = await import('../core/tiers.js');
+
+  // 判定只看两样看得懂的东西：景别 + 有没有角色
+  check('没人出场的空镜 → 最低档', tiers.tierOf({ characters: [], camera: '全景' }) === 'low');
+  check('有人但拉得很远 → 最低档', tiers.tierOf({ characters: ['阿澜'], camera: '远景' }) === 'low');
+  check('有人 + 特写 → 最高档', tiers.tierOf({ characters: ['阿澜'], camera: '特写' }) === 'high');
+  check('有人 + 中景 → 中档', tiers.tierOf({ characters: ['阿澜'], camera: '中景' }) === 'normal');
+  // 自动判定永远不该覆盖手选
+  check('手动指定的最优先', tiers.tierOf({ characters: [], camera: '全景', tier: 'high' }) === 'high');
+  // 判错时用户得能一眼看出为什么，才知道该不该改它
+  check('说得出为什么判成这一档', /没有角色/.test(tiers.reasonFor({ characters: [], camera: '全景' })));
+  check('手选的也说清楚是手选的', /手动/.test(tiers.reasonFor({ tier: 'low' })));
+
+  check('不配就返回 null（调用方退回主路由）', tiers.routeFor('low', {}) === null);
+  check('只填一半也不算配（半配是最难查的状态）',
+    tiers.routeFor('low', { low: { provider: 'volcengine' } }) === null);
+
+  const sum = tiers.summarize([
+    { characters: [], camera: '全景' },
+    { characters: ['阿澜'], camera: '特写' },
+    { characters: ['阿澜'], camera: '中景' },
+    { characters: [], camera: '远景' }
+  ]);
+  check('分档摘要对得上', sum.low === 2 && sum.high === 1 && sum.normal === 1, JSON.stringify(sum));
+
+  /**
+   * 真的按档位发出去了吗 —— 从桩上游那边看请求，而不是看我们自己记了什么。
+   */
+  const tp = await (await fetch(`${appUrl}/api/projects`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: '分级出片', script: '一段话。' })
+  })).json();
+  // ⚠ 图必须是**真文件**：出视频要读首帧，假路径直接让这一镜失败，
+  // 于是上游一次都没被调到 —— 而那看起来会像"分级没生效"
+  const tdir = store.assetDir(tp.id);
+  const tpng = path.join(tdir, 'frame.png');
+  fs.writeFileSync(tpng, Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64'
+  ));
+  store.update(tp.id, (p) => {
+    p.bible = { style: { anchor: '国风', negative: '' }, characters: [{ name: '阿澜', appearance: '短发', seed: 1, variants: [] }], scenes: [], props: [] };
+    p.shots = [
+      { id: 't1', index: 1, characters: ['阿澜'], camera: '特写', description: '阿澜的脸', duration: 4, imagePath: tpng },
+      { id: 't2', index: 2, characters: [], camera: '全景', description: '空镜：雨中的码头', duration: 4, imagePath: tpng }
+    ];
+    return p;
+  });
+
+  // 不配时：两镜都走主路由，行为一个字不变
+  settings.patch({ videoTiers: {} });
+  // 看**桩上游那边真收到了什么**，而不是看我们自己记了什么 ——
+  // 后者是从同一批变量算出来的，记对了不等于发对了
+  upstream.videoBodies = [];
+  await ndjson(`/projects/${tp.id}/stage/video`, {});
+  const plain = (upstream.videoBodies || []).map((b) => b.model).filter(Boolean);
+  check('不配时两镜同一个模型（行为一个字不变）',
+    plain.length >= 2 && new Set(plain).size === 1, JSON.stringify(plain));
+
+  // 配了低档之后：空镜那一镜换模型，特写那一镜不动
+  settings.patch({ videoTiers: { low: { provider: 'volcengine', model: 'cheap-video-model' } } });
+  store.update(tp.id, (p) => {
+    for (const s2 of p.shots) delete s2.videoPath;
+    return p;
+  });
+  upstream.videoBodies = [];
+  await ndjson(`/projects/${tp.id}/stage/video`, {});
+  const sentModels = (upstream.videoBodies || []).map((b) => b.model);
+  check('发出去的两条用了不同模型', new Set(sentModels).size === 2, JSON.stringify(sentModels));
+  const after = store.read(tp.id).shots;
+  check('空镜那一镜走了便宜模型',
+    /cheap-video-model/.test(after[1].videoModelUsed || ''), after[1].videoModelUsed);
+  check('特写那一镜没被动过',
+    !/cheap-video-model/.test(after[0].videoModelUsed || ''), after[0].videoModelUsed);
+  check('走的哪一档记在镜头上（出完之后"这一镜为什么糊"最先查它）',
+    after[1].videoTier === 'low' && after[0].videoTier === 'high',
+    JSON.stringify([after[0].videoTier, after[1].videoTier]));
+
+  settings.patch({ videoTiers: {} });
+}
+
 section('整段标衔接');
 {
   const lp = await (await fetch(`${appUrl}/api/projects`, {

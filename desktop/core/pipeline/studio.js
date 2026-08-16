@@ -28,6 +28,7 @@ import * as duration from '../duration.js';
 import * as skillsLib from '../skills.js';
 import * as variants from './variants.js';
 import * as oss from '../oss.js';
+import * as tiers from '../tiers.js';
 
 export const extractJSON = consistency.extractJSON;
 
@@ -621,6 +622,8 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
  */
 const SHOT_EDITABLE = [
   'description', 'camera', 'motion', 'dialogue', 'scene', 'characters', 'duration', 'link', 'skills',
+  // 这一镜走哪一档模型。自动判定会给一个，判错的那几镜由人改
+  'tier',
   // 这句台词是谁说的。决定用哪个角色的音色 —— 空字符串 = 旁白
   'speaker',
   // { '阿澜': 'v-xxx', '码头': 'v-yyy' } —— 这一镜谁穿哪套、场景是什么时段
@@ -1330,8 +1333,17 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
   if (!shot.imagePath) throw new Error('这一镜还没有图，先出图再出视频');
 
   const r = routing();
-  const providerId = opts.provider || r.video.provider;
-  const model = opts.model || r.video.model;
+  /**
+   * 单镜重出也走同一套分级。
+   *
+   * 两条路各挑各的模型，会出现"整批出的和单独重出的画质不一样"——
+   * 而这种差别不报任何错，只是那一镜看着不对，查起来毫无头绪。
+   * 手动指定（opts.provider）永远最优先。
+   */
+  const tier = tiers.tierOf(shot);
+  const tierRoute = tiers.routeFor(tier, settings.get('videoTiers'));
+  const providerId = opts.provider || tierRoute?.provider || r.video.provider;
+  const model = opts.model || tierRoute?.model || r.video.model;
 
   onEvent?.({ type: 'shot', shotId, status: 'running', message: `第 ${shot.index} 镜重出视频（${providerId} / ${model}）…` });
 
@@ -2013,9 +2025,30 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
       const videoPrompt = ctx.videoPrompt;
       onEvent?.({ type: 'shot', shotId: shot.id, status: 'running', message: `提交任务：${videoPrompt.slice(0, 60)}…` });
 
+      /**
+       * 按镜头分级挑模型：贵的只用在看得出差别的地方。
+       *
+       * 视频这一步是最大的一笔开销，而且按镜计费。但空镜、远景、过渡镜
+       * 常常占一部片子的三四成，那些地方便宜模型和贵模型看不出差别 ——
+       * 全片一律用最贵的，等于为看不出差别的地方付全价。
+       *
+       * 没配就是 null，退回主路由 —— 不配等于现在的行为，一模一样。
+       */
+      const tier = tiers.tierOf(shot);
+      const tierRoute = tiers.routeFor(tier, settings.get('videoTiers'));
+      const useProvider = tierRoute?.provider || r.video.provider;
+      const useModel = tierRoute?.model || r.video.model;
+      if (tierRoute) {
+        onEvent?.({
+          type: 'note',
+          shotId: shot.id,
+          message: `第 ${shot.index} 镜按「${tiers.TIER_LABELS[tier]}」走 ${useProvider} / ${useModel}（${tiers.reasonFor(shot)}）`
+        });
+      }
+
       const video = await adapters.generateVideo({
-        providerId: r.video.provider,
-        model: r.video.model,
+        providerId: useProvider,
+        model: useModel,
         prompt: videoPrompt,
         firstFrameUrl: firstFrame,
         lastFrameUrl: ctx.lastFrameUrl,
@@ -2035,7 +2068,9 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
           t.videoPath = dest;
           t.videoPrompt = videoPrompt;
           t.videoAt = new Date().toISOString();
-          t.videoModelUsed = `${r.video.provider} / ${r.video.model}`;
+          t.videoModelUsed = `${useProvider} / ${useModel}`;
+          // 记下走的哪一档：出完之后"这一镜为什么糊"最先该查的就是它
+          t.videoTier = tier;
           t.videoResolution = video.resolution || null;
           t.videoRefs = bibleRefs.labels;
           t.link = ctx.link;

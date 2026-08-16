@@ -34,6 +34,7 @@ import * as zip from './zip.js';
 import * as deploy from './deploy.js';
 import * as oss from './oss.js';
 import * as accounts from './accounts.js';
+import * as tiers from './tiers.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -526,6 +527,15 @@ async function handleApi(req, res, url, { lan = false } = {}) {
     }
   }
 
+  // ---- 镜头分级：这部片子按档位分下来是什么样 ----
+  // 先给这个，人才判断得出"值不值得配"——低档只有一镜的话，配这一层就是白折腾
+  if (a === 'tiers') {
+    return json(res, 200, {
+      tiers: tiers.TIERS.map((id) => ({ id, label: tiers.TIER_LABELS[id], hint: tiers.TIER_HINTS[id] })),
+      config: settings.get('videoTiers') || {}
+    });
+  }
+
   // ---- 对象存储（阿里云 OSS）----
   if (a === 'oss') {
     if (method === 'GET' && !b) {
@@ -740,6 +750,18 @@ async function handleApi(req, res, url, { lan = false } = {}) {
     }
 
     // 设定集里冻结的画风，和预设对得上吗；对不上就让用户一键换过来
+    // 这个项目的镜头按档位分下来是什么样
+    if (b && c === 'tiers' && method === 'GET') {
+      const p = store.read(b);
+      if (!p) return json(res, 404, { error: '项目不存在' });
+      return json(res, 200, {
+        summary: tiers.summarize(p.shots || []),
+        shots: (p.shots || []).map((s) => ({
+          index: s.index, tier: tiers.tierOf(s), reason: tiers.reasonFor(s), manual: tiers.TIERS.includes(s.tier)
+        }))
+      });
+    }
+
     if (b && c === 'style' && !d && method === 'GET') {
       const p = store.read(b);
       if (!p) return json(res, 404, { error: '项目不存在' });

@@ -903,6 +903,95 @@ export default {
       );
     }
 
+    /**
+     * ── 镜头分级：贵模型只用在看得出差别的地方 ──
+     *
+     * 视频那一步是最大的一笔开销，而且按镜计费。但空镜、远景、过渡镜
+     * 常常占一部片子的三四成 —— 那些地方便宜模型和贵模型看不出差别，
+     * 全片一律用最贵的，等于为看不出差别的地方付全价。
+     *
+     * 界面上**先给这部片子的分档摘要**，人才判断得出值不值得配：
+     * 低档只有一镜的话，配这一层就是白折腾。
+     */
+    const tierHost = h('div', {});
+    async function paintTiers() {
+      const info = await api('/tiers').catch(() => null);
+      clear(tierHost);
+      if (!info) {
+        tierHost.append(h('p', { class: 'field-hint' }, '读不到镜头分级配置'));
+        return;
+      }
+      const videoProviders = state.catalog.providers.filter((p) => (p.capabilities || []).includes('t2v'));
+      const cfg = { ...info.config };
+
+      // 当前项目分下来是什么样 —— 没打开项目就不显示，别摆一行"0/0/0"
+      if (state.projectId) {
+        api(`/projects/${state.projectId}/tiers`).then((t) => {
+          const s2 = t.summary;
+          tierHost.prepend(h('div', { class: 'note-line' },
+            `当前项目 ${s2.total} 镜分下来：`,
+            h('b', {}, ` 关键 ${s2.high}`), ` · 一般 ${s2.normal} · `,
+            h('b', {}, `空镜 ${s2.low}`),
+            s2.low ? `　—— 这 ${s2.low} 镜换便宜模型看不出差别` : '　—— 这部片子没有空镜，配了也省不下'));
+        }).catch(() => {});
+      }
+
+      for (const t of info.tiers) {
+        const provSel = h('select', {},
+          h('option', { value: '' }, '跟随主路由（不额外指定）'),
+          ...videoProviders.map((p) => h('option', { value: p.id, selected: cfg[t.id]?.provider === p.id }, p.name)));
+        const modelInput = h('input', {
+          type: 'text', placeholder: '模型 ID（留空 = 跟随主路由）',
+          value: cfg[t.id]?.model || ''
+        });
+        const sync = () => {
+          cfg[t.id] = provSel.value && modelInput.value.trim()
+            ? { provider: provSel.value, model: modelInput.value.trim() }
+            : null;
+        };
+        provSel.onchange = sync;
+        modelInput.oninput = sync;
+
+        tierHost.append(
+          h('div', { class: 'field', style: 'margin-top:14px' },
+            h('label', {}, t.label),
+            h('div', { class: 'field-hint', style: 'margin-bottom:6px' }, t.hint),
+            h('div', { class: 'grid2' }, provSel, modelInput)));
+      }
+
+      tierHost.append(
+        h('div', { class: 'inline', style: 'margin-top:14px' },
+          h('button', {
+            class: 'btn',
+            onclick: async (e) => {
+              e.target.disabled = true;
+              try {
+                // cap:tier-routing
+                await api('/settings', { method: 'POST', body: { videoTiers: cfg } });
+                await refreshCatalog();
+                toast('已保存。下一批出视频按这个走', 'ok');
+              } catch (err) {
+                toast(err.message, 'err');
+              } finally {
+                e.target.disabled = false;
+              }
+            }
+          }, '保存分级')),
+        h('div', { class: 'field-hint', style: 'margin-top:8px' },
+          '判定依据只有两样看得懂的东西：景别 + 这一镜有没有角色。'
+          + '不用模型打分 —— 判错时你得能一眼看出为什么，才知道该不该手动改它。'
+          + '判错的那几镜，在分镜卡片上单独改。'));
+    }
+
+    root.append(
+      h('div', { class: 'panel' },
+        h('h2', { class: 'panel-title' }, '镜头分级（省钱）'),
+        h('p', { class: 'panel-hint' },
+          '不配就是现在的行为，一模一样 —— 这一层是选配。只有你明确给某一档指定了别的模型，它才开始起作用。'),
+        tierHost)
+    );
+    paintTiers();
+
     root.append(
       h('div', { class: 'panel' },
         h('h2', { class: 'panel-title' }, '账号与设备'),

@@ -1258,6 +1258,12 @@ export default {
           description: h('textarea', { rows: 3 }, shot.description || ''),
           camera: h('input', { type: 'text', placeholder: '中景 / 特写 / 航拍…', value: shot.camera || '' }),
           motion: h('input', { type: 'text', placeholder: '镜头缓慢推进…', value: shot.motion || '' }),
+          // 这一镜走哪一档视频模型。自动判定给一个，判错的那几镜由人改
+          tier: h('select', {},
+            h('option', { value: '', selected: !shot.tier }, '自动判定'),
+            h('option', { value: 'high', selected: shot.tier === 'high' }, '关键镜（用最好的）'),
+            h('option', { value: 'normal', selected: shot.tier === 'normal' }, '一般叙事镜'),
+            h('option', { value: 'low', selected: shot.tier === 'low' }, '空镜 / 远景（用便宜的）')),
           scene: h('input', { type: 'text', placeholder: '场景名（要和设定集里的一致）', value: shot.scene || '' }),
           characters: h('input', {
             type: 'text', placeholder: '出场角色，逗号分隔', value: (shot.characters || []).join('、')
@@ -1288,6 +1294,8 @@ export default {
                   description: fields.description.value,
                   camera: fields.camera.value,
                   motion: fields.motion.value,
+                  // cap:tier-routing
+                  tier: fields.tier.value,
                   scene: fields.scene.value,
                   characters: fields.characters.value,
                   dialogue: fields.dialogue.value,
@@ -1355,7 +1363,8 @@ export default {
           h('label', {}, '台词'),
           fields.dialogue,
           h('div', { class: 'shot-edit-grid' },
-            h('div', {}, h('label', {}, '谁说的'), fields.speaker)),
+            h('div', {}, h('label', {}, '谁说的'), fields.speaker),
+            h('div', {}, h('label', {}, '模型档位'), fields.tier)),
           // ── 这一镜谁穿哪套、场景是什么时段 ──
           // 只在真的有多版时才摆出来：大多数条目只有一版，摆一排"默认"是纯噪音
           (() => {

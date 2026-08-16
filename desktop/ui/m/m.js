@@ -977,6 +977,9 @@ function editRow(s) {
 
   let camera = s.camera || '';
   let motion = s.motion || '';
+  // 这一镜走哪一档模型。自动判定给一个，判错的那几镜由人改
+  let tier = s.tier || '';
+  const TIER_PICK = [['', '自动判定'], ['high', '关键镜'], ['normal', '一般'], ['low', '空镜']];
 
   const save = h('button', { class: 'btn sm primary grow' }, '保存');
   save.onclick = async () => {
@@ -991,6 +994,7 @@ function editRow(s) {
           speaker: who.value,
           camera,
           motion,
+          tier,
           duration: Number(dur.value) || s.duration
         }
       });
@@ -1018,6 +1022,22 @@ function editRow(s) {
     field('景别', chips(CAMERAS, camera, (v) => (camera = v))),
     field('运镜', chips(MOTIONS, motion, (v) => (motion = v))),
     field('时长（秒）', dur),
+    // cap:tier-routing
+    field('模型档位', (() => {
+      const wrap = h('div', { class: 'chips' });
+      for (const [val, label] of TIER_PICK) {
+        const b = h('button', {
+          class: `chip ${val === tier ? 'on' : ''}`,
+          onclick: () => {
+            tier = val;
+            for (const el of wrap.children) el.classList.remove('on');
+            b.classList.add('on');
+          }
+        }, label);
+        wrap.append(b);
+      }
+      return wrap;
+    })(), '空镜和远景用便宜模型看不出差别 —— 这一档最省钱。判错了在这儿改。'),
     h('div', { class: 'row', style: 'margin-top:12px' }, save),
     h('div', { class: 'muted', style: 'margin-top:7px' },
       '保存只改文案，不重出 —— 一般是连着改好几镜再统一重出，改一个字就烧一次钱不划算。')

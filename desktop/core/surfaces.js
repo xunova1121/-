@@ -152,6 +152,13 @@ export const CAPABILITIES = [
     mobile: 'ui/m/m.js'
   },
   {
+    id: 'tier-routing',
+    name: '按镜头分级挑模型（省钱）',
+    api: 'PATCH /projects/:id/shots/:sid { tier } + PATCH /settings { videoTiers }',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js'
+  },
+  {
     id: 'account-login',
     name: '用账号密码登录',
     api: 'POST /account/login',
