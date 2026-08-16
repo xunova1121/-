@@ -989,8 +989,50 @@ export function resetMediaLimits() {
  */
 function isMediaLimitError(message) {
   const m = String(message || '');
-  if (/[（(\[]\s*2013\s*[）)\]]|code\D{0,4}2013\b/i.test(m)) return true;
-  return /媒体数量|输入媒体|媒体数|图片数量|number of (images|media)|media (count|number)|exceed.*(image|media)/i.test(m);
+  /**
+   * ⚠ **2013 不是"图太多"** —— 厂商原话是 `cannot download media URL (2013)`，
+   * 它抱怨的是自己取不到我们给的地址。
+   *
+   * 之前把 2013 当成数量超限，后果是一连串做在错地方的补救：
+   * 自动减半重试 → 减到 1 张照样失败（地址还是取不到）→ 把"最多 1 张"
+   * 记了下来 → 从此每一镜只带 1 张参考图，一致性塌了一半，而且不报任何错。
+   *
+   * 一个指错方向的判断，会让后面每一个动作都做在错的地方。
+   * 所以这里只认**明确在说数量**的那些话，不认厂商的私有错误码。
+   */
+  if (/cannot\s+download|download\s+media/i.test(m)) return false;
+  return /媒体数量|输入媒体数量|图片数量|number of (images|media)|media (count|number)|exceed.*(image|media)/i.test(m);
+}
+
+/**
+ * 厂商说"下不到这张图"时，**我们自己去拉一次**。
+ *
+ * 这一步把猜测变成事实，而且答案指向完全不同的两个方向：
+ *
+ *   我们也拉不到  → 是我们这边的问题：地址不是公网的、签名过期了、桶是私有的
+ *   我们拉得到    → 是厂商那边够不着：跨境、地域限制、它的出口被挡
+ *
+ * 这两种情况的下一步动作毫不相干，而单看那句 `cannot download media URL`
+ * 是分不出来的 —— 人只能瞎试。一次 HEAD 请求换掉一整轮瞎试，很划算。
+ * 只在**已经失败**时才做，正常路径上一次都不发。
+ */
+async function probeMediaUrl(url) {
+  if (!url) return '（这一镜没带参考图，问题不在图上）';
+  if (String(url).startsWith('data:')) {
+    return '我们发的是内联图（data URI），而这家只收公网地址 —— 去「设置 → 对象存储」配一个，或者填一个上传网关。';
+  }
+  try {
+    const res = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' }, signal: AbortSignal.timeout(15000) });
+    if (res.ok || res.status === 206) {
+      return `我们这边拉得到（HTTP ${res.status}）—— 说明地址本身是好的，是**厂商那边够不着**：常见于对象存储在境外而厂商在境内，或者它的出口被挡。把桶换到和厂商同一侧，或者改用公共读 + CDN。`;
+    }
+    if (res.status === 403) {
+      return '我们这边也是 403 —— 多半是限时地址过期了，或者桶是私有的而签名不被接受。「设置 → 对象存储」里把有效期调长，或者把桶设成公共读。';
+    }
+    return `我们这边也拉不到（HTTP ${res.status}）—— 先把这个地址在无痕窗口里打开确认一下。`;
+  } catch (err) {
+    return `我们这边也拉不到（${err.message}）—— 这个地址不是公网可达的。`;
+  }
 }
 
 async function submitWithMediaBackoff({ providerId, provider, url, images, buildBody, checkBiz, label, onEvent }) {
@@ -1019,6 +1061,17 @@ async function submitWithMediaBackoff({ providerId, provider, url, images, build
       if (count < images.length) rememberMediaLimit(key, count);
       return json;
     } catch (err) {
+      /**
+       * "下不到图"和"图带多了"是两件完全不同的事，补救动作也完全不同。
+       * 减半重试对前者毫无用处（地址还是取不到），只会白等几轮，
+       * 最后还留下一个错误的"这家只收 1 张"。所以这里直接停下来，
+       * 并且把"到底是谁拉不到"查清楚再抛。
+       */
+      if (/cannot\s+download|download\s+media/i.test(err.message || '')) {
+        const verdict = await probeMediaUrl(images[0]);
+        err.message = `${err.message}\n\n我们替你查了一下：${verdict}`;
+        throw err;
+      }
       if (!isMediaLimitError(err.message) || count <= 1) throw err;
       const next = Math.max(1, Math.floor(count / 2));
       onEvent?.({
@@ -1443,3 +1496,8 @@ export function resolvedRouting() {
     tts: { provider: s.ttsProvider, model: s.ttsModel }
   };
 }
+
+
+/** 只给自检用：这两个判断出过大错，值得单独验 */
+export const __isMediaLimitError = isMediaLimitError;
+export const __probeMediaUrl = probeMediaUrl;

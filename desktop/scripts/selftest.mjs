@@ -1916,6 +1916,44 @@ section('技法顺场（镜与镜之间）');
  * 用户截了秘塔控制台的图：参考素材那栏写着 0/9。我们学到的"最多 1 张"
  * 从头到尾就是错的。降级必须可撤销，否则一次误判就是永久损失。
  */
+/**
+ * `cannot download media URL (2013)` —— 厂商下不到我们给的图。
+ *
+ * 这一条曾经被当成"图带多了"，后果是一连串**做在错地方**的补救：
+ * 自动减半重试 → 减到 1 张照样失败（地址还是取不到）→ 把"最多 1 张"记下来
+ * → 从此每一镜只带 1 张参考图，一致性塌了一半，而且不报任何错。
+ *
+ * 一个指错方向的判断，会让后面每一个动作都做在错的地方。
+ */
+section('下不到图 ≠ 图太多');
+{
+  const ad = await import('../core/providers/adapters.js');
+  const idx = await import('../core/providers/index.js');
+
+  // 判别：只认明确在说数量的话，不认厂商的私有错误码
+  const isLimit = (m) => ad.__isMediaLimitError(m);
+  check('「下不到图」不再被当成「图太多」', isLimit('cannot download media URL (2013)') === false);
+  check('真的说数量时还是认得出', isLimit('输入媒体数量超过限制 (2013)') === true);
+  check('英文的数量超限也认', isLimit('number of images exceeded') === true);
+  // 裸着匹配 2013 的话，报错里任何地方出现这四个数字都会被误判
+  check('时间戳里的 2013 不会被误判', isLimit('任务 20130422 超时') === false);
+
+  // 报错要指向对的方向：人看到"请求体不合法"会去翻参数、翻模型 ID，全是白费
+  const said = idx.diagnose({ status: 400, json: { message: 'cannot download media URL (2013)' } });
+  check('400 里单独把"下不到图"挑出来说', /下载不到我们给的图/.test(said), said.slice(0, 60));
+  check('并且说清楚这不是参数问题', /不是参数问题/.test(said));
+  check('给了可以照着做的排查顺序', /无痕窗口/.test(said) && /对象存储/.test(said));
+
+  // 我们自己去拉一次 —— 把猜测变成事实
+  const inline = await ad.__probeMediaUrl('data:image/png;base64,AAAA');
+  check('内联图的情况直接点名', /只收公网地址/.test(inline), inline.slice(0, 40));
+  const unreachable = await ad.__probeMediaUrl('http://127.0.0.1:1/nope.png');
+  check('拉不到时说"我们这边也拉不到"', /我们这边也拉不到/.test(unreachable), unreachable.slice(0, 50));
+  const ok = await ad.__probeMediaUrl(`${appUrl}/index.html`);
+  // 这两种情况的下一步动作毫不相干，而单看厂商那句话是分不出来的
+  check('拉得到时反过来指向厂商那边', /厂商那边够不着/.test(ok), ok.slice(0, 50));
+}
+
 section('学来的图片上限：会过期，而且别乱学');
 {
   const ad = await import('../core/providers/adapters.js');
