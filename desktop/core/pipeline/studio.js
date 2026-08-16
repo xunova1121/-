@@ -627,6 +627,43 @@ const SHOT_EDITABLE = [
   'variants'
 ];
 
+/**
+ * 一段镜头一起改衔接关系。
+ *
+ * 为什么值得单开一条：「这一段是一个连贯动作」是**按段**发生的想法，
+ * 不是按镜。推门→进门→环视→停下，四镜是一件事；一镜一镜点四次，
+ * 中间还容易漏掉一镜 —— 而漏掉的那一镜恰恰是断点，等出完片才看出来。
+ *
+ * ⚠ 标成 continuous 是有代价的，界面上必须说清楚：
+ *   · 这几镜会**串行**生成（每一镜要等前一镜的末帧），不能并行，慢好几倍
+ *   · 机位被锁住了 —— 连续动作意味着不切镜位，标多了整段变成一个长镜头
+ * 所以默认永远是 cut，continuous 必须是人主动圈出来的。
+ */
+export function setLinkRange(projectId, { from, to, link }) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  if (!continuity.LINKS.includes(link)) {
+    throw new Error(`不认识的衔接关系：${link}（只能是 ${continuity.LINKS.join(' / ')}）`);
+  }
+  const lo = Math.min(Number(from), Number(to));
+  const hi = Math.max(Number(from), Number(to));
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) throw new Error('镜号不对');
+
+  const changed = [];
+  const next = store.update(projectId, (p) => {
+    for (const s of p.shots || []) {
+      if (s.index < lo || s.index > hi) continue;
+      if (s.link === link) continue;
+      s.link = link;
+      // 记一笔"这是人选的"，免得后面自动推断又把它改回去
+      s.linkBy = 'user';
+      changed.push(s.index);
+    }
+    return p;
+  });
+  return { project: next, changed, link };
+}
+
 export function updateShot(projectId, shotId, patch = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);

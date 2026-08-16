@@ -829,13 +829,63 @@ function newProjectCard() {
     h('div', { class: 'row', style: 'margin-top:10px' }, go));
 }
 
+/**
+ * 一段镜头一起标衔接关系。
+ *
+ * 「这一段是一个连贯动作」是**按段**发生的想法，不是按镜：
+ * 推门→进门→环视→停下，四镜是一件事。一镜一镜点四次容易漏掉中间那一镜，
+ * 而漏掉的那一镜恰恰是断点 —— 出完片才看得出来。
+ */
+function linkRangeCard(shots) {
+  const from = h('input', { type: 'number', min: 1, value: '1', style: 'width:80px' });
+  const to = h('input', { type: 'number', min: 1, value: String(shots.length) , style: 'width:80px' });
+  const kind = h('select', { class: 'msel' },
+    h('option', { value: 'continuous', selected: true }, '连续动作（动作不能断）'),
+    h('option', { value: 'cut' }, '同场景换机位'),
+    h('option', { value: 'new-scene' }, '换场景'));
+  const status = h('div', { class: 'muted', style: 'margin-top:8px' });
+  const go = h('button', { class: 'btn sm grow' }, '整段标记');
+  go.onclick = async () => {
+    if (kind.value === 'continuous') {
+      const n = Math.abs(Number(to.value) - Number(from.value)) + 1;
+      // 代价要在按之前说，不是按完之后才发现"怎么这么慢"
+      if (!confirm(`把第 ${from.value}~${to.value} 镜（共 ${n} 镜）标成连续动作？\n\n这几镜会串行生成，比并行慢好几倍；而且机位被锁住，标多了整段变成一个长镜头。`)) return;
+    }
+    go.disabled = true;
+    try {
+      // cap:link-batch
+      const r = await api(`/projects/${project.id}/shots/link`, {
+        method: 'POST',
+        body: { from: Number(from.value), to: Number(to.value), link: kind.value }
+      });
+      status.textContent = r.changed.length ? `改了 ${r.changed.length} 镜` : '本来就是这个关系，没动';
+      await reload();
+    } catch (err) {
+      toast(err.message, 'err');
+    } finally {
+      go.disabled = false;
+    }
+  };
+  return h('div', { class: 'card' },
+    h('b', {}, '整段标衔接'),
+    h('p', { class: 'muted', style: 'margin:6px 0 10px' },
+      '推门→进门→环视 这种连贯动作，标成「连续动作」会把上一镜的末帧锁成下一镜的首帧。'),
+    h('div', { class: 'row' },
+      h('span', { class: 'muted' }, '第'), from,
+      h('span', { class: 'muted' }, '到'), to,
+      h('span', { class: 'muted' }, '镜')),
+    h('div', { style: 'margin-top:9px' }, kind),
+    h('div', { class: 'row', style: 'margin-top:9px' }, go),
+    status);
+}
+
 function paintShots() {
   const shots = (project?.shots || []).slice().sort((a, b) => a.index - b.index);
   if (!shots.length) return h('div', { class: 'card muted' }, '还没有分镜。先在流水线里跑到第 02 步。');
   const v = Date.parse(project.updatedAt || '') || 0;
   const portrait = /^9:16$|^3:4$/.test(project.aspectRatio || '');
 
-  return shots.map((s) => {
+  return [linkRangeCard(shots), ...shots.map((s) => {
     const c = s.consistency;
     return h('div', { class: 'card shot' },
       s.videoPath
@@ -869,7 +919,7 @@ function paintShots() {
               }, '重出这段视频')
             : null),
         editRow(s)));
-  });
+  })];
 }
 
 /**

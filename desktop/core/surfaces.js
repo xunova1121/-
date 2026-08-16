@@ -145,6 +145,13 @@ export const CAPABILITIES = [
   },
 
   {
+    id: 'link-batch',
+    name: '一段镜头一起标衔接关系',
+    api: 'POST /projects/:id/shots/link',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js'
+  },
+  {
     id: 'account-login',
     name: '用账号密码登录',
     api: 'POST /account/login',

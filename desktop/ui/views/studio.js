@@ -1837,6 +1837,52 @@ export default {
       paintShots();
     }
 
+    /**
+     * 一段镜头一起标衔接关系。
+     *
+     * 「这一段是一个连贯动作」是**按段**发生的想法，不是按镜：
+     * 推门→进门→环视→停下，四镜是一件事。一镜一镜点四次，
+     * 中间容易漏掉一镜 —— 而漏掉的那一镜恰恰是断点，出完片才看得出来。
+     */
+    const linkFrom = h('input', { type: 'number', min: 1, value: '1', style: 'width:72px' });
+    const linkTo = h('input', { type: 'number', min: 1, value: String(project.shots?.length || 1), style: 'width:72px' });
+    const linkKind = h('select', {},
+      ...(state.catalog.links || []).map((l) =>
+        h('option', { value: l.id, selected: l.id === 'continuous', title: l.hint || '' }, l.label)));
+    const linkStatus = h('span', { class: 'field-hint' });
+    const linkBtn = h('button', {
+      class: 'btn sm',
+      onclick: async (e) => {
+        const kind = linkKind.value;
+        if (kind === 'continuous') {
+          // 标成连续动作是有代价的，说清楚再问 —— 事后才发现"怎么这么慢"最气人
+          const n = Math.abs(Number(linkTo.value) - Number(linkFrom.value)) + 1;
+          if (!confirm(
+            `把第 ${linkFrom.value}~${linkTo.value} 镜（共 ${n} 镜）标成「连续动作」？\n\n` +
+            '这几镜会串行生成（每一镜要等前一镜的末帧），比并行慢好几倍；\n' +
+            '而且机位被锁住 —— 连续动作意味着不切镜位，标多了整段会变成一个长镜头。'
+          )) return;
+        }
+        e.target.disabled = true;
+        try {
+          // cap:link-batch
+          const r = await api(`/projects/${project.id}/shots/link`, {
+            method: 'POST',
+            body: { from: Number(linkFrom.value), to: Number(linkTo.value), link: kind }
+          });
+          linkStatus.textContent = r.changed.length
+            ? `改了 ${r.changed.length} 镜：第 ${r.changed.join('、')} 镜`
+            : '这几镜本来就是这个关系，没动';
+          project = r.project;
+          paintShots();
+        } catch (err) {
+          linkStatus.textContent = err.message;
+        } finally {
+          e.target.disabled = false;
+        }
+      }
+    }, '整段标记');
+
     const shotsPanel = h('div', { class: 'panel' },
       h('h2', { class: 'panel-title' },
         '分镜',
@@ -1844,6 +1890,10 @@ export default {
         shotBadge
       ),
       shotHint,
+      h('div', { class: 'inline', style: 'margin-bottom:10px;flex-wrap:wrap;gap:6px' },
+        h('span', { class: 'field-hint' }, '第'), linkFrom,
+        h('span', { class: 'field-hint' }, '到'), linkTo,
+        h('span', { class: 'field-hint' }, '镜，标成'), linkKind, linkBtn, linkStatus),
       // 这两个按钮只在用得上的那一步露面：在出图那步摆一个"自动绑说话人"，
       // 只会让人以为得先把它按了才能出图
       h('div', { class: 'inline', style: 'margin-bottom:10px;flex-wrap:wrap' },

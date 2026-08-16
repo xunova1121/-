@@ -759,6 +759,17 @@ async function handleApi(req, res, url, { lan = false } = {}) {
 
     // ── 手改一镜的文案：自动拆的分镜有时不准，改一行字比重跑十次便宜 ──
     // 只认白名单字段（见 pipeline/studio.js），不会碰 imagePath / videoPath 这些产物。
+    // 一段镜头一起改衔接关系 —— "这一段是一个连贯动作"是按段发生的想法，不是按镜
+    if (b && c === 'shots' && d === 'link' && method === 'POST') {
+      const body = await readBody(req);
+      try {
+        // cap:link-batch
+        return json(res, 200, studio.setLinkRange(b, body));
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
+    }
+
     if (b && c === 'shots' && d && !e && method === 'PATCH') {
       const patch = await readBody(req);
       try {

@@ -1879,6 +1879,51 @@ section('技法顺场（镜与镜之间）');
  * 星形（1→2, 1→3, 1→4）效果一样（都像同一张，自然彼此也像），
  * 误差却是**常数**而不是**累加**。这一节验的就是这个拓扑。
  */
+/**
+ * 整段标衔接关系。
+ *
+ *「这一段是一个连贯动作」是**按段**发生的想法，不是按镜 ——
+ * 推门→进门→环视→停下，四镜是一件事。一镜一镜点四次容易漏掉中间那一镜，
+ * 而漏掉的那一镜恰恰是断点，出完片才看得出来。
+ */
+section('整段标衔接');
+{
+  const lp = await (await fetch(`${appUrl}/api/projects`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: '整段标记', script: '一段话。' })
+  })).json();
+  store.update(lp.id, (p) => {
+    p.shots = Array.from({ length: 6 }, (_, i) => ({
+      id: `k${i + 1}`, index: i + 1, scene: '门口', description: `第 ${i + 1} 镜`, duration: 4
+    }));
+    return p;
+  });
+
+  const mark = (body) => fetch(`${appUrl}/api/projects/${lp.id}/shots/link`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  }).then(async (r) => ({ status: r.status, body: await r.json() }));
+
+  const r1 = await mark({ from: 2, to: 4, link: 'continuous' });
+  check('一次标了三镜', r1.body.changed?.length === 3, JSON.stringify(r1.body.changed));
+  const after = store.read(lp.id).shots;
+  check('范围内的都改了', after.slice(1, 4).every((s) => s.link === 'continuous'));
+  check('范围外的一个没动', !after[0].link && !after[4].link, JSON.stringify([after[0].link, after[4].link]));
+  // 记一笔"人选的"，免得后面自动推断又改回去
+  check('标成人选的，自动推断不会再覆盖', after[1].linkBy === 'user');
+
+  // 倒着填也该正常 —— 用户不会每次都记得大小顺序
+  const r2 = await mark({ from: 6, to: 5, link: 'new-scene' });
+  check('起止填反了也认', r2.body.changed?.length === 2, JSON.stringify(r2.body.changed));
+
+  // 已经是这个关系的不重复记，不然"改了 6 镜"这句话会骗人
+  const r3 = await mark({ from: 2, to: 4, link: 'continuous' });
+  check('本来就是这个关系时不谎报改了几镜', r3.body.changed?.length === 0, JSON.stringify(r3.body.changed));
+
+  const bad = await mark({ from: 1, to: 3, link: '乱写的' });
+  check('不认识的关系当场拒绝，并说清楚能填什么',
+    bad.status === 400 && /new-scene/.test(bad.body.error || ''), bad.body.error);
+}
+
 section('邻镜参考：星形，不是链');
 {
   const cont = await import('../core/pipeline/continuity.js');
