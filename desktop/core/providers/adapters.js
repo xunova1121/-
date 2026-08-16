@@ -1035,7 +1035,46 @@ async function probeMediaUrl(url) {
   }
 }
 
-async function submitWithMediaBackoff({ providerId, provider, url, images, buildBody, checkBiz, label, onEvent }) {
+/**
+ * 内联图（base64）按**总体积**卡，不按张数卡。
+ *
+ * 张数上限管的是厂商收不收得下；体积管的是这个请求发不发得出去 ——
+ * 两回事。参考图上限提到 9 张之后，一旦走内联兜底（没配对象存储时），
+ * 请求体一下子几十 MB：光上传就超过任何合理的超时，而失败的样子是
+ * "请求超时"，完全看不出是体积问题。
+ *
+ * base64 还会再胀三分之一，所以这里卡的是编码后的实际字节数。
+ * 8MB 是个经验值：多数厂商的请求体上限在 10~20MB 之间，留出余量。
+ */
+const INLINE_BUDGET = 8 * 1024 * 1024;
+
+function trimInlineImages(images, onEvent) {
+  const inline = images.filter((u) => String(u || '').startsWith('data:'));
+  if (!inline.length) return images;
+
+  const kept = [];
+  let used = 0;
+  for (const img of images) {
+    const size = String(img || '').startsWith('data:') ? img.length : 0;
+    if (size && used + size > INLINE_BUDGET && kept.length) break;
+    kept.push(img);
+    used += size;
+  }
+  if (kept.length < images.length) {
+    onEvent?.({
+      type: 'note',
+      message:
+        `参考图是内联发的（没配对象存储），${images.length} 张加起来 ` +
+        `${(images.reduce((n, u) => n + (String(u).startsWith('data:') ? u.length : 0), 0) / 1048576).toFixed(1)}MB ` +
+        `太大，这次只发前 ${kept.length} 张。` +
+        `配上「设置 → 对象存储」之后图会以地址形式发出去，就能把 ${images.length} 张全带上`
+    });
+  }
+  return kept;
+}
+
+async function submitWithMediaBackoff({ providerId, provider, url, images: rawImages, buildBody, checkBiz, label, onEvent }) {
+  const images = trimInlineImages(rawImages, onEvent);
   const key = `${providerId}::${baseUrlOf(provider)}`;
   const learned = learnedMediaLimit(key);
   let count = learned ? Math.min(learned, images.length) : images.length;
@@ -1498,6 +1537,7 @@ export function resolvedRouting() {
 }
 
 
-/** 只给自检用：这两个判断出过大错，值得单独验 */
+/** 只给自检用：这几个判断出过大错，值得单独验 */
 export const __isMediaLimitError = isMediaLimitError;
 export const __probeMediaUrl = probeMediaUrl;
+export const __trimInlineImages = trimInlineImages;

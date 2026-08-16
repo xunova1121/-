@@ -1934,6 +1934,54 @@ section('技法顺场（镜与镜之间）');
  *
  * 重新签一次是纯本地计算、不发任何请求 —— 省那一下毫无意义。
  */
+/**
+ * 「请求超时（60000ms 未返回）」—— 这句话对排错毫无帮助。
+ *
+ * 它没说是网络慢、厂商卡住、还是我们自己塞了 40MB 过去。而第三种恰恰是
+ * 最常见、也最容易改的那一种：参考图上限从 3 张提到 9 张之后，一旦走内联
+ * base64 兜底（没配对象存储时），请求体直接涨三倍，光上传就超过任何合理超时。
+ *
+ * 张数上限管的是"厂商收不收得下"，体积管的是"这个请求发不发得出去"——两回事。
+ */
+section('内联图按体积卡，超时要说清楚发了多大');
+{
+  const ad = await import('../core/providers/adapters.js');
+  const big = `data:image/png;base64,${'A'.repeat(3 * 1024 * 1024)}`;
+  const notes = [];
+  const kept = ad.__trimInlineImages([big, big, big, big], (e) => notes.push(e.message));
+  check('内联图超预算时截断', kept.length < 4 && kept.length >= 1, String(kept.length));
+  // 只说"发不出去"没用，要说清楚该去配什么
+  check('并且说清楚该配对象存储', notes.some((m) => /对象存储/.test(m)), notes[0]?.slice(0, 60));
+  check('还告诉你配完能全带上', notes.some((m) => /全带上/.test(m)));
+
+  // 走地址的不受影响 —— 那种请求体只有几 KB
+  const urls = ['https://a/1.png', 'https://a/2.png', 'https://a/3.png'];
+  check('走公网地址的一张都不砍', ad.__trimInlineImages(urls, () => {}).length === 3);
+  // 一张就超预算时也得发出去，否则等于什么都不做
+  check('单张就超预算时仍然发（否则等于什么都做不了）',
+    ad.__trimInlineImages([big], () => {}).length === 1);
+
+  /**
+   * 超时时间要跟着体积走：固定 60 秒对 2KB 的 JSON 宽松，对 40MB 荒谬。
+   */
+  const hc = await import('../core/http-client.js');
+  const slow = http.createServer(() => { /* 故意永不回应 */ });
+  await new Promise((r) => slow.listen(0, '127.0.0.1', r));
+  const slowUrl = `http://127.0.0.1:${slow.address().port}/`;
+  let msg = '';
+  try {
+    await hc.execute({
+      method: 'POST', url: slowUrl, timeoutMs: 300,
+      body: { blob: 'x'.repeat(3 * 1024 * 1024) }
+    });
+  } catch (err) {
+    msg = err.message;
+  }
+  slow.close();
+  check('超时报错带上了这次发了多大', /MB/.test(msg), msg.slice(0, 120));
+  check('并直接点名 base64 内联这个最常见的原因', /base64/.test(msg));
+}
+
 section('存下来的限时地址不复用');
 {
   const st = await import('../core/pipeline/studio.js');

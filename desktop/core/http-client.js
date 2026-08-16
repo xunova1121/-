@@ -181,7 +181,23 @@ export async function execute(spec, onEvent) {
   }
 
   const controller = new AbortController();
-  const timeoutMs = Number(spec.timeoutMs) > 0 ? Number(spec.timeoutMs) : DEFAULT_TIMEOUT_MS;
+  /**
+   * 超时要**跟着请求体大小走**。
+   *
+   * 固定 60 秒对一个 2KB 的 JSON 是宽松的，对一个 40MB 的请求体是荒谬的 ——
+   * 后者光上传就不止 60 秒。而失败的样子是"请求超时（60000ms 未返回）"，
+   * 完全看不出是**体积**问题：人会去查网络、查厂商、查模型，
+   * 而真正该做的是别把九张图内联成 base64 发出去。
+   *
+   * 这个坑是自己挖的：参考图上限从 3 张提到 9 张之后，一旦那些图走的是
+   * 内联 base64（没配对象存储时的兜底），请求体直接涨三倍。
+   *
+   * 按 100KB/s 这个很保守的有效上行估算给额外时间，最多加到 5 分钟 ——
+   * 再长就不是"慢"而是"卡死"了，该让它失败。
+   */
+  const bodyBytes = bodyText ? Buffer.byteLength(bodyText) : 0;
+  const baseTimeout = Number(spec.timeoutMs) > 0 ? Number(spec.timeoutMs) : DEFAULT_TIMEOUT_MS;
+  const timeoutMs = Math.min(300000, baseTimeout + Math.round(bodyBytes / 100));
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   if (spec.signal) {
     if (spec.signal.aborted) controller.abort();
@@ -211,8 +227,20 @@ export async function execute(spec, onEvent) {
   } catch (err) {
     clearTimeout(timer);
     const aborted = err.name === 'AbortError';
+    /**
+     * 超时报错必须带上**发了多大**。
+     *
+     * "请求超时（60000ms 未返回）"这句话对排错毫无帮助 —— 它没说是网络慢、
+     * 厂商卡住、还是我们自己塞了 40MB 过去。把体积印出来，第三种情况
+     * 一眼就认得出（而它恰恰是最常见、也最容易改的那一种）。
+     */
+    const mb = bodyBytes / 1048576;
+    const sizeHint = bodyBytes > 2 * 1048576
+      ? `。这次发了 ${mb.toFixed(1)}MB —— 多半是参考图被内联成 base64 了。` +
+        `去「设置 → 对象存储」配一个，图就会以地址的形式发出去，请求体只有几 KB`
+      : '';
     const message = aborted
-      ? `请求超时（${timeoutMs}ms 未返回）`
+      ? `请求超时（${timeoutMs}ms 未返回）${sizeHint}`
       : explainNetworkError(err, url);
     const entry = logbus.record({
       ...logDraft,
