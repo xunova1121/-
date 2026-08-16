@@ -945,21 +945,64 @@ async function resolveQueryUrl(provider, providerId, taskId, label, onEvent) {
  */
 const mediaLimitCache = new Map();
 
-/** 这条报错是不是在说"图带多了" */
+/**
+ * 学来的上限**会过期**。
+ *
+ * 原来它是永久的，而那是个严重的错：一次偶发失败（某张图地址临时取不到、
+ * 厂商抖了一下）会被归因成"图带多了"，然后这台服务**这辈子都按 1 张发** ——
+ * 参考图少了一半以上，一致性跟着塌，而且没有任何报错，只是"最近出图不太像"。
+ *
+ * 用户截了秘塔控制台的图：参考素材那栏写着 `0/9`。也就是说我们学到的那个
+ * "最多 1 张"从头到尾就是错的。降级必须是**可撤销**的，否则一次误判就是永久损失。
+ *
+ * 半小时后重新按满额试一次。真有限制的话最多多撞一次墙（参数校验失败，不计费）；
+ * 而如果当初那次是偶发的，半小时后就自动恢复了。
+ */
+const LIMIT_TTL_MS = 30 * 60 * 1000;
+
+export function rememberMediaLimit(key, count) {
+  mediaLimitCache.set(key, { count, at: Date.now() });
+}
+
+export function learnedMediaLimit(key) {
+  const hit = mediaLimitCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > LIMIT_TTL_MS) {
+    mediaLimitCache.delete(key);
+    return null;
+  }
+  return hit.count;
+}
+
+/** 只给自检和"重新试探"用 */
+export function resetMediaLimits() {
+  mediaLimitCache.clear();
+}
+
+/**
+ * 这条报错是不是在说"图带多了"。
+ *
+ * ⚠ `2013` 必须当**错误码**匹配，不能裸着匹配 —— 裸的话，报错里出现
+ * "2013" 这四个数字的任何地方（时间戳、任务号、年份）都会被当成
+ * "图太多"，于是把一次完全不相干的失败学成永久降级。
+ * 这类"匹配得太宽"的判断，出错时看起来永远像是别的问题。
+ */
 function isMediaLimitError(message) {
-  return /媒体数量|输入媒体|媒体数|图片数量|number of (images|media)|media (count|number)|exceed.*(image|media)|2013/i.test(
-    String(message || '')
-  );
+  const m = String(message || '');
+  if (/[（(\[]\s*2013\s*[）)\]]|code\D{0,4}2013\b/i.test(m)) return true;
+  return /媒体数量|输入媒体|媒体数|图片数量|number of (images|media)|media (count|number)|exceed.*(image|media)/i.test(m);
 }
 
 async function submitWithMediaBackoff({ providerId, provider, url, images, buildBody, checkBiz, label, onEvent }) {
   const key = `${providerId}::${baseUrlOf(provider)}`;
-  const learned = mediaLimitCache.get(key);
+  const learned = learnedMediaLimit(key);
   let count = learned ? Math.min(learned, images.length) : images.length;
   if (learned && images.length > learned) {
     onEvent?.({
       type: 'note',
-      message: `这家之前试出来最多收 ${learned} 张图，本次直接按 ${learned} 张发`
+      message:
+        `这家半小时内试出来最多收 ${learned} 张图，本次先按 ${learned} 张发` +
+        `（如果厂商界面上写的比这多，多半是上次那个失败另有原因 —— 过半小时会自动重试满额）`
     });
   }
 
@@ -973,7 +1016,7 @@ async function submitWithMediaBackoff({ providerId, provider, url, images, build
         ),
         '提交'
       );
-      if (count < images.length) mediaLimitCache.set(key, count);
+      if (count < images.length) rememberMediaLimit(key, count);
       return json;
     } catch (err) {
       if (!isMediaLimitError(err.message) || count <= 1) throw err;

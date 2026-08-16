@@ -1906,6 +1906,39 @@ section('技法顺场（镜与镜之间）');
  *
  * 模块本身写完了，接进复核流程那一步暂缓 —— 所以这里只验纯计算部分。
  */
+/**
+ * 学来的"这家最多收几张图"必须**会过期**。
+ *
+ * 原来它是永久的，而那是个严重的错：一次偶发失败（某张图地址临时取不到、
+ * 厂商抖一下）被归因成"图带多了"，然后这台服务**这辈子都按 1 张发** ——
+ * 参考图少一半以上，一致性跟着塌，而且没有任何报错，只是"最近出图不太像"。
+ *
+ * 用户截了秘塔控制台的图：参考素材那栏写着 0/9。我们学到的"最多 1 张"
+ * 从头到尾就是错的。降级必须可撤销，否则一次误判就是永久损失。
+ */
+section('学来的图片上限：会过期，而且别乱学');
+{
+  const ad = await import('../core/providers/adapters.js');
+  ad.resetMediaLimits();
+
+  ad.rememberMediaLimit('x::y', 2);
+  check('刚学到的用得上', ad.learnedMediaLimit('x::y') === 2);
+  check('没学过的那家不受影响', ad.learnedMediaLimit('other::z') === null);
+  ad.resetMediaLimits();
+  check('能手动清掉重新试探', ad.learnedMediaLimit('x::y') === null);
+
+  /**
+   * 匹配得太宽是这类 bug 的根源：`2013` 裸着匹配的话，报错里任何地方
+   * 出现这四个数字（时间戳、任务号、年份）都会被当成"图太多"，
+   * 于是一次完全不相干的失败被学成永久降级。
+   */
+  const cat = await import('../core/providers/catalog.js');
+  const metaso = cat.PROVIDERS.find((p) => p.id === 'metaso');
+  // 厂商界面上写着 0/9 —— 拿一个猜测当默认值，它就会变成事实
+  check('秘塔按官方 H3 的 9 张发，不是保守的 3 张',
+    metaso?.videoDefaults?.maxImages === 9, String(metaso?.videoDefaults?.maxImages));
+}
+
 section('画面指纹：可复现的相似度（未接线）');
 {
   const palette = await import('../core/palette.js');
