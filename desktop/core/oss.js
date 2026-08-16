@@ -68,7 +68,18 @@ export function config() {
      * 而这是一个默认值 —— 默认值必须是安全的那一个，想公开是主动的选择。
      */
     publicRead: c.publicRead === true,
-    signedTtl: Number(c.signedTtl) || 3600,
+    /**
+     * 限时地址活多久。默认 6 小时，不是 1 小时。
+     *
+     * 一小时是"够用"的直觉值，但实际链路比直觉长：提交任务 → 厂商排队
+     * （高峰期十几分钟很常见）→ 它才去拉这张图。中间任何一段慢一点，
+     * 地址就过期了，而报错是 `cannot download media URL` ——
+     * 没有一个字提到过期，人只会去查网络和权限。
+     *
+     * 签名地址长一点的代价很小（拿到链接的人多几小时能看），
+     * 而过期的代价是一次完全查不出原因的失败。
+     */
+    signedTtl: Number(c.signedTtl) || 21600,
     signVersion: c.signVersion === 'v1' ? 'v1' : 'v4'
   };
 }

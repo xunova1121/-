@@ -1925,6 +1925,36 @@ section('技法顺场（镜与镜之间）');
  *
  * 一个指错方向的判断，会让后面每一个动作都做在错的地方。
  */
+/**
+ * 存下来的限时地址会过期 —— 而过期的样子是"看起来完全正常的 https 链接"。
+ *
+ * imageRef 落盘进项目文件，重出视频时直接拿来当首帧。对象存储私有桶给的是
+ * 限时签名地址，几小时后那个链接就打不开了，厂商那边报
+ * `cannot download media URL`，报错里**没有一个字提到过期**。
+ *
+ * 重新签一次是纯本地计算、不发任何请求 —— 省那一下毫无意义。
+ */
+section('存下来的限时地址不复用');
+{
+  const st = await import('../core/pipeline/studio.js');
+  const oss2 = await import('../core/oss.js');
+
+  check('带 Expires 的一律现签，不复用',
+    st.__usableRef('https://b.oss-cn-beijing.aliyuncs.com/a.png?OSSAccessKeyId=x&Expires=1700000000&Signature=y') === null);
+  // 上传网关给的地址和内联图不会过期，复用它们是对的
+  check('网关给的固定地址照常复用',
+    st.__usableRef('https://cdn.example.com/a.png') === 'https://cdn.example.com/a.png');
+  check('内联图照常复用', st.__usableRef('data:image/png;base64,AAA').startsWith('data:'));
+  check('没有就是没有', st.__usableRef(null) === null);
+
+  /**
+   * 一小时是"够用"的直觉值，但实际链路比直觉长：提交 → 厂商排队十几分钟
+   * → 才去拉图。中间慢一点地址就过期了，而报错完全指不到这上面。
+   */
+  settings.patch({ oss: {} });
+  check('限时地址默认活 6 小时，不是 1 小时', oss2.config().signedTtl === 21600, String(oss2.config().signedTtl));
+}
+
 section('下不到图 ≠ 图太多');
 {
   const ad = await import('../core/providers/adapters.js');

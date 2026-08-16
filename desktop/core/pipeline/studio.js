@@ -83,6 +83,30 @@ function routing() {
  *
  * 只有百炼那几个"只认公网 URL"的接口会卡在第三条上，那时候前两条随便配一个都行。
  */
+/**
+ * 存下来的那个"模型能吃的引用"还能不能用。
+ *
+ * ── 这是一个真的把人坑过的 bug ──
+ *
+ * imageRef 是落盘进项目文件的，后面重出视频时直接拿来当首帧：
+ * `shot.imageRef || await toModelRef(...)`。看着很合理 —— 省一次上传。
+ *
+ * 但对象存储的**私有桶**给的是**限时签名地址**（默认一小时）。存进项目文件
+ * 当长期引用，几小时后它就变成一个**看起来完全正常、其实打不开**的 https 链接。
+ * 而厂商那边的表现是 `cannot download media URL` —— 报错里没有一个字
+ * 提到"过期"，人只会去查网络、查权限、查参数。
+ *
+ * 重新签一次是**纯本地计算、不发任何请求**，省那一下毫无意义。
+ * 所以：带 Expires 的一律不复用，现签。
+ *
+ * 上传网关给的地址和内联图不受影响 —— 它们本来就不会过期。
+ */
+function usableRef(ref) {
+  if (!ref) return null;
+  if (/[?&]Expires=/i.test(String(ref))) return null;
+  return ref;
+}
+
 export async function toModelRef(localPath, { onEvent } = {}) {
   const gateway = settings.get('uploadGateway');
   if (gateway) return uploadVia(gateway, localPath, onEvent);
@@ -1347,7 +1371,7 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
 
   onEvent?.({ type: 'shot', shotId, status: 'running', message: `第 ${shot.index} 镜重出视频（${providerId} / ${model}）…` });
 
-  const firstFrame = shot.imageRef || (await toModelRef(shot.imagePath, { onEvent }));
+  const firstFrame = usableRef(shot.imageRef) || (await toModelRef(shot.imagePath, { onEvent }));
   // 首帧只定住第一格，后面几秒全靠提示词和参考图撑着。
   // 所以这里和批量出视频走完全一样的一套：设定集提示词 + 场景/角色/道具参考图。
   const bibleRefs =
@@ -1898,7 +1922,7 @@ async function videoContextFor(project, shot, { onEvent } = {}) {
   let lastFrameUrl = null;
   if (continuity.shouldChainEndFrame(next, nextLink)) {
     try {
-      lastFrameUrl = next.imageRef || (await toModelRef(next.imagePath, { onEvent }));
+      lastFrameUrl = usableRef(next.imageRef) || (await toModelRef(next.imagePath, { onEvent }));
       onEvent?.({
         type: 'note',
         message: `第 ${next.index} 镜标成「连续动作」，把它那张图锁成本镜末帧 —— 两镜之间会是无缝的`
@@ -2012,7 +2036,7 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
   for (const shot of targets) {
     onEvent?.({ type: 'shot', shotId: shot.id, status: 'running', message: `第 ${shot.index} 镜出视频…` });
     try {
-      const firstFrame = shot.imageRef || (await toModelRef(shot.imagePath, { onEvent }));
+      const firstFrame = usableRef(shot.imageRef) || (await toModelRef(shot.imagePath, { onEvent }));
       // 设定集参考图一并带上（场景 + 角色 + 道具）：
       // 支持 r2v 的厂商（Vidu、H3）能靠它把人和环境一起锁住
       const bibleRefs =
@@ -2781,3 +2805,7 @@ export async function runAll(projectId, { shotCount = 8, from = null, onEvent } 
   }
   return last || store.read(projectId);
 }
+
+
+/** 只给自检用：这条判断错了会以"厂商下不到图"的样子出现，极难查 */
+export const __usableRef = usableRef;
