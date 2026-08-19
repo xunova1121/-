@@ -2169,6 +2169,28 @@ section('跑的是哪一版：更新完能核对，而不是去点功能试');
   const info = ver.info();
   check('版本号从 package.json 读，不是写死的', info.version === health.version);
 
+  /**
+   * 打 exe 那条路不能靠环境变量：electron-builder 把源码打进 asar，
+   * 用户双击运行时构建机上那个变量早就没了。所以要落成文件跟着一起打包。
+   * 少了这一条，所有 exe 用户看到的都是 dev。
+   */
+  const buildJson = path.join(PROJECT_ROOT, 'core', 'build.json');
+  const hadBuildJson = fs.existsSync(buildJson);
+  const savedBuildJson = hadBuildJson ? fs.readFileSync(buildJson, 'utf8') : null;
+  try {
+    fs.writeFileSync(buildJson, JSON.stringify({ build: 'abc1234' }));
+    // info() 有缓存，用一个带查询串的地址拿一份新的模块实例
+    const fresh = await import(`../core/version.js?v=${Date.now()}`);
+    check('打包时写进去的提交号读得出来', fresh.info().build === 'abc1234', fresh.info().build);
+  } finally {
+    if (savedBuildJson === null) fs.rmSync(buildJson, { force: true });
+    else fs.writeFileSync(buildJson, savedBuildJson);
+  }
+
+  // 生成的文件不该进版本库 —— 提交进去它永远指向"上次提交时的上一个提交"
+  const ignore = fs.readFileSync(path.join(PROJECT_ROOT, '.gitignore'), 'utf8');
+  check('build.json 在 .gitignore 里', /core\/build\.json/.test(ignore));
+
   // Docker 那条路要把提交号钉进镜像，少了 build-arg 这一环整件事就白做了
   const dockerfile = fs.readFileSync(path.join(PROJECT_ROOT, 'Dockerfile'), 'utf8');
   check('Dockerfile 收 FD_BUILD 并转成环境变量',

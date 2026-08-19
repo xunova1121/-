@@ -40,6 +40,19 @@ jobs:
       - name: 自检（不联外网，全部打桩）
         run: node scripts/selftest.mjs
 
+      # 把提交号写进文件，跟着源码一起打进包里。
+      #
+      # 这里不能用环境变量：electron-builder 把源码打进 asar，
+      # 用户双击运行的时候，构建机上那个变量早就不存在了。
+      # 少了这一步，所有 exe 用户在设置页看到的都是 "dev" ——
+      # 而"你装的是哪一版"恰恰是排错时第一个要问的问题。
+      #
+      # 放在自检**之后**：自检里有一条断言"没注入时老实说 dev"，
+      # 写在前面会把那条弄红。
+      - name: 把提交号写进包里
+        shell: bash
+        run: echo "{\"build\":\"${GITHUB_SHA:0:7}\"}" > core/build.json
+
       # 应用本身零运行时依赖，这一步装的只有 electron 和 electron-builder。
       # 没有 lockfile，所以用 install 而不是 ci。
       - name: 安装打包工具

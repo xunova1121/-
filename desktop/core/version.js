@@ -38,12 +38,28 @@ export function info() {
   }
 
   /**
-   * 提交号由构建时注入（Docker 的 build-arg / 打包流水线的环境变量）。
+   * 提交号由构建时注入，两条路各管一种打包方式：
    *
-   * 注入不到时回 'dev' 而**不是**装作知道。写一个假的版本号，
-   * 比没有版本号更坏 —— 它会让人相信一个错的答案。
+   *   环境变量  —— Docker 那条路（build-arg → ENV），容器里读得到
+   *   build.json —— 打 exe 那条路。环境变量在这儿没用：
+   *                 electron-builder 把源码打进 asar，用户双击运行时
+   *                 构建机上那个变量早就没了，必须**写进文件**跟着一起打包
+   *
+   * 少了第二条，所有 exe 用户看到的都是 "dev" —— 而"你装的是哪一版"
+   * 恰恰是排错时第一个要问的问题。
+   *
+   * 两条都没有时回 'dev'，而**不是**装作知道：
+   * 一个假的版本号比没有版本号更坏，它会让人相信一个错的答案。
    */
-  const build = (process.env.FUTUREDREAM_BUILD || '').trim() || 'dev';
+  let build = (process.env.FUTUREDREAM_BUILD || '').trim();
+  if (!build) {
+    try {
+      build = String(JSON.parse(fs.readFileSync(path.join(HERE, 'build.json'), 'utf8')).build || '').trim();
+    } catch {
+      /* 开发机上本来就没有这个文件 */
+    }
+  }
+  if (!build) build = 'dev';
 
   cached = { version, build };
   return cached;
