@@ -2954,98 +2954,82 @@ section('改了描述，发出去的提示词跟着变');
 section('转场：真发给 FFmpeg 的那串参数长什么样');
 {
   /**
-   * 这一段用一个**假的 ffmpeg** 把 argv 录下来。
+   * 这一段把假的 probe/exec 注入进去，把 argv 录下来。
    *
    * 它证明的是"我们拼出来的参数是不是我们想要的那串"，
-   * **不能**证明真 FFmpeg 会接受它 —— 那要一个带 libx264 和 xfade 的真二进制，
-   * 这台机器上没有（这台的 ffmpeg 是 Playwright 那份精简版，只有 vp8/png）。
+   * **不能**证明真 FFmpeg 会接受它 —— 那要一个带 libx264 和 xfade 的真二进制。
    * 两件事分清楚：切点算错、滤镜写反这类错这里能挡住；
    * 滤镜名拼错、这个版本不支持 xfade 这类错挡不住。
+   *
+   * 第一版是拿一个假的 ffmpeg 可执行文件录参数的，Linux 上很好使，
+   * 结果在 Windows 上整个红掉 —— 那儿没有 shebang 这回事。
+   * 而 Windows 是这个应用唯一的目标平台，那儿测不了等于没测。
    */
   const ff = await import('../core/ffmpeg.js');
-  const st = await import('../core/settings.js');
 
   const dir = path.join(SANDBOX, 'trans');
   fs.mkdirSync(dir, { recursive: true });
-  const logFile = path.join(dir, 'argv.log');
-  const fake = path.join(dir, 'fakeffmpeg.mjs');
-  // 探时长那一步读的是 stderr 里的 Duration / Stream 两行，照着回一份
-  fs.writeFileSync(fake, `#!/usr/bin/env node
-import fs from 'node:fs';
-const argv = process.argv.slice(2);
-fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify(argv) + '\\n');
-process.stderr.write('  Duration: 00:00:05.00, start: 0.000000, bitrate: 1000 kb/s\\n');
-process.stderr.write('  Stream #0:0: Video: h264, yuv420p, 1280x720\\n');
-if (argv.includes('-f') && argv[argv.indexOf('-f') + 1] === 'null') process.exit(0);
-// 出片的那几步：把目标文件建出来，让后面的 existsSync 过得去
-const out = argv[argv.length - 1];
-if (out && !out.startsWith('-')) fs.writeFileSync(out, 'x');
-process.exit(0);
-`);
-  const sh = path.join(dir, 'ffmpeg');
-  fs.writeFileSync(sh, `#!/bin/sh\nexec ${process.execPath} ${fake} "$@"\n`);
-  fs.chmodSync(sh, 0o755);
+  const segs = ['a.mp4', 'b.mp4', 'c.mp4'].map((n) => path.join(dir, n));
+  for (const s of segs) fs.writeFileSync(s, 'seg');
+  const out = path.join(dir, 'film.mp4');
 
-  const hadPath = st.get('ffmpegPath');
-  st.patch({ ffmpegPath: sh });
-  ff.locate({ refresh: true });
-
-  try {
-    // 探时长那一步先 existsSync，所以片段必须真的在盘上（内容无所谓，假 ffmpeg 不看）
-    const segs = ['a.mp4', 'b.mp4', 'c.mp4'].map((n) => path.join(dir, n));
-    for (const s of segs) fs.writeFileSync(s, 'seg');
-    const out = path.join(dir, 'film.mp4');
-
-    // ① 全硬切：一句转场参数都不该出现，而且要走不重编码的快路
-    fs.writeFileSync(logFile, '');
-    await ff.concat(segs, out, { transitions: ['cut', 'cut', 'cut'] });
-    let calls = fs.readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
-    check('全硬切时一次多余的重编码都不做', calls.length === 1, String(calls.length));
-    check('全硬切走 -c copy 的快路', calls[0].includes('-c') && calls[0].includes('copy'), calls[0].join(' '));
-
-    // ② 第二镜叠化：该出现 xfade，而且重叠 0.5 秒
-    fs.writeFileSync(logFile, '');
-    await ff.concat(segs, out, { transitions: ['cut', 'dissolve', 'cut'] });
-    calls = fs.readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
-    const flat = calls.map((c) => c.join(' '));
-    check('叠化真的用上了 xfade', flat.some((c) => /xfade=transition=fade:duration=0\.5/.test(c)),
-      flat.find((c) => /xfade/.test(c)) || flat.join(' | ').slice(0, 200));
-    // 上一段的尾巴要从 5-0.5=4.5 秒开始取
-    check('过渡片取的是上一段的最后 0.5 秒', flat.some((c) => /-ss 4\.500/.test(c)), flat.join(' | ').slice(0, 300));
-    // 下一段的头 0.5 秒已经被过渡片用掉了，正片要从那之后开始
-    check('叠化的那一段掐掉了已经用过的开头', flat.some((c) => /-ss 0\.500/.test(c)), flat.join(' | ').slice(0, 300));
-    /**
-     * 动过刀就必须重编码。concat demuxer 不重编码的前提是各段参数完全一致，
-     * 而我们重压的那几段跟厂商原片对不上 —— 硬 copy 拼出来会在接缝处花屏，
-     * 且**只在成片里出现**，每段单独播都是好的。
-     */
-    check('做过转场之后最终拼接改走重编码',
-      /-c:v libx264/.test(flat[flat.length - 1]), flat[flat.length - 1]);
-
-    // ③ 黑场：淡出淡入都在，而且一秒时长都不吃
-    fs.writeFileSync(logFile, '');
-    await ff.concat(segs, out, { transitions: ['cut', 'fade', 'cut'] });
-    calls = fs.readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
-    const f2 = calls.map((c) => c.join(' '));
-    check('黑场：上一段末尾淡出', f2.some((c) => /fade=t=out/.test(c)), f2.join(' | ').slice(0, 200));
-    check('黑场：这一段开头淡入', f2.some((c) => /fade=t=in:st=0/.test(c)), f2.join(' | ').slice(0, 200));
-    check('黑场不吃时长，所以不出现 xfade', !f2.some((c) => /xfade/.test(c)));
-    check('黑场也不掐头去尾', !f2.some((c) => /-ss 0\.500/.test(c)), f2.join(' | ').slice(0, 200));
-
-    // ④ 片段太短就别做转场 —— 切完就没了。宁可不做，也不能把成片弄坏
-    fs.writeFileSync(logFile, '');
+  /** 每段都是 5 秒、无音轨。录下每一次调用的 argv */
+  const runWith = async (transitions, { seconds = 5 } = {}) => {
+    const calls = [];
     const notes = [];
-    fs.writeFileSync(fake, fs.readFileSync(fake, 'utf8').replace('00:00:05.00', '00:00:00.60'));
-    await ff.concat(segs, out, { transitions: ['cut', 'dissolve', 'cut'], onNote: (m) => notes.push(m) });
-    // 说的必须是"太短"这个真实原因 —— 只匹配"硬切"的话，任何一种退回都会让它绿，
-    // 包括"根本没读到时长"那种完全不同的失败（这个测试第一版就是那么假绿的）
-    check('片段太短时退回硬切', notes.some((m) => /切没/.test(m)), notes.join(' | '));
-    const c4 = fs.readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l).join(' '));
-    check('退回硬切之后确实没做 xfade', !c4.some((c) => /xfade/.test(c)));
-  } finally {
-    st.patch({ ffmpegPath: hadPath || '' });
-    ff.locate({ refresh: true });
-  }
+    await ff.concat(segs, out, {
+      transitions,
+      onNote: (m) => notes.push(m),
+      __probe: async () => ({ seconds, hasAudio: false }),
+      __exec: async (args) => {
+        calls.push(args.join(' '));
+        // 出片那几步要把目标文件建出来，后面的 existsSync 才过得去
+        const last = args[args.length - 1];
+        if (last && !last.startsWith('-')) fs.writeFileSync(last, 'x');
+        return { stderr: '' };
+      }
+    });
+    return { calls, notes };
+  };
+
+  // ① 全硬切：一次多余的重编码都不该做，而且要走不重编码的快路
+  const cut = await runWith(['cut', 'cut', 'cut']);
+  check('全硬切时一次多余的重编码都不做', cut.calls.length === 1, String(cut.calls.length));
+  check('全硬切走 -c copy 的快路', /-c copy/.test(cut.calls[0]), cut.calls[0]);
+
+  // ② 第二镜叠化
+  const dis = await runWith(['cut', 'dissolve', 'cut']);
+  check('叠化真的用上了 xfade',
+    dis.calls.some((c) => /xfade=transition=fade:duration=0\.5/.test(c)),
+    dis.calls.find((c) => /xfade/.test(c)) || dis.calls.join(' | ').slice(0, 200));
+  // 上一段的尾巴要从 5-0.5=4.5 秒开始取
+  check('过渡片取的是上一段的最后 0.5 秒',
+    dis.calls.some((c) => /-ss 4\.500/.test(c)), dis.calls.join(' | ').slice(0, 300));
+  // 下一段的头 0.5 秒已经被过渡片用掉了，正片要从那之后开始
+  check('叠化的那一段掐掉了已经用过的开头',
+    dis.calls.some((c) => /-ss 0\.500/.test(c)), dis.calls.join(' | ').slice(0, 300));
+  /**
+   * 动过刀就必须重编码。concat demuxer 不重编码的前提是各段参数完全一致，
+   * 而我们重压的那几段跟厂商原片对不上 —— 硬 copy 拼出来会在接缝处花屏，
+   * 且**只在成片里出现**，每段单独播都是好的。
+   */
+  check('做过转场之后最终拼接改走重编码',
+    /-c:v libx264/.test(dis.calls[dis.calls.length - 1]), dis.calls[dis.calls.length - 1]);
+
+  // ③ 黑场：淡出淡入都在，而且一秒时长都不吃
+  const fade = await runWith(['cut', 'fade', 'cut']);
+  check('黑场：上一段末尾淡出', fade.calls.some((c) => /fade=t=out/.test(c)), fade.calls.join(' | ').slice(0, 200));
+  check('黑场：这一段开头淡入', fade.calls.some((c) => /fade=t=in:st=0/.test(c)), fade.calls.join(' | ').slice(0, 200));
+  check('黑场不吃时长，所以不出现 xfade', !fade.calls.some((c) => /xfade/.test(c)));
+  check('黑场也不掐头去尾', !fade.calls.some((c) => /-ss 0\.500/.test(c)), fade.calls.join(' | ').slice(0, 200));
+
+  // ④ 片段太短就别做转场 —— 切完就没了。宁可不做，也不能把成片弄坏
+  const tiny = await runWith(['cut', 'dissolve', 'cut'], { seconds: 0.6 });
+  // 说的必须是"切没"这个真实原因 —— 只匹配"硬切"的话，任何一种退回都会让它绿，
+  // 包括"根本没读到时长"那种完全不同的失败（这个测试第一版就是那么假绿的）
+  check('片段太短时退回硬切', tiny.notes.some((m) => /切没/.test(m)), tiny.notes.join(' | '));
+  check('退回硬切之后确实没做 xfade', !tiny.calls.some((c) => /xfade/.test(c)));
+  check('退回硬切之后也不重编码', /-c copy/.test(tiny.calls[tiny.calls.length - 1]), tiny.calls[tiny.calls.length - 1]);
 }
 
 section('配音按时间轴摆，不是顺次拼');
@@ -3889,6 +3873,35 @@ check(
   'Electron 里没有用 window.prompt（它不实现，点了没反应）',
   promptOffenders.length === 0,
   promptOffenders.map((f) => path.relative(PROJECT_ROOT, f)).join('、')
+);
+
+/**
+ * 自检里不许造"可执行的脚本文件"当替身。
+ *
+ * ── 这条是我自己踩出来的 ──
+ *
+ * 加转场那一版，我写了个 `#!/bin/sh` 的假 ffmpeg 来录参数。
+ * 本机全绿、三套浏览器走查全绿，推上去 Windows 流水线当场红 ——
+ * Windows 没有 shebang 这回事，spawn 一个没后缀的脚本直接失败。
+ *
+ * 关键不在于修它，而在于：**这个应用唯一的目标平台就是 Windows**，
+ * 我却在一个跑不到 Windows 的地方宣布"全过了"。
+ * 上面那几条规矩拦的是源码里的 Windows 陷阱，这一条拦的是**自检自己**的。
+ *
+ * 要替身就用注入（把假的 probe/exec 当参数传进去），两个平台跑同一段代码。
+ */
+const SHEBANG_STUB = /#!\/(bin|usr)\//;
+const stubOffenders = sourceFiles
+  .filter((f) => f.includes(`${path.sep}scripts${path.sep}`))
+  .filter((f) => {
+    const text = fs.readFileSync(f, 'utf8');
+    // 文件自己的第一行 shebang 不算 —— 那是正常的
+    return SHEBANG_STUB.test(stripComments(text).split('\n').slice(1).join('\n'));
+  });
+check(
+  '自检里没有造 shebang 脚本当替身（Windows 上跑不了）',
+  stubOffenders.length === 0,
+  stubOffenders.map((f) => path.relative(PROJECT_ROOT, f)).join('、')
 );
 
 // 同一族的另一个坑：new URL(...).pathname 在 Windows 上带盘符前缀斜杠。

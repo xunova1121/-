@@ -226,10 +226,24 @@ export async function buildVoiceTrack(entries, outputPath, { onProgress } = {}) 
  *
  * 一律退回硬切，并且说出来。转场是锦上添花，
  * 让它把**整部成片**带崩是完全不成比例的 —— 片子出不来才是真的损失。
+ *
+ * ── probe / exec 这两个参数是干什么的 ──
+ *
+ * 留给自检注入用，正常调用一个都不用传。
+ *
+ * 本来是拿一个假的 ffmpeg 可执行文件来录参数的，那在 Linux 上很好使 ——
+ * 写个 `#!/bin/sh` 脚本就行。但 Windows 上没有 shebang 这回事，
+ * spawn 一个没后缀的脚本文件直接失败，于是自检在 Windows 上整个红掉。
+ * 而 Windows 恰恰是这个应用**唯一的目标平台**，那儿测不了等于没测。
+ *
+ * 换成在这里留一个口子：假的东西从参数进来，两个平台跑的是同一段代码。
  */
-async function buildTransitions({ clips, kinds, outputPath, cleanup, onProgress, onNote }) {
+async function buildTransitions({
+  clips, kinds, outputPath, cleanup, onProgress, onNote,
+  probe = probeStreams, exec = run
+}) {
   const info = [];
-  for (const c of clips) info.push((await probeStreams(c)) || { seconds: null, hasAudio: false });
+  for (const c of clips) info.push((await probe(c)) || { seconds: null, hasAudio: false });
   if (info.some((i) => !i.seconds)) {
     onNote?.('读不出片段时长，这次按硬切合成（转场跳过，成片不受影响）');
     return clips;
@@ -276,7 +290,7 @@ async function buildTransitions({ clips, kinds, outputPath, cleanup, onProgress,
       }
       if (vf.length) args.push('-vf', vf.join(','));
       args.push('-c:v', 'libx264', '-preset', 'veryfast', ...(anyAudio ? ['-c:a', 'aac'] : ['-an']), piece);
-      await run(args, { onProgress });
+      await exec(args, { onProgress });
       cleanup.push(piece);
       out.push(piece);
 
@@ -294,7 +308,7 @@ async function buildTransitions({ clips, kinds, outputPath, cleanup, onProgress,
           ...(anyAudio ? ['-map', '2:a', '-c:a', 'aac'] : ['-an']),
           '-c:v', 'libx264', '-preset', 'veryfast', x
         );
-        await run(xa, { onProgress });
+        await exec(xa, { onProgress });
         cleanup.push(x);
         out.push(x);
       }
@@ -306,7 +320,12 @@ async function buildTransitions({ clips, kinds, outputPath, cleanup, onProgress,
   }
 }
 
-export async function concat(segments, outputPath, { audioPath, audioTracks, audioAt, trims, transitions, onNote, onProgress } = {}) {
+export async function concat(
+  segments,
+  outputPath,
+  // __probe / __exec 只给自检注入用，正常调用一个都不用传（理由见 buildTransitions 上面那段）
+  { audioPath, audioTracks, audioAt, trims, transitions, onNote, onProgress, __probe, __exec } = {}
+) {
   if (!segments.length) throw new Error('没有可合成的片段');
 
   const cleanup = [];
@@ -351,7 +370,11 @@ export async function concat(segments, outputPath, { audioPath, audioTracks, aud
     let recode = false;
     if (transitions?.some((k) => k && k !== 'cut')) {
       const before = clips;
-      clips = await buildTransitions({ clips, kinds: transitions, outputPath, cleanup, onProgress, onNote });
+      clips = await buildTransitions({
+        clips, kinds: transitions, outputPath, cleanup, onProgress, onNote,
+        ...(__probe ? { probe: __probe } : {}),
+        ...(__exec ? { exec: __exec } : {})
+      });
       recode = clips !== before;
     }
 
@@ -393,7 +416,7 @@ export async function concat(segments, outputPath, { audioPath, audioTracks, aud
     }
     args.push(outputPath);
 
-    await run(args, { onProgress });
+    await (__exec || run)(args, { onProgress });
   } finally {
     for (const f of cleanup) fs.rmSync(f, { force: true });
   }
