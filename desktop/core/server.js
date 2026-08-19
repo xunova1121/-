@@ -35,6 +35,7 @@ import * as deploy from './deploy.js';
 import * as oss from './oss.js';
 import * as accounts from './accounts.js';
 import * as tiers from './tiers.js';
+import * as version from './version.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -361,6 +362,8 @@ async function handleApi(req, res, url, { lan = false } = {}) {
   if (a === 'health') {
     return json(res, 200, {
       ok: true,
+      // 跑的是哪一版。服务器上更新完拿这个确认，比"去点个新功能试试"可靠得多
+      ...version.info(),
       dataDir: DATA_DIR,
       node: process.version,
       platform: process.platform,

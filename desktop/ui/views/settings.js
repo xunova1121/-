@@ -694,7 +694,11 @@ export default {
           }
         }, '保存设置'),
         h('span', { style: 'font-size:12px;color:var(--ink-faint)' },
-          `配置文件：${state.health.dataDir}${state.health.platform === 'win32' ? '\\' : '/'}settings.json`)
+          `配置文件：${state.health.dataDir}${state.health.platform === 'win32' ? '\\' : '/'}settings.json`),
+        // 跑的是哪一版。服务器上更新完看这一行就知道生效没有 ——
+        // 比"去点个新功能试试"可靠得多（试出来没有还分不清是哪种原因）
+        h('span', { style: 'font-size:12px;color:var(--ink-faint)' },
+          `版本 ${state.health.version || '?'}（${state.health.build || 'dev'}）`)
       )
     );
 

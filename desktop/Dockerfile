@@ -14,6 +14,13 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# 构建时把提交号钉进镜像。没有它的话，"更新到底生效没有"只能靠去点个新功能试试 ——
+# 而试出来没有还分不清是没更新还是那个功能本身有问题。
+# 传法：docker compose build --build-arg FD_BUILD=$(git rev-parse --short HEAD)
+ARG FD_BUILD=""
+ENV FUTUREDREAM_BUILD=$FD_BUILD
+
 COPY core ./core
 COPY ui ./ui
 COPY scripts ./scripts

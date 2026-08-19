@@ -5,7 +5,11 @@
 # Caddy 只要填对域名就自动去 Let's Encrypt 签证书，不用你碰 certbot。
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        # 跑的是哪个提交。更新脚本会自动填，手动 build 时不填也能跑（显示 dev）
+        FD_BUILD: "${FD_BUILD:-}"
     restart: unless-stopped
     environment:
       # ⚠ 这两个必须改成你自己的

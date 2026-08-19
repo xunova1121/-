@@ -942,8 +942,12 @@ docker compose logs -f app        # 看它在干什么
 docker compose restart app        # 重启
 docker compose down               # 停（数据在卷里，不会丢）
 
-# 更新到最新版
-git pull && docker compose up -d --build
+# 更新到最新版（FD_BUILD 会把提交号钉进镜像，更新完能核对跑的是哪一版）
+git pull && FD_BUILD=$(git rev-parse --short HEAD) docker compose up -d --build
+
+# 核对更新生效没有 —— 回的 build 应该等于上面那个提交号
+curl -s -H "x-fd-key: $FD_TOKEN" https://你的域名/api/health | head -c 200
+# 也可以在界面上看：设置页最下面那行「版本 0.1.0（6653e17）」
 
 # 备份：项目、密钥、设置全在这一个卷里
 docker run --rm -v desktop_fd-data:/data -v $PWD:/out alpine \

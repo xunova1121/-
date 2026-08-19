@@ -2151,6 +2151,32 @@ section('分镜体检：出图之前就该发现的三类硬伤');
   check('没问题时不吭声', lint.summarize([]) === null);
 }
 
+section('跑的是哪一版：更新完能核对，而不是去点功能试');
+{
+  /**
+   * 服务器上更新是 `git pull && docker compose up -d --build`，
+   * 这条命令有好几种"看起来成功、其实没更新"的失败法（镜像用了缓存层、
+   * 容器没重建、改的是另一个目录）。没有版本号的话，
+   * 判断生效没有只能靠去点个新功能试试 —— 而试出来没有还分不清是哪种原因。
+   */
+  const health = await (await fetch(`${appUrl}/api/health`)).json();
+  check('健康检查带上了版本号', /^\d+\.\d+\.\d+$/.test(health.version || ''), String(health.version));
+  check('也带上了构建标记', typeof health.build === 'string' && health.build.length > 0, String(health.build));
+  // 注入不到时回 dev 而不是装作知道 —— 一个假的版本号比没有版本号更坏
+  check('没注入提交号时老实说 dev', health.build === 'dev', String(health.build));
+
+  const ver = await import('../core/version.js');
+  const info = ver.info();
+  check('版本号从 package.json 读，不是写死的', info.version === health.version);
+
+  // Docker 那条路要把提交号钉进镜像，少了 build-arg 这一环整件事就白做了
+  const dockerfile = fs.readFileSync(path.join(PROJECT_ROOT, 'Dockerfile'), 'utf8');
+  check('Dockerfile 收 FD_BUILD 并转成环境变量',
+    /ARG FD_BUILD/.test(dockerfile) && /ENV FUTUREDREAM_BUILD=\$FD_BUILD/.test(dockerfile));
+  const compose = fs.readFileSync(path.join(PROJECT_ROOT, 'docker-compose.yml'), 'utf8');
+  check('compose 把 FD_BUILD 传给构建', /FD_BUILD:\s*"\$\{FD_BUILD/.test(compose));
+}
+
 section('转场：默认硬切，叠化要付出时长');
 {
   const tr = await import('../core/transitions.js');
