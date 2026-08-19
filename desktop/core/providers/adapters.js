@@ -541,16 +541,30 @@ export async function generateVideo({
     });
   }
 
-  const maxImages = provider.videoDefaults?.maxImages ?? 4;
+  const maxImages = modelMaxImages(provider, model);
   // 末帧占一个名额，而且**优先于设定集参考图**：它是这两镜能不能对上的唯一保证，
   // 参考图只是让人别变样，后者可以靠首帧和提示词兜。
   const allImages = [firstFrameUrl, ...(endFrame ? [endFrame] : []), ...refImages].filter(Boolean);
   const capacity = endFrame ? Math.max(maxImages, provider.videoDefaults?.maxImagesWithEndFrame ?? maxImages) : maxImages;
   const images = allImages.slice(0, capacity);
-  if (allImages.length > images.length) {
+  /**
+   * 上限是 0 —— 这是个**文生视频模型**，一张图都不收。
+   *
+   * 这条必须单独说：选错模型时，前面出好的首帧图会被整个丢掉，
+   * 而画面照样能出来，只是和分镜里那张完全不是一回事。
+   * 不吭声的话，用户会以为"一致性做得不好"，其实是模型选错了。
+   */
+  if (capacity === 0 && allImages.length) {
     onEvent?.({
       type: 'note',
-      message: `${provider.name} 这一步最多收 ${capacity} 张图，已带上首帧${endFrame ? '和末帧' : ''}，另外 ${
+      message:
+        `${model} 是文生视频模型，一张图都不收 —— 本镜的首帧图和 ${allImages.length - 1} 张参考图全都用不上，` +
+        '画面只由提示词决定，和分镜里那张图不会是同一个。要接上首帧的话换一个图生视频模型（i2v）。'
+    });
+  } else if (allImages.length > images.length) {
+    onEvent?.({
+      type: 'note',
+      message: `${provider.name}·${model} 这一步最多收 ${capacity} 张图，已带上首帧${endFrame ? '和末帧' : ''}，另外 ${
         allImages.length - images.length
       } 张设定集参考图这次不发（${provider.videoDefaults?.refNote || '一致性由首帧图和提示词里的冻结设定承担'}）`
     });
@@ -943,6 +957,34 @@ async function resolveQueryUrl(provider, providerId, taskId, label, onEvent) {
  *
  * 缓存的 key 带上 baseUrl：同一家换个中转地址，限制就可能不一样。
  */
+/**
+ * 这一步能带几张图 —— **按模型问，不是按服务商问**。
+ *
+ * 同一家的不同模型差得可以很远：MiniMax 的 H3 收 9 张，同一家的海螺
+ * 只吃 1 张首帧。按服务商取上限的后果，用户的日志里写得清清楚楚：
+ *
+ *     ※ 服务端嫌图带多了（5 张），改成 2 张重试
+ *     ※ 服务端嫌图带多了（2 张），改成 1 张重试
+ *     ※ 海螺任务已提交：2088852517485670400
+ *
+ * 每一镜都要**白撞两次墙**才发得出去。二十镜就是四十次白跑的往返，
+ * 而这件事在目录里本来就是已知的 —— 只是没人问模型，只问了服务商。
+ *
+ * 兜底顺序：模型自己写的 > 服务商的天花板 > 4。
+ * 用 `??` 不用 `||`：0 是合法答案（文生视频模型一张都不收），
+ * 而 `||` 会把这个 0 当成"没写"，然后按 9 张发出去。
+ */
+export function modelMaxImages(provider, modelId) {
+  const entry = (provider?.models || []).find((m) => m.id === modelId);
+  return entry?.maxImages ?? provider?.videoDefaults?.maxImages ?? 4;
+}
+
+/** 请求体里到底放进去了几张图。只给报错文案用，数不准也不影响流程 */
+function countImagesIn(body) {
+  const text = JSON.stringify(body || {});
+  return (text.match(/https?:\/\/|data:image\//g) || []).length;
+}
+
 const mediaLimitCache = new Map();
 
 /**
@@ -1073,26 +1115,35 @@ function trimInlineImages(images, onEvent) {
   return kept;
 }
 
-async function submitWithMediaBackoff({ providerId, provider, url, images: rawImages, buildBody, checkBiz, label, onEvent }) {
+async function submitWithMediaBackoff({ providerId, provider, model, url, images: rawImages, buildBody, checkBiz, label, onEvent }) {
   const images = trimInlineImages(rawImages, onEvent);
-  const key = `${providerId}::${baseUrlOf(provider)}`;
+  /**
+   * 学来的上限按 服务商 + 地址 + **模型** 记。
+   *
+   * 少了模型这一段，同一家里一个模型学到的数会扣到另一个模型头上：
+   * 海螺试出"最多 1 张"之后，同一家的 H3 也跟着只发 1 张 ——
+   * 而 H3 是这家唯一能靠多张参考图锁人设的模型，等于把它废掉了。
+   * 一致性上的损失从来不会报错，只会让人觉得"最近出的图不太像"。
+   */
+  const key = `${providerId}::${baseUrlOf(provider)}::${model || ''}`;
   const learned = learnedMediaLimit(key);
   let count = learned ? Math.min(learned, images.length) : images.length;
   if (learned && images.length > learned) {
     onEvent?.({
       type: 'note',
       message:
-        `这家半小时内试出来最多收 ${learned} 张图，本次先按 ${learned} 张发` +
+        `${model} 在这家半小时内试出来最多收 ${learned} 张图，本次先按 ${learned} 张发` +
         `（如果厂商界面上写的比这多，多半是上次那个失败另有原因 —— 过半小时会自动重试满额）`
     });
   }
 
   for (;;) {
     const imgs = images.slice(0, count);
+    const body = buildBody(imgs);
     try {
       const json = checkBiz(
         await send(
-          { provider: providerId, label: `${label}·提交`, method: 'POST', url, body: buildBody(imgs), timeoutMs: 60000 },
+          { provider: providerId, label: `${label}·提交`, method: 'POST', url, body, timeoutMs: 60000 },
           onEvent
         ),
         '提交'
@@ -1113,6 +1164,24 @@ async function submitWithMediaBackoff({ providerId, provider, url, images: rawIm
       }
       if (!isMediaLimitError(err.message) || count <= 1) throw err;
       const next = Math.max(1, Math.floor(count / 2));
+      /**
+       * 减图之前先确认：**少发几张，请求体真的会变吗？**
+       *
+       * 海螺这条路上 buildBody 只用 imgs[0]（其余走 subject_reference 或压根不用），
+       * 所以 5 张、2 张、1 张拼出来的请求体**一模一样**。原来的代码照样退让三轮，
+       * 于是发了三个完全相同的请求，第三个碰巧成了，然后把"这家只收 1 张"记了下来 ——
+       * 一个纯属虚构的结论，却会实打实地砍掉后面每一镜的参考图。
+       *
+       * 请求体没变就不是张数的问题，重试也不会有任何不同。停下来，说实话。
+       */
+      if (JSON.stringify(buildBody(images.slice(0, next))) === JSON.stringify(body)) {
+        err.message =
+          `${err.message}\n\n` +
+          `这一步减图没有意义：${model} 的请求体里本来就只放得下 ${countImagesIn(body)} 张图，` +
+          `发 ${count} 张和发 ${next} 张拼出来的请求**完全一样**。所以这次失败不是"图带多了"，` +
+          '是别的原因（地址取不到、参数不合法、或者厂商那一下抖了）——按上面这条服务端原话查。';
+        throw err;
+      }
       onEvent?.({
         type: 'note',
         message: `服务端嫌图带多了（${count} 张），改成 ${next} 张重试 —— 这次失败是参数校验，没开始出片，不计费`
@@ -1324,6 +1393,7 @@ async function generateVideoMiniMax({
   const created = await submitWithMediaBackoff({
     providerId,
     provider,
+    model,
     url: createUrl,
     images,
     buildBody,

@@ -2055,6 +2055,149 @@ section('学来的图片上限：会过期，而且别乱学');
     metaso?.videoDefaults?.maxImages === 9, String(metaso?.videoDefaults?.maxImages));
 }
 
+section('图片上限按模型问，不是按服务商问');
+{
+  /**
+   * 用户日志里的原话：
+   *   ※ 服务端嫌图带多了（5 张），改成 2 张重试
+   *   ※ 服务端嫌图带多了（2 张），改成 1 张重试
+   *   ※ 海螺任务已提交
+   * 每一镜都要白撞两次墙。而"海螺只吃 1 张"这件事目录里本来就写着 ——
+   * 只是没人问模型，只问了服务商。
+   */
+  const ad = await import('../core/providers/adapters.js');
+  const cat = await import('../core/providers/catalog.js');
+  const mm = cat.PROVIDERS.find((p) => p.id === 'minimax');
+
+  check('H3 还是 9 张', ad.modelMaxImages(mm, 'MiniMax-H3') === 9, String(ad.modelMaxImages(mm, 'MiniMax-H3')));
+  check('海螺 2.3 只发 1 张，不再白撞两次墙',
+    ad.modelMaxImages(mm, 'MiniMax-Hailuo-2.3') === 1, String(ad.modelMaxImages(mm, 'MiniMax-Hailuo-2.3')));
+  check('I2V-01 同理', ad.modelMaxImages(mm, 'I2V-01') === 1);
+  // S2V 的第二张走 subject_reference，占的不是首帧那个位置
+  check('S2V 收 2 张', ad.modelMaxImages(mm, 'S2V-01') === 2);
+  // 0 是合法答案。用 || 兜底的话这个 0 会被当成"没写"，然后按 9 张发出去
+  check('文生视频模型是 0 张，而不是回退到服务商的 9 张',
+    ad.modelMaxImages(mm, 'T2V-01') === 0, String(ad.modelMaxImages(mm, 'T2V-01')));
+  check('目录里没写的模型退回服务商上限',
+    ad.modelMaxImages(mm, '不存在的模型') === 9);
+  check('连服务商都没写的退回 4', ad.modelMaxImages({ models: [] }, 'x') === 4);
+
+  // Vidu：r2v 收 3 张，classic 走 img2video 只吃首帧
+  const vidu = cat.PROVIDERS.find((p) => p.id === 'vidu');
+  check('Vidu Q1 收 3 张', ad.modelMaxImages(vidu, 'viduq1') === 3);
+  check('Vidu Q1 Classic 只收 1 张', ad.modelMaxImages(vidu, 'viduq1-classic') === 1);
+
+  /**
+   * 学来的上限也必须按模型记。少了模型这一段，海螺试出的"最多 1 张"
+   * 会扣到同一家 H3 头上 —— 而 H3 是这家唯一能靠多张参考图锁人设的模型。
+   */
+  ad.resetMediaLimits();
+  ad.rememberMediaLimit('minimax::https://api.minimax.chat::MiniMax-Hailuo-2.3', 1);
+  check('海螺学到的数不会扣到 H3 头上',
+    ad.learnedMediaLimit('minimax::https://api.minimax.chat::MiniMax-H3') === null);
+  check('海螺自己那条还在',
+    ad.learnedMediaLimit('minimax::https://api.minimax.chat::MiniMax-Hailuo-2.3') === 1);
+  ad.resetMediaLimits();
+}
+
+section('分镜体检：出图之前就该发现的三类硬伤');
+{
+  const lint = await import('../core/pipeline/shotlint.js');
+
+  /**
+   * 用户报的那一场戏，一字不改地拿来当用例：
+   * "老师坐在办公室、听到敲门、说请进，客人推门进来，然后坐下"
+   * 出来的片子是门本来就开着 + 有敲门声 + 老师在说话，整场逻辑是反的。
+   */
+  const bad = lint.lintShot({
+    description: '老师坐在办公室里，听到敲门声，然后客人推门进来，走了进来，坐下'
+  });
+  const kinds = bad.map((i) => i.kind);
+  check('认出"敲门声"写进了画面', kinds.includes('sound-in-frame'), kinds.join(','));
+  check('认出一镜塞了好几件事', kinds.includes('too-many-beats'), kinds.join(','));
+  check('认出写的是动作做完的样子', kinds.includes('end-state'), kinds.join(','));
+  // 只说"这里不对"是没用的，人下一秒就要问"那该怎么写"
+  check('每条都给了改法', bad.every((i) => i.fix && i.fix.length > 8));
+
+  // 拆开之后就该干净 —— 报个不停的检查等于没有检查，人会直接无视它
+  check('拆成一镜一动作之后不再报',
+    lint.lintShot({ description: '老师伏在办公桌前批改作业' }).length === 0,
+    JSON.stringify(lint.lintShot({ description: '老师伏在办公桌前批改作业' })));
+  check('正在发生的动作不报',
+    lint.lintShot({ description: '门把手正在缓缓转动' }).length === 0);
+  check('空描述不报', lint.lintShot({ description: '' }).length === 0);
+
+  /**
+   * 乱报的检查等于没有检查 —— 看两次假警报之后人就再也不看它了。
+   * 所以这几条"写得很丰满但只有一个动作"的描述必须一条都不报。
+   */
+  const quiet = [
+    '老师伏在办公桌前，台灯的光落在摊开的作业本上，窗外是深夜',
+    '桌上已经堆满了文件，一支钢笔横在最上面',
+    '强雄站在走廊尽头，背对镜头，肩膀微微起伏'
+  ];
+  for (const d of quiet) {
+    check(`不误报：${d.slice(0, 12)}…`, lint.lintShot({ description: d }).length === 0,
+      JSON.stringify(lint.lintShot({ description: d }).map((i) => i.kind)));
+  }
+
+  const results = lint.lintShots([
+    { id: 'a', index: 1, description: '老师伏案批改作业' },
+    { id: 'b', index: 2, description: '传来敲门声，然后老师抬起头' }
+  ]);
+  check('只回有问题的那几镜', results.length === 1 && results[0].index === 2);
+  const brief = lint.summarize(results);
+  check('摘要里点名是第几镜', /第 2 镜/.test(brief), brief);
+  check('没问题时不吭声', lint.summarize([]) === null);
+}
+
+section('转场：默认硬切，叠化要付出时长');
+{
+  const tr = await import('../core/transitions.js');
+
+  // 真正的行家几乎只用硬切。模型瞎编的转场名不该悄悄变成别的效果
+  check('没写就是硬切', tr.kindOf({}) === 'cut');
+  check('瞎编的值退回硬切', tr.kindOf({ transition: '炫酷旋转' }) === 'cut');
+  check('合法值照收', tr.kindOf({ transition: 'dissolve' }) === 'dissolve');
+
+  // 黑场是原地做的，不吃时长；叠化必然吃掉重叠的那段
+  check('硬切不吃时长', tr.overlapOf({ transition: 'cut' }) === 0);
+  check('黑场不吃时长', tr.overlapOf({ transition: 'fade' }) === 0);
+  check('叠化吃掉重叠那段', tr.overlapOf({ transition: 'dissolve' }) === tr.DISSOLVE_SECONDS);
+
+  // 第一镜的"转场"是片头，不吃任何时间
+  const shots = [{ transition: 'dissolve' }, { transition: 'dissolve' }, { transition: 'fade' }];
+  check('片头那一处不算', tr.totalOverlap(shots) === tr.DISSOLVE_SECONDS, String(tr.totalOverlap(shots)));
+  check('全是硬切时不用动手', tr.anyEffect([{ transition: 'cut' }, { transition: 'cut' }]) === false);
+  check('有一处非硬切就要动手', tr.anyEffect(shots) === true);
+}
+
+section('叠化吃掉的时间要进时间轴，否则配音整体后移');
+{
+  const studio = await import('../core/pipeline/studio.js');
+  const tr = await import('../core/transitions.js');
+  const mk = (i, transition) => ({
+    id: `s${i}`, index: i, duration: 4, videoPath: `/tmp/${i}.mp4`, transition, dialogue: `第${i}句`
+  });
+
+  const plain = studio.timelineOf({ shots: [mk(1, 'cut'), mk(2, 'cut'), mk(3, 'cut')] });
+  check('全硬切时就是顺次相接', plain.map((r) => r.start).join(',') === '0,4,8', plain.map((r) => r.start).join(','));
+
+  /**
+   * 这一条是真会出事的：配音和字幕都按**绝对时间**摆，
+   * 而叠化让全片变短。少了这一步，一处叠化之后每一句台词都晚半秒 ——
+   * 表现和"配音顺次拼"那个老 bug 一模一样，只是原因换了一个。
+   */
+  const withDissolve = studio.timelineOf({ shots: [mk(1, 'cut'), mk(2, 'dissolve'), mk(3, 'cut')] });
+  const starts = withDissolve.map((r) => r.start);
+  check('叠化之后的每一镜都往前提', starts[1] === 4 - tr.DISSOLVE_SECONDS, starts.join(','));
+  check('后面的镜头跟着一起提，误差不累积', starts[2] === 8 - tr.DISSOLVE_SECONDS, starts.join(','));
+
+  // 字幕用的是同一份时间轴 —— 三者不会各算各的，这正是只留一个出处的原因
+  const cues = studio.buildSubtitles({ shots: [mk(1, 'cut'), mk(2, 'dissolve'), mk(3, 'cut')] });
+  check('字幕跟着同一份时间轴走', cues[1].start === 4 - tr.DISSOLVE_SECONDS, String(cues[1].start));
+}
+
 section('画面指纹：可复现的相似度（未接线）');
 {
   const palette = await import('../core/palette.js');
@@ -2806,6 +2949,103 @@ section('改了描述，发出去的提示词跟着变');
   const p1 = done?.shots?.find((x) => x.id === 'p1');
   check('重出之后不再显示"已过时"',
     p1?.videoPrompt?.includes('缆绳的断口'), p1?.videoPrompt?.slice(0, 60));
+}
+
+section('转场：真发给 FFmpeg 的那串参数长什么样');
+{
+  /**
+   * 这一段用一个**假的 ffmpeg** 把 argv 录下来。
+   *
+   * 它证明的是"我们拼出来的参数是不是我们想要的那串"，
+   * **不能**证明真 FFmpeg 会接受它 —— 那要一个带 libx264 和 xfade 的真二进制，
+   * 这台机器上没有（这台的 ffmpeg 是 Playwright 那份精简版，只有 vp8/png）。
+   * 两件事分清楚：切点算错、滤镜写反这类错这里能挡住；
+   * 滤镜名拼错、这个版本不支持 xfade 这类错挡不住。
+   */
+  const ff = await import('../core/ffmpeg.js');
+  const st = await import('../core/settings.js');
+
+  const dir = path.join(SANDBOX, 'trans');
+  fs.mkdirSync(dir, { recursive: true });
+  const logFile = path.join(dir, 'argv.log');
+  const fake = path.join(dir, 'fakeffmpeg.mjs');
+  // 探时长那一步读的是 stderr 里的 Duration / Stream 两行，照着回一份
+  fs.writeFileSync(fake, `#!/usr/bin/env node
+import fs from 'node:fs';
+const argv = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify(argv) + '\\n');
+process.stderr.write('  Duration: 00:00:05.00, start: 0.000000, bitrate: 1000 kb/s\\n');
+process.stderr.write('  Stream #0:0: Video: h264, yuv420p, 1280x720\\n');
+if (argv.includes('-f') && argv[argv.indexOf('-f') + 1] === 'null') process.exit(0);
+// 出片的那几步：把目标文件建出来，让后面的 existsSync 过得去
+const out = argv[argv.length - 1];
+if (out && !out.startsWith('-')) fs.writeFileSync(out, 'x');
+process.exit(0);
+`);
+  const sh = path.join(dir, 'ffmpeg');
+  fs.writeFileSync(sh, `#!/bin/sh\nexec ${process.execPath} ${fake} "$@"\n`);
+  fs.chmodSync(sh, 0o755);
+
+  const hadPath = st.get('ffmpegPath');
+  st.patch({ ffmpegPath: sh });
+  ff.locate({ refresh: true });
+
+  try {
+    // 探时长那一步先 existsSync，所以片段必须真的在盘上（内容无所谓，假 ffmpeg 不看）
+    const segs = ['a.mp4', 'b.mp4', 'c.mp4'].map((n) => path.join(dir, n));
+    for (const s of segs) fs.writeFileSync(s, 'seg');
+    const out = path.join(dir, 'film.mp4');
+
+    // ① 全硬切：一句转场参数都不该出现，而且要走不重编码的快路
+    fs.writeFileSync(logFile, '');
+    await ff.concat(segs, out, { transitions: ['cut', 'cut', 'cut'] });
+    let calls = fs.readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    check('全硬切时一次多余的重编码都不做', calls.length === 1, String(calls.length));
+    check('全硬切走 -c copy 的快路', calls[0].includes('-c') && calls[0].includes('copy'), calls[0].join(' '));
+
+    // ② 第二镜叠化：该出现 xfade，而且重叠 0.5 秒
+    fs.writeFileSync(logFile, '');
+    await ff.concat(segs, out, { transitions: ['cut', 'dissolve', 'cut'] });
+    calls = fs.readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    const flat = calls.map((c) => c.join(' '));
+    check('叠化真的用上了 xfade', flat.some((c) => /xfade=transition=fade:duration=0\.5/.test(c)),
+      flat.find((c) => /xfade/.test(c)) || flat.join(' | ').slice(0, 200));
+    // 上一段的尾巴要从 5-0.5=4.5 秒开始取
+    check('过渡片取的是上一段的最后 0.5 秒', flat.some((c) => /-ss 4\.500/.test(c)), flat.join(' | ').slice(0, 300));
+    // 下一段的头 0.5 秒已经被过渡片用掉了，正片要从那之后开始
+    check('叠化的那一段掐掉了已经用过的开头', flat.some((c) => /-ss 0\.500/.test(c)), flat.join(' | ').slice(0, 300));
+    /**
+     * 动过刀就必须重编码。concat demuxer 不重编码的前提是各段参数完全一致，
+     * 而我们重压的那几段跟厂商原片对不上 —— 硬 copy 拼出来会在接缝处花屏，
+     * 且**只在成片里出现**，每段单独播都是好的。
+     */
+    check('做过转场之后最终拼接改走重编码',
+      /-c:v libx264/.test(flat[flat.length - 1]), flat[flat.length - 1]);
+
+    // ③ 黑场：淡出淡入都在，而且一秒时长都不吃
+    fs.writeFileSync(logFile, '');
+    await ff.concat(segs, out, { transitions: ['cut', 'fade', 'cut'] });
+    calls = fs.readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    const f2 = calls.map((c) => c.join(' '));
+    check('黑场：上一段末尾淡出', f2.some((c) => /fade=t=out/.test(c)), f2.join(' | ').slice(0, 200));
+    check('黑场：这一段开头淡入', f2.some((c) => /fade=t=in:st=0/.test(c)), f2.join(' | ').slice(0, 200));
+    check('黑场不吃时长，所以不出现 xfade', !f2.some((c) => /xfade/.test(c)));
+    check('黑场也不掐头去尾', !f2.some((c) => /-ss 0\.500/.test(c)), f2.join(' | ').slice(0, 200));
+
+    // ④ 片段太短就别做转场 —— 切完就没了。宁可不做，也不能把成片弄坏
+    fs.writeFileSync(logFile, '');
+    const notes = [];
+    fs.writeFileSync(fake, fs.readFileSync(fake, 'utf8').replace('00:00:05.00', '00:00:00.60'));
+    await ff.concat(segs, out, { transitions: ['cut', 'dissolve', 'cut'], onNote: (m) => notes.push(m) });
+    // 说的必须是"太短"这个真实原因 —— 只匹配"硬切"的话，任何一种退回都会让它绿，
+    // 包括"根本没读到时长"那种完全不同的失败（这个测试第一版就是那么假绿的）
+    check('片段太短时退回硬切', notes.some((m) => /切没/.test(m)), notes.join(' | '));
+    const c4 = fs.readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l).join(' '));
+    check('退回硬切之后确实没做 xfade', !c4.some((c) => /xfade/.test(c)));
+  } finally {
+    st.patch({ ffmpegPath: hadPath || '' });
+    ff.locate({ refresh: true });
+  }
 }
 
 section('配音按时间轴摆，不是顺次拼');

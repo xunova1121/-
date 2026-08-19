@@ -662,21 +662,30 @@ export const PROVIDERS = [
     videoDefaults: {
       resolution: '1080P',
       resolutions: ['512P', '768P', '1080P', '2K'],
-      // H3 收最多 9 张；Hailuo 系走 first_frame_image + subject_reference，适配器里另有处理
+      /**
+       * ⚠ 这个 9 是**这家的天花板**，不是每个模型都收得下。
+       *
+       * 只有 H3 收 9 张；Hailuo / I2V / S2V 系走 first_frame_image，
+       * 实际只吃 1 张（S2V 另外加一张 subject_reference）。
+       * 所以真正生效的上限写在**每个模型自己**的 maxImages 上，这里只是兜底 ——
+       * 按厂商定上限，会让选了海螺的人每一镜都先带 5 张撞一次墙、再减到 2 张撞一次、
+       * 最后才发得出去：白跑两轮，而且日志上看起来像是厂商小气。
+       */
       maxImages: 9
     },
     models: [
       // H3 是全模态：一次能收最多 9 张图 + 3 段视频 + 3 段音频，出 2K、原生立体声、最长 15 秒。
       // 请求结构和 Hailuo 系不同（content[] 多模态数组），适配器按模型名分流。
-      { id: 'MiniMax-H3', capability: 'r2v', label: 'H3 全模态（9 张参考图，2K，最长 15 秒）', durations: [6, 10, 15], multimodal: true },
-      { id: 'MiniMax-Hailuo-2.3', capability: 'i2v', label: '海螺 2.3 图生视频（最新）', durations: [6, 10] },
-      { id: 'MiniMax-Hailuo-02', capability: 'i2v', label: '海螺 02 图生视频', durations: [6, 10] },
-      { id: 'I2V-01-Director', capability: 'i2v', label: 'I2V-01 Director（可写运镜指令）', durations: [6] },
-      { id: 'I2V-01-live', capability: 'i2v', label: 'I2V-01 live（二次元更好）', durations: [6] },
-      { id: 'I2V-01', capability: 'i2v', label: 'I2V-01', durations: [6] },
-      { id: 'T2V-01-Director', capability: 't2v', label: 'T2V-01 Director 文生视频', durations: [6] },
-      { id: 'T2V-01', capability: 't2v', label: 'T2V-01 文生视频', durations: [6] },
-      { id: 'S2V-01', capability: 'i2v', label: 'S2V-01（主体参考，锁人设强）', durations: [6] },
+      { id: 'MiniMax-H3', capability: 'r2v', label: 'H3 全模态（9 张参考图，2K，最长 15 秒）', durations: [6, 10, 15], multimodal: true, maxImages: 9 },
+      { id: 'MiniMax-Hailuo-2.3', capability: 'i2v', label: '海螺 2.3 图生视频（最新）', durations: [6, 10], maxImages: 1 },
+      { id: 'MiniMax-Hailuo-02', capability: 'i2v', label: '海螺 02 图生视频', durations: [6, 10], maxImages: 1 },
+      { id: 'I2V-01-Director', capability: 'i2v', label: 'I2V-01 Director（可写运镜指令）', durations: [6], maxImages: 1 },
+      { id: 'I2V-01-live', capability: 'i2v', label: 'I2V-01 live（二次元更好）', durations: [6], maxImages: 1 },
+      { id: 'I2V-01', capability: 'i2v', label: 'I2V-01', durations: [6], maxImages: 1 },
+      { id: 'T2V-01-Director', capability: 't2v', label: 'T2V-01 Director 文生视频', durations: [6], maxImages: 0 },
+      { id: 'T2V-01', capability: 't2v', label: 'T2V-01 文生视频', durations: [6], maxImages: 0 },
+      // S2V 的第二张走 subject_reference 字段，不占 first_frame_image 的位置
+      { id: 'S2V-01', capability: 'i2v', label: 'S2V-01（主体参考，锁人设强）', durations: [6], maxImages: 2 },
       { id: 'image-01', capability: 't2i', label: 'image-01 文生图' },
       { id: 'MiniMax-Text-01', capability: 'chat', label: 'MiniMax Text-01（长上下文）' },
       { id: 'abab6.5s-chat', capability: 'chat', label: 'abab6.5s（便宜）' }
@@ -1006,10 +1015,11 @@ export const PROVIDERS = [
       failureStates: ['failed']
     },
     models: [
-      { id: 'viduq1', capability: 'r2v', label: 'Vidu Q1（支持多张参考图锁人设）', durations: [4, 8] },
-      { id: 'viduq1-classic', capability: 'i2v', label: 'Vidu Q1 Classic', durations: [4, 8] },
-      { id: 'vidu2.0', capability: 'r2v', label: 'Vidu 2.0', durations: [4, 8] },
-      { id: 'vidu1.5', capability: 'r2v', label: 'Vidu 1.5（便宜）', durations: [4, 8] }
+      { id: 'viduq1', capability: 'r2v', label: 'Vidu Q1（支持多张参考图锁人设）', durations: [4, 8], maxImages: 3 },
+      // classic 走 img2video，只吃首帧那一张
+      { id: 'viduq1-classic', capability: 'i2v', label: 'Vidu Q1 Classic', durations: [4, 8], maxImages: 1 },
+      { id: 'vidu2.0', capability: 'r2v', label: 'Vidu 2.0', durations: [4, 8], maxImages: 3 },
+      { id: 'vidu1.5', capability: 'r2v', label: 'Vidu 1.5（便宜）', durations: [4, 8], maxImages: 3 }
     ],
     probe: { label: '连通性自检', method: 'GET', url: '{{baseUrl}}/tasks?limit=1' },
     templates: [

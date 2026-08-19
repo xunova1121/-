@@ -16,6 +16,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { BIN_DIRS, USER_BIN_DIR } from './paths.js';
 import * as settings from './settings.js';
+import { DISSOLVE_SECONDS, FADE_SECONDS } from './transitions.js';
+
+// 时长会被时间轴、字幕、合成三处同时用到，所以只有 transitions.js 一个出处
+const TRANS = { DISSOLVE: DISSOLVE_SECONDS, FADE: FADE_SECONDS };
 
 const EXE = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
 
@@ -133,12 +137,25 @@ export function run(args, { onProgress, cwd } = {}) {
  * 在 run() 里变成异常，调用方还得去 catch 一个"正常情况"。
  */
 export async function probeDuration(file) {
+  return (await probeStreams(file))?.seconds ?? null;
+}
+
+/**
+ * 时长 + 有没有音轨，一次探完。
+ *
+ * 「有没有音轨」是拼接时的一个硬约束：concat demuxer 要求各段的流结构一致。
+ * 一段有声、一段没声混着拼，出来的片子会从某一处开始**整条音轨消失**，
+ * 而 FFmpeg 一句警告都不给。加转场时要重编码，正好在那时候统一齐。
+ */
+export async function probeStreams(file) {
   if (!fs.existsSync(file)) return null;
   try {
     const { stderr } = await run(['-i', file, '-f', 'null', '-']);
     const m = stderr.match(/Duration:\s*(\d+):(\d+):(\d+\.\d+)/);
-    if (!m) return null;
-    return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+    return {
+      seconds: m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) : null,
+      hasAudio: /Stream #\d+:\d+.*: Audio:/.test(stderr)
+    };
   } catch {
     return null;
   }
@@ -193,7 +210,103 @@ export async function buildVoiceTrack(entries, outputPath, { onProgress } = {}) 
  *   audioAt     [{ path, at }] —— 按时间点摆，**音画对齐的正确做法**
  *   audioTracks 顺次拼接的老写法，只在没有时间轴信息时用（会错位，见上面）
  */
-export async function concat(segments, outputPath, { audioPath, audioTracks, audioAt, trims, onProgress } = {}) {
+/**
+ * 在片段之间做转场。返回一份新的片段清单，交回给 concat 照常拼。
+ *
+ * ── 为什么是"生成新片段"而不是"一整条 filter_complex" ──
+ *
+ * 用一条 xfade 链把整部片子串起来是最直观的写法，但它要求**整片重编码**：
+ * 二十镜的片子要重压二十段，慢好几倍，画质还掉一档。
+ * 而转场通常只有两三处 —— 为了两处效果把另外十八段无辜地重压一遍，不划算。
+ *
+ * 所以这里只动**接缝附近**：需要效果的那两段各重编码一次，
+ * 中间再生成一小段过渡片，其余片段原样不动，继续走不重编码的快路。
+ *
+ * ── 失败了怎么办 ──
+ *
+ * 一律退回硬切，并且说出来。转场是锦上添花，
+ * 让它把**整部成片**带崩是完全不成比例的 —— 片子出不来才是真的损失。
+ */
+async function buildTransitions({ clips, kinds, outputPath, cleanup, onProgress, onNote }) {
+  const info = [];
+  for (const c of clips) info.push((await probeStreams(c)) || { seconds: null, hasAudio: false });
+  if (info.some((i) => !i.seconds)) {
+    onNote?.('读不出片段时长，这次按硬切合成（转场跳过，成片不受影响）');
+    return clips;
+  }
+
+  // 音轨要么全有、要么全无。缺的补一段静音，否则拼出来会从某一处开始整条没声
+  const anyAudio = info.some((i) => i.hasAudio);
+
+  // 每段各要切掉多少：头上被前一个叠化吃掉，尾巴被后一个叠化吃掉
+  const headCut = clips.map((_, i) => (i > 0 && kinds[i] === 'dissolve' ? TRANS.DISSOLVE : 0));
+  const tailCut = clips.map((_, i) => (i + 1 < clips.length && kinds[i + 1] === 'dissolve' ? TRANS.DISSOLVE : 0));
+  // 黑场是原地做的，不吃时长：只是把上一段的尾巴压黑、这一段的头淡入
+  const fadeIn = clips.map((_, i) => i > 0 && kinds[i] === 'fade');
+  const fadeOut = clips.map((_, i) => i + 1 < clips.length && kinds[i + 1] === 'fade');
+
+  // 片段太短，切完就没了 —— 这种情况下做转场没有意义
+  for (let i = 0; i < clips.length; i += 1) {
+    if (info[i].seconds - headCut[i] - tailCut[i] < 0.5) {
+      onNote?.(`第 ${i + 1} 段只有 ${info[i].seconds.toFixed(1)} 秒，做转场会把它切没，这次按硬切合成`);
+      return clips;
+    }
+  }
+
+  try {
+    const out = [];
+    for (let i = 0; i < clips.length; i += 1) {
+      const need = headCut[i] || tailCut[i] || fadeIn[i] || fadeOut[i];
+      if (!need) {
+        out.push(clips[i]);
+        continue;
+      }
+      const len = info[i].seconds - headCut[i] - tailCut[i];
+      const vf = [];
+      if (fadeIn[i]) vf.push(`fade=t=in:st=0:d=${TRANS.FADE}`);
+      if (fadeOut[i]) vf.push(`fade=t=out:st=${Math.max(0, len - TRANS.FADE).toFixed(3)}:d=${TRANS.FADE}`);
+
+      const piece = `${outputPath}.tr${i}.mp4`;
+      const args = ['-y'];
+      if (headCut[i]) args.push('-ss', headCut[i].toFixed(3));
+      args.push('-i', clips[i], '-t', len.toFixed(3));
+      // 没音轨的补静音，让所有片段的流结构一致
+      if (anyAudio && !info[i].hasAudio) {
+        args.push('-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100', '-shortest');
+      }
+      if (vf.length) args.push('-vf', vf.join(','));
+      args.push('-c:v', 'libx264', '-preset', 'veryfast', ...(anyAudio ? ['-c:a', 'aac'] : ['-an']), piece);
+      await run(args, { onProgress });
+      cleanup.push(piece);
+      out.push(piece);
+
+      // 叠化的过渡片：拿上一段的尾巴和这一段的开头重叠着渐变
+      if (i + 1 < clips.length && kinds[i + 1] === 'dissolve') {
+        const x = `${outputPath}.xf${i}.mp4`;
+        const from = Math.max(0, info[i].seconds - TRANS.DISSOLVE);
+        const xa = ['-y', '-ss', from.toFixed(3), '-t', String(TRANS.DISSOLVE), '-i', clips[i],
+          '-t', String(TRANS.DISSOLVE), '-i', clips[i + 1]];
+        if (anyAudio) xa.push('-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100', '-shortest');
+        xa.push(
+          '-filter_complex',
+          `[0:v][1:v]xfade=transition=fade:duration=${TRANS.DISSOLVE}:offset=0[v]`,
+          '-map', '[v]',
+          ...(anyAudio ? ['-map', '2:a', '-c:a', 'aac'] : ['-an']),
+          '-c:v', 'libx264', '-preset', 'veryfast', x
+        );
+        await run(xa, { onProgress });
+        cleanup.push(x);
+        out.push(x);
+      }
+    }
+    return out;
+  } catch (err) {
+    onNote?.(`转场没做成（${err.message}），这次按硬切合成 —— 成片照常出，只是接缝处没有淡入淡出`);
+    return clips;
+  }
+}
+
+export async function concat(segments, outputPath, { audioPath, audioTracks, audioAt, trims, transitions, onNote, onProgress } = {}) {
   if (!segments.length) throw new Error('没有可合成的片段');
 
   const cleanup = [];
@@ -228,6 +341,20 @@ export async function concat(segments, outputPath, { audioPath, audioTracks, aud
       }
     }
 
+    /**
+     * 转场在裁剪**之后**做。
+     *
+     * 顺序不能反：裁剪是把厂商多给的那一两秒切掉，转场是在切完之后的
+     * 真实边界上做效果。反过来的话，淡出会做在一段马上要被切掉的画面上 ——
+     * 成片里看到的是"突然黑一下然后硬切"，比不做还难看。
+     */
+    let recode = false;
+    if (transitions?.some((k) => k && k !== 'cut')) {
+      const before = clips;
+      clips = await buildTransitions({ clips, kinds: transitions, outputPath, cleanup, onProgress, onNote });
+      recode = clips !== before;
+    }
+
     // 多条配音先合成一条整片音轨，再和视频合流
     let track = audioPath;
     if (!track && audioAt?.length) {
@@ -246,9 +373,21 @@ export async function concat(segments, outputPath, { audioPath, audioTracks, aud
     }
 
     const args = ['-y', '-f', 'concat', '-safe', '0', '-i', writeList(clips, 'concat')];
+    /**
+     * 做过转场就必须重编码。
+     *
+     * concat demuxer 不重编码的前提是**各段编码参数完全一致**。
+     * 转场那几段是我们自己重压的（libx264 veryfast），和厂商原始片段
+     * 在 profile、GOP、色彩范围上不一定对得上。硬 copy 拼出来的片子
+     * 多数播放器能放，但会在接缝处花屏或者卡一下 —— 而这**只在成片里出现**，
+     * 每一段单独播都是好的，最难查的那一类。
+     */
+    const vcodec = recode ? ['-c:v', 'libx264', '-preset', 'veryfast'] : ['-c:v', 'copy'];
     if (track && fs.existsSync(track)) {
-      // 视频不重编码（快），音频统一转 AAC（各家出的容器不一定一致）
-      args.push('-i', track, '-c:v', 'copy', '-c:a', 'aac', '-map', '0:v:0', '-map', '1:a:0', '-shortest');
+      // 音频统一转 AAC（各家出的容器不一定一致）
+      args.push('-i', track, ...vcodec, '-c:a', 'aac', '-map', '0:v:0', '-map', '1:a:0', '-shortest');
+    } else if (recode) {
+      args.push(...vcodec, '-c:a', 'aac');
     } else {
       args.push('-c', 'copy');
     }

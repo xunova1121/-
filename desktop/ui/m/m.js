@@ -967,6 +967,9 @@ function editRow(s) {
 
   const desc = h('textarea', { rows: 3, class: 'mta' }, s.description || '');
   const line = h('textarea', { rows: 2, class: 'mta' }, s.dialogue || '');
+  // 画外音效。单开一栏是因为写进画面描述会让出图模型去画那个声音 ——
+  //「敲门声」最常见的下场是画出一扇开着的门，而这一镜的前提是门还关着
+  const sfx = h('input', { type: 'text', class: 'min', placeholder: '敲门声、脚步声…', value: s.sound || '' });
   const dur = h('input', { type: 'number', step: '0.5', min: '0.5', max: '30', value: String(s.duration ?? 4) });
 
   // 说话人只能从设定集里的角色里选 —— 手打一个名字，配音那步就配不上音色
@@ -980,6 +983,9 @@ function editRow(s) {
   // 这一镜走哪一档模型。自动判定给一个，判错的那几镜由人改
   let tier = s.tier || '';
   const TIER_PICK = [['', '自动判定'], ['high', '关键镜'], ['normal', '一般'], ['low', '空镜']];
+  // 怎么进入这一镜。默认硬切 —— 满屏叠化是最典型的业余做法
+  let transition = s.transition || 'cut';
+  const TRANS_PICK = [['cut', '硬切'], ['fade', '黑场'], ['dissolve', '叠化']];
 
   const save = h('button', { class: 'btn sm primary grow' }, '保存');
   save.onclick = async () => {
@@ -992,6 +998,10 @@ function editRow(s) {
           description: desc.value,
           dialogue: line.value,
           speaker: who.value,
+          // cap:shot-sound
+          sound: sfx.value,
+          // cap:shot-transition
+          transition,
           camera,
           motion,
           tier,
@@ -1019,6 +1029,7 @@ function editRow(s) {
     field('画面描述', desc, '这是出图和出视频的唯一输入 —— 写偏一句，重出十次也回不到对的画面。'),
     field('台词', line, '留空就是这一镜没人说话。'),
     field('谁说的', who, '决定用哪个角色的音色。选「旁白」就是画外音。'),
+    field('画外音效', sfx, '听得见看不见的东西写这里。写进画面描述的话，出图模型会去画那个声音 ——「敲门声」通常会画出一扇开着的门。'),
     field('景别', chips(CAMERAS, camera, (v) => (camera = v))),
     field('运镜', chips(MOTIONS, motion, (v) => (motion = v))),
     field('时长（秒）', dur),
@@ -1038,6 +1049,22 @@ function editRow(s) {
       }
       return wrap;
     })(), '空镜和远景用便宜模型看不出差别 —— 这一档最省钱。判错了在这儿改。'),
+    // cap:shot-transition
+    field('转场', (() => {
+      const wrap = h('div', { class: 'chips' });
+      for (const [val, label] of TRANS_PICK) {
+        const b = h('button', {
+          class: `chip ${val === transition ? 'on' : ''}`,
+          onclick: () => {
+            transition = val;
+            for (const el of wrap.children) el.classList.remove('on');
+            b.classList.add('on');
+          }
+        }, label);
+        wrap.append(b);
+      }
+      return wrap;
+    })(), '绝大多数镜都该是硬切。黑场和叠化只在真的换时间换地点时用 —— 满屏叠化是最典型的业余做法。叠化还会吃掉 0.5 秒。'),
     h('div', { class: 'row', style: 'margin-top:12px' }, save),
     h('div', { class: 'muted', style: 'margin-top:7px' },
       '保存只改文案，不重出 —— 一般是连着改好几镜再统一重出，改一个字就烧一次钱不划算。')

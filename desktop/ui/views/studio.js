@@ -1269,6 +1269,16 @@ export default {
             type: 'text', placeholder: '出场角色，逗号分隔', value: (shot.characters || []).join('、')
           }),
           dialogue: h('input', { type: 'text', placeholder: '这一镜的台词（没有就留空）', value: shot.dialogue || '' }),
+          // 听得见、看不见的东西。**不进出图提示词** —— 这正是它单独一栏的理由：
+          // "敲门声"写在画面描述里，出图模型画不出声音，就会去画一扇开着的门
+          sound: h('input', {
+            type: 'text', placeholder: '敲门声、脚步声、远处汽笛…（不会画进画面）', value: shot.sound || ''
+          }),
+          // 怎么进入这一镜。绝大多数时候该是硬切 —— 满屏叠化是最典型的业余做法
+          transition: h('select', {},
+            h('option', { value: 'cut', selected: (shot.transition || 'cut') === 'cut' }, '硬切（默认）'),
+            h('option', { value: 'fade', selected: shot.transition === 'fade' }, '黑场（换时间换地点）'),
+            h('option', { value: 'dissolve', selected: shot.transition === 'dissolve' }, '叠化（时间流逝，吃 0.5 秒）')),
           // 谁说的 —— 决定用哪个角色的音色。留空 = 旁白
           speaker: h('select', {},
             h('option', { value: '', selected: !shot.speaker }, '旁白'),
@@ -1299,6 +1309,10 @@ export default {
                   scene: fields.scene.value,
                   characters: fields.characters.value,
                   dialogue: fields.dialogue.value,
+                  // cap:shot-sound
+                  sound: fields.sound.value,
+                  // cap:shot-transition
+                  transition: fields.transition.value,
                   link: fields.link.value,
                   skills: pickedSkills,
                   variants: pickedVariants,
@@ -1362,9 +1376,15 @@ export default {
             h('div', {}, h('label', {}, '出场角色'), fields.characters)),
           h('label', {}, '台词'),
           fields.dialogue,
+          h('label', {}, '画外音效'),
+          fields.sound,
+          h('div', { class: 'hint' },
+            '听得见但看不见的东西写这里。写进"画面描述"的话，出图模型画不出声音，' +
+            '会去画那个声音最像的东西 ——「敲门声」最常见的下场是画出一扇**开着的门**。'),
           h('div', { class: 'shot-edit-grid' },
             h('div', {}, h('label', {}, '谁说的'), fields.speaker),
-            h('div', {}, h('label', {}, '模型档位'), fields.tier)),
+            h('div', {}, h('label', {}, '模型档位'), fields.tier),
+            h('div', {}, h('label', {}, '转场'), fields.transition)),
           // ── 这一镜谁穿哪套、场景是什么时段 ──
           // 只在真的有多版时才摆出来：大多数条目只有一版，摆一排"默认"是纯噪音
           (() => {

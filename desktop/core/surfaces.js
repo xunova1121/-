@@ -56,6 +56,20 @@ export const CAPABILITIES = [
     mobile: 'ui/m/m.js'
   },
   {
+    id: 'shot-sound',
+    name: '写画外音效（不进画面）',
+    api: 'PATCH /projects/:id/shots/:sid { sound }',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js'
+  },
+  {
+    id: 'shot-transition',
+    name: '改转场形式（硬切/黑场/叠化）',
+    api: 'PATCH /projects/:id/shots/:sid { transition }',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js'
+  },
+  {
     id: 'bible-edit',
     name: '改设定集里的外貌描述',
     api: 'PATCH /projects/:id { bible }',

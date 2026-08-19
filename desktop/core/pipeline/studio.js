@@ -29,6 +29,8 @@ import * as skillsLib from '../skills.js';
 import * as variants from './variants.js';
 import * as oss from '../oss.js';
 import * as tiers from '../tiers.js';
+import * as shotlint from './shotlint.js';
+import * as transitions from '../transitions.js';
 
 export const extractJSON = consistency.extractJSON;
 
@@ -43,11 +45,13 @@ const SHOT_PROMPT = `你是动态漫画的分镜导演。把剧本拆成可直�
       "index": 1,
       "scene": "所属场景名（必须用设定集里已有的场景名）",
       "characters": ["出场角色名，必须用设定集里已有的名字，空镜给空数组"],
-      "description": "这一镜画面里发生的事，只写画面，不写心理活动",
+      "description": "这一镜画面里发生的事，只写看得见的画面，不写心理活动、不写声音",
       "camera": "镜头语言：特写 / 中景 / 全景 / 俯拍 / 跟拍 / 推镜 等",
       "motion": "给图生视频的运镜与动态提示，一句话",
       "dialogue": "旁白或台词，没有留空字符串",
       "speaker": "这句台词是谁说的，填角色名；旁白或没有台词就留空字符串",
+      "sound": "这一镜听得见但看不见的声音（敲门声、脚步声、雨声、远处汽笛）。没有就留空字符串",
+      "transition": "进入这一镜的方式：cut（硬切，默认）/ fade（黑场淡入，换时间换地点用）/ dissolve（叠化，时间流逝或情绪转折用）。绝大多数镜都该是 cut",
       "duration": 4
     }
   ]
@@ -61,6 +65,33 @@ const SHOT_PROMPT = `你是动态漫画的分镜导演。把剧本拆成可直�
 - **不要**在 description 里重复角色外貌 —— 外貌由设定集统一注入，你重复写反而会冲突；
 - characters 和 scene 必须严格用下面设定集里给出的名字，不要自创；
 - duration 取 3~6 秒。
+
+分镜铁律（违反其中任何一条，这一镜出来的画面都会是错的）：
+
+- **一镜只装一个动作**。「老师听到敲门 → 说请进 → 客人推门进来 → 客人坐下」是**四镜**，
+  不是一镜。这一条是所有毛病里最贵的一条：每一镜只会拿到**一张静止的首帧图**，
+  一张图画不出一串先后发生的事，模型只能挑一个瞬间画，然后剩下的事全都没了。
+
+- **声音写进 sound，不要写进 description**。description 里出现"敲门声"，
+  出图模型没法画一个声音，它会去画那个声音最像的**东西** —— 于是画出一扇**开着的门**。
+  而这一镜的前提恰恰是门还关着。一个字放错字段，整场戏的逻辑就反了。
+
+- **description 写"正在发生"，不写"已经发生"**。首帧图是这一镜的**起点**，不是终点。
+  写"客人推门进来"，出的图是客人**已经站在屋里**，视频就没得动了；
+  写"门把手正在转动，门开了一条缝"，视频才有得演。
+
+- **写清楚可见状态**。门是关着还是开着、灯亮还是暗、人是坐着还是站着 ——
+  这些跨镜头会被记住，不写的话每一镜都会重新掷骰子，前一镜关着的门下一镜就开了。
+
+- **相邻两镜的方向要一致**。同一场戏里，角色朝画面左还是右、从哪一侧进画，
+  前后镜必须对得上。反了的话观众会觉得"两个人在各说各的"，说不出哪里怪，但就是怪。
+
+- **动作中途切**。要让两镜接得看不出接缝，就在**动作进行到一半时**换镜：
+  上一镜"手伸向门把手"，下一镜"手把门把手拧下去"。
+  等一个动作彻底做完再切，接缝会很明显 —— 这是业余和专业最容易分辨的一处。
+
+- **transition 绝大多数时候填 cut**。fade 和 dissolve 只在**真的换时间换地点**时用。
+  每镜都叠化是最典型的业余做法：它不会让片子更顺，只会让人看不清发生了什么。
 
 已冻结的设定集：
 {{BIBLE}}`;
@@ -566,6 +597,18 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
     dialogue: s.dialogue || '',
     // 谁说的。配音时按它取这个角色的音色 —— 空 = 旁白
     speaker: s.speaker || '',
+    /**
+     * 听得见、看不见的东西。
+     *
+     * 单开一个字段，是为了让"敲门声"**有地方去** —— 只说"别写进画面描述里"
+     * 而不给它一个去处，模型要么还是写进画面（照样画出开着的门），
+     * 要么直接把它丢了（那这场戏就没有敲门这回事了）。
+     * 现在它落在这里：不进出图提示词，但留在数据里，后面配音效时直接可用。
+     */
+    sound: s.sound || '',
+    // 进入这一镜的方式。只认三种合法值，模型瞎编的一律回退硬切 ——
+    // 一个不认识的转场名会在合成时被当成"没写"，而那时候已经看不出是模型编的了
+    transition: ['cut', 'fade', 'dissolve'].includes(s.transition) ? s.transition : 'cut',
     duration: Number(s.duration) || 4,
     // 模型回的是**版本名**（它没法知道 id），这里翻成 id。
     // 翻不出来的直接丢掉：指向不存在的变体等于悄悄回退到默认，而界面上还显示着你选的那一版
@@ -626,6 +669,20 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
     status: 'done',
     message: chapter ? `${chapter.title} 拆出 ${shots.length} 镜` : `拆出 ${shots.length} 个分镜`
   });
+
+  /**
+   * 拆完立刻体检，**在出图之前**。
+   *
+   * 这个时机是有意挑的：分镜里的三类硬伤（一镜多事件、声音写进画面、
+   * 写成动作终点）看文字就能发现，而它们的后果要等图出来才看得见 ——
+   * 那时候一镜的钱已经花了，重出还要再花一次。
+   * 提示词里已经写明了铁律，但模型不是每次都听；这一层是**兜底的检查**，
+   * 不是替代品。纯本地正则，不花一次调用。
+   */
+  const lint = shotlint.lintShots(store.read(projectId).shots || []);
+  const brief = shotlint.summarize(lint);
+  if (brief) onEvent?.({ type: 'note', message: `⚠ 分镜体检：${brief}` });
+
   return store.read(projectId);
 }
 
@@ -646,6 +703,9 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
  */
 const SHOT_EDITABLE = [
   'description', 'camera', 'motion', 'dialogue', 'scene', 'characters', 'duration', 'link', 'skills',
+  // 画外音效，和转场形式。不放进白名单的话，界面上改了存不下去 ——
+  // 而且那种"改了没反应"最难查：接口回 200，值就是没进去
+  'sound', 'transition',
   // 这一镜走哪一档模型。自动判定会给一个，判错的那几镜由人改
   'tier',
   // 这句台词是谁说的。决定用哪个角色的音色 —— 空字符串 = 旁白
@@ -1434,12 +1494,15 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
 
   const head = await verifyVideoHead(shot, dest, { onEvent });
   const tail = await verifyVideoTail(projectId, shot, dest, { onEvent });
-  if (head || tail) {
+  const { next: nextShot } = continuity.neighbors(store.read(projectId).shots || [], shotId);
+  const seam = await verifyTailAlign(shot, dest, nextShot, { onEvent });
+  if (head || tail || seam) {
     store.update(projectId, (p) => {
       const t = p.shots.find((s) => s.id === shotId);
       if (t) {
         if (head) t.headMatch = head;
         if (tail) t.videoConsistency = tail;
+        if (seam) t.tailAlign = seam;
       }
       return p;
     });
@@ -2020,6 +2083,78 @@ async function verifyVideoTail(projectId, shot, videoPath, { onEvent } = {}) {
   }
 }
 
+/**
+ * 接缝比对 —— 标了「连续动作」的这两镜，**真的接上了吗**。
+ *
+ * ── 这一层补的是哪个洞 ──
+ *
+ * 标成「连续动作」时，我们会把下一镜的分镜图当**末帧**发给厂商，
+ * 让这段视频结束在那张图上，下一段从同一张图开始 —— 接缝就看不出来。
+ *
+ * 问题是：**没有一处在检查厂商到底吃没吃这个参数**。
+ * 不收末帧的厂商多数不会报错，它只是当没看见，照常出一段普通图生视频，
+ * 任务状态是"成功"，视频也能播。于是界面上明明白白标着「无缝衔接」，
+ * 而成片放到那个接缝时会**跳一下** —— 要等全片合成完、放出来才发现，
+ * 那时候这两镜的钱都已经花过了。
+ *
+ * 有了 verifyVideoHead（首帧对不对）和 verifyVideoTail（人还像不像），
+ * 唯独少了这一条：**末帧是不是下一镜那张图**。三个问题，三层各答一个。
+ *
+ * ── 为什么用感知哈希而不是问模型 ──
+ *
+ * "这一帧和这张图是不是同一个画面"是**像素问题**，不需要理解力。
+ * 哈希免费、可复现、毫秒级；问视觉模型要花钱，而且同一对图两次能差好几分。
+ * 和 verifyVideoHead 同一个理由，所以也同样不受「一致性复核」开关控制。
+ */
+async function verifyTailAlign(shot, videoPath, nextShot, { onEvent } = {}) {
+  // 只有真锁了末帧的镜才需要验。cut 的镜位本来就该跳，验了没意义
+  if (!shot.endFrameChained) return null;
+  if (!nextShot?.imagePath || !fs.existsSync(nextShot.imagePath)) return null;
+  if (!ffmpeg.locate().available) return null;
+
+  try {
+    const [tailHash, headHash] = await Promise.all([
+      imghash.hashVideoFrame(videoPath, { at: 'end' }),
+      imghash.hashImage(nextShot.imagePath)
+    ]);
+    // 画面太平（大片纯色、全黑淡出）时哈希没有分辨力 —— 这种情况**不下判断**。
+    // 把"看不出来"说成"对上了"，比不检查更坏
+    if (!imghash.informative(tailHash) || !imghash.informative(headHash)) {
+      return { verdict: 'inconclusive', ok: null, at: new Date().toISOString() };
+    }
+
+    const distance = imghash.hamming(tailHash, headHash);
+    const similarity = imghash.similarity(distance);
+    /**
+     * 三档而不是两档。中间这一档（"有点漂"）是真实存在的一种结果：
+     * 厂商吃了末帧参数，但没完全收住 —— 接缝处会轻微跳一下。
+     * 归到"对上了"里会让人相信一个其实不太行的接缝；
+     * 归到"没锁上"里又会让人白白去换厂商。它该有自己的名字。
+     *
+     * 22 这个数：MATCH_THRESHOLD 是 12，64 位哈希完全无关时期望距离是 32。
+     * 取两者之间偏低的一侧 —— 宁可多报几个"有点漂"让人自己看一眼。
+     */
+    const verdict =
+      distance <= imghash.MATCH_THRESHOLD ? 'aligned' : distance <= 22 ? 'partial' : 'missed';
+
+    const message =
+      verdict === 'aligned'
+        ? `接缝比对通过：第 ${shot.index} 镜的末帧确实停在第 ${nextShot.index} 镜那张图上（相似度 ${similarity}%）`
+        : verdict === 'partial'
+          ? `接缝比对：第 ${shot.index}→${nextShot.index} 镜有轻微漂移（相似度 ${similarity}%）—— ` +
+            '厂商吃了末帧参数但没完全收住，成片在这个接缝会轻微跳一下。重出这一镜多半会好，或者把这两镜改成硬切。'
+          : `⚠ 接缝没锁上：第 ${shot.index} 镜的末帧和第 ${nextShot.index} 镜那张图对不上（相似度只有 ${similarity}%）—— ` +
+            '这家多半**没吃末帧参数**，只是没报错。这两镜标着「连续动作」，但成片放到这里会明显跳一下。' +
+            '换一家收末帧的（可灵、Vidu、方舟），或者把这两镜改成硬切，别让界面上写着无缝而实际不是。';
+    onEvent?.({ type: 'note', message });
+
+    return { verdict, ok: verdict === 'aligned', distance, similarity, nextIndex: nextShot.index, at: new Date().toISOString() };
+  } catch (err) {
+    onEvent?.({ type: 'note', message: `接缝比对没跑成：${err.message}` });
+    return null;
+  }
+}
+
 export async function generateVideos(projectId, { only = null, chapterId = null, regenerate = false, onEvent } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
@@ -2112,12 +2247,15 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
       // 末帧看"演到最后人还是不是那个人"（要一次多模态调用）
       const head = await verifyVideoHead(shot, dest, { onEvent });
       const tail = await verifyVideoTail(projectId, shot, dest, { onEvent });
-      if (head || tail) {
+      const { next: nextShot } = continuity.neighbors(store.read(projectId).shots || [], shot.id);
+      const seam = await verifyTailAlign(shot, dest, nextShot, { onEvent });
+      if (head || tail || seam) {
         store.update(projectId, (p) => {
           const t = p.shots.find((s) => s.id === shot.id);
           if (t) {
             if (head) t.headMatch = head;
             if (tail) t.videoConsistency = tail;
+            if (seam) t.tailAlign = seam;
           }
           return p;
         });
@@ -2604,6 +2742,15 @@ export function timelineOf(project, { policy = 'trim' } = {}) {
   const rows = [];
   let at = 0;
   for (const shot of shots) {
+    /**
+     * 叠化会**吃掉**重叠的那半秒 —— 全片因此变短。
+     *
+     * 这一行必须在这里，不能只写在合成那一层：配音按绝对时间点摆、
+     * 字幕也按绝对时间算，两者都来自这个函数。少了它，一处叠化之后
+     * 的每一句台词都会晚半秒，而且叠化越多错得越多 ——
+     * 表现和"配音顺次拼"那个老 bug 一模一样，只是原因换了一个。
+     */
+    if (rows.length) at -= transitions.overlapOf(shot);
     const span = policy === 'trim'
       ? Number(shot.duration) || Number(shot.actualDuration) || 0
       : Number(shot.actualDuration) || Number(shot.duration) || 0;
@@ -2714,9 +2861,24 @@ export async function compose(projectId, { onEvent } = {}) {
     if (saved > 0.5) onEvent?.({ type: 'note', message: `按分镜时长裁剪，去掉厂商档位多出的 ${saved.toFixed(1)} 秒` });
   }
 
+  // 每一段是"怎么进来的"。第一段没有转场可言，永远硬切
+  const transitionKinds = withVideo.map((s, i) => (i === 0 ? 'cut' : transitions.kindOf(s)));
+  const effects = transitionKinds.filter((k) => k !== 'cut').length;
+  if (effects) {
+    const eaten = transitions.totalOverlap(withVideo);
+    onEvent?.({
+      type: 'note',
+      message:
+        `${effects} 处转场（黑场/叠化），其余都是硬切` +
+        (eaten > 0 ? `。叠化会重叠掉 ${eaten.toFixed(1)} 秒，成片总长相应变短，配音和字幕已按这个算` : '')
+    });
+  }
+
   await ffmpeg.concat(segments, out, {
     audioAt,
     trims,
+    transitions: transitionKinds,
+    onNote: (message) => onEvent?.({ type: 'note', message }),
     onProgress: (p) => onEvent?.({ type: 'progress', seconds: p.seconds })
   });
 
