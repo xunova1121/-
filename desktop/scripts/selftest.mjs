@@ -2096,6 +2096,122 @@ section('下不到图 ≠ 图太多');
   const ok = await ad.__probeMediaUrl(`${appUrl}/index.html`);
   // 这两种情况的下一步动作毫不相干，而单看厂商那句话是分不出来的
   check('拉得到时反过来指向厂商那边', /厂商那边够不着/.test(ok), ok.slice(0, 50));
+  /**
+   * 这个探测是从跑着应用的那台机器上发的，而桶通常就在同一片机房 ——
+   * "我们拉得到"因此几乎必然成立。原来的话把它说成"地址本身是好的"，
+   * 会让人放心地不去查桶权限，而桶不是公共读恰恰是最常见的原因。
+   */
+  check('并且承认这个探测本身够不着结论', /同一片机房/.test(ok) && /公共读/.test(ok), ok.slice(0, 120));
+  check('给了一个能分清两种情况的动作', /无痕窗口/.test(ok), ok.slice(0, 200));
+}
+
+section('厂商拉不到我们的桶：先绕过去，再讲道理');
+{
+  /**
+   * 用户那条日志：厂商回 `cannot download media URL (2013)`，我们自己探测
+   * 却是 HTTP 206。结论"把桶换到和厂商同一侧"是对的，但它救不了眼前这一镜 ——
+   * 换地域要重建桶、重传所有素材，而人现在就想把这一镜出出来。
+   *
+   * 厂商其实不需要能访问我们的桶，它只需要拿到那几个字节。
+   * 我们拉得到，那就下下来内联发过去。
+   */
+  const ad = await import('../core/providers/adapters.js');
+  const cat = await import('../core/providers/catalog.js');
+  ad.resetMediaLimits();
+  vault.setSecret('METASO_API_KEY', 'ms-test-key');
+
+  const provider = cat.PROVIDERS.find((p) => p.id === 'metaso');
+  const reachable = `${appUrl}/index.html`; // 我们拉得到的真地址
+  const notes = [];
+  let submits = 0;
+  let sawInline = 0;
+
+  /**
+   * "到底发的是地址还是字节"只能在 buildBody 里看 —— checkBiz 拿到的是
+   * 上游的回包，跟我们发出去的 body 没有关系。
+   */
+  let attempt = 0;
+  const res = await ad.__submitWithMediaBackoff({
+    providerId: 'metaso',
+    provider,
+    model: 'MiniMax-H3',
+    url: `${upstreamUrl}/api/v1/tasks/submit`,
+    images: [reachable, reachable],
+    buildBody: (imgs) => {
+      attempt += 1;
+      if (imgs.some((u) => String(u).startsWith('data:'))) sawInline += 1;
+      return { imgs, inline: imgs.some((u) => String(u).startsWith('data:')) };
+    },
+    checkBiz: () => {
+      submits += 1;
+      // 第一次发的是地址（attempt 1）→ 厂商说下不到；之后发的是字节 → 收
+      if (attempt === 1) throw new Error('cannot download media URL (2013)');
+      return { ok: true };
+    },
+    label: '测试',
+    onEvent: (ev) => notes.push(ev.message)
+  }).catch((err) => ({ error: err.message }));
+
+  const joined = notes.join(' | ');
+  check('厂商下不到时，改把图下下来内联发', !res.error && sawInline >= 1, res.error || `inline=${sawInline}`);
+  check('说清楚绕过去了、这一镜不用重来', /不用重来/.test(joined), joined.slice(0, 200));
+  /**
+   * 绕过去之后**仍然要把长期的解法说出来**。内联每镜都要多下一趟图，
+   * 图一多还会撞体积上限 —— 它是应急，不是终点。不说的话人就永远停在这。
+   */
+  check('同时仍然给出长期解法（把桶换到同一侧）', /同一侧/.test(joined), joined.slice(0, 260));
+
+  /**
+   * 一部片子十几二十镜。如果每一镜都先撞一次墙再改内联，那就是十几次
+   * 白跑的提交，每次都要等厂商超时 —— 慢，而且日志里全是失败，
+   * 人分不出哪一条是真出事了。第一镜撞过就该记住。
+   */
+  const before = submits;
+  const shapes = []; // 每次 buildBody 发的是地址还是字节
+  const second = await ad.__submitWithMediaBackoff({
+    providerId: 'metaso',
+    provider,
+    model: 'MiniMax-H3',
+    url: `${upstreamUrl}/api/v1/tasks/submit`,
+    images: [reachable],
+    buildBody: (imgs) => {
+      const inline = imgs.every((u) => String(u).startsWith('data:'));
+      shapes.push(inline ? 'inline' : 'url');
+      return { inline };
+    },
+    // 厂商的行为没变：发地址照样下不到。所以"只提交了一次"必须是因为
+    // 我们**第一次就发了字节**，而不是因为这个假厂商太好说话。
+    checkBiz: () => {
+      submits += 1;
+      if (shapes[shapes.length - 1] === 'url') throw new Error('cannot download media URL (2013)');
+      return { ok: true };
+    },
+    label: '测试',
+    onEvent: (ev) => notes.push(ev.message)
+  }).catch((err) => ({ error: err.message }));
+  check('下一镜直接走内联，不再白撞一次',
+    !second.error && submits - before === 1 && shapes[0] === 'inline',
+    `${submits - before} 次提交，${shapes.join('→')}`);
+
+  /**
+   * 而"我们自己也拉不到"的时候不能绕 —— 那不是厂商够不着，是地址本身有问题。
+   * 硬绕只会多等一个超时，然后报一个更含糊的错。
+   */
+  ad.resetMediaLimits();
+  const dead = await ad.__submitWithMediaBackoff({
+    providerId: 'metaso',
+    provider,
+    model: 'MiniMax-H3',
+    url: `${upstreamUrl}/api/v1/tasks/submit`,
+    images: ['http://127.0.0.1:1/nope.png'],
+    buildBody: (imgs) => ({ imgs }),
+    checkBiz: () => { throw new Error('cannot download media URL (2013)'); },
+    label: '测试',
+    onEvent: (ev) => notes.push(ev.message)
+  }).catch((err) => ({ error: err.message }));
+  check('我们自己也拉不到时，不硬绕，照实报', /我们这边也拉不到/.test(dead.error || ''), (dead.error || '').slice(0, 120));
+
+  ad.resetMediaLimits();
 }
 
 section('学来的图片上限：会过期，而且别乱学');

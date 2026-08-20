@@ -1022,9 +1022,36 @@ export function learnedMediaLimit(key) {
   return hit.count;
 }
 
+/**
+ * 记住"这家厂商拉不到我们的桶"。
+ *
+ * 一部片子十几二十镜，如果每一镜都先撞一次 `cannot download media URL`
+ * 再改内联，那就是十几次白跑的提交 —— 每次都要等厂商超时，慢得离谱，
+ * 而且日志里全是失败，人根本看不出哪次是真出事了。
+ *
+ * 第一镜撞过之后就记下来，后面的镜直接走内联。和上限一样是**会过期的**：
+ * 桶换了地域、CDN 配好了，半小时后自动回到"发地址"这条更省的路上。
+ */
+const unreachableCache = new Map();
+
+export function rememberUrlUnreachable(key) {
+  unreachableCache.set(key, Date.now());
+}
+
+export function urlUnreachable(key) {
+  const at = unreachableCache.get(key);
+  if (!at) return false;
+  if (Date.now() - at > LIMIT_TTL_MS) {
+    unreachableCache.delete(key);
+    return false;
+  }
+  return true;
+}
+
 /** 只给自检和"重新试探"用 */
 export function resetMediaLimits() {
   mediaLimitCache.clear();
+  unreachableCache.clear();
 }
 
 /**
@@ -1064,6 +1091,43 @@ function isMediaLimitError(message) {
  * 是分不出来的 —— 人只能瞎试。一次 HEAD 请求换掉一整轮瞎试，很划算。
  * 只在**已经失败**时才做，正常路径上一次都不发。
  */
+/**
+ * 把几个公网地址下下来，变成内联图。
+ *
+ * 拉不到、或者加起来太大，就回 null —— 调用方据此决定还要不要绕这个弯。
+ * 太大的话绕过去也是白绕：内联几十 MB 只会换来一次超时（见 trimInlineImages）。
+ */
+async function inlineFromUrls(urls, onEvent) {
+  const list = (urls || []).filter((u) => /^https?:/i.test(String(u)));
+  if (!list.length) return null;
+
+  const out = [];
+  let total = 0;
+  for (const u of list) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const res = await fetch(u, { signal: AbortSignal.timeout(30000) });
+      if (!res.ok) return null;
+      // eslint-disable-next-line no-await-in-loop
+      const buf = Buffer.from(await res.arrayBuffer());
+      const type = res.headers.get('content-type') || 'image/png';
+      total += Math.ceil((buf.length * 4) / 3);
+      if (total > INLINE_BUDGET) {
+        onEvent?.({
+          type: 'note',
+          message: `想改成内联图绕过去，但这几张加起来超过 ${(INLINE_BUDGET / 1048576).toFixed(0)}MB，内联发只会换来一次超时 —— 不绕了`
+        });
+        return null;
+      }
+      out.push(`data:${type};base64,${buf.toString('base64')}`);
+    } catch {
+      return null;
+    }
+  }
+  onEvent?.({ type: 'note', message: `厂商拉不到我们的地址，改把图下下来内联发（共 ${out.length} 张，${(total / 1048576).toFixed(1)}MB）` });
+  return out;
+}
+
 async function probeMediaUrl(url) {
   if (!url) return '（这一镜没带参考图，问题不在图上）';
   if (String(url).startsWith('data:')) {
@@ -1072,7 +1136,20 @@ async function probeMediaUrl(url) {
   try {
     const res = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' }, signal: AbortSignal.timeout(15000) });
     if (res.ok || res.status === 206) {
-      return `我们这边拉得到（HTTP ${res.status}）—— 说明地址本身是好的，是**厂商那边够不着**：常见于对象存储在境外而厂商在境内，或者它的出口被挡。把桶换到和厂商同一侧，或者改用公共读 + CDN。`;
+      /**
+       * 这句话要说得比原来保守。
+       *
+       * 这个探测是**从跑着这个应用的机器上**发出去的，而多数人的桶和应用
+       * 在同一片机房里（我们自己就是：应用在香港，桶也在香港）。同机房拉得到
+       * 几乎必然成立，它证明不了"地址是公网可达的"—— 只证明了"我们够得着"。
+       * 把它说成"地址本身是好的"，会让人放心地不去查桶权限，而那恰恰是最常见的原因。
+       */
+      return (
+        `我们这边拉得到（HTTP ${res.status}）—— 但我们是从跑着这个应用的机器上拉的，` +
+        `如果桶和应用在同一片机房，这一条几乎必然成立，证明不了地址在公网上可达。` +
+        `两种可能：① 桶不是公共读、限时地址厂商用不了；② 地址是好的，但厂商那边够不着（桶在境外而厂商在境内，或它的出口被挡）。` +
+        `把这个地址复制到手机流量下的无痕窗口里打开一次，就能分清是哪一种 —— 打不开是①，打得开是②。`
+      );
     }
     if (res.status === 403) {
       return '我们这边也是 403 —— 多半是限时地址过期了，或者桶是私有的而签名不被接受。「设置 → 对象存储」里把有效期调长，或者把桶设成公共读。';
@@ -1122,7 +1199,14 @@ function trimInlineImages(images, onEvent) {
 }
 
 async function submitWithMediaBackoff({ providerId, provider, model, url, images: rawImages, buildBody, checkBiz, label, onEvent }) {
-  const images = trimInlineImages(rawImages, onEvent);
+  let images = trimInlineImages(rawImages, onEvent);
+
+  // 这家上一镜就拉不到我们的桶，别再撞一次墙了，直接走内联（拉不动或太大就照旧发地址）。
+  const reachKey = `${providerId}::${baseUrlOf(provider)}::urls`;
+  if (urlUnreachable(reachKey) && images.some((u) => /^https?:/i.test(String(u)))) {
+    const pre = await inlineFromUrls(images, onEvent);
+    if (pre) images = pre;
+  }
   /**
    * 学来的上限按 服务商 + 地址 + **模型** 记。
    *
@@ -1175,6 +1259,47 @@ async function submitWithMediaBackoff({ providerId, provider, model, url, images
        * 并且把"到底是谁拉不到"查清楚再抛。
        */
       if (/cannot\s+download|download\s+media/i.test(err.message || '')) {
+        /**
+         * 厂商说它下不到我们给的地址。
+         *
+         * ── 先别急着报错，先想一件事 ──
+         *
+         * 如果**我们自己拉得到**这张图，那这个问题其实是可以绕过去的：
+         * 把图**下下来，当内联图发过去**。厂商不需要能访问我们的桶 ——
+         * 它只需要拿到那几个字节。
+         *
+         * 这一条在"桶在境外、厂商在境内"的场合特别值钱：那种情况下
+         * 换地域要重建桶、重传所有素材，而这一镜现在就想出。
+         * 报一句"把桶换到和厂商同一侧"是对的建议，但它救不了眼前这一镜。
+         *
+         * 只试一次，而且卡体积（内联发太大照样会超时 —— 那是另一个坑，
+         * 上面 trimInlineImages 那段写着）。绕过去之后仍然要把
+         * **长期的解法**说出来，否则每一镜都要多跑一趟这个弯路。
+         */
+        const inlined = await inlineFromUrls(imgs, onEvent);
+        if (inlined) {
+          try {
+            const json = checkBiz(
+              await send(
+                { provider: providerId, label: `${label}·提交（改内联图）`, method: 'POST', url, body: buildBody(inlined), timeoutMs: 120000 },
+                onEvent
+              ),
+              '提交'
+            );
+            rememberUrlUnreachable(reachKey);
+            onEvent?.({
+              type: 'note',
+              message:
+                '改成内联图发过去，成了 —— 厂商拉不到我们的桶，但它拿得到图本身。'
+                + '这一镜不用重来。长期的解法还是把桶换到和厂商同一侧（境内厂商就用境内地域），'
+                + '不然每一镜都要多绕这一趟，而且内联图多了会超时。'
+            });
+            return json;
+          } catch (retryErr) {
+            onEvent?.({ type: 'note', message: `改内联图也没成（${String(retryErr.message).slice(0, 120)}）` });
+          }
+        }
+
         const verdict = await probeMediaUrl(images[0]);
         err.message = `${err.message}\n\n我们替你查了一下：${verdict}`;
         throw err;
