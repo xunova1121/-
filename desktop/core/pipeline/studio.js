@@ -116,6 +116,15 @@ const SHOT_PROMPT = `你是动态漫画的分镜导演。把剧本拆成可直�
   上一镜"手伸向门把手"，下一镜"手把门把手拧下去"。
   等一个动作彻底做完再切，接缝会很明显 —— 这是业余和专业最容易分辨的一处。
 
+- **动作量要配得上时长**。这是"节奏忽快忽慢"的真正来源：
+  每一镜是**独立生成**的，模型只知道"演什么、几秒"，于是自己算速度。
+  一个 3 秒的镜头里写"走过整条走廊"，它只能把人加速成小跑；
+  下一个 6 秒的镜头写"抬起头"，同一个人又慢得像定格。两镜一接，
+  观众立刻觉得莫名其妙 —— 而人对速度突变比对人脸漂移敏感得多。
+  所以：**大动作给长时长，小动作给短时长**。
+  一个人正常走三五步大约 3 秒，转身抬头大约 1~2 秒，
+  跨过一整个空间要 6 秒以上 —— 写不下就拆成两镜，别靠加速硬塞。
+
 - **转场只出现在场次之间**。场次内部的每一镜，transition 一律填 cut。
   一个场次的头一镜，transition 要和这个场次的 enter 一致。
   每镜都叠化是最典型的业余做法：它不会让片子更顺，只会让人看不清发生了什么。
@@ -1553,7 +1562,7 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
 
   // 单独重出同样要吃上下文 —— 少了它，重出的这一镜会变成全片里唯一"自成一段"的那一镜。
   // 也放在首帧之前：接缝模式下首帧可能来自上一段视频的真实末帧
-  const ctx = await videoContextFor(project, shot, { onEvent });
+  const ctx = await videoContextFor(project, shot, { onEvent, providerId });
   const firstFrame =
     ctx.headFromTail?.url
     || usableRef(shot.imageRef)
@@ -2104,7 +2113,7 @@ function checkRatio(file, wanted, label, onEvent, asked = null) {
  *   ② 末帧图 —— 只有标成"连续动作"的下一镜才锁，见 continuity.js 里为什么不全锁；
  *   ③ 给界面看的说明，让"这一镜到底接没接上"是看得见的，而不是玄学。
  */
-async function videoContextFor(project, shot, { onEvent } = {}) {
+async function videoContextFor(project, shot, { onEvent, providerId = null } = {}) {
   const { prev, next, link, nextLink } = continuity.neighbors(project.shots || [], shot.id);
 
   const videoPrompt = consistency.assembleVideoPrompt(project.bible, shot, { prev, next, link });
@@ -2128,17 +2137,44 @@ async function videoContextFor(project, shot, { onEvent } = {}) {
     headFromTail = await tailFrameOf(project, prev, shot, { onEvent });
   }
 
+  /**
+   * 末帧锁定：**先问这家收不收，再决定说什么**。
+   *
+   * 以前是先许诺"两镜之间会是无缝的"，然后适配器那一层才发现这家不收末帧，
+   * 又说一句"会是硬切"。两句话同时躺在日志里，前一句是在还不知道厂商是谁的
+   * 时候许下的 —— 这不只是话难看：用户会以为接缝做上了，直到看成片才发现没有。
+   *
+   * 收末帧的只有方舟、可灵、Vidu；海螺、秘塔、百炼、Sora 都不收。
+   */
+  const provider = providerId ? catalog.getProvider(providerId) : null;
+  const takesEndFrame = provider ? Boolean(provider.videoDefaults?.endFrame) : true;
+
   let lastFrameUrl = null;
   if (seamMode !== 'off' && continuity.shouldChainEndFrame(next, nextLink, shot)) {
-    try {
-      lastFrameUrl = usableRef(next.imageRef) || (await toModelRef(next.imagePath, { onEvent }));
+    if (!takesEndFrame) {
+      /**
+       * 这家不收末帧。只有一句话可说，而且这句话必须**指向出路**，
+       * 不能只是通报一个坏消息。
+       */
       onEvent?.({
         type: 'note',
-        message: `第 ${next.index} 镜标成「连续动作」，把它那张图锁成本镜末帧 —— 两镜之间会是无缝的`
+        message: headFromTail
+          ? `${provider.name} 不收末帧图，但本镜已经接住了第 ${headFromTail.fromIndex} 镜的真实末帧当首帧 —— 接缝照样是连的`
+          : `${provider.name} 不收末帧图，而本镜也没接住上一段的末帧，第 ${next.index} 镜那儿会硬切。`
+            + '出路两条：把「设置 → 一致性引擎 → 接缝」保持在「接住真实末帧」（对所有厂商都管用），'
+            + '或者换一家收末帧的（可灵、Vidu、方舟）。'
       });
-    } catch (err) {
-      // 末帧拿不到不该拖垮这一镜：降级成普通图生视频，但要说清楚降级了
-      onEvent?.({ type: 'note', message: `取第 ${next.index} 镜的图当末帧失败（${err.message}），本镜按普通图生视频出` });
+    } else {
+      try {
+        lastFrameUrl = usableRef(next.imageRef) || (await toModelRef(next.imagePath, { onEvent }));
+        onEvent?.({
+          type: 'note',
+          message: `第 ${next.index} 镜标成「连续动作」，把它那张图锁成本镜末帧 —— 两镜之间会是无缝的`
+        });
+      } catch (err) {
+        // 末帧拿不到不该拖垮这一镜：降级成普通图生视频，但要说清楚降级了
+        onEvent?.({ type: 'note', message: `取第 ${next.index} 镜的图当末帧失败（${err.message}），本镜按普通图生视频出` });
+      }
     }
   }
 
@@ -2394,30 +2430,14 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
        *   ② 上一段的 videoPath 是**这一轮刚写进去的**。拿循环开始时那份
        *      快照的话，prev.videoPath 永远是空的，接缝这条路整个不会触发
        */
-      const ctx = await videoContextFor(store.read(projectId), shot, { onEvent });
-      const firstFrame =
-        ctx.headFromTail?.url
-        || usableRef(shot.imageRef)
-        || (await toModelRef(shot.imagePath, { onEvent }));
-      // 设定集参考图一并带上（场景 + 角色 + 道具）：
-      // 支持 r2v 的厂商（Vidu、H3）能靠它把人和环境一起锁住
-      const bibleRefs =
-        settings.get('useReferenceImages') === false
-          ? { images: [], labels: [] }
-          : consistency.collectReferences(project.bible, shot);
-
-      // 上下文：接在谁后面、要交给谁。缺了它，每一镜都会被当成独立短片来演。（上面已经算过）
-      const videoPrompt = ctx.videoPrompt;
-      onEvent?.({ type: 'shot', shotId: shot.id, status: 'running', message: `提交任务：${videoPrompt.slice(0, 60)}…` });
-
       /**
-       * 按镜头分级挑模型：贵的只用在看得出差别的地方。
+       * 分级要在**上下文之前**定。
        *
-       * 视频这一步是最大的一笔开销，而且按镜计费。但空镜、远景、过渡镜
-       * 常常占一部片子的三四成，那些地方便宜模型和贵模型看不出差别 ——
-       * 全片一律用最贵的，等于为看不出差别的地方付全价。
-       *
-       * 没配就是 null，退回主路由 —— 不配等于现在的行为，一模一样。
+       * 因为"这家收不收末帧图"决定了接缝那句话该怎么说 ——
+       * 而这家是谁，正是分级挑出来的。顺序反了就会出现日志里那种自相矛盾：
+       *   第 5 镜标成「连续动作」，把它那张图锁成本镜末帧 —— 两镜之间会是无缝的
+       *   秘塔 metaso 这一步不收末帧图，本镜按普通图生视频出 —— 会是硬切
+       * 前一句是在还不知道厂商是谁的时候许下的承诺，下一句就把它收回去了。
        */
       const tier = tiers.tierOf(shot);
       const tierRoute = tiers.routeFor(tier, settings.get('videoTiers'));
@@ -2431,6 +2451,55 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
         });
       }
 
+      const ctx = await videoContextFor(store.read(projectId), shot, { onEvent, providerId: useProvider });
+      const firstFrame =
+        ctx.headFromTail?.url
+        || usableRef(shot.imageRef)
+        || (await toModelRef(shot.imagePath, { onEvent }));
+      // 设定集参考图一并带上（场景 + 角色 + 道具）：
+      // 支持 r2v 的厂商（Vidu、H3）能靠它把人和环境一起锁住
+      const bibleRefs =
+        settings.get('useReferenceImages') === false
+          ? { images: [], labels: [] }
+          : consistency.collectReferences(project.bible, shot);
+
+      /**
+       * 接住末帧时，**这一镜自己那张分镜图改当参考图**。
+       *
+       * 不这么做的话，那张图就白出了 —— 用户的原话："我生成的分镜图片就没有用了"。
+       * 那张图是花钱出的、审过的、构图和内容都是按分镜定的，
+       * 只是不再当"第一格画面"而已。
+       *
+       * 首帧管的是**接缝**（从哪一帧长出来），参考图管的是**内容**（要演成什么样）。
+       * 两件事本来就不冲突，之前是被我做成了二选一。
+       */
+      if (ctx.headFromTail && shot.imagePath) {
+        try {
+          const own = usableRef(shot.imageRef) || (await toModelRef(shot.imagePath, { onEvent }));
+          if (own && !bibleRefs.images.includes(own)) {
+            // 放在最前面：它比设定集参考图更贴这一镜要演的东西
+            bibleRefs.images.unshift(own);
+            bibleRefs.labels.unshift(`本镜分镜图`);
+            onEvent?.({
+              type: 'note',
+              message: `第 ${shot.index} 镜的分镜图改当参考图带上 —— 首帧接住上一段管接缝，这张管"要演成什么样"，两件事不冲突`
+            });
+          }
+        } catch (err) {
+          onEvent?.({ type: 'note', message: `本镜分镜图当参考图没带上（${err.message}），只影响构图参照，不影响接缝` });
+        }
+      }
+
+      // 上下文：接在谁后面、要交给谁。缺了它，每一镜都会被当成独立短片来演。（上面已经算过）
+      const videoPrompt = ctx.videoPrompt;
+      onEvent?.({ type: 'shot', shotId: shot.id, status: 'running', message: `提交任务：${videoPrompt.slice(0, 60)}…` });
+
+      /**
+       * 按镜头分级挑模型：贵的只用在看得出差别的地方。
+       * 视频这一步是最大的一笔开销，而且按镜计费；空镜、远景、过渡镜
+       * 常占一部片子的三四成，那些地方便宜模型看不出差别。
+       *（tier / useProvider / useModel 在上面就算好了 —— 接缝那句话要靠它。）
+       */
       const video = await adapters.generateVideo({
         providerId: useProvider,
         model: useModel,

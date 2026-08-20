@@ -2121,6 +2121,67 @@ section('学来的图片上限：会过期，而且别乱学');
     metaso?.videoDefaults?.maxImages === 9, String(metaso?.videoDefaults?.maxImages));
 }
 
+section('内联图被拒时：说清楚是体积，而且别学错结论');
+{
+  /**
+   * 用户的实例：秘塔控制台上写着参考素材 `0/9`，而发 4 张就被拒。
+   * 张数远没到上限，被顶掉的是**体积** —— 4 张内联 base64 合计 8.9MB。
+   *
+   * 而厂商在体积超了时给的话往往还是"媒体数量超限"那一套，
+   * 于是我们照字面减张数：4 → 2 → 1，三次上传、每次好几 MB、
+   * 前两次纯属白跑，最后还留下一个错误结论。
+   */
+  const ad = await import('../core/providers/adapters.js');
+  const cat = await import('../core/providers/catalog.js');
+  ad.resetMediaLimits();
+
+  // 一张 1.5MB 的假内联图
+  const big = `data:image/png;base64,${'A'.repeat(1_500_000)}`;
+  const notes = [];
+  let tries = 0;
+  const provider = cat.PROVIDERS.find((p) => p.id === 'metaso');
+
+  // 这家标称 9 张 —— 断言里要用得上，别写死一个数
+  check('秘塔标称收 9 张（所以 4 张被拒不可能是张数问题）',
+    provider.videoDefaults.maxImages === 9, String(provider.videoDefaults.maxImages));
+
+  // send() 先要凭据、再要一个真回 200 的地址 —— 否则连不到 checkBiz 那一步
+  vault.setSecret('METASO_API_KEY', 'ms-test-key');
+  const res = await ad.__submitWithMediaBackoff({
+    providerId: 'metaso',
+    provider,
+    model: 'MiniMax-H3',
+    url: `${upstreamUrl}/api/v1/tasks/submit`,
+    images: [big, big, big],
+    buildBody: (imgs) => ({ content: imgs.map((u) => ({ type: 'image_url', image_url: { url: u } })) }),
+    checkBiz: () => {
+      tries += 1;
+      // 前两次按"媒体数量超限"拒掉，第三次放行 —— 复现用户那条日志
+      if (tries < 3) throw new Error('输入媒体数量超过限制');
+      return { ok: true };
+    },
+    label: '测试',
+    onEvent: (ev) => notes.push(ev.message)
+  }).catch((err) => ({ error: err.message }));
+
+  const joined = notes.join(' | ');
+  check('点明了是内联发的、合计多大', /内联发的/.test(joined) && /MB/.test(joined), joined.slice(0, 220));
+  // 让人以为"这家小气"是最坏的误导 —— 他会去换厂商，而换了照样不行
+  check('点明了远没到张数上限，多半是体积', /远没到上限/.test(joined) && /体积/.test(joined), joined.slice(0, 260));
+  check('给了真正的出路（配对象存储）', /对象存储/.test(joined), joined.slice(0, 260));
+
+  /**
+   * 而且**不能把这个数记下来**。内联时"减到几张才过"量的是体积，
+   * 当成张数上限记住的话，配好对象存储之后本来能发 9 张，
+   * 却因为这条记忆继续只发 1 张 —— 不报任何错，只是"最近出的图不太像"。
+   */
+  check('内联被拒不写进"学来的上限"（那是体积不是张数）',
+    ad.learnedMediaLimit('metaso::https://metaso.cn/api/minimax/v2::MiniMax-H3') === null,
+    String(ad.learnedMediaLimit('metaso::https://metaso.cn/api/minimax/v2::MiniMax-H3')));
+  void res;
+  ad.resetMediaLimits();
+}
+
 section('图片上限按模型问，不是按服务商问');
 {
   /**
@@ -2726,8 +2787,18 @@ section('接缝：不收末帧的厂商上，靠什么把两段连起来');
   check('可灵收末帧', v('kling'));
   check('Vidu 收末帧', v('vidu'));
   check('海螺不收末帧（所以老办法在它上面是空的）', !v('minimax'));
-  check('秘塔不收末帧', !v('metaso'));
   check('百炼不收末帧', !v('dashscope'));
+  /**
+   * 秘塔**是收的** —— 控制台上摆着「起始帧」和「结束帧」两个上传框。
+   *
+   * 目录里原来没写 endFrame，于是「连续动作」在秘塔上整个是空的：
+   * 先说一句"锁成末帧，两镜之间会是无缝的"，紧接着又说"这家不收末帧，会是硬切"。
+   * 两句自相矛盾的话躺在同一份日志里，而用户的控制台截图证明第二句是错的。
+   *
+   * 教训：目录里的一个"没写"，和"明确写了不支持"在代码里是同一回事 ——
+   * 而它会安静地关掉一整条功能。
+   */
+  check('秘塔收末帧（控制台上有起始帧/结束帧两个框）', v('metaso'));
 
   /**
    * 反过来做就不依赖厂商了：等上一段跑完，抠出它**真实的最后一帧**，
@@ -2750,6 +2821,73 @@ section('接缝：不收末帧的厂商上，靠什么把两段连起来');
    */
   check('跨场次不接',
     continuity.shouldChainFromTail({ ...shot, segment: 2 }, prev, 'continuous') === false);
+}
+
+section('节奏：每一段是独立生成的，速度得自己接上');
+{
+  const continuity = await import('../core/pipeline/continuity.js');
+
+  /**
+   * 用户报的：第一段人在慢慢走，第二段突然加速，很莫名其妙。
+   *
+   * 原因是每一段都**独立生成**：模型只看到"这一镜演什么、多长"，
+   * 看不到上一段人是用什么速度走的，于是自己挑一个。
+   * 首帧接住了也救不了 —— 首帧只定住第一格，速度是后面几秒的事。
+   */
+  const prev = { index: 1, description: '陈卫沿走廊缓步向前' };
+  const lines = continuity.continuityLines(
+    { index: 2, description: '陈卫走到门前停下' }, { prev, link: 'continuous' });
+  const joined = lines.join('，');
+  check('连续动作时要求速度接上', /运动速度和上一镜保持一致/.test(joined), joined);
+  check('并且明说不要突然加快或放慢', /突然加快或放慢/.test(joined), joined);
+
+  // 硬切不该管速度 —— 换机位本来就可以换节奏，管了反而绑手绑脚
+  const cutLines = continuity.continuityLines(
+    { index: 2, description: '门被推开' }, { prev, link: 'cut' }).join('，');
+  check('同场换机位不管速度（换机位本来就可以换节奏）', !/运动速度/.test(cutLines), cutLines);
+
+  // 拆分镜那一层也要说：动作量配不上时长才是节奏突变的根
+  const studioSrc = fs.readFileSync(path.join(PROJECT_ROOT, 'core', 'pipeline', 'studio.js'), 'utf8');
+  check('拆分镜时要求动作量配得上时长', /动作量要配得上时长/.test(studioSrc));
+  check('并且给了可照着做的量（走三五步约 3 秒之类）', /正常走三五步/.test(studioSrc));
+}
+
+section('接住末帧时，自己那张分镜图不能白出');
+{
+  /**
+   * 用户的原话："我生成的分镜图片就没有用了"。
+   *
+   * 那张图是花钱出的、审过的、构图和内容都按分镜定的。
+   * 接缝模式下它不再当"第一格画面"，但它该改当**参考图** ——
+   * 首帧管接缝（从哪一帧长出来），参考图管内容（要演成什么样），
+   * 两件事本来就不冲突，之前是被做成了二选一。
+   */
+  const src = fs.readFileSync(path.join(PROJECT_ROOT, 'core', 'pipeline', 'studio.js'), 'utf8');
+  check('接住末帧时把本镜分镜图改当参考图', /本镜分镜图/.test(src));
+  check('而且排在设定集参考图前面（它更贴这一镜要演的东西）',
+    /bibleRefs\.images\.unshift/.test(src));
+  check('带不上时只影响构图，不影响接缝 —— 说清楚了',
+    /只影响构图参照，不影响接缝/.test(src));
+}
+
+section('末帧写法不知道就试，别押一个然后安静失效');
+{
+  const ad = await import('../core/providers/adapters.js');
+  const src = fs.readFileSync(path.join(PROJECT_ROOT, 'core', 'providers', 'adapters.js'), 'utf8');
+
+  /**
+   * 秘塔控制台上摆着「起始帧」「结束帧」两个框，所以它一定收 ——
+   * 但字段名没有公开文档。押一个然后安静失效，正是这条功能一直是空的原因。
+   * 提交参数校验失败**不计费**，所以按可能性排序试一遍是划算的。
+   */
+  check('准备了不止一种末帧写法', /last_frame_image/.test(src) && /content-role/.test(src));
+  check('试通了会记住（同一批后面的镜头不再重试）', /rememberMediaLimit\(shapeKey/.test(src));
+  check('两种都不成时不带末帧兜底，而不是把这一镜废掉',
+    /改成不带末帧发/.test(src) && /lastFrameUrl = null/.test(src));
+  // 接缝做不上是遗憾，但必须说出来 —— 不说的话用户看到的是"标了连续动作但还是跳"
+  check('并且说清楚接缝这次没做上、以及还有哪条路',
+    /接缝那儿会跳一下/.test(src) && /接住真实末帧/.test(src));
+  void ad;
 }
 
 section('接缝：走一遍出视频，看首帧到底发的是哪张');

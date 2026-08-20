@@ -615,6 +615,7 @@ export async function generateVideo({
       prompt,
       signal,
       firstFrameUrl,
+      lastFrameUrl: endFrame,
       refImages,
       duration: actualDuration,
       requestedDuration: duration,
@@ -1153,7 +1154,18 @@ async function submitWithMediaBackoff({ providerId, provider, model, url, images
         ),
         '提交'
       );
-      if (count < images.length) rememberMediaLimit(key, count);
+      /**
+       * 只有走**公网地址**时才把这个数记下来。
+       *
+       * 内联发的时候，"减到几张才过"量的是**体积**不是张数 ——
+       * 把它当张数上限记住，等于用一个错误的结论去限制后面每一镜：
+       * 配好对象存储之后本来能发 9 张，却因为这条记忆继续只发 1 张，
+       * 而且不报任何错，只是"最近出的图不太像"。
+       *
+       * 学错的代价比不学大得多，所以这一条宁可不学。
+       */
+      const wasInline = imgs.some((u) => String(u).startsWith('data:'));
+      if (count < images.length && !wasInline) rememberMediaLimit(key, count);
       return json;
     } catch (err) {
       /**
@@ -1187,9 +1199,34 @@ async function submitWithMediaBackoff({ providerId, provider, model, url, images
           '是别的原因（地址取不到、参数不合法、或者厂商那一下抖了）——按上面这条服务端原话查。';
         throw err;
       }
+      /**
+       * ⚠ 内联图的时候，"图带多了"这句话**多半是假象**。
+       *
+       * 用户的实例：控制台上写着参考素材 `0/9`（也就是最多 9 张），
+       * 而发 4 张就被拒。张数远没到上限，被顶掉的是**体积** ——
+       * 4 张内联 base64 加起来 8.9MB，一个请求体扛不住。
+       *
+       * 而各家在体积超了时给的话往往还是"媒体数量超限"那一套，
+       * 于是我们照着字面减张数：4 → 2 → 1。三次上传、每次好几 MB、
+       * 前两次纯属白跑，最后"成功"了还留下一个错误结论（这家只收 1 张），
+       * 参考图从此少一大半，一致性跟着塌。
+       *
+       * 真正的出路是**别内联**：配上对象存储，图以地址发出去，
+       * 请求体从 8.9MB 掉到几 KB，9 张也塞得下。
+       * 所以这句话必须说清楚是体积，而不是让人以为这家小气。
+       */
+      const inlineBytes = imgs.reduce((n, u) => n + (String(u).startsWith('data:') ? u.length : 0), 0);
+      const mb = inlineBytes / 1048576;
+      const catalogMax = provider.videoDefaults?.maxImages ?? 0;
       onEvent?.({
         type: 'note',
-        message: `服务端嫌图带多了（${count} 张），改成 ${next} 张重试 —— 这次失败是参数校验，没开始出片，不计费`
+        message: inlineBytes > 0
+          ? `服务端拒了这 ${count} 张图（合计 ${mb.toFixed(1)}MB，是内联发的）。`
+            + `${catalogMax >= count ? `这家标称能收 ${catalogMax} 张，${count} 张远没到上限 —— 所以顶掉它的多半是**体积**，不是张数。` : ''}`
+            + `先改成 ${next} 张重试（这次失败是参数校验，没开始出片，不计费）；`
+            + '但真正的解法是「设置 → 对象存储」配一个 —— 配上之后图以地址发出去，'
+            + '请求体从几 MB 掉到几 KB，参考图一张都不用丢。'
+          : `服务端嫌图带多了（${count} 张），改成 ${next} 张重试 —— 这次失败是参数校验，没开始出片，不计费`
       });
       count = next;
     }
@@ -1352,6 +1389,8 @@ async function generateVideoMiniMax({
   prompt,
   signal = null,
   firstFrameUrl,
+  // 末帧。秘塔控制台上那两个框（起始帧 / 结束帧）就是它
+  lastFrameUrl = null,
   refImages,
   images,
   duration,
@@ -1377,19 +1416,59 @@ async function generateVideoMiniMax({
   const vd = provider.videoDefaults || {};
   const createUrl = endpoint(provider, 'videoCreate', '{{baseUrl}}/video_generation');
 
+  /**
+   * 末帧到底怎么带 —— 这一家**没有公开文档说清楚**。
+   *
+   * 已知的事实只有一条：秘塔控制台上摆着「起始帧」和「结束帧」两个上传框，
+   * 所以它一定收。但字段名是哪个，只能试：
+   *
+   *   ① last_frame_image      —— 海螺自家 first_frame_image 的对称写法，最可能
+   *   ② content 里带 role     —— 方舟 Seedance 用的就是这套（first_frame/last_frame）
+   *
+   * 与其押一个然后**安静地失效**（那正是这条功能一直是空的原因），
+   * 不如按可能性排序试一遍。提交参数校验失败**不计费**，
+   * 试错的代价只是一次往返；而押错的代价是这条功能白做。
+   *
+   * 通了就按 服务商+地址+模型 记住，同一批后面的镜头直接用。
+   */
+  const endFrameShapes = [
+    {
+      id: 'last_frame_image',
+      apply: (b, url) => ({ ...b, last_frame_image: url })
+    },
+    {
+      id: 'content-role',
+      apply: (b, url) => ({
+        ...b,
+        content: [
+          ...(b.content || []).map((c, i) =>
+            // 带 role 时首帧也要标出来，否则它会被当成一张普通参考图
+            c.type === 'image_url' && i === 1 ? { ...c, role: 'first_frame' } : c),
+          { type: 'image_url', image_url: { url }, role: 'last_frame' }
+        ]
+      })
+    }
+  ];
+  const shapeKey = `${providerId}::${baseUrlOf(provider)}::${model}::endframe`;
+  let shapeIdx = Number(learnedMediaLimit(shapeKey));
+  if (!Number.isInteger(shapeIdx) || shapeIdx < 0 || shapeIdx >= endFrameShapes.length) shapeIdx = 0;
+
   const buildBody = (imgs) => {
+    let b;
     if (isH3) {
       // H3 是全模态：content[] 里按 type 区分 text / image_url / video_url / audio_url。
       // 官方收到 9 张，中转家常常收得更少 —— 具体几张由下面的退让逻辑试出来。
       const content = [{ type: 'text', text: prompt }];
       for (const url of imgs) content.push({ type: 'image_url', image_url: { url } });
-      const b = { model, content, duration, resolution };
+      b = { model, content, duration, resolution };
       // 中转家（如秘塔）多要一个 ratio 字段，官方 H3 没有
       if (vd.ratio) b.ratio = aspectRatio;
-      return b;
+      return lastFrameUrl ? endFrameShapes[shapeIdx].apply(b, lastFrameUrl) : b;
     }
-    const b = { model, prompt, duration, resolution };
+    b = { model, prompt, duration, resolution };
     if (imgs[0]) b.first_frame_image = imgs[0];
+    // 海螺系：末帧走对称的那个字段名
+    if (lastFrameUrl) b.last_frame_image = lastFrameUrl;
     // S2V 系列用主体参考锁人设，是 Hailuo 这边一致性最好的一条路
     if (refImages.length && /S2V/i.test(model)) {
       b.subject_reference = [{ type: 'character', image_file: refImages[0] }];
@@ -1397,7 +1476,14 @@ async function generateVideoMiniMax({
     return b;
   };
 
-  const created = await submitWithMediaBackoff({
+  /**
+   * 试末帧的写法：第一种不成就换第二种，两种都不成就**不带末帧再发一次**。
+   *
+   * 最后那一步很要紧 —— 接缝做不上是遗憾，为它把整镜废掉是不成比例的。
+   * 而且要说出来：不说的话，用户看到的是"标了连续动作但成片还是跳"，
+   * 却不知道是末帧那一步没成。
+   */
+  const submitOnce = () => submitWithMediaBackoff({
     providerId,
     provider,
     model,
@@ -1408,6 +1494,44 @@ async function generateVideoMiniMax({
     label,
     onEvent
   });
+
+  let created;
+  if (!lastFrameUrl) {
+    created = await submitOnce();
+  } else {
+    let lastErr = null;
+    for (let i = shapeIdx; i < endFrameShapes.length; i += 1) {
+      shapeIdx = i;
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        created = await submitOnce();
+        rememberMediaLimit(shapeKey, i);
+        if (i > 0) {
+          onEvent?.({ type: 'note', message: `末帧按「${endFrameShapes[i].id}」这种写法发通了，同一批后面的镜头直接用这个` });
+        }
+        lastErr = null;
+        break;
+      } catch (err) {
+        lastErr = err;
+        const another = i + 1 < endFrameShapes.length;
+        onEvent?.({
+          type: 'note',
+          message: `末帧按「${endFrameShapes[i].id}」发被拒了（${String(err.message).slice(0, 80)}）。`
+            + (another ? `换「${endFrameShapes[i + 1].id}」再试 —— 参数校验失败不计费` : '两种写法都不成，改成不带末帧发。')
+        });
+      }
+    }
+    if (lastErr) {
+      // 两种都不成：不带末帧兜底，并且说清楚接缝这次没做上
+      lastFrameUrl = null;
+      onEvent?.({
+        type: 'note',
+        message: '这一镜没带上末帧 —— 接缝那儿会跳一下。'
+          + '「设置 → 一致性引擎 → 接缝」保持在「接住真实末帧」的话，下一镜会从这一段的真实末帧接上，照样是连的。'
+      });
+      created = await submitOnce();
+    }
+  }
 
   const taskId = created.task_id || created.data?.task_id;
   if (!taskId) throw new Error(`${label}：提交后没拿到 task_id`);
@@ -1692,3 +1816,5 @@ export function resolvedRouting() {
 export const __isMediaLimitError = isMediaLimitError;
 export const __probeMediaUrl = probeMediaUrl;
 export const __trimInlineImages = trimInlineImages;
+/** 只给自检用：退让那一路的话术出过误导，值得单独验 */
+export const __submitWithMediaBackoff = submitWithMediaBackoff;
