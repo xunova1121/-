@@ -66,7 +66,12 @@ jobs:
           echo "FFMPEG_PATH=$(cat ffpath.txt)" >> "$GITHUB_ENV"
           "$(cat ffpath.txt)" -version | head -1
 
+      # REALCHECK_REQUIRED=1：这里找不到 ffmpeg 就红，不许安静跳过。
+      # 没有这一行的话，上面"装 ffmpeg"那步一旦哪天悄悄失效，
+      # 这个检查会变回空转，而流水线依然一片绿。
       - name: 真 FFmpeg 合成自检
+        env:
+          REALCHECK_REQUIRED: '1'
         run: node scripts/realcheck.mjs
 
       # 把提交号写进文件，跟着源码一起打进包里。

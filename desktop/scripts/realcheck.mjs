@@ -19,8 +19,10 @@
  *     node scripts/realcheck.mjs
  *
  * 找 ffmpeg 的顺序：FFMPEG_PATH 环境变量 → 设置里配的 → PATH。
- * 一个都找不到就**跳过并明说**，退出码 0 —— 没装 FFmpeg 不是代码的错，
- * 但也绝不能假装验过了。
+ *
+ * 一个都找不到时：本机上跳过并明说（退出码 0，没装不是代码的错）；
+ * **CI 里直接红**（设了 REALCHECK_REQUIRED=1）—— 加了一个验证步骤
+ * 而它什么都没验，比没有这个步骤更糟，因为它会让人以为验过了。
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -45,9 +47,25 @@ function locate() {
 
 const bin = locate();
 if (!bin) {
-  console.log('\n没找到 ffmpeg，这一份跳过（不算失败）。');
+  /**
+   * 在自己机器上没装 ffmpeg，跳过是合理的 —— 那不是代码的错。
+   *
+   * 但在**流水线里**，跳过是不能接受的：加了一个验证步骤而它什么都没验，
+   * 比没有这个步骤还糟，因为它会让人以为验过了。
+   *
+   * 这一条是踩出来的：第一版流水线里写着"Windows runner 自带 ffmpeg"，
+   * 而它并不自带。那一步每次都安静地跳过，绿了好几轮。
+   * 所以 CI 里显式要求它必须真跑，跳过就红。
+   */
+  const required = process.env.REALCHECK_REQUIRED === '1';
+  console.log('\n没找到 ffmpeg。');
   console.log('要跑它：装一个 ffmpeg，或者设 FFMPEG_PATH 指向可执行文件。');
-  console.log('⚠ 跳过意味着**转场、补帧、混音这几条真跑起来对不对，这次没有验过**。\n');
+  console.log('⚠ 没跑意味着**转场、补帧、混音这几条真跑起来对不对，这次没有验过**。\n');
+  if (required) {
+    console.log('\x1b[31m这是 CI，跳过不算通过（REALCHECK_REQUIRED=1）\x1b[0m\n');
+    process.exit(1);
+  }
+  console.log('（本机上这不算失败）\n');
   process.exit(0);
 }
 settings.patch({ ffmpegPath: bin });
