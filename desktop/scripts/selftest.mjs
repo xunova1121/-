@@ -3323,6 +3323,32 @@ section('台词绑谁说的');
     ));
   check('音效那条不算有台词，嘴也不该动',
     /不要出现说话口型/.test(consistency.assembleVideoPrompt(fresh2.bible, fresh2.shots[1])));
+
+  /**
+   * ⚠ 画面里一个人都没有时，**这句话一个字都不该出现**。
+   *
+   * 用户问的就是这个：「为什么每一镜都有『画面中的人物不说话』」。
+   * 因为原来这里不看有没有人 —— 空镜（码头夜色、桌上一支钢笔）照样会被加上。
+   *
+   * 三重代价：纯噪音；**会招人**（提示词里出现"人物"，扩散模型很可能真画一个）；
+   * 白吃掉一成多的提示词字数，挤掉"这一镜到底演什么"。
+   * 而空镜在一部片子里占三四成，所以它看起来像"总是"出现。
+   */
+  const empty = { description: '码头的夜色，缆绳垂在水面', characters: [], dialogue: '', motion: '固定' };
+  const emptyPrompt = consistency.assembleVideoPrompt(fresh2.bible, empty);
+  check('空镜不提"人物不说话"（提了反而可能给你画一个人）',
+    !/人物不说话|嘴部保持闭合|说话口型/.test(emptyPrompt), emptyPrompt);
+  check('空镜的画面描述本身还在', /码头的夜色/.test(emptyPrompt), emptyPrompt);
+
+  // 空镜配旁白也一样：旁白是画外音，画面里本来就没人
+  const emptyVO = consistency.assembleVideoPrompt(fresh2.bible,
+    { ...empty, dialogue: '那一夜他没有回头。' });
+  check('空镜 + 旁白同样不提嘴', !/嘴部|口型/.test(emptyVO), emptyVO);
+
+  // 有人就照旧要管住嘴 —— 这一条是上面那个修法最容易改过头的地方
+  const withCast = consistency.assembleVideoPrompt(fresh2.bible,
+    { ...empty, description: '阿澜站在缆绳旁', characters: ['阿澜'] });
+  check('画面里有人时照旧要求闭嘴', /不要出现说话口型/.test(withCast), withCast);
 }
 
 // 音画对不上的最大来源不在模型，在合成这一步：画面的长度是分镜时长，

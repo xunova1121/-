@@ -413,11 +413,35 @@ export function assembleVideoPrompt(
  *   不说"谁在说"     → 画面里两个人，模型随便挑一个张嘴；
  *   不说"说什么"     → 口型和台词对不上（能出声的模型更是直接念错内容）。
  *
+ * 但前提是**画面里有人**。没人的时候这三件事一件都不存在，
+ * 而多说一句"人物不说话"反倒可能给你招来一个人 —— 见函数体里那段。
+ *
  * 旁白是最容易被忽略的一种：它有台词，但**画面里的人不该开口** ——
  * 旧版本一律按"人物在说话"处理，于是每条旁白都配上一个跟着念的哑剧演员。
  */
 function speechLine(bible, shot) {
+  const cast = matchCharacters(bible, shot);
   const said = speaker.spokenText(shot.dialogue);
+
+  /**
+   * ⚠ 画面里一个人都没有时，**什么都别说**。
+   *
+   * 这一条是用户问出来的：「为什么每一镜都有『画面中的人物不说话』这句话」。
+   * 因为原来这里不看有没有人 —— 空镜（码头夜色、桌上一支钢笔）照样会被
+   * 加上"画面中的人物不说话，嘴部保持闭合"。
+   *
+   * 三重代价，一重比一重实在：
+   *
+   *   ① 纯噪音     —— 画面里没有人，这句话不约束任何东西
+   *   ② **会招人** —— 提示词里出现"人物"两个字，扩散模型很可能真给你画一个。
+   *                   一个空镜里凭空多出半个人影，而你完全想不到是这句话干的
+   *   ③ 占字数     —— 视频提示词精准模式只有 200 字，这句 24 字，白吃掉一成多，
+   *                   挤掉的是"这一镜到底演什么"
+   *
+   * 而空镜在一部片子里占三四成 —— 所以它看起来像"总是"出现。
+   */
+  if (!cast.length) return '';
+
   if (said.kind !== 'speech') return '画面中的人物不说话，嘴部保持闭合，不要出现说话口型';
 
   const r = speaker.resolve({ bible }, shot);
@@ -425,7 +449,7 @@ function speechLine(bible, shot) {
 
   // 台词太长会把提示词吃掉一大块，而口型只需要知道说的是什么、有多长
   const line = said.text.length > 26 ? `${said.text.slice(0, 26)}…` : said.text;
-  const others = matchCharacters(bible, shot).filter((c) => c.name !== r.speaker);
+  const others = cast.filter((c) => c.name !== r.speaker);
   return (
     `只有${r.speaker}在说话，口型对上台词「${line}」` +
     (others.length ? `，${others.map((c) => c.name).join('、')}保持沉默不开口` : '')
