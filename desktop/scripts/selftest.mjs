@@ -3310,19 +3310,29 @@ section('台词绑谁说的');
   // ── 嘴要不要动，视频提示词里必须明说 ──
   const silent = consistency.assembleVideoPrompt(fresh2.bible, fresh2.shots[3]);
   const talking = consistency.assembleVideoPrompt(fresh2.bible, fresh2.shots[0]);
-  check('没台词的镜头明确要求不要出现说话口型（否则人物会在那儿瞎说）',
-    /不要出现说话口型/.test(silent), silent.slice(0, 120));
+  /**
+   * 说法必须是**正面的**。
+   *
+   * 原来这句是"人物不说话，嘴部保持闭合，不要出现说话口型"——
+   * 扩散模型对否定句出了名的不灵：它读到的是"说话""口型"这几个词本身，
+   * "不要"那两个字分量小得多。等于在一句要求闭嘴的话里反复塞"说话"。
+   */
+  check('没台词的镜头要求嘴唇闭合（否则人物会在那儿瞎说）',
+    /嘴唇闭合/.test(silent), silent.slice(0, 120));
+  check('而且是正面说法，不出现"说话/口型"这些会往反方向拉的词',
+    !/不说话|说话口型|不要出现/.test(silent), silent.slice(0, 120));
   // 光说"人物在说话"是不够的：画面里两个人，模型会随便挑一个张嘴，
   // 说的内容更是随它发挥 —— 谁在说、说哪句，都得写出来
   check('有台词的镜头写清楚谁在说、说的是哪句',
-    /只有阿澜在说话/.test(talking) && /设备正常/.test(talking) && !/不要出现说话口型/.test(talking),
+    /只有阿澜在说话/.test(talking) && /设备正常/.test(talking) && !/嘴唇闭合，面部安静/.test(talking),
     talking.slice(0, 160));
   check('同框的其他人被要求闭嘴（不然两个人一起张嘴）',
-    /保持沉默不开口/.test(
+    /老周嘴唇闭合/.test(
       consistency.assembleVideoPrompt(fresh2.bible, { ...fresh2.shots[0], characters: ['阿澜', '老周'] })
     ));
   check('音效那条不算有台词，嘴也不该动',
-    /不要出现说话口型/.test(consistency.assembleVideoPrompt(fresh2.bible, fresh2.shots[1])));
+    /嘴唇闭合/.test(consistency.assembleVideoPrompt(fresh2.bible,
+      { ...fresh2.shots[1], characters: ['阿澜'] })));
 
   /**
    * ⚠ 画面里一个人都没有时，**这句话一个字都不该出现**。
@@ -3348,7 +3358,20 @@ section('台词绑谁说的');
   // 有人就照旧要管住嘴 —— 这一条是上面那个修法最容易改过头的地方
   const withCast = consistency.assembleVideoPrompt(fresh2.bible,
     { ...empty, description: '阿澜站在缆绳旁', characters: ['阿澜'] });
-  check('画面里有人时照旧要求闭嘴', /不要出现说话口型/.test(withCast), withCast);
+  check('画面里有人时照旧要求闭嘴', /嘴唇闭合/.test(withCast), withCast);
+
+  /**
+   * ⚠ 还有一个更隐蔽的漏法：**场景名或描述里带了人名**。
+   *
+   * matchCharacters 在 characters 为空时会去扫描描述里的人名 ——
+   * 那对"该注入谁的外貌"是对的，对"画面里有没有人"是错的：
+   * 一个叫「明锋的办公室走廊」的空镜，扫一下命中"明锋"，又判成有人了。
+   *
+   * 分镜表里的 characters 是权威的（拆分镜提示词明写"空镜给空数组"）。
+   */
+  const namedPlace = consistency.assembleVideoPrompt(fresh2.bible,
+    { ...empty, description: '空荡的阿澜办公室走廊', characters: [] });
+  check('场景名里带人名的空镜也不提嘴', !/嘴唇|口型/.test(namedPlace), namedPlace);
 }
 
 // 音画对不上的最大来源不在模型，在合成这一步：画面的长度是分镜时长，
@@ -4739,9 +4762,10 @@ section('全流程：竖屏短剧从剧本到合成');
   check('④ 视频提示词里是这一镜的画面描述，不是泛泛的运镜',
     vTexts.every((t, i) => t.includes((cur.shots[i]?.description || '').slice(0, 6))),
     JSON.stringify(vTexts.map((t) => t.slice(0, 20))));
-  check('④ 没台词的镜头明确要求不要张嘴（不然人物会在那儿瞎说）',
-    cur.shots.every((sh, i) => Boolean(sh.dialogue?.trim()) || /不要出现说话口型/.test(vTexts[i] || '')),
-    JSON.stringify(cur.shots.map((sh, i) => [Boolean(sh.dialogue), /不要出现说话口型/.test(vTexts[i] || '')])));
+  check('④ 没台词、但画面里有人的镜头要求闭嘴（不然人物会在那儿瞎说）',
+    cur.shots.every((sh, i) =>
+      Boolean(sh.dialogue?.trim()) || !(sh.characters || []).length || /嘴唇闭合/.test(vTexts[i] || '')),
+    JSON.stringify(cur.shots.map((sh, i) => [Boolean(sh.dialogue), (sh.characters || []).length, /嘴唇闭合/.test(vTexts[i] || '')])));
 
   // ⑤ 配音。
   // 音色表是**跟着 TTS 服务商走**的，所以先在真实路由（百炼有音色表）下分配音色，

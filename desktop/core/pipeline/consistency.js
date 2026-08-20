@@ -419,8 +419,31 @@ export function assembleVideoPrompt(
  * 旁白是最容易被忽略的一种：它有台词，但**画面里的人不该开口** ——
  * 旧版本一律按"人物在说话"处理，于是每条旁白都配上一个跟着念的哑剧演员。
  */
+/**
+ * 这一镜的画面里**到底有没有人**。
+ *
+ * 和 matchCharacters 不是一回事，区别只在一处、但很要紧：
+ * matchCharacters 在 characters 为空时，会退回去**扫描画面描述里的人名** ——
+ * 那对"该注入谁的外貌"是对的（描述里写了"李队"就该带上他的设定），
+ * 对"画面里有没有人"却是**错的**：
+ *
+ *     场景名叫「明锋的办公室走廊」，而这一镜是个空走廊。
+ *     扫描一命中"明锋"，就又判成"画面里有人"了。
+ *
+ * 分镜表里的 characters 是权威的 —— 拆分镜的提示词明写着"空镜给空数组"。
+ * 明确给了空数组就信它。只有**老项目**（压根没有这个字段）才退回扫描。
+ */
+function castInFrame(bible, shot) {
+  if (Array.isArray(shot?.characters)) {
+    return shot.characters
+      .map((n) => (bible?.characters || []).find((c) => c.name === n))
+      .filter(Boolean);
+  }
+  return matchCharacters(bible, shot);
+}
+
 function speechLine(bible, shot) {
-  const cast = matchCharacters(bible, shot);
+  const cast = castInFrame(bible, shot);
   const said = speaker.spokenText(shot.dialogue);
 
   /**
@@ -442,17 +465,36 @@ function speechLine(bible, shot) {
    */
   if (!cast.length) return '';
 
-  if (said.kind !== 'speech') return '画面中的人物不说话，嘴部保持闭合，不要出现说话口型';
+  /**
+   * ── 为什么改成正面说法 ──
+   *
+   * 原来这句是"画面中的人物不说话，嘴部保持闭合，**不要出现说话口型**"。
+   * 扩散模型对否定句是出了名的不灵：它读到的是"说话""口型"这几个词本身，
+   * "不要"那两个字的分量小得多。等于在一句要求闭嘴的话里，
+   * 反复把"说话"这个概念塞给它。
+   *
+   * 所以整句改成只描述**想要的状态**：嘴唇闭合、面部安静。
+   * 一个"不"字都不出现，也不出现"说话""口型"这些会往反方向拉的词。
+   *
+   * ⚠ 这一条是基于"否定式提示词效果差"这个通行经验做的判断，
+   * 我没有在真厂商上做过 A/B。要是你发现改完之后人物反而开始张嘴，
+   * 那就是这个判断错了，回去用否定式 —— 这种事只有真出片才分得出来。
+   */
+  if (said.kind !== 'speech') {
+    return cast.length > 1 ? '所有人嘴唇闭合，面部安静' : '嘴唇闭合，面部安静';
+  }
 
   const r = speaker.resolve({ bible }, shot);
-  if (!r.speaker) return '画外旁白，画面中的人物不说话，嘴部保持闭合';
+  // 旁白：有台词，但声音来自画外，画面里的人照样闭嘴
+  if (!r.speaker) return '画外旁白，声音来自画外，画面中的人嘴唇闭合';
 
   // 台词太长会把提示词吃掉一大块，而口型只需要知道说的是什么、有多长
   const line = said.text.length > 26 ? `${said.text.slice(0, 26)}…` : said.text;
   const others = cast.filter((c) => c.name !== r.speaker);
   return (
     `只有${r.speaker}在说话，口型对上台词「${line}」` +
-    (others.length ? `，${others.map((c) => c.name).join('、')}保持沉默不开口` : '')
+    // 这半句是正面说法：说的是别人该是什么样，而不是"不要张嘴"
+    (others.length ? `，${others.map((c) => c.name).join('、')}嘴唇闭合` : '')
   );
 }
 
