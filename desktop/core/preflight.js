@@ -11,6 +11,9 @@ import * as settings from './settings.js';
 import * as adapters from './providers/adapters.js';
 import { getProvider } from './providers/catalog.js';
 import { send, baseUrlOf, interpolate, diagnose, credentialStatus } from './providers/index.js';
+import * as ffmpegLib from './ffmpeg.js';
+import * as oss from './oss.js';
+import { authHeadersFor } from './providers/index.js';
 
 /** 64×64 的小图：暖底加一个冷蓝圆。视觉模型要能明确描述它，才算真的看懂了图。 */
 const TEST_IMAGE =
@@ -56,6 +59,37 @@ export const CHECKS = [
     cost: '极低',
     note: '合成四个字',
     defaultOn: false
+  },
+  {
+    id: 'sfx',
+    label: '音效',
+    capability: 'sfx',
+    cost: '极低',
+    note: '生成一秒钟的敲门声。没配音效服务商就跳过（那是个正经选择，不是错）',
+    defaultOn: false
+  },
+  /**
+   * 下面两条不调任何模型，也不花一分钱，所以默认就开。
+   *
+   * 它们补的是"路由体检"一直没管的那半边：**本机环境**。
+   * 密钥全对、模型全通，最后照样出不来片子 —— 因为没装 FFmpeg，
+   * 或者对象存储的签名不对。这两件事以前只能等跑到最后一步才发现。
+   */
+  {
+    id: 'ffmpeg',
+    label: '本机 FFmpeg',
+    capability: null,
+    cost: '免费',
+    note: '合成、裁剪、抠帧、烧字幕全靠它。顺带查转场和补帧要用的那几个滤镜在不在',
+    defaultOn: true
+  },
+  {
+    id: 'oss',
+    label: '对象存储',
+    capability: null,
+    cost: '免费',
+    note: '真的写一个小文件、读回来、再删掉 —— 签名对不对只有这么试才知道。没配就跳过',
+    defaultOn: true
   }
 ];
 
@@ -64,11 +98,16 @@ const ROUTE_KEYS = {
   vision: ['visionProvider', 'visionModel'],
   t2i: ['imageProvider', 'imageModel'],
   i2v: ['videoProvider', 'videoModel'],
-  tts: ['ttsProvider', 'ttsModel']
+  tts: ['ttsProvider', 'ttsModel'],
+  sfx: ['sfxProvider', 'sfxModel'],
+  // 这两条不走服务商路由 —— 它们查的是本机环境
+  ffmpeg: [null, null],
+  oss: [null, null]
 };
 
 function route(checkId) {
-  const [pk, mk] = ROUTE_KEYS[checkId];
+  const [pk, mk] = ROUTE_KEYS[checkId] || [null, null];
+  if (!pk) return { providerId: null, model: null, local: true };
   const s = settings.all();
   return { providerId: s[pk], model: s[mk] };
 }
@@ -191,11 +230,13 @@ export async function probeCandidates(providerId, onEvent) {
 }
 
 async function runOne(checkId, ctx, onEvent) {
-  const { providerId, model } = route(checkId);
+  const { providerId, model, local } = route(checkId);
   const provider = getProvider(providerId);
   const started = Date.now();
 
-  const base = { id: checkId, provider: providerId, providerName: provider?.name || providerId, model };
+  const base = local
+    ? { id: checkId, provider: '本机', providerName: '本机', model: '' }
+    : { id: checkId, provider: providerId, providerName: provider?.name || providerId, model };
   onEvent?.({ type: 'check', status: 'running', ...base });
 
   const finish = (status, extra = {}) => {
@@ -203,6 +244,28 @@ async function runOne(checkId, ctx, onEvent) {
     onEvent?.(result);
     return result;
   };
+
+  /**
+   * 本机那两条不查密钥、不查模型 —— 它们和服务商无关。
+   * 分流放在最前面，否则会被下面"缺凭据"那道拦下来，
+   * 报一个和实际问题毫不相干的原因。
+   */
+  if (local) {
+    if (checkId === 'ffmpeg') return await checkFfmpeg(finish);
+    if (checkId === 'oss') return await checkOss(finish);
+    return finish('skip', { message: `未知的本机检查：${checkId}` });
+  }
+
+  /**
+   * 音效没配 = **不做音效**，这是个正经选择，不是错。
+   * 报成 fail 会让人以为流水线坏了，然后去配一个他本来就不想要的东西。
+   */
+  if (checkId === 'sfx' && !providerId) {
+    return finish('skip', {
+      message: '没配音效服务商 —— 这一步会跳过，分镜里写的「画外音效」不会变成声音',
+      hint: '要音效的话去「设置 → 能力路由 → 音效」选一家。故意不回退到配音模型：那会念出"敲门声"三个字'
+    });
+  }
 
   if (!provider) return finish('fail', { message: `设置里指向了一个不存在的服务商：${providerId}` });
 
@@ -306,12 +369,126 @@ async function runOne(checkId, ctx, onEvent) {
         return finish('fail', { message: '配音接口没有返回可用结果' });
       }
 
+      case 'sfx': {
+        const sfx = await adapters.generateSfx({
+          providerId, model, text: '木门被敲三下', seconds: 1, label: '体检·音效'
+        });
+        if (sfx.url) return finish('ok', { detail: '音效生成成功，已拿到音频 URL' });
+        if (sfx.binaryRequest) {
+          const r = await fetch(sfx.binaryRequest.url, {
+            method: sfx.binaryRequest.method,
+            headers: { 'Content-Type': 'application/json', ...authHeadersFor(sfx.binaryRequest.provider) },
+            body: JSON.stringify(sfx.binaryRequest.body),
+            signal: AbortSignal.timeout(60000)
+          });
+          if (!r.ok) {
+            return finish('fail', {
+              message: `音效接口返回 HTTP ${r.status}：${(await r.text()).slice(0, 160)}`,
+              hint: hintFor(r, provider)
+            });
+          }
+          const bytes = (await r.arrayBuffer()).byteLength;
+          // 回了 200 但只有几十字节，多半是一段错误 JSON 被当成音频 —— 那不算通过
+          if (bytes < 500) return finish('warn', { message: `只回了 ${bytes} 字节，不像一段音频` });
+          return finish('ok', { detail: `音效生成成功（${(bytes / 1024).toFixed(0)}KB）` });
+        }
+        return finish('fail', { message: '音效接口没有返回可用结果' });
+      }
+
       default:
         return finish('skip', { message: `未知检查项：${checkId}` });
     }
   } catch (err) {
     return finish('fail', { message: err.message, hint: hintForError(err.message, provider) });
   }
+}
+
+/**
+ * 本机 FFmpeg 到底行不行。
+ *
+ * 不只看"找不找得到" —— 找到了但版本太老，一样出不来片子，
+ * 而那时候的报错是 `No such filter: 'xfade'`，出现在跑完整条流水线之后，
+ * 图和视频的钱都已经花了。这几个滤镜各管一件事，缺哪个就说清楚缺了会怎样。
+ */
+async function checkFfmpeg(finish) {
+  const bin = ffmpegLib.locate({ refresh: true });
+  if (!bin.available) {
+    return finish('fail', { message: '没装 FFmpeg，最后一步合成会做不了', hint: bin.hint });
+  }
+
+  const need = [
+    ['xfade', '叠化转场做不了，会退回硬切'],
+    ['fade', '黑场转场做不了'],
+    ['tpad', '厂商给的片段比分镜短时补不齐 —— 成片会比时间轴短，配音和字幕跟着全体错位'],
+    ['apad', '补出来那截没音轨，拼接时整条音轨可能从那儿断掉'],
+    ['adelay', '配音没法按时间点摆，只能顺次拼 —— 那样音画必然错位'],
+    ['amix', '配音和音效混不到一起'],
+    ['volume', '音效压不低，一声关门就能盖掉一句台词'],
+    ['subtitles', '字幕烧不进画面（只出 .srt 不受影响）']
+  ];
+
+  let filters = '';
+  try {
+    const r = await ffmpegLib.run(['-hide_banner', '-filters']);
+    filters = r.stderr || '';
+    // -filters 走的是 stdout，run() 只收 stderr，所以这条多半读不到 —— 下面兜底
+  } catch {
+    /* 下面用另一种办法 */
+  }
+  if (!/xfade/.test(filters)) {
+    // 直接问某一个滤镜在不在：`-h filter=xxx` 找不到时会明说
+    const has = async (name) => {
+      try {
+        const r = await ffmpegLib.run(['-hide_banner', '-h', `filter=${name}`]);
+        return !/Unknown filter|No such filter/i.test(r.stderr || '');
+      } catch (err) {
+        return !/Unknown filter|No such filter/i.test(err.message || '');
+      }
+    };
+    const missing = [];
+    for (const [name, why] of need) {
+      // eslint-disable-next-line no-await-in-loop
+      if (!(await has(name))) missing.push(`${name}（${why}）`);
+    }
+    if (missing.length) {
+      return finish('warn', {
+        message: `FFmpeg 能用，但缺 ${missing.length} 个滤镜：${missing.join('；')}`,
+        hint: '换一个完整版 FFmpeg（官方 release 构建都带这些）。精简版和某些发行版自带的会裁掉滤镜。'
+      });
+    }
+  }
+  return finish('ok', { detail: `${bin.version}（转场、补帧、混音要用的滤镜都在）` });
+}
+
+/**
+ * 对象存储真的能写能读吗。
+ *
+ * 签名算法只有**真发一次**才知道对不对 —— 自己写的校验代码用的是同一份
+ * 理解，验来验去只是把同一个误解验两遍。所以这里走真流程：
+ * 写一个小文件 → 读回来比对 → 删掉。
+ *
+ * 这一步免费（几个字节的读写），但它挡住的是最贵的一类失败：
+ * 出完几十张图之后，视频那步才发现参考图地址厂商取不到。
+ */
+async function checkOss(finish) {
+  if (!oss.ready()) {
+    return finish('skip', {
+      message: '没配对象存储 —— 参考图会以内联 base64 发出去',
+      hint: '多数厂商吃得下内联图，但百炼那几个只认公网地址的接口会卡住；' +
+        '而且九张参考图内联发就是几十 MB，容易超时。要用的话去「设置 → 对象存储」配。'
+    });
+  }
+  const r = await oss.probe();
+  const done = (r.steps || []).map((x) => x.name || x).join(' → ');
+  if (!r.ok) {
+    return finish('fail', {
+      message: `对象存储不通：${r.error || '未说明'}`,
+      detail: done ? `走到：${done}` : '',
+      hint: '签名版本、地域节点（endpoint）、Bucket 名字、RAM 权限，这四样最容易错。' +
+        '报错原文里通常已经点名了是哪一样。'
+    });
+  }
+  return finish('ok', { detail: `写→读→删三步都通${done ? `（${done}）` : ''}` });
 }
 
 /** 针对状态码给一句"下一步该做什么"，而不是只说哪里错了 */

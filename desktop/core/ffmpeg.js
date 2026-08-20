@@ -316,12 +316,30 @@ async function buildTransitions({
         const from = Math.max(0, info[i].seconds - TRANS.DISSOLVE);
         const xa = ['-y', '-ss', from.toFixed(3), '-t', String(TRANS.DISSOLVE), '-i', clips[i],
           '-t', String(TRANS.DISSOLVE), '-i', clips[i + 1]];
-        if (anyAudio) xa.push('-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100', '-shortest');
+        /**
+         * ⚠ 这里的静音必须**给定长度**，而且输出还要再 `-t` 卡一次。
+         *
+         * 原来写的是无限长的 anullsrc + `-shortest`，想当然以为
+         * `-shortest` 会按最短的那条（0.5 秒的画面）收尾。**它没有** ——
+         * 真跑出来这一小段是 1.0 秒，整整多了一倍。
+         *
+         * 后果不是"多半秒"这么简单：叠化本该让全片**变短** 0.5 秒，
+         * 而这个 bug 让它反而**变长** 0.5 秒。时间轴（timelineOf）按变短算，
+         * 于是从这处叠化往后，配音和字幕全体错位 1 秒。
+         *
+         * 而这个错单元测试一个都抓不到 —— 参数拼得完全"正确"，
+         * 只有真的跑一遍 FFmpeg 再去量出来的时长，才看得见。
+         */
+        if (anyAudio) {
+          xa.push('-f', 'lavfi', '-i', `anullsrc=channel_layout=stereo:sample_rate=44100:d=${TRANS.DISSOLVE}`);
+        }
         xa.push(
           '-filter_complex',
           `[0:v][1:v]xfade=transition=fade:duration=${TRANS.DISSOLVE}:offset=0[v]`,
           '-map', '[v]',
           ...(anyAudio ? ['-map', '2:a', '-c:a', 'aac'] : ['-an']),
+          // 输出侧再钉一次长度。不靠 -shortest：它在"输出来自滤镜图"时不可靠
+          '-t', String(TRANS.DISSOLVE),
           '-c:v', 'libx264', '-preset', 'veryfast', x
         );
         await exec(xa, { onProgress });
@@ -471,8 +489,21 @@ export async function concat(
      */
     const vcodec = recode ? ['-c:v', 'libx264', '-preset', 'veryfast'] : ['-c:v', 'copy'];
     if (track && fs.existsSync(track)) {
-      // 音频统一转 AAC（各家出的容器不一定一致）
-      args.push('-i', track, ...vcodec, '-c:a', 'aac', '-map', '0:v:0', '-map', '1:a:0', '-shortest');
+      /**
+       * ⚠ `-shortest` 会**按最短的那条流收尾**，而音轨常常比画面短 ——
+       * 最后一句台词往往在片子结束前就念完了。
+       *
+       * 结果是**成片被砍掉结尾**：一部 11.5 秒的片子，配音只到第 7 秒，
+       * 出来的成片就只有 7 秒。后面四秒半的画面凭空消失，
+       * 而合成这一步是"成功"的，没有任何报错。
+       *
+       * 这个坑在真跑一遍之前完全看不出来 —— 参数看着天经地义。
+       *
+       * apad 把音轨用静音补到无限长，`-shortest` 于是按**画面**收尾，
+       * 这才是这两个参数该有的配合方式。
+       */
+      args.push('-i', track, ...vcodec, '-c:a', 'aac', '-map', '0:v:0', '-map', '1:a:0',
+        '-af', 'apad', '-shortest');
     } else if (recode) {
       args.push(...vcodec, '-c:a', 'aac');
     } else {

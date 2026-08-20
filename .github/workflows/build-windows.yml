@@ -40,6 +40,17 @@ jobs:
       - name: 自检（不联外网，全部打桩）
         run: node scripts/selftest.mjs
 
+      # 真 FFmpeg 走一遍合成。
+      #
+      # 这一步补的是自检补不了的洞：自检验的是"参数拼得对不对"，
+      # 而真跑一遍才能发现"命令全都成功、片子却不对"那一类 ——
+      # 加这一步的当天就抓出两个：叠化那一小段长了一倍（时间轴全体错位），
+      # 以及配音比画面短时**成片结尾被砍掉**。两个都躲过了一千多项自检。
+      #
+      # Windows runner 自带 ffmpeg，直接用。
+      - name: 真 FFmpeg 合成自检
+        run: node scripts/realcheck.mjs
+
       # 把提交号写进文件，跟着源码一起打进包里。
       #
       # 这里不能用环境变量：electron-builder 把源码打进 asar，

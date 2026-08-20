@@ -17,7 +17,9 @@
     "mcheck": "node scripts/mcheck.mjs",
     "smoke": "electron . --smoke",
     "icon": "node scripts/make-icon.mjs",
-    "build:win": "electron-builder --win nsis portable"
+    "build:win": "electron-builder --win nsis portable",
+    "realcheck": "node scripts/realcheck.mjs",
+    "doctor": "node scripts/doctor.mjs"
   },
   "devDependencies": {
     "electron": "^31.0.0",
@@ -26,14 +28,33 @@
   "build": {
     "appId": "com.futuredream.studio",
     "productName": "未来创梦",
-    "files": ["electron/**", "core/**", "ui/**", "package.json"],
-    "extraResources": [{ "from": "bin", "to": "bin", "filter": ["**/*"] }],
+    "files": [
+      "electron/**",
+      "core/**",
+      "ui/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "bin",
+        "to": "bin",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "build/icon.ico"
     },
     "compression": "maximum",
-    "electronLanguages": ["zh-CN", "en-US"],
+    "electronLanguages": [
+      "zh-CN",
+      "en-US"
+    ],
     "nsis": {
       "oneClick": false,
       "perMachine": false,

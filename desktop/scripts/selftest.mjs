@@ -5793,9 +5793,59 @@ section('对象存储：接线');
   const ref = await studioMod.toModelRef(dest2, {});
   check('参考图走公网地址，不再退回 base64', /^http/.test(ref), ref.slice(0, 60));
 
+  /**
+   * 体检里的对象存储那一条，走的必须是**真写真读真删**这条路。
+   *
+   * 一把只读的 key 在"能不能连上"里表现完全正常 —— 直到出完几十张图，
+   * 视频那步才发现参考图传不上去。所以体检不能只 ping 一下。
+   */
+  const pf = await import('../core/preflight.js');
+  const ossOk = await pf.run({ include: ['oss'] }, () => {});
+  check('体检里的对象存储真的写读删了一遍', ossOk[0]?.status === 'ok', JSON.stringify(ossOk[0]));
+
+  failNext = true;
+  const ossBad = await pf.run({ include: ['oss'] }, () => {});
+  check('没权限时体检报不通，而不是报通过', ossBad[0]?.status === 'fail', JSON.stringify(ossBad[0]));
+  check('并且给了下一步该查什么', /签名版本|地域|Bucket|RAM/.test(ossBad[0]?.hint || ''), ossBad[0]?.hint);
+  failNext = false;
+
   settings.patch({ oss: {} });
   delete process.env.FUTUREDREAM_OSS_ENDPOINT;
+
+  // 没配对象存储是**跳过**，不是失败 —— 不配是个正经选择，参考图会内联发
+  const ossSkip = await pf.run({ include: ['oss'] }, () => {});
+  check('没配对象存储时是跳过不是失败', ossSkip[0]?.status === 'skip', JSON.stringify(ossSkip[0]));
+
   stub.close();
+}
+
+section('体检：本机环境那两条');
+{
+  const pf = await import('../core/preflight.js');
+
+  // 这两条不调任何模型、不花一分钱，所以默认就开
+  const ff = pf.CHECKS.find((c) => c.id === 'ffmpeg');
+  const os2 = pf.CHECKS.find((c) => c.id === 'oss');
+  check('本机 FFmpeg 是一条体检项', Boolean(ff) && ff.defaultOn === true);
+  check('对象存储是一条体检项', Boolean(os2) && os2.defaultOn === true);
+  check('两条都标着免费', ff.cost === '免费' && os2.cost === '免费');
+
+  /**
+   * 没装 FFmpeg 要报**不通**，而且提示里得说清楚去哪儿放那个文件。
+   * 这一条以前只有跑到最后一步合成时才会发现 —— 而那时候
+   * 图和视频的钱都已经花完了。
+   */
+  const saved = settings.get('ffmpegPath');
+  settings.patch({ ffmpegPath: path.join(SANDBOX, '压根不存在的ffmpeg') });
+  const r = await pf.run({ include: ['ffmpeg'] }, () => {});
+  check('没装 FFmpeg 时体检报不通', r[0]?.status === 'fail', JSON.stringify(r[0]));
+  check('并且告诉你把文件放哪儿', /bin|winget|完整路径/.test(r[0]?.hint || ''), (r[0]?.hint || '').slice(0, 80));
+  settings.patch({ ffmpegPath: saved || '' });
+
+  // 音效没配是跳过 —— 那是个正经选择，报成 fail 会让人以为流水线坏了
+  const sfxR = await pf.run({ include: ['sfx'] }, () => {});
+  check('没配音效服务商时是跳过', sfxR[0]?.status === 'skip', JSON.stringify(sfxR[0]));
+  check('并且说明了跳过的后果', /不会变成声音/.test(sfxR[0]?.message || ''), sfxR[0]?.message);
 }
 
 section('三端对齐：谁该有什么功能');
