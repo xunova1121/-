@@ -1094,38 +1094,55 @@ function isMediaLimitError(message) {
 /**
  * 把几个公网地址下下来，变成内联图。
  *
- * 拉不到、或者加起来太大，就回 null —— 调用方据此决定还要不要绕这个弯。
+ * 回 `{ images }` 表示绕得过去；回 `{ failedUrl }` 表示绕不过去，
+ * 而且**指名是哪一张**卡住的 —— 调用方要拿它去做诊断（见下面为什么）。
+ *
  * 太大的话绕过去也是白绕：内联几十 MB 只会换来一次超时（见 trimInlineImages）。
  */
 async function inlineFromUrls(urls, onEvent) {
   const list = (urls || []).filter((u) => /^https?:/i.test(String(u)));
-  if (!list.length) return null;
+  if (!list.length) return { failedUrl: null };
 
   const out = [];
   let total = 0;
-  for (const u of list) {
+  for (const [i, u] of list.entries()) {
+    let res;
     try {
       // eslint-disable-next-line no-await-in-loop
-      const res = await fetch(u, { signal: AbortSignal.timeout(30000) });
-      if (!res.ok) return null;
-      // eslint-disable-next-line no-await-in-loop
-      const buf = Buffer.from(await res.arrayBuffer());
-      const type = res.headers.get('content-type') || 'image/png';
-      total += Math.ceil((buf.length * 4) / 3);
-      if (total > INLINE_BUDGET) {
-        onEvent?.({
-          type: 'note',
-          message: `想改成内联图绕过去，但这几张加起来超过 ${(INLINE_BUDGET / 1048576).toFixed(0)}MB，内联发只会换来一次超时 —— 不绕了`
-        });
-        return null;
-      }
-      out.push(`data:${type};base64,${buf.toString('base64')}`);
-    } catch {
-      return null;
+      res = await fetch(u, { signal: AbortSignal.timeout(30000) });
+    } catch (err) {
+      /**
+       * 这一句以前是没有的 —— 拉不到就默默回 null，然后走去报原来那个错。
+       *
+       * 而那条路会生成一句**和事实相反**的话：诊断只探 images[0]，
+       * 所以第 1 张好、第 3 张坏的时候，用户读到的是"我们这边拉得到，
+       * 是厂商够不着"。他会照着这句去查跨境、查 CDN、甚至重建对象存储桶，
+       * 而真正坏掉的是第 3 张图。
+       *
+       * 指名道姓说是第几张，比"拉不到"三个字值钱得多。
+       */
+      onEvent?.({ type: 'note', message: `想改成内联图绕过去，但第 ${i + 1} 张我们自己也下不下来（${err.message}）—— 这条路走不通` });
+      return { failedUrl: u };
     }
+    if (!res.ok) {
+      onEvent?.({ type: 'note', message: `想改成内联图绕过去，但第 ${i + 1} 张我们自己也下不下来（HTTP ${res.status}）—— 这条路走不通` });
+      return { failedUrl: u };
+    }
+    // eslint-disable-next-line no-await-in-loop
+    const buf = Buffer.from(await res.arrayBuffer());
+    const type = res.headers.get('content-type') || 'image/png';
+    total += Math.ceil((buf.length * 4) / 3);
+    if (total > INLINE_BUDGET) {
+      onEvent?.({
+        type: 'note',
+        message: `想改成内联图绕过去，但这几张加起来超过 ${(INLINE_BUDGET / 1048576).toFixed(0)}MB，内联发只会换来一次超时 —— 不绕了`
+      });
+      return { failedUrl: null };
+    }
+    out.push(`data:${type};base64,${buf.toString('base64')}`);
   }
   onEvent?.({ type: 'note', message: `厂商拉不到我们的地址，改把图下下来内联发（共 ${out.length} 张，${(total / 1048576).toFixed(1)}MB）` });
-  return out;
+  return { images: out };
 }
 
 async function probeMediaUrl(url) {
@@ -1205,7 +1222,7 @@ async function submitWithMediaBackoff({ providerId, provider, model, url, images
   const reachKey = `${providerId}::${baseUrlOf(provider)}::urls`;
   if (urlUnreachable(reachKey) && images.some((u) => /^https?:/i.test(String(u)))) {
     const pre = await inlineFromUrls(images, onEvent);
-    if (pre) images = pre;
+    if (pre.images) images = pre.images;
   }
   /**
    * 学来的上限按 服务商 + 地址 + **模型** 记。
@@ -1277,11 +1294,11 @@ async function submitWithMediaBackoff({ providerId, provider, model, url, images
          * **长期的解法**说出来，否则每一镜都要多跑一趟这个弯路。
          */
         const inlined = await inlineFromUrls(imgs, onEvent);
-        if (inlined) {
+        if (inlined.images) {
           try {
             const json = checkBiz(
               await send(
-                { provider: providerId, label: `${label}·提交（改内联图）`, method: 'POST', url, body: buildBody(inlined), timeoutMs: 120000 },
+                { provider: providerId, label: `${label}·提交（改内联图）`, method: 'POST', url, body: buildBody(inlined.images), timeoutMs: 120000 },
                 onEvent
               ),
               '提交'
@@ -1300,7 +1317,14 @@ async function submitWithMediaBackoff({ providerId, provider, model, url, images
           }
         }
 
-        const verdict = await probeMediaUrl(images[0]);
+        /**
+         * 诊断要探**真正卡住的那一张**，不是永远探第 1 张。
+         *
+         * 上面拉的时候已经知道是第几张坏了。这时候还去探 images[0]，
+         * 就会在第 1 张好、第 3 张坏的情况下输出"我们这边拉得到，是厂商够不着" ——
+         * 一句和事实相反的话，会把人送去查跨境和 CDN，而坏的是第 3 张图。
+         */
+        const verdict = await probeMediaUrl(inlined.failedUrl || images[0]);
         err.message = `${err.message}\n\n我们替你查了一下：${verdict}`;
         throw err;
       }

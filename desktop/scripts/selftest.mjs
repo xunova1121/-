@@ -2211,6 +2211,35 @@ section('厂商拉不到我们的桶：先绕过去，再讲道理');
   }).catch((err) => ({ error: err.message }));
   check('我们自己也拉不到时，不硬绕，照实报', /我们这边也拉不到/.test(dead.error || ''), (dead.error || '').slice(0, 120));
 
+  /**
+   * 最阴的一种：**第 1 张好、第 3 张坏**。
+   *
+   * 诊断那一步原来永远探 images[0]，于是它会输出"我们这边拉得到 ——
+   * 是厂商那边够不着"。这句话和事实正好相反：真正坏掉的是第 3 张图，
+   * 而用户会照着这句去查跨境、查 CDN、甚至去重建对象存储桶。
+   *
+   * 一句指错方向的诊断比没有诊断更贵 —— 它会让人花几个小时在错的地方。
+   */
+  ad.resetMediaLimits();
+  const mixedNotes = [];
+  const mixed = await ad.__submitWithMediaBackoff({
+    providerId: 'metaso',
+    provider,
+    model: 'MiniMax-H3',
+    url: `${upstreamUrl}/api/v1/tasks/submit`,
+    images: [reachable, reachable, 'http://127.0.0.1:1/broken.png'],
+    buildBody: (imgs) => ({ imgs }),
+    checkBiz: () => { throw new Error('cannot download media URL (2013)'); },
+    label: '测试',
+    onEvent: (ev) => mixedNotes.push(ev.message)
+  }).catch((err) => ({ error: err.message }));
+
+  check('坏的不是第一张时，点名是第几张', /第 3 张/.test(mixedNotes.join(' | ')), mixedNotes.join(' | ').slice(0, 160));
+  // 这条才是要害：诊断必须去探真正坏掉的那张，否则它会说出相反的话
+  check('诊断探的是真正坏掉的那张，不是永远探第一张',
+    /我们这边也拉不到/.test(mixed.error || '') && !/厂商那边够不着/.test(mixed.error || ''),
+    (mixed.error || '').slice(0, 160));
+
   ad.resetMediaLimits();
 }
 
