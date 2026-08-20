@@ -2144,7 +2144,8 @@ async function videoContextFor(project, shot, { onEvent, providerId = null } = {
    * 又说一句"会是硬切"。两句话同时躺在日志里，前一句是在还不知道厂商是谁的
    * 时候许下的 —— 这不只是话难看：用户会以为接缝做上了，直到看成片才发现没有。
    *
-   * 收末帧的只有方舟、可灵、Vidu；海螺、秘塔、百炼、Sora 都不收。
+   * 收不收由 catalog 里的 videoDefaults.endFrame 说了算，别在这儿写死名单 ——
+   * 上一版这里写着"秘塔不收"，而用户的控制台截图上明明白白有首尾帧两栏。
    */
   const provider = providerId ? catalog.getProvider(providerId) : null;
   const takesEndFrame = provider ? Boolean(provider.videoDefaults?.endFrame) : true;
