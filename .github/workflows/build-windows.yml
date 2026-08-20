@@ -47,7 +47,25 @@ jobs:
       # 加这一步的当天就抓出两个：叠化那一小段长了一倍（时间轴全体错位），
       # 以及配音比画面短时**成片结尾被砍掉**。两个都躲过了一千多项自检。
       #
-      # Windows runner 自带 ffmpeg，直接用。
+      # ⚠ Windows runner **不自带 ffmpeg**。
+      # 第一版这里写着"runner 自带，直接用"，结果这一步每次都安静地跳过 ——
+      # 加了一个验证步骤，而它什么都没验。幸好脚本在跳过时会大声说一句
+      # "这次没有验过"，不然就是一个看着绿、其实空转的检查。
+      #
+      # 装到临时目录而不是 desktop/node_modules：那个 80MB 的二进制
+      # 不该被 electron-builder 打进安装包里。
+      - name: 装一个真 FFmpeg（临时目录）
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ffbin"
+          cd "$RUNNER_TEMP/ffbin"
+          npm init -y >/dev/null
+          npm install ffmpeg-static >/dev/null
+          node -e "console.log(require('ffmpeg-static'))" > ffpath.txt
+          echo "FFMPEG_PATH=$(cat ffpath.txt)" >> "$GITHUB_ENV"
+          "$(cat ffpath.txt)" -version | head -1
+
       - name: 真 FFmpeg 合成自检
         run: node scripts/realcheck.mjs
 

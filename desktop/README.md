@@ -121,7 +121,7 @@ npm run build:win    # 出安装包和免安装版，产物在 dist\
 | 命令 | 验什么 | 花钱吗 | 谁跑 |
 |---|---|---|---|
 | `npm run selftest` | **逻辑**。全程打桩，不联外网 | 不 | 每次提交、CI |
-| `node scripts/realcheck.mjs` | **合成真跑起来对不对**。真 FFmpeg 出片再量时长、量亮度、量音量 | 不 | CI（Windows runner 自带 ffmpeg） |
+| `node scripts/realcheck.mjs` | **合成真跑起来对不对**。真 FFmpeg 出片再量时长、量亮度、量音量 | 不 | CI（流水线里装一个临时 ffmpeg） |
 | `node scripts/doctor.mjs` | **你的密钥、你的桶、你的网络** | 默认极低 | 你，在自己机器/服务器上 |
 
 三层的边界值得说清楚，因为它们各自漏掉的东西正好是别人补的：
