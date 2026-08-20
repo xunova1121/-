@@ -462,6 +462,24 @@ export default {
       h('option', { value: 'off', selected: settings.neighborRef === 'off' },
         '关掉 —— 只靠设定集参考图'));
 
+    /**
+     * 接缝：标了「连续动作」的两镜之间，怎么让画面真的连上。
+     *
+     * 这一项存在的理由，是老办法有个**只在某些厂商上成立**的前提：
+     * 把下一镜那张图锁成这一段的末帧 —— 而收末帧的只有方舟、可灵、Vidu。
+     * 海螺、秘塔、百炼、Sora 都不收，用那几家时那条路整个是空的，
+     * 我们只会说一句"这家不收末帧"，接缝就那么跳着。
+     */
+    const seamSel = h('select', {
+      onchange: (e) => (pending.seamMode = e.target.value)
+    },
+      h('option', { value: 'tail', selected: (settings.seamMode || 'tail') === 'tail' },
+        '接住真实末帧（推荐）—— 抠出上一段的最后一帧，当这一镜的首帧'),
+      h('option', { value: 'lock', selected: settings.seamMode === 'lock' },
+        '只锁末帧 —— 要求上一段结束在这一镜的图上（部分厂商不支持）'),
+      h('option', { value: 'off', selected: settings.seamMode === 'off' },
+        '关掉 —— 只靠提示词衔接'));
+
     const thresholdInput = h('input', { type: 'number', min: 0, max: 100, value: settings.consistencyThreshold,
       oninput: (e) => (pending.consistencyThreshold = Number(e.target.value)) });
     const retryInput = h('input', { type: 'number', min: 0, max: 5, value: settings.consistencyMaxRetries,
@@ -487,6 +505,22 @@ export default {
             + '那时候要的是"上一帧的下一瞬间"，锚给不了。'),
           h('div', { class: 'field-hint' },
             '⚠ 这一层要「分镜图用图生图」开着才生效（文生图通道收不了参考图）。')),
+        h('div', { class: 'field', style: 'margin-top:14px' },
+          h('label', {}, '接缝（「连续动作」两镜之间怎么连上）'), seamSel,
+          h('div', { class: 'field-hint' },
+            '「只锁末帧」是老办法：要求上一段**结束在**下一镜那张图上。'
+            + '问题是收末帧的只有方舟、可灵、Vidu —— 海螺、秘塔、百炼、Sora 都不收，'
+            + '用那几家时这条等于没做，接缝会明显跳一下。'),
+          h('div', { class: 'field-hint' },
+            '「接住真实末帧」是反过来做：等上一段跑完，**抠出它真正的最后一帧**，'
+            + '拿那一帧当这一镜的首帧。每一家 i2v 都收首帧图，所以这条在所有厂商上都成立，'
+            + '而且用的是真渲染出来的那一帧，接缝在像素上就是连的。'),
+          h('div', { class: 'field-hint' },
+            '⚠ 代价：这一镜自己那张审过的分镜图就不当首帧用了（图还在，审片和重出还看它）；'
+            + '而且这是链式，误差会沿着链累积 —— 所以只在「连续动作」上做，'
+            + '而那种链一个场次里通常只有两三镜。末帧太糊时会自动退回用分镜图，并说一声。'),
+          h('div', { class: 'field-hint' },
+            '⚠ 抠帧要 FFmpeg。没装的话这一项不生效，会明确说出来。')),
         h('div', { class: 'grid2', style: 'margin-top:14px' },
           h('div', { class: 'field' }, h('label', {}, '复核通过分数线'), thresholdInput,
             h('div', { class: 'field-hint' }, '低于这个分数判定人设漂了，会换一颗种子重出。75 是比较稳的起点。')),

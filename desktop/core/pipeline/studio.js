@@ -1551,15 +1551,19 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
 
   onEvent?.({ type: 'shot', shotId, status: 'running', message: `第 ${shot.index} 镜重出视频（${providerId} / ${model}）…` });
 
-  const firstFrame = usableRef(shot.imageRef) || (await toModelRef(shot.imagePath, { onEvent }));
+  // 单独重出同样要吃上下文 —— 少了它，重出的这一镜会变成全片里唯一"自成一段"的那一镜。
+  // 也放在首帧之前：接缝模式下首帧可能来自上一段视频的真实末帧
+  const ctx = await videoContextFor(project, shot, { onEvent });
+  const firstFrame =
+    ctx.headFromTail?.url
+    || usableRef(shot.imageRef)
+    || (await toModelRef(shot.imagePath, { onEvent }));
   // 首帧只定住第一格，后面几秒全靠提示词和参考图撑着。
   // 所以这里和批量出视频走完全一样的一套：设定集提示词 + 场景/角色/道具参考图。
   const bibleRefs =
     settings.get('useReferenceImages') === false
       ? { images: [], labels: [] }
       : consistency.collectReferences(project.bible, shot);
-  // 单独重出同样要吃上下文 —— 少了它，重出的这一镜会变成全片里唯一"自成一段"的那一镜
-  const ctx = await videoContextFor(project, shot, { onEvent });
   const videoPrompt = opts.prompt?.trim() || ctx.videoPrompt;
   if (bibleRefs.labels.length) {
     onEvent?.({ type: 'note', message: `参考设定集：${bibleRefs.labels.join('、')}` });
@@ -1606,13 +1610,16 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
       t.videoRefs = bibleRefs.labels;
       t.link = ctx.link;
       t.endFrameChained = Boolean(ctx.lastFrameUrl);
+      // 这一镜的首帧是不是接住了上一段的真实末帧。界面上要能一眼看出
+      // 哪几处接缝是"像素级连着的"，哪几处只是文字上接了一下
+      t.headFromTail = ctx.headFromTail ? { fromIndex: ctx.headFromTail.fromIndex, at: new Date().toISOString() } : null;
       t.actualDuration = video.actualDuration || shot.duration;
       t.status = 'video-ready';
     }
     return p;
   });
 
-  const head = await verifyVideoHead(shot, dest, { onEvent });
+  const head = await verifyVideoHead(shot, dest, { onEvent, headRef: ctx.headFromTail });
   const tail = await verifyVideoTail(projectId, shot, dest, { onEvent });
   const { next: nextShot } = continuity.neighbors(store.read(projectId).shots || [], shotId);
   const seam = await verifyTailAlign(shot, dest, nextShot, { onEvent });
@@ -2102,8 +2109,27 @@ async function videoContextFor(project, shot, { onEvent } = {}) {
 
   const videoPrompt = consistency.assembleVideoPrompt(project.bible, shot, { prev, next, link });
 
+  /**
+   * 接缝：把上一段视频的**真实末帧**抠出来，当这一镜的首帧。
+   *
+   * 这条和下面那条末帧锁定是**两个方向**，各有各的前提：
+   *
+   *   末帧锁定  要求上一段"结束在这一镜的图上"——**只有收末帧的厂商能做**
+   *             （方舟、可灵、Vidu；海螺、秘塔、百炼、Sora 都不收）
+   *   首帧接续  等上一段跑完，用它真实的最后一帧当这一镜的首帧 ——
+   *             **每一家都能做**，因为图生视频的定义就是收首帧
+   *
+   * 两条都做时是双保险；用不收末帧的厂商时，这一条是唯一有效的那条。
+   * 详见 continuity.js 里 shouldChainFromTail 上面那段。
+   */
+  let headFromTail = null;
+  const seamMode = settings.get('seamMode') || 'tail';
+  if (seamMode === 'tail' && continuity.shouldChainFromTail(shot, prev, link)) {
+    headFromTail = await tailFrameOf(project, prev, shot, { onEvent });
+  }
+
   let lastFrameUrl = null;
-  if (continuity.shouldChainEndFrame(next, nextLink, shot)) {
+  if (seamMode !== 'off' && continuity.shouldChainEndFrame(next, nextLink, shot)) {
     try {
       lastFrameUrl = usableRef(next.imageRef) || (await toModelRef(next.imagePath, { onEvent }));
       onEvent?.({
@@ -2116,7 +2142,64 @@ async function videoContextFor(project, shot, { onEvent } = {}) {
     }
   }
 
-  return { prev, next, link, nextLink, videoPrompt, lastFrameUrl };
+  return { prev, next, link, nextLink, videoPrompt, lastFrameUrl, headFromTail };
+}
+
+/**
+ * 抠出上一段视频的最后一帧，交给这一镜当首帧。
+ *
+ * 拿不到就回 null —— 接缝没接上是遗憾，为它把这一镜整个废掉是不成比例的。
+ * 每一种拿不到的情况都要说清楚原因，否则用户只会看到"有时候接得上有时候接不上"。
+ */
+async function tailFrameOf(project, prev, shot, { onEvent } = {}) {
+  if (!ffmpeg.locate().available) {
+    onEvent?.({
+      type: 'note',
+      message: `第 ${shot.index} 镜想接住上一段的末帧，但没装 FFmpeg（抠帧要用它）—— 这一镜改用自己那张分镜图当首帧，接缝会跳一下`
+    });
+    return null;
+  }
+
+  const framePath = path.join(store.assetDir(project.id), `${shot.id}.head.png`);
+  try {
+    await ffmpeg.grabFrame(prev.videoPath, framePath, { at: 'end' });
+  } catch (err) {
+    onEvent?.({ type: 'note', message: `抠上一段末帧失败（${err.message}），第 ${shot.index} 镜改用自己那张分镜图当首帧` });
+    return null;
+  }
+
+  /**
+   * 糊的帧不能当首帧。
+   *
+   * 上一段结尾正好是个快速运动的话，最后一帧带着运动模糊 ——
+   * 拿它当首帧等于**把糊传染给下一段**，而且是从第一格就糊。
+   * 这种情况宁可退回自己那张干净的分镜图：接缝跳一下，
+   * 总好过下一段整段都是糊的。
+   */
+  try {
+    const hash = await imghash.hashImage(framePath);
+    if (!imghash.informative(hash)) {
+      onEvent?.({
+        type: 'note',
+        message: `上一段的末帧太平（大片纯色或者糊了），不适合当首帧 —— 第 ${shot.index} 镜改用自己那张分镜图，接缝会跳一下`
+      });
+      return null;
+    }
+  } catch {
+    // 判不了就照用：判不出来不等于不能用
+  }
+
+  try {
+    const url = await toModelRef(framePath, { onEvent });
+    onEvent?.({
+      type: 'note',
+      message: `第 ${shot.index} 镜接住第 ${prev.index} 镜的**真实末帧**当首帧 —— 接缝在像素上就是连的，不靠厂商支持末帧`
+    });
+    return { url, path: framePath, fromIndex: prev.index };
+  } catch (err) {
+    onEvent?.({ type: 'note', message: `末帧传不上去（${err.message}），第 ${shot.index} 镜改用自己那张分镜图当首帧` });
+    return null;
+  }
 }
 
 /**
@@ -2141,14 +2224,24 @@ async function videoContextFor(project, shot, { onEvent } = {}) {
  * 这一层是**免费的**：走 FFmpeg 抠帧 + 感知哈希，不调模型、不花钱、
  * 结果可复现。所以它不受「一致性复核」开关控制，只要有 FFmpeg 就做。
  */
-async function verifyVideoHead(shot, videoPath, { onEvent } = {}) {
-  if (!shot.imagePath || !fs.existsSync(shot.imagePath)) return null;
+async function verifyVideoHead(shot, videoPath, { onEvent, headRef = null } = {}) {
+  /**
+   * 比的是"视频第一帧"和"我们给的那张首帧图"。
+   *
+   * ⚠ 接缝模式下给出去的首帧**不是这一镜的分镜图**，而是上一段视频的真实末帧。
+   * 还拿分镜图去比的话，每一个接住上一镜的镜头都会被报成"首帧没吃" ——
+   * 一个彻头彻尾的假警报，而且恰恰出现在接缝工作得最好的那几镜上。
+   * 假警报比没有警报更坏：报几次之后，真的那次也没人看了。
+   */
+  const target = headRef?.path && fs.existsSync(headRef.path) ? headRef.path : shot.imagePath;
+  if (!target || !fs.existsSync(target)) return null;
   try {
-    const r = await imghash.compareFirstFrame(videoPath, shot.imagePath);
+    const r = await imghash.compareFirstFrame(videoPath, target);
     if (!r) return null; // 没装 FFmpeg：这是"没检查"，不是"不匹配"
+    const from = headRef ? `第 ${headRef.fromIndex} 镜的末帧` : `第 ${shot.index} 镜那张图`;
     const message =
       r.verdict === 'ok'
-        ? `首帧核对通过：这段视频确实是从第 ${shot.index} 镜那张图开始的（相似度 ${r.similarity}%）`
+        ? `首帧核对通过：这段视频确实是从${from}开始的（相似度 ${r.similarity}%）`
         : r.verdict === 'mismatch'
           ? `⚠ 首帧对不上（相似度只有 ${r.similarity}%）—— 这家多半没吃我们给的首帧图，` +
             '要么在提示词和图打架时自己重画了，要么退化成了文生视频。' +
@@ -2292,7 +2385,20 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
     jobs.checkpoint(signal, `第 ${shot.index} 镜起往后的 ${targets.length - targets.indexOf(shot)} 镜`);
     onEvent?.({ type: 'shot', shotId: shot.id, status: 'running', message: `第 ${shot.index} 镜出视频…` });
     try {
-      const firstFrame = usableRef(shot.imageRef) || (await toModelRef(shot.imagePath, { onEvent }));
+      /**
+       * 上下文要**先**算，而且要用**刚读出来的项目**。
+       *
+       * 两个原因，都不是可有可无的：
+       *   ① 接缝模式下这一镜的首帧可能来自上一段视频的真实末帧，
+       *      而不是自己那张分镜图 —— 顺序反了会先白传一次图
+       *   ② 上一段的 videoPath 是**这一轮刚写进去的**。拿循环开始时那份
+       *      快照的话，prev.videoPath 永远是空的，接缝这条路整个不会触发
+       */
+      const ctx = await videoContextFor(store.read(projectId), shot, { onEvent });
+      const firstFrame =
+        ctx.headFromTail?.url
+        || usableRef(shot.imageRef)
+        || (await toModelRef(shot.imagePath, { onEvent }));
       // 设定集参考图一并带上（场景 + 角色 + 道具）：
       // 支持 r2v 的厂商（Vidu、H3）能靠它把人和环境一起锁住
       const bibleRefs =
@@ -2300,8 +2406,7 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
           ? { images: [], labels: [] }
           : consistency.collectReferences(project.bible, shot);
 
-      // 上下文：接在谁后面、要交给谁。缺了它，每一镜都会被当成独立短片来演。
-      const ctx = await videoContextFor(project, shot, { onEvent });
+      // 上下文：接在谁后面、要交给谁。缺了它，每一镜都会被当成独立短片来演。（上面已经算过）
       const videoPrompt = ctx.videoPrompt;
       onEvent?.({ type: 'shot', shotId: shot.id, status: 'running', message: `提交任务：${videoPrompt.slice(0, 60)}…` });
 
@@ -2368,6 +2473,9 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
           // 末帧锁没锁上要如实记：界面上标着"连续动作"却其实没锁，
           // 用户会一直以为这两镜是无缝的，直到把成片放出来
           t.endFrameChained = Boolean(ctx.lastFrameUrl);
+      // 这一镜的首帧是不是接住了上一段的真实末帧。界面上要能一眼看出
+      // 哪几处接缝是"像素级连着的"，哪几处只是文字上接了一下
+      t.headFromTail = ctx.headFromTail ? { fromIndex: ctx.headFromTail.fromIndex, at: new Date().toISOString() } : null;
           // 厂商档位可能把 4s 顶成 5s。如实记下来，别让界面上的总时长撒谎。
           t.actualDuration = video.actualDuration || shot.duration;
           t.status = 'video-ready';
@@ -2377,7 +2485,7 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
 
       // 两头都验：首帧看"厂商有没有吃我们那张图"（免费），
       // 末帧看"演到最后人还是不是那个人"（要一次多模态调用）
-      const head = await verifyVideoHead(shot, dest, { onEvent });
+      const head = await verifyVideoHead(shot, dest, { onEvent, headRef: ctx.headFromTail });
       const tail = await verifyVideoTail(projectId, shot, dest, { onEvent });
       const { next: nextShot } = continuity.neighbors(store.read(projectId).shots || [], shot.id);
       const seam = await verifyTailAlign(shot, dest, nextShot, { onEvent });

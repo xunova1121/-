@@ -2708,6 +2708,125 @@ section('场次：先决定在哪儿断，再决定拆成几镜');
     /3 个场次/.test(seg.summarize(segs, fixed) || ''), seg.summarize(segs, fixed));
 }
 
+section('接缝：不收末帧的厂商上，靠什么把两段连起来');
+{
+  const continuity = await import('../core/pipeline/continuity.js');
+  const cat = await import('../core/providers/catalog.js');
+
+  /**
+   * 先把问题摆出来：**收末帧的厂商是少数**。
+   *
+   * 「连续动作」原来只有一条实现 —— 把下一镜那张图锁成这一段的末帧。
+   * 它成立的前提是厂商收末帧图，而只有方舟、可灵、Vidu 收。
+   * 用海螺、秘塔、百炼、Sora 时，那条路整个是空的：
+   * 我们说一句"这家不收末帧"，然后两段之间就只剩文字上的衔接。
+   */
+  const v = (id) => cat.PROVIDERS.find((p) => p.id === id)?.videoDefaults?.endFrame === true;
+  check('方舟收末帧', v('volcengine'));
+  check('可灵收末帧', v('kling'));
+  check('Vidu 收末帧', v('vidu'));
+  check('海螺不收末帧（所以老办法在它上面是空的）', !v('minimax'));
+  check('秘塔不收末帧', !v('metaso'));
+  check('百炼不收末帧', !v('dashscope'));
+
+  /**
+   * 反过来做就不依赖厂商了：等上一段跑完，抠出它**真实的最后一帧**，
+   * 拿那一帧当这一镜的首帧。每一家 i2v 都收首帧图。
+   */
+  const prev = { id: 'a', index: 1, segment: 1, videoPath: '/x/a.mp4' };
+  const shot = { id: 'b', index: 2, segment: 1 };
+  check('连续动作时接住上一段的末帧',
+    continuity.shouldChainFromTail(shot, prev, 'continuous') === true);
+  // 同场换机位本来就该跳一下，接了反而不对
+  check('同场换机位不接', continuity.shouldChainFromTail(shot, prev, 'cut') === false);
+  check('换场景不接', continuity.shouldChainFromTail(shot, prev, 'new-scene') === false);
+  // 上一段还没出视频时无从接起 —— 这一条决定了它必须用"刚读出来的项目"
+  check('上一段还没出视频就不接',
+    continuity.shouldChainFromTail(shot, { ...prev, videoPath: null }, 'continuous') === false);
+  /**
+   * 跨场次一律不接。这是"链式生成"唯一真正危险的地方：
+   * 把二十年前那一镜的末帧接到今天这一镜的头上，
+   * 等于强行让新的一场长成上一场的样子，而且不报任何错。
+   */
+  check('跨场次不接',
+    continuity.shouldChainFromTail({ ...shot, segment: 2 }, prev, 'continuous') === false);
+}
+
+section('接缝：走一遍出视频，看首帧到底发的是哪张');
+{
+  const sp = await (
+    await fetch(`${appUrl}/api/projects`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '接缝自检' })
+    })
+  ).json();
+
+  store.update(sp.id, (p) => {
+    p.bible = { style: { anchor: '国风', negative: '' },
+      characters: [{ name: '阿澜', appearance: '短发', seed: 7, variants: [{ id: 'v-default', name: '默认造型' }] }],
+      scenes: [], props: [] };
+    p.shots = [
+      { id: 'k1', index: 1, segment: 1, characters: ['阿澜'], description: '阿澜伸手去够门把手',
+        camera: '中景', duration: 4, link: 'new-scene' },
+      // 第 2 镜是第 1 镜那个动作的下一瞬间 —— 接缝就该在这儿
+      { id: 'k2', index: 2, segment: 1, characters: ['阿澜'], description: '手把门把手拧下去',
+        camera: '特写', duration: 4, link: 'continuous' }
+    ];
+    return p;
+  });
+
+  await ndjson(`/projects/${sp.id}/stage/assets`, {});
+  upstream.videoBodies = [];
+  const evs = await ndjson(`/projects/${sp.id}/stage/video`, {});
+  const after = store.read(sp.id);
+
+  const notes = evs.filter((e) => e.type === 'note').map((e) => e.message).join(' | ');
+  const ffReady = (await import('../core/ffmpeg.js')).locate({ refresh: true }).available;
+
+  /**
+   * 抠帧要 FFmpeg，而这份自检是**不依赖外部环境**的 —— 两条路都得验：
+   *
+   *   装了    真的抠出末帧当首帧，并且落库
+   *   没装    退回自己那张分镜图，**并且说清楚为什么**
+   *
+   * 第二条一点都不次要：多数人第一次跑的时候就是没装 FFmpeg 的状态。
+   * 那时候接缝跳一下是可以接受的，"不知道为什么跳"才不行。
+   */
+  if (ffReady) {
+    check('第 2 镜说明了接住上一段的真实末帧', /接住第 1 镜的\*\*真实末帧\*\*/.test(notes), notes.slice(0, 300));
+    check('落库记下了接缝来源（界面要显示哪几处是像素级连着的）',
+      after.shots[1]?.headFromTail?.fromIndex === 1, JSON.stringify(after.shots[1]?.headFromTail));
+    // 抠出来的那一帧要真的落盘 —— 不落盘的话首帧核对没法拿它去比
+    check('末帧抠出来落盘了', fs.existsSync(path.join(store.assetDir(sp.id), 'k2.head.png')));
+  } else {
+    check('没装 FFmpeg 时明说了接不上、以及为什么',
+      /没装 FFmpeg/.test(notes) && /接缝会跳一下/.test(notes), notes.slice(0, 300));
+    check('并且退回用自己那张分镜图，没把这一镜废掉', Boolean(after.shots[1]?.videoPath));
+    check('没接上就不记接缝来源（不能记一个没发生的事）', !after.shots[1]?.headFromTail);
+  }
+  check('第 1 镜没有接缝来源（它前面没有片子）', !after.shots[0]?.headFromTail);
+
+  /**
+   * ⚠ 首帧核对必须拿**真正发出去的那张**去比。
+   *
+   * 接缝模式下发的是上一段的末帧，不是这一镜的分镜图。
+   * 还拿分镜图去比的话，每一个接住上一镜的镜头都会被报成"首帧没吃" ——
+   * 一个彻头彻尾的假警报，而且恰恰出现在接缝工作得最好的那几镜上。
+   * 假警报比没有警报更坏：报几次之后，真的那次也没人看了。
+   */
+  check('首帧核对没有误报"首帧没吃"',
+    after.shots[1]?.headMatch?.verdict !== 'mismatch',
+    JSON.stringify(after.shots[1]?.headMatch));
+
+  // 关掉就该完全退回老行为
+  settings.patch({ seamMode: 'off' });
+  store.update(sp.id, (p) => { p.shots.forEach((x) => { x.videoPath = null; x.headFromTail = null; }); return p; });
+  const off = await ndjson(`/projects/${sp.id}/stage/video`, {});
+  check('关掉之后不接末帧',
+    !off.some((e) => /真实末帧/.test(e.message || '')) && !store.read(sp.id).shots[1]?.headFromTail);
+  settings.patch({ seamMode: 'tail' });
+}
+
 section('场次边界：不锁末帧、不拿邻镜当参考');
 {
   const continuity = await import('../core/pipeline/continuity.js');

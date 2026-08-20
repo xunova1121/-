@@ -68,6 +68,46 @@ export function deriveLink(shot, prev) {
   return 'cut';
 }
 
+/**
+ * 这一镜的首帧该不该**换成上一段视频的真实末帧**。
+ *
+ * ════════ 它补的是哪个洞 ════════
+ *
+ * 「连续动作」原来只有一条实现：把**下一镜那张图**锁成这一段的末帧
+ *（shouldChainEndFrame）。它成立的前提是**厂商收末帧图** ——
+ * 而收的只有方舟、可灵、Vidu 三家。海螺、秘塔、百炼、Sora 都不收。
+ *
+ * 用这几家时，那条路整个是空的：我们会说一句"这家不收末帧"，
+ * 然后两段之间就只剩文字上的衔接 —— 上一段结束时的画面和下一段
+ * 开始时的画面**毫无关系**，接缝一眼就看得出来。
+ *
+ * ════════ 反过来做就不依赖厂商了 ════════
+ *
+ * 不去要求上一段"结束在某张图上"，而是等它跑完，**抠出它真实的最后一帧**，
+ * 拿那一帧当下一镜的首帧。
+ *
+ *   · 每一家 i2v 都收首帧图 —— 这是图生视频的定义，不存在"不支持"
+ *   · 用的是**真渲染出来的那一帧**，不是"希望它长成的那张图"
+ *   · 接缝在像素上就是连的，不需要任何复核去确认
+ *
+ * ════════ 代价，说在前面 ════════
+ *
+ * ① 这一镜自己那张审过的分镜图**不再当首帧用**。图还在（重出、审片都还看它），
+ *    但视频是从上一段的末帧长出来的。
+ * ② 这是**链式生成**：误差会沿着链累积。所以只在 continuous 上做 ——
+ *    那是"同一个动作的下一瞬间"，链本来就短（一个场次里通常两三镜）。
+ *    cut 和 new-scene 一律不做，它们本来就该跳。
+ * ③ 末帧可能带运动模糊。糊的帧当首帧会把糊带进下一段，
+ *    所以取之前要先量一下这一帧有没有信息量（见 studio.js 里的用法）。
+ */
+export function shouldChainFromTail(shot, prev, link) {
+  if (!prev?.videoPath) return false;
+  if (link !== 'continuous') return false;
+  // 跨场次不接 —— 和 shouldChainEndFrame 同一条底线
+  if (Number(prev.segment || 1) !== Number(shot?.segment || 1)) return false;
+  return true;
+}
+
 /** 给整条分镜表补上 link（不覆盖已有的） */
 export function withLinks(shots = []) {
   const sorted = shots.slice().sort((a, b) => a.index - b.index);
