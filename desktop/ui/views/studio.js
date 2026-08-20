@@ -66,6 +66,8 @@ const job = {
   doneCount: 0,
   /** 跑的是哪一步。结束时 stage 会被清成 null，而结果提示还要用它的名字 */
   lastStage: null,
+  /** 这一轮是被主动停掉的，不是失败。两者的收尾提示完全不一样 */
+  cancelled: false,
   startedAt: 0,
   /** 只保留最新一次渲染的回调 —— 旧的那次已经不在文档里了，没必要留着 */
   onUpdate: null
@@ -772,6 +774,9 @@ export default {
             }
             // 整步就没跑起来（缺前置产出、缺密钥、服务不通）也是失败，一样要摊开
             if (ev.type === 'error') job.failures.push({ who: '整步', message: ev.message });
+            // 主动停下来**不是失败**。混进失败清单里，会让人回头去查一个
+            // 根本不存在的问题 —— 而他自己按的那一下才是原因
+            if (ev.type === 'cancelled') job.cancelled = true;
 
             const text = describe(ev);
             if (text) {
@@ -787,12 +792,18 @@ export default {
       } finally {
         const spent = Date.now() - job.startedAt;
         const failed = job.failures.length;
+        const cancelled = job.cancelled;
+        job.cancelled = false;
         job.stage = null;
         job.live.clear();
         jobNotify('done');
         toast(
-          failed ? `${failed} 项失败，看流水线下面的失败原因` : `完成，用时 ${fmtMs(spent)}`,
-          failed ? 'err' : 'ok'
+          cancelled
+            ? `已停下，用时 ${fmtMs(spent)}。已经跑完的都存着了，接着跑就从这一步「往后全跑」`
+            : failed
+              ? `${failed} 项失败，看流水线下面的失败原因`
+              : `完成，用时 ${fmtMs(spent)}`,
+          cancelled ? 'ok' : failed ? 'err' : 'ok'
         );
       }
     }
@@ -834,7 +845,10 @@ export default {
      * 手里这份 project 还是旧的 —— "要退出去再进来才看得到"就是这么来的。
      */
     async function onJobUpdate(kind) {
+      // 有活儿在跑才摆「停」。平时摆一个灰着的按钮是纯噪音
+      stopBtn.style.display = jobBusy() ? '' : 'none';
       if (kind === 'start') {
+        stopBtn.disabled = false;
         clear(progressLog);
         painted = 0;
         clear(failHost);
@@ -1059,6 +1073,35 @@ export default {
             : '当前这一步不在流水线里（比如「剧本」），只能从头跑。'));
     }
 
+    /**
+     * 停下来。
+     *
+     * 只在真的有活儿在跑时才出现 —— 平时摆一个灰着的「停」是纯噪音。
+     *
+     * 按钮上的字是「停在这一镜之后」而不是「取消」，这一条是有意的：
+     * 取消不会掐断手上正在跑的那一镜（钱已经花了，掐掉等于白花），
+     * 写「取消」的话，用户点完看到它又跑完一镜会以为按钮坏了。
+     */
+    const stopBtn = h('button', {
+      class: 'btn ghost sm danger',
+      style: 'margin-left:8px',
+      title: '手上这一镜会跑完并存下来（钱已经花了），后面还没开始的一镜都不发',
+      onclick: async () => {
+        stopBtn.disabled = true;
+        try {
+          // cap:job-cancel
+          const r = await api(`/projects/${project.id}/cancel`, { method: 'POST' });
+          toast(r.message, 'ok');
+          job.log.push({ type: 'note', text: `※ ${r.message}` });
+          jobNotify('tick');
+        } catch (err) {
+          toast(err.message, 'err');
+          stopBtn.disabled = false;
+        }
+      }
+    }, '■ 停在这一镜之后');
+    stopBtn.style.display = jobBusy() ? '' : 'none';
+
     const stagePanel = h('div', { class: 'panel' },
       h('h2', { class: 'panel-title' }, '这一步', liveBadge,
         h('button', {
@@ -1071,7 +1114,8 @@ export default {
             if (open) paintRunChoice();
             runChoice.style.display = open ? '' : 'none';
           }
-        }, '▶ 一键跑完')),
+        }, '▶ 一键跑完'),
+        stopBtn),
       runChoice,
       stageDetail,
       progressLog,

@@ -31,6 +31,7 @@ import * as oss from '../oss.js';
 import * as tiers from '../tiers.js';
 import * as shotlint from './shotlint.js';
 import * as transitions from '../transitions.js';
+import * as jobs from '../jobs.js';
 
 export const extractJSON = consistency.extractJSON;
 
@@ -385,7 +386,7 @@ export function sheetPrompt(kind, bible, item, variant = null) {
  * 生成设定集并出角色设定图 / 场景基准图。
  * 这一步是整条流水线的地基，跑完之后人设就锁死了。
  */
-export async function buildBible(projectId, { onEvent, regenerate = false } = {}) {
+export async function buildBible(projectId, { onEvent, regenerate = false, signal = null } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
   if (!project.script?.trim()) throw new Error('剧本是空的，先写点东西');
@@ -421,6 +422,7 @@ export async function buildBible(projectId, { onEvent, regenerate = false } = {}
 
   for (const { kind, item, variant } of targets) {
     const label = variants.labelOf(item, variant);
+    jobs.checkpoint(signal, `${label} 起往后的参考图`);
     try {
       onEvent?.({ type: 'sheet', name: label, kind, status: 'running', message: `生成${SHEET_LABEL[kind]}：${label}` });
 
@@ -461,6 +463,7 @@ export async function buildBible(projectId, { onEvent, regenerate = false } = {}
       });
       onEvent?.({ type: 'sheet', name: label, status: 'done' });
     } catch (err) {
+      if (jobs.isCancel(err)) throw err;
       onEvent?.({ type: 'sheet', name: label, status: 'failed', message: err.message });
     }
   }
@@ -1169,7 +1172,7 @@ export function chapterAdvice(script) {
 
 // ═══════════════════════ 阶段三：镜头出图（带一致性复核）═══════════════════════
 
-export async function generateAssets(projectId, { only = null, chapterId = null, regenerate = false, onEvent } = {}) {
+export async function generateAssets(projectId, { only = null, chapterId = null, regenerate = false, onEvent, signal = null } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
   if (!project.shots?.length) throw new Error('还没有分镜，先跑「分镜」');
@@ -1210,6 +1213,9 @@ export async function generateAssets(projectId, { only = null, chapterId = null,
   }
 
   for (const shot of targets) {
+    // 停在下一个安全点：还没开始的这一镜一张都不发（不计费）。
+    // 已经发出去的那一镜不在这里 —— 它在上一圈，跑完并存下来了
+    jobs.checkpoint(signal, `第 ${shot.index} 镜起往后的 ${targets.length - targets.indexOf(shot)} 镜`);
     try {
       const result = await consistency.generateConsistentImage({
         project,
@@ -1253,6 +1259,8 @@ export async function generateAssets(projectId, { only = null, chapterId = null,
       });
       onEvent?.({ type: 'shot', shotId: shot.id, status: 'done', score: result.verification?.score ?? null });
     } catch (err) {
+      // 取消不是失败：不该把这一镜标成 failed，那会让人以为它出错了
+      if (jobs.isCancel(err)) throw err;
       onEvent?.({ type: 'shot', shotId: shot.id, status: 'failed', message: err.message });
       store.update(projectId, (p) => {
         const t = p.shots.find((s) => s.id === shot.id);
@@ -2155,7 +2163,7 @@ async function verifyTailAlign(shot, videoPath, nextShot, { onEvent } = {}) {
   }
 }
 
-export async function generateVideos(projectId, { only = null, chapterId = null, regenerate = false, onEvent } = {}) {
+export async function generateVideos(projectId, { only = null, chapterId = null, regenerate = false, onEvent, signal = null } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
 
@@ -2169,6 +2177,7 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
   onEvent?.({ type: 'stage', stage: 'video', status: 'running', message: `待出视频 ${targets.length} 段` });
 
   for (const shot of targets) {
+    jobs.checkpoint(signal, `第 ${shot.index} 镜起往后的 ${targets.length - targets.indexOf(shot)} 镜`);
     onEvent?.({ type: 'shot', shotId: shot.id, status: 'running', message: `第 ${shot.index} 镜出视频…` });
     try {
       const firstFrame = usableRef(shot.imageRef) || (await toModelRef(shot.imagePath, { onEvent }));
@@ -2215,6 +2224,17 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
         duration: shot.duration,
         aspectRatio: project.aspectRatio || null,
         label: `视频 #${shot.index}`,
+        /**
+         * 取消信号也要送到轮询那一层。
+         *
+         * 这是"取消"里最微妙的一处：任务**已经提交了**，钱已经在花。
+         * 单纯不管它，人得干等一两分钟才停得下来；而直接掐掉的话，
+         * task_id 就丢了 —— 钱花了，片子在厂商那儿，你却再也找不回来。
+         *
+         * 所以轮询会带着 task_id 抛出来，下面 catch 里那段现成的
+         * 「待认领」逻辑正好接住它：停得快，钱也不白花。
+         */
+        signal,
         // 轮询事件本身不带镜头信息，补上 shotId，前端才知道这是哪一镜在等
         onEvent: (ev) => onEvent?.({ ...ev, shotId: shot.id })
       });
@@ -2271,6 +2291,17 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
           if (t) t.pendingTask = { taskId, provider: r.video.provider, at: new Date().toISOString() };
           return p;
         });
+      }
+      /**
+       * 取消不是"这一镜失败了"，不能按失败处理接着跑下一镜。
+       *
+       * 顺序很要紧：**先**把 task_id 记进「待认领」，**再**抛出去。
+       * 反过来的话，正卡在轮询上被取消的那一镜，钱花了、片子在厂商那儿、
+       * 而任务号丢了 —— 这正是取消最容易造成的一种损失。
+       */
+      if (jobs.isCancel(err)) {
+        onEvent?.({ type: 'shot', shotId: shot.id, status: 'idle', message: err.message });
+        throw err;
       }
       onEvent?.({ type: 'shot', shotId: shot.id, status: 'failed', message: err.message });
     }
@@ -2627,7 +2658,7 @@ export function voiceForShot(project, shot) {
   };
 }
 
-export async function generateVoice(projectId, { onEvent } = {}) {
+export async function generateVoice(projectId, { onEvent, signal = null } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
   const r = routing();
@@ -2671,6 +2702,7 @@ export async function generateVoice(projectId, { onEvent } = {}) {
 
   onEvent?.({ type: 'stage', stage: 'voice', status: 'running', message: `待配音 ${targets.length} 条` });
   for (const shot of targets) {
+    jobs.checkpoint(signal, `第 ${shot.index} 镜起往后的配音`);
     try {
       const { voice, who, text } = voiceForShot(fresh, shot);
       onEvent?.({ type: 'shot', shotId: shot.id, status: 'running', message: `第 ${shot.index} 镜配音（${who}${voice ? `·${voice}` : ''}）…` });
@@ -2709,6 +2741,7 @@ export async function generateVoice(projectId, { onEvent } = {}) {
       });
       onEvent?.({ type: 'shot', shotId: shot.id, status: 'done', message: '配音完成' });
     } catch (err) {
+      if (jobs.isCancel(err)) throw err;
       onEvent?.({ type: 'shot', shotId: shot.id, status: 'failed', message: err.message });
     }
   }
@@ -2951,7 +2984,7 @@ const RUN_ORDER = [
  * 中间任一步抛错就停下，已经跑完的都在盘上 —— 不做"跳过失败继续跑"：
  * 出图失败还硬着头皮去出视频，只会拿着半张图烧掉更贵的那一步。
  */
-export async function runAll(projectId, { shotCount = 8, from = null, onEvent } = {}) {
+export async function runAll(projectId, { shotCount = 8, from = null, onEvent, signal = null } = {}) {
   const start = from ? RUN_ORDER.findIndex((s) => s.id === from) : 0;
   if (from && start === -1) throw new Error(`不认识这一步：${from}`);
   const plan = RUN_ORDER.slice(Math.max(0, start));
@@ -2962,8 +2995,11 @@ export async function runAll(projectId, { shotCount = 8, from = null, onEvent } 
 
   let last = null;
   for (const step of plan) {
+    // 每一步开始前看一眼。停在步与步之间是最干净的落点：
+    // 上一步的产物完整存着，接着跑时从这一步「往后全跑」就行
+    jobs.checkpoint(signal, `「${step.label}」及其后各步`);
     // eslint-disable-next-line no-await-in-loop
-    last = await step.run(projectId, { shotCount, onEvent });
+    last = await step.run(projectId, { shotCount, onEvent, signal });
   }
   return last || store.read(projectId);
 }

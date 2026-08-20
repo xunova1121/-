@@ -173,6 +173,13 @@ export const CAPABILITIES = [
     mobile: 'ui/m/m.js'
   },
   {
+    id: 'job-cancel',
+    name: '把正在跑的任务停下来',
+    api: 'POST /projects/:id/cancel',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js'
+  },
+  {
     id: 'account-login',
     name: '用账号密码登录',
     api: 'POST /account/login',

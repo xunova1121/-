@@ -511,16 +511,38 @@ function paintLive() {
     h('div', { class: 'row' },
       job.running ? h('span', { class: 'spin' }, '◐') : h('span', {}, job.fail ? '✕' : '✓'),
       h('b', { class: 'grow' }, job.label || (job.running ? '运行中' : '完成')),
-      !job.running
+      /**
+       * 跑到一半发现分镜写错了，手机上也得停得下来 —— 这恰恰是最需要它的场景：
+       * 人不在电脑前，而视频那一步是按镜数计费的，一镜一镜烧下去。
+       *
+       * 按钮上写「停在这一镜之后」而不是「取消」：手上那一镜会跑完
+       *（钱已经花了，掐掉等于白花），写「取消」会让人以为按钮坏了。
+       */
+      job.running
         ? h('button', {
+            class: 'btn sm',
+            disabled: job.stopping,
+            // cap:job-cancel
+            onclick: async (e) => {
+              job.stopping = true;
+              e.target.disabled = true;
+              try {
+                const r = await api(`/projects/${project.id}/cancel`, { method: 'POST' });
+                job.message = r.message;
+              } catch (err) {
+                job.message = err.message;
+              }
+              updateLive();
+            }
+          }, job.stopping ? '正在停…' : '■ 停在这一镜之后')
+        : h('button', {
             class: 'btn sm',
             onclick: () => {
               job.message = '';
               job.fail = 0;
               paint();
             }
-          }, '知道了')
-        : null),
+          }, '知道了')),
     job.message ? h('div', { class: 'live-line' }, job.message) : null);
 }
 
@@ -1173,7 +1195,10 @@ async function runStage(stageId, label, extra = {}) {
   paint();
   try {
     await stream(`/projects/${project.id}/stage/${stageId}`, extra, (ev) => {
-      if (ev.type === 'error') {
+      // 主动停下来不是失败 —— 记成失败会让人回头去查一个不存在的问题
+      if (ev.type === 'cancelled') {
+        job.message = ev.message || '已停下';
+      } else if (ev.type === 'error') {
         job.fail += 1;
         job.message = ev.message || '失败';
       } else if ((ev.type === 'shot' || ev.type === 'sheet') && ev.status === 'failed') {
@@ -1189,6 +1214,7 @@ async function runStage(stageId, label, extra = {}) {
     job.message = err.message;
   } finally {
     job.running = false;
+    job.stopping = false;
     await reload();
   }
 }

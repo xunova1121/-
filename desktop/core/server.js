@@ -36,6 +36,7 @@ import * as oss from './oss.js';
 import * as accounts from './accounts.js';
 import * as tiers from './tiers.js';
 import * as version from './version.js';
+import * as jobs from './jobs.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -1091,11 +1092,20 @@ async function handleApi(req, res, url, { lan = false } = {}) {
       if (method === 'DELETE') return json(res, 200, studio.clearChapters(b));
     }
 
+    /**
+     * 现在在跑什么。
+     *
+     * 页面刷新之后要能接着看到"它还在跑"和那个「停下来」按钮 ——
+     * 少了这一条，关一次页面就再也停不下来了（流断了，后台循环还在跑）。
+     */
+    if (b && c === 'job' && method === 'GET') return json(res, 200, jobs.describe(b));
+
+    // 叫停。回的是一句人话，说清接下来会发生什么 —— 见 jobs.js 里的说明
+    if (b && c === 'cancel' && method === 'POST') return json(res, 200, jobs.cancel(b));
+
     // 跑某一阶段，进度流式回传
     if (b && c === 'stage' && d && method === 'POST') {
       const opts = await readBody(req);
-      const stream = ndjson(res);
-      req.on('close', () => stream.end());
       const runners = {
         bible: studio.buildBible,
         script: studio.analyzeScript,
@@ -1106,12 +1116,46 @@ async function handleApi(req, res, url, { lan = false } = {}) {
         all: studio.runAll
       };
       const runner = runners[d];
-      if (!runner) return stream.end({ type: 'error', message: `未知阶段：${d}` });
+      if (!runner) return json(res, 400, { error: `未知阶段：${d}` });
+
+      /**
+       * 登记这份活儿。要在开流**之前**做：同项目已经在跑时要回一个正经的
+       * 409，而不是开一条流再往里塞一条 error —— 前端对这两者的处理不一样。
+       */
+      let job;
       try {
-        const project = await runner(b, { ...opts, onEvent: (ev) => stream.send(ev) });
+        job = jobs.start(b, d);
+      } catch (err) {
+        return json(res, err.code === 'BUSY' ? 409 : 500, { error: err.message });
+      }
+
+      const stream = ndjson(res);
+      /**
+       * ⚠ 关掉页面**不等于**取消。
+       *
+       * 这里只断流，不动那份活儿 —— 出到一半的片子还在跑，
+       * 关掉浏览器就把它们全丢掉（而且钱照花）是更糟的默认行为。
+       * 要停就明确点「停下来」。
+       */
+      req.on('close', () => stream.end());
+      try {
+        const project = await runner(b, {
+          ...opts,
+          signal: job.signal,
+          onEvent: (ev) => {
+            if (ev?.message) job.note = String(ev.message).slice(0, 120);
+            stream.send(ev);
+          }
+        });
         stream.end({ type: 'finished', project });
       } catch (err) {
-        stream.end({ type: 'error', message: err.message });
+        stream.end(
+          jobs.isCancel(err)
+            ? { type: 'cancelled', message: err.message, project: store.read(b) }
+            : { type: 'error', message: err.message }
+        );
+      } finally {
+        jobs.finish(job);
       }
       return undefined;
     }

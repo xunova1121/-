@@ -2199,6 +2199,224 @@ section('跑的是哪一版：更新完能核对，而不是去点功能试');
   check('compose 把 FD_BUILD 传给构建', /FD_BUILD:\s*"\$\{FD_BUILD/.test(compose));
 }
 
+section('叫停：真的走一遍接口，而不是只测那个开关');
+{
+  /**
+   * 前面两段测的是零件。这一段测的是**整件事到底成不成** ——
+   * 起一个真的跑八镜的任务，跑到一半从另一条连接上点「停」，
+   * 然后看它是不是真的没把剩下几镜发出去。
+   *
+   * 只测开关的话，有太多种"开关翻了但没人看"的失败法：
+   * 信号没传进循环、循环里没有安全点、异常在 catch 里被当成
+   * 普通失败吞掉然后接着跑下一镜 —— 每一种都会让钱照烧。
+   */
+  const cp = await (
+    await fetch(`${appUrl}/api/projects`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '叫停自检' })
+    })
+  ).json();
+
+  const SHOTS = 8;
+  store.update(cp.id, (p) => {
+    p.bible = { style: { anchor: '国风', negative: '' },
+      characters: [{ name: '阿澜', appearance: '短发', seed: 7, variants: [{ id: 'v-default', name: '默认造型' }] }],
+      scenes: [], props: [] };
+    p.shots = Array.from({ length: SHOTS }, (_, i) => ({
+      id: `c${i + 1}`, index: i + 1, characters: ['阿澜'],
+      description: `第 ${i + 1} 镜`, camera: '中景', duration: 4
+    }));
+    return p;
+  });
+
+  const events = [];
+  let cancelReply = null;
+  const res = await fetch(`${appUrl}/api/projects/${cp.id}/stage/assets`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+  });
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  let doneShots = 0;
+  let busyStatus = null;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const lines = buf.split('\n');
+    buf = lines.pop() || '';
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const ev = JSON.parse(line);
+      events.push(ev);
+      if (ev.type === 'shot' && ev.status === 'done') {
+        doneShots += 1;
+        // 第二镜出完就叫停 —— 跑到一半才是真实场景
+        if (doneShots === 2 && !cancelReply) {
+          // 同一时刻再点一次「跑」，必须被 409 拦下（两条流水线会抢同一批文件）
+          const again = await fetch(`${appUrl}/api/projects/${cp.id}/stage/assets`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+          });
+          busyStatus = again.status;
+          await again.text();
+
+          cancelReply = await (
+            await fetch(`${appUrl}/api/projects/${cp.id}/cancel`, { method: 'POST' })
+          ).json();
+        }
+      }
+    }
+  }
+
+  check('正在跑的时候再点一次跑，被 409 拦下', busyStatus === 409, String(busyStatus));
+  check('取消接口回了确认', cancelReply?.cancelled === true, JSON.stringify(cancelReply));
+
+  const last = events[events.length - 1];
+  // 收尾事件必须是 cancelled 而不是 error —— 前端拿这个字段决定提示语，
+  // 报成 error 会让人回头去查一个根本不存在的问题
+  check('流以「已停下」收尾，不是报错', last?.type === 'cancelled', JSON.stringify(last).slice(0, 160));
+  check('收尾时把当前项目也带回来了（界面要拿它刷新）', Boolean(last?.project?.shots));
+
+  const after = store.read(cp.id);
+  const made = after.shots.filter((x) => x.imagePath).length;
+  /**
+   * 这一条是整个功能的意义所在：**剩下几镜的钱省下来了**。
+   * 允许比 2 多一两镜（叫停请求飞过去的时候手上那镜正在跑），
+   * 但绝不能是 8 —— 那说明取消压根没生效。
+   */
+  check(`八镜里只出了前几镜就停了（实际 ${made} 镜）`, made >= 2 && made <= 4, String(made));
+  check('没被停掉的那几镜没有被标成失败',
+    after.shots.filter((x) => x.status === 'failed').length === 0,
+    JSON.stringify(after.shots.map((x) => x.status)));
+
+  // 停完之后登记表要干净，不然下一次「跑」会被自己的残留挡住
+  const job = await (await fetch(`${appUrl}/api/projects/${cp.id}/job`)).json();
+  check('停完之后没有残留的任务登记', job.running === false, JSON.stringify(job));
+
+  // 接着跑：剩下那几镜要能补齐，而且已经出好的不重出（不重复计费）
+  const resume = await ndjson(`/projects/${cp.id}/stage/assets`, {});
+  check('停完还能接着跑', resume.some((e) => e.type === 'finished'));
+  check('剩下的镜头补齐了', store.read(cp.id).shots.every((x) => x.imagePath));
+}
+
+section('叫停：停在下一个安全点，而不是掐断');
+{
+  const jobs = await import('../core/jobs.js');
+  jobs.__reset();
+
+  // ── 登记与并发 ──
+  const j = jobs.start('p1', 'video');
+  check('登记上了', jobs.describe('p1').running === true);
+  check('阶段名翻成人话', jobs.describe('p1').stageLabel === '出视频', jobs.describe('p1').stageLabel);
+  check('别的项目不受影响', jobs.describe('p2').running === false);
+
+  /**
+   * 同一个项目不许跑两遍。以前连点两下「全跑」就是两条流水线抢同一批文件，
+   * 表现是"有几镜莫名其妙变回了旧的"，几乎不可能靠看日志查出来。
+   */
+  let busy = null;
+  try {
+    jobs.start('p1', 'assets');
+  } catch (err) {
+    busy = err;
+  }
+  check('同项目跑两遍会被拦下', busy?.code === 'BUSY', String(busy?.code));
+  check('并且说清楚了在跑什么、该怎么办', /已经在跑「出视频」/.test(busy?.message || ''), busy?.message);
+  check('别的项目照样能开', Boolean(jobs.start('p2', 'assets')));
+
+  // ── 取消 ──
+  check('取消前没有中止信号', j.signal.aborted === false);
+  const r = jobs.cancel('p1');
+  check('取消成功', r.cancelled === true);
+  check('信号发出去了', j.signal.aborted === true);
+  /**
+   * 这句话必须说清楚"手上这一镜会跑完"。
+   * 只回一个 ok 的话，用户看着它又跑完一镜会以为按钮坏了 ——
+   * 而那一镜的钱本来就已经花了，掐掉才是真的浪费。
+   */
+  check('说清楚了手上那一镜会跑完', /跑完并存下来/.test(r.message), r.message);
+  check('也说清楚了后面的不发', /还没开始.*都不发|不发/.test(r.message), r.message);
+  check('再点一次不会重复中止', /已经在停了/.test(jobs.cancel('p1').message));
+  check('状态里标着正在停', jobs.describe('p1').cancelling === true);
+  check('没在跑的项目取消是句人话，不是报错',
+    jobs.cancel('p3').cancelled === false && /没有在跑/.test(jobs.cancel('p3').message));
+
+  // ── 安全点 ──
+  let stopped = null;
+  try {
+    jobs.checkpoint(j.signal, '第 5 镜起往后的 6 镜');
+  } catch (err) {
+    stopped = err;
+  }
+  check('到安全点会停', stopped?.code === 'CANCELLED', String(stopped?.code));
+  // "不计费"这三个字很要紧：用户最担心的就是"我点了停，钱还在烧吗"
+  check('并且说明没开始的不计费', /不计费/.test(stopped?.message || ''), stopped?.message);
+  check('认得出这是取消不是失败', jobs.isCancel(stopped) === true);
+  check('别的错不会被当成取消', jobs.isCancel(new Error('厂商 500')) === false);
+  // 没取消时 checkpoint 必须什么都不做，否则整条流水线跑不起来
+  const fresh = jobs.start('p4', 'assets');
+  jobs.checkpoint(fresh.signal, '不该抛');
+  check('没取消时安全点直接放行', true);
+
+  // ── 收工 ──
+  jobs.finish(j);
+  check('收工后登记表里没有了', jobs.describe('p1').running === false);
+  // 拿别人的 job 来收会误删掉后开的那一份
+  const later = jobs.start('p1', 'voice');
+  jobs.finish(j);
+  check('收工只收自己那一份', jobs.describe('p1').running === true);
+  jobs.finish(later);
+  jobs.__reset();
+}
+
+section('叫停：轮询停下来，但不能把已经花掉的钱弄丢');
+{
+  /**
+   * 这是取消里最容易造成实际损失的一处：任务**已经提交**，钱已经在花。
+   * 停轮询是对的，但如果连 task_id 一起丢掉 ——
+   * 片子在厂商那儿跑完了，而你再也找不回来。
+   */
+  const { poll } = await import('../core/http-client.js');
+
+  const ac = new AbortController();
+  ac.abort();
+  let err = null;
+  try {
+    await poll(async () => ({ done: false, value: {} }), { signal: ac.signal, taskId: 'task-88', intervalMs: 10 });
+  } catch (e) {
+    err = e;
+  }
+  check('取消时轮询停下来', err?.code === 'CANCELLED', String(err?.code));
+  check('任务号带出来了（上层要拿它记「待认领」）', err?.taskId === 'task-88', String(err?.taskId));
+  check('话里点明了它已经计费、去哪儿找回来',
+    /计费/.test(err?.message || '') && /待认领/.test(err?.message || ''), err?.message);
+
+  // 跑到一半才取消：已经问过的那几次不该白问，但不能再往下问
+  const ac2 = new AbortController();
+  let asked = 0;
+  let err2 = null;
+  try {
+    await poll(
+      async () => {
+        asked += 1;
+        if (asked === 2) ac2.abort();
+        return { done: false, value: {} };
+      },
+      { signal: ac2.signal, taskId: 't2', intervalMs: 10 }
+    );
+  } catch (e) {
+    err2 = e;
+  }
+  check('中途取消，问过两次就停', asked === 2, String(asked));
+  check('中途取消也带着任务号', err2?.taskId === 't2');
+
+  // 没有信号时行为一点不变 —— 这条路上绝大多数调用都不传信号
+  let n = 0;
+  const v = await poll(async () => { n += 1; return n >= 2 ? { done: true, value: 'ok' } : { done: false, value: {} }; },
+    { intervalMs: 5 });
+  check('不传信号时照常轮询到底', v === 'ok' && n === 2, `${v}/${n}`);
+}
+
 section('转场：默认硬切，叠化要付出时长');
 {
   const tr = await import('../core/transitions.js');

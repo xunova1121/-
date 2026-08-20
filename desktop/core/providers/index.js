@@ -233,7 +233,10 @@ export async function sendAsync(spec, onEvent) {
     },
     {
       intervalMs: settings.get('pollIntervalMs'),
-      timeoutMs: settings.get('pollTimeoutMs')
+      timeoutMs: settings.get('pollTimeoutMs'),
+      // 取消时停轮询，但把任务号带出去 —— 它已经计费了，丢了号就白花
+      signal: spec.pollSignal || null,
+      taskId
     }
   );
 

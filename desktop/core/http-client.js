@@ -380,10 +380,29 @@ export async function executeJSON(spec) {
 }
 
 /** 轮询直到任务终态。国内这几家视频模型清一色是"提交 → 轮询"，抽出来复用。 */
-export async function poll(fn, { intervalMs = 3000, timeoutMs = 600000, onTick } = {}) {
+export async function poll(fn, { intervalMs = 3000, timeoutMs = 600000, onTick, signal = null, taskId = null } = {}) {
   const deadline = Date.now() + timeoutMs;
   let attempt = 0;
   for (;;) {
+    /**
+     * 用户叫停了。
+     *
+     * 停轮询，但**把 task_id 带出去** —— 这一步很要紧：任务已经提交了，
+     * 钱已经在花。丢了这个号，就是钱花了、片子在厂商那儿、而你再也找不回来。
+     * 上层拿到它会记进「待认领」，回头能把片子收回来。
+     *
+     * 检查放在每一圈开头而不是只在 sleep 里，是为了让"刚点完取消"
+     * 也能立刻生效，而不是先白等一个轮询间隔。
+     */
+    if (signal?.aborted) {
+      const err = new HttpError(
+        `已按你的要求停止轮询。${taskId ? `任务 ${taskId} 在厂商那边还会跑完 —— 它已经计费了，去「待认领」把片子收回来。` : ''}`
+      );
+      err.code = 'CANCELLED';
+      if (taskId) err.taskId = taskId;
+      throw err;
+    }
+
     attempt += 1;
     const { done, value } = await fn(attempt);
     if (done) return value;
@@ -391,6 +410,21 @@ export async function poll(fn, { intervalMs = 3000, timeoutMs = 600000, onTick }
     if (Date.now() >= deadline) {
       throw new HttpError(`任务轮询超时（${Math.round(timeoutMs / 1000)}s），最后状态：${JSON.stringify(value).slice(0, 200)}`);
     }
-    await new Promise((r) => setTimeout(r, intervalMs));
+    // 睡这一觉也要能被叫醒 —— 轮询间隔可能有好几秒，
+    // 傻等完再看信号会让"取消"感觉很迟钝
+    await sleepOrAbort(intervalMs, signal);
   }
+}
+
+function sleepOrAbort(ms, signal) {
+  if (!signal) return new Promise((r) => setTimeout(r, ms));
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, ms);
+    function done() {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', done);
+      resolve();
+    }
+    signal.addEventListener('abort', done, { once: true });
+  });
 }

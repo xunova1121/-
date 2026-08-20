@@ -491,6 +491,9 @@ export async function generateVideo({
   aspectRatio = null,
   timeoutMs = 600000,
   label = '出视频',
+  // 取消信号。只影响**轮询**，不打断已经发出去的提交 ——
+  // 提交半路被掐是最坏的情况：可能已经计费，而 task_id 没拿到
+  signal = null,
   onEvent = null
 }) {
   const provider = getProvider(providerId);
@@ -590,6 +593,7 @@ export async function generateVideo({
       providerId,
       model,
       prompt,
+      signal,
       images,
       duration: actualDuration,
       requestedDuration: duration,
@@ -609,6 +613,7 @@ export async function generateVideo({
       providerId,
       model,
       prompt,
+      signal,
       firstFrameUrl,
       refImages,
       duration: actualDuration,
@@ -703,7 +708,7 @@ export async function generateVideo({
   }
 
   const { submitted, polled } = await sendAsync(
-    { provider: providerId, label, method: 'POST', timeoutMs, ...spec },
+    { provider: providerId, label, method: 'POST', timeoutMs, pollSignal: signal, ...spec },
     onEvent
   );
   if (!submitted.ok) fail(label, submitted);
@@ -1208,6 +1213,7 @@ async function generateVideoOpenAI({
   providerId,
   model,
   prompt,
+  signal = null,
   images,
   duration,
   requestedDuration,
@@ -1273,7 +1279,7 @@ async function generateVideoOpenAI({
       }
       return { done: false, value: res.json };
     },
-    { intervalMs: settings.get('pollIntervalMs'), timeoutMs }
+    { intervalMs: settings.get('pollIntervalMs'), timeoutMs, signal, taskId: id }
   );
 
   const contentUrl = ep('content', '{{baseUrl}}/videos/{id}/content').replace('{id}', encodeURIComponent(id));
@@ -1344,6 +1350,7 @@ async function generateVideoMiniMax({
   providerId,
   model,
   prompt,
+  signal = null,
   firstFrameUrl,
   refImages,
   images,
@@ -1490,7 +1497,7 @@ async function generateVideoMiniMax({
       }
       return { done: false, value: json };
     },
-    { intervalMs: settings.get('pollIntervalMs'), timeoutMs }
+    { intervalMs: settings.get('pollIntervalMs'), timeoutMs, signal, taskId }
   );
 
   // ③ 取下载地址（第②步已经给了 url 就跳过）
