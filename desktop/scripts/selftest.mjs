@@ -5078,6 +5078,40 @@ check(
   stubOffenders.map((f) => path.relative(PROJECT_ROOT, f)).join('、')
 );
 
+/**
+ * 更新脚本的核对那一步，不许有"跳过"这条路。
+ *
+ * ── 这条也是踩出来的 ──
+ *
+ * update-server.sh 存在的**唯一**理由是最后那次核对：前面每一条命令
+ * 都可能回 0 而实际没更新（镜像用了缓存层、容器没重建）。
+ *
+ * 而它第一版是拿 .env 里的 FD_TOKEN 去请求 /api/health —— 可
+ * docker-compose.yml 里 FD_TOKEN 是**可选**的，不填的话应用自己生成一个
+ * 存进数据卷。也就是说在这个项目自己推荐的装法下，核对**永远走 exit 0
+ * 那条跳过分支**。用户跑完看到一句"跳过核对，请自己看页面"，
+ * 整个脚本等于没干最重要的那件事，而且它回的是 0，看起来一切正常。
+ *
+ * 用户真的这么跑了，真的看到了那句话 —— 这条断言就是那次的回执。
+ *
+ * 现在改成在容器里读应用自己的 version.info()：不碰网络、不要口令，
+ * 没有任何前提条件，也就没有理由再有一条 exit 0 的旁路。
+ */
+{
+  const updater = path.join(PROJECT_ROOT, 'scripts', 'update-server.sh');
+  const text = fs.existsSync(updater) ? fs.readFileSync(updater, 'utf8') : '';
+  const body = text
+    .split('\n')
+    .filter((l) => !/^\s*#/.test(l))     // 注释里出现"跳过"是在讲历史，不算
+    .join('\n');
+  check('更新脚本还在（核对版本这件事没人替它做）', text.length > 0);
+  check('更新脚本里没有"核对不了就算了"的旁路（exit 0）',
+    !/\bexit\s+0\b/.test(body), body.split('\n').filter((l) => /exit\s+0/.test(l)).join(' / '));
+  // 核对必须问应用自己，别再依赖 .env 里可有可无的东西
+  check('核对读的是应用自己的版本号，不依赖 FD_TOKEN',
+    /version\.js/.test(body) && !/FD_TOKEN/.test(body), body.includes('FD_TOKEN') ? '还在用 FD_TOKEN' : '');
+}
+
 // 同一族的另一个坑：new URL(...).pathname 在 Windows 上带盘符前缀斜杠。
 // 这段检查本身第一版就栽在这里，所以顺手也纳入守卫。
 const PATHNAME_TRAP = /new\s+URL\s*\([^)]*\)\s*\.pathname/;

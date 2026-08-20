@@ -59,26 +59,21 @@ FD_BUILD="$AFTER" docker compose up -d --build
 # 这一步才是这个脚本的重点。前面每一条命令都可能回 0 而实际没生效。
 say "核对跑着的版本"
 
-TOKEN=""
-if [ -f .env ]; then
-  # 只去掉两头的引号和空白。用 tr -d 会把**中间**的字符也删掉 ——
-  # 口令是复制粘贴的，删错一个字符就变成"口令不对"，而看上去完全正常
-  TOKEN="$(grep -E '^FD_TOKEN=' .env | head -1 | sed -E "s/^FD_TOKEN=//; s/^[[:space:]]*//; s/[[:space:]]*$//; s/^[\"']//; s/[\"']$//" || true)"
-fi
-if [ -z "$TOKEN" ]; then
-  bad "在 .env 里没找到 FD_TOKEN，跳过核对 —— 请自己打开页面看「设置」最下面那行版本号"
-  exit 0
-fi
-
-# 容器刚起来，给它几秒。轮询而不是死等固定秒数：好了就立刻往下走
+# ── 直接问容器，不走 HTTP，也就不需要口令 ──
+#
+# 上一版是拿 FD_TOKEN 去请求 /api/health。那要求口令写在 .env 里，
+# 而 docker-compose.yml 里 FD_TOKEN 是**可选**的：不填的话应用第一次
+# 启动会自己生成一个、存在数据卷里，只打印在 docker logs 里。
+# 也就是说，在这个项目自己推荐的那种装法下，核对这一步**永远跳过** ——
+# 而它恰恰是整个脚本存在的理由。用户跑完看到的是一句"跳过核对，
+# 请自己打开页面看版本号"，等于什么都没验。
+#
+# 换成在容器里跑一行 node，读的是应用自己那份 version.info()：
+# 同一段代码、同一个来源，页面上显示的就是这个数。不碰网络、不碰口令。
 RUNNING=""
 for _ in $(seq 1 30); do
-  # 口令用 -e 传进容器，不拼进命令行 —— 拼进去它会留在 shell 历史和 ps 输出里
-  RUNNING="$(docker compose exec -T -e K="$TOKEN" app node -e '
-    fetch("http://127.0.0.1:5178/api/health", { headers: { "x-fd-key": process.env.K } })
-      .then((r) => r.json())
-      .then((j) => console.log(j.build || ""))
-      .catch(() => console.log(""));
+  RUNNING="$(docker compose exec -T app node -e '
+    import("./core/version.js").then((v) => console.log(v.info().build)).catch(() => console.log(""));
   ' 2>/dev/null | tr -d '\r\n ' || true)"
   [ -n "$RUNNING" ] && break
   sleep 2
@@ -86,6 +81,15 @@ done
 
 if [ -z "$RUNNING" ]; then
   bad "起来了但问不到版本。看一眼它在干什么：docker compose logs --tail=40 app"
+  exit 1
+fi
+
+if [ "$RUNNING" = "dev" ]; then
+  # 镜像是在没有 FD_BUILD 的情况下建的（比如有人手敲了一遍 docker compose up -d --build）。
+  # 这时候核对不出结论 —— 说清楚是"验不了"，别含糊成"通过了"
+  bad "容器报的是 dev：这个镜像建的时候没带提交号，核对不出它到底是哪一版"
+  echo "  重建一次就好："
+  echo "    FD_BUILD=$AFTER docker compose up -d --build"
   exit 1
 fi
 
