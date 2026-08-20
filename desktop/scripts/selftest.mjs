@@ -457,27 +457,41 @@ const BIBLE_REPLY = {
   props: [{ name: '执法记录仪', appearance: '黑色方形，胸前佩戴' }]
 };
 
+/**
+ * 这份假答复**故意是违规的**：第 2 镜跨了场次却标着「连续动作」和叠化。
+ * 模型真会这么答 —— 提示词只是请求。解析那一步必须把它掰回来，
+ * 否则那两镜会去锁末帧，强行让新的一场长成上一场的样子，而且不报任何错。
+ */
 const SHOTS_REPLY = {
   logline: '一次清晨的例行巡查',
+  segments: [
+    { index: 1, where: '码头', when: '清晨', summary: '阿澜出发前的检查与登船', enter: 'cut' }
+  ],
   shots: [
     {
       index: 1,
+      segment: 1,
       scene: '码头',
       characters: ['阿澜'],
       description: '阿澜检查执法记录仪',
       camera: '中景',
       motion: '镜头缓推',
       dialogue: '设备正常。',
+      transition: 'dissolve',
       duration: 4
     },
     {
       index: 2,
+      segment: 1,
       scene: '码头',
       characters: ['阿澜'],
       description: '阿澜登船',
       camera: '全景',
       motion: '跟拍',
       dialogue: '',
+      link: 'continuous',
+      // 场次内部不该有转场。模型照样会给，解析那一步要把它压回硬切
+      transition: 'dissolve',
       duration: 5
     }
   ]
@@ -795,6 +809,32 @@ const afterScript = scriptEvents.find((e) => e.type === 'finished')?.project;
 check('分镜跑通', afterScript?.shots?.length === 2, JSON.stringify(scriptEvents.slice(-1)));
 check('分镜带上了出场角色', afterScript?.shots?.[0]?.characters?.[0] === '阿澜');
 
+/**
+ * 场次那一层真的落地了没有 —— 前面测的是零件，这里测的是整条路。
+ * 假答复是故意违规的（跨场次标了「连续动作」、第一镜标了叠化），
+ * 走完拆分镜这一步之后必须已经被掰回来。
+ */
+check('场次表存进项目里了', afterScript?.segments?.length === 1,
+  JSON.stringify(afterScript?.segments));
+check('两镜都在同一个场次里', afterScript?.shots?.map((x) => x.segment).join(',') === '1,1',
+  afterScript?.shots?.map((x) => x.segment).join(','));
+// 第一镜前面什么都没有，叠化不可能生效 —— 界面上显示一个永远不生效的转场比没有更糟
+check('第一镜那个叠化被掰成硬切', afterScript?.shots?.[0]?.transition === 'cut',
+  afterScript?.shots?.[0]?.transition);
+// 场次内部一律硬切。中间来一下叠化是最典型的业余做法
+check('场次内部那个叠化也被掰成硬切', afterScript?.shots?.[1]?.transition === 'cut',
+  afterScript?.shots?.[1]?.transition);
+// 场次内部的衔接关系不该被动 —— 那本来就该由它自己决定
+check('场次内部的「连续动作」原样保留', afterScript?.shots?.[1]?.link === 'continuous',
+  afterScript?.shots?.[1]?.link);
+// 改了什么必须说出来，不能悄悄改
+check('纠正过程说出来了',
+  scriptEvents.some((e) => /按场次规矩纠正了/.test(e.message || '')),
+  JSON.stringify(scriptEvents.filter((e) => e.type === 'note').slice(0, 4)));
+check('场次摘要也报了',
+  scriptEvents.some((e) => /1 个场次/.test(e.message || '')),
+  JSON.stringify(scriptEvents.filter((e) => e.type === 'note').map((e) => e.message).slice(0, 6)));
+
 upstream.imagePrompts = [];
 upstream.imageSeeds = [];
 const assetEvents = await ndjson(`/projects/${project.id}/stage/assets`, {});
@@ -929,11 +969,18 @@ const vidImages = vidContent.filter((c) => c.type === 'image_url');
 check('单镜视频重出跑通', Boolean(shot1v?.videoPath), JSON.stringify(vidEvents.slice(-1)));
 check('提示词里有剧本内容，不只是运镜（图文不搭就是这儿漏的）',
   vidText.includes('阿澜'), vidText.slice(0, 80));
-// 方舟 Seedance 只收 1 张首帧图。多塞几张过去整个任务会被判非法参数直接失败 ——
-// "出视频一直失败"最常见的就是这个原因。所以这里必须只发 1 张，并说清楚为什么。
-check('方舟只发 1 张首帧图（多发会让任务提交直接失败）', vidImages.length === 1, `${vidImages.length} 张`);
+/**
+ * 方舟 Seedance 只收 1 张首帧图；标了「连续动作」时走首尾帧模式，最多 2 张，
+ * 而且**两张都要带 role** —— 不带的话它会当成两张参考图，整个任务提交就失败。
+ * 多塞第三张过去同样是非法参数。所以这里卡的是"不超过 2 张"。
+ *
+ * 这份假答复里第 2 镜标着 continuous，所以正确答案就是 2 张（首帧 + 末帧）。
+ * 设定集参考图那一张必须被截掉，并且说清楚为什么。
+ */
+check('方舟最多 2 张（首帧+末帧），第三张会让任务提交直接失败',
+  vidImages.length === 2, `${vidImages.length} 张`);
 check('被截掉的参考图有说明，不是悄悄丢掉',
-  vidEvents.some((e) => e.type === 'note' && /最多收 1 张图/.test(e.message || '')),
+  vidEvents.some((e) => e.type === 'note' && /最多收 2 张图/.test(e.message || '')),
   JSON.stringify(vidEvents.filter((e) => e.type === 'note').map((e) => e.message).slice(0, 3)));
 // 台词从来没进过视频提示词：于是模型只知道"有人在说话"，说什么、谁在说全靠它猜。
 // 画面里两个人时，张嘴的那个有一半几率是错的
@@ -2417,6 +2464,123 @@ section('叫停：轮询停下来，但不能把已经花掉的钱弄丢');
   check('不传信号时照常轮询到底', v === 'ok' && n === 2, `${v}/${n}`);
 }
 
+section('场次：先决定在哪儿断，再决定拆成几镜');
+{
+  const seg = await import('../core/pipeline/segments.js');
+  const tr = await import('../core/transitions.js');
+
+  // ── 洗模型给的场次表 ──
+  const segs = seg.normalizeSegments([
+    { where: '办公室', when: '二十年前', summary: '明锋收下支票', enter: 'dissolve' },
+    { where: '办公室', when: '今天', summary: '明锋想起那天', enter: 'fade' },
+    { where: '走廊', when: '今天', enter: '花式旋转' }
+  ]);
+  // 第一段前面什么都没有，"进入方式"无从谈起
+  check('第一场固定硬切', segs[0].enter === 'cut', segs[0].enter);
+  check('第二场保留黑场', segs[1].enter === 'fade');
+  check('瞎编的进入方式退回硬切', segs[2].enter === 'cut', segs[2].enter);
+  check('序号重排成 1..n', segs.map((x) => x.index).join(',') === '1,2,3');
+  check('模型没给场次表时回空数组，退回老行为', seg.normalizeSegments(undefined).length === 0);
+
+  // ── 分配 ──
+  const byModel = seg.assignSegments(
+    [{ index: 1, segment: 1 }, { index: 2, segment: 2 }, { index: 3, segment: 99 }], segs);
+  check('模型标的场次用得上', byModel[1].segment === 2);
+  check('越界的夹回合法范围', byModel[2].segment === 3, String(byModel[2].segment));
+
+  // 模型没标时按场景名推断 —— 抓不到"同地点不同时间"，但不会抓错
+  const derived = seg.assignSegments(
+    [{ index: 1, scene: '码头' }, { index: 2, scene: '码头' }, { index: 3, scene: '值班室' }], []);
+  check('没标时按场景名变化推断', derived.map((x) => x.segment).join(',') === '1,1,2',
+    derived.map((x) => x.segment).join(','));
+
+  // ── 强制归一：这一段才是这个模块存在的理由 ──
+  const raw = [
+    { index: 1, segment: 1, transition: 'dissolve', link: 'cut' },
+    { index: 2, segment: 1, transition: 'dissolve', link: 'continuous' },
+    { index: 3, segment: 2, transition: 'cut', link: 'continuous' },
+    { index: 4, segment: 2, transition: 'fade', link: 'cut' }
+  ];
+  const { shots: fixed, changes } = seg.enforce(raw, segs);
+
+  check('第一镜没有转场可言', fixed[0].transition === 'cut' && fixed[0].link === 'new-scene');
+  // 场次内部来一下叠化是最典型的业余做法
+  check('场次内部的叠化被改回硬切', fixed[1].transition === 'cut', fixed[1].transition);
+  check('场次内部的衔接关系不动', fixed[1].link === 'continuous');
+  /**
+   * 这一条是整条规矩里唯一会造成真实损失的：continuous 会去锁末帧，
+   * 跨了二十年还这么锁，等于强行让新的一场长成上一场的样子，而且不报错。
+   */
+  check('跨场次的「连续动作」被改成换场景', fixed[2].link === 'new-scene', fixed[2].link);
+  check('场次头一镜按场次的进入方式来', fixed[2].transition === 'fade', fixed[2].transition);
+  check('场次内部的第 4 镜转场被压回硬切', fixed[3].transition === 'cut');
+  // 改了什么必须说得出来 —— 悄悄改用户看得见的字段是这类归一化最容易犯的错
+  check('每一处改动都有记录', changes.length >= 4, String(changes.length));
+  check('记录里写清了为什么', changes.every((c) => c.why && c.why.length > 6));
+
+  // ── 时长账 ──
+  const cost = seg.overlapCost([
+    { transition: 'cut' }, { transition: 'dissolve' }, { transition: 'fade' }, { transition: 'dissolve' }
+  ]);
+  check('只有叠化吃时长，黑场不吃', cost === tr.DISSOLVE_SECONDS * 2, String(cost));
+  check('第一镜的转场不算钱', seg.overlapCost([{ transition: 'dissolve' }]) === 0);
+
+  check('摘要点出了场次数和镜数',
+    /3 个场次/.test(seg.summarize(segs, fixed) || ''), seg.summarize(segs, fixed));
+}
+
+section('场次边界：不锁末帧、不拿邻镜当参考');
+{
+  const continuity = await import('../core/pipeline/continuity.js');
+
+  /**
+   * 光比场景名会漏掉最坑的一种：**同一个地方，隔了二十年**。
+   * "二十年前的办公室"和"今天的办公室"很可能挂着同一个场景名 ——
+   * 于是今天那一镜会拿二十年前那张当参考，人、光、陈设全被带回去，而且不报错。
+   */
+  const same = { id: 'b', index: 2, scene: '办公室', segment: 2, imagePath: null };
+  const prev = { id: 'a', index: 1, scene: '办公室', segment: 1, imagePath: '/x/a.png' };
+
+  check('跨场次不锁末帧',
+    continuity.shouldChainEndFrame(same, 'continuous', prev) === false);
+  check('同场次照常锁末帧',
+    continuity.shouldChainEndFrame({ ...same, segment: 1, imagePath: '/x/b.png' }, 'continuous', prev) === true);
+  // 不传当前镜时维持老行为 —— 老项目里没有 segment 字段
+  check('没有场次信息时不改变老行为',
+    continuity.shouldChainEndFrame({ ...same, imagePath: '/x/b.png' }, 'continuous') === true);
+
+  const proj = { shots: [prev, { ...same, link: 'cut' }] };
+  check('跨场次不拿上一镜当参考图',
+    continuity.neighborRef(proj, proj.shots[1]) === null);
+  const sameSeg = { shots: [prev, { ...same, segment: 1, link: 'cut' }] };
+  check('同场次照常给场景锚',
+    continuity.neighborRef(sameSeg, sameSeg.shots[1])?.path === '/x/a.png');
+}
+
+section('手改违规不悄悄改回去，但要说出来');
+{
+  const lint = await import('../core/pipeline/shotlint.js');
+
+  /**
+   * 拆分镜时这些已经强制归一过了。这里抓的是**人在界面上手改出来的** ——
+   * 那种改动不去悄悄改回来（人明确选的东西，界面上自己变回去比不做还糟），
+   * 但必须说出来。
+   */
+  const bad = lint.lintShots([
+    { id: 'a', index: 1, segment: 1, description: '明锋伏案', transition: 'cut' },
+    { id: 'b', index: 2, segment: 2, description: '明锋抬头', link: 'continuous', transition: 'fade' },
+    { id: 'c', index: 3, segment: 2, description: '支票摊在桌上', transition: 'dissolve' }
+  ]);
+  const kinds = bad.flatMap((r) => r.issues.map((i) => i.kind));
+  check('跨场次标了连续动作会被报出来', kinds.includes('continuous-across-segments'), kinds.join(','));
+  check('场次内部用叠化会被报出来', kinds.includes('transition-inside-segment'), kinds.join(','));
+  // 合规的那两处不该报
+  check('场次头一镜用黑场是合规的，不报',
+    !bad.find((r) => r.index === 2)?.issues.some((i) => i.kind === 'transition-inside-segment'));
+  check('第一镜不报', !bad.some((r) => r.index === 1));
+  check('每条都给了改法', bad.every((r) => r.issues.every((i) => i.fix && i.fix.length > 8)));
+}
+
 section('转场：默认硬切，叠化要付出时长');
 {
   const tr = await import('../core/transitions.js');
@@ -3215,6 +3379,74 @@ section('改了描述，发出去的提示词跟着变');
   const p1 = done?.shots?.find((x) => x.id === 'p1');
   check('重出之后不再显示"已过时"',
     p1?.videoPrompt?.includes('缆绳的断口'), p1?.videoPrompt?.slice(0, 60));
+}
+
+section('片段比分镜短：定格补齐，而不是让后面全跟着提前');
+{
+  /**
+   * 原来这里只有 `-t want`，而 **-t 只截不补**：一段 3.2 秒的片子配上
+   * `-t 5`，出来还是 3.2 秒。成片就比时间轴短了 1.8 秒。
+   *
+   * 而配音和字幕按**绝对时间**摆，它们仍然以为这一镜占满 5 秒 ——
+   * 于是从这一镜之后每一句都提前，缺几段就累加几次。
+   * 这个错没有任何报错：厂商给的片子短一点很常见（档位对不齐、
+   * 模型提前收尾、下载被截断），任务全都是"成功"。
+   */
+  const ff = await import('../core/ffmpeg.js');
+  const dir = path.join(SANDBOX, 'pad');
+  fs.mkdirSync(dir, { recursive: true });
+  const segs = ['p1.mp4', 'p2.mp4'].map((n) => path.join(dir, n));
+  for (const f of segs) fs.writeFileSync(f, 'seg');
+  const out = path.join(dir, 'film.mp4');
+
+  const runWith = async (realSeconds, trims, { hasAudio = false } = {}) => {
+    const calls = [];
+    const notes = [];
+    await ff.concat(segs, out, {
+      trims,
+      onNote: (m) => notes.push(m),
+      __probe: async (f) => ({ seconds: realSeconds[segs.indexOf(f)] ?? 5, hasAudio }),
+      __exec: async (args) => {
+        calls.push(args.join(' '));
+        const last = args[args.length - 1];
+        if (last && !last.startsWith('-')) fs.writeFileSync(last, 'x');
+        return { stderr: '' };
+      }
+    });
+    return { calls, notes };
+  };
+
+  // ① 第一段只有 3.2 秒而分镜要 5 秒 —— 差 1.8 秒，必须补
+  const short = await runWith([3.2, 5], [5, 5]);
+  check('短了的那段用定格补齐',
+    short.calls.some((c) => /tpad=stop_mode=clone:stop_duration=1\.800/.test(c)),
+    short.calls.join(' | ').slice(0, 240));
+  // 补黑场等于片子中间闪一下，比短一点还难看。定格是剪辑里的常规做法
+  check('补的是定格不是黑场', !short.calls.some((c) => /color=black|nullsrc/.test(c)));
+  check('补完仍然按分镜时长截齐', short.calls.some((c) => /-t 5/.test(c)));
+  check('够长的那段不补', short.calls.filter((c) => /tpad/.test(c)).length === 1,
+    String(short.calls.filter((c) => /tpad/.test(c)).length));
+  // 悄悄补齐等于把"这一镜时长定得不合理"这条信息藏起来
+  check('补了多少说出来了', short.notes.some((m) => /补齐/.test(m)), short.notes.join(' | '));
+  check('并且说清了不补会怎样', short.notes.some((m) => /提前/.test(m)), short.notes.join(' | '));
+  check('点名了差得最多的那一段', short.notes.some((m) => /第 1 段/.test(m)), short.notes.join(' | '));
+
+  // ② 差得在 0.15 秒以内不折腾 —— 那点差观感上不存在，为它重编码不划算
+  const tiny = await runWith([4.95, 5], [5, 5]);
+  check('差一点点不补', !tiny.calls.some((c) => /tpad/.test(c)), tiny.calls.join(' | ').slice(0, 160));
+  check('不补的时候也不吭声', !tiny.notes.some((m) => /补齐/.test(m)));
+
+  // ③ 长了照旧只截 —— 这是原来就有的行为，不能被改坏
+  const long = await runWith([10, 5], [5, 5]);
+  check('长了的只截不补', !long.calls.some((c) => /tpad/.test(c)));
+  check('截到分镜时长', long.calls.some((c) => /-t 5/.test(c)));
+
+  // ④ 有音轨时静音也要跟着补，否则补出来那截没音轨，拼接时流结构对不上
+  const withAudio = await runWith([3, 5], [5, 5], { hasAudio: true });
+  check('有音轨时静音跟着补', withAudio.calls.some((c) => /apad=pad_dur=2\.000/.test(c)),
+    withAudio.calls.join(' | ').slice(0, 200));
+  const noAudio = await runWith([3, 5], [5, 5], { hasAudio: false });
+  check('没音轨时不硬加 apad', !noAudio.calls.some((c) => /apad/.test(c)));
 }
 
 section('转场：真发给 FFmpeg 的那串参数长什么样');

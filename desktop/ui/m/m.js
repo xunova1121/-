@@ -907,7 +907,38 @@ function paintShots() {
   const v = Date.parse(project.updatedAt || '') || 0;
   const portrait = /^9:16$|^3:4$/.test(project.aspectRatio || '');
 
-  return [linkRangeCard(shots), ...shots.map((s) => {
+  /**
+   * 场次分隔条。手机上一屏只看得见一两镜，边界更容易被漏掉 ——
+   * 而跨边界不能锁末帧、不能拿邻镜当参考，看不见的话人只会觉得
+   * "这两镜怎么接不上"，而那条线正在眼皮底下。
+   */
+  const segs = project.segments || [];
+  let lastSeg = null;
+  const out = [linkRangeCard(shots)];
+
+  for (const s of shots) {
+    const seg = Number(s.segment || 1);
+    if (seg !== lastSeg) {
+      const meta = segs.find((x) => Number(x.index) === seg && (x.chapterId || null) === (s.chapterId || null));
+      const enter = lastSeg === null ? '' : s.transition || 'cut';
+      out.push(
+        h('div', { class: 'seg-head' },
+          h('b', {}, `第 ${seg} 场`),
+          h('span', { class: 'muted' },
+            `${meta?.where || s.scene || '未标场景'}${meta?.when ? ` · ${meta.when}` : ''}`),
+          enter && enter !== 'cut'
+            ? h('span', { class: 'tag' }, enter === 'fade' ? '黑场进入' : '叠化进入 −0.5s')
+            : null)
+      );
+      lastSeg = seg;
+    }
+    out.push(shotCardOf(s, v, portrait));
+  }
+  return out;
+}
+
+function shotCardOf(s, v, portrait) {
+  {
     const c = s.consistency;
     return h('div', { class: 'card shot' },
       s.videoPath
@@ -941,7 +972,7 @@ function paintShots() {
               }, '重出这段视频')
             : null),
         editRow(s)));
-  })];
+  }
 }
 
 /**
@@ -1005,6 +1036,8 @@ function editRow(s) {
   // 这一镜走哪一档模型。自动判定给一个，判错的那几镜由人改
   let tier = s.tier || '';
   const TIER_PICK = [['', '自动判定'], ['high', '关键镜'], ['normal', '一般'], ['low', '空镜']];
+  // 属于第几场。模型划边界是读剧本猜的，猜错很正常，得能改
+  const segIn = h('input', { type: 'number', class: 'min', min: '1', max: '99', value: String(s.segment || 1) });
   // 怎么进入这一镜。默认硬切 —— 满屏叠化是最典型的业余做法
   let transition = s.transition || 'cut';
   const TRANS_PICK = [['cut', '硬切'], ['fade', '黑场'], ['dissolve', '叠化']];
@@ -1024,6 +1057,8 @@ function editRow(s) {
           sound: sfx.value,
           // cap:shot-transition
           transition,
+          // cap:shot-segment
+          segment: Number(segIn.value) || 1,
           camera,
           motion,
           tier,
@@ -1055,6 +1090,8 @@ function editRow(s) {
     field('景别', chips(CAMERAS, camera, (v) => (camera = v))),
     field('运镜', chips(MOTIONS, motion, (v) => (motion = v))),
     field('时长（秒）', dur),
+    // cap:shot-segment
+    field('第几场', segIn, '场次 = 同一时间同一地点的一段戏。跨场次不能锁末帧、不能拿邻镜当参考图，转场也只出现在场次之间。'),
     // cap:tier-routing
     field('模型档位', (() => {
       const wrap = h('div', { class: 'chips' });

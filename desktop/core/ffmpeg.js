@@ -339,9 +339,33 @@ export async function concat(
   };
 
   try {
-    // 按分镜时长裁剪：模型只给固定档位（5s/10s），想精确命中目标时长就得切。
-    // 用 -t 而不是重新编码整段 —— 只截时长，画质不动。
+    /**
+     * 按分镜时长对齐 —— **长了要切，短了要补**。
+     *
+     * ── 短了会怎样，为什么以前看不出来 ──
+     *
+     * 原来这里只有 `-t want`，而 `-t` 只截不补：一段 3.2 秒的片子配上
+     * `-t 5`，出来还是 3.2 秒。于是成片比时间轴短了 1.8 秒。
+     *
+     * 而配音和字幕是按**绝对时间**摆的（timelineOf 那一份），它们仍然
+     * 以为这一镜占满 5 秒。结果是**从这一镜之后，每一句台词都早出来 1.8 秒**，
+     * 而且缺几镜就累加几次 —— 到片尾能错出好几秒。
+     *
+     * 表现和"配音顺次拼"那个老 bug 一模一样：前两镜看着挺正常，越往后越离谱。
+     * 而且它**没有任何报错** —— 厂商给的片子短一点是很常见的事
+     *（档位对不齐、模型提前收尾、下载被截断），任务全都是"成功"。
+     *
+     * ── 怎么补 ──
+     *
+     * 定格最后一帧（tpad=stop_mode=clone），不是补黑场。
+     * 补黑场等于在片子中间闪一下，比短一点还难看；定格是剪辑里
+     * 处理这种情况的常规做法，观众读作"停顿"，不违和。
+     *
+     * 补多少要说出来：补太多说明这一镜的分镜时长定得不合理，
+     * 那是导演该知道的事，不该被悄悄抹平。
+     */
     let clips = segments;
+    const padded = [];
     if (trims?.length) {
       clips = [];
       for (let i = 0; i < segments.length; i++) {
@@ -350,14 +374,38 @@ export async function concat(
           clips.push(segments[i]);
           continue;
         }
+        const info = await (__probe || probeStreams)(segments[i]);
+        const real = info?.seconds || null;
+        // 0.15 秒以内不管：那点差在观感上不存在，为它重编码一遍不划算
+        const gap = real ? want - real : 0;
+        const needPad = gap > 0.15;
+
         const cut = `${outputPath}.trim${i}.mp4`;
+        const args = ['-y', '-i', segments[i]];
+        if (needPad) {
+          args.push('-vf', `tpad=stop_mode=clone:stop_duration=${gap.toFixed(3)}`);
+          // 有音轨的话也要跟着补静音，否则补出来的那一段没有音轨，
+          // 拼接时流结构对不上（concat demuxer 对这个很敏感）
+          if (info?.hasAudio) args.push('-af', `apad=pad_dur=${gap.toFixed(3)}`);
+          padded.push({ index: i + 1, gap, real, want });
+        }
         // 关键帧不一定落在切点上，所以这里必须重编码视频，copy 会切歪
-        await run(['-y', '-i', segments[i], '-t', String(want), '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', cut], {
-          onProgress
-        });
+        args.push('-t', String(want), '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', cut);
+        await (__exec || run)(args, { onProgress });
         cleanup.push(cut);
         clips.push(cut);
       }
+    }
+
+    if (padded.length) {
+      const worst = padded.slice().sort((a, b) => b.gap - a.gap)[0];
+      onNote?.(
+        `有 ${padded.length} 段比分镜时长短，已用定格最后一帧补齐（合计 ${
+          padded.reduce((n, x) => n + x.gap, 0).toFixed(1)
+        } 秒）—— 不补的话，从那一镜之后每一句配音和字幕都会提前，而且缺几段就累加几次。` +
+        `其中第 ${worst.index} 段差得最多：厂商给了 ${worst.real.toFixed(1)} 秒，分镜要 ${worst.want} 秒。` +
+        (worst.gap > 1.5 ? '差一秒半以上说明这一镜的时长定得不合理，去分镜页把它改短一点更自然。' : '')
+      );
     }
 
     /**

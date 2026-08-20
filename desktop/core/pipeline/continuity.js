@@ -140,8 +140,19 @@ export function continuityLines(shot, { prev, next, link, brief: short = false }
  *
  * 只在 continuous 时用：cut 的镜位是要跳的，锁了末帧等于不让它跳。
  */
-export function shouldChainEndFrame(nextShot, nextLink) {
-  return Boolean(nextShot?.imagePath && nextLink === 'continuous');
+export function shouldChainEndFrame(nextShot, nextLink, thisShot = null) {
+  if (!nextShot?.imagePath || nextLink !== 'continuous') return false;
+  /**
+   * 跨场次绝不锁末帧。
+   *
+   * 这是"顺序反了"会造成的**唯一一处真实损失**：锁末帧的含义是
+   * "这一段片子要长成下一镜那张图的样子"。跨了时间地点还这么锁，
+   * 等于强行让二十年后那一镜画成二十年前 —— 而且任务是"成功"的，
+   * 没有一处会报错。解析时已经把跨场次的 link 归一成 new-scene 了，
+   * 这里是第二道：手改过的、老项目里存着的，都拦得住。
+   */
+  if (thisShot && Number(thisShot.segment || 1) !== Number(nextShot.segment || 1)) return false;
+  return true;
 }
 
 
@@ -183,6 +194,16 @@ export function neighborRef(project, shot, { mode = 'scene-anchor' } = {}) {
   const prev = shots[at - 1];
 
   /**
+   * 场次边界比场景名更靠得住，所以它也要断链。
+   *
+   * 光比场景名会漏掉一种最坑的情况：**同一个地方，隔了很久**。
+   * "二十年前的办公室"和"今天的办公室"很可能挂着同一个场景名，
+   * 于是今天那一镜会拿二十年前那张当参考 —— 人、光、陈设全被带回去，
+   * 而且不报任何错。场次是按"时间跳了或地点换了"划的，正好拦住它。
+   */
+  if (Number(prev.segment || 1) !== Number(shot.segment || 1)) return null;
+
+  /**
    * 连续动作是唯一该用真链式的地方 —— 要的是"上一帧的下一瞬间"，
    * 场景锚给不了这个。这一条本来就少，累积不了几次。
    */
@@ -202,6 +223,7 @@ export function neighborRef(project, shot, { mode = 'scene-anchor' } = {}) {
   let anchor = null;
   for (let i = at - 1; i >= 0; i -= 1) {
     const s = shots[i];
+    if (Number(s.segment || 1) !== Number(shot.segment || 1)) break;
     if (!sameScene(s.scene, shot.scene)) break;
     if (s.imagePath) anchor = s;
   }

@@ -70,6 +70,13 @@ export const CAPABILITIES = [
     mobile: 'ui/m/m.js'
   },
   {
+    id: 'shot-segment',
+    name: '改这一镜属于第几场',
+    api: 'PATCH /projects/:id/shots/:sid { segment }',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js'
+  },
+  {
     id: 'bible-edit',
     name: '改设定集里的外貌描述',
     api: 'PATCH /projects/:id { bible }',

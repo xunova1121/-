@@ -377,3 +377,13 @@ input {
 
 /* 能点开的图给一点"可以点"的暗示，不然没人知道它能点 */
 .shot-media[onclick], .sheet-thumb[onclick] { cursor: zoom-in; }
+
+/* 场次分隔。手机上一屏只看得见一两镜，边界更容易被漏掉 ——
+   而跨边界不能锁末帧、不能拿邻镜当参考 */
+.seg-head {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  margin: 18px 4px 8px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.seg-head b { font-size: 13px; }

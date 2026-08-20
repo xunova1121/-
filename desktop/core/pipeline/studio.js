@@ -30,6 +30,7 @@ import * as variants from './variants.js';
 import * as oss from '../oss.js';
 import * as tiers from '../tiers.js';
 import * as shotlint from './shotlint.js';
+import * as segments from './segments.js';
 import * as transitions from '../transitions.js';
 import * as jobs from '../jobs.js';
 
@@ -37,13 +38,34 @@ export const extractJSON = consistency.extractJSON;
 
 const SHOT_PROMPT = `你是动态漫画的分镜导演。把剧本拆成可直接投产的分镜表。
 
+**分两步，顺序不能反**：
+
+  第一步 先划场次 —— 通读剧本，找出**时间跳了**或者**地点换了**的地方，
+         那些就是场次的边界。先把边界定下来。
+  第二步 再在每个场次内部拆镜头。
+
+为什么是这个顺序：边界决定了哪些镜头之间可以"接得看不出来"、哪些必须断开。
+先拆镜再补转场的话，会出现两镜标着「连续动作」而它们之间隔了二十年 ——
+那对镜头会去锁末帧、会互相当参考图，出来的东西说不上哪里怪，但就是怪。
+
 严格只输出 JSON，不要解释、不要代码块：
 
 {
   "logline": "一句话梗概",
+  "segments": [
+    {
+      "index": 1,
+      "where": "这一场在哪儿（用设定集里已有的场景名）",
+      "when": "什么时候（当天下午 / 二十年前 / 三小时后…）",
+      "summary": "这一场在演什么，一句话",
+      "enter": "怎么进入这一场：cut（硬切，默认）/ fade（黑场，换时间换地点）/ dissolve（叠化，表示时间流逝）。第一场固定 cut",
+      "seconds": 18
+    }
+  ],
   "shots": [
     {
       "index": 1,
+      "segment": 1,
       "scene": "所属场景名（必须用设定集里已有的场景名）",
       "characters": ["出场角色名，必须用设定集里已有的名字，空镜给空数组"],
       "description": "这一镜画面里发生的事，只写看得见的画面，不写心理活动、不写声音",
@@ -53,6 +75,7 @@ const SHOT_PROMPT = `你是动态漫画的分镜导演。把剧本拆成可直�
       "speaker": "这句台词是谁说的，填角色名；旁白或没有台词就留空字符串",
       "sound": "这一镜听得见但看不见的声音（敲门声、脚步声、雨声、远处汽笛）。没有就留空字符串",
       "transition": "进入这一镜的方式：cut（硬切，默认）/ fade（黑场淡入，换时间换地点用）/ dissolve（叠化，时间流逝或情绪转折用）。绝大多数镜都该是 cut",
+      "link": "和上一镜的关系：continuous（动作不能断，比如伸手→握住门把手，会把上一镜的末帧锁成这一镜的首帧）/ cut（同一场戏里换机位）/ new-scene（换场次）。场次的头一镜固定 new-scene",
       "duration": 4
     }
   ]
@@ -63,6 +86,8 @@ const SHOT_PROMPT = `你是动态漫画的分镜导演。把剧本拆成可直�
 - **全片总时长必须控制在 {{TARGET_SECONDS}} 秒左右（±10%）**，你自己在各镜之间分配：
   紧张、动作、转场用 3 秒短镜；抒情、对话、定场用 5~6 秒长镜。
   不要平均分配 —— 均分看着整齐，剪出来很呆板；
+- **叠化会吃掉 0.5 秒**（两段画面重叠着渐变，那半秒是重叠掉的，不是多出来的）。
+  用了几处叠化，就在时长里把那几个 0.5 秒补回来，否则成片会比说好的短；
 - **不要**在 description 里重复角色外貌 —— 外貌由设定集统一注入，你重复写反而会冲突；
 - characters 和 scene 必须严格用下面设定集里给出的名字，不要自创；
 - duration 取 3~6 秒。
@@ -91,8 +116,16 @@ const SHOT_PROMPT = `你是动态漫画的分镜导演。把剧本拆成可直�
   上一镜"手伸向门把手"，下一镜"手把门把手拧下去"。
   等一个动作彻底做完再切，接缝会很明显 —— 这是业余和专业最容易分辨的一处。
 
-- **transition 绝大多数时候填 cut**。fade 和 dissolve 只在**真的换时间换地点**时用。
+- **转场只出现在场次之间**。场次内部的每一镜，transition 一律填 cut。
+  一个场次的头一镜，transition 要和这个场次的 enter 一致。
   每镜都叠化是最典型的业余做法：它不会让片子更顺，只会让人看不清发生了什么。
+
+- **跨场次不可能是「连续动作」**。场次的头一镜，link 必须是 new-scene。
+  continuous 的含义是"上一帧的下一瞬间"，而跨场次之间隔着时间或地点 ——
+  标错了会让系统去锁末帧，强行把二十年后那一镜画成二十年前的样子，而且不报任何错。
+
+- **动作接切只在场次内部做**。同一场戏里可以在动作中途换镜；
+  跨场次一律断得干干净净，那正是观众需要的"这里翻篇了"的信号。
 
 已冻结的设定集：
 {{BIBLE}}`;
@@ -587,7 +620,13 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
   });
 
   const parsed = extractJSON(text);
-  const shots = (parsed.shots || []).map((s, i) => ({
+  /**
+   * 场次先落地。**先决定在哪儿断，再决定拆成几镜** —— 见 pipeline/segments.js。
+   * 模型没给这一段（老模型、输出跑偏）时回空数组，下面会退回按场景名推断，
+   * 行为正好等于改这一版之前 —— 少一个字段不该让整步失败。
+   */
+  const segs = segments.normalizeSegments(parsed.segments);
+  const rawShots = (parsed.shots || []).map((s, i) => ({
     id: chapters.shotIdFor(chapter?.id || null, i + 1),
     // 全局镜号：章序 × 1000 + 章内序，3012 一眼看出是第 3 章第 12 镜
     index: chapters.globalShotIndex(chapter?.index || 0, i + 1),
@@ -612,6 +651,17 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
     // 进入这一镜的方式。只认三种合法值，模型瞎编的一律回退硬切 ——
     // 一个不认识的转场名会在合成时被当成"没写"，而那时候已经看不出是模型编的了
     transition: ['cut', 'fade', 'dissolve'].includes(s.transition) ? s.transition : 'cut',
+    /**
+     * 和上一镜什么关系 —— **这一条以前是丢的**。
+     *
+     * 提示词里让模型判断"这两镜是不是一个连续动作"，模型也照着答了，
+     * 而解析这一步压根没读它，全靠后面按场景名推断。
+     * 后果是「连续动作」几乎永远推断不出来（同场景一律算 cut），
+     * 于是锁末帧这条最有效的衔接手段基本没启用过 —— 而且没有任何地方会报错。
+     *
+     * 认不出的值留空，交给 deriveLink 按老规矩推断，不硬塞一个默认值。
+     */
+    link: continuity.LINKS.includes(s.link) ? s.link : '',
     duration: Number(s.duration) || 4,
     // 模型回的是**版本名**（它没法知道 id），这里翻成 id。
     // 翻不出来的直接丢掉：指向不存在的变体等于悄悄回退到默认，而界面上还显示着你选的那一版
@@ -627,6 +677,8 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
         })
         .filter(Boolean)
     ),
+    // 这一镜属于哪个场次。模型标了就用它的，没标就在下面按场景名推断
+    segment: Number(s.segment) || null,
     imagePath: null,
     imageRef: null,
     videoPath: null,
@@ -636,8 +688,41 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
     status: 'pending'
   }));
 
+  /**
+   * 把场次的规矩**落到**每一镜上。
+   *
+   * 提示词里已经写清楚了这些规矩，但提示词只是请求，这一步才是保证 ——
+   * 模型不是每次都听，而"两镜标着连续动作、中间隔了二十年"这种错
+   * 不会报任何错，只会让成片说不上哪里怪。
+   */
+  const withSeg = segments.assignSegments(rawShots, segs);
+  const enforced = segments.enforce(withSeg, segs);
+  const shots = enforced.shots;
+
+  // 改了什么必须说出来。悄悄改用户看得见的字段是这类归一化最容易犯的错
+  if (enforced.changes.length) {
+    const head = enforced.changes.slice(0, 4)
+      .map((c) => `第 ${c.index} 镜的${c.what === 'link' ? '衔接' : '转场'} ${c.from} → ${c.to}（${c.why}）`);
+    onEvent?.({
+      type: 'note',
+      message:
+        `按场次规矩纠正了 ${enforced.changes.length} 处：${head.join('；')}` +
+        `${enforced.changes.length > 4 ? ` 等 ${enforced.changes.length} 处` : ''}`
+    });
+  }
+
+  const segBrief = segments.summarize(segs, shots);
+  if (segBrief) onEvent?.({ type: 'note', message: segBrief });
+
   store.update(projectId, (p) => {
     if (!p.logline) p.logline = parsed.logline || '';
+    // 场次表存下来：界面要按它把分镜分组显示，出图那步也要靠它判断场景锚
+    if (segs.length) {
+      p.segments = chapter
+        ? [...(p.segments || []).filter((x) => x.chapterId !== chapter.id),
+           ...segs.map((x) => ({ ...x, chapterId: chapter.id }))]
+        : segs.map((x) => ({ ...x, chapterId: null }));
+    }
     if (chapter) {
       // 只换掉这一章的镜头，别的章已经出好的图不能被误伤
       p.shots = [...p.shots.filter((s) => s.chapterId !== chapter.id), ...shots].sort((a, b) => a.index - b.index);
@@ -686,6 +771,30 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
   const brief = shotlint.summarize(lint);
   if (brief) onEvent?.({ type: 'note', message: `⚠ 分镜体检：${brief}` });
 
+  /**
+   * 时长对账：叠化吃掉的那几个半秒要减掉。
+   *
+   * 提示词里让模型自己补回来了，但那同样只是请求。真正的成片长度是
+   * 「各镜时长之和 − 被叠化重叠掉的部分」，而这个差**没有任何地方会报错** ——
+   * 你只会觉得"怎么比说好的短了两秒"，然后去怀疑裁剪、怀疑厂商。
+   * 所以在这儿当场对一次账，差得多就说出来。
+   */
+  const planned = shots.reduce((sum, x) => sum + (Number(x.duration) || 0), 0);
+  const eaten = segments.overlapCost(shots);
+  const real = planned - eaten;
+  if (targetSeconds > 0 && Math.abs(real - targetSeconds) > targetSeconds * 0.15) {
+    onEvent?.({
+      type: 'note',
+      message:
+        `⚠ 时长对不上：各镜加起来 ${planned.toFixed(1)} 秒` +
+        `${eaten > 0 ? `，叠化重叠掉 ${eaten.toFixed(1)} 秒` : ''}，` +
+        `成片约 ${real.toFixed(1)} 秒，而目标是 ${targetSeconds} 秒。` +
+        '要卡准的话，去分镜页调几镜的时长 —— 现在改比出完片再改便宜得多。'
+    });
+  } else if (eaten > 0) {
+    onEvent?.({ type: 'note', message: `${eaten.toFixed(1)} 秒会被叠化重叠掉，成片约 ${real.toFixed(1)} 秒（已计入字幕和配音的时间轴）` });
+  }
+
   return store.read(projectId);
 }
 
@@ -709,6 +818,9 @@ const SHOT_EDITABLE = [
   // 画外音效，和转场形式。不放进白名单的话，界面上改了存不下去 ——
   // 而且那种"改了没反应"最难查：接口回 200，值就是没进去
   'sound', 'transition',
+  // 这一镜属于哪个场次。场次边界决定了能不能锁末帧、能不能拿邻镜当参考，
+  // 所以模型划错的时候人得能改
+  'segment',
   // 这一镜走哪一档模型。自动判定会给一个，判错的那几镜由人改
   'tier',
   // 这句台词是谁说的。决定用哪个角色的音色 —— 空字符串 = 旁白
@@ -1991,7 +2103,7 @@ async function videoContextFor(project, shot, { onEvent } = {}) {
   const videoPrompt = consistency.assembleVideoPrompt(project.bible, shot, { prev, next, link });
 
   let lastFrameUrl = null;
-  if (continuity.shouldChainEndFrame(next, nextLink)) {
+  if (continuity.shouldChainEndFrame(next, nextLink, shot)) {
     try {
       lastFrameUrl = usableRef(next.imageRef) || (await toModelRef(next.imagePath, { onEvent }));
       onEvent?.({

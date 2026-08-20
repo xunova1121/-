@@ -114,10 +114,49 @@ export function lintShot(shot) {
   return issues;
 }
 
+/**
+ * 跨镜头才看得出来的毛病 —— 单看一镜是发现不了的。
+ *
+ * 拆分镜时这些已经被强制归一过了（见 pipeline/segments.js），
+ * 所以这里抓的是**手改出来的**：人在界面上把两镜标成「连续动作」，
+ * 而它们分属两个场次。那种改动我们不去悄悄改回来 ——
+ * 人明确选的东西，界面上自己变回去比不做还糟。但必须说出来。
+ */
+function lintPair(shot, prev) {
+  if (!prev) return [];
+  const issues = [];
+  const crossed = Number(prev.segment || 1) !== Number(shot.segment || 1);
+
+  if (crossed && shot.link === 'continuous') {
+    issues.push({
+      kind: 'continuous-across-segments',
+      severity: 'high',
+      what: `和第 ${prev.index} 镜之间跨了场次，却标着「连续动作」`,
+      why: '「连续动作」会把上一镜的末帧锁成这一镜的首帧。跨了时间地点还这么锁，等于强行让新的一场长成上一场的样子 —— 而且任务是"成功"的，不会报任何错。',
+      fix: '改成「换场景」。真要做无缝衔接，那两镜本来就该属于同一个场次。'
+    });
+  }
+  if (!crossed && shot.transition && shot.transition !== 'cut') {
+    issues.push({
+      kind: 'transition-inside-segment',
+      severity: 'normal',
+      what: `场次内部却用了${shot.transition === 'fade' ? '黑场' : '叠化'}`,
+      why: '转场是给"翻篇了"用的信号。同一场戏中间来一下叠化，观众会以为时间跳了，然后发现没跳。满屏叠化是最典型的业余标志。',
+      fix: '改成硬切。真要在这儿断开，就把它划成新的场次。'
+    });
+  }
+  return issues;
+}
+
 /** 体检整份分镜表。只回有问题的那几镜 */
 export function lintShots(shots = []) {
-  return shots
-    .map((s) => ({ id: s.id, index: s.index, issues: lintShot(s) }))
+  const sorted = shots.slice().sort((a, b) => (a.index || 0) - (b.index || 0));
+  return sorted
+    .map((s, i) => ({
+      id: s.id,
+      index: s.index,
+      issues: [...lintShot(s), ...lintPair(s, i ? sorted[i - 1] : null)]
+    }))
     .filter((r) => r.issues.length);
 }
 

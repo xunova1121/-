@@ -495,6 +495,22 @@ label {
 
 .shot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: 14px; }
 
+/* 场次分隔。边界决定了能不能锁末帧、能不能拿邻镜当参考，所以它必须看得见 */
+.seg-head {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin: 22px 0 10px; padding-bottom: 7px;
+  border-bottom: 1px solid var(--line);
+}
+.seg-head:first-child { margin-top: 4px; }
+.seg-no { font-weight: 600; font-size: 13px; color: var(--ink); }
+.seg-where { font-size: 13px; color: var(--ink-dim); }
+.seg-when { color: var(--ink-faint); margin-left: 4px; }
+.seg-sum { font-size: 12px; color: var(--ink-faint); }
+.seg-enter {
+  font-size: 12px; color: var(--ink-faint); margin-left: auto;
+  border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px;
+}
+
 .shot-card {
   background: var(--surface);
   border: 1px solid var(--line);

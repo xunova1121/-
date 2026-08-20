@@ -1318,6 +1318,17 @@ export default {
           sound: h('input', {
             type: 'text', placeholder: '敲门声、脚步声、远处汽笛…（不会画进画面）', value: shot.sound || ''
           }),
+          /**
+           * 这一镜属于哪个场次。
+           *
+           * 放开给人改，是因为**边界划错的代价很具体**：划漏了，跨着二十年的
+           * 两镜会去锁末帧；划多了，同一场戏被切断，动作接不上。
+           * 而模型划边界是靠读剧本猜的，猜错很正常。
+           */
+          segment: h('input', {
+            type: 'number', min: 1, max: 99, style: 'width:70px',
+            value: String(shot.segment || 1)
+          }),
           // 怎么进入这一镜。绝大多数时候该是硬切 —— 满屏叠化是最典型的业余做法
           transition: h('select', {},
             h('option', { value: 'cut', selected: (shot.transition || 'cut') === 'cut' }, '硬切（默认）'),
@@ -1357,6 +1368,8 @@ export default {
                   sound: fields.sound.value,
                   // cap:shot-transition
                   transition: fields.transition.value,
+                  // cap:shot-segment
+                  segment: Number(fields.segment.value) || 1,
                   link: fields.link.value,
                   skills: pickedSkills,
                   variants: pickedVariants,
@@ -1428,7 +1441,11 @@ export default {
           h('div', { class: 'shot-edit-grid' },
             h('div', {}, h('label', {}, '谁说的'), fields.speaker),
             h('div', {}, h('label', {}, '模型档位'), fields.tier),
+            h('div', {}, h('label', {}, '第几场'), fields.segment),
             h('div', {}, h('label', {}, '转场'), fields.transition)),
+          h('div', { class: 'hint' },
+            '场次 = 同一时间同一地点的一段戏。跨场次不能锁末帧、不能拿邻镜当参考图，' +
+            '转场也只该出现在场次之间 —— 划错了这几件事都会做在错的地方。'),
           // ── 这一镜谁穿哪套、场景是什么时段 ──
           // 只在真的有多版时才摆出来：大多数条目只有一版，摆一排"默认"是纯噪音
           (() => {
@@ -1789,11 +1806,43 @@ export default {
           '左边菜单里按顺序走：先「剧本」，再「设定集」，然后到「分镜」这一步点开始。'));
         return;
       }
-      const grid = h('div', { class: 'shot-grid' });
-      for (const shot of project.shots.slice().sort((a, b) => a.index - b.index)) {
-        grid.append(renderShotCard(shot));
+      /**
+       * 按**场次**分组显示，而不是摊成一长条。
+       *
+       * 场次边界是这条流水线上最要紧的一条线：跨过它就不能锁末帧、
+       * 不能拿邻镜当参考、转场只能出现在这儿。它既然决定了这么多事，
+       * 就该在界面上看得见 —— 看不见的话，人只会觉得
+       * "为什么这两镜接不上"，而边界正在眼皮底下。
+       */
+      const sorted = project.shots.slice().sort((a, b) => a.index - b.index);
+      const segs = project.segments || [];
+      let openGrid = null;
+      let lastSeg = null;
+
+      for (const shot of sorted) {
+        const seg = Number(shot.segment || 1);
+        if (seg !== lastSeg) {
+          const meta = segs.find((x) => Number(x.index) === seg
+            && (x.chapterId || null) === (shot.chapterId || null));
+          const enter = lastSeg === null ? '' : shot.transition || 'cut';
+          shotHost.append(
+            h('div', { class: 'seg-head' },
+              h('span', { class: 'seg-no' }, `第 ${seg} 场`),
+              h('span', { class: 'seg-where' },
+                meta?.where || shot.scene || '（未标场景）',
+                meta?.when ? h('span', { class: 'seg-when' }, `· ${meta.when}`) : null),
+              meta?.summary ? h('span', { class: 'seg-sum' }, meta.summary) : null,
+              // 进入这一场的方式。硬切是默认，不必声张；黑场和叠化要标出来
+              enter && enter !== 'cut'
+                ? h('span', { class: 'seg-enter' }, enter === 'fade' ? '⟨黑场进入⟩' : '⟨叠化进入 −0.5s⟩')
+                : null)
+          );
+          openGrid = h('div', { class: 'shot-grid' });
+          shotHost.append(openGrid);
+          lastSeg = seg;
+        }
+        openGrid.append(renderShotCard(shot));
       }
-      shotHost.append(grid);
     }
 
     // 分镜面板的标题和说明也跟着阶段走：同一张网格，在出图那步和出视频那步
