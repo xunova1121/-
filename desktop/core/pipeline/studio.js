@@ -181,6 +181,104 @@ function usableRef(ref) {
   return ref;
 }
 
+/**
+ * 设定集参考图：过期的那张，**当场重新签一个**。
+ *
+ * ── 这个洞是怎么露出来的 ──
+ *
+ * 用户重出一镜，日志里是：
+ *   ※ 想改成内联图绕过去，但第 2 张我们自己也下不下来（HTTP 403）
+ *   ✕ 厂商那边下载不到我们给的图
+ * 而图明明还好好地在对象存储里。
+ *
+ * 原因：sheetUrl 存的是**限时**地址，默认活 6 小时。设定集是前一天建的，
+ * 于是第二天所有参考图一起 403。而 usableRef() 这个专门用来挡过期地址的
+ * 守卫，只加在了分镜自己那张图上，**设定集这条路上一次都没走过**。
+ *
+ * ── 为什么不能只是"跳过过期的" ──
+ *
+ * 跳过的话这一镜就少带一张参考图，人设当场松掉，而且不报错 ——
+ * 只是"最近出的图不太像"。参考图是一致性最有效的那一层，宁可多花一次上传。
+ *
+ * 本地文件一直都在（sheetPath），重新签一个是几百毫秒的事，
+ * 而且顺手把新地址写回设定集，后面每一镜都省下这一趟。
+ */
+async function refreshRefs(project, refs, { onEvent } = {}) {
+  if (!refs?.images?.length) return refs;
+
+  const images = refs.images.slice();
+  const fixed = [];
+  const lost = [];
+
+  for (let i = 0; i < images.length; i += 1) {
+    if (usableRef(images[i])) continue;
+    const local = refs.paths?.[i];
+    const label = refs.labels?.[i] || `第 ${i + 1} 张`;
+    if (!local || !fs.existsSync(local)) {
+      lost.push(label);
+      continue;
+    }
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      images[i] = await toModelRef(local, { onEvent });
+      fixed.push(label);
+    } catch (err) {
+      lost.push(`${label}（${err.message}）`);
+    }
+  }
+
+  if (fixed.length) {
+    onEvent?.({
+      type: 'note',
+      message: `设定集里有 ${fixed.length} 张参考图的地址过期了（${fixed.join('、')}），已经重新传了一份 —— 限时地址默认只活 6 小时，设定集是早先建的就会这样`
+    });
+    persistRefs(project, refs, images);
+  }
+  if (lost.length) {
+    // 少带一张参考图不报错的话，表现就是"最近出的图不太像"，最难查
+    onEvent?.({
+      type: 'note',
+      message: `⚠ ${lost.join('、')} 的地址过期了，而本地那份图也找不到了 —— 这一镜会少带这几张参考图，人设可能不稳。去「设定集」把它们重出一次`
+    });
+  }
+
+  const keep = images.map((u, i) => [u, i]).filter(([u]) => usableRef(u));
+  return {
+    ...refs,
+    images: keep.map(([u]) => u),
+    labels: keep.map(([, i]) => refs.labels?.[i]).filter(Boolean),
+    paths: keep.map(([, i]) => refs.paths?.[i] ?? null)
+  };
+}
+
+/**
+ * 把重新签好的地址写回设定集，免得后面每一镜都重传一遍。
+ *
+ * 按**本地路径**认条目，不按名字 —— 名字会重（"办公室"既是场景名也可能是道具名），
+ * 而 sheetPath 是唯一的。
+ */
+function persistRefs(project, refs, images) {
+  const byPath = new Map();
+  refs.paths?.forEach((p, i) => {
+    if (p && images[i] && images[i] !== refs.images[i]) byPath.set(p, images[i]);
+  });
+  if (!byPath.size) return;
+
+  let touched = false;
+  const bible = project.bible || {};
+  for (const group of [bible.characters, bible.scenes, bible.props]) {
+    for (const item of group || []) {
+      for (const holder of [item, ...(item.variants || [])]) {
+        if (holder?.sheetPath && byPath.has(holder.sheetPath)) {
+          holder.sheetUrl = byPath.get(holder.sheetPath);
+          touched = true;
+        }
+      }
+    }
+  }
+  if (touched) store.save(project);
+}
+
 export async function toModelRef(localPath, { onEvent } = {}) {
   const gateway = settings.get('uploadGateway');
   if (gateway) return uploadVia(gateway, localPath, onEvent);
@@ -1343,7 +1441,8 @@ export async function generateAssets(projectId, { only = null, chapterId = null,
         shot,
         bible: project.bible,
         maxRetries,
-        onEvent
+        onEvent,
+        refresh: (refs) => refreshRefs(project, refs, { onEvent })
       });
 
       const dest = path.join(dir, `${shot.id}.png`);
@@ -1459,11 +1558,19 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
   // 和批量出图保持一致：分镜图默认不走图生图（编辑模型会把这一镜画成
   // "被改过的角色设定图"）。开关在「设置 → 画面规格」。
   const useEdit = settings.get('useEditModelForShots') === true;
-  const refImages =
-    !useEdit || settings.get('useReferenceImages') === false ? [] : assembled.refImages;
+  // 过期的限时地址在这儿换掉，否则厂商只会回一句"下载不到你给的图"
+  const freshRefs =
+    !useEdit || settings.get('useReferenceImages') === false
+      ? { images: [], labels: [] }
+      : await refreshRefs(
+        project,
+        { images: assembled.refImages, labels: assembled.refLabels, paths: assembled.refPaths },
+        { onEvent }
+      );
+  const refImages = freshRefs.images;
   onEvent?.({ type: 'shot', shotId, status: 'running', message: `第 ${shot.index} 镜重出（${providerId} / ${model}）…` });
   if (refImages.length) {
-    onEvent?.({ type: 'note', message: `参考设定集：${assembled.refLabels.join('、')}` });
+    onEvent?.({ type: 'note', message: `参考设定集：${freshRefs.labels.join('、')}` });
   }
 
   const image = await adapters.generateImage({
@@ -1572,7 +1679,8 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
   const bibleRefs =
     settings.get('useReferenceImages') === false
       ? { images: [], labels: [] }
-      : consistency.collectReferences(project.bible, shot);
+      // 过期的限时地址在这儿当场换掉，不然厂商只会回一句"下载不到你给的图"
+      : await refreshRefs(project, consistency.collectReferences(project.bible, shot), { onEvent });
   const videoPrompt = opts.prompt?.trim() || ctx.videoPrompt;
   if (bibleRefs.labels.length) {
     onEvent?.({ type: 'note', message: `参考设定集：${bibleRefs.labels.join('、')}` });
@@ -2526,7 +2634,8 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
       const bibleRefs =
         settings.get('useReferenceImages') === false
           ? { images: [], labels: [] }
-          : consistency.collectReferences(project.bible, shot);
+          // 过期的限时地址在这儿当场换掉，不然厂商只会回一句"下载不到你给的图"
+          : await refreshRefs(project, consistency.collectReferences(project.bible, shot), { onEvent });
 
       /**
        * 接住末帧时，**这一镜自己那张分镜图改当参考图**。
@@ -3530,3 +3639,4 @@ export async function runAll(projectId, { shotCount = 8, from = null, onEvent, s
 /** 只给自检用：这条判断错了会以"厂商下不到图"的样子出现，极难查 */
 export const __usableRef = usableRef;
 export const __seamPlanOf = seamPlanOf;
+export const __refreshRefs = refreshRefs;

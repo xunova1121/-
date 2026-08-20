@@ -2067,6 +2067,82 @@ section('存下来的限时地址不复用');
    */
   settings.patch({ oss: {} });
   check('限时地址默认活 6 小时，不是 1 小时', oss2.config().signedTtl === 21600, String(oss2.config().signedTtl));
+
+  /**
+   * 上面四条守的是**分镜自己那张图**。而设定集参考图走的是另一条路
+   * （bible 里的 sheetUrl），那条路上一次都没经过这个守卫。
+   *
+   * 用户的实测，图明明还在对象存储里：
+   *   ※ 想改成内联图绕过去，但第 2 张我们自己也下不下来（HTTP 403）
+   *   ✕ 厂商那边下载不到我们给的图
+   *
+   * 设定集是前一天建的，限时地址活 6 小时 —— 第二天所有参考图一起 403。
+   * 而且这个洞会**越用越疼**：设定集建得越早、片子做得越久，越必然撞上。
+   *
+   * 光"跳过过期的"不算修好：那样这一镜少带一张参考图，人设当场松掉，
+   * 而且不报错，只是"最近出的图不太像"。本地文件一直都在，重新签一个就行。
+   */
+  const collected = (await import('../core/pipeline/consistency.js')).collectReferences(
+    {
+      characters: [{ name: '班主任', sheetPath: '/tmp/nope-班主任.png', sheetUrl: 'https://b.oss.com/t.png?Expires=1700000000&Signature=y' }],
+      scenes: [{ name: '办公室', sheetPath: '/tmp/nope-办公室.png', sheetUrl: 'https://cdn.example.com/office.png' }],
+      props: []
+    },
+    { description: '班主任在办公室里', scene: '办公室', characters: ['班主任'] }
+  );
+  check('参考图带上了本地路径（不然过期了也没法重签）',
+    Array.isArray(collected.paths) && collected.paths.length === collected.images.length,
+    JSON.stringify(collected.paths));
+  check('过期的那张确实被认出来了',
+    collected.images.filter((u) => st.__usableRef(u) === null).length === 1,
+    JSON.stringify(collected.images));
+}
+
+section('设定集参考图过期：重新签，而不是让厂商拒掉');
+{
+  const st = await import('../core/pipeline/studio.js');
+  const fsx = await import('node:fs');
+  const pathx = await import('node:path');
+
+  // 真写一张图到盘上 —— 重签这条路要读它，假路径会让整段悄悄走进"找不到"那一支
+  const realPng = pathx.join(SANDBOX, 'sheet-班主任.png');
+  fsx.writeFileSync(realPng, Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64'
+  ));
+  const gonePng = pathx.join(SANDBOX, 'sheet-没了.png');
+
+  const project = { id: 'refresh-test', bible: { characters: [], scenes: [], props: [] }, shots: [] };
+  const notes = [];
+  const fresh = await st.__refreshRefs(
+    project,
+    {
+      images: [
+        'https://cdn.example.com/ok.png',
+        'https://b.oss.com/t.png?Expires=1700000000&Signature=y',
+        'https://b.oss.com/x.png?Expires=1700000000&Signature=z'
+      ],
+      labels: ['景·办公室', '角·班主任', '道·没了的东西'],
+      paths: [null, realPng, gonePng]
+    },
+    { onEvent: (ev) => notes.push(ev.message) }
+  );
+
+  const joined = notes.join(' | ');
+  check('没过期的那张原样留着', fresh.images[0] === 'https://cdn.example.com/ok.png', fresh.images[0]);
+  check('过期但本地还在的，换成了新地址',
+    fresh.images.length === 2 && fresh.images[1] !== 'https://b.oss.com/t.png?Expires=1700000000&Signature=y',
+    JSON.stringify(fresh.images));
+  check('标签跟着一起收缩，不会和图错位',
+    fresh.labels.length === fresh.images.length && fresh.labels[1] === '角·班主任',
+    JSON.stringify(fresh.labels));
+  check('说清楚是地址过期了，不是图没了', /过期/.test(joined) && /6 小时/.test(joined), joined.slice(0, 140));
+  /**
+   * 本地也找不到的那张只能放弃 —— 但必须**出声**。
+   * 默默少带一张参考图，表现就是"最近出的图不太像"，是最难查的那类。
+   */
+  check('本地也没了的那张，大声说一句，别默默少带',
+    /本地那份图也找不到/.test(joined) && /道·没了的东西/.test(joined), joined.slice(-160));
 }
 
 section('下不到图 ≠ 图太多');

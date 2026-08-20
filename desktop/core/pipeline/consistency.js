@@ -255,6 +255,8 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
     seed: (cast[0]?.seed ?? scene?.seed ?? 0) + (shot.index || 0),
     refImages: refs.images,
     refLabels: refs.labels,
+    // 和 refImages 一一对应。限时地址过期时靠它重新签一个（见 studio.js 的 refreshRefs）
+    refPaths: refs.paths,
     cast: cast.map((c) => c.name),
     scene: scene?.name || null
   };
@@ -276,10 +278,21 @@ export function collectReferences(bible, shot, { limit = 9 } = {}) {
   const picked = [];
   // 带的是**这一镜选中那个变体**的图：夜戏就该带夜景基准图，
   // 带白天那张等于给了模型一条互相打架的指令
+  /**
+   * 连**本地那张图在哪**一起带出去。
+   *
+   * sheetUrl 可能是对象存储的**限时**地址。设定集是几天前建的，
+   * 而限时地址默认只活 6 小时 —— 于是"今天重出昨天那一镜"必然 403，
+   * 而报出来的样子是厂商说"下载不到你给的图"，完全指不到过期这件事上。
+   *
+   * 光判断"过期了"没用，得能**重新签一个**，而重新签就需要本地那张图。
+   * sheetPath 一直都存着（见 variants.js），以前只是没往外传。
+   */
   const ref = (kind, item) => {
     const v = variants.pickVariant(item, shot);
     const url = v?.sheetUrl || item.sheetUrl;
-    if (url) picked.push({ kind, name: variants.labelOf(item, v) || item.name, url });
+    const localPath = (v?.sheetUrl ? v?.sheetPath : null) || item.sheetPath || null;
+    if (url) picked.push({ kind, name: variants.labelOf(item, v) || item.name, url, path: localPath });
   };
   const scene = matchScene(bible, shot);
   if (scene) ref('scene', scene);
@@ -292,6 +305,8 @@ export function collectReferences(bible, shot, { limit = 9 } = {}) {
   return {
     refs: unique,
     images: unique.map((r) => r.url),
+    // 和 images 一一对应；过期的那张要靠它重新签（见 studio.js 的 refreshRefs）
+    paths: unique.map((r) => r.path || null),
     // 界面上直接显示"这次带了谁"，用户才知道重出为什么像/不像
     labels: unique.map((r) => `${glyph[r.kind]}·${r.name}`)
   };
@@ -601,7 +616,15 @@ export async function generateConsistentImage({
   shot,
   bible,
   maxRetries = 2,
-  onEvent
+  onEvent,
+  /**
+   * 参考图地址过期时怎么救 —— 由调用方注入。
+   *
+   * 这一层自己做不了：重新签地址要用到对象存储和项目落盘，而这个模块
+   * 是纯装配逻辑，不该碰 IO（碰了就没法在自检里不联网跑）。
+   * 不注入就退回原样，只是过期的那张会照旧发出去然后被厂商拒掉。
+   */
+  refresh = null
 }) {
   const routing = adapters.resolvedRouting();
   const threshold = settings.get('consistencyThreshold') ?? 75;
@@ -623,7 +646,12 @@ export async function generateConsistentImage({
    */
   const useEdit = settings.get('useEditModelForShots') === true;
   const refsOn = settings.get('useReferenceImages') !== false;
-  const baseRefs = !useEdit || !refsOn ? [] : assembled.refImages;
+  // 过期的限时地址在这儿换掉，否则厂商只会回一句"下载不到你给的图"
+  const fresh =
+    useEdit && refsOn && refresh
+      ? await refresh({ images: assembled.refImages, labels: assembled.refLabels, paths: assembled.refPaths })
+      : null;
+  const baseRefs = !useEdit || !refsOn ? [] : (fresh?.images || assembled.refImages);
 
   /**
    * 邻镜参考：让这一镜的光线、色调、质感和同场景的其它镜连得住。
