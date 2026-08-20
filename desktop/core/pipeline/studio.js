@@ -2405,6 +2405,69 @@ async function verifyTailAlign(shot, videoPath, nextShot, { onEvent } = {}) {
   }
 }
 
+/**
+ * 开跑之前先说清楚：这一批里**哪几个接缝会真接上**。
+ *
+ * ── 为什么必须有这一句 ──
+ *
+ * 用户按设置里那句"接住真实末帧（所有厂商都管用）"的字面理解，出了一批片子，
+ * 然后说"并不是这样啊"。他没看错：那句话说的是**厂商侧没有门槛**
+ *（每一家 i2v 都收首帧图），可接缝要真的走这条路，还有一个前提 ——
+ * 这两镜之间得标着「连续动作」。而 continuous **从来不会被自动推断出来**
+ *（deriveLink 只在 new-scene 和 cut 之间选，见 continuity.js 里为什么），
+ * 它只可能是模型拆分镜时自己标的、或者人在界面上圈的。
+ *
+ * 于是最常见的情形是：一批二十镜，一个 continuous 都没有，接缝这条路
+ * 一次都没走，而**日志里一个字都没说** —— 不触发的分支是彻底安静的。
+ * 用户只能得出"这功能是假的"这个结论，而且他没法反驳自己。
+ *
+ * 没做某件事，和做了但没说，在用户那儿是同一回事。所以这里在开跑前
+ * 把整批的接缝计划摊开：接哪几处、为什么其余的不接、想改去哪儿改。
+ */
+function seamPlanOf(allShots, targets, seamMode) {
+  if (seamMode === 'off') {
+    return '接缝：已关掉（设置 → 一致性引擎 → 接缝），镜与镜之间只靠提示词衔接';
+  }
+
+  const sorted = allShots.slice().sort((a, b) => a.index - b.index);
+  const inBatch = new Set(targets.map((s) => s.id));
+  const pairs = [];
+  const orphans = [];
+
+  for (const shot of targets) {
+    const { prev, link } = continuity.neighbors(sorted, shot.id);
+    if (!prev || link !== 'continuous') continue;
+    // 跨场次不接 —— 和 shouldChainFromTail 同一条底线
+    if (Number(prev.segment || 1) !== Number(shot.segment || 1)) continue;
+    // 上一段得**有片子**才能抠末帧：要么早就出过，要么这一批里排在前面
+    if (prev.videoPath || inBatch.has(prev.id)) pairs.push(`${prev.index}→${shot.index}`);
+    else orphans.push(`${prev.index}→${shot.index}`);
+  }
+
+  const how =
+    seamMode === 'lock'
+      ? '把下一镜那张图锁成上一段的末帧（要厂商收末帧图）'
+      : '接住上一段的真实末帧当首帧';
+
+  if (!pairs.length && !orphans.length) {
+    return (
+      `接缝：这 ${targets.length} 镜里没有一处标着「连续动作」，所以接缝全是硬切 —— ` +
+      '这是默认，而且大部分镜位切换本来就该硬切（全都接上的话，整部片子会变成一个没剪过的长镜头）。' +
+      '想让某两镜的画面真的接上，去分镜里把后面那一镜的「接」改成「连续动作」，再重出这一镜。'
+    );
+  }
+
+  const lines = [];
+  if (pairs.length) lines.push(`接缝：${pairs.length} 处标着「连续动作」会${how} —— 第 ${pairs.join('、')} 镜；其余是硬切（默认）`);
+  if (orphans.length) {
+    lines.push(
+      `第 ${orphans.join('、')} 镜标着「连续动作」，但上一段这次不出、之前也没出过片 —— ` +
+      '抠不到末帧，这几处只能按普通图生视频出。要接上的话，把上一镜一起选上重出。'
+    );
+  }
+  return lines.join('\n');
+}
+
 export async function generateVideos(projectId, { only = null, chapterId = null, regenerate = false, onEvent, signal = null } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
@@ -2417,6 +2480,7 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
   if (!targets.length) throw new Error('没有可出视频的分镜（需要先有镜头图）');
 
   onEvent?.({ type: 'stage', stage: 'video', status: 'running', message: `待出视频 ${targets.length} 段` });
+  onEvent?.({ type: 'note', message: seamPlanOf(project.shots || [], targets, settings.get('seamMode') || 'tail') });
 
   for (const shot of targets) {
     jobs.checkpoint(signal, `第 ${shot.index} 镜起往后的 ${targets.length - targets.indexOf(shot)} 镜`);
@@ -3465,3 +3529,4 @@ export async function runAll(projectId, { shotCount = 8, from = null, onEvent, s
 
 /** 只给自检用：这条判断错了会以"厂商下不到图"的样子出现，极难查 */
 export const __usableRef = usableRef;
+export const __seamPlanOf = seamPlanOf;

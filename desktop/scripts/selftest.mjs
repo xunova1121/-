@@ -2937,6 +2937,52 @@ section('接缝：不收末帧的厂商上，靠什么把两段连起来');
    */
   check('跨场次不接',
     continuity.shouldChainFromTail({ ...shot, segment: 2 }, prev, 'continuous') === false);
+
+  /**
+   * 上面这五条**全都是对的**，而用户还是出了一批片子回来说"并不是这样啊"。
+   *
+   * 因为它们量的是"该不该接"，没有一条量"不接的时候有没有说一声"。
+   * 而 continuous 从来不会被自动推断出来（deriveLink 只在 new-scene 和 cut
+   * 之间选），所以最常见的情形是一整批一个 continuous 都没有 ——
+   * 接缝这条路一次都没走，日志里一个字都没有。
+   *
+   * 用户唯一能得出的结论是"这功能是假的"，而且他没法反驳自己。
+   * 没做某件事，和做了但没说，在用户那儿是同一回事。
+   */
+  const st = await import('../core/pipeline/studio.js');
+  const plan = st.__seamPlanOf;
+
+  const noneShots = [
+    { id: 'a', index: 1, segment: 1, scene: '走廊' },
+    { id: 'b', index: 2, segment: 1, scene: '走廊' },
+    { id: 'c', index: 3, segment: 1, scene: '走廊' }
+  ];
+  const none = plan(noneShots, noneShots, 'tail');
+  check('一处连续动作都没有时，明说"这批接缝全是硬切"', /全是硬切/.test(none), none.slice(0, 60));
+  // 只说"没接"是不够的 —— 人会以为坏了。要说清楚这是默认，以及为什么
+  check('并且说清楚这是默认、不是坏了', /默认/.test(none) && /长镜头/.test(none), none.slice(0, 160));
+  check('并且告诉他去哪儿改', /「接」/.test(none) && /连续动作/.test(none), none.slice(-90));
+
+  const someShots = [
+    { id: 'a', index: 1, segment: 1, scene: '走廊' },
+    { id: 'b', index: 2, segment: 1, scene: '走廊', link: 'continuous' },
+    { id: 'c', index: 3, segment: 1, scene: '走廊' }
+  ];
+  const some = plan(someShots, someShots, 'tail');
+  check('有连续动作时，点名是第几到第几镜', /1→2/.test(some), some.slice(0, 90));
+  check('并且说清楚其余是硬切', /其余是硬切/.test(some), some.slice(0, 120));
+
+  /**
+   * 只重出后面那一镜时最容易踩空：上一段这次不出、之前也没出过片，
+   * 抠不到末帧。这时候标记明明在，接缝却还是接不上 —— 不说的话
+   * 就是"有时候接得上有时候接不上"，比一次都不接更让人没法排查。
+   */
+  const orphan = plan(someShots, [someShots[1]], 'tail');
+  check('上一段没片子时点明抠不到末帧', /抠不到末帧/.test(orphan), orphan.slice(0, 120));
+  check('并且给出办法（把上一镜一起选上）', /一起选上/.test(orphan), orphan.slice(-60));
+
+  const off = plan(someShots, someShots, 'off');
+  check('关掉时如实说关掉了', /已关掉/.test(off), off.slice(0, 40));
 }
 
 section('节奏：每一段是独立生成的，速度得自己接上');
