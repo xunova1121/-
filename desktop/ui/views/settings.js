@@ -809,12 +809,51 @@ export default {
         keySecret.value = '';
       };
 
+      /**
+       * 「这几个框里到底该填什么」是配这一步唯一的卡点。
+       *
+       * 原来这个面板只解释了每个字段**是干什么的**，却没说**去哪儿拿**——
+       * 而卡住人的从来是后者。四步写在这儿，不用去翻文档。
+       */
+      const guide = h('details', { class: 'field', style: 'margin-bottom:12px' },
+        h('summary', { style: 'cursor:pointer;color:var(--beam)' }, '这几个值去哪儿拿？（四步，约五分钟）'),
+        h('div', { class: 'field-hint', style: 'margin-top:8px;line-height:1.7' },
+          h('div', {}, h('b', {}, '① 建一个 Bucket'), '　阿里云控制台 → 对象存储 OSS → 创建 Bucket。'),
+          h('div', { style: 'margin-left:14px' },
+            '名字随便起（填到下面「Bucket」），',
+            h('b', {}, '地域要和你用的厂商同一侧'),
+            '：秘塔、海螺、方舟、百炼都在国内，就选国内地域（北京/上海/杭州都行）。'
+            + '桶在境外而厂商在境内，它很可能拉不到你的参考图 —— 那正是「cannot download media URL」最常见的原因。'),
+          h('div', { style: 'margin-left:14px' }, '读写权限保持默认的', h('b', {}, '私有'), '，下面那个「桶是公共读」也别勾。'),
+          h('div', { style: 'margin-top:8px' }, h('b', {}, '② 建一个 RAM 用户，只给它这一个桶的权限')),
+          h('div', { style: 'margin-left:14px' },
+            '控制台 → 访问控制 RAM → 用户 → 创建用户，勾', h('b', {}, '「使用永久 AccessKey 访问」'), '。'
+            + '建完会给你一对 AccessKey ID / Secret —— ',
+            h('b', {}, 'Secret 只显示这一次'), '，当场复制。'),
+          h('div', { style: 'margin-left:14px' },
+            '然后给它授权：AliyunOSSFullAccess 最省事；讲究一点就自定义策略，只放这一个桶。'
+            + '别用主账号的 AccessKey —— 那把钥匙能动你账号里的一切。'),
+          h('div', { style: 'margin-top:8px' }, h('b', {}, '③ 填下面这几个框')),
+          h('div', { style: 'margin-left:14px' },
+            '地域和 Bucket 照①填；AccessKey 那两个照②填；'
+            + '「路径前缀」随便写一个（比如 futuredream），它让同一个桶还能放别的东西，也方便回头整批删；'
+            + '「自定义域名」除非你绑过 CNAME，否则留空。'),
+          h('div', { style: 'margin-top:8px' }, h('b', {}, '④ 点下面的「测试连接」')),
+          h('div', { style: 'margin-left:14px' },
+            '它会真的写一个小文件、读回来、再删掉 —— 签名对不对只有这么试才知道，而且不花钱。'
+            + '通了就成了；不通的话报错里会点名是地域、Bucket 名、还是 RAM 权限。'),
+          h('div', { style: 'margin-top:8px;color:var(--ink-dim)' },
+            '花钱吗：存储费几乎可以忽略（一部片子的参考图就几 MB）；'
+            + '真正计费的是外网流量，而厂商拉一次参考图也就几 MB。比起因为内联发图而反复失败重传，这条便宜得多。')));
+
       ossHost.append(
+        guide,
         h('div', { class: 'field' },
           h('label', {}, h('span', { class: 'inline' }, enabled, ' 开启对象存储')),
           h('div', { class: 'field-hint' },
             '开了之后，出好的图和视频会传一份到 OSS，参考图也就有了公网地址 —— '
-            + '万相这类只收 https 地址的出图模型，靠的就是这个。')),
+            + '万相这类只收 https 地址的出图模型靠的就是这个；'
+            + '而且请求体会从几 MB 掉到几 KB，"图带多了""请求超时"那一类多半跟着消失。')),
         h('div', { class: 'grid2' },
           h('div', { class: 'field' }, h('label', {}, '地域'), region),
           h('div', { class: 'field' }, h('label', {}, 'Bucket'), bucket)),
