@@ -15,7 +15,7 @@ import * as settings from '../settings.js';
 import * as logbus from '../logbus.js';
 import * as adapters from '../providers/adapters.js';
 import * as catalog from '../providers/catalog.js';
-import { authHeadersForUrl } from '../providers/index.js';
+import { authHeadersForUrl, authHeadersFor } from '../providers/index.js';
 import * as consistency from './consistency.js';
 import * as continuity from './continuity.js';
 import * as speakerLib from './speaker.js';
@@ -2808,8 +2808,20 @@ export async function generateVoice(projectId, { onEvent, signal = null } = {}) 
     onEvent?.({ type: 'note', message: `第 ${sk.index} 镜跳过配音：「${sk.why}」是音效/提示，不是台词` });
   }
   if (!targets.length) {
+    /**
+     * ⚠ 没台词**不等于**没声音。
+     *
+     * 这里原来直接 return，于是一部"全片没有台词、只有画外音效"的片子
+     * 永远出不来音效 —— 而那种片子恰恰最依赖音效（没人说话时，
+     * 声音就是全部的氛围）。这个错还特别隐蔽：界面上写着"这一步完成"。
+     */
+    await generateSfx(projectId, { onEvent, signal });
     onEvent?.({ type: 'stage', stage: 'voice', status: 'done', message: '没有需要配音的台词' });
-    return project;
+    store.update(projectId, (p) => {
+      p.stageStatus.voice = 'done';
+      return p;
+    });
+    return store.read(projectId);
   }
 
   onEvent?.({ type: 'stage', stage: 'voice', status: 'running', message: `待配音 ${targets.length} 条` });
@@ -2831,14 +2843,26 @@ export async function generateVoice(projectId, { onEvent, signal = null } = {}) 
       if (speech.url) {
         await saveMedia(speech, dest, onEvent);
       } else if (speech.binaryRequest) {
-        // OpenAI 系的 /audio/speech 直接回二进制流
-        const { url, body } = speech.binaryRequest;
+        /**
+         * OpenAI 系的 /audio/speech 直接回二进制流。
+         *
+         * ⚠ 这里以前**一个鉴权头都不发** —— 于是这条路只会回 401，
+         * 而报错只有一句"配音失败 HTTP 401"，看不出是缺了 Authorization。
+         * 401 的第一反应永远是"密钥不对"，人会去控制台反复重建密钥。
+         *
+         * 用 provider id 直接取头，不从地址反推：调用方本来就知道是哪家，
+         * 反推在共用网关或中转域名时会认错人。
+         */
+        const { url, body, provider: pid } = speech.binaryRequest;
         const res = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeadersFor(pid) },
           body: JSON.stringify(body)
         });
-        if (!res.ok) throw new Error(`配音失败 HTTP ${res.status}`);
+        if (!res.ok) {
+          // 带上服务端原话。只报状态码等于让人自己去猜
+          throw new Error(`配音失败 HTTP ${res.status}：${(await res.text()).slice(0, 200)}`);
+        }
         fs.writeFileSync(dest, Buffer.from(await res.arrayBuffer()));
       }
       store.update(projectId, (p) => {
@@ -2857,11 +2881,111 @@ export async function generateVoice(projectId, { onEvent, signal = null } = {}) 
       onEvent?.({ type: 'shot', shotId: shot.id, status: 'failed', message: err.message });
     }
   }
+  await generateSfx(projectId, { onEvent, signal });
+
   store.update(projectId, (p) => {
     p.stageStatus.voice = 'done';
     return p;
   });
   return store.read(projectId);
+}
+
+/**
+ * 画外音效 —— 分镜里那一栏「敲门声、脚步声」变成真的声音。
+ *
+ * ── 为什么跟着配音那一步跑，而不是单开一步 ──
+ *
+ * 它和配音是同一件事的两半：都是往这部片子的声音里加东西，
+ * 都按同一份时间轴摆，都在合成时混进同一条音轨。
+ * 拆成两步只会多一个要点的按钮，而没人会想"只配音不要音效"。
+ *
+ * ── 没配服务商就跳过，不回退 ──
+ *
+ * 这一条是**故意的**：音效和配音是两种模型。拿配音模型去生成"敲门声"，
+ * 出来的是一个人**念这三个字**，而且会被当成成片的一部分交付出去。
+ * 宁可没有音效，也不要那个。
+ */
+async function generateSfx(projectId, { onEvent, signal } = {}) {
+  const project = store.read(projectId);
+  /**
+   * 要出音效的那些：写了描述，而且**还没出**或者**描述改过了**。
+   *
+   * 第二个条件不能少。只看 sfxPath 的话，改完描述再跑一遍什么都不会变 ——
+   * 界面上标着"音效已过时"，重跑也退不掉，人只会觉得这个标记坏了。
+   * 而实际后果更实在：成片里还是那声旧的。
+   */
+  const targets = (project.shots || []).filter((s) => {
+    const want = String(s.sound || '').trim();
+    if (!want) return false;
+    return !s.sfxPath || s.sfxOf !== want;
+  });
+  if (!targets.length) return;
+
+  const r = routing();
+  if (!r.sfx?.provider) {
+    onEvent?.({
+      type: 'note',
+      message:
+        `有 ${targets.length} 镜写了画外音效，但还没配音效服务商，这次跳过。` +
+        '（去「设置 → 能力路由 → 音效」配一家。故意不回退到配音模型 —— ' +
+        '那出来的是一个人念"敲门声"三个字，比没有音效更糟。）'
+    });
+    return;
+  }
+
+  onEvent?.({ type: 'stage', stage: 'voice', status: 'running', message: `待生成音效 ${targets.length} 条` });
+  const dir = store.assetDir(projectId);
+  let made = 0;
+
+  for (const shot of targets) {
+    jobs.checkpoint(signal, `第 ${shot.index} 镜起往后的音效`);
+    try {
+      onEvent?.({ type: 'shot', shotId: shot.id, status: 'running', message: `第 ${shot.index} 镜音效：${shot.sound}` });
+      const sfx = await adapters.generateSfx({
+        providerId: r.sfx.provider,
+        model: r.sfx.model,
+        text: shot.sound,
+        // 卡在镜头长度以内：音效比画面长的话会盖到下一镜上 ——
+        // 上一场的敲门声在新场景里还在响，观众立刻就听出不对
+        seconds: Math.min(Number(shot.duration) || 3, 10),
+        label: `音效 #${shot.index}`
+      });
+      const dest = path.join(dir, `${shot.id}.sfx.mp3`);
+      if (sfx.url) {
+        await saveMedia(sfx, dest, onEvent);
+      } else if (sfx.binaryRequest) {
+        const res = await fetch(sfx.binaryRequest.url, {
+          method: sfx.binaryRequest.method,
+          headers: { 'Content-Type': 'application/json', ...authHeadersFor(sfx.binaryRequest.provider) },
+          body: JSON.stringify(sfx.binaryRequest.body)
+        });
+        if (!res.ok) throw new Error(`音效失败 HTTP ${res.status}：${(await res.text()).slice(0, 200)}`);
+        fs.writeFileSync(dest, Buffer.from(await res.arrayBuffer()));
+      }
+      store.update(projectId, (p) => {
+        const t = p.shots.find((x) => x.id === shot.id);
+        // 记下当时那句描述：改了描述之后界面要能说清楚"现在这条音效是旧的"
+        if (t) {
+          t.sfxPath = dest;
+          t.sfxOf = shot.sound;
+        }
+        return p;
+      });
+      made += 1;
+      onEvent?.({ type: 'shot', shotId: shot.id, status: 'done', message: '音效完成' });
+    } catch (err) {
+      if (jobs.isCancel(err)) throw err;
+      // 音效失败不该拖垮整部片子 —— 它是锦上添花，成片没有它照样能看
+      onEvent?.({ type: 'note', message: `第 ${shot.index} 镜音效没出成（${err.message}），成片会少这一声，其余不受影响` });
+    }
+  }
+
+  if (made) {
+    onEvent?.({
+      type: 'note',
+      message: `音效 ${made}/${targets.length} 条就绪。合成时会压在台词底下（音量 ${settings.get('sfxGain') ?? 0.35} 倍）—— 等响的话一声关门就能盖掉一句台词`
+    });
+  }
 }
 
 // ═══════════════════════ 阶段六：合成 ═══════════════════════
@@ -2984,6 +3108,29 @@ export async function compose(projectId, { onEvent } = {}) {
     .filter((r) => r.shot.audioPath && fs.existsSync(r.shot.audioPath))
     .map((r) => ({ path: r.shot.audioPath, at: r.start, index: r.shot.index, span: r.span }));
 
+  /**
+   * 画外音效走**同一条时间轴**，只是音量压低。
+   *
+   * 同一条时间轴这一点是关键：音效和台词、字幕如果各算各的起点，
+   * 一处叠化或者一处补帧就会让它们互相错开 —— 而"敲门声比开门画面晚半秒"
+   * 是观众一秒就能听出来的那种错。
+   *
+   * gain 压低同样不是可选项：等响的话一声关门就能盖掉一句台词。
+   */
+  const sfxGain = Number(settings.get('sfxGain'));
+  const sfxAt = timeline
+    .filter((r) => r.shot.sfxPath && fs.existsSync(r.shot.sfxPath))
+    .map((r) => ({
+      path: r.shot.sfxPath,
+      at: r.start,
+      index: r.shot.index,
+      span: r.span,
+      gain: Number.isFinite(sfxGain) && sfxGain > 0 ? sfxGain : 0.35
+    }));
+  if (sfxAt.length) {
+    onEvent?.({ type: 'note', message: `混入 ${sfxAt.length} 条画外音效，音量压到 ${(sfxAt[0].gain * 100).toFixed(0)}%（台词要压得住它）` });
+  }
+
   // 台词念不完的要当场说出来：这不是能自动修的事 —— 要么把这一镜拉长，
   // 要么把台词改短，两个都是导演的决定。不说的话它只会表现为"后面几句压到了下一镜"。
   const overruns = [];
@@ -2991,6 +3138,25 @@ export async function compose(projectId, { onEvent } = {}) {
     const secs = await ffmpeg.probeDuration(a.path);
     if (secs && a.span && secs > a.span + 0.25) overruns.push({ index: a.index, secs, span: a.span });
   }
+  /**
+   * 音效比镜头长的话，它会响到下一镜上。
+   *
+   * 生成时已经按镜头时长卡过一次，但厂商给多了是常有的事（档位、模型自己收尾）。
+   * 而这个错的表现特别"说不清"：上一场的敲门声在新场景里还在响，
+   * 观众立刻觉得不对，却指不出哪里不对。所以这里直接裁到镜头长度，
+   * 并且说一声 —— 裁比让它漏出去好，音效本来就是垫底的。
+   */
+  for (const a of sfxAt) {
+    const secs = await ffmpeg.probeDuration(a.path);
+    if (secs && a.span && secs > a.span + 0.2) {
+      a.trimTo = a.span;
+      onEvent?.({
+        type: 'note',
+        message: `第 ${a.index} 镜的音效有 ${secs.toFixed(1)} 秒，比镜头长，已裁到 ${a.span} 秒 —— 不裁的话它会响到下一镜上`
+      });
+    }
+  }
+
   if (overruns.length) {
     onEvent?.({
       type: 'note',
@@ -3020,7 +3186,9 @@ export async function compose(projectId, { onEvent } = {}) {
   }
 
   await ffmpeg.concat(segments, out, {
-    audioAt,
+    // 台词在前、音效在后：混音时顺序不影响结果，但报错里的编号跟着这个顺序，
+    // 排查"第几条音频有问题"时对得上
+    audioAt: [...audioAt, ...sfxAt],
     trims,
     transitions: transitionKinds,
     onNote: (message) => onEvent?.({ type: 'note', message }),

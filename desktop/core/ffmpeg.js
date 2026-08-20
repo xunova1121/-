@@ -182,8 +182,19 @@ export function voiceFilterGraph(entries) {
   const filters = entries
     .map((e, i) => {
       const ms = Math.max(0, Math.round((Number(e.at) || 0) * 1000));
+      /**
+       * gain 是给**音效**用的：音效必须压在台词底下。
+       *
+       * 等响的话，一声关门就能把一句台词整个盖掉 —— 而台词是观众
+       * 唯一的信息来源。这是混音里最基本的一条，也是自己做音频时
+       * 最容易做砸的一处：素材各自听着都正常，混到一起才发现听不清人话。
+       *
+       * 台词不传 gain，走原音量；只有音效那几条会带上。
+       */
+      const g = Number(e.gain);
+      const vol = Number.isFinite(g) && g > 0 && g !== 1 ? `,volume=${g.toFixed(3)}` : '';
       // adelay 要按声道给值，all=1 省得去数这条音频是单声道还是立体声
-      return `[${i}:a]adelay=${ms}:all=1[a${i}]`;
+      return `[${i}:a]adelay=${ms}:all=1${vol}[a${i}]`;
     })
     .join(';');
   const mixIn = entries.map((_, i) => `[a${i}]`).join('');
@@ -195,7 +206,12 @@ export async function buildVoiceTrack(entries, outputPath, { onProgress } = {}) 
   if (!usable.length) return null;
 
   const args = ['-y'];
-  for (const e of usable) args.push('-i', e.path);
+  for (const e of usable) {
+    // trimTo：音效比镜头长时裁掉多出来的部分，否则它会响到下一镜上。
+    // -t 放在 -i **前面**才是"只读这么长"，放后面变成"输出这么长"，那是另一回事
+    if (Number(e.trimTo) > 0) args.push('-t', String(e.trimTo));
+    args.push('-i', e.path);
+  }
   args.push('-filter_complex', voiceFilterGraph(usable), '-map', '[out]', '-c:a', 'aac', outputPath);
   await run(args, { onProgress });
   return outputPath;

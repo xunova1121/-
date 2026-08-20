@@ -426,6 +426,25 @@ const upstream = http.createServer((req, res) => {
     return undefined;
   }
 
+  // 音效：ElevenLabs 那条路，直接回音频二进制，鉴权走 xi-api-key 而不是 Bearer
+  if (url.pathname === '/v1/sound-generation') {
+    let raw = '';
+    req.on('data', (c) => (raw += c));
+    req.on('end', () => {
+      upstream.sfxHeaders = req.headers;
+      upstream.sfxBodies = upstream.sfxBodies || [];
+      upstream.sfxBodies.push(JSON.parse(raw || '{}'));
+      // 鉴权头写错的话（发成 Bearer）就 401 —— 真厂商也是这么回的
+      if (!req.headers['xi-api-key']) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ detail: { message: '缺少 xi-api-key' } }));
+      }
+      res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
+      return res.end(Buffer.from('ID3fake-sfx'));
+    });
+    return undefined;
+  }
+
   if (url.pathname === '/pixel.png') {
     res.writeHead(200, { 'Content-Type': 'image/png' });
     return res.end(PIXEL_PNG);
@@ -2462,6 +2481,166 @@ section('叫停：轮询停下来，但不能把已经花掉的钱弄丢');
   const v = await poll(async () => { n += 1; return n >= 2 ? { done: true, value: 'ok' } : { done: false, value: {} }; },
     { intervalMs: 5 });
   check('不传信号时照常轮询到底', v === 'ok' && n === 2, `${v}/${n}`);
+}
+
+section('音效：不是拿配音模型念"敲门声"三个字');
+{
+  const ad = await import('../core/providers/adapters.js');
+  const auth = await import('../core/providers/auth.js');
+  const cat = await import('../core/providers/catalog.js');
+  const vault = await import('../core/vault.js');
+
+  // ── 能力是分开的 ──
+  check('目录里音效是独立能力', Boolean(cat.CAPABILITIES.sfx), JSON.stringify(Object.keys(cat.CAPABILITIES)));
+  const el = cat.PROVIDERS.find((p) => p.id === 'elevenlabs');
+  check('有一家做音效的', Boolean(el) && el.capabilities.includes('sfx'));
+
+  /**
+   * 鉴权头写错是这类接入最常见、也最难查的一种失败：
+   * 对方回 401，而 401 的第一反应永远是"密钥不对"，
+   * 人会去控制台反复重建密钥，白折腾一圈。
+   */
+  vault.setSecret('ELEVENLABS_API_KEY', 'el-test-key-1234');
+  const heads = auth.buildAuthHeaders(el);
+  check('用 xi-api-key 而不是 Bearer', heads['xi-api-key'] === 'el-test-key-1234', JSON.stringify(heads));
+  check('并且不多发一个 Authorization', !heads.Authorization, JSON.stringify(heads));
+
+  // ── 不做音效就是不做，不回退 ──
+  let refused = null;
+  try {
+    await ad.generateSfx({ providerId: 'dashscope', model: 'qwen3-tts-flash', text: '敲门声' });
+  } catch (err) {
+    refused = err;
+  }
+  // 回退到配音模型的话，出来的是一个人念"敲门声"这三个字，
+  // 而且会被当成成片的一部分交付出去 —— 比没有音效更糟
+  check('拿配音服务商做音效会被当场拒绝', Boolean(refused), String(refused));
+  check('并且说清了为什么', /念/.test(refused?.message || ''), refused?.message);
+
+  const r = ad.resolvedRouting();
+  check('默认不配音效服务商', !r.sfx.provider, JSON.stringify(r.sfx));
+
+  // ── 真发一次 ──
+  settings.patch({ baseUrls: { elevenlabs: `${upstreamUrl}/v1` } });
+  upstream.sfxBodies = [];
+  const got = await ad.generateSfx({
+    providerId: 'elevenlabs', model: 'eleven_text_to_sound_v2', text: '木门被敲三下', seconds: 2.5
+  });
+  check('拿到了音频（二进制那条路）', Boolean(got.binaryRequest || got.url), JSON.stringify(got).slice(0, 120));
+
+  // 时长要卡住：音效比画面长的话会响到下一镜上，观众立刻听出不对
+  const body = upstream.sfxBodies[0] || got.binaryRequest?.body;
+  check('把时长带过去了', Number(body?.duration_seconds) === 2.5, JSON.stringify(body));
+  const capped = await ad.generateSfx({ providerId: 'elevenlabs', text: 'x', seconds: 999 });
+  const cappedBody = upstream.sfxBodies[1] || capped.binaryRequest?.body;
+  check('离谱的时长被夹住', Number(cappedBody?.duration_seconds) <= 22, JSON.stringify(cappedBody));
+
+  settings.patch({ baseUrls: {} });
+}
+
+section('音效走完整条：从分镜那一栏到成片的音轨里');
+{
+  /**
+   * 前面测的是零件。这一段走真接口：建项目 → 分镜里写上音效 →
+   * 跑配音那一步 → 看音效文件出没出来、混音时是不是压低了。
+   */
+  const sp = await (
+    await fetch(`${appUrl}/api/projects`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '音效自检' })
+    })
+  ).json();
+
+  store.update(sp.id, (p) => {
+    p.bible = { style: { anchor: '国风', negative: '' }, characters: [], scenes: [], props: [] };
+    p.shots = [
+      { id: 'x1', index: 1, segment: 1, description: '老师伏案批改作业', duration: 4,
+        sound: '远处传来敲门声', videoPath: '/tmp/x1.mp4', dialogue: '', characters: [] },
+      { id: 'x2', index: 2, segment: 1, description: '老师抬起头', duration: 3,
+        sound: '', videoPath: '/tmp/x2.mp4', dialogue: '', characters: [] }
+    ];
+    return p;
+  });
+
+  // ① 没配音效服务商：跳过，而且要说清楚为什么，不能闷声不做
+  const skipped = await ndjson(`/projects/${sp.id}/stage/voice`, {});
+  const skipNote = skipped.filter((e) => e.type === 'note').map((e) => e.message).join(' | ');
+  check('没配服务商时说明跳过了', /还没配音效服务商/.test(skipNote), skipNote.slice(0, 200));
+  // 故意不回退到配音模型这件事必须写在提示里 —— 否则用户会以为是 bug
+  check('并且解释了为什么不用配音模型顶上', /念/.test(skipNote), skipNote.slice(0, 240));
+  check('这时候没有音效文件', !store.read(sp.id).shots[0].sfxPath);
+
+  // ② 配上之后真的出
+  settings.patch({
+    baseUrls: { elevenlabs: `${upstreamUrl}/v1` },
+    sfxProvider: 'elevenlabs',
+    sfxModel: 'eleven_text_to_sound_v2'
+  });
+  upstream.sfxBodies = [];
+  const ran = await ndjson(`/projects/${sp.id}/stage/voice`, {});
+  const after = store.read(sp.id);
+
+  check('写了音效的那一镜出了文件', Boolean(after.shots[0].sfxPath), JSON.stringify(after.shots[0].sfxPath));
+  check('文件真的落盘了', after.shots[0].sfxPath && fs.existsSync(after.shots[0].sfxPath));
+  check('没写音效的那一镜不花这笔钱', !after.shots[1].sfxPath);
+  check('发过去的是那句描述', upstream.sfxBodies[0]?.text === '远处传来敲门声', JSON.stringify(upstream.sfxBodies[0]));
+  // 音效比画面长的话会响到下一镜上，所以生成时就按镜头时长卡
+  check('时长按镜头卡住', Number(upstream.sfxBodies[0]?.duration_seconds) <= 4,
+    String(upstream.sfxBodies[0]?.duration_seconds));
+  // 改了描述之后界面要能说清"现在这条音效是旧的"
+  check('记下了当时那句描述', after.shots[0].sfxOf === '远处传来敲门声', after.shots[0].sfxOf);
+  check('说明了会压在台词底下',
+    ran.some((e) => /压在台词底下/.test(e.message || '')),
+    ran.filter((e) => e.type === 'note').map((e) => e.message).join(' | ').slice(0, 200));
+
+  // ③ 已经出过的不重出 —— 重出就是重复计费
+  upstream.sfxBodies = [];
+  await ndjson(`/projects/${sp.id}/stage/voice`, {});
+  check('已经有的音效不重出（不重复计费）', upstream.sfxBodies.length === 0, String(upstream.sfxBodies.length));
+
+  /**
+   * ④ 改了描述就要重出。
+   *
+   * 只看"有没有文件"的话，改完描述再跑一遍什么都不会变 ——
+   * 界面上标着"音效已过时"，重跑也退不掉，人只会觉得那个标记坏了。
+   * 而实际后果更实在：成片里还是那声旧的。
+   */
+  await fetch(`${appUrl}/api/projects/${sp.id}/shots/x1`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sound: '玻璃杯摔碎' })
+  });
+  check('改完描述，界面上认得出这条音效过时了',
+    store.read(sp.id).shots[0].sfxOf !== store.read(sp.id).shots[0].sound);
+  upstream.sfxBodies = [];
+  await ndjson(`/projects/${sp.id}/stage/voice`, {});
+  check('改了描述会重出', upstream.sfxBodies[0]?.text === '玻璃杯摔碎', JSON.stringify(upstream.sfxBodies[0]));
+  check('重出之后不再是过时的',
+    store.read(sp.id).shots[0].sfxOf === '玻璃杯摔碎', store.read(sp.id).shots[0].sfxOf);
+
+  settings.patch({ baseUrls: {}, sfxProvider: '', sfxModel: '' });
+}
+
+section('混音：音效必须压在台词底下');
+{
+  const ff = await import('../core/ffmpeg.js');
+
+  /**
+   * 等响的话，一声关门就能把一句台词整个盖掉 —— 而台词是观众唯一的信息来源。
+   * 这是混音里最基本的一条，也是自己做音频最容易做砸的一处：
+   * 素材各自听着都正常，混到一起才发现听不清人话。
+   */
+  const graph = ff.voiceFilterGraph([
+    { path: 'line.mp3', at: 0 },
+    { path: 'knock.mp3', at: 2.5, gain: 0.35 }
+  ]);
+  check('台词按原音量', /\[0:a\]adelay=0:all=1\[a0\]/.test(graph), graph);
+  check('音效压低了', /\[1:a\]adelay=2500:all=1,volume=0\.350\[a1\]/.test(graph), graph);
+  // gain=1 不该多加一个没用的 volume 滤镜 —— 每多一层滤镜就多一次重采样
+  check('gain 为 1 时不多加滤镜',
+    !/volume=/.test(ff.voiceFilterGraph([{ path: 'a.mp3', at: 0, gain: 1 }])));
+  check('没写 gain 也不加', !/volume=/.test(ff.voiceFilterGraph([{ path: 'a.mp3', at: 0 }])));
+  // 二十条混完每句只剩 1/20 音量，听上去像没配音
+  check('仍然不做音量均分', /normalize=0/.test(graph));
 }
 
 section('场次：先决定在哪儿断，再决定拆成几镜');

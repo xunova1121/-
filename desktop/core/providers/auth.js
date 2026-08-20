@@ -61,6 +61,25 @@ export function buildAuthHeaders(provider, { placeholder = false } = {}) {
     return { Authorization: `Bearer ${signKlingJWT(ak, sk)}` };
   }
 
+  /**
+   * 密钥根本不放在 Authorization 里的那些家。
+   *
+   * ElevenLabs 用的是 `xi-api-key: <key>`。不认这一种的话，代码会走到下面
+   * 那条默认分支，发出一个 `Authorization: Bearer <key>` —— 对方回 401，
+   * 而 401 的第一反应永远是"密钥不对"，人会去控制台反复重建密钥，
+   * 白折腾一圈。Vidu 那条 `Token` 而不是 `Bearer` 的注释就是同一个教训。
+   */
+  if (auth.type === 'header') {
+    const name = auth.header || 'X-API-Key';
+    if (placeholder) return { [name]: `{{${auth.secret}}}` };
+    const value = getSecret(auth.secret);
+    if (!value) {
+      if (auth.optional) return {};
+      throw new AuthError(`${provider.name} 缺少凭据：${auth.secret}`, [auth.secret]);
+    }
+    return { [name]: value };
+  }
+
   const scheme = auth.type === 'token' ? 'Token' : 'Bearer';
   if (placeholder) return { Authorization: `${scheme} {{${auth.secret}}}` };
 

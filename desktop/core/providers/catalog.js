@@ -17,7 +17,16 @@ export const CAPABILITIES = {
   t2v: '文生视频',
   i2v: '图生视频',
   r2v: '参考图生视频',
-  tts: '语音合成'
+  tts: '语音合成',
+  /**
+   * 音效 ≠ 语音合成。
+   *
+   * 两者是完全不同的模型：TTS 要的是"把这段字念出来"，音效要的是
+   * "生成一段敲门声"。拿 TTS 去做音效，结果是一个人**朗读"敲门声"这三个字** ——
+   * 这个坑在分镜那一层已经踩过一次了（音效写进台词字段，配音时被念出来），
+   * 所以这里从一开始就分成两种能力，不共用路由。
+   */
+  sfx: '音效生成'
 };
 
 /**
@@ -1046,6 +1055,73 @@ export const PROVIDERS = [
         url: '{{baseUrl}}/img2video',
         async: true,
         body: { model: 'viduq1', images: ['https://example.com/first-frame.jpg'], prompt: '镜头缓推', duration: 4 }
+      }
+    ]
+  },
+
+  // ───────────────────────── ElevenLabs：音效 ─────────────────────────
+  /**
+   * 目前唯一一家有**专门的音效接口**的。
+   *
+   * 别的家有的是 TTS（把字念出来）或者音乐生成（写一段旋律），
+   * 都不是"生成一段敲门声"。拿它们凑合的结果是：
+   * TTS 会**朗读"敲门声"这三个字**，音乐生成会给你一段配乐 ——
+   * 两种都比没有音效更糟，因为它们会被当成成片的一部分发出去。
+   *
+   * ⚠ 请求结构照官方文档写。厂商改版很勤，真对不上时到「API 联调台」
+   * 用 sfx 这个模板试出能通的写法，再到「服务商与密钥 → 接口地址」里改 ——
+   * 这正是那两处存在的意义，不指望预设永远对。
+   */
+  {
+    id: 'elevenlabs',
+    name: 'ElevenLabs（音效 / 配音）',
+    docs: 'https://elevenlabs.io/docs/api-reference',
+    baseUrl: 'https://api.elevenlabs.io/v1',
+    family: 'elevenlabs',
+    // 它不用 Bearer，用自己的 xi-api-key 头
+    auth: { type: 'header', header: 'xi-api-key', secret: 'ELEVENLABS_API_KEY' },
+    secrets: [
+      {
+        name: 'ELEVENLABS_API_KEY',
+        label: 'API Key',
+        required: true,
+        hint: '控制台 → Profile → API Key。音效按生成秒数计费，一镜通常一两秒。'
+      }
+    ],
+    capabilities: ['sfx', 'tts'],
+    editableBaseUrl: true,
+    endpoints: {
+      sfx: '{{baseUrl}}/sound-generation',
+      tts: '{{baseUrl}}/text-to-speech/{voice}'
+    },
+    models: [
+      { id: 'eleven_text_to_sound_v2', capability: 'sfx', label: '音效生成（一句话描述 → 一段声音）' },
+      { id: 'eleven_multilingual_v2', capability: 'tts', label: '多语种配音' }
+    ],
+    /**
+     * 这家没有便宜的"列模型"接口可探，而真生成一次要花钱。
+     * 拿用量接口当连通性自检：它只读，不产生费用，但能验证密钥对不对。
+     */
+    probe: { label: '连通性自检（读订阅信息，不计费）', method: 'GET', url: '{{baseUrl}}/user/subscription' },
+    templates: [
+      {
+        id: 'sfx',
+        label: '音效生成',
+        capability: 'sfx',
+        method: 'POST',
+        url: '{{baseUrl}}/sound-generation',
+        body: {
+          text: 'knocking on a wooden door, three knocks',
+          duration_seconds: 2,
+          // 0~1：越高越贴提示词，越低越"有创意"。音效要的是贴，所以给高
+          prompt_influence: 0.6
+        }
+      },
+      {
+        id: 'subscription',
+        label: '看用量（不计费）',
+        method: 'GET',
+        url: '{{baseUrl}}/user/subscription'
       }
     ]
   },

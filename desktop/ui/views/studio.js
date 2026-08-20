@@ -1622,6 +1622,23 @@ export default {
                         '换一家，或者把提示词里和画面冲突的话去掉再重出。'
                     }, '首帧没吃')
                   : null,
+                /**
+                 * 音效跟不跟得上改动。
+                 *
+                 * 改了「画外音效」那一栏之后，旧的那声还在成片里 ——
+                 * 你以为改了，实际上没重出。这类"改了没生效"必须看得见，
+                 * 否则只会在放成片时才发现，而那时候已经合成过一遍了。
+                 */
+                shot.sfxPath
+                  ? h('span', {
+                      class: `badge ${shot.sfxOf === shot.sound ? 'ok' : 'warn'}`,
+                      title: shot.sfxOf === shot.sound
+                        ? `画外音效：${shot.sound}（合成时压在台词底下）`
+                        : `音效是按「${shot.sfxOf}」出的，而现在写的是「${shot.sound}」—— 重跑配音那一步才会换`
+                    }, shot.sfxOf === shot.sound ? '有音效' : '音效已过时')
+                  : shot.sound
+                    ? h('span', { class: 'badge', title: `还没出：${shot.sound}` }, '待出音效')
+                    : null,
                 // 末帧复核：视频的人设漂移几乎都在后半段，首帧永远是像的
                 shot.videoConsistency
                   ? h('span', {

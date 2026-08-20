@@ -26,7 +26,17 @@ const CAP_META = [
   ['vision', '一致性复核', 'visionProvider', 'visionModel', '把成图和角色设定图放一起比对，必须选带视觉的模型'],
   ['t2i', '出图', 'imageProvider', 'imageModel', '角色设定图和每一镜的画面'],
   ['i2v', '视频', 'videoProvider', 'videoModel', '以镜头图为首帧生成视频片段'],
-  ['tts', '配音', 'ttsProvider', 'ttsModel', '把台词合成语音']
+  ['tts', '配音', 'ttsProvider', 'ttsModel', '把台词合成语音'],
+  /**
+   * 音效和配音是**两种模型**，所以是两行，不是一行。
+   *
+   * 合成一行的诱惑很大（都是"出声音"），但拿配音模型去做"敲门声"，
+   * 出来的是一个人念这三个字 —— 而且会被当成成片的一部分交付出去。
+   * 不配就是不做音效，故意不回退。
+   */
+  ['sfx', '音效', 'sfxProvider', 'sfxModel',
+    '把分镜里那栏「画外音效」（敲门声、脚步声）变成真的声音。不配就是不做音效 —— 故意不回退到配音模型，那会念出"敲门声"三个字',
+    { none: '不做音效' }]
 ];
 
 export default {
@@ -74,6 +84,12 @@ export default {
           modelSel.append(h('option', { value: '', selected: true }, '（跟随剧本模型）'));
           return;
         }
+        // 「不做」是一个正经的选择，不是"还没配"。摆个占位说清楚
+        if (opts.none && !providerId) {
+          modelSel.innerHTML = '';
+          modelSel.append(h('option', { value: '', selected: true }, `（${opts.none}）`));
+          return;
+        }
         const p = providers.find((x) => x.id === providerId);
         const models = (p?.models || []).filter((m) => !m.capability || m.capability === cap || cap === 'chat');
         modelSel.innerHTML = '';
@@ -114,6 +130,9 @@ export default {
         },
         opts.follow
           ? h('option', { value: '', selected: !settings[provKey] }, '跟随剧本模型')
+          : null,
+        opts.none
+          ? h('option', { value: '', selected: !settings[provKey] }, opts.none)
           : null,
         candidates.map((p) =>
           h('option', { value: p.id, selected: p.id === settings[provKey] },

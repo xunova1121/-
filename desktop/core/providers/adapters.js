@@ -1594,6 +1594,78 @@ export async function synthesizeSpeech({
   };
 }
 
+/**
+ * 生成一段音效。
+ *
+ * ── 为什么不能拿 TTS 凑合 ──
+ *
+ * 这是两种模型。把"敲门声"交给 TTS，得到的是**一个人念出"敲门声"这三个字**。
+ * 这个坑在分镜那一层已经踩过：音效被写进台词字段，配音时一字不落地念了出来。
+ * 所以音效走自己的能力（sfx）和自己的路由，不和配音共用。
+ *
+ * ── 时长 ──
+ *
+ * 卡在镜头长度以内。音效比画面长的话，它会盖到下一镜上 ——
+ * 上一场的敲门声在新场景里还在响，观众立刻就听出不对。
+ */
+export async function generateSfx({
+  providerId,
+  model,
+  text,
+  seconds = 2,
+  timeoutMs = 120000,
+  label = '音效'
+}) {
+  const provider = getProvider(providerId);
+  if (!provider) throw new Error(`未知服务商：${providerId}`);
+  if (!(provider.capabilities || []).includes('sfx')) {
+    throw new Error(
+      `${provider.name} 不做音效生成。音效和配音是两种模型 —— ` +
+      '拿配音模型生成的话，出来的是一个人在念"敲门声"这三个字。' +
+      '去「设置 → 能力路由 → 音效」选一家支持的。'
+    );
+  }
+
+  const res = await send(
+    {
+      provider: providerId,
+      label,
+      method: 'POST',
+      url: endpoint(provider, 'sfx', '{{baseUrl}}/sound-generation'),
+      body: {
+        text,
+        // 档位之外的值有的家会直接 400，夹一下更稳；太短听不出来，太长会压到下一镜
+        duration_seconds: Math.min(22, Math.max(0.5, Number(seconds) || 2)),
+        // 音效要的是**贴着描述**，不是创意发挥
+        prompt_influence: 0.6,
+        ...(model ? { model_id: model } : {})
+      },
+      timeoutMs
+    },
+    null
+  );
+  if (!res.ok) fail(label, res);
+
+  // 有的家直接回音频二进制，有的家回一个地址。两种都接
+  const url = firstMediaUrl(res.json, { extensions: ['.mp3', '.wav', '.ogg'] }) || firstMediaUrl(res.json);
+  if (url) return { url, raw: res.json };
+
+  return {
+    url: null,
+    binaryRequest: {
+      provider: providerId,
+      method: 'POST',
+      url: interpolate(provider.endpoints?.sfx || '{{baseUrl}}/sound-generation', provider),
+      body: {
+        text,
+        duration_seconds: Math.min(22, Math.max(0.5, Number(seconds) || 2)),
+        prompt_influence: 0.6,
+        ...(model ? { model_id: model } : {})
+      }
+    }
+  };
+}
+
 /** 当前设置下，各能力实际会用哪家哪个模型 —— 界面上要显示，出错时也好排查 */
 export function resolvedRouting() {
   const s = settings.all();
@@ -1609,7 +1681,9 @@ export function resolvedRouting() {
     vision: { provider: s.visionProvider, model: s.visionModel },
     image: { provider: s.imageProvider, model: s.imageModel },
     video: { provider: s.videoProvider, model: s.videoModel },
-    tts: { provider: s.ttsProvider, model: s.ttsModel }
+    tts: { provider: s.ttsProvider, model: s.ttsModel },
+    // 音效。没配就是不做音效 —— 不回退到配音模型，那会念出"敲门声"三个字
+    sfx: { provider: s.sfxProvider || '', model: s.sfxModel || '' }
   };
 }
 

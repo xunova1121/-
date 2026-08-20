@@ -957,7 +957,12 @@ function shotCardOf(s, v, portrait) {
           s.imageSize && s.imageSize.ok === false
             ? h('span', { class: 'tag warn' }, `比例不符 ${s.imageSize.width}×${s.imageSize.height}`)
             : null,
-          s.headMatch?.verdict === 'mismatch' ? h('span', { class: 'tag warn' }, '首帧没吃') : null),
+          s.headMatch?.verdict === 'mismatch' ? h('span', { class: 'tag warn' }, '首帧没吃') : null,
+          // 音效改过描述之后要能看出这条是旧的 —— 否则你以为改了，其实成片里还是那声旧的
+          s.sfxPath
+            ? h('span', { class: `tag ${s.sfxOf === s.sound ? '' : 'warn'}` },
+                s.sfxOf === s.sound ? '有音效' : '音效已过时')
+            : s.sound ? h('span', { class: 'tag' }, '待出音效') : null),
         h('div', { class: 'row' },
           h('button', {
             class: 'btn sm grow',
@@ -1167,6 +1172,7 @@ function paintFilm() {
   const shots = (project?.shots || []).slice().sort((a, b) => a.index - b.index);
   const clips = shots.filter((s) => s.videoPath);
   const voices = shots.filter((s) => s.audioPath);
+  const sfxs = shots.filter((s) => s.sfxPath);
 
   const head = out?.video
     ? [
@@ -1215,7 +1221,10 @@ function paintFilm() {
             media(s.videoPath, v)
           )),
         ...voices.map((s) =>
-          assetRow(`第 ${s.index} 镜 配音`, `${s.speakerUsed || s.speaker || '旁白'}：${(s.dialogue || '').slice(0, 14)}`, media(s.audioPath, v))))
+          assetRow(`第 ${s.index} 镜 配音`, `${s.speakerUsed || s.speaker || '旁白'}：${(s.dialogue || '').slice(0, 14)}`, media(s.audioPath, v))),
+        // 音效也要能单独取走：进剪映之后音量、位置都可能想再调
+        ...sfxs.map((s) =>
+          assetRow(`第 ${s.index} 镜 音效`, s.sfxOf || s.sound || '', media(s.sfxPath, v))))
     : null;
 
   return [...head, material];

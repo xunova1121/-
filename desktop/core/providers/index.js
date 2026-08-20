@@ -147,6 +147,25 @@ export function providerForUrl(url) {
   );
 }
 
+/**
+ * 指名道姓拿某一家的鉴权头。
+ *
+ * 比 authHeadersForUrl 靠谱：那一个是**从地址反推**是哪家，
+ * 而调用方其实早就知道是哪家了。反推在两种情况下会错 ——
+ * 几家共用一个网关地址（自检里就是这样），或者用了中转域名。
+ * 猜错的后果是把头发错、或者干脆不发，而表现都是 401：
+ * 一个让人去反复重建密钥的、最浪费时间的错。
+ */
+export function authHeadersFor(providerId) {
+  const provider = getProvider(providerId);
+  if (!provider) return {};
+  try {
+    return buildAuthHeaders(provider);
+  } catch {
+    return {};
+  }
+}
+
 /** 下载这个地址时该带的鉴权头。不属于任何已配置的服务商就返回空。 */
 export function authHeadersForUrl(url) {
   const provider = providerForUrl(url);
