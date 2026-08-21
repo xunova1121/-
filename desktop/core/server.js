@@ -871,6 +871,22 @@ async function handleApi(req, res, url, { lan = false } = {}) {
       }
     }
 
+    // 这一镜出过几版 / 回到某一版。cap:shot-versions
+    if (b && c === 'shots' && d && e === 'versions' && method === 'GET') {
+      try {
+        return json(res, 200, studio.shotVersions(b, d));
+      } catch (err) {
+        return json(res, 404, { error: err.message });
+      }
+    }
+    if (b && c === 'shots' && d && e === 'versions' && f === 'restore' && method === 'POST') {
+      try {
+        return json(res, 200, studio.restoreShotVersion(b, d, await readBody(req)));
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
+    }
+
     if (b && c === 'shots' && d && !e && method === 'PATCH') {
       const patch = await readBody(req);
       try {

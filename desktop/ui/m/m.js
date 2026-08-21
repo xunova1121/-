@@ -1343,6 +1343,65 @@ function editRow(s) {
     }
   }, s.stage?.cam ? '预演台 ·' : '预演台');
 
+  /**
+   * 历史版本。重出写的是同一个路径，上一版原来直接被覆盖 ——
+   * 而每一版都是真金白银出的，丢掉的不是文件，是已经花掉的钱。
+   *
+   * 按需拉：二十镜各拉一次目录列表的话，光是打开分镜页就要等。
+   */
+  const verBtn = h('button', { class: 'btn sm grow' }, '历史版本');
+  verBtn.onclick = async () => {
+    verBtn.disabled = true;
+    try {
+      // cap:shot-versions
+      const v = await api(`/projects/${project.id}/shots/${s.id}/versions`);
+      const rows = [
+        ...v.image.versions.map((x) => ({ ...x, kind: 'image', label: '图' })),
+        ...v.video.versions.map((x) => ({ ...x, kind: 'video', label: '视频' }))
+      ].sort((a, b) => (a.at < b.at ? 1 : -1));
+      if (!rows.length) return toast('还没有历史版本 —— 重出一次之后，上一版就留在这儿', 'ok');
+      const layer = h('div', { class: 'sheet' });
+      const close = () => layer.remove();
+      layer.onclick = (e) => { if (e.target === layer) close(); };
+      layer.append(h('div', { class: 'sheet-box' },
+        h('b', {}, `第 ${s.index} 镜的历史版本`),
+        h('p', { class: 'muted', style: 'margin:6px 0 10px' },
+          `留最近 ${rows.length} 版。换回某一版之后，现在这版也会被存起来 —— 换回去是可逆的。`),
+        ...rows.map((x) => h('div', { class: 'row', style: 'margin-top:8px;align-items:center' },
+          h('img', {
+            src: media(x.path),
+            style: 'width:56px;height:36px;object-fit:cover;border-radius:6px;background:#000',
+            onerror: (e) => { e.target.style.display = 'none'; }
+          }),
+          h('span', { class: 'tag' }, `${x.label} v${x.n}`),
+          h('span', { class: 'muted grow', style: 'font-size:12px' }, new Date(x.at).toLocaleString('zh-CN')),
+          h('button', {
+            class: 'btn sm',
+            onclick: async (e) => {
+              e.target.disabled = true;
+              try {
+                await api(`/projects/${project.id}/shots/${s.id}/versions/restore`, {
+                  method: 'POST', body: { kind: x.kind, n: x.n }
+                });
+                close();
+                toast(`已换回${x.label} v${x.n}`, 'ok');
+                await reload();
+              } catch (err) {
+                toast(err.message, 'err');
+                e.target.disabled = false;
+              }
+            }
+          }, '换回'))),
+        h('div', { class: 'row', style: 'margin-top:12px' },
+          h('button', { class: 'btn sm grow', onclick: close }, '关闭'))));
+      document.body.append(layer);
+    } catch (err) {
+      toast(err.message, 'err');
+    } finally {
+      verBtn.disabled = false;
+    }
+  };
+
   box.append(
     field('画面描述', desc, '这是出图和出视频的唯一输入 —— 写偏一句，重出十次也回不到对的画面。'),
     field('台词', line, '留空就是这一镜没人说话。'),
@@ -1399,7 +1458,7 @@ function editRow(s) {
       '保存只改文案，不重出 —— 一般是连着改好几镜再统一重出，改一个字就烧一次钱不划算。')
   );
 
-  return [h('div', { class: 'row', style: 'margin-top:8px' }, toggle, stageBtn), box];
+  return [h('div', { class: 'row', style: 'margin-top:8px' }, toggle, stageBtn, verBtn), box];
 }
 
 /** 一个可以存到手机上的素材行 */

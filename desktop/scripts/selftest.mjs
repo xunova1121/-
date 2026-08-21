@@ -3686,6 +3686,70 @@ section('接缝：走一遍出视频，看首帧到底发的是哪张');
   settings.patch({ seamMode: 'lock' });
 }
 
+section('历史版本：重出之前把上一版留下来');
+{
+  const v = await import('../core/versions.js');
+  const os2 = await import('node:os');
+
+  /**
+   * 每一次重出写的都是同一个路径（`<镜头id>.png` / `.mp4`），旧的直接被覆盖。
+   * "重出三次，第二次最好"这种再常见不过的情形没有出路 —— 只能再赌一次。
+   *
+   * 而每一版都是真金白银出的：丢掉的不是文件，是已经花掉的钱。
+   */
+  const dir = fs.mkdtempSync(path.join(os2.tmpdir(), 'fd-ver-'));
+  const dest = path.join(dir, 'shot-1.png');
+
+  check('第一次出：没有上一版可留', v.archive(dest) === null);
+  fs.writeFileSync(dest, '第1版');
+  for (let i = 2; i <= 8; i += 1) {
+    v.archive(dest);
+    fs.writeFileSync(dest, `第${i}版`);
+  }
+
+  /**
+   * 留 5 版。一段 1080p 视频十几 MB，二十镜留满就是一两 G，
+   * 而"我想回到三次之前那一版"实际上很少超过五次。
+   */
+  const kept = v.list(dest);
+  check(`超出上限的从最旧的删（留 ${v.KEEP} 版）`, kept.length === v.KEEP, `${kept.length} 版`);
+  check('新的在前', kept[0].n > kept[kept.length - 1].n, kept.map((x) => x.n).join(','));
+  check('当前那份没被动', fs.readFileSync(dest, 'utf8') === '第8版');
+
+  /**
+   * ⚠ 换回某一版时，**当前这版也要先存起来**。
+   * 不然"我看看上一版长什么样"这个动作本身就会把现在这版弄丢 ——
+   * 而人不会预期点一下"看看"会删东西。
+   */
+  const before = fs.readFileSync(dest, 'utf8');
+  v.restore(dest, kept[1].path);
+  check('换回上上版之后，当前就是那一版', fs.readFileSync(dest, 'utf8') === '第6版', fs.readFileSync(dest, 'utf8'));
+  check('换回去是可逆的（刚才那版被存起来了）',
+    v.list(dest).some((x) => fs.readFileSync(x.path, 'utf8') === before),
+    v.list(dest).map((x) => fs.readFileSync(x.path, 'utf8')).join(','));
+
+  /**
+   * 版本号取"现有最大值 + 1"，不是"现有个数 + 1"。
+   * 按个数算的话，删掉旧版之后新版会撞上一个还在的号 —— 直接覆盖掉它，
+   * 而那正是这个模块要防的事。
+   */
+  const dir2 = fs.mkdtempSync(path.join(os2.tmpdir(), 'fd-ver2-'));
+  const d2 = path.join(dir2, 'x.png');
+  fs.writeFileSync(d2, 'a'); v.archive(d2);
+  fs.writeFileSync(d2, 'b'); v.archive(d2);
+  fs.rmSync(v.list(d2).find((x) => x.n === 1).path);   // 手动删掉 v1，制造空档
+  fs.writeFileSync(d2, 'c'); v.archive(d2);
+  const ns = v.list(d2).map((x) => x.n).sort();
+  check('删过旧版之后，新版不会撞号覆盖掉还在的那个',
+    new Set(ns).size === ns.length && ns.includes(2), ns.join(','));
+
+  // 目录不存在 / 文件不在时不能炸 —— 用户清过盘是常事
+  check('目录不存在时回空数组', v.list(path.join(dir, 'nope', 'a.png')).length === 0);
+  let threw = null;
+  try { v.restore(dest, path.join(dir, 'nope.png')); } catch (e) { threw = e.message; }
+  check('要一个已经不在的版本时，报人话', /不在了/.test(threw || ''), String(threw));
+}
+
 section('台词时长：念不完的镜头，出图之前就该拉长');
 {
   const d = await import('../core/duration.js');

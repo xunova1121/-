@@ -25,6 +25,7 @@ import * as imghash from '../imghash.js';
 import { safeFileName, PROJECTS_DIR } from '../paths.js';
 import * as chapters from './chapters.js';
 import * as duration from '../duration.js';
+import * as versions from '../versions.js';
 import * as skillsLib from '../skills.js';
 import * as variants from './variants.js';
 import * as anglesLib from './angles.js';
@@ -341,6 +342,16 @@ async function uploadVia(gateway, localPath, onEvent) {
 /** 把远端产物或 base64 落到本地。二进制不能走 execute()（那条通道是按文本设计的）。 */
 export async function saveMedia({ url, base64, downloadHeaders }, destPath, onEvent) {
   fs.mkdirSync(path.dirname(destPath), { recursive: true });
+  /**
+   * 覆盖之前，把上一版留下来。
+   *
+   * 放在这儿是因为这里是**所有产物落盘的唯一咽喉** —— 出图、出视频、
+   * 设定图、补角度、贴地址，八条路最后都走这一行。在每条路上各加一次，
+   * 迟早漏掉一条，而漏掉的表现是"这一镜的历史版本莫名其妙没有"。
+   *
+   * 每一版都是真金白银出的。丢掉的不是文件，是已经花掉的钱。
+   */
+  versions.archive(destPath);
   let buf;
   const started = Date.now();
   if (base64 && !url) {
@@ -1893,6 +1904,83 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
 }
 
 /** 重出某一镜的视频（图不动，只重跑视频那步） */
+/** 这一镜的产物落在哪儿。版本号是按这两个路径算的 */
+function shotAssetPath(projectId, shot, kind) {
+  return path.join(store.assetDir(projectId), `${shot.id}.${kind === 'video' ? 'mp4' : 'png'}`);
+}
+
+/**
+ * 这一镜出过几版，每版什么时候出的。
+ *
+ * 直接扫盘，不读记录 —— 记录会和盘上的东西对不上（清过盘、写到一半崩了），
+ * 而界面照着记录画出五个缩略图、点第四个是空的，比没有这个功能更糟。
+ */
+export function shotVersions(projectId, shotId) {
+  const project = store.read(projectId);
+  const shot = project?.shots.find((s) => s.id === shotId);
+  if (!shot) throw new Error(`没有这一镜：${shotId}`);
+  const of = (kind) => {
+    const dest = shotAssetPath(projectId, shot, kind);
+    return {
+      current: fs.existsSync(dest) ? dest : null,
+      versions: versions.list(dest).map((v) => ({ n: v.n, at: v.at, path: v.path }))
+    };
+  };
+  return { image: of('image'), video: of('video') };
+}
+
+/**
+ * 回到某一版。
+ *
+ * ⚠ 只收**版本号**，不收路径。
+ *
+ * 收路径的话，界面传什么服务端就读什么 —— 一个 `../../../etc/passwd` 就能
+ * 把任意文件拷进项目里。路径由服务端自己按 id 和版本号拼出来，
+ * 这条路从根上就不存在。
+ */
+export function restoreShotVersion(projectId, shotId, { kind = 'image', n } = {}) {
+  const project = store.read(projectId);
+  const shot = project?.shots.find((s) => s.id === shotId);
+  if (!shot) throw new Error(`没有这一镜：${shotId}`);
+  if (kind !== 'image' && kind !== 'video') throw new Error(`不认识的产物类型：${kind}`);
+
+  const dest = shotAssetPath(projectId, shot, kind);
+  const hit = versions.list(dest).find((v) => v.n === Number(n));
+  if (!hit) throw new Error(`第 ${shot.index} 镜没有第 ${n} 版了（可能已经被更早的版本挤掉）`);
+
+  versions.restore(dest, hit.path);
+
+  store.update(projectId, (p) => {
+    const t = p.shots.find((x) => x.id === shotId);
+    if (!t) return p;
+    if (kind === 'video') {
+      t.videoPath = dest;
+      /**
+       * 回退视频时，接缝那几笔要**跟着作废**。
+       *
+       * headFromTail 记的是"这一段是从第 N 镜的末帧长出来的"，
+       * 而回到的这一版可能根本不是那么出的。留着的话界面会显示
+       * 一个像素级连着的接缝，而实际上并没有 —— 界面和事实不一致，
+       * 比少一个功能糟糕得多。
+       */
+      t.headFromTail = null;
+      t.endFrameChained = false;
+      t.headMatch = null;
+      t.seamCheck = null;
+    } else {
+      t.imagePath = dest;
+      // 地址指向的是旧那一版的字节，重出后必须重新上传才对得上
+      t.imageRef = null;
+      // 一致性分数是给被换掉那一版打的，留着会冒充现在这版的结论
+      if (t.consistency) t.consistency = { ...t.consistency, stale: true };
+    }
+    t.restoredAt = new Date().toISOString();
+    return p;
+  });
+
+  return { project: store.read(projectId), restored: n, kind };
+}
+
 export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent) {
   const project = store.read(projectId);
   const shot = project?.shots.find((s) => s.id === shotId);

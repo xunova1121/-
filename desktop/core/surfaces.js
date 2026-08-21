@@ -194,6 +194,13 @@ export const CAPABILITIES = [
     mobile: 'ui/m/m.js'
   },
   {
+    id: 'shot-versions',
+    name: '看历史版本 / 回到某一版',
+    api: 'GET+POST /projects/:id/shots/:sid/versions',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js'
+  },
+  {
     id: 'link-auto',
     name: '自动标出哪几镜是连续动作',
     api: 'POST /projects/:id/shots/link/auto',

@@ -1311,6 +1311,70 @@ export default {
           }
         }, shot.stage?.cam ? '预演台 ·' : '预演台');
 
+        /**
+         * 历史版本。
+         *
+         * 每一次重出写的都是同一个路径，上一版原来是**直接被覆盖**的 ——
+         * "重出三次，第二次最好"这种再常见不过的情形没有出路，只能再赌一次。
+         * 而每一版都是真金白银出的：丢掉的不是文件，是已经花掉的钱。
+         *
+         * 按需拉，不预取：二十镜各拉一次目录列表，光是打开分镜页就要等。
+         */
+        const verBtn = h('button', {
+          class: 'shot-edit-btn',
+          title: '这一镜之前出过的版本，可以挑一版换回来',
+          onclick: async () => {
+            verBtn.disabled = true;
+            try {
+              // cap:shot-versions
+              const v = await api(`/projects/${project.id}/shots/${shot.id}/versions`);
+              const rows = [
+                ...v.image.versions.map((x) => ({ ...x, kind: 'image', label: '图' })),
+                ...v.video.versions.map((x) => ({ ...x, kind: 'video', label: '视频' }))
+              ].sort((a, b) => (a.at < b.at ? 1 : -1));
+              if (!rows.length) return toast('这一镜还没有历史版本 —— 重出一次之后，上一版就会留在这儿', 'ok');
+              const box = h('div', { class: 'shot-versions' },
+                h('div', { class: 'field-hint' },
+                  `留最近 ${rows.length} 版。换回某一版之后，现在这一版也会被存起来 —— 换回去是可逆的。`),
+                ...rows.map((x) => h('div', { class: 'inline', style: 'gap:8px;margin-top:6px' },
+                  h('img', {
+                    src: `${mediaUrl(x.path)}`,
+                    style: 'width:56px;height:36px;object-fit:cover;border-radius:4px;background:#000',
+                    onerror: (e) => { e.target.style.display = 'none'; }
+                  }),
+                  h('span', { class: 'badge' }, `${x.label} v${x.n}`),
+                  h('span', { class: 'field-hint', style: 'margin:0' },
+                    new Date(x.at).toLocaleString('zh-CN')),
+                  h('button', {
+                    class: 'btn ghost sm',
+                    onclick: async (e) => {
+                      e.target.disabled = true;
+                      try {
+                        const r = await api(`/projects/${project.id}/shots/${shot.id}/versions/restore`, {
+                          method: 'POST', body: { kind: x.kind, n: x.n }
+                        });
+                        project = r.project;
+                        toast(`已换回${x.label} v${x.n}`, 'ok');
+                        paintShots();
+                      } catch (err) {
+                        toast(err.message, 'err');
+                        e.target.disabled = false;
+                      }
+                    }
+                  }, '换回这一版'))));
+              const old = editor.querySelector('.shot-versions');
+              if (old) old.remove();
+              editor.append(box);
+              openEdit();
+              box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } catch (err) {
+              toast(err.message, 'err');
+            } finally {
+              verBtn.disabled = false;
+            }
+          }
+        }, '历史版本');
+
         // 厂商的时长档位：设 4 秒而模型只出 5/10 秒时，得在这儿就说清楚
         const steps = state.catalog.videoDurations || [];
         const aligned = steps.find((x) => x >= shot.duration) || steps.at(-1);
@@ -1653,7 +1717,8 @@ export default {
                 // 光靠"描述可点"没人发现得了，摆个明确的入口
                 h('button', { class: 'shot-edit-btn', title: '改这一镜的描述、景别、台词', onclick: openEdit }, '改文案'),
                 // 和「改文案」并排。藏在编辑面板底部时用户根本找不到它
-                stageBtn
+                stageBtn,
+                verBtn
               ),
               descEl,
               editor,
