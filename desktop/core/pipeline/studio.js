@@ -1128,6 +1128,172 @@ export const SKILL_PROMPT = `你是分镜师。下面给你一份分镜表和一
  * 只重挑一部分（only）时，其余镜头照样发过去，标 pick:false 当上下文，
  * 否则重挑的那几镜必然和没重挑的那几镜对不上 —— 它压根没看见它们。
  */
+export const LINK_PROMPT = `你是剪辑师。下面给你一份分镜表，判断**每一镜和上一镜之间是不是"连续动作"**。
+
+"连续动作"的定义很窄：**这一镜是上一镜那个动作的下一瞬间**，中间没有时间流逝、机位也没有跳。
+典型的是把一个动作拆成两镜：
+  伸手去够门把手 → 把门把手拧下去        ✅ 连续
+  转身面向门口   → 迈步走出门            ✅ 连续
+  举起杯子       → 杯子送到嘴边          ✅ 连续
+
+不是连续动作的（这些占绝大多数）：
+  他在办公桌前批改作业 → 特写他的钢笔      ❌ 同一场戏换机位而已
+  两人对话，A 说完 → 切到 B 的反应        ❌ 反打，是剪辑
+  他走出办公室   → 走廊尽头的安全灯        ❌ 换了拍摄对象
+  白天在教室     → 夜里在家               ❌ 换场次
+
+⚠ **判错的代价不对称，所以默认永远是 cut**：
+- 该切的地方标成连续 → 这一段失去剪辑感、机位被锁死，整段只能重出；而且这几镜必须串行生成，慢好几倍
+- 该连的地方标成切   → 顶多硬切一下，还能看
+
+拿不准就给 cut。宁可漏掉几处，也不要多标一处。
+
+严格只输出 JSON，不要解释、不要代码块：
+{ "shots": [ { "index": 2, "link": "continuous", "why": "上一镜伸手，这一镜是同一只手拧下把手" } ] }
+
+只列你判定为 continuous 的那些镜，其余不用出现。why 写一句话，说清楚"哪个动作在延续"。`;
+
+/**
+ * 让调度模型通读全片，把「连续动作」标出来。
+ *
+ * ── 为什么必须是模型，不是规则 ──
+ *
+ * 规则能判的只有"换没换场景"（比场景名），而那正是 deriveLink 已经在做的。
+ * "这一镜是不是上一镜那个动作的下一瞬间"要读懂两句中文描述之间的**动作关系**：
+ * 「伸手去够门把手」和「把门把手拧下去」是同一只手的同一个动作，
+ * 而「他在批改作业」和「特写他的钢笔」不是 —— 字面上都发生在同一场戏、
+ * 同一批词，规则区分不了，硬写关键词只会得到一个不断误判的东西。
+ *
+ * ── 而判错的代价是不对称的 ──
+ *
+ * 标多了：那一段失去剪辑感、机位锁死，整段只能重出；而且连续镜必须**串行**
+ * 生成（每镜要等上一镜的末帧），慢好几倍。
+ * 标少了：顶多硬切一下，还能看。
+ *
+ * 所以提示词里反复说"拿不准就给 cut"，而且下面还有一层确定性的收口 ——
+ * 提示词只是请求，这个项目里已经栽过不止一次。
+ */
+export async function suggestLinks(projectId, { only = null, onEvent } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const all = continuity.withLinks(project.shots || []);
+  if (!all.length) throw new Error('还没有分镜');
+
+  const r = routing();
+  onEvent?.({
+    type: 'stage',
+    stage: 'script',
+    status: 'running',
+    message: `让调度模型 ${r.director.model}（${r.director.provider}）通读 ${all.length} 镜，找出哪些是连续动作…`
+  });
+
+  const payload = all.map((s) => ({
+    index: s.index,
+    segment: s.segment || 1,
+    scene: s.scene,
+    description: s.description,
+    camera: s.camera,
+    dialogue: s.dialogue
+  }));
+
+  const { text } = await adapters.chat({
+    providerId: r.director.provider,
+    model: r.director.model,
+    system: LINK_PROMPT,
+    user: JSON.stringify(payload),
+    temperature: 0.2,
+    jsonMode: true,
+    label: '标衔接关系'
+  });
+
+  const parsed = consistency.extractJSON(text);
+  const picks = new Map(
+    (Array.isArray(parsed.shots) ? parsed.shots : [])
+      .filter((x) => x && x.link === 'continuous' && Number.isFinite(Number(x.index)))
+      .map((x) => [Number(x.index), String(x.why || '').trim()])
+  );
+
+  const changed = [];
+  const refused = [];
+  store.update(projectId, (p) => {
+    const sorted = (p.shots || []).slice().sort((a, b) => a.index - b.index);
+    let run = 0;
+    for (let i = 0; i < sorted.length; i += 1) {
+      const shot = sorted[i];
+      const prev = i ? sorted[i - 1] : null;
+      const want = picks.has(shot.index);
+
+      /**
+       * ── 确定性收口。提示词只是请求，这几条必须由代码保证 ──
+       */
+      // ① 人手选过的不动。悄悄改用户选的东西，会让他看着一个自己没选过的结果
+      if (shot.linkBy === 'user') {
+        if (want) refused.push({ index: shot.index, why: '你手动标过这一镜，没有覆盖' });
+        continue;
+      }
+      if (!want) {
+        // 模型没点名的一律回到默认（cut / new-scene 由 deriveLink 定）
+        if (shot.link === 'continuous') {
+          changed.push({ index: shot.index, to: 'cut', why: '这一轮没判成连续动作' });
+          shot.link = 'cut';
+          shot.linkWhy = '';
+        }
+        run = 0;
+        continue;
+      }
+      // ② 第一镜没有上一镜可连
+      if (!prev) {
+        refused.push({ index: shot.index, why: '这是第一镜，没有上一镜可接' });
+        run = 0;
+        continue;
+      }
+      // ③ 跨场次不可能是连续动作 —— 另一个地方、另一段时间
+      if (Number(prev.segment || 1) !== Number(shot.segment || 1)) {
+        refused.push({ index: shot.index, why: `和第 ${prev.index} 镜跨了场次` });
+        run = 0;
+        continue;
+      }
+      /**
+       * ④ 一串连续镜不能太长。
+       *
+       * 连着四五镜都是「连续动作」，等于整段变成一个没剪过的长镜头 ——
+       * 而且它们必须**串行**生成（每镜要等上一镜出片抠末帧），慢好几倍。
+       * 三镜是一个动作拆到头的合理上限（伸手→握住→拧开）。
+       */
+      if (run >= 2) {
+        refused.push({ index: shot.index, why: '已经连着三镜了，再连下去整段会变成一个长镜头' });
+        run = 0;
+        continue;
+      }
+
+      if (shot.link !== 'continuous') {
+        changed.push({ index: shot.index, to: 'continuous', why: picks.get(shot.index) });
+      }
+      shot.link = 'continuous';
+      shot.linkWhy = picks.get(shot.index);
+      run += 1;
+    }
+    return p;
+  });
+
+  for (const c of changed) {
+    onEvent?.({ type: 'note', message: `第 ${c.index} 镜 → ${continuity.LINK_LABELS[c.to]}${c.why ? `（${c.why}）` : ''}` });
+  }
+  // 被规矩拦下来的也要说 —— 不然人看到模型说了却没生效，只会以为功能坏了
+  for (const x of refused) {
+    onEvent?.({ type: 'note', message: `第 ${x.index} 镜模型想标连续动作，没采纳：${x.why}` });
+  }
+  onEvent?.({
+    type: 'stage',
+    stage: 'script',
+    status: 'done',
+    message: changed.length
+      ? `标好了：${changed.filter((c) => c.to === 'continuous').length} 处连续动作`
+      : '通读完了，没有哪两镜构成连续动作 —— 这很正常，大部分镜位切换本来就该硬切'
+  });
+  return { project: store.read(projectId), changed, refused };
+}
+
 export async function suggestSkills(projectId, { only = null, onEvent } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);

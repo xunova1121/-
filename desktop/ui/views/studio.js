@@ -2098,6 +2098,51 @@ export default {
       }
     }, '整段标记');
 
+    /**
+     * 让调度模型通读全片自动标。
+     *
+     * ── 为什么这活儿只能交给模型 ──
+     *
+     * 规则能判的只有"换没换场景"（比场景名），而那本来就在自动做。
+     * "这一镜是不是上一镜那个动作的下一瞬间"要读懂两句中文之间的**动作关系**：
+     * 「伸手去够门把手」和「把门把手拧下去」是同一只手的同一个动作，
+     * 而「他在批改作业」和「特写他的钢笔」不是 —— 字面上同一场戏、同一批词，
+     * 规则区分不了，硬写关键词只会得到一个不断误判的东西。
+     *
+     * 模型答完还有一层确定性收口（跨场次不许、连着三镜就停、手选过的不覆盖），
+     * 被拦下来的也会逐条说出来 —— 不然人看到模型说了却没生效，只会以为坏了。
+     */
+    const autoLinkStatus = h('span', { class: 'field-hint', style: 'margin:0' });
+    const autoLinkBtn = h('button', {
+      class: 'btn sm',
+      title: '让调度模型读一遍全片，找出哪几镜是同一个动作的下一瞬间',
+      onclick: async () => {
+        autoLinkBtn.disabled = true;
+        const label = autoLinkBtn.textContent;
+        autoLinkBtn.textContent = '通读中…';
+        try {
+          let err = null;
+          await stream(
+            // cap:link-auto
+            `/projects/${project.id}/shots/link/auto`,
+            {},
+            (ev) => {
+              if (ev.type === 'error') err = ev.message;
+              if (ev.type === 'finished' && ev.project) project = ev.project;
+              if (ev.message) autoLinkStatus.textContent = ev.message;
+            }
+          );
+          if (err) throw new Error(err);
+          paintShots();
+        } catch (e2) {
+          autoLinkStatus.textContent = e2.message;
+        } finally {
+          autoLinkBtn.disabled = false;
+          autoLinkBtn.textContent = label;
+        }
+      }
+    }, '自动标连续动作');
+
     const shotsPanel = h('div', { class: 'panel' },
       h('h2', { class: 'panel-title' },
         '分镜',
@@ -2109,6 +2154,10 @@ export default {
         h('span', { class: 'field-hint' }, '第'), linkFrom,
         h('span', { class: 'field-hint' }, '到'), linkTo,
         h('span', { class: 'field-hint' }, '镜，标成'), linkKind, linkBtn, linkStatus),
+      // 手工整段标之外，再给一条"让模型通读全片"的路 ——
+      // 二十镜里哪两镜是同一个动作，人自己一对一对看是很累的
+      h('div', { class: 'inline', style: 'margin-bottom:10px;flex-wrap:wrap;gap:6px' },
+        autoLinkBtn, autoLinkStatus),
       // 这两个按钮只在用得上的那一步露面：在出图那步摆一个"自动绑说话人"，
       // 只会让人以为得先把它按了才能出图
       h('div', { class: 'inline', style: 'margin-bottom:10px;flex-wrap:wrap' },

@@ -841,6 +841,23 @@ async function handleApi(req, res, url, { lan = false } = {}) {
     // ── 手改一镜的文案：自动拆的分镜有时不准，改一行字比重跑十次便宜 ──
     // 只认白名单字段（见 pipeline/studio.js），不会碰 imagePath / videoPath 这些产物。
     // 一段镜头一起改衔接关系 —— "这一段是一个连贯动作"是按段发生的想法，不是按镜
+    /**
+     * 让调度模型通读全片，自动标出哪些是「连续动作」。cap:link-auto
+     * 走流式：通读一遍要十几秒，而且每改一镜都要说一句为什么。
+     */
+    if (b && c === 'shots' && d === 'link' && e === 'auto' && method === 'POST') {
+      const opts = await readBody(req);
+      const stream = ndjson(res);
+      req.on('close', () => stream.end());
+      try {
+        const out = await studio.suggestLinks(b, { ...opts, onEvent: (ev) => stream.send(ev) });
+        stream.end({ type: 'finished', project: out.project, changed: out.changed, refused: out.refused });
+      } catch (err) {
+        stream.end({ type: 'error', message: err.message });
+      }
+      return undefined;
+    }
+
     if (b && c === 'shots' && d === 'link' && method === 'POST') {
       const body = await readBody(req);
       try {

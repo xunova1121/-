@@ -187,6 +187,13 @@ export const CAPABILITIES = [
     mobile: 'ui/m/m.js'
   },
   {
+    id: 'link-auto',
+    name: '自动标出哪几镜是连续动作',
+    api: 'POST /projects/:id/shots/link/auto',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js'
+  },
+  {
     id: 'tier-routing',
     name: '按镜头分级挑模型（省钱）',
     api: 'PATCH /projects/:id/shots/:sid { tier } + POST /settings { videoTiers }',

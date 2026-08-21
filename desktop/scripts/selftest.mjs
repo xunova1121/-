@@ -317,6 +317,19 @@ const upstream = http.createServer((req, res) => {
         content = JSON.stringify(BIBLE_REPLY);
       } else if (system.includes('分镜导演')) {
         content = JSON.stringify(SHOTS_REPLY);
+      } else if (system.includes('剪辑师')) {
+        /**
+         * 自动标衔接。**故意给一份违规的答案** —— 模型真会这么答，
+         * 提示词只是请求。收口那一层要能把每一条都掰回来：
+         *   第 1 镜   没有上一镜可接
+         *   跨场次那镜 另一个地方、另一段时间，不可能是连续动作
+         *   一长串     连着标下去整段会变成一个没剪过的长镜头
+         */
+        const shots = JSON.parse(body.messages?.[1]?.content || '[]');
+        upstream.lastLinkPayload = shots;
+        content = JSON.stringify({
+          shots: shots.map((x) => ({ index: x.index, link: 'continuous', why: '模型说什么都连' }))
+        });
       } else if (system.includes('分镜师')) {
         // 挑技法。故意埋三个坑：
         //   第 1 镜给一个自创 id + 一对互斥的 → 验证规整
@@ -3671,6 +3684,65 @@ section('接缝：走一遍出视频，看首帧到底发的是哪张');
     !off.some((e) => /真实末帧/.test(e.message || '')) && !store.read(sp.id).shots[1]?.headFromTail);
   // 还回默认，别把后面的段一起带偏
   settings.patch({ seamMode: 'lock' });
+}
+
+section('自动标连续动作：模型给的是建议，收口由代码做');
+{
+  const st4 = await import('../core/pipeline/studio.js');
+
+  /**
+   * 这活儿只能交给模型：规则能判的只有"换没换场景"（比场景名），
+   * 而"这一镜是不是上一镜那个动作的下一瞬间"要读懂两句中文之间的动作关系 ——
+   * 「伸手去够门把手」和「把门把手拧下去」是同一只手的同一个动作，
+   * 而「他在批改作业」和「特写他的钢笔」不是。字面上同一场戏、同一批词，
+   * 规则区分不了。
+   *
+   * 但**判错的代价是不对称的**：标多了那一段失去剪辑感、机位锁死、
+   * 而且必须串行生成（每镜等上一镜的末帧）慢好几倍；标少了顶多硬切一下。
+   * 所以模型答完必须有一层确定性的收口 —— 打桩那边故意让模型
+   * **每一镜都答 continuous**，看收口拦不拦得住。
+   */
+  const lp = store.create({ title: '自动标衔接', script: 'x' });
+  store.update(lp.id, (p) => {
+    p.shots = [
+      { id: 'l1', index: 1, segment: 1, scene: '办公室', description: '他伸手去够门把手' },
+      { id: 'l2', index: 2, segment: 1, scene: '办公室', description: '把门把手拧下去' },
+      { id: 'l3', index: 3, segment: 1, scene: '办公室', description: '门开了一条缝' },
+      { id: 'l4', index: 4, segment: 1, scene: '办公室', description: '他侧身挤进去' },
+      { id: 'l5', index: 5, segment: 2, scene: '走廊', description: '走廊尽头的安全灯' },
+      // 人手选过的那一镜：绝不覆盖
+      { id: 'l6', index: 6, segment: 2, scene: '走廊', description: '他站在灯下', link: 'cut', linkBy: 'user' }
+    ];
+    return p;
+  });
+
+  const evs = [];
+  const out = await st4.suggestLinks(lp.id, { onEvent: (e) => evs.push(e.message) });
+  const after = store.read(lp.id).shots;
+  const linkOf = (i) => after.find((x) => x.index === i)?.link;
+
+  check('第 1 镜没有上一镜可接，不标', linkOf(1) !== 'continuous', String(linkOf(1)));
+  check('第 2、3 镜采纳了', linkOf(2) === 'continuous' && linkOf(3) === 'continuous',
+    `${linkOf(2)} / ${linkOf(3)}`);
+  /**
+   * 连着三镜就停。再连下去整段会变成一个没剪过的长镜头，
+   * 而且这几镜必须串行生成，慢好几倍 —— 这是标多了最实在的代价。
+   */
+  check('连到第三镜就打住（不然整段变成一个长镜头）', linkOf(4) !== 'continuous', String(linkOf(4)));
+  check('跨场次那镜不标（另一个地方、另一段时间）', linkOf(5) !== 'continuous', String(linkOf(5)));
+  check('人手选过的一镜不覆盖', linkOf(6) === 'cut', String(linkOf(6)));
+
+  /**
+   * 被规矩拦下来的**必须逐条说出来**。不然人看到模型答了却没生效，
+   * 只会以为功能坏了 —— 这个项目里同一个毛病已经出现过三次。
+   */
+  const notes = evs.filter(Boolean).join(' | ');
+  check('拦下来的都说了为什么', /没采纳/.test(notes), notes.slice(0, 200));
+  check('说清楚了是哪几条规矩拦的',
+    /跨了场次/.test(notes) && /长镜头/.test(notes) && /手动标过/.test(notes), notes.slice(0, 400));
+  check('采纳的那几镜记下了理由（人要能判断它凭什么这么标）',
+    Boolean(after.find((x) => x.index === 2)?.linkWhy), JSON.stringify(after.find((x) => x.index === 2)?.linkWhy));
+  check('返回值里也带着被拦的清单', (out.refused || []).length >= 3, JSON.stringify(out.refused));
 }
 
 section('单镜重出：接缝没做，也得说一句为什么');

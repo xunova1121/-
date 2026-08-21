@@ -1045,6 +1045,28 @@ function linkRangeCard(shots) {
       go.disabled = false;
     }
   };
+  const auto = h('button', { class: 'btn sm grow' }, '让模型通读全片自动标');
+  auto.onclick = async () => {
+    auto.disabled = true;
+    const label = auto.textContent;
+    auto.textContent = '通读中…';
+    try {
+      let failed = null;
+      // cap:link-auto
+      await stream(`/projects/${project.id}/shots/link/auto`, {}, (ev) => {
+        if (ev.type === 'error') failed = ev.message;
+        if (ev.message) status.textContent = ev.message;
+      });
+      if (failed) throw new Error(failed);
+      await reload();
+    } catch (err) {
+      toast(err.message, 'err');
+    } finally {
+      auto.disabled = false;
+      auto.textContent = label;
+    }
+  };
+
   return h('div', { class: 'card' },
     h('b', {}, '整段标衔接'),
     h('p', { class: 'muted', style: 'margin:6px 0 10px' },
@@ -1055,6 +1077,15 @@ function linkRangeCard(shots) {
       h('span', { class: 'muted' }, '镜')),
     h('div', { style: 'margin-top:9px' }, kind),
     h('div', { class: 'row', style: 'margin-top:9px' }, go),
+    /**
+     * 让调度模型通读全片自动标。
+     *
+     * 手工整段标要人自己一对一对看"这两镜是不是同一个动作"，二十镜很累，
+     * 而在手机上更累。这一条恰恰是**模型比规则强**的地方：
+     * 规则只能比场景名，读不懂「伸手去够门把手」和「把门把手拧下去」
+     * 是同一只手的同一个动作。
+     */
+    h('div', { class: 'row', style: 'margin-top:9px' }, auto),
     status);
 }
 
