@@ -419,3 +419,23 @@ input {
   font-size: 12px; line-height: 1.6;
 }
 .previz-details > summary { cursor: pointer; color: var(--ink-dim); font-size: 13px; padding: 6px 0; }
+
+/* ── 浮层：新建项目那一类 ──
+   不用 prompt()：它在部分安卓浏览器和加到主屏的 WebAPK 里根本不弹，
+   点了没反应是最难报的故障 —— 用户只会觉得按钮坏了。 */
+.sheet {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex; align-items: flex-end; justify-content: center;
+  padding: 16px;
+  /* 底部横条、刘海都要让开，否则按钮会被系统手势条压住 */
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}
+.sheet-box {
+  width: 100%; max-width: 520px;
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 16px;
+}
+.sheet-box input { width: 100%; }

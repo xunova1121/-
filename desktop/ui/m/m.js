@@ -477,6 +477,24 @@ function paint() {
             }
           }, projects.map((p) => h('option', { value: p.id, selected: p.id === project?.id }, p.title)))
         : h('div', { class: 'top-title' }, project?.title || '未来创梦'),
+      /**
+       * 新建项目 —— 放在顶栏，任何时候都点得到。
+       *
+       * ── 为什么补这个 ──
+       *
+       * 原来"新建"只存在于 newProjectCard()，而那张卡片只在
+       * **一个项目都没有**的时候才画（`if (!project)`）。也就是说它是个
+       * 空状态提示，不是功能：建完第一部片子之后，手机上就再也建不了第二部了。
+       *
+       * 能力清单一直是绿的 —— `// cap:project-new` 那行标记确实在代码里。
+       * 这和手机端「重出参考图」那次是同一类漏法：标记证明"写了代码"，
+       * 证明不了"用户点得到"。
+       */
+      h('button', {
+        class: 'btn sm',
+        title: '再开一部片子',
+        onclick: () => newProjectSheet()
+      }, '＋'),
       h('button', {
         class: 'btn sm',
         onclick: async () => {
@@ -877,6 +895,61 @@ function driftCard() {
 }
 
 /** 一台设备上一个项目都没有时，得能直接建一个，而不是"回电脑上建" */
+/**
+ * 真正建项目的那一步。空状态那张卡片和顶栏那个 ＋ 都走它 ——
+ * 两处各写一份的话，迟早一处改了另一处没改（比如以后要带上画风），
+ * 而"从哪儿进来的决定建出来的项目长什么样"是最难查的一类不一致。
+ */
+async function createProject(title) {
+  // cap:project-new
+  const p = await api('/projects', { method: 'POST', body: { title } });
+  localStorage.setItem(PROJ_STORE, p.id);
+  await reload();
+  return p;
+}
+
+/**
+ * 顶栏那个 ＋ 弹出来的一层。
+ *
+ * 用一层浮层而不是 prompt()：prompt 在部分安卓浏览器和加到主屏的
+ * WebAPK 里**根本不弹**，点了没反应 —— 而"点了没反应"是最难报的故障，
+ * 用户只会觉得这个按钮坏了。
+ */
+function newProjectSheet() {
+  const name = h('input', { type: 'text', placeholder: '片名', autofocus: true });
+  const go = h('button', { class: 'btn primary grow' }, '建');
+  const layer = h('div', { class: 'sheet' });
+  const close = () => layer.remove();
+  go.onclick = async () => {
+    const title = name.value.trim();
+    if (!title) return toast('先起个名字', 'err');
+    go.disabled = true;
+    try {
+      await createProject(title);
+      close();
+      toast('建好了，把剧本贴进来', 'ok');
+    } catch (err) {
+      toast(err.message, 'err');
+      go.disabled = false;
+    }
+  };
+  name.onkeydown = (e) => { if (e.key === 'Enter') go.click(); };
+  layer.append(
+    h('div', { class: 'sheet-box' },
+      h('b', {}, '新建项目'),
+      h('p', { class: 'muted', style: 'margin:6px 0 10px' }, '起个名字就能开工，剧本可以之后再贴。'),
+      name,
+      h('div', { class: 'row', style: 'margin-top:12px' },
+        go,
+        h('button', { class: 'btn sm', onclick: close }, '取消')))
+  );
+  // 点浮层外面关掉。手机上没有 Esc，这是唯一自然的退出方式
+  layer.onclick = (e) => { if (e.target === layer) close(); };
+  document.body.append(layer);
+  setTimeout(() => name.focus(), 50);
+  return layer;
+}
+
 function newProjectCard() {
   const name = h('input', { type: 'text', placeholder: '片名' });
   const go = h('button', { class: 'btn primary grow' }, '新建项目');
@@ -885,11 +958,8 @@ function newProjectCard() {
     if (!title) return toast('先起个名字', 'err');
     go.disabled = true;
     try {
-      // cap:project-new
-      const p = await api('/projects', { method: 'POST', body: { title } });
-      localStorage.setItem(PROJ_STORE, p.id);
+      await createProject(title);
       toast('建好了，把剧本贴进来', 'ok');
-      await reload();
     } catch (err) {
       toast(err.message, 'err');
       go.disabled = false;

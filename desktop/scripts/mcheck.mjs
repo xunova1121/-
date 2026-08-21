@@ -280,6 +280,32 @@ console.log('   可一键存的素材数：', saveBtns, saveBtns >= 4 ? '✓' : 
 // ⑦ 项目切换
 console.log('⑦ 单个项目时不摆下拉：', (await page.locator('.top-pick').count()) === 0 ? '✓' : '✕（多余的控件）');
 
+/**
+ * ⑦b 新建项目 —— **在已经有项目的时候**也点得到。
+ *
+ * 原来"新建"只存在于那张空状态卡片里，只有一个项目都没有时才画。
+ * 也就是说建完第一部片子之后，手机上就再也建不了第二部了；
+ * 而能力清单一直是绿的，因为 `// cap:project-new` 那行标记确实在。
+ *
+ * 所以这条断言的关键不是"能不能建"，是**在有项目的状态下能不能建** ——
+ * 这正是它漏掉的那种情形。
+ */
+await page.locator('.top button:has-text("＋")').click();
+await page.waitForTimeout(300);
+const sheetUp = (await page.locator('.sheet-box').count()) > 0;
+console.log('⑦b 有项目时也能新建：', sheetUp ? '弹出来了 ✓' : '✕ 顶栏上没有入口');
+if (sheetUp) {
+  await page.locator('.sheet-box input').fill('第二部片子');
+  await page.locator('.sheet-box button:has-text("建")').first().click();
+  await page.waitForTimeout(1200);
+  const names = store.list().map((x) => x.title);
+  console.log('   建出来了：', names.includes('第二部片子') ? '✓' : `✕ ${JSON.stringify(names)}`);
+  console.log('   浮层关掉了：', (await page.locator('.sheet-box').count()) === 0 ? '✓' : '✕ 还挡着');
+  // 建完要切过去 —— 建了却还停在旧项目上，人会以为没建成，然后再建一个
+  console.log('   自动切到新项目：',
+    /第二部片子/.test(await page.locator('.top').innerText()) ? '✓' : '✕ 还停在旧项目');
+}
+
 // ⑧ 往后全跑
 await page.locator('.tab', { hasText: '流水线' }).click();
 await page.waitForTimeout(500);
