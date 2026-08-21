@@ -762,7 +762,7 @@ function bibleCard(kind, item, v) {
     try {
       // cap:sheet-regen
       let failed = null;
-      await stream(`/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}/sheet`, {}, (ev) => {
+      await stream(`/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}/regenerate`, {}, (ev) => {
         if (ev.type === 'error') failed = ev.message;
         if (ev.message) {
           job.message = ev.message;
@@ -780,6 +780,47 @@ function bibleCard(kind, item, v) {
     }
   };
 
+  /**
+   * 补角度：侧面 / 背面 / 俯视平面。
+   *
+   * 手机上**不列角度清单**，直接"全补" —— 服务端不带 angles 时默认补齐这一类的全部。
+   * 手机端是遥控 + 审片，审片时发现"他一转身就变了个人"，当场点一下补上就够了；
+   * 挑哪几个角度这种事留给电脑版。
+   */
+  const angleRow = (item.variants?.[0]?.angles || []).filter((a) => a?.sheetPath);
+  const angleBtn = kind === 'prop'
+    ? null
+    : h('button', { class: 'btn sm grow', disabled: job.running || !item.sheetPath }, angleRow.length ? `补角度（已有 ${angleRow.length}）` : '补角度');
+  if (angleBtn) {
+    angleBtn.onclick = async () => {
+      if (!confirm(`给「${item.name}」补出其他角度？每张都是一次出图开销。\n\n补完之后，需要那个朝向的镜头会自动改用对应的图。`)) return;
+      angleBtn.disabled = true;
+      job.running = true;
+      job.label = `${item.name} 补角度`;
+      job.message = '正在出…';
+      updateLive();
+      try {
+        // cap:sheet-angles
+        let failed = null;
+        await stream(`/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}/angles`, {}, (ev) => {
+          if (ev.type === 'error') failed = ev.message;
+          if (ev.message) {
+            job.message = ev.message;
+            updateLive();
+          }
+        });
+        if (failed) throw new Error(failed);
+        toast(`${item.name} 的角度补好了`, 'ok');
+      } catch (err) {
+        toast(err.message, 'err');
+      } finally {
+        job.running = false;
+        updateLive();
+        await reload();
+      }
+    };
+  }
+
   return h('div', { class: 'card' },
     h('div', { class: 'row' },
       item.sheetPath
@@ -790,7 +831,7 @@ function bibleCard(kind, item, v) {
         item.role ? h('div', { class: 'muted' }, item.role) : null,
         item.seed != null ? h('div', { class: 'muted' }, `种子 ${item.seed}`) : null)),
     h('div', { style: 'margin-top:10px' }, look),
-    h('div', { class: 'row', style: 'margin-top:9px' }, save, redo));
+    h('div', { class: 'row', style: 'margin-top:9px' }, save, redo, angleBtn));
 }
 
 /** 画风和设定集里冻结的那段对不上时，给一条能一键换过来的提示 */

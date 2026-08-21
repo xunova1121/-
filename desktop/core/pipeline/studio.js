@@ -27,6 +27,7 @@ import * as chapters from './chapters.js';
 import * as duration from '../duration.js';
 import * as skillsLib from '../skills.js';
 import * as variants from './variants.js';
+import * as anglesLib from './angles.js';
 import * as oss from '../oss.js';
 import * as tiers from '../tiers.js';
 import * as shotlint from './shotlint.js';
@@ -1842,6 +1843,117 @@ export async function regenerateSheet(projectId, kind, name, opts = {}, onEvent)
   });
 
   onEvent?.({ type: 'sheet', name: label, kind, status: 'done' });
+  return store.read(projectId);
+}
+
+/**
+ * 补出正面之外的角度：角色的侧面 / 背面，场景的左右 / 俯视平面。
+ *
+ * ── 为什么必须拿主图当参考图 ──
+ *
+ * 光靠文字说"同一个人的背面"，模型会很乐意给你**另一个人的背面** ——
+ * 而那比没有这张图更糟：它会被当成同一个人的参考图发给视频模型，
+ * 于是这个角色一转身就真的变成了另一个人，而且是我们亲手教的。
+ *
+ * 所以这里走的是图生图：把主图当参考图发过去。这也意味着
+ * **主图必须先有**，没有就直接说清楚，别出一张来路不明的图。
+ *
+ * ── 为什么不做成"出设定集时自动全出" ──
+ *
+ * 一个角色从 1 张变 3 张，一个场景从 1 张变 4 张。十个条目就是三四十张图，
+ * 而多数片子里大部分角色从头到尾都是正面。默认不出，谁需要谁补 ——
+ * 让用户自己决定在哪儿花这个钱。
+ */
+export async function generateAngles(projectId, kind, name, opts = {}, onEvent) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  // 没有这一句的话，下面那行会抛一个原始的 TypeError，
+  // 而它会被原样发到界面上（"Cannot read properties of null"）—— 谁也看不懂
+  if (!project.bible) throw new Error('这个项目还没有设定集，先跑第 01 步');
+
+  const target = bibleBucket(project.bible, kind).find((x) => x.name === name);
+  if (!target) throw new Error(`设定集里没有「${name}」`);
+  const variant = variants.findVariant(target, opts.variantId) || variants.defaultVariant(target);
+  const label = variants.labelOf(target, variant);
+
+  if (!variant?.sheetPath || !fs.existsSync(variant.sheetPath)) {
+    throw new Error(`「${label}」还没有主图。补角度是拿主图当参考画出来的 —— 先把正面那张出了再来`);
+  }
+
+  const wanted = (opts.angles?.length ? opts.angles : anglesLib.extraAngles(kind).map((a) => a.id))
+    .filter((id) => id !== anglesLib.PRIMARY)
+    .filter((id) => anglesLib.extraAngles(kind).some((a) => a.id === id));
+  if (!wanted.length) throw new Error(`${SHEET_LABEL[kind]}没有可补的角度`);
+
+  const r = routing();
+  const providerId = opts.provider || r.image.provider;
+  const model = opts.model || r.image.model;
+  const baseRef = usableRef(variant.sheetUrl) || (await toModelRef(variant.sheetPath, { onEvent }));
+
+  for (const angleId of wanted) {
+    jobs.checkpoint(opts.signal, `补角度：${label}`);
+    const angleLabel = anglesLib.labelOf(kind, angleId);
+    onEvent?.({ type: 'sheet', name: label, kind, status: 'running', message: `补角度：${label} · ${angleLabel}` });
+
+    // 身份锚 + 这一版的描述 + 角度要求。前两段和主图完全一致 ——
+    // 少了它们，这张图只是"一个侧面"，不是"这个人的侧面"
+    const base = sheetPrompt(kind, project.bible, target, variant);
+    const prompt = `${base}\n${anglesLib.promptFor(kind, angleId)}`;
+
+    let image;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      image = await adapters.generateImage({
+        providerId,
+        model,
+        // 这一步**必须**走图生图：参考图才是锁住"还是同一个人"的东西
+        editModel: undefined,
+        prompt,
+        negative: project.bible.style.negative,
+        // 和主图同一颗种子：采样起点一致，两张图更像同一个人
+        seed: target.seed,
+        refImages: [baseRef],
+        aspectRatio: project.aspectRatio || null,
+        label: `补角度·${label}·${angleLabel}`,
+        onEvent
+      });
+    } catch (err) {
+      // 一个角度失败不该拖垮其余的 —— 说清楚哪个没成，接着补下一个
+      onEvent?.({ type: 'note', message: `${label} 的${angleLabel}没出成（${err.message}）—— 其余角度继续` });
+      continue;
+    }
+
+    const dest = path.join(
+      store.assetDir(projectId),
+      `ref-${kind}-${safeFileName(name)}-${safeFileName(variant.id)}-${angleId}.png`
+    );
+    // eslint-disable-next-line no-await-in-loop
+    await saveMedia(image, dest, onEvent);
+    // eslint-disable-next-line no-await-in-loop
+    const modelRef = await toModelRef(dest, { onEvent });
+
+    store.update(projectId, (p) => {
+      const t = bibleBucket(p.bible, kind).find((x) => x.name === name);
+      const tv = t && variants.findVariant(t, variant.id);
+      if (!tv) return p;
+      anglesLib.normalizeVariant(tv);
+      const row = {
+        id: angleId,
+        sheetPath: dest,
+        sheetUrl: modelRef,
+        sheetAt: new Date().toISOString(),
+        sheetSource: 'model',
+        sheetPromptUsed: prompt
+      };
+      const at = tv.angles.findIndex((a) => a.id === angleId);
+      if (at >= 0) tv.angles[at] = row;
+      else tv.angles.push(row);
+      return p;
+    });
+
+    onEvent?.({ type: 'sheet', name: label, kind, status: 'done', message: `${label} · ${angleLabel} 出好了` });
+  }
+
   return store.read(projectId);
 }
 

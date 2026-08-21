@@ -26,6 +26,7 @@ import * as providers from './providers/index.js';
 import * as adapters from './providers/adapters.js';
 import * as studio from './pipeline/studio.js';
 import * as continuity from './pipeline/continuity.js';
+import * as anglesLib from './pipeline/angles.js';
 import * as preflight from './preflight.js';
 import * as styles from './styles.js';
 import * as duration from './duration.js';
@@ -396,6 +397,13 @@ async function handleApi(req, res, url, { lan = false } = {}) {
         label: continuity.LINK_LABELS[id],
         hint: continuity.LINK_HINTS[id]
       })),
+      // 设定图有哪些角度可补。界面不能直接 import core/ 里的模块
+      // （那些文件不发给浏览器），所以角度表和衔接关系一样，从这里下发
+      sheetAngles: {
+        char: anglesLib.extraAngles('char'),
+        scene: anglesLib.extraAngles('scene'),
+        prop: anglesLib.extraAngles('prop')
+      },
       // 厂商只接受固定档位（5/10 秒之类）。提前告诉界面，
       // 免得用户设了 4 秒、出来 5 秒，事后才在日志里看到一句解释
       videoDurations: adapters.routedVideoDurations(),
@@ -986,6 +994,20 @@ async function handleApi(req, res, url, { lan = false } = {}) {
         req.on('close', () => stream.end());
         try {
           const project = await studio.attachBibleSheet(b, kind, decodeURIComponent(e), body, (ev) => stream.send(ev));
+          stream.end({ type: 'finished', project });
+        } catch (err) {
+          stream.end({ type: 'error', message: err.message });
+        }
+        return undefined;
+      }
+      // 补出正面之外的角度（角色的侧/背，场景的左右/俯视）。cap:sheet-angles
+      // 走流式：一次可能出三四张图，闷着等两分钟没有任何反馈是最糟的
+      if (e && f === 'angles' && method === 'POST') {
+        const opts = await readBody(req);
+        const stream = ndjson(res);
+        req.on('close', () => stream.end());
+        try {
+          const project = await studio.generateAngles(b, kind, decodeURIComponent(e), opts, (ev) => stream.send(ev));
           stream.end({ type: 'finished', project });
         } catch (err) {
           stream.end({ type: 'error', message: err.message });

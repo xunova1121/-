@@ -387,6 +387,62 @@ export default {
         onclick: () => fileInput.click()
       }, '传本地图');
 
+      /**
+       * 补角度：侧面 / 背面 / 俯视平面。
+       *
+       * 默认不出，是因为一个角色从 1 张变 3 张、一个场景变 4 张 ——
+       * 十个条目就是三四十张图，而多数片子里大部分角色从头到尾都是正面。
+       * 谁需要谁补，让钱花在看得出差别的地方。
+       *
+       * 补出来之后，出图和出视频会**按这一镜的朝向自动挑**：
+       * 描述里有"背对/背影/转身离开"就发背面那张，有"俯拍"就发俯视图。
+       */
+      // 角度表由 /catalog 下发 —— ui/ 不能 import core/ 里的模块（那些文件不发给浏览器）
+      const angleSet = (state.catalog.sheetAngles || {})[kind] || [];
+      const primaryVariant = item.variants?.[0] || item;
+      const have = new Set((primaryVariant.angles || []).filter((a) => a?.sheetPath).map((a) => a.id));
+      const angleBtn = angleSet.length
+        ? h('button', {
+          class: 'btn ghost sm',
+          disabled: !item.sheetPath,
+          title: item.sheetPath
+            ? `补出${angleSet.map((a) => a.label).join(' / ')}。拿正面那张当参考画，保证还是同一个`
+            : '要先有主图 —— 补角度是拿主图当参考画出来的',
+          onclick: async () => {
+            const missing = angleSet.filter((a) => !have.has(a.id));
+            const todo = missing.length ? missing : angleSet;
+            if (!confirm(
+              `给「${item.name}」补 ${todo.length} 张：${todo.map((a) => a.label).join('、')}\n\n`
+              + `每张都是一次出图开销。补出来之后，需要那个朝向的镜头会自动改用对应的图。`
+            )) return;
+            angleBtn.disabled = true;
+            const label = angleBtn.textContent;
+            angleBtn.textContent = '补图中…';
+            try {
+              let err = null;
+              await stream(
+                // cap:sheet-angles
+                `/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}/angles`,
+                { angles: todo.map((a) => a.id) },
+                (ev) => {
+                  if (ev.type === 'finished' && ev.project) project = ev.project;
+                  if (ev.type === 'error') err = ev.message;
+                  if (ev.type === 'sheet' && ev.message) angleBtn.textContent = ev.message.slice(0, 12);
+                }
+              );
+              if (err) throw new Error(err);
+              toast(`${item.name} 的角度补好了`, 'ok');
+              rerender();
+            } catch (e) {
+              toast(e.message, 'err');
+            } finally {
+              angleBtn.disabled = false;
+              angleBtn.textContent = label;
+            }
+          }
+        }, have.size ? `补角度（已有 ${have.size}/${angleSet.length}）` : '补角度')
+        : null;
+
       /** 只存文字，不出图。免费、立刻生效。 */
       async function saveText(extra = {}) {
         // cap:bible-edit
@@ -566,6 +622,7 @@ export default {
           h('div', { class: 'inline', style: 'margin-top:8px' },
             saveBtn,
             redoBtn,
+            angleBtn,
             uploadBtn,
             fileInput,
             h('button', {

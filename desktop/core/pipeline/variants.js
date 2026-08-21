@@ -28,6 +28,8 @@
  * 并始终镜像默认变体 —— 全代码库引用它们的地方太多，一次性改完风险远大于收益。
  */
 
+import * as angles from './angles.js';
+
 /** 默认变体的固定 id。同一个条目里它永远是第一个。 */
 export const DEFAULT_VARIANT_ID = 'v-default';
 
@@ -68,6 +70,8 @@ export function normalizeItem(item, kind = 'char') {
       }
     ];
   }
+  // 角度（正/侧/背）挂在变体下面，和变体正交 —— 见 angles.js 开头
+  for (const v of item.variants) angles.normalizeVariant(v);
   // 条目上这几个字段始终镜像默认变体。
   // 保留镜像而不是全代码库改引用：引用它们的地方太多，一次性改完风险远大于收益。
   const first = item.variants[0];
@@ -138,7 +142,9 @@ export function makeVariant({ name, appearance = '' }) {
     sheetAt: null,
     sheetSource: null,
     sheetPromptUsed: '',
-    sheetPrompt: ''
+    sheetPrompt: '',
+    // 正面之外的角度，补出来才会有（见 angles.js）
+    angles: []
   };
 }
 

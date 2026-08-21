@@ -86,7 +86,14 @@ export const CAPABILITIES = [
   {
     id: 'sheet-regen',
     name: '单独重出一张参考图',
-    api: 'POST /projects/:id/bible/:kind/:name/sheet',
+    api: 'POST /projects/:id/bible/:kind/:name/regenerate',
+    pc: 'ui/views/bible.js',
+    mobile: 'ui/m/m.js'
+  },
+  {
+    id: 'sheet-angles',
+    name: '补出侧面 / 背面 / 俯视等角度',
+    api: 'POST /projects/:id/bible/:kind/:name/angles',
     pc: 'ui/views/bible.js',
     mobile: 'ui/m/m.js'
   },
@@ -123,7 +130,7 @@ export const CAPABILITIES = [
   {
     id: 'shot-regen',
     name: '单独重出一镜的图 / 视频',
-    api: 'POST /projects/:id/shots/:sid/image|video',
+    api: 'POST /projects/:id/shots/:sid/regenerate { kind }',
     pc: 'ui/views/studio.js',
     mobile: 'ui/m/m.js'
   },
@@ -132,7 +139,7 @@ export const CAPABILITIES = [
   {
     id: 'film-view',
     name: '看成片',
-    api: 'GET /media',
+    api: 'GET /media?p= （不在 /api 前缀下）',
     pc: 'ui/views/studio.js',
     mobile: 'ui/m/m.js'
   },
@@ -175,7 +182,7 @@ export const CAPABILITIES = [
   {
     id: 'tier-routing',
     name: '按镜头分级挑模型（省钱）',
-    api: 'PATCH /projects/:id/shots/:sid { tier } + PATCH /settings { videoTiers }',
+    api: 'PATCH /projects/:id/shots/:sid { tier } + POST /settings { videoTiers }',
     pc: 'ui/views/studio.js',
     mobile: 'ui/m/m.js'
   },
@@ -198,7 +205,7 @@ export const CAPABILITIES = [
   {
     id: 'providers',
     name: '服务商与密钥',
-    api: 'POST /providers/:id/keys',
+    api: 'POST /secrets { secrets }',
     pc: 'ui/views/providers.js',
     mobile: null,
     why: '密钥只该在跑引擎的那台机器上。手机丢了不等于密钥丢了 —— 这是这套架构的一条底线。'
@@ -206,7 +213,7 @@ export const CAPABILITIES = [
   {
     id: 'routing',
     name: '模型路由与体检',
-    api: 'GET /routing',
+    api: 'POST /routing/check',
     pc: 'ui/views/settings.js',
     mobile: null,
     why: '选模型要对着价格、能力、延迟一起看，手机屏幕上摆不下，也不是出门在外会做的事。'
@@ -214,7 +221,7 @@ export const CAPABILITIES = [
   {
     id: 'debug-console',
     name: '第三方 API 联调台',
-    api: 'POST /debug/request',
+    api: 'POST /debug/send',
     pc: 'ui/views/debug.js',
     mobile: null,
     why: '排错工具。要贴 JSON、看原始响应、改请求头，手机上做这些是自找麻烦。'
@@ -246,7 +253,7 @@ export const CAPABILITIES = [
   {
     id: 'oss-config',
     name: '对象存储配置',
-    api: 'PATCH /settings { oss }',
+    api: 'POST /settings { oss }',
     pc: 'ui/views/settings.js',
     mobile: null,
     why: 'AccessKey 和密钥同理，只在电脑上配。'

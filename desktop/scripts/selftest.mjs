@@ -2098,6 +2098,72 @@ section('存下来的限时地址不复用');
     JSON.stringify(collected.images));
 }
 
+section('设定图的角度：人一转身，参考图也得跟着转');
+{
+  const ang = await import('../core/pipeline/angles.js');
+  const con = await import('../core/pipeline/consistency.js');
+
+  check('角色有正 / 侧 / 背', ang.anglesFor('char').map((a) => a.id).join(',') === 'primary,side,back');
+  check('场景多一张俯视平面（预演台的排位底图就是它）',
+    ang.anglesFor('scene').map((a) => a.id).includes('top'));
+  // 道具多出两张只是多花钱：产品图视角本来就够
+  check('道具不补角度', ang.extraAngles('prop').length === 0);
+
+  /**
+   * 提示词必须同时说两件事：换个角度，**以及别换人**。
+   * 只说前者的话，模型很乐意给你"一个侧面的另一个人"——
+   * 而那比没有这张图更糟：它会被当成同一个人的参考图发出去。
+   */
+  const back = ang.promptFor('char', 'back');
+  check('背面图的提示词要求"同一个人"', /同一个人/.test(back), back.slice(0, 40));
+  check('并且点明发型服装要和正面一致', /发型/.test(back) && /一致/.test(back));
+  // 俯视图要的是布局图，不是"从高处拍一张" —— 后者既不能当俯拍参考也没法当底图
+  check('俯视图要的是平面布局，不是大仰角镜头',
+    /垂直向下/.test(ang.promptFor('scene', 'top')), ang.promptFor('scene', 'top').slice(0, 30));
+
+  // ── 挑角度 ──
+  const has = { available: ['side', 'back'] };
+  check('背对镜头 → 发背面那张',
+    ang.pickAngle('char', { description: '强雄背对镜头站在窗前' }, has) === 'back');
+  check('侧脸对话 → 发侧面那张',
+    ang.pickAngle('char', { description: '两人侧脸对话' }, has) === 'side');
+  check('普通描述 → 还是正面', ang.pickAngle('char', { description: '强雄推门进来' }, has) === 'primary');
+  /**
+   * 没补过的角度不能挑 —— 挑了就会取到一个没有图的条目，
+   * 结果是这一镜**一张参考图都没带**，比带错那张还糟。
+   */
+  check('没补过背面时，退回正面而不是取空',
+    ang.pickAngle('char', { description: '背对镜头' }, { available: [] }) === 'primary');
+  check('俯拍 → 场景发俯视图',
+    ang.pickAngle('scene', { description: '俯拍整个操场', camera: '俯拍' }, { available: ['top'] }) === 'top');
+
+  // ── 真的传到参考图那一步了吗 ──
+  const bible = {
+    characters: [{
+      name: '强雄',
+      sheetPath: '/x/front.png',
+      sheetUrl: 'https://cdn.example.com/front.png',
+      variants: [{
+        id: 'v-default',
+        name: '默认造型',
+        sheetPath: '/x/front.png',
+        sheetUrl: 'https://cdn.example.com/front.png',
+        angles: [{ id: 'back', sheetPath: '/x/back.png', sheetUrl: 'https://cdn.example.com/back.png' }]
+      }]
+    }],
+    scenes: [],
+    props: []
+  };
+  const front = con.collectReferences(bible, { description: '强雄推门进来', characters: ['强雄'] });
+  check('正面镜发正面图', front.images[0] === 'https://cdn.example.com/front.png', front.images[0]);
+  const behind = con.collectReferences(bible, { description: '强雄背对镜头走远', characters: ['强雄'] });
+  check('背影镜真的换成了背面图', behind.images[0] === 'https://cdn.example.com/back.png', behind.images[0]);
+  // 标签要带出角度，否则用户看不出这一镜为什么像 / 不像
+  check('标签上写明这次发的是哪个角度', /背面/.test(behind.labels[0]), behind.labels[0]);
+  // 重签那条路要用本地文件 —— 角度图的本地路径也得跟着带出来
+  check('角度图的本地路径也带上了（过期能重签）', behind.paths[0] === '/x/back.png', String(behind.paths[0]));
+}
+
 section('设定集参考图过期：重新签，而不是让厂商拒掉');
 {
   const st = await import('../core/pipeline/studio.js');
@@ -6477,6 +6543,59 @@ section('三端对齐：谁该有什么功能');
   check('该在手机上有的，手机版一条都不能少',
     missingMobile.length === 0,
     missingMobile.map((c) => `${c.id} —— ${c.name}`).join('、'));
+
+  /**
+   * 标记只证明"这一端写了代码"，不证明**它调的地址真的存在**。
+   *
+   * ── 这条是抓出来的，不是想出来的 ──
+   *
+   * 手机端的「重出参考图」调的是 `/bible/:kind/:name/sheet`，
+   * 而服务端那条路由叫 `regenerate` —— `/sheet` **压根不存在**。
+   * 也就是说这个按钮从写下来那天起就是 404：点了转一下，报个 HTTP 404，
+   * 而清单检查一直是绿的，因为 `// cap:sheet-regen` 那行注释确实在。
+   *
+   * 清单里 api 那一栏当时写的也是 `/sheet` —— 三处一致地错着，
+   * 而"一致"恰恰让它看起来是对的。
+   *
+   * 所以这里不看字符串，**真的把每条路由打一遍**，只要服务端回
+   * "未知接口"就算漏。参数用真项目 id 填，其余用占位；
+   * 返回 400 / 404-带业务话术都算通过 —— 我们只问"这条路存不存在"。
+   */
+  const made = await fetch(`${appUrl}/api/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: '路由体检', script: '老师坐在办公室' })
+  }).then((r) => r.json());
+  const pid = made.id || made.project?.id;
+
+  const dead = [];
+  for (const cap of surfaces.CAPABILITIES) {
+    // 纯前端的能力没有后端地址，跳过（它们在 api 那栏写着括号说明）
+    const m = /^(GET|POST|PATCH|DELETE|PUT)((?:\+\w+)?)\s+(\/[^\s{（]+)/.exec(cap.api || '');
+    if (!m) continue;
+    const method = m[1];
+    const route = m[3]
+      .split('|')[0]                       // shot-regen 写的是 image|video，打前一个就够
+      .replace(':id', pid)
+      .replace(':sid', 'shot-x')
+      .replace(':kind', 'char')
+      .replace(':name', 'x')
+      .replace(':stage', 'bible')
+      .replace(/:\w+/g, 'x');
+    // /media 不在 /api 前缀下（它要能直接塞进 <img src>，加不了自定义头）
+    const base = route.startsWith('/media') ? `${appUrl}${route}` : `${appUrl}/api${route}`;
+    // eslint-disable-next-line no-await-in-loop
+    const res = await fetch(base, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      ...(method === 'GET' || method === 'DELETE' ? {} : { body: '{}' })
+    });
+    // eslint-disable-next-line no-await-in-loop
+    const body = await res.text();
+    if (/未知接口/.test(body)) dead.push(`${cap.id}: ${method} ${route}`);
+  }
+  check('清单里每条能力的地址在服务端真的存在（不是 404）',
+    dead.length === 0, dead.join('、'));
 
   // 不做也要有理由，不然三个月后没人知道当初是"故意不做"还是"忘了做"
   const noWhy = surfaces.CAPABILITIES.filter((c) => !c.mobile && !c.why);

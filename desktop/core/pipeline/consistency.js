@@ -24,6 +24,7 @@ import * as continuity from './continuity.js';
 import * as skills from '../skills.js';
 import * as speaker from './speaker.js';
 import * as variants from './variants.js';
+import * as anglesLib from './angles.js';
 import { resolveStyle } from '../styles.js';
 
 /** 由项目和名字派生稳定种子。同一项目里同一角色，永远同一颗种子。 */
@@ -290,9 +291,28 @@ export function collectReferences(bible, shot, { limit = 9 } = {}) {
    */
   const ref = (kind, item) => {
     const v = variants.pickVariant(item, shot);
-    const url = v?.sheetUrl || item.sheetUrl;
-    const localPath = (v?.sheetUrl ? v?.sheetPath : null) || item.sheetPath || null;
-    if (url) picked.push({ kind, name: variants.labelOf(item, v) || item.name, url, path: localPath });
+
+    /**
+     * 这一镜该发哪个角度的图。
+     *
+     * 人背对镜头的时候发一张正脸过去，等于告诉模型"背面长这样"——
+     * 它只能自己编，于是后脑勺的发型、衣服背面每一镜都在变，
+     * 而且**不报错**，表现就是"他一转身就换了个人"。
+     * 补过背面图的话，这里就该发那张。
+     */
+    const setKey = kind === 'character' ? 'char' : kind;
+    const angleId = anglesLib.pickAngle(setKey, shot, { available: anglesLib.availableOn(v) });
+    const angle = anglesLib.sheetOf(v, angleId);
+
+    const url = angle?.sheetUrl || v?.sheetUrl || item.sheetUrl;
+    const localPath =
+      angle?.sheetPath || (v?.sheetUrl ? v?.sheetPath : null) || item.sheetPath || null;
+    if (!url) return;
+
+    // 标签上带出角度，用户才知道这一镜为什么像 / 不像
+    const base = variants.labelOf(item, v) || item.name;
+    const name = angleId === anglesLib.PRIMARY ? base : `${base}·${anglesLib.labelOf(setKey, angleId)}`;
+    picked.push({ kind, name, url, path: localPath });
   };
   const scene = matchScene(bible, shot);
   if (scene) ref('scene', scene);
