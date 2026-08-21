@@ -9,6 +9,7 @@ import { h, clear, add, api, stream, toast, mediaUrl, fmtMs } from '../lib.js';
 import { openLightbox } from '../lightbox.js';
 import { ratioLabel } from '../ratios.js';
 import { skillPicker, customSkillForm } from '../skill-picker.js';
+import { previzPanel, blankStage } from '../previz-canvas.js';
 import { stepsOf, stepProgress } from '../pipeline.js';
 import bibleView from './bible.js';
 
@@ -1298,6 +1299,40 @@ export default {
           title: '点一下改这一镜的描述'
         }, shot.description || '（无描述）');
 
+        /**
+         * 预演台：把这一镜的机位从一句话变成一组数。
+         *
+         * 默认**折叠**。不是每一镜都值得排位 —— 空镜、过渡镜写句"全景"就够了。
+         * 值得排的是对话戏和动作接续：那两种地方越轴和景别跳最要命，
+         * 而它们恰恰是逐镜看都没问题、连起来才露馅的那类。
+         *
+         * 排过位之后，提示词里的机位那句由几何算出来（previz.cameraLine），
+         * 上面那个 camera 文本框只在没排位时兜底 —— 两个都留着是有意的。
+         */
+        let stageDraft = shot.stage || null;
+        const previzHost = h('details', { class: 'shot-previz' },
+          h('summary', {}, stageDraft ? '预演台 · 已排位（点开调整）' : '预演台 · 排一下机位（可选）'));
+        previzHost.addEventListener('toggle', () => {
+          if (!previzHost.open || previzHost.dataset.built) return;
+          previzHost.dataset.built = '1';
+          if (!stageDraft) {
+            stageDraft = blankStage(
+              String(shot.characters || '').split(/[,，、]/).map((x) => x.trim()).filter(Boolean)
+            );
+          }
+          // 上一镜的排位拿来比对轴线 —— 越轴是**两镜之间**的事，单看一镜看不出来
+          const panel = previzPanel(stageDraft, {
+            prevStage: prevShot?.stage || null,
+            onChange: () => { /* 拖动时只更新读数，存盘等你点保存 */ }
+          });
+          previzHost.append(
+            h('div', { class: 'shot-edit-tip' },
+              '拖大圆点摆人，拖小圆点转身，拖「机」摆机位。两个人之间那条线就是轴线 —— '
+              + '机位跨过去，成片上两人就左右对调了。排完点下面的保存。'),
+            panel.node
+          );
+        });
+
         const fields = {
           description: h('textarea', { rows: 3 }, shot.description || ''),
           camera: h('input', { type: 'text', placeholder: '中景 / 特写 / 航拍…', value: shot.camera || '' }),
@@ -1373,7 +1408,9 @@ export default {
                   link: fields.link.value,
                   skills: pickedSkills,
                   variants: pickedVariants,
-                  speaker: fields.speaker.value
+                  speaker: fields.speaker.value,
+                  // cap:shot-stage
+                  ...(stageDraft ? { stage: stageDraft } : {})
                 }
               });
               project = r.project;
@@ -1527,6 +1564,7 @@ export default {
                   '同场景换机位保持默认就好 —— 每一镜都接上的话，整部片子会变成一个没剪过的长镜头。')
               ]
             : null,
+          previzHost,
           h('div', { class: 'shot-edit-tip' },
             '只写画面，别写外貌 —— 长相由设定集定，写在这儿反而会和设定集打架。',
             shot.imagePath ? ' 改完这一镜已经出好的图不会变，要重出才生效。' : ''),

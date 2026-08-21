@@ -117,7 +117,17 @@ const check = (name, ok, detail = '') => {
   if (!ok) bad += 1;
 };
 
-const b = await chromium.launch();
+/**
+ * 允许指定浏览器可执行文件。
+ *
+ * Playwright 用**它自己那个版本号**去找浏览器（chromium-1234/…）。
+ * 机器上预装的常常是另一个版本号，于是它报"浏览器没装，请 npx playwright install"——
+ * 而浏览器明明就在那儿。在没有外网、或者不想再下 150MB 的环境里，
+ * 这一行是唯一能把走查跑起来的办法。
+ */
+const b = await chromium.launch(
+  process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}
+);
 const page = await b.newPage();
 const errs = [];
 page.on('pageerror', (e) => errs.push(e.message));
@@ -168,6 +178,60 @@ const hud = await page.evaluate(() => {
 });
 // 右下角只在出结果时冒一次，而且要报出真实产出 —— "0 项完成"等于说白跑了
 check('右下角报了结果，且数字不是 0', /分镜完成/.test(hud) && !/\b0 /.test(hud), hud);
+
+/**
+ * ── 预演台 ──
+ *
+ * 这块是**拖出来**的：单元测试能验几何算得对不对，验不了
+ * "手指按下去、拖过去，那个圆点跟不跟着走"。而拖动最容易坏的地方
+ * 恰恰在显示尺寸和 viewBox 不一致的换算上 —— 那种错只有真拖一次才看得见。
+ */
+console.log('\n预演台');
+// 打开第一镜的编辑面板
+const editable = page.locator('.shot-desc.editable').first();
+await editable.click();
+await page.waitForTimeout(400);
+const previz = page.locator('.shot-previz').first();
+check('分镜编辑面板里有预演台', await previz.count() > 0);
+if (await previz.count()) {
+  await previz.locator('summary').click();
+  await page.waitForTimeout(600);
+  const canvas = page.locator('.previz-canvas').first();
+  check('画布画出来了', await canvas.count() > 0);
+  const before = await page.locator('.previz-line-text').first().innerText().catch(() => '');
+  check('读数一开始就有（不是拖了才出现）', /mm/.test(before), before.slice(0, 60));
+
+  /**
+   * 真的拖一次机位：从机位圆点拖到画布右上角。
+   *
+   * ⚠ 必须先滚进视口再量坐标。boundingBox() 给的是**页面**坐标（含滚动），
+   * 而 page.mouse 用的是**视口**坐标 —— 元素在折线以下时，两者差一个滚动量，
+   * 鼠标会按下在完全不相干的地方。第一版就栽在这儿：面板在 y≈744，
+   * 而视口只有 720 高，于是"拖了但没反应"，看起来像功能坏了。
+   */
+  const cam = page.locator('.previz-cam').first();
+  await cam.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(200);
+  const box = await cam.boundingBox();
+  const cbox = await canvas.boundingBox();
+  const vp = page.viewportSize();
+  check('机位圆点在视口里（不然鼠标会按在别处，测了个寂寞）',
+    Boolean(box) && box.y >= 0 && box.y + box.height <= vp.height,
+    `box.y=${box?.y?.toFixed(0)} 视口高=${vp.height}`);
+  if (box && cbox) {
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(cbox.x + cbox.width * 0.8, cbox.y + cbox.height * 0.2, { steps: 12 });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+  }
+  const afterDrag = await page.locator('.previz-line-text').first().innerText().catch(() => '');
+  check('拖动机位之后读数跟着变了', afterDrag !== before, `${before.slice(0, 40)} → ${afterDrag.slice(0, 40)}`);
+  // 拖到人后面去，看它认不认得出"现在看到的是背面"
+  check('读数里说了现在看到的是哪一面',
+    /正面|侧面|斜侧|侧后|背面/.test(afterDrag), afterDrag.slice(0, 80));
+}
+
 
 // ── 换画风之后，设定集要认出"冻结的那段话过期了" ──
 // 这是真在浏览器里点：接口对了但提示没冒出来，用户照样看不见

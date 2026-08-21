@@ -180,6 +180,13 @@ export const CAPABILITIES = [
     mobile: 'ui/m/m.js'
   },
   {
+    id: 'shot-stage',
+    name: '预演台：排机位、看景别、查越轴',
+    api: 'PATCH /projects/:id/shots/:sid { stage }',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js'
+  },
+  {
     id: 'tier-routing',
     name: '按镜头分级挑模型（省钱）',
     api: 'PATCH /projects/:id/shots/:sid { tier } + POST /settings { videoTiers }',

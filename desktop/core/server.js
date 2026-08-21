@@ -39,6 +39,8 @@ import * as tiers from './tiers.js';
 import * as version from './version.js';
 import * as jobs from './jobs.js';
 
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -1246,7 +1248,22 @@ export function createServer({ lan = false } = {}) {
     const isAuthDoor = url.pathname === '/api/account/login' || url.pathname === '/api/account/setup';
 
     if (lan) {
-      const isShell = url.pathname === '/m' || url.pathname.startsWith('/m/');
+      /**
+       * 手机版那张网页会 import 两个**根路径上的模块**（预演台画布 + 它的几何）。
+       *
+       * 它们和 /m/m.js 是同一类东西：程序代码，里面没有任何用户数据。
+       * 不放行的话它们 401，而 `import` 失败会让**整个 m.js 加载不起来** ——
+       * 表现是手机上打开一片空白，连"请输入配对码"那一屏都没有。
+       * 这比少一个功能糟糕得多，而且完全看不出是鉴权造成的。
+       *
+       * 放行的是这两个确切的路径，不是"所有 .js"—— 后者会把电脑版
+       * 整套界面代码一起放出去，那不是同一件事。
+       */
+      const SHARED_MODULES = ['/previz-canvas.js', '/previz.js'];
+      const isShell =
+        url.pathname === '/m'
+        || url.pathname.startsWith('/m/')
+        || SHARED_MODULES.includes(url.pathname);
       if (!isShell && !isAuthDoor) {
         const bad = checkKey(req, url);
         if (bad) return json(res, 401, { error: bad });
@@ -1294,6 +1311,26 @@ export function createServer({ lan = false } = {}) {
       }
       // 手机端是独立的一套页面，不是把电脑版缩小 —— 见 ui/m/README 里的取舍
       if (url.pathname === '/m' || url.pathname === '/m/') return serveStatic(req, res, '/m/index.html');
+      /**
+       * 把**流水线自己那份**几何模块原样发给浏览器。
+       *
+       * 界面要在拖动时实时显示景别、机位关系、越轴 —— 那些全是 previz.js 里的算法。
+       * 三条路可选，两条是错的：
+       *   在界面里再写一份  → 两份算法会以肉眼看不出的方式漂开（一边顺时针、
+       *                      一边逆时针），而漂开不报错，只是"预览和成片对不上"
+       *   每次拖动问服务端  → 拖一下发一次请求，手感烂，还得处理乱序返回
+       *   **发同一个文件**  → 一份代码两处跑，不可能漂
+       *
+       * 前提是这个文件必须保持**零依赖**（它现在就是纯计算，不碰 node: 任何东西）。
+       * 自检里有一条守着这件事 —— 哪天有人给它加个 import，那条会先红。
+       */
+      if (url.pathname === '/previz.js') {
+        return fs.readFile(path.join(HERE, 'pipeline', 'previz.js'), (err, data) => {
+          if (err) return json(res, 404, { error: '找不到 previz.js' });
+          res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
+          res.end(data);
+        });
+      }
       if (url.pathname === '/media') return serveMedia(req, res, url);
       if (url.pathname.startsWith('/api/')) {
         const out = await handleApi(req, res, url, { lan });

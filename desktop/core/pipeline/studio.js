@@ -28,6 +28,7 @@ import * as duration from '../duration.js';
 import * as skillsLib from '../skills.js';
 import * as variants from './variants.js';
 import * as anglesLib from './angles.js';
+import * as previz from './previz.js';
 import * as oss from '../oss.js';
 import * as tiers from '../tiers.js';
 import * as shotlint from './shotlint.js';
@@ -933,6 +934,14 @@ const SHOT_EDITABLE = [
   'tier',
   // 这句台词是谁说的。决定用哪个角色的音色 —— 空字符串 = 旁白
   'speaker',
+  /**
+   * 预演台排位：人站哪、朝哪、机位在哪、什么焦段、怎么运镜。
+   *
+   * 它是 camera 那个文本字段的**上位替代**：排过位之后，
+   * 提示词里的机位那句话由几何算出来（见 previz.cameraLine），
+   * 而 camera 只在没排位时兜底。两个都留着，因为不是每一镜都值得排位。
+   */
+  'stage',
   // { '阿澜': 'v-xxx', '码头': 'v-yyy' } —— 这一镜谁穿哪套、场景是什么时段
   'variants'
 ];
@@ -1013,6 +1022,13 @@ export function updateShot(projectId, shotId, patch = {}) {
       const norm = skillsLib.normalize(value);
       dropped.push(...norm.dropped);
       value = norm.ids;
+    } else if (key === 'stage') {
+      /**
+       * 排位是**对象**，不能掉进下面那个 String(value).trim() 里 ——
+       * 那会把它存成 "[object Object]"：接口回 200、界面看着像存住了，
+       * 下次读出来是一坨没法用的字符串。规整一遍再存。
+       */
+      value = previz.normalizeStage(value);
     } else if (key === 'characters') {
       // 界面上是一行逗号分隔的文本，中英文逗号和顿号都得认
       value = Array.isArray(value)
@@ -1021,8 +1037,8 @@ export function updateShot(projectId, shotId, patch = {}) {
     } else {
       value = String(value ?? '').trim();
     }
-    const same = key === 'characters' || key === 'skills' || key === 'variants'
-      ? JSON.stringify(value) === JSON.stringify(shot[key] || (key === 'variants' ? {} : []))
+    const same = key === 'characters' || key === 'skills' || key === 'variants' || key === 'stage'
+      ? JSON.stringify(value) === JSON.stringify(shot[key] ?? (key === 'variants' ? {} : key === 'stage' ? null : []))
       : value === shot[key];
     if (same) continue;
     shot[key] = value;

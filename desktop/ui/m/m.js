@@ -32,6 +32,16 @@
  * 所以这里不硬试（试了也只是吞掉一个异常，还让人以为装上了），
  * 而是在界面上说清楚：要真正的应用图标和独立窗口，装那个 apk。
  */
+/**
+ * 预演台那块画布是**和电脑版共用同一份**（ui/previz-canvas.js）。
+ *
+ * 这一端本来一个 import 都没有，是个自包含模块。破这个例是有理由的：
+ * 排位是几何，两端各写一份的话会以肉眼看不出的方式漂开
+ *（一边顺时针一边逆时针），而漂开不报错，只会让同一份排位在两端
+ * 算出不同的机位关系 —— 那比少一个功能糟糕得多。
+ */
+import { previzPanel, blankStage } from '/previz-canvas.js';
+
 const canInstall = window.isSecureContext && 'serviceWorker' in navigator;
 if (canInstall) {
   navigator.serviceWorker.register('/m/sw.js').catch(() => {});
@@ -1084,6 +1094,22 @@ function editRow(s) {
   const TIER_PICK = [['', '自动判定'], ['high', '关键镜'], ['normal', '一般'], ['low', '空镜']];
   // 属于第几场。模型划边界是读剧本猜的，猜错很正常，得能改
   const segIn = h('input', { type: 'number', class: 'min', min: '1', max: '99', value: String(s.segment || 1) });
+
+  /**
+   * 默认折叠：不是每一镜都值得排位。空镜、过渡镜写句"全景"就够了，
+   * 值得排的是对话戏和动作接续 —— 那两种地方越轴和景别跳最要命。
+   */
+  let stageDraft = s.stage || null;
+  const previzBox = h('details', { class: 'previz-details' },
+    h('summary', {}, stageDraft ? '已排位（点开调整）' : '排一下机位'));
+  previzBox.addEventListener('toggle', () => {
+    if (!previzBox.open || previzBox.dataset.built) return;
+    previzBox.dataset.built = '1';
+    if (!stageDraft) stageDraft = blankStage((s.characters || []).slice(0, 4));
+    // 上一镜的排位拿来比轴线 —— 越轴是两镜之间的事，单看一镜看不出来
+    const prev = (project.shots || []).filter((x) => x.index < s.index).slice(-1)[0];
+    previzBox.append(previzPanel(stageDraft, { size: 300, prevStage: prev?.stage || null }).node);
+  });
   // 怎么进入这一镜。默认硬切 —— 满屏叠化是最典型的业余做法
   let transition = s.transition || 'cut';
   const TRANS_PICK = [['cut', '硬切'], ['fade', '黑场'], ['dissolve', '叠化']];
@@ -1108,7 +1134,8 @@ function editRow(s) {
           camera,
           motion,
           tier,
-          duration: Number(dur.value) || s.duration
+          duration: Number(dur.value) || s.duration,
+          ...(stageDraft ? { stage: stageDraft } : {})
         }
       });
       toast('已保存。重出这一镜才会按新的生成', 'ok');
@@ -1138,6 +1165,11 @@ function editRow(s) {
     field('时长（秒）', dur),
     // cap:shot-segment
     field('第几场', segIn, '场次 = 同一时间同一地点的一段戏。跨场次不能锁末帧、不能拿邻镜当参考图，转场也只出现在场次之间。'),
+    // cap:shot-stage
+    field('预演台（可选）', previzBox,
+      '排一下机位：拖大圆点摆人、拖小圆点转身、拖「机」摆机位。'
+      + '两人之间那条线是轴线，机位跨过去成片上两人就左右对调了。'
+      + '排过位之后，景别和机位由几何算出来，不再是"中景"这种说不清的词。'),
     // cap:tier-routing
     field('模型档位', (() => {
       const wrap = h('div', { class: 'chips' });

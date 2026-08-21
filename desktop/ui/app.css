@@ -1209,3 +1209,38 @@ select.mini {
   border-color: color-mix(in srgb, var(--caution) 45%, var(--line));
   background: var(--caution-wash);
 }
+
+/* ── 预演台：俯视排位 ──
+   画布的**结构**两端共用（ui/previz-canvas.js），配色各自定义：
+   手机端那套色板是独立的（见 ui/m/m.css 开头为什么），token 名字都不一样，
+   共用一份样式表只会得到一堆解析不出来的变量。类名保持一致就够了。 */
+.previz-panel { margin-top: 10px; }
+.previz-canvas { border: 1px solid var(--line); border-radius: 10px; display: block; }
+.previz-bg { fill: var(--surface); }
+.previz-grid { stroke: var(--line-soft); stroke-width: 1; }
+.previz-axis { stroke: var(--line); stroke-width: 1.5; }
+/* 轴线画成醒目的虚线：它不是布景，是一条"别跨过去"的规矩 */
+.previz-line { stroke: var(--caution); stroke-width: 2; stroke-dasharray: 6 4; }
+.previz-fov { fill: var(--beam-wash); stroke: none; }
+.previz-cam { fill: var(--beam-deep); stroke: var(--beam); stroke-width: 2; }
+.previz-sub { fill: var(--surface-3); stroke: var(--ink-dim); stroke-width: 2; }
+.previz-facing { stroke: var(--ink-dim); stroke-width: 2; }
+.previz-tip { fill: var(--ink-dim); }
+.previz-label, .previz-label-cam {
+  font-size: 11px; text-anchor: middle; pointer-events: none;
+}
+.previz-label { fill: var(--ink); }
+.previz-label-cam { fill: var(--ground); font-weight: 700; }
+.previz-controls { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.previz-row { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.previz-cap { color: var(--ink-faint); font-size: 12px; min-width: 44px; }
+.previz-row .btn.on { border-color: var(--beam); color: var(--beam); }
+.previz-readout { margin-top: 10px; }
+.previz-line-text { color: var(--ink); font-size: 13px; line-height: 1.6; }
+.previz-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.previz-warn {
+  margin-top: 8px; padding: 8px 10px; border-radius: 8px;
+  background: var(--alarm-wash);
+  color: var(--alarm); font-size: 12px; line-height: 1.6;
+}
+.shot-previz > summary { cursor: pointer; color: var(--ink-dim); font-size: 12px; margin-top: 10px; }

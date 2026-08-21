@@ -290,6 +290,56 @@ export function toBrackets(read, { max = 2 } = {}) {
     .join('');
 }
 
+const LIMIT = 6;
+
+function clampM(v, fallback = 0) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(-LIMIT, Math.min(LIMIT, Number(n.toFixed(2))));
+}
+
+/**
+ * 把界面传上来的排位规整成可信的形状。
+ *
+ * ── 为什么必须有这一步 ──
+ *
+ * 分镜的可改字段是按"文本框"设计的：不认识的键一律 `String(value).trim()`。
+ * 于是排位这种**对象**存进去会变成字符串 `"[object Object]"` ——
+ * 接口回 200、界面上看着像存住了，下次读出来是一坨没法用的字符。
+ * 这正是那份白名单注释里警告过的"改了没反应"，只是这次更坏：它不是没存，
+ * 是存了个错的进去。
+ *
+ * 顺带把坐标夹回范围、把角度归一 —— 手改过 project.json 的人不少，
+ * 一个 NaN 混进来会让整条几何链算出 NaN，而 NaN 不报错，只是哪儿都不对。
+ */
+export function normalizeStage(stage) {
+  if (!stage || typeof stage !== 'object') return null;
+  const cam = stage.cam && typeof stage.cam === 'object' ? stage.cam : null;
+  if (!cam) return null;
+
+  const subjects = (Array.isArray(stage.subjects) ? stage.subjects : [])
+    .filter((s) => s && typeof s === 'object')
+    .slice(0, 8)
+    .map((s) => ({
+      name: String(s.name ?? '').trim().slice(0, 24),
+      x: clampM(s.x),
+      y: clampM(s.y),
+      facing: norm180(s.facing)
+    }));
+
+  return {
+    cam: {
+      x: clampM(cam.x),
+      y: clampM(cam.y, -3),
+      // 机位高度不该被夹到 ±6：它是**离地高度**，只可能是正的
+      height: Math.max(0, Math.min(8, Number.isFinite(Number(cam.height)) ? Number(cam.height) : 1.6)),
+      lens: Math.max(8, Math.min(400, Number(cam.lens) || DEFAULT_LENS)),
+      move: normalizeMove(cam.move)
+    },
+    subjects
+  };
+}
+
 /**
  * 这一镜的机位，写成一句可以直接塞进提示词的话。
  *

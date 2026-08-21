@@ -2190,6 +2190,23 @@ section('预演台：把"中景"变成一组数');
   check('排过位就给出精确那句', /mm/.test(pv.cameraLine({ stage: { cam: { x: 0, y: -3, height: 1.6, lens: 50 }, subjects: [{ name: '强雄', x: 0, y: 0, facing: 180 }] } })));
 }
 
+/**
+ * previz.js 必须保持**零依赖**。
+ *
+ * 界面拿它算实时读数，走的是服务端把这个文件**原样发给浏览器**那条路
+ *（/previz.js）。它一旦 import 了任何东西（哪怕只是同目录的另一个模块），
+ * 浏览器那边就会去请求一个不存在的地址 —— 而失败的样子是整块面板不出来，
+ * 或者更糟：面板在、读数是空的，看起来像"这一镜算不出来"。
+ *
+ * 两端共用一份代码的好处是不可能算漂，代价就是这条约束。写下来，让它会报错。
+ */
+{
+  const src = fs.readFileSync(path.join(PROJECT_ROOT, 'core', 'pipeline', 'previz.js'), 'utf8');
+  const imports = src.split('\n').filter((l) => /^\s*import\s/.test(l));
+  check('预演台的几何模块保持零依赖（它要原样发给浏览器）',
+    imports.length === 0, imports.join(' / '));
+}
+
 section('预演台：算出来的机位，比读描述里的关键词准');
 {
   const con = await import('../core/pipeline/consistency.js');

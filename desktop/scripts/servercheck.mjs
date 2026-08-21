@@ -90,7 +90,10 @@ const realPort = port || Number(process.env.FD_TEST_PORT) || 5178;
 const base = `http://127.0.0.1:${realPort}`;
 console.log(`服务器模式走查：${base}（Host 伪装成 ${HOST}）`);
 
-const b = await chromium.launch();
+// 和 uicheck / mcheck 同一条：预装的浏览器版本号常和 Playwright 自带的对不上
+const b = await chromium.launch(
+  process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}
+);
 /**
  * Host 必须是配的那个域名，否则服务端一律 403（这条规矩本身是对的）。
  * 浏览器改不了 Host 头，所以在路由层把请求重写到本机端口 —— 相当于

@@ -92,7 +92,17 @@ console.log('带配对码：', withKey.status === 200 ? '✓ 通了' : `✕ ${wi
 const wrongKey = await fetch(`${base}/api/projects`, { headers: { 'X-FD-Key': 'WRONGKEY' } });
 console.log('错的配对码：', wrongKey.status === 401 ? '✓ 挡住了' : `✕ ${wrongKey.status}`);
 
-const b = await chromium.launch();
+/**
+ * 允许指定浏览器可执行文件。
+ *
+ * Playwright 用**它自己那个版本号**去找浏览器（chromium-1234/…）。
+ * 机器上预装的常常是另一个版本号，于是它报"浏览器没装，请 npx playwright install"——
+ * 而浏览器明明就在那儿。在没有外网、或者不想再下 150MB 的环境里，
+ * 这一行是唯一能把走查跑起来的办法。
+ */
+const b = await chromium.launch(
+  process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}
+);
 const ctx = await b.newContext({ ...devices['iPhone 13'] });
 const page = await ctx.newPage();
 /**
@@ -165,6 +175,33 @@ console.log('   描述：', saved.description === '阿澜停在栈桥尽头远�
 console.log('   台词：', saved.dialogue === '这里的缆绳被人动过。' ? '存下了 ✓' : `✕ ${saved.dialogue}`);
 console.log('   谁说的：', saved.speaker === '阿澜' ? '存下了 ✓' : `✕ ${saved.speaker}`);
 console.log('   景别：', saved.camera === '全景' ? '存下了 ✓' : `✕ ${saved.camera}`);
+
+/**
+ * ⑤a 预演台。
+ *
+ * 这一块的**画布和几何是和电脑版共用同一份代码**（ui/previz-canvas.js
+ * + core/pipeline/previz.js，后者按 /previz.js 原样发给浏览器）。
+ * 所以这里验的是"手机这一端接得上没有"：
+ *   · 那两个根路径上的模块在手机那条监听上放行了吗
+ *     —— 不放行会 401，而 import 失败会让**整个 m.js 加载不起来**，
+ *        表现是打开一片空白，连输配对码那一屏都没有（真踩过）
+ *   · 折叠面板点开后画布画出来了吗、读数出来了吗
+ *
+ * 拖动本身在电脑版那条走查里真拖过（uicheck），是同一段代码，这里不重复。
+ */
+await page.locator('.tab', { hasText: '分镜' }).click();
+await page.waitForTimeout(600);
+await page.locator('button:has-text("改这一镜")').first().click();
+await page.waitForTimeout(400);
+const pvz = page.locator('.previz-details').first();
+const hasPvz = (await pvz.count()) > 0;
+if (hasPvz) {
+  await pvz.locator('summary').click();
+  await page.waitForTimeout(600);
+}
+console.log('⑤a 手机上的预演台：', hasPvz ? '有 ✓' : '✕ 没有');
+console.log('   画布：', (await page.locator('.previz-canvas').count()) > 0 ? '画出来了 ✓' : '✕');
+console.log('   读数：', /mm/.test(await page.locator('.previz-line-text').first().innerText().catch(() => '')) ? '有 ✓' : '✕');
 
 // ⑤b 剧本和设定集：这两样以前只能"回电脑上改"，现在手机上就能改
 await page.locator('.tab', { hasText: '剧本' }).click();

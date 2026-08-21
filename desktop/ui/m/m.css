@@ -387,3 +387,35 @@ input {
   font-size: 13px;
 }
 .seg-head b { font-size: 13px; }
+
+/* ── 预演台：俯视排位 ──
+   结构和电脑版共用同一份（ui/previz-canvas.js），类名一致，
+   配色用这一端自己的 token —— 两端色板本来就是分开的。
+   触控目标比电脑版大一圈：手指按不准 8px 的点。 */
+.previz-panel { margin-top: 10px; }
+.previz-canvas { border: 1px solid var(--line); border-radius: var(--r); display: block; }
+.previz-bg { fill: var(--surface-1); }
+.previz-grid { stroke: var(--line-soft); stroke-width: 1; }
+.previz-axis { stroke: var(--line); stroke-width: 1.5; }
+.previz-line { stroke: var(--caution); stroke-width: 2.5; stroke-dasharray: 6 4; }
+.previz-fov { fill: rgba(232, 180, 95, 0.12); }
+.previz-cam { fill: var(--beam); stroke: var(--ink); stroke-width: 2; }
+.previz-sub { fill: var(--surface-2); stroke: var(--ink-dim); stroke-width: 2; }
+.previz-facing { stroke: var(--ink-dim); stroke-width: 2; }
+.previz-tip { fill: var(--ink-dim); }
+.previz-label, .previz-label-cam { font-size: 12px; text-anchor: middle; pointer-events: none; }
+.previz-label { fill: var(--ink); }
+.previz-label-cam { fill: var(--ground); font-weight: 700; }
+.previz-controls { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.previz-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.previz-cap { color: var(--ink-faint); font-size: 12px; min-width: 40px; }
+.previz-row .btn.on { border-color: var(--beam); color: var(--beam); }
+.previz-readout { margin-top: 10px; }
+.previz-line-text { font-size: 13px; line-height: 1.7; }
+.previz-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.previz-warn {
+  margin-top: 8px; padding: 9px 11px; border-radius: 10px;
+  background: rgba(217, 97, 76, 0.14); color: var(--alarm);
+  font-size: 12px; line-height: 1.6;
+}
+.previz-details > summary { cursor: pointer; color: var(--ink-dim); font-size: 13px; padding: 6px 0; }
