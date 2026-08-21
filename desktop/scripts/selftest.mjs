@@ -3686,6 +3686,75 @@ section('接缝：走一遍出视频，看首帧到底发的是哪张');
   settings.patch({ seamMode: 'lock' });
 }
 
+section('自动剪辑：跳掉开头那几帧不动的');
+{
+  const ac = await import('../core/autocut.js');
+  const ih = await import('../core/imghash.js');
+  // 用真哈希的汉明距离，别自己造一个 —— 造出来的会和产线用的那个不是一回事
+  const opts = { hamming: ih.hamming };
+  // 把"帧差序列"直接变成假哈希：第 i 位翻 d 个 bit，汉明距离就是 d
+  const fromDiffs = (diffs) => {
+    const out = ['0000000000000000'];
+    let acc = 0n;
+    for (const d of diffs) {
+      acc ^= BigInt((2 ** d) - 1);          // 翻 d 个 bit
+      out.push(acc.toString(16).padStart(16, '0'));
+    }
+    return out;
+  };
+
+  /**
+   * 图生视频几乎都有的毛病：开头零点几秒是不动的（模型在"起势"，
+   * 前几帧基本是首帧的复制）。一段察觉不到，二十段连起来整片发黏 ——
+   * 而逐段看每一段都没问题，这正是最难自己发现的那类。
+   */
+  check('开头五帧不动 → 从 1 秒进',
+    ac.headTrim([0, 0, 0, 0, 0, 4, 5, 4, 5, 4]) === 1, String(ac.headTrim([0, 0, 0, 0, 0, 4, 5, 4, 5, 4])));
+
+  /**
+   * ⚠ 这一条是拿真视频跑出来的回归。
+   *
+   * 第一版用的是**绝对阈值**（汉明距离 ≤ 3 算静止）。而一段从第一帧就在动的
+   * 真片子，相邻帧差只有 2~4 —— 全在阈值以下，于是整段被判成"开头一秒没动"，
+   * 白白剪掉一秒真内容。单元测试当时是绿的，因为我造的假数据用的是大数。
+   *
+   * 现在判据是**相对这一段自己的运动量**：低于中位数四分之一才算没动。
+   */
+  check('全程都在动（帧差只有 2~4）→ 一帧都不剪',
+    ac.headTrim([2, 2, 2, 2, 2, 3, 4, 3, 2, 3]) === 0,
+    String(ac.headTrim([2, 2, 2, 2, 2, 3, 4, 3, 2, 3])));
+
+  // 整段静止的空镜：那就是它本来的样子，剪掉就没了
+  check('全程静止的空镜一帧都不剪', ac.headTrim([0, 0, 0, 0, 0, 0]) === 0);
+
+  /**
+   * 安全带：最多砍 1 秒。万一判断出错（比如慢镜头被当成静止），
+   * 没有它就会把整段砍光。宁可少剪，也不要剪掉真内容。
+   */
+  check('最多只砍 1 秒（判错时的安全带）',
+    ac.headTrim(Array(20).fill(0).concat([9, 9, 9])) <= ac.MAX_HEAD,
+    String(ac.headTrim(Array(20).fill(0).concat([9, 9, 9]))));
+
+  // ── 挑窗口 ──
+  const dead = fromDiffs([0, 0, 0, 0, 0, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6]);
+  const w = ac.pickWindow(dead, 4, 3, opts);
+  check('去掉废头之后从 1 秒切 3 秒', w.in === 1 && w.out === 4, JSON.stringify(w));
+
+  /**
+   * 去完头就不够长了的话，把入点往回挪。
+   * 时长不够会触发补帧（把最后一帧冻住撑时间），那比开头顿一下难看得多 ——
+   * 画面彻底静止，观众一眼就看出是凑数的。
+   */
+  const tight = ac.pickWindow(dead, 3.4, 3, opts);
+  check('去完头不够长时，入点往回挪保时长',
+    tight.in === 0.4 && Number((tight.out - tight.in).toFixed(2)) === 3, JSON.stringify(tight));
+
+  // 报的时候只报真剪了的。"0 镜被剪"每次合成都印一遍是纯噪音
+  check('一条都没剪时不打那行', ac.summarize([{ trimmed: false, deadHead: 0, index: 1 }]) === null);
+  const brief = ac.summarize([{ trimmed: true, deadHead: 0.6, in: 0.6, index: 3 }]);
+  check('剪了就说清楚剪了哪几镜、为什么', /#3/.test(brief) && /首帧的复制/.test(brief), brief);
+}
+
 section('历史版本：重出之前把上一版留下来');
 {
   const v = await import('../core/versions.js');

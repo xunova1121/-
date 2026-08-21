@@ -358,7 +358,7 @@ export async function concat(
   segments,
   outputPath,
   // __probe / __exec 只给自检注入用，正常调用一个都不用传（理由见 buildTransitions 上面那段）
-  { audioPath, audioTracks, audioAt, trims, transitions, onNote, onProgress, __probe, __exec } = {}
+  { audioPath, audioTracks, audioAt, trims, cuts, transitions, onNote, onProgress, __probe, __exec } = {}
 ) {
   if (!segments.length) throw new Error('没有可合成的片段');
 
@@ -409,13 +409,24 @@ export async function concat(
           continue;
         }
         const info = await (__probe || probeStreams)(segments[i]);
-        const real = info?.seconds || null;
+        // ⚠ 从入点往后**还剩多少**才是可用长度。拿整段长度去算的话，
+        // 跳掉开头之后其实已经不够了，而补帧那一步会以为够，于是少补一截
+        const real = info?.seconds ? info.seconds - (Number(cuts?.[i]?.in) || 0) : null;
         // 0.15 秒以内不管：那点差在观感上不存在，为它重编码一遍不划算
         const gap = real ? want - real : 0;
         const needPad = gap > 0.15;
 
         const cut = `${outputPath}.trim${i}.mp4`;
-        const args = ['-y', '-i', segments[i]];
+        /**
+         * 入点。`-ss` 必须放在 `-i` **前面**：放前面是快速定位（先跳再解码），
+         * 放后面是解码到那儿再丢弃 —— 结果一样，但后者要把前面整段解一遍。
+         *
+         * 没有入点时一个参数都不加，保持和以前完全一样的行为。
+         */
+        const startAt = Number(cuts?.[i]?.in) || 0;
+        const args = ['-y'];
+        if (startAt > 0) args.push('-ss', startAt.toFixed(3));
+        args.push('-i', segments[i]);
         if (needPad) {
           args.push('-vf', `tpad=stop_mode=clone:stop_duration=${gap.toFixed(3)}`);
           // 有音轨的话也要跟着补静音，否则补出来的那一段没有音轨，
@@ -528,6 +539,33 @@ export async function concat(
  * `-sseof -0.2` 是从**结尾往回**定位，比先探时长再 seek 少一次调用，
  * 而且对时长元数据不准的文件也管用（模型出的 mp4 时长经常和档位差一点）。
  */
+/**
+ * 按固定间隔把整段视频采成一串小图。
+ *
+ * ── 为什么一次调用取全部，而不是每帧调一次 ──
+ *
+ * 一段 5 秒的片子按 0.2 秒采就是 25 帧。每帧起一次 FFmpeg 进程的话，
+ * 二十镜就是五百次进程启动 —— 光是启动开销就比解码本身贵得多，
+ * 而且在 Windows 上尤其慢。一次调用输出一整个序列，二十镜只有二十次。
+ *
+ * 缩到 64 像素宽：后面只拿它算感知哈希，再大都是白解码。
+ */
+export async function sampleFrames(videoPath, outDir, { step = 0.2 } = {}) {
+  if (!fs.existsSync(videoPath)) throw new Error(`视频不存在：${videoPath}`);
+  fs.mkdirSync(outDir, { recursive: true });
+  const pattern = path.join(outDir, 'f%04d.png');
+  await run([
+    '-y', '-i', videoPath,
+    '-vf', `fps=${(1 / step).toFixed(4)},scale=64:-1`,
+    '-q:v', '4',
+    pattern
+  ]);
+  return fs.readdirSync(outDir)
+    .filter((n) => /^f\d+\.png$/.test(n))
+    .sort()
+    .map((n) => path.join(outDir, n));
+}
+
 export async function grabFrame(videoPath, outPath, { at = 'end' } = {}) {
   if (!fs.existsSync(videoPath)) throw new Error(`视频不存在：${videoPath}`);
   const args =

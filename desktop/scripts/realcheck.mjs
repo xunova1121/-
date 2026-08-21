@@ -285,6 +285,60 @@ section('整条走一遍：转场 + 补齐 + 混音一起来');
   check('转场没退回硬切', !notes.some((m) => /没做成|按硬切合成/.test(m)), notes.join(' | '));
 }
 
+// ── 自动剪辑：真视频，真采帧 ──
+{
+  const ih = await import('../core/imghash.js');
+  const ac = await import('../core/autocut.js');
+
+  /**
+   * 这一段非在真 FFmpeg 上跑不可 —— 它抓到过一个单元测试完全看不见的 bug。
+   *
+   * 判"没动"原来用的是**绝对阈值**（汉明距离 ≤ 3）。假数据里我造的差值都是
+   * 大数，一路绿灯；而真视频里一段**从第一帧就在动**的片子，相邻帧差只有
+   * 2~4 —— 全落在阈值以下，于是整段被判成"开头一秒没动"，白剪一秒真内容。
+   *
+   * 造两段形态相反的片子，看它分不分得开。
+   */
+  const deadHead = path.join(DIR, 'dead-head.mp4');
+  const moving = path.join(DIR, 'moving.mp4');
+  // 冻住首帧 1.2 秒再开始动 —— 和模型"起势"那几帧是同一个形态
+  spawnSync(bin, ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=320x180:r=25:d=2.8',
+    '-vf', 'tpad=start_mode=clone:start_duration=1.2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', deadHead]);
+  spawnSync(bin, ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=320x180:r=25:d=4',
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', moving]);
+
+  const windowOf = async (file) => {
+    const dir = path.join(DIR, `fr-${path.basename(file, '.mp4')}`);
+    const frames = await ffmpeg.sampleFrames(file, dir, { step: ac.STEP });
+    const hashes = [];
+    for (const f of frames) hashes.push(await ih.hashImage(f));
+    const total = await ffmpeg.probeDuration(file);
+    return { win: ac.pickWindow(hashes, total, 3, { hamming: ih.hamming }), frames: frames.length };
+  };
+
+  const a = await windowOf(deadHead);
+  const b = await windowOf(moving);
+  check(`采帧真的采出来了（${a.frames} 帧）`, a.frames > 10, String(a.frames));
+  check(`冻头那段被认出来了（入点 ${a.win.in}s）`, a.win.in > 0.5, JSON.stringify(a.win));
+  /**
+   * 这一条就是那个 bug 的回执。它要是红了，说明判据又变回"绝对阈值"那种，
+   * 而后果是每一段都被白剪掉一秒。
+   */
+  check('全程在动的那段一帧都没剪', b.win.in === 0, JSON.stringify(b.win));
+
+  // 入点要真的落进成片里，不能只是算出来一个数
+  const cut = path.join(DIR, 'cut.mp4');
+  const raw = path.join(DIR, 'raw.mp4');
+  await ffmpeg.concat([deadHead], raw, { trims: [1.5] });
+  await ffmpeg.concat([deadHead], cut, { trims: [1.5], cuts: [{ in: 2.0 }] });
+  const h1 = await ih.hashVideoFrame(raw, { at: 'first' });
+  const h2 = await ih.hashVideoFrame(cut, { at: 'first' });
+  check('入点真的落进了成片（首帧不一样）', h1 !== h2, `${h1} / ${h2}`);
+  const cutSecs = await ffmpeg.probeDuration(cut);
+  check(`带入点之后时长还是对的（${cutSecs?.toFixed(2)}s）`,
+    cutSecs != null && Math.abs(cutSecs - 1.5) < 0.3, String(cutSecs));
+}
+
 // ── 收尾 ──
 fs.rmSync(DIR, { recursive: true, force: true });
 console.log(`\n${'─'.repeat(50)}`);

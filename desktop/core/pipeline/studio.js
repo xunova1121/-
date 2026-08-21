@@ -26,6 +26,7 @@ import { safeFileName, PROJECTS_DIR } from '../paths.js';
 import * as chapters from './chapters.js';
 import * as duration from '../duration.js';
 import * as versions from '../versions.js';
+import * as autocut from '../autocut.js';
 import * as skillsLib from '../skills.js';
 import * as variants from './variants.js';
 import * as anglesLib from './angles.js';
@@ -3979,6 +3980,49 @@ export async function compose(projectId, { onEvent } = {}) {
   const policy = settings.get('durationPolicy') || 'trim';
   const trims = policy === 'trim' ? withVideo.map((s) => Number(s.duration) || null) : null;
 
+  /**
+   * 自动剪辑：给每段挑一个入点，别永远从第 0 秒切。
+   *
+   * 图生视频几乎都有的毛病 —— 开头零点几秒是不动的（模型在"起势"，
+   * 前几帧基本是首帧的复制）。一段察觉不到，二十段连起来整片发黏，
+   * 而逐段看每一段都没问题，这正是最难自己发现的那类。
+   *
+   * 要 FFmpeg 才做得了（得把帧采出来）。没装就跳过并说一声 ——
+   * 跳过是可以接受的，不知道自己跳过了才不行。
+   */
+  let cuts = null;
+  if (settings.get('autoCut') !== false && ffmpeg.locate().available) {
+    cuts = [];
+    const tmpRoot = path.join(dir, '.autocut');
+    for (const [i, shot] of withVideo.entries()) {
+      jobs.checkpoint(signal, '自动剪辑');
+      const outDir = path.join(tmpRoot, String(shot.id));
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const frames = await ffmpeg.sampleFrames(shot.videoPath, outDir, { step: autocut.STEP });
+        // eslint-disable-next-line no-await-in-loop
+        const hashes = await Promise.all(frames.map((f) => imghash.hashImage(f)));
+        // eslint-disable-next-line no-await-in-loop
+        const total = (await ffmpeg.probeDuration(shot.videoPath)) || 0;
+        const win = autocut.pickWindow(hashes, total, trims?.[i] || 0, { hamming: imghash.hamming });
+        cuts.push({ ...win, index: shot.index });
+      } catch {
+        // 一段分析不了不该拖垮整次合成 —— 那一段照原样切
+        cuts.push({ in: 0, out: 0, deadHead: 0, trimmed: false, index: shot.index });
+      } finally {
+        fs.rmSync(outDir, { recursive: true, force: true });
+      }
+    }
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    const brief = autocut.summarize(cuts);
+    if (brief) onEvent?.({ type: 'note', message: brief });
+  } else if (settings.get('autoCut') !== false) {
+    onEvent?.({
+      type: 'note',
+      message: '自动剪辑要 FFmpeg 才做得了（得把帧采出来分析），这次跳过 —— 每一镜开头那几帧不动的会留在成片里'
+    });
+  }
+
   const bin = ffmpeg.locate({ refresh: true });
   if (!bin.available) throw new Error(bin.hint);
 
@@ -4080,6 +4124,7 @@ export async function compose(projectId, { onEvent } = {}) {
     // 排查"第几条音频有问题"时对得上
     audioAt: [...audioAt, ...sfxAt],
     trims,
+    cuts,
     transitions: transitionKinds,
     onNote: (message) => onEvent?.({ type: 'note', message }),
     onProgress: (p) => onEvent?.({ type: 'progress', seconds: p.seconds })
