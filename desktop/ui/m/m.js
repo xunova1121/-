@@ -572,7 +572,10 @@ function paint() {
          * 不点进去也知道有事 —— 否则那几镜要等到审片翻到才被发现，
          * 而人多半是跑完全流程、看一眼成片觉得还行就发了。
          */
-        id === 'shots' && (project?.shots || []).some((s) => shotLevel(s) === 'bad')
+        id === 'shots' && (() => {
+          const list = (project?.shots || []).slice().sort((a, b) => a.index - b.index);
+          return list.some((s, i) => shotLevel(s, i ? list[i - 1] : null) === 'bad');
+        })()
           ? h('span', { class: 'tab-flag' })
           : null))
     )
@@ -1186,7 +1189,7 @@ function linkRangeCard(shots) {
  * `fix` 是"按下去就能修"的那个动作；修不了的（比如配音要整步跑）留 null，
  * 界面上就不给主按钮 —— 给一个按下去没用的按钮比不给更让人恼火。
  */
-function shotIssues(s) {
+function shotIssues(s, prev = null) {
   const out = [];
   if (!s.imagePath) {
     out.push({ level: 'blocker', what: '还没出图', fix: 'image', how: '重出这张图' });
@@ -1195,6 +1198,26 @@ function shotIssues(s) {
   }
   if (s.link === 'continuous' && s.tailAlign?.verdict === 'missed') {
     out.push({ level: 'blocker', what: '标着「连续动作」，接缝其实没锁上', fix: 'video', how: '重出这段视频' });
+  }
+  /**
+   * 标着「连续动作」，而两条路一条都没走成。
+   *
+   * 接缝在首尾帧模式下是做在**上一镜**身上的，所以证据也在上一镜：
+   *   首尾帧  上一镜的 endFrameChained（末帧真的发出去了）
+   *   接住末帧 这一镜的 headFromTail（首帧真的是上一段抠出来的）
+   * 都没有，这两镜之间就什么衔接都没有 —— 而卡片上还写着「连续动作」。
+   *
+   * ⚠ 要重出的是**上一镜**，不是这一镜。不说清楚的话，人会一遍遍重出
+   * 后面这一镜然后觉得功能是坏的 —— 而那正是最贵的一种误解。
+   */
+  if (s.link === 'continuous' && s.videoPath && prev?.videoPath
+      && !s.headFromTail && !prev.endFrameChained) {
+    out.push({
+      level: 'blocker',
+      what: `标着「连续动作」，但和第 ${prev.index} 镜之间什么衔接都没做上`,
+      fix: null,
+      how: `去重出第 ${prev.index} 镜 —— 接缝做在上一镜身上`
+    });
   }
   if (String(s.dialogue || '').trim() && !s.audioPath) {
     out.push({ level: 'blocker', what: '有台词但没配音 —— 嘴在动，没有声音', fix: null, how: '去流水线跑「配音」' });
@@ -1218,8 +1241,8 @@ function shotIssues(s) {
 }
 
 /** 这一镜是红的、黄的、还是干净的 */
-function shotLevel(s) {
-  const p = shotIssues(s);
+function shotLevel(s, prev = null) {
+  const p = shotIssues(s, prev);
   return p.some((i) => i.level === 'blocker') ? 'bad' : p.length ? 'iffy' : 'ok';
 }
 
@@ -1239,7 +1262,8 @@ function paintShots() {
   const v = Date.parse(project.updatedAt || '') || 0;
   const portrait = /^9:16$|^3:4$/.test(project.aspectRatio || '');
 
-  const probs = new Map(shots.map((s) => [s.id, shotIssues(s)]));
+  // 接缝的证据在上一镜身上，所以每一镜都要连着它的前一镜一起看
+  const probs = new Map(shots.map((s, i) => [s.id, shotIssues(s, i ? shots[i - 1] : null)]));
   const level = (s) => {
     const p = probs.get(s.id);
     return p.some((i) => i.level === 'blocker') ? 'bad' : p.length ? 'iffy' : 'ok';

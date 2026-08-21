@@ -132,6 +132,41 @@ export function audit(project, { lintResults = [], threshold = 75 } = {}) {
       fix: '重出这一镜；或者把这两镜改成硬切，别让界面写着无缝而实际不是。'
     });
   }
+  /**
+   * 标着「连续动作」，而**两条路一条都没走成**。
+   *
+   * 这一条是 endFrameChained 改成"如实回报"之后必须补上的。
+   * 以前那个字段记的是"我们打算发末帧"，所以只要标了连续动作它就是 true，
+   * 接缝复核（verifyTailAlign）一定会跑，跑出 missed 就被上面那条拦下。
+   *
+   * 现在它记的是"真的发出去了没有" —— 于是末帧被厂商扔掉的那些镜，
+   * 复核直接不跑（没锁过，验什么），tailAlign 是 null，
+   * 上面那条**拦不到它们**。不补这一条的话，接缝消失得比以前更安静：
+   * 卡片上标着连续动作、体检一片绿、成片放到那儿跳一下。
+   *
+   * 两条路各自的证据：
+   *   首尾帧（lock）  上一镜的 endFrameChained
+   *   接住末帧（tail）这一镜的 headFromTail
+   * 都没有，就是这一处接缝什么也没做。
+   */
+  const byIndex = new Map(shots.map((s) => [s.index, s]));
+  const seamNothing = shots.filter((s) => {
+    if (s.link !== 'continuous' || !s.videoPath) return false;
+    const prev = byIndex.get(s.index - 1);
+    if (!prev?.videoPath) return false;
+    return !s.headFromTail && !prev.endFrameChained;
+  });
+  if (seamNothing.length) {
+    add(items, 'blocker', {
+      id: 'seam-nothing',
+      what: `${seamNothing.length} 处标着「连续动作」，但末帧和接住末帧**两条路都没走成**（第 ${seamNothing.map((s) => s.index).join('、')} 镜）`,
+      why: '厂商把末帧参数扔了（多半是请求体超上限，或者这一版接口不认那个字段），而上一段也没出片可抠 —— '
+        + '这两镜之间实际上什么衔接都没有。分镜上写着「连续动作」，成片放到这儿会明显跳一下。',
+      fix: '把这两镜一起选上重出；老是被顶掉的话去「设置 → 对象存储」配一个 —— '
+        + '图以地址发出去，请求体从几 MB 掉到几 KB，末帧就不会再被挤掉了。'
+    });
+  }
+
   const driftSeam = shots.filter((s) => s.link === 'continuous' && s.tailAlign?.verdict === 'partial');
   if (driftSeam.length) {
     add(items, 'warn', {

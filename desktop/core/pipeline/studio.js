@@ -2087,7 +2087,15 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
       t.videoResolution = video.resolution || null;
       t.videoRefs = bibleRefs.labels;
       t.link = ctx.link;
-      t.endFrameChained = Boolean(ctx.lastFrameUrl);
+      /**
+       * ⚠ 记的是**发出去了没有**，不是"我们打算发"。
+       *
+       * 原来写的是 `Boolean(ctx.lastFrameUrl)` —— 那只是决定要发末帧。
+       * 适配器完全可能中途把它扔掉（写法被拒、请求体超上限），
+       * 而这里照样记成 true，于是界面写着"这两镜是无缝的"，
+       * 接缝复核也据此认为该有接缝。界面和事实不一致，比少一个功能糟糕得多。
+       */
+      t.endFrameChained = Boolean(video.endFrameSent);
       // 这一镜的首帧是不是接住了上一段的真实末帧。界面上要能一眼看出
       // 哪几处接缝是"像素级连着的"，哪几处只是文字上接了一下
       t.headFromTail = ctx.headFromTail ? { fromIndex: ctx.headFromTail.fromIndex, at: new Date().toISOString() } : null;
@@ -3300,12 +3308,18 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
           t.videoResolution = video.resolution || null;
           t.videoRefs = bibleRefs.labels;
           t.link = ctx.link;
-          // 末帧锁没锁上要如实记：界面上标着"连续动作"却其实没锁，
-          // 用户会一直以为这两镜是无缝的，直到把成片放出来
-          t.endFrameChained = Boolean(ctx.lastFrameUrl);
-      // 这一镜的首帧是不是接住了上一段的真实末帧。界面上要能一眼看出
-      // 哪几处接缝是"像素级连着的"，哪几处只是文字上接了一下
-      t.headFromTail = ctx.headFromTail ? { fromIndex: ctx.headFromTail.fromIndex, at: new Date().toISOString() } : null;
+          /**
+           * 末帧锁没锁上要如实记：界面上标着"连续动作"却其实没锁，
+           * 用户会一直以为这两镜是无缝的，直到把成片放出来。
+           *
+           * ⚠ 记的是**发出去了没有**，不是"我们打算发"。原来写的是
+           * `Boolean(ctx.lastFrameUrl)` —— 那只是决定要发末帧；适配器完全
+           * 可能中途把它扔掉（写法被拒、请求体超上限），而这里照样记成 true。
+           */
+          t.endFrameChained = Boolean(video.endFrameSent);
+          // 这一镜的首帧是不是接住了上一段的真实末帧。界面上要能一眼看出
+          // 哪几处接缝是"像素级连着的"，哪几处只是文字上接了一下
+          t.headFromTail = ctx.headFromTail ? { fromIndex: ctx.headFromTail.fromIndex, at: new Date().toISOString() } : null;
           // 厂商档位可能把 4s 顶成 5s。如实记下来，别让界面上的总时长撒谎。
           t.actualDuration = video.actualDuration || shot.duration;
           t.status = 'video-ready';

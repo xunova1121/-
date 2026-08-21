@@ -745,6 +745,15 @@ export async function generateVideo({
     requestedDuration: duration,
     allowedDurations: allowed,
     resolution: finalResolution,
+    /**
+     * 末帧**到底有没有发出去**。
+     *
+     * 上层原来记的是 `Boolean(ctx.lastFrameUrl)` —— 那是**决定**发末帧，
+     * 不是发成了。适配器这一层完全可能中途把它扔掉（写法被拒、体积超了），
+     * 而那种情况下界面照样显示"这两镜是无缝的"。
+     * 界面说谎比少一个功能糟糕得多，所以由发请求的这一层如实回报。
+     */
+    endFrameSent: Boolean(endFrame),
     raw: polled?.json ?? submitted.json
   };
 }
@@ -1511,6 +1520,8 @@ async function generateVideoOpenAI({
     url: contentUrl,
     // 关键：这个地址不带密钥取不到，落盘时必须把头带上
     downloadHeaders: buildAuthHeaders(provider),
+    // Sora 这条路不收末帧（目录里也没标），如实回报，别让上层记成"接上了"
+    endFrameSent: false,
     actualDuration: Number(finalJson?.seconds) || duration,
     requestedDuration,
     allowedDurations: allowed,
@@ -1702,6 +1713,20 @@ async function generateVideoMiniMax({
         break;
       } catch (err) {
         lastErr = err;
+        /**
+         * ⚠ **被体积/张数顶掉 ≠ 这种末帧写法不对。**
+         *
+         * 换一种写法发过去还是那么多字节，白撞一次墙，而且会把结论
+         * 引到"这家不认这种写法"上 —— 然后我们据此扔掉末帧。
+         * 真正该做的是下面那一步：先撤参考图。
+         */
+        if (isMediaLimitError(err.message)) {
+          onEvent?.({
+            type: 'note',
+            message: '这次被顶掉的是**体积或张数**，不是末帧的写法 —— 换个写法发还是那么大，不白撞这一次。'
+          });
+          break;
+        }
         const another = i + 1 < endFrameShapes.length;
         onEvent?.({
           type: 'note',
@@ -1710,13 +1735,26 @@ async function generateVideoMiniMax({
         });
       }
     }
+
+    /**
+     * ⚠ 这里**不要**再补一次"只带首帧和末帧重试"。
+     *
+     * 我第一版加了那一步，理由是"先扔参考图、别扔末帧"—— 方向对，
+     * 但那件事 submitWithMediaBackoff 已经做完了：末帧现在走
+     * reservedInline，根本不在 images 里，所以它的退让是
+     * 5 张 → 2 张 → 1 张（只剩首帧），末帧一路都在。
+     * 退到 1 张仍然失败时再发一次 `images.slice(0, 1)`，
+     * 发的是**和上一次一模一样的请求体** —— 白等一轮，多花一次上传。
+     *
+     * 顺序本来就是对的，补一刀只会重复。
+     */
     if (lastErr) {
-      // 两种都不成：不带末帧兜底，并且说清楚接缝这次没做上
+      // 到这一步才认输：不带末帧兜底，并且说清楚接缝这次没做上
       lastFrameUrl = null;
       onEvent?.({
         type: 'note',
         message: '这一镜没带上末帧 —— 接缝那儿会跳一下。'
-          + '「设置 → 一致性引擎 → 接缝」保持在「接住真实末帧」的话，下一镜会从这一段的真实末帧接上，照样是连的。'
+          + '「设置 → 一致性引擎 → 接缝」改成「接住真实末帧」的话，下一镜会从这一段的真实末帧接上，照样是连的。'
       });
       created = await submitOnce();
     }
@@ -1860,6 +1898,8 @@ async function generateVideoMiniMax({
     requestedDuration,
     allowedDurations: allowed,
     resolution: task.resolution || resolution,
+    // 兜底那几步会把 lastFrameUrl 清成 null，所以这里读到的就是"发送时的真相"
+    endFrameSent: Boolean(lastFrameUrl),
     raw: finalStatus
   };
 }

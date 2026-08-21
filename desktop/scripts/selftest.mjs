@@ -165,6 +165,19 @@ const upstream = http.createServer((req, res) => {
       upstream.msImageCounts = upstream.msImageCounts || [];
       const imgs = (upstream.msBody.content || []).filter((c) => c.type === 'image_url').length;
       upstream.msImageCounts.push(imgs);
+      /**
+       * 这家认不认末帧。真实世界里"认"是常态（控制台上摆着起始帧/结束帧两个框），
+       * 但中转平台换一版接口就可能不认了 —— 而那种时候接缝会**安静地消失**。
+       * 打开这个开关就是在模拟那一天。
+       */
+      upstream.msSawEndFrame = upstream.msSawEndFrame || [];
+      const hasEnd = Boolean(upstream.msBody.last_frame_image)
+        || (upstream.msBody.content || []).some((c) => c.role === 'last_frame');
+      upstream.msSawEndFrame.push(hasEnd);
+      if (hasEnd && upstream.msRejectEndFrame) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ message: 'invalid parameter: last_frame_image' }));
+      }
       // 中转平台的真实脾气：图带多了就拒，而且文档里没写几张算多
       if (imgs > (upstream.msMediaLimit ?? 99)) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -3765,6 +3778,42 @@ section('成片体检：现在能不能发');
    */
   check('理由是界面和事实不一致', /界面和事实不一致/.test(broken.items.find((i) => i.id === 'seam-missed').why));
 
+  /**
+   * ══ 接缝"两条路都没走成"也要拦 ══
+   *
+   * 这一条是 endFrameChained 改成"如实回报"之后必须补的。
+   *
+   * 那个字段原来记的是"我们打算发末帧"，所以只要标了连续动作它就是 true，
+   * 接缝复核一定会跑，跑出 missed 就被上面那条拦下。现在它记的是
+   * "真的发出去了没有" —— 末帧被厂商扔掉的那些镜，复核直接不跑
+   * （没锁过，验什么），tailAlign 是 null，上面那条**拦不到它们**。
+   *
+   * 不补这一条的话，接缝消失得比以前更安静：卡片上标着连续动作、
+   * 体检一片绿、成片放到那儿跳一下。用户报的"后面几个一个都连不上"
+   * 就是这种形状。
+   */
+  const nothing = q.audit({
+    shots: [
+      done(1, { endFrameChained: false }),
+      done(2, { link: 'continuous', headFromTail: null })
+    ]
+  });
+  check('末帧被扔了、也没接住上一段 → 拦',
+    nothing.items.some((i) => i.id === 'seam-nothing'), JSON.stringify(nothing.items.map((i) => i.id)));
+  check('并且指向真正的解法（配对象存储，别让末帧被挤掉）',
+    /对象存储/.test(nothing.items.find((i) => i.id === 'seam-nothing').fix));
+  // 反面两条：接缝真做上了就不该报，否则这条会变成一条永远红的噪音
+  const lockOk = q.audit({
+    shots: [done(1, { endFrameChained: true }), done(2, { link: 'continuous' })]
+  });
+  check('首尾帧真锁上了就不报', !lockOk.items.some((i) => i.id === 'seam-nothing'),
+    JSON.stringify(lockOk.items.map((i) => i.id)));
+  const tailOk = q.audit({
+    shots: [done(1, { endFrameChained: false }), done(2, { link: 'continuous', headFromTail: { fromIndex: 1 } })]
+  });
+  check('走的是接住真实末帧那条路，也不报', !tailOk.items.some((i) => i.id === 'seam-nothing'),
+    JSON.stringify(tailOk.items.map((i) => i.id)));
+
   // ── warn：质量风险，但未必看得出来 ──
   const low = q.audit({ shots: [done(1, { consistency: { score: 60 } })] });
   check('一致性偏低是 warn 不是 blocker', low.verdict === 'fixable', JSON.stringify(low.counts));
@@ -5542,6 +5591,82 @@ check('探出来的路径被缓存，第二次不再重复试', upstream.msQuery
   check('首帧和参考图都还在（去重不能连它们一起去掉）',
     urls.length === 2 && urls.some((u) => /head\.png/.test(u)) && urls.some((u) => /ref1\.png/.test(u)),
     JSON.stringify(urls));
+}
+
+/**
+ * ══ 末帧到底发出去没有，要如实回报 ══
+ *
+ * 上层原来记的是 `Boolean(ctx.lastFrameUrl)` —— 那是**决定**发末帧，
+ * 不是发成了。适配器完全可能中途把它扔掉（写法被拒、体积超上限），
+ * 而那种情况下分镜上照样挂着"这两镜是无缝的"、成片体检也据此放行。
+ *
+ * 界面说谎比少一个功能糟糕得多：人据此以为接上了，直到把成片放出来。
+ */
+{
+  upstream.msPolls = 0;
+  upstream.msSawEndFrame = [];
+  const ok = await adapters.generateVideo({
+    providerId: 'metaso',
+    model: 'MiniMax-H3',
+    prompt: 'x',
+    duration: 5,
+    firstFrameUrl: 'https://x.invalid/head.png',
+    lastFrameUrl: 'https://x.invalid/tail.png'
+  });
+  check('末帧发通了就回报 true', ok.endFrameSent === true, String(ok.endFrameSent));
+
+  // 这家换了一版接口，不认末帧了 —— 接缝会消失，而这件事必须被记下来
+  upstream.msRejectEndFrame = true;
+  upstream.msPolls = 0;
+  upstream.msSawEndFrame = [];
+  const notes = [];
+  const dropped = await adapters.generateVideo({
+    providerId: 'metaso',
+    model: 'MiniMax-H3',
+    prompt: 'x',
+    duration: 5,
+    firstFrameUrl: 'https://x.invalid/head.png',
+    lastFrameUrl: 'https://x.invalid/tail.png',
+    onEvent: (ev) => { if (ev.message) notes.push(ev.message); }
+  });
+  upstream.msRejectEndFrame = false;
+  check('末帧被扔掉时这一镜照样出得来（接缝没做上不该把整镜废掉）',
+    /out\.mp4$/.test(dropped.url || ''), dropped.url);
+  check('但**如实回报没发出去**（原来这里会记成"接上了"）',
+    dropped.endFrameSent === false, String(dropped.endFrameSent));
+  check('并且当场说清楚接缝这次没做上', /没带上末帧/.test(notes.join(' | ')), notes.join(' | ').slice(-220));
+  // 最后那一次提交确实是不带末帧的 —— 否则上面那条可能只是标志位写对了
+  check('最后一次真的发的是不带末帧的请求',
+    upstream.msSawEndFrame.length >= 2 && upstream.msSawEndFrame[upstream.msSawEndFrame.length - 1] === false,
+    JSON.stringify(upstream.msSawEndFrame));
+}
+
+/**
+ * 被体积/张数顶掉 ≠ 这种末帧写法不对。
+ *
+ * 换一种写法发过去还是那么多字节，白撞一次墙 —— 而且会把结论引到
+ * "这家不认这种写法"上，然后据此扔掉末帧。多花的还不只是时间：
+ * 内联图那一路，每撞一次就是几 MB 的上传。
+ */
+{
+  upstream.msPolls = 0;
+  upstream.msSawEndFrame = [];
+  upstream.msMediaLimit = 0; // 一张都不收 —— 逼出"退到底仍然失败"
+  const notes = [];
+  await adapters.generateVideo({
+    providerId: 'metaso',
+    model: 'MiniMax-H3',
+    prompt: 'x',
+    duration: 5,
+    firstFrameUrl: 'https://x.invalid/head.png',
+    lastFrameUrl: 'https://x.invalid/tail.png',
+    onEvent: (ev) => { if (ev.message) notes.push(ev.message); }
+  }).catch(() => null);
+  upstream.msMediaLimit = undefined;
+  const joined = notes.join(' | ');
+  check('体积被顶掉时点明"不是末帧的写法问题"',
+    /不是末帧的写法/.test(joined), joined.slice(-260));
+  check('并且不换第二种写法白撞一次', !/换「/.test(joined), joined.slice(-260));
 }
 
 /**
