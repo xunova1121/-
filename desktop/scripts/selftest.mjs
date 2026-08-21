@@ -3591,6 +3591,14 @@ section('末帧写法不知道就试，别押一个然后安静失效');
 
 section('接缝：走一遍出视频，看首帧到底发的是哪张');
 {
+  /**
+   * 这一段量的是**接住真实末帧**那条路，所以明写 seamMode，不吃默认值。
+   *
+   * 默认值改成「首尾帧」的时候这条当场红了 —— 它一直靠"默认就是 tail"
+   * 这个隐含前提活着。测试依赖默认值就是这样：默认一动，
+   * 红的是一条和这次改动毫不相干的断言，而看的人得先花时间弄明白它为什么红。
+   */
+  settings.patch({ seamMode: 'tail' });
   const sp = await (
     await fetch(`${appUrl}/api/projects`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -3661,7 +3669,58 @@ section('接缝：走一遍出视频，看首帧到底发的是哪张');
   const off = await ndjson(`/projects/${sp.id}/stage/video`, {});
   check('关掉之后不接末帧',
     !off.some((e) => /真实末帧/.test(e.message || '')) && !store.read(sp.id).shots[1]?.headFromTail);
-  settings.patch({ seamMode: 'tail' });
+  // 还回默认，别把后面的段一起带偏
+  settings.patch({ seamMode: 'lock' });
+}
+
+section('默认走首尾帧：碰上不收末帧的厂商要能退回去');
+{
+  const cat = await import('../core/providers/catalog.js');
+  const st = await import('../core/settings.js');
+
+  /**
+   * 默认值从「接住真实末帧」改成了「首尾帧」——
+   * 两头都钉在审过的图上，这一镜再怎么演也跑不出去；而接住真实末帧只钉住起点，
+   * 结尾是模型自己发挥的、又成为下一镜的起点，链越长漂得越远。
+   *
+   * ⚠ 但 lock 整条路都架在"厂商收末帧"上。碰上不收的那几家，
+   * 它会**一处接缝都不做** —— 比原来的默认还差，而且用户是照着
+   * "首尾帧更准"这个理由选的它，结果反而更糟。
+   *
+   * 所以必须兜一层：选了 lock 而这家不收末帧，退回接住真实末帧。
+   * **这一层就是这个默认值敢改的全部理由**，它一旦没了，默认值就该改回去。
+   */
+  check('默认是首尾帧', st.DEFAULTS ? st.DEFAULTS.seamMode === 'lock' : true);
+  st.patch({ seamMode: undefined });
+  check('没设过的时候取到的也是首尾帧', (st.get('seamMode') || 'lock') === 'lock', String(st.get('seamMode')));
+
+  // 兜底那一层的判据：这家收不收末帧
+  const takes = (id) => Boolean(cat.PROVIDERS.find((p) => p.id === id)?.videoDefaults?.endFrame);
+  check('秘塔收末帧 → 首尾帧走得通', takes('metaso') === true);
+  check('百炼不收末帧 → 必须退回接住真实末帧', takes('dashscope') === false);
+  check('海螺官方口也不收', takes('minimax') === false);
+
+  /**
+   * ⚠ 上面这些只量了"目录里写着收不收"，**没量兜底那一行有没有真的兜住**。
+   *
+   * 第一版我在这儿照抄了一遍判断逻辑当真值表 —— 那是自己验自己，
+   * 产线代码写反了它照样绿。所以那一行被拎成了 studio.wantsTailChain，
+   * 产线和这里调**同一个函数**。
+   *
+   * （中间还试过真跑一遍出视频。那条路更实，但打桩服务没实现海螺的视频接口，
+   *   为了测一行判断去给打桩补一整套厂商接口，代价远超收益 ——
+   *   而且补出来的那套本身也没人验过。）
+   */
+  const st2 = await import('../core/pipeline/studio.js');
+  check('lock + 收末帧 → 走首尾帧，不抠末帧', st2.wantsTailChain('lock', true) === false);
+  check('lock + 不收末帧 → 退回抠末帧（这一条就是默认值敢改的全部理由）',
+    st2.wantsTailChain('lock', false) === true);
+  check('tail 永远抠末帧，不管厂商收不收',
+    st2.wantsTailChain('tail', true) && st2.wantsTailChain('tail', false));
+  check('off 两条都不做',
+    !st2.wantsTailChain('off', true) && !st2.wantsTailChain('off', false));
+
+  st.patch({ seamMode: 'lock' });
 }
 
 section('场次边界：不锁末帧、不拿邻镜当参考');

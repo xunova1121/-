@@ -2373,42 +2373,71 @@ function checkRatio(file, wanted, label, onEvent, asked = null) {
  *   ② 末帧图 —— 只有标成"连续动作"的下一镜才锁，见 continuity.js 里为什么不全锁；
  *   ③ 给界面看的说明，让"这一镜到底接没接上"是看得见的，而不是玄学。
  */
+/**
+ * 要不要去抠上一段的真实末帧当首帧。
+ *
+ * 单拎出来是为了**能被直接断言**。它就一行，但错了的后果是
+ * "某几家厂商上接缝整个消失"，而且不报错 —— 这种一行判断最该有测试。
+ *
+ * 而测试必须调**这一个**函数，不能在测试里照抄一遍逻辑：
+ * 抄一遍就成了自己验自己，产线写反了它照样绿。
+ */
+export function wantsTailChain(seamMode, takesEndFrame) {
+  if (seamMode === 'off') return false;
+  if (seamMode === 'tail') return true;
+  // lock：首尾帧那条路要厂商收末帧。不收就退回来，否则这一镜一处接缝都没有
+  return !takesEndFrame;
+}
+
 async function videoContextFor(project, shot, { onEvent, providerId = null } = {}) {
   const { prev, next, link, nextLink } = continuity.neighbors(project.shots || [], shot.id);
 
   const videoPrompt = consistency.assembleVideoPrompt(project.bible, shot, { prev, next, link });
 
   /**
-   * 接缝：把上一段视频的**真实末帧**抠出来，当这一镜的首帧。
-   *
-   * 这条和下面那条末帧锁定是**两个方向**，各有各的前提：
-   *
-   *   末帧锁定  要求上一段"结束在这一镜的图上"——**只有收末帧的厂商能做**
-   *             （方舟、可灵、Vidu；海螺、秘塔、百炼、Sora 都不收）
-   *   首帧接续  等上一段跑完，用它真实的最后一帧当这一镜的首帧 ——
-   *             **每一家都能做**，因为图生视频的定义就是收首帧
-   *
-   * 两条都做时是双保险；用不收末帧的厂商时，这一条是唯一有效的那条。
-   * 详见 continuity.js 里 shouldChainFromTail 上面那段。
-   */
-  let headFromTail = null;
-  const seamMode = settings.get('seamMode') || 'tail';
-  if (seamMode === 'tail' && continuity.shouldChainFromTail(shot, prev, link)) {
-    headFromTail = await tailFrameOf(project, prev, shot, { onEvent });
-  }
-
-  /**
-   * 末帧锁定：**先问这家收不收，再决定说什么**。
+   * 这家收不收末帧 —— **必须先问，再决定接缝怎么做**。
    *
    * 以前是先许诺"两镜之间会是无缝的"，然后适配器那一层才发现这家不收末帧，
    * 又说一句"会是硬切"。两句话同时躺在日志里，前一句是在还不知道厂商是谁的
-   * 时候许下的 —— 这不只是话难看：用户会以为接缝做上了，直到看成片才发现没有。
+   * 时候许下的 —— 用户会以为接缝做上了，直到看成片才发现没有。
    *
    * 收不收由 catalog 里的 videoDefaults.endFrame 说了算，别在这儿写死名单 ——
    * 上一版这里写着"秘塔不收"，而用户的控制台截图上明明白白有首尾帧两栏。
    */
   const provider = providerId ? catalog.getProvider(providerId) : null;
   const takesEndFrame = provider ? Boolean(provider.videoDefaults?.endFrame) : true;
+
+  /**
+   * 接缝的两个方向，各有各的前提：
+   *
+   *   首尾帧（lock）  本镜的图当首帧、下一镜的图当末帧 —— 两头都是审过的图，
+   *                   这一镜再怎么演也跑不出去。**要厂商收末帧**
+   *   接住末帧（tail）等上一段跑完，用它真实的最后一帧当首帧 ——
+   *                   **每一家都能做**（图生视频的定义就是收首帧），
+   *                   但只钉住起点，结尾是模型自己发挥的，误差会沿链累积
+   *
+   * ── 为什么 lock 要能退回 tail ──
+   *
+   * lock 整条路都架在"厂商收末帧"上。碰上不收的那几家（海螺官方口、百炼、
+   * Sora），lock 会**一处接缝都不做** —— 比默认值还差，而且用户是照着
+   * "首尾帧更准"这个理由选的它，结果反而更糟。
+   *
+   * 所以这里兜一层：选了 lock 而这家不收末帧，就退回接住真实末帧，
+   * 并且**说清楚退了**。默认值敢改成 lock，靠的就是这一层。
+   */
+  const seamMode = settings.get('seamMode') || 'lock';
+  const wantTail = wantsTailChain(seamMode, takesEndFrame);
+
+  let headFromTail = null;
+  if (wantTail && continuity.shouldChainFromTail(shot, prev, link)) {
+    if (seamMode === 'lock') {
+      onEvent?.({
+        type: 'note',
+        message: `${provider?.name || '这家'}不收末帧图，「首尾帧」这条路在它上面做不了 —— 本镜改用「接住上一段的真实末帧」兜底，接缝照样是连的`
+      });
+    }
+    headFromTail = await tailFrameOf(project, prev, shot, { onEvent });
+  }
 
   let lastFrameUrl = null;
   if (seamMode !== 'off' && continuity.shouldChainEndFrame(next, nextLink, shot)) {
@@ -2421,9 +2450,8 @@ async function videoContextFor(project, shot, { onEvent, providerId = null } = {
         type: 'note',
         message: headFromTail
           ? `${provider.name} 不收末帧图，但本镜已经接住了第 ${headFromTail.fromIndex} 镜的真实末帧当首帧 —— 接缝照样是连的`
-          : `${provider.name} 不收末帧图，而本镜也没接住上一段的末帧，第 ${next.index} 镜那儿会硬切。`
-            + '出路两条：把「设置 → 一致性引擎 → 接缝」保持在「接住真实末帧」（对所有厂商都管用），'
-            + '或者换一家收末帧的（可灵、Vidu、方舟）。'
+          : `${provider.name} 不收末帧图，而本镜也没接住上一段的末帧（上一段还没出片，或者跨了场次），第 ${next.index} 镜那儿会硬切。`
+            + '要无缝的话：把上一镜一起选上重出，或者换一家收末帧的（可灵、Vidu、方舟、秘塔）。'
       });
     } else {
       try {
@@ -2704,9 +2732,17 @@ function seamPlanOf(allShots, targets, seamMode) {
     else orphans.push(`${prev.index}→${shot.index}`);
   }
 
+  /**
+   * ⚠ 这句话是在**还不知道厂商是谁**的时候说的 —— 分级路由可能给每一镜
+   * 挑不同的厂商，而收不收末帧是按厂商定的。
+   *
+   * 所以 lock 这条不能只说"会锁成末帧"：碰上不收末帧的那几家，
+   * 实际走的是退回接住真实末帧。只说前半句，又会变成一句
+   * 兑现不了的许诺 —— 那正是当初那条自相矛盾日志的样子。
+   */
   const how =
     seamMode === 'lock'
-      ? '把下一镜那张图锁成上一段的末帧（要厂商收末帧图）'
+      ? '把下一镜那张图锁成上一段的末帧（碰上不收末帧的厂商会自动退回「接住上一段的真实末帧」）'
       : '接住上一段的真实末帧当首帧';
 
   if (!pairs.length && !orphans.length) {
