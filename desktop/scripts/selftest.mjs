@@ -4137,9 +4137,57 @@ section('默认走首尾帧：碰上不收末帧的厂商要能退回去');
    * 所以必须兜一层：选了 lock 而这家不收末帧，退回接住真实末帧。
    * **这一层就是这个默认值敢改的全部理由**，它一旦没了，默认值就该改回去。
    */
-  check('默认是首尾帧', st.DEFAULTS ? st.DEFAULTS.seamMode === 'lock' : true);
+  /**
+   * ⚠ 这两条原来写得太软：一条是 `st.DEFAULTS ? … : true`（DEFAULTS 没导出就自动过），
+   * 一条是 `(st.get('seamMode') || 'lock') === 'lock'`（在断言里补了一次兜底，
+   * 于是取出 undefined 也照样绿）。软断言比没有断言更糟 —— 它让人以为量过了。
+   */
+  check('默认是首尾帧', st.DEFAULTS.seamMode === 'lock', String(st.DEFAULTS.seamMode));
   st.patch({ seamMode: undefined });
-  check('没设过的时候取到的也是首尾帧', (st.get('seamMode') || 'lock') === 'lock', String(st.get('seamMode')));
+  check('没设过的时候取到的也是首尾帧', st.get('seamMode') === 'lock', String(st.get('seamMode')));
+
+  /**
+   * 上面那条**第一次收紧的时候是红的** —— 而它红出来的不是接缝的问题，
+   * 是 patch 的：`{...all(), seamMode: undefined}` 会把已经合好的默认值
+   * 盖成 undefined，而 all() 认缓存、不会再合一次 DEFAULTS。
+   * 于是"默认开启"这件事只剩下调用处一路 `|| 'lock'` 在兜，
+   * 漏兜的那一处就会安静地走到反面。
+   *
+   * 这一条守的是那个洞本身，不只守接缝：任何一项都不该被一个
+   * "这次没提供"打穿。
+   */
+  st.patch({ autoCut: undefined, sfxGain: undefined });
+  check('patch 收到 undefined 时不打穿默认值',
+    st.get('autoCut') === true && st.get('sfxGain') === 0.35,
+    `autoCut=${st.get('autoCut')} sfxGain=${st.get('sfxGain')}`);
+  // 真的传了值当然还是要改 —— 否则上一条可以靠"什么都不写"作弊通过
+  st.patch({ autoCut: false });
+  check('真给了值照样改得动', st.get('autoCut') === false, String(st.get('autoCut')));
+  st.patch({ autoCut: true });
+
+  /**
+   * ══ 三端的首尾帧：一个引擎，三张脸 ══
+   *
+   * 用户问的是"三端的首尾帧是否确实有效，都要默认开启"。这里要说清楚
+   * 它为什么是**一个**问题而不是三个：接缝是引擎那一侧的事，电脑版、手机版、
+   * 安卓壳打的是同一套 HTTP 接口，走的是同一个 videoContextFor。
+   *
+   * 所以三端一致的**结构性保证**是这个：出视频的入口只有两个，
+   * 而这两个入口在能力清单里对三端是同一条。哪天有人给某一端另开一条
+   * 出视频的路，这条会红 —— 那正是三端会漂开的唯一方式。
+   */
+  const { CAPABILITIES } = await import('../core/surfaces.js');
+  const videoEntries = CAPABILITIES.filter((c) => ['run-stage', 'run-from', 'shot-regen'].includes(c.id));
+  check('出视频的入口三端共用（电脑、手机、安卓壳都有）',
+    videoEntries.length === 3 && videoEntries.every((c) => c.pc && c.mobile),
+    JSON.stringify(videoEntries.map((c) => [c.id, Boolean(c.pc), Boolean(c.mobile)])));
+  /**
+   * 反过来，接缝开关**只在电脑上**，手机端故意没有。
+   * 这不是漏做：它是"坐下来配一次"的东西，而且手机上没有它反而更稳 ——
+   * 三端读的是同一个默认值，不会出现"手机上被关掉了而电脑上不知道"。
+   */
+  check('接缝开关不在手机端（三端共用引擎那一个默认值）',
+    !CAPABILITIES.some((c) => c.mobile && /接缝|seam/i.test(`${c.name}${c.api}`)));
 
   // 兜底那一层的判据：这家收不收末帧
   const takes = (id) => Boolean(cat.PROVIDERS.find((p) => p.id === id)?.videoDefaults?.endFrame);
@@ -5455,6 +5503,63 @@ check('时长 5 秒原样发出（这家档位是 5 而不是官方的 6）',
   upstream.msBody?.duration === 5, `${upstream.msBody?.duration}`);
 check('官方查询路径 404 后自动试出正确路径', /out\.mp4$/.test(msVideo.url), msVideo.url);
 check('探出来的路径被缓存，第二次不再重复试', upstream.msQueryHits >= 2);
+
+/**
+ * ══ 末帧只能发一遍 ══
+ *
+ * 用户那批片子的日志：每一镜都先说"把下一镜那张图锁成本镜末帧 —— 两镜之间
+ * 会是无缝的"，紧接着就是"服务端拒了这 4 张图（合计 6.6MB，是内联发的）"，
+ * 然后一路减参考图。
+ *
+ * 查下来，末帧被发了**两遍**：一遍在普通图列表里（allImages 是按
+ * [首帧, 末帧, 参考图…] 拼的），一遍走 H3 的 last_frame_image 字段。
+ * 两个后果：
+ *   · 内联时白白多出一两 MB —— 而这条路正是被体积顶掉的那条，
+ *     多出来的那份不但没用，还在把请求往上限外推，然后我们照着减参考图
+ *   · 普通列表里那一份**没有 role**，模型只会当它是本镜的参考图 ——
+ *     等于把下一镜的画面掺进这一镜。日志写着"锁成末帧"，
+ *     实际做的是"顺便把下一镜也画进来"
+ *
+ * 这两条都不会报错，成片照样出得来 —— 只是接缝那儿的画面不是你要的那个。
+ */
+{
+  upstream.msPolls = 0;
+  await adapters.generateVideo({
+    providerId: 'metaso',
+    model: 'MiniMax-H3',
+    prompt: 'x',
+    duration: 5,
+    firstFrameUrl: 'https://x.invalid/head.png',
+    lastFrameUrl: 'https://x.invalid/tail.png',
+    refImages: ['https://x.invalid/ref1.png']
+  });
+  const seam = upstream.msBody || {};
+  const urls = (seam.content || []).filter((c) => c.type === 'image_url').map((c) => c.image_url?.url || '');
+  check('末帧走的是专门的字段（不是混在参考图里）',
+    seam.last_frame_image === 'https://x.invalid/tail.png', JSON.stringify(seam.last_frame_image));
+  check('末帧不再在普通图列表里重复发一遍',
+    urls.filter((u) => /tail\.png/.test(u)).length === 0, JSON.stringify(urls));
+  check('首帧和参考图都还在（去重不能连它们一起去掉）',
+    urls.length === 2 && urls.some((u) => /head\.png/.test(u)) && urls.some((u) => /ref1\.png/.test(u)),
+    JSON.stringify(urls));
+}
+
+/**
+ * 末帧不在 images 里了，可它的字节数照样要发出去 ——
+ * 体积预算必须先给它留出位置。不留的话这里以为还剩两三 MB、实际早就超了，
+ * 失败发生在厂商那一侧，而我们给出的解释会是"图带多了"（错的）。
+ */
+{
+  const chunk = `data:image/png;base64,${'A'.repeat(3 * 1024 * 1024)}`;
+  const withEnd = [];
+  const keptWithEnd = adapters.__trimInlineImages([chunk, chunk, chunk], (e) => withEnd.push(e.message), chunk);
+  const keptAlone = adapters.__trimInlineImages([chunk, chunk, chunk], () => {}, null);
+  check('末帧占的体积算进了预算', keptWithEnd.length === 1, `留了 ${keptWithEnd.length} 张`);
+  check('不带末帧时预算照旧（这条证明上面那条量的是末帧，不是别的）',
+    keptAlone.length === 2, `留了 ${keptAlone.length} 张`);
+  check('并且说清楚末帧照发（它是这两镜能不能接上的唯一保证）',
+    /末帧照发/.test(withEnd.join(' | ')), withEnd.join(' | ').slice(0, 200));
+}
 
 // ── 图片张数：中转平台各有各的上限，而且不写在文档里 ──
 // 猜高了整步一直失败，猜低了白白丢掉一致性 —— 所以按"试出来"处理。

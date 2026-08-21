@@ -113,16 +113,10 @@ const DEFAULTS = {
    * ⚠ 无论哪一种，**都只在标着「连续动作」的两镜之间发生**。
    * link 不会被自动推断出 continuous（deriveLink 只给 new-scene / cut），
    * 所以一个都没标的项目上，接缝一处也不会做 —— 这是最常见的"没生效"。
-   */
-  /**
-   * 接缝默认走**首尾帧**：本镜的图当首帧、下一镜的图当末帧。
    *
-   * 两头都钉在你审过的图上，这一镜再怎么演也跑不出去。而「接住真实末帧」
-   * 只钉住起点，结尾是模型自己发挥的、又成为下一镜的起点 —— 链越长漂得越远。
-   *
-   * 敢把它设成默认，是因为 videoContextFor 里兜了一层：碰上不收末帧的厂商
-   * 会自动退回接住真实末帧，并说清楚退了。否则这个默认值在那几家上
-   * 会一处接缝都不做 —— 比原来的默认还差。
+   * 默认之所以敢是 lock：videoContextFor 里兜了一层 —— 碰上不收末帧的厂商
+   * 会自动退回接住真实末帧，并说清楚退了。没有那一层的话，这个默认值
+   * 在那几家上会**一处接缝都不做**，比原来的默认还差。
    */
   seamMode: 'lock',
   /**
@@ -252,10 +246,24 @@ export function get(key) {
 }
 
 export function patch(changes = {}) {
-  const next = { ...all(), ...changes };
-  if (changes.baseUrls) next.baseUrls = { ...all().baseUrls, ...changes.baseUrls };
-  if (changes.endpointOverrides) {
-    next.endpointOverrides = { ...all().endpointOverrides, ...changes.endpointOverrides };
+  /**
+   * `undefined` 意思是"这次没提供这一项"，不是"把它清成空"。
+   *
+   * 不剔掉的话，展开时它会**盖掉已经合好的默认值**：`{...all(), seamMode: undefined}`
+   * 得到的 seamMode 是 undefined，而 all() 认缓存、不会再合一次 DEFAULTS ——
+   * 于是这一项从此没有值。接缝那个开关就是这么丢的：默认写着 lock，
+   * 取出来却是 undefined，靠调用处一路 `|| 'lock'` 兜着，
+   * 而漏兜的那一处（比如某个只写 `settings.get('seamMode') === 'lock'` 的判断）
+   * 会安静地走到反面。
+   *
+   * JSON 序列化本来就会丢掉 undefined 的键，所以这里剔掉它也不改变落盘的结果 ——
+   * 变的只是**内存里那份不再被打穿**。
+   */
+  const given = Object.fromEntries(Object.entries(changes).filter(([, v]) => v !== undefined));
+  const next = { ...all(), ...given };
+  if (given.baseUrls) next.baseUrls = { ...all().baseUrls, ...given.baseUrls };
+  if (given.endpointOverrides) {
+    next.endpointOverrides = { ...all().endpointOverrides, ...given.endpointOverrides };
     // 填了空字符串等于"清掉这条覆盖，回到自动探测"
     for (const [k, v] of Object.entries(next.endpointOverrides)) if (!v) delete next.endpointOverrides[k];
   }

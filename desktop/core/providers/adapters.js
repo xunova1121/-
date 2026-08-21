@@ -549,7 +549,29 @@ export async function generateVideo({
   // 参考图只是让人别变样，后者可以靠首帧和提示词兜。
   const allImages = [firstFrameUrl, ...(endFrame ? [endFrame] : []), ...refImages].filter(Boolean);
   const capacity = endFrame ? Math.max(maxImages, provider.videoDefaults?.maxImagesWithEndFrame ?? maxImages) : maxImages;
-  const images = allImages.slice(0, capacity);
+  const picked = allImages.slice(0, capacity);
+  /**
+   * 末帧**不进普通图列表**。
+   *
+   * 收末帧的那几家都有专门的位置放它（海螺 / H3 的 last_frame_image、
+   * 可灵的 image_tail、方舟的 role=last_frame、Vidu 的 start-end2video），
+   * 下面每条分支也都是单独取 `endFrame` 用的。再把它留在 images 里，
+   * 后果有两个，都不是小事：
+   *
+   *   · **同一张图发两遍**。走内联（没配对象存储）时白白多出一两 MB，
+   *     而这条路恰恰就是被体积顶掉的那条 —— 用户那批片子的原话是
+   *     "服务端拒了这 4 张图（合计 6.6MB，是内联发的）"。多出来的那份
+   *     不但没用，还在把请求往上限外面推，然后我们照着减**参考图**。
+   *   · H3 那条更糟：多出来的那一张**没有 role**，模型只会把它当成
+   *     本镜的一张参考图 —— 等于把下一镜的画面掺进这一镜。
+   *     日志上写着"锁成末帧"，实际做的是"顺便把下一镜也画进来"。
+   *
+   * 位置是固定的：allImages 就是按 [首帧, 末帧, 参考图…] 拼的。
+   */
+  const endSlot = endFrame ? (firstFrameUrl ? 1 : 0) : -1;
+  const images = endSlot >= 0 && endSlot < picked.length
+    ? picked.filter((_, i) => i !== endSlot)
+    : picked;
   /**
    * 上限是 0 —— 这是个**文生视频模型**，一张图都不收。
    *
@@ -564,11 +586,11 @@ export async function generateVideo({
         `${model} 是文生视频模型，一张图都不收 —— 本镜的首帧图和 ${allImages.length - 1} 张参考图全都用不上，` +
         '画面只由提示词决定，和分镜里那张图不会是同一个。要接上首帧的话换一个图生视频模型（i2v）。'
     });
-  } else if (allImages.length > images.length) {
+  } else if (allImages.length > picked.length) {
     onEvent?.({
       type: 'note',
       message: `${provider.name}·${model} 这一步最多收 ${capacity} 张图，已带上首帧${endFrame ? '和末帧' : ''}，另外 ${
-        allImages.length - images.length
+        allImages.length - picked.length
       } 张设定集参考图这次不发（${provider.videoDefaults?.refNote || '一致性由首帧图和提示词里的冻结设定承担'}）`
     });
   }
@@ -1190,33 +1212,49 @@ async function probeMediaUrl(url) {
  */
 const INLINE_BUDGET = 8 * 1024 * 1024;
 
-function trimInlineImages(images, onEvent) {
-  const inline = images.filter((u) => String(u || '').startsWith('data:'));
-  if (!inline.length) return images;
+/**
+ * @param reserved 不在 images 里、但**照样占请求体**的那张图（末帧）。
+ *                 末帧走各家的专门字段，不进普通图列表 —— 可它的字节数
+ *                 是实打实要发出去的。不把它算进预算的话，这里以为还剩
+ *                 两三 MB，实际早就超了，然后失败在厂商那一侧，
+ *                 而我们给出的解释会是"图带多了"（错的）。
+ */
+function trimInlineImages(images, onEvent, reserved = null) {
+  const bytesOf = (u) => (String(u || '').startsWith('data:') ? String(u).length : 0);
+  const reservedBytes = bytesOf(reserved);
+  const inline = images.filter((u) => bytesOf(u) > 0);
+  if (!inline.length && !reservedBytes) return images;
 
   const kept = [];
-  let used = 0;
+  // 末帧先占上位置：它是这两镜能不能接上的唯一保证，宁可少发参考图
+  let used = reservedBytes;
   for (const img of images) {
-    const size = String(img || '').startsWith('data:') ? img.length : 0;
+    const size = bytesOf(img);
     if (size && used + size > INLINE_BUDGET && kept.length) break;
     kept.push(img);
     used += size;
   }
   if (kept.length < images.length) {
+    const total = images.reduce((n, u) => n + bytesOf(u), 0) + reservedBytes;
     onEvent?.({
       type: 'note',
       message:
-        `参考图是内联发的（没配对象存储），${images.length} 张加起来 ` +
-        `${(images.reduce((n, u) => n + (String(u).startsWith('data:') ? u.length : 0), 0) / 1048576).toFixed(1)}MB ` +
-        `太大，这次只发前 ${kept.length} 张。` +
+        `参考图是内联发的（没配对象存储），${images.length} 张` +
+        (reservedBytes ? '加上末帧' : '') +
+        `加起来 ${(total / 1048576).toFixed(1)}MB 太大，这次只发前 ${kept.length} 张` +
+        (reservedBytes ? '（末帧照发 —— 它是这两镜能不能接上的唯一保证）' : '') + '。' +
         `配上「设置 → 对象存储」之后图会以地址形式发出去，就能把 ${images.length} 张全带上`
     });
   }
   return kept;
 }
 
-async function submitWithMediaBackoff({ providerId, provider, model, url, images: rawImages, buildBody, checkBiz, label, onEvent }) {
-  let images = trimInlineImages(rawImages, onEvent);
+async function submitWithMediaBackoff({
+  providerId, provider, model, url, images: rawImages, buildBody, checkBiz, label, onEvent,
+  // 走专门字段发出去的末帧。不在 images 里，但请求体里有它
+  reservedInline = null
+}) {
+  let images = trimInlineImages(rawImages, onEvent, reservedInline);
 
   // 这家上一镜就拉不到我们的桶，别再撞一次墙了，直接走内联（拉不动或太大就照旧发地址）。
   const reachKey = `${providerId}::${baseUrlOf(provider)}::urls`;
@@ -1641,7 +1679,9 @@ async function generateVideoMiniMax({
     buildBody,
     checkBiz,
     label,
-    onEvent
+    onEvent,
+    // 末帧不在 images 里（走 last_frame_image / role=last_frame），但它照样占体积
+    reservedInline: lastFrameUrl
   });
 
   let created;

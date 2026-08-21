@@ -323,6 +323,28 @@ check('不是只印一个分数，条目摊开了',
   /会被看出来|质量风险|四类检查都过了/.test(q), q.slice(0, 300));
 check('并且说清楚后果（拖进剪映才发现缺一段）', /剪映/.test(filmText) && /缺一段/.test(filmText));
 
+/**
+ * 首尾帧要**默认就是开着的**，而且在设置界面上看起来也得是开着的。
+ *
+ * 引擎那边的默认值早就是 lock 了，但这个下拉框里还留着一句
+ * `settings.seamMode || 'tail'` —— 真有人把设置清干净的时候，
+ * 界面会显示「接住真实末帧」而引擎跑的是首尾帧。
+ * 一个显示错的开关比没有开关更糟：人照着它做判断，然后判断全是错的。
+ *
+ * 所以这一条在**真浏览器里读那个 select 的值**，不读源码。
+ */
+await page.locator('.nav-item:has-text("设置")').first().click();
+await page.waitForTimeout(900);
+const seamSel = page.locator('select').filter({ has: page.locator('option[value="lock"]') }).first();
+check('设置里有接缝这一项', (await seamSel.count()) === 1);
+if ((await seamSel.count()) === 1) {
+  check('电脑版上默认选中的就是首尾帧',
+    (await seamSel.inputValue()) === 'lock', await seamSel.inputValue());
+  const opt = await seamSel.locator('option[value="lock"]').innerText();
+  check('并且写清楚它是什么（本镜首帧 + 下一镜末帧）',
+    /首尾帧/.test(opt) && /下一镜/.test(opt), opt.slice(0, 80));
+}
+
 check('全程没有页面报错', errs.length === 0, errs.slice(0, 3).join(' | '));
 
 await b.close();
