@@ -1349,7 +1349,7 @@ export function createServer({ lan = false } = {}) {
        * 放行的是这两个确切的路径，不是"所有 .js"—— 后者会把电脑版
        * 整套界面代码一起放出去，那不是同一件事。
        */
-      const SHARED_MODULES = ['/previz-canvas.js', '/previz.js'];
+      const SHARED_MODULES = ['/previz-canvas.js', '/previz.js', '/duration.js'];
       const isShell =
         url.pathname === '/m'
         || url.pathname.startsWith('/m/')
@@ -1417,6 +1417,20 @@ export function createServer({ lan = false } = {}) {
       if (url.pathname === '/previz.js') {
         return fs.readFile(path.join(HERE, 'pipeline', 'previz.js'), (err, data) => {
           if (err) return json(res, 404, { error: '找不到 previz.js' });
+          res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
+          res.end(data);
+        });
+      }
+      /**
+       * 同一个道理，台词时长的估法也发原件。
+       *
+       * 手机端要在人边打字边说"这句约 2.1 秒，本镜 3.2 秒，说得完"。
+       * 在界面里另写一个估法的话，两份系数迟早会漂 —— 然后界面说念得完、
+       * 合成那步说念不完，而两句话都是我们自己说的。
+       */
+      if (url.pathname === '/duration.js') {
+        return fs.readFile(path.join(HERE, 'duration.js'), (err, data) => {
+          if (err) return json(res, 404, { error: '找不到 duration.js' });
           res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
           res.end(data);
         });

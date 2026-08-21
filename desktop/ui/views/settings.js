@@ -485,9 +485,9 @@ export default {
        * 现在把两条各自的**代价**写在名字里，让人照着自己的厂商选，
        * 而不是照着一个过时的"推荐"选。
        */
-      h('option', { value: 'tail', selected: (settings.seamMode || 'tail') === 'tail' },
+      h('option', { value: 'tail', selected: settings.seamMode === 'tail' },
         '接住真实末帧 —— 上一段的最后一帧当首帧。所有厂商都支持，但误差会沿着链累积'),
-      h('option', { value: 'lock', selected: settings.seamMode === 'lock' },
+      h('option', { value: 'lock', selected: (settings.seamMode || 'lock') === 'lock' },
         '首尾帧 —— 本镜的图当首帧、下一镜的图当末帧。两头都是你审过的图，要厂商收末帧'),
       h('option', { value: 'off', selected: settings.seamMode === 'off' },
         '关掉 —— 只靠提示词衔接'));

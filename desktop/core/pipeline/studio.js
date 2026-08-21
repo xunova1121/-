@@ -3122,16 +3122,38 @@ function seamPlanOf(allShots, targets, seamMode) {
       ? '把下一镜那张图锁成上一段的末帧（碰上不收末帧的厂商会自动退回「接住上一段的真实末帧」）'
       : '接住上一段的真实末帧当首帧';
 
+  /**
+   * 首尾帧模式必须**先说清楚它长什么样**，否则它会被当成没生效。
+   *
+   * 用户的原话是"在生成视频的时候，完全不是按照首尾来的""还是只用各自首帧生成"。
+   * 那个观察是对的 —— 首尾帧模式下每一段确实是从**自己那张图**开始的，
+   * 接缝是靠逼上一段"结束在下一镜那张图上"做出来的，做在**上一镜**身上。
+   * 会去看"本段首帧是不是上段尾帧"的那个预期，对应的是另一个模式（接住真实末帧）。
+   *
+   * 这句话不说，功能做得再对也会被判成坏的 —— 而且判得有理有据。
+   */
+  const shape =
+    seamMode === 'lock'
+      ? '⚠ 首尾帧模式下，每一段仍然是从**它自己那张图**开始的 —— 接缝做在**上一镜**身上'
+        + '（逼上一段结束在下一镜那张图上）。想要"本段第一帧就是上一段最后一帧"，'
+        + '那是另一个模式：设置 → 一致性引擎 → 接缝 → 接住真实末帧。'
+      : '';
+
   if (!pairs.length && !orphans.length) {
     return (
       `接缝：这 ${targets.length} 镜里没有一处标着「连续动作」，所以接缝全是硬切 —— ` +
       '这是默认，而且大部分镜位切换本来就该硬切（全都接上的话，整部片子会变成一个没剪过的长镜头）。' +
-      '想让某两镜的画面真的接上，去分镜里把后面那一镜的「接」改成「连续动作」，再重出这一镜。'
+      '⚠「连续动作」**不会被自动判出来**，不标就一处接缝都不做，首尾帧也好接住末帧也好都不会发生。' +
+      '要标：分镜页 →「整段标衔接」，手动圈一段，或者按「自动标」让模型通读全片挑出连贯动作；' +
+      '标完再重出这几镜。'
     );
   }
 
   const lines = [];
-  if (pairs.length) lines.push(`接缝：${pairs.length} 处标着「连续动作」会${how} —— 第 ${pairs.join('、')} 镜；其余是硬切（默认）`);
+  if (pairs.length) {
+    lines.push(`接缝：${pairs.length} 处标着「连续动作」会${how} —— 第 ${pairs.join('、')} 镜；其余是硬切（默认）`);
+    if (shape) lines.push(shape);
+  }
   if (orphans.length) {
     lines.push(
       `第 ${orphans.join('、')} 镜标着「连续动作」，但上一段这次不出、之前也没出过片 —— ` +
@@ -3153,7 +3175,7 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
   if (!targets.length) throw new Error('没有可出视频的分镜（需要先有镜头图）');
 
   onEvent?.({ type: 'stage', stage: 'video', status: 'running', message: `待出视频 ${targets.length} 段` });
-  onEvent?.({ type: 'note', message: seamPlanOf(project.shots || [], targets, settings.get('seamMode') || 'tail') });
+  onEvent?.({ type: 'note', message: seamPlanOf(project.shots || [], targets, settings.get('seamMode') || 'lock') });
 
   for (const shot of targets) {
     jobs.checkpoint(signal, `第 ${shot.index} 镜起往后的 ${targets.length - targets.indexOf(shot)} 镜`);

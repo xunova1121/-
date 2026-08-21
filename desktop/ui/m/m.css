@@ -120,7 +120,7 @@ input {
 }
 .step:last-child { border-bottom: 0; }
 .step-num { font-size: 11px; color: var(--ink-faint); font-variant-numeric: tabular-nums; width: 18px; }
-.step-name { flex: 1; }
+.step-name { flex: 1; display: block; }
 .step-count { font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
 .step-mark { width: 18px; text-align: center; }
 .step.done .step-mark { color: var(--good); }
@@ -228,7 +228,7 @@ input {
 
 /* 输入类一律 16px 起。iOS 上小于 16px 的输入框会在聚焦时把整页放大，
    放大之后布局全乱，而且退不回去 —— 这不是审美问题，是能不能用的问题 */
-.mta, .msel, .editbox input {
+.mta, .msel {
   width: 100%;
   padding: 11px 12px;
   border-radius: 10px;
@@ -241,8 +241,6 @@ input {
 }
 .mta { resize: vertical; min-height: 64px; }
 .msel { min-height: 46px; }
-
-.editbox { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
 
 /* 景别、运镜这些是从固定几项里选，用胶囊比下拉快得多 —— 一眼看全，一下点中 */
 .chips { display: flex; flex-wrap: wrap; gap: 7px; }
@@ -439,3 +437,214 @@ input {
   padding: 16px;
 }
 .sheet-box input { width: 100%; }
+
+/* ══════════════════════ 拇指版排布 ══════════════════════
+   前一版的毛病不在配色也不在字号，在**落点**：
+     ① 一张分镜卡底下五个等宽灰按钮，一屏塞不下，也分不出主次；
+     ② 「改这一镜」就地展开十二个字段，把卡撑到要滚很久，
+        滚着滚着人就不知道自己在改哪一镜了；
+     ③ 一致性、比例、首帧、音效四种毛病挤成一排同色小标签，
+        要一镜一镜翻才看得见。
+   所以这一段只动层级和落点，token 一个没换 —— 换色板是另一件事，
+   混在一起改的话，出了问题分不清是哪一改带来的。 */
+
+/* ── 筛选条：审片时第一句话永远是"哪几镜不对" ── */
+.filterbar {
+  position: sticky;
+  top: calc(env(safe-area-inset-top) + 60px);
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 -14px 4px;
+  padding: 9px 14px;
+  background: color-mix(in srgb, var(--ground) 92%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line-soft);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.fchip {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 13px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 13px;
+}
+.fchip.on { border-color: var(--beam); background: rgba(232, 180, 95, .14); color: var(--ink); }
+.fchip.bad { color: var(--alarm); border-color: color-mix(in srgb, var(--alarm) 45%, var(--line)); }
+.fchip.bad.on { background: rgba(217, 97, 76, .14); }
+.fchip.warnish { color: var(--caution); border-color: color-mix(in srgb, var(--caution) 45%, var(--line)); }
+.fchip.icon { width: 32px; padding: 0; text-align: center; margin-left: auto; }
+
+/* ── 分镜卡 ── */
+.shot.bad { border-color: color-mix(in srgb, var(--alarm) 50%, var(--line)); }
+.shot.iffy { border-color: color-mix(in srgb, var(--caution) 45%, var(--line)); }
+
+/* 镜号和时长压到画面上：省一行，而且看图时它们就在眼睛已经在的地方 */
+.mediawrap { position: relative; }
+.overlay {
+  position: absolute;
+  display: flex;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, .55);
+  color: var(--ink);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.overlay.tl { left: 10px; top: 10px; }
+.overlay.bl { left: 10px; bottom: 10px; }
+.overlay .dim { color: var(--ink-dim); }
+.overlay.link { color: var(--good); background: rgba(111, 191, 138, .2); }
+
+/* 问题条：贴在按钮正上方，写清楚"哪儿不对"和"该按哪个键"。
+   写在标签堆里没人看得见 —— 而这句话的全部价值就是被看见 */
+.prob {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 8px 13px;
+  border-top: 1px solid var(--line-soft);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.prob.blocker { background: rgba(217, 97, 76, .13); color: var(--alarm); }
+.prob.warn { background: rgba(217, 164, 65, .11); color: var(--caution); }
+.prob .grow { min-width: 0; }
+.prob .more { flex: 0 0 auto; opacity: .75; font-size: 11.5px; }
+
+/* 三个目标，不是五个 */
+.acts { display: flex; gap: 8px; margin-top: 12px; }
+.acts .btn { min-height: 44px; }
+.acts .btn.wide { flex: 1; }
+.acts .btn.fixed { flex: 0 0 96px; padding: 0 8px; }
+.iconbtn {
+  flex: 0 0 44px;
+  width: 44px;
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 17px;
+  line-height: 1;
+}
+
+/* ── 动作面板：卡片上放不下的都收到这儿，每条都是整行大目标 ── */
+.acts-sheet .row-act {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 0;
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+}
+.acts-sheet .row-act:disabled { opacity: .4; }
+.acts-sheet .row-act .ic { flex: 0 0 26px; text-align: center; font-size: 16px; color: var(--ink-dim); }
+.acts-sheet .row-act .ic.hot { color: var(--beam); }
+.acts-sheet .row-act .sub { color: var(--ink-faint); font-size: 11.5px; line-height: 1.4; }
+.acts-sheet .grab { width: 38px; height: 4px; border-radius: 2px; background: var(--line); margin: -6px auto 12px; }
+
+/* ── 单镜编辑：整屏，不是卡片里展开的手风琴 ──
+   撑开卡片那种做法在手机上有一个致命处：滚到第七个字段时，
+   屏幕上已经没有任何东西写着"你在改第几镜"了。 */
+.ed {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  background: var(--ground);
+}
+.ed-top {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: calc(env(safe-area-inset-top) + 9px) 14px 9px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.ed-top .side { flex: 0 0 64px; }
+.ed-top .mid { flex: 1; text-align: center; min-width: 0; }
+.ed-top .mid b { font-size: 15px; display: block; line-height: 1.2; }
+.ed-top .mid span { color: var(--ink-faint); font-size: 11px; }
+.ed-top .btn { min-height: 40px; }
+.ed-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  padding: 8px 14px 10px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.ed-tab {
+  flex: 1;
+  min-height: 40px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 13.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+.ed-tab.on { background: var(--beam); border-color: var(--beam); color: #241b0c; font-weight: 600; }
+.ed-tab .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--good); }
+.ed-tab.on .dot { background: #241b0c; }
+.ed-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 12px 14px 24px; }
+.ed-foot {
+  flex: 0 0 auto;
+  padding: 10px 14px calc(env(safe-area-inset-bottom) + 14px);
+  border-top: 1px solid var(--line-soft);
+  background: var(--ground);
+}
+.ed-note { color: var(--ink-faint); font-size: 11.5px; text-align: center; margin-top: 7px; }
+/* 编辑面板里的分组：一屏只答一类问题 */
+.ed-group {
+  background: var(--surface-1);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r);
+  padding: 13px;
+  margin-bottom: 11px;
+}
+.ed-group > h4 { margin: 0 0 8px; font-size: 13.5px; font-weight: 600; }
+.ed-group > h4 span { color: var(--ink-faint); font-size: 11.5px; font-weight: 400; margin-left: 7px; }
+.ed-group .mfield:last-child { margin-bottom: 0; }
+/* 台词念不念得完，在改的时候就说，不是等生成完才发现 */
+.fit { display: flex; align-items: center; gap: 8px; margin-top: 11px; padding: 9px 11px; border-radius: 10px; font-size: 12px; line-height: 1.45; }
+.fit.ok { background: rgba(111, 191, 138, .12); color: var(--good); }
+.fit.over { background: rgba(217, 97, 76, .13); color: var(--alarm); }
+
+/* ── 流水线：数字进度直接画成条 ── */
+.pbar { height: 4px; border-radius: 2px; background: var(--surface-2); margin-top: 6px; overflow: hidden; }
+.pbar > i { display: block; height: 4px; border-radius: 2px; background: var(--beam); }
+.step.done .pbar > i { background: var(--good); }
+.step.running { background: rgba(232, 180, 95, .07); }
+.step-body { flex: 1; min-width: 0; }
+
+/* 有镜头带着问题时，分镜那个页签上点一个红点 —— 不用点进去也知道 */
+.tab { position: relative; }
+.tab-flag {
+  position: absolute;
+  top: 9px;
+  margin-left: 24px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--alarm);
+}

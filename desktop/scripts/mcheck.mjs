@@ -161,14 +161,26 @@ console.log('   台词和说话人：', /阿澜：「设备正常。」/.test(aw
  * 最常当场想改的恰恰是台词和谁说的，一眼看得出不对，改起来也只是敲几个字。
  */
 await page.locator('button:has-text("改这一镜")').first().click();
-await page.waitForTimeout(300);
-const editBox = page.locator('.shot .editbox').first();
-await editBox.locator('textarea').nth(0).fill('阿澜停在栈桥尽头远眺');
-await editBox.locator('textarea').nth(1).fill('这里的缆绳被人动过。');
-await editBox.locator('select').selectOption('阿澜');
-await editBox.locator('.chip:has-text("全景")').click();
-await editBox.locator('button:has-text("保存")').first().click();
+await page.waitForTimeout(400);
+/**
+ * 编辑是**整屏一层**（.ed），不再是卡片里就地展开的手风琴。
+ * 手风琴那版的毛病：十二个字段一展开，滚到第七个时屏幕上已经没有
+ * 任何东西写着"你在改第几镜"了 —— 而这一页最常见的用法就是连着改好几镜。
+ */
+const ed = page.locator('.ed');
+console.log('   整屏面板打开了：', (await ed.count()) === 1 ? '✓' : '✕ 还是卡片里展开的');
+console.log('   顶上一直写着在改第几镜：',
+  /第 1 镜/.test(await ed.locator('.ed-top').innerText().catch(() => '')) ? '✓' : '✕');
+await ed.locator('.ed-body textarea').nth(0).fill('阿澜停在栈桥尽头远眺');
+await ed.locator('.ed-body textarea').nth(1).fill('这里的缆绳被人动过。');
+await ed.locator('.ed-body select').first().selectOption('阿澜');
+// 景别在「镜头」那一组 —— 分组本身就是这次要验的东西
+await ed.locator('.ed-tab:has-text("镜头")').click();
+await page.waitForTimeout(250);
+await ed.locator('.chip:has-text("全景")').click();
+await ed.locator('.ed-top button:has-text("保存")').click();
 await page.waitForTimeout(1200);
+console.log('   存完就退出去了：', (await page.locator('.ed').count()) === 0 ? '✓' : '✕ 还挡在上面');
 const saved = store.read(proj.id).shots.find((x) => x.id === 's1');
 console.log('⑤ 手机上改这一镜：');
 console.log('   描述：', saved.description === '阿澜停在栈桥尽头远眺' ? '存下了 ✓' : `✕ ${saved.description}`);
@@ -195,19 +207,50 @@ await page.waitForTimeout(600);
  * 从**卡片上那个按钮**点起，走用户真正会走的那条路。
  * 原来它只藏在「改这一镜」里面往下翻很远的地方 —— 用户的原话是"没找到"。
  */
-const entry = page.locator('button:has-text("预演台")').first();
+await page.locator('.shot .iconbtn').first().click();
+await page.waitForTimeout(400);
+const sheet = page.locator('.acts-sheet');
+console.log('⑤a 卡片上那个「⋯」打得开：', (await sheet.count()) === 1 ? '✓' : '✕ 打不开');
+const entry = sheet.locator('.row-act:has-text("预演台")');
 const hasEntry = (await entry.count()) > 0;
-console.log('⑤a 卡片上有预演台入口：', hasEntry ? '✓' : '✕ 找不到');
-let hasPvz = false;
+console.log('   面板里有预演台：', hasEntry ? '✓' : '✕ 找不到');
 if (hasEntry) {
   await entry.click();
-  await page.waitForTimeout(800);
-  const pvz = page.locator('.previz-details').first();
-  hasPvz = (await pvz.count()) > 0 && (await pvz.evaluate((n) => n.open)) === true;
+  await page.waitForTimeout(900);
 }
-console.log('   点一下就展开了：', hasPvz ? '✓' : '✕ 还要自己翻');
+// 从「⋯ → 预演台」进来，应该**直接落在预演台那一组**，不是落在内容组让人自己翻
+console.log('   直接落在预演台那一组：',
+  (await page.locator('.ed-tab.on:has-text("预演台")').count()) === 1 ? '✓' : '✕ 还要自己点');
 console.log('   画布：', (await page.locator('.previz-canvas').count()) > 0 ? '画出来了 ✓' : '✕');
 console.log('   读数：', /mm/.test(await page.locator('.previz-line-text').first().innerText().catch(() => '')) ? '有 ✓' : '✕');
+await page.locator('.ed-top button:has-text("取消")').click();
+await page.waitForTimeout(300);
+
+/**
+ * ⑤a2 筛选条。
+ *
+ * 十二镜里有三镜有毛病时，让人一镜一镜翻过去找，等于把机器该干的事推给人 ——
+ * 而手机上一屏只看得见一两镜，翻的代价还要再高一截。
+ * 这份数据里第 2 镜是故意没出视频的，所以「缺视频」那一档必须出现，
+ * 点下去必须真的只剩它。
+ */
+const chips = await page.locator('.filterbar .fchip').allInnerTexts();
+console.log('⑤a2 筛选条：', chips.join(' | '));
+const novideo = page.locator('.filterbar .fchip:has-text("缺视频")');
+if ((await novideo.count()) > 0) {
+  await novideo.click();
+  await page.waitForTimeout(500);
+  const left = await page.locator('.shot').count();
+  console.log('   点「缺视频」只剩那一镜：', left === 1 ? '✓' : `✕ 还剩 ${left} 张`);
+  console.log('   那一镜身上有问题条：',
+    (await page.locator('.shot .prob').count()) >= 1 ? '✓' : '✕ 卡上不说哪儿不对');
+  console.log('   主按钮就是该按的那个：',
+    /重出这段视频/.test(await page.locator('.shot .btn.primary').first().innerText().catch(() => '')) ? '✓' : '✕');
+  await page.locator('.filterbar .fchip:has-text("全部")').click();
+  await page.waitForTimeout(400);
+} else {
+  console.log('   ✕ 有一镜没视频，筛选条里却没有「缺视频」这一档');
+}
 
 // ⑤b 剧本和设定集：这两样以前只能"回电脑上改"，现在手机上就能改
 await page.locator('.tab', { hasText: '剧本' }).click();

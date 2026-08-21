@@ -42,6 +42,8 @@
  */
 import { previzPanel, blankStage } from '/previz-canvas.js';
 import { inheritStage } from '/previz.js';
+// 台词念不念得完，用引擎自己那份估法（同一个文件，不是抄一份）
+import { speechSeconds, SPEECH_HEADROOM } from '/duration.js';
 
 const canInstall = window.isSecureContext && 'serviceWorker' in navigator;
 if (canInstall) {
@@ -564,7 +566,15 @@ function paint() {
             tab = id;
             paint();
           }
-        }, h('span', { class: 'tab-dot' }, dot), label))
+        }, h('span', { class: 'tab-dot' }, dot), label,
+        /**
+         * 有镜头带着"导出去一定看得出来"的毛病时，页签上点一个红点。
+         * 不点进去也知道有事 —— 否则那几镜要等到审片翻到才被发现，
+         * 而人多半是跑完全流程、看一眼成片觉得还行就发了。
+         */
+        id === 'shots' && (project?.shots || []).some((s) => shotLevel(s) === 'bad')
+          ? h('span', { class: 'tab-flag' })
+          : null))
     )
   );
 }
@@ -616,12 +626,20 @@ function paintFlow() {
   STEPS.forEach((s, i) => {
     const st = stateOf(project, s.id);
     const { done, total } = progressOf(project, s.id);
+    /**
+     * "8/12" 这种数字在手机上要看两眼才知道跑了多少 —— 画成条一眼就有。
+     * 数字留着（有时候确实要知道是第几镜），但不再是唯一的表达。
+     */
+    const pct = total > 0 ? Math.round((done / total) * 100) : (st === 'done' ? 100 : 0);
+    const running = job.running && job.stage === s.id;
     box.append(
-      h('div', { class: `step ${st}` },
+      h('div', { class: `step ${st} ${running ? 'running' : ''}` },
         h('span', { class: 'step-num' }, String(i + 1).padStart(2, '0')),
-        h('span', { class: 'step-name' }, s.label),
-        total > 1 ? h('span', { class: 'step-count' }, `${done}/${total}`) : null,
-        h('span', { class: 'step-mark' }, st === 'done' ? '✓' : st === 'partial' ? '◗' : ''),
+        h('span', { class: 'step-body' },
+          h('span', { class: 'step-name' }, s.label,
+            total > 1 ? h('span', { class: 'step-count', style: 'margin-left:7px' }, `${done}/${total}`) : null),
+          h('span', { class: 'pbar' }, h('i', { style: `width:${pct}%` }))),
+        h('span', { class: 'step-mark' }, running ? '◐' : st === 'done' ? '✓' : st === 'partial' ? '◗' : ''),
         h('button', {
           class: 'btn sm',
           disabled: job.running,
@@ -945,6 +963,73 @@ async function createProject(title) {
 }
 
 /**
+ * 从底下推上来的一层。
+ *
+ * 手机上没有 Esc，也没有"点旁边关掉"的鼠标习惯 —— 所以每一层都要同时给
+ * ①点浮层外面关 ②面板里一个整行的取消。只给其中一个，总有人被困在里面。
+ *
+ * @param inner 面板内容（自己带 padding 的节点，比如一张 .card）
+ * @param opts.bare true = 内容自己就是面板，不再包一层 .sheet-box
+ */
+function openSheet(inner, { bare = false } = {}) {
+  const layer = h('div', { class: 'sheet' });
+  const close = () => layer.remove();
+  layer.append(bare ? inner : h('div', { class: 'sheet-box' }, inner));
+  layer.onclick = (e) => { if (e.target === layer) close(); };
+  document.body.append(layer);
+  return { layer, close };
+}
+
+/**
+ * 一镜的「⋯」。
+ *
+ * 卡片上放不下的动作全在这儿，每一条都是整行 56px 的目标 ——
+ * 比原来挤在一排的五个小按钮好点得多，而且每条底下能写一句
+ * "什么时候该用它"，那句话原来无处可写。
+ */
+function openShotActions(s) {
+  const box = h('div', { class: 'sheet-box acts-sheet' });
+  const { layer, close } = openSheet(box, { bare: true });
+
+  const row = (icon, label, sub, onclick, { hot = false, disabled = false, tail = '' } = {}) =>
+    h('button', { class: 'row-act', disabled, onclick: () => { close(); onclick(); } },
+      h('span', { class: `ic ${hot ? 'hot' : ''}` }, icon),
+      h('span', { class: 'grow' },
+        h('div', {}, label),
+        sub ? h('div', { class: 'sub' }, sub) : null),
+      tail ? h('span', { class: 'muted', style: 'font-size:12px' }, tail) : null);
+
+  box.append(
+    h('div', { class: 'grab' }),
+    h('div', { class: 'row' },
+      s.imagePath
+        ? h('img', { src: media(s.imagePath), style: 'width:54px;height:34px;flex:0 0 54px;object-fit:cover;border-radius:7px;background:#000' })
+        : null,
+      h('div', { class: 'grow' },
+        h('b', {}, `第 ${s.index} 镜`),
+        h('div', { class: 'muted', style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap' },
+          s.description || '（无描述）'))),
+    // cap:shot-regen
+    row('↻', '重出这张图', '改完描述先出图，看对了再出视频 —— 省一次视频钱',
+      () => regen(s, 'image'), { hot: true, disabled: job.running }),
+    row('▶', '重出这段视频', s.imagePath ? '按首尾帧重出，会重新去接上一镜的末帧' : '得先有图才能出视频',
+      () => regen(s, 'video'), { hot: true, disabled: job.running || !s.imagePath }),
+    row('✎', '改这一镜', '描述、台词、景别、时长…', () => openEditor(s)),
+    row('⌖', '预演台', s.stage?.cam ? '已排位，点进去调整' : '排机位、算景别、查越轴',
+      () => openEditor(s, 'stage')),
+    // cap:shot-versions
+    row('⏱', '历史版本', '留最近 5 版，换回去是可逆的', () => openVersions(s)),
+    // cap:image-zoom
+    s.imagePath
+      ? row('⤢', '看大图', '双指放大，查手指、查衣领花纹',
+          () => openViewer(media(s.imagePath), `第 ${s.index} 镜`))
+      : null,
+    h('button', { class: 'btn block', style: 'margin-top:14px', onclick: close }, '取消'));
+
+  return layer;
+}
+
+/**
  * 顶栏那个 ＋ 弹出来的一层。
  *
  * 用一层浮层而不是 prompt()：prompt 在部分安卓浏览器和加到主屏的
@@ -1089,11 +1174,111 @@ function linkRangeCard(shots) {
     status);
 }
 
+/**
+ * 这一镜有什么毛病，以及**该按哪个键**。
+ *
+ * 分档和字段名跟 core/pipeline/quality.js（成片体检）对齐。两处结论不一致
+ * 比没有结论更糟：卡片上说没事、体检页说不能发，人只会两个都不信。
+ *
+ *   blocker  导出去一定有人看得出来（缺产物、有台词没配音、标着无缝而实际没接上）
+ *   warn     质量风险，未必看得出来（一致性偏低、首帧没吃、比例不符）
+ *
+ * `fix` 是"按下去就能修"的那个动作；修不了的（比如配音要整步跑）留 null，
+ * 界面上就不给主按钮 —— 给一个按下去没用的按钮比不给更让人恼火。
+ */
+function shotIssues(s) {
+  const out = [];
+  if (!s.imagePath) {
+    out.push({ level: 'blocker', what: '还没出图', fix: 'image', how: '重出这张图' });
+  } else if (!s.videoPath) {
+    out.push({ level: 'blocker', what: '有图没视频 —— 合成时这一镜会被直接跳过', fix: 'video', how: '重出这段视频' });
+  }
+  if (s.link === 'continuous' && s.tailAlign?.verdict === 'missed') {
+    out.push({ level: 'blocker', what: '标着「连续动作」，接缝其实没锁上', fix: 'video', how: '重出这段视频' });
+  }
+  if (String(s.dialogue || '').trim() && !s.audioPath) {
+    out.push({ level: 'blocker', what: '有台词但没配音 —— 嘴在动，没有声音', fix: null, how: '去流水线跑「配音」' });
+  }
+  if (s.headMatch?.verdict === 'mismatch') {
+    out.push({ level: 'warn', what: '视频首帧和发过去的图对不上', fix: 'video', how: '重出这段视频' });
+  }
+  if (s.imageSize && s.imageSize.ok === false) {
+    out.push({ level: 'warn', what: `画面比例不符（${s.imageSize.width}×${s.imageSize.height}）`, fix: 'image', how: '重出这张图' });
+  }
+  const c = s.consistency;
+  if (c?.stale) {
+    out.push({ level: 'warn', what: '一致性分数是改文案之前打的，不作数了', fix: 'image', how: '重出这张图' });
+  } else if (c && c.score != null && c.pass === false) {
+    out.push({ level: 'warn', what: `一致性只有 ${c.score} 分 —— 这一镜里的人和设定图对不上`, fix: 'image', how: '重出这张图' });
+  }
+  if (s.sfxPath && s.sfxOf !== s.sound) {
+    out.push({ level: 'warn', what: '音效是按旧描述出的', fix: null, how: '去流水线重跑「音效」' });
+  }
+  return out;
+}
+
+/** 这一镜是红的、黄的、还是干净的 */
+function shotLevel(s) {
+  const p = shotIssues(s);
+  return p.some((i) => i.level === 'blocker') ? 'bad' : p.length ? 'iffy' : 'ok';
+}
+
+/** 分镜页当前只看哪一类。放模块级：切到别的页再回来，筛选还在 */
+let shotFilter = 'all';
+
+/**
+ * 分镜页。
+ *
+ * 这一页的真实用法是**审片**：从头翻到尾，找出哪几镜不对，当场改或当场重出。
+ * 所以最上面那条筛选不是装饰 —— 十二镜里有三镜有毛病，让人一镜一镜翻过去找，
+ * 等于把机器该干的事推给人；而手机上一屏只看得见一两镜，翻的代价还要再高一截。
+ */
 function paintShots() {
   const shots = (project?.shots || []).slice().sort((a, b) => a.index - b.index);
   if (!shots.length) return h('div', { class: 'card muted' }, '还没有分镜。先在流水线里跑到第 02 步。');
   const v = Date.parse(project.updatedAt || '') || 0;
   const portrait = /^9:16$|^3:4$/.test(project.aspectRatio || '');
+
+  const probs = new Map(shots.map((s) => [s.id, shotIssues(s)]));
+  const level = (s) => {
+    const p = probs.get(s.id);
+    return p.some((i) => i.level === 'blocker') ? 'bad' : p.length ? 'iffy' : 'ok';
+  };
+  const counts = { bad: 0, iffy: 0, novideo: 0 };
+  for (const s of shots) {
+    const l = level(s);
+    if (l !== 'ok') counts[l] += 1;
+    if (!s.videoPath) counts.novideo += 1;
+  }
+
+  const PICKS = [
+    ['all', `全部 ${shots.length}`, ''],
+    ['bad', `有问题 ${counts.bad}`, 'bad'],
+    ['iffy', `值得看 ${counts.iffy}`, 'warnish'],
+    ['novideo', `缺视频 ${counts.novideo}`, '']
+  ].filter(([id]) => id === 'all' || counts[id]);
+  if (!PICKS.some(([id]) => id === shotFilter)) shotFilter = 'all';
+
+  const keep = (s) => (shotFilter === 'all' ? true
+    : shotFilter === 'novideo' ? !s.videoPath
+      : level(s) === shotFilter);
+
+  const bar = h('div', { class: 'filterbar' },
+    ...PICKS.map(([id, label, tone]) => h('button', {
+      class: `fchip ${tone} ${shotFilter === id ? 'on' : ''}`,
+      onclick: () => {
+        shotFilter = id;
+        paint();
+      }
+    }, label)),
+    /**
+     * 整段标衔接原来是列表最上面那张大卡，占掉小半屏 —— 而它是**偶尔用一次**的东西：
+     * 一部片子标一遍就完了，剩下九十九次打开分镜页的人都在被它挡着。收进这儿。
+     */
+    h('button', {
+      class: 'fchip icon',
+      onclick: () => openSheet(linkRangeCard(shots))
+    }, '⋯'));
 
   /**
    * 场次分隔条。手机上一屏只看得见一两镜，边界更容易被漏掉 ——
@@ -1102,9 +1287,15 @@ function paintShots() {
    */
   const segs = project.segments || [];
   let lastSeg = null;
-  const out = [linkRangeCard(shots)];
+  const out = [bar];
 
-  for (const s of shots) {
+  const visible = shots.filter(keep);
+  if (!visible.length) {
+    out.push(h('div', { class: 'card muted', style: 'margin-top:12px' }, '这一类一个都没有 —— 挺好的。'));
+    return out;
+  }
+
+  for (const s of visible) {
     const seg = Number(s.segment || 1);
     if (seg !== lastSeg) {
       const meta = segs.find((x) => Number(x.index) === seg && (x.chapterId || null) === (s.chapterId || null));
@@ -1120,53 +1311,89 @@ function paintShots() {
       );
       lastSeg = seg;
     }
-    out.push(shotCardOf(s, v, portrait));
+    out.push(shotCardOf(s, v, portrait, probs.get(s.id)));
   }
   return out;
 }
 
-function shotCardOf(s, v, portrait) {
-  {
-    const c = s.consistency;
-    return h('div', { class: 'card shot' },
+/**
+ * 一张分镜卡。
+ *
+ * 前一版底下并排五个等宽灰按钮（重出图 / 重出视频 / 改这一镜 / 预演台 / 历史版本），
+ * 390px 宽根本排不下，而且**五个一样重的按钮等于没有主次** ——
+ * 每次都要读一遍才知道该按哪个。
+ *
+ * 现在按状态决定那唯一一个亮色主按钮：这一镜此刻最该做的那件事。
+ * 没毛病的镜，那件事就是「改这一镜」；有毛病的镜，就是修它的那个重出。
+ * 剩下的全部收进「⋯」，那里每一条都是整行大目标，比挤在一排的小按钮好点得多。
+ */
+function shotCardOf(s, v, portrait, probs = shotIssues(s)) {
+  const worst = probs.find((i) => i.level === 'blocker') || probs[0] || null;
+  const tone = probs.some((i) => i.level === 'blocker') ? 'bad' : probs.length ? 'iffy' : '';
+  const fixable = probs.find((i) => i.fix) || null;
+
+  const acts = h('div', { class: 'acts' });
+  if (fixable) {
+    acts.append(
+      h('button', {
+        class: 'btn primary wide',
+        disabled: job.running,
+        onclick: () => regen(s, fixable.fix)
+      }, fixable.how),
+      h('button', { class: 'btn fixed', onclick: () => openEditor(s) }, '改这一镜'));
+  } else {
+    acts.append(h('button', { class: 'btn wide', onclick: () => openEditor(s) }, '改这一镜'));
+  }
+  acts.append(h('button', { class: 'iconbtn', onclick: () => openShotActions(s) }, '⋯'));
+
+  return h('div', { class: `card shot ${tone}` },
+    // 镜号和时长压在画面上：省掉一整行，而且它们出现在眼睛已经在的地方
+    h('div', { class: 'mediawrap' },
       s.videoPath
         ? h('video', { class: `shot-media ${portrait ? 'portrait' : ''}`, src: media(s.videoPath, v), controls: true, preload: 'metadata', playsinline: true })
         : s.imagePath
           ? zoomable({ class: `shot-media ${portrait ? 'portrait' : ''}`, loading: 'lazy' }, media(s.imagePath, v), `第 ${s.index} 镜`)
           : h('div', { class: 'shot-media', style: 'display:flex;align-items:center;justify-content:center;color:var(--ink-faint);font-size:13px' }, '还没出图'),
-      h('div', { class: 'shot-info' },
-        h('div', { class: 'shot-no' }, `SH ${String(s.index).padStart(3, '0')} · ${Number(s.duration).toFixed(1)}s`),
-        h('div', { class: 'shot-desc' }, s.description || '（无描述）'),
-        s.dialogue ? h('div', { class: 'muted', style: 'margin-bottom:8px' }, `${s.speaker || '旁白'}：「${s.dialogue}」`) : null,
-        h('div', { class: 'tags' },
-          s.camera ? h('span', { class: 'tag' }, s.camera) : null,
-          s.scene ? h('span', { class: 'tag' }, s.scene) : null,
-          c?.score != null ? h('span', { class: `tag ${c.pass ? 'ok' : 'warn'}` }, `一致性 ${c.score}`) : null,
-          s.imageSize && s.imageSize.ok === false
-            ? h('span', { class: 'tag warn' }, `比例不符 ${s.imageSize.width}×${s.imageSize.height}`)
-            : null,
-          s.headMatch?.verdict === 'mismatch' ? h('span', { class: 'tag warn' }, '首帧没吃') : null,
-          // 音效改过描述之后要能看出这条是旧的 —— 否则你以为改了，其实成片里还是那声旧的
-          s.sfxPath
-            ? h('span', { class: `tag ${s.sfxOf === s.sound ? '' : 'warn'}` },
-                s.sfxOf === s.sound ? '有音效' : '音效已过时')
-            : s.sound ? h('span', { class: 'tag' }, '待出音效') : null),
-        h('div', { class: 'row' },
-          h('button', {
-            class: 'btn sm grow',
-            disabled: job.running,
-            onclick: () => regen(s, 'image')
-          }, '重出这张图'),
-          s.imagePath
-            ? h('button', {
-                class: 'btn sm grow',
-                disabled: job.running,
-                onclick: () => regen(s, 'video')
-              }, '重出这段视频')
-            : null),
-        editRow(s)));
-  }
+      h('div', { class: 'overlay tl' },
+        h('span', {}, `SH ${String(s.index).padStart(3, '0')}`),
+        h('span', { class: 'dim' }, `${Number(s.duration).toFixed(1)}s`)),
+      // 「连续动作」标在画面上而不是标签堆里：它说的是这一镜和上一镜的关系，
+      // 而人是在看画面接不接得上的时候想起这件事的
+      s.link === 'continuous' ? h('div', { class: 'overlay bl link' }, '连续动作 ↑') : null),
+
+    /**
+     * 问题条。贴在按钮正上方，写清楚"哪儿不对"和"该按哪个键"。
+     * 这句话原来是标签堆里一枚和别的同色的小标签 —— 而它的全部价值就是被看见。
+     */
+    worst
+      ? h('div', { class: `prob ${worst.level}` },
+          h('span', {}, worst.level === 'blocker' ? '✕' : '!'),
+          h('span', { class: 'grow' }, worst.what),
+          probs.length > 1 ? h('span', { class: 'more' }, `＋${probs.length - 1}`) : null)
+      : null,
+
+    h('div', { class: 'shot-info' },
+      h('div', { class: 'shot-desc', style: 'margin-top:0' }, s.description || '（无描述）'),
+      s.dialogue
+        ? h('div', { class: 'row', style: 'margin-bottom:8px' },
+            h('span', { class: 'tag', style: 'flex:0 0 auto' }, LINE_KIND_SHORT[s.lineKind || (s.speaker ? 'speech' : 'voiceover')] || '白'),
+            h('span', { class: 'muted grow', style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap' },
+              `${s.speaker || '旁白'}：「${s.dialogue}」`))
+        : null,
+      h('div', { class: 'tags' },
+        s.camera ? h('span', { class: 'tag' }, s.camera) : null,
+        s.scene ? h('span', { class: 'tag' }, s.scene) : null,
+        // 一致性过了才在卡上显示 —— 没过的那条已经在上面的问题条里说过了
+        s.consistency?.score != null && s.consistency.pass
+          ? h('span', { class: 'tag ok' }, `一致性 ${s.consistency.score}`)
+          : null,
+        s.sfxPath && s.sfxOf === s.sound ? h('span', { class: 'tag' }, '有音效')
+          : !s.sfxPath && s.sound ? h('span', { class: 'tag' }, '待出音效') : null),
+      acts));
 }
+
+/** 台词类型在卡片上只占一个字：整个词摆上去，一行就没了 */
+const LINE_KIND_SHORT = { speech: '白', inner: '心', voiceover: '旁', offscreen: '外' };
 
 /**
  * 就地改这一镜。
@@ -1208,10 +1435,24 @@ function chips(options, current, onPick) {
   return wrap;
 }
 
-function editRow(s) {
-  const box = h('div', { class: 'editbox', style: 'display:none' });
-
-  const desc = h('textarea', { rows: 3, class: 'mta' }, s.description || '');
+/**
+ * 单镜编辑：**整屏一层**，不是卡片里就地展开的手风琴。
+ *
+ * 原来那种做法在手机上有一个致命处：十二个字段一展开，卡片被撑到要滚很久，
+ * 而滚到第七个字段时屏幕上已经没有任何东西写着"你在改第几镜"了 ——
+ * 偏偏这一页最常见的用法就是连着改好几镜。
+ *
+ * 十二个字段按"一屏只答一类问题"分成四组：
+ *
+ *   内容    这一镜演什么、谁说什么（改得最多，默认停在这儿）
+ *   镜头    怎么拍、多长、怎么进来
+ *   预演台  机位排布（不是每一镜都值得排，所以单独一组、按需才建）
+ *   高级    第几场、走哪一档模型
+ *
+ * @param jump 直接落到某一组（从「⋯ → 预演台」进来时用）
+ */
+function openEditor(s, jump = 'content') {
+  const desc = h('textarea', { rows: 4, class: 'mta' }, s.description || '');
   const line = h('textarea', { rows: 2, class: 'mta' }, s.dialogue || '');
   // 画外音效。单开一栏是因为写进画面描述会让出图模型去画那个声音 ——
   //「敲门声」最常见的下场是画出一扇开着的门，而这一镜的前提是门还关着
@@ -1229,7 +1470,6 @@ function editRow(s) {
   // 这一镜走哪一档模型。自动判定给一个，判错的那几镜由人改
   let tier = s.tier || '';
   const TIER_PICK = [['', '自动判定'], ['high', '关键镜'], ['normal', '一般'], ['low', '空镜']];
-  // 属于第几场。模型划边界是读剧本猜的，猜错很正常，得能改
   /**
    * 台词类型。漏掉它的时候「心里话」根本没法表达 ——
    * 填了说话人画面就要求口型对上（成了自言自语），留空又变成旁白的音色。
@@ -1254,18 +1494,53 @@ function editRow(s) {
     return wrap;
   })();
 
+  // 属于第几场。模型划边界是读剧本猜的，猜错很正常，得能改
   const segIn = h('input', { type: 'number', class: 'min', min: '1', max: '99', value: String(s.segment || 1) });
 
+  // 怎么进入这一镜。默认硬切 —— 满屏叠化是最典型的业余做法
+  let transition = s.transition || 'cut';
+  const TRANS_PICK = [['cut', '硬切'], ['fade', '黑场'], ['dissolve', '叠化']];
+
   /**
-   * 默认折叠：不是每一镜都值得排位。空镜、过渡镜写句"全景"就够了，
+   * 这句话在这个时长里念不念得完 —— **改的时候就说**。
+   *
+   * 原来这件事要等到合成那一步才发现，而那时候视频已经出完、钱已经花掉了。
+   * 估算用的是引擎自己那份 core/duration.js（服务端发过来的同一个文件），
+   * 不是在这儿另写一个 —— 两份估法会以肉眼看不出的方式漂开，
+   * 然后界面说念得完、合成说念不完，人两个都不信。
+   */
+  const fit = h('div', { class: 'fit ok' });
+  const refreshFit = () => {
+    const need = speechSeconds(line.value);
+    const have = Number(dur.value) || 0;
+    if (!need) {
+      fit.style.display = 'none';
+      return;
+    }
+    fit.style.display = '';
+    const ok = have >= need + SPEECH_HEADROOM;
+    fit.className = `fit ${ok ? 'ok' : 'over'}`;
+    clear(fit);
+    fit.append(
+      h('span', {}, ok ? '✓' : '!'),
+      h('span', { class: 'grow' }, ok
+        ? `这句约 ${need} 秒，本镜 ${have} 秒 —— 说得完`
+        : `这句约 ${need} 秒，本镜只有 ${have} 秒 —— 会说不完。把时长改到 ${(need + SPEECH_HEADROOM).toFixed(1)} 秒以上，或者把话说短点`));
+  };
+  line.addEventListener('input', refreshFit);
+  dur.addEventListener('input', refreshFit);
+  refreshFit();
+
+  /**
+   * 预演台按需才建：不是每一镜都值得排位。空镜、过渡镜写句"全景"就够了，
    * 值得排的是对话戏和动作接续 —— 那两种地方越轴和景别跳最要命。
    */
   let stageDraft = s.stage || null;
-  const previzBox = h('details', { class: 'previz-details' },
-    h('summary', {}, stageDraft ? '已排位（点开调整）' : '排一下机位'));
-  previzBox.addEventListener('toggle', () => {
-    if (!previzBox.open || previzBox.dataset.built) return;
-    previzBox.dataset.built = '1';
+  const stageWrap = h('div');
+  let stageBuilt = false;
+  const buildStage = () => {
+    if (stageBuilt) return;
+    stageBuilt = true;
     // 上一镜的排位拿来比轴线 —— 越轴是两镜之间的事，单看一镜看不出来
     const prev = (project.shots || []).filter((x) => x.index < s.index).slice(-1)[0];
     if (!stageDraft) {
@@ -1275,14 +1550,124 @@ function editRow(s) {
       const names = (s.characters || []).slice(0, 4);
       stageDraft = (sameSeg && inheritStage(prev.stage, names)) || blankStage(names);
     }
-    previzBox.append(previzPanel(stageDraft, { size: 300, prevStage: prev?.stage || null }).node);
-  });
-  // 怎么进入这一镜。默认硬切 —— 满屏叠化是最典型的业余做法
-  let transition = s.transition || 'cut';
-  const TRANS_PICK = [['cut', '硬切'], ['fade', '黑场'], ['dissolve', '叠化']];
+    stageWrap.append(previzPanel(stageDraft, { size: 300, prevStage: prev?.stage || null }).node);
+  };
 
-  const save = h('button', { class: 'btn sm primary grow' }, '保存');
-  save.onclick = async () => {
+  // ── 四组 ──
+  const pages = {
+    content: h('div', {},
+      h('div', { class: 'ed-group' },
+        h('h4', {}, '画面描述', h('span', {}, '出图和出视频的唯一输入')),
+        desc,
+        h('div', { class: 'muted', style: 'margin-top:6px' }, '写偏一句，重出十次也回不到对的画面。')),
+      h('div', { class: 'ed-group' },
+        h('h4', {}, '台词'),
+        field('说什么', line, '留空就是这一镜没人说话。'),
+        field('谁说的', who, '决定用哪个角色的**声音**。'),
+        // cap:line-kind
+        field('台词类型', kindPick,
+          '和「谁说的」是两件事：那个管声音用谁的，这个管**嘴动不动**。'
+          + '心里话＝他自己的声音但嘴闭着；旁白＝画外叙述；画外音＝他在说话但不在这一镜画面里。'),
+        fit),
+      h('div', { class: 'ed-group' },
+        h('h4', {}, '画外音效', h('span', {}, '听得见看不见的')),
+        sfx,
+        h('div', { class: 'muted', style: 'margin-top:6px' },
+          '写进画面描述的话，出图模型会去画那个声音 ——「敲门声」通常会画出一扇开着的门。'))),
+
+    camera: h('div', {},
+      h('div', { class: 'ed-group' },
+        h('h4', {}, '怎么拍'),
+        // cap:shot-camera
+        field('景别', chips(CAMERAS, camera, (v) => (camera = v))),
+        field('运镜', chips(MOTIONS, motion, (v) => (motion = v))),
+        field('时长（秒）', dur, '有台词的话，上一组里会告诉你够不够念。')),
+      h('div', { class: 'ed-group' },
+        h('h4', {}, '怎么进来'),
+        // cap:shot-transition
+        field('转场', (() => {
+          const wrap = h('div', { class: 'chips' });
+          for (const [val, label] of TRANS_PICK) {
+            const b = h('button', {
+              class: `chip ${val === transition ? 'on' : ''}`,
+              onclick: () => {
+                transition = val;
+                for (const el of wrap.children) el.classList.remove('on');
+                b.classList.add('on');
+              }
+            }, label);
+            wrap.append(b);
+          }
+          return wrap;
+        })(), '绝大多数镜都该是硬切。黑场和叠化只在真的换时间换地点时用 —— 满屏叠化是最典型的业余做法。叠化还会吃掉 0.5 秒。'))),
+
+    // cap:shot-stage
+    stage: h('div', {},
+      h('div', { class: 'ed-group' },
+        h('h4', {}, '排一下机位'),
+        h('div', { class: 'muted', style: 'margin-bottom:10px' },
+          '拖大圆点摆人、拖小圆点转身、拖「机」摆机位。'
+          + '两人之间那条线是轴线，机位跨过去成片上两人就左右对调了。'
+          + '排过位之后，景别和机位由几何算出来，不再是"中景"这种说不清的词。'),
+        stageWrap)),
+
+    adv: h('div', {},
+      h('div', { class: 'ed-group' },
+        h('h4', {}, '第几场'),
+        // cap:shot-segment
+        segIn,
+        h('div', { class: 'muted', style: 'margin-top:6px' },
+          '场次 = 同一时间同一地点的一段戏。跨场次不能锁末帧、不能拿邻镜当参考图，转场也只出现在场次之间。')),
+      h('div', { class: 'ed-group' },
+        h('h4', {}, '模型档位'),
+        // cap:tier-routing
+        (() => {
+          const wrap = h('div', { class: 'chips' });
+          for (const [val, label] of TIER_PICK) {
+            const b = h('button', {
+              class: `chip ${val === tier ? 'on' : ''}`,
+              onclick: () => {
+                tier = val;
+                for (const el of wrap.children) el.classList.remove('on');
+                b.classList.add('on');
+              }
+            }, label);
+            wrap.append(b);
+          }
+          return wrap;
+        })(),
+        h('div', { class: 'muted', style: 'margin-top:6px' },
+          '空镜和远景用便宜模型看不出差别 —— 这一档最省钱。判错了在这儿改。')))
+  };
+
+  const body = h('div', { class: 'ed-body' });
+  const tabsRow = h('div', { class: 'ed-tabs' });
+  let page = pages[jump] ? jump : 'content';
+  const TABS = [
+    ['content', '内容', false],
+    ['camera', '镜头', false],
+    ['stage', '预演台', true],
+    ['adv', '高级', false]
+  ];
+  const show = (id) => {
+    page = id;
+    if (id === 'stage') buildStage();
+    clear(body);
+    body.append(pages[id]);
+    for (const el of tabsRow.children) el.classList.toggle('on', el.dataset.page === page);
+    body.scrollTop = 0;
+  };
+  for (const [id, label, flag] of TABS) {
+    tabsRow.append(h('button', {
+      class: 'ed-tab', 'data-page': id, onclick: () => show(id)
+    }, label, flag && stageDraft?.cam ? h('span', { class: 'dot' }) : null));
+  }
+
+  const layer = h('div', { class: 'ed' });
+  const close = () => layer.remove();
+
+  const save = h('button', { class: 'btn primary' }, '保存');
+  const doSave = async () => {
     save.disabled = true;
     try {
       // cap:shot-text cap:shot-dialogue cap:shot-camera
@@ -1306,159 +1691,112 @@ function editRow(s) {
           ...(stageDraft ? { stage: stageDraft } : {})
         }
       });
-      toast('已保存。重出这一镜才会按新的生成', 'ok');
-      await reload();
+      return true;
     } catch (err) {
       toast(err.message, 'err');
       save.disabled = false;
+      return false;
     }
   };
-
-  const toggle = h('button', {
-    class: 'btn sm grow',
-    onclick: () => {
-      const open = box.style.display === 'none';
-      box.style.display = open ? '' : 'none';
-      toggle.textContent = open ? '收起' : '改这一镜';
-    }
-  }, '改这一镜');
+  save.onclick = async () => {
+    if (!(await doSave())) return;
+    close();
+    toast('已保存。重出这一镜才会按新的生成', 'ok');
+    await reload();
+  };
 
   /**
-   * 预演台要有**自己的按钮**，不能只藏在「改这一镜」里面。
+   * 「保存并重出这张图」。
    *
-   * 原来要先点开编辑、再往下翻过描述/台词/音效/景别/时长/场次一大串
-   * 才看得到那个折叠块。用户的原话是"没找到预演台"。
-   * **功能找不到等于没做** —— 而且这种漏法比崩溃更隐蔽：
-   * 功能在、测试绿、就是没人用得上。
+   * 改完描述之后十有八九就是要重出 —— 分两步做的话，人得先按保存、
+   * 关掉这一层、找回刚才那张卡、再按重出。这里合成一个动作。
    *
-   * 排过位的镜按钮上带个点，扫一眼就知道哪几镜排过。
+   * 只出图不出视频是**故意的**：视频比图贵一个量级，正确的顺序是
+   * 先出图看对不对，对了再出视频。
    */
-  const stageBtn = h('button', {
-    class: 'btn sm grow',
-    onclick: () => {
-      if (box.style.display === 'none') toggle.click();
-      previzBox.open = true;
-      previzBox.dispatchEvent(new Event('toggle'));
-      previzBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const saveRun = h('button', { class: 'btn', style: 'border-color:var(--beam);color:var(--beam)' }, '保存并重出这张图');
+  saveRun.onclick = async () => {
+    saveRun.disabled = true;
+    if (!(await doSave())) {
+      saveRun.disabled = false;
+      return;
     }
-  }, s.stage?.cam ? '预演台 ·' : '预演台');
+    close();
+    await reload();
+    const fresh = (project.shots || []).find((x) => x.id === s.id) || s;
+    regen(fresh, 'image');
+  };
 
-  /**
-   * 历史版本。重出写的是同一个路径，上一版原来直接被覆盖 ——
-   * 而每一版都是真金白银出的，丢掉的不是文件，是已经花掉的钱。
-   *
-   * 按需拉：二十镜各拉一次目录列表的话，光是打开分镜页就要等。
-   */
-  const verBtn = h('button', { class: 'btn sm grow' }, '历史版本');
-  verBtn.onclick = async () => {
-    verBtn.disabled = true;
-    try {
-      // cap:shot-versions
-      const v = await api(`/projects/${project.id}/shots/${s.id}/versions`);
-      const rows = [
-        ...v.image.versions.map((x) => ({ ...x, kind: 'image', label: '图' })),
-        ...v.video.versions.map((x) => ({ ...x, kind: 'video', label: '视频' }))
-      ].sort((a, b) => (a.at < b.at ? 1 : -1));
-      if (!rows.length) return toast('还没有历史版本 —— 重出一次之后，上一版就留在这儿', 'ok');
-      const layer = h('div', { class: 'sheet' });
-      const close = () => layer.remove();
-      layer.onclick = (e) => { if (e.target === layer) close(); };
-      layer.append(h('div', { class: 'sheet-box' },
-        h('b', {}, `第 ${s.index} 镜的历史版本`),
-        h('p', { class: 'muted', style: 'margin:6px 0 10px' },
-          `留最近 ${rows.length} 版。换回某一版之后，现在这版也会被存起来 —— 换回去是可逆的。`),
-        ...rows.map((x) => h('div', { class: 'row', style: 'margin-top:8px;align-items:center' },
-          h('img', {
-            src: media(x.path),
-            style: 'width:56px;height:36px;object-fit:cover;border-radius:6px;background:#000',
-            onerror: (e) => { e.target.style.display = 'none'; }
-          }),
-          h('span', { class: 'tag' }, `${x.label} v${x.n}`),
-          h('span', { class: 'muted grow', style: 'font-size:12px' }, new Date(x.at).toLocaleString('zh-CN')),
-          h('button', {
-            class: 'btn sm',
-            onclick: async (e) => {
-              e.target.disabled = true;
-              try {
-                await api(`/projects/${project.id}/shots/${s.id}/versions/restore`, {
-                  method: 'POST', body: { kind: x.kind, n: x.n }
-                });
-                close();
-                toast(`已换回${x.label} v${x.n}`, 'ok');
-                await reload();
-              } catch (err) {
-                toast(err.message, 'err');
-                e.target.disabled = false;
-              }
+  layer.append(
+    h('div', { class: 'ed-top' },
+      h('div', { class: 'side' }, h('button', { class: 'btn sm', onclick: close }, '取消')),
+      h('div', { class: 'mid' },
+        h('b', {}, `第 ${s.index} 镜`),
+        h('span', {}, `第 ${s.segment || 1} 场 · ${s.scene || '未标场景'}`)),
+      h('div', { class: 'side', style: 'text-align:right' }, save)),
+    tabsRow,
+    body,
+    h('div', { class: 'ed-foot' },
+      h('div', { class: 'row' }, h('div', { class: 'grow' }, saveRun)),
+      h('div', { class: 'ed-note' }, '保存不花钱；重出按镜数计费')));
+
+  document.body.append(layer);
+  show(page);
+  return layer;
+}
+
+/**
+ * 历史版本。重出写的是同一个路径，上一版原来直接被覆盖 ——
+ * 而每一版都是真金白银出的，丢掉的不是文件，是已经花掉的钱。
+ *
+ * 按需拉：二十镜各拉一次目录列表的话，光是打开分镜页就要等。
+ */
+async function openVersions(s) {
+  try {
+    // cap:shot-versions
+    const v = await api(`/projects/${project.id}/shots/${s.id}/versions`);
+    const rows = [
+      ...v.image.versions.map((x) => ({ ...x, kind: 'image', label: '图' })),
+      ...v.video.versions.map((x) => ({ ...x, kind: 'video', label: '视频' }))
+    ].sort((a, b) => (a.at < b.at ? 1 : -1));
+    if (!rows.length) return toast('还没有历史版本 —— 重出一次之后，上一版就留在这儿', 'ok');
+    const box = h('div', { class: 'sheet-box' });
+    const { close } = openSheet(box, { bare: true });
+    box.append(
+      h('b', {}, `第 ${s.index} 镜的历史版本`),
+      h('p', { class: 'muted', style: 'margin:6px 0 10px' },
+        `留最近 ${rows.length} 版。换回某一版之后，现在这版也会被存起来 —— 换回去是可逆的。`),
+      ...rows.map((x) => h('div', { class: 'row', style: 'margin-top:8px;align-items:center' },
+        h('img', {
+          src: media(x.path),
+          style: 'width:56px;height:36px;object-fit:cover;border-radius:6px;background:#000',
+          onerror: (e) => { e.target.style.display = 'none'; }
+        }),
+        h('span', { class: 'tag' }, `${x.label} v${x.n}`),
+        h('span', { class: 'muted grow', style: 'font-size:12px' }, new Date(x.at).toLocaleString('zh-CN')),
+        h('button', {
+          class: 'btn sm',
+          onclick: async (e) => {
+            e.target.disabled = true;
+            try {
+              await api(`/projects/${project.id}/shots/${s.id}/versions/restore`, {
+                method: 'POST', body: { kind: x.kind, n: x.n }
+              });
+              close();
+              toast(`已换回${x.label} v${x.n}`, 'ok');
+              await reload();
+            } catch (err) {
+              toast(err.message, 'err');
+              e.target.disabled = false;
             }
-          }, '换回'))),
-        h('div', { class: 'row', style: 'margin-top:12px' },
-          h('button', { class: 'btn sm grow', onclick: close }, '关闭'))));
-      document.body.append(layer);
-    } catch (err) {
-      toast(err.message, 'err');
-    } finally {
-      verBtn.disabled = false;
-    }
-  };
-
-  box.append(
-    field('画面描述', desc, '这是出图和出视频的唯一输入 —— 写偏一句，重出十次也回不到对的画面。'),
-    field('台词', line, '留空就是这一镜没人说话。'),
-    field('谁说的', who, '决定用哪个角色的**声音**。'),
-    // cap:line-kind
-    field('台词类型', kindPick,
-      '和「谁说的」是两件事：那个管声音用谁的，这个管**嘴动不动**。'
-      + '心里话＝他自己的声音但嘴闭着；旁白＝画外叙述；画外音＝他在说话但不在这一镜画面里。'),
-    field('画外音效', sfx, '听得见看不见的东西写这里。写进画面描述的话，出图模型会去画那个声音 ——「敲门声」通常会画出一扇开着的门。'),
-    field('景别', chips(CAMERAS, camera, (v) => (camera = v))),
-    field('运镜', chips(MOTIONS, motion, (v) => (motion = v))),
-    field('时长（秒）', dur),
-    // cap:shot-segment
-    field('第几场', segIn, '场次 = 同一时间同一地点的一段戏。跨场次不能锁末帧、不能拿邻镜当参考图，转场也只出现在场次之间。'),
-    // cap:shot-stage
-    field('预演台（可选）', previzBox,
-      '排一下机位：拖大圆点摆人、拖小圆点转身、拖「机」摆机位。'
-      + '两人之间那条线是轴线，机位跨过去成片上两人就左右对调了。'
-      + '排过位之后，景别和机位由几何算出来，不再是"中景"这种说不清的词。'),
-    // cap:tier-routing
-    field('模型档位', (() => {
-      const wrap = h('div', { class: 'chips' });
-      for (const [val, label] of TIER_PICK) {
-        const b = h('button', {
-          class: `chip ${val === tier ? 'on' : ''}`,
-          onclick: () => {
-            tier = val;
-            for (const el of wrap.children) el.classList.remove('on');
-            b.classList.add('on');
           }
-        }, label);
-        wrap.append(b);
-      }
-      return wrap;
-    })(), '空镜和远景用便宜模型看不出差别 —— 这一档最省钱。判错了在这儿改。'),
-    // cap:shot-transition
-    field('转场', (() => {
-      const wrap = h('div', { class: 'chips' });
-      for (const [val, label] of TRANS_PICK) {
-        const b = h('button', {
-          class: `chip ${val === transition ? 'on' : ''}`,
-          onclick: () => {
-            transition = val;
-            for (const el of wrap.children) el.classList.remove('on');
-            b.classList.add('on');
-          }
-        }, label);
-        wrap.append(b);
-      }
-      return wrap;
-    })(), '绝大多数镜都该是硬切。黑场和叠化只在真的换时间换地点时用 —— 满屏叠化是最典型的业余做法。叠化还会吃掉 0.5 秒。'),
-    h('div', { class: 'row', style: 'margin-top:12px' }, save),
-    h('div', { class: 'muted', style: 'margin-top:7px' },
-      '保存只改文案，不重出 —— 一般是连着改好几镜再统一重出，改一个字就烧一次钱不划算。')
-  );
-
-  return [h('div', { class: 'row', style: 'margin-top:8px' }, toggle, stageBtn, verBtn), box];
+        }, '换回'))),
+      h('div', { class: 'row', style: 'margin-top:12px' },
+        h('button', { class: 'btn sm grow', onclick: close }, '关闭')));
+    return box;
+  } catch (err) {
+    return toast(err.message, 'err');
+  }
 }
 
 /** 一个可以存到手机上的素材行 */
@@ -1598,6 +1936,7 @@ function paintFilm() {
 async function runStage(stageId, label, extra = {}) {
   if (job.running) return;
   job.running = true;
+  job.stage = stageId;
   job.label = label;
   job.message = '正在提交…';
   job.fail = 0;
@@ -1624,6 +1963,7 @@ async function runStage(stageId, label, extra = {}) {
   } finally {
     job.running = false;
     job.stopping = false;
+    job.stage = '';
     await reload();
   }
 }
