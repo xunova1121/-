@@ -8,6 +8,9 @@
 [ArcReel](https://github.com/ArcReel/ArcReel)（参考资产沉淀），
 但在**一致性**和**联调**这两件事上做得更进一步 —— 具体差在哪见下文。
 
+最近改了什么见 [CHANGELOG.md](CHANGELOG.md)（按"你看得见的变化"写，不是按提交）。
+⚠ 仓库根目录那份 `CHANGELOG.md` 是另一个项目的，别看错。
+
 ---
 
 ## 为什么不是直接把 lumenx 搬过来
