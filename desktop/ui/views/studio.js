@@ -2110,7 +2110,24 @@ export default {
               : null,
             h('span', { class: 'field-hint', style: 'margin:0' },
               `${project.outputs.seconds ? `${project.outputs.seconds}s · ` : ''}` +
-              `${project.outputs.durationPolicy === 'trim' ? '按分镜时长裁剪' : '保留完整片段'}`)));
+              `${project.outputs.durationPolicy === 'trim' ? '按分镜时长裁剪' : '保留完整片段'}`)),
+          /**
+           * **哪几镜还没出视频，必须说出来。**
+           *
+           * 少一镜的素材包看起来和齐了的一模一样：文件按序号排好、分镜表也在。
+           * 人拖进剪映排完一条时间线，才发现中间缺了一镜 —— 那时候要么回来补出、
+           * 要么将就着接上，两条都是白干一遍。这一条不报，代价全落在最后一步。
+           */
+          (() => {
+            const missing = (project.shots || []).filter((x) => !x.videoPath);
+            return missing.length
+              ? h('div', { class: 'notice warn', style: 'margin-top:10px' },
+                h('b', {}, `第 ${missing.map((x) => x.index).join('、')} 镜还没出视频`),
+                h('p', {},
+                  '打包出来的素材里没有它们的片段，而包看起来是齐的 —— '
+                  + '拖进剪映排完才会发现时间线中间缺一段。先把这几镜出了再打包。'))
+              : null;
+          })());
       })()
     );
 

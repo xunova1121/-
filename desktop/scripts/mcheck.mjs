@@ -260,7 +260,19 @@ await page.waitForTimeout(700);
 const filmText = await page.locator('#app').innerText();
 console.log('⑥ 成片页：', /成片 mp4/.test(filmText) ? '有成片 ✓' : '✕');
 console.log('   字幕：', /字幕 \.srt/.test(filmText) ? '✓' : '✕');
-console.log('   每镜片段：', /第 1 镜/.test(filmText) && /第 2 镜/.test(filmText) ? '都列出来了 ✓' : '✕');
+/**
+ * 出了视频的镜要列出来；**没出的那几镜要点名说缺**。
+ *
+ * 这一条原来写的是"第 1 镜和第 2 镜都要在"，而这份数据里第 2 镜是
+ * **故意没出视频**的（上面 shots 那儿写着为什么）。也就是说它从写下来
+ * 那天起就是红的 —— 一条永远红的检查等于没有检查，跑的人扫一眼就跳过去了。
+ *
+ * 而它红着的这段时间里，真正的毛病没人发现：少一镜的素材包看起来和齐了的
+ * 一模一样，人拖进剪映排完才发现中间缺一段。现在断言改成量这件事。
+ */
+console.log('   出了视频的镜列出来了：', /第 1 镜/.test(filmText) ? '✓' : '✕');
+console.log('   没出视频的镜点名说缺：',
+  /第 2 镜还没出视频/.test(filmText) ? '✓' : '✕ 素材包缺一镜却不说，进剪映才会发现');
 console.log('   配音轨：', /配音/.test(filmText) ? '✓' : '✕');
 const saveBtns = await page.locator('a:has-text("存到手机")').count();
 console.log('   可一键存的素材数：', saveBtns, saveBtns >= 4 ? '✓' : '✕');

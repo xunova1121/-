@@ -1246,6 +1246,8 @@ function paintFilm() {
   const clips = shots.filter((s) => s.videoPath);
   const voices = shots.filter((s) => s.audioPath);
   const sfxs = shots.filter((s) => s.sfxPath);
+  // 有图没视频的那几镜 —— 素材包里缺的就是它们
+  const missing = shots.filter((s) => !s.videoPath);
 
   const head = out?.video
     ? [
@@ -1287,6 +1289,20 @@ function paintFilm() {
         h('p', { class: 'muted', style: 'margin:0 0 8px' },
           '包里还有一张分镜表，写着每个片段是哪一镜、多长、说了什么 —— ' +
           '进剪映之后不用对着文件名猜。手机上会存进「文件」，在那儿解压再导入剪映。'),
+        /**
+         * **哪几镜还没出视频，必须说出来。**
+         *
+         * 少一镜的素材包看起来和齐了的一模一样：文件按序号排好、分镜表也在。
+         * 人拖进剪映排完一条时间线，才发现中间缺了一镜 —— 那时候要么回来补出，
+         * 要么将就着接上，而两条都是白干一遍。
+         *
+         * 这一条不报的代价全落在最后一步，那正是最贵的地方。
+         */
+        missing.length
+          ? h('div', { class: 'card warn', style: 'margin:0 0 10px' },
+            `第 ${missing.map((s) => s.index).join('、')} 镜还没出视频，这个包里没有它们的片段。`
+            + '现在拿去剪映的话，时间线中间会缺一段 —— 先把这几镜出了再打包。')
+          : null,
         ...clips.map((s) =>
           assetRow(
             `第 ${s.index} 镜`,

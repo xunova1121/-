@@ -274,6 +274,33 @@ check('输入框里的字当场换了（不用整页重画）', /青绿/.test(af
 // 换一句话不该让手改过的角色描述陪葬
 check('角色描述没被冲掉', after.some((v) => v.includes('藏青立领制服')), JSON.stringify(after.slice(0, 6)));
 
+/**
+ * ── 素材包缺镜要说出来 ──
+ *
+ * 少一镜的包看起来和齐了的一模一样：文件按序号排好、分镜表也在。
+ * 人拖进剪映排完一条时间线才发现中间缺一段 —— 那时候要么回来补出、
+ * 要么将就着接上，两条都是白干一遍。
+ *
+ * 手机端那条走查里同一件事已经验过；这一条守的是电脑端别落下。
+ */
+console.log('\n素材包');
+await page.evaluate(async (id) => {
+  const p = await (await fetch(`/api/projects/${id}`)).json();
+  // 第一镜给个片段，其余留空 —— 这正是"出了一半"的常态
+  const shots = (p.shots || []).map((s, i) => (i === 0 ? { ...s, videoPath: '/tmp/x.mp4' } : s));
+  await fetch(`/api/projects/${id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ shots, outputs: { video: '/tmp/final.mp4', seconds: 7, durationPolicy: 'trim' } })
+  });
+}, proj.id);
+await page.reload();
+await page.waitForTimeout(1200);
+await step('合成').click();
+await page.waitForTimeout(900);
+const filmText = await page.locator('#view-inner').innerText();
+check('缺镜时当场点名', /还没出视频/.test(filmText), filmText.slice(0, 200));
+check('并且说清楚后果（拖进剪映才发现缺一段）', /剪映/.test(filmText) && /缺一段/.test(filmText));
+
 check('全程没有页面报错', errs.length === 0, errs.slice(0, 3).join(' | '));
 
 await b.close();
