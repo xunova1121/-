@@ -174,6 +174,11 @@ const upstream = http.createServer((req, res) => {
       const hasEnd = Boolean(upstream.msBody.last_frame_image)
         || (upstream.msBody.content || []).some((c) => c.role === 'last_frame');
       upstream.msSawEndFrame.push(hasEnd);
+      // 每一次提交里，普通图列表（content 的 image_url）都发了哪几张
+      upstream.msContentUrls = upstream.msContentUrls || [];
+      upstream.msContentUrls.push((upstream.msBody.content || [])
+        .filter((c) => c.type === 'image_url' && !c.role)
+        .map((c) => c.image_url?.url || ''));
       if (hasEnd && upstream.msRejectEndFrame) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ message: 'invalid parameter: last_frame_image' }));
@@ -5667,6 +5672,73 @@ check('探出来的路径被缓存，第二次不再重复试', upstream.msQuery
   check('体积被顶掉时点明"不是末帧的写法问题"',
     /不是末帧的写法/.test(joined), joined.slice(-260));
   check('并且不换第二种写法白撞一次', !/换「/.test(joined), joined.slice(-260));
+}
+
+/**
+ * ══ "首尾两张一定发得出去"到底能保证到什么程度 ══
+ *
+ * 用户问的原话是"能保证首尾图片过去吗"。这一组就是把那个"保证"钉下来，
+ * 免得它停留在一句让人放心的空话上。能保证的是**我们这一侧**：
+ *
+ *   ① 首帧永远在。退让退到底也留 images[0]，
+ *      连它自己就超预算的极端情况也照发（发不出去是厂商的事，
+ *      我们不能主动把这一镜变成文生视频）。
+ *   ② 末帧不参与退让。它走 reservedInline，退让动的只有设定集参考图，
+ *      5 张 → 2 张 → 1 张，末帧一路都在。
+ *
+ * 保证不了的是厂商收不收 —— 那一层由 endFrameSent 如实回报（上面几条）。
+ */
+{
+  // ① 首帧自己就超预算：照发。丢掉它等于把这一镜降级成文生视频
+  const huge = `data:image/png;base64,${'A'.repeat(9 * 1024 * 1024)}`;
+  const keptHuge = adapters.__trimInlineImages([huge], () => {}, null);
+  check('首帧自己就超预算也照发（丢了它这一镜就变成文生视频了）',
+    keptHuge.length === 1, `留了 ${keptHuge.length} 张`);
+  // 末帧已经吃满预算时，首帧仍然要留下
+  const keptWithFatEnd = adapters.__trimInlineImages([huge], () => {}, huge);
+  check('末帧吃满预算时首帧仍然留下', keptWithFatEnd.length === 1, `留了 ${keptWithFatEnd.length} 张`);
+}
+{
+  // ② 退让退到底：只剩首帧，而末帧还在
+  upstream.msPolls = 0;
+  upstream.msImageCounts = [];
+  upstream.msSawEndFrame = [];
+  upstream.msContentUrls = [];
+  upstream.msMediaLimit = 1; // 这家只收 1 张普通图，逼出完整的退让过程
+  await adapters.generateVideo({
+    providerId: 'metaso',
+    model: 'MiniMax-H3',
+    prompt: 'x',
+    duration: 5,
+    firstFrameUrl: 'https://x.invalid/head.png',
+    lastFrameUrl: 'https://x.invalid/tail.png',
+    refImages: ['https://x.invalid/r1.png', 'https://x.invalid/r2.png', 'https://x.invalid/r3.png']
+  });
+  upstream.msMediaLimit = undefined;
+  check('被顶掉时先减参考图（4 张 → 2 张 → 1 张）',
+    upstream.msImageCounts.length >= 2 && upstream.msImageCounts[0] > upstream.msImageCounts.at(-1),
+    JSON.stringify(upstream.msImageCounts));
+  check('退到底剩下的那一张是首帧', upstream.msImageCounts.at(-1) === 1, JSON.stringify(upstream.msImageCounts));
+  /**
+   * ⚠ 这一条原来写的是"每一次提交都带着末帧"—— **那是个永远绿的断言**：
+   * buildBody 无条件把 lastFrameUrl 拼进去，跟 imgs 一点关系都没有，
+   * 所以不管退让成什么样它都成立。我照着它得出过一个错的结论
+   * （"退让把末帧挤掉了"），而那个结论指错了修的地方。
+   *
+   * 能失败的断言是这一条：末帧**从来不以普通图的身份**出现在 content 里。
+   * 61c84ec 之前它会 —— 那一份没有 role，模型只会当它是本镜的参考图，
+   * 等于把下一镜的画面掺进这一镜。
+   */
+  const asPlain = (upstream.msContentUrls || []).filter((list) => list.some((u) => /tail\.png/.test(u)));
+  check('末帧从不以普通参考图的身份出现（每一次退让都是）',
+    (upstream.msContentUrls || []).length > 0 && asPlain.length === 0,
+    JSON.stringify(upstream.msContentUrls));
+  /**
+   * 这一轮退让会把"这家最多收 1 张"学下来，而下面那组量的正是退让过程本身 ——
+   * 学到的数会让它一上来就按 1 张发，退让一次都不发生，那一组就白绿了。
+   * 用例之间的隐藏状态是最难查的一类假绿，清掉。
+   */
+  adapters.resetMediaLimits();
 }
 
 /**
