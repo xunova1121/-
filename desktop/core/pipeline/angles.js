@@ -118,7 +118,16 @@ const SCENE_HINTS = [{ angle: 'top', re: /俯视|俯拍|航拍|鸟瞰|顶视/ }]
  * ⚠ 判断只看**画面描述和运镜**，不看台词。台词里"他转身走了"是旁白在讲，
  * 画面上可能根本没这个动作。
  */
-export function pickAngle(kind, shot, { available = [] } = {}) {
+export function pickAngle(kind, shot, { available = [], hint = null } = {}) {
+  /**
+   * 排过位的话，**机位算出来的关系说了算**，关键词让路。
+   *
+   * 关键词只在没有机位信息时才是最优解。「他望着窗外」既可能是侧脸
+   * 也可能是背影 —— 这靠读字是分不出来的，而机位一摆就是确定的。
+   */
+  if (hint && hint !== PRIMARY && available.includes(hint)) return hint;
+  if (hint === PRIMARY) return PRIMARY;
+
   const text = `${shot?.description || ''} ${shot?.camera || ''} ${shot?.motion || ''}`;
   const hints = kind === 'scene' ? SCENE_HINTS : kind === 'char' ? CHAR_HINTS : [];
   for (const h of hints) {

@@ -25,6 +25,7 @@ import * as skills from '../skills.js';
 import * as speaker from './speaker.js';
 import * as variants from './variants.js';
 import * as anglesLib from './angles.js';
+import * as previz from './previz.js';
 import { resolveStyle } from '../styles.js';
 
 /** 由项目和名字派生稳定种子。同一项目里同一角色，永远同一颗种子。 */
@@ -245,7 +246,17 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
   const skillParts = skills.fragmentsFor(shot.skills, { target: 'image' });
   parts.push(...skillParts.look, ...skillParts.action, ...skillParts.mood);
 
-  if (shot.camera) parts.push(`镜头：${shot.camera}`);
+  /**
+   * 排过位的话，机位用**算出来的那句**，而不是 `camera: "中景"`。
+   *
+   * "中景"没有确切含义 —— 35mm 站 2 米和 85mm 站 5 米都能叫中景，
+   * 而两张画完全不同（后者背景压缩、透视平）。模型每一镜自己挑一个，
+   * 于是同一场戏里景别忽远忽近，看起来像"模型不稳定"，
+   * 其实是我们从来没说清楚过。
+   */
+  const staged = previz.cameraLine(shot, cast[0]?.name);
+  if (staged) parts.push(`镜头：${staged}`);
+  else if (shot.camera) parts.push(`镜头：${shot.camera}`);
   if (bible?.style?.palette) parts.push(`主色调：${bible.style.palette}`);
 
   return {
@@ -301,7 +312,9 @@ export function collectReferences(bible, shot, { limit = 9 } = {}) {
      * 补过背面图的话，这里就该发那张。
      */
     const setKey = kind === 'character' ? 'char' : kind;
-    const angleId = anglesLib.pickAngle(setKey, shot, { available: anglesLib.availableOn(v) });
+    // 排过位就用机位算出来的关系（准），没排就退回读描述里的关键词（猜）
+    const hint = kind === 'character' ? previz.sheetHintFor(shot, item.name) : null;
+    const angleId = anglesLib.pickAngle(setKey, shot, { available: anglesLib.availableOn(v), hint });
     const angle = anglesLib.sheetOf(v, angleId);
 
     const url = angle?.sheetUrl || v?.sheetUrl || item.sheetUrl;
@@ -412,7 +425,10 @@ export function assembleVideoPrompt(
       if (brief) parts.push(brief);
     }
 
-    if (shot.camera) parts.push(shot.camera);
+    // 同上：排过位就用精确机位，没排就用原来那句话
+    const staged = previz.cameraLine(shot, cast[0]?.name);
+    if (staged) parts.push(staged);
+    else if (shot.camera) parts.push(shot.camera);
   }
 
   // 技法卡：运镜替代那句泛泛的默认运镜 ——

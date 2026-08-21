@@ -22,6 +22,16 @@
  * 二是**悄悄改用户的文字**这件事本身就不该做 —— 他会看着一句自己没写过的话，
  * 想不明白哪里来的。报出来，让他自己决定拆成几镜。
  */
+import * as previz from './previz.js';
+
+/**
+ * 这一镜排过位吗？排过就算出机位关系，没排回 null。
+ * 越轴这件事**只有排过位才查得出来** —— 没有机位就没有轴线。
+ */
+function readOf(shot) {
+  return shot?.stage?.cam ? previz.readShot(shot.stage) : null;
+}
+
 
 /** 只听得见、看不见的东西。写进画面描述里，出图模型只能瞎画 */
 const SOUND_WORDS = [
@@ -136,6 +146,23 @@ function lintPair(shot, prev) {
       fix: '改成「换场景」。真要做无缝衔接，那两镜本来就该属于同一个场次。'
     });
   }
+  /**
+   * 越轴 —— 只有排过位才查得出来。
+   *
+   * 这一条以前只是提示词里一句"不要越轴"，而模型根本不知道机位在哪，
+   * 那句话等于没说。排过位之后它是**算出来的**：两个人之间那条连线就是轴线，
+   * 机位跨到另一侧，画面上两人就左右对调了。
+   */
+  if (!crossed && previz.crossesAxis(readOf(prev), readOf(shot))) {
+    issues.push({
+      kind: 'crosses-axis',
+      severity: 'high',
+      what: `和第 ${prev.index} 镜之间越轴了（机位跨到了轴线另一侧）`,
+      why: '成片上的表现是两个人左右对调、或者人物突然掉头。观众读不出"换了机位"，只会觉得穿帮 —— 而逐镜看每一张都没问题，只有连起来放才露馅。',
+      fix: '把机位挪回轴线同一侧；真要换到对面，中间插一个正对轴线的过渡镜。'
+    });
+  }
+
   if (!crossed && shot.transition && shot.transition !== 'cut') {
     issues.push({
       kind: 'transition-inside-segment',

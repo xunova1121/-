@@ -2098,6 +2098,157 @@ section('存下来的限时地址不复用');
     JSON.stringify(collected.images));
 }
 
+section('预演台：把"中景"变成一组数');
+{
+  const pv = await import('../core/pipeline/previz.js');
+
+  /**
+   * 景别是**算出来的**，不是感觉。同样说"中景"，35mm 站 2 米和 85mm 站 5 米
+   * 是完全不同的两张画（后者背景压缩、透视平），而 camera: "中景"
+   * 把这个差别整个抹掉了 —— 于是模型每一镜自己挑一个，
+   * 同一场戏里景别忽远忽近，看起来像"模型不稳定"。
+   */
+  check('同样 3 米，35mm 是全景、85mm 是近景',
+    pv.shotSize(3, 35).label === '全景' && pv.shotSize(3, 85).label === '近景',
+    `${pv.shotSize(3, 35).label} / ${pv.shotSize(3, 85).label}`);
+  check('走近就变特写', pv.shotSize(0.6, 50).label === '特写', pv.shotSize(0.6, 50).label);
+  // 换焦段不换镜头位置也会换景别 —— 这正是"中景"说不清的东西
+  check('同一位置换长焦，景别跟着变',
+    pv.shotSize(5, 35).label !== pv.shotSize(5, 135).label);
+
+  // ── 方位：0° 朝上、顺时针 ──
+  check('正上方是 0°', pv.bearing({ x: 0, y: 0 }, { x: 0, y: 1 }) === 0);
+  check('正右方是 90°', pv.bearing({ x: 0, y: 0 }, { x: 1, y: 0 }) === 90);
+
+  /**
+   * 机位在人的哪一边 —— 这一条直接决定发哪张设定图。
+   * 机位在人的正南方（y 更小），人朝北（facing 0）就是背对镜头。
+   */
+  const cam = { x: 0, y: -3, height: 1.6, lens: 35 };
+  check('人面向机位 → 正面', pv.facingRelation(cam, { x: 0, y: 0, facing: 180 }).sheet === 'primary');
+  check('人背对机位 → 背面', pv.facingRelation(cam, { x: 0, y: 0, facing: 0 }).sheet === 'back');
+  check('人侧对机位 → 侧面', pv.facingRelation(cam, { x: 0, y: 0, facing: 90 }).sheet === 'side');
+
+  check('机位高过眼睛是俯拍', pv.heightRelation(2.4).label === '俯拍');
+  check('齐眼是平视', pv.heightRelation(1.6).label === '平视');
+  check('趴地上是仰拍', pv.heightRelation(0.4).label === '仰拍');
+
+  /**
+   * ── 越轴 ──
+   *
+   * 两个人对话，他们之间那条连线就是轴线。机位待在同一侧，
+   * A 永远在左、B 永远在右；跨到另一侧，两人在画面上左右对调 ——
+   * 而观众读到的不是"换了机位"，是"他俩换了位置"。
+   *
+   * 这一条以前只是提示词里一句"不要越轴"，而模型根本不知道机位在哪。
+   */
+  const two = [{ name: 'A', x: -1, y: 0, facing: 90 }, { name: 'B', x: 1, y: 0, facing: 270 }];
+  const south = pv.axisSide({ x: 0, y: -3 }, two);
+  const north = pv.axisSide({ x: 0, y: 3 }, two);
+  check('轴线两侧算出来是相反的', south !== 0 && north !== 0 && south !== north, `${south} / ${north}`);
+  check('同一侧的两个机位不算越轴',
+    pv.crossesAxis({ side: south }, { side: pv.axisSide({ x: -2, y: -4 }, two) }) === false);
+  check('跨到对面就是越轴', pv.crossesAxis({ side: south }, { side: north }) === true);
+  /**
+   * 正好落在轴线上的机位回 0。它是唯一"两侧都算"的位置 ——
+   * 拿它和谁比都不该报越轴，否则会冒出一堆假警报，
+   * 而假警报多了人就不看这个检查了。
+   */
+  check('正好在轴线上时不报越轴', pv.crossesAxis({ side: 0 }, { side: north }) === false);
+
+  // ── 三种译法 ──
+  const read = pv.readShot({
+    cam: { x: 0, y: -3, height: 1.2, lens: 85, move: { horizontal: -3, zoom: 0, pan: 0, tilt: 0, roll: 0, vertical: 0 } },
+    subjects: [{ name: '强雄', x: 0, y: 0, facing: 180 }]
+  });
+  const zh = pv.toChinese(read, { subjectName: '强雄' });
+  check('中文译法把景别、方位、高度、焦段都说全了',
+    /近景/.test(zh) && /正面/.test(zh) && /85mm/.test(zh), zh);
+  check('并且说了运镜方向', /向左横移/.test(zh), zh);
+
+  const kling = pv.toKling(read);
+  check('可灵译法给的是那六个字段', kling && kling.config.horizontal === -3, JSON.stringify(kling?.config));
+  /**
+   * ⚠ 可灵的 camera_control 和**首尾帧、运动笔刷三选一**。
+   * 也就是说标了「连续动作」要锁尾帧的镜，在可灵上用不了结构化运镜。
+   * 这个冲突必须让调用方看见，不能等到线上才发现两个都设了、只生效一个。
+   */
+  check('并且标出了它和首尾帧互斥', kling.conflictsWithEndFrame === true);
+  check('固定机位不发运镜参数（别给一组全 0 让它乱动）', pv.toKling(pv.readShot({ cam: { x: 0, y: -2 }, subjects: [] })) === null);
+
+  check('海螺那一路给方括号指令', pv.toBrackets(read) === '[左移]', pv.toBrackets(read));
+  // 六个方向全塞进去的话模型会挑着执行，而挑哪个你控制不了
+  const busy = pv.readShot({ cam: { move: { horizontal: 9, zoom: 8, pan: 7, tilt: 6, roll: 5, vertical: 4 } }, subjects: [] });
+  check('运镜太多时只留最强的两个', pv.toBrackets(busy).match(/\[/g).length === 2, pv.toBrackets(busy));
+
+  /**
+   * 没排位就**不能假装有**。编一句"机位在人物右前方"而实际没人摆过，
+   * 比笼统的"中景"更坏 —— 它是一个听起来很精确的谎。
+   */
+  check('没排位时回 null，让原来那句 camera 接着用',
+    pv.cameraLine({ camera: '中景' }) === null);
+  check('排过位就给出精确那句', /mm/.test(pv.cameraLine({ stage: { cam: { x: 0, y: -3, height: 1.6, lens: 50 }, subjects: [{ name: '强雄', x: 0, y: 0, facing: 180 }] } })));
+}
+
+section('预演台：算出来的机位，比读描述里的关键词准');
+{
+  const con = await import('../core/pipeline/consistency.js');
+  const lint = await import('../core/pipeline/shotlint.js');
+
+  const bible = {
+    characters: [{
+      name: '强雄',
+      sheetPath: '/x/front.png',
+      sheetUrl: 'https://cdn.example.com/front.png',
+      variants: [{
+        id: 'v-default',
+        sheetPath: '/x/front.png',
+        sheetUrl: 'https://cdn.example.com/front.png',
+        angles: [{ id: 'back', sheetPath: '/x/back.png', sheetUrl: 'https://cdn.example.com/back.png' }]
+      }]
+    }],
+    scenes: [],
+    props: []
+  };
+
+  /**
+   * 「他望着窗外」这句话，既可能是侧脸也可能是背影 —— 读字是分不出来的。
+   * 而机位一摆就是确定的：机位在他正南、他朝北，那就是背影。
+   */
+  const staged = {
+    description: '强雄望着窗外',
+    characters: ['强雄'],
+    stage: { cam: { x: 0, y: -3, height: 1.6, lens: 50 }, subjects: [{ name: '强雄', x: 0, y: 0, facing: 0 }] }
+  };
+  const noStage = { description: '强雄望着窗外', characters: ['强雄'] };
+  check('没排位时关键词判不出来，发正面（和以前一样）',
+    con.collectReferences(bible, noStage).images[0] === 'https://cdn.example.com/front.png');
+  check('排过位就按机位发背面 —— 关键词一个字都没提到"背"',
+    con.collectReferences(bible, staged).images[0] === 'https://cdn.example.com/back.png',
+    con.collectReferences(bible, staged).labels[0]);
+
+  // ── 越轴报到用户看得见的地方 ──
+  const two = [{ name: 'A', x: -1, y: 0, facing: 90 }, { name: 'B', x: 1, y: 0, facing: 270 }];
+  const shots = [
+    { id: 's1', index: 1, segment: 1, description: '两人对话', stage: { cam: { x: 0, y: -3, height: 1.6, lens: 50 }, subjects: two } },
+    { id: 's2', index: 2, segment: 1, description: '反打', stage: { cam: { x: 0, y: 3, height: 1.6, lens: 50 }, subjects: two } }
+  ];
+  const found = lint.lintShots(shots);
+  const axis = found.flatMap((r) => r.issues).find((i) => i.kind === 'crosses-axis');
+  check('越轴被分镜体检抓出来了', Boolean(axis), JSON.stringify(found.map((r) => r.index)));
+  check('并且说清楚成片上会看到什么', /左右对调|掉头/.test(axis?.why || ''), (axis?.why || '').slice(0, 50));
+  check('并且给了怎么改', /同一侧/.test(axis?.fix || ''), axis?.fix);
+
+  // 跨场次不查：换了场戏轴线本来就重新算，查了全是假警报
+  const crossSeg = lint.lintShots([shots[0], { ...shots[1], segment: 2 }]);
+  check('跨场次不报越轴（轴线本来就重算）',
+    !crossSeg.flatMap((r) => r.issues).some((i) => i.kind === 'crosses-axis'));
+  // 没排位的镜断开链条，不拿它和隔壁比
+  const partial = lint.lintShots([shots[0], { id: 's2', index: 2, segment: 1, description: '反打' }]);
+  check('没排位的镜不参与越轴判断',
+    !partial.flatMap((r) => r.issues).some((i) => i.kind === 'crosses-axis'));
+}
+
 section('设定图的角度：人一转身，参考图也得跟着转');
 {
   const ang = await import('../core/pipeline/angles.js');
