@@ -184,6 +184,30 @@ function lintPair(shot, prev) {
     });
   }
 
+  /**
+   * 「连续动作」的首帧**就是上一段的真实末帧** —— 画面起点已经定死了。
+   * 而提示词里那句机位是这一镜排位算出来的。两者一冲突，模型只能二选一：
+   * 无视首帧（接缝白做），或者无视排位（排位白做）。两种都不报错。
+   *
+   * 查出来多半不是排位排错了，是这两镜本来就该是硬切 ——
+   * 同一瞬间里机位不会瞬移，也不会从全景变特写，那是剪辑。
+   */
+  if (shot.link === 'continuous') {
+    const jump = previz.cameraJump(prev.stage, shot.stage);
+    if (jump) {
+      const what = jump.sizeChanged
+        ? `景别从「${jump.sizeFrom}」跳到「${jump.sizeTo}」`
+        : `机位挪了 ${jump.moved} 米`;
+      issues.push({
+        kind: 'continuous-camera-jump',
+        severity: 'high',
+        what: `标着「连续动作」，但和第 ${prev.index} 镜之间${what}`,
+        why: '「连续动作」的首帧就是上一段视频的真实末帧 —— 画面起点由上一镜定死了。而提示词里那句机位是这一镜排位算出来的。两者打架时模型只能二选一：无视首帧（接缝白做了），或者无视排位（排位白做了），而且都不报错。',
+        fix: '要换机位就改成「同场景换机位」（硬切）—— 同一瞬间里机位本来就不会瞬移。真要连着，把这一镜的机位拖回上一镜附近。'
+      });
+    }
+  }
+
   if (!crossed && shot.transition && shot.transition !== 'cut') {
     issues.push({
       kind: 'transition-inside-segment',

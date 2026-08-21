@@ -2265,6 +2265,47 @@ section('预演台：把"中景"变成一组数');
     imports.length === 0, imports.join(' / '));
 }
 
+section('连续动作的首帧是上一段的末帧 —— 机位不该跳');
+{
+  const pv = await import('../core/pipeline/previz.js');
+  const lint = await import('../core/pipeline/shotlint.js');
+  const stage = (x, y, lens) => ({ cam: { x, y, height: 1.6, lens, move: {} }, subjects: [{ name: 'A', x: 0, y: 0, facing: 180 }] });
+
+  /**
+   * 标了「连续动作」的镜，首帧**就是上一段视频的真实末帧**。
+   * 画面起点已经被上一镜定死了，而提示词里那句机位是这一镜排位算出来的。
+   *
+   * 两者一冲突，模型只能二选一：无视首帧（接缝白做了），
+   * 或者无视排位（排位白做了）—— **两种都不报错**。
+   */
+  const prev = { id: 'p', index: 4, segment: 1, description: '他伸手去推门', stage: stage(0, -4, 35) };
+  const mk = (st, link) => ({ id: 'n', index: 5, segment: 1, link, description: '门开了一条缝', stage: st });
+  const jumps = (s2) => lint.lintShots([prev, s2]).flatMap((r) => r.issues).filter((i) => i.kind === 'continuous-camera-jump');
+
+  check('机位大挪 → 报', jumps(mk(stage(2, -4, 35), 'continuous')).length === 1);
+  check('景别从全景跳到特写 → 报',
+    /景别从/.test(jumps(mk(stage(0, -1.2, 85), 'continuous'))[0]?.what || ''),
+    jumps(mk(stage(0, -1.2, 85), 'continuous'))[0]?.what);
+  check('标成硬切就不报（硬切本来就该跳）', jumps(mk(stage(0, -1.2, 85), 'cut')).length === 0);
+
+  /**
+   * ⚠ 第一版是拿**档位名**比的（"全景" vs "远景"），当场假警报：
+   * 机位只挪 0.3 米，而画面高度正好跨过 2.8 米那条档位线，就翻了档。
+   *
+   * 档位是给人读的，边界上一厘米的抖动就能翻。真正该量的是
+   * "画面装得下多高"变了多少倍 —— 那是连续的，没有悬崖。
+   * 一个乱报的检查等于没有检查：看两次假警报之后人就再也不看它了。
+   */
+  check('挪一点点不报（哪怕档位名正好翻了档）',
+    jumps(mk(stage(0.3, -4.1, 35), 'continuous')).length === 0,
+    JSON.stringify(pv.cameraJump(prev.stage, stage(0.3, -4.1, 35))));
+
+  // 有一边没排位就无从比较 —— 不能凭空报
+  check('有一边没排位时不报', pv.cameraJump(null, stage(0, -1, 85)) === null);
+  check('报的时候给出路（改成硬切 / 把机位拖回去）',
+    /硬切/.test(jumps(mk(stage(2, -4, 35), 'continuous'))[0]?.fix || ''));
+}
+
 section('预演台 vs 技法卡：两边都在说机位，会打架');
 {
   const pv = await import('../core/pipeline/previz.js');

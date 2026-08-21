@@ -480,6 +480,67 @@ function describeFor(id, read) {
 }
 
 /**
+ * 「连续动作」两镜之间，机位跳了多少。
+ *
+ * ── 为什么这一条非查不可 ──
+ *
+ * 标了「连续动作」的镜，首帧**就是上一段视频的真实末帧**（seam 那条路）。
+ * 也就是说画面的起点已经定死了 —— 它长什么样由上一镜决定，不由这一镜的排位决定。
+ *
+ * 而提示词里那句机位是**这一镜排位算出来的**。两者一冲突就成了：
+ *
+ *   首帧递过来的是一张全景，而提示词说"近景，机位在人物右前方、85mm"
+ *
+ * 模型只能二选一：要么无视首帧硬切成近景（接缝白做了），
+ * 要么听首帧、无视你排的位（排位白做了）。**两种都不报错。**
+ *
+ * ── 这其实是标错了衔接关系 ──
+ *
+ * 「连续动作」的含义是"上一帧的下一瞬间"。同一瞬间里机位不会瞬移，
+ * 也不会从全景变特写 —— 那是**剪辑**，是硬切。
+ * 所以查出来的多半不是排位排错了，是这两镜本来就该是 cut。
+ *
+ * 回 null 表示没跳（或者信息不足，比如有一边没排位 —— 那就无从比较）。
+ */
+export function cameraJump(prevStage, stage) {
+  const a = normalizeStage(prevStage);
+  const b = normalizeStage(stage);
+  if (!a || !b) return null;
+
+  const ra = readShot(a);
+  const rb = readShot(b);
+  const moved = Number(distance(a.cam, b.cam).toFixed(2));
+
+  /**
+   * ⚠ 判景别变没变，**不能比档位名**。
+   *
+   * 第一版就是比「全景 / 特写」这几个词，结果假警报当场出现：
+   * 机位只挪了 0.3 米，而画面高度正好跨过 2.8 米那条档位线，
+   * 于是「全景」变「远景」—— 报了一条谁也看不懂的警报。
+   *
+   * 档位是给人读的，边界上一厘米的抖动就能翻档。真正该量的是
+   * **画面装得下多高**变了多少倍，那是连续的，没有悬崖。
+   *
+   * 1.4 倍：相邻两档之间大约差 1.6 倍，取略低一点，
+   * 既抓得住真的景别跳，又容得下拖动时的手抖。
+   */
+  const hA = ra.size?.framedHeight;
+  const hB = rb.size?.framedHeight;
+  const ratio = hA && hB ? Math.max(hA, hB) / Math.min(hA, hB) : 1;
+  const sizeChanged = ratio >= 1.4;
+
+  // 一米同理，是给"手抖"留的余地：拖出来的排位差十几厘米没有意义
+  if (moved <= 1 && !sizeChanged) return null;
+  return {
+    moved,
+    sizeFrom: ra.size?.label || null,
+    sizeTo: rb.size?.label || null,
+    sizeChanged,
+    ratio: Number(ratio.toFixed(2))
+  };
+}
+
+/**
  * 越轴检查：同一场戏里，相邻两镜的机位不能跨到轴线另一侧。
  *
  * 只在**同一场次**内查 —— 换了场次就是另一场戏，轴线本来就重新算。
