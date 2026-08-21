@@ -23,6 +23,10 @@
  * 想不明白哪里来的。报出来，让他自己决定拆成几镜。
  */
 import * as previz from './previz.js';
+import { BUILTIN_SKILLS } from '../skills.js';
+
+/** 报冲突时要说卡的名字，不是 id —— 用户在界面上看到的是名字 */
+const SKILL_NAMES = Object.fromEntries((BUILTIN_SKILLS || []).map((s) => [s.id, s.name]));
 
 /**
  * 这一镜排过位吗？排过就算出机位关系，没排回 null。
@@ -107,6 +111,23 @@ export function lintShot(shot) {
       what: seqHit ? `画面描述里有「${seqHit[1]}」，这是两件先后发生的事` : `这一镜一口气写了 ${beats} 段，多半塞了好几件事`,
       why: '每一镜只拿得到**一张静止的首帧图**。一张图画不出一串先后发生的事，模型只能挑一个瞬间画，剩下的全丢。',
       fix: '拆成几镜，一镜一个动作。「听到敲门」「说请进」「门被推开」「客人坐下」是四镜。'
+    });
+  }
+
+  /**
+   * 技法卡和排位说的不是一回事。
+   *
+   * 两句话会一起进同一条提示词而且挨着，模型只能挑一句听 —— 挑哪句你控制不了。
+   * 表现是"排了位好像没生效"或者"选了仰拍怎么出来是平的"，
+   * 而**没有任何报错**：两句话各自都是合法的。
+   */
+  for (const c of previz.conflictingSkills(shot)) {
+    issues.push({
+      kind: 'skill-vs-stage',
+      severity: 'high',
+      what: `技法卡选了「${SKILL_NAMES[c.id] || c.id}」，而排位算出来是「${c.said}」`,
+      why: '这两句话会一起发给模型，而且挨在一起。模型只能挑一句听，挑哪句你控制不了 —— 表现就是"排了位好像没生效"，却什么错都不报。',
+      fix: '要么把这张技法卡取消，让排位说了算；要么把机位拖成技法卡说的那样。两条都行，但不能都留着。'
     });
   }
 

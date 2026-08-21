@@ -1197,7 +1197,31 @@ export async function suggestSkills(projectId, { only = null, onEvent } = {}) {
       // 和手选走同一条规整逻辑：互斥组只留一个、不认识的 id 丢掉。
       // 模型偶尔会自创 id 或者两个互斥的都给。
       const norm = skillsLib.normalize(pick.skills);
-      target.skills = norm.ids;
+      /**
+       * 排过位的镜头，**机位和运镜那几张卡轮不到模型挑**。
+       *
+       * 那几张卡说的正是排位已经算出来的东西（平视/仰拍/大特写/推镜/固定镜头…）。
+       * 两句话会一起进同一条提示词而且挨着，模型只能挑一句听 ——
+       * 表现是"排了位好像没生效"，却什么错都不报。
+       *
+       * 这里过滤而不是在提示词里嘱咐模型别挑：提示词只是**请求**，
+       * 而这条规矩不能靠请求（这份文件里已经栽过一次 —— 见 SHOTS_REPLY 那段注释）。
+       *
+       * ⚠ 只过滤自动挑的。人自己在界面上选的不动 —— 悄悄改用户选的东西，
+       * 会让他看着一个自己没选过的结果想不明白哪儿来的。那种冲突走体检报出来。
+       */
+      const staged = Boolean(target.stage?.cam);
+      const kept = staged
+        ? norm.ids.filter((id) => !previz.SKILLS_OWNED_BY_STAGE.includes(id))
+        : norm.ids;
+      if (staged && kept.length < norm.ids.length) {
+        const dropped = norm.ids.filter((id) => !kept.includes(id));
+        onEvent?.({
+          type: 'note',
+          message: `第 ${target.index} 镜排过位，机位那几张卡（${dropped.join('、')}）不挑了 —— 机位由排位说了算，两边都说会打架`
+        });
+      }
+      target.skills = kept;
       target.skillWhy = String(pick.why || '').trim();
       touched.push({ id: target.id, index: target.index, dropped: norm.dropped });
     }

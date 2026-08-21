@@ -2265,6 +2265,61 @@ section('预演台：把"中景"变成一组数');
     imports.length === 0, imports.join(' / '));
 }
 
+section('预演台 vs 技法卡：两边都在说机位，会打架');
+{
+  const pv = await import('../core/pipeline/previz.js');
+  const lint = await import('../core/pipeline/shotlint.js');
+
+  /**
+   * 技法卡里有一整组在**描述机位**（平视/仰拍/俯拍/顶视/大特写），
+   * 还有一组在**描述运镜**（推镜/拉镜/摇镜/跟拍/固定镜头）。
+   * 而排过位之后，机位高度、景别、运镜方向全是算出来的。
+   *
+   * 两者会一起进同一条提示词，而且挨着：
+   *   「低机位仰拍，被摄者显得高大……，镜头：全景，机位在强雄正面方向、平视，35mm」
+   * 模型只能挑一句听，挑哪句你控制不了。表现是"排了位好像没生效"，
+   * 而**没有任何报错** —— 两句话各自都是合法的。
+   */
+  const staged = {
+    index: 7,
+    description: '强雄站在窗前',
+    stage: { cam: { x: 0, y: -3, height: 1.6, lens: 35, move: { horizontal: -4 } }, subjects: [{ name: '强雄', x: 0, y: 0, facing: 180 }] }
+  };
+
+  const bad = pv.conflictingSkills({ ...staged, skills: ['low-angle', 'static'] });
+  check('仰拍 vs 排位算出的平视 → 报', bad.some((c) => c.id === 'low-angle'), JSON.stringify(bad));
+  check('固定镜头 vs 排位算出的横移 → 报', bad.some((c) => c.id === 'static'), JSON.stringify(bad));
+  check('报的时候指着说排位到底是什么', bad.find((c) => c.id === 'low-angle')?.said === '平视');
+
+  /**
+   * ⚠ 只报**真的对不上**的。选了「平视」而排位也是平视，那是一致，不是冲突 ——
+   * 把一致的也报出来，这个检查立刻变成噪音，然后没人再看它。
+   */
+  check('一致的不报（平视 + 平视）',
+    pv.conflictingSkills({ ...staged, skills: ['eye-level'] }).length === 0);
+  check('一致的不报（跟拍 + 横移）',
+    pv.conflictingSkills({ ...staged, skills: ['tracking'] }).length === 0);
+  // 光线、动作、氛围和机位无关，一张都不该被牵连
+  check('不相干的卡不受影响',
+    pv.conflictingSkills({ ...staged, skills: ['rembrandt', 'act-cry'] }).length === 0);
+  /**
+   * 排位说不了的东西不算冲突：环绕、希区柯克变焦、手持质感、荷兰角、过肩 ——
+   * 那六个参数里根本没有它们，卡片是**补充**而不是矛盾。
+   */
+  check('排位表达不了的卡不算冲突',
+    pv.conflictingSkills({ ...staged, skills: pv.SKILLS_BEYOND_STAGE }).length === 0,
+    JSON.stringify(pv.conflictingSkills({ ...staged, skills: pv.SKILLS_BEYOND_STAGE })));
+  // 没排位就没有冲突可言 —— 那时候技法卡就是唯一的机位来源
+  check('没排位时不报', pv.conflictingSkills({ skills: ['low-angle'], description: 'x' }).length === 0);
+
+  // 报到用户看得见的地方
+  const found = lint.lintShot({ ...staged, skills: ['low-angle'] });
+  const hit = found.find((i) => i.kind === 'skill-vs-stage');
+  check('冲突进了分镜体检', Boolean(hit), JSON.stringify(found.map((i) => i.kind)));
+  check('说的是卡的名字，不是 id（用户看到的是名字）', /仰拍/.test(hit?.what || ''), hit?.what);
+  check('给了两条都能走的出路', /取消/.test(hit?.fix || '') && /拖成/.test(hit?.fix || ''), hit?.fix);
+}
+
 section('预演台：下一镜接着上一镜排，不是从零开始');
 {
   const pv = await import('../core/pipeline/previz.js');

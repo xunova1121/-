@@ -415,6 +415,71 @@ export function sheetHintFor(shot, personName) {
 }
 
 /**
+ * 技法卡和排位打架的地方。
+ *
+ * ── 冲突是怎么产生的 ──
+ *
+ * 技法卡里有一整组是**在描述机位**：平视 / 仰拍 / 俯拍 / 顶视 / 大特写，
+ * 还有一组在**描述运镜**：推镜 / 拉镜 / 摇镜 / 跟拍 / 固定镜头。
+ * 而排过位之后，机位高度、景别、运镜方向全是**算出来的**。
+ *
+ * 两者会一起进同一条提示词，而且挨着：
+ *
+ *   低机位仰拍，被摄者显得高大具有压迫感，……，镜头：全景，机位在强雄正面方向、平视，35mm
+ *
+ * 模型收到两句互相打架的话，只能挑一句听 —— 挑哪句你控制不了。
+ * 表现是"排了位好像没生效"，或者"选了仰拍怎么出来是平的"，
+ * 而**没有任何报错**：两句话各自都是合法的。
+ *
+ * ── 为什么是报，不是自动删 ──
+ *
+ * 和分镜体检同一条规矩：悄悄改用户选的东西，会让他看着一个自己没选过的
+ * 结果想不明白哪儿来的。这里只把冲突指出来、说清楚会怎样，改不改他定。
+ *（自动挑技法那一步是另一回事 —— 那是我们替他挑的，就该一开始别挑到，
+ *  见 studio.js 里 assignSkills 的过滤。）
+ *
+ * ⚠ 只列**真的对不上**的。选了「平视」而排位也是平视，那是一致，不是冲突 ——
+ * 把一致的也报出来，这个检查就变成噪音了。
+ */
+const CARD_AGREES = {
+  'eye-level': (r) => r.height.id === 'eye',
+  'low-angle': (r) => r.height.id === 'low',
+  'high-angle': (r) => r.height.id === 'high',
+  'birds-eye': (r) => r.height.id === 'high',
+  'close-up': (r) => r.size?.id === 'closeup',
+  static: (r) => r.static,
+  'push-in': (r) => r.move.zoom < 0,
+  'pull-out': (r) => r.move.zoom > 0,
+  // ⚠ 这两条的字面意思是反的：可灵的 pan 是**俯仰**转、tilt 是**左右**转，
+  // 而技法卡里「摇镜」是水平扫、「俯仰摇」是垂直扫。照字面对会全接反。
+  pan: (r) => r.move.tilt !== 0,
+  tilt: (r) => r.move.pan !== 0,
+  tracking: (r) => r.move.horizontal !== 0,
+  crane: (r) => r.move.vertical !== 0
+};
+
+/** 这几张卡说的是排位说不了的东西（环绕、变焦特效、手持质感），不算冲突 */
+export const SKILLS_BEYOND_STAGE = ['orbit', 'dolly-zoom', 'handheld', 'dutch', 'ots'];
+
+/** 排过位之后，这几张卡就轮不到它们说了 —— 自动挑技法时直接别挑 */
+export const SKILLS_OWNED_BY_STAGE = Object.keys(CARD_AGREES);
+
+export function conflictingSkills(shot) {
+  if (!shot?.stage?.cam) return [];
+  const read = readShot(shot.stage);
+  return (shot.skills || [])
+    .filter((id) => CARD_AGREES[id] && !CARD_AGREES[id](read))
+    .map((id) => ({ id, said: describeFor(id, read) }));
+}
+
+/** 排位在这一项上到底说的是什么 —— 报冲突时要能指着说 */
+function describeFor(id, read) {
+  if (['eye-level', 'low-angle', 'high-angle', 'birds-eye'].includes(id)) return read.height.label;
+  if (id === 'close-up') return read.size ? read.size.label : '（这一镜没有主体，算不出景别）';
+  return read.static ? '固定机位' : toChinese(read).split('，').pop();
+}
+
+/**
  * 越轴检查：同一场戏里，相邻两镜的机位不能跨到轴线另一侧。
  *
  * 只在**同一场次**内查 —— 换了场次就是另一场戏，轴线本来就重新算。
