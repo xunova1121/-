@@ -3673,6 +3673,55 @@ section('接缝：走一遍出视频，看首帧到底发的是哪张');
   settings.patch({ seamMode: 'lock' });
 }
 
+section('单镜重出：接缝没做，也得说一句为什么');
+{
+  const st3 = await import('../core/pipeline/studio.js');
+
+  /**
+   * 用户在手机上重出两镜，看到的是"两段各自用各自的首帧"，
+   * 于是得出"两个接缝模式都没生效"。
+   *
+   * 而真相是：那两镜没标「连续动作」，接缝本来就不该做 ——
+   * 只是**单镜重出这条路一个字都没说**。批量出视频那条开跑前会打一行
+   * 接缝计划，这条漏了。不触发的分支彻底安静，用户唯一能得出的结论
+   * 就是"功能是坏的"，而且他没法反驳自己。
+   *
+   * 这是这个项目里同一个教训的第三次（前两次：接缝计划、手机端新建项目）。
+   */
+  const sp3 = store.create({ title: '接缝解释', script: 'x' });
+  store.update(sp3.id, (p) => {
+    p.bible = { style: { anchor: '', negative: '' }, characters: [], scenes: [], props: [] };
+    p.shots = [
+      { id: 'a', index: 1, segment: 1, scene: '走廊', description: '伸手', camera: '中景', duration: 4, imagePath: '/x/1.png' },
+      { id: 'b', index: 2, segment: 1, scene: '走廊', description: '拧把手', camera: '特写', duration: 4, imagePath: '/x/2.png' }
+    ];
+    return p;
+  });
+  settings.patch({ seamMode: 'lock' });
+
+  const notes = [];
+  await st3.regenerateShotVideo(sp3.id, 'b', {}, (e) => notes.push(e.message)).catch(() => {});
+  const why = notes.filter(Boolean).find((m) => /没做接缝/.test(m)) || '';
+  check('没做接缝时出声了（原来是彻底安静的）', Boolean(why), notes.filter(Boolean).slice(0, 3).join(' | '));
+  check('指名是因为没标「连续动作」', /连续动作/.test(why), why.slice(0, 120));
+  /**
+   * 最容易误解的一条：首尾帧模式下接缝做在**上一镜**身上
+   *（把这一镜的图锁成上一镜的末帧）。只重出后面那一镜，接缝一点变化都没有。
+   * 不说的话，人会一遍遍重出后面那镜，然后确信功能是坏的。
+   */
+  check('点明首尾帧模式下该重出的是上一镜', /上一镜/.test(why), why.slice(-90));
+
+  // 关掉时说的是"关掉了"，不是编一个别的理由
+  settings.patch({ seamMode: 'off' });
+  const offNotes = [];
+  await st3.regenerateShotVideo(sp3.id, 'b', {}, (e) => offNotes.push(e.message)).catch(() => {});
+  check('关掉时如实说是关掉了',
+    offNotes.filter(Boolean).some((m) => /已在设置里关掉/.test(m)),
+    offNotes.filter(Boolean).slice(0, 3).join(' | '));
+
+  settings.patch({ seamMode: 'lock' });
+}
+
 section('默认走首尾帧：碰上不收末帧的厂商要能退回去');
 {
   const cat = await import('../core/providers/catalog.js');

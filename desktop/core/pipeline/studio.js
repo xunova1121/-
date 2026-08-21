@@ -1710,7 +1710,7 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
 
   // 单独重出同样要吃上下文 —— 少了它，重出的这一镜会变成全片里唯一"自成一段"的那一镜。
   // 也放在首帧之前：接缝模式下首帧可能来自上一段视频的真实末帧
-  const ctx = await videoContextFor(project, shot, { onEvent, providerId });
+  const ctx = await videoContextFor(project, shot, { onEvent, providerId, explain: true });
   const firstFrame =
     ctx.headFromTail?.url
     || usableRef(shot.imageRef)
@@ -2389,7 +2389,50 @@ export function wantsTailChain(seamMode, takesEndFrame) {
   return !takesEndFrame;
 }
 
-async function videoContextFor(project, shot, { onEvent, providerId = null } = {}) {
+/**
+ * 这一镜的接缝为什么没做 —— 一句话说清楚，并指向能改的地方。
+ *
+ * ⚠ 最容易误解的一条单独点出来：**首尾帧模式下，接缝做在「上一镜」身上**
+ *（把这一镜的图锁成上一镜的末帧）。所以只重出后面那一镜，接缝一点变化都不会有 ——
+ * 该重出的是前面那一镜。不说的话，人会一遍遍重出后面那镜然后觉得功能是坏的。
+ */
+function seamWhyNot({ shot, prev, next, link, nextLink, seamMode, takesEndFrame, provider }) {
+  if (seamMode === 'off') {
+    return '接缝：已在设置里关掉，这一镜只靠提示词衔接';
+  }
+  if (!prev && !next) {
+    return '接缝：全片只有这一镜，没有可接的邻镜';
+  }
+
+  const sameSeg = (a, b) => Number(a?.segment || 1) === Number(b?.segment || 1);
+  const bits = [];
+
+  // 和上一镜之间
+  if (prev && link !== 'continuous') {
+    bits.push(`和第 ${prev.index} 镜之间标着「${continuity.LINK_LABELS[link] || link}」，不是「连续动作」—— 接缝只在连续动作上做`);
+  } else if (prev && !sameSeg(prev, shot)) {
+    bits.push(`和第 ${prev.index} 镜跨了场次，不接（另一个地方、另一段时间）`);
+  } else if (prev && !prev.videoPath) {
+    bits.push(`第 ${prev.index} 镜还没出视频，抠不到它的末帧 —— 把上一镜一起选上重出`);
+  }
+
+  // 和下一镜之间（首尾帧模式下，锁的是**这一镜的末帧**）
+  if (next && nextLink !== 'continuous') {
+    bits.push(`和第 ${next.index} 镜之间标着「${continuity.LINK_LABELS[nextLink] || nextLink}」，也不是「连续动作」`);
+  } else if (next && !takesEndFrame) {
+    bits.push(`${provider?.name || '这家'}不收末帧图`);
+  }
+
+  const head = `第 ${shot.index} 镜这次没做接缝：${bits.join('；') || '相邻两镜都不是连续动作'}。`;
+  const how =
+    '「连续动作」不会自动判出来，要在分镜里手选。'
+    + (seamMode === 'lock'
+      ? '⚠ 首尾帧模式下接缝做在**上一镜**身上（把这一镜的图锁成上一镜的末帧）—— 只重出后面这一镜是看不到变化的，该重出的是前面那一镜。'
+      : '');
+  return head + how;
+}
+
+async function videoContextFor(project, shot, { onEvent, providerId = null, explain = false } = {}) {
   const { prev, next, link, nextLink } = continuity.neighbors(project.shots || [], shot.id);
 
   const videoPrompt = consistency.assembleVideoPrompt(project.bible, shot, { prev, next, link });
@@ -2465,6 +2508,20 @@ async function videoContextFor(project, shot, { onEvent, providerId = null } = {
         onEvent?.({ type: 'note', message: `取第 ${next.index} 镜的图当末帧失败（${err.message}），本镜按普通图生视频出` });
       }
     }
+  }
+
+  /**
+   * 单镜重出时，**接缝没做也要说一句为什么**。
+   *
+   * 批量出视频那条路开跑前会打一行接缝计划（seamPlanOf），
+   * 而单镜重出这条路原来是彻底安静的：接缝不触发时一个字都没有。
+   * 用户在手机上重出两镜，看到的就是"两段各自用各自的首帧"，
+   * 而且**没有任何线索**说明为什么 —— 只能得出"这两个模式都没生效"。
+   *
+   * 不触发的分支必须出声。这是这个项目里同一个教训的第三次了。
+   */
+  if (explain && !headFromTail && !lastFrameUrl) {
+    onEvent?.({ type: 'note', message: seamWhyNot({ shot, prev, next, link, nextLink, seamMode, takesEndFrame, provider }) });
   }
 
   return { prev, next, link, nextLink, videoPrompt, lastFrameUrl, headFromTail };
