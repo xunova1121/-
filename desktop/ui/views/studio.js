@@ -10,6 +10,7 @@ import { openLightbox } from '../lightbox.js';
 import { ratioLabel } from '../ratios.js';
 import { skillPicker, customSkillForm } from '../skill-picker.js';
 import { previzPanel, blankStage } from '../previz-canvas.js';
+import { inheritStage } from '/previz.js';
 import { stepsOf, stepProgress } from '../pipeline.js';
 import bibleView from './bible.js';
 
@@ -1316,9 +1317,17 @@ export default {
           if (!previzHost.open || previzHost.dataset.built) return;
           previzHost.dataset.built = '1';
           if (!stageDraft) {
-            stageDraft = blankStage(
-              String(shot.characters || '').split(/[,，、]/).map((x) => x.trim()).filter(Boolean)
-            );
+            const names = String(shot.characters || '').split(/[,，、]/).map((x) => x.trim()).filter(Boolean);
+            /**
+             * 接着上一镜排，不是从零开始。
+             *
+             * 同一场戏里人不会在两镜之间瞬移 —— 每镜重摆一遍不只是重复劳动，
+             * 更坏的是**轴线会跟着变**：人的位置一变，两人之间那条线就转了，
+             * 越轴检查跟着乱报，而乱报的检查比没有检查更糟。
+             * 跨场次不继承 —— 那是另一个地方、另一段时间。
+             */
+            const sameSeg = prevShot && Number(prevShot.segment || 1) === Number(shot.segment || 1);
+            stageDraft = (sameSeg && inheritStage(prevShot.stage, names)) || blankStage(names);
           }
           // 上一镜的排位拿来比对轴线 —— 越轴是**两镜之间**的事，单看一镜看不出来
           const panel = previzPanel(stageDraft, {

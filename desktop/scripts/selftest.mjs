@@ -2265,6 +2265,50 @@ section('预演台：把"中景"变成一组数');
     imports.length === 0, imports.join(' / '));
 }
 
+section('预演台：下一镜接着上一镜排，不是从零开始');
+{
+  const pv = await import('../core/pipeline/previz.js');
+
+  const prev = {
+    cam: { x: -2, y: -3, height: 1.2, lens: 85, move: { horizontal: -4 } },
+    subjects: [
+      { name: '强雄', x: -1, y: 0, facing: 90 },
+      { name: '班主任', x: 1, y: 0, facing: 270 }
+    ]
+  };
+
+  /**
+   * 同一场戏里人不会在两镜之间瞬移。每镜从空白重摆的话，不只是重复劳动 ——
+   * 人的位置一变，两人之间那条**轴线就转了**，于是"机位在同一侧"这个判断
+   * 整个失去意义，越轴检查开始乱报。而乱报的检查比没有检查更糟：
+   * 看两次假警报之后，人就再也不看它了。
+   */
+  const next = pv.inheritStage(prev, ['强雄', '班主任']);
+  check('人的位置原样接过来', next.subjects[0].x === -1 && next.subjects[1].x === 1,
+    JSON.stringify(next.subjects));
+  check('朝向也接过来（不然每镜都要重新转身）', next.subjects[0].facing === 90);
+  /**
+   * 机位也接过来当起点：起点落在上一镜同一侧，**默认就是不越轴的**，
+   * 要越轴得自己动手把它拖过去。
+   */
+  check('机位接过来当起点，默认不越轴',
+    pv.axisSide(next.cam, next.subjects) === pv.axisSide(prev.cam, prev.subjects));
+  check('焦段和运镜也一起带过来', next.cam.lens === 85 && next.cam.move.horizontal === -4);
+
+  // 这一镜新出场的人得有个位置，先摆中间等着被拖走
+  const withNew = pv.inheritStage(prev, ['强雄', '周爸爸']);
+  check('新出场的人补一个位置', withNew.subjects.length === 2 && withNew.subjects[1].name === '周爸爸');
+  check('已有的人还是原来那个位置', withNew.subjects[0].x === -1);
+  /**
+   * 上一镜有、这一镜没有的人要**丢掉**。留在图上的话，算景别时可能挑到他
+   * 当主体，于是整镜的景别都是照错人算的 —— 而画面上根本没有这个人。
+   */
+  check('这一镜没有的人要丢掉（否则景别会照错人算）',
+    !withNew.subjects.some((x) => x.name === '班主任'), JSON.stringify(withNew.subjects.map((x) => x.name)));
+
+  check('上一镜没排过位就没得继承', pv.inheritStage(null, ['强雄']) === null);
+}
+
 section('预演台：算出来的机位，比读描述里的关键词准');
 {
   const con = await import('../core/pipeline/consistency.js');

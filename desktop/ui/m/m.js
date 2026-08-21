@@ -41,6 +41,7 @@
  * 算出不同的机位关系 —— 那比少一个功能糟糕得多。
  */
 import { previzPanel, blankStage } from '/previz-canvas.js';
+import { inheritStage } from '/previz.js';
 
 const canInstall = window.isSecureContext && 'serviceWorker' in navigator;
 if (canInstall) {
@@ -1210,9 +1211,15 @@ function editRow(s) {
   previzBox.addEventListener('toggle', () => {
     if (!previzBox.open || previzBox.dataset.built) return;
     previzBox.dataset.built = '1';
-    if (!stageDraft) stageDraft = blankStage((s.characters || []).slice(0, 4));
     // 上一镜的排位拿来比轴线 —— 越轴是两镜之间的事，单看一镜看不出来
     const prev = (project.shots || []).filter((x) => x.index < s.index).slice(-1)[0];
+    if (!stageDraft) {
+      // 接着上一镜排（同场次才接）—— 人不会在两镜之间瞬移，
+      // 而且位置一变轴线就跟着转，越轴检查会开始乱报
+      const sameSeg = prev && Number(prev.segment || 1) === Number(s.segment || 1);
+      const names = (s.characters || []).slice(0, 4);
+      stageDraft = (sameSeg && inheritStage(prev.stage, names)) || blankStage(names);
+    }
     previzBox.append(previzPanel(stageDraft, { size: 300, prevStage: prev?.stage || null }).node);
   });
   // 怎么进入这一镜。默认硬切 —— 满屏叠化是最典型的业余做法

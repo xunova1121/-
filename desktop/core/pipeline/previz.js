@@ -341,6 +341,47 @@ export function normalizeStage(stage) {
 }
 
 /**
+ * 下一镜的排位从哪儿开始 —— **接着上一镜，不是从零开始**。
+ *
+ * ── 为什么这条是必须的 ──
+ *
+ * 同一场戏里，人不会在两镜之间瞬移。第 4 镜他站在门口，第 5 镜他还在门口，
+ * 变的只是机位。每一镜都从一张空白图重新摆的话：
+ *
+ *   · 光是重复劳动就足以让人不用这个功能
+ *   · 更坏的是**轴线会跟着变**。人的位置一变，两人之间那条线就转了，
+ *     于是"机位在同一侧"这个判断整个失去意义 —— 越轴检查会开始乱报，
+ *     而乱报的检查比没有检查更糟
+ *
+ * 所以继承的是**人的位置和朝向**，机位也一并带过来当起点：
+ * 起点落在上一镜同一侧，默认就是不越轴的，要越轴得自己把它拖过去。
+ *
+ * ⚠ 只在**同一场次**内继承。跨场次是另一个地方、另一段时间，
+ * 把上一场的站位搬过来是错的，而且错得很隐蔽。
+ */
+export function inheritStage(prevStage, names = []) {
+  const base = normalizeStage(prevStage);
+  if (!base) return null;
+
+  const want = (names || []).map((n) => String(n).trim()).filter(Boolean);
+  if (!want.length) return { cam: { ...base.cam }, subjects: base.subjects.map((s) => ({ ...s })) };
+
+  /**
+   * 这一镜的人 = 剧本里写的那几个。上一镜有位置的沿用，
+   * 这一镜新出现的排在场地中间等着被拖走。
+   *
+   * 反过来 —— 上一镜有、这一镜没有的人要**丢掉**：把不在这一镜里的人
+   * 留在图上，算景别时可能挑到他当主体，于是整镜的景别都是照错人算的。
+   */
+  const subjects = want.map((name, i) => {
+    const old = base.subjects.find((s) => s.name === name);
+    if (old) return { ...old };
+    return { name, x: clampM((i - (want.length - 1) / 2) * 1.2), y: 0, facing: 180 };
+  });
+  return { cam: { ...base.cam }, subjects };
+}
+
+/**
  * 这一镜的机位，写成一句可以直接塞进提示词的话。
  *
  * 没排位就回 null —— 调用方据此退回原来那个 `camera` 文本字段。
