@@ -22,6 +22,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(HERE, '..');
 
 // 自检用独立数据目录，绝不碰用户真实的 %APPDATA%\FutureDream
+// 心跳调快，不然那条断言要等 15 秒 —— 等 15 秒的测试没人愿意跑
+process.env.FUTUREDREAM_PING_MS = '60';
 const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'futuredream-selftest-'));
 process.env.FUTUREDREAM_DATA_DIR = SANDBOX;
 
@@ -2096,6 +2098,62 @@ section('存下来的限时地址不复用');
   check('过期的那张确实被认出来了',
     collected.images.filter((u) => st.__usableRef(u) === null).length === 1,
     JSON.stringify(collected.images));
+}
+
+section('长任务的流：一分钟不吭声，连接会被掐掉');
+{
+  /**
+   * 用户在手机上重出一张图，得到一句 `network error`。
+   *
+   * 这条流经常**一分多钟一个字节都不写** —— 出一张图要等厂商三十秒到两分钟，
+   * 这期间流上完全静默。而一条静默的连接会被沿途任何一环回收：
+   * 手机基站的 NAT 表、运营商的空闲超时、反向代理、浏览器息屏时收紧的策略。
+   *
+   * 掐掉之后浏览器只给一句 `network error`，它不区分"服务器挂了""网断了"
+   * "闲太久被回收了"—— 而这三件事该做的处理完全不同。更要命的是：
+   * **任务在服务器上还好好跑着**，图其实出来了。
+   */
+  const srv = await import('../core/server.js');
+  const writes = [];
+  const handlers = {};
+  const fakeRes = {
+    writeHead() {},
+    write(chunk) { writes.push(chunk); },
+    end(chunk) { if (chunk) writes.push(chunk); },
+    on(ev, fn) { handlers[ev] = fn; }
+  };
+
+  const stream = srv.__ndjson(fakeRes);
+  stream.send({ type: 'note', message: '开跑' });
+  check('正常事件照常发出去', writes.some((w) => /开跑/.test(w)), JSON.stringify(writes));
+
+  // 自检里把心跳调到 60ms（FUTUREDREAM_PING_MS），不然这条要等 15 秒
+  await new Promise((r) => setTimeout(r, 200));
+  const pings = writes.filter((w) => /"type":"ping"/.test(w)).length;
+  check('静默期间会持续发心跳（否则连接被回收）', pings >= 2, `${pings} 次`);
+
+  /**
+   * ping 必须是**能被 JSON.parse 的完整一行**。
+   * 各端都是按行 parse、按 type 分派，不认识的 type 天然忽略 ——
+   * 但只要有一行 parse 不了，缓冲区的切分就会乱，后面的真事件跟着丢。
+   */
+  const pingLine = writes.find((w) => /ping/.test(w));
+  check('心跳是完整的一行 JSON（解析不了会带乱后面的事件）',
+    pingLine.endsWith('\n') && JSON.parse(pingLine.trim()).type === 'ping', JSON.stringify(pingLine));
+
+  stream.end({ type: 'finished' });
+  const after = writes.length;
+  await new Promise((r) => setTimeout(r, 200));
+  check('结束之后不再发心跳（不然定时器会一直吊着）', writes.length === after, `又多了 ${writes.length - after} 条`);
+
+  // 对端先走的情况：res 的 close 事件要能把定时器停掉
+  const w2 = [];
+  const res2 = { writeHead() {}, write(c) { w2.push(c); }, end() {}, on(ev, fn) { if (ev === 'close') res2.__close = fn; } };
+  srv.__ndjson(res2);
+  res2.__close();
+  const n2 = w2.length;
+  await new Promise((r) => setTimeout(r, 200));
+  check('对端断开后也停掉心跳', w2.length === n2, `又多了 ${w2.length - n2} 条`);
 }
 
 section('预演台：把"中景"变成一组数');

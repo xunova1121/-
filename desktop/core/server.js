@@ -98,6 +98,16 @@ function readBody(req, limitBytes = 8 * 1024 * 1024) {
  * 用它而不是 SSE，是因为前端要的就是"边跑边看"，而 NDJSON 在 fetch + ReadableStream 下
  * 处理起来比 EventSource 简单，还能带 POST body。
  */
+/**
+ * 心跳间隔。**每次取值**而不是模块加载时定死 ——
+ * 定死的话自检根本改不动它：ESM 的静态 import 在任何代码之前就跑完了，
+ * 等测试去设环境变量时，这个常量早就是 15000 了。
+ * 做成可配的唯一理由就是能测，那它就必须在测试够得着的时候才取。
+ */
+function pingMs() {
+  return Number(process.env.FUTUREDREAM_PING_MS) || 15000;
+}
+
 function ndjson(res) {
   res.writeHead(200, {
     'Content-Type': 'application/x-ndjson; charset=utf-8',
@@ -105,6 +115,40 @@ function ndjson(res) {
     'X-Accel-Buffering': 'no'
   });
   let closed = false;
+
+  /**
+   * 心跳。**这条流经常一分多钟一个字节都不写。**
+   *
+   * ── 为什么必须有 ──
+   *
+   * 出一张图要等厂商三十秒到两分钟，这期间流上完全是静默的。
+   * 而一条静默的连接会被沿途任何一环掐掉：手机基站的 NAT 表、
+   * 运营商的空闲超时、反向代理、浏览器自己在息屏时收紧的策略。
+   *
+   * 掐掉之后浏览器那边 fetch 直接 reject，报的是一句
+   * **`network error`** —— 它不区分"服务器挂了""网断了""连接闲太久被回收了"，
+   * 而这三件事该做的处理完全不同。用户看到的就是一句什么也没说的报错，
+   * 更糟的是：**任务在服务器上还好好跑着**，图其实出来了。
+   *
+   * 每 15 秒写一行 ping 就能把整条链路上的空闲计时器全部重置。
+   * 代价是每分钟四行 JSON，可以忽略。
+   *
+   * ping 这一行客户端不用特别处理：各端都是 `JSON.parse` 一行、按 type 分派，
+   * 不认识的 type 天然被忽略。
+   */
+  const beat = setInterval(() => {
+    if (closed) return;
+    try {
+      res.write('{"type":"ping"}\n');
+    } catch {
+      // 对端已经走了。这里不该抛 —— 心跳失败不是业务失败
+    }
+  }, pingMs());
+  // 别让一个定时器把进程吊着不退（打包成 exe 之后这会表现为"关不掉"）
+  beat.unref?.();
+  const stop = () => clearInterval(beat);
+  res.on('close', stop);
+
   return {
     send(event) {
       if (closed) return;
@@ -114,6 +158,7 @@ function ndjson(res) {
       if (closed) return;
       if (event) res.write(`${JSON.stringify(event)}\n`);
       closed = true;
+      stop();
       res.end();
     },
     get closed() {
@@ -1530,3 +1575,6 @@ if (invokedDirectly) {
       process.exit(1);
     });
 }
+
+/** 只给自检用：心跳是看不见的东西，不测就永远不知道它有没有在跳 */
+export const __ndjson = ndjson;

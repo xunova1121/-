@@ -88,6 +88,30 @@ export async function api(path, { method = 'GET', body } = {}) {
  * 读 NDJSON 流。后端把进度一行一个事件推过来，这里逐行回调。
  * 关键是要处理"一个 chunk 里可能有半行"的情况 —— 不留缓冲会把 JSON 切断。
  */
+/**
+ * 流中途断了，说人话。
+ *
+ * 浏览器对**所有**网络层失败都只给一句 `network error`（或者
+ * `Failed to fetch` / `Load failed`，各家措辞还不一样）。它不区分
+ * "服务器挂了""网断了""连接闲太久被回收了"，而这三件事该做的处理完全不同。
+ *
+ * 最要紧的一点是：这条流断掉时，**任务在服务器上多半还在跑**。
+ * 报一句"失败了"会让人以为白花了钱，然后再点一次 —— 那才是真的白花。
+ */
+function streamBroke(err, got) {
+  const raw = String(err?.message || err || '');
+  // 用户主动取消不算断线，别把"我点了停止"说成"网络出问题了"
+  if (err?.name === 'AbortError') return err;
+  const looksNetwork = /network error|Failed to fetch|Load failed|terminated/i.test(raw);
+  if (!looksNetwork) return err;
+  return new Error(
+    (got ? '跑到一半连接断了' : '连接没建起来')
+    + '（息屏、切网、或者连接闲置被回收都会这样）。'
+    + '这一步多半还在服务器上跑着 —— 刷新看看结果，别急着重跑，重跑是重新花一次钱。'
+    + `（原始报错：${raw.slice(0, 60)}）`
+  );
+}
+
 export async function stream(path, body, onEvent, { signal } = {}) {
   const res = await fetch(`/api${path}`, {
     method: 'POST',
@@ -101,9 +125,18 @@ export async function stream(path, body, onEvent, { signal } = {}) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let got = false;
   for (;;) {
-    const { done, value } = await reader.read();
+    let chunk;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      chunk = await reader.read();
+    } catch (err) {
+      throw streamBroke(err, got);
+    }
+    const { done, value } = chunk;
     if (done) break;
+    got = true;
     buffer += decoder.decode(value, { stream: true });
     let nl;
     while ((nl = buffer.indexOf('\n')) !== -1) {

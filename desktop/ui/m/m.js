@@ -121,20 +121,55 @@ async function api(path, { method = 'GET', body = null } = {}) {
  * NDJSON 流。手机端也要能发起整步任务 —— 出门在外看到"第 3 镜失败了"，
  * 总得能当场点一下重出，而不是记在心里回去再说。
  */
+/**
+ * 流中途断了，说人话。
+ *
+ * 浏览器对**所有**网络层失败都只给一句 `network error`（或者
+ * `Failed to fetch` / `Load failed`，各家措辞还不一样）。它不区分
+ * "服务器挂了""网断了""连接闲太久被回收了"，而这三件事该做的处理完全不同。
+ *
+ * 最要紧的一点是：这条流断掉时，**任务在服务器上多半还在跑**。
+ * 报一句"失败了"会让人以为白花了钱，然后再点一次 —— 那才是真的白花。
+ */
+function streamBroke(err, got) {
+  const raw = String(err?.message || err || '');
+  const looksNetwork = /network error|Failed to fetch|Load failed|terminated|aborted/i.test(raw);
+  if (!looksNetwork) return err;
+  return new Error(
+    (got ? '跑到一半连接断了' : '连接没建起来')
+    + '（手机息屏、切了网、或者连接闲置被回收都会这样）。'
+    + '**这一步多半还在服务器上跑着** —— 回来点「刷新」看看结果，别急着重跑，重跑是重新花一次钱。'
+    + `（原始报错：${raw.slice(0, 60)}）`
+  );
+}
+
 async function stream(path, body, onEvent) {
-  const res = await fetch(`/api${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(authKey ? { 'X-FD-Key': authKey } : {}) },
-    body: JSON.stringify(body || {})
-  });
+  let res;
+  try {
+    res = await fetch(`/api${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(authKey ? { 'X-FD-Key': authKey } : {}) },
+      body: JSON.stringify(body || {})
+    });
+  } catch (err) {
+    throw streamBroke(err, false);
+  }
   if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let buf = '';
+  let got = false;
   for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
+    let chunk;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      chunk = await reader.read();
+    } catch (err) {
+      throw streamBroke(err, got);
+    }
+    if (chunk.done) break;
+    got = true;
+    buf += dec.decode(chunk.value, { stream: true });
     const lines = buf.split('\n');
     buf = lines.pop() || '';
     for (const line of lines) {
