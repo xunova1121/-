@@ -38,6 +38,57 @@ const SPEECH_VERBS = '说|道|问|答|喊|叫|吼|嘟囔|低语|开口|回答|�
 /** 旁白的各种写法 */
 const NARRATOR = ['旁白', '画外音', 'V.O.', 'VO', 'OS'];
 
+/**
+ * 台词的**四种**类型。
+ *
+ * 原来只有两种：有 speaker 就是对白，没有就是旁白。这漏掉了短剧里最常用的
+ * 一种 —— **心里话**：声音是这个角色自己的，但他嘴不动。
+ *
+ * 用原来那套表达不了：把 speaker 填成这个角色，画面就会被要求"口型对上台词"，
+ * 出来是他在自言自语；把 speaker 留空当旁白，声音又变成了旁白那个音色。
+ * 两种都不对，而且**都不会报错**。
+ *
+ * 所以类型和说话人是**两个正交的字段**：
+ *
+ *   speaker  声音用谁的（空 = 旁白音色）
+ *   lineKind 嘴动不动、声音从哪儿来
+ */
+export const LINE_KINDS = [
+  { id: 'speech', label: '对白', hint: '他在画面里说出来，口型要对上' },
+  { id: 'inner', label: '心里话', hint: '他自己的声音，但嘴不动 —— 内心独白' },
+  { id: 'voiceover', label: '旁白', hint: '画外的叙述者，画面里的人都不说话' },
+  { id: 'offscreen', label: '画外音', hint: '这个角色在说话，但他不在这一镜的画面里（隔壁房间、门外、电话）' }
+];
+
+export const LINE_KIND_LABELS = Object.fromEntries(LINE_KINDS.map((k) => [k.id, k.label]));
+
+/**
+ * 这一镜的台词算哪一种。
+ *
+ * 没标过的按老规矩推：有说话人 = 对白，没有 = 旁白。
+ * 这样老项目读出来行为一个字都不变。
+ */
+export function lineKindOf(shot, resolvedSpeaker = undefined) {
+  const explicit = String(shot?.lineKind || '').trim();
+  if (LINE_KINDS.some((k) => k.id === explicit)) return explicit;
+  /**
+   * 没标过的按老规矩推。
+   *
+   * ⚠ 这里要用**推断过**的说话人，不是 shot.speaker 那个原始字段。
+   * 管线里说话人是 resolve() 出来的：分镜没填时，画面里只有一个角色就算他说的。
+   * 拿原始字段判的话，"有台词但没填说话人"会被判成旁白 ——
+   * 而老行为是当成对白（口型对上台词）。第一版就这么写的，
+   * 自检里那条"有台词时提示口型自然"当场变红，红得对。
+   */
+  const who = resolvedSpeaker === undefined ? String(shot?.speaker || '').trim() : String(resolvedSpeaker || '').trim();
+  return who ? 'speech' : 'voiceover';
+}
+
+/** 这一种要不要嘴动。只有对白要 —— 其余三种嘴都是闭着的 */
+export function movesLips(kind) {
+  return kind === 'speech';
+}
+
 export function isNarrator(name) {
   const n = String(name || '').trim();
   return NARRATOR.some((x) => x.toLowerCase() === n.toLowerCase());

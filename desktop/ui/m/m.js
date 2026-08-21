@@ -1230,6 +1230,30 @@ function editRow(s) {
   let tier = s.tier || '';
   const TIER_PICK = [['', '自动判定'], ['high', '关键镜'], ['normal', '一般'], ['low', '空镜']];
   // 属于第几场。模型划边界是读剧本猜的，猜错很正常，得能改
+  /**
+   * 台词类型。漏掉它的时候「心里话」根本没法表达 ——
+   * 填了说话人画面就要求口型对上（成了自言自语），留空又变成旁白的音色。
+   */
+  const LINE_KINDS = [
+    ['speech', '对白'], ['inner', '心里话'], ['voiceover', '旁白'], ['offscreen', '画外音']
+  ];
+  let lineKind = s.lineKind || (s.speaker ? 'speech' : 'voiceover');
+  const kindPick = (() => {
+    const wrap = h('div', { class: 'chips' });
+    for (const [val, label] of LINE_KINDS) {
+      const b = h('button', {
+        class: `chip ${val === lineKind ? 'on' : ''}`,
+        onclick: () => {
+          lineKind = val;
+          for (const el of wrap.children) el.classList.remove('on');
+          b.classList.add('on');
+        }
+      }, label);
+      wrap.append(b);
+    }
+    return wrap;
+  })();
+
   const segIn = h('input', { type: 'number', class: 'min', min: '1', max: '99', value: String(s.segment || 1) });
 
   /**
@@ -1268,6 +1292,7 @@ function editRow(s) {
           description: desc.value,
           dialogue: line.value,
           speaker: who.value,
+          lineKind,
           // cap:shot-sound
           sound: sfx.value,
           // cap:shot-transition
@@ -1321,7 +1346,11 @@ function editRow(s) {
   box.append(
     field('画面描述', desc, '这是出图和出视频的唯一输入 —— 写偏一句，重出十次也回不到对的画面。'),
     field('台词', line, '留空就是这一镜没人说话。'),
-    field('谁说的', who, '决定用哪个角色的音色。选「旁白」就是画外音。'),
+    field('谁说的', who, '决定用哪个角色的**声音**。'),
+    // cap:line-kind
+    field('台词类型', kindPick,
+      '和「谁说的」是两件事：那个管声音用谁的，这个管**嘴动不动**。'
+      + '心里话＝他自己的声音但嘴闭着；旁白＝画外叙述；画外音＝他在说话但不在这一镜画面里。'),
     field('画外音效', sfx, '听得见看不见的东西写这里。写进画面描述的话，出图模型会去画那个声音 ——「敲门声」通常会画出一扇开着的门。'),
     field('景别', chips(CAMERAS, camera, (v) => (camera = v))),
     field('运镜', chips(MOTIONS, motion, (v) => (motion = v))),

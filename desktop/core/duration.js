@@ -43,6 +43,65 @@ export function alignDuration(requested, allowed = DEFAULT_DURATIONS, { mode = '
   return options.find((d) => d >= want) ?? options[options.length - 1];
 }
 
+/**
+ * 这句台词大概要念多久（秒）。
+ *
+ * ── 为什么必须在**拆分镜那一步**就估 ──
+ *
+ * 原来只有合成那一步会发现"台词比镜头长"，而那时候图和视频的钱已经全花完了。
+ * 补救只有两条：把镜头拉长（要重出这一镜的视频），或者把台词改短（要重配音）。
+ * 两条都是重来一遍。
+ *
+ * 而这件事**在拆分镜的时候就完全算得出来** —— 台词就在手上，几个字数一乘就知道。
+ * 一个 12 个字的句子塞进 3 秒的镜头，念不完是必然的，不需要等到出片才发现。
+ *
+ * ── 这个估法有多准 ──
+ *
+ * 中文 TTS 常速大约每秒 4~5 个字。这里取 4.5，再加标点停顿和首尾的气口。
+ * 它不可能准到零点几秒，也不需要 —— 我们要判的是"3 秒够不够念 12 个字"，
+ * 那是差一倍的量级，估到 ±20% 就完全够用。
+ *
+ * ⚠ 宁可估长。估短了会把台词切掉（最刺耳的一种错），估长了顶多多几秒画面。
+ */
+const CHARS_PER_SEC = 4.5;
+const PAUSE_PER_PUNCT = 0.22;
+/** 开口前和收尾的气口。TTS 出来的音频两头本来就带一点静音 */
+const BREATH = 0.6;
+
+export function speechSeconds(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return 0;
+
+  // 标点单独算停顿，不计进字数 —— 逗号句号本身不发音，但它实实在在占时间
+  const puncts = (raw.match(/[，,。.！!？?；;：:、…—]/g) || []).length;
+  const cjk = (raw.match(/[\u4e00-\u9fff]/g) || []).length;
+  // 英文按词算：一个词平均约 0.35 秒，和中文一个字的时长不是一回事
+  const words = (raw.replace(/[\u4e00-\u9fff]/g, ' ').match(/[A-Za-z0-9']+/g) || []).length;
+
+  const spoken = cjk / CHARS_PER_SEC + words * 0.35;
+  return Number((spoken + puncts * PAUSE_PER_PUNCT + BREATH).toFixed(1));
+}
+
+/**
+ * 这一镜的时长够不够念完台词。
+ *
+ * 留 0.4 秒余量：估算本来就有误差，而且台词紧贴着镜头结尾收也很难看 ——
+ * 话音刚落画面就切走，观众会觉得被打断。
+ */
+export const SPEECH_HEADROOM = 0.4;
+
+export function fitsDialogue(shot) {
+  const need = speechSeconds(shot?.dialogue);
+  const have = Number(shot?.duration) || 0;
+  return { need, have, ok: need === 0 || have >= need + SPEECH_HEADROOM };
+}
+
+/** 念得完这句话，至少要多少秒 */
+export function secondsForDialogue(shot) {
+  const need = speechSeconds(shot?.dialogue);
+  return need ? Number((need + SPEECH_HEADROOM).toFixed(1)) : 0;
+}
+
 /** 常见的成片长度，做成预设省得手填 */
 export const DURATION_PRESETS = [
   { seconds: 15, label: '15 秒', note: '信息流广告' },

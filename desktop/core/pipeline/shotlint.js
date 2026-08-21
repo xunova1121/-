@@ -23,6 +23,7 @@
  * 想不明白哪里来的。报出来，让他自己决定拆成几镜。
  */
 import * as previz from './previz.js';
+import * as duration from '../duration.js';
 import { BUILTIN_SKILLS } from '../skills.js';
 
 /** 报冲突时要说卡的名字，不是 id —— 用户在界面上看到的是名字 */
@@ -128,6 +129,24 @@ export function lintShot(shot) {
       what: `技法卡选了「${SKILL_NAMES[c.id] || c.id}」，而排位算出来是「${c.said}」`,
       why: '这两句话会一起发给模型，而且挨在一起。模型只能挑一句听，挑哪句你控制不了 —— 表现就是"排了位好像没生效"，却什么错都不报。',
       fix: '要么把这张技法卡取消，让排位说了算；要么把机位拖成技法卡说的那样。两条都行，但不能都留着。'
+    });
+  }
+
+  /**
+   * 台词念不完。
+   *
+   * 拆分镜时会自动把时长拉长，但**人改台词是不会自动拉的** ——
+   * 在界面上把一句话改长，时长还停在原来那个数，而这件事要等到合成
+   * 那一步才有人说，那时候图和视频的钱都花完了。
+   */
+  const fit = duration.fitsDialogue(shot);
+  if (!fit.ok) {
+    issues.push({
+      kind: 'dialogue-too-long',
+      severity: 'high',
+      what: `台词大约要念 ${fit.need} 秒，而这一镜只有 ${fit.have} 秒`,
+      why: '念不完的话，配音会压到下一镜的画面上 —— 观众看到的是嘴型和声音对不上，而且下一镜刚开始就有人在说上一镜的话。',
+      fix: `把这一镜拉到 ${duration.secondsForDialogue(shot)} 秒以上，或者把台词改短。出图之前改是免费的。`
     });
   }
 

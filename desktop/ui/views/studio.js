@@ -1411,6 +1411,21 @@ export default {
             (project.bible?.characters || []).map((c) =>
               h('option', { value: c.name, selected: c.name === shot.speaker },
                 `${c.name}${c.voice ? `（${c.voice}）` : ''}`))),
+          /**
+           * 台词类型。和「谁说的」是两件事，摆在一起才不会被当成同一个选择：
+           *   谁说的   = 用谁的**声音**
+           *   台词类型 = 嘴动不动、声音从哪儿来
+           *
+           * 漏掉它的时候「心里话」根本没法表达：填了说话人，画面就被要求
+           * 口型对上台词（成了自言自语）；留空当旁白，声音又换成了旁白音色。
+           */
+          lineKind: h('select', {},
+            (state.catalog.lineKinds || []).map((k) =>
+              h('option', {
+                value: k.id,
+                title: k.hint,
+                selected: k.id === (shot.lineKind || (shot.speaker ? 'speech' : 'voiceover'))
+              }, k.label))),
           // 和上一镜什么关系。它决定这一镜出视频时要不要把上一镜的末帧锁住 ——
           // 三种关系各有各的代价，见下面那行说明
           link: h('select', {},
@@ -1445,6 +1460,8 @@ export default {
                   skills: pickedSkills,
                   variants: pickedVariants,
                   speaker: fields.speaker.value,
+                  // cap:line-kind
+                  lineKind: fields.lineKind.value,
                   // cap:shot-stage
                   ...(stageDraft ? { stage: stageDraft } : {})
                 }
@@ -1513,6 +1530,8 @@ export default {
             '会去画那个声音最像的东西 ——「敲门声」最常见的下场是画出一扇**开着的门**。'),
           h('div', { class: 'shot-edit-grid' },
             h('div', {}, h('label', {}, '谁说的'), fields.speaker),
+          // 和「谁说的」并排：一个管声音用谁的，一个管嘴动不动
+          h('div', {}, h('label', {}, '台词类型'), fields.lineKind),
             h('div', {}, h('label', {}, '模型档位'), fields.tier),
             h('div', {}, h('label', {}, '第几场'), fields.segment),
             h('div', {}, h('label', {}, '转场'), fields.transition)),

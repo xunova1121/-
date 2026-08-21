@@ -78,6 +78,7 @@ const SHOT_PROMPT = `你是动态漫画的分镜导演。把剧本拆成可直�
       "sound": "这一镜听得见但看不见的声音（敲门声、脚步声、雨声、远处汽笛）。没有就留空字符串",
       "transition": "进入这一镜的方式：cut（硬切，默认）/ fade（黑场淡入，换时间换地点用）/ dissolve（叠化，时间流逝或情绪转折用）。绝大多数镜都该是 cut",
       "link": "和上一镜的关系：continuous（动作不能断，比如伸手→握住门把手，会把上一镜的末帧锁成这一镜的首帧）/ cut（同一场戏里换机位）/ new-scene（换场次）。场次的头一镜固定 new-scene",
+      "lineKind": "台词类型：speech（对白，他在画面里说出来）/ inner（心里话，他自己的声音但嘴不动）/ voiceover（旁白，画外叙述）/ offscreen（画外音，说话人不在这一镜画面里）。没有台词就不用给",
       "duration": 4
     }
   ]
@@ -820,6 +821,37 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
     });
   }
 
+  /**
+   * 台词念不完就把镜头拉长 —— **在这一步拉，不能等到合成**。
+   *
+   * 原来只有合成那一步会发现"台词比镜头长"，而那时候图和视频的钱已经花完了：
+   * 补救要么重出这一镜的视频（拉长），要么重配音（改短台词），两条都是重来一遍。
+   *
+   * 而这件事在这儿完全算得出来 —— 台词就在手上。12 个字塞进 3 秒念不完是必然的，
+   * 不需要等到出片。这一步还没花任何钱，改时长是免费的。
+   *
+   * ⚠ 只往上调，不往下调。台词短不代表镜头就该短 —— 一个 2 秒台词的镜头
+   * 完全可以是 6 秒（说完还有反应、还有留白），那是导演的选择，不该被我们压掉。
+   */
+  const stretched = [];
+  for (const shot of shots) {
+    const need = duration.secondsForDialogue(shot);
+    if (need > (Number(shot.duration) || 0)) {
+      stretched.push({ index: shot.index, from: shot.duration, to: need });
+      shot.duration = need;
+    }
+  }
+  if (stretched.length) {
+    onEvent?.({
+      type: 'note',
+      message:
+        `${stretched.length} 镜的台词念不完，已经把时长拉长：` +
+        stretched.slice(0, 5).map((x) => `#${x.index}（${x.from}s→${x.to}s）`).join('、') +
+        `${stretched.length > 5 ? ` 等 ${stretched.length} 处` : ''}` +
+        '。现在改是免费的 —— 等出完视频再发现，就得重出那一镜。'
+    });
+  }
+
   const segBrief = segments.summarize(segs, shots);
   if (segBrief) onEvent?.({ type: 'note', message: segBrief });
 
@@ -934,6 +966,14 @@ const SHOT_EDITABLE = [
   'tier',
   // 这句台词是谁说的。决定用哪个角色的音色 —— 空字符串 = 旁白
   'speaker',
+  /**
+   * 台词的类型：对白 / 心里话 / 旁白 / 画外音。
+   *
+   * 和 speaker **正交**：speaker 决定用谁的声音，lineKind 决定嘴动不动、
+   * 声音从哪儿来。漏掉这个字段时，「心里话」根本表达不了 ——
+   * 填了说话人画面就要求口型对上（成了自言自语），留空声音又变成旁白音色。
+   */
+  'lineKind',
   /**
    * 预演台排位：人站哪、朝哪、机位在哪、什么焦段、怎么运镜。
    *

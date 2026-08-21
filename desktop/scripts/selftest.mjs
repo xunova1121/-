@@ -3686,6 +3686,88 @@ section('接缝：走一遍出视频，看首帧到底发的是哪张');
   settings.patch({ seamMode: 'lock' });
 }
 
+section('台词时长：念不完的镜头，出图之前就该拉长');
+{
+  const d = await import('../core/duration.js');
+  const lint = await import('../core/pipeline/shotlint.js');
+
+  /**
+   * 原来只有**合成**那一步会发现"台词比镜头长"，而那时候图和视频的钱已经花完了：
+   * 补救要么重出这一镜的视频（拉长），要么重配音（改短台词），两条都是重来一遍。
+   *
+   * 而这件事在拆分镜的时候就完全算得出来 —— 台词就在手上。
+   */
+  check('五个字大约一秒多', d.speechSeconds('设备正常。') > 1 && d.speechSeconds('设备正常。') < 2.5,
+    String(d.speechSeconds('设备正常。')));
+  check('二十一个字要五秒上下', d.speechSeconds('这里的缆绳被人动过，昨天夜里有人来过这儿。') > 4,
+    String(d.speechSeconds('这里的缆绳被人动过，昨天夜里有人来过这儿。')));
+  check('没台词就是 0 秒', d.speechSeconds('') === 0 && d.speechSeconds(null) === 0);
+  // 标点是停顿，不发音但实实在在占时间
+  check('标点算进停顿', d.speechSeconds('好，我知道了。') > d.speechSeconds('好我知道了'));
+
+  check('4 秒装不下这句 21 字的台词',
+    d.fitsDialogue({ dialogue: '这里的缆绳被人动过，昨天夜里有人来过这儿。', duration: 4 }).ok === false);
+  check('拉到它说的秒数就装得下', (() => {
+    const line = '这里的缆绳被人动过，昨天夜里有人来过这儿。';
+    return d.fitsDialogue({ dialogue: line, duration: d.secondsForDialogue({ dialogue: line }) }).ok;
+  })());
+
+  // 手改台词不会自动拉时长，所以体检要拦一道
+  const bad = lint.lintShot({ index: 3, description: '他站在门口', dialogue: '我不知道该怎么跟你说这件事，但是我必须说出来。', duration: 4 });
+  const hit = bad.find((i) => i.kind === 'dialogue-too-long');
+  check('体检拦得住手改出来的超长台词', Boolean(hit), JSON.stringify(bad.map((i) => i.kind)));
+  check('说清楚会怎样（压到下一镜）', /下一镜/.test(hit?.why || ''), hit?.why?.slice(0, 60));
+  check('给了具体该拉到几秒', /\d/.test(hit?.fix || ''), hit?.fix);
+  check('台词短的不报', lint.lintShot({ index: 4, description: '他站在门口', dialogue: '好。', duration: 4 })
+    .some((i) => i.kind === 'dialogue-too-long') === false);
+}
+
+section('台词四种类型：只有对白才该动嘴');
+{
+  const sp = await import('../core/pipeline/speaker.js');
+  const con = await import('../core/pipeline/consistency.js');
+
+  /**
+   * 原来只有两种：有 speaker 是对白，没有是旁白。漏掉了短剧里最常用的
+   * **心里话** —— 声音是这个角色自己的，但他嘴不动。
+   *
+   * 用原来那套表达不了：填了说话人，画面被要求"口型对上台词"，出来是自言自语；
+   * 留空当旁白，声音又换成了旁白音色。两种都不对，而且**都不报错**。
+   */
+  check('四种类型都在', sp.LINE_KINDS.map((k) => k.id).join(',') === 'speech,inner,voiceover,offscreen');
+  check('只有对白动嘴',
+    sp.LINE_KINDS.filter((k) => sp.movesLips(k.id)).map((k) => k.id).join(',') === 'speech');
+
+  // 没标过的按老规矩推，老项目读出来行为一个字不变
+  check('没标过 + 有说话人 → 对白', sp.lineKindOf({ speaker: '强雄' }) === 'speech');
+  check('没标过 + 没说话人 → 旁白', sp.lineKindOf({}) === 'voiceover');
+  /**
+   * ⚠ 判类型要用**推断过**的说话人。分镜没填说话人时，画面里只有一个角色
+   * 就算他说的 —— 拿原始字段判会把这种情况变成旁白，而老行为是对白。
+   */
+  check('推断出来的说话人也算数', sp.lineKindOf({ dialogue: '走' }, '阿澜') === 'speech');
+
+  const bible = {
+    characters: [{ name: '强雄', appearance: '短发' }, { name: '班主任', appearance: '制服' }],
+    scenes: [], props: []
+  };
+  const base = { description: '强雄站在办公桌前', characters: ['强雄', '班主任'], dialogue: '我不能就这么算了。', speaker: '强雄' };
+  const line = (kind) => con.assembleVideoPrompt(bible, { ...base, lineKind: kind }, {});
+
+  check('对白：口型对上台词', /口型对上台词/.test(line('speech')));
+  /**
+   * 心里话是这次真正补上的那一种：他自己的声音、嘴闭着。
+   * 只说"嘴唇闭合"还不够 —— 模型会画成发呆，所以加一句眼神有戏。
+   */
+  check('心里话：说是内心独白，而且嘴闭着', /内心独白/.test(line('inner')) && /嘴唇闭合/.test(line('inner')), line('inner').slice(-80));
+  check('心里话不要求口型', !/口型对上/.test(line('inner')));
+  check('画外音：说话的人不在画面里', /不在画面里/.test(line('offscreen')), line('offscreen').slice(-70));
+  check('旁白：声音来自画外', /画外旁白/.test(line('voiceover')));
+  // 空镜里一个人都没有时，四种都不该说话 —— 提示词里出现"人物"会招来一个人
+  const empty = con.assembleVideoPrompt(bible, { description: '空荡的走廊', characters: [], dialogue: '他走了。', lineKind: 'voiceover' }, {});
+  check('空镜里不提人物（提了会凭空画出一个人）', !/人物|嘴唇/.test(empty), empty.slice(0, 90));
+}
+
 section('自动标连续动作：模型给的是建议，收口由代码做');
 {
   const st4 = await import('../core/pipeline/studio.js');

@@ -536,8 +536,36 @@ function speechLine(bible, shot) {
   }
 
   const r = speaker.resolve({ bible }, shot);
+  // 用**推断过**的说话人判类型：分镜没填说话人时，画面里只有一个角色就算他说的
+  const kind = speaker.lineKindOf(shot, r.speaker);
+
+  /**
+   * ── 四种台词，只有一种要动嘴 ──
+   *
+   * 漏掉「心里话」是原来这段最实在的缺口：短剧里内心独白到处都是，
+   * 而用原来那两种表达不了 ——
+   *   把 speaker 填成这个角色 → 画面被要求"口型对上台词"，出来是他在自言自语
+   *   把 speaker 留空当旁白   → 声音换成了旁白的音色，不是他自己的
+   * 两种都不对，而且**都不报错**。
+   *
+   * 现在类型和说话人是两个正交的字段：谁的声音 / 嘴动不动，分开说。
+   */
+  if (kind === 'inner') {
+    // 心里话：他自己的声音，但嘴闭着。加一句表情提示，否则模型会画成发呆
+    const who = r.speaker || cast[0]?.name;
+    const others = cast.filter((c) => c.name !== who);
+    return (
+      `${who ? `${who}的内心独白` : '内心独白'}，声音是他自己的但不出声，嘴唇闭合，眼神有戏、若有所思`
+      + (others.length ? `，${others.map((c) => c.name).join('、')}嘴唇闭合` : '')
+    );
+  }
+  if (kind === 'offscreen') {
+    // 画外音：说话人不在这一镜画面里，画面里的人是在听
+    return `说话的人不在画面里，声音来自画外，画面中的人在听、嘴唇闭合${
+      r.speaker ? `（说话的是${r.speaker}）` : ''}`;
+  }
   // 旁白：有台词，但声音来自画外，画面里的人照样闭嘴
-  if (!r.speaker) return '画外旁白，声音来自画外，画面中的人嘴唇闭合';
+  if (kind === 'voiceover' || !r.speaker) return '画外旁白，声音来自画外，画面中的人嘴唇闭合';
 
   // 台词太长会把提示词吃掉一大块，而口型只需要知道说的是什么、有多长
   const line = said.text.length > 26 ? `${said.text.slice(0, 26)}…` : said.text;

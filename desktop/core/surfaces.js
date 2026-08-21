@@ -187,6 +187,13 @@ export const CAPABILITIES = [
     mobile: 'ui/m/m.js'
   },
   {
+    id: 'line-kind',
+    name: '台词类型（对白 / 心里话 / 旁白 / 画外音）',
+    api: 'PATCH /projects/:id/shots/:sid { lineKind }',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js'
+  },
+  {
     id: 'link-auto',
     name: '自动标出哪几镜是连续动作',
     api: 'POST /projects/:id/shots/link/auto',

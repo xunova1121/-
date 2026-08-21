@@ -27,6 +27,7 @@ import * as adapters from './providers/adapters.js';
 import * as studio from './pipeline/studio.js';
 import * as continuity from './pipeline/continuity.js';
 import * as anglesLib from './pipeline/angles.js';
+import * as speakerLib from './pipeline/speaker.js';
 import * as preflight from './preflight.js';
 import * as styles from './styles.js';
 import * as duration from './duration.js';
@@ -444,6 +445,8 @@ async function handleApi(req, res, url, { lan = false } = {}) {
         label: continuity.LINK_LABELS[id],
         hint: continuity.LINK_HINTS[id]
       })),
+      // 台词的四种类型。界面要按它给下拉，也要按它解释"心里话和旁白差在哪"
+      lineKinds: speakerLib.LINE_KINDS,
       // 设定图有哪些角度可补。界面不能直接 import core/ 里的模块
       // （那些文件不发给浏览器），所以角度表和衔接关系一样，从这里下发
       sheetAngles: {
