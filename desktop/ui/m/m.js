@@ -1500,6 +1500,29 @@ function paintFilm() {
   // 有图没视频的那几镜 —— 素材包里缺的就是它们
   const missing = shots.filter((s) => !s.videoPath);
 
+  /**
+   * 成片体检。摆在成片页，因为决定发不发就是在这儿做的。
+   * 手机上更需要它 —— 那几条警告是在电脑上跑的时候刷过去的，
+   * 出门在外只看得到成片本身。
+   */
+  const qualityHost = h('div', {});
+  // cap:quality-report
+  api(`/projects/${project.id}/quality`).then((r) => {
+    clear(qualityHost);
+    qualityHost.append(h('div', { class: `card ${r.verdict === 'ready' ? '' : 'warn'}` },
+      h('b', {}, `成片体检：${r.score} 分 · ${
+        { ready: '可以发', fixable: '能发，但有几处值得改', 'not-ready': '先别发' }[r.verdict]}`),
+      // 分数永远不单独出现 —— 人下一秒就要问"哪儿扣的分"
+      ...(r.items.length
+        ? r.items.map((i) => h('div', { style: 'margin-top:9px' },
+          h('span', { class: `tag ${i.level === 'note' ? '' : 'warn'}` },
+            { blocker: '会被看出来', warn: '质量风险', note: '可改进' }[i.level]),
+          h('div', { style: 'margin-top:4px' }, i.what),
+          h('div', { class: 'muted' }, i.why),
+          h('div', { class: 'muted' }, `→ ${i.fix}`)))
+        : [h('p', { class: 'muted', style: 'margin:6px 0 0' }, '四类检查都过了：产物齐、一致性达标、接缝对得上、分镜没有高危项。')])));
+  }).catch(() => { /* 体检拉不到不该把成片页弄坏 */ });
+
   const head = out?.video
     ? [
         h('div', { class: 'card', style: 'padding:0;overflow:hidden' },
@@ -1567,7 +1590,7 @@ function paintFilm() {
           assetRow(`第 ${s.index} 镜 音效`, s.sfxOf || s.sound || '', media(s.sfxPath, v))))
     : null;
 
-  return [...head, material];
+  return [...head, qualityHost, material];
 }
 
 // ───────────────────────── 动作 ─────────────────────────

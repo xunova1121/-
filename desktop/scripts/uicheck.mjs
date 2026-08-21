@@ -308,6 +308,19 @@ await step('合成').click();
 await page.waitForTimeout(900);
 const filmText = await page.locator('#view-inner').innerText();
 check('缺镜时当场点名', /还没出视频/.test(filmText), filmText.slice(0, 200));
+
+/**
+ * 成片体检要在这一页上**真的画出来**。
+ *
+ * 它是个异步拉取 —— 接口对了但界面没渲染，用户照样看不到，
+ * 而这正是这个项目里反复出现的那种漏法。所以在真浏览器里读一次。
+ */
+await page.waitForTimeout(900);
+const q = await page.locator('#view-inner').innerText();
+check('成片页上有体检结论', /成片体检/.test(q), q.slice(0, 160));
+// 光一个分数没有信息量 —— 人下一秒就要问"哪儿扣的分"
+check('不是只印一个分数，条目摊开了',
+  /会被看出来|质量风险|四类检查都过了/.test(q), q.slice(0, 300));
 check('并且说清楚后果（拖进剪映才发现缺一段）', /剪映/.test(filmText) && /缺一段/.test(filmText));
 
 check('全程没有页面报错', errs.length === 0, errs.slice(0, 3).join(' | '));

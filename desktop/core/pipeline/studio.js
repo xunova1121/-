@@ -27,6 +27,7 @@ import * as chapters from './chapters.js';
 import * as duration from '../duration.js';
 import * as versions from '../versions.js';
 import * as autocut from '../autocut.js';
+import * as quality from './quality.js';
 import * as skillsLib from '../skills.js';
 import * as variants from './variants.js';
 import * as anglesLib from './angles.js';
@@ -651,6 +652,21 @@ export async function buildBible(projectId, { onEvent, regenerate = false, signa
  * 都少一张参考图、少一份复核基准，**一致性就是从那儿开始塌的**。
  * 而且那时候你已经在出几十张分镜图了，回头补的代价比现在大得多。
  */
+/**
+ * 成片体检：把散在四处的结论汇总成"现在能不能发"。
+ *
+ * 分镜体检在这儿现算（它便宜），其余全从已有字段读 —— 不重新调模型、
+ * 不重新跑 FFmpeg。体检本身要免费、要快，慢一点人就不会在导出前点它。
+ */
+export function qualityReport(projectId) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  return quality.audit(project, {
+    lintResults: shotlint.lintShots(project.shots || []),
+    threshold: settings.get('consistencyThreshold') ?? 75
+  });
+}
+
 export function bibleReadiness(project) {
   // 按**变体**算：一个角色三套衣服就是三张图，缺一张就少一个基准
   const targets = variants.sheetTargets(project.bible);
@@ -1967,7 +1983,16 @@ export function restoreShotVersion(projectId, shotId, { kind = 'image', n } = {}
       t.headFromTail = null;
       t.endFrameChained = false;
       t.headMatch = null;
-      t.seamCheck = null;
+      /**
+       * ⚠ 字段叫 tailAlign，不是 seamCheck。
+       *
+       * 第一版这里写的是 `t.seamCheck = null` —— 清了一个**根本不存在**的字段，
+       * 而真正记着接缝比对结论的 tailAlign 原封不动留着了。
+       * 后果是回退视频之后，界面还挂着上一版那次"接缝比对通过"，
+       * 而这一版根本不是那么出的。赋值给不存在的字段不会报任何错，
+       * 这类错只能靠对着写入处核一遍字段名来发现。
+       */
+      t.tailAlign = null;
     } else {
       t.imagePath = dest;
       // 地址指向的是旧那一版的字节，重出后必须重新上传才对得上

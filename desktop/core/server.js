@@ -1137,6 +1137,15 @@ async function handleApi(req, res, url, { lan = false } = {}) {
       }
     }
 
+    // 成片体检：现在能不能发。cap:quality-report
+    if (b && c === 'quality' && method === 'GET') {
+      try {
+        return json(res, 200, studio.qualityReport(b));
+      } catch (err) {
+        return json(res, 404, { error: err.message });
+      }
+    }
+
     // ── 设定图齐了没 ──
     // 界面在跑「分镜」之前就该知道还差几张，而不是点下去才被拦
     if (b && c === 'bible-readiness' && method === 'GET') {

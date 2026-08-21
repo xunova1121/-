@@ -2258,7 +2258,42 @@ export default {
         if (!project.outputs?.video) {
           return h('p', { class: 'panel-hint' }, '还没有成片。上面点「开始」，FFmpeg 会按分镜顺序拼接、按时长策略裁剪。这一步不花钱，跑错了重跑就行。');
         }
+        /**
+         * 成片体检。摆在成片这一步，是因为**决定发不发就是在这儿做的**。
+         *
+         * 检查一直都有，但散在四个地方各说各的：分镜卡片上的一致性分数、
+         * 分镜体检、出视频日志里的首帧核对和接缝比对、合成日志里的台词超长。
+         * 每一条单看都有用，合起来却回答不了那个真正要问的问题 ——
+         * 我现在导出去，会不会有明显的错？
+         *
+         * 而实际发生的是：人跑完全流程，看一眼觉得还行就发了，
+         * 那几条警告出现在几十分钟前、混在几百行日志里，谁也没回头翻。
+         */
+        const qualityHost = h('div', { style: 'margin-top:12px' });
+        api(`/projects/${project.id}/quality`).then((r) => {
+          const tone = r.verdict === 'ready' ? 'ok' : r.verdict === 'fixable' ? 'warn' : 'bad';
+          clear(qualityHost);
+          qualityHost.append(
+            h('div', { class: `notice ${tone === 'bad' ? 'warn' : ''}` },
+              h('b', {}, `成片体检：${r.score} 分 · ${
+                { ready: '可以发', fixable: '能发，但有几处值得改', 'not-ready': '先别发' }[r.verdict]}`),
+              /**
+               * ⚠ 分数**永远不单独出现**。它只是把"有多少问题、多严重"压成一个数，
+               * 本身没有物理意义 —— 92 和 88 之间没有任何可解释的差别。
+               * 只印一个分数的界面是在假装精确，人下一秒就要问"哪儿扣的分"。
+               */
+              r.items.length
+                ? h('div', {}, ...r.items.map((i) => h('p', { style: 'margin:8px 0' },
+                  h('span', { class: `badge ${i.level === 'blocker' ? 'warn' : ''}` },
+                    { blocker: '会被看出来', warn: '质量风险', note: '可改进' }[i.level]),
+                  ' ', h('b', {}, i.what),
+                  h('span', { class: 'field-hint', style: 'display:block;margin-top:2px' }, i.why),
+                  h('span', { class: 'field-hint', style: 'display:block' }, `→ ${i.fix}`))))
+                : h('p', {}, '四类检查都过了：产物齐、一致性达标、接缝对得上、分镜没有高危项。')));
+        }).catch(() => { /* 体检拉不到不该把成片页弄坏 */ });
         return h('div', {},
+          // cap:quality-report
+          qualityHost,
           h('video', {
             // cap:film-view
             src: `${mediaUrl(project.outputs.video)}&v=${v}`,

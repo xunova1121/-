@@ -194,6 +194,13 @@ export const CAPABILITIES = [
     mobile: 'ui/m/m.js'
   },
   {
+    id: 'quality-report',
+    name: '成片体检（现在能不能发）',
+    api: 'GET /projects/:id/quality',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js'
+  },
+  {
     id: 'shot-versions',
     name: '看历史版本 / 回到某一版',
     api: 'GET+POST /projects/:id/shots/:sid/versions',

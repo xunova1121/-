@@ -3686,6 +3686,78 @@ section('接缝：走一遍出视频，看首帧到底发的是哪张');
   settings.patch({ seamMode: 'lock' });
 }
 
+section('成片体检：现在能不能发');
+{
+  const q = await import('../core/pipeline/quality.js');
+  const shot = (i, o = {}) => ({ id: `q${i}`, index: i, description: '他站在门口', ...o });
+  const done = (i, o = {}) => shot(i, { imagePath: 'a', videoPath: 'v', ...o });
+
+  /**
+   * 检查一直都有，但散在四个地方各说各的：分镜卡片上的一致性分数、分镜体检、
+   * 出视频日志里的首帧核对和接缝比对、合成日志里的台词超长。
+   * 每一条单看都有用，合起来却回答不了那个真正要问的问题 ——
+   * **我现在导出去，会不会有明显的错？**
+   */
+  const clean = q.audit({ bible: { characters: [{ name: 'A', sheetPath: 'x' }], scenes: [] }, shots: [done(1), done(2)] });
+  check('全都齐时给放行', clean.verdict === 'ready' && clean.score === 100, JSON.stringify(clean.counts));
+  check('放行时也说清楚查了什么', /没有查出问题/.test(q.headline(clean)), q.headline(clean));
+
+  /**
+   * ── blocker 的定义：导出去**一定**有人看得出来 ──
+   *
+   * 这三条都不会让任何一步失败：合成照样成功，成片照样导得出来。
+   * 所以只能靠体检发现 —— 而这正是它存在的理由。
+   */
+  const noVideo = q.audit({ shots: [done(1), shot(2, { imagePath: 'a' })] });
+  check('有图没视频 → 拦', noVideo.verdict === 'not-ready' && noVideo.items[0].id === 'missing-video',
+    JSON.stringify(noVideo.items.map((i) => i.id)));
+  check('说清楚后果（成片里那段直接没有）', /直接不存在/.test(noVideo.items[0].why), noVideo.items[0].why);
+
+  const silent = q.audit({ shots: [done(1, { dialogue: '我不同意' })] });
+  check('有台词没配音 → 拦', silent.items.some((i) => i.id === 'missing-voice'));
+  check('点明它不会让任何一步失败（所以只能靠体检发现）',
+    /照样导得出来/.test(silent.items.find((i) => i.id === 'missing-voice').why));
+
+  const broken = q.audit({ shots: [done(1, { link: 'continuous', tailAlign: { verdict: 'missed' } })] });
+  check('标着连续动作但接缝没锁上 → 拦', broken.items.some((i) => i.id === 'seam-missed'));
+  /**
+   * 这一条算 blocker 不是因为画面坏了，是因为**界面在说谎**：
+   * 卡片上写着「连续动作」，人据此以为是连的，直到成片放到那儿才发现跳了。
+   */
+  check('理由是界面和事实不一致', /界面和事实不一致/.test(broken.items.find((i) => i.id === 'seam-missed').why));
+
+  // ── warn：质量风险，但未必看得出来 ──
+  const low = q.audit({ shots: [done(1, { consistency: { score: 60 } })] });
+  check('一致性偏低是 warn 不是 blocker', low.verdict === 'fixable', JSON.stringify(low.counts));
+  /**
+   * 手改过描述之后那个分数是给**旧描述**打的。
+   * 拿它当"这一镜没问题"的证据，等于用一个过期的结论放行。
+   */
+  const stale = q.audit({ shots: [done(1, { consistency: { score: 95, stale: true } })] });
+  check('过时的高分不当作通过', stale.items.some((i) => i.id === 'consistency-stale'), JSON.stringify(stale.items.map((i) => i.id)));
+  check('而且不因为分数高就漏报', stale.verdict !== 'ready');
+
+  /**
+   * ⚠ 分档必须**真的分得开**。什么都标成 blocker 的话，人第一次看到十几条红的
+   * 就再也不看这一页了 —— 那比没有这一页更糟。
+   */
+  const mixed = q.audit({
+    shots: [done(1, { consistency: { score: 60 } }), shot(2, { imagePath: 'a' })],
+    bible: { characters: [{ name: 'A' }], scenes: [] }
+  });
+  check('blocker 排在 warn 前面', mixed.items[0].level === 'blocker', JSON.stringify(mixed.items.map((i) => i.level)));
+  check('两档同时存在时不会混为一谈', mixed.counts.blocker > 0 && mixed.counts.warn > 0, JSON.stringify(mixed.counts));
+
+  /**
+   * 一句话结论**永远带上最要紧的那一条**。
+   * 只有分数的说法（"质量分 88"）没有信息量 —— 人下一秒就要问"哪儿扣的分"。
+   */
+  check('结论里带着最要紧那条，不是光一个分数',
+    q.headline(mixed).includes(mixed.items[0].what), q.headline(mixed));
+
+  check('没有分镜时直接说没分镜', q.audit({ shots: [] }).items[0].what === '还没有分镜');
+}
+
 section('自动剪辑：跳掉开头那几帧不动的');
 {
   const ac = await import('../core/autocut.js');
