@@ -1284,6 +1284,33 @@ export default {
           onclick: () => regenerate(shot, 'video', vidPicker, vidBtn)
         }, shot.videoPath ? '重出视频' : '出视频');
 
+        /**
+         * 预演台的入口要在**卡片上**，不能只藏在「改这一镜」里面。
+         *
+         * 原来它是编辑面板底部的一个折叠块 —— 要先点开编辑、再往下翻过
+         * 描述/台词/景别/时长/场次/档位/技法一大串才看得到。
+         * 用户的原话是"没找到预演台"。**功能找不到等于没做**，
+         * 而且这种漏法比崩溃更隐蔽：功能在、测试绿、就是没人用得上。
+         *
+         * 排过位的镜头按钮上带个点，扫一眼就知道哪几镜排过了。
+         */
+        const stageBtn = h('button', {
+          class: 'shot-edit-btn',
+          title: shot.stage?.cam
+            ? '这一镜排过位了。点开调整机位、看景别、查越轴'
+            : '排一下机位：拖人、拖机位，景别和越轴当场算给你看',
+          onclick: () => {
+            // 编辑面板里那块才是真正的画布，这里负责把它打开并滚过去
+            openEdit();
+            const box = editor.querySelector('.shot-previz');
+            if (box) {
+              box.open = true;
+              box.dispatchEvent(new Event('toggle'));
+              box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          }
+        }, shot.stage?.cam ? '预演台 ·' : '预演台');
+
         // 厂商的时长档位：设 4 秒而模型只出 5/10 秒时，得在这儿就说清楚
         const steps = state.catalog.videoDurations || [];
         const aligned = steps.find((x) => x >= shot.duration) || steps.at(-1);
@@ -1605,7 +1632,9 @@ export default {
                     ? h('span', { style: 'color:var(--caution)' }, ` →${shot.actualDuration}s`)
                     : null),
                 // 光靠"描述可点"没人发现得了，摆个明确的入口
-                h('button', { class: 'shot-edit-btn', title: '改这一镜的描述、景别、台词', onclick: openEdit }, '改文案')
+                h('button', { class: 'shot-edit-btn', title: '改这一镜的描述、景别、台词', onclick: openEdit }, '改文案'),
+                // 和「改文案」并排。藏在编辑面板底部时用户根本找不到它
+                stageBtn
               ),
               descEl,
               editor,

@@ -187,15 +187,24 @@ check('右下角报了结果，且数字不是 0', /分镜完成/.test(hud) && !
  * 恰恰在显示尺寸和 viewBox 不一致的换算上 —— 那种错只有真拖一次才看得见。
  */
 console.log('\n预演台');
-// 打开第一镜的编辑面板
-const editable = page.locator('.shot-desc.editable').first();
-await editable.click();
-await page.waitForTimeout(400);
+/**
+ * 入口要在**卡片上**看得见。
+ *
+ * 原来它只是编辑面板底部的一个折叠块 —— 要先点开编辑、再往下翻过
+ * 描述/台词/景别/时长/场次/档位/技法一大串。用户的原话是"没找到预演台"。
+ * 功能找不到等于没做，而这种漏法比崩溃更隐蔽：功能在、测试绿、没人用得上。
+ *
+ * 所以这里从**卡片上那个按钮**点起，不再自己去点描述展开编辑面板 ——
+ * 走用户真正会走的那条路。
+ */
+const stageEntry = page.locator('.shot-edit-btn', { hasText: '预演台' }).first();
+check('卡片上直接看得到预演台入口', (await stageEntry.count()) > 0);
+await stageEntry.click();
+await page.waitForTimeout(600);
 const previz = page.locator('.shot-previz').first();
-check('分镜编辑面板里有预演台', await previz.count() > 0);
+check('点一下就展开了（不用再自己去翻）',
+  (await previz.count()) > 0 && (await previz.evaluate((n) => n.open)) === true);
 if (await previz.count()) {
-  await previz.locator('summary').click();
-  await page.waitForTimeout(600);
   const canvas = page.locator('.previz-canvas').first();
   check('画布画出来了', await canvas.count() > 0);
   const before = await page.locator('.previz-line-text').first().innerText().catch(() => '');

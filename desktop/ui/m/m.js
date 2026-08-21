@@ -1267,6 +1267,26 @@ function editRow(s) {
     }
   }, '改这一镜');
 
+  /**
+   * 预演台要有**自己的按钮**，不能只藏在「改这一镜」里面。
+   *
+   * 原来要先点开编辑、再往下翻过描述/台词/音效/景别/时长/场次一大串
+   * 才看得到那个折叠块。用户的原话是"没找到预演台"。
+   * **功能找不到等于没做** —— 而且这种漏法比崩溃更隐蔽：
+   * 功能在、测试绿、就是没人用得上。
+   *
+   * 排过位的镜按钮上带个点，扫一眼就知道哪几镜排过。
+   */
+  const stageBtn = h('button', {
+    class: 'btn sm grow',
+    onclick: () => {
+      if (box.style.display === 'none') toggle.click();
+      previzBox.open = true;
+      previzBox.dispatchEvent(new Event('toggle'));
+      previzBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, s.stage?.cam ? '预演台 ·' : '预演台');
+
   box.append(
     field('画面描述', desc, '这是出图和出视频的唯一输入 —— 写偏一句，重出十次也回不到对的画面。'),
     field('台词', line, '留空就是这一镜没人说话。'),
@@ -1319,7 +1339,7 @@ function editRow(s) {
       '保存只改文案，不重出 —— 一般是连着改好几镜再统一重出，改一个字就烧一次钱不划算。')
   );
 
-  return [h('div', { class: 'row', style: 'margin-top:8px' }, toggle), box];
+  return [h('div', { class: 'row', style: 'margin-top:8px' }, toggle, stageBtn), box];
 }
 
 /** 一个可以存到手机上的素材行 */

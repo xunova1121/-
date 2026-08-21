@@ -191,15 +191,21 @@ console.log('   景别：', saved.camera === '全景' ? '存下了 ✓' : `✕ $
  */
 await page.locator('.tab', { hasText: '分镜' }).click();
 await page.waitForTimeout(600);
-await page.locator('button:has-text("改这一镜")').first().click();
-await page.waitForTimeout(400);
-const pvz = page.locator('.previz-details').first();
-const hasPvz = (await pvz.count()) > 0;
-if (hasPvz) {
-  await pvz.locator('summary').click();
-  await page.waitForTimeout(600);
+/**
+ * 从**卡片上那个按钮**点起，走用户真正会走的那条路。
+ * 原来它只藏在「改这一镜」里面往下翻很远的地方 —— 用户的原话是"没找到"。
+ */
+const entry = page.locator('button:has-text("预演台")').first();
+const hasEntry = (await entry.count()) > 0;
+console.log('⑤a 卡片上有预演台入口：', hasEntry ? '✓' : '✕ 找不到');
+let hasPvz = false;
+if (hasEntry) {
+  await entry.click();
+  await page.waitForTimeout(800);
+  const pvz = page.locator('.previz-details').first();
+  hasPvz = (await pvz.count()) > 0 && (await pvz.evaluate((n) => n.open)) === true;
 }
-console.log('⑤a 手机上的预演台：', hasPvz ? '有 ✓' : '✕ 没有');
+console.log('   点一下就展开了：', hasPvz ? '✓' : '✕ 还要自己翻');
 console.log('   画布：', (await page.locator('.previz-canvas').count()) > 0 ? '画出来了 ✓' : '✕');
 console.log('   读数：', /mm/.test(await page.locator('.previz-line-text').first().innerText().catch(() => '')) ? '有 ✓' : '✕');
 
