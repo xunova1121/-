@@ -203,6 +203,44 @@ function signV1({ method, key, headers, c, ak, sk }) {
 
 // ═══════════════════════ 请求 ═══════════════════════
 
+/**
+ * 一把钥匙长什么样 —— **不泄露它本身**。
+ *
+ * 用户回了一句"确定没填错"，而我们只会重复一句"ID 不对"。两边都没有
+ * 新信息，只能僵在那儿。真正能推进的是**让他自己核对**：
+ * 头四位、尾四位、总长度，对着控制台扫一眼就知道是不是同一把。
+ *
+ * 中间一律不显示。日志、请求记录、聊天窗口里都可能留下这行字。
+ */
+export function fingerprint(key) {
+  const k = String(key || '');
+  if (!k) return '（空）';
+  if (k.length <= 10) return `${k.slice(0, 2)}…（只有 ${k.length} 位，太短了）`;
+  return `${k.slice(0, 4)}…${k.slice(-4)}（${k.length} 位）`;
+}
+
+/**
+ * 这串东西**看着**像不像一个阿里云 AccessKey ID。
+ *
+ * 阿里云的 AK ID 现在一律是 `LTAI` 开头、24 位上下。形状不对的时候，
+ * 十有八九是粘错了东西 —— RAM 用户名、登录名、甚至 Secret。
+ * 而 OSS 对这些一律回同一句 InvalidAccessKeyId，自己不会说是哪一种。
+ */
+function shapeHint(ak) {
+  const k = String(ak || '');
+  if (/^STS\./i.test(k)) {
+    return '这是一把 **STS 临时凭证**（STS. 开头）—— 它必须配一个 SecurityToken 才能用，'
+      + '而这里只收永久 AccessKey。去 RAM 用户那儿建一把永久的。';
+  }
+  if (/\s/.test(k)) return '这串里**有空格或换行** —— 多半是复制时带进来的，重新粘一次。';
+  if (!/^LTAI/i.test(k)) {
+    return '阿里云的 AccessKey ID 一律是 **LTAI 开头**，这串不是 —— '
+      + '八成粘错了东西（RAM 用户名？登录名？还是把 Secret 粘到 ID 这一栏了？）。';
+  }
+  if (k.length < 20 || k.length > 30) return `AccessKey ID 通常是 24 位上下，这串是 ${k.length} 位 —— 可能粘漏了或多带了字符。`;
+  return '';
+}
+
 /** OSS 的错误是一段 XML，把里面的 Code / Message 抠出来才有人话可说 */
 function explain(status, body) {
   const code = (body.match(/<Code>([^<]+)<\/Code>/) || [])[1] || '';
@@ -210,10 +248,35 @@ function explain(status, body) {
   const known = {
     NoSuchBucket: 'Bucket 名字不对，或者它不在你填的这个地域',
     AccessDenied: '这把 AccessKey 没有操作这个 Bucket 的权限（去 RAM 里给它挂上 AliyunOSSFullAccess，或者只给这个 Bucket 的读写）',
-    InvalidAccessKeyId: 'AccessKey ID 不对（注意别把 ID 和 Secret 填反）',
     SignatureDoesNotMatch: 'AccessKey Secret 不对，或者签名版本不匹配',
     RequestTimeTooSkewed: '这台机器的时间和阿里云差太多，先把系统时间对准（服务器上装个 ntp）'
   };
+
+  /**
+   * InvalidAccessKeyId 单独写。
+   *
+   * 原来这里只有一句"ID 不对（注意别把 ID 和 Secret 填反）"——
+   * 用户回"确定没填错"，然后就僵住了：他没办法证明，我们也没给他任何
+   * 能核对的东西。而这个错误码在阿里云那边至少对应**四种**完全不同的原因，
+   * 它们的下一步动作各不相同。所以这里把四种都摆出来，
+   * 并且带上这把钥匙的指纹让他能当场比对。
+   */
+  if (code === 'InvalidAccessKeyId') {
+    const ak = credentials().accessKeyId;
+    const shape = shapeHint(ak);
+    return [
+      `OSS ${status} InvalidAccessKeyId —— 阿里云说**这个 AccessKey ID 不存在**。`,
+      `我们发出去的是：${fingerprint(ak)}　← 对着控制台扫一眼头尾四位对不对。`,
+      shape,
+      '这个错只有四种可能，都不是"权限不够"：',
+      '① 粘错了 —— 头尾对不上，或者 ID 和 Secret 填反了；',
+      '② 这把钥匙**不属于装着这个 Bucket 的那个账号**（子账号 / 另一个阿里云账号）；',
+      '③ 这把钥匙在 RAM 里被**禁用或删掉**了（控制台 → 访问控制 → 用户 → AccessKey，状态要是「启用」）；',
+      '④ 刚建出来还没生效 —— 等十几秒再点一次。',
+      '⚠ 权限没配够是另一个错（AccessDenied），不会报成这个。所以现在别去改策略。'
+    ].filter(Boolean).join('\n');
+  }
+
   const extra = known[code] ? ` —— ${known[code]}` : '';
   return `OSS ${status} ${code || ''}${extra}${msg && !known[code] ? `：${msg}` : ''}`.trim();
 }

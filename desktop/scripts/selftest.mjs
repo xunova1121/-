@@ -7795,6 +7795,43 @@ section('对象存储：能验的部分');
     /RAM/.test(oss.__explain?.(403, '<Error><Code>AccessDenied</Code></Error>') || ''),
     'explain 没导出就跳过');
 
+  /**
+   * ══ InvalidAccessKeyId：一句"ID 不对"会把人卡死 ══
+   *
+   * 用户配 OSS 时收到这个错，回了一句"确定没填错"—— 然后就僵住了：
+   * 他没办法证明自己没填错，我们也没给他任何能核对的东西。
+   *
+   * 而这个错误码在阿里云那边至少对应四种完全不同的原因（粘错了 /
+   * 钥匙不属于这个账号 / 被禁用了 / 刚建还没生效），下一步动作各不相同。
+   * 更要紧的是：**权限不够不会报成这个**（那是 AccessDenied）——
+   * 不说清楚的话，人第一反应就是去改 RAM 策略，改半天也不会好。
+   */
+  {
+    vault.setSecret(oss.AK_NAME, 'LTAI5tSomethingLong9x7f');
+    const bad = oss.__explain(403, '<Error><Code>InvalidAccessKeyId</Code></Error>');
+    check('把这把钥匙的指纹摆出来（能核对，又不泄露）',
+      /LTAI…9x7f/.test(bad) && !/SomethingLong/.test(bad), bad.slice(0, 200));
+    check('四种可能都列出来了', /四种可能/.test(bad) && /被\*\*禁用/.test(bad), bad.slice(0, 400));
+    check('明说这不是权限问题（否则人会去白改 RAM 策略）',
+      /AccessDenied/.test(bad) && /别去改策略/.test(bad), bad.slice(-140));
+
+    // 形状不对的时候直接点破，别让人对着一个 24 位的正确格式找了半天
+    vault.setSecret(oss.AK_NAME, 'STS.NUxxxxxxxxxxxxxxxx');
+    check('STS 临时凭证当场点破',
+      /STS 临时凭证/.test(oss.__explain(403, '<Error><Code>InvalidAccessKeyId</Code></Error>')));
+    vault.setSecret(oss.AK_NAME, 'my-ram-user-name');
+    check('不是 LTAI 开头就说不是',
+      /LTAI 开头/.test(oss.__explain(403, '<Error><Code>InvalidAccessKeyId</Code></Error>')));
+    vault.setSecret(oss.AK_NAME, 'LTAI5t with space');
+    check('带空格换行的当场点破',
+      /有空格或换行/.test(oss.__explain(403, '<Error><Code>InvalidAccessKeyId</Code></Error>')));
+    // 指纹永远不能把整把钥匙印出来
+    check('指纹不泄露中间那段',
+      !oss.fingerprint('LTAI5tABCDEFGHIJKLMNOP').includes('ABCDEFGHIJKLMN'),
+      oss.fingerprint('LTAI5tABCDEFGHIJKLMNOP'));
+    vault.setSecret(oss.AK_NAME, 'ak-test');
+  }
+
   check('MIME 认得出 mp4', oss.contentTypeOf('a.mp4') === 'video/mp4');
   check('认不出的类型退到通用二进制', oss.contentTypeOf('a.xyz') === 'application/octet-stream');
 
