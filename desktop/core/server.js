@@ -607,9 +607,20 @@ async function handleApi(req, res, url, { lan = false } = {}) {
         ...c,
         regions: oss.REGIONS,
         host: c.bucket ? oss.host(c) : '',
-        // 只回"配没配"，绝不回密钥本身
+        /**
+         * 绝不回密钥本身。但"配没配"这三个字是不够的 ——
+         * 这两个框写着「已配置（留空表示不改）」，于是**存着的那份错值
+         * 会一直看不见**：用户以为自己这次填对了，实际上只填了一栏，
+         * 另一栏还留着上回粘错的东西，而界面上永远只显示"已配置"。
+         *
+         * AccessKey ID 给指纹（头四尾四 + 长度）—— 它本来就会出现在
+         * 每一个签名请求的 OSSAccessKeyId 参数里，不是秘密。
+         * Secret 只给长度：30 位对不对，看这一个数就够了。
+         */
         hasKeyId: Boolean(k.accessKeyId),
         hasKeySecret: Boolean(k.accessKeySecret),
+        keyIdHint: k.accessKeyId ? oss.fingerprint(k.accessKeyId) : '',
+        keySecretLen: k.accessKeySecret ? k.accessKeySecret.length : 0,
         ready: oss.ready()
       });
     }

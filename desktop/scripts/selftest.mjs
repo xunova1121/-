@@ -7819,6 +7819,18 @@ section('对象存储：能验的部分');
     vault.setSecret(oss.AK_NAME, 'STS.NUxxxxxxxxxxxxxxxx');
     check('STS 临时凭证当场点破',
       /STS 临时凭证/.test(oss.__explain(403, '<Error><Code>InvalidAccessKeyId</Code></Error>')));
+    /**
+     * 用户真实碰到的那一把：`JReq…OIJ9（30 位）`。
+     * 30 位、不是 LTAI 开头 —— 阿里云的 Secret 正好是 30 位，ID 是 24 位。
+     * 长度已经把答案写在脸上了，上一版却还在并列三个猜测让人自己试。
+     */
+    vault.setSecret(oss.AK_NAME, 'JReq' + 'x'.repeat(22) + 'OIJ9');
+    const swapped = oss.__explain(403, '<Error><Code>InvalidAccessKeyId</Code></Error>');
+    check('30 位的那把直接断定是"两栏填反了"',
+      /这就是一把 AccessKey Secret/.test(swapped) && /填反/.test(swapped), swapped.slice(0, 300));
+    check('并且提醒两栏一起重填（框是"留空表示不改"的）',
+      /两栏都要重填/.test(swapped), swapped.slice(0, 400));
+
     vault.setSecret(oss.AK_NAME, 'my-ram-user-name');
     check('不是 LTAI 开头就说不是',
       /LTAI 开头/.test(oss.__explain(403, '<Error><Code>InvalidAccessKeyId</Code></Error>')));

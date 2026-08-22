@@ -814,8 +814,29 @@ export default {
       const save = async () => {
         // cap:oss-config
         const secrets = {};
-        if (keyId.value.trim()) secrets.ALIYUN_OSS_KEY_ID = keyId.value.trim();
-        if (keySecret.value.trim()) secrets.ALIYUN_OSS_KEY_SECRET = keySecret.value.trim();
+        const idIn = keyId.value.trim();
+        const secretIn = keySecret.value.trim();
+        /**
+         * 存进去之前先拦一道。
+         *
+         * 这两样的长度是**固定的、而且不一样**：ID 24 位 LTAI 开头，Secret 30 位。
+         * 填反了的话，要等到点「测试连接」才会以 403 InvalidAccessKeyId 的形式
+         * 冒出来 —— 而那个错误码字面上说的是"这个 ID 不存在"，
+         * 没有一个字提到"你可能填反了"。用户于是回一句"我没有填反"，
+         * 然后两边一起卡在那儿。
+         *
+         * 形状是当场看得出来的，就别等到那时候。
+         */
+        if (idIn && idIn.length === 30 && !/^LTAI/i.test(idIn)) {
+          toast('「AccessKey ID」那一栏填的是 30 位、不是 LTAI 开头 —— 那是 Secret 的形状。两栏填反了，换过来再存。', 'err');
+          return;
+        }
+        if (secretIn && /^LTAI/i.test(secretIn) && secretIn.length === 24) {
+          toast('「AccessKey Secret」那一栏填的是 LTAI 开头的 24 位 —— 那是 ID 的形状。两栏填反了，换过来再存。', 'err');
+          return;
+        }
+        if (idIn) secrets.ALIYUN_OSS_KEY_ID = idIn;
+        if (secretIn) secrets.ALIYUN_OSS_KEY_SECRET = secretIn;
         if (Object.keys(secrets).length) await api('/secrets', { method: 'POST', body: { secrets } });
         await api('/settings', {
           method: 'POST',
@@ -886,8 +907,29 @@ export default {
           h('div', { class: 'field' }, h('label', {}, '路径前缀'), prefix),
           h('div', { class: 'field' }, h('label', {}, '自定义域名'), domain)),
         h('div', { class: 'grid2' },
-          h('div', { class: 'field' }, h('label', {}, 'AccessKey ID'), keyId),
-          h('div', { class: 'field' }, h('label', {}, 'AccessKey Secret'), keySecret)),
+          /**
+           * 把**存着的那份**摆出来。
+           *
+           * 「已配置（留空表示不改）」这句话藏住了一件要命的事：只填一栏
+           * 保存之后，另一栏还留着上回粘错的东西，而界面上永远只显示"已配置"。
+           * 用户完全有理由说"我没有填反"—— 他这一次确实没有。
+           * 错的是三次之前那一份，而它一直看不见。
+           */
+          h('div', { class: 'field' },
+            h('label', {}, 'AccessKey ID'), keyId,
+            cfg.keyIdHint
+              ? h('div', { class: 'field-hint' },
+                  `现在存着的是：${cfg.keyIdHint}`,
+                  /^LTAI/i.test(cfg.keyIdHint) ? '' : '　⚠ 阿里云的 ID 是 LTAI 开头、24 位，这份不像',
+                  /（30 位）/.test(cfg.keyIdHint) ? '　⚠ 30 位是 Secret 的长度 —— 这一栏多半存着一把 Secret' : '')
+              : null),
+          h('div', { class: 'field' },
+            h('label', {}, 'AccessKey Secret'), keySecret,
+            cfg.keySecretLen
+              ? h('div', { class: 'field-hint' },
+                  `现在存着的是 ${cfg.keySecretLen} 位`,
+                  cfg.keySecretLen === 30 ? '（长度对）' : '　⚠ 阿里云的 Secret 是 30 位，这份不是')
+              : null)),
         h('div', { class: 'field' },
           h('label', {}, h('span', { class: 'inline' }, publicRead, ' 桶是公共读')),
           h('div', { class: 'field-hint' },
