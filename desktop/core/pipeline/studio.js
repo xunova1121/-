@@ -18,6 +18,7 @@ import * as catalog from '../providers/catalog.js';
 import { authHeadersForUrl, authHeadersFor } from '../providers/index.js';
 import * as consistency from './consistency.js';
 import * as continuity from './continuity.js';
+import * as edit from './edit.js';
 import * as speakerLib from './speaker.js';
 import * as imgsize from '../imgsize.js';
 import * as ffmpeg from '../ffmpeg.js';
@@ -4142,7 +4143,16 @@ async function generateSfx(projectId, { onEvent, signal } = {}) {
  * 三处只要有一处用了另一种时长口径，音、画、字就会各走各的。
  */
 export function timelineOf(project, { policy = 'trim' } = {}) {
-  const shots = (project.shots || []).filter((s) => s.videoPath).sort((a, b) => a.index - b.index);
+  /**
+   * ⚠ 顺序和"用不用"由**剪辑台**说了算，不再是"按 index 排一遍"。
+   *
+   * 这一行必须在这里，不能只写在合成那一层：配音按绝对时间点摆、
+   * 字幕也按绝对时间算，两者都来自这个函数。调了顺序却只改合成，
+   * 结果是画面按新顺序、声音和字幕按旧顺序 —— 而那是全片错位，
+   * 比不给剪辑功能糟得多。
+   */
+  const withVideo = (project.shots || []).filter((s) => s.videoPath);
+  const shots = edit.ordered(project.edit, withVideo);
   const rows = [];
   let at = 0;
   for (const shot of shots) {
@@ -4155,10 +4165,18 @@ export function timelineOf(project, { policy = 'trim' } = {}) {
      * 表现和"配音顺次拼"那个老 bug 一模一样，只是原因换了一个。
      */
     if (rows.length) at -= transitions.overlapOf(shot);
-    const span = policy === 'trim'
-      ? Number(shot.duration) || Number(shot.actualDuration) || 0
-      : Number(shot.actualDuration) || Number(shot.duration) || 0;
-    rows.push({ shot, start: at, span });
+    /**
+     * 手工设过入出点的，长度就是那一段 —— 它压过时长策略。
+     * 人明确说了"这一镜只要 2.4 秒"，没有任何理由再去按计划值或实出时长算。
+     */
+    const total = Number(shot.actualDuration) || Number(shot.duration) || 0;
+    const win = edit.windowOf(project.edit, shot, total);
+    const span = win
+      ? Number((win.out - win.in).toFixed(2))
+      : (policy === 'trim'
+        ? Number(shot.duration) || Number(shot.actualDuration) || 0
+        : Number(shot.actualDuration) || Number(shot.duration) || 0);
+    rows.push({ shot, start: at, span, win });
     at += span;
   }
   return rows;
@@ -4211,9 +4229,21 @@ export async function compose(projectId, { onEvent, signal = null } = {}) {
   const dir = store.assetDir(projectId);
 
   const ordered = project.shots.slice().sort((a, b) => a.index - b.index);
-  const withVideo = ordered.filter((s) => s.videoPath);
+  /**
+   * ⚠ 顺序、用不用、切哪一段，全部**由剪辑台决定**，而且要和
+   * timelineOf 用的是同一份 —— 配音和字幕按那份摆。
+   * 各算各的顺序，结果就是画面按新顺序、声音按旧顺序。
+   */
+  const withVideo = edit.ordered(project.edit, ordered.filter((s) => s.videoPath));
   const segments = withVideo.map((s) => s.videoPath);
-  if (!segments.length) throw new Error('没有可合成的视频片段');
+  if (!segments.length) {
+    const anyVideo = ordered.some((s) => s.videoPath);
+    throw new Error(anyVideo
+      ? '剪辑台里每一镜都标成了"不用" —— 至少留一镜才能合成'
+      : '没有可合成的视频片段');
+  }
+  const editNote = edit.summarize(project.edit, ordered.filter((s) => s.videoPath));
+  if (editNote) onEvent?.({ type: 'note', message: editNote });
 
   // 缺镜也允许合成 —— 卡在"必须全齐"上，一个取不回来的任务就能让整部片子出不来。
   // 但必须说清楚少了哪几镜，别让人以为这就是完整成片。
@@ -4232,7 +4262,20 @@ export async function compose(projectId, { onEvent, signal = null } = {}) {
   // 裁剪是唯一能精确命中目标时长的办法：模型给 5 秒而分镜只要 3.5 秒时切掉多余的。
   // 关掉则保留完整片段 —— 运动更自然，但成片会比计划长。
   const policy = settings.get('durationPolicy') || 'trim';
-  const trims = policy === 'trim' ? withVideo.map((s) => Number(s.duration) || null) : null;
+  /**
+   * 手工设过入出点的那几镜**不受时长策略管** —— 人已经明确说了要多长，
+   * 那个长度就是 out − in。
+   *
+   * ⚠ 这里**不能给 null**。concat 里入点（cuts[i].in）只在
+   * `trims[i]` 是正数时才会被读 —— 给 null 等于把整条裁剪路径关掉，
+   * 于是"存下来了、日志也说剪过了、成片纹丝不动"。
+   * 走查第一版就是这么红的：顺序和跳过都生效了，唯独入出点没有。
+   */
+  const trims = withVideo.map((s) => {
+    const w = edit.windowOf(project.edit, s, Number(s.actualDuration) || Number(s.duration) || 0);
+    if (w) return Number((w.out - w.in).toFixed(2));
+    return policy === 'trim' ? Number(s.duration) || null : null;
+  });
 
   /**
    * 自动剪辑：给每段挑一个入点，别永远从第 0 秒切。
@@ -4244,7 +4287,20 @@ export async function compose(projectId, { onEvent, signal = null } = {}) {
    * 要 FFmpeg 才做得了（得把帧采出来）。没装就跳过并说一声 ——
    * 跳过是可以接受的，不知道自己跳过了才不行。
    */
-  let cuts = null;
+  /**
+   * ⚠ **手工入出点和自动剪辑是两回事，不能绑在同一个开关上。**
+   *
+   * 自动剪辑关掉、或者机器上没有 FFmpeg 的时候，剪辑台上人一刀一刀
+   * 设好的入出点**照样要生效** —— 那是人的决定，不是一个可以"跳过"的优化。
+   * 所以先把手工那部分铺满，自动那部分只往空位里填。
+   */
+  const manualCuts = withVideo.map((s) => {
+    const total = Number(s.actualDuration) || Number(s.duration) || 0;
+    const w = edit.windowOf(project.edit, s, total);
+    return w ? { in: w.in, out: w.out, deadHead: 0, trimmed: w.in > 0, index: s.index, manual: true } : null;
+  });
+  let cuts = manualCuts.some(Boolean) ? manualCuts.map((c) => c || { in: 0, out: 0, deadHead: 0, trimmed: false }) : null;
+
   if (settings.get('autoCut') !== false && ffmpeg.locate().available) {
     cuts = [];
     const tmpRoot = path.join(dir, '.autocut');
@@ -4254,6 +4310,15 @@ export async function compose(projectId, { onEvent, signal = null } = {}) {
       try {
         // eslint-disable-next-line no-await-in-loop
         const total = (await ffmpeg.probeDuration(shot.videoPath)) || 0;
+        /**
+         * 手工剪过的那几镜**直接用人给的那一段**，不再去猜。
+         * 自动剪辑是"没人管的时候尽量做对"，人明确说了要哪一段之后，
+         * 再去分析一遍纯属浪费 —— 而且万一算出个不一样的，就是它在跟人打架。
+         */
+        if (manualCuts[i]) {
+          cuts.push(manualCuts[i]);
+          continue;
+        }
         /**
          * 先问 FFmpeg 自己的 freezedetect：一趟出结果、不落临时文件、
          * 噪声门限可调（编码噪点骗不了它）。

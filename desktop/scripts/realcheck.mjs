@@ -481,6 +481,91 @@ section('合成这一整步（studio.compose，不是只测零件）');
   }
 }
 
+/**
+ * ── 剪辑台：改了顺序和入出点，成片真的跟着变 ──
+ *
+ * 纯函数那一层自检里量透了。这里量的是**它真的走到了 FFmpeg**：
+ * 顺序换了、某一镜跳过了、入出点设了，出来的片子长度和内容都得跟着变。
+ * 只验"存下来了"是不够的 —— 存对了而合成不读它，用户看到的是"改了没反应"。
+ */
+section('剪辑台走到真片子上');
+{
+  const store = await import('../core/store.js');
+  const studio = await import('../core/pipeline/studio.js');
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'fd-cut-'));
+  const keepData = process.env.FUTUREDREAM_DATA_DIR;
+  process.env.FUTUREDREAM_DATA_DIR = sandbox;
+  try {
+    const p = store.create({ title: '剪辑走查', script: '三镜。' });
+    const assets = store.assetDir(p.id);
+    fs.mkdirSync(assets, { recursive: true });
+    const mk = (name, secs, color) => {
+      const src = clip(`cut-${name}.mp4`, secs, color);
+      const dst = path.join(assets, `${name}.mp4`);
+      fs.copyFileSync(src, dst);
+      return dst;
+    };
+    const v1 = mk('s1', 3, 'red');
+    const v2 = mk('s2', 3, 'green');
+    const v3 = mk('s3', 3, 'blue');
+    store.update(p.id, (x) => {
+      x.shots = [
+        { id: 's1', index: 1, description: '一', duration: 3, actualDuration: 3, transition: 'cut', videoPath: v1 },
+        { id: 's2', index: 2, description: '二', duration: 3, actualDuration: 3, transition: 'cut', videoPath: v2 },
+        { id: 's3', index: 3, description: '三', duration: 3, actualDuration: 3, transition: 'cut', videoPath: v3 }
+      ];
+      return x;
+    });
+    settings.patch({ autoCut: false, durationPolicy: 'keep' });
+
+    // ① 原样合成：三段各 3 秒
+    await studio.compose(p.id, { onEvent: () => {} });
+    const base = await ffmpeg.probeDuration(store.read(p.id).outputs.video);
+    check(`原样是三段共 9 秒（实际 ${base?.toFixed(2)}）`, Math.abs(base - 9) < 0.4, String(base));
+
+    // ② 跳过一镜 + 给一镜设入出点 → 长度必须变
+    store.update(p.id, (x) => {
+      x.edit = { order: ['s3', 's1', 's2'], clips: { s2: { off: true }, s1: { in: 0.5, out: 2 } } };
+      return x;
+    });
+    const notes = [];
+    await studio.compose(p.id, { onEvent: (ev) => { if (ev.message) notes.push(ev.message); } });
+    const cutSecs = await ffmpeg.probeDuration(store.read(p.id).outputs.video);
+    // s3 完整 3 秒 + s1 的 1.5 秒 = 4.5
+    check(`剪完是 4.5 秒（实际 ${cutSecs?.toFixed(2)}）`, Math.abs(cutSecs - 4.5) < 0.4, String(cutSecs));
+    check('合成日志说清楚剪过什么',
+      notes.some((m) => /剪辑台/.test(m || '')), notes.join(' | ').slice(0, 200));
+
+    /**
+     * 顺序真的换了吗 —— 量**第一帧的颜色**。
+     * 只看总长的话，"跳过 s2"和"把 s2 剪短"是同一个数字，分不出来。
+     */
+    const head = path.join(sandbox, 'head.png');
+    spawnSync(bin, ['-y', '-v', 'error', '-i', store.read(p.id).outputs.video,
+      '-frames:v', '1', '-update', '1', head]);
+    const { stderr: probe } = await ffmpeg.run(['-i', head, '-f', 'null', '-']).catch((e) => ({ stderr: '' }));
+    void probe;
+    const ih = await import('../core/imghash.js');
+    const blueRef = path.join(sandbox, 'blue.png');
+    spawnSync(bin, ['-y', '-v', 'error', '-i', v3, '-frames:v', '1', '-update', '1', blueRef]);
+    const same = ih.hamming(await ih.hashImage(head), await ih.hashImage(blueRef));
+    check('第一帧变成了原来的第 3 镜（顺序真的换了）', same <= 4, `汉明距离 ${same}`);
+
+    // ③ 全都标成不用 → 要给一句人话，而不是一个看不懂的 FFmpeg 错
+    store.update(p.id, (x) => {
+      x.edit = { order: ['s1', 's2', 's3'], clips: { s1: { off: true }, s2: { off: true }, s3: { off: true } } };
+      return x;
+    });
+    let allOff = null;
+    await studio.compose(p.id, { onEvent: () => {} }).catch((e) => { allOff = e.message; });
+    check('全标成不用时说人话', /至少留一镜/.test(allOff || ''), allOff);
+  } finally {
+    if (keepData) process.env.FUTUREDREAM_DATA_DIR = keepData;
+    else delete process.env.FUTUREDREAM_DATA_DIR;
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+}
+
 // ── 收尾 ──
 fs.rmSync(DIR, { recursive: true, force: true });
 console.log(`\n${'─'.repeat(50)}`);

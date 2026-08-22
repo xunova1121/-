@@ -366,6 +366,71 @@ if ((await seamSel.count()) === 1) {
     /首尾帧/.test(opt) && /下一镜/.test(opt), opt.slice(0, 80));
 }
 
+/**
+ * ── 剪辑台 ──
+ *
+ * 成片出来之后还能改顺序、设入出点、跳过某一镜，改完只重新合成 ——
+ * 十几秒，一分钱不花。这块的价值全在"改了真的算数"，
+ * 所以量的是**点完之后项目里存下了什么**，不是"有没有这个面板"。
+ */
+console.log('\n剪辑台');
+await page.evaluate(async (id) => {
+  // 造两段有视频的镜头，让剪辑台有东西可排（上游打桩，不出真视频）
+  const p = await (await fetch(`/api/projects/${id}`)).json();
+  const shots = (p.shots || []).map((s, i) => ({
+    ...s, videoPath: `/tmp/fake-${i}.mp4`, actualDuration: 5, duration: 4
+  }));
+  await fetch(`/api/projects/${id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ shots, outputs: { video: '/tmp/final.mp4', seconds: 9 } })
+  });
+}, proj.id);
+await page.goto(`${url}#/studio/${proj.id}`);
+await page.waitForTimeout(1800);
+await step('合成').click();
+await page.waitForTimeout(1200);
+
+const cutRows = page.locator('.cut-row');
+check('剪辑台把每一镜列出来了', (await cutRows.count()) === 2, String(await cutRows.count()));
+if ((await cutRows.count()) === 2) {
+  // 把第 1 镜往后挪 —— 顺序要真的存进项目
+  await cutRows.first().locator('button:has-text("↓")').click();
+  await page.waitForTimeout(700);
+  const afterMove = await page.evaluate((id) => fetch(`/api/projects/${id}`).then((r) => r.json()), proj.id);
+  check('调顺序真的存下来了',
+    Array.isArray(afterMove.edit?.order) && afterMove.edit.order[0] !== afterMove.shots[0].id,
+    JSON.stringify(afterMove.edit?.order));
+
+  // 跳过一镜
+  await page.locator('.cut-row button:has-text("不用")').first().click();
+  await page.waitForTimeout(700);
+  const afterOff = await page.evaluate((id) => fetch(`/api/projects/${id}`).then((r) => r.json()), proj.id);
+  check('"不用"真的存下来了',
+    Object.values(afterOff.edit?.clips || {}).some((c) => c.off === true),
+    JSON.stringify(afterOff.edit?.clips));
+
+  // 入点
+  const inBox = page.locator('.cut-row input[type=number]').first();
+  await inBox.fill('1.5');
+  await inBox.dispatchEvent('change');
+  await page.waitForTimeout(700);
+  const afterIn = await page.evaluate((id) => fetch(`/api/projects/${id}`).then((r) => r.json()), proj.id);
+  check('入点真的存下来了',
+    Object.values(afterIn.edit?.clips || {}).some((c) => c.in === 1.5),
+    JSON.stringify(afterIn.edit?.clips));
+
+  // 恢复默认要真的清干净 —— 留半份状态比不给这个按钮更糟
+  await page.locator('button:has-text("恢复默认")').click();
+  await page.waitForTimeout(800);
+  const afterReset = await page.evaluate((id) => fetch(`/api/projects/${id}`).then((r) => r.json()), proj.id);
+  check('「恢复默认」把剪辑决定清干净',
+    Object.keys(afterReset.edit?.clips || {}).length === 0, JSON.stringify(afterReset.edit));
+  check('并且顺序回到按镜号排',
+    (afterReset.edit?.order || [])[0] === afterReset.shots[0].id, JSON.stringify(afterReset.edit?.order));
+}
+check('说清楚重新合成不花钱',
+  /一分钱不花|不花钱/.test(await page.locator('#view-inner').innerText()), '');
+
 check('全程没有页面报错', errs.length === 0, errs.slice(0, 3).join(' | '));
 
 await b.close();

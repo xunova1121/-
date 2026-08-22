@@ -6145,6 +6145,85 @@ section('配完对象存储，老项目要跟上');
   check('跑完还原了（别把状态留给下一个用例）', ossMod.ready() === false);
 }
 
+section('剪辑台：出片之后还能改，而且不花钱');
+{
+  const ed = await import('../core/pipeline/edit.js');
+  const st = await import('../core/pipeline/studio.js');
+  const shots = [
+    { id: 'a', index: 1, videoPath: '/a.mp4', actualDuration: 5, duration: 4, dialogue: '一' },
+    { id: 'b', index: 2, videoPath: '/b.mp4', actualDuration: 5, duration: 4, dialogue: '二' },
+    { id: 'c', index: 3, videoPath: '/c.mp4', actualDuration: 5, duration: 4, dialogue: '三' }
+  ];
+
+  // ── 洗输入：界面发什么进来都不能一路走到 FFmpeg ──
+  const dirty = ed.normalize({
+    order: ['c', 'nope', 'c', 'a'],
+    clips: { a: { in: -3, out: 2 }, zzz: { off: true }, b: { in: 4, out: 4.1 } }
+  }, shots);
+  check('顺序里不存在的 id 被剔掉', !dirty.order.includes('nope'), JSON.stringify(dirty.order));
+  check('重复的只留一次', dirty.order.filter((x) => x === 'c').length === 1, JSON.stringify(dirty.order));
+  check('没提到的镜头按 index 补在后面', dirty.order.join() === 'c,a,b', dirty.order.join());
+  check('负数入点被夹回 0', dirty.clips.a.in === 0, JSON.stringify(dirty.clips.a));
+  check('短得没意义的一段当没设过（否则发给 FFmpeg 一个空片段）',
+    !dirty.clips.b, JSON.stringify(dirty.clips.b));
+  check('不存在的镜头不留记录', !dirty.clips.zzz);
+
+  // ── 顺序和"不用" ──
+  const reordered = { order: ['c', 'a', 'b'], clips: { b: { off: true } } };
+  check('按剪辑顺序排', ed.ordered(reordered, shots).map((x) => x.id).join() === 'c,a', 
+    ed.ordered(reordered, shots).map((x) => x.id).join());
+  check('标了"不用"的不进成片', !ed.ordered(reordered, shots).some((x) => x.id === 'b'));
+  check('没剪过时就是原顺序', ed.ordered({}, shots).map((x) => x.id).join() === 'a,b,c');
+
+  /**
+   * ══ 最要紧的一条：**字幕和配音必须跟着剪辑走** ══
+   *
+   * 顺序、入出点、跳过哪一镜，这三样同时影响画面怎么切、配音摆在第几秒、
+   * 字幕什么时候出。只要有一处用了不同的口径，音、画、字就各走各的 ——
+   * 而这种错在成片里表现为"越到后面越对不上"，是最难自己发现的那一类。
+   *
+   * 所以这里量的不是"剪辑台能不能存"，是**时间轴认不认它**。
+   */
+  const project = { shots, edit: reordered };
+  const rows = st.timelineOf(project, { policy: 'keep' });
+  check('时间轴跟着剪辑的顺序走', rows.map((r) => r.shot.id).join() === 'c,a', rows.map((r) => r.shot.id).join());
+  check('跳过的那一镜不占时间轴', rows.length === 2, String(rows.length));
+  check('第二段的起点是第一段的长度（不是原来第 2 镜的位置）',
+    rows[1].start === 5, JSON.stringify(rows.map((r) => r.start)));
+  const cues = st.buildSubtitles(project, { policy: 'keep' });
+  check('字幕跟着新顺序', cues[0].text === '三' && cues[1].text === '一',
+    JSON.stringify(cues.map((c) => c.text)));
+  check('被跳过那一镜的字幕也跟着没了',
+    !cues.some((c) => c.text === '二'), JSON.stringify(cues.map((c) => c.text)));
+
+  // ── 手工入出点压过时长策略 ──
+  const manual = { shots, edit: { clips: { a: { in: 1, out: 3.4 } } } };
+  const mrows = st.timelineOf(manual, { policy: 'trim' });
+  check('手工设过的那一镜，长度就是那一段（不再按计划时长）',
+    mrows[0].span === 2.4, JSON.stringify(mrows[0]));
+  check('后面那一镜的起点跟着挪', mrows[1].start === 2.4, JSON.stringify(mrows.map((r) => r.start)));
+  // 这一条按 trim 策略算：没手工设过的那一镜用的是分镜计划时长 4，不是实出的 5
+  check('没手工设的仍然按策略走（trim → 计划时长 4）', mrows[1].span === 4, String(mrows[1].span));
+
+  /**
+   * 素材换过一版（重出）之后变短了，旧的出点就悬空了。
+   * 不夹回去的话 FFmpeg 会切出一段空的 —— 而那表现为"成片里少了一镜"。
+   */
+  check('素材变短时把出点夹回来',
+    ed.windowOf({ clips: { a: { in: 1, out: 9 } } }, shots[0], 4)?.out === 4,
+    JSON.stringify(ed.windowOf({ clips: { a: { in: 1, out: 9 } } }, shots[0], 4)));
+  check('夹到没法成段时作废，交回自动剪辑',
+    ed.windowOf({ clips: { a: { in: 8, out: 9 } } }, shots[0], 0.2) === null);
+  check('没手工设过就回 null（别替自动剪辑做决定）',
+    ed.windowOf({}, shots[0], 5) === null);
+
+  // ── 说人话 ──
+  const brief = ed.summarize(reordered, shots);
+  check('合成日志里说清楚剪过什么', /调过顺序/.test(brief) && /跳过 1 镜/.test(brief), brief);
+  check('并且说明它不重新生成素材', /不重新生成/.test(brief), brief);
+  check('没剪过就不说话（每次合成印一行"没剪"是纯噪音）', ed.summarize({}, shots) === null);
+}
+
 section('待认领的任务不能变成黑洞');
 {
   // 提交成功、片子在厂商那边、我们没取回来 —— 这种状态既不算完成也不算失败，

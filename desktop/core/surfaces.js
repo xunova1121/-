@@ -316,6 +316,17 @@ export const CAPABILITIES = [
     why: '手机本来就是连服务器的，没有"要不要连"这个选择。'
   },
   {
+    id: 'film-cut',
+    name: '剪辑台：调顺序 / 设入出点 / 跳过某镜',
+    api: 'PATCH /projects/:id { edit }',
+    pc: 'ui/views/studio.js',
+    mobile: null,
+    why: '一屏要同时看十几条片段的缩略图、时长和入出点，还要来回拖顺序 —— '
+      + '390px 宽摆不下，拖拽在拇指上也很难精确。手机上该做的是"看到不对、当场改一句、重出"，'
+      + '而剪辑是坐下来一次做完的事。⚠ 这一条是有意为之，不是漏做：等手机上真的需要时再单独设计，'
+      + '而不是把电脑那套缩小塞进去。'
+  },
+  {
     id: 'oss-config',
     name: '对象存储配置',
     api: 'POST /settings { oss }',

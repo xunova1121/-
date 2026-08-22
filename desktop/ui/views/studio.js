@@ -2295,6 +2295,7 @@ export default {
         return h('div', {},
           // cap:quality-report
           qualityHost,
+          cutRoom(),
           h('video', {
             // cap:film-view
             src: `${mediaUrl(project.outputs.video)}&v=${v}`,
@@ -2337,6 +2338,241 @@ export default {
           })());
       })()
     );
+
+    /**
+     * ══════════════ 剪辑台 ══════════════
+     *
+     * 在这之前，整条链路是**一次性**的：分镜定好 → 出图 → 出视频 → 合成 → 完。
+     * 想调节奏、换顺序、砍掉一镜，只能回分镜页改字段**再重跑**——
+     * 而重跑是按镜数计费的。
+     *
+     * 可是"这段太拖，砍掉一秒""第 7 和第 8 对调""这一镜不要了"这些事，
+     * **一帧都不用重新生成**。素材已经在盘上，要动的只是"怎么拼" ——
+     * 那是 FFmpeg 层的事，十几秒的活，一分钱不花。
+     *
+     * ⚠ 这里只做**怎么拼**：顺序、入出点、用不用、转场。
+     * 特效、滤镜、字幕样式是另外的事，不在这一层，也不该混进来 ——
+     * 那几样一旦掺进来，"重新合成不花钱"这条就不再成立了。
+     *
+     * ⚠ 顺序和入出点改的是 project.edit，而 timelineOf() 认它 ——
+     * 所以配音和字幕会跟着一起挪。这一点是这块能不能用的前提：
+     * 只改画面不改声音，等于把一部对上的片子改成对不上的。
+     */
+    function cutRoom() {
+      const clips = (project.shots || []).filter((s) => s.videoPath);
+      if (clips.length < 2) return null;
+
+      const draft = {
+        order: Array.isArray(project.edit?.order) && project.edit.order.length
+          ? project.edit.order.slice()
+          : clips.slice().sort((x, y) => x.index - y.index).map((s) => s.id),
+        clips: JSON.parse(JSON.stringify(project.edit?.clips || {}))
+      };
+      const byId = new Map(clips.map((s) => [s.id, s]));
+      const host = h('div', { class: 'panel', style: 'margin-top:14px' });
+      /**
+       * 保存要**串行、但不能丢**。
+       *
+       * 第一版写的是 `if (saving) return;` —— 一次保存在飞的时候，
+       * 后来的那次直接扔掉。走查里立刻现形：改完入点马上点「恢复默认」，
+       * 恢复那一下被吞了，界面显示已恢复而盘上还是旧的。
+       *
+       * 而这正是最难查的一类：它只在**手快**的时候发生，
+       * 复现要靠运气，用户报上来的会是"有时候改了不生效"。
+       * 排队重发一次（最后一次赢），代价是偶尔多发一个请求。
+       */
+      let saving = false;
+      let queued = false;
+
+      const totalOf = (s) => Number(s.actualDuration) || Number(s.duration) || 0;
+      const spanOf = (s) => {
+        const c = draft.clips[s.id] || {};
+        if (c.in != null || c.out != null) {
+          const a = Math.max(0, c.in ?? 0);
+          const b = Math.min(c.out ?? totalOf(s), totalOf(s));
+          return Math.max(0, Number((b - a).toFixed(2)));
+        }
+        return (state.catalog?.settings?.durationPolicy || 'keep') === 'trim'
+          ? Number(s.duration) || totalOf(s)
+          : totalOf(s);
+      };
+
+      const save = async () => {
+        if (saving) {
+          queued = true;
+          return;
+        }
+        saving = true;
+        try {
+          // cap:film-cut
+          await api(`/projects/${project.id}`, { method: 'PATCH', body: { edit: draft } });
+        } catch (err) {
+          toast(err.message, 'err');
+        } finally {
+          saving = false;
+          if (queued) {
+            queued = false;
+            await save(); // draft 是引用，重发的一定是最新那份
+          }
+        }
+      };
+
+      const paintList = () => {
+        const list = h('div', { class: 'stack', style: 'gap:6px' });
+        draft.order.forEach((id, i) => {
+          const s = byId.get(id);
+          if (!s) return;
+          const c = draft.clips[id] || {};
+          const off = c.off === true;
+          const total = totalOf(s);
+
+          const num = (val, ph, onSet) => h('input', {
+            type: 'number', step: '0.1', min: '0', max: String(total || 60),
+            value: val == null ? '' : String(val),
+            placeholder: ph,
+            style: 'width:78px',
+            onchange: (e) => {
+              const raw = e.target.value.trim();
+              onSet(raw === '' ? null : Number(raw));
+              /**
+               * ⚠ 这里**不能整块重绘**。
+               *
+               * change 事件是在失焦的过程中触发的，此时把这个 input 所在的
+               * 整棵子树 removeChild 掉，浏览器紧接着要把焦点还给一个
+               * 已经不在文档里的节点 —— 于是抛
+               * `The node to be removed is no longer a child of this node`。
+               * 页面看着没事，控制台里一条红的，而走查是盯着页面报错的。
+               *
+               * 只更新那两处会变的数字就够了，顺便还省掉了一次闪烁、
+               * 焦点也不会被抢走。
+               */
+              refreshNumbers();
+              save();
+            }
+          });
+
+          const setClip = (patch) => {
+            draft.clips[id] = { ...(draft.clips[id] || {}), ...patch };
+            for (const [k, val] of Object.entries(draft.clips[id])) {
+              if (val == null || val === false) delete draft.clips[id][k];
+            }
+            if (!Object.keys(draft.clips[id]).length) delete draft.clips[id];
+          };
+
+          const move = (delta) => {
+            const j = i + delta;
+            if (j < 0 || j >= draft.order.length) return;
+            const next = draft.order.slice();
+            [next[i], next[j]] = [next[j], next[i]];
+            draft.order = next;
+            redraw();
+            save();
+          };
+
+          list.append(h('div', {
+            class: 'cut-row',
+            style: `display:flex;align-items:center;gap:10px;padding:8px;border:1px solid var(--line);`
+              + `border-radius:10px;background:var(--bg-1);${off ? 'opacity:.45' : ''}`
+          },
+          h('span', { class: 'field-hint', style: 'margin:0;width:26px;text-align:right' }, String(i + 1)),
+          s.imagePath
+            ? h('img', {
+                src: mediaUrl(s.imagePath),
+                style: 'width:72px;height:41px;object-fit:cover;border-radius:6px;background:#000'
+              })
+            : h('div', { style: 'width:72px;height:41px;border-radius:6px;background:var(--bg-2)' }),
+          h('div', { style: 'flex:1;min-width:0' },
+            h('div', {}, h('b', {}, `第 ${s.index} 镜`),
+              h('span', {
+                class: 'field-hint cut-span',
+                'data-shot': s.id,
+                style: 'margin-left:8px'
+              }, `${spanOf(s).toFixed(1)}s / 素材 ${total.toFixed(1)}s`)),
+            h('div', {
+              class: 'field-hint',
+              style: 'margin:2px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
+            }, s.description || '（无描述）')),
+          h('div', { class: 'inline', style: 'gap:6px' },
+            num(c.in, '入点', (v) => setClip({ in: v })),
+            num(c.out, '出点', (v) => setClip({ out: v })),
+            h('select', {
+              onchange: (e) => {
+                // 转场记在镜头上（合成时按它算重叠），不是剪辑决定的一部分
+                api(`/projects/${project.id}/shots/${s.id}`, {
+                  method: 'PATCH', body: { transition: e.target.value }
+                }).then(() => { s.transition = e.target.value; }).catch((err) => toast(err.message, 'err'));
+              }
+            },
+            ...[['cut', '硬切'], ['fade', '黑场'], ['dissolve', '叠化']].map(([val, label]) =>
+              h('option', { value: val, selected: (s.transition || 'cut') === val }, label))),
+            h('button', { class: 'btn ghost sm', title: '往前挪', onclick: () => move(-1) }, '↑'),
+            h('button', { class: 'btn ghost sm', title: '往后挪', onclick: () => move(1) }, '↓'),
+            h('button', {
+              class: `btn sm ${off ? '' : 'ghost'}`,
+              title: off ? '放回成片' : '这一镜不进成片（素材不删）',
+              onclick: () => { setClip({ off: !off }); redraw(); save(); }
+            }, off ? '已跳过' : '不用'))));
+        });
+        return list;
+      };
+
+      /**
+       * 改数字之后只刷这两处：这一行的时长、底下的合计。
+       * 不重绘整块 —— 见上面 onchange 里那段说明。
+       */
+      const refreshNumbers = () => {
+        for (const el of host.querySelectorAll('.cut-span')) {
+          const s = byId.get(el.dataset.shot);
+          if (s) el.textContent = `${spanOf(s).toFixed(1)}s / 素材 ${totalOf(s).toFixed(1)}s`;
+        }
+        const foot = host.querySelector('.cut-total');
+        if (foot) {
+          const used = draft.order.filter((id) => !draft.clips[id]?.off);
+          const secs = used.reduce((sum, id) => sum + (byId.get(id) ? spanOf(byId.get(id)) : 0), 0);
+          foot.textContent = `用 ${used.length} / ${clips.length} 镜，约 ${secs.toFixed(1)} 秒`
+            + '（叠化会各吃掉 0.5 秒，实际以合成结果为准）';
+        }
+      };
+
+      const redraw = () => {
+        clear(host);
+        const used = draft.order.filter((id) => !draft.clips[id]?.off);
+        const secs = used.reduce((sum, id) => sum + (byId.get(id) ? spanOf(byId.get(id)) : 0), 0);
+        host.append(
+          h('h2', { class: 'panel-title' }, '剪辑台'),
+          h('p', { class: 'panel-hint' },
+            '调顺序、设入出点、跳过某一镜、换转场 —— 改完点下面「重新合成」，',
+            h('b', {}, '十几秒出片，一分钱不花'),
+            '（不重新生成任何素材）。配音和字幕会跟着一起挪。'),
+          paintList(),
+          h('div', { class: 'inline', style: 'margin-top:12px;flex-wrap:wrap' },
+            h('button', {
+              class: 'btn primary',
+              onclick: async () => {
+                await save();
+                run('compose', '重新合成');
+              }
+            }, '重新合成（不花钱）'),
+            h('button', {
+              class: 'btn ghost',
+              title: '把顺序、入出点、跳过全部清掉，回到自动剪辑的结果',
+              onclick: async () => {
+                draft.order = clips.slice().sort((x, y) => x.index - y.index).map((s) => s.id);
+                draft.clips = {};
+                redraw();
+                await save();
+                toast('已恢复成自动剪辑的结果', 'ok');
+              }
+            }, '恢复默认'),
+            h('span', { class: 'field-hint cut-total', style: 'margin:0' },
+              `用 ${used.length} / ${clips.length} 镜，约 ${secs.toFixed(1)} 秒`
+              + '（叠化会各吃掉 0.5 秒，实际以合成结果为准）'))
+        );
+      };
+
+      redraw();
+      return host;
+    }
 
     /**
      * 一步只显示这一步的东西。
