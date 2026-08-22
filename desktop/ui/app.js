@@ -98,10 +98,23 @@ function paintChain() {
           title: !ready
             ? `${provider?.name || route?.provider || '未配置'} —— 缺少密钥，去「服务商与密钥」补上`
             : bad
-              ? `${provider.name} / ${route.model}\n✕ 连不通：${checked.reason}`
+              ? `${provider.name} / ${route.model}\n✕ 连不通：${checked.reason}\n\n点一下看完整原因`
               : checked?.ok
                 ? `${provider.name} / ${route.model}\n✓ 已连通${checked.latencyMs ? `（${checked.latencyMs}ms）` : ''}`
-                : `${provider.name} / ${route.model}`
+                : `${provider.name} / ${route.model}`,
+          /**
+           * ⚠ 红叉必须**点得开**。
+           *
+           * 用户报上来的原话就是四行光秃秃的
+           *     剧本 openai ✕ / 调度 openai ✕ / 复核 openai ✕ / 出图 openai ✕
+           * 而真正的原因（"这台机器连不上 api.openai.com，不是密钥问题"）
+           * 当时只挂在 title 上 —— 鼠标不悬停就永远看不到，而人的第一反应是去翻密钥。
+           *
+           * 常驻红横幅是有意不做的（见下面 paintRoutingBanner 那段），
+           * 但"看到红叉之后有地方能问为什么"必须有。点开是**人主动要的**，
+           * 不违反那条取舍。
+           */
+          ...(bad ? { onclick: () => showRouteDetail(cap, label, provider, route, checked) } : {})
         },
         `${label} `,
         h('b', {}, provider ? provider.id : '—'),
@@ -109,6 +122,61 @@ function paintChain() {
       )
     );
   }
+}
+
+/**
+ * 点了红叉之后，把**完整原因**摊开在信号链下面。
+ *
+ * 借用横幅那块地方，但它是**人点出来的**，不是常驻的 —— 那条取舍
+ *（不要一条永远压在页面顶上的红横幅）仍然成立。
+ *
+ * 原因里带换行（网络那一层的解释是分行写的，一行一条路），所以要
+ * `white-space:pre-wrap` —— 塌成一坨的话，写得再清楚也没人读得下去。
+ */
+function showRouteDetail(cap, label, provider, route, checked) {
+  const host = $('#route-banner');
+  if (!host) return;
+  clear(host);
+  host.style.display = '';
+  const reason = checked?.reason || '（没拿到原因）';
+  /**
+   * 按钮要**跟着原因走**。连不上网络的时候摆一个「去配密钥」，
+   * 是明明白白把人往沟里带 —— 而这正是原来那个横幅在做的事。
+   */
+  const networky = /连不上|解析不了|连接失败|拒绝连接|掐断|超时/.test(reason);
+  host.append(
+    h('b', {}, `${label}：${provider?.name || route?.provider} 连不通`),
+    h('div', {
+      class: 'route-why',
+      style: 'white-space:pre-wrap;line-height:1.7;margin:6px 0;color:var(--ink)'
+    }, reason),
+    h('div', { class: 'inline', style: 'flex-wrap:wrap' },
+      networky
+        ? h('button', {
+            class: 'btn ghost sm',
+            onclick: () => { localStorage.setItem('fd.view', 'settings'); location.reload(); }
+          }, '去「本机环境」开系统代理')
+        : h('button', {
+            class: 'btn ghost sm',
+            onclick: () => { localStorage.setItem('fd.view', 'providers'); location.reload(); }
+          }, '去配密钥'),
+      h('button', {
+        class: 'btn ghost sm',
+        onclick: () => { localStorage.setItem('fd.view', 'providers'); location.reload(); }
+      }, '改接口根地址'),
+      h('button', {
+        class: 'btn ghost sm',
+        onclick: (e) => {
+          e.target.disabled = true;
+          runRoutingCheck().finally(() => {
+            e.target.disabled = false;
+            paintChain();
+            showRouteDetail(cap, label, provider, route, state.routingCheck?.capabilities?.[cap]);
+          });
+        }
+      }, '重新检测'),
+      h('button', { class: 'btn ghost sm', onclick: () => { host.style.display = 'none'; } }, '关掉'))
+  );
 }
 
 /**

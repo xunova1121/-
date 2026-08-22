@@ -2265,6 +2265,29 @@ export default {
       shotHost
     );
 
+    /**
+     * ───────────── 剪辑台 ─────────────
+     *
+     * ⚠ 它是**独立一块**，摆在「成片」上面，不再塞在成片面板里。
+     *
+     * 两个理由：
+     * ① 顺序不对。人的动作是"先剪，再出片，再看" —— 而它原来在成片下面，
+     *    等于让人先看完片子再往回翻去改。
+     * ② 原来它只在**已经有成片**的时候才出现（整块藏在 outputs.video 的分支里），
+     *    可第一次合成之前恰恰最该先排一遍顺序。
+     */
+    const cutPanel = h('div', { style: 'display:none' });
+    (() => {
+      const room = cutRoom();
+      if (room) cutPanel.append(room);
+      else {
+        cutPanel.append(h('div', { class: 'panel' },
+          h('h2', { class: 'panel-title' }, '剪辑台'),
+          h('p', { class: 'panel-hint' },
+            '还没有可剪的片段 —— 先把「视频生成」那一步跑出至少一镜，这里才会出现时间线。')));
+      }
+    })();
+
     // ───────────── 成片 ─────────────
     // 合成那一步的产出不在分镜网格里，得有个地方能直接看
     const composePanel = h('div', { class: 'panel', style: 'display:none' },
@@ -2310,7 +2333,6 @@ export default {
         return h('div', {},
           // cap:quality-report
           qualityHost,
-          cutRoom(),
           h('video', {
             // cap:film-view
             src: `${mediaUrl(project.outputs.video)}&v=${v}`,
@@ -2513,6 +2535,73 @@ export default {
         repaint();
       };
 
+      /**
+       * ══════ 小剪刀 ══════
+       *
+       * 在播放头那一刀把选中的片段切成两段。两段共用同一个素材文件，
+       * 各有各的入出点 —— 所以"切一刀"不重新生成任何东西，还是十几秒的活。
+       *
+       * ⚠ 台词和音效**只跟第一段走**（引擎那边靠 timeline 的 `first` 判）。
+       * 不这么定的话，切一刀就会把同一句话念两遍。
+       *
+       * 两边各留至少 0.3 秒：再短就是一帧闪过，观众只会觉得画面抖了一下。
+       */
+      const splitPoint = () => {
+        if (!sel) return null;
+        const r = rowsOf().find((x) => x.key === sel);
+        if (!r) return null;
+        const into = playAt - r.start;
+        if (into < MINSPAN || r.span - into < MINSPAN) return null;
+        const a = r.win ? r.win.in : 0;
+        return { row: r, at: Number((a + into).toFixed(2)), a, b: r.win ? r.win.out : r.total };
+      };
+      const canSplit = () => Boolean(splitPoint());
+      const splitHere = () => {
+        const p = splitPoint();
+        if (!p) {
+          toast('把播放头拖到这一段中间再切 —— 两边各要留够 0.3 秒', 'warn');
+          return;
+        }
+        mark();
+        const key = p.row.key;
+        const next = EDIT.nextKey(draft, EDIT.shotIdOf(key));
+        // 前半段：原 key 保留（转场、效果、静音都跟着它，因为它还接在原来的位置上）
+        setClip(key, { in: Number(p.a.toFixed(2)), out: p.at });
+        // 后半段：新 key，只带入出点。转场留空 = 硬切，这是切开之后最合理的默认
+        draft.clips[next] = { in: p.at, out: Number(p.b.toFixed(2)) };
+        const at = draft.order.indexOf(key);
+        draft.order.splice(at + 1, 0, next);
+        sel = next;
+        done();
+        toast(`切成两段：${p.at - p.a > 0 ? `${(p.at - p.a).toFixed(1)}s + ${(p.b - p.at).toFixed(1)}s` : ''}`, 'ok');
+      };
+
+      /**
+       * 删除选中的片段。
+       *
+       * 分两种，因为**可逆性不一样**：
+       *   切出来的段  直接从 order 里拿掉 —— 它本来就是切出来的，没了就是没了，
+       *               但另一半还在，再切一次就能回来
+       *   整镜那一段  标成"不用"而不是删掉 —— 那是这一镜在时间线上唯一的位置，
+       *               真删了就再也放不回来。标"不用"能从左边素材架里点回来
+       */
+      const deleteSel = () => {
+        if (!sel) return;
+        const sid = EDIT.shotIdOf(sel);
+        const parts = draft.order.filter((k) => EDIT.shotIdOf(k) === sid);
+        mark();
+        if (parts.length > 1) {
+          draft.order = draft.order.filter((k) => k !== sel);
+          delete draft.clips[sel];
+          toast('这一段拿掉了（同一镜的另一段还在）', 'ok');
+        } else {
+          setClip(sel, { off: true });
+          toast('标成"不用"了 —— 左边素材架里点「放回来」就回来', 'ok');
+        }
+        sel = null;
+        done();
+      };
+
       const setClip = (id, patch) => {
         draft.clips[id] = { ...(draft.clips[id] || {}), ...patch };
         for (const [k, val] of Object.entries(draft.clips[id])) {
@@ -2528,11 +2617,17 @@ export default {
       // ───────────── 视图状态 ─────────────
       /** 每秒画多少像素。缩放改的是它 */
       let pps = 46;
+      /**
+       * 选中的是**片段 key**，不是镜头 id。
+       * 一镜被小剪刀切开之后是两段（`s1` 和 `s1#2`），各选各的。
+       */
       let sel = null;
       let playAt = 0;
       let playing = false;
       let fitted = false;
 
+      /** 一段最短留多少秒。和引擎那边的 edit.MIN_SPAN 是同一个数 */
+      const MINSPAN = EDIT.MIN_SPAN;
       const LAB = 96;   // 左边轨道名那一列
       const H = { ruler: 20, video: 62, audio: 24 };
 
@@ -2577,12 +2672,30 @@ export default {
         else el.addEventListener('loadedmetadata', put, { once: true });
       };
 
-      const seek = (t, { play = null } = {}) => {
+      /**
+       * 播放头落在哪一段上。
+       *
+       * ⚠ **重叠类转场会让相邻两段的时间范围叠在一起**（叠化各吃掉 0.5 秒，
+       * 所以下一段的起点比上一段的终点还早）。用"第一个还没结束的"去找，
+       * 在重叠区里会找回**上一段** —— 于是"跳到下一段的起点"跳完还在原地，
+       * 下一帧又触发跳转，播放就死在那个接缝上再也过不去。
+       *
+       * 用户报上来的原话："点击按钮演示一直卡在那边播放不下去"。
+       * 从后往前找第一个"起点已经到了"的，重叠区就归**后一段**，和成片一致。
+       */
+      const rowAt = (rs, t) => {
+        for (let i = rs.length - 1; i >= 0; i -= 1) if (t >= rs[i].start - 0.001) return rs[i];
+        return rs[0];
+      };
+
+      const seek = (t, { play = null, row = null } = {}) => {
         const rs = rowsOf();
         if (!rs.length) return;
         const tot = totalOf(rs);
         playAt = Math.max(0, Math.min(Number(t) || 0, tot));
-        const r = rs.find((x) => playAt < x.start + x.span - 0.001) || rs[rs.length - 1];
+        // 跳到下一段时**按下标点名**，不靠时间去猜 —— 重叠区里猜是猜不准的
+        const r = (row != null && rs[row]) || rowAt(rs, playAt);
+        if (row != null && rs[row]) playAt = Math.max(playAt, rs[row].start);
         const inAt = r.win ? r.win.in : 0;
         const into = Math.max(0, playAt - r.start);
 
@@ -2633,7 +2746,7 @@ export default {
         // 到这一镜的出点了 —— 跳下一镜。这一步就是"按剪辑顺序播"
         if (video.currentTime >= inAt + r.span - 0.04) {
           const i = rs.indexOf(r);
-          if (i + 1 < rs.length) return seek(rs[i + 1].start, { play: true });
+          if (i + 1 < rs.length) return seek(rs[i + 1].start, { play: true, row: i + 1 });
           stopPlay();
           return seek(0);
         }
@@ -2644,7 +2757,7 @@ export default {
         if (!playing) return;
         const rs = rowsOf();
         const i = rs.findIndex((x) => x.shot.id === curShot);
-        if (i >= 0 && i + 1 < rs.length) seek(rs[i + 1].start, { play: true });
+        if (i >= 0 && i + 1 < rs.length) seek(rs[i + 1].start, { play: true, row: i + 1 });
         else { stopPlay(); seek(0); }
       });
 
@@ -2668,30 +2781,32 @@ export default {
        */
       function paintShelf() {
         clear(shelfBox);
-        const used = new Set(rowsOf().map((r) => r.shot.id));
+        const rs = rowsOf();
+        const used = new Set(rs.map((r) => r.key));
         shelfBox.append(
           h('div', { class: 'tl-shelf-hd' }, '素材',
-            h('span', { class: 'field-hint', style: 'margin:0 0 0 6px' }, `${used.size}/${clips.length} 在用`)),
-          ...draft.order.map((id) => {
-            const s = byId.get(id);
+            h('span', { class: 'field-hint', style: 'margin:0 0 0 6px' }, `${used.size}/${draft.order.length} 段在用`)),
+          ...draft.order.map((key) => {
+            const s = byId.get(EDIT.shotIdOf(key));
             if (!s) return null;
-            const on = used.has(id);
+            const on = used.has(key);
+            const part = key.includes('#') ? `·${key.split('#')[1]}` : '';
             return h('div', {
-              class: `tl-card${on ? '' : ' off'}${sel === id ? ' on' : ''}`,
-              title: on ? '点一下选中它' : '这一镜现在不进成片，点「放回来」',
-              onclick: () => { sel = id; paintShelf(); paintProps(); paintLanes(); }
+              class: `tl-card${on ? '' : ' off'}${sel === key ? ' on' : ''}`,
+              title: on ? '点一下选中它' : '这一段现在不进成片，点「放回来」',
+              onclick: () => { sel = key; paintShelf(); paintProps(); paintLanes(); syncTools(); }
             },
             s.imagePath
               ? h('img', { src: mediaUrl(s.imagePath), class: 'tl-card-img' })
               : h('div', { class: 'tl-card-img' }),
             h('div', { style: 'min-width:0;flex:1' },
-              h('div', { class: 'tl-card-t' }, `#${s.index}`),
+              h('div', { class: 'tl-card-t' }, `#${s.index}${part}`),
               h('div', { class: 'field-hint', style: 'margin:0' },
-                on ? `${(rowsOf().find((r) => r.shot.id === id)?.span || 0).toFixed(1)}s` : '不用')),
+                on ? `${(rs.find((r) => r.key === key)?.span || 0).toFixed(1)}s` : '不用')),
             !on
               ? h('button', {
                   class: 'btn ghost sm',
-                  onclick: (e) => { e.stopPropagation(); mark(); setClip(id, { off: false }); done(); }
+                  onclick: (e) => { e.stopPropagation(); mark(); setClip(key, { off: false }); done(); }
                 }, '放回来')
               : null);
           }).filter(Boolean)
@@ -2702,8 +2817,8 @@ export default {
       function paintProps() {
         clear(propsBox);
         const rs = rowsOf();
-        const r = rs.find((x) => x.shot.id === sel);
-        const s = sel ? byId.get(sel) : null;
+        const r = rs.find((x) => x.key === sel);
+        const s = sel ? byId.get(EDIT.shotIdOf(sel)) : null;
         if (!s) {
           propsBox.append(
             h('div', { class: 'tl-props-hd' }, '属性'),
@@ -2721,26 +2836,27 @@ export default {
           onchange: (e) => { mark(); onSet(Number(e.target.value)); done(); }
         });
 
+        const part = String(sel).includes('#') ? `（第 ${String(sel).split('#')[1]} 段）` : '';
         propsBox.append(
           h('div', { class: 'tl-props-hd' }, '属性'),
           h('div', { class: 'tl-field' }, h('label', {}, '名称'),
-            h('div', { class: 'tl-val' }, `第 ${s.index} 镜`)),
+            h('div', { class: 'tl-val' }, `第 ${s.index} 镜${part}`)),
           h('div', { class: 'tl-two' },
             h('div', { class: 'tl-field' }, h('label', {}, '开始'),
-              num(a, (v) => setClip(s.id, { in: Math.max(0, Math.min(v, b - 0.3)), out: Number(b.toFixed(2)) }), '从素材的第几秒进')),
+              num(a, (v) => setClip(sel, { in: Math.max(0, Math.min(v, b - 0.3)), out: Number(b.toFixed(2)) }), '从素材的第几秒进')),
             h('div', { class: 'tl-field' }, h('label', {}, '结束'),
-              num(b, (v) => setClip(s.id, { in: Number(a.toFixed(2)), out: Math.min(total || v, Math.max(v, a + 0.3)) }), '切到素材的第几秒'))),
+              num(b, (v) => setClip(sel, { in: Number(a.toFixed(2)), out: Math.min(total || v, Math.max(v, a + 0.3)) }), '切到素材的第几秒'))),
           h('div', { class: 'tl-field' }, h('label', {}, '本段时长'),
             h('div', { class: 'tl-val big' }, `${(r?.span || 0).toFixed(2)} s`),
             h('div', { class: 'field-hint', style: 'margin:2px 0 0' }, `素材共 ${total.toFixed(2)}s`)),
           h('div', { class: 'tl-field' }, h('label', {}, '转场（怎么接上来）'),
             (() => {
-              const first = rs[0]?.shot.id === s.id;
-              const cur = draft.clips[s.id]?.trans || s.transition || 'cut';
+              const first = rs[0]?.key === sel;
+              const cur = draft.clips[sel]?.trans || s.transition || 'cut';
               return h('select', {
                 disabled: first,
                 title: first ? '第一段前面没有片子，没有"怎么接上来"这回事' : '',
-                onchange: (e) => { mark(); setClip(s.id, { trans: e.target.value }); done(); }
+                onchange: (e) => { mark(); setClip(sel, { trans: e.target.value }); done(); }
               },
               h('optgroup', { label: '常用' },
                 ...TRANS.CATALOG.filter((t) => TRANS.KINDS.includes(t.id))
@@ -2752,27 +2868,32 @@ export default {
           h('div', { class: 'tl-field' }, h('label', {}, '画面效果'),
             h('select', {
               title: '只有这一段会重压一遍（慢一点，但不重新生成素材、不花钱）',
-              onchange: (e) => { mark(); setClip(s.id, { fx: e.target.value }); done(); }
+              onchange: (e) => { mark(); setClip(sel, { fx: e.target.value }); done(); }
             }, ...FX.CATALOG.map((f) =>
-              h('option', { value: f.id, selected: (draft.clips[s.id]?.fx || 'none') === f.id, title: f.why }, f.label))),
+              h('option', { value: f.id, selected: (draft.clips[sel]?.fx || 'none') === f.id, title: f.why }, f.label))),
             h('div', { class: 'field-hint', style: 'margin:2px 0 0' },
-              FX.defOf(draft.clips[s.id]?.fx || 'none').why)),
+              FX.defOf(draft.clips[sel]?.fx || 'none').why)),
           h('div', { class: 'inline', style: 'flex-wrap:wrap;margin-top:10px' },
             h('button', {
-              class: `btn sm ${draft.clips[s.id]?.mute ? '' : 'ghost'}`,
-              title: '这一镜不要声音（台词和音效都不混），画面照留',
-              onclick: () => { mark(); setClip(s.id, { mute: !draft.clips[s.id]?.mute }); done(); }
-            }, draft.clips[s.id]?.mute ? '🔇 已静音' : '🔊 有声'),
+              class: `btn sm ${draft.clips[sel]?.mute ? '' : 'ghost'}`,
+              title: '这一段不要声音（台词和音效都不混），画面照留',
+              onclick: () => { mark(); setClip(sel, { mute: !draft.clips[sel]?.mute }); done(); }
+            }, draft.clips[sel]?.mute ? '🔇 已静音' : '🔊 有声'),
             h('button', {
               class: 'btn ghost sm',
-              title: '这一镜不进成片。素材不删，随时能从左边放回来',
-              onclick: () => { mark(); setClip(s.id, { off: !draft.clips[s.id]?.off }); done(); }
-            }, draft.clips[s.id]?.off ? '放回来' : '不用这一镜'),
+              title: '这一段不进成片。素材不删，随时能从左边放回来',
+              onclick: () => { mark(); setClip(sel, { off: !draft.clips[sel]?.off }); done(); }
+            }, draft.clips[sel]?.off ? '放回来' : '不用这一段'),
             h('button', {
               class: 'btn ghost sm',
               title: '把这一段的入出点清掉，交回给自动剪辑',
-              onclick: () => { mark(); setClip(s.id, { in: null, out: null }); done(); }
-            }, '还原裁剪'))
+              onclick: () => { mark(); setClip(sel, { in: null, out: null }); done(); }
+            }, '还原裁剪'),
+            h('button', {
+              class: 'btn ghost sm',
+              title: '把这一段拉到素材的完整长度（能拉多长由素材决定）',
+              onclick: () => { mark(); setClip(sel, { in: 0, out: Number(total.toFixed(2)) }); done(); }
+            }, '拉满整段'))
         );
       }
 
@@ -2785,6 +2906,19 @@ export default {
         barBox.append(
           h('button', { class: 'btn ghost sm', title: '撤销（上一步剪辑）', disabled: !past.length, onclick: undoStep }, '↩ 撤销'),
           h('button', { class: 'btn ghost sm', title: '重做', disabled: !future.length, onclick: redoStep }, '↪ 重做'),
+          h('span', { class: 'tl-sep' }),
+          h('button', {
+            class: 'btn ghost sm tl-cut',
+            title: '在播放头这一刀把选中的片段切成两段（两段各有各的入出点、转场和效果）',
+            disabled: !canSplit(),
+            onclick: splitHere
+          }, '✂ 分割'),
+          h('button', {
+            class: 'btn ghost sm tl-del',
+            title: '把选中的片段从时间线上拿掉（素材不删，左边素材架里还能放回来）',
+            disabled: !sel,
+            onclick: deleteSel
+          }, '🗑 删除'),
           h('span', { class: 'tl-sep' }),
           h('button', { class: 'btn primary sm tl-play', title: '播放 / 暂停（按剪辑后的顺序播）', onclick: () => togglePlay() }, playing ? '⏸' : '▶'),
           h('button', { class: 'btn ghost sm', title: '回到开头', onclick: () => seek(0, { play: false }) }, '⏮'),
@@ -2835,13 +2969,13 @@ export default {
         rs.forEach((r, i) => {
           const s = r.shot;
           const block = h('div', {
-            class: `tl-clip${sel === s.id ? ' on' : ''}${r.muted ? ' muted' : ''}`,
-            'data-shot': s.id,
+            class: `tl-clip${sel === r.key ? ' on' : ''}${r.muted ? ' muted' : ''}`,
+            'data-shot': r.key,
             style: `left:${r.start * pps}px;width:${Math.max(8, r.span * pps)}px`
               + (s.imagePath ? `;background-image:url(${mediaUrl(s.imagePath)})` : ''),
             title: `第 ${s.index} 镜 · ${r.span.toFixed(2)}s（素材 ${r.total.toFixed(2)}s）\n拖中间换位置，拖两端裁剪`
           },
-          h('span', { class: 'tl-tag' }, `#${s.index}`,
+          h('span', { class: 'tl-tag' }, `#${s.index}${String(r.key).includes('#') ? `·${String(r.key).split('#')[1]}` : ''}`,
             r.fx !== 'none' ? h('i', { class: 'tl-chip', title: FX.labelOf(r.fx) }, '效') : null,
             r.muted ? h('i', { class: 'tl-chip' }, '静') : null),
           h('span', { class: 'tl-len' }, `${r.span.toFixed(1)}s`),
@@ -2922,9 +3056,24 @@ export default {
         paintBar();
       }
 
+      /**
+       * 剪刀和删除**能不能按，是跟着播放头和选中项走的**。
+       *
+       * 只在重画工具条时算一次的话，人拖完播放头看到的还是"灰的" ——
+       * 而这时候明明已经可以切了。走查里就是这么红的：点了片段、把播放头
+       * 拖到中间，剪刀还是按不下去。
+       */
+      function syncTools() {
+        const cut = host.querySelector('.tl-cut');
+        if (cut) cut.disabled = !canSplit();
+        const del = host.querySelector('.tl-del');
+        if (del) del.disabled = !sel;
+      }
+
       function movePlayhead(scrollTo = true) {
         head.style.left = `${playAt * pps}px`;
         clock.textContent = `${fmt(playAt)} / ${fmt(totalOf(rowsOf()))}`;
+        syncTools();
         if (!scrollTo) return;
         const x = playAt * pps;
         const view = scrollBox.scrollLeft;
@@ -2942,11 +3091,13 @@ export default {
        */
       function wireClip(block, row, rs) {
         const s = row.shot;
+        const key = row.key;
         block.addEventListener('pointerdown', (e) => {
           e.preventDefault();
-          sel = s.id;
+          sel = key;
           paintShelf();
           paintProps();
+          syncTools();
 
           const box = block.getBoundingClientRect();
           const edge = e.clientX - box.left < 10 ? 'l' : box.right - e.clientX < 10 ? 'r' : null;
@@ -2977,10 +3128,11 @@ export default {
               const d = dx / pps;
               if (edge === 'l') {
                 const v = Math.max(0, Math.min(startIn + d, startOut - 0.3));
-                setClip(s.id, { in: Number(v.toFixed(2)), out: Number(startOut.toFixed(2)) });
+                setClip(key, { in: Number(v.toFixed(2)), out: Number(startOut.toFixed(2)) });
               } else {
+                // 往右拉最多到素材本身的长度 —— 再长就得靠定格补帧，那是另一回事
                 const v = Math.min(total || (startOut + d), Math.max(startOut + d, startIn + 0.3));
-                setClip(s.id, { in: Number(startIn.toFixed(2)), out: Number(v.toFixed(2)) });
+                setClip(key, { in: Number(startIn.toFixed(2)), out: Number(v.toFixed(2)) });
               }
               paintLanes();
               paintProps();
@@ -3014,8 +3166,8 @@ export default {
               return;
             }
             if (edge) { done(); return; }
-            const from = draft.order.indexOf(s.id);
-            const visible = rowsOf().map((r) => r.shot.id);
+            const from = draft.order.indexOf(key);
+            const visible = rowsOf().map((r) => r.key);
             const target = dropAt >= visible.length
               ? draft.order.length
               : draft.order.indexOf(visible[dropAt]);
@@ -3024,7 +3176,7 @@ export default {
             if (!marked) mark();
             const next = draft.order.slice();
             next.splice(from, 1);
-            next.splice(Math.max(0, Math.min(to, next.length)), 0, s.id);
+            next.splice(Math.max(0, Math.min(to, next.length)), 0, key);
             draft.order = next;
             done();
           };
@@ -3206,7 +3358,15 @@ export default {
         footBox.append(
           h('button', {
             class: 'btn primary',
-            onclick: async () => { stopPlay(); await save(); run('compose', '重新合成'); }
+            /**
+             * ⚠ 这里原来写的是 `run('compose', …)` —— 而这个文件里**根本没有 run**。
+             *
+             * 后果是点下去抛一个 ReferenceError，界面纹丝不动：
+             * 用户报上来的原话就是"重新合成这个按钮按不动"。
+             * 而走查一直是绿的，因为它从没点过这颗按钮（点了会真去合成）。
+             * 现在点它，并且量"有没有真的发出那一次请求"。
+             */
+            onclick: async () => { stopPlay(); await save(); runStage('compose'); }
           }, '重新合成（不花钱）'),
           h('button', {
             class: 'btn ghost',
@@ -3331,9 +3491,9 @@ export default {
       assets: [shotsPanel],
       video: [shotsPanel],
       voice: [shotsPanel],
-      compose: [composePanel]
+      compose: [cutPanel, composePanel]
     };
-    const allPanels = [scriptPanel, chapterPanel, readinessHost, biblePanel, durationPanel, shotsPanel, composePanel]
+    const allPanels = [scriptPanel, chapterPanel, readinessHost, biblePanel, durationPanel, shotsPanel, cutPanel, composePanel]
       .filter(Boolean);
     // 只读那一行摆在分镜面板顶上，跟着"视频"这一步出现
     shotsPanel.insertBefore(durationLine, shotsPanel.firstChild.nextSibling);

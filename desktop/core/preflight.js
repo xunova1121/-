@@ -533,10 +533,37 @@ export async function run({ include } = {}, onEvent) {
     failed: failed.length,
     warned: warned.length,
     verdict: failed.length
-      ? `${failed.length} 条不通：${failed.map((f) => f.id).join('、')} —— 流水线跑到那一步会停`
+      ? `${sameRootCause(failed) || `${failed.length} 条不通：${failed.map((f) => f.id).join('、')}`} —— 流水线跑到那一步会停`
       : warned.length
         ? '能跑，但有需要留意的地方（见上）'
         : '五条腿都通，可以开跑'
   });
   return results;
+}
+
+/**
+ * 好几条一起红的时候，先看看**是不是同一个原因**。
+ *
+ * 用户报上来的原话是这样四行：
+ *     剧本 openai ✕ / 调度 openai ✕ / 复核 openai ✕ / 出图 openai ✕
+ * 看上去像四个毛病，其实是一个：这台机器连不上 api.openai.com。
+ * 而结论那一行只会说"4 条不通：chat、vision、t2i、tts"，
+ * 等于把同一句话拆成四份，还漏掉了唯一有用的那句。
+ *
+ * 一条一条去读详情当然也能看出来，但人不会 —— 四个红叉先入为主，
+ * 第一反应是"密钥是不是过期了"，然后开始白折腾。
+ */
+export function sameRootCause(failed = []) {
+  if (failed.length < 2) return '';
+  const providers = new Set(failed.map((f) => f.providerName || f.provider).filter(Boolean));
+  // 都指着同一家、而且都是"连不上"那一类
+  const netLike = failed.filter((f) => /连不上|解析不了|连接失败|拒绝连接|掐断/.test(f.message || ''));
+  if (providers.size !== 1 || netLike.length !== failed.length) return '';
+  const blocked = failed.some((f) => /在中国大陆\*\*直连基本不通\*\*/.test(f.message || ''));
+  return (
+    `${failed.length} 条全红，但**是同一个原因**：这台机器连不上 ${[...providers][0]}。`
+    + (blocked
+      ? '这个域名在境内直连基本不通 —— 不是密钥的问题，往下看第一条的说明，三条路挑一条。'
+      : '密钥和模型都没被验到（请求根本没发出去），先解决网络再看别的。')
+  );
 }

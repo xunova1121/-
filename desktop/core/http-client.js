@@ -47,8 +47,79 @@ export class HttpError extends Error {
  * 光甩一句 `连接失败：UND_ERR_CONNECT_TIMEOUT` 等于什么都没说 ——
  * 用户会去翻密钥、换模型，全是白费。
  */
+/**
+ * 这几个域名**在中国大陆直连基本不通**，而这个应用的用户就在那儿。
+ *
+ * 这不是"网络不稳定"，是常态：同一把密钥、同一个模型，
+ * 放在境外服务器上一次就通，在自己电脑上永远超时。
+ *
+ * 而报出来的样子只有一句 `UND_ERR_CONNECT_TIMEOUT`，
+ * 人会去翻密钥、换模型、重装应用 —— 全是白费。这一条就是为了把话说明白。
+ */
+const BLOCKED_IN_CN = [
+  'api.openai.com',
+  'api.anthropic.com',
+  'generativelanguage.googleapis.com',
+  'api.groq.com',
+  'api.mistral.ai',
+  'openrouter.ai'
+];
+
+/** 连不上的原因是"到不了"，而不是"对方拒了"——这几种都算 */
+const UNREACHABLE = [
+  'UND_ERR_CONNECT_TIMEOUT', 'ETIMEDOUT', 'ECONNRESET', 'EHOSTUNREACH',
+  'ENETUNREACH', 'ENOTFOUND', 'EAI_AGAIN', 'UND_ERR_SOCKET', 'ECONNREFUSED'
+];
+
+/**
+ * 这台机器根本到不了这个域名时，给一段**能照着做**的话。
+ *
+ * 三条路按"最可能奏效"排，而且每一条都指到应用里的具体位置 ——
+ * 只说"检查网络"等于什么都没说。
+ */
+function cnBlockedAdvice(host) {
+  return (
+    `\n\n⚠ ${host} 在中国大陆**直连基本不通**，这跟密钥和模型没有任何关系 ——\n` +
+    `同一把密钥放在境外服务器上一次就通，在自己电脑上永远超时。三条路，挑一条：\n` +
+    `① 让应用走你的梯子：「设置 → 本机环境」勾上「走 Windows 的系统代理」（Windows 里设过系统代理才有用，` +
+    `Clash / v2rayN 这类客户端默认会设）。这条最省事。\n` +
+    `② 换成中转地址：「服务商与密钥 → ${host.includes('openai') ? 'OpenAI' : '这一家'} → 接口根地址」` +
+    `填一个你有的中转/代理站地址（很多中转站是 OpenAI 兼容的，填上去就能用）。\n` +
+    `③ 让服务器跑：菜单「文件 → 引擎在哪儿跑…」填你自己那台服务器的地址。` +
+    `请求就从服务器发出去了 —— 你的服务器既然能通，这条一定成。而且手机和电脑看的是同一份数据。`
+  );
+}
+
+/**
+ * 把真正的错误码挖出来。
+ *
+ * ⚠ 不能只看 `err.cause.code`。
+ *
+ * 域名同时有 A 和 AAAA 记录时（现在绝大多数都有），fetch 会**两个地址一起试**，
+ * 两边都失败就把它们打包成一个 `AggregateError` —— 而 AggregateError
+ * 自己**没有 code**，真正的 ECONNREFUSED / ETIMEDOUT 藏在 `.errors[0].code` 里。
+ *
+ * 后果是所有解释全部失效，报出来只剩一句 `连接失败：fetch failed`。
+ * 走查里现形的：拿 127.0.0.1:1 造一个必然连不上的地址，
+ * 结果那一整段"境内直连不通"的说明一个字都没出来 —— 而它本该出来。
+ */
+function codeOf(err) {
+  const seen = new Set();
+  const dig = (e, depth = 0) => {
+    if (!e || depth > 4 || seen.has(e)) return '';
+    seen.add(e);
+    if (e.code) return e.code;
+    for (const sub of Array.isArray(e.errors) ? e.errors : []) {
+      const got = dig(sub, depth + 1);
+      if (got) return got;
+    }
+    return dig(e.cause, depth + 1);
+  };
+  return dig(err) || '';
+}
+
 export function explainNetworkError(err, url = '') {
-  const code = err?.cause?.code || err?.code || '';
+  const code = codeOf(err);
   let host = '';
   try {
     host = new URL(url).host;
@@ -57,27 +128,45 @@ export function explainNetworkError(err, url = '') {
   }
   const where = host ? `「${host}」` : '这个地址';
 
+  /**
+   * 有几种失败**根本没有错误码**，只有一句英文。最常见的是 `bad port`：
+   * fetch 拒绝连接一批"有名的危险端口"（1、7、9、25、110…），
+   * 这跟网络一点关系都没有，是地址写错了。
+   * 不认出来的话，报出来只有一句"连接失败：fetch failed"。
+   */
+  const rawCause = String(err?.cause?.message || '');
+  if (/bad port/i.test(rawCause)) {
+    return `${where} 的端口号不允许连接（fetch 挡掉了一批危险端口，比如 1、7、9、25）。`
+      + '八成是接口根地址里的端口写错了 —— 去「服务商与密钥 → 接口根地址」核一下。';
+  }
+  // 到不了一个"境内本来就连不上"的域名 —— 直接把真正的原因说出来，别让人去翻密钥
+  const blocked = host && BLOCKED_IN_CN.includes(host) && UNREACHABLE.includes(code)
+    ? cnBlockedAdvice(host)
+    : '';
+
   switch (code) {
     case 'UND_ERR_CONNECT_TIMEOUT':
+    case 'ETIMEDOUT':
       return (
         `连不上${where}（TCP 连接超时）。和密钥、模型都没关系 —— 请求根本没发出去。\n` +
         `依次试：① 浏览器打开 https://${host || '该域名'} 看看通不通；` +
-        `② 通但应用连不上，多半是公司网络要走代理，Windows 上给启动脚本设 HTTPS_PROXY 环境变量；` +
+        `② 通但应用连不上，多半是要走代理，去「设置 → 本机环境」勾上「走 Windows 的系统代理」；` +
         `③ 浏览器也不通，就是这台机器到这个域名的网络被挡了，换网络或改用同一家的其他接入点。`
+        + blocked
       );
     case 'ENOTFOUND':
     case 'EAI_AGAIN':
-      return `域名解析不了${where}。检查网线/WiFi、DNS，以及接口根地址有没有写错（多打一个空格、少个字母都会这样）。`;
+      return `域名解析不了${where}。检查网线/WiFi、DNS，以及接口根地址有没有写错（多打一个空格、少个字母都会这样）。${blocked}`;
     case 'ECONNREFUSED':
-      return `${where} 拒绝连接。地址或端口写错的可能性最大；如果是本地模型（Ollama/LM Studio），先确认它已经起来了。`;
+      return `${where} 拒绝连接。地址或端口写错的可能性最大；如果是本地模型（Ollama/LM Studio），先确认它已经起来了。${blocked}`;
     case 'ECONNRESET':
-      return `连接被对方掐断（${where}）。常见于代理/防火墙中途拦截，或对方限流。重试一次看看是不是偶发。`;
+      return `连接被对方掐断（${where}）。常见于代理/防火墙中途拦截，或对方限流。重试一次看看是不是偶发。${blocked}`;
     case 'CERT_HAS_EXPIRED':
     case 'UNABLE_TO_VERIFY_LEAF_SIGNATURE':
     case 'SELF_SIGNED_CERT_IN_CHAIN':
       return `HTTPS 证书验证不过（${code}）。多半是公司网络在做流量审计，需要把它的根证书装进系统信任库。`;
     default:
-      return `连接失败：${code || err?.message || '未知网络错误'}${host ? `（${host}）` : ''}`;
+      return `连接失败：${code || err?.message || '未知网络错误'}${host ? `（${host}）` : ''}${blocked}`;
   }
 }
 

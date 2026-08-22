@@ -5527,6 +5527,161 @@ section('转场：真发给 FFmpeg 的那串参数长什么样');
   check('退回硬切之后也不重编码', /-c copy/.test(tiny.calls[tiny.calls.length - 1]), tiny.calls[tiny.calls.length - 1]);
 }
 
+section('小剪刀：一镜切成两段');
+{
+  /**
+   * 切开之后同一个素材文件在时间线上出现两次，各有各的入出点、
+   * 各有各的转场和效果。它**不重新生成任何东西** —— 还是十几秒的活。
+   *
+   * 这一节盯着三处最容易错的：
+   *   ① 后半段不能继承分镜上那个转场（否则在一镜自己中间插一处叠化）
+   *   ② 台词和音效只跟第一段走（否则同一句话念两遍）
+   *   ③ 把前半段删了之后，那一镜不能"自己长回来"
+   */
+  const ed = await import('../core/pipeline/edit.js');
+  const shots = [
+    { id: 'a', index: 1, duration: 4, actualDuration: 6, dialogue: '你好', transition: 'cut', videoPath: '/a.mp4' },
+    { id: 'b', index: 2, duration: 4, actualDuration: 6, dialogue: '再见', transition: 'dissolve', videoPath: '/b.mp4' }
+  ];
+
+  check('key 认得出是哪一镜', ed.shotIdOf('a#2') === 'a' && ed.shotIdOf('a') === 'a');
+  check('要新号时从 #2 起', ed.nextKey({ order: ['a'] }, 'a') === 'a#2');
+  /**
+   * ⚠ 中间删过一段之后，"现有个数 + 1"会撞上一个还在的号，直接把它盖掉。
+   * 所以是"找第一个空号"。
+   */
+  check('中间删过号也不撞车', ed.nextKey({ order: ['a', 'a#3'] }, 'a') === 'a#2');
+
+  const split = {
+    order: ['a', 'a#2', 'b'],
+    clips: { a: { in: 0, out: 2.5 }, 'a#2': { in: 2.5, out: 6 } }
+  };
+  const rows = ed.timeline({ shots, edit: split }, { policy: 'keep' });
+  check('切完是三段', rows.length === 3, String(rows.length));
+  check('两段用的是同一个素材文件',
+    rows[0].shot.videoPath === rows[1].shot.videoPath, `${rows[0].shot.videoPath} / ${rows[1].shot.videoPath}`);
+  check('前半段 2.5 秒、后半段 3.5 秒',
+    rows[0].span === 2.5 && rows[1].span === 3.5, `${rows[0].span} / ${rows[1].span}`);
+  check('后半段接着前半段摆', rows[1].start === 2.5, String(rows[1].start));
+  /**
+   * ⚠ 分镜上那个转场说的是"这一镜和**上一镜**之间"。
+   * 让后半段也去读它，等于在这一镜自己中间插一处叠化 ——
+   * 画面莫名叠一下，还会吃掉半秒，把后面整条时间轴推歪。
+   */
+  const withTrans = ed.timeline({
+    shots, edit: { order: ['b', 'b#2', 'a'], clips: { b: { in: 0, out: 3 }, 'b#2': { in: 3, out: 6 } } }
+  }, { policy: 'keep' });
+  check('切出来的后半段不继承分镜上那个叠化',
+    withTrans[1].trans === 'cut', withTrans[1].trans);
+  check('所以它也不吃掉那半秒', withTrans[1].start === 3, String(withTrans[1].start));
+
+  // ② 台词只跟第一段走
+  check('第一段标着 first', rows[0].first === true);
+  check('后半段不是 first（同一句台词不会念两遍）', rows[1].first === false);
+  check('另一镜自己还是 first', rows[2].first === true);
+
+  // ③ 把前半段删了，这一镜不能自己长回来
+  const halfGone = ed.normalize({ order: ['a#2', 'b'], clips: { 'a#2': { in: 2.5, out: 6 } } }, shots);
+  check('只留后半段时不会又补一段完整的回来',
+    halfGone.order.join() === 'a#2,b', halfGone.order.join());
+  // 反过来：一镜一段都没排到的，还是要补
+  check('一段都没排到的镜头照样补在后面',
+    ed.normalize({ order: ['b'] }, shots).order.join() === 'b,a',
+    ed.normalize({ order: ['b'] }, shots).order.join());
+
+  check('日志里说了切过几处', /切开了 1 处/.test(ed.summarize(split, shots) || ''), ed.summarize(split, shots));
+}
+
+section('连不上境外服务商时，报的是原因不是四个红叉');
+{
+  /**
+   * 用户报上来的原话是这样四行：
+   *     剧本 openai ✕ / 调度 openai ✕ / 复核 openai ✕ / 出图 openai ✕
+   * 而 exe 在他自己电脑上跑、服务器在香港 —— 服务器那两端全通。
+   *
+   * 看上去像四个毛病，其实是一个：这台机器连不上 api.openai.com。
+   * 光报 `UND_ERR_CONNECT_TIMEOUT` 的话，人第一反应是去翻密钥、换模型，全是白费。
+   */
+  const hc = await import('../core/http-client.js');
+  const pf = await import('../core/preflight.js');
+  const boom = (code) => { const e = new Error('fetch failed'); e.cause = { code }; return e; };
+
+  const oa = hc.explainNetworkError(boom('UND_ERR_CONNECT_TIMEOUT'), 'https://api.openai.com/v1/chat/completions');
+  check('点名这是"境内直连不通"，不是密钥问题', /直连基本不通/.test(oa) && /跟密钥和模型没有任何关系/.test(oa), oa.slice(0, 120));
+  /**
+   * 三条路都要**指到应用里的具体位置**。只说"检查网络"等于什么都没说，
+   * 而这三条恰好都是这个应用已经有的功能 —— 说不清楚等于白做。
+   */
+  check('给了走系统代理这条路，并指明在哪儿', /本机环境/.test(oa) && /系统代理/.test(oa), oa.slice(-400));
+  check('给了填中转地址这条路，并指明在哪儿', /接口根地址/.test(oa), oa.slice(-400));
+  check('给了"让服务器跑"这条路（他的服务器本来就是通的）',
+    /引擎在哪儿跑/.test(oa), oa.slice(-400));
+
+  // 换个到不了的方式，话要照样说到
+  for (const code of ['ETIMEDOUT', 'ECONNRESET', 'ENOTFOUND', 'ECONNREFUSED']) {
+    check(`${code} 也认得出是这回事`,
+      /直连基本不通/.test(hc.explainNetworkError(boom(code), 'https://api.openai.com/v1/x')), code);
+  }
+  /**
+   * ⚠ 只对**确实连不上**的情况说。HTTP 401 是连上了的 ——
+   * 那时候还劝人去配代理，是把人往沟里带。
+   */
+  /**
+   * ⚠ 域名同时有 A 和 AAAA 记录时（现在绝大多数都有），fetch 会两个地址一起试，
+   * 都失败就打包成一个 AggregateError —— 而它**自己没有 code**，
+   * 真正的 ECONNREFUSED / ETIMEDOUT 藏在 `.errors[0].code` 里。
+   *
+   * 只看 `err.cause.code` 的话，上面那一整段说明一个字都出不来，
+   * 报出来只剩一句"连接失败：fetch failed"。这条是走查里真撞出来的。
+   */
+  const agg = new Error('fetch failed');
+  agg.cause = new AggregateError(
+    [Object.assign(new Error('a'), { code: 'ETIMEDOUT' }), Object.assign(new Error('b'), { code: 'ETIMEDOUT' })], '');
+  const aggMsg = hc.explainNetworkError(agg, 'https://api.openai.com/v1/x');
+  check('双栈失败打包成 AggregateError 时，照样挖得出真正的原因',
+    /连接超时/.test(aggMsg) && /直连基本不通/.test(aggMsg), aggMsg.slice(0, 140));
+  /**
+   * `bad port` 根本没有错误码，只有一句英文 —— fetch 挡掉了一批危险端口
+   *（1、7、9、25…）。这跟网络无关，是地址写错了，而不认出来的话
+   * 报出来只有一句"连接失败：fetch failed"。
+   */
+  const badPort = new Error('fetch failed');
+  badPort.cause = new Error('bad port');
+  check('端口写成了被挡的那几个时，说的是"端口不允许"而不是"连不上网"',
+    /端口号不允许连接/.test(hc.explainNetworkError(badPort, 'http://127.0.0.1:1/v3')),
+    hc.explainNetworkError(badPort, 'http://127.0.0.1:1/v3'));
+
+  check('挖不到 code 时也不至于崩',
+    typeof hc.explainNetworkError(new Error('whatever'), 'https://x.com/') === 'string');
+
+  const authErr = hc.explainNetworkError(boom('HTTP_401'), 'https://api.openai.com/v1/x');
+  check('连上了只是报错时，不乱扯代理', !/直连基本不通/.test(authErr), authErr.slice(0, 120));
+  // 境内域名不该多这一段
+  const cn = hc.explainNetworkError(boom('UND_ERR_CONNECT_TIMEOUT'), 'https://ark.cn-beijing.volces.com/api/v3');
+  check('国内厂商连不上时不扯"境内直连不通"', !/直连基本不通/.test(cn), cn.slice(0, 100));
+
+  // ── 四条全红要合并成一句 ──
+  const four = ['chat', 'vision', 't2i', 'tts'].map((id) => ({
+    id, provider: 'openai', providerName: 'OpenAI', message: oa
+  }));
+  const merged = pf.sameRootCause(four);
+  check('四条全红时先说"是同一个原因"', /同一个原因/.test(merged), merged);
+  check('并且点名是哪一家连不上', /OpenAI/.test(merged), merged);
+  check('并且明说不是密钥的问题', /不是密钥的问题/.test(merged), merged);
+  /**
+   * ⚠ 不能见到"多条失败"就合并。两家不同的服务商各挂各的、
+   * 或者一条是网络一条是密钥，合成一句反而把真实情况抹平了。
+   */
+  check('不同服务商不合并',
+    pf.sameRootCause([{ id: 'chat', providerName: 'OpenAI', message: '连不上' },
+      { id: 't2i', providerName: '火山', message: '连不上' }]) === '');
+  check('原因不同不合并',
+    pf.sameRootCause([{ id: 'chat', providerName: 'OpenAI', message: '连不上' },
+      { id: 't2i', providerName: 'OpenAI', message: 'HTTP 401 密钥无效' }]) === '');
+  check('只红一条时不说这句（那本来就不用合并）',
+    pf.sameRootCause([{ id: 'chat', providerName: 'OpenAI', message: '连不上' }]) === '');
+}
+
 section('剪辑台：拖拽排序 / 音轨 / 配乐 / 画面效果 / 更多转场');
 {
   const ed = await import('../core/pipeline/edit.js');
@@ -5579,15 +5734,15 @@ section('剪辑台：拖拽排序 / 音轨 / 配乐 / 画面效果 / 更多转�
   // ───── 转场两级：剪辑台压过分镜，没改过的听分镜的 ─────
   const withEdit = { clips: { s1: { trans: 'pixelize' } } };
   check('剪辑台上改过的转场压过分镜字段',
-    ed.transitionOf(withEdit, shots[0]) === 'pixelize', ed.transitionOf(withEdit, shots[0]));
+    ed.transitionOf(withEdit, 's1', shots[0]) === 'pixelize', ed.transitionOf(withEdit, 's1', shots[0]));
   /**
    * 这一条是"重跑分镜不会冲掉人手调的转场"的另一面：
    * 没在剪辑台上动过的，必须跟着分镜走 —— 否则改分镜就再也影响不了成片。
    */
   check('没在剪辑台上动过的听分镜的',
-    ed.transitionOf(withEdit, shots[1]) === 'dissolve', ed.transitionOf(withEdit, shots[1]));
-  check('两边都没有就是硬切', ed.transitionOf({}, shots[2]) === 'cut');
-  check('分镜里写了个瞎编的值也当硬切', ed.transitionOf({}, { id: 'x', transition: 'zzz' }) === 'cut');
+    ed.transitionOf(withEdit, 's2', shots[1]) === 'dissolve', ed.transitionOf(withEdit, 's2', shots[1]));
+  check('两边都没有就是硬切', ed.transitionOf({}, 's3', shots[2]) === 'cut');
+  check('分镜里写了个瞎编的值也当硬切', ed.transitionOf({}, 'x', { id: 'x', transition: 'zzz' }) === 'cut');
 
   // ───── 转场表 ─────
   /**
@@ -6534,10 +6689,13 @@ section('剪辑台：出片之后还能改，而且不花钱');
 
   // ── 顺序和"不用" ──
   const reordered = { order: ['c', 'a', 'b'], clips: { b: { off: true } } };
-  check('按剪辑顺序排', ed.ordered(reordered, shots).map((x) => x.id).join() === 'c,a', 
-    ed.ordered(reordered, shots).map((x) => x.id).join());
-  check('标了"不用"的不进成片', !ed.ordered(reordered, shots).some((x) => x.id === 'b'));
-  check('没剪过时就是原顺序', ed.ordered({}, shots).map((x) => x.id).join() === 'a,b,c');
+  // ⚠ ordered() 回的是 { key, shot } —— 同一镜切开之后会出现不止一次，
+  // 只回 shot 的话调用方就找不到"这一段"的入出点了
+  const ids = (e) => ed.ordered(e, shots).map((x) => x.shot.id).join();
+  check('按剪辑顺序排', ids(reordered) === 'c,a', ids(reordered));
+  check('标了"不用"的不进成片', !ed.ordered(reordered, shots).some((x) => x.shot.id === 'b'));
+  check('没剪过时就是原顺序', ids({}) === 'a,b,c');
+  check('每一段都带着自己的 key', ed.ordered({}, shots).every((x) => x.key === x.shot.id));
 
   /**
    * ══ 最要紧的一条：**字幕和配音必须跟着剪辑走** ══
@@ -6574,16 +6732,21 @@ section('剪辑台：出片之后还能改，而且不花钱');
    * 不夹回去的话 FFmpeg 会切出一段空的 —— 而那表现为"成片里少了一镜"。
    */
   check('素材变短时把出点夹回来',
-    ed.windowOf({ clips: { a: { in: 1, out: 9 } } }, shots[0], 4)?.out === 4,
-    JSON.stringify(ed.windowOf({ clips: { a: { in: 1, out: 9 } } }, shots[0], 4)));
+    ed.windowOf({ clips: { a: { in: 1, out: 9 } } }, 'a', 4)?.out === 4,
+    JSON.stringify(ed.windowOf({ clips: { a: { in: 1, out: 9 } } }, 'a', 4)));
+  /**
+   * ⚠ 这两条以前传的是 shot 对象。签名换成 key 之后它们**照样绿** ——
+   * 因为 `clips[对象]` 永远是 undefined，回 null 正好是断言要的答案。
+   * 也就是说它们验的不是"夹回来了"，而是"什么都没查到"。改成传 key 才算真验。
+   */
   check('夹到没法成段时作废，交回自动剪辑',
-    ed.windowOf({ clips: { a: { in: 8, out: 9 } } }, shots[0], 0.2) === null);
+    ed.windowOf({ clips: { a: { in: 8, out: 9 } } }, 'a', 0.2) === null);
   check('没手工设过就回 null（别替自动剪辑做决定）',
-    ed.windowOf({}, shots[0], 5) === null);
+    ed.windowOf({}, 'a', 5) === null);
 
   // ── 说人话 ──
   const brief = ed.summarize(reordered, shots);
-  check('合成日志里说清楚剪过什么', /调过顺序/.test(brief) && /跳过 1 镜/.test(brief), brief);
+  check('合成日志里说清楚剪过什么', /调过顺序/.test(brief) && /跳过 1 段/.test(brief), brief);
   check('并且说明它不重新生成素材', /不重新生成/.test(brief), brief);
   check('没剪过就不说话（每次合成印一行"没剪"是纯噪音）', ed.summarize({}, shots) === null);
 }

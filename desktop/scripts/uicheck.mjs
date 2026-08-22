@@ -136,6 +136,15 @@ await page.goto(`${url}#/studio/${proj.id}`);
 await page.waitForTimeout(1500);
 
 const step = (name) => page.locator('.nav-step', { hasText: name }).first();
+/**
+ * 记下发出去的每一条请求。
+ *
+ * 「重新合成」这颗按钮从来没被点过（点了会真去合成），于是它调了一个
+ * **这个文件里根本不存在的函数**这件事，一直没人发现 —— 用户报上来的原话是
+ * "重新合成这个按钮按不动"。量"有没有真的发出那一次请求"，就再也漏不掉了。
+ */
+const sent = [];
+page.on('request', (r) => sent.push(`${r.method()} ${new URL(r.url()).pathname}`));
 const inner = () => page.locator('#view-inner').innerText();
 
 // ── 第 02 步：设定集 ──
@@ -409,6 +418,20 @@ const readEdit = () => page.evaluate(
   (id) => fetch(`/api/projects/${id}`).then((r) => r.json()).then((p) => p.edit || {}), proj.id);
 const idsNow = async () => (await readEdit()).order || [];
 
+/**
+ * ⚠ 剪辑台要在**「成片」上面**，而且是独立一块。
+ *
+ * 人的动作是"先剪，再出片，再看" —— 摆在成片下面等于让人先看完片子
+ * 再往回翻去改。它原来还整个藏在"已经有成片"的分支里，
+ * 可第一次合成之前恰恰最该先排一遍顺序。
+ */
+check('剪辑台是独立一块，排在「成片」上面', await page.evaluate(() => {
+  const all = [...document.querySelectorAll('.panel')].filter((p) => p.offsetParent !== null);
+  const cut = all.findIndex((p) => /剪辑台/.test(p.querySelector('.panel-title')?.textContent || ''));
+  const film = all.findIndex((p) => /^成片$/.test(p.querySelector('.panel-title')?.textContent || ''));
+  return cut >= 0 && film >= 0 && cut < film;
+}), '');
+
 const tlClips = page.locator('.tl-clip');
 check('时间线把每一镜摆成了一段', (await tlClips.count()) === 3, String(await tlClips.count()));
 
@@ -538,6 +561,33 @@ if ((await tlClips.count()) === 3) {
   check('接缝上出现了转场标记', (await page.locator('.tl-trans').count()) >= 1,
     String(await page.locator('.tl-trans').count()));
 
+  /**
+   * ⚠ **重叠类转场处，播放头必须归后一段。**
+   *
+   * 推移/叠化各吃掉 0.5 秒，于是下一段的起点比上一段的终点还早 ——
+   * 两段的时间范围是**叠在一起**的。用"第一个还没结束的"去找，
+   * 在重叠区里会找回上一段：跳到下一段的起点跳完还在原地，
+   * 下一帧又触发跳转，播放就死在那个接缝上再也过不去。
+   * 用户报上来的原话："点击按钮演示一直卡在那边播放不下去"。
+   *
+   * 素材播不了（走查里是假文件），所以量的不是"播过去了"，
+   * 而是**跳到接缝那一刻，预览加载的是哪一段的素材** —— 同一个判断。
+   */
+  const seamKey = await page.evaluate(() => document.querySelectorAll('.tl-clip')[1].dataset.shot);
+  const seamShot = seamKey.split('#')[0];
+  const seamPath = await page.evaluate(
+    ([id, sid]) => fetch(`/api/projects/${id}`).then((r) => r.json())
+      .then((pp) => (pp.shots.find((x) => x.id === sid) || {}).videoPath || ''),
+    [proj.id, seamShot]);
+  const seamBox = await tlClips.nth(1).boundingBox();
+  const rulerBox = await page.locator('.tl-ruler').boundingBox();
+  await page.mouse.click(seamBox.x + 2, rulerBox.y + rulerBox.height / 2);
+  await page.waitForTimeout(500);
+  const loaded = await page.evaluate(() => document.querySelector('.tl-video')?.getAttribute('src') || '');
+  check('跳到转场接缝上时，预览加载的是后一段（否则播放会卡死在这儿）',
+    Boolean(seamPath) && loaded.includes(encodeURIComponent(seamPath).slice(-14)),
+    `想要 ${seamPath} / 实际 ${loaded.slice(-60)}`);
+
   const fxSel = page.locator('.tl-props select').nth(1);
   await fxSel.selectOption('bw');
   await page.waitForTimeout(700);
@@ -558,7 +608,7 @@ if ((await tlClips.count()) === 3) {
    * 没有它的话这个操作是单向的，而"不用"本来就该是可逆的。
    */
   const nUsed = await tlClips.count();
-  await page.locator('.tl-props button:has-text("不用这一镜")').click();
+  await page.locator('.tl-props button:has-text("不用这一段")').click();
   await page.waitForTimeout(800);
   check('标成"不用"之后它从时间线上消失了',
     (await tlClips.count()) === nUsed - 1, `${nUsed} → ${await tlClips.count()}`);
@@ -658,6 +708,68 @@ if ((await tlClips.count()) === 3) {
   check('并且顺序回到按镜号排',
     (afterReset.order || [])[0] === shotIds[0], JSON.stringify(afterReset.order));
 }
+/**
+ * ── 小剪刀 / 删除 / 拉满 ──
+ */
+{
+  const clipsNow = await tlClips.count();
+  const firstBox = await tlClips.first().boundingBox();
+  await page.mouse.click(firstBox.x + firstBox.width / 2, firstBox.y + firstBox.height / 2);
+  await page.waitForTimeout(400);
+  // 把播放头挪到这一段中间再切 —— 两边各要留够 0.3 秒
+  const ruler2 = await page.locator('.tl-ruler').boundingBox();
+  await page.mouse.click(ruler2.x + firstBox.width / 2, ruler2.y + ruler2.height / 2);
+  await page.waitForTimeout(400);
+  check('小剪刀在播放头落到片段中间时可以按', !(await page.locator('.tl-cut').isDisabled()), '');
+  await page.locator('.tl-cut').click();
+  await page.waitForTimeout(900);
+  check('切完时间线上多了一段',
+    (await tlClips.count()) === clipsNow + 1, `${clipsNow} → ${await tlClips.count()}`);
+  const afterSplit = await readEdit();
+  check('切出来的那一段带着 # 号（和原来那一镜连着）',
+    (afterSplit.order || []).some((k) => k.includes('#')), JSON.stringify(afterSplit.order));
+  /**
+   * ⚠ 两段的入出点必须**首尾相接**，中间不能少一截也不能重一截。
+   * 少一截 = 成片里丢帧，重一截 = 同一段画面放两遍。
+   */
+  const parts = (afterSplit.order || []).filter((k) => k.split('#')[0] === (afterSplit.order || [])[0].split('#')[0]);
+  if (parts.length === 2) {
+    const [p1, p2] = parts.map((k) => afterSplit.clips[k]);
+    check('两段首尾相接，不丢帧也不重复',
+      Math.abs(p1.out - p2.in) < 0.01, `${JSON.stringify(p1)} / ${JSON.stringify(p2)}`);
+  }
+
+  // 删除：切出来的那一段直接拿掉（另一半还在，所以是可逆的）
+  const beforeDel = await tlClips.count();
+  await page.locator('.tl-del').click();
+  await page.waitForTimeout(900);
+  check('删除把选中的那一段拿掉了',
+    (await tlClips.count()) === beforeDel - 1, `${beforeDel} → ${await tlClips.count()}`);
+
+  // 拉满整段
+  const lastBox = await tlClips.last().boundingBox();
+  await page.mouse.click(lastBox.x + lastBox.width / 2, lastBox.y + lastBox.height / 2);
+  await page.waitForTimeout(400);
+  await page.locator('.tl-props button:has-text("拉满整段")').click();
+  await page.waitForTimeout(800);
+  const full = await readEdit();
+  check('「拉满整段」把出点拉到素材的完整长度',
+    Object.values(full.clips || {}).some((c) => c.out === 5), JSON.stringify(full.clips));
+}
+
+/**
+ * ── 「重新合成」这颗按钮按得动吗 ──
+ *
+ * 它原来调的是一个这个文件里**根本不存在的函数**，点下去抛 ReferenceError，
+ * 界面纹丝不动。而走查一直是绿的，因为从来没点过它。
+ */
+sent.length = 0;
+await page.locator('button:has-text("重新合成")').click();
+await page.waitForTimeout(1500);
+check('点「重新合成」真的发出了合成请求',
+  sent.some((x) => /POST \/api\/projects\/.*\/stage\/compose/.test(x)),
+  sent.slice(-6).join(' | '));
+
 check('说清楚重新合成不花钱',
   /一分钱不花|不花钱/.test(await page.locator('#view-inner').innerText()), '');
 /**
@@ -667,6 +779,62 @@ check('说清楚重新合成不花钱',
 check('如实说明了预览不等于成片',
   /不等于成片/.test(await page.locator('.tl-stage').innerText()),
   (await page.locator('.tl-stage').innerText()).slice(0, 120));
+
+/**
+ * ── 连不通的时候，红叉点得开吗 ──
+ *
+ * 用户报上来的原话是四行光秃秃的
+ *     剧本 openai ✕ / 调度 openai ✕ / 复核 openai ✕ / 出图 openai ✕
+ * 而真正的原因当时只挂在 title 上 —— 鼠标不悬停就永远看不到，
+ * 于是第一反应是去翻密钥，全是白折腾。
+ *
+ * 这里把服务商指到一个**确定连不上**的地址（本机一个没人监听的端口），
+ * 重新加载页面，然后点那个红叉，看它说不说人话。
+ * 放在最后跑：这一步会把路由改坏，后面的用例都别想用了。
+ */
+console.log('\n连不通时的解释');
+await page.evaluate(() => fetch('/api/settings', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  // ⚠ 开机自检在这个走查里是关着的（省时间），这一节要用它，得先打开
+  body: JSON.stringify({ autoCheckOnStart: true, baseUrls: { volcengine: 'http://127.0.0.1:45999/v3' } })
+}));
+/**
+ * ⚠ 必须 reload()，不能 goto 同一个地址。
+ *
+ * 地址一模一样（只有 hash）时浏览器不会重新加载页面，开机自检也就不会再跑一次 ——
+ * 于是这一节永远看到 0 条红的，而产品代码是好的。
+ */
+await page.reload();
+// 开机自检是异步发出去的，连不上要等 TCP 拒绝回来
+await page.waitForTimeout(4000);
+const badSeg = page.locator('.chain-seg.bad').first();
+const nBad = await page.locator('.chain-seg.bad').count();
+check(`连不通的能力在信号链上标红了（${nBad} 条）`, nBad >= 1, String(nBad));
+if (nBad >= 1) {
+  check('红叉是能点的（光标是手型）',
+    (await badSeg.evaluate((el) => getComputedStyle(el).cursor)) === 'pointer', '');
+  await badSeg.click();
+  await page.waitForTimeout(400);
+  const why = await page.locator('.route-why').innerText().catch(() => '');
+  /**
+   * ⚠ 量的是"说没说到原因"，不是"有没有弹出个东西"。
+   * 弹一个写着"连接失败"的框和不弹，对用户是一样的。
+   */
+  check('点开之后写着到底为什么连不通',
+    /连不上|拒绝连接|连接失败|超时/.test(why), why.slice(0, 160));
+  /**
+   * ⚠ 量的是"有没有把原因翻译成人话"。
+   * 一句 `连接失败：fetch failed` 和不说是一样的 —— 而那正是这一条第一次跑出来的样子
+   *（双栈失败被打包成 AggregateError，真正的错误码被埋掉了）。
+   */
+  check('原因是人话，不是一句 fetch failed',
+    /拒绝连接|解析不了|连接超时/.test(why) && !/^连接失败：fetch failed/.test(why),
+    why.slice(0, 200));
+  check('按钮跟着原因走：网络问题不该只给"去配密钥"',
+    /系统代理|接口根地址/.test(await page.locator('#route-banner').innerText()),
+    (await page.locator('#route-banner').innerText()).slice(0, 200));
+}
 
 check('全程没有页面报错', errs.length === 0, errs.slice(0, 3).join(' | '));
 

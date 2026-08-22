@@ -1180,6 +1180,10 @@ select.mini {
 .chain-seg.good b { color: var(--good); }
 .chain-seg.bad { background: var(--alarm-wash); }
 .chain-seg.bad b { color: var(--alarm); }
+/* 红叉是**能点的** —— 光标要说出这件事，否则原因永远藏在 title 里没人看得到 */
+.chain-seg.bad { cursor: pointer; }
+.chain-seg.bad:hover { background: var(--alarm); color: var(--ground); }
+.chain-seg.bad:hover b { color: var(--ground); }
 
 /* ══════════════════════ 设定集变体 ══════════════════════ */
 

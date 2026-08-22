@@ -24,8 +24,8 @@
  *
  * ════════ 存什么 ════════
  *
- *   order   镜头 id 的顺序。空数组 = 按 index 原样
- *   clips   { [shotId]: { in, out, off, trans, fx, mute } }
+ *   order   片段 key 的顺序。空数组 = 按 index 原样
+ *   clips   { [key]: { in, out, off, trans, fx, mute } }
  *             in/out  手工入点出点（秒）。没设就交给自动剪辑
  *             off     这一镜不进成片。**不是删除** —— 素材还在，随时能放回来
  *             trans   进这一镜用什么转场。压过 shot.transition
@@ -33,6 +33,19 @@
  *             mute    这一镜的台词和音效都不要（画面照留）
  *   tracks  { voice, sfx, music } —— 整条音轨的开关。只存**关掉**的那些
  *   music   { path, name, gain, fadeIn, fadeOut, duck, loop } 背景音乐
+ *
+ * ════════ 什么是 key ════════
+ *
+ * 一开始 key 就是镜头 id，一镜一段。**用小剪刀切开之后不是了** ——
+ * 同一镜会变成两段，各有各的入出点、各有各的转场和效果。
+ * 那时候第二段的 key 是 `<shotId>#2`。
+ *
+ * 为什么不另起一套 id：切开的两段**共用同一个素材文件**，也共用同一句台词、
+ * 同一条音效。key 里带着 shotId，"这一段是哪一镜来的"就永远不会丢，
+ * 而重出这一镜之后两段会自动跟着换成新素材。
+ *
+ * ⚠ 台词和音效**只跟第一段走**（timeline 里的 `first`）。
+ * 不这么定的话，切一刀就会把同一句话念两遍 —— 而那是没人想要的。
  *
  * ⚠ 只存**差异**。没动过的镜头在 clips 里一条记录都没有，
  * 这样自动剪辑改进之后，没手工调过的那些会自动跟着变好。
@@ -79,25 +92,62 @@ export const TRACK_LABELS = { voice: '台词配音', sfx: '音效', music: '背�
  * 一个负数入点、一个比片段还长的出点。不洗的话这些会一路走到 FFmpeg，
  * 而那一层的报错完全看不出是这儿的问题。
  */
+/** 片段 key → 它是哪一镜。`s1` → `s1`，`s1#2` → `s1` */
+export function shotIdOf(key) {
+  const k = String(key ?? '');
+  const i = k.indexOf('#');
+  return i === -1 ? k : k.slice(0, i);
+}
+
+/**
+ * 给某一镜再要一个没被占用的 key。切开时用。
+ *
+ * 从 #2 往上找第一个空号，**不是"现有个数 + 1"** —— 中间删掉过一段的话，
+ * 按个数算会撞上一个还在的号，直接把它盖掉。
+ */
+export function nextKey(edit, shotId, shots = []) {
+  const used = new Set([
+    ...(Array.isArray(edit?.order) ? edit.order : []),
+    ...Object.keys(edit?.clips || {})
+  ].filter((k) => shotIdOf(k) === shotId));
+  void shots;
+  for (let n = 2; n < 999; n += 1) {
+    const k = `${shotId}#${n}`;
+    if (!used.has(k)) return k;
+  }
+  return `${shotId}#${Date.now()}`;
+}
+
 export function normalize(edit, shots = []) {
   const known = new Map(shots.map((s) => [s.id, s]));
   const raw = edit && typeof edit === 'object' ? edit : {};
 
-  // 顺序：只认真实存在的、不重复的；没提到的按 index 补在后面
+  // 顺序：只认真实存在的、不重复的；一镜都没提到的按 index 补在后面
   const seen = new Set();
   const order = [];
-  for (const id of Array.isArray(raw.order) ? raw.order : []) {
-    if (!known.has(id) || seen.has(id)) continue;
-    seen.add(id);
-    order.push(id);
+  const covered = new Set();
+  for (const key of Array.isArray(raw.order) ? raw.order : []) {
+    const sid = shotIdOf(key);
+    if (!known.has(sid) || seen.has(key)) continue;
+    seen.add(key);
+    covered.add(sid);
+    order.push(key);
   }
+  /**
+   * ⚠ 补的判据是"这一镜**一段都没有**"，不是"这个 id 不在 order 里"。
+   *
+   * 切开之后 order 里是 `s1` 和 `s1#2`，两段都在。按 id 找的话
+   * `s1` 在、没事；但要是人把第一段删了、只留 `s1#2`，
+   * 按 id 找就会以为这一镜没排到，又给它补一段完整的回来 ——
+   * 表现是"删掉的那半截自己长回来了"。
+   */
   for (const s of [...shots].sort((a, b) => (a.index || 0) - (b.index || 0))) {
-    if (!seen.has(s.id)) order.push(s.id);
+    if (!covered.has(s.id)) order.push(s.id);
   }
 
   const clips = {};
   for (const [id, v] of Object.entries(raw.clips || {})) {
-    if (!known.has(id) || !v || typeof v !== 'object') continue;
+    if (!known.has(shotIdOf(id)) || !v || typeof v !== 'object') continue;
     const one = {};
     if (v.off === true) one.off = true;
     if (v.mute === true) one.mute = true;
@@ -158,26 +208,35 @@ export function trackOn(edit, name) {
   return edit?.tracks?.[name] !== false;
 }
 
-/** 这一镜的声音要不要（画面照留）*/
-export function isMuted(edit, shotId) {
-  return Boolean(edit?.clips?.[shotId]?.mute);
+/** 这一段的声音要不要（画面照留）*/
+export function isMuted(edit, key) {
+  return Boolean(edit?.clips?.[key]?.mute);
 }
 
 /**
- * 进这一镜用什么转场。
+ * 进这一段用什么转场。
  *
  * 剪辑台上改过的优先；没改过的听分镜的。两级的理由见文件开头 ——
  * 重跑分镜不该冲掉人手调的转场，而人没调过的应该跟着分镜一起变。
  */
-export function transitionOf(edit, shot) {
-  const manual = edit?.clips?.[shot?.id]?.trans;
+export function transitionOf(edit, key, shot) {
+  const manual = edit?.clips?.[key]?.trans;
   if (transitions.ALL_KINDS.includes(manual)) return manual;
+  /**
+   * ⚠ 切出来的后半段**不继承分镜上那个转场**。
+   *
+   * 分镜说"这一镜用叠化进来"，说的是这一镜和**上一镜**之间。
+   * 让后半段也去读它，等于在这一镜自己中间插一处叠化 ——
+   * 画面会莫名其妙地叠一下，而且还会吃掉半秒，把后面整条时间轴推歪。
+   * 后半段默认硬切（就是它本来的样子：同一段画面接着往下走）。
+   */
+  if (key !== shotIdOf(key)) return 'cut';
   return transitions.kindOf(shot);
 }
 
 /** 这一段的画面效果。没设过回 'none' */
-export function fxOf(edit, shot) {
-  const id = edit?.clips?.[shot?.id]?.fx;
+export function fxOf(edit, key) {
+  const id = edit?.clips?.[key]?.fx;
   return fx.has(id) ? id : 'none';
 }
 
@@ -187,13 +246,16 @@ export function musicOf(edit) {
   return normalizeMusic(edit?.music);
 }
 
-/** 这一镜进不进成片 */
-export function isOff(edit, shotId) {
-  return Boolean(edit?.clips?.[shotId]?.off);
+/** 这一段进不进成片 */
+export function isOff(edit, key) {
+  return Boolean(edit?.clips?.[key]?.off);
 }
 
 /**
- * 按剪辑顺序排好、去掉不用的那几镜。
+ * 按剪辑顺序排好、去掉不用的那几段。回的是 `{ key, shot }`。
+ *
+ * ⚠ 同一镜被切开之后会**出现不止一次**（key 不同、shot 是同一个）。
+ * 所以这里不能只回 shot —— 调用方要靠 key 才找得到这一段的入出点。
  *
  * @param shots 已经有视频的那些（没视频的镜头进不了成片，那是另一回事）
  */
@@ -201,9 +263,9 @@ export function ordered(edit, shots = []) {
   const norm = normalize(edit, shots);
   const byId = new Map(shots.map((s) => [s.id, s]));
   return norm.order
-    .filter((id) => !isOff(norm, id))
-    .map((id) => byId.get(id))
-    .filter(Boolean);
+    .filter((key) => !isOff(norm, key))
+    .map((key) => ({ key, shot: byId.get(shotIdOf(key)) }))
+    .filter((x) => x.shot);
 }
 
 /**
@@ -216,8 +278,8 @@ export function ordered(edit, shots = []) {
  * @param total 这一段素材实际多长。用来把手工值卡回合法范围 ——
  *              素材换过一版（重出）之后，旧的出点可能已经超出去了。
  */
-export function windowOf(edit, shot, total = 0) {
-  const c = edit?.clips?.[shot?.id];
+export function windowOf(edit, key, total = 0) {
+  const c = edit?.clips?.[key];
   if (!c || (c.in == null && c.out == null)) return null;
   const cap = Number(total) > 0 ? Number(total) : Infinity;
   let a = Math.max(0, Math.min(c.in ?? 0, cap));
@@ -252,10 +314,11 @@ export function windowOf(edit, shot, total = 0) {
  */
 export function timeline(project, { policy = 'keep' } = {}) {
   const withVideo = (project?.shots || []).filter((s) => s.videoPath);
-  const shots = ordered(project?.edit, withVideo);
+  const parts = ordered(project?.edit, withVideo);
   const rows = [];
+  const usedShots = new Set();
   let at = 0;
-  for (const shot of shots) {
+  for (const { key, shot } of parts) {
     /**
      * 重叠类转场（叠化、推、划……）会**吃掉**重叠的那半秒 —— 全片因此变短。
      *
@@ -263,28 +326,39 @@ export function timeline(project, { policy = 'keep' } = {}) {
      * 字幕也按绝对时间算，两者都来自这个函数。少了它，一处叠化之后
      * 的每一句台词都会晚半秒，而且叠化越多错得越多。
      */
-    const trans = rows.length ? transitionOf(project?.edit, shot) : 'cut';
+    const trans = rows.length ? transitionOf(project?.edit, key, shot) : 'cut';
     if (rows.length) at -= transitions.overlapOfKind(trans);
     /**
      * 手工设过入出点的，长度就是那一段 —— 它压过时长策略。
      * 人明确说了"这一镜只要 2.4 秒"，没有任何理由再去按计划值或实出时长算。
      */
     const total = Number(shot.actualDuration) || Number(shot.duration) || 0;
-    const win = windowOf(project?.edit, shot, total);
+    const win = windowOf(project?.edit, key, total);
     const span = win
       ? Number((win.out - win.in).toFixed(2))
       : (policy === 'trim'
         ? Number(shot.duration) || Number(shot.actualDuration) || 0
         : Number(shot.actualDuration) || Number(shot.duration) || 0);
+    /**
+     * ⚠ 台词和音效**只跟这一镜的第一段走**。
+     *
+     * 切一刀之后同一镜出现两次，而它的配音只有一条。两段都摆的话，
+     * 同一句话会被念两遍 —— 那不是任何人想要的，而且第二遍还会盖到
+     * 后面镜头的台词上。字幕同理。
+     */
+    const first = !usedShots.has(shot.id);
+    usedShots.add(shot.id);
     rows.push({
+      key,
       shot,
+      first,
       start: Number(at.toFixed(3)),
       span,
       win,
       total,
       trans,
-      fx: fxOf(project?.edit, shot),
-      muted: isMuted(project?.edit, shot.id)
+      fx: fxOf(project?.edit, key),
+      muted: isMuted(project?.edit, key)
     });
     at += span;
   }
@@ -316,11 +390,12 @@ export function touched(edit) {
  */
 export function summarize(edit, shots = []) {
   const norm = normalize(edit, shots);
-  const off = Object.entries(norm.clips).filter(([, v]) => v.off).map(([id]) => id);
+  const off = Object.entries(norm.clips).filter(([, v]) => v.off).map(([key]) => key);
   const trimmed = Object.entries(norm.clips).filter(([, v]) => v.in != null || v.out != null);
   const byId = new Map(shots.map((s) => [s.id, s]));
   const natural = [...shots].sort((a, b) => (a.index || 0) - (b.index || 0)).map((s) => s.id);
-  const reordered = norm.order.some((id, i) => natural[i] !== id);
+  const reordered = norm.order.length !== natural.length || norm.order.some((key, i) => natural[i] !== key);
+  const splits = norm.order.filter((key) => key !== shotIdOf(key)).length;
 
   const muted = Object.entries(norm.clips).filter(([, v]) => v.mute);
   const withTrans = Object.entries(norm.clips).filter(([, v]) => v.trans);
@@ -328,7 +403,8 @@ export function summarize(edit, shots = []) {
 
   const bits = [];
   if (reordered) bits.push('调过顺序');
-  if (off.length) bits.push(`跳过 ${off.length} 镜（第 ${off.map((id) => byId.get(id)?.index).filter(Boolean).join('、')} 镜）`);
+  if (splits) bits.push(`用小剪刀切开了 ${splits} 处`);
+  if (off.length) bits.push(`跳过 ${off.length} 段（第 ${[...new Set(off.map((key) => byId.get(shotIdOf(key))?.index).filter(Boolean))].join('、')} 镜）`);
   if (trimmed.length) bits.push(`${trimmed.length} 镜手工设了入出点`);
   if (muted.length) bits.push(`${muted.length} 镜静音`);
   if (withTrans.length) bits.push(`${withTrans.length} 处手改了转场`);

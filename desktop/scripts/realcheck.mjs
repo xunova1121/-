@@ -570,7 +570,7 @@ section('剪辑台走到真片子上');
     });
     let allOff = null;
     await studio.compose(p.id, { onEvent: () => {} }).catch((e) => { allOff = e.message; });
-    check('全标成不用时说人话', /至少留一镜/.test(allOff || ''), allOff);
+    check('全标成不用时说人话', /至少留一段/.test(allOff || ''), allOff);
   } finally {
     if (keepData) process.env.FUTUREDREAM_DATA_DIR = keepData;
     else delete process.env.FUTUREDREAM_DATA_DIR;
@@ -898,6 +898,84 @@ section('配乐走完整条 compose');
     await studio.compose(p.id, { onEvent: (ev) => { if (ev.message) off.push(ev.message); } });
     check('关掉音乐轨之后说清楚"文件还在"',
       off.some((m) => /音乐这条轨是关着的/.test(m)), off.join(' | ').slice(0, 200));
+  } finally {
+    if (keepData) process.env.FUTUREDREAM_DATA_DIR = keepData;
+    else delete process.env.FUTUREDREAM_DATA_DIR;
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+}
+
+section('小剪刀：切开之后真的出两段');
+{
+  /**
+   * selftest 验的是"时间轴算出来是两段"。这一节验的是**成片真的变了**：
+   * 同一个素材文件在 concat 里出现两次、各切各的，而且总长对得上。
+   *
+   * 顺带验一件很容易漏的事：切开之后把两段**换个顺序**，成片的第一帧
+   * 必须是后半段的画面 —— 只看总长的话，换没换顺序是一模一样的数字。
+   */
+  const store = await import('../core/store.js');
+  const studio = await import('../core/pipeline/studio.js');
+  const ih = await import('../core/imghash.js');
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'fd-split-'));
+  const keepData = process.env.FUTUREDREAM_DATA_DIR;
+  process.env.FUTUREDREAM_DATA_DIR = sandbox;
+  try {
+    const p = store.create({ title: '分割走查', script: '一镜。' });
+    const assets = store.assetDir(p.id);
+    fs.mkdirSync(assets, { recursive: true });
+    /**
+     * 素材前后两半颜色不同 —— 这样"切开之后哪一半在前"才量得出来。
+     * 一整段纯色的话，换不换顺序出来的帧完全一样，断言等于没验。
+     */
+    const half1 = clip('sp-1.mp4', 3, 'red');
+    const half2 = clip('sp-2.mp4', 3, 'blue');
+    const src = path.join(assets, 'two-tone.mp4');
+    {
+      const list = path.join(sandbox, 'l.txt');
+      fs.writeFileSync(list, `file '${half1}'\nfile '${half2}'\n`, 'utf8');
+      const r = spawnSync(bin, ['-y', '-v', 'error', '-f', 'concat', '-safe', '0', '-i', list,
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', src], { encoding: 'utf8' });
+      if (r.status !== 0) throw new Error(`造双色素材失败：${r.stderr?.slice(-300)}`);
+    }
+
+    store.update(p.id, (x) => {
+      x.shots = [{ id: 'one', index: 1, description: '一镜到底', duration: 6, actualDuration: 6, videoPath: src }];
+      return x;
+    });
+    settings.patch({ autoCut: false, durationPolicy: 'keep', loudness: false });
+
+    // ① 不切：整段 6 秒
+    await studio.compose(p.id, { onEvent: () => {} });
+    const whole = await ffmpeg.probeDuration(store.read(p.id).outputs.video);
+    check(`不切时是整段 6 秒（实际 ${whole?.toFixed(2)}）`, Math.abs(whole - 6) < 0.4, String(whole));
+
+    // ② 切成两段、后半在前 → 总长不变，但第一帧变成蓝的
+    store.update(p.id, (x) => {
+      x.edit = { order: ['one#2', 'one'], clips: { one: { in: 0, out: 3 }, 'one#2': { in: 3, out: 6 } } };
+      return x;
+    });
+    const notes = [];
+    await studio.compose(p.id, { onEvent: (ev) => { if (ev.message) notes.push(ev.message); } });
+    const film = store.read(p.id).outputs.video;
+    const cut = await ffmpeg.probeDuration(film);
+    check(`切成两段再对调，总长还是 6 秒（实际 ${cut?.toFixed(2)}）`, Math.abs(cut - 6) < 0.5, String(cut));
+    const [r0, g0, b0] = await rgbAt(film, 1);
+    check(`第一帧变成了后半段的蓝色（${r0},${g0},${b0}）—— 顺序真的换了`,
+      b0 - r0 > 40, `${r0},${g0},${b0}`);
+    const [r1, , b1] = await rgbAt(film, 4.5);
+    check(`后半变成了原来的前半（红，${r1},${b1}）`, r1 - b1 > 40, `${r1},${b1}`);
+    check('日志里说了切过几处', notes.some((m) => /切开了 1 处/.test(m)), notes.join(' | ').slice(0, 200));
+
+    // ③ 只留后半段：3 秒，而且那一镜不会"自己长回来"
+    store.update(p.id, (x) => {
+      x.edit = { order: ['one#2'], clips: { 'one#2': { in: 3, out: 6 } } };
+      return x;
+    });
+    await studio.compose(p.id, { onEvent: () => {} });
+    const only = await ffmpeg.probeDuration(store.read(p.id).outputs.video);
+    check(`只留后半段就是 3 秒（实际 ${only?.toFixed(2)}）—— 删掉的那半截没有自己长回来`,
+      Math.abs(only - 3) < 0.4, String(only));
   } finally {
     if (keepData) process.env.FUTUREDREAM_DATA_DIR = keepData;
     else delete process.env.FUTUREDREAM_DATA_DIR;

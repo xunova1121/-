@@ -4277,7 +4277,9 @@ export function timelineOf(project, { policy = 'trim' } = {}) {
 
 export function buildSubtitles(project, { policy = 'trim' } = {}) {
   const cues = [];
-  for (const { shot, start, span } of timelineOf(project, { policy })) {
+  for (const { shot, start, span, first } of timelineOf(project, { policy })) {
+    // 切成两段的镜头只在**第一段**出字幕 —— 否则同一句话会连出两条
+    if (!first) continue;
     // 字幕显示的也是净台词：署名单独有 speaker 字段，念不出来的括注更不该显示
     const text = speakerLib.spokenText(shot.dialogue).text;
     if (!text) continue;
@@ -4322,17 +4324,25 @@ export async function compose(projectId, { onEvent, signal = null } = {}) {
   const dir = store.assetDir(projectId);
 
   const ordered = project.shots.slice().sort((a, b) => a.index - b.index);
+  // 裁剪是唯一能精确命中目标时长的办法：模型给 5 秒而分镜只要 3.5 秒时切掉多余的。
+  // 关掉则保留完整片段 —— 运动更自然，但成片会比计划长。
+  const policy = settings.get('durationPolicy') || 'trim';
   /**
-   * ⚠ 顺序、用不用、切哪一段，全部**由剪辑台决定**，而且要和
-   * timelineOf 用的是同一份 —— 配音和字幕按那份摆。
-   * 各算各的顺序，结果就是画面按新顺序、声音按旧顺序。
+   * ⚠ 顺序、用不用、切哪一段、什么转场、什么效果，全部**从时间轴那一份来**。
+   *
+   * 以前这里自己又推导了一遍（edit.ordered + 逐个 windowOf），和 timelineOf
+   * 是两份代码算同一件事 —— 而配音和字幕按 timelineOf 那份摆。
+   * 两份只要有一处口径不同，画面按一种算、声音按另一种算，整片错位。
+   *
+   * 现在只有一份：rows。而且它天然扛得住"同一镜被切成两段" ——
+   * 那种情况下同一个 videoPath 出现两次，各带各的入出点。
    */
-  const withVideo = edit.ordered(project.edit, ordered.filter((s) => s.videoPath));
-  const segments = withVideo.map((s) => s.videoPath);
+  const rows = timelineOf(project, { policy });
+  const segments = rows.map((r) => r.shot.videoPath);
   if (!segments.length) {
     const anyVideo = ordered.some((s) => s.videoPath);
     throw new Error(anyVideo
-      ? '剪辑台里每一镜都标成了"不用" —— 至少留一镜才能合成'
+      ? '剪辑台里每一段都标成了"不用" —— 至少留一段才能合成'
       : '没有可合成的视频片段');
   }
   const editNote = edit.summarize(project.edit, ordered.filter((s) => s.videoPath));
@@ -4352,11 +4362,8 @@ export async function compose(projectId, { onEvent, signal = null } = {}) {
     });
   }
 
-  // 裁剪是唯一能精确命中目标时长的办法：模型给 5 秒而分镜只要 3.5 秒时切掉多余的。
-  // 关掉则保留完整片段 —— 运动更自然，但成片会比计划长。
-  const policy = settings.get('durationPolicy') || 'trim';
   /**
-   * 手工设过入出点的那几镜**不受时长策略管** —— 人已经明确说了要多长，
+   * 手工设过入出点的那几段**不受时长策略管** —— 人已经明确说了要多长，
    * 那个长度就是 out − in。
    *
    * ⚠ 这里**不能给 null**。concat 里入点（cuts[i].in）只在
@@ -4364,10 +4371,9 @@ export async function compose(projectId, { onEvent, signal = null } = {}) {
    * 于是"存下来了、日志也说剪过了、成片纹丝不动"。
    * 走查第一版就是这么红的：顺序和跳过都生效了，唯独入出点没有。
    */
-  const trims = withVideo.map((s) => {
-    const w = edit.windowOf(project.edit, s, Number(s.actualDuration) || Number(s.duration) || 0);
-    if (w) return Number((w.out - w.in).toFixed(2));
-    return policy === 'trim' ? Number(s.duration) || null : null;
+  const trims = rows.map((r) => {
+    if (r.win) return Number((r.win.out - r.win.in).toFixed(2));
+    return policy === 'trim' ? Number(r.shot.duration) || null : null;
   });
 
   /**
@@ -4387,19 +4393,20 @@ export async function compose(projectId, { onEvent, signal = null } = {}) {
    * 设好的入出点**照样要生效** —— 那是人的决定，不是一个可以"跳过"的优化。
    * 所以先把手工那部分铺满，自动那部分只往空位里填。
    */
-  const manualCuts = withVideo.map((s) => {
-    const total = Number(s.actualDuration) || Number(s.duration) || 0;
-    const w = edit.windowOf(project.edit, s, total);
-    return w ? { in: w.in, out: w.out, deadHead: 0, trimmed: w.in > 0, index: s.index, manual: true } : null;
-  });
+  const manualCuts = rows.map((r) =>
+    (r.win
+      ? { in: r.win.in, out: r.win.out, deadHead: 0, trimmed: r.win.in > 0, index: r.shot.index, manual: true }
+      : null));
   let cuts = manualCuts.some(Boolean) ? manualCuts.map((c) => c || { in: 0, out: 0, deadHead: 0, trimmed: false }) : null;
 
   if (settings.get('autoCut') !== false && ffmpeg.locate().available) {
     cuts = [];
     const tmpRoot = path.join(dir, '.autocut');
-    for (const [i, shot] of withVideo.entries()) {
+    for (const [i, r] of rows.entries()) {
+      const shot = r.shot;
       jobs.checkpoint(signal, '自动剪辑');
-      const outDir = path.join(tmpRoot, String(shot.id));
+      // 临时目录按**片段 key** 分，不按镜头 id —— 同一镜被切成两段时会撞名
+      const outDir = path.join(tmpRoot, String(r.key).replace(/[^\w.-]/g, '_'));
       try {
         // eslint-disable-next-line no-await-in-loop
         const total = (await ffmpeg.probeDuration(shot.videoPath)) || 0;
@@ -4495,8 +4502,13 @@ export async function compose(projectId, { onEvent, signal = null } = {}) {
     const has = timeline.filter((r) => r.shot.audioPath && fs.existsSync(r.shot.audioPath)).length;
     if (has) onEvent?.({ type: 'note', message: `台词这条轨是关着的，${has} 条配音这次一条都不混进去（文件还在）` });
   }
+  /**
+   * ⚠ `r.first` 这一条不能少：同一镜被小剪刀切成两段之后它会出现两次，
+   * 而它的配音只有一条。两段都摆的话同一句话被念两遍，第二遍还会盖到
+   * 后面镜头的台词上 —— 而那听起来像"配音错乱"，很难想到是切了一刀造成的。
+   */
   const audioAt = (voiceOn ? timeline : [])
-    .filter((r) => !r.muted && r.shot.audioPath && fs.existsSync(r.shot.audioPath))
+    .filter((r) => r.first && !r.muted && r.shot.audioPath && fs.existsSync(r.shot.audioPath))
     .map((r) => ({ path: r.shot.audioPath, at: r.start, index: r.shot.index, span: r.span }));
 
   /**
@@ -4528,7 +4540,7 @@ export async function compose(projectId, { onEvent, signal = null } = {}) {
     }
   }
   const sfxAt = (sfxOff ? [] : timeline)
-    .filter((r) => !r.muted && r.shot.sfxPath && fs.existsSync(r.shot.sfxPath))
+    .filter((r) => r.first && !r.muted && r.shot.sfxPath && fs.existsSync(r.shot.sfxPath))
     .map((r) => ({
       path: r.shot.sfxPath,
       at: r.start,
@@ -4577,7 +4589,7 @@ export async function compose(projectId, { onEvent, signal = null } = {}) {
   }
 
   if (trims) {
-    const saved = withVideo.reduce((sum, s) => sum + Math.max(0, duration.shotSeconds(s) - (Number(s.duration) || 0)), 0);
+    const saved = rows.reduce((sum, r) => sum + Math.max(0, duration.shotSeconds(r.shot) - (Number(r.shot.duration) || 0)), 0);
     if (saved > 0.5) onEvent?.({ type: 'note', message: `按分镜时长裁剪，去掉厂商档位多出的 ${saved.toFixed(1)} 秒` });
   }
 
@@ -4587,7 +4599,7 @@ export async function compose(projectId, { onEvent, signal = null } = {}) {
    * ⚠ 必须和 timelineOf 用**同一个解析口径**（edit.transitionOf）：
    * 一边读剪辑台、一边读分镜字段的话，画面和声音会各按各的算重叠。
    */
-  const transitionKinds = withVideo.map((s, i) => (i === 0 ? 'cut' : edit.transitionOf(project.edit, s)));
+  const transitionKinds = rows.map((r, i) => (i === 0 ? 'cut' : r.trans));
   const effects = transitionKinds.filter((k) => k !== 'cut').length;
   if (effects) {
     const eaten = transitionKinds.reduce((sum, k) => sum + transitions.overlapOfKind(k), 0);
@@ -4608,20 +4620,19 @@ export async function compose(projectId, { onEvent, signal = null } = {}) {
    * 探一次流信息是必要的：zoompan 不知道分辨率会把 1080p 悄悄降到 720p，
    * 不知道帧率会把 24 帧重采样成 25 帧（画面发抖）。两样都不报错。
    */
-  const filters = new Array(withVideo.length).fill(null);
+  const filters = new Array(rows.length).fill(null);
   const fxPicks = [];
-  for (const [i, s] of withVideo.entries()) {
-    const id = edit.fxOf(project.edit, s);
-    if (id === 'none') continue;
+  for (const [i, r] of rows.entries()) {
+    if (r.fx === 'none') continue;
     // eslint-disable-next-line no-await-in-loop
-    const info = (await ffmpeg.probeStreams(s.videoPath)) || {};
-    const made = fx.compile(id, info);
+    const info = (await ffmpeg.probeStreams(r.shot.videoPath)) || {};
+    const made = fx.compile(r.fx, info);
     if (made.skip) {
-      onEvent?.({ type: 'note', message: `第 ${s.index} 镜：${made.skip}，这一段先按原样出` });
+      onEvent?.({ type: 'note', message: `第 ${r.shot.index} 镜：${made.skip}，这一段先按原样出` });
       continue;
     }
     filters[i] = made.vf;
-    fxPicks.push({ index: s.index, fx: id });
+    fxPicks.push({ index: r.shot.index, fx: r.fx });
   }
   const fxNote = fx.summarize(fxPicks);
   if (fxNote) onEvent?.({ type: 'note', message: fxNote });
