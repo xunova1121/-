@@ -679,6 +679,7 @@ export default {
               h('button', {
                 class: 'btn sm primary',
                 disabled: !runnable,
+                // cap:task-reclaim
                 onclick: () => recheckTasks()
               }, '重查待认领任务（不花钱）'),
               h('button', { class: 'btn ghost sm', onclick: () => go('providers') }, '去填查任务地址')))

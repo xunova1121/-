@@ -695,9 +695,57 @@ function paintFlow() {
     );
   });
 
+  /**
+   * 待认领：提交成功了、**钱花了**、片子在厂商那边，我们没取回来。
+   *
+   * 这一块原来只有电脑版有。手机上看到的是"有图没视频"，
+   * 唯一能做的动作就是重出 —— 而重出是**第二次付钱**，
+   * 第一次那份还好好地在厂商那儿放着。
+   *
+   * 用户的原话："视频13段都生成两次了，PC和移动端还是显示只生成了4段"。
+   * 那个循环就是这么闭合的：取不回来 → 没有 videoPath → 下次全跑照样重提交。
+   */
+  const owed = (project.shots || []).filter((s) => s.pendingTask && !s.videoPath);
+  const reclaim = owed.length
+    ? (() => {
+        const go = h('button', { class: 'btn primary block', disabled: job.running }, `把这 ${owed.length} 镜捞回来（不花钱）`);
+        go.onclick = async () => {
+          go.disabled = true;
+          job.running = true;
+          job.label = '重查待认领';
+          job.message = '正在查…';
+          job.fail = 0;
+          job.streaming = true;
+          paint();
+          try {
+            // cap:task-reclaim
+            await stream(`/projects/${project.id}/tasks/recheck`, {}, (ev) => {
+              if (ev.message) job.message = ev.message;
+              updateLive();
+            });
+          } catch (err) {
+            job.fail += 1;
+            job.message = err.message;
+          } finally {
+            job.running = false;
+            job.streaming = false;
+            await reload();
+          }
+        };
+        return h('div', { class: 'card warn' },
+          h('b', {}, `${owed.length} 镜的钱已经花了，片子还没取回来`),
+          h('p', { class: 'muted', style: 'margin:6px 0 10px' },
+            `第 ${owed.map((s) => s.index).join('、')} 镜提交是成功的，片子多半已经在厂商那边出好了，`
+            + '只是我们当时没取回来（查任务的地址不对、下载要鉴权、或者网断了一下）。'
+            + '**直接重出等于第二次付钱**。查一次不花钱，先查。'),
+          go);
+      })()
+    : null;
+
   return [
     h('p', { class: 'muted', style: 'margin:2px 4px 10px' },
       '每一步都在电脑上跑，手机只是发个指令 —— 关掉这个页面也不影响它继续跑。'),
+    reclaim,
     box,
     h('div', { class: 'card' },
       h('div', { class: 'muted' },
@@ -1222,8 +1270,28 @@ function shotIssues(s, prev = null) {
   const out = [];
   if (!s.imagePath) {
     out.push({ level: 'blocker', what: '还没出图', fix: 'image', how: '重出这张图' });
+  } else if (!s.videoPath && s.pendingTask) {
+    /**
+     * 钱已经花了，片子在厂商那边 —— 这一条**必须排在"有图没视频"前面**，
+     * 而且不能给「重出」那个主按钮：重出是第二次付钱，而正确的动作是免费捞回来。
+     * 两者长得一模一样（都是"有图没视频"），代价差一整镜的视频钱。
+     */
+    out.push({
+      level: 'blocker',
+      what: '这一镜的钱已经花了、片子没取回来 —— 重出等于再付一次',
+      fix: null,
+      how: '去流水线点「把这几镜捞回来（不花钱）」'
+    });
   } else if (!s.videoPath) {
-    out.push({ level: 'blocker', what: '有图没视频 —— 合成时这一镜会被直接跳过', fix: 'video', how: '重出这段视频' });
+    out.push({
+      level: 'blocker',
+      // 失败过就把厂商原话摆出来。原来这句话只活在那条流里，流一断就没了
+      what: s.videoError?.message
+        ? `出视频失败：${String(s.videoError.message).slice(0, 60)}`
+        : '有图没视频 —— 合成时这一镜会被直接跳过',
+      fix: 'video',
+      how: '重出这段视频'
+    });
   }
   if (s.link === 'continuous' && s.tailAlign?.verdict === 'missed') {
     out.push({ level: 'blocker', what: '标着「连续动作」，接缝其实没锁上', fix: 'video', how: '重出这段视频' });

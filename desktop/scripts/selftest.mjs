@@ -162,6 +162,11 @@ const upstream = http.createServer((req, res) => {
     req.on('end', () => {
       upstream.msBody = JSON.parse(raw || '{}');
       upstream.msSubmits = (upstream.msSubmits || 0) + 1;
+      // 让用例能造一次"厂商明确拒了"的失败，用来验失败原因有没有被存下来
+      if (upstream.videoFail) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ message: upstream.videoFail }));
+      }
       upstream.msImageCounts = upstream.msImageCounts || [];
       const imgs = (upstream.msBody.content || []).filter((c) => c.type === 'image_url').length;
       upstream.msImageCounts.push(imgs);
@@ -207,6 +212,10 @@ const upstream = http.createServer((req, res) => {
   // 用户实测拿回来的真实形状：外面套一层 task，状态和地址都在里面。
   // 少看一层就读不出状态，然后一路轮到超时 —— 这个坑必须钉死。
   if (url.pathname === '/msv2/video_generation' && req.method === 'POST') {
+    // ⚠ 这个计数原来没有，而有一条断言在读它 —— 于是那条断言
+    // 量的是 undefined === undefined，**永远绿**。而它守的恰恰是
+    //"有没有第二次付钱"这件事，一条永远绿的断言在这儿等于没有守。
+    upstream.msv2Submits = (upstream.msv2Submits || 0) + 1;
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ task_id: '424010985738629' }));
   }
@@ -5934,13 +5943,106 @@ section('待认领的任务不能变成黑洞');
   adapters.resetQueryUrlCache();
   upstream.msv2Hits = 5; // 直接给终态，重查是"查一次"不是轮询
 
+  // ⚠ 按**增量**比，不能比绝对值：前面的用例也往这个口上提交过。
+  // 原来这条读的是一个从来没被赋过值的计数器，等于 undefined === undefined，
+  // 永远绿 —— 而它守的正是"重查会不会顺手又生成一次"。
+  const submitsBeforeRecheck = upstream.msv2Submits || 0;
   const evs = await ndjson(`/projects/${project.id}/tasks/recheck`, {});
   const after = evs.find((e) => e.type === 'finished')?.project;
   const claimed = after?.shots?.find((x) => x.id === shot.id);
   check('重查一次就把片子收回来了', Boolean(claimed?.videoPath), JSON.stringify(evs.slice(-2)));
   check('收回来之后不再挂着"待认领"', !claimed?.pendingTask);
-  check('重查只查不生成（没有新的提交请求）', upstream.msv2Submits === undefined || upstream.msv2Submits === 0);
+  check('重查只查不生成（没有新的提交请求）',
+    (upstream.msv2Submits || 0) === submitsBeforeRecheck,
+    `${upstream.msv2Submits} vs ${submitsBeforeRecheck}`);
   check('列表随之清空', studioModule.listPendingTasks(project.id).length === 0);
+
+  /**
+   * ══════ 重跑之前必须先把已经付过钱的那几镜捞回来 ══════
+   *
+   * 用户报的：「视频13段都生成两次了，PC和移动端还是显示只生成了4段」。
+   *
+   * 这个循环是这样闭合的：某一镜提交成功、厂商那边也出片了，但我们没取回来
+   *（查任务的路径不对、下载要鉴权、网断了一下）—— 于是这一镜没有 videoPath。
+   * 而 targets 的筛选条件正是「没有 videoPath」，所以下一次「往后全跑」
+   * 会原样再提交一遍，**再付一次钱**。出多少次都不会自己好，
+   * 因为坏的是取回来那一步，不是生成那一步。
+   *
+   * 打断它的办法：重跑之前先查一次。查任务是免费的，能省下一整镜的视频钱。
+   * 这一条量的就是"它到底有没有先查"。
+   */
+  {
+    const s0 = afterAssets.shots[0];
+    store.update(project.id, (p) => {
+      const t = p.shots.find((x) => x.id === s0.id);
+      if (t) {
+        delete t.videoPath;
+        t.pendingTask = { taskId: '424010985738629', provider: 'metaso', at: new Date().toISOString() };
+      }
+      return p;
+    });
+    /**
+     * 出视频也路由到这个假秘塔口上 —— 否则"没有再提交一次"量的是
+     * 一个根本不会被碰到的计数器（重跑会打到别家去），又是一条永远绿的断言。
+     */
+    const keepP = settings.get('videoProvider');
+    const keepM = settings.get('videoModel');
+    settings.patch({
+      baseUrls: { metaso: `${upstreamUrl}/msv2` },
+      videoProvider: 'metaso',
+      videoModel: 'MiniMax-H3'
+    });
+    adapters.resetQueryUrlCache();
+    upstream.msv2Hits = 5;
+    const submitsBefore = upstream.msv2Submits || 0;
+
+    const notes = [];
+    await studioModule.generateVideos(project.id, {
+      only: [s0.id],
+      onEvent: (ev) => { if (ev.message) notes.push(ev.message); }
+    }).catch((e) => notes.push(`ERR ${e.message}`));
+
+    const back = store.read(project.id).shots.find((x) => x.id === s0.id);
+    const joined = notes.join(' | ');
+    check('全跑之前先免费查了一遍待认领', /先免费查一遍|捞回来/.test(joined), joined.slice(0, 240));
+    check('捞回来了，videoPath 补上了', Boolean(back?.videoPath), String(back?.videoPath));
+    check('**没有再提交一次**（那一次就是第二笔钱）',
+      (upstream.msv2Submits || 0) === submitsBefore, `${upstream.msv2Submits} vs ${submitsBefore}`);
+    check('并且说清楚省下的是什么', /第二次付钱|省下/.test(joined), joined.slice(0, 240));
+
+    settings.patch({ baseUrls: { metaso: `${upstreamUrl}/ms` }, videoProvider: keepP, videoModel: keepM });
+    adapters.resetQueryUrlCache();
+  }
+
+  /**
+   * 失败的原因要**存在这一镜身上**，不能只发进那条流里。
+   *
+   * 流一断（关页面、切屏、手机锁屏）那句话就永远消失了，之后两端看到的
+   * 都是"有图没视频"四个字，没有任何线索 —— 于是唯一能做的动作就是再跑一遍。
+   */
+  {
+    const s1 = afterAssets.shots[0];
+    store.update(project.id, (p) => {
+      const t = p.shots.find((x) => x.id === s1.id);
+      if (t) { delete t.videoPath; delete t.pendingTask; t.videoError = null; }
+      return p;
+    });
+    // 把出视频路由到那个假的秘塔口上 —— videoFail 这个开关挂在它身上
+    const keepProvider = settings.get('videoProvider');
+    const keepModel = settings.get('videoModel');
+    settings.patch({ videoProvider: 'metaso', videoModel: 'MiniMax-H3' });
+    upstream.videoFail = '厂商那边出片失败：内容审核不通过';
+    await studioModule.generateVideos(project.id, { only: [s1.id], onEvent: () => {} }).catch(() => {});
+    upstream.videoFail = null;
+    settings.patch({ videoProvider: keepProvider, videoModel: keepModel });
+    const hurt = store.read(project.id).shots.find((x) => x.id === s1.id);
+    check('失败原因存在这一镜身上（流断了也还在）',
+      Boolean(hurt?.videoError?.message), JSON.stringify(hurt?.videoError));
+    check('存的是厂商原话，不是"失败了"三个字',
+      /审核不通过/.test(hurt?.videoError?.message || ''), hurt?.videoError?.message);
+    check('并且记下了时间（不然分不清是这次的还是上次的）',
+      Boolean(hurt?.videoError?.at), String(hurt?.videoError?.at));
+  }
 
   settings.patch({ baseUrls: { metaso: `${upstreamUrl}/ms` } });
   adapters.resetQueryUrlCache();

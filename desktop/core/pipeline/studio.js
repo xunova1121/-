@@ -2096,6 +2096,9 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
        * 接缝复核也据此认为该有接缝。界面和事实不一致，比少一个功能糟糕得多。
        */
       t.endFrameChained = Boolean(video.endFrameSent);
+      // 这一镜成了，上一次的失败记录和待认领都作废 —— 留着会一直红着
+      t.videoError = null;
+      delete t.pendingTask;
       // 这一镜的首帧是不是接住了上一段的真实末帧。界面上要能一眼看出
       // 哪几处接缝是"像素级连着的"，哪几处只是文字上接了一下
       t.headFromTail = ctx.headFromTail ? { fromIndex: ctx.headFromTail.fromIndex, at: new Date().toISOString() } : null;
@@ -3177,10 +3180,57 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
 
   const r = routing();
   const dir = store.assetDir(projectId);
-  const targets = project.shots
+  let targets = project.shots
     .filter((s) => (chapterId ? s.chapterId === chapterId : true))
     .filter((s) => s.imagePath && (only ? only.includes(s.id) : regenerate || !s.videoPath));
   if (!targets.length) throw new Error('没有可出视频的分镜（需要先有镜头图）');
+
+  /**
+   * ═══════ 开跑前先去把已经付过钱的那几镜捞回来 ═══════
+   *
+   * 用户报的：十三镜在厂商那边跑过**两遍**，而界面上一直显示只有 4 段。
+   *
+   * 这个循环是这样闭合的：某一镜提交成功了、厂商那边也出片了，
+   * 但我们没取回来（查任务的路径不对、下载要鉴权、网断了一下）——
+   * 于是这一镜没有 videoPath。而 targets 的筛选条件正是「没有 videoPath」，
+   * 所以下一次「往后全跑」会**原样再提交一遍**，再付一次钱。
+   * 出多少次都不会自己好，因为坏的是取回来那一步，不是生成那一步。
+   *
+   * 打断它的办法很简单：重跑之前先查一次待认领。查任务是**免费**的，
+   * 而它能省下的是一整镜的视频钱 —— 这笔账没有任何一侧是划算的反面。
+   *
+   * ⚠ 这一步失败了绝不能拖垮整批：捞不回来就照常重出，
+   * 那是原来的行为，不会更糟。
+   */
+  /**
+   * 只在"补齐缺的"时候捞，明确点了「重出」就不捞 ——
+   * 那是用户要一版新的，把一版旧的捞回来盖上去不是他要的。
+   */
+  const owed = regenerate ? [] : targets.filter((s) => s.pendingTask);
+  if (owed.length) {
+    onEvent?.({
+      type: 'note',
+      message: `这 ${owed.length} 镜上次提交成功过、但片子没取回来（第 ${owed.map((s) => s.index).join('、')} 镜）。`
+        + '直接重出等于**第二次付钱**，所以先免费查一遍能不能捞回来。'
+    });
+    try {
+      await recheckPendingTasks(projectId, { onEvent });
+    } catch (err) {
+      onEvent?.({ type: 'note', message: `捞了一下没捞着（${err.message}），这几镜照常重出。` });
+    }
+    // 捞回来的那几镜已经有 videoPath 了，从这一批里去掉，别再花一次钱
+    const fresh = store.read(projectId);
+    const stillNeed = new Set((fresh.shots || []).filter((s) => !s.videoPath).map((s) => s.id));
+    const before = targets.length;
+    targets = targets.filter((s) => stillNeed.has(s.id));
+    if (targets.length < before) {
+      onEvent?.({ type: 'note', message: `捞回来 ${before - targets.length} 镜，这几镜不用再出了（省下的就是这几镜的视频钱）` });
+    }
+    if (!targets.length) {
+      onEvent?.({ type: 'stage', stage: 'video', status: 'done', message: '全都捞回来了，一分钱没花' });
+      return store.read(projectId);
+    }
+  }
 
   onEvent?.({ type: 'stage', stage: 'video', status: 'running', message: `待出视频 ${targets.length} 段` });
   onEvent?.({ type: 'note', message: seamPlanOf(project.shots || [], targets, settings.get('seamMode') || 'lock') });
@@ -3317,6 +3367,9 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
            * 可能中途把它扔掉（写法被拒、请求体超上限），而这里照样记成 true。
            */
           t.endFrameChained = Boolean(video.endFrameSent);
+          // 这一镜成了，上一次的失败记录和待认领都作废 —— 留着会一直红着
+          t.videoError = null;
+          delete t.pendingTask;
           // 这一镜的首帧是不是接住了上一段的真实末帧。界面上要能一眼看出
           // 哪几处接缝是"像素级连着的"，哪几处只是文字上接了一下
           t.headFromTail = ctx.headFromTail ? { fromIndex: ctx.headFromTail.fromIndex, at: new Date().toISOString() } : null;
@@ -3349,13 +3402,31 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
       // 报错里带了 task_id 的话记下来：任务多半在厂商那边跑完了，
       // 只是我们查不到。留着这个号，用户能去平台上把片子捞回来。
       const taskId = err.taskId || (err.message.match(/task_id\s+(\S+)/) || [])[1];
-      if (taskId) {
-        store.update(projectId, (p) => {
-          const t = p.shots.find((s) => s.id === shot.id);
-          if (t) t.pendingTask = { taskId, provider: r.video.provider, at: new Date().toISOString() };
-          return p;
-        });
-      }
+      /**
+       * ⚠ **把失败的原因存下来。**
+       *
+       * 原来它只作为一个事件发进那条流里 —— 流一断（关页面、切屏、手机锁屏），
+       * 这句话就永远消失了。之后两端看到的都是一样的东西：
+       * "有图没视频"，四个字，没有任何线索。
+       *
+       * 用户碰上的正是这个：十三镜在厂商那边跑过两遍，界面上一直显示 4 段。
+       * 中间那九镜为什么没回来，**没有任何地方记着** ——
+       * 于是唯一能做的动作就是再跑一遍，也就是再付一次钱。
+       *
+       * 这个字段是那条循环的记账：出错的原因、什么时候、任务号是多少。
+       */
+      store.update(projectId, (p) => {
+        const t = p.shots.find((s) => s.id === shot.id);
+        if (!t) return p;
+        if (taskId) t.pendingTask = { taskId, provider: r.video.provider, at: new Date().toISOString() };
+        t.videoError = {
+          at: new Date().toISOString(),
+          message: String(err.message || '未说明原因').slice(0, 400),
+          taskId: taskId || null,
+          provider: r.video.provider || null
+        };
+        return p;
+      });
       /**
        * 取消不是"这一镜失败了"，不能按失败处理接着跑下一镜。
        *

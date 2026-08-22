@@ -228,6 +228,21 @@ export const CAPABILITIES = [
     pc: 'ui/views/studio.js',
     mobile: 'ui/m/m.js'
   },
+  /**
+   * 待认领：提交成功了、钱花了、片子在厂商那边，我们没取回来。
+   *
+   * 这一条原来**只有电脑版有**，而且没在这份清单里登记过 ——
+   * 所以三端对齐那条自检一直是绿的，漏得毫无声息。
+   * 代价是实打实的钱：手机上看到"有图没视频"，唯一能做的动作就是重出，
+   * 而重出等于第二次付钱，第一次那份还好好地在厂商那儿放着。
+   */
+  {
+    id: 'task-reclaim',
+    name: '把已经付过钱的任务捞回来（不花钱）',
+    api: 'GET /projects/:id/tasks + POST /projects/:id/tasks/recheck',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js'
+  },
   {
     id: 'account-login',
     name: '用账号密码登录',
