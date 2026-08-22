@@ -243,6 +243,21 @@ export const CAPABILITIES = [
     pc: 'ui/views/studio.js',
     mobile: 'ui/m/m.js'
   },
+  /**
+   * 出片规格（画幅 + 视频分辨率），记在**项目**上。
+   *
+   * 用户的原话："有的时候是在手机新建项目，不默认他们的设置"。
+   * 全局设置是坐在电脑前为上一部片子调的 —— 手机上新建一部竖屏短剧，
+   * 却继承了上一部横屏纪录片的比例，而这两样一旦跑起来就改不动了：
+   * 分镜图按那个比例出完，视频跟着图走，发现不对时钱已经花掉了。
+   */
+  {
+    id: 'project-format',
+    name: '这部片子的画幅和分辨率',
+    api: 'PATCH /projects/:id { aspectRatio, videoResolution }',
+    pc: 'ui/views/projects.js',
+    mobile: 'ui/m/m.js'
+  },
   {
     id: 'account-login',
     name: '用账号密码登录',

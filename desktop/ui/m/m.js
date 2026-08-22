@@ -50,6 +50,27 @@ if (canInstall) {
   navigator.serviceWorker.register('/m/sw.js').catch(() => {});
 }
 
+/**
+ * 配色三态。存在这台手机上 —— 它是"这块屏幕现在在什么光线下"的事，
+ * 跟项目、跟账号都没关系，同一个人在电脑上和手机上要的完全可以不一样。
+ */
+const THEME_STORE = 'fd.m.theme';
+const THEME_ICON = { auto: '◐', light: '☀', dark: '☾' };
+const THEME_LABEL = { auto: '跟随系统', light: '白天模式', dark: '夜间模式' };
+let themeMode = 'auto';
+
+function setTheme(mode) {
+  themeMode = ['auto', 'light', 'dark'].includes(mode) ? mode : 'auto';
+  // auto 就是**不写这个属性** —— 交给 CSS 里的 prefers-color-scheme
+  if (themeMode === 'auto') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.dataset.theme = themeMode;
+  try {
+    localStorage.setItem(THEME_STORE, themeMode);
+  } catch {
+    /* 隐私模式下写不进去，那这一次有效 */
+  }
+}
+
 const KEY_STORE = 'fd.m.key';
 const PROJ_STORE = 'fd.m.project';
 /**
@@ -555,6 +576,27 @@ function paint() {
         title: '再开一部片子',
         onclick: () => newProjectSheet()
       }, '＋'),
+      /**
+       * 白天 / 夜间。
+       *
+       * 用户的原话："手机版要有白天使用模式，现在 ui 全是黑的，晚上看不见"。
+       * 深色在暗处很好，在**日光下的手机屏**上是另一回事 ——
+       * 屏幕反光加上深底浅字，对比度直接塌掉。而这一端本来就是给
+       * "在路上"设计的，路上最常见的光线恰恰是白天的户外。
+       *
+       * 三态循环：跟随系统 → 浅色 → 深色 → 跟随系统。
+       * 默认跟随系统，因为多数人的手机本来就按日程自动切了。
+       */
+      h('button', {
+        class: 'btn sm',
+        title: THEME_LABEL[themeMode],
+        onclick: () => {
+          const next = { auto: 'light', light: 'dark', dark: 'auto' };
+          setTheme(next[themeMode] || 'auto');
+          toast(THEME_LABEL[themeMode]);
+          paint();
+        }
+      }, THEME_ICON[themeMode]),
       h('button', {
         class: 'btn sm',
         onclick: async () => {
@@ -882,8 +924,65 @@ function paintScript() {
         + '已经出好的图和视频不会自动跟着变。'),
       ta,
       h('div', { class: 'row', style: 'margin-top:10px' }, save)),
+    formatCard(),
     styleCard()
   ];
+}
+
+/**
+ * 出片规格：画幅 + 分辨率，**记在这部片子上**。
+ *
+ * ── 为什么必须在手机上有 ──
+ *
+ * 用户的原话："有的时候是在手机新建项目，不默认他们的设置"。
+ *
+ * 全局设置是坐在电脑前为**上一部片子**调的。在手机上新建一部竖屏短剧，
+ * 却继承了上一部横屏纪录片的画幅和 1080p —— 而这两样一旦跑起来就
+ * **改不动了**：分镜图按那个比例出完，视频跟着图走，发现不对时
+ * 前两步的钱已经花掉了。
+ *
+ * 画幅本来就记在项目上（电脑版项目页能改），手机上一直缺；
+ * 分辨率原来只有全局一个，这次也给项目加了一层覆盖。
+ *
+ * ⚠ 服务商不在这儿。选厂商要对着价格、能力、额度一起看，
+ * 那是坐下来做的事 —— 而且它决定的是钱怎么花，不该在路上顺手点一下。
+ */
+const M_RATIOS = [
+  ['16:9', '16:9 横屏'], ['9:16', '9:16 竖屏'], ['1:1', '1:1 方形'],
+  ['4:3', '4:3 传统'], ['21:9', '21:9 宽银幕']
+];
+const M_RES = [['', '跟随设置'], ['480P', '480P 省钱'], ['720P', '720P'], ['1080P', '1080P'], ['2K', '2K']];
+
+function formatCard() {
+  let ratio = project.aspectRatio || '';
+  let res = project.videoResolution || '';
+  const save = h('button', { class: 'btn primary grow' }, '保存规格');
+  save.onclick = async () => {
+    save.disabled = true;
+    try {
+      // cap:project-format
+      await api(`/projects/${project.id}`, {
+        method: 'PATCH',
+        body: { aspectRatio: ratio, videoResolution: res }
+      });
+      toast('已保存。已经出好的图和视频不会跟着变，要重出才会', 'ok');
+      await reload();
+    } catch (err) {
+      toast(err.message, 'err');
+      save.disabled = false;
+    }
+  };
+  return h('div', { class: 'card' },
+    h('b', {}, '出片规格'),
+    h('p', { class: 'muted', style: 'margin:6px 0 10px' },
+      '记在**这一部片子**上，不跟着全局设置走 —— 手机上新建的片子不会继承上一部的比例。'),
+    field('画幅', chips(M_RATIOS.map((r) => r[1]), M_RATIOS.find((r) => r[0] === ratio)?.[1] || '',
+      (v) => { ratio = M_RATIOS.find((r) => r[1] === v)?.[0] || ''; }),
+    '出图和出视频共用一个，免得成片里两者打架。**跑之前定好** —— 分镜图按这个比例出完之后再改，那些图就白出了。'),
+    field('视频分辨率', chips(M_RES.map((r) => r[1]), M_RES.find((r) => r[0] === res)?.[1] || '跟随设置',
+      (v) => { res = M_RES.find((r) => r[1] === v)?.[0] || ''; }),
+    '越高越贵、出得越慢。建议先用 480P 跑通全流程、确认分镜和人设都对，最后一遍再拉高重出。'),
+    h('div', { class: 'row' }, save));
 }
 
 /** 画风：选一张卡 + 一段可以自己写的描述 */
@@ -2347,6 +2446,17 @@ function savedKey() {
 }
 
 async function boot() {
+  /**
+   * 配色要在**任何网络请求之前**就位。
+   * 放到后面的话，网慢时会先闪一屏深色再跳成浅色 ——
+   * 那一下白闪比一直是深色更难受。
+   */
+  try {
+    setTheme(localStorage.getItem(THEME_STORE) || 'auto');
+  } catch {
+    setTheme('auto');
+  }
+
   /**
    * 先问清楚这台服务要的是配对码还是访问口令。
    *

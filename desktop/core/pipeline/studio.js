@@ -2159,7 +2159,14 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
       lastFrameUrl: ctx.lastFrameUrl,
       refImages: bibleRefs.images,
       duration: shot.duration,
-      resolution: opts.resolution || null,
+      /**
+       * 优先级：这一次指定 > **这部片子自己的** > 全局设置 > 厂商默认。
+       *
+       * 中间那一层是后加的。用户在手机上新建项目时说"不默认他们的设置"——
+       * 全局设置是坐在电脑前为**上一部片子**调的，新片子凭什么继承它。
+       * 画幅本来就记在项目上，分辨率没道理不是。
+       */
+      resolution: opts.resolution || project.videoResolution || null,
       aspectRatio: project.aspectRatio || null,
       label: `重出视频 #${shot.index}`,
       onEvent: (ev) => onEvent?.({ ...ev, shotId })
@@ -3430,6 +3437,8 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
         lastFrameUrl: ctx.lastFrameUrl,
         refImages: bibleRefs.images,
         duration: shot.duration,
+        // 同上：这部片子自己定的分辨率，优先于全局设置
+        resolution: project.videoResolution || null,
         aspectRatio: project.aspectRatio || null,
         label: `视频 #${shot.index}`,
         /**

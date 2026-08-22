@@ -237,6 +237,20 @@ export default {
         let picked = p.styleId;
         let pickedText = p.style || '';
         let pickedRatio = p.aspectRatio || '';
+        /**
+         * 分辨率也记在**项目**上。
+         *
+         * 全局那个设置是为上一部片子调的：新建一部片子却继承了它，
+         * 而这一项一旦跑起来就改不动了 —— 图按它出完、视频跟着图走，
+         * 发现不对时前两步的钱已经花掉了。留空 = 跟随全局设置。
+         */
+        let pickedRes = p.videoResolution || '';
+        const resPick = h('select',
+          { onchange: (e) => (pickedRes = e.target.value) },
+          ...[['', `跟随设置（${state.catalog?.settings?.videoResolution || 'auto'}）`],
+            ['480P', '480P —— 跑通流程时用它最省'],
+            ['720P', '720P'], ['1080P', '1080P'], ['2K', '2K']]
+            .map(([v, label]) => h('option', { value: v, selected: v === pickedRes }, label)));
         styleHost.append(
           h('label', {}, '影片比例'),
           ratioPicker(pickedRatio, (id) => (pickedRatio = id), {
@@ -248,6 +262,10 @@ export default {
             ? h('div', { class: 'field-hint' },
                 `这个项目已经出了 ${p.images} 张图。改比例只影响之后新出的，旧的要重出才会跟着变。`)
             : null,
+          h('label', { style: 'margin-top:12px' }, '视频分辨率'),
+          resPick,
+          h('div', { class: 'field-hint' },
+            '越高越贵、出得越慢。建议先用 480P 跑通全流程、确认分镜和人设都对，最后一遍再拉高重出。'),
           h('label', { style: 'margin-top:12px' }, '画风'),
           stylePicker(presets, p.styleId, (id) => (picked = id), {
             text: pickedText,
@@ -263,8 +281,13 @@ export default {
                 }
                 await api(`/projects/${p.id}`, {
                   method: 'PATCH',
-                  // cap:style-pick
-                  body: { styleId: picked, style: pickedText.trim(), aspectRatio: pickedRatio }
+                  // cap:style-pick cap:project-format
+                  body: {
+                    styleId: picked,
+                    style: pickedText.trim(),
+                    aspectRatio: pickedRatio,
+                    videoResolution: pickedRes
+                  }
                 });
                 projects = await api('/projects');
                 toast(

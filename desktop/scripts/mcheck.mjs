@@ -478,6 +478,108 @@ if (sheetUp) {
     /第二部片子/.test(await page.locator('.top').innerText()) ? '✓' : '✕ 还停在旧项目');
 }
 
+/**
+ * ⑧b 白天模式。
+ *
+ * 用户的原话："手机版要有白天使用模式，现在 ui 全是黑的，晚上看不见"。
+ * 深色在暗处很好，在日光下的手机屏上是另一回事 —— 屏幕反光加上深底浅字，
+ * 对比度直接塌掉。
+ *
+ * 量的是**真的换了像素**（读 body 的实际背景色），不是"有个按钮能点"——
+ * 只验按钮存在的话，一个把 class 加错了的实现照样绿。
+ *
+ * ⚠ 系统偏好要**自己钉死**。Playwright 的 iPhone 模拟默认是浅色系统，
+ * 于是"跟随系统"一开始就已经是浅的 —— 第一版断言假设它从深色起步，
+ * 结果量了个寂寞（点完之后颜色确实没变，因为本来就是那个颜色）。
+ */
+{
+  const bg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  const lum = (c) => (c.match(/\d+/g) || [0, 0, 0]).slice(0, 3).reduce((a, b) => a + Number(b), 0) / 3;
+  const themeBtn = page.locator('.top button').filter({ hasText: /[◐☀☾]/ }).first();
+  console.log('⑧b 顶栏有配色开关：', (await themeBtn.count()) === 1 ? '✓' : '✕ 找不到');
+
+  // 系统=深色，且没手动选过 → 跟着系统走
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.waitForTimeout(200);
+  const autoDark = await bg();
+  console.log('   跟随系统：系统深色时是深的：', lum(autoDark) < 60 ? `✓ ${Math.round(lum(autoDark))}` : `✕ ${autoDark}`);
+  // 系统=浅色 → 同一个"跟随"要跟着变
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.waitForTimeout(200);
+  const autoLight = await bg();
+  console.log('   跟随系统：系统浅色时是浅的：', lum(autoLight) > 180 ? `✓ ${Math.round(lum(autoLight))}` : `✕ ${autoLight}`);
+
+  // 手动选浅色 —— 这一下之后系统说什么都不算数了
+  await themeBtn.click();
+  await page.waitForTimeout(300);
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.waitForTimeout(200);
+  const forcedLight = await bg();
+  console.log('   手动选白天后，系统转深色也不跟：',
+    lum(forcedLight) > 180 ? `✓ ${Math.round(lum(forcedLight))}` : `✕ ${forcedLight}`);
+
+  // 刷新之后要记得住 —— 每次打开都要重点一次的话，等于没有
+  await page.reload();
+  await page.waitForTimeout(1500);
+  console.log('   刷新之后还记得：', lum(await bg()) > 180 ? '✓' : `✕ ${await bg()}`);
+
+  // 再点一下 → 强制深色，此时系统是深色，要靠 data-theme 证明它是"强制"的
+  await page.locator('.top button').filter({ hasText: /[◐☀☾]/ }).first().click();
+  await page.waitForTimeout(300);
+  const attr = await page.evaluate(() => document.documentElement.dataset.theme || '');
+  console.log('   再点一下变强制夜间：', attr === 'dark' ? '✓' : `✕ data-theme=${attr}`);
+  // 回到跟随系统
+  await page.locator('.top button').filter({ hasText: /[◐☀☾]/ }).first().click();
+  await page.waitForTimeout(300);
+  console.log('   第三下回到跟随系统：',
+    (await page.evaluate(() => document.documentElement.hasAttribute('data-theme'))) === false ? '✓' : '✕');
+  await page.emulateMedia({ colorScheme: 'light' });
+}
+
+/**
+ * ⑧c 出片规格：画幅和分辨率记在**这部片子**上。
+ *
+ * 用户的原话："有的时候是在手机新建项目，不默认他们的设置"。
+ * 全局设置是坐在电脑前为上一部片子调的，而这两样一旦跑起来就改不动了：
+ * 分镜图按那个比例出完、视频跟着图走，发现不对时钱已经花掉了。
+ *
+ * ⚠ 断言必须对着**页面当前打开的那部片子**读。
+ * 第一版写死了 proj.id，而 ⑦b 刚刚新建并切到了另一部 —— PATCH 打在
+ * 新的那部上，断言却去查旧的那部，于是"分辨率没存上"红了半天，
+ * 功能其实一直是好的。而"画幅存上了"那条同时是**假绿**：
+ * 旧项目本来就是 9:16，怎么点都对。
+ */
+{
+  await page.locator('.tab', { hasText: '剧本' }).click();
+  await page.waitForTimeout(700);
+  const body = await page.locator('.body').innerText();
+  console.log('⑧c 剧本页有「出片规格」：', /出片规格/.test(body) ? '✓' : `✕ ${body.slice(0, 120)}`);
+  console.log('   画幅和分辨率都在：',
+    /画幅/.test(body) && /视频分辨率/.test(body) ? '✓' : '✕');
+
+  // 页面在哪一部上，就查哪一部
+  const openId = await page.evaluate(() => localStorage.getItem('fd.m.project'));
+  const before = store.read(openId);
+  const ratioChip = page.locator('.chip', { hasText: '16:9 横屏' }).first();
+  const resChip = page.locator('.chip', { hasText: '480P 省钱' }).first();
+  if ((await ratioChip.count()) && (await resChip.count())) {
+    await ratioChip.click();
+    await resChip.click();
+    await page.locator('button:has-text("保存规格")').first().click();
+    await page.waitForTimeout(1200);
+    const saved = store.read(openId);
+    // 前后要真的不一样，否则这两条可能只是在量一个本来就对的初值
+    console.log('   画幅存到项目上：',
+      saved.aspectRatio === '16:9' && before.aspectRatio !== '16:9'
+        ? '✓' : `✕ ${before.aspectRatio} → ${saved.aspectRatio}`);
+    console.log('   分辨率也存到项目上：',
+      saved.videoResolution === '480P' && before.videoResolution !== '480P'
+        ? '✓' : `✕ ${before.videoResolution} → ${saved.videoResolution}`);
+  } else {
+    console.log('   ✕ 选项点不到');
+  }
+}
+
 // ⑧ 往后全跑
 await page.locator('.tab', { hasText: '流水线' }).click();
 await page.waitForTimeout(500);

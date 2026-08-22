@@ -7,6 +7,23 @@
  *   ② 一屏只做一件事，靠底部 tab 切换，不做横向滚动；
  *   ③ 安全区（刘海、底部横条）用 env(safe-area-inset-*) 留出来。
  */
+/**
+ * ── 两套配色 ──
+ *
+ * 用户的原话："手机版要有白天使用模式，现在 ui 全是黑的，晚上看不见"。
+ * 深色在暗处很好，在**日光下的手机屏**上是另一回事：屏幕反光加上
+ * 深底浅字，对比度直接塌掉，什么都看不清。这一端本来就是给"在路上"
+ * 设计的，而在路上最常见的光线恰恰是白天的户外。
+ *
+ * 三态，和系统一致：
+ *   跟随系统（默认）—— 不写 data-theme，靠 prefers-color-scheme
+ *   data-theme="dark"  强制深色
+ *   data-theme="light" 强制浅色
+ *
+ * 深色写在裸 :root 上而不是媒体查询里：那样即便 prefers-color-scheme
+ * 探不到（老 WebView、加到主屏的 PWA 偶尔会这样），也有一套完整的值兜底，
+ * 不会出现"某几个变量没定义"那种半拉子配色。
+ */
 :root {
   --ground: #16130f;
   --surface-1: #1e1a15;
@@ -24,6 +41,58 @@
   --caution: #d9a441;
   --alarm: #d9614c;
   --r: 12px;
+  /* 亮色按钮上的字。深色主题下 beam 很亮，压深色字；浅色主题下反过来 */
+  --on-beam: #241b0c;
+  --shadow: rgba(0, 0, 0, .45);
+  color-scheme: dark;
+}
+
+/**
+ * 浅色。**不是把深色反过来**：
+ *   · beam 从 #e8b45f 压到 #a8700f —— 浅底上的金色必须压暗，
+ *     否则白底上一片浅金，按钮和背景糊成一团（对比度不到 2:1）
+ *   · good / caution / alarm 同理，全部压深一档
+ *   · surface-1 用纯白、ground 用暖白，卡片才浮得起来
+ */
+:root[data-theme='light'] {
+  --ground: #faf7f2;
+  --surface-1: #ffffff;
+  --surface-2: #f3ede4;
+  --line: #d9cfbf;
+  --line-soft: #e9e1d5;
+  --ink: #201b15;
+  --ink-dim: #5f564a;
+  --ink-faint: #8b8071;
+  --beam: #a8700f;
+  --beam-wash: rgba(168, 112, 15, .12);
+  --good: #2c7a4b;
+  --caution: #8a5d0c;
+  --alarm: #b03a26;
+  --on-beam: #ffffff;
+  --shadow: rgba(60, 46, 20, .16);
+  color-scheme: light;
+}
+
+/* 没明确选过就跟系统走。`:not([data-theme])` 保证手动选的深色不会被系统覆盖 */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --ground: #faf7f2;
+    --surface-1: #ffffff;
+    --surface-2: #f3ede4;
+    --line: #d9cfbf;
+    --line-soft: #e9e1d5;
+    --ink: #201b15;
+    --ink-dim: #5f564a;
+    --ink-faint: #8b8071;
+    --beam: #a8700f;
+    --beam-wash: rgba(168, 112, 15, .12);
+    --good: #2c7a4b;
+    --caution: #8a5d0c;
+    --alarm: #b03a26;
+    --on-beam: #ffffff;
+    --shadow: rgba(60, 46, 20, .16);
+    color-scheme: light;
+  }
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -96,7 +165,7 @@ textarea { font-family: inherit; }
   cursor: pointer;
 }
 .btn:active { transform: scale(.98); }
-.btn.primary { background: var(--beam); border-color: var(--beam); color: #241b0c; font-weight: 600; }
+.btn.primary { background: var(--beam); border-color: var(--beam); color: var(--on-beam); font-weight: 600; }
 .btn.sm { min-height: 36px; padding: 0 12px; font-size: 13.5px; }
 .btn[disabled] { opacity: .45; }
 .btn.block { width: 100%; }
@@ -186,7 +255,7 @@ input {
   border-radius: var(--r);
   border: 1px solid var(--line);
   background: var(--surface-1);
-  box-shadow: 0 8px 26px rgba(0, 0, 0, .45);
+  box-shadow: 0 8px 26px var(--shadow);
   font-size: 13px;
 }
 .live[hidden] { display: none; }
@@ -606,9 +675,9 @@ input {
   justify-content: center;
   gap: 5px;
 }
-.ed-tab.on { background: var(--beam); border-color: var(--beam); color: #241b0c; font-weight: 600; }
+.ed-tab.on { background: var(--beam); border-color: var(--beam); color: var(--on-beam); font-weight: 600; }
 .ed-tab .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--good); }
-.ed-tab.on .dot { background: #241b0c; }
+.ed-tab.on .dot { background: var(--on-beam); }
 .ed-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 12px 14px 24px; }
 .ed-foot {
   flex: 0 0 auto;
