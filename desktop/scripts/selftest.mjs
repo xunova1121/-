@@ -7929,7 +7929,25 @@ section('对象存储：接线');
   failNext = false;
 
   const dest2 = path.join(SANDBOX, 'projects', p1.id, 'assets', 'y.png');
-  await studioMod.saveMedia({ base64: Buffer.from('imagedata2').toString('base64') }, dest2, () => {});
+  /**
+   * ⚠ 这一行原来把 onEvent 写成 `() => {}` —— 于是**成功那条路上说了什么，
+   * 从来没有人看过**。而那里藏着一个 `return url`，作用域里根本没有 url。
+   *
+   * 后果很阴：传是真传上去了（"已同步到对象存储"照常打出来），
+   * 紧接着 ReferenceError 被 catch 接住，又打一句
+   * "对象存储没传上去（不影响这一步）：url is not defined"。
+   * 两句自相矛盾的话前后脚出现在同一份日志里，而文件好好地在桶里。
+   *
+   * 它能活这么久，是因为唯一的调用点不看返回值 —— 没人用的返回值写错了
+   * 不会有任何症状，直到有人第一次真的把对象存储配起来。
+   * 所以这里不但要收事件，还要断言**那句矛盾的话不出现**。
+   */
+  const okNotes = [];
+  await studioMod.saveMedia({ base64: Buffer.from('imagedata2').toString('base64') }, dest2, (ev) => okNotes.push(ev.message));
+  check('传成功时说了"已同步到对象存储"',
+    okNotes.some((m) => /已同步到对象存储/.test(m || '')), okNotes.join(' | '));
+  check('并且**不会**紧接着又说一句"没传上去"（那是 return url 那个洞）',
+    !okNotes.some((m) => /没传上去/.test(m || '')), okNotes.join(' | '));
   check('传成功之后能拿到公网地址（万相那类只收 https 的就靠它）',
     /^http/.test(studioMod.publicUrlFor(dest2) || ''), String(studioMod.publicUrlFor(dest2)));
 

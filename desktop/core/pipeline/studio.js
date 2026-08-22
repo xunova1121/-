@@ -535,7 +535,19 @@ async function mirrorToOss(destPath, buf, onEvent) {
     const put = await oss.putBuffer(key, buf, oss.contentTypeOf(destPath));
     OSS_KEYS.set(destPath, put.key);
     onEvent?.({ type: 'note', message: `已同步到对象存储：${path.basename(destPath)}` });
-    return url;
+    /**
+     * ⚠ 这里原来写的是 `return url` —— 而这个作用域里**根本没有 url**。
+     *
+     * 后果很阴：传是**真传上去了**（上面那句"已同步到对象存储"照常打出来），
+     * 紧接着 ReferenceError 被下面的 catch 接住，于是又打一句
+     * "对象存储没传上去（不影响这一步）：url is not defined"。
+     * 两句自相矛盾的话前后脚出现在同一份日志里，而文件其实好好地在桶里。
+     *
+     * 而它一直没被发现，是因为**唯一的调用点根本不看返回值**
+     *（`await mirrorToOss(...)`，丢掉）。没有人用的返回值写错了不会有任何症状 ——
+     * 直到有人第一次真的把对象存储配起来。
+     */
+    return put.url;
   } catch (err) {
     onEvent?.({ type: 'note', message: `对象存储没传上去（不影响这一步）：${err.message}` });
     return null;
