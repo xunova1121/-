@@ -19,7 +19,8 @@
     "icon": "node scripts/make-icon.mjs",
     "build:win": "electron-builder --win nsis portable",
     "realcheck": "node scripts/realcheck.mjs",
-    "doctor": "node scripts/doctor.mjs"
+    "doctor": "node scripts/doctor.mjs",
+    "shots": "node scripts/shots.mjs"
   },
   "devDependencies": {
     "electron": "^31.0.0",
