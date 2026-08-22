@@ -416,6 +416,30 @@ console.log('⑦ 单个项目时不摆下拉：', (await page.locator('.top-pick
   await page.reload();
   await page.waitForTimeout(1500);
   const withOwed = await page.locator('.body').innerText();
+  /**
+   * 上一次跑的结果要**留在页面上**。
+   *
+   * 用户的原话："我切屏幕返回看到还是生成视频没动这个bug"。
+   * 那一次其实早就跑完了 —— 只是跑完的结果没有留下来，切屏回来看到的是
+   * 一个静止的流水线：4/12，没有转圈、没有报错、没有任何痕迹。
+   * 进度流是给"正在看着"的人用的，这一条是给**回来的人**用的。
+   */
+  store.update(proj.id, (p) => {
+    p.lastRun = {
+      stage: 'video', stageLabel: '视频生成', outcome: 'done',
+      at: new Date().toISOString(), failed: 8, message: ''
+    };
+    return p;
+  });
+  await page.reload();
+  await page.waitForTimeout(1500);
+  const lastText = await page.locator('.body').innerText();
+  console.log('   切回来看得到上次跑的结果：',
+    /上次跑「视频生成」/.test(lastText) ? '✓' : '✕ 页面上没有任何痕迹说明跑过');
+  console.log('   并且说清楚败了几镜：',
+    /8 镜失败/.test(lastText) ? '✓' : `✕ ${lastText.slice(0, 100)}`);
+  store.update(proj.id, (p) => { delete p.lastRun; return p; });
+
   console.log('   有待认领时才出免费按钮：',
     /钱花了没取回来 1 镜/.test(withOwed)
     && (await page.locator('button:has-text("捞回来")').count()) === 1 ? '✓' : '✕');

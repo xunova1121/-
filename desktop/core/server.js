@@ -1254,6 +1254,38 @@ async function handleApi(req, res, url, { lan = false } = {}) {
         (store.read(b)?.shots || []).map((s) => [s.id, s.index])
       );
 
+      /**
+       * 跑完之后把**这一次的结果**存进项目里。
+       *
+       * 不存的话，一关页面就什么都没有了：手机切屏回来看到的是一个静止的
+       * 流水线 —— 4/12，没有转圈，没有报错，没有任何痕迹说明刚才跑过一次。
+       * 用户读到的是"这个 bug 还在"，而实际上那一次早就跑完了，
+       * 只是**跑完的结果没有留下来**。
+       *
+       * 进度流是给"正在看着"的那个人用的，这一条是给"回来的人"用的。
+       * 两者缺一不可，而这一端原来只有前者。
+       */
+      let failedCount = 0;
+      const runStartedAt = new Date().toISOString();
+      const recordRun = (outcome, message = '') => {
+        try {
+          store.update(b, (p) => {
+            p.lastRun = {
+              stage: d,
+              stageLabel: job.stageLabel || d,
+              outcome, // done / cancelled / error
+              at: new Date().toISOString(),
+              startedAt: runStartedAt,
+              failed: failedCount,
+              message: String(message || '').slice(0, 300)
+            };
+            return p;
+          });
+        } catch {
+          /* 记账失败不该影响这一趟的结果 */
+        }
+      };
+
       const stream = ndjson(res);
       /**
        * ⚠ 关掉页面**不等于**取消。
@@ -1285,11 +1317,14 @@ async function handleApi(req, res, url, { lan = false } = {}) {
               // 而正则读文案坏掉的方式是安静地读不出来
               if (shotIndexOf.has(ev.shotId)) job.shotIndex = shotIndexOf.get(ev.shotId);
             }
+            if (ev?.type === 'shot' && ev.status === 'failed') failedCount += 1;
             stream.send(ev);
           }
         });
+        recordRun('done');
         stream.end({ type: 'finished', project });
       } catch (err) {
+        recordRun(jobs.isCancel(err) ? 'cancelled' : 'error', err.message);
         stream.end(
           jobs.isCancel(err)
             ? { type: 'cancelled', message: err.message, project: store.read(b) }

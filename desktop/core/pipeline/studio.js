@@ -216,20 +216,37 @@ async function refreshRefs(project, refs, { onEvent } = {}) {
   const fixed = [];
   const lost = [];
 
+  /**
+   * 一张内联参考图**超过这个大小就重做一份小的**。
+   *
+   * 光在生成设定图那一刻缩是不够的：那时候产生的 data: URI 会被
+   * 存进设定集（sheetUrl），之后每一镜都直接复用那一份 —— 而 usableRef()
+   * 只挡"带 Expires 的过期地址"，一个几 MB 的 base64 在它眼里是完全可用的。
+   * 于是老项目里那几张胖图会一直发下去，直到把请求体顶穿。
+   *
+   * 400KB 的 base64 大约对应一张 300KB 的图，768px 的 JPEG 远在这之下。
+   */
+  const FAT_INLINE = 400 * 1024;
+  const tooFat = (u) => typeof u === 'string' && u.startsWith('data:') && u.length > FAT_INLINE;
+
   for (let i = 0; i < images.length; i += 1) {
-    if (usableRef(images[i])) continue;
+    const fat = tooFat(images[i]);
+    if (usableRef(images[i]) && !fat) continue;
     const local = refs.paths?.[i];
     const label = refs.labels?.[i] || `第 ${i + 1} 张`;
     if (!local || !fs.existsSync(local)) {
-      lost.push(label);
+      // 只是胖、但原图找不着了：胖着发也比不发强，一致性那一层还在
+      if (!fat) lost.push(label);
       continue;
     }
     try {
       // eslint-disable-next-line no-await-in-loop
-      images[i] = await toModelRef(local, { onEvent });
-      fixed.push(label);
+      const made = await toModelRef(local, { onEvent, shrink: true });
+      // 缩完反而更大就别换了（本来就是张小图，转码可能不划算）
+      if (!fat || !tooFat(made) || made.length < images[i].length) images[i] = made;
+      if (!fat) fixed.push(label);
     } catch (err) {
-      lost.push(`${label}（${err.message}）`);
+      if (!fat) lost.push(`${label}（${err.message}）`);
     }
   }
 
@@ -285,7 +302,12 @@ function persistRefs(project, refs, images) {
   if (touched) store.save(project);
 }
 
-export async function toModelRef(localPath, { onEvent } = {}) {
+/**
+ * @param shrink 这张图是**参考图**（对人、对场景），不是要按像素接上的首/末帧。
+ *               默认 false —— 漏传的那些调用点保持原样，是刻意的：
+ *               把首帧缩了会让接缝整个失效，而那种错不报任何声音。
+ */
+export async function toModelRef(localPath, { onEvent, shrink = false } = {}) {
   const gateway = settings.get('uploadGateway');
   if (gateway) return uploadVia(gateway, localPath, onEvent);
 
@@ -306,8 +328,46 @@ export async function toModelRef(localPath, { onEvent } = {}) {
     }
   }
 
-  const buf = fs.readFileSync(localPath);
-  const ext = path.extname(localPath).toLowerCase();
+  /**
+   * ═══ 内联之前先把图缩小 ═══
+   *
+   * 我们出的分镜图是 1080p / 2K 的 PNG，一张一两 MB，base64 再胀三分之一。
+   * 五张参考图就是八九 MB —— 顶穿厂商的请求体上限，然后我们照着
+   * "图带多了"去砍参考图，砍掉的是一致性。用户那批片子里第 2~9 镜
+   * （出场角色和道具最多的那几镜）全军覆没，就是这么来的。
+   *
+   * 而参考图**根本不需要那么大**：它回答的是"这个人长什么样、这个场景
+   * 什么调子"，768px 的 JPEG 完全够用，体积只有原来的十分之一。
+   * 发过去多少分辨率不影响出片分辨率 —— 那由 resolution 参数决定。
+   *
+   * 缩完存在旁边，下次直接用（比源文件新就算数）—— 二十镜每镜都缩一遍
+   * 同样几张设定图，白烧 CPU。
+   *
+   * ⚠ 缩图失败绝不能拖垮这一镜：没装 FFmpeg、格式不认，都照旧发原图。
+   */
+  let sendPath = localPath;
+  const raw = fs.statSync(localPath);
+  if (shrink && raw.size > 400 * 1024 && ffmpeg.locate().available) {
+    const small = `${localPath.replace(/\.[^.]+$/, '')}.ref768.jpg`;
+    try {
+      const fresh = fs.existsSync(small) && fs.statSync(small).mtimeMs >= raw.mtimeMs;
+      if (!fresh) await ffmpeg.shrinkImage(localPath, small);
+      const after = fs.statSync(small).size;
+      if (after < raw.size) {
+        sendPath = small;
+        onEvent?.({
+          type: 'note',
+          message: `参考图 ${path.basename(localPath)} 缩到 768px 再内联发（${(raw.size / 1048576).toFixed(1)}MB → ${(after / 1024).toFixed(0)}KB）`
+            + ' —— 参考图只用来对人和场景，不影响出片分辨率'
+        });
+      }
+    } catch (err) {
+      onEvent?.({ type: 'note', message: `缩图没成（${err.message}），照原图发 —— 图大的话可能会被厂商顶掉` });
+    }
+  }
+
+  const buf = fs.readFileSync(sendPath);
+  const ext = path.extname(sendPath).toLowerCase();
   const mime = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.webp' ? 'image/webp' : 'image/png';
   // 太大的 base64 会把请求体撑爆（有厂商限 10MB），超了就明确报错而不是让服务端回一个看不懂的 400
   if (buf.length > 7 * 1024 * 1024) {

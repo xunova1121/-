@@ -578,6 +578,38 @@ export async function grabFrame(videoPath, outPath, { at = 'end' } = {}) {
 }
 
 /**
+ * 把一张图缩小、转成 JPEG —— 专门给"内联发给厂商的参考图"用。
+ *
+ * ════════ 它补的是哪个洞 ════════
+ *
+ * 没配对象存储时，参考图只能以 base64 内联进请求体。而我们出的分镜图
+ * 是 1080p 甚至 2K 的 PNG，一张一两 MB，base64 再胀三分之一 ——
+ * 五张就是八九 MB，直接顶穿厂商的请求体上限。
+ *
+ * 表现是这样一串（用户的真实日志）：
+ *   ※ 5 张加起来 8.4MB 太大，这次只发前 4 张
+ *   ※ 服务端拒了这 4 张图（合计 6.6MB）…先改成 2 张重试
+ * 最后要么整镜失败，要么参考图被砍到只剩一张 —— 一致性跟着塌。
+ *
+ * 而这件事**根本不需要那么大的图**：参考图的作用是"这个人长什么样、
+ * 这个场景什么调子"，768px 的 JPEG 完全够用，体积只有原来的十分之一。
+ * 发过去的分辨率高低不影响出片分辨率 —— 那由 resolution 参数决定。
+ *
+ * ⚠ 只用来做**参考图**。首帧图不走这里：那张是要按像素接上的，缩了就废了。
+ */
+export async function shrinkImage(srcPath, outPath, { maxSide = 768, quality = 4 } = {}) {
+  if (!fs.existsSync(srcPath)) throw new Error(`图片不存在：${srcPath}`);
+  /**
+   * `scale` 里那个 `min(iw,768)` 是为了**不放大** —— 本来就小的图放大
+   * 只会变糊，体积还涨。`-2` 让另一边按比例走并保证是偶数。
+   */
+  const vf = `scale='min(iw,${maxSide})':-2:force_original_aspect_ratio=decrease`;
+  await run(['-y', '-i', srcPath, '-vf', vf, '-q:v', String(quality), '-update', '1', outPath]);
+  if (!fs.existsSync(outPath)) throw new Error('FFmpeg 没有输出缩图');
+  return outPath;
+}
+
+/**
  * 把 SRT 烧进画面。
  *
  * 默认不做，因为它有两个很容易翻车的前提：这份 FFmpeg 编进了 libass，

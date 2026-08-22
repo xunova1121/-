@@ -5920,6 +5920,79 @@ check('路径全试不通时，报错里带上 task_id 和下一步该干什么'
 
 // ─────────────────────── 8. 上线前体检 ───────────────────────
 
+section('内联参考图先缩小 —— 不然请求体被自己撑穿');
+{
+  /**
+   * 用户那批片子：第 1、10、11、12 镜成了，中间第 2~9 镜全挂。
+   * 不是"越往后越糟"，是**中间那几镜出场的人和道具最多**，参考图带得最多：
+   *
+   *   ※ 5 张加起来 8.4MB 太大，这次只发前 4 张
+   *   ※ 服务端拒了这 4 张图（合计 6.6MB，是内联发的）…先改成 2 张重试
+   *
+   * 我们出的分镜图是 1080p/2K 的 PNG，一张一两 MB，base64 再胀三分之一。
+   * 而参考图**根本不需要那么大** —— 它回答的是"这个人长什么样"，
+   * 768px 完全够用，发过去多少分辨率也不影响出片分辨率。
+   *
+   * ⚠ 这一组只在装了 FFmpeg 的机器上量得了（缩图靠它）。没装就跳过 ——
+   * 但要**说出来跳过了**，不能让它假装绿。
+   */
+  const ff = await import('../core/ffmpeg.js');
+  /**
+   * 自检默认是"没装 FFmpeg"的环境（有几条专门量那种情况下的降级说辞）。
+   * 这一段要真跑一次缩图，所以临时把路径指过去，跑完**必须还回去** ——
+   * 用例之间留下状态是最难查的一类假绿。
+   */
+  let ffTemp = '';
+  try {
+    const mod = await import('ffmpeg-static');
+    ffTemp = mod.default || mod;
+  } catch { /* 没装这个包就按没装 FFmpeg 处理 */ }
+  const ffKeep = settings.get('ffmpegPath');
+  if (ffTemp) { settings.patch({ ffmpegPath: ffTemp }); ff.locate({ refresh: true }); }
+
+  if (!ff.locate().available) {
+    console.log('  \x1b[33m—\x1b[0m 这台机器没装 FFmpeg，缩图那几条跳过（realcheck 里会真跑）');
+  } else {
+    const fsx = await import('node:fs');
+    const pathx = await import('node:path');
+    const dir = fsx.mkdtempSync(pathx.join((await import('node:os')).tmpdir(), 'fd-shrink-'));
+    const big = pathx.join(dir, 'ref.png');
+    // 造一张真的大图：1920×1080 的噪点，PNG 压不动，稳定在几 MB
+    await ff.run(['-y', '-f', 'lavfi', '-i', 'nullsrc=s=1920x1080', '-vf',
+      'geq=random(1)*255:128:128', '-frames:v', '1', '-update', '1', big]);
+    const before = fsx.statSync(big).size;
+    const small = pathx.join(dir, 'ref.small.jpg');
+    await ff.shrinkImage(big, small);
+    const after = fsx.statSync(small).size;
+    check('缩完确实小了一个数量级', after * 5 < before, `${before} → ${after}`);
+    check('缩完还是一张能用的图（不是 0 字节）', after > 2000, String(after));
+
+    /**
+     * 不放大：本来就小的图放大只会变糊，体积还涨。
+     * 这一条量的是那个 min(iw,768)，没有它的话小图会被拉到 768。
+     */
+    const tiny = pathx.join(dir, 'tiny.png');
+    await ff.run(['-y', '-f', 'lavfi', '-i', 'color=c=red:s=320x180', '-frames:v', '1', '-update', '1', tiny]);
+    const tinyOut = pathx.join(dir, 'tiny.out.jpg');
+    await ff.shrinkImage(tiny, tinyOut);
+    /**
+     * ⚠ 第一版这里读的是 probeStreams()，可那个函数只回 { seconds, hasAudio }
+     * —— 根本没有 width。于是断言写成了 `!w || w <= 320`，w 永远 undefined，
+     * **永远绿**。去掉 min() 那个 canary 一声不吭地过了，我差点就信了。
+     * 现在直接从 ffmpeg 自己那行 `Stream #0:0: Video: ... 320x180` 里读。
+     */
+    const { stderr } = await ff.run(['-i', tinyOut, '-f', 'null', '-']).catch((e) => ({ stderr: String(e.message) }));
+    const wh = /,\s(\d{2,5})x(\d{2,5})/.exec(stderr || '');
+    check('量得到缩完之后的尺寸（读不出来的话下面那条就是空断言）',
+      Boolean(wh), (stderr || '').slice(0, 120));
+    check('本来就小的图不放大', wh && Number(wh[1]) <= 320, wh ? `${wh[1]}x${wh[2]}` : '读不出');
+    fsx.rmSync(dir, { recursive: true, force: true });
+  }
+  if (ffTemp) { settings.patch({ ffmpegPath: ffKeep || '' }); ff.locate({ refresh: true }); }
+  check('跑完把 FFmpeg 路径还回去了（别把状态留给下一个用例）',
+    ff.locate().available === false || Boolean(ffKeep), String(ff.locate().available));
+}
+
 section('待认领的任务不能变成黑洞');
 {
   // 提交成功、片子在厂商那边、我们没取回来 —— 这种状态既不算完成也不算失败，

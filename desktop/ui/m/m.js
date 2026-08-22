@@ -801,9 +801,34 @@ function paintFlow() {
       })()
     : null;
 
+  /**
+   * 上一次跑的结果。
+   *
+   * 进度流是给"正在看着"的那个人用的；这一条是给**回来的人**用的。
+   * 没有它的话，切屏回来看到的是一个静止的流水线 —— 4/12，没有转圈、
+   * 没有报错、没有任何痕迹说明刚才跑过一次。用户读到的是"这个 bug 还在"，
+   * 而实际上那一次早就跑完了，只是跑完的结果没有留下来。
+   */
+  const lr = project.lastRun;
+  const lastRunCard = lr && !job.running
+    ? h('div', { class: `card ${lr.outcome === 'error' || lr.failed ? 'warn' : ''}`, style: 'padding:11px 13px' },
+        h('div', { class: 'row' },
+          h('span', {}, lr.outcome === 'error' ? '✕' : lr.outcome === 'cancelled' ? '■' : lr.failed ? '!' : '✓'),
+          h('div', { class: 'grow' },
+            h('div', {},
+              `上次跑「${lr.stageLabel}」：`
+              + (lr.outcome === 'cancelled' ? '你叫停了'
+                : lr.outcome === 'error' ? '中途出错'
+                  : lr.failed ? `完成，但 ${lr.failed} 镜失败` : '全部完成')),
+            h('div', { class: 'muted' },
+              new Date(lr.at).toLocaleString('zh-CN')
+              + (lr.message ? ` · ${String(lr.message).slice(0, 60)}` : '')))))
+    : null;
+
   return [
     h('p', { class: 'muted', style: 'margin:2px 4px 10px' },
       '每一步都在电脑上跑，手机只是发个指令 —— 关掉这个页面也不影响它继续跑。'),
+    lastRunCard,
     videoState,
     reclaim,
     box,
