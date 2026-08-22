@@ -4326,6 +4326,35 @@ section('默认走首尾帧：碰上不收末帧的厂商要能退回去');
    * 这一条守的是那个洞本身，不只守接缝：任何一项都不该被一个
    * "这次没提供"打穿。
    */
+  /**
+   * ══ 落盘只写差异 —— 否则改默认值对老用户永远不生效 ══
+   *
+   * 原来 patch 把整份合并后的对象写下去，于是用户**第一次保存任何一项**
+   * 的那一刻，当时那份 DEFAULTS 的全部快照就被固化进了 settings.json。
+   * 之后我再改默认值，磁盘上那份旧快照永远压过它。
+   *
+   * 用户更新到新版之后说"每镜会用完整片段这个都没看到"——
+   * 就是这个：他盘上写着 trim，而我改的是默认值。
+   * 最阴的地方是**无声无息**：默认值改了、代码对、自检也绿
+   *（自检那份 settings.json 是空的），只有真实用户碰得到。
+   */
+  {
+    const fsx = await import('node:fs');
+    const { SETTINGS_FILE } = await import('../core/paths.js');
+    st.patch({ theme: 'dark' }); // theme 的默认值就是 dark —— 存了等于没改
+    const onDisk = JSON.parse(fsx.readFileSync(SETTINGS_FILE, 'utf8'));
+    check('和默认一样的项不落盘（改默认值才能到用户手里）',
+      !('theme' in onDisk), JSON.stringify(Object.keys(onDisk).slice(0, 12)));
+    check('没被写进去的那些，读出来还是默认值',
+      st.get('theme') === 'dark', String(st.get('theme')));
+    st.patch({ theme: 'light' });
+    const onDisk2 = JSON.parse(fsx.readFileSync(SETTINGS_FILE, 'utf8'));
+    check('真改过的项照常落盘', onDisk2.theme === 'light', JSON.stringify(onDisk2.theme));
+    st.patch({ theme: 'dark' });
+    check('改回默认之后那一项从盘上消失',
+      !('theme' in JSON.parse(fsx.readFileSync(SETTINGS_FILE, 'utf8'))));
+  }
+
   st.patch({ autoCut: undefined, sfxGain: undefined });
   check('patch 收到 undefined 时不打穿默认值',
     st.get('autoCut') === true && st.get('sfxGain') === 0.35,

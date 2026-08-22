@@ -335,6 +335,27 @@ check('并且说清楚后果（拖进剪映才发现缺一段）', /剪映/.test
  */
 await page.locator('.nav-item:has-text("设置")').first().click();
 await page.waitForTimeout(900);
+
+/**
+ * 「合成」那一整块原来一个控件都没有 —— 时长策略、自动剪辑、音效音量
+ * 三样只活在默认值里，谁都改不了。而它们恰恰决定了成片好不好看。
+ *
+ * 加了功能却不给入口，和没加是一样的；更糟的是**我以为加了**，
+ * 还让用户去「设置 → 音效音量」找一个不存在的地方。
+ */
+{
+  const body = await page.locator('#view-inner').innerText();
+  check('设置里有「合成」这一块', /合成/.test(body) && /时长策略/.test(body), body.slice(0, 200));
+  const durSel = page.locator('select').filter({ has: page.locator('option[value="keep"]') }).first();
+  check('时长策略选得到', (await durSel.count()) === 1);
+  if ((await durSel.count()) === 1) {
+    check('默认选中的是「保留完整片段」',
+      (await durSel.inputValue()) === 'keep', await durSel.inputValue());
+  }
+  check('音效音量填得了', /音效音量/.test(body), body.slice(0, 400));
+  // 这三样的共同点：改完只要重新合成，不用重新生成 —— 这句话必须写出来
+  check('说清楚改完不用重新生成', /不用重新生成任何镜头|不花钱/.test(body), body.slice(0, 400));
+}
 const seamSel = page.locator('select').filter({ has: page.locator('option[value="lock"]') }).first();
 check('设置里有接缝这一项', (await seamSel.count()) === 1);
 if ((await seamSel.count()) === 1) {

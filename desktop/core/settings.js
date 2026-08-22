@@ -283,9 +283,32 @@ export function patch(changes = {}) {
     for (const [k, v] of Object.entries(next.endpointOverrides)) if (!v) delete next.endpointOverrides[k];
   }
   cache = next;
+
+  /**
+   * ⚠ 落盘时**只写和默认值不一样的那些**。
+   *
+   * 原来是把整份合并后的对象写下去 —— 于是用户**第一次保存任何一项设置**
+   * 的那一刻，当时那份 DEFAULTS 的全部快照就被固化进了 settings.json。
+   *
+   * 后果是：**改默认值对任何一台已经用过的机器都不生效**。
+   * 我把时长策略的默认从 trim 改成 keep，用户更新完却说"每镜会用完整片段
+   * 这个都没看到" —— 因为他盘上那份三个月前保存的快照里写着 trim，
+   * 而合并的时候磁盘永远压过默认值。
+   *
+   * 这个坑最阴的地方在于**它无声无息**：默认值改了、代码是对的、
+   * 测试也是绿的（自检那份是空的 settings.json），只有真实用户碰得到。
+   *
+   * 只存差异之后，settings.json 变成"我改过什么"，没改过的那些
+   * 一律跟着默认值走 —— 以后调默认值才真的能到用户手里。
+   */
+  const persist = {};
+  for (const [k, v] of Object.entries(next)) {
+    if (JSON.stringify(v) !== JSON.stringify(DEFAULTS[k])) persist[k] = v;
+  }
+
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const tmp = `${SETTINGS_FILE}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(next, null, 2), 'utf8');
+  fs.writeFileSync(tmp, JSON.stringify(persist, null, 2), 'utf8');
   fs.renameSync(tmp, SETTINGS_FILE);
   return next;
 }

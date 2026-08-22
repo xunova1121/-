@@ -498,7 +498,56 @@ export default {
       oninput: (e) => (pending.consistencyMaxRetries = Number(e.target.value)) });
 
 
+    /**
+     * 「合成」这一整块原来**一个控件都没有**。
+     *
+     * 时长策略、自动剪辑、音效音量三样都只活在 settings.js 的默认值里 ——
+     * 也就是说：谁都改不了，而它们恰恰决定了成片好不好看。
+     * 用户看完成片报"画面还没演示完就切了""13个片13个音效很乱"，
+     * 而我当时让他去「设置 → 音效音量」—— 那个地方不存在。
+     *
+     * 加一个功能却不给入口，和没加是一样的；更糟的是**我以为加了**。
+     */
+    const durSel = h('select', { onchange: (e) => (pending.durationPolicy = e.target.value) },
+      h('option', { value: 'keep', selected: (settings.durationPolicy || 'keep') === 'keep' },
+        '保留完整片段（推荐）—— 每一镜演完再切'),
+      h('option', { value: 'trim', selected: settings.durationPolicy === 'trim' },
+        '按分镜时长裁剪 —— 总长准，但可能切在动作中途'));
+    const autoCutBox = h('input', {
+      type: 'checkbox',
+      checked: settings.autoCut !== false,
+      onchange: (e) => (pending.autoCut = e.target.checked)
+    });
+    const sfxGainIn = h('input', {
+      type: 'number', min: 0, max: 1, step: 0.05,
+      value: settings.sfxGain ?? 0.35,
+      oninput: (e) => (pending.sfxGain = Number(e.target.value))
+    });
+
     root.append(
+      h('div', { class: 'panel' },
+        h('h2', { class: 'panel-title' }, '合成'),
+        h('p', { class: 'panel-hint' },
+          '这三样只影响**合成那一步**，改完重新合成一次就生效 —— 不用重新生成任何镜头，不花钱。'),
+        h('div', { class: 'grid2' },
+          h('div', { class: 'field' },
+            h('label', {}, '时长策略'), durSel,
+            h('div', { class: 'field-hint' },
+              '各家视频模型只出固定档（秘塔 5/10/15，海螺 6/10）。分镜写 4 秒、厂商给 5 秒时，',
+              h('b', {}, '裁剪会切掉最后那一秒 —— 而那一秒正好是动作收尾'),
+              '（模型是按"这一段演完"编排节奏的：起手慢、收在最后）。',
+              '所以默认保留完整片段：目标时长决定拆多少镜，拆完之后让每一镜演完，',
+              '比让总长精确命中一个估算值要紧得多。真要卡死总长再改回裁剪。')),
+          h('div', { class: 'field' },
+            h('label', {}, '音效音量'), sfxGainIn,
+            h('div', { class: 'field-hint' },
+              '相对台词的倍数，0.35 约等于 −9dB。音效必须压在台词底下 —— 等响的话一声关门就能盖掉一句台词。',
+              h('b', {}, '填 0 = 这次不混音效'), '：音效文件还在，把值调回去重新合成就能听见。',
+              '每一镜都配一个环境音的话，连起来是一串互不相干的响动，比完全没有音效更糟 —— ',
+              '先调 0 听一遍纯净版，再决定留哪几处。'))),
+        h('div', { class: 'stack', style: 'gap:10px' },
+          check(autoCutBox,
+            '自动剪辑：跳过每段开头不动的那几帧（图生视频"起势"时的首帧复制）'))),
       h('div', { class: 'panel' },
         h('h2', { class: 'panel-title' }, '一致性引擎'),
         h('p', { class: 'panel-hint' },
