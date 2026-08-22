@@ -231,6 +231,74 @@ export function windowOf(edit, shot, total = 0) {
   return { in: Number(a.toFixed(2)), out: Number(b.toFixed(2)), manual: true };
 }
 
+/**
+ * 成片的时间轴：每一镜从第几秒开始、占多长。
+ *
+ * ════════ 为什么这一份要放在这里 ════════
+ *
+ * 它同时是**四样东西的依据**：画面怎么切、配音摆在第几秒、字幕什么时候出、
+ * 以及剪辑台上那条时间线画多长。
+ *
+ * 前三样在服务端算，第四样在浏览器里画。在界面里另写一份算法是最自然的写法，
+ * 也是错的 —— 两份算法一定会漂（少减一次叠化的重叠、时长策略读的是另一个字段），
+ * 而漂开的表现是"时间线上量的和出来的片子对不上"：
+ * 界面说第 7 镜在第 22 秒，成片里它在第 20.5 秒。这种错没有报错，
+ * 只能靠人拿秒表去比，而没人会那么做。
+ *
+ * 所以服务端和浏览器**跑的是这一个函数**（服务端 import，浏览器走 /edit.js
+ * 那条把原件原样发过去的路）。一份代码，不可能漂。
+ *
+ * @param policy  'keep' 保留模型给的完整片段 / 'trim' 按分镜时长裁剪
+ */
+export function timeline(project, { policy = 'keep' } = {}) {
+  const withVideo = (project?.shots || []).filter((s) => s.videoPath);
+  const shots = ordered(project?.edit, withVideo);
+  const rows = [];
+  let at = 0;
+  for (const shot of shots) {
+    /**
+     * 重叠类转场（叠化、推、划……）会**吃掉**重叠的那半秒 —— 全片因此变短。
+     *
+     * 这一行必须在这里，不能只写在合成那一层：配音按绝对时间点摆、
+     * 字幕也按绝对时间算，两者都来自这个函数。少了它，一处叠化之后
+     * 的每一句台词都会晚半秒，而且叠化越多错得越多。
+     */
+    const trans = rows.length ? transitionOf(project?.edit, shot) : 'cut';
+    if (rows.length) at -= transitions.overlapOfKind(trans);
+    /**
+     * 手工设过入出点的，长度就是那一段 —— 它压过时长策略。
+     * 人明确说了"这一镜只要 2.4 秒"，没有任何理由再去按计划值或实出时长算。
+     */
+    const total = Number(shot.actualDuration) || Number(shot.duration) || 0;
+    const win = windowOf(project?.edit, shot, total);
+    const span = win
+      ? Number((win.out - win.in).toFixed(2))
+      : (policy === 'trim'
+        ? Number(shot.duration) || Number(shot.actualDuration) || 0
+        : Number(shot.actualDuration) || Number(shot.duration) || 0);
+    rows.push({
+      shot,
+      start: Number(at.toFixed(3)),
+      span,
+      win,
+      total,
+      trans,
+      fx: fxOf(project?.edit, shot),
+      muted: isMuted(project?.edit, shot.id)
+    });
+    at += span;
+  }
+  return rows;
+}
+
+/** 成片总长（秒）。时间线要按它画刻度，播放头要按它封顶 */
+export function totalSeconds(project, opts) {
+  const rows = timeline(project, opts);
+  if (!rows.length) return 0;
+  const last = rows[rows.length - 1];
+  return Number((last.start + last.span).toFixed(2));
+}
+
 /** 有没有人动过 —— 界面上要据此显示"这部片子剪过" */
 export function touched(edit) {
   if (!edit) return false;

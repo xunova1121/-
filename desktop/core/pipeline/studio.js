@@ -4259,53 +4259,20 @@ export function detachMusic(projectId) {
  *
  * 字幕、配音、裁剪**必须共用这一份**。各算各的时间轴是错位的根源：
  * 三处只要有一处用了另一种时长口径，音、画、字就会各走各的。
+ *
+ * ⚠ 算法本身搬到了 `edit.timeline()`，这里只剩一层转发。
+ *
+ * 搬过去的理由是**第四个使用者**：剪辑台那条时间线要在浏览器里画，
+ * 而它量的必须和成片一模一样。界面里另写一份的话，两份一定会漂
+ *（少减一次重叠、时长策略读了另一个字段），表现是"时间线上写第 22 秒、
+ * 成片里在第 20.5 秒"—— 没有报错，只能拿秒表比，而没人会那么做。
+ * 现在服务端 import 它，浏览器走 /edit.js 拿同一个文件的原件。
+ *
+ * 这个名字留着不动：它在这个文件里被引用了好几处，而且
+ * "时间轴只有一份"这句话是围着这个名字写的。
  */
 export function timelineOf(project, { policy = 'trim' } = {}) {
-  /**
-   * ⚠ 顺序和"用不用"由**剪辑台**说了算，不再是"按 index 排一遍"。
-   *
-   * 这一行必须在这里，不能只写在合成那一层：配音按绝对时间点摆、
-   * 字幕也按绝对时间算，两者都来自这个函数。调了顺序却只改合成，
-   * 结果是画面按新顺序、声音和字幕按旧顺序 —— 而那是全片错位，
-   * 比不给剪辑功能糟得多。
-   */
-  const withVideo = (project.shots || []).filter((s) => s.videoPath);
-  const shots = edit.ordered(project.edit, withVideo);
-  const rows = [];
-  let at = 0;
-  for (const shot of shots) {
-    /**
-     * 叠化会**吃掉**重叠的那半秒 —— 全片因此变短。
-     *
-     * 这一行必须在这里，不能只写在合成那一层：配音按绝对时间点摆、
-     * 字幕也按绝对时间算，两者都来自这个函数。少了它，一处叠化之后
-     * 的每一句台词都会晚半秒，而且叠化越多错得越多 ——
-     * 表现和"配音顺次拼"那个老 bug 一模一样，只是原因换了一个。
-     */
-    /**
-     * ⚠ 转场要走**剪辑台那一份**（edit.transitionOf），不能直接读 shot.transition。
-     *
-     * 人在剪辑台上把某处改成叠化之后，画面会少半秒，而字幕和配音都从这个
-     * 函数拿起点 —— 这里读旧字段的话，画面按新转场、声音按旧转场，
-     * 从那一处往后整片错位。而这种错**没有任何报错**，只表现为"越到后面越对不上"。
-     */
-    const kind = rows.length ? edit.transitionOf(project.edit, shot) : 'cut';
-    if (rows.length) at -= transitions.overlapOfKind(kind);
-    /**
-     * 手工设过入出点的，长度就是那一段 —— 它压过时长策略。
-     * 人明确说了"这一镜只要 2.4 秒"，没有任何理由再去按计划值或实出时长算。
-     */
-    const total = Number(shot.actualDuration) || Number(shot.duration) || 0;
-    const win = edit.windowOf(project.edit, shot, total);
-    const span = win
-      ? Number((win.out - win.in).toFixed(2))
-      : (policy === 'trim'
-        ? Number(shot.duration) || Number(shot.actualDuration) || 0
-        : Number(shot.actualDuration) || Number(shot.duration) || 0);
-    rows.push({ shot, start: at, span, win, trans: kind, muted: edit.isMuted(project.edit, shot.id) });
-    at += span;
-  }
-  return rows;
+  return edit.timeline(project, { policy });
 }
 
 export function buildSubtitles(project, { policy = 'trim' } = {}) {

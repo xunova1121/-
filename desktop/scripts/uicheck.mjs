@@ -367,15 +367,19 @@ if ((await seamSel.count()) === 1) {
 }
 
 /**
- * ── 剪辑台 ──
+ * ── 剪辑台（时间线）──
  *
- * 成片出来之后还能改顺序、设入出点、跳过某一镜，改完只重新合成 ——
- * 十几秒，一分钱不花。这块的价值全在"改了真的算数"，
- * 所以量的是**点完之后项目里存下了什么**，不是"有没有这个面板"。
+ * 成片出来之后还能改顺序、裁一刀、换转场、配乐，改完只重新合成 ——
+ * 十几秒，一分钱不花。
+ *
+ * 这块的价值全在"改了真的算数"，所以量的是**操作完项目里存下了什么**，
+ * 不是"有没有这个面板"。另外有两条是专门盯着"时间线"这个形态的：
+ * 片段宽度要和时长成比例、裁短之后要真的变窄 —— 一律等宽的话
+ * 它就退化成一张带缩略图的清单了，而"哪一段特别长"正是人打开它要问的第一个问题。
  */
-console.log('\n剪辑台');
+console.log('\n剪辑台（时间线）');
 await page.evaluate(async (id) => {
-  // 造三段有视频的镜头，让剪辑台有东西可排（上游打桩，不出真视频）。
+  // 造三段有视频的镜头，让时间线有东西可排（上游打桩，不出真视频）。
   // 三段而不是两段：两段的话"往后挪一位"和"拖到最后"是同一个结果，分不出来
   const p = await (await fetch(`/api/projects/${id}`)).json();
   const shots = (p.shots || []).map((s, i) => ({
@@ -395,6 +399,7 @@ await page.evaluate(async (id) => {
     body: JSON.stringify({ shots, outputs: { video: '/tmp/final.mp4', seconds: 9 } })
   });
 }, proj.id);
+await page.setViewportSize({ width: 1400, height: 1500 });
 await page.goto(`${url}#/studio/${proj.id}`);
 await page.waitForTimeout(1800);
 await step('合成').click();
@@ -402,61 +407,57 @@ await page.waitForTimeout(1200);
 
 const readEdit = () => page.evaluate(
   (id) => fetch(`/api/projects/${id}`).then((r) => r.json()).then((p) => p.edit || {}), proj.id);
+const idsNow = async () => (await readEdit()).order || [];
 
-const cutRows = page.locator('.cut-row');
-check('剪辑台把每一镜列出来了', (await cutRows.count()) === 3, String(await cutRows.count()));
-if ((await cutRows.count()) === 3) {
-  const idsNow = async () => (await readEdit()).order || [];
+const tlClips = page.locator('.tl-clip');
+check('时间线把每一镜摆成了一段', (await tlClips.count()) === 3, String(await tlClips.count()));
 
+/**
+ * ⚠ 这是"时间线"和"清单"的分界：宽度必须**和时长成比例**。
+ *
+ * 一律等宽的话，"哪一段特别长"这件事就看不出来了 —— 而那正是
+ * 人打开剪辑台要回答的第一个问题。所以把一段裁短之后，它的像素宽度必须跟着变。
+ */
+const widthOf = (i) => page.evaluate(
+  (n) => document.querySelectorAll('.tl-clip')[n].getBoundingClientRect().width, i);
+const w0 = await widthOf(0);
+check('片段有宽度（时间线真的画出来了）', w0 > 20, String(w0));
+
+if ((await tlClips.count()) === 3) {
   /**
-   * ── 拖拽排序 ──
+   * ── 拖着换位置 ──
    *
-   * 这是这一版最容易"看着能用、其实没存"的一处：拖动是纯前端的动作，
-   * 松手之后如果没把新顺序发出去，界面上排得好好的，刷新一下全变回去。
+   * 这是最容易"看着能用、其实没存"的一处：拖动是纯前端的动作，
+   * 松手之后如果没把新顺序发出去，屏幕上排得好好的，刷新一下全变回去。
    * 所以量的是**盘上存的顺序**，不是屏幕上的位置。
    */
   const before = await page.evaluate(() =>
-    [...document.querySelectorAll('.cut-row')].map((r) => r.dataset.shot));
-  /**
-   * ⚠ 拖拽要用 page.mouse，而它吃的是**视口坐标**，不是页面坐标。
-   *
-   * .click() 会自己把元素滚进视口，mouse.move 不会 —— 元素在折线以下时，
-   * 鼠标落在视口外面，什么都点不到，而**一条报错都没有**：
-   * 落点线没出现、顺序没变，看起来就像"拖拽功能没做"。
-   * 走查第一版就是这么红的，而产品代码是好的。
-   * 所以这里先把视口拉高、再把那一行滚进来，两件都做。
-   */
-  const grip = cutRows.first().locator('.cut-grip');
-  await page.setViewportSize({ width: 1280, height: 1400 });
-  await grip.scrollIntoViewIfNeeded();
-  await page.waitForTimeout(300);
-  const g = await grip.boundingBox();
-  const last = await cutRows.nth(2).boundingBox();
-  await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+    [...document.querySelectorAll('.tl-clip')].map((c) => c.dataset.shot));
+  const b0 = await tlClips.first().boundingBox();
+  const b2 = await tlClips.nth(2).boundingBox();
+  // 从第一段的中间按下（避开两端 8px 的裁剪把手），拖到最后一段的右半边
+  await page.mouse.move(b0.x + b0.width / 2, b0.y + b0.height / 2);
   await page.mouse.down();
-  await page.mouse.move(g.x + g.width / 2, last.y + last.height - 3, { steps: 10 });
+  await page.mouse.move(b2.x + b2.width - 6, b0.y + b0.height / 2, { steps: 12 });
   check('拖动时有一条落点线，能看出会插到哪儿',
-    (await page.locator('.cut-marker').count()) === 1, String(await page.locator('.cut-marker').count()));
+    await page.locator('.tl-drop').isVisible(), '');
   await page.mouse.up();
   await page.waitForTimeout(800);
   const dragged = await idsNow();
-  check('拖拽排序真的存下来了（第一镜被拖到了最后）',
+  check('拖拽换位置真的存下来了（第一段被拖到了最后）',
     dragged[dragged.length - 1] === before[0], `${JSON.stringify(dragged)} ← 原 ${JSON.stringify(before)}`);
-  check('拖完落点线收干净了', (await page.locator('.cut-marker').count()) === 0);
 
   /**
    * ⚠ 再拖一次，这次落在**中间**。
    *
    * 只测"拖到最后"是不够的：那个位置上，"自己被拿走之后后面都往前挪一位"
-   * 这条修正错不错，结果都一样（都是追加到末尾）。走查里试过 ——
-   * 把那行修正删掉，第一条断言纹丝不动地绿着。
-   * 往下拖到中间才分得出来：算错一位的话这一镜会越过目标多走一格。
+   * 这条修正错不错，结果都一样（都是追加到末尾）。往下拖到中间才分得出来。
    */
-  const g2 = await cutRows.first().locator('.cut-grip').boundingBox();
-  const mid = await cutRows.nth(1).boundingBox();
-  await page.mouse.move(g2.x + g2.width / 2, g2.y + g2.height / 2);
+  const c0 = await tlClips.first().boundingBox();
+  const c1 = await tlClips.nth(1).boundingBox();
+  await page.mouse.move(c0.x + c0.width / 2, c0.y + c0.height / 2);
   await page.mouse.down();
-  await page.mouse.move(g2.x + g2.width / 2, mid.y + mid.height - 3, { steps: 10 });
+  await page.mouse.move(c1.x + c1.width - 6, c0.y + c0.height / 2, { steps: 12 });
   await page.mouse.up();
   await page.waitForTimeout(800);
   const mid2 = await idsNow();
@@ -464,92 +465,139 @@ if ((await cutRows.count()) === 3) {
     mid2[1] === dragged[0] && mid2[0] === dragged[1],
     `${JSON.stringify(mid2)} ← ${JSON.stringify(dragged)}`);
 
-  // ↑↓ 也还在：拖拽不精确的时候要有一条稳的路
-  await cutRows.first().locator('button:has-text("↓")').click();
-  await page.waitForTimeout(700);
-  const afterMove = await idsNow();
-  check('↑↓ 挪一位也照样存下来',
-    afterMove[0] !== mid2[0], `${JSON.stringify(afterMove)} ← ${JSON.stringify(mid2)}`);
-
   /**
-   * ── 裁剪条 ──
+   * ── 拖两端裁剪 ──
    *
-   * 两个数字框谁都会做，但没人能拿着两个数字想象出这一刀切在哪儿。
-   * 拖把手是这块能不能叫"剪辑台"的分界，而它必须真的写进 edit。
+   * 数字框谁都会做，但没人能拿着两个数字想象出这一刀切在哪儿。
+   * 拖边缘是这块能不能叫"剪辑台"的分界，而它必须真的写进 edit，
+   * 并且**这一段在时间线上要跟着变窄**。
    */
-  const bar = cutRows.first().locator('.cut-bar');
-  const bb = await bar.boundingBox();
-  const handle = cutRows.first().locator('.cut-handle.a');
-  const hb = await handle.boundingBox();
-  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+  const target = tlClips.first();
+  const tb = await target.boundingBox();
+  const wBefore = tb.width;
+  await page.mouse.move(tb.x + 3, tb.y + tb.height / 2);   // 左边缘 = 入点把手
   await page.mouse.down();
-  await page.mouse.move(bb.x + bb.width * 0.4, hb.y + hb.height / 2, { steps: 8 });
+  await page.mouse.move(tb.x + tb.width * 0.4, tb.y + tb.height / 2, { steps: 10 });
   await page.mouse.up();
   await page.waitForTimeout(800);
-  const afterDrag = await readEdit();
-  const dragIn = Object.values(afterDrag.clips || {}).map((c) => c.in).find((v) => v > 0);
-  check('拖裁剪条真的设上了入点', dragIn > 0.5 && dragIn < 4, JSON.stringify(afterDrag.clips));
-  check('拖完那一行的读数跟着变了',
-    /→/.test(await cutRows.first().locator('.cut-bar-txt').innerText()),
-    await cutRows.first().locator('.cut-bar-txt').innerText());
+  const afterTrim = await readEdit();
+  const cutIn = Object.values(afterTrim.clips || {}).map((c) => c.in).find((v) => v > 0);
+  check('拖左边缘真的设上了入点', cutIn > 0.3, JSON.stringify(afterTrim.clips));
+  const wAfter = await widthOf(0);
+  check(`裁短之后这一段在时间线上变窄了（${wBefore.toFixed(0)}px → ${wAfter.toFixed(0)}px）`,
+    wAfter < wBefore - 8, `${wBefore} → ${wAfter}`);
 
-  // 数字框那条路也要还在（拖不准的时候手填）
-  const inBox = cutRows.nth(1).locator('input[type=number]').first();
-  await inBox.fill('1.5');
-  await inBox.dispatchEvent('change');
+  // ── 属性面板 ──
+  check('选中之后右边属性面板显示的是它',
+    /第 \d+ 镜/.test(await page.locator('.tl-props').innerText()),
+    (await page.locator('.tl-props').innerText()).slice(0, 80));
+  const propIn = page.locator('.tl-props input[type=number]').first();
+  await propIn.fill('1.5');
+  await propIn.dispatchEvent('change');
   await page.waitForTimeout(700);
-  const afterIn = await readEdit();
-  check('手填入点也真的存下来了',
-    Object.values(afterIn.clips || {}).some((c) => c.in === 1.5), JSON.stringify(afterIn.clips));
+  check('属性面板里手填入点也存得下来',
+    Object.values((await readEdit()).clips || {}).some((c) => c.in === 1.5),
+    JSON.stringify((await readEdit()).clips));
 
-  // ── 转场：改的是剪辑决定，不是分镜字段 ──
-  const transSel = cutRows.nth(1).locator('select').first();
+  // ── 撤销 / 重做 ──
+  /**
+   * 剪辑台上每一步都是破坏性的，而人一定会拖错。没有撤销的话唯一的退路是
+   * 「恢复默认」—— 那会把之前调好的全清掉，代价大到人干脆不敢拖。
+   */
+  const beforeUndo = JSON.stringify(await readEdit());
+  await page.locator('.tl-bar button:has-text("撤销")').click();
+  await page.waitForTimeout(800);
+  const afterUndo = JSON.stringify(await readEdit());
+  check('撤销真的退回了上一步', afterUndo !== beforeUndo, afterUndo.slice(0, 120));
+  await page.locator('.tl-bar button:has-text("重做")').click();
+  await page.waitForTimeout(800);
+  check('重做又回到了撤销之前那一步',
+    JSON.stringify(await readEdit()) === beforeUndo, JSON.stringify(await readEdit()).slice(0, 120));
+
+  // ── 转场 / 效果 / 静音（都在属性面板里）──
+  // 先选中第 2 段：第一段没有"怎么接上来"这回事，它的转场框是灰的
+  const secondBox = await tlClips.nth(1).boundingBox();
+  await page.mouse.click(secondBox.x + secondBox.width / 2, secondBox.y + secondBox.height / 2);
+  await page.waitForTimeout(500);
+  check('第一段的转场框是灰的（它前面没有片子）', await page.evaluate(() => {
+    const cards = [...document.querySelectorAll('.tl-clip')];
+    cards[0].dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 0, clientY: 0 }));
+    document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    return document.querySelector('.tl-props select')?.disabled === true;
+  }), '');
+  await page.mouse.click(secondBox.x + secondBox.width / 2, secondBox.y + secondBox.height / 2);
+  await page.waitForTimeout(500);
+  const transSel = page.locator('.tl-props select').first();
   await transSel.selectOption('slideleft');
   await page.waitForTimeout(700);
-  const afterTrans = await readEdit();
   check('换转场存进了剪辑决定（不冲掉分镜里那个建议值）',
-    Object.values(afterTrans.clips || {}).some((c) => c.trans === 'slideleft'),
-    JSON.stringify(afterTrans.clips));
-  check('第一段的转场是灰的（它前面没有片子，没有"怎么接上来"这回事）',
-    await cutRows.first().locator('select').first().isDisabled());
+    Object.values((await readEdit()).clips || {}).some((c) => c.trans === 'slideleft'),
+    JSON.stringify((await readEdit()).clips));
   const transOpts = await transSel.locator('option').count();
   check(`转场不止那三个（现在有 ${transOpts} 种）`, transOpts >= 15, String(transOpts));
+  check('接缝上出现了转场标记', (await page.locator('.tl-trans').count()) >= 1,
+    String(await page.locator('.tl-trans').count()));
 
-  // ── 画面效果 ──
-  const fxSel = cutRows.nth(1).locator('select').nth(1);
+  const fxSel = page.locator('.tl-props select').nth(1);
   await fxSel.selectOption('bw');
   await page.waitForTimeout(700);
-  const afterFx = await readEdit();
   check('画面效果存下来了',
-    Object.values(afterFx.clips || {}).some((c) => c.fx === 'bw'), JSON.stringify(afterFx.clips));
+    Object.values((await readEdit()).clips || {}).some((c) => c.fx === 'bw'),
+    JSON.stringify((await readEdit()).clips));
 
-  // ── 单镜静音 ──
-  await cutRows.nth(1).locator('button[title*="不要声音"]').click();
+  await page.locator('.tl-props button:has-text("有声")').click();
   await page.waitForTimeout(700);
-  const afterMute = await readEdit();
   check('单镜静音存下来了',
-    Object.values(afterMute.clips || {}).some((c) => c.mute === true), JSON.stringify(afterMute.clips));
-
-  // ── 跳过一镜 ──
-  await page.locator('.cut-row button:has-text("不用")').first().click();
-  await page.waitForTimeout(700);
-  const afterOff = await readEdit();
-  check('"不用"真的存下来了',
-    Object.values(afterOff.clips || {}).some((c) => c.off === true), JSON.stringify(afterOff.clips));
+    Object.values((await readEdit()).clips || {}).some((c) => c.mute === true),
+    JSON.stringify((await readEdit()).clips));
 
   /**
-   * ── 音轨开关 ──
+   * ── "不用"之后必须能放回来 ──
    *
-   * 声音的问题是整片性的（"音效太吵""音乐盖住台词"从来不是某一镜的事），
-   * 所以开关摆在片段上面。关掉不删任何文件 —— 这一点界面上必须说出来。
+   * 标成不用的那一镜会从时间线上**消失**。左边那栏素材架就是它唯一的退路 ——
+   * 没有它的话这个操作是单向的，而"不用"本来就该是可逆的。
    */
-  const voiceBtn = page.locator('.cut-track button[title*="不混任何配音"]');
-  await voiceBtn.click();
-  await page.waitForTimeout(700);
-  const afterTrack = await readEdit();
-  check('关掉台词轨真的存下来了', afterTrack.tracks?.voice === false, JSON.stringify(afterTrack.tracks));
-  await voiceBtn.click();
-  await page.waitForTimeout(700);
+  const nUsed = await tlClips.count();
+  await page.locator('.tl-props button:has-text("不用这一镜")').click();
+  await page.waitForTimeout(800);
+  check('标成"不用"之后它从时间线上消失了',
+    (await tlClips.count()) === nUsed - 1, `${nUsed} → ${await tlClips.count()}`);
+  check('但它还在左边的素材架上（不用是可逆的）',
+    (await page.locator('.tl-card.off').count()) === 1,
+    String(await page.locator('.tl-card.off').count()));
+  await page.locator('.tl-card.off button:has-text("放回来")').click();
+  await page.waitForTimeout(800);
+  check('放回来之后又出现在时间线上', (await tlClips.count()) === nUsed,
+    String(await tlClips.count()));
+
+  // ── 播放头 ──
+  const ruler = page.locator('.tl-ruler');
+  const rb = await ruler.boundingBox();
+  await page.mouse.click(rb.x + rb.width * 0.5, rb.y + rb.height / 2);
+  await page.waitForTimeout(500);
+  const headLeft = await page.evaluate(() => parseFloat(document.querySelector('.tl-head').style.left));
+  check('点刻度尺能把播放头挪过去', headLeft > 10, String(headLeft));
+  check('时码跟着走了',
+    !/^00:00\.00/.test(await page.locator('.tl-clock').innerText()),
+    await page.locator('.tl-clock').innerText());
+
+  // ── 音轨 ──
+  /**
+   * 声音的问题是整片性的（"音效太吵""音乐盖住台词"从来不是某一镜的事），
+   * 所以开关做在轨道名上，而不是每一段里 —— 摆在段里人要点十三次。
+   */
+  check('三条声音轨都在（台词/音效/音乐）',
+    /台词/.test(await page.locator('.tl-labels').innerText())
+    && /音效/.test(await page.locator('.tl-labels').innerText())
+    && /背景音乐/.test(await page.locator('.tl-labels').innerText()),
+    await page.locator('.tl-labels').innerText());
+  const voiceEye = page.locator('.tl-lab:has-text("台词") .tl-eye');
+  await voiceEye.click();
+  await page.waitForTimeout(800);
+  check('点轨道上那只眼睛能关掉整条台词轨',
+    (await readEdit()).tracks?.voice === false, JSON.stringify((await readEdit()).tracks));
+  await page.locator('.tl-lab:has-text("台词") .tl-eye').click();
+  await page.waitForTimeout(800);
   check('再点一下就开回来（只存"被关掉"的那些）',
     (await readEdit()).tracks?.voice === undefined, JSON.stringify((await readEdit()).tracks));
 
@@ -563,30 +611,41 @@ if ((await cutRows.count()) === 3) {
   await musicInput.setInputFiles({
     name: '走查用.mp3',
     mimeType: 'audio/mpeg',
-    buffer: Buffer.from('ID3      fake-mp3-body', 'binary')
+    buffer: Buffer.from('ID3      fake-mp3-body', 'binary')
   });
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(1600);
   const afterMusic = await readEdit();
   check('背景音乐传上去了，路径记在项目里', Boolean(afterMusic.music?.path), JSON.stringify(afterMusic.music));
   check('音乐的默认参数是"压在台词底下 + 自动避让"',
     afterMusic.music?.gain <= 0.3 && afterMusic.music?.duck !== false, JSON.stringify(afterMusic.music));
-  check('传完之后音量、避让、淡入淡出这些控件出来了',
-    (await page.locator('.cut-track input[type=range]').count()) >= 2,
-    String(await page.locator('.cut-track input[type=range]').count()));
+  check('音乐轨上出现了一条铺满全片的块',
+    (await page.locator('.tl-ab.music').count()) === 1,
+    String(await page.locator('.tl-ab.music').count()));
   check('说清楚曲子的授权要自己确认',
     /授权/.test(await page.locator('.cut-audio').innerText()), '');
 
   const duckBox = page.locator('.cut-track label[title*="自动让开"] input[type=checkbox]');
   if (await duckBox.count()) {
     await duckBox.uncheck();
-    await page.waitForTimeout(700);
+    await page.waitForTimeout(800);
     check('关掉自动避让也存得下来', (await readEdit()).music?.duck === false,
       JSON.stringify((await readEdit()).music));
   }
-
-  await page.locator('button:has-text("移除")').click();
-  await page.waitForTimeout(800);
+  await page.locator('.cut-track button:has-text("移除")').click();
+  await page.waitForTimeout(900);
   check('撤下音乐之后项目里就没有了', !(await readEdit()).music, JSON.stringify((await readEdit()).music));
+
+  // ── 缩放 ──
+  const wNormal = await widthOf(0);
+  await page.locator('.tl-bar button:has-text("＋")').click();
+  await page.waitForTimeout(400);
+  check('放大之后片段变宽（时间线是可缩放的）',
+    (await widthOf(0)) > wNormal * 1.2, `${wNormal} → ${await widthOf(0)}`);
+  await page.locator('.tl-bar button:has-text("适应窗口")').click();
+  await page.waitForTimeout(400);
+  check('「适应窗口」把整条片子收回一屏',
+    (await widthOf(0)) < (await page.locator('.tl-scroll').boundingBox()).width,
+    String(await widthOf(0)));
 
   // ── 恢复默认：只清片段那一块，音轨开关不该被顺手清掉 ──
   await page.locator('button:has-text("恢复默认")').click();
@@ -601,9 +660,13 @@ if ((await cutRows.count()) === 3) {
 }
 check('说清楚重新合成不花钱',
   /一分钱不花|不花钱/.test(await page.locator('#view-inner').innerText()), '');
-check('画面效果那一栏如实说了"慢一点但不花钱"',
-  /不花钱/.test(await page.locator('.cut-row select').nth(1).getAttribute('title') || ''),
-  await page.locator('.cut-row select').nth(1).getAttribute('title'));
+/**
+ * 预览不等于成片这件事**必须说出来**：自动避让和转场是合成那一步做的，
+ * 预览里听不到。不说的话人会拿预览当最终效果，然后觉得"配的乐没生效"。
+ */
+check('如实说明了预览不等于成片',
+  /不等于成片/.test(await page.locator('.tl-stage').innerText()),
+  (await page.locator('.tl-stage').innerText()).slice(0, 120));
 
 check('全程没有页面报错', errs.length === 0, errs.slice(0, 3).join(' | '));
 

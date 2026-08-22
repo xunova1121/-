@@ -20,6 +20,12 @@ import { inheritStage } from '/previz.js';
  */
 import * as TRANS from '/transitions.js';
 import * as FX from '/fx.js';
+/**
+ * 时间线量的必须和成片一模一样，所以它不自己算 —— 直接跑引擎那一份。
+ * 服务端把 core/pipeline/edit.js 原样发到 /edit.js，两端是同一个文件。
+ */
+import * as EDIT from '/edit.js';
+import * as DUR from '/duration.js';
 import { stepsOf, stepProgress } from '../pipeline.js';
 import bibleView from './bible.js';
 
@@ -2359,22 +2365,24 @@ export default {
      * 这些事，**一帧都不用重新生成**。素材已经在盘上，要动的只是"怎么拼" ——
      * 那是 FFmpeg 层的事，十几秒的活，一分钱不花。
      *
-     * ── 这里能做什么 ──
+     * ════════ 为什么是时间线，不是一行一行的清单 ════════
      *
-     *   拖拽排序        按住左边的 ≡ 上下拖
-     *   裁剪            拖裁剪条两端的把手，或者直接填入点出点
-     *   跳过某镜        素材不删，随时放回来
-     *   转场            十九种，默认硬切（九成的接缝都该是硬切）
-     *   画面效果        十三种。**只有加了效果的那几段要重压**，其余照走快路
-     *   音轨            台词 / 音效 / 背景音乐，每条能整条关掉，每一镜能单独静音
-     *   背景音乐        自己传一首，能自动避让台词（有人说话时压低，说完回来）
+     * 第一版做成了清单：每一镜一行，填入点出点。功能上全有，但它回答不了
+     * 剪辑时**唯一真正要问的那个问题** —— "现在这条片子长什么样"。
      *
-     * ⚠ 顺序、入出点、转场改的是 project.edit，而 timelineOf() 认它 ——
-     * 所以配音和字幕会跟着一起挪。这一点是这块能不能用的前提：
+     * 节奏是**看**出来的：哪一段特别长、哪几段挤在一起、音乐从第几秒进、
+     * 台词压不压得住。这些在清单里全部是数字，而在时间线上是一眼的事。
+     * 所以这一版把片段按**时长成比例**摆在一条横轨上，配一个能就地播放的预览：
+     * 拖着看、拖着改。
+     *
+     * ⚠ 时间线量的必须和成片**一模一样**。所以它不自己算 ——
+     * 走的是引擎那一份 `edit.timeline()`（服务端把 core/pipeline/edit.js
+     * 原样发到 /edit.js）。界面里另写一份的话两份一定会漂，而漂开的表现是
+     * "时间线上写第 22 秒、成片里在第 20.5 秒"，没有报错，只能拿秒表比。
+     *
+     * ⚠ 顺序、入出点、转场改的是 project.edit，而配音和字幕也从
+     * edit.timeline() 拿起点 —— 所以它们会跟着一起挪。这是这块能不能用的前提：
      * 只改画面不改声音，等于把一部对上的片子改成对不上的。
-     *
-     * ⚠ 唯一有代价的是**画面效果**：那几段要重新压一遍，比平时慢。
-     * 但慢和花钱是两件事，界面上必须分开说 —— 人只会为后者犹豫。
      */
     function cutRoom() {
       const clips = (project.shots || []).filter((s) => s.videoPath);
@@ -2382,11 +2390,14 @@ export default {
 
       const natural = clips.slice().sort((x, y) => x.index - y.index).map((s) => s.id);
       const byId = new Map(clips.map((s) => [s.id, s]));
+      const settings = state.catalog?.settings || {};
+      const policy = settings.durationPolicy || 'keep';
+
       const draft = {
         /**
          * ⚠ 存下来的顺序要**和现在真实有视频的那几镜对齐**，不能原样端出来。
          *
-         * 两个方向都会出事：里面躺着一个后来被删掉的镜头 id，界面上会少一行
+         * 两个方向都会出事：里面躺着一个后来被删掉的镜头 id，时间线上会少一块
          * 而且没人知道为什么；后来才补出视频的那几镜不在里面，它们会**整个消失**
          * —— 素材在盘上、成片里没有，而这在界面上完全看不出来。
          */
@@ -2397,9 +2408,7 @@ export default {
       };
       for (const id of natural) if (!draft.order.includes(id)) draft.order.push(id);
 
-      const host = h('div', { class: 'panel', style: 'margin-top:14px' });
-      const settings = state.catalog?.settings || {};
-
+      // ───────────── 存盘 ─────────────
       /**
        * 保存要**串行、但不能丢**。
        *
@@ -2407,53 +2416,102 @@ export default {
        * 后来的那次直接扔掉。走查里立刻现形：改完入点马上点「恢复默认」，
        * 恢复那一下被吞了，界面显示已恢复而盘上还是旧的。
        *
-       * 而这正是最难查的一类：它只在**手快**的时候发生，
-       * 复现要靠运气，用户报上来的会是"有时候改了不生效"。
-       * 排队重发一次（最后一次赢），代价是偶尔多发一个请求。
+       * 而这正是最难查的一类：它只在**手快**的时候发生，复现要靠运气，
+       * 用户报上来的会是"有时候改了不生效"。排队重发一次（最后一次赢）。
        */
       let saving = false;
       let queued = false;
       const save = async () => {
-        if (saving) {
-          queued = true;
-          return;
-        }
+        if (saving) { queued = true; return; }
         saving = true;
         try {
           // cap:film-cut
           await api(`/projects/${project.id}`, { method: 'PATCH', body: { edit: draft } });
-          if (project.edit) Object.assign(project.edit, draft);
-          else project.edit = { ...draft };
+          project.edit = JSON.parse(JSON.stringify(draft));
         } catch (err) {
           toast(err.message, 'err');
         } finally {
           saving = false;
-          if (queued) {
-            queued = false;
-            await save(); // draft 是引用，重发的一定是最新那份
-          }
+          if (queued) { queued = false; await save(); }
         }
       };
 
-      const totalOf = (s) => Number(s.actualDuration) || Number(s.duration) || 0;
-      const winOf = (s) => {
-        const c = draft.clips[s.id] || {};
-        if (c.in == null && c.out == null) return null;
-        const total = totalOf(s) || 60;
-        const a = Math.max(0, Math.min(c.in ?? 0, total));
-        const b = Math.min(c.out ?? total, total);
-        return b - a >= 0.3 ? { in: a, out: b } : null;
+      /**
+       * 撤销 / 重做。
+       *
+       * 剪辑台上每一步都是破坏性的（拖一下顺序就变了），而人一定会拖错。
+       * 没有撤销的话，唯一的退路是「恢复默认」—— 那会把之前调好的全清掉，
+       * 代价大到人干脆不敢拖。
+       *
+       * 存的是整份剪辑决定的快照。它是个几百字节的小对象，
+       * 存六十份也不到几十 KB —— 比"算出反操作"简单得多，也不会算错。
+       */
+      const past = [];
+      const future = [];
+      let baseline = JSON.stringify(draft);
+      const load = (text) => {
+        const p = JSON.parse(text);
+        draft.order = p.order;
+        draft.clips = p.clips;
+        draft.tracks = p.tracks;
+        draft.music = p.music;
       };
-      const spanOf = (s) => {
-        const w = winOf(s);
-        if (w) return Number((w.out - w.in).toFixed(2));
-        return (settings.durationPolicy || 'keep') === 'trim'
-          ? Number(s.duration) || totalOf(s)
-          : totalOf(s);
+      /** 改之前叫一声，把改动**之前**那份压进撤销栈 */
+      const mark = () => {
+        past.push(baseline);
+        if (past.length > 60) past.shift();
+        future.length = 0;
       };
-      /** 这一段进不进成片时长（跳过的那几镜不算） */
-      const usedIds = () => draft.order.filter((id) => !draft.clips[id]?.off);
-      const totalSpan = () => usedIds().reduce((sum, id) => sum + (byId.get(id) ? spanOf(byId.get(id)) : 0), 0);
+      /** 改完之后叫一声：更新基线、存盘、重画 */
+      const done = () => {
+        const now = JSON.stringify(draft);
+        /**
+         * ⚠ **什么都没改的那一步不能占一格撤销。**
+         *
+         * 走查里现形的：在属性面板里填一个数，浏览器会连着发两次 change
+         *（一次来自输入、一次来自失焦），于是压进去两格，其中第二格
+         * 和第一格一模一样。人点一下「撤销」，界面纹丝不动 ——
+         * 要点两下才退得回去。
+         *
+         * 而这种"点了没反应"最伤：人会以为撤销坏了，然后再也不敢拖。
+         */
+        if (past.length && past[past.length - 1] === now) past.pop();
+        baseline = now;
+        save();
+        repaint();
+      };
+
+      /**
+       * 重画要**推迟到下一帧**，不能在事件处理里当场做。
+       *
+       * change 事件是在失焦的过程中触发的。此时把这个输入框所在的整棵子树
+       * 拆掉，浏览器紧接着要把焦点还给一个已经不在文档里的节点，于是抛
+       * `The node to be removed is no longer a child of this node`。
+       * 页面看着没事，控制台里一条红的 —— 而走查是盯着页面报错的。
+       *
+       * 顺带还去掉了一次重复渲染：连着改两个字段只会重画一次。
+       */
+      let pending = 0;
+      const repaint = () => {
+        if (pending) return;
+        pending = requestAnimationFrame(() => { pending = 0; paintAll(); });
+      };
+      const undoStep = () => {
+        if (!past.length) return;
+        future.push(JSON.stringify(draft));
+        load(past.pop());
+        baseline = JSON.stringify(draft);
+        save();
+        repaint();
+      };
+      const redoStep = () => {
+        if (!future.length) return;
+        past.push(JSON.stringify(draft));
+        load(future.pop());
+        baseline = JSON.stringify(draft);
+        save();
+        repaint();
+      };
 
       const setClip = (id, patch) => {
         draft.clips[id] = { ...(draft.clips[id] || {}), ...patch };
@@ -2463,277 +2521,561 @@ export default {
         if (!Object.keys(draft.clips[id]).length) delete draft.clips[id];
       };
 
-      // 每一行注册一个"把自己刷新一遍"的函数。改数字时只调它们，
-      // 不整块重绘 —— 重绘会在失焦过程中把正在编辑的 input 摘出文档，
-      // 浏览器紧接着要把焦点还给一个已经不在文档里的节点，于是抛 removeChild
-      let syncs = [];
-      const refreshNumbers = () => {
-        for (const fn of syncs) fn();
-        const foot = host.querySelector('.cut-total');
-        if (foot) foot.textContent = footText();
+      // ───────────── 时间轴（引擎那一份，不自己算）─────────────
+      const rowsOf = () => EDIT.timeline({ shots: clips, edit: draft }, { policy });
+      const totalOf = (rs) => (rs.length ? Number((rs[rs.length - 1].start + rs[rs.length - 1].span).toFixed(2)) : 0);
+
+      // ───────────── 视图状态 ─────────────
+      /** 每秒画多少像素。缩放改的是它 */
+      let pps = 46;
+      let sel = null;
+      let playAt = 0;
+      let playing = false;
+      let fitted = false;
+
+      const LAB = 96;   // 左边轨道名那一列
+      const H = { ruler: 20, video: 62, audio: 24 };
+
+      const fmt = (sec) => {
+        const s = Math.max(0, Number(sec) || 0);
+        const m = Math.floor(s / 60);
+        const r = s - m * 60;
+        return `${String(m).padStart(2, '0')}:${r.toFixed(2).padStart(5, '0')}`;
       };
-      const footText = () =>
-        `用 ${usedIds().length} / ${clips.length} 镜，约 ${totalSpan().toFixed(1)} 秒`
-        + '（重叠类转场会各吃掉 0.5 秒，实际以合成结果为准）';
 
-      // ───────────── 一行片段 ─────────────
-      function paintRow(id, i, list) {
-        const s = byId.get(id);
-        /**
-         * ⚠ 每次都从 draft 里**现取**，不能在这儿抓一份快照。
-         *
-         * 抓快照的写法（`const c = draft.clips[id] || {}`）有个致命处：
-         * 这一镜原来没被改过时，`{}` 是一个和 draft **没有任何关系**的新对象。
-         * 往它身上写值，界面看着变了，存下去的却还是旧的 ——
-         * 于是又是一次"改了不生效"。
-         */
-        const cf = () => draft.clips[id] || {};
-        const off = cf().off === true;
-        const total = totalOf(s);
+      // ───────────── 预览 ─────────────
+      /**
+       * 预览要**能听见声音**，否则"音乐压不压得住台词"这件事只能靠合成完再听，
+       * 而那正是剪辑台想省掉的那一趟。
+       *
+       * 做法是三个独立的播放器跟着播放头走：当前这一镜的画面、这一镜的配音、
+       * 这一镜的音效，外加一条整片的背景音乐。
+       *
+       * ⚠ 它**不等于成片**，有两处如实说明白：自动避让（音乐给台词让路）
+       * 是 FFmpeg 那一层做的，预览里没有；镜与镜之间会有一次很短的加载停顿，
+       * 因为每一镜是一个独立文件。要听最终效果还是得点「重新合成」——
+       * 那一步十几秒，不花钱。
+       */
+      const video = h('video', {
+        class: 'tl-video',
+        playsinline: true,
+        preload: 'auto',
+        onclick: () => togglePlay()
+      });
+      const voiceEl = h('audio', { preload: 'auto' });
+      const sfxEl = h('audio', { preload: 'auto' });
+      const musicEl = h('audio', { preload: 'auto', loop: true });
+      let curShot = null;
 
-        const grip = h('div', { class: 'cut-grip', title: '按住上下拖，调整这一镜在成片里的位置' }, '⠿');
-        const bar = h('div', { class: 'cut-bar' });
-        const keep = h('div', { class: 'cut-keep' });
-        const hA = h('div', { class: 'cut-handle a', title: '入点：从这儿开始' });
-        const hB = h('div', { class: 'cut-handle b', title: '出点：切到这儿' });
-        const barTxt = h('span', { class: 'cut-bar-txt' });
-        bar.append(keep, hA, hB, barTxt);
+      const setSrc = (el, url) => {
+        if (!url) { if (el.getAttribute('src')) { el.pause(); el.removeAttribute('src'); el.load(); } return; }
+        if (el.getAttribute('src') !== url) { el.src = url; }
+      };
+      const at = (el, t) => {
+        const put = () => { try { el.currentTime = Math.max(0, t); } catch { /* 还没准备好，等元数据 */ } };
+        if (el.readyState >= 1) put();
+        else el.addEventListener('loadedmetadata', put, { once: true });
+      };
 
-        const inNum = h('input', { type: 'number', step: '0.1', min: '0', max: String(total || 60), placeholder: '入点' });
-        const outNum = h('input', { type: 'number', step: '0.1', min: '0', max: String(total || 60), placeholder: '出点' });
-        const spanTxt = h('span', { class: 'field-hint', style: 'margin:0' });
+      const seek = (t, { play = null } = {}) => {
+        const rs = rowsOf();
+        if (!rs.length) return;
+        const tot = totalOf(rs);
+        playAt = Math.max(0, Math.min(Number(t) || 0, tot));
+        const r = rs.find((x) => playAt < x.start + x.span - 0.001) || rs[rs.length - 1];
+        const inAt = r.win ? r.win.in : 0;
+        const into = Math.max(0, playAt - r.start);
 
-        const sync = () => {
-          const w = winOf(s);
-          const a = w ? w.in : 0;
-          const b = w ? w.out : total;
-          const pct = (v) => (total > 0 ? Math.max(0, Math.min(100, (v / total) * 100)) : 0);
-          keep.style.left = `${pct(a)}%`;
-          keep.style.width = `${Math.max(1, pct(b) - pct(a))}%`;
-          hA.style.left = `${pct(a)}%`;
-          hB.style.left = `${pct(b)}%`;
-          barTxt.textContent = w
-            ? `${a.toFixed(1)}s → ${b.toFixed(1)}s`
-            : `整段 ${total.toFixed(1)}s（没手工裁过，交给自动剪辑）`;
-          // 正在编辑的那个框不要去动它，否则光标会跳到末尾
-          if (document.activeElement !== inNum) inNum.value = cf().in == null ? '' : String(cf().in);
-          if (document.activeElement !== outNum) outNum.value = cf().out == null ? '' : String(cf().out);
-          spanTxt.textContent = `${spanOf(s).toFixed(1)}s / 素材 ${total.toFixed(1)}s`;
-        };
+        if (curShot !== r.shot.id) {
+          curShot = r.shot.id;
+          setSrc(video, mediaUrl(r.shot.videoPath));
+          setSrc(voiceEl, r.shot.audioPath && !r.muted && EDIT.trackOn(draft, 'voice') ? mediaUrl(r.shot.audioPath) : null);
+          setSrc(sfxEl, r.shot.sfxPath && !r.muted && EDIT.trackOn(draft, 'sfx') ? mediaUrl(r.shot.sfxPath) : null);
+        }
+        at(video, inAt + into);
+        at(voiceEl, into);
+        at(sfxEl, into);
 
-        /**
-         * 拖把手改入出点。
-         *
-         * 两个数字框谁都会做，但**没人能拿着两个数字想象出这一刀切在哪儿**。
-         * 这条亮起来的区间就是会进成片的那一段 —— 这是"数字输入框"
-         * 和"剪辑台"之间差别最大的一处。
-         */
-        const dragHandle = (el, which) => {
-          el.addEventListener('pointerdown', (e) => {
-            if (!total) return;
-            e.preventDefault();
-            el.setPointerCapture?.(e.pointerId);
-            const move = (ev) => {
-              const r = bar.getBoundingClientRect();
-              const t = Math.max(0, Math.min(total, ((ev.clientX - r.left) / r.width) * total));
-              const cur = winOf(s) || { in: 0, out: total };
-              if (which === 'in') {
-                // 两端不能互相穿过 —— 穿过之后出点在入点前面，FFmpeg 会拿到一个空片段
-                setClip(id, { in: Number(Math.min(t, cur.out - 0.3).toFixed(2)), out: Number(cur.out.toFixed(2)) });
-              } else {
-                setClip(id, { in: Number(cur.in.toFixed(2)), out: Number(Math.max(t, cur.in + 0.3).toFixed(2)) });
+        const music = EDIT.musicOf(draft);
+        setSrc(musicEl, music ? mediaUrl(music.path) : null);
+        musicEl.volume = Math.min(1, music ? music.gain : 0);
+        sfxEl.volume = Math.min(1, Number(settings.sfxGain ?? 0.35));
+        if (music) at(musicEl, playAt);
+
+        movePlayhead();
+        if (play === true) startPlay();
+        else if (play === false) stopPlay();
+        else if (playing) startPlay();
+      };
+
+      const startPlay = () => {
+        playing = true;
+        for (const el of [video, voiceEl, sfxEl, musicEl]) {
+          if (el.getAttribute('src')) el.play().catch(() => { /* 自动播放被拦，点一下就好 */ });
+        }
+        const btn = host.querySelector('.tl-play');
+        if (btn) btn.textContent = '⏸';
+      };
+      const stopPlay = () => {
+        playing = false;
+        for (const el of [video, voiceEl, sfxEl, musicEl]) el.pause();
+        const btn = host.querySelector('.tl-play');
+        if (btn) btn.textContent = '▶';
+      };
+      const togglePlay = () => (playing ? stopPlay() : seek(playAt, { play: true }));
+
+      video.addEventListener('timeupdate', () => {
+        if (!playing) return;
+        const rs = rowsOf();
+        const r = rs.find((x) => x.shot.id === curShot);
+        if (!r) return;
+        const inAt = r.win ? r.win.in : 0;
+        // 到这一镜的出点了 —— 跳下一镜。这一步就是"按剪辑顺序播"
+        if (video.currentTime >= inAt + r.span - 0.04) {
+          const i = rs.indexOf(r);
+          if (i + 1 < rs.length) return seek(rs[i + 1].start, { play: true });
+          stopPlay();
+          return seek(0);
+        }
+        playAt = r.start + (video.currentTime - inAt);
+        movePlayhead(false);
+      });
+      video.addEventListener('ended', () => {
+        if (!playing) return;
+        const rs = rowsOf();
+        const i = rs.findIndex((x) => x.shot.id === curShot);
+        if (i >= 0 && i + 1 < rs.length) seek(rs[i + 1].start, { play: true });
+        else { stopPlay(); seek(0); }
+      });
+
+      // ───────────── 结构（只搭一次，之后只重画里面）─────────────
+      const host = h('div', { class: 'panel tl-panel' });
+      const shelfBox = h('div', { class: 'tl-shelf' });
+      const propsBox = h('div', { class: 'tl-props' });
+      const barBox = h('div', { class: 'tl-bar' });
+      const labelsBox = h('div', { class: 'tl-labels' });
+      const laneBox = h('div', { class: 'tl-inner' });
+      const scrollBox = h('div', { class: 'tl-scroll' }, laneBox);
+      const audioBox = h('div', { class: 'cut-audio' });
+      const footBox = h('div', { class: 'inline', style: 'margin-top:12px;flex-wrap:wrap' });
+      const clock = h('span', { class: 'tl-clock' }, '00:00.00 / 00:00.00');
+      const head = h('div', { class: 'tl-head' });
+
+      // ───────────── 左边：素材架 ─────────────
+      /**
+       * 时间线上只有**用到的**那几镜。标成"不用"的会从轨道上消失 ——
+       * 没有这一栏的话它们就再也回不来了，而"不用"本来就该是可逆的。
+       */
+      function paintShelf() {
+        clear(shelfBox);
+        const used = new Set(rowsOf().map((r) => r.shot.id));
+        shelfBox.append(
+          h('div', { class: 'tl-shelf-hd' }, '素材',
+            h('span', { class: 'field-hint', style: 'margin:0 0 0 6px' }, `${used.size}/${clips.length} 在用`)),
+          ...draft.order.map((id) => {
+            const s = byId.get(id);
+            if (!s) return null;
+            const on = used.has(id);
+            return h('div', {
+              class: `tl-card${on ? '' : ' off'}${sel === id ? ' on' : ''}`,
+              title: on ? '点一下选中它' : '这一镜现在不进成片，点「放回来」',
+              onclick: () => { sel = id; paintShelf(); paintProps(); paintLanes(); }
+            },
+            s.imagePath
+              ? h('img', { src: mediaUrl(s.imagePath), class: 'tl-card-img' })
+              : h('div', { class: 'tl-card-img' }),
+            h('div', { style: 'min-width:0;flex:1' },
+              h('div', { class: 'tl-card-t' }, `#${s.index}`),
+              h('div', { class: 'field-hint', style: 'margin:0' },
+                on ? `${(rowsOf().find((r) => r.shot.id === id)?.span || 0).toFixed(1)}s` : '不用')),
+            !on
+              ? h('button', {
+                  class: 'btn ghost sm',
+                  onclick: (e) => { e.stopPropagation(); mark(); setClip(id, { off: false }); done(); }
+                }, '放回来')
+              : null);
+          }).filter(Boolean)
+        );
+      }
+
+      // ───────────── 右边：属性 ─────────────
+      function paintProps() {
+        clear(propsBox);
+        const rs = rowsOf();
+        const r = rs.find((x) => x.shot.id === sel);
+        const s = sel ? byId.get(sel) : null;
+        if (!s) {
+          propsBox.append(
+            h('div', { class: 'tl-props-hd' }, '属性'),
+            h('p', { class: 'field-hint' }, '在时间线上点一段，这里显示它的入出点、转场和画面效果。拖两端可以裁剪，拖中间可以换位置。'));
+          return;
+        }
+        const total = Number(s.actualDuration) || Number(s.duration) || 0;
+        const win = r?.win || null;
+        const a = win ? win.in : 0;
+        const b = win ? win.out : total;
+
+        const num = (val, onSet, title) => h('input', {
+          type: 'number', step: '0.1', min: '0', max: String(total || 60),
+          value: String(Number(val).toFixed(2)), title,
+          onchange: (e) => { mark(); onSet(Number(e.target.value)); done(); }
+        });
+
+        propsBox.append(
+          h('div', { class: 'tl-props-hd' }, '属性'),
+          h('div', { class: 'tl-field' }, h('label', {}, '名称'),
+            h('div', { class: 'tl-val' }, `第 ${s.index} 镜`)),
+          h('div', { class: 'tl-two' },
+            h('div', { class: 'tl-field' }, h('label', {}, '开始'),
+              num(a, (v) => setClip(s.id, { in: Math.max(0, Math.min(v, b - 0.3)), out: Number(b.toFixed(2)) }), '从素材的第几秒进')),
+            h('div', { class: 'tl-field' }, h('label', {}, '结束'),
+              num(b, (v) => setClip(s.id, { in: Number(a.toFixed(2)), out: Math.min(total || v, Math.max(v, a + 0.3)) }), '切到素材的第几秒'))),
+          h('div', { class: 'tl-field' }, h('label', {}, '本段时长'),
+            h('div', { class: 'tl-val big' }, `${(r?.span || 0).toFixed(2)} s`),
+            h('div', { class: 'field-hint', style: 'margin:2px 0 0' }, `素材共 ${total.toFixed(2)}s`)),
+          h('div', { class: 'tl-field' }, h('label', {}, '转场（怎么接上来）'),
+            (() => {
+              const first = rs[0]?.shot.id === s.id;
+              const cur = draft.clips[s.id]?.trans || s.transition || 'cut';
+              return h('select', {
+                disabled: first,
+                title: first ? '第一段前面没有片子，没有"怎么接上来"这回事' : '',
+                onchange: (e) => { mark(); setClip(s.id, { trans: e.target.value }); done(); }
+              },
+              h('optgroup', { label: '常用' },
+                ...TRANS.CATALOG.filter((t) => TRANS.KINDS.includes(t.id))
+                  .map((t) => h('option', { value: t.id, selected: cur === t.id, title: t.why }, t.label))),
+              h('optgroup', { label: '更多（满屏花哨转场是最典型的业余做法，慎用）' },
+                ...TRANS.CATALOG.filter((t) => !TRANS.KINDS.includes(t.id))
+                  .map((t) => h('option', { value: t.id, selected: cur === t.id, title: t.why }, t.label))));
+            })()),
+          h('div', { class: 'tl-field' }, h('label', {}, '画面效果'),
+            h('select', {
+              title: '只有这一段会重压一遍（慢一点，但不重新生成素材、不花钱）',
+              onchange: (e) => { mark(); setClip(s.id, { fx: e.target.value }); done(); }
+            }, ...FX.CATALOG.map((f) =>
+              h('option', { value: f.id, selected: (draft.clips[s.id]?.fx || 'none') === f.id, title: f.why }, f.label))),
+            h('div', { class: 'field-hint', style: 'margin:2px 0 0' },
+              FX.defOf(draft.clips[s.id]?.fx || 'none').why)),
+          h('div', { class: 'inline', style: 'flex-wrap:wrap;margin-top:10px' },
+            h('button', {
+              class: `btn sm ${draft.clips[s.id]?.mute ? '' : 'ghost'}`,
+              title: '这一镜不要声音（台词和音效都不混），画面照留',
+              onclick: () => { mark(); setClip(s.id, { mute: !draft.clips[s.id]?.mute }); done(); }
+            }, draft.clips[s.id]?.mute ? '🔇 已静音' : '🔊 有声'),
+            h('button', {
+              class: 'btn ghost sm',
+              title: '这一镜不进成片。素材不删，随时能从左边放回来',
+              onclick: () => { mark(); setClip(s.id, { off: !draft.clips[s.id]?.off }); done(); }
+            }, draft.clips[s.id]?.off ? '放回来' : '不用这一镜'),
+            h('button', {
+              class: 'btn ghost sm',
+              title: '把这一段的入出点清掉，交回给自动剪辑',
+              onclick: () => { mark(); setClip(s.id, { in: null, out: null }); done(); }
+            }, '还原裁剪'))
+        );
+      }
+
+      // ───────────── 工具条 ─────────────
+      function paintBar() {
+        clear(barBox);
+        const rs = rowsOf();
+        const tot = totalOf(rs);
+        clock.textContent = `${fmt(playAt)} / ${fmt(tot)}`;
+        barBox.append(
+          h('button', { class: 'btn ghost sm', title: '撤销（上一步剪辑）', disabled: !past.length, onclick: undoStep }, '↩ 撤销'),
+          h('button', { class: 'btn ghost sm', title: '重做', disabled: !future.length, onclick: redoStep }, '↪ 重做'),
+          h('span', { class: 'tl-sep' }),
+          h('button', { class: 'btn primary sm tl-play', title: '播放 / 暂停（按剪辑后的顺序播）', onclick: () => togglePlay() }, playing ? '⏸' : '▶'),
+          h('button', { class: 'btn ghost sm', title: '回到开头', onclick: () => seek(0, { play: false }) }, '⏮'),
+          clock,
+          h('span', { class: 'tl-sep' }),
+          h('button', { class: 'btn ghost sm', title: '时间线缩小', onclick: () => { pps = Math.max(6, pps / 1.5); paintLanes(); } }, '－'),
+          h('span', { class: 'field-hint', style: 'margin:0;min-width:52px;text-align:center' }, `${pps.toFixed(0)} px/s`),
+          h('button', { class: 'btn ghost sm', title: '时间线放大', onclick: () => { pps = Math.min(400, pps * 1.5); paintLanes(); } }, '＋'),
+          h('button', { class: 'btn ghost sm', title: '整条片子铺满这一屏', onclick: () => { fitted = false; paintLanes(); } }, '适应窗口')
+        );
+      }
+
+      // ───────────── 轨道 ─────────────
+      function paintLanes() {
+        const rs = rowsOf();
+        const tot = totalOf(rs);
+        if (!fitted && tot > 0) {
+          const room = Math.max(320, (scrollBox.clientWidth || 900) - 24);
+          pps = Math.max(6, Math.min(200, room / tot));
+          fitted = true;
+        }
+        const W = Math.max(240, tot * pps + 24);
+
+        clear(labelsBox);
+        clear(laneBox);
+        laneBox.style.width = `${W}px`;
+
+        // ── 刻度 ──
+        const step = [0.5, 1, 2, 5, 10, 15, 30, 60].find((x) => x * pps >= 56) || 60;
+        const ruler = h('div', { class: 'tl-ruler', style: `height:${H.ruler}px` });
+        for (let t = 0; t <= tot + 0.001; t += step) {
+          ruler.append(h('div', { class: 'tl-tick', style: `left:${t * pps}px` },
+            h('span', {}, t >= 60 ? fmt(t) : `${Number(t.toFixed(2))}s`)));
+        }
+        ruler.addEventListener('pointerdown', (e) => {
+          const r = ruler.getBoundingClientRect();
+          seek((e.clientX - r.left) / pps, { play: false });
+        });
+        labelsBox.append(h('div', { class: 'tl-lab', style: `height:${H.ruler}px` }));
+        laneBox.append(ruler);
+
+        // ── 画面轨 ──
+        const lane = h('div', { class: 'tl-lane', style: `height:${H.video}px` });
+        labelsBox.append(h('div', { class: 'tl-lab', style: `height:${H.video}px` },
+          h('b', {}, '画面'),
+          h('span', { class: 'field-hint', style: 'margin:0' }, `${rs.length} 段`)));
+
+        rs.forEach((r, i) => {
+          const s = r.shot;
+          const block = h('div', {
+            class: `tl-clip${sel === s.id ? ' on' : ''}${r.muted ? ' muted' : ''}`,
+            'data-shot': s.id,
+            style: `left:${r.start * pps}px;width:${Math.max(8, r.span * pps)}px`
+              + (s.imagePath ? `;background-image:url(${mediaUrl(s.imagePath)})` : ''),
+            title: `第 ${s.index} 镜 · ${r.span.toFixed(2)}s（素材 ${r.total.toFixed(2)}s）\n拖中间换位置，拖两端裁剪`
+          },
+          h('span', { class: 'tl-tag' }, `#${s.index}`,
+            r.fx !== 'none' ? h('i', { class: 'tl-chip', title: FX.labelOf(r.fx) }, '效') : null,
+            r.muted ? h('i', { class: 'tl-chip' }, '静') : null),
+          h('span', { class: 'tl-len' }, `${r.span.toFixed(1)}s`),
+          h('div', { class: 'tl-trim l', title: '拖：改入点' }),
+          h('div', { class: 'tl-trim r', title: '拖：改出点' }));
+
+          // 转场标记摆在接缝上 —— 它属于"两段之间"，不属于任何一段
+          if (i > 0 && r.trans !== 'cut') {
+            lane.append(h('div', {
+              class: 'tl-trans',
+              style: `left:${r.start * pps}px`,
+              title: `${TRANS.defOf(r.trans).label}：${TRANS.defOf(r.trans).why}`
+            }, TRANS.defOf(r.trans).label.slice(0, 2)));
+          }
+          wireClip(block, r, rs);
+          lane.append(block);
+        });
+        lane.append(h('div', { class: 'tl-drop', style: 'display:none' }));
+        laneBox.append(lane);
+
+        // ── 声音三轨 ──
+        const audioLane = (name, key, blocks, hint) => {
+          const on = EDIT.trackOn(draft, key);
+          labelsBox.append(h('div', { class: `tl-lab${on ? '' : ' off'}`, style: `height:${H.audio}px` },
+            h('span', {}, name),
+            h('button', {
+              class: 'tl-eye',
+              title: on ? `关掉${name}这条轨（这次不混进去，文件不删）` : `打开${name}`,
+              onclick: () => {
+                mark();
+                if (on) draft.tracks[key] = false; else delete draft.tracks[key];
+                done();
               }
-              refreshNumbers();
-            };
-            const up = (ev) => {
-              el.releasePointerCapture?.(ev.pointerId);
-              el.removeEventListener('pointermove', move);
-              el.removeEventListener('pointerup', up);
-              save();
-            };
-            el.addEventListener('pointermove', move);
-            el.addEventListener('pointerup', up);
-            move(e);
-          });
-        };
-        dragHandle(hA, 'in');
-        dragHandle(hB, 'out');
-
-        const onNum = () => {
-          const a = inNum.value.trim() === '' ? null : Number(inNum.value);
-          const b = outNum.value.trim() === '' ? null : Number(outNum.value);
-          setClip(id, { in: a, out: b });
-          refreshNumbers();
-          save();
-        };
-        inNum.addEventListener('change', onNum);
-        outNum.addEventListener('change', onNum);
-
-        // ── 转场 ──
-        // 第一段没有"从哪儿进来"这回事，摆一个能选的下拉框只会让人以为它有用
-        const transSel = h('select', {
-          disabled: i === 0,
-          title: i === 0 ? '第一段没有转场可言' : '这一镜是怎么接上来的',
-          onchange: (e) => {
-            setClip(id, { trans: e.target.value });
-            refreshNumbers();
-            save();
+            }, on ? '👁' : '🚫')));
+          const el = h('div', { class: `tl-lane audio${on ? '' : ' off'}`, style: `height:${H.audio}px`, title: hint });
+          for (const b of blocks) {
+            el.append(h('div', {
+              class: `tl-ab ${b.cls}`,
+              style: `left:${b.at * pps}px;width:${Math.max(3, b.len * pps)}px`,
+              title: b.title
+            }, b.text || ''));
           }
-        },
-        ...(() => {
-          const cur = cf().trans || s.transition || 'cut';
-          const common = TRANS.CATALOG.filter((t) => TRANS.KINDS.includes(t.id));
-          const more = TRANS.CATALOG.filter((t) => !TRANS.KINDS.includes(t.id));
-          const opt = (t) => h('option', { value: t.id, selected: cur === t.id, title: t.why }, t.label);
-          return [
-            h('optgroup', { label: '常用' }, ...common.map(opt)),
-            h('optgroup', { label: '更多（用之前想一下：满屏花哨转场是最典型的业余做法）' }, ...more.map(opt))
-          ];
-        })());
-
-        // ── 画面效果 ──
-        const fxSel = h('select', {
-          title: '只有加了效果的这一段会重压一遍（慢一点，但不重新生成素材、不花钱）',
-          onchange: (e) => {
-            setClip(id, { fx: e.target.value });
-            refreshNumbers();
-            save();
-          }
-        }, ...FX.CATALOG.map((f) =>
-          h('option', { value: f.id, selected: (cf().fx || 'none') === f.id, title: f.why }, f.label)));
-
-        const muteBtn = h('button', {
-          class: `btn ghost sm${cf().mute ? ' on' : ''}`,
-          title: cf().mute ? '这一镜现在是静音的，点一下恢复' : '这一镜不要声音（台词和音效都不混），画面照留',
-          onclick: () => { setClip(id, { mute: !cf().mute }); redraw(); save(); }
-        }, cf().mute ? '🔇 静音' : '🔊');
-
-        const move = (delta) => {
-          const j = i + delta;
-          if (j < 0 || j >= draft.order.length) return;
-          const next = draft.order.slice();
-          [next[i], next[j]] = [next[j], next[i]];
-          draft.order = next;
-          redraw();
-          save();
+          laneBox.append(el);
         };
 
-        const row = h('div', { class: `cut-row${off ? ' off' : ''}`, 'data-shot': id },
-          grip,
-          h('span', { class: 'cut-idx' }, String(i + 1)),
-          s.imagePath
-            ? h('img', {
-                class: 'cut-thumb',
-                src: mediaUrl(s.imagePath),
-                title: '点开看这一镜的片段',
-                onclick: () => window.open(mediaUrl(s.videoPath), '_blank')
-              })
-            : h('div', { class: 'cut-thumb' }),
-          h('div', { class: 'cut-main' },
-            h('div', { class: 'cut-head' },
-              h('b', {}, `第 ${s.index} 镜`), spanTxt,
-              h('span', { class: 'cut-desc' }, s.description || '（无描述）')),
-            bar,
-            h('div', { class: 'cut-tools' },
-              h('span', { class: 'field-hint', style: 'margin:0' }, '入'), inNum,
-              h('span', { class: 'field-hint', style: 'margin:0' }, '出'), outNum,
-              transSel, fxSel, muteBtn,
-              h('button', { class: 'btn ghost sm', title: '往前挪一位', onclick: () => move(-1) }, '↑'),
-              h('button', { class: 'btn ghost sm', title: '往后挪一位', onclick: () => move(1) }, '↓'),
-              h('button', {
-                class: `btn sm ${off ? '' : 'ghost'}`,
-                title: off ? '放回成片' : '这一镜不进成片（素材不删）',
-                onclick: () => { setClip(id, { off: !off }); redraw(); save(); }
-              }, off ? '已跳过' : '不用'))));
+        audioLane('台词', 'voice',
+          rs.filter((r) => r.shot.audioPath).map((r) => {
+            const spoken = Math.min(r.span, DUR.speechSeconds(r.shot.dialogue) || r.span);
+            return {
+              at: r.start, len: spoken, cls: `voice${r.muted ? ' off' : ''}`,
+              title: `第 ${r.shot.index} 镜的配音${r.muted ? '（这一镜标了静音，不混）' : ''}`,
+              text: (r.shot.dialogue || '').slice(0, 12)
+            };
+          }),
+          '每一镜的配音摆在它那一镜的起点上 —— 长度是按台词字数估的，实际以合成为准');
 
-        /**
-         * 拖拽排序。用指针事件自己做，**不用 HTML5 的 draggable**：
-         * 那一套要把 draggable 挂在整行上，而整行里有输入框和下拉框 ——
-         * 选中一段数字就会被浏览器当成"开始拖这一行"，输入框直接没法用。
-         */
-        grip.addEventListener('pointerdown', (e) => {
+        audioLane('音效', 'sfx',
+          rs.filter((r) => r.shot.sfxPath).map((r) => ({
+            at: r.start, len: r.span, cls: `sfx${r.muted ? ' off' : ''}`,
+            title: `第 ${r.shot.index} 镜的画外音效${r.muted ? '（静音）' : ''}`
+          })),
+          '画外音效。音量压在台词底下 —— 等响的话一声关门就能盖掉一句台词');
+
+        const music = draft.music;
+        audioLane('背景音乐', 'music',
+          music ? [{
+            at: 0, len: tot, cls: 'music',
+            title: `${music.name || '背景音乐'}${music.duck !== false ? '（有台词时自动压低）' : ''}`,
+            text: music.name || '背景音乐'
+          }] : [],
+          music ? '整片一条，不够长会循环' : '还没配乐，下面可以选一首');
+
+        // ── 播放头 ──
+        head.style.height = `${H.ruler + H.video + H.audio * 3}px`;
+        laneBox.append(head);
+        movePlayhead(false);
+
+        paintBar();
+      }
+
+      function movePlayhead(scrollTo = true) {
+        head.style.left = `${playAt * pps}px`;
+        clock.textContent = `${fmt(playAt)} / ${fmt(totalOf(rowsOf()))}`;
+        if (!scrollTo) return;
+        const x = playAt * pps;
+        const view = scrollBox.scrollLeft;
+        const w = scrollBox.clientWidth;
+        if (x < view + 40 || x > view + w - 40) scrollBox.scrollLeft = Math.max(0, x - w / 2);
+      }
+
+      /**
+       * 一段片子上的三种拖动：左边缘改入点、右边缘改出点、中间换位置。
+       *
+       * 全部走指针事件，**不用 HTML5 的 draggable** —— 那一套拖起来会带一张
+       * 半透明的元素截图，而且在有输入框的容器里很容易和选中文字打架。
+       * 自己做还能在拖的过程中实时重画时间线：拖到哪儿、后面几段跟着挪多少，
+       * 一眼就看得见，而这正是"时间线"比"清单"强的地方。
+       */
+      function wireClip(block, row, rs) {
+        const s = row.shot;
+        block.addEventListener('pointerdown', (e) => {
           e.preventDefault();
-          const rows = Array.from(list.children);
-          const from = rows.indexOf(row);
-          if (from < 0) return;
-          const marker = h('div', { class: 'cut-marker' });
-          let to = from;
-          const place = (y) => {
-            let idx = rows.length;
-            for (let k = 0; k < rows.length; k += 1) {
-              const r = rows[k].getBoundingClientRect();
-              if (y < r.top + r.height / 2) { idx = k; break; }
+          sel = s.id;
+          paintShelf();
+          paintProps();
+
+          const box = block.getBoundingClientRect();
+          const edge = e.clientX - box.left < 10 ? 'l' : box.right - e.clientX < 10 ? 'r' : null;
+          /**
+           * ⚠ 拖之前就要把"拖之前那份"压进撤销栈。
+           *
+           * 拖动过程中会改很多次（每移动一像素改一次），只能记**一格**：
+           * 记成几十格的话，人得点几十下「撤销」才退得回去一次拖动。
+           * 而如果等松手了再 mark()，压进去的已经是改完的那份 —— 撤销等于没用。
+           */
+          let marked = false;
+          const total = row.total;
+          const startIn = row.win ? row.win.in : 0;
+          const startOut = row.win ? row.win.out : total;
+          const x0 = e.clientX;
+          let moved = false;
+          let dropAt = rs.indexOf(row);
+
+          const marker = laneBox.querySelector('.tl-drop');
+
+          const onMove = (ev) => {
+            const dx = ev.clientX - x0;
+            if (!moved && Math.abs(dx) < 3) return;
+            if (!moved) { mark(); marked = true; }
+            moved = true;
+            if (edge) {
+              // ── 裁剪 ──
+              const d = dx / pps;
+              if (edge === 'l') {
+                const v = Math.max(0, Math.min(startIn + d, startOut - 0.3));
+                setClip(s.id, { in: Number(v.toFixed(2)), out: Number(startOut.toFixed(2)) });
+              } else {
+                const v = Math.min(total || (startOut + d), Math.max(startOut + d, startIn + 0.3));
+                setClip(s.id, { in: Number(startIn.toFixed(2)), out: Number(v.toFixed(2)) });
+              }
+              paintLanes();
+              paintProps();
+              return;
             }
-            to = idx;
-            if (idx >= rows.length) list.append(marker);
-            else list.insertBefore(marker, rows[idx]);
+            // ── 换位置 ──
+            const laneRect = laneBox.getBoundingClientRect();
+            const x = ev.clientX - laneRect.left;
+            const cur = rowsOf();
+            let idx = cur.length;
+            for (let k = 0; k < cur.length; k += 1) {
+              if (x < (cur[k].start + cur[k].span / 2) * pps) { idx = k; break; }
+            }
+            dropAt = idx;
+            if (marker) {
+              marker.style.display = '';
+              marker.style.left = `${(idx >= cur.length ? tailX(cur) : cur[idx].start) * pps}px`;
+            }
+            block.classList.add('dragging');
           };
-          row.classList.add('cut-dragging');
-          place(e.clientY);
-          const onMove = (ev) => place(ev.clientY);
+
           const onUp = () => {
             document.removeEventListener('pointermove', onMove);
             document.removeEventListener('pointerup', onUp);
-            marker.remove();
-            row.classList.remove('cut-dragging');
-            // 自己被拿走之后，后面每一位都往前挪了一格
-            const target = to > from ? to - 1 : to;
-            if (target === from) return;
+            block.classList.remove('dragging');
+            if (marker) marker.style.display = 'none';
+            if (!moved) {
+              // 没拖动 = 只是点了一下：选中它，顺便把播放头挪过来看一眼
+              seek(row.start, { play: false });
+              paintLanes();
+              return;
+            }
+            if (edge) { done(); return; }
+            const from = draft.order.indexOf(s.id);
+            const visible = rowsOf().map((r) => r.shot.id);
+            const target = dropAt >= visible.length
+              ? draft.order.length
+              : draft.order.indexOf(visible[dropAt]);
+            let to = target > from ? target - 1 : target;
+            if (to === from) { paintLanes(); return; }
+            if (!marked) mark();
             const next = draft.order.slice();
-            const [moved] = next.splice(from, 1);
-            next.splice(target, 0, moved);
+            next.splice(from, 1);
+            next.splice(Math.max(0, Math.min(to, next.length)), 0, s.id);
             draft.order = next;
-            redraw();
-            save();
+            done();
           };
+
           document.addEventListener('pointermove', onMove);
           document.addEventListener('pointerup', onUp);
         });
-
-        syncs.push(sync);
-        sync();
-        return row;
       }
 
-      // ───────────── 音轨 ─────────────
-      /**
-       * 三条轨摆在片段上面，因为**声音的问题是整片性的**：
-       * "音效太吵""音乐盖住台词"从来不是某一镜的事。
-       * 摆在每一行里的话，人要点十三次才关得掉一件事。
-       */
-      function paintAudio() {
-        const box = h('div', { class: 'cut-audio' });
-        const trackBtn = (name, label, hint) => h('button', {
-          class: `btn sm ${draft.tracks[name] === false ? 'ghost' : 'on'}`,
-          title: hint,
-          onclick: () => {
-            if (draft.tracks[name] === false) delete draft.tracks[name];
-            else draft.tracks[name] = false;
-            redraw();
-            save();
-          }
-        }, `${draft.tracks[name] === false ? '已关闭' : '开'} · ${label}`);
+      const tailX = (rs) => (rs.length ? rs[rs.length - 1].start + rs[rs.length - 1].span : 0);
 
+      // 拖播放头
+      head.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const move = (ev) => {
+          const r = laneBox.getBoundingClientRect();
+          seek((ev.clientX - r.left) / pps, { play: false });
+        };
+        const up = () => {
+          document.removeEventListener('pointermove', move);
+          document.removeEventListener('pointerup', up);
+        };
+        document.addEventListener('pointermove', move);
+        document.addEventListener('pointerup', up);
+      });
+
+      // ───────────── 声音那一排设置 ─────────────
+      /**
+       * 三条轨的开关做在轨道名上（那是它该在的地方）。这一排放的是
+       * **调出来才知道对不对**的那几个数：音效音量、音乐音量、避让、响度。
+       */
+      function paintAudioBar() {
+        clear(audioBox);
         const putSetting = async (patch) => {
           try {
             await api('/settings', { method: 'POST', body: patch });
             Object.assign(settings, patch);
             if (state.catalog?.settings) Object.assign(state.catalog.settings, patch);
-          } catch (err) {
-            toast(err.message, 'err');
-          }
+          } catch (err) { toast(err.message, 'err'); }
         };
 
+        const sfxPct = h('span', { class: 'field-hint', style: 'margin:0;width:38px' },
+          `${Math.round((settings.sfxGain ?? 0.35) * 100)}%`);
         const sfxRange = h('input', {
           type: 'range', min: '0', max: '1', step: '0.05',
           value: String(settings.sfxGain ?? 0.35),
           oninput: (e) => { sfxPct.textContent = `${Math.round(Number(e.target.value) * 100)}%`; },
           onchange: (e) => putSetting({ sfxGain: Number(e.target.value) })
         });
-        const sfxPct = h('span', { class: 'field-hint', style: 'margin:0;width:38px' },
-          `${Math.round((settings.sfxGain ?? 0.35) * 100)}%`);
 
-        // ── 背景音乐 ──
         const musicInput = h('input', {
           type: 'file',
           accept: 'audio/mpeg,audio/mp4,audio/x-m4a,audio/aac,audio/wav,audio/flac,audio/ogg,.mp3,.m4a,.wav,.flac,.ogg',
@@ -2759,12 +3101,13 @@ export default {
                   project.edit = ev.project.edit;
                   draft.music = ev.project.edit?.music ? { ...ev.project.edit.music } : null;
                   delete draft.tracks.music;
+                  baseline = JSON.stringify(draft);
                 }
                 if (ev.type === 'error') err = ev.message;
               });
               if (err) throw new Error(err);
               toast('背景音乐就位。调好音量点「重新合成」，十几秒出片，不花钱', 'ok');
-              redraw();
+              paintAll();
             } catch (e) {
               toast(e.message, 'err');
             } finally {
@@ -2780,19 +3123,23 @@ export default {
           onclick: () => musicInput.click()
         }, draft.music ? '换一首' : '选一首本地音乐');
 
-        const musicRows = [];
+        const rows = [
+          h('div', { class: 'cut-track' },
+            h('span', { class: 'cut-name' }, '音效音量'), sfxRange, sfxPct,
+            h('span', { class: 'field-hint', style: 'margin:0' },
+              '压在台词底下（等响的话一声关门就能盖掉一句台词）。调 0 = 这次不混音效'),
+            h('span', { class: 'tl-sep' }),
+            h('label', { class: 'inline', style: 'gap:5px;margin:0' },
+              h('input', {
+                type: 'checkbox',
+                checked: settings.loudness !== false,
+                onchange: (e) => putSetting({ loudness: e.target.checked })
+              }),
+              h('span', { class: 'field-hint', style: 'margin:0' }, '统一响度（−16 LUFS）')))
+        ];
+
         if (draft.music) {
-          const setMusic = (patch, { redrawAfter = false } = {}) => {
-            draft.music = { ...draft.music, ...patch };
-            if (redrawAfter) redraw();
-            save();
-          };
-          const gainRange = h('input', {
-            type: 'range', min: '0', max: '0.8', step: '0.02',
-            value: String(draft.music.gain ?? 0.22),
-            oninput: (e) => { gainPct.textContent = `${Math.round(Number(e.target.value) * 100)}%`; },
-            onchange: (e) => setMusic({ gain: Number(e.target.value) })
-          });
+          const setMusic = (patch) => { mark(); draft.music = { ...draft.music, ...patch }; done(); };
           const gainPct = h('span', { class: 'field-hint', style: 'margin:0;width:38px' },
             `${Math.round((draft.music.gain ?? 0.22) * 100)}%`);
           const chk = (key, label, hint) => h('label', { class: 'inline', style: 'gap:5px;margin:0', title: hint },
@@ -2801,120 +3148,114 @@ export default {
               checked: draft.music[key] !== false,
               onchange: (e) => setMusic({ [key]: e.target.checked })
             }), h('span', { class: 'field-hint', style: 'margin:0' }, label));
-
-          musicRows.push(
-            h('div', { class: 'cut-track' },
-              h('span', { class: 'cut-name' }, '音量'), gainRange, gainPct,
-              chk('duck', '说话时自动压低', '广播和影视里的标准做法：有人说话音乐自动让开，说完自己回来。这一条打开和不打开，是"专业"和"自己拿剪映拼的"之间差别最大的一处'),
-              chk('loop', '不够长就循环', '曲子比片子短时接着从头放')),
-            h('div', { class: 'cut-track' },
-              h('span', { class: 'cut-name' }, '淡入淡出'),
-              h('input', {
-                type: 'number', min: '0', max: '10', step: '0.5', style: 'width:66px',
-                value: String(draft.music.fadeIn ?? 1.5),
-                onchange: (e) => setMusic({ fadeIn: Number(e.target.value) })
-              }),
-              h('span', { class: 'field-hint', style: 'margin:0' }, '秒进 /'),
-              h('input', {
-                type: 'number', min: '0', max: '20', step: '0.5', style: 'width:66px',
-                value: String(draft.music.fadeOut ?? 2.5),
-                onchange: (e) => setMusic({ fadeOut: Number(e.target.value) })
-              }),
-              h('span', { class: 'field-hint', style: 'margin:0' }, '秒出'),
-              h('button', {
-                class: 'btn ghost sm',
-                title: '撤下这首（文件不删，重新选还找得着）',
-                onclick: async () => {
-                  try {
-                    const p = await api(`/projects/${project.id}/music`, { method: 'DELETE' });
-                    project.edit = p.edit;
-                    draft.music = null;
-                    redraw();
-                    toast('已撤下背景音乐', 'ok');
-                  } catch (err) {
-                    toast(err.message, 'err');
-                  }
-                }
-              }, '移除')));
-        }
-
-        box.append(
-          h('div', { class: 'cut-track' },
-            h('span', { class: 'cut-name' }, '台词配音'),
-            trackBtn('voice', '台词', '整条关掉：这次不混任何配音，文件都还在'),
-            h('span', { class: 'field-hint', style: 'margin:0' }, '关掉之后字幕照出 —— 想做纯画面样片时很好用')),
-          h('div', { class: 'cut-track' },
-            h('span', { class: 'cut-name' }, '音效'),
-            trackBtn('sfx', '音效', '整条关掉：这次不混任何画外音效'),
-            h('span', { class: 'field-hint', style: 'margin:0' }, '音量'), sfxRange, sfxPct,
-            h('span', { class: 'field-hint', style: 'margin:0' }, '压在台词底下（等响的话一声关门就能盖掉一句台词）')),
-          h('div', { class: 'cut-track' },
+          rows.push(h('div', { class: 'cut-track' },
+            h('span', { class: 'cut-name' }, '音乐'),
+            h('span', { class: 'field-hint', style: 'margin:0;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' },
+              `♪ ${draft.music.name || '未命名'}`),
+            h('input', {
+              type: 'range', min: '0', max: '0.8', step: '0.02',
+              value: String(draft.music.gain ?? 0.22),
+              oninput: (e) => { gainPct.textContent = `${Math.round(Number(e.target.value) * 100)}%`; },
+              onchange: (e) => setMusic({ gain: Number(e.target.value) })
+            }), gainPct,
+            chk('duck', '说话时自动压低',
+              '广播和影视里的标准做法：有人说话音乐自动让开，说完自己回来。这一条打开和不打开，是"专业"和"自己拿剪映拼的"之间差别最大的一处'),
+            chk('loop', '不够长就循环', '曲子比片子短时接着从头放'),
+            h('span', { class: 'field-hint', style: 'margin:0' }, '淡入'),
+            h('input', {
+              type: 'number', min: '0', max: '10', step: '0.5', style: 'width:60px',
+              value: String(draft.music.fadeIn ?? 1.5),
+              onchange: (e) => setMusic({ fadeIn: Number(e.target.value) })
+            }),
+            h('span', { class: 'field-hint', style: 'margin:0' }, '淡出'),
+            h('input', {
+              type: 'number', min: '0', max: '20', step: '0.5', style: 'width:60px',
+              value: String(draft.music.fadeOut ?? 2.5),
+              onchange: (e) => setMusic({ fadeOut: Number(e.target.value) })
+            }),
+            pickBtn, musicInput,
+            h('button', {
+              class: 'btn ghost sm',
+              title: '撤下这首（文件不删，重新选还找得着）',
+              onclick: async () => {
+                try {
+                  const p = await api(`/projects/${project.id}/music`, { method: 'DELETE' });
+                  project.edit = p.edit;
+                  mark();
+                  draft.music = null;
+                  done();
+                  toast('已撤下背景音乐', 'ok');
+                } catch (err) { toast(err.message, 'err'); }
+              }
+            }, '移除')));
+          rows.push(h('p', { class: 'field-hint', style: 'margin:6px 0 0' },
+            '⚠ 曲子的授权要你自己确认。这个应用不内置也不下载任何曲库 —— 那些文件的授权我们无从核实，而侵权的后果会落在你头上。'));
+        } else {
+          rows.push(h('div', { class: 'cut-track' },
             h('span', { class: 'cut-name' }, '背景音乐'),
-            draft.music ? trackBtn('music', '音乐', '整条关掉：这次不混音乐，文件还在') : null,
-            h('span', { class: 'field-hint', style: 'margin:0;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' },
-              draft.music
-                ? `♪ ${draft.music.name || '未命名'}${draft.music.seconds ? `（${Math.floor(draft.music.seconds / 60)}:${String(Math.round(draft.music.seconds % 60)).padStart(2, '0')}）` : ''}`
-                : '还没配乐'),
-            pickBtn, musicInput),
-          ...musicRows,
-          h('div', { class: 'cut-track' },
-            h('span', { class: 'cut-name' }, '统一响度'),
-            h('label', { class: 'inline', style: 'gap:5px;margin:0' },
-              h('input', {
-                type: 'checkbox',
-                checked: settings.loudness !== false,
-                onchange: (e) => putSetting({ loudness: e.target.checked })
-              }),
-              h('span', { class: 'field-hint', style: 'margin:0' },
-                '把整条音轨拉到 −16 LUFS。不做的话不同来源的配音和音乐各有各的响度，观众要一集一集调音量 —— 那是"业余"最直接的信号'))),
-          draft.music
-            ? h('p', { class: 'field-hint', style: 'margin:8px 0 0' },
-              '⚠ 曲子的授权要你自己确认。这个应用不内置也不下载任何曲库 —— 那些文件的授权我们无从核实，而侵权的后果会落在你头上。')
-            : null
-        );
-        return box;
+            h('span', { class: 'field-hint', style: 'margin:0' }, '还没配乐'),
+            pickBtn, musicInput));
+        }
+        audioBox.append(...rows);
       }
 
-      const redraw = () => {
-        clear(host);
-        syncs = [];
-        const list = h('div', { class: 'cut-list' });
-        draft.order.forEach((id, i) => {
-          if (!byId.has(id)) return;
-          list.append(paintRow(id, i, list));
-        });
-        host.append(
-          h('h2', { class: 'panel-title' }, '剪辑台'),
-          h('p', { class: 'panel-hint' },
-            '拖 ⠿ 调顺序、拖裁剪条两端设入出点、换转场和画面效果、开关音轨、配背景音乐 —— 改完点下面「重新合成」，',
-            h('b', {}, '十几秒出片，一分钱不花'),
-            '（不重新生成任何素材）。配音和字幕会跟着一起挪。'),
-          paintAudio(),
-          list,
-          h('div', { class: 'inline', style: 'margin-top:12px;flex-wrap:wrap' },
-            h('button', {
-              class: 'btn primary',
-              onclick: async () => {
-                await save();
-                run('compose', '重新合成');
-              }
-            }, '重新合成（不花钱）'),
-            h('button', {
-              class: 'btn ghost',
-              title: '把顺序、入出点、跳过、转场、效果、静音全部清掉，回到自动剪辑的结果。背景音乐和音轨开关不动',
-              onclick: async () => {
-                draft.order = natural.slice();
-                draft.clips = {};
-                redraw();
-                await save();
-                toast('片段这一块已恢复成自动剪辑的结果（音乐和音轨开关没动）', 'ok');
-              }
-            }, '恢复默认'),
-            h('span', { class: 'field-hint cut-total', style: 'margin:0' }, footText()))
+      // ───────────── 底部 ─────────────
+      function paintFoot() {
+        clear(footBox);
+        const rs = rowsOf();
+        footBox.append(
+          h('button', {
+            class: 'btn primary',
+            onclick: async () => { stopPlay(); await save(); run('compose', '重新合成'); }
+          }, '重新合成（不花钱）'),
+          h('button', {
+            class: 'btn ghost',
+            title: '把顺序、入出点、跳过、转场、效果、静音全部清掉，回到自动剪辑的结果。背景音乐和音轨开关不动',
+            onclick: async () => {
+              mark();
+              draft.order = natural.slice();
+              draft.clips = {};
+              done();
+              toast('片段这一块已恢复成自动剪辑的结果（音乐和音轨开关没动）', 'ok');
+            }
+          }, '恢复默认'),
+          h('span', { class: 'field-hint cut-total', style: 'margin:0' },
+            `用 ${rs.length} / ${clips.length} 镜，约 ${totalOf(rs).toFixed(1)} 秒`
+            + '（重叠类转场会各吃掉 0.5 秒，成片以合成结果为准）')
         );
-      };
+      }
 
-      redraw();
+      function paintAll() {
+        paintShelf();
+        paintProps();
+        paintLanes();
+        paintAudioBar();
+        paintFoot();
+      }
+
+      host.append(
+        h('h2', { class: 'panel-title' }, '剪辑台'),
+        h('p', { class: 'panel-hint' },
+          '拖片段换位置、拖两端裁剪、点▶就地看 —— 改完点下面「重新合成」，',
+          h('b', {}, '十几秒出片，一分钱不花'),
+          '（不重新生成任何素材）。配音和字幕会跟着一起挪。'),
+        h('div', { class: 'tl-top' },
+          shelfBox,
+          h('div', { class: 'tl-stage' }, video,
+            h('p', { class: 'field-hint', style: 'margin:6px 0 0' },
+              '预览是按剪辑后的顺序逐段播原始素材，配音、音效、音乐都跟着放。',
+              h('b', {}, '它不等于成片'),
+              '：音乐给台词让路（自动避让）和转场是合成那一步做的，这里听不到；镜与镜之间会有一次很短的加载停顿。')),
+          propsBox),
+        barBox,
+        h('div', { class: 'tl-wrap' }, labelsBox, scrollBox),
+        audioBox,
+        footBox
+      );
+
+      paintAll();
+      // 首屏要等布局出来才知道一屏有多宽，宽度为 0 时算出来的 pps 是废的
+      requestAnimationFrame(() => { fitted = false; paintLanes(); });
       return host;
     }
 

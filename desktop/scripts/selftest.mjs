@@ -2316,6 +2316,23 @@ section('预演台：把"中景"变成一组数');
     const im = s.split('\n').filter((l) => /^\s*import\s/.test(l));
     check(`${file} 保持零依赖（它要原样发给浏览器）`, im.length === 0, im.join(' / '));
   }
+
+  /**
+   * edit.js 也走那条路（/edit.js），但它**允许** import 上面那两个 ——
+   * 在浏览器里 `../transitions.js` 从 `/edit.js` 出发正好解析到 `/transitions.js`，
+   * 而那条路由是有的。
+   *
+   * 允许的就这两个。多一个（比如顺手 import 了 store.js）浏览器就会去请求
+   * 一个不存在的地址，而 import 失败会让**整个界面模块加载不起来** ——
+   * 表现是剪辑台整块不出来，或者更糟：页面在、时间线是空的。
+   */
+  const editSrc = fs.readFileSync(path.join(PROJECT_ROOT, 'core', 'pipeline', 'edit.js'), 'utf8');
+  const editImports = [...editSrc.matchAll(/^\s*import\s.*?from\s+'([^']+)'/gm)].map((m) => m[1]);
+  const allowed = ['../transitions.js', '../fx.js'];
+  check('edit.js 只 import 那两个也发给浏览器的模块（它自己也要发过去）',
+    editImports.every((x) => allowed.includes(x)), editImports.join(' / '));
+  check('并且 node: 内置一个都没有（浏览器里没有它们）',
+    !/from\s+'node:/.test(editSrc));
 }
 
 section('连续动作的首帧是上一段的末帧 —— 机位不该跳');

@@ -1250,82 +1250,176 @@ select.mini {
  * 这一块是成片出来**之后**才用得上的：调顺序、裁一刀、换转场、配乐。
  * 素材已经在盘上，动的只是"怎么拼" —— 所以这里的每一个控件都必须
  * 让人一眼看出"改这个不用重新生成"，视觉上不能长得像"重跑"那一类按钮。
+ *
+ * 做成时间线而不是清单，是因为**节奏是看出来的**：哪一段特别长、
+ * 哪几段挤在一起、音乐从第几秒进。这些在清单里全是数字，在轨道上是一眼的事。
  */
-.cut-list { display: flex; flex-direction: column; gap: 6px; }
-.cut-row {
+.tl-panel { margin-top: 14px; }
+.tl-top {
   display: grid;
-  grid-template-columns: 22px 26px 76px 1fr;
-  gap: 10px;
-  align-items: center;
-  padding: 8px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface-2);
+  grid-template-columns: 190px minmax(0, 1fr) 250px;
+  gap: 12px;
+  align-items: start;
 }
-.cut-row.off { opacity: .45; }
-/* 拖动中的那一行压暗，让人看清楚"我正在搬的是它" */
-.cut-row.cut-dragging { opacity: .35; }
+@media (max-width: 1180px) {
+  .tl-top { grid-template-columns: 1fr; }
+}
+
+/* ── 左：素材架。标成"不用"的那几镜从轨道上消失了，得有个地方能放回来 ── */
+.tl-shelf {
+  border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2);
+  padding: 8px; max-height: 340px; overflow-y: auto;
+}
+.tl-shelf-hd { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
+.tl-card {
+  display: flex; align-items: center; gap: 8px; padding: 5px;
+  border-radius: 8px; cursor: pointer; border: 1px solid transparent;
+}
+.tl-card:hover { background: var(--surface-3); }
+.tl-card.on { border-color: var(--beam); background: var(--beam-wash); }
+.tl-card.off { opacity: .5; }
+.tl-card-img {
+  width: 54px; height: 31px; object-fit: cover; border-radius: 4px;
+  background: #000; flex: 0 0 54px;
+}
+.tl-card-t { font-size: 12px; font-weight: 600; }
+
+/* ── 中：预览。剪辑台没有预览就只是一张表 ── */
+.tl-stage { min-width: 0; }
+.tl-video {
+  width: 100%; max-height: 46vh; border-radius: var(--r);
+  background: #000; display: block; cursor: pointer;
+}
+
+/* ── 右：属性面板 ── */
+.tl-props {
+  border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2);
+  padding: 10px; display: flex; flex-direction: column; gap: 8px;
+}
+.tl-props-hd { font-weight: 700; font-size: 13px; }
+.tl-field { display: flex; flex-direction: column; gap: 3px; }
+.tl-field > label { font-size: 12px; color: var(--ink-dim); }
+.tl-field select, .tl-field input { width: 100%; }
+.tl-two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.tl-val { font-size: 13px; }
+.tl-val.big { font-size: 18px; font-weight: 700; color: var(--beam); }
+
+/* ── 工具条 ── */
+.tl-bar {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin: 12px 0 6px;
+}
+.tl-sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
+.tl-clock {
+  font-family: var(--code); font-size: 12px; color: var(--ink-dim);
+  padding: 2px 8px; border-radius: 6px; background: var(--surface-2);
+}
+
+/* ── 时间线本体 ── */
+.tl-wrap {
+  display: flex; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); overflow: hidden;
+}
+.tl-labels { flex: 0 0 96px; border-right: 1px solid var(--line); background: var(--surface-2); }
+.tl-lab {
+  display: flex; align-items: center; justify-content: space-between; gap: 4px;
+  padding: 0 8px; font-size: 12px; color: var(--ink-dim);
+  border-bottom: 1px solid var(--line-soft);
+}
+.tl-lab.off { opacity: .45; }
+.tl-eye {
+  background: none; border: none; cursor: pointer; font-size: 13px;
+  padding: 2px 4px; line-height: 1; color: inherit;
+}
+.tl-scroll { flex: 1; overflow-x: auto; overflow-y: hidden; }
+.tl-inner { position: relative; }
+
+.tl-ruler { position: relative; border-bottom: 1px solid var(--line-soft); }
+.tl-tick { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--line); }
+.tl-tick span {
+  position: absolute; left: 3px; top: 2px; font-size: 10px;
+  color: var(--ink-faint); white-space: nowrap;
+}
+
+.tl-lane { position: relative; border-bottom: 1px solid var(--line-soft); }
+.tl-lane.audio { background: var(--surface-2); }
+.tl-lane.off { opacity: .35; }
+
+/* 片段：宽度 = 时长 × 缩放。背景横向平铺缩略图，做出胶片条的样子 */
+.tl-clip {
+  position: absolute; top: 3px; bottom: 3px;
+  border: 2px solid var(--line); border-radius: 6px;
+  background: var(--surface-3) center / auto 100% repeat-x;
+  cursor: grab; overflow: hidden; box-sizing: border-box;
+}
+.tl-clip.on { border-color: var(--beam); box-shadow: 0 0 0 1px var(--beam) inset; }
+.tl-clip.muted { filter: grayscale(.5); }
+.tl-clip.dragging { opacity: .5; cursor: grabbing; }
+.tl-tag {
+  position: absolute; left: 3px; top: 3px;
+  font-size: 10px; font-weight: 700; color: #fff;
+  background: rgba(0, 0, 0, .62); border-radius: 4px; padding: 1px 5px;
+  display: flex; gap: 3px; align-items: center;
+}
+.tl-chip {
+  font-style: normal; font-size: 9px; background: var(--beam);
+  border-radius: 3px; padding: 0 3px;
+}
+.tl-len {
+  position: absolute; right: 3px; bottom: 3px;
+  font-size: 10px; color: #fff; background: rgba(0, 0, 0, .62);
+  border-radius: 4px; padding: 1px 5px;
+}
+/* 两端各留一条 8px 的把手区。窄片段上它们会盖住整块，这时拖动就是裁剪 —— 可以接受 */
+.tl-trim {
+  position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize;
+  background: linear-gradient(var(--beam), var(--beam)); opacity: 0;
+}
+.tl-clip:hover .tl-trim { opacity: .55; }
+.tl-trim.l { left: 0; }
+.tl-trim.r { right: 0; }
+
+/* 转场标记摆在接缝上 —— 它属于"两段之间"，不属于任何一段 */
+.tl-trans {
+  position: absolute; top: 3px; z-index: 2; transform: translateX(-50%);
+  font-size: 9px; padding: 1px 4px; border-radius: 4px;
+  background: var(--caution); color: var(--ground); font-weight: 700;
+  pointer-events: none;
+}
+
 /* 落点线。没有它的话拖到一半完全不知道会插到哪儿 */
-.cut-marker {
-  height: 3px; margin: -1px 0;
-  background: var(--beam); border-radius: 2px;
-}
-.cut-grip {
-  cursor: grab; user-select: none; touch-action: none;
-  color: var(--ink-faint); text-align: center; font-size: 15px; line-height: 1;
-  padding: 6px 0;
-}
-.cut-grip:active { cursor: grabbing; }
-.cut-idx { color: var(--ink-faint); font-size: 12px; text-align: right; }
-.cut-thumb {
-  width: 76px; height: 43px; object-fit: cover;
-  border-radius: 6px; background: #000; cursor: zoom-in; display: block;
-}
-.cut-main { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-.cut-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.cut-desc {
-  color: var(--ink-faint); font-size: 12px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;
-}
-.cut-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.cut-tools select { padding: 3px 6px; font-size: 12px; }
-.cut-tools input[type="number"] { width: 66px; padding: 3px 6px; font-size: 12px; }
-
-/* ── 裁剪条 ──
- * 数字输入框谁都会做，但没人能拿着两个数字想象出"这一刀切在哪儿"。
- * 这条是真正让它成为剪辑台的东西：亮的那一段就是会进成片的那一段。
- */
-.cut-bar {
-  position: relative; height: 24px; border-radius: 6px;
-  background: var(--surface-3); border: 1px solid var(--line);
-  touch-action: none; user-select: none;
-}
-.cut-keep {
-  position: absolute; top: 0; bottom: 0;
-  background: var(--beam-wash);
-  border-left: 2px solid var(--beam); border-right: 2px solid var(--beam);
-}
-.cut-handle {
-  position: absolute; top: -3px; bottom: -3px; width: 12px;
-  cursor: ew-resize; border-radius: 4px;
-  background: var(--beam); opacity: .85;
-}
-.cut-handle:hover, .cut-handle:active { opacity: 1; }
-.cut-handle.a { transform: translateX(-6px); }
-.cut-handle.b { transform: translateX(-6px); }
-.cut-bar-txt {
-  position: absolute; left: 8px; top: 50%; transform: translateY(-50%);
-  font-size: 11px; color: var(--ink-dim); pointer-events: none;
-  text-shadow: 0 1px 2px var(--ground);
+.tl-drop {
+  position: absolute; top: 0; bottom: 0; width: 3px;
+  background: var(--beam); border-radius: 2px; z-index: 4; pointer-events: none;
 }
 
-/* ── 音轨 ── */
+.tl-ab {
+  position: absolute; top: 4px; bottom: 4px; border-radius: 4px;
+  font-size: 10px; color: var(--ground); line-height: 16px;
+  padding: 0 4px; overflow: hidden; white-space: nowrap;
+}
+.tl-ab.voice { background: var(--good); }
+.tl-ab.sfx { background: var(--caution); }
+.tl-ab.music { background: var(--beam); color: #fff; }
+.tl-ab.off { opacity: .35; text-decoration: line-through; }
+
+/* 播放头 */
+.tl-head {
+  position: absolute; top: 0; width: 2px; background: var(--alarm);
+  z-index: 5; cursor: ew-resize;
+}
+.tl-head::before {
+  content: ''; position: absolute; top: -1px; left: -5px;
+  border: 6px solid transparent; border-top-color: var(--alarm);
+}
+
+/* ── 声音那一排设置 ── */
 .cut-audio {
   border: 1px solid var(--line); border-radius: 10px;
-  background: var(--surface-2); padding: 10px; margin-bottom: 12px;
+  background: var(--surface-2); padding: 10px; margin-top: 12px;
 }
 .cut-track { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 5px 0; }
 .cut-track + .cut-track { border-top: 1px dashed var(--line-soft); }
-.cut-track .cut-name { width: 84px; color: var(--ink-dim); font-size: 13px; }
+.cut-track .cut-name { width: 78px; color: var(--ink-dim); font-size: 13px; }
 .cut-track input[type="range"] { width: 130px; }
 .btn.on { border-color: var(--beam); color: var(--beam); }

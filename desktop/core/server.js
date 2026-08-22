@@ -1448,7 +1448,7 @@ export function createServer({ lan = false } = {}) {
        * 放行的是这两个确切的路径，不是"所有 .js"—— 后者会把电脑版
        * 整套界面代码一起放出去，那不是同一件事。
        */
-      const SHARED_MODULES = ['/previz-canvas.js', '/previz.js', '/duration.js', '/transitions.js', '/fx.js'];
+      const SHARED_MODULES = ['/previz-canvas.js', '/previz.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js'];
       const isShell =
         url.pathname === '/m'
         || url.pathname.startsWith('/m/')
@@ -1548,6 +1548,26 @@ export function createServer({ lan = false } = {}) {
         const file = url.pathname.slice(1);
         return fs.readFile(path.join(HERE, file), (err, data) => {
           if (err) return json(res, 404, { error: `找不到 ${file}` });
+          res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
+          res.end(data);
+        });
+      }
+      /**
+       * 剪辑那一层也发原件 —— 这一条是这几个里最要紧的。
+       *
+       * 剪辑台要在浏览器里**画出成片的时间线**：每一镜从第几秒开始、占多长。
+       * 而同一份计算在服务端决定配音摆在第几秒、字幕什么时候出、片段怎么裁。
+       * 界面里另写一份的话，两份一定会漂（少减一次转场重叠、时长策略读了
+       * 另一个字段），表现是"时间线上写第 22 秒、成片里在第 20.5 秒" ——
+       * 没有任何报错，只能拿秒表去比，而没人会那么做。
+       *
+       * 它 import 的 `../transitions.js`、`../fx.js` 在浏览器里会解析到
+       * `/transitions.js`、`/fx.js`（URL 里 `/` 的上一级还是 `/`），
+       * 正好就是上面那两条路由。自检守着"只许 import 这两个"。
+       */
+      if (url.pathname === '/edit.js') {
+        return fs.readFile(path.join(HERE, 'pipeline', 'edit.js'), (err, data) => {
+          if (err) return json(res, 404, { error: '找不到 edit.js' });
           res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
           res.end(data);
         });
