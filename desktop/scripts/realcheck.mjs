@@ -339,6 +339,90 @@ section('整条走一遍：转场 + 补齐 + 混音一起来');
     cutSecs != null && Math.abs(cutSecs - 1.5) < 0.3, String(cutSecs));
 }
 
+/**
+ * ── 走 studio.compose() 那一整条，不是只测 ffmpeg.concat ──
+ *
+ * 这一段是被一个真实故障逼出来的：用户点合成，收到
+ * `✕ dir is not defined`。自动剪辑那段代码引用了 `dir` 和 `signal`，
+ * 而 compose 的作用域里**两个都不存在**。
+ *
+ * 为什么一路溜到了用户手上：
+ *   · selftest 跑在没有 FFmpeg 的环境里 → 自动剪辑整段被 if 跳过，
+ *     那几行代码**一次都没有被执行过**；
+ *   · realcheck 有 FFmpeg，但它只测 `ffmpeg.concat`、`autocut` 这些零件，
+ *     **从来没有调用过 studio.compose()** —— 零件全好，装配的那一步没人验。
+ *
+ * 所以这里补的是"装配"：拿真视频，走一遍真正的那个函数。
+ */
+section('合成这一整步（studio.compose，不是只测零件）');
+{
+  const store = await import('../core/store.js');
+  const studio = await import('../core/pipeline/studio.js');
+
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'fd-compose-'));
+  const keepData = process.env.FUTUREDREAM_DATA_DIR;
+  process.env.FUTUREDREAM_DATA_DIR = sandbox;
+
+  try {
+    const p = store.create({ title: '合成走查', script: '两镜。' });
+    const assets = store.assetDir(p.id);
+    fs.mkdirSync(assets, { recursive: true });
+    /**
+     * 第一段**故意做成"冻头"**：首帧冻 1.2 秒再开始动，
+     * 和模型起势那几帧是同一个形态。
+     *
+     * 用纯色片是不行的 —— 整段一帧不动，自动剪辑会（正确地）一帧都不剪，
+     * 于是它什么也不说，这一节就变成"跑没跑到都看不出来"。
+     * 要验它真的跑到了，就得给它一段真有东西可剪的素材。
+     */
+    const a = path.join(DIR, 'dead.mp4');
+    spawnSync(bin, ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=320x180:r=25:d=3',
+      '-vf', 'tpad=start_mode=clone:start_duration=1.2',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', a]);
+    const bClip = clip('c2.mp4', 3, 'blue');
+    const a2 = path.join(assets, 's1.mp4');
+    const b2 = path.join(assets, 's2.mp4');
+    fs.copyFileSync(a, a2);
+    fs.copyFileSync(bClip, b2);
+    store.update(p.id, (x) => {
+      x.shots = [
+        { id: 's1', index: 1, description: '一', duration: 3, transition: 'cut', videoPath: a2 },
+        { id: 's2', index: 2, description: '二', duration: 3, transition: 'cut', videoPath: b2 }
+      ];
+      return x;
+    });
+
+    const notes = [];
+    let err = null;
+    // 让自动剪辑那段有活可干（默认就是这两个值，写出来是为了这一节不受外部设置影响）
+    settings.patch({ autoCut: true, durationPolicy: 'trim' });
+    await studio.compose(p.id, { onEvent: (ev) => { if (ev.message) notes.push(ev.message); } })
+      .catch((e) => { err = e; });
+
+    check('compose 跑完没抛异常', !err, err ? `${err.message}\n${String(err.stack).split('\n')[1] || ''}` : '');
+    /**
+     * 这两条单独列出来，是因为那次故障的形状正是它们：
+     * 不是"合成质量不好"，是**一个引用不存在的变量的 ReferenceError**。
+     * 这类错在没跑到那一行之前完全隐形。
+     */
+    check('没有 ReferenceError（dir / signal 那一类）',
+      !err || !/is not defined/.test(err.message || ''), err?.message);
+    const outFile = store.read(p.id).outputs?.video;
+    check('真出片了', Boolean(outFile) && fs.existsSync(outFile), String(outFile));
+    if (outFile && fs.existsSync(outFile)) {
+      const secs = await ffmpeg.probeDuration(outFile);
+      check(`成片时长像样（${secs?.toFixed(2)}s）`, secs != null && secs > 3 && secs < 8, String(secs));
+    }
+    // 自动剪辑默认开着，这台机器又有 FFmpeg —— 那段代码必须真的被执行到
+    check('自动剪辑那段真的跑到了（否则这一节等于没验）',
+      notes.some((m) => /自动剪辑|入点|没动|冻/.test(m || '')), notes.join(' | ').slice(0, 300));
+  } finally {
+    if (keepData) process.env.FUTUREDREAM_DATA_DIR = keepData;
+    else delete process.env.FUTUREDREAM_DATA_DIR;
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+}
+
 // ── 收尾 ──
 fs.rmSync(DIR, { recursive: true, force: true });
 console.log(`\n${'─'.repeat(50)}`);

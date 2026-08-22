@@ -4184,9 +4184,19 @@ export function toSRT(cues) {
     .join('\n');
 }
 
-export async function compose(projectId, { onEvent } = {}) {
+/**
+ * ⚠ signal 必须在签名里接住。
+ *
+ * 服务端一直是带着它调的（`runner(b, { ...opts, signal: job.signal, onEvent })`），
+ * 而这里原来没声明 —— 于是下面自动剪辑那段里的 `jobs.checkpoint(signal, …)`
+ * 引用的是一个**不存在的变量**，直接 ReferenceError。
+ * 顺带，「停下来」在合成这一步也就一直是不起作用的。
+ */
+export async function compose(projectId, { onEvent, signal = null } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
+  // 产物和中间文件都放这一份项目自己的目录里
+  const dir = store.assetDir(projectId);
 
   const ordered = project.shots.slice().sort((a, b) => a.index - b.index);
   const withVideo = ordered.filter((s) => s.videoPath);
@@ -4238,9 +4248,21 @@ export async function compose(projectId, { onEvent } = {}) {
         const total = (await ffmpeg.probeDuration(shot.videoPath)) || 0;
         const win = autocut.pickWindow(hashes, total, trims?.[i] || 0, { hamming: imghash.hamming });
         cuts.push({ ...win, index: shot.index });
-      } catch {
-        // 一段分析不了不该拖垮整次合成 —— 那一段照原样切
+      } catch (err) {
+        /**
+         * 一段分析不了不该拖垮整次合成 —— 那一段照原样切。
+         *
+         * ⚠ 但**必须出声**。原来这里是个光秃秃的 `catch {}`：
+         * 采帧失败、哈希算不出、探不到时长，通通被吞掉，
+         * 表现是"自动剪辑什么也没做"，和"这几段本来就不用剪"
+         * 长得一模一样。我自己写走查时就被它骗了一轮 ——
+         * 断言红着，而日志里一个字都没有。
+         */
         cuts.push({ in: 0, out: 0, deadHead: 0, trimmed: false, index: shot.index });
+        onEvent?.({
+          type: 'note',
+          message: `第 ${shot.index} 镜分析不了，这一段照原样切（${String(err.message || err).slice(0, 120)}）`
+        });
       } finally {
         fs.rmSync(outDir, { recursive: true, force: true });
       }

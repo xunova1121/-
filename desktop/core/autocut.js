@@ -75,9 +75,28 @@ export const MAX_HEAD = 1.0;
  */
 export function headTrim(diffs, { step = STEP, max = MAX_HEAD } = {}) {
   const floor = Math.max(STILL_FLOOR, median(diffs) * STILL_RATIO);
+  /**
+   * ⚠ **一帧的编码噪点不算"开始动了"，要连着两帧才算。**
+   *
+   * 原来是见到第一个 `d >= floor` 就停。而 floor 的下限是 1，
+   * 于是**任何一处差值为 1 的抖动都会把整个检测掐掉** ——
+   * 偏偏那个抖动最常出现在最前面：第一帧是 I 帧、第二帧是 P 帧，
+   * 编码方式不同，哪怕画面完全一样，dHash 也可能差 1。
+   *
+   * 真实形态长这样：`[1, 0, 0, 0, 0, 0, 2, 2, 2, …]`
+   * 肉眼一看就是"前六帧没动"，而旧写法在第一个 1 上就停了，判成 0。
+   *
+   * 这不是假想 —— 我给走查造测试片时随手加了个 `-preset ultrafast`，
+   * 它就变成了这个样子，而同一段素材换个 preset 就能正常判出来。
+   * 厂商出的片子用什么编码参数我们管不着，所以这条得扛得住。
+   *
+   * 连着两帧才认，代价可控：MAX_HEAD 那条安全带还在（最多砍 1 秒）。
+   */
   let dead = 0;
-  for (const d of diffs) {
-    if (d >= floor) break;
+  for (let i = 0; i < diffs.length; i += 1) {
+    const moving = diffs[i] >= floor;
+    const nextMoving = i + 1 < diffs.length ? diffs[i + 1] >= floor : true;
+    if (moving && nextMoving) break;
     dead += 1;
   }
   const seconds = dead * step;
