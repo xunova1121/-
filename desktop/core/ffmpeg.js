@@ -578,6 +578,53 @@ export async function grabFrame(videoPath, outPath, { at = 'end' } = {}) {
 }
 
 /**
+ * 开头**冻住了多少秒** —— 用 FFmpeg 自己的 freezedetect。
+ *
+ * ════════ 为什么换掉自己那套 ════════
+ *
+ * 原来判"起势那几帧"是：每 0.2 秒抠一张 PNG 出来 → 算感知哈希 →
+ * 比相邻两帧的汉明距离。一段十几张图，二十镜就是两三百次落盘 + 解码。
+ * 而 FFmpeg 里本来就有一个专门干这件事的滤镜，一趟过，不落任何临时文件。
+ *
+ * 更要紧的是**准**。哈希那条路我刚被咬过一次：编码器在第一帧和第二帧
+ * 之间留下的噪点（I 帧 vs P 帧）就足以让整段检测失效 ——
+ * 同一段素材换个 `-preset` 结论就不一样。而 freezedetect 有一个
+ * 显式的噪声门限（n），噪点骗不了它。时间也是连续值，不再是 0.2 秒一档。
+ *
+ * ── 参数 ──
+ *   n  噪声门限。默认 0.001（-60dB）对我们太严，压缩过的"静止"画面
+ *      到不了那么干净。0.003 是拿真片子试出来的。
+ *   d  至少冻多久才算。0.3 秒 —— 再短的顿挫观众感觉不到，剪它没意义。
+ *
+ * 回 null 表示**这个 FFmpeg 没有这个滤镜**（老版本），让调用方退回旧路，
+ * 而不是当成"没有冻结"—— 那两件事的处理完全不同。
+ */
+export async function headFreeze(videoPath, { noise = 0.003, min = 0.3 } = {}) {
+  if (!fs.existsSync(videoPath)) throw new Error(`视频不存在：${videoPath}`);
+  let stderr = '';
+  try {
+    ({ stderr } = await run(['-v', 'info', '-i', videoPath, '-vf', `freezedetect=n=${noise}:d=${min}`, '-f', 'null', '-']));
+  } catch (err) {
+    stderr = String(err.stderr || err.message || '');
+    if (/No such filter|Unknown filter/i.test(stderr)) return null;
+    throw err;
+  }
+  if (/No such filter|Unknown filter/i.test(stderr)) return null;
+
+  /**
+   * start 和 duration 是**分开两行**打出来的（duration 落在冻结结束后的那一帧上）。
+   * 按出现顺序配对即可 —— 一段视频里可能有好几处冻结，我们只关心
+   * **从头开始**的那一处：中间冻住是内容本身，剪掉会丢东西。
+   */
+  const starts = [...stderr.matchAll(/freeze_start:\s*([\d.]+)/g)].map((m) => Number(m[1]));
+  const durs = [...stderr.matchAll(/freeze_duration:\s*([\d.]+)/g)].map((m) => Number(m[1]));
+  if (!starts.length) return 0;
+  // 第一处冻结不是从 0 开始的话，开头就是在动的
+  if (starts[0] > 0.05) return 0;
+  return Number.isFinite(durs[0]) ? durs[0] : 0;
+}
+
+/**
  * 把一张图缩小、转成 JPEG —— 专门给"内联发给厂商的参考图"用。
  *
  * ════════ 它补的是哪个洞 ════════

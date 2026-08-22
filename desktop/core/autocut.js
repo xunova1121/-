@@ -112,11 +112,25 @@ export function headTrim(diffs, { step = STEP, max = MAX_HEAD } = {}) {
  * @param total   这一段实际多长
  * @param want    这一镜要多长（分镜表里那个数）。给 0 表示不裁，只去头
  */
-export function pickWindow(hashes, total, want, { step = STEP, hamming, ...opts } = {}) {
-  const diffs = [];
-  for (let i = 1; i < hashes.length; i += 1) diffs.push(hamming(hashes[i - 1], hashes[i]));
-
-  const dead = headTrim(diffs, { step, ...opts });
+export function pickWindow(hashes, total, want, { step = STEP, hamming, dead: given = null, ...opts } = {}) {
+  /**
+   * `dead` 可以由外面直接给。
+   *
+   * 给的那一路是 FFmpeg 自己的 freezedetect —— 它比这里的采帧+感知哈希
+   * 强在三处：一趟出结果不落临时文件、噪声门限可调（编码噪点骗不了它）、
+   * 时间是连续值而不是 0.2 秒一档。
+   * 采帧那条留着兜底：老版本 FFmpeg 没有 freezedetect。
+   */
+  const dead = given != null
+    ? Math.min(Math.max(0, given), opts.max ?? MAX_HEAD)
+    : headTrim(
+      (() => {
+        const diffs = [];
+        for (let i = 1; i < hashes.length; i += 1) diffs.push(hamming(hashes[i - 1], hashes[i]));
+        return diffs;
+      })(),
+      { step, ...opts }
+    );
   const length = want > 0 ? want : Math.max(0, total - dead);
 
   /**

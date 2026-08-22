@@ -4241,12 +4241,24 @@ export async function compose(projectId, { onEvent, signal = null } = {}) {
       const outDir = path.join(tmpRoot, String(shot.id));
       try {
         // eslint-disable-next-line no-await-in-loop
-        const frames = await ffmpeg.sampleFrames(shot.videoPath, outDir, { step: autocut.STEP });
-        // eslint-disable-next-line no-await-in-loop
-        const hashes = await Promise.all(frames.map((f) => imghash.hashImage(f)));
-        // eslint-disable-next-line no-await-in-loop
         const total = (await ffmpeg.probeDuration(shot.videoPath)) || 0;
-        const win = autocut.pickWindow(hashes, total, trims?.[i] || 0, { hamming: imghash.hamming });
+        /**
+         * 先问 FFmpeg 自己的 freezedetect：一趟出结果、不落临时文件、
+         * 噪声门限可调（编码噪点骗不了它）。
+         * 回 null 表示这个 FFmpeg 没这个滤镜（老版本），才退回采帧+哈希那条老路。
+         */
+        // eslint-disable-next-line no-await-in-loop
+        const frozen = await ffmpeg.headFreeze(shot.videoPath).catch(() => null);
+        let win;
+        if (frozen !== null) {
+          win = autocut.pickWindow([], total, trims?.[i] || 0, { hamming: imghash.hamming, dead: frozen });
+        } else {
+          // eslint-disable-next-line no-await-in-loop
+          const frames = await ffmpeg.sampleFrames(shot.videoPath, outDir, { step: autocut.STEP });
+          // eslint-disable-next-line no-await-in-loop
+          const hashes = await Promise.all(frames.map((f) => imghash.hashImage(f)));
+          win = autocut.pickWindow(hashes, total, trims?.[i] || 0, { hamming: imghash.hamming });
+        }
         cuts.push({ ...win, index: shot.index });
       } catch (err) {
         /**

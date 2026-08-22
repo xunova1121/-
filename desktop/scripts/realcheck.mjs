@@ -285,6 +285,49 @@ section('整条走一遍：转场 + 补齐 + 混音一起来');
   check('转场没退回硬切', !notes.some((m) => /没做成|按硬切合成/.test(m)), notes.join(' | '));
 }
 
+/**
+ * ── freezedetect：FFmpeg 自己那个"画面冻住了"的滤镜 ──
+ *
+ * 拿它换掉了原来"每 0.2 秒抠一张 PNG + 感知哈希"那套。换的理由不是省事，
+ * 是**准**：哈希那条路被编码噪点咬过一次（第一帧 I 帧、第二帧 P 帧，
+ * 画面一样 dHash 也差 1），同一段素材换个 -preset 结论就不一样。
+ * 这一节要证明的正是"换个 preset 也认得出来"。
+ */
+section('freezedetect：开头冻了多久');
+{
+  const mk = (name, extra) => {
+    const out = path.join(DIR, name);
+    spawnSync(bin, ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=320x180:r=25:d=2.8',
+      '-vf', 'tpad=start_mode=clone:start_duration=1.2', '-c:v', 'libx264', ...extra,
+      '-pix_fmt', 'yuv420p', out], { encoding: 'utf8' });
+    return out;
+  };
+  const fast = mk('fz-fast.mp4', ['-preset', 'ultrafast']);
+  const norm = mk('fz-norm.mp4', []);
+  const a1 = await ffmpeg.headFreeze(fast);
+  const a2 = await ffmpeg.headFreeze(norm);
+  check('认出开头冻了约 1.2 秒', a1 != null && Math.abs(a1 - 1.2) < 0.25, String(a1));
+  check('换个编码 preset 结论一样（哈希那条路在这儿会翻车）',
+    a2 != null && Math.abs(a2 - a1) < 0.15, `${a1} vs ${a2}`);
+
+  const moving = path.join(DIR, 'fz-moving.mp4');
+  spawnSync(bin, ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=320x180:r=25:d=3',
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', moving], { encoding: 'utf8' });
+  check('全程在动的那段判 0（不能乱剪真内容）',
+    (await ffmpeg.headFreeze(moving)) === 0, String(await ffmpeg.headFreeze(moving)));
+
+  /**
+   * 中间冻住的**不能**算废头 —— 那是内容本身（比如一个静止的定格），
+   * 剪掉会丢东西。只有从 0 开始的那一段才算起势。
+   */
+  const midFreeze = path.join(DIR, 'fz-mid.mp4');
+  spawnSync(bin, ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=320x180:r=25:d=1.5',
+    '-vf', 'tpad=stop_mode=clone:stop_duration=1.5', '-c:v', 'libx264', '-preset', 'ultrafast',
+    '-pix_fmt', 'yuv420p', midFreeze], { encoding: 'utf8' });
+  check('冻在后半段的不算废头（那是内容，剪了会丢东西）',
+    (await ffmpeg.headFreeze(midFreeze)) === 0, String(await ffmpeg.headFreeze(midFreeze)));
+}
+
 // ── 自动剪辑：真视频，真采帧 ──
 {
   const ih = await import('../core/imghash.js');
