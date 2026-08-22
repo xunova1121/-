@@ -5527,6 +5527,96 @@ section('转场：真发给 FFmpeg 的那串参数长什么样');
   check('退回硬切之后也不重编码', /-c copy/.test(tiny.calls[tiny.calls.length - 1]), tiny.calls[tiny.calls.length - 1]);
 }
 
+section('中转站只转对话：不该四条一起红');
+{
+  /**
+   * ════════ 这一节挡的是什么 ════════
+   *
+   * 国内用 OpenAI 基本都要走一个中转站。而 OpenAI 家族的自检发的是
+   * `GET /v1/models` —— 它便宜，但**不是流水线真正会用的接口**。
+   * 中转站十有八九只转 `/chat/completions`，`/models` 要么 404、要么 401。
+   *
+   * 后果：信号链上「剧本 / 调度 / 复核 / 出图」**四条一起红**
+   *（它们本来就共用同一次自检），而出图出片一点问题都没有。
+   * 用户看到四个红叉，第一反应是去翻密钥 —— 全是白折腾。
+   *
+   * 所以只要服务端确实回话了（有 HTTP 状态码 = 网络通、地址对），
+   * 就再问一次真正要用的那条路。
+   */
+  const providers = await import('../core/providers/index.js');
+  const vaultMod = await import('../core/vault.js');
+
+  const hits = [];
+  const relay = http.createServer((req, res) => {
+    hits.push(`${req.method} ${req.url}`);
+    if (req.url.endsWith('/models')) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: { message: 'Not Found' } }));
+    }
+    if (req.url.endsWith('/chat/completions')) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ choices: [{ message: { content: 'pong' } }] }));
+    }
+    res.writeHead(404).end('{}');
+  });
+  await new Promise((r) => relay.listen(0, '127.0.0.1', r));
+  const relayUrl = `http://127.0.0.1:${relay.address().port}/v1`;
+
+  const keepBase = settings.get('baseUrls')?.openai;
+  const keepChatP = settings.get('chatProvider');
+  const keepChatM = settings.get('chatModel');
+  vaultMod.setSecret('OPENAI_API_KEY', 'sk-test-relay');
+  settings.patch({
+    baseUrls: { openai: relayUrl },
+    chatProvider: 'openai',
+    chatModel: 'gpt-4o-mini'
+  });
+
+  const r1 = await providers.probe('openai');
+  check('列模型 404 但对话通时，判为**通**', r1.ok === true, JSON.stringify(r1).slice(0, 200));
+  check('并且如实说明是"列模型那条不通、对话是通的"',
+    /对话是通的/.test(r1.note || ''), r1.note);
+  check('用的是路由到这一家的那个模型（不是目录里的示例）',
+    r1.model === 'gpt-4o-mini', String(r1.model));
+  check('先探便宜那条，不通才退一步 —— 不是一上来就发对话',
+    hits[0]?.includes('/models') && hits[1]?.includes('/chat/completions'), hits.join(' | '));
+
+  /**
+   * ⚠ 反面：对话也不通的时候**不能报"列模型 404"**。
+   * 那句话对用户没有任何用 —— 真正要看的是对话那次的原因。
+   */
+  hits.length = 0;
+  const dead = http.createServer((req, res) => {
+    hits.push(req.url);
+    res.writeHead(401, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: { message: 'Incorrect API key provided' } }));
+  });
+  await new Promise((r) => dead.listen(0, '127.0.0.1', r));
+  settings.patch({ baseUrls: { openai: `http://127.0.0.1:${dead.address().port}/v1` } });
+  const r2 = await providers.probe('openai');
+  check('对话也不通时判为不通', r2.ok === false, JSON.stringify(r2).slice(0, 160));
+  check('报的是对话那次的原因（密钥不对），不是"列模型 404"',
+    /密钥|API key|401/i.test(r2.reason || '') && !/404/.test(r2.reason || ''), r2.reason);
+
+  /**
+   * ⚠ 网络层根本没连上时**不重试**。
+   * 重试一次只是让人多等 20 秒，而结论一个字都不会变。
+   */
+  hits.length = 0;
+  settings.patch({ baseUrls: { openai: 'http://127.0.0.1:45997/v1' } });
+  const r3 = await providers.probe('openai');
+  check('压根连不上时判为不通', r3.ok === false, JSON.stringify(r3).slice(0, 160));
+  check('连不上就不再退一步试对话（白等 20 秒）', r3.status === 0, String(r3.status));
+
+  relay.close();
+  dead.close();
+  settings.patch({
+    baseUrls: { openai: keepBase || '' },
+    chatProvider: keepChatP,
+    chatModel: keepChatM
+  });
+}
+
 section('小剪刀：一镜切成两段');
 {
   /**
@@ -6984,9 +7074,15 @@ check('拿不到模型列表时说明白该去哪儿找', modelList.ok === false
 section('开机自动探一遍路由到的服务商');
 {
   const before = upstream.imagePrompts.length;
-  const probesBefore = logbus.list({ limit: 200 }).filter((x) => /自检/.test(x.label || '')).length;
+  const probeLog = () => logbus.list({ limit: 200 }).filter((x) => /自检/.test(x.label || ''));
+  // 按**这一条记录本身**的 id 去差集，不是按服务商 —— 之前探过的那几家
+  // 还在日志里，按服务商差集会把它们这一趟的请求算漏
+  const seenIds = new Set(probeLog().map((x) => x.id));
+  const probesBefore = probeLog().length;
   const r = await (await fetch(`${appUrl}/api/routing/check`, { method: 'POST' })).json();
-  const probesAfter = logbus.list({ limit: 200 }).filter((x) => /自检/.test(x.label || '')).length;
+  const fresh = probeLog().filter((x) => !seenIds.has(x.id));
+  const probesAfter = probeLog().length;
+  const touched = new Set(fresh.map((x) => x.provider));
 
   check('六种能力都给了结论（剧本、调度、复核、出图、视频、配音）',
     Object.keys(r.capabilities || {}).length === 6, JSON.stringify(Object.keys(r.capabilities || {})));
@@ -7004,11 +7100,20 @@ section('开机自动探一遍路由到的服务商');
 
   /**
    * 同一家被多条能力用到时只该探一次。
-   * 自检时 chat/vision/image/video 全指向 volcengine、tts 指向 dashscope，
-   * 所以这一趟最多两次请求 —— 探五遍同一个端点既慢又没意义。
+   * 自检时 chat/vision/image/video 全指向 volcengine、tts 指向 dashscope。
+   *
+   * ⚠ 量的是**探过几家**，不是发了几次请求。
+   *
+   * 第一条探针不通时会再问一次"真正要用的那条路"（一次最小对话）——
+   * 那是有意的第二次请求，不是"重复探"。按请求数卡的话，
+   * 这条断言会在一个完全正确的改动上红，而它想守的东西一点没变。
    */
   check('同一家不重复探（四条能力同一家时只探一次）',
-    probesAfter - probesBefore <= 2, `这一趟发了 ${probesAfter - probesBefore} 次自检请求`);
+    touched.size <= 2, `这一趟探了 ${touched.size} 家：${[...touched].join('、')}`);
+  // 但也不能没完没了：每家最多两次（第一条探针 + 退一步的那次对话）
+  check('每家最多两次请求（探针 + 退一步那次对话）',
+    fresh.length <= touched.size * 2,
+    `${touched.size} 家发了 ${fresh.length} 次：${fresh.map((x) => x.provider).join('、')}`);
 
   // 密钥没配的那家要说"缺什么"，而不是笼统地说"连不上"——
   // 后者会让人去查一个根本不存在的网络问题

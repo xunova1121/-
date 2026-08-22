@@ -392,7 +392,7 @@ export async function probe(providerId) {
       provider.probe.paramErrorMeansOk && (res.status === 400 || res.status === 422);
     const ok = res.ok || paramErrorOk;
 
-    return {
+    const out = {
       ok,
       status: res.status,
       model: body?.model || null,
@@ -405,9 +405,88 @@ export async function probe(providerId) {
         : '',
       reason: ok ? '' : diagnose(res)
     };
+
+    if (!out.ok) {
+      /**
+       * ⚠ **列模型这个接口不通，不等于这家不能用。**
+       *
+       * OpenAI 家族的自检发的是 `GET /v1/models` —— 它便宜，但**不是流水线
+       * 真正会用的接口**。而中转站（国内用 OpenAI 基本都要走一个）十有八九
+       * 只转 `/chat/completions`，`/models` 要么 404、要么 401、要么直接不开放。
+       *
+       * 后果是信号链上「剧本 / 调度 / 复核 / 出图」**四条一起红**，
+       * 而实际上出图出片一点问题都没有 —— 这四条本来就共用同一次自检。
+       * 用户看到四个红叉，第一反应是去翻密钥，全是白折腾。
+       *
+       * 所以只要**服务端确实回话了**（有 HTTP 状态码 = 网络通、地址对），
+       * 就再问一次真正要用的那条路：一次 max_tokens=1 的对话。
+       * 它通了就算通，并且如实说明"列模型那条不通，但对话是通的"。
+       *
+       * 网络层根本没连上时不重试 —— 那种情况重试一次只是多等 20 秒。
+       */
+      const chatUrl = provider.endpoints?.chat;
+      const model = chatProbeModel(provider);
+      if (chatUrl && model) {
+        try {
+          const second = await send({
+            provider: provider.id,
+            label: '连通性自检（改用一次最小对话）',
+            method: 'POST',
+            url: interpolate(chatUrl, provider),
+            body: { model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1 },
+            timeoutMs: 20000
+          }, null);
+          // 400/422 说明鉴权过了、路径对了，只是参数不合这个模型的口味
+          //（比如 o 系列不认 max_tokens）—— 那不叫"连不上"
+          const paramOk = second.status === 400 || second.status === 422;
+          if (second.ok || paramOk) {
+            return {
+              ok: true,
+              status: second.status,
+              model,
+              latencyMs: Date.now() - started,
+              logId: second.logId,
+              note:
+                `列模型那条接口不通（${diagnose(res).split(/[。\n]/)[0]}），`
+                + `但**对话是通的**（${model}）—— 中转站大多只转 /chat/completions，`
+                + '这不影响出图出片。'
+            };
+          }
+          // 对话也不通：报对话那次的原因，它比"列模型 404"有用得多
+          return {
+            ok: false,
+            status: second.status,
+            model,
+            latencyMs: Date.now() - started,
+            logId: second.logId,
+            reason: diagnose(second)
+          };
+        } catch (err) {
+          return { ok: false, status: 0, latencyMs: Date.now() - started, reason: err.message };
+        }
+      }
+    }
+    return out;
   } catch (err) {
     return { ok: false, status: 0, latencyMs: Date.now() - started, reason: err.message };
   }
+}
+
+/**
+ * 退一步用哪个模型去试对话。
+ *
+ * 优先**用户真正路由到这一家的那个对话模型** —— 拿目录里的示例去试，
+ * 会出现"自检过了但生产用的模型根本不存在"，那比不自检还糟。
+ */
+function chatProbeModel(provider) {
+  const s = settings.all();
+  for (const [pk, mk] of [['chatProvider', 'chatModel'], ['directorProvider', 'directorModel'],
+    ['visionProvider', 'visionModel']]) {
+    if (s[pk] === provider.id && s[mk]) return s[mk];
+  }
+  const m = (provider.models || []).find((x) => x.capability === 'chat')
+    || (provider.models || []).find((x) => x.capability === 'vision');
+  return m?.id || null;
 }
 
 /**
