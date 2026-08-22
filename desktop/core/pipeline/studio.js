@@ -78,7 +78,7 @@ const SHOT_PROMPT = `你是动态漫画的分镜导演。把剧本拆成可直�
       "motion": "给图生视频的运镜与动态提示，一句话",
       "dialogue": "旁白或台词，没有留空字符串",
       "speaker": "这句台词是谁说的，填角色名；旁白或没有台词就留空字符串",
-      "sound": "这一镜听得见但看不见的声音（敲门声、脚步声、雨声、远处汽笛）。没有就留空字符串",
+      "sound": "⚠ 绝大多数镜这里都该留空。只有当这个声音本身在传递画面没说的信息时才填（关着的门后传来敲门声、画外一声玻璃碎）。全片最多三五处。环境音（风声、脚步声、街市声）一律留空 —— 那种东西每镜一个会让成片听起来很乱",
       "transition": "进入这一镜的方式：cut（硬切，默认）/ fade（黑场淡入，换时间换地点用）/ dissolve（叠化，时间流逝或情绪转折用）。绝大多数镜都该是 cut",
       "link": "和上一镜的关系：continuous（动作不能断，比如伸手→握住门把手，会把上一镜的末帧锁成这一镜的首帧）/ cut（同一场戏里换机位）/ new-scene（换场次）。场次的头一镜固定 new-scene",
       "lineKind": "台词类型：speech（对白，他在画面里说出来）/ inner（心里话，他自己的声音但嘴不动）/ voiceover（旁白，画外叙述）/ offscreen（画外音，说话人不在这一镜画面里）。没有台词就不用给",
@@ -93,6 +93,9 @@ const SHOT_PROMPT = `你是动态漫画的分镜导演。把剧本拆成可直�
   紧张、动作、转场用 3 秒短镜；抒情、对话、定场用 5~6 秒长镜。
   不要平均分配 —— 均分看着整齐，剪出来很呆板；
 - **叠化会吃掉 0.5 秒**（两段画面重叠着渐变，那半秒是重叠掉的，不是多出来的）。
+- **音效要稀**：sound 只在"这一声本身是信息"时填，全片最多三五处。
+  每镜都配一个环境音，成片听起来是一串互不相干的响动，比没有音效糟得多 ——
+  真实的片子靠一条连续的环境底噪撑着，而那条底噪不是这么一镜一镜拼出来的。
   用了几处叠化，就在时长里把那几个 0.5 秒补回来，否则成片会比说好的短；
 - **不要**在 description 里重复角色外貌 —— 外貌由设定集统一注入，你重复写反而会冲突；
 - characters 和 scene 必须严格用下面设定集里给出的名字，不要自创；
@@ -4318,14 +4321,32 @@ export async function compose(projectId, { onEvent, signal = null } = {}) {
    * gain 压低同样不是可选项：等响的话一声关门就能盖掉一句台词。
    */
   const sfxGain = Number(settings.get('sfxGain'));
-  const sfxAt = timeline
+  /**
+   * `sfxGain: 0` = **这一次不要音效**，而不是"用默认音量"。
+   *
+   * 用户的原话："13个片13个音效很乱"。音效已经花钱出好了，重出一遍
+   * 既慢又白花；他要的只是"这次先别混进去"。原来 `<= 0` 会被
+   * 下面那行悄悄兜回 0.35 —— 也就是**关不掉**。
+   * 关掉之后重新合成一次就行，不重新生成任何东西。
+   */
+  const sfxOff = Number.isFinite(sfxGain) && sfxGain <= 0;
+  if (sfxOff) {
+    const has = timeline.filter((r) => r.shot.sfxPath && fs.existsSync(r.shot.sfxPath)).length;
+    if (has) {
+      onEvent?.({
+        type: 'note',
+        message: `音效音量设成了 0，这次 ${has} 条音效一条都不混进去（文件还在，把音量调回去重新合成就能听见）`
+      });
+    }
+  }
+  const sfxAt = (sfxOff ? [] : timeline)
     .filter((r) => r.shot.sfxPath && fs.existsSync(r.shot.sfxPath))
     .map((r) => ({
       path: r.shot.sfxPath,
       at: r.start,
       index: r.shot.index,
       span: r.span,
-      gain: Number.isFinite(sfxGain) && sfxGain > 0 ? sfxGain : 0.35
+      gain: Number.isFinite(sfxGain) && sfxGain > 0 ? sfxGain : 0.35 // 只在"没填"时兜底，0 是明确的关
     }));
   if (sfxAt.length) {
     onEvent?.({ type: 'note', message: `混入 ${sfxAt.length} 条画外音效，音量压到 ${(sfxAt[0].gain * 100).toFixed(0)}%（台词要压得住它）` });

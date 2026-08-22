@@ -199,6 +199,30 @@ export function audit(project, { lintResults = [], threshold = 75 } = {}) {
       fix: '重出这几镜，分数会跟着重打。'
     });
   }
+  /**
+   * 音效太密。
+   *
+   * 用户的原话："13个片13个音效很乱"。每一镜配一个环境音，成片听起来是
+   * 一串互不相干的响动 —— 比完全没有音效糟得多。真实的片子靠一条**连续的
+   * 环境底噪**撑着，而那条底噪不是一镜一镜拼出来的。
+   *
+   * 三分之一是拍脑袋定的门槛吗？不是：音效的作用是"这一声本身在传递
+   * 画面没说的信息"，那种时刻在一部短片里本来就只有三五处。
+   * 超过三分之一的镜头都有，几乎可以肯定是当成环境音在填。
+   */
+  const withSfx = shots.filter((s) => String(s.sound || '').trim());
+  if (shots.length >= 6 && withSfx.length > shots.length / 3) {
+    add(items, 'warn', {
+      id: 'sfx-too-dense',
+      what: `${shots.length} 镜里有 ${withSfx.length} 镜带音效（第 ${withSfx.slice(0, 8).map((s) => s.index).join('、')}${withSfx.length > 8 ? ' 等' : ''}）`,
+      why: '每一镜一个音效，连起来是一串互不相干的响动，比完全没有音效更糟 —— '
+        + '真实的片子靠一条连续的环境底噪撑着，而那条底噪不是一镜一镜拼出来的。',
+      fix: '把环境音那类（风声、脚步声、街市声）清空，只留"这一声本身是信息"的那三五处'
+        + '（关着的门后传来敲门声、画外一声玻璃碎）。'
+        + '想先听听没有音效是什么效果：把「设置 → 音效音量」调成 0，重新合成一次即可，不用重新生成。'
+    });
+  }
+
   const headBad = shots.filter((s) => s.headMatch?.verdict === 'mismatch');
   if (headBad.length) {
     add(items, 'warn', {

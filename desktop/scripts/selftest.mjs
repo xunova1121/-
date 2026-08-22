@@ -3856,6 +3856,29 @@ section('成片体检：现在能不能发');
   check('走的是接住真实末帧那条路，也不报', !tailOk.items.some((i) => i.id === 'seam-nothing'),
     JSON.stringify(tailOk.items.map((i) => i.id)));
 
+  /**
+   * ══ 音效太密 ══
+   *
+   * 用户的原话："13个片13个音效很乱"。每一镜配一个环境音，成片听起来是
+   * 一串互不相干的响动 —— 比完全没有音效糟得多。
+   */
+  {
+    const many = q.audit({ shots: Array.from({ length: 12 }, (_, i) => done(i + 1, { sound: '风声' })) });
+    const hit = many.items.find((i) => i.id === 'sfx-too-dense');
+    check('每镜都有音效 → 报出来', Boolean(hit), JSON.stringify(many.items.map((i) => i.id)));
+    check('并且给一条不用重新生成的出路（音量调 0 再合成一次）',
+      /音效音量/.test(hit?.fix || '') && /不用重新生成/.test(hit?.fix || ''), hit?.fix);
+    // 稀疏是正常的，不能报 —— 一条永远红的检查等于没有检查
+    const few = q.audit({
+      shots: Array.from({ length: 12 }, (_, i) => done(i + 1, i < 3 ? { sound: '敲门声' } : {}))
+    });
+    check('只有三处音效时不报（这才是正常的用法）',
+      !few.items.some((i) => i.id === 'sfx-too-dense'), JSON.stringify(few.items.map((i) => i.id)));
+    // 镜头太少时也不报：3 镜里 2 镜有音效说明不了什么
+    const tiny = q.audit({ shots: [done(1, { sound: 'a' }), done(2, { sound: 'b' }), done(3)] });
+    check('镜头太少时不下这个结论', !tiny.items.some((i) => i.id === 'sfx-too-dense'));
+  }
+
   // ── warn：质量风险，但未必看得出来 ──
   const low = q.audit({ shots: [done(1, { consistency: { score: 60 } })] });
   check('一致性偏低是 warn 不是 blocker', low.verdict === 'fixable', JSON.stringify(low.counts));
@@ -3928,6 +3951,37 @@ section('自动剪辑：跳掉开头那几帧不动的');
 
   // 整段静止的空镜：那就是它本来的样子，剪掉就没了
   check('全程静止的空镜一帧都不剪', ac.headTrim([0, 0, 0, 0, 0, 0]) === 0);
+
+  /**
+   * ══ 富余不多时从头上切，别从尾上切 ══
+   *
+   * 用户的原话："画面还没演示完就拼凑到下一个画面了，为了硬拼时间，
+   * 把一些好的画面给截了"。
+   *
+   * 形状：分镜写 4 秒，厂商只出固定档（秘塔 5/10/15）给回 5 秒，
+   * 旧写法切 [0,4] —— 扔掉最后一秒。而模型是按"这一段演完"编排节奏的，
+   * 起手慢、收在最后，那一秒恰恰是动作收尾。
+   * 同样砍一秒：从头砍掉的是起势（看不出来），从尾砍掉的是收尾（一眼看出）。
+   */
+  {
+    const still = Array(25).fill(5); // 全程在动，dead=0，把变量控制住
+    const w = ac.pickWindow([], 5, 4, { hamming: () => 0, dead: 0 });
+    check('5 秒的片子要 4 秒 → 切后 4 秒，不是前 4 秒',
+      w.in === 1 && w.out === 5, JSON.stringify(w));
+    // 已经有废头时，两者叠加但不超过总长
+    const w2 = ac.pickWindow([], 5, 4, { hamming: () => 0, dead: 0.6 });
+    check('已经有废头时，入点仍然落在能把结尾留住的位置',
+      w2.out === 5 && w2.in === 1, JSON.stringify(w2));
+    // 富余太大就不硬挑了 —— 从头上砍六秒会把动作开头也砍掉
+    const w3 = ac.pickWindow([], 10, 4, { hamming: () => 0, dead: 0 });
+    check('富余太大时不从头硬砍（那种情况该用 keep 策略）',
+      w3.in === 0 && w3.out === 4, JSON.stringify(w3));
+    // 不裁（want=0）时不受影响
+    const w4 = ac.pickWindow([], 5, 0, { hamming: () => 0, dead: 0.6 });
+    check('不裁时只去废头，结尾原样留着',
+      w4.in === 0.6 && w4.out === 5, JSON.stringify(w4));
+    void still;
+  }
 
   /**
    * ⚠ **一帧的编码噪点不算"开始动了"。**

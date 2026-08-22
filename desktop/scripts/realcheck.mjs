@@ -366,8 +366,23 @@ section('freezedetect：开头冻了多久');
   /**
    * 这一条就是那个 bug 的回执。它要是红了，说明判据又变回"绝对阈值"那种，
    * 而后果是每一段都被白剪掉一秒。
+   *
+   * ⚠ 量的是 **deadHead**（检测结果），不是 in（最终入点）。
+   * 原来写的是 `in === 0`，那是把两件事混在了一起 —— 后来加了"富余不多时
+   * 从头上切"之后，一段全程在动、但比要的长 1 秒的片子，
+   * 入点会（正确地）落在 1 秒，而 deadHead 仍然是 0。
+   * 盯着 in 的话，这条会因为一个**正确的**改动而红，
+   * 然后逼着人去改回一个错的行为。
    */
-  check('全程在动的那段一帧都没剪', b.win.in === 0, JSON.stringify(b.win));
+  check('全程在动的那段，废头判 0（判据没退回绝对阈值）',
+    b.win.deadHead === 0, JSON.stringify(b.win));
+  /**
+   * 而窗口这边要的是另一件事：既然非切不可，**留结尾、切开头**。
+   * 模型是按"这一段演完"编排节奏的，收尾才是这一镜的看点。
+   */
+  const bTotal = await ffmpeg.probeDuration(moving);
+  check('非切不可时留住结尾（切的是开头那一截）',
+    Math.abs(b.win.out - bTotal) < 0.25, `${JSON.stringify(b.win)} total=${bTotal}`);
 
   // 入点要真的落进成片里，不能只是算出来一个数
   const cut = path.join(DIR, 'cut.mp4');
