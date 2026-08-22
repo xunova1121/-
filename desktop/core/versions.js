@@ -37,8 +37,23 @@ function parts(dest) {
 /**
  * 这个产物有哪些历史版本，**新的在前**。
  *
- * 排序按文件的修改时间，不按版本号里那个数字 —— 数字只保证唯一，
- * 不保证顺序（删掉中间几版之后就会出现空档）。时间才是人心里的顺序。
+ * 排序按文件的修改时间 —— 时间才是人心里的顺序。
+ *
+ * ⚠ **时间一样时必须拿版本号兜底**，否则顺序是随机的。
+ *
+ * 这不是理论上的隐患，是 Windows 上真出过的事：
+ *   · `renameSync` **不改 mtime** —— 归档出来的文件带的是它当初被写下的时间
+ *   · Windows 的系统时钟粒度约 15 毫秒，而连着重出几版远不到 15 毫秒
+ * 两条撞在一起，好几个版本的 mtime **一模一样**。JS 的 sort 对相等的键是
+ * 稳定排序，于是最终顺序取决于 `readdirSync` 给的顺序（Windows 上是字母序）
+ * —— 也就是**最旧的排在最前面**，正好反了。
+ *
+ * 后果是"回到上一版"回到的是**最旧那一版**。而这一步是覆盖当前产物的，
+ * 人点的时候以为是往回退一格。Linux 上完全看不出来（ext4 的 mtime 精确到纳秒，
+ * 天然分得开），CI 在 Windows 上跑才红。
+ *
+ * 版本号在这里是可靠的第二判据：archive() 取的是"现有最大值 + 1"，
+ * 所以号越大一定越新 —— 中间删空了几号也不影响这个结论。
  */
 export function list(dest) {
   const { dir, base, ext } = parts(dest);
@@ -63,7 +78,7 @@ export function list(dest) {
       return { path: full, n: Number(m[1]), at: new Date(at).toISOString(), ms: at };
     })
     .filter(Boolean)
-    .sort((a, b) => b.ms - a.ms);
+    .sort((a, b) => b.ms - a.ms || b.n - a.n);
 }
 
 /**

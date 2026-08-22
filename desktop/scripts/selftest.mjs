@@ -4092,6 +4092,36 @@ section('历史版本：重出之前把上一版留下来');
     v.list(dest).map((x) => fs.readFileSync(x.path, 'utf8')).join(','));
 
   /**
+   * ⚠ **几个版本的修改时间一模一样时，顺序也必须是对的。**
+   *
+   * 这一条不是假想。Windows 上真出过：`renameSync` 不改 mtime，
+   * 而 Windows 的系统时钟粒度约 15 毫秒 —— 连着重出几版远不到 15 毫秒，
+   * 于是好几版的 mtime 完全相等。JS 的 sort 对相等的键是稳定排序，
+   * 最终顺序变成 readdirSync 给的字母序，**最旧的排到了最前面**。
+   * 后果是"回到上一版"回到的是最旧那一版，而那一步是覆盖当前产物的。
+   *
+   * Linux 上天然看不出来（ext4 的 mtime 精确到纳秒，随手就分开了），
+   * 只有 CI 在 Windows 上跑才红 —— 而当时红的是上面那条，
+   * 报出来的是"内容不对"，完全看不出根因在排序。
+   *
+   * 所以这里**把时间抹平**，在 Linux 上复现 Windows 的那个条件。
+   */
+  const tie = fs.mkdtempSync(path.join(os2.tmpdir(), 'fd-vertie-'));
+  const td = path.join(tie, 'shot-9.png');
+  fs.writeFileSync(td, '第1版');
+  for (let i = 2; i <= 5; i += 1) {
+    v.archive(td);
+    fs.writeFileSync(td, `第${i}版`);
+  }
+  const sameTime = new Date(1700000000000);
+  for (const n of fs.readdirSync(tie)) fs.utimesSync(path.join(tie, n), sameTime, sameTime);
+  const tied = v.list(td);
+  check('时间完全相同时，仍然是新的在前',
+    tied.map((x) => x.n).join(',') === '4,3,2,1', tied.map((x) => x.n).join(','));
+  check('时间相同时"上一版"也还是上一版（不是最旧那一版）',
+    fs.readFileSync(tied[0].path, 'utf8') === '第4版', fs.readFileSync(tied[0].path, 'utf8'));
+
+  /**
    * 版本号取"现有最大值 + 1"，不是"现有个数 + 1"。
    * 按个数算的话，删掉旧版之后新版会撞上一个还在的号 —— 直接覆盖掉它，
    * 而那正是这个模块要防的事。
