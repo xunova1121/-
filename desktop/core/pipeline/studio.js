@@ -187,6 +187,35 @@ function usableRef(ref) {
   return ref;
 }
 
+/** 一张内联图大到该想办法了。400KB 的 base64 ≈ 300KB 的图 */
+const FAT_INLINE = 400 * 1024;
+const fatInline = (u) => typeof u === 'string' && u.startsWith('data:') && u.length > FAT_INLINE;
+
+/**
+ * 缓存的那个地址还能不能接着用 —— 首帧 / 末帧专用。
+ *
+ * ── 补的是"配完对象存储之后老项目没跟上"这个洞 ──
+ *
+ * imageRef / sheetUrl 是出图那一刻算出来的。没配对象存储时它是一个
+ * **几 MB 的 base64**，而且会被存进项目文件里。之后每一镜都直接复用它 ——
+ * usableRef() 只挡"带 Expires 的过期地址"，一个 2MB 的 data: URI
+ * 在它眼里完全可用。
+ *
+ * 于是会出现这样一件很伤人的事：用户照着我们的建议去配了对象存储，
+ * 满心以为请求体从几 MB 掉到几 KB —— 而老项目里那些镜头**照旧内联发**，
+ * 因为缓存里那一份还"可用"。问题一点没变，而他已经付出了配置的成本。
+ *
+ * 所以：缓存的是个胖内联图、而现在**有更好的路可走**（对象存储配好了），
+ * 就重算一次。没配的话保持原样 —— 重算出来还是同一个胖东西，白读一次盘。
+ *
+ * ⚠ 首帧/末帧这条路上**绝不缩图**：那两张是要按像素接上的。
+ */
+function reusableFrameRef(cached) {
+  if (!usableRef(cached)) return null;
+  if (fatInline(cached) && oss.ready()) return null;
+  return cached;
+}
+
 /**
  * 设定集参考图：过期的那张，**当场重新签一个**。
  *
@@ -226,8 +255,7 @@ async function refreshRefs(project, refs, { onEvent } = {}) {
    *
    * 400KB 的 base64 大约对应一张 300KB 的图，768px 的 JPEG 远在这之下。
    */
-  const FAT_INLINE = 400 * 1024;
-  const tooFat = (u) => typeof u === 'string' && u.startsWith('data:') && u.length > FAT_INLINE;
+  const tooFat = fatInline;
 
   for (let i = 0; i < images.length; i += 1) {
     const fat = tooFat(images[i]);
@@ -2093,7 +2121,7 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
   const ctx = await videoContextFor(project, shot, { onEvent, providerId, explain: true });
   const firstFrame =
     ctx.headFromTail?.url
-    || usableRef(shot.imageRef)
+    || reusableFrameRef(shot.imageRef)
     || (await toModelRef(shot.imagePath, { onEvent }));
   // 首帧只定住第一格，后面几秒全靠提示词和参考图撑着。
   // 所以这里和批量出视频走完全一样的一套：设定集提示词 + 场景/角色/道具参考图。
@@ -2889,7 +2917,7 @@ async function videoContextFor(project, shot, { onEvent, providerId = null, expl
       });
     } else {
       try {
-        lastFrameUrl = usableRef(next.imageRef) || (await toModelRef(next.imagePath, { onEvent }));
+        lastFrameUrl = reusableFrameRef(next.imageRef) || (await toModelRef(next.imagePath, { onEvent }));
         onEvent?.({
           type: 'note',
           message: `第 ${next.index} 镜标成「连续动作」，把它那张图锁成本镜末帧 —— 两镜之间会是无缝的`
@@ -3332,7 +3360,7 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
       const ctx = await videoContextFor(store.read(projectId), shot, { onEvent, providerId: useProvider });
       const firstFrame =
         ctx.headFromTail?.url
-        || usableRef(shot.imageRef)
+        || reusableFrameRef(shot.imageRef)
         || (await toModelRef(shot.imagePath, { onEvent }));
       // 设定集参考图一并带上（场景 + 角色 + 道具）：
       // 支持 r2v 的厂商（Vidu、H3）能靠它把人和环境一起锁住
@@ -3354,7 +3382,7 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
        */
       if (ctx.headFromTail && shot.imagePath) {
         try {
-          const own = usableRef(shot.imageRef) || (await toModelRef(shot.imagePath, { onEvent }));
+          const own = reusableFrameRef(shot.imageRef) || (await toModelRef(shot.imagePath, { onEvent }));
           if (own && !bibleRefs.images.includes(own)) {
             // 放在最前面：它比设定集参考图更贴这一镜要演的东西
             bibleRefs.images.unshift(own);
@@ -4416,3 +4444,6 @@ export async function runAll(projectId, { shotCount = 8, from = null, onEvent, s
 export const __usableRef = usableRef;
 export const __seamPlanOf = seamPlanOf;
 export const __refreshRefs = refreshRefs;
+
+/** 只给自检用 */
+export const __reusableFrameRef = reusableFrameRef;

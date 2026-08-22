@@ -5993,6 +5993,50 @@ section('内联参考图先缩小 —— 不然请求体被自己撑穿');
     ff.locate().available === false || Boolean(ffKeep), String(ff.locate().available));
 }
 
+section('配完对象存储，老项目要跟上');
+{
+  /**
+   * 一件很伤人的事：用户照着我们的建议去配了对象存储，满心以为请求体
+   * 从几 MB 掉到几 KB —— 而**老项目里那些镜头照旧内联发**。
+   *
+   * 因为 imageRef 是出图那一刻算出来的：没配 OSS 时它是一个几 MB 的
+   * base64，还被存进了项目文件。之后每一镜都直接复用它 ——
+   * usableRef() 只挡"带 Expires 的过期地址"，一个 2MB 的 data: URI
+   * 在它眼里完全可用。问题一点没变，而他已经付出了配置的成本。
+   *
+   * 这一组量的就是那条判断：胖内联图 + 现在有更好的路 = 重算。
+   */
+  const st = await import('../core/pipeline/studio.js');
+  const reuse = st.__reusableFrameRef;
+  const fat = `data:image/png;base64,${'A'.repeat(2 * 1024 * 1024)}`;
+  const thin = 'data:image/png;base64,AAAA';
+  const url = 'https://bucket.oss-cn-shanghai.aliyuncs.com/a.png';
+  const expired = 'https://bucket.oss-cn-shanghai.aliyuncs.com/a.png?Expires=1&Signature=x';
+
+  const ossMod = await import('../core/oss.js');
+  const wasReady = ossMod.ready();
+  check('这台自检机器上没配对象存储（下面几条的前提）', wasReady === false, String(wasReady));
+
+  // 没配 OSS 时：胖就胖着发 —— 重算出来还是同一个胖东西，白读一次盘
+  check('没配 OSS 时，胖内联图照旧复用', reuse(fat) === fat);
+  check('小的内联图当然也复用', reuse(thin) === thin);
+  check('过期的签名地址一律不复用', reuse(expired) === null);
+  check('没缓存就是没缓存', reuse('') === null && reuse(null) === null);
+
+  // 配上 OSS 之后：胖的那张要重算（这一次能换成几十字节的地址）
+  settings.patch({ oss: { enabled: true, bucket: 'b', region: 'oss-cn-shanghai' } });
+  vault.setSecret('ALIYUN_OSS_KEY_ID', 'ak-test');
+  vault.setSecret('ALIYUN_OSS_KEY_SECRET', 'sk-test');
+  check('配上之后 oss.ready() 是真的（不然下面几条是空断言）', ossMod.ready() === true);
+  check('配完 OSS，胖内联图不再复用（这次能换成地址）', reuse(fat) === null);
+  check('小的内联图仍然复用（换它没意义，白传一趟）', reuse(thin) === thin);
+  check('已经是地址的照旧复用', reuse(url) === url);
+  settings.patch({ oss: { enabled: false } });
+  vault.setSecret('ALIYUN_OSS_KEY_ID', '');
+  vault.setSecret('ALIYUN_OSS_KEY_SECRET', '');
+  check('跑完还原了（别把状态留给下一个用例）', ossMod.ready() === false);
+}
+
 section('待认领的任务不能变成黑洞');
 {
   // 提交成功、片子在厂商那边、我们没取回来 —— 这种状态既不算完成也不算失败，
