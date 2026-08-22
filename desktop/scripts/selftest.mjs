@@ -2303,6 +2303,19 @@ section('预演台：把"中景"变成一组数');
   const imports = src.split('\n').filter((l) => /^\s*import\s/.test(l));
   check('预演台的几何模块保持零依赖（它要原样发给浏览器）',
     imports.length === 0, imports.join(' / '));
+
+  /**
+   * 转场表和效果表走的是同一条路（/transitions.js、/fx.js）。
+   *
+   * 剪辑台上那两个下拉框直接读这两份清单 —— 在界面里另抄一份的话，
+   * 加一个新转场就得记得改两处，而漏掉界面那份没人会发现
+   *（引擎支持但选不到），漏掉引擎那份用户会报"选了没反应"。
+   */
+  for (const file of ['transitions.js', 'fx.js']) {
+    const s = fs.readFileSync(path.join(PROJECT_ROOT, 'core', file), 'utf8');
+    const im = s.split('\n').filter((l) => /^\s*import\s/.test(l));
+    check(`${file} 保持零依赖（它要原样发给浏览器）`, im.length === 0, im.join(' / '));
+  }
 }
 
 section('连续动作的首帧是上一段的末帧 —— 机位不该跳');
@@ -5465,6 +5478,310 @@ section('转场：真发给 FFmpeg 的那串参数长什么样');
   check('片段太短时退回硬切', tiny.notes.some((m) => /切没/.test(m)), tiny.notes.join(' | '));
   check('退回硬切之后确实没做 xfade', !tiny.calls.some((c) => /xfade/.test(c)));
   check('退回硬切之后也不重编码', /-c copy/.test(tiny.calls[tiny.calls.length - 1]), tiny.calls[tiny.calls.length - 1]);
+}
+
+section('剪辑台：拖拽排序 / 音轨 / 配乐 / 画面效果 / 更多转场');
+{
+  const ed = await import('../core/pipeline/edit.js');
+  const tr = await import('../core/transitions.js');
+  const fxm = await import('../core/fx.js');
+  const ff = await import('../core/ffmpeg.js');
+
+  const shots = [
+    { id: 's1', index: 1, transition: 'cut' },
+    { id: 's2', index: 2, transition: 'dissolve' },
+    { id: 's3', index: 3 }
+  ];
+
+  // ───── 洗数据：界面和请求体都可能发来垃圾 ─────
+  const n = ed.normalize({
+    order: ['s3', 'nope', 's1'],
+    clips: {
+      s1: { trans: 'slideleft', fx: 'bw', mute: true },
+      s2: { trans: '硬拉倒', fx: '不存在的效果' },
+      s3: { trans: 'cut', fx: 'none' },
+      ghost: { off: true }
+    },
+    tracks: { voice: false, sfx: true, music: false, 乱来: false },
+    music: { path: '/m.mp3', name: 'x', gain: 40, fadeIn: -3, duck: false }
+  }, shots);
+
+  check('认得的转场留下来', n.clips.s1.trans === 'slideleft', JSON.stringify(n.clips.s1));
+  check('认得的效果留下来', n.clips.s1.fx === 'bw');
+  check('这一镜静音记住了', n.clips.s1.mute === true);
+  /**
+   * 认不出来的名字必须**丢掉**，不能留着。
+   * 留着的话它会一路走到 FFmpeg，在那儿变成一条谁也看不懂的滤镜报错，
+   * 而真正的原因（谁写进来的）已经无从查起。
+   */
+  check('瞎编的转场名被丢掉', n.clips.s2?.trans === undefined, JSON.stringify(n.clips.s2));
+  check('瞎编的效果名被丢掉', n.clips.s2?.fx === undefined, JSON.stringify(n.clips.s2));
+  // cut 和 none 就是默认值，存下来只是噪音 —— 而且会让"这部片子剪过没有"永远为真
+  check('默认值（硬切/原样）不存', n.clips.s3 === undefined, JSON.stringify(n.clips.s3));
+  check('不存在的镜头 id 整条丢掉', n.clips.ghost === undefined);
+  check('音轨只存被关掉的那些', JSON.stringify(n.tracks) === '{"voice":false,"music":false}', JSON.stringify(n.tracks));
+  /**
+   * 音量必须夹回合法范围。界面上是滑块，但请求体是可以手写的 ——
+   * 而爆音是**不可逆**的：混完就没法从成片里救回来。
+   */
+  check('音乐音量夹回上限', n.music.gain === 1.5, String(n.music.gain));
+  check('负的淡入被换成默认值', n.music.fadeIn === 0, String(n.music.fadeIn));
+  check('明确写了不避让就是不避让', n.music.duck === false);
+  check('没有 path 的音乐当没有', ed.normalizeMusic({ gain: 0.3 }) === null);
+
+  // ───── 转场两级：剪辑台压过分镜，没改过的听分镜的 ─────
+  const withEdit = { clips: { s1: { trans: 'pixelize' } } };
+  check('剪辑台上改过的转场压过分镜字段',
+    ed.transitionOf(withEdit, shots[0]) === 'pixelize', ed.transitionOf(withEdit, shots[0]));
+  /**
+   * 这一条是"重跑分镜不会冲掉人手调的转场"的另一面：
+   * 没在剪辑台上动过的，必须跟着分镜走 —— 否则改分镜就再也影响不了成片。
+   */
+  check('没在剪辑台上动过的听分镜的',
+    ed.transitionOf(withEdit, shots[1]) === 'dissolve', ed.transitionOf(withEdit, shots[1]));
+  check('两边都没有就是硬切', ed.transitionOf({}, shots[2]) === 'cut');
+  check('分镜里写了个瞎编的值也当硬切', ed.transitionOf({}, { id: 'x', transition: 'zzz' }) === 'cut');
+
+  // ───── 转场表 ─────
+  /**
+   * ⚠ 模型能选的只有那三个（segments.js 解析时强制归一到 KINDS）。
+   * 把新加的推拉划像塞进 KINDS 的话，模型输出里蹦出一个 "pixelize"
+   * 会被当成合法值原样收下，然后二十镜的片子里冒出一处马赛克 ——
+   * 而没有任何人做过这个决定。这条断言守着这件事。
+   */
+  check('模型能选的转场仍然只有硬切/黑场/叠化',
+    JSON.stringify(tr.KINDS) === JSON.stringify(['cut', 'fade', 'dissolve']), JSON.stringify(tr.KINDS));
+  check('剪辑台上能选的比模型多', tr.ALL_KINDS.length > tr.KINDS.length, String(tr.ALL_KINDS.length));
+  check('模型能选的那三个都在剪辑台清单里', tr.KINDS.every((k) => tr.ALL_KINDS.includes(k)));
+  /**
+   * 每一种重叠类转场都吃掉同样的时长。
+   * 少算一处的后果是全片从那儿往后音画错位 —— 而这个错没有任何报错。
+   */
+  const xfades = tr.CATALOG.filter((t) => t.mode === 'xfade');
+  check('重叠类转场每一种都吃掉 0.5 秒',
+    xfades.every((t) => tr.overlapOfKind(t.id) === tr.DISSOLVE_SECONDS), String(xfades.length));
+  check('硬切和黑场一秒都不吃',
+    tr.overlapOfKind('cut') === 0 && tr.overlapOfKind('fade') === 0);
+  check('每一种重叠类转场都写了 xfade 的名字',
+    xfades.every((t) => typeof t.xfade === 'string' && t.xfade.length > 0));
+  check('转场每一条都有一句"什么时候用"', tr.CATALOG.every((t) => t.why && t.label));
+
+  // ───── 画面效果 ─────
+  const bw = fxm.compile('bw', {});
+  check('黑白不需要知道素材信息', bw.vf === 'hue=s=0', JSON.stringify(bw));
+  /**
+   * zoompan 不给 s= 会把 1080p 悄悄降到 720p，不给 fps= 会按 25 帧重采样。
+   * 两样都不报错，只是让成片变差 —— 所以宁可让整个表接一个参数。
+   */
+  const push = fxm.compile('push', { width: 1920, height: 1080, fps: 24 });
+  check('缓推带上了素材自己的分辨率', /s=1920x1080/.test(push.vf), push.vf);
+  check('缓推带上了素材自己的帧率', /fps=24/.test(push.vf), push.vf);
+  /**
+   * 探不出分辨率时**必须给一个原因**，不能悄悄回 null。
+   * 回 null 的话调用方只能当"这一段没效果"，而人明明点了一个 ——
+   * 成片和界面对不上，还没有任何线索。
+   */
+  const blind = fxm.compile('push', {});
+  check('探不出素材信息时说清楚为什么做不了', typeof blind.skip === 'string' && /帧率|宽|高/.test(blind.skip), JSON.stringify(blind));
+  check('不认识的效果当没设', fxm.compile('哈哈', {}).vf === null);
+  check('原样就是不加滤镜', fxm.compile('none', {}).vf === null);
+  check('效果每一条都有标签和理由', fxm.CATALOG.every((f) => f.label && f.why));
+  // 柔光是带标签的子图（split/blend），-vf 收得下，但它整体必须一进一出
+  const soft = fxm.compile('soft', {}).vf;
+  check('柔光是"糊的那层叠回清晰画面"，不是直接糊', /blend=all_mode=screen/.test(soft), soft);
+  check('效果说明里点明了"慢但不花钱"',
+    /不花钱/.test(fxm.summarize([{ index: 2, fx: 'bw' }]) || ''), String(fxm.summarize([{ index: 2, fx: 'bw' }])));
+  check('一个效果都没加时不打这行话', fxm.summarize([]) === null);
+
+  // ───── 混音图 ─────
+  /**
+   * 音轨这一层的错（旁链接错、标签用两次、循环没截断）在成片里
+   * 只表现为"声音不对"，是最难自己发现的一类。所以这里把它当字符串验。
+   */
+  const voice = [{ path: '/v1.mp3', at: 0 }, { path: '/v2.mp3', at: 4 }];
+  const sfx = { path: '/s1.mp3', at: 1, gain: 0.35 };
+  const music = { path: '/m.mp3', gain: 0.22, fadeIn: 1.5, fadeOut: 2.5, duck: true, loop: true };
+  const argsOf = (entries, bgm, opt = {}) =>
+    ff.planAudio(entries, bgm, { total: 20, outputPath: '/o.m4a', duck: true, ...opt });
+  const graphOf = (args) => args[args.indexOf('-filter_complex') + 1];
+
+  const full = argsOf([...voice, sfx], music, { loudness: true });
+  const fullGraph = graphOf(full);
+  check('有台词时音乐自动避让（sidechaincompress）', /sidechaincompress/.test(fullGraph), fullGraph.slice(0, 200));
+  /**
+   * 旁链要**单独取一份台词**。直接把混好的那一路接两次，FFmpeg 报
+   * "Output pad already connected" —— 整条音轨出不来，成片彻底无声。
+   */
+  check('旁链是 asplit 出来的另一份，不是把同一路接两次', /asplit=2/.test(fullGraph), fullGraph.slice(0, 300));
+  /**
+   * ⚠ 这条是这一段里最值钱的：把整张图的标签数一遍。
+   * 每个中间标签必须**恰好出现两次**（一次产出、一次消费），
+   * 只有最终那个例外（产出一次，然后被 -map 取走）。
+   * 少一次 = 有一路被丢掉（声音无声无息地少了一层），
+   * 多一次 = FFmpeg 直接报错。两种都是肉眼很难从一长串滤镜里看出来的。
+   */
+  const labelAudit = (args) => {
+    const g = graphOf(args);
+    const mapTo = args[args.indexOf('-map') + 1];
+    const counts = new Map();
+    for (const m of g.matchAll(/\[([A-Za-z]\w*)\]/g)) {
+      counts.set(m[1], (counts.get(m[1]) || 0) + 1);
+    }
+    const bad = [];
+    for (const [name, c] of counts) {
+      const want = `[${name}]` === mapTo ? 1 : 2;
+      if (c !== want) bad.push(`${name}×${c}(应 ${want})`);
+    }
+    return bad;
+  };
+  check('滤镜图里每个标签都恰好接了一次', labelAudit(full).length === 0, labelAudit(full).join('、'));
+  check('旁链用的是台词那一路，不是台词+音效',
+    /\[bgm\]\[voicePad\]sidechaincompress/.test(fullGraph), fullGraph.slice(0, 400));
+  /**
+   * ⚠ 旁链必须先 apad 补到无限长。
+   *
+   * sidechaincompress 在**旁链结束的那一刻就收尾** —— 不管主输入还有多长。
+   * 台词通常在片子结束前很久就念完了，于是整条音轨被砍在最后一句话上：
+   * 一部 8 秒的片子只剩 4 秒，后面的音乐凭空消失，而且一句警告都没有。
+   * 这是真跑 FFmpeg 量出来的，参数看着完全正常。
+   */
+  check('旁链补到了无限长（否则整条音轨会被砍在最后一句台词上）',
+    /\[voiceB\]apad\[voicePad\]/.test(fullGraph), fullGraph.slice(0, 400));
+  // 音效不能当旁链：它多是连续的环境声，音乐会被一直压着，等于关掉了音乐
+  check('音效那一路带着自己的音量，且不进旁链',
+    /volume=0\.350/.test(fullGraph) && !/\[a2\]sidechain/.test(fullGraph), fullGraph.slice(0, 300));
+  check('统一响度接在最后一环', /\[loud\]$/.test(fullGraph.split(';').pop()), fullGraph.split(';').pop());
+  check('循环的音乐被总长截断',
+    full.includes('-stream_loop') && full[full.indexOf('-t')] === '-t', full.join(' ').slice(0, 120));
+  check('淡出是从"总长减淡出时长"开始的', /afade=t=out:st=17\.50/.test(fullGraph), fullGraph.slice(0, 300));
+
+  const noDuck = argsOf([...voice, sfx], { ...music, duck: false });
+  check('说了不避让就真的不避让', !/sidechaincompress/.test(graphOf(noDuck)));
+  check('不避让时也不用多此一举地 asplit', !/asplit/.test(graphOf(noDuck)));
+  check('不避让时标签也全都接对了', labelAudit(noDuck).length === 0, labelAudit(noDuck).join('、'));
+
+  const onlyMusic = argsOf([], music);
+  check('一句台词都没有时音乐照样出得来', /\[bgm\]/.test(graphOf(onlyMusic)), graphOf(onlyMusic));
+  check('没有台词就没有避让可言', !/sidechaincompress/.test(graphOf(onlyMusic)));
+  check('只有音乐时标签也都接对了', labelAudit(onlyMusic).length === 0, labelAudit(onlyMusic).join('、'));
+
+  const noMusic = argsOf(voice, null);
+  check('没有音乐时不出现 stream_loop', !noMusic.includes('-stream_loop'));
+  check('没开统一响度时不出现 loudnorm', !/loudnorm/.test(graphOf(noMusic)));
+  check('没有音乐时标签也都接对了', labelAudit(noMusic).length === 0, labelAudit(noMusic).join('、'));
+
+  // ───── 入点：没有 trims 也要生效 ─────
+  /**
+   * ⚠ 这一条挡的是一个真出过的错。
+   *
+   * 时长策略默认改成「保留完整片段」之后，trims 整条都是 null。
+   * 而当时 concat 里的判断只有 `if (!want) 跳过` —— 于是自动剪辑照跑、
+   * 日志照打"已跳过开头 0.6 秒"，成片里那 0.6 秒**一帧没少**。
+   * 日志说做了、实际没做，是这个项目里反复出现的那一类错。
+   */
+  const dir2 = path.join(SANDBOX, 'cutin');
+  fs.mkdirSync(dir2, { recursive: true });
+  const segs2 = ['x1.mp4', 'x2.mp4'].map((nm) => path.join(dir2, nm));
+  for (const f of segs2) fs.writeFileSync(f, 'seg');
+  const out2 = path.join(dir2, 'film.mp4');
+  const runCut = async (opts) => {
+    const calls = [];
+    await ff.concat(segs2, out2, {
+      onNote: () => {},
+      __probe: async () => ({ seconds: 5, hasAudio: false, width: 1920, height: 1080, fps: 24 }),
+      __exec: async (args) => {
+        calls.push(args.join(' '));
+        const last = args[args.length - 1];
+        if (last && !last.startsWith('-')) fs.writeFileSync(last, 'x');
+        return { stderr: '' };
+      },
+      ...opts
+    });
+    return calls;
+  };
+
+  const inOnly = await runCut({ cuts: [{ in: 0.6 }, { in: 0 }] });
+  check('没有裁剪目标时，入点照样送进 FFmpeg',
+    inOnly.some((c) => /-ss 0\.600/.test(c)), inOnly.join(' | ').slice(0, 260));
+  check('只有入点、没有目标时长时不硬加 -t',
+    !inOnly.find((c) => /-ss 0\.600/.test(c))?.includes(' -t '), inOnly.find((c) => /-ss 0\.600/.test(c)));
+  check('没有入点的那一段一次都不重压',
+    inOnly.filter((c) => /trim\d\.mp4/.test(c)).length === 1, String(inOnly.filter((c) => /trim/.test(c)).length));
+  /**
+   * 只重压了一部分段时，最后那一拼**不能再走 -c copy**：
+   * 重压的那几段和厂商原片在 profile/GOP 上不一定对得上，
+   * 硬 copy 拼出来会在接缝处花屏，而且只在成片里出现。
+   */
+  check('只重压了一部分时，最终拼接改走重编码',
+    /-c:v libx264/.test(inOnly[inOnly.length - 1]), inOnly[inOnly.length - 1]);
+
+  const noneAtAll = await runCut({});
+  check('什么都没设时一次重压都不做', noneAtAll.length === 1, String(noneAtAll.length));
+  check('什么都没设时走 -c copy 的快路', /-c copy/.test(noneAtAll[0]), noneAtAll[0]);
+
+  // ───── 画面效果只重压被点过的那一段 ─────
+  const withFx = await runCut({ filters: [null, 'hue=s=0'] });
+  check('只有加了效果的那一段被重压',
+    withFx.filter((c) => /trim\d\.mp4/.test(c)).length === 1, String(withFx.length));
+  check('效果真的写进了 -vf', withFx.some((c) => /-vf hue=s=0/.test(c)), withFx.join(' | ').slice(0, 240));
+
+  /**
+   * 效果和补帧共用同一个 -vf —— 一条命令里它只能出现一次，
+   * 写两遍的话后一个会**悄悄顶掉**前一个（FFmpeg 不报错）。
+   * 顺序也有讲究：效果在前、补帧在后，否则冻住的是没上效果的原始帧，
+   * 成片最后会看到突然"掉色"。
+   */
+  const fxAndPad = await runCut({ filters: ['hue=s=0', null], trims: [8, 0] });
+  const padCall = fxAndPad.find((c) => /tpad/.test(c));
+  check('效果和补帧合在同一个 -vf 里', (padCall.match(/-vf /g) || []).length === 1, padCall);
+  check('效果排在补帧前面', /-vf hue=s=0,tpad=/.test(padCall), padCall);
+
+  // ───── 更多转场：名字要真的换过去，做不了要就地退让 ─────
+  const dir3 = path.join(SANDBOX, 'xfk');
+  fs.mkdirSync(dir3, { recursive: true });
+  const segs3 = ['y1.mp4', 'y2.mp4'].map((nm) => path.join(dir3, nm));
+  for (const f of segs3) fs.writeFileSync(f, 'seg');
+  const out3 = path.join(dir3, 'film.mp4');
+  const runX = async (kinds, { failOn = null } = {}) => {
+    const calls = [];
+    const notes = [];
+    await ff.concat(segs3, out3, {
+      transitions: kinds,
+      onNote: (m) => notes.push(m),
+      __probe: async () => ({ seconds: 5, hasAudio: false }),
+      __exec: async (args) => {
+        const line = args.join(' ');
+        if (failOn && line.includes(failOn)) throw new Error('Invalid transition');
+        calls.push(line);
+        const last = args[args.length - 1];
+        if (last && !last.startsWith('-')) fs.writeFileSync(last, 'x');
+        return { stderr: '' };
+      }
+    });
+    return { calls, notes };
+  };
+
+  const pix = await runX(['cut', 'pixelize']);
+  check('选了马赛克就真的发 transition=pixelize',
+    pix.calls.some((c) => /xfade=transition=pixelize/.test(c)), pix.calls.join(' | ').slice(0, 260));
+  /**
+   * ⚠ 新转场最容易漏的是**掐头去尾那两行**：名字换过去了、xfade 也做了，
+   * 但头尾没切 —— 那一处画面多出半秒，而配音和字幕按"少半秒"算，
+   * 整片从那儿往后错位。
+   */
+  check('新转场同样掐掉了被重叠用掉的那半秒',
+    pix.calls.some((c) => /-ss 0\.500/.test(c)), pix.calls.join(' | ').slice(0, 300));
+
+  /**
+   * xfade 认得的名字是跟 FFmpeg 版本走的，而用户机器上那份是自己下的。
+   * 一个不认识的名字**不能连累其余十几处转场**（原来是整个循环外面一个
+   * catch，一处失败就全片退回硬切）。
+   */
+  const fallback = await runX(['cut', 'pixelize'], { failOn: 'transition=pixelize' });
+  check('这台机器做不了这个效果时，就地退回普通叠化',
+    fallback.calls.some((c) => /xfade=transition=fade/.test(c)), fallback.calls.join(' | ').slice(0, 300));
+  check('退让说出来了，而且点明其余转场不受影响',
+    fallback.notes.some((m) => /其余转场不受影响/.test(m)), fallback.notes.join(' | '));
 }
 
 section('配音按时间轴摆，不是顺次拼');

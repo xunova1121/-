@@ -1244,3 +1244,88 @@ select.mini {
   color: var(--alarm); font-size: 12px; line-height: 1.6;
 }
 .shot-previz > summary { cursor: pointer; color: var(--ink-dim); font-size: 12px; margin-top: 10px; }
+
+/* ═══════════════════ 剪辑台 ═══════════════════
+ *
+ * 这一块是成片出来**之后**才用得上的：调顺序、裁一刀、换转场、配乐。
+ * 素材已经在盘上，动的只是"怎么拼" —— 所以这里的每一个控件都必须
+ * 让人一眼看出"改这个不用重新生成"，视觉上不能长得像"重跑"那一类按钮。
+ */
+.cut-list { display: flex; flex-direction: column; gap: 6px; }
+.cut-row {
+  display: grid;
+  grid-template-columns: 22px 26px 76px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.cut-row.off { opacity: .45; }
+/* 拖动中的那一行压暗，让人看清楚"我正在搬的是它" */
+.cut-row.cut-dragging { opacity: .35; }
+/* 落点线。没有它的话拖到一半完全不知道会插到哪儿 */
+.cut-marker {
+  height: 3px; margin: -1px 0;
+  background: var(--beam); border-radius: 2px;
+}
+.cut-grip {
+  cursor: grab; user-select: none; touch-action: none;
+  color: var(--ink-faint); text-align: center; font-size: 15px; line-height: 1;
+  padding: 6px 0;
+}
+.cut-grip:active { cursor: grabbing; }
+.cut-idx { color: var(--ink-faint); font-size: 12px; text-align: right; }
+.cut-thumb {
+  width: 76px; height: 43px; object-fit: cover;
+  border-radius: 6px; background: #000; cursor: zoom-in; display: block;
+}
+.cut-main { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.cut-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.cut-desc {
+  color: var(--ink-faint); font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;
+}
+.cut-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cut-tools select { padding: 3px 6px; font-size: 12px; }
+.cut-tools input[type="number"] { width: 66px; padding: 3px 6px; font-size: 12px; }
+
+/* ── 裁剪条 ──
+ * 数字输入框谁都会做，但没人能拿着两个数字想象出"这一刀切在哪儿"。
+ * 这条是真正让它成为剪辑台的东西：亮的那一段就是会进成片的那一段。
+ */
+.cut-bar {
+  position: relative; height: 24px; border-radius: 6px;
+  background: var(--surface-3); border: 1px solid var(--line);
+  touch-action: none; user-select: none;
+}
+.cut-keep {
+  position: absolute; top: 0; bottom: 0;
+  background: var(--beam-wash);
+  border-left: 2px solid var(--beam); border-right: 2px solid var(--beam);
+}
+.cut-handle {
+  position: absolute; top: -3px; bottom: -3px; width: 12px;
+  cursor: ew-resize; border-radius: 4px;
+  background: var(--beam); opacity: .85;
+}
+.cut-handle:hover, .cut-handle:active { opacity: 1; }
+.cut-handle.a { transform: translateX(-6px); }
+.cut-handle.b { transform: translateX(-6px); }
+.cut-bar-txt {
+  position: absolute; left: 8px; top: 50%; transform: translateY(-50%);
+  font-size: 11px; color: var(--ink-dim); pointer-events: none;
+  text-shadow: 0 1px 2px var(--ground);
+}
+
+/* ── 音轨 ── */
+.cut-audio {
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface-2); padding: 10px; margin-bottom: 12px;
+}
+.cut-track { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 5px 0; }
+.cut-track + .cut-track { border-top: 1px dashed var(--line-soft); }
+.cut-track .cut-name { width: 84px; color: var(--ink-dim); font-size: 13px; }
+.cut-track input[type="range"] { width: 130px; }
+.btn.on { border-color: var(--beam); color: var(--beam); }

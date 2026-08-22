@@ -317,7 +317,7 @@ export const CAPABILITIES = [
   },
   {
     id: 'film-cut',
-    name: '剪辑台：调顺序 / 设入出点 / 跳过某镜',
+    name: '剪辑台：拖拽排序 / 设入出点 / 跳过某镜 / 转场 / 画面效果 / 静音',
     api: 'PATCH /projects/:id { edit }',
     pc: 'ui/views/studio.js',
     mobile: null,
@@ -325,6 +325,17 @@ export const CAPABILITIES = [
       + '390px 宽摆不下，拖拽在拇指上也很难精确。手机上该做的是"看到不对、当场改一句、重出"，'
       + '而剪辑是坐下来一次做完的事。⚠ 这一条是有意为之，不是漏做：等手机上真的需要时再单独设计，'
       + '而不是把电脑那套缩小塞进去。'
+  },
+  {
+    id: 'film-music',
+    name: '给成片配背景音乐（自动避让台词）',
+    api: 'POST /projects/:id/music',
+    pc: 'ui/views/studio.js',
+    mobile: null,
+    why: '和剪辑台是同一块面板：调音量、开关避让都要一边听成片一边试，'
+      + '而这件事在手机上做不了（改一次要重新合成，手机上等不起，也听不准）。'
+      + '⚠ 有意为之：等手机上真的需要时单独设计一个"换一首就好"的极简版，'
+      + '而不是把这一整排滑块塞进 390px。'
   },
   {
     id: 'oss-config',

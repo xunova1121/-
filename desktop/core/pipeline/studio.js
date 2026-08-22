@@ -38,6 +38,7 @@ import * as tiers from '../tiers.js';
 import * as shotlint from './shotlint.js';
 import * as segments from './segments.js';
 import * as transitions from '../transitions.js';
+import * as fx from '../fx.js';
 import * as jobs from '../jobs.js';
 
 export const extractJSON = consistency.extractJSON;
@@ -4124,6 +4125,123 @@ async function generateSfx(projectId, { onEvent, signal } = {}) {
   }
 }
 
+// ═══════════════════════ 背景音乐 ═══════════════════════
+
+/**
+ * 认得的音频格式。
+ *
+ * 有意**不收视频容器**（mp4/mov）：那类文件人多半是想"用这段视频的声音"，
+ * 而那是另一件事（要先分离音轨）。收下来会得到一条能跑但结果莫名其妙的路。
+ */
+const AUDIO_MIME = {
+  'audio/mpeg': '.mp3',
+  'audio/mp3': '.mp3',
+  'audio/mp4': '.m4a',
+  'audio/x-m4a': '.m4a',
+  'audio/aac': '.aac',
+  'audio/wav': '.wav',
+  'audio/x-wav': '.wav',
+  'audio/wave': '.wav',
+  'audio/vnd.wave': '.wav',
+  'audio/flac': '.flac',
+  'audio/x-flac': '.flac',
+  'audio/ogg': '.ogg',
+  'audio/opus': '.opus',
+  'audio/webm': '.weba'
+};
+
+/**
+ * 一首背景音乐最大收多大。
+ *
+ * 20MB 按 128kbps 算是二十分钟，比任何一部短剧都长。
+ * 上限不敢再放宽是因为这条路是 **base64 内联**的：40MB 的文件发出去是 54MB，
+ * 手机上传一次要好几分钟，中间断一次就得从头来。要传无损的先转成 MP3。
+ */
+const MUSIC_MAX = 20 * 1024 * 1024;
+
+/**
+ * 给这部片子配一段背景音乐。
+ *
+ * ⚠ 音乐**只能是用户自己传的**。这个应用不内置也不下载任何曲库 ——
+ * 那些文件的授权状况我们无从核实，而一旦成片拿去商用，
+ * 侵权的后果全落在用户头上。这条是有意为之，不是没做。
+ *
+ * 存下来就完了：混音发生在合成那一步（见 ffmpeg.buildAudioTrack），
+ * 所以换音量、开关避让、换一首，都只要重新合成一次，一分钱不花。
+ */
+export async function attachMusic(projectId, { dataUrl, fileName = '' } = {}, onEvent) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+
+  const m = /^data:([^;,]*);base64,(.+)$/s.exec(String(dataUrl || ''));
+  if (!m) throw new Error('没读到音频内容（需要 data:audio/...;base64, 开头的内容）');
+  const mime = m[1].toLowerCase();
+  // 有些浏览器对 .m4a / .flac 给不出 MIME，这时按文件名后缀认
+  const byName = /\.(mp3|m4a|aac|wav|flac|ogg|opus)$/i.exec(fileName || '');
+  const ext = AUDIO_MIME[mime] || (byName ? `.${byName[1].toLowerCase()}` : null);
+  if (!ext) {
+    throw new Error(`不认识这种音频格式：${mime || '（浏览器没给类型）'}。用 MP3 / M4A / WAV / FLAC / OGG。`);
+  }
+
+  const buf = Buffer.from(m[2], 'base64');
+  if (!buf.length) throw new Error('这个音频文件是空的');
+  if (buf.length > MUSIC_MAX) {
+    throw new Error(`这首有 ${(buf.length / 1024 / 1024).toFixed(1)}MB，超过 ${MUSIC_MAX / 1024 / 1024}MB。转成 MP3 再传，音质对背景音乐来说完全够。`);
+  }
+
+  const dest = path.join(store.assetDir(projectId), `music-${safeFileName(path.parse(fileName || 'bgm').name)}${ext}`);
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.writeFileSync(dest, buf);
+  onEvent?.({ type: 'note', message: `已存下 ${path.basename(dest)}（${(buf.length / 1024 / 1024).toFixed(1)}MB）` });
+
+  /**
+   * 时长探不出来不算失败。没 FFmpeg 的机器照样能把音乐存上 ——
+   * 那一步的报错该出现在**合成**时（那时确实需要 FFmpeg），不是现在。
+   */
+  let seconds = null;
+  try {
+    seconds = await ffmpeg.probeDuration(dest);
+  } catch {
+    /* 没装 FFmpeg，或者这个格式解不了。到合成那步再说 */
+  }
+
+  const next = store.update(projectId, (p) => {
+    const before = edit.normalizeMusic(p.edit?.music);
+    p.edit = {
+      ...(p.edit || {}),
+      // 换一首的时候**保留上次调好的音量和淡入淡出** —— 那是人试出来的，
+      // 换首曲子就清零等于让人从头再试一遍
+      music: {
+        ...edit.MUSIC_DEFAULTS,
+        ...(before ? { gain: before.gain, fadeIn: before.fadeIn, fadeOut: before.fadeOut, duck: before.duck, loop: before.loop } : {}),
+        path: dest,
+        name: fileName || path.basename(dest),
+        seconds
+      }
+    };
+    // 传了音乐还开着"关掉音乐轨"是自相矛盾的，顺手打开
+    if (p.edit.tracks) delete p.edit.tracks.music;
+    return p;
+  });
+
+  onEvent?.({
+    type: 'note',
+    message:
+      `背景音乐就位${seconds ? `（${seconds.toFixed(1)} 秒）` : ''}。`
+      + '在剪辑台上调音量、开关"说话时自动压低"，改完重新合成一次就行 —— 不重新生成任何素材。'
+      + '⚠ 曲子的授权要你自己确认，商用别用没买过的。'
+  });
+  return next;
+}
+
+/** 把背景音乐撤下来。**不删文件** —— 想换回来还得找得着 */
+export function detachMusic(projectId) {
+  return store.update(projectId, (p) => {
+    if (p.edit) p.edit.music = null;
+    return p;
+  });
+}
+
 // ═══════════════════════ 阶段六：合成 ═══════════════════════
 
 /**
@@ -4164,7 +4282,15 @@ export function timelineOf(project, { policy = 'trim' } = {}) {
      * 的每一句台词都会晚半秒，而且叠化越多错得越多 ——
      * 表现和"配音顺次拼"那个老 bug 一模一样，只是原因换了一个。
      */
-    if (rows.length) at -= transitions.overlapOf(shot);
+    /**
+     * ⚠ 转场要走**剪辑台那一份**（edit.transitionOf），不能直接读 shot.transition。
+     *
+     * 人在剪辑台上把某处改成叠化之后，画面会少半秒，而字幕和配音都从这个
+     * 函数拿起点 —— 这里读旧字段的话，画面按新转场、声音按旧转场，
+     * 从那一处往后整片错位。而这种错**没有任何报错**，只表现为"越到后面越对不上"。
+     */
+    const kind = rows.length ? edit.transitionOf(project.edit, shot) : 'cut';
+    if (rows.length) at -= transitions.overlapOfKind(kind);
     /**
      * 手工设过入出点的，长度就是那一段 —— 它压过时长策略。
      * 人明确说了"这一镜只要 2.4 秒"，没有任何理由再去按计划值或实出时长算。
@@ -4176,7 +4302,7 @@ export function timelineOf(project, { policy = 'trim' } = {}) {
       : (policy === 'trim'
         ? Number(shot.duration) || Number(shot.actualDuration) || 0
         : Number(shot.actualDuration) || Number(shot.duration) || 0);
-    rows.push({ shot, start: at, span, win });
+    rows.push({ shot, start: at, span, win, trans: kind, muted: edit.isMuted(project.edit, shot.id) });
     at += span;
   }
   return rows;
@@ -4381,8 +4507,29 @@ export async function compose(projectId, { onEvent, signal = null } = {}) {
    * 而且因为是渐进的，前两镜看着还挺正常，很难往这儿想。
    */
   const timeline = timelineOf(store.read(projectId), { policy });
-  const audioAt = timeline
-    .filter((r) => r.shot.audioPath && fs.existsSync(r.shot.audioPath))
+
+  /**
+   * ══════ 音轨开关 ══════
+   *
+   * 剪辑台上有三条轨（台词 / 音效 / 背景音乐），每条都能整条关掉，
+   * 每一镜还能单独静音。关掉不删任何文件 —— 打开重新合成就回来了。
+   *
+   * 这一层要在**摆时间轴之后**做，不能在之前：关掉台词不该让画面跟着挪。
+   */
+  const voiceOn = edit.trackOn(project.edit, 'voice');
+  const mutedShots = timeline.filter((r) => r.muted);
+  if (mutedShots.length) {
+    onEvent?.({
+      type: 'note',
+      message: `第 ${mutedShots.map((r) => r.shot.index).join('、')} 镜标了静音，这几镜的台词和音效都不混进去（画面照留）`
+    });
+  }
+  if (!voiceOn) {
+    const has = timeline.filter((r) => r.shot.audioPath && fs.existsSync(r.shot.audioPath)).length;
+    if (has) onEvent?.({ type: 'note', message: `台词这条轨是关着的，${has} 条配音这次一条都不混进去（文件还在）` });
+  }
+  const audioAt = (voiceOn ? timeline : [])
+    .filter((r) => !r.muted && r.shot.audioPath && fs.existsSync(r.shot.audioPath))
     .map((r) => ({ path: r.shot.audioPath, at: r.start, index: r.shot.index, span: r.span }));
 
   /**
@@ -4403,7 +4550,7 @@ export async function compose(projectId, { onEvent, signal = null } = {}) {
    * 下面那行悄悄兜回 0.35 —— 也就是**关不掉**。
    * 关掉之后重新合成一次就行，不重新生成任何东西。
    */
-  const sfxOff = Number.isFinite(sfxGain) && sfxGain <= 0;
+  const sfxOff = (Number.isFinite(sfxGain) && sfxGain <= 0) || !edit.trackOn(project.edit, 'sfx');
   if (sfxOff) {
     const has = timeline.filter((r) => r.shot.sfxPath && fs.existsSync(r.shot.sfxPath)).length;
     if (has) {
@@ -4414,7 +4561,7 @@ export async function compose(projectId, { onEvent, signal = null } = {}) {
     }
   }
   const sfxAt = (sfxOff ? [] : timeline)
-    .filter((r) => r.shot.sfxPath && fs.existsSync(r.shot.sfxPath))
+    .filter((r) => !r.muted && r.shot.sfxPath && fs.existsSync(r.shot.sfxPath))
     .map((r) => ({
       path: r.shot.sfxPath,
       at: r.start,
@@ -4467,25 +4614,84 @@ export async function compose(projectId, { onEvent, signal = null } = {}) {
     if (saved > 0.5) onEvent?.({ type: 'note', message: `按分镜时长裁剪，去掉厂商档位多出的 ${saved.toFixed(1)} 秒` });
   }
 
-  // 每一段是"怎么进来的"。第一段没有转场可言，永远硬切
-  const transitionKinds = withVideo.map((s, i) => (i === 0 ? 'cut' : transitions.kindOf(s)));
+  /**
+   * 每一段是"怎么进来的"。第一段没有转场可言，永远硬切。
+   *
+   * ⚠ 必须和 timelineOf 用**同一个解析口径**（edit.transitionOf）：
+   * 一边读剪辑台、一边读分镜字段的话，画面和声音会各按各的算重叠。
+   */
+  const transitionKinds = withVideo.map((s, i) => (i === 0 ? 'cut' : edit.transitionOf(project.edit, s)));
   const effects = transitionKinds.filter((k) => k !== 'cut').length;
   if (effects) {
-    const eaten = transitions.totalOverlap(withVideo);
+    const eaten = transitionKinds.reduce((sum, k) => sum + transitions.overlapOfKind(k), 0);
+    const names = [...new Set(transitionKinds.filter((k) => k !== 'cut'))]
+      .map((k) => transitions.defOf(k).label).join('、');
     onEvent?.({
       type: 'note',
       message:
-        `${effects} 处转场（黑场/叠化），其余都是硬切` +
-        (eaten > 0 ? `。叠化会重叠掉 ${eaten.toFixed(1)} 秒，成片总长相应变短，配音和字幕已按这个算` : '')
+        `${effects} 处转场（${names}），其余都是硬切` +
+        (eaten > 0 ? `。重叠类转场会各吃掉 ${transitions.DISSOLVE_SECONDS} 秒，合计 ${eaten.toFixed(1)} 秒，成片总长相应变短，配音和字幕已按这个算` : '')
     });
+  }
+
+  /**
+   * ══════ 画面效果 ══════
+   *
+   * 只有被点过的那几段要重压，其余照走不重编码的快路。
+   * 探一次流信息是必要的：zoompan 不知道分辨率会把 1080p 悄悄降到 720p，
+   * 不知道帧率会把 24 帧重采样成 25 帧（画面发抖）。两样都不报错。
+   */
+  const filters = new Array(withVideo.length).fill(null);
+  const fxPicks = [];
+  for (const [i, s] of withVideo.entries()) {
+    const id = edit.fxOf(project.edit, s);
+    if (id === 'none') continue;
+    // eslint-disable-next-line no-await-in-loop
+    const info = (await ffmpeg.probeStreams(s.videoPath)) || {};
+    const made = fx.compile(id, info);
+    if (made.skip) {
+      onEvent?.({ type: 'note', message: `第 ${s.index} 镜：${made.skip}，这一段先按原样出` });
+      continue;
+    }
+    filters[i] = made.vf;
+    fxPicks.push({ index: s.index, fx: id });
+  }
+  const fxNote = fx.summarize(fxPicks);
+  if (fxNote) onEvent?.({ type: 'note', message: fxNote });
+
+  /**
+   * ══════ 背景音乐 ══════
+   *
+   * 音乐是用户自己传上来的文件（我们不内置也不下载任何音乐 —— 版权风险
+   * 全落在用户头上）。混的时候要知道成片有多长：循环要按这个截断，
+   * 淡出要从这个时刻往前算。
+   */
+  const filmSeconds = timeline.length
+    ? Number((timeline[timeline.length - 1].start + timeline[timeline.length - 1].span).toFixed(2))
+    : 0;
+  const music = edit.musicOf(project.edit);
+  if (music) {
+    onEvent?.({
+      type: 'note',
+      message:
+        `背景音乐：${music.name || path.basename(music.path)}，音量 ${(music.gain * 100).toFixed(0)}%`
+        + `${music.duck ? '，有台词时自动压低（说完自己回来）' : '，不做避让'}`
+        + `${music.loop ? '，不够长会循环' : ''}，淡入 ${music.fadeIn}s / 淡出 ${music.fadeOut}s`
+    });
+  } else if (project.edit?.music?.path && !edit.trackOn(project.edit, 'music')) {
+    onEvent?.({ type: 'note', message: '背景音乐这条轨是关着的，这次不混进去（文件还在，打开重新合成就有）' });
   }
 
   await ffmpeg.concat(segments, out, {
     // 台词在前、音效在后：混音时顺序不影响结果，但报错里的编号跟着这个顺序，
     // 排查"第几条音频有问题"时对得上
     audioAt: [...audioAt, ...sfxAt],
+    music,
+    total: filmSeconds,
+    loudness: settings.get('loudness') !== false,
     trims,
     cuts,
+    filters,
     transitions: transitionKinds,
     onNote: (message) => onEvent?.({ type: 'note', message }),
     onProgress: (p) => onEvent?.({ type: 'progress', seconds: p.seconds })

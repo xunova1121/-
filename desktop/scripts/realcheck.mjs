@@ -106,6 +106,18 @@ section('这个 FFmpeg 有没有我们用到的滤镜');
   check('tpad（片段短了定格补齐）', has('tpad'), '缺它的话短片段补不齐，成片会比时间轴短，配音字幕跟着全错');
   check('apad（补静音）', has('apad'), '缺它的话补出来那截没音轨，拼接时整条音轨可能消失');
   check('adelay + amix + volume（配音和音效按时间轴混）', has('adelay') && has('amix') && has('volume'));
+  // 剪辑台第二版用到的。缺哪个都有对应的退让，但**必须知道缺了**
+  check('sidechaincompress（音乐给台词让路）', has('sidechaincompress'),
+    '缺它的话背景音乐不会在有人说话时压低，会盖住台词 —— 会退回固定音量');
+  check('loudnorm（统一响度）', has('loudnorm'), '缺它的话不同来源的配音和音乐响度不齐 —— 会退回原始响度');
+  check('zoompan（缓推/缓拉）', has('zoompan'), '缺它的话这两个效果做不了');
+  check('eq + colorbalance + hue（冷暖明暗黑白）', has('eq') && has('colorbalance') && has('hue'));
+  check('gblur + blend（柔光）', has('gblur') && has('blend'));
+  check('vignette + unsharp + noise（暗角/锐化/颗粒）',
+    has('vignette') && has('unsharp') && has('noise'));
+  check('aformat + asplit（旁链两路必须同格式，且不能接两次）',
+    has('aformat') && has('asplit'), '缺它们的话加背景音乐会让整条音轨建不出来');
+  check('afade（音乐淡入淡出）', has('afade'));
   check('libx264', / libx264 /.test(encoders), '缺它的话裁剪和转场都没法重编码');
   check('aac', / aac /.test(encoders));
 }
@@ -559,6 +571,333 @@ section('剪辑台走到真片子上');
     let allOff = null;
     await studio.compose(p.id, { onEvent: () => {} }).catch((e) => { allOff = e.message; });
     check('全标成不用时说人话', /至少留一镜/.test(allOff || ''), allOff);
+  } finally {
+    if (keepData) process.env.FUTUREDREAM_DATA_DIR = keepData;
+    else delete process.env.FUTUREDREAM_DATA_DIR;
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+}
+
+// ═════════════ 剪辑台第二版：真跑一遍 ═════════════
+/**
+ * 这一整节挡的是 selftest 挡不住的那一类：**参数拼对了，真跑起来不对**。
+ *
+ * 具体到这一批功能，最怕的三件事各自都不报错：
+ *   · zoompan 不给 s= → 1080p 悄悄变 720p；不给 fps= → 24 帧被重采样成 25
+ *   · sidechaincompress 两路格式不一致 → 整条音轨建不出来，成片无声
+ *   · xfade 的效果名这个版本不认识 → 转场全退回硬切
+ * 三件都要**量出来**才算验过。
+ */
+
+/** 取某一时刻的一个像素（缩成 1×1 求平均色）。拿它验"画面真的变了" */
+const rgbAt = async (file, at = 0.5) => {
+  const buf = await ffmpeg.runCapture([
+    '-v', 'error', '-ss', String(at), '-i', file, '-frames:v', '1',
+    '-vf', 'scale=1:1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'
+  ]);
+  return [buf[0], buf[1], buf[2]];
+};
+
+/**
+ * 某一小段时间里的平均电平（dB）。
+ *
+ * ⚠ 必须能**按窗口**量，不能只量整条。整条的平均会被"台词那两秒有多响"
+ * 和"片尾静了多久"一起摊平 —— 避让压没压下去，在整条平均里看不出来。
+ * 走查第一版就是量整条的，结论完全是噪音（开了避让反而更响）。
+ */
+const meanVolIn = async (file, at = 0, len = null) => {
+  const args = ['-ss', String(at)];
+  if (len) args.push('-t', String(len));
+  const { stderr } = await ffmpeg.run([...args, '-i', file, '-af', 'volumedetect', '-f', 'null', '-']);
+  const m = stderr.match(/mean_volume:\s*(-?[\d.]+) dB/);
+  return m ? Number(m[1]) : null;
+};
+
+/** 整合响度（LUFS）。拿它验"统一响度真的拉到位了" */
+const lufsOf = async (file) => {
+  const { stderr } = await ffmpeg.run(['-i', file, '-filter_complex', 'ebur128', '-f', 'null', '-']);
+  const all = [...stderr.matchAll(/I:\s*(-?[\d.]+) LUFS/g)];
+  return all.length ? Number(all[all.length - 1][1]) : null;
+};
+
+section('更多转场：这个 FFmpeg 到底认不认识这些名字');
+{
+  const help = spawnSync(bin, ['-hide_banner', '-h', 'filter=xfade'], { encoding: 'utf8' }).stdout || '';
+  const wanted = transitions.CATALOG.filter((t) => t.xfade).map((t) => t.xfade);
+  const missing = wanted.filter((name) => !new RegExp(`\\b${name}\\b`).test(help));
+  /**
+   * 少几个不是错 —— 老版本本来就少。但**必须知道少了哪些**：
+   * 界面上摆着一个这台机器做不出来的效果，用户点了会看到"改用普通叠化"，
+   * 那是设计好的退让，不是故障。这条断言在意的是我们心里有数。
+   */
+  check(`剪辑台上那 ${wanted.length} 种重叠转场，这个版本认得 ${wanted.length - missing.length} 种`,
+    missing.length <= 2, `不认识：${missing.join('、') || '无'}`);
+
+  const a = clip('tx-a.mp4', 5, 'red');
+  const b = clip('tx-b.mp4', 5, 'blue');
+  for (const kind of ['pixelize', 'slideleft']) {
+    const out = path.join(DIR, `tx-${kind}.mp4`);
+    const notes = [];
+    // eslint-disable-next-line no-await-in-loop
+    await ffmpeg.concat([a, b], out, { transitions: ['cut', kind], onNote: (m) => notes.push(m) });
+    // eslint-disable-next-line no-await-in-loop
+    const secs = await dur(out);
+    check(`「${transitions.defOf(kind).label}」真做出来了，而且吃掉了 0.5 秒（实际 ${secs?.toFixed(2)}）`,
+      Math.abs(secs - 9.5) < 0.4, `${secs} / ${notes.join(' | ').slice(0, 160)}`);
+    check(`「${transitions.defOf(kind).label}」没有悄悄退回硬切`,
+      !notes.some((m) => /硬切/.test(m)), notes.join(' | ').slice(0, 200));
+  }
+
+  /**
+   * ⚠ 一处做不出来**不能连累其余的**。
+   * 造一个 FFmpeg 一定不认识的名字，看它是不是只退这一处。
+   */
+  const bogus = path.join(DIR, 'tx-bogus.mp4');
+  const bogusNotes = [];
+  await ffmpeg.concat([a, b], bogus, {
+    transitions: ['cut', 'dissolve'],
+    onNote: (m) => bogusNotes.push(m),
+    __exec: async (args) => {
+      if (args.join(' ').includes('xfade=transition=fade')) throw new Error('Invalid transition');
+      return ffmpeg.run(args);
+    }
+  }).catch(() => {});
+  check('连 fade 都做不了时，整片退回硬切而不是报错崩掉',
+    bogusNotes.some((m) => /硬切/.test(m)), bogusNotes.join(' | ').slice(0, 200));
+}
+
+section('画面效果：每一个都真能跑，而且真的改了画面');
+{
+  const fxm = await import('../core/fx.js');
+  /**
+   * ⚠ 这一段的素材**必须不是 25 帧**。
+   *
+   * zoompan 不写 `fps=` 时默认输出 25 帧。拿 25 帧的素材去测"有没有偷偷改帧率"，
+   * 写不写那个参数结果都一样 —— 断言永远绿。
+   * 走查里就是这么发现的：把 `fps=` 从产品代码里删掉，这一节一条都没红。
+   * 换成 24 帧之后，删掉它立刻红。
+   */
+  const src = path.join(DIR, 'fx-src.mp4');
+  {
+    const r = spawnSync(bin, ['-y', '-v', 'error',
+      '-f', 'lavfi', '-i', 'color=c=red:s=320x180:r=24:d=2',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', src
+    ], { encoding: 'utf8' });
+    if (r.status !== 0) throw new Error(`造 24 帧测试片失败：${r.stderr?.slice(-300)}`);
+  }
+  const info = await ffmpeg.probeStreams(src);
+  check(`探得出分辨率和帧率（${info.width}×${info.height} @ ${info.fps}）`,
+    info.width === 320 && info.height === 180 && Math.abs(info.fps - 24) < 0.4, JSON.stringify(info));
+
+  for (const f of fxm.CATALOG) {
+    if (f.id === 'none') continue;
+    const made = fxm.compile(f.id, info);
+    if (made.skip) {
+      check(`「${f.label}」缺信息时说清楚原因`, false, made.skip);
+      continue;
+    }
+    const out = path.join(DIR, `fx-${f.id}.mp4`);
+    let err = null;
+    // eslint-disable-next-line no-await-in-loop
+    await ffmpeg.run(['-y', '-v', 'error', '-i', src, '-vf', made.vf,
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'copy', out])
+      .catch((e) => { err = e.message; });
+    // eslint-disable-next-line no-await-in-loop
+    const st = err ? null : await ffmpeg.probeStreams(out);
+    check(`「${f.label}」真跑得动`, !err, String(err).slice(0, 200));
+    if (!st) continue;
+    /**
+     * ⚠ 这三条是这一节的重点。zoompan 不给 s= 会把画面降成 hd720，
+     * 不给 fps= 会重采样帧率 —— 两样都**不报错**，只是成片悄悄变差。
+     * 时长变了则更要命：整片时间轴按原时长算，音画会从这一镜起全错。
+     */
+    check(`「${f.label}」没有偷偷改分辨率`,
+      st.width === info.width && st.height === info.height, `${st.width}×${st.height}`);
+    check(`「${f.label}」没有偷偷改帧率`, Math.abs(st.fps - info.fps) < 0.6, String(st.fps));
+    check(`「${f.label}」没有改变时长`, Math.abs(st.seconds - info.seconds) < 0.25,
+      `${st.seconds} vs ${info.seconds}`);
+  }
+
+  // 黑白必须真的变灰 —— 只验"跑得动"的话，一条什么都不做的滤镜也会绿
+  const bwOut = path.join(DIR, 'fx-bw.mp4');
+  const [r, g, b2] = await rgbAt(bwOut, 1);
+  check(`黑白真的把红色变成了灰（${r},${g},${b2}）`,
+    Math.abs(r - g) < 12 && Math.abs(g - b2) < 12, `${r},${g},${b2}`);
+  const [r0, g0, b0] = await rgbAt(src, 1);
+  check(`原片本来是红的（${r0},${g0},${b0}）—— 否则上一条等于没验`,
+    r0 - g0 > 60, `${r0},${g0},${b0}`);
+}
+
+section('画面效果走完整条 concat：只重压被点过的那一段');
+{
+  const a = clip('ef-a.mp4', 3, 'red');
+  const b = clip('ef-b.mp4', 3, 'blue');
+  const out = path.join(DIR, 'ef.mp4');
+  await ffmpeg.concat([a, b], out, { filters: [null, 'hue=s=0'] });
+  const secs = await dur(out);
+  check(`加了效果之后总长不变（${secs?.toFixed(2)}）`, Math.abs(secs - 6) < 0.4, String(secs));
+  // 前一段还该是红的（没被顺手一起处理），后一段该是灰的
+  const [ar, ag] = await rgbAt(out, 1);
+  const [br, bg, bb] = await rgbAt(out, 4.5);
+  check(`没点效果的那一段原样保留（${ar},${ag}）`, ar - ag > 60, `${ar},${ag}`);
+  check(`点了效果的那一段真的变灰了（${br},${bg},${bb}）`,
+    Math.abs(br - bg) < 12 && Math.abs(bg - bb) < 12, `${br},${bg},${bb}`);
+}
+
+section('入点：没有裁剪目标时也要真的切掉');
+{
+  /**
+   * ⚠ 这一条挡的是一个真出过的错，而且它**只在真跑时才看得见**。
+   *
+   * 时长策略默认改成「保留完整片段」之后，trims 整条都是 null。
+   * 而当时 concat 里的判断只有 `if (!want) 跳过` —— 自动剪辑照跑、
+   * 日志照打"已跳过开头 1 秒"，成片里那一秒一帧没少。
+   */
+  const a = clip('ci-a.mp4', 4, 'red');
+  const b = clip('ci-b.mp4', 4, 'blue');
+  const out = path.join(DIR, 'ci.mp4');
+  await ffmpeg.concat([a, b], out, { cuts: [{ in: 1 }, { in: 0 }] });
+  const secs = await dur(out);
+  check(`第一段跳掉 1 秒，总长 7 秒（实际 ${secs?.toFixed(2)}）`, Math.abs(secs - 7) < 0.4, String(secs));
+}
+
+section('背景音乐：混得进去、循环得上、避让真的压下去了');
+{
+  const music = path.join(DIR, 'bgm.mp3');
+  let r = spawnSync(bin, ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=220:duration=3',
+    '-c:a', 'libmp3lame', music], { encoding: 'utf8' });
+  if (r.status !== 0) r = spawnSync(bin, ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=220:duration=3',
+    '-c:a', 'aac', music.replace('.mp3', '.m4a')], { encoding: 'utf8' });
+  const bgmPath = fs.existsSync(music) ? music : music.replace('.mp3', '.m4a');
+
+  // 台词：只在 2~4 秒之间有声音，其余是静的 —— 避让要压的就是这一段
+  const voice = path.join(DIR, 'v.m4a');
+  spawnSync(bin, ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=700:duration=2',
+    '-c:a', 'aac', voice], { encoding: 'utf8' });
+
+  const entries = [{ path: voice, at: 2 }];
+  /**
+   * ⚠ 这里的音乐音量（1.5）比真实用法（0.22）**高得多**，是**故意的**。
+   *
+   * 避让压的是音乐那一路。而在混完的成片里，台词本来就比音乐响得多 ——
+   * 音乐压下去 8dB，混音总电平只动零点几，量出来的差别淹没在误差里。
+   * 走查第一版就是这么假绿（"压了"和"没压"只差 0.8dB，看不出是不是噪声）。
+   *
+   * 把音乐拉到和台词一个量级，避让的效果才**量得出来**。
+   * 真实用法里音乐更轻，避让只会更明显地保住台词，不会更差。
+   */
+  const bgm = { path: bgmPath, gain: 1.5, fadeIn: 0.5, fadeOut: 1, duck: true, loop: true };
+
+  const ducked = path.join(DIR, 'mix-duck.m4a');
+  await ffmpeg.buildAudioTrack(entries, ducked, { music: bgm, total: 8, loudness: false });
+  const dSecs = await dur(ducked);
+  /**
+   * 音乐只有 3 秒而片子 8 秒 —— 循环必须接上，而且必须**按总长截断**。
+   * 不截断的话 `-stream_loop -1` 会让这条命令永远跑不完。
+   */
+  check(`循环补满并按总长截断（${dSecs?.toFixed(2)} 秒）`, Math.abs(dSecs - 8) < 0.5, String(dSecs));
+
+  const flat = path.join(DIR, 'mix-flat.m4a');
+  await ffmpeg.buildAudioTrack(entries, flat, { music: { ...bgm, duck: false }, total: 8, loudness: false });
+  /**
+   * 避让**必须能量出来**，而且要量在**对的窗口上**。
+   *
+   * 只验"跑得动"的话，sidechaincompress 压错那一路、或者阈值大到永不触发，
+   * 都会一路绿到用户耳朵里。
+   *
+   * 量两个窗口：台词那一秒（该被压下去）和片尾没人说话那一段（该一模一样）。
+   * 只量前者的话，"整条都变轻了"（比如误加了一个 volume）也会绿 ——
+   * 后者就是拿来排除这种情况的对照。
+   */
+  const [dTalk, fTalk] = [await meanVolIn(ducked, 2.5, 1), await meanVolIn(flat, 2.5, 1)];
+  const [dQuiet, fQuiet] = [await meanVolIn(ducked, 5.5, 1.5), await meanVolIn(flat, 5.5, 1.5)];
+  check(`有人说话时音乐被压下去了（说话段 ${dTalk} dB vs 不避让 ${fTalk} dB）`,
+    dTalk !== null && fTalk !== null && dTalk < fTalk - 2.5, `${dTalk} / ${fTalk}`);
+  check(`没人说话的地方一点没动（${dQuiet} dB vs ${fQuiet} dB）—— 否则就不是避让，是整体调小了`,
+    dQuiet !== null && fQuiet !== null && Math.abs(dQuiet - fQuiet) < 0.6, `${dQuiet} / ${fQuiet}`);
+
+  const loud = path.join(DIR, 'mix-loud.m4a');
+  await ffmpeg.buildAudioTrack(entries, loud, { music: bgm, total: 8, loudness: true });
+  const lu = await lufsOf(loud);
+  check(`统一响度把整条拉到 −16 LUFS 附近（实际 ${lu}）`,
+    lu !== null && Math.abs(lu + 16) < 3.5, String(lu));
+  const luRaw = await lufsOf(ducked);
+  check(`不开的时候本来不在这个响度上（${luRaw}）—— 否则上一条等于没验`,
+    luRaw !== null && Math.abs(luRaw - lu) > 1, `${luRaw} / ${lu}`);
+
+  // 一句台词都没有、只配一段音乐的片子（空镜、片头）也得出得来
+  const onlyMusic = path.join(DIR, 'mix-only.m4a');
+  const built = await ffmpeg.buildAudioTrack([], onlyMusic, { music: bgm, total: 5, loudness: false });
+  check('没有台词时音乐照样混得出来', Boolean(built) && fs.existsSync(onlyMusic));
+
+  // 文件不见了要说一声，而不是悄悄出一条没有音乐的音轨
+  const gone = [];
+  const still = path.join(DIR, 'mix-gone.m4a');
+  await ffmpeg.buildAudioTrack(entries, still, {
+    music: { ...bgm, path: path.join(DIR, '不存在.mp3') }, total: 8, onNote: (m) => gone.push(m)
+  });
+  check('音乐文件不见了会说出来，而且台词照混',
+    gone.some((m) => /找不到/.test(m)) && fs.existsSync(still), gone.join(' | '));
+}
+
+section('配乐走完整条 compose');
+{
+  const store = await import('../core/store.js');
+  const studio = await import('../core/pipeline/studio.js');
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'fd-bgm-'));
+  const keepData = process.env.FUTUREDREAM_DATA_DIR;
+  process.env.FUTUREDREAM_DATA_DIR = sandbox;
+  try {
+    const p = store.create({ title: '配乐走查', script: '两镜。' });
+    const assets = store.assetDir(p.id);
+    fs.mkdirSync(assets, { recursive: true });
+    const cp = (name, secs, color) => {
+      const dst = path.join(assets, `${name}.mp4`);
+      fs.copyFileSync(clip(`bgm-${name}.mp4`, secs, color), dst);
+      return dst;
+    };
+    const v1 = cp('m1', 3, 'red');
+    const v2 = cp('m2', 3, 'green');
+    const song = path.join(assets, 'song.m4a');
+    spawnSync(bin, ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=180:duration=2',
+      '-c:a', 'aac', song], { encoding: 'utf8' });
+
+    store.update(p.id, (x) => {
+      x.shots = [
+        { id: 'm1', index: 1, description: '一', duration: 3, actualDuration: 3, videoPath: v1 },
+        { id: 'm2', index: 2, description: '二', duration: 3, actualDuration: 3, videoPath: v2 }
+      ];
+      x.edit = {
+        order: ['m1', 'm2'],
+        clips: { m2: { fx: 'bw', trans: 'slideleft' } },
+        music: { path: song, name: 'song.m4a', gain: 0.3, fadeIn: 0.5, fadeOut: 1, duck: true, loop: true }
+      };
+      return x;
+    });
+    settings.patch({ autoCut: false, durationPolicy: 'keep', loudness: true });
+
+    const notes = [];
+    await studio.compose(p.id, { onEvent: (ev) => { if (ev.message) notes.push(ev.message); } });
+    const film = store.read(p.id).outputs.video;
+    const st = await ffmpeg.probeStreams(film);
+    // 3 + 3 − 0.5（推移吃掉的）= 5.5
+    check(`带配乐+效果+推移转场的成片时长对（${st?.seconds?.toFixed(2)}）`,
+      Math.abs(st.seconds - 5.5) < 0.5, String(st?.seconds));
+    check('成片里有音轨（配乐真的混进去了）', st?.hasAudio === true, JSON.stringify(st));
+    check('日志说了配了什么乐', notes.some((m) => /背景音乐/.test(m)), notes.join(' | ').slice(0, 240));
+    check('日志说了哪几镜加了效果，并且点明不花钱',
+      notes.some((m) => /画面效果/.test(m) && /不花钱/.test(m)), notes.join(' | ').slice(0, 240));
+    const [br, bg2, bb2] = await rgbAt(film, 4.5);
+    check(`第 2 镜真的变黑白了（${br},${bg2},${bb2}）`,
+      Math.abs(br - bg2) < 14 && Math.abs(bg2 - bb2) < 14, `${br},${bg2},${bb2}`);
+
+    // 关掉音乐轨 → 文件还在，但这一次不混
+    store.update(p.id, (x) => { x.edit.tracks = { music: false }; return x; });
+    const off = [];
+    await studio.compose(p.id, { onEvent: (ev) => { if (ev.message) off.push(ev.message); } });
+    check('关掉音乐轨之后说清楚"文件还在"',
+      off.some((m) => /音乐这条轨是关着的/.test(m)), off.join(' | ').slice(0, 200));
   } finally {
     if (keepData) process.env.FUTUREDREAM_DATA_DIR = keepData;
     else delete process.env.FUTUREDREAM_DATA_DIR;

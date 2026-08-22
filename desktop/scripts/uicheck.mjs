@@ -375,11 +375,21 @@ if ((await seamSel.count()) === 1) {
  */
 console.log('\n剪辑台');
 await page.evaluate(async (id) => {
-  // 造两段有视频的镜头，让剪辑台有东西可排（上游打桩，不出真视频）
+  // 造三段有视频的镜头，让剪辑台有东西可排（上游打桩，不出真视频）。
+  // 三段而不是两段：两段的话"往后挪一位"和"拖到最后"是同一个结果，分不出来
   const p = await (await fetch(`/api/projects/${id}`)).json();
   const shots = (p.shots || []).map((s, i) => ({
     ...s, videoPath: `/tmp/fake-${i}.mp4`, actualDuration: 5, duration: 4
   }));
+  while (shots.length < 3) {
+    shots.push({
+      ...shots[0],
+      id: `extra-${shots.length}`,
+      index: shots.length + 1,
+      description: `补的第 ${shots.length + 1} 镜`,
+      videoPath: `/tmp/fake-${shots.length}.mp4`
+    });
+  }
   await fetch(`/api/projects/${id}`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ shots, outputs: { video: '/tmp/final.mp4', seconds: 9 } })
@@ -390,46 +400,210 @@ await page.waitForTimeout(1800);
 await step('合成').click();
 await page.waitForTimeout(1200);
 
+const readEdit = () => page.evaluate(
+  (id) => fetch(`/api/projects/${id}`).then((r) => r.json()).then((p) => p.edit || {}), proj.id);
+
 const cutRows = page.locator('.cut-row');
-check('剪辑台把每一镜列出来了', (await cutRows.count()) === 2, String(await cutRows.count()));
-if ((await cutRows.count()) === 2) {
-  // 把第 1 镜往后挪 —— 顺序要真的存进项目
+check('剪辑台把每一镜列出来了', (await cutRows.count()) === 3, String(await cutRows.count()));
+if ((await cutRows.count()) === 3) {
+  const idsNow = async () => (await readEdit()).order || [];
+
+  /**
+   * ── 拖拽排序 ──
+   *
+   * 这是这一版最容易"看着能用、其实没存"的一处：拖动是纯前端的动作，
+   * 松手之后如果没把新顺序发出去，界面上排得好好的，刷新一下全变回去。
+   * 所以量的是**盘上存的顺序**，不是屏幕上的位置。
+   */
+  const before = await page.evaluate(() =>
+    [...document.querySelectorAll('.cut-row')].map((r) => r.dataset.shot));
+  /**
+   * ⚠ 拖拽要用 page.mouse，而它吃的是**视口坐标**，不是页面坐标。
+   *
+   * .click() 会自己把元素滚进视口，mouse.move 不会 —— 元素在折线以下时，
+   * 鼠标落在视口外面，什么都点不到，而**一条报错都没有**：
+   * 落点线没出现、顺序没变，看起来就像"拖拽功能没做"。
+   * 走查第一版就是这么红的，而产品代码是好的。
+   * 所以这里先把视口拉高、再把那一行滚进来，两件都做。
+   */
+  const grip = cutRows.first().locator('.cut-grip');
+  await page.setViewportSize({ width: 1280, height: 1400 });
+  await grip.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  const g = await grip.boundingBox();
+  const last = await cutRows.nth(2).boundingBox();
+  await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(g.x + g.width / 2, last.y + last.height - 3, { steps: 10 });
+  check('拖动时有一条落点线，能看出会插到哪儿',
+    (await page.locator('.cut-marker').count()) === 1, String(await page.locator('.cut-marker').count()));
+  await page.mouse.up();
+  await page.waitForTimeout(800);
+  const dragged = await idsNow();
+  check('拖拽排序真的存下来了（第一镜被拖到了最后）',
+    dragged[dragged.length - 1] === before[0], `${JSON.stringify(dragged)} ← 原 ${JSON.stringify(before)}`);
+  check('拖完落点线收干净了', (await page.locator('.cut-marker').count()) === 0);
+
+  /**
+   * ⚠ 再拖一次，这次落在**中间**。
+   *
+   * 只测"拖到最后"是不够的：那个位置上，"自己被拿走之后后面都往前挪一位"
+   * 这条修正错不错，结果都一样（都是追加到末尾）。走查里试过 ——
+   * 把那行修正删掉，第一条断言纹丝不动地绿着。
+   * 往下拖到中间才分得出来：算错一位的话这一镜会越过目标多走一格。
+   */
+  const g2 = await cutRows.first().locator('.cut-grip').boundingBox();
+  const mid = await cutRows.nth(1).boundingBox();
+  await page.mouse.move(g2.x + g2.width / 2, g2.y + g2.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(g2.x + g2.width / 2, mid.y + mid.height - 3, { steps: 10 });
+  await page.mouse.up();
+  await page.waitForTimeout(800);
+  const mid2 = await idsNow();
+  check('往下拖到中间时落点不多走一格',
+    mid2[1] === dragged[0] && mid2[0] === dragged[1],
+    `${JSON.stringify(mid2)} ← ${JSON.stringify(dragged)}`);
+
+  // ↑↓ 也还在：拖拽不精确的时候要有一条稳的路
   await cutRows.first().locator('button:has-text("↓")').click();
   await page.waitForTimeout(700);
-  const afterMove = await page.evaluate((id) => fetch(`/api/projects/${id}`).then((r) => r.json()), proj.id);
-  check('调顺序真的存下来了',
-    Array.isArray(afterMove.edit?.order) && afterMove.edit.order[0] !== afterMove.shots[0].id,
-    JSON.stringify(afterMove.edit?.order));
+  const afterMove = await idsNow();
+  check('↑↓ 挪一位也照样存下来',
+    afterMove[0] !== mid2[0], `${JSON.stringify(afterMove)} ← ${JSON.stringify(mid2)}`);
 
-  // 跳过一镜
-  await page.locator('.cut-row button:has-text("不用")').first().click();
-  await page.waitForTimeout(700);
-  const afterOff = await page.evaluate((id) => fetch(`/api/projects/${id}`).then((r) => r.json()), proj.id);
-  check('"不用"真的存下来了',
-    Object.values(afterOff.edit?.clips || {}).some((c) => c.off === true),
-    JSON.stringify(afterOff.edit?.clips));
+  /**
+   * ── 裁剪条 ──
+   *
+   * 两个数字框谁都会做，但没人能拿着两个数字想象出这一刀切在哪儿。
+   * 拖把手是这块能不能叫"剪辑台"的分界，而它必须真的写进 edit。
+   */
+  const bar = cutRows.first().locator('.cut-bar');
+  const bb = await bar.boundingBox();
+  const handle = cutRows.first().locator('.cut-handle.a');
+  const hb = await handle.boundingBox();
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bb.x + bb.width * 0.4, hb.y + hb.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(800);
+  const afterDrag = await readEdit();
+  const dragIn = Object.values(afterDrag.clips || {}).map((c) => c.in).find((v) => v > 0);
+  check('拖裁剪条真的设上了入点', dragIn > 0.5 && dragIn < 4, JSON.stringify(afterDrag.clips));
+  check('拖完那一行的读数跟着变了',
+    /→/.test(await cutRows.first().locator('.cut-bar-txt').innerText()),
+    await cutRows.first().locator('.cut-bar-txt').innerText());
 
-  // 入点
-  const inBox = page.locator('.cut-row input[type=number]').first();
+  // 数字框那条路也要还在（拖不准的时候手填）
+  const inBox = cutRows.nth(1).locator('input[type=number]').first();
   await inBox.fill('1.5');
   await inBox.dispatchEvent('change');
   await page.waitForTimeout(700);
-  const afterIn = await page.evaluate((id) => fetch(`/api/projects/${id}`).then((r) => r.json()), proj.id);
-  check('入点真的存下来了',
-    Object.values(afterIn.edit?.clips || {}).some((c) => c.in === 1.5),
-    JSON.stringify(afterIn.edit?.clips));
+  const afterIn = await readEdit();
+  check('手填入点也真的存下来了',
+    Object.values(afterIn.clips || {}).some((c) => c.in === 1.5), JSON.stringify(afterIn.clips));
 
-  // 恢复默认要真的清干净 —— 留半份状态比不给这个按钮更糟
-  await page.locator('button:has-text("恢复默认")').click();
+  // ── 转场：改的是剪辑决定，不是分镜字段 ──
+  const transSel = cutRows.nth(1).locator('select').first();
+  await transSel.selectOption('slideleft');
+  await page.waitForTimeout(700);
+  const afterTrans = await readEdit();
+  check('换转场存进了剪辑决定（不冲掉分镜里那个建议值）',
+    Object.values(afterTrans.clips || {}).some((c) => c.trans === 'slideleft'),
+    JSON.stringify(afterTrans.clips));
+  check('第一段的转场是灰的（它前面没有片子，没有"怎么接上来"这回事）',
+    await cutRows.first().locator('select').first().isDisabled());
+  const transOpts = await transSel.locator('option').count();
+  check(`转场不止那三个（现在有 ${transOpts} 种）`, transOpts >= 15, String(transOpts));
+
+  // ── 画面效果 ──
+  const fxSel = cutRows.nth(1).locator('select').nth(1);
+  await fxSel.selectOption('bw');
+  await page.waitForTimeout(700);
+  const afterFx = await readEdit();
+  check('画面效果存下来了',
+    Object.values(afterFx.clips || {}).some((c) => c.fx === 'bw'), JSON.stringify(afterFx.clips));
+
+  // ── 单镜静音 ──
+  await cutRows.nth(1).locator('button[title*="不要声音"]').click();
+  await page.waitForTimeout(700);
+  const afterMute = await readEdit();
+  check('单镜静音存下来了',
+    Object.values(afterMute.clips || {}).some((c) => c.mute === true), JSON.stringify(afterMute.clips));
+
+  // ── 跳过一镜 ──
+  await page.locator('.cut-row button:has-text("不用")').first().click();
+  await page.waitForTimeout(700);
+  const afterOff = await readEdit();
+  check('"不用"真的存下来了',
+    Object.values(afterOff.clips || {}).some((c) => c.off === true), JSON.stringify(afterOff.clips));
+
+  /**
+   * ── 音轨开关 ──
+   *
+   * 声音的问题是整片性的（"音效太吵""音乐盖住台词"从来不是某一镜的事），
+   * 所以开关摆在片段上面。关掉不删任何文件 —— 这一点界面上必须说出来。
+   */
+  const voiceBtn = page.locator('.cut-track button[title*="不混任何配音"]');
+  await voiceBtn.click();
+  await page.waitForTimeout(700);
+  const afterTrack = await readEdit();
+  check('关掉台词轨真的存下来了', afterTrack.tracks?.voice === false, JSON.stringify(afterTrack.tracks));
+  await voiceBtn.click();
+  await page.waitForTimeout(700);
+  check('再点一下就开回来（只存"被关掉"的那些）',
+    (await readEdit()).tracks?.voice === undefined, JSON.stringify((await readEdit()).tracks));
+
+  /**
+   * ── 背景音乐 ──
+   *
+   * 传上去只是存文件；混音发生在合成那一步。所以这里量的是
+   * "文件到了没、参数记上没"，真正的混音由 realcheck 拿真 FFmpeg 验。
+   */
+  const musicInput = page.locator('.cut-audio input[type=file]');
+  await musicInput.setInputFiles({
+    name: '走查用.mp3',
+    mimeType: 'audio/mpeg',
+    buffer: Buffer.from('ID3      fake-mp3-body', 'binary')
+  });
+  await page.waitForTimeout(1500);
+  const afterMusic = await readEdit();
+  check('背景音乐传上去了，路径记在项目里', Boolean(afterMusic.music?.path), JSON.stringify(afterMusic.music));
+  check('音乐的默认参数是"压在台词底下 + 自动避让"',
+    afterMusic.music?.gain <= 0.3 && afterMusic.music?.duck !== false, JSON.stringify(afterMusic.music));
+  check('传完之后音量、避让、淡入淡出这些控件出来了',
+    (await page.locator('.cut-track input[type=range]').count()) >= 2,
+    String(await page.locator('.cut-track input[type=range]').count()));
+  check('说清楚曲子的授权要自己确认',
+    /授权/.test(await page.locator('.cut-audio').innerText()), '');
+
+  const duckBox = page.locator('.cut-track label[title*="自动让开"] input[type=checkbox]');
+  if (await duckBox.count()) {
+    await duckBox.uncheck();
+    await page.waitForTimeout(700);
+    check('关掉自动避让也存得下来', (await readEdit()).music?.duck === false,
+      JSON.stringify((await readEdit()).music));
+  }
+
+  await page.locator('button:has-text("移除")').click();
   await page.waitForTimeout(800);
-  const afterReset = await page.evaluate((id) => fetch(`/api/projects/${id}`).then((r) => r.json()), proj.id);
+  check('撤下音乐之后项目里就没有了', !(await readEdit()).music, JSON.stringify((await readEdit()).music));
+
+  // ── 恢复默认：只清片段那一块，音轨开关不该被顺手清掉 ──
+  await page.locator('button:has-text("恢复默认")').click();
+  await page.waitForTimeout(900);
+  const afterReset = await readEdit();
   check('「恢复默认」把剪辑决定清干净',
-    Object.keys(afterReset.edit?.clips || {}).length === 0, JSON.stringify(afterReset.edit));
+    Object.keys(afterReset.clips || {}).length === 0, JSON.stringify(afterReset));
+  const shotIds = await page.evaluate((id) =>
+    fetch(`/api/projects/${id}`).then((r) => r.json()).then((p) => p.shots.map((s) => s.id)), proj.id);
   check('并且顺序回到按镜号排',
-    (afterReset.edit?.order || [])[0] === afterReset.shots[0].id, JSON.stringify(afterReset.edit?.order));
+    (afterReset.order || [])[0] === shotIds[0], JSON.stringify(afterReset.order));
 }
 check('说清楚重新合成不花钱',
   /一分钱不花|不花钱/.test(await page.locator('#view-inner').innerText()), '');
+check('画面效果那一栏如实说了"慢一点但不花钱"',
+  /不花钱/.test(await page.locator('.cut-row select').nth(1).getAttribute('title') || ''),
+  await page.locator('.cut-row select').nth(1).getAttribute('title'));
 
 check('全程没有页面报错', errs.length === 0, errs.slice(0, 3).join(' | '));
 

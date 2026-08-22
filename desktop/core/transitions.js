@@ -45,10 +45,78 @@ export const LABELS = {
   dissolve: '叠化（时间流逝）'
 };
 
+/**
+ * ════════ 剪辑台上那一排"更多转场" ════════
+ *
+ * 上面那三个是**模型能选的**（见 segments.js：分镜解析时强制归一到这三个）。
+ * 下面这些是**人在剪辑台上手选的** —— 模型不该有权选它们，
+ * 理由和上面那段一样：满屏推拉划像是业余标志，而模型最爱干这个。
+ *
+ * ⚠ 两份清单必须分开。把它们合成一份的话，模型输出里蹦出一个
+ * "pixelize" 就会被当成合法值原样收下，然后二十镜的片子里冒出一处马赛克 ——
+ * 而没有任何人做过这个决定。
+ *
+ * ── 实现上只有三类 ──
+ *
+ *   mode: 'none'    什么都不做（硬切）
+ *   mode: 'black'   在原片上做淡出/淡入。**不吃时长**
+ *   mode: 'xfade'   两段重叠着换。**必然吃掉重叠的那段时间**（见文件开头）
+ *
+ * xfade 那一栏是 FFmpeg `xfade` 滤镜的 transition 名。老版本 FFmpeg 认得的
+ * 名字更少 —— 所以合成那一层必须能"这一处做不出来就退回叠化"，
+ * 而不是让一个不认识的名字把整部片子的转场全带崩。
+ */
+export const CATALOG = [
+  { id: 'cut', label: '硬切（默认）', mode: 'none', xfade: null, why: '九成的镜头之间都该是这个' },
+  { id: 'fade', label: '黑场', mode: 'black', xfade: null, why: '换时间、换地点' },
+  { id: 'dissolve', label: '叠化', mode: 'xfade', xfade: 'fade', why: '时间流逝' },
+  { id: 'fadeblack', label: '闪黑', mode: 'xfade', xfade: 'fadeblack', why: '比黑场急，一下就过去' },
+  { id: 'fadewhite', label: '闪白', mode: 'xfade', xfade: 'fadewhite', why: '回忆、爆闪、醒来' },
+  { id: 'slideleft', label: '左推', mode: 'xfade', xfade: 'slideleft', why: '同场景换角度' },
+  { id: 'slideright', label: '右推', mode: 'xfade', xfade: 'slideright', why: '同场景换角度' },
+  { id: 'slideup', label: '上推', mode: 'xfade', xfade: 'slideup', why: '换段落' },
+  { id: 'slidedown', label: '下推', mode: 'xfade', xfade: 'slidedown', why: '换段落' },
+  { id: 'wipeleft', label: '左划', mode: 'xfade', xfade: 'wipeleft', why: '并置两件同时发生的事' },
+  { id: 'wiperight', label: '右划', mode: 'xfade', xfade: 'wiperight', why: '并置两件同时发生的事' },
+  { id: 'smoothleft', label: '柔划左', mode: 'xfade', xfade: 'smoothleft', why: '比硬划像温和' },
+  { id: 'smoothright', label: '柔划右', mode: 'xfade', xfade: 'smoothright', why: '比硬划像温和' },
+  { id: 'circleopen', label: '圆开', mode: 'xfade', xfade: 'circleopen', why: '进入某人的视角' },
+  { id: 'circleclose', label: '圆收', mode: 'xfade', xfade: 'circleclose', why: '一段结束，收束到一点' },
+  { id: 'pixelize', label: '马赛克', mode: 'xfade', xfade: 'pixelize', why: '穿越、数字感' },
+  { id: 'radial', label: '扫转', mode: 'xfade', xfade: 'radial', why: '时间跳跃' },
+  { id: 'zoomin', label: '推近', mode: 'xfade', xfade: 'zoomin', why: '往细节里钻' },
+  { id: 'hblur', label: '横向模糊', mode: 'xfade', xfade: 'hblur', why: '甩镜、失神' }
+];
+
+/** 剪辑台上人能选的全部转场（含上面那三个） */
+export const ALL_KINDS = CATALOG.map((t) => t.id);
+
+const BY_ID = new Map(CATALOG.map((t) => [t.id, t]));
+
+/** 查一条转场的定义。不认识的一律当硬切 */
+export function defOf(kind) {
+  return BY_ID.get(kind) || BY_ID.get('cut');
+}
+
 /** 不认识的值一律当硬切。模型瞎编的转场名不该悄悄变成别的效果 */
 export function kindOf(shot) {
   const k = shot?.transition;
-  return KINDS.includes(k) ? k : 'cut';
+  return ALL_KINDS.includes(k) ? k : 'cut';
+}
+
+/** 这个转场要用 xfade 做吗（要的话就会吃掉时长） */
+export function xfadeOf(kind) {
+  return defOf(kind).xfade;
+}
+
+/**
+ * 这一种转场吃掉多少秒。
+ *
+ * 和 overlapOf(shot) 是同一个数，只是入口不同：剪辑台把转场记在
+ * **剪辑决定**里（edit.clips[id].trans），那时手上只有一个字符串，没有 shot。
+ */
+export function overlapOfKind(kind) {
+  return defOf(kind).mode === 'xfade' ? DISSOLVE_SECONDS : 0;
 }
 
 /**
@@ -59,7 +127,7 @@ export function kindOf(shot) {
  * 这正是把它单独拎出来的原因：三处各写一个 0.5，早晚会有一处忘了改。
  */
 export function overlapOf(shot) {
-  return kindOf(shot) === 'dissolve' ? DISSOLVE_SECONDS : 0;
+  return overlapOfKind(kindOf(shot));
 }
 
 /** 整部片子被叠化吃掉的总时长。第一镜的转场是片头，不吃时间 */

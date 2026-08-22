@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { BIN_DIRS, USER_BIN_DIR } from './paths.js';
 import * as settings from './settings.js';
-import { DISSOLVE_SECONDS, FADE_SECONDS } from './transitions.js';
+import { DISSOLVE_SECONDS, FADE_SECONDS, xfadeOf } from './transitions.js';
 
 // 时长会被时间轴、字幕、合成三处同时用到，所以只有 transitions.js 一个出处
 const TRANS = { DISSOLVE: DISSOLVE_SECONDS, FADE: FADE_SECONDS };
@@ -152,9 +152,28 @@ export async function probeStreams(file) {
   try {
     const { stderr } = await run(['-i', file, '-f', 'null', '-']);
     const m = stderr.match(/Duration:\s*(\d+):(\d+):(\d+\.\d+)/);
+    /**
+     * 分辨率和帧率也一起读出来。
+     *
+     * 这两个数是给画面效果用的：zoompan 不给 `s=` 会把 1080p 悄悄降到 720p，
+     * 不给 `fps=` 会按 25 帧重采样（24 帧的素材于是抖）。两样都不报错，
+     * 只是让成片变差 —— 正是这个项目里反复出问题的那一类沉默。
+     *
+     * ⚠ 曾经有一条自检断言读的就是 `probeStreams().width`，而那时这里
+     * **根本没有这个字段** —— 断言永远是 undefined 比 undefined，永远绿。
+     * 加字段的同时把那条也补上了。
+     *
+     * 正则要从 `Video:` 那一行里取第一个 `数x数`：后面还跟着
+     * `[SAR 1:1 DAR 16:9]`，先匹配到别的会拿回一对没意义的数。
+     */
+    const v = stderr.match(/Video:.*?(\d{2,5})x(\d{2,5})/);
+    const f = stderr.match(/,\s*([\d.]+)\s*fps/);
     return {
       seconds: m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) : null,
-      hasAudio: /Stream #\d+:\d+.*: Audio:/.test(stderr)
+      hasAudio: /Stream #\d+:\d+.*: Audio:/.test(stderr),
+      width: v ? Number(v[1]) : null,
+      height: v ? Number(v[2]) : null,
+      fps: f && Number(f[1]) > 0 ? Number(f[1]) : null
     };
   } catch {
     return null;
@@ -202,9 +221,123 @@ export function voiceFilterGraph(entries) {
 }
 
 export async function buildVoiceTrack(entries, outputPath, { onProgress } = {}) {
-  const usable = (entries || []).filter((e) => e?.path && fs.existsSync(e.path));
-  if (!usable.length) return null;
+  return buildAudioTrack(entries, outputPath, { onProgress });
+}
 
+/**
+ * 所有输入统一到这一种格式。
+ *
+ * ── 为什么必须显式统一 ──
+ *
+ * amix 自己会插 aresample，所以以前混台词和音效没出过问题。但
+ * **sidechaincompress 不会** —— 它要求主输入和旁链的采样率、声道布局完全一致。
+ * 而我们手上的素材天生就不一致：TTS 给的常是 24kHz 单声道，
+ * 背景音乐是 44.1kHz 立体声。不统一的话它直接报错，
+ * 表现就是"加了背景音乐之后整条音轨没了"。
+ */
+const FMT = 'aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo';
+
+/**
+ * 整片音轨：台词 + 音效 + 背景音乐，一次混完。
+ *
+ * ════════ 背景音乐为什么不能只是"再混一条进去" ════════
+ *
+ * 直接 amix 一条音乐进来，听感上一定是错的：音乐是**连续**的，台词是**断续**的，
+ * 而人耳对"听不清在说什么"极其敏感。把音乐压到听不见吧，等于没配；
+ * 压到刚好吧，一到有台词的地方就糊。
+ *
+ * 广播和影视里的标准解法是**自动避让**（ducking）：有人说话时音乐自动往下压，
+ * 说完自己回来。这里用 sidechaincompress 做 —— 把台词轨当旁链信号，
+ * 音乐当被压的主信号。这比手动摆关键帧靠谱得多，也是"听上去像专业做的"
+ * 和"听上去像自己拿剪映拼的"之间差别最大的一处。
+ *
+ * ⚠ 旁链要用**台词那一路**，不能用"台词+音效"。音效多是连续的环境声，
+ * 拿它当旁链的话音乐会被一直压着，等于关掉了音乐。
+ *
+ * ════════ 统一响度 ════════
+ *
+ * loudnorm 把整条音轨拉到 −16 LUFS（短视频平台的常见口径）。
+ * 不做的话，不同厂商的 TTS、不同来源的音乐各有各的响度，
+ * 观众要一集一集去调音量 —— 而这恰恰是"业余"最直接的信号。
+ */
+export async function buildAudioTrack(
+  entries,
+  outputPath,
+  { music = null, total = 0, loudness = false, onProgress, onNote } = {}
+) {
+  const usable = (entries || []).filter((e) => e?.path && fs.existsSync(e.path));
+  const bgm = music?.path && fs.existsSync(music.path) ? music : null;
+  if (!usable.length && !bgm) return null;
+  if (music?.path && !bgm) {
+    onNote?.(`背景音乐文件找不到了（${music.path}），这次先不混音乐 —— 成片照出`);
+  }
+
+  /**
+   * 逐级退让。每一级都比上一级少一样东西，**声音本身永远不丢**：
+   *
+   *   ① 音乐 + 避让 + 统一响度   —— 想要的样子
+   *   ② 去掉统一响度             —— 老 FFmpeg 没有 loudnorm
+   *   ③ 去掉避让                 —— 老 FFmpeg 没有 sidechaincompress
+   *   ④ 连音乐一起去掉           —— 这个音频文件解不了
+   *
+   * ⚠ 这一层不是"以防万一"。用户机器上那份 FFmpeg 是自己下的，
+   * 版本完全不受我们控制，而这三个滤镜恰恰都是后来才进去的。
+   * 没有这一层的话，缺一个滤镜的后果是**整部成片一点声音都没有** ——
+   * 而日志里只有一句看不懂的滤镜报错。
+   */
+  const ladder = [];
+  if (bgm) {
+    if (loudness) ladder.push({ music: true, duck: true, loud: true });
+    ladder.push({ music: true, duck: true, loud: false });
+    ladder.push({
+      music: true,
+      duck: false,
+      loud: false,
+      why: '「说话时自动压低」这台机器的 FFmpeg 做不了，这次音乐按固定音量混（可以把音量调小一点）'
+    });
+    if (usable.length) {
+      ladder.push({
+        music: false,
+        duck: false,
+        loud: false,
+        why: '这段音乐混不进去，这次先只出台词和音效 —— 换个 MP3 再试'
+      });
+    }
+  } else {
+    if (loudness) ladder.push({ music: false, duck: false, loud: true });
+    ladder.push({ music: false, duck: false, loud: false });
+  }
+
+  let lastErr = null;
+  for (const [step, opt] of ladder.entries()) {
+    const args = planAudio(usable, opt.music ? bgm : null, {
+      total, loudness: opt.loud, duck: opt.duck, outputPath
+    });
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await run(args, { onProgress });
+      return outputPath;
+    } catch (err) {
+      lastErr = err;
+      const next = ladder[step + 1];
+      if (!next) break;
+      onNote?.(
+        (next.why || '响度统一这一步没做成，这次按原始响度混音 —— 声音都在，只是不同来源的音量可能不齐')
+        + `（${String(err.message || err).slice(0, 90)}）`
+      );
+    }
+  }
+  throw lastErr;
+}
+
+/**
+ * 把一次混音编成 FFmpeg 参数。**纯字符串**，不碰盘、不起进程。
+ *
+ * 单独拎出来是为了能被大量而便宜地断言：音轨这一层的错
+ *（旁链接错、标签用两次、循环没截断）在成片里只表现为"声音不对"，
+ * 而那是最难自己发现的一类。
+ */
+export function planAudio(usable, bgm, { total = 0, loudness = false, duck = true, outputPath } = {}) {
   const args = ['-y'];
   for (const e of usable) {
     // trimTo：音效比镜头长时裁掉多出来的部分，否则它会响到下一镜上。
@@ -212,9 +345,96 @@ export async function buildVoiceTrack(entries, outputPath, { onProgress } = {}) 
     if (Number(e.trimTo) > 0) args.push('-t', String(e.trimTo));
     args.push('-i', e.path);
   }
-  args.push('-filter_complex', voiceFilterGraph(usable), '-map', '[out]', '-c:a', 'aac', outputPath);
-  await run(args, { onProgress });
-  return outputPath;
+  if (bgm) {
+    /**
+     * ⚠ `-stream_loop` 必须在**这一个** `-i` 前面，而且要配 `-t` 卡住长度 ——
+     * 无限循环的输入不给上限的话，这条命令永远跑不完。
+     */
+    if (bgm.loop !== false && total > 0) args.push('-stream_loop', '-1');
+    if (total > 0) args.push('-t', total.toFixed(3));
+    args.push('-i', bgm.path);
+  }
+
+  const parts = [];
+  const voiceIdx = [];
+  const sfxIdx = [];
+  usable.forEach((e, i) => {
+    const ms = Math.max(0, Math.round((Number(e.at) || 0) * 1000));
+    const g = Number(e.gain);
+    const vol = Number.isFinite(g) && g > 0 && g !== 1 ? `,volume=${g.toFixed(3)}` : '';
+    parts.push(`[${i}:a]adelay=${ms}:all=1${vol},${FMT}[a${i}]`);
+    // 旁链只取台词。音效是带 gain 的那几条（compose 只给音效传 gain），
+    // 拿连续的环境声当旁链会把音乐一直压着，等于关掉了音乐
+    (Number.isFinite(g) && g > 0 && g < 1 ? sfxIdx : voiceIdx).push(i);
+  });
+
+  const ducking = Boolean(bgm) && duck && bgm.duck !== false && voiceIdx.length > 0;
+
+  /**
+   * ⚠ 滤镜图里**一个输出标签只能被接一次**。
+   *
+   * 接两次 FFmpeg 直接报 "Output pad already connected" —— 整条音轨出不来。
+   * 所以要做避让时，人声必须先 asplit 成两份：一份进成片，一份当旁链。
+   */
+  const mix = (labels, name) => {
+    if (labels.length === 1) return labels[0];
+    parts.push(`${labels.join('')}amix=inputs=${labels.length}:dropout_transition=0:normalize=0[${name}]`);
+    return `[${name}]`;
+  };
+
+  let spoken = null;
+  let sidechain = null;
+  if (voiceIdx.length) {
+    let v = mix(voiceIdx.map((i) => `[a${i}]`), 'voice');
+    if (ducking) {
+      /**
+       * ⚠ 旁链那一路必须 **apad 补到无限长**。
+       *
+       * sidechaincompress 在**旁链结束的那一刻就收尾** —— 它不管主输入
+       * 还有多长。台词通常在片子结束前很久就念完了，于是整条音轨被砍在
+       * 最后一句话上：一部 8 秒的片子只剩 4 秒，后面的音乐凭空消失。
+       *
+       * 而这件事**一句警告都没有**，参数看着也天经地义 ——
+       * 是真跑一遍量出来的（走查里第一次跑就是 4.02 秒）。
+       * apad 之后旁链变成"台词 + 无限静音"，收尾权就回到音乐那一路。
+       */
+      parts.push(`${v}asplit=2[voiceA][voiceB]`);
+      parts.push('[voiceB]apad[voicePad]');
+      v = '[voiceA]';
+      sidechain = '[voicePad]';
+    }
+    spoken = v;
+  }
+  if (sfxIdx.length) {
+    spoken = mix([...(spoken ? [spoken] : []), ...sfxIdx.map((i) => `[a${i}]`)], 'spoken');
+  }
+
+  let out = spoken;
+  if (bgm) {
+    const mi = usable.length; // 音乐是最后一个输入
+    const chain = [`volume=${Number(bgm.gain ?? 0.22).toFixed(3)}`];
+    if (Number(bgm.fadeIn) > 0) chain.push(`afade=t=in:st=0:d=${Number(bgm.fadeIn).toFixed(2)}`);
+    if (Number(bgm.fadeOut) > 0 && total > Number(bgm.fadeOut)) {
+      chain.push(`afade=t=out:st=${(total - Number(bgm.fadeOut)).toFixed(2)}:d=${Number(bgm.fadeOut).toFixed(2)}`);
+    }
+    chain.push(FMT);
+    parts.push(`[${mi}:a]${chain.join(',')}[bgm]`);
+
+    let bgmLabel = '[bgm]';
+    if (sidechain) {
+      parts.push(`[bgm]${sidechain}sidechaincompress=threshold=0.03:ratio=12:attack=20:release=500:makeup=1[ducked]`);
+      bgmLabel = '[ducked]';
+    }
+    out = spoken ? mix([bgmLabel, spoken], 'mixed') : bgmLabel;
+  }
+
+  if (loudness) {
+    parts.push(`${out}loudnorm=I=-16:TP=-1.5:LRA=11[loud]`);
+    out = '[loud]';
+  }
+
+  args.push('-filter_complex', parts.join(';'), '-map', out, '-c:a', 'aac', outputPath);
+  return args;
 }
 
 /**
@@ -268,9 +488,19 @@ async function buildTransitions({
   // 音轨要么全有、要么全无。缺的补一段静音，否则拼出来会从某一处开始整条没声
   const anyAudio = info.some((i) => i.hasAudio);
 
-  // 每段各要切掉多少：头上被前一个叠化吃掉，尾巴被后一个叠化吃掉
-  const headCut = clips.map((_, i) => (i > 0 && kinds[i] === 'dissolve' ? TRANS.DISSOLVE : 0));
-  const tailCut = clips.map((_, i) => (i + 1 < clips.length && kinds[i + 1] === 'dissolve' ? TRANS.DISSOLVE : 0));
+  /**
+   * 「要重叠着换」的那一类 —— 叠化、推、划、圆开圆收、马赛克……
+   * 它们在实现上是同一件事（FFmpeg 的 xfade 滤镜，只是 transition= 后面的名字不同），
+   * 所以这里一律按 xfade 处理，**不再逐个 if**。
+   *
+   * ⚠ 之前这里写死的是 `kinds[i] === 'dissolve'`。加新转场时最容易漏的就是
+   * 这两行：新名字进得来、xfade 那一步也做了，但头尾没有相应切掉 ——
+   * 于是那一处的画面**多出半秒**，而配音和字幕按"少半秒"算，整片从那儿往后错位。
+   */
+  const isX = (k) => Boolean(xfadeOf(k));
+  // 每段各要切掉多少：头上被前一个重叠吃掉，尾巴被后一个重叠吃掉
+  const headCut = clips.map((_, i) => (i > 0 && isX(kinds[i]) ? TRANS.DISSOLVE : 0));
+  const tailCut = clips.map((_, i) => (i + 1 < clips.length && isX(kinds[i + 1]) ? TRANS.DISSOLVE : 0));
   // 黑场是原地做的，不吃时长：只是把上一段的尾巴压黑、这一段的头淡入
   const fadeIn = clips.map((_, i) => i > 0 && kinds[i] === 'fade');
   const fadeOut = clips.map((_, i) => i + 1 < clips.length && kinds[i + 1] === 'fade');
@@ -310,8 +540,8 @@ async function buildTransitions({
       cleanup.push(piece);
       out.push(piece);
 
-      // 叠化的过渡片：拿上一段的尾巴和这一段的开头重叠着渐变
-      if (i + 1 < clips.length && kinds[i + 1] === 'dissolve') {
+      // 重叠类转场的过渡片：拿上一段的尾巴和这一段的开头叠在一起换过去
+      if (i + 1 < clips.length && isX(kinds[i + 1])) {
         const x = `${outputPath}.xf${i}.mp4`;
         const from = Math.max(0, info[i].seconds - TRANS.DISSOLVE);
         const xa = ['-y', '-ss', from.toFixed(3), '-t', String(TRANS.DISSOLVE), '-i', clips[i],
@@ -333,16 +563,40 @@ async function buildTransitions({
         if (anyAudio) {
           xa.push('-f', 'lavfi', '-i', `anullsrc=channel_layout=stereo:sample_rate=44100:d=${TRANS.DISSOLVE}`);
         }
-        xa.push(
-          '-filter_complex',
-          `[0:v][1:v]xfade=transition=fade:duration=${TRANS.DISSOLVE}:offset=0[v]`,
+        const tail = [
           '-map', '[v]',
           ...(anyAudio ? ['-map', '2:a', '-c:a', 'aac'] : ['-an']),
           // 输出侧再钉一次长度。不靠 -shortest：它在"输出来自滤镜图"时不可靠
           '-t', String(TRANS.DISSOLVE),
           '-c:v', 'libx264', '-preset', 'veryfast', x
-        );
-        await exec(xa, { onProgress });
+        ];
+        const withKind = (name) => [
+          ...xa,
+          '-filter_complex', `[0:v][1:v]xfade=transition=${name}:duration=${TRANS.DISSOLVE}:offset=0[v]`,
+          ...tail
+        ];
+        const wanted = xfadeOf(kinds[i + 1]);
+        try {
+          await exec(withKind(wanted), { onProgress });
+        } catch (err) {
+          /**
+           * ⚠ 一处转场做不出来，**不能连累其余十几处**。
+           *
+           * xfade 认得的效果名是跟 FFmpeg 版本走的：`pixelize`、`zoomin`、
+           * `hblur` 这些是后来才加的，老一点的构建直接报 "Invalid transition"。
+           * 而用户机器上那份 FFmpeg 是自己下的，版本完全不受我们控制。
+           *
+           * 原来的写法是整个循环外面一个 catch —— 一个不认识的名字会让
+           * **整部片子退回全硬切**，包括那些本来做得好好的叠化。
+           * 这里就地退回最保险的 fade（xfade 从第一版就有它），
+           * 时长口径一点不变（都是 DISSOLVE 秒），所以音画不会因此错位。
+           */
+          onNote?.(
+            `第 ${i + 2} 段的「${wanted}」这台机器的 FFmpeg 做不了，这一处改用普通叠化`
+            + `（${String(err.message || err).slice(0, 80)}）—— 其余转场不受影响`
+          );
+          await exec(withKind('fade'), { onProgress });
+        }
         cleanup.push(x);
         out.push(x);
       }
@@ -358,7 +612,11 @@ export async function concat(
   segments,
   outputPath,
   // __probe / __exec 只给自检注入用，正常调用一个都不用传（理由见 buildTransitions 上面那段）
-  { audioPath, audioTracks, audioAt, trims, cuts, transitions, onNote, onProgress, __probe, __exec } = {}
+  {
+    audioPath, audioTracks, audioAt, music, total = 0, loudness = false,
+    trims, cuts, filters, transitions,
+    onNote, onProgress, __probe, __exec
+  } = {}
 ) {
   if (!segments.length) throw new Error('没有可合成的片段');
 
@@ -400,47 +658,82 @@ export async function concat(
      */
     let clips = segments;
     const padded = [];
-    if (trims?.length) {
+    /**
+     * 哪几段要单独过一遍。三种原因，任一条成立就得重压这一段：
+     *
+     *   trims[i] > 0     要卡到某个时长（长了切、短了补）
+     *   cuts[i].in > 0   要从第几秒进（自动剪辑的废头，或人设的入点）
+     *   filters[i]       加了画面效果
+     *
+     * ⚠ 第二条以前**不在这个清单里** —— 那时的判断只有 `if (!want) 跳过`。
+     * 后果很隐蔽：时长策略改成默认「保留完整片段」之后，trims 整条都是 null，
+     * 于是自动剪辑照样跑、日志照样打"已跳过开头 N 秒"，
+     * 而成片里那几秒**一帧没少**。日志说做了、实际没做，是这个项目里
+     * 反复出现的那一类错，这次把入点单独立成一条判据。
+     */
+    const need = segments.map((_, i) =>
+      Number(trims?.[i]) > 0 || Number(cuts?.[i]?.in) > 0 || Boolean(filters?.[i]));
+    if (need.some(Boolean)) {
       clips = [];
       for (let i = 0; i < segments.length; i++) {
-        const want = trims[i];
-        if (!want || want <= 0) {
+        if (!need[i]) {
           clips.push(segments[i]);
           continue;
         }
-        const info = await (__probe || probeStreams)(segments[i]);
-        // ⚠ 从入点往后**还剩多少**才是可用长度。拿整段长度去算的话，
-        // 跳掉开头之后其实已经不够了，而补帧那一步会以为够，于是少补一截
-        const real = info?.seconds ? info.seconds - (Number(cuts?.[i]?.in) || 0) : null;
-        // 0.15 秒以内不管：那点差在观感上不存在，为它重编码一遍不划算
-        const gap = real ? want - real : 0;
-        const needPad = gap > 0.15;
-
-        const cut = `${outputPath}.trim${i}.mp4`;
+        const want = Number(trims?.[i]) > 0 ? Number(trims[i]) : 0;
         /**
          * 入点。`-ss` 必须放在 `-i` **前面**：放前面是快速定位（先跳再解码），
          * 放后面是解码到那儿再丢弃 —— 结果一样，但后者要把前面整段解一遍。
-         *
-         * 没有入点时一个参数都不加，保持和以前完全一样的行为。
          */
         const startAt = Number(cuts?.[i]?.in) || 0;
+        const info = await (__probe || probeStreams)(segments[i]);
+        // ⚠ 从入点往后**还剩多少**才是可用长度。拿整段长度去算的话，
+        // 跳掉开头之后其实已经不够了，而补帧那一步会以为够，于是少补一截
+        const real = info?.seconds ? info.seconds - startAt : null;
+        // 0.15 秒以内不管：那点差在观感上不存在，为它重编码一遍不划算
+        const gap = want && real ? want - real : 0;
+        const needPad = gap > 0.15;
+
+        const cut = `${outputPath}.trim${i}.mp4`;
         const args = ['-y'];
         if (startAt > 0) args.push('-ss', startAt.toFixed(3));
         args.push('-i', segments[i]);
+        /**
+         * 画面效果和补帧共用同一个 `-vf` —— 一条命令里它只能出现一次，
+         * 写两遍的话后一个会**悄悄顶掉**前一个（FFmpeg 不报错）。
+         * 效果在前、补帧在后：补出来的那一段是效果做完之后的最后一帧，
+         * 反过来的话冻住的是原始帧，成片里会看到最后突然"掉色"。
+         */
+        const vf = [];
+        if (filters?.[i]) vf.push(filters[i]);
         if (needPad) {
-          args.push('-vf', `tpad=stop_mode=clone:stop_duration=${gap.toFixed(3)}`);
+          vf.push(`tpad=stop_mode=clone:stop_duration=${gap.toFixed(3)}`);
           // 有音轨的话也要跟着补静音，否则补出来的那一段没有音轨，
           // 拼接时流结构对不上（concat demuxer 对这个很敏感）
           if (info?.hasAudio) args.push('-af', `apad=pad_dur=${gap.toFixed(3)}`);
           padded.push({ index: i + 1, gap, real, want });
         }
+        if (vf.length) args.push('-vf', vf.join(','));
         // 关键帧不一定落在切点上，所以这里必须重编码视频，copy 会切歪
-        args.push('-t', String(want), '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', cut);
+        if (want > 0) args.push('-t', String(want));
+        args.push('-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', cut);
         await (__exec || run)(args, { onProgress });
         cleanup.push(cut);
         clips.push(cut);
       }
     }
+    /**
+     * 只重压了**一部分**段的时候，最后那一拼不能再走 `-c copy`。
+     *
+     * concat demuxer 不重编码的前提是各段编码参数一致。我们重压的那几段是
+     * libx264 veryfast，没动过的还是厂商原始编码 —— 两者在 profile、GOP、
+     * 色彩范围上不一定对得上。硬 copy 拼出来多数播放器能放，
+     * 但会在接缝处花屏或卡一下，而且**只在成片里出现**，每一段单独播都是好的。
+     *
+     * 全都重压过（或者一段都没重压）时不受影响，照走快路。
+     */
+    const worked = need.filter(Boolean).length;
+    const mixedEncoding = worked > 0 && worked < segments.length;
 
     if (padded.length) {
       const worst = padded.slice().sort((a, b) => b.gap - a.gap)[0];
@@ -460,7 +753,7 @@ export async function concat(
      * 真实边界上做效果。反过来的话，淡出会做在一段马上要被切掉的画面上 ——
      * 成片里看到的是"突然黑一下然后硬切"，比不做还难看。
      */
-    let recode = false;
+    let recode = mixedEncoding;
     if (transitions?.some((k) => k && k !== 'cut')) {
       const before = clips;
       clips = await buildTransitions({
@@ -468,14 +761,32 @@ export async function concat(
         ...(__probe ? { probe: __probe } : {}),
         ...(__exec ? { exec: __exec } : {})
       });
-      recode = clips !== before;
+      // ⚠ `=` 不是 `||=` 的话，转场没做成时会把上面那条"混编码"的结论抹掉，
+      // 于是又回到 copy 拼接 —— 而混编码那个坑只在成片的接缝处冒出来
+      recode = recode || clips !== before;
     }
 
     // 多条配音先合成一条整片音轨，再和视频合流
     let track = audioPath;
-    if (!track && audioAt?.length) {
+    // ⚠ 判据里必须带上 music：一部没有台词、只想配一段音乐的片子
+    // （空镜、片头）在旧写法下会连音乐一起丢掉，而且一声不吭
+    if (!track && (audioAt?.length || music)) {
       track = `${outputPath}.voice.m4a`;
-      const built = await buildVoiceTrack(audioAt, track, { onProgress });
+      let built = null;
+      try {
+        built = await buildAudioTrack(audioAt || [], track, {
+          music, total, loudness, onProgress, onNote
+        });
+      } catch (err) {
+        /**
+         * 音轨一条都建不出来时，**照样把片子拼出来**（无声）。
+         *
+         * 这一条是权衡过的：没有声音的成片是残次品，但至少能看到画面、
+         * 能确认剪辑对不对；而合成整个失败，人手上什么都没有。
+         * 前提是必须说得足够清楚 —— 无声成片和有声成片在文件列表里长得一模一样。
+         */
+        onNote?.(`⚠ 音轨没建成（${String(err.message || err).slice(0, 140)}）。这次先出**无声**成片，画面是全的 —— 声音的问题解决后重新合成一次就有，不花钱`);
+      }
       if (built) cleanup.push(track);
       else track = null;
     }

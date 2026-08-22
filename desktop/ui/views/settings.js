@@ -523,12 +523,18 @@ export default {
       value: settings.sfxGain ?? 0.35,
       oninput: (e) => (pending.sfxGain = Number(e.target.value))
     });
+    const loudBox = h('input', {
+      type: 'checkbox',
+      checked: settings.loudness !== false,
+      onchange: (e) => (pending.loudness = e.target.checked)
+    });
 
     root.append(
       h('div', { class: 'panel' },
         h('h2', { class: 'panel-title' }, '合成'),
         h('p', { class: 'panel-hint' },
-          '这三样只影响**合成那一步**，改完重新合成一次就生效 —— 不用重新生成任何镜头，不花钱。'),
+          '这几样只影响**合成那一步**，改完重新合成一次就生效 —— 不用重新生成任何镜头，不花钱。'
+          + '（顺序、入出点、转场、画面效果、背景音乐在成片那一步的「剪辑台」里改。）'),
         h('div', { class: 'grid2' },
           h('div', { class: 'field' },
             h('label', {}, '时长策略'), durSel,
@@ -547,7 +553,10 @@ export default {
               '先调 0 听一遍纯净版，再决定留哪几处。'))),
         h('div', { class: 'stack', style: 'gap:10px' },
           check(autoCutBox,
-            '自动剪辑：跳过每段开头不动的那几帧（图生视频"起势"时的首帧复制）'))),
+            '自动剪辑：跳过每段开头不动的那几帧（图生视频"起势"时的首帧复制）'),
+          check(loudBox,
+            '统一响度：把整条音轨拉到 −16 LUFS（短视频平台的常见口径）。'
+            + '不做的话，不同厂商的配音和不同来源的背景音乐各有各的响度，观众要一集一集去调音量'))),
       h('div', { class: 'panel' },
         h('h2', { class: 'panel-title' }, '一致性引擎'),
         h('p', { class: 'panel-hint' },

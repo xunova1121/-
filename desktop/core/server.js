@@ -850,6 +850,32 @@ async function handleApi(req, res, url, { lan = false } = {}) {
       });
       return json(res, 200, { project, style: project.bible.style });
     }
+    /**
+     * 背景音乐。cap:film-music
+     *
+     * 走流式（ndjson）和设定图上传同一个理由：一首歌十几 MB，
+     * 存盘 + 探时长要几秒，闷着等没有任何反馈是最糟的。
+     */
+    if (b && c === 'music' && !d && method === 'POST') {
+      // base64 会把体积撑大三分之一，限额要按**编码后**算，
+      // 否则一首 20MB 的歌会在读请求体这一步被拦掉，而报错完全看不出是为什么
+      const body = await readBody(req, 28 * 1024 * 1024);
+      const stream = ndjson(res);
+      req.on('close', () => stream.end());
+      try {
+        const project = await studio.attachMusic(b, body, (ev) => stream.send(ev));
+        stream.end({ type: 'finished', project });
+      } catch (err) {
+        stream.end({ type: 'error', message: err.message });
+      }
+      return undefined;
+    }
+    if (b && c === 'music' && !d && method === 'DELETE') {
+      const p = store.read(b);
+      if (!p) return json(res, 404, { error: '项目不存在' });
+      return json(res, 200, studio.detachMusic(b));
+    }
+
     if (b && !c && method === 'DELETE') return json(res, 200, { ok: store.remove(b) });
 
     // ── 手改一镜的文案：自动拆的分镜有时不准，改一行字比重跑十次便宜 ──
@@ -1422,7 +1448,7 @@ export function createServer({ lan = false } = {}) {
        * 放行的是这两个确切的路径，不是"所有 .js"—— 后者会把电脑版
        * 整套界面代码一起放出去，那不是同一件事。
        */
-      const SHARED_MODULES = ['/previz-canvas.js', '/previz.js', '/duration.js'];
+      const SHARED_MODULES = ['/previz-canvas.js', '/previz.js', '/duration.js', '/transitions.js', '/fx.js'];
       const isShell =
         url.pathname === '/m'
         || url.pathname.startsWith('/m/')
@@ -1504,6 +1530,24 @@ export function createServer({ lan = false } = {}) {
       if (url.pathname === '/duration.js') {
         return fs.readFile(path.join(HERE, 'duration.js'), (err, data) => {
           if (err) return json(res, 404, { error: '找不到 duration.js' });
+          res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
+          res.end(data);
+        });
+      }
+      /**
+       * 转场表和效果表，也发原件 —— 和上面两个是同一条理由。
+       *
+       * 剪辑台上那两个下拉框要列出**能做的每一种**转场和效果。在界面里
+       * 另抄一份清单的话，加一个新转场就必须记得改两个地方，
+       * 而漏掉界面那份的表现是"引擎支持但没人选得到"（谁也不会发现），
+       * 漏掉引擎那份的表现是"选了没效果"（用户发现，然后报"点了没反应"）。
+       *
+       * 这两个文件必须保持纯计算（不 import 任何 node: 模块），自检守着这一条。
+       */
+      if (url.pathname === '/transitions.js' || url.pathname === '/fx.js') {
+        const file = url.pathname.slice(1);
+        return fs.readFile(path.join(HERE, file), (err, data) => {
+          if (err) return json(res, 404, { error: `找不到 ${file}` });
           res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
           res.end(data);
         });
