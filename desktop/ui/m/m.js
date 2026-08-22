@@ -705,7 +705,68 @@ function paintFlow() {
    * 用户的原话："视频13段都生成两次了，PC和移动端还是显示只生成了4段"。
    * 那个循环就是这么闭合的：取不回来 → 没有 videoPath → 下次全跑照样重提交。
    */
-  const owed = (project.shots || []).filter((s) => s.pendingTask && !s.videoPath);
+  const shots = (project.shots || []);
+  const owed = shots.filter((s) => s.pendingTask && !s.videoPath);
+  const failedShots = shots.filter((s) => !s.videoPath && !s.pendingTask && s.videoError);
+  const notRun = shots.filter((s) => !s.videoPath && !s.pendingTask && !s.videoError);
+  const missing = owed.length + failedShots.length + notRun.length;
+
+  /**
+   * ⚠ **没有可捞的东西时，这一块也必须说话。**
+   *
+   * 上一版只在 owed.length 时才画那张黄卡。用户于是对着一个
+   * 什么都没有的流水线页问："在哪，在哪捞回来"—— 而正确答案是
+   * "没有可捞的"。可"没有卡"和"这个功能还没更新上"长得一模一样，
+   * 他没有任何办法分辨。
+   *
+   * 这是这个项目里同一个教训的第 N 次：**不触发的分支是彻底安静的**，
+   * 而安静会被读成"坏了"。所以只要还差视频，这一块就always在，
+   * 把三种处境分开摆出来 —— 它们在界面上长得一模一样（都是"有图没视频"），
+   * 补救动作却完全不同，而其中只有一种是免费的。
+   */
+  const nums = (list) => `第 ${list.map((s) => s.index).join('、')} 镜`;
+  const videoState = missing
+    ? h('div', { class: `card ${owed.length ? 'warn' : ''}` },
+        h('b', {}, `${shots.length} 镜里还差 ${missing} 镜没有视频`),
+        h('div', { style: 'margin-top:10px' },
+          h('div', { class: 'row', style: 'align-items:flex-start;padding:7px 0' },
+            h('span', { style: `flex:0 0 22px;color:${owed.length ? 'var(--caution)' : 'var(--ink-faint)'}` }, '$'),
+            h('div', { class: 'grow' },
+              h('div', {}, `钱花了没取回来 ${owed.length} 镜`),
+              h('div', { class: 'muted' },
+                owed.length
+                  ? `${nums(owed)} —— 提交成功过，片子多半还在厂商那边。重出等于第二次付钱，用下面那个按钮免费捞。`
+                  : '没有这一类 —— 也就是说没有"可以免费捞回来"的镜头。'))),
+          h('div', { class: 'row', style: 'align-items:flex-start;padding:7px 0;border-top:1px solid var(--line-soft)' },
+            h('span', { style: `flex:0 0 22px;color:${failedShots.length ? 'var(--alarm)' : 'var(--ink-faint)'}` }, '✕'),
+            h('div', { class: 'grow' },
+              h('div', {}, `出视频失败了 ${failedShots.length} 镜`),
+              h('div', { class: 'muted' },
+                failedShots.length
+                  ? `${nums(failedShots)}：${String(failedShots[0].videoError.message).slice(0, 70)}`
+                  : '没有这一类。'))),
+          h('div', { class: 'row', style: 'align-items:flex-start;padding:7px 0;border-top:1px solid var(--line-soft)' },
+            h('span', { style: 'flex:0 0 22px;color:var(--ink-faint)' }, '·'),
+            h('div', { class: 'grow' },
+              h('div', {}, `还没跑到 ${notRun.length} 镜`),
+              h('div', { class: 'muted' },
+                notRun.length
+                  ? `${nums(notRun)} —— 点上面「视频生成」那行的「继续」就会接着出这几镜。`
+                  : '没有这一类。')))),
+        /**
+         * 老项目上"失败原因"是空的 —— 它是后来才开始存的。
+         * 不说这一句的话，跑过又失败的镜会被读成"还没跑到"，
+         * 而那两件事的判断完全不同。
+         */
+        notRun.length && !failedShots.length && !owed.length
+          ? h('p', { class: 'muted', style: 'margin:10px 0 0' },
+              '⚠ 如果这几镜其实跑过、只是失败了：失败原因是新版才开始记的，'
+              + '更早那些失败没有留下记录，所以在这儿显示成"还没跑到"。'
+              + '先单独重出**一镜**（分镜页 → 那一镜 →「重出这段视频」）看看报什么错，'
+              + '别整段跑 —— 整段跑是按镜数计费的。')
+          : null)
+    : null;
+
   const reclaim = owed.length
     ? (() => {
         const go = h('button', { class: 'btn primary block', disabled: job.running }, `把这 ${owed.length} 镜捞回来（不花钱）`);
@@ -733,11 +794,9 @@ function paintFlow() {
           }
         };
         return h('div', { class: 'card warn' },
-          h('b', {}, `${owed.length} 镜的钱已经花了，片子还没取回来`),
-          h('p', { class: 'muted', style: 'margin:6px 0 10px' },
-            `第 ${owed.map((s) => s.index).join('、')} 镜提交是成功的，片子多半已经在厂商那边出好了，`
-            + '只是我们当时没取回来（查任务的地址不对、下载要鉴权、或者网断了一下）。'
-            + '**直接重出等于第二次付钱**。查一次不花钱，先查。'),
+          h('p', { class: 'muted', style: 'margin:0 0 10px' },
+            '查一次**不花钱**（只是再问厂商一遍那个任务号出片了没有）。'
+            + '刚在「服务商与密钥 → 接口地址」里填对查询地址的话，这一下能全收回来。'),
           go);
       })()
     : null;
@@ -745,6 +804,7 @@ function paintFlow() {
   return [
     h('p', { class: 'muted', style: 'margin:2px 4px 10px' },
       '每一步都在电脑上跑，手机只是发个指令 —— 关掉这个页面也不影响它继续跑。'),
+    videoState,
     reclaim,
     box,
     h('div', { class: 'card' },

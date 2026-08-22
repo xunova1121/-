@@ -384,6 +384,51 @@ console.log('   可一键存的素材数：', saveBtns, saveBtns >= 4 ? '✓' : 
 console.log('⑦ 单个项目时不摆下拉：', (await page.locator('.top-pick').count()) === 0 ? '✓' : '✕（多余的控件）');
 
 /**
+ * ⑧a 缺视频的那几镜，流水线页上**必须说话** —— 哪怕一个都捞不回来。
+ *
+ * 上一版只在"有可捞的"时候才画那张卡。用户于是对着一个什么都没有的
+ * 流水线页问："在哪，在哪捞回来" —— 而正确答案是"没有可捞的"。
+ * 可"没有卡"和"这个功能还没更新上"长得一模一样，他没办法分辨。
+ *
+ * 所以这里量的是**空的时候也出声**：这份数据里第 2 镜没视频、
+ * 也没有待认领、也没有失败记录 —— 三种处境里最容易被读成"坏了"的那种。
+ */
+{
+  await page.locator('.tab', { hasText: '流水线' }).click();
+  await page.waitForTimeout(700);
+  const flow = await page.locator('.body').innerText();
+  console.log('⑧a 缺视频时流水线页出声：', /还差 1 镜没有视频/.test(flow) ? '✓' : `✕ ${flow.slice(0, 120)}`);
+  console.log('   三种处境分开列：',
+    /钱花了没取回来 0 镜/.test(flow) && /出视频失败了 0 镜/.test(flow) && /还没跑到 1 镜/.test(flow)
+      ? '✓' : `✕ ${flow.slice(0, 200)}`);
+  // "没有可捞的"要**明说**，不能靠没有按钮来暗示
+  console.log('   明说没有可以免费捞的：',
+    /没有"可以免费捞回来"的镜头|没有这一类/.test(flow) ? '✓' : '✕ 只能靠"没按钮"去猜');
+  console.log('   老项目那句提醒也在：',
+    /失败原因是新版才开始记的/.test(flow) ? '✓' : '✕ 会把"跑过但失败"读成"还没跑到"');
+
+  // 反面：真有待认领时，那个免费按钮要出现
+  store.update(proj.id, (p) => {
+    const t = p.shots.find((x) => x.id === 's2');
+    if (t) t.pendingTask = { taskId: 'task-77', provider: 'metaso', at: new Date().toISOString() };
+    return p;
+  });
+  await page.reload();
+  await page.waitForTimeout(1500);
+  const withOwed = await page.locator('.body').innerText();
+  console.log('   有待认领时才出免费按钮：',
+    /钱花了没取回来 1 镜/.test(withOwed)
+    && (await page.locator('button:has-text("捞回来")').count()) === 1 ? '✓' : '✕');
+  store.update(proj.id, (p) => {
+    const t = p.shots.find((x) => x.id === 's2');
+    if (t) delete t.pendingTask;
+    return p;
+  });
+  await page.reload();
+  await page.waitForTimeout(1200);
+}
+
+/**
  * ⑦b 新建项目 —— **在已经有项目的时候**也点得到。
  *
  * 原来"新建"只存在于那张空状态卡片里，只有一个项目都没有时才画。
