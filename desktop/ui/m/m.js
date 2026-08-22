@@ -157,7 +157,29 @@ async function stream(path, body, onEvent) {
   } catch (err) {
     throw streamBroke(err, false);
   }
-  if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+  /**
+   * 开不了流的时候，**把服务端那句话读出来**。
+   *
+   * 原来这里直接抛 `HTTP ${status}` —— 手机上看到的就是光秃秃一行
+   * "HTTP 409"，而服务端那一侧其实写着整整一段：
+   * "这个项目已经在跑「视频生成」了（38 秒前开始）。要么等它跑完，
+   *  要么先点「停下来」。同时跑两遍会让两条流水线抢同一批文件…"
+   *
+   * 一个状态码对用户是零信息 —— 尤其 409 这种，字面上什么也没说，
+   * 而它恰恰是最容易碰上的那个（切屏回来又点了一次「往后全跑」）。
+   * 话本来就写好了，只是没被读出来。
+   */
+  if (!res.ok) {
+    let said = '';
+    try {
+      const text = await res.text();
+      said = JSON.parse(text)?.error || text.slice(0, 200);
+    } catch {
+      /* 不是 JSON 就算了，下面用状态码兜底 */
+    }
+    throw new Error(said || `HTTP ${res.status}`);
+  }
+  if (!res.body) throw new Error(`HTTP ${res.status}：服务端没有回内容`);
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let buf = '';
@@ -587,7 +609,14 @@ function paintLive() {
   return h('div', { class: `live ${job.fail ? 'bad' : job.running ? '' : 'good'}` },
     h('div', { class: 'row' },
       job.running ? h('span', { class: 'spin' }, '◐') : h('span', {}, job.fail ? '✕' : '✓'),
-      h('b', { class: 'grow' }, job.label || (job.running ? '运行中' : '完成')),
+      /**
+       * 「视频生成 · 第 5 镜」比光写「视频生成」有用得多：
+       * 十二镜跑二十分钟，人真正想知道的是"到第几镜了、有没有卡住"。
+       * 这个数在流断了之后由 GET /job 接回来（见 syncJob）。
+       */
+      h('b', { class: 'grow' },
+        (job.label || (job.running ? '运行中' : '完成'))
+        + (job.running && job.shotIndex ? ` · 第 ${job.shotIndex} 镜` : '')),
       /**
        * 跑到一半发现分镜写错了，手机上也得停得下来 —— 这恰恰是最需要它的场景：
        * 人不在电脑前，而视频那一步是按镜数计费的，一镜一镜烧下去。
@@ -1370,7 +1399,9 @@ function shotCardOf(s, v, portrait, probs = shotIssues(s)) {
   }
   acts.append(h('button', { class: 'iconbtn', onclick: () => openShotActions(s) }, '⋯'));
 
-  return h('div', { class: `card shot ${tone}` },
+  // 正在跑的那一张点亮：翻着分镜页等的时候，"轮到哪一镜了"一眼就有
+  const live = job.running && job.shotId === s.id;
+  return h('div', { class: `card shot ${tone} ${live ? 'live-shot' : ''}` },
     // 镜号和时长压在画面上：省掉一整行，而且它们出现在眼睛已经在的地方
     h('div', { class: 'mediawrap' },
       s.videoPath
@@ -1381,6 +1412,7 @@ function shotCardOf(s, v, portrait, probs = shotIssues(s)) {
       h('div', { class: 'overlay tl' },
         h('span', {}, `SH ${String(s.index).padStart(3, '0')}`),
         h('span', { class: 'dim' }, `${Number(s.duration).toFixed(1)}s`)),
+      live ? h('div', { class: 'overlay bl running' }, h('span', { class: 'spin' }, '◐'), '正在跑') : null,
       // 「连续动作」标在画面上而不是标签堆里：它说的是这一镜和上一镜的关系，
       // 而人是在看画面接不接得上的时候想起这件事的
       s.link === 'continuous' ? h('div', { class: 'overlay bl link' }, '连续动作 ↑') : null),
@@ -1964,10 +1996,18 @@ async function runStage(stageId, label, extra = {}) {
   job.label = label;
   job.message = '正在提交…';
   job.fail = 0;
+  job.shotId = null;
+  job.shotIndex = null;
+  job.reattached = false;
+  // 自己开着流的时候不用轮询，两条一起跑只会互相打架
+  job.streaming = true;
+  stopJobPoll();
   paint();
   try {
     await stream(`/projects/${project.id}/stage/${stageId}`, extra, (ev) => {
       // 主动停下来不是失败 —— 记成失败会让人回头去查一个不存在的问题
+      // 正在跑哪一镜 —— 分镜页上那一张要点亮，状态条上要写出来
+      if (ev.type === 'shot' && ev.status === 'running' && ev.shotId) job.shotId = ev.shotId;
       if (ev.type === 'cancelled') {
         job.message = ev.message || '已停下';
       } else if (ev.type === 'error') {
@@ -1987,7 +2027,10 @@ async function runStage(stageId, label, extra = {}) {
   } finally {
     job.running = false;
     job.stopping = false;
+    job.streaming = false;
     job.stage = '';
+    job.shotId = null;
+    job.shotIndex = null;
     await reload();
   }
 }
@@ -2037,8 +2080,92 @@ async function reload() {
   const pick = list.find((p) => p.id === wanted) || list[0];
   project = pick ? await api(`/projects/${pick.id}`).catch(() => null) : null;
   if (project) localStorage.setItem(PROJ_STORE, project.id);
+  await syncJob();
   paint();
 }
+
+/**
+ * ═══════════ 接回那份还在跑的活儿 ═══════════
+ *
+ * 手机上最容易撞的一个坑，用户的原话是：
+ * "点击全跑了，手机切屏一会回来刷屏还是不动"。
+ *
+ * 事情是这样的：这份活儿跑在**服务器上**，关页面、切后台、断网都不影响它
+ *（这是刻意的 —— 关掉浏览器就把出到一半的片子全丢掉，而且钱照花，
+ *  是更糟的默认行为）。但那条进度流是跟着页面走的，一切屏就断了，
+ * 而断了之后这一端**从来不问一句"现在还在跑吗"** ——
+ * 于是回来看到的是一个静止的页面：进度条停在原处，没有转圈，什么都没有。
+ *
+ * 人只能判断成"卡死了"，然后再点一次「往后全跑」—— 撞上 409。
+ * 那个 409 又只显示成光秃秃一行"HTTP 409"（那条也一起修了）。
+ * 三件事叠在一起，看起来就是"手机端坏了"。
+ *
+ * 服务端本来就记着这份活儿（GET /projects/:id/job），只是没人问。
+ */
+async function syncJob() {
+  if (!project) return;
+  const live = await api(`/projects/${project.id}/job`).catch(() => null);
+  if (!live) return;
+  /**
+   * 只在**我们没有自己那条流**的时候接管状态。
+   * 正开着流的时候由 runStage 管，两边都写会互相打架 ——
+   * 而打架的样子是状态条一会儿一个说法，比不更新还糟。
+   */
+  if (job.streaming) return;
+
+  if (!live.running) {
+    if (job.running) {
+      job.running = false;
+      job.reattached = false;
+      job.shotId = null;
+      job.shotIndex = null;
+      job.message = live.note || '跑完了';
+    }
+    stopJobPoll();
+    return;
+  }
+  job.running = true;
+  job.reattached = true;
+  job.stage = live.stage || '';
+  job.label = live.stageLabel || live.stage || '运行中';
+  job.message = live.note || '正在跑…';
+  job.shotId = live.shotId || null;
+  job.shotIndex = live.shotIndex || null;
+  job.stopping = Boolean(live.cancelling);
+  startJobPoll();
+}
+
+/**
+ * 接回来之后要**接着看**。
+ *
+ * 流已经断了，重开一条会撞 409（那条口子一个项目只允许一份活儿），
+ * 所以这里改成轮询 —— 三秒一次，只在页面可见时问，切后台就停。
+ * 手机上后台定时器本来也不保证跑，与其假装在更新，不如回来时补一次。
+ */
+let jobTimer = null;
+function startJobPoll() {
+  if (jobTimer) return;
+  jobTimer = setInterval(async () => {
+    if (document.hidden) return;
+    await syncJob();
+    updateLive();
+    // 跑完了要把画面也换过来，否则分镜页上还是旧的图
+    if (!job.running) await reload();
+  }, 3000);
+}
+function stopJobPoll() {
+  if (!jobTimer) return;
+  clearInterval(jobTimer);
+  jobTimer = null;
+}
+// 切回来立刻补一次，别等那三秒 —— "回来时是不是马上有反应"就是这一下的差别
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  syncJob().then(() => {
+    updateLive();
+    paint();
+  });
+});
 
 // ───────────────────────── 启动 ─────────────────────────
 

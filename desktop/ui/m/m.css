@@ -17,6 +17,9 @@
   --ink-dim: #b6ab9b;
   --ink-faint: #7d7365;
   --beam: #e8b45f;
+  /* 选中的胶囊那层淡底。原来 .chip.on 直接写 var(--beam-wash) 而这个变量
+     从来没定义过 —— 无效值等于没写，选中态只剩描边，在小屏上很难分辨 */
+  --beam-wash: rgba(232, 180, 95, .14);
   --good: #6fbf8a;
   --caution: #d9a441;
   --alarm: #d9614c;
@@ -648,3 +651,8 @@ input {
   border-radius: 50%;
   background: var(--alarm);
 }
+
+/* 正在跑的那一镜。翻着分镜页等的时候，"轮到哪一镜了"一眼就该有 —— 
+   而流断了之后这个信息是从 GET /job 接回来的，不靠那条流 */
+.shot.live-shot { border-color: var(--beam); box-shadow: 0 0 0 1px var(--beam) inset; }
+.overlay.running { color: var(--beam); background: rgba(232, 180, 95, .22); align-items: center; }

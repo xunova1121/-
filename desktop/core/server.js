@@ -1243,6 +1243,17 @@ async function handleApi(req, res, url, { lan = false } = {}) {
         return json(res, err.code === 'BUSY' ? 409 : 500, { error: err.message });
       }
 
+      /**
+       * 开跑前把 shotId → 第几镜 存一份。
+       *
+       * 一次读盘，换来"流断了之后还能说出跑到第几镜" —— 而这正是
+       * 手机上最缺的那句话：切屏回来一刷新，页面是静止的，
+       * 人只能判断成卡死了，然后再点一次「往后全跑」，撞上 409。
+       */
+      const shotIndexOf = new Map(
+        (store.read(b)?.shots || []).map((s) => [s.id, s.index])
+      );
+
       const stream = ndjson(res);
       /**
        * ⚠ 关掉页面**不等于**取消。
@@ -1258,6 +1269,22 @@ async function handleApi(req, res, url, { lan = false } = {}) {
           signal: job.signal,
           onEvent: (ev) => {
             if (ev?.message) job.note = String(ev.message).slice(0, 120);
+            /**
+             * 顺手把"跑到哪一镜"记进登记表。
+             *
+             * 流断了这份活儿照样在跑（关页面不等于取消），而断了之后
+             * 界面就再也不知道它在干嘛了 —— 手机切屏回来一刷新，
+             * 看到的是一个静止的页面，人只能判断成"卡死了"，
+             * 然后再点一次「往后全跑」，撞上 409。
+             *
+             * 登记表本来就在内存里，记两个数就能让 GET /job 回答那个问题。
+             */
+            if (ev?.type === 'shot' && ev.status === 'running' && ev.shotId) {
+              job.shotId = ev.shotId;
+              // 从 id 查序号，**不去解析那句话**：文案随时会改，
+              // 而正则读文案坏掉的方式是安静地读不出来
+              if (shotIndexOf.has(ev.shotId)) job.shotIndex = shotIndexOf.get(ev.shotId);
+            }
             stream.send(ev);
           }
         });

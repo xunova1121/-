@@ -3050,6 +3050,8 @@ section('叫停：真的走一遍接口，而不是只测那个开关');
   let buf = '';
   let doneShots = 0;
   let busyStatus = null;
+  let busyBody = '';
+  let jobPeek = null;
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -3069,7 +3071,17 @@ section('叫停：真的走一遍接口，而不是只测那个开关');
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
           });
           busyStatus = again.status;
-          await again.text();
+          busyBody = await again.text();
+
+          /**
+           * 流断了之后，"现在还在跑吗、跑到第几镜"必须问得出来。
+           *
+           * 用户的原话：「点击全跑了，手机切屏一会回来刷屏还是不动」。
+           * 这份活儿跑在服务器上，切屏只是把那条进度流掐了 —— 而这一端
+           * 从来不问一句"还在跑吗"，于是回来看到的是一个静止的页面，
+           * 人只能判断成卡死了，再点一次「往后全跑」，撞上 409。
+           */
+          jobPeek = await (await fetch(`${appUrl}/api/projects/${cp.id}/job`)).json();
 
           cancelReply = await (
             await fetch(`${appUrl}/api/projects/${cp.id}/cancel`, { method: 'POST' })
@@ -3080,6 +3092,22 @@ section('叫停：真的走一遍接口，而不是只测那个开关');
   }
 
   check('正在跑的时候再点一次跑，被 409 拦下', busyStatus === 409, String(busyStatus));
+  /**
+   * 409 的**正文**必须写清楚。手机上那条错误提示原来只有光秃秃一行
+   * "HTTP 409" —— 一个状态码对用户是零信息，尤其 409 这种字面上什么也没说的。
+   * 话本来就写好了（jobs.start 里那一段），只是前端没把它读出来。
+   */
+  const busySaid = (() => { try { return JSON.parse(busyBody).error || ''; } catch { return ''; } })();
+  check('409 的正文说清楚了是"已经在跑"', /已经在跑/.test(busySaid), busySaid.slice(0, 120));
+  check('并且给出两条出路（等它跑完 / 先停下来）',
+    /等它跑完/.test(busySaid) && /停下来/.test(busySaid), busySaid.slice(0, 160));
+
+  // 流断了也问得出"还在跑吗、跑到第几镜"
+  check('断流之后还能问出这份活儿在跑', jobPeek?.running === true, JSON.stringify(jobPeek));
+  check('并且说得出跑到第几镜（手机切屏回来全靠它）',
+    Number.isInteger(jobPeek?.shotIndex) && jobPeek.shotIndex > 0, JSON.stringify(jobPeek));
+  check('也说得出是哪一镜的 id（分镜页上要把那张点亮）',
+    Boolean(jobPeek?.shotId), JSON.stringify(jobPeek?.shotId));
   check('取消接口回了确认', cancelReply?.cancelled === true, JSON.stringify(cancelReply));
 
   const last = events[events.length - 1];

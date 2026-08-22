@@ -303,6 +303,60 @@ if (opened) {
   console.log('   关掉后页面能滚：', (await page.evaluate(() => document.body.style.overflow)) === '' ? '✓' : '✕ 还锁着');
 }
 
+/**
+ * ⑤e 切屏回来，那份还在跑的活儿要接得回来。
+ *
+ * 用户的原话：「点击全跑了，手机切屏一会回来刷屏还是不动」。
+ * 这份活儿跑在服务器上，切屏只是把那条进度流掐了 —— 而这一端原来
+ * **从来不问一句"还在跑吗"**，于是回来看到的是一个静止的页面：
+ * 进度条停在原处，没有转圈，什么都没有。人只能判断成卡死了，
+ * 再点一次「往后全跑」，撞上 409 —— 而那个 409 又只显示成"HTTP 409"。
+ *
+ * 这里直接往登记表里塞一份活儿（它和这台服务器在同一个进程里），
+ * 然后刷新页面 —— 走的正是用户切屏回来那条路。
+ */
+const jobs = await import('/home/user/-/desktop/core/jobs.js');
+{
+  const cur = store.list()[0];
+  const fake = jobs.start(cur.id, 'video');
+  fake.note = '第 2 镜出视频…';
+  const target = store.read(cur.id).shots[1];
+  fake.shotId = target.id;
+  fake.shotIndex = target.index;
+
+  await page.reload();
+  await page.waitForTimeout(1600);
+  const live = await page.locator('.live').innerText().catch(() => '');
+  console.log('⑤e 刷新之后还认得那份在跑的活儿：', /出视频|视频生成/.test(live) ? '✓' : `✕ ${live.slice(0, 60)}`);
+  console.log('   并且说得出跑到第几镜：', /第 2 镜/.test(live) ? '✓' : `✕ ${live.slice(0, 60)}`);
+  console.log('   还给得出「停下来」：', /停在这一镜之后/.test(live) ? '✓' : `✕ ${live.slice(0, 80)}`);
+
+  await page.locator('.tab', { hasText: '分镜' }).click();
+  await page.waitForTimeout(700);
+  console.log('   分镜页上把那一镜点亮了：',
+    (await page.locator('.shot.live-shot').count()) === 1 ? '✓' : '✕ 分不出轮到哪一镜');
+
+  /**
+   * 接回来之后，那几个「开始 / 继续 / 往后全跑」必须是**灰的**。
+   *
+   * 这比"点下去给一句好话"更靠前一步：用户之所以会重复点，就是因为
+   * 页面看起来什么也没发生。知道它在跑之后，按钮本来就不该还能按 ——
+   * 409 那句人话是留给真正的竞态的（两台设备、或者轮询还没落地）。
+   */
+  await page.locator('.tab', { hasText: '流水线' }).click();
+  await page.waitForTimeout(700);
+  const runBtns = page.locator('.step button');
+  const total = await runBtns.count();
+  let enabled = 0;
+  for (let i = 0; i < total; i += 1) if (await runBtns.nth(i).isEnabled()) enabled += 1;
+  console.log('   跑着的时候那些「跑」按钮是灰的：',
+    total > 0 && enabled === 0 ? `✓（${total} 个全灰）` : `✕ 还有 ${enabled} 个能点`);
+
+  jobs.finish(fake);
+  await page.reload();
+  await page.waitForTimeout(1200);
+}
+
 // ⑥ 成片 + 交给剪映的素材
 await page.locator('.tab', { hasText: '成片' }).click();
 await page.waitForTimeout(700);

@@ -68,7 +68,16 @@ export function start(projectId, stage) {
     controller,
     signal: controller.signal,
     // 最近一条进度，给"刷新页面之后还能看到它在干嘛"用
-    note: ''
+    note: '',
+    /**
+     * 手上正在跑的是**哪一镜**。
+     *
+     * 光有 note 是不够的：手机切屏回来一刷新，流早就断了，
+     * 页面上只剩一句"运行中"，而人真正想知道的是"跑到第几镜了、卡住没有"。
+     * 有了它，分镜页能把那一镜点亮，流水线上能写"第 5 / 12 镜"。
+     */
+    shotIndex: null,
+    shotId: null
   };
   RUNNING.set(projectId, job);
   return job;
@@ -115,7 +124,9 @@ export function describe(projectId) {
     startedAt: job.startedAt,
     elapsedMs: now() - job.startedAt,
     cancelling: Boolean(job.cancelledAt),
-    note: job.note
+    note: job.note,
+    shotIndex: job.shotIndex,
+    shotId: job.shotId
   };
 }
 
