@@ -23,6 +23,11 @@ class OpenAICompatibleAdapter(AIAdapter):
     def __init__(self, provider: str) -> None:
         self.provider = provider
 
+    @staticmethod
+    def _ensure(response: httpx.Response, label: str, endpoint: str) -> None:
+        if response.status_code >= 400:
+            raise RuntimeError(f"{label} HTTP {response.status_code} · {endpoint} · {response.text[:1200]}")
+
     async def invoke(self, prompt: str, context: dict[str, Any]) -> dict[str, Any]:
         task_type = str(context.get("task_type", "llm"))
         if task_type == "image" and self.provider == "openai":
@@ -31,6 +36,8 @@ class OpenAICompatibleAdapter(AIAdapter):
             return await self._voice(prompt, context)
         if task_type == "video" and self.provider == "openai":
             return await self._video(prompt, context)
+        if task_type == "vision_review" and self.provider == "openai":
+            return await self._vision_review(prompt, context)
         if task_type not in {"llm", "proofread"}:
             raise RuntimeError(f"{self.provider} 尚未实现 {task_type} 协议；任务不会伪造成功")
         config = resolve_provider_config(self.provider, "chat")
@@ -52,10 +59,13 @@ class OpenAICompatibleAdapter(AIAdapter):
             async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=20.0)) as client:
                 response = await client.post(endpoint, headers={"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}, json=body)
                 status_code = response.status_code
-                response.raise_for_status()
+                self._ensure(response, config.provider.name, endpoint)
                 payload = response.json()
             content = payload["choices"][0]["message"]["content"]
             return {"provider": self.provider, "model": config.model, "status": "completed", "result": content, "usage": payload.get("usage", {})}
+        except RuntimeError as exc:
+            error = str(exc)
+            raise
         except (httpx.HTTPError, KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             error = str(exc)
             raise RuntimeError(f"{config.provider.name} 请求失败：{error}") from exc
@@ -80,9 +90,18 @@ class OpenAICompatibleAdapter(AIAdapter):
         options = dict(context.get("options") or {})
         model = str(context.get("model") or options.get("model") or "gpt-image-2")
         body = {"model": model, "prompt": prompt, "size": options.get("size", "1536x1024"), "quality": options.get("quality", "medium"), "output_format": "png"}
+        references = [Path(item) for item in list(context.get("reference_paths") or [])[:4] if Path(item).is_file()]
         async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0)) as client:
-            response = await client.post(f"{config.base_url.rstrip('/')}/images/generations", headers={"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}, json=body)
-            response.raise_for_status()
+            if references:
+                endpoint = f"{config.base_url.rstrip('/')}/images/edits"
+                files = [("image", (path.name, path.read_bytes(), mimetypes.guess_type(path.name)[0] or "image/png")) for path in references]
+                form = {key: str(value) for key, value in body.items()}
+                form["input_fidelity"] = str(options.get("input_fidelity", "high"))
+                response = await client.post(endpoint, headers={"Authorization": f"Bearer {config.api_key}"}, data=form, files=files)
+            else:
+                endpoint = f"{config.base_url.rstrip('/')}/images/generations"
+                response = await client.post(endpoint, headers={"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}, json=body)
+            self._ensure(response, "OpenAI 图片", endpoint)
             payload = response.json()
             item = payload["data"][0]
             if item.get("b64_json"):
@@ -108,7 +127,7 @@ class OpenAICompatibleAdapter(AIAdapter):
             body["instructions"] = options["instructions"]
         async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0)) as client:
             response = await client.post(f"{config.base_url.rstrip('/')}/audio/speech", headers={"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}, json=body)
-            response.raise_for_status()
+            self._ensure(response, "OpenAI 语音", f"{config.base_url.rstrip('/')}/audio/speech")
             data = response.content
         output = self._destination(context, ".mp3")
         output.write_bytes(data)
@@ -135,13 +154,13 @@ class OpenAICompatibleAdapter(AIAdapter):
         headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}
         async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=30.0)) as client:
             created = await client.post(f"{config.base_url.rstrip('/')}/videos", headers=headers, json=body)
-            created.raise_for_status()
+            self._ensure(created, "OpenAI 视频创建", f"{config.base_url.rstrip('/')}/videos")
             job = created.json()
             video_id = job["id"]
             deadline = time.monotonic() + float(options.get("poll_timeout", 1200))
             while time.monotonic() < deadline:
                 status_response = await client.get(f"{config.base_url.rstrip('/')}/videos/{video_id}", headers=headers)
-                status_response.raise_for_status()
+                self._ensure(status_response, "OpenAI 视频状态", f"{config.base_url.rstrip('/')}/videos/{video_id}")
                 job = status_response.json()
                 status = str(job.get("status") or "").lower()
                 if status in {"completed", "succeeded"}:
@@ -152,8 +171,33 @@ class OpenAICompatibleAdapter(AIAdapter):
             else:
                 raise RuntimeError("OpenAI 视频生成轮询超时")
             download = await client.get(f"{config.base_url.rstrip('/')}/videos/{video_id}/content", headers={"Authorization": f"Bearer {config.api_key}"})
-            download.raise_for_status()
+            self._ensure(download, "OpenAI 视频下载", f"{config.base_url.rstrip('/')}/videos/{video_id}/content")
             data = download.content
         output = self._destination(context, ".mp4")
         output.write_bytes(data)
         return {"provider": self.provider, "model": model, "provider_task_id": video_id, "status": "completed", "output_path": str(output), "output_name": output.name, "asset_type": "video", "shot_id": context.get("shot_id"), "deprecation_notice": "OpenAI Videos API is scheduled to shut down on 2026-09-24"}
+
+    async def _vision_review(self, prompt: str, context: dict[str, Any]) -> dict[str, Any]:
+        config = resolve_provider_config(self.provider, "vision")
+        if not config.api_key:
+            raise RuntimeError("OpenAI 尚未配置 API 密钥")
+        references = list(context.get("reference_paths") or [])
+        if not references:
+            raise RuntimeError("视觉质检缺少关键帧")
+        model = str(context.get("model") or "gpt-4.1-mini")
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt + "\n只输出JSON对象：score(0-100)、dimensions(character,scene,prop,lighting,image)、findings数组。不得输出Markdown。"}]
+        for path in references[:3]:
+            content.append({"type": "image_url", "image_url": {"url": self._data_url(path), "detail": "high"}})
+        body = {"model": model, "messages": [{"role": "user", "content": content}], "temperature": 0.1, "response_format": {"type": "json_object"}}
+        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=30.0)) as client:
+            response = await client.post(f"{config.base_url.rstrip('/')}/chat/completions", headers={"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}, json=body)
+            self._ensure(response, "OpenAI 视觉质检", f"{config.base_url.rstrip('/')}/chat/completions")
+            raw = response.json()["choices"][0]["message"]["content"]
+        try:
+            review = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("视觉质检未返回有效 JSON") from exc
+        dimensions = {key: max(0, min(100, int(value))) for key, value in dict(review.get("dimensions") or {}).items()}
+        score = int(review.get("score") or (sum(dimensions.values()) / len(dimensions) if dimensions else 0))
+        return {"provider": self.provider, "model": model, "status": "completed", "score": max(0, min(100, score)), "dimensions": dimensions,
+                "findings": list(review.get("findings") or []), "shot_id": context.get("shot_id"), "reviewed_path": references[0]}
