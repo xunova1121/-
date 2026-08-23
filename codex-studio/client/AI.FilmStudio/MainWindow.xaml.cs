@@ -89,6 +89,7 @@ public partial class MainWindow : Window
             "director" => "导演工作台 · 第1集 雪夜杀局",
             "storyboard" => "分镜工作台 · 第1集 雪夜杀局",
             "generation" => "视频生成中心 · 第1集 雪夜杀局",
+            "editing" => $"剪辑与导出 · {CurrentProjectName.Text}",
             "assets" => $"资产管理 · {CurrentProjectName.Text}",
             "tasks" => "任务队列 · 生成与渲染",
             _ => "剪辑工作台 · 第1集 雪夜杀局"
@@ -100,6 +101,16 @@ public partial class MainWindow : Window
             if (key == "director") new ScriptWorkbenchWindow(_api, project) { Owner = this }.ShowDialog();
             else new StoryboardWindow(_api, project) { Owner = this }.ShowDialog();
             await SelectProjectAsync(project);
+            return;
+        }
+        if (key is "generation" or "editing" or "assets")
+        {
+            if (ProjectSelector.SelectedItem is not StudioProject) { MessageBox.Show("请先创建项目", "AI影视Studio"); return; }
+            var selected = (StudioProject)ProjectSelector.SelectedItem;
+            if (key == "generation") new GenerationWindow(_api, selected) { Owner = this }.ShowDialog();
+            else if (key == "editing") new EditingWindow(_api) { Owner = this }.ShowDialog();
+            else new AssetManagerWindow(_api, selected) { Owner = this }.ShowDialog();
+            if (ProjectSelector.SelectedItem is StudioProject active) await SelectProjectAsync(active);
             return;
         }
         if (key == "tasks")
@@ -115,10 +126,13 @@ public partial class MainWindow : Window
     {
         if (sender is not Button { Tag: string title }) return;
         WorkspaceTitle.Text = $"{title} · {CurrentProjectName.Text}";
-        if (title is not ("剧本" or "分镜")) return;
         if (ProjectSelector.SelectedItem is not StudioProject project) { MessageBox.Show("请先创建项目", "AI影视Studio"); return; }
         if (title == "剧本") new ScriptWorkbenchWindow(_api, project) { Owner = this }.ShowDialog();
-        else new StoryboardWindow(_api, project) { Owner = this }.ShowDialog();
+        else if (title == "分镜") new StoryboardWindow(_api, project) { Owner = this }.ShowDialog();
+        else if (title == "制作") new GenerationWindow(_api, project) { Owner = this }.ShowDialog();
+        else if (title == "剪辑") new EditingWindow(_api) { Owner = this }.ShowDialog();
+        else if (title == "发布") new PublishWindow(_api) { Owner = this }.ShowDialog();
+        else return;
         await SelectProjectAsync(project);
     }
 
