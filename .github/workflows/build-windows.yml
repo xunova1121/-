@@ -2,7 +2,7 @@ name: Build Windows EXE
 
 on:
   push:
-    branches: ["codex/ai-film-studio-v0.2"]
+    branches: ["codex/real-product-rebuild-v1"]
   pull_request:
     branches: ["claude/windows-app-third-party-api-8h0qec"]
   workflow_dispatch:
@@ -97,7 +97,7 @@ jobs:
             }
             $response = Invoke-RestMethod -Uri "http://127.0.0.1:18118/api/v1/health" -TimeoutSec 3
             if ($response.status -ne "ok") { throw "Desktop-launched service is unhealthy" }
-            if ($response.version -ne "0.6.0") { throw "Unexpected service version: $($response.version)" }
+            if ($response.version -ne "0.7.0") { throw "Unexpected service version: $($response.version)" }
             $media = Invoke-RestMethod -Uri "http://127.0.0.1:18118/api/v1/media/capabilities" -TimeoutSec 3
             if (-not $media.ffmpeg_available) {
               $runtime = Join-Path $env:LOCALAPPDATA "AI-Film-Studio/runtime"
@@ -116,6 +116,6 @@ jobs:
           Get-FileHash dist/AI-Film-Studio/AI-Film-Studio.exe -Algorithm SHA256
       - uses: actions/upload-artifact@v4
         with:
-          name: AI-Film-Studio-V0.6.0-Single-EXE
+          name: AI-Film-Studio-V0.7.0-Real-Workflow-Single-EXE
           path: dist/AI-Film-Studio/AI-Film-Studio.exe
           retention-days: 30
