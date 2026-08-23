@@ -11,10 +11,28 @@ CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, genre TEXT NOT NULL DEFAULT '',
     episode_count INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS episode_scripts (
+    project_id TEXT NOT NULL, episode INTEGER NOT NULL, title TEXT NOT NULL DEFAULT '',
+    source_name TEXT NOT NULL DEFAULT '', source_text TEXT NOT NULL DEFAULT '',
+    checksum TEXT NOT NULL DEFAULT '', parse_status TEXT NOT NULL DEFAULT 'draft',
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(project_id, episode), FOREIGN KEY(project_id) REFERENCES projects(id)
+);
+CREATE TABLE IF NOT EXISTS scenes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, episode INTEGER NOT NULL,
+    sequence INTEGER NOT NULL, heading TEXT NOT NULL, location TEXT NOT NULL DEFAULT '',
+    time_of_day TEXT NOT NULL DEFAULT '', summary TEXT NOT NULL DEFAULT '',
+    source_text TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(project_id) REFERENCES projects(id), UNIQUE(project_id, episode, sequence)
+);
 CREATE TABLE IF NOT EXISTS shots (
     id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, episode INTEGER NOT NULL DEFAULT 1,
+    scene_id INTEGER, sequence INTEGER NOT NULL DEFAULT 0,
     number TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', duration TEXT NOT NULL DEFAULT '3.0s',
     status TEXT NOT NULL DEFAULT '待生成', color TEXT NOT NULL DEFAULT '#1C2027', prompt TEXT NOT NULL DEFAULT '',
+    shot_type TEXT NOT NULL DEFAULT '中景', camera TEXT NOT NULL DEFAULT '固定',
+    action TEXT NOT NULL DEFAULT '', dialogue TEXT NOT NULL DEFAULT '',
+    characters_json TEXT NOT NULL DEFAULT '[]', continuity_json TEXT NOT NULL DEFAULT '{}',
     FOREIGN KEY(project_id) REFERENCES projects(id)
 );
 CREATE TABLE IF NOT EXISTS assets (
@@ -102,6 +120,17 @@ TASK_MIGRATIONS: dict[str, str] = {
     "updated_at": "TEXT",
 }
 
+SHOT_MIGRATIONS: dict[str, str] = {
+    "scene_id": "INTEGER",
+    "sequence": "INTEGER NOT NULL DEFAULT 0",
+    "shot_type": "TEXT NOT NULL DEFAULT '中景'",
+    "camera": "TEXT NOT NULL DEFAULT '固定'",
+    "action": "TEXT NOT NULL DEFAULT ''",
+    "dialogue": "TEXT NOT NULL DEFAULT ''",
+    "characters_json": "TEXT NOT NULL DEFAULT '[]'",
+    "continuity_json": "TEXT NOT NULL DEFAULT '{}'",
+}
+
 
 def _migrate(connection: sqlite3.Connection) -> None:
     columns = {row[1] for row in connection.execute("PRAGMA table_info(tasks)")}
@@ -110,6 +139,12 @@ def _migrate(connection: sqlite3.Connection) -> None:
             connection.execute(f"ALTER TABLE tasks ADD COLUMN {name} {definition}")
     connection.execute("UPDATE tasks SET available_at=COALESCE(available_at,created_at,CURRENT_TIMESTAMP), updated_at=COALESCE(updated_at,created_at,CURRENT_TIMESTAMP)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_tasks_dispatch ON tasks(status, available_at, priority DESC, id)")
+    shot_columns = {row[1] for row in connection.execute("PRAGMA table_info(shots)")}
+    for name, definition in SHOT_MIGRATIONS.items():
+        if name not in shot_columns:
+            connection.execute(f"ALTER TABLE shots ADD COLUMN {name} {definition}")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_shots_episode ON shots(project_id, episode, sequence, id)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_scenes_episode ON scenes(project_id, episode, sequence)")
 
 
 def initialize_database(path: Path | None = None) -> None:
