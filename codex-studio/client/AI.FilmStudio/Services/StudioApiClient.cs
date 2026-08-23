@@ -17,6 +17,20 @@ public sealed class StudioApiClient
 
     public void SelectProject(string projectId) => CurrentProjectId = projectId;
 
+    private static async Task EnsureSuccessAsync(HttpResponseMessage response)
+    {
+        if (response.IsSuccessStatusCode) return;
+        var raw = await response.Content.ReadAsStringAsync();
+        var detail = raw;
+        try
+        {
+            using var document = JsonDocument.Parse(raw);
+            if (document.RootElement.TryGetProperty("detail", out var value)) detail = value.ValueKind == JsonValueKind.String ? value.GetString() ?? raw : value.ToString();
+        }
+        catch { }
+        throw new InvalidOperationException($"服务返回 {(int)response.StatusCode} {response.ReasonPhrase}：{detail}");
+    }
+
     private string ProjectPath(string suffix)
     {
         if (string.IsNullOrWhiteSpace(CurrentProjectId)) throw new InvalidOperationException("请先创建或选择项目");
@@ -40,8 +54,22 @@ public sealed class StudioApiClient
     public async Task<StudioProject> CreateProjectAsync(string name, string genre, int episodeCount, CancellationToken token = default)
     {
         var response = await _http.PostAsJsonAsync("projects", new { name, genre, episode_count = episodeCount }, token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response);
         return await response.Content.ReadFromJsonAsync<StudioProject>(cancellationToken: token) ?? throw new InvalidOperationException("服务未返回项目");
+    }
+
+    public async Task<StudioProject> UpdateProjectAsync(string projectId, string name, string genre, int episodeCount, CancellationToken token = default)
+    {
+        var response = await _http.PatchAsJsonAsync($"projects/{Uri.EscapeDataString(projectId)}", new { name, genre, episode_count = episodeCount }, token);
+        await EnsureSuccessAsync(response);
+        return await response.Content.ReadFromJsonAsync<StudioProject>(cancellationToken: token) ?? throw new InvalidOperationException("服务未返回项目");
+    }
+
+    public async Task DeleteProjectAsync(string projectId, CancellationToken token = default)
+    {
+        var response = await _http.DeleteAsync($"projects/{Uri.EscapeDataString(projectId)}", token);
+        await EnsureSuccessAsync(response);
+        if (CurrentProjectId == projectId) CurrentProjectId = null;
     }
 
     public async Task<ProjectSummary> GetProjectSummaryAsync(CancellationToken token = default) =>
@@ -56,20 +84,20 @@ public sealed class StudioApiClient
     public async Task SaveScriptAsync(int episode, string title, string sourceName, string sourceText, CancellationToken token = default)
     {
         var response = await _http.PutAsJsonAsync(ProjectPath($"episodes/{episode}/script"), new { title, source_name = sourceName, source_text = sourceText }, token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response);
     }
 
     public async Task<ScriptParseResult> ParseScriptAsync(int episode, CancellationToken token = default)
     {
         var response = await _http.PostAsync(ProjectPath($"episodes/{episode}/script/parse"), null, token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response);
         return await response.Content.ReadFromJsonAsync<ScriptParseResult>(cancellationToken: token) ?? new ScriptParseResult();
     }
 
     public async Task<StoryboardGenerateResult> GenerateStoryboardAsync(int episode, bool replaceExisting = true, CancellationToken token = default)
     {
         var response = await _http.PostAsJsonAsync(ProjectPath($"episodes/{episode}/storyboard/generate"), new { replace_existing = replaceExisting }, token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response);
         return await response.Content.ReadFromJsonAsync<StoryboardGenerateResult>(cancellationToken: token) ?? new StoryboardGenerateResult();
     }
 
@@ -82,7 +110,7 @@ public sealed class StudioApiClient
             camera = shot.Camera, action = shot.Action, dialogue = shot.Dialogue,
             characters = shot.Characters
         }, token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response);
     }
 
     public async Task<IReadOnlyList<AssetItem>> GetAssetsAsync(string? assetType = null, int? episode = null, CancellationToken token = default)
@@ -97,20 +125,20 @@ public sealed class StudioApiClient
     public async Task<AssetItem> ImportAssetAsync(string path, string assetType, string name, int episode = 1, int? shotId = null, CancellationToken token = default)
     {
         var response = await _http.PostAsJsonAsync(ProjectPath("assets/import"), new { source_path = path, asset_type = assetType, name, episode, shot_id = shotId, copy_into_project = true }, token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response);
         return await response.Content.ReadFromJsonAsync<AssetItem>(cancellationToken: token) ?? throw new InvalidOperationException("服务未返回资产");
     }
 
     public async Task DeleteAssetAsync(int assetId, bool deleteFile = true, CancellationToken token = default)
     {
         var response = await _http.DeleteAsync($"assets/{assetId}?delete_file={deleteFile.ToString().ToLowerInvariant()}", token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response);
     }
 
     public async Task<TaskAccepted> GenerateShotAsync(int shotId, string taskType, string provider, string prompt, string? model, IReadOnlyList<int> references, Dictionary<string, object?> options, CancellationToken token = default)
     {
         var response = await _http.PostAsJsonAsync(ProjectPath("shots/generate"), new { shot_id = shotId, task_type = taskType, provider, prompt, model, reference_asset_ids = references, options }, token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response);
         return await response.Content.ReadFromJsonAsync<TaskAccepted>(cancellationToken: token) ?? new TaskAccepted();
     }
 
@@ -120,14 +148,14 @@ public sealed class StudioApiClient
     public async Task<TimelineClip> AddTimelineClipAsync(string sourcePath, string title, int episode = 1, string track = "V1", CancellationToken token = default)
     {
         var response = await _http.PostAsJsonAsync(ProjectPath("timeline"), new { episode, track, source_path = sourcePath, title }, token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response);
         return await response.Content.ReadFromJsonAsync<TimelineClip>(cancellationToken: token) ?? throw new InvalidOperationException("服务未返回时间线片段");
     }
 
     public async Task<int> BuildTimelineFromStoryboardAsync(int episode = 1, CancellationToken token = default)
     {
         var response = await _http.PostAsync(ProjectPath($"timeline/from-storyboard?episode={episode}&replace=true"), null, token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response);
         var result = await response.Content.ReadFromJsonAsync<OperationAccepted>(cancellationToken: token);
         return result?.Created ?? 0;
     }
@@ -135,25 +163,25 @@ public sealed class StudioApiClient
     public async Task UpdateTimelineClipAsync(TimelineClip clip, CancellationToken token = default)
     {
         var response = await _http.PatchAsJsonAsync($"timeline/{clip.Id}", new { position = clip.Position, track = clip.Track, title = clip.Title, trim_in = clip.TrimIn, trim_out = clip.TrimOut, duration = clip.Duration, transition = clip.Transition, transition_duration = clip.TransitionDuration, volume = clip.Volume }, token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response);
     }
 
     public async Task ReorderTimelineAsync(IEnumerable<int> clipIds, CancellationToken token = default)
     {
         var response = await _http.PostAsJsonAsync(ProjectPath("timeline/reorder"), new { clip_ids = clipIds }, token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response);
     }
 
     public async Task DeleteTimelineClipAsync(int clipId, CancellationToken token = default)
     {
         var response = await _http.DeleteAsync($"timeline/{clipId}", token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response);
     }
 
     public async Task<TaskAccepted> ExportTimelineAsync(int episode, int width, int height, int fps, string quality, string outputName, CancellationToken token = default)
     {
         var response = await _http.PostAsJsonAsync(ProjectPath("timeline/export"), new { episode, width, height, fps, quality, burn_subtitles = true, output_name = outputName }, token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response);
         return await response.Content.ReadFromJsonAsync<TaskAccepted>(cancellationToken: token) ?? new TaskAccepted();
     }
 
@@ -164,8 +192,34 @@ public sealed class StudioApiClient
     {
         var payload = new { scene_key = sceneKey, camera = new { position = new { x = cameraX, y = cameraY }, target = new { x = targetX, y = targetY }, lens_mm = lens, height_m = 1.6, movement = "fixed" }, subjects = new[] { new { entity_key = "主角", position = new { x = subjectX, y = subjectY }, facing_deg = 180, pose = "standing" } }, landmarks = Array.Empty<object>(), sun_bearing_deg = sunBearing, sun_elevation = "mid" };
         var response = await _http.PostAsJsonAsync(ProjectPath("previz/layouts"), payload, token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response);
         return await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token);
+    }
+
+    public async Task<IReadOnlyList<BibleEntity>> GetBibleAsync(CancellationToken token = default) =>
+        await _http.GetFromJsonAsync<List<BibleEntity>>(ProjectPath("bible?latest_only=true"), token) ?? [];
+
+    public async Task<BibleEntity> SaveBibleVersionAsync(string entityType, string entityKey, string name, JsonElement data, IReadOnlyList<string> references, bool frozen, CancellationToken token = default)
+    {
+        var response = await _http.PostAsJsonAsync(ProjectPath("bible"), new { entity_type = entityType, entity_key = entityKey, name, data, reference_assets = references, state = frozen ? "frozen" : "draft" }, token);
+        await EnsureSuccessAsync(response);
+        return await response.Content.ReadFromJsonAsync<BibleEntity>(cancellationToken: token) ?? throw new InvalidOperationException("服务未返回设定版本");
+    }
+
+    public async Task<AutomationRun> StartAutomationAsync(int episode, string mode, string imageProvider, string imageModel, string videoProvider, string videoModel, string? voiceProvider, string voiceModel, string? qualityProvider, string outputName, int width, int height, int fps, string quality, CancellationToken token = default)
+    {
+        var response = await _http.PostAsJsonAsync(ProjectPath("automation/start"), new { episode, mode, image_provider = imageProvider, image_model = imageModel, video_provider = videoProvider, video_model = videoModel, voice_provider = voiceProvider, voice_model = voiceModel, quality_provider = qualityProvider, output_name = outputName, width, height, fps, quality, auto_freeze_bible = true, generate_images = true, generate_voice = voiceProvider is not null, auto_repair = true }, token);
+        await EnsureSuccessAsync(response);
+        return await response.Content.ReadFromJsonAsync<AutomationRun>(cancellationToken: token) ?? new AutomationRun();
+    }
+
+    public async Task<IReadOnlyList<AutomationRun>> GetAutomationRunsAsync(CancellationToken token = default) =>
+        await _http.GetFromJsonAsync<List<AutomationRun>>(ProjectPath("automation/runs"), token) ?? [];
+
+    public async Task CancelAutomationAsync(int runId, CancellationToken token = default)
+    {
+        var response = await _http.PostAsync($"automation/runs/{runId}/cancel", null, token);
+        await EnsureSuccessAsync(response);
     }
 
     public async Task<IReadOnlyList<TaskItem>> GetTasksAsync(CancellationToken token = default) =>
@@ -181,7 +235,7 @@ public sealed class StudioApiClient
             max_attempts = 3,
             payload = new { prompt, episode = 1 }
         }, token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response);
     }
 
     public async Task<IReadOnlyList<ProviderConfigStatus>> GetProviderConfigsAsync(CancellationToken token = default) =>
@@ -190,19 +244,40 @@ public sealed class StudioApiClient
     public async Task SaveProviderConfigAsync(string providerId, string baseUrl, string model, string? apiKey, CancellationToken token = default)
     {
         var response = await _http.PutAsJsonAsync($"provider-configs/{Uri.EscapeDataString(providerId)}", new { base_url = baseUrl, model, api_key = string.IsNullOrWhiteSpace(apiKey) ? null : apiKey }, token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response);
+    }
+
+    public async Task<GatewayTextResult> RunDirectorAnalysisAsync(string provider, string script, int episode, CancellationToken token = default)
+    {
+        var prompt = $"""
+请对以下第{episode}集短剧剧本做可执行的导演分析。必须给出：
+1. 戏剧节拍与前三秒钩子；2. 逐场景视觉目标；3. 关键镜头与景别/运镜；
+4. 相邻镜头的动作承接、视线方向和可用转场；5. 人物/服装/道具/场景连续性风险；
+6. 适合图像及视频生成模型的具体约束。不要复述剧本，不要空泛建议。
+
+剧本：
+{script}
+""";
+        var response = await _http.PostAsJsonAsync("gateway/llm", new
+        {
+            provider,
+            prompt,
+            context = new { task_type = "llm", temperature = 0.25, max_tokens = 4096, system_prompt = "你是短剧导演与连续性总监。你的结论必须能直接指导分镜、生成和剪辑。" }
+        }, token);
+        await EnsureSuccessAsync(response);
+        return await response.Content.ReadFromJsonAsync<GatewayTextResult>(cancellationToken: token) ?? throw new InvalidOperationException("导演模型未返回分析结果");
     }
 
     public async Task CancelTaskAsync(int taskId, CancellationToken token = default)
     {
         var response = await _http.PostAsync($"tasks/{taskId}/cancel", null, token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response);
     }
 
     public async Task RetryTaskAsync(int taskId, CancellationToken token = default)
     {
         var response = await _http.PostAsync($"tasks/{taskId}/retry", null, token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response);
     }
 
     public async Task<MediaCapabilities> GetMediaCapabilitiesAsync(CancellationToken token = default) =>
@@ -221,7 +296,7 @@ public sealed class StudioApiClient
             height = 720,
             preserve_audio = true
         }, token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response);
         return await response.Content.ReadFromJsonAsync<TaskAccepted>(cancellationToken: token) ?? new TaskAccepted();
     }
 
