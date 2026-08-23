@@ -934,6 +934,22 @@ async function handleApi(req, res, url, { lan = false } = {}) {
       }
     }
 
+    /**
+     * 把某一镜的场景骨架（地标 + 光位）存成这个场景的默认布局。cap:scene-layout
+     *
+     * 同一个场景往往会反复回来（第 3 镜在码头、第 11 镜又回码头）。
+     * 逐镜继承只在连着的那几镜里管用，中间隔一场就断了 ——
+     * 于是同一个码头被摆了三遍，三遍的灯塔在不同方位。而观众记得住地方。
+     */
+    if (b && c === 'scene-layout' && method === 'POST') {
+      const { scene, stage } = await readBody(req);
+      try {
+        return json(res, 200, studio.saveSceneLayout(b, scene, stage));
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
+    }
+
     // ── 让模型按画面描述给每一镜挑技法 ──
     // 手选的问题不在麻烦，在于你未必记得住那些术语 —— 四十七张卡里永远只用那三张。
     if (b && c === 'skills' && d === 'suggest' && method === 'POST') {

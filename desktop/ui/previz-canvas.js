@@ -116,6 +116,45 @@ export function blockingCanvas(stage, { size = 320, onChange = () => {} } = {}) 
     });
   }
 
+  /**
+   * 只有**方位**、没有坐标的东西（远景地标、太阳）摆在画布边上，绕着圈拖。
+   *
+   * 为什么不给它们一个坐标：一座山、一个太阳的"离主体几米"是编不出来的，
+   * 编出来的后果是机位挪三米、画面里那座山跟着横移半个屏，而真山不会动。
+   * 摆在边框上，视觉上也说清了"它在场地外面很远"。
+   */
+  const RIM = size / 2 - 13;
+  const rimAt = (deg) => {
+    const rad = ((Number(deg) || 0) * Math.PI) / 180;
+    return [size / 2 + Math.sin(rad) * RIM, size / 2 - Math.cos(rad) * RIM];
+  };
+  function draggableAngle(node, onDeg) {
+    node.style.cursor = 'grab';
+    node.addEventListener('pointerdown', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      node.setPointerCapture(ev.pointerId);
+      const rect = svg.getBoundingClientRect();
+      const move = (e) => {
+        const px = ((e.clientX - rect.left) / rect.width) * size - size / 2;
+        const py = ((e.clientY - rect.top) / rect.height) * size - size / 2;
+        if (Math.hypot(px, py) < 6) return; // 拖到正中时角度没有定义，别乱跳
+        onDeg(Math.round((Math.atan2(px, -py) * 180) / Math.PI));
+        redraw();
+        onChange();
+      };
+      const up = () => {
+        node.releasePointerCapture(ev.pointerId);
+        svg.removeEventListener('pointermove', move);
+        svg.removeEventListener('pointerup', up);
+        svg.removeEventListener('pointercancel', up);
+      };
+      svg.addEventListener('pointermove', move);
+      svg.addEventListener('pointerup', up);
+      svg.addEventListener('pointercancel', up);
+    });
+  }
+
   function redraw() {
     while (layer.firstChild) layer.removeChild(layer.firstChild);
     const subjects = stage.subjects || [];
@@ -150,6 +189,18 @@ export function blockingCanvas(stage, { size = 320, onChange = () => {} } = {}) 
      * 而那正是"这两镜好像不在同一个屋里"的真正来源。
      */
     for (const mk of stage.marks || []) {
+      if (mk.far) {
+        // 远景地标：只有方位，摆在边框上
+        const [fx, fy] = rimAt(mk.deg);
+        const fg = el('g');
+        fg.append(el('circle', { cx: fx, cy: fy, r: 10, class: 'previz-far' }));
+        const ft = el('text', { x: fx, y: fy + 4, class: 'previz-mark-label', 'pointer-events': 'none' });
+        ft.append(document.createTextNode((mk.name || '?').slice(0, 2)));
+        fg.append(ft);
+        draggableAngle(fg.firstChild, (deg) => { mk.deg = deg; });
+        layer.append(fg);
+        continue;
+      }
       const g = el('g');
       g.append(el('rect', {
         x: s.x(mk.x) - 9, y: s.y(mk.y) - 9, width: 18, height: 18, rx: 4, class: 'previz-mark'
@@ -175,6 +226,23 @@ export function blockingCanvas(stage, { size = 320, onChange = () => {} } = {}) 
         x2: s.x(subjects[1].x), y2: s.y(subjects[1].y),
         class: 'previz-line'
       }));
+    }
+
+    /**
+     * ── 太阳 ──
+     *
+     * 外景真正把几镜钉在一起的是**光**，不是地标 —— 一片海滩上没有门窗桌椅。
+     * 上一镜逆光、这一镜顺光，观众读出来是"这两镜不是同一时间拍的"。
+     */
+    if (stage.sun && Number.isFinite(Number(stage.sun.deg))) {
+      const [sx, sy] = rimAt(stage.sun.deg);
+      const sg = el('g');
+      sg.append(el('circle', { cx: sx, cy: sy, r: 11, class: 'previz-sun' }));
+      const stx = el('text', { x: sx, y: sy + 4, class: 'previz-sun-label', 'pointer-events': 'none' });
+      stx.append(document.createTextNode('☀'));
+      sg.append(stx);
+      draggableAngle(sg.firstChild, (deg) => { stage.sun = { ...stage.sun, deg }; });
+      layer.append(sg);
     }
 
     // ── 机位 ──
@@ -298,7 +366,15 @@ export function blankStage(names = []) {
  * 算读数用的是**流水线自己那份 previz.js**（服务端按 /previz.js 原样发过来），
  * 所以这里显示的和最终写进提示词的是同一套算法，不可能对不上。
  */
-export function previzPanel(stage, { size = 320, onChange = () => {}, prevStage = null } = {}) {
+export function previzPanel(stage, {
+  size = 320, onChange = () => {}, prevStage = null,
+  /** 这一镜属于哪个场景。给了才摆得出"存成这个场景的默认布局"那颗按钮 */
+  scene = '',
+  /** 存：把地标和光位挂到设定集的场景上。回一个 Promise */
+  onSaveScene = null,
+  /** 套用：把那个场景已经存过的布局搬过来 */
+  sceneLayout = null
+} = {}) {
   const host = document.createElement('div');
   host.className = 'previz-panel';
 
@@ -362,6 +438,97 @@ export function previzPanel(stage, { size = 320, onChange = () => {}, prevStage 
     }));
     controls.append(markRow);
 
+    /**
+     * ── 外景那一排 ──
+     *
+     * 外景没有门窗桌椅，钉住空间的是**远处那几样**（山、塔、海）和**光**。
+     * 它们和近处地标在数学上完全不同：只有方位，没有坐标 ——
+     * 机位挪三米，一座山在画面里纹丝不动。所以它们摆在画布边上，绕着圈拖。
+     */
+    const farRow = document.createElement('div');
+    farRow.className = 'previz-row';
+    farRow.append(Object.assign(document.createElement('span'), { className: 'previz-cap', textContent: '远景' }));
+    for (const [name, deg] of [['山', -45], ['塔', 45], ['海', 180], ['天际线', 90], ['路口', -135]]) {
+      const has = (stage.marks || []).some((m) => m.far && m.name === name);
+      farRow.append(btn(name, has, () => {
+        stage.marks = stage.marks || [];
+        if (has) stage.marks = stage.marks.filter((m) => !(m.far && m.name === name));
+        else stage.marks.push({ name, far: true, deg });
+      }));
+    }
+    controls.append(farRow);
+
+    const sunRow = document.createElement('div');
+    sunRow.className = 'previz-row';
+    sunRow.append(Object.assign(document.createElement('span'), { className: 'previz-cap', textContent: '光位' }));
+    sunRow.append(btn(stage.sun ? '有太阳' : '加太阳', Boolean(stage.sun), () => {
+      stage.sun = stage.sun ? null : { deg: -45, elev: 'low' };
+    }));
+    if (stage.sun) {
+      for (const [label, id] of [['早晚斜射', 'low'], ['中等', 'mid'], ['正午顶光', 'high']]) {
+        sunRow.append(btn(label, stage.sun.elev === id, () => { stage.sun = { ...stage.sun, elev: id }; }));
+      }
+    }
+    sunRow.append(Object.assign(document.createElement('span'), {
+      className: 'previz-cap',
+      style: 'min-width:0',
+      textContent: '拖边上那个 ☀ 定方向'
+    }));
+    controls.append(sunRow);
+
+    /**
+     * ── 一个场景摆一次 ──
+     *
+     * 逐镜继承只在**同一场次连着的那几镜**里管用。可同一个场景往往会反复回来：
+     * 第 3 镜在码头、第 11 镜又回码头、第 20 镜还在码头。中间隔着别的场次，
+     * 继承那条链早断了 —— 于是同一个码头被摆了三遍，三遍的灯塔在不同方位、
+     * 太阳在不同高度。而**观众记得住地方**：同一个码头三种长相，
+     * 比任何一处越轴都刺眼。
+     *
+     * ⚠ 存的是**房间**，不是机位：只存地标和光位，不存机位和人的站位。
+     * 一起存的话每一镜都从同一个机位开始，那等于把二十镜拍成同一张画。
+     */
+    if (scene && (onSaveScene || sceneLayout)) {
+      const sceneRow = document.createElement('div');
+      sceneRow.className = 'previz-row';
+      sceneRow.append(Object.assign(document.createElement('span'),
+        { className: 'previz-cap', textContent: '场景' }));
+      if (onSaveScene) {
+        const save = document.createElement('button');
+        save.className = 'btn ghost sm';
+        save.textContent = `存成「${scene}」的默认布局`;
+        save.title = '只存地标和光位（房间长什么样），不存机位和站位。'
+          + '所有用到这个场景的镜头都会从这一份起步 —— 哪怕隔着十几镜、跨了场次';
+        save.onclick = async () => {
+          save.disabled = true;
+          const old = save.textContent;
+          save.textContent = '存…';
+          // cap:scene-layout
+          try { await onSaveScene({ marks: stage.marks || [], sun: stage.sun || null }); } finally {
+            save.disabled = false;
+            save.textContent = old;
+          }
+        };
+        sceneRow.append(save);
+      }
+      if (sceneLayout && (sceneLayout.marks?.length || sceneLayout.sun)) {
+        const apply = document.createElement('button');
+        apply.className = 'btn ghost sm';
+        apply.textContent = '套用这个场景的布局';
+        apply.title = '把这个场景存过的地标和光位搬过来。机位和站位不动';
+        apply.onclick = () => {
+          stage.marks = (sceneLayout.marks || []).map((m) => ({ ...m }));
+          stage.sun = sceneLayout.sun ? { ...sceneLayout.sun } : null;
+          rebuildControls();
+          canvas.redraw();
+          refresh();
+          onChange();
+        };
+        sceneRow.append(apply);
+      }
+      controls.append(sceneRow);
+    }
+
     const mRow = document.createElement('div');
     mRow.className = 'previz-row';
     mRow.append(Object.assign(document.createElement('span'), { className: 'previz-cap', textContent: '运镜' }));
@@ -408,7 +575,11 @@ export function previzPanel(stage, { size = 320, onChange = () => {}, prevStage 
       chips.append(chip(`场景${f.camAt}侧 · 朝${f.looking}拍`));
       for (const m of f.marks) {
         if (!m.side) continue;
-        chips.append(chip(`${m.name}：${m.side}`, m.side === '画外' ? '' : 'ok'));
+        chips.append(chip(`${m.name}${m.far ? '（远）' : ''}：${m.side}`, m.side === '画外' ? '' : 'ok'));
+      }
+      // 外景把几镜钉在一起的主要是光，不是地标 —— 它得摆在能看见的地方
+      if (f.light) {
+        chips.append(chip(`${f.light.kind}${f.light.from ? ` · 光从${f.light.from}` : ''}`, 'ok'));
       }
     }
     readout.append(chips);

@@ -1439,6 +1439,23 @@ export default {
           // 上一镜的排位拿来比对轴线 —— 越轴是**两镜之间**的事，单看一镜看不出来
           const panel = previzPanel(stageDraft, {
             prevStage: prevShot?.stage || null,
+            // 同一个场景往往会反复回来（第 3 镜在码头、第 11 镜又回码头）——
+            // 逐镜继承在中间隔了一场之后就断了，所以布局要能挂到场景上
+            scene: shot.scene || '',
+            sceneLayout: (project.bible?.scenes || []).find((x) => x.name === shot.scene)?.layout || null,
+            onSaveScene: async (layout) => {
+              try {
+                // cap:scene-layout
+                const p2 = await api(`/projects/${project.id}/scene-layout`, {
+                  method: 'POST',
+                  body: { scene: shot.scene, stage: { ...stageDraft, ...layout } }
+                });
+                project.bible = p2.bible;
+                toast(`已存成「${shot.scene}」的默认布局 —— 用到这个场景的镜头都从它起步`, 'ok');
+              } catch (err) {
+                toast(err.message, 'err');
+              }
+            },
             onChange: () => { /* 拖动时只更新读数，存盘等你点保存 */ }
           });
           previzHost.append(

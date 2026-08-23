@@ -363,18 +363,48 @@ export function normalizeStage(stage) {
    * 它们才是观众用来定位的参照物。人物走位再准，窗户一会儿在画面左、
    * 一会儿在画面右，这场戏就散了 —— 而这一点在只排了人的图上完全看不出来。
    */
+  /**
+   * 地标有**两种**，而且数学上完全不同：
+   *
+   *   近处的（门、窗、桌、车）  有坐标。机位挪三米，它在画面里就挪一大截
+   *   远处的（山、塔、海、天际线）**只有方位**。机位挪三米，它在画面里纹丝不动
+   *
+   * ⚠ 这个区别不是学术性的 —— 外景基本上只有远处的那种。
+   * 硬给一座山编一个"离主体 4 米"的坐标，算出来的画面位置全是错的：
+   * 机位一动它就在画面里乱跑，而真山不会。
+   *
+   * 所以远景地标存的是**方位角**（deg），算画面位置时只看镜头轴向、不算视差。
+   */
   const marks = (Array.isArray(stage.marks) ? stage.marks : [])
     .filter((m) => m && typeof m === 'object')
-    .slice(0, 8)
-    .map((m) => ({
-      name: String(m.name ?? '').trim().slice(0, 12),
-      x: clampM(m.x),
-      y: clampM(m.y)
-    }))
+    .slice(0, 10)
+    .map((m) => {
+      const name = String(m.name ?? '').trim().slice(0, 12);
+      if (m.far || (m.deg !== undefined && m.x === undefined)) {
+        return { name, far: true, deg: norm180(m.deg) };
+      }
+      return { name, x: clampM(m.x), y: clampM(m.y) };
+    })
     .filter((m) => m.name);
+
+  /**
+   * 光位。**外景最要紧的那一样，比任何地标都要紧。**
+   *
+   * 室内的光是布的，两镜之间不会自己变；外景的光是太阳给的，
+   * 而观众对它极其敏感：上一镜逆光、这一镜顺光，读出来是"换了个时间拍的"。
+   * 而模型不知道太阳在哪 —— 除非我们每一镜都告诉它。
+   *
+   *   deg   光**从哪个方位来**（太阳所在的方位角）
+   *   elev  高度：low 早晚斜射长影 / mid / high 正午顶光
+   */
+  const rawSun = stage.sun && typeof stage.sun === 'object' ? stage.sun : null;
+  const sun = rawSun && Number.isFinite(Number(rawSun.deg))
+    ? { deg: norm180(rawSun.deg), elev: ['low', 'mid', 'high'].includes(rawSun.elev) ? rawSun.elev : 'mid' }
+    : null;
 
   return {
     marks,
+    sun,
     cam: {
       x: clampM(cam.x),
       y: clampM(cam.y, -3),
@@ -419,7 +449,9 @@ export function inheritStage(prevStage, names = []) {
    * 唯一不该变的东西 —— 丢了它们，"画面左边是窗"这句话下一镜就没了。
    */
   const marks = base.marks.map((m) => ({ ...m }));
-  if (!want.length) return { marks, cam: { ...base.cam }, subjects: base.subjects.map((s) => ({ ...s })) };
+  // 太阳更不会因为换机位就挪窝 —— 它是这一场戏里最不该变的东西
+  const sun = base.sun ? { ...base.sun } : null;
+  if (!want.length) return { marks, sun, cam: { ...base.cam }, subjects: base.subjects.map((s) => ({ ...s })) };
 
   /**
    * 这一镜的人 = 剧本里写的那几个。上一镜有位置的沿用，
@@ -433,7 +465,7 @@ export function inheritStage(prevStage, names = []) {
     if (old) return { ...old };
     return { name, x: clampM((i - (want.length - 1) / 2) * 1.2), y: 0, facing: 180 };
   });
-  return { marks, cam: { ...base.cam }, subjects };
+  return { marks, sun, cam: { ...base.cam }, subjects };
 }
 
 /**
@@ -469,7 +501,23 @@ export function cameraLine(shot, subjectName = null) {
   const bits = [`机位在场景${f.camAt}侧、朝${f.looking}拍`];
   const seen = f.marks.filter((m) => m.side && m.side !== '画外');
   if (seen.length) {
-    bits.push(seen.map((m) => `${m.side === '正中' ? '画面正中' : m.side}是${m.name}`).join('、'));
+    bits.push(seen.map((m) => {
+      const where = m.side === '正中' ? '画面正中' : m.side;
+      // 远的要说"远处" —— 不说的话模型会把一座山画成近景里的一块石头
+      return `${where}${m.far ? '远处' : ''}是${m.name}`;
+    }).join('、'));
+  }
+  /**
+   * ⚠ 光位放在最后，而且**每一镜都要有**。
+   *
+   * 外景的一致性主要不是靠地标 —— 一片海滩上没有门窗桌椅。
+   * 真正把几镜钉在一起的是光：上一镜逆光、这一镜顺光，观众读出来是
+   * "这两镜不是同一时间拍的"。而模型不知道太阳在哪，除非每一镜都说一遍。
+   */
+  if (f.light) {
+    bits.push(
+      `${f.light.kind}${f.light.from ? `，光从${f.light.from}来` : ''}，${f.light.elev}`
+    );
   }
   return `${base}。${bits.join('，')}`;
 }
@@ -659,6 +707,54 @@ export function screenX(cam, aimDeg, target) {
   return Number(v.toFixed(3));
 }
 
+/**
+ * 一个地标落在画面的哪儿。近的算视差，远的只看方位。
+ *
+ * ⚠ 这两条**不能合成一条**。远景地标没有坐标（一座山的"坐标"是编不出来的），
+ * 硬编一个出来的后果是：机位挪三米，画面里那座山跟着横移半个屏 —— 而真山不会。
+ */
+export function markScreenX(cam, aimDeg, mark) {
+  if (!mark) return null;
+  if (mark.far) {
+    const off = norm180(Number(mark.deg) - (Number(aimDeg) || 0));
+    if (Math.abs(off) >= 89) return null;
+    const lens = Math.max(8, Number(cam?.lens) || DEFAULT_LENS);
+    const halfFov = Math.atan(SENSOR_W / 2 / lens);
+    return Number((Math.tan((off * Math.PI) / 180) / Math.tan(halfFov)).toFixed(3));
+  }
+  return screenX(cam, aimDeg, mark);
+}
+
+/**
+ * 光位：太阳在画面的哪一边、是顺光还是逆光。
+ *
+ * ════════ 为什么外景非有它不可 ════════
+ *
+ * 室内的光是布的，两镜之间不会自己变。外景的光是太阳给的，
+ * 而观众对它极其敏感：上一镜逆光、这一镜顺光，读出来是"这两镜不是同一时间拍的"。
+ *
+ * 而模型**不知道太阳在哪** —— 除非每一镜都告诉它。这就是为什么外景的
+ * 一致性靠地标不够：一片海滩上没有门窗桌椅，真正把几镜钉在一起的是光。
+ *
+ * ⚠ 这里**不做相邻两镜的光位检查**。一场戏只有一个太阳（sun 存在场景上、
+ * 逐镜继承），所以"光位跳变"由构造保证不会发生；而正反打里一边顺光一边逆光
+ * 本来就是正常的，报它只会变成噪音 —— 噪音会让人学会无视所有警报。
+ * 光位的价值全在**写进每一镜的提示词**。
+ */
+export function lightOf(stage) {
+  const st = normalizeStage(stage);
+  if (!st?.sun) return null;
+  const aim = aimBearing(st);
+  // 太阳所在方位 相对 镜头轴向
+  const rel = norm180(st.sun.deg - aim);
+  const a = Math.abs(rel);
+  const kind = a <= 40 ? '逆光' : a >= 140 ? '顺光' : (a <= 75 || a >= 105 ? '侧逆光' : '侧光');
+  // ⚠ 顺光/逆光时"从哪边来"没有意义（太阳基本在轴上），说了反而误导
+  const from = a <= 25 || a >= 155 ? null : (rel > 0 ? '画面右' : '画面左');
+  const elev = { low: '低角度（早晚，影子拉得很长）', mid: '中等高度', high: '接近顶光（正午，影子很短）' }[st.sun.elev];
+  return { kind, from, elev, deg: st.sun.deg, rel: Number(rel.toFixed(1)) };
+}
+
 /** −1..1 说人话。画面正中那一小条不算左也不算右 */
 export function sideOfScreen(x) {
   if (x === null || x === undefined) return null;
@@ -682,10 +778,10 @@ export function framing(stage) {
   const camAt = compassOf(bearing(center, st.cam));
   const looking = compassOf(aim);
   const marks = st.marks.map((m) => {
-    const x = screenX(st.cam, aim, m);
-    return { name: m.name, x, side: sideOfScreen(x), behind: x === null };
+    const x = markScreenX(st.cam, aim, m);
+    return { name: m.name, far: Boolean(m.far), x, side: sideOfScreen(x), behind: x === null };
   });
-  return { aim: Number(aim.toFixed(1)), camAt, looking, marks };
+  return { aim: Number(aim.toFixed(1)), camAt, looking, marks, light: lightOf(st) };
 }
 
 /**

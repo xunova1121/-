@@ -5527,6 +5527,176 @@ section('转场：真发给 FFmpeg 的那串参数长什么样');
   check('退回硬切之后也不重编码', /-c copy/.test(tiny.calls[tiny.calls.length - 1]), tiny.calls[tiny.calls.length - 1]);
 }
 
+section('外景怎么定方位：远景地标和光位');
+{
+  /**
+   * ════════ 内景和外景不是同一个问题 ════════
+   *
+   * 内景有门窗桌椅 —— 都在几米之内，有坐标，机位挪三米它们在画面里挪一大截。
+   * 外景基本上什么都没有：一片海滩、一条街、一段山路。真正能定方位的只有两样：
+   *
+   *   远处那几个地标（山、塔、灯塔、天际线）—— 它们**只有方位，没有坐标**。
+   *     机位挪三米，一座山在画面里纹丝不动。硬给它编一个"离主体 4 米"的坐标，
+   *     算出来的画面位置全是错的：机位一动它就横移半个屏，而真山不会。
+   *
+   *   光 —— 外景最要紧的那一样，比任何地标都要紧。室内的光是布的，
+   *     两镜之间不会自己变；外景的光是太阳给的，而观众对它极其敏感：
+   *     上一镜逆光、这一镜顺光，读出来是"这两镜不是同一时间拍的"。
+   *     而模型不知道太阳在哪 —— 除非每一镜都告诉它。
+   */
+  const pv = await import('../core/pipeline/previz.js');
+
+  const beach = (camX, camY, lens = 35) => ({
+    cam: { x: camX, y: camY, height: 1.6, lens },
+    subjects: [{ name: '阿澜', x: 0, y: 0, facing: 180 }],
+    marks: [{ name: '灯塔', far: true, deg: -30 }, { name: '缆桩', x: 1.2, y: 0.6 }],
+    sun: { deg: 55, elev: 'low' }
+  });
+
+  const st = pv.normalizeStage(beach(0, -4));
+  check('远景地标只存方位、不存坐标',
+    st.marks[0].far === true && st.marks[0].deg === -30 && st.marks[0].x === undefined,
+    JSON.stringify(st.marks[0]));
+  check('近处地标照旧存坐标', st.marks[1].x === 1.2 && !st.marks[1].far, JSON.stringify(st.marks[1]));
+  check('太阳存下来了', st.sun.deg === 55 && st.sun.elev === 'low', JSON.stringify(st.sun));
+  check('太阳缺角度就当没有（一个没有方向的太阳没有意义）',
+    pv.normalizeStage({ ...beach(0, -4), sun: { elev: 'low' } }).sun === null);
+
+  /**
+   * ⚠ 这条是这一节的核心：**机位挪了，远景地标在画面里不该动**。
+   *
+   * 拿它和近处那个缆桩比 —— 同样挪 2 米，缆桩在画面里跑掉一大截，
+   * 灯塔几乎不动。这就是"有没有视差"的区别，也是为什么两种地标
+   * 不能用同一套算法。
+   */
+  const near = (stage) => pv.framing(stage).marks.find((m) => m.name === '缆桩').x;
+  const far = (stage) => pv.framing(stage).marks.find((m) => m.name === '灯塔').x;
+
+  /**
+   * ⚠ 要量的是**推拉**（沿着轴向前后走），不是横移。
+   *
+   * 第一版量的是横移，结果和直觉正好相反：远处的灯塔跑掉一大截，
+   * 近处的缆桩几乎没动。而那是**对的** —— 横移时镜头得转过去继续对着主体，
+   * 轴向跟着转了 27°，于是只受轴向影响的远景地标整个扫过画面；
+   * 而缆桩自己的方位也跟着变，两下抵消掉大半。这正是"背景相对主体在动"
+   * 的视差本身，也是横移看起来那么有立体感的原因。
+   *
+   * 前后推拉时轴向一点不变，两者的差别才干净地露出来：
+   * 远的纹丝不动（它只看轴向），近的跑掉一大截。
+   */
+  const a = beach(0, -6);
+  const b = beach(0, -2);
+  check(`推近 4 米，近处的缆桩在画面里跑了一大截（${near(a)} → ${near(b)}）`,
+    Math.abs(near(a) - near(b)) > 0.4, `${near(a)} / ${near(b)}`);
+  check(`同一次推近，远处的灯塔纹丝不动（${far(a)} → ${far(b)}）—— 它只看镜头轴向`,
+    Math.abs(far(a) - far(b)) < 0.001, `${far(a)} / ${far(b)}`);
+  /**
+   * ⚠ 光有"不动"是不够的 —— 那一条**假绿过**。
+   *
+   * 把远景那条分支关掉，代码会退回近景算法，而一个没有 x/y 的地标
+   * 会被当成坐标 (0,0)，正好落在主体身上、正好在画面正中，
+   * 于是"推近时不动"照样成立（一直是 0）。
+   *
+   * 所以还要钉住**它到底在画面的哪儿**：35mm 的半视角是 atan(18/35)=27.2°，
+   * 方位偏 30° 算出来就是 tan30/tan27.2 ≈ −1.12（画面左，而且已经出画）。
+   */
+  check(`远处地标的画面位置由它的方位角算出来（应 ≈ −1.12，实际 ${far(a)}）`,
+    Math.abs(far(a) + 1.122) < 0.02, String(far(a)));
+  /**
+   * 反过来也要验一条：轴向真的转了的时候，远景地标必须跟着扫过画面。
+   * 不然"只看轴向"这句话就成了"永远不动"，那是另一种错。
+   */
+  const turned = { ...beach(0, -4), subjects: [{ name: '阿澜', x: 2, y: 0, facing: 180 }] };
+  check('镜头转向时远景地标跟着扫过画面（不是永远钉死）',
+    Math.abs(far(beach(0, -4)) - far(turned)) > 0.3,
+    `${far(beach(0, -4))} / ${far(turned)}`);
+
+  // ── 光位 ──
+  const lightAt = (sunDeg) => pv.lightOf({ ...beach(0, -4), sun: { deg: sunDeg, elev: 'low' } });
+  check('太阳在镜头正前方 = 逆光', lightAt(0).kind === '逆光', JSON.stringify(lightAt(0)));
+  check('太阳在机位背后 = 顺光', lightAt(180).kind === '顺光', JSON.stringify(lightAt(180)));
+  check('太阳在右边 = 侧光，光从画面右来',
+    lightAt(90).kind === '侧光' && lightAt(90).from === '画面右', JSON.stringify(lightAt(90)));
+  check('太阳在左边就是画面左', lightAt(-90).from === '画面左', JSON.stringify(lightAt(-90)));
+  /**
+   * ⚠ 顺光和逆光时"光从哪边来"没有意义 —— 太阳基本在镜头轴上。
+   * 硬说一个"从画面左来"是**误导**，模型会照着打一道侧光。
+   */
+  check('顺光/逆光时不硬说"从哪边来"', lightAt(0).from === null && lightAt(180).from === null);
+  check('高度也说出来（早晚斜射和正午顶光是两种画）',
+    /早晚/.test(lightAt(90).elev) && /顶光/.test(pv.lightOf({ ...beach(0, -4), sun: { deg: 90, elev: 'high' } }).elev));
+  check('没太阳（内景）就没有光位这一段', pv.lightOf({ ...beach(0, -4), sun: null }) === null);
+
+  // ── 那句提示词 ──
+  const line = pv.cameraLine({ stage: beach(0, -4) });
+  check('提示词里带上了光位', /侧逆光|逆光|顺光|侧光/.test(line), line);
+  check('并且说了光从哪边来、什么高度', /光从画面[左右]来/.test(line) && /早晚/.test(line), line);
+  /**
+   * 远的要说"远处"。不说的话模型会把一座山画成近景里的一块石头 ——
+   * 而那在画面上是彻底不同的两张图。
+   */
+  const wide = pv.cameraLine({ stage: beach(0, -4, 18) });
+  check('远景地标在提示词里标着"远处"', /远处是灯塔/.test(wide), wide);
+  check('近处的不标"远处"', !/远处是缆桩/.test(wide), wide);
+
+  // ── 继承：太阳更不该因为换机位就挪窝 ──
+  const next = pv.inheritStage(beach(0, -4), ['别人']);
+  check('换一镜时太阳原样带过去', next.sun?.deg === 55, JSON.stringify(next.sun));
+  check('远景地标也原样带过去',
+    next.marks.some((m) => m.far && m.name === '灯塔'), JSON.stringify(next.marks));
+
+  /**
+   * ⚠ **不对相邻两镜做光位检查**，这是有意的。
+   *
+   * 一场戏只有一个太阳（sun 存在场景上、逐镜继承），所以"光位跳变"
+   * 由构造保证不会发生；而正反打里一边顺光一边逆光本来就是正常的，
+   * 报它只会变成噪音 —— 而噪音会让人学会无视所有警报。
+   * 光位的价值全在写进每一镜的提示词。
+   */
+  const sameSun = pv.continuityIssues(beach(0, -4), beach(0, 4));
+  check('正反打不会因为光位翻面就报警（那本来就是正常的）',
+    !sameSun.some((i) => /光|逆|顺/.test(i.what)), JSON.stringify(sameSun.map((i) => i.what)));
+
+  // ── 挂到场景上 ──
+  /**
+   * 逐镜继承只在同一场次连着的那几镜里管用。而同一个场景往往会反复回来：
+   * 第 3 镜在码头、第 11 镜又回码头。中间隔一场，继承那条链就断了 ——
+   * 于是同一个码头被摆了三遍，三遍的灯塔在不同方位。而观众记得住地方。
+   */
+  const studioMod = await import('../core/pipeline/studio.js');
+  const storeMod = await import('../core/store.js');
+  const proj = storeMod.create({ title: '场景布局', script: 'x' });
+  storeMod.update(proj.id, (p) => {
+    p.bible = { characters: [], scenes: [{ name: '码头' }], props: [] };
+    return p;
+  });
+  const saved = studioMod.saveSceneLayout(proj.id, '码头', beach(0, -4));
+  const layout = studioMod.sceneLayoutOf(saved, '码头');
+  check('布局挂到了设定集的场景上', Boolean(layout), JSON.stringify(layout));
+  check('地标和光位都存了',
+    layout.marks.length === 2 && layout.sun?.deg === 55, JSON.stringify(layout));
+  /**
+   * ⚠ 存的是**房间**，不是机位。一起存的话每一镜都从同一个机位开始 ——
+   * 那等于把二十镜拍成同一张画，而那正是"分镜"要避免的事。
+   */
+  /**
+   * ⚠ 要查**盘上真的存了什么**，不是查读出来的那个对象。
+   *
+   * sceneLayoutOf 是自己重新组的 `{ marks, sun }` —— 拿它去断言"没存机位"
+   * 永远是绿的，哪怕落库时把整个 stage 都写进去了。这一条假绿过。
+   */
+  const onDisk = saved.bible.scenes.find((x) => x.name === '码头').layout;
+  check('不存机位', onDisk.cam === undefined, JSON.stringify(Object.keys(onDisk)));
+  check('也不存人的站位（那跟着剧情走）', onDisk.subjects === undefined,
+    JSON.stringify(Object.keys(onDisk)));
+  check('没存过的场景回 null（别拿一份空布局冒充）',
+    studioMod.sceneLayoutOf(saved, '别的地方') === null);
+  let boom = null;
+  try { studioMod.saveSceneLayout(proj.id, '不存在的场景', beach(0, -4)); } catch (e) { boom = e.message; }
+  check('存到一个设定集里没有的场景上要报错', /设定集里没有场景/.test(boom || ''), boom);
+  storeMod.remove(proj.id);
+}
+
 section('接缝那几句话：三处必须是同一句');
 {
   /**

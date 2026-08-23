@@ -281,6 +281,56 @@ if (await previz.count()) {
     check('再点一下能把它撤掉', (await page.locator('.previz-mark').count()) === 0,
       String(await page.locator('.previz-mark').count()));
   }
+
+  /**
+   * ── 外景 ──
+   *
+   * 外景没有门窗桌椅。钉住空间的是**远处那几样**（山、塔、海）和**光**，
+   * 而它们和近处地标在数学上完全不同：只有方位、没有坐标 ——
+   * 机位挪三米，一座山在画面里纹丝不动。所以它们摆在画布边上。
+   */
+  /**
+   * ⚠ 全都摆上，不要只摆一个。
+   *
+   * 只摆一个的话，它落在镜头背后（前面拖过机位，轴向早不是初始那个了）
+   * 就完全读不到 —— 而那是走查站错了地方，不是功能没做。
+   * 五个方位铺开，总有一个在画面里。
+   */
+  const farNames = ['山', '塔', '海', '天际线', '路口'];
+  let farClicked = 0;
+  for (const name of farNames) {
+    const b = page.locator('.previz-row button', { hasText: name }).first();
+    if (!(await b.count())) continue;
+    await b.click();
+    await page.waitForTimeout(150);
+    farClicked += 1;
+  }
+  if (farClicked) {
+    await page.waitForTimeout(300);
+    check(`远景地标摆在画布边上（它只有方位，没有坐标）—— 摆了 ${farClicked} 个`,
+      (await page.locator('.previz-far').count()) === farClicked,
+      String(await page.locator('.previz-far').count()));
+    const farChips = await page.locator('.previz-chips').first().innerText().catch(() => '');
+    check('读数里标出它是"远"的（不标的话模型会把山画成近景里一块石头）',
+      /（远）/.test(farChips), farChips.slice(0, 160));
+  }
+
+  const sunBtn = page.locator('.previz-row button', { hasText: '加太阳' }).first();
+  if (await sunBtn.count()) {
+    await sunBtn.click();
+    await page.waitForTimeout(400);
+    check('太阳摆上去了', (await page.locator('.previz-sun').count()) === 1,
+      String(await page.locator('.previz-sun').count()));
+    const lit = await page.locator('.previz-chips').first().innerText().catch(() => '');
+    /**
+     * 光是外景最要紧的一样：上一镜逆光、这一镜顺光，观众读出来是
+     * "这两镜不是同一时间拍的"。而模型不知道太阳在哪 —— 除非每一镜都说。
+     */
+    check('读数里当场算出是顺光还是逆光',
+      /顺光|逆光|侧光|侧逆光/.test(lit), lit.slice(0, 180));
+    check('高度那三档也点得到',
+      (await page.locator('.previz-row button', { hasText: '正午顶光' }).count()) >= 1);
+  }
 }
 
 

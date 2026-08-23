@@ -1156,6 +1156,53 @@ export function setLinkRange(projectId, { from, to, link }) {
   return { project: next, changed, link };
 }
 
+/**
+ * 把这一镜的**场景骨架**（地标 + 光位）存成这个场景的默认布局。
+ *
+ * ════════ 为什么要挂在场景上，而不是逐镜继承 ════════
+ *
+ * 逐镜继承只在**同一场次连着的那几镜**里管用。可同一个场景往往会
+ * 反复回来：第 3 镜在码头、第 11 镜又回码头、第 20 镜还在码头。
+ * 中间隔着别的场次，继承那条链早断了 —— 于是同一个码头被摆了三遍，
+ * 三遍的灯塔在不同方位、太阳在不同高度。
+ *
+ * 而观众记得住地方。同一个码头三种长相，比任何一处越轴都刺眼。
+ *
+ * 挂在场景上之后：一个场景摆一次，所有用到它的镜头（哪怕隔着十几镜、
+ * 跨了场次）都从同一份布局起步。人还是可以逐镜微调机位 ——
+ * 存的是**房间**，不是机位。
+ *
+ * ⚠ 只存地标和光位，**不存机位和人的站位**。
+ * 机位每一镜都不同（那才是"分镜"这件事本身），人的站位跟着剧情走。
+ * 把它们一起存下来的话，每一镜都会从同一个机位开始 —— 那等于把
+ * 二十镜拍成同一张画。
+ */
+export function saveSceneLayout(projectId, sceneName, stage) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const name = String(sceneName || '').trim();
+  if (!name) throw new Error('没说是哪个场景');
+  const item = (project.bible?.scenes || []).find((x) => x.name === name);
+  if (!item) throw new Error(`设定集里没有场景「${name}」`);
+
+  const st = previz.normalizeStage(stage);
+  if (!st) throw new Error('这一镜还没排位，没有布局可存');
+
+  return store.update(projectId, (p) => {
+    const target = (p.bible?.scenes || []).find((x) => x.name === name);
+    if (target) target.layout = { marks: st.marks, sun: st.sun };
+    return p;
+  });
+}
+
+/** 这个场景存过布局吗。没有回 null */
+export function sceneLayoutOf(project, sceneName) {
+  const item = (project?.bible?.scenes || []).find((x) => x.name === String(sceneName || '').trim());
+  const layout = item?.layout;
+  if (!layout || (!layout.marks?.length && !layout.sun)) return null;
+  return { marks: layout.marks || [], sun: layout.sun || null };
+}
+
 export function updateShot(projectId, shotId, patch = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);

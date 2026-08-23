@@ -1432,3 +1432,7 @@ select.mini {
 .previz-compass { fill: var(--ink-faint); font-size: 11px; text-anchor: middle; font-weight: 700; }
 .previz-mark { fill: var(--surface-3); stroke: var(--ink-faint); stroke-width: 1.5; cursor: grab; }
 .previz-mark-label { fill: var(--ink-dim); font-size: 10px; text-anchor: middle; }
+/* 只有方位没有坐标的那些（远景地标、太阳）摆在画布边上 */
+.previz-far { fill: var(--surface-2); stroke: var(--ink-faint); stroke-width: 1.5; stroke-dasharray: 3 2; cursor: grab; }
+.previz-sun { fill: var(--caution); stroke: var(--caution); cursor: grab; }
+.previz-sun-label { fill: var(--ground); font-size: 11px; text-anchor: middle; }

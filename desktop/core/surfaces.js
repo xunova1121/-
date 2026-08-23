@@ -327,6 +327,14 @@ export const CAPABILITIES = [
       + '而不是把电脑那套缩小塞进去。'
   },
   {
+    id: 'scene-layout',
+    name: '把地标和光位存成这个场景的默认布局',
+    api: 'POST /projects/:id/scene-layout',
+    pc: 'ui/previz-canvas.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
     id: 'film-music',
     name: '给成片配背景音乐（自动避让台词）',
     api: 'POST /projects/:id/music',

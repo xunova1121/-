@@ -1900,7 +1900,26 @@ function openEditor(s, jump = 'content') {
       const names = (s.characters || []).slice(0, 4);
       stageDraft = (sameSeg && inheritStage(prev.stage, names)) || blankStage(names);
     }
-    stageWrap.append(previzPanel(stageDraft, { size: 300, prevStage: prev?.stage || null }).node);
+    stageWrap.append(previzPanel(stageDraft, {
+      size: 300,
+      prevStage: prev?.stage || null,
+      // 同一个场景会反复回来，而逐镜继承隔一场就断了 —— 布局要挂到场景上
+      scene: s.scene || '',
+      sceneLayout: (project.bible?.scenes || []).find((x) => x.name === s.scene)?.layout || null,
+      onSaveScene: async (layout) => {
+        try {
+          // cap:scene-layout
+          const p2 = await api(`/projects/${project.id}/scene-layout`, {
+            method: 'POST',
+            body: { scene: s.scene, stage: { ...stageDraft, ...layout } }
+          });
+          project.bible = p2.bible;
+          toast(`已存成「${s.scene}」的默认布局`, 'ok');
+        } catch (err) {
+          toast(err.message, 'err');
+        }
+      }
+    }).node);
   };
 
   // ── 四组 ──
