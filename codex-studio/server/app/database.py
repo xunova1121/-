@@ -37,7 +37,25 @@ CREATE TABLE IF NOT EXISTS shots (
 );
 CREATE TABLE IF NOT EXISTS assets (
     id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, asset_type TEXT NOT NULL,
-    name TEXT NOT NULL, memory_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    name TEXT NOT NULL, episode INTEGER NOT NULL DEFAULT 1, shot_id INTEGER,
+    local_path TEXT NOT NULL DEFAULT '', mime_type TEXT NOT NULL DEFAULT '',
+    source_kind TEXT NOT NULL DEFAULT 'manual', status TEXT NOT NULL DEFAULT 'ready',
+    memory_json TEXT NOT NULL DEFAULT '{}', metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS shot_assets (
+    shot_id INTEGER NOT NULL, asset_id INTEGER NOT NULL, role TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(shot_id, asset_id, role)
+);
+CREATE TABLE IF NOT EXISTS timeline_clips (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, episode INTEGER NOT NULL DEFAULT 1,
+    track TEXT NOT NULL DEFAULT 'V1', position INTEGER NOT NULL DEFAULT 0,
+    asset_id INTEGER, source_path TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',
+    trim_in REAL NOT NULL DEFAULT 0, trim_out REAL NOT NULL DEFAULT 0,
+    duration REAL NOT NULL DEFAULT 0, transition TEXT NOT NULL DEFAULT 'cut',
+    transition_duration REAL NOT NULL DEFAULT 0.4, volume REAL NOT NULL DEFAULT 1,
+    metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, task_type TEXT NOT NULL,
@@ -131,6 +149,16 @@ SHOT_MIGRATIONS: dict[str, str] = {
     "continuity_json": "TEXT NOT NULL DEFAULT '{}'",
 }
 
+ASSET_MIGRATIONS: dict[str, str] = {
+    "episode": "INTEGER NOT NULL DEFAULT 1",
+    "shot_id": "INTEGER",
+    "local_path": "TEXT NOT NULL DEFAULT ''",
+    "mime_type": "TEXT NOT NULL DEFAULT ''",
+    "source_kind": "TEXT NOT NULL DEFAULT 'manual'",
+    "status": "TEXT NOT NULL DEFAULT 'ready'",
+    "metadata_json": "TEXT NOT NULL DEFAULT '{}'",
+}
+
 
 def _migrate(connection: sqlite3.Connection) -> None:
     columns = {row[1] for row in connection.execute("PRAGMA table_info(tasks)")}
@@ -145,6 +173,12 @@ def _migrate(connection: sqlite3.Connection) -> None:
             connection.execute(f"ALTER TABLE shots ADD COLUMN {name} {definition}")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_shots_episode ON shots(project_id, episode, sequence, id)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_scenes_episode ON scenes(project_id, episode, sequence)")
+    asset_columns = {row[1] for row in connection.execute("PRAGMA table_info(assets)")}
+    for name, definition in ASSET_MIGRATIONS.items():
+        if name not in asset_columns:
+            connection.execute(f"ALTER TABLE assets ADD COLUMN {name} {definition}")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_assets_project ON assets(project_id, asset_type, episode, id)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_timeline_order ON timeline_clips(project_id, episode, track, position, id)")
 
 
 def initialize_database(path: Path | None = None) -> None:
