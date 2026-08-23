@@ -2,11 +2,12 @@ import asyncio
 import json
 import sqlite3
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from .adapters import registry
 from .config import settings
-from .media import render_transition
+from .media import render_timeline, render_transition
 
 
 class TaskRunner:
@@ -64,16 +65,28 @@ class TaskRunner:
             payload = json.loads(task["payload_json"])
             if task["task_type"] == "transition_render":
                 result = await asyncio.to_thread(render_transition, payload)
+            elif task["task_type"] == "timeline_export":
+                clips = await asyncio.to_thread(self._timeline_clips, task["project_id"], int(payload.get("episode", 1)))
+                result = await asyncio.to_thread(render_timeline, {**payload, "project_id": task["project_id"]}, clips)
             else:
                 adapter = registry.resolve(task["provider"])
                 prompt = str(payload.get("prompt") or f"执行 {task['task_type']} 任务")
-                result = await adapter.invoke(prompt, {**payload, "task_id": task["id"], "task_type": task["task_type"]})
-            await asyncio.to_thread(self._complete, task["id"], result)
+                result = await adapter.invoke(prompt, {**payload, "project_id": task["project_id"], "task_id": task["id"], "task_type": task["task_type"]})
+            await asyncio.to_thread(self._complete, task, result)
         except Exception as exc:
             await asyncio.to_thread(self._fail_or_retry, task, str(exc))
 
-    def _complete(self, task_id: int, result: dict[str, Any]) -> None:
+    @staticmethod
+    def _timeline_clips(project_id: str, episode: int) -> list[dict[str, Any]]:
         with sqlite3.connect(settings.database_path) as db:
+            db.row_factory = sqlite3.Row
+            rows = db.execute("SELECT * FROM timeline_clips WHERE project_id=? AND episode=? ORDER BY track,position,id", (project_id, episode)).fetchall()
+        return [dict(row) for row in rows]
+
+    def _complete(self, task: dict[str, Any], result: dict[str, Any]) -> None:
+        task_id = int(task["id"])
+        with sqlite3.connect(settings.database_path) as db:
+            db.row_factory = sqlite3.Row
             canceled = db.execute("SELECT cancel_requested FROM tasks WHERE id=?", (task_id,)).fetchone()
             status = "canceled" if canceled and canceled[0] else "completed"
             progress = 0 if status == "canceled" else 100
@@ -81,6 +94,20 @@ class TaskRunner:
                 "UPDATE tasks SET status=?,progress=?,result_json=?,lease_until=NULL,completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (status, progress, json.dumps(result, ensure_ascii=False), task_id),
             )
+            output_path = str(result.get("output_path") or "")
+            asset_type = str(result.get("asset_type") or ("video" if task["task_type"] == "timeline_export" else ""))
+            if status == "completed" and output_path and asset_type:
+                payload = json.loads(task["payload_json"])
+                cursor = db.execute(
+                    "INSERT INTO assets(project_id,asset_type,name,episode,shot_id,local_path,mime_type,source_kind,status,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (task["project_id"], asset_type, str(result.get("output_name") or Path(output_path).name), int(payload.get("episode", 1)), result.get("shot_id") or payload.get("shot_id"), output_path,
+                     {"image": "image/png", "video": "video/mp4", "voice": "audio/mpeg"}.get(asset_type, "application/octet-stream"), "generated", "ready", json.dumps({"provider": result.get("provider"), "model": result.get("model"), "task_id": task_id}, ensure_ascii=False)),
+                )
+                result["asset_id"] = cursor.lastrowid
+                db.execute("UPDATE tasks SET result_json=? WHERE id=?", (json.dumps(result, ensure_ascii=False), task_id))
+                shot_id = result.get("shot_id") or payload.get("shot_id")
+                if shot_id:
+                    db.execute("INSERT OR IGNORE INTO shot_assets(shot_id,asset_id,role) VALUES(?,?,?)", (shot_id, cursor.lastrowid, asset_type))
 
     def _fail_or_retry(self, task: dict[str, Any], message: str) -> None:
         attempts = int(task["attempts"])
