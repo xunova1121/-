@@ -35,6 +35,9 @@ public partial class StoryboardWindow : Window
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await LoadAsync();
 
+    private void Previz_Click(object sender, RoutedEventArgs e) => new PrevizWindow(_api) { Owner = this }.ShowDialog();
+    private void Continuity_Click(object sender, RoutedEventArgs e) => new ContinuityWindow(_api) { Owner = this }.ShowDialog();
+
     private async void SaveAll_Click(object sender, RoutedEventArgs e)
     {
         ShotGrid.CommitEdit();
