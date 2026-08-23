@@ -31,9 +31,9 @@ public partial class GenerationWindow : Window
     private async Task RefreshProvidersAsync()
     {
         var type = SelectedType;
-        var allowed = _providers.Where(p => type switch { "image" => p.ProviderId == "openai", "video" => p.ProviderId is "openai" or "dashscope", "voice" => p.ProviderId == "openai", _ => false }).ToList();
+        var allowed = _providers.Where(p => type switch { "image" => p.ProviderId == "openai", "video" => p.ProviderId == "dashscope", "voice" => p.ProviderId == "openai", _ => false }).ToList();
         ProviderSelector.ItemsSource = allowed; if (allowed.Count > 0) ProviderSelector.SelectedIndex = 0;
-        ModelText.Text = type switch { "image" => "gpt-image-2", "video" => allowed.FirstOrDefault()?.ProviderId == "dashscope" ? "wan2.7-i2v-2026-04-25" : "sora-2", "voice" => "gpt-4o-mini-tts", _ => "" };
+        ModelText.Text = type switch { "image" => "gpt-image-2", "video" => "wan2.7-i2v-2026-04-25", "voice" => "gpt-4o-mini-tts", _ => "" };
         await Task.CompletedTask;
     }
     private async Task RefreshTasksAsync() { var tasks = await _api.GetTasksAsync(); TaskGrid.ItemsSource = tasks.Where(t => t.TaskType is "image" or "video" or "voice").ToList(); StatusText.Text = $"生成任务 {tasks.Count(t => t.TaskType is "image" or "video" or "voice")} 项。完成结果会自动回写资产库和镜头。"; }

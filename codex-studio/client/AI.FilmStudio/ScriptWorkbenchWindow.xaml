@@ -18,8 +18,8 @@
                 <Button Style="{StaticResource NavButton}" Content="导入 TXT / MD / DOCX" Click="Import_Click"/>
                 <Button Style="{StaticResource NavButton}" Content="保存剧本" Click="Save_Click"/>
                 <Button Style="{StaticResource PrimaryButton}" Content="解析剧本" Click="Parse_Click"/>
-                <Button x:Name="DirectorButton" Style="{StaticResource NavButton}" Content="AI导演分析" Click="Director_Click" IsEnabled="False"/>
-                <Button Style="{StaticResource PrimaryButton}" Content="生成全量分镜" Click="Generate_Click" Margin="8,0,0,0"/>
+                <Button Style="{StaticResource NavButton}" Content="离线草稿分镜" Click="Generate_Click"/>
+                <Button x:Name="DirectorButton" Style="{StaticResource PrimaryButton}" Content="AI全量分镜 + Story Bible" Click="Director_Click" IsEnabled="False" Margin="8,0,0,0"/>
             </StackPanel>
         </Grid>
 
@@ -47,8 +47,8 @@
                 </Border>
                 <TextBlock Grid.Row="2" Text="场景顺序" FontWeight="SemiBold" VerticalAlignment="Center"/>
                 <ListBox x:Name="SceneList" Grid.Row="3" DisplayMemberPath="Display" Background="#101318" Foreground="{StaticResource TextBrush}" BorderBrush="{StaticResource StrokeBrush}" Padding="5"/>
-                <TextBlock Grid.Row="4" Text="AI 导演意见" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                <TextBox x:Name="DirectorResult" Grid.Row="5" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Background="#101318" Foreground="{StaticResource TextBrush}" BorderBrush="{StaticResource StrokeBrush}" Padding="10" Text="配置任一导演模型后可分析剧本、镜头衔接与连续性风险。"/>
+                <TextBlock Grid.Row="4" Text="AI 生产设计结果" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <TextBox x:Name="DirectorResult" Grid.Row="5" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Background="#101318" Foreground="{StaticResource TextBrush}" BorderBrush="{StaticResource StrokeBrush}" Padding="10" Text="配置导演模型后，会先通读全剧本，再一次生成全部场次、镜头、冻结设定和故事状态图。"/>
             </Grid>
         </Border>
 

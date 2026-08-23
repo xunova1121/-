@@ -175,7 +175,14 @@ def test_vision_review_is_persisted_as_repair_record():
 def test_claude_borrowed_architecture_endpoints():
     with TestClient(app) as client:
         assert len(client.get("/api/v1/pipeline/stages").json()) == 6
-        assert any(item["id"] == "vidu" for item in client.get("/api/v1/providers?capability=r2v").json())
+        assert client.get("/api/v1/providers?capability=r2v").json() == []
+        dashscope = next(item for item in client.get("/api/v1/providers").json() if item["id"] == "dashscope")
+        assert dashscope["capabilities"] == ["i2v"]
+        openai = next(item for item in client.get("/api/v1/providers").json() if item["id"] == "openai")
+        assert "i2v" not in openai["capabilities"]
+        rejected = client.post("/api/v1/projects/demo/shots/generate", json={"shot_id": 1, "task_type": "video", "provider": "openai", "prompt": "测试"})
+        assert rejected.status_code == 422
+        assert all(item["id"] not in {"vidu", "kling", "minimax"} for item in client.get("/api/v1/providers").json())
         result = client.post("/api/v1/continuity/analyze", json={
             "previous": {"scene": "古寺", "screen_direction": "right", "lighting": "night"},
             "current": {"scene": "古寺大殿", "screen_direction": "left", "lighting": "day"},
@@ -196,19 +203,15 @@ def test_proofread_is_computed_from_project_shots():
 
 
 def test_automation_start_freezes_bible_and_injects_memory():
-    with TestClient(app) as client:
-        client.post("/api/v1/projects/demo/bible", json={"entity_type": "character", "entity_key": "hero", "name": "主角", "state": "draft", "data": {"face": "国字脸", "costume": "青衫"}})
-        started = client.post("/api/v1/projects/demo/automation/start", json={
-            "episode": 1, "image_provider": "not-running", "video_provider": "not-running", "voice_provider": None,
-            "output_name": "automation-test.mp4"
-        })
-        assert started.status_code == 202
-        run_id = started.json()["id"]
-        with sqlite3.connect(settings.database_path) as db:
-            assert db.execute("SELECT state FROM bible_entities WHERE entity_key='hero' ORDER BY version DESC LIMIT 1").fetchone()[0] == "frozen"
-            payload = db.execute("SELECT payload_json FROM tasks WHERE automation_run_id=? AND stage='keyframes' ORDER BY id LIMIT 1", (run_id,)).fetchone()[0]
-        assert "国字脸" in payload
-        assert "禁止" not in payload or "强制连续性设定" in payload
+    with sqlite3.connect(settings.database_path) as db:
+        db.execute("INSERT INTO bible_entities(project_id,entity_type,entity_key,name,state,data_json) VALUES('demo','character','hero','主角','draft',?)", ('{"face":"国字脸","costume":"青衫"}',))
+    started = production.start_automation("demo", {"episode": 1, "mode": "balanced", "image_provider": "mock", "video_provider": "mock", "voice_provider": None, "auto_freeze_bible": True, "generate_images": True, "output_name": "automation-test.mp4", "width": 1280, "height": 720})
+    run_id = started["id"]
+    with sqlite3.connect(settings.database_path) as db:
+        assert db.execute("SELECT state FROM bible_entities WHERE entity_key='hero' ORDER BY version DESC LIMIT 1").fetchone()[0] == "frozen"
+        payload = db.execute("SELECT payload_json FROM tasks WHERE automation_run_id=? AND stage='keyframes' ORDER BY id LIMIT 1", (run_id,)).fetchone()[0]
+    assert "国字脸" in payload
+    assert "禁止" not in payload or "强制连续性设定" in payload
 
 
 @pytest.mark.skipif(not __import__("shutil").which("ffmpeg") or not __import__("shutil").which("ffprobe"), reason="FFmpeg not installed")
@@ -325,6 +328,87 @@ def test_real_script_parse_storyboard_edit_and_persistence(tmp_path: Path):
         object.__setattr__(settings, "database_path", original)
 
 
+def test_ai_director_atomically_builds_bible_storyboard_and_state_graph():
+    director_json = {
+        "logline": "沈岚带伤追查失窃的玉佩。",
+        "bible": {
+            "world": {"name": "现代悬疑世界", "rules": "现实主义"},
+            "style": {"name": "冷峻蓝灰", "palette": "蓝灰"},
+            "characters": [{"name": "沈岚", "face": "窄脸", "hair": "黑色短发", "body": "高挑", "costume": "黑色风衣"}],
+            "locations": [{"name": "雨夜仓库", "layout": "门在西侧，货架南北排列", "lighting": "顶部冷光"}],
+            "props": [{"name": "玉佩", "initial_state": "在沈岚手中"}],
+        },
+        "scenes": [{"index": 1, "heading": "雨夜仓库", "location": "雨夜仓库", "time_of_day": "夜", "summary": "追查"}],
+        "shots": [
+            {"scene_index": 1, "title": "入场", "description": "沈岚推门", "action": "沈岚推门进入", "duration": 3, "characters": ["沈岚"], "props": ["玉佩"], "link": "new-scene", "state_before": {"characters": {"沈岚": {"costume": "黑色风衣"}}, "props": {"玉佩": "手中"}}, "state_after": {"characters": {"沈岚": {"costume": "黑色风衣"}}, "props": {"玉佩": "手中"}}, "value_score": 82},
+            {"scene_index": 1, "title": "转身", "description": "沈岚闻声转身", "action": "沈岚向右转身", "duration": 3, "characters": ["沈岚"], "props": ["玉佩"], "link": "continuous", "state_before": {}, "state_after": {}, "value_score": 70},
+        ],
+    }
+
+    class FakeDirector(AIAdapter):
+        provider = "directorfake"
+        async def invoke(self, prompt, context):
+            assert "完整生产设计" in prompt
+            assert context["temperature"] == 0.15
+            return {"provider": self.provider, "model": "director-test", "result": __import__("json").dumps(director_json, ensure_ascii=False)}
+
+    registry.register(FakeDirector())
+    with TestClient(app) as client:
+        client.put("/api/v1/projects/demo/episodes/1/script", json={"title": "第一集", "source_name": "", "source_text": "雨夜仓库，沈岚推门进入。"})
+        response = client.post("/api/v1/projects/demo/episodes/1/director/generate", json={"provider": "directorfake", "replace_existing": True, "freeze_bible": True})
+        assert response.status_code == 200, response.text
+        result = response.json()
+        assert result["shot_count"] == 2
+        assert result["bible_count"] == 5
+        assert result["blocking_state_conflicts"] == 0
+    with sqlite3.connect(settings.database_path) as db:
+        assert db.execute("SELECT COUNT(*) FROM bible_entities WHERE project_id='demo' AND state='frozen'").fetchone()[0] == 5
+        assert db.execute("SELECT COUNT(*) FROM shot_state_snapshots WHERE project_id='demo'").fetchone()[0] == 2
+        second = db.execute("SELECT state_before_json FROM shot_state_snapshots ORDER BY shot_id DESC LIMIT 1").fetchone()[0]
+        assert "黑色风衣" in second and "手中" in second
+        assert db.execute("SELECT parse_status FROM episode_scripts WHERE project_id='demo' AND episode=1").fetchone()[0] == "director_storyboard"
+
+
+def test_continuous_video_waits_for_previous_tail_frame(tmp_path: Path, monkeypatch):
+    previous_video = tmp_path / "previous.mp4"
+    previous_video.write_bytes(b"video")
+    tail = tmp_path / "tail.png"
+    tail.write_bytes(b"tail")
+    with sqlite3.connect(settings.database_path) as db:
+        db.row_factory = sqlite3.Row
+        rows = db.execute("SELECT id FROM shots WHERE project_id='demo' ORDER BY id LIMIT 2").fetchall()
+        first, second = int(rows[0]["id"]), int(rows[1]["id"])
+        db.execute("UPDATE shots SET continuity_json=? WHERE id=?", ('{"link":"new-scene"}', first))
+        db.execute("UPDATE shots SET continuity_json=? WHERE id=?", ('{"link":"continuous"}', second))
+        run_id = db.execute("INSERT INTO automation_runs(project_id,episode,status,stage,config_json) VALUES('demo',1,'running','videos','{}')").lastrowid
+        shots = db.execute("SELECT * FROM shots WHERE id IN (?,?) ORDER BY id", (first, second)).fetchall()
+        queued = production._queue_video_wave(db, run_id, "demo", shots, {"video_provider": "mock", "width": 1280, "height": 720})
+        assert queued == 1
+        asset_id = db.execute("INSERT INTO assets(project_id,asset_type,name,episode,shot_id,local_path,status) VALUES('demo','video','previous',1,?,?,'ready')", (first, str(previous_video))).lastrowid
+        db.execute("INSERT INTO shot_assets(shot_id,asset_id,role) VALUES(?,?,'video')", (first, asset_id))
+        monkeypatch.setattr(production, "extract_boundary_frames", lambda *args: (str(tail), str(tail)))
+        queued = production._queue_video_wave(db, run_id, "demo", shots, {"video_provider": "mock", "width": 1280, "height": 720})
+        assert queued == 1
+        payload = db.execute("SELECT payload_json FROM tasks WHERE automation_run_id=? AND stage='videos' ORDER BY id DESC LIMIT 1", (run_id,)).fetchone()[0]
+    decoded = __import__("json").loads(payload)
+    assert decoded["reference_paths"] == [str(tail)]
+    assert decoded["dependency"]["from_shot_id"] == first
+
+
+def test_story_state_recomputes_after_edit_and_blocks_production():
+    with TestClient(app) as client:
+        shots = client.get("/api/v1/projects/demo/shots").json()[:2]
+        first, second = shots[0], shots[1]
+        first_continuity = {"link": "new-scene", "state_before": {"characters": {"主角": {"costume": "黑衣"}}}, "state_after": {"characters": {"主角": {"costume": "黑衣"}}}}
+        second_continuity = {"link": "continuous", "state_before": {"characters": {"主角": {"costume": "白衣"}}}, "state_after": {"characters": {"主角": {"costume": "白衣"}}}}
+        assert client.patch(f"/api/v1/shots/{first['id']}", json={"continuity": first_continuity}).status_code == 200
+        assert client.patch(f"/api/v1/shots/{second['id']}", json={"continuity": second_continuity}).status_code == 200
+        proofread = client.get("/api/v1/projects/demo/proofread").json()
+        assert proofread["state_conflicts"] >= 1
+        assert any(item["action"] == "fix_story_state" and item["severity"] == "blocking" for item in proofread["findings"])
+        blocked = client.post("/api/v1/projects/demo/automation/start", json={"episode": 1, "image_provider": "mock", "video_provider": "mock"})
+        assert blocked.status_code == 409
+        assert "故事状态图" in blocked.json()["detail"]
 def test_story_bible_episode_lock_and_quality_repair():
     with TestClient(app) as client:
         entity = client.post("/api/v1/projects/demo/bible", json={
@@ -364,7 +448,8 @@ def test_previz_transition_and_episode_automation():
             "right": {"shot_number": "006", "scene_key": "temple", "action": "斧头下落", "action_phase": "middle", "screen_direction": "right", "lighting": "night"},
             "narrative_relation": "same_action", "preferred_engine": "auto", "target_fps": 24
         }).json()
-        assert transition["method"] == "vace_context_bridge"
+        assert transition["method"] == "tail_frame_dependency"
+        assert "不插入额外桥接时长" in transition["reason"]
         assert transition["parameters"]["context_frames_each_side"] % 4 == 0
         assert transition["parameters"]["generated_bridge_frames"] % 4 == 1
         plan = client.post("/api/v1/projects/demo/automation/plan", json={"episode": 1, "mode": "quality"}).json()

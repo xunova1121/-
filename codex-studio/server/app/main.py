@@ -15,10 +15,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from .adapters import registry
 from .config import project_media_dir, render_dir, settings
 from .database import connect, initialize_database
-from .schemas import AssetCreate, AssetImportRequest, AssetUpdate, AutomationStartRequest, BibleEntityCreate, ContinuityContractRequest, ContinuityRequest, EpisodeAutomationRequest, EpisodeLockRequest, GatewayRequest, PipelineUpdate, PreflightRequest, Project, ProjectCreate, ProjectUpdate, ProviderConfigUpdate, QualityReviewRequest, RouteUpdate, SceneLayoutRequest, ScriptUpsert, Shot, ShotCreate, ShotGenerationRequest, ShotUpdate, StoryboardGenerateRequest, TaskCreate, TimelineClipCreate, TimelineClipUpdate, TimelineExportRequest, TimelineReorderRequest, TransitionPlanRequest, TransitionRenderRequest
+from .schemas import AssetCreate, AssetImportRequest, AssetUpdate, AutomationStartRequest, BibleEntityCreate, ContinuityContractRequest, ContinuityRequest, DirectorBuildRequest, EpisodeAutomationRequest, EpisodeLockRequest, GatewayRequest, PipelineUpdate, PreflightRequest, Project, ProjectCreate, ProjectUpdate, ProviderConfigUpdate, QualityReviewRequest, RouteUpdate, SceneLayoutRequest, ScriptUpsert, Shot, ShotCreate, ShotGenerationRequest, ShotUpdate, StoryboardGenerateRequest, TaskCreate, TimelineClipCreate, TimelineClipUpdate, TimelineExportRequest, TimelineReorderRequest, TransitionPlanRequest, TransitionRenderRequest
 from .continuity import analyze_pair
 from .pipeline import stage_catalog
-from .providers import CAPABILITIES, providers_for, public_catalog
+from .providers import CAPABILITIES, known_provider, providers_for, public_catalog, supports
 from .preflight import run_preflight
 from .provider_config import all_provider_statuses, delete_provider_config, save_provider_config
 from .quality import repair_plan, weighted_score
@@ -30,6 +30,8 @@ from .task_runner import TaskRunner, serialize_task
 from .media import MediaError, capabilities as media_capabilities, probe_media
 from .script_engine import extract_characters, parse_scenes, scene_to_shots
 from .production import bible_context, serialize_run, start_automation
+from .director import DIRECTOR_SYSTEM, director_prompt, extract_json_object, normalize_design
+from .story_logic import persist_snapshots, recompute_episode
 
 
 @asynccontextmanager
@@ -44,14 +46,14 @@ async def lifespan(_: FastAPI):
         await worker
 
 
-app = FastAPI(title=settings.app_name, version="1.1.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.2.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost", "http://127.0.0.1"], allow_methods=["*"], allow_headers=["*"])
 PREFIX = settings.api_prefix
 
 
 @app.get(f"{PREFIX}/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "1.1.0", "instance_id": os.getenv("AI_STUDIO_INSTANCE_ID", "external")}
+    return {"status": "ok", "version": "1.2.0", "instance_id": os.getenv("AI_STUDIO_INSTANCE_ID", "external")}
 
 
 @app.get(f"{PREFIX}/providers")
@@ -141,7 +143,7 @@ def delete_project(project_id: str):
         if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
             raise HTTPException(404, "Project not found")
         db.execute("DELETE FROM shot_assets WHERE shot_id IN (SELECT id FROM shots WHERE project_id=?)", (project_id,))
-        for table in ("episode_scripts", "scenes", "shots", "assets", "timeline_clips", "tasks", "automation_runs", "pipeline_runs", "bible_entities", "episode_locks", "continuity_contracts", "quality_reviews", "scene_layouts", "transition_plans"):
+        for table in ("episode_scripts", "scenes", "shots", "shot_state_snapshots", "assets", "timeline_clips", "tasks", "automation_runs", "pipeline_runs", "bible_entities", "episode_locks", "continuity_contracts", "quality_reviews", "scene_layouts", "transition_plans"):
             db.execute(f"DELETE FROM {table} WHERE project_id=?", (project_id,))
         db.execute("DELETE FROM projects WHERE id=?", (project_id,))
 
@@ -251,6 +253,80 @@ def generate_storyboard(project_id: str, episode: int, payload: StoryboardGenera
     return {"project_id": project_id, "episode": episode, "shot_count": created, "replaced": bool(existing)}
 
 
+@app.post(f"{PREFIX}/projects/{{project_id}}/episodes/{{episode}}/director/generate")
+async def generate_director_package(project_id: str, episode: int, payload: DirectorBuildRequest):
+    """Generate and atomically persist the full storyboard, Bible and state graph."""
+    with connect() as db:
+        script = db.execute(
+            "SELECT source_text FROM episode_scripts WHERE project_id=? AND episode=?",
+            (project_id, episode),
+        ).fetchone()
+        if not script or not str(script["source_text"] or "").strip():
+            raise HTTPException(409, "请先保存完整剧本")
+        existing = db.execute("SELECT COUNT(*) FROM shots WHERE project_id=? AND episode=?", (project_id, episode)).fetchone()[0]
+        if existing and not payload.replace_existing:
+            raise HTTPException(409, "本集已经存在分镜")
+    try:
+        adapter = registry.resolve(payload.provider)
+        result = await adapter.invoke(director_prompt(script["source_text"], episode), {
+            "task_type": "llm", "system_prompt": DIRECTOR_SYSTEM, "temperature": 0.15, "max_tokens": 16000,
+            "project_id": project_id, "episode": episode,
+        })
+        design = normalize_design(extract_json_object(str(result.get("result") or "")))
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+    state = "frozen" if payload.freeze_bible else "draft"
+    shot_ids: list[int] = []
+    with connect() as db:
+        if payload.replace_existing:
+            old_ids = [row[0] for row in db.execute("SELECT id FROM shots WHERE project_id=? AND episode=?", (project_id, episode)).fetchall()]
+            if old_ids:
+                marks = ",".join("?" for _ in old_ids)
+                db.execute(f"DELETE FROM shot_assets WHERE shot_id IN ({marks})", old_ids)
+            db.execute("DELETE FROM shot_state_snapshots WHERE project_id=? AND episode=?", (project_id, episode))
+            db.execute("DELETE FROM shots WHERE project_id=? AND episode=?", (project_id, episode))
+            db.execute("DELETE FROM scenes WHERE project_id=? AND episode=?", (project_id, episode))
+        scene_ids: dict[int, int] = {}
+        for scene in design["scenes"]:
+            cursor = db.execute(
+                "INSERT INTO scenes(project_id,episode,sequence,heading,location,time_of_day,summary,source_text) VALUES(?,?,?,?,?,?,?,?)",
+                (project_id, episode, scene["index"], scene["heading"], scene["location"], scene["time_of_day"], scene["summary"], ""),
+            )
+            scene_ids[int(scene["index"])] = int(cursor.lastrowid)
+        for shot in design["shots"]:
+            cursor = db.execute(
+                "INSERT INTO shots(project_id,episode,scene_id,sequence,number,title,description,duration,status,color,prompt,shot_type,camera,action,dialogue,characters_json,continuity_json,value_score,model_requirement_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (project_id, episode, scene_ids[int(shot["scene_index"])], shot["sequence"], shot["number"], shot["title"], shot["description"], shot["duration"], shot["status"], shot["color"], shot["prompt"], shot["shot_type"], shot["camera"], shot["action"], shot["dialogue"], json.dumps(shot["characters"], ensure_ascii=False), json.dumps(shot["continuity"], ensure_ascii=False), shot["value_score"], json.dumps(shot["model_requirement"], ensure_ascii=False)),
+            )
+            shot_ids.append(int(cursor.lastrowid))
+        findings = persist_snapshots(db, project_id, episode, design["shots"], shot_ids)
+        bible_count = 0
+        singular = {"characters": "character", "locations": "location", "props": "prop", "world": "world", "style": "style"}
+        for group, entity_type in singular.items():
+            for entity in design["bible"].get(group, []):
+                name = str(entity.get("name") or entity_type).strip()
+                entity_key = hashlib.sha1(f"{entity_type}:{name}".encode("utf-8")).hexdigest()[:20]
+                version = int(db.execute("SELECT COALESCE(MAX(version),0)+1 FROM bible_entities WHERE project_id=? AND entity_type=? AND entity_key=?", (project_id, entity_type, entity_key)).fetchone()[0])
+                mark = fingerprint(entity, [])
+                db.execute(
+                    "INSERT INTO bible_entities(project_id,entity_type,entity_key,name,version,state,data_json,reference_assets_json,fingerprint) VALUES(?,?,?,?,?,?,?,?,?)",
+                    (project_id, entity_type, entity_key, name, version, state, json.dumps(entity, ensure_ascii=False), "[]", mark),
+                )
+                bible_count += 1
+        db.execute("UPDATE episode_scripts SET parse_status='director_storyboard',updated_at=CURRENT_TIMESTAMP WHERE project_id=? AND episode=?", (project_id, episode))
+    warnings = list(design["warnings"])
+    warnings.extend(f"镜头 {item['shot_number']} 存在未解释的状态跳变：{item['path']}" for item in findings)
+    return {
+        "project_id": project_id, "episode": episode, "provider": result.get("provider", payload.provider),
+        "model": result.get("model", ""), "logline": design["logline"], "scene_count": len(design["scenes"]),
+        "shot_count": len(design["shots"]), "bible_count": bible_count, "blocking_state_conflicts": len(findings),
+        "warnings": warnings, "replaced": bool(existing),
+    }
+
+
 @app.get(f"{PREFIX}/projects/{{project_id}}/shots", response_model=list[Shot])
 def list_shots(project_id: str):
     with connect() as db:
@@ -268,6 +344,7 @@ def create_shot(project_id: str, payload: ShotCreate):
             "INSERT INTO shots(project_id,episode,scene_id,sequence,number,title,description,duration,status,color,prompt,shot_type,camera,action,dialogue,characters_json,continuity_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (project_id, payload.episode, payload.scene_id, payload.sequence, payload.number, payload.title, payload.description, payload.duration, payload.status, payload.color, payload.prompt, payload.shot_type, payload.camera, payload.action, payload.dialogue, json.dumps(payload.characters, ensure_ascii=False), json.dumps(payload.continuity, ensure_ascii=False)),
         )
+        recompute_episode(db, project_id, payload.episode)
     return {"id": cursor.lastrowid, **payload.model_dump()}
 
 
@@ -282,9 +359,11 @@ def update_shot(shot_id: int, payload: ShotUpdate):
         changes["continuity_json"] = json.dumps(changes.pop("continuity"), ensure_ascii=False)
     columns = ",".join(f"{key}=?" for key in changes)
     with connect() as db:
-        cursor = db.execute(f"UPDATE shots SET {columns} WHERE id=?", (*changes.values(), shot_id))
-        if not cursor.rowcount:
+        current = db.execute("SELECT project_id,episode FROM shots WHERE id=?", (shot_id,)).fetchone()
+        if not current:
             raise HTTPException(404, "Shot not found")
+        cursor = db.execute(f"UPDATE shots SET {columns} WHERE id=?", (*changes.values(), shot_id))
+        recompute_episode(db, current["project_id"], int(current["episode"]))
     return {"id": shot_id, **changes}
 
 
@@ -373,6 +452,9 @@ def delete_asset(asset_id: int, delete_file: bool = False):
 
 @app.post(f"{PREFIX}/projects/{{project_id}}/shots/generate", status_code=202)
 def generate_shot_media(project_id: str, payload: ShotGenerationRequest):
+    capability = {"image": "t2i", "video": "i2v", "voice": "tts"}[payload.task_type]
+    if (known_provider(payload.provider) and not supports(payload.provider, capability)) or (not known_provider(payload.provider) and not registry.has(payload.provider)):
+        raise HTTPException(422, f"{payload.provider} 当前没有已维护的 {capability} 适配器")
     with connect() as db:
         shot = db.execute("SELECT * FROM shots WHERE id=? AND project_id=?", (payload.shot_id, project_id)).fetchone()
         if not shot: raise HTTPException(404, "Shot not found")
@@ -683,6 +765,14 @@ def start_episode_automation(project_id: str, payload: AutomationStartRequest):
     with connect() as db:
         if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
             raise HTTPException(404, "Project not found")
+    checks = [(payload.image_provider, "t2i"), (payload.video_provider, "i2v")]
+    if payload.voice_provider:
+        checks.append((payload.voice_provider, "tts"))
+    if payload.quality_provider:
+        checks.append((payload.quality_provider, "vision"))
+    unsupported = [f"{provider}:{capability}" for provider, capability in checks if (known_provider(provider) and not supports(provider, capability)) or (not known_provider(provider) and not registry.has(provider))]
+    if unsupported:
+        raise HTTPException(422, "未实现或已停止维护的模型能力：" + "、".join(unsupported))
     try:
         return start_automation(project_id, payload.model_dump())
     except RuntimeError as exc:
@@ -761,6 +851,7 @@ def proofread(project_id: str):
             "SELECT number,scene_id,action,characters_json,continuity_json FROM shots WHERE project_id=? ORDER BY episode,sequence,id",
             (project_id,),
         ).fetchall()
+        state_rows = db.execute("SELECT s.number,ss.conflicts_json FROM shot_state_snapshots ss JOIN shots s ON s.id=ss.shot_id WHERE ss.project_id=? ORDER BY s.episode,s.sequence,s.id", (project_id,)).fetchall()
     shots = []
     for row in rows:
         continuity = json.loads(row["continuity_json"] or "{}")
@@ -775,5 +866,11 @@ def proofread(project_id: str):
         for item in result["findings"]:
             findings.append({"shot": f"{previous['number']}→{current['number']}", "message": item["message"],
                              "action": "adjust_axis" if item["type"] == "axis" else "adjust_lighting", "severity": item["severity"]})
+    state_conflicts = 0
+    for row in state_rows:
+        for item in json.loads(row["conflicts_json"] or "[]"):
+            state_conflicts += 1
+            findings.append({"shot": str(row["number"]), "message": f"故事状态跳变：{item.get('path')}，应为 {item.get('expected')}，实际为 {item.get('actual')}", "action": "fix_story_state", "severity": "blocking"})
     score = round(sum(scores) / len(scores)) if scores else (100 if shots else 0)
-    return {"project_id": project_id, "score": score, "shot_count": len(shots), "findings": findings}
+    score = max(0, score - state_conflicts * 20)
+    return {"project_id": project_id, "score": score, "shot_count": len(shots), "state_conflicts": state_conflicts, "findings": findings}

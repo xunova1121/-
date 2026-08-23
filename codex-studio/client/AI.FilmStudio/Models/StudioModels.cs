@@ -21,8 +21,23 @@ public sealed class Shot
     [JsonPropertyName("action")] public string Action { get; set; } = "";
     [JsonPropertyName("dialogue")] public string Dialogue { get; set; } = "";
     [JsonPropertyName("characters")] public List<string> Characters { get; set; } = [];
+    [JsonPropertyName("continuity")] public Dictionary<string, JsonElement> Continuity { get; set; } = [];
+    [JsonIgnore] public string Link { get => ReadText("link", "cut"); set => WriteText("link", value); }
+    [JsonIgnore] public string ScreenDirection { get => ReadText("screen_direction", "unknown"); set => WriteText("screen_direction", value); }
+    [JsonIgnore] public string ActionPhase { get => ReadText("action_phase", "static"); set => WriteText("action_phase", value); }
+    [JsonIgnore] public string StateBeforeText { get => ReadJson("state_before"); set => WriteJson("state_before", value); }
+    [JsonIgnore] public string StateAfterText { get => ReadJson("state_after"); set => WriteJson("state_after", value); }
     [JsonIgnore] public string CharacterText => string.Join("、", Characters);
     [JsonIgnore] public string Display => $"{Number} · {Title}";
+
+    private string ReadText(string key, string fallback) => Continuity.TryGetValue(key, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? fallback : fallback;
+    private void WriteText(string key, string value) => Continuity[key] = JsonSerializer.SerializeToElement(value ?? "");
+    private string ReadJson(string key) => Continuity.TryGetValue(key, out var value) && value.ValueKind == JsonValueKind.Object ? value.GetRawText() : "{}";
+    private void WriteJson(string key, string value)
+    {
+        try { using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(value) ? "{}" : value); Continuity[key] = document.RootElement.Clone(); }
+        catch (JsonException) { }
+    }
 }
 
 public sealed class ScriptDocument
@@ -55,6 +70,18 @@ public sealed class StoryboardGenerateResult
 {
     [JsonPropertyName("shot_count")] public int ShotCount { get; set; }
     [JsonPropertyName("replaced")] public bool Replaced { get; set; }
+}
+
+public sealed class DirectorBuildResult
+{
+    [JsonPropertyName("provider")] public string Provider { get; set; } = "";
+    [JsonPropertyName("model")] public string Model { get; set; } = "";
+    [JsonPropertyName("logline")] public string Logline { get; set; } = "";
+    [JsonPropertyName("scene_count")] public int SceneCount { get; set; }
+    [JsonPropertyName("shot_count")] public int ShotCount { get; set; }
+    [JsonPropertyName("bible_count")] public int BibleCount { get; set; }
+    [JsonPropertyName("blocking_state_conflicts")] public int BlockingStateConflicts { get; set; }
+    [JsonPropertyName("warnings")] public List<string> Warnings { get; set; } = [];
 }
 
 public sealed class ProjectSummary
@@ -111,6 +138,7 @@ public sealed class ProofreadResult
 {
     [JsonPropertyName("score")] public int Score { get; set; }
     [JsonPropertyName("shot_count")] public int ShotCount { get; set; }
+    [JsonPropertyName("state_conflicts")] public int StateConflicts { get; set; }
     [JsonPropertyName("findings")] public List<ContinuityFinding> Findings { get; set; } = [];
 }
 public sealed class ContinuityFinding
@@ -119,7 +147,7 @@ public sealed class ContinuityFinding
     [JsonPropertyName("message")] public string Message { get; set; } = "";
     [JsonPropertyName("action")] public string Action { get; set; } = "";
     [JsonPropertyName("severity")] public string Severity { get; set; } = "warning";
-    [JsonIgnore] public string ActionText => Action switch { "adjust_axis" => "调整机位/运动方向", "adjust_lighting" => "统一光照状态", _ => "人工复核" };
+    [JsonIgnore] public string ActionText => Action switch { "adjust_axis" => "调整机位/运动方向", "adjust_lighting" => "统一光照状态", "fix_story_state" => "修正状态前/状态后 JSON", _ => "人工复核" };
 }
 public sealed record Episode(string Title, string Duration, bool IsActive = false);
 public sealed record Finding(string Shot, string Message, string Action);

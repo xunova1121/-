@@ -46,7 +46,10 @@ public partial class StoryboardWindow : Window
         {
             StatusText.Text = $"正在保存 {_shots.Count} 个镜头…";
             foreach (var shot in _shots) await _api.UpdateShotAsync(shot);
-            StatusText.Text = $"已保存 {_shots.Count} 个镜头。关闭再打开仍会保留。";
+            var proofread = await _api.ProofreadAsync();
+            StatusText.Text = proofread.StateConflicts == 0
+                ? $"已保存 {_shots.Count} 个镜头，故事状态图重新计算通过。"
+                : $"已保存；状态图仍有 {proofread.StateConflicts} 个阻断项，请打开“连续性审校”定位。";
         }
         catch (Exception ex) { StatusText.Text = $"保存失败：{ex.Message}"; }
     }

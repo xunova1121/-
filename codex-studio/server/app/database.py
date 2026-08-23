@@ -33,7 +33,15 @@ CREATE TABLE IF NOT EXISTS shots (
     shot_type TEXT NOT NULL DEFAULT '中景', camera TEXT NOT NULL DEFAULT '固定',
     action TEXT NOT NULL DEFAULT '', dialogue TEXT NOT NULL DEFAULT '',
     characters_json TEXT NOT NULL DEFAULT '[]', continuity_json TEXT NOT NULL DEFAULT '{}',
+    value_score INTEGER NOT NULL DEFAULT 50, model_requirement_json TEXT NOT NULL DEFAULT '{}',
     FOREIGN KEY(project_id) REFERENCES projects(id)
+);
+CREATE TABLE IF NOT EXISTS shot_state_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, episode INTEGER NOT NULL,
+    shot_id INTEGER NOT NULL, schema_version TEXT NOT NULL DEFAULT '1.0',
+    state_before_json TEXT NOT NULL DEFAULT '{}', state_after_json TEXT NOT NULL DEFAULT '{}',
+    conflicts_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(project_id, episode, shot_id)
 );
 CREATE TABLE IF NOT EXISTS assets (
     id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, asset_type TEXT NOT NULL,
@@ -158,6 +166,8 @@ SHOT_MIGRATIONS: dict[str, str] = {
     "dialogue": "TEXT NOT NULL DEFAULT ''",
     "characters_json": "TEXT NOT NULL DEFAULT '[]'",
     "continuity_json": "TEXT NOT NULL DEFAULT '{}'",
+    "value_score": "INTEGER NOT NULL DEFAULT 50",
+    "model_requirement_json": "TEXT NOT NULL DEFAULT '{}'",
 }
 
 ASSET_MIGRATIONS: dict[str, str] = {
@@ -185,6 +195,7 @@ def _migrate(connection: sqlite3.Connection) -> None:
         if name not in shot_columns:
             connection.execute(f"ALTER TABLE shots ADD COLUMN {name} {definition}")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_shots_episode ON shots(project_id, episode, sequence, id)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_shot_states_episode ON shot_state_snapshots(project_id, episode, shot_id)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_scenes_episode ON scenes(project_id, episode, sequence)")
     asset_columns = {row[1] for row in connection.execute("PRAGMA table_info(assets)")}
     for name, definition in ASSET_MIGRATIONS.items():

@@ -23,7 +23,7 @@ def capabilities() -> dict[str, Any]:
         "ffmpeg_path": ffmpeg,
         "ffprobe_path": ffprobe,
         "local_transition_methods": sorted(LOCAL_METHODS),
-        "ai_transition_methods": ["rife_interpolate", "first_last_bridge", "vace_context_bridge"],
+        "production_continuity_method": "tail_frame_dependency",
     }
 
 
@@ -130,6 +130,25 @@ def extract_boundary_frames(left_path: str, right_path: str, project_id: str, bo
     _run([ffmpeg, "-hide_banner", "-y", "-ss", f"{left_at:.3f}", "-i", left["path"], "-frames:v", "1", str(left_frame)], 60)
     _run([ffmpeg, "-hide_banner", "-y", "-ss", "0", "-i", right["path"], "-frames:v", "1", str(right_frame)], 60)
     return str(left_frame), str(right_frame)
+
+
+def extract_review_frames(video_path: str, project_id: str, boundary_key: str, count: int = 3) -> list[str]:
+    ffmpeg = locate_ffmpeg()
+    if not ffmpeg:
+        raise MediaError("未找到 FFmpeg，无法提取质检帧")
+    info = probe_media(video_path)
+    duration = max(0.1, float(info["duration"]))
+    count = max(1, min(5, int(count)))
+    points = [0.05] if count == 1 else [min(duration - 0.02, 0.05 + index * max(0.0, duration - 0.1) / (count - 1)) for index in range(count)]
+    folder = render_dir() / "reviews" / "".join(ch for ch in project_id if ch.isalnum() or ch in "-_")
+    folder.mkdir(parents=True, exist_ok=True)
+    safe = "".join(ch for ch in boundary_key if ch.isalnum() or ch in "-_") or uuid.uuid4().hex[:8]
+    paths: list[str] = []
+    for index, point in enumerate(points):
+        target = folder / f"{safe}-{index + 1}.png"
+        _run([ffmpeg, "-hide_banner", "-y", "-ss", f"{max(0.0, point):.3f}", "-i", info["path"], "-frames:v", "1", str(target)], 60)
+        paths.append(str(target))
+    return paths
 
 
 def _safe_output_name(name: str) -> str:

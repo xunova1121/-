@@ -7,7 +7,7 @@ from typing import Any
 
 from .automation import STAGE_POLICIES
 from .config import project_media_dir, settings
-from .media import MediaError, extract_boundary_frames, probe_media
+from .media import MediaError, extract_boundary_frames, extract_review_frames, probe_media
 
 
 def _db() -> sqlite3.Connection:
@@ -72,6 +72,12 @@ def start_automation(project_id: str, config: dict[str, Any]) -> dict[str, Any]:
         shots = _shot_rows(db, project_id, episode)
         if not shots:
             raise RuntimeError("请先完成剧本解析并生成全量分镜")
+        conflicts = db.execute(
+            "SELECT COUNT(*) FROM shot_state_snapshots WHERE project_id=? AND episode=? AND conflicts_json<>'[]'",
+            (project_id, episode),
+        ).fetchone()[0]
+        if conflicts:
+            raise RuntimeError(f"故事状态图存在 {conflicts} 个阻断镜头，请先在分镜工作台修正服装、伤势、道具或环境跳变")
         if config.get("auto_freeze_bible", True):
             latest_ids = [row["id"] for row in _latest_bible(db, project_id)]
             if latest_ids:
@@ -86,7 +92,7 @@ def start_automation(project_id: str, config: dict[str, Any]) -> dict[str, Any]:
             _queue_keyframes(db, run_id, project_id, shots, config, "keyframes")
             stage = "keyframes"
         else:
-            _queue_videos(db, run_id, project_id, shots, config)
+            _queue_video_wave(db, run_id, project_id, shots, config)
             stage = "videos"
         db.execute("UPDATE automation_runs SET stage=?,progress=5,updated_at=CURRENT_TIMESTAMP WHERE id=?", (stage, run_id))
     return {"id": run_id, "project_id": project_id, "episode": episode, "status": "running", "stage": stage, "shot_count": len(shots)}
@@ -99,10 +105,14 @@ def _queue_keyframes(db: sqlite3.Connection, run_id: int, project_id: str, shots
         memory, references = bible_context(db, project_id, shot)
         notes = list((repair_notes or {}).get(int(shot["id"]), []))
         repair = f"\n\n【上一版质检失败，必须逐项修复】{json.dumps(notes, ensure_ascii=False)}" if notes else ""
+        value_score = int(shot["value_score"] or 50)
+        requirement = json.loads(shot["model_requirement_json"] or "{}")
+        tier = str(requirement.get("tier") or ("premium" if value_score >= 80 else "standard" if value_score >= 45 else "economy"))
         payload = {"project_id": project_id, "episode": shot["episode"], "shot_id": shot["id"], "shot_number": shot["number"],
                    "prompt": (shot["prompt"] or shot["description"]) + memory + repair, "model": config.get("image_model"), "reference_paths": references,
-                   "options": {"size": "1024x1536" if int(config.get("height", 1080)) > int(config.get("width", 1920)) else "1536x1024", "quality": "high"}}
-        _queue(db, run_id, project_id, "image", config["image_provider"], stage, payload, 80)
+                   "options": {"size": "1024x1536" if int(config.get("height", 1080)) > int(config.get("width", 1920)) else "1536x1024", "quality": "high" if tier == "premium" or config.get("mode") == "quality" else "medium"},
+                   "routing": {"value_score": value_score, "tier": tier, "reason": "shot_value_score"}}
+        _queue(db, run_id, project_id, "image", config["image_provider"], stage, payload, 70 + value_score // 4)
 
 
 def _latest_shot_asset(db: sqlite3.Connection, shot_id: int, role: str) -> sqlite3.Row | None:
@@ -127,17 +137,116 @@ def _queue_reviews(db: sqlite3.Connection, run_id: int, project_id: str, shots: 
     return count
 
 
-def _queue_videos(db: sqlite3.Connection, run_id: int, project_id: str, shots: list[sqlite3.Row], config: dict[str, Any]) -> None:
+def _queued_shot_ids(db: sqlite3.Connection, run_id: int, stage: str) -> set[int]:
+    result: set[int] = set()
+    for row in db.execute("SELECT payload_json FROM tasks WHERE automation_run_id=? AND stage=?", (run_id, stage)).fetchall():
+        payload = json.loads(row["payload_json"] or "{}")
+        if payload.get("shot_id") is not None:
+            result.add(int(payload["shot_id"]))
+    return result
+
+
+def _queue_video_wave(db: sqlite3.Connection, run_id: int, project_id: str, shots: list[sqlite3.Row], config: dict[str, Any], stage: str = "videos", only_ids: set[int] | None = None, repair_notes: dict[int, list[Any]] | None = None) -> int:
+    queued_ids = _queued_shot_ids(db, run_id, stage)
+    count = 0
+    previous: sqlite3.Row | None = None
     for shot in shots:
+        shot_id = int(shot["id"])
+        if shot_id in queued_ids or (only_ids is not None and shot_id not in only_ids):
+            previous = shot
+            continue
         memory, references = bible_context(db, project_id, shot)
         keyframe = _latest_shot_asset(db, int(shot["id"]), "image")
         if keyframe and keyframe["local_path"]:
             references = [keyframe["local_path"]]
+        continuity = json.loads(shot["continuity_json"] or "{}")
+        link = str(continuity.get("link") or "cut")
+        dependency: dict[str, Any] = {"relation": link}
+        if link == "continuous" and previous is not None:
+            previous_video = _latest_shot_asset(db, int(previous["id"]), "video")
+            if not previous_video:
+                previous = shot
+                continue
+            try:
+                tail_frame, _ = extract_boundary_frames(previous_video["local_path"], previous_video["local_path"], project_id, f"tail-{previous['number']}-{shot['number']}")
+            except MediaError:
+                previous = shot
+                continue
+            references = [tail_frame]
+            dependency.update({"from_shot_id": int(previous["id"]), "from_shot_number": previous["number"], "tail_frame": tail_frame})
         duration = max(3, min(12, round(_duration_seconds(shot["duration"]))))
+        value_score = int(shot["value_score"] or 50)
+        requirement = json.loads(shot["model_requirement_json"] or "{}")
+        tier = str(requirement.get("tier") or ("premium" if value_score >= 80 else "standard" if value_score >= 45 else "economy"))
+        resolution = "1080P" if tier == "premium" or config.get("mode") == "quality" else "720P"
+        notes = list((repair_notes or {}).get(shot_id, []))
+        repair = f"\n\n【视频质检返工】{json.dumps(notes, ensure_ascii=False)}" if notes else ""
         payload = {"project_id": project_id, "episode": shot["episode"], "shot_id": shot["id"], "shot_number": shot["number"],
-                   "prompt": (shot["prompt"] or shot["description"]) + memory + f"\n动作连续要求：{shot['action']}", "model": config.get("video_model"),
-                   "reference_paths": references[:1], "options": {"duration": duration, "seconds": duration, "resolution": "1080P" if int(config.get("height", 1080)) >= 1080 else "720P", "size": f"{config.get('width',1920)}x{config.get('height',1080)}", "prompt_extend": True, "watermark": False}}
-        _queue(db, run_id, project_id, "video", config["video_provider"], "videos", payload, 60)
+                   "prompt": (shot["prompt"] or shot["description"]) + memory + f"\n动作连续要求：{shot['action']}" + repair, "model": config.get("video_model"),
+                   "reference_paths": references[:1], "options": {"duration": duration, "seconds": duration, "resolution": resolution, "size": f"{config.get('width',1920)}x{config.get('height',1080)}", "prompt_extend": True, "watermark": False},
+                   "routing": {"value_score": value_score, "tier": tier, "resolution": resolution, "reason": "shot_value_score_and_requirement"}}
+        payload["dependency"] = dependency
+        _queue(db, run_id, project_id, "video", config["video_provider"], stage, payload, 60 + value_score // 5)
+        count += 1
+        previous = shot
+    return count
+
+
+def _queue_video_reviews(db: sqlite3.Connection, run_id: int, project_id: str, shots: list[sqlite3.Row], config: dict[str, Any], stage: str) -> int:
+    provider = config.get("quality_provider")
+    if not provider:
+        return 0
+    count = 0
+    for shot in shots:
+        video = _latest_shot_asset(db, int(shot["id"]), "video")
+        if not video:
+            continue
+        try:
+            frames = extract_review_frames(video["local_path"], project_id, f"run-{run_id}-{stage}-{shot['number']}", 3)
+        except MediaError:
+            continue
+        memory, _ = bible_context(db, project_id, shot)
+        payload = {"project_id": project_id, "episode": shot["episode"], "shot_id": shot["id"], "shot_number": shot["number"],
+                   "prompt": f"逐帧审核本镜头的身份、服装、场景、道具、动作相位、画质和首尾连续性。分镜动作：{shot['action']}。{memory}",
+                   "reference_paths": frames, "options": {"threshold": STAGE_POLICIES[config.get('mode', 'balanced')]["consistency_threshold"], "review_kind": "video"}}
+        _queue(db, run_id, project_id, "vision_review", provider, stage, payload, 72)
+        count += 1
+    return count
+
+
+def _review_failures(tasks: list[sqlite3.Row], threshold: int) -> tuple[set[int], dict[int, list[Any]]]:
+    low: set[int] = set()
+    notes: dict[int, list[Any]] = {}
+    for row in tasks:
+        result, payload = json.loads(row["result_json"] or "{}"), json.loads(row["payload_json"] or "{}")
+        if int(result.get("score", 0)) < threshold and payload.get("shot_id") is not None:
+            shot_id = int(payload["shot_id"])
+            low.add(shot_id)
+            notes[shot_id] = list(result.get("findings") or [])
+    return low, notes
+
+
+def _queue_final_review(db: sqlite3.Connection, run_id: int, project_id: str, output: str, config: dict[str, Any]) -> int:
+    provider = config.get("quality_provider")
+    if not provider or not output:
+        return 0
+    try:
+        frames = extract_review_frames(output, project_id, f"run-{run_id}-final", 3)
+    except MediaError:
+        return 0
+    payload = {"project_id": project_id, "episode": int(config.get("episode", 1)), "shot_number": "FINAL",
+               "prompt": "审核最终成片采样帧：人物与场景是否稳定、镜头顺序是否叙事连贯、字幕是否遮挡主体、画面是否有明显生成瑕疵。",
+               "reference_paths": frames, "options": {"threshold": STAGE_POLICIES[config.get('mode', 'balanced')]["consistency_threshold"], "review_kind": "final"}}
+    _queue(db, run_id, project_id, "vision_review", provider, "final_review", payload, 105)
+    return 1
+
+
+def _after_video(db: sqlite3.Connection, run_id: int, project_id: str, shots: list[sqlite3.Row], config: dict[str, Any]) -> tuple[str, int]:
+    count = _queue_voices(db, run_id, project_id, shots, config)
+    if count:
+        return "voice", 75
+    _assemble(db, run_id, project_id, shots, config)
+    return "export", 86
 
 
 def _queue_voices(db: sqlite3.Connection, run_id: int, project_id: str, shots: list[sqlite3.Row], config: dict[str, Any]) -> int:
@@ -163,29 +272,6 @@ def _queue_voices(db: sqlite3.Connection, run_id: int, project_id: str, shots: l
     return count
 
 
-def _queue_bridges(db: sqlite3.Connection, run_id: int, project_id: str, shots: list[sqlite3.Row], config: dict[str, Any]) -> int:
-    if not config.get("generate_bridges", True) or config.get("video_provider") != "dashscope":
-        return 0
-    count = 0
-    for left, right in zip(shots, shots[1:]):
-        if not left["scene_id"] or left["scene_id"] != right["scene_id"]:
-            continue
-        left_asset = _latest_shot_asset(db, int(left["id"]), "video")
-        right_asset = _latest_shot_asset(db, int(right["id"]), "video")
-        if not left_asset or not right_asset:
-            continue
-        try:
-            first, last = extract_boundary_frames(left_asset["local_path"], right_asset["local_path"], project_id, f"{left['number']}-{right['number']}")
-        except MediaError:
-            continue
-        prompt = f"生成连接镜头 {left['number']} 与 {right['number']} 的短转场。上一镜结束动作：{left['action']}。下一镜开始动作：{right['action']}。保持同一人物、服装、场景、光照和运动方向，禁止新增人物或改变构图关系。"
-        payload = {"project_id": project_id, "episode": left["episode"], "shot_number": f"{left['number']}→{right['number']}", "bridge_after_shot_id": left["id"], "bridge_before_shot_id": right["id"],
-                   "prompt": prompt, "model": config.get("video_model"), "reference_paths": [first, last], "options": {"duration": 5, "resolution": "720P", "prompt_extend": True, "watermark": False}}
-        _queue(db, run_id, project_id, "video", config["video_provider"], "bridges", payload, 55)
-        count += 1
-    return count
-
-
 def _duration_seconds(value: str) -> float:
     try:
         return float(str(value).lower().replace("seconds", "").replace("second", "").replace("s", "").strip())
@@ -206,12 +292,6 @@ def _assemble(db: sqlite3.Connection, run_id: int, project_id: str, shots: list[
     db.execute("DELETE FROM timeline_clips WHERE project_id=? AND episode=?", (project_id, episode))
     elapsed = 0.0
     subtitles: list[str] = []
-    bridge_rows = db.execute("SELECT result_json,payload_json FROM tasks WHERE automation_run_id=? AND stage='bridges' AND status='completed' ORDER BY id", (run_id,)).fetchall()
-    bridges: dict[int, dict[str, Any]] = {}
-    for row in bridge_rows:
-        result, payload = json.loads(row["result_json"] or "{}"), json.loads(row["payload_json"] or "{}")
-        if result.get("output_path") and payload.get("bridge_after_shot_id"):
-            bridges[int(payload["bridge_after_shot_id"])] = {"path": result["output_path"], "asset_id": result.get("asset_id"), "title": payload.get("shot_number", "AI转场")}
     position = 0
     for shot_index, shot in enumerate(shots):
         video = _latest_shot_asset(db, int(shot["id"]), "video")
@@ -221,7 +301,7 @@ def _assemble(db: sqlite3.Connection, run_id: int, project_id: str, shots: list[
             duration = float(probe_media(video["local_path"])["duration"])
         except (MediaError, OSError, ValueError):
             duration = _duration_seconds(shot["duration"])
-        transition = "dissolve" if shot_index > 0 and shot["scene_id"] == shots[shot_index - 1]["scene_id"] and int(shots[shot_index - 1]["id"]) not in bridges else "cut"
+        transition = "cut"
         db.execute("INSERT INTO timeline_clips(project_id,episode,track,position,asset_id,source_path,title,duration,transition,transition_duration,metadata_json) VALUES(?,?,'V1',?,?,?,?,?,?,0.35,?)",
                    (project_id, episode, position, video["id"], video["local_path"], f"{shot['number']} · {shot['title']}", duration, transition, json.dumps({"shot_id": shot["id"], "start_seconds": elapsed})))
         voice = _latest_shot_asset(db, int(shot["id"]), "voice")
@@ -233,14 +313,6 @@ def _assemble(db: sqlite3.Connection, run_id: int, project_id: str, shots: list[
             subtitles.extend([str(len(subtitles) // 4 + 1), f"{_srt_time(elapsed)} --> {_srt_time(elapsed + duration)}", dialogue, ""])
         elapsed += duration - (0.35 if transition == "dissolve" else 0)
         position += 1
-        bridge = bridges.get(int(shot["id"]))
-        if bridge:
-            try: bridge_duration = float(probe_media(bridge["path"])["duration"])
-            except (MediaError, OSError, ValueError): bridge_duration = 5.0
-            db.execute("INSERT INTO timeline_clips(project_id,episode,track,position,asset_id,source_path,title,duration,transition,transition_duration,metadata_json) VALUES(?,?,'V1',?,?,?,?,?,'cut',0,?)",
-                       (project_id, episode, position, bridge["asset_id"], bridge["path"], f"AI首尾帧桥接 {bridge['title']}", bridge_duration, json.dumps({"bridge_after_shot_id": shot["id"], "start_seconds": elapsed})))
-            elapsed += bridge_duration
-            position += 1
     if subtitles:
         folder = project_media_dir(project_id) / "generated"
         folder.mkdir(parents=True, exist_ok=True)
@@ -275,7 +347,7 @@ def advance_automation(run_id: int) -> None:
             if _queue_reviews(db, run_id, run["project_id"], shots, config):
                 next_stage, progress = "keyframe_review", 25
             else:
-                _queue_videos(db, run_id, run["project_id"], shots, config); next_stage, progress = "videos", 35
+                _queue_video_wave(db, run_id, run["project_id"], shots, config); next_stage, progress = "videos", 35
         elif stage == "keyframe_review":
             threshold = STAGE_POLICIES[config.get("mode", "balanced")]["consistency_threshold"]
             low: set[int] = set()
@@ -289,31 +361,59 @@ def advance_automation(run_id: int) -> None:
             if low and config.get("auto_repair", True):
                 _queue_keyframes(db, run_id, run["project_id"], shots, config, "keyframe_repairs", low, repair_notes); next_stage, progress = "keyframe_repairs", 30
             else:
-                _queue_videos(db, run_id, run["project_id"], shots, config); next_stage, progress = "videos", 35
+                _queue_video_wave(db, run_id, run["project_id"], shots, config); next_stage, progress = "videos", 35
         elif stage == "keyframe_repairs":
-            _queue_videos(db, run_id, run["project_id"], shots, config); next_stage, progress = "videos", 40
+            _queue_video_wave(db, run_id, run["project_id"], shots, config); next_stage, progress = "videos", 40
         elif stage == "videos":
-            bridges = _queue_bridges(db, run_id, run["project_id"], shots, config)
-            if bridges:
-                next_stage, progress = "bridges", 65
-                db.execute("UPDATE automation_runs SET stage=?,progress=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (next_stage, progress, run_id))
+            if _queue_video_wave(db, run_id, run["project_id"], shots, config):
+                scheduled = len(_queued_shot_ids(db, run_id, "videos"))
+                progress = 40 + round(20 * scheduled / max(1, len(shots)))
+                db.execute("UPDATE automation_runs SET progress=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (progress, run_id))
                 return
-            count = _queue_voices(db, run_id, run["project_id"], shots, config)
-            if count:
-                next_stage, progress = "voice", 72
+            if _queue_video_reviews(db, run_id, run["project_id"], shots, config, "video_review"):
+                next_stage, progress = "video_review", 63
             else:
-                _assemble(db, run_id, run["project_id"], shots, config); next_stage, progress = "export", 85
-        elif stage == "bridges":
-            count = _queue_voices(db, run_id, run["project_id"], shots, config)
-            if count:
-                next_stage, progress = "voice", 72
+                next_stage, progress = _after_video(db, run_id, run["project_id"], shots, config)
+        elif stage == "video_review":
+            threshold = STAGE_POLICIES[config.get("mode", "balanced")]["consistency_threshold"]
+            low, notes = _review_failures(tasks, threshold)
+            if low and config.get("auto_repair", True):
+                _queue_video_wave(db, run_id, run["project_id"], shots, config, "video_repairs", low, notes)
+                next_stage, progress = "video_repairs", 68
+            elif low and config.get("stop_on_blocker", True):
+                db.execute("UPDATE automation_runs SET status='review_required',stage='video_review',error_message=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (f"{len(low)} 个镜头未通过视频质检", run_id))
+                return
             else:
-                _assemble(db, run_id, run["project_id"], shots, config); next_stage, progress = "export", 85
+                next_stage, progress = _after_video(db, run_id, run["project_id"], shots, config)
+        elif stage == "video_repairs":
+            if _queue_video_reviews(db, run_id, run["project_id"], shots, config, "video_repair_review"):
+                next_stage, progress = "video_repair_review", 72
+            else:
+                next_stage, progress = _after_video(db, run_id, run["project_id"], shots, config)
+        elif stage == "video_repair_review":
+            threshold = STAGE_POLICIES[config.get("mode", "balanced")]["consistency_threshold"]
+            low, _ = _review_failures(tasks, threshold)
+            if low and config.get("stop_on_blocker", True):
+                db.execute("UPDATE automation_runs SET status='review_required',stage='video_repair_review',error_message=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (f"自动返工后仍有 {len(low)} 个镜头未达标，需要人工确认", run_id))
+                return
+            next_stage, progress = _after_video(db, run_id, run["project_id"], shots, config)
         elif stage == "voice":
             _assemble(db, run_id, run["project_id"], shots, config); next_stage, progress = "export", 85
         elif stage == "export":
             output = next((json.loads(row["result_json"] or "{}").get("output_path") for row in tasks if row["status"] == "completed"), "")
-            db.execute("UPDATE automation_runs SET status='completed',stage='completed',progress=100,checkpoint_json=?,updated_at=CURRENT_TIMESTAMP,completed_at=CURRENT_TIMESTAMP WHERE id=?", (json.dumps({"output_path": output}, ensure_ascii=False), run_id))
+            checkpoint = json.dumps({"output_path": output}, ensure_ascii=False)
+            if _queue_final_review(db, run_id, run["project_id"], output, config):
+                db.execute("UPDATE automation_runs SET stage='final_review',progress=95,checkpoint_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (checkpoint, run_id))
+                return
+            db.execute("UPDATE automation_runs SET status='completed',stage='completed',progress=100,checkpoint_json=?,updated_at=CURRENT_TIMESTAMP,completed_at=CURRENT_TIMESTAMP WHERE id=?", (checkpoint, run_id))
+            return
+        elif stage == "final_review":
+            threshold = STAGE_POLICIES[config.get("mode", "balanced")]["consistency_threshold"]
+            score = min((int(json.loads(row["result_json"] or "{}").get("score", 0)) for row in tasks), default=0)
+            if score < threshold and config.get("stop_on_blocker", True):
+                db.execute("UPDATE automation_runs SET status='review_required',progress=98,error_message=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (f"最终成片质检 {score} 分，低于 {threshold} 分阈值", run_id))
+                return
+            db.execute("UPDATE automation_runs SET status='completed',stage='completed',progress=100,updated_at=CURRENT_TIMESTAMP,completed_at=CURRENT_TIMESTAMP WHERE id=?", (run_id,))
             return
         db.execute("UPDATE automation_runs SET stage=?,progress=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (next_stage, progress, run_id))
 

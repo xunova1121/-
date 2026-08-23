@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import base64
-import asyncio
 import mimetypes
 import time
 import uuid
@@ -34,8 +33,6 @@ class OpenAICompatibleAdapter(AIAdapter):
             return await self._image(prompt, context)
         if task_type == "voice" and self.provider == "openai":
             return await self._voice(prompt, context)
-        if task_type == "video" and self.provider == "openai":
-            return await self._video(prompt, context)
         if task_type == "vision_review" and self.provider == "openai":
             return await self._vision_review(prompt, context)
         if task_type not in {"llm", "proofread"}:
@@ -141,42 +138,6 @@ class OpenAICompatibleAdapter(AIAdapter):
         mime = mimetypes.guess_type(source.name)[0] or "image/png"
         return f"data:{mime};base64,{base64.b64encode(source.read_bytes()).decode('ascii')}"
 
-    async def _video(self, prompt: str, context: dict[str, Any]) -> dict[str, Any]:
-        config = resolve_provider_config(self.provider, "i2v")
-        if not config.api_key:
-            raise RuntimeError("OpenAI 尚未配置 API 密钥")
-        options = dict(context.get("options") or {})
-        model = str(context.get("model") or options.get("model") or "sora-2")
-        body: dict[str, Any] = {"model": model, "prompt": prompt, "seconds": str(options.get("seconds", 8)), "size": options.get("size", "1280x720")}
-        reference = str(options.get("reference_path") or next(iter(context.get("reference_paths") or []), ""))
-        if reference:
-            body["input_reference"] = {"image_url": self._data_url(reference)}
-        headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}
-        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=30.0)) as client:
-            created = await client.post(f"{config.base_url.rstrip('/')}/videos", headers=headers, json=body)
-            self._ensure(created, "OpenAI 视频创建", f"{config.base_url.rstrip('/')}/videos")
-            job = created.json()
-            video_id = job["id"]
-            deadline = time.monotonic() + float(options.get("poll_timeout", 1200))
-            while time.monotonic() < deadline:
-                status_response = await client.get(f"{config.base_url.rstrip('/')}/videos/{video_id}", headers=headers)
-                self._ensure(status_response, "OpenAI 视频状态", f"{config.base_url.rstrip('/')}/videos/{video_id}")
-                job = status_response.json()
-                status = str(job.get("status") or "").lower()
-                if status in {"completed", "succeeded"}:
-                    break
-                if status in {"failed", "cancelled", "canceled"}:
-                    raise RuntimeError(f"OpenAI 视频生成失败：{job.get('error') or status}")
-                await asyncio.sleep(10)
-            else:
-                raise RuntimeError("OpenAI 视频生成轮询超时")
-            download = await client.get(f"{config.base_url.rstrip('/')}/videos/{video_id}/content", headers={"Authorization": f"Bearer {config.api_key}"})
-            self._ensure(download, "OpenAI 视频下载", f"{config.base_url.rstrip('/')}/videos/{video_id}/content")
-            data = download.content
-        output = self._destination(context, ".mp4")
-        output.write_bytes(data)
-        return {"provider": self.provider, "model": model, "provider_task_id": video_id, "status": "completed", "output_path": str(output), "output_name": output.name, "asset_type": "video", "shot_id": context.get("shot_id"), "deprecation_notice": "OpenAI Videos API is scheduled to shut down on 2026-09-24"}
-
     async def _vision_review(self, prompt: str, context: dict[str, Any]) -> dict[str, Any]:
         config = resolve_provider_config(self.provider, "vision")
         if not config.api_key:
@@ -185,7 +146,9 @@ class OpenAICompatibleAdapter(AIAdapter):
         if not references:
             raise RuntimeError("视觉质检缺少关键帧")
         model = str(context.get("model") or "gpt-4.1-mini")
-        content: list[dict[str, Any]] = [{"type": "text", "text": prompt + "\n只输出JSON对象：score(0-100)、dimensions(character,scene,prop,lighting,image)、findings数组。不得输出Markdown。"}]
+        review_kind = str((context.get("options") or {}).get("review_kind") or "keyframe")
+        dimensions = "character,scene,prop,lighting,image" if review_kind == "keyframe" else "character,scene,prop,lighting,motion,continuity,artifact"
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt + f"\n只输出JSON对象：score(0-100)、dimensions({dimensions})、findings数组。不得输出Markdown。"}]
         for path in references[:3]:
             content.append({"type": "image_url", "image_url": {"url": self._data_url(path), "detail": "high"}})
         body = {"model": model, "messages": [{"role": "user", "content": content}], "temperature": 0.1, "response_format": {"type": "json_object"}}

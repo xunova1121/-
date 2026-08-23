@@ -5,9 +5,7 @@ METHODS = {
     "match_cut": {"engine": "ffmpeg", "cost": "free"},
     "dissolve": {"engine": "ffmpeg", "cost": "free"},
     "fade_black": {"engine": "ffmpeg", "cost": "free"},
-    "rife_interpolate": {"engine": "rife", "cost": "local_gpu"},
-    "first_last_bridge": {"engine": "video_api", "cost": "api"},
-    "vace_context_bridge": {"engine": "vace", "cost": "local_gpu_or_api"},
+    "tail_frame_dependency": {"engine": "production_scheduler", "cost": "api"},
 }
 
 
@@ -29,7 +27,7 @@ def plan_transition(data: dict[str, Any]) -> dict[str, Any]:
 
     if relation == "same_action":
         if data.get("allow_ai_bridge"):
-            method = "vace_context_bridge" if data.get("preferred_engine") in {"auto", "vace"} else "first_last_bridge"
+            method = "tail_frame_dependency"
         else:
             method = "match_cut"
     elif relation == "time_passage":
@@ -39,16 +37,14 @@ def plan_transition(data: dict[str, Any]) -> dict[str, Any]:
     elif relation == "parallel":
         method = "match_cut"
     else:
-        method = "cut" if direction_match and light_match else "vace_context_bridge" if data.get("allow_ai_bridge") else "dissolve"
+        method = "cut" if direction_match and light_match else "tail_frame_dependency" if data.get("allow_ai_bridge") else "dissolve"
 
     fps = data.get("target_fps", 24)
     context_frames = _multiple_of_four(round(fps * 0.33))
     replace_frames = _multiple_of_four(round(fps * 0.33))
     bridge_frames = _multiple_of_four(round(fps * 0.5)) + 1
     fallbacks = {
-        "vace_context_bridge": ["first_last_bridge", "rife_interpolate", "match_cut"],
-        "first_last_bridge": ["rife_interpolate", "match_cut"],
-        "rife_interpolate": ["dissolve", "cut"],
+        "tail_frame_dependency": ["match_cut", "dissolve", "cut"],
     }.get(method, ["cut"])
     score = max(0, 100 - len(findings) * 15)
     return {
@@ -67,12 +63,10 @@ def plan_transition(data: dict[str, Any]) -> dict[str, Any]:
         },
         "fallback_chain": fallbacks,
         "reason": {
-            "vace_context_bridge": "连续动作使用前后双侧上下文重生成接缝区域",
-            "first_last_bridge": "使用上一镜末帧和下一镜首帧生成中间运动",
+            "tail_frame_dependency": "下一镜直接以上一镜真实尾帧为生成条件，不插入额外桥接时长",
             "match_cut": "按动作形态和运动方向寻找最佳切点",
             "cut": "镜头关系允许专业硬切，不额外制造视觉噪声",
             "dissolve": "时间流逝使用短叠化并同步修正时间线",
             "fade_black": "时间或空间明显变化，用黑场向观众发出段落信号",
         }[method],
     }
-

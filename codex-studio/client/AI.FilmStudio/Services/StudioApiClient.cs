@@ -101,6 +101,13 @@ public sealed class StudioApiClient
         return await response.Content.ReadFromJsonAsync<StoryboardGenerateResult>(cancellationToken: token) ?? new StoryboardGenerateResult();
     }
 
+    public async Task<DirectorBuildResult> GenerateDirectorPackageAsync(int episode, string provider, bool replaceExisting = true, CancellationToken token = default)
+    {
+        var response = await _http.PostAsJsonAsync(ProjectPath($"episodes/{episode}/director/generate"), new { provider, replace_existing = replaceExisting, freeze_bible = true }, token);
+        await EnsureSuccessAsync(response);
+        return await response.Content.ReadFromJsonAsync<DirectorBuildResult>(cancellationToken: token) ?? throw new InvalidOperationException("导演模型未返回生产设计");
+    }
+
     public async Task UpdateShotAsync(Shot shot, CancellationToken token = default)
     {
         var response = await _http.PatchAsJsonAsync($"shots/{shot.Id}", new
@@ -108,7 +115,7 @@ public sealed class StudioApiClient
             title = shot.Title, description = shot.Description, duration = shot.Duration,
             status = shot.Status, prompt = shot.Prompt, shot_type = shot.ShotType,
             camera = shot.Camera, action = shot.Action, dialogue = shot.Dialogue,
-            characters = shot.Characters
+            characters = shot.Characters, continuity = shot.Continuity
         }, token);
         await EnsureSuccessAsync(response);
     }

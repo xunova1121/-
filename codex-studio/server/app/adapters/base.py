@@ -29,5 +29,8 @@ class AdapterRegistry:
             raise KeyError(f"AI provider not configured: {provider}")
         return self._adapters[provider]
 
+    def has(self, provider: str) -> bool:
+        return provider in self._adapters
+
 
 registry = AdapterRegistry()

@@ -117,12 +117,14 @@ class TaskRunner:
                 payload = json.loads(task["payload_json"])
                 score = max(0, min(100, int(result.get("score", 0))))
                 findings = list(result.get("findings") or [])
+                review_kind = str((payload.get("options") or {}).get("review_kind") or "keyframe")
+                action = {"video": "regenerate_video", "final": "manual_final_gate"}.get(review_kind, "regenerate_keyframe")
                 db.execute(
                     "INSERT INTO quality_reviews(project_id,episode,shot_number,score,status,dimensions_json,findings_json,repair_plan_json) VALUES(?,?,?,?,?,?,?,?)",
                     (task["project_id"], int(payload.get("episode", 1)), str(payload.get("shot_number") or payload.get("shot_id") or ""), score,
                      "passed" if score >= int((payload.get("options") or {}).get("threshold", 80)) else "repair_required",
                      json.dumps(result.get("dimensions") or {}, ensure_ascii=False), json.dumps(findings, ensure_ascii=False),
-                     json.dumps({"action": "regenerate_keyframe", "findings": findings}, ensure_ascii=False)),
+                     json.dumps({"action": action, "review_kind": review_kind, "findings": findings}, ensure_ascii=False)),
                 )
             output_path = str(result.get("output_path") or "")
             asset_type = str(result.get("asset_type") or ("video" if task["task_type"] == "timeline_export" else ""))

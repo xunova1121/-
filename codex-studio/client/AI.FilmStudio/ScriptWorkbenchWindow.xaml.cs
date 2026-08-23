@@ -52,6 +52,7 @@ public partial class ScriptWorkbenchWindow : Window
             SourceNameText.Text = string.IsNullOrWhiteSpace(_sourceName) ? "尚未导入文件" : _sourceName;
             ParseSummaryText.Text = script.ParseStatus switch
             {
+                "director_storyboard" => "AI 生产设计、Story Bible 与状态图已生成",
                 "storyboard" => "已解析并生成分镜",
                 "parsed" => "剧本已解析",
                 "saved" => "已保存，等待解析",
@@ -133,10 +134,16 @@ public partial class ScriptWorkbenchWindow : Window
             if (_directorProvider is null) throw new InvalidOperationException("尚未配置可用的导演模型");
             if (string.IsNullOrWhiteSpace(ScriptEditor.Text)) throw new InvalidOperationException("剧本文本不能为空");
             DirectorButton.IsEnabled = false;
-            DirectorResult.Text = "导演模型正在分析戏剧节拍、镜头衔接和连续性风险…";
-            var result = await _api.RunDirectorAnalysisAsync(_directorProvider, ScriptEditor.Text, Episode);
-            DirectorResult.Text = $"{result.Provider} · {result.Model}\n\n{result.Result}";
-            StatusText.Text = "AI 导演分析已完成；可据此调整剧本后再生成全量分镜。";
+            await SaveAsync();
+            DirectorResult.Text = "导演模型正在通读完整剧本，并生成场次、全量分镜、冻结 Story Bible 与逐镜状态图…";
+            var result = await _api.GenerateDirectorPackageAsync(Episode, _directorProvider, true);
+            StoryboardChanged = true;
+            ParseSummaryText.Text = $"{result.SceneCount} 个场景 · {result.ShotCount} 个镜头 · {result.BibleCount} 项冻结设定";
+            var warnings = result.Warnings.Count == 0 ? "状态图检查通过，无阻断项。" : string.Join(Environment.NewLine, result.Warnings.Select(x => "• " + x));
+            DirectorResult.Text = $"{result.Provider} · {result.Model}\n\n一句话梗概：{result.Logline}\n\n{warnings}";
+            StatusText.Text = result.BlockingStateConflicts == 0
+                ? "AI 全量生产设计已落库；可进入分镜工作台逐镜核对。"
+                : $"已生成，但状态图发现 {result.BlockingStateConflicts} 个阻断镜头；修正前不会启动批量生产。";
         }
         catch (Exception ex) { DirectorResult.Text = $"分析失败：{ex.Message}"; }
         finally { DirectorButton.IsEnabled = _directorProvider is not null; }
@@ -151,7 +158,7 @@ public partial class ScriptWorkbenchWindow : Window
             var result = await _api.GenerateStoryboardAsync(Episode, true);
             StoryboardChanged = true;
             ParseSummaryText.Text = $"{parsed.SceneCount} 个场景 · 已生成 {result.ShotCount} 个镜头";
-            StatusText.Text = $"全量分镜生成完成：{result.ShotCount} 个镜头。可进入分镜工作台逐镜修改。";
+            StatusText.Text = $"离线草稿分镜完成：{result.ShotCount} 个镜头。它不包含 AI Story Bible 和状态图，请优先使用 AI 全量生产设计。";
         }
         catch (Exception ex) { StatusText.Text = $"生成失败：{ex.Message}"; }
     }

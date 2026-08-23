@@ -27,8 +27,14 @@
                 <DataGridTextColumn Header="运镜" Binding="{Binding Camera, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
                 <DataGridTextColumn Header="标题" Binding="{Binding Title, UpdateSourceTrigger=PropertyChanged}" Width="150"/>
                 <DataGridTextColumn Header="动作 / 画面" Binding="{Binding Description, UpdateSourceTrigger=PropertyChanged}" Width="2*"/>
+                <DataGridTextColumn Header="单镜动作" Binding="{Binding Action, UpdateSourceTrigger=PropertyChanged}" Width="180"/>
                 <DataGridTextColumn Header="对白" Binding="{Binding Dialogue, UpdateSourceTrigger=PropertyChanged}" Width="1.5*"/>
                 <DataGridTextColumn Header="人物" Binding="{Binding CharacterText}" Width="110" IsReadOnly="True"/>
+                <DataGridTextColumn Header="衔接" Binding="{Binding Link, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
+                <DataGridTextColumn Header="动作相位" Binding="{Binding ActionPhase, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
+                <DataGridTextColumn Header="运动方向" Binding="{Binding ScreenDirection, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
+                <DataGridTextColumn Header="状态前 JSON" Binding="{Binding StateBeforeText}" Width="220"/>
+                <DataGridTextColumn Header="状态后 JSON" Binding="{Binding StateAfterText}" Width="220"/>
                 <DataGridTextColumn Header="时长" Binding="{Binding Duration, UpdateSourceTrigger=PropertyChanged}" Width="75"/>
                 <DataGridTextColumn Header="生成提示词" Binding="{Binding Prompt, UpdateSourceTrigger=PropertyChanged}" Width="2*"/>
                 <DataGridTextColumn Header="状态" Binding="{Binding Status, UpdateSourceTrigger=PropertyChanged}" Width="90"/>

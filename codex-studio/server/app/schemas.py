@@ -28,6 +28,12 @@ class StoryboardGenerateRequest(BaseModel):
     replace_existing: bool = True
 
 
+class DirectorBuildRequest(BaseModel):
+    provider: str = Field(min_length=1, max_length=80)
+    replace_existing: bool = True
+    freeze_bible: bool = True
+
+
 class Shot(BaseModel):
     id: int
     episode: int
@@ -327,6 +333,5 @@ class AutomationStartRequest(BaseModel):
     auto_freeze_bible: bool = True
     generate_images: bool = True
     generate_voice: bool = True
-    generate_bridges: bool = True
     auto_repair: bool = True
     stop_on_blocker: bool = True

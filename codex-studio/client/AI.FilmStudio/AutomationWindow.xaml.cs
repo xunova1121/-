@@ -16,8 +16,8 @@ public partial class AutomationWindow : Window
     private IReadOnlyList<ProviderConfigStatus> _providers = [];
     public AutomationWindow(StudioApiClient api, StudioProject project) { InitializeComponent(); _api = api; _project = project; for (var i = 1; i <= project.EpisodeCount; i++) Episode.Items.Add(i); Episode.SelectedIndex = 0; _timer.Tick += async (_, _) => await LoadRunsAsync(); Loaded += async (_, _) => { await LoadAsync(); _timer.Start(); }; Closed += (_, _) => _timer.Stop(); }
     private static string Tag(ComboBox combo) => (combo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "";
-    private void VideoProvider_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (VideoProvider.SelectedItem is ProviderConfigStatus provider) VideoModel.Text = provider.ProviderId == "dashscope" ? "wan2.7-i2v-2026-04-25" : "sora-2"; }
-    private async Task LoadAsync() { try { _providers = (await _api.GetProviderConfigsAsync()).Where(x => x.Configured).ToList(); ImageProvider.ItemsSource = _providers.Where(x => x.ProviderId == "openai").ToList(); VideoProvider.ItemsSource = _providers.Where(x => x.ProviderId is "dashscope" or "openai").ToList(); ImageProvider.SelectedIndex = 0; VideoProvider.SelectedIndex = VideoProvider.Items.Cast<ProviderConfigStatus>().ToList().FindIndex(x => x.ProviderId == "dashscope"); if (VideoProvider.SelectedIndex < 0) VideoProvider.SelectedIndex = 0; await LoadRunsAsync(); StatusText.Text = _providers.Count == 0 ? "请先配置模型 API。" : "自动生产会冻结当前 Story Bible 最新版本，并在后台持续执行。"; } catch (Exception ex) { StatusText.Text = $"加载失败：{ex.Message}"; } }
+    private void VideoProvider_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (VideoProvider.SelectedItem is ProviderConfigStatus) VideoModel.Text = "wan2.7-i2v-2026-04-25"; }
+    private async Task LoadAsync() { try { _providers = (await _api.GetProviderConfigsAsync()).Where(x => x.Configured).ToList(); ImageProvider.ItemsSource = _providers.Where(x => x.ProviderId == "openai").ToList(); VideoProvider.ItemsSource = _providers.Where(x => x.ProviderId == "dashscope").ToList(); ImageProvider.SelectedIndex = 0; VideoProvider.SelectedIndex = 0; await LoadRunsAsync(); StatusText.Text = _providers.Count == 0 ? "请先配置模型 API。" : "自动生产会冻结 Story Bible，并让连续镜头继承上一镜真实尾帧。"; } catch (Exception ex) { StatusText.Text = $"加载失败：{ex.Message}"; } }
     private async Task LoadRunsAsync() { try { RunGrid.ItemsSource = await _api.GetAutomationRunsAsync(); } catch { } }
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await LoadRunsAsync();
     private async void Start_Click(object sender, RoutedEventArgs e)
@@ -25,7 +25,7 @@ public partial class AutomationWindow : Window
         try
         {
             if (ImageProvider.SelectedItem is not ProviderConfigStatus image) throw new InvalidOperationException("需要配置 OpenAI 关键帧模型");
-            if (VideoProvider.SelectedItem is not ProviderConfigStatus video) throw new InvalidOperationException("需要配置 OpenAI 或阿里云百炼视频模型");
+            if (VideoProvider.SelectedItem is not ProviderConfigStatus video) throw new InvalidOperationException("需要配置阿里云百炼 Wan 2.7 视频模型");
             var voice = EnableVoice.IsChecked == true ? _providers.FirstOrDefault(x => x.ProviderId == "openai") : null;
             if (EnableVoice.IsChecked == true && voice is null) throw new InvalidOperationException("启用配音需要配置 OpenAI");
             var qualityProvider = EnableReview.IsChecked == true ? _providers.FirstOrDefault(x => x.ProviderId == "openai")?.ProviderId : null;
