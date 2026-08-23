@@ -106,6 +106,17 @@ def test_claude_borrowed_architecture_endpoints():
         assert len(result["findings"]) == 2
 
 
+def test_proofread_is_computed_from_project_shots():
+    with sqlite3.connect(settings.database_path) as db:
+        db.execute("UPDATE shots SET scene_id=1,continuity_json=? WHERE project_id='demo' AND number='001'", ('{"screen_direction":"right","lighting":"night"}',))
+        db.execute("UPDATE shots SET scene_id=1,continuity_json=? WHERE project_id='demo' AND number='002'", ('{"screen_direction":"left","lighting":"day"}',))
+    with TestClient(app) as client:
+        result = client.get("/api/v1/projects/demo/proofread").json()
+        assert result["shot_count"] == 6
+        assert result["score"] < 100
+        assert {item["action"] for item in result["findings"]} == {"adjust_axis", "adjust_lighting"}
+
+
 def test_pipeline_checkpoint():
     with TestClient(app) as client:
         saved = client.put("/api/v1/projects/demo/pipeline/images", json={"status": "paused", "progress": 42, "checkpoint": {"last_shot": "006"}})
