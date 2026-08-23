@@ -24,11 +24,13 @@ public partial class App : Application
             _service.StartIfPackaged();
             MainWindow = new MainWindow();
             MainWindow.Show();
+            try { WriteReadyMarker(); }
+            catch (Exception markerError) { WriteCrashLog(markerError); }
         }
         catch (Exception ex)
         {
             WriteCrashLog(ex);
-            MessageBox.Show($"启动失败，诊断日志已保存。\n\n{ex.Message}", "AI影视Studio", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"启动失败，诊断日志已保存。\n\n{ex.Message}", "AI影视Studio 启动失败", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(-1);
         }
     }
@@ -48,5 +50,12 @@ public partial class App : Application
             File.AppendAllText(Path.Combine(directory, "desktop.log"), $"[{DateTimeOffset.Now:O}] {exception}\n\n");
         }
         catch { }
+    }
+
+    private static void WriteReadyMarker()
+    {
+        var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AI-Film-Studio");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "desktop-ready.txt"), $"{Environment.ProcessId}|0.5.1|{DateTimeOffset.Now:O}");
     }
 }

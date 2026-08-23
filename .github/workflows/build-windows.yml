@@ -62,20 +62,29 @@ jobs:
       - name: Build WPF client EXE
         shell: pwsh
         run: |
-          dotnet publish codex-studio/client/AI.FilmStudio/AI.FilmStudio.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o dist/AI-Film-Studio
-          New-Item -ItemType Directory -Force dist/AI-Film-Studio/service
-          Copy-Item codex-studio/server/dist/AIStudioService.exe dist/AI-Film-Studio/service/AIStudioService.exe
-          Copy-Item codex-studio/README.md dist/AI-Film-Studio/README.md
+          New-Item -ItemType Directory -Force codex-studio/client/AI.FilmStudio/Embedded
+          Copy-Item codex-studio/server/dist/AIStudioService.exe codex-studio/client/AI.FilmStudio/Embedded/AIStudioService.exe
+          dotnet publish codex-studio/client/AI.FilmStudio/AI.FilmStudio.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=None -p:DebugSymbols=false -o dist/AI-Film-Studio
       - name: Smoke test packaged desktop app
         shell: pwsh
         run: |
+          $ready = Join-Path $env:LOCALAPPDATA "AI-Film-Studio/desktop-ready.txt"
+          Remove-Item $ready -Force -ErrorAction SilentlyContinue
           $desktop = Start-Process -FilePath "dist/AI-Film-Studio/AI-Film-Studio.exe" -PassThru
           try {
-            Start-Sleep -Seconds 12
-            if ($desktop.HasExited) {
+            $started = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              Start-Sleep -Milliseconds 500
+              if ($desktop.HasExited) { break }
+              if (Test-Path $ready) {
+                $markerPid = ((Get-Content $ready -Raw) -split '\|')[0]
+                if ($markerPid -eq "$($desktop.Id)") { $started = $true; break }
+              }
+            }
+            if (-not $started) {
               $log = Join-Path $env:LOCALAPPDATA "AI-Film-Studio/logs/desktop.log"
               if (Test-Path $log) { Get-Content $log }
-              throw "Desktop app exited during startup with code $($desktop.ExitCode)"
+              throw "Desktop main window did not publish a valid ready marker"
             }
             $response = Invoke-RestMethod -Uri "http://127.0.0.1:18118/api/v1/health" -TimeoutSec 3
             if ($response.status -ne "ok") { throw "Desktop-launched service is unhealthy" }
@@ -83,11 +92,14 @@ jobs:
             if (-not $desktop.HasExited) { Stop-Process -Id $desktop.Id -Force }
             Get-Process AIStudioService -ErrorAction SilentlyContinue | Stop-Process -Force
           }
-      - name: Package
+      - name: Verify single-file delivery
         shell: pwsh
-        run: Compress-Archive -Path dist/AI-Film-Studio/* -DestinationPath dist/AI-Film-Studio-Windows-x64.zip -Force
+        run: |
+          $files = Get-ChildItem dist/AI-Film-Studio -File
+          if ($files.Count -ne 1 -or $files[0].Name -ne "AI-Film-Studio.exe") { throw "Delivery must contain exactly one EXE" }
+          Get-FileHash dist/AI-Film-Studio/AI-Film-Studio.exe -Algorithm SHA256
       - uses: actions/upload-artifact@v4
         with:
-          name: AI-Film-Studio-Windows-x64
-          path: dist/AI-Film-Studio-Windows-x64.zip
+          name: AI-Film-Studio-V0.5.1-Single-EXE
+          path: dist/AI-Film-Studio/AI-Film-Studio.exe
           retention-days: 30

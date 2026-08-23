@@ -66,6 +66,7 @@ public partial class MainWindow : Window
 
     private void EpisodeList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (WorkspaceTitle is null) return;
         if (EpisodeList.SelectedItem is ListBoxItem item)
             WorkspaceTitle.Text = $"剪辑工作台 · {item.Content?.ToString()?.Trim()}";
     }
