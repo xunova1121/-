@@ -37,8 +37,46 @@ public sealed class StudioApiClient
         return await response.Content.ReadFromJsonAsync<StudioProject>(cancellationToken: token) ?? throw new InvalidOperationException("服务未返回项目");
     }
 
+    public async Task<ProjectSummary> GetProjectSummaryAsync(CancellationToken token = default) =>
+        await _http.GetFromJsonAsync<ProjectSummary>(ProjectPath("summary"), token) ?? new ProjectSummary();
+
     public async Task<IReadOnlyList<Shot>> GetShotsAsync(CancellationToken token = default) =>
         await _http.GetFromJsonAsync<List<Shot>>(ProjectPath("shots"), token) ?? [];
+
+    public async Task<ScriptDocument> GetScriptAsync(int episode, CancellationToken token = default) =>
+        await _http.GetFromJsonAsync<ScriptDocument>(ProjectPath($"episodes/{episode}/script"), token) ?? new ScriptDocument { Episode = episode };
+
+    public async Task SaveScriptAsync(int episode, string title, string sourceName, string sourceText, CancellationToken token = default)
+    {
+        var response = await _http.PutAsJsonAsync(ProjectPath($"episodes/{episode}/script"), new { title, source_name = sourceName, source_text = sourceText }, token);
+        response.EnsureSuccessStatusCode();
+    }
+
+    public async Task<ScriptParseResult> ParseScriptAsync(int episode, CancellationToken token = default)
+    {
+        var response = await _http.PostAsync(ProjectPath($"episodes/{episode}/script/parse"), null, token);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<ScriptParseResult>(cancellationToken: token) ?? new ScriptParseResult();
+    }
+
+    public async Task<StoryboardGenerateResult> GenerateStoryboardAsync(int episode, bool replaceExisting = true, CancellationToken token = default)
+    {
+        var response = await _http.PostAsJsonAsync(ProjectPath($"episodes/{episode}/storyboard/generate"), new { replace_existing = replaceExisting }, token);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<StoryboardGenerateResult>(cancellationToken: token) ?? new StoryboardGenerateResult();
+    }
+
+    public async Task UpdateShotAsync(Shot shot, CancellationToken token = default)
+    {
+        var response = await _http.PatchAsJsonAsync($"shots/{shot.Id}", new
+        {
+            title = shot.Title, description = shot.Description, duration = shot.Duration,
+            status = shot.Status, prompt = shot.Prompt, shot_type = shot.ShotType,
+            camera = shot.Camera, action = shot.Action, dialogue = shot.Dialogue,
+            characters = shot.Characters
+        }, token);
+        response.EnsureSuccessStatusCode();
+    }
 
     public async Task<IReadOnlyList<TaskItem>> GetTasksAsync(CancellationToken token = default) =>
         await _http.GetFromJsonAsync<List<TaskItem>>(ProjectPath("tasks"), token) ?? [];
