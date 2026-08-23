@@ -1,3 +1,4 @@
+import hashlib
 import json
 import uuid
 import asyncio
@@ -11,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .adapters import registry
 from .config import render_dir, settings
 from .database import connect, initialize_database
-from .schemas import AssetCreate, BibleEntityCreate, ContinuityContractRequest, ContinuityRequest, EpisodeAutomationRequest, EpisodeLockRequest, GatewayRequest, PipelineUpdate, PreflightRequest, Project, ProjectCreate, ProviderConfigUpdate, QualityReviewRequest, RouteUpdate, SceneLayoutRequest, Shot, ShotCreate, ShotUpdate, TaskCreate, TransitionPlanRequest, TransitionRenderRequest
+from .schemas import AssetCreate, BibleEntityCreate, ContinuityContractRequest, ContinuityRequest, EpisodeAutomationRequest, EpisodeLockRequest, GatewayRequest, PipelineUpdate, PreflightRequest, Project, ProjectCreate, ProviderConfigUpdate, QualityReviewRequest, RouteUpdate, SceneLayoutRequest, ScriptUpsert, Shot, ShotCreate, ShotUpdate, StoryboardGenerateRequest, TaskCreate, TransitionPlanRequest, TransitionRenderRequest
 from .continuity import analyze_pair
 from .pipeline import stage_catalog
 from .providers import CAPABILITIES, providers_for, public_catalog
@@ -24,6 +25,7 @@ from .previz import analyze_stage, stage_fingerprint
 from .transitions import plan_transition
 from .task_runner import TaskRunner, serialize_task
 from .media import MediaError, capabilities as media_capabilities, probe_media
+from .script_engine import extract_characters, parse_scenes, scene_to_shots
 
 
 @asynccontextmanager
@@ -38,14 +40,14 @@ async def lifespan(_: FastAPI):
         await worker
 
 
-app = FastAPI(title=settings.app_name, version="0.6.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="0.7.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost", "http://127.0.0.1"], allow_methods=["*"], allow_headers=["*"])
 PREFIX = settings.api_prefix
 
 
 @app.get(f"{PREFIX}/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.6.0"}
+    return {"status": "ok", "version": "0.7.0"}
 
 
 @app.get(f"{PREFIX}/providers")
@@ -98,21 +100,144 @@ def create_project(payload: ProjectCreate):
     return project
 
 
+@app.get(f"{PREFIX}/projects/{{project_id}}/summary")
+def project_summary(project_id: str):
+    with connect() as db:
+        if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
+            raise HTTPException(404, "Project not found")
+        shots = db.execute("SELECT COUNT(*) FROM shots WHERE project_id=?", (project_id,)).fetchone()[0]
+        scenes = db.execute("SELECT COUNT(*) FROM scenes WHERE project_id=?", (project_id,)).fetchone()[0]
+        scripts = db.execute("SELECT COUNT(*) FROM episode_scripts WHERE project_id=? AND source_text<>''", (project_id,)).fetchone()[0]
+        assets = {row["asset_type"]: row["count"] for row in db.execute("SELECT asset_type,COUNT(*) AS count FROM assets WHERE project_id=? GROUP BY asset_type", (project_id,)).fetchall()}
+        bible = {row["entity_type"]: row["count"] for row in db.execute("SELECT entity_type,COUNT(*) AS count FROM bible_entities WHERE project_id=? GROUP BY entity_type", (project_id,)).fetchall()}
+    return {
+        "scripts": scripts, "scenes": scenes, "shots": shots,
+        "characters": max(assets.get("character", 0), bible.get("character", 0)),
+        "locations": max(assets.get("scene", 0), bible.get("location", 0)),
+        "props": max(assets.get("prop", 0), bible.get("prop", 0)),
+    }
+
+
 @app.delete(f"{PREFIX}/projects/{{project_id}}", status_code=204)
 def delete_project(project_id: str):
     with connect() as db:
         cursor = db.execute("DELETE FROM projects WHERE id=?", (project_id,))
         if not cursor.rowcount:
             raise HTTPException(404, "Project not found")
-        for table in ("shots", "assets", "tasks", "pipeline_runs"):
+        for table in ("episode_scripts", "scenes", "shots", "assets", "tasks", "pipeline_runs", "bible_entities", "episode_locks", "continuity_contracts", "quality_reviews", "scene_layouts", "transition_plans"):
             db.execute(f"DELETE FROM {table} WHERE project_id=?", (project_id,))
+
+
+@app.get(f"{PREFIX}/projects/{{project_id}}/episodes/{{episode}}/script")
+def get_episode_script(project_id: str, episode: int):
+    with connect() as db:
+        row = db.execute(
+            "SELECT project_id,episode,title,source_name,source_text,checksum,parse_status,updated_at FROM episode_scripts WHERE project_id=? AND episode=?",
+            (project_id, episode),
+        ).fetchone()
+    if not row:
+        return {"project_id": project_id, "episode": episode, "title": "", "source_name": "", "source_text": "", "checksum": "", "parse_status": "empty", "updated_at": None}
+    return dict(row)
+
+
+@app.put(f"{PREFIX}/projects/{{project_id}}/episodes/{{episode}}/script")
+def save_episode_script(project_id: str, episode: int, payload: ScriptUpsert):
+    if episode < 1:
+        raise HTTPException(400, "Episode must be positive")
+    checksum = hashlib.sha256(payload.source_text.encode("utf-8")).hexdigest()
+    with connect() as db:
+        project = db.execute("SELECT episode_count FROM projects WHERE id=?", (project_id,)).fetchone()
+        if not project:
+            raise HTTPException(404, "Project not found")
+        if episode > project["episode_count"]:
+            raise HTTPException(400, "Episode exceeds project episode count")
+        db.execute(
+            "INSERT INTO episode_scripts(project_id,episode,title,source_name,source_text,checksum,parse_status) VALUES(?,?,?,?,?,?,'saved') "
+            "ON CONFLICT(project_id,episode) DO UPDATE SET title=excluded.title,source_name=excluded.source_name,source_text=excluded.source_text,checksum=excluded.checksum,parse_status='saved',updated_at=CURRENT_TIMESTAMP",
+            (project_id, episode, payload.title, payload.source_name, payload.source_text, checksum),
+        )
+    return {"project_id": project_id, "episode": episode, "checksum": checksum, "parse_status": "saved"}
+
+
+@app.post(f"{PREFIX}/projects/{{project_id}}/episodes/{{episode}}/script/parse")
+def parse_episode_script(project_id: str, episode: int):
+    with connect() as db:
+        script = db.execute("SELECT source_text FROM episode_scripts WHERE project_id=? AND episode=?", (project_id, episode)).fetchone()
+        if not script or not script["source_text"].strip():
+            raise HTTPException(409, "Script is empty")
+        scenes = parse_scenes(script["source_text"])
+        characters = extract_characters(script["source_text"])
+        db.execute("DELETE FROM scenes WHERE project_id=? AND episode=?", (project_id, episode))
+        for scene in scenes:
+            db.execute(
+                "INSERT INTO scenes(project_id,episode,sequence,heading,location,time_of_day,summary,source_text) VALUES(?,?,?,?,?,?,?,?)",
+                (project_id, episode, scene.sequence, scene.heading, scene.location, scene.time_of_day, scene.summary, scene.source_text),
+            )
+            key = f"episode-{episode}-scene-{scene.sequence}"
+            data = json.dumps({"heading": scene.heading, "location": scene.location, "time_of_day": scene.time_of_day}, ensure_ascii=False)
+            db.execute(
+                "INSERT OR IGNORE INTO bible_entities(project_id,entity_type,entity_key,name,state,data_json) VALUES(?,'location',?,?,'draft',?)",
+                (project_id, key, scene.location, data),
+            )
+        for name in characters:
+            key = hashlib.sha1(name.encode("utf-8")).hexdigest()[:16]
+            db.execute(
+                "INSERT OR IGNORE INTO bible_entities(project_id,entity_type,entity_key,name,state,data_json) VALUES(?,'character',?,?,'draft','{}')",
+                (project_id, key, name),
+            )
+        db.execute("UPDATE episode_scripts SET parse_status='parsed',updated_at=CURRENT_TIMESTAMP WHERE project_id=? AND episode=?", (project_id, episode))
+    return {
+        "project_id": project_id, "episode": episode, "scene_count": len(scenes),
+        "character_count": len(characters), "characters": characters,
+        "scenes": [scene.__dict__ for scene in scenes],
+    }
+
+
+@app.get(f"{PREFIX}/projects/{{project_id}}/episodes/{{episode}}/scenes")
+def list_episode_scenes(project_id: str, episode: int):
+    with connect() as db:
+        rows = db.execute(
+            "SELECT id,episode,sequence,heading,location,time_of_day,summary,source_text FROM scenes WHERE project_id=? AND episode=? ORDER BY sequence",
+            (project_id, episode),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+@app.post(f"{PREFIX}/projects/{{project_id}}/episodes/{{episode}}/storyboard/generate")
+def generate_storyboard(project_id: str, episode: int, payload: StoryboardGenerateRequest):
+    with connect() as db:
+        scene_rows = db.execute(
+            "SELECT id,sequence,heading,location,time_of_day,summary,source_text FROM scenes WHERE project_id=? AND episode=? ORDER BY sequence",
+            (project_id, episode),
+        ).fetchall()
+        if not scene_rows:
+            raise HTTPException(409, "Parse the script before generating the storyboard")
+        existing = db.execute("SELECT COUNT(*) FROM shots WHERE project_id=? AND episode=?", (project_id, episode)).fetchone()[0]
+        if existing and not payload.replace_existing:
+            raise HTTPException(409, "Storyboard already exists")
+        if payload.replace_existing:
+            db.execute("DELETE FROM shots WHERE project_id=? AND episode=?", (project_id, episode))
+        next_number = 1
+        created = 0
+        for row in scene_rows:
+            from .script_engine import ParsedScene
+            scene = ParsedScene(row["sequence"], row["heading"], row["location"], row["time_of_day"], row["source_text"], row["summary"])
+            for item in scene_to_shots(scene, next_number):
+                db.execute(
+                    "INSERT INTO shots(project_id,episode,scene_id,sequence,number,title,description,duration,status,color,prompt,shot_type,camera,action,dialogue,characters_json,continuity_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (project_id, episode, row["id"], created + 1, item["number"], item["title"], item["description"], item["duration"], item["status"], item["color"], item["prompt"], item["shot_type"], item["camera"], item["action"], item["dialogue"], json.dumps(item["characters"], ensure_ascii=False), json.dumps(item["continuity"], ensure_ascii=False)),
+                )
+                created += 1
+            next_number = created + 1
+        db.execute("UPDATE episode_scripts SET parse_status='storyboard',updated_at=CURRENT_TIMESTAMP WHERE project_id=? AND episode=?", (project_id, episode))
+    return {"project_id": project_id, "episode": episode, "shot_count": created, "replaced": bool(existing)}
 
 
 @app.get(f"{PREFIX}/projects/{{project_id}}/shots", response_model=list[Shot])
 def list_shots(project_id: str):
     with connect() as db:
-        rows = db.execute("SELECT number,title,description,duration,status,color FROM shots WHERE project_id=? ORDER BY episode,number", (project_id,)).fetchall()
-    return [dict(row) for row in rows]
+        rows = db.execute("SELECT id,episode,scene_id,sequence,number,title,description,duration,status,color,prompt,shot_type,camera,action,dialogue,characters_json,continuity_json FROM shots WHERE project_id=? ORDER BY episode,sequence,id", (project_id,)).fetchall()
+    return [{**{key: row[key] for key in row.keys() if key not in {"characters_json", "continuity_json"}}, "characters": json.loads(row["characters_json"]), "continuity": json.loads(row["continuity_json"])} for row in rows]
 
 
 @app.post(f"{PREFIX}/projects/{{project_id}}/shots", status_code=201)
@@ -122,8 +247,8 @@ def create_shot(project_id: str, payload: ShotCreate):
         if not exists:
             raise HTTPException(404, "Project not found")
         cursor = db.execute(
-            "INSERT INTO shots(project_id,episode,number,title,description,duration,status,color,prompt) VALUES(?,?,?,?,?,?,?,?,?)",
-            (project_id, payload.episode, payload.number, payload.title, payload.description, payload.duration, payload.status, payload.color, payload.prompt),
+            "INSERT INTO shots(project_id,episode,scene_id,sequence,number,title,description,duration,status,color,prompt,shot_type,camera,action,dialogue,characters_json,continuity_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (project_id, payload.episode, payload.scene_id, payload.sequence, payload.number, payload.title, payload.description, payload.duration, payload.status, payload.color, payload.prompt, payload.shot_type, payload.camera, payload.action, payload.dialogue, json.dumps(payload.characters, ensure_ascii=False), json.dumps(payload.continuity, ensure_ascii=False)),
         )
     return {"id": cursor.lastrowid, **payload.model_dump()}
 
@@ -133,6 +258,10 @@ def update_shot(shot_id: int, payload: ShotUpdate):
     changes = payload.model_dump(exclude_none=True)
     if not changes:
         raise HTTPException(400, "No changes")
+    if "characters" in changes:
+        changes["characters_json"] = json.dumps(changes.pop("characters"), ensure_ascii=False)
+    if "continuity" in changes:
+        changes["continuity_json"] = json.dumps(changes.pop("continuity"), ensure_ascii=False)
     columns = ",".join(f"{key}=?" for key in changes)
     with connect() as db:
         cursor = db.execute(f"UPDATE shots SET {columns} WHERE id=?", (*changes.values(), shot_id))
