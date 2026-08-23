@@ -5,7 +5,7 @@ on:
     branches: ["codex/ai-film-studio-v0.2"]
     paths:
       - "desktop/**"
-      - ".github/workflows/build-real-desktop.yml"
+      - ".github/workflows/build-windows.yml"
   workflow_dispatch:
 
 permissions:
