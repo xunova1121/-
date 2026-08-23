@@ -580,6 +580,54 @@ if (sheetUp) {
   }
 }
 
+/**
+ * ⑧d 接缝那句话要说**当前模式**的行为。
+ *
+ * 这张卡片上原来写着「标成连续动作会把上一镜的末帧锁成下一镜的首帧」——
+ * 那描述的是 tail 模式，而默认跑的是 lock（首尾帧）。用户照着这句话去看成片，
+ * 看到"这一段的第一帧根本不是上一段的最后一帧"，只能得出"坏了"的结论。
+ * 他的原话就是："怎么是上一镜尾帧为下一镜的首帧？不是首尾帧？"
+ */
+{
+  /**
+   * ⚠ 先切回**有分镜的那部片子**。
+   *
+   * ⑦b 刚刚新建并切到了一部空的，那上面根本没有分镜页 ——
+   * 直接查会得到"找不到「整段标衔接」"，而那是测试站错了地方，不是功能没做。
+   * 这个坑在 ⑧c 上已经栽过一次了。
+   */
+  await page.evaluate((id) => localStorage.setItem('fd.m.project', id), proj.id);
+  await page.reload();
+  await page.waitForTimeout(1200);
+  await page.locator('.tab', { hasText: '分镜' }).click();
+  await page.waitForTimeout(800);
+  // 它收在分镜页那排筛选后面的「⋯」里（偶尔用一次的东西不该占掉小半屏）
+  const more = page.locator('.fchip.icon').last();
+  if (await more.count()) {
+    await more.scrollIntoViewIfNeeded();
+    await more.click({ force: true });
+    await page.waitForTimeout(800);
+  }
+
+  // 它是弹出来的一层（.sheet），不在 #app 里面
+  const card = page.locator('.sheet', { hasText: '整段标衔接' }).first();
+  if (await card.count()) {
+    const text = await card.innerText();
+    const modeNamed = /「首尾帧」|「接住真实末帧」|「关掉」/.test(text);
+    console.log('⑧d 接缝卡片点名了当前模式：', modeNamed ? '✓' : `✕ ${text.slice(0, 140)}`);
+    // 默认是首尾帧 —— 那就必须说清楚"接缝做在上一镜身上"，不能说反
+    const rightWay = !/「首尾帧」/.test(text) || /做在\*\*上一镜\*\*身上|做在上一镜身上/.test(text);
+    console.log('   首尾帧模式下没把话说反：', rightWay ? '✓' : `✕ ${text.slice(0, 200)}`);
+    console.log('   说清了只在标了连续动作的地方才做：',
+      /连续动作/.test(text) ? '✓' : `✕ ${text.slice(0, 120)}`);
+  } else {
+    console.log('⑧d 接缝卡片：✕ 分镜页上找不到「整段标衔接」');
+  }
+  // ⚠ 弹层不关掉的话，后面每一步的点击都会被它挡住（Playwright 会一直重试到超时）
+  await page.evaluate(() => document.querySelectorAll('.sheet').forEach((n) => n.remove()));
+  await page.waitForTimeout(200);
+}
+
 // ⑧ 往后全跑
 await page.locator('.tab', { hasText: '流水线' }).click();
 await page.waitForTimeout(500);

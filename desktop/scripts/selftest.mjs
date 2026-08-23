@@ -5527,6 +5527,84 @@ section('转场：真发给 FFmpeg 的那串参数长什么样');
   check('退回硬切之后也不重编码', /-c copy/.test(tiny.calls[tiny.calls.length - 1]), tiny.calls[tiny.calls.length - 1]);
 }
 
+section('接缝那几句话：三处必须是同一句');
+{
+  /**
+   * ════════ 这一节挡的是一个真出过的错 ════════
+   *
+   * 手机端那张卡片上写着：「标成连续动作会把上一镜的末帧锁成下一镜的首帧」。
+   * 那描述的是 tail 模式，**而默认跑的是 lock**。
+   *
+   * lock 下每一段视频**仍然是从自己那张图开始的** —— 接缝是靠逼上一段
+   * "结束在下一镜那张图上"做出来的，做在**上一镜**身上。
+   * 用户照着那句话去看成片，看到"这一段的第一帧根本不是上一段的最后一帧"，
+   * 得出的结论只能是"坏了"。他的原话就是：
+   *   "怎么是上一镜尾帧为下一镜的首帧？不是首尾帧？"
+   *
+   * 措辞现在只有一份（core/seam.js），设置下拉、手机卡片、出视频说明都读它。
+   */
+  const seam = await import('../core/seam.js');
+  const settingsMod = await import('../core/settings.js');
+
+  check('三种模式都在', seam.SEAM_MODES.map((m) => m.id).join() === 'lock,tail,off',
+    seam.SEAM_MODES.map((m) => m.id).join());
+  check('不认识的模式当默认（设置文件是可以手改的）', seam.modeOf('乱写').id === 'lock');
+  check('默认就是 lock（和 settings 的默认对得上）',
+    (settingsMod.DEFAULTS ? settingsMod.DEFAULTS.seamMode : settingsMod.get('seamMode')) === 'lock');
+
+  const lock = seam.howItWorks('lock');
+  /**
+   * ⚠ lock 那句话里**必须**把"每一段仍然从自己那张图开始"说出来。
+   * 不说的话，人只会按字面理解成"上一段的尾帧变成这一段的首帧"——
+   * 而那正是 tail 干的事，两者看起来完全不一样。
+   */
+  check('首尾帧那句点明"接缝做在上一镜身上"', /做在\*\*上一镜\*\*身上/.test(lock), lock);
+  check('并且明说"别去看这一段的首帧是不是上一段的尾帧"',
+    /首帧是不是上一段的尾帧/.test(lock) && /永远是否/.test(lock), lock);
+  check('首尾帧那句里没有"上一段的尾帧当这一段的首帧"这种说法',
+    !/上一段的最后一帧.*当.*首帧/.test(lock), lock);
+
+  const tail = seam.howItWorks('tail');
+  check('接住真实末帧那句才说"这一段的第一帧等于上一段的最后一帧"',
+    /第一帧就等于上一段的最后一帧/.test(tail), tail);
+  check('两种模式的说法不一样（一样就说明有一处在撒谎）', lock !== tail);
+  check('每一句都带着当前模式的名字（不带的话人不知道自己在看哪一种）',
+    /「首尾帧」/.test(lock) && /「接住真实末帧」/.test(tail) && /「关掉」/.test(seam.howItWorks('off')));
+
+  /**
+   * ⚠ 这个文件要原样发给浏览器（/seam.js），所以必须零依赖。
+   * 它一旦 import 了任何东西，手机端整个 m.js 都加载不起来 ——
+   * 表现是打开手机版一片空白，而且完全看不出是这儿造成的。
+   */
+  const src = fs.readFileSync(path.join(PROJECT_ROOT, 'core', 'seam.js'), 'utf8');
+  check('seam.js 保持零依赖（它要原样发给浏览器）',
+    !/^\s*import\s/m.test(src) && !/from\s+'node:/.test(src));
+
+  // ── 自动标那一步：给模型的料够不够 ──
+  /**
+   * "这一镜是不是上一镜那个动作的下一瞬间"，前提是**同一个人**在继续同一个动作。
+   * 只给描述的话，「他推开门」和「她走进屋」字面上一样像连续动作。
+   * 少给这两个字段的代价是判漏 —— 而用户看到的是"很明显的连贯动作，
+   * 模型怎么看不出来"。模型看不出来，因为我们没给它看。
+   */
+  const studioMod = await import('../core/pipeline/studio.js');
+  const one = studioMod.linkPayloadOf({
+    index: 4, segment: 2, scene: '走廊', characters: ['阿澜'],
+    description: '推开门', camera: '中景', motion: '跟随', dialogue: ''
+  });
+  check('发给模型的每一镜带上了"这一镜有谁"',
+    Array.isArray(one.characters) && one.characters[0] === '阿澜', JSON.stringify(one));
+  check('也带上了"这一镜怎么动"', one.motion === '跟随', JSON.stringify(one));
+  check('场次也在（跨场次不可能是连续动作，它得知道）', one.segment === 2, JSON.stringify(one));
+  check('没写 characters 的老分镜也不会炸', Array.isArray(studioMod.linkPayloadOf({ index: 1 }).characters));
+
+  check('提示词里点名了"这一类不要漏"', /不要漏/.test(studioMod.LINK_PROMPT), '');
+  check('并且举了推门→进门这个例子（界面上就是这么宣传的）',
+    /推开门.*走进屋里/s.test(studioMod.LINK_PROMPT), '');
+  check('仍然保留"拿不准就给 cut"（判错的代价是不对称的）',
+    /拿不准就给 cut/.test(studioMod.LINK_PROMPT), '');
+}
+
 section('场景的东南西北：机位相对房间，不只相对人');
 {
   /**

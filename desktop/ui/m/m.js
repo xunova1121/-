@@ -44,6 +44,11 @@ import { previzPanel, blankStage } from '/previz-canvas.js';
 import { inheritStage } from '/previz.js';
 // 台词念不念得完，用引擎自己那份估法（同一个文件，不是抄一份）
 import { speechSeconds, SPEECH_HEADROOM } from '/duration.js';
+/**
+ * 接缝那几句话读引擎那一份原件 —— 三处（设置下拉、这张卡片、出视频时的说明）
+ * 必须是同一句。各写各的话已经错过一次：这里写的是 tail 的行为，跑的是 lock。
+ */
+import * as SEAM from '/seam.js';
 
 const canInstall = window.isSecureContext && 'serviceWorker' in navigator;
 if (canInstall) {
@@ -436,6 +441,16 @@ function stateOf(project, id) {
 const app = document.querySelector('#app');
 let project = null;
 let projects = [];
+/**
+ * 全局设置里手机端只读、不改的那几项（现在只有接缝模式）。
+ *
+ * 为什么非要拿：接缝那句话必须说**当前模式**的行为 —— 两种模式看起来
+ * 完全不一样，说错一种，用户照着去看成片只会得出"坏了"的结论。
+ * 而这正是上一版犯的错。
+ *
+ * 拿不到就留空对象，措辞那边会退回默认（lock），不会炸。
+ */
+let appSettings = {};
 let tab = 'flow';
 const job = { running: false, label: '', message: '', fail: 0 };
 
@@ -1371,7 +1386,8 @@ function linkRangeCard(shots) {
     h('option', { value: 'continuous', selected: true }, '连续动作（动作不能断）'),
     h('option', { value: 'cut' }, '同场景换机位'),
     h('option', { value: 'new-scene' }, '换场景'));
-  const status = h('div', { class: 'muted', style: 'margin-top:8px' });
+  // 通读的过程要**全留着**（拒绝的理由都在里面），所以给它一个能滚的框
+  const status = h('div', { class: 'muted', style: 'margin-top:8px;max-height:220px;overflow-y:auto' });
   const go = h('button', { class: 'btn sm grow' }, '整段标记');
   go.onclick = async () => {
     if (kind.value === 'continuous') {
@@ -1402,9 +1418,23 @@ function linkRangeCard(shots) {
     try {
       let failed = null;
       // cap:link-auto
+      /**
+       * ⚠ 每条消息都要**留住**，不能只写最后一行。
+       *
+       * 这里原来是 `status.textContent = ev.message` —— 后一条冲掉前一条。
+       * 而这一步最值钱的输出恰恰是中间那些：「第 7 镜模型想标连续动作，
+       * 没采纳：和第 6 镜跨了场次」。冲掉之后用户只看到最后那句
+       * "没有哪两镜构成连续动作"，然后问"很明显的连贯动作，为什么看不出来" ——
+       * 而理由其实说过了，只是被下一行覆盖了。
+       */
+      clear(status);
       await stream(`/projects/${project.id}/shots/link/auto`, {}, (ev) => {
         if (ev.type === 'error') failed = ev.message;
-        if (ev.message) status.textContent = ev.message;
+        if (!ev.message) return;
+        const line = h('div', { class: 'muted', style: 'margin-top:4px' }, ev.message);
+        if (/没采纳|想标/.test(ev.message)) line.style.color = 'var(--warn, #c98a2b)';
+        status.append(line);
+        status.scrollTop = status.scrollHeight;
       });
       if (failed) throw new Error(failed);
       await reload();
@@ -1418,8 +1448,20 @@ function linkRangeCard(shots) {
 
   return h('div', { class: 'card' },
     h('b', {}, '整段标衔接'),
+    /**
+     * ⚠ 这句话**写错过**，而且错得很有代价。
+     *
+     * 原文是「标成连续动作会把上一镜的末帧锁成下一镜的首帧」—— 那描述的是
+     * tail 模式，而默认跑的是 lock（首尾帧）。用户照着这句话去看成片，
+     * 看到"这一段的第一帧根本不是上一段的最后一帧"，只能得出"坏了"的结论。
+     *
+     * 现在按**当前模式**说，而且措辞读的是引擎那一份（core/seam.js）——
+     * 三处（设置下拉、这张卡片、出视频时的说明）用同一句，才不会再漂开。
+     */
     h('p', { class: 'muted', style: 'margin:6px 0 10px' },
-      '推门→进门→环视 这种连贯动作，标成「连续动作」会把上一镜的末帧锁成下一镜的首帧。'),
+      '推门→进门→环视 这种连贯动作，标成「连续动作」才会做接缝。'),
+    h('p', { class: 'muted', style: 'margin:0 0 10px' },
+      SEAM.howItWorks(appSettings.seamMode)),
     h('div', { class: 'row' },
       h('span', { class: 'muted' }, '第'), from,
       h('span', { class: 'muted' }, '到'), to,
@@ -2326,6 +2368,11 @@ function updateLive() {
 }
 
 async function reload() {
+  /**
+   * 顺手把全局设置捎回来。拿不到就算了 —— 少一句说明不该让整页打不开，
+   * 而接缝那句话会退回默认模式的措辞（默认就是 lock）。
+   */
+  api('/settings').then((s) => { appSettings = s || {}; }).catch(() => {});
   const list = await api('/projects').catch(() => []);
   projects = list;
   const wanted = localStorage.getItem(PROJ_STORE);

@@ -1308,6 +1308,12 @@ export const LINK_PROMPT = `你是剪辑师。下面给你一份分镜表，判�
   伸手去够门把手 → 把门把手拧下去        ✅ 连续
   转身面向门口   → 迈步走出门            ✅ 连续
   举起杯子       → 杯子送到嘴边          ✅ 连续
+  推开门         → 走进屋里              ✅ 连续
+  抬手要敲门     → 指节落在门板上        ✅ 连续
+
+⚠ **上面这一类不要漏。** 同一场次、同一个人，而第二镜的描述明显是第一镜那个动作的
+**下一步**（推门→进门、抬手→握住、起身→走向、迈步→跨过），这就是 continuous。
+这种是拆动作，不是换机位 —— 漏掉它，两段之间会硬生生断一下。
 
 不是连续动作的（这些占绝大多数）：
   他在办公桌前批改作业 → 特写他的钢笔      ❌ 同一场戏换机位而已
@@ -1346,6 +1352,25 @@ export const LINK_PROMPT = `你是剪辑师。下面给你一份分镜表，判�
  * 所以提示词里反复说"拿不准就给 cut"，而且下面还有一层确定性的收口 ——
  * 提示词只是请求，这个项目里已经栽过不止一次。
  */
+/**
+ * 发给模型的一镜长什么样。
+ *
+ * 单独拎出来是为了能被断言 —— 少给一个字段的后果是**判漏**，
+ * 而判漏在界面上长得和"模型能力不行"一模一样，查不出是我们没给料。
+ */
+export function linkPayloadOf(s) {
+  return {
+    index: s.index,
+    segment: s.segment || 1,
+    scene: s.scene,
+    characters: s.characters || [],
+    description: s.description,
+    camera: s.camera,
+    motion: s.motion,
+    dialogue: s.dialogue
+  };
+}
+
 export async function suggestLinks(projectId, { only = null, onEvent } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
@@ -1360,14 +1385,18 @@ export async function suggestLinks(projectId, { only = null, onEvent } = {}) {
     message: `让调度模型 ${r.director.model}（${r.director.provider}）通读 ${all.length} 镜，找出哪些是连续动作…`
   });
 
-  const payload = all.map((s) => ({
-    index: s.index,
-    segment: s.segment || 1,
-    scene: s.scene,
-    description: s.description,
-    camera: s.camera,
-    dialogue: s.dialogue
-  }));
+  /**
+   * ⚠ 必须带上 **characters 和 motion**。
+   *
+   * 「这一镜是不是上一镜那个动作的下一瞬间」这个判断，前提是**同一个人**
+   * 在继续同一个动作。只给描述的话，「他推开门」和「她走进屋」在字面上
+   * 一样像连续动作 —— 而那俩根本不是同一个人。
+   * motion（这一镜怎么动）同理：一个"固定"接一个"跟随"，多半是换机位不是拆动作。
+   *
+   * 少给这两个字段的代价是**判漏**，而用户看到的是"很明显的连贯动作，
+   * 模型怎么看不出来" —— 模型看不出来，因为我们没给它看。
+   */
+  const payload = all.map(linkPayloadOf);
 
   const { text } = await adapters.chat({
     providerId: r.director.provider,
@@ -1462,7 +1491,19 @@ export async function suggestLinks(projectId, { only = null, onEvent } = {}) {
     status: 'done',
     message: changed.length
       ? `标好了：${changed.filter((c) => c.to === 'continuous').length} 处连续动作`
-      : '通读完了，没有哪两镜构成连续动作 —— 这很正常，大部分镜位切换本来就该硬切'
+      : (refused.length
+        /**
+         * ⚠ "模型一处都没标"和"模型标了但被规矩拦下来"是**完全不同**的两件事，
+         * 而收尾这句话原来把它们说成同一件。
+         *
+         * 用户看到"没有哪两镜构成连续动作"，而实际上模型明明标了三处、
+         * 只是全被跨场次拦了 —— 于是他问"很明显的连贯动作，怎么看不出来"。
+         * 模型看出来了，是我们没让他知道。
+         */
+        ? `模型标了 ${refused.length} 处，但都被规矩拦下来了（上面每条都写了原因）——`
+          + '要么去改那几镜的场次划分，要么在下面手动整段标'
+        : '通读完了，没有哪两镜构成连续动作 —— 这很正常，大部分镜位切换本来就该硬切。'
+          + '你觉得明显是连贯动作却没标上的，用下面「手工整段标」直接框住那几镜')
   });
   return { project: store.read(projectId), changed, refused };
 }

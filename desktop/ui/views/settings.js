@@ -4,6 +4,7 @@
  * 能力路由是拆开的（剧本、复核、出图、视频、配音各选各的），
  * 因为各家强项差得很远，绑死一家反而处处将就。
  */
+import * as SEAM from '/seam.js';
 import { h, clear, add, api, stream, toast, fmtMs } from '../lib.js';
 import { RATIOS } from '../ratios.js';
 
@@ -485,12 +486,15 @@ export default {
        * 现在把两条各自的**代价**写在名字里，让人照着自己的厂商选，
        * 而不是照着一个过时的"推荐"选。
        */
-      h('option', { value: 'tail', selected: settings.seamMode === 'tail' },
-        '接住真实末帧 —— 上一段的最后一帧当首帧。所有厂商都支持，但误差会沿着链累积'),
-      h('option', { value: 'lock', selected: (settings.seamMode || 'lock') === 'lock' },
-        '首尾帧 —— 本镜的图当首帧、下一镜的图当末帧。两头都是你审过的图，要厂商收末帧'),
-      h('option', { value: 'off', selected: settings.seamMode === 'off' },
-        '关掉 —— 只靠提示词衔接'));
+      /**
+       * 措辞读的是引擎那一份（core/seam.js）。
+       * 各写各的话迟早有一处和实际行为对不上 —— 手机端那张卡片就这么错过一次，
+       * 写的是 tail 的行为、跑的是 lock，用户照着看成片只能得出"坏了"。
+       */
+      ...['tail', 'lock', 'off'].map((id) => h('option', {
+        value: id,
+        selected: (settings.seamMode || 'lock') === id
+      }, SEAM.modeOf(id).option)));
 
     const thresholdInput = h('input', { type: 'number', min: 0, max: 100, value: settings.consistencyThreshold,
       oninput: (e) => (pending.consistencyThreshold = Number(e.target.value)) });

@@ -1448,7 +1448,7 @@ export function createServer({ lan = false } = {}) {
        * 放行的是这两个确切的路径，不是"所有 .js"—— 后者会把电脑版
        * 整套界面代码一起放出去，那不是同一件事。
        */
-      const SHARED_MODULES = ['/previz-canvas.js', '/previz.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js'];
+      const SHARED_MODULES = ['/previz-canvas.js', '/previz.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js'];
       const isShell =
         url.pathname === '/m'
         || url.pathname.startsWith('/m/')
@@ -1544,7 +1544,7 @@ export function createServer({ lan = false } = {}) {
        *
        * 这两个文件必须保持纯计算（不 import 任何 node: 模块），自检守着这一条。
        */
-      if (url.pathname === '/transitions.js' || url.pathname === '/fx.js') {
+      if (url.pathname === '/transitions.js' || url.pathname === '/fx.js' || url.pathname === '/seam.js') {
         const file = url.pathname.slice(1);
         return fs.readFile(path.join(HERE, file), (err, data) => {
           if (err) return json(res, 404, { error: `找不到 ${file}` });
