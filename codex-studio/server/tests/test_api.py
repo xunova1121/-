@@ -8,6 +8,12 @@ from fastapi.testclient import TestClient
 from app import database
 from app.config import settings
 from app.main import app
+from app.adapters import registry
+from app.adapters.base import AIAdapter, MockAdapter
+from app.adapters.anthropic import AnthropicAdapter
+from app.adapters.openai_compatible import OpenAICompatibleAdapter
+from app import media, production
+from app.task_runner import TaskRunner
 
 
 @pytest.fixture(autouse=True)
@@ -94,6 +100,78 @@ def test_real_openai_compatible_gateway_uses_configured_model(monkeypatch, tmp_p
         object.__setattr__(settings, "database_path", original)
 
 
+def test_anthropic_director_adapter_uses_messages_protocol(monkeypatch):
+    class FakeResponse:
+        status_code = 200
+        is_error = False
+        text = ""
+        def json(self): return {"content": [{"type": "text", "text": "导演分析结果"}], "usage": {"input_tokens": 9, "output_tokens": 5}}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): return None
+        async def post(self, url, headers, json):
+            assert url == "https://api.anthropic.com/v1/messages"
+            assert headers["anthropic-version"] == "2023-06-01"
+            assert headers["x-api-key"] == "anthropic-secret"
+            assert json["messages"][0]["content"] == "分析镜头"
+            return FakeResponse()
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-secret")
+    monkeypatch.setenv("AI_STUDIO_ANTHROPIC_MODEL", "claude-test")
+    monkeypatch.setattr("app.adapters.anthropic.httpx.AsyncClient", FakeClient)
+    result = __import__("asyncio").run(AnthropicAdapter().invoke("分析镜头", {"task_type": "llm"}))
+    assert result["result"] == "导演分析结果"
+    assert result["model"] == "claude-test"
+
+
+def test_openai_image_uses_reference_edit_for_story_bible(monkeypatch, tmp_path: Path):
+    import base64
+    reference = tmp_path / "character.png"
+    reference.write_bytes(b"reference-image")
+    output_png = base64.b64encode(b"generated-image").decode()
+
+    class FakeResponse:
+        status_code = 200
+        is_error = False
+        text = ""
+        def json(self): return {"data": [{"b64_json": output_png}]}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): return None
+        async def post(self, url, headers, data=None, files=None, json=None):
+            assert url.endswith("/images/edits")
+            assert data["input_fidelity"] == "high"
+            assert files and files[0][0] == "image"
+            return FakeResponse()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-secret")
+    monkeypatch.setattr("app.adapters.openai_compatible.httpx.AsyncClient", FakeClient)
+    monkeypatch.setattr("app.adapters.openai_compatible.project_media_dir", lambda _: tmp_path / "media")
+    result = __import__("asyncio").run(OpenAICompatibleAdapter("openai").invoke("保持人物一致", {
+        "task_type": "image", "project_id": "demo", "shot_id": 1, "reference_paths": [str(reference)], "options": {"input_fidelity": "high"}
+    }))
+    assert Path(result["output_path"]).read_bytes() == b"generated-image"
+
+
+def test_vision_review_is_persisted_as_repair_record():
+    with sqlite3.connect(settings.database_path) as db:
+        cursor = db.execute("INSERT INTO tasks(project_id,task_type,provider,payload_json) VALUES('demo','vision_review','openai',?)", ('{"episode":1,"shot_number":"001","options":{"threshold":85}}',))
+        task_id = cursor.lastrowid
+        row = db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+        columns = [item[1] for item in db.execute("PRAGMA table_info(tasks)")]
+        task = dict(zip(columns, row))
+    TaskRunner()._complete(task, {"score": 61, "dimensions": {"character": 55}, "findings": ["脸型漂移"]})
+    with sqlite3.connect(settings.database_path) as db:
+        review = db.execute("SELECT score,status,repair_plan_json FROM quality_reviews WHERE project_id='demo' ORDER BY id DESC LIMIT 1").fetchone()
+    assert review[0] == 61
+    assert review[1] == "repair_required"
+    assert "regenerate_keyframe" in review[2]
+
+
 def test_claude_borrowed_architecture_endpoints():
     with TestClient(app) as client:
         assert len(client.get("/api/v1/pipeline/stages").json()) == 6
@@ -117,6 +195,66 @@ def test_proofread_is_computed_from_project_shots():
         assert {item["action"] for item in result["findings"]} == {"adjust_axis", "adjust_lighting"}
 
 
+def test_automation_start_freezes_bible_and_injects_memory():
+    with TestClient(app) as client:
+        client.post("/api/v1/projects/demo/bible", json={"entity_type": "character", "entity_key": "hero", "name": "主角", "state": "draft", "data": {"face": "国字脸", "costume": "青衫"}})
+        started = client.post("/api/v1/projects/demo/automation/start", json={
+            "episode": 1, "image_provider": "not-running", "video_provider": "not-running", "voice_provider": None,
+            "output_name": "automation-test.mp4"
+        })
+        assert started.status_code == 202
+        run_id = started.json()["id"]
+        with sqlite3.connect(settings.database_path) as db:
+            assert db.execute("SELECT state FROM bible_entities WHERE entity_key='hero' ORDER BY version DESC LIMIT 1").fetchone()[0] == "frozen"
+            payload = db.execute("SELECT payload_json FROM tasks WHERE automation_run_id=? AND stage='keyframes' ORDER BY id LIMIT 1", (run_id,)).fetchone()[0]
+        assert "国字脸" in payload
+        assert "禁止" not in payload or "强制连续性设定" in payload
+
+
+@pytest.mark.skipif(not __import__("shutil").which("ffmpeg") or not __import__("shutil").which("ffprobe"), reason="FFmpeg not installed")
+def test_one_click_automation_reaches_real_export(tmp_path: Path, monkeypatch):
+    import base64
+    import subprocess
+    import shutil
+
+    video = tmp_path / "generated.mp4"
+    subprocess.run([shutil.which("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=navy:s=320x240:d=0.8:r=24", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.8", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(video)], check=True, timeout=30)
+    image = tmp_path / "keyframe.png"
+    image.write_bytes(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="))
+
+    class FakeProductionAdapter(AIAdapter):
+        provider = "fakeprod"
+        async def invoke(self, prompt, context):
+            kind = context.get("task_type")
+            path = image if kind == "image" else video
+            asset_type = "image" if kind == "image" else "voice" if kind == "voice" else "video"
+            return {"provider": self.provider, "status": "completed", "output_path": str(path), "output_name": path.name, "asset_type": asset_type, "shot_id": context.get("shot_id")}
+
+    registry.register(FakeProductionAdapter())
+    monkeypatch.setattr(media, "render_dir", lambda: tmp_path / "renders")
+    monkeypatch.setattr(production, "project_media_dir", lambda _: tmp_path / "project-media")
+    with sqlite3.connect(settings.database_path) as db:
+        db.execute("DELETE FROM shots WHERE project_id='demo' AND number NOT IN ('001','002')")
+        db.execute("UPDATE shots SET prompt='电影关键帧',description='人物在雪夜前行',dialogue='继续前进。',duration='0.7s' WHERE project_id='demo'")
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/v1/projects/demo/automation/start", json={"episode": 1, "image_provider": "fakeprod", "video_provider": "fakeprod", "voice_provider": "fakeprod", "quality_provider": None, "width": 640, "height": 360, "output_name": "一键成片.mp4"})
+            assert response.status_code == 202
+            run_id = response.json()["id"]
+            deadline = time.time() + 20
+            run = None
+            while time.time() < deadline:
+                run = next(item for item in client.get("/api/v1/projects/demo/automation/runs").json() if item["id"] == run_id)
+                if run["status"] in {"completed", "failed"}: break
+                time.sleep(0.1)
+            assert run and run["status"] == "completed", run
+            assert Path(run["checkpoint"]["output_path"]).is_file()
+            tasks = client.get("/api/v1/projects/demo/tasks").json()
+            assert {item["stage"] for item in tasks if item["automation_run_id"] == run_id} == {"keyframes", "videos", "voice", "export"}
+    finally:
+        registry.register(MockAdapter())
+
+
 def test_pipeline_checkpoint():
     with TestClient(app) as client:
         saved = client.put("/api/v1/projects/demo/pipeline/images", json={"status": "paused", "progress": 42, "checkpoint": {"last_shot": "006"}})
@@ -130,6 +268,9 @@ def test_pipeline_checkpoint():
 def test_project_shot_task_crud_and_preflight():
     with TestClient(app) as client:
         project = client.post("/api/v1/projects", json={"name": "测试长篇", "genre": "科幻", "episode_count": 24}).json()
+        renamed = client.patch(f"/api/v1/projects/{project['id']}", json={"name": "测试长篇·修订", "episode_count": 30}).json()
+        assert renamed["name"] == "测试长篇·修订"
+        assert renamed["episode_count"] == 30
         shot = client.post(f"/api/v1/projects/{project['id']}/shots", json={"number": "001", "title": "开场"}).json()
         assert client.patch(f"/api/v1/shots/{shot['id']}", json={"description": "城市夜景"}).status_code == 200
         assert client.post(f"/api/v1/projects/{project['id']}/tasks", json={"task_type": "image", "payload": {"shot": "001"}}).status_code == 202
