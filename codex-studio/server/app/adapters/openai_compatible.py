@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import json
+import base64
+import asyncio
+import mimetypes
 import time
+import uuid
+from pathlib import Path
 from typing import Any
 
 import httpx
 
 from ..database import connect
+from ..config import project_media_dir
 from ..provider_config import resolve_provider_config
 from .base import AIAdapter
 
@@ -19,8 +25,14 @@ class OpenAICompatibleAdapter(AIAdapter):
 
     async def invoke(self, prompt: str, context: dict[str, Any]) -> dict[str, Any]:
         task_type = str(context.get("task_type", "llm"))
+        if task_type == "image" and self.provider == "openai":
+            return await self._image(prompt, context)
+        if task_type == "voice" and self.provider == "openai":
+            return await self._voice(prompt, context)
+        if task_type == "video" and self.provider == "openai":
+            return await self._video(prompt, context)
         if task_type not in {"llm", "proofread"}:
-            raise RuntimeError(f"{self.provider} 当前真实适配器仅支持剧本/校对任务，不会伪造 {task_type} 结果")
+            raise RuntimeError(f"{self.provider} 尚未实现 {task_type} 协议；任务不会伪造成功")
         config = resolve_provider_config(self.provider, "chat")
         if not config.api_key:
             raise RuntimeError(f"{config.provider.name} 尚未配置 API 密钥")
@@ -54,3 +66,94 @@ class OpenAICompatibleAdapter(AIAdapter):
                     "INSERT INTO request_logs(provider,capability,status_code,latency_ms,success,error_message) VALUES(?,?,?,?,?,?)",
                     (self.provider, "chat", status_code, latency, int(200 <= status_code < 300 and not error), error[:1000]),
                 )
+
+    def _destination(self, context: dict[str, Any], suffix: str) -> Path:
+        project_id = str(context.get("project_id") or "unassigned")
+        target = project_media_dir(project_id) / "generated"
+        target.mkdir(parents=True, exist_ok=True)
+        return target / f"{context.get('task_type', 'media')}-{uuid.uuid4().hex[:12]}{suffix}"
+
+    async def _image(self, prompt: str, context: dict[str, Any]) -> dict[str, Any]:
+        config = resolve_provider_config(self.provider, "t2i")
+        if not config.api_key:
+            raise RuntimeError("OpenAI 尚未配置 API 密钥")
+        options = dict(context.get("options") or {})
+        model = str(context.get("model") or options.get("model") or "gpt-image-2")
+        body = {"model": model, "prompt": prompt, "size": options.get("size", "1536x1024"), "quality": options.get("quality", "medium"), "output_format": "png"}
+        async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0)) as client:
+            response = await client.post(f"{config.base_url.rstrip('/')}/images/generations", headers={"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}, json=body)
+            response.raise_for_status()
+            payload = response.json()
+            item = payload["data"][0]
+            if item.get("b64_json"):
+                data = base64.b64decode(item["b64_json"])
+            elif item.get("url"):
+                download = await client.get(item["url"])
+                download.raise_for_status()
+                data = download.content
+            else:
+                raise RuntimeError("OpenAI 图片接口未返回图像数据")
+        output = self._destination(context, ".png")
+        output.write_bytes(data)
+        return {"provider": self.provider, "model": model, "status": "completed", "output_path": str(output), "output_name": output.name, "asset_type": "image", "shot_id": context.get("shot_id"), "revised_prompt": item.get("revised_prompt", "")}
+
+    async def _voice(self, prompt: str, context: dict[str, Any]) -> dict[str, Any]:
+        config = resolve_provider_config(self.provider, "tts")
+        if not config.api_key:
+            raise RuntimeError("OpenAI 尚未配置 API 密钥")
+        options = dict(context.get("options") or {})
+        model = str(context.get("model") or options.get("model") or "gpt-4o-mini-tts")
+        body = {"model": model, "voice": options.get("voice", "alloy"), "input": prompt, "response_format": "mp3"}
+        if options.get("instructions"):
+            body["instructions"] = options["instructions"]
+        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0)) as client:
+            response = await client.post(f"{config.base_url.rstrip('/')}/audio/speech", headers={"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}, json=body)
+            response.raise_for_status()
+            data = response.content
+        output = self._destination(context, ".mp3")
+        output.write_bytes(data)
+        return {"provider": self.provider, "model": model, "status": "completed", "output_path": str(output), "output_name": output.name, "asset_type": "voice", "shot_id": context.get("shot_id")}
+
+    @staticmethod
+    def _data_url(path: str) -> str:
+        source = Path(path)
+        if not source.is_file() or source.stat().st_size > 20 * 1024 * 1024:
+            raise RuntimeError("视频参考图不存在或超过 20MB")
+        mime = mimetypes.guess_type(source.name)[0] or "image/png"
+        return f"data:{mime};base64,{base64.b64encode(source.read_bytes()).decode('ascii')}"
+
+    async def _video(self, prompt: str, context: dict[str, Any]) -> dict[str, Any]:
+        config = resolve_provider_config(self.provider, "i2v")
+        if not config.api_key:
+            raise RuntimeError("OpenAI 尚未配置 API 密钥")
+        options = dict(context.get("options") or {})
+        model = str(context.get("model") or options.get("model") or "sora-2")
+        body: dict[str, Any] = {"model": model, "prompt": prompt, "seconds": str(options.get("seconds", 8)), "size": options.get("size", "1280x720")}
+        reference = str(options.get("reference_path") or next(iter(context.get("reference_paths") or []), ""))
+        if reference:
+            body["input_reference"] = {"image_url": self._data_url(reference)}
+        headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=30.0)) as client:
+            created = await client.post(f"{config.base_url.rstrip('/')}/videos", headers=headers, json=body)
+            created.raise_for_status()
+            job = created.json()
+            video_id = job["id"]
+            deadline = time.monotonic() + float(options.get("poll_timeout", 1200))
+            while time.monotonic() < deadline:
+                status_response = await client.get(f"{config.base_url.rstrip('/')}/videos/{video_id}", headers=headers)
+                status_response.raise_for_status()
+                job = status_response.json()
+                status = str(job.get("status") or "").lower()
+                if status in {"completed", "succeeded"}:
+                    break
+                if status in {"failed", "cancelled", "canceled"}:
+                    raise RuntimeError(f"OpenAI 视频生成失败：{job.get('error') or status}")
+                await asyncio.sleep(10)
+            else:
+                raise RuntimeError("OpenAI 视频生成轮询超时")
+            download = await client.get(f"{config.base_url.rstrip('/')}/videos/{video_id}/content", headers={"Authorization": f"Bearer {config.api_key}"})
+            download.raise_for_status()
+            data = download.content
+        output = self._destination(context, ".mp4")
+        output.write_bytes(data)
+        return {"provider": self.provider, "model": model, "provider_task_id": video_id, "status": "completed", "output_path": str(output), "output_name": output.name, "asset_type": "video", "shot_id": context.get("shot_id"), "deprecation_notice": "OpenAI Videos API is scheduled to shut down on 2026-09-24"}
