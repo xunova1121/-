@@ -12,13 +12,34 @@ class Project(ProjectCreate):
     id: str
 
 
+class ScriptUpsert(BaseModel):
+    title: str = Field(default="", max_length=200)
+    source_name: str = Field(default="", max_length=260)
+    source_text: str = Field(min_length=1)
+
+
+class StoryboardGenerateRequest(BaseModel):
+    replace_existing: bool = True
+
+
 class Shot(BaseModel):
+    id: int
+    episode: int
+    scene_id: int | None = None
+    sequence: int = 0
     number: str
     title: str
     description: str
     duration: str
     status: str
     color: str
+    prompt: str = ""
+    shot_type: str = "中景"
+    camera: str = "固定"
+    action: str = ""
+    dialogue: str = ""
+    characters: list[str] = []
+    continuity: dict[str, Any] = {}
 
 
 class ShotCreate(BaseModel):
@@ -30,6 +51,14 @@ class ShotCreate(BaseModel):
     status: str = "待生成"
     color: str = "#1C2027"
     prompt: str = ""
+    scene_id: int | None = None
+    sequence: int = 0
+    shot_type: str = "中景"
+    camera: str = "固定"
+    action: str = ""
+    dialogue: str = ""
+    characters: list[str] = []
+    continuity: dict[str, Any] = {}
 
 
 class ShotUpdate(BaseModel):
@@ -38,6 +67,12 @@ class ShotUpdate(BaseModel):
     duration: str | None = None
     status: str | None = None
     prompt: str | None = None
+    shot_type: str | None = None
+    camera: str | None = None
+    action: str | None = None
+    dialogue: str | None = None
+    characters: list[str] | None = None
+    continuity: dict[str, Any] | None = None
 
 
 class AssetCreate(BaseModel):
