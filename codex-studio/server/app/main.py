@@ -8,13 +8,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from .adapters import registry
 from .config import settings
 from .database import connect, initialize_database
-from .schemas import AssetCreate, BibleEntityCreate, ContinuityContractRequest, ContinuityRequest, EpisodeLockRequest, GatewayRequest, PipelineUpdate, PreflightRequest, Project, ProjectCreate, QualityReviewRequest, RouteUpdate, Shot, ShotCreate, ShotUpdate, TaskCreate
+from .schemas import AssetCreate, BibleEntityCreate, ContinuityContractRequest, ContinuityRequest, EpisodeAutomationRequest, EpisodeLockRequest, GatewayRequest, PipelineUpdate, PreflightRequest, Project, ProjectCreate, QualityReviewRequest, RouteUpdate, SceneLayoutRequest, Shot, ShotCreate, ShotUpdate, TaskCreate, TransitionPlanRequest
 from .continuity import analyze_pair
 from .pipeline import stage_catalog
 from .providers import CAPABILITIES, providers_for, public_catalog
 from .preflight import run_preflight
 from .quality import repair_plan, weighted_score
 from .story_bible import continuity_contract, episode_snapshot, fingerprint
+from .automation import automation_plan
+from .previz import analyze_stage, stage_fingerprint
+from .transitions import plan_transition
 
 
 @asynccontextmanager
@@ -187,6 +190,40 @@ def quality_review(project_id: str, payload: QualityReviewRequest):
     with connect() as db:
         cursor = db.execute("INSERT INTO quality_reviews(project_id,episode,shot_number,score,status,dimensions_json,findings_json,repair_plan_json) VALUES(?,?,?,?,?,?,?,?)", (project_id, payload.episode, payload.shot_number, score, status, json.dumps(payload.dimensions), json.dumps(payload.findings, ensure_ascii=False), json.dumps(plan, ensure_ascii=False)))
     return {"id": cursor.lastrowid, "score": score, "status": status, "repair_plan": plan, **payload.model_dump()}
+
+
+@app.post(f"{PREFIX}/projects/{{project_id}}/previz/layouts", status_code=201)
+def save_scene_layout(project_id: str, payload: SceneLayoutRequest):
+    layout = payload.model_dump()
+    mark = stage_fingerprint(layout)
+    with connect() as db:
+        row = db.execute("SELECT COALESCE(MAX(version),0)+1 FROM scene_layouts WHERE project_id=? AND scene_key=?", (project_id, payload.scene_key)).fetchone()
+        version = row[0]
+        cursor = db.execute("INSERT INTO scene_layouts(project_id,scene_key,version,layout_json,fingerprint) VALUES(?,?,?,?,?)", (project_id, payload.scene_key, version, json.dumps(layout, ensure_ascii=False), mark))
+    return {"id": cursor.lastrowid, "version": version, "fingerprint": mark, "analysis": analyze_stage(layout), **layout}
+
+
+@app.post(f"{PREFIX}/previz/analyze")
+def analyze_previz(payload: SceneLayoutRequest):
+    return analyze_stage(payload.model_dump())
+
+
+@app.post(f"{PREFIX}/projects/{{project_id}}/transition-plans", status_code=201)
+def create_transition_plan(project_id: str, payload: TransitionPlanRequest):
+    raw = payload.model_dump()
+    plan = plan_transition(raw)
+    with connect() as db:
+        db.execute("INSERT INTO transition_plans(project_id,episode,from_shot,to_shot,method,score,plan_json) VALUES(?,?,?,?,?,?,?) ON CONFLICT(project_id,episode,from_shot,to_shot) DO UPDATE SET method=excluded.method,score=excluded.score,plan_json=excluded.plan_json,status='planned'", (project_id, payload.episode, payload.left.shot_number, payload.right.shot_number, plan["method"], plan["score"], json.dumps(plan, ensure_ascii=False)))
+    return {"project_id": project_id, **plan}
+
+
+@app.post(f"{PREFIX}/projects/{{project_id}}/automation/plan")
+def plan_episode_automation(project_id: str, payload: EpisodeAutomationRequest):
+    with connect() as db:
+        shot_count = db.execute("SELECT COUNT(*) FROM shots WHERE project_id=? AND episode=?", (project_id, payload.episode)).fetchone()[0]
+        rows = db.execute("SELECT from_shot,to_shot,score,findings_json FROM continuity_contracts WHERE project_id=? AND episode=? AND score<70", (project_id, payload.episode)).fetchall()
+    blockers = [{**dict(row), "findings": json.loads(row["findings_json"])} for row in rows]
+    return automation_plan(payload.episode, payload.mode, shot_count, blockers)
 
 
 @app.post(f"{PREFIX}/gateway/{{capability}}")

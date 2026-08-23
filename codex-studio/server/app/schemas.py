@@ -110,3 +110,69 @@ class QualityReviewRequest(BaseModel):
     dimensions: dict[str, int]
     findings: list[dict[str, Any]] = []
     auto_repair: bool = True
+
+
+class Vector2(BaseModel):
+    x: float
+    y: float
+
+
+class StageSubject(BaseModel):
+    entity_key: str
+    position: Vector2
+    facing_deg: float = 0
+    pose: str = "standing"
+
+
+class StageLandmark(BaseModel):
+    name: str
+    position: Vector2 | None = None
+    far_bearing_deg: float | None = None
+
+
+class CameraState(BaseModel):
+    position: Vector2
+    target: Vector2
+    lens_mm: float = Field(default=35, ge=8, le=300)
+    height_m: float = Field(default=1.6, ge=0, le=20)
+    movement: str = "fixed"
+
+
+class SceneLayoutRequest(BaseModel):
+    scene_key: str
+    camera: CameraState
+    subjects: list[StageSubject] = []
+    landmarks: list[StageLandmark] = []
+    sun_bearing_deg: float | None = None
+    sun_elevation: Literal["low", "mid", "high"] = "mid"
+
+
+class TransitionBoundary(BaseModel):
+    shot_number: str
+    scene_key: str
+    action: str = ""
+    action_phase: Literal["start", "middle", "end", "static"] = "static"
+    screen_direction: Literal["left", "right", "center", "unknown"] = "unknown"
+    camera_movement: str = "fixed"
+    lighting: str = ""
+    color_temperature: int | None = None
+    video_path: str | None = None
+    first_frame: str | None = None
+    last_frame: str | None = None
+
+
+class TransitionPlanRequest(BaseModel):
+    episode: int = Field(ge=1)
+    left: TransitionBoundary
+    right: TransitionBoundary
+    narrative_relation: Literal["same_action", "same_scene", "time_passage", "new_scene", "parallel"] = "same_scene"
+    preferred_engine: Literal["auto", "vace", "first_last_frame", "rife", "ffmpeg"] = "auto"
+    target_fps: int = Field(default=24, ge=12, le=120)
+    allow_ai_bridge: bool = True
+
+
+class EpisodeAutomationRequest(BaseModel):
+    episode: int = Field(ge=1)
+    mode: Literal["quality", "balanced", "economy"] = "balanced"
+    auto_repair: bool = True
+    stop_on_blocker: bool = True

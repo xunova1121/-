@@ -82,3 +82,27 @@ def test_story_bible_episode_lock_and_quality_repair():
         }).json()
         assert review["status"] == "repair_required"
         assert review["repair_plan"]["actions"][0]["action"] == "regenerate_video"
+
+
+def test_previz_transition_and_episode_automation():
+    with TestClient(app) as client:
+        layout = {
+            "scene_key": "temple", "camera": {"position": {"x": 0, "y": -5}, "target": {"x": 0, "y": 0}, "lens_mm": 35},
+            "subjects": [{"entity_key": "li-goudan", "position": {"x": 0, "y": 0}, "facing_deg": 180}],
+            "landmarks": [{"name": "古寺大门", "position": {"x": 3, "y": 2}}, {"name": "雪山", "far_bearing_deg": -30}],
+            "sun_bearing_deg": -45, "sun_elevation": "low"
+        }
+        previz = client.post("/api/v1/projects/demo/previz/layouts", json=layout).json()
+        assert previz["analysis"]["subjects"][0]["visible"] is True
+        transition = client.post("/api/v1/projects/demo/transition-plans", json={
+            "episode": 1,
+            "left": {"shot_number": "005", "scene_key": "temple", "action": "斧头脱手", "action_phase": "middle", "screen_direction": "right", "lighting": "night"},
+            "right": {"shot_number": "006", "scene_key": "temple", "action": "斧头下落", "action_phase": "middle", "screen_direction": "right", "lighting": "night"},
+            "narrative_relation": "same_action", "preferred_engine": "auto", "target_fps": 24
+        }).json()
+        assert transition["method"] == "vace_context_bridge"
+        assert transition["parameters"]["context_frames_each_side"] % 4 == 0
+        assert transition["parameters"]["generated_bridge_frames"] % 4 == 1
+        plan = client.post("/api/v1/projects/demo/automation/plan", json={"episode": 1, "mode": "quality"}).json()
+        assert len(plan["stages"]) == 8
+        assert next(stage for stage in plan["stages"] if stage["id"] == "seams")["items"] == 5

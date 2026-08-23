@@ -64,6 +64,19 @@ CREATE TABLE IF NOT EXISTS quality_reviews (
     dimensions_json TEXT NOT NULL DEFAULT '{}', findings_json TEXT NOT NULL DEFAULT '[]',
     repair_plan_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS scene_layouts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, scene_key TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1, layout_json TEXT NOT NULL DEFAULT '{}',
+    fingerprint TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(project_id, scene_key, version)
+);
+CREATE TABLE IF NOT EXISTS transition_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, episode INTEGER NOT NULL,
+    from_shot TEXT NOT NULL, to_shot TEXT NOT NULL, method TEXT NOT NULL,
+    score INTEGER NOT NULL DEFAULT 0, plan_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'planned', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(project_id, episode, from_shot, to_shot)
+);
 """
 
 
