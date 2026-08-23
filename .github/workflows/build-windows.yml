@@ -39,7 +39,7 @@ jobs:
         run: |
           dotnet publish codex-studio/client/AI.FilmStudio/AI.FilmStudio.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o dist/AI-Film-Studio
           New-Item -ItemType Directory -Force dist/AI-Film-Studio/service
-          Copy-Item server/dist/AIStudioService.exe dist/AI-Film-Studio/service/AIStudioService.exe
+          Copy-Item codex-studio/server/dist/AIStudioService.exe dist/AI-Film-Studio/service/AIStudioService.exe
           Copy-Item codex-studio/README.md dist/AI-Film-Studio/README.md
       - name: Package
         shell: pwsh
@@ -49,4 +49,3 @@ jobs:
           name: AI-Film-Studio-Windows-x64
           path: dist/AI-Film-Studio-Windows-x64.zip
           retention-days: 30
-

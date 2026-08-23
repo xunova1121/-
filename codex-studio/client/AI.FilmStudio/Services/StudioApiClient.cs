@@ -1,3 +1,4 @@
+using System.Net.Http;
 using System.Net.Http.Json;
 using AI.FilmStudio.Models;
 
@@ -22,4 +23,3 @@ public sealed class StudioApiClient
 
     private sealed record HealthResult(string Status);
 }
-
