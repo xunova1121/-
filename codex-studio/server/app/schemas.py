@@ -81,8 +81,79 @@ class AssetCreate(BaseModel):
     memory: dict[str, Any] = {}
 
 
+class AssetUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    asset_type: Literal["character", "scene", "prop", "image", "video", "voice", "music", "subtitle", "motion"] | None = None
+    episode: int | None = Field(default=None, ge=1)
+    shot_id: int | None = None
+    status: str | None = None
+    memory: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class AssetImportRequest(BaseModel):
+    source_path: str = Field(min_length=1)
+    asset_type: Literal["character", "scene", "prop", "image", "video", "voice", "music", "subtitle", "motion"]
+    name: str = Field(default="", max_length=120)
+    episode: int = Field(default=1, ge=1)
+    shot_id: int | None = None
+    copy_into_project: bool = True
+    memory: dict[str, Any] = {}
+
+
+class ShotGenerationRequest(BaseModel):
+    shot_id: int
+    task_type: Literal["image", "video", "voice"]
+    provider: str
+    prompt: str = Field(min_length=1, max_length=32000)
+    model: str | None = None
+    reference_asset_ids: list[int] = []
+    options: dict[str, Any] = {}
+
+
+class TimelineClipCreate(BaseModel):
+    episode: int = Field(default=1, ge=1)
+    track: Literal["V1", "V2", "A1", "A2", "T1"] = "V1"
+    asset_id: int | None = None
+    source_path: str = Field(min_length=1)
+    title: str = ""
+    trim_in: float = Field(default=0, ge=0)
+    trim_out: float = Field(default=0, ge=0)
+    duration: float = Field(default=0, ge=0)
+    transition: Literal["cut", "dissolve", "fade_black"] = "cut"
+    transition_duration: float = Field(default=0.4, ge=0, le=3)
+    volume: float = Field(default=1, ge=0, le=4)
+    metadata: dict[str, Any] = {}
+
+
+class TimelineClipUpdate(BaseModel):
+    position: int | None = Field(default=None, ge=0)
+    track: Literal["V1", "V2", "A1", "A2", "T1"] | None = None
+    title: str | None = None
+    trim_in: float | None = Field(default=None, ge=0)
+    trim_out: float | None = Field(default=None, ge=0)
+    duration: float | None = Field(default=None, ge=0)
+    transition: Literal["cut", "dissolve", "fade_black"] | None = None
+    transition_duration: float | None = Field(default=None, ge=0, le=3)
+    volume: float | None = Field(default=None, ge=0, le=4)
+
+
+class TimelineReorderRequest(BaseModel):
+    clip_ids: list[int]
+
+
+class TimelineExportRequest(BaseModel):
+    episode: int = Field(default=1, ge=1)
+    width: int = Field(default=1920, ge=320, le=3840)
+    height: int = Field(default=1080, ge=240, le=2160)
+    fps: int = Field(default=24, ge=12, le=60)
+    quality: Literal["draft", "standard", "high"] = "high"
+    burn_subtitles: bool = True
+    output_name: str = Field(default="final.mp4", min_length=1, max_length=120)
+
+
 class TaskCreate(BaseModel):
-    task_type: Literal["llm", "image", "video", "voice", "proofread", "transition_render"]
+    task_type: Literal["llm", "image", "video", "voice", "proofread", "transition_render", "timeline_export"]
     provider: str = "mock"
     payload: dict[str, Any] = {}
     priority: int = Field(default=0, ge=-100, le=100)
