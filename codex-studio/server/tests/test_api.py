@@ -128,6 +128,51 @@ def test_project_shot_task_crud_and_preflight():
         assert client.delete(f"/api/v1/projects/{project['id']}").status_code == 204
 
 
+def test_real_script_parse_storyboard_edit_and_persistence(tmp_path: Path):
+    original = settings.database_path
+    object.__setattr__(settings, "database_path", tmp_path / "story.db")
+    script = """第1场 木屋外—雪夜
+李狗蛋抡起劈柴斧劈向木桩，木桩裂开一道缝。
+李狗蛋：谁在那里？
+
+第2场 古寺大门—深夜
+黑衣人从门后出现，缓慢拔刀。
+黑衣人：你终于来了。
+"""
+    try:
+        with TestClient(app) as client:
+            project = client.post("/api/v1/projects", json={"name": "雪夜杀局", "genre": "武侠", "episode_count": 2}).json()
+            project_id = project["id"]
+            saved = client.put(f"/api/v1/projects/{project_id}/episodes/1/script", json={
+                "title": "第一集", "source_name": "雪夜杀局.txt", "source_text": script,
+            })
+            assert saved.status_code == 200
+            parsed = client.post(f"/api/v1/projects/{project_id}/episodes/1/script/parse").json()
+            assert parsed["scene_count"] == 2
+            assert parsed["characters"] == ["李狗蛋", "黑衣人"]
+            generated = client.post(f"/api/v1/projects/{project_id}/episodes/1/storyboard/generate", json={"replace_existing": True}).json()
+            assert generated["shot_count"] == 4
+            summary = client.get(f"/api/v1/projects/{project_id}/summary").json()
+            assert summary == {"scripts": 1, "scenes": 2, "shots": 4, "characters": 2, "locations": 2, "props": 0}
+            shots = client.get(f"/api/v1/projects/{project_id}/shots").json()
+            assert shots[0]["scene_id"] is not None
+            assert shots[0]["action"].startswith("李狗蛋抡起")
+            assert shots[1]["dialogue"] == "谁在那里？"
+            assert "李狗蛋" in shots[1]["characters"]
+            assert client.patch(f"/api/v1/shots/{shots[0]['id']}", json={"shot_type": "近景", "duration": "4.5s"}).status_code == 200
+
+        # A fresh application lifespan must read the same SQLite state.
+        with TestClient(app) as reopened:
+            stored_script = reopened.get(f"/api/v1/projects/{project_id}/episodes/1/script").json()
+            stored_shots = reopened.get(f"/api/v1/projects/{project_id}/shots").json()
+            assert stored_script["source_text"] == script
+            assert stored_script["parse_status"] == "storyboard"
+            assert stored_shots[0]["shot_type"] == "近景"
+            assert stored_shots[0]["duration"] == "4.5s"
+    finally:
+        object.__setattr__(settings, "database_path", original)
+
+
 def test_story_bible_episode_lock_and_quality_repair():
     with TestClient(app) as client:
         entity = client.post("/api/v1/projects/demo/bible", json={
