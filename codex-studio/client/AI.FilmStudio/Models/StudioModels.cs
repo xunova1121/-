@@ -142,7 +142,15 @@ public sealed class ProviderConfigStatus
     [JsonPropertyName("model")] public string Model { get; set; } = "";
     [JsonPropertyName("configured")] public bool Configured { get; set; }
     [JsonPropertyName("credential_source")] public string CredentialSource { get; set; } = "";
+    [JsonPropertyName("capabilities")] public List<string> Capabilities { get; set; } = [];
     [JsonIgnore] public string DisplayName => Configured ? $"● {Name}" : $"○ {Name}";
+}
+
+public sealed class GatewayTextResult
+{
+    [JsonPropertyName("provider")] public string Provider { get; set; } = "";
+    [JsonPropertyName("model")] public string Model { get; set; } = "";
+    [JsonPropertyName("result")] public string Result { get; set; } = "";
 }
 
 public sealed class TaskItem
@@ -170,4 +178,32 @@ public sealed class TaskAccepted
 {
     [JsonPropertyName("id")] public int Id { get; set; }
     [JsonPropertyName("status")] public string Status { get; set; } = "";
+}
+
+public sealed class BibleEntity
+{
+    [JsonPropertyName("id")] public int Id { get; set; }
+    [JsonPropertyName("entity_type")] public string EntityType { get; set; } = "character";
+    [JsonPropertyName("entity_key")] public string EntityKey { get; set; } = "";
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("version")] public int Version { get; set; }
+    [JsonPropertyName("state")] public string State { get; set; } = "draft";
+    [JsonPropertyName("data")] public Dictionary<string, JsonElement> Data { get; set; } = [];
+    [JsonPropertyName("reference_assets")] public List<string> ReferenceAssets { get; set; } = [];
+    [JsonPropertyName("fingerprint")] public string Fingerprint { get; set; } = "";
+    [JsonIgnore] public string Display => $"{Name} · v{Version} · {(State == "frozen" ? "已冻结" : "草稿")}";
+}
+
+public sealed class AutomationRun
+{
+    [JsonPropertyName("id")] public int Id { get; set; }
+    [JsonPropertyName("episode")] public int Episode { get; set; }
+    [JsonPropertyName("mode")] public string Mode { get; set; } = "balanced";
+    [JsonPropertyName("status")] public string Status { get; set; } = "";
+    [JsonPropertyName("stage")] public string Stage { get; set; } = "";
+    [JsonPropertyName("progress")] public int Progress { get; set; }
+    [JsonPropertyName("error_message")] public string ErrorMessage { get; set; } = "";
+    [JsonPropertyName("checkpoint")] public Dictionary<string, JsonElement> Checkpoint { get; set; } = [];
+    [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
+    [JsonIgnore] public string OutputPath => Checkpoint.TryGetValue("output_path", out var value) ? value.GetString() ?? "" : "";
 }
