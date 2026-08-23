@@ -1,12 +1,32 @@
 from pathlib import Path
 import sqlite3
 import time
+import pytest
 
 from fastapi.testclient import TestClient
 
 from app import database
 from app.config import settings
 from app.main import app
+
+
+@pytest.fixture(autouse=True)
+def isolated_test_database(tmp_path: Path):
+    """Tests may use a sample project, but production startup never seeds one."""
+    original = settings.database_path
+    path = tmp_path / "isolated.db"
+    object.__setattr__(settings, "database_path", path)
+    database.initialize_database(path)
+    with sqlite3.connect(path) as db:
+        db.execute("INSERT INTO projects(id,name,genre,episode_count) VALUES('demo','自动化测试项目','测试',1)")
+        db.executemany(
+            "INSERT INTO shots(project_id,episode,number,title,description,duration,status,color) VALUES('demo',1,?,?,?,?,?,?)",
+            [(f"{i:03}", f"测试镜头 {i}", "", "3.0s", "已生成", "#1C2027") for i in range(1, 7)],
+        )
+    try:
+        yield
+    finally:
+        object.__setattr__(settings, "database_path", original)
 
 
 def wait_for_status(client: TestClient, project_id: str, task_id: int, expected: set[str], timeout: float = 4) -> dict:
