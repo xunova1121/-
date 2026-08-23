@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   windows-portable:
@@ -103,3 +103,15 @@ jobs:
           path: desktop/release/*
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish verified Codex prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "ai-film-studio-v0.2.0-codex"
+          gh release view $tag --repo "${{ github.repository }}" 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo "${{ github.repository }}" --target "${{ github.sha }}" --prerelease --title "AI影视Studio V0.2.0 Codex 验证版" --notes "真实 Electron 全流程产品；内置 FFmpeg；Windows portable EXE 已通过离线产品、真实媒体、开发态与打包态启动测试。"
+          }
+          gh release upload $tag "release\AI-Film-Studio-Real-V0.2.0-Windows-x64.exe" "release\SHA256SUMS.txt" --repo "${{ github.repository }}" --clobber
