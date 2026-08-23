@@ -3,7 +3,68 @@ namespace AI.FilmStudio.Models;
 using System.Text.Json.Serialization;
 using System.Text.Json;
 
-public sealed record Shot(string Number, string Title, string Description, string Duration, string Status, string Color);
+public sealed class Shot
+{
+    [JsonPropertyName("id")] public int Id { get; set; }
+    [JsonPropertyName("episode")] public int Episode { get; set; }
+    [JsonPropertyName("scene_id")] public int? SceneId { get; set; }
+    [JsonPropertyName("sequence")] public int Sequence { get; set; }
+    [JsonPropertyName("number")] public string Number { get; set; } = "";
+    [JsonPropertyName("title")] public string Title { get; set; } = "";
+    [JsonPropertyName("description")] public string Description { get; set; } = "";
+    [JsonPropertyName("duration")] public string Duration { get; set; } = "3.0s";
+    [JsonPropertyName("status")] public string Status { get; set; } = "待生成";
+    [JsonPropertyName("color")] public string Color { get; set; } = "#1C2027";
+    [JsonPropertyName("prompt")] public string Prompt { get; set; } = "";
+    [JsonPropertyName("shot_type")] public string ShotType { get; set; } = "中景";
+    [JsonPropertyName("camera")] public string Camera { get; set; } = "固定";
+    [JsonPropertyName("action")] public string Action { get; set; } = "";
+    [JsonPropertyName("dialogue")] public string Dialogue { get; set; } = "";
+    [JsonPropertyName("characters")] public List<string> Characters { get; set; } = [];
+    [JsonIgnore] public string CharacterText => string.Join("、", Characters);
+}
+
+public sealed class ScriptDocument
+{
+    [JsonPropertyName("project_id")] public string ProjectId { get; set; } = "";
+    [JsonPropertyName("episode")] public int Episode { get; set; }
+    [JsonPropertyName("title")] public string Title { get; set; } = "";
+    [JsonPropertyName("source_name")] public string SourceName { get; set; } = "";
+    [JsonPropertyName("source_text")] public string SourceText { get; set; } = "";
+    [JsonPropertyName("parse_status")] public string ParseStatus { get; set; } = "empty";
+}
+
+public sealed class ParsedScene
+{
+    [JsonPropertyName("sequence")] public int Sequence { get; set; }
+    [JsonPropertyName("heading")] public string Heading { get; set; } = "";
+    [JsonPropertyName("summary")] public string Summary { get; set; } = "";
+    [JsonIgnore] public string Display => $"{Sequence:00}  {Heading}  {Summary}";
+}
+
+public sealed class ScriptParseResult
+{
+    [JsonPropertyName("scene_count")] public int SceneCount { get; set; }
+    [JsonPropertyName("character_count")] public int CharacterCount { get; set; }
+    [JsonPropertyName("characters")] public List<string> Characters { get; set; } = [];
+    [JsonPropertyName("scenes")] public List<ParsedScene> Scenes { get; set; } = [];
+}
+
+public sealed class StoryboardGenerateResult
+{
+    [JsonPropertyName("shot_count")] public int ShotCount { get; set; }
+    [JsonPropertyName("replaced")] public bool Replaced { get; set; }
+}
+
+public sealed class ProjectSummary
+{
+    [JsonPropertyName("scripts")] public int Scripts { get; set; }
+    [JsonPropertyName("scenes")] public int Scenes { get; set; }
+    [JsonPropertyName("shots")] public int Shots { get; set; }
+    [JsonPropertyName("characters")] public int Characters { get; set; }
+    [JsonPropertyName("locations")] public int Locations { get; set; }
+    [JsonPropertyName("props")] public int Props { get; set; }
+}
 public sealed record Episode(string Title, string Duration, bool IsActive = false);
 public sealed record Finding(string Shot, string Message, string Action);
 public sealed record Workspace(string Key, string Title);
