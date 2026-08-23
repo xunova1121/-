@@ -15,6 +15,7 @@ public partial class ScriptWorkbenchWindow : Window
     private readonly StudioProject _project;
     private string _sourceName = "";
     private bool _loadingEpisode;
+    private string? _directorProvider;
     public bool StoryboardChanged { get; private set; }
 
     public ScriptWorkbenchWindow(StudioApiClient api, StudioProject project)
@@ -25,10 +26,19 @@ public partial class ScriptWorkbenchWindow : Window
         ProjectNameText.Text = $"· {project.Name}";
         EpisodeSelector.ItemsSource = Enumerable.Range(1, project.EpisodeCount).Select(i => $"第 {i} 集").ToList();
         EpisodeSelector.SelectedIndex = 0;
-        Loaded += async (_, _) => await LoadEpisodeAsync();
+        Loaded += async (_, _) => { await LoadDirectorProviderAsync(); await LoadEpisodeAsync(); };
     }
 
     private int Episode => EpisodeSelector.SelectedIndex + 1;
+
+    private async Task LoadDirectorProviderAsync()
+    {
+        var priorities = new[] { "anthropic", "deepseek", "qwen", "openai", "ark" };
+        var configured = (await _api.GetProviderConfigsAsync()).Where(x => x.Configured && x.Capabilities.Contains("chat")).ToList();
+        _directorProvider = priorities.FirstOrDefault(id => configured.Any(x => x.ProviderId == id));
+        DirectorButton.IsEnabled = _directorProvider is not null;
+        if (_directorProvider is null) DirectorResult.Text = "请先在“模型设置”中配置 Claude、DeepSeek、Qwen、OpenAI 或方舟导演模型。";
+    }
 
     private async Task LoadEpisodeAsync()
     {
@@ -114,6 +124,22 @@ public partial class ScriptWorkbenchWindow : Window
     {
         try { await ParseAsync(); }
         catch (Exception ex) { StatusText.Text = $"解析失败：{ex.Message}"; }
+    }
+
+    private async void Director_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (_directorProvider is null) throw new InvalidOperationException("尚未配置可用的导演模型");
+            if (string.IsNullOrWhiteSpace(ScriptEditor.Text)) throw new InvalidOperationException("剧本文本不能为空");
+            DirectorButton.IsEnabled = false;
+            DirectorResult.Text = "导演模型正在分析戏剧节拍、镜头衔接和连续性风险…";
+            var result = await _api.RunDirectorAnalysisAsync(_directorProvider, ScriptEditor.Text, Episode);
+            DirectorResult.Text = $"{result.Provider} · {result.Model}\n\n{result.Result}";
+            StatusText.Text = "AI 导演分析已完成；可据此调整剧本后再生成全量分镜。";
+        }
+        catch (Exception ex) { DirectorResult.Text = $"分析失败：{ex.Message}"; }
+        finally { DirectorButton.IsEnabled = _directorProvider is not null; }
     }
 
     private async void Generate_Click(object sender, RoutedEventArgs e)
