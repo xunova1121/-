@@ -5,8 +5,7 @@
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>AI影视Studio</AssemblyName>
+    <AssemblyName>AI-Film-Studio</AssemblyName>
     <RootNamespace>AI.FilmStudio</RootNamespace>
   </PropertyGroup>
 </Project>
-

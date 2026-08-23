@@ -50,6 +50,8 @@ class TaskCreate(BaseModel):
     task_type: Literal["llm", "image", "video", "voice", "proofread"]
     provider: str = "mock"
     payload: dict[str, Any] = {}
+    priority: int = Field(default=0, ge=-100, le=100)
+    max_attempts: int = Field(default=3, ge=1, le=10)
 
 
 class GatewayRequest(BaseModel):

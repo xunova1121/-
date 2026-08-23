@@ -62,10 +62,27 @@ jobs:
       - name: Build WPF client EXE
         shell: pwsh
         run: |
-          dotnet publish codex-studio/client/AI.FilmStudio/AI.FilmStudio.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o dist/AI-Film-Studio
+          dotnet publish codex-studio/client/AI.FilmStudio/AI.FilmStudio.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o dist/AI-Film-Studio
           New-Item -ItemType Directory -Force dist/AI-Film-Studio/service
           Copy-Item codex-studio/server/dist/AIStudioService.exe dist/AI-Film-Studio/service/AIStudioService.exe
           Copy-Item codex-studio/README.md dist/AI-Film-Studio/README.md
+      - name: Smoke test packaged desktop app
+        shell: pwsh
+        run: |
+          $desktop = Start-Process -FilePath "dist/AI-Film-Studio/AI-Film-Studio.exe" -PassThru
+          try {
+            Start-Sleep -Seconds 12
+            if ($desktop.HasExited) {
+              $log = Join-Path $env:LOCALAPPDATA "AI-Film-Studio/logs/desktop.log"
+              if (Test-Path $log) { Get-Content $log }
+              throw "Desktop app exited during startup with code $($desktop.ExitCode)"
+            }
+            $response = Invoke-RestMethod -Uri "http://127.0.0.1:18118/api/v1/health" -TimeoutSec 3
+            if ($response.status -ne "ok") { throw "Desktop-launched service is unhealthy" }
+          } finally {
+            if (-not $desktop.HasExited) { Stop-Process -Id $desktop.Id -Force }
+            Get-Process AIStudioService -ErrorAction SilentlyContinue | Stop-Process -Force
+          }
       - name: Package
         shell: pwsh
         run: Compress-Archive -Path dist/AI-Film-Studio/* -DestinationPath dist/AI-Film-Studio-Windows-x64.zip -Force

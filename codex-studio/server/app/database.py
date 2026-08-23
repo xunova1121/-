@@ -24,7 +24,11 @@ CREATE TABLE IF NOT EXISTS assets (
 CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, task_type TEXT NOT NULL,
     provider TEXT NOT NULL DEFAULT 'mock', status TEXT NOT NULL DEFAULT 'queued', progress INTEGER NOT NULL DEFAULT 0,
-    payload_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    payload_json TEXT NOT NULL DEFAULT '{}', result_json TEXT NOT NULL DEFAULT '{}',
+    priority INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 3,
+    available_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, lease_until TEXT, cancel_requested INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT NOT NULL DEFAULT '', started_at TEXT, completed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS pipeline_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, stage TEXT NOT NULL,
@@ -80,11 +84,36 @@ CREATE TABLE IF NOT EXISTS transition_plans (
 """
 
 
+TASK_MIGRATIONS: dict[str, str] = {
+    "result_json": "TEXT NOT NULL DEFAULT '{}'",
+    "priority": "INTEGER NOT NULL DEFAULT 0",
+    "attempts": "INTEGER NOT NULL DEFAULT 0",
+    "max_attempts": "INTEGER NOT NULL DEFAULT 3",
+    "available_at": "TEXT",
+    "lease_until": "TEXT",
+    "cancel_requested": "INTEGER NOT NULL DEFAULT 0",
+    "error_message": "TEXT NOT NULL DEFAULT ''",
+    "started_at": "TEXT",
+    "completed_at": "TEXT",
+    "updated_at": "TEXT",
+}
+
+
+def _migrate(connection: sqlite3.Connection) -> None:
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(tasks)")}
+    for name, definition in TASK_MIGRATIONS.items():
+        if name not in columns:
+            connection.execute(f"ALTER TABLE tasks ADD COLUMN {name} {definition}")
+    connection.execute("UPDATE tasks SET available_at=COALESCE(available_at,created_at,CURRENT_TIMESTAMP), updated_at=COALESCE(updated_at,created_at,CURRENT_TIMESTAMP)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_tasks_dispatch ON tasks(status, available_at, priority DESC, id)")
+
+
 def initialize_database(path: Path | None = None) -> None:
     target = path or settings.database_path
     target.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(target) as connection:
         connection.executescript(SCHEMA)
+        _migrate(connection)
         connection.execute("INSERT OR IGNORE INTO projects(id,name,genre,episode_count) VALUES(?,?,?,?)", ("demo", "雪山剑客 第一季", "武侠 / 剧情", 12))
         count = connection.execute("SELECT COUNT(*) FROM shots WHERE project_id='demo'").fetchone()[0]
         if count == 0:

@@ -1,10 +1,22 @@
 from pathlib import Path
+import sqlite3
+import time
 
 from fastapi.testclient import TestClient
 
 from app import database
 from app.config import settings
 from app.main import app
+
+
+def wait_for_status(client: TestClient, project_id: str, task_id: int, expected: set[str], timeout: float = 4) -> dict:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        task = next(item for item in client.get(f"/api/v1/projects/{project_id}/tasks").json() if item["id"] == task_id)
+        if task["status"] in expected:
+            return task
+        time.sleep(0.05)
+    raise AssertionError(f"task {task_id} did not reach {expected}")
 
 
 def test_health_and_demo_data(tmp_path: Path):
@@ -106,3 +118,53 @@ def test_previz_transition_and_episode_automation():
         plan = client.post("/api/v1/projects/demo/automation/plan", json={"episode": 1, "mode": "quality"}).json()
         assert len(plan["stages"]) == 8
         assert next(stage for stage in plan["stages"] if stage["id"] == "seams")["items"] == 5
+
+
+def test_durable_task_completion_failure_retry_and_stats(tmp_path: Path):
+    original = settings.database_path
+    object.__setattr__(settings, "database_path", tmp_path / "tasks.db")
+    try:
+        with TestClient(app) as client:
+            completed_id = client.post("/api/v1/projects/demo/tasks", json={
+                "task_type": "video", "provider": "mock", "priority": 20,
+                "payload": {"prompt": "生成连续动作镜头"}
+            }).json()["id"]
+            completed = wait_for_status(client, "demo", completed_id, {"completed"})
+            assert completed["progress"] == 100
+            assert completed["attempts"] == 1
+            assert completed["result"]["status"] == "completed"
+
+            failed_id = client.post("/api/v1/projects/demo/tasks", json={
+                "task_type": "image", "provider": "not-configured", "max_attempts": 1
+            }).json()["id"]
+            failed = wait_for_status(client, "demo", failed_id, {"failed"})
+            assert "not configured" in failed["error_message"]
+            retried = client.post(f"/api/v1/tasks/{failed_id}/retry")
+            assert retried.status_code == 202
+            assert wait_for_status(client, "demo", failed_id, {"failed"})["attempts"] == 1
+
+            stats = client.get("/api/v1/tasks/stats").json()
+            assert stats["total"] == 2
+            assert stats["by_status"]["completed"] == 1
+            assert stats["by_status"]["failed"] == 1
+    finally:
+        object.__setattr__(settings, "database_path", original)
+
+
+def test_task_schema_migrates_and_recovers_expired_lease(tmp_path: Path):
+    path = tmp_path / "legacy.db"
+    with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE tasks (id INTEGER PRIMARY KEY, project_id TEXT, task_type TEXT, provider TEXT, status TEXT, progress INTEGER, payload_json TEXT, created_at TEXT)")
+        db.execute("INSERT INTO tasks VALUES(1,'demo','video','mock','running',25,'{}',CURRENT_TIMESTAMP)")
+    database.initialize_database(path)
+    columns = {row[1] for row in sqlite3.connect(path).execute("PRAGMA table_info(tasks)")}
+    assert {"lease_until", "attempts", "result_json", "updated_at"}.issubset(columns)
+
+    original = settings.database_path
+    object.__setattr__(settings, "database_path", path)
+    try:
+        with TestClient(app) as client:
+            recovered = wait_for_status(client, "demo", 1, {"completed"})
+            assert recovered["attempts"] == 1
+    finally:
+        object.__setattr__(settings, "database_path", original)

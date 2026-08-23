@@ -1,5 +1,6 @@
 import json
 import uuid
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -18,22 +19,29 @@ from .story_bible import continuity_contract, episode_snapshot, fingerprint
 from .automation import automation_plan
 from .previz import analyze_stage, stage_fingerprint
 from .transitions import plan_transition
+from .task_runner import TaskRunner, serialize_task
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     initialize_database()
-    yield
+    runner = TaskRunner()
+    worker = asyncio.create_task(runner.run(), name="durable-task-runner")
+    try:
+        yield
+    finally:
+        runner.stop()
+        await worker
 
 
-app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="0.5.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost", "http://127.0.0.1"], allow_methods=["*"], allow_headers=["*"])
 PREFIX = settings.api_prefix
 
 
 @app.get(f"{PREFIX}/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.1.0"}
+    return {"status": "ok", "version": "0.5.0"}
 
 
 @app.get(f"{PREFIX}/providers")
@@ -118,15 +126,50 @@ def create_asset(project_id: str, payload: AssetCreate):
 @app.post(f"{PREFIX}/projects/{{project_id}}/tasks", status_code=202)
 def create_task(project_id: str, payload: TaskCreate):
     with connect() as db:
-        cursor = db.execute("INSERT INTO tasks(project_id,task_type,provider,payload_json) VALUES(?,?,?,?)", (project_id, payload.task_type, payload.provider, json.dumps(payload.payload, ensure_ascii=False)))
+        if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
+            raise HTTPException(404, "Project not found")
+        cursor = db.execute("INSERT INTO tasks(project_id,task_type,provider,payload_json,priority,max_attempts) VALUES(?,?,?,?,?,?)", (project_id, payload.task_type, payload.provider, json.dumps(payload.payload, ensure_ascii=False), payload.priority, payload.max_attempts))
     return {"id": cursor.lastrowid, "status": "queued", **payload.model_dump()}
 
 
 @app.get(f"{PREFIX}/projects/{{project_id}}/tasks")
 def list_tasks(project_id: str):
     with connect() as db:
-        rows = db.execute("SELECT id,task_type,provider,status,progress,payload_json,created_at FROM tasks WHERE project_id=? ORDER BY id DESC", (project_id,)).fetchall()
-    return [{**dict(row), "payload": json.loads(row["payload_json"])} for row in rows]
+        rows = db.execute("SELECT * FROM tasks WHERE project_id=? ORDER BY id DESC", (project_id,)).fetchall()
+    return [serialize_task(row) for row in rows]
+
+
+@app.get(f"{PREFIX}/tasks/stats")
+def task_stats():
+    with connect() as db:
+        rows = db.execute("SELECT status,COUNT(*) AS count FROM tasks GROUP BY status").fetchall()
+    counts = {row["status"]: row["count"] for row in rows}
+    return {"total": sum(counts.values()), "by_status": counts, "active": counts.get("queued", 0) + counts.get("running", 0) + counts.get("retry_wait", 0)}
+
+
+@app.post(f"{PREFIX}/tasks/{{task_id}}/cancel", status_code=202)
+def cancel_task(task_id: int):
+    with connect() as db:
+        row = db.execute("SELECT status FROM tasks WHERE id=?", (task_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Task not found")
+        if row["status"] in {"completed", "failed", "canceled"}:
+            raise HTTPException(409, "Task is already terminal")
+        status = "canceled" if row["status"] in {"queued", "retry_wait"} else row["status"]
+        db.execute("UPDATE tasks SET status=?,cancel_requested=1,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?", (status, task_id))
+    return {"id": task_id, "status": status, "cancel_requested": True}
+
+
+@app.post(f"{PREFIX}/tasks/{{task_id}}/retry", status_code=202)
+def retry_task(task_id: int):
+    with connect() as db:
+        row = db.execute("SELECT status FROM tasks WHERE id=?", (task_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Task not found")
+        if row["status"] not in {"failed", "canceled"}:
+            raise HTTPException(409, "Only failed or canceled tasks can be retried")
+        db.execute("UPDATE tasks SET status='queued',progress=0,attempts=0,cancel_requested=0,error_message='',result_json='{}',available_at=CURRENT_TIMESTAMP,completed_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?", (task_id,))
+    return {"id": task_id, "status": "queued"}
 
 
 @app.post(f"{PREFIX}/preflight")

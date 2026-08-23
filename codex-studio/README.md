@@ -23,6 +23,8 @@
 - 空间预演数据模型：虚拟摄影机、焦段、人物走位、地标与太阳光位
 - 智能转场决策：VACE 双侧上下文补缝、首尾帧桥接、RIFE 与 FFmpeg 回退链
 - 一键生成整集八阶段自动化执行图
+- 持久化后台任务执行器：优先级、租约、指数退避重试、取消与崩溃恢复
+- 可操作的桌面任务中心：创建、刷新、取消、重试与结果状态
 
 ## 目录
 
@@ -56,10 +58,16 @@ dotnet run
 
 接口文档：`http://127.0.0.1:18118/docs`
 
+## 成品包使用
+
+1. 必须先完整解压 ZIP，不能直接在压缩包预览中运行。
+2. 双击根目录的 `AI-Film-Studio.exe`；不要单独移动 EXE，旁边的 DLL 与 `service` 目录是运行必需文件。
+3. 如果启动失败，查看 `%LOCALAPPDATA%\AI-Film-Studio\logs\desktop.log` 与同目录服务日志。
+
 ## 打包 EXE
 
 ```powershell
 ./scripts/package-win.ps1
 ```
 
-输出目录：`dist/AI影视Studio/`。当前 V0.1 将 WPF 客户端发布为自包含 win-x64 EXE；本地服务仍以源码方式随包启动，下一阶段可使用 PyInstaller 封装为独立服务进程。
+输出目录：`dist/AI影视Studio/`。桌面客户端发布为自包含 win-x64 EXE，本地 FastAPI 服务使用 PyInstaller 封装为独立进程；打包流水线会对服务 EXE 执行健康检查冒烟测试。

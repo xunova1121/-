@@ -39,7 +39,7 @@ public partial class MainWindow : Window
         ServiceText.Text = healthy ? "本地服务已连接" : "离线演示模式";
     }
 
-    private void Workspace_Click(object sender, RoutedEventArgs e)
+    private async void Workspace_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: string key }) return;
         WorkspaceTitle.Text = key switch
@@ -51,6 +51,12 @@ public partial class MainWindow : Window
             "tasks" => "任务队列 · 生成与渲染",
             _ => "剪辑工作台 · 第1集 雪夜杀局"
         };
+        if (key == "tasks")
+        {
+            var window = new TaskQueueWindow(_api) { Owner = this };
+            window.ShowDialog();
+            await CheckServiceAsync();
+        }
     }
 
     private void TopNav_Click(object sender, RoutedEventArgs e)
