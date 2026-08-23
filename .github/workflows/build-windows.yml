@@ -58,6 +58,8 @@ jobs:
             }
           } finally {
             if (-not $service.HasExited) { Stop-Process -Id $service.Id -Force }
+            Get-Process AIStudioService -ErrorAction SilentlyContinue | Stop-Process -Force
+            Start-Sleep -Milliseconds 750
           }
       - name: Build WPF client EXE
         shell: pwsh
@@ -97,7 +99,11 @@ jobs:
             if ($response.status -ne "ok") { throw "Desktop-launched service is unhealthy" }
             if ($response.version -ne "0.6.0") { throw "Unexpected service version: $($response.version)" }
             $media = Invoke-RestMethod -Uri "http://127.0.0.1:18118/api/v1/media/capabilities" -TimeoutSec 3
-            if (-not $media.ffmpeg_available) { throw "Embedded FFmpeg was not detected" }
+            if (-not $media.ffmpeg_available) {
+              $runtime = Join-Path $env:LOCALAPPDATA "AI-Film-Studio/runtime"
+              Get-ChildItem $runtime -Recurse -ErrorAction SilentlyContinue | Select-Object FullName,Length | Format-Table
+              throw "Embedded FFmpeg was not detected"
+            }
           } finally {
             if (-not $desktop.HasExited) { Stop-Process -Id $desktop.Id -Force }
             Get-Process AIStudioService -ErrorAction SilentlyContinue | Stop-Process -Force
