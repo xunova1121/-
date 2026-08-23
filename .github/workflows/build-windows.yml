@@ -21,6 +21,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Archive Claude desktop source for Codex
+        shell: pwsh
+        run: Compress-Archive -Path desktop/* -DestinationPath desktop-source.zip -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-source
+          path: desktop-source.zip
+          retention-days: 7
       - name: Test local service
         shell: pwsh
         run: |
