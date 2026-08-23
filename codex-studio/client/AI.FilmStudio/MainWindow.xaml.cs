@@ -68,8 +68,16 @@ public partial class MainWindow : Window
         ActiveProjectText.Text = project.Name + "⌄";
         WorkspaceTitle.Text = $"剪辑工作台 · {project.Name}";
         var shots = await _api.GetShotsAsync();
+        var summary = await _api.GetProjectSummaryAsync();
         _shots.Clear();
         foreach (var shot in shots) _shots.Add(shot);
+        EpisodeList.Items.Clear();
+        for (var episode = 1; episode <= project.EpisodeCount; episode++)
+            EpisodeList.Items.Add(new ListBoxItem { Content = $"第 {episode} 集", IsSelected = episode == 1 });
+        CharacterCountText.Text = summary.Characters.ToString();
+        SceneCountText.Text = summary.Scenes.ToString();
+        PropCountText.Text = summary.Props.ToString();
+        ShotCountText.Text = summary.Shots.ToString();
         EmptyShotsText.Visibility = _shots.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -85,6 +93,15 @@ public partial class MainWindow : Window
             "tasks" => "任务队列 · 生成与渲染",
             _ => "剪辑工作台 · 第1集 雪夜杀局"
         };
+        if (key is "director" or "storyboard")
+        {
+            var project = ProjectSelector.SelectedItem as StudioProject;
+            if (project is null) { MessageBox.Show("请先创建项目", "AI影视Studio"); return; }
+            if (key == "director") new ScriptWorkbenchWindow(_api, project) { Owner = this }.ShowDialog();
+            else new StoryboardWindow(_api, project) { Owner = this }.ShowDialog();
+            await SelectProjectAsync(project);
+            return;
+        }
         if (key == "tasks")
         {
             if (string.IsNullOrWhiteSpace(_api.CurrentProjectId)) { MessageBox.Show("请先创建项目", "AI影视Studio"); return; }
@@ -94,9 +111,15 @@ public partial class MainWindow : Window
         }
     }
 
-    private void TopNav_Click(object sender, RoutedEventArgs e)
+    private async void TopNav_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: string title }) WorkspaceTitle.Text = $"{title} · {CurrentProjectName.Text}";
+        if (sender is not Button { Tag: string title }) return;
+        WorkspaceTitle.Text = $"{title} · {CurrentProjectName.Text}";
+        if (title is not ("剧本" or "分镜")) return;
+        if (ProjectSelector.SelectedItem is not StudioProject project) { MessageBox.Show("请先创建项目", "AI影视Studio"); return; }
+        if (title == "剧本") new ScriptWorkbenchWindow(_api, project) { Owner = this }.ShowDialog();
+        else new StoryboardWindow(_api, project) { Owner = this }.ShowDialog();
+        await SelectProjectAsync(project);
     }
 
     private void EpisodeList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -126,4 +149,9 @@ public partial class MainWindow : Window
     }
 
     private void ProviderSettings_Click(object sender, RoutedEventArgs e) => new ProviderSettingsWindow(_api) { Owner = this }.ShowDialog();
+
+    private async void RefreshProject_Click(object sender, RoutedEventArgs e)
+    {
+        if (ProjectSelector.SelectedItem is StudioProject project) await SelectProjectAsync(project);
+    }
 }
