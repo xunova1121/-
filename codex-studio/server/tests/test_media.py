@@ -62,3 +62,20 @@ def test_real_timeline_export_with_cut_and_dissolve(tmp_path, monkeypatch):
     assert result["media"]["width"] == 640
     assert result["media"]["height"] == 360
     assert 3.0 < result["media"]["duration"] < 3.7
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="FFmpeg not installed")
+def test_timeline_mixes_external_audio_and_burns_subtitles(tmp_path, monkeypatch):
+    video, voice, subtitle = tmp_path / "video.mp4", tmp_path / "voice.wav", tmp_path / "caption.srt"
+    subprocess.run([shutil.which("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=black:s=320x240:d=1.5:r=24", "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(video)], check=True, timeout=30)
+    subprocess.run([shutil.which("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=880:duration=0.7", str(voice)], check=True, timeout=30)
+    subtitle.write_text("1\n00:00:00,100 --> 00:00:01,200\n自动字幕已进入成片\n", encoding="utf-8")
+    monkeypatch.setattr(media, "render_dir", lambda: tmp_path / "renders")
+    result = media.render_timeline({"project_id": "audio-subtitle", "width": 640, "height": 360, "fps": 24, "quality": "standard", "output_name": "mixed.mp4", "burn_subtitles": True}, [
+        {"track": "V1", "source_path": str(video), "duration": 1.4, "trim_in": 0, "trim_out": 0, "transition": "cut", "transition_duration": 0},
+        {"track": "A1", "source_path": str(voice), "volume": 1, "metadata": {"start_seconds": 0.3}},
+        {"track": "T1", "source_path": str(subtitle)},
+    ])
+    assert result["status"] == "completed"
+    assert result["media"]["has_audio"] is True
+    assert result["media"]["width"] == 640
