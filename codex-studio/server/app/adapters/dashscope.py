@@ -18,6 +18,11 @@ from .base import AIAdapter
 class DashScopeAdapter(AIAdapter):
     provider = "dashscope"
 
+    @staticmethod
+    def _ensure(response: httpx.Response, label: str, endpoint: str) -> None:
+        if response.status_code >= 400:
+            raise RuntimeError(f"{label} HTTP {response.status_code} · {endpoint} · {response.text[:1200]}")
+
     async def invoke(self, prompt: str, context: dict[str, Any]) -> dict[str, Any]:
         if str(context.get("task_type")) != "video":
             raise RuntimeError("阿里云百炼适配器当前用于万相视频生成；其他能力请选择相应提供方")
@@ -48,7 +53,7 @@ class DashScopeAdapter(AIAdapter):
         headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json", "X-DashScope-Async": "enable"}
         async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=30.0)) as client:
             created = await client.post(endpoint, headers=headers, json=body)
-            created.raise_for_status()
+            self._ensure(created, "阿里云百炼视频创建", endpoint)
             created_json = created.json()
             task_id = created_json.get("output", {}).get("task_id")
             if not task_id:
@@ -56,8 +61,9 @@ class DashScopeAdapter(AIAdapter):
             deadline = time.monotonic() + float(options.get("poll_timeout", 1800))
             video_url = ""
             while time.monotonic() < deadline:
-                status_response = await client.get(f"{base}/tasks/{task_id}", headers={"Authorization": f"Bearer {config.api_key}"})
-                status_response.raise_for_status()
+                status_endpoint = f"{base}/tasks/{task_id}"
+                status_response = await client.get(status_endpoint, headers={"Authorization": f"Bearer {config.api_key}"})
+                self._ensure(status_response, "阿里云百炼视频状态", status_endpoint)
                 payload = status_response.json()
                 output = payload.get("output", {})
                 status = str(output.get("task_status") or "UNKNOWN").upper()
@@ -70,7 +76,7 @@ class DashScopeAdapter(AIAdapter):
             if not video_url:
                 raise RuntimeError("百炼视频生成轮询超时")
             download = await client.get(video_url)
-            download.raise_for_status()
+            self._ensure(download, "阿里云百炼视频下载", video_url)
             data = download.content
         target = project_media_dir(str(context.get("project_id") or "unassigned")) / "generated"
         target.mkdir(parents=True, exist_ok=True)
