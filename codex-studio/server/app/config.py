@@ -15,6 +15,11 @@ def render_dir() -> Path:
     return app_data_dir() / "renders"
 
 
+def project_media_dir(project_id: str) -> Path:
+    safe = "".join(ch for ch in project_id if ch.isalnum() or ch in "-_") or "unassigned"
+    return app_data_dir() / "projects" / safe / "media"
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str = "AI影视Studio Local Service"
