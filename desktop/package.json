@@ -17,6 +17,7 @@
     "mcheck": "node scripts/mcheck.mjs",
     "smoke": "electron . --smoke",
     "icon": "node scripts/make-icon.mjs",
+    "prebuild:win": "node scripts/stage-ffmpeg.mjs",
     "build:win": "electron-builder --win nsis portable",
     "realcheck": "node scripts/realcheck.mjs",
     "doctor": "node scripts/doctor.mjs",
@@ -24,7 +25,8 @@
   },
   "devDependencies": {
     "electron": "^31.0.0",
-    "electron-builder": "^24.13.3"
+    "electron-builder": "^24.13.3",
+    "ffmpeg-static": "5.2.0"
   },
   "build": {
     "appId": "com.aifilm.studio",
