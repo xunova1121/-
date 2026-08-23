@@ -11,6 +11,10 @@ def app_data_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "data"
 
 
+def render_dir() -> Path:
+    return app_data_dir() / "renders"
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str = "AI影视Studio Local Service"

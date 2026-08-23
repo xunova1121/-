@@ -6,6 +6,7 @@ from typing import Any
 
 from .adapters import registry
 from .config import settings
+from .media import render_transition
 
 
 class TaskRunner:
@@ -61,9 +62,12 @@ class TaskRunner:
     async def execute(self, task: dict[str, Any]) -> None:
         try:
             payload = json.loads(task["payload_json"])
-            adapter = registry.resolve(task["provider"])
-            prompt = str(payload.get("prompt") or f"执行 {task['task_type']} 任务")
-            result = await adapter.invoke(prompt, {**payload, "task_id": task["id"], "task_type": task["task_type"]})
+            if task["task_type"] == "transition_render":
+                result = await asyncio.to_thread(render_transition, payload)
+            else:
+                adapter = registry.resolve(task["provider"])
+                prompt = str(payload.get("prompt") or f"执行 {task['task_type']} 任务")
+                result = await adapter.invoke(prompt, {**payload, "task_id": task["id"], "task_type": task["task_type"]})
             await asyncio.to_thread(self._complete, task["id"], result)
         except Exception as exc:
             await asyncio.to_thread(self._fail_or_retry, task, str(exc))
