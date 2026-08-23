@@ -36,3 +36,29 @@ def test_real_dissolve_render_normalizes_video_and_preserves_audio(tmp_path, mon
 def test_ai_transition_cannot_silently_fall_back_to_local_renderer():
     with pytest.raises(media.MediaError, match="AI 转场引擎"):
         media.render_transition({"method": "vace_context_bridge"})
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="FFmpeg not installed")
+def test_real_timeline_export_with_cut_and_dissolve(tmp_path, monkeypatch):
+    sources = []
+    for index, color in enumerate(("red", "blue", "green")):
+        output = tmp_path / f"source-{index}.mp4"
+        subprocess.run([
+            shutil.which("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", f"color=c={color}:s=320x240:d=1.4:r=24",
+            "-f", "lavfi", "-i", f"sine=frequency={440 + index * 100}:duration=1.4", "-shortest",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(output),
+        ], check=True, timeout=30)
+        sources.append(output)
+    monkeypatch.setattr(media, "render_dir", lambda: tmp_path / "renders")
+    clips = [
+        {"track": "V1", "source_path": str(sources[0]), "duration": 1.2, "trim_in": 0, "trim_out": 0, "transition": "cut", "transition_duration": 0.3},
+        {"track": "V1", "source_path": str(sources[1]), "duration": 1.2, "trim_in": 0, "trim_out": 0, "transition": "cut", "transition_duration": 0.3},
+        {"track": "V1", "source_path": str(sources[2]), "duration": 1.2, "trim_in": 0, "trim_out": 0, "transition": "dissolve", "transition_duration": 0.3},
+    ]
+    result = media.render_timeline({"project_id": "timeline-test", "width": 640, "height": 360, "fps": 24, "quality": "standard", "output_name": "成片.mp4"}, clips)
+    assert result["status"] == "completed"
+    assert result["clip_count"] == 3
+    assert result["media"]["width"] == 640
+    assert result["media"]["height"] == 360
+    assert 3.0 < result["media"]["duration"] < 3.7
