@@ -19,15 +19,16 @@ def wait_for_status(client: TestClient, project_id: str, task_id: int, expected:
     raise AssertionError(f"task {task_id} did not reach {expected}")
 
 
-def test_health_and_demo_data(tmp_path: Path):
+def test_health_starts_without_seeded_demo_and_creates_real_project(tmp_path: Path):
     original = settings.database_path
     object.__setattr__(settings, "database_path", tmp_path / "test.db")
     try:
         with TestClient(app) as client:
             assert client.get("/api/v1/health").json()["status"] == "ok"
-            shots = client.get("/api/v1/projects/demo/shots").json()
-            assert len(shots) == 6
-            assert shots[0]["number"] == "001"
+            assert client.get("/api/v1/projects").json() == []
+            project = client.post("/api/v1/projects", json={"name": "真实项目", "genre": "悬疑", "episode_count": 8}).json()
+            assert project["id"] != "demo"
+            assert client.get(f"/api/v1/projects/{project['id']}/shots").json() == []
     finally:
         object.__setattr__(settings, "database_path", original)
 
@@ -37,6 +38,40 @@ def test_gateway_mock():
         response = client.post("/api/v1/gateway/llm", json={"prompt": "分析剧本", "provider": "mock"})
         assert response.status_code == 200
         assert response.json()["status"] == "completed"
+
+
+def test_real_openai_compatible_gateway_uses_configured_model(monkeypatch, tmp_path: Path):
+    class FakeResponse:
+        status_code = 200
+        def raise_for_status(self): return None
+        def json(self): return {"choices": [{"message": {"content": "真实适配器返回"}}], "usage": {"total_tokens": 12}}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): return None
+        async def post(self, url, headers, json):
+            assert url == "https://gateway.example/v1/chat/completions"
+            assert headers["Authorization"] == "Bearer secret-for-test"
+            assert json["model"] == "production-model"
+            return FakeResponse()
+
+    original = settings.database_path
+    object.__setattr__(settings, "database_path", tmp_path / "provider.db")
+    monkeypatch.setenv("OPENAI_API_KEY", "secret-for-test")
+    monkeypatch.setenv("AI_STUDIO_OPENAI_BASE_URL", "https://gateway.example/v1")
+    monkeypatch.setenv("AI_STUDIO_OPENAI_MODEL", "production-model")
+    monkeypatch.setattr("app.adapters.openai_compatible.httpx.AsyncClient", FakeClient)
+    try:
+        with TestClient(app) as client:
+            status = next(item for item in client.get("/api/v1/provider-configs").json() if item["provider_id"] == "openai")
+            assert status["configured"] is True
+            assert "secret" not in str(status)
+            result = client.post("/api/v1/gateway/llm", json={"provider": "openai", "prompt": "生成分镜"})
+            assert result.status_code == 200
+            assert result.json()["result"] == "真实适配器返回"
+    finally:
+        object.__setattr__(settings, "database_path", original)
 
 
 def test_claude_borrowed_architecture_endpoints():
@@ -125,23 +160,24 @@ def test_durable_task_completion_failure_retry_and_stats(tmp_path: Path):
     object.__setattr__(settings, "database_path", tmp_path / "tasks.db")
     try:
         with TestClient(app) as client:
-            completed_id = client.post("/api/v1/projects/demo/tasks", json={
+            project_id = client.post("/api/v1/projects", json={"name": "任务测试", "episode_count": 1}).json()["id"]
+            completed_id = client.post(f"/api/v1/projects/{project_id}/tasks", json={
                 "task_type": "video", "provider": "mock", "priority": 20,
                 "payload": {"prompt": "生成连续动作镜头"}
             }).json()["id"]
-            completed = wait_for_status(client, "demo", completed_id, {"completed"})
+            completed = wait_for_status(client, project_id, completed_id, {"completed"})
             assert completed["progress"] == 100
             assert completed["attempts"] == 1
             assert completed["result"]["status"] == "completed"
 
-            failed_id = client.post("/api/v1/projects/demo/tasks", json={
+            failed_id = client.post(f"/api/v1/projects/{project_id}/tasks", json={
                 "task_type": "image", "provider": "not-configured", "max_attempts": 1
             }).json()["id"]
-            failed = wait_for_status(client, "demo", failed_id, {"failed"})
+            failed = wait_for_status(client, project_id, failed_id, {"failed"})
             assert "not configured" in failed["error_message"]
             retried = client.post(f"/api/v1/tasks/{failed_id}/retry")
             assert retried.status_code == 202
-            assert wait_for_status(client, "demo", failed_id, {"failed"})["attempts"] == 1
+            assert wait_for_status(client, project_id, failed_id, {"failed"})["attempts"] == 1
 
             stats = client.get("/api/v1/tasks/stats").json()
             assert stats["total"] == 2

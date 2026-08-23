@@ -7,9 +7,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>AI-Film-Studio</AssemblyName>
     <RootNamespace>AI.FilmStudio</RootNamespace>
-    <Version>0.5.1</Version>
+    <Version>0.6.0</Version>
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="Embedded/AIStudioService.exe" LogicalName="AIStudioService.exe" Condition="Exists('Embedded/AIStudioService.exe')" />
+    <EmbeddedResource Include="Embedded/ffmpeg.exe" LogicalName="AIStudioFFmpeg.exe" Condition="Exists('Embedded/ffmpeg.exe')" />
+    <EmbeddedResource Include="Embedded/ffprobe.exe" LogicalName="AIStudioFFprobe.exe" Condition="Exists('Embedded/ffprobe.exe')" />
   </ItemGroup>
 </Project>

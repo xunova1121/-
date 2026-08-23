@@ -47,7 +47,7 @@ class AssetCreate(BaseModel):
 
 
 class TaskCreate(BaseModel):
-    task_type: Literal["llm", "image", "video", "voice", "proofread"]
+    task_type: Literal["llm", "image", "video", "voice", "proofread", "transition_render"]
     provider: str = "mock"
     payload: dict[str, Any] = {}
     priority: int = Field(default=0, ge=-100, le=100)
@@ -58,6 +58,12 @@ class GatewayRequest(BaseModel):
     provider: str = "mock"
     prompt: str = Field(min_length=1)
     context: dict[str, Any] = {}
+
+
+class ProviderConfigUpdate(BaseModel):
+    base_url: str = Field(min_length=8, max_length=500)
+    model: str = Field(min_length=1, max_length=160)
+    api_key: str | None = Field(default=None, min_length=8, max_length=500)
 
 
 class ContinuityRequest(BaseModel):
@@ -171,6 +177,17 @@ class TransitionPlanRequest(BaseModel):
     preferred_engine: Literal["auto", "vace", "first_last_frame", "rife", "ffmpeg"] = "auto"
     target_fps: int = Field(default=24, ge=12, le=120)
     allow_ai_bridge: bool = True
+
+
+class TransitionRenderRequest(BaseModel):
+    left_path: str = Field(min_length=1)
+    right_path: str = Field(min_length=1)
+    method: Literal["cut", "match_cut", "dissolve", "fade_black"] = "dissolve"
+    duration_seconds: float = Field(default=0.5, gt=0, le=3)
+    target_fps: int = Field(default=24, ge=12, le=60)
+    width: int = Field(default=1280, ge=320, le=3840)
+    height: int = Field(default=720, ge=240, le=2160)
+    preserve_audio: bool = True
 
 
 class EpisodeAutomationRequest(BaseModel):

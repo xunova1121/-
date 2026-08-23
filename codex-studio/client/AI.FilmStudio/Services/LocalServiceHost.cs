@@ -13,7 +13,7 @@ public sealed class LocalServiceHost : IDisposable
     {
         var baseDir = AppContext.BaseDirectory;
         var executable = Path.Combine(baseDir, "service", "AIStudioService.exe");
-        if (!File.Exists(executable)) executable = ExtractEmbeddedService() ?? "";
+        if (!File.Exists(executable)) executable = PrepareEmbeddedRuntime() ?? "";
         if (!File.Exists(executable)) return;
         try
         {
@@ -38,14 +38,23 @@ public sealed class LocalServiceHost : IDisposable
         }
     }
 
-    private static string? ExtractEmbeddedService()
+    private static string? PrepareEmbeddedRuntime()
     {
-        using var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream("AIStudioService.exe");
-        if (resource is null) return null;
         var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "current";
         var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AI-Film-Studio", "runtime", version);
         Directory.CreateDirectory(directory);
-        var target = Path.Combine(directory, "AIStudioService.exe");
+        var service = ExtractResource("AIStudioService.exe", Path.Combine(directory, "AIStudioService.exe"));
+        var tools = Path.Combine(directory, "tools");
+        Directory.CreateDirectory(tools);
+        ExtractResource("AIStudioFFmpeg.exe", Path.Combine(tools, "ffmpeg.exe"));
+        ExtractResource("AIStudioFFprobe.exe", Path.Combine(tools, "ffprobe.exe"));
+        return service;
+    }
+
+    private static string? ExtractResource(string resourceName, string target)
+    {
+        using var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName);
+        if (resource is null) return null;
         if (!File.Exists(target) || new FileInfo(target).Length != resource.Length)
         {
             var temporary = target + ".new";

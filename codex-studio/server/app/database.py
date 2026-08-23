@@ -42,6 +42,10 @@ CREATE TABLE IF NOT EXISTS request_logs (
     success INTEGER NOT NULL DEFAULT 0, error_message TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS provider_configs (
+    provider_id TEXT PRIMARY KEY, base_url TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
+    secret_blob BLOB, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS bible_entities (
     id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL,
     entity_type TEXT NOT NULL, entity_key TEXT NOT NULL, name TEXT NOT NULL,
@@ -114,18 +118,6 @@ def initialize_database(path: Path | None = None) -> None:
     with sqlite3.connect(target) as connection:
         connection.executescript(SCHEMA)
         _migrate(connection)
-        connection.execute("INSERT OR IGNORE INTO projects(id,name,genre,episode_count) VALUES(?,?,?,?)", ("demo", "雪山剑客 第一季", "武侠 / 剧情", 12))
-        count = connection.execute("SELECT COUNT(*) FROM shots WHERE project_id='demo'").fetchone()[0]
-        if count == 0:
-            connection.executemany(
-                "INSERT INTO shots(project_id,episode,number,title,description,duration,status,color) VALUES(?,?,?,?,?,?,?,?)",
-                [("demo", 1, f"{i:03}", title, desc, duration, status, color) for i, title, desc, duration, status, color in [
-                    (1, "远景｜固定", "雪山全景，风雪飘扬", "3.2s", "已生成", "#1C2027"),
-                    (2, "中景｜推镜", "李狗蛋出现，步履坚定", "2.8s", "已生成", "#1C2027"),
-                    (3, "特写｜固定", "人物面部与情绪特写", "2.6s", "已生成", "#1C2027"),
-                    (4, "大全景｜平移", "古寺大门，灯火摇曳", "2.4s", "生成中 65%", "#252019"),
-                    (5, "中景｜跟随", "李狗蛋进入古寺", "1.8s", "待生成", "#1C2027"),
-                    (6, "近景｜固定", "黑衣人出现，深邃", "1.8s", "待生成", "#1C2027")]])
 
 
 @contextmanager

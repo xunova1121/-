@@ -1,25 +1,29 @@
 import json
 import uuid
 import asyncio
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from .adapters import registry
-from .config import settings
+from .config import render_dir, settings
 from .database import connect, initialize_database
-from .schemas import AssetCreate, BibleEntityCreate, ContinuityContractRequest, ContinuityRequest, EpisodeAutomationRequest, EpisodeLockRequest, GatewayRequest, PipelineUpdate, PreflightRequest, Project, ProjectCreate, QualityReviewRequest, RouteUpdate, SceneLayoutRequest, Shot, ShotCreate, ShotUpdate, TaskCreate, TransitionPlanRequest
+from .schemas import AssetCreate, BibleEntityCreate, ContinuityContractRequest, ContinuityRequest, EpisodeAutomationRequest, EpisodeLockRequest, GatewayRequest, PipelineUpdate, PreflightRequest, Project, ProjectCreate, ProviderConfigUpdate, QualityReviewRequest, RouteUpdate, SceneLayoutRequest, Shot, ShotCreate, ShotUpdate, TaskCreate, TransitionPlanRequest, TransitionRenderRequest
 from .continuity import analyze_pair
 from .pipeline import stage_catalog
 from .providers import CAPABILITIES, providers_for, public_catalog
 from .preflight import run_preflight
+from .provider_config import all_provider_statuses, delete_provider_config, save_provider_config
 from .quality import repair_plan, weighted_score
 from .story_bible import continuity_contract, episode_snapshot, fingerprint
 from .automation import automation_plan
 from .previz import analyze_stage, stage_fingerprint
 from .transitions import plan_transition
 from .task_runner import TaskRunner, serialize_task
+from .media import MediaError, capabilities as media_capabilities, probe_media
 
 
 @asynccontextmanager
@@ -34,14 +38,14 @@ async def lifespan(_: FastAPI):
         await worker
 
 
-app = FastAPI(title=settings.app_name, version="0.5.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="0.6.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost", "http://127.0.0.1"], allow_methods=["*"], allow_headers=["*"])
 PREFIX = settings.api_prefix
 
 
 @app.get(f"{PREFIX}/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.5.0"}
+    return {"status": "ok", "version": "0.6.0"}
 
 
 @app.get(f"{PREFIX}/providers")
@@ -49,6 +53,29 @@ def provider_catalog(capability: str | None = None):
     if capability and capability not in CAPABILITIES:
         raise HTTPException(400, "Unknown capability")
     return [provider.__dict__ for provider in providers_for(capability)] if capability else public_catalog()
+
+
+@app.get(f"{PREFIX}/provider-configs")
+def provider_configs():
+    return all_provider_statuses()
+
+
+@app.put(f"{PREFIX}/provider-configs/{{provider_id}}")
+def configure_provider(provider_id: str, payload: ProviderConfigUpdate):
+    try:
+        return save_provider_config(provider_id, payload.base_url, payload.model, payload.api_key)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.delete(f"{PREFIX}/provider-configs/{{provider_id}}", status_code=204)
+def remove_provider_config(provider_id: str):
+    try:
+        delete_provider_config(provider_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 @app.get(f"{PREFIX}/pipeline/stages")
@@ -73,8 +100,6 @@ def create_project(payload: ProjectCreate):
 
 @app.delete(f"{PREFIX}/projects/{{project_id}}", status_code=204)
 def delete_project(project_id: str):
-    if project_id == "demo":
-        raise HTTPException(400, "演示项目不可删除")
     with connect() as db:
         cursor = db.execute("DELETE FROM projects WHERE id=?", (project_id,))
         if not cursor.rowcount:
@@ -258,6 +283,47 @@ def create_transition_plan(project_id: str, payload: TransitionPlanRequest):
     with connect() as db:
         db.execute("INSERT INTO transition_plans(project_id,episode,from_shot,to_shot,method,score,plan_json) VALUES(?,?,?,?,?,?,?) ON CONFLICT(project_id,episode,from_shot,to_shot) DO UPDATE SET method=excluded.method,score=excluded.score,plan_json=excluded.plan_json,status='planned'", (project_id, payload.episode, payload.left.shot_number, payload.right.shot_number, plan["method"], plan["score"], json.dumps(plan, ensure_ascii=False)))
     return {"project_id": project_id, **plan}
+
+
+@app.get(f"{PREFIX}/media/capabilities")
+def get_media_capabilities():
+    return media_capabilities()
+
+
+@app.get(f"{PREFIX}/media/probe")
+def inspect_media(path: str):
+    try:
+        return probe_media(path)
+    except MediaError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post(f"{PREFIX}/projects/{{project_id}}/transition-renders", status_code=202)
+def queue_transition_render(project_id: str, payload: TransitionRenderRequest):
+    task_payload = {"project_id": project_id, **payload.model_dump()}
+    with connect() as db:
+        if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
+            raise HTTPException(404, "Project not found")
+        cursor = db.execute(
+            "INSERT INTO tasks(project_id,task_type,provider,payload_json,priority,max_attempts) VALUES(?,?,?,?,?,?)",
+            (project_id, "transition_render", "ffmpeg", json.dumps(task_payload, ensure_ascii=False), 30, 1),
+        )
+    return {"id": cursor.lastrowid, "status": "queued", "method": payload.method}
+
+
+@app.get(f"{PREFIX}/tasks/{{task_id}}/output")
+def download_task_output(task_id: int):
+    with connect() as db:
+        row = db.execute("SELECT status,result_json FROM tasks WHERE id=?", (task_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Task not found")
+    if row["status"] != "completed":
+        raise HTTPException(409, "Task output is not ready")
+    output = Path(json.loads(row["result_json"]).get("output_path", "")).resolve()
+    root = render_dir().resolve()
+    if not output.is_file() or root not in output.parents:
+        raise HTTPException(404, "Output file not found")
+    return FileResponse(output, media_type="video/mp4", filename=output.name)
 
 
 @app.post(f"{PREFIX}/projects/{{project_id}}/automation/plan")

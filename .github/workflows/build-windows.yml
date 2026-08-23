@@ -1,117 +1,115 @@
-name: Build Real AI Film Studio
-# Primary Windows delivery: verified Electron app + bundled FFmpeg + portable EXE.
+name: Build Windows EXE
 
 on:
   push:
     branches: ["codex/ai-film-studio-v0.2"]
-    paths:
-      - "desktop/**"
-      - ".github/workflows/build-windows.yml"
+  pull_request:
+    branches: ["claude/windows-app-third-party-api-8h0qec"]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  windows-portable:
+  build:
     runs-on: windows-latest
-    timeout-minutes: 45
-    defaults:
-      run:
-        working-directory: desktop
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-dotnet@v4
         with:
-          node-version: "22"
-
-      - name: Install desktop build dependencies
-        shell: pwsh
-        run: npm install
-
-      - name: Offline product self-test
-        shell: pwsh
-        env:
-          FUTUREDREAM_DISABLE_PATH_FFMPEG: "1"
-        run: npm run selftest
-
-      - name: Install and stage bundled FFmpeg
+          dotnet-version: "8.0.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test local service
         shell: pwsh
         run: |
-          npm install --no-save ffmpeg-static@5.2.0
-          node scripts/stage-ffmpeg.mjs
-
-      - name: Real FFmpeg media test
-        shell: pwsh
-        env:
-          REALCHECK_REQUIRED: "1"
-          FUTUREDREAM_BIN_DIR: ${{ github.workspace }}\desktop\bin
-          FFMPEG_PATH: ${{ github.workspace }}\desktop\bin\ffmpeg.exe
-          FUTUREDREAM_DISABLE_PATH_FFMPEG: "1"
-        run: npm run realcheck
-
-      - name: Electron development smoke test
-        shell: pwsh
-        run: npm run smoke
-
-      - name: Stamp build identity
+          python -m pip install -r codex-studio/server/requirements.txt
+          $env:PYTHONPATH = "codex-studio/server"
+          pytest -q codex-studio/server/tests
+      - name: Build local service EXE
         shell: pwsh
         run: |
-          $build = "${{ github.sha }}".Substring(0, 12)
-          @{ build = $build } | ConvertTo-Json | Set-Content core/build.json -Encoding utf8
-
-      - name: Build installer and one-file portable EXE
-        shell: pwsh
-        run: npm run build:win
-
-      - name: Verify packaged runtime and launch packaged app
+          python -m pip install pyinstaller
+          Push-Location codex-studio/server
+          pyinstaller AIStudioService.spec --clean --noconfirm
+          Pop-Location
+      - name: Smoke test packaged local service
         shell: pwsh
         run: |
-          $ffmpeg = Join-Path $PWD "dist\win-unpacked\resources\bin\ffmpeg.exe"
-          if (-not (Test-Path $ffmpeg)) { throw "Packaged app is missing resources/bin/ffmpeg.exe" }
-          & $ffmpeg -hide_banner -version
-          if ($LASTEXITCODE -ne 0) { throw "Packaged FFmpeg cannot run" }
-
-          $app = Get-ChildItem "dist\win-unpacked" -Filter "*.exe" |
-            Where-Object { $_.Name -notmatch "uninstall" } |
-            Select-Object -First 1
-          if (-not $app) { throw "Cannot find packaged desktop executable" }
-          $process = Start-Process -FilePath $app.FullName -ArgumentList "--smoke" -PassThru
-          if (-not $process.WaitForExit(45000)) {
-            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-            throw "Packaged desktop smoke test timed out"
+          $service = Start-Process -FilePath "codex-studio/server/dist/AIStudioService.exe" -PassThru
+          try {
+            $healthy = $false
+            for ($i = 0; $i -lt 20; $i++) {
+              Start-Sleep -Milliseconds 500
+              try {
+                $response = Invoke-RestMethod -Uri "http://127.0.0.1:18118/api/v1/health" -TimeoutSec 2
+                if ($response.status -eq "ok") { $healthy = $true; break }
+              } catch { }
+              if ($service.HasExited) { throw "Packaged service exited early with code $($service.ExitCode)" }
+            }
+            if (-not $healthy) {
+              $logRoot = Join-Path $env:LOCALAPPDATA "AI-Film-Studio/logs"
+              Get-ChildItem $logRoot -ErrorAction SilentlyContinue | ForEach-Object {
+                Write-Host "--- $($_.Name) ---"
+                Get-Content $_.FullName -ErrorAction SilentlyContinue
+              }
+              throw "Packaged service did not become healthy"
+            }
+          } finally {
+            if (-not $service.HasExited) { Stop-Process -Id $service.Id -Force }
           }
-          if ($process.ExitCode -ne 0) { throw "Packaged desktop smoke test failed with code $($process.ExitCode)" }
-
-      - name: Prepare verified download
+      - name: Build WPF client EXE
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force release | Out-Null
-          $portable = Get-ChildItem dist -Filter "AI-Film-Studio-Portable-*.exe" | Select-Object -First 1
-          if (-not $portable) { throw "Portable EXE was not produced" }
-          $target = "release\AI-Film-Studio-Real-V0.2.0-Windows-x64.exe"
-          Copy-Item $portable.FullName $target
-          $hash = (Get-FileHash $target -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  AI-Film-Studio-Real-V0.2.0-Windows-x64.exe" | Set-Content "release\SHA256SUMS.txt" -Encoding ascii
-          Get-Item $target | Format-List Name,Length,LastWriteTime
-          Get-Content "release\SHA256SUMS.txt"
-
+          New-Item -ItemType Directory -Force codex-studio/client/AI.FilmStudio/Embedded
+          Copy-Item codex-studio/server/dist/AIStudioService.exe codex-studio/client/AI.FilmStudio/Embedded/AIStudioService.exe
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile "$env:RUNNER_TEMP/ffmpeg.zip"
+          Expand-Archive "$env:RUNNER_TEMP/ffmpeg.zip" "$env:RUNNER_TEMP/ffmpeg" -Force
+          $ffmpeg = Get-ChildItem "$env:RUNNER_TEMP/ffmpeg" -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          $ffprobe = Get-ChildItem "$env:RUNNER_TEMP/ffmpeg" -Recurse -Filter ffprobe.exe | Select-Object -First 1
+          if (-not $ffmpeg -or -not $ffprobe) { throw "FFmpeg package is incomplete" }
+          Copy-Item $ffmpeg.FullName codex-studio/client/AI.FilmStudio/Embedded/ffmpeg.exe
+          Copy-Item $ffprobe.FullName codex-studio/client/AI.FilmStudio/Embedded/ffprobe.exe
+          dotnet publish codex-studio/client/AI.FilmStudio/AI.FilmStudio.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=None -p:DebugSymbols=false -o dist/AI-Film-Studio
+      - name: Smoke test packaged desktop app
+        shell: pwsh
+        run: |
+          $ready = Join-Path $env:LOCALAPPDATA "AI-Film-Studio/desktop-ready.txt"
+          Remove-Item $ready -Force -ErrorAction SilentlyContinue
+          $desktop = Start-Process -FilePath "dist/AI-Film-Studio/AI-Film-Studio.exe" -PassThru
+          try {
+            $started = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              Start-Sleep -Milliseconds 500
+              if ($desktop.HasExited) { break }
+              if (Test-Path $ready) {
+                $markerPid = ((Get-Content $ready -Raw) -split '\|')[0]
+                if ($markerPid -eq "$($desktop.Id)") { $started = $true; break }
+              }
+            }
+            if (-not $started) {
+              $log = Join-Path $env:LOCALAPPDATA "AI-Film-Studio/logs/desktop.log"
+              if (Test-Path $log) { Get-Content $log }
+              throw "Desktop main window did not publish a valid ready marker"
+            }
+            $response = Invoke-RestMethod -Uri "http://127.0.0.1:18118/api/v1/health" -TimeoutSec 3
+            if ($response.status -ne "ok") { throw "Desktop-launched service is unhealthy" }
+            if ($response.version -ne "0.6.0") { throw "Unexpected service version: $($response.version)" }
+            $media = Invoke-RestMethod -Uri "http://127.0.0.1:18118/api/v1/media/capabilities" -TimeoutSec 3
+            if (-not $media.ffmpeg_available) { throw "Embedded FFmpeg was not detected" }
+          } finally {
+            if (-not $desktop.HasExited) { Stop-Process -Id $desktop.Id -Force }
+            Get-Process AIStudioService -ErrorAction SilentlyContinue | Stop-Process -Force
+          }
+      - name: Verify single-file delivery
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem dist/AI-Film-Studio -File
+          if ($files.Count -ne 1 -or $files[0].Name -ne "AI-Film-Studio.exe") { throw "Delivery must contain exactly one EXE" }
+          Get-FileHash dist/AI-Film-Studio/AI-Film-Studio.exe -Algorithm SHA256
       - uses: actions/upload-artifact@v4
         with:
-          name: AI-Film-Studio-Real-V0.2.0-Windows-x64
-          path: desktop/release/*
-          if-no-files-found: error
+          name: AI-Film-Studio-V0.6.0-Single-EXE
+          path: dist/AI-Film-Studio/AI-Film-Studio.exe
           retention-days: 30
-
-      - name: Publish verified Codex prerelease
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $tag = "ai-film-studio-v0.2.0-codex"
-          gh release view $tag --repo "${{ github.repository }}" 2>$null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --repo "${{ github.repository }}" --target "${{ github.sha }}" --prerelease --title "AI影视Studio V0.2.0 Codex 验证版" --notes "真实 Electron 全流程产品；内置 FFmpeg；Windows portable EXE 已通过离线产品、真实媒体、开发态与打包态启动测试。"
-          }
-          gh release upload $tag "release\AI-Film-Studio-Real-V0.2.0-Windows-x64.exe" "release\SHA256SUMS.txt" --repo "${{ github.repository }}" --clobber

@@ -14,7 +14,7 @@ class MockAdapter(AIAdapter):
     provider = "mock"
 
     async def invoke(self, prompt: str, context: dict[str, Any]) -> dict[str, Any]:
-        return {"provider": self.provider, "status": "completed", "result": f"[Demo] 已接收任务：{prompt}", "context": context}
+        return {"provider": self.provider, "status": "completed", "result": f"[TestAdapter] {prompt}", "context": context}
 
 
 class AdapterRegistry:
@@ -31,4 +31,3 @@ class AdapterRegistry:
 
 
 registry = AdapterRegistry()
-

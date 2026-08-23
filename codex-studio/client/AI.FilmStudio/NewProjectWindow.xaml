@@ -1,0 +1,17 @@
+<Window x:Class="AI.FilmStudio.NewProjectWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="新建项目" Width="520" Height="390" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" Background="{StaticResource BgBrush}">
+    <Grid Margin="28">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <StackPanel><TextBlock Text="创建真实制作项目" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="项目、镜头、任务和连续性数据会保存到本机数据库" Foreground="{StaticResource MutedBrush}" Margin="0,7,0,0"/></StackPanel>
+        <StackPanel Grid.Row="1" Margin="0,24,0,0">
+            <TextBlock Text="项目名称"/><TextBox x:Name="ProjectName" Height="38" Margin="0,6,0,14" Padding="9" Text="我的短剧"/>
+            <TextBlock Text="类型 / 风格"/><TextBox x:Name="Genre" Height="38" Margin="0,6,0,14" Padding="9" Text="都市 / 剧情"/>
+            <TextBlock Text="集数"/><TextBox x:Name="EpisodeCount" Height="38" Margin="0,6,0,0" Padding="9" Text="1"/>
+            <TextBlock x:Name="Feedback" Foreground="#E0A534" Margin="0,10,0,0"/>
+        </StackPanel>
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right"><Button Style="{StaticResource NavButton}" Content="取消" Click="Cancel_Click"/><Button x:Name="CreateButton" Style="{StaticResource PrimaryButton}" Content="创建项目" Click="Create_Click" Margin="8,0,0,0"/></StackPanel>
+    </Grid>
+</Window>
