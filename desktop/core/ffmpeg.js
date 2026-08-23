@@ -32,7 +32,12 @@ export function locate({ refresh = false } = {}) {
   const candidates = [];
   if (configured) candidates.push(configured);
   for (const dir of BIN_DIRS) candidates.push(path.join(dir, EXE));
-  candidates.push(EXE); // 交给 PATH 解析
+  // 自检必须和运行机器装没装 FFmpeg 无关，否则同一份代码会在开发机和
+  // GitHub Runner 上走两条不同分支。部署方也可用它禁止调用系统 PATH 中
+  // 未经审核的二进制，仅允许设置路径或随包版本。
+  if (process.env.FUTUREDREAM_DISABLE_PATH_FFMPEG !== '1') {
+    candidates.push(EXE); // 交给 PATH 解析
+  }
 
   for (const candidate of candidates) {
     const isPath = candidate.includes(path.sep) || candidate.includes('/');
