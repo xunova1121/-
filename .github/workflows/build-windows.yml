@@ -48,7 +48,14 @@ jobs:
               } catch { }
               if ($service.HasExited) { throw "Packaged service exited early with code $($service.ExitCode)" }
             }
-            if (-not $healthy) { throw "Packaged service did not become healthy" }
+            if (-not $healthy) {
+              $logRoot = Join-Path $env:LOCALAPPDATA "AI-Film-Studio/logs"
+              Get-ChildItem $logRoot -ErrorAction SilentlyContinue | ForEach-Object {
+                Write-Host "--- $($_.Name) ---"
+                Get-Content $_.FullName -ErrorAction SilentlyContinue
+              }
+              throw "Packaged service did not become healthy"
+            }
           } finally {
             if (-not $service.HasExited) { Stop-Process -Id $service.Id -Force }
           }

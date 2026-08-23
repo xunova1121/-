@@ -29,7 +29,12 @@ public partial class MainWindow : Window
 
     private async Task CheckServiceAsync()
     {
-        var healthy = await _api.IsHealthyAsync();
+        var healthy = false;
+        for (var attempt = 0; attempt < 20 && !healthy; attempt++)
+        {
+            healthy = await _api.IsHealthyAsync();
+            if (!healthy) await Task.Delay(500);
+        }
         ServiceDot.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(healthy ? "#36C979" : "#E0A534"));
         ServiceText.Text = healthy ? "本地服务已连接" : "离线演示模式";
     }
@@ -59,4 +64,3 @@ public partial class MainWindow : Window
             WorkspaceTitle.Text = $"剪辑工作台 · {item.Content?.ToString()?.Trim()}";
     }
 }
-

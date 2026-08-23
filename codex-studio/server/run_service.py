@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 import uvicorn
+from app.main import app as studio_app
 
 
 def prepare_headless_streams() -> None:
@@ -19,7 +20,7 @@ def prepare_headless_streams() -> None:
 if __name__ == "__main__":
     prepare_headless_streams()
     uvicorn.run(
-        "app.main:app",
+        studio_app,
         host="127.0.0.1",
         port=18118,
         log_config=None,
