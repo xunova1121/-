@@ -47,6 +47,7 @@ jobs:
         env:
           REALCHECK_REQUIRED: "1"
           FUTUREDREAM_BIN_DIR: ${{ github.workspace }}\desktop\bin
+          FFMPEG_PATH: ${{ github.workspace }}\desktop\bin\ffmpeg.exe
           FUTUREDREAM_DISABLE_PATH_FFMPEG: "1"
         run: npm run realcheck
 
