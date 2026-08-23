@@ -64,7 +64,16 @@ CREATE TABLE IF NOT EXISTS tasks (
     priority INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 3,
     available_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, lease_until TEXT, cancel_requested INTEGER NOT NULL DEFAULT 0,
     error_message TEXT NOT NULL DEFAULT '', started_at TEXT, completed_at TEXT,
+    automation_run_id INTEGER, stage TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS automation_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, episode INTEGER NOT NULL DEFAULT 1,
+    mode TEXT NOT NULL DEFAULT 'balanced', status TEXT NOT NULL DEFAULT 'queued', stage TEXT NOT NULL DEFAULT 'prepare',
+    progress INTEGER NOT NULL DEFAULT 0, config_json TEXT NOT NULL DEFAULT '{}', checkpoint_json TEXT NOT NULL DEFAULT '{}',
+    error_message TEXT NOT NULL DEFAULT '', cancel_requested INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TEXT
 );
 CREATE TABLE IF NOT EXISTS pipeline_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, stage TEXT NOT NULL,
@@ -136,6 +145,8 @@ TASK_MIGRATIONS: dict[str, str] = {
     "started_at": "TEXT",
     "completed_at": "TEXT",
     "updated_at": "TEXT",
+    "automation_run_id": "INTEGER",
+    "stage": "TEXT NOT NULL DEFAULT ''",
 }
 
 SHOT_MIGRATIONS: dict[str, str] = {
@@ -167,6 +178,8 @@ def _migrate(connection: sqlite3.Connection) -> None:
             connection.execute(f"ALTER TABLE tasks ADD COLUMN {name} {definition}")
     connection.execute("UPDATE tasks SET available_at=COALESCE(available_at,created_at,CURRENT_TIMESTAMP), updated_at=COALESCE(updated_at,created_at,CURRENT_TIMESTAMP)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_tasks_dispatch ON tasks(status, available_at, priority DESC, id)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_tasks_automation ON tasks(automation_run_id, stage, status, id)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_automation_project ON automation_runs(project_id, episode, id DESC)")
     shot_columns = {row[1] for row in connection.execute("PRAGMA table_info(shots)")}
     for name, definition in SHOT_MIGRATIONS.items():
         if name not in shot_columns:
