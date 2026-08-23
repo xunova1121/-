@@ -10,6 +10,8 @@
                 <TextBlock x:Name="ProjectNameText" Foreground="{StaticResource MutedBrush}" Margin="14,5,0,0"/>
             </StackPanel>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <Button Style="{StaticResource NavButton}" Content="场景预演台" Click="Previz_Click"/>
+                <Button Style="{StaticResource NavButton}" Content="连续性审校" Click="Continuity_Click"/>
                 <Button Style="{StaticResource NavButton}" Content="刷新" Click="Refresh_Click"/>
                 <Button Style="{StaticResource PrimaryButton}" Content="保存全部修改" Click="SaveAll_Click"/>
             </StackPanel>
