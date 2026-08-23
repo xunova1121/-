@@ -1,7 +1,10 @@
 import hashlib
+import os
 import json
 import uuid
 import asyncio
+import mimetypes
+import shutil
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -10,9 +13,9 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from .adapters import registry
-from .config import render_dir, settings
+from .config import project_media_dir, render_dir, settings
 from .database import connect, initialize_database
-from .schemas import AssetCreate, BibleEntityCreate, ContinuityContractRequest, ContinuityRequest, EpisodeAutomationRequest, EpisodeLockRequest, GatewayRequest, PipelineUpdate, PreflightRequest, Project, ProjectCreate, ProviderConfigUpdate, QualityReviewRequest, RouteUpdate, SceneLayoutRequest, ScriptUpsert, Shot, ShotCreate, ShotUpdate, StoryboardGenerateRequest, TaskCreate, TransitionPlanRequest, TransitionRenderRequest
+from .schemas import AssetCreate, AssetImportRequest, AssetUpdate, BibleEntityCreate, ContinuityContractRequest, ContinuityRequest, EpisodeAutomationRequest, EpisodeLockRequest, GatewayRequest, PipelineUpdate, PreflightRequest, Project, ProjectCreate, ProviderConfigUpdate, QualityReviewRequest, RouteUpdate, SceneLayoutRequest, ScriptUpsert, Shot, ShotCreate, ShotGenerationRequest, ShotUpdate, StoryboardGenerateRequest, TaskCreate, TimelineClipCreate, TimelineClipUpdate, TimelineExportRequest, TimelineReorderRequest, TransitionPlanRequest, TransitionRenderRequest
 from .continuity import analyze_pair
 from .pipeline import stage_catalog
 from .providers import CAPABILITIES, providers_for, public_catalog
@@ -40,14 +43,14 @@ async def lifespan(_: FastAPI):
         await worker
 
 
-app = FastAPI(title=settings.app_name, version="0.7.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.0.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost", "http://127.0.0.1"], allow_methods=["*"], allow_headers=["*"])
 PREFIX = settings.api_prefix
 
 
 @app.get(f"{PREFIX}/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.7.0"}
+    return {"status": "ok", "version": "1.0.0", "instance_id": os.getenv("AI_STUDIO_INSTANCE_ID", "external")}
 
 
 @app.get(f"{PREFIX}/providers")
@@ -124,7 +127,8 @@ def delete_project(project_id: str):
         cursor = db.execute("DELETE FROM projects WHERE id=?", (project_id,))
         if not cursor.rowcount:
             raise HTTPException(404, "Project not found")
-        for table in ("episode_scripts", "scenes", "shots", "assets", "tasks", "pipeline_runs", "bible_entities", "episode_locks", "continuity_contracts", "quality_reviews", "scene_layouts", "transition_plans"):
+        db.execute("DELETE FROM shot_assets WHERE shot_id IN (SELECT id FROM shots WHERE project_id=?)", (project_id,))
+        for table in ("episode_scripts", "scenes", "shots", "assets", "timeline_clips", "tasks", "pipeline_runs", "bible_entities", "episode_locks", "continuity_contracts", "quality_reviews", "scene_layouts", "transition_plans"):
             db.execute(f"DELETE FROM {table} WHERE project_id=?", (project_id,))
 
 
@@ -277,12 +281,191 @@ def create_asset(project_id: str, payload: AssetCreate):
     return {"id": cursor.lastrowid, **payload.model_dump()}
 
 
+def _asset_dict(row):
+    return {**{key: row[key] for key in row.keys() if key not in {"memory_json", "metadata_json"}}, "memory": json.loads(row["memory_json"]), "metadata": json.loads(row["metadata_json"])}
+
+
+@app.get(f"{PREFIX}/projects/{{project_id}}/assets")
+def list_assets(project_id: str, asset_type: str | None = None, episode: int | None = None):
+    query = "SELECT * FROM assets WHERE project_id=?"
+    args: list[object] = [project_id]
+    if asset_type:
+        query += " AND asset_type=?"; args.append(asset_type)
+    if episode:
+        query += " AND episode=?"; args.append(episode)
+    query += " ORDER BY created_at DESC,id DESC"
+    with connect() as db:
+        rows = db.execute(query, args).fetchall()
+    return [_asset_dict(row) for row in rows]
+
+
+@app.post(f"{PREFIX}/projects/{{project_id}}/assets/import", status_code=201)
+def import_asset(project_id: str, payload: AssetImportRequest):
+    source = Path(payload.source_path).expanduser().resolve()
+    if not source.is_file():
+        raise HTTPException(404, "Source file not found")
+    with connect() as db:
+        if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
+            raise HTTPException(404, "Project not found")
+    target = source
+    if payload.copy_into_project:
+        folder = project_media_dir(project_id) / "imported"
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / f"{uuid.uuid4().hex[:10]}-{source.name}"
+        shutil.copy2(source, target)
+    metadata: dict[str, object] = {"source_path": str(source), "size_bytes": target.stat().st_size}
+    if payload.asset_type == "video":
+        try: metadata.update(probe_media(str(target)))
+        except MediaError as exc: raise HTTPException(422, str(exc)) from exc
+    mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    with connect() as db:
+        cursor = db.execute(
+            "INSERT INTO assets(project_id,asset_type,name,episode,shot_id,local_path,mime_type,source_kind,status,memory_json,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (project_id, payload.asset_type, payload.name or source.stem, payload.episode, payload.shot_id, str(target), mime, "manual", "ready", json.dumps(payload.memory, ensure_ascii=False), json.dumps(metadata, ensure_ascii=False)),
+        )
+        if payload.shot_id:
+            db.execute("INSERT OR IGNORE INTO shot_assets(shot_id,asset_id,role) VALUES(?,?,?)", (payload.shot_id, cursor.lastrowid, payload.asset_type))
+        row = db.execute("SELECT * FROM assets WHERE id=?", (cursor.lastrowid,)).fetchone()
+    return _asset_dict(row)
+
+
+@app.patch(f"{PREFIX}/assets/{{asset_id}}")
+def update_asset(asset_id: int, payload: AssetUpdate):
+    changes = payload.model_dump(exclude_none=True)
+    if "memory" in changes: changes["memory_json"] = json.dumps(changes.pop("memory"), ensure_ascii=False)
+    if "metadata" in changes: changes["metadata_json"] = json.dumps(changes.pop("metadata"), ensure_ascii=False)
+    if not changes: raise HTTPException(400, "No changes")
+    with connect() as db:
+        cursor = db.execute(f"UPDATE assets SET {','.join(f'{key}=?' for key in changes)} WHERE id=?", (*changes.values(), asset_id))
+        if not cursor.rowcount: raise HTTPException(404, "Asset not found")
+        row = db.execute("SELECT * FROM assets WHERE id=?", (asset_id,)).fetchone()
+    return _asset_dict(row)
+
+
+@app.delete(f"{PREFIX}/assets/{{asset_id}}", status_code=204)
+def delete_asset(asset_id: int, delete_file: bool = False):
+    with connect() as db:
+        row = db.execute("SELECT local_path,source_kind FROM assets WHERE id=?", (asset_id,)).fetchone()
+        if not row: raise HTTPException(404, "Asset not found")
+        db.execute("DELETE FROM shot_assets WHERE asset_id=?", (asset_id,))
+        db.execute("DELETE FROM assets WHERE id=?", (asset_id,))
+    if delete_file and row["source_kind"] in {"manual", "generated"} and row["local_path"]:
+        try:
+            path = Path(row["local_path"]).resolve()
+            root = settings.database_path.parent.resolve()
+            if root in path.parents: path.unlink(missing_ok=True)
+        except OSError: pass
+
+
+@app.post(f"{PREFIX}/projects/{{project_id}}/shots/generate", status_code=202)
+def generate_shot_media(project_id: str, payload: ShotGenerationRequest):
+    with connect() as db:
+        shot = db.execute("SELECT id,episode,number,title,prompt FROM shots WHERE id=? AND project_id=?", (payload.shot_id, project_id)).fetchone()
+        if not shot: raise HTTPException(404, "Shot not found")
+        reference_rows = []
+        if payload.reference_asset_ids:
+            marks = ",".join("?" for _ in payload.reference_asset_ids)
+            reference_rows = db.execute(f"SELECT id,local_path FROM assets WHERE project_id=? AND id IN ({marks})", (project_id, *payload.reference_asset_ids)).fetchall()
+        reference_paths = [row["local_path"] for row in reference_rows if row["local_path"]]
+        task_payload = {
+            "project_id": project_id, "episode": shot["episode"], "shot_id": shot["id"], "shot_number": shot["number"],
+            "prompt": payload.prompt, "model": payload.model, "reference_asset_ids": payload.reference_asset_ids,
+            "reference_paths": reference_paths, "options": payload.options,
+        }
+        cursor = db.execute("INSERT INTO tasks(project_id,task_type,provider,payload_json,priority,max_attempts) VALUES(?,?,?,?,?,?)", (project_id, payload.task_type, payload.provider, json.dumps(task_payload, ensure_ascii=False), 50, 3))
+    return {"id": cursor.lastrowid, "status": "queued", "shot_id": payload.shot_id, "task_type": payload.task_type}
+
+
+def _timeline_clip(row):
+    return {**{key: row[key] for key in row.keys() if key != "metadata_json"}, "metadata": json.loads(row["metadata_json"])}
+
+
+@app.get(f"{PREFIX}/projects/{{project_id}}/timeline")
+def list_timeline(project_id: str, episode: int = 1):
+    with connect() as db:
+        rows = db.execute("SELECT * FROM timeline_clips WHERE project_id=? AND episode=? ORDER BY track,position,id", (project_id, episode)).fetchall()
+    return [_timeline_clip(row) for row in rows]
+
+
+@app.post(f"{PREFIX}/projects/{{project_id}}/timeline", status_code=201)
+def add_timeline_clip(project_id: str, payload: TimelineClipCreate):
+    source = Path(payload.source_path).expanduser().resolve()
+    if not source.is_file(): raise HTTPException(404, "Media file not found")
+    duration = payload.duration
+    if payload.track.startswith("V") and duration <= 0:
+        try: duration = float(probe_media(str(source))["duration"])
+        except MediaError as exc: raise HTTPException(422, str(exc)) from exc
+    with connect() as db:
+        position = db.execute("SELECT COALESCE(MAX(position),-1)+1 FROM timeline_clips WHERE project_id=? AND episode=? AND track=?", (project_id, payload.episode, payload.track)).fetchone()[0]
+        cursor = db.execute(
+            "INSERT INTO timeline_clips(project_id,episode,track,position,asset_id,source_path,title,trim_in,trim_out,duration,transition,transition_duration,volume,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (project_id, payload.episode, payload.track, position, payload.asset_id, str(source), payload.title or source.stem, payload.trim_in, payload.trim_out, duration, payload.transition, payload.transition_duration, payload.volume, json.dumps(payload.metadata, ensure_ascii=False)),
+        )
+        row = db.execute("SELECT * FROM timeline_clips WHERE id=?", (cursor.lastrowid,)).fetchone()
+    return _timeline_clip(row)
+
+
+@app.post(f"{PREFIX}/projects/{{project_id}}/timeline/from-storyboard")
+def timeline_from_storyboard(project_id: str, episode: int = 1, replace: bool = True):
+    with connect() as db:
+        rows = db.execute(
+            "SELECT a.id,a.local_path,a.name,s.number FROM shots s JOIN shot_assets sa ON sa.shot_id=s.id AND sa.role='video' JOIN assets a ON a.id=sa.asset_id WHERE s.project_id=? AND s.episode=? ORDER BY s.sequence,s.id,a.id DESC",
+            (project_id, episode),
+        ).fetchall()
+        unique = {}
+        for row in rows:
+            unique.setdefault(row["number"], row)
+        if replace: db.execute("DELETE FROM timeline_clips WHERE project_id=? AND episode=? AND track='V1'", (project_id, episode))
+        created = 0
+        for position, row in enumerate(unique.values()):
+            try: duration = probe_media(row["local_path"])["duration"]
+            except MediaError: continue
+            db.execute("INSERT INTO timeline_clips(project_id,episode,track,position,asset_id,source_path,title,duration,transition) VALUES(?,?,'V1',?,?,?,?,?,'cut')", (project_id, episode, position, row["id"], row["local_path"], f"镜头 {row['number']} · {row['name']}", duration))
+            created += 1
+    return {"created": created, "episode": episode}
+
+
+@app.patch(f"{PREFIX}/timeline/{{clip_id}}")
+def update_timeline_clip(clip_id: int, payload: TimelineClipUpdate):
+    changes = payload.model_dump(exclude_none=True)
+    if not changes: raise HTTPException(400, "No changes")
+    with connect() as db:
+        cursor = db.execute(f"UPDATE timeline_clips SET {','.join(f'{key}=?' for key in changes)} WHERE id=?", (*changes.values(), clip_id))
+        if not cursor.rowcount: raise HTTPException(404, "Timeline clip not found")
+        row = db.execute("SELECT * FROM timeline_clips WHERE id=?", (clip_id,)).fetchone()
+    return _timeline_clip(row)
+
+
+@app.post(f"{PREFIX}/projects/{{project_id}}/timeline/reorder")
+def reorder_timeline(project_id: str, payload: TimelineReorderRequest):
+    with connect() as db:
+        for position, clip_id in enumerate(payload.clip_ids):
+            db.execute("UPDATE timeline_clips SET position=? WHERE id=? AND project_id=?", (position, clip_id, project_id))
+    return {"clip_ids": payload.clip_ids}
+
+
+@app.delete(f"{PREFIX}/timeline/{{clip_id}}", status_code=204)
+def delete_timeline_clip(clip_id: int):
+    with connect() as db:
+        cursor = db.execute("DELETE FROM timeline_clips WHERE id=?", (clip_id,))
+        if not cursor.rowcount: raise HTTPException(404, "Timeline clip not found")
+
+
+@app.post(f"{PREFIX}/projects/{{project_id}}/timeline/export", status_code=202)
+def export_timeline(project_id: str, payload: TimelineExportRequest):
+    with connect() as db:
+        count = db.execute("SELECT COUNT(*) FROM timeline_clips WHERE project_id=? AND episode=? AND track IN ('V1','V2')", (project_id, payload.episode)).fetchone()[0]
+        if not count: raise HTTPException(409, "Timeline has no video clips")
+        cursor = db.execute("INSERT INTO tasks(project_id,task_type,provider,payload_json,priority,max_attempts) VALUES(?,?,?,?,?,1)", (project_id, "timeline_export", "ffmpeg", json.dumps(payload.model_dump(), ensure_ascii=False), 100))
+    return {"id": cursor.lastrowid, "status": "queued", "clip_count": count}
+
+
 @app.post(f"{PREFIX}/projects/{{project_id}}/tasks", status_code=202)
 def create_task(project_id: str, payload: TaskCreate):
     with connect() as db:
         if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
             raise HTTPException(404, "Project not found")
-        cursor = db.execute("INSERT INTO tasks(project_id,task_type,provider,payload_json,priority,max_attempts) VALUES(?,?,?,?,?,?)", (project_id, payload.task_type, payload.provider, json.dumps(payload.payload, ensure_ascii=False), payload.priority, payload.max_attempts))
+        cursor = db.execute("INSERT INTO tasks(project_id,task_type,provider,payload_json,priority,max_attempts) VALUES(?,?,?,?,?,?)", (project_id, payload.task_type, payload.provider, json.dumps({"project_id": project_id, **payload.payload}, ensure_ascii=False), payload.priority, payload.max_attempts))
     return {"id": cursor.lastrowid, "status": "queued", **payload.model_dump()}
 
 
@@ -508,12 +691,24 @@ def pipeline_status(project_id: str):
 
 @app.get(f"{PREFIX}/projects/{{project_id}}/proofread")
 def proofread(project_id: str):
-    return {
-        "project_id": project_id,
-        "score": 86,
-        "dimensions": {"character": 92, "scene": 88, "motion": 75, "lighting": 89},
-        "findings": [
-            {"shot": "005→006", "message": "动作跨度较大，建议增加过渡镜头", "action": "generate_transition"},
-            {"shot": "012", "message": "光影与前后镜头差异较大", "action": "adjust_lighting"},
-        ],
-    }
+    with connect() as db:
+        rows = db.execute(
+            "SELECT number,scene_id,action,characters_json,continuity_json FROM shots WHERE project_id=? ORDER BY episode,sequence,id",
+            (project_id,),
+        ).fetchall()
+    shots = []
+    for row in rows:
+        continuity = json.loads(row["continuity_json"] or "{}")
+        continuity.update({"number": row["number"], "scene": continuity.get("scene") or str(row["scene_id"] or ""),
+                           "action": row["action"], "characters": json.loads(row["characters_json"] or "[]")})
+        shots.append(continuity)
+    findings: list[dict[str, str]] = []
+    scores: list[int] = []
+    for previous, current in zip(shots, shots[1:]):
+        result = analyze_pair(previous, current)
+        scores.append(result["score"])
+        for item in result["findings"]:
+            findings.append({"shot": f"{previous['number']}→{current['number']}", "message": item["message"],
+                             "action": "adjust_axis" if item["type"] == "axis" else "adjust_lighting", "severity": item["severity"]})
+    score = round(sum(scores) / len(scores)) if scores else (100 if shots else 0)
+    return {"project_id": project_id, "score": score, "shot_count": len(shots), "findings": findings}
