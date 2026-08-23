@@ -18,6 +18,7 @@
                 <Button Style="{StaticResource NavButton}" Content="导入 TXT / MD / DOCX" Click="Import_Click"/>
                 <Button Style="{StaticResource NavButton}" Content="保存剧本" Click="Save_Click"/>
                 <Button Style="{StaticResource PrimaryButton}" Content="解析剧本" Click="Parse_Click"/>
+                <Button x:Name="DirectorButton" Style="{StaticResource NavButton}" Content="AI导演分析" Click="Director_Click" IsEnabled="False"/>
                 <Button Style="{StaticResource PrimaryButton}" Content="生成全量分镜" Click="Generate_Click" Margin="8,0,0,0"/>
             </StackPanel>
         </Grid>
@@ -36,7 +37,7 @@
         </Border>
 
         <Border Grid.Row="1" Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource StrokeBrush}" BorderThickness="1" CornerRadius="8" Padding="14">
-            <Grid><Grid.RowDefinitions><RowDefinition Height="42"/><RowDefinition Height="Auto"/><RowDefinition Height="44"/><RowDefinition/></Grid.RowDefinitions>
+            <Grid><Grid.RowDefinitions><RowDefinition Height="42"/><RowDefinition Height="Auto"/><RowDefinition Height="44"/><RowDefinition Height="2*"/><RowDefinition Height="40"/><RowDefinition Height="2*"/></Grid.RowDefinitions>
                 <TextBlock Text="解析结果" FontWeight="SemiBold" FontSize="16" VerticalAlignment="Center"/>
                 <Border Grid.Row="1" Background="#191D24" CornerRadius="6" Padding="12" Margin="0,4,0,10">
                     <StackPanel>
@@ -46,6 +47,8 @@
                 </Border>
                 <TextBlock Grid.Row="2" Text="场景顺序" FontWeight="SemiBold" VerticalAlignment="Center"/>
                 <ListBox x:Name="SceneList" Grid.Row="3" DisplayMemberPath="Display" Background="#101318" Foreground="{StaticResource TextBrush}" BorderBrush="{StaticResource StrokeBrush}" Padding="5"/>
+                <TextBlock Grid.Row="4" Text="AI 导演意见" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <TextBox x:Name="DirectorResult" Grid.Row="5" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Background="#101318" Foreground="{StaticResource TextBrush}" BorderBrush="{StaticResource StrokeBrush}" Padding="10" Text="配置任一导演模型后可分析剧本、镜头衔接与连续性风险。"/>
             </Grid>
         </Border>
 
