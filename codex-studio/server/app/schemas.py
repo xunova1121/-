@@ -8,6 +8,12 @@ class ProjectCreate(BaseModel):
     episode_count: int = Field(default=1, ge=1, le=999)
 
 
+class ProjectUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    genre: str | None = Field(default=None, max_length=80)
+    episode_count: int | None = Field(default=None, ge=1, le=999)
+
+
 class Project(ProjectCreate):
     id: str
 
@@ -299,5 +305,28 @@ class TransitionRenderRequest(BaseModel):
 class EpisodeAutomationRequest(BaseModel):
     episode: int = Field(ge=1)
     mode: Literal["quality", "balanced", "economy"] = "balanced"
+    auto_repair: bool = True
+    stop_on_blocker: bool = True
+
+
+class AutomationStartRequest(BaseModel):
+    episode: int = Field(default=1, ge=1)
+    mode: Literal["quality", "balanced", "economy"] = "balanced"
+    image_provider: str = "openai"
+    image_model: str = "gpt-image-2"
+    video_provider: str = "dashscope"
+    video_model: str = "wan2.7-i2v-2026-04-25"
+    voice_provider: str | None = "openai"
+    voice_model: str = "gpt-4o-mini-tts"
+    quality_provider: str | None = None
+    output_name: str = "自动成片.mp4"
+    width: int = Field(default=1920, ge=320, le=3840)
+    height: int = Field(default=1080, ge=240, le=2160)
+    fps: int = Field(default=24, ge=12, le=60)
+    quality: Literal["draft", "standard", "high"] = "high"
+    auto_freeze_bible: bool = True
+    generate_images: bool = True
+    generate_voice: bool = True
+    generate_bridges: bool = True
     auto_repair: bool = True
     stop_on_blocker: bool = True
