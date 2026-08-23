@@ -38,6 +38,32 @@ CREATE TABLE IF NOT EXISTS request_logs (
     success INTEGER NOT NULL DEFAULT 0, error_message TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS bible_entities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL,
+    entity_type TEXT NOT NULL, entity_key TEXT NOT NULL, name TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1, state TEXT NOT NULL DEFAULT 'draft',
+    data_json TEXT NOT NULL DEFAULT '{}', reference_assets_json TEXT NOT NULL DEFAULT '[]',
+    fingerprint TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(project_id, entity_type, entity_key, version)
+);
+CREATE TABLE IF NOT EXISTS episode_locks (
+    project_id TEXT NOT NULL, episode INTEGER NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'draft', snapshot_json TEXT NOT NULL DEFAULT '{}',
+    locked_at TEXT, PRIMARY KEY(project_id, episode)
+);
+CREATE TABLE IF NOT EXISTS continuity_contracts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, episode INTEGER NOT NULL,
+    from_shot TEXT NOT NULL, to_shot TEXT NOT NULL, relation TEXT NOT NULL DEFAULT 'cut',
+    contract_json TEXT NOT NULL DEFAULT '{}', score INTEGER NOT NULL DEFAULT 100,
+    findings_json TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(project_id, episode, from_shot, to_shot)
+);
+CREATE TABLE IF NOT EXISTS quality_reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, episode INTEGER NOT NULL,
+    shot_number TEXT NOT NULL, score INTEGER NOT NULL, status TEXT NOT NULL,
+    dimensions_json TEXT NOT NULL DEFAULT '{}', findings_json TEXT NOT NULL DEFAULT '[]',
+    repair_plan_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 

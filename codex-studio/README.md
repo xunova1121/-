@@ -16,6 +16,10 @@
 - 六阶段断点续跑 checkpoint
 - Windows 打包时内置本地服务 EXE
 - GitHub Actions 自动生成 Windows x64 成品包
+- 版本化 Story Bible（世界、角色、场景、道具、风格）
+- 全量分镜 Episode Lock，未通过连续性门禁不得进入批量生成
+- 镜间动作、道具、环境、机位连续性契约
+- 多维质量评分与“只重做失败环节”的自动修复计划
 
 ## 目录
 

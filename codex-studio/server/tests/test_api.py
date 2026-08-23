@@ -59,3 +59,26 @@ def test_project_shot_task_crud_and_preflight():
         checks = client.post("/api/v1/preflight", json={"checks": ["database", "routes"]}).json()
         assert all(item["status"] == "pass" for item in checks)
         assert client.delete(f"/api/v1/projects/{project['id']}").status_code == 204
+
+
+def test_story_bible_episode_lock_and_quality_repair():
+    with TestClient(app) as client:
+        entity = client.post("/api/v1/projects/demo/bible", json={
+            "entity_type": "character", "entity_key": "li-goudan", "name": "李狗蛋",
+            "state": "frozen", "data": {"face": "国字脸", "costume": "青衫"}, "reference_assets": ["asset://li/front"]
+        }).json()
+        assert len(entity["fingerprint"]) == 64
+        contract = client.put("/api/v1/projects/demo/continuity-contracts", json={
+            "episode": 1, "from_shot": "005", "to_shot": "006", "relation": "continuous",
+            "action_state": {"end_pose": "斧头脱手", "next_start_pose": "斧头下落"},
+            "prop_state": {"before": "握在右手", "after": "空中", "change_reason": "脱手"},
+            "camera_state": {"from_direction": "right", "to_direction": "right"}
+        }).json()
+        assert contract["score"] == 100
+        lock = client.post("/api/v1/projects/demo/episode-locks", json={"episode": 1}).json()
+        assert lock["status"] == "locked"
+        review = client.post("/api/v1/projects/demo/quality-reviews", json={
+            "episode": 1, "shot_number": "006", "dimensions": {"character": 94, "scene": 90, "prop": 96, "motion": 58, "lighting": 88, "image": 85, "audio": 91}
+        }).json()
+        assert review["status"] == "repair_required"
+        assert review["repair_plan"]["actions"][0]["action"] == "regenerate_video"

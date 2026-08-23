@@ -77,3 +77,36 @@ class RouteUpdate(BaseModel):
 
 class PreflightRequest(BaseModel):
     checks: list[str] = ["database", "ffmpeg", "routes"]
+
+
+class BibleEntityCreate(BaseModel):
+    entity_type: Literal["world", "character", "location", "prop", "style"]
+    entity_key: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=120)
+    data: dict[str, Any]
+    reference_assets: list[str] = []
+    state: Literal["draft", "frozen"] = "draft"
+
+
+class EpisodeLockRequest(BaseModel):
+    episode: int = Field(ge=1)
+    force: bool = False
+
+
+class ContinuityContractRequest(BaseModel):
+    episode: int = Field(ge=1)
+    from_shot: str
+    to_shot: str
+    relation: Literal["new-scene", "cut", "continuous"] = "cut"
+    action_state: dict[str, Any] = {}
+    prop_state: dict[str, Any] = {}
+    environment_state: dict[str, Any] = {}
+    camera_state: dict[str, Any] = {}
+
+
+class QualityReviewRequest(BaseModel):
+    episode: int = Field(ge=1)
+    shot_number: str
+    dimensions: dict[str, int]
+    findings: list[dict[str, Any]] = []
+    auto_repair: bool = True
