@@ -13,14 +13,15 @@ public partial class GenerationWindow : Window
     private IReadOnlyList<Shot> _shots = [];
     private IReadOnlyList<ProviderConfigStatus> _providers = [];
     private IReadOnlyList<AssetItem> _assets = [];
-    public GenerationWindow(StudioApiClient api, StudioProject project) { InitializeComponent(); _api = api; _project = project; ProjectText.Text = $"· {project.Name}"; Loaded += async (_, _) => await LoadAsync(); }
+    public GenerationWindow(StudioApiClient api, StudioProject project) { InitializeComponent(); _api = api; _project = project; ProjectText.Text = $"· {project.Name}"; for (var i = 1; i <= project.EpisodeCount; i++) EpisodeSelector.Items.Add(i); EpisodeSelector.SelectedIndex = 0; Loaded += async (_, _) => await LoadAsync(); }
+    private int Episode => EpisodeSelector.SelectedItem is int value ? value : 1;
     private string SelectedType => (TaskType.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "image";
     private static string ComboText(ComboBox box) => (box.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "";
     private async Task LoadAsync()
     {
         try
         {
-            _shots = await _api.GetShotsAsync(); _assets = await _api.GetAssetsAsync(); _providers = (await _api.GetProviderConfigsAsync()).Where(p => p.Configured).ToList();
+            _shots = (await _api.GetShotsAsync()).Where(x => x.Episode == Episode).ToList(); _assets = await _api.GetAssetsAsync(episode: Episode); _providers = (await _api.GetProviderConfigsAsync()).Where(p => p.Configured).ToList();
             ShotSelector.ItemsSource = _shots; if (ShotSelector.SelectedIndex < 0 && _shots.Count > 0) ShotSelector.SelectedIndex = 0;
             ReferenceList.ItemsSource = _assets.Where(a => a.AssetType is "image" or "character" or "scene" or "prop").ToList();
             await RefreshProvidersAsync(); await RefreshTasksAsync();
@@ -37,6 +38,7 @@ public partial class GenerationWindow : Window
     }
     private async Task RefreshTasksAsync() { var tasks = await _api.GetTasksAsync(); TaskGrid.ItemsSource = tasks.Where(t => t.TaskType is "image" or "video" or "voice").ToList(); StatusText.Text = $"生成任务 {tasks.Count(t => t.TaskType is "image" or "video" or "voice")} 项。完成结果会自动回写资产库和镜头。"; }
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshTasksAsync();
+    private async void EpisodeSelector_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (IsLoaded) await LoadAsync(); }
     private async void TaskType_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (IsLoaded) await RefreshProvidersAsync(); }
     private void ShotSelector_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (ShotSelector.SelectedItem is Shot shot) PromptText.Text = SelectedType == "voice" ? shot.Dialogue : shot.Prompt; }
     private Dictionary<string, object?> Options() => new() { ["duration"] = int.TryParse(ComboText(Duration), out var d) ? d : 5, ["seconds"] = int.TryParse(ComboText(Duration), out var s) ? s : 8, ["ratio"] = ComboText(Ratio), ["resolution"] = "720P", ["size"] = ComboText(Ratio) == "9:16" ? "720x1280" : "1280x720", ["voice"] = "alloy", ["prompt_extend"] = true, ["watermark"] = false };
