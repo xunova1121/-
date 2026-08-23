@@ -3,6 +3,8 @@ name: Build Windows EXE
 on:
   push:
     branches: ["codex/ai-film-studio-v0.2"]
+  pull_request:
+    branches: ["claude/windows-app-third-party-api-8h0qec"]
   workflow_dispatch:
 
 permissions:
@@ -47,3 +49,4 @@ jobs:
           name: AI-Film-Studio-Windows-x64
           path: dist/AI-Film-Studio-Windows-x64.zip
           retention-days: 30
+
