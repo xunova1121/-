@@ -248,6 +248,39 @@ if (await previz.count()) {
   // 拖到人后面去，看它认不认得出"现在看到的是背面"
   check('读数里说了现在看到的是哪一面',
     /正面|侧面|斜侧|侧后|背面/.test(afterDrag), afterDrag.slice(0, 80));
+
+  /**
+   * ── 场景的东南西北 ──
+   *
+   * 上面那句"机位在人物右前方"是相对**人**的，人一转身就指向房间里别处。
+   * 相对**房间**的那句（"机位在场景西南侧、朝东北拍"）才是同一场戏里
+   * 每一镜都对得上的话 —— 而它得先在图上有个基准才读得懂。
+   */
+  check('画布上标了东南西北', (await page.locator('.previz-compass').count()) === 4,
+    String(await page.locator('.previz-compass').count()));
+  const chips = await page.locator('.previz-chips').first().innerText().catch(() => '');
+  check('读数里有"机位在场景哪一侧、朝哪儿拍"',
+    /场景[东南西北]+侧/.test(chips) && /朝[东南西北]+拍/.test(chips), chips.slice(0, 120));
+
+  /**
+   * 摆一个地标上去 —— 观众判断"人在房间里的哪儿"靠的就是这些不动的东西。
+   * 摆上之后必须能当场算出它在画面的哪一边。
+   */
+  const markBtn = page.locator('.previz-row button', { hasText: '窗' }).first();
+  if (await markBtn.count()) {
+    await markBtn.click();
+    await page.waitForTimeout(400);
+    check('点一下就把地标摆到图上', (await page.locator('.previz-mark').count()) >= 1,
+      String(await page.locator('.previz-mark').count()));
+    const withMark = await page.locator('.previz-chips').first().innerText().catch(() => '');
+    check('并且当场算出它在画面哪一边（或者出画了）',
+      /窗：(画面左|画面右|正中|画外)/.test(withMark), withMark.slice(0, 160));
+    // 再点一下收回去 —— 摆错了要能撤
+    await page.locator('.previz-row button', { hasText: '窗' }).first().click();
+    await page.waitForTimeout(300);
+    check('再点一下能把它撤掉', (await page.locator('.previz-mark').count()) === 0,
+      String(await page.locator('.previz-mark').count()));
+  }
 }
 
 

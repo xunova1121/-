@@ -122,6 +122,49 @@ export function blockingCanvas(stage, { size = 320, onChange = () => {} } = {}) 
     const cam = stage.cam;
 
     /**
+     * ── 东南西北 ──
+     *
+     * 图上不标方位的话，"机位在场景西南侧"这句话在人眼里是没有着落的。
+     * 标出来之后，同一场戏的每一镜都能对着同一个基准摆 ——
+     * 而这正是"下一镜衔接幅度很大"的根治办法：不是不让调，
+     * 是调的时候看得见自己相对**房间**动了多少。
+     *
+     * ⚠ 不是真的地理方向，是给这一场戏定的基准（+y 记作北）。
+     */
+    for (const [word, dx, dy] of [['北', 0, -1], ['南', 0, 1], ['东', 1, 0], ['西', -1, 0]]) {
+      const t = el('text', {
+        x: size / 2 + dx * (size / 2 - 9),
+        y: size / 2 + dy * (size / 2 - 9) + 4,
+        class: 'previz-compass',
+        'pointer-events': 'none'
+      });
+      t.append(document.createTextNode(word));
+      layer.append(t);
+    }
+
+    /**
+     * ── 地标：门、窗、桌 ──
+     *
+     * 观众判断"人在房间里的哪儿"靠的就是这些不动的东西。
+     * 摆上之后，机位一挪就能当场算出"窗跑到画面另一边去了"——
+     * 而那正是"这两镜好像不在同一个屋里"的真正来源。
+     */
+    for (const mk of stage.marks || []) {
+      const g = el('g');
+      g.append(el('rect', {
+        x: s.x(mk.x) - 9, y: s.y(mk.y) - 9, width: 18, height: 18, rx: 4, class: 'previz-mark'
+      }));
+      const t = el('text', { x: s.x(mk.x), y: s.y(mk.y) + 4, class: 'previz-mark-label', 'pointer-events': 'none' });
+      t.append(document.createTextNode((mk.name || '?').slice(0, 2)));
+      g.append(t);
+      draggable(g.firstChild, (mx, my) => {
+        mk.x = Number(mx.toFixed(2));
+        mk.y = Number(my.toFixed(2));
+      });
+      layer.append(g);
+    }
+
+    /**
      * 轴线：两个人之间那条连线。画出来才有意义 ——
      * "别越轴"这句话对着一张空白俯视图是没法执行的，
      * 而线一画出来，"机位别跨过这条线"就是看得见的一件事。
@@ -293,6 +336,32 @@ export function previzPanel(stage, { size = 320, onChange = () => {}, prevStage 
     }
     controls.append(hRow);
 
+    /**
+     * ── 地标那一排 ──
+     *
+     * 门窗桌椅是**场景的骨架**：人物走位再准，窗一会儿在画面左、一会儿在右，
+     * 这场戏的空间就塌了。摆一次就够 —— 同一场次的后面几镜会原样继承，
+     * 因为它们不会因为换了个机位就搬家。
+     */
+    const markRow = document.createElement('div');
+    markRow.className = 'previz-row';
+    markRow.append(Object.assign(document.createElement('span'), { className: 'previz-cap', textContent: '地标' }));
+    for (const name of ['门', '窗', '桌', '床', '楼梯']) {
+      const has = (stage.marks || []).some((m) => m.name === name);
+      markRow.append(btn(name, has, () => {
+        stage.marks = stage.marks || [];
+        if (has) stage.marks = stage.marks.filter((m) => m.name !== name);
+        // 新地标先摆在场地边上，等着被拖到该在的位置
+        else stage.marks.push({ name, x: (stage.marks.length % 2 ? 1 : -1) * 2.5, y: 2 });
+      }));
+    }
+    markRow.append(Object.assign(document.createElement('span'), {
+      className: 'previz-cap',
+      style: 'min-width:0',
+      textContent: '摆上就能算出"窗在画面哪边"'
+    }));
+    controls.append(markRow);
+
     const mRow = document.createElement('div');
     mRow.className = 'previz-row';
     mRow.append(Object.assign(document.createElement('span'), { className: 'previz-cap', textContent: '运镜' }));
@@ -327,6 +396,21 @@ export function previzPanel(stage, { size = 320, onChange = () => {}, prevStage 
     if (read.facing) chips.append(chip(`看到的是${read.facing.label}（${read.facing.deg}°）`));
     chips.append(chip(read.height.label));
     if (read.distance !== null) chips.append(chip(`距离 ${read.distance} 米`));
+    /**
+     * 方位那两个字要**当场显示**。
+     *
+     * "机位在人物右前方"是相对人的 —— 人一转身它就指向房间里别的地方。
+     * "机位在场景西南侧、朝东北拍"是相对房间的，房间不会转，
+     * 所以它才是同一场戏里每一镜都对得上的那句话。
+     */
+    const f = previz.framing(stage);
+    if (f) {
+      chips.append(chip(`场景${f.camAt}侧 · 朝${f.looking}拍`));
+      for (const m of f.marks) {
+        if (!m.side) continue;
+        chips.append(chip(`${m.name}：${m.side}`, m.side === '画外' ? '' : 'ok'));
+      }
+    }
     readout.append(chips);
 
     /**
@@ -342,6 +426,18 @@ export function previzPanel(stage, { size = 320, onChange = () => {}, prevStage 
         const warn = document.createElement('div');
         warn.className = 'previz-warn';
         warn.textContent = '⚠ 越轴了：机位跨到了轴线另一侧。成片上会看到两个人左右对调，或者人物突然掉头。把机位挪回同一侧。';
+        readout.append(warn);
+      }
+      /**
+       * 越轴之外那四条也当场报：摆太狠、摆太少（跳切）、景别跳太远、
+       * 参照物换边。判断走 previz.continuityIssues —— 和分镜体检是同一份，
+       * 两处各写一份的话，画布说没事、体检说有事，谁也不信谁。
+       */
+      for (const one of previz.continuityIssues(prevStage, stage)) {
+        const warn = document.createElement('div');
+        warn.className = 'previz-warn';
+        warn.textContent = `⚠ ${one.what}。${one.fix}`;
+        warn.title = one.why;
         readout.append(warn);
       }
     }

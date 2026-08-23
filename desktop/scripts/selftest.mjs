@@ -5527,6 +5527,160 @@ section('转场：真发给 FFmpeg 的那串参数长什么样');
   check('退回硬切之后也不重编码', /-c copy/.test(tiny.calls[tiny.calls.length - 1]), tiny.calls[tiny.calls.length - 1]);
 }
 
+section('场景的东南西北：机位相对房间，不只相对人');
+{
+  /**
+   * ════════ 补的是哪个洞 ════════
+   *
+   * 原来算出来的机位是**相对人的**："机位在人物右前方 45°"。
+   * 单独一镜里很准，可它经不起下一镜：人一转身，"右前方"指向房间里
+   * 完全不同的地方。于是同一场戏里，模型每一镜都在重新想象这个房间 ——
+   * 窗一会儿在画面左、一会儿在右，门一会儿在背后、一会儿在侧面。
+   *
+   * 而观众读一场戏靠的正是这些**不动的东西**。它们乱了，人物走位再准也没用。
+   * 这也是"随便调机位、下一镜衔接幅度很大"的根治办法：不是不让调，
+   * 是调完之后能算出画面里那些不动的东西有没有跟着乱。
+   */
+  const pv = await import('../core/pipeline/previz.js');
+
+  // ── 方位 ──
+  check('八个方位对得上（+y 记作北，顺时针）',
+    ['北', '东北', '东', '东南', '南', '西南', '西', '西北']
+      .every((w, i) => pv.compassOf(i * 45) === w),
+    [0, 45, 90, 135, 180, 225, 270, 315].map((d) => pv.compassOf(d)).join(','));
+  check('负角度和超过一圈都认得', pv.compassOf(-90) === '西' && pv.compassOf(450) === '东');
+
+  // ── 地标 ──
+  const room = () => ({
+    cam: { x: 0, y: -3, height: 1.6, lens: 35 },
+    subjects: [{ name: '阿澜', x: 0, y: 0, facing: 180 }],
+    marks: [{ name: '窗', x: -1.2, y: 2 }, { name: '门', x: 1.2, y: 2 }]
+  });
+  const st = pv.normalizeStage(room());
+  check('地标存得下来', st.marks.length === 2, JSON.stringify(st.marks));
+  check('没名字的地标丢掉（一个没名字的方块在图上没有意义）',
+    pv.normalizeStage({ ...room(), marks: [{ x: 1, y: 1 }] }).marks.length === 0);
+
+  /**
+   * ⚠ 地标**不跟着人走**。
+   *
+   * 人是按这一镜的剧本来的（这一镜没有的人要丢掉），但门窗桌椅不会因为
+   * 换了个机位就搬家。丢了它们，"画面左边是窗"这句话下一镜就没了 ——
+   * 而那正是场景一致性的全部依靠。
+   */
+  const next = pv.inheritStage(room(), ['别人']);
+  check('换了人，地标原样带过去', next.marks.length === 2, JSON.stringify(next.marks));
+  check('这一镜没有的人被丢掉（否则景别会照错人算）',
+    next.subjects.length === 1 && next.subjects[0].name === '别人', JSON.stringify(next.subjects));
+
+  // ── 画面左右 ──
+  const f = pv.framing(room());
+  check('机位在场景南侧、朝北拍', f.camAt === '南' && f.looking === '北', `${f.camAt}/${f.looking}`);
+  const win = f.marks.find((m) => m.name === '窗');
+  const door = f.marks.find((m) => m.name === '门');
+  check('窗在画面左、门在画面右', win.side === '画面左' && door.side === '画面右',
+    `${win.side}/${door.side}`);
+  /**
+   * ⚠ 出画和"在身后"是两回事。长焦下窗早就出画了，但它还在镜头前方；
+   * 一律回 null 会把这个差别抹掉，而"刚出画一点点"是可以靠退半步救回来的。
+   */
+  const tele = pv.framing({ ...room(), cam: { ...room().cam, lens: 200 } });
+  check('长焦下地标出画，但不算"在身后"',
+    tele.marks.every((m) => m.side === '画外' && !m.behind), JSON.stringify(tele.marks));
+  // 摆一个在机位**背后**的地标：那时候"左右"没有意义
+  const behind = pv.framing({
+    ...room(),
+    marks: [{ name: '门', x: 0, y: -6 }]  // 机位在 y=-3 朝北看，门在它身后
+  });
+  check('绕到地标后面时，"左右"没有意义，如实回空',
+    behind.marks.every((m) => m.behind === true && m.side === null), JSON.stringify(behind.marks));
+
+  // ── 那句提示词 ──
+  const line = pv.cameraLine({ stage: room() });
+  check('机位那句话里带上了相对房间的方位',
+    /机位在场景南侧、朝北拍/.test(line), line);
+  check('并且点名画面里看得见什么、在哪边', /画面左是窗/.test(line) && /画面右是门/.test(line), line);
+  /**
+   * ⚠ 没摆地标就**只说方位，不编**。编一句"画面左边是窗"而实际上没人摆过，
+   * 比不说更坏 —— 它是一个听起来很具体的谎。
+   */
+  const bare = pv.cameraLine({ stage: { ...room(), marks: [] } });
+  check('没摆地标时不硬编"画面左边是什么"', !/画面左/.test(bare) && /机位在场景/.test(bare), bare);
+
+  // ── 衔接幅度 ──
+  const at = (x, y, lens = 35) => ({ ...room(), cam: { x, y, height: 1.6, lens } });
+  const kinds = (a, b) => pv.continuityIssues(a, b).map((i) => i.kind);
+
+  check('正常换个机位不报警', kinds(at(0, -3), at(-1.8, -2.4)).length === 0,
+    JSON.stringify(kinds(at(0, -3), at(-1.8, -2.4))));
+  /**
+   * 摆太狠：绕着人转过一百度，画面里一切都换了位置，只是恰好没跨轴线。
+   * 观众在两镜之间失去方位，而逐镜看每一张都挑不出毛病。
+   */
+  check('绕主体摆过一百度要报', kinds(at(0, -3), at(3, 1)).includes('camera-swing'),
+    JSON.stringify(pv.continuityBetween(at(0, -3), at(3, 1))));
+  /**
+   * 摆太少：只挪了十几度、景别也没变 —— 那不叫换机位，叫跳切，
+   * 看上去像播放器卡了一下。剪辑里最基本的三十度原则。
+   */
+  check('几乎没动又不换景别要报（三十度原则）',
+    kinds(at(0, -3), at(0.3, -3)).includes('jump-cut'), JSON.stringify(kinds(at(0, -3), at(0.3, -3))));
+  check('动得少但换了景别就不算跳切',
+    !kinds(at(0, -3), at(0.3, -3, 135)).includes('jump-cut'),
+    JSON.stringify(kinds(at(0, -3), at(0.3, -3, 135))));
+  check('景别一步跨太多档要报', kinds(at(0, -6, 24), at(0, -1.2, 85)).includes('size-leap'),
+    JSON.stringify(pv.continuityBetween(at(0, -6, 24), at(0, -1.2, 85))));
+
+  /**
+   * ⚠ 参照物换边 —— 这是"这两镜好像不在同一个屋里"的真正来源。
+   * 机位绕到另一边，窗从画面左跑到画面右，而人物走位一点没错。
+   */
+  // 广角 + 摆在侧后一点的窗：两个机位下它都在画面里，才谈得上"换边"
+  const flipMarks = [{ name: '窗', x: -1.5, y: 0.5 }];
+  const flipA = { ...room(), marks: flipMarks, cam: { x: 0, y: -4, height: 1.6, lens: 24 } };
+  const flipB = {
+    ...room(),
+    marks: flipMarks,
+    cam: { x: 0, y: 4, height: 1.6, lens: 24 },
+    subjects: [{ name: '阿澜', x: 0, y: 0, facing: 0 }]
+  };
+  const flip = pv.continuityBetween(flipA, flipB);
+  check('绕到对面时算得出参照物换了边', flip.flips.length >= 1, JSON.stringify(flip));
+  check('并且点名是哪一个、从哪边到哪边',
+    Boolean(flip.flips[0]?.name && flip.flips[0]?.from && flip.flips[0]?.to), JSON.stringify(flip.flips[0]));
+  check('报出来的话里带着那个地标的名字',
+    /「窗」|「门」/.test(pv.continuityIssues(flipA, flipB).find((i) => i.kind === 'landmark-flip')?.what || ''),
+    JSON.stringify(pv.continuityIssues(flipA, flipB).map((i) => i.what)));
+
+  /**
+   * ⚠ 主体不是同一个人时，"机位绕了多少度"没有意义 ——
+   * 那本来就是两个不同的参照点，硬算会得出一个纯噪音的角度。
+   */
+  const other = { ...at(3, 1), subjects: [{ name: '另一个人', x: 0, y: 0, facing: 180 }] };
+  check('两镜主体不是同一个人时不算"绕了多少度"',
+    pv.continuityBetween(at(0, -3), other).swing === null,
+    JSON.stringify(pv.continuityBetween(at(0, -3), other)));
+
+  // 有一边没排位就没法比 —— 不比，也不瞎报
+  check('有一边没排位时不比较', pv.continuityBetween(null, at(0, -3)) === null);
+
+  // ── 整场走一遍 ──
+  const seq = pv.lintSequence([
+    { index: 1, segment: 1, stage: at(0, -3) },
+    { index: 2, segment: 1, stage: at(3, 1) },
+    { index: 3, segment: 2, stage: at(0, -3) }
+  ]);
+  check('整场走一遍能报出摆太狠', seq.some((i) => i.kind === 'camera-swing'), JSON.stringify(seq.map((i) => i.kind)));
+  check('报的时候点名是哪两镜之间',
+    seq.some((i) => i.from === 1 && i.to === 2), JSON.stringify(seq.map((i) => [i.from, i.to])));
+  /**
+   * ⚠ 跨场次不查。换了场次就是另一个地方、另一段时间，机位本来就该重摆 ——
+   * 在那儿报"摆太狠"是纯噪音，而噪音会让人学会无视所有警报。
+   */
+  check('跨场次那一刀不查（换了地方，机位本来就该重摆）',
+    !seq.some((i) => i.to === 3), JSON.stringify(seq.map((i) => [i.from, i.to])));
+}
+
 section('中转站只转对话：不该四条一起红');
 {
   /**

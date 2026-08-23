@@ -211,6 +211,25 @@ function lintPair(shot, prev) {
    * 查出来多半不是排位排错了，是这两镜本来就该是硬切 ——
    * 同一瞬间里机位不会瞬移，也不会从全景变特写，那是剪辑。
    */
+  /**
+   * 越轴之外，"动得合不合适"还有四条 —— 摆太狠、摆太少、景别跳太远、
+   * 参照物换边。判断放在 previz.continuityIssues 里，这儿只负责摆出来：
+   * 两处各写一份迟早会漂，而漂开之后画布上说没事、体检说有事，谁也不信谁。
+   *
+   * 只在**同一场次**内查。换了场次就是另一个地方，机位本来就该重摆。
+   */
+  if (!crossed) {
+    for (const one of previz.continuityIssues(prev.stage, shot.stage)) {
+      issues.push({
+        kind: one.kind,
+        severity: one.severity,
+        what: `和第 ${prev.index} 镜之间：${one.what}`,
+        why: one.why,
+        fix: one.fix
+      });
+    }
+  }
+
   if (shot.link === 'continuous') {
     const jump = previz.cameraJump(prev.stage, shot.stage);
     if (jump) {

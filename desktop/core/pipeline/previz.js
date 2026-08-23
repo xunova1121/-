@@ -38,6 +38,36 @@
 /** 全画幅底片高度（毫米）。景别换算的基准，换机型不换这个数就行 */
 const SENSOR_H = 24;
 
+/** 全画幅底片宽度。判"这东西落在画面左边还是右边"要用横向视角 */
+const SENSOR_W = 36;
+
+/**
+ * ════════ 场景的东南西北 ════════
+ *
+ * 俯视图上把 **+y 定成「北」**。它不是真的地理方向，是**给这一场戏定一个基准** ——
+ * 有了基准，"机位在房间的西南角、朝东北拍"才是一句每一镜都对得上的话。
+ *
+ * ── 为什么非要有它 ──
+ *
+ * 原来算出来的机位是**相对人的**："机位在人物右前方 45°"。
+ * 这句话在单独一镜里是准的，可它经不起下一镜：人一转身，"右前方"
+ * 指向房间里完全不同的地方。于是同一场戏里，模型每一镜都在重新想象这个房间 ——
+ * 窗一会儿在左一会儿在右，门一会儿在背后一会儿在侧面。
+ *
+ * 而观众读一场戏靠的正是这些**不动的东西**。它们乱了，人物走位再准也没用。
+ *
+ * 所以场景要有地标（门、窗、桌），机位要有方位。这两样都不动，
+ * 人才有得参照 —— 这也是"随便调机位，下一镜衔接幅度很大"的根治办法：
+ * 不是不让调，是调完之后能算出**画面里那些不动的东西有没有跟着乱**。
+ */
+export const COMPASS = ['北', '东北', '东', '东南', '南', '西南', '西', '西北'];
+
+/** 方位角 → 八个方位里的哪一个。0° 是北，顺时针 */
+export function compassOf(deg) {
+  const d = ((Number(deg) || 0) % 360 + 360) % 360;
+  return COMPASS[Math.round(d / 45) % 8];
+}
+
 /** 一个人有多高（米）。景别说的就是"这个人占了画面多少" */
 export const PERSON_H = 1.7;
 
@@ -327,7 +357,24 @@ export function normalizeStage(stage) {
       facing: norm180(s.facing)
     }));
 
+  /**
+   * 地标：门、窗、桌、床…… 场景里**不动的那些东西**。
+   *
+   * 它们才是观众用来定位的参照物。人物走位再准，窗户一会儿在画面左、
+   * 一会儿在画面右，这场戏就散了 —— 而这一点在只排了人的图上完全看不出来。
+   */
+  const marks = (Array.isArray(stage.marks) ? stage.marks : [])
+    .filter((m) => m && typeof m === 'object')
+    .slice(0, 8)
+    .map((m) => ({
+      name: String(m.name ?? '').trim().slice(0, 12),
+      x: clampM(m.x),
+      y: clampM(m.y)
+    }))
+    .filter((m) => m.name);
+
   return {
+    marks,
     cam: {
       x: clampM(cam.x),
       y: clampM(cam.y, -3),
@@ -364,7 +411,15 @@ export function inheritStage(prevStage, names = []) {
   if (!base) return null;
 
   const want = (names || []).map((n) => String(n).trim()).filter(Boolean);
-  if (!want.length) return { cam: { ...base.cam }, subjects: base.subjects.map((s) => ({ ...s })) };
+  /**
+   * ⚠ 地标**原样带过去，一个都不删**。
+   *
+   * 人是按这一镜的剧本来的（这一镜没有的人要丢掉，见下面），
+   * 但门窗桌椅不会因为换了个机位就搬家。它们正是同一场戏里
+   * 唯一不该变的东西 —— 丢了它们，"画面左边是窗"这句话下一镜就没了。
+   */
+  const marks = base.marks.map((m) => ({ ...m }));
+  if (!want.length) return { marks, cam: { ...base.cam }, subjects: base.subjects.map((s) => ({ ...s })) };
 
   /**
    * 这一镜的人 = 剧本里写的那几个。上一镜有位置的沿用，
@@ -378,7 +433,7 @@ export function inheritStage(prevStage, names = []) {
     if (old) return { ...old };
     return { name, x: clampM((i - (want.length - 1) / 2) * 1.2), y: 0, facing: 180 };
   });
-  return { cam: { ...base.cam }, subjects };
+  return { marks, cam: { ...base.cam }, subjects };
 }
 
 /**
@@ -393,7 +448,30 @@ export function cameraLine(shot, subjectName = null) {
   if (!stage?.cam) return null;
   const read = readShot(stage);
   const who = subjectName || stage.subjects?.[0]?.name || '人物';
-  return toChinese(read, { subjectName: who });
+  const base = toChinese(read, { subjectName: who });
+
+  /**
+   * ⚠ 再补一句**相对房间**的方位。
+   *
+   * 上面那句是相对**人**的（"机位在人物右前方"）—— 单独一镜里很准，
+   * 可它经不起下一镜：人一转身，"右前方"就指向房间里完全不同的地方。
+   * 于是同一场戏里模型每一镜都在重新想象这个房间，窗一会儿在左一会儿在右。
+   *
+   * 房间不会转。所以再给一句"机位在场景西南侧、朝东北拍"，
+   * 外加画面里那几样不动的东西各在哪边 —— 这才是让连续几镜长在
+   * **同一个空间**里的那句话。
+   *
+   * 没摆地标就只说方位，不硬编 —— 编一句"画面左边是窗"而实际上没人摆过，
+   * 比不说更坏：它是一个听起来很具体的谎。
+   */
+  const f = framing(stage);
+  if (!f) return base;
+  const bits = [`机位在场景${f.camAt}侧、朝${f.looking}拍`];
+  const seen = f.marks.filter((m) => m.side && m.side !== '画外');
+  if (seen.length) {
+    bits.push(seen.map((m) => `${m.side === '正中' ? '画面正中' : m.side}是${m.name}`).join('、'));
+  }
+  return `${base}。${bits.join('，')}`;
 }
 
 /**
@@ -541,6 +619,142 @@ export function cameraJump(prevStage, stage) {
 }
 
 /**
+ * 这一镜的**镜头轴向**：机位在往哪个方位看。
+ *
+ * 看的是主体；没有主体就看地标的重心；都没有就朝北。
+ * 空镜也是镜头，不该因为没人就算不出方位。
+ */
+export function aimBearing(stage) {
+  const st = normalizeStage(stage);
+  if (!st) return null;
+  const target = st.subjects[0] || centroid(st.marks);
+  if (!target) return 0;
+  return bearing(st.cam, target);
+}
+
+/** 一堆点的重心。空的回 null —— 不要拿 (0,0) 冒充"中心" */
+function centroid(points = []) {
+  const list = (points || []).filter((p) => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)));
+  if (!list.length) return null;
+  return {
+    x: list.reduce((n, p) => n + Number(p.x), 0) / list.length,
+    y: list.reduce((n, p) => n + Number(p.y), 0) / list.length
+  };
+}
+
+/**
+ * 某个东西落在画面里的横向位置：−1 最左、0 正中、+1 最右。
+ *
+ * 出画（超出 ±1）照样把数算出来，让调用方自己决定怎么说 ——
+ * "刚出画一点点"和"在身后"是两回事，直接回 null 就把这个差别抹掉了。
+ * 真在机位**背后**（偏角 ≥ 90°）才回 null：那时候"左右"没有意义。
+ */
+export function screenX(cam, aimDeg, target) {
+  if (!cam || !target) return null;
+  const off = norm180(bearing(cam, target) - (Number(aimDeg) || 0));
+  if (Math.abs(off) >= 89) return null;
+  const lens = Math.max(8, Number(cam.lens) || DEFAULT_LENS);
+  const halfFov = Math.atan(SENSOR_W / 2 / lens);
+  const v = Math.tan((off * Math.PI) / 180) / Math.tan(halfFov);
+  return Number(v.toFixed(3));
+}
+
+/** −1..1 说人话。画面正中那一小条不算左也不算右 */
+export function sideOfScreen(x) {
+  if (x === null || x === undefined) return null;
+  if (Math.abs(x) > 1.05) return '画外';
+  if (Math.abs(x) <= 0.12) return '正中';
+  return x < 0 ? '画面左' : '画面右';
+}
+
+/**
+ * 这一镜"在这个房间里的什么位置、朝哪儿拍、画面里看得见哪些不动的东西"。
+ *
+ * 这三样合起来才是**场景方位**。只说"机位在人物右前方"是不够的 ——
+ * 人一转身那句话就指向别处了，而房间不会转。
+ */
+export function framing(stage) {
+  const st = normalizeStage(stage);
+  if (!st) return null;
+  const aim = aimBearing(st);
+  // 场景中心 = 地标和人的重心。没有地标时就是人所在的地方
+  const center = centroid([...st.marks, ...st.subjects]) || { x: 0, y: 0 };
+  const camAt = compassOf(bearing(center, st.cam));
+  const looking = compassOf(aim);
+  const marks = st.marks.map((m) => {
+    const x = screenX(st.cam, aim, m);
+    return { name: m.name, x, side: sideOfScreen(x), behind: x === null };
+  });
+  return { aim: Number(aim.toFixed(1)), camAt, looking, marks };
+}
+
+/**
+ * 相邻两镜之间**动了多大**。
+ *
+ * ── 为什么单看越轴不够 ──
+ *
+ * 越轴查的是"有没有跨过那条线"。可**没跨线也能把人看晕**：
+ * 机位绕着人转了 120°，画面里的一切都换了位置，只是恰好没跨过轴线。
+ * 观众在两镜之间失去方位感，而每一镜单独看都挑不出毛病。
+ *
+ * 反过来也有：机位只挪了 10°、景别也没变 —— 那不叫换机位，叫跳切，
+ * 看上去像播放器卡了一下。这是剪辑里最基本的「三十度原则」。
+ *
+ * 所以这里量三个数：绕主体转了多少度、景别差几倍、画面里那些不动的东西
+ * 有没有换边。回 null 表示比不了（有一边没排位）。
+ */
+export function continuityBetween(prevStage, stage) {
+  const a = normalizeStage(prevStage);
+  const b = normalizeStage(stage);
+  if (!a || !b) return null;
+
+  /**
+   * ⚠ 绕的是**同一个人**。
+   *
+   * 两镜的主体不是同一个人时，"机位绕了多少度"没有意义 ——
+   * 那本来就是两个不同的参照点。按名字对上才算，对不上就不算这一项。
+   */
+  const mainA = a.subjects[0] || null;
+  const mainB = mainA ? b.subjects.find((s) => s.name && s.name === mainA.name) : null;
+  const swing = mainA && mainB
+    ? Math.abs(norm180(bearing(mainB, b.cam) - bearing(mainA, a.cam)))
+    : null;
+
+  const ra = readShot(a);
+  const rb = readShot(b);
+  const hA = ra.size?.framedHeight;
+  const hB = rb.size?.framedHeight;
+  const sizeRatio = hA && hB ? Number((Math.max(hA, hB) / Math.min(hA, hB)).toFixed(2)) : null;
+
+  // 画面里那些**不动的东西**换没换边 —— 这是观众真正用来定位的参照物
+  const fa = framing(a);
+  const fb = framing(b);
+  const flips = [];
+  for (const m of fa.marks) {
+    const after = fb.marks.find((x) => x.name === m.name);
+    if (!after || !m.side || !after.side) continue;
+    if (m.side === '画外' || after.side === '画外') continue;
+    if (m.side === '正中' || after.side === '正中') continue;
+    if (m.side !== after.side) flips.push({ name: m.name, from: m.side, to: after.side });
+  }
+
+  return {
+    swing: swing === null ? null : Number(swing.toFixed(1)),
+    sizeRatio,
+    flips,
+    camFrom: fa.camAt,
+    camTo: fb.camAt
+  };
+}
+
+/** 摆到这个度数以上，观众会在两镜之间失去方位感 */
+export const SWING_LOST = 100;
+/** 摆不到这个度数、景别又没变，那不叫换机位，叫跳切（三十度原则）*/
+export const SWING_JUMPCUT = 30;
+/** 景别一步跨这么多倍，观众接不上（全景直接切特写）*/
+export const SIZE_LEAP = 4;
+
+/**
  * 越轴检查：同一场戏里，相邻两镜的机位不能跨到轴线另一侧。
  *
  * 只在**同一场次**内查 —— 换了场次就是另一场戏，轴线本来就重新算。
@@ -554,7 +768,78 @@ export function crossesAxis(prevRead, nextRead) {
 }
 
 /**
- * 一整场戏走一遍，把越轴的地方挑出来。
+ * 相邻两镜之间"动得合不合适"。**越轴之外的那几条都在这儿。**
+ *
+ * ── 为什么单查越轴不够 ──
+ *
+ * 越轴查的是"有没有跨过那条线"。可没跨线一样能把人看晕，而且方式不止一种：
+ *
+ *   摆太狠    机位绕着人转了 120°，画面里一切都换了位置，只是恰好没跨轴线。
+ *             观众在两镜之间失去方位，而每一镜单独看都挑不出毛病
+ *   摆太少    只挪了 10°、景别也没变 —— 那不叫换机位，叫跳切，
+ *             看上去像播放器卡了一下。剪辑里最基本的「三十度原则」
+ *   跳太远    全景直接切特写，中间少一档，观众接不上
+ *   参照物换边 背景里的窗从画面左边跑到右边 —— 观众定位用的就是这些不动的东西
+ *
+ * 这四条都要**排过位才算得出来**，而排过位之后它们都是算术，不是感觉。
+ *
+ * 回的是描述性的条目，由调用方决定怎么展示（分镜体检 / 预演台画布）——
+ * 两处各写一份判断迟早会漂。
+ */
+export function continuityIssues(prevStage, stage) {
+  const c = continuityBetween(prevStage, stage);
+  if (!c) return [];
+  const out = [];
+
+  if (c.swing !== null && c.swing >= SWING_LOST) {
+    out.push({
+      kind: 'camera-swing',
+      severity: 'normal',
+      what: `机位绕着主体转了 ${Math.round(c.swing)}°（从场景${c.camFrom}侧摆到${c.camTo}侧）`,
+      why: '转过一百度，画面里的一切都换了位置 —— 背景、光的方向、人朝哪边看，全变了。'
+        + '观众在这两镜之间会短暂失去方位感，而逐镜看每一张都没毛病，只有连起来放才别扭。',
+      fix: '要么把机位挪回来一点，要么在中间插一个能交代空间的镜（全景/过肩），先告诉观众"房间长这样"，再摆过去。'
+    });
+  }
+
+  if (c.swing !== null && c.swing < SWING_JUMPCUT && c.sizeRatio !== null && c.sizeRatio < 1.4) {
+    out.push({
+      kind: 'jump-cut',
+      severity: 'normal',
+      what: `机位只转了 ${Math.round(c.swing)}°、景别也几乎没变`,
+      why: '两张画面太像，切过去观众读不出"换了机位"，只会觉得画面抖了一下、或者播放器卡了一下。'
+        + '这就是剪辑里的三十度原则：要换机位，就换得让人看得出来。',
+      fix: `把机位再挪开一些（绕主体转到 ${SWING_JUMPCUT}° 以上），或者干脆换一档景别。`
+    });
+  }
+
+  if (c.sizeRatio !== null && c.sizeRatio >= SIZE_LEAP) {
+    out.push({
+      kind: 'size-leap',
+      severity: 'normal',
+      what: `景别一步跨了 ${c.sizeRatio} 倍`,
+      why: '全景直接切特写，观众要重新找"这是谁、在哪儿"。偶尔用是强调，连着用就是没编排。',
+      fix: '中间加一档（全景 → 中景 → 特写），或者把这一刀留给真正需要强调的地方。'
+    });
+  }
+
+  if (c.flips.length) {
+    const one = c.flips[0];
+    out.push({
+      kind: 'landmark-flip',
+      severity: 'high',
+      what: `画面里的「${one.name}」从${one.from}跑到了${one.to}`
+        + (c.flips.length > 1 ? `（还有 ${c.flips.length - 1} 处同样情况）` : ''),
+      why: '观众判断"人在房间里的哪儿"，靠的就是门窗桌椅这些不动的东西。它们左右对调，'
+        + '整场戏的空间就塌了 —— 表现出来是"这两镜好像不在同一个屋里"，但说不出哪儿不对。',
+      fix: '把机位挪回参照物同一侧；真要拍对面，中间插一个能交代空间的镜。'
+    });
+  }
+  return out;
+}
+
+/**
+ * 一整场戏走一遍，把接不上的地方挑出来。
  * shots 要按顺序给，每个形如 { index, segment, stage }。
  */
 export function lintSequence(shots = []) {
@@ -566,7 +851,8 @@ export function lintSequence(shots = []) {
       continue;
     }
     const read = readShot(shot.stage);
-    if (prev && Number(prev.shot.segment || 1) === Number(shot.segment || 1) && crossesAxis(prev.read, read)) {
+    const sameSegment = prev && Number(prev.shot.segment || 1) === Number(shot.segment || 1);
+    if (sameSegment && crossesAxis(prev.read, read)) {
       issues.push({
         kind: 'crosses-axis',
         from: prev.shot.index,
@@ -576,6 +862,16 @@ export function lintSequence(shots = []) {
           + '成片上的表现是两个人左右对调、或者人物突然掉头 —— 观众读不出"换了机位"，只会觉得穿帮。'
           + '把机位挪回同一侧，或者中间插一个正对轴线的过渡镜。'
       });
+    }
+    if (sameSegment) {
+      for (const one of continuityIssues(prev.shot.stage, shot.stage)) {
+        issues.push({
+          kind: one.kind,
+          from: prev.shot.index,
+          to: shot.index,
+          message: `第 ${prev.shot.index} → ${shot.index} 镜：${one.what}。${one.why}${one.fix}`
+        });
+      }
     }
     prev = { shot, read };
   }

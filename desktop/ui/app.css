@@ -1427,3 +1427,8 @@ select.mini {
 .cut-track .cut-name { width: 78px; color: var(--ink-dim); font-size: 13px; }
 .cut-track input[type="range"] { width: 130px; }
 .btn.on { border-color: var(--beam); color: var(--beam); }
+
+/* 预演台：场景方位和地标 —— 观众用来定位的就是这些不动的东西 */
+.previz-compass { fill: var(--ink-faint); font-size: 11px; text-anchor: middle; font-weight: 700; }
+.previz-mark { fill: var(--surface-3); stroke: var(--ink-faint); stroke-width: 1.5; cursor: grab; }
+.previz-mark-label { fill: var(--ink-dim); font-size: 10px; text-anchor: middle; }
