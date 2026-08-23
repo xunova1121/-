@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Net;
+using System.Net.Sockets;
 
 namespace AI.FilmStudio.Services;
 
@@ -17,13 +19,20 @@ public sealed class LocalServiceHost : IDisposable
         if (!File.Exists(executable)) return;
         try
         {
-            _process = Process.Start(new ProcessStartInfo(executable)
+            var port = ReservePort();
+            StudioRuntime.InstanceId = Guid.NewGuid().ToString("N");
+            StudioRuntime.ApiBaseAddress = new Uri($"http://127.0.0.1:{port}/api/v1/");
+            var start = new ProcessStartInfo(executable)
             {
                 WorkingDirectory = Path.GetDirectoryName(executable)!,
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WindowStyle = ProcessWindowStyle.Hidden
-            });
+            };
+            start.Environment["AI_STUDIO_PORT"] = port.ToString();
+            start.Environment["AI_STUDIO_INSTANCE_ID"] = StudioRuntime.InstanceId;
+            start.Environment["AI_STUDIO_EXPECTED_VERSION"] = StudioRuntime.ProductVersion;
+            _process = Process.Start(start);
         }
         catch (Exception ex)
         {
@@ -36,6 +45,13 @@ public sealed class LocalServiceHost : IDisposable
             }
             catch { }
         }
+    }
+
+    private static int ReservePort()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        return ((IPEndPoint)listener.LocalEndpoint).Port;
     }
 
     private static string? PrepareEmbeddedRuntime()
