@@ -1,5 +1,6 @@
 import json
 import subprocess
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
@@ -108,3 +109,91 @@ def render_transition(payload: dict[str, Any]) -> dict[str, Any]:
         "output_path": str(output), "output_name": output.name, "media": rendered,
         "transition_seconds": transition_seconds, "audio_preserved": preserve_audio,
     }
+
+
+def _run(command: list[str], timeout: int = 1800) -> None:
+    completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, check=False)
+    if completed.returncode:
+        raise MediaError((completed.stderr or "FFmpeg 渲染失败")[-5000:])
+
+
+def _safe_output_name(name: str) -> str:
+    base = "".join(ch for ch in Path(name).stem if ch.isalnum() or ch in "-_（）()中文成片")[:80] or "final"
+    return base + ".mp4"
+
+
+def render_timeline(payload: dict[str, Any], clips: list[dict[str, Any]]) -> dict[str, Any]:
+    ffmpeg = locate_ffmpeg()
+    if not ffmpeg:
+        raise MediaError("未找到 FFmpeg，无法导出成片")
+    video_clips = [clip for clip in clips if clip.get("track") in {"V1", "V2"}]
+    if not video_clips:
+        raise MediaError("时间线没有视频素材")
+    width, height = int(payload.get("width", 1920)), int(payload.get("height", 1080))
+    fps = int(payload.get("fps", 24))
+    quality = str(payload.get("quality", "high"))
+    crf = {"draft": "28", "standard": "22", "high": "18"}.get(quality, "18")
+    project_id = str(payload.get("project_id", "unassigned"))
+    output_dir = render_dir() / "".join(ch for ch in project_id if ch.isalnum() or ch in "-_")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output = output_dir / _safe_output_name(str(payload.get("output_name", "final.mp4")))
+
+    with tempfile.TemporaryDirectory(prefix="ai-film-export-") as temporary:
+        normalized: list[Path] = []
+        durations: list[float] = []
+        for index, clip in enumerate(video_clips):
+            info = probe_media(str(clip["source_path"]))
+            trim_in = max(0.0, float(clip.get("trim_in") or 0))
+            trim_out = max(0.0, float(clip.get("trim_out") or 0))
+            requested = float(clip.get("duration") or 0)
+            available = max(0.05, info["duration"] - trim_in - trim_out)
+            duration = min(requested, available) if requested > 0 else available
+            durations.append(duration)
+            segment = Path(temporary) / f"segment-{index:04d}.mp4"
+            command = [ffmpeg, "-hide_banner", "-y", "-ss", f"{trim_in:.3f}", "-i", info["path"]]
+            audio_input = 0
+            if not info["has_audio"]:
+                command.extend(["-f", "lavfi", "-t", f"{duration:.3f}", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"])
+                audio_input = 1
+            command.extend([
+                "-t", f"{duration:.3f}", "-map", "0:v:0", "-map", f"{audio_input}:a:0",
+                "-vf", f"fps={fps},scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p",
+                "-af", "aresample=async=1:first_pts=0", "-c:v", "libx264", "-preset", "veryfast", "-crf", crf,
+                "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", str(segment),
+            ])
+            _run(command)
+            normalized.append(segment)
+
+        if len(normalized) == 1:
+            _run([ffmpeg, "-hide_banner", "-y", "-i", str(normalized[0]), "-c", "copy", "-movflags", "+faststart", str(output)])
+        else:
+            command = [ffmpeg, "-hide_banner", "-y"]
+            for segment in normalized:
+                command.extend(["-i", str(segment)])
+            filters: list[str] = []
+            for index in range(len(normalized)):
+                filters.append(f"[{index}:v]settb=AVTB,setpts=PTS-STARTPTS[sv{index}]")
+                filters.append(f"[{index}:a]aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS[sa{index}]")
+            previous_v, previous_a = "[sv0]", "[sa0]"
+            elapsed = durations[0]
+            for index in range(1, len(normalized)):
+                method = str(video_clips[index].get("transition") or "cut")
+                transition = min(float(video_clips[index].get("transition_duration") or 0.4), durations[index - 1] / 3, durations[index] / 3)
+                if method == "cut" or transition <= 0:
+                    filters.append(f"{previous_v}[sv{index}]concat=n=2:v=1:a=0[v{index}]")
+                    filters.append(f"{previous_a}[sa{index}]concat=n=2:v=0:a=1[a{index}]")
+                    elapsed += durations[index]
+                else:
+                    style = "fadeblack" if method == "fade_black" else "fade"
+                    offset = max(0.0, elapsed - transition)
+                    filters.append(f"{previous_v}[sv{index}]xfade=transition={style}:duration={transition:.3f}:offset={offset:.3f}[v{index}]")
+                    filters.append(f"{previous_a}[sa{index}]acrossfade=d={transition:.3f}:c1=tri:c2=tri[a{index}]")
+                    elapsed += durations[index] - transition
+                previous_v, previous_a = f"[v{index}]", f"[a{index}]"
+            command.extend(["-filter_complex", ";".join(filters), "-map", previous_v, "-map", previous_a,
+                            "-c:v", "libx264", "-preset", "medium", "-crf", crf, "-c:a", "aac", "-b:a", "192k",
+                            "-movflags", "+faststart", str(output)])
+            _run(command)
+    if not output.is_file():
+        raise MediaError("导出命令结束但未生成成片")
+    return {"status": "completed", "output_path": str(output), "output_name": output.name, "media": probe_media(str(output)), "clip_count": len(video_clips)}
