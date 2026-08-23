@@ -22,6 +22,7 @@ public sealed class Shot
     [JsonPropertyName("dialogue")] public string Dialogue { get; set; } = "";
     [JsonPropertyName("characters")] public List<string> Characters { get; set; } = [];
     [JsonIgnore] public string CharacterText => string.Join("、", Characters);
+    [JsonIgnore] public string Display => $"{Number} · {Title}";
 }
 
 public sealed class ScriptDocument
@@ -64,6 +65,61 @@ public sealed class ProjectSummary
     [JsonPropertyName("characters")] public int Characters { get; set; }
     [JsonPropertyName("locations")] public int Locations { get; set; }
     [JsonPropertyName("props")] public int Props { get; set; }
+}
+
+public sealed class AssetItem
+{
+    [JsonPropertyName("id")] public int Id { get; set; }
+    [JsonPropertyName("project_id")] public string ProjectId { get; set; } = "";
+    [JsonPropertyName("asset_type")] public string AssetType { get; set; } = "";
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("episode")] public int Episode { get; set; }
+    [JsonPropertyName("shot_id")] public int? ShotId { get; set; }
+    [JsonPropertyName("local_path")] public string LocalPath { get; set; } = "";
+    [JsonPropertyName("mime_type")] public string MimeType { get; set; } = "";
+    [JsonPropertyName("source_kind")] public string SourceKind { get; set; } = "";
+    [JsonPropertyName("status")] public string Status { get; set; } = "";
+    [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
+    [JsonIgnore] public string ShotText => ShotId is null ? "—" : ShotId.ToString()!;
+}
+
+public sealed class TimelineClip
+{
+    [JsonPropertyName("id")] public int Id { get; set; }
+    [JsonPropertyName("episode")] public int Episode { get; set; }
+    [JsonPropertyName("track")] public string Track { get; set; } = "V1";
+    [JsonPropertyName("position")] public int Position { get; set; }
+    [JsonPropertyName("asset_id")] public int? AssetId { get; set; }
+    [JsonPropertyName("source_path")] public string SourcePath { get; set; } = "";
+    [JsonPropertyName("title")] public string Title { get; set; } = "";
+    [JsonPropertyName("trim_in")] public double TrimIn { get; set; }
+    [JsonPropertyName("trim_out")] public double TrimOut { get; set; }
+    [JsonPropertyName("duration")] public double Duration { get; set; }
+    [JsonPropertyName("transition")] public string Transition { get; set; } = "cut";
+    [JsonPropertyName("transition_duration")] public double TransitionDuration { get; set; } = 0.4;
+    [JsonPropertyName("volume")] public double Volume { get; set; } = 1;
+}
+
+public sealed class OperationAccepted
+{
+    [JsonPropertyName("id")] public int Id { get; set; }
+    [JsonPropertyName("status")] public string Status { get; set; } = "";
+    [JsonPropertyName("created")] public int Created { get; set; }
+}
+
+public sealed class ProofreadResult
+{
+    [JsonPropertyName("score")] public int Score { get; set; }
+    [JsonPropertyName("shot_count")] public int ShotCount { get; set; }
+    [JsonPropertyName("findings")] public List<ContinuityFinding> Findings { get; set; } = [];
+}
+public sealed class ContinuityFinding
+{
+    [JsonPropertyName("shot")] public string Shot { get; set; } = "";
+    [JsonPropertyName("message")] public string Message { get; set; } = "";
+    [JsonPropertyName("action")] public string Action { get; set; } = "";
+    [JsonPropertyName("severity")] public string Severity { get; set; } = "warning";
+    [JsonIgnore] public string ActionText => Action switch { "adjust_axis" => "调整机位/运动方向", "adjust_lighting" => "统一光照状态", _ => "人工复核" };
 }
 public sealed record Episode(string Title, string Duration, bool IsActive = false);
 public sealed record Finding(string Shot, string Message, string Action);
