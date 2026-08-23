@@ -117,9 +117,63 @@ def _run(command: list[str], timeout: int = 1800) -> None:
         raise MediaError((completed.stderr or "FFmpeg 渲染失败")[-5000:])
 
 
+def extract_boundary_frames(left_path: str, right_path: str, project_id: str, boundary_key: str) -> tuple[str, str]:
+    ffmpeg = locate_ffmpeg()
+    if not ffmpeg:
+        raise MediaError("未找到 FFmpeg，无法提取转场首尾帧")
+    left, right = probe_media(left_path), probe_media(right_path)
+    folder = render_dir() / "boundaries" / "".join(ch for ch in project_id if ch.isalnum() or ch in "-_")
+    folder.mkdir(parents=True, exist_ok=True)
+    safe = "".join(ch for ch in boundary_key if ch.isalnum() or ch in "-_") or uuid.uuid4().hex[:8]
+    left_frame, right_frame = folder / f"{safe}-left.png", folder / f"{safe}-right.png"
+    left_at = max(0.0, float(left["duration"]) - 0.08)
+    _run([ffmpeg, "-hide_banner", "-y", "-ss", f"{left_at:.3f}", "-i", left["path"], "-frames:v", "1", str(left_frame)], 60)
+    _run([ffmpeg, "-hide_banner", "-y", "-ss", "0", "-i", right["path"], "-frames:v", "1", str(right_frame)], 60)
+    return str(left_frame), str(right_frame)
+
+
 def _safe_output_name(name: str) -> str:
     base = "".join(ch for ch in Path(name).stem if ch.isalnum() or ch in "-_（）()中文成片")[:80] or "final"
     return base + ".mp4"
+
+
+def _subtitle_filter(path: str) -> str:
+    escaped = Path(path).resolve().as_posix().replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+    return f"subtitles=filename='{escaped}':charenc=UTF-8"
+
+
+def _finish_timeline(ffmpeg: str, master: Path, output: Path, payload: dict[str, Any], clips: list[dict[str, Any]], crf: str) -> None:
+    audio_clips = [clip for clip in clips if clip.get("track") in {"A1", "A2"} and Path(str(clip.get("source_path", ""))).is_file()]
+    subtitle = next((clip for clip in clips if clip.get("track") == "T1" and Path(str(clip.get("source_path", ""))).is_file()), None)
+    if not audio_clips and not (subtitle and payload.get("burn_subtitles", True)):
+        _run([ffmpeg, "-hide_banner", "-y", "-i", str(master), "-c", "copy", "-movflags", "+faststart", str(output)])
+        return
+    master_duration = float(probe_media(str(master))["duration"])
+    command = [ffmpeg, "-hide_banner", "-y", "-i", str(master)]
+    for clip in audio_clips:
+        command.extend(["-i", str(clip["source_path"])])
+    filters: list[str] = []
+    audio_labels = ["[0:a]"]
+    for index, clip in enumerate(audio_clips, start=1):
+        metadata = clip.get("metadata") or {}
+        if isinstance(metadata, str):
+            try: metadata = json.loads(metadata)
+            except json.JSONDecodeError: metadata = {}
+        delay = max(0, round(float(metadata.get("start_seconds", 0)) * 1000))
+        volume = max(0.0, min(4.0, float(clip.get("volume") or 1)))
+        filters.append(f"[{index}:a]aresample=48000,adelay={delay}|{delay},volume={volume:.3f},apad,atrim=0:{master_duration:.3f}[ta{index}]")
+        audio_labels.append(f"[ta{index}]")
+    if audio_clips:
+        filters.append(f"{''.join(audio_labels)}amix=inputs={len(audio_labels)}:duration=first:dropout_transition=2[aout]")
+        command.extend(["-filter_complex", ";".join(filters), "-map", "0:v:0", "-map", "[aout]"])
+    else:
+        command.extend(["-map", "0:v:0", "-map", "0:a:0"])
+    if subtitle and payload.get("burn_subtitles", True):
+        command.extend(["-vf", _subtitle_filter(str(subtitle["source_path"])), "-c:v", "libx264", "-preset", "medium", "-crf", crf])
+    else:
+        command.extend(["-c:v", "copy"])
+    command.extend(["-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(output)])
+    _run(command)
 
 
 def render_timeline(payload: dict[str, Any], clips: list[dict[str, Any]]) -> dict[str, Any]:
@@ -139,6 +193,7 @@ def render_timeline(payload: dict[str, Any], clips: list[dict[str, Any]]) -> dic
     output = output_dir / _safe_output_name(str(payload.get("output_name", "final.mp4")))
 
     with tempfile.TemporaryDirectory(prefix="ai-film-export-") as temporary:
+        master = Path(temporary) / "video-master.mp4"
         normalized: list[Path] = []
         durations: list[float] = []
         for index, clip in enumerate(video_clips):
@@ -165,7 +220,7 @@ def render_timeline(payload: dict[str, Any], clips: list[dict[str, Any]]) -> dic
             normalized.append(segment)
 
         if len(normalized) == 1:
-            _run([ffmpeg, "-hide_banner", "-y", "-i", str(normalized[0]), "-c", "copy", "-movflags", "+faststart", str(output)])
+            _run([ffmpeg, "-hide_banner", "-y", "-i", str(normalized[0]), "-c", "copy", "-movflags", "+faststart", str(master)])
         else:
             command = [ffmpeg, "-hide_banner", "-y"]
             for segment in normalized:
@@ -192,8 +247,9 @@ def render_timeline(payload: dict[str, Any], clips: list[dict[str, Any]]) -> dic
                 previous_v, previous_a = f"[v{index}]", f"[a{index}]"
             command.extend(["-filter_complex", ";".join(filters), "-map", previous_v, "-map", previous_a,
                             "-c:v", "libx264", "-preset", "medium", "-crf", crf, "-c:a", "aac", "-b:a", "192k",
-                            "-movflags", "+faststart", str(output)])
+                            "-movflags", "+faststart", str(master)])
             _run(command)
+        _finish_timeline(ffmpeg, master, output, payload, clips, crf)
     if not output.is_file():
         raise MediaError("导出命令结束但未生成成片")
     return {"status": "completed", "output_path": str(output), "output_name": output.name, "media": probe_media(str(output)), "clip_count": len(video_clips)}
