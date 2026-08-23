@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .adapters import registry
 from .config import project_media_dir, render_dir, settings
 from .database import connect, initialize_database
-from .schemas import AssetCreate, AssetImportRequest, AssetUpdate, BibleEntityCreate, ContinuityContractRequest, ContinuityRequest, EpisodeAutomationRequest, EpisodeLockRequest, GatewayRequest, PipelineUpdate, PreflightRequest, Project, ProjectCreate, ProviderConfigUpdate, QualityReviewRequest, RouteUpdate, SceneLayoutRequest, ScriptUpsert, Shot, ShotCreate, ShotGenerationRequest, ShotUpdate, StoryboardGenerateRequest, TaskCreate, TimelineClipCreate, TimelineClipUpdate, TimelineExportRequest, TimelineReorderRequest, TransitionPlanRequest, TransitionRenderRequest
+from .schemas import AssetCreate, AssetImportRequest, AssetUpdate, AutomationStartRequest, BibleEntityCreate, ContinuityContractRequest, ContinuityRequest, EpisodeAutomationRequest, EpisodeLockRequest, GatewayRequest, PipelineUpdate, PreflightRequest, Project, ProjectCreate, ProjectUpdate, ProviderConfigUpdate, QualityReviewRequest, RouteUpdate, SceneLayoutRequest, ScriptUpsert, Shot, ShotCreate, ShotGenerationRequest, ShotUpdate, StoryboardGenerateRequest, TaskCreate, TimelineClipCreate, TimelineClipUpdate, TimelineExportRequest, TimelineReorderRequest, TransitionPlanRequest, TransitionRenderRequest
 from .continuity import analyze_pair
 from .pipeline import stage_catalog
 from .providers import CAPABILITIES, providers_for, public_catalog
@@ -29,6 +29,7 @@ from .transitions import plan_transition
 from .task_runner import TaskRunner, serialize_task
 from .media import MediaError, capabilities as media_capabilities, probe_media
 from .script_engine import extract_characters, parse_scenes, scene_to_shots
+from .production import bible_context, serialize_run, start_automation
 
 
 @asynccontextmanager
@@ -43,14 +44,14 @@ async def lifespan(_: FastAPI):
         await worker
 
 
-app = FastAPI(title=settings.app_name, version="1.0.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.1.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost", "http://127.0.0.1"], allow_methods=["*"], allow_headers=["*"])
 PREFIX = settings.api_prefix
 
 
 @app.get(f"{PREFIX}/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "1.0.0", "instance_id": os.getenv("AI_STUDIO_INSTANCE_ID", "external")}
+    return {"status": "ok", "version": "1.1.0", "instance_id": os.getenv("AI_STUDIO_INSTANCE_ID", "external")}
 
 
 @app.get(f"{PREFIX}/providers")
@@ -103,6 +104,19 @@ def create_project(payload: ProjectCreate):
     return project
 
 
+@app.patch(f"{PREFIX}/projects/{{project_id}}", response_model=Project)
+def update_project(project_id: str, payload: ProjectUpdate):
+    changes = payload.model_dump(exclude_none=True)
+    if not changes:
+        raise HTTPException(400, "No changes")
+    with connect() as db:
+        cursor = db.execute(f"UPDATE projects SET {','.join(f'{key}=?' for key in changes)} WHERE id=?", (*changes.values(), project_id))
+        if not cursor.rowcount:
+            raise HTTPException(404, "Project not found")
+        row = db.execute("SELECT id,name,genre,episode_count FROM projects WHERE id=?", (project_id,)).fetchone()
+    return dict(row)
+
+
 @app.get(f"{PREFIX}/projects/{{project_id}}/summary")
 def project_summary(project_id: str):
     with connect() as db:
@@ -124,12 +138,12 @@ def project_summary(project_id: str):
 @app.delete(f"{PREFIX}/projects/{{project_id}}", status_code=204)
 def delete_project(project_id: str):
     with connect() as db:
-        cursor = db.execute("DELETE FROM projects WHERE id=?", (project_id,))
-        if not cursor.rowcount:
+        if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
             raise HTTPException(404, "Project not found")
         db.execute("DELETE FROM shot_assets WHERE shot_id IN (SELECT id FROM shots WHERE project_id=?)", (project_id,))
-        for table in ("episode_scripts", "scenes", "shots", "assets", "timeline_clips", "tasks", "pipeline_runs", "bible_entities", "episode_locks", "continuity_contracts", "quality_reviews", "scene_layouts", "transition_plans"):
+        for table in ("episode_scripts", "scenes", "shots", "assets", "timeline_clips", "tasks", "automation_runs", "pipeline_runs", "bible_entities", "episode_locks", "continuity_contracts", "quality_reviews", "scene_layouts", "transition_plans"):
             db.execute(f"DELETE FROM {table} WHERE project_id=?", (project_id,))
+        db.execute("DELETE FROM projects WHERE id=?", (project_id,))
 
 
 @app.get(f"{PREFIX}/projects/{{project_id}}/episodes/{{episode}}/script")
@@ -360,16 +374,18 @@ def delete_asset(asset_id: int, delete_file: bool = False):
 @app.post(f"{PREFIX}/projects/{{project_id}}/shots/generate", status_code=202)
 def generate_shot_media(project_id: str, payload: ShotGenerationRequest):
     with connect() as db:
-        shot = db.execute("SELECT id,episode,number,title,prompt FROM shots WHERE id=? AND project_id=?", (payload.shot_id, project_id)).fetchone()
+        shot = db.execute("SELECT * FROM shots WHERE id=? AND project_id=?", (payload.shot_id, project_id)).fetchone()
         if not shot: raise HTTPException(404, "Shot not found")
         reference_rows = []
         if payload.reference_asset_ids:
             marks = ",".join("?" for _ in payload.reference_asset_ids)
             reference_rows = db.execute(f"SELECT id,local_path FROM assets WHERE project_id=? AND id IN ({marks})", (project_id, *payload.reference_asset_ids)).fetchall()
         reference_paths = [row["local_path"] for row in reference_rows if row["local_path"]]
+        memory_block, bible_references = bible_context(db, project_id, shot)
+        reference_paths = list(dict.fromkeys(reference_paths + bible_references))
         task_payload = {
             "project_id": project_id, "episode": shot["episode"], "shot_id": shot["id"], "shot_number": shot["number"],
-            "prompt": payload.prompt, "model": payload.model, "reference_asset_ids": payload.reference_asset_ids,
+            "prompt": payload.prompt + memory_block, "model": payload.model, "reference_asset_ids": payload.reference_asset_ids,
             "reference_paths": reference_paths, "options": payload.options,
         }
         cursor = db.execute("INSERT INTO tasks(project_id,task_type,provider,payload_json,priority,max_attempts) VALUES(?,?,?,?,?,?)", (project_id, payload.task_type, payload.provider, json.dumps(task_payload, ensure_ascii=False), 50, 3))
@@ -516,12 +532,27 @@ def preflight(payload: PreflightRequest):
 
 @app.post(f"{PREFIX}/projects/{{project_id}}/bible", status_code=201)
 def create_bible_version(project_id: str, payload: BibleEntityCreate):
-    data = payload.model_dump()
-    mark = fingerprint(payload.data, payload.reference_assets)
+    references: list[str] = []
+    bible_folder = project_media_dir(project_id) / "bible"
+    bible_folder.mkdir(parents=True, exist_ok=True)
+    project_root = project_media_dir(project_id).resolve()
+    for value in payload.reference_assets:
+        source = Path(value).expanduser().resolve()
+        if source.is_file():
+            if project_root in source.parents:
+                target = source
+            else:
+                target = bible_folder / f"{uuid.uuid4().hex[:10]}-{source.name}"
+                shutil.copy2(source, target)
+            references.append(str(target))
+        elif value.startswith("asset://"):
+            references.append(value)
+    data = {**payload.model_dump(), "reference_assets": references}
+    mark = fingerprint(payload.data, references)
     with connect() as db:
         row = db.execute("SELECT COALESCE(MAX(version),0)+1 FROM bible_entities WHERE project_id=? AND entity_type=? AND entity_key=?", (project_id, payload.entity_type, payload.entity_key)).fetchone()
         version = row[0]
-        cursor = db.execute("INSERT INTO bible_entities(project_id,entity_type,entity_key,name,version,state,data_json,reference_assets_json,fingerprint) VALUES(?,?,?,?,?,?,?,?,?)", (project_id, payload.entity_type, payload.entity_key, payload.name, version, payload.state, json.dumps(payload.data, ensure_ascii=False), json.dumps(payload.reference_assets, ensure_ascii=False), mark))
+        cursor = db.execute("INSERT INTO bible_entities(project_id,entity_type,entity_key,name,version,state,data_json,reference_assets_json,fingerprint) VALUES(?,?,?,?,?,?,?,?,?)", (project_id, payload.entity_type, payload.entity_key, payload.name, version, payload.state, json.dumps(payload.data, ensure_ascii=False), json.dumps(references, ensure_ascii=False), mark))
     return {"id": cursor.lastrowid, "version": version, "fingerprint": mark, **data}
 
 
@@ -647,6 +678,37 @@ def plan_episode_automation(project_id: str, payload: EpisodeAutomationRequest):
     return automation_plan(payload.episode, payload.mode, shot_count, blockers)
 
 
+@app.post(f"{PREFIX}/projects/{{project_id}}/automation/start", status_code=202)
+def start_episode_automation(project_id: str, payload: AutomationStartRequest):
+    with connect() as db:
+        if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
+            raise HTTPException(404, "Project not found")
+    try:
+        return start_automation(project_id, payload.model_dump())
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.get(f"{PREFIX}/projects/{{project_id}}/automation/runs")
+def list_automation_runs(project_id: str):
+    with connect() as db:
+        rows = db.execute("SELECT * FROM automation_runs WHERE project_id=? ORDER BY id DESC", (project_id,)).fetchall()
+    return [serialize_run(row) for row in rows]
+
+
+@app.post(f"{PREFIX}/automation/runs/{{run_id}}/cancel", status_code=202)
+def cancel_automation_run(run_id: int):
+    with connect() as db:
+        row = db.execute("SELECT status FROM automation_runs WHERE id=?", (run_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Automation run not found")
+        if row["status"] in {"completed", "failed", "canceled"}:
+            raise HTTPException(409, "Automation run is already terminal")
+        db.execute("UPDATE automation_runs SET status='canceled',cancel_requested=1,completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?", (run_id,))
+        db.execute("UPDATE tasks SET cancel_requested=1,status=CASE WHEN status IN ('queued','retry_wait') THEN 'canceled' ELSE status END,updated_at=CURRENT_TIMESTAMP WHERE automation_run_id=? AND status NOT IN ('completed','failed','canceled')", (run_id,))
+    return {"id": run_id, "status": "canceled"}
+
+
 @app.post(f"{PREFIX}/gateway/{{capability}}")
 async def gateway(capability: str, payload: GatewayRequest):
     if capability not in {"llm", "image", "video", "voice", "memory"}:
@@ -655,7 +717,10 @@ async def gateway(capability: str, payload: GatewayRequest):
         adapter = registry.resolve(payload.provider)
     except KeyError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return {"capability": capability, **await adapter.invoke(payload.prompt, payload.context)}
+    try:
+        return {"capability": capability, **await adapter.invoke(payload.prompt, payload.context)}
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc)) from exc
 
 
 @app.post(f"{PREFIX}/continuity/analyze")
