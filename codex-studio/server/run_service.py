@@ -19,10 +19,11 @@ def prepare_headless_streams() -> None:
 
 if __name__ == "__main__":
     prepare_headless_streams()
+    port = int(os.getenv("AI_STUDIO_PORT", "18118"))
     uvicorn.run(
         studio_app,
         host="127.0.0.1",
-        port=18118,
+        port=port,
         log_config=None,
         access_log=False,
     )
