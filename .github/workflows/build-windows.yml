@@ -1,4 +1,5 @@
 name: Build Real AI Film Studio
+# Primary Windows delivery: verified Electron app + bundled FFmpeg + portable EXE.
 
 on:
   push:
