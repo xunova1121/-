@@ -100,6 +100,10 @@ CREATE TABLE IF NOT EXISTS provider_configs (
     provider_id TEXT PRIMARY KEY, base_url TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
     secret_blob BLOB, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS model_role_bindings (
+    role_id TEXT PRIMARY KEY, provider_id TEXT NOT NULL, model TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS bible_entities (
     id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL,
     entity_type TEXT NOT NULL, entity_key TEXT NOT NULL, name TEXT NOT NULL,
@@ -206,6 +210,7 @@ def _migrate(connection: sqlite3.Connection) -> None:
             connection.execute(f"ALTER TABLE assets ADD COLUMN {name} {definition}")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_assets_project ON assets(project_id, asset_type, episode, id)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_timeline_order ON timeline_clips(project_id, episode, track, position, id)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_model_role_provider ON model_role_bindings(provider_id, role_id)")
 
 
 def initialize_database(path: Path | None = None) -> None:

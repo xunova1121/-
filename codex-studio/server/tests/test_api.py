@@ -104,6 +104,85 @@ def test_provider_catalog_exposes_only_real_metaso_h3_capabilities():
     assert item["max_reference_images"] == 9
 
 
+def test_model_roles_bind_specific_models_and_validate_capability():
+    with TestClient(app) as client:
+        roles = client.get("/api/v1/model-roles")
+        assert roles.status_code == 200
+        assert {item["id"] for item in roles.json()} >= {"script_analysis", "storyboard_design", "shot_video", "dialogue_voice", "final_review"}
+        saved = client.put("/api/v1/model-roles/storyboard_design", json={"provider_id": "deepseek", "model": "deepseek-v4-pro"})
+        assert saved.status_code == 200
+        assert saved.json()["provider_id"] == "deepseek"
+        assert saved.json()["model"] == "deepseek-v4-pro"
+        rejected = client.put("/api/v1/model-roles/dialogue_voice", json={"provider_id": "deepseek", "model": "deepseek-v4-pro"})
+        assert rejected.status_code == 422
+        assert client.delete("/api/v1/model-roles/storyboard_design").status_code == 204
+        cleared = next(item for item in client.get("/api/v1/model-roles").json() if item["id"] == "storyboard_design")
+        assert cleared["provider_id"] == "" and cleared["model"] == ""
+
+
+def test_openai_model_discovery_uses_account_models_endpoint(monkeypatch):
+    import asyncio
+    import httpx
+    from app.model_discovery import discover_provider_models
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "https://api.openai.com/v1/models"
+        assert request.headers["authorization"] == "Bearer live-secret"
+        return httpx.Response(200, json={"data": [{"id": "gpt-5.2"}, {"id": "gpt-image-2"}, {"id": "gpt-4o-mini-tts"}]})
+
+    monkeypatch.setenv("OPENAI_API_KEY", "live-secret")
+    result = asyncio.run(discover_provider_models("openai", None, httpx.MockTransport(handler)))
+    assert result["source"] == "remote"
+    assert [item["id"] for item in result["models"]] == ["gpt-4o-mini-tts", "gpt-5.2", "gpt-image-2"]
+
+
+def test_aliyun_model_discovery_uses_modality_filter(monkeypatch):
+    import asyncio
+    import httpx
+    from app.model_discovery import discover_provider_models
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/models"
+        assert request.url.params["providers"] == "wan"
+        assert request.url.params["capabilities"] == "VG"
+        return httpx.Response(200, json={"output": {"models": [{"model": "wan-next-i2v", "name": "Wan Next", "capabilities": ["VG"], "model_info": {"context_window": None}}]}})
+
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "dash-secret")
+    result = asyncio.run(discover_provider_models("dashscope", "i2v", httpx.MockTransport(handler)))
+    assert result["source"] == "remote"
+    assert result["models"][0]["id"] == "wan-next-i2v"
+    assert "i2v" in result["models"][0]["capabilities"]
+
+
+def test_automation_uses_saved_production_role_routes(monkeypatch):
+    from app import main as main_module
+
+    captured: dict = {}
+    monkeypatch.setattr(main_module, "start_automation", lambda _project_id, config: captured.update(config) or {"status": "running"})
+    with TestClient(app) as client:
+        assert client.put("/api/v1/model-roles/keyframe_image", json={"provider_id": "openai", "model": "gpt-image-role"}).status_code == 200
+        assert client.put("/api/v1/model-roles/shot_video", json={"provider_id": "metaso", "model": "MiniMax-H3"}).status_code == 200
+        assert client.put("/api/v1/model-roles/transition_video", json={"provider_id": "dashscope", "model": "wan-transition-role"}).status_code == 200
+        result = client.post("/api/v1/projects/demo/automation/start", json={"episode": 1, "voice_provider": None, "quality_provider": None})
+    assert result.status_code == 202, result.text
+    assert captured["image_provider"] == "openai" and captured["image_model"] == "gpt-image-role"
+    assert captured["video_provider"] == "metaso" and captured["video_model"] == "MiniMax-H3"
+    assert captured["transition_provider"] == "dashscope" and captured["transition_model"] == "wan-transition-role"
+
+
+def test_continuous_shot_uses_transition_role_in_route_plan():
+    from app.production import video_route
+
+    with sqlite3.connect(settings.database_path) as db:
+        db.row_factory = sqlite3.Row
+        db.execute("UPDATE shots SET continuity_json=? WHERE project_id='demo' AND number='002'", ('{"link":"continuous"}',))
+        shot = db.execute("SELECT * FROM shots WHERE project_id='demo' AND number='002'").fetchone()
+    route = video_route(shot, {"video_provider": "metaso", "video_model": "MiniMax-H3", "transition_provider": "dashscope", "transition_model": "wan-bridge"})
+    assert route["provider"] == "dashscope"
+    assert route["model"] == "wan-bridge"
+    assert route["reason"] == "transition_video_role"
+
+
 def test_metaso_automation_adds_wan_fallback_only_when_configured(monkeypatch):
     from app import main as main_module
 

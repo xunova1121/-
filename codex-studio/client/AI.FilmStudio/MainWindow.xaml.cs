@@ -12,6 +12,7 @@ public partial class MainWindow : Window
     private readonly StudioApiClient _api = new();
     private readonly ObservableCollection<Shot> _shots = [];
     private readonly ObservableCollection<StudioProject> _projects = [];
+    private string _activeWorkspaceKey = "home";
 
     public MainWindow()
     {
@@ -19,6 +20,42 @@ public partial class MainWindow : Window
         ShotList.ItemsSource = _shots;
         ProjectSelector.ItemsSource = _projects;
         Loaded += async (_, _) => await InitializeWorkspaceAsync();
+    }
+
+    private Style NavStyle => (Style)FindResource("NavButton");
+    private Style ActiveNavStyle => (Style)FindResource("ActiveNavButton");
+
+    private static Button? TaggedButton(Panel panel, string tag) => panel.Children.OfType<Button>().FirstOrDefault(button => string.Equals(button.Tag?.ToString(), tag, StringComparison.OrdinalIgnoreCase));
+
+    private void SetGroupActive(Panel panel, string? tag)
+    {
+        foreach (var button in panel.Children.OfType<Button>()) button.Style = NavStyle;
+        var active = string.IsNullOrWhiteSpace(tag) ? null : TaggedButton(panel, tag);
+        if (active is not null) active.Style = ActiveNavStyle;
+    }
+
+    private void ShowHome()
+    {
+        _activeWorkspaceKey = "home";
+        HomeDashboard.Visibility = Visibility.Visible;
+        WorkspaceShell.Visibility = Visibility.Collapsed;
+        TimelineShell.Visibility = Visibility.Collapsed;
+        TransportShell.Visibility = Visibility.Collapsed;
+        SetGroupActive(TopNavigation, "首页");
+        SetGroupActive(WorkspaceNavigation, null);
+    }
+
+    private void ShowWorkspace(string key)
+    {
+        _activeWorkspaceKey = key;
+        HomeDashboard.Visibility = Visibility.Collapsed;
+        WorkspaceShell.Visibility = Visibility.Visible;
+        var editing = key == "editing";
+        TimelineShell.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
+        TransportShell.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
+        SetGroupActive(WorkspaceNavigation, key);
+        var top = key switch { "director" => "剧本", "storyboard" => "分镜", "editing" => "剪辑", "assets" => "项目", _ => "制作" };
+        SetGroupActive(TopNavigation, top);
     }
 
     private async Task<bool> CheckServiceAsync()
@@ -31,13 +68,16 @@ public partial class MainWindow : Window
         }
         ServiceDot.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(healthy ? "#36C979" : "#E0A534"));
         ServiceText.Text = healthy ? "本地服务已连接" : "本地服务启动失败";
+        HomeServiceText.Text = healthy ? "已连接" : "启动失败";
+        HomeServiceText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(healthy ? "#57D98B" : "#F2B84B"));
         return healthy;
     }
 
     private async Task InitializeWorkspaceAsync()
     {
         if (!await CheckServiceAsync()) return;
-        await LoadProjectsAsync(true);
+        await LoadProjectsAsync(false);
+        ShowHome();
     }
 
     private async Task LoadProjectsAsync(bool promptWhenEmpty = false)
@@ -66,7 +106,6 @@ public partial class MainWindow : Window
         CurrentProjectName.Text = project.Name;
         CurrentProjectMeta.Text = project.Summary;
         ActiveProjectText.Text = project.Name + "⌄";
-        WorkspaceTitle.Text = $"剪辑工作台 · {project.Name}";
         var shots = await _api.GetShotsAsync();
         var summary = await _api.GetProjectSummaryAsync();
         _shots.Clear();
@@ -78,12 +117,18 @@ public partial class MainWindow : Window
         SceneCountText.Text = summary.Scenes.ToString();
         PropCountText.Text = summary.Props.ToString();
         ShotCountText.Text = summary.Shots.ToString();
+        HomeProjectName.Text = project.Name;
+        HomeProjectMeta.Text = project.Summary;
+        HomeShotCount.Text = $"{summary.Shots} 镜";
+        HomeBibleCount.Text = $"{summary.Characters + summary.Scenes + summary.Props} 项";
+        HomeWelcomeText.Text = $"{project.Name} 已载入。按剧本 → 全量分镜 → 设定集 → AI生成 → 剪辑导出的顺序制作。";
         EmptyShotsText.Visibility = _shots.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private async void Workspace_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: string key }) return;
+        ShowWorkspace(key);
         WorkspaceTitle.Text = key switch
         {
             "director" => $"导演工作台 · {CurrentProjectName.Text}",
@@ -129,21 +174,24 @@ public partial class MainWindow : Window
     private async void TopNav_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: string title }) return;
-        WorkspaceTitle.Text = $"{title} · {CurrentProjectName.Text}";
-        if (title == "项目") { new ProjectManagerWindow(_api) { Owner = this }.ShowDialog(); await LoadProjectsAsync(); return; }
+        if (title == "首页") { ShowHome(); return; }
+        if (title == "项目") { SetGroupActive(TopNavigation, "项目"); SetGroupActive(WorkspaceNavigation, null); new ProjectManagerWindow(_api) { Owner = this }.ShowDialog(); await LoadProjectsAsync(); ShowHome(); return; }
         if (ProjectSelector.SelectedItem is not StudioProject project) { MessageBox.Show("请先创建项目", "AI影视Studio"); return; }
+        var key = title switch { "剧本" => "director", "分镜" => "storyboard", "制作" => "generation", "剪辑" => "editing", _ => "publish" };
+        ShowWorkspace(key);
+        WorkspaceTitle.Text = $"{title} · {CurrentProjectName.Text}";
         if (title == "剧本") new ScriptWorkbenchWindow(_api, project) { Owner = this }.ShowDialog();
         else if (title == "分镜") new StoryboardWindow(_api, project) { Owner = this }.ShowDialog();
         else if (title == "制作") new GenerationWindow(_api, project) { Owner = this }.ShowDialog();
         else if (title == "剪辑") new EditingWindow(_api, project) { Owner = this }.ShowDialog();
-        else if (title == "发布") new PublishWindow(_api) { Owner = this }.ShowDialog();
+        else if (title == "发布") { SetGroupActive(TopNavigation, "发布"); SetGroupActive(WorkspaceNavigation, null); new PublishWindow(_api) { Owner = this }.ShowDialog(); }
         else return;
         await SelectProjectAsync(project);
     }
 
     private void EpisodeList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (WorkspaceTitle is null) return;
+        if (WorkspaceTitle is null || _activeWorkspaceKey != "editing") return;
         if (EpisodeList.SelectedItem is ListBoxItem item)
             WorkspaceTitle.Text = $"剪辑工作台 · {item.Content?.ToString()?.Trim()}";
     }
@@ -167,7 +215,20 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog() == true) await LoadProjectsAsync();
     }
 
-    private void ProviderSettings_Click(object sender, RoutedEventArgs e) => new ProviderSettingsWindow(_api) { Owner = this }.ShowDialog();
+    private void ProviderSettings_Click(object sender, RoutedEventArgs e)
+    {
+        ModelSettingsButton.Style = ActiveNavStyle;
+        try { new ProviderSettingsWindow(_api) { Owner = this }.ShowDialog(); }
+        finally { ModelSettingsButton.Style = NavStyle; }
+    }
+
+    private async void ProjectManager_Click(object sender, RoutedEventArgs e)
+    {
+        SetGroupActive(TopNavigation, "项目");
+        new ProjectManagerWindow(_api) { Owner = this }.ShowDialog();
+        await LoadProjectsAsync();
+        ShowHome();
+    }
 
     private async void RefreshProject_Click(object sender, RoutedEventArgs e)
     {

@@ -15,12 +15,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from .adapters import registry
 from .config import project_media_dir, render_dir, settings
 from .database import connect, initialize_database
-from .schemas import AssetCreate, AssetImportRequest, AssetUpdate, AutomationStartRequest, BibleEntityCreate, ContinuityContractRequest, ContinuityRequest, DirectorBuildRequest, EpisodeAutomationRequest, EpisodeLockRequest, GatewayRequest, PipelineUpdate, PreflightRequest, Project, ProjectCreate, ProjectUpdate, ProviderConfigUpdate, QualityReviewRequest, RouteUpdate, SceneLayoutRequest, ScriptUpsert, Shot, ShotCreate, ShotGenerationRequest, ShotUpdate, StoryboardGenerateRequest, TaskCreate, TimelineClipCreate, TimelineClipUpdate, TimelineExportRequest, TimelineReorderRequest, TransitionPlanRequest, TransitionRenderRequest
+from .schemas import AssetCreate, AssetImportRequest, AssetUpdate, AutomationStartRequest, BibleEntityCreate, ContinuityContractRequest, ContinuityRequest, DirectorBuildRequest, EpisodeAutomationRequest, EpisodeLockRequest, GatewayRequest, ModelRoleBindingUpdate, PipelineUpdate, PreflightRequest, Project, ProjectCreate, ProjectUpdate, ProviderConfigUpdate, QualityReviewRequest, RouteUpdate, SceneLayoutRequest, ScriptUpsert, Shot, ShotCreate, ShotGenerationRequest, ShotUpdate, StoryboardGenerateRequest, TaskCreate, TimelineClipCreate, TimelineClipUpdate, TimelineExportRequest, TimelineReorderRequest, TransitionPlanRequest, TransitionRenderRequest
 from .continuity import analyze_pair
 from .pipeline import stage_catalog
 from .providers import CAPABILITIES, known_provider, providers_for, public_catalog, supports
 from .preflight import run_preflight
 from .provider_config import all_provider_statuses, delete_provider_config, resolve_provider_config, save_provider_config
+from .model_discovery import discover_provider_models
+from .model_routing import delete_model_binding, list_model_roles, resolve_model_role, save_model_binding
 from .quality import repair_plan, weighted_score
 from .story_bible import continuity_contract, episode_snapshot, fingerprint
 from .automation import automation_plan
@@ -46,14 +48,14 @@ async def lifespan(_: FastAPI):
         await worker
 
 
-app = FastAPI(title=settings.app_name, version="1.4.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.5.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost", "http://127.0.0.1"], allow_methods=["*"], allow_headers=["*"])
 PREFIX = settings.api_prefix
 
 
 @app.get(f"{PREFIX}/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "1.4.0", "instance_id": os.getenv("AI_STUDIO_INSTANCE_ID", "external")}
+    return {"status": "ok", "version": "1.5.0", "instance_id": os.getenv("AI_STUDIO_INSTANCE_ID", "external")}
 
 
 @app.get(f"{PREFIX}/providers")
@@ -82,6 +84,41 @@ def configure_provider(provider_id: str, payload: ProviderConfigUpdate):
 def remove_provider_config(provider_id: str):
     try:
         delete_provider_config(provider_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.get(f"{PREFIX}/provider-configs/{{provider_id}}/models")
+async def provider_models(provider_id: str, capability: str | None = None):
+    if capability and capability not in CAPABILITIES:
+        raise HTTPException(400, "Unknown capability")
+    try:
+        return await discover_provider_models(provider_id, capability)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get(f"{PREFIX}/model-roles")
+def model_roles():
+    return list_model_roles()
+
+
+@app.put(f"{PREFIX}/model-roles/{{role_id}}")
+def bind_model_role(role_id: str, payload: ModelRoleBindingUpdate):
+    try:
+        return save_model_binding(role_id, payload.provider_id, payload.model)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.delete(f"{PREFIX}/model-roles/{{role_id}}", status_code=204)
+def unbind_model_role(role_id: str):
+    try:
+        delete_model_binding(role_id)
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
 
@@ -266,11 +303,16 @@ async def generate_director_package(project_id: str, episode: int, payload: Dire
         existing = db.execute("SELECT COUNT(*) FROM shots WHERE project_id=? AND episode=?", (project_id, episode)).fetchone()[0]
         if existing and not payload.replace_existing:
             raise HTTPException(409, "本集已经存在分镜")
+    route = resolve_model_role("storyboard_design")
+    provider_id = payload.provider or (route["provider_id"] if route else None)
+    if not provider_id:
+        raise HTTPException(409, "请先在模型路由中心绑定“全量分镜导演”模型")
+    model = payload.model or (route["model"] if route and route["provider_id"] == provider_id else None)
     try:
-        adapter = registry.resolve(payload.provider)
+        adapter = registry.resolve(provider_id)
         result = await adapter.invoke(director_prompt(script["source_text"], episode), {
             "task_type": "llm", "system_prompt": DIRECTOR_SYSTEM, "temperature": 0.15, "max_tokens": 16000,
-            "project_id": project_id, "episode": episode,
+            "project_id": project_id, "episode": episode, "model": model,
         })
         design = normalize_design(extract_json_object(str(result.get("result") or "")))
     except KeyError as exc:
@@ -765,17 +807,36 @@ def start_episode_automation(project_id: str, payload: AutomationStartRequest):
     with connect() as db:
         if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
             raise HTTPException(404, "Project not found")
-    checks = [(payload.image_provider, "t2i"), (payload.video_provider, "i2v")]
-    if payload.voice_provider:
-        checks.append((payload.voice_provider, "tts"))
-    if payload.quality_provider:
-        checks.append((payload.quality_provider, "vision"))
+    config = payload.model_dump()
+    if payload.use_role_bindings:
+        for role_id, provider_key, model_key in (
+            ("keyframe_image", "image_provider", "image_model"),
+            ("reference_image", "reference_image_provider", "reference_image_model"),
+            ("shot_video", "video_provider", "video_model"),
+            ("transition_video", "transition_provider", "transition_model"),
+            ("dialogue_voice", "voice_provider", "voice_model"),
+            ("continuity_review", "quality_provider", "quality_model"),
+            ("final_review", "final_review_provider", "final_review_model"),
+        ):
+            route = resolve_model_role(role_id)
+            if route:
+                config[provider_key], config[model_key] = route["provider_id"], route["model"]
+    checks = [(config["image_provider"], "t2i"), (config["video_provider"], "i2v")]
+    if config.get("voice_provider"):
+        checks.append((config["voice_provider"], "tts"))
+    if config.get("quality_provider"):
+        checks.append((config["quality_provider"], "vision"))
+    if config.get("reference_image_provider"):
+        checks.append((config["reference_image_provider"], "i2i"))
+    if config.get("transition_provider"):
+        checks.append((config["transition_provider"], "i2v"))
+    if config.get("final_review_provider"):
+        checks.append((config["final_review_provider"], "vision"))
     unsupported = [f"{provider}:{capability}" for provider, capability in checks if (known_provider(provider) and not supports(provider, capability)) or (not known_provider(provider) and not registry.has(provider))]
     if unsupported:
         raise HTTPException(422, "未实现或已停止维护的模型能力：" + "、".join(unsupported))
     try:
-        config = payload.model_dump()
-        if payload.video_provider == "metaso" and resolve_provider_config("dashscope", "i2v").api_key:
+        if config["video_provider"] == "metaso" and resolve_provider_config("dashscope", "i2v").api_key:
             config["video_fallback_provider"] = "dashscope"
             config["video_fallback_model"] = "wan2.7-i2v-2026-04-25"
             config["value_routing_enabled"] = True
@@ -790,7 +851,20 @@ def preview_episode_routes(project_id: str, payload: AutomationStartRequest):
         if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
             raise HTTPException(404, "Project not found")
     config = payload.model_dump()
-    if payload.video_provider == "metaso" and resolve_provider_config("dashscope", "i2v").api_key:
+    if payload.use_role_bindings:
+        for role_id, provider_key, model_key in (
+            ("keyframe_image", "image_provider", "image_model"),
+            ("reference_image", "reference_image_provider", "reference_image_model"),
+            ("shot_video", "video_provider", "video_model"),
+            ("transition_video", "transition_provider", "transition_model"),
+            ("dialogue_voice", "voice_provider", "voice_model"),
+            ("continuity_review", "quality_provider", "quality_model"),
+            ("final_review", "final_review_provider", "final_review_model"),
+        ):
+            route = resolve_model_role(role_id)
+            if route:
+                config[provider_key], config[model_key] = route["provider_id"], route["model"]
+    if config["video_provider"] == "metaso" and resolve_provider_config("dashscope", "i2v").api_key:
         config.update({"video_fallback_provider": "dashscope", "video_fallback_model": "wan2.7-i2v-2026-04-25", "value_routing_enabled": True})
     return automation_route_plan(project_id, config)
 
@@ -820,11 +894,20 @@ async def gateway(capability: str, payload: GatewayRequest):
     if capability not in {"llm", "image", "video", "voice", "memory"}:
         raise HTTPException(404, "Unknown AI capability")
     try:
-        adapter = registry.resolve(payload.provider)
+        route = resolve_model_role(payload.role_id) if payload.role_id else None
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    provider_id = payload.provider or (route["provider_id"] if route else "mock")
+    context = dict(payload.context)
+    if route and provider_id == route["provider_id"]:
+        context["model"] = route["model"]
+        context["model_role"] = route["role_id"]
+    try:
+        adapter = registry.resolve(provider_id)
     except KeyError as exc:
         raise HTTPException(400, str(exc)) from exc
     try:
-        return {"capability": capability, **await adapter.invoke(payload.prompt, payload.context)}
+        return {"capability": capability, **await adapter.invoke(payload.prompt, context)}
     except RuntimeError as exc:
         raise HTTPException(502, str(exc)) from exc
 

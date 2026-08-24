@@ -176,6 +176,39 @@ public sealed class ProviderConfigStatus
     [JsonIgnore] public string DisplayName => Configured ? $"● {Name}" : $"○ {Name}";
 }
 
+public sealed class ProviderModelInfo
+{
+    [JsonPropertyName("id")] public string Id { get; set; } = "";
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("capabilities")] public List<string> Capabilities { get; set; } = [];
+    [JsonPropertyName("context_window")] public int? ContextWindow { get; set; }
+    [JsonIgnore] public string DisplayName => string.IsNullOrWhiteSpace(Name) || Name == Id ? Id : $"{Name} · {Id}";
+}
+
+public sealed class ProviderModelList
+{
+    [JsonPropertyName("provider_id")] public string ProviderId { get; set; } = "";
+    [JsonPropertyName("source")] public string Source { get; set; } = "";
+    [JsonPropertyName("capability")] public string Capability { get; set; } = "";
+    [JsonPropertyName("models")] public List<ProviderModelInfo> Models { get; set; } = [];
+    [JsonPropertyName("warning")] public string Warning { get; set; } = "";
+    [JsonPropertyName("endpoint")] public string Endpoint { get; set; } = "";
+}
+
+public sealed class ModelRoleBinding
+{
+    [JsonPropertyName("id")] public string Id { get; set; } = "";
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("stage")] public string Stage { get; set; } = "";
+    [JsonPropertyName("capability")] public string Capability { get; set; } = "";
+    [JsonPropertyName("description")] public string Description { get; set; } = "";
+    [JsonPropertyName("provider_id")] public string ProviderId { get; set; } = "";
+    [JsonPropertyName("model")] public string Model { get; set; } = "";
+    [JsonPropertyName("available")] public bool Available { get; set; }
+    [JsonIgnore] public string DisplayLabel => $"{Stage} · {Name}  →  {BindingLabel}";
+    [JsonIgnore] public string BindingLabel => string.IsNullOrWhiteSpace(ProviderId) ? "尚未绑定" : $"{ProviderId} / {Model}";
+}
+
 public sealed class GatewayTextResult
 {
     [JsonPropertyName("provider")] public string Provider { get; set; } = "";

@@ -29,7 +29,8 @@ class StoryboardGenerateRequest(BaseModel):
 
 
 class DirectorBuildRequest(BaseModel):
-    provider: str = Field(min_length=1, max_length=80)
+    provider: str | None = Field(default=None, min_length=1, max_length=80)
+    model: str | None = Field(default=None, min_length=1, max_length=160)
     replace_existing: bool = True
     freeze_bible: bool = True
 
@@ -173,7 +174,8 @@ class TaskCreate(BaseModel):
 
 
 class GatewayRequest(BaseModel):
-    provider: str = "mock"
+    provider: str | None = None
+    role_id: str | None = Field(default=None, max_length=80)
     prompt: str = Field(min_length=1)
     context: dict[str, Any] = {}
 
@@ -182,6 +184,11 @@ class ProviderConfigUpdate(BaseModel):
     base_url: str = Field(min_length=8, max_length=500)
     model: str = Field(min_length=1, max_length=160)
     api_key: str | None = Field(default=None, min_length=8, max_length=500)
+
+
+class ModelRoleBindingUpdate(BaseModel):
+    provider_id: str = Field(min_length=1, max_length=80)
+    model: str = Field(min_length=1, max_length=160)
 
 
 class ContinuityRequest(BaseModel):
@@ -335,3 +342,4 @@ class AutomationStartRequest(BaseModel):
     generate_voice: bool = True
     auto_repair: bool = True
     stop_on_blocker: bool = True
+    use_role_bindings: bool = True

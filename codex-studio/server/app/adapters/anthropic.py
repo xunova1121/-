@@ -26,8 +26,9 @@ class AnthropicAdapter(AIAdapter):
         if not config.model:
             raise RuntimeError("Anthropic Claude 尚未配置模型")
         endpoint = f"{config.base_url.rstrip('/')}/messages"
+        model = str(context.get("model") or config.model)
         body = {
-            "model": config.model,
+            "model": model,
             "max_tokens": int(context.get("max_tokens", 4096)),
             "temperature": float(context.get("temperature", 0.4)),
             "system": str(context.get("system_prompt") or "你是影视制作导演助手，输出可直接执行、具体且结构化的结果。"),
@@ -51,7 +52,7 @@ class AnthropicAdapter(AIAdapter):
             content = "\n".join(str(item.get("text") or "") for item in payload.get("content", []) if item.get("type") == "text").strip()
             if not content:
                 raise RuntimeError("Anthropic 未返回文本内容")
-            return {"provider": self.provider, "model": config.model, "status": "completed", "result": content, "usage": payload.get("usage", {})}
+            return {"provider": self.provider, "model": model, "status": "completed", "result": content, "usage": payload.get("usage", {})}
         except (httpx.HTTPError, KeyError, TypeError, json.JSONDecodeError) as exc:
             error = str(exc)
             raise RuntimeError(f"Anthropic 请求失败：{error}") from exc

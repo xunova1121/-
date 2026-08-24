@@ -16,6 +16,7 @@ public partial class ScriptWorkbenchWindow : Window
     private string _sourceName = "";
     private bool _loadingEpisode;
     private string? _directorProvider;
+    private string? _directorModel;
     public bool StoryboardChanged { get; private set; }
 
     public ScriptWorkbenchWindow(StudioApiClient api, StudioProject project)
@@ -35,9 +36,12 @@ public partial class ScriptWorkbenchWindow : Window
     {
         var priorities = new[] { "anthropic", "deepseek", "qwen", "openai", "ark" };
         var configured = (await _api.GetProviderConfigsAsync()).Where(x => x.Configured && x.Capabilities.Contains("chat")).ToList();
-        _directorProvider = priorities.FirstOrDefault(id => configured.Any(x => x.ProviderId == id));
+        var bound = (await _api.GetModelRolesAsync()).FirstOrDefault(x => x.Id == "storyboard_design" && x.Available);
+        _directorProvider = bound?.ProviderId ?? priorities.FirstOrDefault(id => configured.Any(x => x.ProviderId == id));
+        _directorModel = bound?.Model;
         DirectorButton.IsEnabled = _directorProvider is not null;
-        if (_directorProvider is null) DirectorResult.Text = "请先在“模型设置”中配置 Claude、DeepSeek、Qwen、OpenAI 或方舟导演模型。";
+        if (_directorProvider is null) DirectorResult.Text = "请先在“模型路由中心”配置服务商，并绑定“全量分镜导演”岗位。";
+        else if (bound is not null) DirectorResult.Text = $"本次将使用已绑定的全量分镜导演：{bound.ProviderId} / {bound.Model}";
     }
 
     private async Task LoadEpisodeAsync()
@@ -136,7 +140,7 @@ public partial class ScriptWorkbenchWindow : Window
             DirectorButton.IsEnabled = false;
             await SaveAsync();
             DirectorResult.Text = "导演模型正在通读完整剧本，并生成场次、全量分镜、冻结 Story Bible 与逐镜状态图…";
-            var result = await _api.GenerateDirectorPackageAsync(Episode, _directorProvider, true);
+            var result = await _api.GenerateDirectorPackageAsync(Episode, _directorProvider, _directorModel, true);
             StoryboardChanged = true;
             ParseSummaryText.Text = $"{result.SceneCount} 个场景 · {result.ShotCount} 个镜头 · {result.BibleCount} 项冻结设定";
             var warnings = result.Warnings.Count == 0 ? "状态图检查通过，无阻断项。" : string.Join(Environment.NewLine, result.Warnings.Select(x => "• " + x));

@@ -111,7 +111,8 @@ def delete_provider_config(provider_id: str) -> None:
 
 
 def public_provider_status(provider_id: str) -> dict:
-    config = resolve_provider_config(provider_id)
+    provider = _provider(provider_id)
+    config = resolve_provider_config(provider_id, provider.capabilities[0] if provider.capabilities else "chat")
     return {
         "provider_id": provider_id,
         "name": config.provider.name,

@@ -101,9 +101,9 @@ public sealed class StudioApiClient
         return await response.Content.ReadFromJsonAsync<StoryboardGenerateResult>(cancellationToken: token) ?? new StoryboardGenerateResult();
     }
 
-    public async Task<DirectorBuildResult> GenerateDirectorPackageAsync(int episode, string provider, bool replaceExisting = true, CancellationToken token = default)
+    public async Task<DirectorBuildResult> GenerateDirectorPackageAsync(int episode, string? provider = null, string? model = null, bool replaceExisting = true, CancellationToken token = default)
     {
-        var response = await _http.PostAsJsonAsync(ProjectPath($"episodes/{episode}/director/generate"), new { provider, replace_existing = replaceExisting, freeze_bible = true }, token);
+        var response = await _http.PostAsJsonAsync(ProjectPath($"episodes/{episode}/director/generate"), new { provider, model, replace_existing = replaceExisting, freeze_bible = true }, token);
         await EnsureSuccessAsync(response);
         return await response.Content.ReadFromJsonAsync<DirectorBuildResult>(cancellationToken: token) ?? throw new InvalidOperationException("导演模型未返回生产设计");
     }
@@ -261,7 +261,29 @@ public sealed class StudioApiClient
         await EnsureSuccessAsync(response);
     }
 
-    public async Task<GatewayTextResult> RunDirectorAnalysisAsync(string provider, string script, int episode, CancellationToken token = default)
+    public async Task<ProviderModelList> GetProviderModelsAsync(string providerId, string? capability = null, CancellationToken token = default)
+    {
+        var query = string.IsNullOrWhiteSpace(capability) ? "" : $"?capability={Uri.EscapeDataString(capability)}";
+        return await _http.GetFromJsonAsync<ProviderModelList>($"provider-configs/{Uri.EscapeDataString(providerId)}/models{query}", token) ?? new ProviderModelList { ProviderId = providerId };
+    }
+
+    public async Task<IReadOnlyList<ModelRoleBinding>> GetModelRolesAsync(CancellationToken token = default) =>
+        await _http.GetFromJsonAsync<List<ModelRoleBinding>>("model-roles", token) ?? [];
+
+    public async Task<ModelRoleBinding> SaveModelRoleAsync(string roleId, string providerId, string model, CancellationToken token = default)
+    {
+        var response = await _http.PutAsJsonAsync($"model-roles/{Uri.EscapeDataString(roleId)}", new { provider_id = providerId, model }, token);
+        await EnsureSuccessAsync(response);
+        return await response.Content.ReadFromJsonAsync<ModelRoleBinding>(cancellationToken: token) ?? throw new InvalidOperationException("模型岗位绑定未返回结果");
+    }
+
+    public async Task DeleteModelRoleAsync(string roleId, CancellationToken token = default)
+    {
+        var response = await _http.DeleteAsync($"model-roles/{Uri.EscapeDataString(roleId)}", token);
+        await EnsureSuccessAsync(response);
+    }
+
+    public async Task<GatewayTextResult> RunDirectorAnalysisAsync(string? provider, string script, int episode, CancellationToken token = default)
     {
         var prompt = $"""
 请对以下第{episode}集短剧剧本做可执行的导演分析。必须给出：
@@ -275,6 +297,7 @@ public sealed class StudioApiClient
         var response = await _http.PostAsJsonAsync("gateway/llm", new
         {
             provider,
+            role_id = "script_analysis",
             prompt,
             context = new { task_type = "llm", temperature = 0.25, max_tokens = 4096, system_prompt = "你是短剧导演与连续性总监。你的结论必须能直接指导分镜、生成和剪辑。" }
         }, token);

@@ -108,11 +108,13 @@ def _queue_keyframes(db: sqlite3.Connection, run_id: int, project_id: str, shots
         value_score = int(shot["value_score"] or 50)
         requirement = json.loads(shot["model_requirement_json"] or "{}")
         tier = str(requirement.get("tier") or ("premium" if value_score >= 80 else "standard" if value_score >= 45 else "economy"))
+        provider = config.get("reference_image_provider") if references and config.get("reference_image_provider") else config["image_provider"]
+        model = config.get("reference_image_model") if references and config.get("reference_image_provider") else config.get("image_model")
         payload = {"project_id": project_id, "episode": shot["episode"], "shot_id": shot["id"], "shot_number": shot["number"],
-                   "prompt": (shot["prompt"] or shot["description"]) + memory + repair, "model": config.get("image_model"), "reference_paths": references,
+                   "prompt": (shot["prompt"] or shot["description"]) + memory + repair, "model": model, "reference_paths": references,
                    "options": {"size": "1024x1536" if int(config.get("height", 1080)) > int(config.get("width", 1920)) else "1536x1024", "quality": "high" if tier == "premium" or config.get("mode") == "quality" else "medium"},
-                   "routing": {"value_score": value_score, "tier": tier, "reason": "shot_value_score"}}
-        _queue(db, run_id, project_id, "image", config["image_provider"], stage, payload, 70 + value_score // 4)
+                   "routing": {"value_score": value_score, "tier": tier, "reason": "reference_image_role" if references and config.get("reference_image_provider") else "keyframe_image_role"}}
+        _queue(db, run_id, project_id, "image", provider, stage, payload, 70 + value_score // 4)
 
 
 def _latest_shot_asset(db: sqlite3.Connection, shot_id: int, role: str) -> sqlite3.Row | None:
@@ -132,6 +134,11 @@ def video_route(shot: sqlite3.Row, config: dict[str, Any]) -> dict[str, Any]:
             provider, model, reason = "metaso", str(config.get("video_model") or "MiniMax-H3"), "high_value_h3"
         else:
             provider, model, reason = "dashscope", str(config.get("video_fallback_model") or "wan2.7-i2v-2026-04-25"), "standard_value_wan"
+    continuity = json.loads(shot["continuity_json"] or "{}")
+    if str(continuity.get("link") or "cut") == "continuous" and config.get("transition_provider"):
+        provider = str(config["transition_provider"])
+        model = str(config.get("transition_model") or model)
+        reason = "transition_video_role"
     resolution = ("2K" if tier == "premium" else "768P") if provider == "metaso" else ("1080P" if tier in {"premium", "standard"} or config.get("mode") == "quality" else "720P")
     return {"provider": provider, "model": model, "resolution": resolution, "reason": reason, "tier": tier, "value_score": value_score}
 
@@ -171,7 +178,7 @@ def _queue_reviews(db: sqlite3.Connection, run_id: int, project_id: str, shots: 
         memory, bible_references = bible_context(db, project_id, shot)
         payload = {"project_id": project_id, "episode": shot["episode"], "shot_id": shot["id"], "shot_number": shot["number"],
                    "prompt": f"审核此分镜关键帧与分镜描述、冻结设定的一致性。分镜：{shot['description']} {memory}",
-                   "reference_paths": [asset["local_path"], *bible_references[:2]], "options": {"threshold": STAGE_POLICIES[config.get('mode', 'balanced')]["consistency_threshold"]}}
+                   "model": config.get("quality_model"), "reference_paths": [asset["local_path"], *bible_references[:2]], "options": {"threshold": STAGE_POLICIES[config.get('mode', 'balanced')]["consistency_threshold"]}}
         _queue(db, run_id, project_id, "vision_review", provider, "keyframe_review", payload, 70)
         count += 1
     return count
@@ -223,6 +230,11 @@ def _queue_video_wave(db: sqlite3.Connection, run_id: int, project_id: str, shot
         value_score, tier = route["value_score"], route["tier"]
         route_provider, route_model = route["provider"], route["model"]
         route_reason, resolution = route["reason"], route["resolution"]
+        if link == "continuous" and config.get("transition_provider"):
+            route_provider = str(config["transition_provider"])
+            route_model = str(config.get("transition_model") or route_model)
+            route_reason = "transition_video_role"
+            resolution = "2K" if route_provider == "metaso" else "1080P"
         notes = list((repair_notes or {}).get(shot_id, []))
         repair = f"\n\n【视频质检返工】{json.dumps(notes, ensure_ascii=False)}" if notes else ""
         phase = str(continuity.get("action_phase") or "static")
@@ -280,7 +292,7 @@ def _queue_video_reviews(db: sqlite3.Connection, run_id: int, project_id: str, s
                     seam_note = "未能提取上一镜尾帧，本次只能审核本镜内部。"
         payload = {"project_id": project_id, "episode": shot["episode"], "shot_id": shot["id"], "shot_number": shot["number"],
                    "prompt": f"逐帧审核本镜头的身份、服装、场景、道具、动作相位、手部姿态、动量、画质和跨镜接缝。{seam_note} 分镜动作：{shot['action']}；动作链：{continuity.get('action_id') or '未命名'}；相位：{continuity.get('action_phase') or 'static'}。{memory}",
-                   "reference_paths": review_paths, "options": {"threshold": STAGE_POLICIES[config.get('mode', 'balanced')]["consistency_threshold"], "review_kind": "video", "seam_from_shot": previous["number"] if seam_note and previous is not None else None}}
+                   "model": config.get("quality_model"), "reference_paths": review_paths, "options": {"threshold": STAGE_POLICIES[config.get('mode', 'balanced')]["consistency_threshold"], "review_kind": "video", "seam_from_shot": previous["number"] if seam_note and previous is not None else None}}
         _queue(db, run_id, project_id, "vision_review", provider, stage, payload, 72)
         count += 1
         previous = shot
@@ -300,7 +312,7 @@ def _review_failures(tasks: list[sqlite3.Row], threshold: int) -> tuple[set[int]
 
 
 def _queue_final_review(db: sqlite3.Connection, run_id: int, project_id: str, output: str, config: dict[str, Any]) -> int:
-    provider = config.get("quality_provider")
+    provider = config.get("final_review_provider") or config.get("quality_provider")
     if not provider or not output:
         return 0
     try:
@@ -309,7 +321,7 @@ def _queue_final_review(db: sqlite3.Connection, run_id: int, project_id: str, ou
         return 0
     payload = {"project_id": project_id, "episode": int(config.get("episode", 1)), "shot_number": "FINAL",
                "prompt": "审核最终成片采样帧：人物与场景是否稳定、镜头顺序是否叙事连贯、字幕是否遮挡主体、画面是否有明显生成瑕疵。",
-               "reference_paths": frames, "options": {"threshold": STAGE_POLICIES[config.get('mode', 'balanced')]["consistency_threshold"], "review_kind": "final"}}
+               "model": config.get("final_review_model") or config.get("quality_model"), "reference_paths": frames, "options": {"threshold": STAGE_POLICIES[config.get('mode', 'balanced')]["consistency_threshold"], "review_kind": "final"}}
     _queue(db, run_id, project_id, "vision_review", provider, "final_review", payload, 105)
     return 1
 
