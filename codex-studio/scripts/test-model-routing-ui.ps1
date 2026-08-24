@@ -98,7 +98,9 @@ try {
         $entityBody = $entity | ConvertTo-Json -Depth 5
         Invoke-RestMethod -Method Post -Uri "$ApiBase/projects/$($project.id)/bible" -ContentType "application/json" -Body $entityBody | Out-Null
     }
-    $boards = @(Invoke-RestMethod -Uri "$ApiBase/projects/$($project.id)/reference-boards")
+    $boardsResponse = Invoke-RestMethod -Uri "$ApiBase/projects/$($project.id)/reference-boards"
+    $boards = @()
+    foreach ($item in $boardsResponse) { $boards += $item }
     Write-Host "Reference boards returned: $($boards.Count)"
     foreach ($board in $boards) { Write-Host " - $($board.entity_type)/$($board.entity_key): $($board.name)" }
     if ($boards.Count -lt 2) { throw "Explicit character and location reference boards were not returned" }
