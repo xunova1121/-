@@ -48,6 +48,12 @@ public partial class App : Application
         window.MaxHeight = maxHeight;
         if (!double.IsNaN(window.Width) && window.Width > maxWidth) window.Width = maxWidth;
         if (!double.IsNaN(window.Height) && window.Height > maxHeight) window.Height = maxHeight;
+        var width = double.IsNaN(window.Width) || window.Width <= 0 ? Math.Min(window.ActualWidth, maxWidth) : window.Width;
+        var height = double.IsNaN(window.Height) || window.Height <= 0 ? Math.Min(window.ActualHeight, maxHeight) : window.Height;
+        var preferredLeft = window.Owner is null ? area.Left + (area.Width - width) / 2 : window.Owner.Left + (window.Owner.ActualWidth - width) / 2;
+        var preferredTop = window.Owner is null ? area.Top + (area.Height - height) / 2 : window.Owner.Top + (window.Owner.ActualHeight - height) / 2;
+        window.Left = Math.Clamp(preferredLeft, area.Left + 12, Math.Max(area.Left + 12, area.Right - width - 12));
+        window.Top = Math.Clamp(preferredTop, area.Top + 12, Math.Max(area.Top + 12, area.Bottom - height - 12));
         window.UseLayoutRounding = true;
         window.SnapsToDevicePixels = true;
     }
