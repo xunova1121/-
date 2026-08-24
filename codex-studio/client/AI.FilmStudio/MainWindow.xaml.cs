@@ -39,8 +39,6 @@ public partial class MainWindow : Window
         _activeWorkspaceKey = "home";
         HomeDashboard.Visibility = Visibility.Visible;
         WorkspaceShell.Visibility = Visibility.Collapsed;
-        TimelineShell.Visibility = Visibility.Collapsed;
-        TransportShell.Visibility = Visibility.Collapsed;
         SetGroupActive(TopNavigation, "首页");
         SetGroupActive(WorkspaceNavigation, null);
     }
@@ -50,9 +48,6 @@ public partial class MainWindow : Window
         _activeWorkspaceKey = key;
         HomeDashboard.Visibility = Visibility.Collapsed;
         WorkspaceShell.Visibility = Visibility.Visible;
-        var editing = key == "editing";
-        TimelineShell.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
-        TransportShell.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
         SetGroupActive(WorkspaceNavigation, key);
         var top = key switch { "director" => "剧本", "storyboard" => "分镜", "editing" => "剪辑", "assets" => "项目", _ => "制作" };
         SetGroupActive(TopNavigation, top);

@@ -20,6 +20,19 @@ def main():
     assert '<Style TargetType="ComboBox">' in app_text and '<ControlTemplate TargetType="ComboBox">' in app_text
     assert '<Style TargetType="ListBox">' in app_text and 'Value="#0B0E13"' in app_text
     assert '<Color x:Key="Text">#FFFFFF</Color>' in app_text
+    assert '<Style TargetType="DataGridRow">' in app_text
+
+    app_code = (ROOT / "client/AI.FilmStudio/App.xaml.cs").read_text(encoding="utf-8")
+    assert "FitWindowToWorkArea" in app_code and "SystemParameters.WorkArea" in app_code
+
+    for path in sorted((ROOT / "client/AI.FilmStudio").glob("*Window.xaml")):
+        window = ET.parse(path).getroot()
+        for button in window.iter(f"{{{NS['w']}}}Button"):
+            label = button.attrib.get("Content", "")
+            assert any(name in button.attrib for name in ("Click", "Command", "IsCancel", "IsDefault")), f"{path.name}: enabled-looking button has no action: {label}"
+        for block in window.iter(f"{{{NS['w']}}}TextBlock"):
+            size = block.attrib.get("FontSize")
+            assert size is None or float(size) >= 15, f"{path.name}: unreadable explicit font size {size}"
 
     xaml_path = ROOT / "client/AI.FilmStudio/ProviderSettingsWindow.xaml"
     root = ET.parse(xaml_path).getroot()
@@ -47,6 +60,9 @@ def main():
     assert "SelectedModelId(RoleModel)" in code
     assert "SaveModelRoleAsync(roleId, provider.ProviderId, modelId)" in code
     assert "UpdateSelectedRoleSummary" in code
+    automation = (ROOT / "client/AI.FilmStudio/AutomationWindow.xaml.cs").read_text(encoding="utf-8")
+    assert 'RequireRole("keyframe_image"' in automation and 'RequireRole("shot_video"' in automation
+    assert "ProviderConfigStatus" not in automation
     print("UI contract passed: readable controls and explicit persistent role-binding actions")
 
 

@@ -54,6 +54,6 @@
             </Border>
         </Grid>
 
-        <Button Grid.Row="2" Style="{StaticResource NavButton}" Content="关闭" Click="Close_Click" Padding="26,12" HorizontalAlignment="Right"/>
+        <Button x:Name="CloseRouterButton" AutomationProperties.AutomationId="CloseRouterButton" Grid.Row="2" Style="{StaticResource NavButton}" Content="关闭" Click="Close_Click" Padding="26,12" HorizontalAlignment="Right"/>
     </Grid>
 </Window>

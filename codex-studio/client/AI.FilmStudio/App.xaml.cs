@@ -12,6 +12,7 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent, new RoutedEventHandler(FitWindowToWorkArea));
         DispatcherUnhandledException += (_, args) =>
         {
             WriteCrashLog(args.Exception);
@@ -33,6 +34,22 @@ public partial class App : Application
             MessageBox.Show($"启动失败，诊断日志已保存。\n\n{ex.Message}", "AI影视Studio 启动失败", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(-1);
         }
+    }
+
+    private static void FitWindowToWorkArea(object sender, RoutedEventArgs _)
+    {
+        if (sender is not Window window) return;
+        var area = SystemParameters.WorkArea;
+        var maxWidth = Math.Max(760, area.Width - 24);
+        var maxHeight = Math.Max(560, area.Height - 24);
+        window.MinWidth = Math.Min(window.MinWidth, maxWidth);
+        window.MinHeight = Math.Min(window.MinHeight, maxHeight);
+        window.MaxWidth = maxWidth;
+        window.MaxHeight = maxHeight;
+        if (!double.IsNaN(window.Width) && window.Width > maxWidth) window.Width = maxWidth;
+        if (!double.IsNaN(window.Height) && window.Height > maxHeight) window.Height = maxHeight;
+        window.UseLayoutRounding = true;
+        window.SnapsToDevicePixels = true;
     }
 
     protected override void OnExit(ExitEventArgs e)
