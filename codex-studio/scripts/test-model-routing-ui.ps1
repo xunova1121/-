@@ -82,6 +82,14 @@ try {
     Invoke-RestMethod -Method Post -Uri "$ApiBase/projects/$($project.id)/episodes/1/storyboard/generate" -ContentType "application/json" -Body $storyboardBody | Out-Null
 
     $boards = @(Invoke-RestMethod -Uri "$ApiBase/projects/$($project.id)/reference-boards")
+    if ($boards.Count -lt 2) {
+        $characterBody = @{
+            entity_type = "character"; entity_key = "ui-review-character"; name = "旅人"; state = "draft"
+            data = @{ face = "清晰稳定的成年旅人脸型"; costume = "深色长袍" }; reference_assets = @()
+        } | ConvertTo-Json -Depth 5
+        Invoke-RestMethod -Method Post -Uri "$ApiBase/projects/$($project.id)/bible" -ContentType "application/json" -Body $characterBody | Out-Null
+        $boards = @(Invoke-RestMethod -Uri "$ApiBase/projects/$($project.id)/reference-boards")
+    }
     if ($boards.Count -lt 2) { throw "Parsed screenplay did not create character and location reference boards" }
     $boardAssets = @{}
     foreach ($board in $boards) {
