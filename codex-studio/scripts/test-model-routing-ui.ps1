@@ -97,14 +97,24 @@ try {
         if ($null -ne $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)) { throw "Internal storyboard field '$forbidden' leaked into the review table" }
     }
     Save-Screen "02-storyboard-review"
-    Invoke-Element (Wait-Element $root "StoryboardLockButton")
+    $lockButton = Wait-Element $root "StoryboardLockButton"
+    $lockStatus = Wait-Element $root "StoryboardLockStatus"
+    $lockReady = $false
+    for ($i = 0; $i -lt 40; $i++) {
+        Start-Sleep -Milliseconds 250
+        if ($lockButton.Current.IsEnabled -and $lockStatus.Current.Name -notmatch "读取") { $lockReady = $true; break }
+    }
+    if (-not $lockReady) { throw "Storyboard lock action never became ready; status='$($lockStatus.Current.Name)'" }
+    Invoke-Element $lockButton
     $lock = $null
     for ($i = 0; $i -lt 40; $i++) {
         Start-Sleep -Milliseconds 250
         $lock = Invoke-RestMethod -Uri "$ApiBase/projects/$($project.id)/episodes/1/storyboard-lock"
         if ($lock.status -eq "locked") { break }
     }
-    if ($null -eq $lock -or $lock.status -ne "locked" -or $lock.revision -lt 1) { throw "Storyboard lock did not persist through the UI" }
+    if ($null -eq $lock -or $lock.status -ne "locked" -or $lock.revision -lt 1) {
+        throw "Storyboard lock did not persist through the UI; api='$($lock | ConvertTo-Json -Compress)'; ui='$($lockStatus.Current.Name)'"
+    }
     Save-Screen "02b-storyboard-locked"
     $storyboardWindow = $storyboardGrid
     while ($storyboardWindow.Current.ControlType -ne [System.Windows.Automation.ControlType]::Window) {
