@@ -7,7 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>AI-Film-Studio</AssemblyName>
     <RootNamespace>AI.FilmStudio</RootNamespace>
-    <Version>1.5.0</Version>
+    <Version>1.5.1</Version>
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="Embedded/AIStudioService.exe" LogicalName="AIStudioService.exe" Condition="Exists('Embedded/AIStudioService.exe')" />

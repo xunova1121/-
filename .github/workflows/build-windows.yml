@@ -31,6 +31,7 @@ jobs:
           python -m pip install -r codex-studio/server/requirements.txt
           $env:PYTHONPATH = "codex-studio/server"
           pytest -q codex-studio/server/tests
+          python codex-studio/scripts/test_ui_contract.py
       - name: Build local service EXE
         shell: pwsh
         run: |
@@ -102,13 +103,14 @@ jobs:
             }
             $response = Invoke-RestMethod -Uri "$apiBase/health" -TimeoutSec 3
             if ($response.status -ne "ok") { throw "Desktop-launched service is unhealthy" }
-            if ($response.version -ne "1.5.0") { throw "Unexpected service version: $($response.version)" }
+            if ($response.version -ne "1.5.1") { throw "Unexpected service version: $($response.version)" }
             $media = Invoke-RestMethod -Uri "$apiBase/media/capabilities" -TimeoutSec 3
             if (-not $media.ffmpeg_available) {
               $runtime = Join-Path $env:LOCALAPPDATA "AI-Film-Studio/runtime"
               Get-ChildItem $runtime -Recurse -ErrorAction SilentlyContinue | Select-Object FullName,Length | Format-Table
               throw "Embedded FFmpeg was not detected"
             }
+            & codex-studio/scripts/test-model-routing-ui.ps1 -DesktopPid $desktop.Id -ApiBase $apiBase
           } finally {
             if (-not $desktop.HasExited) { Stop-Process -Id $desktop.Id -Force }
             Get-Process AIStudioService -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -121,6 +123,6 @@ jobs:
           Get-FileHash dist/AI-Film-Studio/AI-Film-Studio.exe -Algorithm SHA256
       - uses: actions/upload-artifact@v4
         with:
-          name: AI-Film-Studio-V1.5.0-UI-Model-Routing-Single-EXE
+          name: AI-Film-Studio-V1.5.1-Readable-Model-Binding-Single-EXE
           path: dist/AI-Film-Studio/AI-Film-Studio.exe
           retention-days: 30

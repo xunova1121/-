@@ -48,14 +48,14 @@ async def lifespan(_: FastAPI):
         await worker
 
 
-app = FastAPI(title=settings.app_name, version="1.5.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.5.1", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost", "http://127.0.0.1"], allow_methods=["*"], allow_headers=["*"])
 PREFIX = settings.api_prefix
 
 
 @app.get(f"{PREFIX}/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "1.5.0", "instance_id": os.getenv("AI_STUDIO_INSTANCE_ID", "external")}
+    return {"status": "ok", "version": "1.5.1", "instance_id": os.getenv("AI_STUDIO_INSTANCE_ID", "external")}
 
 
 @app.get(f"{PREFIX}/providers")

@@ -22,6 +22,20 @@ public partial class ProviderSettingsWindow : Window
     private ProviderConfigStatus? SelectedProvider => Provider.SelectedItem as ProviderConfigStatus;
     private ModelRoleBinding? SelectedRole => RoleList.SelectedItem as ModelRoleBinding;
 
+    private static string SelectedModelId(ComboBox combo) =>
+        combo.SelectedItem is ProviderModelInfo model ? model.Id.Trim() : combo.Text.Trim();
+
+    private static void SelectModel(ComboBox combo, IReadOnlyList<ProviderModelInfo> models, string? modelId)
+    {
+        combo.ItemsSource = models;
+        var value = (modelId ?? "").Trim();
+        var exact = models.FirstOrDefault(item => string.Equals(item.Id, value, StringComparison.OrdinalIgnoreCase));
+        if (exact is not null) combo.SelectedItem = exact;
+        else if (!string.IsNullOrWhiteSpace(value)) combo.Text = value;
+        else if (models.Count > 0) combo.SelectedIndex = 0;
+        else combo.Text = "";
+    }
+
     private async Task ReloadAsync(string? providerId = null, string? roleId = null)
     {
         _loading = true;
@@ -67,7 +81,8 @@ public partial class ProviderSettingsWindow : Window
         RoleProvider.SelectedItem = candidates.FirstOrDefault(x => x.ProviderId == role.ProviderId) ?? candidates.FirstOrDefault(x => x.Configured) ?? candidates.FirstOrDefault();
         RoleModel.ItemsSource = null;
         RoleModel.Text = role.Model;
-        RoleFeedback.Text = role.Available ? "当前绑定可用" : string.IsNullOrWhiteSpace(role.ProviderId) ? "请选择服务商并绑定具体模型" : "绑定已保存，但服务商密钥尚未配置";
+        RoleFeedback.Text = role.Available ? $"✓ 已生效：{role.BindingLabel}" : string.IsNullOrWhiteSpace(role.ProviderId) ? "尚未绑定：请选择服务商，拉取候选模型后点击“绑定并保存”" : $"已保存 {role.BindingLabel}，但服务商密钥尚未配置";
+        UpdateSelectedRoleSummary();
     }
 
     private void Provider_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (IsLoaded && !_loading) ApplyProviderSelection(); }
@@ -78,17 +93,40 @@ public partial class ProviderSettingsWindow : Window
         RoleModel.ItemsSource = null;
         if (SelectedRole?.ProviderId == provider.ProviderId) RoleModel.Text = SelectedRole.Model;
         else RoleModel.Text = provider.Model;
+        UpdateSelectedRoleSummary();
+    }
+
+    private void RoleModel_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateSelectedRoleSummary();
+    private void RoleModel_DropDownClosed(object? sender, EventArgs e) => UpdateSelectedRoleSummary();
+    private void RoleModel_KeyUp(object sender, System.Windows.Input.KeyEventArgs e) => UpdateSelectedRoleSummary();
+
+    private void UpdateSelectedRoleSummary()
+    {
+        if (SelectedRole is null)
+        {
+            SelectedRoleSummary.Text = "当前选择：尚未选择岗位";
+            BindRoleButton.IsEnabled = false;
+            ClearRoleButton.IsEnabled = false;
+            return;
+        }
+        var provider = RoleProvider.SelectedItem as ProviderConfigStatus;
+        var modelId = SelectedModelId(RoleModel);
+        SelectedRoleSummary.Text = string.IsNullOrWhiteSpace(modelId)
+            ? $"准备绑定：{SelectedRole.Name} → 请先拉取并选择模型"
+            : $"准备绑定：{SelectedRole.Name} → {provider?.Name ?? "未选择服务商"} / {modelId}";
+        BindRoleButton.IsEnabled = provider is not null && !string.IsNullOrWhiteSpace(modelId);
+        ClearRoleButton.IsEnabled = !string.IsNullOrWhiteSpace(SelectedRole.ProviderId);
     }
 
     private async Task FetchAsync(ComboBox target, string providerId, string? capability, TextBlock feedback)
     {
-        var current = target.Text;
+        var current = SelectedModelId(target);
         var result = await _api.GetProviderModelsAsync(providerId, capability);
-        target.ItemsSource = result.Models;
-        if (!string.IsNullOrWhiteSpace(current)) target.Text = current;
-        else if (result.Models.Count > 0) target.SelectedIndex = 0;
+        SelectModel(target, result.Models, current);
         var source = result.Source == "remote" ? "服务商实时返回" : "内置兼容目录";
-        feedback.Text = $"{source} · {result.Models.Count} 个模型" + (string.IsNullOrWhiteSpace(result.Warning) ? "" : $"\n{result.Warning}");
+        var selected = SelectedModelId(target);
+        feedback.Text = $"{source} · {result.Models.Count} 个模型" + (string.IsNullOrWhiteSpace(selected) ? "" : $" · 已选择 {selected}") + (string.IsNullOrWhiteSpace(result.Warning) ? "" : $"\n{result.Warning}");
+        if (ReferenceEquals(target, RoleModel)) UpdateSelectedRoleSummary();
     }
 
     private async void FetchModels_Click(object sender, RoutedEventArgs e)
@@ -111,12 +149,13 @@ public partial class ProviderSettingsWindow : Window
 
     private async void Save_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedProvider is null || string.IsNullOrWhiteSpace(BaseUrl.Text) || string.IsNullOrWhiteSpace(Model.Text)) { Feedback.Text = "Base URL 和默认模型不能为空"; return; }
+        var modelId = SelectedModelId(Model);
+        if (SelectedProvider is null || string.IsNullOrWhiteSpace(BaseUrl.Text) || string.IsNullOrWhiteSpace(modelId)) { Feedback.Text = "Base URL 和默认模型不能为空"; return; }
         SaveButton.IsEnabled = false;
         try
         {
             var id = SelectedProvider.ProviderId;
-            await _api.SaveProviderConfigAsync(id, BaseUrl.Text.Trim(), Model.Text.Trim(), ApiKey.Password);
+            await _api.SaveProviderConfigAsync(id, BaseUrl.Text.Trim(), modelId, ApiKey.Password);
             ApiKey.Clear();
             await ReloadAsync(id, SelectedRole?.Id);
             Feedback.Text = "已使用 Windows 加密保存";
@@ -127,14 +166,15 @@ public partial class ProviderSettingsWindow : Window
 
     private async void BindRole_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedRole is null || RoleProvider.SelectedItem is not ProviderConfigStatus provider || string.IsNullOrWhiteSpace(RoleModel.Text)) { RoleFeedback.Text = "请选择服务商和具体模型"; return; }
+        var modelId = SelectedModelId(RoleModel);
+        if (SelectedRole is null || RoleProvider.SelectedItem is not ProviderConfigStatus provider || string.IsNullOrWhiteSpace(modelId)) { RoleFeedback.Text = "请选择服务商和具体模型"; return; }
         BindRoleButton.IsEnabled = false;
         try
         {
             var roleId = SelectedRole.Id;
-            await _api.SaveModelRoleAsync(roleId, provider.ProviderId, RoleModel.Text.Trim());
+            await _api.SaveModelRoleAsync(roleId, provider.ProviderId, modelId);
             await ReloadAsync(SelectedProvider?.ProviderId, roleId);
-            RoleFeedback.Text = "岗位绑定已保存，相关功能将使用该模型";
+            RoleFeedback.Text = $"✓ 绑定成功：{SelectedRole?.Name} → {provider.Name} / {modelId}。相关功能立即按此路由执行。";
         }
         catch (Exception ex) { RoleFeedback.Text = $"绑定失败：{ex.Message}"; }
         finally { BindRoleButton.IsEnabled = true; }
