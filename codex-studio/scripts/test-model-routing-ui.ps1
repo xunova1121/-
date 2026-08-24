@@ -80,12 +80,68 @@ try {
     $storyboardBody = @{ replace_existing = $true } | ConvertTo-Json
     Invoke-RestMethod -Method Post -Uri "$ApiBase/projects/$($project.id)/episodes/1/storyboard/generate" -ContentType "application/json" -Body $storyboardBody | Out-Null
 
+    $boards = @(Invoke-RestMethod -Uri "$ApiBase/projects/$($project.id)/reference-boards")
+    if ($boards.Count -lt 2) { throw "Parsed screenplay did not create character and location reference boards" }
+    $boardAssets = @{}
+    foreach ($board in $boards) {
+        $ids = @()
+        foreach ($role in $board.required_views) {
+            $imagePath = Join-Path $env:RUNNER_TEMP "ref-$($board.entity_type)-$($board.entity_key)-$role.png"
+            $bitmap = New-Object System.Drawing.Bitmap(96, 96)
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            try {
+                $graphics.Clear([System.Drawing.Color]::FromArgb(70 + ($ids.Count * 35), 90, 150))
+                $bitmap.Save($imagePath, [System.Drawing.Imaging.ImageFormat]::Png)
+            } finally { $graphics.Dispose(); $bitmap.Dispose() }
+            $assetType = if ($board.entity_type -eq "location") { "scene" } else { $board.entity_type }
+            $assetBody = @{
+                source_path = $imagePath; asset_type = $assetType; name = "$($board.name)-$role"
+                entity_type = $board.entity_type; entity_key = $board.entity_key; view_role = $role; copy_into_project = $true
+            } | ConvertTo-Json
+            $asset = Invoke-RestMethod -Method Post -Uri "$ApiBase/projects/$($project.id)/assets/import" -ContentType "application/json" -Body $assetBody
+            $ids += $asset.id
+        }
+        $boardAssets["$($board.entity_type)|$($board.entity_key)"] = $ids
+    }
+
     Invoke-Element (Wait-Element $main "ProjectNavButton")
     $root = [System.Windows.Automation.AutomationElement]::RootElement
     $selectProject = Wait-Element $root "SelectCurrentProjectButton"
     Start-Sleep -Seconds 1
     Invoke-Element $selectProject
     Start-Sleep -Seconds 1
+
+    Invoke-Element (Wait-Element $main "AssetManagerButton")
+    $root = [System.Windows.Automation.AutomationElement]::RootElement
+    $approve = Wait-Element $root "ApproveReferenceBoardButton"
+    $approvalStatus = Wait-Element $root "ReferenceApprovalStatus"
+    for ($i = 0; $i -lt 40 -and -not $approve.Current.IsEnabled; $i++) { Start-Sleep -Milliseconds 250 }
+    if (-not $approve.Current.IsEnabled) { throw "Reference approval button never became enabled; status='$($approvalStatus.Current.Name)'" }
+    Invoke-Element $approve
+    $firstBoard = $boards[0]
+    $firstApproval = $null
+    for ($i = 0; $i -lt 40; $i++) {
+        Start-Sleep -Milliseconds 250
+        $firstApproval = Invoke-RestMethod -Uri "$ApiBase/projects/$($project.id)/reference-boards/$($firstBoard.entity_type)/$($firstBoard.entity_key)"
+        if ($firstApproval.status -eq "approved") { break }
+    }
+    if ($null -eq $firstApproval -or $firstApproval.status -ne "approved") { throw "Asset approval did not persist through the UI" }
+    Save-Screen "02-reference-assets-approved"
+    $assetWindow = $approve
+    while ($assetWindow.Current.ControlType -ne [System.Windows.Automation.ControlType]::Window) {
+        $assetWindow = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($assetWindow)
+        if ($null -eq $assetWindow) { throw "Asset approval window ancestor was not found" }
+    }
+    $assetWindow.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close()
+    Start-Sleep -Milliseconds 500
+
+    foreach ($board in $boards | Select-Object -Skip 1) {
+        $key = "$($board.entity_type)|$($board.entity_key)"
+        $approvalBody = @{ asset_ids = @($boardAssets[$key]) } | ConvertTo-Json
+        $approvedBoard = Invoke-RestMethod -Method Post -Uri "$ApiBase/projects/$($project.id)/reference-boards/$($board.entity_type)/$($board.entity_key)/approval" -ContentType "application/json" -Body $approvalBody
+        if ($approvedBoard.status -ne "approved") { throw "Reference board '$($board.name)' was not approved" }
+    }
+
     Invoke-Element (Wait-Element $main "StoryboardNavButton")
     $storyboardGrid = Wait-Element $root "StoryboardGrid"
     foreach ($header in @('镜号','场景','景别','画面与动作','人物','时长','衔接','状态')) {

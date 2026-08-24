@@ -51,6 +51,12 @@ CREATE TABLE IF NOT EXISTS assets (
     memory_json TEXT NOT NULL DEFAULT '{}', metadata_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS reference_asset_approvals (
+    project_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_key TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'draft',
+    asset_ids_json TEXT NOT NULL DEFAULT '[]', snapshot_json TEXT NOT NULL DEFAULT '{}',
+    approved_at TEXT, PRIMARY KEY(project_id, entity_type, entity_key)
+);
 CREATE TABLE IF NOT EXISTS shot_assets (
     shot_id INTEGER NOT NULL, asset_id INTEGER NOT NULL, role TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -185,6 +191,9 @@ ASSET_MIGRATIONS: dict[str, str] = {
     "source_kind": "TEXT NOT NULL DEFAULT 'manual'",
     "status": "TEXT NOT NULL DEFAULT 'ready'",
     "metadata_json": "TEXT NOT NULL DEFAULT '{}'",
+    "entity_type": "TEXT NOT NULL DEFAULT ''",
+    "entity_key": "TEXT NOT NULL DEFAULT ''",
+    "view_role": "TEXT NOT NULL DEFAULT ''",
 }
 
 
@@ -209,6 +218,7 @@ def _migrate(connection: sqlite3.Connection) -> None:
         if name not in asset_columns:
             connection.execute(f"ALTER TABLE assets ADD COLUMN {name} {definition}")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_assets_project ON assets(project_id, asset_type, episode, id)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_assets_reference_board ON assets(project_id, entity_type, entity_key, view_role, id)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_timeline_order ON timeline_clips(project_id, episode, track, position, id)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_model_role_provider ON model_role_bindings(provider_id, role_id)")
 

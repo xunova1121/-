@@ -24,7 +24,9 @@ public partial class GenerationWindow : Window
         {
             _shots = (await _api.GetShotsAsync()).Where(x => x.Episode == Episode).ToList(); _assets = await _api.GetAssetsAsync(episode: Episode); _providers = (await _api.GetProviderConfigsAsync()).Where(p => p.Configured).ToList();
             ShotSelector.ItemsSource = _shots; if (ShotSelector.SelectedIndex < 0 && _shots.Count > 0) ShotSelector.SelectedIndex = 0;
-            ReferenceList.ItemsSource = _assets.Where(a => a.AssetType is "image" or "character" or "scene" or "prop").ToList();
+            var boards = await _api.GetReferenceBoardsAsync();
+            var approvedReferences = boards.Where(board => board.Status == "approved").SelectMany(board => board.Assets).Where(asset => asset.Approved);
+            ReferenceList.ItemsSource = _assets.Where(a => a.AssetType == "image" && string.IsNullOrWhiteSpace(a.EntityKey)).Concat(approvedReferences).GroupBy(a => a.Id).Select(group => group.First()).ToList();
             await RefreshProvidersAsync(); await RefreshTasksAsync();
         }
         catch (Exception ex) { StatusText.Text = $"加载失败：{ex.Message}"; }

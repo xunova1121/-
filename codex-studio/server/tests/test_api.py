@@ -890,6 +890,80 @@ def test_storyboard_lock_blocks_costly_automation_and_becomes_stale_after_edit(m
         assert client.post("/api/v1/projects/demo/automation/start", json={"episode": 1, "image_provider": "mock", "video_provider": "mock"}).status_code == 202
 
 
+def test_multiview_reference_approval_is_versioned_and_blocks_paid_production(monkeypatch, tmp_path: Path):
+    from app import main as main_module
+
+    monkeypatch.setattr(main_module, "start_automation", lambda _project_id, config: {"status": "running", "config": config})
+    with TestClient(app) as client:
+        entity = client.post("/api/v1/projects/demo/bible", json={
+            "entity_type": "character", "entity_key": "hero", "name": "主角", "state": "draft",
+            "data": {"face": "国字脸", "costume": "青衫"}, "reference_assets": [],
+        })
+        assert entity.status_code == 201
+        first = client.get("/api/v1/projects/demo/shots").json()[0]
+        assert client.patch(f"/api/v1/shots/{first['id']}", json={"characters": ["主角"]}).status_code == 200
+
+        imported_ids: list[int] = []
+        for role in ("front", "profile"):
+            source = tmp_path / f"hero-{role}.png"
+            source.write_bytes(b"png-candidate")
+            response = client.post("/api/v1/projects/demo/assets/import", json={
+                "source_path": str(source), "asset_type": "character", "name": f"主角-{role}",
+                "entity_type": "character", "entity_key": "hero", "view_role": role,
+            })
+            assert response.status_code == 201
+            imported_ids.append(response.json()["id"])
+
+        board = client.get("/api/v1/projects/demo/reference-boards/character/hero").json()
+        assert board["status"] == "draft" and board["ready_to_approve"] is False
+        assert "全身" in "".join(board["issues"])
+        unapproved_generation = client.post("/api/v1/projects/demo/shots/generate", json={
+            "shot_id": first["id"], "task_type": "image", "provider": "mock", "prompt": "主角定妆",
+            "reference_asset_ids": [imported_ids[0]],
+        })
+        assert unapproved_generation.status_code == 409 and "尚未批准" in unapproved_generation.json()["detail"]
+        rejected = client.post("/api/v1/projects/demo/reference-boards/character/hero/approval", json={"asset_ids": imported_ids})
+        assert rejected.status_code == 409 and "全身" in rejected.json()["detail"]
+
+        full_body = tmp_path / "hero-full.png"
+        full_body.write_bytes(b"png-full-body")
+        imported = client.post("/api/v1/projects/demo/assets/import", json={
+            "source_path": str(full_body), "asset_type": "character", "name": "主角-全身",
+            "entity_type": "character", "entity_key": "hero", "view_role": "full_body",
+        }).json()
+        imported_ids.append(imported["id"])
+        approved = client.post("/api/v1/projects/demo/reference-boards/character/hero/approval", json={"asset_ids": imported_ids}).json()
+        assert approved["status"] == "approved" and approved["revision"] == 1
+        assert set(approved["approved_asset_ids"]) == set(imported_ids)
+        approved_generation = client.post("/api/v1/projects/demo/shots/generate", json={
+            "shot_id": first["id"], "task_type": "image", "provider": "mock", "prompt": "主角定妆",
+            "reference_asset_ids": [imported_ids[0]],
+        })
+        assert approved_generation.status_code == 202
+
+        bible = next(item for item in client.get("/api/v1/projects/demo/bible?latest_only=true").json() if item["entity_key"] == "hero")
+        assert bible["state"] == "frozen" and len(bible["reference_assets"]) == 3
+        gate = client.get("/api/v1/projects/demo/episodes/1/reference-gate").json()
+        assert gate["status"] == "approved" and gate["approved_count"] == gate["required_count"] == 1
+        assert client.post("/api/v1/projects/demo/episode-locks", json={"episode": 1}).status_code == 200
+        assert client.post("/api/v1/projects/demo/automation/start", json={"episode": 1, "image_provider": "mock", "video_provider": "mock"}).status_code == 202
+
+        changed = client.post("/api/v1/projects/demo/bible", json={
+            "entity_type": "character", "entity_key": "hero", "name": "主角", "state": "draft",
+            "data": {"face": "国字脸", "costume": "黑衫"}, "reference_assets": [],
+        })
+        assert changed.status_code == 201
+        stale = client.get("/api/v1/projects/demo/reference-boards/character/hero").json()
+        assert stale["status"] == "stale"
+        blocked = client.post("/api/v1/projects/demo/automation/start", json={"episode": 1, "image_provider": "mock", "video_provider": "mock"})
+        assert blocked.status_code == 409
+
+        reapproved = client.post("/api/v1/projects/demo/reference-boards/character/hero/approval", json={"asset_ids": imported_ids}).json()
+        assert reapproved["status"] == "approved" and reapproved["revision"] == 2
+        relocked = client.post("/api/v1/projects/demo/episode-locks", json={"episode": 1}).json()
+        assert relocked["status"] == "locked"
+
+
 def test_previz_transition_and_episode_automation():
     with TestClient(app) as client:
         layout = {

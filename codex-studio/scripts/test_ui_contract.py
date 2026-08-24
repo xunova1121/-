@@ -81,11 +81,18 @@ def main():
     assert lock_button.attrib.get("AutomationProperties.AutomationId") == "StoryboardLockButton"
     automation_root = ET.parse(ROOT / "client/AI.FilmStudio/AutomationWindow.xaml").getroot()
     named(automation_root, "TextBlock", "LockStatusText")
+    assets_root = ET.parse(ROOT / "client/AI.FilmStudio/AssetManagerWindow.xaml").getroot()
+    named(assets_root, "ListBox", "EntityList")
+    named(assets_root, "ListBox", "CandidateList")
+    named(assets_root, "ComboBox", "ViewRole")
+    approve = named(assets_root, "Button", "ApproveButton")
+    assert approve.attrib.get("Content") == "✓ 批准当前多视图"
+    assert approve.attrib.get("AutomationProperties.AutomationId") == "ApproveReferenceBoardButton"
     assert "状态前 JSON" not in storyboard_text and "状态后 JSON" not in storyboard_text
     assert "动作链ID" not in storyboard_text and "动作动量" not in storyboard_text
     for required in ("镜号", "场景", "景别", "画面与动作", "人物", "时长", "衔接", "状态"):
         assert f'Header="{required}"' in storyboard_text
-    print("UI contract passed: single navigation, readable storyboard review, lock gate, and persistent role binding")
+    print("UI contract passed: single navigation, readable storyboard review, multiview asset approval, lock gate, and persistent role binding")
 
 
 if __name__ == "__main__":

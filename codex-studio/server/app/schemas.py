@@ -102,6 +102,9 @@ class AssetUpdate(BaseModel):
     status: str | None = None
     memory: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
+    entity_type: Literal["character", "location", "prop", ""] | None = None
+    entity_key: str | None = Field(default=None, max_length=160)
+    view_role: str | None = Field(default=None, max_length=40)
 
 
 class AssetImportRequest(BaseModel):
@@ -112,6 +115,13 @@ class AssetImportRequest(BaseModel):
     shot_id: int | None = None
     copy_into_project: bool = True
     memory: dict[str, Any] = {}
+    entity_type: Literal["character", "location", "prop", ""] = ""
+    entity_key: str = Field(default="", max_length=160)
+    view_role: str = Field(default="", max_length=40)
+
+
+class ReferenceBoardApproveRequest(BaseModel):
+    asset_ids: list[int] = []
 
 
 class ShotGenerationRequest(BaseModel):

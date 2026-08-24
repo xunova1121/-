@@ -101,8 +101,9 @@ public partial class AutomationWindow : Window
         var plan = await _api.GetAutomationRoutePlanAsync(value.Episode, value.Mode, value.Image.ProviderId, value.Image.Model, value.Video.ProviderId, value.Video.Model, value.Voice?.ProviderId, value.Voice?.Model ?? "", value.Quality?.ProviderId, OutputName.Text.Trim(), value.Width, value.Height, 24, "high");
         RouteGrid.ItemsSource = plan.Routes;
         var totals = string.Join("；", plan.Totals.Select(x => $"{x.Provider} {x.Shots}镜/{x.Seconds}秒"));
-        StatusText.Text = plan.Ready ? $"预检通过：锁定版本 R{plan.LockRevision}，{plan.ShotCount} 镜。{totals}" :
+        StatusText.Text = plan.Ready ? $"预检通过：锁定版本 R{plan.LockRevision}，一致性资产 {plan.ApprovedReferenceCount}/{plan.RequiredReferenceCount}，{plan.ShotCount} 镜。{totals}" :
             plan.LockStatus != "locked" ? "预检阻断：本集全量分镜尚未锁定或锁定后已被修改。" :
+            plan.ReferenceGateStatus != "approved" ? $"预检阻断：一致性资产未批准。{string.Join("；", plan.ReferenceGateIssues.Take(3))}" :
             $"预检阻断：{plan.BlockingConflicts} 个连续性冲突或尚无分镜。";
         return plan;
     }
@@ -124,7 +125,7 @@ public partial class AutomationWindow : Window
         {
             var value = ReadConfiguration();
             var plan = await PreviewAsync();
-            if (!plan.Ready) throw new InvalidOperationException($"路由预检未通过：{plan.BlockingConflicts} 个连续性阻断");
+            if (!plan.Ready) throw new InvalidOperationException(plan.ReferenceGateStatus != "approved" ? "一致性资产审批门禁未通过" : $"路由预检未通过：{plan.BlockingConflicts} 个连续性阻断");
             StartButton.IsEnabled = false;
             var run = await _api.StartAutomationAsync(value.Episode, value.Mode, value.Image.ProviderId, value.Image.Model, value.Video.ProviderId, value.Video.Model, value.Voice?.ProviderId, value.Voice?.Model ?? "", value.Quality?.ProviderId, OutputName.Text.Trim(), value.Width, value.Height, 24, "high");
             StatusText.Text = $"自动生产 #{run.Id} 已启动；可关闭窗口，后台仍会继续。";

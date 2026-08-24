@@ -145,11 +145,30 @@ public sealed class StudioApiClient
         return await _http.GetFromJsonAsync<List<AssetItem>>(ProjectPath(suffix), token) ?? [];
     }
 
-    public async Task<AssetItem> ImportAssetAsync(string path, string assetType, string name, int episode = 1, int? shotId = null, CancellationToken token = default)
+    public async Task<AssetItem> ImportAssetAsync(string path, string assetType, string name, int episode = 1, int? shotId = null, string entityType = "", string entityKey = "", string viewRole = "", CancellationToken token = default)
     {
-        var response = await _http.PostAsJsonAsync(ProjectPath("assets/import"), new { source_path = path, asset_type = assetType, name, episode, shot_id = shotId, copy_into_project = true }, token);
+        var response = await _http.PostAsJsonAsync(ProjectPath("assets/import"), new { source_path = path, asset_type = assetType, name, episode, shot_id = shotId, copy_into_project = true, entity_type = entityType, entity_key = entityKey, view_role = viewRole }, token);
         await EnsureSuccessAsync(response);
         return await response.Content.ReadFromJsonAsync<AssetItem>(cancellationToken: token) ?? throw new InvalidOperationException("服务未返回资产");
+    }
+
+    public async Task<IReadOnlyList<ReferenceBoard>> GetReferenceBoardsAsync(string? entityType = null, CancellationToken token = default)
+    {
+        var query = string.IsNullOrWhiteSpace(entityType) ? "" : $"?entity_type={Uri.EscapeDataString(entityType)}";
+        return await _http.GetFromJsonAsync<List<ReferenceBoard>>(ProjectPath("reference-boards" + query), token) ?? [];
+    }
+
+    public async Task<ReferenceBoard> ApproveReferenceBoardAsync(string entityType, string entityKey, IReadOnlyList<int> assetIds, CancellationToken token = default)
+    {
+        var response = await _http.PostAsJsonAsync(ProjectPath($"reference-boards/{Uri.EscapeDataString(entityType)}/{Uri.EscapeDataString(entityKey)}/approval"), new { asset_ids = assetIds }, token);
+        await EnsureSuccessAsync(response);
+        return await response.Content.ReadFromJsonAsync<ReferenceBoard>(cancellationToken: token) ?? throw new InvalidOperationException("服务未返回资产审批状态");
+    }
+
+    public async Task RevokeReferenceBoardAsync(string entityType, string entityKey, CancellationToken token = default)
+    {
+        var response = await _http.DeleteAsync(ProjectPath($"reference-boards/{Uri.EscapeDataString(entityType)}/{Uri.EscapeDataString(entityKey)}/approval"), token);
+        await EnsureSuccessAsync(response);
     }
 
     public async Task DeleteAssetAsync(int assetId, bool deleteFile = true, CancellationToken token = default)

@@ -8,6 +8,7 @@ from typing import Any
 from .automation import STAGE_POLICIES
 from .config import project_media_dir, settings
 from .media import MediaError, extract_boundary_frames, extract_review_frames, probe_media
+from .reference_boards import approved_reference_paths
 
 
 def _db() -> sqlite3.Connection:
@@ -35,7 +36,7 @@ def bible_context(db: sqlite3.Connection, project_id: str, shot: sqlite3.Row) ->
             continue
         data = json.loads(row["data_json"] or "{}")
         selected.append({"type": row["entity_type"], "name": row["name"], "version": row["version"], "state": row["state"], "data": data})
-        for value in json.loads(row["reference_assets_json"] or "[]"):
+        for value in approved_reference_paths(db, project_id, row["entity_type"], row["entity_key"]):
             path = str(value)
             if Path(path).is_file() and path not in references:
                 references.append(path)

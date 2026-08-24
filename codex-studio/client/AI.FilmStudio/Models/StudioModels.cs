@@ -181,8 +181,34 @@ public sealed class AssetItem
     [JsonPropertyName("mime_type")] public string MimeType { get; set; } = "";
     [JsonPropertyName("source_kind")] public string SourceKind { get; set; } = "";
     [JsonPropertyName("status")] public string Status { get; set; } = "";
+    [JsonPropertyName("entity_type")] public string EntityType { get; set; } = "";
+    [JsonPropertyName("entity_key")] public string EntityKey { get; set; } = "";
+    [JsonPropertyName("view_role")] public string ViewRole { get; set; } = "";
+    [JsonPropertyName("view_label")] public string ViewLabel { get; set; } = "";
+    [JsonPropertyName("approved")] public bool Approved { get; set; }
     [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
     [JsonIgnore] public string ShotText => ShotId is null ? "—" : ShotId.ToString()!;
+    [JsonIgnore] public string ApprovalText => Approved ? "✓ 已采用" : "候选";
+}
+
+public sealed class ReferenceBoard
+{
+    [JsonPropertyName("entity_type")] public string EntityType { get; set; } = "";
+    [JsonPropertyName("entity_key")] public string EntityKey { get; set; } = "";
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("bible_version")] public int BibleVersion { get; set; }
+    [JsonPropertyName("status")] public string Status { get; set; } = "draft";
+    [JsonPropertyName("revision")] public int Revision { get; set; }
+    [JsonPropertyName("ready_to_approve")] public bool ReadyToApprove { get; set; }
+    [JsonPropertyName("required_views")] public List<string> RequiredViews { get; set; } = [];
+    [JsonPropertyName("required_view_labels")] public List<string> RequiredViewLabels { get; set; } = [];
+    [JsonPropertyName("issues")] public List<string> Issues { get; set; } = [];
+    [JsonPropertyName("approved_asset_ids")] public List<int> ApprovedAssetIds { get; set; } = [];
+    [JsonPropertyName("assets")] public List<AssetItem> Assets { get; set; } = [];
+    [JsonIgnore] public string TypeText => EntityType switch { "character" => "人物", "location" => "场景", "prop" => "道具", _ => EntityType };
+    [JsonIgnore] public string StatusText => Status switch { "approved" => $"已批准 · R{Revision}", "stale" => $"已失效 · R{Revision}", _ => ReadyToApprove ? "待批准" : "待补视图" };
+    [JsonIgnore] public string RequiredText => string.Join("、", RequiredViewLabels);
+    [JsonIgnore] public string IssueText => Issues.Count == 0 ? "视图完整，可以批准" : string.Join("；", Issues);
 }
 
 public sealed class TimelineClip
@@ -367,6 +393,10 @@ public sealed class AutomationRoutePlan
     [JsonPropertyName("lock_status")] public string LockStatus { get; set; } = "draft";
     [JsonPropertyName("lock_revision")] public int LockRevision { get; set; }
     [JsonPropertyName("lock_issues")] public List<string> LockIssues { get; set; } = [];
+    [JsonPropertyName("reference_gate_status")] public string ReferenceGateStatus { get; set; } = "blocked";
+    [JsonPropertyName("reference_gate_issues")] public List<string> ReferenceGateIssues { get; set; } = [];
+    [JsonPropertyName("approved_reference_count")] public int ApprovedReferenceCount { get; set; }
+    [JsonPropertyName("required_reference_count")] public int RequiredReferenceCount { get; set; }
     [JsonPropertyName("routes")] public List<AutomationRoute> Routes { get; set; } = [];
     [JsonPropertyName("totals")] public List<AutomationRouteTotal> Totals { get; set; } = [];
 }

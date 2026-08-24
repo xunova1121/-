@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .adapters import registry
 from .config import project_media_dir, render_dir, settings
 from .database import connect, initialize_database
-from .schemas import AssetCreate, AssetImportRequest, AssetUpdate, AutomationStartRequest, BibleEntityCreate, ContinuityContractRequest, ContinuityRequest, DirectorBuildRequest, EpisodeAutomationRequest, EpisodeLockRequest, GatewayRequest, ModelRoleBindingUpdate, PipelineUpdate, PreflightRequest, Project, ProjectCreate, ProjectUpdate, ProviderConfigUpdate, QualityReviewRequest, RouteUpdate, SceneLayoutRequest, ScriptUpsert, Shot, ShotCreate, ShotGenerationRequest, ShotUpdate, StoryboardGenerateRequest, TaskCreate, TimelineClipCreate, TimelineClipUpdate, TimelineExportRequest, TimelineReorderRequest, TransitionPlanRequest, TransitionRenderRequest
+from .schemas import AssetCreate, AssetImportRequest, AssetUpdate, AutomationStartRequest, BibleEntityCreate, ContinuityContractRequest, ContinuityRequest, DirectorBuildRequest, EpisodeAutomationRequest, EpisodeLockRequest, GatewayRequest, ModelRoleBindingUpdate, PipelineUpdate, PreflightRequest, Project, ProjectCreate, ProjectUpdate, ProviderConfigUpdate, QualityReviewRequest, ReferenceBoardApproveRequest, RouteUpdate, SceneLayoutRequest, ScriptUpsert, Shot, ShotCreate, ShotGenerationRequest, ShotUpdate, StoryboardGenerateRequest, TaskCreate, TimelineClipCreate, TimelineClipUpdate, TimelineExportRequest, TimelineReorderRequest, TransitionPlanRequest, TransitionRenderRequest
 from .continuity import analyze_pair
 from .pipeline import stage_catalog
 from .providers import CAPABILITIES, known_provider, providers_for, public_catalog, supports
@@ -35,6 +35,7 @@ from .production import automation_route_plan, bible_context, serialize_run, sta
 from .director import DIRECTOR_SYSTEM, director_prompt, director_retry_prompt, extract_json_object, normalize_design
 from .story_logic import persist_snapshots, recompute_episode
 from .storyboard_lock import build_snapshot as build_storyboard_snapshot, status as storyboard_lock_status
+from .reference_boards import approve_board, board_status, episode_reference_gate, list_boards, revoke_board
 
 
 @asynccontextmanager
@@ -49,14 +50,14 @@ async def lifespan(_: FastAPI):
         await worker
 
 
-app = FastAPI(title=settings.app_name, version="1.6.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.7.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost", "http://127.0.0.1"], allow_methods=["*"], allow_headers=["*"])
 PREFIX = settings.api_prefix
 
 
 @app.get(f"{PREFIX}/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "1.6.0", "instance_id": os.getenv("AI_STUDIO_INSTANCE_ID", "external")}
+    return {"status": "ok", "version": "1.7.0", "instance_id": os.getenv("AI_STUDIO_INSTANCE_ID", "external")}
 
 
 @app.get(f"{PREFIX}/providers")
@@ -181,7 +182,7 @@ def delete_project(project_id: str):
         if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
             raise HTTPException(404, "Project not found")
         db.execute("DELETE FROM shot_assets WHERE shot_id IN (SELECT id FROM shots WHERE project_id=?)", (project_id,))
-        for table in ("episode_scripts", "scenes", "shots", "shot_state_snapshots", "assets", "timeline_clips", "tasks", "automation_runs", "pipeline_runs", "bible_entities", "episode_locks", "continuity_contracts", "quality_reviews", "scene_layouts", "transition_plans"):
+        for table in ("episode_scripts", "scenes", "shots", "shot_state_snapshots", "assets", "reference_asset_approvals", "timeline_clips", "tasks", "automation_runs", "pipeline_runs", "bible_entities", "episode_locks", "continuity_contracts", "quality_reviews", "scene_layouts", "transition_plans"):
             db.execute(f"DELETE FROM {table} WHERE project_id=?", (project_id,))
         db.execute("DELETE FROM projects WHERE id=?", (project_id,))
 
@@ -472,13 +473,48 @@ def import_asset(project_id: str, payload: AssetImportRequest):
     mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
     with connect() as db:
         cursor = db.execute(
-            "INSERT INTO assets(project_id,asset_type,name,episode,shot_id,local_path,mime_type,source_kind,status,memory_json,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-            (project_id, payload.asset_type, payload.name or source.stem, payload.episode, payload.shot_id, str(target), mime, "manual", "ready", json.dumps(payload.memory, ensure_ascii=False), json.dumps(metadata, ensure_ascii=False)),
+            "INSERT INTO assets(project_id,asset_type,name,episode,shot_id,local_path,mime_type,source_kind,status,memory_json,metadata_json,entity_type,entity_key,view_role) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (project_id, payload.asset_type, payload.name or source.stem, payload.episode, payload.shot_id, str(target), mime, "manual", "ready", json.dumps(payload.memory, ensure_ascii=False), json.dumps(metadata, ensure_ascii=False), payload.entity_type, payload.entity_key, payload.view_role),
         )
         if payload.shot_id:
             db.execute("INSERT OR IGNORE INTO shot_assets(shot_id,asset_id,role) VALUES(?,?,?)", (payload.shot_id, cursor.lastrowid, payload.asset_type))
         row = db.execute("SELECT * FROM assets WHERE id=?", (cursor.lastrowid,)).fetchone()
     return _asset_dict(row)
+
+
+@app.get(f"{PREFIX}/projects/{{project_id}}/reference-boards")
+def get_reference_boards(project_id: str, entity_type: str | None = None):
+    with connect() as db:
+        if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
+            raise HTTPException(404, "Project not found")
+        return list_boards(db, project_id, entity_type)
+
+
+@app.get(f"{PREFIX}/projects/{{project_id}}/reference-boards/{{entity_type}}/{{entity_key}}")
+def get_reference_board(project_id: str, entity_type: str, entity_key: str):
+    with connect() as db:
+        return board_status(db, project_id, entity_type, entity_key)
+
+
+@app.post(f"{PREFIX}/projects/{{project_id}}/reference-boards/{{entity_type}}/{{entity_key}}/approval")
+def approve_reference_board(project_id: str, entity_type: str, entity_key: str, payload: ReferenceBoardApproveRequest):
+    try:
+        with connect() as db:
+            return approve_board(db, project_id, entity_type, entity_key, payload.asset_ids)
+    except ValueError as exc:
+        raise HTTPException(409, f"一致性资产审批未通过：{exc}") from exc
+
+
+@app.delete(f"{PREFIX}/projects/{{project_id}}/reference-boards/{{entity_type}}/{{entity_key}}/approval", status_code=204)
+def revoke_reference_board(project_id: str, entity_type: str, entity_key: str):
+    with connect() as db:
+        revoke_board(db, project_id, entity_type, entity_key)
+
+
+@app.get(f"{PREFIX}/projects/{{project_id}}/episodes/{{episode}}/reference-gate")
+def get_episode_reference_gate(project_id: str, episode: int):
+    with connect() as db:
+        return episode_reference_gate(db, project_id, episode)
 
 
 @app.patch(f"{PREFIX}/assets/{{asset_id}}")
@@ -520,7 +556,15 @@ def generate_shot_media(project_id: str, payload: ShotGenerationRequest):
         reference_rows = []
         if payload.reference_asset_ids:
             marks = ",".join("?" for _ in payload.reference_asset_ids)
-            reference_rows = db.execute(f"SELECT id,local_path FROM assets WHERE project_id=? AND id IN ({marks})", (project_id, *payload.reference_asset_ids)).fetchall()
+            reference_rows = db.execute(f"SELECT id,local_path,entity_type,entity_key FROM assets WHERE project_id=? AND id IN ({marks})", (project_id, *payload.reference_asset_ids)).fetchall()
+            if len(reference_rows) != len(set(payload.reference_asset_ids)):
+                raise HTTPException(404, "部分参考资产不存在")
+            for row in reference_rows:
+                if not row["entity_type"]:
+                    continue
+                board = board_status(db, project_id, row["entity_type"], row["entity_key"])
+                if board["status"] != "approved" or int(row["id"]) not in board["approved_asset_ids"]:
+                    raise HTTPException(409, f"参考资产“{row['entity_key']}”尚未批准或已失效")
         reference_paths = [row["local_path"] for row in reference_rows if row["local_path"]]
         memory_block, bible_references = bible_context(db, project_id, shot)
         reference_paths = list(dict.fromkeys(reference_paths + bible_references))
@@ -845,9 +889,13 @@ def start_episode_automation(project_id: str, payload: AutomationStartRequest):
         if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
             raise HTTPException(404, "Project not found")
         lock = storyboard_lock_status(db, project_id, payload.episode)
+        reference_gate = episode_reference_gate(db, project_id, payload.episode)
     if lock["status"] != "locked":
         reason = "；".join(lock["issues"][:4]) or "请先在分镜工作台审阅并锁定本集全量分镜"
         raise HTTPException(409, f"全量分镜门禁未通过（{lock['status']}）：{reason}")
+    if reference_gate["status"] != "approved":
+        reason = "；".join(reference_gate["issues"][:4]) or "请先在资产审批板批准人物、场景和道具参考视图"
+        raise HTTPException(409, f"一致性资产门禁未通过：{reason}")
     config = payload.model_dump()
     if payload.use_role_bindings:
         for role_id, provider_key, model_key in (
@@ -892,6 +940,7 @@ def preview_episode_routes(project_id: str, payload: AutomationStartRequest):
         if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
             raise HTTPException(404, "Project not found")
         lock = storyboard_lock_status(db, project_id, payload.episode)
+        reference_gate = episode_reference_gate(db, project_id, payload.episode)
     config = payload.model_dump()
     if payload.use_role_bindings:
         for role_id, provider_key, model_key in (
@@ -912,7 +961,11 @@ def preview_episode_routes(project_id: str, payload: AutomationStartRequest):
     plan["lock_status"] = lock["status"]
     plan["lock_revision"] = lock["revision"]
     plan["lock_issues"] = lock["issues"]
-    plan["ready"] = bool(plan["ready"] and lock["status"] == "locked")
+    plan["reference_gate_status"] = reference_gate["status"]
+    plan["reference_gate_issues"] = reference_gate["issues"]
+    plan["approved_reference_count"] = reference_gate["approved_count"]
+    plan["required_reference_count"] = reference_gate["required_count"]
+    plan["ready"] = bool(plan["ready"] and lock["status"] == "locked" and reference_gate["status"] == "approved")
     return plan
 
 

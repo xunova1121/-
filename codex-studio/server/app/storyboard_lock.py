@@ -6,6 +6,8 @@ import re
 import sqlite3
 from typing import Any
 
+from .reference_boards import episode_reference_gate
+
 
 def _json(value: str | None, fallback: Any) -> Any:
     try:
@@ -45,6 +47,7 @@ def build_snapshot(db: sqlite3.Connection, project_id: str, episode: int) -> tup
         "SELECT COUNT(*) FROM shot_state_snapshots WHERE project_id=? AND episode=? AND conflicts_json<>'[]'",
         (project_id, episode),
     ).fetchone()[0])
+    reference_gate = episode_reference_gate(db, project_id, episode)
 
     shots = [{
         "id": int(row["id"]), "number": row["number"], "sequence": int(row["sequence"]),
@@ -90,6 +93,8 @@ def build_snapshot(db: sqlite3.Connection, project_id: str, episode: int) -> tup
         issues.append(f"存在 {len(blocking_contracts)} 个镜间连续性阻断")
     if conflict_count:
         issues.append(f"存在 {conflict_count} 个故事状态冲突")
+    if reference_gate["status"] != "approved":
+        issues.extend("一致性资产未批准：" + item for item in reference_gate["issues"])
 
     core = {
         "schema_version": "1.0", "project_id": project_id, "episode": episode,
@@ -97,6 +102,7 @@ def build_snapshot(db: sqlite3.Connection, project_id: str, episode: int) -> tup
         "script_parse_status": script["parse_status"] if script else "empty",
         "shots": shots, "bible": bible, "contracts": contracts,
         "shot_count": len(shots), "state_conflicts": conflict_count,
+        "reference_approvals": reference_gate["boards"],
     }
     canonical = json.dumps(core, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     core["fingerprint"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()

@@ -103,7 +103,7 @@ jobs:
             }
             $response = Invoke-RestMethod -Uri "$apiBase/health" -TimeoutSec 3
             if ($response.status -ne "ok") { throw "Desktop-launched service is unhealthy" }
-            if ($response.version -ne "1.6.0") { throw "Unexpected service version: $($response.version)" }
+            if ($response.version -ne "1.7.0") { throw "Unexpected service version: $($response.version)" }
             $media = Invoke-RestMethod -Uri "$apiBase/media/capabilities" -TimeoutSec 3
             if (-not $media.ffmpeg_available) {
               $runtime = Join-Path $env:LOCALAPPDATA "AI-Film-Studio/runtime"
@@ -119,7 +119,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Film-Studio-V1.6.0-Storyboard-Gate-UI-Review
+          name: AI-Film-Studio-V1.7.0-Multiview-Asset-Approval-UI-Review
           path: ui-artifacts/*.png
           if-no-files-found: warn
           retention-days: 30
@@ -131,6 +131,6 @@ jobs:
           Get-FileHash dist/AI-Film-Studio/AI-Film-Studio.exe -Algorithm SHA256
       - uses: actions/upload-artifact@v4
         with:
-          name: AI-Film-Studio-V1.6.0-Storyboard-Gate-Single-EXE
+          name: AI-Film-Studio-V1.7.0-Multiview-Asset-Approval-Single-EXE
           path: dist/AI-Film-Studio/AI-Film-Studio.exe
           retention-days: 30

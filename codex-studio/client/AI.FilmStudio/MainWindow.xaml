@@ -29,7 +29,7 @@
                 <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                     <Ellipse x:Name="ServiceDot" Width="9" Height="9" Fill="#E0A534" ToolTip="本地服务状态"/>
                     <TextBlock x:Name="ServiceText" Text="检测中" Foreground="{StaticResource MutedBrush}" Margin="6,0,6,0" VerticalAlignment="Center" ToolTip="本地服务状态"/>
-                    <Button Style="{StaticResource NavButton}" Content="资产" Click="AssetUtility_Click" Padding="8,9"/>
+                    <Button AutomationProperties.AutomationId="AssetManagerButton" Style="{StaticResource NavButton}" Content="资产" Click="AssetUtility_Click" Padding="8,9"/>
                     <Button Style="{StaticResource NavButton}" Content="任务" Click="TaskUtility_Click" Padding="8,9"/>
                     <Button x:Name="ModelSettingsButton" AutomationProperties.AutomationId="ModelSettingsButton" Style="{StaticResource NavButton}" Content="⚙ 模型" Click="ProviderSettings_Click" Padding="8,9"/>
                 </StackPanel>
