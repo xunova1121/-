@@ -120,6 +120,22 @@ public sealed class StudioApiClient
         await EnsureSuccessAsync(response);
     }
 
+    public async Task<StoryboardLockStatus> GetStoryboardLockAsync(int episode, CancellationToken token = default) =>
+        await _http.GetFromJsonAsync<StoryboardLockStatus>(ProjectPath($"episodes/{episode}/storyboard-lock"), token) ?? new StoryboardLockStatus { Episode = episode };
+
+    public async Task<StoryboardLockStatus> LockStoryboardAsync(int episode, CancellationToken token = default)
+    {
+        var response = await _http.PostAsJsonAsync(ProjectPath("episode-locks"), new { episode, force = false }, token);
+        await EnsureSuccessAsync(response);
+        return await response.Content.ReadFromJsonAsync<StoryboardLockStatus>(cancellationToken: token) ?? throw new InvalidOperationException("服务未返回分镜锁定状态");
+    }
+
+    public async Task UnlockStoryboardAsync(int episode, CancellationToken token = default)
+    {
+        var response = await _http.DeleteAsync(ProjectPath($"episodes/{episode}/storyboard-lock"), token);
+        await EnsureSuccessAsync(response);
+    }
+
     public async Task<IReadOnlyList<AssetItem>> GetAssetsAsync(string? assetType = null, int? episode = null, CancellationToken token = default)
     {
         var query = new List<string>();

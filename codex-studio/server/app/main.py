@@ -24,7 +24,7 @@ from .provider_config import all_provider_statuses, delete_provider_config, reso
 from .model_discovery import discover_provider_models
 from .model_routing import delete_model_binding, list_model_roles, resolve_model_role, save_model_binding
 from .quality import repair_plan, weighted_score
-from .story_bible import continuity_contract, episode_snapshot, fingerprint
+from .story_bible import continuity_contract, fingerprint
 from .automation import automation_plan
 from .previz import analyze_stage, stage_fingerprint
 from .transitions import plan_transition
@@ -34,6 +34,7 @@ from .script_engine import extract_characters, parse_scenes, scene_to_shots
 from .production import automation_route_plan, bible_context, serialize_run, start_automation
 from .director import DIRECTOR_SYSTEM, director_prompt, director_retry_prompt, extract_json_object, normalize_design
 from .story_logic import persist_snapshots, recompute_episode
+from .storyboard_lock import build_snapshot as build_storyboard_snapshot, status as storyboard_lock_status
 
 
 @asynccontextmanager
@@ -48,14 +49,14 @@ async def lifespan(_: FastAPI):
         await worker
 
 
-app = FastAPI(title=settings.app_name, version="1.5.6", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.6.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost", "http://127.0.0.1"], allow_methods=["*"], allow_headers=["*"])
 PREFIX = settings.api_prefix
 
 
 @app.get(f"{PREFIX}/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "1.5.6", "instance_id": os.getenv("AI_STUDIO_INSTANCE_ID", "external")}
+    return {"status": "ok", "version": "1.6.0", "instance_id": os.getenv("AI_STUDIO_INSTANCE_ID", "external")}
 
 
 @app.get(f"{PREFIX}/providers")
@@ -718,17 +719,30 @@ def save_continuity_contract(project_id: str, payload: ContinuityContractRequest
 @app.post(f"{PREFIX}/projects/{{project_id}}/episode-locks")
 def lock_episode(project_id: str, payload: EpisodeLockRequest):
     with connect() as db:
-        shot_rows = db.execute("SELECT number,title,description,duration,status,prompt FROM shots WHERE project_id=? AND episode=? ORDER BY number", (project_id, payload.episode)).fetchall()
-        bible_rows = db.execute("SELECT entity_type,entity_key,state,fingerprint FROM bible_entities WHERE project_id=? AND version=(SELECT MAX(b2.version) FROM bible_entities b2 WHERE b2.project_id=bible_entities.project_id AND b2.entity_type=bible_entities.entity_type AND b2.entity_key=bible_entities.entity_key)", (project_id,)).fetchall()
-        contract_rows = db.execute("SELECT from_shot,to_shot,relation,score,findings_json FROM continuity_contracts WHERE project_id=? AND episode=? ORDER BY from_shot", (project_id, payload.episode)).fetchall()
-        snapshot = episode_snapshot([dict(row) for row in shot_rows], [dict(row) for row in bible_rows], [{**dict(row), "findings": json.loads(row["findings_json"])} for row in contract_rows])
-        blockers = [item for item in snapshot["contracts"] if item["score"] < 70]
-        if (not snapshot["ready"] or blockers) and not payload.force:
-            raise HTTPException(409, {"message": "全量分镜或设定未通过锁定条件", "ready": snapshot["ready"], "blocking_contracts": blockers})
+        if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
+            raise HTTPException(404, "Project not found")
+        snapshot, issues = build_storyboard_snapshot(db, project_id, payload.episode)
+        if issues and not payload.force:
+            raise HTTPException(409, {"message": "全量分镜未通过锁定条件", "issues": issues})
         current = db.execute("SELECT revision FROM episode_locks WHERE project_id=? AND episode=?", (project_id, payload.episode)).fetchone()
         revision = (current[0] + 1) if current else 1
         db.execute("INSERT INTO episode_locks(project_id,episode,revision,status,snapshot_json,locked_at) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(project_id,episode) DO UPDATE SET revision=excluded.revision,status=excluded.status,snapshot_json=excluded.snapshot_json,locked_at=CURRENT_TIMESTAMP", (project_id, payload.episode, revision, "locked", json.dumps(snapshot, ensure_ascii=False)))
-    return {"project_id": project_id, "episode": payload.episode, "revision": revision, "status": "locked", "snapshot": snapshot}
+        result = storyboard_lock_status(db, project_id, payload.episode)
+    return result
+
+
+@app.get(f"{PREFIX}/projects/{{project_id}}/episodes/{{episode}}/storyboard-lock")
+def get_storyboard_lock(project_id: str, episode: int):
+    with connect() as db:
+        if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
+            raise HTTPException(404, "Project not found")
+        return storyboard_lock_status(db, project_id, episode)
+
+
+@app.delete(f"{PREFIX}/projects/{{project_id}}/episodes/{{episode}}/storyboard-lock", status_code=204)
+def unlock_storyboard(project_id: str, episode: int):
+    with connect() as db:
+        db.execute("UPDATE episode_locks SET status='draft',locked_at=NULL WHERE project_id=? AND episode=?", (project_id, episode))
 
 
 @app.post(f"{PREFIX}/projects/{{project_id}}/quality-reviews", status_code=201)
@@ -822,6 +836,10 @@ def start_episode_automation(project_id: str, payload: AutomationStartRequest):
     with connect() as db:
         if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
             raise HTTPException(404, "Project not found")
+        lock = storyboard_lock_status(db, project_id, payload.episode)
+    if lock["status"] != "locked":
+        reason = "；".join(lock["issues"][:4]) or "请先在分镜工作台审阅并锁定本集全量分镜"
+        raise HTTPException(409, f"全量分镜门禁未通过（{lock['status']}）：{reason}")
     config = payload.model_dump()
     if payload.use_role_bindings:
         for role_id, provider_key, model_key in (
@@ -865,6 +883,7 @@ def preview_episode_routes(project_id: str, payload: AutomationStartRequest):
     with connect() as db:
         if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
             raise HTTPException(404, "Project not found")
+        lock = storyboard_lock_status(db, project_id, payload.episode)
     config = payload.model_dump()
     if payload.use_role_bindings:
         for role_id, provider_key, model_key in (
@@ -881,7 +900,12 @@ def preview_episode_routes(project_id: str, payload: AutomationStartRequest):
                 config[provider_key], config[model_key] = route["provider_id"], route["model"]
     if config["video_provider"] == "metaso" and resolve_provider_config("dashscope", "i2v").api_key:
         config.update({"video_fallback_provider": "dashscope", "video_fallback_model": "wan2.7-i2v-2026-04-25", "value_routing_enabled": True})
-    return automation_route_plan(project_id, config)
+    plan = automation_route_plan(project_id, config)
+    plan["lock_status"] = lock["status"]
+    plan["lock_revision"] = lock["revision"]
+    plan["lock_issues"] = lock["issues"]
+    plan["ready"] = bool(plan["ready"] and lock["status"] == "locked")
+    return plan
 
 
 @app.get(f"{PREFIX}/projects/{{project_id}}/automation/runs")

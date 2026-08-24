@@ -75,11 +75,17 @@ def main():
     storyboard_text = (ROOT / "client/AI.FilmStudio/StoryboardWindow.xaml").read_text(encoding="utf-8")
     named(storyboard_root, "ListBox", "SceneFilterList")
     named(storyboard_root, "Grid", "ShotInspector")
+    named(storyboard_root, "ComboBox", "EpisodeSelector")
+    lock_button = named(storyboard_root, "Button", "LockButton")
+    assert lock_button.attrib.get("Content") == "锁定本集分镜"
+    assert lock_button.attrib.get("AutomationProperties.AutomationId") == "StoryboardLockButton"
+    automation_root = ET.parse(ROOT / "client/AI.FilmStudio/AutomationWindow.xaml").getroot()
+    named(automation_root, "TextBlock", "LockStatusText")
     assert "状态前 JSON" not in storyboard_text and "状态后 JSON" not in storyboard_text
     assert "动作链ID" not in storyboard_text and "动作动量" not in storyboard_text
     for required in ("镜号", "场景", "景别", "画面与动作", "人物", "时长", "衔接", "状态"):
         assert f'Header="{required}"' in storyboard_text
-    print("UI contract passed: single navigation, readable storyboard review, and persistent role binding")
+    print("UI contract passed: single navigation, readable storyboard review, lock gate, and persistent role binding")
 
 
 if __name__ == "__main__":

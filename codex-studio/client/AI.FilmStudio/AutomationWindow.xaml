@@ -16,7 +16,7 @@
                     <StackPanel>
                         <TextBlock Text="生产配置" FontSize="19" FontWeight="Bold"/>
                         <Grid Margin="0,13,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/></Grid.ColumnDefinitions>
-                            <StackPanel><TextBlock Text="集数" FontWeight="SemiBold"/><ComboBox x:Name="Episode" Height="42" Margin="0,6,0,10"/></StackPanel>
+                            <StackPanel><TextBlock Text="集数" FontWeight="SemiBold"/><ComboBox x:Name="Episode" Height="42" Margin="0,6,0,10" SelectionChanged="Episode_SelectionChanged"/></StackPanel>
                             <StackPanel Grid.Column="2"><TextBlock Text="模式" FontWeight="SemiBold"/><ComboBox x:Name="Mode" SelectedIndex="1" Height="42" Margin="0,6,0,10"><ComboBoxItem Content="质量优先" Tag="quality"/><ComboBoxItem Content="均衡" Tag="balanced"/><ComboBoxItem Content="经济" Tag="economy"/></ComboBox></StackPanel>
                         </Grid>
                         <TextBlock Text="成片画幅" FontWeight="SemiBold"/><ComboBox x:Name="Aspect" SelectedIndex="0" Height="42" Margin="0,6,0,11"><ComboBoxItem Content="9:16 竖屏短剧 · 1080×1920" Tag="portrait"/><ComboBoxItem Content="16:9 横屏 · 1920×1080" Tag="landscape"/><ComboBoxItem Content="1:1 方形 · 1080×1080" Tag="square"/></ComboBox>
@@ -37,6 +37,7 @@
                     </StackPanel>
                 </ScrollViewer>
                 <StackPanel Grid.Row="1" Margin="0,13,0,0">
+                    <TextBlock x:Name="LockStatusText" Text="正在检查全量分镜门禁…" Foreground="#FFD166" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,9"/>
                     <Button x:Name="StartButton" Style="{StaticResource PrimaryButton}" Content="开始全流程自动生产" Click="Start_Click" Padding="18,12"/>
                     <TextBlock x:Name="RouteBlockerText" Foreground="#FFD166" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,9,0,0"/>
                 </StackPanel>

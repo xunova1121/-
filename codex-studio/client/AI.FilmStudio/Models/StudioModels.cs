@@ -127,6 +127,26 @@ public sealed class StoryboardGenerateResult
     [JsonPropertyName("replaced")] public bool Replaced { get; set; }
 }
 
+public sealed class StoryboardLockStatus
+{
+    [JsonPropertyName("project_id")] public string ProjectId { get; set; } = "";
+    [JsonPropertyName("episode")] public int Episode { get; set; }
+    [JsonPropertyName("status")] public string Status { get; set; } = "draft";
+    [JsonPropertyName("revision")] public int Revision { get; set; }
+    [JsonPropertyName("locked_at")] public string? LockedAt { get; set; }
+    [JsonPropertyName("shot_count")] public int ShotCount { get; set; }
+    [JsonPropertyName("ready_to_lock")] public bool ReadyToLock { get; set; }
+    [JsonPropertyName("issues")] public List<string> Issues { get; set; } = [];
+    [JsonPropertyName("fingerprint")] public string Fingerprint { get; set; } = "";
+    [JsonIgnore] public bool IsLocked => Status == "locked";
+    [JsonIgnore] public string Label => Status switch
+    {
+        "locked" => $"已锁定 · R{Revision}",
+        "stale" => $"已失效 · R{Revision}",
+        _ => ReadyToLock ? "待确认锁定" : "尚未满足锁定条件"
+    };
+}
+
 public sealed class DirectorBuildResult
 {
     [JsonPropertyName("provider")] public string Provider { get; set; } = "";
@@ -344,6 +364,9 @@ public sealed class AutomationRoutePlan
     [JsonPropertyName("ready")] public bool Ready { get; set; }
     [JsonPropertyName("shot_count")] public int ShotCount { get; set; }
     [JsonPropertyName("blocking_conflicts")] public int BlockingConflicts { get; set; }
+    [JsonPropertyName("lock_status")] public string LockStatus { get; set; } = "draft";
+    [JsonPropertyName("lock_revision")] public int LockRevision { get; set; }
+    [JsonPropertyName("lock_issues")] public List<string> LockIssues { get; set; } = [];
     [JsonPropertyName("routes")] public List<AutomationRoute> Routes { get; set; } = [];
     [JsonPropertyName("totals")] public List<AutomationRouteTotal> Totals { get; set; } = [];
 }

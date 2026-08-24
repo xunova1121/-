@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Media;
 using AI.FilmStudio.Models;
 using AI.FilmStudio.Services;
 
@@ -17,6 +18,8 @@ public partial class StoryboardWindow : Window
     private readonly ObservableCollection<Shot> _shots = [];
     private readonly ObservableCollection<SceneFilterItem> _sceneFilters = [];
     private ICollectionView? _shotView;
+    private StoryboardLockStatus _lockStatus = new();
+    private int Episode => EpisodeSelector.SelectedItem is int value ? value : 1;
 
     public StoryboardWindow(StudioApiClient api, StudioProject project)
     {
@@ -24,6 +27,8 @@ public partial class StoryboardWindow : Window
         _api = api;
         _project = project;
         ProjectNameText.Text = $"· {project.Name}";
+        for (var episode = 1; episode <= project.EpisodeCount; episode++) EpisodeSelector.Items.Add(episode);
+        EpisodeSelector.SelectedIndex = 0;
         ShotGrid.ItemsSource = _shots;
         SceneFilterList.ItemsSource = _sceneFilters;
         Loaded += async (_, _) => await LoadAsync();
@@ -72,7 +77,7 @@ public partial class StoryboardWindow : Window
     {
         try
         {
-            var shots = await _api.GetShotsAsync();
+            var shots = (await _api.GetShotsAsync()).Where(item => item.Episode == Episode).ToList();
             _shots.Clear();
             foreach (var shot in shots)
             {
@@ -89,7 +94,11 @@ public partial class StoryboardWindow : Window
                 _sceneFilters.Add(new SceneFilterItem(group.Key, $"{group.Key}  {group.Count()}"));
             SceneFilterList.SelectedIndex = 0;
             ApplyFilter();
-            StatusText.Text = _shots.Count == 0 ? "尚无分镜。请先在剧本工作台保存、解析并生成全量分镜。" : "分镜已按场次整理；Markdown、时间码和分隔线仅做展示清洗，点击“保存修改”后写回项目。";
+            _lockStatus = await _api.GetStoryboardLockAsync(Episode);
+            ApplyLockState();
+            StatusText.Text = _shots.Count == 0 ? "尚无分镜。请先在剧本工作台保存、解析并生成全量分镜。" :
+                _lockStatus.IsLocked ? "本集分镜已经锁定；必须先解除锁定才能修改。自动生产只读取这个锁定版本。" :
+                "请完成审阅并保存修改，再锁定本集分镜；未锁定内容不能进入自动生产。";
         }
         catch (Exception ex) { StatusText.Text = $"加载失败：{ex.Message}"; }
     }
@@ -100,13 +109,23 @@ public partial class StoryboardWindow : Window
 
     private void SceneFilter_SelectionChanged(object sender, SelectionChangedEventArgs e) => ApplyFilter();
 
+    private async void EpisodeSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (IsLoaded) await LoadAsync();
+    }
+
     private void ShotGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        UpdateInspectorState();
+    }
+
+    private void UpdateInspectorState()
     {
         var selected = ShotGrid.SelectedItem is Shot;
         NoSelectionText.Visibility = selected ? Visibility.Collapsed : Visibility.Visible;
-        InspectorFields.IsEnabled = selected;
-        ContinuityFields.IsEnabled = selected;
-        PromptFields.IsEnabled = selected;
+        InspectorFields.IsEnabled = selected && !_lockStatus.IsLocked;
+        ContinuityFields.IsEnabled = selected && !_lockStatus.IsLocked;
+        PromptFields.IsEnabled = selected && !_lockStatus.IsLocked;
     }
 
     private void SetInspectorOpen(bool open)
@@ -128,19 +147,62 @@ public partial class StoryboardWindow : Window
     private void Previz_Click(object sender, RoutedEventArgs e) => new PrevizWindow(_api) { Owner = this }.ShowDialog();
     private void Continuity_Click(object sender, RoutedEventArgs e) => new ContinuityWindow(_api) { Owner = this }.ShowDialog();
 
-    private async void SaveAll_Click(object sender, RoutedEventArgs e)
+    private void ApplyLockState()
+    {
+        var locked = _lockStatus.IsLocked;
+        ShotGrid.IsReadOnly = locked;
+        SaveButton.IsEnabled = !locked && _shots.Count > 0;
+        LockButton.IsEnabled = _shots.Count > 0;
+        LockButton.Content = locked ? "解除锁定" : _lockStatus.Status == "stale" ? "重新锁定" : "锁定本集分镜";
+        LockStatusText.Text = _lockStatus.Label;
+        LockStatusText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(locked ? "#75E6A4" : _lockStatus.Status == "stale" ? "#FF8A80" : "#FFD166"));
+        UpdateInspectorState();
+    }
+
+    private async Task SaveAllAsync()
     {
         ShotGrid.CommitEdit();
         ShotGrid.CommitEdit();
+        StatusText.Text = $"正在保存第 {Episode} 集 {_shots.Count} 个镜头…";
+        foreach (var shot in _shots) await _api.UpdateShotAsync(shot);
+        var proofread = await _api.ProofreadAsync();
+        _lockStatus = await _api.GetStoryboardLockAsync(Episode);
+        ApplyLockState();
+        StatusText.Text = proofread.StateConflicts == 0
+            ? $"已保存第 {Episode} 集 {_shots.Count} 个镜头，故事状态图重新计算通过。"
+            : $"已保存；状态图仍有 {proofread.StateConflicts} 个阻断项，请打开“连续性审校”定位。";
+    }
+
+    private async void SaveAll_Click(object sender, RoutedEventArgs e)
+    {
+        try { await SaveAllAsync(); }
+        catch (Exception ex) { StatusText.Text = $"保存失败：{ex.Message}"; }
+    }
+
+    private async void Lock_Click(object sender, RoutedEventArgs e)
+    {
         try
         {
-            StatusText.Text = $"正在保存 {_shots.Count} 个镜头…";
-            foreach (var shot in _shots) await _api.UpdateShotAsync(shot);
-            var proofread = await _api.ProofreadAsync();
-            StatusText.Text = proofread.StateConflicts == 0
-                ? $"已保存 {_shots.Count} 个镜头，故事状态图重新计算通过。"
-                : $"已保存；状态图仍有 {proofread.StateConflicts} 个阻断项，请打开“连续性审校”定位。";
+            LockButton.IsEnabled = false;
+            if (_lockStatus.IsLocked)
+            {
+                await _api.UnlockStoryboardAsync(Episode);
+                _lockStatus = await _api.GetStoryboardLockAsync(Episode);
+                StatusText.Text = $"第 {Episode} 集已解除锁定，现在可以修改；自动生产保持阻断。";
+            }
+            else
+            {
+                await SaveAllAsync();
+                _lockStatus = await _api.LockStoryboardAsync(Episode);
+                StatusText.Text = $"第 {Episode} 集已锁定为 R{_lockStatus.Revision}；自动生产只会使用此版本。";
+            }
+            ApplyLockState();
         }
-        catch (Exception ex) { StatusText.Text = $"保存失败：{ex.Message}"; }
+        catch (Exception ex)
+        {
+            _lockStatus = await _api.GetStoryboardLockAsync(Episode);
+            ApplyLockState();
+            StatusText.Text = $"锁定失败：{ex.Message}";
+        }
     }
 }

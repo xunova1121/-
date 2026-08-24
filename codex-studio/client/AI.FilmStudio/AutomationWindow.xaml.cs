@@ -15,6 +15,7 @@ public partial class AutomationWindow : Window
     private readonly StudioProject _project;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(3) };
     private IReadOnlyList<ModelRoleBinding> _roles = [];
+    private StoryboardLockStatus _lockStatus = new();
 
     public AutomationWindow(StudioApiClient api, StudioProject project)
     {
@@ -49,8 +50,13 @@ public partial class AutomationWindow : Window
         if (Role("shot_video")?.Available != true) missing.Add("正式镜头视频");
         if (EnableVoice.IsChecked == true && Role("dialogue_voice")?.Available != true) missing.Add("角色对白配音");
         if (EnableReview.IsChecked == true && Role("continuity_review")?.Available != true) missing.Add("跨镜连续性审核");
-        StartButton.IsEnabled = missing.Count == 0;
-        RouteBlockerText.Text = missing.Count == 0 ? "所选生产功能的岗位已就绪；开始前仍会检查分镜锁定和连续性阻断。" : "尚缺岗位：" + string.Join("、", missing) + "。请进入模型路由中心完成绑定和连接。";
+        var lockReady = _lockStatus.IsLocked;
+        StartButton.IsEnabled = missing.Count == 0 && lockReady;
+        LockStatusText.Text = lockReady ? $"✓ 第 {_lockStatus.Episode} 集全量分镜已锁定 · R{_lockStatus.Revision}" : $"⚠ 第 {_lockStatus.Episode} 集分镜门禁：{_lockStatus.Label}";
+        LockStatusText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(lockReady ? "#75E6A4" : "#FFD166"));
+        RouteBlockerText.Text = missing.Count > 0 ? "尚缺岗位：" + string.Join("、", missing) + "。请进入模型路由中心完成绑定和连接。" :
+            !lockReady ? "请先在分镜工作台完成全量审阅并锁定本集；未锁定内容不会提交任何付费任务。" :
+            "岗位与分镜门禁均已就绪，可以执行生成前预检。";
     }
 
     private async Task LoadAsync()
@@ -58,6 +64,7 @@ public partial class AutomationWindow : Window
         try
         {
             _roles = await _api.GetModelRolesAsync();
+            _lockStatus = await _api.GetStoryboardLockAsync((int)Episode.SelectedItem);
             ShowRoleRoutes();
             await LoadRunsAsync();
             StatusText.Text = "自动生产严格使用岗位绑定；Story Bible、真实尾帧继承、任务断点恢复均在后台执行。";
@@ -94,7 +101,9 @@ public partial class AutomationWindow : Window
         var plan = await _api.GetAutomationRoutePlanAsync(value.Episode, value.Mode, value.Image.ProviderId, value.Image.Model, value.Video.ProviderId, value.Video.Model, value.Voice?.ProviderId, value.Voice?.Model ?? "", value.Quality?.ProviderId, OutputName.Text.Trim(), value.Width, value.Height, 24, "high");
         RouteGrid.ItemsSource = plan.Routes;
         var totals = string.Join("；", plan.Totals.Select(x => $"{x.Provider} {x.Shots}镜/{x.Seconds}秒"));
-        StatusText.Text = plan.Ready ? $"预检通过：{plan.ShotCount} 镜。{totals}" : $"预检阻断：{plan.BlockingConflicts} 个连续性冲突或尚无分镜。";
+        StatusText.Text = plan.Ready ? $"预检通过：锁定版本 R{plan.LockRevision}，{plan.ShotCount} 镜。{totals}" :
+            plan.LockStatus != "locked" ? "预检阻断：本集全量分镜尚未锁定或锁定后已被修改。" :
+            $"预检阻断：{plan.BlockingConflicts} 个连续性冲突或尚无分镜。";
         return plan;
     }
 
@@ -102,6 +111,12 @@ public partial class AutomationWindow : Window
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await LoadRunsAsync();
     private async void RefreshRoutes_Click(object sender, RoutedEventArgs e) => await LoadAsync();
     private void Options_Click(object sender, RoutedEventArgs e) => ShowRoleRoutes();
+    private async void Episode_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded || Episode.SelectedItem is not int episode) return;
+        try { _lockStatus = await _api.GetStoryboardLockAsync(episode); ShowRoleRoutes(); await PreviewAsync(); }
+        catch (Exception ex) { StatusText.Text = $"集数切换失败：{ex.Message}"; }
+    }
 
     private async void Start_Click(object sender, RoutedEventArgs e)
     {

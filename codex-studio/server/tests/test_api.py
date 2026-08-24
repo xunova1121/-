@@ -16,6 +16,7 @@ from app.adapters.metaso import MetasoAdapter
 from app import media, production, story_logic
 from app.task_runner import TaskRunner
 from app.schemas import AutomationStartRequest
+from app.storyboard_lock import build_snapshot as build_storyboard_snapshot
 
 
 def test_metaso_h3_submits_polls_and_downloads_with_same_domain_auth(monkeypatch, tmp_path: Path):
@@ -281,8 +282,12 @@ def isolated_test_database(tmp_path: Path):
         db.execute("INSERT INTO projects(id,name,genre,episode_count) VALUES('demo','自动化测试项目','测试',1)")
         db.executemany(
             "INSERT INTO shots(project_id,episode,number,title,description,duration,status,color) VALUES('demo',1,?,?,?,?,?,?)",
-            [(f"{i:03}", f"测试镜头 {i}", "", "3.0s", "已生成", "#1C2027") for i in range(1, 7)],
+            [(f"{i:03}", f"测试镜头 {i}", f"测试画面 {i}", "3.0s", "已生成", "#1C2027") for i in range(1, 7)],
         )
+        db.row_factory = sqlite3.Row
+        snapshot, issues = build_storyboard_snapshot(db, "demo", 1)
+        assert not issues
+        db.execute("INSERT INTO episode_locks(project_id,episode,revision,status,snapshot_json,locked_at) VALUES('demo',1,1,'locked',?,CURRENT_TIMESTAMP)", (__import__("json").dumps(snapshot, ensure_ascii=False),))
     try:
         yield
     finally:
@@ -495,6 +500,7 @@ def test_one_click_automation_reaches_real_export(tmp_path: Path, monkeypatch):
         db.execute("UPDATE shots SET prompt='电影关键帧',description='人物在雪夜前行',dialogue='继续前进。',duration='0.7s' WHERE project_id='demo'")
     try:
         with TestClient(app) as client:
+            assert client.post("/api/v1/projects/demo/episode-locks", json={"episode": 1}).status_code == 200
             response = client.post("/api/v1/projects/demo/automation/start", json={"episode": 1, "image_provider": "fakeprod", "video_provider": "fakeprod", "voice_provider": "fakeprod", "quality_provider": None, "width": 640, "height": 360, "output_name": "一键成片.mp4"})
             assert response.status_code == 202
             run_id = response.json()["id"]
@@ -772,6 +778,7 @@ def test_route_plan_previews_every_paid_video_call_without_creating_tasks(monkey
         db.execute("UPDATE shots SET value_score=92,model_requirement_json='{}' WHERE id=?", (rows[0][0],))
         db.execute("UPDATE shots SET value_score=40,model_requirement_json='{}' WHERE id=?", (rows[1][0],))
     with TestClient(app) as client:
+        assert client.post("/api/v1/projects/demo/episode-locks", json={"episode": 1}).status_code == 200
         response = client.post("/api/v1/projects/demo/automation/route-plan", json={
             "episode": 1, "mode": "balanced", "video_provider": "metaso", "video_model": "MiniMax-H3",
             "image_provider": "openai", "voice_provider": None,
@@ -857,6 +864,30 @@ def test_story_bible_episode_lock_and_quality_repair():
         }).json()
         assert review["status"] == "repair_required"
         assert review["repair_plan"]["actions"][0]["action"] == "regenerate_video"
+
+
+def test_storyboard_lock_blocks_costly_automation_and_becomes_stale_after_edit(monkeypatch):
+    from app import main as main_module
+
+    captured: dict = {}
+    monkeypatch.setattr(main_module, "start_automation", lambda _project_id, config: captured.update(config) or {"status": "running"})
+    with TestClient(app) as client:
+        assert client.delete("/api/v1/projects/demo/episodes/1/storyboard-lock").status_code == 204
+        draft = client.get("/api/v1/projects/demo/episodes/1/storyboard-lock").json()
+        assert draft["status"] == "draft" and draft["ready_to_lock"] is True
+        blocked = client.post("/api/v1/projects/demo/automation/start", json={"episode": 1, "image_provider": "mock", "video_provider": "mock"})
+        assert blocked.status_code == 409 and "全量分镜门禁" in blocked.json()["detail"]
+        locked = client.post("/api/v1/projects/demo/episode-locks", json={"episode": 1}).json()
+        assert locked["status"] == "locked" and locked["revision"] == 2
+        first = client.get("/api/v1/projects/demo/shots").json()[0]
+        assert client.patch(f"/api/v1/shots/{first['id']}", json={"description": "锁定后修改的画面"}).status_code == 200
+        stale = client.get("/api/v1/projects/demo/episodes/1/storyboard-lock").json()
+        assert stale["status"] == "stale"
+        assert any("锁定后修改" in issue for issue in stale["issues"])
+        assert client.post("/api/v1/projects/demo/automation/start", json={"episode": 1, "image_provider": "mock", "video_provider": "mock"}).status_code == 409
+        relocked = client.post("/api/v1/projects/demo/episode-locks", json={"episode": 1}).json()
+        assert relocked["status"] == "locked" and relocked["revision"] == 3
+        assert client.post("/api/v1/projects/demo/automation/start", json={"episode": 1, "image_provider": "mock", "video_provider": "mock"}).status_code == 202
 
 
 def test_previz_transition_and_episode_automation():
