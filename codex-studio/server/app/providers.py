@@ -48,6 +48,9 @@ PROVIDERS = (
              ("chat",), ("ARK_API_KEY",), {}, False, None, False, None, "shot_sequence"),
     Provider("dashscope", "阿里云百炼", "dashscope", "https://dashscope.aliyuncs.com/api/v1",
              ("i2v",), ("DASHSCOPE_API_KEY",), {"i2v": ("wan2.7-i2v-2026-04-25",)}, True, 2, True, 15, "shot_sequence"),
+    Provider("metaso", "秘塔 · MiniMax H3", "minimax", "https://metaso.cn/api/minimax/v2",
+             ("i2v", "r2v"), ("METASO_API_KEY",), {"i2v": ("MiniMax-H3",), "r2v": ("MiniMax-H3",)},
+             True, 9, True, 15, "shot_sequence"),
 )
 
 

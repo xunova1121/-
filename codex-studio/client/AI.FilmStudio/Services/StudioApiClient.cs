@@ -220,6 +220,13 @@ public sealed class StudioApiClient
         return await response.Content.ReadFromJsonAsync<AutomationRun>(cancellationToken: token) ?? new AutomationRun();
     }
 
+    public async Task<AutomationRoutePlan> GetAutomationRoutePlanAsync(int episode, string mode, string imageProvider, string imageModel, string videoProvider, string videoModel, string? voiceProvider, string voiceModel, string? qualityProvider, string outputName, int width, int height, int fps, string quality, CancellationToken token = default)
+    {
+        var response = await _http.PostAsJsonAsync(ProjectPath("automation/route-plan"), new { episode, mode, image_provider = imageProvider, image_model = imageModel, video_provider = videoProvider, video_model = videoModel, voice_provider = voiceProvider, voice_model = voiceModel, quality_provider = qualityProvider, output_name = outputName, width, height, fps, quality, auto_freeze_bible = true, generate_images = true, generate_voice = voiceProvider is not null, auto_repair = true }, token);
+        await EnsureSuccessAsync(response);
+        return await response.Content.ReadFromJsonAsync<AutomationRoutePlan>(cancellationToken: token) ?? new AutomationRoutePlan();
+    }
+
     public async Task<IReadOnlyList<AutomationRun>> GetAutomationRunsAsync(CancellationToken token = default) =>
         await _http.GetFromJsonAsync<List<AutomationRun>>(ProjectPath("automation/runs"), token) ?? [];
 

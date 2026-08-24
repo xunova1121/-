@@ -10,7 +10,7 @@
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                 <Button Style="{StaticResource NavButton}" Content="刷新" Click="Refresh_Click"/>
                 <ComboBox x:Name="Provider" Width="145" Margin="8,0" DisplayMemberPath="DisplayName"/>
-                <ComboBox x:Name="TaskType" Width="120" SelectedIndex="0" Margin="0,0,8,0" Background="#20242B" Foreground="White">
+                <ComboBox x:Name="TaskType" Width="120" SelectedIndex="0" Margin="0,0,8,0" Background="#20242B" Foreground="White" SelectionChanged="TaskType_SelectionChanged">
                     <ComboBoxItem Content="llm"/><ComboBoxItem Content="proofread"/><ComboBoxItem Content="image"/><ComboBoxItem Content="video"/><ComboBoxItem Content="voice"/>
                 </ComboBox>
                 <Button Style="{StaticResource PrimaryButton}" Content="＋ 新建真实任务" Click="Create_Click"/>
@@ -27,6 +27,7 @@
                 <DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="60"/>
                 <DataGridTextColumn Header="类型" Binding="{Binding TaskType}" Width="110"/>
                 <DataGridTextColumn Header="提供方" Binding="{Binding Provider}" Width="110"/>
+                <DataGridTextColumn Header="路由" Binding="{Binding RouteState}" Width="180"/>
                 <DataGridTextColumn Header="状态" Binding="{Binding Status}" Width="120"/>
                 <DataGridTextColumn Header="进度" Binding="{Binding Progress, StringFormat={}{0}%}" Width="90"/>
                 <DataGridTextColumn Header="尝试" Binding="{Binding Attempts}" Width="70"/>

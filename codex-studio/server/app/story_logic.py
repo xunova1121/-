@@ -5,6 +5,11 @@ import sqlite3
 from typing import Any
 
 
+ACTION_PHASES = ("anticipation", "start", "middle", "impact", "follow_through", "end", "settle")
+ACTION_PHASE_ORDER = {name: index for index, name in enumerate(ACTION_PHASES)}
+OPPOSITE_MOMENTUM = {("left", "right"), ("right", "left"), ("up", "down"), ("down", "up"), ("forward", "back"), ("back", "forward")}
+
+
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
@@ -35,6 +40,9 @@ def validate_and_project(shots: list[dict[str, Any]], initial_state: dict[str, A
     findings: list[dict[str, Any]] = []
     previous_after: dict[str, Any] = dict(initial_state or {})
     previous_scene: int | None = None
+    previous_action_id = ""
+    previous_phase = "static"
+    previous_momentum = ""
     for shot in shots:
         continuity = _mapping(shot.get("continuity"))
         before = _mapping(continuity.get("state_before"))
@@ -67,6 +75,32 @@ def validate_and_project(shots: list[dict[str, Any]], initial_state: dict[str, A
                 expected = _flatten(merged_before).get(path)
                 if expected is not None and actual != expected and not any(item["path"] == path for item in conflicts):
                     conflicts.append({"path": path, "expected": expected, "actual": actual})
+
+        action_id = str(continuity.get("action_id") or "").strip()
+        phase = str(continuity.get("action_phase") or "static").strip().lower()
+        momentum = str(continuity.get("momentum") or "").strip().lower()
+        if phase not in {*ACTION_PHASES, "static"}:
+            conflicts.append({"type": "action_phase", "path": "continuity.action_phase", "expected": "/".join(ACTION_PHASES), "actual": phase, "message": f"未知动作相位 {phase}"})
+            phase = "static"
+        if relation == "continuous":
+            if not action_id and previous_action_id:
+                action_id = previous_action_id
+                continuity["action_id"] = action_id
+            if action_id and previous_action_id and action_id != previous_action_id:
+                conflicts.append({"type": "action_chain", "path": "continuity.action_id", "expected": previous_action_id, "actual": action_id,
+                                  "message": "标记为 continuous 的相邻镜头必须属于同一个动作链"})
+            if phase != "static" and previous_phase != "static":
+                current_index = ACTION_PHASE_ORDER[phase]
+                previous_index = ACTION_PHASE_ORDER[previous_phase]
+                if current_index < previous_index:
+                    conflicts.append({"type": "action_phase", "path": "continuity.action_phase", "expected": f">={previous_phase}", "actual": phase,
+                                      "message": f"连续动作相位从 {previous_phase} 倒退到 {phase}"})
+                elif current_index - previous_index > 2:
+                    conflicts.append({"type": "action_phase_gap", "path": "continuity.action_phase", "expected": ACTION_PHASES[min(previous_index + 1, len(ACTION_PHASES) - 1)], "actual": phase,
+                                      "message": f"连续动作从 {previous_phase} 跳到 {phase}，跨度过大，必须补过渡镜头或中间相位"})
+            if previous_momentum and momentum and (previous_momentum, momentum) in OPPOSITE_MOMENTUM:
+                conflicts.append({"type": "momentum", "path": "continuity.momentum", "expected": previous_momentum, "actual": momentum,
+                                  "message": f"连续动作动量从 {previous_momentum} 突然反向为 {momentum}"})
         continuity["state_before"] = merged_before
         continuity["state_after"] = merged_after
         continuity["state_schema_version"] = "1.0"
@@ -75,6 +109,7 @@ def validate_and_project(shots: list[dict[str, Any]], initial_state: dict[str, A
         for conflict in conflicts:
             findings.append({"shot_number": shot.get("number"), "severity": "blocking", "type": "story_state", **conflict})
         previous_after, previous_scene = merged_after, scene_index
+        previous_action_id, previous_phase, previous_momentum = action_id, phase, momentum
     return projected, findings
 
 

@@ -31,7 +31,9 @@
                 <DataGridTextColumn Header="对白" Binding="{Binding Dialogue, UpdateSourceTrigger=PropertyChanged}" Width="1.5*"/>
                 <DataGridTextColumn Header="人物" Binding="{Binding CharacterText}" Width="110" IsReadOnly="True"/>
                 <DataGridTextColumn Header="衔接" Binding="{Binding Link, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
+                <DataGridTextColumn Header="动作链ID" Binding="{Binding ActionId, UpdateSourceTrigger=PropertyChanged}" Width="110"/>
                 <DataGridTextColumn Header="动作相位" Binding="{Binding ActionPhase, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
+                <DataGridTextColumn Header="动作动量" Binding="{Binding Momentum, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
                 <DataGridTextColumn Header="运动方向" Binding="{Binding ScreenDirection, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
                 <DataGridTextColumn Header="状态前 JSON" Binding="{Binding StateBeforeText}" Width="220"/>
                 <DataGridTextColumn Header="状态后 JSON" Binding="{Binding StateAfterText}" Width="220"/>

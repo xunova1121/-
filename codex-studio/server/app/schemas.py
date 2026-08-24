@@ -277,7 +277,7 @@ class TransitionBoundary(BaseModel):
     shot_number: str
     scene_key: str
     action: str = ""
-    action_phase: Literal["start", "middle", "end", "static"] = "static"
+    action_phase: Literal["anticipation", "start", "middle", "impact", "follow_through", "end", "settle", "static"] = "static"
     screen_direction: Literal["left", "right", "center", "unknown"] = "unknown"
     camera_movement: str = "fixed"
     lighting: str = ""

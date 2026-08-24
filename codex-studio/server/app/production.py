@@ -119,6 +119,46 @@ def _latest_shot_asset(db: sqlite3.Connection, shot_id: int, role: str) -> sqlit
     return db.execute("SELECT a.* FROM assets a JOIN shot_assets sa ON sa.asset_id=a.id WHERE sa.shot_id=? AND sa.role=? AND a.status='ready' ORDER BY a.id DESC LIMIT 1", (shot_id, role)).fetchone()
 
 
+def video_route(shot: sqlite3.Row, config: dict[str, Any]) -> dict[str, Any]:
+    """Return the deterministic, billable video route before any task is submitted."""
+    value_score = int(shot["value_score"] or 50)
+    requirement = json.loads(shot["model_requirement_json"] or "{}")
+    tier = str(requirement.get("tier") or ("premium" if value_score >= 80 else "standard" if value_score >= 45 else "economy"))
+    provider = str(config.get("video_provider") or "dashscope")
+    model = str(config.get("video_model") or "")
+    reason = "selected_video_provider"
+    if config.get("value_routing_enabled") and provider == "metaso" and config.get("video_fallback_provider") == "dashscope":
+        if tier == "premium" or value_score >= 80:
+            provider, model, reason = "metaso", str(config.get("video_model") or "MiniMax-H3"), "high_value_h3"
+        else:
+            provider, model, reason = "dashscope", str(config.get("video_fallback_model") or "wan2.7-i2v-2026-04-25"), "standard_value_wan"
+    resolution = ("2K" if tier == "premium" else "768P") if provider == "metaso" else ("1080P" if tier in {"premium", "standard"} or config.get("mode") == "quality" else "720P")
+    return {"provider": provider, "model": model, "resolution": resolution, "reason": reason, "tier": tier, "value_score": value_score}
+
+
+def automation_route_plan(project_id: str, config: dict[str, Any]) -> dict[str, Any]:
+    """Preview every paid video call and blocking continuity issue without mutating state."""
+    episode = int(config.get("episode", 1))
+    with _db() as db:
+        shots = _shot_rows(db, project_id, episode)
+        conflict_count = int(db.execute(
+            "SELECT COUNT(*) FROM shot_state_snapshots WHERE project_id=? AND episode=? AND conflicts_json<>'[]'",
+            (project_id, episode),
+        ).fetchone()[0])
+        items: list[dict[str, Any]] = []
+        totals: dict[str, dict[str, Any]] = {}
+        for shot in shots:
+            route = video_route(shot, config)
+            seconds = max(3, min(12, round(_duration_seconds(shot["duration"]))))
+            items.append({"shot_id": int(shot["id"]), "shot_number": shot["number"], "seconds": seconds, **route})
+            summary = totals.setdefault(route["provider"], {"provider": route["provider"], "shots": 0, "seconds": 0, "resolutions": {}})
+            summary["shots"] += 1
+            summary["seconds"] += seconds
+            summary["resolutions"][route["resolution"]] = summary["resolutions"].get(route["resolution"], 0) + 1
+    return {"project_id": project_id, "episode": episode, "ready": bool(shots) and conflict_count == 0,
+            "shot_count": len(shots), "blocking_conflicts": conflict_count, "routes": items, "totals": list(totals.values())}
+
+
 def _queue_reviews(db: sqlite3.Connection, run_id: int, project_id: str, shots: list[sqlite3.Row], config: dict[str, Any]) -> int:
     provider = config.get("quality_provider")
     if not provider:
@@ -157,8 +197,9 @@ def _queue_video_wave(db: sqlite3.Connection, run_id: int, project_id: str, shot
             continue
         memory, references = bible_context(db, project_id, shot)
         keyframe = _latest_shot_asset(db, int(shot["id"]), "image")
+        keyframe_path = str(keyframe["local_path"] or "") if keyframe else ""
         if keyframe and keyframe["local_path"]:
-            references = [keyframe["local_path"]]
+            references = [keyframe_path]
         continuity = json.loads(shot["continuity_json"] or "{}")
         link = str(continuity.get("link") or "cut")
         dependency: dict[str, Any] = {"relation": link}
@@ -172,21 +213,38 @@ def _queue_video_wave(db: sqlite3.Connection, run_id: int, project_id: str, shot
             except MediaError:
                 previous = shot
                 continue
-            references = [tail_frame]
-            dependency.update({"from_shot_id": int(previous["id"]), "from_shot_number": previous["number"], "tail_frame": tail_frame})
+            # 上一镜真实尾帧是本镜起点，本镜已确认关键帧是目标终点。
+            # 两者同时发送给支持首尾帧的 H3/Wan，避免只锁起点却丢掉本镜构图。
+            references = [tail_frame, *([keyframe_path] if keyframe_path else [])]
+            dependency.update({"from_shot_id": int(previous["id"]), "from_shot_number": previous["number"], "tail_frame": tail_frame,
+                               "target_keyframe": keyframe_path, "constraint": "previous_tail_to_current_target"})
         duration = max(3, min(12, round(_duration_seconds(shot["duration"]))))
-        value_score = int(shot["value_score"] or 50)
-        requirement = json.loads(shot["model_requirement_json"] or "{}")
-        tier = str(requirement.get("tier") or ("premium" if value_score >= 80 else "standard" if value_score >= 45 else "economy"))
-        resolution = "1080P" if tier == "premium" or config.get("mode") == "quality" else "720P"
+        route = video_route(shot, config)
+        value_score, tier = route["value_score"], route["tier"]
+        route_provider, route_model = route["provider"], route["model"]
+        route_reason, resolution = route["reason"], route["resolution"]
         notes = list((repair_notes or {}).get(shot_id, []))
         repair = f"\n\n【视频质检返工】{json.dumps(notes, ensure_ascii=False)}" if notes else ""
+        phase = str(continuity.get("action_phase") or "static")
+        action_id = str(continuity.get("action_id") or "")
+        momentum = str(continuity.get("momentum") or "still")
+        video_prompt = (shot["prompt"] or shot["description"]) + memory + f"\n动作连续要求：动作链 {action_id or '未命名'}，当前相位 {phase}，动量 {momentum}；可见动作：{shot['action']}" + repair
+        native_audio_policy = "model_default"
+        if route_provider == "metaso" and config.get("generate_voice", True) and config.get("voice_provider"):
+            native_audio_policy = "ambient_only"
+            video_prompt += "\n\n【音频硬约束】只生成环境音、动作音和空间氛围，不生成角色对白或旁白；对白由后期独立配音轨完成。"
         payload = {"project_id": project_id, "episode": shot["episode"], "shot_id": shot["id"], "shot_number": shot["number"],
-                   "prompt": (shot["prompt"] or shot["description"]) + memory + f"\n动作连续要求：{shot['action']}" + repair, "model": config.get("video_model"),
-                   "reference_paths": references[:1], "options": {"duration": duration, "seconds": duration, "resolution": resolution, "size": f"{config.get('width',1920)}x{config.get('height',1080)}", "prompt_extend": True, "watermark": False},
-                   "routing": {"value_score": value_score, "tier": tier, "resolution": resolution, "reason": "shot_value_score_and_requirement"}}
+                   "prompt": video_prompt, "model": route_model,
+                   "reference_paths": references[:2], "options": {"duration": duration, "seconds": duration, "resolution": resolution, "size": f"{config.get('width',1920)}x{config.get('height',1080)}", "reference_mode": "frames", "prompt_extend": True, "watermark": False, "native_audio_policy": native_audio_policy},
+                   "routing": {"value_score": value_score, "tier": tier, "provider": route_provider, "model": route_model, "resolution": resolution, "reason": route_reason}}
+        if route_provider == "metaso" and config.get("video_fallback_provider"):
+            payload["fallback"] = {
+                "provider": config["video_fallback_provider"],
+                "model": config.get("video_fallback_model") or "",
+                "reason": "primary_queue_timeout_or_temporary_failure",
+            }
         payload["dependency"] = dependency
-        _queue(db, run_id, project_id, "video", config["video_provider"], stage, payload, 60 + value_score // 5)
+        _queue(db, run_id, project_id, "video", route_provider, stage, payload, 60 + value_score // 5)
         count += 1
         previous = shot
     return count
@@ -197,20 +255,35 @@ def _queue_video_reviews(db: sqlite3.Connection, run_id: int, project_id: str, s
     if not provider:
         return 0
     count = 0
+    previous: sqlite3.Row | None = None
     for shot in shots:
         video = _latest_shot_asset(db, int(shot["id"]), "video")
         if not video:
+            previous = shot
             continue
         try:
             frames = extract_review_frames(video["local_path"], project_id, f"run-{run_id}-{stage}-{shot['number']}", 3)
         except MediaError:
             continue
         memory, _ = bible_context(db, project_id, shot)
+        continuity = json.loads(shot["continuity_json"] or "{}")
+        review_paths = list(frames)
+        seam_note = ""
+        if str(continuity.get("link") or "cut") == "continuous" and previous is not None:
+            previous_video = _latest_shot_asset(db, int(previous["id"]), "video")
+            if previous_video:
+                try:
+                    previous_tail, current_head = extract_boundary_frames(previous_video["local_path"], video["local_path"], project_id, f"review-{previous['number']}-{shot['number']}")
+                    review_paths = [previous_tail, current_head, *frames[1:]]
+                    seam_note = f"第1张是上一镜 {previous['number']} 的真实尾帧，第2张是本镜真实首帧；必须重点比较人物姿态、手部、道具、运动方向、动作相位和动量是否无跳变。"
+                except MediaError:
+                    seam_note = "未能提取上一镜尾帧，本次只能审核本镜内部。"
         payload = {"project_id": project_id, "episode": shot["episode"], "shot_id": shot["id"], "shot_number": shot["number"],
-                   "prompt": f"逐帧审核本镜头的身份、服装、场景、道具、动作相位、画质和首尾连续性。分镜动作：{shot['action']}。{memory}",
-                   "reference_paths": frames, "options": {"threshold": STAGE_POLICIES[config.get('mode', 'balanced')]["consistency_threshold"], "review_kind": "video"}}
+                   "prompt": f"逐帧审核本镜头的身份、服装、场景、道具、动作相位、手部姿态、动量、画质和跨镜接缝。{seam_note} 分镜动作：{shot['action']}；动作链：{continuity.get('action_id') or '未命名'}；相位：{continuity.get('action_phase') or 'static'}。{memory}",
+                   "reference_paths": review_paths, "options": {"threshold": STAGE_POLICIES[config.get('mode', 'balanced')]["consistency_threshold"], "review_kind": "video", "seam_from_shot": previous["number"] if seam_note and previous is not None else None}}
         _queue(db, run_id, project_id, "vision_review", provider, stage, payload, 72)
         count += 1
+        previous = shot
     return count
 
 

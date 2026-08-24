@@ -17,6 +17,7 @@ public partial class GenerationWindow : Window
     private int Episode => EpisodeSelector.SelectedItem is int value ? value : 1;
     private string SelectedType => (TaskType.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "image";
     private static string ComboText(ComboBox box) => (box.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "";
+    private static string ComboTag(ComboBox box) => (box.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "";
     private async Task LoadAsync()
     {
         try
@@ -31,17 +32,32 @@ public partial class GenerationWindow : Window
     private async Task RefreshProvidersAsync()
     {
         var type = SelectedType;
-        var allowed = _providers.Where(p => type switch { "image" => p.ProviderId == "openai", "video" => p.ProviderId == "dashscope", "voice" => p.ProviderId == "openai", _ => false }).ToList();
+        var capability = type switch { "image" => "t2i", "video" => "i2v", "voice" => "tts", _ => "" };
+        var allowed = _providers.Where(p => p.Capabilities.Contains(capability)).ToList();
         ProviderSelector.ItemsSource = allowed; if (allowed.Count > 0) ProviderSelector.SelectedIndex = 0;
-        ModelText.Text = type switch { "image" => "gpt-image-2", "video" => "wan2.7-i2v-2026-04-25", "voice" => "gpt-4o-mini-tts", _ => "" };
+        ModelText.Text = type switch { "image" => "gpt-image-2", "video" => allowed.FirstOrDefault()?.ProviderId == "metaso" ? "MiniMax-H3" : "wan2.7-i2v-2026-04-25", "voice" => "gpt-4o-mini-tts", _ => "" };
         await Task.CompletedTask;
     }
     private async Task RefreshTasksAsync() { var tasks = await _api.GetTasksAsync(); TaskGrid.ItemsSource = tasks.Where(t => t.TaskType is "image" or "video" or "voice").ToList(); StatusText.Text = $"生成任务 {tasks.Count(t => t.TaskType is "image" or "video" or "voice")} 项。完成结果会自动回写资产库和镜头。"; }
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshTasksAsync();
     private async void EpisodeSelector_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (IsLoaded) await LoadAsync(); }
     private async void TaskType_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (IsLoaded) await RefreshProvidersAsync(); }
+    private void ProviderSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ProviderSelector.SelectedItem is not ProviderConfigStatus provider) return;
+        if (SelectedType == "video")
+        {
+            ModelText.Text = provider.ProviderId == "metaso" ? "MiniMax-H3" : "wan2.7-i2v-2026-04-25";
+            Resolution.ItemsSource = provider.ProviderId == "metaso" ? new[] { "768P", "2K" } : new[] { "720P", "1080P" };
+            Resolution.SelectedIndex = 0;
+        }
+        else
+        {
+            Resolution.ItemsSource = new[] { "默认" }; Resolution.SelectedIndex = 0;
+        }
+    }
     private void ShotSelector_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (ShotSelector.SelectedItem is Shot shot) PromptText.Text = SelectedType == "voice" ? shot.Dialogue : shot.Prompt; }
-    private Dictionary<string, object?> Options() => new() { ["duration"] = int.TryParse(ComboText(Duration), out var d) ? d : 5, ["seconds"] = int.TryParse(ComboText(Duration), out var s) ? s : 8, ["ratio"] = ComboText(Ratio), ["resolution"] = "720P", ["size"] = ComboText(Ratio) == "9:16" ? "720x1280" : "1280x720", ["voice"] = "alloy", ["prompt_extend"] = true, ["watermark"] = false };
+    private Dictionary<string, object?> Options() => new() { ["duration"] = int.TryParse(ComboText(Duration), out var d) ? d : 5, ["seconds"] = int.TryParse(ComboText(Duration), out var s) ? s : 8, ["ratio"] = ComboText(Ratio), ["resolution"] = ComboText(Resolution), ["reference_mode"] = ComboTag(ReferenceMode), ["size"] = ComboText(Ratio) == "9:16" ? "720x1280" : "1280x720", ["voice"] = "alloy", ["prompt_extend"] = true, ["watermark"] = false };
     private IReadOnlyList<int> References() => ReferenceList.SelectedItems.Cast<AssetItem>().Select(a => a.Id).ToList();
     private async Task QueueAsync(Shot shot, string prompt)
     {

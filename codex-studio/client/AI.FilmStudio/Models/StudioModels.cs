@@ -23,8 +23,10 @@ public sealed class Shot
     [JsonPropertyName("characters")] public List<string> Characters { get; set; } = [];
     [JsonPropertyName("continuity")] public Dictionary<string, JsonElement> Continuity { get; set; } = [];
     [JsonIgnore] public string Link { get => ReadText("link", "cut"); set => WriteText("link", value); }
+    [JsonIgnore] public string ActionId { get => ReadText("action_id", ""); set => WriteText("action_id", value); }
     [JsonIgnore] public string ScreenDirection { get => ReadText("screen_direction", "unknown"); set => WriteText("screen_direction", value); }
     [JsonIgnore] public string ActionPhase { get => ReadText("action_phase", "static"); set => WriteText("action_phase", value); }
+    [JsonIgnore] public string Momentum { get => ReadText("momentum", "still"); set => WriteText("momentum", value); }
     [JsonIgnore] public string StateBeforeText { get => ReadJson("state_before"); set => WriteJson("state_before", value); }
     [JsonIgnore] public string StateAfterText { get => ReadJson("state_after"); set => WriteJson("state_after", value); }
     [JsonIgnore] public string CharacterText => string.Join("、", Characters);
@@ -147,7 +149,7 @@ public sealed class ContinuityFinding
     [JsonPropertyName("message")] public string Message { get; set; } = "";
     [JsonPropertyName("action")] public string Action { get; set; } = "";
     [JsonPropertyName("severity")] public string Severity { get; set; } = "warning";
-    [JsonIgnore] public string ActionText => Action switch { "adjust_axis" => "调整机位/运动方向", "adjust_lighting" => "统一光照状态", "fix_story_state" => "修正状态前/状态后 JSON", _ => "人工复核" };
+    [JsonIgnore] public string ActionText => Action switch { "adjust_axis" => "调整机位/运动方向", "adjust_lighting" => "统一光照状态", "fix_story_state" => "修正状态前/状态后 JSON", "fix_action_phase" => "补中间相位/过渡镜头", _ => "人工复核" };
 }
 public sealed record Episode(string Title, string Duration, bool IsActive = false);
 public sealed record Finding(string Shot, string Message, string Action);
@@ -192,8 +194,23 @@ public sealed class TaskItem
     [JsonPropertyName("max_attempts")] public int MaxAttempts { get; set; }
     [JsonPropertyName("error_message")] public string ErrorMessage { get; set; } = "";
     [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
+    [JsonPropertyName("provider_task_id")] public string ProviderTaskId { get; set; } = "";
+    [JsonPropertyName("payload")] public Dictionary<string, JsonElement> Payload { get; set; } = [];
     [JsonPropertyName("result")] public Dictionary<string, JsonElement> Result { get; set; } = [];
     [JsonIgnore] public string OutputPath => Result.TryGetValue("output_path", out var value) ? value.GetString() ?? "" : "";
+    [JsonIgnore] public string RouteState
+    {
+        get
+        {
+            if (Payload.TryGetValue("routing", out var routing) && routing.ValueKind == JsonValueKind.Object &&
+                routing.TryGetProperty("degraded_from", out var from) && routing.TryGetProperty("degraded_to", out var to))
+            {
+                var pending = routing.TryGetProperty("upgrade_pending", out var value) && value.ValueKind == JsonValueKind.True;
+                return $"{from.GetString()}→{to.GetString()}" + (pending ? " · 秘塔待升级" : "");
+            }
+            return string.IsNullOrWhiteSpace(ProviderTaskId) ? "正常路由" : $"外部任务 {ProviderTaskId}";
+        }
+    }
 }
 
 public sealed class MediaCapabilities
@@ -234,4 +251,33 @@ public sealed class AutomationRun
     [JsonPropertyName("checkpoint")] public Dictionary<string, JsonElement> Checkpoint { get; set; } = [];
     [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
     [JsonIgnore] public string OutputPath => Checkpoint.TryGetValue("output_path", out var value) ? value.GetString() ?? "" : "";
+}
+
+public sealed class AutomationRoutePlan
+{
+    [JsonPropertyName("ready")] public bool Ready { get; set; }
+    [JsonPropertyName("shot_count")] public int ShotCount { get; set; }
+    [JsonPropertyName("blocking_conflicts")] public int BlockingConflicts { get; set; }
+    [JsonPropertyName("routes")] public List<AutomationRoute> Routes { get; set; } = [];
+    [JsonPropertyName("totals")] public List<AutomationRouteTotal> Totals { get; set; } = [];
+}
+
+public sealed class AutomationRoute
+{
+    [JsonPropertyName("shot_number")] public string ShotNumber { get; set; } = "";
+    [JsonPropertyName("seconds")] public int Seconds { get; set; }
+    [JsonPropertyName("provider")] public string Provider { get; set; } = "";
+    [JsonPropertyName("model")] public string Model { get; set; } = "";
+    [JsonPropertyName("resolution")] public string Resolution { get; set; } = "";
+    [JsonPropertyName("reason")] public string Reason { get; set; } = "";
+    [JsonPropertyName("tier")] public string Tier { get; set; } = "";
+    [JsonPropertyName("value_score")] public int ValueScore { get; set; }
+    [JsonIgnore] public string RouteReason => Reason == "high_value_h3" ? "高价值镜头" : Reason == "standard_value_wan" ? "普通镜头节费" : "手动选择";
+}
+
+public sealed class AutomationRouteTotal
+{
+    [JsonPropertyName("provider")] public string Provider { get; set; } = "";
+    [JsonPropertyName("shots")] public int Shots { get; set; }
+    [JsonPropertyName("seconds")] public int Seconds { get; set; }
 }

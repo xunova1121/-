@@ -20,7 +20,7 @@ from .continuity import analyze_pair
 from .pipeline import stage_catalog
 from .providers import CAPABILITIES, known_provider, providers_for, public_catalog, supports
 from .preflight import run_preflight
-from .provider_config import all_provider_statuses, delete_provider_config, save_provider_config
+from .provider_config import all_provider_statuses, delete_provider_config, resolve_provider_config, save_provider_config
 from .quality import repair_plan, weighted_score
 from .story_bible import continuity_contract, episode_snapshot, fingerprint
 from .automation import automation_plan
@@ -29,7 +29,7 @@ from .transitions import plan_transition
 from .task_runner import TaskRunner, serialize_task
 from .media import MediaError, capabilities as media_capabilities, probe_media
 from .script_engine import extract_characters, parse_scenes, scene_to_shots
-from .production import bible_context, serialize_run, start_automation
+from .production import automation_route_plan, bible_context, serialize_run, start_automation
 from .director import DIRECTOR_SYSTEM, director_prompt, extract_json_object, normalize_design
 from .story_logic import persist_snapshots, recompute_episode
 
@@ -46,14 +46,14 @@ async def lifespan(_: FastAPI):
         await worker
 
 
-app = FastAPI(title=settings.app_name, version="1.2.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.4.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost", "http://127.0.0.1"], allow_methods=["*"], allow_headers=["*"])
 PREFIX = settings.api_prefix
 
 
 @app.get(f"{PREFIX}/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "1.2.0", "instance_id": os.getenv("AI_STUDIO_INSTANCE_ID", "external")}
+    return {"status": "ok", "version": "1.4.0", "instance_id": os.getenv("AI_STUDIO_INSTANCE_ID", "external")}
 
 
 @app.get(f"{PREFIX}/providers")
@@ -603,7 +603,7 @@ def retry_task(task_id: int):
             raise HTTPException(404, "Task not found")
         if row["status"] not in {"failed", "canceled"}:
             raise HTTPException(409, "Only failed or canceled tasks can be retried")
-        db.execute("UPDATE tasks SET status='queued',progress=0,attempts=0,cancel_requested=0,error_message='',result_json='{}',available_at=CURRENT_TIMESTAMP,completed_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?", (task_id,))
+        db.execute("UPDATE tasks SET status='queued',progress=0,attempts=0,cancel_requested=0,error_message='',result_json='{}',provider_task_id='',provider_state_json='{}',available_at=CURRENT_TIMESTAMP,completed_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?", (task_id,))
     return {"id": task_id, "status": "queued"}
 
 
@@ -774,9 +774,25 @@ def start_episode_automation(project_id: str, payload: AutomationStartRequest):
     if unsupported:
         raise HTTPException(422, "未实现或已停止维护的模型能力：" + "、".join(unsupported))
     try:
-        return start_automation(project_id, payload.model_dump())
+        config = payload.model_dump()
+        if payload.video_provider == "metaso" and resolve_provider_config("dashscope", "i2v").api_key:
+            config["video_fallback_provider"] = "dashscope"
+            config["video_fallback_model"] = "wan2.7-i2v-2026-04-25"
+            config["value_routing_enabled"] = True
+        return start_automation(project_id, config)
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
+
+
+@app.post(f"{PREFIX}/projects/{{project_id}}/automation/route-plan")
+def preview_episode_routes(project_id: str, payload: AutomationStartRequest):
+    with connect() as db:
+        if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
+            raise HTTPException(404, "Project not found")
+    config = payload.model_dump()
+    if payload.video_provider == "metaso" and resolve_provider_config("dashscope", "i2v").api_key:
+        config.update({"video_fallback_provider": "dashscope", "video_fallback_model": "wan2.7-i2v-2026-04-25", "value_routing_enabled": True})
+    return automation_route_plan(project_id, config)
 
 
 @app.get(f"{PREFIX}/projects/{{project_id}}/automation/runs")
@@ -870,7 +886,10 @@ def proofread(project_id: str):
     for row in state_rows:
         for item in json.loads(row["conflicts_json"] or "[]"):
             state_conflicts += 1
-            findings.append({"shot": str(row["number"]), "message": f"故事状态跳变：{item.get('path')}，应为 {item.get('expected')}，实际为 {item.get('actual')}", "action": "fix_story_state", "severity": "blocking"})
+            kind = str(item.get("type") or "story_state")
+            message = str(item.get("message") or f"故事状态跳变：{item.get('path')}，应为 {item.get('expected')}，实际为 {item.get('actual')}")
+            action = "fix_action_phase" if kind in {"action_phase", "action_phase_gap", "action_chain", "momentum"} else "fix_story_state"
+            findings.append({"shot": str(row["number"]), "message": message, "action": action, "severity": "blocking"})
     score = round(sum(scores) / len(scores)) if scores else (100 if shots else 0)
     score = max(0, score - state_conflicts * 20)
     return {"project_id": project_id, "score": score, "shot_count": len(shots), "state_conflicts": state_conflicts, "findings": findings}

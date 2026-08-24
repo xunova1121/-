@@ -10,6 +10,7 @@ namespace AI.FilmStudio;
 public partial class TaskQueueWindow : Window
 {
     private readonly StudioApiClient _api;
+    private IReadOnlyList<ProviderConfigStatus> _providers = [];
 
     public TaskQueueWindow(StudioApiClient api)
     {
@@ -22,10 +23,8 @@ public partial class TaskQueueWindow : Window
     {
         try
         {
-            var providers = (await _api.GetProviderConfigsAsync()).Where(item => item.Configured && item.ProviderId is "openai" or "ark").ToList();
-            var selected = (Provider.SelectedItem as ProviderConfigStatus)?.ProviderId;
-            Provider.ItemsSource = providers;
-            Provider.SelectedItem = providers.FirstOrDefault(item => item.ProviderId == selected) ?? providers.FirstOrDefault();
+            _providers = (await _api.GetProviderConfigsAsync()).Where(item => item.Configured).ToList();
+            RefreshProviderChoices();
             var tasks = await _api.GetTasksAsync();
             TaskGrid.ItemsSource = tasks;
             var active = tasks.Count(item => item.Status is "queued" or "running" or "retry_wait");
@@ -41,10 +40,22 @@ public partial class TaskQueueWindow : Window
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAsync();
 
+    private void TaskType_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (IsLoaded) RefreshProviderChoices(); }
+
+    private void RefreshProviderChoices()
+    {
+        var type = (TaskType.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "llm";
+        var capability = type switch { "image" => "t2i", "video" => "i2v", "voice" => "tts", _ => "chat" };
+        var selected = (Provider.SelectedItem as ProviderConfigStatus)?.ProviderId;
+        var available = _providers.Where(item => item.Capabilities.Contains(capability)).ToList();
+        Provider.ItemsSource = available;
+        Provider.SelectedItem = available.FirstOrDefault(item => item.ProviderId == selected) ?? available.FirstOrDefault();
+    }
+
     private async void Create_Click(object sender, RoutedEventArgs e)
     {
         var type = (TaskType.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "video";
-        if (Provider.SelectedItem is not ProviderConfigStatus provider) { FeedbackText.Text = "请先在主界面的“模型”中配置 OpenAI 或火山方舟"; return; }
+        if (Provider.SelectedItem is not ProviderConfigStatus provider) { FeedbackText.Text = "请先在主界面的“模型”中配置支持当前任务类型的提供方"; return; }
         try
         {
             await _api.CreateTaskAsync(type, provider.ProviderId, $"为当前影视项目执行 {type} 制作任务。输出应结构化、具体且可直接进入下一制作环节。");

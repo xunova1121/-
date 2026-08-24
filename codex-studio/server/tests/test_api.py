@@ -12,8 +12,183 @@ from app.adapters import registry
 from app.adapters.base import AIAdapter, MockAdapter
 from app.adapters.anthropic import AnthropicAdapter
 from app.adapters.openai_compatible import OpenAICompatibleAdapter
-from app import media, production
+from app.adapters.metaso import MetasoAdapter
+from app import media, production, story_logic
 from app.task_runner import TaskRunner
+from app.schemas import AutomationStartRequest
+
+
+def test_metaso_h3_submits_polls_and_downloads_with_same_domain_auth(monkeypatch, tmp_path: Path):
+    import asyncio
+    import httpx
+
+    reference = tmp_path / "first.png"
+    reference.write_bytes(b"fake-png")
+    calls: list[tuple[str, str]] = []
+    query_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal query_count
+        calls.append((request.method, str(request.url)))
+        assert request.headers.get("authorization") == "Bearer mk-test-secret"
+        if request.method == "POST":
+            body = __import__("json").loads(request.content)
+            assert body["model"] == "MiniMax-H3"
+            assert body["duration"] == 4
+            assert body["resolution"] == "2K"
+            assert body["ratio"] == "adaptive"
+            assert body["content"][1]["role"] == "first_frame"
+            assert body["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+            return httpx.Response(200, json={"task_id": "h3-100"})
+        if "query/video_generation" in str(request.url):
+            query_count += 1
+            status = "queued" if query_count == 1 else "succeeded"
+            content = {"url": "https://files.metaso.cn/api/video-generation/h3-100/content"} if status == "succeeded" else {}
+            return httpx.Response(200, json={"task": {"id": "h3-100", "status": status, "content": content, "resolution": "2K", "duration": 4}})
+        assert request.headers.get("authorization") == "Bearer mk-test-secret"
+        return httpx.Response(200, content=b"video-bytes", headers={"content-type": "video/mp4"})
+
+    monkeypatch.setenv("METASO_API_KEY", "mk-test-secret")
+    monkeypatch.setenv("AI_STUDIO_METASO_BASE_URL", "https://metaso.cn/api/minimax/v2")
+    monkeypatch.setattr("app.adapters.metaso.project_media_dir", lambda _: tmp_path / "media")
+    with sqlite3.connect(settings.database_path) as db:
+        task_id = db.execute("INSERT INTO tasks(project_id,task_type,provider) VALUES('demo','video','metaso')").lastrowid
+    result = asyncio.run(MetasoAdapter(httpx.MockTransport(handler)).invoke("人物回头", {
+        "task_id": task_id, "task_type": "video", "project_id": "demo", "shot_id": 1,
+        "reference_paths": [str(reference)], "options": {"duration": 3, "resolution": "1080P", "ratio": "9:16", "poll_interval": 0},
+    }))
+    assert result["provider_task_id"] == "h3-100"
+    assert result["first_frame_sent"] is True
+    assert Path(result["output_path"]).read_bytes() == b"video-bytes"
+    assert sum(1 for method, _ in calls if method == "POST") == 1
+    with sqlite3.connect(settings.database_path) as db:
+        row = db.execute("SELECT provider_task_id,provider_state_json FROM tasks WHERE id=?", (task_id,)).fetchone()
+    assert row[0] == "h3-100" and "downloaded" in row[1]
+
+
+def test_metaso_h3_resumes_saved_provider_task_without_resubmit(monkeypatch, tmp_path: Path):
+    import asyncio
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        if "query/video_generation" in str(request.url):
+            return httpx.Response(200, json={"task": {"id": "saved-7", "status": "succeeded", "content": {"url": "https://cdn.example/video.mp4"}}})
+        assert "authorization" not in request.headers
+        return httpx.Response(200, content=b"resumed-video", headers={"content-type": "video/mp4"})
+
+    monkeypatch.setenv("METASO_API_KEY", "mk-test-secret")
+    monkeypatch.setenv("AI_STUDIO_METASO_BASE_URL", "https://metaso.cn/api/minimax/v2")
+    monkeypatch.setattr("app.adapters.metaso.project_media_dir", lambda _: tmp_path / "media")
+    with sqlite3.connect(settings.database_path) as db:
+        task_id = db.execute("INSERT INTO tasks(project_id,task_type,provider,provider_task_id) VALUES('demo','video','metaso','saved-7')").lastrowid
+    result = asyncio.run(MetasoAdapter(httpx.MockTransport(handler)).invoke("继续查询", {
+        "task_id": task_id, "task_type": "video", "project_id": "demo", "options": {"poll_interval": 0},
+    }))
+    assert result["provider_task_id"] == "saved-7"
+    assert Path(result["output_path"]).read_bytes() == b"resumed-video"
+
+
+def test_metaso_recognizes_http_200_business_error():
+    import httpx
+    response = httpx.Response(200, json={"type": "error", "error": {"message": "login fail: bad key", "http_code": "401"}})
+    with pytest.raises(RuntimeError, match="login fail"):
+        MetasoAdapter._payload(response, "秘塔测试", "https://metaso.cn/test")
+
+
+def test_provider_catalog_exposes_only_real_metaso_h3_capabilities():
+    with TestClient(app) as client:
+        item = next(provider for provider in client.get("/api/v1/providers").json() if provider["id"] == "metaso")
+    assert item["models"]["i2v"] == ["MiniMax-H3"]
+    assert item["supports_end_frame"] is True
+    assert item["max_reference_images"] == 9
+
+
+def test_metaso_automation_adds_wan_fallback_only_when_configured(monkeypatch):
+    from app import main as main_module
+
+    captured: dict = {}
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "dashscope-secret")
+    monkeypatch.setattr(main_module, "start_automation", lambda _project_id, config: captured.update(config) or config)
+    result = main_module.start_episode_automation("demo", AutomationStartRequest(video_provider="metaso", video_model="MiniMax-H3"))
+    assert result["video_fallback_provider"] == "dashscope"
+    assert captured["video_fallback_model"] == "wan2.7-i2v-2026-04-25"
+
+
+def test_metaso_queue_timeout_routes_to_wan_without_losing_primary_task_id():
+    payload = {
+        "prompt": "连续动作",
+        "model": "MiniMax-H3",
+        "routing": {"tier": "premium"},
+        "fallback": {"provider": "dashscope", "model": "wan2.7-i2v-2026-04-25"},
+    }
+    with sqlite3.connect(settings.database_path) as db:
+        task_id = db.execute(
+            "INSERT INTO tasks(project_id,task_type,provider,status,attempts,max_attempts,payload_json,provider_task_id) VALUES('demo','video','metaso','running',1,3,?,'h3-running')",
+            (__import__("json").dumps(payload, ensure_ascii=False),),
+        ).lastrowid
+        db.row_factory = sqlite3.Row
+        task = dict(db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone())
+    # claim_next obtains its row before the adapter persists the external id; fallback must reread SQLite.
+    task["provider_task_id"] = ""
+    terminal = TaskRunner()._fail_or_retry(task, "秘塔视频生成排队超时；任务 h3-running 已保留")
+    assert terminal is False
+    with sqlite3.connect(settings.database_path) as db:
+        db.row_factory = sqlite3.Row
+        row = db.execute("SELECT provider,status,attempts,payload_json,provider_task_id,provider_state_json FROM tasks WHERE id=?", (task_id,)).fetchone()
+    routed = __import__("json").loads(row["payload_json"])
+    assert row["provider"] == "dashscope" and row["status"] == "queued" and row["attempts"] == 0
+    assert row["provider_task_id"] == ""
+    assert routed["model"] == "wan2.7-i2v-2026-04-25"
+    assert routed["routing"]["primary_provider_task_id"] == "h3-running"
+    assert routed["routing"]["upgrade_pending"] is True
+    assert "degraded" in row["provider_state_json"]
+
+
+def test_metaso_auth_error_does_not_hide_problem_with_wan_fallback():
+    payload = {"fallback": {"provider": "dashscope", "model": "wan"}}
+    with sqlite3.connect(settings.database_path) as db:
+        task_id = db.execute(
+            "INSERT INTO tasks(project_id,task_type,provider,status,attempts,max_attempts,payload_json) VALUES('demo','video','metaso','running',1,3,?)",
+            (__import__("json").dumps(payload),),
+        ).lastrowid
+        db.row_factory = sqlite3.Row
+        task = dict(db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone())
+    terminal = TaskRunner()._fail_or_retry(task, "秘塔视频创建 HTTP 401 · 密钥错误")
+    assert terminal is True
+    with sqlite3.connect(settings.database_path) as db:
+        provider, status = db.execute("SELECT provider,status FROM tasks WHERE id=?", (task_id,)).fetchone()
+    assert provider == "metaso" and status == "failed"
+
+
+def test_metaso_reference_mode_uses_reference_roles(monkeypatch, tmp_path: Path):
+    import asyncio
+    import httpx
+
+    images = []
+    for index in range(3):
+        path = tmp_path / f"ref-{index}.png"
+        path.write_bytes(b"image")
+        images.append(str(path))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            body = __import__("json").loads(request.content)
+            assert body["ratio"] == "9:16"
+            assert [item.get("role") for item in body["content"][1:]] == ["reference_image"] * 3
+            return httpx.Response(200, json={"task_id": "ref-3"})
+        if "query/video_generation" in str(request.url):
+            return httpx.Response(200, json={"task": {"id": "ref-3", "status": "succeeded", "content": {"url": "https://cdn.example/ref.mp4"}}})
+        return httpx.Response(200, content=b"reference-video", headers={"content-type": "video/mp4"})
+
+    monkeypatch.setenv("METASO_API_KEY", "mk-test-secret")
+    monkeypatch.setenv("AI_STUDIO_METASO_BASE_URL", "https://metaso.cn/api/minimax/v2")
+    monkeypatch.setattr("app.adapters.metaso.project_media_dir", lambda _: tmp_path / "media")
+    result = asyncio.run(MetasoAdapter(httpx.MockTransport(handler)).invoke("锁定角色", {
+        "task_type": "video", "project_id": "demo", "reference_paths": images,
+        "options": {"reference_mode": "reference", "ratio": "9:16", "poll_interval": 0},
+    }))
+    assert result["reference_count_sent"] == 3
 
 
 @pytest.fixture(autouse=True)
@@ -175,7 +350,7 @@ def test_vision_review_is_persisted_as_repair_record():
 def test_claude_borrowed_architecture_endpoints():
     with TestClient(app) as client:
         assert len(client.get("/api/v1/pipeline/stages").json()) == 6
-        assert client.get("/api/v1/providers?capability=r2v").json() == []
+        assert [item["id"] for item in client.get("/api/v1/providers?capability=r2v").json()] == ["metaso"]
         dashscope = next(item for item in client.get("/api/v1/providers").json() if item["id"] == "dashscope")
         assert dashscope["capabilities"] == ["i2v"]
         openai = next(item for item in client.get("/api/v1/providers").json() if item["id"] == "openai")
@@ -386,13 +561,109 @@ def test_continuous_video_waits_for_previous_tail_frame(tmp_path: Path, monkeypa
         assert queued == 1
         asset_id = db.execute("INSERT INTO assets(project_id,asset_type,name,episode,shot_id,local_path,status) VALUES('demo','video','previous',1,?,?,'ready')", (first, str(previous_video))).lastrowid
         db.execute("INSERT INTO shot_assets(shot_id,asset_id,role) VALUES(?,?,'video')", (first, asset_id))
+        target = tmp_path / "target-keyframe.png"
+        target.write_bytes(b"target")
+        target_id = db.execute("INSERT INTO assets(project_id,asset_type,name,episode,shot_id,local_path,status) VALUES('demo','image','target',1,?,?,'ready')", (second, str(target))).lastrowid
+        db.execute("INSERT INTO shot_assets(shot_id,asset_id,role) VALUES(?,?,'image')", (second, target_id))
         monkeypatch.setattr(production, "extract_boundary_frames", lambda *args: (str(tail), str(tail)))
         queued = production._queue_video_wave(db, run_id, "demo", shots, {"video_provider": "mock", "width": 1280, "height": 720})
         assert queued == 1
         payload = db.execute("SELECT payload_json FROM tasks WHERE automation_run_id=? AND stage='videos' ORDER BY id DESC LIMIT 1", (run_id,)).fetchone()[0]
     decoded = __import__("json").loads(payload)
-    assert decoded["reference_paths"] == [str(tail)]
+    assert decoded["reference_paths"] == [str(tail), str(target)]
     assert decoded["dependency"]["from_shot_id"] == first
+    assert decoded["dependency"]["constraint"] == "previous_tail_to_current_target"
+
+
+def test_action_phase_state_machine_blocks_regression_and_large_gap():
+    shots = [
+        {"number": "001", "scene_index": 1, "continuity": {"link": "new-scene", "action_id": "chop-1", "action_phase": "start", "momentum": "down"}},
+        {"number": "002", "scene_index": 1, "continuity": {"link": "continuous", "action_id": "chop-1", "action_phase": "end", "momentum": "down"}},
+        {"number": "003", "scene_index": 1, "continuity": {"link": "continuous", "action_id": "chop-1", "action_phase": "middle", "momentum": "up"}},
+    ]
+    _, findings = story_logic.validate_and_project(shots)
+    kinds = {item["type"] for item in findings}
+    assert "action_phase_gap" in kinds
+    assert "action_phase" in kinds
+    assert "momentum" in kinds
+    assert all(item["severity"] == "blocking" for item in findings)
+
+
+def test_value_router_sends_premium_to_h3_and_standard_to_wan():
+    with sqlite3.connect(settings.database_path) as db:
+        db.row_factory = sqlite3.Row
+        rows = db.execute("SELECT id FROM shots WHERE project_id='demo' ORDER BY id LIMIT 2").fetchall()
+        db.execute("UPDATE shots SET value_score=90,model_requirement_json='{}',continuity_json='{\"link\":\"cut\"}' WHERE id=?", (rows[0]["id"],))
+        db.execute("UPDATE shots SET value_score=55,model_requirement_json='{}',continuity_json='{\"link\":\"cut\"}' WHERE id=?", (rows[1]["id"],))
+        shots = db.execute("SELECT * FROM shots WHERE id IN (?,?) ORDER BY id", (rows[0]["id"], rows[1]["id"])).fetchall()
+        run_id = db.execute("INSERT INTO automation_runs(project_id,episode,status,stage,config_json) VALUES('demo',1,'running','videos','{}')").lastrowid
+        production._queue_video_wave(db, run_id, "demo", shots, {
+            "video_provider": "metaso", "video_model": "MiniMax-H3", "video_fallback_provider": "dashscope",
+            "video_fallback_model": "wan2.7-i2v-2026-04-25", "value_routing_enabled": True, "width": 1920, "height": 1080,
+        })
+        tasks = db.execute("SELECT provider,payload_json FROM tasks WHERE automation_run_id=? ORDER BY id", (run_id,)).fetchall()
+    assert [row["provider"] for row in tasks] == ["metaso", "dashscope"]
+    payloads = [__import__("json").loads(row["payload_json"]) for row in tasks]
+    assert payloads[0]["routing"]["reason"] == "high_value_h3" and payloads[0]["options"]["resolution"] == "2K"
+    assert payloads[1]["routing"]["reason"] == "standard_value_wan" and payloads[1]["options"]["resolution"] == "1080P"
+
+
+def test_route_plan_previews_every_paid_video_call_without_creating_tasks(monkeypatch):
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "dashscope-for-route-preview")
+    with sqlite3.connect(settings.database_path) as db:
+        rows = db.execute("SELECT id FROM shots WHERE project_id='demo' ORDER BY id LIMIT 2").fetchall()
+        db.execute("DELETE FROM shots WHERE project_id='demo' AND id NOT IN (?,?)", (rows[0][0], rows[1][0]))
+        db.execute("UPDATE shots SET value_score=92,model_requirement_json='{}' WHERE id=?", (rows[0][0],))
+        db.execute("UPDATE shots SET value_score=40,model_requirement_json='{}' WHERE id=?", (rows[1][0],))
+    with TestClient(app) as client:
+        response = client.post("/api/v1/projects/demo/automation/route-plan", json={
+            "episode": 1, "mode": "balanced", "video_provider": "metaso", "video_model": "MiniMax-H3",
+            "image_provider": "openai", "voice_provider": None,
+        })
+        assert response.status_code == 200
+        plan = response.json()
+        assert plan["ready"] is True and plan["shot_count"] == 2
+        assert [item["provider"] for item in plan["routes"]] == ["metaso", "dashscope"]
+        assert [item["reason"] for item in plan["routes"]] == ["high_value_h3", "standard_value_wan"]
+        assert sum(item["shots"] for item in plan["totals"]) == 2
+        assert client.get("/api/v1/projects/demo/tasks").json() == []
+
+
+def test_video_review_compares_previous_tail_with_current_head(monkeypatch):
+    with sqlite3.connect(settings.database_path) as db:
+        db.row_factory = sqlite3.Row
+        shots = db.execute("SELECT * FROM shots WHERE project_id='demo' ORDER BY id LIMIT 2").fetchall()
+        db.execute("UPDATE shots SET continuity_json='{\"link\":\"new-scene\",\"action_id\":\"run-1\",\"action_phase\":\"start\"}' WHERE id=?", (shots[0]["id"],))
+        db.execute("UPDATE shots SET continuity_json='{\"link\":\"continuous\",\"action_id\":\"run-1\",\"action_phase\":\"middle\"}' WHERE id=?", (shots[1]["id"],))
+        shots = db.execute("SELECT * FROM shots WHERE id IN (?,?) ORDER BY id", (shots[0]["id"], shots[1]["id"])).fetchall()
+        for index, shot in enumerate(shots):
+            asset_id = db.execute("INSERT INTO assets(project_id,asset_type,name,episode,shot_id,local_path,status) VALUES('demo','video',?,1,?,?,'ready')", (f"v{index}", shot["id"], f"video-{index}.mp4")).lastrowid
+            db.execute("INSERT INTO shot_assets(shot_id,asset_id,role) VALUES(?,?,'video')", (shot["id"], asset_id))
+        run_id = db.execute("INSERT INTO automation_runs(project_id,episode,status,stage,config_json) VALUES('demo',1,'running','video_review','{}')").lastrowid
+        monkeypatch.setattr(production, "extract_review_frames", lambda path, *_args: [f"{path}-head", f"{path}-middle", f"{path}-tail"])
+        monkeypatch.setattr(production, "extract_boundary_frames", lambda *_args: ("previous-real-tail.png", "current-real-head.png"))
+        count = production._queue_video_reviews(db, run_id, "demo", shots, {"quality_provider": "mock", "mode": "quality"}, "video_review")
+        raw = db.execute("SELECT payload_json FROM tasks WHERE automation_run_id=? AND stage='video_review' ORDER BY id DESC LIMIT 1", (run_id,)).fetchone()[0]
+    payload = __import__("json").loads(raw)
+    assert count == 2
+    assert payload["reference_paths"][:2] == ["previous-real-tail.png", "current-real-head.png"]
+    assert payload["options"]["seam_from_shot"] == shots[0]["number"]
+    assert "必须重点比较" in payload["prompt"]
+
+
+def test_metaso_native_audio_is_limited_to_ambience_when_tts_is_enabled():
+    with sqlite3.connect(settings.database_path) as db:
+        db.row_factory = sqlite3.Row
+        shot = db.execute("SELECT * FROM shots WHERE project_id='demo' ORDER BY id LIMIT 1").fetchone()
+        run_id = db.execute("INSERT INTO automation_runs(project_id,episode,status,stage,config_json) VALUES('demo',1,'running','videos','{}')").lastrowid
+        production._queue_video_wave(db, run_id, "demo", [shot], {
+            "video_provider": "metaso", "video_model": "MiniMax-H3", "voice_provider": "openai", "generate_voice": True,
+            "width": 1080, "height": 1920,
+        })
+        raw = db.execute("SELECT payload_json FROM tasks WHERE automation_run_id=?", (run_id,)).fetchone()[0]
+    payload = __import__("json").loads(raw)
+    assert payload["options"]["native_audio_policy"] == "ambient_only"
+    assert "不生成角色对白或旁白" in payload["prompt"]
 
 
 def test_story_state_recomputes_after_edit_and_blocks_production():

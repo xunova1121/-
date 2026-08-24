@@ -82,6 +82,8 @@ class TaskRunner:
                 adapter = registry.resolve(task["provider"])
                 prompt = str(payload.get("prompt") or f"执行 {task['task_type']} 任务")
                 result = await adapter.invoke(prompt, {**payload, "project_id": task["project_id"], "task_id": task["id"], "task_type": task["task_type"]})
+                if payload.get("routing"):
+                    result["routing"] = payload["routing"]
             await asyncio.to_thread(self._complete, task, result)
             if task.get("automation_run_id"):
                 await asyncio.to_thread(advance_automation, int(task["automation_run_id"]))
@@ -110,7 +112,7 @@ class TaskRunner:
             status = "canceled" if canceled and canceled[0] else "completed"
             progress = 0 if status == "canceled" else 100
             db.execute(
-                "UPDATE tasks SET status=?,progress=?,result_json=?,lease_until=NULL,completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                "UPDATE tasks SET status=?,progress=?,result_json=?,error_message='',lease_until=NULL,completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (status, progress, json.dumps(result, ensure_ascii=False), task_id),
             )
             if status == "completed" and task["task_type"] == "vision_review":
@@ -144,6 +146,8 @@ class TaskRunner:
     def _fail_or_retry(self, task: dict[str, Any], message: str) -> bool:
         attempts = int(task["attempts"])
         max_attempts = int(task["max_attempts"])
+        if self._route_video_fallback(task, message, attempts, max_attempts):
+            return False
         non_retryable = any(marker in message for marker in ("HTTP 400", "HTTP 401", "HTTP 403", "HTTP 404", "尚未配置", "不支持", "缺少", "不存在"))
         terminal = non_retryable or attempts >= max_attempts
         delay = min(60, 2 ** attempts)
@@ -155,6 +159,45 @@ class TaskRunner:
                 ("failed" if terminal else "retry_wait", message[:1000], available, terminal, task["id"]),
             )
         return terminal
+
+    @staticmethod
+    def _route_video_fallback(task: dict[str, Any], message: str, attempts: int, max_attempts: int) -> bool:
+        if task.get("task_type") != "video":
+            return False
+        payload = json.loads(task.get("payload_json") or "{}")
+        fallback = payload.get("fallback") if isinstance(payload.get("fallback"), dict) else {}
+        fallback_provider = str(fallback.get("provider") or "")
+        if not fallback_provider or fallback_provider == task.get("provider"):
+            return False
+        lower = message.lower()
+        queue_timeout = "排队超时" in message or "poll" in lower and "timeout" in lower
+        temporary = any(marker in lower for marker in ("http 429", "http 500", "http 502", "http 503", "http 504", "rate limit", "internal error", "temporarily", "network", "connect", "timeout"))
+        if not queue_timeout and not (temporary and attempts >= max_attempts):
+            return False
+        current_provider_task_id = str(task.get("provider_task_id") or "")
+        if not current_provider_task_id:
+            with sqlite3.connect(settings.database_path) as db:
+                row = db.execute("SELECT provider_task_id FROM tasks WHERE id=?", (task["id"],)).fetchone()
+            current_provider_task_id = str(row[0] or "") if row else ""
+        routing = dict(payload.get("routing") or {})
+        routing.update({
+            "degraded_from": task.get("provider"),
+            "degraded_to": fallback_provider,
+            "degraded_reason": message[:500],
+            "primary_provider_task_id": current_provider_task_id,
+            "upgrade_pending": bool(current_provider_task_id),
+        })
+        payload["routing"] = routing
+        payload["model"] = str(fallback.get("model") or payload.get("model") or "")
+        payload.pop("fallback", None)
+        with sqlite3.connect(settings.database_path) as db:
+            db.execute(
+                "UPDATE tasks SET provider=?,status='queued',progress=0,attempts=0,payload_json=?,provider_task_id='',"
+                "provider_state_json=?,error_message=?,available_at=CURRENT_TIMESTAMP,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (fallback_provider, json.dumps(payload, ensure_ascii=False), json.dumps({"status": "degraded", **routing}, ensure_ascii=False),
+                 f"已从 {task.get('provider')} 降级到 {fallback_provider}：{message[:600]}", task["id"]),
+            )
+        return True
 
 
 def serialize_task(row: sqlite3.Row) -> dict[str, Any]:

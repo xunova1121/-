@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     available_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, lease_until TEXT, cancel_requested INTEGER NOT NULL DEFAULT 0,
     error_message TEXT NOT NULL DEFAULT '', started_at TEXT, completed_at TEXT,
     automation_run_id INTEGER, stage TEXT NOT NULL DEFAULT '',
+    provider_task_id TEXT NOT NULL DEFAULT '', provider_state_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS automation_runs (
@@ -155,6 +156,8 @@ TASK_MIGRATIONS: dict[str, str] = {
     "updated_at": "TEXT",
     "automation_run_id": "INTEGER",
     "stage": "TEXT NOT NULL DEFAULT ''",
+    "provider_task_id": "TEXT NOT NULL DEFAULT ''",
+    "provider_state_json": "TEXT NOT NULL DEFAULT '{}'",
 }
 
 SHOT_MIGRATIONS: dict[str, str] = {

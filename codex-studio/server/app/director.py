@@ -29,7 +29,7 @@ JSON 结构：
     "scene_index":1,"title":"","description":"只写当前画面可见状态","shot_type":"中景","camera":"固定",
     "action":"一个镜头只包含一个主要动作","dialogue":"","speaker":"","line_kind":"speech",
     "sound":"","duration":4,"characters":[],"props":[],"link":"new-scene",
-    "screen_direction":"unknown","action_phase":"static","lighting":"","end_state":"",
+    "screen_direction":"unknown","action_id":"","action_phase":"static","momentum":"still","lighting":"","end_state":"",
     "state_before":{"characters":{},"props":{},"environment":{}},
     "state_after":{"characters":{},"props":{},"environment":{}},
     "state_change_reason":"仅在状态发生变化时说明镜头内可见原因",
@@ -41,6 +41,7 @@ JSON 结构：
 硬性规则：
 - 每个场次第一镜必须 link=new-scene；跨场次禁止 continuous；同场换机位默认 cut；只有同一动作的下一瞬间才用 continuous。
 - 一镜只做一个主要动作；首帧描述必须是动作正在开始或进行中，不能把整段动作写完。
+- 连续动作必须使用相同 action_id；action_phase 只能按 anticipation→start→middle→impact→follow_through→end→settle 前进，不得倒退或跨越两个以上阶段；momentum 标记 left/right/up/down/forward/back/still。
 - 动作量必须与时长匹配；单镜 2-12 秒；对白时长按每秒约4个汉字估算，不得念不完。
 - 人物、场景、道具名称只能使用 Bible 中的名称；不得在不同镜头随意改名。
 - 同场人物运动方向、视线、光向和色温必须连续；需要越轴时在 end_state 中说明动机。
@@ -170,8 +171,14 @@ def normalize_design(raw: dict[str, Any]) -> dict[str, Any]:
         if direction not in {"left", "right", "center", "unknown"}:
             direction = "unknown"
         phase = _text(item.get("action_phase"), "static")
-        if phase not in {"start", "middle", "end", "static"}:
+        if phase not in {"anticipation", "start", "middle", "impact", "follow_through", "end", "settle", "static"}:
             phase = "static"
+        action_id = _text(item.get("action_id"))
+        if link == "continuous" and not action_id and shots:
+            action_id = _text(shots[-1].get("continuity", {}).get("action_id"))
+        momentum = _text(item.get("momentum"), "still").lower()
+        if momentum not in {"left", "right", "up", "down", "forward", "back", "still"}:
+            momentum = "still"
         line_kind = _text(item.get("line_kind"), "speech")
         if line_kind not in {"speech", "inner", "voiceover", "offscreen"}:
             line_kind = "speech"
@@ -189,7 +196,7 @@ def normalize_design(raw: dict[str, Any]) -> dict[str, Any]:
             "continuity": {
                 "scene": scene["location"], "time_of_day": scene["time_of_day"], "link": link,
                 "speaker": _text(item.get("speaker")), "line_kind": line_kind, "sound": _text(item.get("sound")),
-                "props": props, "screen_direction": direction, "action_phase": phase,
+                "props": props, "screen_direction": direction, "action_id": action_id, "action_phase": phase, "momentum": momentum,
                 "lighting": _text(item.get("lighting")), "end_state": _text(item.get("end_state")),
                 "state_before": dict(item.get("state_before") or {}) if isinstance(item.get("state_before"), dict) else {},
                 "state_after": dict(item.get("state_after") or {}) if isinstance(item.get("state_after"), dict) else {},

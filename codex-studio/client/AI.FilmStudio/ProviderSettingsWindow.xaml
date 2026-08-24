@@ -1,13 +1,13 @@
 <Window x:Class="AI.FilmStudio.ProviderSettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="模型连接" Width="680" Height="530" ResizeMode="NoResize"
+        Title="模型连接" Width="720" Height="550" ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner" Background="{StaticResource BgBrush}">
     <Grid Margin="26">
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <StackPanel><TextBlock Text="真实模型连接" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="密钥使用 Windows DPAPI 加密，仅当前 Windows 用户可以解密；不会显示或写入日志。" Foreground="{StaticResource MutedBrush}" Margin="0,7,0,0" TextWrapping="Wrap"/></StackPanel>
         <Border Grid.Row="1" Background="#171A20" BorderBrush="{StaticResource StrokeBrush}" BorderThickness="1" CornerRadius="7" Padding="12" Margin="0,20,0,16">
-            <StackPanel Orientation="Horizontal"><TextBlock Text="提供方" VerticalAlignment="Center" Margin="0,0,12,0"/><ComboBox x:Name="Provider" Width="320" Height="36" SelectionChanged="Provider_SelectionChanged"><ComboBoxItem Tag="openai">OpenAI · 导演/图像/语音/VLM质检</ComboBoxItem><ComboBoxItem Tag="anthropic">Anthropic Claude · 导演/剧本</ComboBoxItem><ComboBoxItem Tag="deepseek">DeepSeek · 导演/剧本</ComboBoxItem><ComboBoxItem Tag="qwen">阿里云百炼 · Qwen 导演</ComboBoxItem><ComboBoxItem Tag="dashscope">阿里云百炼 · Wan 2.7 视频</ComboBoxItem><ComboBoxItem Tag="ark">火山方舟 · 导演/剧本 Endpoint</ComboBoxItem></ComboBox><TextBlock x:Name="Status" Margin="16,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}"/></StackPanel>
+            <StackPanel Orientation="Horizontal"><TextBlock Text="提供方" VerticalAlignment="Center" Margin="0,0,12,0"/><ComboBox x:Name="Provider" Width="350" Height="36" SelectionChanged="Provider_SelectionChanged"><ComboBoxItem Tag="openai">OpenAI · 导演/图像/语音/VLM质检</ComboBoxItem><ComboBoxItem Tag="anthropic">Anthropic Claude · 导演/剧本</ComboBoxItem><ComboBoxItem Tag="deepseek">DeepSeek · 导演/剧本</ComboBoxItem><ComboBoxItem Tag="qwen">阿里云百炼 · Qwen 导演</ComboBoxItem><ComboBoxItem Tag="metaso">秘塔 · MiniMax H3 视频</ComboBoxItem><ComboBoxItem Tag="dashscope">阿里云百炼 · Wan 2.7 视频</ComboBoxItem><ComboBoxItem Tag="ark">火山方舟 · 导演/剧本 Endpoint</ComboBoxItem></ComboBox><TextBlock x:Name="Status" Margin="16,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}"/></StackPanel>
         </Border>
         <StackPanel Grid.Row="2">
             <TextBlock Text="API Base URL"/><TextBox x:Name="BaseUrl" Height="38" Padding="9" Margin="0,6,0,15"/>
