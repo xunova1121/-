@@ -840,6 +840,10 @@ def test_story_state_recomputes_after_edit_and_blocks_production():
         proofread = client.get("/api/v1/projects/demo/proofread").json()
         assert proofread["state_conflicts"] >= 1
         assert any(item["action"] == "fix_story_state" and item["severity"] == "blocking" for item in proofread["findings"])
+        # Re-lock the deliberately conflicting snapshot so the request reaches
+        # the runtime story-state gate instead of stopping at the earlier stale-lock gate.
+        forced_lock = client.post("/api/v1/projects/demo/episode-locks", json={"episode": 1, "force": True})
+        assert forced_lock.status_code == 200
         blocked = client.post("/api/v1/projects/demo/automation/start", json={"episode": 1, "image_provider": "mock", "video_provider": "mock"})
         assert blocked.status_code == 409
         assert "故事状态图" in blocked.json()["detail"]

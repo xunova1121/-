@@ -28,6 +28,8 @@ jobs:
       - name: Test local service
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
           python -m pip install -r codex-studio/server/requirements.txt
           $env:PYTHONPATH = "codex-studio/server"
           pytest -q codex-studio/server/tests
@@ -35,6 +37,8 @@ jobs:
       - name: Build local service EXE
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
           python -m pip install pyinstaller
           Push-Location codex-studio/server
           pyinstaller AIStudioService.spec --clean --noconfirm
@@ -42,6 +46,8 @@ jobs:
       - name: Smoke test packaged local service
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
           $service = Start-Process -FilePath "codex-studio/server/dist/AIStudioService.exe" -PassThru
           try {
             $healthy = $false
@@ -69,6 +75,8 @@ jobs:
       - name: Build WPF client EXE
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
           New-Item -ItemType Directory -Force codex-studio/client/AI.FilmStudio/Embedded
           Copy-Item codex-studio/server/dist/AIStudioService.exe codex-studio/client/AI.FilmStudio/Embedded/AIStudioService.exe
           Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile "$env:RUNNER_TEMP/ffmpeg.zip"
@@ -82,6 +90,8 @@ jobs:
       - name: Smoke test packaged desktop app
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
           $ready = Join-Path $env:LOCALAPPDATA "AI-Film-Studio/desktop-ready.txt"
           Remove-Item $ready -Force -ErrorAction SilentlyContinue
           $desktop = Start-Process -FilePath "dist/AI-Film-Studio/AI-Film-Studio.exe" -PassThru
@@ -126,6 +136,8 @@ jobs:
       - name: Verify single-file delivery
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
           $files = Get-ChildItem dist/AI-Film-Studio -File
           if ($files.Count -ne 1 -or $files[0].Name -ne "AI-Film-Studio.exe") { throw "Delivery must contain exactly one EXE" }
           Get-FileHash dist/AI-Film-Studio/AI-Film-Studio.exe -Algorithm SHA256
