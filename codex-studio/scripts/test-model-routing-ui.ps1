@@ -81,16 +81,27 @@ try {
     $storyboardBody = @{ replace_existing = $true } | ConvertTo-Json
     Invoke-RestMethod -Method Post -Uri "$ApiBase/projects/$($project.id)/episodes/1/storyboard/generate" -ContentType "application/json" -Body $storyboardBody | Out-Null
 
-    $boards = @(Invoke-RestMethod -Uri "$ApiBase/projects/$($project.id)/reference-boards")
-    if ($boards.Count -lt 2) {
-        $characterBody = @{
+    # Keep UI review deterministic. The parser remains covered by backend tests; this
+    # desktop smoke creates named review entities explicitly so it cannot depend on
+    # how a deliberately tiny screenplay is interpreted on a particular build.
+    $reviewEntities = @(
+        @{
             entity_type = "character"; entity_key = "ui-review-character"; name = "旅人"; state = "draft"
             data = @{ face = "清晰稳定的成年旅人脸型"; costume = "深色长袍" }; reference_assets = @()
-        } | ConvertTo-Json -Depth 5
-        Invoke-RestMethod -Method Post -Uri "$ApiBase/projects/$($project.id)/bible" -ContentType "application/json" -Body $characterBody | Out-Null
-        $boards = @(Invoke-RestMethod -Uri "$ApiBase/projects/$($project.id)/reference-boards")
+        },
+        @{
+            entity_type = "location"; entity_key = "ui-review-location"; name = "沙丘"; state = "draft"
+            data = @{ layout = "开阔沙丘与明确地平线"; lighting = "黎明冷暖交界光" }; reference_assets = @()
+        }
+    )
+    foreach ($entity in $reviewEntities) {
+        $entityBody = $entity | ConvertTo-Json -Depth 5
+        Invoke-RestMethod -Method Post -Uri "$ApiBase/projects/$($project.id)/bible" -ContentType "application/json" -Body $entityBody | Out-Null
     }
-    if ($boards.Count -lt 2) { throw "Parsed screenplay did not create character and location reference boards" }
+    $boards = @(Invoke-RestMethod -Uri "$ApiBase/projects/$($project.id)/reference-boards")
+    Write-Host "Reference boards returned: $($boards.Count)"
+    foreach ($board in $boards) { Write-Host " - $($board.entity_type)/$($board.entity_key): $($board.name)" }
+    if ($boards.Count -lt 2) { throw "Explicit character and location reference boards were not returned" }
     $boardAssets = @{}
     foreach ($board in $boards) {
         $ids = @()
