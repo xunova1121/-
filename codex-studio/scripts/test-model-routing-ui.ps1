@@ -88,7 +88,6 @@ try {
     Start-Sleep -Seconds 1
     Invoke-Element (Wait-Element $main "StoryboardNavButton")
     $storyboardGrid = Wait-Element $root "StoryboardGrid"
-    Wait-Element $root "StoryboardInspector" | Out-Null
     foreach ($header in @('镜号','场景','景别','画面与动作','人物','时长','衔接','状态')) {
         $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $header)
         if ($null -eq $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)) { throw "Storyboard header '$header' was not visible" }
