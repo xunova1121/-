@@ -1,4 +1,4 @@
-from app.script_engine import ParsedScene, parse_scenes, scene_to_shots
+from app.script_engine import ParsedScene, extract_characters, parse_scenes, scene_to_shots
 
 
 def test_markdown_timecoded_outline_becomes_readable_shots():
@@ -18,6 +18,11 @@ def test_markdown_timecoded_outline_becomes_readable_shots():
     assert shots[0]["description"] == "黎明前的沙丘安静无声；旅人裹着长袍；旅人缓慢抬头"
     assert shots[1]["description"] == "风声骤停；旅人手指收紧"
     assert all("**" not in shot["description"] and "0:00" not in shot["description"] for shot in shots)
+
+
+def test_production_labels_are_not_misidentified_as_characters():
+    text = "**画面：** 雪原无声\n**细节：** 风吹衣角\n李狗蛋：谁在那里？\n旁白：夜色更深"
+    assert extract_characters(text) == ["李狗蛋"]
 
 
 def test_plain_script_keeps_one_action_or_dialogue_per_shot():

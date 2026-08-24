@@ -153,7 +153,7 @@ public partial class StoryboardWindow : Window
         ShotGrid.IsReadOnly = locked;
         SaveButton.IsEnabled = !locked && _shots.Count > 0;
         LockButton.IsEnabled = _shots.Count > 0;
-        LockButton.Content = locked ? "解除锁定" : _lockStatus.Status == "stale" ? "重新锁定" : "锁定本集分镜";
+        LockButton.Content = locked ? "解除锁定" : _lockStatus.Status == "stale" ? "重新锁定" : "锁定设定与分镜";
         LockStatusText.Text = _lockStatus.Label;
         LockStatusText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(locked ? "#75E6A4" : _lockStatus.Status == "stale" ? "#FF8A80" : "#FFD166"));
         UpdateInspectorState();

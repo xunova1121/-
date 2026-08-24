@@ -77,7 +77,7 @@ def main():
     named(storyboard_root, "Grid", "ShotInspector")
     named(storyboard_root, "ComboBox", "EpisodeSelector")
     lock_button = named(storyboard_root, "Button", "LockButton")
-    assert lock_button.attrib.get("Content") == "锁定本集分镜"
+    assert lock_button.attrib.get("Content") == "锁定设定与分镜"
     assert lock_button.attrib.get("AutomationProperties.AutomationId") == "StoryboardLockButton"
     automation_root = ET.parse(ROOT / "client/AI.FilmStudio/AutomationWindow.xaml").getroot()
     named(automation_root, "TextBlock", "LockStatusText")

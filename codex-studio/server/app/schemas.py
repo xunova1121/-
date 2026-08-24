@@ -224,6 +224,7 @@ class BibleEntityCreate(BaseModel):
 class EpisodeLockRequest(BaseModel):
     episode: int = Field(ge=1)
     force: bool = False
+    freeze_bible: bool = True
 
 
 class ContinuityContractRequest(BaseModel):

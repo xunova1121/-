@@ -232,16 +232,17 @@ def parse_episode_script(project_id: str, episode: int):
                 (project_id, episode, scene.sequence, scene.heading, scene.location, scene.time_of_day, scene.summary, scene.source_text),
             )
             key = f"episode-{episode}-scene-{scene.sequence}"
-            data = json.dumps({"heading": scene.heading, "location": scene.location, "time_of_day": scene.time_of_day}, ensure_ascii=False)
+            location_data = {"heading": scene.heading, "location": scene.location, "time_of_day": scene.time_of_day}
+            data = json.dumps(location_data, ensure_ascii=False)
             db.execute(
-                "INSERT OR IGNORE INTO bible_entities(project_id,entity_type,entity_key,name,state,data_json) VALUES(?,'location',?,?,'draft',?)",
-                (project_id, key, scene.location, data),
+                "INSERT OR IGNORE INTO bible_entities(project_id,entity_type,entity_key,name,state,data_json,fingerprint) VALUES(?,'location',?,?,'draft',?,?)",
+                (project_id, key, scene.location, data, fingerprint(location_data, [])),
             )
         for name in characters:
             key = hashlib.sha1(name.encode("utf-8")).hexdigest()[:16]
             db.execute(
-                "INSERT OR IGNORE INTO bible_entities(project_id,entity_type,entity_key,name,state,data_json) VALUES(?,'character',?,?,'draft','{}')",
-                (project_id, key, name),
+                "INSERT OR IGNORE INTO bible_entities(project_id,entity_type,entity_key,name,state,data_json,fingerprint) VALUES(?,'character',?,?,'draft','{}',?)",
+                (project_id, key, name, fingerprint({}, [])),
             )
         db.execute("UPDATE episode_scripts SET parse_status='parsed',updated_at=CURRENT_TIMESTAMP WHERE project_id=? AND episode=?", (project_id, episode))
     return {
@@ -721,6 +722,13 @@ def lock_episode(project_id: str, payload: EpisodeLockRequest):
     with connect() as db:
         if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
             raise HTTPException(404, "Project not found")
+        if payload.freeze_bible:
+            latest_ids = [row[0] for row in db.execute(
+                "SELECT id FROM bible_entities b WHERE project_id=? AND version=(SELECT MAX(version) FROM bible_entities x WHERE x.project_id=b.project_id AND x.entity_type=b.entity_type AND x.entity_key=b.entity_key)",
+                (project_id,),
+            ).fetchall()]
+            if latest_ids:
+                db.execute(f"UPDATE bible_entities SET state='frozen' WHERE id IN ({','.join('?' for _ in latest_ids)})", latest_ids)
         snapshot, issues = build_storyboard_snapshot(db, project_id, payload.episode)
         if issues and not payload.force:
             raise HTTPException(409, {"message": "全量分镜未通过锁定条件", "issues": issues})

@@ -59,7 +59,7 @@
                         <TextBlock x:Name="ShotSummaryText" Text="0 个镜头" FontWeight="SemiBold" VerticalAlignment="Center"/>
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                             <TextBlock x:Name="LockStatusText" AutomationProperties.AutomationId="StoryboardLockStatus" Text="读取锁定状态…" Foreground="#FFD166" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                            <Button x:Name="LockButton" AutomationProperties.AutomationId="StoryboardLockButton" Style="{StaticResource NavButton}" Content="锁定本集分镜" Click="Lock_Click" Padding="11,7"/>
+                            <Button x:Name="LockButton" AutomationProperties.AutomationId="StoryboardLockButton" Style="{StaticResource NavButton}" Content="锁定设定与分镜" Click="Lock_Click" Padding="11,7"/>
                         </StackPanel>
                     </Grid>
                     <DataGrid x:Name="ShotGrid" AutomationProperties.AutomationId="StoryboardGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"

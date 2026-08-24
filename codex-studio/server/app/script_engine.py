@@ -19,6 +19,7 @@ TIMECODE = re.compile(
     r"[\[\(（]?\s*(?:\d{1,2}:)?\d{1,2}:\d{2}\s*[-–—~至]\s*(?:\d{1,2}:)?\d{1,2}:\d{2}\s*[\]\)）]?"
 )
 PRODUCTION_LABEL = re.compile(r"^(?:画面|细节|动作|环境|人物|镜头|说明|对白|音效|声音)\s*[:：]\s*(.*)$", re.IGNORECASE)
+NON_CHARACTER_LABELS = {"画面", "细节", "动作", "环境", "人物", "镜头", "说明", "对白", "音效", "声音", "旁白", "字幕", "场景"}
 
 
 @dataclass(frozen=True)
@@ -101,8 +102,10 @@ def extract_characters(text: str) -> list[str]:
     ordered: list[str] = []
     for line in _clean_lines(text):
         match = DIALOGUE.match(line)
-        if match and match.group(1) not in ordered:
-            ordered.append(match.group(1))
+        if match:
+            name = match.group(1).strip()
+            if name not in NON_CHARACTER_LABELS and name not in ordered:
+                ordered.append(name)
     return ordered
 
 
