@@ -11,6 +11,7 @@ namespace AI.FilmStudio;
 
 public partial class StoryboardWindow : Window
 {
+    private static readonly GridLength InspectorWidth = new(350);
     private readonly StudioApiClient _api;
     private readonly StudioProject _project;
     private readonly ObservableCollection<Shot> _shots = [];
@@ -106,6 +107,22 @@ public partial class StoryboardWindow : Window
         InspectorFields.IsEnabled = selected;
         ContinuityFields.IsEnabled = selected;
         PromptFields.IsEnabled = selected;
+    }
+
+    private void SetInspectorOpen(bool open)
+    {
+        InspectorGapColumn.Width = open ? new GridLength(12) : new GridLength(0);
+        InspectorColumn.Width = open ? InspectorWidth : new GridLength(0);
+        InspectorPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        InspectorToggleButton.Content = open ? "收起详情" : "镜头详情";
+    }
+
+    private void ToggleInspector_Click(object sender, RoutedEventArgs e) =>
+        SetInspectorOpen(InspectorPanel.Visibility != Visibility.Visible);
+
+    private void ShotGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (ShotGrid.SelectedItem is Shot) SetInspectorOpen(true);
     }
 
     private void Previz_Click(object sender, RoutedEventArgs e) => new PrevizWindow(_api) { Owner = this }.ShowDialog();
