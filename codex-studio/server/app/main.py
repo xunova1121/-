@@ -32,7 +32,7 @@ from .task_runner import TaskRunner, serialize_task
 from .media import MediaError, capabilities as media_capabilities, probe_media
 from .script_engine import extract_characters, parse_scenes, scene_to_shots
 from .production import automation_route_plan, bible_context, serialize_run, start_automation
-from .director import DIRECTOR_SYSTEM, director_prompt, extract_json_object, normalize_design
+from .director import DIRECTOR_SYSTEM, director_prompt, director_retry_prompt, extract_json_object, normalize_design
 from .story_logic import persist_snapshots, recompute_episode
 
 
@@ -48,14 +48,14 @@ async def lifespan(_: FastAPI):
         await worker
 
 
-app = FastAPI(title=settings.app_name, version="1.5.5", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.5.6", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost", "http://127.0.0.1"], allow_methods=["*"], allow_headers=["*"])
 PREFIX = settings.api_prefix
 
 
 @app.get(f"{PREFIX}/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "1.5.5", "instance_id": os.getenv("AI_STUDIO_INSTANCE_ID", "external")}
+    return {"status": "ok", "version": "1.5.6", "instance_id": os.getenv("AI_STUDIO_INSTANCE_ID", "external")}
 
 
 @app.get(f"{PREFIX}/providers")
@@ -310,11 +310,26 @@ async def generate_director_package(project_id: str, episode: int, payload: Dire
     model = payload.model or (route["model"] if route and route["provider_id"] == provider_id else None)
     try:
         adapter = registry.resolve(provider_id)
-        result = await adapter.invoke(director_prompt(script["source_text"], episode), {
+        director_context = {
             "task_type": "llm", "system_prompt": DIRECTOR_SYSTEM, "temperature": 0.15, "max_tokens": 16000,
-            "project_id": project_id, "episode": episode, "model": model,
-        })
-        design = normalize_design(extract_json_object(str(result.get("result") or "")))
+            "response_format": "json_object", "project_id": project_id, "episode": episode, "model": model,
+        }
+        result = await adapter.invoke(director_prompt(script["source_text"], episode), director_context)
+        json_retry_used = False
+        try:
+            design = normalize_design(extract_json_object(str(result.get("result") or "")))
+        except ValueError as first_error:
+            json_retry_used = True
+            retry_context = {**director_context, "temperature": 0.0}
+            result = await adapter.invoke(
+                director_retry_prompt(script["source_text"], episode, str(first_error)), retry_context
+            )
+            try:
+                design = normalize_design(extract_json_object(str(result.get("result") or "")))
+            except ValueError as retry_error:
+                raise ValueError(
+                    f"导演模型自动修复重试后仍无法生成完整分镜：{retry_error}"
+                ) from retry_error
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
     except (RuntimeError, ValueError) as exc:
@@ -365,7 +380,7 @@ async def generate_director_package(project_id: str, episode: int, payload: Dire
         "project_id": project_id, "episode": episode, "provider": result.get("provider", payload.provider),
         "model": result.get("model", ""), "logline": design["logline"], "scene_count": len(design["scenes"]),
         "shot_count": len(design["shots"]), "bible_count": bible_count, "blocking_state_conflicts": len(findings),
-        "warnings": warnings, "replaced": bool(existing),
+        "warnings": warnings, "replaced": bool(existing), "json_retry_used": json_retry_used,
     }
 
 

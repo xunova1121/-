@@ -14,6 +14,11 @@ CAMERA_HINTS = {
     "特写": "特写", "近景": "近景", "中景": "中景", "全景": "全景", "远景": "远景",
     "俯拍": "俯拍", "仰拍": "仰拍", "航拍": "航拍",
 }
+MARKUP_SEPARATOR = re.compile(r"^\s*(?:-{3,}|_{3,}|\*{3,})\s*$")
+TIMECODE = re.compile(
+    r"[\[\(（]?\s*(?:\d{1,2}:)?\d{1,2}:\d{2}\s*[-–—~至]\s*(?:\d{1,2}:)?\d{1,2}:\d{2}\s*[\]\)）]?"
+)
+PRODUCTION_LABEL = re.compile(r"^(?:画面|细节|动作|环境|人物|镜头|说明|对白|音效|声音)\s*[:：]\s*(.*)$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -26,8 +31,42 @@ class ParsedScene:
     summary: str
 
 
+def _clean_line(line: str) -> str:
+    value = line.strip().lstrip("\ufeff")
+    if not value or MARKUP_SEPARATOR.match(value) or value.startswith("```"):
+        return ""
+    value = value.replace("**", "").replace("__", "").replace("`", "")
+    value = re.sub(r"^\s*[#>]+\s*", "", value)
+    value = re.sub(r"^\s*[-*+]\s+", "", value)
+    value = TIMECODE.sub("", value, count=1)
+    return re.sub(r"\s+", " ", value).strip(" —-")
+
+
 def _clean_lines(text: str) -> list[str]:
-    return [re.sub(r"\s+", " ", line).strip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    return [_clean_line(line) for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+
+
+def _shot_blocks(text: str) -> list[str]:
+    raw_lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    production_mode = any(TIMECODE.search(line) or PRODUCTION_LABEL.match(_clean_line(line)) for line in raw_lines)
+    if not production_mode:
+        return [line for line in _clean_lines(text) if line]
+    blocks: list[str] = []
+    for raw in raw_lines:
+        has_timecode = bool(TIMECODE.search(raw))
+        line = _clean_line(raw)
+        if not line:
+            continue
+        label = PRODUCTION_LABEL.match(line)
+        content = (label.group(1) if label else line).strip()
+        if not content:
+            continue
+        starts_shot = has_timecode or bool(label and line.startswith("画面")) or not blocks
+        if starts_shot:
+            blocks.append(content)
+        else:
+            blocks[-1] = f"{blocks[-1]}；{content}"
+    return blocks
 
 
 def parse_scenes(text: str) -> list[ParsedScene]:
@@ -75,7 +114,7 @@ def _shot_type(text: str, index: int) -> str:
 
 
 def scene_to_shots(scene: ParsedScene, global_start: int) -> list[dict]:
-    blocks = [line for line in _clean_lines(scene.source_text) if line]
+    blocks = _shot_blocks(scene.source_text)
     if not blocks:
         blocks = [f"建立{scene.location}的环境与空间关系"]
     result: list[dict] = []

@@ -39,8 +39,7 @@ public partial class MainWindow : Window
         _activeWorkspaceKey = "home";
         HomeDashboard.Visibility = Visibility.Visible;
         WorkspaceShell.Visibility = Visibility.Collapsed;
-        SetGroupActive(TopNavigation, "首页");
-        SetGroupActive(WorkspaceNavigation, null);
+        SetGroupActive(TopNavigation, "home");
     }
 
     private void ShowWorkspace(string key)
@@ -48,9 +47,7 @@ public partial class MainWindow : Window
         _activeWorkspaceKey = key;
         HomeDashboard.Visibility = Visibility.Collapsed;
         WorkspaceShell.Visibility = Visibility.Visible;
-        SetGroupActive(WorkspaceNavigation, key);
-        var top = key switch { "director" => "剧本", "storyboard" => "分镜", "editing" => "剪辑", "assets" => "项目", _ => "制作" };
-        SetGroupActive(TopNavigation, top);
+        SetGroupActive(TopNavigation, key);
     }
 
     private async Task<bool> CheckServiceAsync()
@@ -62,7 +59,7 @@ public partial class MainWindow : Window
             if (!healthy) await Task.Delay(500);
         }
         ServiceDot.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(healthy ? "#36C979" : "#E0A534"));
-        ServiceText.Text = healthy ? "本地服务已连接" : "本地服务启动失败";
+        ServiceText.Text = healthy ? "已连接" : "服务异常";
         HomeServiceText.Text = healthy ? "已连接" : "启动失败";
         HomeServiceText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(healthy ? "#57D98B" : "#F2B84B"));
         return healthy;
@@ -100,7 +97,6 @@ public partial class MainWindow : Window
         _api.SelectProject(project.Id);
         CurrentProjectName.Text = project.Name;
         CurrentProjectMeta.Text = project.Summary;
-        ActiveProjectText.Text = project.Name + "⌄";
         var shots = await _api.GetShotsAsync();
         var summary = await _api.GetProjectSummaryAsync();
         _shots.Clear();
@@ -168,20 +164,25 @@ public partial class MainWindow : Window
 
     private async void TopNav_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: string title }) return;
-        if (title == "首页") { ShowHome(); return; }
-        if (title == "项目") { SetGroupActive(TopNavigation, "项目"); SetGroupActive(WorkspaceNavigation, null); new ProjectManagerWindow(_api) { Owner = this }.ShowDialog(); await LoadProjectsAsync(); ShowHome(); return; }
-        if (ProjectSelector.SelectedItem is not StudioProject project) { MessageBox.Show("请先创建项目", "AI影视Studio"); return; }
-        var key = title switch { "剧本" => "director", "分镜" => "storyboard", "制作" => "generation", "剪辑" => "editing", _ => "publish" };
-        ShowWorkspace(key);
-        WorkspaceTitle.Text = $"{title} · {CurrentProjectName.Text}";
-        if (title == "剧本") new ScriptWorkbenchWindow(_api, project) { Owner = this }.ShowDialog();
-        else if (title == "分镜") new StoryboardWindow(_api, project) { Owner = this }.ShowDialog();
-        else if (title == "制作") new GenerationWindow(_api, project) { Owner = this }.ShowDialog();
-        else if (title == "剪辑") new EditingWindow(_api, project) { Owner = this }.ShowDialog();
-        else if (title == "发布") { SetGroupActive(TopNavigation, "发布"); SetGroupActive(WorkspaceNavigation, null); new PublishWindow(_api) { Owner = this }.ShowDialog(); }
-        else return;
-        await SelectProjectAsync(project);
+        if (sender is not Button { Tag: string key }) return;
+        if (key == "home") { ShowHome(); return; }
+        if (key == "projects")
+        {
+            SetGroupActive(TopNavigation, "projects");
+            new ProjectManagerWindow(_api) { Owner = this }.ShowDialog();
+            await LoadProjectsAsync();
+            ShowHome();
+            return;
+        }
+        if (key == "publish")
+        {
+            if (ProjectSelector.SelectedItem is not StudioProject project) { MessageBox.Show("请先创建项目", "AI影视Studio"); return; }
+            SetGroupActive(TopNavigation, "publish");
+            new PublishWindow(_api) { Owner = this }.ShowDialog();
+            await SelectProjectAsync(project);
+            return;
+        }
+        Workspace_Click(sender, e);
     }
 
     private void EpisodeList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -217,9 +218,23 @@ public partial class MainWindow : Window
         finally { ModelSettingsButton.Style = NavStyle; }
     }
 
+    private async void AssetUtility_Click(object sender, RoutedEventArgs e)
+    {
+        if (ProjectSelector.SelectedItem is not StudioProject project) { MessageBox.Show("请先创建项目", "AI影视Studio"); return; }
+        new AssetManagerWindow(_api, project) { Owner = this }.ShowDialog();
+        await SelectProjectAsync(project);
+    }
+
+    private async void TaskUtility_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_api.CurrentProjectId)) { MessageBox.Show("请先创建项目", "AI影视Studio"); return; }
+        new TaskQueueWindow(_api) { Owner = this }.ShowDialog();
+        await CheckServiceAsync();
+    }
+
     private async void ProjectManager_Click(object sender, RoutedEventArgs e)
     {
-        SetGroupActive(TopNavigation, "项目");
+        SetGroupActive(TopNavigation, "projects");
         new ProjectManagerWindow(_api) { Owner = this }.ShowDialog();
         await LoadProjectsAsync();
         ShowHome();

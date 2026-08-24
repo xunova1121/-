@@ -2,39 +2,92 @@ namespace AI.FilmStudio.Models;
 
 using System.Text.Json.Serialization;
 using System.Text.Json;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
 
-public sealed class Shot
+public sealed class Shot : INotifyPropertyChanged
 {
+    private string _title = "";
+    private string _description = "";
+    private string _duration = "3.0s";
+    private string _status = "待生成";
+    private string _prompt = "";
+    private string _shotType = "中景";
+    private string _camera = "固定";
+    private string _action = "";
+    private string _dialogue = "";
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
     [JsonPropertyName("id")] public int Id { get; set; }
     [JsonPropertyName("episode")] public int Episode { get; set; }
     [JsonPropertyName("scene_id")] public int? SceneId { get; set; }
     [JsonPropertyName("sequence")] public int Sequence { get; set; }
     [JsonPropertyName("number")] public string Number { get; set; } = "";
-    [JsonPropertyName("title")] public string Title { get; set; } = "";
-    [JsonPropertyName("description")] public string Description { get; set; } = "";
-    [JsonPropertyName("duration")] public string Duration { get; set; } = "3.0s";
-    [JsonPropertyName("status")] public string Status { get; set; } = "待生成";
+    [JsonPropertyName("title")] public string Title { get => _title; set => SetField(ref _title, value ?? ""); }
+    [JsonPropertyName("description")] public string Description { get => _description; set => SetField(ref _description, value ?? ""); }
+    [JsonPropertyName("duration")] public string Duration { get => _duration; set => SetField(ref _duration, value ?? "3.0s"); }
+    [JsonPropertyName("status")] public string Status { get => _status; set => SetField(ref _status, value ?? "待生成"); }
     [JsonPropertyName("color")] public string Color { get; set; } = "#1C2027";
-    [JsonPropertyName("prompt")] public string Prompt { get; set; } = "";
-    [JsonPropertyName("shot_type")] public string ShotType { get; set; } = "中景";
-    [JsonPropertyName("camera")] public string Camera { get; set; } = "固定";
-    [JsonPropertyName("action")] public string Action { get; set; } = "";
-    [JsonPropertyName("dialogue")] public string Dialogue { get; set; } = "";
+    [JsonPropertyName("prompt")] public string Prompt { get => _prompt; set => SetField(ref _prompt, value ?? ""); }
+    [JsonPropertyName("shot_type")] public string ShotType { get => _shotType; set => SetField(ref _shotType, value ?? "中景"); }
+    [JsonPropertyName("camera")] public string Camera { get => _camera; set => SetField(ref _camera, value ?? "固定"); }
+    [JsonPropertyName("action")] public string Action { get => _action; set => SetField(ref _action, value ?? ""); }
+    [JsonPropertyName("dialogue")] public string Dialogue { get => _dialogue; set => SetField(ref _dialogue, value ?? ""); }
     [JsonPropertyName("characters")] public List<string> Characters { get; set; } = [];
     [JsonPropertyName("continuity")] public Dictionary<string, JsonElement> Continuity { get; set; } = [];
-    [JsonIgnore] public string Link { get => ReadText("link", "cut"); set => WriteText("link", value); }
-    [JsonIgnore] public string ActionId { get => ReadText("action_id", ""); set => WriteText("action_id", value); }
-    [JsonIgnore] public string ScreenDirection { get => ReadText("screen_direction", "unknown"); set => WriteText("screen_direction", value); }
-    [JsonIgnore] public string ActionPhase { get => ReadText("action_phase", "static"); set => WriteText("action_phase", value); }
-    [JsonIgnore] public string Momentum { get => ReadText("momentum", "still"); set => WriteText("momentum", value); }
-    [JsonIgnore] public string StateBeforeText { get => ReadJson("state_before"); set => WriteJson("state_before", value); }
-    [JsonIgnore] public string StateAfterText { get => ReadJson("state_after"); set => WriteJson("state_after", value); }
+    [JsonIgnore] public string Link { get => ReadText("link", "cut"); set { WriteText("link", value); OnPropertyChanged(); } }
+    [JsonIgnore] public string ActionId { get => ReadText("action_id", ""); set { WriteText("action_id", value); OnPropertyChanged(); } }
+    [JsonIgnore] public string ScreenDirection { get => ReadText("screen_direction", "unknown"); set { WriteText("screen_direction", value); OnPropertyChanged(); } }
+    [JsonIgnore] public string ActionPhase { get => ReadText("action_phase", "static"); set { WriteText("action_phase", value); OnPropertyChanged(); } }
+    [JsonIgnore] public string Momentum { get => ReadText("momentum", "still"); set { WriteText("momentum", value); OnPropertyChanged(); } }
+    [JsonIgnore] public string StateBeforeText { get => ReadJson("state_before"); set { WriteJson("state_before", value); OnPropertyChanged(); OnPropertyChanged(nameof(StateBeforeSummary)); } }
+    [JsonIgnore] public string StateAfterText { get => ReadJson("state_after"); set { WriteJson("state_after", value); OnPropertyChanged(); OnPropertyChanged(nameof(StateAfterSummary)); } }
     [JsonIgnore] public string CharacterText => string.Join("、", Characters);
+    [JsonIgnore] public string SceneName => ReadText("scene", SceneId is null ? "未分场" : $"场景 {SceneId}");
+    [JsonIgnore] public string StateBeforeSummary => ReadStateSummary("state_before");
+    [JsonIgnore] public string StateAfterSummary => ReadStateSummary("state_after");
     [JsonIgnore] public string Display => $"{Number} · {Title}";
+
+    private void SetField(ref string field, string value, [CallerMemberName] string? propertyName = null)
+    {
+        if (field == value) return;
+        field = value;
+        OnPropertyChanged(propertyName);
+    }
+
+    private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
     private string ReadText(string key, string fallback) => Continuity.TryGetValue(key, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? fallback : fallback;
     private void WriteText(string key, string value) => Continuity[key] = JsonSerializer.SerializeToElement(value ?? "");
     private string ReadJson(string key) => Continuity.TryGetValue(key, out var value) && value.ValueKind == JsonValueKind.Object ? value.GetRawText() : "{}";
+    private string ReadStateSummary(string key)
+    {
+        if (!Continuity.TryGetValue(key, out var value) || value.ValueKind != JsonValueKind.Object || !value.EnumerateObject().Any()) return "未记录变化";
+        var items = new List<string>();
+        FlattenState(value, "", items);
+        return items.Count == 0 ? "未记录变化" : string.Join("；", items.Take(8));
+    }
+
+    private static void FlattenState(JsonElement value, string path, List<string> items)
+    {
+        if (items.Count >= 8) return;
+        if (value.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in value.EnumerateObject())
+                FlattenState(property.Value, string.IsNullOrWhiteSpace(path) ? property.Name : $"{path}·{property.Name}", items);
+            return;
+        }
+        if (value.ValueKind == JsonValueKind.Array)
+        {
+            var text = string.Join("、", value.EnumerateArray().Select(item => item.ToString()));
+            if (!string.IsNullOrWhiteSpace(text)) items.Add($"{path}：{text}");
+            return;
+        }
+        var scalar = value.ToString();
+        if (!string.IsNullOrWhiteSpace(scalar)) items.Add($"{path}：{scalar}");
+    }
     private void WriteJson(string key, string value)
     {
         try { using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(value) ? "{}" : value); Continuity[key] = document.RootElement.Clone(); }

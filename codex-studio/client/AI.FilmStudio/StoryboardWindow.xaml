@@ -1,47 +1,125 @@
 <Window x:Class="AI.FilmStudio.StoryboardWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="分镜工作台" Width="1440" Height="820" MinWidth="1050" MinHeight="650"
+        Title="分镜工作台" Width="1440" Height="860" MinWidth="1050" MinHeight="680"
         WindowStartupLocation="CenterOwner" Background="{StaticResource BgBrush}">
-    <Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="56"/><RowDefinition/><RowDefinition Height="42"/></Grid.RowDefinitions>
+    <Window.Resources>
+        <Style x:Key="WrapCell" TargetType="TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Padding" Value="6,4"/>
+        </Style>
+        <Style x:Key="SectionTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,0,0,9"/>
+        </Style>
+        <Style x:Key="FieldLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="Margin" Value="0,9,0,5"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="16">
+        <Grid.RowDefinitions><RowDefinition Height="64"/><RowDefinition/><RowDefinition Height="42"/></Grid.RowDefinitions>
         <Grid>
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock Text="全量分镜工作台" FontSize="22" FontWeight="SemiBold"/>
-                <TextBlock x:Name="ProjectNameText" Foreground="{StaticResource MutedBrush}" Margin="14,5,0,0"/>
+            <StackPanel VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="全量分镜" FontSize="25" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="ProjectNameText" Foreground="{StaticResource MutedBrush}" Margin="12,7,0,0"/>
+                </StackPanel>
+                <TextBlock Text="按场次浏览镜头；主表只显示制作判断所需信息，技术状态在右侧检查器中查看。" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0"/>
             </StackPanel>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                <Button Style="{StaticResource NavButton}" Content="场景预演台" Click="Previz_Click"/>
-                <Button Style="{StaticResource NavButton}" Content="连续性审校" Click="Continuity_Click"/>
-                <Button Style="{StaticResource NavButton}" Content="刷新" Click="Refresh_Click"/>
-                <Button Style="{StaticResource PrimaryButton}" Content="保存全部修改" Click="SaveAll_Click"/>
+                <Button Style="{StaticResource NavButton}" Content="场景预演" Click="Previz_Click" Padding="12,9"/>
+                <Button Style="{StaticResource NavButton}" Content="连续性审校" Click="Continuity_Click" Padding="12,9"/>
+                <Button Style="{StaticResource NavButton}" Content="刷新" Click="Refresh_Click" Padding="12,9"/>
+                <Button Style="{StaticResource PrimaryButton}" Content="保存修改" Click="SaveAll_Click" Padding="16,10"/>
             </StackPanel>
         </Grid>
-        <DataGrid x:Name="ShotGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
-                  Background="{StaticResource PanelBrush}" Foreground="{StaticResource TextBrush}" BorderBrush="{StaticResource StrokeBrush}"
-                  GridLinesVisibility="Horizontal" RowBackground="#171A20" AlternatingRowBackground="#1B1F26" AlternationCount="2"
-                  HeadersVisibility="Column" SelectionMode="Single" SelectionUnit="FullRow">
-            <DataGrid.Columns>
-                <DataGridTextColumn Header="#" Binding="{Binding Number}" Width="55" IsReadOnly="True"/>
-                <DataGridTextColumn Header="场" Binding="{Binding SceneId}" Width="55" IsReadOnly="True"/>
-                <DataGridTextColumn Header="景别" Binding="{Binding ShotType, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
-                <DataGridTextColumn Header="运镜" Binding="{Binding Camera, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
-                <DataGridTextColumn Header="标题" Binding="{Binding Title, UpdateSourceTrigger=PropertyChanged}" Width="150"/>
-                <DataGridTextColumn Header="动作 / 画面" Binding="{Binding Description, UpdateSourceTrigger=PropertyChanged}" Width="2*"/>
-                <DataGridTextColumn Header="单镜动作" Binding="{Binding Action, UpdateSourceTrigger=PropertyChanged}" Width="180"/>
-                <DataGridTextColumn Header="对白" Binding="{Binding Dialogue, UpdateSourceTrigger=PropertyChanged}" Width="1.5*"/>
-                <DataGridTextColumn Header="人物" Binding="{Binding CharacterText}" Width="110" IsReadOnly="True"/>
-                <DataGridTextColumn Header="衔接" Binding="{Binding Link, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
-                <DataGridTextColumn Header="动作链ID" Binding="{Binding ActionId, UpdateSourceTrigger=PropertyChanged}" Width="110"/>
-                <DataGridTextColumn Header="动作相位" Binding="{Binding ActionPhase, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
-                <DataGridTextColumn Header="动作动量" Binding="{Binding Momentum, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
-                <DataGridTextColumn Header="运动方向" Binding="{Binding ScreenDirection, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
-                <DataGridTextColumn Header="状态前 JSON" Binding="{Binding StateBeforeText}" Width="220"/>
-                <DataGridTextColumn Header="状态后 JSON" Binding="{Binding StateAfterText}" Width="220"/>
-                <DataGridTextColumn Header="时长" Binding="{Binding Duration, UpdateSourceTrigger=PropertyChanged}" Width="75"/>
-                <DataGridTextColumn Header="生成提示词" Binding="{Binding Prompt, UpdateSourceTrigger=PropertyChanged}" Width="2*"/>
-                <DataGridTextColumn Header="状态" Binding="{Binding Status, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
-            </DataGrid.Columns>
-        </DataGrid>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="180"/><ColumnDefinition Width="12"/><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition Width="350"/></Grid.ColumnDefinitions>
+            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource StrokeBrush}" BorderThickness="1" CornerRadius="9" Padding="12">
+                <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition/></Grid.RowDefinitions>
+                    <TextBlock Text="场次与筛选" Style="{StaticResource SectionTitle}"/>
+                    <TextBox x:Name="SearchBox" Grid.Row="1" Height="38" TextChanged="SearchBox_TextChanged" ToolTip="搜索标题、画面、动作、对白或人物"/>
+                    <TextBlock Grid.Row="2" Text="输入关键词筛选" Foreground="{StaticResource MutedBrush}" Margin="2,5,0,10"/>
+                    <ListBox x:Name="SceneFilterList" Grid.Row="3" SelectionChanged="SceneFilter_SelectionChanged"/>
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource StrokeBrush}" BorderThickness="1" CornerRadius="9">
+                <Grid><Grid.RowDefinitions><RowDefinition Height="42"/><RowDefinition/></Grid.RowDefinitions>
+                    <Grid Margin="12,0">
+                        <TextBlock x:Name="ShotSummaryText" Text="0 个镜头" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        <TextBlock Text="单击镜头后在右侧编辑详细信息" Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                    </Grid>
+                    <DataGrid x:Name="ShotGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
+                              Background="{StaticResource PanelBrush}" Foreground="{StaticResource TextBrush}" BorderThickness="0"
+                              GridLinesVisibility="Horizontal" RowBackground="#171A20" AlternatingRowBackground="#1B1F26" AlternationCount="2"
+                              HeadersVisibility="Column" SelectionMode="Single" SelectionUnit="FullRow" RowHeight="72"
+                              SelectionChanged="ShotGrid_SelectionChanged">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="镜号" Binding="{Binding Number}" Width="58" IsReadOnly="True" ElementStyle="{StaticResource WrapCell}"/>
+                            <DataGridTextColumn Header="场景" Binding="{Binding SceneName}" Width="105" IsReadOnly="True" ElementStyle="{StaticResource WrapCell}"/>
+                            <DataGridTextColumn Header="景别" Binding="{Binding ShotType, UpdateSourceTrigger=PropertyChanged}" Width="72" ElementStyle="{StaticResource WrapCell}"/>
+                            <DataGridTextColumn Header="画面与动作" Binding="{Binding Description, UpdateSourceTrigger=PropertyChanged}" Width="2.5*" ElementStyle="{StaticResource WrapCell}"/>
+                            <DataGridTextColumn Header="人物" Binding="{Binding CharacterText}" Width="95" IsReadOnly="True" ElementStyle="{StaticResource WrapCell}"/>
+                            <DataGridTextColumn Header="时长" Binding="{Binding Duration, UpdateSourceTrigger=PropertyChanged}" Width="66" ElementStyle="{StaticResource WrapCell}"/>
+                            <DataGridTextColumn Header="衔接" Binding="{Binding Link, UpdateSourceTrigger=PropertyChanged}" Width="78" ElementStyle="{StaticResource WrapCell}"/>
+                            <DataGridTextColumn Header="状态" Binding="{Binding Status, UpdateSourceTrigger=PropertyChanged}" Width="82" ElementStyle="{StaticResource WrapCell}"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="4" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource StrokeBrush}" BorderThickness="1" CornerRadius="9" Padding="14">
+                <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition/></Grid.RowDefinitions>
+                    <TextBlock Text="镜头检查器" Style="{StaticResource SectionTitle}"/>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <Grid x:Name="ShotInspector" DataContext="{Binding SelectedItem, ElementName=ShotGrid}">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="未选择镜头" x:Name="NoSelectionText" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,12"/>
+                                <StackPanel x:Name="InspectorFields">
+                                    <TextBlock Text="标题" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="10"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="景别" Style="{StaticResource FieldLabel}"/><ComboBox Text="{Binding ShotType, UpdateSourceTrigger=PropertyChanged}" IsEditable="True"><ComboBoxItem Content="远景"/><ComboBoxItem Content="全景"/><ComboBoxItem Content="中景"/><ComboBoxItem Content="近景"/><ComboBoxItem Content="特写"/></ComboBox></StackPanel>
+                                        <StackPanel Grid.Column="2"><TextBlock Text="运镜" Style="{StaticResource FieldLabel}"/><ComboBox Text="{Binding Camera, UpdateSourceTrigger=PropertyChanged}" IsEditable="True"><ComboBoxItem Content="固定"/><ComboBoxItem Content="推镜"/><ComboBoxItem Content="拉镜"/><ComboBoxItem Content="摇镜"/><ComboBoxItem Content="跟拍"/><ComboBoxItem Content="手持"/></ComboBox></StackPanel>
+                                    </Grid>
+                                    <TextBlock Text="画面描述" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox Text="{Binding Description, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="70"/>
+                                    <TextBlock Text="单镜动作" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox Text="{Binding Action, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="58"/>
+                                    <TextBlock Text="对白" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox Text="{Binding Dialogue, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="52"/>
+                                </StackPanel>
+                            </StackPanel>
+                            <StackPanel Grid.Row="1" x:Name="ContinuityFields">
+                                <Separator Margin="0,16,0,14"/>
+                                <TextBlock Text="连续性摘要" Style="{StaticResource SectionTitle}"/>
+                                <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="10"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                    <StackPanel><TextBlock Text="衔接" Style="{StaticResource FieldLabel}"/><ComboBox Text="{Binding Link, UpdateSourceTrigger=PropertyChanged}" IsEditable="True"><ComboBoxItem Content="new-scene"/><ComboBoxItem Content="cut"/><ComboBoxItem Content="continuous"/></ComboBox></StackPanel>
+                                    <StackPanel Grid.Column="2"><TextBlock Text="动作阶段" Style="{StaticResource FieldLabel}"/><ComboBox Text="{Binding ActionPhase, UpdateSourceTrigger=PropertyChanged}" IsEditable="True"><ComboBoxItem Content="static"/><ComboBoxItem Content="anticipation"/><ComboBoxItem Content="start"/><ComboBoxItem Content="middle"/><ComboBoxItem Content="impact"/><ComboBoxItem Content="follow_through"/><ComboBoxItem Content="end"/><ComboBoxItem Content="settle"/></ComboBox></StackPanel>
+                                </Grid>
+                                <TextBlock Text="进入镜头时" Style="{StaticResource FieldLabel}"/>
+                                <TextBlock Text="{Binding StateBeforeSummary}" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"/>
+                                <TextBlock Text="镜头结束时" Style="{StaticResource FieldLabel}"/>
+                                <TextBlock Text="{Binding StateAfterSummary}" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"/>
+                            </StackPanel>
+                            <StackPanel Grid.Row="2" x:Name="PromptFields">
+                                <Separator Margin="0,16,0,14"/>
+                                <TextBlock Text="生成提示词" Style="{StaticResource SectionTitle}"/>
+                                <TextBox Text="{Binding Prompt, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="110"/>
+                            </StackPanel>
+                        </Grid>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
         <TextBlock x:Name="StatusText" Grid.Row="2" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}"/>
     </Grid>
 </Window>

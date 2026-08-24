@@ -50,17 +50,30 @@ class OpenAICompatibleAdapter(AIAdapter):
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
             "temperature": float(context.get("temperature", 0.4)),
         }
+        if context.get("max_tokens"):
+            body["max_tokens"] = max(1, int(context["max_tokens"]))
+        if context.get("response_format") == "json_object":
+            body["response_format"] = {"type": "json_object"}
         started = time.perf_counter()
         status_code = 0
         error = ""
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=20.0)) as client:
-                response = await client.post(endpoint, headers={"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}, json=body)
+                headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}
+                response = await client.post(endpoint, headers=headers, json=body)
+                structured_error = str(getattr(response, "text", "")).lower()
+                if response.status_code in {400, 422} and "response_format" in body and any(
+                    marker in structured_error for marker in ("response_format", "json_object", "structured", "unsupported", "unknown field")
+                ):
+                    fallback_body = dict(body)
+                    fallback_body.pop("response_format", None)
+                    response = await client.post(endpoint, headers=headers, json=fallback_body)
                 status_code = response.status_code
                 self._ensure(response, config.provider.name, endpoint)
                 payload = response.json()
             content = payload["choices"][0]["message"]["content"]
-            return {"provider": self.provider, "model": model, "status": "completed", "result": content, "usage": payload.get("usage", {})}
+            return {"provider": self.provider, "model": model, "status": "completed", "result": content, "usage": payload.get("usage", {}),
+                    "finish_reason": payload.get("choices", [{}])[0].get("finish_reason", "")}
         except RuntimeError as exc:
             error = str(exc)
             raise

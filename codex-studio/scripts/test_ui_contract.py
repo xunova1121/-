@@ -63,7 +63,23 @@ def main():
     automation = (ROOT / "client/AI.FilmStudio/AutomationWindow.xaml.cs").read_text(encoding="utf-8")
     assert 'RequireRole("keyframe_image"' in automation and 'RequireRole("shot_video"' in automation
     assert "ProviderConfigStatus" not in automation
-    print("UI contract passed: readable controls and explicit persistent role-binding actions")
+
+    main_root = ET.parse(ROOT / "client/AI.FilmStudio/MainWindow.xaml").getroot()
+    top_nav = named(main_root, "StackPanel", "TopNavigation")
+    labels = [button.attrib.get("Content", "") for button in top_nav if button.tag == f"{{{NS['w']}}}Button"]
+    assert len(labels) == len(set(labels)), f"duplicate primary navigation labels: {labels}"
+    assert labels == ["首页", "项目", "剧本", "分镜", "设定集", "AI生成", "自动生产", "剪辑", "发布"]
+    assert not any(item.attrib.get(f"{XAML_NS}Name") == "WorkspaceNavigation" for item in main_root.iter()), "secondary duplicate navigation must not return"
+
+    storyboard_root = ET.parse(ROOT / "client/AI.FilmStudio/StoryboardWindow.xaml").getroot()
+    storyboard_text = (ROOT / "client/AI.FilmStudio/StoryboardWindow.xaml").read_text(encoding="utf-8")
+    named(storyboard_root, "ListBox", "SceneFilterList")
+    named(storyboard_root, "Grid", "ShotInspector")
+    assert "状态前 JSON" not in storyboard_text and "状态后 JSON" not in storyboard_text
+    assert "动作链ID" not in storyboard_text and "动作动量" not in storyboard_text
+    for required in ("镜号", "场景", "景别", "画面与动作", "人物", "时长", "衔接", "状态"):
+        assert f'Header="{required}"' in storyboard_text
+    print("UI contract passed: single navigation, readable storyboard review, and persistent role binding")
 
 
 if __name__ == "__main__":

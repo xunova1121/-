@@ -623,6 +623,83 @@ def test_ai_director_atomically_builds_bible_storyboard_and_state_graph():
         assert db.execute("SELECT parse_status FROM episode_scripts WHERE project_id='demo' AND episode=1").fetchone()[0] == "director_storyboard"
 
 
+def test_ai_director_retries_once_when_first_response_cannot_be_repaired():
+    valid = {
+        "logline": "雨夜追查",
+        "bible": {
+            "world": {"name": "现代世界"}, "style": {"name": "冷峻风格"},
+            "characters": [{"name": "沈岚", "face": "窄脸", "hair": "短发", "body": "高挑", "costume": "黑色风衣"}],
+            "locations": [{"name": "仓库", "layout": "门在西侧", "lighting": "冷光"}], "props": [],
+        },
+        "scenes": [{"index": 1, "heading": "仓库", "location": "仓库", "time_of_day": "夜"}],
+        "shots": [{"scene_index": 1, "title": "入场", "description": "沈岚推门", "action": "沈岚推门", "characters": ["沈岚"], "link": "new-scene"}],
+    }
+
+    class RetryDirector(AIAdapter):
+        provider = "retrydirector"
+
+        def __init__(self):
+            self.calls = 0
+
+        async def invoke(self, prompt, context):
+            self.calls += 1
+            assert context["response_format"] == "json_object"
+            assert context["max_tokens"] == 16000
+            if self.calls == 1:
+                return {"provider": self.provider, "model": "retry-test", "result": "完成了，但本次不输出结构化内容"}
+            assert context["temperature"] == 0.0
+            assert "上一次输出无法进入生产系统" in prompt
+            return {"provider": self.provider, "model": "retry-test", "result": __import__("json").dumps(valid, ensure_ascii=False)}
+
+    adapter = RetryDirector()
+    registry.register(adapter)
+    with TestClient(app) as client:
+        project = client.post("/api/v1/projects", json={"name": "JSON自修复验收", "genre": "悬疑", "episode_count": 1}).json()
+        client.put(f"/api/v1/projects/{project['id']}/episodes/1/script", json={"title": "第一集", "source_name": "", "source_text": "雨夜，沈岚推门进入仓库。"})
+        response = client.post(f"/api/v1/projects/{project['id']}/episodes/1/director/generate", json={"provider": "retrydirector", "replace_existing": True})
+    assert response.status_code == 200, response.text
+    assert response.json()["json_retry_used"] is True
+    assert response.json()["shot_count"] == 1
+    assert adapter.calls == 2
+
+
+def test_openai_director_sends_output_limit_and_falls_back_if_json_mode_is_unsupported(monkeypatch):
+    import asyncio
+
+    bodies = []
+
+    class FakeResponse:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+            self.text = "response_format unsupported" if status_code >= 400 else ""
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): return None
+
+        async def post(self, url, headers, json):
+            bodies.append(dict(json))
+            if len(bodies) == 1:
+                return FakeResponse(400, {})
+            return FakeResponse(200, {"choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}]})
+
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-secret")
+    monkeypatch.setenv("AI_STUDIO_OPENAI_MODEL", "director-model")
+    monkeypatch.setattr("app.adapters.openai_compatible.httpx.AsyncClient", FakeClient)
+    result = asyncio.run(OpenAICompatibleAdapter("openai").invoke("生成分镜", {
+        "task_type": "llm", "response_format": "json_object", "max_tokens": 16000,
+    }))
+    assert bodies[0]["response_format"] == {"type": "json_object"}
+    assert bodies[0]["max_tokens"] == 16000
+    assert "response_format" not in bodies[1]
+    assert result["finish_reason"] == "stop"
+
+
 def test_continuous_video_waits_for_previous_tail_frame(tmp_path: Path, monkeypatch):
     previous_video = tmp_path / "previous.mp4"
     previous_video.write_bytes(b"video")

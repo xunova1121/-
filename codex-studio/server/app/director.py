@@ -4,6 +4,8 @@ import json
 import re
 from typing import Any
 
+from json_repair import repair_json
+
 
 DIRECTOR_SYSTEM = """你是工业级短剧导演、分镜师和连续性总监。你的输出会直接进入生产数据库，必须只输出一个 JSON 对象，不得输出 Markdown 或解释。
 
@@ -58,28 +60,102 @@ def director_prompt(script: str, episode: int) -> str:
     return f"第 {episode} 集剧本如下。请生成完整生产设计。\n\n{script.strip()}"
 
 
-def extract_json_object(text: str) -> dict[str, Any]:
-    raw = str(text or "").strip()
-    if raw.startswith("```"):
-        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
-        raw = re.sub(r"\s*```$", "", raw)
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError:
-        start, end = raw.find("{"), raw.rfind("}")
-        if start < 0 or end <= start:
-            raise ValueError("导演模型没有返回 JSON 对象")
-        try:
-            value = json.loads(raw[start : end + 1])
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"导演模型 JSON 无法解析：{exc.msg}") from exc
-    if not isinstance(value, dict):
-        raise ValueError("导演模型返回的根节点必须是 JSON 对象")
+def director_retry_prompt(script: str, episode: int, error: str) -> str:
+    return (
+        f"第 {episode} 集剧本如下。上一次输出无法进入生产系统（{error}）。\n"
+        "请重新生成完整生产设计，只输出一个完整 JSON 对象："
+        "不要 Markdown 代码块，不要解释，不要省略任何场次或镜头，并检查所有键后都有英文冒号。\n\n"
+        f"{script.strip()}"
+    )
+
+
+def _strip_fence(text: str) -> str:
+    value = text.strip().lstrip("\ufeff")
+    match = re.search(r"```(?:json)?\s*(.*?)\s*```", value, flags=re.IGNORECASE | re.DOTALL)
+    if match:
+        return match.group(1).strip()
     return value
 
 
+def _normalize_outside_strings(text: str) -> str:
+    """Normalize punctuation that Chinese LLMs sometimes emit between JSON tokens."""
+    result: list[str] = []
+    in_string = False
+    escaped = False
+    replacements = {"：": ":", "，": ",", "；": ","}
+    for char in text:
+        if in_string:
+            result.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            result.append(char)
+        else:
+            result.append(replacements.get(char, char))
+    return "".join(result)
+
+
+def _json_candidates(text: str) -> list[str]:
+    raw = _strip_fence(text)
+    candidates = [raw, _normalize_outside_strings(raw)]
+    start, end = raw.find("{"), raw.rfind("}")
+    if start >= 0 and end > start:
+        fragment = raw[start : end + 1]
+        candidates.extend([fragment, _normalize_outside_strings(fragment)])
+    unique: list[str] = []
+    for item in candidates:
+        item = item.strip()
+        if item and item not in unique:
+            unique.append(item)
+    return unique
+
+
+def extract_json_object(text: str) -> dict[str, Any]:
+    candidates = _json_candidates(str(text or ""))
+    if not candidates or not any("{" in item for item in candidates):
+        raise ValueError("导演模型没有返回 JSON 对象")
+    last_error: json.JSONDecodeError | None = None
+    for candidate in candidates:
+        try:
+            value = json.loads(candidate)
+        except json.JSONDecodeError as exc:
+            last_error = exc
+            continue
+        if isinstance(value, dict):
+            return value
+    for candidate in candidates:
+        try:
+            value = repair_json(candidate, return_objects=True, ensure_ascii=False)
+        except Exception:
+            continue
+        if isinstance(value, dict) and value:
+            return value
+    if last_error:
+        raise ValueError(
+            f"导演模型 JSON 无法解析：{last_error.msg}"
+            f"（第 {last_error.lineno} 行，第 {last_error.colno} 列）"
+        ) from last_error
+    raise ValueError("导演模型返回的根节点必须是 JSON 对象")
+
+
 def _text(value: Any, default: str = "") -> str:
-    return str(value if value is not None else default).strip()
+    text = str(value if value is not None else default).strip().lstrip("\ufeff")
+    if re.fullmatch(r"\s*(?:-{3,}|_{3,}|\*{3,})\s*", text):
+        return ""
+    text = text.replace("**", "").replace("__", "").replace("`", "")
+    text = re.sub(r"^\s*[#>\-*]+\s*", "", text)
+    text = re.sub(
+        r"^\s*[\[\(（]?(?:\d{1,2}:)?\d{1,2}:\d{2}\s*[-–—~至]\s*(?:\d{1,2}:)?\d{1,2}:\d{2}[\]\)）]?\s*",
+        "", text,
+    )
+    text = re.sub(r"^\s*(?:画面|细节|动作|环境|人物|镜头|说明)\s*[:：]\s*", "", text, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _names(value: Any) -> list[str]:

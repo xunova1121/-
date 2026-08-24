@@ -10,22 +10,30 @@
         </Style>
     </Window.Resources>
     <Grid>
-        <Grid.RowDefinitions><RowDefinition Height="68"/><RowDefinition Height="62"/><RowDefinition/><RowDefinition Height="245"/><RowDefinition Height="58"/></Grid.RowDefinitions>
+        <Grid.RowDefinitions><RowDefinition Height="68"/><RowDefinition Height="0"/><RowDefinition/><RowDefinition Height="245"/><RowDefinition Height="58"/></Grid.RowDefinitions>
 
         <Border Grid.Row="0" Background="#111318" BorderBrush="{StaticResource StrokeBrush}" BorderThickness="0,0,0,1">
-            <Grid Margin="18,0"><Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition/><ColumnDefinition Width="300"/></Grid.ColumnDefinitions>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><Border Width="36" Height="36" CornerRadius="9" Background="{StaticResource AccentBrush}"><TextBlock Text="◇" FontSize="22" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="AI影视Studio" FontWeight="SemiBold" FontSize="20" Margin="12,0,0,0" VerticalAlignment="Center"/></StackPanel>
+            <Grid Margin="12,0"><Grid.ColumnDefinitions><ColumnDefinition Width="154"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><Border Width="34" Height="34" CornerRadius="9" Background="{StaticResource AccentBrush}"><TextBlock Text="◇" FontSize="21" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="AI影视Studio" FontWeight="SemiBold" FontSize="18" Margin="9,0,0,0" VerticalAlignment="Center"/></StackPanel>
                 <StackPanel x:Name="TopNavigation" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center">
-                    <Button x:Name="HomeNavButton" Style="{StaticResource ActiveNavButton}" Content="首页" Click="TopNav_Click" Tag="首页" Padding="11,9"/><Button Style="{StaticResource NavButton}" Content="项目" Click="TopNav_Click" Tag="项目" Padding="11,9"/><Button Style="{StaticResource NavButton}" Content="剧本" Click="TopNav_Click" Tag="剧本" Padding="11,9"/><Button Style="{StaticResource NavButton}" Content="分镜" Click="TopNav_Click" Tag="分镜" Padding="11,9"/><Button Style="{StaticResource NavButton}" Content="制作" Click="TopNav_Click" Tag="制作" Padding="11,9"/><Button Style="{StaticResource NavButton}" Content="剪辑" Click="TopNav_Click" Tag="剪辑" Padding="11,9"/><Button Style="{StaticResource NavButton}" Content="发布" Click="TopNav_Click" Tag="发布" Padding="11,9"/>
+                    <Button x:Name="HomeNavButton" Style="{StaticResource ActiveNavButton}" Content="首页" Click="TopNav_Click" Tag="home" Padding="8,9"/>
+                    <Button Style="{StaticResource NavButton}" Content="项目" Click="TopNav_Click" Tag="projects" Padding="8,9"/>
+                    <Button Style="{StaticResource NavButton}" Content="剧本" Click="TopNav_Click" Tag="director" Padding="8,9"/>
+                    <Button Style="{StaticResource NavButton}" Content="分镜" Click="TopNav_Click" Tag="storyboard" Padding="8,9"/>
+                    <Button Style="{StaticResource NavButton}" Content="设定集" Click="TopNav_Click" Tag="bible" Padding="8,9"/>
+                    <Button Style="{StaticResource NavButton}" Content="AI生成" Click="TopNav_Click" Tag="generation" Padding="8,9"/>
+                    <Button Style="{StaticResource NavButton}" Content="自动生产" Click="TopNav_Click" Tag="automation" Padding="8,9"/>
+                    <Button Style="{StaticResource NavButton}" Content="剪辑" Click="TopNav_Click" Tag="editing" Padding="8,9"/>
+                    <Button Style="{StaticResource NavButton}" Content="发布" Click="TopNav_Click" Tag="publish" Padding="8,9"/>
                 </StackPanel>
-                <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"><Ellipse x:Name="ServiceDot" Width="9" Height="9" Fill="#E0A534"/><TextBlock x:Name="ServiceText" Text="本地服务检测中" Foreground="{StaticResource MutedBrush}" Margin="8,0,10,0" VerticalAlignment="Center"/><Button x:Name="ModelSettingsButton" AutomationProperties.AutomationId="ModelSettingsButton" Style="{StaticResource NavButton}" Content="⚙ 模型" Click="ProviderSettings_Click" Padding="12,9"/><TextBlock x:Name="ActiveProjectText" Text="未选择项目" VerticalAlignment="Center" Margin="8,0,0,0"/></StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Ellipse x:Name="ServiceDot" Width="9" Height="9" Fill="#E0A534" ToolTip="本地服务状态"/>
+                    <TextBlock x:Name="ServiceText" Text="检测中" Foreground="{StaticResource MutedBrush}" Margin="6,0,6,0" VerticalAlignment="Center" ToolTip="本地服务状态"/>
+                    <Button Style="{StaticResource NavButton}" Content="资产" Click="AssetUtility_Click" Padding="8,9"/>
+                    <Button Style="{StaticResource NavButton}" Content="任务" Click="TaskUtility_Click" Padding="8,9"/>
+                    <Button x:Name="ModelSettingsButton" AutomationProperties.AutomationId="ModelSettingsButton" Style="{StaticResource NavButton}" Content="⚙ 模型" Click="ProviderSettings_Click" Padding="8,9"/>
+                </StackPanel>
             </Grid>
-        </Border>
-
-        <Border Grid.Row="1" Background="#14171C" BorderBrush="{StaticResource StrokeBrush}" BorderThickness="0,0,0,1">
-            <StackPanel x:Name="WorkspaceNavigation" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                <Button Style="{StaticResource NavButton}" Content="剧本" Click="Workspace_Click" Tag="director" Padding="16,11"/><Button Style="{StaticResource NavButton}" Content="分镜" Click="Workspace_Click" Tag="storyboard" Padding="16,11"/><Button Style="{StaticResource NavButton}" Content="设定集" Click="Workspace_Click" Tag="bible" Padding="16,11"/><Button Style="{StaticResource NavButton}" Content="AI生成" Click="Workspace_Click" Tag="generation" Padding="16,11"/><Button Style="{StaticResource NavButton}" Content="一键生产" Click="Workspace_Click" Tag="automation" Padding="16,11"/><Button Style="{StaticResource NavButton}" Content="剪辑导出" Click="Workspace_Click" Tag="editing" Padding="16,11"/><Button Style="{StaticResource NavButton}" Content="资产" Click="Workspace_Click" Tag="assets" Padding="16,11"/><Button Style="{StaticResource NavButton}" Content="任务" Click="Workspace_Click" Tag="tasks" Padding="16,11"/>
-            </StackPanel>
         </Border>
 
         <Grid x:Name="HomeDashboard" Grid.Row="2" Grid.RowSpan="3" Margin="24">
@@ -61,7 +69,7 @@
 
             <Border Grid.Column="1" Style="{StaticResource PanelBorder}" Margin="0,0,8,0">
                 <Grid><Grid.RowDefinitions><RowDefinition Height="48"/><RowDefinition/></Grid.RowDefinitions>
-                    <Grid><TextBlock x:Name="WorkspaceTitle" Text="项目工作台" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button Style="{StaticResource NavButton}" Content="剧本工作台" Click="TopNav_Click" Tag="剧本"/><Button Style="{StaticResource PrimaryButton}" Content="分镜工作台" Click="TopNav_Click" Tag="分镜"/></StackPanel></Grid>
+                    <Grid><TextBlock x:Name="WorkspaceTitle" Text="项目工作台" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/><TextBlock Text="主流程只使用顶部导航；资产、任务和模型属于全局工具。" Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid>
                     <Grid Grid.Row="1"><TextBlock x:Name="EmptyShotsText" Text="项目尚无镜头。打开剧本工作台，导入剧本并生成全量分镜。" Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap"/><ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"><ItemsControl x:Name="ShotList"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><Border Width="190" Height="300" Background="{Binding Color}" CornerRadius="7" Margin="0,0,10,0" BorderBrush="#434A57" BorderThickness="1"><Grid><Grid.RowDefinitions><RowDefinition Height="150"/><RowDefinition/></Grid.RowDefinitions><Grid Background="#252A32"><TextBlock Text="{Binding Number}" Background="#15171B" Padding="7,3" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8"/><TextBlock Text="◈" FontSize="44" Foreground="#9BA6B8" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Text="{Binding Duration}" Background="#15171B" Padding="7,3" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8"/></Grid><StackPanel Grid.Row="1" Margin="10"><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Description}" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="15" Margin="0,8,0,0"/><Border Background="#203D2E" CornerRadius="4" Padding="7,4" HorizontalAlignment="Left" Margin="0,12,0,0"><TextBlock Text="{Binding Status}" Foreground="#68E19A" FontSize="15"/></Border></StackPanel></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer></Grid>
                 </Grid>
             </Border>
