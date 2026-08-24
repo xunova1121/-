@@ -56,7 +56,7 @@
                         <TextBlock x:Name="ShotSummaryText" Text="0 个镜头" FontWeight="SemiBold" VerticalAlignment="Center"/>
                         <TextBlock Text="单击镜头后在右侧编辑详细信息" Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                     </Grid>
-                    <DataGrid x:Name="ShotGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
+                    <DataGrid x:Name="ShotGrid" AutomationProperties.AutomationId="StoryboardGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
                               Background="{StaticResource PanelBrush}" Foreground="{StaticResource TextBrush}" BorderThickness="0"
                               GridLinesVisibility="Horizontal" RowBackground="#171A20" AlternatingRowBackground="#1B1F26" AlternationCount="2"
                               HeadersVisibility="Column" SelectionMode="Single" SelectionUnit="FullRow" RowHeight="72"
@@ -79,7 +79,7 @@
                 <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition/></Grid.RowDefinitions>
                     <TextBlock Text="镜头检查器" Style="{StaticResource SectionTitle}"/>
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                        <Grid x:Name="ShotInspector" DataContext="{Binding SelectedItem, ElementName=ShotGrid}">
+                        <Grid x:Name="ShotInspector" AutomationProperties.AutomationId="StoryboardInspector" DataContext="{Binding SelectedItem, ElementName=ShotGrid}">
                             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                             <StackPanel>
                                 <TextBlock Text="未选择镜头" x:Name="NoSelectionText" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,12"/>

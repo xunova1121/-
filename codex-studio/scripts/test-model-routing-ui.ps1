@@ -62,6 +62,50 @@ try {
     if ($desktop.MainWindowHandle -eq 0) { throw "Desktop main window handle is unavailable" }
     $main = [System.Windows.Automation.AutomationElement]::FromHandle($desktop.MainWindowHandle)
     Save-Screen "01-home"
+
+    $projectBody = @{ name = "UI审片验收"; genre = "悬疑"; episode_count = 1 } | ConvertTo-Json
+    $project = Invoke-RestMethod -Method Post -Uri "$ApiBase/projects" -ContentType "application/json" -Body $projectBody
+    $scriptText = @"
+# 场景 1 沙丘 - 黎明
+**（0:00-0:12）** **画面：** 黎明前的沙丘安静无声
+**细节：** 旅人裹着长袍
+**动作：** 旅人缓慢抬头
+---
+**（0:13-0:25）** **画面：** 风声骤停
+**细节：** 旅人手指收紧
+"@
+    $scriptBody = @{ title = "第一集"; source_name = "ui-review.md"; source_text = $scriptText } | ConvertTo-Json
+    Invoke-RestMethod -Method Put -Uri "$ApiBase/projects/$($project.id)/episodes/1/script" -ContentType "application/json" -Body $scriptBody | Out-Null
+    Invoke-RestMethod -Method Post -Uri "$ApiBase/projects/$($project.id)/episodes/1/script/parse" | Out-Null
+    $storyboardBody = @{ replace_existing = $true } | ConvertTo-Json
+    Invoke-RestMethod -Method Post -Uri "$ApiBase/projects/$($project.id)/episodes/1/storyboard/generate" -ContentType "application/json" -Body $storyboardBody | Out-Null
+
+    Invoke-Element (Wait-Element $main "ProjectNavButton")
+    $root = [System.Windows.Automation.AutomationElement]::RootElement
+    $selectProject = Wait-Element $root "SelectCurrentProjectButton"
+    Start-Sleep -Seconds 1
+    Invoke-Element $selectProject
+    Start-Sleep -Seconds 1
+    Invoke-Element (Wait-Element $main "StoryboardNavButton")
+    $storyboardGrid = Wait-Element $root "StoryboardGrid"
+    Wait-Element $root "StoryboardInspector" | Out-Null
+    foreach ($header in @('镜号','场景','景别','画面与动作','人物','时长','衔接','状态')) {
+        $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $header)
+        if ($null -eq $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)) { throw "Storyboard header '$header' was not visible" }
+    }
+    foreach ($forbidden in @('状态前 JSON','状态后 JSON','动作链ID','动作动量')) {
+        $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $forbidden)
+        if ($null -ne $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)) { throw "Internal storyboard field '$forbidden' leaked into the review table" }
+    }
+    Save-Screen "02-storyboard-review"
+    $storyboardWindow = $storyboardGrid
+    while ($storyboardWindow.Current.ControlType -ne [System.Windows.Automation.ControlType]::Window) {
+        $storyboardWindow = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($storyboardWindow)
+        if ($null -eq $storyboardWindow) { throw "Storyboard window ancestor was not found" }
+    }
+    $storyboardWindow.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close()
+    Start-Sleep -Milliseconds 500
+
     Invoke-Element (Wait-Element $main "ModelSettingsButton")
 
     $root = [System.Windows.Automation.AutomationElement]::RootElement
@@ -82,7 +126,7 @@ try {
         if ($selected -match "studio-ui-smoke-chat") { break }
     }
     if ($selected -notmatch "studio-ui-smoke-chat") { throw "Pulled model was not selected in the role model control; value='$selected'" }
-    Save-Screen "02-model-pulled-and-selected"
+    Save-Screen "03-model-pulled-and-selected"
 
     Invoke-Element $bind
     Start-Sleep -Seconds 1
@@ -91,7 +135,7 @@ try {
     if ($role.provider_id -ne "openai" -or $role.model -ne "studio-ui-smoke-chat") {
         throw "UI binding did not persist the exact model id: $($role | ConvertTo-Json -Compress)"
     }
-    Save-Screen "03-model-binding-saved"
+    Save-Screen "04-model-binding-saved"
 
     Invoke-Element $close
     Start-Sleep -Milliseconds 500
@@ -105,7 +149,7 @@ try {
         if ($reopened -match "studio-ui-smoke-chat") { break }
     }
     if ($reopened -notmatch "studio-ui-smoke-chat") { throw "Saved role binding was not restored after reopening; value='$reopened'" }
-    Save-Screen "04-model-binding-restored-after-reopen"
+    Save-Screen "05-model-binding-restored-after-reopen"
 
     Invoke-Element $clear
     Start-Sleep -Seconds 1

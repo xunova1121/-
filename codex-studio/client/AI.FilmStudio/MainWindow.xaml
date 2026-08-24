@@ -17,9 +17,9 @@
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><Border Width="34" Height="34" CornerRadius="9" Background="{StaticResource AccentBrush}"><TextBlock Text="◇" FontSize="21" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="AI影视Studio" FontWeight="SemiBold" FontSize="18" Margin="9,0,0,0" VerticalAlignment="Center"/></StackPanel>
                 <StackPanel x:Name="TopNavigation" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center">
                     <Button x:Name="HomeNavButton" Style="{StaticResource ActiveNavButton}" Content="首页" Click="TopNav_Click" Tag="home" Padding="8,9"/>
-                    <Button Style="{StaticResource NavButton}" Content="项目" Click="TopNav_Click" Tag="projects" Padding="8,9"/>
+                    <Button AutomationProperties.AutomationId="ProjectNavButton" Style="{StaticResource NavButton}" Content="项目" Click="TopNav_Click" Tag="projects" Padding="8,9"/>
                     <Button Style="{StaticResource NavButton}" Content="剧本" Click="TopNav_Click" Tag="director" Padding="8,9"/>
-                    <Button Style="{StaticResource NavButton}" Content="分镜" Click="TopNav_Click" Tag="storyboard" Padding="8,9"/>
+                    <Button AutomationProperties.AutomationId="StoryboardNavButton" Style="{StaticResource NavButton}" Content="分镜" Click="TopNav_Click" Tag="storyboard" Padding="8,9"/>
                     <Button Style="{StaticResource NavButton}" Content="设定集" Click="TopNav_Click" Tag="bible" Padding="8,9"/>
                     <Button Style="{StaticResource NavButton}" Content="AI生成" Click="TopNav_Click" Tag="generation" Padding="8,9"/>
                     <Button Style="{StaticResource NavButton}" Content="自动生产" Click="TopNav_Click" Tag="automation" Padding="8,9"/>
