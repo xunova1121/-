@@ -161,6 +161,13 @@ def test_previz_transition_and_episode_automation():
         }
         previz = client.post("/api/v1/projects/demo/previz/layouts", json=layout).json()
         assert previz["analysis"]["subjects"][0]["visible"] is True
+        opposite = {**layout, "camera": {"position": {"x": 0, "y": 5}, "target": {"x": 0, "y": 0}, "lens_mm": 50}}
+        second = client.post("/api/v1/projects/demo/previz/layouts", json=opposite).json()
+        assert second["version"] == 2
+        assert any(item["type"] == "axis" for item in second["analysis"]["findings"])
+        layouts = client.get("/api/v1/projects/demo/previz/layouts?scene_key=temple").json()
+        assert [item["version"] for item in layouts] == [2, 1]
+        assert layouts[0]["camera"]["lens_mm"] == 50
         transition = client.post("/api/v1/projects/demo/transition-plans", json={
             "episode": 1,
             "left": {"shot_number": "005", "scene_key": "temple", "action": "斧头脱手", "action_phase": "middle", "screen_direction": "right", "lighting": "night"},

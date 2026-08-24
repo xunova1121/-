@@ -1,5 +1,6 @@
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Text.Json;
 using AI.FilmStudio.Models;
 
 namespace AI.FilmStudio.Services;
@@ -95,6 +96,27 @@ public sealed class StudioApiClient
         }, token);
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<TaskAccepted>(cancellationToken: token) ?? new TaskAccepted();
+    }
+
+    public async Task<IReadOnlyList<PrevizLayoutVersion>> GetPrevizLayoutsAsync(string? sceneKey = null, CancellationToken token = default)
+    {
+        var query = string.IsNullOrWhiteSpace(sceneKey) ? "" : $"?scene_key={Uri.EscapeDataString(sceneKey)}";
+        return await _http.GetFromJsonAsync<List<PrevizLayoutVersion>>(ProjectPath("previz/layouts") + query, token) ?? [];
+    }
+
+    public async Task<PrevizLayoutVersion> SavePrevizAsync(string sceneKey, double cameraX, double cameraY, double targetX, double targetY, double lens, double sunBearing, IReadOnlyList<PrevizSubject> subjects, CancellationToken token = default)
+    {
+        var response = await _http.PostAsJsonAsync(ProjectPath("previz/layouts"), new
+        {
+            scene_key = sceneKey,
+            camera = new { position = new { x = cameraX, y = cameraY }, target = new { x = targetX, y = targetY }, lens_mm = lens, height_m = 1.6, movement = "fixed" },
+            subjects,
+            landmarks = Array.Empty<object>(),
+            sun_bearing_deg = sunBearing,
+            sun_elevation = "mid"
+        }, token);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<PrevizLayoutVersion>(cancellationToken: token) ?? throw new InvalidOperationException("服务未返回预演版本");
     }
 
     private sealed record HealthResult(string Status);

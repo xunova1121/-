@@ -24,7 +24,7 @@
 
         <Border Grid.Row="1" Background="#14171C" BorderBrush="{StaticResource StrokeBrush}" BorderThickness="0,0,0,1">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                <Button Style="{StaticResource NavButton}" Content="◉ 导演工作台" Click="Workspace_Click" Tag="director"/><Button Style="{StaticResource NavButton}" Content="▧ 分镜工作台" Click="Workspace_Click" Tag="storyboard"/><Button Style="{StaticResource NavButton}" Content="▣ 视频生成" Click="Workspace_Click" Tag="generation"/><Button Style="{StaticResource PrimaryButton}" Content="⌁ 剪辑工作台" Click="Workspace_Click" Tag="editing"/><Button Style="{StaticResource NavButton}" Content="♙ 资产管理" Click="Workspace_Click" Tag="assets"/><Button Style="{StaticResource NavButton}" Content="▤ 任务队列" Click="Workspace_Click" Tag="tasks"/>
+                <Button Style="{StaticResource NavButton}" Content="◉ 导演工作台" Click="Workspace_Click" Tag="director"/><Button Style="{StaticResource NavButton}" Content="▧ 分镜工作台" Click="Workspace_Click" Tag="storyboard"/><Button Style="{StaticResource NavButton}" Content="◎ 空间预演" Click="Workspace_Click" Tag="previz"/><Button Style="{StaticResource NavButton}" Content="▣ 视频生成" Click="Workspace_Click" Tag="generation"/><Button Style="{StaticResource PrimaryButton}" Content="⌁ 剪辑工作台" Click="Workspace_Click" Tag="editing"/><Button Style="{StaticResource NavButton}" Content="♙ 资产管理" Click="Workspace_Click" Tag="assets"/><Button Style="{StaticResource NavButton}" Content="▤ 任务队列" Click="Workspace_Click" Tag="tasks"/>
             </StackPanel>
         </Border>
 

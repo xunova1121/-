@@ -38,14 +38,14 @@ async def lifespan(_: FastAPI):
         await worker
 
 
-app = FastAPI(title=settings.app_name, version="0.6.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="0.7.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost", "http://127.0.0.1"], allow_methods=["*"], allow_headers=["*"])
 PREFIX = settings.api_prefix
 
 
 @app.get(f"{PREFIX}/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.6.0"}
+    return {"status": "ok", "version": "0.7.0"}
 
 
 @app.get(f"{PREFIX}/providers")
@@ -265,10 +265,38 @@ def save_scene_layout(project_id: str, payload: SceneLayoutRequest):
     layout = payload.model_dump()
     mark = stage_fingerprint(layout)
     with connect() as db:
+        project = db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone()
+        if not project:
+            raise HTTPException(404, "Project not found")
+        previous_row = db.execute(
+            "SELECT layout_json FROM scene_layouts WHERE project_id=? AND scene_key=? ORDER BY version DESC,id DESC LIMIT 1",
+            (project_id, payload.scene_key),
+        ).fetchone()
+        previous = json.loads(previous_row["layout_json"]) if previous_row else None
         row = db.execute("SELECT COALESCE(MAX(version),0)+1 FROM scene_layouts WHERE project_id=? AND scene_key=?", (project_id, payload.scene_key)).fetchone()
         version = row[0]
         cursor = db.execute("INSERT INTO scene_layouts(project_id,scene_key,version,layout_json,fingerprint) VALUES(?,?,?,?,?)", (project_id, payload.scene_key, version, json.dumps(layout, ensure_ascii=False), mark))
-    return {"id": cursor.lastrowid, "version": version, "fingerprint": mark, "analysis": analyze_stage(layout), **layout}
+    return {"id": cursor.lastrowid, "version": version, "fingerprint": mark, "analysis": analyze_stage(layout, previous), **layout}
+
+
+@app.get(f"{PREFIX}/projects/{{project_id}}/previz/layouts")
+def list_scene_layouts(project_id: str, scene_key: str | None = None, latest_only: bool = False):
+    clauses, values = ["project_id=?"], [project_id]
+    if scene_key:
+        clauses.append("scene_key=?")
+        values.append(scene_key)
+    query = "SELECT * FROM scene_layouts WHERE " + " AND ".join(clauses) + " ORDER BY scene_key,version DESC,id DESC"
+    with connect() as db:
+        rows = db.execute(query, values).fetchall()
+    seen: set[str] = set()
+    result = []
+    for row in rows:
+        if latest_only and row["scene_key"] in seen:
+            continue
+        seen.add(row["scene_key"])
+        layout = json.loads(row["layout_json"] or "{}")
+        result.append({"id": row["id"], "version": row["version"], "fingerprint": row["fingerprint"], "created_at": row["created_at"], **layout})
+    return result
 
 
 @app.post(f"{PREFIX}/previz/analyze")

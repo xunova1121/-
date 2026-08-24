@@ -8,6 +8,8 @@
 | Forget-C/Jellyfish | Apache-2.0 | 资产候选确认、统一异步任务、镜头 readiness 思路 |
 | stuttlepress/ComfyUI-Wan-VACE-Video-Joiner | MIT | 双侧上下文帧、替换接缝坏帧、VACE 失败回退思路 |
 | AcademySoftwareFoundation/OpenTimelineIO | Apache-2.0 | 后续采用帧精确时间线交换标准 |
+| wonderunit/shot-generator-models | MIT | 借鉴角色、物体、灯光和相机同台布置的 Shot Generator 产品模型，不复制资源或代码 |
+| Blender Storypencil | GPL-3.0 | 只借鉴场景—镜头—故事板的工作流与机位预演体验，不复制代码、不形成运行时依赖 |
 | HaD0Yun/CozyClay | 未确认 | 只借鉴虚拟摄影机、人物走位、镜头时间线概念，不复制代码 |
 | morphicfilms/frames-to-video | Apache-2.0，已归档 | 只保留多关键帧插值适配思路 |
 | joaofernandes/comfystudio | MIT | 桌面 AI 视频工作站、项目级任务与导出编排思路 |

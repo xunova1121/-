@@ -56,6 +56,15 @@ jobs:
               }
               throw "Packaged service did not become healthy"
             }
+            $headers = @{ "Content-Type" = "application/json" }
+            $project = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:18118/api/v1/projects" -Headers $headers -Body (@{ name="预演冒烟"; genre="测试"; episode_count=1 } | ConvertTo-Json)
+            $layout = @{ scene_key="ci-stage"; camera=@{ position=@{x=0;y=-5}; target=@{x=0;y=0}; lens_mm=35; height_m=1.6; movement="fixed" }; subjects=@(@{entity_key="主角";position=@{x=0;y=0};facing_deg=180;pose="standing"}); landmarks=@(); sun_bearing_deg=-45; sun_elevation="mid" }
+            $first = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:18118/api/v1/projects/$($project.id)/previz/layouts" -Headers $headers -Body ($layout | ConvertTo-Json -Depth 8)
+            $layout.camera.position.y = 5
+            $second = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:18118/api/v1/projects/$($project.id)/previz/layouts" -Headers $headers -Body ($layout | ConvertTo-Json -Depth 8)
+            $versions = Invoke-RestMethod -Uri "http://127.0.0.1:18118/api/v1/projects/$($project.id)/previz/layouts?scene_key=ci-stage"
+            if ($first.version -ne 1 -or $second.version -ne 2 -or $versions.Count -ne 2) { throw "Packaged previz version round-trip failed" }
+            if (-not ($second.analysis.findings | Where-Object { $_.type -eq "axis" })) { throw "Packaged previz axis analysis failed" }
           } finally {
             if (-not $service.HasExited) { Stop-Process -Id $service.Id -Force }
             Get-Process AIStudioService -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -97,7 +106,7 @@ jobs:
             }
             $response = Invoke-RestMethod -Uri "http://127.0.0.1:18118/api/v1/health" -TimeoutSec 3
             if ($response.status -ne "ok") { throw "Desktop-launched service is unhealthy" }
-            if ($response.version -ne "0.6.0") { throw "Unexpected service version: $($response.version)" }
+            if ($response.version -ne "0.7.0") { throw "Unexpected service version: $($response.version)" }
             $media = Invoke-RestMethod -Uri "http://127.0.0.1:18118/api/v1/media/capabilities" -TimeoutSec 3
             if (-not $media.ffmpeg_available) {
               $runtime = Join-Path $env:LOCALAPPDATA "AI-Film-Studio/runtime"
@@ -116,6 +125,6 @@ jobs:
           Get-FileHash dist/AI-Film-Studio/AI-Film-Studio.exe -Algorithm SHA256
       - uses: actions/upload-artifact@v4
         with:
-          name: AI-Film-Studio-V0.6.0-Single-EXE
+          name: AI-Film-Studio-V0.7.0-Interactive-Previz-Single-EXE
           path: dist/AI-Film-Studio/AI-Film-Studio.exe
           retention-days: 30

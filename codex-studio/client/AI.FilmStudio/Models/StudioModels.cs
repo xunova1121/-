@@ -54,3 +54,41 @@ public sealed class TaskAccepted
     [JsonPropertyName("id")] public int Id { get; set; }
     [JsonPropertyName("status")] public string Status { get; set; } = "";
 }
+
+public sealed class PrevizPoint
+{
+    [JsonPropertyName("x")] public double X { get; set; }
+    [JsonPropertyName("y")] public double Y { get; set; }
+}
+
+public sealed class PrevizCamera
+{
+    [JsonPropertyName("position")] public PrevizPoint Position { get; set; } = new();
+    [JsonPropertyName("target")] public PrevizPoint Target { get; set; } = new();
+    [JsonPropertyName("lens_mm")] public double LensMm { get; set; } = 35;
+    [JsonPropertyName("height_m")] public double HeightM { get; set; } = 1.6;
+    [JsonPropertyName("movement")] public string Movement { get; set; } = "fixed";
+}
+
+public sealed class PrevizSubject
+{
+    [JsonPropertyName("entity_key")] public string EntityKey { get; set; } = "角色";
+    [JsonPropertyName("position")] public PrevizPoint Position { get; set; } = new();
+    [JsonPropertyName("facing_deg")] public double FacingDeg { get; set; } = 180;
+    [JsonPropertyName("pose")] public string Pose { get; set; } = "standing";
+}
+
+public sealed class PrevizLayoutVersion
+{
+    [JsonPropertyName("id")] public int Id { get; set; }
+    [JsonPropertyName("scene_key")] public string SceneKey { get; set; } = "";
+    [JsonPropertyName("version")] public int Version { get; set; }
+    [JsonPropertyName("fingerprint")] public string Fingerprint { get; set; } = "";
+    [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
+    [JsonPropertyName("camera")] public PrevizCamera Camera { get; set; } = new();
+    [JsonPropertyName("subjects")] public List<PrevizSubject> Subjects { get; set; } = [];
+    [JsonPropertyName("sun_bearing_deg")] public double? SunBearingDeg { get; set; }
+    [JsonPropertyName("sun_elevation")] public string SunElevation { get; set; } = "mid";
+    [JsonPropertyName("analysis")] public JsonElement Analysis { get; set; }
+    [JsonIgnore] public string Display => $"v{Version} · {CreatedAt}";
+}

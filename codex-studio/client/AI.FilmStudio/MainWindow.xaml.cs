@@ -80,6 +80,7 @@ public partial class MainWindow : Window
         {
             "director" => "导演工作台 · 第1集 雪夜杀局",
             "storyboard" => "分镜工作台 · 第1集 雪夜杀局",
+            "previz" => $"空间预演台 · {CurrentProjectName.Text}",
             "generation" => "视频生成中心 · 第1集 雪夜杀局",
             "assets" => $"资产管理 · {CurrentProjectName.Text}",
             "tasks" => "任务队列 · 生成与渲染",
@@ -91,6 +92,11 @@ public partial class MainWindow : Window
             var window = new TaskQueueWindow(_api) { Owner = this };
             window.ShowDialog();
             await CheckServiceAsync();
+        }
+        else if (key == "previz")
+        {
+            if (string.IsNullOrWhiteSpace(_api.CurrentProjectId)) { MessageBox.Show("请先创建项目", "AI影视Studio"); return; }
+            new PrevizWindow(_api) { Owner = this }.ShowDialog();
         }
     }
 
