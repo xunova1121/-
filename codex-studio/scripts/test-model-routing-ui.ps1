@@ -98,8 +98,14 @@ try {
     Invoke-Element (Wait-Element $main "ModelSettingsButton")
     $modelSelector = Wait-Element $root "RoleModelSelector"
     $clear = Wait-Element $root "ClearRoleButton"
-    $reopened = $modelSelector.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+    $reopened = ""
+    for ($i = 0; $i -lt 60; $i++) {
+        Start-Sleep -Milliseconds 250
+        try { $reopened = $modelSelector.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value } catch { }
+        if ($reopened -match "studio-ui-smoke-chat") { break }
+    }
     if ($reopened -notmatch "studio-ui-smoke-chat") { throw "Saved role binding was not restored after reopening; value='$reopened'" }
+    Save-Screen "04-model-binding-restored-after-reopen"
 
     Invoke-Element $clear
     Start-Sleep -Seconds 1
