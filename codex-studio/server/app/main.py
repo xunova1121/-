@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
+from . import APP_VERSION
 from .adapters import registry
 from .config import render_dir, settings
 from .database import connect, initialize_database
@@ -41,7 +42,7 @@ async def lifespan(_: FastAPI):
         await worker
 
 
-app = FastAPI(title=settings.app_name, version="0.10.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version=APP_VERSION, lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost", "http://127.0.0.1"], allow_methods=["*"], allow_headers=["*"])
 PREFIX = settings.api_prefix
 MODEL_ROLES = {
@@ -54,7 +55,7 @@ MODEL_ROLES = {
 
 @app.get(f"{PREFIX}/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.9.0"}
+    return {"status": "ok", "version": APP_VERSION}
 
 
 @app.get(f"{PREFIX}/providers")

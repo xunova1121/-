@@ -44,7 +44,8 @@ def test_health_starts_without_seeded_demo_and_creates_real_project(tmp_path: Pa
     object.__setattr__(settings, "database_path", tmp_path / "test.db")
     try:
         with TestClient(app) as client:
-            assert client.get("/api/v1/health").json()["status"] == "ok"
+            health = client.get("/api/v1/health").json()
+            assert health == {"status": "ok", "version": "0.10.0"}
             assert client.get("/api/v1/projects").json() == []
             project = client.post("/api/v1/projects", json={"name": "真实项目", "genre": "悬疑", "episode_count": 8}).json()
             assert project["id"] != "demo"
