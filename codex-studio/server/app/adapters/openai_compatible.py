@@ -28,8 +28,9 @@ class OpenAICompatibleAdapter(AIAdapter):
             raise RuntimeError(f"{config.provider.name} 尚未配置模型")
         endpoint = f"{config.base_url.rstrip('/')}/chat/completions"
         system = str(context.get("system_prompt") or "你是影视制作助手。输出可直接用于制作的结构化、具体结果。")
+        selected_model = str(context.get("model_override") or config.model)
         body = {
-            "model": config.model,
+            "model": selected_model,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
             "temperature": float(context.get("temperature", 0.4)),
         }
@@ -43,7 +44,7 @@ class OpenAICompatibleAdapter(AIAdapter):
                 response.raise_for_status()
                 payload = response.json()
             content = payload["choices"][0]["message"]["content"]
-            return {"provider": self.provider, "model": config.model, "status": "completed", "result": content, "usage": payload.get("usage", {})}
+            return {"provider": self.provider, "model": selected_model, "status": "completed", "result": content, "usage": payload.get("usage", {})}
         except (httpx.HTTPError, KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             error = str(exc)
             raise RuntimeError(f"{config.provider.name} 请求失败：{error}") from exc

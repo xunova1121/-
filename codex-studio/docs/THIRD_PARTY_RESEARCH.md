@@ -10,6 +10,7 @@
 | AcademySoftwareFoundation/OpenTimelineIO | Apache-2.0 | 后续采用帧精确时间线交换标准 |
 | wonderunit/shot-generator-models | MIT | 借鉴角色、物体、灯光和相机同台布置的 Shot Generator 产品模型，不复制资源或代码 |
 | alibaba/lumenx | MIT | 借鉴项目上下文贯穿剧本、分镜、资产、视频与导出的流水线原则；本项目独立实现镜头—预演版本生产契约 |
+| BerriAI/litellm | MIT（`enterprise/` 除外） | 只借鉴统一模型目录、能力路由与请求记录的网关分层思想，不复制源码、不引入依赖 |
 | Blender Storypencil | GPL-3.0 | 只借鉴场景—镜头—故事板的工作流与机位预演体验，不复制代码、不形成运行时依赖 |
 | HaD0Yun/CozyClay | 未确认 | 只借鉴虚拟摄影机、人物走位、镜头时间线概念，不复制代码 |
 | morphicfilms/frames-to-video | Apache-2.0，已归档 | 只保留多关键帧插值适配思路 |

@@ -69,6 +69,18 @@ class ProviderConfigUpdate(BaseModel):
     api_key: str | None = Field(default=None, min_length=8, max_length=500)
 
 
+class ModelRouteUpdate(BaseModel):
+    provider_id: str = Field(min_length=1, max_length=80)
+    model: str = Field(min_length=1, max_length=160)
+
+
+class RoleTaskCreate(BaseModel):
+    role: Literal["script_analysis", "shot_breakdown", "storyboard_direction", "quality_review"]
+    prompt: str = Field(min_length=1)
+    priority: int = Field(default=10, ge=-100, le=100)
+    max_attempts: int = Field(default=3, ge=1, le=10)
+
+
 class ContinuityRequest(BaseModel):
     previous: dict[str, Any]
     current: dict[str, Any]

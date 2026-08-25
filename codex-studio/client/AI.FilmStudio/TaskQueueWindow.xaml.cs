@@ -22,10 +22,10 @@ public partial class TaskQueueWindow : Window
     {
         try
         {
-            var providers = (await _api.GetProviderConfigsAsync()).Where(item => item.Configured && item.ProviderId is "openai" or "ark").ToList();
-            var selected = (Provider.SelectedItem as ProviderConfigStatus)?.ProviderId;
-            Provider.ItemsSource = providers;
-            Provider.SelectedItem = providers.FirstOrDefault(item => item.ProviderId == selected) ?? providers.FirstOrDefault();
+            var routes = (await _api.GetModelRoutesAsync()).Where(item => !string.IsNullOrWhiteSpace(item.Model)).ToList();
+            var selected = (Role.SelectedItem as ModelRoute)?.Role;
+            Role.ItemsSource = routes;
+            Role.SelectedItem = routes.FirstOrDefault(item => item.Role == selected) ?? routes.FirstOrDefault();
             var tasks = await _api.GetTasksAsync();
             TaskGrid.ItemsSource = tasks;
             var active = tasks.Count(item => item.Status is "queued" or "running" or "retry_wait");
@@ -43,11 +43,10 @@ public partial class TaskQueueWindow : Window
 
     private async void Create_Click(object sender, RoutedEventArgs e)
     {
-        var type = (TaskType.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "video";
-        if (Provider.SelectedItem is not ProviderConfigStatus provider) { FeedbackText.Text = "请先在主界面的“模型”中配置 OpenAI 或火山方舟"; return; }
+        if (Role.SelectedItem is not ModelRoute role) { FeedbackText.Text = "请先在“模型”中拉取模型并确认岗位绑定"; return; }
         try
         {
-            await _api.CreateTaskAsync(type, provider.ProviderId, $"为当前影视项目执行 {type} 制作任务。输出应结构化、具体且可直接进入下一制作环节。");
+            await _api.CreateRoleTaskAsync(role.Role, $"为当前项目执行“{role.Name}”。必须输出合法 JSON，不要使用 Markdown 代码围栏。");
             await Task.Delay(350);
             await RefreshAsync();
         }

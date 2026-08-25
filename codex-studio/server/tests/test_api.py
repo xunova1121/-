@@ -227,6 +227,36 @@ def test_shot_previz_binding_freezes_layout_and_injects_generation_payload():
         assert client.post(f"/api/v1/projects/demo/shots/{shot['id']}/generation-tasks", json={"task_type": "image"}).status_code == 409
 
 
+def test_model_discovery_role_binding_and_routed_task(monkeypatch):
+    async def fake_models(provider_id: str):
+        assert provider_id == "openai"
+        return ["director-large", "script-fast"]
+
+    async def fake_invoke(prompt: str, context: dict):
+        return {"status": "completed", "model": context["model_override"], "result": "[]"}
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-secret-never-returned")
+    monkeypatch.setattr("app.main.fetch_provider_models", fake_models)
+    from app.adapters import registry
+    monkeypatch.setattr(registry.resolve("openai"), "invoke", fake_invoke)
+    with TestClient(app) as client:
+        models = client.get("/api/v1/provider-configs/openai/models")
+        assert models.status_code == 200 and models.json()["models"] == ["director-large", "script-fast"]
+        routes = client.get("/api/v1/model-routes").json()
+        assert {item["role"] for item in routes} == {"script_analysis", "shot_breakdown", "storyboard_direction", "quality_review"}
+        bound = client.put("/api/v1/model-routes/storyboard_direction", json={"provider_id": "openai", "model": "director-large"})
+        assert bound.status_code == 200 and bound.json()["bound"] is True
+        queued = client.post("/api/v1/projects/demo/role-tasks", json={"role": "storyboard_direction", "prompt": "生成全量分镜"})
+        assert queued.status_code == 202 and queued.json()["model"] == "director-large"
+        task = next(item for item in client.get("/api/v1/projects/demo/tasks").json() if item["id"] == queued.json()["id"])
+        assert task["provider"] == "openai"
+        assert task["payload"]["role"] == "storyboard_direction"
+        assert task["payload"]["model_override"] == "director-large"
+        assert "全剧" in task["payload"]["system_prompt"]
+        completed = wait_for_status(client, "demo", queued.json()["id"], {"completed"})
+        assert completed["result"]["model"] == "director-large"
+
+
 def test_durable_task_completion_failure_retry_and_stats(tmp_path: Path):
     original = settings.database_path
     object.__setattr__(settings, "database_path", tmp_path / "tasks.db")

@@ -46,6 +46,10 @@ CREATE TABLE IF NOT EXISTS provider_configs (
     provider_id TEXT PRIMARY KEY, base_url TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
     secret_blob BLOB, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS model_routes (
+    role TEXT PRIMARY KEY, provider_id TEXT NOT NULL, model TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS bible_entities (
     id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL,
     entity_type TEXT NOT NULL, entity_key TEXT NOT NULL, name TEXT NOT NULL,

@@ -11,12 +11,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from .adapters import registry
 from .config import render_dir, settings
 from .database import connect, initialize_database
-from .schemas import AssetCreate, BibleEntityCreate, ContinuityContractRequest, ContinuityRequest, EpisodeAutomationRequest, EpisodeLockRequest, GatewayRequest, PipelineUpdate, PreflightRequest, Project, ProjectCreate, ProviderConfigUpdate, QualityReviewRequest, RouteUpdate, SceneLayoutRequest, Shot, ShotCreate, ShotGenerationRequest, ShotPrevizBindingRequest, ShotUpdate, TaskCreate, TransitionPlanRequest, TransitionRenderRequest
+from .schemas import AssetCreate, BibleEntityCreate, ContinuityContractRequest, ContinuityRequest, EpisodeAutomationRequest, EpisodeLockRequest, GatewayRequest, ModelRouteUpdate, PipelineUpdate, PreflightRequest, Project, ProjectCreate, ProviderConfigUpdate, QualityReviewRequest, RoleTaskCreate, RouteUpdate, SceneLayoutRequest, Shot, ShotCreate, ShotGenerationRequest, ShotPrevizBindingRequest, ShotUpdate, TaskCreate, TransitionPlanRequest, TransitionRenderRequest
 from .continuity import analyze_pair
 from .pipeline import stage_catalog
 from .providers import CAPABILITIES, providers_for, public_catalog
 from .preflight import run_preflight
-from .provider_config import all_provider_statuses, delete_provider_config, save_provider_config
+from .provider_config import all_provider_statuses, delete_provider_config, fetch_provider_models, resolve_provider_config, save_provider_config
 from .quality import repair_plan, weighted_score
 from .story_bible import continuity_contract, episode_snapshot, fingerprint
 from .automation import automation_plan
@@ -39,14 +39,20 @@ async def lifespan(_: FastAPI):
         await worker
 
 
-app = FastAPI(title=settings.app_name, version="0.8.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="0.9.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost", "http://127.0.0.1"], allow_methods=["*"], allow_headers=["*"])
 PREFIX = settings.api_prefix
+MODEL_ROLES = {
+    "script_analysis": ("剧本诊断", "通读全剧，分析钩子、节奏、人物弧光和逻辑风险，输出结构化 JSON。"),
+    "shot_breakdown": ("拆场与要素提取", "提取集、场、人物、场景、道具、对白和连续性状态，输出结构化 JSON。"),
+    "storyboard_direction": ("全量分镜导演", "将已确认剧本转换为覆盖全剧的可拍摄镜头清单，输出结构化 JSON。"),
+    "quality_review": ("成片质量复核", "按人物、场景、动作、镜头、画质和叙事维度复核，输出结构化 JSON。"),
+}
 
 
 @app.get(f"{PREFIX}/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.8.0"}
+    return {"status": "ok", "version": "0.9.0"}
 
 
 @app.get(f"{PREFIX}/providers")
@@ -59,6 +65,42 @@ def provider_catalog(capability: str | None = None):
 @app.get(f"{PREFIX}/provider-configs")
 def provider_configs():
     return all_provider_statuses()
+
+
+@app.get(f"{PREFIX}/provider-configs/{{provider_id}}/models")
+async def provider_models(provider_id: str):
+    try:
+        return {"provider_id": provider_id, "models": await fetch_provider_models(provider_id)}
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+
+@app.get(f"{PREFIX}/model-routes")
+def model_routes():
+    with connect() as db:
+        rows = {row["role"]: dict(row) for row in db.execute("SELECT role,provider_id,model,updated_at FROM model_routes")}
+    return [{"role": role, "name": meta[0], "purpose": meta[1], **rows.get(role, {"provider_id": "", "model": "", "updated_at": None})} for role, meta in MODEL_ROLES.items()]
+
+
+@app.put(f"{PREFIX}/model-routes/{{role}}")
+def update_model_route(role: str, payload: ModelRouteUpdate):
+    if role not in MODEL_ROLES:
+        raise HTTPException(404, "Unknown model role")
+    try:
+        config = resolve_provider_config(payload.provider_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    if not config.api_key:
+        raise HTTPException(409, "请先保存服务商 API 密钥")
+    if config.provider.family != "openai":
+        raise HTTPException(409, "该岗位当前只支持已实现的 OpenAI 兼容执行器")
+    with connect() as db:
+        db.execute("INSERT INTO model_routes(role,provider_id,model) VALUES(?,?,?) ON CONFLICT(role) DO UPDATE SET provider_id=excluded.provider_id,model=excluded.model,updated_at=CURRENT_TIMESTAMP", (role, payload.provider_id, payload.model))
+    return {"role": role, "name": MODEL_ROLES[role][0], "provider_id": payload.provider_id, "model": payload.model, "bound": True}
 
 
 @app.put(f"{PREFIX}/provider-configs/{{provider_id}}")
@@ -156,6 +198,20 @@ def create_task(project_id: str, payload: TaskCreate):
             raise HTTPException(404, "Project not found")
         cursor = db.execute("INSERT INTO tasks(project_id,task_type,provider,payload_json,priority,max_attempts) VALUES(?,?,?,?,?,?)", (project_id, payload.task_type, payload.provider, json.dumps(payload.payload, ensure_ascii=False), payload.priority, payload.max_attempts))
     return {"id": cursor.lastrowid, "status": "queued", **payload.model_dump()}
+
+
+@app.post(f"{PREFIX}/projects/{{project_id}}/role-tasks", status_code=202)
+def create_role_task(project_id: str, payload: RoleTaskCreate):
+    with connect() as db:
+        if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
+            raise HTTPException(404, "Project not found")
+        route = db.execute("SELECT provider_id,model FROM model_routes WHERE role=?", (payload.role,)).fetchone()
+        if not route:
+            raise HTTPException(409, f"岗位“{MODEL_ROLES[payload.role][0]}”尚未绑定模型")
+        task_payload = {"role": payload.role, "prompt": payload.prompt, "model_override": route["model"], "system_prompt": MODEL_ROLES[payload.role][1]}
+        task_type = "proofread" if payload.role == "quality_review" else "llm"
+        cursor = db.execute("INSERT INTO tasks(project_id,task_type,provider,payload_json,priority,max_attempts) VALUES(?,?,?,?,?,?)", (project_id, task_type, route["provider_id"], json.dumps(task_payload, ensure_ascii=False), payload.priority, payload.max_attempts))
+    return {"id": cursor.lastrowid, "status": "queued", "role": payload.role, "provider": route["provider_id"], "model": route["model"]}
 
 
 @app.get(f"{PREFIX}/projects/{{project_id}}/tasks")

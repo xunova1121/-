@@ -40,6 +40,22 @@ public sealed class ProviderConfigStatus
     [JsonIgnore] public string DisplayName => Configured ? $"● {Name}" : $"○ {Name}";
 }
 
+public sealed class ModelRoute
+{
+    [JsonPropertyName("role")] public string Role { get; set; } = "";
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("purpose")] public string Purpose { get; set; } = "";
+    [JsonPropertyName("provider_id")] public string ProviderId { get; set; } = "";
+    [JsonPropertyName("model")] public string Model { get; set; } = "";
+    [JsonIgnore] public string Display => string.IsNullOrWhiteSpace(Model) ? $"{Name} → 尚未绑定" : $"{Name} → {ProviderId} / {Model}";
+}
+
+public sealed class ProviderModels
+{
+    [JsonPropertyName("provider_id")] public string ProviderId { get; set; } = "";
+    [JsonPropertyName("models")] public List<string> Models { get; set; } = [];
+}
+
 public sealed class TaskItem
 {
     [JsonPropertyName("id")] public int Id { get; set; }

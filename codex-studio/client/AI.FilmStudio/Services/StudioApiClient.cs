@@ -73,6 +73,27 @@ public sealed class StudioApiClient
         response.EnsureSuccessStatusCode();
     }
 
+    public async Task<IReadOnlyList<string>> FetchProviderModelsAsync(string providerId, CancellationToken token = default)
+    {
+        var result = await _http.GetFromJsonAsync<ProviderModels>($"provider-configs/{Uri.EscapeDataString(providerId)}/models", token);
+        return result?.Models ?? [];
+    }
+
+    public async Task<IReadOnlyList<ModelRoute>> GetModelRoutesAsync(CancellationToken token = default) =>
+        await _http.GetFromJsonAsync<List<ModelRoute>>("model-routes", token) ?? [];
+
+    public async Task SaveModelRouteAsync(string role, string providerId, string model, CancellationToken token = default)
+    {
+        var response = await _http.PutAsJsonAsync($"model-routes/{Uri.EscapeDataString(role)}", new { provider_id = providerId, model }, token);
+        response.EnsureSuccessStatusCode();
+    }
+
+    public async Task CreateRoleTaskAsync(string role, string prompt, CancellationToken token = default)
+    {
+        var response = await _http.PostAsJsonAsync(ProjectPath("role-tasks"), new { role, prompt, priority = 10, max_attempts = 3 }, token);
+        response.EnsureSuccessStatusCode();
+    }
+
     public async Task CancelTaskAsync(int taskId, CancellationToken token = default)
     {
         var response = await _http.PostAsync($"tasks/{taskId}/cancel", null, token);

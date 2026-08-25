@@ -8,6 +8,7 @@ from __future__ import annotations
 import ctypes
 import os
 import sys
+import httpx
 from ctypes import wintypes
 from dataclasses import dataclass
 
@@ -125,3 +126,24 @@ def public_provider_status(provider_id: str) -> dict:
 
 def all_provider_statuses() -> list[dict]:
     return [public_provider_status(item.id) for item in PROVIDERS if item.id != "mock"]
+
+
+async def fetch_provider_models(provider_id: str) -> list[str]:
+    """Return the models the configured OpenAI-compatible account can actually access."""
+    config = resolve_provider_config(provider_id)
+    if config.provider.family != "openai":
+        raise ValueError(f"{config.provider.name} 暂不支持实时模型目录")
+    if not config.api_key:
+        raise ValueError(f"{config.provider.name} 尚未配置 API 密钥")
+    endpoint = f"{config.base_url.rstrip('/')}/models"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+            response = await client.get(endpoint, headers={"Authorization": f"Bearer {config.api_key}"})
+            response.raise_for_status()
+            payload = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise RuntimeError(f"拉取模型失败：{exc}") from exc
+    models = sorted({str(item.get("id", "")).strip() for item in payload.get("data", []) if item.get("id")})
+    if not models:
+        raise RuntimeError("服务商返回成功，但没有可用模型")
+    return models
