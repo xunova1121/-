@@ -41,6 +41,13 @@ public sealed class StudioApiClient
     public async Task<IReadOnlyList<Shot>> GetShotsAsync(CancellationToken token = default) =>
         await _http.GetFromJsonAsync<List<Shot>>(ProjectPath("shots"), token) ?? [];
 
+    public async Task<Shot> CreateShotAsync(string number, string title, string description = "", CancellationToken token = default)
+    {
+        var response = await _http.PostAsJsonAsync(ProjectPath("shots"), new { episode = 1, number, title, description }, token);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<Shot>(cancellationToken: token) ?? throw new InvalidOperationException("服务未返回镜头");
+    }
+
     public async Task<IReadOnlyList<TaskItem>> GetTasksAsync(CancellationToken token = default) =>
         await _http.GetFromJsonAsync<List<TaskItem>>(ProjectPath("tasks"), token) ?? [];
 
@@ -117,6 +124,27 @@ public sealed class StudioApiClient
         }, token);
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<PrevizLayoutVersion>(cancellationToken: token) ?? throw new InvalidOperationException("服务未返回预演版本");
+    }
+
+    public async Task<ShotPrevizBinding?> GetShotPrevizBindingAsync(int shotId, CancellationToken token = default)
+    {
+        var response = await _http.GetAsync(ProjectPath($"shots/{shotId}/previz-binding"), token);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<ShotPrevizBinding>(cancellationToken: token);
+    }
+
+    public async Task<ShotPrevizBinding> BindShotPrevizAsync(int shotId, int layoutId, CancellationToken token = default)
+    {
+        var response = await _http.PutAsJsonAsync(ProjectPath($"shots/{shotId}/previz-binding"), new { layout_id = layoutId }, token);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<ShotPrevizBinding>(cancellationToken: token) ?? throw new InvalidOperationException("服务未返回镜头绑定");
+    }
+
+    public async Task RemoveShotPrevizBindingAsync(int shotId, CancellationToken token = default)
+    {
+        var response = await _http.DeleteAsync(ProjectPath($"shots/{shotId}/previz-binding"), token);
+        if (response.StatusCode != System.Net.HttpStatusCode.NotFound) response.EnsureSuccessStatusCode();
     }
 
     private sealed record HealthResult(string Status);

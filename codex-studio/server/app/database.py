@@ -78,6 +78,12 @@ CREATE TABLE IF NOT EXISTS scene_layouts (
     fingerprint TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(project_id, scene_key, version)
 );
+CREATE TABLE IF NOT EXISTS shot_previz_bindings (
+    project_id TEXT NOT NULL, shot_id INTEGER PRIMARY KEY, layout_id INTEGER NOT NULL,
+    layout_fingerprint TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(project_id) REFERENCES projects(id), FOREIGN KEY(shot_id) REFERENCES shots(id),
+    FOREIGN KEY(layout_id) REFERENCES scene_layouts(id)
+);
 CREATE TABLE IF NOT EXISTS transition_plans (
     id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, episode INTEGER NOT NULL,
     from_shot TEXT NOT NULL, to_shot TEXT NOT NULL, method TEXT NOT NULL,
@@ -110,6 +116,7 @@ def _migrate(connection: sqlite3.Connection) -> None:
             connection.execute(f"ALTER TABLE tasks ADD COLUMN {name} {definition}")
     connection.execute("UPDATE tasks SET available_at=COALESCE(available_at,created_at,CURRENT_TIMESTAMP), updated_at=COALESCE(updated_at,created_at,CURRENT_TIMESTAMP)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_tasks_dispatch ON tasks(status, available_at, priority DESC, id)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_shot_previz_project ON shot_previz_bindings(project_id,layout_id)")
 
 
 def initialize_database(path: Path | None = None) -> None:

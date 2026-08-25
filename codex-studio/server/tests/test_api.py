@@ -182,6 +182,51 @@ def test_previz_transition_and_episode_automation():
         assert next(stage for stage in plan["stages"] if stage["id"] == "seams")["items"] == 5
 
 
+def test_shot_previz_binding_freezes_layout_and_injects_generation_payload():
+    with TestClient(app) as client:
+        shot = client.get("/api/v1/projects/demo/shots").json()[0]
+        blocked = client.post(f"/api/v1/projects/demo/shots/{shot['id']}/generation-tasks", json={
+            "task_type": "image", "provider": "mock", "prompt": "主角走入古寺",
+        })
+        assert blocked.status_code == 409
+        assert "尚未绑定空间预演" in blocked.json()["detail"]
+
+        layout = {
+            "scene_key": "temple-main", "camera": {
+                "position": {"x": -2, "y": -6}, "target": {"x": 0, "y": 1},
+                "lens_mm": 50, "height_m": 1.5, "movement": "slow_push",
+            },
+            "subjects": [{"entity_key": "主角", "position": {"x": 0, "y": 1}, "facing_deg": 180, "pose": "walking"}],
+            "landmarks": [], "sun_bearing_deg": -35, "sun_elevation": "low",
+        }
+        first = client.post("/api/v1/projects/demo/previz/layouts", json=layout).json()
+        binding = client.put(f"/api/v1/projects/demo/shots/{shot['id']}/previz-binding", json={"layout_id": first["id"]})
+        assert binding.status_code == 200
+        assert binding.json()["layout_version"] == 1
+        assert "焦段50.0mm" in binding.json()["prompt_constraint"]
+
+        queued = client.post(f"/api/v1/projects/demo/shots/{shot['id']}/generation-tasks", json={
+            "task_type": "video", "provider": "mock", "prompt": "主角走入古寺",
+        })
+        assert queued.status_code == 202
+        task = next(item for item in client.get("/api/v1/projects/demo/tasks").json() if item["id"] == queued.json()["id"])
+        assert task["payload"]["base_prompt"] == "主角走入古寺"
+        assert "【空间预演强制约束】" in task["payload"]["prompt"]
+        assert task["payload"]["previz"]["layout_id"] == first["id"]
+        assert task["payload"]["previz"]["fingerprint"] == first["fingerprint"]
+        assert task["payload"]["previz"]["layout"]["camera"]["lens_mm"] == 50
+
+        changed = {**layout, "camera": {**layout["camera"], "position": {"x": 3, "y": -4}, "lens_mm": 85}}
+        second = client.post("/api/v1/projects/demo/previz/layouts", json=changed).json()
+        still_first = client.get(f"/api/v1/projects/demo/shots/{shot['id']}/previz-binding").json()
+        assert second["version"] == 2
+        assert still_first["layout_id"] == first["id"] and still_first["layout_version"] == 1
+        rebound = client.put(f"/api/v1/projects/demo/shots/{shot['id']}/previz-binding", json={"layout_id": second["id"]}).json()
+        assert rebound["layout_version"] == 2 and "焦段85.0mm" in rebound["prompt_constraint"]
+        assert client.delete(f"/api/v1/projects/demo/shots/{shot['id']}/previz-binding").status_code == 204
+        assert client.post(f"/api/v1/projects/demo/shots/{shot['id']}/generation-tasks", json={"task_type": "image"}).status_code == 409
+
+
 def test_durable_task_completion_failure_retry_and_stats(tmp_path: Path):
     original = settings.database_path
     object.__setattr__(settings, "database_path", tmp_path / "tasks.db")

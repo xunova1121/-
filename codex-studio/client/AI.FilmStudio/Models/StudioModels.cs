@@ -3,7 +3,19 @@ namespace AI.FilmStudio.Models;
 using System.Text.Json.Serialization;
 using System.Text.Json;
 
-public sealed record Shot(string Number, string Title, string Description, string Duration, string Status, string Color);
+public sealed class Shot
+{
+    [JsonPropertyName("id")] public int Id { get; set; }
+    [JsonPropertyName("episode")] public int Episode { get; set; }
+    [JsonPropertyName("number")] public string Number { get; set; } = "";
+    [JsonPropertyName("title")] public string Title { get; set; } = "";
+    [JsonPropertyName("description")] public string Description { get; set; } = "";
+    [JsonPropertyName("duration")] public string Duration { get; set; } = "";
+    [JsonPropertyName("status")] public string Status { get; set; } = "";
+    [JsonPropertyName("color")] public string Color { get; set; } = "";
+    [JsonPropertyName("prompt")] public string Prompt { get; set; } = "";
+    [JsonIgnore] public string Display => $"{Number} · {Title}";
+}
 public sealed record Episode(string Title, string Duration, bool IsActive = false);
 public sealed record Finding(string Shot, string Message, string Action);
 public sealed record Workspace(string Key, string Title);
@@ -91,4 +103,16 @@ public sealed class PrevizLayoutVersion
     [JsonPropertyName("sun_elevation")] public string SunElevation { get; set; } = "mid";
     [JsonPropertyName("analysis")] public JsonElement Analysis { get; set; }
     [JsonIgnore] public string Display => $"v{Version} · {CreatedAt}";
+}
+
+public sealed class ShotPrevizBinding
+{
+    [JsonPropertyName("shot_id")] public int ShotId { get; set; }
+    [JsonPropertyName("shot_number")] public string ShotNumber { get; set; } = "";
+    [JsonPropertyName("layout_id")] public int LayoutId { get; set; }
+    [JsonPropertyName("scene_key")] public string SceneKey { get; set; } = "";
+    [JsonPropertyName("layout_version")] public int LayoutVersion { get; set; }
+    [JsonPropertyName("fingerprint")] public string Fingerprint { get; set; } = "";
+    [JsonPropertyName("status")] public string Status { get; set; } = "";
+    [JsonPropertyName("prompt_constraint")] public string PromptConstraint { get; set; } = "";
 }

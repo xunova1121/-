@@ -25,7 +25,7 @@ public partial class PrevizWindow : Window
         _api = api;
         SubjectGrid.ItemsSource = _subjects;
         _subjects.Add(new PrevizSubject { EntityKey = "主角", Position = new PrevizPoint { X = 0, Y = 0 } });
-        Loaded += async (_, _) => { Redraw(); await LoadVersionsAsync(); };
+        Loaded += async (_, _) => { Redraw(); await LoadShotsAsync(); await LoadVersionsAsync(); };
         SizeChanged += (_, _) => Redraw();
     }
 
@@ -106,6 +106,50 @@ public partial class PrevizWindow : Window
         catch (Exception ex) { StatusText.Text = $"读取版本失败：{ex.Message}"; }
     }
 
+    private async Task LoadShotsAsync()
+    {
+        try
+        {
+            var shots = await _api.GetShotsAsync();
+            ShotList.ItemsSource = shots;
+            if (shots.Count > 0) ShotList.SelectedIndex = 0;
+            else BindingText.Text = "当前项目还没有镜头，请先创建全量分镜。";
+        }
+        catch (Exception ex) { BindingText.Text = $"读取镜头失败：{ex.Message}"; }
+    }
+
+    private async void CreateShot_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var title = NewShotTitle.Text.Trim();
+            if (string.IsNullOrWhiteSpace(title)) throw new InvalidOperationException("请输入新镜头标题");
+            var current = (ShotList.ItemsSource as IEnumerable<Shot>)?.ToList() ?? [];
+            var next = current.Select(item => int.TryParse(item.Number, out var number) ? number : 0).DefaultIfEmpty().Max() + 1;
+            var created = await _api.CreateShotAsync(next.ToString("000"), title, title);
+            await LoadShotsAsync();
+            ShotList.SelectedItem = (ShotList.ItemsSource as IEnumerable<Shot>)?.FirstOrDefault(item => item.Id == created.Id);
+            NewShotTitle.Clear();
+            BindingText.Text = $"已新建镜头 {created.Number}，请完成空间布置后保存并绑定。";
+        }
+        catch (Exception ex) { BindingText.Text = $"新建镜头失败：{ex.Message}"; }
+    }
+
+    private async Task LoadBindingAsync()
+    {
+        if (ShotList.SelectedItem is not Shot shot) return;
+        try
+        {
+            var binding = await _api.GetShotPrevizBindingAsync(shot.Id);
+            BindingText.Text = binding is null
+                ? $"镜头 {shot.Number} 尚未绑定，不能进入正式图片/视频生产。"
+                : $"已绑定：{binding.SceneKey} v{binding.LayoutVersion} · {binding.Status} · 指纹 {binding.Fingerprint[..Math.Min(10, binding.Fingerprint.Length)]}…";
+        }
+        catch (Exception ex) { BindingText.Text = $"读取绑定失败：{ex.Message}"; }
+    }
+
+    private async void ShotList_SelectionChanged(object sender, SelectionChangedEventArgs e) => await LoadBindingAsync();
+
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await LoadVersionsAsync();
     private void VersionList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -115,16 +159,47 @@ public partial class PrevizWindow : Window
         StatusText.Text = $"已载入 {version.SceneKey} v{version.Version} · 指纹 {version.Fingerprint[..Math.Min(12, version.Fingerprint.Length)]}…";
     }
 
+    private async Task BindSelectedAsync(PrevizLayoutVersion version)
+    {
+        if (ShotList.SelectedItem is not Shot shot) throw new InvalidOperationException("请先选择要绑定的镜头");
+        var binding = await _api.BindShotPrevizAsync(shot.Id, version.Id);
+        BindingText.Text = $"已绑定：镜头 {shot.Number} → {binding.SceneKey} v{binding.LayoutVersion}。生成任务将强制携带该空间约束。";
+    }
+
+    private async void BindExisting_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (VersionList.SelectedItem is not PrevizLayoutVersion version) throw new InvalidOperationException("请先选择一个历史版本");
+            await BindSelectedAsync(version);
+            StatusText.Text = "现有预演版本已绑定到当前镜头。";
+        }
+        catch (Exception ex) { StatusText.Text = $"绑定失败：{ex.Message}"; }
+    }
+
+    private async void RemoveBinding_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (ShotList.SelectedItem is not Shot shot) throw new InvalidOperationException("请先选择镜头");
+            await _api.RemoveShotPrevizBindingAsync(shot.Id);
+            BindingText.Text = $"镜头 {shot.Number} 已解除绑定，正式生成已被门禁阻止。";
+        }
+        catch (Exception ex) { StatusText.Text = $"解除失败：{ex.Message}"; }
+    }
+
     private async void Save_Click(object sender, RoutedEventArgs e)
     {
         try
         {
+            if (ShotList.SelectedItem is not Shot) throw new InvalidOperationException("请先选择或新建镜头");
             if (string.IsNullOrWhiteSpace(SceneKey.Text)) throw new InvalidOperationException("场景键不能为空");
             if (_subjects.Count == 0) throw new InvalidOperationException("至少布置一个人物");
             var saved = await _api.SavePrevizAsync(SceneKey.Text.Trim(), Read(CameraX), Read(CameraY), Read(TargetX), Read(TargetY), Math.Clamp(Read(Lens, 35), 8, 300), Read(Sun, -45), _subjects.ToList());
+            await BindSelectedAsync(saved);
             var score = saved.Analysis.TryGetProperty("score", out var scoreNode) ? scoreNode.GetInt32() : 0;
             var messages = new List<string>(); if (saved.Analysis.TryGetProperty("findings", out var findings)) foreach (var item in findings.EnumerateArray()) if (item.TryGetProperty("message", out var message)) messages.Add(message.GetString() ?? "");
-            StatusText.Text = $"已保存 v{saved.Version} · 构图 {score} 分" + (messages.Count > 0 ? " · " + string.Join("；", messages) : " · 无阻断发现");
+            StatusText.Text = $"已保存并绑定 v{saved.Version} · 构图 {score} 分" + (messages.Count > 0 ? " · " + string.Join("；", messages) : " · 无阻断发现");
             await LoadVersionsAsync();
         }
         catch (Exception ex) { StatusText.Text = $"保存失败：{ex.Message}"; }

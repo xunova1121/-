@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .adapters import registry
 from .config import render_dir, settings
 from .database import connect, initialize_database
-from .schemas import AssetCreate, BibleEntityCreate, ContinuityContractRequest, ContinuityRequest, EpisodeAutomationRequest, EpisodeLockRequest, GatewayRequest, PipelineUpdate, PreflightRequest, Project, ProjectCreate, ProviderConfigUpdate, QualityReviewRequest, RouteUpdate, SceneLayoutRequest, Shot, ShotCreate, ShotUpdate, TaskCreate, TransitionPlanRequest, TransitionRenderRequest
+from .schemas import AssetCreate, BibleEntityCreate, ContinuityContractRequest, ContinuityRequest, EpisodeAutomationRequest, EpisodeLockRequest, GatewayRequest, PipelineUpdate, PreflightRequest, Project, ProjectCreate, ProviderConfigUpdate, QualityReviewRequest, RouteUpdate, SceneLayoutRequest, Shot, ShotCreate, ShotGenerationRequest, ShotPrevizBindingRequest, ShotUpdate, TaskCreate, TransitionPlanRequest, TransitionRenderRequest
 from .continuity import analyze_pair
 from .pipeline import stage_catalog
 from .providers import CAPABILITIES, providers_for, public_catalog
@@ -21,6 +21,7 @@ from .quality import repair_plan, weighted_score
 from .story_bible import continuity_contract, episode_snapshot, fingerprint
 from .automation import automation_plan
 from .previz import analyze_stage, stage_fingerprint
+from .previz_bindings import bind_shot, get_binding, production_payload
 from .transitions import plan_transition
 from .task_runner import TaskRunner, serialize_task
 from .media import MediaError, capabilities as media_capabilities, probe_media
@@ -38,14 +39,14 @@ async def lifespan(_: FastAPI):
         await worker
 
 
-app = FastAPI(title=settings.app_name, version="0.7.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="0.8.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost", "http://127.0.0.1"], allow_methods=["*"], allow_headers=["*"])
 PREFIX = settings.api_prefix
 
 
 @app.get(f"{PREFIX}/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.7.0"}
+    return {"status": "ok", "version": "0.8.0"}
 
 
 @app.get(f"{PREFIX}/providers")
@@ -104,14 +105,14 @@ def delete_project(project_id: str):
         cursor = db.execute("DELETE FROM projects WHERE id=?", (project_id,))
         if not cursor.rowcount:
             raise HTTPException(404, "Project not found")
-        for table in ("shots", "assets", "tasks", "pipeline_runs"):
+        for table in ("shot_previz_bindings", "scene_layouts", "shots", "assets", "tasks", "pipeline_runs"):
             db.execute(f"DELETE FROM {table} WHERE project_id=?", (project_id,))
 
 
 @app.get(f"{PREFIX}/projects/{{project_id}}/shots", response_model=list[Shot])
 def list_shots(project_id: str):
     with connect() as db:
-        rows = db.execute("SELECT number,title,description,duration,status,color FROM shots WHERE project_id=? ORDER BY episode,number", (project_id,)).fetchall()
+        rows = db.execute("SELECT id,episode,number,title,description,duration,status,color,prompt FROM shots WHERE project_id=? ORDER BY episode,number,id", (project_id,)).fetchall()
     return [dict(row) for row in rows]
 
 
@@ -297,6 +298,48 @@ def list_scene_layouts(project_id: str, scene_key: str | None = None, latest_onl
         layout = json.loads(row["layout_json"] or "{}")
         result.append({"id": row["id"], "version": row["version"], "fingerprint": row["fingerprint"], "created_at": row["created_at"], **layout})
     return result
+
+
+@app.put(f"{PREFIX}/projects/{{project_id}}/shots/{{shot_id}}/previz-binding")
+def bind_shot_previz(project_id: str, shot_id: int, payload: ShotPrevizBindingRequest):
+    try:
+        with connect() as db:
+            return bind_shot(db, project_id, shot_id, payload.layout_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.get(f"{PREFIX}/projects/{{project_id}}/shots/{{shot_id}}/previz-binding")
+def get_shot_previz(project_id: str, shot_id: int):
+    with connect() as db:
+        binding = get_binding(db, project_id, shot_id)
+    if not binding:
+        raise HTTPException(404, "该镜头尚未绑定空间预演版本")
+    return binding
+
+
+@app.delete(f"{PREFIX}/projects/{{project_id}}/shots/{{shot_id}}/previz-binding", status_code=204)
+def delete_shot_previz(project_id: str, shot_id: int):
+    with connect() as db:
+        cursor = db.execute("DELETE FROM shot_previz_bindings WHERE project_id=? AND shot_id=?", (project_id, shot_id))
+    if not cursor.rowcount:
+        raise HTTPException(404, "该镜头尚未绑定空间预演版本")
+
+
+@app.post(f"{PREFIX}/projects/{{project_id}}/shots/{{shot_id}}/generation-tasks", status_code=202)
+def queue_shot_generation(project_id: str, shot_id: int, payload: ShotGenerationRequest):
+    try:
+        with connect() as db:
+            task_payload = production_payload(db, project_id, shot_id, payload.prompt)
+            cursor = db.execute(
+                "INSERT INTO tasks(project_id,task_type,provider,payload_json,priority,max_attempts) VALUES(?,?,?,?,?,?)",
+                (project_id, payload.task_type, payload.provider, json.dumps(task_payload, ensure_ascii=False), payload.priority, payload.max_attempts),
+            )
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"id": cursor.lastrowid, "status": "queued", "task_type": payload.task_type, "previz": task_payload["previz"]}
 
 
 @app.post(f"{PREFIX}/previz/analyze")

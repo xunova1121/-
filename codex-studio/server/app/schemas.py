@@ -13,12 +13,15 @@ class Project(ProjectCreate):
 
 
 class Shot(BaseModel):
+    id: int
+    episode: int
     number: str
     title: str
     description: str
     duration: str
     status: str
     color: str
+    prompt: str = ""
 
 
 class ShotCreate(BaseModel):
@@ -153,6 +156,18 @@ class SceneLayoutRequest(BaseModel):
     landmarks: list[StageLandmark] = []
     sun_bearing_deg: float | None = None
     sun_elevation: Literal["low", "mid", "high"] = "mid"
+
+
+class ShotPrevizBindingRequest(BaseModel):
+    layout_id: int = Field(ge=1)
+
+
+class ShotGenerationRequest(BaseModel):
+    task_type: Literal["image", "video"]
+    provider: str = "mock"
+    prompt: str = ""
+    priority: int = Field(default=30, ge=-100, le=100)
+    max_attempts: int = Field(default=3, ge=1, le=10)
 
 
 class TransitionBoundary(BaseModel):
