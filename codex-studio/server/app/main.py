@@ -1,4 +1,5 @@
 import json
+import mimetypes
 import uuid
 import asyncio
 from pathlib import Path
@@ -24,6 +25,7 @@ from .previz import analyze_stage, stage_fingerprint
 from .previz_bindings import bind_shot, get_binding, production_payload
 from .transitions import plan_transition
 from .task_runner import TaskRunner, serialize_task
+from .task_outputs import managed_output_root, serialize_output
 from .media import MediaError, capabilities as media_capabilities, probe_media
 
 
@@ -39,7 +41,7 @@ async def lifespan(_: FastAPI):
         await worker
 
 
-app = FastAPI(title=settings.app_name, version="0.9.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="0.10.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost", "http://127.0.0.1"], allow_methods=["*"], allow_headers=["*"])
 PREFIX = settings.api_prefix
 MODEL_ROLES = {
@@ -144,11 +146,11 @@ def create_project(payload: ProjectCreate):
 @app.delete(f"{PREFIX}/projects/{{project_id}}", status_code=204)
 def delete_project(project_id: str):
     with connect() as db:
-        cursor = db.execute("DELETE FROM projects WHERE id=?", (project_id,))
-        if not cursor.rowcount:
+        if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
             raise HTTPException(404, "Project not found")
-        for table in ("shot_previz_bindings", "scene_layouts", "shots", "assets", "tasks", "pipeline_runs"):
+        for table in ("task_outputs", "shot_previz_bindings", "scene_layouts", "shots", "assets", "tasks", "pipeline_runs"):
             db.execute(f"DELETE FROM {table} WHERE project_id=?", (project_id,))
+        db.execute("DELETE FROM projects WHERE id=?", (project_id,))
 
 
 @app.get(f"{PREFIX}/projects/{{project_id}}/shots", response_model=list[Shot])
@@ -219,6 +221,18 @@ def list_tasks(project_id: str):
     with connect() as db:
         rows = db.execute("SELECT * FROM tasks WHERE project_id=? ORDER BY id DESC", (project_id,)).fetchall()
     return [serialize_task(row) for row in rows]
+
+
+@app.get(f"{PREFIX}/projects/{{project_id}}/outputs")
+def list_project_outputs(project_id: str, shot_id: int | None = None):
+    query = "SELECT * FROM task_outputs WHERE project_id=?"
+    values: list[Any] = [project_id]
+    if shot_id is not None:
+        query += " AND shot_id=?"
+        values.append(shot_id)
+    with connect() as db:
+        rows = db.execute(query + " ORDER BY id DESC", values).fetchall()
+    return [serialize_output(row) for row in rows]
 
 
 @app.get(f"{PREFIX}/tasks/stats")
@@ -447,10 +461,10 @@ def download_task_output(task_id: int):
     if row["status"] != "completed":
         raise HTTPException(409, "Task output is not ready")
     output = Path(json.loads(row["result_json"]).get("output_path", "")).resolve()
-    root = render_dir().resolve()
-    if not output.is_file() or root not in output.parents:
+    allowed_roots = (managed_output_root().resolve(), render_dir().resolve())
+    if not output.is_file() or not any(root in output.parents for root in allowed_roots):
         raise HTTPException(404, "Output file not found")
-    return FileResponse(output, media_type="video/mp4", filename=output.name)
+    return FileResponse(output, media_type=mimetypes.guess_type(output.name)[0] or "application/octet-stream", filename=output.name)
 
 
 @app.post(f"{PREFIX}/projects/{{project_id}}/automation/plan")

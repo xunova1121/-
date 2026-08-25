@@ -21,6 +21,14 @@ CREATE TABLE IF NOT EXISTS assets (
     id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, asset_type TEXT NOT NULL,
     name TEXT NOT NULL, memory_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS task_outputs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER NOT NULL UNIQUE, project_id TEXT NOT NULL,
+    shot_id INTEGER, output_type TEXT NOT NULL, path TEXT NOT NULL, file_name TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL, sha256 TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(task_id) REFERENCES tasks(id), FOREIGN KEY(project_id) REFERENCES projects(id),
+    FOREIGN KEY(shot_id) REFERENCES shots(id)
+);
 CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, task_type TEXT NOT NULL,
     provider TEXT NOT NULL DEFAULT 'mock', status TEXT NOT NULL DEFAULT 'queued', progress INTEGER NOT NULL DEFAULT 0,
@@ -121,6 +129,7 @@ def _migrate(connection: sqlite3.Connection) -> None:
     connection.execute("UPDATE tasks SET available_at=COALESCE(available_at,created_at,CURRENT_TIMESTAMP), updated_at=COALESCE(updated_at,created_at,CURRENT_TIMESTAMP)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_tasks_dispatch ON tasks(status, available_at, priority DESC, id)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_shot_previz_project ON shot_previz_bindings(project_id,layout_id)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_task_outputs_project ON task_outputs(project_id,shot_id,created_at)")
 
 
 def initialize_database(path: Path | None = None) -> None:

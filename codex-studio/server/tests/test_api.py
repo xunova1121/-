@@ -289,6 +289,40 @@ def test_durable_task_completion_failure_retry_and_stats(tmp_path: Path):
         object.__setattr__(settings, "database_path", original)
 
 
+def test_completed_media_is_ingested_registered_and_bound_back_to_shot(tmp_path: Path, monkeypatch):
+    original = settings.database_path
+    object.__setattr__(settings, "database_path", tmp_path / "outputs.db")
+    source = tmp_path / "provider-result.mp4"
+    source.write_bytes(b"real-media-bytes")
+
+    async def media_result(prompt: str, context: dict):
+        return {"status": "completed", "output_path": str(source), "provider_job_id": "job-001"}
+
+    from app.adapters import registry
+    monkeypatch.setattr(registry.resolve("mock"), "invoke", media_result)
+    monkeypatch.setattr("app.task_outputs.managed_output_root", lambda: tmp_path / "managed")
+    monkeypatch.setattr("app.main.managed_output_root", lambda: tmp_path / "managed")
+    try:
+        with TestClient(app) as client:
+            project_id = client.post("/api/v1/projects", json={"name": "产物闭环", "episode_count": 1}).json()["id"]
+            shot = client.post(f"/api/v1/projects/{project_id}/shots", json={"number": "001", "title": "入场"}).json()
+            task_id = client.post(f"/api/v1/projects/{project_id}/tasks", json={
+                "task_type": "video", "provider": "mock", "payload": {"shot_id": shot["id"], "prompt": "主角入场"},
+            }).json()["id"]
+            completed = wait_for_status(client, project_id, task_id, {"completed"})
+            managed = Path(completed["result"]["output_path"])
+            assert managed.is_file() and managed.read_bytes() == b"real-media-bytes"
+            assert completed["result"]["output"]["sha256"] == "d06d0c49c051ecd80da5986ebe693089651cc2742d0c41bba93085e37498b9e2"
+            outputs = client.get(f"/api/v1/projects/{project_id}/outputs?shot_id={shot['id']}").json()
+            assert len(outputs) == 1 and outputs[0]["task_id"] == task_id
+            assert outputs[0]["metadata"]["provider_job_id"] == "job-001"
+            assert client.get(f"/api/v1/projects/{project_id}/shots").json()[0]["status"] == "已生成"
+            download = client.get(f"/api/v1/tasks/{task_id}/output")
+            assert download.status_code == 200 and download.content == b"real-media-bytes"
+    finally:
+        object.__setattr__(settings, "database_path", original)
+
+
 def test_task_schema_migrates_and_recovers_expired_lease(tmp_path: Path):
     path = tmp_path / "legacy.db"
     with sqlite3.connect(path) as db:
@@ -297,6 +331,8 @@ def test_task_schema_migrates_and_recovers_expired_lease(tmp_path: Path):
     database.initialize_database(path)
     columns = {row[1] for row in sqlite3.connect(path).execute("PRAGMA table_info(tasks)")}
     assert {"lease_until", "attempts", "result_json", "updated_at"}.issubset(columns)
+    tables = {row[0] for row in sqlite3.connect(path).execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "task_outputs" in tables
 
     original = settings.database_path
     object.__setattr__(settings, "database_path", path)

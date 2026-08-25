@@ -7,6 +7,7 @@ from typing import Any
 from .adapters import registry
 from .config import settings
 from .media import render_transition
+from .task_outputs import ingest_task_output
 
 
 class TaskRunner:
@@ -68,15 +69,19 @@ class TaskRunner:
                 adapter = registry.resolve(task["provider"])
                 prompt = str(payload.get("prompt") or f"执行 {task['task_type']} 任务")
                 result = await adapter.invoke(prompt, {**payload, "task_id": task["id"], "task_type": task["task_type"]})
-            await asyncio.to_thread(self._complete, task["id"], result)
+            await asyncio.to_thread(self._complete, task, result)
         except Exception as exc:
             await asyncio.to_thread(self._fail_or_retry, task, str(exc))
 
-    def _complete(self, task_id: int, result: dict[str, Any]) -> None:
+    def _complete(self, task: dict[str, Any], result: dict[str, Any]) -> None:
+        task_id = int(task["id"])
         with sqlite3.connect(settings.database_path) as db:
+            db.row_factory = sqlite3.Row
             canceled = db.execute("SELECT cancel_requested FROM tasks WHERE id=?", (task_id,)).fetchone()
             status = "canceled" if canceled and canceled[0] else "completed"
             progress = 0 if status == "canceled" else 100
+            if status == "completed":
+                result = ingest_task_output(db, task, result)
             db.execute(
                 "UPDATE tasks SET status=?,progress=?,result_json=?,lease_until=NULL,completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (status, progress, json.dumps(result, ensure_ascii=False), task_id),
