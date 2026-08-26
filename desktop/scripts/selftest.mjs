@@ -2333,6 +2333,206 @@ section('预演台：把"中景"变成一组数');
     editImports.every((x) => allowed.includes(x)), editImports.join(' / '));
   check('并且 node: 内置一个都没有（浏览器里没有它们）',
     !/from\s+'node:/.test(editSrc));
+
+  /**
+   * 场地图那一层走同一条路（/site.js），只许 import previz ——
+   * 在浏览器里 `./previz.js` 从 `/site.js` 出发正好解析到 `/previz.js`。
+   */
+  const siteSrc = fs.readFileSync(path.join(PROJECT_ROOT, 'core', 'pipeline', 'site.js'), 'utf8');
+  const siteImports = [...siteSrc.matchAll(/^\s*import\s.*?from\s+'([^']+)'/gm)].map((m) => m[1]);
+  check('site.js 只 import previz（它自己也要原样发给浏览器）',
+    siteImports.every((x) => x === './previz.js'), siteImports.join(' / '));
+  check('site.js 里没有 node: 内置', !/from\s+'node:/.test(siteSrc));
+}
+
+/**
+ * ════════ 场地图：两个**不同的场景**之间对不对得上 ════════
+ *
+ * 前面每一层查的都是"一个场景以内"的事：
+ *
+ *   分镜体检   一镜的文字
+ *   越轴 / 跳切 相邻两镜的机位
+ *   场景布局   同一个场景反复回来时，门窗和太阳是不是同一份
+ *
+ * 而"山门外是斜逆光、大殿是正顺光"牵涉的是两个不同的场景，中间可能隔着
+ * 十几镜、跨了好几场。没有任何一层会把它们放在一起看 —— 这一层才会。
+ */
+section('场地图：同一片地上的几个场景');
+{
+  const site = await import('../core/pipeline/site.js');
+
+  /** 造一个项目：三个场景摆在「雪山」上 */
+  const mk = (scenes) => ({ bible: { scenes } });
+  const sc = (name, x, y, sun, marks) => ({
+    name,
+    place: { site: '雪山', x, y },
+    layout: { marks: marks || [], sun: sun || null }
+  });
+
+  // ── 分组 ──
+  {
+    const p = mk([
+      sc('山门外', 0, 0), sc('大殿', 0, 30),
+      { name: '客栈', place: { site: '镇上', x: 0, y: 0 }, layout: null },
+      { name: '没摆过的' }
+    ]);
+    const sites = site.sitesOf(p);
+    check('按场地名分组', sites.map((s) => s.name).join(',') === '雪山,镇上', sites.map((s) => s.name).join(','));
+    check('雪山上有两个场景', sites[0].places.length === 2);
+    check('没摆过位置的场景不在任何图上',
+      !sites.some((s) => s.places.some((x) => x.scene === '没摆过的')));
+    check('摘下来之后就不在图上了',
+      site.sitesOf(mk([{ name: '山门外' }])).length === 0);
+  }
+
+  // ── 规整 ──
+  {
+    check('没有场地名就不算摆过', site.normalizePlace({ x: 1, y: 2 }) === null);
+    check('坐标夹回场地范围内', site.normalizePlace({ site: 'a', x: 99999 }).x === site.SITE_LIMIT);
+    check('NaN 坐标退回 0', site.normalizePlace({ site: 'a', x: 'abc' }).x === 0);
+    /**
+     * ⚠ 这一条防的是一类很隐蔽的脏数据：近处地标（门、窗、桌）被误发到
+     * 场地那条接口上。它没有方位角，补一个 0 就会变成"正北有一扇门"
+     * 静静躺在场地图上 —— 接口回 200，图上多一个圆点，而它是凭空捏的。
+     */
+    const s = site.normalizeSite({ marks: [{ name: '桌', x: 1, y: 2 }, { name: '主峰', deg: 20 }] });
+    check('没有方位角的地标被丢掉，不是补成正北',
+      s.marks.length === 1 && s.marks[0].name === '主峰', JSON.stringify(s.marks));
+    check('留下的都标着 far', s.marks.every((m) => m.far === true));
+  }
+
+  // ── 太阳 ──
+  {
+    const one = site.sitesOf(mk([sc('山门外', 0, 0, { deg: 135, elev: 'low' })]))[0];
+    check('只有一个场景摆过太阳时不报', site.sunIssues(one).length === 0);
+
+    const near = site.sitesOf(mk([
+      sc('山门外', 0, 0, { deg: 135, elev: 'low' }),
+      sc('石阶', 14, -20, { deg: 150, elev: 'low' })
+    ]))[0];
+    check('差 15° 在容差内，不报', site.sunIssues(near).length === 0);
+
+    const far = site.sitesOf(mk([
+      sc('山门外', 0, 0, { deg: 135, elev: 'low' }),
+      sc('大殿', 0, 30, { deg: 40, elev: 'low' })
+    ]))[0];
+    const sun = site.sunIssues(far);
+    check('差 95° 就报', sun.length === 1 && sun[0].kind === 'site-sun-drift');
+    check('报的时候说清是哪两个场景、差了多少',
+      /山门外/.test(sun[0].what) && /大殿/.test(sun[0].what) && /95/.test(sun[0].what), sun[0]?.what);
+    /**
+     * 这一条不能写成"错了"。剧情本来就可能跨了几小时 ——
+     * 进山时清晨、到大殿已是黄昏，那时候太阳**就该**不一样。
+     * 一个把正常创作判成错误的检查，人看两次就再也不看了。
+     */
+    check('措辞留了"也可能是过了时间"这条路', /除非/.test(sun[0].why), sun[0]?.why);
+
+    const elev = site.sitesOf(mk([
+      sc('山门外', 0, 0, { deg: 135, elev: 'low' }),
+      sc('大殿', 0, 30, { deg: 135, elev: 'high' })
+    ]))[0];
+    check('方位一样但高度从斜射跳到顶光，也报',
+      site.sunIssues(elev).some((i) => i.kind === 'site-sun-elev'));
+  }
+
+  // ── 远景地标 ──
+  {
+    const m = (name, deg) => [{ name, far: true, deg }];
+    const same = site.sitesOf(mk([
+      sc('山门外', 0, 0, null, m('主峰', 20)),
+      sc('石阶', 14, -20, null, m('主峰', 25))
+    ]))[0];
+    check('同一座山差 5°，不报', site.farMarkIssues(same).length === 0);
+
+    const moved = site.sitesOf(mk([
+      sc('山门外', 0, 0, null, m('主峰', 20)),
+      sc('大殿', 0, 30, null, m('主峰', 200))
+    ]))[0];
+    const far = site.farMarkIssues(moved);
+    check('同一座山差 180° 就报', far.length === 1 && far[0].kind === 'site-far-drift');
+    check('说清了为什么远景地标不该动', /视差/.test(far[0].why), far[0]?.why);
+
+    const other = site.sitesOf(mk([
+      sc('山门外', 0, 0, null, m('主峰', 20)),
+      sc('大殿', 0, 30, null, m('灯塔', 200))
+    ]))[0];
+    check('不同名字的地标各在各的方位，不报', site.farMarkIssues(other).length === 0);
+
+    /**
+     * 近处地标（门、窗）**不参与**这条检查。
+     * 它们有坐标、有视差，换个场景本来就该在不同方位 —— 拿它们比是错的，
+     * 而且会把每一个摆过门的项目都报成红的。
+     *
+     * ⚠ 这一条的**第一版是假绿的**，记在这儿免得再写一遍：
+     *
+     * 原来的样子是两个场景各摆一个近处的「门」，然后断言不报。可近处地标
+     * 根本没有 deg 字段 —— 去掉那道 `far` 判断之后，两个门的方位都读成 0，
+     * 差值也是 0，照样不报。**改坏了断言纹丝不动。**
+     *
+     * 现在用同名的一近一远：山门外那座塔是近处的（有坐标），大殿那座是远处的
+     *（只有方位）。挡住近处那个，就只剩一条、无从比起；挡不住，0° 对 170°，
+     * 立刻报。这才是那道判断真正在守的事。
+     */
+    const mixed = site.sitesOf(mk([
+      sc('山门外', 0, 0, null, [{ name: '塔', x: 1, y: 2 }]),
+      sc('大殿', 0, 30, null, [{ name: '塔', far: true, deg: 170 }])
+    ]))[0];
+    check('同名的近处地标不会被当成远景来比', site.farMarkIssues(mixed).length === 0,
+      JSON.stringify(site.farMarkIssues(mixed).map((i) => i.what)));
+  }
+
+  // ── 叠在一起 ──
+  {
+    const stacked = site.sitesOf(mk([sc('山门外', 0, 0), sc('大殿', 0, 0)]))[0];
+    check('两个场景摆在同一点上会提醒', site.stackedIssues(stacked).length === 1);
+    const apart = site.sitesOf(mk([sc('山门外', 0, 0), sc('大殿', 0, 30)]))[0];
+    check('拖开了就不提醒', site.stackedIssues(apart).length === 0);
+  }
+
+  // ── 方位和距离 ──
+  {
+    const s = site.sitesOf(mk([sc('山门外', 0, 0), sc('大殿', 0, 30)]))[0];
+    const [a, b] = s.places;
+    const line = site.describeBetween(a, b);
+    check('说得出"大殿在山门外的北边三十米"', /大殿/.test(line) && /北/.test(line) && /30/.test(line), line);
+    /**
+     * ⚠ 方向必须**跟着 previz 那套走**（+y 是北）。
+     * 两套坐标系是这类几何代码最经典的坑，而且它不报错 ——
+     * 只是图上画的和文字说的拧着，两句话都是我们自己说的。
+     */
+    check('往南摆就说南', /南/.test(site.describeBetween(a, { scene: '谷底', x: 0, y: -30 })));
+    check('往东摆就说东', /东/.test(site.describeBetween(a, { scene: '东坡', x: 30, y: 0 })));
+    check('几乎同一处时不硬编方向', /同一处/.test(site.describeBetween(a, { scene: '门口', x: 0.1, y: 0.1 })));
+  }
+
+  // ── 汇总进成片体检 ──
+  {
+    const quality = await import('../core/pipeline/quality.js');
+    const project = {
+      shots: [{ id: 's1', index: 1, imagePath: 'a.png', videoPath: 'a.mp4' }],
+      bible: {
+        scenes: [
+          sc('山门外', 0, 0, { deg: 135, elev: 'low' }),
+          sc('大殿', 0, 30, { deg: 40, elev: 'low' })
+        ]
+      }
+    };
+    const report = quality.audit(project, { lintResults: [] });
+    const item = report.items.find((i) => i.id === 'site-continuity');
+    check('场地图对不上会出现在成片体检里', !!item, report.items.map((i) => i.id).join(','));
+    /**
+     * 算 warn 不算 blocker。跨了时间的戏本来就该换太阳 ——
+     * 把正常创作判成"先别发"，人第一次看到就再也不信这一页了。
+     */
+    check('算 warn，不是 blocker', item?.level === 'warn', item?.level);
+    check('体检里指得出去哪儿改', /场地/.test(item?.fix || ''), item?.fix);
+
+    const clean = quality.audit(
+      { ...project, bible: { scenes: [sc('山门外', 0, 0, { deg: 135, elev: 'low' })] } },
+      { lintResults: [] }
+    );
+    check('没问题时不出现这一条', !clean.items.some((i) => i.id === 'site-continuity'));
+  }
 }
 
 section('连续动作的首帧是上一段的末帧 —— 机位不该跳');

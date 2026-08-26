@@ -950,6 +950,41 @@ async function handleApi(req, res, url, { lan = false } = {}) {
       }
     }
 
+    /**
+     * 把一个场景摆到某片场地的某个坐标上。cap:site-map
+     *
+     * 排位管的是"一个场景内部"，场景布局管的是"同一个场景反复回来"。
+     * 这一条管的是两个场景**之间** —— 大殿在山门外的北边三十米。
+     * 那件事在两张分开的俯视图上永远读不出来，而它决定了
+     * "他往北走出画"的下一场接不接得上。
+     *
+     * place 传 null 就是从场地图上摘下来。
+     */
+    if (b && c === 'scene-place' && method === 'POST') {
+      const { scene, place } = await readBody(req);
+      try {
+        return json(res, 200, studio.saveScenePlace(b, scene, place ?? null));
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
+    }
+
+    /**
+     * 一片场地自己的远景地标和太阳。cap:site-map
+     *
+     * 太阳挂在场地上、不挂在场景上，是因为**一个地方只有一个太阳**。
+     * 挂在场景上的那份是各摆各的，于是同一座山上三场戏三个方向的光 ——
+     * 而这正是检查要抓的东西。
+     */
+    if (b && c === 'site' && method === 'POST') {
+      const { site, marks, sun } = await readBody(req);
+      try {
+        return json(res, 200, studio.saveSiteMap(b, site, { marks, sun }));
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
+    }
+
     // ── 让模型按画面描述给每一镜挑技法 ──
     // 手选的问题不在麻烦，在于你未必记得住那些术语 —— 四十七张卡里永远只用那三张。
     if (b && c === 'skills' && d === 'suggest' && method === 'POST') {
@@ -1464,7 +1499,7 @@ export function createServer({ lan = false } = {}) {
        * 放行的是这两个确切的路径，不是"所有 .js"—— 后者会把电脑版
        * 整套界面代码一起放出去，那不是同一件事。
        */
-      const SHARED_MODULES = ['/previz-canvas.js', '/previz.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js'];
+      const SHARED_MODULES = ['/previz-canvas.js', '/site-canvas.js', '/previz.js', '/site.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js'];
       const isShell =
         url.pathname === '/m'
         || url.pathname.startsWith('/m/')
@@ -1581,6 +1616,23 @@ export function createServer({ lan = false } = {}) {
        * `/transitions.js`、`/fx.js`（URL 里 `/` 的上一级还是 `/`），
        * 正好就是上面那两条路由。自检守着"只许 import 这两个"。
        */
+      /**
+       * 场地图那一层也发原件。
+       *
+       * 它 import 的 `./previz.js` 在浏览器里从 `/site.js` 出发正好解析到
+       * `/previz.js` —— 上面那条路由。自检守着"只许 import 这一个"。
+       *
+       * 为什么必须共用：画布上拖场景时要当场算"大殿在山门外正北 30 米"，
+       * 而同一份计算在服务端判断太阳对不对得上、远景地标有没有跑。
+       * 界面里另写一份的话，图上说正北、检查说西北 —— 两句话都是我们说的。
+       */
+      if (url.pathname === '/site.js') {
+        return fs.readFile(path.join(HERE, 'pipeline', 'site.js'), (err, data) => {
+          if (err) return json(res, 404, { error: '找不到 site.js' });
+          res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
+          res.end(data);
+        });
+      }
       if (url.pathname === '/edit.js') {
         return fs.readFile(path.join(HERE, 'pipeline', 'edit.js'), (err, data) => {
           if (err) return json(res, 404, { error: '找不到 edit.js' });

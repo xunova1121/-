@@ -628,6 +628,89 @@ if (sheetUp) {
   await page.waitForTimeout(200);
 }
 
+/**
+ * ⑧e 场地图 —— 手机上真的点得开、拖得动。
+ *
+ * 这一块在手机上不是"电脑那套缩小塞进来"：两指捏合缩放、一指平移
+ * 本来就是触屏的母语。但正因为它是新写的一套手势，最容易出的问题是
+ * **一根手指拖场景时，画布跟着一起平移** —— 那样场景永远拖不到该在的地方，
+ * 而不会有任何报错。
+ */
+{
+  // 老规矩：先切回有设定集的那部片子（⑦b 切走过一次，⑧c/⑧d 都在这儿栽过）
+  await page.evaluate((id) => localStorage.setItem('fd.m.project', id), proj.id);
+  await page.reload();
+  await page.waitForTimeout(1200);
+  await page.locator('.tab', { hasText: '设定集' }).click();
+  await page.waitForTimeout(900);
+
+  const head = page.locator('.site-details > summary').first();
+  if (!(await head.count())) {
+    console.log('⑧e 场地图：✕ 设定集页上找不到入口');
+  } else {
+    /**
+     * ⚠ 触控目标别小于 36px。
+     *
+     * summary 默认只有一行文字高（约 20px），在手机上是点不准的 ——
+     * 而这一点用眼睛看截图是看不出来的，只能量。
+     */
+    const box = await head.boundingBox();
+    console.log('⑧e 场地图入口够大点：',
+      box && box.height >= 32 ? '✓' : `✕ 只有 ${box ? Math.round(box.height) : 0}px 高`);
+    await head.scrollIntoViewIfNeeded();
+    await head.click();
+    await page.waitForTimeout(700);
+    console.log('   卡片能展开：', (await page.locator('.site-panel').count()) ? '✓' : '✕');
+
+    // 还没有场地时不能是一块空白 —— 空白让人以为功能坏了
+    const why = await page.locator('.site-empty-why').first().innerText().catch(() => '');
+    console.log('   空的时候说清了这是干什么的：',
+      /场景/.test(why) ? '✓' : `✕ ${why.slice(0, 100)}`);
+
+    const start = page.locator('.site-empty button').first();
+    if (await start.count()) {
+      await start.click();
+      await page.waitForTimeout(900);
+    }
+    const hasCanvas = (await page.locator('svg.site-canvas').count()) > 0;
+    console.log('   画布画出来了：', hasCanvas ? '✓' : '✕');
+
+    if (hasCanvas) {
+      /**
+       * ⚠ 触摸拖动必须**不带动画布平移**。
+       *
+       * 圆点上的 pointerdown 要 stopPropagation，否则 SVG 那层也收到，
+       * 于是拖一个场景变成"场景和整张图一起走"，相对位置纹丝不动 ——
+       * 界面看起来在动，而存下去的坐标一点没变。所以这里量的是
+       * **圆点相对网格有没有真的移动**，不是"有没有动"。
+       */
+      const dot = page.locator('.site-place').first();
+      const before = await dot.getAttribute('cx');
+      const box = await dot.boundingBox();
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      for (let i = 1; i <= 6; i += 1) {
+        await page.mouse.move(box.x + box.width / 2 + i * 7, box.y + box.height / 2);
+        await page.waitForTimeout(30);
+      }
+      await page.mouse.up();
+      await page.waitForTimeout(700);
+      const after = await page.locator('.site-place').first().getAttribute('cx');
+      console.log('   拖场景真的挪了位置（不是整张图跟着走）：',
+        before !== after ? '✓' : `✕ 拖前拖后都是 ${before}`);
+
+      const saved = await page.evaluate(async (id) => {
+        const p = await (await fetch(`/api/projects/${id}`)).json();
+        return (p.bible.scenes || []).filter((s) => s.place).length;
+      }, proj.id);
+      console.log('   位置落到盘上了：', saved >= 1 ? '✓' : '✕ 界面动了但没存住');
+
+      // 比例尺：缩放之后没有它，没人知道自己在看多大一块地
+      console.log('   有比例尺：', (await page.locator('.site-scale-label').count()) ? '✓' : '✕');
+    }
+  }
+}
+
 // ⑧ 往后全跑
 await page.locator('.tab', { hasText: '流水线' }).click();
 await page.waitForTimeout(500);

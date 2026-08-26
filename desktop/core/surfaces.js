@@ -335,6 +335,14 @@ export const CAPABILITIES = [
     why: ''
   },
   {
+    id: 'site-map',
+    name: '场地图：把几个场景摆到同一片地上（可缩放平移的画布）',
+    api: 'POST /projects/:id/scene-place',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
     id: 'film-music',
     name: '给成片配背景音乐（自动避让台词）',
     api: 'POST /projects/:id/music',

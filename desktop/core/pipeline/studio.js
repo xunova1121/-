@@ -33,6 +33,7 @@ import * as skillsLib from '../skills.js';
 import * as variants from './variants.js';
 import * as anglesLib from './angles.js';
 import * as previz from './previz.js';
+import * as siteMod from './site.js';
 import * as oss from '../oss.js';
 import * as tiers from '../tiers.js';
 import * as shotlint from './shotlint.js';
@@ -1193,6 +1194,66 @@ export function saveSceneLayout(projectId, sceneName, stage) {
     if (target) target.layout = { marks: st.marks, sun: st.sun };
     return p;
   });
+}
+
+/**
+ * 把这个场景摆到某一片**场地**上的某个位置。
+ *
+ * ════════ 和上面那个 layout 的分工 ════════
+ *
+ *   layout  这个场景**内部**长什么样：门在哪、窗在哪、太阳从哪来
+ *   place   这个场景**在世界上的哪儿**：属于哪片场地、坐标是多少
+ *
+ * 两件事必须分开存。合成一个的话，"把大殿往北挪十米"就会连带
+ * 把大殿里的门窗也挪了 —— 而门窗的坐标是相对场景原点的，
+ * 挪了之后场景内部全乱，且不报错。
+ *
+ * ⚠ place 传 null 就是**从场地图上摘下来**。这条必须有 ——
+ * 摆错了地方却没法撤销，是这类空间功能最招人恨的地方。
+ */
+export function saveScenePlace(projectId, sceneName, place) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const name = String(sceneName || '').trim();
+  if (!name) throw new Error('没说是哪个场景');
+  if (!(project.bible?.scenes || []).some((x) => x.name === name)) {
+    throw new Error(`设定集里没有场景「${name}」`);
+  }
+  // null / 空对象 = 摘下来。normalizePlace 对没有 site 名字的一律回 null
+  const next = place === null ? null : siteMod.normalizePlace(place);
+  return store.update(projectId, (p) => {
+    const target = (p.bible?.scenes || []).find((x) => x.name === name);
+    if (!target) return p;
+    if (next) target.place = next;
+    else delete target.place;
+    return p;
+  });
+}
+
+/**
+ * 一片场地自己的东西：远景地标 + 太阳。
+ *
+ * 按**名字**存，没有 id。`bible.sites` 是个普通对象，键就是场地名。
+ * 用 id 的话，改一次场地名就会留下一条断掉的引用 —— 而断引用从不报错，
+ * 只是有一天地图上的山没了。多一个用不上的键是无害的，断引用不是。
+ */
+export function saveSiteMap(projectId, siteName, patch = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const name = String(siteName || '').trim();
+  if (!name) throw new Error('没说是哪片场地');
+  const clean = siteMod.normalizeSite(patch);
+  return store.update(projectId, (p) => {
+    if (!p.bible) p.bible = {};
+    if (!p.bible.sites || typeof p.bible.sites !== 'object') p.bible.sites = {};
+    p.bible.sites[name] = clean;
+    return p;
+  });
+}
+
+/** 这个项目上的场地图，连同算出来的问题 */
+export function siteMapOf(project) {
+  return { sites: siteMod.sitesOf(project), issues: siteMod.siteIssues(project) };
 }
 
 /** 这个场景存过布局吗。没有回 null */

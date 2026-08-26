@@ -10,6 +10,7 @@ import { openLightbox } from '../lightbox.js';
 import { ratioLabel } from '../ratios.js';
 import { skillPicker, customSkillForm } from '../skill-picker.js';
 import { previzPanel, blankStage } from '../previz-canvas.js';
+import * as siteCanvasMod from '../site-canvas.js';
 import { inheritStage } from '/previz.js';
 /**
  * 转场表和效果表读的是**引擎那一份原件**（服务端把 core/transitions.js、
@@ -3477,6 +3478,50 @@ export default {
     }
 
     /**
+     * ── 场地图 ──
+     *
+     * 摆在设定集这一步，因为它整理的是**场景之间的关系** —— 而场景就在这一页定义。
+     *
+     * 排位画布解决"一个场景内部"，场景布局解决"同一个场景反复回来"，
+     * 这一块解决"两个不同的场景"：大殿在山门外的北边三十米、
+     * 这片山坡上只有一个太阳。前两层都看不见这件事，
+     * 因为它们一次只看得见一个场景。
+     */
+    const sitePanelHost = h('div', { class: 'panel', style: 'display:none' });
+    let siteMounted = false;
+
+    function mountSite() {
+      clear(sitePanelHost);
+      sitePanelHost.append(
+        h('div', { class: 'panel-head' },
+          h('b', {}, '场地图'),
+          h('span', { class: 'muted' },
+            '把同一个地方的几个场景摆到一张图上。滚轮缩放，拖空白平移。'
+            + '外景尤其要摆 —— 一片山坡上的三场戏，太阳只有一个。')),
+        siteCanvasMod.sitePanel(project, {
+          onPlace: async (scene, place) => {
+            try {
+              // cap:site-map
+              const p2 = await api(`/projects/${project.id}/scene-place`, {
+                method: 'POST', body: { scene, place }
+              });
+              project.bible = p2.bible;
+            } catch (err) { toast(err.message, 'err'); }
+          },
+          onSite: async (name, patch) => {
+            try {
+              // cap:site-map
+              const p2 = await api(`/projects/${project.id}/site`, {
+                method: 'POST', body: { site: name, ...patch }
+              });
+              project.bible = p2.bible;
+            } catch (err) { toast(err.message, 'err'); }
+          }
+        }).node
+      );
+    }
+
+    /**
      * 视频这一步只给一行**只读**的时长摘要。
      *
      * 时长的可改之处只有一个：分镜。它是拆镜时的预算，改它等于重排每一镜的秒数 ——
@@ -3503,14 +3548,14 @@ export default {
 
     const stepPanels = {
       'script-src': [scriptPanel, chapterPanel],
-      bible: [readinessHost, biblePanel],
+      bible: [readinessHost, biblePanel, sitePanelHost],
       script: [durationPanel, chapterPanel, shotsPanel],
       assets: [shotsPanel],
       video: [shotsPanel],
       voice: [shotsPanel],
       compose: [cutPanel, composePanel]
     };
-    const allPanels = [scriptPanel, chapterPanel, readinessHost, biblePanel, durationPanel, shotsPanel, cutPanel, composePanel]
+    const allPanels = [scriptPanel, chapterPanel, readinessHost, biblePanel, sitePanelHost, durationPanel, shotsPanel, cutPanel, composePanel]
       .filter(Boolean);
     // 只读那一行摆在分镜面板顶上，跟着"视频"这一步出现
     shotsPanel.insertBefore(durationLine, shotsPanel.firstChild.nextSibling);
@@ -3523,6 +3568,11 @@ export default {
       if (wanted.has(biblePanel) && !bibleMounted) {
         bibleMounted = true;
         mountBible();
+      }
+      // 场地图也只在第一次翻到这一步时才建 —— 它要画一整块 SVG
+      if (wanted.has(sitePanelHost) && !siteMounted) {
+        siteMounted = true;
+        mountSite();
       }
       const showLine = state.stage === 'video';
       durationLine.style.display = showLine ? '' : 'none';

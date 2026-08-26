@@ -49,6 +49,7 @@ import { speechSeconds, SPEECH_HEADROOM } from '/duration.js';
  * 必须是同一句。各写各的话已经错过一次：这里写的是 tail 的行为，跑的是 lock。
  */
 import * as SEAM from '/seam.js';
+import * as SITE from '/site-canvas.js';
 
 const canInstall = window.isSecureContext && 'serviceWorker' in navigator;
 if (canInstall) {
@@ -1086,8 +1087,63 @@ function paintBible() {
     if (!items.length) continue;
     out.push(h('div', { class: 'sec' }, title));
     for (const item of items) out.push(bibleCard(kind, item, v));
+    // 场景列完了紧跟着摆场地图 —— 它整理的正是这几个场景之间的关系
+    if (kind === 'scene') out.push(siteCard());
   }
   return out;
+}
+
+/**
+ * ── 场地图 ──
+ *
+ * 手机上做这一块，和剪辑台不同，不是"把电脑那套缩小塞进来"。
+ *
+ * 画布本身在手机上是**更好用**的：两指捏合缩放、一根手指平移，
+ * 这套手势本来就是触屏的母语，鼠标那边反而要靠滚轮凑合。
+ * 而它要交付的那件事 —— "这片山坡上三场戏的太阳对不对得上" ——
+ * 恰恰是审片时最容易发现、最该当场记一笔的。
+ *
+ * 折叠起来是因为它不是每次打开设定集都要看的东西。
+ */
+function siteCard() {
+  /**
+   * 用原生 <details>，不自己写开合。
+   *
+   * ⚠ 第一版把标题套在 `.fchip.icon` 上 —— 那个类是 `width: 32px` 的
+   * **方形图标按钮**（分镜页那个「⋯」用的就是它）。四个字塞进 32 像素，
+   * 结果是一个挤成一团、点不准的东西，而 CSS 不会因此报任何错。
+   * 原生 details 自带箭头、自带键盘可达性，也不会有开合状态对不上的 bug。
+   */
+  const host = h('details', { class: 'card site-details' });
+  const head = h('summary', {}, '场地图 ', h('span', { class: 'muted' }, '几个场景摆到一张图上'));
+  const body = h('div', {});
+  let built = false;
+  host.addEventListener('toggle', () => {
+    if (!host.open || built) return;
+    built = true;
+    body.append(SITE.sitePanel(project, {
+      onPlace: async (scene, place) => {
+        try {
+          // cap:site-map
+          const p2 = await api(`/projects/${project.id}/scene-place`, {
+            method: 'POST', body: { scene, place }
+          });
+          project.bible = p2.bible;
+        } catch (err) { toast(err.message, 'err'); }
+      },
+      onSite: async (name, patch) => {
+        try {
+          // cap:site-map
+          const p2 = await api(`/projects/${project.id}/site`, {
+            method: 'POST', body: { site: name, ...patch }
+          });
+          project.bible = p2.bible;
+        } catch (err) { toast(err.message, 'err'); }
+      }
+    }).node);
+  });
+  host.append(head, body);
+  return host;
 }
 
 function bibleCard(kind, item, v) {

@@ -919,6 +919,107 @@ if (nBad >= 1) {
     (await page.locator('#route-banner').innerText()).slice(0, 200));
 }
 
+/**
+ * ── 场地图：真在浏览器里拖 ──
+ *
+ * 这一节量的是"服务端全绿而界面一动不动"那一类问题。几何算得对不对
+ * 已经由自检那 30 多条守着了 —— 这里只管三件在浏览器里才成立的事：
+ *
+ *   ① 面板真的画出来了（SVG 在 DOM 里，不是一块空 div）
+ *   ② 点「摆上来」真的发出了那一次请求（按钮调了个不存在的函数，就是这么漏掉的）
+ *   ③ **拖动过程中不存盘、松手才存一次** —— 这一条只有量请求数才看得出来
+ */
+console.log('\n场地图');
+// 第二个场景直接写进设定集：不动前面那份 BIBLE，免得影响已经跑过的每一步
+await page.evaluate(async (id) => {
+  const p = await (await fetch(`/api/projects/${id}`)).json();
+  p.bible.scenes.push({ name: '栈桥', appearance: '伸进雾里的木栈桥', sheetPrompt: '' });
+  await fetch(`/api/projects/${id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bible: p.bible })
+  });
+}, proj.id);
+await page.goto(`${url}#/studio/${proj.id}`);
+await page.waitForTimeout(1200);
+await step('设定集').click();
+await page.waitForTimeout(1200);
+
+const sitePanel = page.locator('.site-panel').first();
+check('设定集这一步能看到场地图', (await sitePanel.count()) > 0);
+
+// 一片场地都还没有时，不能是一块空白 —— 空白让人以为功能坏了
+const emptyWhy = await page.locator('.site-empty-why').first().innerText().catch(() => '');
+check('还没有场地时说清了这是干什么的',
+  /场景/.test(emptyWhy) && /太阳|方向|北/.test(emptyWhy), emptyWhy.slice(0, 120));
+
+sent.length = 0;
+await page.locator('.site-empty button').first().click();
+await page.waitForTimeout(900);
+check('建图真的发出了请求，不是只改了界面',
+  sent.some((s) => s === 'POST /api/projects/' + proj.id + '/scene-place'),
+  sent.slice(-4).join(' | '));
+check('画布出来了', (await page.locator('svg.site-canvas').count()) > 0);
+check('第一个场景摆上去了', (await page.locator('.site-place').count()) === 1);
+
+// 把第二个场景也摆上来
+const addBtn = page.locator('.site-row button', { hasText: '栈桥' }).first();
+check('没摆上来的场景列得出来', (await addBtn.count()) > 0);
+await addBtn.click();
+await page.waitForTimeout(900);
+check('两个场景都在图上了', (await page.locator('.site-place').count()) === 2);
+/**
+ * 新场景不能落在原点 —— 落在原点会正好盖住第一个，看起来像"没加上"。
+ * 量两个圆点的屏幕坐标：重合就是没拖开。
+ */
+const centers = await page.locator('.site-place').evaluateAll(
+  (ns) => ns.map((n) => `${n.getAttribute('cx')},${n.getAttribute('cy')}`)
+);
+check('新场景没有盖在第一个上面', centers[0] !== centers[1], centers.join(' / '));
+
+/**
+ * 拖一个场景。
+ *
+ * ⚠ page.mouse 用的是**视口坐标**，而 boundingBox() 回的是页面坐标 ——
+ * 页面滚动过之后两者差一个滚动量，拖动会落在空处而**不报任何错**。
+ * 先把画布滚进视口再取坐标。
+ */
+await page.locator('svg.site-canvas').first().scrollIntoViewIfNeeded();
+await page.waitForTimeout(200);
+const dot = page.locator('.site-place').first();
+const box = await dot.boundingBox();
+sent.length = 0;
+await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+await page.mouse.down();
+// 分几步移动：一步到位的话 pointermove 只发一次，测不出"拖动中在不在存"
+for (let i = 1; i <= 8; i += 1) {
+  await page.mouse.move(box.x + box.width / 2 + i * 6, box.y + box.height / 2 + i * 4);
+  await page.waitForTimeout(30);
+}
+const duringDrag = sent.filter((s) => s.includes('scene-place')).length;
+/**
+ * ⚠ 这一条是这一节里最值钱的。
+ *
+ * 把存盘挂在 onChange（每一帧都响）上，本机跑起来完全看不出问题 ——
+ * 都是毫秒级。连服务器就是一串请求排队，表现是"拖起来很卡"，
+ * 而没人会想到是自己在拖的时候一直在存。
+ */
+check('拖动过程中一次都不存', duringDrag === 0, `拖到一半已经发了 ${duringDrag} 次`);
+await page.mouse.up();
+await page.waitForTimeout(900);
+const afterDrag = sent.filter((s) => s.includes('scene-place')).length;
+check('松手存了一次', afterDrag === 1, `松手后共 ${afterDrag} 次`);
+
+// 选中之后要说得出"它在别处的哪个方向、多远"—— 这是整块画布要交付的东西
+const pickText = await page.locator('.site-pick').first().innerText().catch(() => '');
+check('选中的场景说得出到别处的方位和距离',
+  /(东|南|西|北)/.test(pickText) && /米/.test(pickText), pickText.replace(/\n/g, ' ').slice(0, 140));
+
+// 存下去的位置得能读回来 —— 界面上动了而盘上没动，是最难发现的一类
+const saved = await page.evaluate(async (id) => {
+  const p = await (await fetch(`/api/projects/${id}`)).json();
+  return (p.bible.scenes || []).filter((s) => s.place).map((s) => `${s.name}:${s.place.site}`);
+}, proj.id);
+check('位置真的落到盘上了（不是只在界面上）', saved.length === 2, saved.join(' | '));
+
 check('全程没有页面报错', errs.length === 0, errs.slice(0, 3).join(' | '));
 
 await b.close();

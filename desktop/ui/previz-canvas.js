@@ -448,7 +448,9 @@ export function previzPanel(stage, {
     const farRow = document.createElement('div');
     farRow.className = 'previz-row';
     farRow.append(Object.assign(document.createElement('span'), { className: 'previz-cap', textContent: '远景' }));
-    for (const [name, deg] of [['山', -45], ['塔', 45], ['海', 180], ['天际线', 90], ['路口', -135]]) {
+    // 名字这一份和场地图共用（previz.FAR_PRESETS）—— 跨场景那条检查是按名字配对的，
+    // 两边各写各的清单，它就永远配不上对，而界面上两边都摆得好好的
+    for (const { name, deg } of previz.FAR_PRESETS) {
       const has = (stage.marks || []).some((m) => m.far && m.name === name);
       farRow.append(btn(name, has, () => {
         stage.marks = stage.marks || [];

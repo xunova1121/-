@@ -44,6 +44,8 @@
  * 所以 `audit()` 回的是 { score, verdict, items }，而界面必须把 items 摊开。
  * 只印一个分数的界面是在假装精确。
  */
+import * as site from './site.js';
+
 const WEIGHT = { blocker: 12, warn: 4, note: 1 };
 
 const LEVELS = ['blocker', 'warn', 'note'];
@@ -253,6 +255,28 @@ export function audit(project, { lintResults = [], threshold = 75 } = {}) {
       what: `分镜体检有 ${normal.length} 条一般项`,
       why: normal.slice(0, 2).map((i) => `第 ${i.index} 镜：${i.what}`).join('；'),
       fix: '不改也能发，改了更像成片。'
+    });
+  }
+
+  /**
+   * ── 场地图：同一片地上的几个场景对不对得上 ──
+   *
+   * 这一条查的东西，前面每一层都查不出来：分镜体检看的是一镜的文字，
+   * 越轴看的是相邻两镜的机位，场景布局看的是"同一个场景反复回来"。
+   * 而"山门外是斜逆光、大殿是正顺光"这件事，牵涉的是**两个不同的场景**，
+   * 中间可能隔着十几镜 —— 没有任何一层会把它们放在一起看。
+   *
+   * 算 warn 不算 blocker：剧情本来就可能跨了几小时（进山时清晨、
+   * 到大殿已是黄昏），那时候太阳就该不一样。这是"要么改、要么确认过了时间"，
+   * 不是"错了"。
+   */
+  const siteProblems = site.siteIssues(project);
+  if (siteProblems.length) {
+    add(items, 'warn', {
+      id: 'site-continuity',
+      what: `场地图上有 ${siteProblems.length} 处对不上`,
+      why: siteProblems.slice(0, 3).map((i) => i.what).join('；') + (siteProblems.length > 3 ? ' 等' : ''),
+      fix: '到「预演台 → 场地」看一眼。如果剧情确实过了时间，那就是对的，不用改。'
     });
   }
 

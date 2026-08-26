@@ -490,6 +490,57 @@ input {
 }
 .previz-details > summary { cursor: pointer; color: var(--ink-dim); font-size: 13px; padding: 6px 0; }
 
+/* 场地图那张卡片用原生 details。触控目标要够大：summary 默认只有一行文字高 */
+.site-details > summary {
+  cursor: pointer; padding: 4px 0; font-weight: 700;
+  min-height: 32px; display: flex; align-items: center; gap: 6px;
+}
+.site-details > summary .muted { font-weight: 400; font-size: 12px; }
+
+/* ── 场地图 ──
+   这一块在手机上比在电脑上顺手：两指捏合缩放、一指平移是触屏的母语，
+   鼠标那边反而要靠滚轮凑合。圆点半径由脚本给（它固定在屏幕上、不跟缩放变），
+   这里只管颜色。 */
+.site-panel { margin-top: 8px; }
+.site-canvas { border: 1px solid var(--line); border-radius: var(--r); display: block; }
+.site-bg { fill: var(--surface-1); }
+.site-grid { stroke: var(--line-soft); stroke-width: 1; }
+.site-axis { stroke: var(--line); stroke-width: 1.5; }
+.site-scalebar { stroke: var(--ink-faint); stroke-width: 2; }
+.site-scale-label { fill: var(--ink-faint); font-size: 10px; }
+.site-compass { fill: var(--ink-faint); font-size: 12px; text-anchor: middle; }
+.site-place { fill: var(--surface-2); stroke: var(--ink-dim); stroke-width: 2; }
+.site-place-on { fill: var(--beam); stroke: var(--ink); }
+.site-place-label { fill: var(--ink); font-size: 11px; text-anchor: middle; }
+.site-place-sun { stroke: var(--caution); stroke-width: 2; }
+.site-far { fill: var(--surface-2); stroke: var(--ink-faint); stroke-width: 2; }
+.site-far-label { fill: var(--ink-dim); font-size: 10px; text-anchor: middle; }
+.site-sun { fill: rgba(232, 180, 95, 0.18); stroke: var(--caution); stroke-width: 2; }
+.site-sun-label { fill: var(--caution); font-size: 12px; text-anchor: middle; }
+.site-link { stroke: var(--beam); stroke-width: 1.5; stroke-dasharray: 5 4; opacity: .85; }
+.site-link-label { fill: var(--beam); font-size: 10px; text-anchor: middle; }
+.site-summary { color: var(--ink-dim); font-size: 12px; margin-bottom: 8px; }
+.site-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.site-tools { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.site-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.site-cap { color: var(--ink-faint); font-size: 12px; min-width: 40px; }
+.site-row .btn.on { border-color: var(--beam); color: var(--beam); }
+.site-pick { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.site-pick-name { font-weight: 700; font-size: 13px; }
+.site-pick-line { color: var(--ink-dim); font-size: 12px; }
+.site-hint { color: var(--ink-faint); font-size: 12px; line-height: 1.6; }
+.site-issues { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.site-ok { color: var(--ink-faint); font-size: 12px; }
+.site-issue {
+  padding: 9px 11px; border-radius: 10px;
+  background: rgba(232, 180, 95, 0.14); border-left: 3px solid var(--caution);
+}
+.site-issue-what { font-size: 12px; line-height: 1.6; }
+.site-issue-why { color: var(--ink-dim); font-size: 11px; line-height: 1.6; margin-top: 3px; }
+.site-empty { padding: 12px 0; display: flex; flex-direction: column; gap: 8px; }
+.site-empty-title { font-weight: 700; }
+.site-empty-why { color: var(--ink-dim); font-size: 12px; line-height: 1.7; }
+
 /* ── 浮层：新建项目那一类 ──
    不用 prompt()：它在部分安卓浏览器和加到主屏的 WebAPK 里根本不弹，
    点了没反应是最难报的故障 —— 用户只会觉得按钮坏了。 */
