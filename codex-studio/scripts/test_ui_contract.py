@@ -52,7 +52,8 @@ def main():
         for item in scroll.iter()
     }
     assert not set(expected_buttons).intersection(scroll_names), "binding actions must stay outside scrolling content"
-    named(root, "ComboBox", "RoleProvider")
+    role_provider = named(root, "ComboBox", "RoleProvider")
+    assert role_provider.attrib.get("DisplayMemberPath") == "RouteDisplayName", "role provider must show provider identity and configuration state"
     named(root, "ComboBox", "RoleModel")
     named(root, "TextBlock", "SelectedRoleSummary")
 
@@ -60,6 +61,8 @@ def main():
     assert "SelectedModelId(RoleModel)" in code
     assert "SaveModelRoleAsync(roleId, provider.ProviderId, modelId)" in code
     assert "UpdateSelectedRoleSummary" in code
+    assert "GetProviderModelsAsync(provider.ProviderId, SelectedRole.Capability)" in code, "changing the role provider must refresh that provider's models"
+    assert "changeVersion != _roleProviderChangeVersion" in code, "late model responses must not overwrite a newer provider selection"
     automation = (ROOT / "client/AI.FilmStudio/AutomationWindow.xaml.cs").read_text(encoding="utf-8")
     assert 'RequireRole("keyframe_image"' in automation and 'RequireRole("shot_video"' in automation
     assert "ProviderConfigStatus" not in automation
