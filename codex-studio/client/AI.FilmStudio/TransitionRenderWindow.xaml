@@ -1,0 +1,22 @@
+<Window x:Class="AI.FilmStudio.TransitionRenderWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="转场渲染" Width="720" Height="470" WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize" Background="{StaticResource BgBrush}">
+    <Grid Margin="24">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <StackPanel><TextBlock Text="镜间衔接渲染" FontSize="22" FontWeight="SemiBold"/><TextBlock Text="统一分辨率、帧率和色彩格式后执行转场，结果进入持久任务队列" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0"/></StackPanel>
+        <Border Grid.Row="1" Background="#171A20" BorderBrush="{StaticResource StrokeBrush}" BorderThickness="1" CornerRadius="7" Padding="12" Margin="0,18,0,8">
+            <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBox x:Name="LeftPath" IsReadOnly="True" Text="选择上一镜视频" Background="Transparent" Foreground="{StaticResource TextBrush}" BorderThickness="0" VerticalContentAlignment="Center"/><Button Grid.Column="1" Style="{StaticResource NavButton}" Content="选择上一镜" Click="PickLeft_Click"/></Grid>
+        </Border>
+        <Border Grid.Row="2" Background="#171A20" BorderBrush="{StaticResource StrokeBrush}" BorderThickness="1" CornerRadius="7" Padding="12" Margin="0,0,0,8">
+            <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBox x:Name="RightPath" IsReadOnly="True" Text="选择下一镜视频" Background="Transparent" Foreground="{StaticResource TextBrush}" BorderThickness="0" VerticalContentAlignment="Center"/><Button Grid.Column="1" Style="{StaticResource NavButton}" Content="选择下一镜" Click="PickRight_Click"/></Grid>
+        </Border>
+        <Grid Grid.Row="3" Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+            <StackPanel><TextBlock Text="转场方式" Foreground="{StaticResource MutedBrush}"/><ComboBox x:Name="Method" SelectedIndex="2" Height="36" Margin="0,6,12,0"><ComboBoxItem Content="cut"/><ComboBoxItem Content="match_cut"/><ComboBoxItem Content="dissolve"/><ComboBoxItem Content="fade_black"/></ComboBox></StackPanel>
+            <StackPanel Grid.Column="1"><TextBlock Text="转场时长（秒）" Foreground="{StaticResource MutedBrush}"/><TextBox x:Name="Duration" Text="0.5" Height="36" Margin="12,6,0,0" Padding="8"/></StackPanel>
+        </Grid>
+        <StackPanel Grid.Row="4" Margin="0,20,0,0"><TextBlock x:Name="EngineStatus" Text="正在检测 FFmpeg…"/><TextBlock Text="连续动作需要 AI 桥接时，请先在转场计划中选择 VACE；这里负责本地剪辑型转场。" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/><TextBlock x:Name="Feedback" Foreground="#E0A534" TextWrapping="Wrap" Margin="0,12,0,0"/></StackPanel>
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right"><Button Style="{StaticResource NavButton}" Content="关闭" Click="Close_Click"/><Button x:Name="RenderButton" Style="{StaticResource PrimaryButton}" Content="加入渲染队列" Click="Render_Click" Margin="8,0,0,0"/></StackPanel>
+    </Grid>
+</Window>

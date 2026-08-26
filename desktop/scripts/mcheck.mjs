@@ -13,6 +13,11 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = path.resolve(HERE, '..');
+const localModule = (relativePath) => pathToFileURL(path.join(PROJECT_ROOT, relativePath)).href;
 const PW = process.env.PLAYWRIGHT_PATH || 'playwright';
 let chromium; let devices;
 try {
@@ -32,9 +37,9 @@ try {
 const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'fd-m-'));
 process.env.FUTUREDREAM_DATA_DIR = SANDBOX;
 
-const settings = await import('/home/user/-/desktop/core/settings.js');
-const store = await import('/home/user/-/desktop/core/store.js');
-const srv = await import('/home/user/-/desktop/core/server.js');
+const settings = await import(localModule('core/settings.js'));
+const store = await import(localModule('core/store.js'));
+const srv = await import(localModule('core/server.js'));
 
 settings.patch({ autoCheckOnStart: false });
 const proj = store.create({ title: '手机端测试', aspectRatio: '9:16', script: '阿澜在码头巡查。' });
@@ -315,7 +320,7 @@ if (opened) {
  * 这里直接往登记表里塞一份活儿（它和这台服务器在同一个进程里），
  * 然后刷新页面 —— 走的正是用户切屏回来那条路。
  */
-const jobs = await import('/home/user/-/desktop/core/jobs.js');
+const jobs = await import(localModule('core/jobs.js'));
 {
   const cur = store.list()[0];
   const fake = jobs.start(cur.id, 'video');

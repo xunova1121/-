@@ -1,0 +1,59 @@
+<Window x:Class="AI.FilmStudio.ProviderSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="模型路由中心" Width="1240" Height="760" MinWidth="1060" MinHeight="640" ResizeMode="CanResize"
+        WindowStartupLocation="CenterOwner" Background="{StaticResource BgBrush}">
+    <Grid Margin="26">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <StackPanel>
+            <TextBlock Text="模型路由中心" FontSize="32" FontWeight="Bold"/>
+            <TextBlock Text="① 保存服务商连接并拉取模型  →  ② 选择功能岗位  →  ③ 选择服务商和模型  →  ④ 点击“绑定并保存”" FontSize="17" Foreground="{StaticResource MutedBrush}" Margin="0,9,0,0" TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <Grid Grid.Row="1" Margin="0,22,0,18">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="0.92*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="1.08*"/></Grid.ColumnDefinitions>
+            <Border Background="#171A20" BorderBrush="{StaticResource StrokeBrush}" BorderThickness="1" CornerRadius="9" Padding="22">
+                <Grid>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <TextBlock Text="1. 服务商连接" FontSize="23" FontWeight="Bold"/>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="0,14,0,10">
+                    <StackPanel>
+                    <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="150"/></Grid.ColumnDefinitions>
+                        <ComboBox x:Name="Provider" AutomationProperties.AutomationId="ProviderSelector" Height="48" DisplayMemberPath="Name" SelectionChanged="Provider_SelectionChanged"/>
+                        <TextBlock x:Name="Status" Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                    </Grid>
+                    <StackPanel Margin="0,15,0,0"><TextBlock Text="API Base URL" FontWeight="Bold"/><TextBox x:Name="BaseUrl" Height="48" Margin="0,7,0,0"/></StackPanel>
+                    <StackPanel Margin="0,15,0,0"><TextBlock Text="默认模型 / Endpoint ID" FontWeight="Bold"/><ComboBox x:Name="Model" AutomationProperties.AutomationId="DefaultModelSelector" Height="48" Margin="0,7,0,0" IsEditable="True" IsTextSearchEnabled="True" DisplayMemberPath="DisplayName"/></StackPanel>
+                    <StackPanel Margin="0,15,0,0"><TextBlock Text="API 密钥（留空将保留已保存密钥）" FontWeight="Bold"/><PasswordBox x:Name="ApiKey" Height="48" Margin="0,7,0,0"/></StackPanel>
+                    </StackPanel>
+                    </ScrollViewer>
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,0"><Button x:Name="FetchButton" AutomationProperties.AutomationId="FetchProviderModelsButton" Style="{StaticResource NavButton}" Content="① 拉取可用模型" Click="FetchModels_Click" Padding="18,11"/><Button x:Name="SaveButton" AutomationProperties.AutomationId="SaveProviderButton" Style="{StaticResource PrimaryButton}" Content="② 加密保存连接" Click="Save_Click" Margin="10,0,0,0" Padding="18,11"/></StackPanel>
+                    <TextBlock x:Name="Feedback" Grid.Row="3" Foreground="#FFD166" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,13,0,0"/>
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="2" Background="#171A20" BorderBrush="{StaticResource StrokeBrush}" BorderThickness="1" CornerRadius="9" Padding="22">
+                <Grid>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <StackPanel><TextBlock Text="2. 功能岗位绑定" FontSize="23" FontWeight="Bold"/><TextBlock Text="选岗位后拉取该能力支持的模型；底部按钮始终可见。" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/></StackPanel>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="0,13,0,10">
+                    <StackPanel>
+                        <TextBlock Text="① 选择要配置的功能岗位" FontWeight="Bold"/>
+                        <ListBox x:Name="RoleList" AutomationProperties.AutomationId="RoleSelector" Height="150" Margin="0,7,0,0" DisplayMemberPath="DisplayLabel" SelectionChanged="RoleList_SelectionChanged"/>
+                        <Border Background="#202630" BorderBrush="#475163" BorderThickness="1" CornerRadius="6" Padding="13" Margin="0,12,0,0"><StackPanel><TextBlock x:Name="RoleName" FontSize="19" FontWeight="Bold"/><TextBlock x:Name="RoleDescription" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0" TextWrapping="Wrap"/><TextBlock x:Name="RoleRequirement" Foreground="#9FD5FF" FontWeight="SemiBold" Margin="0,8,0,0"/></StackPanel></Border>
+                        <Grid Margin="0,13,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="14"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                            <StackPanel><TextBlock Text="② 选择服务商（可切换）" FontWeight="Bold"/><ComboBox x:Name="RoleProvider" AutomationProperties.AutomationId="RoleProviderSelector" Height="48" Margin="0,7,0,0" DisplayMemberPath="RouteDisplayName" SelectionChanged="RoleProvider_SelectionChanged"/><TextBlock Text="● 已配置　○ 未配置" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0"/></StackPanel>
+                            <StackPanel Grid.Column="2"><TextBlock Text="③ 选择具体模型" FontWeight="Bold"/><ComboBox x:Name="RoleModel" AutomationProperties.AutomationId="RoleModelSelector" Height="48" Margin="0,7,0,0" IsEditable="True" IsTextSearchEnabled="True" DisplayMemberPath="DisplayName" SelectionChanged="RoleModel_SelectionChanged" DropDownClosed="RoleModel_DropDownClosed" KeyUp="RoleModel_KeyUp"/></StackPanel>
+                        </Grid>
+                        <TextBlock x:Name="SelectedRoleSummary" Margin="0,11,0,0" Foreground="White" FontSize="17" FontWeight="Bold" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    </ScrollViewer>
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,7,0,0"><Button x:Name="FetchRoleButton" AutomationProperties.AutomationId="FetchRoleModelsButton" Style="{StaticResource NavButton}" Content="拉取此岗位候选模型" Click="FetchRoleModels_Click" Padding="15,11"/><Button x:Name="BindRoleButton" AutomationProperties.AutomationId="BindRoleButton" Style="{StaticResource PrimaryButton}" Content="✓ 绑定并保存" Click="BindRole_Click" Margin="8,0,0,0" Padding="18,11"/><Button x:Name="ClearRoleButton" AutomationProperties.AutomationId="ClearRoleButton" Style="{StaticResource NavButton}" Content="解除当前绑定" Click="ClearRole_Click" Margin="8,0,0,0" Padding="15,11"/></StackPanel>
+                    <TextBlock x:Name="RoleFeedback" Grid.Row="3" Foreground="#FFD166" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,12,0,0"/>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <Button x:Name="CloseRouterButton" AutomationProperties.AutomationId="CloseRouterButton" Grid.Row="2" Style="{StaticResource NavButton}" Content="关闭" Click="Close_Click" Padding="26,12" HorizontalAlignment="Right"/>
+    </Grid>
+</Window>

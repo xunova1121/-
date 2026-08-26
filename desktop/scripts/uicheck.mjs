@@ -23,6 +23,11 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = path.resolve(HERE, '..');
+const localModule = (relativePath) => pathToFileURL(path.join(PROJECT_ROOT, relativePath)).href;
 // Playwright 不是这个项目的依赖，从全局装的那份里取。找不到就说清楚怎么装
 const PW = process.env.PLAYWRIGHT_PATH || 'playwright';
 let chromium;
@@ -90,10 +95,10 @@ const stub = http.createServer((req, res) => {
 await new Promise((r) => stub.listen(0, '127.0.0.1', r));
 const stubUrl = `http://127.0.0.1:${stub.address().port}/v3`;
 
-const settings = await import('/home/user/-/desktop/core/settings.js');
-const vault = await import('/home/user/-/desktop/core/vault.js');
-const store = await import('/home/user/-/desktop/core/store.js');
-const { listen } = await import('/home/user/-/desktop/core/server.js');
+const settings = await import(localModule('core/settings.js'));
+const vault = await import(localModule('core/vault.js'));
+const store = await import(localModule('core/store.js'));
+const { listen } = await import(localModule('core/server.js'));
 
 vault.setSecret('ARK_API_KEY', 'stub-key');
 settings.patch({

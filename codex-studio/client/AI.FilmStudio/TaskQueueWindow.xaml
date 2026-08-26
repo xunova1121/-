@@ -1,0 +1,49 @@
+<Window x:Class="AI.FilmStudio.TaskQueueWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="任务队列" Width="980" Height="620" MinWidth="780" MinHeight="480"
+        WindowStartupLocation="CenterOwner" Background="{StaticResource BgBrush}">
+    <Grid Margin="20">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <Grid>
+            <StackPanel><TextBlock Text="持久化任务中心" FontSize="22" FontWeight="SemiBold"/><TextBlock Text="支持后台执行、失败退避重试、取消与服务重启恢复" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0"/></StackPanel>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <Button Style="{StaticResource NavButton}" Content="刷新" Click="Refresh_Click"/>
+                <ComboBox x:Name="Provider" Width="145" Margin="8,0" DisplayMemberPath="DisplayName"/>
+                <ComboBox x:Name="TaskType" Width="120" SelectedIndex="0" Margin="0,0,8,0" Background="#20242B" Foreground="White" SelectionChanged="TaskType_SelectionChanged">
+                    <ComboBoxItem Content="llm"/><ComboBoxItem Content="proofread"/><ComboBoxItem Content="image"/><ComboBoxItem Content="video"/><ComboBoxItem Content="voice"/>
+                </ComboBox>
+                <Button Style="{StaticResource PrimaryButton}" Content="＋ 新建真实任务" Click="Create_Click"/>
+            </StackPanel>
+        </Grid>
+        <Border Grid.Row="1" Background="#171A20" BorderBrush="{StaticResource StrokeBrush}" BorderThickness="1" CornerRadius="7" Padding="12" Margin="0,18,0,10">
+            <TextBlock x:Name="SummaryText" Text="正在读取队列…"/>
+        </Border>
+        <DataGrid x:Name="TaskGrid" Grid.Row="2" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
+                  Background="#15181D" Foreground="{StaticResource TextBrush}" BorderBrush="{StaticResource StrokeBrush}"
+                  RowBackground="#171A20" AlternatingRowBackground="#1B1E24" GridLinesVisibility="Horizontal"
+                  HeadersVisibility="Column" CanUserAddRows="False">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="60"/>
+                <DataGridTextColumn Header="类型" Binding="{Binding TaskType}" Width="110"/>
+                <DataGridTextColumn Header="提供方" Binding="{Binding Provider}" Width="110"/>
+                <DataGridTextColumn Header="路由" Binding="{Binding RouteState}" Width="180"/>
+                <DataGridTextColumn Header="状态" Binding="{Binding Status}" Width="120"/>
+                <DataGridTextColumn Header="进度" Binding="{Binding Progress, StringFormat={}{0}%}" Width="90"/>
+                <DataGridTextColumn Header="尝试" Binding="{Binding Attempts}" Width="70"/>
+                <DataGridTextColumn Header="错误信息" Binding="{Binding ErrorMessage}" Width="*"/>
+                <DataGridTextColumn Header="输出" Binding="{Binding OutputPath}" Width="180"/>
+                <DataGridTextColumn Header="创建时间" Binding="{Binding CreatedAt}" Width="160"/>
+            </DataGrid.Columns>
+        </DataGrid>
+        <Grid Grid.Row="3" Margin="0,12,0,0">
+            <TextBlock x:Name="FeedbackText" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Style="{StaticResource NavButton}" Content="取消选中任务" Click="Cancel_Click"/>
+                <Button Style="{StaticResource NavButton}" Content="重试失败任务" Click="Retry_Click"/>
+                <Button Style="{StaticResource NavButton}" Content="打开输出" Click="OpenOutput_Click"/>
+                <Button Style="{StaticResource PrimaryButton}" Content="关闭" Click="Close_Click" Margin="8,0,0,0"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

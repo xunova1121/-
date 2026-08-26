@@ -1,0 +1,70 @@
+"""声明式模型目录与能力路由。
+
+借鉴 Claude 版本的核心原则：一家服务商可以有多种能力，但每种能力独立选路由，
+业务层不直接写死供应商名称。
+"""
+from dataclasses import asdict, dataclass, field
+
+
+@dataclass(frozen=True)
+class Provider:
+    id: str
+    name: str
+    family: str
+    base_url: str
+    capabilities: tuple[str, ...]
+    secret_names: tuple[str, ...] = ()
+    models: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    async_task: bool = False
+    max_reference_images: int | None = None
+    supports_end_frame: bool = False
+    max_duration_seconds: int | None = None
+    long_video_strategy: str = "shot_sequence"
+
+
+CAPABILITIES = {
+    "chat": "剧本与分镜",
+    "vision": "视觉一致性复核",
+    "t2i": "文生图",
+    "i2i": "参考图生图",
+    "i2v": "图生视频",
+    "r2v": "参考图生视频",
+    "tts": "语音合成",
+    "sfx": "音效生成",
+}
+
+PROVIDERS = (
+    Provider("mock", "内部自动化测试", "mock", "", tuple(CAPABILITIES), models={"chat": ("mock-chat",)}),
+    Provider("openai", "OpenAI 标准接口", "openai", "https://api.openai.com/v1",
+             ("chat", "vision", "t2i", "i2i", "tts"), ("OPENAI_API_KEY",),
+             {"chat": ("gpt-4.1-mini",), "vision": ("gpt-4.1-mini",), "t2i": ("gpt-image-2",), "i2i": ("gpt-image-2",), "tts": ("gpt-4o-mini-tts",)}, True, 1, False, None, "shot_sequence"),
+    Provider("anthropic", "Anthropic Claude", "anthropic", "https://api.anthropic.com/v1",
+             ("chat",), ("ANTHROPIC_API_KEY",), {"chat": ("claude-sonnet-4-5",)}),
+    Provider("deepseek", "DeepSeek", "openai", "https://api.deepseek.com",
+             ("chat",), ("DEEPSEEK_API_KEY",), {"chat": ("deepseek-v4-flash", "deepseek-v4-pro")}),
+    Provider("qwen", "阿里云百炼 · Qwen", "openai", "https://dashscope.aliyuncs.com/compatible-mode/v1",
+             ("chat",), ("DASHSCOPE_API_KEY",), {"chat": ("qwen-plus",)}),
+    Provider("ark", "火山引擎方舟", "openai", "https://ark.cn-beijing.volces.com/api/v3",
+             ("chat",), ("ARK_API_KEY",), {}, False, None, False, None, "shot_sequence"),
+    Provider("dashscope", "阿里云百炼", "dashscope", "https://dashscope.aliyuncs.com/api/v1",
+             ("i2v",), ("DASHSCOPE_API_KEY",), {"i2v": ("wan2.7-i2v-2026-04-25",)}, True, 2, True, 15, "shot_sequence"),
+    Provider("metaso", "秘塔 · MiniMax H3", "minimax", "https://metaso.cn/api/minimax/v2",
+             ("i2v", "r2v"), ("METASO_API_KEY",), {"i2v": ("MiniMax-H3",), "r2v": ("MiniMax-H3",)},
+             True, 9, True, 15, "shot_sequence"),
+)
+
+
+def public_catalog() -> list[dict]:
+    return [asdict(provider) for provider in PROVIDERS if provider.id != "mock"]
+
+
+def providers_for(capability: str) -> list[Provider]:
+    return [provider for provider in PROVIDERS if provider.id != "mock" and capability in provider.capabilities]
+
+
+def supports(provider_id: str, capability: str) -> bool:
+    return any(provider.id == provider_id and capability in provider.capabilities for provider in PROVIDERS)
+
+
+def known_provider(provider_id: str) -> bool:
+    return any(provider.id == provider_id for provider in PROVIDERS)

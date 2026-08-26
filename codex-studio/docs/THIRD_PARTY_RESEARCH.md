@@ -1,0 +1,19 @@
+# 第三方调研与采用边界
+
+本项目只复用许可清晰的代码或公开接口；许可证不明确时只借鉴产品概念，不复制实现。
+
+| 项目 | 许可证 | 采用内容 |
+| --- | --- | --- |
+| HKUDS/ViMax | MIT | Agent 化叙事规划、资产生成、装配分层思路 |
+| Forget-C/Jellyfish | Apache-2.0 | 资产候选确认、统一异步任务、镜头 readiness 思路 |
+| stuttlepress/ComfyUI-Wan-VACE-Video-Joiner | MIT | 双侧上下文帧、替换接缝坏帧、VACE 失败回退思路 |
+| AcademySoftwareFoundation/OpenTimelineIO | Apache-2.0 | 后续采用帧精确时间线交换标准 |
+| HaD0Yun/CozyClay | 未确认 | 只借鉴虚拟摄影机、人物走位、镜头时间线概念，不复制代码 |
+| morphicfilms/frames-to-video | Apache-2.0，已归档 | 只保留多关键帧插值适配思路 |
+| joaofernandes/comfystudio | MIT | 桌面 AI 视频工作站、项目级任务与导出编排思路 |
+| SaladTechnologies/comfyui-api | MIT | 长耗时 ComfyUI 工作流的队列、状态与回调边界 |
+| itsjwill/vanta | MIT | 程序化时间线、可组合转场与渲染管线思路 |
+| VelornLabs/velorn | GPL-3.0 | 只观察本地工作站和工具调用体验，不复制代码 |
+| mikehalleen/the-halleen-machine | AGPL-3.0 | 只观察批处理和资产管理体验，不复制代码 |
+
+核心实现均在本项目内重新设计：WPF 原生客户端、FastAPI 模块服务、SQLite 本地数据层。

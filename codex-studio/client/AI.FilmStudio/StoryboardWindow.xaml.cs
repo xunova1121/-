@@ -1,0 +1,208 @@
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Text.RegularExpressions;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Media;
+using AI.FilmStudio.Models;
+using AI.FilmStudio.Services;
+
+namespace AI.FilmStudio;
+
+public partial class StoryboardWindow : Window
+{
+    private static readonly GridLength InspectorWidth = new(350);
+    private readonly StudioApiClient _api;
+    private readonly StudioProject _project;
+    private readonly ObservableCollection<Shot> _shots = [];
+    private readonly ObservableCollection<SceneFilterItem> _sceneFilters = [];
+    private ICollectionView? _shotView;
+    private StoryboardLockStatus _lockStatus = new();
+    private int Episode => EpisodeSelector.SelectedItem is int value ? value : 1;
+
+    public StoryboardWindow(StudioApiClient api, StudioProject project)
+    {
+        InitializeComponent();
+        _api = api;
+        _project = project;
+        ProjectNameText.Text = $"· {project.Name}";
+        for (var episode = 1; episode <= project.EpisodeCount; episode++) EpisodeSelector.Items.Add(episode);
+        EpisodeSelector.SelectedIndex = 0;
+        ShotGrid.ItemsSource = _shots;
+        SceneFilterList.ItemsSource = _sceneFilters;
+        Loaded += async (_, _) => await LoadAsync();
+    }
+
+    private sealed record SceneFilterItem(string Key, string Label)
+    {
+        public override string ToString() => Label;
+    }
+
+    private static string CleanDisplayText(string? value)
+    {
+        var text = (value ?? "").Trim();
+        if (Regex.IsMatch(text, @"^\s*(?:---+|___+|\*\*\*+)\s*$")) return "";
+        text = Regex.Replace(text, @"```(?:\w+)?|```", "");
+        text = text.Replace("**", "").Replace("__", "").Replace("`", "");
+        text = Regex.Replace(text, @"^\s*[#>\-*]+\s*", "");
+        text = Regex.Replace(text, @"^\s*[\[\(（]?(?:\d{1,2}:)?\d{1,2}:\d{2}\s*[-–—~至]\s*(?:\d{1,2}:)?\d{1,2}:\d{2}[\]\)）]?\s*", "");
+        text = Regex.Replace(text, @"^\s*(?:画面|细节|动作|环境|人物|镜头|说明)\s*[:：]\s*", "", RegexOptions.IgnoreCase);
+        return Regex.Replace(text, @"\s+", " ").Trim();
+    }
+
+    private static bool IsDisplayable(Shot shot) =>
+        !string.IsNullOrWhiteSpace(shot.Title) || !string.IsNullOrWhiteSpace(shot.Description) ||
+        !string.IsNullOrWhiteSpace(shot.Action) || !string.IsNullOrWhiteSpace(shot.Dialogue);
+
+    private void ApplyFilter()
+    {
+        if (_shotView is null) return;
+        var scene = (SceneFilterList.SelectedItem as SceneFilterItem)?.Key ?? "*";
+        var query = (SearchBox.Text ?? "").Trim();
+        _shotView.Filter = item =>
+        {
+            if (item is not Shot shot || !IsDisplayable(shot)) return false;
+            if (scene != "*" && !string.Equals(shot.SceneName, scene, StringComparison.OrdinalIgnoreCase)) return false;
+            if (string.IsNullOrWhiteSpace(query)) return true;
+            var searchable = string.Join(" ", shot.Number, shot.SceneName, shot.Title, shot.Description, shot.Action, shot.Dialogue, shot.CharacterText);
+            return searchable.Contains(query, StringComparison.OrdinalIgnoreCase);
+        };
+        _shotView.Refresh();
+        ShotSummaryText.Text = $"当前显示 {_shotView.Cast<object>().Count()} / {_shots.Count(IsDisplayable)} 个镜头";
+        if (ShotGrid.SelectedItem is null) ShotGrid.SelectedItem = _shotView.Cast<object>().FirstOrDefault();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var shots = (await _api.GetShotsAsync()).Where(item => item.Episode == Episode).ToList();
+            _shots.Clear();
+            foreach (var shot in shots)
+            {
+                shot.Title = CleanDisplayText(shot.Title);
+                shot.Description = CleanDisplayText(shot.Description);
+                shot.Action = CleanDisplayText(shot.Action);
+                shot.Dialogue = CleanDisplayText(shot.Dialogue);
+                _shots.Add(shot);
+            }
+            _shotView = CollectionViewSource.GetDefaultView(_shots);
+            _sceneFilters.Clear();
+            _sceneFilters.Add(new SceneFilterItem("*", $"全部镜头  {_shots.Count(IsDisplayable)}"));
+            foreach (var group in _shots.Where(IsDisplayable).GroupBy(item => item.SceneName))
+                _sceneFilters.Add(new SceneFilterItem(group.Key, $"{group.Key}  {group.Count()}"));
+            SceneFilterList.SelectedIndex = 0;
+            ApplyFilter();
+            _lockStatus = await _api.GetStoryboardLockAsync(Episode);
+            ApplyLockState();
+            StatusText.Text = _shots.Count == 0 ? "尚无分镜。请先在剧本工作台保存、解析并生成全量分镜。" :
+                _lockStatus.IsLocked ? "本集分镜已经锁定；必须先解除锁定才能修改。自动生产只读取这个锁定版本。" :
+                "请完成审阅并保存修改，再锁定本集分镜；未锁定内容不能进入自动生产。";
+        }
+        catch (Exception ex) { StatusText.Text = $"加载失败：{ex.Message}"; }
+    }
+
+    private async void Refresh_Click(object sender, RoutedEventArgs e) => await LoadAsync();
+
+    private void SearchBox_TextChanged(object sender, TextChangedEventArgs e) => ApplyFilter();
+
+    private void SceneFilter_SelectionChanged(object sender, SelectionChangedEventArgs e) => ApplyFilter();
+
+    private async void EpisodeSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (IsLoaded) await LoadAsync();
+    }
+
+    private void ShotGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        UpdateInspectorState();
+    }
+
+    private void UpdateInspectorState()
+    {
+        var selected = ShotGrid.SelectedItem is Shot;
+        NoSelectionText.Visibility = selected ? Visibility.Collapsed : Visibility.Visible;
+        InspectorFields.IsEnabled = selected && !_lockStatus.IsLocked;
+        ContinuityFields.IsEnabled = selected && !_lockStatus.IsLocked;
+        PromptFields.IsEnabled = selected && !_lockStatus.IsLocked;
+    }
+
+    private void SetInspectorOpen(bool open)
+    {
+        InspectorGapColumn.Width = open ? new GridLength(12) : new GridLength(0);
+        InspectorColumn.Width = open ? InspectorWidth : new GridLength(0);
+        InspectorPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        InspectorToggleButton.Content = open ? "收起详情" : "镜头详情";
+    }
+
+    private void ToggleInspector_Click(object sender, RoutedEventArgs e) =>
+        SetInspectorOpen(InspectorPanel.Visibility != Visibility.Visible);
+
+    private void ShotGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (ShotGrid.SelectedItem is Shot) SetInspectorOpen(true);
+    }
+
+    private void Previz_Click(object sender, RoutedEventArgs e) => new PrevizWindow(_api) { Owner = this }.ShowDialog();
+    private void Continuity_Click(object sender, RoutedEventArgs e) => new ContinuityWindow(_api) { Owner = this }.ShowDialog();
+
+    private void ApplyLockState()
+    {
+        var locked = _lockStatus.IsLocked;
+        ShotGrid.IsReadOnly = locked;
+        SaveButton.IsEnabled = !locked && _shots.Count > 0;
+        LockButton.IsEnabled = _shots.Count > 0;
+        LockButton.Content = locked ? "解除锁定" : _lockStatus.Status == "stale" ? "重新锁定" : "锁定设定与分镜";
+        LockStatusText.Text = _lockStatus.Label;
+        LockStatusText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(locked ? "#75E6A4" : _lockStatus.Status == "stale" ? "#FF8A80" : "#FFD166"));
+        UpdateInspectorState();
+    }
+
+    private async Task SaveAllAsync()
+    {
+        ShotGrid.CommitEdit();
+        ShotGrid.CommitEdit();
+        StatusText.Text = $"正在保存第 {Episode} 集 {_shots.Count} 个镜头…";
+        foreach (var shot in _shots) await _api.UpdateShotAsync(shot);
+        var proofread = await _api.ProofreadAsync();
+        _lockStatus = await _api.GetStoryboardLockAsync(Episode);
+        ApplyLockState();
+        StatusText.Text = proofread.StateConflicts == 0
+            ? $"已保存第 {Episode} 集 {_shots.Count} 个镜头，故事状态图重新计算通过。"
+            : $"已保存；状态图仍有 {proofread.StateConflicts} 个阻断项，请打开“连续性审校”定位。";
+    }
+
+    private async void SaveAll_Click(object sender, RoutedEventArgs e)
+    {
+        try { await SaveAllAsync(); }
+        catch (Exception ex) { StatusText.Text = $"保存失败：{ex.Message}"; }
+    }
+
+    private async void Lock_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            LockButton.IsEnabled = false;
+            if (_lockStatus.IsLocked)
+            {
+                await _api.UnlockStoryboardAsync(Episode);
+                _lockStatus = await _api.GetStoryboardLockAsync(Episode);
+                StatusText.Text = $"第 {Episode} 集已解除锁定，现在可以修改；自动生产保持阻断。";
+            }
+            else
+            {
+                await SaveAllAsync();
+                _lockStatus = await _api.LockStoryboardAsync(Episode);
+                StatusText.Text = $"第 {Episode} 集已锁定为 R{_lockStatus.Revision}；自动生产只会使用此版本。";
+            }
+            ApplyLockState();
+        }
+        catch (Exception ex)
+        {
+            _lockStatus = await _api.GetStoryboardLockAsync(Episode);
+            ApplyLockState();
+            StatusText.Text = $"锁定失败：{ex.Message}";
+        }
+    }
+}

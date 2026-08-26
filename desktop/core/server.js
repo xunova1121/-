@@ -325,7 +325,21 @@ function checkKey(req, url) {
 /** 本机的局域网地址，用来在设置页里告诉用户"手机上该输什么" */
 export function lanAddresses() {
   const out = [];
-  for (const [name, list] of Object.entries(os.networkInterfaces())) {
+  // 某些 Windows 单文件打包环境、受限容器和网卡服务尚未就绪的机器上，
+  // networkInterfaces() 可能直接抛异常。局域网遥控是可选能力，不能让它
+  // 把整个桌面应用的启动一起拖死。
+  let interfaces = {};
+  try {
+    interfaces = os.networkInterfaces() || {};
+  } catch (err) {
+    logbus.record({
+      kind: 'local-network',
+      status: 0,
+      error: err?.message || String(err),
+      note: '读取局域网网卡失败，手机遥控入口暂不可用'
+    });
+  }
+  for (const [name, list] of Object.entries(interfaces)) {
     for (const ni of list || []) {
       if (ni.internal) continue;
       if (ni.family !== 'IPv4' && ni.family !== 4) continue;
