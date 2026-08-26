@@ -1025,6 +1025,23 @@ def test_durable_task_completion_failure_retry_and_stats(tmp_path: Path):
         object.__setattr__(settings, "database_path", original)
 
 
+def test_generated_candidates_can_switch_adopted_result_without_deleting_history():
+    with database.connect() as db:
+        shot_id = db.execute("SELECT id FROM shots WHERE project_id='demo' ORDER BY id LIMIT 1").fetchone()[0]
+        first = db.execute("INSERT INTO assets(project_id,asset_type,name,episode,shot_id,local_path,source_kind,status) VALUES('demo','image','候选A',1,?,'a.png','generated','ready')", (shot_id,)).lastrowid
+        second = db.execute("INSERT INTO assets(project_id,asset_type,name,episode,shot_id,local_path,source_kind,status) VALUES('demo','image','候选B',1,?,'b.png','generated','ready')", (shot_id,)).lastrowid
+        db.execute("INSERT INTO shot_assets(shot_id,asset_id,role) VALUES(?,?,'image')", (shot_id, first))
+        db.execute("INSERT INTO shot_assets(shot_id,asset_id,role) VALUES(?,?,'image')", (shot_id, second))
+    with TestClient(app) as client:
+        adopted = client.post(f"/api/v1/assets/{second}/adopt")
+        assert adopted.status_code == 200 and adopted.json()["status"] == "adopted"
+    with database.connect() as db:
+        states = {row["id"]: row["status"] for row in db.execute("SELECT id,status FROM assets WHERE id IN (?,?)", (first, second))}
+        roles = {row["asset_id"]: row["role"] for row in db.execute("SELECT asset_id,role FROM shot_assets WHERE shot_id=? AND asset_id IN (?,?)", (shot_id, first, second))}
+    assert states == {first: "candidate", second: "adopted"}
+    assert roles == {first: "image_candidate", second: "image"}
+
+
 def test_task_schema_migrates_and_recovers_expired_lease(tmp_path: Path):
     path = tmp_path / "legacy.db"
     with sqlite3.connect(path) as db:
