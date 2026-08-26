@@ -80,6 +80,8 @@ def main():
     assert "GetProviderConfigsAsync()" in generation and "模型设置已更新" in generation, "closing model settings must refresh generation providers"
     assert "GetProviderModelsAsync(provider.ProviderId, capability)" in generation, "generation must discover models from the selected provider"
     assert "CancelTaskAsync(task.Id)" in generation and "RetryTaskAsync(task.Id)" in generation, "generation tasks must expose cancel and retry controls"
+    named(generation_root, "TextBlock", "CostPreviewText")
+    assert "ConfirmPaidSubmission(1)" in generation and "ConfirmPaidSubmission(planned)" in generation, "single and batch paid calls must require confirmation"
     named(generation_root, "Button", "GalleryButton")
     gallery_root = ET.parse(ROOT / "client/AI.FilmStudio/GenerationGalleryWindow.xaml").getroot()
     named(gallery_root, "ListBox", "Gallery")
