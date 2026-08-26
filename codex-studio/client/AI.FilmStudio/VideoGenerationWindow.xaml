@@ -1,0 +1,48 @@
+<Window x:Class="AI.FilmStudio.VideoGenerationWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="真实视频生成" Width="1040" Height="760" MinWidth="920" MinHeight="680"
+        WindowStartupLocation="CenterOwner" Background="#0E1014">
+  <Window.Resources>
+    <Style TargetType="TextBox"><Setter Property="Background" Value="#101318"/><Setter Property="Foreground" Value="#F4F6FA"/><Setter Property="BorderBrush" Value="#596273"/><Setter Property="CaretBrush" Value="White"/><Setter Property="FontSize" Value="15"/><Setter Property="Padding" Value="10,8"/></Style>
+    <Style TargetType="ComboBox"><Setter Property="Background" Value="#F4F6FA"/><Setter Property="Foreground" Value="#11151C"/><Setter Property="BorderBrush" Value="#697386"/><Setter Property="FontSize" Value="15"/><Setter Property="Padding" Value="8,5"/></Style>
+    <Style TargetType="TextBlock"><Setter Property="Foreground" Value="#F4F6FA"/></Style>
+  </Window.Resources>
+  <Grid Margin="28">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <StackPanel>
+      <TextBlock Text="真实视频生成" FontSize="30" FontWeight="Bold"/>
+      <TextBlock Text="秘塔 MiniMax H3 · 镜头预演约束会自动写入提示词，任务完成后视频自动归档并回写镜头。" Foreground="#C3CAD6" FontSize="15" Margin="0,8,0,20"/>
+    </StackPanel>
+    <Grid Grid.Row="1">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="1.05*"/><ColumnDefinition Width="20"/><ColumnDefinition Width="0.95*"/></Grid.ColumnDefinitions>
+      <Border Background="#171A20" BorderBrush="#3B4350" BorderThickness="1" CornerRadius="9" Padding="22">
+        <StackPanel>
+          <TextBlock Text="1. 选择镜头与画面约束" FontSize="20" FontWeight="SemiBold"/>
+          <TextBlock Text="镜头" Margin="0,18,0,6"/><ComboBox x:Name="ShotSelector" AutomationProperties.AutomationId="GenerationShotSelector" Height="42" DisplayMemberPath="Display" SelectionChanged="ShotSelector_SelectionChanged"/>
+          <Border Background="#183628" CornerRadius="6" Padding="12" Margin="0,12,0,14"><TextBlock x:Name="BindingStatus" AutomationProperties.AutomationId="GenerationBindingStatus" Text="正在核验空间预演绑定…" Foreground="#9AE6B4" TextWrapping="Wrap"/></Border>
+          <TextBlock Text="视频提示词"/><TextBox x:Name="Prompt" AutomationProperties.AutomationId="GenerationPrompt" Height="126" Margin="0,6,0,14" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+          <TextBlock Text="首帧（可选）"/><Grid Margin="0,6,0,10"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="88"/></Grid.ColumnDefinitions><TextBox x:Name="FirstFrame" AutomationProperties.AutomationId="GenerationFirstFrame" Height="40"/><Button Grid.Column="1" Style="{StaticResource NavButton}" Content="浏览…" Click="BrowseFirst_Click"/></Grid>
+          <TextBlock Text="尾帧（可选，控制镜头落点）"/><Grid Margin="0,6,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="88"/></Grid.ColumnDefinitions><TextBox x:Name="LastFrame" AutomationProperties.AutomationId="GenerationLastFrame" Height="40"/><Button Grid.Column="1" Style="{StaticResource NavButton}" Content="浏览…" Click="BrowseLast_Click"/></Grid>
+        </StackPanel>
+      </Border>
+      <Border Grid.Column="2" Background="#171A20" BorderBrush="#3B4350" BorderThickness="1" CornerRadius="9" Padding="22">
+        <StackPanel>
+          <TextBlock Text="2. 生成参数" FontSize="20" FontWeight="SemiBold"/>
+          <TextBlock Text="服务商" Margin="0,18,0,6"/><TextBox Text="秘塔 metaso · MiniMax H3" IsReadOnly="True" Height="42"/>
+          <TextBlock Text="更多参考图（可多选，首尾帧合计最多 9 张）" Margin="0,14,0,6"/>
+          <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="88"/></Grid.ColumnDefinitions><TextBox x:Name="ReferenceImages" Height="74" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/><Button Grid.Column="1" Style="{StaticResource NavButton}" Content="选择…" Click="BrowseReferences_Click"/></Grid>
+          <Grid Margin="0,16,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="14"/><ColumnDefinition/></Grid.ColumnDefinitions>
+            <StackPanel><TextBlock Text="时长"/><ComboBox x:Name="Duration" AutomationProperties.AutomationId="GenerationDuration" Height="42" Margin="0,6,0,0" SelectedIndex="1"><ComboBoxItem Tag="4">4 秒</ComboBoxItem><ComboBoxItem Tag="5">5 秒</ComboBoxItem><ComboBoxItem Tag="10">10 秒</ComboBoxItem><ComboBoxItem Tag="15">15 秒</ComboBoxItem></ComboBox></StackPanel>
+            <StackPanel Grid.Column="2"><TextBlock Text="分辨率"/><ComboBox x:Name="Resolution" AutomationProperties.AutomationId="GenerationResolution" Height="42" Margin="0,6,0,0" SelectedIndex="2"><ComboBoxItem>480p</ComboBoxItem><ComboBoxItem>512p</ComboBoxItem><ComboBoxItem>768P</ComboBoxItem><ComboBoxItem>2K</ComboBoxItem></ComboBox></StackPanel>
+          </Grid>
+          <TextBlock Text="画面比例" Margin="0,16,0,6"/><ComboBox x:Name="AspectRatio" AutomationProperties.AutomationId="GenerationAspectRatio" Height="42" SelectedIndex="1"><ComboBoxItem>auto</ComboBoxItem><ComboBoxItem>16:9</ComboBoxItem><ComboBoxItem>9:16</ComboBoxItem><ComboBoxItem>4:3</ComboBoxItem><ComboBoxItem>1:1</ComboBoxItem><ComboBoxItem>3:4</ComboBoxItem><ComboBoxItem>21:9</ComboBoxItem></ComboBox>
+          <Border Background="#242834" CornerRadius="6" Padding="13" Margin="0,20,0,0"><TextBlock Text="提交前会检查：秘塔密钥、镜头存在、空间预演版本、图片数量和参数范围。提交后可在任务队列取消或查看下载结果。" Foreground="#C3CAD6" TextWrapping="Wrap" LineHeight="23"/></Border>
+          <Button x:Name="SubmitButton" AutomationProperties.AutomationId="SubmitRealVideoTask" Style="{StaticResource PrimaryButton}" Content="提交真实视频任务" Click="Submit_Click" FontSize="16" Padding="22,13" HorizontalAlignment="Stretch" Margin="0,20,0,0" IsEnabled="False"/>
+          <TextBlock x:Name="Feedback" Foreground="#F2C15B" FontSize="14" TextWrapping="Wrap" Margin="0,12,0,0"/>
+        </StackPanel>
+      </Border>
+    </Grid>
+    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0"><Button Style="{StaticResource NavButton}" Content="关闭" Click="Close_Click"/></StackPanel>
+  </Grid>
+</Window>
