@@ -80,6 +80,12 @@ def main():
     assert "GetProviderConfigsAsync()" in generation and "模型设置已更新" in generation, "closing model settings must refresh generation providers"
     assert "GetProviderModelsAsync(provider.ProviderId, capability)" in generation, "generation must discover models from the selected provider"
     assert "CancelTaskAsync(task.Id)" in generation and "RetryTaskAsync(task.Id)" in generation, "generation tasks must expose cancel and retry controls"
+    named(generation_root, "Button", "GalleryButton")
+    gallery_root = ET.parse(ROOT / "client/AI.FilmStudio/GenerationGalleryWindow.xaml").getroot()
+    named(gallery_root, "ListBox", "Gallery")
+    named(gallery_root, "Button", "AdoptButton")
+    gallery = (ROOT / "client/AI.FilmStudio/GenerationGalleryWindow.xaml.cs").read_text(encoding="utf-8")
+    assert "AdoptAssetAsync(item.Id)" in gallery, "the review gallery must adopt one candidate without deleting alternatives"
 
     main_root = ET.parse(ROOT / "client/AI.FilmStudio/MainWindow.xaml").getroot()
     top_nav = named(main_root, "StackPanel", "TopNavigation")
