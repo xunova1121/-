@@ -192,6 +192,7 @@ public sealed class AssetItem
     [JsonIgnore] public string PreviewPath => MimeType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ||
         new[] { ".png", ".jpg", ".jpeg", ".webp", ".bmp" }.Contains(Path.GetExtension(LocalPath).ToLowerInvariant()) ? LocalPath : "";
     [JsonIgnore] public string MetaText => $"{AssetType} · {(Episode > 0 ? $"第 {Episode} 集" : "全局")} · {Status}";
+    [JsonIgnore] public string ReviewText => Status == "adopted" ? "✓ 当前采用" : Status == "candidate" ? "候选" : "待审";
 }
 
 public sealed class ReferenceBoard
