@@ -70,10 +70,16 @@ def main():
     generation_root = ET.parse(ROOT / "client/AI.FilmStudio/GenerationWindow.xaml").getroot()
     named(generation_root, "Button", "GenerateButton")
     named(generation_root, "Button", "BatchButton")
+    named(generation_root, "ComboBox", "ModelText")
+    named(generation_root, "Button", "OpenResultButton")
+    named(generation_root, "Button", "CancelTaskButton")
+    named(generation_root, "Button", "RetryTaskButton")
     generation = (ROOT / "client/AI.FilmStudio/GenerationWindow.xaml.cs").read_text(encoding="utf-8")
     assert "_taskRefreshTimer.Start()" in generation and "_taskRefreshTimer.Stop()" in generation, "generation tasks must refresh while the window is open"
     assert "正在提交镜头" in generation and "已进入生成队列" in generation, "generation submission must provide visible progress and success feedback"
     assert "GetProviderConfigsAsync()" in generation and "模型设置已更新" in generation, "closing model settings must refresh generation providers"
+    assert "GetProviderModelsAsync(provider.ProviderId, capability)" in generation, "generation must discover models from the selected provider"
+    assert "CancelTaskAsync(task.Id)" in generation and "RetryTaskAsync(task.Id)" in generation, "generation tasks must expose cancel and retry controls"
 
     main_root = ET.parse(ROOT / "client/AI.FilmStudio/MainWindow.xaml").getroot()
     top_nav = named(main_root, "StackPanel", "TopNavigation")
