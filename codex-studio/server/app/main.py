@@ -530,6 +530,34 @@ def update_asset(asset_id: int, payload: AssetUpdate):
     return _asset_dict(row)
 
 
+@app.post(f"{PREFIX}/assets/{{asset_id}}/adopt")
+def adopt_generated_asset(asset_id: int):
+    """Choose one generated candidate as the active shot asset without deleting alternatives."""
+    with connect() as db:
+        row = db.execute("SELECT * FROM assets WHERE id=?", (asset_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Asset not found")
+        if not row["shot_id"] or row["asset_type"] not in {"image", "video", "voice"}:
+            raise HTTPException(409, "Only shot image, video, or voice candidates can be adopted")
+        candidates = db.execute(
+            "SELECT id FROM assets WHERE project_id=? AND shot_id=? AND asset_type=?",
+            (row["project_id"], row["shot_id"], row["asset_type"]),
+        ).fetchall()
+        candidate_ids = [int(item["id"]) for item in candidates]
+        if candidate_ids:
+            marks = ",".join("?" for _ in candidate_ids)
+            db.execute(f"UPDATE assets SET status='candidate' WHERE id IN ({marks})", candidate_ids)
+            db.execute(
+                f"UPDATE shot_assets SET role=? WHERE shot_id=? AND asset_id IN ({marks}) AND role IN (?,?)",
+                (f"{row['asset_type']}_candidate", row["shot_id"], *candidate_ids, row["asset_type"], f"{row['asset_type']}_candidate"),
+            )
+        db.execute("UPDATE assets SET status='adopted' WHERE id=?", (asset_id,))
+        db.execute("DELETE FROM shot_assets WHERE shot_id=? AND asset_id=?", (row["shot_id"], asset_id))
+        db.execute("INSERT INTO shot_assets(shot_id,asset_id,role) VALUES(?,?,?)", (row["shot_id"], asset_id, row["asset_type"]))
+        selected = db.execute("SELECT * FROM assets WHERE id=?", (asset_id,)).fetchone()
+    return _asset_dict(selected)
+
+
 @app.delete(f"{PREFIX}/assets/{{asset_id}}", status_code=204)
 def delete_asset(asset_id: int, delete_file: bool = False):
     with connect() as db:
