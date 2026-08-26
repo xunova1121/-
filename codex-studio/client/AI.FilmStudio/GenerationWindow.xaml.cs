@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Threading;
 using AI.FilmStudio.Models;
 using AI.FilmStudio.Services;
 
@@ -13,7 +14,9 @@ public partial class GenerationWindow : Window
     private IReadOnlyList<Shot> _shots = [];
     private IReadOnlyList<ProviderConfigStatus> _providers = [];
     private IReadOnlyList<AssetItem> _assets = [];
-    public GenerationWindow(StudioApiClient api, StudioProject project) { InitializeComponent(); _api = api; _project = project; ProjectText.Text = $"· {project.Name}"; for (var i = 1; i <= project.EpisodeCount; i++) EpisodeSelector.Items.Add(i); EpisodeSelector.SelectedIndex = 0; Loaded += async (_, _) => await LoadAsync(); }
+    private readonly DispatcherTimer _taskRefreshTimer = new() { Interval = TimeSpan.FromSeconds(2) };
+    private bool _refreshingTasks;
+    public GenerationWindow(StudioApiClient api, StudioProject project) { InitializeComponent(); _api = api; _project = project; ProjectText.Text = $"· {project.Name}"; for (var i = 1; i <= project.EpisodeCount; i++) EpisodeSelector.Items.Add(i); EpisodeSelector.SelectedIndex = 0; _taskRefreshTimer.Tick += async (_, _) => await RefreshTasksAsync(false); Loaded += async (_, _) => { await LoadAsync(); _taskRefreshTimer.Start(); }; Closed += (_, _) => _taskRefreshTimer.Stop(); }
     private int Episode => EpisodeSelector.SelectedItem is int value ? value : 1;
     private string SelectedType => (TaskType.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "image";
     private static string ComboText(ComboBox box) => (box.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "";
@@ -28,22 +31,40 @@ public partial class GenerationWindow : Window
             var approvedReferences = boards.Where(board => board.Status == "approved").SelectMany(board => board.Assets).Where(asset => asset.Approved);
             ReferenceList.ItemsSource = _assets.Where(a => a.AssetType == "image" && string.IsNullOrWhiteSpace(a.EntityKey)).Concat(approvedReferences).GroupBy(a => a.Id).Select(group => group.First()).ToList();
             await RefreshProvidersAsync(); await RefreshTasksAsync();
+            UpdateSubmitAvailability();
         }
         catch (Exception ex) { StatusText.Text = $"加载失败：{ex.Message}"; }
     }
     private async Task RefreshProvidersAsync()
     {
+        var selectedProviderId = (ProviderSelector.SelectedItem as ProviderConfigStatus)?.ProviderId;
         var type = SelectedType;
         var capability = type switch { "image" => "t2i", "video" => "i2v", "voice" => "tts", _ => "" };
         var allowed = _providers.Where(p => p.Capabilities.Contains(capability)).ToList();
-        ProviderSelector.ItemsSource = allowed; if (allowed.Count > 0) ProviderSelector.SelectedIndex = 0;
+        ProviderSelector.ItemsSource = allowed;
+        ProviderSelector.SelectedItem = allowed.FirstOrDefault(item => item.ProviderId == selectedProviderId) ?? allowed.FirstOrDefault();
         ModelText.Text = type switch { "image" => "gpt-image-2", "video" => allowed.FirstOrDefault()?.ProviderId == "metaso" ? "MiniMax-H3" : "wan2.7-i2v-2026-04-25", "voice" => "gpt-4o-mini-tts", _ => "" };
+        UpdateSubmitAvailability();
         await Task.CompletedTask;
     }
-    private async Task RefreshTasksAsync() { var tasks = await _api.GetTasksAsync(); TaskGrid.ItemsSource = tasks.Where(t => t.TaskType is "image" or "video" or "voice").ToList(); StatusText.Text = $"生成任务 {tasks.Count(t => t.TaskType is "image" or "video" or "voice")} 项。完成结果会自动回写资产库和镜头。"; }
+    private async Task RefreshTasksAsync(bool updateStatus = true)
+    {
+        if (_refreshingTasks) return;
+        _refreshingTasks = true;
+        try
+        {
+            var tasks = (await _api.GetTasksAsync()).Where(t => t.TaskType is "image" or "video" or "voice").ToList();
+            var selectedId = (TaskGrid.SelectedItem as TaskItem)?.Id;
+            TaskGrid.ItemsSource = tasks;
+            TaskGrid.SelectedItem = tasks.FirstOrDefault(item => item.Id == selectedId);
+            if (updateStatus) StatusText.Text = tasks.Count == 0 ? "尚无生成任务。选择镜头、服务商和模型后提交。" : $"生成任务 {tasks.Count} 项：进行中 {tasks.Count(t => t.Status is "queued" or "running" or "retry_wait")}，成功 {tasks.Count(t => t.Status == "completed")}，失败 {tasks.Count(t => t.Status == "failed")}。";
+        }
+        catch (Exception ex) { if (updateStatus) StatusText.Text = $"任务刷新失败：{ex.Message}"; }
+        finally { _refreshingTasks = false; }
+    }
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshTasksAsync();
     private async void EpisodeSelector_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (IsLoaded) await LoadAsync(); }
-    private async void TaskType_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (IsLoaded) await RefreshProvidersAsync(); }
+    private async void TaskType_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (!IsLoaded) return; await RefreshProvidersAsync(); if (ShotSelector.SelectedItem is Shot shot) PromptText.Text = SelectedType == "voice" ? shot.Dialogue : shot.Prompt; }
     private void ProviderSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (ProviderSelector.SelectedItem is not ProviderConfigStatus provider) return;
@@ -68,13 +89,35 @@ public partial class GenerationWindow : Window
     }
     private async void Generate_Click(object sender, RoutedEventArgs e)
     {
-        try { if (ShotSelector.SelectedItem is not Shot shot) throw new InvalidOperationException("请先生成全量分镜并选择镜头"); if (string.IsNullOrWhiteSpace(PromptText.Text)) throw new InvalidOperationException("提示词不能为空"); await QueueAsync(shot, PromptText.Text.Trim()); await RefreshTasksAsync(); }
+        GenerateButton.IsEnabled = false;
+        try { if (ShotSelector.SelectedItem is not Shot shot) throw new InvalidOperationException("请先生成全量分镜并选择镜头"); if (string.IsNullOrWhiteSpace(PromptText.Text)) throw new InvalidOperationException("提示词不能为空"); StatusText.Text = $"正在提交镜头 {shot.Number}，请稍候…"; await QueueAsync(shot, PromptText.Text.Trim()); await RefreshTasksAsync(false); StatusText.Text = $"✓ 镜头 {shot.Number} 已进入生成队列；右侧状态会自动刷新。"; }
         catch (Exception ex) { StatusText.Text = $"提交失败：{ex.Message}"; }
+        finally { UpdateSubmitAvailability(); }
     }
     private async void Batch_Click(object sender, RoutedEventArgs e)
     {
-        try { if (_shots.Count == 0) throw new InvalidOperationException("项目没有分镜"); var count = 0; foreach (var shot in _shots) { var prompt = SelectedType == "voice" ? shot.Dialogue : shot.Prompt; if (string.IsNullOrWhiteSpace(prompt)) continue; await QueueAsync(shot, prompt); count++; } StatusText.Text = $"已提交 {count} 个镜头任务。"; await RefreshTasksAsync(); }
+        BatchButton.IsEnabled = false;
+        try { if (_shots.Count == 0) throw new InvalidOperationException("项目没有分镜"); var count = 0; foreach (var shot in _shots) { var prompt = SelectedType == "voice" ? shot.Dialogue : shot.Prompt; if (string.IsNullOrWhiteSpace(prompt)) continue; StatusText.Text = $"正在提交：{count + 1}/{_shots.Count} · 镜头 {shot.Number}"; await QueueAsync(shot, prompt); count++; } await RefreshTasksAsync(false); StatusText.Text = $"✓ 已提交 {count} 个镜头任务；右侧状态会自动刷新。"; }
         catch (Exception ex) { StatusText.Text = $"批量提交失败：{ex.Message}"; }
+        finally { UpdateSubmitAvailability(); }
     }
-    private void Settings_Click(object sender, RoutedEventArgs e) => new ProviderSettingsWindow(_api) { Owner = this }.ShowDialog();
+    private async void Settings_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            new ProviderSettingsWindow(_api) { Owner = this }.ShowDialog();
+            _providers = (await _api.GetProviderConfigsAsync()).Where(p => p.Configured).ToList();
+            await RefreshProvidersAsync();
+            StatusText.Text = ProviderSelector.Items.Count == 0 ? $"没有已配置且支持 {SelectedType} 的服务商，请返回模型设置完成连接。" : "模型设置已更新，可以提交生成任务。";
+        }
+        catch (Exception ex) { StatusText.Text = $"模型设置刷新失败：{ex.Message}"; }
+    }
+
+    private void UpdateSubmitAvailability()
+    {
+        var ready = ShotSelector.SelectedItem is Shot && ProviderSelector.SelectedItem is ProviderConfigStatus;
+        GenerateButton.IsEnabled = ready;
+        BatchButton.IsEnabled = _shots.Count > 0 && ProviderSelector.SelectedItem is ProviderConfigStatus;
+        if (IsLoaded && ProviderSelector.Items.Count == 0) StatusText.Text = $"没有已配置且支持 {SelectedType} 的服务商，请先打开“模型设置”。";
+    }
 }
