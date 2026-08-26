@@ -98,6 +98,7 @@ public partial class GenerationWindow : Window
         }
         catch (Exception ex) { if (loadVersion == _modelLoadVersion) StatusText.Text = $"模型目录读取失败：{ex.Message}。可手动输入模型 ID。"; }
         UpdateSubmitAvailability();
+        UpdateCostPreview();
     }
     private void ShotSelector_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (ShotSelector.SelectedItem is Shot shot) PromptText.Text = SelectedType == "voice" ? shot.Dialogue : shot.Prompt; }
     private Dictionary<string, object?> Options() => new() { ["duration"] = int.TryParse(ComboText(Duration), out var d) ? d : 5, ["seconds"] = int.TryParse(ComboText(Duration), out var s) ? s : 8, ["ratio"] = ComboText(Ratio), ["resolution"] = ComboText(Resolution), ["reference_mode"] = ComboTag(ReferenceMode), ["size"] = ComboText(Ratio) == "9:16" ? "720x1280" : "1280x720", ["voice"] = "alloy", ["prompt_extend"] = true, ["watermark"] = false };
@@ -111,14 +112,14 @@ public partial class GenerationWindow : Window
     private async void Generate_Click(object sender, RoutedEventArgs e)
     {
         GenerateButton.IsEnabled = false;
-        try { if (ShotSelector.SelectedItem is not Shot shot) throw new InvalidOperationException("请先生成全量分镜并选择镜头"); if (string.IsNullOrWhiteSpace(PromptText.Text)) throw new InvalidOperationException("提示词不能为空"); StatusText.Text = $"正在提交镜头 {shot.Number}，请稍候…"; await QueueAsync(shot, PromptText.Text.Trim()); await RefreshTasksAsync(false); StatusText.Text = $"✓ 镜头 {shot.Number} 已进入生成队列；右侧状态会自动刷新。"; }
+        try { if (ShotSelector.SelectedItem is not Shot shot) throw new InvalidOperationException("请先生成全量分镜并选择镜头"); if (string.IsNullOrWhiteSpace(PromptText.Text)) throw new InvalidOperationException("提示词不能为空"); if (!ConfirmPaidSubmission(1)) { StatusText.Text = "已取消提交，未创建付费任务。"; return; } StatusText.Text = $"正在提交镜头 {shot.Number}，请稍候…"; await QueueAsync(shot, PromptText.Text.Trim()); await RefreshTasksAsync(false); StatusText.Text = $"✓ 镜头 {shot.Number} 已进入生成队列；右侧状态会自动刷新。"; }
         catch (Exception ex) { StatusText.Text = $"提交失败：{ex.Message}"; }
         finally { UpdateSubmitAvailability(); }
     }
     private async void Batch_Click(object sender, RoutedEventArgs e)
     {
         BatchButton.IsEnabled = false;
-        try { if (_shots.Count == 0) throw new InvalidOperationException("项目没有分镜"); var count = 0; foreach (var shot in _shots) { var prompt = SelectedType == "voice" ? shot.Dialogue : shot.Prompt; if (string.IsNullOrWhiteSpace(prompt)) continue; StatusText.Text = $"正在提交：{count + 1}/{_shots.Count} · 镜头 {shot.Number}"; await QueueAsync(shot, prompt); count++; } await RefreshTasksAsync(false); StatusText.Text = $"✓ 已提交 {count} 个镜头任务；右侧状态会自动刷新。"; }
+        try { if (_shots.Count == 0) throw new InvalidOperationException("项目没有分镜"); var planned = _shots.Count(shot => !string.IsNullOrWhiteSpace(SelectedType == "voice" ? shot.Dialogue : shot.Prompt)); if (!ConfirmPaidSubmission(planned)) { StatusText.Text = "已取消批量提交，未创建付费任务。"; return; } var count = 0; foreach (var shot in _shots) { var prompt = SelectedType == "voice" ? shot.Dialogue : shot.Prompt; if (string.IsNullOrWhiteSpace(prompt)) continue; StatusText.Text = $"正在提交：{count + 1}/{planned} · 镜头 {shot.Number}"; await QueueAsync(shot, prompt); count++; } await RefreshTasksAsync(false); StatusText.Text = $"✓ 已提交 {count} 个镜头任务；右侧状态会自动刷新。"; }
         catch (Exception ex) { StatusText.Text = $"批量提交失败：{ex.Message}"; }
         finally { UpdateSubmitAvailability(); }
     }
@@ -140,6 +141,32 @@ public partial class GenerationWindow : Window
         GenerateButton.IsEnabled = ready;
         BatchButton.IsEnabled = _shots.Count > 0 && ProviderSelector.SelectedItem is ProviderConfigStatus;
         if (IsLoaded && ProviderSelector.Items.Count == 0) StatusText.Text = $"没有已配置且支持 {SelectedType} 的服务商，请先打开“模型设置”。";
+        UpdateCostPreview();
+    }
+
+    private void CostInput_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (IsLoaded) UpdateCostPreview(); }
+    private string BuildCostPreview(int count)
+    {
+        var provider = ProviderSelector.SelectedItem as ProviderConfigStatus;
+        var seconds = SelectedType == "video" && int.TryParse(ComboText(Duration), out var duration) ? duration * count : 0;
+        var baseText = $"计划：{count} 次 {SelectedType} 调用 · {provider?.Name ?? "未选择服务商"} · {SelectedModelId(ModelText)}" + (seconds > 0 ? $" · 共 {seconds} 秒视频" : "");
+        if (provider?.ProviderId == "metaso" && SelectedType == "video" && seconds > 0)
+        {
+            var rate = ComboText(Resolution) == "2K" ? 0.15m : 0.09m;
+            return $"{baseText} · 参考费用约 ¥{seconds * rate:0.00}（按 ¥{rate:0.00}/秒，实际以服务商账单为准）";
+        }
+        return baseText + " · 费用以服务商实时账单为准";
+    }
+    private void UpdateCostPreview()
+    {
+        if (!IsLoaded || CostPreviewText is null) return;
+        var count = Math.Max(1, _shots.Count(shot => !string.IsNullOrWhiteSpace(SelectedType == "voice" ? shot.Dialogue : shot.Prompt)));
+        CostPreviewText.Text = "当前镜头：" + BuildCostPreview(1) + (count > 1 ? $"\n批量全部：{BuildCostPreview(count)}" : "");
+    }
+    private bool ConfirmPaidSubmission(int count)
+    {
+        if (count <= 0) throw new InvalidOperationException("没有可提交的有效提示词或对白");
+        return MessageBox.Show(BuildCostPreview(count) + "\n\n确认后才会创建生成任务。", "确认生成调用", MessageBoxButton.OKCancel, MessageBoxImage.Warning) == MessageBoxResult.OK;
     }
 
     private TaskItem? SelectedTask => TaskGrid.SelectedItem as TaskItem;
