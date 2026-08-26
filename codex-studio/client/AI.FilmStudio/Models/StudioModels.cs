@@ -189,6 +189,9 @@ public sealed class AssetItem
     [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
     [JsonIgnore] public string ShotText => ShotId is null ? "—" : ShotId.ToString()!;
     [JsonIgnore] public string ApprovalText => Approved ? "✓ 已采用" : "候选";
+    [JsonIgnore] public string PreviewPath => MimeType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ||
+        new[] { ".png", ".jpg", ".jpeg", ".webp", ".bmp" }.Contains(Path.GetExtension(LocalPath).ToLowerInvariant()) ? LocalPath : "";
+    [JsonIgnore] public string MetaText => $"{AssetType} · {(Episode > 0 ? $"第 {Episode} 集" : "全局")} · {Status}";
 }
 
 public sealed class ReferenceBoard
@@ -273,6 +276,7 @@ public sealed class ProviderConfigStatus
     [JsonPropertyName("credential_source")] public string CredentialSource { get; set; } = "";
     [JsonPropertyName("capabilities")] public List<string> Capabilities { get; set; } = [];
     [JsonIgnore] public string DisplayName => Configured ? $"● {Name}" : $"○ {Name}";
+    [JsonIgnore] public string RouteDisplayName => $"{(Configured ? "●" : "○")} {Name} ({ProviderId}){(Configured ? "" : " · 未配置密钥")}";
 }
 
 public sealed class ProviderModelInfo
@@ -369,6 +373,17 @@ public sealed class BibleEntity
     [JsonPropertyName("reference_assets")] public List<string> ReferenceAssets { get; set; } = [];
     [JsonPropertyName("fingerprint")] public string Fingerprint { get; set; } = "";
     [JsonIgnore] public string Display => $"{Name} · v{Version} · {(State == "frozen" ? "已冻结" : "草稿")}";
+    [JsonIgnore] public string PrimaryImagePath => ReferenceAssets.FirstOrDefault(path =>
+        new[] { ".png", ".jpg", ".jpeg", ".webp", ".bmp" }.Contains(Path.GetExtension(path).ToLowerInvariant())) ?? "";
+    [JsonIgnore] public string TypeText => EntityType switch { "character" => "人物", "location" => "场景", "prop" => "道具", "world" => "世界观", "style" => "风格", _ => EntityType };
+    [JsonIgnore] public string StateText => State == "frozen" ? "已冻结" : "草稿";
+    [JsonIgnore] public string Summary => string.Join(" · ", Data.Take(3).Select(pair => $"{pair.Key}：{Compact(pair.Value)}"));
+
+    private static string Compact(JsonElement value)
+    {
+        var text = value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : value.ToString();
+        return text.Length > 28 ? text[..28] + "…" : text;
+    }
 }
 
 public sealed class AutomationRun
