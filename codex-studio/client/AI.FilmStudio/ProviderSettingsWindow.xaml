@@ -4,7 +4,7 @@
     <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions>
       <Border Background="#171A20" BorderBrush="#3B4350" BorderThickness="1" CornerRadius="8" Padding="20"><StackPanel>
         <TextBlock Text="1. 服务商连接与模型目录" FontSize="20" FontWeight="SemiBold" Margin="0,0,0,16"/>
-        <TextBlock Text="服务商"/><ComboBox x:Name="Provider" AutomationProperties.AutomationId="ProviderSelector" Height="40" FontSize="15" Margin="0,6,0,14" SelectionChanged="Provider_SelectionChanged"><ComboBoxItem Tag="openai">OpenAI 标准接口</ComboBoxItem><ComboBoxItem Tag="ark">火山方舟 OpenAI 兼容接口</ComboBoxItem></ComboBox>
+        <TextBlock Text="服务商"/><ComboBox x:Name="Provider" AutomationProperties.AutomationId="ProviderSelector" Height="40" FontSize="15" Margin="0,6,0,14" SelectionChanged="Provider_SelectionChanged"><ComboBoxItem Tag="openai">OpenAI 标准接口</ComboBoxItem><ComboBoxItem Tag="ark">火山方舟 OpenAI 兼容接口</ComboBoxItem><ComboBoxItem Tag="metaso">秘塔 metaso · MiniMax H3 视频</ComboBoxItem></ComboBox>
         <TextBlock Text="API Base URL"/><TextBox x:Name="BaseUrl" Height="40" FontSize="15" Padding="10" Margin="0,6,0,14"/>
         <TextBlock Text="默认模型 / Endpoint ID"/><TextBox x:Name="Model" Height="40" FontSize="15" Padding="10" Margin="0,6,0,14"/>
         <TextBlock Text="API 密钥（留空保留旧密钥）"/><PasswordBox x:Name="ApiKey" Height="40" FontSize="15" Padding="10" Margin="0,6,0,16"/>

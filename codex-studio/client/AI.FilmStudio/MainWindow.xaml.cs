@@ -98,6 +98,11 @@ public partial class MainWindow : Window
             if (string.IsNullOrWhiteSpace(_api.CurrentProjectId)) { MessageBox.Show("请先创建项目", "AI影视Studio"); return; }
             new PrevizWindow(_api) { Owner = this }.ShowDialog();
         }
+        else if (key == "generation")
+        {
+            if (string.IsNullOrWhiteSpace(_api.CurrentProjectId)) { MessageBox.Show("请先创建项目", "AI影视Studio"); return; }
+            new VideoGenerationWindow(_api) { Owner = this }.ShowDialog();
+        }
     }
 
     private void TopNav_Click(object sender, RoutedEventArgs e)

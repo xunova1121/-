@@ -56,6 +56,6 @@ public partial class App : Application
     {
         var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AI-Film-Studio");
         Directory.CreateDirectory(directory);
-        File.WriteAllText(Path.Combine(directory, "desktop-ready.txt"), $"{Environment.ProcessId}|0.10.0|{DateTimeOffset.Now:O}");
+        File.WriteAllText(Path.Combine(directory, "desktop-ready.txt"), $"{Environment.ProcessId}|0.11.0|{DateTimeOffset.Now:O}");
     }
 }

@@ -162,6 +162,31 @@ public sealed class StudioApiClient
         return await response.Content.ReadFromJsonAsync<ShotPrevizBinding>(cancellationToken: token) ?? throw new InvalidOperationException("服务未返回镜头绑定");
     }
 
+    public async Task<TaskAccepted> QueueShotVideoAsync(int shotId, string prompt, string firstFrame, string lastFrame,
+        IReadOnlyList<string> referenceImages, int durationSeconds, string resolution, string aspectRatio, CancellationToken token = default)
+    {
+        var response = await _http.PostAsJsonAsync(ProjectPath($"shots/{shotId}/generation-tasks"), new
+        {
+            task_type = "video",
+            provider = "metaso",
+            prompt,
+            first_frame = string.IsNullOrWhiteSpace(firstFrame) ? null : firstFrame,
+            last_frame = string.IsNullOrWhiteSpace(lastFrame) ? null : lastFrame,
+            reference_images = referenceImages,
+            duration_seconds = durationSeconds,
+            resolution,
+            aspect_ratio = aspectRatio,
+            priority = 20,
+            max_attempts = 3
+        }, token);
+        if (!response.IsSuccessStatusCode)
+        {
+            var detail = await response.Content.ReadAsStringAsync(token);
+            throw new InvalidOperationException($"提交失败（{(int)response.StatusCode}）：{detail}");
+        }
+        return await response.Content.ReadFromJsonAsync<TaskAccepted>(cancellationToken: token) ?? throw new InvalidOperationException("服务未返回任务 ID");
+    }
+
     public async Task RemoveShotPrevizBindingAsync(int shotId, CancellationToken token = default)
     {
         var response = await _http.DeleteAsync(ProjectPath($"shots/{shotId}/previz-binding"), token);

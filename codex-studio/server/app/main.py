@@ -400,8 +400,20 @@ def delete_shot_previz(project_id: str, shot_id: int):
 @app.post(f"{PREFIX}/projects/{{project_id}}/shots/{{shot_id}}/generation-tasks", status_code=202)
 def queue_shot_generation(project_id: str, shot_id: int, payload: ShotGenerationRequest):
     try:
+        if payload.provider != "mock":
+            config = resolve_provider_config(payload.provider, "i2v" if payload.task_type == "video" else "t2i")
+            capability = "i2v" if payload.task_type == "video" else "t2i"
+            if capability not in config.provider.capabilities:
+                raise ValueError(f"{config.provider.name} 不支持 {capability}")
+            if not config.api_key:
+                raise ValueError(f"{config.provider.name} 尚未配置 API 密钥")
         with connect() as db:
             task_payload = production_payload(db, project_id, shot_id, payload.prompt)
+            task_payload.update({
+                "first_frame": payload.first_frame, "last_frame": payload.last_frame,
+                "reference_images": payload.reference_images, "duration_seconds": payload.duration_seconds,
+                "resolution": payload.resolution, "aspect_ratio": payload.aspect_ratio,
+            })
             cursor = db.execute(
                 "INSERT INTO tasks(project_id,task_type,provider,payload_json,priority,max_attempts) VALUES(?,?,?,?,?,?)",
                 (project_id, payload.task_type, payload.provider, json.dumps(task_payload, ensure_ascii=False), payload.priority, payload.max_attempts),
@@ -410,7 +422,7 @@ def queue_shot_generation(project_id: str, shot_id: int, payload: ShotGeneration
         raise HTTPException(404, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
-    return {"id": cursor.lastrowid, "status": "queued", "task_type": payload.task_type, "previz": task_payload["previz"]}
+    return {"id": cursor.lastrowid, "status": "queued", "task_type": payload.task_type, "provider": payload.provider, "previz": task_payload["previz"]}
 
 
 @app.post(f"{PREFIX}/previz/analyze")

@@ -178,6 +178,12 @@ class ShotGenerationRequest(BaseModel):
     task_type: Literal["image", "video"]
     provider: str = "mock"
     prompt: str = ""
+    first_frame: str | None = None
+    last_frame: str | None = None
+    reference_images: list[str] = []
+    duration_seconds: int = Field(default=5, ge=4, le=15)
+    resolution: Literal["480p", "512p", "768P", "2K"] = "768P"
+    aspect_ratio: Literal["auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"] = "16:9"
     priority: int = Field(default=30, ge=-100, le=100)
     max_attempts: int = Field(default=3, ge=1, le=10)
 

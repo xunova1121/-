@@ -40,3 +40,23 @@ for label in ("加密保存连接", "拉取可用模型", "功能岗位绑定", 
 for behavior in ("FetchProviderModelsAsync", "SaveModelRouteAsync", "GetModelRoutesAsync"):
     assert behavior in settings_cs, f"Model routing UI is not wired to {behavior}"
 print("UI contract passed: save provider -> fetch models -> select role -> confirm binding")
+
+generation_xaml = ROOT / "client" / "AI.FilmStudio" / "VideoGenerationWindow.xaml"
+generation_code = generation_xaml.with_suffix(".xaml.cs")
+generation_root = ET.parse(generation_xaml).getroot()
+generation_xml = generation_xaml.read_text(encoding="utf-8")
+generation_cs = generation_code.read_text(encoding="utf-8")
+required_generation_ids = {
+    "GenerationShotSelector", "GenerationBindingStatus", "GenerationPrompt", "GenerationFirstFrame",
+    "GenerationLastFrame", "GenerationDuration", "GenerationResolution", "GenerationAspectRatio",
+    "SubmitRealVideoTask",
+}
+generation_ids = {value for element in generation_root.iter() for key, value in element.attrib.items() if key.endswith("AutomationId")}
+assert not required_generation_ids - generation_ids, f"Missing generation UI ids: {sorted(required_generation_ids - generation_ids)}"
+for label in ("秘塔 MiniMax H3", "选择镜头与画面约束", "提交真实视频任务", "任务队列取消"):
+    assert label in generation_xml, f"Missing visible video-generation action: {label}"
+for behavior in ("GetShotsAsync", "GetShotPrevizBindingAsync", "QueueShotVideoAsync"):
+    assert behavior in generation_cs, f"Video generation UI is not wired to {behavior}"
+main_code = (ROOT / "client" / "AI.FilmStudio" / "MainWindow.xaml.cs").read_text(encoding="utf-8")
+assert 'key == "generation"' in main_code and "new VideoGenerationWindow" in main_code
+print("UI contract passed: select shot -> verify previz -> configure H3 -> queue real task")

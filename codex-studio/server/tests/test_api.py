@@ -45,7 +45,7 @@ def test_health_starts_without_seeded_demo_and_creates_real_project(tmp_path: Pa
     try:
         with TestClient(app) as client:
             health = client.get("/api/v1/health").json()
-            assert health == {"status": "ok", "version": "0.10.0"}
+            assert health == {"status": "ok", "version": "0.11.0"}
             assert client.get("/api/v1/projects").json() == []
             project = client.post("/api/v1/projects", json={"name": "真实项目", "genre": "悬疑", "episode_count": 8}).json()
             assert project["id"] != "demo"
@@ -256,6 +256,36 @@ def test_model_discovery_role_binding_and_routed_task(monkeypatch):
         assert "全剧" in task["payload"]["system_prompt"]
         completed = wait_for_status(client, "demo", queued.json()["id"], {"completed"})
         assert completed["result"]["model"] == "director-large"
+
+
+def test_metaso_catalog_and_generation_payload_are_real_and_frozen(monkeypatch):
+    async def fake_video(prompt: str, context: dict):
+        assert context["task_type"] == "video"
+        return {"status": "completed", "provider": "metaso", "provider_task_id": "mocked-paid-call"}
+
+    monkeypatch.setenv("METASO_API_KEY", "metaso-ci-secret")
+    from app.adapters import registry
+    monkeypatch.setattr(registry.resolve("metaso"), "invoke", fake_video)
+    with TestClient(app) as client:
+        models = client.get("/api/v1/provider-configs/metaso/models")
+        assert models.status_code == 200 and models.json()["models"] == ["MiniMax-H3"]
+        shot = client.get("/api/v1/projects/demo/shots").json()[0]
+        layout = client.post("/api/v1/projects/demo/previz/layouts", json={
+            "scene_key": "metaso-stage", "camera": {"position": {"x": 0, "y": -5}, "target": {"x": 0, "y": 0}, "lens_mm": 35},
+            "subjects": [{"entity_key": "主角", "position": {"x": 0, "y": 0}, "facing_deg": 180}], "landmarks": [],
+        }).json()
+        client.put(f"/api/v1/projects/demo/shots/{shot['id']}/previz-binding", json={"layout_id": layout["id"]})
+        queued = client.post(f"/api/v1/projects/demo/shots/{shot['id']}/generation-tasks", json={
+            "task_type": "video", "provider": "metaso", "prompt": "保持角色，缓慢推镜",
+            "first_frame": "https://files.example/first.png", "last_frame": "https://files.example/last.png",
+            "reference_images": ["https://files.example/face.png"], "duration_seconds": 10,
+            "resolution": "2K", "aspect_ratio": "9:16",
+        })
+        assert queued.status_code == 202 and queued.json()["provider"] == "metaso"
+        task = next(item for item in client.get("/api/v1/projects/demo/tasks").json() if item["id"] == queued.json()["id"])
+        assert task["payload"]["duration_seconds"] == 10 and task["payload"]["resolution"] == "2K"
+        assert task["payload"]["first_frame"].endswith("first.png")
+        assert "空间预演强制约束" in task["payload"]["prompt"]
 
 
 def test_durable_task_completion_failure_retry_and_stats(tmp_path: Path):

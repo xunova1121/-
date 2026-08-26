@@ -131,10 +131,13 @@ def all_provider_statuses() -> list[dict]:
 async def fetch_provider_models(provider_id: str) -> list[str]:
     """Return the models the configured OpenAI-compatible account can actually access."""
     config = resolve_provider_config(provider_id)
-    if config.provider.family != "openai":
-        raise ValueError(f"{config.provider.name} 暂不支持实时模型目录")
     if not config.api_key:
         raise ValueError(f"{config.provider.name} 尚未配置 API 密钥")
+    if config.provider.family != "openai":
+        catalog = sorted({model for models in config.provider.models.values() for model in models})
+        if catalog:
+            return catalog
+        raise ValueError(f"{config.provider.name} 暂不支持模型目录")
     endpoint = f"{config.base_url.rstrip('/')}/models"
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:

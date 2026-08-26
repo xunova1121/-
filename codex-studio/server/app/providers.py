@@ -48,6 +48,9 @@ PROVIDERS = (
              ("i2v", "r2v"), ("VIDU_API_KEY",), {}, True, 7, False, None, "reference_consistent_sequence"),
     Provider("minimax", "MiniMax 海螺", "minimax", "https://api.minimaxi.com/v1",
              ("chat", "t2i", "i2v", "r2v", "tts"), ("MINIMAX_API_KEY",), {}, True, 9, False, None, "reference_consistent_sequence"),
+    Provider("metaso", "秘塔 metaso（MiniMax H3）", "metaso", "https://metaso.cn/api/minimax/v2",
+             ("i2v", "r2v"), ("METASO_API_KEY",),
+             {"i2v": ("MiniMax-H3",), "r2v": ("MiniMax-H3",)}, True, 9, True, 15, "start_end_frame_then_bridge"),
 )
 
 

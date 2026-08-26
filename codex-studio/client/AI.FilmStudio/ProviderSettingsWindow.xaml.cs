@@ -31,7 +31,7 @@ public partial class ProviderSettingsWindow : Window
     private async void FetchModels_Click(object sender, RoutedEventArgs e)
     {
         FetchButton.IsEnabled = false;
-        try { var models = await _api.FetchProviderModelsAsync(SelectedProvider); AvailableModels.ItemsSource = models; AvailableModels.SelectedItem = models.FirstOrDefault(item => item == Model.Text) ?? models.FirstOrDefault(); Feedback.Text = $"服务商实时返回 {models.Count} 个模型，请在右侧选择岗位并确认绑定。"; }
+        try { var models = await _api.FetchProviderModelsAsync(SelectedProvider); AvailableModels.ItemsSource = models; AvailableModels.SelectedItem = models.FirstOrDefault(item => item == Model.Text) ?? models.FirstOrDefault(); Feedback.Text = $"已取得 {models.Count} 个可用模型。文本模型可绑定右侧岗位；视频模型在视频生成中心直接选择。"; }
         catch (Exception ex) { Feedback.Text = $"拉取失败：{ex.Message}"; } finally { FetchButton.IsEnabled = true; }
     }
     private async void Bind_Click(object sender, RoutedEventArgs e)

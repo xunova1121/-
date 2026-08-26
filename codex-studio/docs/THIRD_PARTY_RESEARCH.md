@@ -21,3 +21,10 @@
 | mikehalleen/the-halleen-machine | AGPL-3.0 | 只观察批处理和资产管理体验，不复制代码 |
 
 核心实现均在本项目内重新设计：WPF 原生客户端、FastAPI 模块服务、SQLite 本地数据层。
+
+## V0.11 秘塔视频接入边界
+
+- 接口参数与能力边界来自秘塔公开的 MiniMax H3 产品页，以及仓库 Claude 分支中用户已有的服务商配置；本版本以 Python 独立重写，没有复制 Claude 的 JavaScript 实现。
+- 异步提交、任务 ID、轮询与完成后立即下载的可靠性流程参考 MiniMax 官方视频生成 API 说明。
+- 长任务续租、状态与产物回写只借鉴 MIT 许可的 `SaladTechnologies/comfyui-api` 所体现的异步队列边界；没有复制其代码或引入依赖。
+- 下载外部签名 URL 时不转发秘塔 Bearer 密钥，避免凭据泄漏到第三方存储域名。

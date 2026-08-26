@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import sqlite3
 from datetime import UTC, datetime, timedelta
@@ -8,6 +9,10 @@ from .adapters import registry
 from .config import settings
 from .media import render_transition
 from .task_outputs import ingest_task_output
+
+
+class TaskCanceled(Exception):
+    pass
 
 
 class TaskRunner:
@@ -64,14 +69,55 @@ class TaskRunner:
         try:
             payload = json.loads(task["payload_json"])
             if task["task_type"] == "transition_render":
-                result = await asyncio.to_thread(render_transition, payload)
+                result = await self._invoke_with_heartbeat(task, asyncio.to_thread(render_transition, payload))
             else:
                 adapter = registry.resolve(task["provider"])
                 prompt = str(payload.get("prompt") or f"执行 {task['task_type']} 任务")
-                result = await adapter.invoke(prompt, {**payload, "task_id": task["id"], "task_type": task["task_type"]})
+                result = await self._invoke_with_heartbeat(
+                    task, adapter.invoke(prompt, {**payload, "task_id": task["id"], "task_type": task["task_type"]})
+                )
             await asyncio.to_thread(self._complete, task, result)
+        except TaskCanceled:
+            await asyncio.to_thread(self._mark_canceled, int(task["id"]))
         except Exception as exc:
             await asyncio.to_thread(self._fail_or_retry, task, str(exc))
+
+    async def _invoke_with_heartbeat(self, task: dict[str, Any], awaitable) -> dict[str, Any]:
+        work = asyncio.create_task(awaitable)
+        interval = max(1.0, min(15.0, self.lease_seconds / 3))
+        try:
+            while True:
+                done, _ = await asyncio.wait({work}, timeout=interval)
+                if work in done:
+                    return await work
+                canceled = await asyncio.to_thread(self._renew_lease, int(task["id"]))
+                if canceled:
+                    work.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await work
+                    raise TaskCanceled()
+        except asyncio.CancelledError:
+            work.cancel()
+            raise
+
+    def _renew_lease(self, task_id: int) -> bool:
+        lease = (datetime.now(UTC) + timedelta(seconds=self.lease_seconds)).strftime("%Y-%m-%d %H:%M:%S")
+        with sqlite3.connect(settings.database_path) as db:
+            row = db.execute("SELECT cancel_requested FROM tasks WHERE id=?", (task_id,)).fetchone()
+            if not row or row[0]:
+                return True
+            db.execute(
+                "UPDATE tasks SET lease_until=?,progress=MIN(90,progress+1),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='running'",
+                (lease, task_id),
+            )
+        return False
+
+    def _mark_canceled(self, task_id: int) -> None:
+        with sqlite3.connect(settings.database_path) as db:
+            db.execute(
+                "UPDATE tasks SET status='canceled',progress=0,lease_until=NULL,completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (task_id,),
+            )
 
     def _complete(self, task: dict[str, Any], result: dict[str, Any]) -> None:
         task_id = int(task["id"])
