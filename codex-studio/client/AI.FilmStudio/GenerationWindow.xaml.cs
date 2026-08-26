@@ -167,4 +167,5 @@ public partial class GenerationWindow : Window
         try { await _api.RetryTaskAsync(task.Id); await RefreshTasksAsync(false); StatusText.Text = $"任务 #{task.Id} 已重新进入队列。"; }
         catch (Exception ex) { StatusText.Text = $"重试失败：{ex.Message}"; }
     }
+    private void Gallery_Click(object sender, RoutedEventArgs e) => new GenerationGalleryWindow(_api, Episode) { Owner = this }.ShowDialog();
 }
