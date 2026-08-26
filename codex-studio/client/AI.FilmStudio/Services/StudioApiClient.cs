@@ -177,6 +177,13 @@ public sealed class StudioApiClient
         await EnsureSuccessAsync(response);
     }
 
+    public async Task<AssetItem> AdoptAssetAsync(int assetId, CancellationToken token = default)
+    {
+        var response = await _http.PostAsync($"assets/{assetId}/adopt", null, token);
+        await EnsureSuccessAsync(response);
+        return await response.Content.ReadFromJsonAsync<AssetItem>(cancellationToken: token) ?? throw new InvalidOperationException("服务未返回采用后的资产");
+    }
+
     public async Task<TaskAccepted> GenerateShotAsync(int shotId, string taskType, string provider, string prompt, string? model, IReadOnlyList<int> references, Dictionary<string, object?> options, CancellationToken token = default)
     {
         var response = await _http.PostAsJsonAsync(ProjectPath("shots/generate"), new { shot_id = shotId, task_type = taskType, provider, prompt, model, reference_asset_ids = references, options }, token);
