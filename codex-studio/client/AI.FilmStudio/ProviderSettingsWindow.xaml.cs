@@ -11,6 +11,7 @@ public partial class ProviderSettingsWindow : Window
     private IReadOnlyList<ProviderConfigStatus> _statuses = [];
     private IReadOnlyList<ModelRoleBinding> _roles = [];
     private bool _loading;
+    private int _roleProviderChangeVersion;
 
     public ProviderSettingsWindow(StudioApiClient api)
     {
@@ -87,13 +88,29 @@ public partial class ProviderSettingsWindow : Window
 
     private void Provider_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (IsLoaded && !_loading) ApplyProviderSelection(); }
     private void RoleList_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (IsLoaded && !_loading) ApplyRoleSelection(); }
-    private void RoleProvider_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async void RoleProvider_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_loading || RoleProvider.SelectedItem is not ProviderConfigStatus provider) return;
+        var changeVersion = ++_roleProviderChangeVersion;
         RoleModel.ItemsSource = null;
-        if (SelectedRole?.ProviderId == provider.ProviderId) RoleModel.Text = SelectedRole.Model;
-        else RoleModel.Text = provider.Model;
+        var savedModel = SelectedRole?.ProviderId == provider.ProviderId ? SelectedRole.Model : provider.Model;
+        RoleModel.Text = savedModel;
+        RoleFeedback.Text = $"已选择 {provider.Name}；正在读取该服务商可用于“{SelectedRole?.Name}”的模型…";
         UpdateSelectedRoleSummary();
+        if (SelectedRole is null) return;
+        try
+        {
+            var result = await _api.GetProviderModelsAsync(provider.ProviderId, SelectedRole.Capability);
+            if (changeVersion != _roleProviderChangeVersion || (RoleProvider.SelectedItem as ProviderConfigStatus)?.ProviderId != provider.ProviderId) return;
+            SelectModel(RoleModel, result.Models, savedModel);
+            var source = result.Source == "remote" ? "服务商实时返回" : "内置兼容目录";
+            RoleFeedback.Text = $"已选择 {provider.Name} · {source} · {result.Models.Count} 个候选模型" + (string.IsNullOrWhiteSpace(result.Warning) ? "" : $"\n{result.Warning}");
+            UpdateSelectedRoleSummary();
+        }
+        catch (Exception ex)
+        {
+            RoleFeedback.Text = $"{provider.Name} 模型读取失败：{ex.Message}。仍可手动输入模型 ID 后绑定。";
+        }
     }
 
     private void RoleModel_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateSelectedRoleSummary();
