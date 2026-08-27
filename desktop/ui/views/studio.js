@@ -618,6 +618,34 @@ export default {
     /** 这一步做完了多少。和左边菜单上的对勾共用同一份算法，不各算各的 */
     const stageProgress = (id) => stepProgress(project, id);
 
+    /**
+     * 真正提交付费生成前，把本次会调用什么摊开给人看。
+     *
+     * 不在这里硬编码人民币价格：中转商、账号折扣和模型版本都会让“精确金额”变成假数。
+     * 调用数和视频秒数是我们能可靠算出的计费量，最终金额以服务商账单为准。
+     */
+    function confirmGeneration(kind, targets, override = {}, action = '开始生成') {
+      const route = kind === 'video' ? state.catalog.routing.video : state.catalog.routing.image;
+      const providerId = override.provider || route.provider;
+      const modelId = override.model || route.model;
+      const provider = state.catalog.providers.find((x) => x.id === providerId);
+      const model = (provider?.models || []).find((x) => x.id === modelId);
+      const lines = [
+        `${action}前请核对：`,
+        `服务商：${provider?.name || providerId || '未配置'}`,
+        `模型：${model?.label || modelId || '未配置'}`,
+        `调用次数：${targets.length} 次`
+      ];
+      if (kind === 'video') {
+        const allowed = DUR.allowedDurations(provider, modelId);
+        const seconds = targets.reduce((sum, shot) =>
+          sum + DUR.alignDuration(DUR.shotSeconds(shot), allowed, { mode: 'up' }), 0);
+        lines.push(`预计生成量：${seconds} 视频秒`);
+      }
+      lines.push('', '这会调用第三方付费接口，实际金额以服务商账单为准。确认提交？');
+      return confirm(lines.join('\n'));
+    }
+
     /** 选中步骤的详情：产出统计 + 缺什么 + 明确的运行按钮 */
     function paintStageDetail() {
       clear(stageDetail);
@@ -720,8 +748,7 @@ export default {
               disabled: !runnable,
               title: isCostly ? '视频按镜数计费，是这条流水线最大的开销' : '',
               onclick: () => {
-                if (isCostly && missing.length > 3
-                  && !confirm(`将为 ${missing.length} 个镜头生成视频，按镜数计费且耗时较长。确定？`)) return;
+                if (isCostly && !confirmGeneration('video', missing, {}, '批量生成视频')) return;
                 runStage(state.stage);
               }
             }, done ? `继续（还差 ${total - done}）` : '开始'),
@@ -730,7 +757,10 @@ export default {
                   class: 'btn ghost',
                   disabled: !runnable,
                   onclick: () => {
-                    if (!confirm('这一步已经完成，重跑会覆盖已有产出并重新计费。确定？')) return;
+                    const targets = state.stage === 'video' ? shots.filter((s) => s.imagePath) : shots;
+                    if (state.stage === 'video') {
+                      if (!confirmGeneration('video', targets, {}, '整步重跑视频')) return;
+                    } else if (!confirm('这一步已经完成，重跑会覆盖已有产出并重新计费。确定？')) return;
                     runStage(state.stage, { regenerate: true });
                   }
                 }, '整步重跑')
@@ -1185,6 +1215,8 @@ export default {
 
     async function regenerate(shot, kind, picker, btn) {
       if (job.shots.has(shot.id)) return;
+      const picked = picker.values();
+      if (!confirmGeneration(kind, [shot], picked, kind === 'video' ? `重出第 ${shot.index} 镜视频` : `重出第 ${shot.index} 镜图片`)) return;
       job.projectId = project.id;
       job.lastStage = kind === 'video' ? 'video' : 'assets';
       job.doneCount = 0;
@@ -1198,7 +1230,7 @@ export default {
         await stream(
           // cap:shot-regen
           `/projects/${project.id}/shots/${shot.id}/regenerate`,
-          { kind, ...picker.values() },
+          { kind, ...picked },
           (ev) => {
             // 单镜重出的事件不带 shotId（后端只往流里写这一镜的），补上再走同一套
             trackLive({ ...ev, shotId: ev.shotId || shot.id });
@@ -3713,3 +3745,4 @@ function describe(ev) {
       return null;
   }
 }
+
