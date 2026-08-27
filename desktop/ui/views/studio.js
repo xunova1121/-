@@ -3689,7 +3689,71 @@ export default {
               paintOutline();
             } catch (err) { toast(err.message, 'err'); }
           };
-          listHost.append(h('div', { class: `ob-row${b.locked ? ' locked' : ''}` },
+          /**
+           * ── 自己动手改这一场 ──
+           *
+           * ⚠ 这一条原来是**缺的**：面板上只有秒数是输入框，场景名、内容、
+           * 台词都只能跟模型商量着改。而后端白名单里这几样全都支持 ——
+           * 接口有、界面没接。
+           *
+           * 跟模型来回三轮，不如自己敲两个字。何况改台词直接影响
+           * "念得完念不完"那条硬下限，那是要当场看见的。
+           *
+           * 锁着的场次不给这颗按钮：它们改不动（applyOps 会拒），
+           * 摆一个点了就报错的按钮比不摆更糟。
+           */
+          const editBtn = b.locked ? null : h('button', { class: 'btn ghost sm', title: '自己改这一场' }, '改');
+          if (editBtn) {
+            editBtn.onclick = () => {
+              const f = {
+                scene: h('input', { type: 'text', value: b.scene, placeholder: '场景名' }),
+                time: h('input', { type: 'text', value: b.time, placeholder: '白天 / 夜' }),
+                characters: h('input', { type: 'text', value: b.characters.join('、'), placeholder: '人物，逗号分隔' }),
+                summary: h('textarea', { rows: 2, placeholder: '这一场发生了什么' }, b.summary),
+                dialogue: h('textarea', { rows: 2, placeholder: '这一场真正要念出来的台词，原样抄' }, b.dialogue)
+              };
+              const live = h('div', { class: 'field-hint' });
+              const refreshLive = () => {
+                const est2 = OUTLINE.estimateSeconds({ ...b, summary: f.summary.value, dialogue: f.dialogue.value });
+                live.textContent = est2.floor
+                  ? `台词念完要 ${est2.floor} 秒 —— 这一场至少得这么长`
+                  : '这一场没有台词';
+              };
+              f.dialogue.oninput = refreshLive;
+              refreshLive();
+              const save = h('button', { class: 'btn sm' }, '存这一场');
+              const cancel = h('button', { class: 'btn ghost sm' }, '取消');
+              const box = h('div', { class: 'ob-edit' },
+                h('div', { class: 'ob-edit-grid' },
+                  h('div', {}, h('label', {}, '场景'), f.scene),
+                  h('div', {}, h('label', {}, '时间'), f.time),
+                  h('div', {}, h('label', {}, '人物'), f.characters)),
+                h('label', {}, '内容'), f.summary,
+                h('label', {}, '台词'), f.dialogue, live,
+                h('div', { class: 'inline', style: 'margin-top:8px' }, save, cancel));
+              cancel.onclick = () => box.remove();
+              save.onclick = async () => {
+                save.disabled = true;
+                try {
+                  // cap:outline
+                  const r = await api(`/projects/${project.id}/outline/beat/${b.id}`, {
+                    method: 'PATCH',
+                    body: {
+                      scene: f.scene.value, time: f.time.value,
+                      characters: f.characters.value, summary: f.summary.value, dialogue: f.dialogue.value
+                    }
+                  });
+                  project.outline = r.project.outline;
+                  paintOutline();
+                  toast(r.refused?.length ? `没改成：${r.refused[0].why}` : '存好了', r.refused?.length ? 'err' : 'ok');
+                } catch (err) { toast(err.message, 'err'); } finally { save.disabled = false; }
+              };
+              row.after(box);
+              f.scene.focus();
+            };
+          }
+
+          const row = h('div', { class: `ob-row${b.locked ? ' locked' : ''}` },
             h('span', { class: 'ob-n' }, String(i + 1)),
             h('span', { class: 'ob-scene' }, b.scene || '（未定）'),
             h('span', { class: 'ob-when' }, [b.time, b.characters.join('、')].filter(Boolean).join(' · ')),
@@ -3723,7 +3787,8 @@ export default {
                 } catch (err) { toast(err.message, 'err'); } finally { un.disabled = false; }
               };
               return un;
-            })() : ''));
+            })() : (editBtn || ''));
+          listHost.append(row);
         }
 
         /**

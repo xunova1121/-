@@ -1351,6 +1351,43 @@ if (await buildBtn.count()) {
   }
 
   /**
+   * ── 自己动手改一场 ──
+   *
+   * ⚠ 这一条原来是缺的：面板上只有秒数是输入框，场景名、内容、台词
+   * 都只能跟模型商量着改 —— 而后端白名单里这几样全都支持。
+   * 接口有、界面没接，是最容易漏掉的一种缺口（自检全绿，功能"有"）。
+   */
+  const editOne = page.locator('.ob-row button', { hasText: /^改$/ }).first();
+  check('每一场都能自己动手改', (await editOne.count()) > 0);
+  if (await editOne.count()) {
+    await editOne.scrollIntoViewIfNeeded();
+    await editOne.click();
+    await page.waitForTimeout(400);
+    const box = page.locator('.ob-edit').first();
+    check('打开的编辑框里，场景/内容/台词都能改',
+      (await box.locator('input').count()) >= 3 && (await box.locator('textarea').count()) === 2);
+    /**
+     * 改台词时要**当场**看到"念完要多久" —— 那是这一场时长的硬下限。
+     * 等拆完分镜才发现念不完，那时候改时长等于重拆。
+     */
+    await box.locator('textarea').last().fill('这一句是我自己敲进去的台词，念起来要花掉好几秒钟。');
+    await page.waitForTimeout(300);
+    const liveTxt = await box.locator('.field-hint').first().innerText().catch(() => '');
+    check('边打字边算出台词念完要多久', /台词念完要 \d+ 秒/.test(liveTxt), liveTxt);
+
+    await box.locator('input').first().fill('改过的场景名');
+    await box.locator('button', { hasText: '存这一场' }).click();
+    await page.waitForTimeout(1200);
+    const saved = await page.evaluate(async (id) => {
+      const p = await (await fetch(`/api/projects/${id}`)).json();
+      const b0 = (p.outline?.beats || [])[0];
+      return { scene: b0?.scene, dialogue: b0?.dialogue };
+    }, proj.id);
+    check('手改真的落盘了', saved.scene === '改过的场景名' && /自己敲进去/.test(saved.dialogue || ''),
+      JSON.stringify(saved));
+  }
+
+  /**
    * ── 拆过分镜的场次锁住 ──
    *
    * 这是"不要全部推到重来"的落脚点：出过图的那几场，模型碰不到。

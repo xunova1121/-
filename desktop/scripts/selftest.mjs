@@ -351,7 +351,12 @@ const upstream = http.createServer((req, res) => {
         const user = String(body.messages?.[1]?.content || '');
         const ids = [...user.matchAll(/【场次\s*([a-z0-9-]+)】/gi)].map((m) => m[1]);
         upstream.lastShotPrompt = { system, user };
-        content = JSON.stringify(ids.length
+        /**
+         * 打开这个开关就**一个 beatId 都不标** —— 模型真会这样
+         *（提示词只是请求，它想不理就不理）。而那条路是最危险的分支：
+         * 收口时不知道每一镜属于哪一场，只能保守地把整批换掉。
+         */
+        content = JSON.stringify((ids.length && !upstream.noBeatTags)
           ? { ...SHOTS_REPLY, shots: SHOTS_REPLY.shots.map((x, i) => ({ ...x, beatId: ids[i % ids.length] })) }
           : SHOTS_REPLY);
       } else if (system.includes('剪辑师')) {
@@ -3166,6 +3171,47 @@ section('大纲 → 分镜：只拆没拆过的场次');
     check('新加的那一场拆出了镜头',
       after.shots.some((s) => s.beatId === 'b-99'),
       JSON.stringify(after.shots.map((s) => s.beatId)));
+  }
+
+  /**
+   * ── 模型一个 beatId 都不标时的兜底 ──
+   *
+   * ⚠ 这条路原来**一条断言都没有**，而它恰恰是最危险的分支：
+   * 不知道每一镜属于哪一场，就没法"只换这几场的镜头"。
+   *
+   * 保守处理是把这一批整个换掉。宁可多作废，**不能悄悄重复** ——
+   * 新旧两批叠在一起的话，成片里同一段戏演两遍，而每一镜看着都正常。
+   */
+  {
+    const p = mk();
+    upstream.noBeatTags = true;
+    try {
+      await studio.analyzeScript(p.id, { force: true });
+      const after = store.read(p.id);
+      check('模型不标场次时，镜头照样拆得出来', (after.shots || []).length > 0);
+      check('那几镜的 beatId 是空的（不硬编一个假的）',
+        (after.shots || []).every((s) => !s.beatId),
+        JSON.stringify((after.shots || []).map((s) => s.beatId)));
+      /**
+       * ⚠ 最要紧的一条：**不能重复**。
+       * 编一个 beatId 或者把新旧都留下，成片里同一段戏就会演两遍。
+       */
+      check('没有重复的镜头 id',
+        new Set(after.shots.map((s) => s.id)).size === after.shots.length,
+        JSON.stringify(after.shots.map((s) => s.id)));
+      check('镜号也没有重号',
+        new Set(after.shots.map((s) => s.index)).size === after.shots.length,
+        JSON.stringify(after.shots.map((s) => s.index)));
+
+      // 再拆一次也不该越堆越多
+      store.update(p.id, (x) => { x.outline = ol.unlockBeats(x.outline, []); return x; });
+      const n1 = store.read(p.id).shots.length;
+      await studio.analyzeScript(p.id, { force: true });
+      const n2 = store.read(p.id).shots.length;
+      check('重拆一次镜头数不会翻倍（旧的那批被换掉了）', n2 === n1, `${n1} → ${n2}`);
+    } finally {
+      upstream.noBeatTags = false;
+    }
   }
 
   // ── 没有大纲的项目：老路一点没变 ──

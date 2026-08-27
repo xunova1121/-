@@ -1331,8 +1331,48 @@ function appendChapterCard() {
       btn.textContent = old;
     }
   };
+  /**
+   * ── 新章还没对过设定集 ──
+   *
+   * 电脑版有这条，手机版原来没有。三端对齐那条自检**抓不到**：
+   * 能力清单里 extend-bible 标着"手机版有"（按钮确实在设定集页），
+   * 只是**提示**没有 —— 清单管得了"功能在不在"，管不了"提示在不在"。
+   *
+   * 而不提示的后果是静默的：新章里的角色不进设定集，那几镜没有参考图、
+   * 没有外貌描述、复核没有基准，静默降级成"文生图"，流水线一路绿。
+   */
+  const unscanned = (project?.chapters || []).filter((c) => !c.castScanned);
+  const scanRow = unscanned.length && project?.bible ? (() => {
+    const btn = h('button', { class: 'btn sm grow' }, `扫这 ${unscanned.length} 章`);
+    const log = h('div', { class: 'muted', style: 'margin-top:6px' });
+    btn.onclick = async () => {
+      btn.disabled = true;
+      try {
+        // cap:extend-bible
+        await stream(`/projects/${project.id}/extend-bible`, {}, (ev) => {
+          if (ev.message) log.textContent = ev.message;
+          if (ev.type === 'error') toast(ev.message, 'err');
+          if (ev.type === 'finished') {
+            project.bible = ev.project?.bible || project.bible;
+            toast(ev.added?.length
+              ? `补了 ${ev.added.length} 条：${ev.added.map((a) => a.name).join('、')}`
+              : '这几章用的都是已有的角色和场景', 'ok');
+            paint();
+          }
+        });
+      } catch (err) { toast(err.message, 'err'); } finally { btn.disabled = false; }
+    };
+    return h('div', { class: 'mob-pending' },
+      h('b', {}, `有 ${unscanned.length} 章还没对过设定集`),
+      h('div', { class: 'muted', style: 'margin:3px 0 8px' },
+        '扫一遍，只把没见过的角色和场景补进来 —— 已有的一条都不动、一张图都不重出。'
+        + '不扫的话，新角色那几镜会没有参考图，而且不报错。'),
+      h('div', { class: 'row' }, btn), log);
+  })() : null;
+
   host.append(
     h('summary', {}, '追加一章 ', h('span', { class: 'muted' }, '剧本一章一章来的时候用')),
+    scanRow || '',
     h('div', { class: 'muted', style: 'line-height:1.7' },
       '往剧本末尾拼，前面的正文一个字都不动 —— 已经跑完的章不会作废重跑。'),
     title, body,
@@ -2243,24 +2283,38 @@ function openEditor(s, jump = 'content') {
   };
 
   // ── 四组 ──
+  /**
+   * 「改了要重出 X」—— 和电脑版同一套口径。
+   *
+   * 三样东西喂的是**不同的下游**：画面→出图、运镜/衔接→出视频、
+   * 台词/说话人→配音。改一样东西要付多少代价差着几十倍的钱，
+   * 而原来两端都没说。
+   *
+   * ⚠ 只在那样产物**已经出过**时才显示：还没出过的时候它是废话，
+   * 而废话会把真正要紧的那句挤没。
+   */
+  const redo = (done, text) => (done ? h('div', { class: 'ed-redo' }, text) : null);
+
   const pages = {
     content: h('div', {},
       h('div', { class: 'ed-group' },
-        h('h4', {}, '画面描述', h('span', {}, '出图和出视频的唯一输入')),
+        h('h4', {}, '画面描述', h('span', {}, '出图用的')),
         desc,
         h('div', { class: 'muted', style: 'margin-top:6px' }, '写偏一句，重出十次也回不到对的画面。'),
         field('画面里的道具', propsBox,
           '只填**这一镜真的看得见**的。特写里看不见的东西填上去，'
-          + '「道具消失又回来」那条检查会开始乱报 —— 而乱报的检查比没有更糟。')),
+          + '「道具消失又回来」那条检查会开始乱报 —— 而乱报的检查比没有更糟。'),
+        redo(s.imagePath, '⚠ 这一镜已经出过图了。改完要重出这一镜的图才生效 —— 视频跟着图走，也得跟着重出。')),
       h('div', { class: 'ed-group' },
-        h('h4', {}, '台词'),
+        h('h4', {}, '台词', h('span', {}, '配音用的')),
         field('说什么', line, '留空就是这一镜没人说话。'),
         field('谁说的', who, '决定用哪个角色的**声音**。'),
         // cap:line-kind
         field('台词类型', kindPick,
           '和「谁说的」是两件事：那个管声音用谁的，这个管**嘴动不动**。'
           + '心里话＝他自己的声音但嘴闭着；旁白＝画外叙述；画外音＝他在说话但不在这一镜画面里。'),
-        fit),
+        fit,
+        redo(s.audioPath, '⚠ 这一镜已经配过音了。改完要重新配音才生效。图和视频都不受影响。')),
       h('div', { class: 'ed-group' },
         h('h4', {}, '画外音效', h('span', {}, '听得见看不见的')),
         sfx,
@@ -2269,13 +2323,14 @@ function openEditor(s, jump = 'content') {
 
     camera: h('div', {},
       h('div', { class: 'ed-group' },
-        h('h4', {}, '怎么拍'),
+        h('h4', {}, '怎么拍', h('span', {}, '出视频用的')),
         // cap:shot-camera
         field('景别', chips(CAMERAS, camera, (v) => (camera = v))),
         field('运镜', chips(MOTIONS, motion, (v) => (motion = v))),
-        field('时长（秒）', dur, '有台词的话，上一组里会告诉你够不够念。')),
+        field('时长（秒）', dur, '有台词的话，上一组里会告诉你够不够念。'),
+        redo(s.videoPath, '⚠ 这一镜已经出过视频了。改完要重出视频才生效。图不受影响，不用重出。')),
       h('div', { class: 'ed-group' },
-        h('h4', {}, '怎么进来'),
+        h('h4', {}, '怎么进来', h('span', {}, '合成用的，不花钱')),
         // cap:shot-transition
         field('转场', (() => {
           const wrap = h('div', { class: 'chips' });
