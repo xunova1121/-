@@ -7883,6 +7883,17 @@ section('付费生成提交前确认');
   check('明确提示第三方付费接口和账单口径', src.includes('这会调用第三方付费接口，实际金额以服务商账单为准'));
 }
 
+section('预演台升级为 3D 导演画布');
+{
+  const src = fs.readFileSync(path.join(PROJECT_ROOT, 'ui', 'previz-canvas.js'), 'utf8');
+  check('保留原俯视排位画布', src.includes('export function blockingCanvas'));
+  check('新增独立 3D 导演画布', src.includes('export function director3dCanvas'));
+  check('3D 和俯视读取同一份 stage 坐标', src.includes('director3dCanvas(stage') && src.includes('blockingCanvas(stage'));
+  check('3D 画布的人物、道具和摄影机都可拖动', (src.match(/draggable\(g, item\)/g) || []).length >= 3);
+  check('默认打开 3D 导演画布且可切回俯视', src.includes("['3d', '3D 导演画布']") && src.includes("['top', '俯视排位']"));
+  check('道具栏增加常用可拖拽物件', ['椅', '沙发', '车', '剑'].every((x) => src.includes(`'${x}'`)));
+}
+
 section('打包配置');
 {
   // 自检跑在打包**之前**，所以配置写错该在这里就拦下来 ——
