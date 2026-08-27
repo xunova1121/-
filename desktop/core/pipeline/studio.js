@@ -2742,18 +2742,30 @@ export function exportShotControls(projectId, shotId, stageOverride = null) {
   if (!shot) throw new Error(`没有这一镜：${shotId}`);
   const stage = stageOverride?.cam ? stageOverride : shot.stage;
   if (!stage?.cam) throw new Error('这一镜还没有预演数据，先在预演台排位');
-  const rendered = renderControls(stage);
+  const rendered = renderControls(stage, { duration: shot.duration || 5 });
   const dir = store.assetDir(projectId);
   const files = {
     start: path.join(dir, `${shot.id}.control-start.svg`),
+    end: path.join(dir, `${shot.id}.control-end.svg`),
     depth: path.join(dir, `${shot.id}.control-depth.svg`),
-    mask: path.join(dir, `${shot.id}.control-mask.svg`)
+    mask: path.join(dir, `${shot.id}.control-mask.svg`),
+    edge: path.join(dir, `${shot.id}.control-edge.svg`),
+    pose: path.join(dir, `${shot.id}.control-pose.svg`),
+    manifest: path.join(dir, `${shot.id}.control-manifest.json`)
   };
-  for (const key of ['start', 'depth', 'mask']) fs.writeFileSync(files[key], rendered[key], 'utf8');
+  for (const key of ['start', 'end', 'depth', 'mask', 'edge', 'pose']) fs.writeFileSync(files[key], rendered[key], 'utf8');
+  fs.writeFileSync(files.manifest, JSON.stringify({
+    schema: 'futuredream-control-bundle/v1', fps: rendered.fps, width: rendered.width, height: rendered.height,
+    maxFrame: rendered.maxFrame, keyframes: rendered.keyframes, cameraTrajectory: rendered.trajectory,
+    poseSequence: rendered.poseSequence, layers: rendered.layers,
+    maps: Object.fromEntries(['start', 'end', 'depth', 'mask', 'edge', 'pose'].map((key) => [key, files[key]]))
+  }, null, 2), 'utf8');
   const updated = store.update(projectId, (p) => {
     const target = p.shots.find((x) => x.id === shotId);
     target.stage = stage;
-    target.controls = { ...files, width: rendered.width, height: rendered.height, objects: rendered.objects, at: new Date().toISOString() };
+    target.controls = { ...files, width: rendered.width, height: rendered.height, fps: rendered.fps,
+      maxFrame: rendered.maxFrame, keyframes: rendered.keyframes, trajectory: rendered.trajectory,
+      poseSequence: rendered.poseSequence, layers: rendered.layers, objects: rendered.objects, at: new Date().toISOString() };
     return p;
   });
   return { project: updated, controls: updated.shots.find((x) => x.id === shotId).controls };

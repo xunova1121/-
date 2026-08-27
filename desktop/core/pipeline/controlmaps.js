@@ -1,43 +1,87 @@
-/** 从预演台空间数据导出模型可消费的 SVG 控制图。 */
-const W = 1280, H = 720;
+/** 从预演台空间与关键帧导出可控视频模型能消费的控制包。 */
+import { frameState, normalizeStage, stageObjects } from '../../ui/previz-stage.js';
+
+const W = 1280, H = 720, FPS = 24;
 const esc = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c]));
+
+function stageAt(source, frame) {
+  const stage = structuredClone(source || {});
+  normalizeStage(stage);
+  const state = frameState(stage, frame);
+  for (const { item } of stageObjects(stage)) Object.assign(item, state.values[item.id] || {});
+  return stage;
+}
 
 function projected(stage) {
   const cam = stage.cam || { x: 0, y: -3, height: 1.6, lens: 35 };
   const target = stage.subjects?.[0] || { x: 0, y: 0 };
   const look = Math.atan2(Number(target.y) - Number(cam.y), Number(target.x) - Number(cam.x));
   const focal = Math.max(24, Number(cam.lens || 35));
-  return [
-    ...(stage.subjects || []).map((item, i) => ({ kind: 'subject', item, index: i + 1 })),
-    ...(stage.marks || []).filter((x) => !x.far).map((item, i) => ({ kind: 'prop', item, index: i + 1 }))
-  ].map((entry) => {
-    const dx = Number(entry.item.x) - Number(cam.x), dy = Number(entry.item.y) - Number(cam.y);
-    const depth = dx * Math.cos(look) + dy * Math.sin(look);
-    const side = -dx * Math.sin(look) + dy * Math.cos(look);
-    const scale = Math.min(3, focal / 35 * 3.4 / Math.max(.2, depth)) * Number(entry.item.scale || 1);
-    const h = Math.max(35, Number(entry.item.height || 1) * H * .24 * scale);
-    return { ...entry, depth, x: W / 2 + side * W * .16 * scale, y: H * .54 - h * .12, h };
-  }).filter((x) => x.depth > .15).sort((a, b) => b.depth - a.depth);
+  return [...(stage.subjects || []).map((item, i) => ({ kind: 'subject', item, index: i + 1 })),
+    ...(stage.marks || []).filter((x) => !x.far).map((item, i) => ({ kind: 'prop', item, index: i + 1 }))]
+    .map((entry) => {
+      const dx = Number(entry.item.x) - Number(cam.x), dy = Number(entry.item.y) - Number(cam.y);
+      const depth = dx * Math.cos(look) + dy * Math.sin(look);
+      const side = -dx * Math.sin(look) + dy * Math.cos(look);
+      const scale = Math.min(3, focal / 35 * 3.4 / Math.max(.2, depth)) * Number(entry.item.scale || 1);
+      const h = Math.max(35, Number(entry.item.height || 1) * H * .24 * scale);
+      return { ...entry, depth, x: W / 2 + side * W * .16 * scale, y: H * .54 - h * .12, h };
+    }).filter((x) => x.depth > .15).sort((a, b) => b.depth - a.depth);
 }
 
 function svg(body, title, background = '#11131a') {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><title>${esc(title)}</title><rect width="100%" height="100%" fill="${background}"/>${body}</svg>`;
 }
 
-export function renderControls(stage = {}) {
-  const objects = projected(stage);
-  const shape = (x, fill, label = true) => {
-    const w = x.kind === 'subject' ? x.h * .32 : x.h * .62;
-    const h = x.kind === 'subject' ? x.h : x.h * .75;
-    return `<rect x="${(x.x - w / 2).toFixed(1)}" y="${(x.y - h).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="${x.kind === 'subject' ? (w * .35).toFixed(1) : 3}" fill="${fill}"/>${label ? `<text x="${x.x.toFixed(1)}" y="${(x.y - h - 12).toFixed(1)}" fill="white" font-size="18" text-anchor="middle">${esc(x.item.name || x.kind)}</text>` : ''}`;
-  };
-  const start = svg(`<path d="M0 ${H * .54}H${W}" stroke="#3b4050"/>${objects.map((x) => shape(x, x.kind === 'subject' ? '#d8a24d' : '#687083')).join('')}<path d="M620 360h40M640 340v40" stroke="white" opacity=".65"/>`, '首帧构图控制');
-  const far = Math.max(1, ...objects.map((x) => x.depth));
-  const depth = svg(objects.map((x) => {
-    const value = Math.max(20, Math.min(245, Math.round(255 * (1 - x.depth / (far + 1)))));
-    return shape(x, `rgb(${value},${value},${value})`, false);
-  }).join(''), '深度控制图', '#000');
-  const palette = ['#ff355e', '#00d4ff', '#ffe066', '#8aff80', '#b388ff', '#ff9f43'];
-  const mask = svg(objects.map((x, i) => shape(x, palette[i % palette.length], false)).join(''), '对象遮罩控制图', '#000');
-  return { start, depth, mask, width: W, height: H, objects: objects.map((x) => ({ id: x.item.id, name: x.item.name, kind: x.kind, depth: Number(x.depth.toFixed(3)) })) };
+function geometry(x) {
+  const w = x.kind === 'subject' ? x.h * .32 : x.h * .62;
+  const h = x.kind === 'subject' ? x.h : x.h * .75;
+  return { w, h, left: x.x - w / 2, top: x.y - h };
 }
+
+function shape(x, fill, { label = false, image = false, outline = false } = {}) {
+  const g = geometry(x), rx = x.kind === 'subject' ? g.w * .35 : 3;
+  const href = x.item.thumbnail || x.item.image || '';
+  const base = image && href
+    ? `<defs><clipPath id="clip-${esc(x.item.id)}"><rect x="${g.left.toFixed(1)}" y="${g.top.toFixed(1)}" width="${g.w.toFixed(1)}" height="${g.h.toFixed(1)}" rx="${rx.toFixed(1)}"/></clipPath></defs><image href="${esc(href)}" x="${g.left.toFixed(1)}" y="${g.top.toFixed(1)}" width="${g.w.toFixed(1)}" height="${g.h.toFixed(1)}" preserveAspectRatio="xMidYMid slice" clip-path="url(#clip-${esc(x.item.id)})"/>`
+    : `<rect x="${g.left.toFixed(1)}" y="${g.top.toFixed(1)}" width="${g.w.toFixed(1)}" height="${g.h.toFixed(1)}" rx="${rx.toFixed(1)}" fill="${fill}"${outline ? ' stroke="white" stroke-width="5" fill="none"' : ''}/>`;
+  return `${base}${label ? `<text x="${x.x.toFixed(1)}" y="${(g.top - 12).toFixed(1)}" fill="white" font-size="18" text-anchor="middle">${esc(x.item.name || x.kind)}</text>` : ''}`;
+}
+
+function poseShape(x) {
+  if (x.kind !== 'subject') return '';
+  const g = geometry(x), cx = x.x, head = g.top + g.h * .13, neck = g.top + g.h * .25, hip = g.top + g.h * .6, foot = g.top + g.h;
+  return `<g stroke="#fff" stroke-width="8" stroke-linecap="round" fill="none"><circle cx="${cx}" cy="${head}" r="${g.w * .18}"/><path d="M${cx} ${neck}V${hip}M${cx} ${neck + g.h * .1}L${cx - g.w * .65} ${neck + g.h * .32}M${cx} ${neck + g.h * .1}L${cx + g.w * .65} ${neck + g.h * .32}M${cx} ${hip}L${cx - g.w * .45} ${foot}M${cx} ${hip}L${cx + g.w * .45} ${foot}"/></g>`;
+}
+
+function renderFrame(stage, title) {
+  const objects = projected(stage);
+  const backdrop = stage.backdrop?.image ? `<image href="${esc(stage.backdrop.image)}" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" opacity=".72"/>` : '';
+  return { image: svg(`${backdrop}<path d="M0 ${H * .54}H${W}" stroke="#3b4050"/>${objects.map((x) => shape(x, x.kind === 'subject' ? '#d8a24d' : '#687083', { label: true, image: true })).join('')}<path d="M620 360h40M640 340v40" stroke="white" opacity=".65"/>`, title), objects };
+}
+
+export function renderControls(source = {}, { duration = 5, sampleEvery = 12 } = {}) {
+  const base = structuredClone(source || {});
+  normalizeStage(base);
+  const maxFrame = Math.max(1, Math.round(Number(duration || 5) * FPS));
+  const frameSet = new Set([0, ...(base.keyframes || []).map((x) => x.frame), maxFrame]);
+  for (let frame = 0; frame <= maxFrame; frame += Math.max(1, sampleEvery)) frameSet.add(frame);
+  const sampled = [...frameSet].filter((x) => x >= 0 && x <= maxFrame).sort((a, b) => a - b).map((frame) => ({ frame, stage: stageAt(base, frame) }));
+  const first = renderFrame(sampled[0].stage, '首帧关键帧');
+  const last = renderFrame(sampled.at(-1).stage, '尾帧关键帧');
+  const objects = first.objects;
+  const far = Math.max(1, ...objects.map((x) => x.depth));
+  const depth = svg(objects.map((x) => { const value = Math.max(20, Math.min(245, Math.round(255 * (1 - x.depth / (far + 1))))); return shape(x, `rgb(${value},${value},${value})`); }).join(''), '深度控制图', '#000');
+  const palette = ['#ff355e', '#00d4ff', '#ffe066', '#8aff80', '#b388ff', '#ff9f43'];
+  const mask = svg(objects.map((x, i) => shape(x, palette[i % palette.length])).join(''), '对象遮罩控制图', '#000');
+  const edge = svg(objects.map((x) => shape(x, 'none', { outline: true })).join(''), '边缘控制图', '#000');
+  const pose = svg(objects.map(poseShape).join(''), '人物姿态控制图', '#000');
+  const trajectory = sampled.map(({ frame, stage }) => ({ frame, time: Number((frame / FPS).toFixed(3)), x: stage.cam.x, y: stage.cam.y, height: stage.cam.height, rotation: stage.cam.rotation || 0, lens: stage.cam.lens || 35 }));
+  const poseSequence = sampled.map(({ frame, stage }) => ({ frame, subjects: (stage.subjects || []).map((x) => ({ id: x.id, x: x.x, y: x.y, height: x.height, rotation: x.rotation, scale: x.scale })) }));
+  const layers = [...(base.backdrop ? [{ id: 'background', kind: 'background', source: base.backdrop.image || null }] : []),
+    ...stageObjects(base).filter((x) => x.kind !== 'camera').map((x, i) => ({ id: x.item.id, kind: x.kind, name: x.item.name, source: x.item.thumbnail || null, z: i + 1 }))];
+  return { start: first.image, end: last.image, depth, mask, edge, pose, width: W, height: H, fps: FPS, maxFrame,
+    keyframes: (base.keyframes || []).map((x) => x.frame), trajectory, poseSequence, layers,
+    objects: objects.map((x) => ({ id: x.item.id, name: x.item.name, kind: x.kind, depth: Number(x.depth.toFixed(3)) })) };
+}
+

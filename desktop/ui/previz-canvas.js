@@ -23,7 +23,7 @@
  */
 
 import * as previz from '/previz.js';
-import { addKeyframe, createHistory, findObject, normalizeStage, stageObjects } from './previz-stage.js';
+import { addKeyframe, applyFrame, createHistory, findObject, normalizeStage, stageObjects } from './previz-stage.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -645,19 +645,19 @@ export function previzPanel(stage, {
   const controlShelf = document.createElement('div');
   controlShelf.className = 'previz-control-shelf';
   if (onExportControls) {
-    const exportBtn = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '输出首帧 / 深度 / 遮罩' });
+    const exportBtn = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '输出可控视频控制包' });
     exportBtn.onclick = async () => {
       exportBtn.disabled = true; exportBtn.textContent = '正在输出…';
       try {
         const maps = await onExportControls(stage);
         controlShelf.replaceChildren(exportBtn);
-        for (const [key, label] of [['start', '首帧构图'], ['depth', '深度图'], ['mask', '对象遮罩']]) {
+        for (const [key, label] of [['start', '首帧'], ['end', '尾帧'], ['depth', '深度图'], ['pose', '人物姿态'], ['edge', '边缘图'], ['mask', '对象遮罩']]) {
           if (!maps?.[key]) continue;
           const card = document.createElement('a'); card.className = 'previz-control'; card.href = maps[key]; card.target = '_blank';
           card.append(Object.assign(document.createElement('img'), { src: maps[key], alt: label }), Object.assign(document.createElement('span'), { textContent: label }));
           controlShelf.append(card);
         }
-      } finally { exportBtn.disabled = false; exportBtn.textContent = '重新输出控制图'; }
+      } finally { exportBtn.disabled = false; exportBtn.textContent = '重新输出控制包'; }
     };
     controlShelf.append(exportBtn);
   }
@@ -698,7 +698,14 @@ export function previzPanel(stage, {
     const maxFrame = Math.max(24, Math.round(Number(duration || 5) * 24));
     const range = Object.assign(document.createElement('input'), { type: 'range', min: '0', max: String(maxFrame), value: String(currentFrame) });
     const frame = Object.assign(document.createElement('b'), { textContent: `${currentFrame}f / ${maxFrame}f` });
-    range.oninput = () => { currentFrame = Number(range.value); frame.textContent = `${currentFrame}f / ${maxFrame}f`; };
+    range.oninput = () => {
+      currentFrame = Number(range.value);
+      frame.textContent = `${currentFrame}f / ${maxFrame}f`;
+      if ((stage.keyframes || []).length) {
+        applyFrame(stage, currentFrame);
+        canvas.redraw(); director.redraw(); viewport.redraw(); paintInspector();
+      }
+    };
     const add = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '＋记录关键帧' });
     add.onclick = () => { addKeyframe(stage, currentFrame); history.commit(); paintTimeline(); onChange(); };
     timeline.append(Object.assign(document.createElement('span'), { className: 'previz-cap', textContent: '24fps 时间轴' }), range, frame, add);
@@ -942,3 +949,4 @@ export function previzPanel(stage, {
   host.append(viewBar, assetShelf, viewWrap, canvas.node, inspector, timeline, controlShelf, controls, readout);
   return { node: host, refresh };
 }
+

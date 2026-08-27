@@ -97,6 +97,10 @@ export function addKeyframe(stage, frame, objectIds = []) {
     if (!found) continue;
     const x = found.item;
     values[id] = { x: x.x, y: x.y, height: x.height, rotation: x.rotation, scale: x.scale };
+    if (found.kind === 'camera') {
+      values[id].lens = x.lens;
+      values[id].move = { ...(x.move || {}) };
+    }
   }
   const key = { id: `kf-${Math.max(0, Math.round(frame))}`, frame: Math.max(0, Math.round(frame)), values };
   const at = stage.keyframes.findIndex((x) => x.frame === key.frame);
@@ -104,3 +108,34 @@ export function addKeyframe(stage, frame, objectIds = []) {
   stage.keyframes.sort((a, b) => a.frame - b.frame);
   return key;
 }
+
+/** 在两个关键帧之间线性求值，供时间轴预览和控制图序列共用。 */
+export function frameState(stage, frame) {
+  normalizeStage(stage);
+  const keys = (stage.keyframes || []).slice().sort((a, b) => a.frame - b.frame);
+  const f = Math.max(0, Number(frame) || 0);
+  const left = [...keys].reverse().find((x) => x.frame <= f) || keys[0];
+  const right = keys.find((x) => x.frame >= f) || keys.at(-1);
+  const span = Math.max(1, Number(right?.frame || 0) - Number(left?.frame || 0));
+  const t = left && right ? Math.max(0, Math.min(1, (f - left.frame) / span)) : 0;
+  const values = {};
+  for (const { item } of stageObjects(stage)) {
+    const a = left?.values?.[item.id] || item;
+    const b = right?.values?.[item.id] || a;
+    const out = { ...item };
+    for (const key of ['x', 'y', 'height', 'rotation', 'scale', 'lens']) {
+      const av = Number(a[key]), bv = Number(b[key]);
+      if (Number.isFinite(av) && Number.isFinite(bv)) out[key] = Number((av + (bv - av) * t).toFixed(4));
+    }
+    out.move = { ...((t < .5 ? a.move : b.move) || item.move || {}) };
+    values[item.id] = out;
+  }
+  return { frame: f, left: left?.frame ?? null, right: right?.frame ?? null, t, values };
+}
+
+export function applyFrame(stage, frame) {
+  const state = frameState(stage, frame);
+  for (const { item } of stageObjects(stage)) Object.assign(item, state.values[item.id] || {});
+  return state;
+}
+

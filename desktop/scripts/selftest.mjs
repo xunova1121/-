@@ -10688,15 +10688,22 @@ section('工业化升级：实例路由、任务账本和控制图');
   jobsMod.__reset();
 
   const controls = await import('../core/pipeline/controlmaps.js');
-  const maps = controls.renderControls({ cam: { x: 0, y: -3, height: 1.6, lens: 35 }, subjects: [{ id: 'actor-a', name: '阿澜', x: 0, y: 0, height: 1.72 }], marks: [{ id: 'prop-table', name: '桌', x: 1, y: 1 }] });
+  const maps = controls.renderControls({ cam: { id: 'cam-main', x: 0, y: -3, height: 1.6, lens: 35 }, subjects: [{ id: 'actor-a', name: '阿澜', x: 0, y: 0, height: 1.72, thumbnail: '/api/media?path=alan.png' }], marks: [{ id: 'prop-table', name: '桌', x: 1, y: 1 }], keyframes: [
+    { frame: 0, values: { 'cam-main': { x: 0, y: -3, height: 1.6, lens: 35 }, 'actor-a': { x: 0, y: 0, height: 1.72 } } },
+    { frame: 120, values: { 'cam-main': { x: 1, y: -2, height: 1.8, lens: 50 }, 'actor-a': { x: 2, y: 0, height: 1.72 } } }
+  ] }, { duration: 5 });
   check('预演台能输出可见首帧、深度图和遮罩图',
     [maps.start, maps.depth, maps.mask].every((x) => x.startsWith('<svg') && x.includes('1280')));
   check('控制图保留稳定对象标识和深度', maps.objects[0]?.id && Number.isFinite(maps.objects[0]?.depth));
+  check('控制包有首尾帧、姿态和边缘图', [maps.start, maps.end, maps.pose, maps.edge].every((x) => x.startsWith('<svg')));
+  check('真实人物图片进入首帧合成', maps.start.includes('/api/media?path=alan.png'));
+  check('摄影机关键帧被插值成轨迹', maps.trajectory.length > 2 && maps.trajectory.at(-1).x === 1 && maps.trajectory.at(-1).lens === 50);
+  check('人物姿态序列和分层合成清单齐全', maps.poseSequence.length === maps.trajectory.length && maps.layers.some((x) => x.id === 'actor-a'));
 
   const previzUi = fs.readFileSync(path.join(PROJECT_ROOT, 'ui', 'previz-canvas.js'), 'utf8');
   check('工作台有摄影机取景、关键帧和资产拖入',
     /cameraViewport/.test(previzUi) && /addKeyframe/.test(previzUi) && /application\/x-futuredream-asset/.test(previzUi));
-  check('工作台直接展示控制图而不是 JSON 链接', /previz-control-shelf/.test(previzUi) && /输出首帧 \/ 深度 \/ 遮罩/.test(previzUi));
+  check('工作台直接展示控制图而不是 JSON 链接', /previz-control-shelf/.test(previzUi) && /输出可控视频控制包/.test(previzUi));
 }
 
 section('根地址：手机去手机版，电脑留电脑版');
