@@ -938,10 +938,18 @@ await page.evaluate(async (id) => {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bible: p.bible })
   });
 }, proj.id);
-await page.goto(`${url}#/studio/${proj.id}`);
-await page.waitForTimeout(1200);
+/**
+ * ⚠ 必须 reload()，不能 goto 同一个地址。
+ *
+ * 地址一模一样（只有 hash）时浏览器根本不重新加载 —— 于是内存里那份
+ * project 还是老的，刚 PATCH 进去的那个场景不在里面。这一条第一次跑
+ * 就栽在这儿：报"没摆上来的场景列不出来"，看起来像功能坏了，
+ * 其实是测试站错了地方。（这个坑在信号链那一节已经写过一次了。）
+ */
+await page.reload();
+await page.waitForTimeout(1500);
 await step('设定集').click();
-await page.waitForTimeout(1200);
+await page.waitForTimeout(1500);
 
 const sitePanel = page.locator('.site-panel').first();
 check('设定集这一步能看到场地图', (await sitePanel.count()) > 0);

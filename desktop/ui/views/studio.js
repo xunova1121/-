@@ -3465,7 +3465,19 @@ export default {
     function remountBible({ delay = 0 } = {}) {
       if (!bibleMounted) return;
       clearTimeout(bibleTimer);
-      bibleTimer = setTimeout(() => mountBible(), delay);
+      bibleTimer = setTimeout(() => {
+        mountBible();
+        /**
+         * 场地图跟着一起刷新。
+         *
+         * 新加一个场景之后，「摆上来」那一排里必须有它 —— 而它就在同一页
+         * 上面几厘米的地方列着。不刷的话用户会以为"这个场景不能摆到图上"。
+         *
+         * ⚠ 只重画、不重建：重建会把画布的平移缩放位置一起清掉，
+         * 而人可能正拖到一半。
+         */
+        sitePanelApi?.render();
+      }, delay);
     }
 
     async function mountBible() {
@@ -3489,16 +3501,12 @@ export default {
      */
     const sitePanelHost = h('div', { class: 'panel', style: 'display:none' });
     let siteMounted = false;
+    // 建好之后留一个把手，设定集变了就叫它重画一遍（见 remountBible）
+    let sitePanelApi = null;
 
     function mountSite() {
       clear(sitePanelHost);
-      sitePanelHost.append(
-        h('div', { class: 'panel-head' },
-          h('b', {}, '场地图'),
-          h('span', { class: 'muted' },
-            '把同一个地方的几个场景摆到一张图上。滚轮缩放，拖空白平移。'
-            + '外景尤其要摆 —— 一片山坡上的三场戏，太阳只有一个。')),
-        siteCanvasMod.sitePanel(project, {
+      sitePanelApi = siteCanvasMod.sitePanel(project, {
           onPlace: async (scene, place) => {
             try {
               // cap:site-map
@@ -3517,7 +3525,14 @@ export default {
               project.bible = p2.bible;
             } catch (err) { toast(err.message, 'err'); }
           }
-        }).node
+        });
+      sitePanelHost.append(
+        h('div', { class: 'panel-head' },
+          h('b', {}, '场地图'),
+          h('span', { class: 'muted' },
+            '把同一个地方的几个场景摆到一张图上。滚轮缩放，拖空白平移。'
+            + '外景尤其要摆 —— 一片山坡上的三场戏，太阳只有一个。')),
+        sitePanelApi.node
       );
     }
 

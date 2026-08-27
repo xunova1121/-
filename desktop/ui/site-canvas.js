@@ -474,7 +474,15 @@ export function sitePanel(project, {
 } = {}) {
   const host = elDiv('site-panel');
   const sites = site.sitesOf(project);
-  const allScenes = (project?.bible?.scenes || []).map((s) => s.name).filter(Boolean);
+  /**
+   * 场景清单每次重画都**重新读一遍**，不在建面板时抓一份留着。
+   *
+   * ⚠ 抓一份留着的后果：在设定集里新加一个场景之后，「摆上来」那一排
+   * 里没有它 —— 而它就在同一页上面几厘米的地方列着。用户会以为
+   * "这个场景不能摆到图上"，实际上只是这块面板拿的是老名单。
+   * 这类"界面记着一份过期的东西"从来不报错，只是功能看起来少了一块。
+   */
+  const scenesNow = () => (project?.bible?.scenes || []).map((s) => s.name).filter(Boolean);
 
   /**
    * 当前在看哪片场地。
@@ -494,6 +502,7 @@ export function sitePanel(project, {
   function render() {
     while (body.firstChild) body.removeChild(body.firstChild);
 
+    const allScenes = scenesNow();
     const fresh = site.sitesOf(project);
     const model = fresh.find((s) => s.name === current) || fresh[0] || null;
     if (model) current = model.name;

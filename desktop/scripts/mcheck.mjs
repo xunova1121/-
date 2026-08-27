@@ -60,7 +60,12 @@ store.update(proj.id, (p) => {
     characters: [{ name: '阿澜', appearance: '短发', seed: 1,
       variants: [{ id: 'v-default', name: '默认造型', sheetPath: asset('sheet-alan.png') }],
       sheetPath: asset('sheet-alan.png') }],
-    scenes: [], props: [] };
+    // 两个场景：场地图那一节要能把它们摆到一张图上，一个是摆不出关系的
+    scenes: [
+      { name: '栈桥', appearance: '伸进雾里的木栈桥' },
+      { name: '灯塔下', appearance: '锈迹斑斑的灯塔基座' }
+    ],
+    props: [] };
   p.shots = [
     { id: 's1', index: 1, characters: ['阿澜'], description: '阿澜走向栈桥', camera: '中景', dialogue: '设备正常。', speaker: '阿澜', duration: 4, consistency: { score: 88, pass: true }, videoPath: asset('v1.mp4'), audioPath: asset('a1.mp3'), imagePath: asset('i1.png') },
     // 第二镜**只有图、还没出视频** —— 这是"出图完、视频还没跑"时的常态，
@@ -641,7 +646,8 @@ if (sheetUp) {
   await page.evaluate((id) => localStorage.setItem('fd.m.project', id), proj.id);
   await page.reload();
   await page.waitForTimeout(1200);
-  await page.locator('.tab', { hasText: '设定集' }).click();
+  // ⚠ 底部那一栏的标签是「设定」，不是「设定集」——「设定集」是流水线步骤名
+  await page.locator('.tab', { hasText: '设定' }).click();
   await page.waitForTimeout(900);
 
   const head = page.locator('.site-details > summary').first();
@@ -699,10 +705,14 @@ if (sheetUp) {
       console.log('   拖场景真的挪了位置（不是整张图跟着走）：',
         before !== after ? '✓' : `✕ 拖前拖后都是 ${before}`);
 
-      const saved = await page.evaluate(async (id) => {
-        const p = await (await fetch(`/api/projects/${id}`)).json();
-        return (p.bible.scenes || []).filter((s) => s.place).length;
-      }, proj.id);
+      /**
+       * ⚠ 从 Node 这一侧读盘，不要在页面里 fetch。
+       *
+       * 手机版的 /api 是要口令的，页面里裸 fetch 拿回来的是 401 的 JSON，
+       * 读 `.bible` 就炸 —— 而那报的是测试自己的错，不是功能的错。
+       * 别处（⑤c）也是直接 store.read，跟着来。
+       */
+      const saved = (store.read(proj.id).bible.scenes || []).filter((s) => s.place).length;
       console.log('   位置落到盘上了：', saved >= 1 ? '✓' : '✕ 界面动了但没存住');
 
       // 比例尺：缩放之后没有它，没人知道自己在看多大一块地

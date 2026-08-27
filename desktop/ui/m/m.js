@@ -1087,9 +1087,16 @@ function paintBible() {
     if (!items.length) continue;
     out.push(h('div', { class: 'sec' }, title));
     for (const item of items) out.push(bibleCard(kind, item, v));
-    // 场景列完了紧跟着摆场地图 —— 它整理的正是这几个场景之间的关系
-    if (kind === 'scene') out.push(siteCard());
   }
+  /**
+   * 场地图**永远摆出来**，哪怕一个场景都还没有。
+   *
+   * ⚠ 第一版把它塞进了上面那个循环的"场景"分支里，于是没有场景时
+   * 整张卡片**凭空消失** —— 电脑版在同样情况下是显示一句"得先有场景"。
+   * 同一个功能在两端一个说话一个装死，比两端都没有更糟：
+   * 用户在手机上找不到，会以为这个功能手机上没做。
+   */
+  out.push(siteCard());
   return out;
 }
 
