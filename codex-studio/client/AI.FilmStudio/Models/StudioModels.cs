@@ -3,6 +3,7 @@ namespace AI.FilmStudio.Models;
 using System.Text.Json.Serialization;
 using System.Text.Json;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.CompilerServices;
 
 public sealed class Shot : INotifyPropertyChanged
@@ -436,3 +437,4 @@ public sealed class AutomationRouteTotal
     [JsonPropertyName("shots")] public int Shots { get; set; }
     [JsonPropertyName("seconds")] public int Seconds { get; set; }
 }
+
