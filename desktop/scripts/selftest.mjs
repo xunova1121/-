@@ -2868,6 +2868,56 @@ section('大纲：改动指令，不是推倒重来');
     check('lockBeats 也是纯函数', o.beats.every((b) => !b.locked));
   }
 
+  /**
+   * ── 还没拆分镜的那几场，要说出来 ──
+   *
+   * 在大纲里插一场之后，如果没有一句话告诉你"有 1 场还没拆分镜"，
+   * 那一场就会一直躺在那儿：功能是好的（再点一次分镜就会拆它），
+   * 但没人知道该去点。
+   */
+  {
+    const half = {
+      beats: [
+        { id: 'b-07', scene: '山门外', summary: '甲。', locked: true },
+        { id: 'b-04', scene: '石阶', summary: '乙。', locked: false }
+      ]
+    };
+    check('列得出还没拆的那几场',
+      ol.pendingBeats(half).map((b) => b.id).join(',') === 'b-04',
+      JSON.stringify(ol.pendingBeats(half).map((b) => b.id)));
+    check('摘要里说了还剩几场没拆', /还有 1 场没拆/.test(ol.summarize(half)), ol.summarize(half));
+    /**
+     * ⚠ 一场都没拆过时**不说**这句。
+     * 那时候"还有 2 场没拆"是废话 —— 本来就一场都没拆，
+     * 而且它会和"从剧本生成大纲"那颗按钮抢注意力。
+     */
+    const none = { beats: [{ id: 'b-07', scene: 'x', summary: '甲。' }] };
+    check('一场都没拆过时不说这句（那是废话）',
+      !/还有/.test(ol.summarize(none)), ol.summarize(none));
+    check('按章过滤得出来',
+      ol.pendingBeats({ beats: [
+        { id: 'b-01', chapterId: 'ch-01', scene: 'x', summary: '甲。' },
+        { id: 'b-02', chapterId: 'ch-02', scene: 'y', summary: '乙。' }
+      ] }, 'ch-02').map((b) => b.id).join(',') === 'b-02');
+  }
+
+  // ── 只锁真的发出去的那几场 ──
+  {
+    const o = {
+      beats: [
+        { id: 'b-07', scene: '一', summary: '甲。' },
+        { id: 'b-04', scene: '二', summary: '乙。' },
+        { id: 'b-99', scene: '三', summary: '拆到一半插进来的。' }
+      ]
+    };
+    const only = ol.lockBeats(o, null, ['b-07', 'b-04']);
+    check('给了 ids 就只锁这几场',
+      only.beats.map((b) => b.locked).join(',') === 'true,true,false',
+      JSON.stringify(only.beats.map((b) => [b.id, b.locked])));
+    check('不给 ids 时还是按范围锁（老行为没变）',
+      ol.lockBeats(o, null).beats.every((b) => b.locked));
+  }
+
   // ── 解锁：唯一一条能重拆的路 ──
   {
     const o = {
@@ -3045,6 +3095,56 @@ section('大纲 → 分镜：只拆没拆过的场次');
     check('镜号是连着的，没有重号',
       new Set(after.shots.map((s) => s.index)).size === after.shots.length,
       JSON.stringify(after.shots.map((s) => s.index)));
+  }
+
+  /**
+   * ── 拆到一半 / 拆完之后临时加的一场 ──
+   *
+   * 用户的原话："分镜生成中或者生成完后，临时新增的大纲，要同步到新增分镜"。
+   *
+   * ⚠ 这里埋着一个**静默**的坑：拆完之后锁场次时，锁的是"范围内所有场次"，
+   * 而不是"这一批真的发出去的那几场"。于是**拆的过程中**插进来的一场
+   * 会被连带锁上 —— 它从来没被拆过，却再也拆不了了（锁着的场次
+   * 模型也改不动），而且不报任何错：它就那么留在大纲上，永远没有镜头。
+   */
+  {
+    const p = mk();
+
+    /**
+     * ⚠ 关键是**在拆的过程中**插进去，不是拆完之后。
+     *
+     * analyzeScript 一开始就把"这一批要拆哪几场"定下来了，然后去等模型。
+     * 在这个空档往大纲里插一场，它不在这一批里 —— 而收尾时锁场次，
+     * 锁的是"范围内所有场次"，把它一起锁了。
+     *
+     * 拆完之后再插的那种情况本来就是好的（下一次拆会拆它），所以那样测不出来。
+     */
+    const running = studio.analyzeScript(p.id, { force: true });
+    store.update(p.id, (x) => {
+      const beats = ol.normalizeOutline(x.outline).beats;
+      x.outline = { beats: [...beats, {
+        id: 'b-99', scene: '码头', characters: [], summary: '拆到一半临时加的一场。', dialogue: '', seconds: 15, locked: false
+      }] };
+      return x;
+    });
+    await running;
+
+    const mid = store.read(p.id);
+    const fresh = ol.normalizeOutline(mid.outline).beats.find((b) => b.id === 'b-99');
+    check('拆的过程中插进来的那一场，没有被连带锁上',
+      fresh && fresh.locked === false,
+      JSON.stringify(ol.normalizeOutline(mid.outline).beats.map((b) => [b.id, b.locked])));
+
+    // 再拆一次：只拆这新的一场，老的镜头一个都不动
+    const keptIds = mid.shots.map((s) => s.id);
+    await studio.analyzeScript(p.id, { force: true });
+    const after = store.read(p.id);
+    check('再拆一次时，老场次的镜头原样还在',
+      keptIds.every((id) => after.shots.some((s) => s.id === id)),
+      JSON.stringify({ before: keptIds, after: after.shots.map((s) => s.id) }));
+    check('新加的那一场拆出了镜头',
+      after.shots.some((s) => s.beatId === 'b-99'),
+      JSON.stringify(after.shots.map((s) => s.beatId)));
   }
 
   // ── 没有大纲的项目：老路一点没变 ──

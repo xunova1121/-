@@ -1531,3 +1531,14 @@ select.mini {
 .previz-far { fill: var(--surface-2); stroke: var(--ink-faint); stroke-width: 1.5; stroke-dasharray: 3 2; cursor: grab; }
 .previz-sun { fill: var(--caution); stroke: var(--caution); cursor: grab; }
 .previz-sun-label { fill: var(--ground); font-size: 11px; text-anchor: middle; }
+
+/* 还没拆分镜的那几场。这不是警告，是**下一步** —— 所以用 beam 那一色，
+   和"出问题了"那种橙红分开 */
+.ob-pending {
+  margin-top: 10px; padding: 9px 11px; border-radius: 8px;
+  background: var(--beam-wash); border-left: 3px solid var(--beam);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  font-size: 12px; line-height: 1.6;
+}
+.ob-pending b { font-size: 13px; }
+.ob-pending span { flex: 1; min-width: 200px; color: var(--ink-dim); }

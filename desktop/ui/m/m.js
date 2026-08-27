@@ -1184,6 +1184,24 @@ function outlineCard() {
           b.locked ? h('span', { class: 'badge' }, '锁') : ''),
         h('div', { class: 'muted', style: 'line-height:1.6' }, b.summary)));
     }
+    /**
+     * 还没拆分镜的那几场。和电脑版同一条理由：插了一场之后
+     * 如果没人说"有 1 场还没拆"，它就会一直躺在那儿。
+     */
+    const pend = OUTLINE.pendingBeats(project.outline);
+    if (pend.length && o.beats.some((b) => b.locked)) {
+      const go = h('button', { class: 'btn sm grow' }, `拆这 ${pend.length} 场的分镜`);
+      go.onclick = () => {
+        // cap:run-stage
+        runStage('script', '分镜');
+      };
+      listHost.append(h('div', { class: 'mob-pending' },
+        h('b', {}, `有 ${pend.length} 场还没拆分镜`),
+        h('div', { class: 'muted', style: 'margin:3px 0 8px' },
+          `${pend.map((b) => b.scene || b.id).join('、')}。已经拆过的那几场不会被动。`),
+        h('div', { class: 'row' }, go)));
+    }
+
     const bud = OUTLINE.budgetCheck(project.outline, project.targetDuration);
     for (const one of bud?.issues || []) {
       listHost.append(h('div', { class: `mob-issue${one.kind === 'floor-over' ? ' hard' : ''}` },

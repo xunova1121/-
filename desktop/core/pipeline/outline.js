@@ -333,13 +333,25 @@ export function applyOps(outline, ops = [], { allowLocked = false } = {}) {
  *
  * chapterId 传 null = 整份都锁（没分章的项目，拆一次就是全片拆完）。
  */
-export function lockBeats(outline, chapterId = null) {
+export function lockBeats(outline, chapterId = null, ids = null) {
   const o = normalizeOutline(outline);
+  /**
+   * ⚠ 给了 ids 就**只锁这几场**，不管范围。
+   *
+   * 不这么做的话有个静默的坑：拆分镜是"先定下要拆哪几场 → 去等模型 →
+   * 回来收尾"。在等模型的那段空档里，人完全可能往大纲里插一场
+   *（他正看着大纲，而拆分镜要跑几十秒）。收尾时按"范围"锁的话，
+   * 那一场会被连带锁上 —— **它从来没被拆过，却再也拆不了了**
+   *（锁着的场次模型也改不动），而且不报任何错：它就那么留在大纲上，
+   * 永远没有镜头。
+   */
+  const only = Array.isArray(ids) ? new Set(ids.map(String)) : null;
   return {
     ...o,
-    beats: o.beats.map((b) => (
-      chapterId === null || b.chapterId === chapterId ? { ...b, locked: true } : b
-    ))
+    beats: o.beats.map((b) => {
+      if (only) return only.has(b.id) ? { ...b, locked: true } : b;
+      return chapterId === null || b.chapterId === chapterId ? { ...b, locked: true } : b;
+    })
   };
 }
 
@@ -362,6 +374,12 @@ export function unlockBeats(outline, ids = []) {
       !want.size || want.has(b.id) ? { ...b, locked: false } : b
     ))
   };
+}
+
+/** 还没拆过分镜的那几场。界面据此摆那颗「拆这几场的分镜」 */
+export function pendingBeats(outline, chapterId = null) {
+  return normalizeOutline(outline).beats
+    .filter((b) => !b.locked && (chapterId === null || b.chapterId === chapterId));
 }
 
 /** 一场戏一行，给提示词和摘要用 */
@@ -388,5 +406,14 @@ export function summarize(outline, targetSeconds) {
   const bits = [`${o.beats.length} 场，约 ${duration.fmtSeconds(total)}`];
   if (targetSeconds) bits.push(`目标 ${duration.fmtSeconds(Number(targetSeconds))}`);
   if (locked) bits.push(`${locked} 场已拆过分镜（锁着）`);
+  /**
+   * ⚠ "还有几场没拆"比"几场已经拆过"**更该说**。
+   *
+   * 后者是状态，前者是**下一步**。在大纲里插一场之后，如果没有一句话
+   * 告诉你"有 1 场还没拆分镜"，那一场就会一直躺在那儿 ——
+   * 功能是好的（再点一次分镜就会拆它），但没人知道该去点。
+   */
+  const pending = o.beats.length - locked;
+  if (locked && pending) bits.push(`还有 ${pending} 场没拆分镜`);
   return bits.join(' · ');
 }

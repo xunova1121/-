@@ -1561,8 +1561,14 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
           ...one,
           index: chapter ? chapters.globalShotIndex(chapter.index || 0, i + 1) : i + 1
         }));
-      // 拆过的场次锁上 —— 模型改大纲时碰不到它们了
-      p.outline = outline.lockBeats(p.outline, chapter ? chapter.id : null);
+      /**
+       * 只锁**这一批真的发出去的那几场**。
+       *
+       * ⚠ 不能按范围锁：等模型那几十秒里，人完全可能往大纲里插一场
+       * （他正看着大纲）。按范围锁会把它一起锁上 —— 从没拆过却再也拆不了，
+       * 而且不报任何错。
+       */
+      p.outline = outline.lockBeats(p.outline, null, targetBeats.map((x) => x.id));
       if (chapter) {
         const ch = p.chapters.find((c) => c.id === chapter.id);
         if (ch) { ch.stageStatus.script = 'done'; ch.shotCount = shots.length; }

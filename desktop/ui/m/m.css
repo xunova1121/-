@@ -803,3 +803,11 @@ input {
 }
 .mob-op.refused { opacity: .6; }
 .mob-refused { color: var(--alarm); font-size: 12px; }
+
+/* 还没拆分镜的那几场。不是警告，是**下一步** —— 和"出问题了"那种橙红分开 */
+.mob-pending {
+  margin-top: 10px; padding: 10px 12px; border-radius: 10px;
+  background: var(--beam-wash); border-left: 3px solid var(--beam);
+  font-size: 12.5px;
+}
+.mob-pending b { font-size: 13.5px; }

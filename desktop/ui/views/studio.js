@@ -3643,6 +3643,29 @@ export default {
             })() : ''));
         }
 
+        /**
+         * ── 还没拆分镜的那几场 ──
+         *
+         * 在大纲里插一场之后，如果没有一句话告诉你"有 1 场还没拆分镜"，
+         * 那一场就会一直躺在那儿：功能是好的（再点一次分镜就会拆它），
+         * 但没人知道该去点。
+         *
+         * 拆分镜要跑几十秒，而人这时候多半正看着大纲 —— 边跑边插一场
+         * 是很自然的动作，所以这条提示很常用得上。
+         */
+        const pend = OUTLINE.pendingBeats(project.outline);
+        const anyLocked = o.beats.some((b) => b.locked);
+        if (pend.length && anyLocked) {
+          const go = h('button', { class: 'btn primary sm', disabled: jobBusy() },
+            `拆这 ${pend.length} 场的分镜`);
+          go.onclick = () => runStage('script');
+          budgetHost.append(h('div', { class: 'ob-pending' },
+            h('b', {}, `有 ${pend.length} 场还没拆分镜`),
+            h('span', {}, `：${pend.map((b) => b.scene || b.id).join('、')}。`
+              + '已经拆过的那几场不会被动 —— 只拆这几场。'),
+            go));
+        }
+
         const bud = OUTLINE.budgetCheck(project.outline, project.targetDuration);
         for (const one of bud?.issues || []) {
           budgetHost.append(h('div', { class: `ob-issue ${one.kind === 'floor-over' ? 'hard' : ''}` },
