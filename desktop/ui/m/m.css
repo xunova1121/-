@@ -463,7 +463,21 @@ input {
    配色用这一端自己的 token —— 两端色板本来就是分开的。
    触控目标比电脑版大一圈：手指按不准 8px 的点。 */
 .previz-panel { margin-top: 10px; }
+.previz-viewbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.previz-viewbar .btn.on { border-color: var(--beam); color: var(--beam); background: rgba(232, 180, 95, 0.1); }
 .previz-canvas { border: 1px solid var(--line); border-radius: var(--r); display: block; }
+.previz-canvas[hidden] { display: none; }
+.previz-3d-sky { fill: var(--surface-1); }
+.previz-3d-grid { stroke: var(--line-soft); stroke-width: 1; }
+.previz-3d-axis { stroke: var(--line); stroke-width: 1.5; }
+.previz-3d-shadow { fill: #000; opacity: .2; }
+.previz-3d-person { fill: var(--beam); stroke: var(--ink); stroke-width: 1.5; }
+.previz-3d-head { fill: var(--surface-2); stroke: var(--ink); stroke-width: 1.5; }
+.previz-3d-prop { fill: var(--surface-2); stroke: var(--ink-faint); stroke-width: 1.5; }
+.previz-3d-tripod { stroke: var(--beam); stroke-width: 2; }
+.previz-3d-camera { fill: var(--beam); stroke: var(--ground); stroke-width: 1.5; }
+.previz-3d-label { fill: var(--ink); font-size: 11px; font-weight: 650; text-anchor: middle; paint-order: stroke; stroke: var(--surface-1); stroke-width: 3px; }
+.previz-3d-label.cam { fill: var(--beam); }
 .previz-bg { fill: var(--surface-1); }
 .previz-grid { stroke: var(--line-soft); stroke-width: 1; }
 .previz-axis { stroke: var(--line); stroke-width: 1.5; }
