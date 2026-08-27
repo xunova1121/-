@@ -1379,6 +1379,66 @@ if (await buildBtn.count()) {
     JSON.stringify(refuse.refused));
 }
 
+/**
+ * ── 分镜编辑器按下游分组 ──
+ *
+ * 用户问的是"标连续动作、选技法、绑说话人到底该出现在哪一步"。
+ * 答案是：每一样属于**它喂的那一步**。这一节量的是那个分割真的摆出来了，
+ * 而且「改了要重出 X」只在那样产物已经出过时才说。
+ */
+console.log('\n分镜编辑器：按下游分组');
+await step('分镜').click();
+await page.waitForTimeout(900);
+await page.locator('.shot-card .shot-edit-btn').first().click().catch(() => {});
+await page.waitForTimeout(500);
+{
+  const titles = await page.locator('.shot-group-head b').allInnerTexts();
+  check('四组都在（出图 / 出视频 / 配音 / 合成）',
+    ['出图用的', '出视频用的', '配音用的', '合成用的'].every((t) => titles.includes(t)),
+    titles.join(' | '));
+
+  const inGroup = async (title, label) => page.locator('.shot-group', { hasText: title })
+    .locator('label', { hasText: label }).count();
+  check('技法归在「出图用的」下面', (await inGroup('出图用的', '技法')) > 0);
+  check('「和上一镜的关系」归在「出视频用的」下面',
+    (await inGroup('出视频用的', '和上一镜')) > 0);
+  check('「谁说的」归在「配音用的」下面', (await inGroup('配音用的', '谁说的')) > 0);
+  check('转场归在「合成用的」下面', (await inGroup('合成用的', '转场')) > 0);
+
+  /**
+   * ⚠ 「改了要重出 X」**只在那样产物已经出过时**才显示。
+   * 还没出过的时候它是废话，而废话会把真正要紧的那句挤没。
+   *
+   * ⚠ 只看**打开着的那个**编辑器。所有镜头的编辑器都建在 DOM 里
+   * （靠 display 切换），不限定的话会把每一镜的提示都收进来 ——
+   * 第一版就是这么红的，而那是测试站错了地方。
+   */
+  const state = await page.evaluate(async (id) => {
+    const p = await (await fetch(`/api/projects/${id}`)).json();
+    const s0 = (p.shots || [])[0];
+    return { img: Boolean(s0?.imagePath), vid: Boolean(s0?.videoPath), aud: Boolean(s0?.audioPath) };
+  }, proj.id);
+  const redo = await page.locator('.shot-edit:visible .shot-group-redo').allInnerTexts();
+  const says = (re) => redo.some((t) => re.test(t));
+  check('出过图才提示要重出图', says(/重出这一镜的图/) === state.img,
+    JSON.stringify({ state, redo }));
+  check('出过视频才提示要重出视频', says(/重出视频/) === state.vid, JSON.stringify({ state, redo }));
+  check('配过音才提示要重配音', says(/重新配音/) === state.aud, JSON.stringify({ state, redo }));
+  /**
+   * 出图那一条必须说清**视频也得跟着重出** —— 视频是跟着图走的。
+   * 只说"重出图"的话，人重出完图，成片里还是旧视频，而且没人提醒。
+   */
+  if (state.img) {
+    check('出图那条说清了视频也得跟着重出',
+      says(/视频也得/), JSON.stringify(redo));
+  }
+  check('没出过的那几样一句废话都不说',
+    redo.length === [state.img, state.vid, state.aud].filter(Boolean).length
+      + (await page.locator('.shot-edit:visible .shot-group', { hasText: '合成用的' })
+        .locator('.shot-group-redo').count()),
+    JSON.stringify({ state, redo }));
+}
+
 check('全程没有页面报错', errs.length === 0, errs.slice(0, 3).join(' | '));
 
 await b.close();

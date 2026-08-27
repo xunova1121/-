@@ -1712,39 +1712,48 @@ export default {
         };
         descEl.onclick = openEdit;
 
+        /**
+         * ════════ 按**下游**分组 ════════
+         *
+         * 用户问的是"标连续动作、选技法、绑说话人到底该出现在哪一步"。
+         * 答案不是"分镜之前还是之后"，而是：**每一样属于它喂的那一步**。
+         *
+         *   技法卡     → 出图。改了图要重出（视频跟着图走，也得跟着重出）
+         *   连续动作   → 出视频。改了只要重出视频，图不受影响
+         *   谁说的     → 配音。改了只要重配音，图和视频都不受影响
+         *
+         * 原来这些平铺成一长条，四个步骤里长得一模一样 —— 看不出谁管谁，
+         * 也看不出改一样东西要付多少代价（重出图和重配音，差着几十倍的钱）。
+         *
+         * 每一组下面那句「改了要重出 X」**只在那样产物已经出过时**才显示：
+         * 还没出过的时候它是废话，而废话会把真正要紧的那句挤没。
+         */
+        const group = (title, note, done, redo, ...kids) => h('div', { class: 'shot-group' },
+          h('div', { class: 'shot-group-head' },
+            h('b', {}, title),
+            h('span', {}, note)),
+          ...kids.filter(Boolean),
+          done ? h('div', { class: 'shot-group-redo' }, redo) : null);
+
         // 用 add 而不是 editor.append：原生 append 不会摊平数组，也不会跳过 null ——
         // 直接 append 的话，"和上一镜的关系"那一组会被转成字符串印在界面上，
         // 第一镜（没有上一镜）还会真的显示一个 "null"。
         add(editor,
-          h('label', {}, '画面描述'),
-          fields.description,
-          h('div', { class: 'shot-edit-grid' },
-            h('div', {}, h('label', {}, '景别'), fields.camera),
-            h('div', {}, h('label', {}, '运镜'), fields.motion),
-            h('div', {}, h('label', {}, '场景'), fields.scene),
-            h('div', {}, h('label', {}, '出场角色'), fields.characters)),
-          h('div', { class: 'shot-edit-row' },
-            h('div', {}, h('label', {}, '画面里的道具'), fields.props,
-              h('div', { class: 'field-hint' },
-                '只填**这一镜真的看得见**的。特写里看不见的东西填上去，'
-                + '「道具消失又回来」那条检查会开始乱报 —— 而乱报的检查比没有更糟。'))),
-          h('label', {}, '台词'),
-          fields.dialogue,
-          h('label', {}, '画外音效'),
-          fields.sound,
-          h('div', { class: 'hint' },
-            '听得见但看不见的东西写这里。写进"画面描述"的话，出图模型画不出声音，' +
-            '会去画那个声音最像的东西 ——「敲门声」最常见的下场是画出一扇**开着的门**。'),
-          h('div', { class: 'shot-edit-grid' },
-            h('div', {}, h('label', {}, '谁说的'), fields.speaker),
-          // 和「谁说的」并排：一个管声音用谁的，一个管嘴动不动
-          h('div', {}, h('label', {}, '台词类型'), fields.lineKind),
-            h('div', {}, h('label', {}, '模型档位'), fields.tier),
-            h('div', {}, h('label', {}, '第几场'), fields.segment),
-            h('div', {}, h('label', {}, '转场'), fields.transition)),
-          h('div', { class: 'hint' },
-            '场次 = 同一时间同一地点的一段戏。跨场次不能锁末帧、不能拿邻镜当参考图，' +
-            '转场也只该出现在场次之间 —— 划错了这几件事都会做在错的地方。'),
+          group('出图用的', '改这些要重出图', shot.imagePath,
+            '⚠ 这一镜已经出过图了。改完要**重出这一镜的图**才生效 —— '
+            + '而视频是跟着图走的，所以视频也得跟着重出。',
+            h('label', {}, '画面描述'),
+            fields.description,
+            h('div', { class: 'shot-edit-grid' },
+              h('div', {}, h('label', {}, '景别'), fields.camera),
+              h('div', {}, h('label', {}, '场景'), fields.scene),
+              h('div', {}, h('label', {}, '出场角色'), fields.characters),
+              h('div', {}, h('label', {}, '画面里的道具'), fields.props)),
+            h('div', { class: 'field-hint' },
+              '道具只填**这一镜真的看得见**的。特写里看不见的东西填上去，'
+              + '「道具消失又回来」那条检查会开始乱报 —— 而乱报的检查比没有更糟。'),
+            h('div', { class: 'shot-edit-tip' },
+              '只写画面，别写外貌 —— 长相由设定集定，写在这儿反而会和设定集打架。'),
           // ── 这一镜谁穿哪套、场景是什么时段 ──
           // 只在真的有多版时才摆出来：大多数条目只有一版，摆一排"默认"是纯噪音
           (() => {
@@ -1814,6 +1823,10 @@ export default {
                   }))
               ]
             : null,
+            previzHost),
+
+          group('出视频用的', '改这些只要重出视频，图不用动', shot.videoPath,
+            '⚠ 这一镜已经出过视频了。改完要**重出视频**才生效。图不受影响，不用重出。',
           prevShot
             ? [
                 h('label', { style: 'margin-top:8px' }, `和上一镜（SH ${String(prevShot.index).padStart(3, '0')}）的关系`),
@@ -1826,10 +1839,33 @@ export default {
                   '同场景换机位保持默认就好 —— 每一镜都接上的话，整部片子会变成一个没剪过的长镜头。')
               ]
             : null,
-          previzHost,
-          h('div', { class: 'shot-edit-tip' },
-            '只写画面，别写外貌 —— 长相由设定集定，写在这儿反而会和设定集打架。',
-            shot.imagePath ? ' 改完这一镜已经出好的图不会变，要重出才生效。' : ''),
+            h('div', { class: 'shot-edit-grid' },
+              h('div', {}, h('label', {}, '运镜'), fields.motion),
+              h('div', {}, h('label', {}, '时长'), fields.duration),
+              h('div', {}, h('label', {}, '模型档位'), fields.tier),
+              h('div', {}, h('label', {}, '第几场'), fields.segment)),
+            h('div', { class: 'hint' },
+              '场次 = 同一时间同一地点的一段戏。跨场次不能锁末帧、不能拿邻镜当参考图，'
+              + '转场也只该出现在场次之间 —— 划错了这几件事都会做在错的地方。')),
+
+          group('配音用的', '改这些只要重配音，图和视频都不用动', shot.audioPath,
+            '⚠ 这一镜已经配过音了。改完要**重新配音**才生效。图和视频都不受影响。',
+            h('label', {}, '台词'),
+            fields.dialogue,
+            h('div', { class: 'shot-edit-grid' },
+              h('div', {}, h('label', {}, '谁说的'), fields.speaker),
+              h('div', {}, h('label', {}, '台词类型'), fields.lineKind)),
+            h('label', {}, '画外音效'),
+            fields.sound,
+            h('div', { class: 'hint' },
+              '听得见但看不见的东西写这里。写进"画面描述"的话，出图模型画不出声音，'
+              + '会去画那个声音最像的东西 ——「敲门声」最常见的下场是画出一扇**开着的门**。')),
+
+          group('合成用的', '改这个不重新生成任何素材，也就不花钱', Boolean(project.outputs?.video),
+            '改完点「重新合成」就生效 —— 它只是重新拼一遍，不花钱。',
+            h('div', { class: 'shot-edit-grid' },
+              h('div', {}, h('label', {}, '转场'), fields.transition))),
+
           h('div', { class: 'inline', style: 'margin-top:8px' },
             saveEdit,
             h('button', { class: 'btn ghost sm', onclick: closeEdit }, '取消'))
