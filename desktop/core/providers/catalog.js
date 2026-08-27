@@ -630,6 +630,52 @@ export const PROVIDERS = [
     models: [{ id: 'qwen2.5:7b', capability: 'chat', label: 'Qwen2.5 7B（本地）' }]
   }),
 
+  /**
+   * ───────────────────────── 本地出图：ComfyUI ─────────────────────────
+   *
+   * 和别家最大的不同：**跑在你自己的显卡上**。于是有两件别处做不到的事：
+   *
+   *   · 重出不花钱。改一句描述试五十次成本是零 —— 这直接改变用法，
+   *     现在每按一次「重出」都是钱，人会犹豫，而犹豫的结果是将就
+   *   · 一致性可以硬来。我们现在的第③层是"发参考图求厂商照办"
+   *     （所以才有 headMatch 去抓"这家没吃参考图"）；ComfyUI 那边能上
+   *     IPAdapter / ControlNet / LoRA —— 那不是求它，是让它做不到别的
+   *
+   * ⚠ 不需要密钥。secrets 是空的，密钥体检那一套要认得这种情况 ——
+   * 把"没配密钥"报成故障，人会去找一个根本不存在的密钥。
+   *
+   * ⚠ 工作流是**用户自己的**（见 providers/comfy.js）：他导出 API 格式贴进来，
+   * 在要我们填的节点上打 FD_PROMPT / FD_SEED 这类标记。硬塞一个我们
+   * 自己的工作流，等于把 ComfyUI 最值钱的部分（可定制）扔掉。
+   */
+  {
+    id: 'comfyui',
+    name: '本地出图（ComfyUI）',
+    docs: 'https://docs.comfy.org',
+    baseUrl: 'http://127.0.0.1:8188',
+    family: 'comfy',
+    optional: true,
+    // 本地服务不校验密钥。type: 'none' 是显式的这家不需要密钥 ——
+    // 留空 auth 会让 publicCatalog 直接 500（它读 p.auth.type），
+    // 而那个 500 的样子是整个「服务商与密钥」页打不开，看不出是谁害的
+    auth: { type: 'none', optional: true },
+    secrets: [],
+    capabilities: ['t2i', 'i2i'],
+    editableBaseUrl: true,
+    hint: '要先把 ComfyUI 跑起来，并在「设置 → 本地出图」贴一份 API 格式的工作流',
+    endpoints: {
+      images: '{{baseUrl}}/prompt'
+    },
+    models: [
+      {
+        id: 'workflow',
+        capability: 't2i',
+        label: '按我贴的工作流出图',
+        note: '出什么图完全由工作流决定（SDXL / Flux / 挂 LoRA 都行）。本地跑，不花钱'
+      }
+    ]
+  },
+
   // ───────────────────────── MiniMax 海螺 ─────────────────────────
   {
     id: 'minimax',

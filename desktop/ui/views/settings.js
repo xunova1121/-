@@ -263,6 +263,84 @@ export default {
           '留空 = 不切，那样参考图会被文生图模型忽略，人设只能靠文字撑着。'))
     );
 
+    /**
+     * ── 本地出图（ComfyUI）──
+     *
+     * 摆在这儿而不是服务商页，是因为它要填的不是密钥，是一整份**工作流**。
+     *
+     * 贴完当场告诉他打了哪几个标记 —— 不然要等到真出图才发现少了 FD_PROMPT，
+     * 而那时候的表现是"图能出、不花钱、改描述毫无反应"，最难查。
+     */
+    const wfBox = h('textarea', {
+      rows: 6, class: 'mono', style: 'width:100%',
+      placeholder: '把 ComfyUI 里「工作流 → 导出（API）」得到的 JSON 贴在这儿',
+      value: settings.comfyWorkflow || ''
+    });
+    const wfHint = h('div', { class: 'field-hint' });
+    /**
+     * 校验走服务端（providers/comfy.js import 了 http-client，发不给浏览器）。
+     * 输入时防抖 —— 每敲一个字发一次请求没有意义。
+     */
+    let wfTimer = null;
+    const paintWf = async () => {
+      const raw = wfBox.value.trim();
+      if (!raw) {
+        wfHint.className = 'field-hint';
+        wfHint.textContent = '空着就是不用本地出图。';
+        return;
+      }
+      let r;
+      try {
+        // cap:comfy-workflow
+        r = await api('/comfy/inspect', { method: 'POST', body: { workflow: raw } });
+      } catch (err) {
+        wfHint.className = 'field-hint bad';
+        wfHint.textContent = err.message;
+        return;
+      }
+      if (r.error) {
+        wfHint.className = 'field-hint bad';
+        wfHint.textContent = r.error;
+        return;
+      }
+      const has = Object.entries(r.names).filter(([k]) => r.markers[k]).map(([, v]) => v);
+      const miss = Object.entries(r.names).filter(([k]) => !r.markers[k]).map(([, v]) => v);
+      if (!r.markers.prompt) {
+        // 这一条是硬伤：没有它出图会画工作流里写死那句，而且不报错
+        wfHint.className = 'field-hint bad';
+        wfHint.textContent = `⚠ 缺 ${r.names.prompt} —— 没有它，出的图会一直是工作流里写死的那句提示词，`
+          + '改画面描述毫无反应，而且不报任何错。去 ComfyUI 里把正向提示词那个节点的标题改成它。';
+        return;
+      }
+      wfHint.className = 'field-hint';
+      wfHint.textContent = `认出 ${r.nodes} 个节点。已打标记：${has.join('、')}`
+        + (miss.length ? `；没打：${miss.join('、')}（可选，不打就用工作流里原来那个值）` : '');
+    };
+    wfBox.oninput = () => {
+      pending.comfyWorkflow = wfBox.value;
+      clearTimeout(wfTimer);
+      wfTimer = setTimeout(paintWf, 400);
+    };
+    paintWf();
+    routeGrid.append(
+      h('div', { class: 'field', style: 'grid-column:1/-1' },
+        h('label', {}, '本地出图：ComfyUI 工作流'),
+        wfBox,
+        wfHint,
+        h('div', { class: 'field-hint' },
+          '本地跑，**不花钱**，重出多少次都一样。出什么图完全由这份工作流决定。',
+          h('br'),
+          '在 ComfyUI 里双击节点标题改成这几个名字，我们就往里填：',
+          h('br'),
+          h('code', {}, 'FD_PROMPT'), ' 画面描述（必须）　',
+          h('code', {}, 'FD_NEGATIVE'), ' 反向词　',
+          h('code', {}, 'FD_SEED'), ' 种子　',
+          h('code', {}, 'FD_SIZE'), ' 尺寸　',
+          h('code', {}, 'FD_REF'), ' 参考图（LoadImage 节点）',
+          h('br'),
+          '配好之后去上面把「出图」路由到「本地出图（ComfyUI）」。'))
+    );
+
     // ── 上线前体检 ──
     // 流水线跑一趟要几分钟到几十分钟。与其等第 04 步才发现视频模型 ID 填错，
     // 不如在这里用最小代价把五条腿挨个点一遍。

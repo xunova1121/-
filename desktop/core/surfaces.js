@@ -335,6 +335,16 @@ export const CAPABILITIES = [
     why: ''
   },
   {
+    id: 'comfy-workflow',
+    name: '本地出图（ComfyUI）：贴工作流、当场看出打了哪几个标记',
+    api: 'POST /comfy/inspect',
+    pc: 'ui/views/settings.js',
+    mobile: null,
+    why: '要贴一整份工作流 JSON（几十到几百行），还要对着 ComfyUI 那个窗口改节点标题 —— '
+      + '这是坐在电脑前做的事。而且本地出图这件事本身就只在跑引擎的那台机器上成立：'
+      + '手机连的是远端引擎，它那边有没有显卡和手机无关。'
+  },
+  {
     id: 'outline',
     name: '大纲：一行一场戏，剧本和分镜之间那一层（含台词硬下限估算）',
     api: 'POST /projects/:id/outline/build',

@@ -2441,6 +2441,213 @@ section('预演台：把"中景"变成一组数');
  * 第二句是硬约束。所以模型回的不是新大纲，是一串**改动指令**，
  * 人逐条勾选之后才落盘 —— 没勾的一条都不动。
  */
+/**
+ * ════════ 本地出图：ComfyUI ════════
+ *
+ * 和别家形状完全不同：没有"模型"这个参数，出什么图由**用户自己的工作流**决定。
+ * 我们只往里填提示词、种子、尺寸、参考图。
+ *
+ * 这条路最容易坏的地方是**填不进去而不吭声**：
+ * 图能出、不花钱、而画的一直是工作流里写死的那句话 —— 改一百遍描述毫无反应，
+ * 且没有任何报错。所以这一节大半在验"该报的都报了没有"。
+ */
+section('本地出图：ComfyUI');
+{
+  const comfy = await import('../core/providers/comfy.js');
+
+  /** 一份最小的 API 格式工作流。标题就是标记 —— 用户在 ComfyUI 里双击标题改 */
+  const wf = () => ({
+    3: { class_type: 'KSampler', inputs: { seed: 1, steps: 20 }, _meta: { title: 'FD_SEED' } },
+    4: { class_type: 'CLIPTextEncode', inputs: { text: '写死在工作流里的那句' }, _meta: { title: 'FD_PROMPT' } },
+    5: { class_type: 'CLIPTextEncode', inputs: { text: '' }, _meta: { title: 'FD_NEGATIVE' } },
+    6: { class_type: 'EmptyLatentImage', inputs: { width: 512, height: 512 }, _meta: { title: 'FD_SIZE' } },
+    7: { class_type: 'LoadImage', inputs: { image: '' }, _meta: { title: 'FD_REF' } },
+    9: { class_type: 'SaveImage', inputs: {}, _meta: { title: 'SaveImage' } }
+  });
+
+  // ── 贴错格式要当场说清楚 ──
+  {
+    const bad = (t) => { try { comfy.parseWorkflow(t); return ''; } catch (e) { return e.message; } };
+    check('没贴工作流时说去哪儿贴', /设置|本地出图/.test(bad('')), bad(''));
+    check('不是 JSON 时说清楚', /不是合法的 JSON/.test(bad('{oops')), bad('{oops'));
+    /**
+     * ⚠ ComfyUI 有两种导出：「工作流」（带 nodes/links，给编辑器用）
+     * 和「API 格式」（节点号 → {class_type, inputs}，给接口用）。
+     * 贴错的人会很多，而原本的报错是一句莫名其妙的"没有节点"。
+     */
+    const wrong = bad(JSON.stringify({ nodes: [{ id: 1 }], links: [] }));
+    check('贴成「工作流」格式时点名说要「API 格式」', /API 格式/.test(wrong), wrong);
+    check('并且说了在哪儿导出', /导出/.test(wrong), wrong);
+    check('一个节点都没有时也说得出', /节点/.test(bad('{}')), bad('{}'));
+    check('贴对了就通过', Object.keys(comfy.parseWorkflow(JSON.stringify(wf()))).length === 6);
+  }
+
+  // ── 填进去 ──
+  {
+    const r = comfy.inject(wf(), {
+      prompt: '雪夜山门', negative: '模糊', seed: 4242, width: 768, height: 1344, refName: 'ref.png'
+    });
+    check('提示词填进去了', r.workflow[4].inputs.text === '雪夜山门');
+    check('反向提示词填进去了', r.workflow[5].inputs.text === '模糊');
+    check('种子填进去了', r.workflow[3].inputs.seed === 4242);
+    check('尺寸填进去了', r.workflow[6].inputs.width === 768 && r.workflow[6].inputs.height === 1344);
+    check('参考图填进去了', r.workflow[7].inputs.image === 'ref.png');
+    /**
+     * ⚠ 纯函数。同一份工作流要用很多次（一部片子几十镜），
+     * 就地改的话第二镜会拿到第一镜填过的内容 —— 而那是"改了描述没反应"
+     * 的另一种版本，更隐蔽。
+     */
+    const before = wf();
+    comfy.inject(before, { prompt: 'x', seed: 1 });
+    check('不改传进去那份工作流', before[4].inputs.text === '写死在工作流里的那句');
+  }
+
+  // ── 没打标记时：该报错的报错，该说明的说明 ──
+  {
+    const noPrompt = wf(); delete noPrompt[4];
+    let msg = '';
+    try { comfy.inject(noPrompt, { prompt: 'x' }); } catch (e) { msg = e.message; }
+    /**
+     * ⚠ 正向提示词找不到必须**抛**，不能跳过。
+     *
+     * 跳过的后果：出图成功、不花钱、画的是工作流里写死的那句话。
+     * 你改一百遍画面描述都没反应，而且不报任何错 —— 这是这条路上
+     * 最坏的一种坏法，因为它看起来完全正常。
+     */
+    check('没有 FD_PROMPT 时直接报错，不默默跑', /FD_PROMPT/.test(msg), msg);
+    check('并且说清了后果（不然人会以为只是少个可选项）',
+      /写死|毫无反应|没反应/.test(msg), msg);
+
+    const noSeed = wf(); delete noSeed[3];
+    const r = comfy.inject(noSeed, { prompt: 'x', seed: 99 });
+    /**
+     * 种子填不进去是**能跑的**，但必须说出来：
+     * 一致性复核不过时我们会换种子重试，种子没生效的话三次重试出三张
+     * 一模一样的图，而日志上写着"换了种子重试"。
+     */
+    check('没有 FD_SEED 时不报错，但说出来了',
+      r.skipped.some((x) => /种子/.test(x)), JSON.stringify(r.skipped));
+    check('而且说清了后果是"重试换种子不会生效"',
+      r.skipped.some((x) => /重试/.test(x)), JSON.stringify(r.skipped));
+
+    const noRef = wf(); delete noRef[7];
+    const r2 = comfy.inject(noRef, { prompt: 'x', refName: 'a.png' });
+    check('没有 FD_REF 时说清"一致性只剩提示词撑着"',
+      r2.skipped.some((x) => /一致性/.test(x)), JSON.stringify(r2.skipped));
+
+    // 标记打在了错的节点上
+    const wrongNode = wf();
+    wrongNode[4] = { class_type: 'KSampler', inputs: { steps: 20 }, _meta: { title: 'FD_PROMPT' } };
+    let m2 = '';
+    try { comfy.inject(wrongNode, { prompt: 'x' }); } catch (e) { m2 = e.message; }
+    check('标记打在错的节点上时，说得出该打在哪一类节点上',
+      /文本编码|CLIPTextEncode/.test(m2), m2);
+  }
+
+  // ── 工作流里打了哪几个标记：贴完当场告诉他 ──
+  {
+    const m = comfy.markersIn(wf());
+    check('认得出打了哪几个标记', m.prompt && m.seed && m.ref && m.size);
+    const bare = { 1: { class_type: 'KSampler', inputs: {}, _meta: { title: 'KSampler' } } };
+    check('没改过标题的节点不会被误认成标记', comfy.markersIn(bare).prompt === false);
+
+    /**
+     * ⚠ 标记要**从头认**，不能只看"标题里含不含这几个字"。
+     *
+     * 真实工作流里很常见的一种情况：留着一个废弃的旧节点，标题写成
+     * 「备用 FD_PROMPT（没用了）」。按"含不含"来认的话，它会和真的那个
+     * 一起匹配上，而谁排在前面完全看运气 —— 于是提示词填进了那个
+     * 断开连线的废节点，图照出、不花钱、画的还是写死那句。
+     *
+     * 这一条第一版是**空的**：夹具里只有一个 KSampler，
+     * 无论怎么放宽匹配都撞不上。同一个毛病第四次了。
+     */
+    const decoy = {
+      1: { class_type: 'CLIPTextEncode', inputs: { text: '废弃的旧提示词' }, _meta: { title: '备用 FD_PROMPT（没用了）' } },
+      2: { class_type: 'CLIPTextEncode', inputs: { text: '真正接着的' }, _meta: { title: 'FD_PROMPT' } },
+      9: { class_type: 'SaveImage', inputs: {}, _meta: { title: 'SaveImage' } }
+    };
+    const picked = comfy.inject(decoy, { prompt: '雪夜山门' });
+    check('标题里只是"含有"标记的废节点不会被当成标记',
+      picked.workflow['1'].inputs.text === '废弃的旧提示词'
+      && picked.workflow['2'].inputs.text === '雪夜山门',
+      JSON.stringify([picked.workflow['1'].inputs.text, picked.workflow['2'].inputs.text]));
+  }
+
+  // ── 真的跑一遍（打桩的 ComfyUI）──
+  {
+    const hits = [];
+    const srv = http.createServer((req, res) => {
+      let raw = '';
+      req.on('data', (c) => { raw += c; });
+      req.on('end', () => {
+        hits.push(req.url);
+        if (req.url === '/prompt') {
+          const body = JSON.parse(raw);
+          hits.push({ sentPrompt: body.prompt?.['4']?.inputs?.text, sentSeed: body.prompt?.['3']?.inputs?.seed });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ prompt_id: 'p1' }));
+        }
+        if (req.url.startsWith('/history/')) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({
+            p1: { status: { status_str: 'success', completed: true }, outputs: { 9: { images: [{ filename: 'out.png', subfolder: '', type: 'output' }] } } }
+          }));
+        }
+        if (req.url === '/system_stats') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ devices: [{ name: 'RTX 4090', vram_total: 25769803776 }] }));
+        }
+        res.writeHead(404).end();
+      });
+    });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${srv.address().port}`;
+
+    const out = await comfy.run(base, comfy.inject(wf(), { prompt: '雪夜山门', seed: 777 }).workflow, {});
+    check('跑通了，拿回图片地址', /\/view\?/.test(out.url), out.url);
+    check('地址里带着文件名', /filename=out\.png/.test(out.url), out.url);
+    const sent = hits.find((x) => x && x.sentPrompt);
+    check('发出去的是我们填的提示词，不是工作流里写死那句',
+      sent?.sentPrompt === '雪夜山门', JSON.stringify(sent));
+    check('种子也真的发出去了', sent?.sentSeed === 777, JSON.stringify(sent));
+
+    const p = await comfy.probe(base);
+    check('探活说得出是什么卡', p.ok && /4090/.test(p.detail), JSON.stringify(p));
+
+    srv.close();
+  }
+
+  // ── 跑失败时说人话 ──
+  {
+    const srv = http.createServer((req, res) => {
+      let raw = '';
+      req.on('data', (c) => { raw += c; });
+      req.on('end', () => {
+        if (req.url === '/prompt') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({
+            error: { type: 'prompt_outputs_failed_validation', message: 'Prompt outputs failed validation' },
+            node_errors: { 9: { errors: [{ message: 'Required input is missing: images' }] } }
+          }));
+        }
+        res.writeHead(404).end();
+      });
+    });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${srv.address().port}`;
+    let msg = '';
+    try { await comfy.run(base, wf(), {}); } catch (e) { msg = e.message; }
+    /**
+     * ⚠ node_errors 里才写着**到底哪个节点缺什么**。
+     * 只报一句 "Prompt outputs failed validation"，用户完全不知道该改哪儿。
+     */
+    check('校验不过时点名是哪个节点、缺什么',
+      /节点 9/.test(msg) && /images/.test(msg), msg);
+    srv.close();
+  }
+}
+
 section('大纲：改动指令，不是推倒重来');
 {
   const ol = await import('../core/pipeline/outline.js');

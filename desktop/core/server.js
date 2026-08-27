@@ -20,6 +20,7 @@ import * as settings from './settings.js';
 import * as vault from './vault.js';
 import * as logbus from './logbus.js';
 import * as httpClient from './http-client.js';
+import * as comfy from './providers/comfy.js';
 import * as store from './store.js';
 import * as ffmpeg from './ffmpeg.js';
 import * as providers from './providers/index.js';
@@ -726,6 +727,30 @@ async function handleApi(req, res, url, { lan = false } = {}) {
   // ---- 服务商 ----
   // 打开应用时自动跑这一条：只发各家最便宜的探针，不出图不出视频。
   // 配置坏了的代价不是"自检红一下"，而是你跑到第 04 步等两分钟才被告知密钥没配。
+  /**
+   * 看一眼这份 ComfyUI 工作流：认出几个节点、打了哪几个标记。cap:comfy-workflow
+   *
+   * ⚠ 为什么要有这条路由：贴完当场就得告诉他缺不缺 FD_PROMPT。
+   * 等到真出图才发现的话，表现是"图能出、不花钱、改描述毫无反应"——
+   * 这条路上最难查的一种坏法。
+   *
+   * 校验逻辑在 providers/comfy.js 里，它 import 了 http-client（有 node: 依赖），
+   * 所以发不给浏览器 —— 只能走这条路由。
+   */
+  if (a === 'comfy' && b === 'inspect' && method === 'POST') {
+    const { workflow } = await readBody(req);
+    try {
+      const wf = comfy.parseWorkflow(workflow);
+      return json(res, 200, {
+        nodes: Object.keys(wf).length,
+        markers: comfy.markersIn(wf),
+        names: comfy.MARKERS
+      });
+    } catch (err) {
+      return json(res, 200, { error: err.message, names: comfy.MARKERS });
+    }
+  }
+
   if (a === 'routing' && b === 'check' && method === 'POST') {
     return json(res, 200, await providers.probeRouting());
   }

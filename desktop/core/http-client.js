@@ -260,12 +260,32 @@ export async function execute(spec, onEvent) {
     sentHeaders[k] = expandSecrets(String(v));
   }
 
+  /**
+   * 二进制请求体（Buffer / Uint8Array）原样发。
+   *
+   * ⚠ 不能走下面那条 JSON.stringify —— 一个 Buffer 被 stringify 之后
+   * 变成 `{"type":"Buffer","data":[137,80,...]}`，对面收到的是一段
+   * 描述这张图的 JSON，而不是这张图。而这**不会报错**：
+   * 请求 200、字段齐全，只是图是坏的。
+   *
+   * 现在只有一处用到：本地 ComfyUI 传参考图（multipart）。
+   */
+  const isBinary = Buffer.isBuffer(spec.body) || spec.body instanceof Uint8Array;
   let bodyText;
+  let bodyRaw;
   if (spec.body !== null && spec.body !== undefined && method !== 'GET' && method !== 'HEAD') {
-    bodyText = typeof spec.body === 'string' ? spec.body : JSON.stringify(spec.body, null, 2);
-    bodyText = expandSecrets(bodyText);
-    if (!Object.keys(sentHeaders).some((k) => k.toLowerCase() === 'content-type')) {
-      sentHeaders['Content-Type'] = 'application/json';
+    if (isBinary) {
+      bodyRaw = spec.body;
+      // 二进制不展开占位符（里面没有密钥），也不进日志正文
+      if (!Object.keys(sentHeaders).some((k) => k.toLowerCase() === 'content-type')) {
+        sentHeaders['Content-Type'] = 'application/octet-stream';
+      }
+    } else {
+      bodyText = typeof spec.body === 'string' ? spec.body : JSON.stringify(spec.body, null, 2);
+      bodyText = expandSecrets(bodyText);
+      if (!Object.keys(sentHeaders).some((k) => k.toLowerCase() === 'content-type')) {
+        sentHeaders['Content-Type'] = 'application/json';
+      }
     }
   }
 
@@ -284,7 +304,7 @@ export async function execute(spec, onEvent) {
    * 按 100KB/s 这个很保守的有效上行估算给额外时间，最多加到 5 分钟 ——
    * 再长就不是"慢"而是"卡死"了，该让它失败。
    */
-  const bodyBytes = bodyText ? Buffer.byteLength(bodyText) : 0;
+  const bodyBytes = bodyRaw ? bodyRaw.byteLength : (bodyText ? Buffer.byteLength(bodyText) : 0);
   const baseTimeout = Number(spec.timeoutMs) > 0 ? Number(spec.timeoutMs) : DEFAULT_TIMEOUT_MS;
   const timeoutMs = Math.min(300000, baseTimeout + Math.round(bodyBytes / 100));
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -301,7 +321,8 @@ export async function execute(spec, onEvent) {
     method,
     url: spec.url,
     requestHeaders: logbus.redactHeaders(rawHeaders),
-    requestBody: logbus.redactBody(spec.body ?? null)
+    // 二进制不留正文，只记多大 —— 一张图的字节流进日志既没用又占地方
+    requestBody: isBinary ? `（二进制 ${spec.body.byteLength} 字节）` : logbus.redactBody(spec.body ?? null)
   };
 
   let response;
@@ -309,7 +330,7 @@ export async function execute(spec, onEvent) {
     response = await fetchImpl()(url, {
       method,
       headers: sentHeaders,
-      body: bodyText,
+      body: bodyRaw ?? bodyText,
       signal: controller.signal,
       redirect: 'follow'
     });
@@ -497,7 +518,14 @@ export async function poll(fn, { intervalMs = 3000, timeoutMs = 600000, onTick, 
     if (done) return value;
     onTick?.({ attempt, value, elapsedMs: timeoutMs - (deadline - Date.now()) });
     if (Date.now() >= deadline) {
-      throw new HttpError(`任务轮询超时（${Math.round(timeoutMs / 1000)}s），最后状态：${JSON.stringify(value).slice(0, 200)}`);
+      /**
+       * ⚠ value 可能是 undefined（fn 只回了 { done: false }）。
+       * JSON.stringify(undefined) 回的是 undefined 而不是字符串，
+       * 于是 .slice 当场抛 TypeError —— 一次干净的"超时"变成一句
+       * "Cannot read properties of undefined"，而真正的问题（超时）被盖掉了。
+       */
+      const last = value === undefined ? '（没有状态）' : String(JSON.stringify(value)).slice(0, 200);
+      throw new HttpError(`任务轮询超时（${Math.round(timeoutMs / 1000)}s），最后状态：${last}`);
     }
     // 睡这一觉也要能被叫醒 —— 轮询间隔可能有好几秒，
     // 傻等完再看信号会让"取消"感觉很迟钝
