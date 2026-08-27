@@ -537,6 +537,8 @@ def adopt_generated_asset(asset_id: int):
         row = db.execute("SELECT * FROM assets WHERE id=?", (asset_id,)).fetchone()
         if not row:
             raise HTTPException(404, "Asset not found")
+        if row["source_kind"] != "generated":
+            raise HTTPException(409, "Only generated candidates can be adopted")
         if not row["shot_id"] or row["asset_type"] not in {"image", "video", "voice"}:
             raise HTTPException(409, "Only shot image, video, or voice candidates can be adopted")
         candidates = db.execute(
@@ -1104,3 +1106,4 @@ def proofread(project_id: str):
     score = round(sum(scores) / len(scores)) if scores else (100 if shots else 0)
     score = max(0, score - state_conflicts * 20)
     return {"project_id": project_id, "score": score, "shot_count": len(shots), "state_conflicts": state_conflicts, "findings": findings}
+
