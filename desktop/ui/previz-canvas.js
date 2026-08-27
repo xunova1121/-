@@ -323,6 +323,125 @@ export function blockingCanvas(stage, { size = 320, onChange = () => {} } = {}) 
 }
 
 /**
+ * 轻量 3D 导演画布。
+ *
+ * 不引入 Three.js：预演台同时跑在桌面、浏览器和手机壳里，离线也必须能开。
+ * 这里用等距投影把同一份米制坐标画成立体舞台；拖动仍落回地面 x/y，因而
+ * 越轴、景别、继承和最终提示词继续读取原来的 stage 数据，不会出现两套真相。
+ */
+export function director3dCanvas(stage, { size = 520, onChange = () => {} } = {}) {
+  const svg = el('svg', {
+    viewBox: `0 0 ${size} ${Math.round(size * 0.72)}`,
+    class: 'previz-canvas previz-3d',
+    style: `width:100%;max-width:${size}px;aspect-ratio:1.38;touch-action:none;user-select:none`
+  });
+  const height = Math.round(size * 0.72);
+  const k = size / (EXTENT * 2.55);
+  const ox = size / 2;
+  const oy = height * 0.68;
+  const project = (x, y, z = 0) => ({
+    x: ox + (Number(x) - Number(y)) * k * 0.78,
+    y: oy + (Number(x) + Number(y)) * k * 0.38 - Number(z) * k
+  });
+  const unproject = (px, py) => {
+    const a = (px - ox) / (k * 0.78);
+    const b = (py - oy) / (k * 0.38);
+    return { x: clampM((a + b) / 2), y: clampM((b - a) / 2) };
+  };
+
+  svg.append(el('rect', { x: 0, y: 0, width: size, height, class: 'previz-3d-sky' }));
+  const floor = el('g');
+  const layer = el('g');
+  svg.append(floor, layer);
+
+  for (let m = -EXTENT; m <= EXTENT; m += 1) {
+    const xa = project(m, -EXTENT), xb = project(m, EXTENT);
+    const ya = project(-EXTENT, m), yb = project(EXTENT, m);
+    floor.append(el('line', { x1: xa.x, y1: xa.y, x2: xb.x, y2: xb.y, class: m === 0 ? 'previz-3d-axis' : 'previz-3d-grid' }));
+    floor.append(el('line', { x1: ya.x, y1: ya.y, x2: yb.x, y2: yb.y, class: m === 0 ? 'previz-3d-axis' : 'previz-3d-grid' }));
+  }
+
+  function draggable(node, target) {
+    node.style.cursor = 'grab';
+    node.addEventListener('pointerdown', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      node.setPointerCapture(ev.pointerId);
+      const rect = svg.getBoundingClientRect();
+      const move = (e) => {
+        const px = ((e.clientX - rect.left) / rect.width) * size;
+        const py = ((e.clientY - rect.top) / rect.height) * height;
+        const p = unproject(px, py);
+        target.x = Number(p.x.toFixed(2));
+        target.y = Number(p.y.toFixed(2));
+        redraw();
+        onChange();
+      };
+      const up = () => {
+        node.releasePointerCapture(ev.pointerId);
+        svg.removeEventListener('pointermove', move);
+        svg.removeEventListener('pointerup', up);
+        svg.removeEventListener('pointercancel', up);
+      };
+      svg.addEventListener('pointermove', move);
+      svg.addEventListener('pointerup', up);
+      svg.addEventListener('pointercancel', up);
+    });
+  }
+
+  function labelAt(text, p, cls = 'previz-3d-label') {
+    const t = el('text', { x: p.x, y: p.y, class: cls, 'pointer-events': 'none' });
+    t.append(document.createTextNode(text));
+    return t;
+  }
+
+  function redraw() {
+    while (layer.firstChild) layer.removeChild(layer.firstChild);
+    const things = [
+      ...(stage.marks || []).filter((x) => !x.far).map((item) => ({ type: 'prop', item })),
+      ...(stage.subjects || []).map((item) => ({ type: 'subject', item })),
+      ...(stage.cam ? [{ type: 'camera', item: stage.cam }] : [])
+    ].sort((a, b) => (a.item.x + a.item.y) - (b.item.x + b.item.y));
+
+    for (const thing of things) {
+      const item = thing.item;
+      const base = project(item.x, item.y, 0);
+      const g = el('g');
+      if (thing.type === 'subject') {
+        const bodyH = Number(item.height || 1.72);
+        const waist = project(item.x, item.y, bodyH * 0.48);
+        const head = project(item.x, item.y, bodyH * 0.88);
+        g.append(el('ellipse', { cx: base.x, cy: base.y + 3, rx: 15, ry: 7, class: 'previz-3d-shadow' }));
+        g.append(el('path', { d: `M ${base.x - 10} ${base.y} L ${waist.x - 8} ${waist.y} L ${waist.x + 8} ${waist.y} L ${base.x + 10} ${base.y} Z`, class: 'previz-3d-person' }));
+        g.append(el('circle', { cx: head.x, cy: head.y, r: 10, class: 'previz-3d-head' }));
+        g.append(labelAt((item.name || '?').slice(0, 4), { x: head.x, y: head.y - 15 }));
+        draggable(g, item);
+      } else if (thing.type === 'camera') {
+        const top = project(item.x, item.y, Number(item.height || 1.6));
+        g.append(el('line', { x1: base.x, y1: base.y, x2: top.x, y2: top.y, class: 'previz-3d-tripod' }));
+        g.append(el('path', { d: `M ${top.x - 15} ${top.y - 9} h 23 l 12 8 -12 8 h -23 Z`, class: 'previz-3d-camera' }));
+        g.append(labelAt('摄影机', { x: top.x, y: top.y - 16 }, 'previz-3d-label cam'));
+        draggable(g, item);
+      } else {
+        const h = Number(item.height || (['门', '窗'].includes(item.name) ? 2.1 : 0.9));
+        const w = Number(item.width || 0.9);
+        const a = project(item.x - w / 2, item.y, 0);
+        const b = project(item.x + w / 2, item.y, 0);
+        const at = project(item.x - w / 2, item.y, h);
+        const bt = project(item.x + w / 2, item.y, h);
+        g.append(el('path', { d: `M ${a.x} ${a.y} L ${b.x} ${b.y} L ${bt.x} ${bt.y} L ${at.x} ${at.y} Z`, class: 'previz-3d-prop' }));
+        g.append(labelAt((item.name || '道具').slice(0, 4), { x: (at.x + bt.x) / 2, y: (at.y + bt.y) / 2 - 8 }));
+        draggable(g, item);
+      }
+      layer.append(g);
+    }
+  }
+
+  redraw();
+  return { node: svg, redraw };
+}
+
+/**
  * 常用运镜。六个数字直接摆出来没人填得动，而这几个覆盖了绝大多数镜头。
  * 高级用法（同时横移 + 推近）仍然可以在下面那排数字里调。
  */
@@ -378,7 +497,29 @@ export function previzPanel(stage, {
   const host = document.createElement('div');
   host.className = 'previz-panel';
 
-  const canvas = blockingCanvas(stage, { size, onChange: () => { refresh(); onChange(); } });
+  const redrawAll = () => { canvas.redraw(); director.redraw(); refresh(); };
+  const canvas = blockingCanvas(stage, { size, onChange: () => { director.redraw(); refresh(); onChange(); } });
+  const director = director3dCanvas(stage, { size: Math.max(460, size), onChange: () => { canvas.redraw(); refresh(); onChange(); } });
+  canvas.node.hidden = true;
+  const viewBar = document.createElement('div');
+  viewBar.className = 'previz-viewbar';
+  const viewHint = Object.assign(document.createElement('span'), {
+    className: 'field-hint', textContent: '拖人物、道具和摄影机；所有位置都按米保存，并与俯视图实时同步'
+  });
+  const switchView = (mode) => {
+    director.node.hidden = mode !== '3d';
+    canvas.node.hidden = mode === '3d';
+    for (const b of viewBar.querySelectorAll('button')) b.classList.toggle('on', b.dataset.mode === mode);
+  };
+  for (const [mode, label] of [['3d', '3D 导演画布'], ['top', '俯视排位']]) {
+    const b = document.createElement('button');
+    b.className = `btn ghost sm${mode === '3d' ? ' on' : ''}`;
+    b.dataset.mode = mode;
+    b.textContent = label;
+    b.onclick = () => switchView(mode);
+    viewBar.append(b);
+  }
+  viewBar.append(viewHint);
   const readout = document.createElement('div');
   readout.className = 'previz-readout';
 
@@ -386,7 +527,7 @@ export function previzPanel(stage, {
     const b = document.createElement('button');
     b.className = `btn ghost sm${active ? ' on' : ''}`;
     b.textContent = label;
-    b.onclick = () => { on(); rebuildControls(); canvas.redraw(); refresh(); onChange(); };
+    b.onclick = () => { on(); rebuildControls(); redrawAll(); onChange(); };
     return b;
   };
 
@@ -422,7 +563,7 @@ export function previzPanel(stage, {
     const markRow = document.createElement('div');
     markRow.className = 'previz-row';
     markRow.append(Object.assign(document.createElement('span'), { className: 'previz-cap', textContent: '地标' }));
-    for (const name of ['门', '窗', '桌', '床', '楼梯']) {
+    for (const name of ['门', '窗', '桌', '床', '楼梯', '椅', '沙发', '车', '剑']) {
       const has = (stage.marks || []).some((m) => m.name === name);
       markRow.append(btn(name, has, () => {
         stage.marks = stage.marks || [];
@@ -522,8 +663,7 @@ export function previzPanel(stage, {
           stage.marks = (sceneLayout.marks || []).map((m) => ({ ...m }));
           stage.sun = sceneLayout.sun ? { ...sceneLayout.sun } : null;
           rebuildControls();
-          canvas.redraw();
-          refresh();
+          redrawAll();
           onChange();
         };
         sceneRow.append(apply);
@@ -618,6 +758,6 @@ export function previzPanel(stage, {
 
   rebuildControls();
   refresh();
-  host.append(canvas.node, controls, readout);
+  host.append(viewBar, director.node, canvas.node, controls, readout);
   return { node: host, refresh };
 }
