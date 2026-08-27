@@ -922,6 +922,15 @@ export function appendChapter(projectId, { title = '', script = '' } = {}) {
    * 所以：章节已经有了就直接往后加一条，一次重切都不做。
    * script 同步更新，只是为了剧本页能看到全文、以及将来真要重切时有材料在。
    */
+  /**
+   * ⚠ 一次可能贴进来**好几章**。
+   *
+   * 连载的常态就是攒了几章一起发。原来只当一章处理 —— 三章挤成一章，
+   * 于是时长预算、拆分镜、补设定集全都按"一章"来，而它实际是三章。
+   * 而且不报错：章节列表上就是多了一条很长的。
+   */
+  const parts = chapters.splitByHeadings(text);
+
   const existing = project.chapters || [];
   if (!existing.length) {
     // 还没分过章：这一次顺带把已有正文立成第 1 章，再把新章接在后面
@@ -929,29 +938,34 @@ export function appendChapter(projectId, { title = '', script = '' } = {}) {
     if (!fresh.length) throw new Error('没能切出章节');
     store.update(projectId, (p) => { p.script = merged; return p; });
     const next = applyChapters(projectId, fresh);
-    return { project: next, chapter: (next.chapters || [])[next.chapters.length - 1] || null };
+    const added = (next.chapters || []).filter((c) => c.stageStatus?.script !== 'done');
+    return { project: next, added, chapter: added[0] || null };
   }
 
-  const idx = existing.length + 1;
-  const body = `${head}${text}`.trim();
-  const one = {
-    id: `ch-${String(idx).padStart(2, '0')}`,
-    index: idx,
-    title: heading,
-    summary: '',
-    script: body,
-    chars: body.length,
-    stageStatus: { script: 'pending', assets: 'pending', video: 'pending', voice: 'pending', compose: 'pending' },
-    outputs: {}
-  };
+  const made = parts.map((part, k) => {
+    const idx = existing.length + k + 1;
+    const body = part.script.trim();
+    return {
+      id: `ch-${String(idx).padStart(2, '0')}`,
+      index: idx,
+      // 贴进来的正文自己带标题就用它；只贴了一章又没标题时用填的那个
+      title: part.title || (parts.length === 1 ? heading : `第 ${idx} 章`),
+      summary: '',
+      script: body,
+      chars: body.length,
+      stageStatus: { script: 'pending', assets: 'pending', video: 'pending', voice: 'pending', compose: 'pending' },
+      outputs: {}
+    };
+  });
+
   const next = store.update(projectId, (p) => {
     p.script = merged;
-    p.chapters = [...(p.chapters || []), one];
+    p.chapters = [...(p.chapters || []), ...made];
     // 新章还没拆分镜，整片的分镜状态就不再是 done
     p.stageStatus.script = p.chapters.every((c) => c.stageStatus.script === 'done') ? 'done' : 'pending';
     return p;
   });
-  return { project: next, chapter: one };
+  return { project: next, added: made, chapter: made[0] };
 }
 
 // ═══════════════════════ 阶段二：分镜 ═══════════════════════
@@ -1877,6 +1891,20 @@ export function applySiteLayout(projectId, siteName) {
 /** 这个项目上的场地图，连同算出来的问题 */
 export function siteMapOf(project) {
   return { sites: siteMod.sitesOf(project), issues: siteMod.siteIssues(project) };
+}
+
+/**
+ * 还有几章没扫过角色和场景。
+ *
+ * ⚠ 这个数必须**摆到界面上**。加完新章之后如果没人提一句，
+ * 新章里的角色永远不会进设定集 —— 而那件事是**静默**的：
+ * 分镜照拆、图照出，只是那几镜没有参考图、没有外貌描述、复核没有基准，
+ * 静默降级成"文生图"，流水线一路绿。
+ *
+ * 「补上新增的角色和场景」那颗按钮一直都在，但没人知道什么时候该点。
+ */
+export function unscannedChapters(project) {
+  return (project?.chapters || []).filter((c) => !c.castScanned);
 }
 
 /** 这个场景存过布局吗。没有回 null */

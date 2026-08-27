@@ -3167,6 +3167,7 @@ section('大纲 → 分镜：只拆没拆过的场次');
 
 section('剧本一章一章加：追加、补设定集、点名了不存在的人');
 {
+  const chapters2 = await import('../core/pipeline/chapters.js');
   const lint = await import('../core/pipeline/shotlint.js');
   const consistency = await import('../core/pipeline/consistency.js');
   const studio = studioModule;
@@ -3395,6 +3396,60 @@ section('剧本一章一章加：追加、补设定集、点名了不存在的�
       r0.project.chapters[1].id !== r0.project.chapters[0].id,
       r0.project.chapters.map((c) => c.id).join(','));
     check('剧本正文里也跟着有了', /老周跳下船/.test(r0.project.script));
+
+    /**
+     * ⚠ 一次贴**好几章**。
+     *
+     * 连载的常态就是攒了几章一起发。原来只当一章处理 —— 三章挤成一章，
+     * 于是时长预算、拆分镜、补设定集全都按"一章"来，而它实际是三章。
+     * 而且不报错：章节列表上就是多了一条很长的。
+     */
+    const many = store.create({ title: '一次贴三章' });
+    store.update(many.id, (x) => { x.script = ch1; return x; });
+    studio.splitChapters(many.id);
+    // ⚠ 拿**这个项目自己**的第一章来比。第一版比的是上面那个夹具的 c0，
+    // 那是另一个项目的正文 —— 断言在报一件根本不相干的事
+    const manyC0 = store.read(many.id).chapters[0].script;
+    const rm = studio.appendChapter(many.id, {
+      script: '第二章 出海\n船离了港。\n\n第三章 风暴\n浪打了上来。\n\n第四章 靠岸\n他回来了。'
+    });
+    check('一次贴三章就出三章', rm.added.length === 3, String(rm.added.length));
+    check('每一章拿到自己的标题',
+      rm.added.map((c) => c.title).join(' | ') === '第二章 出海 | 第三章 风暴 | 第四章 靠岸',
+      rm.added.map((c) => c.title).join(' | '));
+    check('每一章的正文各自独立',
+      rm.added[1].script.includes('浪打了上来') && !rm.added[1].script.includes('他回来了'),
+      rm.added[1].script);
+    check('id 不重复', new Set(rm.project.chapters.map((c) => c.id)).size === rm.project.chapters.length);
+    check('第一章还是没被动过', rm.project.chapters[0].script === manyC0,
+      JSON.stringify([manyC0, rm.project.chapters[0].script]));
+    /**
+     * ⚠ 只按**标题**切，不按字数兜底。
+     * 贴一章长的（三千字以上）不该被拦腰劈成两半 —— 那不是他要的。
+     */
+    /**
+     * ⚠ 标题**出现在中间**时，前面那段不能丢。
+     *
+     * 这一条是金丝雀顺出来的：`marks.length < 2` 那道闸看着是"防止把书名
+     * 当章节标题"，它真正挡住的其实是**数据丢失** —— 只认出一个标题时，
+     * 按标题切会从标题处开始切，标题**前面**那一段直接被扔掉，
+     * 而且不报任何错：你贴进去 500 字，列表上那一章只有 300 字。
+     */
+    const midHead = chapters2.splitByHeadings('船离了港，雾很大。\n\n第三章 风暴\n浪打了上来。');
+    check('标题出现在中间时，前面那段不会被丢掉',
+      midHead.map((x) => x.script).join('').includes('雾很大'),
+      JSON.stringify(midHead.map((x) => x.script)));
+
+    const longOne = store.create({ title: '一章很长' });
+    store.update(longOne.id, (x) => { x.script = ch1; return x; });
+    studio.splitChapters(longOne.id);
+    const rl = studio.appendChapter(longOne.id, { title: '第二章', script: '啊'.repeat(9000) });
+    check('贴一章很长的不会被按字数劈开', rl.added.length === 1, String(rl.added.length));
+
+    // 新章都是"还没对过设定集"的状态 —— 界面据此提示该扫一遍
+    check('新加的章标着还没扫过设定集',
+      studio.unscannedChapters(rm.project).length === rm.project.chapters.length,
+      JSON.stringify(studio.unscannedChapters(rm.project).map((c) => c.id)));
 
     // 正文自带标题行时不该再补一行，否则重切会多切一刀
     const p2 = store.create({ title: '连载2' });

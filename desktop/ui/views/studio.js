@@ -538,7 +538,10 @@ export default {
             });
             apText.value = '';
             apTitle.value = '';
-            toast(`已追加${r.chapter?.title ? `「${r.chapter.title}」` : '一章'} —— 前面几章的进度都还在`, 'ok');
+            toast((r.added?.length > 1
+              ? `已追加 ${r.added.length} 章：${r.added.map((c) => c.title).join('、')}`
+              : `已追加${r.chapter?.title ? `「${r.chapter.title}」` : '一章'}`)
+              + ' —— 前面几章的进度都还在。记得扫一遍设定集', 'ok');
             rerender();
           } catch (err) {
             toast(err.message, 'err');
@@ -547,6 +550,50 @@ export default {
             apBtn.textContent = old;
           }
         };
+        /**
+         * ── 新章还没扫过角色和场景 ──
+         *
+         * 加完章之后如果没人提一句，新章里的角色永远不会进设定集 ——
+         * 而那件事是**静默**的：分镜照拆、图照出，只是那几镜没有参考图、
+         * 没有外貌描述、复核没有基准，静默降级成"文生图"，流水线一路绿。
+         *
+         * 「补上新增的角色和场景」那颗按钮一直都在设定集页，
+         * 但没人知道什么时候该点 —— 所以提示要出现在**刚贴完章的这里**。
+         */
+        const unscanned = (project.chapters || []).filter((c) => !c.castScanned);
+        if (unscanned.length && project.bible) {
+          const scan = h('button', { class: 'btn primary sm' }, `扫这 ${unscanned.length} 章`);
+          const scanLog = h('span', { class: 'field-hint', style: 'margin:0' });
+          scan.onclick = async () => {
+            scan.disabled = true;
+            const old = scan.textContent;
+            scan.textContent = '扫描中…';
+            try {
+              // cap:extend-bible
+              await stream(`/projects/${project.id}/extend-bible`, {}, (ev) => {
+                if (ev.message) scanLog.textContent = ev.message;
+                if (ev.type === 'error') toast(ev.message, 'err');
+                if (ev.type === 'finished') {
+                  project.bible = ev.project?.bible || project.bible;
+                  toast(ev.added?.length
+                    ? `补了 ${ev.added.length} 条：${ev.added.map((a) => a.name).join('、')}。已有的一条都没动`
+                    : '这几章用的都是已有的角色和场景', 'ok');
+                  rerender();
+                }
+              });
+            } catch (err) { toast(err.message, 'err'); } finally {
+              scan.disabled = false; scan.textContent = old;
+            }
+          };
+          chapterHost.append(h('div', { class: 'ob-pending' },
+            h('b', {}, `有 ${unscanned.length} 章还没对过设定集`),
+            h('span', {},
+              `${unscanned.map((c) => c.title).slice(0, 4).join('、')}${unscanned.length > 4 ? ' 等' : ''}。`
+              + '扫一遍，只把**没见过的**角色和场景补进来 —— 已有的一条都不动、一张图都不重出。'
+              + '不扫的话，新角色那几镜会没有参考图，而且不报错。'),
+            scan, scanLog));
+        }
+
         chapterHost.append(
           h('details', { class: 'append-chapter' },
             h('summary', {}, '追加一章'),
