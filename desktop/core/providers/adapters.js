@@ -345,11 +345,23 @@ export async function generateImage({
    *                 界面写着一个模型、实际发的是另一个，比参考图不生效更糟
    *   传具体模型  → 换成它
    */
+  /**
+   * ⚠ 记下**真正发出去的那个模型**，而不是调用方以为的那个。
+   *
+   * 下面有参考图时会把 model 换成图生图那个。原来换完就不吭声了 ——
+   * 于是卡片上记的 modelUsed 是文生图那个，而图是图生图模型出的。
+   *
+   * 这个字段存在的理由是"中途换过模型是风格漂移最常见的原因"。
+   * 它一旦说谎，那条诊断就废了：你对比两镜看到同一个模型名，
+   * 而实际上一镜带参考图（走 i2i）、一镜没带（走 t2i），本来就是两个模型。
+   */
+  const used = { model, refsSent: 0 };
   const i2iModel = editModel === null ? null : editModel || settings.get('imageEditModel');
   if (wantsRef) {
     if (supportsI2I && i2iModel && i2iModel !== model) {  // eslint-disable-line no-lonely-if
       onEvent?.({ type: 'note', message: `带了 ${refImages.length} 张参考图，出图模型换成 ${i2iModel}（文生图模型不认参考图）` });
       model = i2iModel;
+      used.model = i2iModel;
     } else if (!supportsI2I) {
       onEvent?.({
         type: 'note',
@@ -357,8 +369,11 @@ export async function generateImage({
           '本镜的一致性只能靠提示词里的冻结描述撑着。要锁住脸就把「出图」换成支持图生图的一家。'
       });
       refImages = [];
+      used.refsSent = 0;
     }
   }
+
+  used.refsSent = refImages.length;
 
   switch (family) {
     case 'dashscope': {
@@ -390,7 +405,7 @@ export async function generateImage({
       if (!submitted.ok) fail(label, submitted);
       const url = firstMediaUrl(polled?.json ?? submitted.json);
       if (!url) throw new Error(`${label}：响应里没有图片 URL`);
-      return { url, base64: null, raw: polled?.json ?? submitted.json };
+      return { used, url, base64: null, raw: polled?.json ?? submitted.json };
     }
 
     case 'minimax': {
@@ -425,7 +440,7 @@ export async function generateImage({
       const url = res.json?.data?.image_urls?.[0] || firstMediaUrl(res.json);
       const base64 = url ? null : firstBase64(res.json);
       if (!url && !base64) throw new Error(`${label}：响应里既没有图片 URL 也没有 base64`);
-      return { url, base64, raw: res.json };
+      return { used, url, base64, raw: res.json };
     }
 
     case 'kling':
@@ -464,7 +479,7 @@ export async function generateImage({
       const url = firstMediaUrl(res.json);
       const base64 = url ? null : firstBase64(res.json);
       if (!url && !base64) throw new Error(`${label}：响应里既没有图片 URL 也没有 base64`);
-      return { url, base64, raw: res.json };
+      return { used, url, base64, raw: res.json };
     }
   }
 }

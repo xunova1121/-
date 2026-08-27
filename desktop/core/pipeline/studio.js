@@ -2458,7 +2458,21 @@ export async function generateAssets(projectId, { only = null, chapterId = null,
           t.imageSize = size || null;
           // 这一镜是哪家哪个模型出的。中途换过模型是**风格漂移最常见的原因**，
           // 而它不会报任何错 —— 只是第 6 镜起画风变了，你会以为是提示词的问题
-          t.modelUsed = `${r.image.provider} / ${r.image.model}`;
+          /**
+           * ⚠ 记**真正出图的那个模型**，不是路由到的那个。
+           *
+           * 带参考图时适配器会自动换成图生图模型（文生图模型不认参考图）。
+           * 原来这里记的是换之前那个 —— 卡片上写着 Seedream t2i，
+           * 而图其实是 SeedEdit i2i 出的。
+           *
+           * 这个字段存在的全部理由是"中途换过模型是风格漂移最常见的原因"，
+           * 它一说谎那条诊断就废了：两镜显示同一个模型名，
+           * 而实际上一镜带参考图走 i2i、一镜没带走 t2i，本来就是两个模型。
+           */
+          t.modelUsed = `${r.image.provider} / ${result.used?.model || r.image.model}`;
+          // 参考图**真的发出去了几张**。厂商不支持图生图时它们会被丢掉，
+          // 那时候这一镜的一致性只剩提示词撑着 —— 记下来，回头查得出
+          t.refsSent = result.used?.refsSent ?? null;
           t.bibleRefs = result.refLabels || [];
           t.consistency = {
             score: result.verification?.score ?? null,
@@ -2615,7 +2629,8 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
       t.prompt = opts.prompt?.trim() || assembled.prompt;
       t.imageAt = new Date().toISOString();
       t.imageSize = size || null;
-      t.modelUsed = `${providerId} / ${model}`;
+      t.modelUsed = `${providerId} / ${image.used?.model || model}`;
+      t.refsSent = image.used?.refsSent ?? null;
       t.bibleRefs = refImages.length ? assembled.refLabels : [];
       t.consistency = {
         score: verification.score ?? null,

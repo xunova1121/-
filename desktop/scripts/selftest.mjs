@@ -992,6 +992,42 @@ check('提示词里仍然注入了冻结的外貌（没有参考图时靠它撑�
   check('换模型这件事说了出来（不说的话没人知道发的和界面写的不是一个）',
     evs.some((e) => e.type === 'note' && /出图模型换成/.test(e.message || '')),
     JSON.stringify(evs.filter((e) => e.type === 'note').map((e) => e.message).slice(0, 5)));
+
+  /**
+   * ⚠ **记下来的必须是真正出图的那个模型。**
+   *
+   * 上面几条只验了"发出去的请求换对了模型"，没验**存进这一镜的是什么**。
+   * 于是有个 bug 一直躲着：适配器内部把 model 换成 i2i 之后不回报，
+   * studio 记的是换之前那个 —— 卡片上写着 Seedream t2i，
+   * 而图其实是 SeedEdit i2i 出的。
+   *
+   * modelUsed 这个字段存在的全部理由是"中途换过模型是风格漂移最常见的原因"。
+   * 它一说谎那条诊断就废了：你对比两镜看到同一个模型名，而实际上
+   * 一镜带参考图走 i2i、一镜没带走 t2i，本来就是两个模型。
+   */
+  const recorded = store.read(project.id).shots.find((s) => s.id === afterAssets.shots[0].id);
+  check('存进这一镜的是真正出图的那个模型（不是路由到的那个）',
+    String(recorded?.modelUsed || '').includes(settings.get('imageEditModel')),
+    `${recorded?.modelUsed} / 期望含 ${settings.get('imageEditModel')}`);
+  check('参考图真的发出去了几张，也记下来了', Number(recorded?.refsSent) > 0, String(recorded?.refsSent));
+
+  /**
+   * ⚠ **批量出图那条路要单独验一遍。**
+   *
+   * 上面那条走的是「单独重出这一镜」，而写 modelUsed 的地方有**两处**：
+   * 批量出图一处、单独重出一处。第一版只验了后者 —— 金丝雀把前者改回
+   * 记路由模型，自检照样全绿。
+   *
+   * 两条路各写一份同样的逻辑，就一定要各验一份。
+   */
+  upstream.lastImageBody = null;
+  await ndjson(`/projects/${project.id}/stage/assets`, {
+    only: [afterAssets.shots[1].id], regenerate: true
+  });
+  const batch = store.read(project.id).shots.find((s) => s.id === afterAssets.shots[1].id);
+  check('批量出图那条路记的也是真正出图的模型',
+    String(batch?.modelUsed || '').includes(settings.get('imageEditModel')),
+    `${batch?.modelUsed} / 期望含 ${settings.get('imageEditModel')}`);
   settings.patch({ useEditModelForShots: false });
 }
 
