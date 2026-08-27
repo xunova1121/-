@@ -23,6 +23,7 @@
  */
 
 import * as previz from '/previz.js';
+import * as THREE from '/three.js';
 import { addKeyframe, applyFrame, createHistory, findObject, normalizeStage, stageObjects } from './previz-stage.js';
 
 const NS = 'http://www.w3.org/2000/svg';
@@ -326,140 +327,102 @@ export function blockingCanvas(stage, { size = 320, onChange = () => {} } = {}) 
 /**
  * 轻量 3D 导演画布。
  *
- * 不引入 Three.js：预演台同时跑在桌面、浏览器和手机壳里，离线也必须能开。
- * 这里用等距投影把同一份米制坐标画成立体舞台；拖动仍落回地面 x/y，因而
- * 越轴、景别、继承和最终提示词继续读取原来的 stage 数据，不会出现两套真相。
+ * Three.js 只作为本地运行时依赖打包，桌面、浏览器和手机壳共用同一份渲染器。
+ * 拖动仍落回原有的米制 x/y，因而越轴、景别、继承和生成提示词只有一份真相。
  */
 export function director3dCanvas(stage, {
   size = 520, onChange = () => {}, onSelect = () => {}, onCommit = () => {}, selected = () => '', onAssetDrop = () => {}
 } = {}) {
   normalizeStage(stage);
-  const svg = el('svg', {
-    viewBox: `0 0 ${size} ${Math.round(size * 0.72)}`,
-    class: 'previz-canvas previz-3d',
-    style: `width:100%;max-width:${size}px;aspect-ratio:1.38;touch-action:none;user-select:none`
-  });
-  const height = Math.round(size * 0.72);
-  const k = size / (EXTENT * 2.55);
-  const ox = size / 2;
-  const oy = height * 0.68;
-  const project = (x, y, z = 0) => ({
-    x: ox + (Number(x) - Number(y)) * k * 0.78,
-    y: oy + (Number(x) + Number(y)) * k * 0.38 - Number(z) * k
-  });
-  const unproject = (px, py) => {
-    const a = (px - ox) / (k * 0.78);
-    const b = (py - oy) / (k * 0.38);
-    return { x: clampM((a + b) / 2), y: clampM((b - a) / 2) };
-  };
+  const host = document.createElement('div');
+  host.className = 'previz-canvas previz-3d previz-webgl';
+  host.style.cssText = `width:100%;max-width:${size}px;aspect-ratio:1.38;touch-action:none;position:relative;overflow:hidden`;
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.domElement.style.cssText = 'width:100%;height:100%;display:block';
+  host.append(renderer.domElement);
+  const scene3d = new THREE.Scene();
+  scene3d.background = new THREE.Color(0x151a24);
+  scene3d.fog = new THREE.Fog(0x151a24, 14, 30);
+  const view = new THREE.PerspectiveCamera(42, 1.38, 0.1, 80);
+  view.position.set(9, 8, 10); view.lookAt(0, 0, 0);
+  scene3d.add(new THREE.HemisphereLight(0xbfd8ff, 0x2a2530, 1.5));
+  const key = new THREE.DirectionalLight(0xffe3bd, 2.2); key.position.set(-5, 9, -3); key.castShadow = true; scene3d.add(key);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(24, 24), new THREE.MeshStandardMaterial({ color: 0x29313d, roughness: .92 }));
+  floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene3d.add(floor);
+  const grid = new THREE.GridHelper(24, 24, 0x5d7897, 0x384657); grid.position.y = .006; scene3d.add(grid);
+  const ray = new THREE.Raycaster(), mouse = new THREE.Vector2(), ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const objects = new Map();
+  const textureLoader = new THREE.TextureLoader();
+  let backdropObject = null;
 
-  svg.append(el('rect', { x: 0, y: 0, width: size, height, class: 'previz-3d-sky' }));
-  svg.addEventListener('dragover', (ev) => { ev.preventDefault(); svg.classList.add('drag-over'); });
-  svg.addEventListener('dragleave', () => svg.classList.remove('drag-over'));
-  svg.addEventListener('drop', (ev) => {
-    ev.preventDefault(); svg.classList.remove('drag-over');
-    try {
-      const asset = JSON.parse(ev.dataTransfer.getData('application/x-futuredream-asset'));
-      const rect = svg.getBoundingClientRect();
-      const p = unproject(((ev.clientX - rect.left) / rect.width) * size, ((ev.clientY - rect.top) / rect.height) * height);
-      onAssetDrop(asset, p);
-    } catch { /* 不是本应用的资产，忽略 */ }
-  });
-  const floor = el('g');
-  const layer = el('g');
-  svg.append(floor, layer);
-
-  for (let m = -EXTENT; m <= EXTENT; m += 1) {
-    const xa = project(m, -EXTENT), xb = project(m, EXTENT);
-    const ya = project(-EXTENT, m), yb = project(EXTENT, m);
-    floor.append(el('line', { x1: xa.x, y1: xa.y, x2: xb.x, y2: xb.y, class: m === 0 ? 'previz-3d-axis' : 'previz-3d-grid' }));
-    floor.append(el('line', { x1: ya.x, y1: ya.y, x2: yb.x, y2: yb.y, class: m === 0 ? 'previz-3d-axis' : 'previz-3d-grid' }));
+  function materialFor(item, color) {
+    const source = item.textureUrl || item.thumbnail || item.image;
+    if (!source) return new THREE.MeshStandardMaterial({ color, roughness: .7 });
+    const map = textureLoader.load(source, () => renderer.render(scene3d, view)); map.colorSpace = THREE.SRGBColorSpace;
+    return new THREE.MeshStandardMaterial({ map, transparent: true, alphaTest: .08, side: THREE.DoubleSide, roughness: .8 });
   }
-
-  function draggable(node, target) {
-    node.style.cursor = target.locked ? 'not-allowed' : 'grab';
-    node.addEventListener('pointerdown', (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      onSelect(target.id);
-      if (target.locked) return;
-      node.setPointerCapture(ev.pointerId);
-      const rect = svg.getBoundingClientRect();
-      const move = (e) => {
-        const px = ((e.clientX - rect.left) / rect.width) * size;
-        const py = ((e.clientY - rect.top) / rect.height) * height;
-        const p = unproject(px, py);
-        target.x = Number(p.x.toFixed(2));
-        target.y = Number(p.y.toFixed(2));
-        redraw();
-        onChange();
-      };
-      const up = () => {
-        node.releasePointerCapture(ev.pointerId);
-        svg.removeEventListener('pointermove', move);
-        svg.removeEventListener('pointerup', up);
-        svg.removeEventListener('pointercancel', up);
-        onCommit();
-      };
-      svg.addEventListener('pointermove', move);
-      svg.addEventListener('pointerup', up);
-      svg.addEventListener('pointercancel', up);
-    });
+  function actor(item) {
+    const group = new THREE.Group(), h = Number(item.height || 1.72);
+    const card = new THREE.Mesh(new THREE.PlaneGeometry(h * .62, h), materialFor(item, 0xd9a441));
+    card.position.y = h / 2; card.castShadow = true; group.add(card);
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(.28, .34, .08, 24), new THREE.MeshStandardMaterial({ color: 0x11151d }));
+    base.position.y = .04; base.castShadow = true; group.add(base); return group;
   }
-
-  function labelAt(text, p, cls = 'previz-3d-label') {
-    const t = el('text', { x: p.x, y: p.y, class: cls, 'pointer-events': 'none' });
-    t.append(document.createTextNode(text));
-    return t;
+  function prop(item) {
+    const h = Number(item.height || .9), w = Number(item.width || .9);
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, w * .75), materialFor(item, 0x758196));
+    mesh.position.y = h / 2; mesh.castShadow = true; mesh.receiveShadow = true; return mesh;
   }
-
+  function cameraRig() {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(.65, .38, .35), new THREE.MeshStandardMaterial({ color: 0x34b7eb, metalness: .35 }));
+    body.position.y = 1.55; body.castShadow = true; g.add(body);
+    const lens = new THREE.Mesh(new THREE.CylinderGeometry(.16, .2, .34, 20), new THREE.MeshStandardMaterial({ color: 0x101820, metalness: .7 }));
+    lens.rotation.x = Math.PI / 2; lens.position.set(0, 1.55, .33); g.add(lens);
+    for (const x of [-.28, .28]) { const leg = new THREE.Mesh(new THREE.CylinderGeometry(.025, .035, 1.45, 8), new THREE.MeshStandardMaterial({ color: 0x71879a })); leg.position.set(x, .72, 0); leg.rotation.z = x * .2; g.add(leg); }
+    return g;
+  }
   function redraw() {
-    while (layer.firstChild) layer.removeChild(layer.firstChild);
-    const things = [
-      ...(stage.marks || []).filter((x) => !x.far).map((item) => ({ type: 'prop', item })),
-      ...(stage.subjects || []).map((item) => ({ type: 'subject', item })),
-      ...(stage.cam ? [{ type: 'camera', item: stage.cam }] : [])
-    ].sort((a, b) => (a.item.x + a.item.y) - (b.item.x + b.item.y));
-
-    for (const thing of things) {
-      const item = thing.item;
-      const base = project(item.x, item.y, 0);
-      const g = el('g');
-      g.dataset.objectId = item.id;
-      if (selected() === item.id) g.classList.add('selected');
-      if (item.locked) g.classList.add('locked');
-      if (thing.type === 'subject') {
-        const bodyH = Number(item.height || 1.72);
-        const waist = project(item.x, item.y, bodyH * 0.48);
-        const head = project(item.x, item.y, bodyH * 0.88);
-        g.append(el('ellipse', { cx: base.x, cy: base.y + 3, rx: 15, ry: 7, class: 'previz-3d-shadow' }));
-        g.append(el('path', { d: `M ${base.x - 10} ${base.y} L ${waist.x - 8} ${waist.y} L ${waist.x + 8} ${waist.y} L ${base.x + 10} ${base.y} Z`, class: 'previz-3d-person' }));
-        g.append(el('circle', { cx: head.x, cy: head.y, r: 10, class: 'previz-3d-head' }));
-        g.append(labelAt((item.name || '?').slice(0, 4), { x: head.x, y: head.y - 15 }));
-        draggable(g, item);
-      } else if (thing.type === 'camera') {
-        const top = project(item.x, item.y, Number(item.height || 1.6));
-        g.append(el('line', { x1: base.x, y1: base.y, x2: top.x, y2: top.y, class: 'previz-3d-tripod' }));
-        g.append(el('path', { d: `M ${top.x - 15} ${top.y - 9} h 23 l 12 8 -12 8 h -23 Z`, class: 'previz-3d-camera' }));
-        g.append(labelAt('摄影机', { x: top.x, y: top.y - 16 }, 'previz-3d-label cam'));
-        draggable(g, item);
-      } else {
-        const h = Number(item.height || (['门', '窗'].includes(item.name) ? 2.1 : 0.9));
-        const w = Number(item.width || 0.9);
-        const a = project(item.x - w / 2, item.y, 0);
-        const b = project(item.x + w / 2, item.y, 0);
-        const at = project(item.x - w / 2, item.y, h);
-        const bt = project(item.x + w / 2, item.y, h);
-        g.append(el('path', { d: `M ${a.x} ${a.y} L ${b.x} ${b.y} L ${bt.x} ${bt.y} L ${at.x} ${at.y} Z`, class: 'previz-3d-prop' }));
-        g.append(labelAt((item.name || '道具').slice(0, 4), { x: (at.x + bt.x) / 2, y: (at.y + bt.y) / 2 - 8 }));
-        draggable(g, item);
-      }
-      layer.append(g);
+    for (const obj of objects.values()) scene3d.remove(obj);
+    objects.clear();
+    if (backdropObject) { scene3d.remove(backdropObject); backdropObject = null; }
+    if (stage.backdrop?.image) {
+      const map = textureLoader.load(stage.backdrop.image, () => renderer.render(scene3d, view));
+      map.colorSpace = THREE.SRGBColorSpace;
+      backdropObject = new THREE.Mesh(
+        new THREE.PlaneGeometry(12, 6.75),
+        new THREE.MeshBasicMaterial({ map, side: THREE.DoubleSide, toneMapped: false })
+      );
+      backdropObject.position.set(0, 3.35, 5.8);
+      backdropObject.rotation.y = Math.PI;
+      backdropObject.userData = { kind: 'backdrop', assetRef: stage.backdrop.assetRef, variantId: stage.backdrop.variantId };
+      scene3d.add(backdropObject);
     }
+    const entries = [...(stage.subjects || []).map((item) => ({ kind: 'subject', item })), ...(stage.marks || []).filter((x) => !x.far).map((item) => ({ kind: 'prop', item })), { kind: 'camera', item: stage.cam }];
+    for (const { kind, item } of entries) {
+      const obj = kind === 'subject' ? actor(item) : kind === 'camera' ? cameraRig() : prop(item);
+      obj.position.set(Number(item.x || 0), 0, Number(item.y || 0)); obj.rotation.y = -THREE.MathUtils.degToRad(Number(item.rotation || item.facing || 0));
+      obj.scale.setScalar(Number(item.scale || 1)); obj.userData = { item, kind };
+      if (selected() === item.id) { const box = new THREE.BoxHelper(obj, 0x49c8ff); obj.add(box); }
+      objects.set(item.id, obj); scene3d.add(obj);
+    }
+    const rect = host.getBoundingClientRect(); renderer.setSize(Math.max(320, rect.width || size), Math.max(230, rect.height || size * .72), false);
+    view.aspect = Math.max(1, (rect.width || size) / (rect.height || size * .72)); view.updateProjectionMatrix(); renderer.render(scene3d, view);
   }
-
-  redraw();
-  return { node: svg, redraw };
+  const pointer = (ev) => { const r = renderer.domElement.getBoundingClientRect(); mouse.set((ev.clientX-r.left)/r.width*2-1, -(ev.clientY-r.top)/r.height*2+1); ray.setFromCamera(mouse, view); };
+  const hitGround = (ev) => { pointer(ev); const p = new THREE.Vector3(); return ray.ray.intersectPlane(ground, p) ? { x: clampM(p.x), y: clampM(p.z) } : { x: 0, y: 0 }; };
+  let dragging = null;
+  renderer.domElement.onpointerdown = (ev) => { pointer(ev); const hits = ray.intersectObjects([...objects.values()], true); const root = hits[0]?.object; let obj = root; while (obj && !obj.userData?.item) obj = obj.parent; if (!obj) return; onSelect(obj.userData.item.id); if (!obj.userData.item.locked) { dragging = obj.userData.item; renderer.domElement.setPointerCapture(ev.pointerId); } redraw(); };
+  renderer.domElement.onpointermove = (ev) => { if (!dragging) return; const p = hitGround(ev); dragging.x = Number(p.x.toFixed(2)); dragging.y = Number(p.y.toFixed(2)); redraw(); onChange(); };
+  renderer.domElement.onpointerup = (ev) => { if (dragging) onCommit(); dragging = null; try { renderer.domElement.releasePointerCapture(ev.pointerId); } catch {} };
+  host.ondragover = (ev) => ev.preventDefault();
+  host.ondrop = (ev) => { ev.preventDefault(); try { onAssetDrop(JSON.parse(ev.dataTransfer.getData('application/x-futuredream-asset')), hitGround(ev)); } catch {} };
+  new ResizeObserver(redraw).observe(host); redraw();
+  return { node: host, redraw };
 }
 
 /**
@@ -564,6 +527,24 @@ export function previzPanel(stage, {
   onExportControls = null
 } = {}) {
   normalizeStage(stage);
+  // 实例只保存稳定的设定资产 / 变体 ID；打开镜头时用最新设定图重绑。
+  // 因此设定集重出图不会破坏已排好的位置和关键帧。
+  const rebind = (item, kind) => {
+    if (!item?.assetRef) return;
+    const asset = assets.find((x) => x.kind === kind && x.ref === item.assetRef && (!item.variantId || x.variantId === item.variantId))
+      || assets.find((x) => x.kind === kind && x.ref === item.assetRef);
+    if (!asset) return;
+    item.variantId = asset.variantId || item.variantId || 'default';
+    item.textureUrl = asset.image || item.textureUrl || '';
+    item.thumbnail = item.textureUrl;
+    item.modelUrl = asset.modelUrl || item.modelUrl || '';
+  };
+  for (const item of stage.subjects || []) rebind(item, 'character');
+  for (const item of stage.marks || []) rebind(item, 'prop');
+  if (stage.backdrop?.assetRef) {
+    const asset = assets.find((x) => x.kind === 'scene' && x.ref === stage.backdrop.assetRef);
+    if (asset) Object.assign(stage.backdrop, { image: asset.image || stage.backdrop.image || '', variantId: asset.variantId || stage.backdrop.variantId, modelUrl: asset.modelUrl || stage.backdrop.modelUrl || '' });
+  }
   const host = document.createElement('div');
   host.className = 'previz-panel';
 
@@ -577,9 +558,13 @@ export function previzPanel(stage, {
     onSelect: (id) => { selectedId = id; redrawAll(); },
     onCommit: () => { history.commit(); paintInspector(); onChange(); },
     onAssetDrop: (asset, p) => {
-      if (asset.kind === 'scene') stage.backdrop = { name: asset.name, image: asset.image || '' };
-      else if (asset.kind === 'character') stage.subjects.push({ name: asset.name, x: p.x, y: p.y, facing: 180, height: 1.72, assetRef: asset.ref, thumbnail: asset.image });
-      else stage.marks.push({ name: asset.name, x: p.x, y: p.y, height: .9, width: .9, assetRef: asset.ref, thumbnail: asset.image });
+      const binding = {
+        assetRef: asset.ref, variantId: asset.variantId || 'default',
+        textureUrl: asset.image || '', modelUrl: asset.modelUrl || ''
+      };
+      if (asset.kind === 'scene') stage.backdrop = { name: asset.name, image: asset.image || '', ...binding };
+      else if (asset.kind === 'character') stage.subjects.push({ name: asset.name, x: p.x, y: p.y, facing: 180, height: 1.72, thumbnail: asset.image, ...binding });
+      else stage.marks.push({ name: asset.name, x: p.x, y: p.y, height: .9, width: .9, thumbnail: asset.image, ...binding });
       normalizeStage(stage);
       history.commit(); redrawAll(); onChange();
     },

@@ -1222,6 +1222,9 @@ select.mini {
 .previz-viewbar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:8px; }
 .previz-viewbar .btn.on { border-color:var(--beam); color:var(--beam); background:var(--beam-wash); }
 .previz-canvas { border: 1px solid var(--line); border-radius: 10px; display: block; }
+.previz-webgl { background:#151a24; box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--beam) 15%, transparent); }
+.previz-webgl canvas { cursor:grab; }
+.previz-webgl canvas:active { cursor:grabbing; }
 .previz-canvas[hidden] { display:none; }
 .previz-3d-sky { fill:color-mix(in srgb, var(--surface) 88%, var(--beam) 12%); }
 .previz-3d-grid { stroke:var(--line-soft); stroke-width:1; }
@@ -1616,3 +1619,55 @@ select.mini {
 .ob-edit-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
 .ob-edit label { display: block; font-size: 12px; color: var(--ink-faint); margin-bottom: 3px; }
 .ob-edit textarea, .ob-edit input { width: 100%; }
+/* ───── 账 ───── */
+
+/**
+ * 预估那一行。
+ *
+ * 摆在动作按钮**上面**而不是下面：这句话是给"还没按"的人看的，
+ * 按完再告诉他花了多少就晚了。
+ */
+.cost-line {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+/* 有钱数的时候把数字挑出来 —— 一整行灰字里，人要找的就是那个数 */
+.cost-line b { color: var(--text); font-weight: 600; }
+/* 还没填单价：不是错误，是缺一件东西。用中性色，别用红 */
+.cost-line.unpriced { color: var(--caution); }
+
+.spend-line { font-size: 13px; line-height: 1.6; margin-bottom: 8px; }
+
+.spend-table { display: flex; flex-direction: column; gap: 4px; }
+.spend-row {
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 12.5px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--line-soft, rgba(128,128,128,.12));
+}
+.spend-kind { color: var(--text-dim); }
+.spend-units { color: var(--text); }
+/* 钱右对齐：一列数字对不齐的话，大小根本比不出来 */
+.spend-money { text-align: right; font-variant-numeric: tabular-nums; }
+
+.rate-filler { margin-top: 10px; }
+.rate-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  flex-wrap: wrap;
+}
+.rate-who { flex: 1 1 200px; font-size: 12.5px; color: var(--text-dim); }
+/* 单价输入框窄一点：填的是 0.25 这种数，给一整行宽度反而难对 */
+.rate-row .input.sm { width: 110px; flex: 0 0 auto; }
+
+@media (max-width: 560px) {
+  .spend-row { grid-template-columns: 56px 1fr auto; font-size: 12px; }
+  .rate-who { flex-basis: 100%; }
+}

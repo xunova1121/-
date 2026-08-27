@@ -249,6 +249,8 @@ const DEFAULTS = {
    * 一条常驻的红横幅会让人很快学会无视所有横幅，包括真正要紧的那些。
    */
   routeBannerOn: false,
+  /** 用户自定义的厂商/模型单价表；用量保存事实，金额按当前单价重算。 */
+  rates: {},
   theme: 'dark',
   port: 5178,
 
@@ -277,7 +279,8 @@ export function all() {
     ...DEFAULTS,
     ...disk,
     baseUrls: { ...DEFAULTS.baseUrls, ...(disk.baseUrls || {}) },
-    endpointOverrides: { ...DEFAULTS.endpointOverrides, ...(disk.endpointOverrides || {}) }
+    endpointOverrides: { ...DEFAULTS.endpointOverrides, ...(disk.endpointOverrides || {}) },
+    rates: { ...DEFAULTS.rates, ...(disk.rates || {}) }
   };
   return cache;
 }
@@ -307,6 +310,10 @@ export function patch(changes = {}) {
     next.endpointOverrides = { ...all().endpointOverrides, ...given.endpointOverrides };
     // 填了空字符串等于"清掉这条覆盖，回到自动探测"
     for (const [k, v] of Object.entries(next.endpointOverrides)) if (!v) delete next.endpointOverrides[k];
+  }
+  if (given.rates) {
+    next.rates = { ...all().rates, ...given.rates };
+    for (const [k, v] of Object.entries(next.rates)) if (v === null) delete next.rates[k];
   }
   cache = next;
 

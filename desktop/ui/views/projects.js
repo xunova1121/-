@@ -10,6 +10,8 @@ import { h, clear, api, stream, toast, mediaUrl } from '../lib.js';
 import { styleArtSVG } from '../style-art.js';
 import { openLightbox } from '../lightbox.js';
 import { ratioPicker } from '../ratios.js';
+// 钱的措辞取服务端原件 —— 项目页、工作台、手机三处必须是同一句话
+import * as PRICING from '/pricing.js';
 
 /**
  * 画风缩略图。三种形态，按优先级：
@@ -510,6 +512,51 @@ export default {
         listHost
       )
     );
+
+    /**
+     * ── 全部项目一共花了多少 ──
+     *
+     * 单个项目的账在工作台里，这里回答的是另一个问题：**这个月一共花了多少**。
+     * 摆在项目列表底下，因为它是"跨项目"的事实，不属于任何一个项目。
+     *
+     * 和单项目那张一样：用量是记下来的事实，钱按当前单价现算。
+     * 一个单价都没填的人在这里看到的是纯用量 —— 那也是真的，
+     * 而且已经比什么都没有强得多。
+     */
+    const totalHost = h('div', { class: 'panel' });
+    root.append(totalHost);
+    (async () => {
+      let all;
+      try {
+        // cap:spend-overall
+        all = await api('/spend');
+      } catch {
+        return; // 账读不出来不该拖累项目列表本身
+      }
+      if (!all?.total) return;
+      clear(totalHost).append(
+        h('h2', { class: 'panel-title' }, '一共花了多少',
+          all.projects ? h('span', { class: 'badge' }, `${all.projects} 个项目`) : null),
+        h('div', { class: 'spend-line' }, all.line),
+        all.unmetered
+          ? h('div', { class: 'field-hint' },
+              `另有 ${all.unmetered} 次调用没记上账 —— 厂商没在响应里回用量。这几次的钱确实花了，只是我们数不出来。`)
+          : null,
+        h('div', { class: 'spend-table' },
+          ...all.byProject.filter((p) => p.calls).map((p) => {
+            const name = projects.find((x) => x.id === p.projectId)?.title || p.projectId;
+            const money = p.total.cny === null ? null : PRICING.fmtMoney(p.total.cny);
+            return h('div', { class: 'spend-row' },
+              h('span', { class: 'spend-kind' }, `${p.calls} 次`),
+              h('span', { class: 'spend-units' }, name),
+              h('span', { class: 'spend-money' },
+                money || h('span', { class: 'field-hint' }, '没填单价')));
+          })),
+        h('p', { class: 'panel-hint' },
+          '用量是从厂商响应里读出来的，一个字没猜；钱是按你自己填的单价现算的 —— '
+          + '所以以后补填单价，过去的账也会跟着亮起来。单价在每个项目的「花了多少」里填。')
+      );
+    })();
 
     return root;
   }

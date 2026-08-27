@@ -466,6 +466,9 @@ input {
 .previz-viewbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
 .previz-viewbar .btn.on { border-color: var(--beam); color: var(--beam); background: rgba(232, 180, 95, 0.1); }
 .previz-canvas { border: 1px solid var(--line); border-radius: var(--r); display: block; }
+.previz-webgl { background:#151a24; }
+.previz-webgl canvas { cursor:grab; }
+.previz-webgl canvas:active { cursor:grabbing; }
 .previz-canvas[hidden] { display: none; }
 .previz-3d-sky { fill: var(--surface-1); }
 .previz-3d-grid { stroke: var(--line-soft); stroke-width: 1; }

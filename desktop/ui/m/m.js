@@ -2264,9 +2264,20 @@ function openEditor(s, jump = 'content') {
       duration: s.duration || 5,
       size: 300,
       assets: [
-        ...(project.bible?.characters || []).map((x) => ({ kind: 'character', name: x.name, ref: x.id || x.name, image: x.sheetPath ? media(x.sheetPath) : '' })),
-        ...(project.bible?.scenes || []).map((x) => ({ kind: 'scene', name: x.name, ref: x.id || x.name, image: x.sheetPath ? media(x.sheetPath) : '' })),
-        ...(project.bible?.props || []).map((x) => ({ kind: 'prop', name: x.name, ref: x.id || x.name, image: x.sheetPath ? media(x.sheetPath) : '' }))
+        ...[
+          ['character', project.bible?.characters || []],
+          ['scene', project.bible?.scenes || []],
+          ['prop', project.bible?.props || []]
+        ].flatMap(([kind, list]) => list.map((x) => {
+          const wanted = s.variants?.[x.name];
+          const variant = (x.variants || []).find((v) => v.id === wanted) || x.variants?.[0] || x;
+          const sheetPath = variant.sheetPath || x.sheetPath;
+          return {
+            kind, name: x.name, ref: x.id || x.name, variantId: variant.id || 'default',
+            image: sheetPath ? media(sheetPath) : '',
+            modelUrl: variant.modelPath ? media(variant.modelPath) : x.modelPath ? media(x.modelPath) : ''
+          };
+        }))
       ],
       onExportControls: async (stage) => {
         const r = await api(`/projects/${project.id}/shots/${s.id}/controls`, { method: 'POST', body: { stage } });

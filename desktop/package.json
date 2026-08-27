@@ -67,5 +67,8 @@
     "portable": {
       "artifactName": "FutureDream-Portable-${version}-${arch}.${ext}"
     }
+  },
+  "dependencies": {
+    "three": "^0.180.0"
   }
 }

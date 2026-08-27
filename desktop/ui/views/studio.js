@@ -1611,9 +1611,20 @@ export default {
             prevStage: prevShot?.stage || null,
             duration: shot.duration || 5,
             assets: [
-              ...(project.bible?.characters || []).map((x) => ({ kind: 'character', name: x.name, ref: x.id || x.name, image: x.sheetPath ? mediaUrl(x.sheetPath) : '' })),
-              ...(project.bible?.scenes || []).map((x) => ({ kind: 'scene', name: x.name, ref: x.id || x.name, image: x.sheetPath ? mediaUrl(x.sheetPath) : '' })),
-              ...(project.bible?.props || []).map((x) => ({ kind: 'prop', name: x.name, ref: x.id || x.name, image: x.sheetPath ? mediaUrl(x.sheetPath) : '' }))
+              ...[
+                ['character', project.bible?.characters || []],
+                ['scene', project.bible?.scenes || []],
+                ['prop', project.bible?.props || []]
+              ].flatMap(([kind, list]) => list.map((x) => {
+                const wanted = shot.variants?.[x.name];
+                const variant = (x.variants || []).find((v) => v.id === wanted) || x.variants?.[0] || x;
+                const sheetPath = variant.sheetPath || x.sheetPath;
+                return {
+                  kind, name: x.name, ref: x.id || x.name, variantId: variant.id || 'default',
+                  image: sheetPath ? mediaUrl(sheetPath) : '',
+                  modelUrl: variant.modelPath ? mediaUrl(variant.modelPath) : x.modelPath ? mediaUrl(x.modelPath) : ''
+                };
+              }))
             ],
             onExportControls: async (stage) => {
               const r = await api(`/projects/${project.id}/shots/${shot.id}/controls`, { method: 'POST', body: { stage } });

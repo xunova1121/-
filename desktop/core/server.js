@@ -15,7 +15,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-import { UI_DIR, DATA_DIR, ensureDirs, safeFileName } from './paths.js';
+import { ROOT, UI_DIR, DATA_DIR, ensureDirs, safeFileName } from './paths.js';
 import * as settings from './settings.js';
 import * as vault from './vault.js';
 import * as logbus from './logbus.js';
@@ -32,6 +32,10 @@ import * as speakerLib from './pipeline/speaker.js';
 import * as preflight from './preflight.js';
 import * as styles from './styles.js';
 import * as duration from './duration.js';
+import * as pricing from './pricing.js';
+import * as ledger from './ledger.js';
+import * as estimate from './pipeline/estimate.js';
+import * as meter from './meter.js';
 import * as skillsLib from './skills.js';
 import * as zip from './zip.js';
 import * as deploy from './deploy.js';
@@ -408,7 +412,15 @@ function serveMedia(req, res, url) {
   fs.createReadStream(full).pipe(res);
 }
 
-async function handleApi(req, res, url, { lan = false } = {}) {
+async function handleApi(req, res, url, opts = {}) {
+  const seg = url.pathname.split('/').filter(Boolean);
+  const projectId = seg[1] === 'projects' && seg[2] ? seg[2] : null;
+  if (!projectId) return handleApiInner(req, res, url, opts);
+  const stage = seg[3] === 'stage' ? seg[4] || 'stage' : seg[3] || '';
+  return meter.runIn({ projectId, stage }, () => handleApiInner(req, res, url, opts));
+}
+
+async function handleApiInner(req, res, url, { lan = false } = {}) {
   const seg = url.pathname.split('/').filter(Boolean); // ['api', ...]
   const [, a, b, c, d, e, f, g] = seg;
   const method = req.method;
@@ -817,7 +829,47 @@ async function handleApi(req, res, url, { lan = false } = {}) {
   }
 
   // ---- 项目 ----
+  if (a === 'spend' && !b && method === 'GET') {
+    const rates = settings.get('rates') || {};
+    const all = ledger.overall(rates);
+    return json(res, 200, { ...all, line: pricing.describeSum(all.total, { prefix: '全部项目合计：' }), kinds: pricing.KINDS });
+  }
+  if (a === 'rates' && !b) {
+    if (method === 'GET') return json(res, 200, { rates: settings.get('rates') || {}, kinds: pricing.KINDS });
+    if (method === 'PUT' || method === 'POST') {
+      const body = await readBody(req);
+      const clean = {};
+      for (const [key, val] of Object.entries(body?.rates && typeof body.rates === 'object' ? body.rates : {})) {
+        const parts = String(key).split(':');
+        if (parts.length !== 3 || !pricing.isKind(parts[2])) continue;
+        if (val === null) { clean[key] = null; continue; }
+        if (!val || typeof val !== 'object') continue;
+        clean[key] = pricing.KINDS[parts[2]].pair ? { in: Number(val.in) || 0, out: Number(val.out) || 0 } : { cny: Number(val.cny) || 0 };
+      }
+      settings.patch({ rates: clean });
+      return json(res, 200, { ok: true, rates: settings.get('rates') || {} });
+    }
+  }
+
   if (a === 'projects') {
+    if (b && c === 'spend' && method === 'GET') {
+      const rates = settings.get('rates') || {};
+      const acct = ledger.forProject(b, rates);
+      return json(res, 200, { ...acct, line: pricing.describeSum(acct.total, { prefix: '这个项目到现在：' }), kinds: pricing.KINDS, recent: ledger.recent({ projectId: b, limit: 40 }) });
+    }
+    if (b && c === 'estimate' && method === 'GET') {
+      const p = store.read(b);
+      if (!p) return json(res, 404, { error: '项目不存在' });
+      const rates = settings.get('rates') || {};
+      const stage = url.searchParams.get('stage') || 'assets';
+      const regenerate = url.searchParams.get('regenerate') === '1';
+      const routing = estimateRouting();
+      const maxRetries = settings.get('consistencyVerify') ? Number(settings.get('consistencyMaxRetries')) || 0 : 0;
+      const plan = stage === 'all'
+        ? estimate.forRun({ shots: p.shots || [], from: url.searchParams.get('from') || 'assets', routing, maxRetries })
+        : estimate.forStage({ shots: p.shots || [], stage, routing, regenerate, maxRetries });
+      return json(res, 200, { stage, plan, priced: estimate.price(plan, rates), line: estimate.describe(plan, rates) });
+    }
     if (method === 'GET' && !b) return json(res, 200, store.list());
     if (method === 'POST' && !b) return json(res, 201, store.create(await readBody(req)));
     // 这三条必须加 !c 限定"路径到此为止"。
@@ -1639,6 +1691,20 @@ function summarize(r) {
   };
 }
 
+function estimateRouting() {
+  const r = adapters.resolvedRouting();
+  const videoProvider = providers.getProvider(r.video?.provider) || null;
+  return {
+    image: { provider: r.image?.provider, model: r.image?.model },
+    video: {
+      provider: r.video?.provider,
+      model: r.video?.model,
+      durations: videoProvider ? duration.allowedDurations(videoProvider, r.video?.model) : []
+    },
+    tts: { provider: r.tts?.provider, model: r.tts?.model }
+  };
+}
+
 export function createServer({ lan = false } = {}) {
   ensureDirs();
   // 上次删项目时被 Windows 文件占用打断的残骸，开机顺手扫掉
@@ -1694,7 +1760,7 @@ export function createServer({ lan = false } = {}) {
        * 放行的是这两个确切的路径，不是"所有 .js"—— 后者会把电脑版
        * 整套界面代码一起放出去，那不是同一件事。
        */
-      const SHARED_MODULES = ['/previz-canvas.js', '/previz-stage.js', '/site-canvas.js', '/previz.js', '/site.js', '/outline.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js'];
+      const SHARED_MODULES = ['/previz-canvas.js', '/previz-stage.js', '/site-canvas.js', '/previz.js', '/three.js', '/site.js', '/outline.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js', '/pricing.js', '/estimate.js'];
       const isShell =
         url.pathname === '/m'
         || url.pathname.startsWith('/m/')
@@ -1762,6 +1828,27 @@ export function createServer({ lan = false } = {}) {
       if (url.pathname === '/previz.js') {
         return fs.readFile(path.join(HERE, 'pipeline', 'previz.js'), (err, data) => {
           if (err) return json(res, 404, { error: '找不到 previz.js' });
+          res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
+          res.end(data);
+        });
+      }
+      if (url.pathname === '/three.js') {
+        return fs.readFile(path.join(ROOT, 'node_modules', 'three', 'build', 'three.module.js'), (err, data) => {
+          if (err) return json(res, 404, { error: '找不到 Three.js，请重新安装应用依赖' });
+          res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'public, max-age=31536000' });
+          res.end(data);
+        });
+      }
+      if (url.pathname === '/pricing.js') {
+        return fs.readFile(path.join(HERE, 'pricing.js'), (err, data) => {
+          if (err) return json(res, 404, { error: '找不到 pricing.js' });
+          res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
+          res.end(data);
+        });
+      }
+      if (url.pathname === '/estimate.js') {
+        return fs.readFile(path.join(HERE, 'pipeline', 'estimate.js'), (err, data) => {
+          if (err) return json(res, 404, { error: '找不到 estimate.js' });
           res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
           res.end(data);
         });

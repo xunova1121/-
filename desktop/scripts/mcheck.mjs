@@ -82,6 +82,23 @@ store.update(proj.id, (p) => {
   return p;
 });
 
+/**
+ * 账本里先种几笔用量。
+ *
+ * ⚠ 这台走查机**不联网**，上面那些图和视频是直接写进磁盘的，
+ * 流水线一次都没真跑过 —— 所以账本天然是空的，而空账本只能验到
+ * "还没花过"那一支。真正要看的是另外两支：用量摊开、以及
+ * "没填单价"时能不能就地填。所以这里按真实形状补几笔。
+ *
+ * 种的是**用量**不是钱 —— 账本本来就只存用量，这也顺带验了那件事：
+ * 种完之后一个单价都没有，卡片上必须显示用量、并且挂着"还没填单价"。
+ */
+const ledgerM = await import('/home/user/-/desktop/core/ledger.js');
+ledgerM.add({ projectId: proj.id, stage: 'assets', provider: 'volcengine', model: 'doubao-seedream-3-0-t2i-250415', kind: 'image', units: 1 });
+ledgerM.add({ projectId: proj.id, stage: 'assets', provider: 'volcengine', model: 'doubao-seedream-3-0-t2i-250415', kind: 'image', units: 1 });
+ledgerM.add({ projectId: proj.id, stage: 'video', provider: 'volcengine', model: 'doubao-seedance-1-0-pro-250528', kind: 'video', units: 10 });
+ledgerM.flush();
+
 const lan = await srv.startLan();
 console.log('局域网监听：', JSON.stringify({ running: lan.running, port: lan.port, urls: lan.urls }));
 const token = settings.get('lanToken');
@@ -793,6 +810,44 @@ const small = await page.evaluate(() =>
     .map((el) => ({ t: el.innerText.trim().slice(0, 8), h: Math.round(el.getBoundingClientRect().height) }))
     .filter((x) => x.h > 0 && x.h < 36));
 console.log('⑩ 小于 36px 的可点元素：', small.length ? JSON.stringify(small) : '没有 ✓');
+
+/**
+ * ⑪ 钱：手机上也得看得见。
+ *
+ * ⚠ 这一节有一层只有**真手机浏览器**能验：手机版会 import `/pricing.js`。
+ * 那是个直接发原件的模块，而局域网那条口子是**白名单放行**的 ——
+ * 忘了把它加进 SHARED_MODULES，它就会 401，
+ * 而 import 失败会让**整个 m.js 加载不起来**：手机上打开一片空白，
+ * 连"请输入配对码"那一屏都没有。这种坏法在 Node 里的自检中完全看不见。
+ *
+ * 所以下面这几行同时在验两件事：卡片在不在，以及那个模块放行了没有。
+ */
+await page.locator('.tab', { hasText: '设定' }).click();
+await page.waitForTimeout(800);
+{
+  const card = page.locator('details.card', { hasText: '花了多少' }).first();
+  const there = (await card.count()) > 0;
+  console.log('⑪ 手机上看得到账：', there ? '✓' : '✕ 卡片不在');
+  if (there) {
+    await card.locator('summary').click();
+    await page.waitForTimeout(900);
+    const body = await card.innerText().catch(() => '');
+    console.log('   说得出这个项目发过什么：', /这个项目到现在/.test(body) ? '✓' : `✕ ${body.slice(0, 80)}`);
+    // 没填单价时必须说"还没填"，不能显示 ¥0 —— 未知当 0 是这个功能要消灭的东西
+    console.log('   没填单价时不显示 ¥0：',
+      !/¥\s*0(\D|$)/.test(body) ? '✓' : `✕ ${body.slice(0, 100)}`);
+    console.log('   摊开了每一档的用量：',
+      /出图/.test(body) && /出视频/.test(body) ? '✓' : `✕ ${body.slice(0, 120)}`);
+    console.log('   就地能填单价：',
+      (await card.locator('.rate-row input').count()) > 0 ? '✓' : '✕ 没有输入框');
+    // 填一个，钱要当场出现 —— "存的是用量、钱现算"这个设计的唯一可见证据
+    await card.locator('.rate-row input').first().fill('0.2');
+    await card.locator('button:has-text("存单价")').click();
+    await page.waitForTimeout(1200);
+    const after = await card.innerText().catch(() => '');
+    console.log('   填完单价，钱当场算出来：', /¥\d/.test(after) ? '✓' : `✕ ${after.slice(0, 140)}`);
+  }
+}
 
 // 第 ② 步是**故意**敲错配对码，那一次 401 是预期之内的，不算页面报错
 const realErrs = errs.filter((e) => !/401/.test(e));

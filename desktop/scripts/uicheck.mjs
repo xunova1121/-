@@ -1476,6 +1476,106 @@ await page.waitForTimeout(500);
     JSON.stringify({ state, redo }));
 }
 
+/**
+ * ════════ 钱：那个数真的出现在屏幕上了吗 ════════
+ *
+ * 自检验的是**算得对不对**，这一节验的是**说没说出来**。
+ * 这两件事今天已经分开栽过好几次：功能在、测试绿、界面一声不响。
+ *
+ * 还有一层只有真浏览器能验：/estimate.js 和 /pricing.js 是两个
+ * 直接发原件给浏览器的模块。它们要是 import 挂了，**整个工作台白屏**——
+ * 不是少一行价钱。Node 里的自检永远看不到这一类坏法。
+ */
+console.log('\n钱：预估那句话在不在屏幕上');
+await step('出图').click();
+await page.waitForTimeout(900);
+{
+  const line = await page.locator('.cost-line').first().innerText().catch(() => '');
+  check('出图那一步摆出了这一下要发多少', /出图\s*\d+\s*张/.test(line), line || '（一行都没有）');
+  /**
+   * ⚠ 没填单价时**必须说"还没填单价"，不许显示 ¥0**。
+   *
+   * 这是整个功能的地基：未知当 0 会得到一个看起来正常的偏小的数，
+   * 而人会照着它下手。走查机上一条单价都没填，所以这里正好验到这个分支。
+   */
+  check('没填单价时说的是"算不出钱"，不是 ¥0',
+    line.includes('还没填单价') && !/¥\s*0(\D|$)/.test(line), line);
+
+  /**
+   * ⚠ 合成那一步必须说"不花钱"，而且必须**在屏幕上**说。
+   *
+   * 这条是整个功能里最有价值的一句话：调节奏、换顺序、砍一镜、配段音乐，
+   * 全在合成这一步里，全部是本机 FFmpeg，一分钱不花。
+   * 用户不知道这件事的时候，会为了改一个节奏去重出一整轮视频。
+   *
+   * 金丝雀第一轮把 describe() 里那句"不花钱"删掉，走查照样全绿 ——
+   * 因为它从头到尾没翻到合成那一步。功能在、自检绿、界面不说话，
+   * 又是同一个病，这次犯在验收本身上。
+   */
+  await step('合成').click();
+  await page.waitForTimeout(800);
+  const composeLine = await page.locator('.cost-line').first().innerText().catch(() => '');
+  check('合成那一步当面说"不花钱"', /不花钱/.test(composeLine), composeLine || '（一行都没有）');
+  check('而且说清了为什么（本机 FFmpeg）', /FFmpeg|本机/.test(composeLine), composeLine);
+  await step('出图').click();
+  await page.waitForTimeout(700);
+
+  // 预估摆在按钮**上面** —— 这句话是给还没按的人看的
+  const order = await page.evaluate(() => {
+    const c = document.querySelector('.cost-line');
+    const b = document.querySelector('.stage-detail-head .btn.primary');
+    if (!c || !b) return 'missing';
+    return (c.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) ? 'before' : 'after';
+  });
+  check('它摆在「开始」按钮前面（按完再说就晚了）', order === 'before', order);
+}
+
+console.log('\n钱：这个项目花了多少');
+{
+  const card = page.locator('.card', { hasText: '这个项目花了多少' }).first();
+  check('账那张卡在页面上', (await card.count()) > 0);
+  await card.locator('summary').click().catch(() => {});
+  await page.waitForTimeout(600);
+  const body = await card.innerText().catch(() => '');
+  check('展开后说得出这个项目发过什么', /这个项目到现在/.test(body), body.slice(0, 120));
+  /**
+   * 走查机跑过出图，所以账上必须有图 —— 而且必须挂着"没填单价"。
+   * 只要这两条同时成立，就说明"用量记下来了、钱等你填单价"这条路是通的。
+   */
+  check('用量已经在账上了（哪怕一个单价都没填）', /出图/.test(body), body.slice(0, 200));
+  check('并且就地给了填单价的地方', (await card.locator('.rate-row input').count()) > 0);
+
+  // 填一个单价，钱要当场出现 —— 这是"存的是用量、钱现算"那个设计的唯一可见证据
+  const first = card.locator('.rate-row input').first();
+  await first.fill('0.25');
+  await card.locator('button', { hasText: '存单价' }).click();
+  await page.waitForTimeout(1200);
+  const after = await card.innerText().catch(() => '');
+  check('填完单价，钱当场算出来了（过去的账也跟着亮）',
+    /¥\d/.test(after) && !/还没填单价/.test(after.split('这个项目到现在')[1] || after),
+    after.slice(0, 200));
+}
+
+console.log('\n钱：全部项目一共花了多少');
+await page.locator('.nav-item', { hasText: '项目' }).first().click().catch(async () => {
+  await page.locator('a,button', { hasText: '项目' }).first().click();
+});
+await page.waitForTimeout(1200);
+{
+  const panel = page.locator('.panel', { hasText: '一共花了多少' }).first();
+  check('项目页底下有一张跨项目的总账', (await panel.count()) > 0);
+  if (await panel.count()) {
+    const body = await panel.innerText();
+    check('总账说得出合计', /全部项目合计|还没花过/.test(body), body.slice(0, 120));
+    /**
+     * 刚才在工作台上填过一个单价，所以这里必须已经出钱了 ——
+     * 这一条同时验了"账本存的是用量、钱现算"：总账和单项目账
+     * 读的是同一份用量，换算用的是同一张单价表。
+     */
+    check('工作台上填的单价，这里也算数', /¥\d/.test(body), body.slice(0, 200));
+  }
+}
+
 check('全程没有页面报错', errs.length === 0, errs.slice(0, 3).join(' | '));
 
 await b.close();
