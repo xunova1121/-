@@ -326,7 +326,11 @@ function checkKey(req, url) {
 /** 本机的局域网地址，用来在设置页里告诉用户"手机上该输什么" */
 export function lanAddresses() {
   const out = [];
-  for (const [name, list] of Object.entries(os.networkInterfaces())) {
+  // 某些容器、VPN 和受限 Windows 沙盒会禁止枚举网卡。这个信息只用于显示
+  // “手机该输哪个地址”，取不到时应显示空列表，不能把整个服务进程带崩。
+  let interfaces = {};
+  try { interfaces = os.networkInterfaces() || {}; } catch { return out; }
+  for (const [name, list] of Object.entries(interfaces)) {
     for (const ni of list || []) {
       if (ni.internal) continue;
       if (ni.family !== 'IPv4' && ni.family !== 4) continue;

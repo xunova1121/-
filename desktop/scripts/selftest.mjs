@@ -351,7 +351,12 @@ const upstream = http.createServer((req, res) => {
         const user = String(body.messages?.[1]?.content || '');
         const ids = [...user.matchAll(/【场次\s*([a-z0-9-]+)】/gi)].map((m) => m[1]);
         upstream.lastShotPrompt = { system, user };
-        content = JSON.stringify(ids.length
+        /**
+         * 打开这个开关就**一个 beatId 都不标** —— 模型真会这样
+         *（提示词只是请求，它想不理就不理）。而那条路是最危险的分支：
+         * 收口时不知道每一镜属于哪一场，只能保守地把整批换掉。
+         */
+        content = JSON.stringify((ids.length && !upstream.noBeatTags)
           ? { ...SHOTS_REPLY, shots: SHOTS_REPLY.shots.map((x, i) => ({ ...x, beatId: ids[i % ids.length] })) }
           : SHOTS_REPLY);
       } else if (system.includes('剪辑师')) {
@@ -2628,6 +2633,27 @@ section('本地出图：ComfyUI');
     srv.close();
   }
 
+  /**
+   * ⚠ 参考图**传上去了不等于用上了**。
+   *
+   * 工作流里没有 FD_REF 节点时，图传到了 ComfyUI，但没有任何节点读它 ——
+   * 这一镜的一致性实际上只剩提示词撑着。所以 filled 里没有"参考图"这一项时，
+   * 上层记的 refsSent 必须是 0，不能按"发过去几张"算。
+   *
+   * 这一条是复盘时抓的：早上刚修过同一类错（modelUsed 记的是路由到的模型
+   * 而不是真正出图那个），几小时后在这条新路上又犯了一次。
+   */
+  {
+    const withRef = comfy.inject(wf(), { prompt: 'x', refName: 'ref.png' });
+    check('工作流有 FD_REF 时，filled 里记着"参考图"', withRef.filled.includes('参考图'));
+    const noRefNode = wf(); delete noRefNode[7];
+    const without = comfy.inject(noRefNode, { prompt: 'x', refName: 'ref.png' });
+    check('工作流没有 FD_REF 时，filled 里不能有"参考图"',
+      !without.filled.includes('参考图'), JSON.stringify(without.filled));
+    check('而且要在 skipped 里说出来',
+      without.skipped.some((x) => /参考图/.test(x)), JSON.stringify(without.skipped));
+  }
+
   // ── 跑失败时说人话 ──
   {
     const srv = http.createServer((req, res) => {
@@ -2868,6 +2894,56 @@ section('大纲：改动指令，不是推倒重来');
     check('lockBeats 也是纯函数', o.beats.every((b) => !b.locked));
   }
 
+  /**
+   * ── 还没拆分镜的那几场，要说出来 ──
+   *
+   * 在大纲里插一场之后，如果没有一句话告诉你"有 1 场还没拆分镜"，
+   * 那一场就会一直躺在那儿：功能是好的（再点一次分镜就会拆它），
+   * 但没人知道该去点。
+   */
+  {
+    const half = {
+      beats: [
+        { id: 'b-07', scene: '山门外', summary: '甲。', locked: true },
+        { id: 'b-04', scene: '石阶', summary: '乙。', locked: false }
+      ]
+    };
+    check('列得出还没拆的那几场',
+      ol.pendingBeats(half).map((b) => b.id).join(',') === 'b-04',
+      JSON.stringify(ol.pendingBeats(half).map((b) => b.id)));
+    check('摘要里说了还剩几场没拆', /还有 1 场没拆/.test(ol.summarize(half)), ol.summarize(half));
+    /**
+     * ⚠ 一场都没拆过时**不说**这句。
+     * 那时候"还有 2 场没拆"是废话 —— 本来就一场都没拆，
+     * 而且它会和"从剧本生成大纲"那颗按钮抢注意力。
+     */
+    const none = { beats: [{ id: 'b-07', scene: 'x', summary: '甲。' }] };
+    check('一场都没拆过时不说这句（那是废话）',
+      !/还有/.test(ol.summarize(none)), ol.summarize(none));
+    check('按章过滤得出来',
+      ol.pendingBeats({ beats: [
+        { id: 'b-01', chapterId: 'ch-01', scene: 'x', summary: '甲。' },
+        { id: 'b-02', chapterId: 'ch-02', scene: 'y', summary: '乙。' }
+      ] }, 'ch-02').map((b) => b.id).join(',') === 'b-02');
+  }
+
+  // ── 只锁真的发出去的那几场 ──
+  {
+    const o = {
+      beats: [
+        { id: 'b-07', scene: '一', summary: '甲。' },
+        { id: 'b-04', scene: '二', summary: '乙。' },
+        { id: 'b-99', scene: '三', summary: '拆到一半插进来的。' }
+      ]
+    };
+    const only = ol.lockBeats(o, null, ['b-07', 'b-04']);
+    check('给了 ids 就只锁这几场',
+      only.beats.map((b) => b.locked).join(',') === 'true,true,false',
+      JSON.stringify(only.beats.map((b) => [b.id, b.locked])));
+    check('不给 ids 时还是按范围锁（老行为没变）',
+      ol.lockBeats(o, null).beats.every((b) => b.locked));
+  }
+
   // ── 解锁：唯一一条能重拆的路 ──
   {
     const o = {
@@ -3047,6 +3123,97 @@ section('大纲 → 分镜：只拆没拆过的场次');
       JSON.stringify(after.shots.map((s) => s.index)));
   }
 
+  /**
+   * ── 拆到一半 / 拆完之后临时加的一场 ──
+   *
+   * 用户的原话："分镜生成中或者生成完后，临时新增的大纲，要同步到新增分镜"。
+   *
+   * ⚠ 这里埋着一个**静默**的坑：拆完之后锁场次时，锁的是"范围内所有场次"，
+   * 而不是"这一批真的发出去的那几场"。于是**拆的过程中**插进来的一场
+   * 会被连带锁上 —— 它从来没被拆过，却再也拆不了了（锁着的场次
+   * 模型也改不动），而且不报任何错：它就那么留在大纲上，永远没有镜头。
+   */
+  {
+    const p = mk();
+
+    /**
+     * ⚠ 关键是**在拆的过程中**插进去，不是拆完之后。
+     *
+     * analyzeScript 一开始就把"这一批要拆哪几场"定下来了，然后去等模型。
+     * 在这个空档往大纲里插一场，它不在这一批里 —— 而收尾时锁场次，
+     * 锁的是"范围内所有场次"，把它一起锁了。
+     *
+     * 拆完之后再插的那种情况本来就是好的（下一次拆会拆它），所以那样测不出来。
+     */
+    const running = studio.analyzeScript(p.id, { force: true });
+    store.update(p.id, (x) => {
+      const beats = ol.normalizeOutline(x.outline).beats;
+      x.outline = { beats: [...beats, {
+        id: 'b-99', scene: '码头', characters: [], summary: '拆到一半临时加的一场。', dialogue: '', seconds: 15, locked: false
+      }] };
+      return x;
+    });
+    await running;
+
+    const mid = store.read(p.id);
+    const fresh = ol.normalizeOutline(mid.outline).beats.find((b) => b.id === 'b-99');
+    check('拆的过程中插进来的那一场，没有被连带锁上',
+      fresh && fresh.locked === false,
+      JSON.stringify(ol.normalizeOutline(mid.outline).beats.map((b) => [b.id, b.locked])));
+
+    // 再拆一次：只拆这新的一场，老的镜头一个都不动
+    const keptIds = mid.shots.map((s) => s.id);
+    await studio.analyzeScript(p.id, { force: true });
+    const after = store.read(p.id);
+    check('再拆一次时，老场次的镜头原样还在',
+      keptIds.every((id) => after.shots.some((s) => s.id === id)),
+      JSON.stringify({ before: keptIds, after: after.shots.map((s) => s.id) }));
+    check('新加的那一场拆出了镜头',
+      after.shots.some((s) => s.beatId === 'b-99'),
+      JSON.stringify(after.shots.map((s) => s.beatId)));
+  }
+
+  /**
+   * ── 模型一个 beatId 都不标时的兜底 ──
+   *
+   * ⚠ 这条路原来**一条断言都没有**，而它恰恰是最危险的分支：
+   * 不知道每一镜属于哪一场，就没法"只换这几场的镜头"。
+   *
+   * 保守处理是把这一批整个换掉。宁可多作废，**不能悄悄重复** ——
+   * 新旧两批叠在一起的话，成片里同一段戏演两遍，而每一镜看着都正常。
+   */
+  {
+    const p = mk();
+    upstream.noBeatTags = true;
+    try {
+      await studio.analyzeScript(p.id, { force: true });
+      const after = store.read(p.id);
+      check('模型不标场次时，镜头照样拆得出来', (after.shots || []).length > 0);
+      check('那几镜的 beatId 是空的（不硬编一个假的）',
+        (after.shots || []).every((s) => !s.beatId),
+        JSON.stringify((after.shots || []).map((s) => s.beatId)));
+      /**
+       * ⚠ 最要紧的一条：**不能重复**。
+       * 编一个 beatId 或者把新旧都留下，成片里同一段戏就会演两遍。
+       */
+      check('没有重复的镜头 id',
+        new Set(after.shots.map((s) => s.id)).size === after.shots.length,
+        JSON.stringify(after.shots.map((s) => s.id)));
+      check('镜号也没有重号',
+        new Set(after.shots.map((s) => s.index)).size === after.shots.length,
+        JSON.stringify(after.shots.map((s) => s.index)));
+
+      // 再拆一次也不该越堆越多
+      store.update(p.id, (x) => { x.outline = ol.unlockBeats(x.outline, []); return x; });
+      const n1 = store.read(p.id).shots.length;
+      await studio.analyzeScript(p.id, { force: true });
+      const n2 = store.read(p.id).shots.length;
+      check('重拆一次镜头数不会翻倍（旧的那批被换掉了）', n2 === n1, `${n1} → ${n2}`);
+    } finally {
+      upstream.noBeatTags = false;
+    }
+  }
+
   // ── 没有大纲的项目：老路一点没变 ──
   {
     const p = store.create({ title: '没大纲', targetDuration: 60 });
@@ -3067,6 +3234,7 @@ section('大纲 → 分镜：只拆没拆过的场次');
 
 section('剧本一章一章加：追加、补设定集、点名了不存在的人');
 {
+  const chapters2 = await import('../core/pipeline/chapters.js');
   const lint = await import('../core/pipeline/shotlint.js');
   const consistency = await import('../core/pipeline/consistency.js');
   const studio = studioModule;
@@ -3295,6 +3463,60 @@ section('剧本一章一章加：追加、补设定集、点名了不存在的�
       r0.project.chapters[1].id !== r0.project.chapters[0].id,
       r0.project.chapters.map((c) => c.id).join(','));
     check('剧本正文里也跟着有了', /老周跳下船/.test(r0.project.script));
+
+    /**
+     * ⚠ 一次贴**好几章**。
+     *
+     * 连载的常态就是攒了几章一起发。原来只当一章处理 —— 三章挤成一章，
+     * 于是时长预算、拆分镜、补设定集全都按"一章"来，而它实际是三章。
+     * 而且不报错：章节列表上就是多了一条很长的。
+     */
+    const many = store.create({ title: '一次贴三章' });
+    store.update(many.id, (x) => { x.script = ch1; return x; });
+    studio.splitChapters(many.id);
+    // ⚠ 拿**这个项目自己**的第一章来比。第一版比的是上面那个夹具的 c0，
+    // 那是另一个项目的正文 —— 断言在报一件根本不相干的事
+    const manyC0 = store.read(many.id).chapters[0].script;
+    const rm = studio.appendChapter(many.id, {
+      script: '第二章 出海\n船离了港。\n\n第三章 风暴\n浪打了上来。\n\n第四章 靠岸\n他回来了。'
+    });
+    check('一次贴三章就出三章', rm.added.length === 3, String(rm.added.length));
+    check('每一章拿到自己的标题',
+      rm.added.map((c) => c.title).join(' | ') === '第二章 出海 | 第三章 风暴 | 第四章 靠岸',
+      rm.added.map((c) => c.title).join(' | '));
+    check('每一章的正文各自独立',
+      rm.added[1].script.includes('浪打了上来') && !rm.added[1].script.includes('他回来了'),
+      rm.added[1].script);
+    check('id 不重复', new Set(rm.project.chapters.map((c) => c.id)).size === rm.project.chapters.length);
+    check('第一章还是没被动过', rm.project.chapters[0].script === manyC0,
+      JSON.stringify([manyC0, rm.project.chapters[0].script]));
+    /**
+     * ⚠ 只按**标题**切，不按字数兜底。
+     * 贴一章长的（三千字以上）不该被拦腰劈成两半 —— 那不是他要的。
+     */
+    /**
+     * ⚠ 标题**出现在中间**时，前面那段不能丢。
+     *
+     * 这一条是金丝雀顺出来的：`marks.length < 2` 那道闸看着是"防止把书名
+     * 当章节标题"，它真正挡住的其实是**数据丢失** —— 只认出一个标题时，
+     * 按标题切会从标题处开始切，标题**前面**那一段直接被扔掉，
+     * 而且不报任何错：你贴进去 500 字，列表上那一章只有 300 字。
+     */
+    const midHead = chapters2.splitByHeadings('船离了港，雾很大。\n\n第三章 风暴\n浪打了上来。');
+    check('标题出现在中间时，前面那段不会被丢掉',
+      midHead.map((x) => x.script).join('').includes('雾很大'),
+      JSON.stringify(midHead.map((x) => x.script)));
+
+    const longOne = store.create({ title: '一章很长' });
+    store.update(longOne.id, (x) => { x.script = ch1; return x; });
+    studio.splitChapters(longOne.id);
+    const rl = studio.appendChapter(longOne.id, { title: '第二章', script: '啊'.repeat(9000) });
+    check('贴一章很长的不会被按字数劈开', rl.added.length === 1, String(rl.added.length));
+
+    // 新章都是"还没对过设定集"的状态 —— 界面据此提示该扫一遍
+    check('新加的章标着还没扫过设定集',
+      studio.unscannedChapters(rm.project).length === rm.project.chapters.length,
+      JSON.stringify(studio.unscannedChapters(rm.project).map((c) => c.id)));
 
     // 正文自带标题行时不该再补一行，否则重切会多切一刀
     const p2 = store.create({ title: '连载2' });
@@ -10699,6 +10921,9 @@ section('工业化升级：实例路由、任务账本和控制图');
   check('真实人物图片进入首帧合成', maps.start.includes('/api/media?path=alan.png'));
   check('摄影机关键帧被插值成轨迹', maps.trajectory.length > 2 && maps.trajectory.at(-1).x === 1 && maps.trajectory.at(-1).lens === 50);
   check('人物姿态序列和分层合成清单齐全', maps.poseSequence.length === maps.trajectory.length && maps.layers.some((x) => x.id === 'actor-a'));
+  const controlPrompt = controls.videoControlPrompt(maps);
+  check('3D预演轨迹能转成视频模型实际收到的导演指令',
+    controlPrompt.includes('3D预演控制') && controlPrompt.includes('actor-a') && controlPrompt.includes('50mm'));
 
   const previzUi = fs.readFileSync(path.join(PROJECT_ROOT, 'ui', 'previz-canvas.js'), 'utf8');
   check('工作台有摄影机取景、关键帧和资产拖入',

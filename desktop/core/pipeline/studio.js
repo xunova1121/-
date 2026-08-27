@@ -42,7 +42,7 @@ import * as segments from './segments.js';
 import * as transitions from '../transitions.js';
 import * as fx from '../fx.js';
 import * as jobs from '../jobs.js';
-import { renderControls } from './controlmaps.js';
+import { renderControls, videoControlPrompt } from './controlmaps.js';
 
 export const extractJSON = consistency.extractJSON;
 
@@ -923,6 +923,15 @@ export function appendChapter(projectId, { title = '', script = '' } = {}) {
    * 所以：章节已经有了就直接往后加一条，一次重切都不做。
    * script 同步更新，只是为了剧本页能看到全文、以及将来真要重切时有材料在。
    */
+  /**
+   * ⚠ 一次可能贴进来**好几章**。
+   *
+   * 连载的常态就是攒了几章一起发。原来只当一章处理 —— 三章挤成一章，
+   * 于是时长预算、拆分镜、补设定集全都按"一章"来，而它实际是三章。
+   * 而且不报错：章节列表上就是多了一条很长的。
+   */
+  const parts = chapters.splitByHeadings(text);
+
   const existing = project.chapters || [];
   if (!existing.length) {
     // 还没分过章：这一次顺带把已有正文立成第 1 章，再把新章接在后面
@@ -930,29 +939,34 @@ export function appendChapter(projectId, { title = '', script = '' } = {}) {
     if (!fresh.length) throw new Error('没能切出章节');
     store.update(projectId, (p) => { p.script = merged; return p; });
     const next = applyChapters(projectId, fresh);
-    return { project: next, chapter: (next.chapters || [])[next.chapters.length - 1] || null };
+    const added = (next.chapters || []).filter((c) => c.stageStatus?.script !== 'done');
+    return { project: next, added, chapter: added[0] || null };
   }
 
-  const idx = existing.length + 1;
-  const body = `${head}${text}`.trim();
-  const one = {
-    id: `ch-${String(idx).padStart(2, '0')}`,
-    index: idx,
-    title: heading,
-    summary: '',
-    script: body,
-    chars: body.length,
-    stageStatus: { script: 'pending', assets: 'pending', video: 'pending', voice: 'pending', compose: 'pending' },
-    outputs: {}
-  };
+  const made = parts.map((part, k) => {
+    const idx = existing.length + k + 1;
+    const body = part.script.trim();
+    return {
+      id: `ch-${String(idx).padStart(2, '0')}`,
+      index: idx,
+      // 贴进来的正文自己带标题就用它；只贴了一章又没标题时用填的那个
+      title: part.title || (parts.length === 1 ? heading : `第 ${idx} 章`),
+      summary: '',
+      script: body,
+      chars: body.length,
+      stageStatus: { script: 'pending', assets: 'pending', video: 'pending', voice: 'pending', compose: 'pending' },
+      outputs: {}
+    };
+  });
+
   const next = store.update(projectId, (p) => {
     p.script = merged;
-    p.chapters = [...(p.chapters || []), one];
+    p.chapters = [...(p.chapters || []), ...made];
     // 新章还没拆分镜，整片的分镜状态就不再是 done
     p.stageStatus.script = p.chapters.every((c) => c.stageStatus.script === 'done') ? 'done' : 'pending';
     return p;
   });
-  return { project: next, chapter: one };
+  return { project: next, added: made, chapter: made[0] };
 }
 
 // ═══════════════════════ 阶段二：分镜 ═══════════════════════
@@ -1580,8 +1594,14 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
           ...one,
           index: chapter ? chapters.globalShotIndex(chapter.index || 0, i + 1) : i + 1
         }));
-      // 拆过的场次锁上 —— 模型改大纲时碰不到它们了
-      p.outline = outline.lockBeats(p.outline, chapter ? chapter.id : null);
+      /**
+       * 只锁**这一批真的发出去的那几场**。
+       *
+       * ⚠ 不能按范围锁：等模型那几十秒里，人完全可能往大纲里插一场
+       * （他正看着大纲）。按范围锁会把它一起锁上 —— 从没拆过却再也拆不了，
+       * 而且不报任何错。
+       */
+      p.outline = outline.lockBeats(p.outline, null, targetBeats.map((x) => x.id));
       if (chapter) {
         const ch = p.chapters.find((c) => c.id === chapter.id);
         if (ch) { ch.stageStatus.script = 'done'; ch.shotCount = shots.length; }
@@ -1890,6 +1910,20 @@ export function applySiteLayout(projectId, siteName) {
 /** 这个项目上的场地图，连同算出来的问题 */
 export function siteMapOf(project) {
   return { sites: siteMod.sitesOf(project), issues: siteMod.siteIssues(project) };
+}
+
+/**
+ * 还有几章没扫过角色和场景。
+ *
+ * ⚠ 这个数必须**摆到界面上**。加完新章之后如果没人提一句，
+ * 新章里的角色永远不会进设定集 —— 而那件事是**静默**的：
+ * 分镜照拆、图照出，只是那几镜没有参考图、没有外貌描述、复核没有基准，
+ * 静默降级成"文生图"，流水线一路绿。
+ *
+ * 「补上新增的角色和场景」那颗按钮一直都在，但没人知道什么时候该点。
+ */
+export function unscannedChapters(project) {
+  return (project?.chapters || []).filter((c) => !c.castScanned);
 }
 
 /** 这个场景存过布局吗。没有回 null */
@@ -3017,7 +3051,13 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
       ? { images: [], labels: [] }
       // 过期的限时地址在这儿当场换掉，不然厂商只会回一句"下载不到你给的图"
       : await refreshRefs(project, consistency.collectReferences(project.bible, shot), { onEvent });
-  const videoPrompt = opts.prompt?.trim() || ctx.videoPrompt;
+  let controlBundle = null;
+  if (shot.stage?.cam) {
+    controlBundle = exportShotControls(projectId, shot.id).controls;
+    onEvent?.({ type: 'note', shotId, message: `已把3D预演轨迹写入本镜生成请求（${controlBundle.keyframes?.length || 0} 个关键帧）` });
+  }
+  const controlPrompt = videoControlPrompt(controlBundle || {});
+  const videoPrompt = [opts.prompt?.trim() || ctx.videoPrompt, controlPrompt].filter(Boolean).join('\n\n');
   if (bibleRefs.labels.length) {
     onEvent?.({ type: 'note', message: `参考设定集：${bibleRefs.labels.join('、')}` });
   }
@@ -3089,7 +3129,8 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
       recordGeneration(t, {
         kind: 'video', provider: providerId, model, prompt: videoPrompt,
         refs: [...bibleRefs.labels], output: dest, resolution: t.videoResolution,
-        duration: t.actualDuration, firstFrame: firstFrame || null, lastFrame: ctx.lastFrameUrl || null
+        duration: t.actualDuration, firstFrame: firstFrame || null, lastFrame: ctx.lastFrameUrl || null,
+        controlManifest: controlBundle?.manifest || null
       });
     }
     return p;
@@ -4297,7 +4338,12 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
       }
 
       // 上下文：接在谁后面、要交给谁。缺了它，每一镜都会被当成独立短片来演。（上面已经算过）
-      const videoPrompt = ctx.videoPrompt;
+      let controlBundle = null;
+      if (shot.stage?.cam) {
+        controlBundle = exportShotControls(projectId, shot.id).controls;
+        onEvent?.({ type: 'note', shotId: shot.id, message: `第 ${shot.index} 镜3D预演已进入生成请求（${controlBundle.keyframes?.length || 0} 个关键帧）` });
+      }
+      const videoPrompt = [ctx.videoPrompt, videoControlPrompt(controlBundle || {})].filter(Boolean).join('\n\n');
       onEvent?.({ type: 'shot', shotId: shot.id, status: 'running', message: `提交任务：${videoPrompt.slice(0, 60)}…` });
 
       /**
@@ -4369,7 +4415,8 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
             kind: 'video', provider: useProvider, model: useModel,
             prompt: videoPrompt, refs: [...bibleRefs.labels], output: dest,
             resolution: t.videoResolution, duration: t.actualDuration,
-            firstFrame: firstFrame || null, lastFrame: ctx.lastFrameUrl || null
+            firstFrame: firstFrame || null, lastFrame: ctx.lastFrameUrl || null,
+            controlManifest: controlBundle?.manifest || null
           });
         }
         return p;

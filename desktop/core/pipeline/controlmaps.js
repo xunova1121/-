@@ -85,3 +85,31 @@ export function renderControls(source = {}, { duration = 5, sampleEvery = 12 } =
     objects: objects.map((x) => ({ id: x.item.id, name: x.item.name, kind: x.kind, depth: Number(x.depth.toFixed(3)) })) };
 }
 
+/**
+ * 把预演台的数值轨迹翻译成所有视频模型都能理解的导演指令。
+ *
+ * 深度图、姿态图只有部分工作流会直接接收，但提示词是所有适配器的共同入口。
+ * 因此控制包至少会真实进入生成请求，而不是只躺在磁盘里等人下载。
+ */
+export function videoControlPrompt(bundle = {}) {
+  const trajectory = bundle.trajectory || bundle.cameraTrajectory || [];
+  const poses = bundle.poseSequence || [];
+  if (!trajectory.length && !poses.length) return '';
+
+  const firstCam = trajectory[0] || {};
+  const lastCam = trajectory.at(-1) || firstCam;
+  const camera = `摄影机从坐标(${Number(firstCam.x || 0).toFixed(2)},${Number(firstCam.y || 0).toFixed(2)},${Number(firstCam.height || 0).toFixed(2)})、${Number(firstCam.lens || 35).toFixed(0)}mm，`
+    + `运动到(${Number(lastCam.x || 0).toFixed(2)},${Number(lastCam.y || 0).toFixed(2)},${Number(lastCam.height || 0).toFixed(2)})、${Number(lastCam.lens || 35).toFixed(0)}mm`;
+
+  const firstPose = new Map((poses[0]?.subjects || []).map((x) => [x.id, x]));
+  const lastPose = new Map((poses.at(-1)?.subjects || []).map((x) => [x.id, x]));
+  const actors = [...firstPose.entries()].map(([id, start]) => {
+    const end = lastPose.get(id) || start;
+    return `${id} 从(${Number(start.x || 0).toFixed(2)},${Number(start.y || 0).toFixed(2)})移动到(${Number(end.x || 0).toFixed(2)},${Number(end.y || 0).toFixed(2)})，朝向${Number(end.rotation || 0).toFixed(0)}°`;
+  });
+
+  return `【3D预演控制】严格保持首尾构图与空间关系；${camera}`
+    + `${actors.length ? `；人物轨迹：${actors.join('；')}` : ''}`
+    + `；按 ${Number(bundle.fps || 24)}fps、${Number(bundle.maxFrame || 0)} 帧平滑插值，不要让人物、道具或机位瞬移。`;
+}
+

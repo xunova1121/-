@@ -728,6 +728,45 @@ if (sheetUp) {
   }
 }
 
+/**
+ * ⑧f 手机版的「改了要重出 X」。
+ *
+ * 三样东西喂的是不同的下游：画面→出图、运镜/衔接→出视频、台词→配音。
+ * 改一样东西要付多少代价差着几十倍的钱，而原来两端都没说。
+ * 电脑版补上了，手机版原来落下了 —— 三端对齐那条自检抓不到这种事：
+ * 它管得了"功能在不在"，管不了"提示在不在"。
+ */
+{
+  await page.evaluate((id) => localStorage.setItem('fd.m.project', id), proj.id);
+  await page.reload();
+  await page.waitForTimeout(1200);
+  await page.locator('.tab', { hasText: '分镜' }).click();
+  await page.waitForTimeout(800);
+  await page.locator('button:has-text("改这一镜")').first().click();
+  await page.waitForTimeout(500);
+  const ed2 = page.locator('.ed');
+  const state = {
+    img: Boolean(store.read(proj.id).shots[0].imagePath),
+    vid: Boolean(store.read(proj.id).shots[0].videoPath),
+    aud: Boolean(store.read(proj.id).shots[0].audioPath)
+  };
+  const contentRedo = await ed2.locator('.ed-redo').allInnerTexts();
+  console.log('⑧f 手机上「改了要重出 X」：',
+    (state.img ? contentRedo.some((t) => /重出这一镜的图/.test(t)) : true)
+    && (state.aud ? contentRedo.some((t) => /重新配音/.test(t)) : true)
+      ? '✓' : `✕ ${JSON.stringify({ state, contentRedo })}`);
+  console.log('   分组标出了喂给哪一步：',
+    /出图用的/.test(await ed2.innerText()) ? '✓' : '✕');
+  // 「镜头」那一页管出视频
+  await ed2.locator('.ed-tab:has-text("镜头")').click();
+  await page.waitForTimeout(300);
+  console.log('   镜头这一组标着出视频用的：',
+    /出视频用的/.test(await ed2.innerText()) ? '✓' : '✕');
+  await ed2.locator('.ed-top button:has-text("取消")').click().catch(() => {});
+  await page.waitForTimeout(300);
+  await page.evaluate(() => document.querySelectorAll('.ed').forEach((n) => n.remove()));
+}
+
 // ⑧ 往后全跑
 await page.locator('.tab', { hasText: '流水线' }).click();
 await page.waitForTimeout(500);

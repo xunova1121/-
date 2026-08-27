@@ -1574,3 +1574,44 @@ select.mini {
 .previz-far { fill: var(--surface-2); stroke: var(--ink-faint); stroke-width: 1.5; stroke-dasharray: 3 2; cursor: grab; }
 .previz-sun { fill: var(--caution); stroke: var(--caution); cursor: grab; }
 .previz-sun-label { fill: var(--ground); font-size: 11px; text-anchor: middle; }
+
+/* 还没拆分镜的那几场。这不是警告，是**下一步** —— 所以用 beam 那一色，
+   和"出问题了"那种橙红分开 */
+.ob-pending {
+  margin-top: 10px; padding: 9px 11px; border-radius: 8px;
+  background: var(--beam-wash); border-left: 3px solid var(--beam);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  font-size: 12px; line-height: 1.6;
+}
+.ob-pending b { font-size: 13px; }
+.ob-pending span { flex: 1; min-width: 200px; color: var(--ink-dim); }
+
+/* ── 分镜编辑器：按**下游**分组 ──
+   三样东西喂的是不同的下游：技法→出图、连续动作→出视频、谁说的→配音。
+   平铺成一条的话看不出谁管谁，也看不出改一样东西要付多少代价
+   —— 重出图和重配音，差着几十倍的钱。 */
+.shot-group {
+  margin-top: 12px; padding: 10px 12px;
+  border: 1px solid var(--line-soft); border-radius: 8px;
+  background: var(--surface);
+}
+.shot-group-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.shot-group-head b { font-size: 13px; }
+.shot-group-head span { color: var(--ink-faint); font-size: 12px; }
+/* 「改了要重出 X」。只在那样产物已经出过时才显示 —— 还没出过的时候
+   它是废话，而废话会把真正要紧的那句挤没 */
+.shot-group-redo {
+  margin-top: 8px; padding: 7px 9px; border-radius: 6px;
+  background: var(--caution-wash); color: var(--ink-dim);
+  font-size: 12px; line-height: 1.6;
+}
+
+/* 自己动手改一场。摊在那一行下面，不做成弹层 ——
+   改台词时要能同时看见上下两场，弹层会把上下文盖住 */
+.ob-edit {
+  margin: 4px 0 10px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2);
+}
+.ob-edit-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
+.ob-edit label { display: block; font-size: 12px; color: var(--ink-faint); margin-bottom: 3px; }
+.ob-edit textarea, .ob-edit input { width: 100%; }

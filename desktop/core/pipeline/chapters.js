@@ -78,6 +78,41 @@ export function autoSplit(script, { targetChars = TARGET_CHARS } = {}) {
 }
 
 /**
+ * 只按**章节标题**切，不按字数兜底。
+ *
+ * ── 和 autoSplit 的分工 ──
+ *
+ * autoSplit 是"给我一整本书，想办法切成章"：认不出标题就按字数攒。
+ * 那个兜底在整本书上是对的，在**追加**这个场景里是错的 ——
+ * 人贴的是"接下来这几章"，一次贴三章就该出三章；
+ * 而贴一章长的（三千字以上）不该被拦腰劈成两半，那不是他要的。
+ *
+ * 所以这里只认标题：认出 ≥2 个就按标题切，否则整段算一章。
+ *
+ * ⚠ "只认出一个标题就不算数"那条规矩在这儿**不适用**。
+ * 那条是为了防止把书名当章节标题，而追加时贴进来的第一行
+ * 本来就极可能是「第二章 出海」—— 拿它当标题正是对的。
+ */
+export function splitByHeadings(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return [];
+  for (const pattern of CHAPTER_PATTERNS) {
+    pattern.lastIndex = 0;
+    const marks = [...raw.matchAll(pattern)];
+    if (marks.length < 2) continue;
+    const out = [];
+    for (let i = 0; i < marks.length; i += 1) {
+      const start = marks[i].index;
+      const end = i + 1 < marks.length ? marks[i + 1].index : raw.length;
+      const body = raw.slice(start, end).trim();
+      if (body) out.push({ title: marks[i][0].trim().slice(0, 60), script: body });
+    }
+    if (out.length >= 2) return out;
+  }
+  return [{ title: '', script: raw }];
+}
+
+/**
  * 把长文切成一个个窗口，交给模型逐段判断断章点。
  *
  * 十万字塞不进任何模型，所以只能分段问。**窗口之间要重叠**：
