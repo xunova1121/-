@@ -1219,7 +1219,21 @@ select.mini {
    手机端那套色板是独立的（见 ui/m/m.css 开头为什么），token 名字都不一样，
    共用一份样式表只会得到一堆解析不出来的变量。类名保持一致就够了。 */
 .previz-panel { margin-top: 10px; }
+.previz-viewbar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:8px; }
+.previz-viewbar .btn.on { border-color:var(--beam); color:var(--beam); background:var(--beam-wash); }
 .previz-canvas { border: 1px solid var(--line); border-radius: 10px; display: block; }
+.previz-canvas[hidden] { display:none; }
+.previz-3d-sky { fill:color-mix(in srgb, var(--surface) 88%, var(--beam) 12%); }
+.previz-3d-grid { stroke:var(--line-soft); stroke-width:1; }
+.previz-3d-axis { stroke:var(--line); stroke-width:1.5; }
+.previz-3d-shadow { fill:#000; opacity:.2; }
+.previz-3d-person { fill:var(--beam-deep); stroke:var(--beam); stroke-width:1.5; }
+.previz-3d-head { fill:var(--surface-3); stroke:var(--ink); stroke-width:1.5; }
+.previz-3d-prop { fill:var(--surface-3); stroke:var(--ink-faint); stroke-width:1.5; }
+.previz-3d-tripod { stroke:var(--beam); stroke-width:2; }
+.previz-3d-camera { fill:var(--beam); stroke:var(--ground); stroke-width:1.5; }
+.previz-3d-label { fill:var(--ink); font-size:11px; font-weight:650; text-anchor:middle; paint-order:stroke; stroke:var(--surface); stroke-width:3px; }
+.previz-3d-label.cam { fill:var(--beam); }
 .previz-bg { fill: var(--surface); }
 .previz-grid { stroke: var(--line-soft); stroke-width: 1; }
 .previz-axis { stroke: var(--line); stroke-width: 1.5; }
