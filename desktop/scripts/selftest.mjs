@@ -2485,6 +2485,32 @@ section('预演台：把"中景"变成一组数');
    * 场地图那一层走同一条路（/site.js），只许 import previz ——
    * 在浏览器里 `./previz.js` 从 `/site.js` 出发正好解析到 `/previz.js`。
    */
+  /**
+   * 单价换算（/pricing.js）也要原样发给浏览器 —— 界面上那句"这一下约 ¥12"
+   * 和服务端记的账必须是同一套算法。一个四舍五入一个截断、一个把未定价
+   * 当 0 一个当未知，就会出现"说好 ¥12、跑完变 ¥31"，而人是照着那个数下的手。
+   */
+  const pricingSrc = fs.readFileSync(path.join(PROJECT_ROOT, 'core', 'pricing.js'), 'utf8');
+  const pricingImports = [...pricingSrc.matchAll(/^\s*import\s.*?from\s+'([^']+)'/gm)].map((m) => m[1]);
+  check('pricing.js 保持零依赖（它要原样发给浏览器）', pricingImports.length === 0, pricingImports.join(' / '));
+  check('pricing.js 里没有 node: 内置', !/from\s+'node:/.test(pricingSrc));
+
+  /**
+   * 预估（/estimate.js）只许 import 那两个同样发给浏览器的 ——
+   * 在浏览器里 `../pricing.js` 和 `../duration.js` 从 `/estimate.js` 出发
+   * 正好解析到 `/pricing.js` 和 `/duration.js`，两条路由都有。
+   *
+   * 多 import 一个（顺手拿了 settings.js 之类）浏览器就会去请求一个
+   * 不存在的地址，而 import 失败会让**整个界面模块加载不起来**——
+   * 表现不是"少一行价钱"，是整个工作台白屏。
+   */
+  const estSrc = fs.readFileSync(path.join(PROJECT_ROOT, 'core', 'pipeline', 'estimate.js'), 'utf8');
+  const estImports = [...estSrc.matchAll(/^\s*import\s.*?from\s+'([^']+)'/gm)].map((m) => m[1]);
+  const estAllowed = ['../pricing.js', '../duration.js'];
+  check('estimate.js 只 import 那两个也发给浏览器的模块',
+    estImports.every((x) => estAllowed.includes(x)), estImports.join(' / '));
+  check('estimate.js 里没有 node: 内置', !/from\s+'node:/.test(estSrc));
+
   const siteSrc = fs.readFileSync(path.join(PROJECT_ROOT, 'core', 'pipeline', 'site.js'), 'utf8');
   const siteImports = [...siteSrc.matchAll(/^\s*import\s.*?from\s+'([^']+)'/gm)].map((m) => m[1]);
   check('site.js 只 import previz（它自己也要原样发给浏览器）',
@@ -10992,6 +11018,20 @@ section('钱：用量是我们的事实，单价是你的');
     check('一个都没定价时总数是"算不出"，不是 ¥0', none.cny === null, String(none.cny));
     check('这时候的措辞是"还没填单价"',
       pricing.describeSum(none).includes('还没填单价'), pricing.describeSum(none));
+
+    /**
+     * ⚠ **一次都没花过 ≠ 没填单价。**
+     *
+     * 这两句一度合成了一句："没有用量 —— 还没填单价，算不出钱"，
+     * 读起来像"你少填了点什么所以算不出来"，而真相是根本还没花过。
+     * 手机走查上第一眼看到的就是它。
+     *
+     * 这种话的坏处很具体：它会让人跑去填一张根本不需要填的表，
+     * 而且填完那句话也不会变 —— 因为问题从来不在那儿。
+     */
+    const nothing = pricing.describeSum(pricing.sum([], rates));
+    check('一次都没花过的时候说"还没花过"，不提单价', nothing.includes('还没花过'), nothing);
+    check('而且不会把它说成"算不出钱"', !nothing.includes('算不出钱'), nothing);
     check('部分定价的措辞里必须有"至少"和"没算进去"',
       pricing.describeSum(mixed).includes('至少') && pricing.describeSum(mixed).includes('没算进去'),
       pricing.describeSum(mixed));

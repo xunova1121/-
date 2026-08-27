@@ -51,6 +51,11 @@ import { speechSeconds, SPEECH_HEADROOM } from '/duration.js';
 import * as SEAM from '/seam.js';
 import * as SITE from '/site-canvas.js';
 import * as OUTLINE from '/outline.js';
+/**
+ * 单价换算取服务端原件。手机上那句话和电脑上那句话必须同源 ——
+ * 两端各拼一份措辞，迟早会出现同一笔账两个说法。
+ */
+import * as PRICING from '/pricing.js';
 
 const canInstall = window.isSecureContext && 'serviceWorker' in navigator;
 if (canInstall) {
@@ -745,8 +750,19 @@ function paintFlow() {
           title: '从这一步一路跑到合成',
           onclick: async () => {
             const rest = STEPS.length - i;
+            /**
+             * 先问服务端这一趟要花多少，再弹确认。
+             *
+             * 原来这句写的是"视频那步按镜数计费，可能是最大的一笔开销"——
+             * 正确，但没有信息量。出门在外按下这一下的人**比坐在电脑前的人
+             * 更需要一个数**：他没法当场去翻厂商后台核对。
+             *
+             * 多一次往返换一个数，值。真要拿不到（离线、超时）就照旧弹，
+             * 不能因为算不出价钱就把「往后全跑」这个功能堵死。
+             */
+            const cost = await costLineFor('all', { from: s.id });
             // eslint-disable-next-line no-alert
-            if (!confirm(`从「${s.label}」一路跑到合成，共 ${rest} 步。视频那步按镜数计费，可能是最大的一笔开销。确定？`)) return;
+            if (!confirm(`从「${s.label}」一路跑到合成，共 ${rest} 步。\n\n${cost || '视频那步按镜数计费，可能是最大的一笔开销。'}`)) return;
             // cap:run-from
             runStage('all', `${s.label} → 合成`, { from: s.id });
           }
@@ -1101,6 +1117,7 @@ function paintBible() {
    */
   out.push(extendCard());
   out.push(siteCard());
+  out.push(spendCard());
   return out;
 }
 
@@ -1112,6 +1129,141 @@ function paintBible() {
  * 没有参考图、没有外貌描述、复核没有基准，静默降级成"文生图"，
  * 而流水线一路绿。
  */
+/**
+ * ══════════ 手机上的账 ══════════
+ *
+ * 为什么手机上也要有：出门在外点「往后全跑」的人，比坐在电脑前的人
+ * **更需要**先知道这一下多少钱 —— 他没法当场去翻厂商后台核对。
+ * 只在电脑上显示价钱，等于把手机版又做回一个"能按但不知道按下去会怎样"的遥控器。
+ *
+ * 和电脑版的实现不一样：这里走服务端那条预估接口，不在浏览器里自己算。
+ * 电脑版之所以在本地算，是因为它已经把整份 catalog（路由 + 厂商档位）
+ * 载进内存了；手机版没有，为了一行字去拉整份目录不划算。
+ * 两端算的是同一套东西 —— 服务端用的就是 estimate.js 那个文件。
+ */
+function spendCard() {
+  const host = h('details', { class: 'card site-details' });
+  const head = h('summary', {}, '花了多少 ', h('span', { class: 'muted' }, '用量是实数，钱按你填的单价算'));
+  const body = h('div', {});
+  let loaded = false;
+
+  const paint = (data) => {
+    clear(body);
+    if (data?.error) {
+      body.append(h('div', { class: 'muted', style: 'line-height:1.7' }, `读不出来：${data.error}`));
+      return;
+    }
+    body.append(h('div', { style: 'line-height:1.7;font-size:13px' }, data.line || ''));
+
+    for (const [kind, spec] of Object.entries(data.kinds || {})) {
+      const b = data.total?.byKind?.[kind];
+      if (!b || !b.calls) continue;
+      body.append(h('div', { class: 'spend-row' },
+        h('span', { class: 'spend-kind' }, spec.label),
+        h('span', { class: 'spend-units' }, PRICING.describeUnits(kind, b.units)),
+        h('span', { class: 'spend-money' }, b.priced ? PRICING.fmtMoney(b.cny) : '没填单价')));
+    }
+
+    if (data.unmetered) {
+      body.append(h('div', { class: 'muted', style: 'line-height:1.7;margin-top:6px' },
+        `另有 ${data.unmetered} 次没记上账 —— 厂商没回用量。这几次的钱确实花了，只是数不出来。`));
+    }
+
+    const missing = data.total?.missing || [];
+    if (missing.length) body.append(mRateFiller(missing, load));
+  };
+
+  async function load() {
+    try {
+      paint(await api(`/projects/${project.id}/spend`));
+    } catch (err) {
+      paint({ error: err.message });
+    }
+  }
+
+  host.append(head, body);
+  host.addEventListener('toggle', () => {
+    if (host.open && !loaded) {
+      loaded = true;
+      // cap:spend-project
+      load();
+    }
+  });
+  return host;
+}
+
+/**
+ * 手机上就地填单价。
+ *
+ * 和电脑版一样**不预填任何厂商的价** —— 预填等于给一个看起来权威的默认值，
+ * 而多数人会直接点保存。照自己账单上的抄才是对的。
+ */
+function mRateFiller(missing, after) {
+  const box = h('div', { style: 'margin-top:10px' });
+  const inputs = new Map();
+  box.append(h('div', { class: 'muted', style: 'line-height:1.7' }, '这几样用过了但没填单价：'));
+  for (const m of missing) {
+    const spec = PRICING.KINDS[m.kind] || {};
+    const row = h('div', { class: 'rate-row' });
+    row.append(h('span', { class: 'rate-who' }, PRICING.describeMissing(m)));
+    if (spec.pair) {
+      const i1 = h('input', { class: 'input sm', type: 'number', step: 'any', min: '0', placeholder: '输入' });
+      const i2 = h('input', { class: 'input sm', type: 'number', step: 'any', min: '0', placeholder: '输出' });
+      inputs.set(m.key, { pair: true, i1, i2 });
+      row.append(i1, i2);
+    } else {
+      const i1 = h('input', { class: 'input sm', type: 'number', step: 'any', min: '0', placeholder: spec.priceUnit || '单价' });
+      inputs.set(m.key, { pair: false, i1 });
+      row.append(i1);
+    }
+    box.append(row);
+  }
+  box.append(h('button', {
+    class: 'fbtn',
+    style: 'margin-top:8px',
+    // cap:spend-rates
+    onclick: async () => {
+      const rates = {};
+      for (const [key, f] of inputs) {
+        if (f.pair) {
+          if (f.i1.value === '' || f.i2.value === '') continue;
+          rates[key] = { in: Number(f.i1.value), out: Number(f.i2.value) };
+        } else {
+          if (f.i1.value === '') continue;
+          rates[key] = { cny: Number(f.i1.value) };
+        }
+      }
+      if (!Object.keys(rates).length) return toast('还没填');
+      try {
+        await api('/rates', { method: 'PUT', body: { rates } });
+        appSettings = await api('/settings');
+        toast('存下了，过去的账也按新单价重算了');
+        await after();
+      } catch (err) {
+        toast(`存不下：${err.message}`);
+      }
+    }
+  }, '存单价'));
+  return box;
+}
+
+/**
+ * 跑之前那句话。
+ *
+ * 拿服务端算好的一行字直接用 —— 手机上不重新拼一遍措辞，
+ * 两端说法不一致比少一句话更糟。
+ */
+async function costLineFor(stage, { from = null } = {}) {
+  try {
+    const q = from ? `stage=all&from=${encodeURIComponent(from)}` : `stage=${encodeURIComponent(stage)}`;
+    // cap:spend-estimate
+    const r = await api(`/projects/${project.id}/estimate?${q}`);
+    return r.line || '';
+  } catch {
+    return '';
+  }
+}
+
 function extendCard() {
   const host = h('details', { class: 'card site-details' });
   const head = h('summary', {}, '剧本又加了新章？ ', h('span', { class: 'muted' }, '只补没见过的角色和场景'));

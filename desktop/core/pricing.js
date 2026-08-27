@@ -255,7 +255,19 @@ export function describeSum(total, { prefix = '' } = {}) {
     if (!b || !b.calls) continue;
     parts.push(`${KINDS[kind].label} ${describeUnits(kind, b.units)}`);
   }
-  const usage = parts.join('、') || '没有用量';
+  /**
+   * ⚠ 一次都没花过 ≠ 没填单价。
+   *
+   * 这两句以前合成了一句："没有用量 —— 还没填单价，算不出钱"。
+   * 读起来像"你少填了点什么，所以我算不出来"，而真相是**根本还没花过钱**，
+   * 没什么可算的。手机走查上第一眼看到的就是这句，当场觉得不对。
+   *
+   * 一句把"没有事情发生"说成"配置不全"的话，会让人跑去填一张
+   * 根本不需要填的表 —— 而且填完那句话也不会变，因为问题从来不在那儿。
+   */
+  if (!parts.length) return `${prefix}还没花过`;
+
+  const usage = parts.join('、');
 
   if (total?.cny === null || total?.cny === undefined) {
     return `${prefix}${usage} —— 还没填单价，算不出钱`;

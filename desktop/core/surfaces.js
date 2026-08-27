@@ -243,6 +243,45 @@ export const CAPABILITIES = [
     pc: 'ui/views/studio.js',
     mobile: 'ui/m/m.js'
   },
+
+  /**
+   * ── 钱 ──
+   *
+   * 这三条都必须在手机上有，而且是**同一个理由**：
+   * 出门在外按下「往后全跑」的那个人，比坐在电脑前的人更需要知道
+   * 这一下多少钱 —— 他没法当场去翻厂商后台核对。
+   *
+   * 只在电脑上显示价钱，等于把手机版又做回一个
+   * "能按、但不知道按下去会怎样"的遥控器。
+   */
+  {
+    id: 'spend-estimate',
+    name: '按下去之前，这一下要花多少',
+    api: 'GET /projects/:id/estimate?stage=',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js'
+  },
+  {
+    id: 'spend-project',
+    name: '这个项目到现在花了多少',
+    api: 'GET /projects/:id/spend',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js'
+  },
+  {
+    id: 'spend-rates',
+    name: '填自己的单价',
+    api: 'PUT /rates',
+    pc: 'ui/views/studio.js',
+    /**
+     * 填单价看起来像"配置"，本该归电脑。放手机上是因为
+     * 缺了它手机会变成一个**只会抱怨的界面**：账那儿写着
+     * "还没填单价"，而在手机上没有任何办法把它填上。
+     * 一个说得出问题却给不出出口的界面，比不说更让人恼火。
+     * 何况它只是几个数字输入框，手机上完全做得动。
+     */
+    mobile: 'ui/m/m.js'
+  },
   /**
    * 出片规格（画幅 + 视频分辨率），记在**项目**上。
    *

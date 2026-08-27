@@ -28,6 +28,15 @@ import * as FX from '/fx.js';
  */
 import * as EDIT from '/edit.js';
 import * as DUR from '/duration.js';
+/**
+ * 预估和单价换算，取的是**服务端那两个文件的原件**（/estimate.js、/pricing.js）。
+ *
+ * 界面上那句"这一下大概多少钱"和跑完之后账本上记的，必须是同一套算法。
+ * 在这边另抄一份的话，两边迟早会分叉，而分叉的样子是
+ * "说好 ¥12、跑完变 ¥31" —— 那比不显示还坏，因为人是照着那个数下的手。
+ */
+import * as EST from '/estimate.js';
+import * as PRICING from '/pricing.js';
 import { stepsOf, stepProgress } from '../pipeline.js';
 import bibleView from './bible.js';
 
@@ -803,7 +812,23 @@ export default {
                 ? h('span', { class: 'badge', style: 'margin-left:8px',
                     title: '出图和出视频都按这个画幅。改它去「项目」页' }, `画幅 ${ratio}`)
                 : null),
-            h('div', { class: 'stage-detail-hint' }, meta.hint)
+            h('div', { class: 'stage-detail-hint' }, meta.hint),
+            /**
+             * 这一下要花多少 —— 摆在按钮**上面**。
+             *
+             * 这句话是给"还没按"的那个人看的。按完再告诉他花了多少就晚了，
+             * 而这条流水线上最贵的一步（出视频）恰恰是最没法反悔的一步。
+             *
+             * 没填单价就显示用量（12 张图、60 秒），那同样是一个能拿来
+             * 做决定的数，而且一个字都不是猜的。
+             */
+            // cap:spend-estimate
+            (() => {
+              const line = costText(state.stage);
+              if (!line) return null;
+              const unpriced = line.includes('还没填单价') || line.includes('没算进去');
+              return h('div', { class: `cost-line${unpriced ? ' unpriced' : ''}` }, line);
+            })()
           ),
           h('div', { class: 'inline' },
 
@@ -812,8 +837,10 @@ export default {
               disabled: !runnable,
               title: isCostly ? '视频按镜数计费，是这条流水线最大的开销' : '',
               onclick: () => {
+                // 原来这里写的是"按镜数计费且耗时较长"—— 一句正确但没有信息量的话。
+                // 现在把真数放进去（没填单价就放用量），人才有得判断
                 if (isCostly && missing.length > 3
-                  && !confirm(`将为 ${missing.length} 个镜头生成视频，按镜数计费且耗时较长。确定？`)) return;
+                  && !costConfirm(`将为 ${missing.length} 个镜头生成视频，耗时较长。确定？`, state.stage)) return;
                 runStage(state.stage);
               }
             }, done ? `继续（还差 ${total - done}）` : '开始'),
@@ -822,7 +849,10 @@ export default {
                   class: 'btn ghost',
                   disabled: !runnable,
                   onclick: () => {
-                    if (!confirm('这一步已经完成，重跑会覆盖已有产出并重新计费。确定？')) return;
+                    // 整步重跑是**全部重出**，不是补缺口 —— 预估也要按 regenerate 算，
+                    // 否则这里会显示一个"还差 0 个"的 ¥0，而实际要重出一整步
+                    if (!costConfirm('这一步已经完成，重跑会覆盖已有产出并重新计费。确定？',
+                      state.stage, { regenerate: true })) return;
                     runStage(state.stage, { regenerate: true });
                   }
                 }, '整步重跑')
@@ -908,6 +938,14 @@ export default {
         job.stage = null;
         job.live.clear();
         jobNotify('done');
+        /**
+         * 跑完把账重新拉一遍。
+         *
+         * 不拉的话，刚花完钱的那一刻账面上还是上一次的数 —— 而
+         * "我刚跑完这一步，到底花了多少"正是最想当场知道的那个问题。
+         * 停下来和失败也要拉：那两种情况下钱**照样花了一部分**。
+         */
+        loadSpend();
         toast(
           cancelled
             ? `已停下，用时 ${fmtMs(spent)}。已经跑完的都存着了，接着跑就从这一步「往后全跑」`
@@ -1142,6 +1180,225 @@ export default {
      * 只想把后面几步串起来跑。从头跑一遍不但白花钱，还会**把你改过的分镜文案冲掉**
      * （重拆分镜等于推翻重来）。所以摆两条路，并且把各自会跑哪几步写清楚。
      */
+    /**
+     * ══════════════ 这一下要花多少 ══════════════
+     *
+     * 界面里讲了一整年的钱 —— "视频那步最贵""改这个要重出""重跑按镜数计费" ——
+     * 却从来没给过一个数。这几个函数就是把那些话变成数。
+     *
+     * 算在**浏览器这一边**，用的是和服务端同一份 estimate.js / pricing.js
+     * （从 /estimate.js 直接取原件）。不走接口是因为这个数要跟着
+     * "切了一下阶段""勾了整步重跑"实时变 —— 每次都发一趟请求的话，
+     * 数字会比手慢半拍，而慢半拍的价钱等于没有。
+     */
+    function costRouting() {
+      const r = state.catalog?.routing || {};
+      return {
+        image: { provider: r.image?.provider, model: r.image?.model },
+        video: {
+          provider: r.video?.provider,
+          model: r.video?.model,
+          // 厂商档位必须带上：分镜写 4 秒、厂商只出 5 秒档、按 5 秒计费
+          durations: state.catalog?.videoDurations || []
+        },
+        tts: { provider: r.tts?.provider, model: r.tts?.model }
+      };
+    }
+
+    function costRates() {
+      return state.catalog?.settings?.rates || {};
+    }
+
+    function costRetries() {
+      const s = state.catalog?.settings || {};
+      return s.consistencyVerify ? Number(s.consistencyMaxRetries) || 0 : 0;
+    }
+
+    /** 某一步的预估。stage 传 'all' 时按「从这一步往后跑」算。 */
+    function costPlan(stage, { regenerate = false, from = null } = {}) {
+      const shots = project.shots || [];
+      const routing = costRouting();
+      const maxRetries = costRetries();
+      return from
+        ? EST.forRun({ shots, from, routing, maxRetries })
+        : EST.forStage({ shots, stage, routing, regenerate, maxRetries });
+    }
+
+    function costText(stage, opts = {}) {
+      try {
+        return EST.describe(costPlan(stage, opts), costRates());
+      } catch {
+        // 预估算不出来绝不能挡住跑流水线这件事本身
+        return '';
+      }
+    }
+
+    /**
+     * 确认框里的那句话。
+     *
+     * 原来写的是"按镜数计费且耗时较长"—— 一句正确但没有信息量的话。
+     * 现在把真数放进去。没填单价的时候放**用量**（12 张图、60 秒），
+     * 那同样是一个能拿来做决定的数，而且一个字都不是猜的。
+     */
+    function costConfirm(question, stage, opts = {}) {
+      const line = costText(stage, opts);
+      return confirm(line ? `${question}\n\n${line}` : question);
+    }
+
+    /**
+     * ══════════════ 这个项目到现在花了多少 ══════════════
+     *
+     * 和上面那个是**两种不同的真相**，所以摆在不同的地方、用不同的措辞：
+     * 上面讲还没发生的（"要发"），这里讲已经发生的（"已经发了"）。
+     *
+     * 用量是记下来的事实；钱是拿你填的单价现算的。没填就只显示用量 ——
+     * 那部分永远是真的，而且已经比什么都不说强得多。
+     */
+    const spendHost = h('div', { class: 'card', style: 'margin-top:14px' });
+    let spend = null;
+    let spendOpen = false;
+
+    async function loadSpend() {
+      try {
+        // cap:spend-project
+        spend = await api(`/projects/${project.id}/spend`);
+      } catch (err) {
+        spend = { error: err.message };
+      }
+      paintSpend();
+    }
+
+    function paintSpend() {
+      clear(spendHost);
+      if (!spend) {
+        add(spendHost, h('div', { class: 'field-hint' }, '正在读这个项目的账…'));
+        return;
+      }
+      if (spend.error) {
+        add(spendHost, h('div', { class: 'field-hint' }, `账读不出来：${spend.error}`));
+        return;
+      }
+
+      const missing = spend.total?.missing || [];
+      const head = h('summary', { class: 'card-title' },
+        '这个项目花了多少',
+        h('span', { class: 'badge', style: 'margin-left:8px' },
+          spend.calls ? `${spend.calls} 次调用` : '还没花过'));
+
+      const body = h('div', {});
+
+      add(body, h('div', { class: 'spend-line' }, spend.line));
+
+      /**
+       * 分口径摊开。只摊有数的那些 —— 一整排 0 是噪音，
+       * 而"这个项目一次视频都没出"本来就该由那一行的缺席来表达。
+       */
+      const rows = [];
+      for (const [kind, spec] of Object.entries(spend.kinds || {})) {
+        const b = spend.total?.byKind?.[kind];
+        if (!b || !b.calls) continue;
+        const money = PRICING.fmtMoney(b.cny);
+        rows.push(h('div', { class: 'spend-row' },
+          h('span', { class: 'spend-kind' }, spec.label),
+          h('span', { class: 'spend-units' }, PRICING.describeUnits(kind, b.units)),
+          h('span', { class: 'spend-money' },
+            b.priced ? money : h('span', { class: 'field-hint' }, '没填单价'))));
+      }
+      if (rows.length) add(body, h('div', { class: 'spend-table' }, ...rows));
+
+      /**
+       * 漏账要说出来。
+       *
+       * "有 3 次调用厂商没回用量"是一句难看的话，但它是真的 ——
+       * 而一个悄悄少了 3 次的总数看起来完全正常，那才是真正的问题。
+       */
+      if (spend.unmetered) {
+        add(body, h('div', { class: 'field-hint', style: 'margin-top:8px' },
+          `另有 ${spend.unmetered} 次调用没记上账 —— `,
+          spend.blind?.length
+            ? `${spend.blind.map((x) => `${x.provider}/${x.model}`).join('、')} 没在响应里回用量。`
+            : '厂商没在响应里回用量。',
+          '这几次的钱确实花了，只是我们数不出来。'));
+      }
+
+      // 还差哪些单价 —— 就地填，不用跑去设置页
+      if (missing.length) add(body, rateFiller(missing, '这几样已经用过了，但还没填单价：'));
+
+      add(spendHost, h('details', { open: spendOpen, ontoggle: (e) => { spendOpen = e.target.open; } },
+        head, body));
+    }
+
+    /**
+     * 就地填单价。
+     *
+     * ⚠ 这里**不预填任何厂商的价**。理由见 core/pricing.js 开头：
+     * 各家单价我只有个印象，印象填进输入框就变成了一个看起来权威的默认值，
+     * 而用户多半会直接点保存。而且标价根本不是他的价 ——
+     * 有额度包、有企业协议、走中转的能差一倍。让他照着自己的账单抄。
+     */
+    function rateFiller(missing, title) {
+      const box = h('div', { class: 'rate-filler' });
+      const inputs = new Map();
+
+      add(box, h('div', { class: 'field-hint', style: 'margin:10px 0 6px' }, title));
+      for (const m of missing) {
+        const spec = PRICING.KINDS[m.kind] || {};
+        const row = h('div', { class: 'rate-row' });
+        add(row, h('span', { class: 'rate-who' }, PRICING.describeMissing(m)));
+        if (spec.pair) {
+          const i1 = h('input', { class: 'input sm', type: 'number', step: 'any', min: '0', placeholder: '输入' });
+          const i2 = h('input', { class: 'input sm', type: 'number', step: 'any', min: '0', placeholder: '输出' });
+          inputs.set(m.key, { pair: true, i1, i2 });
+          add(row, i1, i2);
+        } else {
+          const i1 = h('input', { class: 'input sm', type: 'number', step: 'any', min: '0', placeholder: spec.priceUnit || '单价' });
+          inputs.set(m.key, { pair: false, i1 });
+          add(row, i1);
+        }
+        add(box, row);
+      }
+
+      add(box,
+        h('div', { class: 'inline', style: 'margin-top:8px' },
+          h('button', {
+            class: 'btn sm primary',
+            // cap:spend-rates
+            onclick: async (e) => {
+              const rates = {};
+              for (const [key, f] of inputs) {
+                if (f.pair) {
+                  // 进出两个都得填 —— 只填一个算不出钱，存下来只会让人以为填过了
+                  if (f.i1.value === '' || f.i2.value === '') continue;
+                  rates[key] = { in: Number(f.i1.value), out: Number(f.i2.value) };
+                } else {
+                  if (f.i1.value === '') continue;
+                  rates[key] = { cny: Number(f.i1.value) };
+                }
+              }
+              if (!Object.keys(rates).length) return toast('还没填任何单价');
+              e.target.disabled = true;
+              try {
+                await api('/rates', { method: 'PUT', body: { rates } });
+                // 目录里那份 settings 要一起刷新，不然预估还在用旧单价
+                state.catalog = await api('/catalog');
+                await loadSpend();
+                // 预估那几行也要跟着重画 —— 刚填完单价，上面还写着
+                // "还没填单价，算不出钱"的话，人会以为没存进去
+                paintStageDetail();
+                toast('单价存下了，过去的账也按新单价重算了');
+              } catch (err) {
+                toast(`存不下：${err.message}`);
+              } finally {
+                e.target.disabled = false;
+              }
+            }
+          }, '存单价'),
+          h('span', { class: 'field-hint' },
+            '照你自己账单上的价填。我们不预填任何数 —— 标价不是你的价，'
+            + '有额度包、有协议、走中转的能差一倍。')));
+      return box;
+    }
+
     const runChoice = h('div', { style: 'display:none;margin:8px 0 2px' });
 
     function paintRunChoice() {
@@ -1168,7 +1425,7 @@ export default {
                 disabled: jobBusy(),
                 title: '前面几步保留已有产出，不重跑、不重复计费',
                 onclick: () => {
-                  if (!confirm(`从「${label}」往后跑 ${rest} 步。视频那步按镜数计费，可能是最大的一笔开销。确定？`)) return;
+                  if (!costConfirm(`从「${label}」往后跑 ${rest} 步。`, 'all', { from: state.stage })) return;
                   runChoice.style.display = 'none';
                   runStage('all', { from: state.stage });
                 }
@@ -1181,7 +1438,9 @@ export default {
         h('div', { class: 'field-hint', style: 'margin:6px 0 0' },
           at >= 0
             ? '从这一步往后跑：前面几步的产出原样保留，不重跑也不重复计费。日常用这条。'
-            : '当前这一步不在流水线里（比如「剧本」），只能从头跑。'));
+            : '当前这一步不在流水线里（比如「剧本」），只能从头跑。'),
+        // 「往后跑」那几步加起来多少钱 —— 这是整条链路上最该有个数的地方
+        at >= 0 ? h('div', { class: 'cost-line' }, costText('all', { from: state.stage })) : null);
     }
 
     /**
@@ -4081,7 +4340,12 @@ export default {
     // 只读那一行摆在分镜面板顶上，跟着"视频"这一步出现
     shotsPanel.insertBefore(durationLine, shotsPanel.firstChild.nextSibling);
 
-    root.append(stagePanel, ...allPanels);
+    /**
+     * 账摆在所有步骤下面，而且**每一步都在** —— 它是项目级的事实，
+     * 不属于某一步。默认折起来：日常不用看，要看的时候在手边。
+     */
+    root.append(stagePanel, ...allPanels, spendHost);
+    loadSpend();
 
     function applyStepPanels() {
       const wanted = new Set((stepPanels[state.stage] || [shotsPanel]).filter(Boolean));
