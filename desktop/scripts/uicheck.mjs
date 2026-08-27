@@ -1028,6 +1028,66 @@ const saved = await page.evaluate(async (id) => {
 }, proj.id);
 check('位置真的落到盘上了（不是只在界面上）', saved.length === 2, saved.join(' | '));
 
+/**
+ * ── 问题旁边那条出口 ──
+ *
+ * 只报"这座山在两个场景里差了 180°"是没用的：人下一秒就要问"那我该怎么办"。
+ * 这一节量的是那颗按钮**真的把盘上的数据改了**，不是只让提示消失。
+ */
+// 造一个真对不上的局面：场地上定「山」在北，两个场景里各摆成别的方位
+await page.evaluate(async (id) => {
+  const p = await (await fetch(`/api/projects/${id}`)).json();
+  for (const s of p.bible.scenes) {
+    if (!s.place) continue;
+    s.layout = { marks: [{ name: '门', x: 1, y: 2 }, { name: '山', far: true, deg: 200 }], sun: { deg: 40, elev: 'high' } };
+  }
+  await fetch(`/api/projects/${id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bible: p.bible })
+  });
+  await fetch(`/api/projects/${id}/site`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ site: '外景', marks: [{ name: '山', far: true, deg: 20 }], sun: { deg: 135, elev: 'low' } })
+  });
+}, proj.id);
+await page.reload();
+await page.waitForTimeout(1500);
+await step('设定集').click();
+await page.waitForTimeout(1500);
+
+const issueText = await page.locator('.site-issues').first().innerText().catch(() => '');
+check('对不上的地方报出来了，而且点名是"场地图上定的"那一份',
+  /场地图上定的/.test(issueText), issueText.replace(/\n/g, ' ').slice(0, 160));
+
+const fixBtn = page.locator('.site-issues button').first();
+check('问题旁边给了一条出口，不是只说"这里不对"', (await fixBtn.count()) > 0);
+if (await fixBtn.count()) {
+  await fixBtn.scrollIntoViewIfNeeded();
+  await fixBtn.click();
+  await page.waitForTimeout(1200);
+  const after = await page.evaluate(async (id) => {
+    const p = await (await fetch(`/api/projects/${id}`)).json();
+    const s = (p.bible.scenes || []).find((x) => x.place);
+    return {
+      far: (s.layout.marks || []).find((m) => m.far && m.name === '山')?.deg,
+      near: (s.layout.marks || []).find((m) => m.name === '门'),
+      sun: s.layout.sun
+    };
+  }, proj.id);
+  check('远景地标真的被对齐到场地图那一份了（不是只让提示消失）',
+    after.far === 20, JSON.stringify(after));
+  check('太阳也对齐了', after.sun?.deg === 135 && after.sun?.elev === 'low', JSON.stringify(after.sun));
+  /**
+   * ⚠ 这一条是这一节里最要紧的。
+   *
+   * 近处地标一起被覆盖的话，这颗按钮就从"对齐远景"变成了
+   * "把每个场景的房间布局清空"—— 而它字面上看起来是在帮忙，且不可撤销。
+   */
+  check('门窗那些近处地标一个都没动',
+    after.near && after.near.x === 1 && after.near.y === 2, JSON.stringify(after.near));
+  const gone = await page.locator('.site-issues').first().innerText().catch(() => '');
+  check('对齐完之后提示跟着消失了', /都对得上/.test(gone), gone.replace(/\n/g, ' ').slice(0, 120));
+}
+
 check('全程没有页面报错', errs.length === 0, errs.slice(0, 3).join(' | '));
 
 await b.close();

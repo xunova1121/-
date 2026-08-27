@@ -976,7 +976,23 @@ async function handleApi(req, res, url, { lan = false } = {}) {
      * 挂在场景上的那份是各摆各的，于是同一座山上三场戏三个方向的光 ——
      * 而这正是检查要抓的东西。
      */
-    if (b && c === 'site' && method === 'POST') {
+    /**
+     * 把场地上定的远景地标和光位，一次套到这片场地的所有场景上。cap:site-map
+     *
+     * ⚠ 必须排在下面那条 `c === 'site'` **前面**：那条不看 d，
+     * 排在后面的话这条永远轮不到，而表现是"点了按钮，接口回 200，
+     * 什么也没发生"—— 最难查的一种。
+     */
+    if (b && c === 'site' && d === 'apply' && method === 'POST') {
+      const { site } = await readBody(req);
+      try {
+        return json(res, 200, studio.applySiteLayout(b, site));
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
+    }
+
+    if (b && c === 'site' && !d && method === 'POST') {
       const { site, marks, sun } = await readBody(req);
       try {
         return json(res, 200, studio.saveSiteMap(b, site, { marks, sun }));

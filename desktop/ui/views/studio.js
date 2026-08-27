@@ -3507,6 +3507,18 @@ export default {
     function mountSite() {
       clear(sitePanelHost);
       sitePanelApi = siteCanvasMod.sitePanel(project, {
+          onAlign: async (name) => {
+            try {
+              // cap:site-map
+              const p2 = await api(`/projects/${project.id}/site/apply`, {
+                method: 'POST', body: { site: name }
+              });
+              project.bible = p2.project.bible;
+              toast(p2.changed.length
+                ? `已按场地图对齐 ${p2.changed.length} 个场景：${p2.changed.join('、')}`
+                : '这几个场景本来就和场地图一致，没有要改的', 'ok');
+            } catch (err) { toast(err.message, 'err'); }
+          },
           onPlace: async (scene, place) => {
             try {
               // cap:site-map

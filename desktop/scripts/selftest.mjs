@@ -2481,6 +2481,118 @@ section('场地图：同一片地上的几个场景');
       JSON.stringify(site.farMarkIssues(mixed).map((i) => i.what)));
   }
 
+  /**
+   * ── 场地图上定过的那一份是基准 ──
+   *
+   * 不认基准的话，场地图上那一排远景地标和那个☀就是**纯装饰** ——
+   * 拖它们没有任何后果，而界面上它们看起来像设置。
+   * 一个拖了不起作用的控件，比没有这个控件更糟。
+   */
+  {
+    const withAnchor = (sites, scenes) => ({ bible: { sites, scenes } });
+
+    // 场地上定了「山」在北（20°），而大殿里摆成了南（200°）
+    const p = withAnchor(
+      { 雪山: { marks: [{ name: '山', far: true, deg: 20 }] } },
+      [sc('大殿', 0, 30, null, [{ name: '山', far: true, deg: 200 }])]
+    );
+    const one = site.sitesOf(p)[0];
+    const far = site.farMarkIssues(one);
+    /**
+     * ⚠ 只有**一个**场景也要能报。
+     * 原来是拿"第一个场景"当参照，一个场景时无从比起 —— 于是
+     * "整片场地只用了一个场景，而它摆错了"这种情况永远查不出来。
+     */
+    check('场地上定过基准时，单个场景也查得出来', far.length === 1, JSON.stringify(far));
+    check('说得出是"场地图上定的"那一份，而不是含糊地说两个场景对不上',
+      /场地图上定的/.test(far[0]?.what || ''), far[0]?.what);
+
+    const sunP = withAnchor(
+      { 雪山: { sun: { deg: 135, elev: 'low' } } },
+      [sc('大殿', 0, 30, { deg: 40, elev: 'low' })]
+    );
+    const sun = site.sunIssues(site.sitesOf(sunP)[0]);
+    check('太阳也认场地图上定的那一份', sun.length === 1 && /场地图上定的光/.test(sun[0].what), sun[0]?.what);
+
+    // 场地上没定过就退回老办法：拿第一个场景当参照，只说"这两个对不上"
+    const noAnchor = site.sitesOf(mk([
+      sc('山门外', 0, 0, { deg: 135, elev: 'low' }),
+      sc('大殿', 0, 30, { deg: 40, elev: 'low' })
+    ]))[0];
+    const s2 = site.sunIssues(noAnchor);
+    check('场地上没定过时，退回拿第一个场景当参照',
+      s2.length === 1 && !/场地图上定的/.test(s2[0].what), s2[0]?.what);
+  }
+
+  // ── 套用：问题旁边那条出口 ──
+  {
+    const model = {
+      name: '雪山',
+      marks: [{ name: '山', far: true, deg: 20 }],
+      sun: { deg: 135, elev: 'low' },
+      places: []
+    };
+    /**
+     * ⚠ 近处地标**一个都不能动**。
+     *
+     * 门窗桌椅有坐标、有视差，本来就该每个场景各不相同。一起覆盖掉的话，
+     * 这颗按钮就从"对齐远景"变成了"把每个场景的房间布局清空"——
+     * 而它字面上看起来是在帮忙，且不可撤销。
+     */
+    const layout = {
+      marks: [{ name: '门', x: 1, y: 2 }, { name: '山', far: true, deg: 200 }],
+      sun: { deg: 40, elev: 'high' }
+    };
+    const out = site.alignSceneToSite(layout, model);
+    check('套用之后近处的门还在，坐标没变',
+      out.marks.some((m) => m.name === '门' && m.x === 1 && m.y === 2), JSON.stringify(out.marks));
+    check('远景的山换成了场地图那一份',
+      out.marks.filter((m) => m.far && m.name === '山').length === 1
+      && out.marks.find((m) => m.far && m.name === '山').deg === 20, JSON.stringify(out.marks));
+    check('太阳换成了场地图那一份', out.sun.deg === 135 && out.sun.elev === 'low', JSON.stringify(out.sun));
+
+    /**
+     * 场地上没摆太阳时**保留场景自己那个**，不要清成 null。
+     * "没定基准"和"基准是没有太阳"是两回事，后者会把每个场景
+     * 辛苦摆的光位一次抹掉。
+     */
+    const noSun = site.alignSceneToSite(layout, { ...model, sun: null });
+    check('场地上没摆太阳时，保留场景自己那个（不清空）',
+      noSun.sun?.deg === 40, JSON.stringify(noSun.sun));
+
+    /**
+     * 没有基准就不该摆那颗"套用"按钮 —— 点下去只能套一片空白。
+     *
+     * ⚠ 这一条的**第一版又是假绿的**，和前面那条近处地标犯的是同一个毛病：
+     * 原来传的是 `places: []`，那时候 alignable 走到底也找不出任何问题，
+     * 返回 false —— 于是把"没有基准"那道判断整个删掉，断言照样通过。
+     *
+     * 真正要摆的局面是：**两个场景之间确实对不上，但场地上没定过基准**。
+     * 有毛病、却没有可套的东西 —— 这才是那道判断在守的事。
+     */
+    const drifting = site.sitesOf(mk([
+      sc('山门外', 0, 0, { deg: 135, elev: 'low' }),
+      sc('大殿', 0, 30, { deg: 40, elev: 'low' })
+    ]))[0];
+    check('两个场景对不上、但场地上没定过基准时，不给"套用"',
+      site.alignable(drifting) === false,
+      `问题有 ${site.sunIssues(drifting).length} 条，但没有可套的基准`);
+    const bad = site.sitesOf({
+      bible: {
+        sites: { 雪山: { marks: [{ name: '山', far: true, deg: 20 }] } },
+        scenes: [sc('大殿', 0, 30, null, [{ name: '山', far: true, deg: 200 }])]
+      }
+    })[0];
+    check('有基准而且真的对不上时，才给"套用"', site.alignable(bad) === true);
+    const good = site.sitesOf({
+      bible: {
+        sites: { 雪山: { marks: [{ name: '山', far: true, deg: 20 }] } },
+        scenes: [sc('大殿', 0, 30, null, [{ name: '山', far: true, deg: 22 }])]
+      }
+    })[0];
+    check('本来就一致时不摆按钮（没有要套的）', site.alignable(good) === false);
+  }
+
   // ── 叠在一起 ──
   {
     const stacked = site.sitesOf(mk([sc('山门外', 0, 0), sc('大殿', 0, 0)]))[0];

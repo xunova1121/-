@@ -178,24 +178,39 @@ export function describeBetween(from, to) {
  * ⚠ 它不该是死规则。剧情本来就可能跨了几小时（进山时清晨、
  * 到大殿已是黄昏），那时候太阳就该不一样。所以这里报的是
  * "要么改，要么这中间确实过了时间"，不是"错了"。
+ *
+ * ════════ 基准是谁 ════════
+ *
+ * 场地图上摆过太阳的话，**那个就是基准** —— 它是人明确定下来的
+ * "这片地上的光是这样的"。没摆过就退回"拿第一个场景当基准"：
+ * 那时候没有权威的一份，只能报"这两个对不上"，而不能说谁对谁错。
+ *
+ * 这一条不只是措辞好看。没有基准的话，场地图上那个☀就是**纯装饰** ——
+ * 拖它没有任何后果，而界面上它看起来像个设置。一个拖了不起作用的控件
+ * 比没有这个控件更糟。
  */
 export function sunIssues(site) {
   if (!site) return [];
-  const withSun = site.places
+  const fromScenes = site.places
     .map((p) => ({ scene: p.scene, sun: p.layout?.sun || null }))
     .filter((p) => p.sun && Number.isFinite(Number(p.sun.deg)));
-  if (withSun.length < 2) return [];
 
+  // 场地上定过就以它为准，否则拿第一个场景当基准
+  const anchored = Boolean(site.sun && Number.isFinite(Number(site.sun.deg)));
+  const base = anchored ? { scene: null, sun: site.sun } : fromScenes[0];
+  const rest = anchored ? fromScenes : fromScenes.slice(1);
+  if (!base || !rest.length) return [];
+
+  const who = (x) => (x.scene === null ? '场地图上定的光' : `${x.scene}的光`);
   const out = [];
-  const base = withSun[0];
-  for (const p of withSun.slice(1)) {
+  for (const p of rest) {
     const drift = Math.abs(previz.norm180(p.sun.deg - base.sun.deg));
     if (drift > SUN_DRIFT) {
       out.push({
         kind: 'site-sun-drift',
         site: site.name,
-        scenes: [base.scene, p.scene],
-        what: `同一片「${site.name}」上，${base.scene}的光从${previz.compassOf(base.sun.deg)}来、`
+        scenes: [base.scene, p.scene].filter(Boolean),
+        what: `同一片「${site.name}」上，${who(base)}从${previz.compassOf(base.sun.deg)}来、`
           + `${p.scene}从${previz.compassOf(p.sun.deg)}来，差了 ${Math.round(drift)}°`,
         why: '一个地方只有一个太阳。除非这中间确实过了几个小时，否则观众会读成"这两场不是同一天拍的"'
       });
@@ -204,8 +219,8 @@ export function sunIssues(site) {
       out.push({
         kind: 'site-sun-elev',
         site: site.name,
-        scenes: [base.scene, p.scene],
-        what: `${base.scene}的光位高度是${ELEV_WORD[base.sun.elev] || base.sun.elev}、`
+        scenes: [base.scene, p.scene].filter(Boolean),
+        what: `${who(base)}位高度是${ELEV_WORD[base.sun.elev] || base.sun.elev}、`
           + `${p.scene}是${ELEV_WORD[p.sun.elev] || p.sun.elev}`,
         why: '高度决定影子长短。同一个下午里它可以慢慢变，但不该在相邻两场之间从顶光跳到斜射'
       });
@@ -223,8 +238,21 @@ export function sunIssues(site) {
  */
 export function farMarkIssues(site) {
   if (!site) return [];
-  const seen = new Map(); // name -> {scene, deg}
+  const seen = new Map(); // name -> {scene, deg}；scene 为 null 表示"场地图上定的"
   const out = [];
+  /**
+   * 场地图上摆过的那几座山是**基准**，先填进去。
+   *
+   * 不这么做的话，场地图上那一排远景地标就是纯装饰 —— 拖它没有任何后果，
+   * 而界面上它看起来像个设置。一个拖了不起作用的控件比没有更糟。
+   *
+   * 有基准之后这条检查也更准：原来是拿"第一个场景"当参照，
+   * 那只能说"这两个对不上"；现在说得出**谁摆错了**。
+   */
+  for (const mk of site.marks || []) {
+    if (mk?.name) seen.set(mk.name, { scene: null, deg: previz.norm180(mk.deg) });
+  }
+  const who = (x) => (x.scene === null ? '场地图上定的是' : `在${x.scene}是`);
   for (const p of site.places) {
     for (const mk of p.layout?.marks || []) {
       if (!mk?.far || !mk.name) continue;
@@ -238,8 +266,8 @@ export function farMarkIssues(site) {
         out.push({
           kind: 'site-far-drift',
           site: site.name,
-          scenes: [prev.scene, p.scene],
-          what: `「${mk.name}」在${prev.scene}是${previz.compassOf(prev.deg)}方向、`
+          scenes: [prev.scene, p.scene].filter(Boolean),
+          what: `「${mk.name}」${who(prev)}${previz.compassOf(prev.deg)}方向、`
             + `在${p.scene}是${previz.compassOf(previz.norm180(mk.deg))}方向，差了 ${Math.round(drift)}°`,
           why: '远景地标远到没有视差 —— 换个场景它也该在几乎相同的方位。差这么多，画面里它会横着跑过半个屏'
         });
@@ -275,6 +303,41 @@ export function stackedIssues(site) {
     }
   }
   return out;
+}
+
+/**
+ * 把场地上定的远景地标和光位，套到某个场景的布局上。
+ *
+ * ════════ 为什么要有这一步 ════════
+ *
+ * 只报问题不给出口是没用的 —— 人看到"「山」在山门外是北、在大殿是南"
+ * 之后，下一秒就要问"那我该怎么办"。答案是"去每一个场景里把那座山
+ * 拖回同一个方位"，而那是重复劳动，重复劳动就会做错、做漏。
+ *
+ * ⚠ **近处地标一个都不动。**
+ *
+ * 门、窗、桌是场景内部的东西，有坐标、有视差 —— 它们本来就该每个场景
+ * 各不相同。一起覆盖掉的话，这个按钮就从"对齐远景"变成了"把每个场景
+ * 的房间布局清空"，而那是灾难性的、不可撤销的。
+ *
+ * ⚠ 场地上没摆太阳时，**保留场景自己那个**，不要清成 null。
+ * "没定基准"和"基准是没有太阳"是两回事，而后者会把每个场景辛苦摆的
+ * 光位一次抹掉。
+ */
+export function alignSceneToSite(layout, siteModel) {
+  const near = (layout?.marks || []).filter((m) => m && !m.far);
+  const far = (siteModel?.marks || []).map((m) => ({ ...m }));
+  const sun = siteModel?.sun ? { ...siteModel.sun } : (layout?.sun || null);
+  return { marks: [...near, ...far], sun };
+}
+
+/** 这片场地上有没有"套用一下就能解决"的问题 —— 有才值得摆那颗按钮 */
+export function alignable(site) {
+  if (!site) return false;
+  const hasAnchor = Boolean((site.marks || []).length || site.sun);
+  if (!hasAnchor) return false;
+  return [...sunIssues(site), ...farMarkIssues(site)]
+    .some((i) => i.kind === 'site-sun-drift' || i.kind === 'site-sun-elev' || i.kind === 'site-far-drift');
 }
 
 /** 这个项目所有场地的问题，一次性列出来 */

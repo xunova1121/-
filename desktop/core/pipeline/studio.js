@@ -1251,6 +1251,46 @@ export function saveSiteMap(projectId, siteName, patch = {}) {
   });
 }
 
+/**
+ * 把场地上定的远景地标和光位，一次套到这片场地的**所有场景**上。
+ *
+ * 只报问题不给出口是没用的：人看到"这座山在两个场景里差了 180°"之后，
+ * 下一秒就要问"那我该怎么办"。手工去每个场景里拖回来是重复劳动，
+ * 而重复劳动就会做漏。
+ *
+ * ⚠ 近处地标（门、窗、桌）一个都不动 —— 它们有坐标、有视差，
+ * 本来就该每个场景各不相同。一起覆盖的话，这颗按钮就从"对齐远景"
+ * 变成了"把每个场景的房间布局清空"。
+ *
+ * 回的是 { project, changed }：changed 是真的动过的场景名。
+ * 一个都没动时也要如实说 —— 点了按钮什么都没变而界面不吭声，
+ * 人只会以为按钮坏了。
+ */
+export function applySiteLayout(projectId, siteName) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const model = siteMod.siteOf(project, siteName);
+  if (!model) throw new Error(`没有这片场地：${siteName}`);
+  if (!model.marks.length && !model.sun) {
+    throw new Error('这片场地上还没有定远景地标或光位 —— 先在场地图上摆一个，才有东西可套');
+  }
+
+  const changed = [];
+  const next = store.update(projectId, (p) => {
+    for (const place of model.places) {
+      const target = (p.bible?.scenes || []).find((x) => x.name === place.scene);
+      if (!target) continue;
+      const before = JSON.stringify(target.layout || null);
+      const layout = siteMod.alignSceneToSite(target.layout, model);
+      if (JSON.stringify(layout) === before) continue;
+      target.layout = layout;
+      changed.push(place.scene);
+    }
+    return p;
+  });
+  return { project: next, changed };
+}
+
 /** 这个项目上的场地图，连同算出来的问题 */
 export function siteMapOf(project) {
   return { sites: siteMod.sitesOf(project), issues: siteMod.siteIssues(project) };
