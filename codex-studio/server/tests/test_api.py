@@ -1042,6 +1042,16 @@ def test_generated_candidates_can_switch_adopted_result_without_deleting_history
     assert roles == {first: "image_candidate", second: "image"}
 
 
+def test_manual_asset_cannot_be_adopted_as_generated_candidate():
+    with database.connect() as db:
+        shot_id = db.execute("SELECT id FROM shots WHERE project_id='demo' ORDER BY id LIMIT 1").fetchone()[0]
+        manual = db.execute("INSERT INTO assets(project_id,asset_type,name,episode,shot_id,local_path,source_kind,status) VALUES('demo','image','手工定稿',1,?,'manual.png','manual','ready')", (shot_id,)).lastrowid
+    with TestClient(app) as client:
+        response = client.post(f"/api/v1/assets/{manual}/adopt")
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Only generated candidates can be adopted"
+
+
 def test_task_schema_migrates_and_recovers_expired_lease(tmp_path: Path):
     path = tmp_path / "legacy.db"
     with sqlite3.connect(path) as db:
@@ -1059,3 +1069,4 @@ def test_task_schema_migrates_and_recovers_expired_lease(tmp_path: Path):
             assert recovered["attempts"] == 1
     finally:
         object.__setattr__(settings, "database_path", original)
+
