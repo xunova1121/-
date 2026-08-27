@@ -14,6 +14,7 @@ import { buildAuthHeaders } from './auth.js';
 import { poll } from '../http-client.js';
 import * as comfy from './comfy.js';
 import * as settings from '../settings.js';
+import * as meter from '../meter.js';
 
 /** 深度优先找响应里第一个媒体 URL。各家藏的深度都不一样，与其逐个写路径不如直接找。 */
 export function firstMediaUrl(obj, { extensions = null } = {}) {
@@ -236,6 +237,16 @@ export async function chat({
   );
   if (!res.ok) fail(label, res);
 
+  /**
+   * 记账就记在这里 —— 紧挨着解析响应的那一行。
+   *
+   * 不放在调用方（studio 里十几处），是因为那样每加一个新调用点都要记得
+   * 补一行，而漏了不会红。这个应用里 modelUsed 和 refsSent 都是这么开始说谎的。
+   */
+  const usage = meter.readTokenUsage(res.json);
+  if (usage) meter.record({ kind: 'token', provider: providerId, model, units: usage });
+  else meter.blind({ kind: 'token', provider: providerId, model, why: '响应里没有可拆分进出的 usage' });
+
   const text =
     res.json?.choices?.[0]?.message?.content ??
     res.json?.output?.choices?.[0]?.message?.content ??
@@ -243,7 +254,13 @@ export async function chat({
     '';
   if (typeof text !== 'string') {
     // 少数厂商把 content 也返回成数组
-    return { text: Array.isArray(text) ? text.map((p) => p.text || '').join('') : '', raw: res.json };
+    return {
+      text: Array.isArray(text) ? text.map((p) => p.text || '').join('') : '',
+      raw: res.json,
+      // 这一支原来漏了 usage。返回值形状不一致会让上层"有时拿得到有时拿不到"，
+      // 而那种不一致找起来比没有还费劲
+      usage: res.json?.usage || null
+    };
   }
   return { text, raw: res.json, usage: res.json?.usage || null };
 }
@@ -282,7 +299,38 @@ async function fetchRefBytes(ref) {
   return Buffer.from(await res.arrayBuffer());
 }
 
-export async function generateImage({
+/**
+ * 出一张图，顺带记账。
+ *
+ * ── 为什么记在外面包一层，而不是在四个 return 里各写一行 ──
+ *
+ * 下面那个 switch 有四条分支、四个 return（百炼、MiniMax、本地 ComfyUI、
+ * OpenAI 兼容家族）。在每个 return 前面手工加一行记账，等于**四份重复**，
+ * 而且以后加第五家的人不会知道还有这一步 —— 那家就会安静地不记账。
+ *
+ * 包在外面还有一个更要紧的好处：记的是**真的拿到图了**。
+ * 抛异常的那些次一行账都不记，因为它们没出图。而如果记在 switch 里面、
+ * 记在解析响应之前，失败的那些次也会被记上 —— 那就是虚报。
+ *
+ * 记的模型用的是 `used.model`（实际发出去的那个），不是入参 model ——
+ * 带参考图时会自动切到图生图模型，切了之后账要记在切后的那个头上。
+ * 这一条今天刚在 modelUsed 上栽过一次。
+ */
+export async function generateImage(args) {
+  const result = await generateImageRaw(args);
+  /** 一次调用出一张。没有 url 也没有 base64 的分支上面已经抛掉了。 */
+  if (result?.url || result?.base64) {
+    meter.record({
+      kind: 'image',
+      provider: args.providerId,
+      model: result.used?.model || args.model,
+      units: 1
+    });
+  }
+  return result;
+}
+
+async function generateImageRaw({
   providerId,
   model,
   /**
@@ -552,12 +600,52 @@ export async function generateImage({
 // ──────────────────────────────── 出视频 ────────────────────────────────
 
 /**
+ * 出一段视频，顺带记账。
+ *
+ * ── 为什么按"回来的秒数"记，而不是下单时的秒数 ──
+ *
+ * 视频模型只出固定档（5/10、4/8）。要 4 秒，厂商给 5 秒，**按 5 秒计费**。
+ * 记下单时那个 4，账就系统性地偏小 —— 而且是每一镜都偏，二十镜下来差一大截。
+ * `actualDuration` 是各分支从响应里读出来（或对齐后确定）的那个数。
+ *
+ * ── 为什么失败的那次记成"漏账"而不是不记 ──
+ *
+ * 出视频是先下单后取件的。轮询超时、中途取消、拿不到结果，都不代表
+ * 厂商没做也没计费 —— 多半是做了、计了，只是我们没接住。
+ * 这种时候既不能记一个猜的秒数（假数），也不能当无事发生（少账），
+ * 只能如实记一笔"这里有一次没记上"，让界面能说出来。
+ */
+export async function generateVideo(args) {
+  let result;
+  try {
+    result = await generateVideoRaw(args);
+  } catch (err) {
+    meter.blind({
+      kind: 'video',
+      provider: args.providerId,
+      model: args.model,
+      why: '出视频没拿到结果（厂商那边可能已经出片并计费）'
+    });
+    throw err;
+  }
+  if (result?.url) {
+    meter.record({
+      kind: 'video',
+      provider: args.providerId,
+      model: result.usedModel || args.model,
+      units: Number(result.actualDuration) || Number(args.duration) || 0
+    });
+  }
+  return result;
+}
+
+/**
  * 图生视频 / 参考图生视频。
  *
  * refImages 有多张且厂商支持 r2v 时，优先走参考图通道 ——
  * Vidu 的 reference2video 能同时锁人物和场景，是目前跨镜头一致性最好的一条路。
  */
-export async function generateVideo({
+async function generateVideoRaw({
   providerId,
   model,
   prompt,
@@ -2012,10 +2100,24 @@ export async function synthesizeSpeech({
     if (!res.ok) fail(label, res);
     const url = firstMediaUrl(res.json, { extensions: ['.wav', '.mp3'] }) || firstMediaUrl(res.json);
     if (!url) throw new Error(`${label}：响应里没有音频 URL`);
+    /**
+     * 配音按字数计费，而**字数就是我们发出去的那段字** —— 这一处的
+     * "请求侧的数"恰好就是事实，不是打算：厂商数的也是这段字。
+     * 记在拿到音频之后，失败的那些次不记。
+     */
+    meter.record({ kind: 'tts', provider: providerId, model, units: countChars(text) });
     return { url, raw: res.json };
   }
 
-  // OpenAI 兼容家族的 /audio/speech 直接回二进制，交给上层用 fetch 落盘
+  /**
+   * OpenAI 兼容家族的 /audio/speech 直接回二进制，交给上层用 fetch 落盘。
+   *
+   * ⚠ 账记在**这里**而不是上层落盘之后：上层那条路径不经过适配层，
+   * 补在那儿等于又开一个"调用点手工登记"的口子。代价是这一支在
+   * 上层落盘失败时会多记一笔 —— 但那时候厂商其实已经合成完、也已经计费了，
+   * 所以多记的这一笔恰恰是对的。
+   */
+  meter.record({ kind: 'tts', provider: providerId, model, units: countChars(text) });
   return {
     url: null,
     binaryRequest: {
@@ -2025,6 +2127,15 @@ export async function synthesizeSpeech({
       body: { model, input: text, voice, response_format: 'mp3' }
     }
   };
+}
+
+/**
+ * 配音计费按"字符"算，各家口径大同小异：中文一个字算一个，标点也算。
+ * 这里不做任何聪明的过滤 —— 过滤掉标点会让我们的数**系统性地小于账单**，
+ * 而偏小的账正是这个功能要消灭的东西。
+ */
+function countChars(text) {
+  return [...String(text ?? '')].length;
 }
 
 /**
@@ -2078,6 +2189,10 @@ export async function generateSfx({
     null
   );
   if (!res.ok) fail(label, res);
+
+  // 音效按秒计费，用的是**夹过之后**真正发出去的那个秒数，不是入参
+  const billedSeconds = Math.min(22, Math.max(0.5, Number(seconds) || 2));
+  meter.record({ kind: 'sfx', provider: providerId, model, units: billedSeconds });
 
   // 有的家直接回音频二进制，有的家回一个地址。两种都接
   const url = firstMediaUrl(res.json, { extensions: ['.mp3', '.wav', '.ogg'] }) || firstMediaUrl(res.json);

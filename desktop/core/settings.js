@@ -247,6 +247,18 @@ const DEFAULTS = {
    * 一条常驻的红横幅会让人很快学会无视所有横幅，包括真正要紧的那些。
    */
   routeBannerOn: false,
+  /**
+   * 你自己的单价表。键是 `厂商:模型:口径`，见 core/pricing.js。
+   *
+   * ⚠ 这里**默认是空的，而且不会由我们预填**。理由写在 pricing.js 头上，
+   * 一句话：各家单价我只有个印象，印象写进代码就变成了断言；
+   * 而且标价本来就不是你的价（有额度包、有企业协议、走中转的能差一倍）。
+   *
+   * 空着照样能用 —— 用量（几张图、多少秒、多少字）一直在记、一直在显示，
+   * 那部分一个字都不是猜的。填了单价，钱才出现，而且**过去的账会一起亮起来**
+   * （账本存的是用量不是钱，随时能按新单价重算）。
+   */
+  rates: {},
   theme: 'dark',
   port: 5178,
 
@@ -275,7 +287,8 @@ export function all() {
     ...DEFAULTS,
     ...disk,
     baseUrls: { ...DEFAULTS.baseUrls, ...(disk.baseUrls || {}) },
-    endpointOverrides: { ...DEFAULTS.endpointOverrides, ...(disk.endpointOverrides || {}) }
+    endpointOverrides: { ...DEFAULTS.endpointOverrides, ...(disk.endpointOverrides || {}) },
+    rates: { ...DEFAULTS.rates, ...(disk.rates || {}) }
   };
   return cache;
 }
@@ -305,6 +318,17 @@ export function patch(changes = {}) {
     next.endpointOverrides = { ...all().endpointOverrides, ...given.endpointOverrides };
     // 填了空字符串等于"清掉这条覆盖，回到自动探测"
     for (const [k, v] of Object.entries(next.endpointOverrides)) if (!v) delete next.endpointOverrides[k];
+  }
+  if (given.rates) {
+    next.rates = { ...all().rates, ...given.rates };
+    /**
+     * 传 null 等于"把这条单价删掉，回到未定价"。
+     *
+     * 不给这条路的话，填错了的单价就只能改成别的数，删不掉 ——
+     * 而"删不掉"在钱这件事上很要命：一个填错的 0 会让某一项
+     * **永远显示成免费**，而且看起来完全正常。
+     */
+    for (const [k, v] of Object.entries(next.rates)) if (v === null) delete next.rates[k];
   }
   cache = next;
 
