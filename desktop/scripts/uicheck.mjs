@@ -1501,6 +1501,25 @@ await page.waitForTimeout(900);
   check('没填单价时说的是"算不出钱"，不是 ¥0',
     line.includes('还没填单价') && !/¥\s*0(\D|$)/.test(line), line);
 
+  /**
+   * ⚠ 合成那一步必须说"不花钱"，而且必须**在屏幕上**说。
+   *
+   * 这条是整个功能里最有价值的一句话：调节奏、换顺序、砍一镜、配段音乐，
+   * 全在合成这一步里，全部是本机 FFmpeg，一分钱不花。
+   * 用户不知道这件事的时候，会为了改一个节奏去重出一整轮视频。
+   *
+   * 金丝雀第一轮把 describe() 里那句"不花钱"删掉，走查照样全绿 ——
+   * 因为它从头到尾没翻到合成那一步。功能在、自检绿、界面不说话，
+   * 又是同一个病，这次犯在验收本身上。
+   */
+  await step('合成').click();
+  await page.waitForTimeout(800);
+  const composeLine = await page.locator('.cost-line').first().innerText().catch(() => '');
+  check('合成那一步当面说"不花钱"', /不花钱/.test(composeLine), composeLine || '（一行都没有）');
+  check('而且说清了为什么（本机 FFmpeg）', /FFmpeg|本机/.test(composeLine), composeLine);
+  await step('出图').click();
+  await page.waitForTimeout(700);
+
   // 预估摆在按钮**上面** —— 这句话是给还没按的人看的
   const order = await page.evaluate(() => {
     const c = document.querySelector('.cost-line');
