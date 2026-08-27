@@ -980,6 +980,24 @@ export function qualityReport(projectId) {
   });
 }
 
+/** 给当前镜头版本签字。重出/改文案后 revision 改变，旧签字自动失效。 */
+export function reviewShot(projectId, shotId, { status = 'approved', note = '', reviewer = '' } = {}) {
+  if (!['approved', 'rejected', 'pending'].includes(status)) throw new Error('审核状态只能是通过、退回或待审');
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const shot = (project.shots || []).find((s) => s.id === shotId);
+  if (!shot) throw new Error(`没有这一镜：${shotId}`);
+  shot.review = {
+    status,
+    note: String(note || '').trim().slice(0, 500),
+    reviewer: String(reviewer || '').trim().slice(0, 80) || '本机审片人',
+    at: new Date().toISOString(),
+    revision: quality.reviewRevision(shot)
+  };
+  store.save(project);
+  return { project: store.read(projectId), review: shot.review };
+}
+
 export function bibleReadiness(project) {
   // 按**变体**算：一个角色三套衣服就是三张图，缺一张就少一个基准
   const targets = variants.sheetTargets(project.bible);
@@ -5623,3 +5641,4 @@ export const __refreshRefs = refreshRefs;
 
 /** 只给自检用 */
 export const __reusableFrameRef = reusableFrameRef;
+

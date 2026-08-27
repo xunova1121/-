@@ -50,6 +50,12 @@ const WEIGHT = { blocker: 12, warn: 4, note: 1 };
 
 const LEVELS = ['blocker', 'warn', 'note'];
 
+/** 审批必须绑定到当前素材版本；重出或改文案后，旧签字不能继续放行。 */
+export function reviewRevision(shot = {}) {
+  const last = (shot.generationHistory || []).at(-1);
+  return [shot.imagePath || '', shot.videoPath || '', shot.editedAt || '', last?.at || ''].join('|');
+}
+
 function add(items, level, o) {
   items.push({ level, ...o });
 }
@@ -80,6 +86,29 @@ export function audit(project, { lintResults = [], threshold = 75 } = {}) {
 
   if (!shots.length) {
     return { score: 0, verdict: 'not-ready', items: [{ level: 'blocker', what: '还没有分镜', fix: '先跑到「分镜」那一步' }], counts: { blocker: 1, warn: 0, note: 0 } };
+  }
+
+  // 人工审片：只要团队开始审，就必须把整片审完。审批绑定素材版本，返工后自动过期。
+  const reviewStarted = shots.some((s) => s.review);
+  if (reviewStarted) {
+    const rejected = shots.filter((s) => s.review?.status === 'rejected' && s.review.revision === reviewRevision(s));
+    const pending = shots.filter((s) => s.review?.status !== 'approved' || s.review.revision !== reviewRevision(s));
+    if (rejected.length) {
+      add(items, 'blocker', {
+        id: 'review-rejected',
+        what: `${rejected.length} 镜被人工退回（第 ${rejected.map((s) => s.index).join('、')} 镜）`,
+        why: '审片人已经明确判定当前版本不能交付，自动体检通过也不能覆盖人工结论。',
+        fix: '按退回意见返工，生成新版本后重新审核。'
+      });
+    }
+    if (pending.length) {
+      add(items, 'warn', {
+        id: 'review-pending',
+        what: `${pending.length} 镜尚未通过当前版本的人工审核（第 ${pending.slice(0, 12).map((s) => s.index).join('、')}${pending.length > 12 ? ' 等' : ''}镜）`,
+        why: '未审核或返工后的旧审批已经过期；交付前需要有人看过真正要发布的这一版。',
+        fix: '在分镜卡上逐镜通过或退回；返工后必须重新签字。'
+      });
+    }
   }
 
   // ── 产物齐不齐 ──
@@ -327,3 +356,4 @@ export function headline(report) {
     : `${report.counts.warn} 处质量风险`;
   return `${label}（${report.score} 分，${tail}）：${worst.what}`;
 }
+

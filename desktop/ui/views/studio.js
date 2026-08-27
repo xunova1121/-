@@ -1491,6 +1491,29 @@ export default {
           }
         }, '生产清单');
 
+        const reviewCurrent = shot.review && shot.review.revision === [
+          shot.imagePath || '', shot.videoPath || '', shot.editedAt || '', (shot.generationHistory || []).at(-1)?.at || ''
+        ].join('|');
+        const reviewBtn = h('button', {
+          class: `shot-edit-btn ${reviewCurrent && shot.review.status === 'approved' ? 'ok' : ''}`,
+          title: reviewCurrent
+            ? `${shot.review.reviewer}：${shot.review.status === 'approved' ? '已通过' : shot.review.status === 'rejected' ? '已退回' : '待审'}${shot.review.note ? ` · ${shot.review.note}` : ''}`
+            : shot.review ? '镜头已返工，上一版审批自动失效，请重新审核' : '给当前图片/视频版本签字',
+          onclick: async () => {
+            const note = prompt('审片意见（通过可留空；需要返工时请写清楚）', reviewCurrent ? shot.review.note || '' : '') ?? null;
+            if (note === null) return;
+            const status = note.trim() ? (confirm('这条意见是“退回返工”吗？\n确定 = 退回，取消 = 带意见通过') ? 'rejected' : 'approved') : 'approved';
+            try {
+              const r = await api(`/projects/${project.id}/shots/${shot.id}/review`, { method: 'POST', body: { status, note } });
+              project = r.project;
+              toast(status === 'approved' ? `第 ${shot.index} 镜已通过` : `第 ${shot.index} 镜已退回`, status === 'approved' ? 'ok' : 'err');
+              paintShots();
+            } catch (err) { toast(err.message, 'err'); }
+          }
+        }, reviewCurrent
+          ? (shot.review.status === 'approved' ? '✓ 已审' : shot.review.status === 'rejected' ? '↩ 退回' : '待审')
+          : (shot.review ? '审批已过期' : '审片'));
+
         // 厂商的时长档位：设 4 秒而模型只出 5/10 秒时，得在这儿就说清楚
         const steps = state.catalog.videoDurations || [];
         const aligned = steps.find((x) => x >= shot.duration) || steps.at(-1);
@@ -1880,7 +1903,8 @@ export default {
                 // 和「改文案」并排。藏在编辑面板底部时用户根本找不到它
                 stageBtn,
                 verBtn,
-                manifestBtn
+                manifestBtn,
+                reviewBtn
               ),
               descEl,
               editor,
@@ -1899,6 +1923,9 @@ export default {
                   : null,
                 // 手改过的镜头值得标一下：出来的图和自动拆的分镜对不上时，先想到的就该是"我改过它"
                 shot.editedAt ? h('span', { class: 'badge' }, '文案已手改') : null,
+                reviewCurrent && shot.review.status === 'approved' ? h('span', { class: 'badge ok' }, '当前版已审') : null,
+                reviewCurrent && shot.review.status === 'rejected' ? h('span', { class: 'badge warn' }, '当前版退回') : null,
+                !reviewCurrent && shot.review ? h('span', { class: 'badge warn' }, '审批已过期') : null,
                 // 模型挑技法时给的理由：要判断的是"它为什么这么挑"，不是盯着一串 id 猜
                 shot.skillWhy ? h('span', { class: 'badge', title: shot.skillWhy }, '技法由模型挑') : null,
                 // 用了非默认的那一版要看得见：出来的图"衣服不对"时，先看这里
@@ -4114,3 +4141,4 @@ function describe(ev) {
       return null;
   }
 }
+

@@ -1177,6 +1177,15 @@ async function handleApi(req, res, url, { lan = false } = {}) {
       });
     }
 
+    // 人工审片签字：签的是当前素材版本，不是永久贴在镜头上的标签。
+    if (b && c === 'shots' && d && e === 'review' && method === 'POST') {
+      try {
+        return json(res, 200, studio.reviewShot(b, d, await readBody(req)));
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
+    }
+
     if (b && c === 'shots' && d && e === 'controls' && method === 'POST') {
       try {
         const body = await readBody(req);
@@ -2041,3 +2050,4 @@ if (invokedDirectly) {
 
 /** 只给自检用：心跳是看不见的东西，不测就永远不知道它有没有在跳 */
 export const __ndjson = ndjson;
+

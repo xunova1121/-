@@ -5114,6 +5114,19 @@ section('成片体检：现在能不能发');
   check('全都齐时给放行', clean.verdict === 'ready' && clean.score === 100, JSON.stringify(clean.counts));
   check('放行时也说清楚查了什么', /没有查出问题/.test(q.headline(clean)), q.headline(clean));
 
+  const approved = done(1, { generationHistory: [{ at: '2026-01-01T00:00:00Z' }] });
+  approved.review = { status: 'approved', revision: q.reviewRevision(approved) };
+  const waiting = done(2);
+  const reviewOpen = q.audit({ shots: [approved, waiting] });
+  check('开始人工审片后，未审镜头会进入发布体检', reviewOpen.items.some((i) => i.id === 'review-pending'));
+  approved.generationHistory.push({ at: '2026-01-02T00:00:00Z' });
+  const staleReview = q.audit({ shots: [approved] });
+  check('返工生成新版本后旧审批自动过期', staleReview.items.some((i) => i.id === 'review-pending'));
+  const rejected = done(3);
+  rejected.review = { status: 'rejected', note: '手部变形', revision: q.reviewRevision(rejected) };
+  const reviewBlocked = q.audit({ shots: [rejected] });
+  check('人工退回会阻止发布', reviewBlocked.verdict === 'not-ready' && reviewBlocked.items.some((i) => i.id === 'review-rejected'));
+
   /**
    * ── blocker 的定义：导出去**一定**有人看得出来 ──
    *
@@ -10724,3 +10737,4 @@ fs.rmSync(SANDBOX, { recursive: true, force: true });
 console.log(`\n${'─'.repeat(50)}`);
 console.log(failed === 0 ? `\x1b[32m全部通过：${passed} 项\x1b[0m` : `\x1b[31m${failed} 项未通过\x1b[0m（通过 ${passed} 项）`);
 process.exit(failed === 0 ? 0 : 1);
+
