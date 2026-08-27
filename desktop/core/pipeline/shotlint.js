@@ -258,14 +258,166 @@ function lintPair(shot, prev) {
   return issues;
 }
 
-/** 体检整份分镜表。只回有问题的那几镜 */
-export function lintShots(shots = []) {
+/**
+ * 这一镜点名的角色 / 场景，设定集里有吗。
+ *
+ * ════════ 为什么这条必须有 ════════
+ *
+ * 找不到时**什么都不会发生** —— consistency.matchCharacters 的最后一步是
+ * `.filter(Boolean)`，找不到就悄悄丢掉。于是这一镜：
+ *
+ *   · 提示词里没有这个人的外貌描述
+ *   · 发出去的参考图里没有他
+ *   · 一致性复核没有基准可比
+ *
+ * 三层一致性手段一层都没生效，**静默降级成"文生视频"**，而界面上
+ * 一切正常：图出得来、分数也有（拿别人的脸打的）、流水线一路绿。
+ *
+ * 剧本一章一章往里加的时候，这几乎是必然会发生的 —— 第二章的新角色
+ * 不在第一章建的设定集里。
+ *
+ * ⚠ 只查**结构化字段**（characters / scene / speaker），不去画面描述里
+ * 猜名字。猜出来的假警报会让人学会无视所有警报，而那比没有检查更糟。
+ */
+function lintCast(shot, bible) {
+  if (!bible) return [];
+  const issues = [];
+  const has = (list, name) => (list || []).some((x) => x.name === name);
+
+  const unknown = (shot.characters || [])
+    .map((n) => String(n || '').trim())
+    .filter((n) => n && !has(bible.characters, n));
+  if (unknown.length) {
+    issues.push({
+      kind: 'cast-unknown',
+      severity: 'high',
+      what: `设定集里没有${unknown.map((n) => `「${n}」`).join('')}`,
+      why: '找不到的角色会被**悄悄丢掉**：这一镜的提示词里没有他的外貌、发出去的参考图里没有他、'
+        + '一致性复核也没有基准。三层手段一层都没生效，而流水线一路绿。',
+      fix: '到「设定集」页点「补上新增的角色和场景」—— 只给新来的出图，已有的一张都不重出。'
+        + '或者把这一镜的角色名改成设定集里的写法（"周叔"和"老周"对模型是两个人）。'
+    });
+  }
+
+  const scene = String(shot.scene || '').trim();
+  if (scene && (bible.scenes || []).length && !has(bible.scenes, scene)) {
+    issues.push({
+      kind: 'scene-unknown',
+      severity: 'normal',
+      what: `设定集里没有场景「${scene}」`,
+      why: '这一镜少一张场景基准图。同一个地方在不同镜头里会长得不一样 —— 而观众记得住地方。',
+      fix: '到「设定集」页补上；或者把场景名改成设定集里已有的那个。'
+    });
+  }
+
+  const speaker = String(shot.speaker || '').trim();
+  if (speaker && !has(bible.characters, speaker)) {
+    issues.push({
+      kind: 'speaker-unknown',
+      severity: 'high',
+      what: `台词标着「${speaker}」说，但设定集里没有这个人`,
+      why: '配音那一步按角色分音色。找不到的说话人拿不到音色，这句台词会用默认嗓子念 —— '
+        + '同一个人在不同镜里换声音，比换脸还刺耳。',
+      fix: '补进设定集，或者把「谁说的」改成设定集里的写法。'
+    });
+  }
+  return issues;
+}
+
+/**
+ * 景别够不够宽 —— 宽到"这个道具该看得见"。
+ *
+ * ⚠ 这一条是道具检查能不能用的**关键**。
+ *
+ * 一个道具没出现在某一镜里，绝大多数时候完全正常：那是张特写脸。
+ * 不加这道闸，"道具消失"会对每一个特写报一次警 —— 而满屏假警报
+ * 比没有检查更糟，人看两次就学会无视所有警报了。
+ *
+ * 所以只在**全景 / 中景 / 远景**这类"东西该看得见"的镜头上查。
+ * 认不出景别的（模型自由发挥的词）一律当成看不见，宁可漏报。
+ */
+const WIDE = /全景|中景|远景|广角|大景|俯拍|航拍|建立镜头/;
+function isWide(shot) {
+  return WIDE.test(String(shot?.camera || ''));
+}
+
+/**
+ * 道具凭空消失又回来。
+ *
+ * ── 为什么值得单独查 ──
+ *
+ * 角色一致性我们盯得很紧（设定图、seed、参考图、复核打分四层），
+ * 而**道具一直全靠人眼**。可观众对道具凭空消失同样敏感：
+ * 柴刀第 8 镜握在手里、第 9 镜空手、第 10 镜又握着 —— 这种事一眼就看得出来。
+ *
+ * ⚠ 只在**三明治**成立时报：前有、后有、中间这一镜没有。
+ * 只看"前一镜有、这一镜没有"的话，道具正常退场（放下、收起、离开这个地方）
+ * 会被报成穿帮 —— 而那是绝大多数情况。
+ */
+function lintProps(shot, prev, next) {
+  if (!prev || !next) return [];
+  // 同一场戏之内才算。跨场次本来就是另一个地方、另一段时间
+  const sameSeg = Number(shot.segment || 1) === Number(prev.segment || 1)
+    && Number(shot.segment || 1) === Number(next.segment || 1);
+  if (!sameSeg) return [];
+  if (!isWide(shot)) return [];
+
+  const here = new Set(shot.props || []);
+  const gone = (prev.props || []).filter((x) => (next.props || []).includes(x) && !here.has(x));
+  if (!gone.length) return [];
+  return [{
+    kind: 'prop-vanish',
+    severity: 'normal',
+    what: `${gone.map((x) => `「${x}」`).join('')}在前后两镜里都有，偏偏这一镜没有`,
+    why: '道具凭空消失又回来，观众一眼就看得出来 —— 而这一镜是'
+      + `${shot.camera || '宽景'}，东西本该看得见。`,
+    fix: '要么把它加进这一镜的道具里，要么改成特写之类看不见它的景别；'
+      + '如果剧情里它确实被拿走了，那下一镜就不该再出现。'
+  }];
+}
+
+/**
+ * 这一镜点名的道具，设定集里有吗。
+ *
+ * 和角色那条是同一个道理：找不到就悄悄丢掉，那一镜没有道具参考图、
+ * 提示词里没有它的外观描述 —— 同一把刀在不同镜里长得不一样。
+ */
+function lintPropNames(shot, bible) {
+  if (!bible || !(bible.props || []).length) return [];
+  const unknown = (shot.props || [])
+    .map((x) => String(x || '').trim())
+    .filter((x) => x && !(bible.props || []).some((p) => p.name === x));
+  if (!unknown.length) return [];
+  return [{
+    kind: 'prop-unknown',
+    severity: 'normal',
+    what: `设定集里没有道具${unknown.map((x) => `「${x}」`).join('')}`,
+    why: '找不到的道具会被悄悄丢掉：这一镜没有它的参考图、提示词里也没有它的外观描述。'
+      + '同一把刀在不同镜里会长得不一样。',
+    fix: '到「设定集」补上这件道具；或者把名字改成设定集里已有的写法。'
+  }];
+}
+
+/**
+ * 体检整份分镜表。只回有问题的那几镜。
+ *
+ * bible 是**可选**的：不给就跳过"设定集里有没有这个人"那几条。
+ * 老调用方一个字都不用改，而给了 bible 的地方多查三条。
+ */
+export function lintShots(shots = [], { bible = null } = {}) {
   const sorted = shots.slice().sort((a, b) => (a.index || 0) - (b.index || 0));
   return sorted
     .map((s, i) => ({
       id: s.id,
       index: s.index,
-      issues: [...lintShot(s), ...lintPair(s, i ? sorted[i - 1] : null)]
+      issues: [
+        ...lintShot(s),
+        ...lintPair(s, i ? sorted[i - 1] : null),
+        ...lintCast(s, bible),
+        ...lintPropNames(s, bible),
+        // 三明治：前有、后有、中间这一镜没有。要看得到后一镜，所以传 sorted[i+1]
+        ...lintProps(s, i ? sorted[i - 1] : null, sorted[i + 1] || null)
+      ]
     }))
     .filter((r) => r.issues.length);
 }

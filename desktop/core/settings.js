@@ -7,6 +7,8 @@ import fs from 'node:fs';
 import { SETTINGS_FILE, DATA_DIR } from './paths.js';
 
 const DEFAULTS = {
+  /** 同一厂商的多个账号/网关实例。路由绑定实例 ID，不再只能选“哪一家”。 */
+  providerInstances: [],
   /** 各服务商的 baseUrl 覆盖：{ dashscope: 'https://…' } —— 走内网网关时改这里 */
   baseUrls: {},
   /**
@@ -53,6 +55,19 @@ const DEFAULTS = {
    * 留着是因为「设定集」页单独重出一张设定图、以及以后需要图生图时用得上。
    */
   imageEditModel: 'doubao-seededit-3-0-i2i-250628',
+  /**
+   * 本地出图（ComfyUI）用的工作流，API 格式的 JSON 原文。
+   *
+   * ⚠ 为什么是**用户自己的工作流**而不是我们内置一份：
+   * 有人用 SDXL、有人用 Flux，有人挂三个 LoRA 加 ControlNet。
+   * 内置一份等于把 ComfyUI 最值钱的部分（可定制）扔掉 ——
+   * 那还不如直接调厂商接口。
+   *
+   * 他在 ComfyUI 里给要我们填的节点改个标题（FD_PROMPT / FD_SEED /
+   * FD_SIZE / FD_REF / FD_NEGATIVE），导出「API 格式」贴进来。
+   * 具体规矩见 providers/comfy.js。
+   */
+  comfyWorkflow: '',
   /**
    * 分镜图要不要改用图生图模型（把设定图当参考图喂进去）。
    *

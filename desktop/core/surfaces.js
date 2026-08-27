@@ -335,6 +335,56 @@ export const CAPABILITIES = [
     why: ''
   },
   {
+    id: 'comfy-workflow',
+    name: '本地出图（ComfyUI）：贴工作流、当场看出打了哪几个标记',
+    api: 'POST /comfy/inspect',
+    pc: 'ui/views/settings.js',
+    mobile: null,
+    why: '要贴一整份工作流 JSON（几十到几百行），还要对着 ComfyUI 那个窗口改节点标题 —— '
+      + '这是坐在电脑前做的事。而且本地出图这件事本身就只在跑引擎的那台机器上成立：'
+      + '手机连的是远端引擎，它那边有没有显卡和手机无关。'
+  },
+  {
+    id: 'shot-props',
+    name: '改这一镜画面里的道具（撑着"道具消失又回来"那条检查）',
+    api: 'PATCH /projects/:id/shots/:sid { props }',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
+    id: 'outline',
+    name: '大纲：一行一场戏，剧本和分镜之间那一层（含台词硬下限估算）',
+    api: 'POST /projects/:id/outline/build',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
+    id: 'outline-revise',
+    name: '和模型商量着改大纲：它回改动指令，你逐条勾选应用',
+    api: 'POST /projects/:id/outline/revise',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
+    id: 'extend-bible',
+    name: '增量补设定集：只加新章里没见过的角色和场景，已有的一条都不动',
+    api: 'POST /projects/:id/extend-bible',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
+    id: 'append-chapter',
+    name: '追加一章（往剧本末尾拼，前面的正文不动，已跑完的章不作废）',
+    api: 'POST /projects/:id/chapters/append',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
     id: 'site-map',
     name: '场地图：把几个场景摆到同一片地上（可缩放平移的画布）',
     api: 'POST /projects/:id/scene-place',

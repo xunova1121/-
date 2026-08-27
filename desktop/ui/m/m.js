@@ -50,6 +50,7 @@ import { speechSeconds, SPEECH_HEADROOM } from '/duration.js';
  */
 import * as SEAM from '/seam.js';
 import * as SITE from '/site-canvas.js';
+import * as OUTLINE from '/outline.js';
 
 const canInstall = window.isSecureContext && 'serviceWorker' in navigator;
 if (canInstall) {
@@ -940,6 +941,8 @@ function paintScript() {
         + '已经出好的图和视频不会自动跟着变。'),
       ta,
       h('div', { class: 'row', style: 'margin-top:10px' }, save)),
+    outlineCard(),
+    appendChapterCard(),
     formatCard(),
     styleCard()
   ];
@@ -1096,8 +1099,227 @@ function paintBible() {
    * 同一个功能在两端一个说话一个装死，比两端都没有更糟：
    * 用户在手机上找不到，会以为这个功能手机上没做。
    */
+  out.push(extendCard());
   out.push(siteCard());
   return out;
+}
+
+/**
+ * ── 补上新增的角色和场景 ──
+ *
+ * 手机上做这一块，是因为"剧本又来了一章"这件事**最常发生在手机上** ——
+ * 作者在手机上写、在手机上贴。而不补的后果是静默的：新角色那几镜
+ * 没有参考图、没有外貌描述、复核没有基准，静默降级成"文生图"，
+ * 而流水线一路绿。
+ */
+function extendCard() {
+  const host = h('details', { class: 'card site-details' });
+  const head = h('summary', {}, '剧本又加了新章？ ', h('span', { class: 'muted' }, '只补没见过的角色和场景'));
+  const log = h('div', { class: 'muted', style: 'margin-top:8px;line-height:1.6' });
+  const btn = h('button', { class: 'btn sm grow' }, '扫一遍，补上新增的');
+  btn.onclick = async () => {
+    btn.disabled = true;
+    const old = btn.textContent;
+    btn.textContent = '扫描中…';
+    log.textContent = '';
+    try {
+      // cap:extend-bible
+      await stream(`/projects/${project.id}/extend-bible`, {}, (ev) => {
+        if (ev.message) log.textContent = ev.message;
+        if (ev.type === 'error') toast(ev.message, 'err');
+        if (ev.type === 'finished') {
+          project.bible = ev.project?.bible || project.bible;
+          toast(ev.added?.length
+            ? `补了 ${ev.added.length} 条：${ev.added.map((a) => a.name).join('、')}`
+            : '没有新的角色或场景', 'ok');
+          paint();
+        }
+      });
+    } catch (err) {
+      toast(err.message, 'err');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  };
+  host.append(head,
+    h('div', { class: 'muted', style: 'line-height:1.7' },
+      '已有的一条都不动、一张图都不重出 —— 所以主角不会换脸，也不会重复花钱。'),
+    h('div', { class: 'row', style: 'margin-top:8px' }, btn),
+    log);
+  return host;
+}
+
+/**
+ * ── 大纲 ──
+ *
+ * 手机上做这一层，理由和「追加一章」一样：**改大纲最常发生在手机上**。
+ * 想起来"第二场太拖了"这件事，很少发生在坐下来对着电脑的时候。
+ *
+ * 而这一层恰恰是手机装得下的：一行一场戏，十来行；
+ * 分镜表那种一屏六七个字段的东西才是手机上做不了的。
+ */
+function outlineCard() {
+  const host = h('details', { class: 'card site-details' });
+  const listHost = h('div', { style: 'margin-top:8px' });
+  const chatHost = h('div', { style: 'margin-top:8px' });
+  const sumLine = h('div', { class: 'muted', style: 'line-height:1.7' });
+
+  const paint = () => {
+    clear(listHost);
+    const o = OUTLINE.normalizeOutline(project.outline);
+    sumLine.textContent = OUTLINE.summarize(project.outline, project.targetDuration);
+    if (!o.beats.length) {
+      listHost.append(h('div', { class: 'muted', style: 'line-height:1.7' },
+        '还没有大纲。先生成一份 —— 一行一场戏，改顺了再拆分镜。'));
+      return;
+    }
+    for (const [i, b] of o.beats.entries()) {
+      const est = OUTLINE.estimateSeconds(b);
+      listHost.append(h('div', { class: `mob-row${b.locked ? ' locked' : ''}` },
+        h('div', { class: 'mob-head' },
+          h('b', {}, `${i + 1}. ${b.scene || '（未定）'}`),
+          h('span', { class: 'muted' }, `${est.suggested} 秒`),
+          est.floor ? h('span', { class: 'mob-floor' }, `台词 ${est.floor}s`) : '',
+          b.locked ? h('span', { class: 'badge' }, '锁') : ''),
+        h('div', { class: 'muted', style: 'line-height:1.6' }, b.summary)));
+    }
+    const bud = OUTLINE.budgetCheck(project.outline, project.targetDuration);
+    for (const one of bud?.issues || []) {
+      listHost.append(h('div', { class: `mob-issue${one.kind === 'floor-over' ? ' hard' : ''}` },
+        h('b', {}, one.what),
+        h('div', { class: 'muted', style: 'line-height:1.6;margin-top:3px' }, one.why),
+        h('div', { style: 'line-height:1.6;margin-top:3px' }, one.fix)));
+    }
+  };
+
+  const buildBtn = h('button', { class: 'btn sm grow' }, '从剧本生成大纲');
+  buildBtn.onclick = async () => {
+    const o = OUTLINE.normalizeOutline(project.outline);
+    if (o.beats.length && !confirm('重新生成会按当前剧本重排场次。已经拆过分镜的那几场会原样留下。继续？')) return;
+    buildBtn.disabled = true;
+    const old = buildBtn.textContent;
+    buildBtn.textContent = '拆场次中…';
+    try {
+      // cap:outline
+      await stream(`/projects/${project.id}/outline/build`, {}, (ev) => {
+        if (ev.type === 'stage' && ev.message) sumLine.textContent = ev.message;
+        if (ev.type === 'error') toast(ev.message, 'err');
+        if (ev.type === 'finished') {
+          project.outline = ev.project?.outline || project.outline;
+          paint();
+          toast('大纲出来了', 'ok');
+        }
+      });
+    } catch (err) { toast(err.message, 'err'); } finally {
+      buildBtn.disabled = false;
+      buildBtn.textContent = old;
+    }
+  };
+
+  const say = h('input', { type: 'text', placeholder: '想怎么改？比如「第 2 场砍一半」' });
+  const askBtn = h('button', { class: 'btn sm grow' }, '让它想想');
+  askBtn.onclick = async () => {
+    if (!say.value.trim()) { toast('想改什么？说一句', 'err'); return; }
+    askBtn.disabled = true;
+    const old = askBtn.textContent;
+    askBtn.textContent = '想…';
+    try {
+      // cap:outline-revise
+      const r = await api(`/projects/${project.id}/outline/revise`, {
+        method: 'POST', body: { instruction: say.value }
+      });
+      clear(chatHost);
+      if (!r.preview?.length) {
+        chatHost.append(h('div', { class: 'muted' }, r.note || '它没想出要改什么'));
+        return;
+      }
+      if (r.note) chatHost.append(h('div', { class: 'muted', style: 'line-height:1.7' }, r.note));
+      const boxes = [];
+      for (const one of r.preview) {
+        const cb = h('input', { type: 'checkbox' });
+        cb.checked = !one.refused;
+        cb.disabled = Boolean(one.refused);
+        boxes.push({ cb, op: one.op });
+        chatHost.append(h('label', { class: `mob-op${one.refused ? ' refused' : ''}` },
+          cb, h('span', {}, one.text),
+          one.refused ? h('span', { class: 'mob-refused' }, `（做不了：${one.refused}）`) : ''));
+      }
+      const apply = h('button', { class: 'btn sm grow' }, '应用勾中的');
+      apply.onclick = async () => {
+        const ops = boxes.filter((x) => x.cb.checked).map((x) => x.op);
+        if (!ops.length) { toast('一条都没勾', 'err'); return; }
+        apply.disabled = true;
+        try {
+          // cap:outline-revise
+          const res = await api(`/projects/${project.id}/outline/apply`, { method: 'POST', body: { ops } });
+          project.outline = res.project.outline;
+          paint();
+          clear(chatHost);
+          toast(`改了 ${res.applied} 条`, 'ok');
+        } catch (err) { toast(err.message, 'err'); } finally { apply.disabled = false; }
+      };
+      chatHost.append(h('div', { class: 'row', style: 'margin-top:8px' }, apply));
+    } catch (err) { toast(err.message, 'err'); } finally {
+      askBtn.disabled = false;
+      askBtn.textContent = old;
+    }
+  };
+
+  host.append(
+    h('summary', {}, '大纲 ', h('span', { class: 'muted' }, '一行一场戏，改顺了再拆分镜')),
+    sumLine,
+    h('div', { class: 'row', style: 'margin-top:8px' }, buildBtn),
+    listHost,
+    h('div', { class: 'row', style: 'margin-top:10px' }, say),
+    h('div', { class: 'row', style: 'margin-top:8px' }, askBtn),
+    chatHost
+  );
+  paint();
+  return host;
+}
+
+/**
+ * ── 追加一章 ──
+ *
+ * 往剧本末尾拼，前面的正文一个字都不会动。
+ * 手工粘贴最容易毁掉的就是这一点：碰掉前面一个空格，那一章就被判定
+ * "改过了"，已经出好的分镜全部作废重跑 —— 而且没有任何提示。
+ */
+function appendChapterCard() {
+  const host = h('details', { class: 'card site-details' });
+  const title = h('input', { type: 'text', placeholder: '章节标题（留空自动编号）' });
+  const body = h('textarea', { rows: 5, class: 'mta', placeholder: '把新一章的正文贴在这儿' });
+  const btn = h('button', { class: 'btn sm grow' }, '追加这一章');
+  btn.onclick = async () => {
+    if (!body.value.trim()) { toast('这一章是空的', 'err'); return; }
+    btn.disabled = true;
+    const old = btn.textContent;
+    btn.textContent = '追加中…';
+    try {
+      // cap:append-chapter
+      const r = await api(`/projects/${project.id}/chapters/append`, {
+        method: 'POST', body: { title: title.value, script: body.value }
+      });
+      project = r.project || project;
+      body.value = '';
+      title.value = '';
+      toast('已追加 —— 前面几章的进度都还在', 'ok');
+      paint();
+    } catch (err) {
+      toast(err.message, 'err');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  };
+  host.append(
+    h('summary', {}, '追加一章 ', h('span', { class: 'muted' }, '剧本一章一章来的时候用')),
+    h('div', { class: 'muted', style: 'line-height:1.7' },
+      '往剧本末尾拼，前面的正文一个字都不动 —— 已经跑完的章不会作废重跑。'),
+    title, body,
+    h('div', { class: 'row', style: 'margin-top:8px' }, btn));
+  return host;
 }
 
 /**
@@ -1129,6 +1351,18 @@ function siteCard() {
     if (!host.open || built) return;
     built = true;
     body.append(SITE.sitePanel(project, {
+      onAlign: async (name) => {
+        try {
+          // cap:site-map
+          const p2 = await api(`/projects/${project.id}/site/apply`, {
+            method: 'POST', body: { site: name }
+          });
+          project.bible = p2.project.bible;
+          toast(p2.changed.length
+            ? `已按场地图对齐 ${p2.changed.length} 个场景：${p2.changed.join('、')}`
+            : '这几个场景本来就和场地图一致，没有要改的', 'ok');
+        } catch (err) { toast(err.message, 'err'); }
+      },
       onPlace: async (scene, place) => {
         try {
           // cap:site-map
@@ -1866,6 +2100,11 @@ function chips(options, current, onPick) {
  */
 function openEditor(s, jump = 'content') {
   const desc = h('textarea', { rows: 4, class: 'mta' }, s.description || '');
+  /**
+   * 这一镜画面里**看得见**的关键道具。撑着"道具消失又回来"那条检查。
+   * ⚠ 只填真的在画面里的：特写里看不见的东西填上去，那条检查会开始乱报。
+   */
+  const propsBox = h('input', { type: 'text', value: (s.props || []).join('、') });
   const line = h('textarea', { rows: 2, class: 'mta' }, s.dialogue || '');
   // 画外音效。单开一栏是因为写进画面描述会让出图模型去画那个声音 ——
   //「敲门声」最常见的下场是画出一扇开着的门，而这一镜的前提是门还关着
@@ -1964,7 +2203,18 @@ function openEditor(s, jump = 'content') {
       stageDraft = (sameSeg && inheritStage(prev.stage, names)) || blankStage(names);
     }
     stageWrap.append(previzPanel(stageDraft, {
+      duration: s.duration || 5,
       size: 300,
+      assets: [
+        ...(project.bible?.characters || []).map((x) => ({ kind: 'character', name: x.name, ref: x.id || x.name, image: x.sheetPath ? media(x.sheetPath) : '' })),
+        ...(project.bible?.scenes || []).map((x) => ({ kind: 'scene', name: x.name, ref: x.id || x.name, image: x.sheetPath ? media(x.sheetPath) : '' })),
+        ...(project.bible?.props || []).map((x) => ({ kind: 'prop', name: x.name, ref: x.id || x.name, image: x.sheetPath ? media(x.sheetPath) : '' }))
+      ],
+      onExportControls: async (stage) => {
+        const r = await api(`/projects/${project.id}/shots/${s.id}/controls`, { method: 'POST', body: { stage } });
+        const v = Date.now();
+        return Object.fromEntries(['start', 'depth', 'mask'].map((key) => [key, media(r.controls[key], v)]));
+      },
       prevStage: prev?.stage || null,
       // 同一个场景会反复回来，而逐镜继承隔一场就断了 —— 布局要挂到场景上
       scene: s.scene || '',
@@ -1991,7 +2241,10 @@ function openEditor(s, jump = 'content') {
       h('div', { class: 'ed-group' },
         h('h4', {}, '画面描述', h('span', {}, '出图和出视频的唯一输入')),
         desc,
-        h('div', { class: 'muted', style: 'margin-top:6px' }, '写偏一句，重出十次也回不到对的画面。')),
+        h('div', { class: 'muted', style: 'margin-top:6px' }, '写偏一句，重出十次也回不到对的画面。'),
+        field('画面里的道具', propsBox,
+          '只填**这一镜真的看得见**的。特写里看不见的东西填上去，'
+          + '「道具消失又回来」那条检查会开始乱报 —— 而乱报的检查比没有更糟。')),
       h('div', { class: 'ed-group' },
         h('h4', {}, '台词'),
         field('说什么', line, '留空就是这一镜没人说话。'),
@@ -2107,6 +2360,8 @@ function openEditor(s, jump = 'content') {
         method: 'PATCH',
         body: {
           description: desc.value,
+          // cap:shot-props
+          props: propsBox.value,
           dialogue: line.value,
           speaker: who.value,
           lineKind,

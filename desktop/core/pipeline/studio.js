@@ -34,6 +34,7 @@ import * as variants from './variants.js';
 import * as anglesLib from './angles.js';
 import * as previz from './previz.js';
 import * as siteMod from './site.js';
+import * as outline from './outline.js';
 import * as oss from '../oss.js';
 import * as tiers from '../tiers.js';
 import * as shotlint from './shotlint.js';
@@ -41,6 +42,7 @@ import * as segments from './segments.js';
 import * as transitions from '../transitions.js';
 import * as fx from '../fx.js';
 import * as jobs from '../jobs.js';
+import { renderControls } from './controlmaps.js';
 
 export const extractJSON = consistency.extractJSON;
 
@@ -76,6 +78,7 @@ const SHOT_PROMPT = `你是动态漫画的分镜导演。把剧本拆成可直�
       "segment": 1,
       "scene": "所属场景名（必须用设定集里已有的场景名）",
       "characters": ["出场角色名，必须用设定集里已有的名字，空镜给空数组"],
+      "props": ["这一镜画面里**看得见**的关键道具名，必须用设定集里已有的名字。没有就给空数组。⚠ 只填真的在画面里的：特写镜头里看不见的东西不要填，那会让'道具消失'的检查全是假警报"],
       "description": "这一镜画面里发生的事，只写看得见的画面，不写心理活动、不写声音",
       "camera": "镜头语言：特写 / 中景 / 全景 / 俯拍 / 跟拍 / 推镜 等",
       "motion": "给图生视频的运镜与动态提示，一句话",
@@ -645,40 +648,19 @@ export function sheetPrompt(kind, bible, item, variant = null) {
 // ═══════════════════════ 阶段一：设定集（冻结人设）═══════════════════════
 
 /**
- * 生成设定集并出角色设定图 / 场景基准图。
- * 这一步是整条流水线的地基，跑完之后人设就锁死了。
+ * 出参考图 —— 全量建设定集和**增量补设定集**共用这一段。
+ *
+ * ⚠ 抽出来是必须的，不是整洁癖。增量那条路要出的是"只给新来的角色出图"，
+ * 而出图这件事牵着一串容易漏的细节：按变体出（一个角色三套衣服就是三张）、
+ * 校画幅、转成模型能读的引用、把 sheetPath 写回**变体**而不是条目。
+ * 另写一份的话漏掉其中任何一条，表现都是"新角色的图看起来出了，
+ * 但后面每一镜都没引用到它"—— 而那正是一致性开始塌的地方。
  */
-export async function buildBible(projectId, { onEvent, regenerate = false, signal = null } = {}) {
+async function generateSheets(projectId, targets, { onEvent, signal = null } = {}) {
   const project = store.read(projectId);
-  if (!project) throw new Error(`项目不存在：${projectId}`);
-  if (!project.script?.trim()) throw new Error('剧本是空的，先写点东西');
-
-  onEvent?.({ type: 'stage', stage: 'bible', status: 'running', message: '正在冻结人设与场景…' });
-
-  const bible = project.bible && !regenerate ? project.bible : await consistency.buildBible(project, { onEvent });
-  // 刚生成的设定集还没有"变体"这一层，补上（老项目在 store.read 里补）
-  variants.normalizeBible(bible);
-  store.update(projectId, (p) => {
-    p.bible = bible;
-    return p;
-  });
-
-  /**
-   * 写描述和出设定图是**同一步**。
-   *
-   * 曾经拆成过两步（先出文字、人确认、再出图），道理上说得通，实际不好用：
-   * 多一次手动确认、多一个"图还没出"的中间态，而设定集本来就是
-   * "一口气出齐才有意义"的东西 —— 缺一张角色设定图，后面引用它的每一镜
-   * 都少一张参考图，一致性就是从那儿开始塌的。
-   *
-   * 不满意就在「设定集」页改描述、单独重出那一张 —— 那是随时能做的事，
-   * 不需要为它在流水线上专门开一站。
-   */
+  const bible = project.bible;
   const dir = store.assetDir(projectId);
   const r = routing();
-  // 按**变体**出图，不是按条目：一个角色三套衣服就是三张，
-  // 缺一张就少一个基准（见 pipeline/variants.js）
-  const targets = variants.sheetTargets(bible).filter(({ variant }) => regenerate || !variant.sheetPath);
 
   onEvent?.({ type: 'note', message: `待出参考图 ${targets.length} 张` });
 
@@ -729,6 +711,40 @@ export async function buildBible(projectId, { onEvent, regenerate = false, signa
       onEvent?.({ type: 'sheet', name: label, status: 'failed', message: err.message });
     }
   }
+}
+
+/**
+ * 生成设定集并出角色设定图 / 场景基准图。
+ * 这一步是整条流水线的地基，跑完之后人设就锁死了。
+ */
+export async function buildBible(projectId, { onEvent, regenerate = false, signal = null } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  if (!project.script?.trim()) throw new Error('剧本是空的，先写点东西');
+
+  onEvent?.({ type: 'stage', stage: 'bible', status: 'running', message: '正在冻结人设与场景…' });
+
+  const bible = project.bible && !regenerate ? project.bible : await consistency.buildBible(project, { onEvent });
+  // 刚生成的设定集还没有"变体"这一层，补上（老项目在 store.read 里补）
+  variants.normalizeBible(bible);
+  store.update(projectId, (p) => {
+    p.bible = bible;
+    return p;
+  });
+
+  /**
+   * 写描述和出设定图是**同一步**。
+   *
+   * 曾经拆成过两步（先出文字、人确认、再出图），道理上说得通，实际不好用：
+   * 多一次手动确认、多一个"图还没出"的中间态，而设定集本来就是
+   * "一口气出齐才有意义"的东西 —— 缺一张角色设定图，后面引用它的每一镜
+   * 都少一张参考图，一致性就是从那儿开始塌的。
+   *
+   * 不满意就在「设定集」页改描述、单独重出那一张 —— 那是随时能做的事，
+   * 不需要为它在流水线上专门开一站。
+   */
+  const targets = variants.sheetTargets(bible).filter(({ variant }) => regenerate || !variant.sheetPath);
+  await generateSheets(projectId, targets, { onEvent, signal });
 
   const after = store.read(projectId);
   const all = variants.sheetTargets(after.bible);
@@ -747,6 +763,196 @@ export async function buildBible(projectId, { onEvent, regenerate = false, signa
       : `参考图只出了 ${ready}/${total} 张。缺的那几张会让引用它的镜头少一张参考图，一致性从那儿开始塌 —— 去「设定集」页把缺的补出来再往下走`
   });
   return store.read(projectId);
+}
+
+/**
+ * 增量补设定集 —— 只加新来的，老的一个都不碰。
+ *
+ * ════════ 为什么非有这一条不可 ════════
+ *
+ * 剧本一章一章往里加，第二章必然冒出第一章没有的人和地方。
+ * 而在这之前，能做的只有两件事，两件都不对：
+ *
+ *   什么都不做   新角色永远不在设定集里。而且**不报错** ——
+ *                matchCharacters 找不到就回空数组，那一镜于是没有参考图、
+ *                提示词里没有外貌描述、复核没有基准，静默降级成"文生图"
+ *   重新生成     整份设定集重建，所有 sheetPath 清空，**老角色的图全部重出**。
+ *                既花钱，又冒着"重出那张和之前不一样"的风险 ——
+ *                而观众对主角换脸这件事最敏感
+ *
+ * 这条路只做一件事：扫新正文 → 认出没见过的名字 → 只给这几个建条目、出图。
+ *
+ * ⚠ 判重按**名字**。模型给同一个人换个称呼（"老周" vs "周叔"）时会漏判，
+ * 于是多出一个重复条目。宁可这样：漏判的代价是多一条能手动删掉的设定，
+ * 而按相似度合并的代价是**把两个真的不同的人合成一个**，那是不可逆的。
+ *
+ * ⚠ 不动 style。画风是全片的事，第二章不该把它改掉。
+ */
+export async function extendBible(projectId, { chapterId = null, onEvent, signal = null } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  if (!project.bible) throw new Error('还没有设定集 —— 先跑「设定集」那一步，这一条是往上面补');
+
+  /**
+   * 扫哪一段。
+   *
+   * 指定了章就只扫那一章；没指定就扫**还没被扫过的那些章**。
+   * 扫全文是错的：已经建过条目的正文再扫一遍，模型多半会把
+   * 同一个人换个说法写出来，于是凭空多出一堆重复条目。
+   */
+  const all = project.chapters || [];
+  const pending = chapterId
+    ? all.filter((c) => c.id === chapterId)
+    : all.filter((c) => !c.castScanned);
+  const source = pending.length
+    ? pending.map((c) => c.script).join('\n\n')
+    : (all.length ? '' : project.script);
+
+  if (!String(source || '').trim()) {
+    onEvent?.({ type: 'note', message: '没有新章要扫 —— 每一章都扫过了' });
+    return { project, added: [] };
+  }
+
+  onEvent?.({ type: 'stage', stage: 'bible', status: 'running', message: '扫描新增的角色与场景…' });
+  const found = await consistency.scanCast(project, { source, onEvent });
+  jobs.checkpoint(signal, '扫描新增设定');
+
+  let added = [];
+  store.update(projectId, (p) => {
+    // 合并那一段抽在 consistency.mergeCast 里 —— 它是这条路上最容易出错的
+    // 地方（判重、seed 推导、不碰老条目），单独拿出来才测得动
+    added = consistency.mergeCast(p.bible, found, p.id);
+    // 记一笔这几章扫过了，免得下次又扫一遍扫出一堆重复
+    for (const c of p.chapters || []) {
+      if (pending.some((x) => x.id === c.id)) c.castScanned = true;
+    }
+    variants.normalizeBible(p.bible);
+    return p;
+  });
+
+  if (!added.length) {
+    onEvent?.({ type: 'stage', stage: 'bible', status: 'done', message: '没有新的角色或场景 —— 这几章用的都是已有的设定' });
+    return { project: store.read(projectId), added: [] };
+  }
+
+  onEvent?.({
+    type: 'note',
+    message: `新增 ${added.length} 条：${added.map((a) => a.name).join('、')}。只给这几条出图，已有的一张都不重出`
+  });
+
+  /**
+   * 只给**新条目**出图。
+   *
+   * sheetTargets 回的是全部变体，这里按 sheetPath 为空来筛 —— 正好就是
+   * 刚加进去那几条（老条目早就有图了）。用"名字在 added 里"来筛也行，
+   * 但那样会漏掉一种情况：老条目里本来就有一张没出成的图，
+   * 顺手补上是对的。
+   */
+  const after = store.read(projectId);
+  const targets = variants.sheetTargets(after.bible).filter(({ variant }) => !variant.sheetPath);
+  await generateSheets(projectId, targets, { onEvent, signal });
+
+  const done = store.read(projectId);
+  const sheets = variants.sheetTargets(done.bible);
+  const ready = sheets.filter((x) => x.variant.sheetPath).length;
+  store.update(projectId, (p) => {
+    p.stageStatus.bible = ready === sheets.length ? 'done' : ready ? 'partial' : 'pending';
+    return p;
+  });
+  onEvent?.({
+    type: 'stage',
+    stage: 'bible',
+    status: 'done',
+    message: `补了 ${added.length} 条设定，参考图 ${ready}/${sheets.length}`
+  });
+  return { project: store.read(projectId), added };
+}
+
+/**
+ * 追加一章 —— 剧本一章一章来的时候走这条。
+ *
+ * ════════ 为什么不直接往 chapters 里 push ════════
+ *
+ * 章节是从 `project.script` 切出来的。直接往 chapters 里塞一条，
+ * 两边就对不上了 —— 而下一次有人点「重新分章」，塞进去的那一章
+ * 会凭空消失（script 里根本没有它）。
+ *
+ * 所以这里往 **script 末尾**追加，然后按老规矩重切。这样只有一份真相。
+ *
+ * ⚠ 前面那些章的正文**一个字都不会动**（是我们在末尾拼的），
+ * 所以 applyChapters 里那条"正文没变才留住状态"必然成立 ——
+ * 已经跑完的章不会被判定成"改过了"而作废重跑。
+ * 手工往剧本框里粘贴时最容易毁掉的就是这一点：动了前面一个空格，
+ * 那一章的分镜就全部作废。
+ */
+export function appendChapter(projectId, { title = '', script = '' } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const text = String(script || '').trim();
+  if (!text) throw new Error('这一章是空的');
+
+  /**
+   * 标题要**写进正文**，不是只记在字段上。
+   *
+   * 切章认的是正文里的章节标题行。标题只存在字段里的话，重切时
+   * 这一章会和上一章黏在一起 —— 而那时候上一章的正文就变了，
+   * 它已经跑完的分镜会跟着作废。
+   */
+  const n = (project.chapters || []).length + 1;
+  const heading = String(title || '').trim() || `第 ${n} 章`;
+  const head = /^\s*(第\s*[一二三四五六七八九十百千零〇\d]+\s*[章回节幕]|Chapter\s+\d+|#{1,3}\s)/i.test(text)
+    ? '' // 正文自己带标题行就别再加一行，否则重切会多切一刀
+    : `${heading}\n`;
+
+  const merged = `${String(project.script || '').trimEnd()}\n\n${head}${text}\n`;
+
+  /**
+   * ⚠ **不走重新切分那条路。**
+   *
+   * 一开始是这么写的：把新章拼到剧本末尾，然后 autoSplit 整段重切。
+   * 浏览器走查里当场翻车 —— 追加完还是一章。
+   *
+   * 原因在 autoSplit 的一条规矩上："只认出一个标题说明它多半是书名，
+   * 不算数"（要 ≥2 个标题行才认）。而最常见的情形恰恰是：第一章是直接
+   * 粘进来的、**没有标题行**，你追加的第二章带标题 —— 全文只有一个标题，
+   * 于是这条规矩把它否掉，两章被并成一章。
+   *
+   * 给第一章补一行标题能骗过这条规矩，但那就**改了第一章的正文** ——
+   * 而"不碰前面的正文"正是这颗按钮存在的全部理由。
+   *
+   * 所以：章节已经有了就直接往后加一条，一次重切都不做。
+   * script 同步更新，只是为了剧本页能看到全文、以及将来真要重切时有材料在。
+   */
+  const existing = project.chapters || [];
+  if (!existing.length) {
+    // 还没分过章：这一次顺带把已有正文立成第 1 章，再把新章接在后面
+    const fresh = chapters.autoSplit(merged);
+    if (!fresh.length) throw new Error('没能切出章节');
+    store.update(projectId, (p) => { p.script = merged; return p; });
+    const next = applyChapters(projectId, fresh);
+    return { project: next, chapter: (next.chapters || [])[next.chapters.length - 1] || null };
+  }
+
+  const idx = existing.length + 1;
+  const body = `${head}${text}`.trim();
+  const one = {
+    id: `ch-${String(idx).padStart(2, '0')}`,
+    index: idx,
+    title: heading,
+    summary: '',
+    script: body,
+    chars: body.length,
+    stageStatus: { script: 'pending', assets: 'pending', video: 'pending', voice: 'pending', compose: 'pending' },
+    outputs: {}
+  };
+  const next = store.update(projectId, (p) => {
+    p.script = merged;
+    p.chapters = [...(p.chapters || []), one];
+    // 新章还没拆分镜，整片的分镜状态就不再是 done
+    p.stageStatus.script = p.chapters.every((c) => c.stageStatus.script === 'done') ? 'done' : 'pending';
+    return p;
+  });
+  return { project: next, chapter: one };
 }
 
 // ═══════════════════════ 阶段二：分镜 ═══════════════════════
@@ -768,7 +974,8 @@ export function qualityReport(projectId) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
   return quality.audit(project, {
-    lintResults: shotlint.lintShots(project.shots || []),
+    // 带上设定集：分镜里点名了设定集里没有的角色时，那一镜是静默降级的
+    lintResults: shotlint.lintShots(project.shots || [], { bible: project.bible }),
     threshold: settings.get('consistencyThreshold') ?? 75
   });
 }
@@ -783,6 +990,214 @@ export function bibleReadiness(project) {
     missing: missing.map((t) => `${SHEET_LABEL[t.kind]}·${variants.labelOf(t.item, t.variant)}`),
     ok: targets.length > 0 && missing.length === 0
   };
+}
+
+const OUTLINE_PROMPT = `你是分场编辑。把剧本拆成**一场一场戏**（不是分镜，是场次）。
+
+一场戏 = 同一个地点、同一段连续时间里发生的事。换地方或者跳时间，就是新的一场。
+
+只回 JSON：
+{
+  "beats": [
+    {
+      "scene": "地点名（和设定集里的场景名对得上最好）",
+      "time": "白天 / 傍晚 / 夜 / 清晨 之类，没写就留空",
+      "characters": ["这一场出现的人"],
+      "summary": "这一场发生了什么，一两句话",
+      "dialogue": "这一场里**真正要念出来**的台词，原样抄；没有就留空",
+      "seconds": 这一场大概多少秒（整数）
+    }
+  ]
+}
+
+要紧的三条：
+1. dialogue 要**原样抄剧本里的台词**，不要复述。这个字段用来算"念完要多久"，
+   概括一下就算不准了。没有台词的场次留空字符串。
+2. 场次数量按剧情来，不要凑数。一场戏就是一场戏。
+3. seconds 按这一场的内容估。有大段对话的场次自然长，一个转场空镜自然短。`;
+
+const REVISE_PROMPT = `你在帮人改一份**已经存在**的大纲。
+
+⚠ 不要回新的完整大纲。回一串**改动指令**，每条指令说清楚改哪一场、怎么改。
+
+只回 JSON：
+{
+  "ops": [
+    { "op": "insert", "after": "b-02", "beat": { "scene": "...", "time": "...", "characters": [], "summary": "...", "dialogue": "", "seconds": 30 } },
+    { "op": "edit",   "id": "b-03", "fields": { "summary": "...", "seconds": 120 } },
+    { "op": "delete", "id": "b-05" },
+    { "op": "move",   "id": "b-04", "after": "b-01" }
+  ],
+  "note": "一句话说明你为什么这么改"
+}
+
+规矩：
+1. id 必须用大纲里**已有的** id。编一个不存在的 id，那条会被丢掉。
+2. insert 的 after 填要插在哪一场后面的 id；插到最前面填 null。
+3. edit 的 fields 里**只写要改的字段**，没提到的字段保持原样。
+4. 标着「锁住」的场次已经拆过分镜了 —— 你可以建议改它，但那条多半会被拒绝。
+   能用别的办法达到目的就别动它。
+5. 只做人要求的那件事。顺手"优化"一下别的场次会让人没法判断该不该勾。`;
+
+/**
+ * 从剧本生成一份大纲。
+ *
+ * ════════ 为什么这一层值得单独存在 ════════
+ *
+ * 原来是「剧本 →（一次性）分镜表 → 出图」，中间没有可以商量的中间物。
+ * 而分镜表是个很坏的对话对象：二十镜、每镜六七个字段，想说"第三场太拖了"
+ * 得手工改十几行；让模型重跑一次，它会把已经审过的镜全换掉。
+ *
+ * 大纲是十来行、一行一场戏。在这个粒度上改是一句话的事，改完还看得懂全貌。
+ */
+export async function buildOutline(projectId, { chapterId = null, onEvent } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+
+  const chapterList = project.chapters || [];
+  const chapter = chapterId ? chapterList.find((c) => c.id === chapterId) : null;
+  if (chapterId && !chapter) throw new Error(`没有这一章：${chapterId}`);
+  const source = chapter ? chapter.script : project.script;
+  if (!String(source || '').trim()) throw new Error('剧本是空的');
+
+  const r = routing();
+  onEvent?.({ type: 'stage', stage: 'outline', status: 'running', message: `${r.chat.provider} / ${r.chat.model} 拆场次中…` });
+
+  const { text } = await adapters.chat({
+    providerId: r.chat.provider,
+    model: r.chat.model,
+    system: OUTLINE_PROMPT,
+    user: `目标片长：${project.targetDuration || 60} 秒\n\n剧本：\n${String(source).slice(0, 12000)}`,
+    temperature: 0.6,
+    jsonMode: true,
+    label: '生成大纲',
+    onEvent
+  });
+  const parsed = extractJSON(text);
+  const fresh = outline.normalizeOutline({ beats: parsed.beats });
+  if (!fresh.beats.length) throw new Error('模型没有拆出场次 —— 换一家或者把剧本写具体些');
+
+  /**
+   * ⚠ **保住已经锁住的场次。**
+   *
+   * 重新生成大纲最容易毁掉的就是"已经拆过分镜的那几场"——
+   * 它们后面挂着出好的图和视频。所以锁住的原样留下，
+   * 新生成的接在后面，而不是整份换掉。
+   */
+  const next = store.update(projectId, (p) => {
+    const kept = outline.normalizeOutline(p.outline).beats.filter((b) => b.locked);
+    const tagged = fresh.beats.map((b) => ({ ...b, chapterId: chapter ? chapter.id : '' }));
+    p.outline = { beats: [...kept, ...tagged], updatedAt: new Date().toISOString() };
+    return p;
+  });
+
+  const kept = outline.normalizeOutline(next.outline).beats.filter((b) => b.locked).length;
+  onEvent?.({
+    type: 'stage',
+    stage: 'outline',
+    status: 'done',
+    message: `${outline.summarize(next.outline, next.targetDuration)}${kept ? `（${kept} 场锁着的原样留下了）` : ''}`
+  });
+  return next;
+}
+
+/**
+ * 和模型商量着改大纲 —— **只回建议，不落盘**。
+ *
+ * ⚠ 分成"要建议"和"应用建议"两步，是这整件事的关键。
+ * 模型直接改的话，你没法知道它到底动了哪儿；而"看不出动了哪儿"
+ * 和"全部推倒重来"在后果上是一样的。
+ */
+export async function reviseOutline(projectId, { instruction, onEvent } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const now = outline.normalizeOutline(project.outline);
+  if (!now.beats.length) throw new Error('还没有大纲');
+  const say = String(instruction || '').trim();
+  if (!say) throw new Error('想改什么？说一句');
+
+  const r = routing();
+  onEvent?.({ type: 'note', message: `${r.chat.provider} / ${r.chat.model} 想办法中…` });
+
+  const table = now.beats.map((b, i) => ({
+    id: b.id,
+    序: i + 1,
+    场景: b.scene,
+    时间: b.time,
+    人物: b.characters,
+    内容: b.summary,
+    台词: b.dialogue,
+    秒: outline.estimateSeconds(b).suggested,
+    锁住: b.locked || undefined
+  }));
+
+  const { text } = await adapters.chat({
+    providerId: r.chat.provider,
+    model: r.chat.model,
+    system: REVISE_PROMPT,
+    user: `目标片长：${project.targetDuration || 60} 秒\n\n现在的大纲：\n${JSON.stringify(table, null, 1)}\n\n我想要：${say}`,
+    temperature: 0.4,
+    jsonMode: true,
+    label: '改大纲',
+    onEvent
+  });
+  const parsed = extractJSON(text);
+  const ops = Array.isArray(parsed.ops) ? parsed.ops : [];
+
+  /**
+   * 每条都先**试算一遍**，把"会被拒绝"提前告诉人。
+   *
+   * 让人勾了一条注定被拒的改动，点完发现没生效 —— 那比一开始就
+   * 标出来糟得多：他会以为是按钮坏了。
+   */
+  const preview = ops.map((op) => {
+    const trial = outline.applyOps(now, [op]);
+    return {
+      op,
+      text: outline.describeOp(op, now),
+      refused: trial.refused[0]?.why || null
+    };
+  });
+  return { ops, preview, note: String(parsed.note || '').slice(0, 200) };
+}
+
+/** 把人勾中的那几条改动落盘 */
+export function applyOutlineOps(projectId, { ops = [] } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const r = outline.applyOps(project.outline, ops);
+  const next = store.update(projectId, (p) => {
+    p.outline = r.outline;
+    return p;
+  });
+  return { project: next, applied: r.applied.length, refused: r.refused };
+}
+
+/**
+ * 解锁某几场，准备重拆。
+ *
+ * 回 { project, unlocked, willDrop }：willDrop 是**会作废几镜** ——
+ * 这个数必须回出去让界面摆在确认框里。只说"确定解锁吗"，
+ * 人不知道自己在放弃什么；说"这会作废 7 镜已经出好的图"才叫知情。
+ */
+export function unlockOutlineBeats(projectId, { ids = [] } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const want = new Set((ids || []).map((x) => String(x)));
+  const willDrop = (project.shots || [])
+    .filter((s) => s.beatId && (!want.size || want.has(s.beatId)))
+    .filter((s) => s.imagePath || s.videoPath).length;
+  const next = store.update(projectId, (p) => {
+    p.outline = outline.unlockBeats(p.outline, ids);
+    return p;
+  });
+  const unlocked = outline.normalizeOutline(next.outline).beats.filter((b) => !b.locked).length;
+  return { project: next, unlocked, willDrop };
+}
+
+/** 手改一场（界面上直接编辑，不经过模型） */
+export function editOutlineBeat(projectId, beatId, fields = {}) {
+  return applyOutlineOps(projectId, { ops: [{ op: 'edit', id: beatId, fields }] });
 }
 
 export async function analyzeScript(projectId, { shotCount = 8, chapterId = null, force = false, onEvent } = {}) {
@@ -814,18 +1229,67 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
       : chapterList.find((c) => c.stageStatus?.script !== 'done') || chapterList[0];
     if (!chapter) throw new Error(`没有这一章：${chapterId}`);
   }
-  const sourceScript = chapter ? chapter.script : project.script;
+  /**
+   * ════════ 有大纲就照大纲拆 ════════
+   *
+   * ⚠ 这一段是大纲那一层**唯一真正起作用**的地方。
+   *
+   * 没有它，大纲就是个装饰品：你可以生成、可以跟模型来回改、可以锁住
+   * 已拆的场次，然后点「分镜」—— 它完全无视大纲，重新去读原始剧本。
+   * 一整层白做，而且看不出来（分镜照样出得来，只是和你改的那份没关系）。
+   *
+   * 照大纲拆之后有三样东西跟着变好：
+   *
+   *   ① **只拆没拆过的**。原来是整章重拆 —— 第 3 场出过图了、你想改第 7 场，
+   *      一拆全作废。现在锁住的场次直接跳过，它们的镜头原样留着
+   *   ② 时长按**这几场自己的估算**走，不再按字数比例分摊。
+   *      而字数是个很糙的代理：同样两千字，全是对话的一场念完要 90 秒，
+   *      全是写景的一场 40 秒就够
+   *   ③ 每一镜记下 beatId，于是"重拆第 7 场"这件事以后是可能的
+   */
+  const outlineNow = outline.normalizeOutline(project.outline);
+  const inScope = outlineNow.beats.filter((b) => (chapter ? b.chapterId === chapter.id : true));
+  const targetBeats = inScope.filter((b) => !b.locked);
+  const useOutline = inScope.length > 0;
+
+  if (useOutline && !targetBeats.length) {
+    throw new Error(
+      `大纲里${chapter ? `「${chapter.title}」的` : ''}场次都已经拆过分镜了。`
+      + '要重拆的话，去「大纲」把那几场解锁 —— 解锁之后重拆会作废那几场已经出好的图，'
+      + '所以是个要你自己点一下的动作，不会自动发生。'
+    );
+  }
+
+  /**
+   * 喂给模型的东西。
+   *
+   * 用大纲时喂的是**这几场的正文**，每一场前面标着它的 id ——
+   * 模型据此把每一镜标回哪一场，我们才知道下次只重拆哪几镜。
+   */
+  const sourceScript = useOutline
+    ? targetBeats.map((b) => {
+        const who = b.characters.length ? `（${b.characters.join('、')}）` : '';
+        const when = b.time ? `·${b.time}` : '';
+        return `【场次 ${b.id}】${b.scene}${when}${who}\n${b.summary}${b.dialogue ? `\n台词：${b.dialogue}` : ''}`;
+      }).join('\n\n')
+    : (chapter ? chapter.script : project.script);
 
   // 时长预算：分章时按本章字数占全片的比例分摊，长章自然分到更多秒数
   const totalTarget = Number(project.targetDuration) || 60;
-  const targetSeconds = chapter
-    ? Math.max(
-        10,
-        Math.round(
-          (totalTarget * chapter.chars) / (chapterList.reduce((sum, c) => sum + c.chars, 0) || chapter.chars)
+  const targetSeconds = useOutline
+    // 大纲上每一场自己估过秒数（台词念得完是硬下限）—— 比字数比例准得多
+    ? Math.max(10, targetBeats.reduce((sum, b) => sum + outline.estimateSeconds(b).suggested, 0))
+    : chapter
+      ? Math.max(
+          10,
+          Math.round(
+            (totalTarget * chapter.chars) / (chapterList.reduce((sum, c) => sum + c.chars, 0) || chapter.chars)
+          )
         )
-      )
-    : totalTarget;
+      : totalTarget;
+
+  // 镜头数跟着时长走。大纲那条路上人已经把每场多长定过了，按它反推最合理
+  if (useOutline) shotCount = duration.planShotCount(targetSeconds);
 
   const r = routing();
   onEvent?.({
@@ -856,7 +1320,21 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
     model: r.chat.model,
     system: SHOT_PROMPT.replace('{{SHOT_COUNT}}', String(shotCount))
       .replace('{{TARGET_SECONDS}}', String(targetSeconds))
-      .replace('{{BIBLE}}', bibleDigest),
+      .replace('{{BIBLE}}', bibleDigest)
+      /**
+       * 大纲那条路上追加一段：每一镜要标回它属于哪一场。
+       *
+       * 追加而不是改 SHOT_PROMPT 本身 —— 那一份是所有项目共用的，
+       * 而"标回场次"只在有大纲时才成立。改主提示词会让没有大纲的项目
+       * 也收到一句它看不懂的要求。
+       */
+      + (useOutline
+        ? `\n\n──────── 这一次的额外要求 ────────\n\n`
+          + `剧本里每一场前面都标着【场次 b-XX】。**每一镜都要多带一个字段 beatId**，`
+          + `填它属于的那个场次 id（比如 "b-04"）。\n`
+          + `这个字段决定了以后能不能只重拆某一场 —— 标错或者不标，`
+          + `重拆一场就会连带重拆这一批全部。`
+        : ''),
     user: sourceScript,
     temperature: 0.7,
     jsonMode: true,
@@ -870,13 +1348,37 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
    * 行为正好等于改这一版之前 —— 少一个字段不该让整步失败。
    */
   const segs = segments.normalizeSegments(parsed.segments);
+
+  /**
+   * 模型标回来的场次 id。**只认这一批真的发出去的那几个** ——
+   * 它编一个不存在的 id 的话，那一镜会挂在一个永远不存在的场次上，
+   * 于是"重拆这一场"永远碰不到它，而它就那么留在成片里。
+   */
+  const okBeatIds = new Set(targetBeats.map((b) => b.id));
+  let taggedBack = 0;
+  const beatIdOf = (raw) => {
+    const id = String(raw?.beatId || '').trim();
+    if (id && okBeatIds.has(id)) { taggedBack += 1; return id; }
+    return null;
+  };
+
   const rawShots = (parsed.shots || []).map((s, i) => ({
     id: chapters.shotIdFor(chapter?.id || null, i + 1),
     // 全局镜号：章序 × 1000 + 章内序，3012 一眼看出是第 3 章第 12 镜
     index: chapters.globalShotIndex(chapter?.index || 0, i + 1),
     chapterId: chapter?.id || null,
+    // 这一镜是从大纲哪一场拆出来的。没有大纲时是 null
+    beatId: useOutline ? (beatIdOf(s) || null) : null,
     scene: s.scene || '',
     characters: Array.isArray(s.characters) ? s.characters : [],
+    /**
+     * 这一镜画面里看得见的关键道具。
+     *
+     * 加这个字段是为了让"柴刀第 8 镜在手上、第 9 镜没了、第 10 镜又回来"
+     * 这类穿帮**有地方被发现**。角色一致性我们盯得很紧，而道具一直是
+     * 全靠人眼 —— 而观众对道具凭空消失同样敏感。
+     */
+    props: Array.isArray(s.props) ? s.props.map((x) => String(x || '').trim()).filter(Boolean) : [],
     description: s.description || '',
     camera: s.camera || '中景',
     motion: s.motion || '镜头缓慢推进',
@@ -998,7 +1500,78 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
            ...segs.map((x) => ({ ...x, chapterId: chapter.id }))]
         : segs.map((x) => ({ ...x, chapterId: null }));
     }
-    if (chapter) {
+    if (useOutline) {
+      /**
+       * ── 按**场次**合并，不是按章 ──
+       *
+       * 留下的是"不属于这一批目标场次"的每一镜 —— 也就是锁住那几场
+       * 已经出好的镜头。它们的图和视频原样还在。
+       *
+       * ⚠ 这才是"只拆没拆过的"落地的地方。按章合并的话，
+       * 第 3 场出过图、你只想改第 7 场，一拆连第 3 场一起作废 ——
+       * 而那正是用户说"不要全部推到重来"时怕的那件事。
+       */
+      const redoing = new Set(targetBeats.map((b) => b.id));
+      const kept = p.shots.filter((x) => !(x.beatId && redoing.has(x.beatId)));
+      /**
+       * ⚠ 模型一个 beatId 都没标回来时，**保守处理**：
+       * 这一批当成整体，把这一章（或全片）原有的镜头都换掉。
+       *
+       * 不这么做的话，新旧两批镜头会叠在一起 —— 成片里同一段戏演两遍，
+       * 而每一镜看着都正常。宁可多作废，不能悄悄重复。
+       */
+      const noTags = taggedBack === 0;
+      const base = noTags
+        ? p.shots.filter((x) => (chapter ? x.chapterId !== chapter.id : false))
+        : kept;
+
+      /**
+       * ⚠ 新拆出来的镜头**要避开留下来那几镜的 id**。
+       *
+       * 每一批都是从 1 开始编号的（shot-001、shot-002…）。只重拆一场时，
+       * 新批次的编号会和留下来那几镜撞上 —— 于是项目里出现两个 shot-002，
+       * 而**图是按 id 存盘的**（shot-002.png），后出的那张直接盖掉前一张。
+       *
+       * 表现：没解锁的那一场，图莫名其妙变成了别的场次的画面。
+       * 这一条是自检当场抓到的 —— 出现两个 shot-002。
+       */
+      const takenIds = new Set(base.map((x) => x.id));
+      const renumbered = shots.map((one) => {
+        if (!takenIds.has(one.id)) { takenIds.add(one.id); return one; }
+        let n = takenIds.size + 1;
+        let id = chapters.shotIdFor(chapter?.id || null, n);
+        while (takenIds.has(id)) { n += 1; id = chapters.shotIdFor(chapter?.id || null, n); }
+        takenIds.add(id);
+        return { ...one, id };
+      });
+
+      /**
+       * ⚠ 顺序按**大纲里场次的顺序**排，不能按 index 排。
+       *
+       * 留下来那几镜的 index 和新拆那几镜的 index 都是从 1 开始的，
+       * 直接按 index 排会把两批交错在一起 —— 成片里第 2 场演到一半
+       * 插进第 1 场的镜头，而每一镜看着都正常。
+       *
+       * 排好之后重编 index：镜号本来就该跟着最终顺序走。
+       */
+      const order = new Map(outline.normalizeOutline(p.outline).beats.map((x, i) => [x.id, i]));
+      const rank = (x) => (x.beatId && order.has(x.beatId) ? order.get(x.beatId) : Number.MAX_SAFE_INTEGER);
+      p.shots = [...base, ...renumbered]
+        .sort((x, y) => (rank(x) - rank(y)) || ((x.index || 0) - (y.index || 0)))
+        .map((one, i) => ({
+          ...one,
+          index: chapter ? chapters.globalShotIndex(chapter.index || 0, i + 1) : i + 1
+        }));
+      // 拆过的场次锁上 —— 模型改大纲时碰不到它们了
+      p.outline = outline.lockBeats(p.outline, chapter ? chapter.id : null);
+      if (chapter) {
+        const ch = p.chapters.find((c) => c.id === chapter.id);
+        if (ch) { ch.stageStatus.script = 'done'; ch.shotCount = shots.length; }
+        p.stageStatus.script = p.chapters.every((c) => c.stageStatus.script === 'done') ? 'done' : 'partial';
+      } else {
+        p.stageStatus.script = 'done';
+      }
+    } else if (chapter) {
       // 只换掉这一章的镜头，别的章已经出好的图不能被误伤
       p.shots = [...p.shots.filter((s) => s.chapterId !== chapter.id), ...shots].sort((a, b) => a.index - b.index);
       const ch = p.chapters.find((c) => c.id === chapter.id);
@@ -1011,6 +1584,7 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
       p.shots = shots;
       p.stageStatus.script = 'done';
     }
+
 
     // 顺手把台词署名认一遍：模型经常把说话人写在台词里
     //（dialogue = "阿澜：设备正常。" 而 speaker 空着），留着它配音会连"阿澜冒号"一起念。
@@ -1042,7 +1616,8 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
    * 提示词里已经写明了铁律，但模型不是每次都听；这一层是**兜底的检查**，
    * 不是替代品。纯本地正则，不花一次调用。
    */
-  const lint = shotlint.lintShots(store.read(projectId).shots || []);
+  const proj0 = store.read(projectId);
+  const lint = shotlint.lintShots(proj0.shots || [], { bible: proj0.bible });
   const brief = shotlint.summarize(lint);
   if (brief) onEvent?.({ type: 'note', message: `⚠ 分镜体检：${brief}` });
 
@@ -1090,6 +1665,9 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
  */
 const SHOT_EDITABLE = [
   'description', 'camera', 'motion', 'dialogue', 'scene', 'characters', 'duration', 'link', 'skills',
+  // 这一镜画面里看得见的关键道具。不进白名单的话界面上改了存不下去，
+  // 而道具消失那条检查就永远只能听模型的、人纠正不了
+  'props',
   // 画外音效，和转场形式。不放进白名单的话，界面上改了存不下去 ——
   // 而且那种"改了没反应"最难查：接口回 200，值就是没进去
   'sound', 'transition',
@@ -1251,6 +1829,46 @@ export function saveSiteMap(projectId, siteName, patch = {}) {
   });
 }
 
+/**
+ * 把场地上定的远景地标和光位，一次套到这片场地的**所有场景**上。
+ *
+ * 只报问题不给出口是没用的：人看到"这座山在两个场景里差了 180°"之后，
+ * 下一秒就要问"那我该怎么办"。手工去每个场景里拖回来是重复劳动，
+ * 而重复劳动就会做漏。
+ *
+ * ⚠ 近处地标（门、窗、桌）一个都不动 —— 它们有坐标、有视差，
+ * 本来就该每个场景各不相同。一起覆盖的话，这颗按钮就从"对齐远景"
+ * 变成了"把每个场景的房间布局清空"。
+ *
+ * 回的是 { project, changed }：changed 是真的动过的场景名。
+ * 一个都没动时也要如实说 —— 点了按钮什么都没变而界面不吭声，
+ * 人只会以为按钮坏了。
+ */
+export function applySiteLayout(projectId, siteName) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const model = siteMod.siteOf(project, siteName);
+  if (!model) throw new Error(`没有这片场地：${siteName}`);
+  if (!model.marks.length && !model.sun) {
+    throw new Error('这片场地上还没有定远景地标或光位 —— 先在场地图上摆一个，才有东西可套');
+  }
+
+  const changed = [];
+  const next = store.update(projectId, (p) => {
+    for (const place of model.places) {
+      const target = (p.bible?.scenes || []).find((x) => x.name === place.scene);
+      if (!target) continue;
+      const before = JSON.stringify(target.layout || null);
+      const layout = siteMod.alignSceneToSite(target.layout, model);
+      if (JSON.stringify(layout) === before) continue;
+      target.layout = layout;
+      changed.push(place.scene);
+    }
+    return p;
+  });
+  return { project: next, changed };
+}
+
 /** 这个项目上的场地图，连同算出来的问题 */
 export function siteMapOf(project) {
   return { sites: siteMod.sitesOf(project), issues: siteMod.siteIssues(project) };
@@ -1310,7 +1928,7 @@ export function updateShot(projectId, shotId, patch = {}) {
        * 下次读出来是一坨没法用的字符串。规整一遍再存。
        */
       value = previz.normalizeStage(value);
-    } else if (key === 'characters') {
+    } else if (key === 'characters' || key === 'props') {
       // 界面上是一行逗号分隔的文本，中英文逗号和顿号都得认
       value = Array.isArray(value)
         ? value.map((x) => String(x).trim()).filter(Boolean)
@@ -1318,7 +1936,7 @@ export function updateShot(projectId, shotId, patch = {}) {
     } else {
       value = String(value ?? '').trim();
     }
-    const same = key === 'characters' || key === 'skills' || key === 'variants' || key === 'stage'
+    const same = key === 'characters' || key === 'props' || key === 'skills' || key === 'variants' || key === 'stage'
       ? JSON.stringify(value) === JSON.stringify(shot[key] ?? (key === 'variants' ? {} : key === 'stage' ? null : []))
       : value === shot[key];
     if (same) continue;
@@ -1877,11 +2495,28 @@ export async function smartSplitChapters(projectId, { targetChars = 3000, onEven
 /** 落盘章节，尽量保住已经跑完的那些章的状态（按标题 + 正文匹配） */
 function applyChapters(projectId, fresh) {
   return store.update(projectId, (p) => {
-    const old = new Map((p.chapters || []).map((c) => [c.title, c]));
+    /**
+     * ⚠ 按**正文**配对，不按标题。
+     *
+     * 原来是拿 title 当键的，而标题**不稳定**：只有一章时切不出章节标题
+     *（少于两个标题行不算数），numbered() 就编一个「第 1 章」；等第二章
+     * 一来，两个标题行都认出来了，第一章的标题变成正文里那句「第一章 出发」。
+     *
+     * 正文一个字没变，标题却变了 —— 于是配不上对，第一章被当成新章：
+     * **已经跑完的分镜全部作废，出好的图和视频跟着被丢掉**，而且不吭一声。
+     * 这正是"一章一章加"最想避免的那件事，却恰恰在加第二章时必然发生。
+     *
+     * 正文才是判据：正文没变，分镜就还对得上；正文变了，就必须重拆。
+     * 标题是给人看的。
+     */
+    const old = new Map((p.chapters || []).map((c) => [c.script, c]));
     p.chapters = fresh.map((c) => {
-      const prev = old.get(c.title);
-      // 正文没变才留住状态；改过的章节必须重拆，否则分镜和正文对不上
-      return prev && prev.script === c.script ? { ...c, stageStatus: prev.stageStatus, outputs: prev.outputs } : c;
+      const prev = old.get(c.script);
+      // castScanned 也要带过来，否则重切一次，补设定集那条路会把每一章重扫一遍，
+      // 扫出一堆同一个人的重复条目
+      return prev
+        ? { ...c, stageStatus: prev.stageStatus, outputs: prev.outputs, castScanned: prev.castScanned }
+        : c;
     });
     const keep = new Set(p.chapters.filter((c) => c.stageStatus.script === 'done').map((c) => c.id));
     p.shots = (p.shots || []).filter((s) => !s.chapterId || keep.has(s.chapterId));
@@ -1993,7 +2628,21 @@ export async function generateAssets(projectId, { only = null, chapterId = null,
           t.imageSize = size || null;
           // 这一镜是哪家哪个模型出的。中途换过模型是**风格漂移最常见的原因**，
           // 而它不会报任何错 —— 只是第 6 镜起画风变了，你会以为是提示词的问题
-          t.modelUsed = `${r.image.provider} / ${r.image.model}`;
+          /**
+           * ⚠ 记**真正出图的那个模型**，不是路由到的那个。
+           *
+           * 带参考图时适配器会自动换成图生图模型（文生图模型不认参考图）。
+           * 原来这里记的是换之前那个 —— 卡片上写着 Seedream t2i，
+           * 而图其实是 SeedEdit i2i 出的。
+           *
+           * 这个字段存在的全部理由是"中途换过模型是风格漂移最常见的原因"，
+           * 它一说谎那条诊断就废了：两镜显示同一个模型名，
+           * 而实际上一镜带参考图走 i2i、一镜没带走 t2i，本来就是两个模型。
+           */
+          t.modelUsed = `${r.image.provider} / ${result.used?.model || r.image.model}`;
+          // 参考图**真的发出去了几张**。厂商不支持图生图时它们会被丢掉，
+          // 那时候这一镜的一致性只剩提示词撑着 —— 记下来，回头查得出
+          t.refsSent = result.used?.refsSent ?? null;
           t.bibleRefs = result.refLabels || [];
           t.consistency = {
             score: result.verification?.score ?? null,
@@ -2003,6 +2652,11 @@ export async function generateAssets(projectId, { only = null, chapterId = null,
             attempts: result.trail?.length || 1
           };
           t.status = result.verification?.needsReview ? 'needs-review' : 'image-ready';
+          recordGeneration(t, {
+            kind: 'image', provider: r.image.provider, model: r.image.model,
+            seed: result.seed, prompt: result.prompt, refs: [...t.bibleRefs],
+            output: dest, size: size || null, consistency: t.consistency
+          });
         }
         return p;
       });
@@ -2054,6 +2708,38 @@ export async function generateAssets(projectId, { only = null, chapterId = null,
 }
 
 // ═══════════════════════ 单项重出 ═══════════════════════
+
+function recordGeneration(shot, entry) {
+  shot.generationHistory ||= [];
+  shot.generationHistory.push({
+    id: `gen-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    at: new Date().toISOString(), ...entry
+  });
+  if (shot.generationHistory.length > 40) shot.generationHistory.splice(0, shot.generationHistory.length - 40);
+}
+
+export function exportShotControls(projectId, shotId, stageOverride = null) {
+  const project = store.read(projectId);
+  const shot = project?.shots?.find((x) => x.id === shotId);
+  if (!shot) throw new Error(`没有这一镜：${shotId}`);
+  const stage = stageOverride?.cam ? stageOverride : shot.stage;
+  if (!stage?.cam) throw new Error('这一镜还没有预演数据，先在预演台排位');
+  const rendered = renderControls(stage);
+  const dir = store.assetDir(projectId);
+  const files = {
+    start: path.join(dir, `${shot.id}.control-start.svg`),
+    depth: path.join(dir, `${shot.id}.control-depth.svg`),
+    mask: path.join(dir, `${shot.id}.control-mask.svg`)
+  };
+  for (const key of ['start', 'depth', 'mask']) fs.writeFileSync(files[key], rendered[key], 'utf8');
+  const updated = store.update(projectId, (p) => {
+    const target = p.shots.find((x) => x.id === shotId);
+    target.stage = stage;
+    target.controls = { ...files, width: rendered.width, height: rendered.height, objects: rendered.objects, at: new Date().toISOString() };
+    return p;
+  });
+  return { project: updated, controls: updated.shots.find((x) => x.id === shotId).controls };
+}
 
 /**
  * 重出某一镜的图。
@@ -2150,7 +2836,8 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
       t.prompt = opts.prompt?.trim() || assembled.prompt;
       t.imageAt = new Date().toISOString();
       t.imageSize = size || null;
-      t.modelUsed = `${providerId} / ${model}`;
+      t.modelUsed = `${providerId} / ${image.used?.model || model}`;
+      t.refsSent = image.used?.refsSent ?? null;
       t.bibleRefs = refImages.length ? assembled.refLabels : [];
       t.consistency = {
         score: verification.score ?? null,
@@ -2160,6 +2847,10 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
         attempts: 1
       };
       t.status = 'image-ready';
+      recordGeneration(t, {
+        kind: 'image', provider: providerId, model, seed, prompt: t.prompt,
+        refs: [...t.bibleRefs], output: dest, size: size || null, consistency: t.consistency
+      });
       // 图换了，旧视频就对不上了，清掉免得合成时用了错的
       if (t.videoPath) {
         t.videoPath = null;
@@ -2365,6 +3056,11 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
       t.headFromTail = ctx.headFromTail ? { fromIndex: ctx.headFromTail.fromIndex, at: new Date().toISOString() } : null;
       t.actualDuration = video.actualDuration || shot.duration;
       t.status = 'video-ready';
+      recordGeneration(t, {
+        kind: 'video', provider: providerId, model, prompt: videoPrompt,
+        refs: [...bibleRefs.labels], output: dest, resolution: t.videoResolution,
+        duration: t.actualDuration, firstFrame: firstFrame || null, lastFrame: ctx.lastFrameUrl || null
+      });
     }
     return p;
   });
@@ -3639,6 +4335,12 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
           // 厂商档位可能把 4s 顶成 5s。如实记下来，别让界面上的总时长撒谎。
           t.actualDuration = video.actualDuration || shot.duration;
           t.status = 'video-ready';
+          recordGeneration(t, {
+            kind: 'video', provider: useProvider, model: useModel,
+            prompt: videoPrompt, refs: [...bibleRefs.labels], output: dest,
+            resolution: t.videoResolution, duration: t.actualDuration,
+            firstFrame: firstFrame || null, lastFrame: ctx.lastFrameUrl || null
+          });
         }
         return p;
       });

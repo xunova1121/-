@@ -11,6 +11,7 @@ import { ratioLabel } from '../ratios.js';
 import { skillPicker, customSkillForm } from '../skill-picker.js';
 import { previzPanel, blankStage } from '../previz-canvas.js';
 import * as siteCanvasMod from '../site-canvas.js';
+import * as OUTLINE from '/outline.js';
 import { inheritStage } from '/previz.js';
 /**
  * 转场表和效果表读的是**引擎那一份原件**（服务端把 core/transitions.js、
@@ -510,6 +511,50 @@ export default {
                 rerender();
               }
             }, '取消分章'))
+        );
+
+        /**
+         * ── 追加一章 ──
+         *
+         * 剧本一章一章来的时候，原来只能去剧本框里把新章粘到末尾。
+         * 那件事最容易毁掉的是**前面的正文**：碰掉一个空格，那一章就被
+         * 判定"改过了"，已经出好的分镜全部作废重跑 —— 而没有任何提示，
+         * 你要到重新分章之后才发现前面几章的进度没了。
+         *
+         * 这条路只往末尾拼，碰不到前面。
+         */
+        const apTitle = h('input', { type: 'text', placeholder: `第 ${(project.chapters || []).length + 1} 章（留空就用这个）` });
+        const apText = h('textarea', { rows: 5, placeholder: '把新一章的正文贴在这儿' });
+        const apBtn = h('button', { class: 'btn primary' }, '追加这一章');
+        apBtn.onclick = async () => {
+          if (!apText.value.trim()) { toast('这一章是空的', 'err'); return; }
+          apBtn.disabled = true;
+          const old = apBtn.textContent;
+          apBtn.textContent = '追加中…';
+          try {
+            // cap:append-chapter
+            const r = await api(`/projects/${project.id}/chapters/append`, {
+              method: 'POST', body: { title: apTitle.value, script: apText.value }
+            });
+            apText.value = '';
+            apTitle.value = '';
+            toast(`已追加${r.chapter?.title ? `「${r.chapter.title}」` : '一章'} —— 前面几章的进度都还在`, 'ok');
+            rerender();
+          } catch (err) {
+            toast(err.message, 'err');
+          } finally {
+            apBtn.disabled = false;
+            apBtn.textContent = old;
+          }
+        };
+        chapterHost.append(
+          h('details', { class: 'append-chapter' },
+            h('summary', {}, '追加一章'),
+            h('p', { class: 'field-hint' },
+              '往剧本末尾拼一章，前面的正文一个字都不会动 —— 所以已经跑完的章不会作废重跑。'
+              + '正文里自带「第 X 章」这类标题行的话就不用再填标题。'),
+            apTitle, apText,
+            h('div', { class: 'inline', style: 'margin-top:8px' }, apBtn))
         );
       }
 
@@ -1424,6 +1469,28 @@ export default {
           }
         }, '历史版本');
 
+        const manifestBtn = h('button', {
+          class: 'shot-edit-btn', title: '查看每次生成用过的服务商、模型、提示词、种子、参考图和产物',
+          onclick: async () => {
+            try {
+              const m = await api(`/projects/${project.id}/shots/${shot.id}/manifest`);
+              const rows = [...m.history].reverse();
+              const box = h('div', { class: 'shot-manifest' },
+                h('b', {}, `第 ${shot.index} 镜生产清单`),
+                rows.length ? rows.map((x) => h('details', {},
+                  h('summary', {}, `${x.kind === 'video' ? '视频' : '图片'} · ${x.provider} / ${x.model} · ${new Date(x.at).toLocaleString('zh-CN')}`),
+                  h('div', { class: 'shot-prompt-body' },
+                    x.seed !== undefined ? `种子：${x.seed}\n` : '',
+                    x.resolution ? `清晰度：${x.resolution}\n` : '',
+                    x.refs?.length ? `参考：${x.refs.join('、')}\n` : '',
+                    `提示词：${x.prompt || '—'}\n产物：${x.output || '—'}`)
+                )) : h('div', { class: 'field-hint' }, '旧版本还没有生产清单；下一次单镜重出开始自动记录。'));
+              editor.querySelector('.shot-manifest')?.remove();
+              editor.append(box); openEdit(); box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } catch (err) { toast(err.message, 'err'); }
+          }
+        }, '生产清单');
+
         // 厂商的时长档位：设 4 秒而模型只出 5/10 秒时，得在这儿就说清楚
         const steps = state.catalog.videoDurations || [];
         const aligned = steps.find((x) => x >= shot.duration) || steps.at(-1);
@@ -1472,6 +1539,17 @@ export default {
           // 上一镜的排位拿来比对轴线 —— 越轴是**两镜之间**的事，单看一镜看不出来
           const panel = previzPanel(stageDraft, {
             prevStage: prevShot?.stage || null,
+            duration: shot.duration || 5,
+            assets: [
+              ...(project.bible?.characters || []).map((x) => ({ kind: 'character', name: x.name, ref: x.id || x.name, image: x.sheetPath ? mediaUrl(x.sheetPath) : '' })),
+              ...(project.bible?.scenes || []).map((x) => ({ kind: 'scene', name: x.name, ref: x.id || x.name, image: x.sheetPath ? mediaUrl(x.sheetPath) : '' })),
+              ...(project.bible?.props || []).map((x) => ({ kind: 'prop', name: x.name, ref: x.id || x.name, image: x.sheetPath ? mediaUrl(x.sheetPath) : '' }))
+            ],
+            onExportControls: async (stage) => {
+              const r = await api(`/projects/${project.id}/shots/${shot.id}/controls`, { method: 'POST', body: { stage } });
+              const v = Date.now();
+              return Object.fromEntries(['start', 'depth', 'mask'].map((key) => [key, `${mediaUrl(r.controls[key])}&v=${v}`]));
+            },
             // 同一个场景往往会反复回来（第 3 镜在码头、第 11 镜又回码头）——
             // 逐镜继承在中间隔了一场之后就断了，所以布局要能挂到场景上
             scene: shot.scene || '',
@@ -1512,6 +1590,17 @@ export default {
           scene: h('input', { type: 'text', placeholder: '场景名（要和设定集里的一致）', value: shot.scene || '' }),
           characters: h('input', {
             type: 'text', placeholder: '出场角色，逗号分隔', value: (shot.characters || []).join('、')
+          }),
+          /**
+           * 这一镜画面里**看得见**的关键道具。
+           *
+           * 它撑着"道具消失又回来"那条检查。⚠ 只填真的在画面里的：
+           * 特写里看不见的东西填上去，那条检查就会开始乱报，
+           * 而乱报的检查比没有检查更糟。
+           */
+          // cap:shot-props
+          props: h('input', {
+            type: 'text', placeholder: '画面里看得见的道具，逗号分隔', value: (shot.props || []).join('、')
           }),
           dialogue: h('input', { type: 'text', placeholder: '这一镜的台词（没有就留空）', value: shot.dialogue || '' }),
           // 听得见、看不见的东西。**不进出图提示词** —— 这正是它单独一栏的理由：
@@ -1579,6 +1668,7 @@ export default {
                   tier: fields.tier.value,
                   scene: fields.scene.value,
                   characters: fields.characters.value,
+                  props: fields.props.value,
                   dialogue: fields.dialogue.value,
                   // cap:shot-sound
                   sound: fields.sound.value,
@@ -1651,6 +1741,11 @@ export default {
             h('div', {}, h('label', {}, '运镜'), fields.motion),
             h('div', {}, h('label', {}, '场景'), fields.scene),
             h('div', {}, h('label', {}, '出场角色'), fields.characters)),
+          h('div', { class: 'shot-edit-row' },
+            h('div', {}, h('label', {}, '画面里的道具'), fields.props,
+              h('div', { class: 'field-hint' },
+                '只填**这一镜真的看得见**的。特写里看不见的东西填上去，'
+                + '「道具消失又回来」那条检查会开始乱报 —— 而乱报的检查比没有更糟。'))),
           h('label', {}, '台词'),
           fields.dialogue,
           h('label', {}, '画外音效'),
@@ -1784,7 +1879,8 @@ export default {
                 h('button', { class: 'shot-edit-btn', title: '改这一镜的描述、景别、台词', onclick: openEdit }, '改文案'),
                 // 和「改文案」并排。藏在编辑面板底部时用户根本找不到它
                 stageBtn,
-                verBtn
+                verBtn,
+                manifestBtn
               ),
               descEl,
               editor,
@@ -3531,6 +3627,267 @@ export default {
      * 这片山坡上只有一个太阳。前两层都看不见这件事，
      * 因为它们一次只看得见一个场景。
      */
+    /**
+     * ── 大纲：剧本和分镜之间那一层 ──
+     *
+     * 分镜表是个很坏的对话对象：二十镜、每镜六七个字段，想说"第三场太拖了"
+     * 得手工改十几行；让模型重跑一次，它会把已经审过的镜全换掉。
+     *
+     * 大纲是十来行、一行一场戏。在这个粒度上改是一句话的事。
+     *
+     * ⚠ 模型回的是**改动指令**，不是新大纲。界面把每条摊开让人逐条勾 ——
+     * 没勾的一条都不动。"模型建议"和"实际改动"是两件事。
+     */
+    const outlinePanel = h('div', { class: 'panel' });
+    {
+      const listHost = h('div', { class: 'ob-list' });
+      const sumLine = h('div', { class: 'ob-sum' });
+      const budgetHost = h('div', {});
+      const chatHost = h('div', { class: 'ob-chat' });
+
+      const paintOutline = () => {
+        clear(listHost); clear(budgetHost);
+        const o = OUTLINE.normalizeOutline(project.outline);
+        sumLine.textContent = OUTLINE.summarize(project.outline, project.targetDuration);
+        if (!o.beats.length) {
+          listHost.append(h('div', { class: 'ob-empty' },
+            '还没有大纲。先生成一份 —— 十来行、一行一场戏，改顺了再拆分镜。',
+            h('br'),
+            '在这一层改比在分镜表上改省事得多，而且拆出来的分镜是你已经同意过的。'));
+          return;
+        }
+        for (const [i, b] of o.beats.entries()) {
+          const est = OUTLINE.estimateSeconds(b);
+          const secs = h('input', {
+            type: 'number', class: 'ob-secs', value: String(est.suggested), min: '1',
+            title: est.floor ? `台词念完至少要 ${est.floor} 秒` : '这一场没有台词'
+          });
+          secs.onchange = async () => {
+            try {
+              // cap:outline
+              const r = await api(`/projects/${project.id}/outline/beat/${b.id}`, {
+                method: 'PATCH', body: { seconds: Number(secs.value) }
+              });
+              project.outline = r.project.outline;
+              paintOutline();
+            } catch (err) { toast(err.message, 'err'); }
+          };
+          listHost.append(h('div', { class: `ob-row${b.locked ? ' locked' : ''}` },
+            h('span', { class: 'ob-n' }, String(i + 1)),
+            h('span', { class: 'ob-scene' }, b.scene || '（未定）'),
+            h('span', { class: 'ob-when' }, [b.time, b.characters.join('、')].filter(Boolean).join(' · ')),
+            h('span', { class: 'ob-sumtext' }, b.summary),
+            secs,
+            h('span', { class: 'ob-unit' }, '秒'),
+            // 台词念完的硬下限单独标出来：它和"节奏偏长"是完全不同的两件事
+            est.floor ? h('span', { class: 'ob-floor', title: '台词念完至少要这么长，压不下去' }, `台词 ${est.floor}s`) : '',
+            b.locked ? (() => {
+              /**
+               * 锁着的那几场给一条出口：解锁重拆。
+               *
+               * ⚠ 确认框里必须说**会作废几镜**。只说"确定解锁吗"，
+               * 人不知道自己在放弃什么 —— 而放弃的是已经花过钱的图。
+               */
+              const un = h('button', {
+                class: 'btn ghost sm', title: '解锁之后重拆这一场，已经出好的图会作废'
+              }, '锁·解锁重拆');
+              un.onclick = async () => {
+                un.disabled = true;
+                try {
+                  // cap:outline-revise
+                  const r = await api(`/projects/${project.id}/outline/unlock`, {
+                    method: 'POST', body: { ids: [b.id] }
+                  });
+                  project.outline = r.project.outline;
+                  paintOutline();
+                  toast(r.willDrop
+                    ? `已解锁。重拆这一场会作废 ${r.willDrop} 镜已经出好的图`
+                    : '已解锁，这一场还没有出过图', 'ok');
+                } catch (err) { toast(err.message, 'err'); } finally { un.disabled = false; }
+              };
+              return un;
+            })() : ''));
+        }
+
+        const bud = OUTLINE.budgetCheck(project.outline, project.targetDuration);
+        for (const one of bud?.issues || []) {
+          budgetHost.append(h('div', { class: `ob-issue ${one.kind === 'floor-over' ? 'hard' : ''}` },
+            h('b', {}, one.what), h('div', { class: 'ob-why' }, one.why), h('div', { class: 'ob-fix' }, one.fix)));
+        }
+      };
+
+      const buildBtn = h('button', { class: 'btn' }, '从剧本生成大纲');
+      buildBtn.onclick = async () => {
+        const o = OUTLINE.normalizeOutline(project.outline);
+        if (o.beats.length && !confirm('重新生成会按当前剧本重排场次。已经拆过分镜的那几场（标着「锁」的）会原样留下。继续？')) return;
+        buildBtn.disabled = true;
+        const old = buildBtn.textContent;
+        buildBtn.textContent = '拆场次中…';
+        try {
+          // cap:outline
+          await stream(`/projects/${project.id}/outline/build`, {}, (ev) => {
+            if (ev.type === 'stage' && ev.message) sumLine.textContent = ev.message;
+            if (ev.type === 'error') toast(ev.message, 'err');
+            if (ev.type === 'finished') {
+              project.outline = ev.project?.outline || project.outline;
+              paintOutline();
+              toast('大纲出来了 —— 改顺了再拆分镜', 'ok');
+            }
+          });
+        } catch (err) { toast(err.message, 'err'); } finally {
+          buildBtn.disabled = false;
+          buildBtn.textContent = old;
+        }
+      };
+
+      /**
+       * ── 说一句，看它想怎么改 ──
+       *
+       * 模型回的每一条都摊开成一个勾选框，并且**写清楚改之前是什么**。
+       * 只说"第 3 场改成 2 分钟"，人没法判断该不该勾；
+       * 说"3 分钟 → 2 分钟"才行。
+       */
+      const say = h('input', { type: 'text', class: 'ob-say', placeholder: '想怎么改？比如「第 2 场太拖了，砍一半」「在开头加一场雪夜追逐」' });
+      const askBtn = h('button', { class: 'btn primary' }, '让它想想');
+      const paintOps = (r) => {
+        clear(chatHost);
+        if (!r.preview?.length) {
+          chatHost.append(h('div', { class: 'ob-note' }, r.note || '它没想出要改什么。把要求说具体一点试试。'));
+          return;
+        }
+        if (r.note) chatHost.append(h('div', { class: 'ob-note' }, r.note));
+        const boxes = [];
+        for (const one of r.preview) {
+          const cb = h('input', { type: 'checkbox' });
+          cb.checked = !one.refused;
+          cb.disabled = Boolean(one.refused);
+          boxes.push({ cb, op: one.op });
+          chatHost.append(h('label', { class: `ob-op${one.refused ? ' refused' : ''}` },
+            cb,
+            h('span', {}, one.text),
+            // 注定被拒的当场标出来 —— 让人勾了再发现没生效，他会以为按钮坏了
+            one.refused ? h('span', { class: 'ob-refused' }, `（做不了：${one.refused}）`) : ''));
+        }
+        const apply = h('button', { class: 'btn' }, '应用勾中的');
+        apply.onclick = async () => {
+          const ops = boxes.filter((x) => x.cb.checked).map((x) => x.op);
+          if (!ops.length) { toast('一条都没勾', 'err'); return; }
+          apply.disabled = true;
+          try {
+            // cap:outline-revise
+            const res = await api(`/projects/${project.id}/outline/apply`, { method: 'POST', body: { ops } });
+            project.outline = res.project.outline;
+            paintOutline();
+            clear(chatHost);
+            toast(res.refused?.length
+              ? `改了 ${res.applied} 条，${res.refused.length} 条没做：${res.refused[0].why}`
+              : `改了 ${res.applied} 条`, 'ok');
+          } catch (err) { toast(err.message, 'err'); } finally { apply.disabled = false; }
+        };
+        const drop = h('button', { class: 'btn ghost' }, '算了');
+        drop.onclick = () => clear(chatHost);
+        chatHost.append(h('div', { class: 'inline', style: 'margin-top:10px' }, apply, drop));
+      };
+      askBtn.onclick = async () => {
+        if (!say.value.trim()) { toast('想改什么？说一句', 'err'); return; }
+        askBtn.disabled = true;
+        const old = askBtn.textContent;
+        askBtn.textContent = '想…';
+        try {
+          // cap:outline-revise
+          const r = await api(`/projects/${project.id}/outline/revise`, {
+            method: 'POST', body: { instruction: say.value }
+          });
+          paintOps(r);
+        } catch (err) { toast(err.message, 'err'); } finally {
+          askBtn.disabled = false;
+          askBtn.textContent = old;
+        }
+      };
+      say.onkeydown = (e) => { if (e.key === 'Enter') askBtn.click(); };
+
+      outlinePanel.append(
+        h('div', { class: 'panel-head' },
+          h('b', {}, '大纲'),
+          h('span', { class: 'muted' },
+            '一行一场戏。在这一层改比在分镜表上改省事得多 —— 而且拆出来的分镜是你已经同意过的。'
+            + '标着「锁」的是已经拆过分镜的，模型碰不到。')),
+        h('div', { class: 'inline' }, buildBtn, sumLine),
+        listHost,
+        budgetHost,
+        h('div', { class: 'inline', style: 'margin-top:12px' }, say, askBtn),
+        chatHost
+      );
+      paintOutline();
+    }
+
+    /**
+     * ── 补上新增的角色和场景 ──
+     *
+     * 剧本一章一章往里加时，第二章必然冒出第一章没有的人和地方。
+     * 在这颗按钮之前，能做的只有两件事，两件都不对：
+     *
+     *   什么都不做   新角色永远不在设定集里，而且**不吭声** ——
+     *                那一镜没有参考图、没有外貌描述、复核没有基准，
+     *                静默降级成"文生图"，而流水线一路绿
+     *   重新生成     整份重建，所有参考图清空重出。老角色白花一次钱，
+     *                而且重出那张未必和之前一样 —— 观众对主角换脸最敏感
+     *
+     * 这颗按钮只做一件事：扫还没扫过的章 → 只给没见过的名字建条目、出图。
+     */
+    const extendHost = h('div', { class: 'panel' });
+    {
+      const btn = h('button', { class: 'btn' }, '补上新增的角色和场景');
+      const log = h('div', { class: 'field-hint', style: 'margin-top:8px' });
+      btn.onclick = async () => {
+        btn.disabled = true;
+        const old = btn.textContent;
+        btn.textContent = '扫描中…';
+        log.textContent = '';
+        try {
+          // cap:extend-bible
+          await stream(`/projects/${project.id}/extend-bible`, {}, (ev) => {
+            if (ev.type === 'note' || ev.type === 'stage') log.textContent = ev.message || '';
+            if (ev.type === 'sheet' && ev.status === 'running') log.textContent = ev.message || '';
+            if (ev.type === 'error') toast(ev.message, 'err');
+            if (ev.type === 'finished') {
+              project.bible = ev.project?.bible || project.bible;
+              const summary = ev.added?.length
+                ? `补了 ${ev.added.length} 条：${ev.added.map((a) => a.name).join('、')}。已有的一条都没动。`
+                : '没有新的角色或场景 —— 这几章用的都是已有的设定。';
+              log.textContent = summary;
+              toast(summary, 'ok');
+              /**
+               * ⚠ 这里**不能** rerender()。
+               *
+               * 整页重画会把这块面板连同刚写上去的那句结果一起换掉 ——
+               * 于是点完之后面板一片空白，只剩一个几秒就消失的浮条。
+               * 人回头想确认"到底补了谁"，已经无处可看了。
+               *
+               * remountBible 只重挂设定集那一块（新条目要在列表里出现），
+               * 碰不到这块面板。
+               */
+              remountBible();
+            }
+          });
+        } catch (err) {
+          toast(err.message, 'err');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = old;
+        }
+      };
+      extendHost.append(
+        h('div', { class: 'panel-head' },
+          h('b', {}, '剧本又加了新章？'),
+          h('span', { class: 'muted' },
+            '扫一遍还没扫过的章，只把**没见过的**角色和场景补进来。'
+            + '已有的一条都不动、一张图都不重出 —— 所以主角不会换脸，也不会重复花钱。')),
+        h('div', { class: 'inline' }, btn),
+        log
+      );
+    }
+
     const sitePanelHost = h('div', { class: 'panel', style: 'display:none' });
     let siteMounted = false;
     // 建好之后留一个把手，设定集变了就叫它重画一遍（见 remountBible）
@@ -3539,6 +3896,18 @@ export default {
     function mountSite() {
       clear(sitePanelHost);
       sitePanelApi = siteCanvasMod.sitePanel(project, {
+          onAlign: async (name) => {
+            try {
+              // cap:site-map
+              const p2 = await api(`/projects/${project.id}/site/apply`, {
+                method: 'POST', body: { site: name }
+              });
+              project.bible = p2.project.bible;
+              toast(p2.changed.length
+                ? `已按场地图对齐 ${p2.changed.length} 个场景：${p2.changed.join('、')}`
+                : '这几个场景本来就和场地图一致，没有要改的', 'ok');
+            } catch (err) { toast(err.message, 'err'); }
+          },
           onPlace: async (scene, place) => {
             try {
               // cap:site-map
@@ -3594,15 +3963,15 @@ export default {
     }
 
     const stepPanels = {
-      'script-src': [scriptPanel, chapterPanel],
-      bible: [readinessHost, biblePanel, sitePanelHost],
-      script: [durationPanel, chapterPanel, shotsPanel],
+      'script-src': [scriptPanel, chapterPanel, outlinePanel],
+      bible: [readinessHost, extendHost, biblePanel, sitePanelHost],
+      script: [durationPanel, chapterPanel, outlinePanel, shotsPanel],
       assets: [shotsPanel],
       video: [shotsPanel],
       voice: [shotsPanel],
       compose: [cutPanel, composePanel]
     };
-    const allPanels = [scriptPanel, chapterPanel, readinessHost, biblePanel, sitePanelHost, durationPanel, shotsPanel, cutPanel, composePanel]
+    const allPanels = [scriptPanel, chapterPanel, outlinePanel, readinessHost, extendHost, biblePanel, sitePanelHost, durationPanel, shotsPanel, cutPanel, composePanel]
       .filter(Boolean);
     // 只读那一行摆在分镜面板顶上，跟着"视频"这一步出现
     shotsPanel.insertBefore(durationLine, shotsPanel.firstChild.nextSibling);

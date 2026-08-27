@@ -470,6 +470,7 @@ function elDiv(cls, txt) {
 export function sitePanel(project, {
   onPlace = async () => {},
   onSite = async () => {},
+  onAlign = null,
   onGoScene = null
 } = {}) {
   const host = elDiv('site-panel');
@@ -593,6 +594,36 @@ export function sitePanel(project, {
         item.append(elDiv('site-issue-what', one.what));
         item.append(elDiv('site-issue-why', one.why));
         issueBox.append(item);
+      }
+      /**
+       * 问题旁边给一条出口。
+       *
+       * 只报"这座山在两个场景里差了 180°"是没用的 —— 人下一秒就要问
+       * "那我该怎么办"。手工去每个场景里拖回来是重复劳动，而重复劳动会做漏。
+       *
+       * ⚠ 只在场地上**真的定过**基准时才摆这颗按钮（site.alignable）。
+       * 没有基准却摆一颗"套用"，点下去只能套一片空白 —— 那是把
+       * 每个场景辛苦摆的东西抹掉，而按钮字面上看起来是在帮忙。
+       */
+      if (onAlign && site.alignable(model)) {
+        const fix = document.createElement('button');
+        fix.className = 'btn sm';
+        fix.textContent = '按场地图对齐这几个场景';
+        fix.title = '把场地上定的远景地标和光位套到每个场景。'
+          + '门窗桌椅那些近处地标一个都不动 —— 它们本来就该各场景不同';
+        fix.onclick = async () => {
+          fix.disabled = true;
+          const old = fix.textContent;
+          fix.textContent = '对齐中…';
+          try {
+            await onAlign(model.name);
+            render();
+          } finally {
+            fix.disabled = false;
+            fix.textContent = old;
+          }
+        };
+        issueBox.append(fix);
       }
     }
 

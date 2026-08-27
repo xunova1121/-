@@ -35,6 +35,7 @@
 
 /** projectId -> job */
 const RUNNING = new Map();
+const RECENT = new Map();
 
 function now() {
   return Date.now();
@@ -77,7 +78,12 @@ export function start(projectId, stage) {
      * 有了它，分镜页能把那一镜点亮，流水线上能写"第 5 / 12 镜"。
      */
     shotIndex: null,
-    shotId: null
+    shotId: null,
+    /** 可恢复的任务明细：刷新页面后仍然知道每一镜卡在哪一步。 */
+    items: {},
+    history: [],
+    completed: 0,
+    failed: 0
   };
   RUNNING.set(projectId, job);
   return job;
@@ -85,7 +91,14 @@ export function start(projectId, stage) {
 
 /** 收工。只收自己那一份 —— 拿别人的 job 来收会误删掉后开的那一份 */
 export function finish(job) {
-  if (job && RUNNING.get(job.projectId) === job) RUNNING.delete(job.projectId);
+  if (job && RUNNING.get(job.projectId) === job) {
+    RUNNING.delete(job.projectId);
+    RECENT.set(job.projectId, {
+      running: false, stage: job.stage, stageLabel: job.stageLabel,
+      startedAt: job.startedAt, finishedAt: now(), completed: job.completed,
+      failed: job.failed, items: Object.values(job.items), history: job.history.slice(-80)
+    });
+  }
 }
 
 export function current(projectId) {
@@ -116,7 +129,7 @@ export function cancel(projectId) {
 /** 界面上要显示的那一份（AbortController 不能 JSON 化，挑着回） */
 export function describe(projectId) {
   const job = RUNNING.get(projectId);
-  if (!job) return { running: false };
+  if (!job) return RECENT.get(projectId) || { running: false };
   return {
     running: true,
     stage: job.stage,
@@ -126,8 +139,31 @@ export function describe(projectId) {
     cancelling: Boolean(job.cancelledAt),
     note: job.note,
     shotIndex: job.shotIndex,
-    shotId: job.shotId
+    shotId: job.shotId,
+    completed: job.completed,
+    failed: job.failed,
+    items: Object.values(job.items),
+    history: job.history.slice(-80)
   };
+}
+
+/** 把流式事件同时写进任务账本；流断了，账本仍在。 */
+export function update(job, event = {}) {
+  if (!job || RUNNING.get(job.projectId) !== job) return;
+  const at = new Date().toISOString();
+  const message = String(event.message || '').slice(0, 300);
+  if (message) job.note = message;
+  if (event.shotId) {
+    const old = job.items[event.shotId] || { shotId: event.shotId, shotIndex: event.shotIndex || null, status: 'queued', startedAt: at };
+    const status = event.status || old.status;
+    job.items[event.shotId] = { ...old, status, message, provider: event.provider || old.provider || '', model: event.model || old.model || '', updatedAt: at };
+    job.shotId = event.shotId;
+    if (event.shotIndex) job.shotIndex = event.shotIndex;
+    if (status === 'done' && old.status !== 'done') job.completed += 1;
+    if (status === 'failed' && old.status !== 'failed') job.failed += 1;
+  }
+  job.history.push({ at, type: event.type || 'note', shotId: event.shotId || null, status: event.status || '', message });
+  if (job.history.length > 300) job.history.splice(0, job.history.length - 300);
 }
 
 /**
@@ -151,6 +187,7 @@ export function isCancel(err) {
 /** 只给自检用 */
 export function __reset() {
   RUNNING.clear();
+  RECENT.clear();
 }
 
 const STAGE_LABELS = {

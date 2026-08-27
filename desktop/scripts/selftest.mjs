@@ -343,7 +343,17 @@ const upstream = http.createServer((req, res) => {
       if (system.includes('美术总监')) {
         content = JSON.stringify(BIBLE_REPLY);
       } else if (system.includes('分镜导演')) {
-        content = JSON.stringify(SHOTS_REPLY);
+        /**
+         * 大纲那条路上，剧本里每一场前面标着【场次 b-XX】，
+         * 而模型要把每一镜标回它属于哪一场。这里照做 —— 不照做的话
+         * 走的永远是"一个都没标"那条保守分支，happy path 测不到。
+         */
+        const user = String(body.messages?.[1]?.content || '');
+        const ids = [...user.matchAll(/【场次\s*([a-z0-9-]+)】/gi)].map((m) => m[1]);
+        upstream.lastShotPrompt = { system, user };
+        content = JSON.stringify(ids.length
+          ? { ...SHOTS_REPLY, shots: SHOTS_REPLY.shots.map((x, i) => ({ ...x, beatId: ids[i % ids.length] })) }
+          : SHOTS_REPLY);
       } else if (system.includes('剪辑师')) {
         /**
          * 自动标衔接。**故意给一份违规的答案** —— 模型真会这么答，
@@ -372,6 +382,30 @@ const upstream = http.createServer((req, res) => {
               : ['close-up', 'moonlight', 'mood-tense'],
             why: i === 0 ? '情绪压迫，用仰拍加伦勃朗光' : '夜里的对话戏'
           }))
+        });
+      } else if (system.includes('分场编辑')) {
+        /**
+         * 大纲：拆场次。
+         *
+         * ⚠ 这一支必须排在「编剧」前面 —— 打桩是按 system 里的**子串**认的，
+         * 而一旦有两个提示词都含同一个词，后写的那个永远轮不到。
+         * 大纲那个提示词一开始写的是"你是编剧"，正好被下面绑说话人那一支
+         * 抢走，然后拿 JSON.parse 去解一段中文提示词，整个自检当场崩掉。
+         */
+        content = JSON.stringify({
+          beats: [
+            { scene: '码头', time: '清晨', characters: ['阿澜'], summary: '阿澜走向栈桥，例行巡查。', dialogue: '设备正常。', seconds: 20 },
+            { scene: '码头', time: '清晨', characters: ['阿澜'], summary: '发现缆绳被割断。', dialogue: '这里的缆绳被人动过。', seconds: 25 }
+          ]
+        });
+      } else if (system.includes('改动指令')) {
+        // 改大纲：回一串 ops，不回新大纲
+        content = JSON.stringify({
+          ops: [
+            { op: 'edit', id: 'b-02', fields: { seconds: 40 } },
+            { op: 'insert', after: 'b-01', beat: { scene: '码头', summary: '一只海鸟掠过水面。', dialogue: '', seconds: 5 } }
+          ],
+          note: '第二场加长，中间插一个空镜换气'
         });
       } else if (system.includes('编剧')) {
         // 绑说话人：只有"在场不止一个人又没线索"的那几条会发过来。
@@ -968,6 +1002,42 @@ check('提示词里仍然注入了冻结的外貌（没有参考图时靠它撑�
   check('换模型这件事说了出来（不说的话没人知道发的和界面写的不是一个）',
     evs.some((e) => e.type === 'note' && /出图模型换成/.test(e.message || '')),
     JSON.stringify(evs.filter((e) => e.type === 'note').map((e) => e.message).slice(0, 5)));
+
+  /**
+   * ⚠ **记下来的必须是真正出图的那个模型。**
+   *
+   * 上面几条只验了"发出去的请求换对了模型"，没验**存进这一镜的是什么**。
+   * 于是有个 bug 一直躲着：适配器内部把 model 换成 i2i 之后不回报，
+   * studio 记的是换之前那个 —— 卡片上写着 Seedream t2i，
+   * 而图其实是 SeedEdit i2i 出的。
+   *
+   * modelUsed 这个字段存在的全部理由是"中途换过模型是风格漂移最常见的原因"。
+   * 它一说谎那条诊断就废了：你对比两镜看到同一个模型名，而实际上
+   * 一镜带参考图走 i2i、一镜没带走 t2i，本来就是两个模型。
+   */
+  const recorded = store.read(project.id).shots.find((s) => s.id === afterAssets.shots[0].id);
+  check('存进这一镜的是真正出图的那个模型（不是路由到的那个）',
+    String(recorded?.modelUsed || '').includes(settings.get('imageEditModel')),
+    `${recorded?.modelUsed} / 期望含 ${settings.get('imageEditModel')}`);
+  check('参考图真的发出去了几张，也记下来了', Number(recorded?.refsSent) > 0, String(recorded?.refsSent));
+
+  /**
+   * ⚠ **批量出图那条路要单独验一遍。**
+   *
+   * 上面那条走的是「单独重出这一镜」，而写 modelUsed 的地方有**两处**：
+   * 批量出图一处、单独重出一处。第一版只验了后者 —— 金丝雀把前者改回
+   * 记路由模型，自检照样全绿。
+   *
+   * 两条路各写一份同样的逻辑，就一定要各验一份。
+   */
+  upstream.lastImageBody = null;
+  await ndjson(`/projects/${project.id}/stage/assets`, {
+    only: [afterAssets.shots[1].id], regenerate: true
+  });
+  const batch = store.read(project.id).shots.find((s) => s.id === afterAssets.shots[1].id);
+  check('批量出图那条路记的也是真正出图的模型',
+    String(batch?.modelUsed || '').includes(settings.get('imageEditModel')),
+    `${batch?.modelUsed} / 期望含 ${settings.get('imageEditModel')}`);
   settings.patch({ useEditModelForShots: false });
 }
 
@@ -2357,6 +2427,912 @@ section('预演台：把"中景"变成一组数');
  * 而"山门外是斜逆光、大殿是正顺光"牵涉的是两个不同的场景，中间可能隔着
  * 十几镜、跨了好几场。没有任何一层会把它们放在一起看 —— 这一层才会。
  */
+/**
+ * ════════ 剧本一章一章往里加 ════════
+ *
+ * 这是长篇的常态：作者写一章发一章。而在这之前，这条路上有三个洞，
+ * 每一个都是**静默**的：
+ *
+ *   ① 手工把新章粘到剧本末尾时碰掉前面一个空格 → 那一章被判定"改过了"，
+ *      已出的分镜全部作废重跑，没有任何提示
+ *   ② 第二章的新角色永远不会进设定集
+ *   ③ 而分镜里点名了一个设定集里没有的人时，什么都不会发生 ——
+ *      matchCharacters 找不到就 .filter(Boolean) 掉，于是那一镜没有参考图、
+ *      没有外貌描述、复核没有基准，静默降级成"文生图"，流水线一路绿
+ */
+/**
+ * ════════ 大纲：剧本和分镜之间那一层 ════════
+ *
+ * 用户的两句话定了这一层的形状：
+ *
+ *   "在拆分镜的时候能不能先出一个大纲，就是可和大模型对话的那种"
+ *   "大模型能结合剧本分辨出支持修改和添加的部分，**不要全部推到重来**"
+ *
+ * 第二句是硬约束。所以模型回的不是新大纲，是一串**改动指令**，
+ * 人逐条勾选之后才落盘 —— 没勾的一条都不动。
+ */
+/**
+ * ════════ 本地出图：ComfyUI ════════
+ *
+ * 和别家形状完全不同：没有"模型"这个参数，出什么图由**用户自己的工作流**决定。
+ * 我们只往里填提示词、种子、尺寸、参考图。
+ *
+ * 这条路最容易坏的地方是**填不进去而不吭声**：
+ * 图能出、不花钱、而画的一直是工作流里写死的那句话 —— 改一百遍描述毫无反应，
+ * 且没有任何报错。所以这一节大半在验"该报的都报了没有"。
+ */
+section('本地出图：ComfyUI');
+{
+  const comfy = await import('../core/providers/comfy.js');
+
+  /** 一份最小的 API 格式工作流。标题就是标记 —— 用户在 ComfyUI 里双击标题改 */
+  const wf = () => ({
+    3: { class_type: 'KSampler', inputs: { seed: 1, steps: 20 }, _meta: { title: 'FD_SEED' } },
+    4: { class_type: 'CLIPTextEncode', inputs: { text: '写死在工作流里的那句' }, _meta: { title: 'FD_PROMPT' } },
+    5: { class_type: 'CLIPTextEncode', inputs: { text: '' }, _meta: { title: 'FD_NEGATIVE' } },
+    6: { class_type: 'EmptyLatentImage', inputs: { width: 512, height: 512 }, _meta: { title: 'FD_SIZE' } },
+    7: { class_type: 'LoadImage', inputs: { image: '' }, _meta: { title: 'FD_REF' } },
+    9: { class_type: 'SaveImage', inputs: {}, _meta: { title: 'SaveImage' } }
+  });
+
+  // ── 贴错格式要当场说清楚 ──
+  {
+    const bad = (t) => { try { comfy.parseWorkflow(t); return ''; } catch (e) { return e.message; } };
+    check('没贴工作流时说去哪儿贴', /设置|本地出图/.test(bad('')), bad(''));
+    check('不是 JSON 时说清楚', /不是合法的 JSON/.test(bad('{oops')), bad('{oops'));
+    /**
+     * ⚠ ComfyUI 有两种导出：「工作流」（带 nodes/links，给编辑器用）
+     * 和「API 格式」（节点号 → {class_type, inputs}，给接口用）。
+     * 贴错的人会很多，而原本的报错是一句莫名其妙的"没有节点"。
+     */
+    const wrong = bad(JSON.stringify({ nodes: [{ id: 1 }], links: [] }));
+    check('贴成「工作流」格式时点名说要「API 格式」', /API 格式/.test(wrong), wrong);
+    check('并且说了在哪儿导出', /导出/.test(wrong), wrong);
+    check('一个节点都没有时也说得出', /节点/.test(bad('{}')), bad('{}'));
+    check('贴对了就通过', Object.keys(comfy.parseWorkflow(JSON.stringify(wf()))).length === 6);
+  }
+
+  // ── 填进去 ──
+  {
+    const r = comfy.inject(wf(), {
+      prompt: '雪夜山门', negative: '模糊', seed: 4242, width: 768, height: 1344, refName: 'ref.png'
+    });
+    check('提示词填进去了', r.workflow[4].inputs.text === '雪夜山门');
+    check('反向提示词填进去了', r.workflow[5].inputs.text === '模糊');
+    check('种子填进去了', r.workflow[3].inputs.seed === 4242);
+    check('尺寸填进去了', r.workflow[6].inputs.width === 768 && r.workflow[6].inputs.height === 1344);
+    check('参考图填进去了', r.workflow[7].inputs.image === 'ref.png');
+    /**
+     * ⚠ 纯函数。同一份工作流要用很多次（一部片子几十镜），
+     * 就地改的话第二镜会拿到第一镜填过的内容 —— 而那是"改了描述没反应"
+     * 的另一种版本，更隐蔽。
+     */
+    const before = wf();
+    comfy.inject(before, { prompt: 'x', seed: 1 });
+    check('不改传进去那份工作流', before[4].inputs.text === '写死在工作流里的那句');
+  }
+
+  // ── 没打标记时：该报错的报错，该说明的说明 ──
+  {
+    const noPrompt = wf(); delete noPrompt[4];
+    let msg = '';
+    try { comfy.inject(noPrompt, { prompt: 'x' }); } catch (e) { msg = e.message; }
+    /**
+     * ⚠ 正向提示词找不到必须**抛**，不能跳过。
+     *
+     * 跳过的后果：出图成功、不花钱、画的是工作流里写死的那句话。
+     * 你改一百遍画面描述都没反应，而且不报任何错 —— 这是这条路上
+     * 最坏的一种坏法，因为它看起来完全正常。
+     */
+    check('没有 FD_PROMPT 时直接报错，不默默跑', /FD_PROMPT/.test(msg), msg);
+    check('并且说清了后果（不然人会以为只是少个可选项）',
+      /写死|毫无反应|没反应/.test(msg), msg);
+
+    const noSeed = wf(); delete noSeed[3];
+    const r = comfy.inject(noSeed, { prompt: 'x', seed: 99 });
+    /**
+     * 种子填不进去是**能跑的**，但必须说出来：
+     * 一致性复核不过时我们会换种子重试，种子没生效的话三次重试出三张
+     * 一模一样的图，而日志上写着"换了种子重试"。
+     */
+    check('没有 FD_SEED 时不报错，但说出来了',
+      r.skipped.some((x) => /种子/.test(x)), JSON.stringify(r.skipped));
+    check('而且说清了后果是"重试换种子不会生效"',
+      r.skipped.some((x) => /重试/.test(x)), JSON.stringify(r.skipped));
+
+    const noRef = wf(); delete noRef[7];
+    const r2 = comfy.inject(noRef, { prompt: 'x', refName: 'a.png' });
+    check('没有 FD_REF 时说清"一致性只剩提示词撑着"',
+      r2.skipped.some((x) => /一致性/.test(x)), JSON.stringify(r2.skipped));
+
+    // 标记打在了错的节点上
+    const wrongNode = wf();
+    wrongNode[4] = { class_type: 'KSampler', inputs: { steps: 20 }, _meta: { title: 'FD_PROMPT' } };
+    let m2 = '';
+    try { comfy.inject(wrongNode, { prompt: 'x' }); } catch (e) { m2 = e.message; }
+    check('标记打在错的节点上时，说得出该打在哪一类节点上',
+      /文本编码|CLIPTextEncode/.test(m2), m2);
+  }
+
+  // ── 工作流里打了哪几个标记：贴完当场告诉他 ──
+  {
+    const m = comfy.markersIn(wf());
+    check('认得出打了哪几个标记', m.prompt && m.seed && m.ref && m.size);
+    const bare = { 1: { class_type: 'KSampler', inputs: {}, _meta: { title: 'KSampler' } } };
+    check('没改过标题的节点不会被误认成标记', comfy.markersIn(bare).prompt === false);
+
+    /**
+     * ⚠ 标记要**从头认**，不能只看"标题里含不含这几个字"。
+     *
+     * 真实工作流里很常见的一种情况：留着一个废弃的旧节点，标题写成
+     * 「备用 FD_PROMPT（没用了）」。按"含不含"来认的话，它会和真的那个
+     * 一起匹配上，而谁排在前面完全看运气 —— 于是提示词填进了那个
+     * 断开连线的废节点，图照出、不花钱、画的还是写死那句。
+     *
+     * 这一条第一版是**空的**：夹具里只有一个 KSampler，
+     * 无论怎么放宽匹配都撞不上。同一个毛病第四次了。
+     */
+    const decoy = {
+      1: { class_type: 'CLIPTextEncode', inputs: { text: '废弃的旧提示词' }, _meta: { title: '备用 FD_PROMPT（没用了）' } },
+      2: { class_type: 'CLIPTextEncode', inputs: { text: '真正接着的' }, _meta: { title: 'FD_PROMPT' } },
+      9: { class_type: 'SaveImage', inputs: {}, _meta: { title: 'SaveImage' } }
+    };
+    const picked = comfy.inject(decoy, { prompt: '雪夜山门' });
+    check('标题里只是"含有"标记的废节点不会被当成标记',
+      picked.workflow['1'].inputs.text === '废弃的旧提示词'
+      && picked.workflow['2'].inputs.text === '雪夜山门',
+      JSON.stringify([picked.workflow['1'].inputs.text, picked.workflow['2'].inputs.text]));
+  }
+
+  // ── 真的跑一遍（打桩的 ComfyUI）──
+  {
+    const hits = [];
+    const srv = http.createServer((req, res) => {
+      let raw = '';
+      req.on('data', (c) => { raw += c; });
+      req.on('end', () => {
+        hits.push(req.url);
+        if (req.url === '/prompt') {
+          const body = JSON.parse(raw);
+          hits.push({ sentPrompt: body.prompt?.['4']?.inputs?.text, sentSeed: body.prompt?.['3']?.inputs?.seed });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ prompt_id: 'p1' }));
+        }
+        if (req.url.startsWith('/history/')) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({
+            p1: { status: { status_str: 'success', completed: true }, outputs: { 9: { images: [{ filename: 'out.png', subfolder: '', type: 'output' }] } } }
+          }));
+        }
+        if (req.url === '/system_stats') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ devices: [{ name: 'RTX 4090', vram_total: 25769803776 }] }));
+        }
+        res.writeHead(404).end();
+      });
+    });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${srv.address().port}`;
+
+    const out = await comfy.run(base, comfy.inject(wf(), { prompt: '雪夜山门', seed: 777 }).workflow, {});
+    check('跑通了，拿回图片地址', /\/view\?/.test(out.url), out.url);
+    check('地址里带着文件名', /filename=out\.png/.test(out.url), out.url);
+    const sent = hits.find((x) => x && x.sentPrompt);
+    check('发出去的是我们填的提示词，不是工作流里写死那句',
+      sent?.sentPrompt === '雪夜山门', JSON.stringify(sent));
+    check('种子也真的发出去了', sent?.sentSeed === 777, JSON.stringify(sent));
+
+    const p = await comfy.probe(base);
+    check('探活说得出是什么卡', p.ok && /4090/.test(p.detail), JSON.stringify(p));
+
+    srv.close();
+  }
+
+  // ── 跑失败时说人话 ──
+  {
+    const srv = http.createServer((req, res) => {
+      let raw = '';
+      req.on('data', (c) => { raw += c; });
+      req.on('end', () => {
+        if (req.url === '/prompt') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({
+            error: { type: 'prompt_outputs_failed_validation', message: 'Prompt outputs failed validation' },
+            node_errors: { 9: { errors: [{ message: 'Required input is missing: images' }] } }
+          }));
+        }
+        res.writeHead(404).end();
+      });
+    });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${srv.address().port}`;
+    let msg = '';
+    try { await comfy.run(base, wf(), {}); } catch (e) { msg = e.message; }
+    /**
+     * ⚠ node_errors 里才写着**到底哪个节点缺什么**。
+     * 只报一句 "Prompt outputs failed validation"，用户完全不知道该改哪儿。
+     */
+    check('校验不过时点名是哪个节点、缺什么',
+      /节点 9/.test(msg) && /images/.test(msg), msg);
+    srv.close();
+  }
+}
+
+section('大纲：改动指令，不是推倒重来');
+{
+  const ol = await import('../core/pipeline/outline.js');
+
+  /**
+   * ⚠ 夹具的 id **故意不和位置重合**（b-07 / b-04 / b-11，不是 b-01/02/03）。
+   *
+   * 第一版用的是 b-01/b-02/b-03 —— 于是"edit 之后 id 不变"那条是**空的**：
+   * 就算代码改成按位置重新编号，第 2 场也照样叫 b-02，断言照过。
+   * 金丝雀把两层保护一起打掉都没能让它变红，这才发现。
+   *
+   * 这已经是同一个毛病的第三次了：夹具挑了让断言恰好成立的那种值。
+   */
+  const base = () => ({
+    beats: [
+      { id: 'b-07', scene: '山门外', time: '傍晚', characters: ['阿澜'], summary: '被拦下。', dialogue: '你不能进去。', seconds: 30, locked: true },
+      { id: 'b-04', scene: '石阶', time: '傍晚', characters: ['阿澜'], summary: '独自上石阶。', dialogue: '', seconds: 40 },
+      { id: 'b-11', scene: '大殿', time: '夜', characters: ['阿澜'], summary: '见到住持。', dialogue: '二十年前那件事是我做的。', seconds: 60 }
+    ]
+  });
+
+  // ── 纯函数 ──
+  {
+    const before = base();
+    const snapshot = JSON.stringify(before);
+    ol.applyOps(before, [{ op: 'delete', id: 'b-04' }]);
+    /**
+     * ⚠ 必须是纯函数。界面要用**同一段代码**先预览再应用 ——
+     * 预览走一套、应用走另一套的话，你勾的和实际发生的迟早对不上，
+     * 而那种错只有在数据已经被改坏之后才看得出来。
+     */
+    check('applyOps 不改传进去的那份（界面要拿它先预览）',
+      JSON.stringify(before) === snapshot);
+  }
+
+  // ── 四种指令 ──
+  {
+    const r = ol.applyOps(base(), [{ op: 'insert', after: 'b-04', beat: { scene: '石阶', summary: '黑衣人出现。' } }]);
+    check('insert 插在指定那一场后面',
+      r.outline.beats.map((b) => b.scene).join(',') === '山门外,石阶,石阶,大殿',
+      r.outline.beats.map((b) => b.scene).join(','));
+    check('新插的那一场拿到不重复的 id',
+      new Set(r.outline.beats.map((b) => b.id)).size === r.outline.beats.length);
+    check('新插的那一场不是锁着的', r.outline.beats[2].locked === false);
+
+    const head = ol.applyOps(base(), [{ op: 'insert', after: null, beat: { scene: '雪原', summary: '空镜。' } }]);
+    check('after 传 null 就插到最前面', head.outline.beats[0].scene === '雪原');
+
+    const del = ol.applyOps(base(), [{ op: 'delete', id: 'b-04' }]);
+    check('delete 拿掉那一场', del.outline.beats.map((b) => b.id).join(',') === 'b-07,b-11');
+
+    const mv = ol.applyOps(base(), [{ op: 'move', id: 'b-11', after: null }]);
+    check('move 挪到最前面', mv.outline.beats.map((b) => b.id).join(',') === 'b-11,b-07,b-04');
+
+    const ed = ol.applyOps(base(), [{ op: 'edit', id: 'b-04', fields: { seconds: 15, summary: '改过了' } }]);
+    check('edit 只改点名的字段',
+      ed.outline.beats[1].seconds === 15 && ed.outline.beats[1].summary === '改过了'
+      && ed.outline.beats[1].scene === '石阶', JSON.stringify(ed.outline.beats[1]));
+    check('edit 之后 id 不变（不能按位置重新编号）', ed.outline.beats[1].id === 'b-04');
+  }
+
+  // ── 锁：这一层存在的全部理由 ──
+  {
+    /**
+     * ⚠ 拆过分镜的场次后面挂着**已经出好的图和视频**。
+     * 覆盖它等于把花过的钱作废，而且不可撤销。
+     *
+     * 用户的原话就是"不要全部推到重来"—— 这条断言守的就是那句话。
+     */
+    const r = ol.applyOps(base(), [
+      { op: 'edit', id: 'b-07', fields: { summary: '模型想改' } },
+      { op: 'delete', id: 'b-07' },
+      { op: 'move', id: 'b-07', after: 'b-11' }
+    ]);
+    check('锁住的场次：改不动、删不掉、挪不走', r.applied.length === 0 && r.refused.length === 3);
+    check('而且原样没变', r.outline.beats[0].summary === '被拦下。');
+    check('每条拒绝都说清了原因和出路',
+      r.refused.every((x) => /锁着/.test(x.why) && /分镜/.test(x.why)), JSON.stringify(r.refused[0]));
+    /**
+     * 悄悄跳过一条改动比拒绝它更糟：人以为改了。
+     * 所以 refused 必须回出去，界面必须摆出来。
+     */
+    check('没勾的没做、做不了的说出来 —— 不能悄悄跳过',
+      r.refused.length === 3 && r.refused.every((x) => x.op && x.why));
+
+    const forced = ol.applyOps(base(), [{ op: 'delete', id: 'b-07' }], { allowLocked: true });
+    check('明确要求时才能动锁着的', forced.applied.length === 1);
+  }
+
+  // ── 坏指令一条都不能悄悄放行 ──
+  {
+    const r = ol.applyOps(base(), [
+      { op: 'edit', id: 'b-99', fields: { seconds: 5 } },
+      { op: 'insert', after: 'b-99', beat: { scene: 'x', summary: 'y' } },
+      { op: 'move', id: 'b-04', after: 'b-99' },
+      { op: 'edit', id: 'b-04', fields: {} },
+      { op: '乱写', id: 'b-04' },
+      null
+    ]);
+    check('编出来的 id 一条都不放行', r.applied.length === 0, JSON.stringify(r.applied));
+    check('六条坏指令全部有原因', r.refused.length === 6);
+    /**
+     * ⚠ move 到一个不存在的位置时，那一场必须**回到原位**。
+     * 早先的写法是先 splice 出来再找位置，找不到就落在末尾 ——
+     * 于是一条无效指令把场次顺序改了，而它报的是"拒绝"。
+     */
+    check('挪不过去的场次回到原位，不是掉到末尾',
+      r.outline.beats.map((b) => b.id).join(',') === 'b-07,b-04,b-11',
+      r.outline.beats.map((b) => b.id).join(','));
+    check('白名单之外的字段改不动',
+      ol.applyOps(base(), [{ op: 'edit', id: 'b-04', fields: { locked: true, id: 'hack' } }])
+        .refused.length === 1);
+  }
+
+  // ── 说人话：界面上那一排勾选项 ──
+  {
+    const o = base();
+    /**
+     * ⚠ 一定要说**改之前是什么**。只说"第 3 场改成 2 分钟"，
+     * 人没法判断该不该勾；说"60 → 120"才行。
+     */
+    const t = ol.describeOp({ op: 'edit', id: 'b-11', fields: { seconds: 120 } }, o);
+    check('改动说得出"从什么变成什么"', /60/.test(t) && /120/.test(t), t);
+    check('插入说得出插在哪儿', /第 2 场/.test(ol.describeOp({ op: 'insert', after: 'b-04', beat: { scene: 'x', summary: 'y' } }, o)));
+    check('删除说得出删的是哪一场', /第 1 场/.test(ol.describeOp({ op: 'delete', id: 'b-07' }, o)));
+    check('看不懂的指令也要说出来，不能装作没有',
+      /看不懂/.test(ol.describeOp({ op: '???' }, o)));
+  }
+
+  // ── 片长：台词是硬下限 ──
+  {
+    /**
+     * ════ 这是用户上一个问题的答案落地处 ════
+     *
+     * 原来是"你先定片长，模型按预算拆"，而预算按**字数比例**分摊到每一章。
+     * 同样两千字，全是对话的一章念完要 90 秒，全是写景的一章 40 秒就够 ——
+     * 字数一样，分到的秒数就一样。于是对话密集那章被压得念不完。
+     *
+     * 而"念不念得完"引擎早就算得出来，只是那个信息用在**每一镜**上
+     *（拆完之后校对）—— 那时候分镜已经拆完了，改时长等于重拆。
+     * 放在大纲这一层，它变成**拆之前**就能说的一句话。
+     */
+    const talky = {
+      beats: [{
+        id: 'b-07', scene: '大殿', summary: '长谈。',
+        dialogue: '二十年前那件事是我做的，你父亲什么都不知道。'
+          + '我把他推下山崖那天也下着这样的雪，我以为这辈子不会有人来问我。'
+          + '你既然来了，就该听完整件事，然后自己决定要不要下山。',
+        seconds: 10
+      }]
+    };
+    const est = ol.estimateSeconds(talky.beats[0]);
+    check('台词长的场次，估出来的下限压不到人填的 10 秒', est.floor > 10, String(est.floor));
+    check('建议值不会低于台词下限', est.suggested >= est.floor);
+
+    const bud = ol.budgetCheck(talky, 10);
+    check('台词念不完时报出来', bud.issues.some((i) => i.kind === 'floor-over'), JSON.stringify(bud.issues));
+    /**
+     * ⚠ "台词超了"和"总长偏长"必须分开说：
+     * 前者**改不动**（除非删台词），后者是编辑上的选择。
+     * 混成一句"超了 30 秒"没用 —— 前者要你改剧本，后者要你改节奏。
+     */
+    const hard = bud.issues.find((i) => i.kind === 'floor-over');
+    check('并且说清这是硬下限、不是节奏问题', /硬下限/.test(hard.why), hard.why);
+    check('给的出路是调时长或删台词', /删台词|目标时长/.test(hard.fix), hard.fix);
+
+    const roomy = ol.budgetCheck(talky, 600);
+    check('时长给够了就不报台词那条', !roomy.issues.some((i) => i.kind === 'floor-over'));
+    check('但太短了会说"这份大纲比目标短不少"',
+      ol.budgetCheck({ beats: [{ id: 'b-07', scene: 'x', summary: '一句话。', seconds: 5 }] }, 300)
+        .issues.some((i) => i.kind === 'total-short'));
+    check('没有大纲或没定目标时不硬报', ol.budgetCheck({ beats: [] }, 60) === null);
+  }
+
+  // ── 空的时候也要说话 ──
+  {
+    check('没有大纲时说得出下一步干什么',
+      /先从剧本生成|还没有大纲/.test(ol.summarize({ beats: [] })), ol.summarize({ beats: [] }));
+    check('有大纲时报场数和总长',
+      /3 场/.test(ol.summarize(base(), 120)), ol.summarize(base(), 120));
+    check('锁着几场也说出来', /锁/.test(ol.summarize(base(), 120)), ol.summarize(base(), 120));
+  }
+
+  /**
+   * ── 拆过分镜就锁住 ──
+   *
+   * ⚠ 这一条是金丝雀抓出来的**缺口**：把"拆完就锁"那行代码改坏，
+   * 自检照样全绿 —— 因为前面所有的锁相关断言都是拿**手工设好 locked** 的
+   * 夹具在测，没有一条走过"分镜拆完之后到底有没有锁上"这条真实路径。
+   *
+   * 而这一条正是用户那句"不要全部推到重来"的落脚点。
+   */
+  {
+    const o = {
+      beats: [
+        { id: 'b-07', scene: '一', summary: '甲。', chapterId: 'ch-01' },
+        { id: 'b-04', scene: '二', summary: '乙。', chapterId: 'ch-02' }
+      ]
+    };
+    const one = ol.lockBeats(o, 'ch-01');
+    check('只锁拆过的那一章', one.beats[0].locked === true && one.beats[1].locked === false,
+      JSON.stringify(one.beats.map((b) => b.locked)));
+    check('别的章还能继续改', ol.applyOps(one, [{ op: 'delete', id: 'b-04' }]).applied.length === 1);
+    check('拆过的那一章改不动', ol.applyOps(one, [{ op: 'delete', id: 'b-07' }]).refused.length === 1);
+
+    const all = ol.lockBeats(o, null);
+    check('没分章的项目，拆一次就全锁', all.beats.every((b) => b.locked));
+    check('lockBeats 也是纯函数', o.beats.every((b) => !b.locked));
+  }
+
+  // ── 解锁：唯一一条能重拆的路 ──
+  {
+    const o = {
+      beats: [
+        { id: 'b-07', scene: '一', summary: '甲。', locked: true },
+        { id: 'b-04', scene: '二', summary: '乙。', locked: true }
+      ]
+    };
+    const one = ol.unlockBeats(o, ['b-07']);
+    check('只解锁点名的那一场', one.beats[0].locked === false && one.beats[1].locked === true);
+    check('解锁之后就改得动了', ol.applyOps(one, [{ op: 'delete', id: 'b-07' }]).applied.length === 1);
+    check('没点名的还锁着', ol.applyOps(one, [{ op: 'delete', id: 'b-04' }]).refused.length === 1);
+    check('传空就全解锁', ol.unlockBeats(o, []).beats.every((b) => !b.locked));
+    check('unlockBeats 也是纯函数', o.beats.every((b) => b.locked));
+  }
+
+  // ── 落盘：拆过分镜就锁住 ──
+  {
+    const p = store.create({ title: '大纲落盘' });
+    store.update(p.id, (x) => {
+      x.script = '阿澜在码头巡查。';
+      x.outline = base();
+      return x;
+    });
+    const r = studioModule.applyOutlineOps(p.id, { ops: [{ op: 'edit', id: 'b-04', fields: { seconds: 99 } }] });
+    check('改动真的落到盘上了',
+      store.read(p.id).outline.beats[1].seconds === 99, String(r.applied));
+    check('回的 refused 是空的', r.refused.length === 0);
+
+    const bad = studioModule.applyOutlineOps(p.id, { ops: [{ op: 'delete', id: 'b-07' }] });
+    check('锁着的那一场，走接口也删不掉',
+      store.read(p.id).outline.beats.length === 3 && bad.refused.length === 1);
+  }
+}
+
+/**
+ * ════════ 大纲 → 分镜：这条链到底通不通 ════════
+ *
+ * ⚠ 这一节是补一个**我自己留的洞**：大纲那一层建完之后，
+ * analyzeScript 里一次都没提到 outline —— 你可以生成大纲、跟模型来回改、
+ * 锁住已拆的场次，然后点「分镜」，它完全无视大纲重新去读原始剧本。
+ *
+ * 一整层白做，而且看不出来：分镜照样出得来，只是和你改的那份没关系。
+ */
+section('大纲 → 分镜：只拆没拆过的场次');
+{
+  const studio = studioModule;
+  const ol = await import('../core/pipeline/outline.js');
+
+  /** 造一个跑得动的项目：有设定集、有大纲 */
+  const mk = () => {
+    const p = store.create({ title: '照大纲拆', targetDuration: 120 });
+    store.update(p.id, (x) => {
+      x.script = '阿澜在码头巡查，发现缆绳被割断。';
+      x.bible = {
+        style: { anchor: '国风', negative: '' },
+        characters: [{ name: '阿澜', appearance: '短发', seed: 1, sheetPath: '/a.png',
+          variants: [{ id: 'v-default', name: '默认', sheetPath: '/a.png' }] }],
+        scenes: [{ name: '码头', appearance: '雾', seed: 2, sheetPath: '/b.png',
+          variants: [{ id: 'v-default', name: '默认', sheetPath: '/b.png' }] }],
+        props: []
+      };
+      x.outline = {
+        beats: [
+          { id: 'b-07', scene: '码头', characters: ['阿澜'], summary: '走向栈桥。', dialogue: '设备正常。', seconds: 30 },
+          { id: 'b-04', scene: '码头', characters: ['阿澜'], summary: '发现缆绳被割断。', dialogue: '', seconds: 40 }
+        ]
+      };
+      return x;
+    });
+    return p;
+  };
+
+  {
+    const p = mk();
+    await studio.analyzeScript(p.id, { force: true });
+    const after = store.read(p.id);
+
+    /**
+     * ⚠ 最要紧的一条：喂给模型的**是大纲，不是原始剧本**。
+     *
+     * 不查这个的话，大纲那一层可以完全没接上而这里全绿 ——
+     * 分镜照样拆得出来（模型读原始剧本一样能拆），只是你改的那份没起作用。
+     */
+    const sent = String(upstream.lastShotPrompt?.user || '');
+    check('喂给模型的是大纲里那几场，不是原始剧本',
+      /【场次 b-07】/.test(sent) && /走向栈桥/.test(sent), sent.slice(0, 120));
+    check('原始剧本没有被直接丢进去', !/发现缆绳被割断。$/.test(sent.trim()) || /【场次/.test(sent));
+
+    check('每一镜都标回了它属于哪一场', (after.shots || []).every((s) => s.beatId),
+      JSON.stringify((after.shots || []).map((s) => s.beatId)));
+    check('拆完之后那几场锁上了',
+      ol.normalizeOutline(after.outline).beats.every((b) => b.locked));
+
+    /**
+     * 时长按**大纲上每一场自己的估算**走，不再按字数比例分摊。
+     * 字数是个很糙的代理：同样两千字，全是对话的一场念完要 90 秒。
+     */
+    const sysPrompt = String(upstream.lastShotPrompt?.system || '');
+    const want = ol.estimateSeconds({ summary: '走向栈桥。', dialogue: '设备正常。', seconds: 30 }).suggested
+      + ol.estimateSeconds({ summary: '发现缆绳被割断。', dialogue: '', seconds: 40 }).suggested;
+    check('时长预算来自大纲，不是项目的目标时长',
+      sysPrompt.includes(String(want)), `期望含 ${want}；项目目标是 120`);
+  }
+
+  // ── 再拆一次：全锁着，要拦住并说清出路 ──
+  {
+    const p = mk();
+    await studio.analyzeScript(p.id, { force: true });
+    let msg = '';
+    try { await studio.analyzeScript(p.id, { force: true }); } catch (e) { msg = e.message; }
+    check('都拆过了就拦住，不闷头重拆', /都已经拆过/.test(msg), msg);
+    /**
+     * ⚠ 拦住的同时必须给**出路**。只说"拆过了"，人下一秒就问"那我怎么改"。
+     * 而且要说清解锁的代价 —— 那几场的图是花过钱的。
+     */
+    check('并且说清了怎么才能重拆', /解锁/.test(msg), msg);
+    check('还说清了重拆的代价（会作废已出的图）', /作废/.test(msg), msg);
+  }
+
+  // ── 只重拆一场：另一场的镜头原样留着 ──
+  {
+    const p = mk();
+    await studio.analyzeScript(p.id, { force: true });
+    // 假装两场都出过图了
+    store.update(p.id, (x) => {
+      x.shots.forEach((s) => { s.imagePath = `/img/${s.id}.png`; });
+      return x;
+    });
+    const before = store.read(p.id);
+    const keepIds = before.shots.filter((s) => s.beatId === 'b-04').map((s) => s.id);
+    const dropIds = before.shots.filter((s) => s.beatId === 'b-07').map((s) => s.id);
+    check('两场各自都拆出了镜头', keepIds.length > 0 && dropIds.length > 0,
+      JSON.stringify({ keep: keepIds.length, drop: dropIds.length }));
+
+    const un = studio.unlockOutlineBeats(p.id, { ids: ['b-07'] });
+    /**
+     * ⚠ 解锁时要回**会作废几镜**。只说"确定解锁吗"，人不知道自己在放弃什么 ——
+     * 而放弃的是已经花过钱的图。
+     */
+    check('解锁时说得出会作废几镜', un.willDrop === dropIds.length, `${un.willDrop} / ${dropIds.length}`);
+
+    await studio.analyzeScript(p.id, { force: true });
+    const after = store.read(p.id);
+    /**
+     * ════ 这一条就是这一整节存在的理由 ════
+     *
+     * 原来是**整章重拆**：第 3 场出过图、你只想改第 7 场，一拆全作废。
+     * 而那正是用户说"不要全部推到重来"时怕的那件事。
+     */
+    check('没解锁那一场的镜头原样还在（图也没丢）',
+      keepIds.every((id) => after.shots.some((s) => s.id === id && s.imagePath)),
+      JSON.stringify(after.shots.map((s) => [s.id, s.beatId, Boolean(s.imagePath)])));
+    check('解锁那一场被重拆了',
+      after.shots.some((s) => s.beatId === 'b-07'));
+    check('没有重复：同一场不会既留旧的又加新的',
+      new Set(after.shots.map((s) => s.id)).size === after.shots.length,
+      JSON.stringify(after.shots.map((s) => s.id)));
+
+    /**
+     * ⚠ 顺序要按**大纲里场次的顺序**，不能按 index 排。
+     *
+     * 留下那几镜和新拆那几镜的 index 都是从 1 开始的，按 index 排会把两批
+     * 交错在一起 —— 成片里第 2 场演到一半插进第 1 场的镜头，
+     * 而每一镜看着都正常。
+     *
+     * 这一条第一版是**空的**：只查了 id 不重复、没查顺序，
+     * 于是把排序改成"全部并列"照样全绿。
+     */
+    const seq = after.shots.map((s) => s.beatId);
+    const firstOf = (id) => seq.indexOf(id);
+    const lastOf = (id) => seq.lastIndexOf(id);
+    check('两批镜头没有交错：b-07 的全在 b-04 前面',
+      lastOf('b-07') < firstOf('b-04'), JSON.stringify(seq));
+    check('镜号是连着的，没有重号',
+      new Set(after.shots.map((s) => s.index)).size === after.shots.length,
+      JSON.stringify(after.shots.map((s) => s.index)));
+  }
+
+  // ── 没有大纲的项目：老路一点没变 ──
+  {
+    const p = store.create({ title: '没大纲', targetDuration: 60 });
+    store.update(p.id, (x) => {
+      x.script = '阿澜在码头巡查。';
+      x.bible = { style: { anchor: '国风', negative: '' },
+        characters: [{ name: '阿澜', appearance: '短发', seed: 1, sheetPath: '/a.png',
+          variants: [{ id: 'v-default', name: '默认', sheetPath: '/a.png' }] }],
+        scenes: [], props: [] };
+      return x;
+    });
+    await studio.analyzeScript(p.id, { force: true });
+    const after = store.read(p.id);
+    check('没有大纲时照旧读原始剧本', /阿澜在码头巡查/.test(String(upstream.lastShotPrompt?.user || '')));
+    check('没有大纲时不硬塞 beatId', (after.shots || []).every((s) => s.beatId === null));
+  }
+}
+
+section('剧本一章一章加：追加、补设定集、点名了不存在的人');
+{
+  const lint = await import('../core/pipeline/shotlint.js');
+  const consistency = await import('../core/pipeline/consistency.js');
+  const studio = studioModule;
+
+  // ── ③ 点名了设定集里没有的人 ──
+  {
+    const bible = {
+      characters: [{ name: '阿澜', appearance: '短发' }],
+      scenes: [{ name: '码头', appearance: '晨雾' }]
+    };
+    const kinds = (shots, b) => lint.lintShots(shots, { bible: b }).flatMap((r) => r.issues).map((i) => i.kind);
+
+    check('点名了设定集里没有的角色 → 报',
+      kinds([{ id: 'a', index: 1, characters: ['老周'], description: '他推门' }], bible).includes('cast-unknown'));
+    check('设定集里有的就不报',
+      !kinds([{ id: 'a', index: 1, characters: ['阿澜'], description: '他推门' }], bible).includes('cast-unknown'));
+    /**
+     * ⚠ 没有设定集时**不报**。
+     * 还没跑设定集那一步的项目，每一镜都会中 —— 那是把"还没到那一步"
+     * 说成"出错了"，而满屏假警报会让人学会无视所有警报。
+     */
+    check('还没有设定集时不报（那是"还没到那一步"，不是错）',
+      lint.lintShots([{ id: 'a', index: 1, characters: ['老周'] }]).length === 0);
+
+    check('场景不在设定集里也报',
+      kinds([{ id: 'a', index: 1, scene: '山神庙', description: 'x' }], bible).includes('scene-unknown'));
+    /**
+     * 说话人单独查一条：配音按角色分音色，找不到的说话人拿不到音色，
+     * 那句台词会用默认嗓子念 —— 同一个人在不同镜里换声音，比换脸还刺耳。
+     */
+    check('台词标着一个设定集里没有的人 → 单独报',
+      kinds([{ id: 'a', index: 1, speaker: '周叔', dialogue: '走吧' }], bible).includes('speaker-unknown'));
+
+    const one = lint.lintShots([{ id: 'a', index: 1, characters: ['老周'] }], { bible })[0].issues[0];
+    check('说清了后果是"静默降级"，不是一句"找不到"',
+      /悄悄丢掉|没有他/.test(one.why), one.why);
+    check('给了下一步该干什么', /补上新增|设定集/.test(one.fix), one.fix);
+  }
+
+  /**
+   * ── 道具连续性 ──
+   *
+   * 角色一致性有四层手段盯着（设定图、seed、参考图、复核打分），
+   * 而**道具一直全靠人眼**。可观众对道具凭空消失同样敏感：
+   * 柴刀第 8 镜握在手里、第 9 镜空手、第 10 镜又握着 —— 一眼就看得出来。
+   *
+   * ⚠ 这一块的全部难点在**不制造噪音**。一个道具没出现在某一镜里，
+   * 绝大多数时候完全正常（那是张特写脸）。乱报的检查比没有检查更糟。
+   */
+  {
+    const bible = { characters: [{ name: '阿澜' }], props: [{ name: '柴刀' }] };
+    const shot = (i, camera, props, segment = 1) => ({
+      id: `s${i}`, index: i, segment, camera, props, description: `第 ${i} 镜`
+    });
+    const kinds = (shots, b = bible) => lint.lintShots(shots, { bible: b })
+      .flatMap((r) => r.issues).map((i) => i.kind);
+
+    // 三明治：前有、后有、中间这一镜是全景却没有
+    const sandwich = [shot(1, '全景', ['柴刀']), shot(2, '全景', []), shot(3, '全景', ['柴刀'])];
+    check('前后都有、中间这一镜是全景却没有 → 报', kinds(sandwich).includes('prop-vanish'));
+
+    /**
+     * ⚠ 这一条是这一块能不能用的关键。
+     *
+     * 不看景别的话，每一个特写都会被报一次"道具消失" —— 而特写里
+     * 看不见道具是天经地义的。满屏假警报，人看两次就学会无视所有警报。
+     */
+    const closeup = [shot(1, '全景', ['柴刀']), shot(2, '特写', []), shot(3, '全景', ['柴刀'])];
+    check('中间是特写就不报（特写里看不见道具是正常的）',
+      !kinds(closeup).includes('prop-vanish'), JSON.stringify(kinds(closeup)));
+
+    /**
+     * ⚠ 只在**三明治**成立时报。
+     *
+     * 只看"前一镜有、这一镜没有"的话，道具正常退场（放下、收起、
+     * 人离开这个地方）全都会被报成穿帮 —— 而那是绝大多数情况。
+     */
+    const leaves = [shot(1, '全景', ['柴刀']), shot(2, '全景', []), shot(3, '全景', [])];
+    check('道具正常退场（后面再也没有）不报',
+      !kinds(leaves).includes('prop-vanish'), JSON.stringify(kinds(leaves)));
+
+    const enters = [shot(1, '全景', []), shot(2, '全景', ['柴刀']), shot(3, '全景', ['柴刀'])];
+    check('道具中途登场也不报', !kinds(enters).includes('prop-vanish'));
+
+    // 跨场次是另一个地方、另一段时间
+    const crossSeg = [shot(1, '全景', ['柴刀'], 1), shot(2, '全景', [], 2), shot(3, '全景', ['柴刀'], 3)];
+    check('跨场次不报（另一个地方、另一段时间）',
+      !kinds(crossSeg).includes('prop-vanish'), JSON.stringify(kinds(crossSeg)));
+
+    // 首尾两镜没有"前后都有"可言
+    check('第一镜和最后一镜不参与三明治判断',
+      !kinds([shot(1, '全景', []), shot(2, '全景', ['柴刀'])]).includes('prop-vanish'));
+
+    const one = lint.lintShots(sandwich, { bible })
+      .flatMap((r) => r.issues).find((i) => i.kind === 'prop-vanish');
+    check('报的时候说得出是哪件道具', /柴刀/.test(one.what), one.what);
+    check('并且说清了为什么这一镜该看得见', /全景|看得见/.test(one.why), one.why);
+    check('给了两条出路（补上 / 改景别）', /景别/.test(one.fix), one.fix);
+    check('算一般项，不是高危 —— 它有可能是误报', one.severity === 'normal');
+
+    // ── 点名了设定集里没有的道具 ──
+    {
+      const k = kinds([shot(1, '全景', ['铁剑'])]);
+      check('点名了设定集里没有的道具 → 报', k.includes('prop-unknown'));
+      check('设定集里有的就不报', !kinds([shot(1, '全景', ['柴刀'])]).includes('prop-unknown'));
+      /**
+       * 设定集里一件道具都没有时不报 —— 那是"还没到那一步"，不是错。
+       * 满屏假警报会让人学会无视所有警报。
+       */
+      check('设定集里一件道具都没有时不报',
+        !kinds([shot(1, '全景', ['铁剑'])], { characters: [], props: [] }).includes('prop-unknown'));
+      const u = lint.lintShots([shot(1, '全景', ['铁剑'])], { bible })
+        .flatMap((r) => r.issues).find((i) => i.kind === 'prop-unknown');
+      check('说清了后果是"同一把刀在不同镜里长得不一样"',
+        /长得不一样|参考图/.test(u.why), u.why);
+    }
+  }
+
+  // ── ② 增量补设定集：只加新的，老的一个字都不碰 ──
+  {
+    const bible = {
+      characters: [{ name: '阿澜', appearance: '短发', seed: 111, sheetPath: '/old/alan.png', voice: 'v1' }],
+      scenes: [{ name: '码头', appearance: '晨雾', seed: 222, sheetPath: '/old/dock.png' }],
+      props: []
+    };
+    const found = {
+      characters: [{ name: '阿澜', appearance: '模型这次把他写成了长发' }, { name: '老周', role: '船工', appearance: '花白胡子' }],
+      scenes: [{ name: '灯塔', appearance: '锈迹斑斑' }],
+      props: []
+    };
+    const added = consistency.mergeCast(bible, found, 'p-1');
+
+    check('只新增没见过的那几条', added.map((a) => a.name).join(',') === '老周,灯塔', JSON.stringify(added));
+    /**
+     * ⚠ 这一条是整块里最要紧的。
+     *
+     * 老条目被覆盖的话，"补一章"就变成了"把主角的脸和已经出好的参考图
+     * 一起换掉"—— 而观众对主角换脸最敏感，且要到成片里才看得出来。
+     */
+    const alan = bible.characters.find((c) => c.name === '阿澜');
+    check('已有的角色一个字都没动（描述、seed、参考图、音色）',
+      alan.appearance === '短发' && alan.seed === 111
+      && alan.sheetPath === '/old/alan.png' && alan.voice === 'v1', JSON.stringify(alan));
+    check('已有的场景也没动',
+      bible.scenes.find((s) => s.name === '码头').sheetPath === '/old/dock.png');
+
+    const zhou = bible.characters.find((c) => c.name === '老周');
+    check('新角色的 seed 和全量那条路推的是同一个',
+      zhou.seed === consistency.deriveSeed('p-1', 'char:老周'), String(zhou.seed));
+    check('新角色留了音色位（配音那步要按角色分音色）', zhou.voice === '');
+    check('新角色还没有参考图（等着出）', zhou.sheetPath === null);
+    check('新场景进了 scenes，不是塞进 characters',
+      bible.scenes.some((s) => s.name === '灯塔') && !bible.characters.some((c) => c.name === '灯塔'));
+
+    // 再并一次同一份，不该重复长出来
+    const again = consistency.mergeCast(bible, found, 'p-1');
+    check('同一份扫描结果并第二次不会重复长出来', again.length === 0, JSON.stringify(again));
+
+    // 设定集缺字段时也要能补进去（老项目的 bible 可能没有 props）
+    const bare = { characters: [] };
+    consistency.mergeCast(bare, { characters: [], scenes: [], props: [{ name: '柴刀', appearance: '缺口' }] }, 'p-2');
+    check('设定集缺 props 字段时也补得进去（不是 push 进一个临时数组）',
+      (bare.props || []).some((x) => x.name === '柴刀'), JSON.stringify(bare.props));
+  }
+
+  // ── ① 追加一章：前面的正文一个字都不动 ──
+  {
+    const p = store.create({ title: '连载' });
+    const ch1 = '第一章 出发\n阿澜在码头登船。雾很大。';
+    store.update(p.id, (x) => { x.script = ch1; return x; });
+    studio.splitChapters(p.id);
+    // 假装第一章已经跑完分镜了
+    store.update(p.id, (x) => {
+      x.chapters[0].stageStatus.script = 'done';
+      x.shots = [{ id: 's1', index: 1001, chapterId: x.chapters[0].id, description: '登船' }];
+      return x;
+    });
+
+    const before = store.read(p.id);
+    const r = studio.appendChapter(p.id, { title: '第二章 靠岸', script: '船靠上了灯塔下的礁石。老周跳下船。' });
+    const after = r.project;
+
+    check('章数从 1 变成 2', (after.chapters || []).length === 2, String((after.chapters || []).length));
+    /**
+     * ⚠ 这一条就是这颗按钮存在的全部理由。
+     *
+     * 手工往剧本框里粘贴时最容易毁掉的就是它：碰掉前面一个空格，
+     * 第一章就被判定"改过了"，已经出好的分镜全部作废重跑，
+     * 而且没有任何提示 —— 你要到重新分章之后才发现进度没了。
+     */
+    check('第一章的正文一个字都没变',
+      after.chapters[0].script === before.chapters[0].script,
+      JSON.stringify([before.chapters[0].script, after.chapters[0].script]));
+    check('第一章已跑完的状态保住了', after.chapters[0].stageStatus.script === 'done');
+    check('第一章的分镜没被清掉', (after.shots || []).some((s) => s.id === 's1'));
+    check('新章的正文进去了', /老周跳下船/.test(after.chapters[1].script), after.chapters[1].script);
+    check('新章是没跑过的状态', after.chapters[1].stageStatus.script !== 'done');
+    check('剧本正文里也有了（章节是从它切出来的，两边不能对不上）',
+      /老周跳下船/.test(after.script));
+    check('回的是刚追加的那一章', r.chapter && /第二章|靠岸/.test(r.chapter.title || ''), r.chapter?.title);
+
+    /**
+     * ⚠ 第一章**没有标题行**时也得追加得上。
+     *
+     * 这一条是浏览器走查抓出来的，而上面那几条全绿 —— 因为上面的夹具给
+     * 第一章写了「第一章 出发」这个标题行，正好是**能用的那种情况**。
+     *
+     * 真实的常态是：第一章直接粘进来、没有标题。这时候追加一个带标题的
+     * 第二章，全文只有一个标题行 —— 而 autoSplit 有条规矩"只认出一个标题
+     * 说明它多半是书名，不算数"，于是两章被并成一章，追加等于没发生。
+     *
+     * 又一次同样的教训：**夹具挑了顺的那种，把不顺的那种漏掉了。**
+     */
+    const p0 = store.create({ title: '第一章没标题' });
+    store.update(p0.id, (x) => { x.script = '阿澜在码头巡查，发现缆绳被割断。'; return x; });
+    studio.splitChapters(p0.id);
+    const c0 = store.read(p0.id).chapters[0].script;
+    const r0 = studio.appendChapter(p0.id, { title: '第二章 靠岸', script: '船靠上礁石。老周跳下船。' });
+    check('第一章没有标题行时，追加也真的多出一章',
+      (r0.project.chapters || []).length === 2,
+      (r0.project.chapters || []).map((c) => c.title).join(' | '));
+    check('而且第一章的正文仍然一个字没变',
+      r0.project.chapters[0].script === c0,
+      JSON.stringify([c0, r0.project.chapters[0].script]));
+    check('新章拿到了不重复的 id',
+      r0.project.chapters[1].id !== r0.project.chapters[0].id,
+      r0.project.chapters.map((c) => c.id).join(','));
+    check('剧本正文里也跟着有了', /老周跳下船/.test(r0.project.script));
+
+    // 正文自带标题行时不该再补一行，否则重切会多切一刀
+    const p2 = store.create({ title: '连载2' });
+    store.update(p2.id, (x) => { x.script = ch1; return x; });
+    studio.splitChapters(p2.id);
+    const r2 = studio.appendChapter(p2.id, { script: '第二章 靠岸\n船靠上了礁石。' });
+    check('正文自带章节标题时不重复补标题',
+      (r2.project.chapters || []).length === 2, String((r2.project.chapters || []).length));
+    check('空的一章要挡住', (() => {
+      try { studio.appendChapter(p2.id, { script: '   ' }); return false; } catch { return true; }
+    })());
+  }
+
+  // ── 没有新章可扫时，不该白跑一趟模型 ──
+  {
+    const p = store.create({ title: '都扫过了' });
+    store.update(p.id, (x) => {
+      x.script = '第一章 出发\n阿澜登船。';
+      x.bible = { style: { anchor: 'x' }, characters: [], scenes: [], props: [] };
+      return x;
+    });
+    studio.splitChapters(p.id);
+    store.update(p.id, (x) => { x.chapters.forEach((c) => { c.castScanned = true; }); return x; });
+    const notes = [];
+    const out = await studio.extendBible(p.id, { onEvent: (ev) => notes.push(ev.message || '') });
+    check('每一章都扫过时直接返回，不调模型', out.added.length === 0);
+    check('并且说清楚了为什么什么都没做',
+      notes.some((m) => /没有新章/.test(m)), notes.join(' | '));
+    // ⚠ extendBible 是 async：不 await 的话抛出来的是一个被拒绝的 Promise，
+    // 同步的 try/catch 一个字都接不住 —— 断言会永远判"没挡住"
+    const q = store.create({ title: '没设定集' });
+    store.update(q.id, (x) => { x.script = 'abc'; return x; });
+    let blocked = false;
+    try { await studio.extendBible(q.id); } catch { blocked = true; }
+    check('还没有设定集时挡住（这一条是往上面补，不是从零建）', blocked);
+  }
+}
+
 section('场地图：同一片地上的几个场景');
 {
   const site = await import('../core/pipeline/site.js');
@@ -2479,6 +3455,118 @@ section('场地图：同一片地上的几个场景');
     ]))[0];
     check('同名的近处地标不会被当成远景来比', site.farMarkIssues(mixed).length === 0,
       JSON.stringify(site.farMarkIssues(mixed).map((i) => i.what)));
+  }
+
+  /**
+   * ── 场地图上定过的那一份是基准 ──
+   *
+   * 不认基准的话，场地图上那一排远景地标和那个☀就是**纯装饰** ——
+   * 拖它们没有任何后果，而界面上它们看起来像设置。
+   * 一个拖了不起作用的控件，比没有这个控件更糟。
+   */
+  {
+    const withAnchor = (sites, scenes) => ({ bible: { sites, scenes } });
+
+    // 场地上定了「山」在北（20°），而大殿里摆成了南（200°）
+    const p = withAnchor(
+      { 雪山: { marks: [{ name: '山', far: true, deg: 20 }] } },
+      [sc('大殿', 0, 30, null, [{ name: '山', far: true, deg: 200 }])]
+    );
+    const one = site.sitesOf(p)[0];
+    const far = site.farMarkIssues(one);
+    /**
+     * ⚠ 只有**一个**场景也要能报。
+     * 原来是拿"第一个场景"当参照，一个场景时无从比起 —— 于是
+     * "整片场地只用了一个场景，而它摆错了"这种情况永远查不出来。
+     */
+    check('场地上定过基准时，单个场景也查得出来', far.length === 1, JSON.stringify(far));
+    check('说得出是"场地图上定的"那一份，而不是含糊地说两个场景对不上',
+      /场地图上定的/.test(far[0]?.what || ''), far[0]?.what);
+
+    const sunP = withAnchor(
+      { 雪山: { sun: { deg: 135, elev: 'low' } } },
+      [sc('大殿', 0, 30, { deg: 40, elev: 'low' })]
+    );
+    const sun = site.sunIssues(site.sitesOf(sunP)[0]);
+    check('太阳也认场地图上定的那一份', sun.length === 1 && /场地图上定的光/.test(sun[0].what), sun[0]?.what);
+
+    // 场地上没定过就退回老办法：拿第一个场景当参照，只说"这两个对不上"
+    const noAnchor = site.sitesOf(mk([
+      sc('山门外', 0, 0, { deg: 135, elev: 'low' }),
+      sc('大殿', 0, 30, { deg: 40, elev: 'low' })
+    ]))[0];
+    const s2 = site.sunIssues(noAnchor);
+    check('场地上没定过时，退回拿第一个场景当参照',
+      s2.length === 1 && !/场地图上定的/.test(s2[0].what), s2[0]?.what);
+  }
+
+  // ── 套用：问题旁边那条出口 ──
+  {
+    const model = {
+      name: '雪山',
+      marks: [{ name: '山', far: true, deg: 20 }],
+      sun: { deg: 135, elev: 'low' },
+      places: []
+    };
+    /**
+     * ⚠ 近处地标**一个都不能动**。
+     *
+     * 门窗桌椅有坐标、有视差，本来就该每个场景各不相同。一起覆盖掉的话，
+     * 这颗按钮就从"对齐远景"变成了"把每个场景的房间布局清空"——
+     * 而它字面上看起来是在帮忙，且不可撤销。
+     */
+    const layout = {
+      marks: [{ name: '门', x: 1, y: 2 }, { name: '山', far: true, deg: 200 }],
+      sun: { deg: 40, elev: 'high' }
+    };
+    const out = site.alignSceneToSite(layout, model);
+    check('套用之后近处的门还在，坐标没变',
+      out.marks.some((m) => m.name === '门' && m.x === 1 && m.y === 2), JSON.stringify(out.marks));
+    check('远景的山换成了场地图那一份',
+      out.marks.filter((m) => m.far && m.name === '山').length === 1
+      && out.marks.find((m) => m.far && m.name === '山').deg === 20, JSON.stringify(out.marks));
+    check('太阳换成了场地图那一份', out.sun.deg === 135 && out.sun.elev === 'low', JSON.stringify(out.sun));
+
+    /**
+     * 场地上没摆太阳时**保留场景自己那个**，不要清成 null。
+     * "没定基准"和"基准是没有太阳"是两回事，后者会把每个场景
+     * 辛苦摆的光位一次抹掉。
+     */
+    const noSun = site.alignSceneToSite(layout, { ...model, sun: null });
+    check('场地上没摆太阳时，保留场景自己那个（不清空）',
+      noSun.sun?.deg === 40, JSON.stringify(noSun.sun));
+
+    /**
+     * 没有基准就不该摆那颗"套用"按钮 —— 点下去只能套一片空白。
+     *
+     * ⚠ 这一条的**第一版又是假绿的**，和前面那条近处地标犯的是同一个毛病：
+     * 原来传的是 `places: []`，那时候 alignable 走到底也找不出任何问题，
+     * 返回 false —— 于是把"没有基准"那道判断整个删掉，断言照样通过。
+     *
+     * 真正要摆的局面是：**两个场景之间确实对不上，但场地上没定过基准**。
+     * 有毛病、却没有可套的东西 —— 这才是那道判断在守的事。
+     */
+    const drifting = site.sitesOf(mk([
+      sc('山门外', 0, 0, { deg: 135, elev: 'low' }),
+      sc('大殿', 0, 30, { deg: 40, elev: 'low' })
+    ]))[0];
+    check('两个场景对不上、但场地上没定过基准时，不给"套用"',
+      site.alignable(drifting) === false,
+      `问题有 ${site.sunIssues(drifting).length} 条，但没有可套的基准`);
+    const bad = site.sitesOf({
+      bible: {
+        sites: { 雪山: { marks: [{ name: '山', far: true, deg: 20 }] } },
+        scenes: [sc('大殿', 0, 30, null, [{ name: '山', far: true, deg: 200 }])]
+      }
+    })[0];
+    check('有基准而且真的对不上时，才给"套用"', site.alignable(bad) === true);
+    const good = site.sitesOf({
+      bible: {
+        sites: { 雪山: { marks: [{ name: '山', far: true, deg: 20 }] } },
+        scenes: [sc('大殿', 0, 30, null, [{ name: '山', far: true, deg: 22 }])]
+      }
+    })[0];
+    check('本来就一致时不摆按钮（没有要套的）', site.alignable(good) === false);
   }
 
   // ── 叠在一起 ──
@@ -9540,6 +10628,62 @@ section('三端对齐：谁该有什么功能');
   });
   check('手机端是能干活的客户端，不是只读的遥控器',
     notEditable.length === 0, notEditable.join('、'));
+}
+
+section('预演台工业对象模型');
+{
+  const ps = await import('../ui/previz-stage.js');
+  const stage = { cam: { x: 0, y: -3 }, subjects: [{ name: '阿澜', x: 0, y: 0 }, { name: '阿澜', x: 1, y: 0 }], marks: [{ name: '桌', x: 2, y: 1 }] };
+  ps.normalizeStage(stage);
+  check('旧排位自动补稳定 ID 且重名不冲突',
+    stage.subjects[0].id === 'actor-阿澜' && stage.subjects[1].id === 'actor-阿澜-2');
+  const ids = ps.stageObjects(stage).map((x) => x.item.id);
+  ps.normalizeStage(stage);
+  check('重复规范化不会改对象 ID', ps.stageObjects(stage).map((x) => x.item.id).join() === ids.join());
+  const history = ps.createHistory(stage);
+  stage.subjects[0].x = 3;
+  history.commit();
+  check('撤销恢复拖动前坐标', history.undo() && stage.subjects[0].x === 0);
+  check('重做恢复拖动后坐标', history.redo() && stage.subjects[0].x === 3);
+  const key = ps.addKeyframe(stage, 24, [stage.cam.id, stage.subjects[0].id]);
+  check('关键帧按稳定 ID 保存空间变换', key.frame === 24 && Boolean(key.values[stage.cam.id]) && Boolean(key.values[stage.subjects[0].id]));
+  check('对象锁定字段进入可持久化数据', (stage.subjects[0].locked = true) && JSON.parse(ps.snapshot(stage)).subjects[0].locked === true);
+}
+
+section('工业化升级：实例路由、任务账本和控制图');
+{
+  const settingsMod = await import('../core/settings.js');
+  const providersRuntime = await import('../core/providers/index.js');
+  const oldInstances = settingsMod.get('providerInstances') || [];
+  settingsMod.patch({ providerInstances: [{ id: 'instance-openai-production', providerId: 'openai', name: 'OpenAI 生产账号', baseUrl: 'https://gateway.example/v1' }] });
+  const instance = providersRuntime.getProvider('instance-openai-production');
+  check('同一家服务商可以建立独立实例', instance?.providerId === 'openai' && instance?.instance === true);
+  check('实例使用自己的地址和密钥命名空间',
+    providersRuntime.baseUrlOf(instance) === 'https://gateway.example/v1'
+      && instance.auth.secret === 'instance-openai-production.OPENAI_API_KEY');
+  check('服务商实例进入岗位可选目录', providersRuntime.catalogForUI().some((x) => x.id === instance.id));
+  settingsMod.patch({ providerInstances: oldInstances });
+
+  const jobsMod = await import('../core/jobs.js');
+  jobsMod.__reset();
+  const ledger = jobsMod.start('ledger-project', 'video');
+  jobsMod.update(ledger, { type: 'shot', shotId: 's1', shotIndex: 1, status: 'queued', message: '排队' });
+  jobsMod.update(ledger, { type: 'shot', shotId: 's1', status: 'done', message: '下载完成' });
+  check('任务账本记录逐镜状态和阶段', jobsMod.describe('ledger-project').items[0]?.status === 'done');
+  jobsMod.finish(ledger);
+  check('任务结束后最近结果仍可查询', jobsMod.describe('ledger-project').running === false && jobsMod.describe('ledger-project').completed === 1);
+  jobsMod.__reset();
+
+  const controls = await import('../core/pipeline/controlmaps.js');
+  const maps = controls.renderControls({ cam: { x: 0, y: -3, height: 1.6, lens: 35 }, subjects: [{ id: 'actor-a', name: '阿澜', x: 0, y: 0, height: 1.72 }], marks: [{ id: 'prop-table', name: '桌', x: 1, y: 1 }] });
+  check('预演台能输出可见首帧、深度图和遮罩图',
+    [maps.start, maps.depth, maps.mask].every((x) => x.startsWith('<svg') && x.includes('1280')));
+  check('控制图保留稳定对象标识和深度', maps.objects[0]?.id && Number.isFinite(maps.objects[0]?.depth));
+
+  const previzUi = fs.readFileSync(path.join(PROJECT_ROOT, 'ui', 'previz-canvas.js'), 'utf8');
+  check('工作台有摄影机取景、关键帧和资产拖入',
+    /cameraViewport/.test(previzUi) && /addKeyframe/.test(previzUi) && /application\/x-futuredream-asset/.test(previzUi));
+  check('工作台直接展示控制图而不是 JSON 链接', /previz-control-shelf/.test(previzUi) && /输出首帧 \/ 深度 \/ 遮罩/.test(previzUi));
 }
 
 section('根地址：手机去手机版，电脑留电脑版');

@@ -20,6 +20,7 @@ import * as settings from './settings.js';
 import * as vault from './vault.js';
 import * as logbus from './logbus.js';
 import * as httpClient from './http-client.js';
+import * as comfy from './providers/comfy.js';
 import * as store from './store.js';
 import * as ffmpeg from './ffmpeg.js';
 import * as providers from './providers/index.js';
@@ -726,6 +727,30 @@ async function handleApi(req, res, url, { lan = false } = {}) {
   // ---- 服务商 ----
   // 打开应用时自动跑这一条：只发各家最便宜的探针，不出图不出视频。
   // 配置坏了的代价不是"自检红一下"，而是你跑到第 04 步等两分钟才被告知密钥没配。
+  /**
+   * 看一眼这份 ComfyUI 工作流：认出几个节点、打了哪几个标记。cap:comfy-workflow
+   *
+   * ⚠ 为什么要有这条路由：贴完当场就得告诉他缺不缺 FD_PROMPT。
+   * 等到真出图才发现的话，表现是"图能出、不花钱、改描述毫无反应"——
+   * 这条路上最难查的一种坏法。
+   *
+   * 校验逻辑在 providers/comfy.js 里，它 import 了 http-client（有 node: 依赖），
+   * 所以发不给浏览器 —— 只能走这条路由。
+   */
+  if (a === 'comfy' && b === 'inspect' && method === 'POST') {
+    const { workflow } = await readBody(req);
+    try {
+      const wf = comfy.parseWorkflow(workflow);
+      return json(res, 200, {
+        nodes: Object.keys(wf).length,
+        markers: comfy.markersIn(wf),
+        names: comfy.MARKERS
+      });
+    } catch (err) {
+      return json(res, 200, { error: err.message, names: comfy.MARKERS });
+    }
+  }
+
   if (a === 'routing' && b === 'check' && method === 'POST') {
     return json(res, 200, await providers.probeRouting());
   }
@@ -976,7 +1001,23 @@ async function handleApi(req, res, url, { lan = false } = {}) {
      * 挂在场景上的那份是各摆各的，于是同一座山上三场戏三个方向的光 ——
      * 而这正是检查要抓的东西。
      */
-    if (b && c === 'site' && method === 'POST') {
+    /**
+     * 把场地上定的远景地标和光位，一次套到这片场地的所有场景上。cap:site-map
+     *
+     * ⚠ 必须排在下面那条 `c === 'site'` **前面**：那条不看 d，
+     * 排在后面的话这条永远轮不到，而表现是"点了按钮，接口回 200，
+     * 什么也没发生"—— 最难查的一种。
+     */
+    if (b && c === 'site' && d === 'apply' && method === 'POST') {
+      const { site } = await readBody(req);
+      try {
+        return json(res, 200, studio.applySiteLayout(b, site));
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
+    }
+
+    if (b && c === 'site' && !d && method === 'POST') {
       const { site, marks, sun } = await readBody(req);
       try {
         return json(res, 200, studio.saveSiteMap(b, site, { marks, sun }));
@@ -1099,16 +1140,50 @@ async function handleApi(req, res, url, { lan = false } = {}) {
     // ── 单镜重出：图或视频，可临时换服务商/模型 ──
     if (b && c === 'shots' && d && e === 'regenerate' && method === 'POST') {
       const opts = await readBody(req);
+      let job;
+      try {
+        job = jobs.start(b, opts.kind === 'video' ? 'video' : 'assets');
+        jobs.update(job, { type: 'shot', shotId: d, status: 'queued', message: '已进入生成队列' });
+      } catch (err) {
+        return json(res, err.code === 'BUSY' ? 409 : 500, { error: err.message });
+      }
       const stream = ndjson(res);
       req.on('close', () => stream.end());
       try {
         const run = opts.kind === 'video' ? studio.regenerateShotVideo : studio.regenerateShot;
-        const project = await run(b, d, opts, (ev) => stream.send(ev));
+        const project = await run(b, d, opts, (ev) => { jobs.update(job, ev); stream.send(ev); });
         stream.end({ type: 'finished', project });
       } catch (err) {
         stream.end({ type: 'error', message: err.message });
+      } finally {
+        jobs.finish(job);
       }
       return undefined;
+    }
+
+    // 单镜生产清单：每次生成的服务商、模型、提示词、参考图、种子和产物可追溯。
+    if (b && c === 'shots' && d && e === 'manifest' && method === 'GET') {
+      const project = store.read(b);
+      const shot = project?.shots?.find((s) => s.id === d);
+      if (!shot) return json(res, 404, { error: '没有这一镜' });
+      return json(res, 200, {
+        projectId: b, shotId: shot.id, index: shot.index,
+        current: {
+          image: shot.imagePath || null, video: shot.videoPath || null,
+          imageModel: shot.modelUsed || null, videoModel: shot.videoModelUsed || null,
+          seed: shot.seed ?? null, imagePrompt: shot.prompt || null, videoPrompt: shot.videoPrompt || null
+        },
+        history: shot.generationHistory || []
+      });
+    }
+
+    if (b && c === 'shots' && d && e === 'controls' && method === 'POST') {
+      try {
+        const body = await readBody(req);
+        return json(res, 200, studio.exportShotControls(b, d, body.stage || null));
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
     }
 
     // ── 待认领的任务：查一次，不重新生成，所以不花钱 ──
@@ -1291,7 +1366,114 @@ async function handleApi(req, res, url, { lan = false } = {}) {
         }
         return undefined;
       }
+      /**
+       * 追加一章。cap:append-chapter
+       *
+       * 剧本一章一章来的时候走这条 —— 往剧本末尾拼，然后按老规矩重切。
+       * 手工粘贴的毛病是容易碰到前面的正文：动了一个空格，那一章就被
+       * 判定"改过了"，已出的分镜全部作废重跑。这条路碰不到前面。
+       */
+      if (d === 'append' && method === 'POST') {
+        const { title, script } = await readBody(req);
+        try {
+          return json(res, 200, studio.appendChapter(b, { title, script }));
+        } catch (err) {
+          return json(res, 400, { error: err.message });
+        }
+      }
       if (method === 'DELETE') return json(res, 200, studio.clearChapters(b));
+    }
+
+    /**
+     * ── 大纲 ──
+     *
+     * 剧本和分镜之间那一层，**可以商量的那一层**。
+     * 分镜表是个很坏的对话对象：二十镜、每镜六七个字段，想说"第三场太拖了"
+     * 得手工改十几行；让模型重跑一次，它会把已经审过的镜全换掉。
+     */
+    if (b && c === 'outline') {
+      // 生成一份。cap:outline
+      if (d === 'build' && method === 'POST') {
+        const opts = await readBody(req);
+        const stream = ndjson(res);
+        req.on('close', () => stream.end());
+        try {
+          const project = await studio.buildOutline(b, { ...opts, onEvent: (ev) => stream.send(ev) });
+          stream.end({ type: 'finished', project });
+        } catch (err) {
+          stream.end({ type: 'error', message: err.message });
+        }
+        return undefined;
+      }
+      /**
+       * 和模型商量着改 —— **只回建议，不落盘**。cap:outline-revise
+       *
+       * 分成"要建议"和"应用建议"两步是这件事的关键：模型直接改的话，
+       * 你没法知道它动了哪儿，而"看不出动了哪儿"和"全部推倒重来"
+       * 在后果上是一样的。
+       */
+      if (d === 'revise' && method === 'POST') {
+        const opts = await readBody(req);
+        try {
+          return json(res, 200, await studio.reviseOutline(b, opts));
+        } catch (err) {
+          return json(res, 400, { error: err.message });
+        }
+      }
+      // 把人勾中的那几条落盘。cap:outline-revise
+      if (d === 'apply' && method === 'POST') {
+        const { ops } = await readBody(req);
+        try {
+          return json(res, 200, studio.applyOutlineOps(b, { ops }));
+        } catch (err) {
+          return json(res, 400, { error: err.message });
+        }
+      }
+      /**
+       * 解锁某几场，准备重拆。cap:outline-revise
+       *
+       * ⚠ 必须是人点的动作。解锁之后重拆会作废那几场已经出好的图 ——
+       * 作废是对的（内容变了，旧图对不上新分镜），但它花过钱。
+       */
+      if (d === 'unlock' && method === 'POST') {
+        const { ids } = await readBody(req);
+        try {
+          return json(res, 200, studio.unlockOutlineBeats(b, { ids }));
+        } catch (err) {
+          return json(res, 400, { error: err.message });
+        }
+      }
+
+      // 手改一场（不经过模型）。cap:outline
+      // ⚠ 动词在前、id 在后（outline/beat/:id）。反过来写的话
+      // `outline/build` 里的 build 会被当成 id，两条路由撞在一起
+      if (d === 'beat' && e && method === 'PATCH') {
+        const fields = await readBody(req);
+        try {
+          return json(res, 200, studio.editOutlineBeat(b, e, fields));
+        } catch (err) {
+          return json(res, 400, { error: err.message });
+        }
+      }
+    }
+
+    /**
+     * 增量补设定集：只加新来的角色和场景，已有的一条都不动。cap:extend-bible
+     *
+     * 走流式 —— 它要给新条目出参考图，那是几十秒到几分钟的事，
+     * 没有进度的话人会以为卡住了。
+     */
+    if (b && c === 'extend-bible' && method === 'POST') {
+      const opts = await readBody(req);
+      const stream = ndjson(res);
+      req.on('close', () => stream.end());
+      try {
+        const { project, added } = await studio.extendBible(b, { ...opts, onEvent: (ev) => stream.send(ev) });
+        stream.end({ type: 'finished', project, added });
+      } catch (err) {
+        stream.end({ type: 'error', message: err.message });
+      }
+      return undefined;
     }
 
     /**
@@ -1388,7 +1570,7 @@ async function handleApi(req, res, url, { lan = false } = {}) {
           ...opts,
           signal: job.signal,
           onEvent: (ev) => {
-            if (ev?.message) job.note = String(ev.message).slice(0, 120);
+            jobs.update(job, ev);
             /**
              * 顺手把"跑到哪一镜"记进登记表。
              *
@@ -1499,7 +1681,7 @@ export function createServer({ lan = false } = {}) {
        * 放行的是这两个确切的路径，不是"所有 .js"—— 后者会把电脑版
        * 整套界面代码一起放出去，那不是同一件事。
        */
-      const SHARED_MODULES = ['/previz-canvas.js', '/site-canvas.js', '/previz.js', '/site.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js'];
+      const SHARED_MODULES = ['/previz-canvas.js', '/previz-stage.js', '/site-canvas.js', '/previz.js', '/site.js', '/outline.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js'];
       const isShell =
         url.pathname === '/m'
         || url.pathname.startsWith('/m/')
@@ -1626,6 +1808,23 @@ export function createServer({ lan = false } = {}) {
        * 而同一份计算在服务端判断太阳对不对得上、远景地标有没有跑。
        * 界面里另写一份的话，图上说正北、检查说西北 —— 两句话都是我们说的。
        */
+      /**
+       * 大纲那一层也发原件。
+       *
+       * 界面上那份"这一场大约多少秒、这份大纲一共多长、超没超预算"
+       * 必须和服务端算的是同一套 —— 界面说装得下、拆出来念不完，
+       * 两句话都是我们自己说的。
+       *
+       * 它 import 的 `../duration.js` 在浏览器里从 `/outline.js` 出发
+       * 解析到 `/duration.js`，那条路由是有的。
+       */
+      if (url.pathname === '/outline.js') {
+        return fs.readFile(path.join(HERE, 'pipeline', 'outline.js'), (err, data) => {
+          if (err) return json(res, 404, { error: '找不到 outline.js' });
+          res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
+          res.end(data);
+        });
+      }
       if (url.pathname === '/site.js') {
         return fs.readFile(path.join(HERE, 'pipeline', 'site.js'), (err, data) => {
           if (err) return json(res, 404, { error: '找不到 site.js' });

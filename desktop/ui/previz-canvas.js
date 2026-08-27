@@ -23,6 +23,7 @@
  */
 
 import * as previz from '/previz.js';
+import { addKeyframe, createHistory, findObject, normalizeStage, stageObjects } from './previz-stage.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -329,7 +330,10 @@ export function blockingCanvas(stage, { size = 320, onChange = () => {} } = {}) 
  * 这里用等距投影把同一份米制坐标画成立体舞台；拖动仍落回地面 x/y，因而
  * 越轴、景别、继承和最终提示词继续读取原来的 stage 数据，不会出现两套真相。
  */
-export function director3dCanvas(stage, { size = 520, onChange = () => {} } = {}) {
+export function director3dCanvas(stage, {
+  size = 520, onChange = () => {}, onSelect = () => {}, onCommit = () => {}, selected = () => '', onAssetDrop = () => {}
+} = {}) {
+  normalizeStage(stage);
   const svg = el('svg', {
     viewBox: `0 0 ${size} ${Math.round(size * 0.72)}`,
     class: 'previz-canvas previz-3d',
@@ -350,6 +354,17 @@ export function director3dCanvas(stage, { size = 520, onChange = () => {} } = {}
   };
 
   svg.append(el('rect', { x: 0, y: 0, width: size, height, class: 'previz-3d-sky' }));
+  svg.addEventListener('dragover', (ev) => { ev.preventDefault(); svg.classList.add('drag-over'); });
+  svg.addEventListener('dragleave', () => svg.classList.remove('drag-over'));
+  svg.addEventListener('drop', (ev) => {
+    ev.preventDefault(); svg.classList.remove('drag-over');
+    try {
+      const asset = JSON.parse(ev.dataTransfer.getData('application/x-futuredream-asset'));
+      const rect = svg.getBoundingClientRect();
+      const p = unproject(((ev.clientX - rect.left) / rect.width) * size, ((ev.clientY - rect.top) / rect.height) * height);
+      onAssetDrop(asset, p);
+    } catch { /* 不是本应用的资产，忽略 */ }
+  });
   const floor = el('g');
   const layer = el('g');
   svg.append(floor, layer);
@@ -362,10 +377,12 @@ export function director3dCanvas(stage, { size = 520, onChange = () => {} } = {}
   }
 
   function draggable(node, target) {
-    node.style.cursor = 'grab';
+    node.style.cursor = target.locked ? 'not-allowed' : 'grab';
     node.addEventListener('pointerdown', (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
+      onSelect(target.id);
+      if (target.locked) return;
       node.setPointerCapture(ev.pointerId);
       const rect = svg.getBoundingClientRect();
       const move = (e) => {
@@ -382,6 +399,7 @@ export function director3dCanvas(stage, { size = 520, onChange = () => {} } = {}
         svg.removeEventListener('pointermove', move);
         svg.removeEventListener('pointerup', up);
         svg.removeEventListener('pointercancel', up);
+        onCommit();
       };
       svg.addEventListener('pointermove', move);
       svg.addEventListener('pointerup', up);
@@ -407,6 +425,9 @@ export function director3dCanvas(stage, { size = 520, onChange = () => {} } = {}
       const item = thing.item;
       const base = project(item.x, item.y, 0);
       const g = el('g');
+      g.dataset.objectId = item.id;
+      if (selected() === item.id) g.classList.add('selected');
+      if (item.locked) g.classList.add('locked');
       if (thing.type === 'subject') {
         const bodyH = Number(item.height || 1.72);
         const waist = project(item.x, item.y, bodyH * 0.48);
@@ -462,7 +483,7 @@ export const LENSES = [24, 35, 50, 85, 135];
 /** 一个还没排过位的镜头，从哪儿开始。人在中间、机位在正前方三米 */
 export function blankStage(names = []) {
   const list = (names.length ? names : ['主体']).slice(0, 4);
-  return {
+  return normalizeStage({
     cam: { x: 0, y: -3, height: 1.6, lens: 35, move: {} },
     subjects: list.map((name, i) => ({
       name,
@@ -472,7 +493,53 @@ export function blankStage(names = []) {
       // 默认背对的话每一镜都要先转个身
       facing: 180
     }))
-  };
+  });
+}
+
+/** 摄影机真正会看到的简化取景框；用相同米制数据即时计算，不另存一份构图。 */
+export function cameraViewport(stage, { width = 480 } = {}) {
+  normalizeStage(stage);
+  const height = Math.round(width * 9 / 16);
+  const svg = el('svg', { viewBox: `0 0 ${width} ${height}`, class: 'previz-camera-view' });
+  const bg = el('rect', { x: 0, y: 0, width, height, class: 'previz-camera-bg' });
+  const layer = el('g');
+  svg.append(bg, layer);
+  function redraw() {
+    layer.replaceChildren();
+    const cam = stage.cam;
+    const target = stage.subjects[0] || { x: 0, y: 0 };
+    const look = Math.atan2(target.y - cam.y, target.x - cam.x);
+    const focal = Math.max(24, Number(cam.lens || 35));
+    const horizon = height * (0.52 + (Number(cam.height || 1.6) - 1.6) * .04);
+    layer.append(el('line', { x1: 0, y1: horizon, x2: width, y2: horizon, class: 'previz-camera-horizon' }));
+    const visible = [];
+    for (const entry of stageObjects(stage).filter((x) => x.kind !== 'camera')) {
+      const dx = Number(entry.item.x) - Number(cam.x), dy = Number(entry.item.y) - Number(cam.y);
+      const depth = dx * Math.cos(look) + dy * Math.sin(look);
+      const side = -dx * Math.sin(look) + dy * Math.cos(look);
+      if (depth <= .15) continue;
+      visible.push({ ...entry, depth, side });
+    }
+    visible.sort((a, b) => b.depth - a.depth);
+    for (const entry of visible) {
+      const scale = Math.min(3, focal / 35 * 3.4 / entry.depth) * Number(entry.item.scale || 1);
+      const x = width / 2 + entry.side * width * .16 * scale;
+      const h = Math.max(14, Number(entry.item.height || 1) * height * .24 * scale);
+      const y = horizon - h * .12;
+      const node = entry.kind === 'subject'
+        ? el('rect', { x: x - h * .16, y: y - h, width: h * .32, height: h, rx: h * .14, class: 'previz-camera-subject' })
+        : el('rect', { x: x - h * .3, y: y - h * .75, width: h * .6, height: h * .75, class: 'previz-camera-prop' });
+      layer.append(node, labelAtViewport(entry.item.name || '道具', x, Math.max(14, y - h - 5)));
+    }
+    layer.append(el('path', { d: `M ${width / 2 - 10} ${height / 2} h 20 M ${width / 2} ${height / 2 - 10} v 20`, class: 'previz-camera-cross' }));
+  }
+  function labelAtViewport(text, x, y) {
+    const t = el('text', { x, y, class: 'previz-camera-label' });
+    t.textContent = String(text).slice(0, 6);
+    return t;
+  }
+  redraw();
+  return { node: svg, redraw };
 }
 
 /**
@@ -487,19 +554,38 @@ export function blankStage(names = []) {
  */
 export function previzPanel(stage, {
   size = 320, onChange = () => {}, prevStage = null,
+  duration = 5, assets = [],
   /** 这一镜属于哪个场景。给了才摆得出"存成这个场景的默认布局"那颗按钮 */
   scene = '',
   /** 存：把地标和光位挂到设定集的场景上。回一个 Promise */
   onSaveScene = null,
   /** 套用：把那个场景已经存过的布局搬过来 */
-  sceneLayout = null
+  sceneLayout = null,
+  onExportControls = null
 } = {}) {
+  normalizeStage(stage);
   const host = document.createElement('div');
   host.className = 'previz-panel';
 
-  const redrawAll = () => { canvas.redraw(); director.redraw(); refresh(); };
+  const history = createHistory(stage);
+  let selectedId = stage.cam.id;
+
+  const redrawAll = () => { canvas.redraw(); director.redraw(); viewport.redraw(); refresh(); paintInspector(); paintTimeline(); };
   const canvas = blockingCanvas(stage, { size, onChange: () => { director.redraw(); refresh(); onChange(); } });
-  const director = director3dCanvas(stage, { size: Math.max(460, size), onChange: () => { canvas.redraw(); refresh(); onChange(); } });
+  const director = director3dCanvas(stage, {
+    size: Math.max(460, size), selected: () => selectedId,
+    onSelect: (id) => { selectedId = id; redrawAll(); },
+    onCommit: () => { history.commit(); paintInspector(); onChange(); },
+    onAssetDrop: (asset, p) => {
+      if (asset.kind === 'scene') stage.backdrop = { name: asset.name, image: asset.image || '' };
+      else if (asset.kind === 'character') stage.subjects.push({ name: asset.name, x: p.x, y: p.y, facing: 180, height: 1.72, assetRef: asset.ref, thumbnail: asset.image });
+      else stage.marks.push({ name: asset.name, x: p.x, y: p.y, height: .9, width: .9, assetRef: asset.ref, thumbnail: asset.image });
+      normalizeStage(stage);
+      history.commit(); redrawAll(); onChange();
+    },
+    onChange: () => { canvas.redraw(); refresh(); onChange(); }
+  });
+  const viewport = cameraViewport(stage, { width: Math.max(460, size) });
   canvas.node.hidden = true;
   const viewBar = document.createElement('div');
   viewBar.className = 'previz-viewbar';
@@ -520,6 +606,11 @@ export function previzPanel(stage, {
     viewBar.append(b);
   }
   viewBar.append(viewHint);
+  const undoBtn = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '撤销' });
+  const redoBtn = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '重做' });
+  undoBtn.onclick = () => { if (history.undo()) { redrawAll(); onChange(); } };
+  redoBtn.onclick = () => { if (history.redo()) { redrawAll(); onChange(); } };
+  viewBar.append(undoBtn, redoBtn);
   const readout = document.createElement('div');
   readout.className = 'previz-readout';
 
@@ -533,6 +624,90 @@ export function previzPanel(stage, {
 
   const controls = document.createElement('div');
   controls.className = 'previz-controls';
+  const inspector = document.createElement('div');
+  inspector.className = 'previz-inspector';
+  const timeline = document.createElement('div');
+  timeline.className = 'previz-timeline';
+  let currentFrame = 0;
+  const assetShelf = document.createElement('div');
+  assetShelf.className = 'previz-assets';
+  if (assets.length) {
+    assetShelf.append(Object.assign(document.createElement('b'), { textContent: '项目资产 · 拖到 3D 画布' }));
+    for (const asset of assets) {
+      const card = document.createElement('div');
+      card.className = 'previz-asset'; card.draggable = true; card.title = `拖入${asset.kind === 'character' ? '人物' : asset.kind === 'scene' ? '场景' : '道具'}：${asset.name}`;
+      if (asset.image) card.append(Object.assign(document.createElement('img'), { src: asset.image, alt: asset.name }));
+      card.append(Object.assign(document.createElement('span'), { textContent: asset.name }));
+      card.ondragstart = (ev) => ev.dataTransfer.setData('application/x-futuredream-asset', JSON.stringify(asset));
+      assetShelf.append(card);
+    }
+  }
+  const controlShelf = document.createElement('div');
+  controlShelf.className = 'previz-control-shelf';
+  if (onExportControls) {
+    const exportBtn = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '输出首帧 / 深度 / 遮罩' });
+    exportBtn.onclick = async () => {
+      exportBtn.disabled = true; exportBtn.textContent = '正在输出…';
+      try {
+        const maps = await onExportControls(stage);
+        controlShelf.replaceChildren(exportBtn);
+        for (const [key, label] of [['start', '首帧构图'], ['depth', '深度图'], ['mask', '对象遮罩']]) {
+          if (!maps?.[key]) continue;
+          const card = document.createElement('a'); card.className = 'previz-control'; card.href = maps[key]; card.target = '_blank';
+          card.append(Object.assign(document.createElement('img'), { src: maps[key], alt: label }), Object.assign(document.createElement('span'), { textContent: label }));
+          controlShelf.append(card);
+        }
+      } finally { exportBtn.disabled = false; exportBtn.textContent = '重新输出控制图'; }
+    };
+    controlShelf.append(exportBtn);
+  }
+
+  function paintInspector() {
+    inspector.replaceChildren();
+    undoBtn.disabled = !history.canUndo;
+    redoBtn.disabled = !history.canRedo;
+    const found = findObject(stage, selectedId);
+    if (!found) return;
+    const item = found.item;
+    const title = Object.assign(document.createElement('b'), {
+      textContent: `${found.kind === 'camera' ? '摄影机' : item.name || '对象'} · ${item.id}`
+    });
+    const makeNumber = (label, key, step = '0.1') => {
+      const input = Object.assign(document.createElement('input'), {
+        type: 'number', step, value: String(item[key] ?? 0), disabled: item.locked
+      });
+      input.onchange = () => {
+        item[key] = Number(input.value);
+        if (key === 'rotation' && found.kind === 'subject') item.facing = item.rotation;
+        history.commit(); redrawAll(); onChange();
+      };
+      const wrap = document.createElement('label');
+      wrap.append(document.createTextNode(label), input);
+      return wrap;
+    };
+    const lock = Object.assign(document.createElement('button'), {
+      className: `btn ghost sm${item.locked ? ' on' : ''}`, textContent: item.locked ? '🔒 已锁定' : '🔓 锁定'
+    });
+    lock.onclick = () => { item.locked = !item.locked; history.commit(); redrawAll(); onChange(); };
+    inspector.append(title, makeNumber('X', 'x'), makeNumber('Y', 'y'), makeNumber('高度', 'height'),
+      makeNumber('旋转°', 'rotation', '1'), makeNumber('缩放', 'scale'), lock);
+  }
+
+  function paintTimeline() {
+    timeline.replaceChildren();
+    const maxFrame = Math.max(24, Math.round(Number(duration || 5) * 24));
+    const range = Object.assign(document.createElement('input'), { type: 'range', min: '0', max: String(maxFrame), value: String(currentFrame) });
+    const frame = Object.assign(document.createElement('b'), { textContent: `${currentFrame}f / ${maxFrame}f` });
+    range.oninput = () => { currentFrame = Number(range.value); frame.textContent = `${currentFrame}f / ${maxFrame}f`; };
+    const add = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '＋记录关键帧' });
+    add.onclick = () => { addKeyframe(stage, currentFrame); history.commit(); paintTimeline(); onChange(); };
+    timeline.append(Object.assign(document.createElement('span'), { className: 'previz-cap', textContent: '24fps 时间轴' }), range, frame, add);
+    for (const kf of stage.keyframes || []) {
+      const jump = Object.assign(document.createElement('button'), { className: 'previz-key', textContent: `${kf.frame}f` });
+      jump.onclick = () => { currentFrame = kf.frame; paintTimeline(); };
+      timeline.append(jump);
+    }
+  }
 
   function rebuildControls() {
     while (controls.firstChild) controls.removeChild(controls.firstChild);
@@ -758,6 +933,12 @@ export function previzPanel(stage, {
 
   rebuildControls();
   refresh();
-  host.append(viewBar, director.node, canvas.node, controls, readout);
+  paintInspector();
+  paintTimeline();
+  const viewWrap = document.createElement('div');
+  viewWrap.className = 'previz-workspace';
+  viewWrap.append(director.node, Object.assign(document.createElement('div'), { className: 'previz-camera-pane' }));
+  viewWrap.lastChild.append(Object.assign(document.createElement('b'), { textContent: '摄影机取景' }), viewport.node);
+  host.append(viewBar, assetShelf, viewWrap, canvas.node, inspector, timeline, controlShelf, controls, readout);
   return { node: host, refresh };
 }

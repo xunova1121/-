@@ -1,13 +1,45 @@
 /**
  * 服务商运行时：解析模板 → 补鉴权 → 发请求 →（异步任务的话）轮询到终态。
  */
-import { PROVIDERS, getProvider, publicCatalog, CAPABILITIES } from './catalog.js';
+import { PROVIDERS, getProvider as catalogGetProvider, publicCatalog, CAPABILITIES } from './catalog.js';
 import { buildAuthHeaders, credentialStatus, AuthError } from './auth.js';
 import { getSecret } from '../vault.js';
 import { execute, poll, HttpError } from '../http-client.js';
 import * as settings from '../settings.js';
 
-export { PROVIDERS, getProvider, CAPABILITIES, AuthError, credentialStatus };
+export { PROVIDERS, CAPABILITIES, AuthError, credentialStatus };
+
+function providerInstances() {
+  return Array.isArray(settings.get('providerInstances')) ? settings.get('providerInstances') : [];
+}
+
+/** 运行时把“账号/线路实例”解析成一份完整 provider，所有适配器无需知道实例细节。 */
+export function getProvider(id) {
+  const base = catalogGetProvider(id);
+  if (base) return base;
+  const instance = providerInstances().find((x) => x.id === id);
+  const parent = instance && catalogGetProvider(instance.providerId);
+  if (!parent) return null;
+  const secretName = (name) => `${instance.id}.${name}`;
+  return {
+    ...parent,
+    id: instance.id,
+    providerId: parent.id,
+    name: instance.name || `${parent.name} · ${instance.id}`,
+    baseUrl: instance.baseUrl || parent.baseUrl,
+    auth: {
+      ...parent.auth,
+      ...(parent.auth.secret ? { secret: secretName(parent.auth.secret) } : {}),
+      ...(parent.auth.secret2 ? { secret2: secretName(parent.auth.secret2) } : {})
+    },
+    secrets: (parent.secrets || []).map((s) => ({ ...s, name: secretName(s.name), sourceName: s.name })),
+    instance: true
+  };
+}
+
+function allProviders() {
+  return [...PROVIDERS, ...providerInstances().map((x) => getProvider(x.id)).filter(Boolean)];
+}
 
 export function baseUrlOf(provider) {
   const override = settings.get('baseUrls')?.[provider.id];
@@ -17,8 +49,16 @@ export function baseUrlOf(provider) {
 /** 目录 + 每家的凭据配齐状态，一次给前端 */
 export function catalogForUI() {
   const overrides = {};
-  for (const p of PROVIDERS) overrides[p.id] = { baseUrl: baseUrlOf(p) };
-  return publicCatalog(overrides).map((p) => ({
+  for (const p of allProviders()) overrides[p.id] = { baseUrl: baseUrlOf(p) };
+  const basePublic = publicCatalog(overrides);
+  const instancePublic = allProviders().filter((p) => p.instance).map((p) => ({
+    id: p.id, providerId: p.providerId, name: p.name, docs: p.docs, family: p.family || 'custom',
+    baseUrl: baseUrlOf(p), editableBaseUrl: true, auth: { type: p.auth.type, optional: Boolean(p.auth.optional) },
+    secrets: p.secrets, capabilities: p.capabilities, models: p.models, videoDefaults: p.videoDefaults || null,
+    voices: p.voices || [], endpoints: p.endpoints || {}, probe: p.probe || null, templates: p.templates || [], taskPoll: p.taskPoll || null,
+    instance: true
+  }));
+  return [...basePublic, ...instancePublic].map((p) => ({
     ...p,
     credentials: credentialStatus(getProvider(p.id))
   }));
@@ -134,7 +174,7 @@ export function providerForUrl(url) {
   const domain = registrableDomain(host);
 
   return (
-    PROVIDERS.find((p) => {
+    allProviders().find((p) => {
       const base = baseUrlOf(p);
       if (!base) return false;
       try {

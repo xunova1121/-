@@ -12,6 +12,7 @@ import { allowedDurations, alignDuration } from '../duration.js';
 import { send, sendAsync, baseUrlOf, interpolate, diagnose } from './index.js';
 import { buildAuthHeaders } from './auth.js';
 import { poll } from '../http-client.js';
+import * as comfy from './comfy.js';
 import * as settings from '../settings.js';
 
 /** 深度优先找响应里第一个媒体 URL。各家藏的深度都不一样，与其逐个写路径不如直接找。 */
@@ -263,6 +264,24 @@ export function routedVideoDurations() {
  * refImages 非空时自动走各家的"参考图"通道 —— 这是保住角色一致性的关键路径，
  * 纯靠提示词描述外貌是锁不住人设的。
  */
+/**
+ * 把一张参考图取成字节 —— 本地 ComfyUI 要先把图传上去，LoadImage 才读得到。
+ *
+ * 我们手上的参考图有两种形态（见 studio.toModelRef）：配了对象存储时是
+ * 一个公网地址，没配时是内联的 data: URI。两种都得能取。
+ */
+async function fetchRefBytes(ref) {
+  const s = String(ref || '');
+  const m = s.match(/^data:[^;]+;base64,(.*)$/);
+  if (m) return Buffer.from(m[1], 'base64');
+  if (!/^https?:\/\//i.test(s)) {
+    throw new Error(`这张参考图既不是 data: 也不是 http(s)，取不到内容：${s.slice(0, 60)}`);
+  }
+  const res = await fetch(s);
+  if (!res.ok) throw new Error(`取参考图失败：HTTP ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
 export async function generateImage({
   providerId,
   model,
@@ -345,11 +364,23 @@ export async function generateImage({
    *                 界面写着一个模型、实际发的是另一个，比参考图不生效更糟
    *   传具体模型  → 换成它
    */
+  /**
+   * ⚠ 记下**真正发出去的那个模型**，而不是调用方以为的那个。
+   *
+   * 下面有参考图时会把 model 换成图生图那个。原来换完就不吭声了 ——
+   * 于是卡片上记的 modelUsed 是文生图那个，而图是图生图模型出的。
+   *
+   * 这个字段存在的理由是"中途换过模型是风格漂移最常见的原因"。
+   * 它一旦说谎，那条诊断就废了：你对比两镜看到同一个模型名，
+   * 而实际上一镜带参考图（走 i2i）、一镜没带（走 t2i），本来就是两个模型。
+   */
+  const used = { model, refsSent: 0 };
   const i2iModel = editModel === null ? null : editModel || settings.get('imageEditModel');
   if (wantsRef) {
     if (supportsI2I && i2iModel && i2iModel !== model) {  // eslint-disable-line no-lonely-if
       onEvent?.({ type: 'note', message: `带了 ${refImages.length} 张参考图，出图模型换成 ${i2iModel}（文生图模型不认参考图）` });
       model = i2iModel;
+      used.model = i2iModel;
     } else if (!supportsI2I) {
       onEvent?.({
         type: 'note',
@@ -357,8 +388,11 @@ export async function generateImage({
           '本镜的一致性只能靠提示词里的冻结描述撑着。要锁住脸就把「出图」换成支持图生图的一家。'
       });
       refImages = [];
+      used.refsSent = 0;
     }
   }
+
+  used.refsSent = refImages.length;
 
   switch (family) {
     case 'dashscope': {
@@ -390,7 +424,7 @@ export async function generateImage({
       if (!submitted.ok) fail(label, submitted);
       const url = firstMediaUrl(polled?.json ?? submitted.json);
       if (!url) throw new Error(`${label}：响应里没有图片 URL`);
-      return { url, base64: null, raw: polled?.json ?? submitted.json };
+      return { used, url, base64: null, raw: polled?.json ?? submitted.json };
     }
 
     case 'minimax': {
@@ -425,7 +459,41 @@ export async function generateImage({
       const url = res.json?.data?.image_urls?.[0] || firstMediaUrl(res.json);
       const base64 = url ? null : firstBase64(res.json);
       if (!url && !base64) throw new Error(`${label}：响应里既没有图片 URL 也没有 base64`);
-      return { url, base64, raw: res.json };
+      return { used, url, base64, raw: res.json };
+    }
+
+    /**
+     * ── 本地出图：ComfyUI ──
+     *
+     * 和别家的形状完全不同：没有"模型"这个参数，出什么图由**用户自己的
+     * 工作流**决定。我们只往里填提示词、种子、尺寸、参考图。
+     *
+     * ⚠ 填不进去的每一样都要报上去（inject 回的 skipped）。
+     * 最坏的一种坏法是"种子没填进去"：一致性复核不过时我们会换种子重试，
+     * 而种子没生效的话三次重试出三张一模一样的图，日志上却写着"换了种子"。
+     */
+    case 'comfy': {
+      const wf = comfy.parseWorkflow(settings.get('comfyWorkflow'));
+      const base = baseUrlOf(provider).replace(/\/+$/, '');
+
+      let refName = null;
+      if (refImages.length) {
+        const bytes = await fetchRefBytes(refImages[0]);
+        refName = await comfy.uploadImage(base, bytes, `fd-ref-${Date.now()}.png`, { onEvent });
+      }
+
+      const [w, h] = String(size).split(/[x*]/i).map((n) => Number(n));
+      const { workflow, filled, skipped } = comfy.inject(wf, {
+        prompt, negative, seed, width: w, height: h, refName
+      });
+      onEvent?.({ type: 'note', message: `本地出图：填进去了 ${filled.join('、')}（不花钱）` });
+      for (const one of skipped) {
+        onEvent?.({ type: 'note', message: `⚠ ${one}` });
+      }
+
+      const { url } = await comfy.run(base, workflow, { timeoutMs, onEvent });
+      used.model = 'workflow';
+      return { used, url, base64: null, raw: { local: true } };
     }
 
     case 'kling':
@@ -464,7 +532,7 @@ export async function generateImage({
       const url = firstMediaUrl(res.json);
       const base64 = url ? null : firstBase64(res.json);
       if (!url && !base64) throw new Error(`${label}：响应里既没有图片 URL 也没有 base64`);
-      return { url, base64, raw: res.json };
+      return { used, url, base64, raw: res.json };
     }
   }
 }

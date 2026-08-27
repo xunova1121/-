@@ -31,6 +31,8 @@ export default {
     const previews = Object.fromEntries(secretsInfo.items.map((i) => [i.name, i.preview]));
 
     const root = h('div', { class: 'stack' });
+    const instances = Array.isArray(state.catalog.settings.providerInstances)
+      ? state.catalog.settings.providerInstances : [];
 
     // 有一份读不出来的旧密钥文件（典型情况：先用 exe 存过 DPAPI 密钥，
     // 后来改用只带 Node 的绿色版打开）。这时候最要紧的是让用户知道怎么脱身，
@@ -61,6 +63,27 @@ export default {
             : '当前是命令行模式，密钥用本机 AES-256-GCM 加密。这能挡住"文件被顺手拷走"，挡不住已经拿到你登录态的人。这种格式桌面版也读得出来，两边通用。')
       )
     );
+
+    // 同一家服务商可以有多个账号、区域或中转线路。每个实例有独立密钥名，
+    // 在“能力路由”里会作为独立选项出现，岗位终于能明确绑到哪一条线路。
+    const parentSel = h('select', {}, providers.filter((p) => !p.instance && p.id !== 'raw').map((p) =>
+      h('option', { value: p.id }, p.name)));
+    const instanceName = h('input', { placeholder: '实例名称，例如：方舟·生产账号' });
+    const instanceBase = h('input', { class: 'mono', placeholder: '可选：该实例专用 baseUrl' });
+    root.append(h('div', { class: 'panel' },
+      h('h2', { class: 'panel-title' }, '服务商实例'),
+      h('p', { class: 'panel-hint' }, '同一家可以绑定多个账号或中转线路。建好后，它会单独出现在每个功能岗位的服务商下拉框里，并使用自己的密钥。'),
+      h('div', { class: 'row' }, parentSel, instanceName, instanceBase,
+        h('button', { class: 'btn', onclick: async () => {
+          const name = instanceName.value.trim();
+          if (!name) return toast('先给这个实例起个名字', 'err');
+          const id = `instance-${parentSel.value}-${Date.now().toString(36)}`;
+          await api('/settings', { method: 'POST', body: { providerInstances: [...instances, { id, providerId: parentSel.value, name, baseUrl: instanceBase.value.trim() }] } });
+          await refreshCatalog();
+          toast('实例已创建；在它的卡片里填独立密钥，再去能力路由绑定', 'ok');
+        } }, '新增实例')),
+      instances.length ? h('div', { class: 'field-hint', style: 'margin-top:8px' }, `已建立 ${instances.length} 个独立实例`) : null
+    ));
 
     /**
      * 接口地址（高级）。
@@ -219,6 +242,12 @@ export default {
               }, '自检')
             : null,
           p.docs ? h('a', { class: 'btn ghost sm', href: p.docs, target: '_blank', rel: 'noreferrer' }, '开发文档') : null,
+          p.instance ? h('button', { class: 'btn ghost sm', onclick: async () => {
+            if (!confirm(`删除服务商实例「${p.name}」？已生成的素材不会删除。`)) return;
+            await api('/settings', { method: 'POST', body: { providerInstances: instances.filter((x) => x.id !== p.id) } });
+            await refreshCatalog();
+            toast('实例已删除', 'ok');
+          } }, '删除实例') : null,
           ...p.secrets
             .filter((s) => configured.has(s.name))
             .map((s) =>
