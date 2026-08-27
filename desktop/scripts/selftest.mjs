@@ -2628,6 +2628,27 @@ section('本地出图：ComfyUI');
     srv.close();
   }
 
+  /**
+   * ⚠ 参考图**传上去了不等于用上了**。
+   *
+   * 工作流里没有 FD_REF 节点时，图传到了 ComfyUI，但没有任何节点读它 ——
+   * 这一镜的一致性实际上只剩提示词撑着。所以 filled 里没有"参考图"这一项时，
+   * 上层记的 refsSent 必须是 0，不能按"发过去几张"算。
+   *
+   * 这一条是复盘时抓的：早上刚修过同一类错（modelUsed 记的是路由到的模型
+   * 而不是真正出图那个），几小时后在这条新路上又犯了一次。
+   */
+  {
+    const withRef = comfy.inject(wf(), { prompt: 'x', refName: 'ref.png' });
+    check('工作流有 FD_REF 时，filled 里记着"参考图"', withRef.filled.includes('参考图'));
+    const noRefNode = wf(); delete noRefNode[7];
+    const without = comfy.inject(noRefNode, { prompt: 'x', refName: 'ref.png' });
+    check('工作流没有 FD_REF 时，filled 里不能有"参考图"',
+      !without.filled.includes('参考图'), JSON.stringify(without.filled));
+    check('而且要在 skipped 里说出来',
+      without.skipped.some((x) => /参考图/.test(x)), JSON.stringify(without.skipped));
+  }
+
   // ── 跑失败时说人话 ──
   {
     const srv = http.createServer((req, res) => {

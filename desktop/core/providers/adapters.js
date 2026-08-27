@@ -486,6 +486,18 @@ export async function generateImage({
       const { workflow, filled, skipped } = comfy.inject(wf, {
         prompt, negative, seed, width: w, height: h, refName
       });
+      /**
+       * ⚠ 参考图**传上去了不等于用上了**。
+       *
+       * 工作流里没有 FD_REF 节点时，图传到了 ComfyUI，但没有任何节点读它 ——
+       * 这一镜的一致性实际上只剩提示词撑着。
+       *
+       * 早上刚修过同一类错（modelUsed 记的是路由到的模型而不是真正出图那个），
+       * 几小时后在这条新路上又犯了一次：refsSent 按"发过去几张"算，
+       * 而不是按"真的接进工作流几张"。这个字段存在的全部理由就是
+       * 回头能查"为什么这一镜不像"，它一说谎就没用了。
+       */
+      used.refsSent = filled.includes('参考图') ? refImages.length : 0;
       onEvent?.({ type: 'note', message: `本地出图：填进去了 ${filled.join('、')}（不花钱）` });
       for (const one of skipped) {
         onEvent?.({ type: 'note', message: `⚠ ${one}` });
