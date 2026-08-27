@@ -38,6 +38,7 @@ const providersMod = await import('../core/providers/index.js');
 const store = await import('../core/store.js');
 const styleModule = await import('../core/styles.js');
 const studioModule = await import('../core/pipeline/studio.js');
+const ledgerMod = await import('../core/ledger.js');
 
 let passed = 0;
 let failed = 0;
@@ -1016,6 +1017,12 @@ check('提示词里仍然注入了冻结的外貌（没有参考图时靠它撑�
 {
   settings.patch({ useEditModelForShots: true });
   upstream.lastImageBody = null;
+  // 进这一段之前的两个基准，后面拿差值比 —— 写死数字会随着加用例失准
+  const imageCallsAtBlockStart = upstream.imageCalls || 0;
+  const bookedAtBlockStart = ledgerMod.forProject(project.id, {}).items
+    .filter((x) => x.kind === 'image').reduce((n, x) => n + x.calls, 0);
+  const editCallsAtBlockStart = ledgerMod.forProject(project.id, {}).items
+    .find((x) => x.kind === 'image' && x.model === settings.get('imageEditModel'))?.calls || 0;
   const evs = await ndjson(`/projects/${project.id}/shots/${afterAssets.shots[0].id}/regenerate`, {});
   check('打开开关后才带参考图', Boolean(upstream.lastImageBody?.image));
   check('而且必须换成图生图模型（不换的话参考图会被文生图模型忽略）',
@@ -1060,6 +1067,54 @@ check('提示词里仍然注入了冻结的外貌（没有参考图时靠它撑�
   check('批量出图那条路记的也是真正出图的模型',
     String(batch?.modelUsed || '').includes(settings.get('imageEditModel')),
     `${batch?.modelUsed} / 期望含 ${settings.get('imageEditModel')}`);
+
+  /**
+   * ⚠ **账本上记的也必须是真正出图的那个模型。**
+   *
+   * 上面两条验的是"存进这一镜的字段"，而账本是**另一份记录**，
+   * 走的是另一段代码（适配层那个外包的壳）。金丝雀把它改成记入参的 model，
+   * 上面两条照样全绿 —— 因为它们查的是 shot.modelUsed，不是账。
+   *
+   * 这件事在钱上比在卡片上更要紧：t2i 和 i2i 单价不一样，
+   * 记错模型 = 账按另一个价算，而总数看起来完全正常。
+   * 这正是 modelUsed 当初说谎的那个坑，只是换了个地方重新挖了一遍。
+   */
+  const editModel = settings.get('imageEditModel');
+  const bookItems = ledgerMod.forProject(project.id, {}).items.filter((x) => x.kind === 'image');
+
+  /**
+   * ⚠ 这条**不能**写成"账上存在 i2i 这个模型"。
+   *
+   * 试过，金丝雀直接识破：上面那个"把编辑模型误设成出图路由"的小节
+   * 已经用同一个模型 id 出过一张图了，所以那条记录**无论这里对不对
+   * 都躺在账上**。断言于是恒真 —— 一条看起来严格、其实什么都没验的绿。
+   * 这和今天早些时候那几处退化夹具是同一个病：夹具本身满足了断言，
+   * 和被测代码没关系。
+   *
+   * 改成看**这一段之内的增量**：这一段里发出去的每一次出图请求，
+   * 都必须记在 i2i 那个模型头上。记成入参那个（t2i）的话增量是 0，当场红。
+   */
+  const editCallsNow = bookItems.find((x) => x.model === editModel)?.calls || 0;
+  check('账本上记的是真正出图的那个模型（不是路由到的那个）',
+    editCallsNow - editCallsAtBlockStart === upstream.imageCalls - imageCallsAtBlockStart,
+    `i2i 名下多了 ${editCallsNow - editCallsAtBlockStart} 笔，而这段里发了 ${upstream.imageCalls - imageCallsAtBlockStart} 次`);
+  /**
+   * ⚠ 这里不能写死"应该是 N 笔"。
+   *
+   * 试过写死 2，红了 —— 实际是 3，因为上面那个"把编辑模型误设成出图路由"
+   * 的小节也用同一个模型出过一张。而**账本是对的，我的期望值是错的**。
+   * 写死的数字还会随着以后往这一段里加用例而再次失准，
+   * 到时候红的又是一条正确的断言 —— 那种红会教人去改断言，而不是查代码。
+   *
+   * 要守的其实是一句和顺序无关的话：**厂商收到几次请求，账上就有几笔**。
+   * 所以拿假上游自己数的次数来比，前后各取一次差值。
+   */
+  const callsBefore = imageCallsAtBlockStart;
+  const bookedNow = ledgerMod.forProject(project.id, {}).items
+    .filter((x) => x.kind === 'image').reduce((n, x) => n + x.calls, 0);
+  check('厂商收到几次出图请求，账上就有几笔',
+    bookedNow - bookedAtBlockStart === upstream.imageCalls - callsBefore,
+    `账上多了 ${bookedNow - bookedAtBlockStart} 笔，厂商收到 ${upstream.imageCalls - callsBefore} 次`);
   settings.patch({ useEditModelForShots: false });
 }
 
@@ -8882,6 +8937,8 @@ section('待认领的任务不能变成黑洞');
     const keepModel = settings.get('videoModel');
     settings.patch({ videoProvider: 'metaso', videoModel: 'MiniMax-H3' });
     upstream.videoFail = '厂商那边出片失败：内容审核不通过';
+    // 失败之前先记下账上已有几笔视频，好证明失败那一次一笔都没多记
+    const videoCallsBefore = ledgerMod.forProject(project.id, {}).total.byKind.video?.calls || 0;
     await studioModule.generateVideos(project.id, { only: [s1.id], onEvent: () => {} }).catch(() => {});
     upstream.videoFail = null;
     settings.patch({ videoProvider: keepProvider, videoModel: keepModel });
@@ -8892,6 +8949,30 @@ section('待认领的任务不能变成黑洞');
       /审核不通过/.test(hurt?.videoError?.message || ''), hurt?.videoError?.message);
     check('并且记下了时间（不然分不清是这次的还是上次的）',
       Boolean(hurt?.videoError?.at), String(hurt?.videoError?.at));
+
+    /**
+     * ⚠ **出视频失败了，账上要留一条"这里有一次没记上"。**
+     *
+     * 视频是先下单后取件的。拿不到片子**不等于**厂商没做、没计费 ——
+     * 多半是做了、计了，只是我们没接住。所以这一次既不能记一个猜的秒数
+     * （假数），也不能当无事发生（少账）。
+     *
+     * "少账"是这里最危险的一种：它让总数偏小，而偏小的总数看起来
+     * 完全正常，没有任何地方会红。用户拿着一个漂亮的数去对账单，
+     * 对不上，然后不知道该信哪个。
+     *
+     * 金丝雀把这一处的 blind() 关掉时，上面三条全绿 —— 它们查的是
+     * 这一镜身上的 videoError，和账本是两份记录。
+     */
+    const bookAfterFail = ledgerMod.forProject(project.id, {});
+    check('出视频失败了，账上留了一条"没记上"',
+      bookAfterFail.unmetered > 0, `unmetered=${bookAfterFail.unmetered}`);
+    check('而且说得清是哪一家的哪个模型没记上',
+      bookAfterFail.blind.some((x) => x.kind === 'video'),
+      JSON.stringify(bookAfterFail.blind));
+    check('失败的那一次没有被当成"出了 N 秒"记进用量里',
+      (bookAfterFail.total.byKind.video?.calls || 0) === videoCallsBefore,
+      `失败前 ${videoCallsBefore} 笔，失败后 ${bookAfterFail.total.byKind.video?.calls || 0} 笔`);
   }
 
   settings.patch({ baseUrls: { metaso: `${upstreamUrl}/ms` } });

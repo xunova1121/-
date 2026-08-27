@@ -28,6 +28,7 @@ import * as chapters from './chapters.js';
 import * as duration from '../duration.js';
 import * as versions from '../versions.js';
 import * as autocut from '../autocut.js';
+import * as meter from '../meter.js';
 import * as quality from './quality.js';
 import * as skillsLib from '../skills.js';
 import * as variants from './variants.js';
@@ -716,7 +717,7 @@ async function generateSheets(projectId, targets, { onEvent, signal = null } = {
  * 生成设定集并出角色设定图 / 场景基准图。
  * 这一步是整条流水线的地基，跑完之后人设就锁死了。
  */
-export async function buildBible(projectId, { onEvent, regenerate = false, signal = null } = {}) {
+async function buildBibleRaw(projectId, { onEvent, regenerate = false, signal = null } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
   if (!project.script?.trim()) throw new Error('剧本是空的，先写点东西');
@@ -1213,7 +1214,7 @@ export function editOutlineBeat(projectId, beatId, fields = {}) {
   return applyOutlineOps(projectId, { ops: [{ op: 'edit', id: beatId, fields }] });
 }
 
-export async function analyzeScript(projectId, { shotCount = 8, chapterId = null, force = false, onEvent } = {}) {
+async function analyzeScriptRaw(projectId, { shotCount = 8, chapterId = null, force = false, onEvent } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
   if (!project.bible) throw new Error('请先跑「设定集」—— 没有冻结人设，分镜会自己发挥外貌描述');
@@ -2588,7 +2589,7 @@ export function chapterAdvice(script) {
 
 // ═══════════════════════ 阶段三：镜头出图（带一致性复核）═══════════════════════
 
-export async function generateAssets(projectId, { only = null, chapterId = null, regenerate = false, onEvent, signal = null } = {}) {
+async function generateAssetsRaw(projectId, { only = null, chapterId = null, regenerate = false, onEvent, signal = null } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
   if (!project.shots?.length) throw new Error('还没有分镜，先跑「分镜」');
@@ -4118,7 +4119,7 @@ function seamPlanOf(allShots, targets, seamMode) {
   return lines.join('\n');
 }
 
-export async function generateVideos(projectId, { only = null, chapterId = null, regenerate = false, onEvent, signal = null } = {}) {
+async function generateVideosRaw(projectId, { only = null, chapterId = null, regenerate = false, onEvent, signal = null } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
 
@@ -4739,7 +4740,7 @@ export function voiceForShot(project, shot) {
   };
 }
 
-export async function generateVoice(projectId, { onEvent, signal = null } = {}) {
+async function generateVoiceRaw(projectId, { onEvent, signal = null } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
   const r = routing();
@@ -5149,7 +5150,7 @@ export function toSRT(cues) {
  * 引用的是一个**不存在的变量**，直接 ReferenceError。
  * 顺带，「停下来」在合成这一步也就一直是不起作用的。
  */
-export async function compose(projectId, { onEvent, signal = null } = {}) {
+async function composeRaw(projectId, { onEvent, signal = null } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
   // 产物和中间文件都放这一份项目自己的目录里
@@ -5576,7 +5577,7 @@ const RUN_ORDER = [
  * 中间任一步抛错就停下，已经跑完的都在盘上 —— 不做"跳过失败继续跑"：
  * 出图失败还硬着头皮去出视频，只会拿着半张图烧掉更贵的那一步。
  */
-export async function runAll(projectId, { shotCount = 8, from = null, onEvent, signal = null } = {}) {
+async function runAllRaw(projectId, { shotCount = 8, from = null, onEvent, signal = null } = {}) {
   const start = from ? RUN_ORDER.findIndex((s) => s.id === from) : 0;
   if (from && start === -1) throw new Error(`不认识这一步：${from}`);
   const plan = RUN_ORDER.slice(Math.max(0, start));
@@ -5604,3 +5605,55 @@ export const __refreshRefs = refreshRefs;
 
 /** 只给自检用 */
 export const __reusableFrameRef = reusableFrameRef;
+
+/**
+ * ══════════ 记账的归属钉在这一层 ══════════
+ *
+ * 每个跑流水线的函数第一个参数就是 projectId，所以**这里是全应用唯一
+ * 一处天然知道"这笔钱是谁的"的地方**。在这里圈上下文，往下无论调多深、
+ * await 多少次，适配层记的账都会落到对的项目上（见 core/meter.js）。
+ *
+ * ── 为什么不只圈在 HTTP 那一层 ──
+ *
+ * 服务端路由那儿也圈了一次，而且今天**所有**入口确实都是 HTTP，
+ * 所以那一层单独就够用了 —— 今天。
+ *
+ * 问题是它靠的是一个会过期的前提："进来的路只有 HTTP 这一条"。
+ * 哪天加一个定时重跑、一个命令行、一条 Electron 的 IPC，
+ * 归属就会安静地断掉，而断掉的样子是**账还在记，只是记到了"未归属"**——
+ * 总数看起来正常，某个项目的账莫名其妙少了一截，没有任何地方会红。
+ *
+ * 自检就先撞上了这个：它直接调 generateVideos（不走 HTTP），
+ * 于是那笔漏账落进了"未归属"。测试是这么发现的，用户不会。
+ *
+ * 钉在这一层之后，谁调都对，包括还没写出来的那些调用方。
+ * 两层都圈不冲突：内层沿用外层的 projectId，只把 stage 说得更准。
+ */
+
+export function buildBible(projectId, opts = {}) {
+  return meter.runIn({ projectId, stage: 'bible' }, () => buildBibleRaw(projectId, opts));
+}
+
+export function analyzeScript(projectId, opts = {}) {
+  return meter.runIn({ projectId, stage: 'script' }, () => analyzeScriptRaw(projectId, opts));
+}
+
+export function generateAssets(projectId, opts = {}) {
+  return meter.runIn({ projectId, stage: 'assets' }, () => generateAssetsRaw(projectId, opts));
+}
+
+export function generateVideos(projectId, opts = {}) {
+  return meter.runIn({ projectId, stage: 'video' }, () => generateVideosRaw(projectId, opts));
+}
+
+export function generateVoice(projectId, opts = {}) {
+  return meter.runIn({ projectId, stage: 'voice' }, () => generateVoiceRaw(projectId, opts));
+}
+
+export function compose(projectId, opts = {}) {
+  return meter.runIn({ projectId, stage: 'compose' }, () => composeRaw(projectId, opts));
+}
+
+export function runAll(projectId, opts = {}) {
+  return meter.runIn({ projectId, stage: 'all' }, () => runAllRaw(projectId, opts));
+}
