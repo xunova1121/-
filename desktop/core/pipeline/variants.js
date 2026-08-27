@@ -66,7 +66,10 @@ export function normalizeItem(item, kind = 'char') {
         // 出图提示词的覆盖只存在**变体**上。迁移时从条目搬过来一次之后，
         // 条目那份就不再有人读了（见 studio.sheetPrompt 里的注释）——
         // 同一个值有两个存放处、只有一处会被更新，是那个 bug 复发的根源
-        sheetPrompt: item.sheetPrompt || ''
+        sheetPrompt: item.sheetPrompt || '',
+        modelPath: item.modelPath || null,
+        modelFileName: item.modelFileName || '',
+        modelAt: item.modelAt || null
       }
     ];
   }
@@ -81,6 +84,9 @@ export function normalizeItem(item, kind = 'char') {
   item.sheetSource = first.sheetSource || null;
   item.sheetPromptUsed = first.sheetPromptUsed || '';
   item.sheetFileName = first.sheetFileName || '';
+  item.modelPath = first.modelPath || null;
+  item.modelFileName = first.modelFileName || '';
+  item.modelAt = first.modelAt || null;
   return item;
 }
 

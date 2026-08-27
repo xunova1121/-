@@ -5767,6 +5767,40 @@ export const __reusableFrameRef = reusableFrameRef;
 export function buildBible(projectId, opts = {}) {
   return meter.runIn({ projectId, stage: 'bible' }, () => buildBibleRaw(projectId, opts));
 }
+
+/** 把 GLB 模型绑到设定集变体，预演台优先用模型，加载失败仍可退回设定图。 */
+export async function attachBibleModel(projectId, kind, name, { dataUrl, fileName = '', variantId = null } = {}, onEvent) {
+  const project = store.read(projectId);
+  if (!project?.bible) throw new Error('还没有设定集');
+  const item = bibleBucket(project.bible, kind).find((x) => x.name === name);
+  if (!item) throw new Error(`设定集里没有「${name}」`);
+  const variant = variants.findVariant(item, variantId) || variants.defaultVariant(item);
+  if (!variant) throw new Error(`「${name}」没有可用的变体`);
+  const m = /^data:([^;,]+);base64,(.+)$/s.exec(String(dataUrl || ''));
+  if (!m) throw new Error('没读到 GLB 内容');
+  const mime = m[1].toLowerCase();
+  if (!['model/gltf-binary', 'application/octet-stream'].includes(mime) && !String(fileName).toLowerCase().endsWith('.glb')) {
+    throw new Error('目前只支持单文件 GLB 模型');
+  }
+  const buf = Buffer.from(m[2], 'base64');
+  if (!buf.length) throw new Error('GLB 文件是空的');
+  if (buf.length > 80 * 1024 * 1024) throw new Error(`GLB ${(buf.length / 1024 / 1024).toFixed(1)}MB，超过 80MB 上限`);
+  if (buf.length < 12 || buf.toString('ascii', 0, 4) !== 'glTF') throw new Error('这不是有效的 GLB 文件');
+  const dest = path.join(store.assetDir(projectId), `model-${kind}-${safeFileName(name)}-${safeFileName(variant.id)}.glb`);
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.writeFileSync(dest, buf);
+  store.update(projectId, (p) => {
+    const t = bibleBucket(p.bible, kind).find((x) => x.name === name);
+    const tv = t && variants.findVariant(t, variant.id);
+    if (tv) {
+      tv.modelPath = dest; tv.modelFileName = fileName || path.basename(dest); tv.modelAt = new Date().toISOString();
+      variants.normalizeItem(t, kind);
+    }
+    return p;
+  });
+  onEvent?.({ type: 'note', message: `3D 模型已绑定：${fileName || path.basename(dest)}` });
+  return store.read(projectId);
+}
 export function analyzeScript(projectId, opts = {}) {
   return meter.runIn({ projectId, stage: 'script' }, () => analyzeScriptRaw(projectId, opts));
 }

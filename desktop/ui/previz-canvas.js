@@ -24,6 +24,8 @@
 
 import * as previz from '/previz.js';
 import * as THREE from '/three.js';
+import { GLTFLoader } from '/three-gltf-loader.js';
+import { OrbitControls } from '/three-orbit-controls.js';
 import { addKeyframe, applyFrame, createHistory, findObject, normalizeStage, stageObjects } from './previz-stage.js';
 
 const NS = 'http://www.w3.org/2000/svg';
@@ -349,6 +351,16 @@ export function director3dCanvas(stage, {
   scene3d.fog = new THREE.Fog(0x151a24, 14, 30);
   const view = new THREE.PerspectiveCamera(42, 1.38, 0.1, 80);
   view.position.set(9, 8, 10); view.lookAt(0, 0, 0);
+  const orbit = new OrbitControls(view, renderer.domElement);
+  orbit.target.set(0, 1, 0);
+  orbit.enableDamping = false;
+  orbit.minDistance = 3; orbit.maxDistance = 28; orbit.maxPolarAngle = Math.PI * .48;
+  // 左键留给人物/道具拖拽；右键旋转舞台，中键平移，滚轮缩放。
+  orbit.mouseButtons.LEFT = null;
+  orbit.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
+  orbit.mouseButtons.MIDDLE = THREE.MOUSE.PAN;
+  orbit.touches.ONE = null;
+  orbit.touches.TWO = THREE.TOUCH.DOLLY_PAN;
   scene3d.add(new THREE.HemisphereLight(0xbfd8ff, 0x2a2530, 1.5));
   const key = new THREE.DirectionalLight(0xffe3bd, 2.2); key.position.set(-5, 9, -3); key.castShadow = true; scene3d.add(key);
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(24, 24), new THREE.MeshStandardMaterial({ color: 0x29313d, roughness: .92 }));
@@ -357,7 +369,50 @@ export function director3dCanvas(stage, {
   const ray = new THREE.Raycaster(), mouse = new THREE.Vector2(), ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   const objects = new Map();
   const textureLoader = new THREE.TextureLoader();
+  const gltfLoader = new GLTFLoader();
+  const modelCache = new Map();
   let backdropObject = null;
+
+  orbit.addEventListener('change', () => renderer.render(scene3d, view));
+  renderer.domElement.oncontextmenu = (ev) => ev.preventDefault();
+
+  function loadModel(url) {
+    if (!modelCache.has(url)) modelCache.set(url, gltfLoader.loadAsync(url));
+    return modelCache.get(url);
+  }
+
+  function normalizedModel(source, targetHeight, { scene = false } = {}) {
+    const root = source.clone(true);
+    root.traverse((node) => {
+      if (node.isMesh) { node.castShadow = true; node.receiveShadow = true; }
+    });
+    const box = new THREE.Box3().setFromObject(root);
+    const size3 = box.getSize(new THREE.Vector3());
+    const wanted = scene ? Math.max(5, targetHeight) : targetHeight;
+    const scale = wanted / Math.max(.001, scene ? Math.max(size3.x, size3.z) : size3.y);
+    root.scale.setScalar(scale);
+    const fitted = new THREE.Box3().setFromObject(root);
+    const center = fitted.getCenter(new THREE.Vector3());
+    root.position.set(-center.x, -fitted.min.y, -center.z);
+    return root;
+  }
+
+  function modelOrFallback(item, kind, fallback) {
+    const wrapper = new THREE.Group();
+    wrapper.add(fallback);
+    if (!item.modelUrl) return wrapper;
+    loadModel(item.modelUrl).then((gltf) => {
+      // 拖动/重绘可能已经换了实例，旧请求不能回头篡改新舞台。
+      if (objects.get(item.id) !== wrapper) return;
+      wrapper.clear();
+      wrapper.add(normalizedModel(gltf.scene, Number(item.height || (kind === 'subject' ? 1.72 : .9))));
+      renderer.render(scene3d, view);
+    }).catch(() => {
+      wrapper.userData.modelError = true;
+      renderer.render(scene3d, view);
+    });
+    return wrapper;
+  }
 
   function materialFor(item, color) {
     const source = item.textureUrl || item.thumbnail || item.image;
@@ -390,21 +445,34 @@ export function director3dCanvas(stage, {
     for (const obj of objects.values()) scene3d.remove(obj);
     objects.clear();
     if (backdropObject) { scene3d.remove(backdropObject); backdropObject = null; }
-    if (stage.backdrop?.image) {
-      const map = textureLoader.load(stage.backdrop.image, () => renderer.render(scene3d, view));
-      map.colorSpace = THREE.SRGBColorSpace;
-      backdropObject = new THREE.Mesh(
-        new THREE.PlaneGeometry(12, 6.75),
-        new THREE.MeshBasicMaterial({ map, side: THREE.DoubleSide, toneMapped: false })
-      );
-      backdropObject.position.set(0, 3.35, 5.8);
-      backdropObject.rotation.y = Math.PI;
+    if (stage.backdrop?.image || stage.backdrop?.modelUrl) {
+      backdropObject = new THREE.Group();
+      if (stage.backdrop.image) {
+        const map = textureLoader.load(stage.backdrop.image, () => renderer.render(scene3d, view));
+        map.colorSpace = THREE.SRGBColorSpace;
+        const imageWall = new THREE.Mesh(
+          new THREE.PlaneGeometry(12, 6.75),
+          new THREE.MeshBasicMaterial({ map, side: THREE.DoubleSide, toneMapped: false })
+        );
+        imageWall.position.set(0, 3.35, 5.8); imageWall.rotation.y = Math.PI;
+        backdropObject.add(imageWall);
+      }
       backdropObject.userData = { kind: 'backdrop', assetRef: stage.backdrop.assetRef, variantId: stage.backdrop.variantId };
       scene3d.add(backdropObject);
+      if (stage.backdrop.modelUrl) {
+        const target = backdropObject;
+        loadModel(stage.backdrop.modelUrl).then((gltf) => {
+          if (backdropObject !== target) return;
+          const environment = normalizedModel(gltf.scene, 12, { scene: true });
+          target.add(environment);
+          renderer.render(scene3d, view);
+        }).catch(() => { target.userData.modelError = true; });
+      }
     }
     const entries = [...(stage.subjects || []).map((item) => ({ kind: 'subject', item })), ...(stage.marks || []).filter((x) => !x.far).map((item) => ({ kind: 'prop', item })), { kind: 'camera', item: stage.cam }];
     for (const { kind, item } of entries) {
-      const obj = kind === 'subject' ? actor(item) : kind === 'camera' ? cameraRig() : prop(item);
+      const fallback = kind === 'subject' ? actor(item) : kind === 'camera' ? cameraRig() : prop(item);
+      const obj = kind === 'camera' ? fallback : modelOrFallback(item, kind, fallback);
       obj.position.set(Number(item.x || 0), 0, Number(item.y || 0)); obj.rotation.y = -THREE.MathUtils.degToRad(Number(item.rotation || item.facing || 0));
       obj.scale.setScalar(Number(item.scale || 1)); obj.userData = { item, kind };
       if (selected() === item.id) { const box = new THREE.BoxHelper(obj, 0x49c8ff); obj.add(box); }
@@ -416,7 +484,7 @@ export function director3dCanvas(stage, {
   const pointer = (ev) => { const r = renderer.domElement.getBoundingClientRect(); mouse.set((ev.clientX-r.left)/r.width*2-1, -(ev.clientY-r.top)/r.height*2+1); ray.setFromCamera(mouse, view); };
   const hitGround = (ev) => { pointer(ev); const p = new THREE.Vector3(); return ray.ray.intersectPlane(ground, p) ? { x: clampM(p.x), y: clampM(p.z) } : { x: 0, y: 0 }; };
   let dragging = null;
-  renderer.domElement.onpointerdown = (ev) => { pointer(ev); const hits = ray.intersectObjects([...objects.values()], true); const root = hits[0]?.object; let obj = root; while (obj && !obj.userData?.item) obj = obj.parent; if (!obj) return; onSelect(obj.userData.item.id); if (!obj.userData.item.locked) { dragging = obj.userData.item; renderer.domElement.setPointerCapture(ev.pointerId); } redraw(); };
+  renderer.domElement.onpointerdown = (ev) => { if (ev.button !== 0) return; pointer(ev); const hits = ray.intersectObjects([...objects.values()], true); const root = hits[0]?.object; let obj = root; while (obj && !obj.userData?.item) obj = obj.parent; if (!obj) return; onSelect(obj.userData.item.id); if (!obj.userData.item.locked) { dragging = obj.userData.item; renderer.domElement.setPointerCapture(ev.pointerId); } redraw(); };
   renderer.domElement.onpointermove = (ev) => { if (!dragging) return; const p = hitGround(ev); dragging.x = Number(p.x.toFixed(2)); dragging.y = Number(p.y.toFixed(2)); redraw(); onChange(); };
   renderer.domElement.onpointerup = (ev) => { if (dragging) onCommit(); dragging = null; try { renderer.domElement.releasePointerCapture(ev.pointerId); } catch {} };
   host.ondragover = (ev) => ev.preventDefault();

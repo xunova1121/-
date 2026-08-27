@@ -387,6 +387,43 @@ export default {
         onclick: () => fileInput.click()
       }, '传本地图');
 
+      const modelInput = h('input', {
+        type: 'file', accept: '.glb,model/gltf-binary', style: 'display:none',
+        onchange: async () => {
+          const file = modelInput.files?.[0];
+          if (!file) return;
+          modelBtn.disabled = true;
+          const label = modelBtn.textContent;
+          modelBtn.textContent = '读取模型…';
+          try {
+            const dataUrl = await new Promise((resolve, reject) => {
+              const fr = new FileReader();
+              fr.onload = () => resolve(fr.result);
+              fr.onerror = () => reject(new Error('这个 GLB 读不出来'));
+              fr.readAsDataURL(file);
+            });
+            let err = null;
+            await stream(
+              `/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}/model`,
+              { dataUrl, fileName: file.name },
+              (ev) => {
+                if (ev.type === 'finished' && ev.project) project = ev.project;
+                if (ev.type === 'error') err = ev.message;
+              }
+            );
+            if (err) throw new Error(err);
+            toast(`${item.name} 已绑定 3D 模型，预演台会优先加载它`, 'ok');
+            rerender();
+          } catch (e) { toast(e.message, 'err'); }
+          finally { modelInput.value = ''; modelBtn.disabled = false; modelBtn.textContent = label; }
+        }
+      });
+      const modelBtn = h('button', {
+        class: 'btn ghost sm',
+        title: '上传单文件 GLB；预演台优先用真 3D 模型，失败时自动退回设定图贴片',
+        onclick: () => modelInput.click()
+      }, item.modelPath ? '更换 3D 模型' : '绑定 3D 模型');
+
       /**
        * 补角度：侧面 / 背面 / 俯视平面。
        *
@@ -613,6 +650,9 @@ export default {
           item.sheetSource === 'upload'
             ? h('div', { class: 'sheet-seed', style: 'margin-top:6px' }, '这张是你传的，点「改完重出」会用模型重画一张盖掉它')
             : null,
+          item.modelPath
+            ? h('div', { class: 'sheet-seed', style: 'margin-top:6px;color:var(--good)' }, `3D 模型已绑定：${item.modelFileName || '本地 GLB'}`)
+            : null,
           h('details', { class: 'shot-prompt', style: 'margin-top:8px' },
             h('summary', {}, `${meta.title}（${list.length} 版）`),
             h('div', { class: 'shot-prompt-body' },
@@ -625,6 +665,8 @@ export default {
             angleBtn,
             uploadBtn,
             fileInput,
+            modelBtn,
+            modelInput,
             h('button', {
               class: 'btn ghost sm',
               title: '从设定集里移除',

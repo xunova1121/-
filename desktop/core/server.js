@@ -57,6 +57,8 @@ const MIME = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
+  '.glb': 'model/gltf-binary',
+  '.gltf': 'model/gltf+json',
   '.mp4': 'video/mp4',
   '.mp3': 'audio/mpeg',
   '.wav': 'audio/wav',
@@ -1311,6 +1313,18 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
         }
         return undefined;
       }
+      if (e && f === 'model' && method === 'POST') {
+        const body = await readBody(req, 112 * 1024 * 1024);
+        const stream = ndjson(res);
+        req.on('close', () => stream.end());
+        try {
+          const project = await studio.attachBibleModel(b, kind, decodeURIComponent(e), body, (ev) => stream.send(ev));
+          stream.end({ type: 'finished', project });
+        } catch (err) {
+          stream.end({ type: 'error', message: err.message });
+        }
+        return undefined;
+      }
       // 补出正面之外的角度（角色的侧/背，场景的左右/俯视）。cap:sheet-angles
       // 走流式：一次可能出三四张图，闷着等两分钟没有任何反馈是最糟的
       if (e && f === 'angles' && method === 'POST') {
@@ -1760,7 +1774,7 @@ export function createServer({ lan = false } = {}) {
        * 放行的是这两个确切的路径，不是"所有 .js"—— 后者会把电脑版
        * 整套界面代码一起放出去，那不是同一件事。
        */
-      const SHARED_MODULES = ['/previz-canvas.js', '/previz-stage.js', '/site-canvas.js', '/previz.js', '/three.js', '/site.js', '/outline.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js', '/pricing.js', '/estimate.js'];
+      const SHARED_MODULES = ['/previz-canvas.js', '/previz-stage.js', '/site-canvas.js', '/previz.js', '/three.js', '/three-gltf-loader.js', '/three-orbit-controls.js', '/three-buffer-utils.js', '/site.js', '/outline.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js', '/pricing.js', '/estimate.js'];
       const isShell =
         url.pathname === '/m'
         || url.pathname.startsWith('/m/')
@@ -1837,6 +1851,21 @@ export function createServer({ lan = false } = {}) {
           if (err) return json(res, 404, { error: '找不到 Three.js，请重新安装应用依赖' });
           res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'public, max-age=31536000' });
           res.end(data);
+        });
+      }
+      const threeAddon = {
+        '/three-gltf-loader.js': ['examples', 'jsm', 'loaders', 'GLTFLoader.js'],
+        '/three-orbit-controls.js': ['examples', 'jsm', 'controls', 'OrbitControls.js'],
+        '/three-buffer-utils.js': ['examples', 'jsm', 'utils', 'BufferGeometryUtils.js']
+      }[url.pathname];
+      if (threeAddon) {
+        return fs.readFile(path.join(ROOT, 'node_modules', 'three', ...threeAddon), (err, data) => {
+          if (err) return json(res, 404, { error: `找不到 ${path.basename(threeAddon.at(-1))}` });
+          res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'public, max-age=31536000' });
+          const source = url.pathname === '/three-gltf-loader.js'
+            ? data.toString('utf8').replace("from '../utils/BufferGeometryUtils.js'", "from '/three-buffer-utils.js'")
+            : data;
+          res.end(source);
         });
       }
       if (url.pathname === '/pricing.js') {
