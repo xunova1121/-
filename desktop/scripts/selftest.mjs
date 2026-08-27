@@ -444,7 +444,24 @@ const upstream = http.createServer((req, res) => {
         content = '{}';
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ choices: [{ message: { content } }] }));
+      /**
+       * 带上 usage。
+       *
+       * 这个假上游原来不回 usage —— 而真实厂商全都回。少了它，
+       * 记账那条路在自检里从头到尾走的是"读不出用量"的分支，
+       * 于是「真跑一步之后账上有 token」这条断言查出来是空的。
+       *
+       * 假上游比真实厂商**少给**的字段，会让一整条代码路径从来没被跑过，
+       * 而且表现是"测试绿的"。按真实形态回，那条路才真的被验到。
+       */
+      res.end(JSON.stringify({
+        choices: [{ message: { content } }],
+        usage: {
+          prompt_tokens: Math.max(1, Math.round(JSON.stringify(body).length / 4)),
+          completion_tokens: Math.max(1, Math.round(content.length / 4)),
+          total_tokens: 0
+        }
+      }));
     });
     return undefined;
   }
@@ -10858,6 +10875,349 @@ section('根地址：手机去手机版，电脑留电脑版');
   const withKey = await land('Mozilla/5.0 (Linux; Android 14; Pixel 8) Chrome/120.0 Mobile Safari/537.36', '?k=ABC123');
   check('跳转时把口令带过去（不然到了手机版还要重输）',
     withKey.status === 302 && withKey.to === '/m?k=ABC123', JSON.stringify(withKey));
+}
+
+section('钱：用量是我们的事实，单价是你的');
+{
+  const pricing = await import('../core/pricing.js');
+  const ledger = await import('../core/ledger.js');
+  const meter = await import('../core/meter.js');
+  const estimate = await import('../core/pipeline/estimate.js');
+
+  const K = pricing.rateKey;
+
+  // ── 未定价必须是"未知"，不能是 0 ──
+  {
+    /**
+     * 这一组是整个功能的地基。一旦某处把未知当成 0 参与求和，
+     * 总价就会是一个**看起来正常的偏小的数** —— 用户会照着它下手。
+     */
+    const rates = { [K('volcengine', 'seedream', 'image')]: { cny: 0.2 } };
+    const mixed = pricing.sum(
+      [
+        { kind: 'image', provider: 'volcengine', model: 'seedream', units: 5, calls: 5 },
+        { kind: 'video', provider: 'kling', model: 'kling-v2', units: 30, calls: 3 }
+      ],
+      rates
+    );
+    check('有定价的算进去了', Math.abs(mixed.cny - 1.0) < 1e-9, String(mixed.cny));
+    check('没定价的没有被当成 0 混进总数', mixed.partial === true && mixed.unpriced.length === 1);
+    check('说得出还差哪一个单价',
+      mixed.missing.length === 1 && mixed.missing[0].key === K('kling', 'kling-v2', 'video'),
+      JSON.stringify(mixed.missing));
+
+    // 一个都没定价的时候，总数是 null 而不是 0 —— 0 会被显示成"免费"
+    const none = pricing.sum([{ kind: 'video', provider: 'kling', model: 'kling-v2', units: 30 }], {});
+    check('一个都没定价时总数是"算不出"，不是 ¥0', none.cny === null, String(none.cny));
+    check('这时候的措辞是"还没填单价"',
+      pricing.describeSum(none).includes('还没填单价'), pricing.describeSum(none));
+    check('部分定价的措辞里必须有"至少"和"没算进去"',
+      pricing.describeSum(mixed).includes('至少') && pricing.describeSum(mixed).includes('没算进去'),
+      pricing.describeSum(mixed));
+    // 全都定了价的时候不许再说"至少" —— 那会让一个准确的数看起来不准
+    const full = pricing.sum([{ kind: 'image', provider: 'volcengine', model: 'seedream', units: 5 }], rates);
+    check('全都定了价就不说"至少"', !pricing.describeSum(full).includes('至少'), pricing.describeSum(full));
+  }
+
+  // ── 不许拿相近的型号去猜价 ──
+  {
+    /**
+     * `doubao-seedream-3-0-t2i-250415` 和 `doubao-seedream-4-0-250828`
+     * 前缀一大半是一样的，而两者价钱不同。要是哪天有人给 rateFor
+     * 加了"前缀匹配"图省事，这条会红。
+     */
+    const rates = { [K('volcengine', 'doubao-seedream-3-0-t2i-250415', 'image')]: { cny: 0.2 } };
+    const got = pricing.rateFor('volcengine', 'doubao-seedream-4-0-250828', 'image', rates);
+    check('填了 3.0 的价，不会被拿去当 4.0 的价', got === null, JSON.stringify(got));
+    const same = pricing.rateFor('volcengine', 'doubao-seedream-3-0-t2i-250415', 'image', rates);
+    check('填对了型号当然要认', same?.cny === 0.2 && same.matched === 'model');
+  }
+
+  // ── 厂商级兜底 ──
+  {
+    const rates = {
+      [K('volcengine', '', 'image')]: { cny: 0.5 },
+      [K('volcengine', 'seedream', 'image')]: { cny: 0.2 }
+    };
+    // 数字故意取得不一样：两级都命中时若拿错了级，金额会不同
+    check('没填型号的走厂商兜底', pricing.rateFor('volcengine', 'whatever', 'image', rates)?.cny === 0.5);
+    check('填了型号的以型号为准（不是兜底那个）',
+      pricing.rateFor('volcengine', 'seedream', 'image', rates)?.cny === 0.2);
+  }
+
+  // ── 本地跑的不是"没填价"，是真的不要钱 ──
+  {
+    const local = pricing.sum([{ kind: 'image', provider: 'comfy', model: 'workflow', units: 8 }], {});
+    check('本地 ComfyUI 出图算 0 元', local.cny === 0, String(local.cny));
+    check('而且不会挂一条"还没填单价"', local.missing.length === 0 && local.partial === false);
+  }
+
+  // ── 进出 token 分开计价 ──
+  {
+    // 进出单价故意差 4 倍：算反了、或者只用其中一个，金额都对不上
+    const rates = { [K('volcengine', 'doubao', 'token')]: { in: 1, out: 4 } };
+    const one = pricing.sum([{ kind: 'token', provider: 'volcengine', model: 'doubao', units: { in: 2000000, out: 500000 } }], rates);
+    check('进出各按各的单价算', Math.abs(one.cny - (2 + 2)) < 1e-9, String(one.cny));
+    check('只填了进没填出，这条不算数',
+      pricing.rateFor('volcengine', 'doubao', 'token', { [K('volcengine', 'doubao', 'token')]: { in: 1 } }) === null);
+  }
+
+  // ── 账本：存的是用量，钱现算 ──
+  {
+    /**
+     * 这一条是"只存用量不存钱"那个决定的**唯一证据**：
+     * 同一份账，换一份单价就换一个数，而且过去的账会亮起来。
+     */
+    ledger.reset({ wipe: true });
+    ledger.add({ projectId: 'proj-money', stage: '出图', provider: 'volcengine', model: 'seedream', kind: 'image', units: 1 });
+    ledger.add({ projectId: 'proj-money', stage: '出图', provider: 'volcengine', model: 'seedream', kind: 'image', units: 1 });
+    ledger.add({ projectId: 'proj-money', stage: '配音', provider: 'dashscope', model: 'cosy', kind: 'tts', units: 10000 });
+
+    const blindRead = ledger.forProject('proj-money', {});
+    check('还没填单价时，用量已经在了',
+      blindRead.total.byKind.image.units === 2 && blindRead.total.byKind.tts.units === 10000,
+      JSON.stringify(blindRead.total.byKind));
+    check('还没填单价时，钱是"算不出"', blindRead.total.cny === null);
+
+    const later = ledger.forProject('proj-money', {
+      [K('volcengine', 'seedream', 'image')]: { cny: 0.2 },
+      [K('dashscope', 'cosy', 'tts')]: { cny: 1 }
+    });
+    check('事后补填单价，过去的账立刻亮起来', Math.abs(later.total.cny - (0.4 + 1)) < 1e-9, String(later.total.cny));
+
+    // 改一次价，同一份账要给出不同的数 —— 证明它真的没把钱存进去
+    const cheaper = ledger.forProject('proj-money', {
+      [K('volcengine', 'seedream', 'image')]: { cny: 0.1 },
+      [K('dashscope', 'cosy', 'tts')]: { cny: 1 }
+    });
+    check('换一份单价，同一份账给出不同的数', Math.abs(cheaper.total.cny - 1.2) < 1e-9, String(cheaper.total.cny));
+  }
+
+  // ── 记不上的那些，要能说出来 ──
+  {
+    ledger.reset({ wipe: true });
+    ledger.add({ projectId: 'p-blind', provider: 'volcengine', model: 'doubao', kind: 'token', units: { in: 100, out: 20 } });
+    ledger.addUnmetered({ projectId: 'p-blind', provider: 'someco', model: 'quiet-1', kind: 'token', why: '响应里没有 usage' });
+    ledger.addUnmetered({ projectId: 'p-blind', provider: 'someco', model: 'quiet-1', kind: 'token', why: '响应里没有 usage' });
+    const acct = ledger.forProject('p-blind', {});
+    check('漏记的次数走得出来', acct.unmetered === 2, String(acct.unmetered));
+    check('而且说得出是谁漏的',
+      acct.blind.length === 1 && acct.blind[0].model === 'quiet-1' && acct.blind[0].hits === 2,
+      JSON.stringify(acct.blind));
+    check('漏记的不会被算进用量里', acct.total.byKind.token.units.in === 100, JSON.stringify(acct.total.byKind));
+
+    // 猜不出用量就不许记 —— 记一个假数比少一条坏得多
+    const before = ledger.forProject('p-blind', {}).calls;
+    ledger.add({ projectId: 'p-blind', provider: 'x', model: 'y', kind: 'image', units: 0 });
+    ledger.add({ projectId: 'p-blind', provider: 'x', model: 'y', kind: 'image', units: null });
+    check('用量是 0 或读不出来时，一笔都不记', ledger.forProject('p-blind', {}).calls === before);
+  }
+
+  // ── token 用量：拆不开进出就不算数 ──
+  {
+    check('标准的 OpenAI 形态读得出',
+      JSON.stringify(meter.readTokenUsage({ usage: { prompt_tokens: 10, completion_tokens: 3 } })) === '{"in":10,"out":3}');
+    check('百炼那种 input/output 也读得出',
+      JSON.stringify(meter.readTokenUsage({ usage: { input_tokens: 7, output_tokens: 2 } })) === '{"in":7,"out":2}');
+    check('只给了 total_tokens 的，宁可算漏账也不硬拆',
+      meter.readTokenUsage({ usage: { total_tokens: 999 } }) === null);
+    check('压根没有 usage 的返回 null', meter.readTokenUsage({ choices: [] }) === null);
+  }
+
+  // ── 预估：秒数要按厂商档位对齐 ──
+  {
+    /**
+     * 分镜写 4 秒，厂商只出 5 秒档，**按 5 秒计费**。
+     * 不对齐的话每一镜都少估一截，二十镜下来差四分之一。
+     * 4 和 5 是两个不同的数，所以这条断言不会因为"碰巧相等"而假绿。
+     */
+    const shots = [
+      { id: 's1', duration: 4, imagePath: 'a.png' },
+      { id: 's2', duration: 6, imagePath: 'b.png' }
+    ];
+    const aligned = estimate.forStage({
+      shots,
+      stage: 'video',
+      routing: { video: { provider: 'volcengine', model: 'seedance', durations: [5, 10] } }
+    });
+    check('4 秒和 6 秒按 5/10 档位算成 15 秒', aligned.items[0].units === 15, JSON.stringify(aligned.items));
+    check('镜数和秒数是两个数，都要报', aligned.items[0].calls === 2 && aligned.shots === 2);
+
+    const noDurations = estimate.forStage({
+      shots,
+      stage: 'video',
+      routing: { video: { provider: 'x', model: 'y', durations: [] } }
+    });
+    check('厂商档位不知道时按原样算（10 秒），不假装对齐过', noDurations.items[0].units === 10);
+  }
+
+  // ── 预估：全跑时，出视频那一步要把"马上就会有图"的镜算进去 ──
+  {
+    /**
+     * 一个刚拆完分镜、一张图都没有的项目，点「往后全跑」——
+     * 要是照当前镜况算，出视频那步会估成 0 秒，
+     * 而那正是这一整趟里最贵的一步。
+     */
+    const fresh = [
+      { id: 's1', duration: 5, imagePath: null, dialogue: '走吧。' },
+      { id: 's2', duration: 5, imagePath: null, dialogue: '' }
+    ];
+    const routing = {
+      image: { provider: 'volcengine', model: 'seedream' },
+      video: { provider: 'volcengine', model: 'seedance', durations: [5, 10] },
+      tts: { provider: 'dashscope', model: 'cosy' }
+    };
+    const whole = estimate.forRun({ shots: fresh, from: 'assets', routing });
+    const vid = whole.items.find((i) => i.kind === 'video');
+    check('一张图都没有的项目，全跑也能估出视频那步的钱', vid && vid.units === 10, JSON.stringify(whole.items));
+
+    // 但只从「出视频」开始跑的时候，没图的镜是真的出不了 —— 不能算进去
+    const onlyVideo = estimate.forRun({ shots: fresh, from: 'video', routing });
+    check('单跑出视频时，没图的镜不算进去',
+      !onlyVideo.items.some((i) => i.kind === 'video'), JSON.stringify(onlyVideo.items));
+  }
+
+  // ── 预估：三种不同的真相，三种说法 ──
+  {
+    const routing = { image: { provider: 'volcengine', model: 'seedream' } };
+    const rates = { [K('volcengine', 'seedream', 'image')]: { cny: 0.2 } };
+
+    const composePlan = estimate.forStage({ shots: [{ id: 's1' }], stage: 'compose', routing });
+    check('合成那步说的是"不花钱"，不是"¥0"',
+      estimate.describe(composePlan, rates).includes('不花钱')
+      && !estimate.describe(composePlan, rates).includes('¥0'),
+      estimate.describe(composePlan, rates));
+
+    const nothing = estimate.forStage({ shots: [{ id: 's1', imagePath: 'a.png' }], stage: 'assets', routing });
+    check('没东西要出的时候不显示金额', estimate.describe(nothing, rates).includes('没有要出的东西'),
+      estimate.describe(nothing, rates));
+
+    const scriptPlan = estimate.forStage({ shots: [], stage: 'script', routing });
+    check('拆分镜明说"事前算不出来"',
+      estimate.describe(scriptPlan, rates).includes('算不出来'), estimate.describe(scriptPlan, rates));
+    check('而且不给它编一个数', scriptPlan.items.length === 0);
+
+    // 重试要单独说，不能并进总数 —— 并进去的话每个数都偏高，人会学会不看
+    const withRetry = estimate.forStage({
+      shots: [{ id: 's1' }, { id: 's2' }],
+      stage: 'assets',
+      routing,
+      maxRetries: 2
+    });
+    const priced = estimate.price(withRetry, rates);
+    check('正常情况按不重试算', Math.abs(priced.base.cny - 0.4) < 1e-9, String(priced.base.cny));
+    check('最坏情况另给一个数', Math.abs(priced.worst.cny - 1.2) < 1e-9, String(priced.worst.cny));
+    check('两个数都要出现在那句话里',
+      estimate.describe(withRetry, rates).includes('¥0.40') && estimate.describe(withRetry, rates).includes('¥1.20'),
+      estimate.describe(withRetry, rates));
+  }
+
+  // ── 配音字数：标点也算，跟厂商一个口径 ──
+  {
+    const shot = { dialogue: '你到底是谁？我等了三年！' };
+    check('标点算在字数里', estimate.dialogueChars(shot) === 12, String(estimate.dialogueChars(shot)));
+    check('空台词是 0 字', estimate.dialogueChars({ dialogue: '' }) === 0);
+  }
+
+  // ── 接口这一层 ──
+  {
+    const created = await (await fetch(`${appUrl}/api/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '记账验收', script: '第一章\n\n他推开门。' })
+    })).json();
+
+    const spend = await (await fetch(`${appUrl}/api/projects/${created.id}/spend`)).json();
+    check('新项目的账是空的但接口不报错', spend.calls === 0 && spend.total.cny === null, JSON.stringify(spend.total));
+    check('账那条接口会给出一句人话', typeof spend.line === 'string' && spend.line.includes('这个项目到现在'));
+
+    const est = await (await fetch(`${appUrl}/api/projects/${created.id}/estimate?stage=compose`)).json();
+    check('预估是另一条接口，不和账混在一起', est.priced.free === true && est.line.includes('不花钱'), est.line);
+
+    // 单价表只收认得的键
+    const put = await fetch(`${appUrl}/api/rates`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        rates: {
+          [K('volcengine', 'seedream', 'image')]: { cny: 0.25 },
+          'garbage-key': { cny: 99 },
+          [K('volcengine', 'seedream', 'nosuchkind')]: { cny: 88 }
+        }
+      })
+    });
+    const saved = await put.json();
+    check('填对格式的单价存下来了', saved.rates[K('volcengine', 'seedream', 'image')]?.cny === 0.25);
+    check('乱填的键不进设置',
+      !('garbage-key' in saved.rates) && !(K('volcengine', 'seedream', 'nosuchkind') in saved.rates),
+      JSON.stringify(Object.keys(saved.rates)));
+
+    // 填错了要能删掉 —— 一个填错的 0 会让某项永远显示成免费
+    const del = await (await fetch(`${appUrl}/api/rates`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rates: { [K('volcengine', 'seedream', 'image')]: null } })
+    })).json();
+    check('单价能删掉，不是只能改成别的数',
+      !(K('volcengine', 'seedream', 'image') in del.rates), JSON.stringify(del.rates));
+
+    await fetch(`${appUrl}/api/projects/${created.id}`, { method: 'DELETE' });
+  }
+
+  // ── 真跑一步，看账有没有自己记上 ──
+  {
+    /**
+     * 上面那些验的是零件。这一条验的是**接线** —— 走完整条
+     * 「HTTP 进来 → 圈上下文 → 流水线 → 适配层 → 记账」，
+     * 中间任何一环没接上，这里就是空账。
+     *
+     * 这是唯一能抓住"归属圈漏了"的断言：零件测试全绿而账是空的，
+     * 正是这个功能最可能的坏法。
+     */
+    ledger.reset({ wipe: true });
+    const p = await (await fetch(`${appUrl}/api/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '记账接线', script: '第一章\n\n他推开门，屋里没有人。' })
+    })).json();
+    await ndjson(`/projects/${p.id}/stage/bible`, {});
+    await ndjson(`/projects/${p.id}/stage/script`, { shotCount: 2 });
+    await ndjson(`/projects/${p.id}/stage/assets`, {});
+    ledger.flush();
+
+    const acct = ledger.forProject(p.id, {});
+    check('真跑一步之后，这个项目名下有账了', acct.calls > 0, JSON.stringify(acct.total.byKind));
+    check('出的图记成了图，不是别的口径',
+      (acct.total.byKind.image?.units || 0) > 0, JSON.stringify(acct.total.byKind));
+    check('拆分镜那几次对话也记上了 token',
+      (acct.total.byKind.token?.units?.in || 0) > 0, JSON.stringify(acct.total.byKind));
+
+    const stages = new Set(ledger.recent({ projectId: p.id, limit: 200 }).map((e) => e.stage));
+    check('每一笔都知道自己是哪一步花的',
+      stages.has('assets') && stages.has('script'), [...stages].join('、'));
+    check('没有一笔落进"未归属"', ledger.forProject('(未归属)', {}).calls === 0);
+
+    await fetch(`${appUrl}/api/projects/${p.id}`, { method: 'DELETE' });
+    ledger.reset({ wipe: true });
+  }
+
+  // ── 归属：项目 id 是自动带上的，不靠调用点记得传 ──
+  {
+    ledger.reset({ wipe: true });
+    await meter.runIn({ projectId: 'ctx-proj', stage: '出图' }, async () => {
+      // 隔一次 await，模拟真实链路里的十几层调用
+      await new Promise((r) => setTimeout(r, 1));
+      meter.record({ kind: 'image', provider: 'volcengine', model: 'seedream', units: 1 });
+    });
+    const acct = ledger.forProject('ctx-proj', {});
+    check('await 之后记的账仍然落在对的项目上', acct.calls === 1, JSON.stringify(acct));
+    check('而且带着是哪一步', ledger.recent({ projectId: 'ctx-proj' })[0]?.stage === '出图');
+
+    // 没圈过的照样有账，只是不归任何项目 —— 联调台里手发的请求就是这种
+    meter.record({ kind: 'image', provider: 'volcengine', model: 'seedream', units: 1 });
+    check('圈外面的记到"未归属"，不是丢掉', ledger.forProject('(未归属)', {}).calls === 1);
+    ledger.reset({ wipe: true });
+  }
 }
 
 // ─────────────────────── 收尾 ───────────────────────
