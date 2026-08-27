@@ -1395,6 +1395,21 @@ async function handleApi(req, res, url, { lan = false } = {}) {
           return json(res, 400, { error: err.message });
         }
       }
+      /**
+       * 解锁某几场，准备重拆。cap:outline-revise
+       *
+       * ⚠ 必须是人点的动作。解锁之后重拆会作废那几场已经出好的图 ——
+       * 作废是对的（内容变了，旧图对不上新分镜），但它花过钱。
+       */
+      if (d === 'unlock' && method === 'POST') {
+        const { ids } = await readBody(req);
+        try {
+          return json(res, 200, studio.unlockOutlineBeats(b, { ids }));
+        } catch (err) {
+          return json(res, 400, { error: err.message });
+        }
+      }
+
       // 手改一场（不经过模型）。cap:outline
       // ⚠ 动词在前、id 在后（outline/beat/:id）。反过来写的话
       // `outline/build` 里的 build 会被当成 id，两条路由撞在一起

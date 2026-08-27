@@ -1171,6 +1171,28 @@ export function applyOutlineOps(projectId, { ops = [] } = {}) {
   return { project: next, applied: r.applied.length, refused: r.refused };
 }
 
+/**
+ * 解锁某几场，准备重拆。
+ *
+ * 回 { project, unlocked, willDrop }：willDrop 是**会作废几镜** ——
+ * 这个数必须回出去让界面摆在确认框里。只说"确定解锁吗"，
+ * 人不知道自己在放弃什么；说"这会作废 7 镜已经出好的图"才叫知情。
+ */
+export function unlockOutlineBeats(projectId, { ids = [] } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const want = new Set((ids || []).map((x) => String(x)));
+  const willDrop = (project.shots || [])
+    .filter((s) => s.beatId && (!want.size || want.has(s.beatId)))
+    .filter((s) => s.imagePath || s.videoPath).length;
+  const next = store.update(projectId, (p) => {
+    p.outline = outline.unlockBeats(p.outline, ids);
+    return p;
+  });
+  const unlocked = outline.normalizeOutline(next.outline).beats.filter((b) => !b.locked).length;
+  return { project: next, unlocked, willDrop };
+}
+
 /** 手改一场（界面上直接编辑，不经过模型） */
 export function editOutlineBeat(projectId, beatId, fields = {}) {
   return applyOutlineOps(projectId, { ops: [{ op: 'edit', id: beatId, fields }] });
@@ -1205,18 +1227,67 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
       : chapterList.find((c) => c.stageStatus?.script !== 'done') || chapterList[0];
     if (!chapter) throw new Error(`没有这一章：${chapterId}`);
   }
-  const sourceScript = chapter ? chapter.script : project.script;
+  /**
+   * ════════ 有大纲就照大纲拆 ════════
+   *
+   * ⚠ 这一段是大纲那一层**唯一真正起作用**的地方。
+   *
+   * 没有它，大纲就是个装饰品：你可以生成、可以跟模型来回改、可以锁住
+   * 已拆的场次，然后点「分镜」—— 它完全无视大纲，重新去读原始剧本。
+   * 一整层白做，而且看不出来（分镜照样出得来，只是和你改的那份没关系）。
+   *
+   * 照大纲拆之后有三样东西跟着变好：
+   *
+   *   ① **只拆没拆过的**。原来是整章重拆 —— 第 3 场出过图了、你想改第 7 场，
+   *      一拆全作废。现在锁住的场次直接跳过，它们的镜头原样留着
+   *   ② 时长按**这几场自己的估算**走，不再按字数比例分摊。
+   *      而字数是个很糙的代理：同样两千字，全是对话的一场念完要 90 秒，
+   *      全是写景的一场 40 秒就够
+   *   ③ 每一镜记下 beatId，于是"重拆第 7 场"这件事以后是可能的
+   */
+  const outlineNow = outline.normalizeOutline(project.outline);
+  const inScope = outlineNow.beats.filter((b) => (chapter ? b.chapterId === chapter.id : true));
+  const targetBeats = inScope.filter((b) => !b.locked);
+  const useOutline = inScope.length > 0;
+
+  if (useOutline && !targetBeats.length) {
+    throw new Error(
+      `大纲里${chapter ? `「${chapter.title}」的` : ''}场次都已经拆过分镜了。`
+      + '要重拆的话，去「大纲」把那几场解锁 —— 解锁之后重拆会作废那几场已经出好的图，'
+      + '所以是个要你自己点一下的动作，不会自动发生。'
+    );
+  }
+
+  /**
+   * 喂给模型的东西。
+   *
+   * 用大纲时喂的是**这几场的正文**，每一场前面标着它的 id ——
+   * 模型据此把每一镜标回哪一场，我们才知道下次只重拆哪几镜。
+   */
+  const sourceScript = useOutline
+    ? targetBeats.map((b) => {
+        const who = b.characters.length ? `（${b.characters.join('、')}）` : '';
+        const when = b.time ? `·${b.time}` : '';
+        return `【场次 ${b.id}】${b.scene}${when}${who}\n${b.summary}${b.dialogue ? `\n台词：${b.dialogue}` : ''}`;
+      }).join('\n\n')
+    : (chapter ? chapter.script : project.script);
 
   // 时长预算：分章时按本章字数占全片的比例分摊，长章自然分到更多秒数
   const totalTarget = Number(project.targetDuration) || 60;
-  const targetSeconds = chapter
-    ? Math.max(
-        10,
-        Math.round(
-          (totalTarget * chapter.chars) / (chapterList.reduce((sum, c) => sum + c.chars, 0) || chapter.chars)
+  const targetSeconds = useOutline
+    // 大纲上每一场自己估过秒数（台词念得完是硬下限）—— 比字数比例准得多
+    ? Math.max(10, targetBeats.reduce((sum, b) => sum + outline.estimateSeconds(b).suggested, 0))
+    : chapter
+      ? Math.max(
+          10,
+          Math.round(
+            (totalTarget * chapter.chars) / (chapterList.reduce((sum, c) => sum + c.chars, 0) || chapter.chars)
+          )
         )
-      )
-    : totalTarget;
+      : totalTarget;
+
+  // 镜头数跟着时长走。大纲那条路上人已经把每场多长定过了，按它反推最合理
+  if (useOutline) shotCount = duration.planShotCount(targetSeconds);
 
   const r = routing();
   onEvent?.({
@@ -1247,7 +1318,21 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
     model: r.chat.model,
     system: SHOT_PROMPT.replace('{{SHOT_COUNT}}', String(shotCount))
       .replace('{{TARGET_SECONDS}}', String(targetSeconds))
-      .replace('{{BIBLE}}', bibleDigest),
+      .replace('{{BIBLE}}', bibleDigest)
+      /**
+       * 大纲那条路上追加一段：每一镜要标回它属于哪一场。
+       *
+       * 追加而不是改 SHOT_PROMPT 本身 —— 那一份是所有项目共用的，
+       * 而"标回场次"只在有大纲时才成立。改主提示词会让没有大纲的项目
+       * 也收到一句它看不懂的要求。
+       */
+      + (useOutline
+        ? `\n\n──────── 这一次的额外要求 ────────\n\n`
+          + `剧本里每一场前面都标着【场次 b-XX】。**每一镜都要多带一个字段 beatId**，`
+          + `填它属于的那个场次 id（比如 "b-04"）。\n`
+          + `这个字段决定了以后能不能只重拆某一场 —— 标错或者不标，`
+          + `重拆一场就会连带重拆这一批全部。`
+        : ''),
     user: sourceScript,
     temperature: 0.7,
     jsonMode: true,
@@ -1261,11 +1346,27 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
    * 行为正好等于改这一版之前 —— 少一个字段不该让整步失败。
    */
   const segs = segments.normalizeSegments(parsed.segments);
+
+  /**
+   * 模型标回来的场次 id。**只认这一批真的发出去的那几个** ——
+   * 它编一个不存在的 id 的话，那一镜会挂在一个永远不存在的场次上，
+   * 于是"重拆这一场"永远碰不到它，而它就那么留在成片里。
+   */
+  const okBeatIds = new Set(targetBeats.map((b) => b.id));
+  let taggedBack = 0;
+  const beatIdOf = (raw) => {
+    const id = String(raw?.beatId || '').trim();
+    if (id && okBeatIds.has(id)) { taggedBack += 1; return id; }
+    return null;
+  };
+
   const rawShots = (parsed.shots || []).map((s, i) => ({
     id: chapters.shotIdFor(chapter?.id || null, i + 1),
     // 全局镜号：章序 × 1000 + 章内序，3012 一眼看出是第 3 章第 12 镜
     index: chapters.globalShotIndex(chapter?.index || 0, i + 1),
     chapterId: chapter?.id || null,
+    // 这一镜是从大纲哪一场拆出来的。没有大纲时是 null
+    beatId: useOutline ? (beatIdOf(s) || null) : null,
     scene: s.scene || '',
     characters: Array.isArray(s.characters) ? s.characters : [],
     description: s.description || '',
@@ -1389,7 +1490,78 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
            ...segs.map((x) => ({ ...x, chapterId: chapter.id }))]
         : segs.map((x) => ({ ...x, chapterId: null }));
     }
-    if (chapter) {
+    if (useOutline) {
+      /**
+       * ── 按**场次**合并，不是按章 ──
+       *
+       * 留下的是"不属于这一批目标场次"的每一镜 —— 也就是锁住那几场
+       * 已经出好的镜头。它们的图和视频原样还在。
+       *
+       * ⚠ 这才是"只拆没拆过的"落地的地方。按章合并的话，
+       * 第 3 场出过图、你只想改第 7 场，一拆连第 3 场一起作废 ——
+       * 而那正是用户说"不要全部推到重来"时怕的那件事。
+       */
+      const redoing = new Set(targetBeats.map((b) => b.id));
+      const kept = p.shots.filter((x) => !(x.beatId && redoing.has(x.beatId)));
+      /**
+       * ⚠ 模型一个 beatId 都没标回来时，**保守处理**：
+       * 这一批当成整体，把这一章（或全片）原有的镜头都换掉。
+       *
+       * 不这么做的话，新旧两批镜头会叠在一起 —— 成片里同一段戏演两遍，
+       * 而每一镜看着都正常。宁可多作废，不能悄悄重复。
+       */
+      const noTags = taggedBack === 0;
+      const base = noTags
+        ? p.shots.filter((x) => (chapter ? x.chapterId !== chapter.id : false))
+        : kept;
+
+      /**
+       * ⚠ 新拆出来的镜头**要避开留下来那几镜的 id**。
+       *
+       * 每一批都是从 1 开始编号的（shot-001、shot-002…）。只重拆一场时，
+       * 新批次的编号会和留下来那几镜撞上 —— 于是项目里出现两个 shot-002，
+       * 而**图是按 id 存盘的**（shot-002.png），后出的那张直接盖掉前一张。
+       *
+       * 表现：没解锁的那一场，图莫名其妙变成了别的场次的画面。
+       * 这一条是自检当场抓到的 —— 出现两个 shot-002。
+       */
+      const takenIds = new Set(base.map((x) => x.id));
+      const renumbered = shots.map((one) => {
+        if (!takenIds.has(one.id)) { takenIds.add(one.id); return one; }
+        let n = takenIds.size + 1;
+        let id = chapters.shotIdFor(chapter?.id || null, n);
+        while (takenIds.has(id)) { n += 1; id = chapters.shotIdFor(chapter?.id || null, n); }
+        takenIds.add(id);
+        return { ...one, id };
+      });
+
+      /**
+       * ⚠ 顺序按**大纲里场次的顺序**排，不能按 index 排。
+       *
+       * 留下来那几镜的 index 和新拆那几镜的 index 都是从 1 开始的，
+       * 直接按 index 排会把两批交错在一起 —— 成片里第 2 场演到一半
+       * 插进第 1 场的镜头，而每一镜看着都正常。
+       *
+       * 排好之后重编 index：镜号本来就该跟着最终顺序走。
+       */
+      const order = new Map(outline.normalizeOutline(p.outline).beats.map((x, i) => [x.id, i]));
+      const rank = (x) => (x.beatId && order.has(x.beatId) ? order.get(x.beatId) : Number.MAX_SAFE_INTEGER);
+      p.shots = [...base, ...renumbered]
+        .sort((x, y) => (rank(x) - rank(y)) || ((x.index || 0) - (y.index || 0)))
+        .map((one, i) => ({
+          ...one,
+          index: chapter ? chapters.globalShotIndex(chapter.index || 0, i + 1) : i + 1
+        }));
+      // 拆过的场次锁上 —— 模型改大纲时碰不到它们了
+      p.outline = outline.lockBeats(p.outline, chapter ? chapter.id : null);
+      if (chapter) {
+        const ch = p.chapters.find((c) => c.id === chapter.id);
+        if (ch) { ch.stageStatus.script = 'done'; ch.shotCount = shots.length; }
+        p.stageStatus.script = p.chapters.every((c) => c.stageStatus.script === 'done') ? 'done' : 'partial';
+      } else {
+        p.stageStatus.script = 'done';
+      }
+    } else if (chapter) {
       // 只换掉这一章的镜头，别的章已经出好的图不能被误伤
       p.shots = [...p.shots.filter((s) => s.chapterId !== chapter.id), ...shots].sort((a, b) => a.index - b.index);
       const ch = p.chapters.find((c) => c.id === chapter.id);
@@ -1403,21 +1575,6 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
       p.stageStatus.script = 'done';
     }
 
-    /**
-     * ── 拆过分镜的场次，在大纲上**锁住** ──
-     *
-     * 锁住之后，模型改大纲时碰不到它们：applyOps 会当场拒绝，并说清
-     * "第 N 场已经拆过分镜了，要改先把那一章的分镜清掉"。
-     *
-     * 不锁的话，改一句话就可能把出过图的那几场换掉 —— 而那正是
-     * "不要全部推到重来"这句话里怕的那件事。它不会报错，
-     * 只是下次拆分镜时那几场的内容已经不是你审过的了。
-     *
-     * ⚠ 按**章**锁，不是全锁。别的章还没拆，那几场就该继续能改。
-     */
-    if (p.outline?.beats?.length) {
-      p.outline = outline.lockBeats(p.outline, chapter ? chapter.id : null);
-    }
 
     // 顺手把台词署名认一遍：模型经常把说话人写在台词里
     //（dialogue = "阿澜：设备正常。" 而 speaker 空着），留着它配音会连"阿澜冒号"一起念。

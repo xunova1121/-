@@ -3598,7 +3598,32 @@ export default {
             h('span', { class: 'ob-unit' }, '秒'),
             // 台词念完的硬下限单独标出来：它和"节奏偏长"是完全不同的两件事
             est.floor ? h('span', { class: 'ob-floor', title: '台词念完至少要这么长，压不下去' }, `台词 ${est.floor}s`) : '',
-            b.locked ? h('span', { class: 'badge', title: '已经拆过分镜了。要改先把那一章的分镜清掉' }, '锁') : ''));
+            b.locked ? (() => {
+              /**
+               * 锁着的那几场给一条出口：解锁重拆。
+               *
+               * ⚠ 确认框里必须说**会作废几镜**。只说"确定解锁吗"，
+               * 人不知道自己在放弃什么 —— 而放弃的是已经花过钱的图。
+               */
+              const un = h('button', {
+                class: 'btn ghost sm', title: '解锁之后重拆这一场，已经出好的图会作废'
+              }, '锁·解锁重拆');
+              un.onclick = async () => {
+                un.disabled = true;
+                try {
+                  // cap:outline-revise
+                  const r = await api(`/projects/${project.id}/outline/unlock`, {
+                    method: 'POST', body: { ids: [b.id] }
+                  });
+                  project.outline = r.project.outline;
+                  paintOutline();
+                  toast(r.willDrop
+                    ? `已解锁。重拆这一场会作废 ${r.willDrop} 镜已经出好的图`
+                    : '已解锁，这一场还没有出过图', 'ok');
+                } catch (err) { toast(err.message, 'err'); } finally { un.disabled = false; }
+              };
+              return un;
+            })() : ''));
         }
 
         const bud = OUTLINE.budgetCheck(project.outline, project.targetDuration);

@@ -343,7 +343,17 @@ const upstream = http.createServer((req, res) => {
       if (system.includes('美术总监')) {
         content = JSON.stringify(BIBLE_REPLY);
       } else if (system.includes('分镜导演')) {
-        content = JSON.stringify(SHOTS_REPLY);
+        /**
+         * 大纲那条路上，剧本里每一场前面标着【场次 b-XX】，
+         * 而模型要把每一镜标回它属于哪一场。这里照做 —— 不照做的话
+         * 走的永远是"一个都没标"那条保守分支，happy path 测不到。
+         */
+        const user = String(body.messages?.[1]?.content || '');
+        const ids = [...user.matchAll(/【场次\s*([a-z0-9-]+)】/gi)].map((m) => m[1]);
+        upstream.lastShotPrompt = { system, user };
+        content = JSON.stringify(ids.length
+          ? { ...SHOTS_REPLY, shots: SHOTS_REPLY.shots.map((x, i) => ({ ...x, beatId: ids[i % ids.length] })) }
+          : SHOTS_REPLY);
       } else if (system.includes('剪辑师')) {
         /**
          * 自动标衔接。**故意给一份违规的答案** —— 模型真会这么答，
@@ -2858,6 +2868,22 @@ section('大纲：改动指令，不是推倒重来');
     check('lockBeats 也是纯函数', o.beats.every((b) => !b.locked));
   }
 
+  // ── 解锁：唯一一条能重拆的路 ──
+  {
+    const o = {
+      beats: [
+        { id: 'b-07', scene: '一', summary: '甲。', locked: true },
+        { id: 'b-04', scene: '二', summary: '乙。', locked: true }
+      ]
+    };
+    const one = ol.unlockBeats(o, ['b-07']);
+    check('只解锁点名的那一场', one.beats[0].locked === false && one.beats[1].locked === true);
+    check('解锁之后就改得动了', ol.applyOps(one, [{ op: 'delete', id: 'b-07' }]).applied.length === 1);
+    check('没点名的还锁着', ol.applyOps(one, [{ op: 'delete', id: 'b-04' }]).refused.length === 1);
+    check('传空就全解锁', ol.unlockBeats(o, []).beats.every((b) => !b.locked));
+    check('unlockBeats 也是纯函数', o.beats.every((b) => b.locked));
+  }
+
   // ── 落盘：拆过分镜就锁住 ──
   {
     const p = store.create({ title: '大纲落盘' });
@@ -2874,6 +2900,168 @@ section('大纲：改动指令，不是推倒重来');
     const bad = studioModule.applyOutlineOps(p.id, { ops: [{ op: 'delete', id: 'b-07' }] });
     check('锁着的那一场，走接口也删不掉',
       store.read(p.id).outline.beats.length === 3 && bad.refused.length === 1);
+  }
+}
+
+/**
+ * ════════ 大纲 → 分镜：这条链到底通不通 ════════
+ *
+ * ⚠ 这一节是补一个**我自己留的洞**：大纲那一层建完之后，
+ * analyzeScript 里一次都没提到 outline —— 你可以生成大纲、跟模型来回改、
+ * 锁住已拆的场次，然后点「分镜」，它完全无视大纲重新去读原始剧本。
+ *
+ * 一整层白做，而且看不出来：分镜照样出得来，只是和你改的那份没关系。
+ */
+section('大纲 → 分镜：只拆没拆过的场次');
+{
+  const studio = studioModule;
+  const ol = await import('../core/pipeline/outline.js');
+
+  /** 造一个跑得动的项目：有设定集、有大纲 */
+  const mk = () => {
+    const p = store.create({ title: '照大纲拆', targetDuration: 120 });
+    store.update(p.id, (x) => {
+      x.script = '阿澜在码头巡查，发现缆绳被割断。';
+      x.bible = {
+        style: { anchor: '国风', negative: '' },
+        characters: [{ name: '阿澜', appearance: '短发', seed: 1, sheetPath: '/a.png',
+          variants: [{ id: 'v-default', name: '默认', sheetPath: '/a.png' }] }],
+        scenes: [{ name: '码头', appearance: '雾', seed: 2, sheetPath: '/b.png',
+          variants: [{ id: 'v-default', name: '默认', sheetPath: '/b.png' }] }],
+        props: []
+      };
+      x.outline = {
+        beats: [
+          { id: 'b-07', scene: '码头', characters: ['阿澜'], summary: '走向栈桥。', dialogue: '设备正常。', seconds: 30 },
+          { id: 'b-04', scene: '码头', characters: ['阿澜'], summary: '发现缆绳被割断。', dialogue: '', seconds: 40 }
+        ]
+      };
+      return x;
+    });
+    return p;
+  };
+
+  {
+    const p = mk();
+    await studio.analyzeScript(p.id, { force: true });
+    const after = store.read(p.id);
+
+    /**
+     * ⚠ 最要紧的一条：喂给模型的**是大纲，不是原始剧本**。
+     *
+     * 不查这个的话，大纲那一层可以完全没接上而这里全绿 ——
+     * 分镜照样拆得出来（模型读原始剧本一样能拆），只是你改的那份没起作用。
+     */
+    const sent = String(upstream.lastShotPrompt?.user || '');
+    check('喂给模型的是大纲里那几场，不是原始剧本',
+      /【场次 b-07】/.test(sent) && /走向栈桥/.test(sent), sent.slice(0, 120));
+    check('原始剧本没有被直接丢进去', !/发现缆绳被割断。$/.test(sent.trim()) || /【场次/.test(sent));
+
+    check('每一镜都标回了它属于哪一场', (after.shots || []).every((s) => s.beatId),
+      JSON.stringify((after.shots || []).map((s) => s.beatId)));
+    check('拆完之后那几场锁上了',
+      ol.normalizeOutline(after.outline).beats.every((b) => b.locked));
+
+    /**
+     * 时长按**大纲上每一场自己的估算**走，不再按字数比例分摊。
+     * 字数是个很糙的代理：同样两千字，全是对话的一场念完要 90 秒。
+     */
+    const sysPrompt = String(upstream.lastShotPrompt?.system || '');
+    const want = ol.estimateSeconds({ summary: '走向栈桥。', dialogue: '设备正常。', seconds: 30 }).suggested
+      + ol.estimateSeconds({ summary: '发现缆绳被割断。', dialogue: '', seconds: 40 }).suggested;
+    check('时长预算来自大纲，不是项目的目标时长',
+      sysPrompt.includes(String(want)), `期望含 ${want}；项目目标是 120`);
+  }
+
+  // ── 再拆一次：全锁着，要拦住并说清出路 ──
+  {
+    const p = mk();
+    await studio.analyzeScript(p.id, { force: true });
+    let msg = '';
+    try { await studio.analyzeScript(p.id, { force: true }); } catch (e) { msg = e.message; }
+    check('都拆过了就拦住，不闷头重拆', /都已经拆过/.test(msg), msg);
+    /**
+     * ⚠ 拦住的同时必须给**出路**。只说"拆过了"，人下一秒就问"那我怎么改"。
+     * 而且要说清解锁的代价 —— 那几场的图是花过钱的。
+     */
+    check('并且说清了怎么才能重拆', /解锁/.test(msg), msg);
+    check('还说清了重拆的代价（会作废已出的图）', /作废/.test(msg), msg);
+  }
+
+  // ── 只重拆一场：另一场的镜头原样留着 ──
+  {
+    const p = mk();
+    await studio.analyzeScript(p.id, { force: true });
+    // 假装两场都出过图了
+    store.update(p.id, (x) => {
+      x.shots.forEach((s) => { s.imagePath = `/img/${s.id}.png`; });
+      return x;
+    });
+    const before = store.read(p.id);
+    const keepIds = before.shots.filter((s) => s.beatId === 'b-04').map((s) => s.id);
+    const dropIds = before.shots.filter((s) => s.beatId === 'b-07').map((s) => s.id);
+    check('两场各自都拆出了镜头', keepIds.length > 0 && dropIds.length > 0,
+      JSON.stringify({ keep: keepIds.length, drop: dropIds.length }));
+
+    const un = studio.unlockOutlineBeats(p.id, { ids: ['b-07'] });
+    /**
+     * ⚠ 解锁时要回**会作废几镜**。只说"确定解锁吗"，人不知道自己在放弃什么 ——
+     * 而放弃的是已经花过钱的图。
+     */
+    check('解锁时说得出会作废几镜', un.willDrop === dropIds.length, `${un.willDrop} / ${dropIds.length}`);
+
+    await studio.analyzeScript(p.id, { force: true });
+    const after = store.read(p.id);
+    /**
+     * ════ 这一条就是这一整节存在的理由 ════
+     *
+     * 原来是**整章重拆**：第 3 场出过图、你只想改第 7 场，一拆全作废。
+     * 而那正是用户说"不要全部推到重来"时怕的那件事。
+     */
+    check('没解锁那一场的镜头原样还在（图也没丢）',
+      keepIds.every((id) => after.shots.some((s) => s.id === id && s.imagePath)),
+      JSON.stringify(after.shots.map((s) => [s.id, s.beatId, Boolean(s.imagePath)])));
+    check('解锁那一场被重拆了',
+      after.shots.some((s) => s.beatId === 'b-07'));
+    check('没有重复：同一场不会既留旧的又加新的',
+      new Set(after.shots.map((s) => s.id)).size === after.shots.length,
+      JSON.stringify(after.shots.map((s) => s.id)));
+
+    /**
+     * ⚠ 顺序要按**大纲里场次的顺序**，不能按 index 排。
+     *
+     * 留下那几镜和新拆那几镜的 index 都是从 1 开始的，按 index 排会把两批
+     * 交错在一起 —— 成片里第 2 场演到一半插进第 1 场的镜头，
+     * 而每一镜看着都正常。
+     *
+     * 这一条第一版是**空的**：只查了 id 不重复、没查顺序，
+     * 于是把排序改成"全部并列"照样全绿。
+     */
+    const seq = after.shots.map((s) => s.beatId);
+    const firstOf = (id) => seq.indexOf(id);
+    const lastOf = (id) => seq.lastIndexOf(id);
+    check('两批镜头没有交错：b-07 的全在 b-04 前面',
+      lastOf('b-07') < firstOf('b-04'), JSON.stringify(seq));
+    check('镜号是连着的，没有重号',
+      new Set(after.shots.map((s) => s.index)).size === after.shots.length,
+      JSON.stringify(after.shots.map((s) => s.index)));
+  }
+
+  // ── 没有大纲的项目：老路一点没变 ──
+  {
+    const p = store.create({ title: '没大纲', targetDuration: 60 });
+    store.update(p.id, (x) => {
+      x.script = '阿澜在码头巡查。';
+      x.bible = { style: { anchor: '国风', negative: '' },
+        characters: [{ name: '阿澜', appearance: '短发', seed: 1, sheetPath: '/a.png',
+          variants: [{ id: 'v-default', name: '默认', sheetPath: '/a.png' }] }],
+        scenes: [], props: [] };
+      return x;
+    });
+    await studio.analyzeScript(p.id, { force: true });
+    const after = store.read(p.id);
+    check('没有大纲时照旧读原始剧本', /阿澜在码头巡查/.test(String(upstream.lastShotPrompt?.user || '')));
+    check('没有大纲时不硬塞 beatId', (after.shots || []).every((s) => s.beatId === null));
   }
 }
 

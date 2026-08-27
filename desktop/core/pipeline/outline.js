@@ -343,6 +343,27 @@ export function lockBeats(outline, chapterId = null) {
   };
 }
 
+/**
+ * 解锁某几场 —— 准备重拆它们。
+ *
+ * ⚠ 这个动作**必须是人点的**，不能自动发生。
+ *
+ * 解锁之后重拆，那几场已经出好的图和视频会作废。作废是对的（内容都变了，
+ * 旧图对不上新分镜），但它花过钱，所以要人自己确认一次。
+ *
+ * ids 传空 = 全解锁。
+ */
+export function unlockBeats(outline, ids = []) {
+  const want = new Set((ids || []).map((x) => String(x)));
+  const o = normalizeOutline(outline);
+  return {
+    ...o,
+    beats: o.beats.map((b) => (
+      !want.size || want.has(b.id) ? { ...b, locked: false } : b
+    ))
+  };
+}
+
 /** 一场戏一行，给提示词和摘要用 */
 export function toLines(outline) {
   return normalizeOutline(outline).beats.map((b, i) => {
