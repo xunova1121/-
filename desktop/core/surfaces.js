@@ -269,6 +269,15 @@ export const CAPABILITIES = [
     mobile: 'ui/m/m.js'
   },
   {
+    id: 'spend-overall',
+    name: '全部项目一共花了多少',
+    api: 'GET /spend',
+    pc: 'ui/views/projects.js',
+    mobile: null,
+    why: '跨项目的总账是坐下来盘的东西。手机上要回答的是"我手上这部片子花了多少"，'
+      + '那条在项目页里有；把一张跨项目汇总表塞进手机，滚三屏也看不完，谁也不会在路上看。'
+  },
+  {
     id: 'spend-rates',
     name: '填自己的单价',
     api: 'PUT /rates',

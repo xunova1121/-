@@ -1537,6 +1537,26 @@ console.log('\n钱：这个项目花了多少');
     after.slice(0, 200));
 }
 
+console.log('\n钱：全部项目一共花了多少');
+await page.locator('.nav-item', { hasText: '项目' }).first().click().catch(async () => {
+  await page.locator('a,button', { hasText: '项目' }).first().click();
+});
+await page.waitForTimeout(1200);
+{
+  const panel = page.locator('.panel', { hasText: '一共花了多少' }).first();
+  check('项目页底下有一张跨项目的总账', (await panel.count()) > 0);
+  if (await panel.count()) {
+    const body = await panel.innerText();
+    check('总账说得出合计', /全部项目合计|还没花过/.test(body), body.slice(0, 120));
+    /**
+     * 刚才在工作台上填过一个单价，所以这里必须已经出钱了 ——
+     * 这一条同时验了"账本存的是用量、钱现算"：总账和单项目账
+     * 读的是同一份用量，换算用的是同一张单价表。
+     */
+    check('工作台上填的单价，这里也算数', /¥\d/.test(body), body.slice(0, 200));
+  }
+}
+
 check('全程没有页面报错', errs.length === 0, errs.slice(0, 3).join(' | '));
 
 await b.close();

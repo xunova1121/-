@@ -805,9 +805,12 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
     });
   }
 
-  if (a === 'spend' && b === 'recent' && method === 'GET') {
-    return json(res, 200, { entries: ledger.recent({ limit: 80 }) });
-  }
+  /**
+   * 这里本来还有一条 GET /spend/recent（跨项目流水）。删掉了 ——
+   * 界面上没有任何地方读它，而单项目那条接口已经带着自己的 recent。
+   * 一条没人调的接口不是"以后可能有用"，是一份没人验的负担：
+   * 它会在重构时被当成还在用的东西保着，而它的坏掉没有任何测试会红。
+   */
 
   if (a === 'rates' && !b) {
     if (method === 'GET') {
