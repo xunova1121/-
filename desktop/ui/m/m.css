@@ -776,3 +776,30 @@ input {
    而流断了之后这个信息是从 GET /job 接回来的，不靠那条流 */
 .shot.live-shot { border-color: var(--beam); box-shadow: 0 0 0 1px var(--beam) inset; }
 .overlay.running { color: var(--beam); background: rgba(232, 180, 95, .22); align-items: center; }
+
+/* ── 大纲 ──
+   一行一场戏。手机上这一层反而比分镜表合适：十来行看得完，
+   而分镜表那种一屏六七个字段的东西才是手机装不下的。 */
+.mob-row { padding: 8px 0; border-top: 1px solid var(--line-soft); }
+/* 锁住的那几场已经拆过分镜、后面挂着出好的图，要一眼分得开 */
+.mob-row.locked { background: var(--surface-2); border-radius: 8px; padding: 8px; }
+.mob-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mob-head b { font-size: 13.5px; }
+/* 台词的硬下限：除非删台词否则压不下去，和"节奏偏长"不是一回事 */
+.mob-floor {
+  color: var(--caution); font-size: 11px;
+  padding: 1px 7px; border-radius: 999px; background: rgba(232, 180, 95, .14);
+}
+.mob-issue {
+  margin-top: 10px; padding: 9px 11px; border-radius: 10px;
+  background: rgba(232, 180, 95, .14); border-left: 3px solid var(--caution);
+  font-size: 12px;
+}
+.mob-issue.hard { background: rgba(217, 97, 76, .14); border-left-color: var(--alarm); }
+.mob-op {
+  display: flex; gap: 9px; align-items: flex-start;
+  padding: 9px 4px; font-size: 13px; line-height: 1.6;
+  border-top: 1px solid var(--line-soft);
+}
+.mob-op.refused { opacity: .6; }
+.mob-refused { color: var(--alarm); font-size: 12px; }

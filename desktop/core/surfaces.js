@@ -335,6 +335,22 @@ export const CAPABILITIES = [
     why: ''
   },
   {
+    id: 'outline',
+    name: '大纲：一行一场戏，剧本和分镜之间那一层（含台词硬下限估算）',
+    api: 'POST /projects/:id/outline/build',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
+    id: 'outline-revise',
+    name: '和模型商量着改大纲：它回改动指令，你逐条勾选应用',
+    api: 'POST /projects/:id/outline/revise',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
     id: 'extend-bible',
     name: '增量补设定集：只加新章里没见过的角色和场景，已有的一条都不动',
     api: 'POST /projects/:id/extend-bible',

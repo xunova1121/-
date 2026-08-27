@@ -1326,6 +1326,64 @@ async function handleApi(req, res, url, { lan = false } = {}) {
     }
 
     /**
+     * ── 大纲 ──
+     *
+     * 剧本和分镜之间那一层，**可以商量的那一层**。
+     * 分镜表是个很坏的对话对象：二十镜、每镜六七个字段，想说"第三场太拖了"
+     * 得手工改十几行；让模型重跑一次，它会把已经审过的镜全换掉。
+     */
+    if (b && c === 'outline') {
+      // 生成一份。cap:outline
+      if (d === 'build' && method === 'POST') {
+        const opts = await readBody(req);
+        const stream = ndjson(res);
+        req.on('close', () => stream.end());
+        try {
+          const project = await studio.buildOutline(b, { ...opts, onEvent: (ev) => stream.send(ev) });
+          stream.end({ type: 'finished', project });
+        } catch (err) {
+          stream.end({ type: 'error', message: err.message });
+        }
+        return undefined;
+      }
+      /**
+       * 和模型商量着改 —— **只回建议，不落盘**。cap:outline-revise
+       *
+       * 分成"要建议"和"应用建议"两步是这件事的关键：模型直接改的话，
+       * 你没法知道它动了哪儿，而"看不出动了哪儿"和"全部推倒重来"
+       * 在后果上是一样的。
+       */
+      if (d === 'revise' && method === 'POST') {
+        const opts = await readBody(req);
+        try {
+          return json(res, 200, await studio.reviseOutline(b, opts));
+        } catch (err) {
+          return json(res, 400, { error: err.message });
+        }
+      }
+      // 把人勾中的那几条落盘。cap:outline-revise
+      if (d === 'apply' && method === 'POST') {
+        const { ops } = await readBody(req);
+        try {
+          return json(res, 200, studio.applyOutlineOps(b, { ops }));
+        } catch (err) {
+          return json(res, 400, { error: err.message });
+        }
+      }
+      // 手改一场（不经过模型）。cap:outline
+      // ⚠ 动词在前、id 在后（outline/beat/:id）。反过来写的话
+      // `outline/build` 里的 build 会被当成 id，两条路由撞在一起
+      if (d === 'beat' && e && method === 'PATCH') {
+        const fields = await readBody(req);
+        try {
+          return json(res, 200, studio.editOutlineBeat(b, e, fields));
+        } catch (err) {
+          return json(res, 400, { error: err.message });
+        }
+      }
+    }
+
+    /**
      * 增量补设定集：只加新来的角色和场景，已有的一条都不动。cap:extend-bible
      *
      * 走流式 —— 它要给新条目出参考图，那是几十秒到几分钟的事，
@@ -1549,7 +1607,7 @@ export function createServer({ lan = false } = {}) {
        * 放行的是这两个确切的路径，不是"所有 .js"—— 后者会把电脑版
        * 整套界面代码一起放出去，那不是同一件事。
        */
-      const SHARED_MODULES = ['/previz-canvas.js', '/site-canvas.js', '/previz.js', '/site.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js'];
+      const SHARED_MODULES = ['/previz-canvas.js', '/site-canvas.js', '/previz.js', '/site.js', '/outline.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js'];
       const isShell =
         url.pathname === '/m'
         || url.pathname.startsWith('/m/')
@@ -1676,6 +1734,23 @@ export function createServer({ lan = false } = {}) {
        * 而同一份计算在服务端判断太阳对不对得上、远景地标有没有跑。
        * 界面里另写一份的话，图上说正北、检查说西北 —— 两句话都是我们说的。
        */
+      /**
+       * 大纲那一层也发原件。
+       *
+       * 界面上那份"这一场大约多少秒、这份大纲一共多长、超没超预算"
+       * 必须和服务端算的是同一套 —— 界面说装得下、拆出来念不完，
+       * 两句话都是我们自己说的。
+       *
+       * 它 import 的 `../duration.js` 在浏览器里从 `/outline.js` 出发
+       * 解析到 `/duration.js`，那条路由是有的。
+       */
+      if (url.pathname === '/outline.js') {
+        return fs.readFile(path.join(HERE, 'pipeline', 'outline.js'), (err, data) => {
+          if (err) return json(res, 404, { error: '找不到 outline.js' });
+          res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
+          res.end(data);
+        });
+      }
       if (url.pathname === '/site.js') {
         return fs.readFile(path.join(HERE, 'pipeline', 'site.js'), (err, data) => {
           if (err) return json(res, 404, { error: '找不到 site.js' });

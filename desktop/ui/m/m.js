@@ -50,6 +50,7 @@ import { speechSeconds, SPEECH_HEADROOM } from '/duration.js';
  */
 import * as SEAM from '/seam.js';
 import * as SITE from '/site-canvas.js';
+import * as OUTLINE from '/outline.js';
 
 const canInstall = window.isSecureContext && 'serviceWorker' in navigator;
 if (canInstall) {
@@ -940,6 +941,7 @@ function paintScript() {
         + '已经出好的图和视频不会自动跟着变。'),
       ta,
       h('div', { class: 'row', style: 'margin-top:10px' }, save)),
+    outlineCard(),
     appendChapterCard(),
     formatCard(),
     styleCard()
@@ -1145,6 +1147,135 @@ function extendCard() {
       '已有的一条都不动、一张图都不重出 —— 所以主角不会换脸，也不会重复花钱。'),
     h('div', { class: 'row', style: 'margin-top:8px' }, btn),
     log);
+  return host;
+}
+
+/**
+ * ── 大纲 ──
+ *
+ * 手机上做这一层，理由和「追加一章」一样：**改大纲最常发生在手机上**。
+ * 想起来"第二场太拖了"这件事，很少发生在坐下来对着电脑的时候。
+ *
+ * 而这一层恰恰是手机装得下的：一行一场戏，十来行；
+ * 分镜表那种一屏六七个字段的东西才是手机上做不了的。
+ */
+function outlineCard() {
+  const host = h('details', { class: 'card site-details' });
+  const listHost = h('div', { style: 'margin-top:8px' });
+  const chatHost = h('div', { style: 'margin-top:8px' });
+  const sumLine = h('div', { class: 'muted', style: 'line-height:1.7' });
+
+  const paint = () => {
+    clear(listHost);
+    const o = OUTLINE.normalizeOutline(project.outline);
+    sumLine.textContent = OUTLINE.summarize(project.outline, project.targetDuration);
+    if (!o.beats.length) {
+      listHost.append(h('div', { class: 'muted', style: 'line-height:1.7' },
+        '还没有大纲。先生成一份 —— 一行一场戏，改顺了再拆分镜。'));
+      return;
+    }
+    for (const [i, b] of o.beats.entries()) {
+      const est = OUTLINE.estimateSeconds(b);
+      listHost.append(h('div', { class: `mob-row${b.locked ? ' locked' : ''}` },
+        h('div', { class: 'mob-head' },
+          h('b', {}, `${i + 1}. ${b.scene || '（未定）'}`),
+          h('span', { class: 'muted' }, `${est.suggested} 秒`),
+          est.floor ? h('span', { class: 'mob-floor' }, `台词 ${est.floor}s`) : '',
+          b.locked ? h('span', { class: 'badge' }, '锁') : ''),
+        h('div', { class: 'muted', style: 'line-height:1.6' }, b.summary)));
+    }
+    const bud = OUTLINE.budgetCheck(project.outline, project.targetDuration);
+    for (const one of bud?.issues || []) {
+      listHost.append(h('div', { class: `mob-issue${one.kind === 'floor-over' ? ' hard' : ''}` },
+        h('b', {}, one.what),
+        h('div', { class: 'muted', style: 'line-height:1.6;margin-top:3px' }, one.why),
+        h('div', { style: 'line-height:1.6;margin-top:3px' }, one.fix)));
+    }
+  };
+
+  const buildBtn = h('button', { class: 'btn sm grow' }, '从剧本生成大纲');
+  buildBtn.onclick = async () => {
+    const o = OUTLINE.normalizeOutline(project.outline);
+    if (o.beats.length && !confirm('重新生成会按当前剧本重排场次。已经拆过分镜的那几场会原样留下。继续？')) return;
+    buildBtn.disabled = true;
+    const old = buildBtn.textContent;
+    buildBtn.textContent = '拆场次中…';
+    try {
+      // cap:outline
+      await stream(`/projects/${project.id}/outline/build`, {}, (ev) => {
+        if (ev.type === 'stage' && ev.message) sumLine.textContent = ev.message;
+        if (ev.type === 'error') toast(ev.message, 'err');
+        if (ev.type === 'finished') {
+          project.outline = ev.project?.outline || project.outline;
+          paint();
+          toast('大纲出来了', 'ok');
+        }
+      });
+    } catch (err) { toast(err.message, 'err'); } finally {
+      buildBtn.disabled = false;
+      buildBtn.textContent = old;
+    }
+  };
+
+  const say = h('input', { type: 'text', placeholder: '想怎么改？比如「第 2 场砍一半」' });
+  const askBtn = h('button', { class: 'btn sm grow' }, '让它想想');
+  askBtn.onclick = async () => {
+    if (!say.value.trim()) { toast('想改什么？说一句', 'err'); return; }
+    askBtn.disabled = true;
+    const old = askBtn.textContent;
+    askBtn.textContent = '想…';
+    try {
+      // cap:outline-revise
+      const r = await api(`/projects/${project.id}/outline/revise`, {
+        method: 'POST', body: { instruction: say.value }
+      });
+      clear(chatHost);
+      if (!r.preview?.length) {
+        chatHost.append(h('div', { class: 'muted' }, r.note || '它没想出要改什么'));
+        return;
+      }
+      if (r.note) chatHost.append(h('div', { class: 'muted', style: 'line-height:1.7' }, r.note));
+      const boxes = [];
+      for (const one of r.preview) {
+        const cb = h('input', { type: 'checkbox' });
+        cb.checked = !one.refused;
+        cb.disabled = Boolean(one.refused);
+        boxes.push({ cb, op: one.op });
+        chatHost.append(h('label', { class: `mob-op${one.refused ? ' refused' : ''}` },
+          cb, h('span', {}, one.text),
+          one.refused ? h('span', { class: 'mob-refused' }, `（做不了：${one.refused}）`) : ''));
+      }
+      const apply = h('button', { class: 'btn sm grow' }, '应用勾中的');
+      apply.onclick = async () => {
+        const ops = boxes.filter((x) => x.cb.checked).map((x) => x.op);
+        if (!ops.length) { toast('一条都没勾', 'err'); return; }
+        apply.disabled = true;
+        try {
+          // cap:outline-revise
+          const res = await api(`/projects/${project.id}/outline/apply`, { method: 'POST', body: { ops } });
+          project.outline = res.project.outline;
+          paint();
+          clear(chatHost);
+          toast(`改了 ${res.applied} 条`, 'ok');
+        } catch (err) { toast(err.message, 'err'); } finally { apply.disabled = false; }
+      };
+      chatHost.append(h('div', { class: 'row', style: 'margin-top:8px' }, apply));
+    } catch (err) { toast(err.message, 'err'); } finally {
+      askBtn.disabled = false;
+      askBtn.textContent = old;
+    }
+  };
+
+  host.append(
+    h('summary', {}, '大纲 ', h('span', { class: 'muted' }, '一行一场戏，改顺了再拆分镜')),
+    sumLine,
+    h('div', { class: 'row', style: 'margin-top:8px' }, buildBtn),
+    listHost,
+    h('div', { class: 'row', style: 'margin-top:10px' }, say),
+    h('div', { class: 'row', style: 'margin-top:8px' }, askBtn),
+    chatHost
+  );
+  paint();
   return host;
 }
 

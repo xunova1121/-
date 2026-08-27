@@ -85,8 +85,31 @@ const stub = http.createServer((req, res) => {
         characters: [...BIBLE.characters, { name: '老周', role: '船工', appearance: '花白胡子，藏青短打' }],
         scenes: [...BIBLE.scenes, { name: '灯塔下', appearance: '锈迹斑斑的灯塔基座' }]
       };
+      /**
+       * 大纲那两条也要打桩。
+       *
+       * ⚠ 少了它们，buildOutline 会拿到 '{}'，拆出 0 场然后抛
+       * "模型没有拆出场次" —— 看起来像功能坏了，其实是打桩没跟上。
+       * 这一节第一次跑就是这么红的。
+       */
+      const OUTLINE = {
+        beats: [
+          { scene: '码头', time: '清晨', characters: ['阿澜'], summary: '阿澜走向栈桥，例行巡查。', dialogue: '设备正常。', seconds: 20 },
+          { scene: '码头', time: '清晨', characters: ['阿澜'], summary: '发现缆绳被割断。', dialogue: '这里的缆绳被人动过，割口是新的。', seconds: 25 },
+          { scene: '栈桥', time: '清晨', characters: ['阿澜'], summary: '望向雾里的灯塔。', dialogue: '', seconds: 12 }
+        ]
+      };
+      const REVISE = {
+        ops: [
+          { op: 'edit', id: 'b-02', fields: { seconds: 12 } },
+          { op: 'insert', after: 'b-01', beat: { scene: '码头', summary: '一只海鸟掠过水面。', dialogue: '', seconds: 5 } }
+        ],
+        note: '第二场砍一半，中间插个空镜换气'
+      };
       const content = system.includes('美术总监')
         ? JSON.stringify(user.includes('老周') ? richer : BIBLE)
+        : system.includes('分场编辑') ? JSON.stringify(OUTLINE)
+        : system.includes('改动指令') ? JSON.stringify(REVISE)
         : system.includes('分镜导演') ? JSON.stringify(SHOTS)
         : '{}';
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1248,6 +1271,113 @@ const q2 = await page.evaluate(async (id) => {
 }, proj.id);
 check('成片体检把"点名了设定集里没有的人"报出来了',
   /查无此人|设定集里没有/.test(q2), q2.slice(0, 220));
+
+/**
+ * ── 大纲：模型回建议，人逐条勾 ──
+ *
+ * 用户的原话是"不要全部推到重来"。这一节量的就是那句话：
+ * 没勾的一条都不动，锁着的一条都碰不了。
+ */
+console.log('\n大纲');
+await step('剧本').click().catch(() => {});
+await page.waitForTimeout(1000);
+
+const buildBtn = page.locator('button:has-text("从剧本生成大纲")').first();
+check('剧本这一步有大纲面板', (await buildBtn.count()) > 0);
+if (await buildBtn.count()) {
+  await buildBtn.scrollIntoViewIfNeeded();
+  await buildBtn.click();
+  await page.waitForTimeout(4000);
+  const rows = await page.locator('.ob-row').count();
+  check('大纲出来了，一行一场戏', rows >= 2, `${rows} 行`);
+  /**
+   * ⚠ 台词的硬下限要单独标出来。
+   * 它和"节奏偏长"是完全不同的两件事：前者除非删台词否则压不下去。
+   */
+  check('有台词的场次标出了念完要多久',
+    (await page.locator('.ob-floor').count()) > 0,
+    await page.locator('.ob-list').first().innerText().catch(() => ''));
+
+  // 手改一场的秒数：不经过模型，直接落盘
+  const secs = page.locator('.ob-secs').first();
+  await secs.fill('77');
+  await secs.dispatchEvent('change');
+  await page.waitForTimeout(900);
+  const savedSecs = await page.evaluate(async (id) => {
+    const p = await (await fetch(`/api/projects/${id}`)).json();
+    return p.outline?.beats?.[0]?.seconds;
+  }, proj.id);
+  check('手改秒数真的落盘了', savedSecs === 77, String(savedSecs));
+
+  // ── 和模型商量 ──
+  sent.length = 0;
+  await page.locator('.ob-say').first().fill('第二场太拖了，砍一半');
+  await page.locator('button:has-text("让它想想")').first().click();
+  await page.waitForTimeout(3500);
+  const ops = await page.locator('.ob-op').count();
+  check('它把想改的每一条都摊出来了', ops >= 1, `${ops} 条`);
+  const opText = await page.locator('.ob-op').first().innerText().catch(() => '');
+  /**
+   * ⚠ 每条必须说清**改之前是什么**。只说"第 3 场改成 2 分钟"，
+   * 人没法判断该不该勾；说"60 → 120"才行。
+   */
+  check('每条都说得出"从什么变成什么"', /→/.test(opText), opText.slice(0, 120));
+
+  const beforeApply = await page.evaluate(async (id) => {
+    const p = await (await fetch(`/api/projects/${id}`)).json();
+    return (p.outline?.beats || []).length;
+  }, proj.id);
+  check('这时候还一条都没落盘（只是建议）',
+    !sent.some((x) => x.includes('/outline/apply')), sent.slice(-4).join(' | '));
+
+  /**
+   * ⚠ 这一条是这一节的核心：**只应用勾中的**。
+   * 把第一条取消勾选，然后应用 —— 剩下几条生效，取消的那条不能生效。
+   */
+  const boxes = page.locator('.ob-op input[type=checkbox]:not([disabled])');
+  const nBox = await boxes.count();
+  if (nBox >= 1) {
+    await boxes.first().uncheck();
+    await page.locator('button:has-text("应用勾中的")').first().click();
+    await page.waitForTimeout(1500);
+    const afterApply = await page.evaluate(async (id) => {
+      const p = await (await fetch(`/api/projects/${id}`)).json();
+      return { n: (p.outline?.beats || []).length, beats: (p.outline?.beats || []).map((b) => b.seconds) };
+    }, proj.id);
+    check('应用之后大纲变了', JSON.stringify(afterApply) !== JSON.stringify({ n: beforeApply, beats: [] })
+      || afterApply.n !== beforeApply, JSON.stringify(afterApply));
+    check('没勾的那条没生效（勾了几条就改几条）',
+      afterApply.n <= beforeApply + Math.max(0, nBox - 1), JSON.stringify(afterApply));
+  }
+
+  /**
+   * ── 拆过分镜的场次锁住 ──
+   *
+   * 这是"不要全部推到重来"的落脚点：出过图的那几场，模型碰不到。
+   */
+  await page.evaluate(async (id) => {
+    const p = await (await fetch(`/api/projects/${id}`)).json();
+    const o = p.outline || { beats: [] };
+    o.beats[0].locked = true;
+    await fetch(`/api/projects/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ outline: o })
+    });
+  }, proj.id);
+  const refuse = await page.evaluate(async (id) => {
+    const p = await (await fetch(`/api/projects/${id}`)).json();
+    const first = p.outline.beats[0];
+    const r = await (await fetch(`/api/projects/${id}/outline/apply`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ops: [{ op: 'delete', id: first.id }] })
+    })).json();
+    const after = await (await fetch(`/api/projects/${id}`)).json();
+    return { applied: r.applied, refused: r.refused, still: after.outline.beats[0].id === first.id };
+  }, proj.id);
+  check('锁着的场次删不掉', refuse.applied === 0 && refuse.still, JSON.stringify(refuse));
+  check('并且说清了为什么、怎么才能改',
+    /锁着/.test(refuse.refused?.[0]?.why || '') && /分镜/.test(refuse.refused?.[0]?.why || ''),
+    JSON.stringify(refuse.refused));
+}
 
 check('全程没有页面报错', errs.length === 0, errs.slice(0, 3).join(' | '));
 

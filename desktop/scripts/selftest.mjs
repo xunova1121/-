@@ -373,6 +373,30 @@ const upstream = http.createServer((req, res) => {
             why: i === 0 ? '情绪压迫，用仰拍加伦勃朗光' : '夜里的对话戏'
           }))
         });
+      } else if (system.includes('分场编辑')) {
+        /**
+         * 大纲：拆场次。
+         *
+         * ⚠ 这一支必须排在「编剧」前面 —— 打桩是按 system 里的**子串**认的，
+         * 而一旦有两个提示词都含同一个词，后写的那个永远轮不到。
+         * 大纲那个提示词一开始写的是"你是编剧"，正好被下面绑说话人那一支
+         * 抢走，然后拿 JSON.parse 去解一段中文提示词，整个自检当场崩掉。
+         */
+        content = JSON.stringify({
+          beats: [
+            { scene: '码头', time: '清晨', characters: ['阿澜'], summary: '阿澜走向栈桥，例行巡查。', dialogue: '设备正常。', seconds: 20 },
+            { scene: '码头', time: '清晨', characters: ['阿澜'], summary: '发现缆绳被割断。', dialogue: '这里的缆绳被人动过。', seconds: 25 }
+          ]
+        });
+      } else if (system.includes('改动指令')) {
+        // 改大纲：回一串 ops，不回新大纲
+        content = JSON.stringify({
+          ops: [
+            { op: 'edit', id: 'b-02', fields: { seconds: 40 } },
+            { op: 'insert', after: 'b-01', beat: { scene: '码头', summary: '一只海鸟掠过水面。', dialogue: '', seconds: 5 } }
+          ],
+          note: '第二场加长，中间插一个空镜换气'
+        });
       } else if (system.includes('编剧')) {
         // 绑说话人：只有"在场不止一个人又没线索"的那几条会发过来。
         // 故意也回一条 need=false 的，验证服务端不会拿它去覆盖已经定了的
@@ -2370,6 +2394,246 @@ section('预演台：把"中景"变成一组数');
  *      matchCharacters 找不到就 .filter(Boolean) 掉，于是那一镜没有参考图、
  *      没有外貌描述、复核没有基准，静默降级成"文生图"，流水线一路绿
  */
+/**
+ * ════════ 大纲：剧本和分镜之间那一层 ════════
+ *
+ * 用户的两句话定了这一层的形状：
+ *
+ *   "在拆分镜的时候能不能先出一个大纲，就是可和大模型对话的那种"
+ *   "大模型能结合剧本分辨出支持修改和添加的部分，**不要全部推到重来**"
+ *
+ * 第二句是硬约束。所以模型回的不是新大纲，是一串**改动指令**，
+ * 人逐条勾选之后才落盘 —— 没勾的一条都不动。
+ */
+section('大纲：改动指令，不是推倒重来');
+{
+  const ol = await import('../core/pipeline/outline.js');
+
+  /**
+   * ⚠ 夹具的 id **故意不和位置重合**（b-07 / b-04 / b-11，不是 b-01/02/03）。
+   *
+   * 第一版用的是 b-01/b-02/b-03 —— 于是"edit 之后 id 不变"那条是**空的**：
+   * 就算代码改成按位置重新编号，第 2 场也照样叫 b-02，断言照过。
+   * 金丝雀把两层保护一起打掉都没能让它变红，这才发现。
+   *
+   * 这已经是同一个毛病的第三次了：夹具挑了让断言恰好成立的那种值。
+   */
+  const base = () => ({
+    beats: [
+      { id: 'b-07', scene: '山门外', time: '傍晚', characters: ['阿澜'], summary: '被拦下。', dialogue: '你不能进去。', seconds: 30, locked: true },
+      { id: 'b-04', scene: '石阶', time: '傍晚', characters: ['阿澜'], summary: '独自上石阶。', dialogue: '', seconds: 40 },
+      { id: 'b-11', scene: '大殿', time: '夜', characters: ['阿澜'], summary: '见到住持。', dialogue: '二十年前那件事是我做的。', seconds: 60 }
+    ]
+  });
+
+  // ── 纯函数 ──
+  {
+    const before = base();
+    const snapshot = JSON.stringify(before);
+    ol.applyOps(before, [{ op: 'delete', id: 'b-04' }]);
+    /**
+     * ⚠ 必须是纯函数。界面要用**同一段代码**先预览再应用 ——
+     * 预览走一套、应用走另一套的话，你勾的和实际发生的迟早对不上，
+     * 而那种错只有在数据已经被改坏之后才看得出来。
+     */
+    check('applyOps 不改传进去的那份（界面要拿它先预览）',
+      JSON.stringify(before) === snapshot);
+  }
+
+  // ── 四种指令 ──
+  {
+    const r = ol.applyOps(base(), [{ op: 'insert', after: 'b-04', beat: { scene: '石阶', summary: '黑衣人出现。' } }]);
+    check('insert 插在指定那一场后面',
+      r.outline.beats.map((b) => b.scene).join(',') === '山门外,石阶,石阶,大殿',
+      r.outline.beats.map((b) => b.scene).join(','));
+    check('新插的那一场拿到不重复的 id',
+      new Set(r.outline.beats.map((b) => b.id)).size === r.outline.beats.length);
+    check('新插的那一场不是锁着的', r.outline.beats[2].locked === false);
+
+    const head = ol.applyOps(base(), [{ op: 'insert', after: null, beat: { scene: '雪原', summary: '空镜。' } }]);
+    check('after 传 null 就插到最前面', head.outline.beats[0].scene === '雪原');
+
+    const del = ol.applyOps(base(), [{ op: 'delete', id: 'b-04' }]);
+    check('delete 拿掉那一场', del.outline.beats.map((b) => b.id).join(',') === 'b-07,b-11');
+
+    const mv = ol.applyOps(base(), [{ op: 'move', id: 'b-11', after: null }]);
+    check('move 挪到最前面', mv.outline.beats.map((b) => b.id).join(',') === 'b-11,b-07,b-04');
+
+    const ed = ol.applyOps(base(), [{ op: 'edit', id: 'b-04', fields: { seconds: 15, summary: '改过了' } }]);
+    check('edit 只改点名的字段',
+      ed.outline.beats[1].seconds === 15 && ed.outline.beats[1].summary === '改过了'
+      && ed.outline.beats[1].scene === '石阶', JSON.stringify(ed.outline.beats[1]));
+    check('edit 之后 id 不变（不能按位置重新编号）', ed.outline.beats[1].id === 'b-04');
+  }
+
+  // ── 锁：这一层存在的全部理由 ──
+  {
+    /**
+     * ⚠ 拆过分镜的场次后面挂着**已经出好的图和视频**。
+     * 覆盖它等于把花过的钱作废，而且不可撤销。
+     *
+     * 用户的原话就是"不要全部推到重来"—— 这条断言守的就是那句话。
+     */
+    const r = ol.applyOps(base(), [
+      { op: 'edit', id: 'b-07', fields: { summary: '模型想改' } },
+      { op: 'delete', id: 'b-07' },
+      { op: 'move', id: 'b-07', after: 'b-11' }
+    ]);
+    check('锁住的场次：改不动、删不掉、挪不走', r.applied.length === 0 && r.refused.length === 3);
+    check('而且原样没变', r.outline.beats[0].summary === '被拦下。');
+    check('每条拒绝都说清了原因和出路',
+      r.refused.every((x) => /锁着/.test(x.why) && /分镜/.test(x.why)), JSON.stringify(r.refused[0]));
+    /**
+     * 悄悄跳过一条改动比拒绝它更糟：人以为改了。
+     * 所以 refused 必须回出去，界面必须摆出来。
+     */
+    check('没勾的没做、做不了的说出来 —— 不能悄悄跳过',
+      r.refused.length === 3 && r.refused.every((x) => x.op && x.why));
+
+    const forced = ol.applyOps(base(), [{ op: 'delete', id: 'b-07' }], { allowLocked: true });
+    check('明确要求时才能动锁着的', forced.applied.length === 1);
+  }
+
+  // ── 坏指令一条都不能悄悄放行 ──
+  {
+    const r = ol.applyOps(base(), [
+      { op: 'edit', id: 'b-99', fields: { seconds: 5 } },
+      { op: 'insert', after: 'b-99', beat: { scene: 'x', summary: 'y' } },
+      { op: 'move', id: 'b-04', after: 'b-99' },
+      { op: 'edit', id: 'b-04', fields: {} },
+      { op: '乱写', id: 'b-04' },
+      null
+    ]);
+    check('编出来的 id 一条都不放行', r.applied.length === 0, JSON.stringify(r.applied));
+    check('六条坏指令全部有原因', r.refused.length === 6);
+    /**
+     * ⚠ move 到一个不存在的位置时，那一场必须**回到原位**。
+     * 早先的写法是先 splice 出来再找位置，找不到就落在末尾 ——
+     * 于是一条无效指令把场次顺序改了，而它报的是"拒绝"。
+     */
+    check('挪不过去的场次回到原位，不是掉到末尾',
+      r.outline.beats.map((b) => b.id).join(',') === 'b-07,b-04,b-11',
+      r.outline.beats.map((b) => b.id).join(','));
+    check('白名单之外的字段改不动',
+      ol.applyOps(base(), [{ op: 'edit', id: 'b-04', fields: { locked: true, id: 'hack' } }])
+        .refused.length === 1);
+  }
+
+  // ── 说人话：界面上那一排勾选项 ──
+  {
+    const o = base();
+    /**
+     * ⚠ 一定要说**改之前是什么**。只说"第 3 场改成 2 分钟"，
+     * 人没法判断该不该勾；说"60 → 120"才行。
+     */
+    const t = ol.describeOp({ op: 'edit', id: 'b-11', fields: { seconds: 120 } }, o);
+    check('改动说得出"从什么变成什么"', /60/.test(t) && /120/.test(t), t);
+    check('插入说得出插在哪儿', /第 2 场/.test(ol.describeOp({ op: 'insert', after: 'b-04', beat: { scene: 'x', summary: 'y' } }, o)));
+    check('删除说得出删的是哪一场', /第 1 场/.test(ol.describeOp({ op: 'delete', id: 'b-07' }, o)));
+    check('看不懂的指令也要说出来，不能装作没有',
+      /看不懂/.test(ol.describeOp({ op: '???' }, o)));
+  }
+
+  // ── 片长：台词是硬下限 ──
+  {
+    /**
+     * ════ 这是用户上一个问题的答案落地处 ════
+     *
+     * 原来是"你先定片长，模型按预算拆"，而预算按**字数比例**分摊到每一章。
+     * 同样两千字，全是对话的一章念完要 90 秒，全是写景的一章 40 秒就够 ——
+     * 字数一样，分到的秒数就一样。于是对话密集那章被压得念不完。
+     *
+     * 而"念不念得完"引擎早就算得出来，只是那个信息用在**每一镜**上
+     *（拆完之后校对）—— 那时候分镜已经拆完了，改时长等于重拆。
+     * 放在大纲这一层，它变成**拆之前**就能说的一句话。
+     */
+    const talky = {
+      beats: [{
+        id: 'b-07', scene: '大殿', summary: '长谈。',
+        dialogue: '二十年前那件事是我做的，你父亲什么都不知道。'
+          + '我把他推下山崖那天也下着这样的雪，我以为这辈子不会有人来问我。'
+          + '你既然来了，就该听完整件事，然后自己决定要不要下山。',
+        seconds: 10
+      }]
+    };
+    const est = ol.estimateSeconds(talky.beats[0]);
+    check('台词长的场次，估出来的下限压不到人填的 10 秒', est.floor > 10, String(est.floor));
+    check('建议值不会低于台词下限', est.suggested >= est.floor);
+
+    const bud = ol.budgetCheck(talky, 10);
+    check('台词念不完时报出来', bud.issues.some((i) => i.kind === 'floor-over'), JSON.stringify(bud.issues));
+    /**
+     * ⚠ "台词超了"和"总长偏长"必须分开说：
+     * 前者**改不动**（除非删台词），后者是编辑上的选择。
+     * 混成一句"超了 30 秒"没用 —— 前者要你改剧本，后者要你改节奏。
+     */
+    const hard = bud.issues.find((i) => i.kind === 'floor-over');
+    check('并且说清这是硬下限、不是节奏问题', /硬下限/.test(hard.why), hard.why);
+    check('给的出路是调时长或删台词', /删台词|目标时长/.test(hard.fix), hard.fix);
+
+    const roomy = ol.budgetCheck(talky, 600);
+    check('时长给够了就不报台词那条', !roomy.issues.some((i) => i.kind === 'floor-over'));
+    check('但太短了会说"这份大纲比目标短不少"',
+      ol.budgetCheck({ beats: [{ id: 'b-07', scene: 'x', summary: '一句话。', seconds: 5 }] }, 300)
+        .issues.some((i) => i.kind === 'total-short'));
+    check('没有大纲或没定目标时不硬报', ol.budgetCheck({ beats: [] }, 60) === null);
+  }
+
+  // ── 空的时候也要说话 ──
+  {
+    check('没有大纲时说得出下一步干什么',
+      /先从剧本生成|还没有大纲/.test(ol.summarize({ beats: [] })), ol.summarize({ beats: [] }));
+    check('有大纲时报场数和总长',
+      /3 场/.test(ol.summarize(base(), 120)), ol.summarize(base(), 120));
+    check('锁着几场也说出来', /锁/.test(ol.summarize(base(), 120)), ol.summarize(base(), 120));
+  }
+
+  /**
+   * ── 拆过分镜就锁住 ──
+   *
+   * ⚠ 这一条是金丝雀抓出来的**缺口**：把"拆完就锁"那行代码改坏，
+   * 自检照样全绿 —— 因为前面所有的锁相关断言都是拿**手工设好 locked** 的
+   * 夹具在测，没有一条走过"分镜拆完之后到底有没有锁上"这条真实路径。
+   *
+   * 而这一条正是用户那句"不要全部推到重来"的落脚点。
+   */
+  {
+    const o = {
+      beats: [
+        { id: 'b-07', scene: '一', summary: '甲。', chapterId: 'ch-01' },
+        { id: 'b-04', scene: '二', summary: '乙。', chapterId: 'ch-02' }
+      ]
+    };
+    const one = ol.lockBeats(o, 'ch-01');
+    check('只锁拆过的那一章', one.beats[0].locked === true && one.beats[1].locked === false,
+      JSON.stringify(one.beats.map((b) => b.locked)));
+    check('别的章还能继续改', ol.applyOps(one, [{ op: 'delete', id: 'b-04' }]).applied.length === 1);
+    check('拆过的那一章改不动', ol.applyOps(one, [{ op: 'delete', id: 'b-07' }]).refused.length === 1);
+
+    const all = ol.lockBeats(o, null);
+    check('没分章的项目，拆一次就全锁', all.beats.every((b) => b.locked));
+    check('lockBeats 也是纯函数', o.beats.every((b) => !b.locked));
+  }
+
+  // ── 落盘：拆过分镜就锁住 ──
+  {
+    const p = store.create({ title: '大纲落盘' });
+    store.update(p.id, (x) => {
+      x.script = '阿澜在码头巡查。';
+      x.outline = base();
+      return x;
+    });
+    const r = studioModule.applyOutlineOps(p.id, { ops: [{ op: 'edit', id: 'b-04', fields: { seconds: 99 } }] });
+    check('改动真的落到盘上了',
+      store.read(p.id).outline.beats[1].seconds === 99, String(r.applied));
+    check('回的 refused 是空的', r.refused.length === 0);
+
+    const bad = studioModule.applyOutlineOps(p.id, { ops: [{ op: 'delete', id: 'b-07' }] });
+    check('锁着的那一场，走接口也删不掉',
+      store.read(p.id).outline.beats.length === 3 && bad.refused.length === 1);
+  }
+}
+
 section('剧本一章一章加：追加、补设定集、点名了不存在的人');
 {
   const lint = await import('../core/pipeline/shotlint.js');

@@ -34,6 +34,7 @@ import * as variants from './variants.js';
 import * as anglesLib from './angles.js';
 import * as previz from './previz.js';
 import * as siteMod from './site.js';
+import * as outline from './outline.js';
 import * as oss from '../oss.js';
 import * as tiers from '../tiers.js';
 import * as shotlint from './shotlint.js';
@@ -989,6 +990,192 @@ export function bibleReadiness(project) {
   };
 }
 
+const OUTLINE_PROMPT = `你是分场编辑。把剧本拆成**一场一场戏**（不是分镜，是场次）。
+
+一场戏 = 同一个地点、同一段连续时间里发生的事。换地方或者跳时间，就是新的一场。
+
+只回 JSON：
+{
+  "beats": [
+    {
+      "scene": "地点名（和设定集里的场景名对得上最好）",
+      "time": "白天 / 傍晚 / 夜 / 清晨 之类，没写就留空",
+      "characters": ["这一场出现的人"],
+      "summary": "这一场发生了什么，一两句话",
+      "dialogue": "这一场里**真正要念出来**的台词，原样抄；没有就留空",
+      "seconds": 这一场大概多少秒（整数）
+    }
+  ]
+}
+
+要紧的三条：
+1. dialogue 要**原样抄剧本里的台词**，不要复述。这个字段用来算"念完要多久"，
+   概括一下就算不准了。没有台词的场次留空字符串。
+2. 场次数量按剧情来，不要凑数。一场戏就是一场戏。
+3. seconds 按这一场的内容估。有大段对话的场次自然长，一个转场空镜自然短。`;
+
+const REVISE_PROMPT = `你在帮人改一份**已经存在**的大纲。
+
+⚠ 不要回新的完整大纲。回一串**改动指令**，每条指令说清楚改哪一场、怎么改。
+
+只回 JSON：
+{
+  "ops": [
+    { "op": "insert", "after": "b-02", "beat": { "scene": "...", "time": "...", "characters": [], "summary": "...", "dialogue": "", "seconds": 30 } },
+    { "op": "edit",   "id": "b-03", "fields": { "summary": "...", "seconds": 120 } },
+    { "op": "delete", "id": "b-05" },
+    { "op": "move",   "id": "b-04", "after": "b-01" }
+  ],
+  "note": "一句话说明你为什么这么改"
+}
+
+规矩：
+1. id 必须用大纲里**已有的** id。编一个不存在的 id，那条会被丢掉。
+2. insert 的 after 填要插在哪一场后面的 id；插到最前面填 null。
+3. edit 的 fields 里**只写要改的字段**，没提到的字段保持原样。
+4. 标着「锁住」的场次已经拆过分镜了 —— 你可以建议改它，但那条多半会被拒绝。
+   能用别的办法达到目的就别动它。
+5. 只做人要求的那件事。顺手"优化"一下别的场次会让人没法判断该不该勾。`;
+
+/**
+ * 从剧本生成一份大纲。
+ *
+ * ════════ 为什么这一层值得单独存在 ════════
+ *
+ * 原来是「剧本 →（一次性）分镜表 → 出图」，中间没有可以商量的中间物。
+ * 而分镜表是个很坏的对话对象：二十镜、每镜六七个字段，想说"第三场太拖了"
+ * 得手工改十几行；让模型重跑一次，它会把已经审过的镜全换掉。
+ *
+ * 大纲是十来行、一行一场戏。在这个粒度上改是一句话的事，改完还看得懂全貌。
+ */
+export async function buildOutline(projectId, { chapterId = null, onEvent } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+
+  const chapterList = project.chapters || [];
+  const chapter = chapterId ? chapterList.find((c) => c.id === chapterId) : null;
+  if (chapterId && !chapter) throw new Error(`没有这一章：${chapterId}`);
+  const source = chapter ? chapter.script : project.script;
+  if (!String(source || '').trim()) throw new Error('剧本是空的');
+
+  const r = routing();
+  onEvent?.({ type: 'stage', stage: 'outline', status: 'running', message: `${r.chat.provider} / ${r.chat.model} 拆场次中…` });
+
+  const { text } = await adapters.chat({
+    providerId: r.chat.provider,
+    model: r.chat.model,
+    system: OUTLINE_PROMPT,
+    user: `目标片长：${project.targetDuration || 60} 秒\n\n剧本：\n${String(source).slice(0, 12000)}`,
+    temperature: 0.6,
+    jsonMode: true,
+    label: '生成大纲',
+    onEvent
+  });
+  const parsed = extractJSON(text);
+  const fresh = outline.normalizeOutline({ beats: parsed.beats });
+  if (!fresh.beats.length) throw new Error('模型没有拆出场次 —— 换一家或者把剧本写具体些');
+
+  /**
+   * ⚠ **保住已经锁住的场次。**
+   *
+   * 重新生成大纲最容易毁掉的就是"已经拆过分镜的那几场"——
+   * 它们后面挂着出好的图和视频。所以锁住的原样留下，
+   * 新生成的接在后面，而不是整份换掉。
+   */
+  const next = store.update(projectId, (p) => {
+    const kept = outline.normalizeOutline(p.outline).beats.filter((b) => b.locked);
+    const tagged = fresh.beats.map((b) => ({ ...b, chapterId: chapter ? chapter.id : '' }));
+    p.outline = { beats: [...kept, ...tagged], updatedAt: new Date().toISOString() };
+    return p;
+  });
+
+  const kept = outline.normalizeOutline(next.outline).beats.filter((b) => b.locked).length;
+  onEvent?.({
+    type: 'stage',
+    stage: 'outline',
+    status: 'done',
+    message: `${outline.summarize(next.outline, next.targetDuration)}${kept ? `（${kept} 场锁着的原样留下了）` : ''}`
+  });
+  return next;
+}
+
+/**
+ * 和模型商量着改大纲 —— **只回建议，不落盘**。
+ *
+ * ⚠ 分成"要建议"和"应用建议"两步，是这整件事的关键。
+ * 模型直接改的话，你没法知道它到底动了哪儿；而"看不出动了哪儿"
+ * 和"全部推倒重来"在后果上是一样的。
+ */
+export async function reviseOutline(projectId, { instruction, onEvent } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const now = outline.normalizeOutline(project.outline);
+  if (!now.beats.length) throw new Error('还没有大纲');
+  const say = String(instruction || '').trim();
+  if (!say) throw new Error('想改什么？说一句');
+
+  const r = routing();
+  onEvent?.({ type: 'note', message: `${r.chat.provider} / ${r.chat.model} 想办法中…` });
+
+  const table = now.beats.map((b, i) => ({
+    id: b.id,
+    序: i + 1,
+    场景: b.scene,
+    时间: b.time,
+    人物: b.characters,
+    内容: b.summary,
+    台词: b.dialogue,
+    秒: outline.estimateSeconds(b).suggested,
+    锁住: b.locked || undefined
+  }));
+
+  const { text } = await adapters.chat({
+    providerId: r.chat.provider,
+    model: r.chat.model,
+    system: REVISE_PROMPT,
+    user: `目标片长：${project.targetDuration || 60} 秒\n\n现在的大纲：\n${JSON.stringify(table, null, 1)}\n\n我想要：${say}`,
+    temperature: 0.4,
+    jsonMode: true,
+    label: '改大纲',
+    onEvent
+  });
+  const parsed = extractJSON(text);
+  const ops = Array.isArray(parsed.ops) ? parsed.ops : [];
+
+  /**
+   * 每条都先**试算一遍**，把"会被拒绝"提前告诉人。
+   *
+   * 让人勾了一条注定被拒的改动，点完发现没生效 —— 那比一开始就
+   * 标出来糟得多：他会以为是按钮坏了。
+   */
+  const preview = ops.map((op) => {
+    const trial = outline.applyOps(now, [op]);
+    return {
+      op,
+      text: outline.describeOp(op, now),
+      refused: trial.refused[0]?.why || null
+    };
+  });
+  return { ops, preview, note: String(parsed.note || '').slice(0, 200) };
+}
+
+/** 把人勾中的那几条改动落盘 */
+export function applyOutlineOps(projectId, { ops = [] } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const r = outline.applyOps(project.outline, ops);
+  const next = store.update(projectId, (p) => {
+    p.outline = r.outline;
+    return p;
+  });
+  return { project: next, applied: r.applied.length, refused: r.refused };
+}
+
+/** 手改一场（界面上直接编辑，不经过模型） */
+export function editOutlineBeat(projectId, beatId, fields = {}) {
+  return applyOutlineOps(projectId, { ops: [{ op: 'edit', id: beatId, fields }] });
+}
+
 export async function analyzeScript(projectId, { shotCount = 8, chapterId = null, force = false, onEvent } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
@@ -1214,6 +1401,22 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
     } else {
       p.shots = shots;
       p.stageStatus.script = 'done';
+    }
+
+    /**
+     * ── 拆过分镜的场次，在大纲上**锁住** ──
+     *
+     * 锁住之后，模型改大纲时碰不到它们：applyOps 会当场拒绝，并说清
+     * "第 N 场已经拆过分镜了，要改先把那一章的分镜清掉"。
+     *
+     * 不锁的话，改一句话就可能把出过图的那几场换掉 —— 而那正是
+     * "不要全部推到重来"这句话里怕的那件事。它不会报错，
+     * 只是下次拆分镜时那几场的内容已经不是你审过的了。
+     *
+     * ⚠ 按**章**锁，不是全锁。别的章还没拆，那几场就该继续能改。
+     */
+    if (p.outline?.beats?.length) {
+      p.outline = outline.lockBeats(p.outline, chapter ? chapter.id : null);
     }
 
     // 顺手把台词署名认一遍：模型经常把说话人写在台词里

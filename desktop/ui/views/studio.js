@@ -11,6 +11,7 @@ import { ratioLabel } from '../ratios.js';
 import { skillPicker, customSkillForm } from '../skill-picker.js';
 import { previzPanel, blankStage } from '../previz-canvas.js';
 import * as siteCanvasMod from '../site-canvas.js';
+import * as OUTLINE from '/outline.js';
 import { inheritStage } from '/previz.js';
 /**
  * 转场表和效果表读的是**引擎那一份原件**（服务端把 core/transitions.js、
@@ -3544,6 +3545,175 @@ export default {
      * 因为它们一次只看得见一个场景。
      */
     /**
+     * ── 大纲：剧本和分镜之间那一层 ──
+     *
+     * 分镜表是个很坏的对话对象：二十镜、每镜六七个字段，想说"第三场太拖了"
+     * 得手工改十几行；让模型重跑一次，它会把已经审过的镜全换掉。
+     *
+     * 大纲是十来行、一行一场戏。在这个粒度上改是一句话的事。
+     *
+     * ⚠ 模型回的是**改动指令**，不是新大纲。界面把每条摊开让人逐条勾 ——
+     * 没勾的一条都不动。"模型建议"和"实际改动"是两件事。
+     */
+    const outlinePanel = h('div', { class: 'panel' });
+    {
+      const listHost = h('div', { class: 'ob-list' });
+      const sumLine = h('div', { class: 'ob-sum' });
+      const budgetHost = h('div', {});
+      const chatHost = h('div', { class: 'ob-chat' });
+
+      const paintOutline = () => {
+        clear(listHost); clear(budgetHost);
+        const o = OUTLINE.normalizeOutline(project.outline);
+        sumLine.textContent = OUTLINE.summarize(project.outline, project.targetDuration);
+        if (!o.beats.length) {
+          listHost.append(h('div', { class: 'ob-empty' },
+            '还没有大纲。先生成一份 —— 十来行、一行一场戏，改顺了再拆分镜。',
+            h('br'),
+            '在这一层改比在分镜表上改省事得多，而且拆出来的分镜是你已经同意过的。'));
+          return;
+        }
+        for (const [i, b] of o.beats.entries()) {
+          const est = OUTLINE.estimateSeconds(b);
+          const secs = h('input', {
+            type: 'number', class: 'ob-secs', value: String(est.suggested), min: '1',
+            title: est.floor ? `台词念完至少要 ${est.floor} 秒` : '这一场没有台词'
+          });
+          secs.onchange = async () => {
+            try {
+              // cap:outline
+              const r = await api(`/projects/${project.id}/outline/beat/${b.id}`, {
+                method: 'PATCH', body: { seconds: Number(secs.value) }
+              });
+              project.outline = r.project.outline;
+              paintOutline();
+            } catch (err) { toast(err.message, 'err'); }
+          };
+          listHost.append(h('div', { class: `ob-row${b.locked ? ' locked' : ''}` },
+            h('span', { class: 'ob-n' }, String(i + 1)),
+            h('span', { class: 'ob-scene' }, b.scene || '（未定）'),
+            h('span', { class: 'ob-when' }, [b.time, b.characters.join('、')].filter(Boolean).join(' · ')),
+            h('span', { class: 'ob-sumtext' }, b.summary),
+            secs,
+            h('span', { class: 'ob-unit' }, '秒'),
+            // 台词念完的硬下限单独标出来：它和"节奏偏长"是完全不同的两件事
+            est.floor ? h('span', { class: 'ob-floor', title: '台词念完至少要这么长，压不下去' }, `台词 ${est.floor}s`) : '',
+            b.locked ? h('span', { class: 'badge', title: '已经拆过分镜了。要改先把那一章的分镜清掉' }, '锁') : ''));
+        }
+
+        const bud = OUTLINE.budgetCheck(project.outline, project.targetDuration);
+        for (const one of bud?.issues || []) {
+          budgetHost.append(h('div', { class: `ob-issue ${one.kind === 'floor-over' ? 'hard' : ''}` },
+            h('b', {}, one.what), h('div', { class: 'ob-why' }, one.why), h('div', { class: 'ob-fix' }, one.fix)));
+        }
+      };
+
+      const buildBtn = h('button', { class: 'btn' }, '从剧本生成大纲');
+      buildBtn.onclick = async () => {
+        const o = OUTLINE.normalizeOutline(project.outline);
+        if (o.beats.length && !confirm('重新生成会按当前剧本重排场次。已经拆过分镜的那几场（标着「锁」的）会原样留下。继续？')) return;
+        buildBtn.disabled = true;
+        const old = buildBtn.textContent;
+        buildBtn.textContent = '拆场次中…';
+        try {
+          // cap:outline
+          await stream(`/projects/${project.id}/outline/build`, {}, (ev) => {
+            if (ev.type === 'stage' && ev.message) sumLine.textContent = ev.message;
+            if (ev.type === 'error') toast(ev.message, 'err');
+            if (ev.type === 'finished') {
+              project.outline = ev.project?.outline || project.outline;
+              paintOutline();
+              toast('大纲出来了 —— 改顺了再拆分镜', 'ok');
+            }
+          });
+        } catch (err) { toast(err.message, 'err'); } finally {
+          buildBtn.disabled = false;
+          buildBtn.textContent = old;
+        }
+      };
+
+      /**
+       * ── 说一句，看它想怎么改 ──
+       *
+       * 模型回的每一条都摊开成一个勾选框，并且**写清楚改之前是什么**。
+       * 只说"第 3 场改成 2 分钟"，人没法判断该不该勾；
+       * 说"3 分钟 → 2 分钟"才行。
+       */
+      const say = h('input', { type: 'text', class: 'ob-say', placeholder: '想怎么改？比如「第 2 场太拖了，砍一半」「在开头加一场雪夜追逐」' });
+      const askBtn = h('button', { class: 'btn primary' }, '让它想想');
+      const paintOps = (r) => {
+        clear(chatHost);
+        if (!r.preview?.length) {
+          chatHost.append(h('div', { class: 'ob-note' }, r.note || '它没想出要改什么。把要求说具体一点试试。'));
+          return;
+        }
+        if (r.note) chatHost.append(h('div', { class: 'ob-note' }, r.note));
+        const boxes = [];
+        for (const one of r.preview) {
+          const cb = h('input', { type: 'checkbox' });
+          cb.checked = !one.refused;
+          cb.disabled = Boolean(one.refused);
+          boxes.push({ cb, op: one.op });
+          chatHost.append(h('label', { class: `ob-op${one.refused ? ' refused' : ''}` },
+            cb,
+            h('span', {}, one.text),
+            // 注定被拒的当场标出来 —— 让人勾了再发现没生效，他会以为按钮坏了
+            one.refused ? h('span', { class: 'ob-refused' }, `（做不了：${one.refused}）`) : ''));
+        }
+        const apply = h('button', { class: 'btn' }, '应用勾中的');
+        apply.onclick = async () => {
+          const ops = boxes.filter((x) => x.cb.checked).map((x) => x.op);
+          if (!ops.length) { toast('一条都没勾', 'err'); return; }
+          apply.disabled = true;
+          try {
+            // cap:outline-revise
+            const res = await api(`/projects/${project.id}/outline/apply`, { method: 'POST', body: { ops } });
+            project.outline = res.project.outline;
+            paintOutline();
+            clear(chatHost);
+            toast(res.refused?.length
+              ? `改了 ${res.applied} 条，${res.refused.length} 条没做：${res.refused[0].why}`
+              : `改了 ${res.applied} 条`, 'ok');
+          } catch (err) { toast(err.message, 'err'); } finally { apply.disabled = false; }
+        };
+        const drop = h('button', { class: 'btn ghost' }, '算了');
+        drop.onclick = () => clear(chatHost);
+        chatHost.append(h('div', { class: 'inline', style: 'margin-top:10px' }, apply, drop));
+      };
+      askBtn.onclick = async () => {
+        if (!say.value.trim()) { toast('想改什么？说一句', 'err'); return; }
+        askBtn.disabled = true;
+        const old = askBtn.textContent;
+        askBtn.textContent = '想…';
+        try {
+          // cap:outline-revise
+          const r = await api(`/projects/${project.id}/outline/revise`, {
+            method: 'POST', body: { instruction: say.value }
+          });
+          paintOps(r);
+        } catch (err) { toast(err.message, 'err'); } finally {
+          askBtn.disabled = false;
+          askBtn.textContent = old;
+        }
+      };
+      say.onkeydown = (e) => { if (e.key === 'Enter') askBtn.click(); };
+
+      outlinePanel.append(
+        h('div', { class: 'panel-head' },
+          h('b', {}, '大纲'),
+          h('span', { class: 'muted' },
+            '一行一场戏。在这一层改比在分镜表上改省事得多 —— 而且拆出来的分镜是你已经同意过的。'
+            + '标着「锁」的是已经拆过分镜的，模型碰不到。')),
+        h('div', { class: 'inline' }, buildBtn, sumLine),
+        listHost,
+        budgetHost,
+        h('div', { class: 'inline', style: 'margin-top:12px' }, say, askBtn),
+        chatHost
+      );
+      paintOutline();
+    }
+
+    /**
      * ── 补上新增的角色和场景 ──
      *
      * 剧本一章一章往里加时，第二章必然冒出第一章没有的人和地方。
@@ -3685,15 +3855,15 @@ export default {
     }
 
     const stepPanels = {
-      'script-src': [scriptPanel, chapterPanel],
+      'script-src': [scriptPanel, chapterPanel, outlinePanel],
       bible: [readinessHost, extendHost, biblePanel, sitePanelHost],
-      script: [durationPanel, chapterPanel, shotsPanel],
+      script: [durationPanel, chapterPanel, outlinePanel, shotsPanel],
       assets: [shotsPanel],
       video: [shotsPanel],
       voice: [shotsPanel],
       compose: [cutPanel, composePanel]
     };
-    const allPanels = [scriptPanel, chapterPanel, readinessHost, extendHost, biblePanel, sitePanelHost, durationPanel, shotsPanel, cutPanel, composePanel]
+    const allPanels = [scriptPanel, chapterPanel, outlinePanel, readinessHost, extendHost, biblePanel, sitePanelHost, durationPanel, shotsPanel, cutPanel, composePanel]
       .filter(Boolean);
     // 只读那一行摆在分镜面板顶上，跟着"视频"这一步出现
     shotsPanel.insertBefore(durationLine, shotsPanel.firstChild.nextSibling);

@@ -1249,6 +1249,55 @@ select.mini {
 }
 .shot-previz > summary { cursor: pointer; color: var(--ink-dim); font-size: 12px; margin-top: 10px; }
 
+/* ── 大纲：剧本和分镜之间那一层 ──
+   一行一场戏。这一层的全部价值在于**一眼看得完** ——
+   所以行高压得紧，一屏能装下十几场；一旦要滚动才看得全，
+   "改完还看得懂全貌"这件事就没了，那正是它比分镜表强的地方。 */
+.ob-sum { color: var(--ink-dim); font-size: 12px; margin-left: 10px; }
+.ob-list { margin-top: 10px; display: flex; flex-direction: column; }
+.ob-row {
+  display: grid;
+  grid-template-columns: 24px 92px 140px minmax(0, 1fr) 66px 20px auto auto;
+  gap: 8px; align-items: center;
+  padding: 6px 4px; border-top: 1px solid var(--line-soft); font-size: 13px;
+}
+.ob-row:last-child { border-bottom: 1px solid var(--line-soft); }
+/* 锁住的那几场：已经拆过分镜、后面挂着出好的图。视觉上要能一眼分开 */
+.ob-row.locked { background: var(--surface-2); }
+.ob-n { color: var(--ink-faint); text-align: right; font-variant-numeric: tabular-nums; }
+.ob-scene { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ob-when { color: var(--ink-faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ob-sumtext { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ob-secs { width: 62px; text-align: right; padding: 2px 6px; font-size: 13px; }
+.ob-unit { color: var(--ink-faint); font-size: 12px; }
+/* 台词的硬下限。和"节奏偏长"是完全不同的两件事，所以给它自己的颜色 */
+.ob-floor {
+  color: var(--caution); font-size: 11px; white-space: nowrap;
+  padding: 1px 6px; border-radius: 999px; background: var(--caution-wash);
+}
+.ob-empty { color: var(--ink-dim); font-size: 13px; line-height: 1.8; padding: 10px 0; }
+.ob-issue {
+  margin-top: 10px; padding: 9px 11px; border-radius: 8px;
+  background: var(--caution-wash); border-left: 3px solid var(--caution);
+}
+/* 台词念不完是**硬伤**：除非删台词否则压不下去。它和"偏长"不该长得一样 */
+.ob-issue.hard { background: var(--alarm-wash); border-left-color: var(--alarm); }
+.ob-issue b { font-size: 13px; }
+.ob-why { color: var(--ink-dim); font-size: 12px; line-height: 1.6; margin-top: 3px; }
+.ob-fix { color: var(--ink); font-size: 12px; line-height: 1.6; margin-top: 3px; }
+.ob-say { flex: 1; min-width: 260px; }
+.ob-chat { margin-top: 10px; }
+.ob-note { color: var(--ink-dim); font-size: 12px; line-height: 1.7; margin-bottom: 8px; }
+/* 每条改动一个勾选框。摊开让人逐条勾 —— 没勾的一条都不动 */
+.ob-op {
+  display: flex; gap: 8px; align-items: flex-start;
+  padding: 6px 8px; border-radius: 6px; font-size: 13px; line-height: 1.6;
+  cursor: pointer;
+}
+.ob-op:hover { background: var(--surface-2); }
+.ob-op.refused { opacity: .6; cursor: default; }
+.ob-refused { color: var(--alarm); font-size: 12px; }
+
 /* ── 场地图：可缩放平移的那块画布 ──
    和上面那块排位画布是两个尺度：那个是六米见方的一间屋子，
    这个是三米到四百米的一片地。所以类名不共用 —— 共用的话，
