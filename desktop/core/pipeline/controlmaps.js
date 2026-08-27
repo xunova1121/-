@@ -60,27 +60,45 @@ function renderFrame(stage, title) {
   return { image: svg(`${backdrop}<path d="M0 ${H * .54}H${W}" stroke="#3b4050"/>${objects.map((x) => shape(x, x.kind === 'subject' ? '#d8a24d' : '#687083', { label: true, image: true })).join('')}<path d="M620 360h40M640 340v40" stroke="white" opacity=".65"/>`, title), objects };
 }
 
-export function renderControls(source = {}, { duration = 5, sampleEvery = 12 } = {}) {
+function renderFrameControls(stage, title) {
+  const composite = renderFrame(stage, title);
+  const objects = composite.objects;
+  const far = Math.max(1, ...objects.map((x) => x.depth));
+  const depth = svg(objects.map((x) => {
+    const value = Math.max(20, Math.min(245, Math.round(255 * (1 - x.depth / (far + 1)))));
+    return shape(x, `rgb(${value},${value},${value})`);
+  }).join(''), `${title}·深度`, '#000');
+  const palette = ['#ff355e', '#00d4ff', '#ffe066', '#8aff80', '#b388ff', '#ff9f43'];
+  return {
+    rgb: composite.image,
+    depth,
+    mask: svg(objects.map((x, i) => shape(x, palette[i % palette.length])).join(''), `${title}·对象遮罩`, '#000'),
+    edge: svg(objects.map((x) => shape(x, 'none', { outline: true })).join(''), `${title}·边缘`, '#000'),
+    pose: svg(objects.map(poseShape).join(''), `${title}·人物姿态`, '#000'),
+    objects
+  };
+}
+
+export function renderControls(source = {}, { duration = 5, sampleEvery = 3 } = {}) {
   const base = structuredClone(source || {});
   normalizeStage(base);
   const maxFrame = Math.max(1, Math.round(Number(duration || 5) * FPS));
   const frameSet = new Set([0, ...(base.keyframes || []).map((x) => x.frame), maxFrame]);
   for (let frame = 0; frame <= maxFrame; frame += Math.max(1, sampleEvery)) frameSet.add(frame);
   const sampled = [...frameSet].filter((x) => x >= 0 && x <= maxFrame).sort((a, b) => a - b).map((frame) => ({ frame, stage: stageAt(base, frame) }));
-  const first = renderFrame(sampled[0].stage, '首帧关键帧');
-  const last = renderFrame(sampled.at(-1).stage, '尾帧关键帧');
+  const frames = sampled.map(({ frame, stage }) => {
+    const maps = renderFrameControls(stage, `控制帧 ${String(frame).padStart(4, '0')}`);
+    return { frame, time: Number((frame / FPS).toFixed(3)), ...maps };
+  });
+  const first = frames[0];
+  const last = frames.at(-1);
   const objects = first.objects;
-  const far = Math.max(1, ...objects.map((x) => x.depth));
-  const depth = svg(objects.map((x) => { const value = Math.max(20, Math.min(245, Math.round(255 * (1 - x.depth / (far + 1))))); return shape(x, `rgb(${value},${value},${value})`); }).join(''), '深度控制图', '#000');
-  const palette = ['#ff355e', '#00d4ff', '#ffe066', '#8aff80', '#b388ff', '#ff9f43'];
-  const mask = svg(objects.map((x, i) => shape(x, palette[i % palette.length])).join(''), '对象遮罩控制图', '#000');
-  const edge = svg(objects.map((x) => shape(x, 'none', { outline: true })).join(''), '边缘控制图', '#000');
-  const pose = svg(objects.map(poseShape).join(''), '人物姿态控制图', '#000');
   const trajectory = sampled.map(({ frame, stage }) => ({ frame, time: Number((frame / FPS).toFixed(3)), x: stage.cam.x, y: stage.cam.y, height: stage.cam.height, rotation: stage.cam.rotation || 0, lens: stage.cam.lens || 35 }));
   const poseSequence = sampled.map(({ frame, stage }) => ({ frame, subjects: (stage.subjects || []).map((x) => ({ id: x.id, x: x.x, y: x.y, height: x.height, rotation: x.rotation, scale: x.scale })) }));
   const layers = [...(base.backdrop ? [{ id: 'background', kind: 'background', source: base.backdrop.image || null }] : []),
     ...stageObjects(base).filter((x) => x.kind !== 'camera').map((x, i) => ({ id: x.item.id, kind: x.kind, name: x.item.name, source: x.item.thumbnail || null, z: i + 1 }))];
-  return { start: first.image, end: last.image, depth, mask, edge, pose, width: W, height: H, fps: FPS, maxFrame,
+  return { start: first.rgb, end: last.rgb, depth: first.depth, mask: first.mask, edge: first.edge, pose: first.pose,
+    frames, sampleEvery: Math.max(1, sampleEvery), controlFps: Number((FPS / Math.max(1, sampleEvery)).toFixed(3)), width: W, height: H, fps: FPS, maxFrame,
     keyframes: (base.keyframes || []).map((x) => x.frame), trajectory, poseSequence, layers,
     objects: objects.map((x) => ({ id: x.item.id, name: x.item.name, kind: x.kind, depth: Number(x.depth.toFixed(3)) })) };
 }

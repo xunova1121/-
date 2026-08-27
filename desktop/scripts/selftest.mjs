@@ -10921,6 +10921,12 @@ section('工业化升级：实例路由、任务账本和控制图');
   check('真实人物图片进入首帧合成', maps.start.includes('/api/media?path=alan.png'));
   check('摄影机关键帧被插值成轨迹', maps.trajectory.length > 2 && maps.trajectory.at(-1).x === 1 && maps.trajectory.at(-1).lens === 50);
   check('人物姿态序列和分层合成清单齐全', maps.poseSequence.length === maps.trajectory.length && maps.layers.some((x) => x.id === 'actor-a'));
+  check('逐帧控制序列包含画面、深度、姿态、边缘和遮罩',
+    maps.frames.length === maps.trajectory.length
+      && maps.frames.every((x) => ['rgb', 'depth', 'pose', 'edge', 'mask'].every((key) => x[key]?.startsWith('<svg'))));
+  check('控制序列按8fps左右采样且首尾都保留',
+    maps.controlFps === 8 && maps.frames[0].frame === 0 && maps.frames.at(-1).frame === 120);
+  check('人物移动后的末帧控制图发生变化', maps.frames[0].rgb !== maps.frames.at(-1).rgb);
   const controlPrompt = controls.videoControlPrompt(maps);
   check('3D预演轨迹能转成视频模型实际收到的导演指令',
     controlPrompt.includes('3D预演控制') && controlPrompt.includes('actor-a') && controlPrompt.includes('50mm'));
@@ -10929,6 +10935,8 @@ section('工业化升级：实例路由、任务账本和控制图');
   check('工作台有摄影机取景、关键帧和资产拖入',
     /cameraViewport/.test(previzUi) && /addKeyframe/.test(previzUi) && /application\/x-futuredream-asset/.test(previzUi));
   check('工作台直接展示控制图而不是 JSON 链接', /previz-control-shelf/.test(previzUi) && /输出可控视频控制包/.test(previzUi));
+  check('工作台会显示逐帧控制数量、帧率和清单入口',
+    /frameCount/.test(previzUi) && /controlFps/.test(previzUi) && /打开控制清单/.test(previzUi));
 }
 
 section('根地址：手机去手机版，电脑留电脑版');

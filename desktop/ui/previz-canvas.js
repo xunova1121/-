@@ -649,8 +649,20 @@ export function previzPanel(stage, {
     exportBtn.onclick = async () => {
       exportBtn.disabled = true; exportBtn.textContent = '正在输出…';
       try {
-        const maps = await onExportControls(stage);
+        const result = await onExportControls(stage);
+        const maps = result?.previews || result;
         controlShelf.replaceChildren(exportBtn);
+        if (result?.frameCount) {
+          const summary = document.createElement('div');
+          summary.className = 'previz-control-summary';
+          summary.textContent = `已输出 ${result.frameCount} 个控制时刻 · ${result.controlFps || '—'}fps · 每个时刻含画面/深度/姿态/边缘/遮罩`;
+          controlShelf.append(summary);
+          if (result.manifest) {
+            const manifest = document.createElement('a');
+            manifest.className = 'btn ghost sm'; manifest.href = result.manifest; manifest.target = '_blank';
+            manifest.textContent = '打开控制清单'; controlShelf.append(manifest);
+          }
+        }
         for (const [key, label] of [['start', '首帧'], ['end', '尾帧'], ['depth', '深度图'], ['pose', '人物姿态'], ['edge', '边缘图'], ['mask', '对象遮罩']]) {
           if (!maps?.[key]) continue;
           const card = document.createElement('a'); card.className = 'previz-control'; card.href = maps[key]; card.target = '_blank';

@@ -1618,7 +1618,12 @@ export default {
             onExportControls: async (stage) => {
               const r = await api(`/projects/${project.id}/shots/${shot.id}/controls`, { method: 'POST', body: { stage } });
               const v = Date.now();
-              return Object.fromEntries(['start', 'end', 'depth', 'pose', 'edge', 'mask'].map((key) => [key, `${mediaUrl(r.controls[key])}&v=${v}`]));
+              return {
+                previews: Object.fromEntries(['start', 'end', 'depth', 'pose', 'edge', 'mask'].map((key) => [key, `${mediaUrl(r.controls[key])}&v=${v}`])),
+                frameCount: r.controls.sequence?.length || 0,
+                controlFps: r.controls.controlFps || 0,
+                manifest: r.controls.manifest ? `${mediaUrl(r.controls.manifest)}&v=${v}` : ''
+              };
             },
             // 同一个场景往往会反复回来（第 3 镜在码头、第 11 镜又回码头）——
             // 逐镜继承在中间隔了一场之后就断了，所以布局要能挂到场景上

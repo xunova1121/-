@@ -2778,6 +2778,8 @@ export function exportShotControls(projectId, shotId, stageOverride = null) {
   if (!stage?.cam) throw new Error('这一镜还没有预演数据，先在预演台排位');
   const rendered = renderControls(stage, { duration: shot.duration || 5 });
   const dir = store.assetDir(projectId);
+  const sequenceDir = path.join(dir, `${shot.id}.control-frames`);
+  fs.mkdirSync(sequenceDir, { recursive: true });
   const files = {
     start: path.join(dir, `${shot.id}.control-start.svg`),
     end: path.join(dir, `${shot.id}.control-end.svg`),
@@ -2788,10 +2790,20 @@ export function exportShotControls(projectId, shotId, stageOverride = null) {
     manifest: path.join(dir, `${shot.id}.control-manifest.json`)
   };
   for (const key of ['start', 'end', 'depth', 'mask', 'edge', 'pose']) fs.writeFileSync(files[key], rendered[key], 'utf8');
+  const sequence = rendered.frames.map((frame, index) => {
+    const prefix = String(index).padStart(4, '0');
+    const maps = {};
+    for (const key of ['rgb', 'depth', 'mask', 'edge', 'pose']) {
+      maps[key] = path.join(sequenceDir, `${prefix}.${key}.svg`);
+      fs.writeFileSync(maps[key], frame[key], 'utf8');
+    }
+    return { frame: frame.frame, time: frame.time, maps };
+  });
   fs.writeFileSync(files.manifest, JSON.stringify({
-    schema: 'futuredream-control-bundle/v1', fps: rendered.fps, width: rendered.width, height: rendered.height,
+    schema: 'futuredream-control-bundle/v2', fps: rendered.fps, controlFps: rendered.controlFps,
+    sampleEvery: rendered.sampleEvery, width: rendered.width, height: rendered.height,
     maxFrame: rendered.maxFrame, keyframes: rendered.keyframes, cameraTrajectory: rendered.trajectory,
-    poseSequence: rendered.poseSequence, layers: rendered.layers,
+    poseSequence: rendered.poseSequence, layers: rendered.layers, sequence,
     maps: Object.fromEntries(['start', 'end', 'depth', 'mask', 'edge', 'pose'].map((key) => [key, files[key]]))
   }, null, 2), 'utf8');
   const updated = store.update(projectId, (p) => {
@@ -2799,7 +2811,8 @@ export function exportShotControls(projectId, shotId, stageOverride = null) {
     target.stage = stage;
     target.controls = { ...files, width: rendered.width, height: rendered.height, fps: rendered.fps,
       maxFrame: rendered.maxFrame, keyframes: rendered.keyframes, trajectory: rendered.trajectory,
-      poseSequence: rendered.poseSequence, layers: rendered.layers, objects: rendered.objects, at: new Date().toISOString() };
+      poseSequence: rendered.poseSequence, layers: rendered.layers, objects: rendered.objects,
+      sequenceDir, sequence, controlFps: rendered.controlFps, sampleEvery: rendered.sampleEvery, at: new Date().toISOString() };
     return p;
   });
   return { project: updated, controls: updated.shots.find((x) => x.id === shotId).controls };
