@@ -2818,6 +2818,38 @@ export function exportShotControls(projectId, shotId, stageOverride = null) {
   return { project: updated, controls: updated.shots.find((x) => x.id === shotId).controls };
 }
 
+/** 把逐帧预演控制图烘成秘塔 H3 可直接读取的运动参考视频。 */
+export async function buildPrevizReferenceVideo(projectId, shot, controls, { onEvent } = {}) {
+  if (!controls?.sequenceDir || !controls.sequence?.length) return null;
+  if (!ffmpeg.locate().available) {
+    onEvent?.({ type: 'note', shotId: shot.id, message: '未检测到 FFmpeg：秘塔 H3 本镜先按轨迹提示词生成，未注入3D预演运动参考视频' });
+    return null;
+  }
+  const output = path.join(store.assetDir(projectId), `${shot.id}.control-motion.mp4`);
+  const pattern = path.join(controls.sequenceDir, '%04d.rgb.svg');
+  try {
+    await ffmpeg.run([
+      '-y', '-framerate', String(controls.controlFps || 8), '-i', pattern,
+      '-vf', 'fps=24,format=yuv420p', '-c:v', 'libx264', '-preset', 'veryfast',
+      '-movflags', '+faststart', '-an', '-t', String(Math.max(1, Number(shot.duration) || 5)), output
+    ]);
+    if (!settings.get('uploadGateway') && !oss.ready()) {
+      onEvent?.({ type: 'note', shotId: shot.id, message: '3D预演运动视频已烘焙，但秘塔 H3 需要可拉取的 URL；请配置上传网关或对象存储，本镜暂按轨迹提示词降级' });
+      return null;
+    }
+    const url = await toModelRef(output, { onEvent });
+    if (!url || url.startsWith('data:')) {
+      onEvent?.({ type: 'note', shotId: shot.id, message: '3D预演运动视频已烘焙，但秘塔 H3 需要可拉取的 URL；请配置上传网关或对象存储，本镜暂按轨迹提示词降级' });
+      return null;
+    }
+    onEvent?.({ type: 'note', shotId: shot.id, message: `已向秘塔 H3 注入3D预演运动参考视频（${controls.sequence.length} 个控制采样）` });
+    return { url, role: 'reference_video', label: '3D预演运动参考', path: output };
+  } catch (err) {
+    onEvent?.({ type: 'note', shotId: shot.id, message: `3D预演运动参考视频未注入（${err.message}），本镜仍按轨迹提示词生成` });
+    return null;
+  }
+}
+
 /**
  * 重出某一镜的图。
  *
@@ -3071,6 +3103,9 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
   }
   const controlPrompt = videoControlPrompt(controlBundle || {});
   const videoPrompt = [opts.prompt?.trim() || ctx.videoPrompt, controlPrompt].filter(Boolean).join('\n\n');
+  const controlVideo = providerId === 'metaso' && /(^|[-_])H3([-_]|$)/i.test(model)
+    ? await buildPrevizReferenceVideo(projectId, shot, controlBundle, { onEvent })
+    : null;
   if (bibleRefs.labels.length) {
     onEvent?.({ type: 'note', message: `参考设定集：${bibleRefs.labels.join('、')}` });
   }
@@ -3083,6 +3118,7 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
       firstFrameUrl: firstFrame,
       lastFrameUrl: ctx.lastFrameUrl,
       refImages: bibleRefs.images,
+      refVideos: controlVideo ? [controlVideo] : [],
       duration: shot.duration,
       /**
        * 优先级：这一次指定 > **这部片子自己的** > 全局设置 > 厂商默认。
@@ -3121,6 +3157,8 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
       t.videoModelUsed = `${providerId} / ${model}`;
       t.videoResolution = video.resolution || null;
       t.videoRefs = bibleRefs.labels;
+      t.controlVideoSent = Boolean(video.refVideosSent);
+      t.controlVideoPath = controlVideo?.path || null;
       t.link = ctx.link;
       /**
        * ⚠ 记的是**发出去了没有**，不是"我们打算发"。
@@ -3143,7 +3181,9 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
         kind: 'video', provider: providerId, model, prompt: videoPrompt,
         refs: [...bibleRefs.labels], output: dest, resolution: t.videoResolution,
         duration: t.actualDuration, firstFrame: firstFrame || null, lastFrame: ctx.lastFrameUrl || null,
-        controlManifest: controlBundle?.manifest || null
+        controlManifest: controlBundle?.manifest || null,
+        controlReferenceVideo: controlVideo?.path || null,
+        controlVideoSent: Boolean(video.refVideosSent)
       });
     }
     return p;
@@ -4357,6 +4397,9 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
         onEvent?.({ type: 'note', shotId: shot.id, message: `第 ${shot.index} 镜3D预演已进入生成请求（${controlBundle.keyframes?.length || 0} 个关键帧）` });
       }
       const videoPrompt = [ctx.videoPrompt, videoControlPrompt(controlBundle || {})].filter(Boolean).join('\n\n');
+      const controlVideo = useProvider === 'metaso' && /(^|[-_])H3([-_]|$)/i.test(useModel)
+        ? await buildPrevizReferenceVideo(projectId, shot, controlBundle, { onEvent })
+        : null;
       onEvent?.({ type: 'shot', shotId: shot.id, status: 'running', message: `提交任务：${videoPrompt.slice(0, 60)}…` });
 
       /**
@@ -4372,6 +4415,7 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
         firstFrameUrl: firstFrame,
         lastFrameUrl: ctx.lastFrameUrl,
         refImages: bibleRefs.images,
+        refVideos: controlVideo ? [controlVideo] : [],
         duration: shot.duration,
         // 同上：这部片子自己定的分辨率，优先于全局设置
         resolution: project.videoResolution || null,
@@ -4405,6 +4449,8 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
           t.videoTier = tier;
           t.videoResolution = video.resolution || null;
           t.videoRefs = bibleRefs.labels;
+          t.controlVideoSent = Boolean(video.refVideosSent);
+          t.controlVideoPath = controlVideo?.path || null;
           t.link = ctx.link;
           /**
            * 末帧锁没锁上要如实记：界面上标着"连续动作"却其实没锁，
@@ -4429,7 +4475,9 @@ export async function generateVideos(projectId, { only = null, chapterId = null,
             prompt: videoPrompt, refs: [...bibleRefs.labels], output: dest,
             resolution: t.videoResolution, duration: t.actualDuration,
             firstFrame: firstFrame || null, lastFrame: ctx.lastFrameUrl || null,
-            controlManifest: controlBundle?.manifest || null
+            controlManifest: controlBundle?.manifest || null,
+            controlReferenceVideo: controlVideo?.path || null,
+            controlVideoSent: Boolean(video.refVideosSent)
           });
         }
         return p;

@@ -566,6 +566,7 @@ export async function generateVideo({
   // 切到下一镜时画面完全对齐 —— 衔接里唯一能做到"无缝"的一招。见 pipeline/continuity.js。
   lastFrameUrl = null,
   refImages = [],
+  refVideos = [],
   duration = 5,
   resolution = null,
   aspectRatio = null,
@@ -719,6 +720,7 @@ export async function generateVideo({
       firstFrameUrl,
       lastFrameUrl: endFrame,
       refImages,
+      refVideos,
       duration: actualDuration,
       requestedDuration: duration,
       allowed,
@@ -1670,6 +1672,7 @@ async function generateVideoMiniMax({
   // 末帧。秘塔控制台上那两个框（起始帧 / 结束帧）就是它
   lastFrameUrl = null,
   refImages,
+  refVideos = [],
   images,
   duration,
   requestedDuration,
@@ -1709,7 +1712,15 @@ async function generateVideoMiniMax({
    *
    * 通了就按 服务商+地址+模型 记住，同一批后面的镜头直接用。
    */
-  const endFrameShapes = [
+  const endFrameShapes = isH3 ? [
+    {
+      id: 'content-role',
+      apply: (b, url) => ({
+        ...b,
+        content: [...(b.content || []), { type: 'image_url', image_url: { url }, role: 'last_frame' }]
+      })
+    }
+  ] : [
     {
       id: 'last_frame_image',
       apply: (b, url) => ({ ...b, last_frame_image: url })
@@ -1737,7 +1748,16 @@ async function generateVideoMiniMax({
       // H3 是全模态：content[] 里按 type 区分 text / image_url / video_url / audio_url。
       // 官方收到 9 张，中转家常常收得更少 —— 具体几张由下面的退让逻辑试出来。
       const content = [{ type: 'text', text: prompt }];
-      for (const url of imgs) content.push({ type: 'image_url', image_url: { url } });
+      for (const [index, url] of imgs.entries()) {
+        content.push({
+          type: 'image_url', image_url: { url },
+          role: firstFrameUrl && index === 0 ? 'first_frame' : 'reference_image'
+        });
+      }
+      for (const item of refVideos) {
+        const url = typeof item === 'string' ? item : item?.url;
+        if (url) content.push({ type: 'video_url', video_url: { url }, role: 'reference_video' });
+      }
       b = { model, content, duration, resolution };
       // 中转家（如秘塔）多要一个 ratio 字段，官方 H3 没有
       if (vd.ratio) b.ratio = aspectRatio;
@@ -1980,6 +2000,7 @@ async function generateVideoMiniMax({
     resolution: task.resolution || resolution,
     // 兜底那几步会把 lastFrameUrl 清成 null，所以这里读到的就是"发送时的真相"
     endFrameSent: Boolean(lastFrameUrl),
+    refVideosSent: isH3 ? refVideos.filter((item) => typeof item === 'string' ? item : item?.url).length : 0,
     raw: finalStatus
   };
 }
