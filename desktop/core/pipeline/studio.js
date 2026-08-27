@@ -2804,6 +2804,7 @@ export function exportShotControls(projectId, shotId, stageOverride = null) {
     sampleEvery: rendered.sampleEvery, width: rendered.width, height: rendered.height,
     maxFrame: rendered.maxFrame, keyframes: rendered.keyframes, cameraTrajectory: rendered.trajectory,
     poseSequence: rendered.poseSequence, layers: rendered.layers, sequence,
+    issues: rendered.issues,
     maps: Object.fromEntries(['start', 'end', 'depth', 'mask', 'edge', 'pose'].map((key) => [key, files[key]]))
   }, null, 2), 'utf8');
   const updated = store.update(projectId, (p) => {
@@ -2811,7 +2812,7 @@ export function exportShotControls(projectId, shotId, stageOverride = null) {
     target.stage = stage;
     target.controls = { ...files, width: rendered.width, height: rendered.height, fps: rendered.fps,
       maxFrame: rendered.maxFrame, keyframes: rendered.keyframes, trajectory: rendered.trajectory,
-      poseSequence: rendered.poseSequence, layers: rendered.layers, objects: rendered.objects,
+      poseSequence: rendered.poseSequence, layers: rendered.layers, objects: rendered.objects, issues: rendered.issues,
       sequenceDir, sequence, controlFps: rendered.controlFps, sampleEvery: rendered.sampleEvery, at: new Date().toISOString() };
     return p;
   });

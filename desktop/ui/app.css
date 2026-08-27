@@ -1261,7 +1261,7 @@ select.mini {
 .previz-3d g.locked { opacity:.72; }
 .previz-inspector { display:grid; grid-template-columns:minmax(150px,1.6fr) repeat(5,minmax(70px,.7fr)) auto; gap:7px; align-items:end; margin:8px 0; padding:9px; border:1px solid var(--line-soft); border-radius:9px; background:var(--surface); }
 .previz-inspector label { display:flex; flex-direction:column; gap:3px; margin:0; color:var(--ink-faint); font-size:10px; }
-.previz-inspector input { min-width:0; padding:5px 6px; }
+.previz-inspector input, .previz-inspector select { min-width:0; padding:5px 6px; }
 @media (max-width:900px) { .previz-workspace { grid-template-columns:1fr; } .previz-inspector { grid-template-columns:repeat(3,1fr); } .previz-inspector > b { grid-column:1/-1; } }
 .previz-bg { fill: var(--surface); }
 .previz-grid { stroke: var(--line-soft); stroke-width: 1; }
@@ -1583,6 +1583,7 @@ select.mini {
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
   font-size: 12px; line-height: 1.6;
 }
+.previz-warn.bad { border-color:color-mix(in srgb, var(--bad) 55%, var(--line)); color:var(--bad); }
 .ob-pending b { font-size: 13px; }
 .ob-pending span { flex: 1; min-width: 200px; color: var(--ink-dim); }
 

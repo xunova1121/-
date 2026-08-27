@@ -662,6 +662,12 @@ export function previzPanel(stage, {
             manifest.className = 'btn ghost sm'; manifest.href = result.manifest; manifest.target = '_blank';
             manifest.textContent = '打开控制清单'; controlShelf.append(manifest);
           }
+          for (const issue of result.issues || []) {
+            const warning = document.createElement('div');
+            warning.className = `previz-warn${issue.level === 'blocker' ? ' bad' : ''}`;
+            warning.textContent = `${issue.level === 'blocker' ? '阻断' : '提醒'}：${issue.message}`;
+            controlShelf.append(warning);
+          }
         }
         for (const [key, label] of [['start', '首帧'], ['end', '尾帧'], ['depth', '深度图'], ['pose', '人物姿态'], ['edge', '边缘图'], ['mask', '对象遮罩']]) {
           if (!maps?.[key]) continue;
@@ -697,12 +703,37 @@ export function previzPanel(stage, {
       wrap.append(document.createTextNode(label), input);
       return wrap;
     };
+    const makeSelect = (label, key, options) => {
+      const input = document.createElement('select');
+      input.disabled = item.locked;
+      for (const [value, text] of options) input.append(Object.assign(document.createElement('option'), { value, textContent: text }));
+      input.value = String(item[key] || '');
+      input.onchange = () => { item[key] = input.value; history.commit(); redrawAll(); onChange(); };
+      const wrap = document.createElement('label');
+      wrap.append(document.createTextNode(label), input);
+      return wrap;
+    };
+    const makeText = (label, key, placeholder) => {
+      const input = Object.assign(document.createElement('input'), { value: String(item[key] || ''), placeholder, disabled: item.locked });
+      input.onchange = () => { item[key] = input.value.trim(); history.commit(); redrawAll(); onChange(); };
+      const wrap = document.createElement('label'); wrap.append(document.createTextNode(label), input); return wrap;
+    };
     const lock = Object.assign(document.createElement('button'), {
       className: `btn ghost sm${item.locked ? ' on' : ''}`, textContent: item.locked ? '🔒 已锁定' : '🔓 锁定'
     });
     lock.onclick = () => { item.locked = !item.locked; history.commit(); redrawAll(); onChange(); };
     inspector.append(title, makeNumber('X', 'x'), makeNumber('Y', 'y'), makeNumber('高度', 'height'),
       makeNumber('旋转°', 'rotation', '1'), makeNumber('缩放', 'scale'), lock);
+    if (found.kind === 'camera') {
+      const targets = [['', '自动跟随主体'], ...(stage.subjects || []).map((x) => [x.id, x.name || x.id]),
+        ...(stage.marks || []).filter((x) => !x.far).map((x) => [x.id, x.name || x.id])];
+      inspector.append(makeNumber('光圈 f/', 'aperture', '0.1'), makeSelect('对焦目标', 'focusId', targets));
+    } else if (found.kind === 'subject') {
+      inspector.append(makeSelect('姿态', 'pose', [
+        ['stand', '站立'], ['walk', '行走'], ['run', '奔跑'], ['sit', '坐下'], ['crouch', '下蹲'],
+        ['reach', '伸手'], ['fight', '打斗']
+      ]), makeText('动作指令', 'action', '例如：右手拔剑，左脚向前'));
+    }
   }
 
   function paintTimeline() {
@@ -738,6 +769,18 @@ export function previzPanel(stage, {
       lensRow.append(btn(`${mm}`, Number(stage.cam.lens) === mm, () => { stage.cam.lens = mm; }));
     }
     controls.append(lensRow);
+
+    const focusRow = document.createElement('div');
+    focusRow.className = 'previz-row';
+    focusRow.append(Object.assign(document.createElement('span'), { className: 'previz-cap', textContent: '焦点/景深' }));
+    focusRow.append(btn('自动主体', !stage.cam.focusId, () => { stage.cam.focusId = ''; }));
+    for (const target of [...(stage.subjects || []), ...(stage.marks || []).filter((x) => !x.far)]) {
+      focusRow.append(btn(target.name || target.id, stage.cam.focusId === target.id, () => { stage.cam.focusId = target.id; }));
+    }
+    for (const aperture of [1.4, 2.8, 4, 8, 16]) {
+      focusRow.append(btn(`f/${aperture}`, Number(stage.cam.aperture || 4) === aperture, () => { stage.cam.aperture = aperture; }));
+    }
+    controls.append(focusRow);
 
     const hRow = document.createElement('div');
     hRow.className = 'previz-row';

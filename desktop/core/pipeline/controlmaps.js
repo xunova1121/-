@@ -51,7 +51,12 @@ function shape(x, fill, { label = false, image = false, outline = false } = {}) 
 function poseShape(x) {
   if (x.kind !== 'subject') return '';
   const g = geometry(x), cx = x.x, head = g.top + g.h * .13, neck = g.top + g.h * .25, hip = g.top + g.h * .6, foot = g.top + g.h;
-  return `<g stroke="#fff" stroke-width="8" stroke-linecap="round" fill="none"><circle cx="${cx}" cy="${head}" r="${g.w * .18}"/><path d="M${cx} ${neck}V${hip}M${cx} ${neck + g.h * .1}L${cx - g.w * .65} ${neck + g.h * .32}M${cx} ${neck + g.h * .1}L${cx + g.w * .65} ${neck + g.h * .32}M${cx} ${hip}L${cx - g.w * .45} ${foot}M${cx} ${hip}L${cx + g.w * .45} ${foot}"/></g>`;
+  const pose = x.item.pose || 'stand';
+  const crouch = pose === 'crouch' || pose === 'sit' ? g.h * .16 : 0;
+  const reach = pose === 'reach' || pose === 'fight';
+  const stride = ['walk', 'run', 'fight'].includes(pose) ? g.w * .72 : g.w * .45;
+  const armY = reach ? neck - g.h * .02 : neck + g.h * .32;
+  return `<g data-pose="${esc(pose)}" stroke="#fff" stroke-width="8" stroke-linecap="round" fill="none"><circle cx="${cx}" cy="${head + crouch}" r="${g.w * .18}"/><path d="M${cx} ${neck + crouch}V${hip + crouch}M${cx} ${neck + g.h * .1 + crouch}L${cx - g.w * .65} ${armY + crouch}M${cx} ${neck + g.h * .1 + crouch}L${cx + g.w * .65} ${armY + crouch}M${cx} ${hip + crouch}L${cx - stride} ${foot}M${cx} ${hip + crouch}L${cx + stride} ${foot}"/></g>`;
 }
 
 function renderFrame(stage, title) {
@@ -93,13 +98,23 @@ export function renderControls(source = {}, { duration = 5, sampleEvery = 3 } = 
   const first = frames[0];
   const last = frames.at(-1);
   const objects = first.objects;
-  const trajectory = sampled.map(({ frame, stage }) => ({ frame, time: Number((frame / FPS).toFixed(3)), x: stage.cam.x, y: stage.cam.y, height: stage.cam.height, rotation: stage.cam.rotation || 0, lens: stage.cam.lens || 35 }));
-  const poseSequence = sampled.map(({ frame, stage }) => ({ frame, subjects: (stage.subjects || []).map((x) => ({ id: x.id, x: x.x, y: x.y, height: x.height, rotation: x.rotation, scale: x.scale })) }));
+  const trajectory = sampled.map(({ frame, stage }) => ({ frame, time: Number((frame / FPS).toFixed(3)), x: stage.cam.x, y: stage.cam.y, height: stage.cam.height, rotation: stage.cam.rotation || 0, lens: stage.cam.lens || 35, aperture: stage.cam.aperture || 4, focusId: stage.cam.focusId || '' }));
+  const poseSequence = sampled.map(({ frame, stage }) => ({ frame, subjects: (stage.subjects || []).map((x) => ({ id: x.id, x: x.x, y: x.y, height: x.height, rotation: x.rotation, scale: x.scale, pose: x.pose || 'stand', action: x.action || '' })) }));
   const layers = [...(base.backdrop ? [{ id: 'background', kind: 'background', source: base.backdrop.image || null }] : []),
     ...stageObjects(base).filter((x) => x.kind !== 'camera').map((x, i) => ({ id: x.item.id, kind: x.kind, name: x.item.name, source: x.item.thumbnail || null, z: i + 1 }))];
+  const knownIds = new Set(stageObjects(base).map((x) => x.item.id));
+  const issues = [];
+  for (const point of trajectory) {
+    if (point.focusId && !knownIds.has(point.focusId)) {
+      issues.push({ code: 'missing-focus-target', frame: point.frame, level: 'blocker', message: `第 ${point.frame} 帧的对焦目标已不存在` });
+    }
+    if (Number(point.aperture) < 2 && !point.focusId) {
+      issues.push({ code: 'shallow-focus-auto', frame: point.frame, level: 'warn', message: `第 ${point.frame} 帧使用超浅景深但没有指定对焦人物` });
+    }
+  }
   return { start: first.rgb, end: last.rgb, depth: first.depth, mask: first.mask, edge: first.edge, pose: first.pose,
     frames, sampleEvery: Math.max(1, sampleEvery), controlFps: Number((FPS / Math.max(1, sampleEvery)).toFixed(3)), width: W, height: H, fps: FPS, maxFrame,
-    keyframes: (base.keyframes || []).map((x) => x.frame), trajectory, poseSequence, layers,
+    keyframes: (base.keyframes || []).map((x) => x.frame), trajectory, poseSequence, layers, issues,
     objects: objects.map((x) => ({ id: x.item.id, name: x.item.name, kind: x.kind, depth: Number(x.depth.toFixed(3)) })) };
 }
 
@@ -117,13 +132,14 @@ export function videoControlPrompt(bundle = {}) {
   const firstCam = trajectory[0] || {};
   const lastCam = trajectory.at(-1) || firstCam;
   const camera = `摄影机从坐标(${Number(firstCam.x || 0).toFixed(2)},${Number(firstCam.y || 0).toFixed(2)},${Number(firstCam.height || 0).toFixed(2)})、${Number(firstCam.lens || 35).toFixed(0)}mm，`
-    + `运动到(${Number(lastCam.x || 0).toFixed(2)},${Number(lastCam.y || 0).toFixed(2)},${Number(lastCam.height || 0).toFixed(2)})、${Number(lastCam.lens || 35).toFixed(0)}mm`;
+    + `运动到(${Number(lastCam.x || 0).toFixed(2)},${Number(lastCam.y || 0).toFixed(2)},${Number(lastCam.height || 0).toFixed(2)})、${Number(lastCam.lens || 35).toFixed(0)}mm；`
+    + `焦点${firstCam.focusId || '跟随主体'}→${lastCam.focusId || '跟随主体'}，光圈f/${Number(firstCam.aperture || 4).toFixed(1)}→f/${Number(lastCam.aperture || 4).toFixed(1)}`;
 
   const firstPose = new Map((poses[0]?.subjects || []).map((x) => [x.id, x]));
   const lastPose = new Map((poses.at(-1)?.subjects || []).map((x) => [x.id, x]));
   const actors = [...firstPose.entries()].map(([id, start]) => {
     const end = lastPose.get(id) || start;
-    return `${id} 从(${Number(start.x || 0).toFixed(2)},${Number(start.y || 0).toFixed(2)})移动到(${Number(end.x || 0).toFixed(2)},${Number(end.y || 0).toFixed(2)})，朝向${Number(end.rotation || 0).toFixed(0)}°`;
+    return `${id} 从(${Number(start.x || 0).toFixed(2)},${Number(start.y || 0).toFixed(2)})移动到(${Number(end.x || 0).toFixed(2)},${Number(end.y || 0).toFixed(2)})，朝向${Number(end.rotation || 0).toFixed(0)}°，姿态${start.pose || 'stand'}→${end.pose || 'stand'}${end.action ? `，动作“${end.action}”` : ''}`;
   });
 
   return `【3D预演控制】严格保持首尾构图与空间关系；${camera}`

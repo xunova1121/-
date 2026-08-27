@@ -31,8 +31,14 @@ export function normalizeStage(stage = {}) {
     item.locked = Boolean(item.locked);
     return item;
   };
-  normalize('camera', stage.cam, { name: '摄影机', x: 0, y: -3, height: 1.6 });
-  stage.subjects.forEach((x) => normalize('subject', x, { x: 0, y: 0, height: 1.72 }));
+  normalize('camera', stage.cam, { name: '摄影机', x: 0, y: -3, height: 1.6, aperture: 4, focusId: '' });
+  stage.cam.aperture = Math.max(1, Math.min(22, Number(stage.cam.aperture || 4)));
+  stage.cam.focusId = String(stage.cam.focusId || '');
+  stage.subjects.forEach((x) => {
+    normalize('subject', x, { x: 0, y: 0, height: 1.72, pose: 'stand', action: '' });
+    x.pose = ['stand', 'walk', 'run', 'sit', 'crouch', 'reach', 'fight'].includes(x.pose) ? x.pose : 'stand';
+    x.action = String(x.action || '');
+  });
   stage.marks.filter((x) => !x.far).forEach((x) => normalize('prop', x, { x: 0, y: 0, height: 0.9, width: 0.9 }));
   stage.schemaVersion = Math.max(2, Number(stage.schemaVersion || 0));
   return stage;
@@ -100,6 +106,11 @@ export function addKeyframe(stage, frame, objectIds = []) {
     if (found.kind === 'camera') {
       values[id].lens = x.lens;
       values[id].move = { ...(x.move || {}) };
+      values[id].aperture = x.aperture;
+      values[id].focusId = x.focusId || '';
+    } else if (found.kind === 'subject') {
+      values[id].pose = x.pose || 'stand';
+      values[id].action = x.action || '';
     }
   }
   const key = { id: `kf-${Math.max(0, Math.round(frame))}`, frame: Math.max(0, Math.round(frame)), values };
@@ -123,11 +134,12 @@ export function frameState(stage, frame) {
     const a = left?.values?.[item.id] || item;
     const b = right?.values?.[item.id] || a;
     const out = { ...item };
-    for (const key of ['x', 'y', 'height', 'rotation', 'scale', 'lens']) {
+    for (const key of ['x', 'y', 'height', 'rotation', 'scale', 'lens', 'aperture']) {
       const av = Number(a[key]), bv = Number(b[key]);
       if (Number.isFinite(av) && Number.isFinite(bv)) out[key] = Number((av + (bv - av) * t).toFixed(4));
     }
     out.move = { ...((t < .5 ? a.move : b.move) || item.move || {}) };
+    for (const key of ['focusId', 'pose', 'action']) out[key] = (t < .5 ? a[key] : b[key]) ?? item[key];
     values[item.id] = out;
   }
   return { frame: f, left: left?.frame ?? null, right: right?.frame ?? null, t, values };

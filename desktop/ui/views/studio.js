@@ -1622,6 +1622,7 @@ export default {
                 previews: Object.fromEntries(['start', 'end', 'depth', 'pose', 'edge', 'mask'].map((key) => [key, `${mediaUrl(r.controls[key])}&v=${v}`])),
                 frameCount: r.controls.sequence?.length || 0,
                 controlFps: r.controls.controlFps || 0,
+                issues: r.controls.issues || [],
                 manifest: r.controls.manifest ? `${mediaUrl(r.controls.manifest)}&v=${v}` : ''
               };
             },
