@@ -511,6 +511,50 @@ export default {
               }
             }, '取消分章'))
         );
+
+        /**
+         * ── 追加一章 ──
+         *
+         * 剧本一章一章来的时候，原来只能去剧本框里把新章粘到末尾。
+         * 那件事最容易毁掉的是**前面的正文**：碰掉一个空格，那一章就被
+         * 判定"改过了"，已经出好的分镜全部作废重跑 —— 而没有任何提示，
+         * 你要到重新分章之后才发现前面几章的进度没了。
+         *
+         * 这条路只往末尾拼，碰不到前面。
+         */
+        const apTitle = h('input', { type: 'text', placeholder: `第 ${(project.chapters || []).length + 1} 章（留空就用这个）` });
+        const apText = h('textarea', { rows: 5, placeholder: '把新一章的正文贴在这儿' });
+        const apBtn = h('button', { class: 'btn primary' }, '追加这一章');
+        apBtn.onclick = async () => {
+          if (!apText.value.trim()) { toast('这一章是空的', 'err'); return; }
+          apBtn.disabled = true;
+          const old = apBtn.textContent;
+          apBtn.textContent = '追加中…';
+          try {
+            // cap:append-chapter
+            const r = await api(`/projects/${project.id}/chapters/append`, {
+              method: 'POST', body: { title: apTitle.value, script: apText.value }
+            });
+            apText.value = '';
+            apTitle.value = '';
+            toast(`已追加${r.chapter?.title ? `「${r.chapter.title}」` : '一章'} —— 前面几章的进度都还在`, 'ok');
+            rerender();
+          } catch (err) {
+            toast(err.message, 'err');
+          } finally {
+            apBtn.disabled = false;
+            apBtn.textContent = old;
+          }
+        };
+        chapterHost.append(
+          h('details', { class: 'append-chapter' },
+            h('summary', {}, '追加一章'),
+            h('p', { class: 'field-hint' },
+              '往剧本末尾拼一章，前面的正文一个字都不会动 —— 所以已经跑完的章不会作废重跑。'
+              + '正文里自带「第 X 章」这类标题行的话就不用再填标题。'),
+            apTitle, apText,
+            h('div', { class: 'inline', style: 'margin-top:8px' }, apBtn))
+        );
       }
 
       paintChapters();
@@ -3499,6 +3543,73 @@ export default {
      * 这片山坡上只有一个太阳。前两层都看不见这件事，
      * 因为它们一次只看得见一个场景。
      */
+    /**
+     * ── 补上新增的角色和场景 ──
+     *
+     * 剧本一章一章往里加时，第二章必然冒出第一章没有的人和地方。
+     * 在这颗按钮之前，能做的只有两件事，两件都不对：
+     *
+     *   什么都不做   新角色永远不在设定集里，而且**不吭声** ——
+     *                那一镜没有参考图、没有外貌描述、复核没有基准，
+     *                静默降级成"文生图"，而流水线一路绿
+     *   重新生成     整份重建，所有参考图清空重出。老角色白花一次钱，
+     *                而且重出那张未必和之前一样 —— 观众对主角换脸最敏感
+     *
+     * 这颗按钮只做一件事：扫还没扫过的章 → 只给没见过的名字建条目、出图。
+     */
+    const extendHost = h('div', { class: 'panel' });
+    {
+      const btn = h('button', { class: 'btn' }, '补上新增的角色和场景');
+      const log = h('div', { class: 'field-hint', style: 'margin-top:8px' });
+      btn.onclick = async () => {
+        btn.disabled = true;
+        const old = btn.textContent;
+        btn.textContent = '扫描中…';
+        log.textContent = '';
+        try {
+          // cap:extend-bible
+          await stream(`/projects/${project.id}/extend-bible`, {}, (ev) => {
+            if (ev.type === 'note' || ev.type === 'stage') log.textContent = ev.message || '';
+            if (ev.type === 'sheet' && ev.status === 'running') log.textContent = ev.message || '';
+            if (ev.type === 'error') toast(ev.message, 'err');
+            if (ev.type === 'finished') {
+              project.bible = ev.project?.bible || project.bible;
+              const summary = ev.added?.length
+                ? `补了 ${ev.added.length} 条：${ev.added.map((a) => a.name).join('、')}。已有的一条都没动。`
+                : '没有新的角色或场景 —— 这几章用的都是已有的设定。';
+              log.textContent = summary;
+              toast(summary, 'ok');
+              /**
+               * ⚠ 这里**不能** rerender()。
+               *
+               * 整页重画会把这块面板连同刚写上去的那句结果一起换掉 ——
+               * 于是点完之后面板一片空白，只剩一个几秒就消失的浮条。
+               * 人回头想确认"到底补了谁"，已经无处可看了。
+               *
+               * remountBible 只重挂设定集那一块（新条目要在列表里出现），
+               * 碰不到这块面板。
+               */
+              remountBible();
+            }
+          });
+        } catch (err) {
+          toast(err.message, 'err');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = old;
+        }
+      };
+      extendHost.append(
+        h('div', { class: 'panel-head' },
+          h('b', {}, '剧本又加了新章？'),
+          h('span', { class: 'muted' },
+            '扫一遍还没扫过的章，只把**没见过的**角色和场景补进来。'
+            + '已有的一条都不动、一张图都不重出 —— 所以主角不会换脸，也不会重复花钱。')),
+        h('div', { class: 'inline' }, btn),
+        log
+      );
+    }
+
     const sitePanelHost = h('div', { class: 'panel', style: 'display:none' });
     let siteMounted = false;
     // 建好之后留一个把手，设定集变了就叫它重画一遍（见 remountBible）
@@ -3575,14 +3686,14 @@ export default {
 
     const stepPanels = {
       'script-src': [scriptPanel, chapterPanel],
-      bible: [readinessHost, biblePanel, sitePanelHost],
+      bible: [readinessHost, extendHost, biblePanel, sitePanelHost],
       script: [durationPanel, chapterPanel, shotsPanel],
       assets: [shotsPanel],
       video: [shotsPanel],
       voice: [shotsPanel],
       compose: [cutPanel, composePanel]
     };
-    const allPanels = [scriptPanel, chapterPanel, readinessHost, biblePanel, sitePanelHost, durationPanel, shotsPanel, cutPanel, composePanel]
+    const allPanels = [scriptPanel, chapterPanel, readinessHost, extendHost, biblePanel, sitePanelHost, durationPanel, shotsPanel, cutPanel, composePanel]
       .filter(Boolean);
     // 只读那一行摆在分镜面板顶上，跟着"视频"这一步出现
     shotsPanel.insertBefore(durationLine, shotsPanel.firstChild.nextSibling);

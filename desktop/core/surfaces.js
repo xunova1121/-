@@ -335,6 +335,22 @@ export const CAPABILITIES = [
     why: ''
   },
   {
+    id: 'extend-bible',
+    name: '增量补设定集：只加新章里没见过的角色和场景，已有的一条都不动',
+    api: 'POST /projects/:id/extend-bible',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
+    id: 'append-chapter',
+    name: '追加一章（往剧本末尾拼，前面的正文不动，已跑完的章不作废）',
+    api: 'POST /projects/:id/chapters/append',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
     id: 'site-map',
     name: '场地图：把几个场景摆到同一片地上（可缩放平移的画布）',
     api: 'POST /projects/:id/scene-place',

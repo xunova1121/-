@@ -940,6 +940,7 @@ function paintScript() {
         + '已经出好的图和视频不会自动跟着变。'),
       ta,
       h('div', { class: 'row', style: 'margin-top:10px' }, save)),
+    appendChapterCard(),
     formatCard(),
     styleCard()
   ];
@@ -1096,8 +1097,98 @@ function paintBible() {
    * 同一个功能在两端一个说话一个装死，比两端都没有更糟：
    * 用户在手机上找不到，会以为这个功能手机上没做。
    */
+  out.push(extendCard());
   out.push(siteCard());
   return out;
+}
+
+/**
+ * ── 补上新增的角色和场景 ──
+ *
+ * 手机上做这一块，是因为"剧本又来了一章"这件事**最常发生在手机上** ——
+ * 作者在手机上写、在手机上贴。而不补的后果是静默的：新角色那几镜
+ * 没有参考图、没有外貌描述、复核没有基准，静默降级成"文生图"，
+ * 而流水线一路绿。
+ */
+function extendCard() {
+  const host = h('details', { class: 'card site-details' });
+  const head = h('summary', {}, '剧本又加了新章？ ', h('span', { class: 'muted' }, '只补没见过的角色和场景'));
+  const log = h('div', { class: 'muted', style: 'margin-top:8px;line-height:1.6' });
+  const btn = h('button', { class: 'btn sm grow' }, '扫一遍，补上新增的');
+  btn.onclick = async () => {
+    btn.disabled = true;
+    const old = btn.textContent;
+    btn.textContent = '扫描中…';
+    log.textContent = '';
+    try {
+      // cap:extend-bible
+      await stream(`/projects/${project.id}/extend-bible`, {}, (ev) => {
+        if (ev.message) log.textContent = ev.message;
+        if (ev.type === 'error') toast(ev.message, 'err');
+        if (ev.type === 'finished') {
+          project.bible = ev.project?.bible || project.bible;
+          toast(ev.added?.length
+            ? `补了 ${ev.added.length} 条：${ev.added.map((a) => a.name).join('、')}`
+            : '没有新的角色或场景', 'ok');
+          paint();
+        }
+      });
+    } catch (err) {
+      toast(err.message, 'err');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  };
+  host.append(head,
+    h('div', { class: 'muted', style: 'line-height:1.7' },
+      '已有的一条都不动、一张图都不重出 —— 所以主角不会换脸，也不会重复花钱。'),
+    h('div', { class: 'row', style: 'margin-top:8px' }, btn),
+    log);
+  return host;
+}
+
+/**
+ * ── 追加一章 ──
+ *
+ * 往剧本末尾拼，前面的正文一个字都不会动。
+ * 手工粘贴最容易毁掉的就是这一点：碰掉前面一个空格，那一章就被判定
+ * "改过了"，已经出好的分镜全部作废重跑 —— 而且没有任何提示。
+ */
+function appendChapterCard() {
+  const host = h('details', { class: 'card site-details' });
+  const title = h('input', { type: 'text', placeholder: '章节标题（留空自动编号）' });
+  const body = h('textarea', { rows: 5, class: 'mta', placeholder: '把新一章的正文贴在这儿' });
+  const btn = h('button', { class: 'btn sm grow' }, '追加这一章');
+  btn.onclick = async () => {
+    if (!body.value.trim()) { toast('这一章是空的', 'err'); return; }
+    btn.disabled = true;
+    const old = btn.textContent;
+    btn.textContent = '追加中…';
+    try {
+      // cap:append-chapter
+      const r = await api(`/projects/${project.id}/chapters/append`, {
+        method: 'POST', body: { title: title.value, script: body.value }
+      });
+      project = r.project || project;
+      body.value = '';
+      title.value = '';
+      toast('已追加 —— 前面几章的进度都还在', 'ok');
+      paint();
+    } catch (err) {
+      toast(err.message, 'err');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  };
+  host.append(
+    h('summary', {}, '追加一章 ', h('span', { class: 'muted' }, '剧本一章一章来的时候用')),
+    h('div', { class: 'muted', style: 'line-height:1.7' },
+      '往剧本末尾拼，前面的正文一个字都不动 —— 已经跑完的章不会作废重跑。'),
+    title, body,
+    h('div', { class: 'row', style: 'margin-top:8px' }, btn));
+  return host;
 }
 
 /**

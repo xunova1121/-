@@ -74,7 +74,19 @@ const stub = http.createServer((req, res) => {
     const body = JSON.parse(raw || '{}');
     if (u.pathname === '/v3/chat/completions') {
       const system = JSON.stringify(body.messages?.[0]?.content || '');
-      const content = system.includes('美术总监') ? JSON.stringify(BIBLE)
+      /**
+       * 增量补设定集要能测到"真的多出一个人"那条路。
+       * 所以看**用户那条消息**里有没有新角色的名字：有就多回一个人和一个场景，
+       * 模拟"第二章冒出了第一章没有的人"。
+       */
+      const user = JSON.stringify(body.messages?.[1]?.content || '');
+      const richer = {
+        ...BIBLE,
+        characters: [...BIBLE.characters, { name: '老周', role: '船工', appearance: '花白胡子，藏青短打' }],
+        scenes: [...BIBLE.scenes, { name: '灯塔下', appearance: '锈迹斑斑的灯塔基座' }]
+      };
+      const content = system.includes('美术总监')
+        ? JSON.stringify(user.includes('老周') ? richer : BIBLE)
         : system.includes('分镜导演') ? JSON.stringify(SHOTS)
         : '{}';
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1087,6 +1099,155 @@ if (await fixBtn.count()) {
   const gone = await page.locator('.site-issues').first().innerText().catch(() => '');
   check('对齐完之后提示跟着消失了', /都对得上/.test(gone), gone.replace(/\n/g, ' ').slice(0, 120));
 }
+
+/**
+ * ── 剧本一章一章加 ──
+ *
+ * 这条路上原来有三个洞，每一个都是**静默**的。这一节按用户真会走的顺序点一遍：
+ * 分章 → 追加第二章 → 补设定集 → 看分镜体检有没有把"点名了不存在的人"报出来。
+ */
+console.log('\n剧本一章一章加');
+/**
+ * ⚠ 先把上游地址**接回打桩服务**。
+ *
+ * 上面「连不通时的解释」那一节故意把 volcengine 的根地址改成了一个
+ * 死端口（127.0.0.1:45999），用来验红叉说不说人话。它改的是全局设置，
+ * 于是**这之后每一次调模型都会失败** —— 而这一节要真的调一次模型。
+ *
+ * 第一版就栽在这儿：补设定集一条都没补进来，看起来像功能坏了，
+ * 其实是上一节留下的地址还没还回去。
+ */
+await page.evaluate((u) => fetch('/api/settings', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ autoCheckOnStart: false, baseUrls: { volcengine: u } })
+}), stubUrl);
+
+// 先分章。测试项目的剧本很短，不分章的话章节面板根本不出现
+await page.evaluate(async (id) => {
+  await fetch(`/api/projects/${id}/chapters/split`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+  });
+}, proj.id);
+await page.reload();
+await page.waitForTimeout(1500);
+await step('剧本').click().catch(() => {});
+await page.waitForTimeout(1200);
+
+const chBefore = await page.evaluate(async (id) => {
+  const p = await (await fetch(`/api/projects/${id}`)).json();
+  return { n: (p.chapters || []).length, first: (p.chapters || [])[0]?.script || '' };
+}, proj.id);
+check('分出章节了', chBefore.n >= 1, String(chBefore.n));
+
+const apPanel = page.locator('details.append-chapter').first();
+check('章节面板上有「追加一章」', (await apPanel.count()) > 0);
+if (await apPanel.count()) {
+  await apPanel.locator('summary').click();
+  await page.waitForTimeout(300);
+  await apPanel.locator('input').fill('第二章 靠岸');
+  await apPanel.locator('textarea').fill('船靠上了灯塔下的礁石。老周跳下船，把缆绳系紧。');
+  await apPanel.locator('button').click();
+  await page.waitForTimeout(2000);
+
+  const chAfter = await page.evaluate(async (id) => {
+    const p = await (await fetch(`/api/projects/${id}`)).json();
+    return {
+      n: (p.chapters || []).length,
+      first: (p.chapters || [])[0]?.script || '',
+      firstDone: (p.chapters || [])[0]?.stageStatus?.script,
+      shots: (p.shots || []).length
+    };
+  }, proj.id);
+  check('章数多了一章', chAfter.n === chBefore.n + 1, `${chBefore.n} → ${chAfter.n}`);
+  /**
+   * ⚠ 这一条就是这颗按钮存在的全部理由。
+   *
+   * 手工往剧本框里粘贴时最容易毁掉的就是它：碰掉前面一个空格，第一章
+   * 就被判定"改过了"，已经出好的分镜全部作废重跑，而且不吭一声。
+   */
+  check('第一章的正文一个字都没变', chAfter.first === chBefore.first);
+  check('第一章已跑完的分镜没被清掉', chAfter.shots > 0, `还剩 ${chAfter.shots} 镜`);
+}
+
+// ── 补设定集：只加新来的 ──
+await step('设定集').click();
+await page.waitForTimeout(1200);
+const bibleBefore = await page.evaluate(async (id) => {
+  const p = await (await fetch(`/api/projects/${id}`)).json();
+  const a = (p.bible.characters || []).find((c) => c.name === '阿澜');
+  return { names: (p.bible.characters || []).map((c) => c.name), alanSheet: a?.sheetPath, alanSeed: a?.seed };
+}, proj.id);
+
+const extBtn = page.locator('button:has-text("补上新增的角色和场景")').first();
+check('设定集这一步有「补上新增的角色和场景」', (await extBtn.count()) > 0);
+if (await extBtn.count()) {
+  await extBtn.scrollIntoViewIfNeeded();
+  sent.length = 0;
+  await extBtn.click();
+  await page.waitForTimeout(8000);
+  // 先量"请求到底发出去没有" —— 按钮调了个不存在的函数这种事就是这么漏掉的
+  check('点了真的发出请求',
+    sent.some((x) => x.includes('extend-bible')), sent.slice(-6).join(' | '));
+  /**
+   * ⚠ 只读**那一行日志**，不要读整块面板。
+   *
+   * 第一版读的是整个 .panel，于是断言匹配到了按钮自己的字
+   *（「补上**新增**的角色和场景」）—— 面板一片安静照样通过。
+   * 又一条假绿，还是同一个毛病：量的范围比要量的东西大。
+   */
+  const extLog = await page.locator('.panel', { hasText: '剧本又加了新章' })
+    .locator('.field-hint').last().innerText().catch(() => '');
+  console.log(`      （面板日志：${extLog.replace(/\n/g, ' ').slice(0, 160)}）`);
+  check('面板上把结果说出来了（不是点完一片安静）',
+    /补了|没有新的角色|扫描|参考图/.test(extLog), JSON.stringify(extLog));
+  const bibleAfter = await page.evaluate(async (id) => {
+    const p = await (await fetch(`/api/projects/${id}`)).json();
+    const a = (p.bible.characters || []).find((c) => c.name === '阿澜');
+    const z = (p.bible.characters || []).find((c) => c.name === '老周');
+    return {
+      names: (p.bible.characters || []).map((c) => c.name),
+      scenes: (p.bible.scenes || []).map((s) => s.name),
+      alanSheet: a?.sheetPath, alanSeed: a?.seed,
+      zhouSheet: z?.sheetPath
+    };
+  }, proj.id);
+  check('新角色补进来了', bibleAfter.names.includes('老周'), bibleAfter.names.join('、'));
+  check('新场景也补进来了', bibleAfter.scenes.includes('灯塔下'), bibleAfter.scenes.join('、'));
+  /**
+   * ⚠ 老角色**一个字都不能动**。
+   *
+   * 被覆盖的话，"补一章"就变成了"把主角的脸和已经出好的参考图一起换掉"——
+   * 观众对主角换脸最敏感，而且要到成片里才看得出来。
+   */
+  check('阿澜的参考图没被清掉（不是整份重出）',
+    bibleAfter.alanSheet === bibleBefore.alanSheet && !!bibleAfter.alanSheet,
+    `${bibleBefore.alanSheet} → ${bibleAfter.alanSheet}`);
+  check('阿澜的 seed 也没变（换 seed 就是换脸）', bibleAfter.alanSeed === bibleBefore.alanSeed);
+  check('新角色真的出了参考图', !!bibleAfter.zhouSheet, String(bibleAfter.zhouSheet));
+}
+
+/**
+ * ── 点名了设定集里没有的人，要在分镜页说出来 ──
+ *
+ * 原来什么都不会发生：matchCharacters 找不到就 .filter(Boolean) 掉，
+ * 那一镜没有参考图、没有外貌描述、复核没有基准，静默降级成"文生图"，
+ * 而流水线一路绿。
+ */
+await page.evaluate(async (id) => {
+  const p = await (await fetch(`/api/projects/${id}`)).json();
+  const s = p.shots[0];
+  await fetch(`/api/projects/${id}/shots/${s.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ characters: '查无此人' })
+  });
+}, proj.id);
+const q2 = await page.evaluate(async (id) => {
+  const r = await (await fetch(`/api/projects/${id}/quality`)).json();
+  return JSON.stringify(r.items || []);
+}, proj.id);
+check('成片体检把"点名了设定集里没有的人"报出来了',
+  /查无此人|设定集里没有/.test(q2), q2.slice(0, 220));
 
 check('全程没有页面报错', errs.length === 0, errs.slice(0, 3).join(' | '));
 

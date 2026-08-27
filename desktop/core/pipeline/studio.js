@@ -645,40 +645,19 @@ export function sheetPrompt(kind, bible, item, variant = null) {
 // ═══════════════════════ 阶段一：设定集（冻结人设）═══════════════════════
 
 /**
- * 生成设定集并出角色设定图 / 场景基准图。
- * 这一步是整条流水线的地基，跑完之后人设就锁死了。
+ * 出参考图 —— 全量建设定集和**增量补设定集**共用这一段。
+ *
+ * ⚠ 抽出来是必须的，不是整洁癖。增量那条路要出的是"只给新来的角色出图"，
+ * 而出图这件事牵着一串容易漏的细节：按变体出（一个角色三套衣服就是三张）、
+ * 校画幅、转成模型能读的引用、把 sheetPath 写回**变体**而不是条目。
+ * 另写一份的话漏掉其中任何一条，表现都是"新角色的图看起来出了，
+ * 但后面每一镜都没引用到它"—— 而那正是一致性开始塌的地方。
  */
-export async function buildBible(projectId, { onEvent, regenerate = false, signal = null } = {}) {
+async function generateSheets(projectId, targets, { onEvent, signal = null } = {}) {
   const project = store.read(projectId);
-  if (!project) throw new Error(`项目不存在：${projectId}`);
-  if (!project.script?.trim()) throw new Error('剧本是空的，先写点东西');
-
-  onEvent?.({ type: 'stage', stage: 'bible', status: 'running', message: '正在冻结人设与场景…' });
-
-  const bible = project.bible && !regenerate ? project.bible : await consistency.buildBible(project, { onEvent });
-  // 刚生成的设定集还没有"变体"这一层，补上（老项目在 store.read 里补）
-  variants.normalizeBible(bible);
-  store.update(projectId, (p) => {
-    p.bible = bible;
-    return p;
-  });
-
-  /**
-   * 写描述和出设定图是**同一步**。
-   *
-   * 曾经拆成过两步（先出文字、人确认、再出图），道理上说得通，实际不好用：
-   * 多一次手动确认、多一个"图还没出"的中间态，而设定集本来就是
-   * "一口气出齐才有意义"的东西 —— 缺一张角色设定图，后面引用它的每一镜
-   * 都少一张参考图，一致性就是从那儿开始塌的。
-   *
-   * 不满意就在「设定集」页改描述、单独重出那一张 —— 那是随时能做的事，
-   * 不需要为它在流水线上专门开一站。
-   */
+  const bible = project.bible;
   const dir = store.assetDir(projectId);
   const r = routing();
-  // 按**变体**出图，不是按条目：一个角色三套衣服就是三张，
-  // 缺一张就少一个基准（见 pipeline/variants.js）
-  const targets = variants.sheetTargets(bible).filter(({ variant }) => regenerate || !variant.sheetPath);
 
   onEvent?.({ type: 'note', message: `待出参考图 ${targets.length} 张` });
 
@@ -729,6 +708,40 @@ export async function buildBible(projectId, { onEvent, regenerate = false, signa
       onEvent?.({ type: 'sheet', name: label, status: 'failed', message: err.message });
     }
   }
+}
+
+/**
+ * 生成设定集并出角色设定图 / 场景基准图。
+ * 这一步是整条流水线的地基，跑完之后人设就锁死了。
+ */
+export async function buildBible(projectId, { onEvent, regenerate = false, signal = null } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  if (!project.script?.trim()) throw new Error('剧本是空的，先写点东西');
+
+  onEvent?.({ type: 'stage', stage: 'bible', status: 'running', message: '正在冻结人设与场景…' });
+
+  const bible = project.bible && !regenerate ? project.bible : await consistency.buildBible(project, { onEvent });
+  // 刚生成的设定集还没有"变体"这一层，补上（老项目在 store.read 里补）
+  variants.normalizeBible(bible);
+  store.update(projectId, (p) => {
+    p.bible = bible;
+    return p;
+  });
+
+  /**
+   * 写描述和出设定图是**同一步**。
+   *
+   * 曾经拆成过两步（先出文字、人确认、再出图），道理上说得通，实际不好用：
+   * 多一次手动确认、多一个"图还没出"的中间态，而设定集本来就是
+   * "一口气出齐才有意义"的东西 —— 缺一张角色设定图，后面引用它的每一镜
+   * 都少一张参考图，一致性就是从那儿开始塌的。
+   *
+   * 不满意就在「设定集」页改描述、单独重出那一张 —— 那是随时能做的事，
+   * 不需要为它在流水线上专门开一站。
+   */
+  const targets = variants.sheetTargets(bible).filter(({ variant }) => regenerate || !variant.sheetPath);
+  await generateSheets(projectId, targets, { onEvent, signal });
 
   const after = store.read(projectId);
   const all = variants.sheetTargets(after.bible);
@@ -747,6 +760,196 @@ export async function buildBible(projectId, { onEvent, regenerate = false, signa
       : `参考图只出了 ${ready}/${total} 张。缺的那几张会让引用它的镜头少一张参考图，一致性从那儿开始塌 —— 去「设定集」页把缺的补出来再往下走`
   });
   return store.read(projectId);
+}
+
+/**
+ * 增量补设定集 —— 只加新来的，老的一个都不碰。
+ *
+ * ════════ 为什么非有这一条不可 ════════
+ *
+ * 剧本一章一章往里加，第二章必然冒出第一章没有的人和地方。
+ * 而在这之前，能做的只有两件事，两件都不对：
+ *
+ *   什么都不做   新角色永远不在设定集里。而且**不报错** ——
+ *                matchCharacters 找不到就回空数组，那一镜于是没有参考图、
+ *                提示词里没有外貌描述、复核没有基准，静默降级成"文生图"
+ *   重新生成     整份设定集重建，所有 sheetPath 清空，**老角色的图全部重出**。
+ *                既花钱，又冒着"重出那张和之前不一样"的风险 ——
+ *                而观众对主角换脸这件事最敏感
+ *
+ * 这条路只做一件事：扫新正文 → 认出没见过的名字 → 只给这几个建条目、出图。
+ *
+ * ⚠ 判重按**名字**。模型给同一个人换个称呼（"老周" vs "周叔"）时会漏判，
+ * 于是多出一个重复条目。宁可这样：漏判的代价是多一条能手动删掉的设定，
+ * 而按相似度合并的代价是**把两个真的不同的人合成一个**，那是不可逆的。
+ *
+ * ⚠ 不动 style。画风是全片的事，第二章不该把它改掉。
+ */
+export async function extendBible(projectId, { chapterId = null, onEvent, signal = null } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  if (!project.bible) throw new Error('还没有设定集 —— 先跑「设定集」那一步，这一条是往上面补');
+
+  /**
+   * 扫哪一段。
+   *
+   * 指定了章就只扫那一章；没指定就扫**还没被扫过的那些章**。
+   * 扫全文是错的：已经建过条目的正文再扫一遍，模型多半会把
+   * 同一个人换个说法写出来，于是凭空多出一堆重复条目。
+   */
+  const all = project.chapters || [];
+  const pending = chapterId
+    ? all.filter((c) => c.id === chapterId)
+    : all.filter((c) => !c.castScanned);
+  const source = pending.length
+    ? pending.map((c) => c.script).join('\n\n')
+    : (all.length ? '' : project.script);
+
+  if (!String(source || '').trim()) {
+    onEvent?.({ type: 'note', message: '没有新章要扫 —— 每一章都扫过了' });
+    return { project, added: [] };
+  }
+
+  onEvent?.({ type: 'stage', stage: 'bible', status: 'running', message: '扫描新增的角色与场景…' });
+  const found = await consistency.scanCast(project, { source, onEvent });
+  jobs.checkpoint(signal, '扫描新增设定');
+
+  let added = [];
+  store.update(projectId, (p) => {
+    // 合并那一段抽在 consistency.mergeCast 里 —— 它是这条路上最容易出错的
+    // 地方（判重、seed 推导、不碰老条目），单独拿出来才测得动
+    added = consistency.mergeCast(p.bible, found, p.id);
+    // 记一笔这几章扫过了，免得下次又扫一遍扫出一堆重复
+    for (const c of p.chapters || []) {
+      if (pending.some((x) => x.id === c.id)) c.castScanned = true;
+    }
+    variants.normalizeBible(p.bible);
+    return p;
+  });
+
+  if (!added.length) {
+    onEvent?.({ type: 'stage', stage: 'bible', status: 'done', message: '没有新的角色或场景 —— 这几章用的都是已有的设定' });
+    return { project: store.read(projectId), added: [] };
+  }
+
+  onEvent?.({
+    type: 'note',
+    message: `新增 ${added.length} 条：${added.map((a) => a.name).join('、')}。只给这几条出图，已有的一张都不重出`
+  });
+
+  /**
+   * 只给**新条目**出图。
+   *
+   * sheetTargets 回的是全部变体，这里按 sheetPath 为空来筛 —— 正好就是
+   * 刚加进去那几条（老条目早就有图了）。用"名字在 added 里"来筛也行，
+   * 但那样会漏掉一种情况：老条目里本来就有一张没出成的图，
+   * 顺手补上是对的。
+   */
+  const after = store.read(projectId);
+  const targets = variants.sheetTargets(after.bible).filter(({ variant }) => !variant.sheetPath);
+  await generateSheets(projectId, targets, { onEvent, signal });
+
+  const done = store.read(projectId);
+  const sheets = variants.sheetTargets(done.bible);
+  const ready = sheets.filter((x) => x.variant.sheetPath).length;
+  store.update(projectId, (p) => {
+    p.stageStatus.bible = ready === sheets.length ? 'done' : ready ? 'partial' : 'pending';
+    return p;
+  });
+  onEvent?.({
+    type: 'stage',
+    stage: 'bible',
+    status: 'done',
+    message: `补了 ${added.length} 条设定，参考图 ${ready}/${sheets.length}`
+  });
+  return { project: store.read(projectId), added };
+}
+
+/**
+ * 追加一章 —— 剧本一章一章来的时候走这条。
+ *
+ * ════════ 为什么不直接往 chapters 里 push ════════
+ *
+ * 章节是从 `project.script` 切出来的。直接往 chapters 里塞一条，
+ * 两边就对不上了 —— 而下一次有人点「重新分章」，塞进去的那一章
+ * 会凭空消失（script 里根本没有它）。
+ *
+ * 所以这里往 **script 末尾**追加，然后按老规矩重切。这样只有一份真相。
+ *
+ * ⚠ 前面那些章的正文**一个字都不会动**（是我们在末尾拼的），
+ * 所以 applyChapters 里那条"正文没变才留住状态"必然成立 ——
+ * 已经跑完的章不会被判定成"改过了"而作废重跑。
+ * 手工往剧本框里粘贴时最容易毁掉的就是这一点：动了前面一个空格，
+ * 那一章的分镜就全部作废。
+ */
+export function appendChapter(projectId, { title = '', script = '' } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const text = String(script || '').trim();
+  if (!text) throw new Error('这一章是空的');
+
+  /**
+   * 标题要**写进正文**，不是只记在字段上。
+   *
+   * 切章认的是正文里的章节标题行。标题只存在字段里的话，重切时
+   * 这一章会和上一章黏在一起 —— 而那时候上一章的正文就变了，
+   * 它已经跑完的分镜会跟着作废。
+   */
+  const n = (project.chapters || []).length + 1;
+  const heading = String(title || '').trim() || `第 ${n} 章`;
+  const head = /^\s*(第\s*[一二三四五六七八九十百千零〇\d]+\s*[章回节幕]|Chapter\s+\d+|#{1,3}\s)/i.test(text)
+    ? '' // 正文自己带标题行就别再加一行，否则重切会多切一刀
+    : `${heading}\n`;
+
+  const merged = `${String(project.script || '').trimEnd()}\n\n${head}${text}\n`;
+
+  /**
+   * ⚠ **不走重新切分那条路。**
+   *
+   * 一开始是这么写的：把新章拼到剧本末尾，然后 autoSplit 整段重切。
+   * 浏览器走查里当场翻车 —— 追加完还是一章。
+   *
+   * 原因在 autoSplit 的一条规矩上："只认出一个标题说明它多半是书名，
+   * 不算数"（要 ≥2 个标题行才认）。而最常见的情形恰恰是：第一章是直接
+   * 粘进来的、**没有标题行**，你追加的第二章带标题 —— 全文只有一个标题，
+   * 于是这条规矩把它否掉，两章被并成一章。
+   *
+   * 给第一章补一行标题能骗过这条规矩，但那就**改了第一章的正文** ——
+   * 而"不碰前面的正文"正是这颗按钮存在的全部理由。
+   *
+   * 所以：章节已经有了就直接往后加一条，一次重切都不做。
+   * script 同步更新，只是为了剧本页能看到全文、以及将来真要重切时有材料在。
+   */
+  const existing = project.chapters || [];
+  if (!existing.length) {
+    // 还没分过章：这一次顺带把已有正文立成第 1 章，再把新章接在后面
+    const fresh = chapters.autoSplit(merged);
+    if (!fresh.length) throw new Error('没能切出章节');
+    store.update(projectId, (p) => { p.script = merged; return p; });
+    const next = applyChapters(projectId, fresh);
+    return { project: next, chapter: (next.chapters || [])[next.chapters.length - 1] || null };
+  }
+
+  const idx = existing.length + 1;
+  const body = `${head}${text}`.trim();
+  const one = {
+    id: `ch-${String(idx).padStart(2, '0')}`,
+    index: idx,
+    title: heading,
+    summary: '',
+    script: body,
+    chars: body.length,
+    stageStatus: { script: 'pending', assets: 'pending', video: 'pending', voice: 'pending', compose: 'pending' },
+    outputs: {}
+  };
+  const next = store.update(projectId, (p) => {
+    p.script = merged;
+    p.chapters = [...(p.chapters || []), one];
+    // 新章还没拆分镜，整片的分镜状态就不再是 done
+    p.stageStatus.script = p.chapters.every((c) => c.stageStatus.script === 'done') ? 'done' : 'pending';
+    return p;
+  });
+  return { project: next, chapter: one };
 }
 
 // ═══════════════════════ 阶段二：分镜 ═══════════════════════
@@ -768,7 +971,8 @@ export function qualityReport(projectId) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
   return quality.audit(project, {
-    lintResults: shotlint.lintShots(project.shots || []),
+    // 带上设定集：分镜里点名了设定集里没有的角色时，那一镜是静默降级的
+    lintResults: shotlint.lintShots(project.shots || [], { bible: project.bible }),
     threshold: settings.get('consistencyThreshold') ?? 75
   });
 }
@@ -1042,7 +1246,8 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
    * 提示词里已经写明了铁律，但模型不是每次都听；这一层是**兜底的检查**，
    * 不是替代品。纯本地正则，不花一次调用。
    */
-  const lint = shotlint.lintShots(store.read(projectId).shots || []);
+  const proj0 = store.read(projectId);
+  const lint = shotlint.lintShots(proj0.shots || [], { bible: proj0.bible });
   const brief = shotlint.summarize(lint);
   if (brief) onEvent?.({ type: 'note', message: `⚠ 分镜体检：${brief}` });
 
@@ -1917,11 +2122,28 @@ export async function smartSplitChapters(projectId, { targetChars = 3000, onEven
 /** 落盘章节，尽量保住已经跑完的那些章的状态（按标题 + 正文匹配） */
 function applyChapters(projectId, fresh) {
   return store.update(projectId, (p) => {
-    const old = new Map((p.chapters || []).map((c) => [c.title, c]));
+    /**
+     * ⚠ 按**正文**配对，不按标题。
+     *
+     * 原来是拿 title 当键的，而标题**不稳定**：只有一章时切不出章节标题
+     *（少于两个标题行不算数），numbered() 就编一个「第 1 章」；等第二章
+     * 一来，两个标题行都认出来了，第一章的标题变成正文里那句「第一章 出发」。
+     *
+     * 正文一个字没变，标题却变了 —— 于是配不上对，第一章被当成新章：
+     * **已经跑完的分镜全部作废，出好的图和视频跟着被丢掉**，而且不吭一声。
+     * 这正是"一章一章加"最想避免的那件事，却恰恰在加第二章时必然发生。
+     *
+     * 正文才是判据：正文没变，分镜就还对得上；正文变了，就必须重拆。
+     * 标题是给人看的。
+     */
+    const old = new Map((p.chapters || []).map((c) => [c.script, c]));
     p.chapters = fresh.map((c) => {
-      const prev = old.get(c.title);
-      // 正文没变才留住状态；改过的章节必须重拆，否则分镜和正文对不上
-      return prev && prev.script === c.script ? { ...c, stageStatus: prev.stageStatus, outputs: prev.outputs } : c;
+      const prev = old.get(c.script);
+      // castScanned 也要带过来，否则重切一次，补设定集那条路会把每一章重扫一遍，
+      // 扫出一堆同一个人的重复条目
+      return prev
+        ? { ...c, stageStatus: prev.stageStatus, outputs: prev.outputs, castScanned: prev.castScanned }
+        : c;
     });
     const keep = new Set(p.chapters.filter((c) => c.stageStatus.script === 'done').map((c) => c.id));
     p.shots = (p.shots || []).filter((s) => !s.chapterId || keep.has(s.chapterId));

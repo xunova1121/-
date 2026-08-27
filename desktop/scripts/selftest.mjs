@@ -2357,6 +2357,208 @@ section('预演台：把"中景"变成一组数');
  * 而"山门外是斜逆光、大殿是正顺光"牵涉的是两个不同的场景，中间可能隔着
  * 十几镜、跨了好几场。没有任何一层会把它们放在一起看 —— 这一层才会。
  */
+/**
+ * ════════ 剧本一章一章往里加 ════════
+ *
+ * 这是长篇的常态：作者写一章发一章。而在这之前，这条路上有三个洞，
+ * 每一个都是**静默**的：
+ *
+ *   ① 手工把新章粘到剧本末尾时碰掉前面一个空格 → 那一章被判定"改过了"，
+ *      已出的分镜全部作废重跑，没有任何提示
+ *   ② 第二章的新角色永远不会进设定集
+ *   ③ 而分镜里点名了一个设定集里没有的人时，什么都不会发生 ——
+ *      matchCharacters 找不到就 .filter(Boolean) 掉，于是那一镜没有参考图、
+ *      没有外貌描述、复核没有基准，静默降级成"文生图"，流水线一路绿
+ */
+section('剧本一章一章加：追加、补设定集、点名了不存在的人');
+{
+  const lint = await import('../core/pipeline/shotlint.js');
+  const consistency = await import('../core/pipeline/consistency.js');
+  const studio = studioModule;
+
+  // ── ③ 点名了设定集里没有的人 ──
+  {
+    const bible = {
+      characters: [{ name: '阿澜', appearance: '短发' }],
+      scenes: [{ name: '码头', appearance: '晨雾' }]
+    };
+    const kinds = (shots, b) => lint.lintShots(shots, { bible: b }).flatMap((r) => r.issues).map((i) => i.kind);
+
+    check('点名了设定集里没有的角色 → 报',
+      kinds([{ id: 'a', index: 1, characters: ['老周'], description: '他推门' }], bible).includes('cast-unknown'));
+    check('设定集里有的就不报',
+      !kinds([{ id: 'a', index: 1, characters: ['阿澜'], description: '他推门' }], bible).includes('cast-unknown'));
+    /**
+     * ⚠ 没有设定集时**不报**。
+     * 还没跑设定集那一步的项目，每一镜都会中 —— 那是把"还没到那一步"
+     * 说成"出错了"，而满屏假警报会让人学会无视所有警报。
+     */
+    check('还没有设定集时不报（那是"还没到那一步"，不是错）',
+      lint.lintShots([{ id: 'a', index: 1, characters: ['老周'] }]).length === 0);
+
+    check('场景不在设定集里也报',
+      kinds([{ id: 'a', index: 1, scene: '山神庙', description: 'x' }], bible).includes('scene-unknown'));
+    /**
+     * 说话人单独查一条：配音按角色分音色，找不到的说话人拿不到音色，
+     * 那句台词会用默认嗓子念 —— 同一个人在不同镜里换声音，比换脸还刺耳。
+     */
+    check('台词标着一个设定集里没有的人 → 单独报',
+      kinds([{ id: 'a', index: 1, speaker: '周叔', dialogue: '走吧' }], bible).includes('speaker-unknown'));
+
+    const one = lint.lintShots([{ id: 'a', index: 1, characters: ['老周'] }], { bible })[0].issues[0];
+    check('说清了后果是"静默降级"，不是一句"找不到"',
+      /悄悄丢掉|没有他/.test(one.why), one.why);
+    check('给了下一步该干什么', /补上新增|设定集/.test(one.fix), one.fix);
+  }
+
+  // ── ② 增量补设定集：只加新的，老的一个字都不碰 ──
+  {
+    const bible = {
+      characters: [{ name: '阿澜', appearance: '短发', seed: 111, sheetPath: '/old/alan.png', voice: 'v1' }],
+      scenes: [{ name: '码头', appearance: '晨雾', seed: 222, sheetPath: '/old/dock.png' }],
+      props: []
+    };
+    const found = {
+      characters: [{ name: '阿澜', appearance: '模型这次把他写成了长发' }, { name: '老周', role: '船工', appearance: '花白胡子' }],
+      scenes: [{ name: '灯塔', appearance: '锈迹斑斑' }],
+      props: []
+    };
+    const added = consistency.mergeCast(bible, found, 'p-1');
+
+    check('只新增没见过的那几条', added.map((a) => a.name).join(',') === '老周,灯塔', JSON.stringify(added));
+    /**
+     * ⚠ 这一条是整块里最要紧的。
+     *
+     * 老条目被覆盖的话，"补一章"就变成了"把主角的脸和已经出好的参考图
+     * 一起换掉"—— 而观众对主角换脸最敏感，且要到成片里才看得出来。
+     */
+    const alan = bible.characters.find((c) => c.name === '阿澜');
+    check('已有的角色一个字都没动（描述、seed、参考图、音色）',
+      alan.appearance === '短发' && alan.seed === 111
+      && alan.sheetPath === '/old/alan.png' && alan.voice === 'v1', JSON.stringify(alan));
+    check('已有的场景也没动',
+      bible.scenes.find((s) => s.name === '码头').sheetPath === '/old/dock.png');
+
+    const zhou = bible.characters.find((c) => c.name === '老周');
+    check('新角色的 seed 和全量那条路推的是同一个',
+      zhou.seed === consistency.deriveSeed('p-1', 'char:老周'), String(zhou.seed));
+    check('新角色留了音色位（配音那步要按角色分音色）', zhou.voice === '');
+    check('新角色还没有参考图（等着出）', zhou.sheetPath === null);
+    check('新场景进了 scenes，不是塞进 characters',
+      bible.scenes.some((s) => s.name === '灯塔') && !bible.characters.some((c) => c.name === '灯塔'));
+
+    // 再并一次同一份，不该重复长出来
+    const again = consistency.mergeCast(bible, found, 'p-1');
+    check('同一份扫描结果并第二次不会重复长出来', again.length === 0, JSON.stringify(again));
+
+    // 设定集缺字段时也要能补进去（老项目的 bible 可能没有 props）
+    const bare = { characters: [] };
+    consistency.mergeCast(bare, { characters: [], scenes: [], props: [{ name: '柴刀', appearance: '缺口' }] }, 'p-2');
+    check('设定集缺 props 字段时也补得进去（不是 push 进一个临时数组）',
+      (bare.props || []).some((x) => x.name === '柴刀'), JSON.stringify(bare.props));
+  }
+
+  // ── ① 追加一章：前面的正文一个字都不动 ──
+  {
+    const p = store.create({ title: '连载' });
+    const ch1 = '第一章 出发\n阿澜在码头登船。雾很大。';
+    store.update(p.id, (x) => { x.script = ch1; return x; });
+    studio.splitChapters(p.id);
+    // 假装第一章已经跑完分镜了
+    store.update(p.id, (x) => {
+      x.chapters[0].stageStatus.script = 'done';
+      x.shots = [{ id: 's1', index: 1001, chapterId: x.chapters[0].id, description: '登船' }];
+      return x;
+    });
+
+    const before = store.read(p.id);
+    const r = studio.appendChapter(p.id, { title: '第二章 靠岸', script: '船靠上了灯塔下的礁石。老周跳下船。' });
+    const after = r.project;
+
+    check('章数从 1 变成 2', (after.chapters || []).length === 2, String((after.chapters || []).length));
+    /**
+     * ⚠ 这一条就是这颗按钮存在的全部理由。
+     *
+     * 手工往剧本框里粘贴时最容易毁掉的就是它：碰掉前面一个空格，
+     * 第一章就被判定"改过了"，已经出好的分镜全部作废重跑，
+     * 而且没有任何提示 —— 你要到重新分章之后才发现进度没了。
+     */
+    check('第一章的正文一个字都没变',
+      after.chapters[0].script === before.chapters[0].script,
+      JSON.stringify([before.chapters[0].script, after.chapters[0].script]));
+    check('第一章已跑完的状态保住了', after.chapters[0].stageStatus.script === 'done');
+    check('第一章的分镜没被清掉', (after.shots || []).some((s) => s.id === 's1'));
+    check('新章的正文进去了', /老周跳下船/.test(after.chapters[1].script), after.chapters[1].script);
+    check('新章是没跑过的状态', after.chapters[1].stageStatus.script !== 'done');
+    check('剧本正文里也有了（章节是从它切出来的，两边不能对不上）',
+      /老周跳下船/.test(after.script));
+    check('回的是刚追加的那一章', r.chapter && /第二章|靠岸/.test(r.chapter.title || ''), r.chapter?.title);
+
+    /**
+     * ⚠ 第一章**没有标题行**时也得追加得上。
+     *
+     * 这一条是浏览器走查抓出来的，而上面那几条全绿 —— 因为上面的夹具给
+     * 第一章写了「第一章 出发」这个标题行，正好是**能用的那种情况**。
+     *
+     * 真实的常态是：第一章直接粘进来、没有标题。这时候追加一个带标题的
+     * 第二章，全文只有一个标题行 —— 而 autoSplit 有条规矩"只认出一个标题
+     * 说明它多半是书名，不算数"，于是两章被并成一章，追加等于没发生。
+     *
+     * 又一次同样的教训：**夹具挑了顺的那种，把不顺的那种漏掉了。**
+     */
+    const p0 = store.create({ title: '第一章没标题' });
+    store.update(p0.id, (x) => { x.script = '阿澜在码头巡查，发现缆绳被割断。'; return x; });
+    studio.splitChapters(p0.id);
+    const c0 = store.read(p0.id).chapters[0].script;
+    const r0 = studio.appendChapter(p0.id, { title: '第二章 靠岸', script: '船靠上礁石。老周跳下船。' });
+    check('第一章没有标题行时，追加也真的多出一章',
+      (r0.project.chapters || []).length === 2,
+      (r0.project.chapters || []).map((c) => c.title).join(' | '));
+    check('而且第一章的正文仍然一个字没变',
+      r0.project.chapters[0].script === c0,
+      JSON.stringify([c0, r0.project.chapters[0].script]));
+    check('新章拿到了不重复的 id',
+      r0.project.chapters[1].id !== r0.project.chapters[0].id,
+      r0.project.chapters.map((c) => c.id).join(','));
+    check('剧本正文里也跟着有了', /老周跳下船/.test(r0.project.script));
+
+    // 正文自带标题行时不该再补一行，否则重切会多切一刀
+    const p2 = store.create({ title: '连载2' });
+    store.update(p2.id, (x) => { x.script = ch1; return x; });
+    studio.splitChapters(p2.id);
+    const r2 = studio.appendChapter(p2.id, { script: '第二章 靠岸\n船靠上了礁石。' });
+    check('正文自带章节标题时不重复补标题',
+      (r2.project.chapters || []).length === 2, String((r2.project.chapters || []).length));
+    check('空的一章要挡住', (() => {
+      try { studio.appendChapter(p2.id, { script: '   ' }); return false; } catch { return true; }
+    })());
+  }
+
+  // ── 没有新章可扫时，不该白跑一趟模型 ──
+  {
+    const p = store.create({ title: '都扫过了' });
+    store.update(p.id, (x) => {
+      x.script = '第一章 出发\n阿澜登船。';
+      x.bible = { style: { anchor: 'x' }, characters: [], scenes: [], props: [] };
+      return x;
+    });
+    studio.splitChapters(p.id);
+    store.update(p.id, (x) => { x.chapters.forEach((c) => { c.castScanned = true; }); return x; });
+    const notes = [];
+    const out = await studio.extendBible(p.id, { onEvent: (ev) => notes.push(ev.message || '') });
+    check('每一章都扫过时直接返回，不调模型', out.added.length === 0);
+    check('并且说清楚了为什么什么都没做',
+      notes.some((m) => /没有新章/.test(m)), notes.join(' | '));
+    // ⚠ extendBible 是 async：不 await 的话抛出来的是一个被拒绝的 Promise，
+    // 同步的 try/catch 一个字都接不住 —— 断言会永远判"没挡住"
+    const q = store.create({ title: '没设定集' });
+    store.update(q.id, (x) => { x.script = 'abc'; return x; });
+    let blocked = false;
+    try { await studio.extendBible(q.id); } catch { blocked = true; }
+    check('还没有设定集时挡住（这一条是往上面补，不是从零建）', blocked);
+  }
+}
+
 section('场地图：同一片地上的几个场景');
 {
   const site = await import('../core/pipeline/site.js');

@@ -1307,7 +1307,41 @@ async function handleApi(req, res, url, { lan = false } = {}) {
         }
         return undefined;
       }
+      /**
+       * 追加一章。cap:append-chapter
+       *
+       * 剧本一章一章来的时候走这条 —— 往剧本末尾拼，然后按老规矩重切。
+       * 手工粘贴的毛病是容易碰到前面的正文：动了一个空格，那一章就被
+       * 判定"改过了"，已出的分镜全部作废重跑。这条路碰不到前面。
+       */
+      if (d === 'append' && method === 'POST') {
+        const { title, script } = await readBody(req);
+        try {
+          return json(res, 200, studio.appendChapter(b, { title, script }));
+        } catch (err) {
+          return json(res, 400, { error: err.message });
+        }
+      }
       if (method === 'DELETE') return json(res, 200, studio.clearChapters(b));
+    }
+
+    /**
+     * 增量补设定集：只加新来的角色和场景，已有的一条都不动。cap:extend-bible
+     *
+     * 走流式 —— 它要给新条目出参考图，那是几十秒到几分钟的事，
+     * 没有进度的话人会以为卡住了。
+     */
+    if (b && c === 'extend-bible' && method === 'POST') {
+      const opts = await readBody(req);
+      const stream = ndjson(res);
+      req.on('close', () => stream.end());
+      try {
+        const { project, added } = await studio.extendBible(b, { ...opts, onEvent: (ev) => stream.send(ev) });
+        stream.end({ type: 'finished', project, added });
+      } catch (err) {
+        stream.end({ type: 'error', message: err.message });
+      }
+      return undefined;
     }
 
     /**

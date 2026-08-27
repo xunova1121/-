@@ -76,6 +76,98 @@ const BIBLE_PROMPT = `你是动画片的美术总监。基于剧本，为每个�
 }`;
 
 /**
+ * 只扫一段**新来的**正文，把里面出现的角色/场景/道具认出来。
+ *
+ * ════════ 为什么必须和 buildBible 分开 ════════
+ *
+ * 剧本一章一章往里加时，第二章会冒出第一章没有的人和地方。
+ * 而重跑 buildBible 是**不能接受**的：它回的是一份全新的设定集，
+ * 所有 sheetPath 都是 null —— 于是老角色的参考图全被清空、全部重出。
+ * 那既花钱，又冒着"重出的那张和之前那张不一样"的风险，
+ * 而观众对主角换脸这件事最敏感。
+ *
+ * 所以这里只回**模型读出来的原始清单**，谁是新的由调用方比对，
+ * 老条目一个字都不碰。
+ *
+ * ⚠ 回的是原始形状（没有 seed、没有 sheetPath），不是一份设定集。
+ * 让它长得像设定集的话，早晚有人直接把它存进 project.bible ——
+ * 那就等于把老条目全覆盖了。形状不一样，这种误用就写不出来。
+ */
+export async function scanCast(project, { source, onEvent } = {}) {
+  const routing = adapters.resolvedRouting();
+  const style = resolveStyle(project);
+  const text0 = String(source || '').trim();
+  if (!text0) return { characters: [], scenes: [], props: [] };
+
+  onEvent?.({ type: 'note', message: `扫描新增角色与场景（${routing.chat.provider} / ${routing.chat.model}）…` });
+  const { text } = await adapters.chat({
+    providerId: routing.chat.provider,
+    model: routing.chat.model,
+    system: BIBLE_PROMPT,
+    user: `画风要求：${style.anchor}\n\n剧本：\n${text0.slice(0, 12000)}`,
+    temperature: 0.6,
+    jsonMode: true,
+    label: '扫描新增设定'
+  });
+  const parsed = extractJSON(text);
+  const clean = (list) => (Array.isArray(list) ? list : [])
+    .filter((x) => x && typeof x === 'object' && String(x.name || '').trim())
+    .map((x) => ({ name: String(x.name).trim(), role: x.role || '', appearance: x.appearance || '' }));
+  return {
+    characters: clean(parsed.characters),
+    scenes: clean(parsed.scenes),
+    props: clean(parsed.props)
+  };
+}
+
+/**
+ * 把扫出来的清单并进已有设定集 —— **只加没见过的，老条目一个字都不碰**。
+ *
+ * 就地改 bible，回新增了哪几条。
+ *
+ * ⚠ 判重按**名字**，不做相似度合并。模型给同一个人换个称呼
+ *（"老周" vs "周叔"）时会漏判，于是多出一个重复条目。宁可这样：
+ * 漏判的代价是多一条能手动删掉的设定；而按相似度合并的代价是
+ * **把两个真的不同的人合成一个**，那是不可逆的，且要到成片里才看得出来。
+ *
+ * ⚠ seed 走和全量那条路**同一个推导**（项目 id + `类型:名字`）。
+ * 另写一套的话，同一个角色"先建的"和"后补的"会拿到两个 seed ——
+ * 表现是同名角色两张脸，而这正是整套一致性引擎要防的第一件事。
+ */
+export function mergeCast(bible, found, projectId) {
+  const added = [];
+  if (!bible || !found) return added;
+  // ⚠ 数组要先建出来。`bible.characters || []` 那种写法拿到的是新数组，
+  // 往里 push 完就丢了 —— 表现是"日志说补了几条，设定集里一条没多"
+  if (!Array.isArray(bible.characters)) bible.characters = [];
+  if (!Array.isArray(bible.scenes)) bible.scenes = [];
+  if (!Array.isArray(bible.props)) bible.props = [];
+
+  const buckets = [
+    ['char', found.characters, bible.characters],
+    ['scene', found.scenes, bible.scenes],
+    ['prop', found.props, bible.props]
+  ];
+  for (const [kind, list, bucket] of buckets) {
+    for (const one of list || []) {
+      const name = String(one?.name || '').trim();
+      if (!name || bucket.some((x) => x.name === name)) continue;
+      bucket.push({
+        name,
+        ...(kind === 'char' ? { role: one.role || '', voice: '' } : {}),
+        appearance: one.appearance || '',
+        seed: deriveSeed(projectId, `${kind}:${name}`),
+        sheetPrompt: '',
+        sheetPath: null,
+        sheetUrl: null
+      });
+      added.push({ kind, name });
+    }
+  }
+  return added;
+}
+
+/**
  * 第一步：让模型把设定"写死"。
  * 注意这一步只跑一次，跑完就冻结 —— 每次重新生成设定，人设就会漂一次。
  */

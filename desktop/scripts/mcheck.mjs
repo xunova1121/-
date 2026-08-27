@@ -650,7 +650,14 @@ if (sheetUp) {
   await page.locator('.tab', { hasText: '设定' }).click();
   await page.waitForTimeout(900);
 
-  const head = page.locator('.site-details > summary').first();
+  /**
+   * ⚠ 按**标题文字**找，不能拿 .site-details 的第一个。
+   *
+   * 设定集页上现在有两张同类卡片（「剧本又加了新章？」和「场地图」），
+   * .first() 会点开上面那张 —— 然后找不到 .site-panel，报成"场地图坏了"。
+   * 而那是测试站错了地方。
+   */
+  const head = page.locator('.site-details', { hasText: '场地图' }).locator('summary').first();
   if (!(await head.count())) {
     console.log('⑧e 场地图：✕ 设定集页上找不到入口');
   } else {
