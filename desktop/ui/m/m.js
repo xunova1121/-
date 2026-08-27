@@ -2100,6 +2100,11 @@ function chips(options, current, onPick) {
  */
 function openEditor(s, jump = 'content') {
   const desc = h('textarea', { rows: 4, class: 'mta' }, s.description || '');
+  /**
+   * 这一镜画面里**看得见**的关键道具。撑着"道具消失又回来"那条检查。
+   * ⚠ 只填真的在画面里的：特写里看不见的东西填上去，那条检查会开始乱报。
+   */
+  const propsBox = h('input', { type: 'text', value: (s.props || []).join('、') });
   const line = h('textarea', { rows: 2, class: 'mta' }, s.dialogue || '');
   // 画外音效。单开一栏是因为写进画面描述会让出图模型去画那个声音 ——
   //「敲门声」最常见的下场是画出一扇开着的门，而这一镜的前提是门还关着
@@ -2225,7 +2230,10 @@ function openEditor(s, jump = 'content') {
       h('div', { class: 'ed-group' },
         h('h4', {}, '画面描述', h('span', {}, '出图和出视频的唯一输入')),
         desc,
-        h('div', { class: 'muted', style: 'margin-top:6px' }, '写偏一句，重出十次也回不到对的画面。')),
+        h('div', { class: 'muted', style: 'margin-top:6px' }, '写偏一句，重出十次也回不到对的画面。'),
+        field('画面里的道具', propsBox,
+          '只填**这一镜真的看得见**的。特写里看不见的东西填上去，'
+          + '「道具消失又回来」那条检查会开始乱报 —— 而乱报的检查比没有更糟。')),
       h('div', { class: 'ed-group' },
         h('h4', {}, '台词'),
         field('说什么', line, '留空就是这一镜没人说话。'),
@@ -2341,6 +2349,8 @@ function openEditor(s, jump = 'content') {
         method: 'PATCH',
         body: {
           description: desc.value,
+          // cap:shot-props
+          props: propsBox.value,
           dialogue: line.value,
           speaker: who.value,
           lineKind,

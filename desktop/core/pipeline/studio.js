@@ -77,6 +77,7 @@ const SHOT_PROMPT = `你是动态漫画的分镜导演。把剧本拆成可直�
       "segment": 1,
       "scene": "所属场景名（必须用设定集里已有的场景名）",
       "characters": ["出场角色名，必须用设定集里已有的名字，空镜给空数组"],
+      "props": ["这一镜画面里**看得见**的关键道具名，必须用设定集里已有的名字。没有就给空数组。⚠ 只填真的在画面里的：特写镜头里看不见的东西不要填，那会让'道具消失'的检查全是假警报"],
       "description": "这一镜画面里发生的事，只写看得见的画面，不写心理活动、不写声音",
       "camera": "镜头语言：特写 / 中景 / 全景 / 俯拍 / 跟拍 / 推镜 等",
       "motion": "给图生视频的运镜与动态提示，一句话",
@@ -1369,6 +1370,14 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
     beatId: useOutline ? (beatIdOf(s) || null) : null,
     scene: s.scene || '',
     characters: Array.isArray(s.characters) ? s.characters : [],
+    /**
+     * 这一镜画面里看得见的关键道具。
+     *
+     * 加这个字段是为了让"柴刀第 8 镜在手上、第 9 镜没了、第 10 镜又回来"
+     * 这类穿帮**有地方被发现**。角色一致性我们盯得很紧，而道具一直是
+     * 全靠人眼 —— 而观众对道具凭空消失同样敏感。
+     */
+    props: Array.isArray(s.props) ? s.props.map((x) => String(x || '').trim()).filter(Boolean) : [],
     description: s.description || '',
     camera: s.camera || '中景',
     motion: s.motion || '镜头缓慢推进',
@@ -1655,6 +1664,9 @@ export async function analyzeScript(projectId, { shotCount = 8, chapterId = null
  */
 const SHOT_EDITABLE = [
   'description', 'camera', 'motion', 'dialogue', 'scene', 'characters', 'duration', 'link', 'skills',
+  // 这一镜画面里看得见的关键道具。不进白名单的话界面上改了存不下去，
+  // 而道具消失那条检查就永远只能听模型的、人纠正不了
+  'props',
   // 画外音效，和转场形式。不放进白名单的话，界面上改了存不下去 ——
   // 而且那种"改了没反应"最难查：接口回 200，值就是没进去
   'sound', 'transition',
@@ -1915,7 +1927,7 @@ export function updateShot(projectId, shotId, patch = {}) {
        * 下次读出来是一坨没法用的字符串。规整一遍再存。
        */
       value = previz.normalizeStage(value);
-    } else if (key === 'characters') {
+    } else if (key === 'characters' || key === 'props') {
       // 界面上是一行逗号分隔的文本，中英文逗号和顿号都得认
       value = Array.isArray(value)
         ? value.map((x) => String(x).trim()).filter(Boolean)
@@ -1923,7 +1935,7 @@ export function updateShot(projectId, shotId, patch = {}) {
     } else {
       value = String(value ?? '').trim();
     }
-    const same = key === 'characters' || key === 'skills' || key === 'variants' || key === 'stage'
+    const same = key === 'characters' || key === 'props' || key === 'skills' || key === 'variants' || key === 'stage'
       ? JSON.stringify(value) === JSON.stringify(shot[key] ?? (key === 'variants' ? {} : key === 'stage' ? null : []))
       : value === shot[key];
     if (same) continue;

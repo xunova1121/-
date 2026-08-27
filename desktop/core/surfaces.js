@@ -345,6 +345,14 @@ export const CAPABILITIES = [
       + '手机连的是远端引擎，它那边有没有显卡和手机无关。'
   },
   {
+    id: 'shot-props',
+    name: '改这一镜画面里的道具（撑着"道具消失又回来"那条检查）',
+    api: 'PATCH /projects/:id/shots/:sid { props }',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
     id: 'outline',
     name: '大纲：一行一场戏，剧本和分镜之间那一层（含台词硬下限估算）',
     api: 'POST /projects/:id/outline/build',

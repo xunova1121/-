@@ -3106,6 +3106,85 @@ section('剧本一章一章加：追加、补设定集、点名了不存在的�
     check('给了下一步该干什么', /补上新增|设定集/.test(one.fix), one.fix);
   }
 
+  /**
+   * ── 道具连续性 ──
+   *
+   * 角色一致性有四层手段盯着（设定图、seed、参考图、复核打分），
+   * 而**道具一直全靠人眼**。可观众对道具凭空消失同样敏感：
+   * 柴刀第 8 镜握在手里、第 9 镜空手、第 10 镜又握着 —— 一眼就看得出来。
+   *
+   * ⚠ 这一块的全部难点在**不制造噪音**。一个道具没出现在某一镜里，
+   * 绝大多数时候完全正常（那是张特写脸）。乱报的检查比没有检查更糟。
+   */
+  {
+    const bible = { characters: [{ name: '阿澜' }], props: [{ name: '柴刀' }] };
+    const shot = (i, camera, props, segment = 1) => ({
+      id: `s${i}`, index: i, segment, camera, props, description: `第 ${i} 镜`
+    });
+    const kinds = (shots, b = bible) => lint.lintShots(shots, { bible: b })
+      .flatMap((r) => r.issues).map((i) => i.kind);
+
+    // 三明治：前有、后有、中间这一镜是全景却没有
+    const sandwich = [shot(1, '全景', ['柴刀']), shot(2, '全景', []), shot(3, '全景', ['柴刀'])];
+    check('前后都有、中间这一镜是全景却没有 → 报', kinds(sandwich).includes('prop-vanish'));
+
+    /**
+     * ⚠ 这一条是这一块能不能用的关键。
+     *
+     * 不看景别的话，每一个特写都会被报一次"道具消失" —— 而特写里
+     * 看不见道具是天经地义的。满屏假警报，人看两次就学会无视所有警报。
+     */
+    const closeup = [shot(1, '全景', ['柴刀']), shot(2, '特写', []), shot(3, '全景', ['柴刀'])];
+    check('中间是特写就不报（特写里看不见道具是正常的）',
+      !kinds(closeup).includes('prop-vanish'), JSON.stringify(kinds(closeup)));
+
+    /**
+     * ⚠ 只在**三明治**成立时报。
+     *
+     * 只看"前一镜有、这一镜没有"的话，道具正常退场（放下、收起、
+     * 人离开这个地方）全都会被报成穿帮 —— 而那是绝大多数情况。
+     */
+    const leaves = [shot(1, '全景', ['柴刀']), shot(2, '全景', []), shot(3, '全景', [])];
+    check('道具正常退场（后面再也没有）不报',
+      !kinds(leaves).includes('prop-vanish'), JSON.stringify(kinds(leaves)));
+
+    const enters = [shot(1, '全景', []), shot(2, '全景', ['柴刀']), shot(3, '全景', ['柴刀'])];
+    check('道具中途登场也不报', !kinds(enters).includes('prop-vanish'));
+
+    // 跨场次是另一个地方、另一段时间
+    const crossSeg = [shot(1, '全景', ['柴刀'], 1), shot(2, '全景', [], 2), shot(3, '全景', ['柴刀'], 3)];
+    check('跨场次不报（另一个地方、另一段时间）',
+      !kinds(crossSeg).includes('prop-vanish'), JSON.stringify(kinds(crossSeg)));
+
+    // 首尾两镜没有"前后都有"可言
+    check('第一镜和最后一镜不参与三明治判断',
+      !kinds([shot(1, '全景', []), shot(2, '全景', ['柴刀'])]).includes('prop-vanish'));
+
+    const one = lint.lintShots(sandwich, { bible })
+      .flatMap((r) => r.issues).find((i) => i.kind === 'prop-vanish');
+    check('报的时候说得出是哪件道具', /柴刀/.test(one.what), one.what);
+    check('并且说清了为什么这一镜该看得见', /全景|看得见/.test(one.why), one.why);
+    check('给了两条出路（补上 / 改景别）', /景别/.test(one.fix), one.fix);
+    check('算一般项，不是高危 —— 它有可能是误报', one.severity === 'normal');
+
+    // ── 点名了设定集里没有的道具 ──
+    {
+      const k = kinds([shot(1, '全景', ['铁剑'])]);
+      check('点名了设定集里没有的道具 → 报', k.includes('prop-unknown'));
+      check('设定集里有的就不报', !kinds([shot(1, '全景', ['柴刀'])]).includes('prop-unknown'));
+      /**
+       * 设定集里一件道具都没有时不报 —— 那是"还没到那一步"，不是错。
+       * 满屏假警报会让人学会无视所有警报。
+       */
+      check('设定集里一件道具都没有时不报',
+        !kinds([shot(1, '全景', ['铁剑'])], { characters: [], props: [] }).includes('prop-unknown'));
+      const u = lint.lintShots([shot(1, '全景', ['铁剑'])], { bible })
+        .flatMap((r) => r.issues).find((i) => i.kind === 'prop-unknown');
+      check('说清了后果是"同一把刀在不同镜里长得不一样"',
+        /长得不一样|参考图/.test(u.why), u.why);
+    }
+  }
+
   // ── ② 增量补设定集：只加新的，老的一个字都不碰 ──
   {
     const bible = {

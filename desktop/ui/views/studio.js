@@ -1526,6 +1526,17 @@ export default {
           characters: h('input', {
             type: 'text', placeholder: '出场角色，逗号分隔', value: (shot.characters || []).join('、')
           }),
+          /**
+           * 这一镜画面里**看得见**的关键道具。
+           *
+           * 它撑着"道具消失又回来"那条检查。⚠ 只填真的在画面里的：
+           * 特写里看不见的东西填上去，那条检查就会开始乱报，
+           * 而乱报的检查比没有检查更糟。
+           */
+          // cap:shot-props
+          props: h('input', {
+            type: 'text', placeholder: '画面里看得见的道具，逗号分隔', value: (shot.props || []).join('、')
+          }),
           dialogue: h('input', { type: 'text', placeholder: '这一镜的台词（没有就留空）', value: shot.dialogue || '' }),
           // 听得见、看不见的东西。**不进出图提示词** —— 这正是它单独一栏的理由：
           // "敲门声"写在画面描述里，出图模型画不出声音，就会去画一扇开着的门
@@ -1592,6 +1603,7 @@ export default {
                   tier: fields.tier.value,
                   scene: fields.scene.value,
                   characters: fields.characters.value,
+                  props: fields.props.value,
                   dialogue: fields.dialogue.value,
                   // cap:shot-sound
                   sound: fields.sound.value,
@@ -1664,6 +1676,11 @@ export default {
             h('div', {}, h('label', {}, '运镜'), fields.motion),
             h('div', {}, h('label', {}, '场景'), fields.scene),
             h('div', {}, h('label', {}, '出场角色'), fields.characters)),
+          h('div', { class: 'shot-edit-row' },
+            h('div', {}, h('label', {}, '画面里的道具'), fields.props,
+              h('div', { class: 'field-hint' },
+                '只填**这一镜真的看得见**的。特写里看不见的东西填上去，'
+                + '「道具消失又回来」那条检查会开始乱报 —— 而乱报的检查比没有更糟。'))),
           h('label', {}, '台词'),
           fields.dialogue,
           h('label', {}, '画外音效'),
