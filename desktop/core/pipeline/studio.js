@@ -2914,6 +2914,16 @@ async function generateAssetsRaw(projectId, { only = null, chapterId = null, reg
           // 那时候这一镜的一致性只剩提示词撑着 —— 记下来，回头查得出
           t.refsSent = result.used?.refsSent ?? null;
           t.bibleRefs = result.refLabels || [];
+          /**
+           * ⚠ 还要记下**本来有几张可用**。
+           *
+           * 只记"带了哪几张"的话，界面在 0 张时只能说一句"没带任何参考图"——
+           * 而"没带"至少有两种原因，修法完全不同：
+           *   设定集里这个角色压根没有图  → 去出一张 / 传一张
+           *   有图，但按当前设置没发      → 去设置里改一项
+           * 一句话盖住两种情况，等于把人往其中一条路上瞎指。
+           */
+          t.refsAvailable = result.refsAvailable ?? null;
           t.consistency = {
             score: result.verification?.score ?? null,
             pass: result.verification?.pass ?? null,
@@ -3107,6 +3117,8 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
       t.modelUsed = `${providerId} / ${image.used?.model || model}`;
       t.refsSent = image.used?.refsSent ?? null;
       t.bibleRefs = refImages.length ? assembled.refLabels : [];
+      // 同上：0 张时界面要说得出是"没图"还是"有图没发"
+      t.refsAvailable = (assembled.refImages || []).length;
       t.consistency = {
         score: verification.score ?? null,
         pass: verification.pass ?? null,

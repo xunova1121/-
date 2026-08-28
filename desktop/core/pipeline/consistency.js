@@ -959,7 +959,14 @@ export async function generateConsistentImage({
       label: `出图 #${shot.index}`,
       onEvent
     });
-    last = { ...image, seed, prompt: assembled.prompt, refLabels: refImages.length ? assembled.refLabels : [] };
+    last = {
+      ...image,
+      seed,
+      prompt: assembled.prompt,
+      refLabels: refImages.length ? assembled.refLabels : [],
+      // 本来有几张可用（筛之前）。界面靠它分辨"没图"和"有图没发"
+      refsAvailable: (assembled.refImages || []).length
+    };
 
     if (!verifyEnabled || !cast.length || !image.url) {
       return { ...last, verification: { skipped: true }, trail };

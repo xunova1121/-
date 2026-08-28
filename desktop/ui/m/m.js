@@ -2181,6 +2181,33 @@ function paintShots() {
  * 没毛病的镜，那件事就是「改这一镜」；有毛病的镜，就是修它的那个重出。
  * 剩下的全部收进「⋯」，那里每一条都是整行大目标，比挤在一排的小按钮好点得多。
  */
+/**
+ * 这一镜出图带了哪几张参考图 —— 而且**说得出没带的原因**。
+ *
+ * 只说"没带任何参考图"是不够的：那句话盖住了两种完全不同的情况，
+ * 而它们的下一步动作背道而驰 ——
+ *
+ *   设定集里这个角色压根没有图 → 去给他出一张 / 传一张
+ *   有图，但按当前设置没发     → 去设置里改一项，图早就有了
+ *
+ * 用户看到"没带"之后跑去传图，而图其实一直都在，只是没发 ——
+ * 那一趟白跑，而且会让他更确信"这功能是坏的"。
+ */
+function refLine(s) {
+  if (s.bibleRefs?.length) return `出图带了参考图：${s.bibleRefs.join('、')}`;
+  if (s.refsAvailable > 0) {
+    return `设定集里有 ${s.refsAvailable} 张图可以带，但这一次一张都没发 —— `
+      + '所以脸完全由文字描述决定。去电脑版「设置 → 画面规格 → 出分镜图时带哪些参考图」'
+      + '改成「只用我自己传的图」，再重出这一镜。';
+  }
+  if (s.refsAvailable === 0) {
+    return '这一镜引用的角色/场景在设定集里还没有图 —— 没有图可带，'
+      + '脸完全由文字描述决定。先去设定集给他出一张或传一张。';
+  }
+  // refsAvailable 是 null/undefined：这张图是**这次改动之前**出的，那时候没记这个数
+  return '这张图是早前出的，当时没记下带过哪些参考图。重出一次就知道了。';
+}
+
 function shotCardOf(s, v, portrait, probs = shotIssues(s)) {
   const worst = probs.find((i) => i.level === 'blocker') || probs[0] || null;
   const tone = probs.some((i) => i.level === 'blocker') ? 'bad' : probs.length ? 'iffy' : '';
@@ -2260,11 +2287,7 @@ function shotCardOf(s, v, portrait, probs = shotIssues(s)) {
        */
       // cap:shot-refs
       s.imagePath
-        ? h('div', { class: 'muted', style: 'margin-top:6px;line-height:1.6' },
-            s.bibleRefs?.length
-              ? `出图带了参考图：${s.bibleRefs.join('、')}`
-              : '出图时没带任何参考图 —— 这一镜的脸完全由文字描述决定，跟你传的照片无关。'
-                + '要用上传的照片，去电脑版「设置 → 画面规格 → 出分镜图时带哪些参考图」。')
+        ? h('div', { class: 'muted', style: 'margin-top:6px;line-height:1.6' }, refLine(s))
         : null,
       acts));
 }

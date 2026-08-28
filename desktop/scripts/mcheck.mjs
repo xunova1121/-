@@ -863,11 +863,15 @@ await page.locator('.tab', { hasText: '分镜' }).click();
 await page.waitForTimeout(800);
 {
   const txt = await page.locator('.shot').first().innerText().catch(() => '');
-  const said = /出图带了参考图|出图时没带任何参考图/.test(txt);
+  const said = /出图带了参考图|张图可以带|还没有图|早前出的/.test(txt);
   console.log('⑫ 手机上说得出这一镜带没带参考图：', said ? '✓' : `✕ ${txt.slice(0, 120)}`);
-  // 没带的时候要说清后果，不能只说"没带"
-  console.log('   没带时说清了跟传的照片无关：',
-    !/没带任何参考图/.test(txt) || /跟你传的照片无关/.test(txt) ? '✓' : `✕ ${txt.slice(0, 160)}`);
+  /**
+   * ⚠ 没带的时候要说清**是哪一种没带** —— 那句话盖住的两种情况
+   * 下一步动作背道而驰：没有图（去出一张）vs 有图没发（去改设置）。
+   * 走查机上的分镜是"设定集有图、但这次没发"那种，所以该出现的是后一句。
+   */
+  console.log('   而且说得出是哪一种没带（有图没发 ≠ 压根没图）：',
+    !/张图可以带/.test(txt) || /出分镜图时带哪些参考图/.test(txt) ? '✓' : `✕ ${txt.slice(0, 200)}`);
 }
 
 // 第 ② 步是**故意**敲错配对码，那一次 401 是预期之内的，不算页面报错
