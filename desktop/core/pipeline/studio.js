@@ -2925,6 +2925,7 @@ async function generateAssetsRaw(projectId, { only = null, chapterId = null, reg
            */
           t.refsAvailable = result.refsAvailable ?? null;
           t.refsAvailableLabels = result.refsAvailableLabels || [];
+          t.refBlockedHint = result.refBlockedHint || '';
           t.consistency = {
             score: result.verification?.score ?? null,
             pass: result.verification?.pass ?? null,
@@ -3121,6 +3122,7 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
       // 同上：0 张时界面要说得出是"没图"还是"有图没发"
       t.refsAvailable = (assembled.refImages || []).length;
       t.refsAvailableLabels = assembled.refDetailed || [];
+      t.refBlockedHint = plan.blockedHint || '';
       t.consistency = {
         score: verification.score ?? null,
         pass: verification.pass ?? null,

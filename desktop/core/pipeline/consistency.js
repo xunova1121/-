@@ -510,10 +510,36 @@ export function refPlan() {
   const legacy = settings.get('useEditModelForShots') === true;
   const mode = legacy ? 'edit' : (settings.get('refMode') || 'auto');
   const refsOn = settings.get('useReferenceImages') !== false;
-  if (!refsOn || mode === 'off') return { mode: 'off', send: false, useEditModel: false, onlyUploaded: false };
-  if (mode === 'edit') return { mode, send: true, useEditModel: true, onlyUploaded: false };
-  if (mode === 'all') return { mode, send: true, useEditModel: false, onlyUploaded: false };
-  return { mode: 'auto', send: true, useEditModel: false, onlyUploaded: true };
+  /**
+   * ⚠ **拦住参考图的开关有两个**，而它们在界面上隔着两个面板：
+   *
+   *   useReferenceImages  「设置 → 一致性引擎 → 出镜头图时带上角色设定图」（老开关）
+   *   refMode             「设置 → 画面规格 → 出分镜图时带哪些参考图」（新的）
+   *
+   * 关掉任何一个，结果都是"一张都没发"，而现象一模一样。
+   *
+   * 第一版的提示语只提了后者 —— 于是用户照着去改了那一项，
+   * 而真正关着的是前者，改完照旧不发。他会以为"改了没用，这功能是坏的"。
+   *
+   * 所以返回值里带上**到底是谁拦的**，界面照着说，不猜。
+   */
+  if (!refsOn) {
+    return {
+      mode: 'off', send: false, useEditModel: false, onlyUploaded: false,
+      blockedBy: 'useReferenceImages',
+      blockedHint: '「设置 → 一致性引擎 → 出镜头图时把角色设定图作为参考图带上」这一项是关着的'
+    };
+  }
+  if (mode === 'off') {
+    return {
+      mode: 'off', send: false, useEditModel: false, onlyUploaded: false,
+      blockedBy: 'refMode',
+      blockedHint: '「设置 → 画面规格 → 出分镜图时带哪些参考图」选的是「一张都不发」'
+    };
+  }
+  if (mode === 'edit') return { mode, send: true, useEditModel: true, onlyUploaded: false, blockedBy: null };
+  if (mode === 'all') return { mode, send: true, useEditModel: false, onlyUploaded: false, blockedBy: null };
+  return { mode: 'auto', send: true, useEditModel: false, onlyUploaded: true, blockedBy: null };
 }
 
 /** 按当前策略筛一遍：auto 只留用户自己传的那些 */
@@ -979,7 +1005,9 @@ export async function generateConsistentImage({
       // 本来有几张可用（筛之前）。界面靠它分辨"没图"和"有图没发"
       refsAvailable: (assembled.refImages || []).length,
       // 那几张分别是谁、哪张是用户传的 —— 一张都没发时这才是有用的信息
-      refsAvailableLabels: assembled.refDetailed || []
+      refsAvailableLabels: assembled.refDetailed || [],
+      // 到底是哪个开关拦的。不记的话界面只能猜，而猜错会把人指到另一个面板
+      refBlockedHint: plan.blockedHint || ''
     };
 
     if (!verifyEnabled || !cast.length || !image.url) {

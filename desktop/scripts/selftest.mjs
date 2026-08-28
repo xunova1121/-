@@ -8237,6 +8237,39 @@ section('传上去的照片：要真的用上，而且只用脸');
       gen.prompt.includes('袖口两道银线'), gen.prompt.slice(0, 200));
   }
 
+  /**
+   * ⚠ **拦住参考图的开关有两个**，而它们隔着两个设置面板：
+   *
+   *   useReferenceImages  「一致性引擎 → 出镜头图时把角色设定图带上」（老开关）
+   *   refMode             「画面规格 → 出分镜图时带哪些参考图」（新的）
+   *
+   * 关掉任何一个现象一模一样："一张都没发"。
+   *
+   * 用户真实撞上的就是这个：他传的照片明明在列表里、也标着"你传的"，
+   * auto 本该正好发它，却一张没发 —— 因为关着的是**另一个**开关。
+   * 而我的提示语只提了 refMode，把他指去改一个本来就对的设置。
+   *
+   * 所以要验的不是"没发"，而是**说不说得出是谁拦的**。
+   */
+  {
+    settings.patch({ refMode: 'auto', useReferenceImages: false });
+    const p1 = cs.refPlan();
+    check('老开关关着时，说得出是老开关拦的',
+      p1.send === false && /一致性引擎/.test(p1.blockedHint || ''), JSON.stringify(p1));
+    check('而且不会赖到新开关头上（那会把人指错面板）',
+      !/画面规格/.test(p1.blockedHint || ''), p1.blockedHint);
+
+    settings.patch({ useReferenceImages: true, refMode: 'off' });
+    const p2 = cs.refPlan();
+    check('新开关选了"一张都不发"时，说得出是新开关拦的',
+      p2.send === false && /画面规格/.test(p2.blockedHint || ''), JSON.stringify(p2));
+    check('这时也不会赖到老开关头上',
+      !/一致性引擎/.test(p2.blockedHint || ''), p2.blockedHint);
+
+    settings.patch({ useReferenceImages: true, refMode: 'auto' });
+    check('两个都开着时没有"被谁拦了"这回事', cs.refPlan().blockedBy === null, JSON.stringify(cs.refPlan()));
+  }
+
   // ── all / off / 老开关 ──
   {
     settings.patch({ refMode: 'all' });
