@@ -97,7 +97,18 @@ export async function send(spec, onEvent) {
       headers,
       body: spec.body,
       stream: spec.stream,
-      timeoutMs
+      timeoutMs,
+      /**
+       * ⚠ 这两个必须**显式转发**。
+       *
+       * 这里是照着字段一个一个抄进去的（不是 `...spec`），
+       * 所以新加的字段默认会被**安静地丢掉** —— 表现是空闲超时压根没生效，
+       * 而错误信息看起来完全正常（还是那句"响应读取超时"）。
+       * 自检里那条"总时长 1 秒、实际跑 1.5 秒也不该掐"当场就红了，
+       * 否则这个洞会一直躺到用户身上。
+       */
+      idleTimeoutMs: spec.idleTimeoutMs,
+      maxTotalMs: spec.maxTotalMs
     },
     onEvent
   );

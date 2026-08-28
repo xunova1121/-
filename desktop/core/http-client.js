@@ -354,7 +354,45 @@ export async function execute(spec, onEvent) {
   const bodyBytes = bodyRaw ? bodyRaw.byteLength : (bodyText ? Buffer.byteLength(bodyText) : 0);
   const baseTimeout = Number(spec.timeoutMs) > 0 ? Number(spec.timeoutMs) : DEFAULT_TIMEOUT_MS;
   const timeoutMs = Math.min(300000, baseTimeout + Math.round(bodyBytes / 100));
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  /**
+   * ══════════ 超时要分成"总时长"和"多久没动静" ══════════
+   *
+   * 一个固定的总时长，对**长生成**是错的判据。
+   *
+   * 真实事故：拆分镜走中转站（api.teamorouter.com）+ Claude Opus，
+   * 体检那一下几个 token、1.89 秒回；真跑起来要吐几千 token 的分镜 JSON，
+   * 180 秒到点被我们自己掐断，一个字节都没收到。
+   *
+   * 而"跑了 180 秒"本身根本不是问题 —— 一份二十镜的分镜表，慢一点的模型
+   * 出三四分钟很正常。真正要区分的是这两件事：
+   *
+   *   还在吐字，只是慢     → 健康。等它，甚至等十分钟都行
+   *   一个字节都不来       → 死了。等再久也没有意义
+   *
+   * 总时长把这两种一视同仁：要么把慢的误杀，要么为了迁就慢的
+   * 把死的也陪等十分钟。所以流式请求改用**空闲超时**：
+   * 每收到一段就把计时器往后推，只在"这么久没动静"时才掐。
+   * 外面再套一个绝对上限兜底，防止对面一直发心跳却永远不结束。
+   *
+   * 非流式请求没得选（响应是一次性到的），仍然只有总时长。
+   * 这也正是长生成应该走流式的原因之一。
+   */
+  const idleMs = Number(spec.idleTimeoutMs) > 0 ? Number(spec.idleTimeoutMs) : 0;
+  const hardCapMs = Number(spec.maxTotalMs) > 0 ? Number(spec.maxTotalMs) : 0;
+  let timedOutIdle = false;
+  let lastByteAt = Date.now();
+  let timer = setTimeout(() => controller.abort(), timeoutMs);
+  const hardTimer = hardCapMs ? setTimeout(() => controller.abort(), hardCapMs) : null;
+  /** 收到数据就把空闲计时器往后推。只有流式请求会调它。 */
+  const bump = () => {
+    if (!idleMs) return;
+    lastByteAt = Date.now();
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      timedOutIdle = true;
+      controller.abort();
+    }, idleMs);
+  };
   if (spec.signal) {
     if (spec.signal.aborted) controller.abort();
     else spec.signal.addEventListener('abort', () => controller.abort(), { once: true });
@@ -383,6 +421,7 @@ export async function execute(spec, onEvent) {
     });
   } catch (err) {
     clearTimeout(timer);
+    if (hardTimer) clearTimeout(hardTimer);
     const aborted = err.name === 'AbortError';
     /**
      * 超时报错必须带上**发了多大**。
@@ -437,6 +476,8 @@ export async function execute(spec, onEvent) {
   });
 
   const isSSE = looksLikeSSE(contentType, spec.stream);
+  // 拿到响应头 = 对面活着，从这一刻起按"多久没动静"算
+  if (isSSE) bump();
   const events = [];
   let raw = '';
   let assembled = '';
@@ -463,6 +504,7 @@ export async function execute(spec, onEvent) {
 
       for await (const chunk of response.body) {
         bytes += chunk.length ?? chunk.byteLength ?? 0;
+        bump(); // 还在吐字就不算超时 —— 慢和死是两回事
         const text = decoder.decode(chunk, { stream: true });
         raw += text;
         if (parser) parser.push(text);
@@ -478,8 +520,15 @@ export async function execute(spec, onEvent) {
     }
   } catch (err) {
     clearTimeout(timer);
+    if (hardTimer) clearTimeout(hardTimer);
     const message =
-      err.name === 'AbortError' ? `响应读取超时（${timeoutMs}ms）` : `响应读取中断：${err.message}`;
+      err.name === 'AbortError'
+        ? (timedOutIdle
+          // 读到一半停了，和"从头到尾没动静"是两种毛病，说法必须不一样
+          ? `响应读到一半就停了：已经收到 ${bytes} 字节，然后 ${Math.round(idleMs / 1000)} 秒没有新内容。`
+            + '多半是对面（或中间的中转站）把连接掐了 —— 收到的这半截不完整，没法用。'
+          : `响应读取超时（${timeoutMs}ms）`)
+        : `响应读取中断：${err.message}`;
     const entry = logbus.record({
       ...logDraft,
       status: response.status,
@@ -494,6 +543,7 @@ export async function execute(spec, onEvent) {
     throw new HttpError(message, { status: response.status, bodyText: raw, url });
   }
   clearTimeout(timer);
+  if (hardTimer) clearTimeout(hardTimer);
 
   const totalMs = Date.now() - startedAt;
   let json = null;

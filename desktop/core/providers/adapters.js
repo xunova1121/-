@@ -196,6 +196,16 @@ export async function chat({
   temperature = 0.7,
   jsonMode = false,
   timeoutMs = 180000,
+  /**
+   * 走不走流式。**长生成一律该走**（拆分镜、出大纲、挑技法这些）。
+   *
+   * 默认关，是因为短调用（复核打分、绑说话人）走流式没有好处，
+   * 只是多一层 SSE 解析。判据不是"重不重要"，是"要吐多少字"。
+   */
+  stream = false,
+  /** 流式下多久没有新内容算死。见 http-client 里那段"慢和死是两回事"。 */
+  idleTimeoutMs = 90000,
+  onEvent = null,
   label = '对话'
 }) {
   const provider = getProvider(providerId);
@@ -218,22 +228,48 @@ export async function chat({
   }
 
   const body = { model, messages, temperature };
-  if (jsonMode) {
-    // 支持的厂商会严格输出 JSON；不支持的会忽略这个字段，不至于报错，
-    // 所以下游仍然保留 extractJSON 的兜底解析。
+  if (jsonMode && settings.get('jsonModeOff') !== true) {
+    /**
+     * 支持的厂商会严格输出 JSON；不支持的**通常**会忽略这个字段，
+     * 所以下游仍然保留 extractJSON 的兜底解析。
+     *
+     * ⚠ "通常"两个字是有代价的。Anthropic 的原生接口里根本没有
+     * response_format 这个参数，中转站把 OpenAI 协议翻译成 Anthropic 时
+     * 遇上它可能直接卡住 —— 表现是**一个字节都不回**，而不是报错。
+     * 所以给了一个开关（设置里的 jsonModeOff），碰上这种中转站能一键关掉。
+     */
     body.response_format = { type: 'json_object' };
   }
 
+  /**
+   * ══════════ 长生成走流式 ══════════
+   *
+   * 拆分镜要吐几千 token 的 JSON。非流式的话，这几分钟里**连接上一个字节都没有** ——
+   * 我们分不清"它在认真写"和"它已经死了"，只能等一个固定的总时长到点然后掐断。
+   *
+   * 真实事故：中转站 + Claude Opus，体检那一下几个 token、1.89 秒就回；
+   * 真跑起来 180 秒到点被掐，一个字节都没收到。而"跑了 180 秒"本身不是问题 ——
+   * 二十镜的分镜表出三四分钟很正常。
+   *
+   * 流式之后判据换成"多久没动静"：还在吐字就一直等，真停了才掐。
+   * 顺带还有两个好处：界面上能看见它在动（那几分钟不再是一条僵住的进度条），
+   * 以及中转站的响应更早开始 —— 很多中转站对非流式的长请求本来就有自己的超时。
+   */
   const res = await send(
     {
       provider: providerId,
       label,
       method: 'POST',
       url: endpoint(provider, 'chat', '{{baseUrl}}/chat/completions'),
-      body,
-      timeoutMs
+      body: stream ? { ...body, stream: true } : body,
+      stream: stream || undefined,
+      timeoutMs,
+      // 空闲多久算死。给得比"模型思考一会儿"宽裕，比"人还愿意等"短
+      idleTimeoutMs: stream ? idleTimeoutMs : 0,
+      // 绝对上限兜底：对面一直发心跳却永远不结束时不至于挂到天荒地老
+      maxTotalMs: stream ? Math.max(timeoutMs, idleTimeoutMs * 6) : 0
     },
-    null
+    onEvent
   );
   if (!res.ok) fail(label, res);
 
@@ -243,14 +279,37 @@ export async function chat({
    * 不放在调用方（studio 里十几处），是因为那样每加一个新调用点都要记得
    * 补一行，而漏了不会红。这个应用里 modelUsed 和 refsSent 都是这么开始说谎的。
    */
-  const usage = meter.readTokenUsage(res.json);
+  /**
+   * ⚠ 流式的用量藏在**最后一个 SSE 事件**里，不在 res.json（那是 null）。
+   *
+   * 不挖的话，一开流式，token 那本账就全变成"漏账" —— 而且是静默的：
+   * 用量表上少一大截，没有任何地方会红。今天刚为这类事修过两回。
+   */
+  const streamUsage = res.stream
+    ? (() => {
+      for (let i = (res.events || []).length - 1; i >= 0; i -= 1) {
+        const d = res.events[i]?.data;
+        if (!d || d === '[DONE]') continue;
+        try {
+          const got = meter.readTokenUsage(JSON.parse(d));
+          if (got) return got;
+        } catch {
+          /* 不是 JSON 的事件跳过 */
+        }
+      }
+      return null;
+    })()
+    : null;
+  const usage = streamUsage || meter.readTokenUsage(res.json);
   if (usage) meter.record({ kind: 'token', provider: providerId, model, units: usage });
   else meter.blind({ kind: 'token', provider: providerId, model, why: '响应里没有可拆分进出的 usage' });
 
   const text =
-    res.json?.choices?.[0]?.message?.content ??
-    res.json?.output?.choices?.[0]?.message?.content ??
-    res.json?.output?.text ??
+    // 流式时正文是一段段拼起来的，res.json 是 null —— 拼好的在 res.text 里
+    (res.stream ? res.text : null) ||
+    res.json?.choices?.[0]?.message?.content ||
+    res.json?.output?.choices?.[0]?.message?.content ||
+    res.json?.output?.text ||
     '';
   if (typeof text !== 'string') {
     // 少数厂商把 content 也返回成数组
@@ -262,7 +321,7 @@ export async function chat({
       usage: res.json?.usage || null
     };
   }
-  return { text, raw: res.json, usage: res.json?.usage || null };
+  return { text, raw: res.json, usage: usage || res.json?.usage || null };
 }
 
 /** 当前路由到的视频模型接受哪些时长档位。界面用它提前提示，不用等跑完才知道。 */

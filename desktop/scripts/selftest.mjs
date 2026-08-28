@@ -7537,6 +7537,181 @@ section('场景的东南西北：机位相对房间，不只相对人');
     !seq.some((i) => i.to === 3), JSON.stringify(seq.map((i) => [i.from, i.to])));
 }
 
+/**
+ * ════════ 长生成走流式：慢和死是两回事 ════════
+ *
+ * 用户真实事故：拆分镜走中转站（api.teamorouter.com）+ Claude Opus。
+ * 体检那一下几个 token、**1.89 秒**就回；真跑起来要吐几千 token 的分镜 JSON，
+ * 180 秒到点被我们自己掐断，**一个字节都没收到**。
+ *
+ * 而"跑了 180 秒"本身根本不是问题 —— 二十镜的分镜表，慢一点的模型出三四分钟
+ * 很正常。固定总时长把两件完全不同的事一视同仁：
+ *
+ *   还在吐字，只是慢  → 健康，该等
+ *   一个字节都不来    → 死了，等再久也没用
+ *
+ * 所以长生成改成流式 + 空闲超时。这一节验的是**流式那条路真的走得通**——
+ * 上面那个假上游回的是 application/json，于是 stream:true 会被优雅地
+ * 退回非流式解析，整条流式路径在自检里从头到尾一次都没跑过。
+ * 那正是"绿着的没测过的代码"，今天已经栽过一次（假上游不回 usage）。
+ */
+section('长生成走流式：慢和死是两回事');
+{
+  const adaptersMod = await import('../core/providers/adapters.js');
+  const ledgerMod2 = await import('../core/ledger.js');
+
+  /** 起一个真会吐 SSE 的假上游，行为由查询串控制 */
+  const sse = http.createServer((req, res) => {
+    /**
+     * ⚠ 模式走**路径**不走查询串。
+     *
+     * baseUrl 后面还会被拼上 `/chat/completions`，所以
+     * `http://h/x?mode=silent` 会变成 `http://h/x?mode=silent/chat/completions`——
+     * mode 的值成了 "silent/chat/completions"，永远匹配不上，
+     * 于是三条"该失败"的用例全都走了正常分支、全都假绿。
+     */
+    const mode = (req.url.split('/').filter(Boolean)[0] || 'ok');
+    let raw = '';
+    req.on('data', (c) => { raw += c; });
+    req.on('end', () => {
+      const body = JSON.parse(raw || '{}');
+      sse.lastBody = body;
+      if (mode === 'silent') return; // 连响应头都不给：模拟"一个字节都不回"
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      const frame = (o) => `data: ${JSON.stringify(o)}\n\n`;
+      res.write(frame({ choices: [{ delta: { content: '{"beats":' } }] }));
+      if (mode === 'stall') return; // 开了个头就不动了：模拟中转站中途掐断
+      res.write(frame({ choices: [{ delta: { content: '[]}' } }] }));
+      // 用量在**最后一个事件**里 —— 流式最容易漏账的地方就是这儿
+      res.write(frame({ choices: [{ delta: {} }], usage: { prompt_tokens: 4321, completion_tokens: 765 } }));
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+  });
+  await new Promise((r) => sse.listen(0, '127.0.0.1', r));
+  const sseUrl = `http://127.0.0.1:${sse.address().port}`;
+
+  settings.patch({ baseUrls: { openai: `${sseUrl}/ok` } });
+  vault.setSecret('OPENAI_API_KEY', 'sk-stream-test');
+
+  // ── 正常流式 ──
+  {
+    ledgerMod2.reset({ wipe: true });
+    const r = await adaptersMod.chat({
+      providerId: 'openai', model: 'claude-opus-5', user: '拆一下', jsonMode: true, stream: true, label: '流式'
+    });
+    check('流式拼出来的正文是完整的', r.text === '{"beats":[]}', JSON.stringify(r.text));
+    check('请求体里带了 stream:true（不带的话对面不会流）', sse.lastBody?.stream === true, JSON.stringify(sse.lastBody?.stream));
+
+    /**
+     * ⚠ 流式的用量藏在**最后一个 SSE 事件**里，不在 res.json（那是 null）。
+     * 不挖的话，一开流式 token 那本账就全变成漏账 —— 而且是静默的：
+     * 用量表上少一大截，没有任何地方会红。
+     */
+    const acct = ledgerMod2.forProject('(未归属)', {});
+    check('流式的 token 用量照样记上了（藏在最后一个事件里）',
+      acct.total.byKind.token?.units?.in === 4321 && acct.total.byKind.token?.units?.out === 765,
+      JSON.stringify(acct.total.byKind.token));
+    check('而且没有被当成漏账', acct.unmetered === 0, String(acct.unmetered));
+    ledgerMod2.reset({ wipe: true });
+  }
+
+  // ── 一个字节都不回：这就是用户撞上的那种 ──
+  {
+    settings.patch({ baseUrls: { openai: `${sseUrl}/silent` } });
+    let msg = '';
+    await adaptersMod.chat({
+      providerId: 'openai', model: 'claude-opus-5', user: '拆一下', stream: true,
+      timeoutMs: 1200, idleTimeoutMs: 1200, label: '流式·哑巴'
+    }).catch((e) => { msg = e.message; });
+    check('对面一声不吭时会失败（不是无限等）', Boolean(msg), msg);
+    check('并且说清是"一个字节都没回"', /没有任何响应/.test(msg), msg.slice(0, 120));
+    check('还点名了发往哪个主机', /127\.0\.0\.1/.test(msg), msg.slice(0, 80));
+  }
+
+  // ── 开了个头然后停住：和上一种是**两种毛病**，说法必须不一样 ──
+  {
+    settings.patch({ baseUrls: { openai: `${sseUrl}/stall` } });
+    let msg = '';
+    await adaptersMod.chat({
+      providerId: 'openai', model: 'claude-opus-5', user: '拆一下', stream: true,
+      timeoutMs: 60000, idleTimeoutMs: 900, label: '流式·半路死'
+    }).catch((e) => { msg = e.message; });
+    check('吐了一半就停住，也会失败', Boolean(msg), msg);
+    /**
+     * 这条是空闲超时存在的**全部意义**：总时长给了 60 秒，它在 0.9 秒
+     * 没动静时就掐了。靠总时长的话要白等 60 秒才知道对面已经死了。
+     */
+    check('靠的是"多久没动静"，不是等总时长到点',
+      /读到一半就停了/.test(msg), msg.slice(0, 140));
+    check('说清了已经收到多少字节（半截数据不能当成功用）',
+      /已经收到 \d+ 字节/.test(msg), msg.slice(0, 140));
+  }
+
+  // ── 还在吐字就一直等：慢不该被当成死 ──
+  {
+    const slow = http.createServer((req, res) => {
+      req.on('data', () => {});
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        const frame = (t) => `data: ${JSON.stringify({ choices: [{ delta: { content: t } }] })}\n\n`;
+        // 每 300ms 吐一小段，一共吐够 1.5 秒 —— 远超 900ms 的空闲阈值，
+        // 但因为一直在动，不该被判死
+        let n = 0;
+        const iv = setInterval(() => {
+          n += 1;
+          res.write(frame(String(n)));
+          if (n >= 5) {
+            clearInterval(iv);
+            res.write('data: [DONE]\n\n');
+            res.end();
+          }
+        }, 300);
+      });
+    });
+    await new Promise((r) => slow.listen(0, '127.0.0.1', r));
+    settings.patch({ baseUrls: { openai: `http://127.0.0.1:${slow.address().port}/x` } });
+    let out = null;
+    let err = '';
+    await adaptersMod.chat({
+      providerId: 'openai', model: 'claude-opus-5', user: '慢慢写', stream: true,
+      timeoutMs: 1000, idleTimeoutMs: 900, label: '流式·慢但活着'
+    }).then((r) => { out = r; }).catch((e) => { err = e.message; });
+    /**
+     * ⚠ 这一条是整个改动的**要害**。
+     *
+     * 总时长只给了 1 秒，而这次生成花了 1.5 秒 —— 换成老逻辑必挂。
+     * 它能过，说明判据真的换成了"多久没动静"：一直在吐字就一直等。
+     * 反过来，要是哪天有人把空闲计时器去掉，这条会立刻红。
+     */
+    check('一直在吐字就一直等（总时长 1 秒，实际跑了 1.5 秒也不该掐）',
+      out?.text === '12345', err || JSON.stringify(out?.text));
+    slow.close();
+  }
+
+  // ── 中转站不认 response_format 时的逃生口 ──
+  {
+    settings.patch({ baseUrls: { openai: `${sseUrl}/ok` } });
+    await adaptersMod.chat({ providerId: 'openai', model: 'claude-opus-5', user: 'x', jsonMode: true, stream: true, label: 'jm' });
+    check('默认会带 response_format（支持的厂商靠它保证严格 JSON）',
+      sse.lastBody?.response_format?.type === 'json_object', JSON.stringify(sse.lastBody?.response_format));
+
+    /**
+     * Anthropic 原生接口里**根本没有 response_format**。中转站把 OpenAI 协议
+     * 翻译过去时遇上它可能直接卡住不回 —— 表现是一个字节都不返回，而不是报错。
+     * 所以要能一键关掉；下游本来就有 extractJSON 兜底，不带这个字段照样能用。
+     */
+    settings.patch({ jsonModeOff: true });
+    await adaptersMod.chat({ providerId: 'openai', model: 'claude-opus-5', user: 'x', jsonMode: true, stream: true, label: 'jm2' });
+    check('关掉之后请求体里就没有它了', sse.lastBody?.response_format === undefined,
+      JSON.stringify(sse.lastBody?.response_format));
+    settings.patch({ jsonModeOff: false });
+  }
+
+  sse.close();
+  settings.patch({ baseUrls: { openai: '' } });
+}
+
 section('中转站只转对话：不该四条一起红');
 {
   /**

@@ -259,6 +259,17 @@ const DEFAULTS = {
    * （账本存的是用量不是钱，随时能按新单价重算）。
    */
   rates: {},
+  /**
+   * 关掉 response_format:{type:'json_object'}。
+   *
+   * 默认不关 —— 支持的厂商用它能保证严格 JSON，那是好事。
+   *
+   * 但 Anthropic 的原生接口里**根本没有这个参数**。中转站把 OpenAI 协议
+   * 翻译成 Anthropic 时遇上它，可能直接卡住不回 —— 表现是一个字节都不返回，
+   * 而不是报个错。碰上这种中转站，把这个勾上就绕过去了；
+   * 下游本来就有 extractJSON 兜底解析，不开这个字段也照样能用。
+   */
+  jsonModeOff: false,
   theme: 'dark',
   port: 5178,
 

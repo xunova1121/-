@@ -1155,6 +1155,8 @@ export async function buildOutline(projectId, { chapterId = null, onEvent } = {}
     user: `目标片长：${project.targetDuration || 60} 秒\n\n剧本：\n${String(source).slice(0, 12000)}`,
     temperature: 0.6,
     jsonMode: true,
+    // 长生成：走流式，判据从"总共等了多久"换成"多久没动静"
+    stream: true,
     label: '生成大纲',
     onEvent
   });
@@ -1223,6 +1225,7 @@ export async function reviseOutline(projectId, { instruction, onEvent } = {}) {
     user: `目标片长：${project.targetDuration || 60} 秒\n\n现在的大纲：\n${JSON.stringify(table, null, 1)}\n\n我想要：${say}`,
     temperature: 0.4,
     jsonMode: true,
+    stream: true,
     label: '改大纲',
     onEvent
   });
@@ -1423,6 +1426,14 @@ async function analyzeScriptRaw(projectId, { shotCount = 8, chapterId = null, fo
     user: sourceScript,
     temperature: 0.7,
     jsonMode: true,
+    /**
+     * 拆分镜是全流程里**最长的一次生成** —— 要吐几千 token 的分镜 JSON。
+     * 非流式的话那几分钟里连接上一个字节都没有，我们分不清"在认真写"
+     * 和"已经死了"，只能等一个固定总时长到点掐断（真实事故：中转站 +
+     * Claude Opus，体检 1.89 秒回，真跑 180 秒零字节被自己掐了）。
+     */
+    stream: true,
+    onEvent,
     label: chapter ? `拆分镜·${chapter.title}` : '拆分镜'
   });
 
@@ -2236,6 +2247,8 @@ export async function suggestLinks(projectId, { only = null, onEvent } = {}) {
     user: JSON.stringify(payload),
     temperature: 0.2,
     jsonMode: true,
+    // 全片一次过，输出跟着镜数走，镜多了同样会很长
+    stream: true,
     label: '标衔接关系'
   });
 
@@ -2392,6 +2405,7 @@ export async function suggestSkills(projectId, { only = null, onEvent } = {}) {
     user: JSON.stringify(payload),
     temperature: 0.3,
     jsonMode: true,
+    stream: true,
     label: '挑技法'
   });
 
@@ -2567,6 +2581,7 @@ export async function smartSplitChapters(projectId, { targetChars = 3000, onEven
         user: win.text,
         temperature: 0.2,
         jsonMode: true,
+        stream: true,
         label: `分章 ${i + 1}/${windows.length}`
       });
       const parsed = consistency.extractJSON(text);
@@ -4751,6 +4766,7 @@ export async function autoBindSpeakers(projectId, { useModel = true, onEvent } =
         user: JSON.stringify(payload),
         temperature: 0.2,
         jsonMode: true,
+        stream: true,
         label: '绑说话人'
       });
       const picks = consistency.extractJSON(text)?.shots || [];
