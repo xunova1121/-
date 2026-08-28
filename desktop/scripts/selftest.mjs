@@ -353,6 +353,19 @@ const upstream = http.createServer((req, res) => {
         const ids = [...user.matchAll(/【场次\s*([a-z0-9-]+)】/gi)].map((m) => m[1]);
         upstream.lastShotPrompt = { system, user };
         /**
+         * 每一次拆分镜都留一份**用户消息原文**。
+         *
+         * 分批那一节靠它数"这一批到底发了哪几场" —— 只留 lastShotPrompt
+         * 的话，分没分批根本看不出来（最后一次长得和一次性那次一模一样）。
+         */
+        upstream.shotPrompts = upstream.shotPrompts || [];
+        upstream.shotPrompts.push(user);
+        // 让测试能造出"跑到第 N 批挂掉"，验前面几批不白跑
+        if (upstream.failShotsAfter && upstream.shotPrompts.length > upstream.failShotsAfter) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: { message: '上游炸了（测试造的）' } }));
+        }
+        /**
          * 打开这个开关就**一个 beatId 都不标** —— 模型真会这样
          *（提示词只是请求，它想不理就不理）。而那条路是最危险的分支：
          * 收口时不知道每一镜属于哪一场，只能保守地把整批换掉。
@@ -7710,6 +7723,173 @@ section('长生成走流式：慢和死是两回事');
 
   sse.close();
   settings.patch({ baseUrls: { openai: '' } });
+}
+
+/**
+ * ════════ 长剧本：拆分镜要能一批一批来 ════════
+ *
+ * 用户的问题："现在遇到几十个分镜就这样了，后面如果更多怎么办"。
+ *
+ * 问到了根子上，而**流式治不了它**。流式解决的是"慢被误判成死"；
+ * 这里的毛病是"一次要吐的东西超过模型一次能吐的量"。
+ *
+ *   30 镜 ≈ 6000 token   已经接近不少模型单次输出的上限
+ *   60 镜 ≈ 12000 token  多数中转站会截断
+ *  200 镜 ≈ 40000 token  一次调用绝无可能
+ *
+ * 而超限的表现是最坏的那种：JSON 从中间断掉、状态 200、没有错误字段。
+ *
+ * 所以按大纲的场次分批。这一节验的是**真的分批了**、**断了能接着来**、
+ * 以及**批与批之间不会打架**（id 撞车、顺序错乱）——
+ * 后两样是分批最容易引入的新毛病。
+ */
+section('长剧本：拆分镜一批一批来');
+{
+  const ol = await import('../core/pipeline/outline.js');
+
+  /** 造一个有 N 场的大纲，直接写进项目 —— 不必绕模型 */
+  const makeProject = async (title, beatCount) => {
+    const p = await (await fetch(`${appUrl}/api/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, script: '阿澜在码头巡查。', targetDuration: 300 })
+    })).json();
+    await ndjson(`/projects/${p.id}/stage/bible`, {});
+    store.update(p.id, (proj) => {
+      proj.outline = ol.normalizeOutline({
+        beats: Array.from({ length: beatCount }, (_, i) => ({
+          scene: '码头',
+          time: '清晨',
+          characters: ['阿澜'],
+          summary: `第 ${i + 1} 场：阿澜走过第 ${i + 1} 段栈桥。`,
+          dialogue: '设备正常。',
+          seconds: 20
+        }))
+      });
+      return proj;
+    });
+    return p;
+  };
+
+  // ── 14 场 → 该分 3 批（6 + 6 + 2），不是一次全要 ──
+  {
+    const p = await makeProject('长剧本·分批', 14);
+    // ⚠ 必须清零：这个数组是整轮自检共用的，前面几十节早就往里塞过东西了。
+    //   不清的话数出来的是"从开机到现在所有拆分镜请求"，
+    //   而那个数**永远大于等于**真实批数 —— 断言会以一种看不出来的方式变松
+    upstream.shotPrompts = [];
+    const evs = await ndjson(`/projects/${p.id}/stage/script`, {});
+
+    const after = store.read(p.id);
+    const o = ol.normalizeOutline(after.outline);
+
+    /**
+     * ⚠ 这一条是整节的要害：**每一批只把这一批的场次发出去**。
+     * 一次全发的话，无论分不分批，请求次数都是 1，而输出照样会撞上限。
+     */
+    const prompts = upstream.shotPrompts || [];
+    check('分成了多批（不是一次把 14 场全发出去）', prompts.length >= 3, `实际发了 ${prompts.length} 次`);
+    const perCall = prompts.map((u) => [...u.matchAll(/【场次\s*[a-z0-9-]+】/gi)].length);
+    check('每一批发出去的场次都不超过上限（输出量被钉死，和剧本多长无关）',
+      perCall.every((n) => n > 0 && n <= 6), JSON.stringify(perCall));
+    check('加起来正好是全部 14 场，不多不少（漏一场 = 成片少一段，没人会发现）',
+      perCall.reduce((a, b) => a + b, 0) === 14, JSON.stringify(perCall));
+
+    // ── 分批最容易引入的两个新毛病 ──
+    check('所有场次都拆完了（没有一场被跳过）', o.beats.every((b) => b.locked),
+      JSON.stringify(o.beats.filter((b) => !b.locked).map((b) => b.id)));
+    const ids = (after.shots || []).map((s) => s.id);
+    check('镜头 id 没有撞车（每批都从 1 开始编，不去重就会互相覆盖）',
+      new Set(ids).size === ids.length, `${ids.length} 镜 / ${new Set(ids).size} 个不同 id`);
+    check('镜号是连续的 1..N（批与批之间不能有断号或重号）',
+      (after.shots || []).every((s, i) => s.index === i + 1),
+      JSON.stringify((after.shots || []).map((s) => s.index).slice(0, 20)));
+
+    /**
+     * ⚠ 顺序必须按**大纲里场次的顺序**，不能按各批自己的镜号。
+     * 排错了的话，成片里第 2 场演到一半插进第 8 场的镜头，
+     * 而每一镜单看都正常 —— 这是分批最阴的一种坏法。
+     */
+    const beatOrder = new Map(o.beats.map((b, i) => [b.id, i]));
+    const ranks = (after.shots || []).filter((s) => s.beatId).map((s) => beatOrder.get(s.beatId));
+    check('镜头按场次顺序排（不是按批次先后、也不是按各批的镜号）',
+      ranks.every((v, i) => i === 0 || v >= ranks[i - 1]), JSON.stringify(ranks.slice(0, 24)));
+
+    check('跑完这一步说的是"拆完了"', evs.some((e) => e.type === 'stage' && e.status === 'done'),
+      JSON.stringify(evs.filter((e) => e.type === 'stage').map((e) => e.status)));
+    await fetch(`${appUrl}/api/projects/${p.id}`, { method: 'DELETE' });
+  }
+
+  // ── 中途断了，前面几批不能白跑 ──
+  {
+    /**
+     * 这是分批**最值钱**的那个好处。一次性那条路上，第 190 镜出错等于
+     * 前 189 镜全部作废、钱全白花。分批之后每一批跑完就落盘、就上锁，
+     * 断在第 3 批，前两批稳稳地在盘上。
+     */
+    const p = await makeProject('长剧本·断在中间', 14);
+    upstream.shotPrompts = [];
+    upstream.failShotsAfter = 2; // 第 3 次拆分镜调用直接报错
+    await ndjson(`/projects/${p.id}/stage/script`, {});
+    upstream.failShotsAfter = 0;
+
+    const mid = store.read(p.id);
+    const o = ol.normalizeOutline(mid.outline);
+    const locked = o.beats.filter((b) => b.locked).length;
+    check('断在第 3 批时，前两批已经落盘了', (mid.shots || []).length > 0, String((mid.shots || []).length));
+    check('而且前两批的场次已经上锁（再跑不会重拆、不会重复计费）',
+      locked === 12, `锁了 ${locked} 场`);
+    check('没跑到的那几场还开着（它们是"还没拆"，不是"拆过了"）',
+      o.beats.filter((b) => !b.locked).length === 2,
+      JSON.stringify(o.beats.filter((b) => !b.locked).map((b) => b.id)));
+
+    // 再点一次，从没锁的那一场接着走
+    const shotsBefore = (mid.shots || []).length;
+    upstream.shotPrompts = [];
+    await ndjson(`/projects/${p.id}/stage/script`, {});
+    const done = store.read(p.id);
+    check('再点一次接着往下拆，不从头再来',
+      ol.normalizeOutline(done.outline).beats.every((b) => b.locked)
+      && (done.shots || []).length > shotsBefore,
+      JSON.stringify({ before: shotsBefore, after: (done.shots || []).length }));
+    const resumed = upstream.shotPrompts.map((u) => [...u.matchAll(/【场次\s*[a-z0-9-]+】/gi)].length);
+    check('续跑时只发还没拆的那两场，已经拆过的一场都不重发',
+      resumed.reduce((a, b) => a + b, 0) === 2, JSON.stringify(resumed));
+    await fetch(`${appUrl}/api/projects/${p.id}`, { method: 'DELETE' });
+  }
+
+  // ── 输出被截断：不能当成正常结果 ──
+  {
+    /**
+     * 模型吐到自己上限时回的是 finish_reason:"length" —— 状态 200、
+     * 没有错误字段，只是 JSON 从中间断掉。两种下场都很糟：
+     * 解析失败（报错说"模型没返回合法 JSON"，让人以为模型不听话），
+     * 或者碰巧解析出来（拿到少了后半截的分镜表，而且没人说它少了）。
+     */
+    const adaptersMod = await import('../core/providers/adapters.js');
+    const cut = http.createServer((req, res) => {
+      req.on('data', () => {});
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          choices: [{ message: { content: '{"shots":[{"desc' }, finish_reason: 'length' }],
+          usage: { prompt_tokens: 10, completion_tokens: 4096 }
+        }));
+      });
+    });
+    await new Promise((r) => cut.listen(0, '127.0.0.1', r));
+    settings.patch({ baseUrls: { openai: `http://127.0.0.1:${cut.address().port}` } });
+    vault.setSecret('OPENAI_API_KEY', 'sk-cut');
+    let msg = '';
+    await adaptersMod.chat({ providerId: 'openai', model: 'x', user: '拆', label: '拆分镜' })
+      .catch((e) => { msg = e.message; });
+    check('输出被截断时当场报错，不把半截内容往下传', /截断/.test(msg), msg.slice(0, 100));
+    check('并且说清这不是网络问题、也不是模型不听话',
+      /不是网络问题/.test(msg) && /finish_reason=length/.test(msg), msg.slice(0, 200));
+    check('还给了出路（先出大纲，按场次分批）', /先出大纲/.test(msg), msg.slice(-120));
+    cut.close();
+    settings.patch({ baseUrls: { openai: '' } });
+  }
 }
 
 section('中转站只转对话：不该四条一起红');

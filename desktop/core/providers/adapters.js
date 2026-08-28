@@ -304,6 +304,30 @@ export async function chat({
   if (usage) meter.record({ kind: 'token', provider: providerId, model, units: usage });
   else meter.blind({ kind: 'token', provider: providerId, model, why: '响应里没有可拆分进出的 usage' });
 
+  /**
+   * ⚠ **输出被截断了要当场说**，不能当成正常结果往下传。
+   *
+   * 模型吐到自己的上限时，返回的是 `finish_reason: "length"` —— 状态 200、
+   * 没有任何错误字段，只是 JSON 从中间断掉。下游 extractJSON 有两种下场：
+   *   解析失败 → 整批白跑，而报错说的是"模型没有返回合法 JSON"，
+   *              让人以为是模型不听话，其实是话没说完
+   *   碰巧解析出来 → **更糟**。你拿到一份少了后半截的分镜表，
+   *              而且没有任何地方说它少了
+   *
+   * 拆分镜正是最容易撞上这个的一步（几十镜就是上万 token），
+   * 所以这一层必须把它翻译成一句人能照着做的话。
+   */
+  const finish = res.stream
+    ? lastFinishReason(res.events)
+    : (res.json?.choices?.[0]?.finish_reason || res.json?.choices?.[0]?.finishReason || '');
+  if (finish === 'length') {
+    throw new Error(
+      `${label}：模型的输出被自己的长度上限截断了（finish_reason=length），拿到的是半截内容，不能用。\n`
+      + '这不是网络问题，也不是模型不听话 —— 是这一次要它写的东西超过了它一次能写的量。\n'
+      + '出分镜的话：先出大纲再拆分镜，那条路会按场次分批，每批只拆几场，多长的剧本都不会撞上限。'
+    );
+  }
+
   const text =
     // 流式时正文是一段段拼起来的，res.json 是 null —— 拼好的在 res.text 里
     (res.stream ? res.text : null) ||
@@ -322,6 +346,26 @@ export async function chat({
     };
   }
   return { text, raw: res.json, usage: usage || res.json?.usage || null };
+}
+
+/**
+ * 流式响应里最后一个带 finish_reason 的事件说了什么。
+ *
+ * 截断的信号只在**最后几个事件**里，前面全是 delta。倒着找，找到就停。
+ */
+function lastFinishReason(events = []) {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const d = events[i]?.data;
+    if (!d || d === '[DONE]') continue;
+    try {
+      const j = JSON.parse(d);
+      const fr = j?.choices?.[0]?.finish_reason || j?.choices?.[0]?.finishReason;
+      if (fr) return fr;
+    } catch {
+      /* 不是 JSON 的事件跳过 */
+    }
+  }
+  return '';
 }
 
 /** 当前路由到的视频模型接受哪些时长档位。界面用它提前提示，不用等跑完才知道。 */

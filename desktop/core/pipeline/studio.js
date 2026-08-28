@@ -1288,7 +1288,7 @@ export function editOutlineBeat(projectId, beatId, fields = {}) {
   return applyOutlineOps(projectId, { ops: [{ op: 'edit', id: beatId, fields }] });
 }
 
-async function analyzeScriptRaw(projectId, { shotCount = 8, chapterId = null, force = false, onEvent } = {}) {
+async function analyzeScriptRaw(projectId, { shotCount = 8, chapterId = null, force = false, onEvent, signal = null } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
   if (!project.bible) throw new Error('请先跑「设定集」—— 没有冻结人设，分镜会自己发挥外貌描述');
@@ -1337,7 +1337,46 @@ async function analyzeScriptRaw(projectId, { shotCount = 8, chapterId = null, fo
    */
   const outlineNow = outline.normalizeOutline(project.outline);
   const inScope = outlineNow.beats.filter((b) => (chapter ? b.chapterId === chapter.id : true));
-  const targetBeats = inScope.filter((b) => !b.locked);
+  const allPending = inScope.filter((b) => !b.locked);
+  /**
+   * ══════════ 一次只拆这么多场 ══════════
+   *
+   * 用户的问题："现在遇到几十个分镜就这样了，后面如果更多怎么办"。
+   *
+   * 这个问题问到了根子上，而**流式治不了它** —— 流式解决的是"慢被误判成死"，
+   * 解决不了"一次要吐的东西超过模型一次能吐的上限"。
+   *
+   * 算一笔账：一个 shot 对象十来个字段，中文描述加起来大约 150~250 token。
+   *   30 镜 ≈ 6000 token   ← 已经接近不少模型单次输出的上限
+   *   60 镜 ≈ 12000 token  ← 多数中转站会截断
+   *  200 镜 ≈ 40000 token  ← 一次调用绝无可能
+   *
+   * 而超限的表现是**最坏的那一种**：JSON 从中间断掉。不报错、状态 200，
+   * 只是最后一镜写到一半没了 —— 解析失败的话整批白跑，解析"成功"的话
+   * 你会拿到一份少了后半截的分镜表，而且没有任何地方说少了。
+   *
+   * 所以按**大纲的场次**分批：每批只拆固定几场，输出量就被钉死了，
+   * 和整个剧本多长没有关系。
+   *
+   * ── 为什么这件事几乎不用写新代码 ──
+   *
+   * 下面那套合并逻辑本来就是为"只重拆某一场"写的：id 去重、按场次顺序排、
+   * **只锁这一批发出去的那几场**。所以跑完一批，这一批的场次就锁上了，
+   * 下一批重新算 targetBeats 时它们自然不在里面 —— 循环即可，
+   * 每一批都是一次完整、独立、已落盘的拆分。
+   *
+   * 三个附带的好处，每一个单独拿出来都值得做：
+   *   · 断了不用全重来。第 7 批挂了，前 6 批已经在盘上、已经上锁
+   *   · 进度看得见。"第 3/8 批"而不是一条僵五分钟的进度条
+   *   · 出来的东西更好。模型在长结构化输出上会越写越散，
+   *     十几镜一批时它还端得住全局
+   */
+  const BEATS_PER_BATCH = 6;
+  // ⚠ useOutline 在下面才定义，这里直接用它的来源 —— 提前引用 const 会 TDZ 报错
+  const batching = inScope.length > 0;
+  const targetBeats = batching ? allPending.slice(0, BEATS_PER_BATCH) : allPending;
+  /** 这一批之后还剩几场没拆。跑完拿它决定要不要接着来。 */
+  const restAfterThisBatch = batching ? allPending.length - targetBeats.length : 0;
   const useOutline = inScope.length > 0;
 
   if (useOutline && !targetBeats.length) {
@@ -1701,6 +1740,33 @@ async function analyzeScriptRaw(projectId, { shotCount = 8, chapterId = null, fo
     }
     return p;
   });
+
+  /**
+   * 这一批完了，还有剩的就接着拆。
+   *
+   * ⚠ 递归**必须放在 store.update 之后** —— 也就是这一批已经落盘、
+   * 而且它那几场已经上锁之后。放在前面的话，下一批算 targetBeats 时
+   * 会把这一批又算进去，于是同样几场被反复拆，永远出不去循环。
+   *
+   * 也正因为落盘在先，中途断掉不用全重来：已经跑完的批次都在盘上、
+   * 都锁着，再点一次「拆分镜」会从没锁的那一场接着往下走。
+   */
+  if (restAfterThisBatch > 0) {
+    /**
+     * 停在批与批之间。
+     *
+     * 分批之后这一步从"一次调用"变成了十几次，**能停下来**就比以前重要得多：
+     * 一份两百镜的剧本要跑十来分钟，中途发现大纲写错了却只能干等到底，
+     * 那些钱全是白花的。停在这儿是最干净的位置 —— 刚落盘、刚上锁，
+     * 已经拆完的一场都不会丢，再点一次从没锁的那场接着走。
+     */
+    jobs.checkpoint(signal, `还剩 ${restAfterThisBatch} 场没拆`);
+    onEvent?.({
+      type: 'note',
+      message: `这一批 ${targetBeats.length} 场拆完了（${shots.length} 镜），还剩 ${restAfterThisBatch} 场，接着拆…`
+    });
+    return analyzeScriptRaw(projectId, { shotCount, chapterId, force: false, onEvent, signal });
+  }
 
   onEvent?.({
     type: 'stage',
