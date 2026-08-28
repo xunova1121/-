@@ -1,7 +1,7 @@
 /**
  * 服务商运行时：解析模板 → 补鉴权 → 发请求 →（异步任务的话）轮询到终态。
  */
-import { PROVIDERS, getProvider as catalogGetProvider, publicCatalog, CAPABILITIES } from './catalog.js';
+import { PROVIDERS, getProvider as catalogGetProvider, publicCatalog, CAPABILITIES, modelWarning } from './catalog.js';
 import { buildAuthHeaders, credentialStatus, AuthError } from './auth.js';
 import { getSecret } from '../vault.js';
 import { execute, poll, HttpError } from '../http-client.js';
@@ -383,6 +383,13 @@ export async function probeRouting() {
     }
     const provider = getProvider(providerId);
     const r = results.get(providerId) || {};
+    const modelOf = {
+      chat: s.chatModel, director: s.directorModel || s.chatModel, vision: s.visionModel,
+      image: s.imageModel, video: s.videoModel, tts: s.ttsModel
+    };
+    const warn = modelWarning(providerId, modelOf[cap], {
+      baseUrlOverridden: Boolean(s.baseUrls?.[providerId])
+    });
     out[cap] = {
       provider: providerId,
       providerName: provider?.name || providerId,
@@ -391,7 +398,9 @@ export async function probeRouting() {
       skipped: Boolean(r.skipped),
       reason: r.reason || r.note || '',
       latencyMs: r.latencyMs ?? null,
-      missing: r.missing || null
+      missing: r.missing || null,
+      model: modelOf[cap] || '',
+      modelWarning: warn?.text || ''
     };
   }
   return { checkedAt: new Date().toISOString(), capabilities: out };

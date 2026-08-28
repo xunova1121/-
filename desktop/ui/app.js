@@ -90,18 +90,30 @@ function paintChain() {
     // 开机自检的结果：null = 还没探 / 这家没探针，true = 通，false = 不通
     const checked = state.routingCheck?.capabilities?.[cap];
     const bad = ready && checked && checked.ok === false;
+    /**
+     * 「这家没有这个模型」是**另一种坏**，不是连不通。
+     *
+     * 探针探的是"这家通不通"（列模型 / 最小对话），它可能一路绿灯 ——
+     * 而你真正要用的那个模型这家根本没有。「openai / claude-opus-5」
+     * 就是这么过的体检，然后在拆分镜那步干等三分钟才回一句"请求超时"。
+     *
+     * 所以它得能在**探针是绿的时候**照样显示出来，不能挂在 bad 上。
+     */
+    const modelBad = ready && checked?.modelWarning;
     chain.append(
       h(
         'span',
         {
-          class: `chain-seg ${ready ? '' : 'off'} ${bad ? 'bad' : checked?.ok ? 'good' : ''}`,
+          class: `chain-seg ${ready ? '' : 'off'} ${bad ? 'bad' : modelBad ? 'warn' : checked?.ok ? 'good' : ''}`,
           title: !ready
             ? `${provider?.name || route?.provider || '未配置'} —— 缺少密钥，去「服务商与密钥」补上`
             : bad
               ? `${provider.name} / ${route.model}\n✕ 连不通：${checked.reason}\n\n点一下看完整原因`
-              : checked?.ok
-                ? `${provider.name} / ${route.model}\n✓ 已连通${checked.latencyMs ? `（${checked.latencyMs}ms）` : ''}`
-                : `${provider.name} / ${route.model}`,
+              : modelBad
+                ? `${provider.name} / ${route.model}\n⚠ ${checked.modelWarning}\n\n点一下看完整说明`
+                : checked?.ok
+                  ? `${provider.name} / ${route.model}\n✓ 已连通${checked.latencyMs ? `（${checked.latencyMs}ms）` : ''}`
+                  : `${provider.name} / ${route.model}`,
           /**
            * ⚠ 红叉必须**点得开**。
            *
@@ -114,11 +126,15 @@ function paintChain() {
            * 但"看到红叉之后有地方能问为什么"必须有。点开是**人主动要的**，
            * 不违反那条取舍。
            */
-          ...(bad ? { onclick: () => showRouteDetail(cap, label, provider, route, checked) } : {})
+          ...(bad || modelBad ? { onclick: () => showRouteDetail(cap, label, provider, route, checked) } : {})
         },
         `${label} `,
         h('b', {}, provider ? provider.id : '—'),
-        bad ? h('span', { style: 'color:var(--alarm)' }, ' ✕') : checked?.ok ? h('span', { style: 'color:var(--good)' }, ' ✓') : null
+        bad ? h('span', { style: 'color:var(--alarm)' }, ' ✕')
+          // ⚠ 模型对不上给的是**黄标不是红叉**：这一家是通的，
+          // 错的是模型 id。画成红叉会让人去查网络和密钥，方向就歪了
+          : modelBad ? h('span', { style: 'color:var(--caution)' }, ' ⚠')
+            : checked?.ok ? h('span', { style: 'color:var(--good)' }, ' ✓') : null
       )
     );
   }
@@ -138,14 +154,25 @@ function showRouteDetail(cap, label, provider, route, checked) {
   if (!host) return;
   clear(host);
   host.style.display = '';
-  const reason = checked?.reason || '（没拿到原因）';
+  /**
+   * 两种不同的坏，标题和正文都要跟着换。
+   *
+   * "连不通"和"这家没有这个模型"下一步动作完全不同：前者去查网络/代理，
+   * 后者去改模型 id。标题一律写"连不通"的话，模型选错的人会一头扎进网络里 ——
+   * 而网络本来是好的。
+   */
+  const modelWarn = checked?.modelWarning || '';
+  const reason = modelWarn || checked?.reason || '（没拿到原因）';
   /**
    * 按钮要**跟着原因走**。连不上网络的时候摆一个「去配密钥」，
    * 是明明白白把人往沟里带 —— 而这正是原来那个横幅在做的事。
    */
-  const networky = /连不上|解析不了|连接失败|拒绝连接|掐断|超时/.test(reason);
+  // 模型对不上时该去的是「选模型」，不是代理也不是密钥
+  const networky = !modelWarn && /连不上|解析不了|连接失败|拒绝连接|掐断|超时/.test(reason);
   host.append(
-    h('b', {}, `${label}：${provider?.name || route?.provider} 连不通`),
+    h('b', {}, modelWarn
+      ? `${label}：${provider?.name || route?.provider} 通着，但模型 id 对不上`
+      : `${label}：${provider?.name || route?.provider} 连不通`),
     h('div', {
       class: 'route-why',
       style: 'white-space:pre-wrap;line-height:1.7;margin:6px 0;color:var(--ink)'

@@ -608,6 +608,25 @@ export function bibleBucket(bible, kind) {
  * 角色要正面半身好辨认五官，场景要空镜别混进人，道具要单体产品图。
  * 混用一套模板的话，道具图里会莫名其妙站个人。
  */
+/**
+ * 角色身份锚使用同一次生成的四视图，避免分开生成导致脸、服装和背面细节互相漂移。
+ * 这张图只做参考，不进入成片，因此固定横画幅，不跟随竖屏项目画幅。
+ */
+export function charSheetPrompt(anchor, own) {
+  return `${anchor}，角色三视图设定图。`
+    + '一张图里横向并排四个视角，从左到右依次：'
+    + '① 上半身特写（正面，中性表情，五官和领口细节清晰）；'
+    + '② 全身正面站姿（头到鞋完整入镜，双臂自然下垂）；'
+    + '③ 全身正侧面站姿（90° 正侧，同一姿势）；'
+    + '④ 全身背面站姿（完全背对，后脑发型与服装背面清晰）。'
+    + '四个视角是同一个人、同一套服装、同一配色，身高等比对齐。'
+    + '纯色浅灰背景，均匀柔光、无明显方向光和投影。'
+    + '画面中不得出现任何文字、标注、箭头、分格线或边框，无其他人物。'
+    + own;
+}
+
+export const CHAR_SHEET_RATIO = '16:9';
+
 export function sheetPrompt(kind, bible, item, variant = null) {
   const anchor = bible.style.anchor;
   /**
@@ -641,7 +660,7 @@ export function sheetPrompt(kind, bible, item, variant = null) {
    */
   const override = (v?.sheetPrompt || '').trim();
   const own = override || variants.describeWith(item, v) || item.appearance || '';
-  if (kind === 'char') return `${anchor}，角色设定图，正面半身，中性表情，纯色浅灰背景，无其他人物。${own}`;
+  if (kind === 'char') return charSheetPrompt(anchor, own);
   if (kind === 'scene') return `${anchor}，场景基准图，空镜无人物，广角。${own}`;
   return `${anchor}，道具参考图，单个物体居中，纯色背景，无人物，产品图视角。${own}`;
 }
@@ -676,12 +695,13 @@ async function generateSheets(projectId, targets, { onEvent, signal = null } = {
       const prompt = sheetPrompt(kind, bible, item, variant);
       onEvent?.({ type: 'note', message: `提示词：${prompt.slice(0, 120)}${prompt.length > 120 ? '…' : ''}` });
 
+      const sheetRatio = kind === 'char' ? CHAR_SHEET_RATIO : (project.aspectRatio || null);
       const image = await adapters.generateImage({
         providerId: r.image.provider,
         model: r.image.model,
         prompt,
         negative: bible.style.negative,
-        aspectRatio: project.aspectRatio || null,
+        aspectRatio: sheetRatio,
         // 所有变体共用条目的身份种子 —— 换了衣服还是同一张脸
         seed: item.seed,
         label: `参考图·${label}`,
@@ -690,7 +710,7 @@ async function generateSheets(projectId, targets, { onEvent, signal = null } = {
 
       const dest = path.join(dir, `ref-${kind}-${safeFileName(item.name)}-${safeFileName(variant.id)}.png`);
       await saveMedia(image, dest, onEvent);
-      checkRatio(dest, project.aspectRatio || settings.get('aspectRatio'), `${label} 的设定图`, onEvent);
+      checkRatio(dest, sheetRatio || settings.get('aspectRatio'), `${label} 的设定图`, onEvent);
       const modelRef = await toModelRef(dest, { onEvent });
 
       store.update(projectId, (p) => {

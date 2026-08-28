@@ -559,9 +559,20 @@ export function sameRootCause(failed = []) {
   // 都指着同一家、而且都是"连不上"那一类
   const netLike = failed.filter((f) => /连不上|解析不了|连接失败|拒绝连接|掐断/.test(f.message || ''));
   if (providers.size !== 1 || netLike.length !== failed.length) return '';
-  const blocked = failed.some((f) => /在中国大陆\*\*直连基本不通\*\*/.test(f.message || ''));
+  /**
+   * ⚠ 认这一类**不要连着排版一起认**。
+   *
+   * 原来这条正则把「直连基本不通」两边的 markdown 星号也当成了
+   * 匹配的一部分。于是把那句话里的星号去掉（因为界面是 textContent 渲染的，
+   * 星号会原样印出来），这条判断就**静默失效**：不报错，只是从此再也不认得
+   * "被墙"这一类，四条全红时给的是那句泛泛的"先解决网络"。
+   *
+   * 拿措辞去认措辞本来就脆；至少别把排版也算进去。
+   */
+  const blocked = failed.some((f) => /直连基本不通/.test(f.message || ''));
   return (
-    `${failed.length} 条全红，但**是同一个原因**：这台机器连不上 ${[...providers][0]}。`
+    // 界面用 textContent 显示，写 ** 只会原样印出一堆星号
+    `${failed.length} 条全红，但是同一个原因：这台机器连不上 ${[...providers][0]}。`
     + (blocked
       ? '这个域名在境内直连基本不通 —— 不是密钥的问题，往下看第一条的说明，三条路挑一条。'
       : '密钥和模型都没被验到（请求根本没发出去），先解决网络再看别的。')

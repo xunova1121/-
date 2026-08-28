@@ -1180,6 +1180,8 @@ select.mini {
 .chain-seg.good b { color: var(--good); }
 .chain-seg.bad { background: var(--alarm-wash); }
 .chain-seg.bad b { color: var(--alarm); }
+.chain-seg.warn { background: var(--caution-wash); cursor: pointer; }
+.chain-seg.warn b { color: var(--caution); }
 /* 红叉是**能点的** —— 光标要说出这件事，否则原因永远藏在 title 里没人看得到 */
 .chain-seg.bad { cursor: pointer; }
 .chain-seg.bad:hover { background: var(--alarm); color: var(--ground); }
@@ -1597,14 +1599,64 @@ select.mini {
    三样东西喂的是不同的下游：技法→出图、连续动作→出视频、谁说的→配音。
    平铺成一条的话看不出谁管谁，也看不出改一样东西要付多少代价
    —— 重出图和重配音，差着几十倍的钱。 */
+/* ⚠ 第一版这里写的是 `background: var(--surface)` + `border: var(--line-soft)`，
+   而它坐着的 .shot-card 背景**也是** var(--surface)（#1D1913），
+   边框那个 --line-soft 是 #262019 —— 近黑压近黑。
+   于是四个分组在屏幕上**根本看不见**：DOM 里分好了，走查也绿
+   （那几条查的是"哪个字段归在哪一组"，是结构不是可见性），
+   但人看到的还是一条平铺的清单。用户的原话是"你怎么分的组，我也没看出变化"。
+
+   这是今天反复出现的那个病犯在了本该治它的功能上：
+   分组存在的全部理由就是"让人一眼看出谁喂谁"，看不见等于没做。 */
 .shot-group {
-  margin-top: 12px; padding: 10px 12px;
-  border: 1px solid var(--line-soft); border-radius: 8px;
-  background: var(--surface);
+  margin-top: 14px;
+  border: 1px solid var(--line); border-radius: 8px;
+  /* 比卡片底色亮一档 —— 必须和 .shot-card 的 --surface 拉开，不然等于没有框 */
+  background: var(--surface-2);
+  overflow: hidden;
 }
-.shot-group-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
-.shot-group-head b { font-size: 13px; }
-.shot-group-head span { color: var(--ink-faint); font-size: 12px; }
+/**
+ * 组标题**钉住**。
+ *
+ * 「出图用的」那一组装着画面描述、景别、场景、角色、道具，外加六块技法卡 ——
+ * 差不多是整个编辑器的八成高。滚到一半时屏幕上已经没有任何东西写着
+ * "你现在改的这些是喂给出图的"，而那正是这个分组要回答的唯一问题。
+ *
+ * 钉住之后，滚多远都看得见自己在哪一组里。
+ */
+/**
+ * ⚠ 这里试过 `position: sticky` —— 想让标题在滚过那个巨大的「出图用的」组时
+ * 一直钉着。**没做成，而且是有意撤掉的**：
+ *
+ * .shot-card 上有个 `overflow: hidden`（用来把缩略图裁成圆角），
+ * 它会让整张卡变成"没有可滚区域"的滚动容器，里面任何 sticky 都永远不动 ——
+ * 照样渲染、照样是 sticky、不报任何错。
+ *
+ * 把裁剪挪到 .shot-thumb 上能解开，但那是动**每一张分镜卡**的布局，
+ * 而我在这个环境里没法真的验证 sticky 之后长什么样（走查机视口够高，
+ * 页面根本不滚，量出来的 top 始终等于组顶）。
+ *
+ * 一个没验过的机制 + 一处影响全部卡片的改动，换一个"可能更好滚"，不划算。
+ * 分组现在靠**看得见的框 + 明确的标题 + 代价标签**说话，那三样是量过的。
+ */
+.shot-group-head {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  border-radius: 7px 7px 0 0;
+  /* 左边一道竖杠：滚动时它和标题一起钉着，是"这是一组"的持续信号 */
+  box-shadow: inset 3px 0 0 var(--beam);
+}
+.shot-group-head b { font-size: 14px; color: var(--ink); letter-spacing: .02em; }
+/* 「改这些要重出 X」是**代价**，不是脚注 —— 原来 --ink-faint 12px 太轻，
+   而它恰恰是这一组存在的理由。给它一个能看见的颜色。 */
+.shot-group-head span {
+  color: var(--caution); font-size: 11.5px;
+  background: var(--caution-wash); border-radius: 4px; padding: 1px 6px;
+}
+.shot-group > *:not(.shot-group-head) { margin-left: 12px; margin-right: 12px; }
+.shot-group > *:last-child { margin-bottom: 10px; }
 /* 「改了要重出 X」。只在那样产物已经出过时才显示 —— 还没出过的时候
    它是废话，而废话会把真正要紧的那句挤没 */
 .shot-group-redo {
