@@ -513,6 +513,19 @@ const upstream = http.createServer((req, res) => {
    * 海螺出图。加它是因为**身份通道只在这条路上**（subject_reference），
    * 而火山那条路没有这个字段 —— 只验火山，等于那条通道从没被跑过。
    */
+  // 对象存储的桩：记下每次 PUT 的内容，"重传有没有真的传上去"靠它判
+  if (url.pathname.startsWith('/ossput/')) {
+    let raw = '';
+    req.on('data', (c) => (raw += c));
+    req.on('end', () => {
+      upstream.ossPuts = upstream.ossPuts || [];
+      upstream.ossPuts.push({ key: url.pathname, body: raw });
+      res.writeHead(200, { ETag: '"stub"' });
+      res.end();
+    });
+    return undefined;
+  }
+
   if (url.pathname === '/image_generation') {
     let raw = '';
     req.on('data', (c) => (raw += c));
@@ -9986,6 +9999,57 @@ section('配完对象存储，老项目要跟上');
   check('配完 OSS，胖内联图不再复用（这次能换成地址）', reuse(fat) === null);
   check('小的内联图仍然复用（换它没意义，白传一趟）', reuse(thin) === thin);
   check('已经是地址的照旧复用', reuse(url) === url);
+  /**
+   * ══════════ 重传一张图，得**真的**换成新的那张 ══════════
+   *
+   * 用户："重传了第二张自己不同的图片，分镜怎么还是用的第一张图片生成"。
+   *
+   * 上传设定图落盘用的是固定文件名（ref-角色-变体-upload.png）——
+   * 重传写的是同一个路径。而"本地路径 → 对象存储 key"那张表原来只按路径记：
+   *
+   *   第一次传 → 上传，记下 路径→key
+   *   第二次传 → 覆盖同一个本地文件（新内容）
+   *            → publicUrlFor 按路径命中缓存，返回**旧地址**
+   *            → 新图一次都没被上传
+   *
+   * 没有任何报错，日志也不说"用了缓存"。用户只会觉得"重传没用"，
+   * 而且每一镜出来的还是上一张脸。
+   *
+   * ⚠ 判据得是**桶里那份内容变没变**，不是"返回的地址变没变"——
+   * 私有桶每次现签，地址里的 Signature 本来就每次都不一样，
+   * 拿地址做判据是一条恒真的断言。
+   */
+  {
+    process.env.FUTUREDREAM_OSS_ENDPOINT = `${upstreamUrl}/ossput`;
+    upstream.ossPuts = [];
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fd-reupload-'));
+    const shot1 = path.join(tmpDir, 'ref-char-me-v-default-upload.png');
+
+    fs.writeFileSync(shot1, Buffer.from('第一张图的内容'));
+    const url1 = await studioModule.toModelRef(shot1, {});
+    check('第一次传：真的上传了一次', upstream.ossPuts.length === 1,
+      JSON.stringify(upstream.ossPuts.map((x) => x.body)));
+
+    // 同一个路径再问一次：这次该走缓存，不该白传一趟
+    const again = await studioModule.toModelRef(shot1, {});
+    check('内容没变时走缓存，不重复上传', upstream.ossPuts.length === 1 && Boolean(again),
+      String(upstream.ossPuts.length));
+
+    // ⚠ 重传第二张：同一个文件名，不同内容。mtime 只有毫秒精度，
+    // 写得太快会和上一次同毫秒 —— 那样连 sig 都不变，测试会变成恒真
+    await new Promise((r) => setTimeout(r, 12));
+    fs.writeFileSync(shot1, Buffer.from('第二张图的内容，和第一张完全不同'));
+    await studioModule.toModelRef(shot1, {});
+    check('重传第二张：又上传了一次（修之前这里恒为 1）',
+      upstream.ossPuts.length === 2, String(upstream.ossPuts.length));
+    check('而且传上去的是第二张的内容，不是第一张',
+      String(upstream.ossPuts[1]?.body || '').includes('第二张图的内容'),
+      String(upstream.ossPuts[1]?.body || '').slice(0, 40));
+
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    delete process.env.FUTUREDREAM_OSS_ENDPOINT;
+  }
+
   settings.patch({ oss: { enabled: false } });
   vault.setSecret('ALIYUN_OSS_KEY_ID', '');
   vault.setSecret('ALIYUN_OSS_KEY_SECRET', '');

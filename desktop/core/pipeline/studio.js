@@ -412,7 +412,7 @@ export async function toModelRef(localPath, { onEvent, shrink = false } = {}) {
       const rel = path.relative(PROJECTS_DIR, localPath).split(path.sep).join('/');
       const key = rel.startsWith('..') ? `misc/${path.basename(localPath)}` : rel;
       const put = await oss.putFile(localPath, key);
-      OSS_KEYS.set(localPath, put.key);
+      rememberOssKey(localPath, put.key);
       const url = put.url;
       onEvent?.({ type: 'note', message: `参考图已上传到对象存储：${path.basename(localPath)}` });
       return url;
@@ -599,7 +599,7 @@ async function mirrorToOss(destPath, buf, onEvent) {
     // 落在项目目录之外的（比如画风预览图）也传，只是换个前缀，免得和项目产物混在一起
     const key = rel.startsWith('..') ? `misc/${path.basename(destPath)}` : rel;
     const put = await oss.putBuffer(key, buf, oss.contentTypeOf(destPath));
-    OSS_KEYS.set(destPath, put.key);
+    rememberOssKey(destPath, put.key);
     onEvent?.({ type: 'note', message: `已同步到对象存储：${path.basename(destPath)}` });
     /**
      * ⚠ 这里原来写的是 `return url` —— 而这个作用域里**根本没有 url**。
@@ -633,7 +633,41 @@ async function mirrorToOss(destPath, buf, onEvent) {
  *
  * 放内存不落盘：它是缓存，不是数据。桶换了、前缀改了，重启一次就干净了。
  */
+/**
+ * 本地文件 → 对象存储里的 key。
+ *
+ * ⚠ **值里必须带上"当时那份文件长什么样"，否则重传一张图不会生效。**
+ *
+ * ── 这是一个真的把人坑过的 bug ──
+ *
+ * 上传设定图落盘用的是**固定文件名**（ref-角色-变体-upload.png）——
+ * 同一个角色重传第二张，写的是同一个路径。而这张表原来只按路径记：
+ *
+ *   第一次传 → 上传到 OSS，记下 路径→key
+ *   第二次传 → 覆盖同一个本地文件（新内容）
+ *            → publicUrlFor 按路径命中缓存，直接返回**旧地址**
+ *            → 新图一次都没被上传，设定集指向的还是第一张
+ *
+ * 于是用户换了一张脸，每一镜出来的还是上一张脸，而且没有任何报错、
+ * 日志里也不会说"用了缓存"。他只会觉得"重传没用"。
+ *
+ * 所以记下 mtime + 大小，对不上就当没缓存，重传一次。
+ */
 const OSS_KEYS = new Map();
+
+/** 这份文件此刻的样子。内容一变，它就变 */
+function fileSig(localPath) {
+  try {
+    const st = fs.statSync(localPath);
+    return `${st.mtimeMs}:${st.size}`;
+  } catch {
+    return null;
+  }
+}
+
+function rememberOssKey(localPath, key) {
+  OSS_KEYS.set(localPath, { key, sig: fileSig(localPath) });
+}
 
 /**
  * 参考图要发给出图模型时，优先给公网地址。
@@ -644,9 +678,12 @@ const OSS_KEYS = new Map();
  */
 export function publicUrlFor(localPath) {
   if (!localPath || !oss.ready()) return null;
-  const key = OSS_KEYS.get(localPath);
+  const hit = OSS_KEYS.get(localPath);
+  if (!hit) return null;
+  // ⚠ 文件变过就当没缓存 —— 否则重传的那张图永远发不出去（见 OSS_KEYS 上面）
+  if (hit.sig !== fileSig(localPath)) return null;
   // 每次现签：私有桶那个地址是有期限的
-  return key ? oss.urlFor(key) : null;
+  return oss.urlFor(hit.key);
 }
 
 // ═══════════════════════ 设定集条目：三类共用的取值与提示词 ═══════════════════════
