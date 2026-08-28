@@ -8304,6 +8304,80 @@ section('传上去的照片：要真的用上，而且只用脸');
       store.read(p3.id).shots[0].refPolicy === cs.REF_POLICY,
       JSON.stringify(store.read(p3.id).shots[0].refPolicy));
 
+    /**
+     * ══════════ 参考图存在对象存储里时（也就是真实情况）══════════
+     *
+     * ⚠ **上面所有这些断言，夹具用的都是 https://x/a.png —— 一个不带
+     * Expires 的地址。而真实用户配了对象存储，OSS 签出来的地址永远带
+     * Expires。整段续签逻辑（refreshRefs）因此一次都没被跑到过。**
+     *
+     * 而那里面藏着真正吃掉照片的那一行：判"能不能复用"和判"现在发不发得
+     * 出去"用了同一个函数。带 Expires 就说不可用 → 去重签 → 签出一个崭新
+     * 的地址 → 还报了句"已经重新传了一份" → 最后一行用同一个判据再过一遍
+     * → 刚签好的这张也带 Expires → 扔掉。
+     *
+     * 净效果：只要配了对象存储，参考图一张都发不出去，而日志说重传成功。
+     * 用户来回问了七八轮，全被引到开关和设置上，因为界面看到的现象是
+     * "设定集里有 3 张图可以带，但这一次一张都没发"。
+     *
+     * 教训是老的那条：**凡是"只在真实形状下才走到"的路，夹具就得长成
+     * 真实的样子。**一个简化过头的夹具不会让测试变红，它只会让整条路
+     * 从来不被执行 —— 而绿灯照常亮着。
+     */
+    const signed = (name, secondsLeft) =>
+      `https://b.oss-cn-hongkong.aliyuncs.com/${name}`
+      + `?OSSAccessKeyId=STUB&Expires=${Math.floor(Date.now() / 1000) + secondsLeft}&Signature=stub`;
+
+    const ossBible = mkBible('upload');
+    // 还有 50 分钟才过期 —— 完全可用的地址
+    ossBible.characters[0].sheetUrl = signed('a.png', 3000);
+    ossBible.characters[0].variants[0].sheetUrl = signed('a.png', 3000);
+
+    const p6 = store.create({ title: '参考图在对象存储里' });
+    store.update(p6.id, (x) => {
+      x.bible = ossBible;
+      x.shots = [{ ...shot, id: 's1', imagePath: null }];
+      return x;
+    });
+    upstream.lastImageBody = null;
+    const notes6 = [];
+    await studioModule.generateAssets(p6.id, { onEvent: (e) => notes6.push(e.message || '') });
+    check('参考图是对象存储的签名地址时，照样发得出去（修之前这里恒空）',
+      Boolean(upstream.lastImageBody?.image),
+      JSON.stringify({ 请求体字段: Object.keys(upstream.lastImageBody || {}) }));
+    check('而且发出去的就是那个签名地址本身，没被换成别的',
+      String(upstream.lastImageBody?.image || '').includes('oss-cn-hongkong'),
+      String(upstream.lastImageBody?.image || '').slice(0, 80));
+    /**
+     * 还没过期的地址不该被当成过期：白重签一次（走网络），
+     * 而且源图不在时会报一句指着好地址的假警报。
+     */
+    check('没过期的签名地址不会被误报成"地址过期了"',
+      !notes6.some((m) => /过期/.test(m)), JSON.stringify(notes6.filter((m) => /过期/.test(m))));
+
+    /**
+     * 反面：**真过期了的**地址、而且本地源图也找不着，那才该丢 ——
+     * 否则这个修法就成了"什么都不过滤"，等于把 403 留到厂商那边去报，
+     * 而厂商只会说一句"下载不到你给的图"，指不到过期这件事上。
+     */
+    const deadBible = mkBible('upload');
+    deadBible.characters[0].sheetUrl = signed('a.png', -60); // 一分钟前就过期了
+    deadBible.characters[0].variants[0].sheetUrl = signed('a.png', -60);
+    const p7 = store.create({ title: '签名地址真过期了' });
+    store.update(p7.id, (x) => {
+      x.bible = deadBible;
+      x.shots = [{ ...shot, id: 's1', imagePath: null }];
+      return x;
+    });
+    upstream.lastImageBody = null;
+    const notes7 = [];
+    await studioModule.generateAssets(p7.id, { onEvent: (e) => notes7.push(e.message || '') });
+    check('真过期、本地源图又没了的，还是要丢掉（别把 403 留给厂商去报）',
+      !upstream.lastImageBody?.image,
+      String(upstream.lastImageBody?.image || '').slice(0, 80));
+    check('而且明说是过期了（不然这一镜"不太像"的原因永远查不出来）',
+      notes7.some((m) => /过期/.test(m)), JSON.stringify(notes7.slice(-3)));
+
     settings.patch({ useReferenceImages: true, refMode: 'auto' });
   }
 

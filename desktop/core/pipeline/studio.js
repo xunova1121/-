@@ -196,6 +196,39 @@ function usableRef(ref) {
   return ref;
 }
 
+/**
+ * ══════════ 这个地址**现在**发得出去吗 ══════════
+ *
+ * ⚠ 和上面那个 usableRef 问的**不是同一件事**，混用会把参考图全吃掉。
+ *
+ *   usableRef   ——「这个**存下来的**地址还能不能直接复用」
+ *                  带 Expires 就一律说不能，让调用方去重签。这是对的：
+ *                  重签是纯本地计算，不值得为省它去赌一个可能过期的地址。
+ *   sendableRef ——「这个地址**现在**发给厂商行不行」
+ *                  只有**真的已经过期**才说不行。
+ *
+ * 把前者当后者用，就会出现这样一件很荒谬的事，而它真的发生了：
+ * refreshRefs 发现地址带 Expires → 判定不可用 → 去重签 → 签出一个
+ * 崭新的、完全有效的地址 → 还告诉用户"已经重新传了一份" →
+ * 最后一行再用同一个判据过一遍 → **刚签好的这张也带 Expires，扔掉。**
+ *
+ * 结果：只要配了对象存储，参考图就一张都发不出去，而日志里写着重传成功。
+ * 用户那边看到的是"设定集里有 3 张图可以带，但这一次一张都没发"，
+ * 他传的照片也在里面 —— 于是所有讨论都跑去了开关和设置上，
+ * 而真正的原因在这一行，来回折腾了七八轮。
+ *
+ * 测试没抓到是因为夹具用的是 https://x/z.png —— 不带 Expires，
+ * 整段续签逻辑一次都没跑过。凡是"只在真实形状下才走到"的路，
+ * 夹具就得长成真实的样子。
+ */
+const SIGN_MARGIN_MS = 5 * 60 * 1000; // 出图请求本身要跑一会儿，别掐着点发
+function sendableRef(ref) {
+  if (!ref) return null;
+  const m = /[?&]Expires=(\d+)/i.exec(String(ref));
+  if (!m) return ref; // 内联图、上传网关、公开桶 —— 本来就不过期
+  return Number(m[1]) * 1000 - Date.now() > SIGN_MARGIN_MS ? ref : null;
+}
+
 /** 一张内联图大到该想办法了。400KB 的 base64 ≈ 300KB 的图 */
 const FAT_INLINE = 400 * 1024;
 const fatInline = (u) => typeof u === 'string' && u.startsWith('data:') && u.length > FAT_INLINE;
@@ -268,7 +301,15 @@ async function refreshRefs(project, refs, { onEvent } = {}) {
 
   for (let i = 0; i < images.length; i += 1) {
     const fat = tooFat(images[i]);
-    if (usableRef(images[i]) && !fat) continue;
+    /**
+     * ⚠ 这里也该问"现在发得出去吗"，而不是"能不能复用"。
+     *
+     * 用 usableRef 的话，一个**还有 50 分钟才过期**的签名地址会被判成过期：
+     * 白重签一次（OSS 那趟是要走网络的，每镜每张都来一遍），
+     * 而万一本地那张源图不在了，还会报一句"地址过期了，本地图也找不到了"——
+     * 一条彻头彻尾的假警报，指着一个根本没坏的地址。
+     */
+    if (sendableRef(images[i]) && !fat) continue;
     const local = refs.paths?.[i];
     const label = refs.labels?.[i] || `第 ${i + 1} 张`;
     if (!local || !fs.existsSync(local)) {
@@ -302,7 +343,9 @@ async function refreshRefs(project, refs, { onEvent } = {}) {
     });
   }
 
-  const keep = images.map((u, i) => [u, i]).filter(([u]) => usableRef(u));
+  // ⚠ 这里问的是"现在发得出去吗"，不是"能不能复用"—— 上面刚重签出来的
+  // 那些地址必然带 Expires，用 usableRef 过会把它们连同好图一起扔掉
+  const keep = images.map((u, i) => [u, i]).filter(([u]) => sendableRef(u));
   return {
     ...refs,
     images: keep.map(([u]) => u),
