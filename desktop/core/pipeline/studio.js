@@ -3005,17 +3005,52 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
   // 少带一样，重出的这一镜就会成为全片里唯一对不上的那一张。
   // 和批量出图保持一致：分镜图默认不走图生图（编辑模型会把这一镜画成
   // "被改过的角色设定图"）。开关在「设置 → 画面规格」。
-  const useEdit = settings.get('useEditModelForShots') === true;
-  // 过期的限时地址在这儿换掉，否则厂商只会回一句"下载不到你给的图"
+  /**
+   * ⚠ **单独重出这一镜，和批量出图是两条路** —— 而参考图那个判据只改了批量那条。
+   *
+   * 用户："完全和我传的图片没关系啊"。他按的是每一镜的「重出」，走的正是这条。
+   * 而这里还写着老判据 `useEditModelForShots === true`（默认 false），
+   * 于是 refImages 恒为空 —— 无论设置里怎么选，他传的照片一张都不会发出去。
+   *
+   * 最难堪的是我今天自己在自检注释里写过这句话：
+   *   "写 modelUsed 的地方有两处：批量出图一处、单独重出一处。
+   *    两条路各写一份同样的逻辑，就一定要各验一份。"
+   * 知道有两条路，然后还是只改了一条。
+   *
+   * 现在两条路共用 consistency.refPlan()/pickRefs 这一份判据，不再各写各的。
+   */
+  const plan = consistency.refPlan();
+  const useEdit = plan.useEditModel;
+  const picked = consistency.pickRefs(
+    {
+      images: assembled.refImages,
+      labels: assembled.refLabels,
+      paths: assembled.refPaths,
+      sources: assembled.refSources
+    },
+    plan
+  );
   const freshRefs =
-    !useEdit || settings.get('useReferenceImages') === false
+    !plan.send || !picked.images.length
       ? { images: [], labels: [] }
       : await refreshRefs(
         project,
-        { images: assembled.refImages, labels: assembled.refLabels, paths: assembled.refPaths },
+        { images: picked.images, labels: picked.labels, paths: picked.paths },
         { onEvent }
       );
   const refImages = freshRefs.images;
+  if (!refImages.length && assembled.refImages.length) {
+    /**
+     * 有图可带、却一张都没带 —— 必须说出来。不说的话用户看到的只是
+     * "重出了、还是不像"，而真正的原因（设置里选了不发）一个字都没有。
+     */
+    onEvent?.({
+      type: 'note',
+      message: `这一镜有 ${assembled.refImages.length} 张参考图可用，但按当前设置一张都没发`
+        + `（当前是「${plan.mode}」）。传过照片的话，去「设置 → 画面规格 → 出分镜图时带哪些参考图」`
+        + '改成「只用我自己传的图」。'
+    });
+  }
   onEvent?.({ type: 'shot', shotId, status: 'running', message: `第 ${shot.index} 镜重出（${providerId} / ${model}）…` });
   if (refImages.length) {
     onEvent?.({ type: 'note', message: `参考设定集：${freshRefs.labels.join('、')}` });

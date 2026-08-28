@@ -8154,6 +8154,40 @@ section('传上去的照片：要真的用上，而且只用脸');
       up.prompt.includes('左胸编号牌'), up.prompt.slice(0, 260));
   }
 
+  /**
+   * ⚠ **两条路都要验：批量出图 和 单独重出。**
+   *
+   * 用户："完全和我传的图片没关系啊"—— 他按的是每一镜的「重出」，
+   * 而我上一版只改了批量那条（consistency.js），单独重出那条
+   *（studio.regenerateShot）还写着老判据 useEditModelForShots，默认 false，
+   * 于是那条路上参考图**恒为空**，设置里怎么选都没用。
+   *
+   * 更难堪的是我今天自己在别处的注释里写过"这件事有两处，各验一份"——
+   * 知道有两条路，然后还是只改了一条。所以这条断言走的是**真的重出**，
+   * 不是再验一遍那个纯函数。
+   */
+  {
+    settings.patch({ refMode: 'auto', useEditModelForShots: false, useReferenceImages: true });
+    const p2 = store.create({ title: '传图·单独重出' });
+    store.update(p2.id, (x) => {
+      x.bible = mkBible('upload');
+      x.shots = [{ ...shot, id: 's1' }];
+      return x;
+    });
+    upstream.lastImageBody = null;
+    await studioModule.regenerateShot(p2.id, 's1', {}, () => {});
+    /**
+     * 判据是**请求体里到底有没有那张图**，不是"函数返回了什么"——
+     * 中间任何一层把它丢掉，这里都会红。
+     */
+    const sentImage = upstream.lastImageBody?.image;
+    check('单独重出这一镜时，传的照片真的发出去了（修之前这条恒空）',
+      Boolean(sentImage), JSON.stringify(Object.keys(upstream.lastImageBody || {})));
+    const after = store.read(p2.id).shots[0];
+    check('而且这一镜记下了带过哪几张（手机上那行靠它显示）',
+      (after.bibleRefs || []).length > 0, JSON.stringify(after.bibleRefs));
+  }
+
   // ── 模型自己出的设定图：默认仍然不发（那条路的老理由还成立）──
   {
     settings.patch({ refMode: 'auto' });
