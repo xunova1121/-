@@ -100,8 +100,9 @@ export function renderControls(source = {}, { duration = 5, sampleEvery = 3 } = 
   const objects = first.objects;
   const trajectory = sampled.map(({ frame, stage }) => ({ frame, time: Number((frame / FPS).toFixed(3)), x: stage.cam.x, y: stage.cam.y, height: stage.cam.height, rotation: stage.cam.rotation || 0, lens: stage.cam.lens || 35, aperture: stage.cam.aperture || 4, focusId: stage.cam.focusId || '' }));
   const poseSequence = sampled.map(({ frame, stage }) => ({ frame, subjects: (stage.subjects || []).map((x) => ({ id: x.id, x: x.x, y: x.y, height: x.height, rotation: x.rotation, scale: x.scale, pose: x.pose || 'stand', action: x.action || '' })) }));
+  const lightSequence = sampled.map(({ frame, stage }) => ({ frame, time: Number((frame / FPS).toFixed(3)), lights: (stage.lights || []).map((x) => ({ id: x.id, type: x.lightType, x: x.x, y: x.y, height: x.height, intensity: x.intensity, color: x.color, targetId: x.targetId || '' })) }));
   const layers = [...(base.backdrop ? [{ id: 'background', kind: 'background', source: base.backdrop.image || null }] : []),
-    ...stageObjects(base).filter((x) => x.kind !== 'camera').map((x, i) => ({ id: x.item.id, kind: x.kind, name: x.item.name, source: x.item.thumbnail || null, z: i + 1 }))];
+    ...stageObjects(base).filter((x) => x.kind !== 'camera' && x.kind !== 'light').map((x, i) => ({ id: x.item.id, kind: x.kind, name: x.item.name, source: x.item.thumbnail || null, z: i + 1 }))];
   const knownIds = new Set(stageObjects(base).map((x) => x.item.id));
   const issues = [];
   for (const point of trajectory) {
@@ -114,7 +115,7 @@ export function renderControls(source = {}, { duration = 5, sampleEvery = 3 } = 
   }
   return { start: first.rgb, end: last.rgb, depth: first.depth, mask: first.mask, edge: first.edge, pose: first.pose,
     frames, sampleEvery: Math.max(1, sampleEvery), controlFps: Number((FPS / Math.max(1, sampleEvery)).toFixed(3)), width: W, height: H, fps: FPS, maxFrame,
-    keyframes: (base.keyframes || []).map((x) => x.frame), trajectory, poseSequence, layers, issues,
+    keyframes: (base.keyframes || []).map((x) => x.frame), trajectory, poseSequence, lightSequence, layers, issues,
     objects: objects.map((x) => ({ id: x.item.id, name: x.item.name, kind: x.kind, depth: Number(x.depth.toFixed(3)) })) };
 }
 
@@ -127,7 +128,8 @@ export function renderControls(source = {}, { duration = 5, sampleEvery = 3 } = 
 export function videoControlPrompt(bundle = {}) {
   const trajectory = bundle.trajectory || bundle.cameraTrajectory || [];
   const poses = bundle.poseSequence || [];
-  if (!trajectory.length && !poses.length) return '';
+  const lights = bundle.lightSequence || [];
+  if (!trajectory.length && !poses.length && !lights.length) return '';
 
   const firstCam = trajectory[0] || {};
   const lastCam = trajectory.at(-1) || firstCam;
@@ -141,9 +143,16 @@ export function videoControlPrompt(bundle = {}) {
     const end = lastPose.get(id) || start;
     return `${id} 从(${Number(start.x || 0).toFixed(2)},${Number(start.y || 0).toFixed(2)})移动到(${Number(end.x || 0).toFixed(2)},${Number(end.y || 0).toFixed(2)})，朝向${Number(end.rotation || 0).toFixed(0)}°，姿态${start.pose || 'stand'}→${end.pose || 'stand'}${end.action ? `，动作“${end.action}”` : ''}`;
   });
+  const firstLights = lights[0]?.lights || [];
+  const lastLights = new Map((lights.at(-1)?.lights || firstLights).map((x) => [x.id, x]));
+  const lighting = firstLights.map((start) => {
+    const end = lastLights.get(start.id) || start;
+    return `${start.id}使用${start.type || 'spot'}光，颜色${start.color || '#ffffff'}，强度${Number(start.intensity || 0).toFixed(1)}→${Number(end.intensity || 0).toFixed(1)}，照向${end.targetId || '主体'}`;
+  });
 
   return `【3D预演控制】严格保持首尾构图与空间关系；${camera}`
     + `${actors.length ? `；人物轨迹：${actors.join('；')}` : ''}`
+    + `${lighting.length ? `；灯光连续性：${lighting.join('；')}` : ''}`
     + `；按 ${Number(bundle.fps || 24)}fps、${Number(bundle.maxFrame || 0)} 帧平滑插值，不要让人物、道具或机位瞬移。`;
 }
 

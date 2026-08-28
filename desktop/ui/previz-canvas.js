@@ -249,6 +249,17 @@ export function blockingCanvas(stage, { size = 320, onChange = () => {} } = {}) 
       layer.append(sg);
     }
 
+    for (const light of stage.lights || []) {
+      const lg = el('g');
+      const target = findObject(stage, light.targetId)?.item || subjects[0];
+      if (target) lg.append(el('line', { x1: s.x(light.x), y1: s.y(light.y), x2: s.x(target.x), y2: s.y(target.y), class: 'previz-light-beam', 'pointer-events': 'none' }));
+      const dot = el('circle', { cx: s.x(light.x), cy: s.y(light.y), r: 10, class: 'previz-light' });
+      draggable(dot, (mx, my) => { light.x = Number(mx.toFixed(2)); light.y = Number(my.toFixed(2)); });
+      lg.append(dot);
+      const label = el('text', { x: s.x(light.x), y: s.y(light.y) + 4, class: 'previz-light-label', 'pointer-events': 'none' });
+      label.append(document.createTextNode('灯')); lg.append(label); layer.append(lg);
+    }
+
     // ── 机位 ──
     if (cam) {
       const g = el('g');
@@ -441,6 +452,36 @@ export function director3dCanvas(stage, {
     for (const x of [-.28, .28]) { const leg = new THREE.Mesh(new THREE.CylinderGeometry(.025, .035, 1.45, 8), new THREE.MeshStandardMaterial({ color: 0x71879a })); leg.position.set(x, .72, 0); leg.rotation.z = x * .2; g.add(leg); }
     return g;
   }
+  function lightRig(item) {
+    const g = new THREE.Group();
+    const color = new THREE.Color(item.color || '#ffd6a3');
+    const bulb = new THREE.Mesh(
+      new THREE.SphereGeometry(.13, 18, 12),
+      new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 2 })
+    );
+    bulb.position.y = Number(item.height || 2.6); g.add(bulb);
+    const stand = new THREE.Mesh(new THREE.CylinderGeometry(.025, .04, Number(item.height || 2.6), 8), new THREE.MeshStandardMaterial({ color: 0x596575 }));
+    stand.position.y = Number(item.height || 2.6) / 2; g.add(stand);
+    const targetItem = findObject(stage, item.targetId)?.item || stage.subjects?.[0] || { x: item.x, y: item.y, height: 1 };
+    const target = new THREE.Object3D();
+    target.position.set(Number(targetItem.x || 0) - Number(item.x || 0), Number(targetItem.height || 1) * .55, Number(targetItem.y || 0) - Number(item.y || 0));
+    g.add(target);
+    let source;
+    if (item.lightType === 'point') {
+      source = new THREE.PointLight(color, Number(item.intensity || 2.5), 12, 2);
+    } else if (item.lightType === 'directional') {
+      source = new THREE.DirectionalLight(color, Number(item.intensity || 2.5)); source.target = target;
+    } else {
+      source = new THREE.SpotLight(color, Number(item.intensity || 2.5), 16, Math.PI / 5, .35, 1.2); source.target = target;
+    }
+    source.position.y = Number(item.height || 2.6); source.castShadow = true; g.add(source);
+    const beam = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, Number(item.height || 2.6), 0), target.position.clone()]),
+      new THREE.LineBasicMaterial({ color, transparent: true, opacity: .65 })
+    );
+    g.add(beam);
+    return g;
+  }
   function redraw() {
     for (const obj of objects.values()) scene3d.remove(obj);
     objects.clear();
@@ -469,10 +510,10 @@ export function director3dCanvas(stage, {
         }).catch(() => { target.userData.modelError = true; });
       }
     }
-    const entries = [...(stage.subjects || []).map((item) => ({ kind: 'subject', item })), ...(stage.marks || []).filter((x) => !x.far).map((item) => ({ kind: 'prop', item })), { kind: 'camera', item: stage.cam }];
+    const entries = [...(stage.subjects || []).map((item) => ({ kind: 'subject', item })), ...(stage.marks || []).filter((x) => !x.far).map((item) => ({ kind: 'prop', item })), ...(stage.lights || []).map((item) => ({ kind: 'light', item })), { kind: 'camera', item: stage.cam }];
     for (const { kind, item } of entries) {
-      const fallback = kind === 'subject' ? actor(item) : kind === 'camera' ? cameraRig() : prop(item);
-      const obj = kind === 'camera' ? fallback : modelOrFallback(item, kind, fallback);
+      const fallback = kind === 'subject' ? actor(item) : kind === 'camera' ? cameraRig() : kind === 'light' ? lightRig(item) : prop(item);
+      const obj = kind === 'camera' || kind === 'light' ? fallback : modelOrFallback(item, kind, fallback);
       obj.position.set(Number(item.x || 0), 0, Number(item.y || 0)); obj.rotation.y = -THREE.MathUtils.degToRad(Number(item.rotation || item.facing || 0));
       obj.scale.setScalar(Number(item.scale || 1)); obj.userData = { item, kind };
       if (selected() === item.id) { const box = new THREE.BoxHelper(obj, 0x49c8ff); obj.add(box); }
@@ -544,7 +585,7 @@ export function cameraViewport(stage, { width = 480 } = {}) {
     const horizon = height * (0.52 + (Number(cam.height || 1.6) - 1.6) * .04);
     layer.append(el('line', { x1: 0, y1: horizon, x2: width, y2: horizon, class: 'previz-camera-horizon' }));
     const visible = [];
-    for (const entry of stageObjects(stage).filter((x) => x.kind !== 'camera')) {
+    for (const entry of stageObjects(stage).filter((x) => x.kind !== 'camera' && x.kind !== 'light')) {
       const dx = Number(entry.item.x) - Number(cam.x), dy = Number(entry.item.y) - Number(cam.y);
       const depth = dx * Math.cos(look) + dy * Math.sin(look);
       const side = -dx * Math.sin(look) + dy * Math.cos(look);
@@ -741,7 +782,7 @@ export function previzPanel(stage, {
     if (!found) return;
     const item = found.item;
     const title = Object.assign(document.createElement('b'), {
-      textContent: `${found.kind === 'camera' ? '摄影机' : item.name || '对象'} · ${item.id}`
+      textContent: `${found.kind === 'camera' ? '摄影机' : found.kind === 'light' ? '灯光' : item.name || '对象'} · ${item.id}`
     });
     const makeNumber = (label, key, step = '0.1') => {
       const input = Object.assign(document.createElement('input'), {
@@ -786,6 +827,16 @@ export function previzPanel(stage, {
         ['stand', '站立'], ['walk', '行走'], ['run', '奔跑'], ['sit', '坐下'], ['crouch', '下蹲'],
         ['reach', '伸手'], ['fight', '打斗']
       ]), makeText('动作指令', 'action', '例如：右手拔剑，左脚向前'));
+    } else if (found.kind === 'light') {
+      const color = Object.assign(document.createElement('input'), { type: 'color', value: item.color || '#ffd6a3', disabled: item.locked });
+      color.oninput = () => { item.color = color.value; director.redraw(); onChange(); };
+      color.onchange = () => { history.commit(); paintTimeline(); };
+      const colorWrap = document.createElement('label'); colorWrap.append(document.createTextNode('颜色'), color);
+      const targets = [['', '自动主体'], ...(stage.subjects || []).map((x) => [x.id, x.name || x.id]), ...(stage.marks || []).filter((x) => !x.far).map((x) => [x.id, x.name || x.id])];
+      const remove = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '删除灯光' });
+      remove.onclick = () => { stage.lights = (stage.lights || []).filter((x) => x.id !== item.id); selectedId = stage.cam.id; history.commit(); redrawAll(); onChange(); };
+      inspector.append(makeSelect('类型', 'lightType', [['spot', '聚光灯'], ['point', '点光源'], ['directional', '平行光']]),
+        makeNumber('强度', 'intensity', '0.1'), colorWrap, makeSelect('照向', 'targetId', targets), remove);
     }
   }
 
@@ -834,6 +885,17 @@ export function previzPanel(stage, {
       focusRow.append(btn(`f/${aperture}`, Number(stage.cam.aperture || 4) === aperture, () => { stage.cam.aperture = aperture; }));
     }
     controls.append(focusRow);
+
+    const lightRow = document.createElement('div');
+    lightRow.className = 'previz-row';
+    lightRow.append(Object.assign(document.createElement('span'), { className: 'previz-cap', textContent: '灯光' }));
+    for (const [type, label, color] of [['spot', '＋主光', '#ffd6a3'], ['point', '＋实景灯', '#ffb45e'], ['directional', '＋环境光', '#b8d7ff']]) {
+      lightRow.append(btn(label, false, () => {
+        const light = { name: label.slice(1), lightType: type, x: Number(stage.cam.x || 0) - 1, y: Number(stage.cam.y || 0) + 1, height: 2.6, intensity: type === 'point' ? 1.8 : 2.5, color, targetId: stage.subjects?.[0]?.id || '' };
+        stage.lights ||= []; stage.lights.push(light); normalizeStage(stage); selectedId = light.id; history.commit();
+      }));
+    }
+    controls.append(lightRow);
 
     const hRow = document.createElement('div');
     hRow.className = 'previz-row';

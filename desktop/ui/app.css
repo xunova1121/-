@@ -1235,6 +1235,9 @@ select.mini {
 .previz-3d-prop { fill:var(--surface-3); stroke:var(--ink-faint); stroke-width:1.5; }
 .previz-3d-tripod { stroke:var(--beam); stroke-width:2; }
 .previz-3d-camera { fill:var(--beam); stroke:var(--ground); stroke-width:1.5; }
+.previz-light { fill:#ffd08a; stroke:#fff1c9; stroke-width:2; cursor:grab; }
+.previz-light-label { fill:#241500; font-size:10px; font-weight:800; text-anchor:middle; }
+.previz-light-beam { stroke:#ffd08a; stroke-width:1.5; stroke-dasharray:5 4; opacity:.7; }
 .previz-3d-label { fill:var(--ink); font-size:11px; font-weight:650; text-anchor:middle; paint-order:stroke; stroke:var(--surface); stroke-width:3px; }
 .previz-3d-label.cam { fill:var(--beam); }
 .previz-workspace { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(230px,.8fr); gap:9px; align-items:start; }

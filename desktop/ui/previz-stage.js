@@ -1,5 +1,5 @@
 /** 预演台纯数据层：不依赖 DOM，桌面、手机和测试共用。 */
-const PREFIX = { camera: 'cam', subject: 'actor', prop: 'prop' };
+const PREFIX = { camera: 'cam', subject: 'actor', prop: 'prop', light: 'light' };
 
 function slug(value = '') {
   return String(value).trim().toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-').replace(/^-|-$/g, '').slice(0, 24);
@@ -18,6 +18,7 @@ export function normalizeStage(stage = {}) {
   stage.cam ||= { x: 0, y: -3, height: 1.6, lens: 35, move: {} };
   stage.subjects ||= [];
   stage.marks ||= [];
+  stage.lights ||= [];
   stage.keyframes ||= [];
   const used = new Set();
   const normalize = (kind, item, defaults = {}) => {
@@ -40,7 +41,14 @@ export function normalizeStage(stage = {}) {
     x.action = String(x.action || '');
   });
   stage.marks.filter((x) => !x.far).forEach((x) => normalize('prop', x, { x: 0, y: 0, height: 0.9, width: 0.9 }));
-  stage.schemaVersion = Math.max(2, Number(stage.schemaVersion || 0));
+  stage.lights.forEach((x) => {
+    normalize('light', x, { name: '灯光', x: 0, y: -1, height: 2.6, lightType: 'spot', intensity: 2.5, color: '#ffd6a3', targetId: '' });
+    x.lightType = ['spot', 'point', 'directional'].includes(x.lightType) ? x.lightType : 'spot';
+    x.intensity = Math.max(0, Math.min(20, Number(x.intensity || 0)));
+    x.color = /^#[0-9a-f]{6}$/i.test(x.color) ? x.color : '#ffd6a3';
+    x.targetId = String(x.targetId || '');
+  });
+  stage.schemaVersion = Math.max(3, Number(stage.schemaVersion || 0));
   return stage;
 }
 
@@ -49,7 +57,8 @@ export function stageObjects(stage = {}) {
   return [
     { kind: 'camera', item: stage.cam },
     ...stage.subjects.map((item) => ({ kind: 'subject', item })),
-    ...stage.marks.filter((item) => !item.far).map((item) => ({ kind: 'prop', item }))
+    ...stage.marks.filter((item) => !item.far).map((item) => ({ kind: 'prop', item })),
+    ...stage.lights.map((item) => ({ kind: 'light', item }))
   ];
 }
 
@@ -111,6 +120,11 @@ export function addKeyframe(stage, frame, objectIds = []) {
     } else if (found.kind === 'subject') {
       values[id].pose = x.pose || 'stand';
       values[id].action = x.action || '';
+    } else if (found.kind === 'light') {
+      values[id].lightType = x.lightType;
+      values[id].intensity = x.intensity;
+      values[id].color = x.color;
+      values[id].targetId = x.targetId || '';
     }
   }
   const key = { id: `kf-${Math.max(0, Math.round(frame))}`, frame: Math.max(0, Math.round(frame)), values };
@@ -134,12 +148,12 @@ export function frameState(stage, frame) {
     const a = left?.values?.[item.id] || item;
     const b = right?.values?.[item.id] || a;
     const out = { ...item };
-    for (const key of ['x', 'y', 'height', 'rotation', 'scale', 'lens', 'aperture']) {
+    for (const key of ['x', 'y', 'height', 'rotation', 'scale', 'lens', 'aperture', 'intensity']) {
       const av = Number(a[key]), bv = Number(b[key]);
       if (Number.isFinite(av) && Number.isFinite(bv)) out[key] = Number((av + (bv - av) * t).toFixed(4));
     }
     out.move = { ...((t < .5 ? a.move : b.move) || item.move || {}) };
-    for (const key of ['focusId', 'pose', 'action']) out[key] = (t < .5 ? a[key] : b[key]) ?? item[key];
+    for (const key of ['focusId', 'pose', 'action', 'lightType', 'color', 'targetId']) out[key] = (t < .5 ? a[key] : b[key]) ?? item[key];
     values[item.id] = out;
   }
   return { frame: f, left: left?.frame ?? null, right: right?.frame ?? null, t, values };
