@@ -383,6 +383,7 @@ export function director3dCanvas(stage, {
   const gltfLoader = new GLTFLoader();
   const modelCache = new Map();
   let backdropObject = null;
+  const guides = [];
 
   orbit.addEventListener('change', () => renderer.render(scene3d, view));
   renderer.domElement.oncontextmenu = (ev) => ev.preventDefault();
@@ -450,7 +451,24 @@ export function director3dCanvas(stage, {
     const lens = new THREE.Mesh(new THREE.CylinderGeometry(.16, .2, .34, 20), new THREE.MeshStandardMaterial({ color: 0x101820, metalness: .7 }));
     lens.rotation.x = Math.PI / 2; lens.position.set(0, 1.55, .33); g.add(lens);
     for (const x of [-.28, .28]) { const leg = new THREE.Mesh(new THREE.CylinderGeometry(.025, .035, 1.45, 8), new THREE.MeshStandardMaterial({ color: 0x71879a })); leg.position.set(x, .72, 0); leg.rotation.z = x * .2; g.add(leg); }
+    const depth = 2.2, halfW = .82 * 35 / Math.max(12, Number(stage.cam.lens || 35)), halfH = halfW / 1.78, y = 1.55;
+    const p = [new THREE.Vector3(0, y, .5), new THREE.Vector3(-halfW, y - halfH, depth), new THREE.Vector3(halfW, y - halfH, depth), new THREE.Vector3(halfW, y + halfH, depth), new THREE.Vector3(-halfW, y + halfH, depth)];
+    const edges = [p[0],p[1],p[0],p[2],p[0],p[3],p[0],p[4],p[1],p[2],p[2],p[3],p[3],p[4],p[4],p[1]];
+    g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(edges), new THREE.LineBasicMaterial({ color:0x49c8ff, transparent:true, opacity:.55 })));
     return g;
+  }
+  function addMotionGuide(item, kind) {
+    const points = (stage.keyframes || []).slice().sort((a,b) => a.frame-b.frame).map((key) => key.values?.[item.id]).filter(Boolean)
+      .map((x) => new THREE.Vector3(Number(x.x || 0), kind === 'camera' || kind === 'light' ? Number(x.height || item.height || 1) : .06, Number(x.y || 0)));
+    if (points.length < 2) return;
+    const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
+    const color = kind === 'camera' ? 0x49c8ff : kind === 'light' ? 0xffd08a : kind === 'subject' ? 0xffb648 : 0xaab7c7;
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(Math.max(16, points.length * 12))), new THREE.LineDashedMaterial({ color, dashSize:.18, gapSize:.1, transparent:true, opacity:.85 }));
+    line.computeLineDistances(); scene3d.add(line); guides.push(line);
+    for (const point of points) {
+      const dot = new THREE.Mesh(new THREE.SphereGeometry(.055, 10, 8), new THREE.MeshBasicMaterial({ color }));
+      dot.position.copy(point); scene3d.add(dot); guides.push(dot);
+    }
   }
   function lightRig(item) {
     const g = new THREE.Group();
@@ -485,6 +503,12 @@ export function director3dCanvas(stage, {
   function redraw() {
     for (const obj of objects.values()) scene3d.remove(obj);
     objects.clear();
+    for (const guide of guides.splice(0)) {
+      scene3d.remove(guide);
+      guide.geometry?.dispose();
+      if (Array.isArray(guide.material)) guide.material.forEach((material) => material.dispose());
+      else guide.material?.dispose();
+    }
     if (backdropObject) { scene3d.remove(backdropObject); backdropObject = null; }
     if (stage.backdrop?.image || stage.backdrop?.modelUrl) {
       backdropObject = new THREE.Group();
@@ -514,10 +538,13 @@ export function director3dCanvas(stage, {
     for (const { kind, item } of entries) {
       const fallback = kind === 'subject' ? actor(item) : kind === 'camera' ? cameraRig() : kind === 'light' ? lightRig(item) : prop(item);
       const obj = kind === 'camera' || kind === 'light' ? fallback : modelOrFallback(item, kind, fallback);
-      obj.position.set(Number(item.x || 0), 0, Number(item.y || 0)); obj.rotation.y = -THREE.MathUtils.degToRad(Number(item.rotation || item.facing || 0));
+      obj.position.set(Number(item.x || 0), 0, Number(item.y || 0));
+      if (kind === 'camera' && stage.subjects?.[0]) obj.rotation.y = Math.atan2(Number(stage.subjects[0].x || 0) - Number(item.x || 0), Number(stage.subjects[0].y || 0) - Number(item.y || 0));
+      else obj.rotation.y = -THREE.MathUtils.degToRad(Number(item.rotation || item.facing || 0));
       obj.scale.setScalar(Number(item.scale || 1)); obj.userData = { item, kind };
       if (selected() === item.id) { const box = new THREE.BoxHelper(obj, 0x49c8ff); obj.add(box); }
       objects.set(item.id, obj); scene3d.add(obj);
+      addMotionGuide(item, kind);
     }
     const rect = host.getBoundingClientRect(); renderer.setSize(Math.max(320, rect.width || size), Math.max(230, rect.height || size * .72), false);
     view.aspect = Math.max(1, (rect.width || size) / (rect.height || size * .72)); view.updateProjectionMatrix(); renderer.render(scene3d, view);
@@ -723,6 +750,7 @@ export function previzPanel(stage, {
   const timeline = document.createElement('div');
   timeline.className = 'previz-timeline';
   let currentFrame = 0;
+  let playbackRaf = 0;
   const assetShelf = document.createElement('div');
   assetShelf.className = 'previz-assets';
   if (assets.length) {
@@ -845,20 +873,41 @@ export function previzPanel(stage, {
     const maxFrame = Math.max(24, Math.round(Number(duration || 5) * 24));
     const range = Object.assign(document.createElement('input'), { type: 'range', min: '0', max: String(maxFrame), value: String(currentFrame) });
     const frame = Object.assign(document.createElement('b'), { textContent: `${currentFrame}f / ${maxFrame}f` });
+    const stopPlayback = () => {
+      if (playbackRaf) cancelAnimationFrame(playbackRaf);
+      playbackRaf = 0;
+    };
+    const showFrame = () => {
+      if ((stage.keyframes || []).length) applyFrame(stage, currentFrame);
+      canvas.redraw(); director.redraw(); viewport.redraw(); paintInspector(); refresh();
+    };
     range.oninput = () => {
+      stopPlayback();
       currentFrame = Number(range.value);
       frame.textContent = `${currentFrame}f / ${maxFrame}f`;
-      if ((stage.keyframes || []).length) {
-        applyFrame(stage, currentFrame);
-        canvas.redraw(); director.redraw(); viewport.redraw(); paintInspector();
-      }
+      showFrame();
+    };
+    const play = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: playbackRaf ? '❚❚ 暂停' : '▶ 播放预演' });
+    play.onclick = () => {
+      if (playbackRaf) { stopPlayback(); paintTimeline(); return; }
+      if (currentFrame >= maxFrame) currentFrame = 0;
+      const started = performance.now() - currentFrame / 24 * 1000;
+      play.textContent = '❚❚ 暂停';
+      const tick = (now) => {
+        currentFrame = Math.min(maxFrame, Math.round((now - started) / 1000 * 24));
+        range.value = String(currentFrame); frame.textContent = `${currentFrame}f / ${maxFrame}f`;
+        showFrame();
+        if (currentFrame < maxFrame) playbackRaf = requestAnimationFrame(tick);
+        else { playbackRaf = 0; paintTimeline(); }
+      };
+      playbackRaf = requestAnimationFrame(tick);
     };
     const add = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '＋记录关键帧' });
-    add.onclick = () => { addKeyframe(stage, currentFrame); history.commit(); paintTimeline(); onChange(); };
-    timeline.append(Object.assign(document.createElement('span'), { className: 'previz-cap', textContent: '24fps 时间轴' }), range, frame, add);
+    add.onclick = () => { stopPlayback(); addKeyframe(stage, currentFrame); history.commit(); paintTimeline(); onChange(); };
+    timeline.append(Object.assign(document.createElement('span'), { className: 'previz-cap', textContent: '24fps 时间轴' }), play, range, frame, add);
     for (const kf of stage.keyframes || []) {
       const jump = Object.assign(document.createElement('button'), { className: 'previz-key', textContent: `${kf.frame}f` });
-      jump.onclick = () => { currentFrame = kf.frame; paintTimeline(); };
+      jump.onclick = () => { stopPlayback(); currentFrame = kf.frame; showFrame(); paintTimeline(); };
       timeline.append(jump);
     }
   }

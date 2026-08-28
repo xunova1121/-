@@ -101,6 +101,24 @@ export function renderControls(source = {}, { duration = 5, sampleEvery = 3 } = 
   const trajectory = sampled.map(({ frame, stage }) => ({ frame, time: Number((frame / FPS).toFixed(3)), x: stage.cam.x, y: stage.cam.y, height: stage.cam.height, rotation: stage.cam.rotation || 0, lens: stage.cam.lens || 35, aperture: stage.cam.aperture || 4, focusId: stage.cam.focusId || '' }));
   const poseSequence = sampled.map(({ frame, stage }) => ({ frame, subjects: (stage.subjects || []).map((x) => ({ id: x.id, x: x.x, y: x.y, height: x.height, rotation: x.rotation, scale: x.scale, pose: x.pose || 'stand', action: x.action || '' })) }));
   const lightSequence = sampled.map(({ frame, stage }) => ({ frame, time: Number((frame / FPS).toFixed(3)), lights: (stage.lights || []).map((x) => ({ id: x.id, type: x.lightType, x: x.x, y: x.y, height: x.height, intensity: x.intensity, color: x.color, targetId: x.targetId || '' })) }));
+  const motionPaths = (base.subjects || []).map((subject) => {
+    const points = sampled.map(({ frame, stage }) => {
+      const current = (stage.subjects || []).find((x) => x.id === subject.id) || subject;
+      return { frame, time: Number((frame / FPS).toFixed(3)), x: Number(current.x || 0), y: Number(current.y || 0),
+        rotation: Number(current.rotation || 0), pose: current.pose || 'stand', action: current.action || '' };
+    });
+    let distance = 0;
+    let peakSpeed = 0;
+    for (let i = 1; i < points.length; i += 1) {
+      const segment = Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+      const elapsed = Math.max(1 / FPS, points[i].time - points[i - 1].time);
+      distance += segment;
+      peakSpeed = Math.max(peakSpeed, segment / elapsed);
+    }
+    const totalTime = Math.max(1 / FPS, Number(duration || 5));
+    return { id: subject.id, name: subject.name || subject.id, distance: Number(distance.toFixed(3)),
+      averageSpeed: Number((distance / totalTime).toFixed(3)), peakSpeed: Number(peakSpeed.toFixed(3)), points };
+  });
   const layers = [...(base.backdrop ? [{ id: 'background', kind: 'background', source: base.backdrop.image || null }] : []),
     ...stageObjects(base).filter((x) => x.kind !== 'camera' && x.kind !== 'light').map((x, i) => ({ id: x.item.id, kind: x.kind, name: x.item.name, source: x.item.thumbnail || null, z: i + 1 }))];
   const knownIds = new Set(stageObjects(base).map((x) => x.item.id));
@@ -113,9 +131,13 @@ export function renderControls(source = {}, { duration = 5, sampleEvery = 3 } = 
       issues.push({ code: 'shallow-focus-auto', frame: point.frame, level: 'warn', message: `第 ${point.frame} 帧使用超浅景深但没有指定对焦人物` });
     }
   }
+  for (const path of motionPaths) {
+    if (path.peakSpeed > 15) issues.push({ code: 'subject-teleport', subjectId: path.id, level: 'blocker', message: `${path.name} 峰值速度 ${path.peakSpeed.toFixed(1)}m/s，疑似关键帧瞬移` });
+    else if (path.peakSpeed > 8) issues.push({ code: 'subject-speed', subjectId: path.id, level: 'warn', message: `${path.name} 峰值速度 ${path.peakSpeed.toFixed(1)}m/s，请确认奔跑节奏` });
+  }
   return { start: first.rgb, end: last.rgb, depth: first.depth, mask: first.mask, edge: first.edge, pose: first.pose,
     frames, sampleEvery: Math.max(1, sampleEvery), controlFps: Number((FPS / Math.max(1, sampleEvery)).toFixed(3)), width: W, height: H, fps: FPS, maxFrame,
-    keyframes: (base.keyframes || []).map((x) => x.frame), trajectory, poseSequence, lightSequence, layers, issues,
+    keyframes: (base.keyframes || []).map((x) => x.frame), trajectory, poseSequence, motionPaths, lightSequence, layers, issues,
     objects: objects.map((x) => ({ id: x.item.id, name: x.item.name, kind: x.kind, depth: Number(x.depth.toFixed(3)) })) };
 }
 
@@ -128,8 +150,9 @@ export function renderControls(source = {}, { duration = 5, sampleEvery = 3 } = 
 export function videoControlPrompt(bundle = {}) {
   const trajectory = bundle.trajectory || bundle.cameraTrajectory || [];
   const poses = bundle.poseSequence || [];
+  const paths = bundle.motionPaths || [];
   const lights = bundle.lightSequence || [];
-  if (!trajectory.length && !poses.length && !lights.length) return '';
+  if (!trajectory.length && !poses.length && !paths.length && !lights.length) return '';
 
   const firstCam = trajectory[0] || {};
   const lastCam = trajectory.at(-1) || firstCam;
@@ -139,9 +162,12 @@ export function videoControlPrompt(bundle = {}) {
 
   const firstPose = new Map((poses[0]?.subjects || []).map((x) => [x.id, x]));
   const lastPose = new Map((poses.at(-1)?.subjects || []).map((x) => [x.id, x]));
+  const pathById = new Map(paths.map((x) => [x.id, x]));
   const actors = [...firstPose.entries()].map(([id, start]) => {
     const end = lastPose.get(id) || start;
-    return `${id} 从(${Number(start.x || 0).toFixed(2)},${Number(start.y || 0).toFixed(2)})移动到(${Number(end.x || 0).toFixed(2)},${Number(end.y || 0).toFixed(2)})，朝向${Number(end.rotation || 0).toFixed(0)}°，姿态${start.pose || 'stand'}→${end.pose || 'stand'}${end.action ? `，动作“${end.action}”` : ''}`;
+    const path = pathById.get(id);
+    const pace = path ? `，路径${Number(path.distance || 0).toFixed(2)}米，平均${Number(path.averageSpeed || 0).toFixed(2)}m/s、峰值${Number(path.peakSpeed || 0).toFixed(2)}m/s` : '';
+    return `${id} 从(${Number(start.x || 0).toFixed(2)},${Number(start.y || 0).toFixed(2)})移动到(${Number(end.x || 0).toFixed(2)},${Number(end.y || 0).toFixed(2)})${pace}，朝向${Number(end.rotation || 0).toFixed(0)}°，姿态${start.pose || 'stand'}→${end.pose || 'stand'}${end.action ? `，动作“${end.action}”` : ''}`;
   });
   const firstLights = lights[0]?.lights || [];
   const lastLights = new Map((lights.at(-1)?.lights || firstLights).map((x) => [x.id, x]));

@@ -2804,7 +2804,7 @@ export function exportShotControls(projectId, shotId, stageOverride = null) {
     schema: 'futuredream-control-bundle/v2', fps: rendered.fps, controlFps: rendered.controlFps,
     sampleEvery: rendered.sampleEvery, width: rendered.width, height: rendered.height,
     maxFrame: rendered.maxFrame, keyframes: rendered.keyframes, cameraTrajectory: rendered.trajectory,
-    poseSequence: rendered.poseSequence, lightSequence: rendered.lightSequence, layers: rendered.layers, sequence,
+    poseSequence: rendered.poseSequence, motionPaths: rendered.motionPaths, lightSequence: rendered.lightSequence, layers: rendered.layers, sequence,
     issues: rendered.issues,
     maps: Object.fromEntries(['start', 'end', 'depth', 'mask', 'edge', 'pose'].map((key) => [key, files[key]]))
   }, null, 2), 'utf8');
@@ -2813,7 +2813,7 @@ export function exportShotControls(projectId, shotId, stageOverride = null) {
     target.stage = stage;
     target.controls = { ...files, width: rendered.width, height: rendered.height, fps: rendered.fps,
       maxFrame: rendered.maxFrame, keyframes: rendered.keyframes, trajectory: rendered.trajectory,
-      poseSequence: rendered.poseSequence, lightSequence: rendered.lightSequence, layers: rendered.layers, objects: rendered.objects, issues: rendered.issues,
+      poseSequence: rendered.poseSequence, motionPaths: rendered.motionPaths, lightSequence: rendered.lightSequence, layers: rendered.layers, objects: rendered.objects, issues: rendered.issues,
       sequenceDir, sequence, controlFps: rendered.controlFps, sampleEvery: rendered.sampleEvery, at: new Date().toISOString() };
     return p;
   });
