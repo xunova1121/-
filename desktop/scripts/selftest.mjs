@@ -360,6 +360,9 @@ const upstream = http.createServer((req, res) => {
          */
         upstream.shotPrompts = upstream.shotPrompts || [];
         upstream.shotPrompts.push(user);
+        // system 也留一份：验"这一批的时长预算 = 这一批那几场之和"要用
+        upstream.shotSystems = upstream.shotSystems || [];
+        upstream.shotSystems.push(system);
         // 让测试能造出"跑到第 N 批挂掉"，验前面几批不白跑
         if (upstream.failShotsAfter && upstream.shotPrompts.length > upstream.failShotsAfter) {
           res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -3130,6 +3133,9 @@ section('大纲 → 分镜：只拆没拆过的场次');
 
   {
     const p = mk();
+    // ⚠ 清零：这两个数组整轮共用，不清的话数到的是"开机以来所有拆分镜请求"
+    upstream.shotPrompts = [];
+    upstream.shotSystems = [];
     await studio.analyzeScript(p.id, { force: true });
     const after = store.read(p.id);
 
@@ -3139,7 +3145,14 @@ section('大纲 → 分镜：只拆没拆过的场次');
      * 不查这个的话，大纲那一层可以完全没接上而这里全绿 ——
      * 分镜照样拆得出来（模型读原始剧本一样能拆），只是你改的那份没起作用。
      */
-    const sent = String(upstream.lastShotPrompt?.user || '');
+    /**
+     * ⚠ 要看**所有批次**，不能只看最后一批。
+     *
+     * 拆分镜现在是分批跑的，b-07 可能落在第一批里，而 lastShotPrompt
+     * 只留了最后一批 —— 那样这条断言的成败取决于它恰好排在第几批，
+     * 是一条会随批大小随机红绿的断言。
+     */
+    const sent = (upstream.shotPrompts || []).join('\n');
     check('喂给模型的是大纲里那几场，不是原始剧本',
       /【场次 b-07】/.test(sent) && /走向栈桥/.test(sent), sent.slice(0, 120));
     check('原始剧本没有被直接丢进去', !/发现缆绳被割断。$/.test(sent.trim()) || /【场次/.test(sent));
@@ -3153,11 +3166,33 @@ section('大纲 → 分镜：只拆没拆过的场次');
      * 时长按**大纲上每一场自己的估算**走，不再按字数比例分摊。
      * 字数是个很糙的代理：同样两千字，全是对话的一场念完要 90 秒。
      */
-    const sysPrompt = String(upstream.lastShotPrompt?.system || '');
-    const want = ol.estimateSeconds({ summary: '走向栈桥。', dialogue: '设备正常。', seconds: 30 }).suggested
-      + ol.estimateSeconds({ summary: '发现缆绳被割断。', dialogue: '', seconds: 40 }).suggested;
-    check('时长预算来自大纲，不是项目的目标时长',
-      sysPrompt.includes(String(want)), `期望含 ${want}；项目目标是 120`);
+    /**
+     * ⚠ 分批之后这条要**逐批**验：每一批的预算 = 这一批那几场的估算之和。
+     *
+     * 原来写的是"最后一批的 system 里含两场之和"，那在一次拆完时成立，
+     * 分批之后两场可能落在不同批里 —— 断言会随批大小随机红绿，
+     * 而它验的那件事其实一直是对的。
+     */
+    // 这一节的大纲固定就是 mk() 里那两场，直接拿来算期望值
+    const beatsNow = ol.normalizeOutline({
+      beats: [
+        { id: 'b-07', scene: '码头', characters: ['阿澜'], summary: '走向栈桥。', dialogue: '设备正常。', seconds: 30 },
+        { id: 'b-04', scene: '码头', characters: ['阿澜'], summary: '发现缆绳被割断。', dialogue: '', seconds: 40 }
+      ]
+    }).beats;
+    const byId = new Map(beatsNow.map((b) => [b.id, b]));
+    const budgets = (upstream.shotSystems || []).map((sys) => {
+      const m = sys.match(/控制在\s*(\d+)\s*秒/);
+      return m ? Number(m[1]) : null;
+    });
+    const perBatchIds = (upstream.shotPrompts || [])
+      .map((u) => [...u.matchAll(/【场次\s*([a-z0-9-]+)】/gi)].map((x) => x[1]));
+    const expected = perBatchIds.map((ids) => ids.reduce(
+      (sum, id) => sum + (byId.has(id) ? ol.estimateSeconds(byId.get(id)).suggested : 0), 0
+    ));
+    check('每一批的时长预算都来自大纲那几场，不是项目的目标时长',
+      budgets.length > 0 && budgets.every((got, i) => got !== null && Math.abs(got - expected[i]) <= 1),
+      JSON.stringify({ 发出去的: budgets, 按大纲算的: expected, 项目目标: 120 }));
   }
 
   // ── 再拆一次：全锁着，要拦住并说清出路 ──
@@ -7642,23 +7677,82 @@ section('长生成走流式：慢和死是两回事');
     check('还点名了发往哪个主机', /127\.0\.0\.1/.test(msg), msg.slice(0, 80));
   }
 
-  // ── 开了个头然后停住：和上一种是**两种毛病**，说法必须不一样 ──
+  // ── 开了个头然后停住：JSON 真的不完整，才该报错 ──
   {
     settings.patch({ baseUrls: { openai: `${sseUrl}/stall` } });
     let msg = '';
+    const t0 = Date.now();
     await adaptersMod.chat({
-      providerId: 'openai', model: 'claude-opus-5', user: '拆一下', stream: true,
+      providerId: 'openai', model: 'claude-opus-5', user: '拆一下', stream: true, jsonMode: true,
       timeoutMs: 60000, idleTimeoutMs: 900, label: '流式·半路死'
     }).catch((e) => { msg = e.message; });
-    check('吐了一半就停住，也会失败', Boolean(msg), msg);
+    check('吐了一半就停住、而且解析不出来时，报错', Boolean(msg), msg);
     /**
      * 这条是空闲超时存在的**全部意义**：总时长给了 60 秒，它在 0.9 秒
      * 没动静时就掐了。靠总时长的话要白等 60 秒才知道对面已经死了。
      */
-    check('靠的是"多久没动静"，不是等总时长到点',
-      /读到一半就停了/.test(msg), msg.slice(0, 140));
-    check('说清了已经收到多少字节（半截数据不能当成功用）',
-      /已经收到 \d+ 字节/.test(msg), msg.slice(0, 140));
+    check('靠的是"多久没动静"，不是等总时长到点', Date.now() - t0 < 10000, `等了 ${Date.now() - t0}ms`);
+    check('说清了收到多少字节、以及这一段是真的不完整',
+      /收到 \d+ 字节/.test(msg) && /解析不出完整结果/.test(msg), msg.slice(0, 200));
+    /**
+     * ⚠ 这句"不完整"必须是**验出来的**，不是猜的 —— 所以报错里敢这么写。
+     * 下一组验的正是反面：内容其实完整时，绝不能扔。
+     */
+    check('并且明说这个结论是验过的', /已经验过了，不是猜的/.test(msg), msg.slice(0, 240));
+  }
+
+  // ── 正文发完了但不收尾：**这份是完整的，不许扔** ──
+  {
+    /**
+     * 中转站很常见的一种坏法：正文全发完，但不发 [DONE]、也不关连接。
+     * 从我们这边看和"半路死"长得一模一样（都是"收到 N 字节然后没动静"），
+     * 但那份内容是**完整的**，而且是花过钱的。
+     *
+     * 用户真实撞上的就是这个：收到 277463 字节 ≈ 4600 token 的正文，
+     * 而我们连看都没看一眼就整个丢掉，让他从头再跑一次、再花一次钱。
+     *
+     * 判据只有一个，而且是验出来的：能不能解析成 JSON。
+     */
+    const whole = http.createServer((req, res) => {
+      req.on('data', () => {});
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        const f = (t) => `data: ${JSON.stringify({ choices: [{ delta: { content: t } }] })}\n\n`;
+        res.write(f('{"shots":[{"description":"阿澜走向栈桥"}]}'));
+        // 故意**不发 [DONE]、不 res.end()** —— 连接就这么挂着
+      });
+    });
+    await new Promise((r) => whole.listen(0, '127.0.0.1', r));
+    settings.patch({ baseUrls: { openai: `http://127.0.0.1:${whole.address().port}/x` } });
+    let out = null;
+    let err = '';
+    const notes = [];
+    await adaptersMod.chat({
+      providerId: 'openai', model: 'claude-opus-5', user: '拆', stream: true, jsonMode: true,
+      timeoutMs: 60000, idleTimeoutMs: 900, label: '流式·发完了不收尾',
+      onEvent: (ev) => { if (ev.type === 'note') notes.push(ev.message); }
+    }).then((r) => { out = r; }).catch((e) => { err = e.message; });
+
+    check('正文发完但没收尾时，收到的东西照常用（不是白花钱）',
+      out?.text === '{"shots":[{"description":"阿澜走向栈桥"}]}', err || JSON.stringify(out?.text));
+    check('而且说了一声"对面没正常收尾"（不能悄悄当正常处理）',
+      notes.some((m) => /没有正常收尾/.test(m)), JSON.stringify(notes));
+    whole.close();
+  }
+
+  // ── 那个"完整不完整"的判据本身 ──
+  {
+    check('完整的 JSON 认得出', adaptersMod.looksCompleteJSON('{"a":1}') === true);
+    check('断在半路的认得出来是断的', adaptersMod.looksCompleteJSON('{"a":1,"b":') === false);
+    check('前后带闲话的也能捞出来（模型爱加一句"好的，这是结果："）',
+      adaptersMod.looksCompleteJSON('好的：\n{"a":1}\n以上。') === true);
+    /**
+     * ⚠ 用真解析，不用正则数括号 —— 描述里带花括号完全可能，
+     * 数括号会把一段完整的 JSON 判成不完整，然后把它扔掉。
+     */
+    check('描述里带花括号也不会被误判',
+      adaptersMod.looksCompleteJSON('{"d":"他说\\"{喂}\\"然后走了"}') === true);
+    check('空的就是不完整', adaptersMod.looksCompleteJSON('') === false);
   }
 
   // ── 还在吐字就一直等：慢不该被当成死 ──
@@ -7790,8 +7884,19 @@ section('长剧本：拆分镜一批一批来');
     const prompts = upstream.shotPrompts || [];
     check('分成了多批（不是一次把 14 场全发出去）', prompts.length >= 3, `实际发了 ${prompts.length} 次`);
     const perCall = prompts.map((u) => [...u.matchAll(/【场次\s*[a-z0-9-]+】/gi)].length);
-    check('每一批发出去的场次都不超过上限（输出量被钉死，和剧本多长无关）',
-      perCall.every((n) => n > 0 && n <= 6), JSON.stringify(perCall));
+    /**
+     * ⚠ 量的是"这一批会写出多少镜"，不是"几场"。
+     *
+     * 第一版按场数切（一批 6 场），用户真机上还是撞了：
+     * 收到 277463 字节（≈4600 token）后被掐。因为"场"根本不是均匀单位 ——
+     * 一场 20 秒和一场 90 秒，拆出来的镜数差四倍多，按场数切等于
+     * **不知道自己一次要多少东西**。
+     *
+     * 这里的大纲每场 20 秒 ≈ 4 镜，所以一批 12 镜 ≈ 3 场。
+     * 断言按镜数写，以后调 SHOTS_PER_BATCH 也不会误伤这条。
+     */
+    check('每一批的预计镜数不超过上限（输出量被钉死，和剧本多长无关）',
+      perCall.every((n) => n > 0 && n * 4 <= 12 + 4), JSON.stringify(perCall));
     check('加起来正好是全部 14 场，不多不少（漏一场 = 成片少一段，没人会发现）',
       perCall.reduce((a, b) => a + b, 0) === 14, JSON.stringify(perCall));
 
@@ -7836,12 +7941,17 @@ section('长剧本：拆分镜一批一批来');
     const mid = store.read(p.id);
     const o = ol.normalizeOutline(mid.outline);
     const locked = o.beats.filter((b) => b.locked).length;
+    const open = o.beats.filter((b) => !b.locked).length;
     check('断在第 3 批时，前两批已经落盘了', (mid.shots || []).length > 0, String((mid.shots || []).length));
-    check('而且前两批的场次已经上锁（再跑不会重拆、不会重复计费）',
-      locked === 12, `锁了 ${locked} 场`);
+    /**
+     * 不写死锁了几场 —— 那取决于每批装几镜，调一次 SHOTS_PER_BATCH 就失准，
+     * 而失准时红的是一条**正确的**断言，那种红会教人去改断言而不是查代码。
+     * 要守的是这句和批大小无关的话：**跑过的锁上，没跑到的开着，一场不落**。
+     */
+    check('而且跑过的那几场已经上锁（再跑不会重拆、不会重复计费）',
+      locked > 0 && locked < 14, `锁了 ${locked} 场`);
     check('没跑到的那几场还开着（它们是"还没拆"，不是"拆过了"）',
-      o.beats.filter((b) => !b.locked).length === 2,
-      JSON.stringify(o.beats.filter((b) => !b.locked).map((b) => b.id)));
+      open > 0 && locked + open === 14, JSON.stringify({ locked, open }));
 
     // 再点一次，从没锁的那一场接着走
     const shotsBefore = (mid.shots || []).length;
@@ -7852,9 +7962,12 @@ section('长剧本：拆分镜一批一批来');
       ol.normalizeOutline(done.outline).beats.every((b) => b.locked)
       && (done.shots || []).length > shotsBefore,
       JSON.stringify({ before: shotsBefore, after: (done.shots || []).length }));
-    const resumed = upstream.shotPrompts.map((u) => [...u.matchAll(/【场次\s*[a-z0-9-]+】/gi)].length);
-    check('续跑时只发还没拆的那两场，已经拆过的一场都不重发',
-      resumed.reduce((a, b) => a + b, 0) === 2, JSON.stringify(resumed));
+    const resumedIds = upstream.shotPrompts.flatMap((u) => [...u.matchAll(/【场次\s*([a-z0-9-]+)】/gi)].map((m) => m[1]));
+    const wasLocked = new Set(o.beats.filter((b) => b.locked).map((b) => b.id));
+    check('续跑时一场都不重发（已经拆过的重发 = 重复计费，而且会覆盖手改过的镜头）',
+      resumedIds.every((id) => !wasLocked.has(id)), JSON.stringify({ resumedIds: resumedIds.slice(0, 10) }));
+    check('而且把剩下的那几场都补齐了',
+      new Set(resumedIds).size === open, JSON.stringify({ 发了: new Set(resumedIds).size, 该发: open }));
     await fetch(`${appUrl}/api/projects/${p.id}`, { method: 'DELETE' });
   }
 

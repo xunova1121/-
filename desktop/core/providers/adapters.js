@@ -274,6 +274,37 @@ export async function chat({
   if (!res.ok) fail(label, res);
 
   /**
+   * ══════════ 流没收尾时，先看看收到的能不能用 ══════════
+   *
+   * 中转站有一种很常见的坏法：正文全发完了，但**不发 [DONE]、也不关连接**。
+   * 从我们这边看就是"收到 27 万字节然后没动静了"，而那份内容其实是完整的。
+   *
+   * 用户真实撞上的就是这个：277463 字节 ≈ 4600 token 的正文，全是花过钱的，
+   * 而我们连看都没看就整个丢掉，让他从头再跑一次、再花一次。
+   *
+   * 判据只有一个，而且是**验出来的不是猜出来的**：它能不能解析成 JSON。
+   * 能 —— 就是完整的，照常用，只在日志里说一声流没收尾；
+   * 不能 —— 才是真的断了，这时候报错才有底气说"没法用"。
+   */
+  if (res.incomplete) {
+    const got = String(res.text || '');
+    const usable = jsonMode ? looksCompleteJSON(got) : got.trim().length > 0;
+    if (!usable) {
+      throw new Error(
+        `${label}：流读到一半就断了 —— 收到 ${res.incompleteBytes} 字节后 `
+        + `${Math.round(res.incompleteIdleMs / 1000)} 秒没有新内容，而收到的这部分解析不出完整结果。\n`
+        + '这一段是真的不完整（已经验过了，不是猜的）。多半是中转站把连接掐了。\n'
+        + '出分镜的话：先出大纲再拆分镜，那条路按场次分批，每批要写的东西少得多，不容易被掐。'
+      );
+    }
+    onEvent?.({
+      type: 'note',
+      message: `⚠ 对面没有正常收尾（收到 ${res.incompleteBytes} 字节后停了），`
+        + '但收到的内容能完整解析出来，这一次照常用 —— 没有白花钱。'
+    });
+  }
+
+  /**
    * 记账就记在这里 —— 紧挨着解析响应的那一行。
    *
    * 不放在调用方（studio 里十几处），是因为那样每加一个新调用点都要记得
@@ -346,6 +377,34 @@ export async function chat({
     };
   }
   return { text, raw: res.json, usage: usage || res.json?.usage || null };
+}
+
+/**
+ * 这段文本里有没有一个**完整的** JSON 对象。
+ *
+ * 用真的解析，不用正则数括号 —— 括号计数在字符串里带 { } 时会算错，
+ * 而分镜描述里带花括号完全可能。解析失败就是不完整，没有中间地带。
+ *
+ * 先整体试一次，不行再取最外层 {...} 试一次（模型爱在前后加一句话或代码块）。
+ */
+export function looksCompleteJSON(text) {
+  const s = String(text || '').trim();
+  if (!s) return false;
+  try {
+    JSON.parse(s);
+    return true;
+  } catch {
+    /* 往下再试一次 */
+  }
+  const a = s.indexOf('{');
+  const b = s.lastIndexOf('}');
+  if (a < 0 || b <= a) return false;
+  try {
+    JSON.parse(s.slice(a, b + 1));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

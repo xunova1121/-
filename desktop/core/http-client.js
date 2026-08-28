@@ -521,12 +521,66 @@ export async function execute(spec, onEvent) {
   } catch (err) {
     clearTimeout(timer);
     if (hardTimer) clearTimeout(hardTimer);
+
+    /**
+     * ⚠ **空闲超时但已经收到东西时，别把它扔了。**
+     *
+     * 这里原来直接抛错，错误里还写着"收到的这半截不完整，没法用"——
+     * 而那是一句**没验证过的断言**。真实情形是：中转站可能已经把正文
+     * 全发完了，只是没发 [DONE]、也没关连接。那份内容是**完整的**。
+     *
+     * 用户报上来的就是这种：收到 277463 字节（≈4600 token 的正文），
+     * 然后 90 秒没动静。那些 token 是花了钱的，而我们连看都没看一眼
+     * 就整个丢掉，让他从头再来、再花一次。
+     *
+     * 所以这一支改成**把已经收到的原样交出去**，加一个 incomplete 标记，
+     * 由上层去判断"这东西能不能用"—— 判据是它自己能不能解析出来，
+     * 不是我们猜。猜不出来的事就别写成结论。
+     */
+    if (err.name === 'AbortError' && timedOutIdle && bytes > 0) {
+      const salvaged = isSSE ? (assembled || raw) : raw;
+      const entry0 = logbus.record({
+        ...logDraft,
+        status: response.status,
+        ok: response.ok,
+        ttfbMs,
+        totalMs: Date.now() - startedAt,
+        bytes,
+        stream: isSSE,
+        responseHeaders,
+        responseBody: logbus.redactBody(salvaged),
+        error: `流没有正常收尾：收到 ${bytes} 字节后 ${Math.round(idleMs / 1000)} 秒无新内容`
+      });
+      onEvent?.({
+        type: 'note',
+        message: `对面没有正常收尾（收到 ${bytes} 字节后停了），先看看收到的这部分能不能用…`
+      });
+      return {
+        logId: entry0.id,
+        ok: response.ok,
+        status: response.status,
+        statusText: response.statusText,
+        headers: responseHeaders,
+        raw,
+        json: null,
+        text: salvaged,
+        events,
+        stream: isSSE,
+        ttfbMs,
+        totalMs: Date.now() - startedAt,
+        bytes,
+        /** 流没收尾。内容可能完整也可能不完整 —— 上层自己验，别在这儿下结论 */
+        incomplete: true,
+        incompleteBytes: bytes,
+        incompleteIdleMs: idleMs
+      };
+    }
+
     const message =
       err.name === 'AbortError'
         ? (timedOutIdle
-          // 读到一半停了，和"从头到尾没动静"是两种毛病，说法必须不一样
-          ? `响应读到一半就停了：已经收到 ${bytes} 字节，然后 ${Math.round(idleMs / 1000)} 秒没有新内容。`
-            + '多半是对面（或中间的中转站）把连接掐了 —— 收到的这半截不完整，没法用。'
+          // 一个字节都没收到就停了 —— 这时候确实没什么可救的
+          ? `响应还没开始就停了：${Math.round(idleMs / 1000)} 秒内一个字节都没来。`
           : `响应读取超时（${timeoutMs}ms）`)
         : `响应读取中断：${err.message}`;
     const entry = logbus.record({

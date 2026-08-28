@@ -1288,7 +1288,21 @@ export function editOutlineBeat(projectId, beatId, fields = {}) {
   return applyOutlineOps(projectId, { ops: [{ op: 'edit', id: beatId, fields }] });
 }
 
-async function analyzeScriptRaw(projectId, { shotCount = 8, chapterId = null, force = false, onEvent, signal = null } = {}) {
+async function analyzeScriptRaw(projectId, {
+  shotCount = 8, chapterId = null, force = false, onEvent, signal = null,
+  /**
+   * 这一趟**开跑时**就定下来的场次范围（id 列表）。
+   *
+   * 分批之后这一步会循环好几分钟，而人完全可能在这几分钟里往大纲里插一场
+   *（他正看着大纲）。不定死范围的话，后面某一批会顺手把它捞进去拆掉 ——
+   * 那一场"什么时候被拆"取决于它插进来的时机和当时跑到第几批，
+   * 而这种时序上的巧合是最难解释、也最难复现的一类行为。
+   *
+   * 定死之后规矩很简单：**这一趟只拆开跑时就在的那些场**，
+   * 中途加的属于下一趟。界面上本来就有"还有 N 场没拆分镜"的提示接着它。
+   */
+  scopeIds = null
+} = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
   if (!project.bible) throw new Error('请先跑「设定集」—— 没有冻结人设，分镜会自己发挥外貌描述');
@@ -1337,7 +1351,10 @@ async function analyzeScriptRaw(projectId, { shotCount = 8, chapterId = null, fo
    */
   const outlineNow = outline.normalizeOutline(project.outline);
   const inScope = outlineNow.beats.filter((b) => (chapter ? b.chapterId === chapter.id : true));
-  const allPending = inScope.filter((b) => !b.locked);
+  const allPending = inScope
+    .filter((b) => !b.locked)
+    // 第一批定范围，后面几批照着这个范围走 —— 中途插进来的不算数
+    .filter((b) => !scopeIds || scopeIds.includes(b.id));
   /**
    * ══════════ 一次只拆这么多场 ══════════
    *
@@ -1371,10 +1388,37 @@ async function analyzeScriptRaw(projectId, { shotCount = 8, chapterId = null, fo
    *   · 出来的东西更好。模型在长结构化输出上会越写越散，
    *     十几镜一批时它还端得住全局
    */
-  const BEATS_PER_BATCH = 6;
+  /**
+   * ⚠ 一批切多少，量的是**这一批会写出多少镜**，不是"几场"。
+   *
+   * 第一版按场数切（一批 6 场），用户真机上跑出来这样：
+   *     已经收到 277463 字节，然后 90 秒没有新内容
+   * 27 万字节 ≈ 4600 token 的正文 —— 一批还是太大。
+   *
+   * 原因是"场"根本不是一个均匀的单位：一场 20 秒和一场 90 秒，
+   * 拆出来的镜数差四倍多。按场数切，等于**不知道自己一次要多少东西**，
+   * 碰上几场长的就又撞上限了。
+   *
+   * 按镜数切就钉死了：每批 12 镜上下 ≈ 2500 token，离任何模型的上限都远。
+   * 至少切一场（一场再长也不能不拆），所以最长的那种场仍然可能偏大 ——
+   * 那种情况下真正该做的是把那一场在大纲里拆成两场，而那是人的判断。
+   */
+  const SHOTS_PER_BATCH = 12;
   // ⚠ useOutline 在下面才定义，这里直接用它的来源 —— 提前引用 const 会 TDZ 报错
   const batching = inScope.length > 0;
-  const targetBeats = batching ? allPending.slice(0, BEATS_PER_BATCH) : allPending;
+  const takeByShots = (beats) => {
+    const out = [];
+    let shots = 0;
+    for (const b of beats) {
+      const n = duration.planShotCount(outline.estimateSeconds(b).suggested);
+      // 头一场无论多大都要收下 —— 否则一场特别长的戏会让这一批空转，永远出不去
+      if (out.length && shots + n > SHOTS_PER_BATCH) break;
+      out.push(b);
+      shots += n;
+    }
+    return out;
+  };
+  const targetBeats = batching ? takeByShots(allPending) : allPending;
   /** 这一批之后还剩几场没拆。跑完拿它决定要不要接着来。 */
   const restAfterThisBatch = batching ? allPending.length - targetBeats.length : 0;
   const useOutline = inScope.length > 0;
@@ -1765,7 +1809,11 @@ async function analyzeScriptRaw(projectId, { shotCount = 8, chapterId = null, fo
       type: 'note',
       message: `这一批 ${targetBeats.length} 场拆完了（${shots.length} 镜），还剩 ${restAfterThisBatch} 场，接着拆…`
     });
-    return analyzeScriptRaw(projectId, { shotCount, chapterId, force: false, onEvent, signal });
+    return analyzeScriptRaw(projectId, {
+      shotCount, chapterId, force: false, onEvent, signal,
+      // 把这一趟的范围原样传下去（第一批算出来的那份）
+      scopeIds: scopeIds || allPending.map((b) => b.id)
+    });
   }
 
   onEvent?.({
