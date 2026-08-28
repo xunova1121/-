@@ -125,10 +125,72 @@ export default {
     const bible = project.bible;
     const imageProviders = state.catalog.providers.filter((p) => (p.capabilities || []).includes('t2i'));
 
+    /**
+     * ── 老的半身设定图，提醒一下 ──
+     *
+     * 角色设定图从「正面半身」改成了「一张四视图」（上半身特写 + 全身正/侧/背）。
+     * 但**已经出过的图不会自己变** —— 改的是提示词，不是磁盘上那张 png。
+     *
+     * 不提醒的话，老项目在这一页看起来完全没变化，用户会以为这个改动没生效，
+     * 或者更糟：以为已经生效了，然后继续在半身图的基础上出视频，
+     * 而全景和背影照样每镜一个样。
+     *
+     * 认老图靠 sheetPromptUsed（上次真正发出去的那句话）—— 它记的是**事实**，
+     * 不是"应该发什么"。按理该发的那句话现在人人都一样，只有真发过的那句能分辨新旧。
+     */
+    const staleChars = (bible.characters || []).filter((c) => {
+      const used = c.sheetPromptUsed || '';
+      // 没出过图的不算"旧"，那是"还没出" —— 两件事，提示语也不一样
+      return c.sheetPath && !used.includes('角色三视图');
+    });
+
     // ── 全片风格锚 ──
     const anchorInput = h('textarea', { rows: 2 }, bible.style.anchor);
     const paletteInput = h('input', { type: 'text', value: bible.style.palette || '' });
     const negativeInput = h('textarea', { rows: 2 }, bible.style.negative);
+
+    if (staleChars.length) {
+      const redoAll = h('button', { class: 'btn sm primary' }, `重出这 ${staleChars.length} 张（要花钱）`);
+      const status = h('span', { class: 'field-hint' });
+      redoAll.onclick = async () => {
+        redoAll.disabled = true;
+        let done = 0;
+        for (const c of staleChars) {
+          status.textContent = `正在重出「${c.name}」（${done + 1}/${staleChars.length}）…`;
+          try {
+            await stream(
+              // cap:sheet-regen
+              `/projects/${project.id}/bible/char/${encodeURIComponent(c.name)}/regenerate`,
+              { appearance: c.appearance || '' },
+              (ev) => { if (ev.type === 'error') toast(ev.message, 'err'); }
+            );
+            done += 1;
+          } catch (err) {
+            toast(`「${c.name}」没出成：${err.message}`, 'err');
+          }
+        }
+        status.textContent = `重出了 ${done} 张`;
+        toast(done ? `${done} 张已换成三视图` : '一张都没出成', done ? 'ok' : 'err');
+        rerender();
+      };
+      root.append(
+        h('div', { class: 'panel' },
+          h('h2', { class: 'panel-title' }, '这几张还是老的半身图',
+            h('span', { class: 'badge' }, `${staleChars.length} 个角色`)),
+          h('p', { class: 'panel-hint' },
+            // 纯文本节点里写 ** 只会原样印出来，要强调就用元素（这个坑本仓库踩过）
+            '角色设定图现在出的是', h('b', {}, '一张四视图'), '：上半身特写 + 全身正面 / 侧面 / 背面。'
+            + '下面这几位的图是改之前出的，只有正面半身 —— '
+            + '半身图里没有腿、没有鞋、没有后脑勺、没有衣服背面，'
+            + '所以全景一出，裤子和鞋每镜一个样；人一转身，后背的图案是模型现编的。'
+            + '而复核那一层比的全是半身图里有的东西，永远判 pass，不会报错。'),
+          h('p', { class: 'panel-hint' },
+            h('b', {}, staleChars.map((c) => c.name).join('、')),
+            '。重出会**按当前描述重画**，脸有可能和现在这张不完全一样 —— '
+            + '还没出过分镜图的话现在换最划算；已经出了一半，换完那些镜要跟着重出才对得上。'),
+          h('div', { class: 'inline' }, redoAll, status))
+      );
+    }
 
     root.append(
       h('div', { class: 'panel' },

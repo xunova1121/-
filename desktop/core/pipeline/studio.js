@@ -607,6 +607,67 @@ export function bibleBucket(bible, kind) {
  * 角色要正面半身好辨认五官，场景要空镜别混进人，道具要单体产品图。
  * 混用一套模板的话，道具图里会莫名其妙站个人。
  */
+/**
+ * ══════════ 角色设定图：一张四视图，不是一张正面半身 ══════════
+ *
+ * 原来这里出的是「正面半身，中性表情」—— 一张只到胸口的正脸。
+ *
+ * 用户的原话："设定集中人物出图现在都是上半身，在后面出视频的时候很难统一。"
+ *
+ * 说的是实情，而且这个洞的形状很具体：**没画出来的部分，模型每一镜都在重新发明**。
+ * 半身图里没有腿、没有鞋、没有裙摆长度、没有后脑勺的发型、没有衣服背面。
+ * 于是全景一出，裤子和鞋每镜一个样；人一转身，后背的图案凭空长出来；
+ * 侧脸一给，鼻梁和发际线跟正面对不上。
+ *
+ * 而这件事**不会报错**。复核那一层比的是"发型发色瞳色脸型服装配色"，
+ * 全都是半身图里有的东西 —— 它看不见腿和背面，所以永远判 pass。
+ * 表现就是"每一镜单看都对，连起来就是不像同一个人"。
+ *
+ * ── 为什么是一张图里四个视角，而不是四张图 ──
+ *
+ * 四张分开的图（那是 angles.js 在做的事，见下）解决的是另一个问题：
+ * "这一镜是背影，给它背面那张当参考"。它是**定向的**。
+ *
+ * 而这里要的是**身份锚**：这个人从各个方向看是什么样，一次说清。
+ * 一张图里四视图有两个四张图给不了的好处：
+ *   · 四个视角是**同一次生成**的，天然自洽 —— 分四次出，四张之间就会互相不像，
+ *     那时候"以哪张为准"变成一个新问题；
+ *   · r2v（参考图生视频）那条通道只收有限几张参考图，
+ *     一张四视图 = 用一个名额换四个角度的信息。
+ *
+ * angles.js 那套照旧留着，两者不冲突：这张是锚，那几张是定向补给。
+ *
+ * ── 提示词里每一句都在防一件具体的事 ──
+ */
+export function charSheetPrompt(anchor, own) {
+  return `${anchor}，角色三视图设定图。`
+    // 说死"一张图、横向排开"：不说的话，模型很可能只画一个视角就交差
+    + '一张图里横向并排四个视角，从左到右依次：'
+    + '① 上半身特写（正面，中性表情，五官和领口细节清晰）；'
+    + '② 全身正面站姿（头到鞋完整入镜，双臂自然下垂）；'
+    + '③ 全身正侧面站姿（90° 正侧，同一姿势）；'
+    + '④ 全身背面站姿（完全背对，后脑发型与服装背面清晰）。'
+    // 四个视角必须是同一个人同一套衣服 —— 这是整张图存在的理由，得说出来
+    + '四个视角是同一个人、同一套服装、同一配色，身高等比对齐。'
+    // 参考图不该自带方向光：它会和这一镜的布光打架，人就"每镜光不一样"
+    + '纯色浅灰背景，均匀柔光、无明显方向光和投影。'
+    // 模型很爱在三视图上加 FRONT/SIDE/BACK 标注和分格线，
+    // 而这张图会被当参考图发给出视频那一步 —— 那些字会被一起学进画面里
+    + '画面中不得出现任何文字、标注、箭头、分格线或边框，无其他人物。'
+    + own;
+}
+
+/**
+ * 角色设定图**自己的画幅**，不跟项目走。
+ *
+ * 四个视角横向排开要宽。竖屏短剧（9:16）下跟着项目画幅走的话，
+ * 四个人挤在一条竖条里，每个宽不到成图的四分之一 —— 出来是四条竹竿，
+ * 看不清脸也看不清衣服，等于白出。
+ *
+ * 这张图不进成片，它只当参考，所以它没有"必须和成片同画幅"的义务。
+ */
+export const CHAR_SHEET_RATIO = '16:9';
+
 export function sheetPrompt(kind, bible, item, variant = null) {
   const anchor = bible.style.anchor;
   /**
@@ -640,7 +701,7 @@ export function sheetPrompt(kind, bible, item, variant = null) {
    */
   const override = (v?.sheetPrompt || '').trim();
   const own = override || variants.describeWith(item, v) || item.appearance || '';
-  if (kind === 'char') return `${anchor}，角色设定图，正面半身，中性表情，纯色浅灰背景，无其他人物。${own}`;
+  if (kind === 'char') return charSheetPrompt(anchor, own);
   if (kind === 'scene') return `${anchor}，场景基准图，空镜无人物，广角。${own}`;
   return `${anchor}，道具参考图，单个物体居中，纯色背景，无人物，产品图视角。${own}`;
 }
@@ -675,12 +736,20 @@ async function generateSheets(projectId, targets, { onEvent, signal = null } = {
       const prompt = sheetPrompt(kind, bible, item, variant);
       onEvent?.({ type: 'note', message: `提示词：${prompt.slice(0, 120)}${prompt.length > 120 ? '…' : ''}` });
 
+      /**
+       * 角色那张走**自己的画幅**（四视图横排要宽），场景和道具跟项目走。
+       *
+       * 场景基准图必须跟项目画幅：它是这一场的取景底图，画幅不一样就没法对位。
+       * 角色设定图不进成片、只当参考，没有对齐画幅的义务 —— 反而跟着 9:16
+       * 会把四个视角挤成四条竹竿。见 CHAR_SHEET_RATIO。
+       */
+      const sheetRatio = kind === 'char' ? CHAR_SHEET_RATIO : (project.aspectRatio || null);
       const image = await adapters.generateImage({
         providerId: r.image.provider,
         model: r.image.model,
         prompt,
         negative: bible.style.negative,
-        aspectRatio: project.aspectRatio || null,
+        aspectRatio: sheetRatio,
         // 所有变体共用条目的身份种子 —— 换了衣服还是同一张脸
         seed: item.seed,
         label: `参考图·${label}`,
@@ -689,7 +758,9 @@ async function generateSheets(projectId, targets, { onEvent, signal = null } = {
 
       const dest = path.join(dir, `ref-${kind}-${safeFileName(item.name)}-${safeFileName(variant.id)}.png`);
       await saveMedia(image, dest, onEvent);
-      checkRatio(dest, project.aspectRatio || settings.get('aspectRatio'), `${label} 的设定图`, onEvent);
+      // ⚠ 比的是**这张图自己要的画幅**，不是项目画幅 —— 角色那张本来就不跟项目走，
+      // 拿项目画幅去比会对每一张角色设定图报一次假警
+      checkRatio(dest, sheetRatio || settings.get('aspectRatio'), `${label} 的设定图`, onEvent);
       const modelRef = await toModelRef(dest, { onEvent });
 
       store.update(projectId, (p) => {

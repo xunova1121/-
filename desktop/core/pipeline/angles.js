@@ -37,7 +37,7 @@ export const PRIMARY = 'primary';
  */
 export const ANGLE_SETS = {
   char: [
-    { id: PRIMARY, label: '正面', hint: '主图。半身正面，五官最好辨认' },
+    { id: PRIMARY, label: '三视图', hint: '主图。一张图里四个视角：上半身特写、全身正面/侧面/背面' },
     { id: 'side', label: '侧面', hint: '侧脸对话、侧身走位时用得上' },
     { id: 'back', label: '背面', hint: '背影、转身离开时用得上。后脑勺和衣服背面最容易每镜都变' }
   ],

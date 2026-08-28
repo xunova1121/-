@@ -9604,9 +9604,46 @@ section('全流程：竖屏短剧从剧本到合成');
   check('① 每个条目都出了参考图（缺一张，引用它的每一镜都少一份基准）',
     [...cur.bible.characters, ...cur.bible.scenes, ...(cur.bible.props || [])].every((x) => x.sheetPath),
     JSON.stringify([...cur.bible.characters, ...cur.bible.scenes].map((x) => Boolean(x.sheetPath))));
-  check('① 设定图也按竖屏出',
-    upstream.imageBodies.every((b) => b.size === '720x1280'),
-    JSON.stringify([...new Set(upstream.imageBodies.map((b) => b.size))]));
+  /**
+   * ① 画幅：场景跟着项目走，角色**不跟**。
+   *
+   * 原来这条写的是"所有设定图都按竖屏出"。那在角色设定图还是一张正面半身时
+   * 是对的；改成四视图之后就不对了 —— 四个视角横向排开，塞进 9:16
+   * 会挤成四条竹竿，脸和衣服都看不清，等于白出。
+   *
+   * 所以拆成两条，比原来那条更严：不光验"有没有跟项目画幅"，
+   * 还验了"该跟的跟了、不该跟的没跟"。
+   */
+  const charSheets = upstream.imageBodies.filter((b) => /角色三视图/.test(b.prompt || ''));
+  const otherSheets = upstream.imageBodies.filter((b) => !/角色三视图/.test(b.prompt || ''));
+  check('① 场景和道具的基准图跟着项目画幅（竖屏项目就出竖的）',
+    otherSheets.length > 0 && otherSheets.every((b) => b.size === '720x1280'),
+    JSON.stringify([...new Set(otherSheets.map((b) => b.size))]));
+  check('① 角色三视图走自己的横画幅（跟着竖屏走会挤成四条竹竿）',
+    charSheets.length > 0 && charSheets.every((b) => b.size === '1280x720'),
+    JSON.stringify([...new Set(charSheets.map((b) => b.size))]));
+
+  /**
+   * ⚠ 提示词里那几句"防具体的事"的话必须真的发出去。
+   *
+   * 三视图最容易翻车的两处，都不会报错：
+   *   · 模型在图上加 FRONT / SIDE / BACK 标注和分格线 ——
+   *     而这张图会当参考图发给出视频那一步，那些字会被一起学进画面
+   *   · 四个视角画成了四个不同的人（换了衣服、换了配色）
+   * 所以这两句是功能的一部分，不是文案。
+   */
+  const csPrompt = charSheets[0]?.prompt || '';
+  check('① 三视图说清了是"一张图里四个视角"',
+    /一张图里横向并排四个视角/.test(csPrompt), csPrompt.slice(0, 80));
+  check('① 四个视角都点了名（上半身特写/正面/侧面/背面）',
+    ['上半身特写', '全身正面', '全身正侧面', '全身背面'].every((k) => csPrompt.includes(k)), csPrompt.slice(0, 200));
+  check('① 交代了四个视角必须是同一个人同一套衣服',
+    /同一个人、同一套服装、同一配色/.test(csPrompt), csPrompt.slice(0, 200));
+  check('① 明确不许出现文字标注和分格线（会被当参考图学进画面）',
+    /不得出现任何文字、标注、箭头、分格线/.test(csPrompt), csPrompt.slice(0, 240));
+  check('① 角色的外貌描述仍然带在后面（三视图不能把描述挤掉）',
+    cur.bible.characters.some((c) => c.appearance && csPrompt.includes(c.appearance.slice(0, 12))),
+    csPrompt.slice(-120));
   check('① 没有整步失败', !bibleEvents.some((e) => e.type === 'error'),
     JSON.stringify(bibleEvents.filter((e) => e.type === 'error').map((e) => e.message)));
 
