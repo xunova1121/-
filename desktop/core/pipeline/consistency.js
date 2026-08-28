@@ -523,18 +523,42 @@ export function refPlan() {
    *
    * 所以返回值里带上**到底是谁拦的**，界面照着说，不猜。
    */
+  /**
+   * ══════════ 你自己传的照片，任何开关都拦不住 ══════════
+   *
+   * 到这里为止，一张上传的照片要被用上得闯过**四道关卡**：
+   *   ① useReferenceImages 得开着
+   *   ② refMode 不能是 off
+   *   ③ refMode 得是 auto 或 all
+   *   ④ 中途不能被"重出设定图"覆盖掉
+   * 任何一道没过，现象都一样：出来的脸跟他传的图毫无关系，
+   * 而界面（在补了几轮提示之前）一个字都不说。
+   *
+   * 用户为此来回折腾了七八轮，最后一句是"我服了"。他是对的 ——
+   * 问题不在他没找对开关，在于**这件事根本不该有开关**。
+   *
+   * 上传一张照片是一句**指名道姓的指令**："这个角色就长这样"。
+   * 而那两个开关表达的是**泛泛的偏好**："一般来说要不要带参考图"。
+   * 具体的指令压过泛泛的偏好 —— 这是设置该有的层级，反过来就是耍人。
+   *
+   * 所以：关掉开关只影响**模型自己出的**那些设定图；
+   * 用户亲手传的那张，永远发。真不想要，就在设定集里把它删掉/重出 ——
+   * 那才是"我不要这张图"的正确说法，而且是可见、可撤销的。
+   */
   if (!refsOn) {
     return {
-      mode: 'off', send: false, useEditModel: false, onlyUploaded: false,
-      blockedBy: 'useReferenceImages',
-      blockedHint: '「设置 → 一致性引擎 → 出镜头图时把角色设定图作为参考图带上」这一项是关着的'
+      mode: 'uploaded-only', send: true, useEditModel: false, onlyUploaded: true,
+      blockedBy: null,
+      note: '「出镜头图时把角色设定图作为参考图带上」是关着的，所以模型出的设定图不发；'
+        + '但你自己传的照片照发 —— 传一张图是指名道姓的指令，开关管不着它。'
     };
   }
   if (mode === 'off') {
     return {
-      mode: 'off', send: false, useEditModel: false, onlyUploaded: false,
-      blockedBy: 'refMode',
-      blockedHint: '「设置 → 画面规格 → 出分镜图时带哪些参考图」选的是「一张都不发」'
+      mode: 'uploaded-only', send: true, useEditModel: false, onlyUploaded: true,
+      blockedBy: null,
+      note: '「出分镜图时带哪些参考图」选的是「一张都不发」，所以模型出的设定图不发；'
+        + '但你自己传的照片照发 —— 传一张图是指名道姓的指令，开关管不着它。'
     };
   }
   if (mode === 'edit') return { mode, send: true, useEditModel: true, onlyUploaded: false, blockedBy: null };

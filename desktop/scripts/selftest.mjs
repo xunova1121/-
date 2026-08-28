@@ -8252,22 +8252,44 @@ section('传上去的照片：要真的用上，而且只用脸');
    * 所以要验的不是"没发"，而是**说不说得出是谁拦的**。
    */
   {
+    /**
+     * ⚠ **你自己传的照片，任何开关都拦不住。**
+     *
+     * 用户来回折腾了七八轮，最后一句是"我服了"。他是对的 ——
+     * 一张上传的照片原来要闯过四道关卡才能被用上，任何一道没过，
+     * 现象都一样：脸跟他传的图毫无关系。
+     *
+     * 问题不在他没找对开关，在于**这件事根本不该有开关**：
+     * 上传一张照片是指名道姓的指令（"这个角色就长这样"），
+     * 而那两个开关表达的是泛泛的偏好（"一般要不要带参考图"）。
+     * 具体压过泛泛 —— 反过来就是耍人。
+     */
+    const withUpload = mkBible('upload');
+    const asm = () => cs.assemblePrompt(withUpload, shot);
+    const keptWith = (a) => cs.pickRefs(
+      { images: a.refImages, labels: a.refLabels, paths: a.refPaths, sources: a.refSources }, cs.refPlan()
+    ).images.length;
+
     settings.patch({ refMode: 'auto', useReferenceImages: false });
-    const p1 = cs.refPlan();
-    check('老开关关着时，说得出是老开关拦的',
-      p1.send === false && /一致性引擎/.test(p1.blockedHint || ''), JSON.stringify(p1));
-    check('而且不会赖到新开关头上（那会把人指错面板）',
-      !/画面规格/.test(p1.blockedHint || ''), p1.blockedHint);
+    check('老开关关着，用户传的照片照样发', keptWith(asm()) === 1, JSON.stringify(cs.refPlan()));
 
     settings.patch({ useReferenceImages: true, refMode: 'off' });
-    const p2 = cs.refPlan();
-    check('新开关选了"一张都不发"时，说得出是新开关拦的',
-      p2.send === false && /画面规格/.test(p2.blockedHint || ''), JSON.stringify(p2));
-    check('这时也不会赖到老开关头上',
-      !/一致性引擎/.test(p2.blockedHint || ''), p2.blockedHint);
+    check('新开关选了"一张都不发"，用户传的照片照样发', keptWith(asm()) === 1, JSON.stringify(cs.refPlan()));
+
+    /**
+     * 但关掉开关**确实要有效果** —— 它管的是模型自己出的那些设定图。
+     * 两个都不管的话，那两个开关就成了摆设，而摆设比没有更糟。
+     */
+    const modelOnly = mkBible('model');
+    const asm2 = cs.assemblePrompt(modelOnly, shot);
+    check('而模型自己出的设定图，关掉开关就真的不发', cs.pickRefs(
+      { images: asm2.refImages, labels: asm2.refLabels, paths: asm2.refPaths, sources: asm2.refSources },
+      cs.refPlan()
+    ).images.length === 0, JSON.stringify(asm2.refDetailed));
+    check('并且说清了"关的是什么、没关的是什么"',
+      /你自己传的照片照发/.test(cs.refPlan().note || ''), cs.refPlan().note);
 
     settings.patch({ useReferenceImages: true, refMode: 'auto' });
-    check('两个都开着时没有"被谁拦了"这回事', cs.refPlan().blockedBy === null, JSON.stringify(cs.refPlan()));
   }
 
   // ── all / off / 老开关 ──
@@ -8279,8 +8301,26 @@ section('传上去的照片：要真的用上，而且只用脸');
     ).images.length === 1);
     check('但 all 也不换编辑模型', cs.refPlan().useEditModel === false);
 
-    settings.patch({ refMode: 'off' });
-    check('选 off 时一张都不发', cs.refPlan().send === false);
+    /**
+     * ⚠ off 的含义**变了**，而且是有意变的。
+     *
+     * 原来 off = 一张都不发。现在 off = **模型出的那些不发，你自己传的照发**。
+     *
+     * 因为一张上传的照片是指名道姓的指令（"这个角色就长这样"），
+     * 而这个开关表达的是泛泛的偏好（"一般要不要带参考图"）——
+     * 具体压过泛泛。反过来的话，用户传了照片却怎么也用不上，
+     * 而他要闯过四道开关才找得到原因（真实发生过，他最后说"我服了"）。
+     */
+    settings.patch({ refMode: 'off', useReferenceImages: true });
+    const offPlan = cs.refPlan();
+    const gm = cs.assemblePrompt(mkBible('model'), shot);
+    check('选 off 时，模型出的设定图一张都不发', cs.pickRefs(
+      { images: gm.refImages, labels: gm.refLabels, paths: gm.refPaths, sources: gm.refSources }, offPlan
+    ).images.length === 0, JSON.stringify(gm.refDetailed));
+    const gu = cs.assemblePrompt(mkBible('upload'), shot);
+    check('但你自己传的照片照发（开关管不着指名道姓的那一张）', cs.pickRefs(
+      { images: gu.refImages, labels: gu.refLabels, paths: gu.refPaths, sources: gu.refSources }, offPlan
+    ).images.length === 1, JSON.stringify(gu.refDetailed));
 
     /**
      * ⚠ 老开关不能被悄悄改掉行为：已经打开 useEditModelForShots 的人，
