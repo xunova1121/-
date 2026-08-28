@@ -162,6 +162,19 @@ export const PROVIDERS = [
      * 别家给的是公网直链，拿着就能下；这里必须带着密钥去取，
      * 所以适配层会把鉴权头一路传到落盘那一步。
      */
+    /**
+     * 出图带参考图时走 `/v1/images/edits`（multipart 传文件），
+     * 而不是往 `/images/generations` 的 JSON 里塞一个 image 字段 ——
+     * 后者那个参数在 OpenAI 这边**根本不存在**，会被整个忽略，
+     * 表现是"传了参考图但完全没起作用"。
+     *
+     * ⚠ 判据必须是这个显式声明，**不能用 family === 'openai'**：
+     * 火山方舟的 family 也是 'openai'（它那句注释写得很清楚：
+     * "对话侧完全兼容 OpenAI 协议"），但它的 SeedEdit 确实收 JSON 里的
+     * image 字段。拿 family 当判据会把火山那条正确的路一起改坏 ——
+     * 自检里五条既有断言当场红，就是这么撞出来的。
+     */
+    imageApi: 'openai-edits',
     videoApi: 'openai-videos',
     videoEndpoints: {
       create: '{{baseUrl}}/videos',

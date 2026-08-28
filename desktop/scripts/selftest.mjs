@@ -8191,6 +8191,112 @@ section('传上去的照片：要真的用上，而且只用脸');
   }
 }
 
+/**
+ * ════════ OpenAI 家族带参考图：必须走 /images/edits ════════
+ *
+ * 用户："我用的出图是 gpt-image-2，我自己传的图，还是不是用的我的脸"。
+ *
+ * 不是。原因不在他那边 —— 我们**把参考图发到了一个不存在的字段上**。
+ * OpenAI 的 /v1/images/generations 没有 image 这个参数，
+ * 参考图必须走 /v1/images/edits，而且是 multipart 传**文件本身**。
+ * 发到 generations 上的 image 字段会被整个忽略：不报错、不警告，
+ * 就是一次纯文生图。于是"传了照片但脸不是我的"。
+ *
+ * 更难堪的是代码注释里**写明了**这件事，然后让用户自己去联调台手动发 ——
+ * 而出图是自动跑几十镜的，没人能一镜一镜手动来。
+ */
+section('OpenAI 家族带参考图：要走 /images/edits，不是塞个地址');
+{
+  const adaptersMod = await import('../core/providers/adapters.js');
+  const seen = { paths: [], types: [], bodies: [] };
+  const oa = http.createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      seen.paths.push(new URL(req.url, 'http://x').pathname);
+      seen.types.push(req.headers['content-type'] || '');
+      seen.bodies.push(Buffer.concat(chunks));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      /**
+       * ⚠ base64 要给**真实长度**的。firstBase64 有一条 `length > 100` 的护栏
+       *（防止把随便一个短字符串当成图片），给 'aGk=' 这种四个字符的假数据，
+       * 走到的是"响应里没有图"那条错误分支 —— 而那不是被测代码的问题，
+       * 是夹具比真实响应短了两个数量级。
+       */
+      res.end(JSON.stringify({ data: [{ b64_json: PIXEL_PNG.toString('base64').repeat(3) }] }));
+    });
+  });
+  await new Promise((r) => oa.listen(0, '127.0.0.1', r));
+  settings.patch({ baseUrls: { openai: `http://127.0.0.1:${oa.address().port}/v1` } });
+  vault.setSecret('OPENAI_API_KEY', 'sk-edits-test');
+
+  // 一张真 PNG（就是那个 1×1 像素），当成"用户传的脸"
+  const facePng = `data:image/png;base64,${PIXEL_PNG.toString('base64')}`;
+
+  {
+    const got = await adaptersMod.generateImage({
+      providerId: 'openai', model: 'gpt-image-2', prompt: '阿澜走向栈桥',
+      size: '1024*1024', refImages: [facePng], label: '出图'
+    });
+    check('带参考图时发到 /images/edits（不是 /images/generations）',
+      seen.paths.at(-1) === '/v1/images/edits', JSON.stringify(seen.paths));
+    /**
+     * ⚠ 必须是 multipart。发成 JSON 的话 OpenAI 那边收不到文件 ——
+     * 而这正是修之前的样子：JSON 里一个 image 字段，被整个忽略。
+     */
+    check('而且是 multipart 上传文件，不是 JSON 里塞地址',
+      /multipart\/form-data; boundary=/.test(seen.types.at(-1)), seen.types.at(-1));
+    const raw = seen.bodies.at(-1).toString('latin1');
+    // 中文要按 utf8 读 —— 上面那份 latin1 是给二进制部分用的
+    const text = seen.bodies.at(-1).toString('utf8');
+    check('请求体里真的带了图片文件（不是一个 URL 字符串）',
+      /name="image\[\]"; filename="ref-1\.png"/.test(raw), raw.slice(0, 200));
+    check('文件类型标对了（后缀不对 OpenAI 会直接拒收）',
+      /Content-Type: image\/png/.test(raw), raw.slice(0, 300));
+    check('提示词也一起发过去了（脸来自图，衣服和场景来自它）',
+      /name="prompt"[\s\S]*阿澜走向栈桥/.test(text), text.slice(0, 400));
+    /**
+     * ⚠ **发过去的模型得是这一家真有的。**
+     *
+     * 「图生图模型」默认是火山的 doubao-seededit-3-0-i2i，而原来那个 switch
+     * 只判"这家支不支持 i2i"—— OpenAI 支持，于是把一个**火山的模型 id
+     * 发给了 OpenAI**。必然"模型不存在"，而用户看到的只是出图失败。
+     * 这条是上面那条打印请求体时顺手撞出来的。
+     */
+    check('发过去的模型还是 gpt-image-2（没被换成别家的编辑模型）',
+      /name="model"[\s\S]*gpt-image-2/.test(text), text.slice(0, 200));
+    check('出来的图收下了', typeof got.base64 === 'string' && got.base64.length > 100, String(got.base64).slice(0, 40));
+    /**
+     * refsSent 要如实 —— 今天已经为"记的是意图不是事实"修过两回了。
+     */
+    check('如实记下发了几张参考图', got.used?.refsSent === 1, JSON.stringify(got.used));
+  }
+
+  // ── 不带参考图时照旧走 generations ──
+  {
+    await adaptersMod.generateImage({
+      providerId: 'openai', model: 'gpt-image-2', prompt: '空镜', size: '1024*1024', label: '出图'
+    });
+    check('没有参考图时还是走 /images/generations（别把纯文生图也改道）',
+      seen.paths.at(-1) === '/v1/images/generations', JSON.stringify(seen.paths));
+    check('那条路照旧是 JSON', /application\/json/.test(seen.types.at(-1)), seen.types.at(-1));
+  }
+
+  // ── 多张参考图 ──
+  {
+    await adaptersMod.generateImage({
+      providerId: 'openai', model: 'gpt-image-2', prompt: '两个人', size: '1024*1024',
+      refImages: [facePng, facePng], label: '出图'
+    });
+    const raw = seen.bodies.at(-1).toString('latin1');
+    const parts = (raw.match(/filename="ref-\d+\.png"/g) || []).length;
+    check('多张参考图each一个文件部分（不是只发第一张）', parts === 2, `${parts} 个文件部分`);
+  }
+
+  oa.close();
+  settings.patch({ baseUrls: { openai: '' } });
+}
+
 section('中转站只转对话：不该四条一起红');
 {
   /**

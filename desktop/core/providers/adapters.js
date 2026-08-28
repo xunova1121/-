@@ -474,6 +474,95 @@ async function chatOnce({
 }
 
 /**
+ * 手搓 multipart。项目零第三方依赖，而 Node 自带的 FormData 在
+ * 这个版本的 fetch 上和 Buffer 配合得不好，所以自己拼。
+ * comfy.js 里也有一份 —— 那份只传单文件，这里要传多文件 + 多字段，
+ * 合并成一份反而两边都别扭，各留各的。
+ */
+function buildMultipart(fields, files) {
+  const boundary = `----fd${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  const chunks = [];
+  for (const [k, v] of Object.entries(fields)) {
+    if (v === null || v === undefined || v === '') continue;
+    chunks.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`, 'utf8'
+    ));
+  }
+  for (const f of files) {
+    chunks.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${f.field}"; filename="${f.name}"\r\n`
+      + `Content-Type: ${f.type}\r\n\r\n`, 'utf8'
+    ));
+    chunks.push(f.data);
+    chunks.push(Buffer.from('\r\n', 'utf8'));
+  }
+  chunks.push(Buffer.from(`--${boundary}--\r\n`, 'utf8'));
+  return { body: Buffer.concat(chunks), contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
+/** 认一下这几个字节是什么图。文件名后缀不对的话 OpenAI 会直接拒收。 */
+function sniffImage(buf) {
+  if (buf.length > 8 && buf[0] === 0x89 && buf[1] === 0x50) return { ext: 'png', type: 'image/png' };
+  if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8) return { ext: 'jpg', type: 'image/jpeg' };
+  if (buf.length > 12 && buf.slice(8, 12).toString('ascii') === 'WEBP') return { ext: 'webp', type: 'image/webp' };
+  // 认不出来就按 png 报 —— 多数参考图是 png，而报错的话至少错得明确
+  return { ext: 'png', type: 'image/png' };
+}
+
+/**
+ * 走 OpenAI 的 `/v1/images/edits`：把参考图当**文件**传上去。
+ *
+ * 这是"用我自己那张脸"在 OpenAI 家族上唯一走得通的路。
+ * gpt-image 系列支持多张参考图（每张一个 image[] 部分）。
+ */
+async function editImageOpenAI({
+  provider, providerId, model, prompt, negative, size, refImages, timeoutMs, label, onEvent, used
+}) {
+  const files = [];
+  for (const [i, ref] of refImages.entries()) {
+    const buf = await fetchRefBytes(ref);
+    const kind = sniffImage(buf);
+    // 多张时字段名要带方括号，单张也用同一个写法 —— OpenAI 两种都收
+    files.push({ field: 'image[]', name: `ref-${i + 1}.${kind.ext}`, type: kind.type, data: buf });
+  }
+  onEvent?.({
+    type: 'note',
+    message: `走 /images/edits 传参考图（${files.length} 张，共 ${(files.reduce((n, f) => n + f.data.length, 0) / 1024).toFixed(0)} KB）`
+      + ' —— OpenAI 的出图接口不收 JSON 里的图片地址，只收上传的文件'
+  });
+
+  const { body, contentType } = buildMultipart(
+    {
+      model,
+      prompt: negative ? `${prompt}\n\n避免出现：${negative}` : prompt,
+      size: size.replace('*', 'x'),
+      n: '1'
+    },
+    files
+  );
+
+  const res = await send(
+    {
+      provider: providerId,
+      label,
+      method: 'POST',
+      url: endpoint(provider, 'imageEdits', '{{baseUrl}}/images/edits'),
+      headers: { 'Content-Type': contentType },
+      body,
+      timeoutMs
+    },
+    onEvent
+  );
+  if (!res.ok) fail(label, res);
+  const url = firstMediaUrl(res.json);
+  const base64 = url ? null : firstBase64(res.json);
+  if (!url && !base64) throw new Error(`${label}：/images/edits 的响应里既没有图片 URL 也没有 base64`);
+  used.refsSent = files.length;
+  void provider;
+  return { used, url, base64, raw: res.json };
+}
+
+/**
  * 这段文本里有没有一个**完整的** JSON 对象。
  *
  * 用真的解析，不用正则数括号 —— 括号计数在字符串里带 { } 时会算错，
@@ -680,8 +769,36 @@ async function generateImageRaw({
    */
   const used = { model, refsSent: 0 };
   const i2iModel = editModel === null ? null : editModel || settings.get('imageEditModel');
+  /**
+   * ⚠ **换过去的那个模型，得是这一家真有的。**
+   *
+   * 「图生图模型」这一项默认是火山的 doubao-seededit-3-0-i2i。而这个 switch
+   * 原来只判"这家支不支持 i2i"—— OpenAI 支持，于是路由到 OpenAI + 带参考图时，
+   * 我们会把 model 换成一个**火山的模型 id 发给 OpenAI**。那必然是
+   * "模型不存在"，而用户看到的只是出图失败，完全想不到是我们换错了模型。
+   *
+   * 自检里那条"提示词也一起发过去了"顺手把它抓出来了 —— 它打印了请求体，
+   * 里面 name="model" 那一段写着 doubao-seededit…，而那次调的是 OpenAI。
+   */
+  const i2iBelongs = Boolean(i2iModel) && (provider.models || []).some((m) => m.id === i2iModel);
+  /**
+   * 走 /images/edits 的那家**不换模型**：它的参考图用的是同一个模型
+   *（gpt-image 系列自己就能编辑）。换成别的只会把一个不存在的 id 发过去。
+   *
+   * ⚠ 判据是目录里的 imageApi，不是 family —— 火山的 family 也是 'openai'，
+   * 但那说的是对话协议，它的出图确实收 JSON 里的 image 字段。
+   */
+  const usesEditsApi = provider.imageApi === 'openai-edits';
+  const switchable = !usesEditsApi && supportsI2I && i2iModel && i2iModel !== model && i2iBelongs;
+  if (wantsRef && i2iModel && i2iModel !== model && supportsI2I && !i2iBelongs && !usesEditsApi) {
+    onEvent?.({
+      type: 'note',
+      message: `「设置 → 图生图模型」填的是 ${i2iModel}，而 ${provider.name} 没有这个模型 —— `
+        + `不换了，仍然用 ${model} 发。要用图生图的话，把那一项改成 ${provider.name} 自己的编辑模型。`
+    });
+  }
   if (wantsRef) {
-    if (supportsI2I && i2iModel && i2iModel !== model) {  // eslint-disable-line no-lonely-if
+    if (switchable) {  // eslint-disable-line no-lonely-if
       onEvent?.({ type: 'note', message: `带了 ${refImages.length} 张参考图，出图模型换成 ${i2iModel}（文生图模型不认参考图）` });
       model = i2iModel;
       used.model = i2iModel;
@@ -817,12 +934,37 @@ async function generateImageRaw({
       throw new Error(`${provider.name} 不提供出图能力，请在设置里把「出图」换成别家`);
 
     default: {
-      // OpenAI 兼容家族（含火山方舟 Seedream / SeedEdit、OpenAI gpt-image-1、FloatAI 中转）
+      /**
+       * ══════════ OpenAI 家族带参考图，必须走 /images/edits ══════════
+       *
+       * 用户："我用的出图是 gpt-image-2，我自己传的图，还是不是用的我的脸"。
+       *
+       * 不是。而且原因不在他那边 —— 是我们**把参考图发到了一个不存在的字段上**。
+       *
+       * OpenAI 的 `/v1/images/generations` **没有 image 这个参数**。
+       * 参考图/垫图必须走 `/v1/images/edits`，而且是 multipart 传**文件本身**，
+       * 不是 JSON 里塞一个地址。发到 generations 上的 image 字段会被**整个忽略** ——
+       * 不报错、不警告，就是一次纯文生图。于是"传了照片但脸不是我的"。
+       *
+       * 这段代码原来的注释还明明白白写着"OpenAI 的 images/edits 是另一条
+       * multipart 路径……走 OpenAI 官方编辑接口时请在联调台里改用 /images/edits"——
+       * 也就是**知道**，然后让用户自己去联调台手动发。那对流水线等于没做：
+       * 出图是自动跑几十镜的，没人能在联调台里一镜一镜手动来。
+       *
+       * ⚠ 只对 family === 'openai' 这么做。火山 SeedEdit 那套确实收
+       * JSON 里的 image 字段，走它自己那条路是对的。
+       */
+      if (provider.imageApi === 'openai-edits' && refImages.length) {
+        return await editImageOpenAI({
+          provider, providerId, model, prompt, negative, size, refImages, timeoutMs, label, onEvent, used
+        });
+      }
+
+      // OpenAI 兼容家族（含火山方舟 Seedream / SeedEdit、FloatAI 中转）
       const body = { model, prompt, size: size.replace('*', 'x'), response_format: 'url' };
       if (seed !== null) body.seed = seed;
       if (refImages.length) {
-        // 火山 SeedEdit 收单张 image；OpenAI 的 images/edits 是另一条 multipart 路径，
-        // 这里统一按"JSON + image 字段"发，走 OpenAI 官方编辑接口时请在联调台里改用 /images/edits。
+        // 火山 SeedEdit 这类**确实**收 JSON 里的 image 字段（单张）
         body.image = refImages.length === 1 ? refImages[0] : refImages;
       }
       if (family === 'openai') {
