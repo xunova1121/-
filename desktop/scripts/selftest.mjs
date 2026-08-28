@@ -7668,7 +7668,7 @@ section('长生成走流式：慢和死是两回事');
   {
     settings.patch({ baseUrls: { openai: `${sseUrl}/silent` } });
     let msg = '';
-    await adaptersMod.chat({
+    await adaptersMod.chatNoFallback({
       providerId: 'openai', model: 'claude-opus-5', user: '拆一下', stream: true,
       timeoutMs: 1200, idleTimeoutMs: 1200, label: '流式·哑巴'
     }).catch((e) => { msg = e.message; });
@@ -7682,7 +7682,7 @@ section('长生成走流式：慢和死是两回事');
     settings.patch({ baseUrls: { openai: `${sseUrl}/stall` } });
     let msg = '';
     const t0 = Date.now();
-    await adaptersMod.chat({
+    await adaptersMod.chatNoFallback({
       providerId: 'openai', model: 'claude-opus-5', user: '拆一下', stream: true, jsonMode: true,
       timeoutMs: 60000, idleTimeoutMs: 900, label: '流式·半路死'
     }).catch((e) => { msg = e.message; });
@@ -7754,6 +7754,80 @@ section('长生成走流式：慢和死是两回事');
     check('而且说了一声"对面没正常收尾"（不能悄悄当正常处理）',
       notes.some((m) => /没有正常收尾/.test(m)), JSON.stringify(notes));
     whole.close();
+  }
+
+  // ── 流式跑不通就退回非流式：**最坏也不能比没有流式时更糟** ──
+  {
+    /**
+     * 用户的原话："先前没有出现这个问题啊，刚一下次还拆分了51个镜头"。
+     *
+     * 他是对的，而且那是我改出来的回归：加流式之前，同一家中转站上
+     * 非流式一次出 51 镜是跑通过的；换成流式之后开始各种断。
+     *
+     * 流式本身的道理没错（慢和死要分开），但它建立在一个我**没验证过的前提**上：
+     * 这家中转站的 SSE 和它的非流式一样可靠。事实是不一定。
+     *
+     * 所以流式只是"优先尝试"，它特有的失败一律退回非流式再来一次 ——
+     * 这样最坏情况是"和以前一样"，而不是"比以前更糟"。
+     */
+    let sawStream = 0;
+    let sawPlain = 0;
+    const flaky = http.createServer((req, res) => {
+      let raw = '';
+      req.on('data', (c) => { raw += c; });
+      req.on('end', () => {
+        const body = JSON.parse(raw || '{}');
+        if (body.stream) {
+          // 流式：开个头就不动了（正是用户撞上的那种）
+          sawStream += 1;
+          res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: '{"sh' } }] })}\n\n`);
+          return;
+        }
+        // 非流式：一次性回完整结果 —— 这条路本来就是通的
+        sawPlain += 1;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          choices: [{ message: { content: '{"shots":[{"description":"阿澜走向栈桥"}]}' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 100, completion_tokens: 50 }
+        }));
+      });
+    });
+    await new Promise((r) => flaky.listen(0, '127.0.0.1', r));
+    settings.patch({ baseUrls: { openai: `http://127.0.0.1:${flaky.address().port}/x` } });
+    const notes = [];
+    const got = await adaptersMod.chat({
+      providerId: 'openai', model: 'claude-opus-5', user: '拆', stream: true, jsonMode: true,
+      timeoutMs: 60000, idleTimeoutMs: 800, label: '拆分镜',
+      onEvent: (ev) => { if (ev.type === 'note') notes.push(ev.message); }
+    });
+    check('流式断了会自动退回非流式，最终拿到完整结果',
+      got?.text === '{"shots":[{"description":"阿澜走向栈桥"}]}', JSON.stringify(got?.text));
+    check('两条路都真的走过（先流式、再非流式）', sawStream === 1 && sawPlain === 1,
+      JSON.stringify({ 流式: sawStream, 非流式: sawPlain }));
+    check('而且说了一声换路了（不能悄悄多花一次钱）',
+      notes.some((m) => /换成非流式/.test(m)), JSON.stringify(notes));
+    flaky.close();
+  }
+
+  // ── 但**真的错误**不许重试：重发一次只是再错一次，还多花一次钱 ──
+  {
+    let hits = 0;
+    const denied = http.createServer((req, res) => {
+      req.on('data', () => {});
+      req.on('end', () => {
+        hits += 1;
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: { message: '密钥不对' } }));
+      });
+    });
+    await new Promise((r) => denied.listen(0, '127.0.0.1', r));
+    settings.patch({ baseUrls: { openai: `http://127.0.0.1:${denied.address().port}/x` } });
+    await adaptersMod.chat({
+      providerId: 'openai', model: 'x', user: 'y', stream: true, jsonMode: true, label: '拆分镜'
+    }).catch(() => {});
+    check('401 这种真错误只发一次，不退回去再错一遍', hits === 1, `发了 ${hits} 次`);
+    denied.close();
   }
 
   // ── 那个"完整不完整"的判据本身 ──

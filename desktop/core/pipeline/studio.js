@@ -1404,6 +1404,14 @@ async function analyzeScriptRaw(projectId, {
    * 那种情况下真正该做的是把那一场在大纲里拆成两场，而那是人的判断。
    */
   const SHOTS_PER_BATCH = 12;
+  /**
+   * 没有大纲时，一次最多敢拆多少镜。
+   *
+   * 30 镜 ≈ 6000 token，还在多数模型的输出上限之内；再多就开始赌。
+   * 用户在这家中转站上一次出过 51 镜（那次成了），也撞过 length（那次没成）——
+   * 说明 50 上下正好在边界上，而边界上的东西不该拿用户的钱去试。
+   */
+  const NO_OUTLINE_SHOT_CEILING = 30;
   // ⚠ useOutline 在下面才定义，这里直接用它的来源 —— 提前引用 const 会 TDZ 报错
   const batching = inScope.length > 0;
   const takeByShots = (beats) => {
@@ -1462,12 +1470,40 @@ async function analyzeScriptRaw(projectId, {
   // 镜头数跟着时长走。大纲那条路上人已经把每场多长定过了，按它反推最合理
   if (useOutline) shotCount = duration.planShotCount(targetSeconds);
 
+  /**
+   * ⚠ **没有大纲的长剧本，在发出去之前就拦住。**
+   *
+   * 分批是按大纲的场次切的 —— 没有大纲就切不了，只能一次全要。
+   * 而"一次全要"在镜数一多时是**必定**撞模型输出上限的：
+   * 一个 shot 十来个字段、150~250 token，四五十镜就是一万上下。
+   *
+   * 用户真实撞上的正是这个：finish_reason=length，跑了几分钟、花了钱、
+   * 拿到半截东西。而这件事**在点下去之前就完全算得出来** ——
+   * 镜数是我们自己定的，模型的上限也不是秘密。
+   *
+   * 所以不让它跑：说清为什么、以及那条能跑通的路在哪儿。
+   * 跑一次失败要三分钟加一次钱，而这句话是免费的。
+   */
+  if (!batching && shotCount > NO_OUTLINE_SHOT_CEILING) {
+    throw new Error(
+      `这个项目要一次拆 ${shotCount} 镜左右，而没有大纲的话只能**一次全要** —— `
+      + `一镜十来个字段、150~250 token，${shotCount} 镜大约 ${Math.round(shotCount * 200 / 1000)}k token，`
+      + '多数模型一次写不完，写到一半会被自己的长度上限截断（finish_reason=length）。\n\n'
+      + '走大纲那条路：先在「剧本」页点「出大纲」，再回来拆分镜。\n'
+      + '出了大纲之后，拆分镜会**按场次自动分批**，一批十来镜，剧本多长都不会撞上限；'
+      + '而且断在第几批都不用从头再来 —— 拆过的那几场会锁上，再点一次从没拆的接着走。\n\n'
+      + `（真想一次硬拆的话，把目标时长调短到 ${Math.round(NO_OUTLINE_SHOT_CEILING * 4.5)} 秒以内，`
+      + '或者把剧本按章节分开传。）'
+    );
+  }
+
   const r = routing();
   onEvent?.({
     type: 'stage',
     stage: 'script',
     status: 'running',
     message: `${chapter ? `${chapter.title}：` : ''}${r.chat.provider} / ${r.chat.model} 拆分镜中…`
+      + (batching ? `（这一批 ${targetBeats.length} 场，还剩 ${restAfterThisBatch} 场）` : '')
   });
 
   const bibleDigest = JSON.stringify(

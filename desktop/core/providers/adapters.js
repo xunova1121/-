@@ -187,7 +187,66 @@ function fail(label, res) {
 /**
  * 统一对话入口。images 传进来就自动组装成多模态消息 —— 一致性校验靠它。
  */
-export async function chat({
+/**
+ * ══════════ 流式跑不通就退回非流式 ══════════
+ *
+ * 用户的原话："先前没有出现这个问题啊，刚一下次还拆分了51个镜头"。
+ *
+ * 他是对的，而且这是**我改出来的回归**。加流式之前（4e1491d 之前）
+ * 这条中转站上非流式一次出 51 镜是跑通过的；换成流式之后开始各种断。
+ *
+ * 流式本身的道理没错（慢和死要分开），但它建立在一个我没验证过的前提上：
+ * **这家中转站的 SSE 和它的非流式一样可靠**。事实是不一定 ——
+ * 很多中转站把 OpenAI 协议翻译成 Anthropic 时，非流式那条路成熟得多。
+ *
+ * 所以规矩改成：流式**只是优先尝试**，它特有的那几种失败
+ *（开了头就断、一个字节不回）一律退回非流式再来一次。
+ * 这样最坏情况就是"和加流式之前一样"，而不是"比以前更糟"。
+ *
+ * ⚠ 只在**流式特有的失败**上退。真的错误（401、模型不存在、内容审核）
+ * 退回去重发一次只是再错一次，还多花一次钱。
+ */
+export async function chat(args) {
+  if (!args?.stream) return chatOnce(args);
+  try {
+    return await chatOnce(args);
+  } catch (err) {
+    if (!err?.streamFailure) throw err;
+    args.onEvent?.({
+      type: 'note',
+      message: `流式这条路没走通（${String(err.message).split('\n')[0].slice(0, 80)}），`
+        + '换成非流式重试一次 —— 这条路更老、中转站上通常更稳。'
+    });
+    /**
+     * 非流式没有"多久没动静"这个判据（响应是一次性到的），只能给总时长。
+     * 比流式那条宽 —— 它本来就要闷着头写几分钟才一次吐出来 —— 但**不能太宽**：
+     * 第一版给了 600 秒，而中转站要是非流式也挂着，那就是干等十分钟。
+     * 自检当场卡死在这儿，否则这十分钟会花在用户身上。300 秒够写完一大批了。
+     *
+     * idleTimeoutMs 照样传下去：有些中转站不管你要不要流式，一律回
+     * text/event-stream —— 那种情况下这条路仍然按"多久没动静"保护着。
+     */
+    return chatOnce({
+      ...args,
+      stream: false,
+      timeoutMs: Math.max(Number(args.timeoutMs) || 0, 300000),
+      idleTimeoutMs: args.idleTimeoutMs
+    });
+  }
+}
+
+/**
+ * 自检用：**不带退回**的那一次调用。
+ *
+ * 流式特有的那几句报错（开了头就断、把收到的内容摆出来）是**流式层的属性**，
+ * 该直接验它。走 chat() 的话会被退回非流式那一步接管，
+ * 验到的是另一条路的结果 —— 那样验的就不是想验的东西了。
+ */
+export function chatNoFallback(args) {
+  return chatOnce(args);
+}
+
+async function chatOnce({
   providerId,
   model,
   system,
@@ -316,7 +375,7 @@ export async function chat({
        */
       const peek = got.replace(/\s+/g, ' ').trim().slice(0, 200);
       const thinking = /think|reason|analysis/i.test(got) || got.trim().length < 40;
-      throw new Error(
+      throw Object.assign(new Error(
         `${label}：流开了个头就断了 —— 收到 ${res.incompleteBytes} 字节后 `
         + `${Math.round(res.incompleteIdleMs / 1000)} 秒没有新内容，而收到的这部分解析不出完整结果。\n`
         + `实际收到的是：「${peek}${got.length > 200 ? '…' : ''}」\n`
@@ -330,7 +389,7 @@ export async function chat({
             + '像一句英文报错 = 是②。'
           : '这一段是真的不完整（已经验过了，不是猜的）。多半是中转站把连接掐了。\n'
             + '出分镜的话：先出大纲再拆分镜，那条路按场次分批，每批要写的东西少得多，不容易被掐。')
-      );
+      ), { streamFailure: true });
     }
     onEvent?.({
       type: 'note',

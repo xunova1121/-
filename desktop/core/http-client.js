@@ -461,7 +461,15 @@ export async function execute(spec, onEvent) {
       totalMs: Date.now() - startedAt
     });
     onEvent?.({ type: 'error', message, logId: entry.id });
-    throw new HttpError(message, { url });
+    /**
+     * 标一下"这是流式那条路上的失败"。
+     *
+     * 上层（adapters.chat）据此决定要不要退回非流式再来一次 ——
+     * 而那条路是**验证过能跑通**的（同一家中转站上非流式一次出过 51 镜）。
+     * 不标的话，一个"对面一声不吭"会被当成真错误直接抛给用户，
+     * 而它恰恰是最该换条路重试的那一种。
+     */
+    throw Object.assign(new HttpError(message, { url }), { streamFailure: Boolean(spec.stream) });
   }
 
   const ttfbMs = Date.now() - startedAt;
@@ -594,7 +602,10 @@ export async function execute(spec, onEvent) {
       responseBody: logbus.redactBody(raw)
     });
     onEvent?.({ type: 'error', message, logId: entry.id });
-    throw new HttpError(message, { status: response.status, bodyText: raw, url });
+    throw Object.assign(
+      new HttpError(message, { status: response.status, bodyText: raw, url }),
+      { streamFailure: Boolean(spec.stream) }
+    );
   }
   clearTimeout(timer);
   if (hardTimer) clearTimeout(hardTimer);
