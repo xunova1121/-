@@ -509,6 +509,21 @@ const upstream = http.createServer((req, res) => {
     }));
   }
 
+  /**
+   * 海螺出图。加它是因为**身份通道只在这条路上**（subject_reference），
+   * 而火山那条路没有这个字段 —— 只验火山，等于那条通道从没被跑过。
+   */
+  if (url.pathname === '/image_generation') {
+    let raw = '';
+    req.on('data', (c) => (raw += c));
+    req.on('end', () => {
+      upstream.lastMinimaxImageBody = JSON.parse(raw || '{}');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ data: { image_urls: [`${upstreamUrl}/pixel.png`] } }));
+    });
+    return undefined;
+  }
+
   if (url.pathname === '/v3/images/generations') {
     let raw = '';
     req.on('data', (c) => (raw += c));
@@ -8377,6 +8392,90 @@ section('传上去的照片：要真的用上，而且只用脸');
       String(upstream.lastImageBody?.image || '').slice(0, 80));
     check('而且明说是过期了（不然这一镜"不太像"的原因永远查不出来）',
       notes7.some((m) => /过期/.test(m)), JSON.stringify(notes7.slice(-3)));
+
+    /**
+     * ══════════ 只收一张的那些"身份通道"，得收到角色那张 ══════════
+     *
+     * 海螺的 subject_reference（字面写着 type: 'character'）、万相的 ref_img
+     * 都只收一张图，而它们是目前云端唯一真能做到"换场景但还是这个人"的东西。
+     *
+     * 参考图的排列顺序是**场景在最前**（多数厂商对首张权重最高，出分镜时
+     * 最需要被提醒的是环境）。这两处原来取 refImages[0] —— 于是"这个角色
+     * 长什么样"的字段里装的是一张**场景图**。那条通道等于没开，
+     * 而且不报任何错：出来的人照旧不像，看不出是我们发错了图。
+     *
+     * ⚠ 这条断言必须防恒真：得**真的有一张场景图排在角色前面**，
+     * 否则 identityRef 取第一张也照样对，测试永远绿。
+     */
+    // ⚠ 默认夹具的场景条目**没有图**，于是参考图里压根没有场景那张 ——
+    // 用它测"场景排在角色前面"会连前提都不成立。真实项目里场景是有图的
+    const withScene = mkBible('upload');
+    withScene.scenes[0].sheetPath = '/s.png';
+    withScene.scenes[0].sheetUrl = 'https://x/s.png';
+    withScene.scenes[0].sheetSource = 'model';
+    withScene.scenes[0].variants[0].sheetPath = '/s.png';
+    withScene.scenes[0].variants[0].sheetUrl = 'https://x/s.png';
+    withScene.scenes[0].variants[0].sheetSource = 'model';
+    const ordered = cs.assemblePrompt(withScene, shot);
+    check('参考图顺序确实是场景排在角色前面（下面那条断言的前提）',
+      ordered.refKinds[0] === 'scene' && ordered.refKinds.includes('character'),
+      JSON.stringify(ordered.refKinds));
+    const face = cs.identityRef({
+      images: ordered.refImages, kinds: ordered.refKinds, sources: ordered.refSources
+    });
+    check('挑"这个人长什么样"时挑的是角色那张，不是排在最前的场景图',
+      face === ordered.refImages[ordered.refKinds.indexOf('character')] && face !== ordered.refImages[0],
+      JSON.stringify({ 挑中: face, 第一张: ordered.refImages[0] }));
+    /** 用户亲手传的排在模型出的前面 —— 那是他指名道姓说"就长这样"的那张 */
+    check('两张角色图并存时，优先用户传的那张',
+      cs.identityRef({
+        images: ['scene', 'mine', 'theirs'],
+        kinds: ['scene', 'character', 'character'],
+        sources: ['model', 'upload', 'model']
+      }) === 'mine', '');
+    /** 一张角色图都没有时退回第一张，别退回 null 把通道整个关掉 */
+    check('一张角色图都没有时退回第一张（别把通道整个关掉）',
+      cs.identityRef({ images: ['a', 'b'], kinds: ['scene', 'prop'], sources: ['model', 'model'] }) === 'a', '');
+
+    /**
+     * ⚠ **上面三条验的都是纯函数。真正决定的是请求体里那个字段装了什么。**
+     *
+     * identityRef 挑对了不等于它被发出去了 —— 中间还隔着 pickRefs、
+     * refreshRefs（会重新筛一遍数组，kinds 没跟着筛就整体错位）、
+     * 以及适配器里那个 switch。这一整段路我今天已经在别处栽过两次了。
+     *
+     * 所以直接打到海螺的出图请求体上，看 subject_reference 里装的是谁。
+     */
+    const adaptersModule = await import('../core/providers/adapters.js');
+    // 自检用的假密钥。海螺这条路前面没人跑过，所以金库里还没有它
+    vault.setSecret('MINIMAX_API_KEY', 'sk-minimax-test');
+    const keepBase = settings.get('baseUrls') || {};
+    settings.patch({ baseUrls: { ...keepBase, minimax: upstreamUrl } });
+    upstream.lastMinimaxImageBody = null;
+    await adaptersModule.generateImage({
+      providerId: 'minimax',
+      model: 'image-01',
+      prompt: '测试',
+      refImages: ['https://x/scene.png', 'https://x/face.png'],
+      identityRef: 'https://x/face.png',
+      label: '身份通道'
+    });
+    check('海螺的 subject_reference 里装的是角色那张，不是场景那张',
+      upstream.lastMinimaxImageBody?.subject_reference?.[0]?.image_file === 'https://x/face.png',
+      JSON.stringify(upstream.lastMinimaxImageBody?.subject_reference));
+    /** 不传 identityRef 时保持老行为，别让直接调这个函数的地方跟着崩 */
+    upstream.lastMinimaxImageBody = null;
+    await adaptersModule.generateImage({
+      providerId: 'minimax',
+      model: 'image-01',
+      prompt: '测试',
+      refImages: ['https://x/only.png'],
+      label: '身份通道'
+    });
+    check('没传 identityRef 时退回第一张（老调用方不受影响）',
+      upstream.lastMinimaxImageBody?.subject_reference?.[0]?.image_file === 'https://x/only.png',
+      JSON.stringify(upstream.lastMinimaxImageBody?.subject_reference));
+    settings.patch({ baseUrls: keepBase });
 
     settings.patch({ useReferenceImages: true, refMode: 'auto' });
   }

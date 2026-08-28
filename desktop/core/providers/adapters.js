@@ -697,6 +697,17 @@ async function generateImageRaw({
   aspectRatio = null,
   seed = null,
   refImages = [],
+  /**
+   * 参考图里"代表这个人长什么样"的那一张。
+   *
+   * ⚠ 只有**身份通道**用它 —— 海螺的 subject_reference、万相的 ref_img，
+   * 这些字段只收一张图。原来它们取 refImages[0]，而参考图的顺序是
+   * 场景在最前，于是"这个角色长这样"的字段里装的是一张场景图。
+   * 那条通道是目前云端唯一真能锁脸的东西，收错了等于没开，而且不报错。
+   *
+   * 不传就退回 refImages[0]（保持老行为，也让直接调这个函数的地方不用改）。
+   */
+  identityRef = null,
   timeoutMs = 300000,
   label = '出图',
   onEvent = null
@@ -822,8 +833,10 @@ async function generateImageRaw({
       const input = { prompt, negative_prompt: negative };
       if (refImages.length) {
         // 万相的图生图走 ref_img；一并把强度调低，保人设又不至于完全复制原图
-        requirePublicUrl(refImages[0], label, '参考图生图');
-        input.ref_img = refImages[0];
+        // 身份通道只收一张：发角色那张，不是排在最前的场景图
+        const face = identityRef || refImages[0];
+        requirePublicUrl(face, label, '参考图生图');
+        input.ref_img = face;
       }
       // 百炼认的是 1280*720 这种星号写法；目录里的 enum 可能写成 x，统一一下
       const parameters = { size: String(size).replace(/x/i, '*'), n: 1 };
@@ -858,7 +871,11 @@ async function generateImageRaw({
         response_format: 'url'
       };
       if (seed !== null) body.seed = seed;
-      if (refImages.length) body.subject_reference = [{ type: 'character', image_file: refImages[0] }];
+      // 字面写着 type: 'character' —— 那就得真的发角色那张。
+      // 参考图顺序是场景在最前，取 [0] 等于把场景图当成"这个人长什么样"
+      if (refImages.length) {
+        body.subject_reference = [{ type: 'character', image_file: identityRef || refImages[0] }];
+      }
 
       const res = await send(
         {

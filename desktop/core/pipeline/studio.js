@@ -346,11 +346,25 @@ async function refreshRefs(project, refs, { onEvent } = {}) {
   // ⚠ 这里问的是"现在发得出去吗"，不是"能不能复用"—— 上面刚重签出来的
   // 那些地址必然带 Expires，用 usableRef 过会把它们连同好图一起扔掉
   const keep = images.map((u, i) => [u, i]).filter(([u]) => sendableRef(u));
+  /**
+   * ⚠ **这几个数组是一一对应的，必须一起筛。**
+   *
+   * kinds（这张是景/角/道）和 sources（模型出的还是你传的）下游要用来挑出
+   * "哪张是这个人的脸"—— 海螺的 subject_reference、万相的 ref_img 都只收
+   * 一张，收错了那条通道就白开。少筛一个数组，对应关系就整体错位，
+   * 而错位不报错：它只是让"角色身份"通道收到一张场景图。
+   *
+   * labels 原来还多挂了一个 .filter(Boolean)：某一张恰好没有标签时，
+   * 后面所有标签都往前挪一格，于是卡片上把 A 的名字写在 B 那张上。
+   * 一起去掉 —— 对齐比"数组里别有空值"重要得多。
+   */
   return {
     ...refs,
     images: keep.map(([u]) => u),
-    labels: keep.map(([, i]) => refs.labels?.[i]).filter(Boolean),
-    paths: keep.map(([, i]) => refs.paths?.[i] ?? null)
+    labels: keep.map(([, i]) => refs.labels?.[i] ?? null),
+    paths: keep.map(([, i]) => refs.paths?.[i] ?? null),
+    kinds: keep.map(([, i]) => refs.kinds?.[i] ?? null),
+    sources: keep.map(([, i]) => refs.sources?.[i] ?? null)
   };
 }
 
@@ -3083,19 +3097,28 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
       images: assembled.refImages,
       labels: assembled.refLabels,
       paths: assembled.refPaths,
-      sources: assembled.refSources
+      sources: assembled.refSources,
+      kinds: assembled.refKinds
     },
     plan
   );
   const freshRefs =
     !plan.send || !picked.images.length
-      ? { images: [], labels: [] }
+      ? { images: [], labels: [], kinds: [], sources: [] }
       : await refreshRefs(
         project,
-        { images: picked.images, labels: picked.labels, paths: picked.paths },
+        {
+          images: picked.images, labels: picked.labels, paths: picked.paths,
+          kinds: picked.kinds, sources: picked.sources
+        },
         { onEvent }
       );
   const refImages = freshRefs.images;
+  // 只收一张的那些身份通道，得拿到角色那张而不是排在最前的场景图。
+  // ⚠ 批量出图那条路里同样有一份 —— 两条路各写各的，就得各验各的
+  const faceRef = consistency.identityRef({
+    images: refImages, kinds: freshRefs.kinds, sources: freshRefs.sources
+  });
   if (!refImages.length && assembled.refImages.length) {
     /**
      * 有图可带、却一张都没带 —— 必须说出来。不说的话用户看到的只是
@@ -3127,6 +3150,7 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
     aspectRatio: project.aspectRatio || null,
     seed,
     refImages,
+    identityRef: faceRef,
     label: `重出 #${shot.index}`,
     onEvent
   });

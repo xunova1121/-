@@ -379,6 +379,8 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
     refLabels: refs.labels,
     /** 和 refImages 一一对应：每张图是"你传的"还是"模型出的" */
     refSources: refs.sources,
+    /** 和 refImages 一一对应：每张图是景 / 角色 / 道具。挑"锁脸用的那一张"靠它 */
+    refKinds: refs.kinds,
     /** 带来源的标签，供界面在"一张都没发"时说清那几张分别是谁 */
     refDetailed: refs.detailed,
     // 和 refImages 一一对应。限时地址过期时靠它重新签一个（见 studio.js 的 refreshRefs）
@@ -467,6 +469,16 @@ export function collectReferences(bible, shot, { limit = 9 } = {}) {
     labels: unique.map((r) => `${glyph[r.kind]}·${r.name}`),
     /** 每张是"你传的照片"还是"模型出的设定图"。refMode 靠它筛。 */
     sources: unique.map((r) => r.source || null),
+    /**
+     * 每张是景 / 角色 / 道具。
+     *
+     * ⚠ 有些厂商的**身份通道只收一张图**：海螺的 subject_reference
+     * （字面写着 type: 'character'）、万相的 ref_img。而这个数组的顺序是
+     * 场景在最前、角色在后 —— 取 refImages[0] 就等于把**场景图**当成
+     * "这个人长什么样"发过去。那条通道是专门用来锁脸的，收错了就白开，
+     * 而且不报任何错：出来的人照旧不像，看不出是我们发错了图。
+     */
+    kinds: unique.map((r) => r.kind),
     /**
      * 带来源的标签，界面直接用。
      *
@@ -586,15 +598,44 @@ export function refPlan() {
 }
 
 /** 按当前策略筛一遍：auto 只留用户自己传的那些 */
-export function pickRefs({ images = [], labels = [], paths = [], sources = [] }, plan) {
-  if (!plan.send) return { images: [], labels: [], paths: [], uploaded: 0 };
+export function pickRefs({ images = [], labels = [], paths = [], sources = [], kinds = [] }, plan) {
+  if (!plan.send) return { images: [], labels: [], paths: [], kinds: [], sources: [], uploaded: 0 };
   const keep = images.map((_, i) => (plan.onlyUploaded ? sources[i] === 'upload' : true));
   return {
     images: images.filter((_, i) => keep[i]),
     labels: labels.filter((_, i) => keep[i]),
     paths: paths.filter((_, i) => keep[i]),
+    // 一起筛，否则下游按下标去认"哪张是脸"时会整体错位
+    kinds: kinds.filter((_, i) => keep[i]),
+    sources: sources.filter((_, i) => keep[i]),
     uploaded: images.filter((_, i) => keep[i] && sources[i] === 'upload').length
   };
+}
+
+/**
+ * ══════════ 哪一张是"这个人长什么样" ══════════
+ *
+ * 有些厂商的身份通道**只收一张图**：海螺的 subject_reference（字面就写着
+ * type: 'character'）、万相的 ref_img。这些通道是专门用来锁脸的，
+ * 是目前云端唯一真能做到"换场景但还是这个人"的东西。
+ *
+ * 而参考图数组的顺序是**场景在最前**（多数厂商对首张权重最高，而出分镜时
+ * 最需要被提醒的是环境）。于是 refImages[0] 是场景图 —— 把它塞进
+ * "这个角色长这样"的字段，那条通道就等于没开。而且不报任何错：
+ * 出来的人照旧不像，看不出是我们发错了图。
+ *
+ * 挑选顺序：用户亲手传的角色照 > 模型出的角色设定图 > 退回第一张。
+ * 用户传的排前面，因为那是他指名道姓说"这个人就长这样"的那一张。
+ */
+export function identityRef({ images = [], kinds = [], sources = [] } = {}) {
+  if (!images.length) return null;
+  const at = (pred) => {
+    const i = images.findIndex((_, n) => pred(n));
+    return i === -1 ? null : images[i];
+  };
+  return at((i) => kinds[i] === 'character' && sources[i] === 'upload')
+    || at((i) => kinds[i] === 'character')
+    || images[0];
 }
 
 /**
@@ -970,15 +1011,35 @@ export async function generateConsistentImage({
   const useEdit = plan.useEditModel;
   // ⚠ 先按策略筛，再去续签地址 —— 筛掉的那些没必要费一次签名
   const picked = pickRefs(
-    { images: assembled.refImages, labels: assembled.refLabels, paths: assembled.refPaths, sources: assembled.refSources },
+    {
+      images: assembled.refImages,
+      labels: assembled.refLabels,
+      paths: assembled.refPaths,
+      sources: assembled.refSources,
+      kinds: assembled.refKinds
+    },
     plan
   );
   // 过期的限时地址在这儿换掉，否则厂商只会回一句"下载不到你给的图"
+  // ⚠ kinds / sources 一并传进去：refreshRefs 会筛掉发不出去的那几张，
+  // 不一起筛的话，回来的下标就对不上了（详见那边的注释）
   const fresh =
     plan.send && picked.images.length && refresh
-      ? await refresh({ images: picked.images, labels: picked.labels, paths: picked.paths })
+      ? await refresh({
+        images: picked.images, labels: picked.labels, paths: picked.paths,
+        kinds: picked.kinds, sources: picked.sources
+      })
       : null;
   const baseRefs = plan.send ? (fresh?.images || picked.images) : [];
+  /**
+   * 哪一张代表"这个人长什么样"。只有身份通道（海螺 subject_reference、
+   * 万相 ref_img）用得上它 —— 那些通道只收一张，而默认的第一张是场景图。
+   */
+  const faceRef = identityRef({
+    images: baseRefs,
+    kinds: fresh?.kinds || picked.kinds,
+    sources: fresh?.sources || picked.sources
+  });
 
   /**
    * 邻镜参考：让这一镜的光线、色调、质感和同场景的其它镜连得住。
@@ -1037,6 +1098,8 @@ export async function generateConsistentImage({
       aspectRatio: project.aspectRatio || null,
       seed,
       refImages,
+      // 只收一张的那些身份通道用它，别让它们拿到场景图（见 identityRef）
+      identityRef: faceRef,
       label: `出图 #${shot.index}`,
       onEvent
     });

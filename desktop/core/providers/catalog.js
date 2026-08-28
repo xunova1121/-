@@ -708,7 +708,24 @@ export const PROVIDERS = [
         hint: '部分接口（如语音）要求带 GroupId 查询参数，视频和出图一般不需要'
       }
     ],
-    capabilities: ['chat', 'vision', 't2i', 'i2v', 't2v', 'r2v'],
+    /**
+     * ⚠ **i2i 是为 image-01 的 subject_reference 补的。**
+     *
+     * 适配器里早就写了这一段：
+     *   body.subject_reference = [{ type: 'character', image_file: … }]
+     * 而能力表里没有 'i2i' —— 于是参考图在进那个 switch 之前就被
+     * "这家不支持图生图"那条分支剥掉了。整段代码够不到，是死的。
+     *
+     * 这件事的分量：subject_reference 是**云端少数几个真的按"这个人长什么样"
+     * 设计的通道**（字面就写着 type: 'character'），而 gpt-image 的 edits
+     * 做的是合成、不是身份保持。用户要的"换场景但还是这张脸"，云端这边
+     * 主要就指望它。留着一段够不到的代码，等于把这条路悄悄封了。
+     *
+     * ⚠ 这条改动**没有在真机上验过** —— 本机出网是白名单，打不到海螺。
+     * 验过的只有"参考图能走到请求体里、而且装的是角色那张"（见自检）。
+     * 厂商那边认不认这个字段，得你那边真跑一次才知道。
+     */
+    capabilities: ['chat', 'vision', 't2i', 'i2i', 'i2v', 't2v', 'r2v'],
     editableBaseUrl: true,
     endpoints: {
       chat: '{{baseUrl}}/text/chatcompletion_v2',
