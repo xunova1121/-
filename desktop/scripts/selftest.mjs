@@ -8223,6 +8223,49 @@ section('传上去的照片：要真的用上，而且只用脸');
       JSON.stringify({ kept: kept2.images.length, uploaded: kept2.uploaded, all: two.refImages.length }));
   }
 
+  /**
+   * ⚠ **用户那个确切场景，端到端跑一遍：两个开关都关着 + 单独重出 + 传过照片。**
+   *
+   * 前面那些验的是 refPlan / pickRefs 这两个纯函数。而用户撞的是**整条链路**：
+   * 他按「重出这一镜」，走 studio.regenerateShot，中间要经过
+   * assemblePrompt → refSources → pickRefs → refreshRefs → generateImage。
+   * 任何一环把 sources 丢了，纯函数照样绿，而他的照片照样发不出去。
+   *
+   * 判据是**请求体里到底有没有那张图**，不是函数返回了什么。
+   */
+  {
+    settings.patch({ useReferenceImages: false, refMode: 'off', useEditModelForShots: false });
+    const p3 = store.create({ title: '两个开关都关着' });
+    store.update(p3.id, (x) => {
+      x.bible = mkBible('upload');
+      x.shots = [{ ...shot, id: 's1' }];
+      return x;
+    });
+    upstream.lastImageBody = null;
+    await studioModule.regenerateShot(p3.id, 's1', {}, () => {});
+    check('两个开关都关着，单独重出时用户传的照片照样发出去了',
+      Boolean(upstream.lastImageBody?.image),
+      JSON.stringify({ 请求体字段: Object.keys(upstream.lastImageBody || {}) }));
+    const got3 = store.read(p3.id).shots[0];
+    check('而且这一镜记下了带过它', (got3.bibleRefs || []).length === 1, JSON.stringify(got3.bibleRefs));
+    /**
+     * 同时**模型出的那些确实被挡住了** —— 否则那两个开关就成了摆设，
+     * 而摆设比没有更糟：用户关了它，以为省了钱/省了干扰，其实什么也没发生。
+     */
+    const p4 = store.create({ title: '两个开关都关着·模型图' });
+    store.update(p4.id, (x) => {
+      x.bible = mkBible('model');
+      x.shots = [{ ...shot, id: 's1' }];
+      return x;
+    });
+    upstream.lastImageBody = null;
+    await studioModule.regenerateShot(p4.id, 's1', {}, () => {});
+    check('而模型自己出的设定图，这时确实一张都没发（开关不是摆设）',
+      !upstream.lastImageBody?.image,
+      JSON.stringify({ 请求体字段: Object.keys(upstream.lastImageBody || {}) }));
+    settings.patch({ useReferenceImages: true, refMode: 'auto' });
+  }
+
   // ── 模型自己出的设定图：默认仍然不发（那条路的老理由还成立）──
   {
     settings.patch({ refMode: 'auto' });
