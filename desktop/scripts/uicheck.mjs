@@ -1429,6 +1429,41 @@ await page.waitForTimeout(900);
 await page.locator('.shot-card .shot-edit-btn').first().click().catch(() => {});
 await page.waitForTimeout(500);
 {
+  /**
+   * ⚠ **分组必须看得见**，不只是在 DOM 里分好。
+   *
+   * 下面那几条查的是"哪个字段归在哪一组"—— 全是结构。第一版就是结构全对、
+   * 走查全绿，而屏幕上**什么都看不出来**：.shot-group 的背景写的是
+   * var(--surface)，和它坐着的 .shot-card 一模一样（都是 #1D1913），
+   * 边框那个 --line-soft 是 #262019，近黑压近黑。
+   *
+   * 用户的原话："你怎么分的组，我也没看出变化。"
+   *
+   * 分组存在的全部理由就是"让人一眼看出谁喂谁"。看不见 = 没做。
+   * 所以这里量的是**真的颜色差**，不是"有没有这个 class"。
+   */
+  const contrast = await page.evaluate(() => {
+    const g = document.querySelector('.shot-group');
+    if (!g) return null;
+    const card = g.closest('.shot-card');
+    const px = (s) => (s.match(/\d+/g) || []).map(Number).slice(0, 3);
+    const lum = ([r, gg, b]) => 0.2126 * r + 0.7152 * gg + 0.0722 * b;
+    const gb = px(getComputedStyle(g).backgroundColor);
+    const cb = px(getComputedStyle(card).backgroundColor);
+    return { diff: Math.abs(lum(gb) - lum(cb)), gb: gb.join(','), cb: cb.join(',') };
+  });
+  check('分组和它坐着的卡片**颜色真的不一样**（不然等于没分组）',
+    contrast && contrast.diff >= 4, JSON.stringify(contrast));
+
+  // 「改了要重出 X」是代价，不能是一句灰得看不见的脚注
+  const costChip = await page.evaluate(() => {
+    const s = document.querySelector('.shot-group-head span');
+    if (!s) return null;
+    const cs = getComputedStyle(s);
+    return { text: s.textContent.trim(), color: cs.color, bg: cs.backgroundColor };
+  });
+  check('「改了要重出什么」当面说出来了', /重出|重新/.test(costChip?.text || ''), JSON.stringify(costChip));
+
   const titles = await page.locator('.shot-group-head b').allInnerTexts();
   check('四组都在（出图 / 出视频 / 配音 / 合成）',
     ['出图用的', '出视频用的', '配音用的', '合成用的'].every((t) => titles.includes(t)),
