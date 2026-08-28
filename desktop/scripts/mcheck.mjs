@@ -849,6 +849,27 @@ await page.waitForTimeout(800);
   }
 }
 
+/**
+ * ⑫ 这一镜出图带了哪几张参考图。
+ *
+ * 用户传了自己的照片、出来的脸不是他的，而**手机上一个字都没有** ——
+ * 他没法判断是"图没发出去"还是"发了但模型没保住脸"，而这两件事
+ * 下一步完全不同。他的原话就是"我用的手机端"。
+ *
+ * ⚠ 一张都没带时**更要说**。走查机上的分镜就是没带参考图那种，
+ * 所以这里正好验到那条最要紧的分支：沉默在这里等于误导。
+ */
+await page.locator('.tab', { hasText: '分镜' }).click();
+await page.waitForTimeout(800);
+{
+  const txt = await page.locator('.shot').first().innerText().catch(() => '');
+  const said = /出图带了参考图|出图时没带任何参考图/.test(txt);
+  console.log('⑫ 手机上说得出这一镜带没带参考图：', said ? '✓' : `✕ ${txt.slice(0, 120)}`);
+  // 没带的时候要说清后果，不能只说"没带"
+  console.log('   没带时说清了跟传的照片无关：',
+    !/没带任何参考图/.test(txt) || /跟你传的照片无关/.test(txt) ? '✓' : `✕ ${txt.slice(0, 160)}`);
+}
+
 // 第 ② 步是**故意**敲错配对码，那一次 401 是预期之内的，不算页面报错
 const realErrs = errs.filter((e) => !/401/.test(e));
 console.log('意料之外的 4xx：', unexpected4xx.length ? `✕ ${unexpected4xx.slice(0, 4).join('、')}` : '无 ✓');

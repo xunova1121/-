@@ -2324,8 +2324,21 @@ export default {
                   // 不然重出来还是不像的时候，根本不知道是提示词的问题还是压根没带参考图
                   h('div', { class: 'shot-used' },
                     '单独重出会自动带上本镜的设定集：场景基准图 + 出场角色设定图 + 点到的道具图'),
-                  sc.image && shot.bibleRefs?.length
-                    ? h('div', { class: 'shot-used' }, `上次出图参考：${shot.bibleRefs.join('、')}`)
+                  /**
+                   * ⚠ **一张都没带的时候更要说**。
+                   *
+                   * 这一行原来只在带了参考图时显示，没带时一声不响 ——
+                   * 而那恰恰是最需要知道的情况：用户传了自己的照片、
+                   * 出来的脸不是他的，而界面上没有任何东西告诉他
+                   * 那张照片根本没被用上。沉默在这里等于误导。
+                   */
+                  // cap:shot-refs
+                  sc.image
+                    ? h('div', { class: 'shot-used' },
+                        shot.bibleRefs?.length
+                          ? `上次出图参考：${shot.bibleRefs.join('、')}`
+                          : '上次出图没带任何参考图 —— 这一镜完全由文字描述决定。'
+                            + '传过照片的话，去「设置 → 画面规格 → 出分镜图时带哪些参考图」。')
                     : null,
                   sc.video && shot.videoRefs?.length
                     ? h('div', { class: 'shot-used' }, `上次出视频参考：${shot.videoRefs.join('、')}`)

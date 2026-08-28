@@ -255,6 +255,21 @@ export const CAPABILITIES = [
    * "能按、但不知道按下去会怎样"的遥控器。
    */
   {
+    id: 'shot-refs',
+    name: '这一镜出图带了哪几张参考图',
+    api: '（读 shot.bibleRefs，不单独发请求）',
+    pc: 'ui/views/studio.js',
+    /**
+     * 手机上必须有，而且这一条是用真事换来的：用户在手机上传了自己的照片，
+     * 出来的脸不是他的，而手机上**一个字都没有** —— 他没法判断是
+     * "图没发出去"还是"发了但模型没保住脸"，而这两件事下一步完全不同。
+     *
+     * 这不是排错工具（那类归电脑）。"这一镜为什么像/不像"是个创作问题，
+     * 而审片正是在手机上做的。
+     */
+    mobile: 'ui/m/m.js'
+  },
+  {
     id: 'spend-estimate',
     name: '按下去之前，这一下要花多少',
     api: 'GET /projects/:id/estimate?stage=',

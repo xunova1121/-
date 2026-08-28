@@ -2246,6 +2246,26 @@ function shotCardOf(s, v, portrait, probs = shotIssues(s)) {
           : null,
         s.sfxPath && s.sfxOf === s.sound ? h('span', { class: 'tag' }, '有音效')
           : !s.sfxPath && s.sound ? h('span', { class: 'tag' }, '待出音效') : null),
+      /**
+       * ── 这一镜出图时带了哪几张参考图 ──
+       *
+       * 手机上原来**一个字都没有**（电脑版有一行「上次出图参考：…」）。
+       * 于是用户传了自己的照片、出来的脸不是他的，而他在手机上
+       * 完全无从判断是"图没发出去"还是"发了但模型没保住脸"——
+       * 这两件事的下一步完全不同。用户的原话就是"我用的手机端"。
+       *
+       * ⚠ **一张都没带的时候更要说**。电脑版那行只在有参考图时显示，
+       * 没带时反而一声不响 —— 而那恰恰是最需要知道的情况：
+       * 你传了照片，而这一镜根本没用上它。沉默在这里等于误导。
+       */
+      // cap:shot-refs
+      s.imagePath
+        ? h('div', { class: 'muted', style: 'margin-top:6px;line-height:1.6' },
+            s.bibleRefs?.length
+              ? `出图带了参考图：${s.bibleRefs.join('、')}`
+              : '出图时没带任何参考图 —— 这一镜的脸完全由文字描述决定，跟你传的照片无关。'
+                + '要用上传的照片，去电脑版「设置 → 画面规格 → 出分镜图时带哪些参考图」。')
+        : null,
       acts));
 }
 
