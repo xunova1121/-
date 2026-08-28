@@ -294,9 +294,11 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
    *
    * 所以这三个条件缺一不可：有图、没关掉参考图、而且这一步真的会发图。
    */
-  const willSendRefs = settings.get('useEditModelForShots') === true;
-  const hasRefs =
-    refs.images.length > 0 && settings.get('useReferenceImages') !== false && willSendRefs;
+  const plan = refPlan();
+  const kept = pickRefs(refs, plan);
+  const hasRefs = kept.images.length > 0;
+  /** 这一镜带的参考图里，有没有用户自己传的照片 */
+  const hasPhoto = kept.uploaded > 0;
 
   parts.push(shot.description || '');
 
@@ -308,7 +310,23 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
   for (const c of cast) {
     const v = variants.pickVariant(c, shot);
     const full = variants.describeWith(c, v);
-    if (hasRefs) {
+    if (hasPhoto) {
+      /**
+       * ⚠ 带的是**真人照片**时，说法要反过来：脸照着图，衣服照着字。
+       *
+       * 用户的原话："建议上传的人物脸保留、衣服是描述中的衣服"。
+       *
+       * 只说一句"外貌以参考图为准"的话，模型会把照片里的**衣服也一起抄过来** ——
+       * 而那多半是一件跟这部片子毫无关系的现代便装。于是每一镜都穿着那身，
+       * 设定集里写的"藏青立领制服"一次都没出现过。
+       *
+       * 所以这里把两件事分开点名：五官/发型/肤色跟着照片，
+       * 服装/配饰/场景跟着文字。而且服装那段要**完整给**，不能像下面那样
+       * 截前三段 —— 它现在是唯一的服装来源了。
+       */
+      parts.push(`【${c.name}】脸、发型、肤色以参考图那个人为准；`
+        + `服装与配饰按这里写的来：${full || '按设定集'}`);
+    } else if (hasRefs) {
       // 留三段而不是两段：第三段往往正好是服装配色，而配色是最强的身份线索之一。
       // 参考图给的是设定图（另一个姿势、另一个背景），文字仍然要把关键特征点住。
       const brief = full.split(/[，,。]/).slice(0, 3).join('，');
@@ -359,6 +377,8 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
     seed: (cast[0]?.seed ?? scene?.seed ?? 0) + (shot.index || 0),
     refImages: refs.images,
     refLabels: refs.labels,
+    /** 和 refImages 一一对应：每张图是"你传的"还是"模型出的" */
+    refSources: refs.sources,
     // 和 refImages 一一对应。限时地址过期时靠它重新签一个（见 studio.js 的 refreshRefs）
     refPaths: refs.paths,
     cast: cast.map((c) => c.name),
@@ -417,7 +437,16 @@ export function collectReferences(bible, shot, { limit = 9 } = {}) {
     // 标签上带出角度，用户才知道这一镜为什么像 / 不像
     const base = variants.labelOf(item, v) || item.name;
     const name = angleId === anglesLib.PRIMARY ? base : `${base}·${anglesLib.labelOf(setKey, angleId)}`;
-    picked.push({ kind, name, url, path: localPath });
+    /**
+     * 带上**这张图哪来的**。
+     *
+     * "你自己传的照片"和"模型出的设定图"是两种东西，下游要分开对待：
+     * 传照片是一句毫不含糊的"我要这张脸"，而模型出的设定图只是一个近似。
+     * 不区分的话，"要不要发参考图"就只能一刀切 —— 而一刀切正是
+     * 上传功能形同虚设的原因（见下面 refMode）。
+     */
+    const src = angle?.sheetSource || v?.sheetSource || item.sheetSource || null;
+    picked.push({ kind, name, url, path: localPath, source: src });
   };
   const scene = matchScene(bible, shot);
   if (scene) ref('scene', scene);
@@ -433,7 +462,57 @@ export function collectReferences(bible, shot, { limit = 9 } = {}) {
     // 和 images 一一对应；过期的那张要靠它重新签（见 studio.js 的 refreshRefs）
     paths: unique.map((r) => r.path || null),
     // 界面上直接显示"这次带了谁"，用户才知道重出为什么像/不像
-    labels: unique.map((r) => `${glyph[r.kind]}·${r.name}`)
+    labels: unique.map((r) => `${glyph[r.kind]}·${r.name}`),
+    /** 每张是"你传的照片"还是"模型出的设定图"。refMode 靠它筛。 */
+    sources: unique.map((r) => r.source || null)
+  };
+}
+
+/**
+ * ══════════ 出分镜图时，哪些参考图该发出去 ══════════
+ *
+ * 用户的原话："传本地图，出的分镜和自传图没有任何关系"。
+ *
+ * 他说的完全对，而且原因是结构性的：`useEditModelForShots` 这个开关
+ * 把**两件独立的事**捆在了一起 ——
+ *
+ *   ① 要不要带参考图
+ *   ② 要不要把模型换成图生图（编辑）模型
+ *
+ * 默认关掉它的理由（写在下面那段注释里）全是冲着 ② 去的：SeedEdit 这类
+ * 编辑模型拿到一张图是在**那张图上改**，出来的像"被改过的设定图"而不是那一场戏。
+ * 那个理由是对的。但它把 ① 也一起关掉了 —— 于是默认设置下，
+ * 出分镜图时**一张参考图都不发**，用户传的照片影响是零。
+ *
+ * 拆开之后：
+ *   auto（默认） 只发**你自己传的那些图**，模型不换。
+ *                传一张照片上去是一句毫不含糊的"我要这张脸"，
+ *                而模型出的设定图只是个近似，没必要冒 ② 那个险。
+ *   all          所有设定图都当参考发，模型不换。
+ *   edit         老行为：换成编辑模型 + 发图。构图会被带跑，慎用。
+ *   off          一张都不发（纯文字 + 稳定种子）。
+ *
+ * ⚠ 老的 useEditModelForShots=true 仍然等价于 edit —— 那些人的行为不能被悄悄改掉。
+ */
+export function refPlan() {
+  const legacy = settings.get('useEditModelForShots') === true;
+  const mode = legacy ? 'edit' : (settings.get('refMode') || 'auto');
+  const refsOn = settings.get('useReferenceImages') !== false;
+  if (!refsOn || mode === 'off') return { mode: 'off', send: false, useEditModel: false, onlyUploaded: false };
+  if (mode === 'edit') return { mode, send: true, useEditModel: true, onlyUploaded: false };
+  if (mode === 'all') return { mode, send: true, useEditModel: false, onlyUploaded: false };
+  return { mode: 'auto', send: true, useEditModel: false, onlyUploaded: true };
+}
+
+/** 按当前策略筛一遍：auto 只留用户自己传的那些 */
+export function pickRefs({ images = [], labels = [], paths = [], sources = [] }, plan) {
+  if (!plan.send) return { images: [], labels: [], paths: [], uploaded: 0 };
+  const keep = images.map((_, i) => (plan.onlyUploaded ? sources[i] === 'upload' : true));
+  return {
+    images: images.filter((_, i) => keep[i]),
+    labels: labels.filter((_, i) => keep[i]),
+    paths: paths.filter((_, i) => keep[i]),
+    uploaded: images.filter((_, i) => keep[i] && sources[i] === 'upload').length
   };
 }
 
@@ -804,16 +883,21 @@ export async function generateConsistentImage({
    *
    * 所以默认走文生图 + 冻结描述 + 稳定种子。参考图那一层留给**出视频**
    * （首帧图 + r2v 通道），那边它是真的有用。
-   * 想试图生图的话，「设置 → 画面规格」里有开关。
+   * 想改这件事去「设置 → 画面规格 → 出分镜图时带哪些参考图」。
    */
-  const useEdit = settings.get('useEditModelForShots') === true;
-  const refsOn = settings.get('useReferenceImages') !== false;
+  const plan = refPlan();
+  const useEdit = plan.useEditModel;
+  // ⚠ 先按策略筛，再去续签地址 —— 筛掉的那些没必要费一次签名
+  const picked = pickRefs(
+    { images: assembled.refImages, labels: assembled.refLabels, paths: assembled.refPaths, sources: assembled.refSources },
+    plan
+  );
   // 过期的限时地址在这儿换掉，否则厂商只会回一句"下载不到你给的图"
   const fresh =
-    useEdit && refsOn && refresh
-      ? await refresh({ images: assembled.refImages, labels: assembled.refLabels, paths: assembled.refPaths })
+    plan.send && picked.images.length && refresh
+      ? await refresh({ images: picked.images, labels: picked.labels, paths: picked.paths })
       : null;
-  const baseRefs = !useEdit || !refsOn ? [] : (fresh?.images || assembled.refImages);
+  const baseRefs = plan.send ? (fresh?.images || picked.images) : [];
 
   /**
    * 邻镜参考：让这一镜的光线、色调、质感和同场景的其它镜连得住。
@@ -827,7 +911,12 @@ export async function generateConsistentImage({
    * 多数厂商对首张参考图权重最高，顺序在这里是有意义的。
    */
   const neighborMode = settings.get('neighborRef') || 'scene-anchor';
-  const neighbor = useEdit && refsOn ? continuity.neighborRef(project, shot, { mode: neighborMode }) : null;
+  /**
+   * 邻镜参考只在**编辑模型**那条路上有意义：它是拿上一张成图去"改"出这一张。
+   * 走 auto/all（文生图 + 参考图）时不带它 —— 那条路上的参考图是**身份锚**，
+   * 混进一张构图完全不同的邻镜图，只会让模型在两个目标之间摇摆。
+   */
+  const neighbor = useEdit ? continuity.neighborRef(project, shot, { mode: neighborMode }) : null;
   /**
    * 本地路径 → 模型收得下的引用（公网 URL 或 data URI）。
    *

@@ -471,6 +471,25 @@ export default {
 
     // 这里是**默认值**，不是最终值：每个项目可以有自己的画幅（新建项目时选，
     // 项目页也能改）。手上同时有横屏宣传片和竖屏短剧时，靠这一个全局开关来回切迟早出错。
+    /**
+     * 出分镜图时带哪些参考图。
+     *
+     * ⚠ 这个开关在界面上**一直是缺的** —— consistency.js 的注释里写着
+     *「想试图生图的话，设置 → 画面规格里有开关」，而那儿从来没有过。
+     * 于是用户传了照片上去，出分镜图时一张都不发（默认不发），
+     * 而他没有任何地方能改这件事，也没有任何地方告诉他为什么。
+     * 用户的原话："传本地图，出的分镜和自传图没有任何关系"。
+     */
+    const REF_MODES = [
+      ['auto', '只用我自己传的图（推荐）'],
+      ['all', '所有设定图都当参考'],
+      ['edit', '换成图生图模型再发图'],
+      ['off', '一张都不发（纯文字 + 稳定种子）']
+    ];
+    const refSel = h('select', { onchange: (e) => (pending.refMode = e.target.value) },
+      REF_MODES.map(([id, label]) => h('option',
+        { value: id, selected: id === (settings.refMode || 'auto') }, label)));
+
     const ratioSel = h('select', { onchange: (e) => (pending.aspectRatio = e.target.value) },
       RATIOS.map((r) => h('option', { value: r.id, selected: r.id === (settings.aspectRatio || '16:9') },
         `${r.label} · ${r.hint}`))
@@ -491,6 +510,19 @@ export default {
                 '不勾也会在成片旁边生成 .srt（那一步不花钱、也不会失败）。' +
                 '烧字幕要 FFmpeg 编进了 libass、系统里还得有能显示中文的字体，缺哪个都会失败 —— ' +
                 '所以默认不开。就算开了，烧失败也只丢字幕、不丢成片。')))),
+        h('div', { class: 'field' },
+          h('label', {}, '出分镜图时带哪些参考图'), refSel,
+          h('div', { class: 'field-hint' },
+            h('b', {}, '传了本地照片的话，这一项必须不是「一张都不发」，否则那张照片对分镜图完全没有影响。'),
+            '默认「只用我自己传的图」：传一张照片上去是一句毫不含糊的"我要这张脸"，'
+            + '而模型自己出的设定图只是个近似，为它换模型不划算。'),
+          h('div', { class: 'field-hint' },
+            '带上照片之后，提示词会说清',
+            h('b', {}, '脸照着图、衣服照着设定集的文字'),
+            ' —— 不分开说的话，模型会把照片里那身现代便装也一起抄过来。'),
+          h('div', { class: 'field-hint' },
+            '「换成图生图模型」慎用：那类模型是在你给的那张图上改，'
+            + '出来的会像"被改过的设定图"（人物居中、纯色背景还在），而不是你要的那一场戏。')),
         h('div', { class: 'grid2' },
           h('div', { class: 'field' }, h('label', {}, '默认画幅'), ratioSel,
             h('div', { class: 'field-hint' },

@@ -8095,6 +8095,102 @@ section('长剧本：拆分镜一批一批来');
   }
 }
 
+/**
+ * ════════ 传上去的照片，要真的进到出图那一步 ════════
+ *
+ * 用户的原话："传本地图，出的分镜和自传图没有任何关系，
+ * 建议上传的人物脸保留、衣服是描述中的衣服。"
+ *
+ * 他说的完全对，而且原因是结构性的：useEditModelForShots 把两件独立的事
+ * 捆成了一个开关 —— ①发不发参考图 ②换不换成编辑模型 —— 而它默认关着。
+ * 于是出分镜图时**一张参考图都不发**，传上去的照片影响是零。
+ *
+ * 注释里默认关掉它的理由全是冲着②去的（编辑模型会画出"被改过的设定图"
+ * 而不是那一场戏），那个理由是对的 —— 但它顺手把①也关了。
+ */
+section('传上去的照片：要真的用上，而且只用脸');
+{
+  const cs = await import('../core/pipeline/consistency.js');
+  const mkBible = (source) => ({
+    style: { anchor: '国风', palette: '青灰', negative: '' },
+    characters: [{
+      name: '阿澜', appearance: '短发，藏青立领制服，袖口两道银线，左胸编号牌', seed: 1,
+      sheetPath: '/a.png', sheetUrl: 'https://x/a.png', sheetSource: source,
+      variants: [{ id: 'v-default', name: '默认', sheetPath: '/a.png', sheetUrl: 'https://x/a.png', sheetSource: source }]
+    }],
+    scenes: [{ name: '码头', appearance: '雾', seed: 2, variants: [{ id: 'v-default', name: '默认' }] }],
+    props: []
+  });
+  const shot = { id: 's1', index: 1, scene: '码头', characters: ['阿澜'], description: '阿澜走向栈桥', camera: '中景' };
+
+  const keep = settings.get('refMode');
+
+  // ── auto（默认）：用户传的图要发出去 ──
+  {
+    settings.patch({ refMode: 'auto', useEditModelForShots: false });
+    const up = cs.assemblePrompt(mkBible('upload'), shot);
+    const plan = cs.refPlan();
+    const kept = cs.pickRefs(
+      { images: up.refImages, labels: up.refLabels, paths: up.refPaths, sources: up.refSources }, plan
+    );
+    /**
+     * ⚠ 这是整节的要害。在修之前这里是 0 —— 传了照片，一张也不发。
+     */
+    check('传了照片时，参考图真的会发出去（修之前这里是 0）',
+      kept.images.length === 1, JSON.stringify({ 发出去的: kept.images, 全部: up.refImages }));
+    check('而且不换成编辑模型（换了构图会被带跑，画出"被改过的照片"）',
+      plan.useEditModel === false, JSON.stringify(plan));
+
+    /**
+     * ⚠ 提示词要把两件事**分开点名**：脸照着图，衣服照着字。
+     *
+     * 只说"外貌以参考图为准"的话，模型会把照片里的衣服也一起抄过来 ——
+     * 而那多半是一件跟这部片子毫无关系的现代便装。于是每一镜都穿着那身，
+     * 设定集里写的"藏青立领制服"一次都没出现过。
+     */
+    check('提示词说清了"脸以参考图为准"', /脸、发型、肤色以参考图那个人为准/.test(up.prompt), up.prompt.slice(0, 200));
+    check('并且说清了"衣服按文字来"', /服装与配饰按这里写的来/.test(up.prompt), up.prompt.slice(0, 240));
+    check('服装描述是**完整**给的，不是截前三段（它现在是唯一的服装来源）',
+      up.prompt.includes('左胸编号牌'), up.prompt.slice(0, 260));
+  }
+
+  // ── 模型自己出的设定图：默认仍然不发（那条路的老理由还成立）──
+  {
+    settings.patch({ refMode: 'auto' });
+    const gen = cs.assemblePrompt(mkBible('model'), shot);
+    const kept = cs.pickRefs(
+      { images: gen.refImages, labels: gen.refLabels, paths: gen.refPaths, sources: gen.refSources }, cs.refPlan()
+    );
+    check('模型自己出的设定图，默认还是不发（不改老行为）', kept.images.length === 0, JSON.stringify(kept.images));
+    check('这时候提示词不说"以参考图为准"（说了就是撒谎 —— 图根本没发）',
+      !/以参考图/.test(gen.prompt), gen.prompt.slice(0, 200));
+    check('而是把完整外貌写进去（那是唯一的身份来源）',
+      gen.prompt.includes('袖口两道银线'), gen.prompt.slice(0, 200));
+  }
+
+  // ── all / off / 老开关 ──
+  {
+    settings.patch({ refMode: 'all' });
+    const g = cs.assemblePrompt(mkBible('model'), shot);
+    check('选 all 时模型出的图也发', cs.pickRefs(
+      { images: g.refImages, labels: g.refLabels, paths: g.refPaths, sources: g.refSources }, cs.refPlan()
+    ).images.length === 1);
+    check('但 all 也不换编辑模型', cs.refPlan().useEditModel === false);
+
+    settings.patch({ refMode: 'off' });
+    check('选 off 时一张都不发', cs.refPlan().send === false);
+
+    /**
+     * ⚠ 老开关不能被悄悄改掉行为：已经打开 useEditModelForShots 的人，
+     * 走的还得是"换编辑模型 + 发图"那条路。
+     */
+    settings.patch({ refMode: 'auto', useEditModelForShots: true });
+    check('老的 useEditModelForShots=true 仍然等价于 edit（不改已有用户的行为）',
+      cs.refPlan().mode === 'edit' && cs.refPlan().useEditModel === true, JSON.stringify(cs.refPlan()));
+    settings.patch({ useEditModelForShots: false, refMode: keep });
+  }
+}
+
 section('中转站只转对话：不该四条一起红');
 {
   /**
