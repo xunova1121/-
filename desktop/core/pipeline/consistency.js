@@ -506,6 +506,25 @@ export function collectReferences(bible, shot, { limit = 9 } = {}) {
  *
  * ⚠ 老的 useEditModelForShots=true 仍然等价于 edit —— 那些人的行为不能被悄悄改掉。
  */
+
+/**
+ * ══════════ 这一镜是按哪一版规矩出的 ══════════
+ *
+ * 镜头卡上"带了哪几张参考图"那行，读的全是**出图那一刻存下来的**字段。
+ * 它是一份历史记录，不是当前状态 —— 改了代码、改了设置，它一个字都不会变，
+ * 除非把这一镜重出一次。
+ *
+ * 这件事坑过一整轮：上传图不再受开关管之后，用户更新了程序，
+ * 卡片上照旧写着"你传的那张没发出去，去改设置"—— 因为那行是**上一次出图时**
+ * 写下的，而上一次出图确实没发。他照着去改设置，改完还是那句话，
+ * 于是更确信"这功能是坏的"。而真正该做的只是重出一次。
+ *
+ * 所以每次出图都盖一个戳，界面靠它分清两件完全不同的事：
+ *   没有戳 → 这条记录是旧版留下的，它说什么都不作数，重出一次再看
+ *   有戳还是没发 → 那是真出了问题，得看请求记录，不是去改设置
+ */
+export const REF_POLICY = 'uploads-always';
+
 export function refPlan() {
   const legacy = settings.get('useEditModelForShots') === true;
   const mode = legacy ? 'edit' : (settings.get('refMode') || 'auto');

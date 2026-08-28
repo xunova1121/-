@@ -2926,6 +2926,8 @@ async function generateAssetsRaw(projectId, { only = null, chapterId = null, reg
           t.refsAvailable = result.refsAvailable ?? null;
           t.refsAvailableLabels = result.refsAvailableLabels || [];
           t.refBlockedHint = result.refBlockedHint || '';
+          // 这一镜是按哪一版参考图规矩出的。界面靠它分清"记录是旧的"和"真没发出去"
+          t.refPolicy = consistency.REF_POLICY;
           t.consistency = {
             score: result.verification?.score ?? null,
             pass: result.verification?.pass ?? null,
@@ -3123,6 +3125,8 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
       t.refsAvailable = (assembled.refImages || []).length;
       t.refsAvailableLabels = assembled.refDetailed || [];
       t.refBlockedHint = plan.blockedHint || '';
+      // 同上：这一镜是按哪一版参考图规矩出的
+      t.refPolicy = consistency.REF_POLICY;
       t.consistency = {
         score: verification.score ?? null,
         pass: verification.pass ?? null,

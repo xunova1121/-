@@ -8263,6 +8263,47 @@ section('传上去的照片：要真的用上，而且只用脸');
     check('而模型自己出的设定图，这时确实一张都没发（开关不是摆设）',
       !upstream.lastImageBody?.image,
       JSON.stringify({ 请求体字段: Object.keys(upstream.lastImageBody || {}) }));
+    /**
+     * ⚠ **同样的场景，换成「整步出图」再验一遍 —— 这是另一条路。**
+     *
+     * 上面那两块走的是 regenerateShot（单独重出这一镜），它在 studio.js 里
+     * 自己调了一次 refPlan/pickRefs。而用户平时按的是「出图」这一整步，
+     * 走的是 generateAssets → consistency.generateConsistentImage ——
+     * 那里**另有一次** refPlan/pickRefs，中间还多经过一趟 refreshRefs。
+     *
+     * 我上一轮只验了前者就跟用户说"验过了，去更新"，而他更新完照旧没发。
+     * 两条路各写各的判据，就得各验各的 —— 这句话我自己在别处写过一遍，
+     * 这次又栽在同一个地方。判据仍然是**请求体里有没有那张图**。
+     */
+    const p5 = store.create({ title: '两个开关都关着·整步出图' });
+    store.update(p5.id, (x) => {
+      x.bible = mkBible('upload');
+      x.shots = [{ ...shot, id: 's1', imagePath: null }];
+      return x;
+    });
+    upstream.lastImageBody = null;
+    await studioModule.generateAssets(p5.id, { onEvent: () => {} });
+    check('整步出图时，两个开关都关着也照样发出用户传的照片',
+      Boolean(upstream.lastImageBody?.image),
+      JSON.stringify({ 请求体字段: Object.keys(upstream.lastImageBody || {}) }));
+    const got5 = store.read(p5.id).shots[0];
+    check('整步出图这条路上，这一镜也记下了带过它',
+      (got5.bibleRefs || []).length === 1, JSON.stringify(got5.bibleRefs));
+
+    /**
+     * ⚠ **两条路都得盖上"按哪一版规矩出的"这个戳。**
+     *
+     * 界面靠它分清"这条记录是旧版留下的"和"新版真没发出去"——
+     * 这两件事的下一步完全相反（一个是重出一次，一个是查请求记录）。
+     * 漏盖的那条路，卡片会永远说自己是旧记录，永远劝人重出，
+     * 而重出之后还是那句话 —— 一个自己骗自己的死循环。
+     */
+    check('整步出图会盖上"按新规矩出的"这个戳', got5.refPolicy === cs.REF_POLICY,
+      JSON.stringify({ got: got5.refPolicy, want: cs.REF_POLICY }));
+    check('单独重出这一镜也盖同一个戳（两条路，各盖各的，得各验一份）',
+      store.read(p3.id).shots[0].refPolicy === cs.REF_POLICY,
+      JSON.stringify(store.read(p3.id).shots[0].refPolicy));
+
     settings.patch({ useReferenceImages: true, refMode: 'auto' });
   }
 
