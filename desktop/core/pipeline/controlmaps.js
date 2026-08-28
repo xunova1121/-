@@ -99,13 +99,13 @@ export function renderControls(source = {}, { duration = 5, sampleEvery = 3 } = 
   const last = frames.at(-1);
   const objects = first.objects;
   const trajectory = sampled.map(({ frame, stage }) => ({ frame, time: Number((frame / FPS).toFixed(3)), x: stage.cam.x, y: stage.cam.y, height: stage.cam.height, rotation: stage.cam.rotation || 0, lens: stage.cam.lens || 35, aperture: stage.cam.aperture || 4, focusId: stage.cam.focusId || '' }));
-  const poseSequence = sampled.map(({ frame, stage }) => ({ frame, subjects: (stage.subjects || []).map((x) => ({ id: x.id, x: x.x, y: x.y, height: x.height, rotation: x.rotation, scale: x.scale, pose: x.pose || 'stand', action: x.action || '' })) }));
+  const poseSequence = sampled.map(({ frame, stage }) => ({ frame, subjects: (stage.subjects || []).map((x) => ({ id: x.id, x: x.x, y: x.y, height: x.height, rotation: x.rotation, scale: x.scale, pose: x.pose || 'stand', action: x.action || '', animationName: x.animationName || '' })) }));
   const lightSequence = sampled.map(({ frame, stage }) => ({ frame, time: Number((frame / FPS).toFixed(3)), lights: (stage.lights || []).map((x) => ({ id: x.id, type: x.lightType, x: x.x, y: x.y, height: x.height, intensity: x.intensity, color: x.color, targetId: x.targetId || '' })) }));
   const motionPaths = (base.subjects || []).map((subject) => {
     const points = sampled.map(({ frame, stage }) => {
       const current = (stage.subjects || []).find((x) => x.id === subject.id) || subject;
       return { frame, time: Number((frame / FPS).toFixed(3)), x: Number(current.x || 0), y: Number(current.y || 0),
-        rotation: Number(current.rotation || 0), pose: current.pose || 'stand', action: current.action || '' };
+        rotation: Number(current.rotation || 0), pose: current.pose || 'stand', action: current.action || '', animationName: current.animationName || '' };
     });
     let distance = 0;
     let peakSpeed = 0;
@@ -167,7 +167,7 @@ export function videoControlPrompt(bundle = {}) {
     const end = lastPose.get(id) || start;
     const path = pathById.get(id);
     const pace = path ? `，路径${Number(path.distance || 0).toFixed(2)}米，平均${Number(path.averageSpeed || 0).toFixed(2)}m/s、峰值${Number(path.peakSpeed || 0).toFixed(2)}m/s` : '';
-    return `${id} 从(${Number(start.x || 0).toFixed(2)},${Number(start.y || 0).toFixed(2)})移动到(${Number(end.x || 0).toFixed(2)},${Number(end.y || 0).toFixed(2)})${pace}，朝向${Number(end.rotation || 0).toFixed(0)}°，姿态${start.pose || 'stand'}→${end.pose || 'stand'}${end.action ? `，动作“${end.action}”` : ''}`;
+    return `${id} 从(${Number(start.x || 0).toFixed(2)},${Number(start.y || 0).toFixed(2)})移动到(${Number(end.x || 0).toFixed(2)},${Number(end.y || 0).toFixed(2)})${pace}，朝向${Number(end.rotation || 0).toFixed(0)}°，姿态${start.pose || 'stand'}→${end.pose || 'stand'}${end.animationName ? `，骨骼动画“${end.animationName}”` : ''}${end.action ? `，动作“${end.action}”` : ''}`;
   });
   const firstLights = lights[0]?.lights || [];
   const lastLights = new Map((lights.at(-1)?.lights || firstLights).map((x) => [x.id, x]));

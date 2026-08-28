@@ -1123,6 +1123,7 @@ export async function buildOutline(projectId, { chapterId = null, onEvent } = {}
     user: `目标片长：${project.targetDuration || 60} 秒\n\n剧本：\n${String(source).slice(0, 12000)}`,
     temperature: 0.6,
     jsonMode: true,
+    stream: true,
     label: '生成大纲',
     onEvent
   });
@@ -1191,6 +1192,7 @@ export async function reviseOutline(projectId, { instruction, onEvent } = {}) {
     user: `目标片长：${project.targetDuration || 60} 秒\n\n现在的大纲：\n${JSON.stringify(table, null, 1)}\n\n我想要：${say}`,
     temperature: 0.4,
     jsonMode: true,
+    stream: true,
     label: '改大纲',
     onEvent
   });
@@ -1253,7 +1255,9 @@ export function editOutlineBeat(projectId, beatId, fields = {}) {
   return applyOutlineOps(projectId, { ops: [{ op: 'edit', id: beatId, fields }] });
 }
 
-async function analyzeScriptRaw(projectId, { shotCount = 8, chapterId = null, force = false, onEvent } = {}) {
+async function analyzeScriptRaw(projectId, {
+  shotCount = 8, chapterId = null, force = false, onEvent, signal = null, scopeIds = null
+} = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
   if (!project.bible) throw new Error('请先跑「设定集」—— 没有冻结人设，分镜会自己发挥外貌描述');
@@ -1302,7 +1306,22 @@ async function analyzeScriptRaw(projectId, { shotCount = 8, chapterId = null, fo
    */
   const outlineNow = outline.normalizeOutline(project.outline);
   const inScope = outlineNow.beats.filter((b) => (chapter ? b.chapterId === chapter.id : true));
-  const targetBeats = inScope.filter((b) => !b.locked);
+  const allPending = inScope.filter((b) => !b.locked).filter((b) => !scopeIds || scopeIds.includes(b.id));
+  const SHOTS_PER_BATCH = 12;
+  const batching = inScope.length > 0;
+  const takeByShots = (beats) => {
+    const out = [];
+    let shots = 0;
+    for (const beat of beats) {
+      const count = duration.planShotCount(outline.estimateSeconds(beat).suggested);
+      if (out.length && shots + count > SHOTS_PER_BATCH) break;
+      out.push(beat);
+      shots += count;
+    }
+    return out;
+  };
+  const targetBeats = batching ? takeByShots(allPending) : allPending;
+  const restAfterThisBatch = batching ? allPending.length - targetBeats.length : 0;
   const useOutline = inScope.length > 0;
 
   if (useOutline && !targetBeats.length) {
@@ -1391,6 +1410,8 @@ async function analyzeScriptRaw(projectId, { shotCount = 8, chapterId = null, fo
     user: sourceScript,
     temperature: 0.7,
     jsonMode: true,
+    stream: true,
+    onEvent,
     label: chapter ? `拆分镜·${chapter.title}` : '拆分镜'
   });
 
@@ -1658,6 +1679,18 @@ async function analyzeScriptRaw(projectId, { shotCount = 8, chapterId = null, fo
     }
     return p;
   });
+
+  if (restAfterThisBatch > 0) {
+    jobs.checkpoint(signal, `还剩 ${restAfterThisBatch} 场没拆`);
+    onEvent?.({
+      type: 'note',
+      message: `这一批 ${targetBeats.length} 场拆完了（${shots.length} 镜），还剩 ${restAfterThisBatch} 场，接着拆…`
+    });
+    return analyzeScriptRaw(projectId, {
+      shotCount, chapterId, force: false, onEvent, signal,
+      scopeIds: scopeIds || allPending.map((beat) => beat.id)
+    });
+  }
 
   onEvent?.({
     type: 'stage',
@@ -2204,6 +2237,7 @@ export async function suggestLinks(projectId, { only = null, onEvent } = {}) {
     user: JSON.stringify(payload),
     temperature: 0.2,
     jsonMode: true,
+    stream: true,
     label: '标衔接关系'
   });
 
@@ -2360,6 +2394,7 @@ export async function suggestSkills(projectId, { only = null, onEvent } = {}) {
     user: JSON.stringify(payload),
     temperature: 0.3,
     jsonMode: true,
+    stream: true,
     label: '挑技法'
   });
 
@@ -2535,6 +2570,7 @@ export async function smartSplitChapters(projectId, { targetChars = 3000, onEven
         user: win.text,
         temperature: 0.2,
         jsonMode: true,
+        stream: true,
         label: `分章 ${i + 1}/${windows.length}`
       });
       const parsed = consistency.extractJSON(text);
@@ -4858,6 +4894,7 @@ export async function autoBindSpeakers(projectId, { useModel = true, onEvent } =
         user: JSON.stringify(payload),
         temperature: 0.2,
         jsonMode: true,
+        stream: true,
         label: '绑说话人'
       });
       const picks = consistency.extractJSON(text)?.shots || [];

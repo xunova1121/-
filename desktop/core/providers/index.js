@@ -137,7 +137,9 @@ export async function send(spec, onEvent) {
       headers,
       body: spec.body,
       stream: spec.stream,
-      timeoutMs
+      timeoutMs,
+      idleTimeoutMs: spec.idleTimeoutMs,
+      maxTotalMs: spec.maxTotalMs
     },
     onEvent
   );

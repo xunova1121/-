@@ -196,6 +196,28 @@ export async function chat({
   temperature = 0.7,
   jsonMode = false,
   timeoutMs = 180000,
+  /**
+   * 走不走流式。**长生成一律该走**（拆分镜、出大纲、挑技法这些）。
+   *
+   * 默认关，是因为短调用（复核打分、绑说话人）走流式没有好处，
+   * 只是多一层 SSE 解析。判据不是"重不重要"，是"要吐多少字"。
+   */
+  stream = false,
+  /** 流式下多久没有新内容算死。见 http-client 里那段"慢和死是两回事"。 */
+  /**
+   * 多久没有新内容算死。
+   *
+   * ⚠ 90 秒对**思考型模型**是不够的。Claude 的 extended thinking、
+   * o 系列这类模型在"想"的时候一个 token 都不吐，而中转站不会把思考过程
+   * 转成 SSE —— 于是那几分钟在我们这边看来完全就是没动静。
+   * 用户第二次撞上的多半就是这个：收到 1013 字节（刚开口）然后 90 秒静默。
+   *
+   * 所以默认放宽到 240 秒，并且做成可调 —— 中转站真死了的话多等两分钟，
+   * 比把一次正在思考的调用误杀掉划算得多（误杀的代价是那次的钱白花，
+   * 而且人会以为"这条路不通"而放弃）。
+   */
+  idleTimeoutMs = Number(settings.get('longIdleMs')) || 240000,
+  onEvent = null,
   label = '对话'
 }) {
   const provider = getProvider(providerId);
@@ -218,24 +240,104 @@ export async function chat({
   }
 
   const body = { model, messages, temperature };
-  if (jsonMode) {
-    // 支持的厂商会严格输出 JSON；不支持的会忽略这个字段，不至于报错，
-    // 所以下游仍然保留 extractJSON 的兜底解析。
+  if (jsonMode && settings.get('jsonModeOff') !== true) {
+    /**
+     * 支持的厂商会严格输出 JSON；不支持的**通常**会忽略这个字段，
+     * 所以下游仍然保留 extractJSON 的兜底解析。
+     *
+     * ⚠ "通常"两个字是有代价的。Anthropic 的原生接口里根本没有
+     * response_format 这个参数，中转站把 OpenAI 协议翻译成 Anthropic 时
+     * 遇上它可能直接卡住 —— 表现是**一个字节都不回**，而不是报错。
+     * 所以给了一个开关（设置里的 jsonModeOff），碰上这种中转站能一键关掉。
+     */
     body.response_format = { type: 'json_object' };
   }
 
+  /**
+   * ══════════ 长生成走流式 ══════════
+   *
+   * 拆分镜要吐几千 token 的 JSON。非流式的话，这几分钟里**连接上一个字节都没有** ——
+   * 我们分不清"它在认真写"和"它已经死了"，只能等一个固定的总时长到点然后掐断。
+   *
+   * 真实事故：中转站 + Claude Opus，体检那一下几个 token、1.89 秒就回；
+   * 真跑起来 180 秒到点被掐，一个字节都没收到。而"跑了 180 秒"本身不是问题 ——
+   * 二十镜的分镜表出三四分钟很正常。
+   *
+   * 流式之后判据换成"多久没动静"：还在吐字就一直等，真停了才掐。
+   * 顺带还有两个好处：界面上能看见它在动（那几分钟不再是一条僵住的进度条），
+   * 以及中转站的响应更早开始 —— 很多中转站对非流式的长请求本来就有自己的超时。
+   */
   const res = await send(
     {
       provider: providerId,
       label,
       method: 'POST',
       url: endpoint(provider, 'chat', '{{baseUrl}}/chat/completions'),
-      body,
-      timeoutMs
+      body: stream ? { ...body, stream: true } : body,
+      stream: stream || undefined,
+      timeoutMs,
+      // 空闲多久算死。给得比"模型思考一会儿"宽裕，比"人还愿意等"短
+      idleTimeoutMs: stream ? idleTimeoutMs : 0,
+      // 绝对上限兜底：对面一直发心跳却永远不结束时不至于挂到天荒地老
+      maxTotalMs: stream ? Math.max(timeoutMs, idleTimeoutMs * 6) : 0
     },
-    null
+    onEvent
   );
   if (!res.ok) fail(label, res);
+
+  /**
+   * ══════════ 流没收尾时，先看看收到的能不能用 ══════════
+   *
+   * 中转站有一种很常见的坏法：正文全发完了，但**不发 [DONE]、也不关连接**。
+   * 从我们这边看就是"收到 27 万字节然后没动静了"，而那份内容其实是完整的。
+   *
+   * 用户真实撞上的就是这个：277463 字节 ≈ 4600 token 的正文，全是花过钱的，
+   * 而我们连看都没看就整个丢掉，让他从头再跑一次、再花一次。
+   *
+   * 判据只有一个，而且是**验出来的不是猜出来的**：它能不能解析成 JSON。
+   * 能 —— 就是完整的，照常用，只在日志里说一声流没收尾；
+   * 不能 —— 才是真的断了，这时候报错才有底气说"没法用"。
+   */
+  if (res.incomplete) {
+    const got = String(res.text || '');
+    const usable = jsonMode ? looksCompleteJSON(got) : got.trim().length > 0;
+    if (!usable) {
+      /**
+       * ⚠ **把收到的东西给人看**，不要只报一个字节数。
+       *
+       * 用户第二次报上来的是"收到 1013 字节后 90 秒没有新内容"——
+       * 1013 字节 ≈ 18 个 token，也就是模型**刚开口就停了**。
+       * 而光凭这个数字，我和他都只能猜：是中转站掐了？是模型在思考？
+       * 还是它回了一句错误说明而不是 JSON？
+       *
+       * 这三种情况的下一步动作完全不同，而**收到的那点内容本身就是答案** ——
+       * 它一直在日志里，但没人会为了看一句话专门去翻请求记录。
+       * 报错里直接带上，一眼就分得清。
+       */
+      const peek = got.replace(/\s+/g, ' ').trim().slice(0, 200);
+      const thinking = /think|reason|analysis/i.test(got) || got.trim().length < 40;
+      throw new Error(
+        `${label}：流开了个头就断了 —— 收到 ${res.incompleteBytes} 字节后 `
+        + `${Math.round(res.incompleteIdleMs / 1000)} 秒没有新内容，而收到的这部分解析不出完整结果。\n`
+        + `实际收到的是：「${peek}${got.length > 200 ? '…' : ''}」\n`
+        + (thinking
+          ? '收到的东西**非常少**，看起来模型刚开口就没声了。两种常见原因：\n'
+            + '① 思考型模型（Claude 的 extended thinking、o 系列）在"想"的时候**一个字都不吐**，'
+            + '而中转站不会把思考过程转成 SSE —— 于是那几分钟在我们看来就是没动静。'
+            + '这种情况把「设置 → 长生成空闲上限」调大（比如 300 秒）就好了。\n'
+            + '② 中转站在上游那边超时了，它自己先断的。这种调大没用，换个模型或换家中转。\n'
+            + '分不清是哪种就看上面那句实际收到的内容：像 JSON 开头 = 它在写，是①；'
+            + '像一句英文报错 = 是②。'
+          : '这一段是真的不完整（已经验过了，不是猜的）。多半是中转站把连接掐了。\n'
+            + '出分镜的话：先出大纲再拆分镜，那条路按场次分批，每批要写的东西少得多，不容易被掐。')
+      );
+    }
+    onEvent?.({
+      type: 'note',
+      message: `⚠ 对面没有正常收尾（收到 ${res.incompleteBytes} 字节后停了），`
+        + '但收到的内容能完整解析出来，这一次照常用 —— 没有白花钱。'
+    });
+  }
 
   /**
    * 记账就记在这里 —— 紧挨着解析响应的那一行。
@@ -243,14 +345,61 @@ export async function chat({
    * 不放在调用方（studio 里十几处），是因为那样每加一个新调用点都要记得
    * 补一行，而漏了不会红。这个应用里 modelUsed 和 refsSent 都是这么开始说谎的。
    */
-  const usage = meter.readTokenUsage(res.json);
+  /**
+   * ⚠ 流式的用量藏在**最后一个 SSE 事件**里，不在 res.json（那是 null）。
+   *
+   * 不挖的话，一开流式，token 那本账就全变成"漏账" —— 而且是静默的：
+   * 用量表上少一大截，没有任何地方会红。今天刚为这类事修过两回。
+   */
+  const streamUsage = res.stream
+    ? (() => {
+      for (let i = (res.events || []).length - 1; i >= 0; i -= 1) {
+        const d = res.events[i]?.data;
+        if (!d || d === '[DONE]') continue;
+        try {
+          const got = meter.readTokenUsage(JSON.parse(d));
+          if (got) return got;
+        } catch {
+          /* 不是 JSON 的事件跳过 */
+        }
+      }
+      return null;
+    })()
+    : null;
+  const usage = streamUsage || meter.readTokenUsage(res.json);
   if (usage) meter.record({ kind: 'token', provider: providerId, model, units: usage });
   else meter.blind({ kind: 'token', provider: providerId, model, why: '响应里没有可拆分进出的 usage' });
 
+  /**
+   * ⚠ **输出被截断了要当场说**，不能当成正常结果往下传。
+   *
+   * 模型吐到自己的上限时，返回的是 `finish_reason: "length"` —— 状态 200、
+   * 没有任何错误字段，只是 JSON 从中间断掉。下游 extractJSON 有两种下场：
+   *   解析失败 → 整批白跑，而报错说的是"模型没有返回合法 JSON"，
+   *              让人以为是模型不听话，其实是话没说完
+   *   碰巧解析出来 → **更糟**。你拿到一份少了后半截的分镜表，
+   *              而且没有任何地方说它少了
+   *
+   * 拆分镜正是最容易撞上这个的一步（几十镜就是上万 token），
+   * 所以这一层必须把它翻译成一句人能照着做的话。
+   */
+  const finish = res.stream
+    ? lastFinishReason(res.events)
+    : (res.json?.choices?.[0]?.finish_reason || res.json?.choices?.[0]?.finishReason || '');
+  if (finish === 'length') {
+    throw new Error(
+      `${label}：模型的输出被自己的长度上限截断了（finish_reason=length），拿到的是半截内容，不能用。\n`
+      + '这不是网络问题，也不是模型不听话 —— 是这一次要它写的东西超过了它一次能写的量。\n'
+      + '出分镜的话：先出大纲再拆分镜，那条路会按场次分批，每批只拆几场，多长的剧本都不会撞上限。'
+    );
+  }
+
   const text =
-    res.json?.choices?.[0]?.message?.content ??
-    res.json?.output?.choices?.[0]?.message?.content ??
-    res.json?.output?.text ??
+    // 流式时正文是一段段拼起来的，res.json 是 null —— 拼好的在 res.text 里
+    (res.stream ? res.text : null) ||
+    res.json?.choices?.[0]?.message?.content ||
+    res.json?.output?.choices?.[0]?.message?.content ||
+    res.json?.output?.text ||
     '';
   if (typeof text !== 'string') {
     // 少数厂商把 content 也返回成数组
@@ -262,7 +411,55 @@ export async function chat({
       usage: res.json?.usage || null
     };
   }
-  return { text, raw: res.json, usage: res.json?.usage || null };
+  return { text, raw: res.json, usage: usage || res.json?.usage || null };
+}
+
+/**
+ * 这段文本里有没有一个**完整的** JSON 对象。
+ *
+ * 用真的解析，不用正则数括号 —— 括号计数在字符串里带 { } 时会算错，
+ * 而分镜描述里带花括号完全可能。解析失败就是不完整，没有中间地带。
+ *
+ * 先整体试一次，不行再取最外层 {...} 试一次（模型爱在前后加一句话或代码块）。
+ */
+export function looksCompleteJSON(text) {
+  const s = String(text || '').trim();
+  if (!s) return false;
+  try {
+    JSON.parse(s);
+    return true;
+  } catch {
+    /* 往下再试一次 */
+  }
+  const a = s.indexOf('{');
+  const b = s.lastIndexOf('}');
+  if (a < 0 || b <= a) return false;
+  try {
+    JSON.parse(s.slice(a, b + 1));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 流式响应里最后一个带 finish_reason 的事件说了什么。
+ *
+ * 截断的信号只在**最后几个事件**里，前面全是 delta。倒着找，找到就停。
+ */
+function lastFinishReason(events = []) {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const d = events[i]?.data;
+    if (!d || d === '[DONE]') continue;
+    try {
+      const j = JSON.parse(d);
+      const fr = j?.choices?.[0]?.finish_reason || j?.choices?.[0]?.finishReason;
+      if (fr) return fr;
+    } catch {
+      /* 不是 JSON 的事件跳过 */
+    }
+  }
+  return '';
 }
 
 /** 当前路由到的视频模型接受哪些时长档位。界面用它提前提示，不用等跑完才知道。 */

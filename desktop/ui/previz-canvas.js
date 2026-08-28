@@ -26,6 +26,7 @@ import * as previz from '/previz.js';
 import * as THREE from '/three.js';
 import { GLTFLoader } from '/three-gltf-loader.js';
 import { OrbitControls } from '/three-orbit-controls.js';
+import { clone as cloneSkeleton } from '/three-skeleton-utils.js';
 import { addKeyframe, applyFrame, createHistory, findObject, normalizeStage, stageObjects } from './previz-stage.js';
 
 const NS = 'http://www.w3.org/2000/svg';
@@ -344,7 +345,8 @@ export function blockingCanvas(stage, { size = 320, onChange = () => {} } = {}) 
  * 拖动仍落回原有的米制 x/y，因而越轴、景别、继承和生成提示词只有一份真相。
  */
 export function director3dCanvas(stage, {
-  size = 520, onChange = () => {}, onSelect = () => {}, onCommit = () => {}, selected = () => '', onAssetDrop = () => {}
+  size = 520, onChange = () => {}, onSelect = () => {}, onCommit = () => {}, selected = () => '',
+  onAssetDrop = () => {}, onModelReady = () => {}
 } = {}) {
   normalizeStage(stage);
   const host = document.createElement('div');
@@ -382,6 +384,9 @@ export function director3dCanvas(stage, {
   const textureLoader = new THREE.TextureLoader();
   const gltfLoader = new GLTFLoader();
   const modelCache = new Map();
+  const mixers = new Map();
+  let animationRaf = 0;
+  let animationAt = performance.now();
   let backdropObject = null;
   const guides = [];
 
@@ -393,8 +398,35 @@ export function director3dCanvas(stage, {
     return modelCache.get(url);
   }
 
+  const animationTerms = {
+    stand: ['idle', 'stand', 'breath'], walk: ['walk'], run: ['run', 'jog'], sit: ['sit'],
+    crouch: ['crouch', 'squat'], reach: ['reach', 'grab'], fight: ['fight', 'attack', 'punch', 'kick']
+  };
+
+  function animationClip(clips, item) {
+    if (!clips.length) return null;
+    const named = clips.find((clip) => clip.name === item.animationName);
+    if (named) return named;
+    const terms = animationTerms[item.pose] || animationTerms.stand;
+    return clips.find((clip) => terms.some((term) => clip.name.toLowerCase().includes(term))) || clips[0];
+  }
+
+  function ensureAnimationLoop() {
+    if (animationRaf) return;
+    animationAt = performance.now();
+    const tick = (now) => {
+      if (!host.isConnected || !mixers.size) { animationRaf = 0; return; }
+      const delta = Math.min(.05, Math.max(0, (now - animationAt) / 1000));
+      animationAt = now;
+      for (const mixer of mixers.values()) mixer.update(delta);
+      renderer.render(scene3d, view);
+      animationRaf = requestAnimationFrame(tick);
+    };
+    animationRaf = requestAnimationFrame(tick);
+  }
+
   function normalizedModel(source, targetHeight, { scene = false } = {}) {
-    const root = source.clone(true);
+    const root = cloneSkeleton(source);
     root.traverse((node) => {
       if (node.isMesh) { node.castShadow = true; node.receiveShadow = true; }
     });
@@ -417,7 +449,20 @@ export function director3dCanvas(stage, {
       // 拖动/重绘可能已经换了实例，旧请求不能回头篡改新舞台。
       if (objects.get(item.id) !== wrapper) return;
       wrapper.clear();
-      wrapper.add(normalizedModel(gltf.scene, Number(item.height || (kind === 'subject' ? 1.72 : .9))));
+      const model = normalizedModel(gltf.scene, Number(item.height || (kind === 'subject' ? 1.72 : .9)));
+      wrapper.add(model);
+      const clips = gltf.animations || [];
+      item.availableAnimations = clips.map((clip) => clip.name).filter(Boolean);
+      const clip = kind === 'subject' ? animationClip(clips, item) : null;
+      if (clip) {
+        const mixer = new THREE.AnimationMixer(model);
+        mixer.clipAction(clip).reset().play();
+        mixers.set(wrapper, mixer);
+        wrapper.userData.animationClip = clip.name;
+        ensureAnimationLoop();
+      }
+      if (selected() === item.id) wrapper.add(new THREE.BoxHelper(model, 0x49c8ff));
+      onModelReady(item, clips);
       renderer.render(scene3d, view);
     }).catch(() => {
       wrapper.userData.modelError = true;
@@ -501,7 +546,11 @@ export function director3dCanvas(stage, {
     return g;
   }
   function redraw() {
-    for (const obj of objects.values()) scene3d.remove(obj);
+    for (const obj of objects.values()) {
+      scene3d.remove(obj);
+      const mixer = mixers.get(obj);
+      if (mixer) { mixer.stopAllAction(); mixers.delete(obj); }
+    }
     objects.clear();
     for (const guide of guides.splice(0)) {
       scene3d.remove(guide);
@@ -693,6 +742,7 @@ export function previzPanel(stage, {
     size: Math.max(460, size), selected: () => selectedId,
     onSelect: (id) => { selectedId = id; redrawAll(); },
     onCommit: () => { history.commit(); paintInspector(); onChange(); },
+    onModelReady: () => paintInspector(),
     onAssetDrop: (asset, p) => {
       const binding = {
         assetRef: asset.ref, variantId: asset.variantId || 'default',
@@ -855,6 +905,11 @@ export function previzPanel(stage, {
         ['stand', '站立'], ['walk', '行走'], ['run', '奔跑'], ['sit', '坐下'], ['crouch', '下蹲'],
         ['reach', '伸手'], ['fight', '打斗']
       ]), makeText('动作指令', 'action', '例如：右手拔剑，左脚向前'));
+      if (item.availableAnimations?.length) {
+        inspector.append(makeSelect('模型骨骼动画', 'animationName', [
+          ['', '按姿态自动匹配'], ...item.availableAnimations.map((name) => [name, name])
+        ]));
+      }
     } else if (found.kind === 'light') {
       const color = Object.assign(document.createElement('input'), { type: 'color', value: item.color || '#ffd6a3', disabled: item.locked });
       color.oninput = () => { item.color = color.value; director.redraw(); onChange(); };

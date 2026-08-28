@@ -1774,7 +1774,7 @@ export function createServer({ lan = false } = {}) {
        * 放行的是这两个确切的路径，不是"所有 .js"—— 后者会把电脑版
        * 整套界面代码一起放出去，那不是同一件事。
        */
-      const SHARED_MODULES = ['/previz-canvas.js', '/previz-stage.js', '/site-canvas.js', '/previz.js', '/three.js', '/three-gltf-loader.js', '/three-orbit-controls.js', '/three-buffer-utils.js', '/site.js', '/outline.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js', '/pricing.js', '/estimate.js'];
+      const SHARED_MODULES = ['/previz-canvas.js', '/previz-stage.js', '/site-canvas.js', '/previz.js', '/three.js', '/three-gltf-loader.js', '/three-orbit-controls.js', '/three-buffer-utils.js', '/three-skeleton-utils.js', '/site.js', '/outline.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js', '/pricing.js', '/estimate.js'];
       const isShell =
         url.pathname === '/m'
         || url.pathname.startsWith('/m/')
@@ -1856,7 +1856,8 @@ export function createServer({ lan = false } = {}) {
       const threeAddon = {
         '/three-gltf-loader.js': ['examples', 'jsm', 'loaders', 'GLTFLoader.js'],
         '/three-orbit-controls.js': ['examples', 'jsm', 'controls', 'OrbitControls.js'],
-        '/three-buffer-utils.js': ['examples', 'jsm', 'utils', 'BufferGeometryUtils.js']
+        '/three-buffer-utils.js': ['examples', 'jsm', 'utils', 'BufferGeometryUtils.js'],
+        '/three-skeleton-utils.js': ['examples', 'jsm', 'utils', 'SkeletonUtils.js']
       }[url.pathname];
       if (threeAddon) {
         return fs.readFile(path.join(ROOT, 'node_modules', 'three', ...threeAddon), (err, data) => {

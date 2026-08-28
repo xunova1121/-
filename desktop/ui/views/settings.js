@@ -706,6 +706,18 @@ export default {
       oninput: (e) => (pending.requestTimeoutMs = Number(e.target.value)) });
     const pollInput = h('input', { type: 'number', value: settings.pollIntervalMs, min: 1000, step: 500,
       oninput: (e) => (pending.pollIntervalMs = Number(e.target.value)) });
+    /**
+     * 长生成的空闲上限。这一项要能改，是因为**思考型模型会长时间一个字不吐**——
+     * 而那和"中转站死了"在我们这边长得一模一样。误杀的代价是那次的钱白花，
+     * 而且人会以为这条路不通就此放弃。
+     */
+    const idleInput = h('input', { type: 'number', value: settings.longIdleMs, min: 30000, step: 30000,
+      oninput: (e) => (pending.longIdleMs = Number(e.target.value)) });
+    const jsonOffBox = h('input', {
+      type: 'checkbox',
+      checked: settings.jsonModeOff === true,
+      onchange: (e) => (pending.jsonModeOff = e.target.checked)
+    });
 
     // 系统代理：只有桌面版有这条路。Node 自带的 fetch 不读系统代理，
     // 公司网络下就是连不上（UND_ERR_CONNECT_TIMEOUT），而这跟密钥毫无关系。
@@ -781,7 +793,21 @@ export default {
         h('div', { class: 'grid2' },
           h('div', { class: 'field' }, h('label', {}, '单请求超时（毫秒）'), timeoutInput),
           h('div', { class: 'field' }, h('label', {}, '异步任务轮询间隔（毫秒）'), pollInput,
-            h('div', { class: 'field-hint' }, '被限流（429）时把这个调大。'))
+            h('div', { class: 'field-hint' }, '被限流（429）时把这个调大。')),
+          h('div', { class: 'field' }, h('label', {}, '长生成空闲上限（毫秒）'), idleInput,
+            h('div', { class: 'field-hint' },
+              '拆分镜这类长生成，多久没有新内容才算它死了。',
+              h('b', {}, '不是"总共能跑多久"'),
+              ' —— 一直在吐字就一直等。思考型模型（Claude 的 extended thinking、o 系列）'
+              + '在"想"的时候一个字都不吐，而中转站不会把思考过程转成流，'
+              + '那几分钟在这边看来就是没动静。碰上"收到一点点就停了"，把这个调大到 300000 试试。'))
+        ),
+        h('div', { class: 'stack', style: 'gap:6px;margin-top:12px' },
+          check(jsonOffBox, '不要求模型严格输出 JSON（response_format）'),
+          h('div', { class: 'field-hint', style: 'margin:0 0 6px 26px' },
+            'Anthropic 原生接口里没有这个参数。中转站把 OpenAI 协议翻译过去时遇上它'
+            + '可能直接卡住不回 —— 表现是一个字节都不返回，而不是报错。'
+            + '碰上这种中转站就勾上；我们本来就有兜底解析，不带它照样能用。')
         ),
         h('div', { class: 'stack', style: 'gap:6px;margin-top:12px' },
           check(autoCheckBox,

@@ -36,9 +36,10 @@ export function normalizeStage(stage = {}) {
   stage.cam.aperture = Math.max(1, Math.min(22, Number(stage.cam.aperture || 4)));
   stage.cam.focusId = String(stage.cam.focusId || '');
   stage.subjects.forEach((x) => {
-    normalize('subject', x, { x: 0, y: 0, height: 1.72, pose: 'stand', action: '' });
+    normalize('subject', x, { x: 0, y: 0, height: 1.72, pose: 'stand', action: '', animationName: '' });
     x.pose = ['stand', 'walk', 'run', 'sit', 'crouch', 'reach', 'fight'].includes(x.pose) ? x.pose : 'stand';
     x.action = String(x.action || '');
+    x.animationName = String(x.animationName || '');
   });
   stage.marks.filter((x) => !x.far).forEach((x) => normalize('prop', x, { x: 0, y: 0, height: 0.9, width: 0.9 }));
   stage.lights.forEach((x) => {
@@ -120,6 +121,7 @@ export function addKeyframe(stage, frame, objectIds = []) {
     } else if (found.kind === 'subject') {
       values[id].pose = x.pose || 'stand';
       values[id].action = x.action || '';
+      values[id].animationName = x.animationName || '';
     } else if (found.kind === 'light') {
       values[id].lightType = x.lightType;
       values[id].intensity = x.intensity;
@@ -153,7 +155,7 @@ export function frameState(stage, frame) {
       if (Number.isFinite(av) && Number.isFinite(bv)) out[key] = Number((av + (bv - av) * t).toFixed(4));
     }
     out.move = { ...((t < .5 ? a.move : b.move) || item.move || {}) };
-    for (const key of ['focusId', 'pose', 'action', 'lightType', 'color', 'targetId']) out[key] = (t < .5 ? a[key] : b[key]) ?? item[key];
+    for (const key of ['focusId', 'pose', 'action', 'animationName', 'lightType', 'color', 'targetId']) out[key] = (t < .5 ? a[key] : b[key]) ?? item[key];
     values[item.id] = out;
   }
   return { frame: f, left: left?.frame ?? null, right: right?.frame ?? null, t, values };
