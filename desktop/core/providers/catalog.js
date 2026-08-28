@@ -1206,6 +1206,72 @@ export function getProvider(id) {
   return PROVIDERS.find((p) => p.id === id) || null;
 }
 
+/**
+ * 这家到底有没有这个模型？
+ *
+ * ══════════ 为什么要有这一条 ══════════
+ *
+ * 真实事故：路由配成了「openai / claude-opus-5」。
+ * claude-opus-5 是 Anthropic 的模型 id，OpenAI 那家根本没有它。
+ * 而这个搭配**一路畅通无阻**：能选、能存、能发出去，
+ * 然后在拆分镜那一步卡满三分钟，回一句「请求超时（180151ms 未返回）」。
+ *
+ * 三分钟之后拿到的信息量是零，而这件事在**点下去之前**就完全判断得出来 ——
+ * 目录里明明白白列着这家有哪些模型。
+ *
+ * ══════════ 为什么不能见到不认识的就报警 ══════════
+ *
+ * 中转站（在国内是常态）走的正是"OpenAI 的协议、别家的模型"：
+ * 你把 openai 的接口根地址指到中转站，然后用它家支持的任意模型 id。
+ * 那**完全合法**，而且是很多人唯一能用的路。
+ *
+ * 所以判据是两条一起看：目录里没有 **且** 接口根地址没被改过。
+ * 改过地址 = 你自己知道你在连别的东西，我们不该多嘴。
+ *
+ * 返回 null 表示没话说 —— 调用方据此决定要不要显示。
+ */
+export function modelWarning(providerId, modelId, { baseUrlOverridden = false } = {}) {
+  const provider = getProvider(providerId);
+  const model = String(modelId || '').trim();
+  if (!provider || !model) return null;
+  // 地址改过 = 接的是中转/网关，模型 id 由那边说了算，闭嘴
+  if (baseUrlOverridden) return null;
+  const known = provider.models || [];
+  // 这家压根没列模型（比如只当网关用的那几家），无从判断
+  if (!known.length) return null;
+  if (known.some((m) => m.id === model)) return null;
+
+  /**
+   * 认一下这个 id **像**谁家的 —— "这不是这家的模型"已经有用，
+   * "这看着像 Anthropic 的模型" 更有用：人一眼就知道自己选串行了。
+   */
+  const FAMILY = [
+    [/^claude[-.]/i, 'Anthropic（Claude）'],
+    [/^gpt[-.]|^o[134][-.]?|^chatgpt/i, 'OpenAI'],
+    [/^gemini[-.]/i, 'Google'],
+    [/^deepseek[-.]/i, 'DeepSeek'],
+    [/^qwen|^qwq/i, '通义千问'],
+    [/^doubao[-.]|^ep-/i, '火山方舟'],
+    [/^glm[-.]/i, '智谱'],
+    [/^moonshot[-.]|^kimi/i, '月之暗面']
+  ];
+  const looksLike = FAMILY.find(([re]) => re.test(model))?.[1] || '';
+  const guess = looksLike && looksLike !== provider.name
+    ? `「${model}」看着是 ${looksLike} 的模型。`
+    : '';
+
+  return {
+    model,
+    provider: providerId,
+    providerName: provider.name,
+    looksLike,
+    text:
+      `${provider.name} 的模型表里没有「${model}」。${guess}`
+      + `发过去多半不是报错就是干等 —— 这一家目前列的是：${known.slice(0, 6).map((m) => m.id).join('、')}${known.length > 6 ? ' 等' : ''}。`
+      + '如果你用的是中转站，把「服务商与密钥 → 接口根地址」改成中转站地址，这条提示就不再出现。'
+  };
+}
+
 /** 按能力筛服务商，"选模型"下拉用 */
 export function providersWith(capability) {
   return PROVIDERS.filter((p) => (p.capabilities || []).includes(capability));

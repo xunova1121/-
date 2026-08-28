@@ -1180,6 +1180,10 @@ select.mini {
 .chain-seg.good b { color: var(--good); }
 .chain-seg.bad { background: var(--alarm-wash); }
 .chain-seg.bad b { color: var(--alarm); }
+/* 「这家没有这个模型」是黄不是红：这一家其实是通的，错的是模型 id。
+   画成红的会让人去查网络和密钥 —— 而那两样都是好的。 */
+.chain-seg.warn { background: var(--caution-wash); cursor: pointer; }
+.chain-seg.warn b { color: var(--caution); }
 /* 红叉是**能点的** —— 光标要说出这件事，否则原因永远藏在 title 里没人看得到 */
 .chain-seg.bad { cursor: pointer; }
 .chain-seg.bad:hover { background: var(--alarm); color: var(--ground); }

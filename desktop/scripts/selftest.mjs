@@ -7717,6 +7717,75 @@ section('连不上境外服务商时，报的是原因不是四个红叉');
   check('给了"让服务器跑"这条路（他的服务器本来就是通的）',
     /引擎在哪儿跑/.test(oa), oa.slice(-400));
 
+  /**
+   * ⚠ **超时那一支也要说这些话** —— 而它原来一个字都不说。
+   *
+   * 用户真实报上来的：「script】openai / claude-opus-5 拆分镜中…
+   * ✕ 请求超时（180151ms 未返回）」。三分钟，零信息。
+   *
+   * 原因就在 execute 里那一行：
+   *     const message = aborted ? `请求超时(...)` : explainNetworkError(err, url);
+   * 上面这一整段最对症的话，**恰恰在最对症的那次不会出现**。
+   *
+   * 因为墙对这些域名的做法是**丢包**，不是拒绝：TCP 不报错、TLS 不报错，
+   * 连接就挂在那儿，直到我们自己的计时器把它掐掉 —— 走的是 aborted 那一支。
+   * 于是唯一为这种情况写的建议，永远轮不到它出场。
+   */
+  const to = hc.timeoutHintForTest('https://api.openai.com/v1/chat/completions', 180000);
+  check('超时也说清是发往哪个主机的', /api\.openai\.com/.test(to), to.slice(0, 80));
+  check('超时也说了等了多久', /180 秒/.test(to), to.slice(0, 80));
+  check('境外域名超时时，那段"境内直连不通"的话照样给出来',
+    /直连基本不通/.test(to) && /引擎在哪儿跑/.test(to), to.slice(0, 200));
+
+  /**
+   * 不在墙名单里的主机（中转站、本地服务）超时是另一回事，
+   * 要分清"没连上"和"连上了但不吐字"—— 两者下一步动作完全不同，
+   * 而"请求超时"四个字对两者一视同仁。
+   */
+  const relayTo = hc.timeoutHintForTest('https://my-relay.example.com/v1/chat/completions', 180000);
+  check('中转站超时时不乱说"被墙"', !/直连基本不通/.test(relayTo), relayTo.slice(0, 120));
+  check('而是把两种可能摊开（没连上 / 连上了不吐字）',
+    /根本没连上/.test(relayTo) && /不吐字/.test(relayTo), relayTo.slice(0, 200));
+  check('并且指向体检那条最快的路（几秒 vs 三分钟）',
+    /上线前体检/.test(relayTo), relayTo.slice(-160));
+  // 报错是拿 textContent 显示的，写 ** 只会原样印出一堆星号
+  check('这些话里没有 markdown 星号（界面是纯文本渲染的）',
+    !to.includes('**') && !relayTo.includes('**'), `${to.slice(0, 60)} / ${relayTo.slice(0, 60)}`);
+
+  /**
+   * ── 模型 ID 和服务商对不上，要在**发出去之前**就说 ──
+   *
+   * 真实事故：路由配成「openai / claude-opus-5」。claude-opus-5 是 Anthropic 的
+   * 模型 id，OpenAI 那家根本没有。而这个搭配一路畅通：能选、能存、能发，
+   * 然后在拆分镜那步卡满三分钟，回一句"请求超时"。
+   *
+   * 三分钟换来零信息，而这件事在点下去之前就完全判断得出来 ——
+   * 目录里明明白白列着这家有哪些模型。
+   */
+  const cat = await import('../core/providers/catalog.js');
+  const mism = cat.modelWarning('openai', 'claude-opus-5');
+  check('「openai / claude-opus-5」当场认出对不上', Boolean(mism), JSON.stringify(mism));
+  check('并且点出它看着是哪一家的模型（人一眼知道自己选串行了）',
+    /Anthropic/.test(mism?.text || ''), mism?.text?.slice(0, 100));
+  check('还顺手列出这家真有哪些模型', /gpt-4o/.test(mism?.text || ''), mism?.text?.slice(-160));
+
+  /**
+   * ⚠ **中转站不能报警。**
+   *
+   * 国内很多人唯一能用的路就是"OpenAI 的协议、别家的模型"：
+   * 把 openai 的接口根地址指到中转站，然后用它支持的任意模型 id。
+   * 那完全合法。见到不认识的就报警，等于对着最需要这个应用的那批人一直嚷嚷。
+   *
+   * 判据是两条一起看：目录里没有 **且** 地址没被改过。
+   */
+  check('改过接口根地址（= 接的是中转站）就闭嘴',
+    cat.modelWarning('openai', 'claude-opus-5', { baseUrlOverridden: true }) === null);
+  check('正常搭配不吭声', cat.modelWarning('openai', 'gpt-4o-mini') === null);
+  check('模型留空不吭声（那是"还没选"，不是"选错了"）',
+    cat.modelWarning('openai', '') === null);
+  // 目录里没列模型的那几家（只当网关用的）无从判断，也不该瞎猜
+  check('这家压根没列模型时不猜', cat.modelWarning('comfy', '随便什么') === null);
+
   // 换个到不了的方式，话要照样说到
   for (const code of ['ETIMEDOUT', 'ECONNRESET', 'ENOTFOUND', 'ECONNREFUSED']) {
     check(`${code} 也认得出是这回事`,

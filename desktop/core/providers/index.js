@@ -1,7 +1,7 @@
 /**
  * 服务商运行时：解析模板 → 补鉴权 → 发请求 →（异步任务的话）轮询到终态。
  */
-import { PROVIDERS, getProvider, publicCatalog, CAPABILITIES } from './catalog.js';
+import { PROVIDERS, getProvider, publicCatalog, CAPABILITIES, modelWarning } from './catalog.js';
 import { buildAuthHeaders, credentialStatus, AuthError } from './auth.js';
 import { getSecret } from '../vault.js';
 import { execute, poll, HttpError } from '../http-client.js';
@@ -343,6 +343,22 @@ export async function probeRouting() {
     }
     const provider = getProvider(providerId);
     const r = results.get(providerId) || {};
+    /**
+     * 顺带核一下"这家有没有这个模型"。
+     *
+     * 探针探的是**这家通不通**（列模型 / 最小对话），它可能一路绿灯，
+     * 而你真正要用的那个模型这家根本没有 —— 「openai / claude-opus-5」
+     * 就是这么过的体检，然后在拆分镜那步干等三分钟。
+     *
+     * 这一条不发任何请求，纯查目录，所以放在这儿不花钱也不拖慢。
+     */
+    const modelOf = {
+      chat: s.chatModel, director: s.directorModel || s.chatModel, vision: s.visionModel,
+      image: s.imageModel, video: s.videoModel, tts: s.ttsModel
+    };
+    const warn = modelWarning(providerId, modelOf[cap], {
+      baseUrlOverridden: Boolean(s.baseUrls?.[providerId])
+    });
     out[cap] = {
       provider: providerId,
       providerName: provider?.name || providerId,
@@ -351,7 +367,9 @@ export async function probeRouting() {
       skipped: Boolean(r.skipped),
       reason: r.reason || r.note || '',
       latencyMs: r.latencyMs ?? null,
-      missing: r.missing || null
+      missing: r.missing || null,
+      model: modelOf[cap] || '',
+      modelWarning: warn?.text || ''
     };
   }
   return { checkedAt: new Date().toISOString(), capabilities: out };

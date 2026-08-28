@@ -77,9 +77,56 @@ const UNREACHABLE = [
  * 三条路按"最可能奏效"排，而且每一条都指到应用里的具体位置 ——
  * 只说"检查网络"等于什么都没说。
  */
+/**
+ * 超时那句话。
+ *
+ * 三件事必须说：**发给谁**、等了多久、以及"这是哪一类超时"。
+ *
+ * 最后一条最要紧，因为超时其实是两种完全不同的毛病：
+ *   · 根本没连上（丢包 / 被墙 / 地址写错）—— 一个字节都没送出去
+ *   · 连上了但对面不吐字（中转站挂了、模型 ID 它不认、排队排死）
+ * 两者的下一步动作完全不一样，而"请求超时"这四个字对两者一视同仁。
+ *
+ * 我们在这一层分不清是哪一种（AbortError 不带这个信息），所以**两种都说**，
+ * 并且把最可能的那一种放前面：域名在墙外就先说墙，否则先说对面没响应。
+ */
+function timeoutHint(url, timeoutMs) {
+  let host = '';
+  try {
+    host = new URL(url).host;
+  } catch {
+    /* 地址不合法时下面照样有话说 */
+  }
+  const where = host ? `发往「${host}」的请求` : '这个请求';
+  const secs = Math.round(timeoutMs / 1000);
+  const base = `${where}超时（等了 ${secs} 秒没有任何响应）。`;
+
+  if (host && BLOCKED_IN_CN.includes(host)) {
+    /**
+     * 这里**不要求**错误码属于 UNREACHABLE —— 和 explainNetworkError 里那条判断不同。
+     * 因为走到这儿就是因为没有错误码：被丢包时连接一直挂着，
+     * 直到我们自己掐断。要求错误码等于把这条建议永远关在门外。
+     */
+    return base + cnBlockedAdvice(host);
+  }
+  return (
+    base +
+    '\n两种可能，先分清是哪一种再动手：\n' +
+    `① 根本没连上 —— 地址写错、端口不通、或者被丢包。去「服务商与密钥 → 接口根地址」核一下 ${host || '这个地址'}；\n` +
+    '② 连上了但对面不吐字 —— 中转站挂了、它不认这个模型 ID、或者那边在排队。' +
+    '去「设置 → 上线前体检」把这条能力单跑一次最小调用 —— 那一下只发几个 token，' +
+    '几秒就有结果，比在这儿等三分钟快得多。'
+  );
+}
+
+/** 自检用：超时那句话不经过网络也要能验 */
+export function timeoutHintForTest(url, timeoutMs) {
+  return timeoutHint(url, timeoutMs);
+}
+
 function cnBlockedAdvice(host) {
   return (
-    `\n\n⚠ ${host} 在中国大陆**直连基本不通**，这跟密钥和模型没有任何关系 ——\n` +
+    `\n\n⚠ ${host} 在中国大陆直连基本不通。这跟密钥和模型没有任何关系 ——\n` +
     `同一把密钥放在境外服务器上一次就通，在自己电脑上永远超时。三条路，挑一条：\n` +
     `① 让应用走你的梯子：「设置 → 本机环境」勾上「走 Windows 的系统代理」（Windows 里设过系统代理才有用，` +
     `Clash / v2rayN 这类客户端默认会设）。这条最省事。\n` +
@@ -349,8 +396,23 @@ export async function execute(spec, onEvent) {
       ? `。这次发了 ${mb.toFixed(1)}MB —— 多半是参考图被内联成 base64 了。` +
         `去「设置 → 对象存储」配一个，图就会以地址的形式发出去，请求体只有几 KB`
       : '';
+    /**
+     * ⚠ 超时也要**说清是发往哪儿的**，而且要走同一套"境内连不上"的判断。
+     *
+     * 原来这一支只有一句「请求超时（180151ms 未返回）」—— 没有主机名、
+     * 没有任何建议。而下面 explainNetworkError 里那一整段
+     *「api.openai.com 在大陆直连基本不通，三条路挑一条」的话，
+     * **恰恰在最需要它的时候不会出现**：
+     *
+     * 墙对这些域名的做法是**丢包**，不是拒绝。TCP 不报错、TLS 不报错，
+     * 连接就那么挂着，直到我们自己的计时器把它掐掉 —— 于是走的是 aborted 这一支，
+     * 主机名和建议一起丢了。写了一整段最对症的话，唯独对症的那次不说。
+     *
+     * 用户拿到的原话就是那句光秃秃的超时，然后只能按界面上的
+     *「① 看服务端原话 ② 去体检 ③ 核模型 ID」一条条试。
+     */
     const message = aborted
-      ? `请求超时（${timeoutMs}ms 未返回）${sizeHint}`
+      ? `${timeoutHint(url, timeoutMs)}${sizeHint}`
       : explainNetworkError(err, url);
     const entry = logbus.record({
       ...logDraft,
