@@ -154,18 +154,11 @@ body.portal-shot .main-content { display: none; }
 .welcome-edit:hover { border-color: var(--portal-blue); color: var(--portal-blue); }
 
 /* --- 头图横幅 --- */
-.portal-hero { position: relative; border-radius: 14px; overflow: hidden; margin-bottom: 16px; min-height: 300px; display: flex; align-items: center; box-shadow: 0 2px 10px rgba(15,42,74,0.07); background: linear-gradient(120deg, #eaf3fb 0%, #e4f0fa 40%, #dcebf7 100%); }
+.portal-hero { position: relative; border-radius: 14px; overflow: hidden; margin-bottom: 16px; min-height: 330px; display: flex; align-items: center; box-shadow: 0 2px 10px rgba(15,42,74,0.07); background: linear-gradient(120deg, #eaf3fb 0%, #e4f0fa 40%, #dcebf7 100%); }
 .portal-hero::after { content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: 14px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.85); }
-.hero-emblem { position: absolute; right: 29%; top: 48%; transform: translateY(-50%); width: 215px; height: 215px; opacity: 0.09; z-index: 1; }
-.hero-glow { position: absolute; right: -6%; top: -30%; width: 46%; height: 120%; background: radial-gradient(closest-side, rgba(120,190,255,0.35), rgba(120,190,255,0)); }
 .hero-scene { position: absolute; inset: 0; overflow: hidden; }
-.hero-sky { position: absolute; inset: 0; background: linear-gradient(180deg, #f4f9fd 0%, #e7f1fa 55%, #dbe9f5 100%); }
-.hero-skyline { position: absolute; right: 0; bottom: 33%; width: 60%; height: 42%; opacity: 0.30; filter: blur(0.6px); }
-.hero-water { position: absolute; left: 0; right: 0; bottom: 0; height: 34%; background: linear-gradient(180deg, rgba(215,232,245,0.75) 0%, rgba(207,227,243,0.85) 40%, rgba(198,220,239,0.92) 100%); }
-.hero-water::after { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(180deg, rgba(255,255,255,0.55) 0 1px, rgba(255,255,255,0) 1px 9px); }
-.hero-boats { position: absolute; right: 4%; bottom: 6%; width: 30%; opacity: 0.62; filter: blur(0.4px); }
-.hero-dots { position: absolute; right: 0; top: 0; width: 46%; height: 62%; background-image: radial-gradient(rgba(22,119,255,0.28) 1px, transparent 1px); background-size: 12px 12px; -webkit-mask-image: linear-gradient(200deg, #000 0%, transparent 62%); mask-image: linear-gradient(200deg, #000 0%, transparent 62%); }
-.hero-veil { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(244,249,253,0.96) 0%, rgba(244,249,253,0.78) 32%, rgba(244,249,253,0.18) 58%, rgba(244,249,253,0.30) 100%); }
+.hero-art { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.hero-veil { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(247,251,254,0.88) 0%, rgba(247,251,254,0.55) 30%, rgba(247,251,254,0.06) 56%, rgba(247,251,254,0.14) 100%); }
 
 .hero-inner { position: relative; z-index: 2; display: flex; align-items: center; gap: 24px; width: 100%; padding: 42px 40px; }
 .hero-copy { flex: 1; min-width: 0; }
@@ -570,9 +563,6 @@ body.portal-shot .main-content { display: none; }
 .lake-trend.up { color: #ef4444; }
 .lake-trend.down { color: #10b981; }
 
-.demo-controls { position: fixed; bottom: 20px; left: 20px; display: flex; gap: 8px; z-index: 500; }
-.demo-btn { padding: 8px 16px; background: white; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 5px; }
-.demo-btn.primary { background: linear-gradient(90deg, #0ea5e9, #38bdf8); color: white; border: none; }
 
 /* ---- 窄屏适配 ---- */
 @media (max-width: 960px) {
@@ -656,36 +646,99 @@ body.portal-shot .main-content { display: none; }
   <!-- 门户头图：水域执法场景（纯 CSS/SVG 绘制，离线可用） -->
   <div class="portal-hero">
     <div class="hero-scene">
-      <div class="hero-sky"></div>
-      <div class="hero-glow"></div>
-      <svg class="hero-skyline" viewBox="0 0 600 200" preserveAspectRatio="none" aria-hidden="true">
-        <g fill="#9dc2e0">
-          <rect x="18" y="96" width="34" height="104"/><rect x="60" y="62" width="26" height="138"/>
-          <rect x="94" y="110" width="42" height="90"/><rect x="146" y="44" width="22" height="156"/>
-          <rect x="176" y="86" width="38" height="114"/><rect x="222" y="120" width="30" height="80"/>
-          <rect x="260" y="70" width="24" height="130"/><rect x="292" y="102" width="46" height="98"/>
-          <rect x="346" y="52" width="20" height="148"/><rect x="374" y="92" width="36" height="108"/>
-          <rect x="418" y="126" width="28" height="74"/><rect x="454" y="78" width="24" height="122"/>
-          <rect x="486" y="108" width="44" height="92"/><rect x="538" y="66" width="22" height="134"/>
-        </g>
+      <svg class="hero-art" viewBox="0 0 2000 520" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+<defs>
+  <linearGradient id="hSky" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#d6eafa"/><stop offset="0.32" stop-color="#e8f2fb"/>
+    <stop offset="0.64" stop-color="#f1f3f6"/><stop offset="0.88" stop-color="#fbf1e2"/>
+    <stop offset="1" stop-color="#fbe8ca"/>
+  </linearGradient>
+  <radialGradient id="hSun"><stop offset="0" stop-color="#ffe9b8" stop-opacity="0.95"/>
+    <stop offset="0.45" stop-color="#ffdc9a" stop-opacity="0.42"/><stop offset="1" stop-color="#ffd48a" stop-opacity="0"/></radialGradient>
+  <radialGradient id="hRefl"><stop offset="0" stop-color="#ffe4b0" stop-opacity="0.72"/>
+    <stop offset="0.55" stop-color="#ffe4b0" stop-opacity="0.28"/><stop offset="1" stop-color="#ffe4b0" stop-opacity="0"/></radialGradient>
+  <linearGradient id="hWater" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#dcebf7"/><stop offset="0.25" stop-color="#d1e5f4"/>
+    <stop offset="0.65" stop-color="#c5dbf0"/><stop offset="1" stop-color="#bad5ec"/></linearGradient>
+  <pattern id="hDots" width="9" height="9" patternUnits="userSpaceOnUse"><circle cx="1.6" cy="1.6" r="1.5" fill="#4aa3ff"/></pattern>
+  <pattern id="hGridDots" width="13" height="13" patternUnits="userSpaceOnUse"><circle cx="1.6" cy="1.6" r="1.5" fill="#7dbcff"/></pattern>
+  <linearGradient id="hMeshFade" x1="0" y1="1" x2="1" y2="0">
+    <stop offset="0" stop-color="#fff" stop-opacity="0.95"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  <mask id="hMeshMask"><rect x="0" y="370" width="780" height="150" fill="url(#hMeshFade)"/></mask>
+  <linearGradient id="hGridFade" x1="0" y1="0" x2="0.25" y2="1">
+    <stop offset="0" stop-color="#fff" stop-opacity="0.85"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  <filter id="hSoft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="6"/></filter>
+  <mask id="hGridMask"><rect x="1230" y="0" width="770" height="215" fill="url(#hGridFade)"/></mask>
+</defs>
+
+<rect width="2000" height="520" fill="url(#hSky)"/>
+<ellipse cx="1245" cy="300" rx="480" ry="175" fill="url(#hSun)"/>
+<circle cx="1245" cy="295" r="15" fill="#fff4d8" opacity="0.9"/>
+<g fill="#ffffff" opacity="0.6" filter="url(#hSoft)">
+  <ellipse cx="230" cy="46" rx="250" ry="12"/><ellipse cx="470" cy="78" rx="200" ry="9"/>
+  <ellipse cx="120" cy="100" rx="180" ry="8"/><ellipse cx="1580" cy="96" rx="230" ry="10"/>
+  <ellipse cx="900" cy="38" rx="210" ry="8"/>
+</g>
+<path d="M 120,308 L 120,317.2 Q 167.5,317.2 215,282.1 Q 262.5,282.1 310,274.8 Q 357.5,274.8 405,279.0 Q 452.5,279.0 500,273.4 Q 547.5,273.4 595,272.9 Q 642.5,272.9 690,286.2 Q 737.5,286.2 785,287.5 Q 832.5,287.5 880,267.9 Q 927.5,267.9 975,281.6 Q 1022.5,281.6 1070,282.2 Q 1117.5,282.2 1165,264.1 Q 1172.5,264.1 1180,276.6 L 1180,308 Z" fill="#b7cfe2" opacity="0.40"/>
+<path d="M 760,308 L 760,318.7 Q 807.5,318.7 855,271.4 Q 902.5,271.4 950,268.3 Q 997.5,268.3 1045,258.1 Q 1092.5,258.1 1140,271.0 Q 1187.5,271.0 1235,269.8 Q 1282.5,269.8 1330,267.6 Q 1377.5,267.6 1425,278.9 Q 1472.5,278.9 1520,269.7 Q 1567.5,269.7 1615,266.4 Q 1662.5,266.4 1710,261.8 Q 1715.0,261.8 1720,281.4 L 1720,308 Z" fill="#a9c5dc" opacity="0.46"/>
+<path d="M 1240,308 L 1240,316.4 Q 1287.5,316.4 1335,262.6 Q 1382.5,262.6 1430,253.9 Q 1477.5,253.9 1525,249.2 Q 1572.5,249.2 1620,269.7 Q 1667.5,269.7 1715,255.2 Q 1762.5,255.2 1810,257.1 Q 1857.5,257.1 1905,258.4 Q 1952.5,258.4 2000,275.2 L 2000,308 Z" fill="#9dbdd8" opacity="0.40"/>
+<g fill="#c6d9e9" opacity="0.85"><rect x="1010" y="280.7" width="11.8" height="27.3"/><rect x="1029.9" y="287.8" width="17.1" height="20.2"/><rect x="1056.4" y="283.3" width="22.7" height="24.7"/><rect x="1086.1" y="291.0" width="13.0" height="17.0"/><rect x="1105.1" y="290.0" width="19.0" height="18.0"/><rect x="1133.4" y="287.5" width="12.9" height="20.5"/><rect x="1149.7" y="279.9" width="26.0" height="28.1"/><rect x="1185.7" y="290.5" width="19.5" height="17.5"/><rect x="1210.8" y="289.3" width="17.5" height="18.7"/><rect x="1238.8" y="288.7" width="15.3" height="19.3"/><rect x="1263.7" y="277.1" width="11.1" height="30.9"/><rect x="1281.4" y="285.9" width="18.4" height="22.1"/><rect x="1306.7" y="290.4" width="12.2" height="17.6"/><rect x="1328.8" y="279.3" width="13.0" height="28.7"/><rect x="1346.4" y="277.6" width="25.5" height="30.4"/><rect x="1380.9" y="282.3" width="22.0" height="25.7"/><rect x="1411.7" y="283.9" width="11.1" height="24.1"/></g>
+<g><rect x="1690" y="216" width="230" height="88" fill="#e6f0f9"/><rect x="1690" y="216" width="230" height="8" fill="#cfe0ef"/><g stroke="#8fb6d8" stroke-width="0.9" opacity="0.5"><line x1="1693" y1="230.7" x2="1917" y2="230.7"/><line x1="1693" y1="244.0" x2="1917" y2="244.0"/><line x1="1693" y1="257.3" x2="1917" y2="257.3"/><line x1="1693" y1="270.7" x2="1917" y2="270.7"/><line x1="1693" y1="284.0" x2="1917" y2="284.0"/><line x1="1693" y1="297.3" x2="1917" y2="297.3"/><line x1="1698.2" y1="227" x2="1698.2" y2="301"/><line x1="1714.6" y1="227" x2="1714.6" y2="301"/><line x1="1731.1" y1="227" x2="1731.1" y2="301"/><line x1="1747.5" y1="227" x2="1747.5" y2="301"/><line x1="1763.9" y1="227" x2="1763.9" y2="301"/><line x1="1780.4" y1="227" x2="1780.4" y2="301"/><line x1="1796.8" y1="227" x2="1796.8" y2="301"/><line x1="1813.2" y1="227" x2="1813.2" y2="301"/><line x1="1829.6" y1="227" x2="1829.6" y2="301"/><line x1="1846.1" y1="227" x2="1846.1" y2="301"/><line x1="1862.5" y1="227" x2="1862.5" y2="301"/><line x1="1878.9" y1="227" x2="1878.9" y2="301"/><line x1="1895.4" y1="227" x2="1895.4" y2="301"/><line x1="1911.8" y1="227" x2="1911.8" y2="301"/></g><rect x="1836" y="172" width="74" height="132" fill="#edf5fc"/><rect x="1836" y="172" width="74" height="7" fill="#cfe0ef"/><g stroke="#8fb6d8" stroke-width="0.9" opacity="0.5"><line x1="1839" y1="186.8" x2="1907" y2="186.8"/><line x1="1839" y1="202.4" x2="1907" y2="202.4"/><line x1="1839" y1="218.1" x2="1907" y2="218.1"/><line x1="1839" y1="233.7" x2="1907" y2="233.7"/><line x1="1839" y1="249.3" x2="1907" y2="249.3"/><line x1="1839" y1="264.9" x2="1907" y2="264.9"/><line x1="1839" y1="280.6" x2="1907" y2="280.6"/><line x1="1839" y1="296.2" x2="1907" y2="296.2"/><line x1="1843.4" y1="182" x2="1843.4" y2="301"/><line x1="1858.2" y1="182" x2="1858.2" y2="301"/><line x1="1873.0" y1="182" x2="1873.0" y2="301"/><line x1="1887.8" y1="182" x2="1887.8" y2="301"/><line x1="1902.6" y1="182" x2="1902.6" y2="301"/></g><rect x="1866" y="156" width="5" height="18" fill="#b9d2e6"/><rect x="1918" y="238" width="82" height="66" fill="#e2eef8"/><g stroke="#8fb6d8" stroke-width="0.9" opacity="0.5"><line x1="1921" y1="250.6" x2="1997" y2="250.6"/><line x1="1921" y1="265.9" x2="1997" y2="265.9"/><line x1="1921" y1="281.1" x2="1997" y2="281.1"/><line x1="1921" y1="296.4" x2="1997" y2="296.4"/><line x1="1926.2" y1="246" x2="1926.2" y2="301"/><line x1="1942.6" y1="246" x2="1942.6" y2="301"/><line x1="1959.0" y1="246" x2="1959.0" y2="301"/><line x1="1975.4" y1="246" x2="1975.4" y2="301"/><line x1="1991.8" y1="246" x2="1991.8" y2="301"/></g></g>
+<rect x="1180" y="298" width="820" height="9" fill="#cfe2d6" opacity="0.7"/>
+<g fill="#b7cfae" opacity="0.85"><ellipse cx="1256" cy="297.2" rx="10.1" ry="12.1"/><ellipse cx="1279.0" cy="296.4" rx="11.7" ry="14.1"/><ellipse cx="1303.2" cy="297.1" rx="7.1" ry="8.6"/><ellipse cx="1327.6" cy="297.9" rx="10.2" ry="12.3"/><ellipse cx="1343.7" cy="295.0" rx="9.3" ry="11.2"/><ellipse cx="1364.2" cy="293.6" rx="9.9" ry="11.8"/><ellipse cx="1381.3" cy="298.8" rx="8.4" ry="10.1"/><ellipse cx="1404.0" cy="298.5" rx="7.8" ry="9.4"/><ellipse cx="1420.4" cy="294.1" rx="10.1" ry="12.1"/><ellipse cx="1435.4" cy="293.9" rx="11.4" ry="13.6"/><ellipse cx="1452.6" cy="297.0" rx="11.9" ry="14.3"/><ellipse cx="1470.5" cy="295.4" rx="11.8" ry="14.2"/><ellipse cx="1492.2" cy="299.1" rx="8.0" ry="9.6"/><ellipse cx="1514.1" cy="297.1" rx="11.8" ry="14.2"/><ellipse cx="1532.1" cy="294.9" rx="8.8" ry="10.6"/><ellipse cx="1548.6" cy="296.2" rx="7.3" ry="8.8"/><ellipse cx="1569.6" cy="298.2" rx="7.0" ry="8.4"/><ellipse cx="1588.0" cy="298.2" rx="8.5" ry="10.3"/><ellipse cx="1607.8" cy="296.5" rx="8.6" ry="10.3"/><ellipse cx="1629.9" cy="299.6" rx="7.3" ry="8.7"/><ellipse cx="1645.1" cy="297.4" rx="10.7" ry="12.9"/><ellipse cx="1660.3" cy="294.9" rx="10.9" ry="13.1"/><ellipse cx="1681.0" cy="295.1" rx="7.0" ry="8.5"/><ellipse cx="1697.9" cy="293.7" rx="11.8" ry="14.1"/><ellipse cx="1720.4" cy="297.5" rx="11.6" ry="14.0"/><ellipse cx="1738.9" cy="296.7" rx="8.8" ry="10.5"/><ellipse cx="1761.6" cy="298.3" rx="7.5" ry="9.0"/><ellipse cx="1784.6" cy="293.1" rx="11.3" ry="13.6"/><ellipse cx="1809.0" cy="296.3" rx="7.5" ry="8.9"/><ellipse cx="1830.1" cy="294.5" rx="11.6" ry="13.9"/><ellipse cx="1854.4" cy="295.2" rx="9.7" ry="11.7"/><ellipse cx="1872.6" cy="294.8" rx="7.9" ry="9.5"/><ellipse cx="1889.0" cy="298.3" rx="10.4" ry="12.5"/><ellipse cx="1905.7" cy="299.7" rx="7.2" ry="8.7"/><ellipse cx="1926.0" cy="295.1" rx="9.0" ry="10.8"/><ellipse cx="1946.9" cy="295.3" rx="11.1" ry="13.4"/><ellipse cx="1966.2" cy="299.3" rx="7.3" ry="8.7"/><ellipse cx="1981.5" cy="297.9" rx="9.5" ry="11.4"/><ellipse cx="1997.8" cy="298.0" rx="10.7" ry="12.8"/></g>
+<rect x="1180" y="304" width="820" height="6" fill="#b9cfe0" opacity="0.65"/>
+
+<rect x="0" y="300" width="2000" height="220" fill="url(#hWater)"/>
+<ellipse cx="1245" cy="338" rx="145" ry="86" fill="url(#hRefl)"/>
+<rect x="1690" y="303" width="310" height="34" fill="#dbe9f5" opacity="0.35"/>
+<g stroke="#ffffff" opacity="0.5"><line x1="513.3" y1="312.0" x2="1645.5" y2="312.0" stroke-width="0.84"/><line x1="249.6" y1="320.6" x2="1401.4" y2="320.6" stroke-width="0.88"/><line x1="817.9" y1="329.2" x2="1504.5" y2="329.2" stroke-width="0.74"/><line x1="555.4" y1="337.8" x2="1558.8" y2="337.8" stroke-width="0.93"/><line x1="475.4" y1="346.4" x2="1420.7" y2="346.4" stroke-width="0.92"/><line x1="572.1" y1="355.0" x2="1373.4" y2="355.0" stroke-width="0.54"/><line x1="446.5" y1="363.6" x2="999.1" y2="363.6" stroke-width="0.71"/><line x1="662.3" y1="372.2" x2="1588.4" y2="372.2" stroke-width="0.86"/><line x1="835.2" y1="380.8" x2="1890.8" y2="380.8" stroke-width="0.76"/><line x1="105.5" y1="389.4" x2="661.6" y2="389.4" stroke-width="0.94"/><line x1="256.0" y1="398.0" x2="969.4" y2="398.0" stroke-width="0.89"/><line x1="674.8" y1="406.6" x2="1298.0" y2="406.6" stroke-width="0.54"/><line x1="218.4" y1="415.2" x2="991.1" y2="415.2" stroke-width="0.35"/><line x1="472.2" y1="423.8" x2="1276.6" y2="423.8" stroke-width="0.59"/><line x1="166.9" y1="432.4" x2="777.0" y2="432.4" stroke-width="0.37"/><line x1="785.5" y1="441.0" x2="2000" y2="441.0" stroke-width="0.69"/><line x1="111.5" y1="449.6" x2="760.4" y2="449.6" stroke-width="0.42"/><line x1="284.9" y1="458.2" x2="842.5" y2="458.2" stroke-width="0.52"/><line x1="182.6" y1="466.8" x2="875.4" y2="466.8" stroke-width="0.74"/><line x1="412.0" y1="475.4" x2="1385.5" y2="475.4" stroke-width="0.56"/><line x1="485.1" y1="484.0" x2="1770.3" y2="484.0" stroke-width="0.53"/><line x1="63.2" y1="492.6" x2="1044.4" y2="492.6" stroke-width="0.58"/><line x1="702.5" y1="501.2" x2="1313.4" y2="501.2" stroke-width="0.87"/><line x1="13.3" y1="509.8" x2="1055.6" y2="509.8" stroke-width="0.62"/></g>
+<g fill="none" stroke="#ffffff" stroke-width="1.5" opacity="0.7">
+  <path d="M 500,506 C 860,452 1110,412 1420,388"/>
+  <path d="M 570,520 C 930,462 1170,422 1448,398"/>
+  <path d="M 980,366 C 1120,356 1260,350 1400,349" stroke-width="1" opacity="0.5"/>
+</g>
+<g transform="translate(1000,332) scale(0.28)" opacity="0.9">
+  <path d="M -100,14 L 96,14 L 78,40 L -76,40 Z" fill="#f9fcfe" stroke="#a9c6de" stroke-width="1.8"/>
+  <path d="M -100,14 L 96,14 L 96,21 L -100,21 Z" fill="#dce9f4"/>
+  <rect x="-58" y="-18" width="112" height="32" fill="#ffffff" stroke="#a9c6de" stroke-width="1.8"/>
+  <rect x="-30" y="-42" width="58" height="24" fill="#f4f9fd" stroke="#a9c6de" stroke-width="1.8"/>
+  <g stroke="#9ec0dc" stroke-width="1.4"><line x1="-48" y1="-4" x2="44" y2="-4"/><line x1="-20" y1="-32" x2="20" y2="-32"/></g>
+  <rect x="-3" y="-88" width="3.6" height="46" fill="#a9c6de"/><circle cx="-1.2" cy="-90" r="3.2" fill="#cfe0ef"/>
+  <path d="M -76,40 L 78,40 L 68,48 L -66,48 Z" fill="#bfd8ec" opacity="0.5"/>
+</g>
+<g transform="translate(1548,378) scale(0.6)" opacity="1">
+  <path d="M -100,14 L 96,14 L 78,40 L -76,40 Z" fill="#f9fcfe" stroke="#a9c6de" stroke-width="1.8"/>
+  <path d="M -100,14 L 96,14 L 96,21 L -100,21 Z" fill="#dce9f4"/>
+  <rect x="-58" y="-18" width="112" height="32" fill="#ffffff" stroke="#a9c6de" stroke-width="1.8"/>
+  <rect x="-30" y="-42" width="58" height="24" fill="#f4f9fd" stroke="#a9c6de" stroke-width="1.8"/>
+  <g stroke="#9ec0dc" stroke-width="1.4"><line x1="-48" y1="-4" x2="44" y2="-4"/><line x1="-20" y1="-32" x2="20" y2="-32"/></g>
+  <rect x="-3" y="-88" width="3.6" height="46" fill="#a9c6de"/><circle cx="-1.2" cy="-90" r="3.2" fill="#cfe0ef"/>
+  <path d="M -76,40 L 78,40 L 68,48 L -66,48 Z" fill="#bfd8ec" opacity="0.5"/>
+</g>
+<g fill="#9db4c7" opacity="0.55">
+  <ellipse cx="1108" cy="508" rx="38" ry="13"/><ellipse cx="1188" cy="516" rx="26" ry="10"/>
+  <ellipse cx="1938" cy="498" rx="52" ry="18"/><ellipse cx="1866" cy="514" rx="32" ry="12"/>
+</g>
+<g stroke="#8fb98a" stroke-width="2" fill="none" opacity="0.8" stroke-linecap="round">
+  <path d="M 1330,520 C 1324,472 1338,446 1348,424"/><path d="M 1352,520 C 1350,476 1366,450 1380,432"/>
+  <path d="M 1376,520 C 1380,480 1396,458 1412,440"/><path d="M 1690,520 C 1684,470 1698,442 1712,420"/>
+  <path d="M 1714,520 C 1712,474 1728,448 1744,430"/><path d="M 1738,520 C 1744,478 1760,456 1778,438"/>
+  <path d="M 820,520 C 816,494 826,480 834,468"/><path d="M 842,520 C 842,496 854,482 864,470"/>
+</g>
+<g mask="url(#hMeshMask)" opacity="0.5">
+  <path d="M -20,450 C 160,404 380,412 560,440 C 700,462 770,482 790,498 L 790,530 L -20,530 Z" fill="url(#hDots)"/>
+</g>
+<g mask="url(#hGridMask)" opacity="0.45"><rect x="1300" y="6" width="700" height="200" fill="url(#hGridDots)"/></g>
+<g fill="none" stroke="#ffffff" stroke-width="1.4" opacity="0.7">
+  <path d="M 1160,214 C 1420,116 1700,78 2000,62"/>
+  <path d="M 1210,230 C 1470,140 1740,102 2000,90"/>
+  <path d="M 1300,196 C 1520,128 1760,98 2000,86" stroke-width="0.9" opacity="0.55"/>
+</g>
+<g fill="#ffffff" opacity="0.85">
+  <circle cx="1690" cy="118" r="2.6"/><circle cx="1846" cy="90" r="2.2"/>
+  <circle cx="1540" cy="154" r="2"/><circle cx="1958" cy="76" r="2.3"/>
+</g>
       </svg>
-      <div class="hero-water"></div>
-      <svg class="hero-boats" viewBox="0 0 420 110" aria-hidden="true">
-        <g fill="#ffffff" stroke="#a9c9e2" stroke-width="1.5">
-          <path d="M40 78h150l-16 20H56Z"/>
-          <path d="M74 60h84v18H74Z"/>
-          <path d="M96 46h40v14H96Z"/>
-          <path d="M112 26h4v20h-4Z" fill="#a9c9e2" stroke="none"/>
-        </g>
-        <g fill="#ffffff" stroke="#a9c9e2" stroke-width="1.2" opacity="0.85">
-          <path d="M250 88h116l-12 15h-92Z"/>
-          <path d="M276 74h64v14h-64Z"/>
-          <path d="M294 62h30v12h-30Z"/>
-          <path d="M306 46h3v16h-3Z" fill="#a9c9e2" stroke="none"/>
-        </g>
-      </svg>
-      <div class="hero-dots"></div>
-      <svg class="hero-emblem" viewBox="0 0 200 200" aria-hidden="true"><use href="#fzLogo"/></svg>
       <div class="hero-veil"></div>
     </div>
 
@@ -1272,15 +1325,6 @@ body.portal-shot .main-content { display: none; }
   <i class="fa-solid fa-volume-high vt-icon"></i>
   <span class="vt-wave"><i></i><i></i><i></i><i></i></span>
   <span id="voiceToastText"></span>
-</div>
-
-<div class="demo-controls">
-  <button class="demo-btn primary" onclick="startFullDemo()">
-    <i class="fa-solid fa-play"></i> 启动演示
-  </button>
-  <button class="demo-btn" onclick="resetDemo()">
-    <i class="fa-solid fa-rotate-right"></i> 重置
-  </button>
 </div>
 
 <script>
