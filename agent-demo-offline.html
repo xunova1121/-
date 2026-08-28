@@ -3,8 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>渔政执法综合管理平台 - AI Agent</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Ccircle cx='100' cy='100' r='96' fill='%23fff' stroke='%231668b3' stroke-width='8'/%3E%3Ccircle cx='100' cy='100' r='70' fill='%237ba9db'/%3E%3Cpath d='M100 42 L118 96 L175 96 L129 130 L146 184 L100 150 L54 184 L71 130 L25 96 L82 96 Z' fill='%23e8382c' stroke='%23ffd200' stroke-width='7' stroke-linejoin='round'/%3E%3C/svg%3E">
+<title>渔政执法综合管理平台 - 执法助手</title>
 <style>
 /* Font Awesome Free 6.7.2 —— 按本页实际用到的 49 个图标做了子集化，离线内嵌 */
 @font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;
@@ -87,12 +86,12 @@ text-rendering:auto;font-family:"Font Awesome 6 Free"}
 </script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
-::selection { background: rgba(22,119,255,0.18); color: #0f3d78; }
-::-webkit-scrollbar { width: 9px; height: 9px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #c8d6e5; border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
-::-webkit-scrollbar-thumb:hover { background: #a8bccf; background-clip: content-box; }
+/* 内联矢量图标：尺寸/颜色跟随所在容器，替代图标字体里缺失的字形 */
+.fz-ico { width: 1em; height: 1em; display: inline-block; vertical-align: -0.125em; color: currentColor; }
+.nav-logo svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 1px 2px rgba(15,61,120,0.18)); }
+.agent-btn .entry-logo { width: 100%; height: 100%; display: block; border-radius: 50%; }
+.agent-header-icon svg, .welcome-logo svg { width: 68%; height: 68%; display: block; color: #fff; }
+.chat-avatar .fz-ico { width: 58%; height: 58%; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   min-height: 100vh;
@@ -123,29 +122,25 @@ body.portal-shot .top-nav,
 body.portal-shot .main-content { display: none; }
 
 .top-nav {
-  position: fixed; top: 0; left: 0; right: 0; height: 62px;
-  background: rgba(255,255,255,0.92); backdrop-filter: saturate(180%) blur(10px);
-  border-bottom: 1px solid #e8eef5;
+  position: fixed; top: 0; left: 0; right: 0; height: 60px;
+  background: #fff; border-bottom: 1px solid #e8eef5;
   display: flex; align-items: center; padding: 0 24px; z-index: 10;
-  box-shadow: 0 1px 3px rgba(15,42,74,0.05);
+  box-shadow: 0 1px 2px rgba(15,42,74,0.04);
 }
-.top-nav::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: linear-gradient(90deg, #1668b3 0%, #4aa3ff 22%, rgba(74,163,255,0) 55%); opacity: 0.55; }
-.nav-logo { width: 38px; height: 38px; margin-right: 11px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
-.nav-logo svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 1px 2px rgba(15,61,120,0.18)); }
+.nav-logo { width: 42px; height: 42px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-right: 11px; background: #fff; flex-shrink: 0; overflow: hidden; }
+.nav-logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.nav-logo .logo-fallback { display: none; color: #0f3d78; font-size: 18px; }
 .nav-title { font-size: 19px; font-weight: 700; color: #17395f; letter-spacing: 0.5px; }
 .nav-right { margin-left: auto; display: flex; align-items: center; gap: 22px; }
-.nav-item { position: relative; display: flex; align-items: center; gap: 6px; font-size: 13px; color: #4b5563; cursor: pointer; padding: 6px 10px; border-radius: 7px; transition: all 0.2s; }
-.nav-item:hover { color: var(--portal-blue); background: #f0f7ff; }
-.nav-item.has-dot::after { content: ''; position: absolute; top: 4px; right: 7px; width: 6px; height: 6px; border-radius: 50%; background: #ef4444; box-shadow: 0 0 0 2px #fff; }
-.nav-user { width: 32px; height: 32px; background: linear-gradient(135deg, #2b86ff, #0958d9); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 13px; box-shadow: 0 2px 6px rgba(22,119,255,0.30); }
+.nav-item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #4b5563; cursor: pointer; transition: color 0.2s; }
+.nav-item:hover { color: var(--portal-blue); }
+.nav-user { width: 30px; height: 30px; background: linear-gradient(135deg, #2b86ff, #0958d9); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 13px; }
 
 .main-content { position: relative; z-index: 1; padding: 74px 22px 22px; max-width: 1560px; margin: 0 auto; }
 
 /* --- 欢迎条 --- */
-.welcome-card { position: relative; overflow: hidden; background: #fff; border-radius: 12px; padding: 14px 22px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(15,42,74,0.05); display: flex; align-items: center; gap: 10px; transition: box-shadow 0.25s; }
-.welcome-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: linear-gradient(180deg, #4aa3ff, #1668b3); }
-.welcome-card:hover { box-shadow: 0 4px 16px rgba(15,42,74,0.09); }
-.welcome-icon { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #f59e0b; filter: drop-shadow(0 1px 3px rgba(245,158,11,0.35)); }
+.welcome-card { background: #fff; border-radius: 12px; padding: 14px 22px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(15,42,74,0.05); display: flex; align-items: center; gap: 10px; }
+.welcome-icon { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #f59e0b; }
 .welcome-text { display: flex; align-items: baseline; gap: 14px; }
 .welcome-text h2 { font-size: 16px; color: #6b7280; font-weight: 400; }
 .welcome-text h2 b { color: var(--portal-ink); font-weight: 700; }
@@ -154,66 +149,69 @@ body.portal-shot .main-content { display: none; }
 .welcome-edit:hover { border-color: var(--portal-blue); color: var(--portal-blue); }
 
 /* --- 头图横幅 --- */
-.portal-hero { position: relative; border-radius: 14px; overflow: hidden; margin-bottom: 16px; min-height: 330px; display: flex; align-items: center; box-shadow: 0 2px 10px rgba(15,42,74,0.07); background: linear-gradient(120deg, #eaf3fb 0%, #e4f0fa 40%, #dcebf7 100%); }
-.portal-hero::after { content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: 14px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.85); }
-.hero-scene { position: absolute; inset: 0; overflow: hidden; }
+.portal-hero { position: relative; border-radius: 12px; overflow: hidden; margin-bottom: 16px; min-height: 330px; display: flex; align-items: center; box-shadow: 0 8px 26px rgba(15,42,74,0.12); background-color: #dfeef9; }
+.portal-hero::after { content:''; position:absolute; inset:0; background:linear-gradient(90deg, rgba(244,249,253,.96) 0%, rgba(244,249,253,.88) 31%, rgba(244,249,253,.42) 54%, rgba(244,249,253,.05) 76%); pointer-events:none; }
+.hero-scene { position: absolute; inset: 0; overflow: hidden; z-index: 0; }
 .hero-art { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.hero-veil { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(247,251,254,0.88) 0%, rgba(247,251,254,0.55) 30%, rgba(247,251,254,0.06) 56%, rgba(247,251,254,0.14) 100%); }
+/* 本地实景图单独一层；文件不在时这层透明，自动露出下面的矢量实景图 */
+.hero-photo { position: absolute; inset: 0; z-index: 1; background-image: url("file:///D:/360MoveData/Users/%E5%BE%90%E9%95%BF%E4%B9%90/Desktop/%E8%83%8C%E6%99%AF.png"); background-size: cover; background-position: center; background-repeat: no-repeat; }
+.hero-sky { position: absolute; inset: 0; background: linear-gradient(180deg, #f4f9fd 0%, #e7f1fa 55%, #dbe9f5 100%); }
+.hero-skyline { position: absolute; right: 0; bottom: 33%; width: 60%; height: 42%; opacity: 0.30; filter: blur(0.6px); }
+.hero-water { position: absolute; left: 0; right: 0; bottom: 0; height: 34%; background: linear-gradient(180deg, rgba(215,232,245,0.75) 0%, rgba(207,227,243,0.85) 40%, rgba(198,220,239,0.92) 100%); }
+.hero-water::after { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(180deg, rgba(255,255,255,0.55) 0 1px, rgba(255,255,255,0) 1px 9px); }
+.hero-boats { position: absolute; right: 4%; bottom: 6%; width: 30%; opacity: 0.62; filter: blur(0.4px); }
+.hero-dots { position: absolute; right: 0; top: 0; width: 46%; height: 62%; background-image: radial-gradient(rgba(22,119,255,0.28) 1px, transparent 1px); background-size: 12px 12px; -webkit-mask-image: linear-gradient(200deg, #000 0%, transparent 62%); mask-image: linear-gradient(200deg, #000 0%, transparent 62%); }
+.hero-veil { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(244,249,253,0.96) 0%, rgba(244,249,253,0.78) 32%, rgba(244,249,253,0.18) 58%, rgba(244,249,253,0.30) 100%); }
 
-.hero-inner { position: relative; z-index: 2; display: flex; align-items: center; gap: 24px; width: 100%; padding: 42px 40px; }
+.hero-inner { position: relative; z-index: 2; display: flex; align-items: center; gap: 24px; width: 100%; padding: 48px 44px; }
 .hero-copy { flex: 1; min-width: 0; }
-.hero-badge { display: inline-flex; align-items: center; padding: 6px 16px; border-radius: 999px; background: rgba(22,119,255,0.10); border: 1px solid rgba(22,119,255,0.18); color: #1a5fbf; font-size: 13px; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 18px; }
-.hero-title { font-size: 46px; line-height: 1.15; font-weight: 800; letter-spacing: 2px; margin-bottom: 14px; background: linear-gradient(100deg, #0f3d78 0%, #175da8 55%, #1f78cf 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.hero-badge { display: inline-flex; align-items: center; padding: 6px 16px; border-radius: 999px; background: rgba(22,119,255,0.10); color: #1a5fbf; font-size: 13px; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 18px; }
+.hero-title { font-size: 46px; line-height: 1.15; font-weight: 800; color: #0f3d78; letter-spacing: 2px; margin-bottom: 14px; }
 .hero-sub { font-size: 15px; color: #4b5b6e; margin-bottom: 24px; max-width: 640px; line-height: 1.7; }
 .hero-actions { display: flex; gap: 14px; flex-wrap: wrap; }
 .hero-btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 24px; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; border: 1px solid transparent; transition: all 0.2s; }
 .hero-btn.primary { background: linear-gradient(135deg, #1f6fe0, #17509f); color: #fff; box-shadow: 0 4px 12px rgba(22,90,190,0.28); }
-.hero-btn.primary:hover { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 8px 20px rgba(22,90,190,0.35); }
+.hero-btn.primary:hover { filter: brightness(1.08); }
 .hero-btn.ghost { background: rgba(255,255,255,0.9); color: #33465c; border-color: #d2dfec; }
-.hero-btn.ghost:hover { border-color: var(--portal-blue); color: var(--portal-blue); transform: translateY(-1px); box-shadow: 0 6px 16px rgba(22,119,255,0.16); }
+.hero-btn.ghost:hover { border-color: var(--portal-blue); color: var(--portal-blue); }
 
 .hero-stats { display: grid; grid-template-columns: repeat(2, minmax(140px, 190px)); gap: 16px; flex-shrink: 0; }
-.stat-card { position: relative; overflow: hidden; background: rgba(255,255,255,0.86); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.95); border-radius: 12px; padding: 16px 18px; box-shadow: 0 6px 18px rgba(15,60,120,0.10); transition: transform 0.25s, box-shadow 0.25s; cursor: default; }
-.stat-card::before { content: ''; position: absolute; left: 0; top: 0; width: 100%; height: 2px; background: linear-gradient(90deg, #4aa3ff, rgba(74,163,255,0)); }
-.stat-card:hover { transform: translateY(-3px); box-shadow: 0 12px 26px rgba(15,60,120,0.16); }
+.stat-card { background: rgba(255,255,255,0.82); backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.9); border-radius: 10px; padding: 16px 18px; box-shadow: 0 6px 18px rgba(15,60,120,0.08); }
 .stat-label { font-size: 13px; color: #6b7280; margin-bottom: 8px; }
-.stat-value { font-size: 30px; font-weight: 700; line-height: 1; background: linear-gradient(135deg, #1f6fe0, #0b4fc4); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.stat-value { font-size: 30px; font-weight: 700; color: #1a5fbf; line-height: 1; }
 
 /* --- 快捷入口 --- */
-.quick-section { background: #fff; border-radius: 14px; padding: 18px 20px; box-shadow: 0 2px 10px rgba(15,42,74,0.06); margin-bottom: 12px; }
+.quick-section { background: #fff; border-radius: 12px; padding: 18px 20px; box-shadow: 0 1px 3px rgba(15,42,74,0.05); margin-bottom: 12px; }
 .quick-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 16px; }
 .quick-title { font-size: 17px; font-weight: 700; color: #17395f; display: flex; align-items: center; gap: 8px; }
 .quick-title i, .quick-title svg { color: var(--portal-blue); }
-.quick-search { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: #f7fafd; border: 1px solid #e4ebf3; border-radius: 999px; min-width: 280px; color: #9aa5b1; transition: all 0.2s; }
-.quick-search:focus-within { background: #fff; border-color: #9ec7f5; box-shadow: 0 0 0 3px rgba(22,119,255,0.12); color: var(--portal-blue); }
+.quick-search { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border: 1px solid #dbe3ec; border-radius: 8px; min-width: 280px; color: #9aa5b1; }
 .quick-search input { border: none; outline: none; font-size: 13px; color: #4b5563; width: 100%; background: transparent; }
 .quick-tabs { display: flex; flex-wrap: wrap; gap: 6px 26px; border-bottom: 1px solid #edf1f6; margin-bottom: 14px; }
 .quick-tab { position: relative; display: flex; align-items: center; gap: 7px; padding: 10px 2px 12px; font-size: 14px; color: #4b5563; cursor: pointer; white-space: nowrap; transition: color 0.2s; }
 .quick-tab:hover { color: var(--portal-blue); }
-.quick-tab:hover::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: rgba(22,119,255,0.30); border-radius: 2px; }
 .quick-tab.active { color: var(--portal-blue); font-weight: 600; }
 .quick-tab.active::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--portal-blue); border-radius: 2px; }
 .quick-tab .tab-badge { min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: #ef4444; color: #fff; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
 .quick-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 10px; }
-.quick-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 8px; background: #f7fafd; border: 1px solid #eef3f9; border-radius: 12px; cursor: pointer; transition: all 0.22s cubic-bezier(.4,0,.2,1); }
-.quick-item:hover { background: #fff; border-color: #cfe4fb; transform: translateY(-3px); box-shadow: 0 8px 20px rgba(22,119,255,0.14); }
-.quick-item:hover .quick-item-icon.blue { background: linear-gradient(135deg, #2b86ff, #0b4fc4); color: #fff; box-shadow: 0 4px 12px rgba(22,119,255,0.35); }
-.quick-item:hover .quick-item-text { color: var(--portal-blue); }
-.quick-item-icon { width: 38px; height: 38px; border-radius: 11px; display: flex; align-items: center; justify-content: center; font-size: 17px; transition: all 0.22s; }
+.quick-item { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 8px; background: #f7fafd; border-radius: 10px; cursor: pointer; transition: all 0.2s; }
+.quick-item:hover { background: #eef6ff; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(22,119,255,0.10); }
+.quick-item-icon { width: 36px; height: 36px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 17px; }
 .quick-item-icon.blue { background: #e6f4ff; color: var(--portal-blue); }
-.quick-item-text { font-size: 12px; color: #4b5563; text-align: center; transition: color 0.22s; }
+.quick-item-text { font-size: 12px; color: #4b5563; text-align: center; }
 
-/* ===== 右下角 AI 智能助手入口（替换原门户的“下载资源”悬浮按钮） ===== */
-.agent-entry { position: fixed; bottom: 26px; right: 26px; z-index: 100; }
-.agent-btn { width: 58px; height: 58px; background: linear-gradient(135deg, #2b86ff, #0b4fc4); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 24px; cursor: pointer; box-shadow: 0 8px 22px rgba(22,119,255,0.42); transition: all 0.3s; position: relative; }
-.agent-btn::before { content: ''; position: absolute; inset: -6px; border-radius: 50%; border: 2px solid rgba(22,119,255,0.30); animation: agentRing 2.4s ease-out infinite; }
-@keyframes agentRing { 0% { transform: scale(0.9); opacity: 0.9; } 100% { transform: scale(1.25); opacity: 0; } }
-.agent-btn:hover { transform: scale(1.06); box-shadow: 0 10px 26px rgba(22,119,255,0.55); }
-.agent-btn.alert { animation: btnAlert 0.8s ease-in-out infinite; background: linear-gradient(135deg, #ef4444, #dc2626); }
-@keyframes btnAlert { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
+/* ===== 右下角执法助手入口：官方徽章式入口 ===== */
+.agent-entry { position: fixed; bottom: 24px; right: 24px; z-index: 100; }
+.agent-btn { width: 62px; height: 62px; padding: 5px; background: #fff; border: 2px solid #1768aa; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 8px 24px rgba(15,61,120,.28); transition: transform .2s, box-shadow .2s; position: relative; }
+.agent-btn::before { content: none; }
+.agent-btn:hover { transform: translateY(-3px); box-shadow: 0 12px 30px rgba(15,61,120,.34); }
+.agent-btn.alert { box-shadow: 0 0 0 4px rgba(217,146,38,.28), 0 8px 24px rgba(15,61,120,.28); }
+.agent-btn .entry-logo { width:100%; height:100%; object-fit:contain; border-radius:50%; display:block; }
+.agent-btn .entry-fallback { display:none; color:#155c96; font-size:24px; }
+.agent-btn .entry-chat-mark { position:absolute; right:-4px; bottom:-2px; width:23px; height:23px; display:flex; align-items:center; justify-content:center; border-radius:50%; background:#1768aa; color:#fff; border:2px solid #fff; font-size:10px; }
 .agent-badge { position: absolute; top: -2px; right: -2px; width: 20px; height: 20px; background: #ef4444; color: white; border-radius: 50%; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; border: 2px solid white; z-index: 2; }
-.agent-tip { position: absolute; right: 70px; top: 50%; transform: translateY(-50%); background: #17395f; color: #fff; font-size: 12px; padding: 6px 12px; border-radius: 6px; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
-.agent-entry:hover .agent-tip { opacity: 1; }
+.agent-tip { display:none; }
+.demo-controls { display:none !important; }
 
 @media (max-width: 1280px) {
   .hero-title { font-size: 36px; }
@@ -563,6 +561,9 @@ body.portal-shot .main-content { display: none; }
 .lake-trend.up { color: #ef4444; }
 .lake-trend.down { color: #10b981; }
 
+.demo-controls { position: fixed; bottom: 20px; left: 20px; display: flex; gap: 8px; z-index: 500; }
+.demo-btn { padding: 8px 16px; background: white; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 5px; }
+.demo-btn.primary { background: linear-gradient(90deg, #0ea5e9, #38bdf8); color: white; border: none; }
 
 /* ---- 窄屏适配 ---- */
 @media (max-width: 960px) {
@@ -590,7 +591,7 @@ body.portal-shot .main-content { display: none; }
 
 <body>
 
-<!-- 中国渔政徽标（矢量重绘，全站复用，离线无外链） -->
+<!-- 图标资源：中国渔政徽标 + 执法助手标识（矢量内联，全站复用，不依赖图标字体、不发外部请求） -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
     <path id="fzArcTop" d="M 25,100 A 75,75 0 0 1 175,100" fill="none"/>
@@ -614,6 +615,14 @@ body.portal-shot .main-content { display: none; }
     <path d="M 100.0,34.5 L 107.75,58.34 L 132.81,58.34 L 112.54,73.07 L 120.27,96.91 L 100.0,82.18 L 79.73,96.91 L 87.46,73.07 L 67.19,58.34 L 92.25,58.34 Z" fill="#ffd200"/>
     <g><path d="M 100,69 L 93.26,59.73 L 100.0,39.0 Z" fill="#c9161e"/><path d="M 100,69 L 100.0,39.0 L 106.74,59.73 Z" fill="#e8382c"/><path d="M 100,69 L 106.74,59.73 L 128.53,59.73 Z" fill="#c9161e"/><path d="M 100,69 L 128.53,59.73 L 110.9,72.54 Z" fill="#e8382c"/><path d="M 100,69 L 110.9,72.54 L 117.63,93.27 Z" fill="#c9161e"/><path d="M 100,69 L 117.63,93.27 L 100.0,80.46 Z" fill="#e8382c"/><path d="M 100,69 L 100.0,80.46 L 82.37,93.27 Z" fill="#c9161e"/><path d="M 100,69 L 82.37,93.27 L 89.1,72.54 Z" fill="#e8382c"/><path d="M 100,69 L 89.1,72.54 L 71.47,59.73 Z" fill="#c9161e"/><path d="M 100,69 L 71.47,59.73 L 93.26,59.73 Z" fill="#e8382c"/></g>
     </symbol>
+    <symbol id="fzAide" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2.2 20.2 5.4v6.1c0 4.9-3.4 8.7-8.2 10.3C7.2 20.2 3.8 16.4 3.8 11.5V5.4Z" stroke-width="1.7"/>
+        <circle cx="12" cy="11.6" r="4.6" stroke-width="1.5"/>
+        <path d="M13.9 11.6L18.1 11.6 M12.0 13.5L12.0 17.7 M10.1 11.6L5.9 11.6 M12.0 9.7L12.0 5.5 M13.3 12.9L16.3 15.9 M10.7 12.9L7.7 15.9 M10.7 10.3L7.7 7.3 M13.3 10.3L16.3 7.3" stroke-width="1.35"/>
+      </g>
+      <g fill="currentColor"><circle cx="16.6" cy="16.2" r="0.85"/><circle cx="7.4" cy="16.2" r="0.85"/><circle cx="7.4" cy="7.0" r="0.85"/><circle cx="16.6" cy="7.0" r="0.85"/><circle cx="18.5" cy="11.6" r="0.85"/><circle cx="12.0" cy="18.1" r="0.85"/><circle cx="5.5" cy="11.6" r="0.85"/><circle cx="12.0" cy="5.1" r="0.85"/><circle cx="12" cy="11.6" r="1.5"/></g>
+    </symbol>
   </defs>
 </svg>
 <div class="portal-bg"></div>
@@ -624,7 +633,7 @@ body.portal-shot .main-content { display: none; }
   <div class="nav-right">
     <div class="nav-item"><i class="fa-solid fa-arrow-left"></i> 返回首页</div>
     <div class="nav-item"><i class="fa-solid fa-gear"></i> 系统管理</div>
-    <div class="nav-item has-dot"><i class="fa-solid fa-bell"></i></div>
+    <div class="nav-item"><i class="fa-solid fa-bell"></i></div>
     <div class="nav-user"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5Z"/></svg></div>
     <div class="nav-item">管理员</div>
   </div>
@@ -656,8 +665,8 @@ body.portal-shot .main-content { display: none; }
   <radialGradient id="hSun"><stop offset="0" stop-color="#ffe9b8" stop-opacity="0.95"/>
     <stop offset="0.45" stop-color="#ffdc9a" stop-opacity="0.42"/><stop offset="1" stop-color="#ffd48a" stop-opacity="0"/></radialGradient>
   <linearGradient id="hReflCol" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0" stop-color="#ffe0a6" stop-opacity="0.34"/>
-    <stop offset="0.5" stop-color="#ffe6b8" stop-opacity="0.13"/>
+    <stop offset="0" stop-color="#ffe0a6" stop-opacity="0.55"/>
+    <stop offset="0.5" stop-color="#ffe6b8" stop-opacity="0.22"/>
     <stop offset="1" stop-color="#ffe6b8" stop-opacity="0"/></linearGradient>
   <radialGradient id="hRefl"><stop offset="0" stop-color="#ffe4b0" stop-opacity="0.72"/>
     <stop offset="0.55" stop-color="#ffe4b0" stop-opacity="0.28"/><stop offset="1" stop-color="#ffe4b0" stop-opacity="0"/></radialGradient>
@@ -697,7 +706,7 @@ body.portal-shot .main-content { display: none; }
 
 <rect x="0" y="300" width="2000" height="220" fill="url(#hWater)"/>
 <ellipse cx="1245" cy="316" rx="180" ry="34" fill="url(#hRefl)"/>
-<path d="M 1216,300 L 1274,300 L 1312,520 L 1178,520 Z" fill="url(#hReflCol)"/>
+<path d="M 1208,300 L 1282,300 L 1330,520 L 1160,520 Z" fill="url(#hReflCol)"/>
 <g stroke="#ffeecb" stroke-width="2.2" opacity="0.55" stroke-linecap="round">
   <line x1="1206" y1="326" x2="1286" y2="326"/><line x1="1196" y1="344" x2="1298" y2="344"/>
   <line x1="1188" y1="364" x2="1308" y2="364"/><line x1="1178" y1="388" x2="1318" y2="388"/>
@@ -760,8 +769,8 @@ body.portal-shot .main-content { display: none; }
   <circle cx="1540" cy="154" r="2"/><circle cx="1958" cy="76" r="2.3"/>
 </g>
       </svg>
-      <div class="hero-veil"></div>
     </div>
+    <div class="hero-photo"></div>
 
     <div class="hero-inner">
       <div class="hero-copy">
@@ -811,14 +820,14 @@ body.portal-shot .main-content { display: none; }
       <div class="quick-tab"><i class="fa-solid fa-ship"></i> 渔政装备管理</div>
       <div class="quick-tab"><i class="fa-solid fa-chart-line"></i> 业务能力中心</div>
       <div class="quick-tab"><i class="fa-solid fa-chart-pie"></i> 数据能力中心</div>
-      <div class="quick-tab"><i class="fa-solid fa-brain"></i> AI中台</div>
+      <div class="quick-tab"><svg class="fz-ico" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.7"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/><path d="M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></g></svg> 辅助研判</div>
       <div class="quick-tab"><i class="fa-solid fa-rotate"></i> 运行管理中心</div>
       <div class="quick-tab"><i class="fa-solid fa-eye"></i> 多元感知系统</div>
     </div>
     <div class="quick-grid">
       <div class="quick-item" onclick="toggleAgent()">
-        <div class="quick-item-icon blue"><i class="fa-solid fa-robot"></i></div>
-        <div class="quick-item-text">AI Agent</div>
+        <div class="quick-item-icon blue"><svg class="fz-ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#fzAide"/></svg></div>
+        <div class="quick-item-text">执法助手</div>
       </div>
       <div class="quick-item">
         <div class="quick-item-icon blue"><i class="fa-solid fa-chart-line"></i></div>
@@ -852,11 +861,11 @@ body.portal-shot .main-content { display: none; }
   </div>
 </div>
 
-<!-- 右下角智能助手图标：点击打开 AI Agent 对话框（原“下载资源”悬浮按钮已移除） -->
+<!-- 右下角执法助手入口 -->
 <div class="agent-entry">
-  <div class="agent-tip">智能助手 · 点击开始对话</div>
-  <div class="agent-btn" id="agentBtn" onclick="toggleAgent()" title="智能助手">
-    <i class="fa-solid fa-robot"></i>
+  <div class="agent-btn" id="agentBtn" onclick="toggleAgent()" title="打开执法助手" role="button" tabindex="0" aria-label="打开执法助手">
+    <svg class="entry-logo" viewBox="0 0 200 200" aria-hidden="true"><use href="#fzLogo"/></svg>
+    <span class="entry-chat-mark" aria-hidden="true"><i class="fa-solid fa-message"></i></span>
     <div class="agent-badge" id="agentBadge" style="display:none">1</div>
   </div>
 </div>
@@ -864,9 +873,9 @@ body.portal-shot .main-content { display: none; }
 <div class="agent-modal" id="agentModal">
   <div class="agent-window" id="agentWindow">
     <div class="agent-header">
-      <div class="agent-header-icon"><i class="fa-solid fa-robot"></i></div>
+      <div class="agent-header-icon"><svg viewBox="0 0 24 24"><use href="#fzAide"/></svg></div>
       <div class="agent-header-title">
-        智慧渔业 AI Agent
+        渔政执法助手
         <span class="status"></span>
         <span class="mode-pill" id="modePill" title="正在检测大模型连通性">检测中…</span>
       </div>
@@ -932,9 +941,9 @@ body.portal-shot .main-content { display: none; }
       <div class="agent-main">
         <div class="welcome-area" id="welcomeArea">
           <div class="welcome-header">
-            <div class="welcome-logo"><i class="fa-solid fa-robot"></i></div>
-            <div class="welcome-title">你好，我是 <span>智慧渔业 AI 助理</span></div>
-            <div class="welcome-subtitle">基于 RAG + LLM + NL2SQL 架构，为您提供智能研判与执法调度服务</div>
+            <div class="welcome-logo"><svg viewBox="0 0 24 24"><use href="#fzAide"/></svg></div>
+            <div class="welcome-title">你好，我是 <span>渔政执法助手</span></div>
+            <div class="welcome-subtitle">基于移动九天大模型，为您提供法规查询、态势研判、执法调度和工单跟踪服务，关键处置由执法人员确认</div>
           </div>
 
           <div class="feature-scroll">
@@ -1145,7 +1154,7 @@ body.portal-shot .main-content { display: none; }
             <div class="stat-label">违规告警</div>
           </div>
           <div class="stat-card">
-            <div class="stat-icon blue"><i class="fa-solid fa-robot"></i></div>
+            <div class="stat-icon blue"><svg class="fz-ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#fzAide"/></svg></div>
             <div class="stat-value">11</div>
             <div class="stat-label">Agent研判</div>
           </div>
@@ -1283,8 +1292,8 @@ body.portal-shot .main-content { display: none; }
           <div class="step-line active" id="line1"></div>
         </div>
         <div class="workorder-content">
-          <h4>AI 检测预警</h4>
-          <p>摄像头检测到违规垂钓行为，置信度 94.7%</p>
+          <h4>视频巡查预警</h4>
+          <p>视频巡查发现疑似违规垂钓行为，系统提示置信度 94.7%</p>
           <span class="workorder-status completed">已完成</span>
         </div>
       </div>
@@ -1294,7 +1303,7 @@ body.portal-shot .main-content { display: none; }
           <div class="step-line" id="line2"></div>
         </div>
         <div class="workorder-content">
-          <h4>RAG 法规研判</h4>
+          <h4>法规辅助研判</h4>
           <p>匹配《渔业法》第三十八条、《长江保护法》第八十六条</p>
           <span class="workorder-status completed">已完成</span>
         </div>
@@ -1317,11 +1326,11 @@ body.portal-shot .main-content { display: none; }
         </div>
         <div class="workorder-content">
           <h4>调度执法力量</h4>
-          <p>正在呼叫执法艇苏渔政001...</p>
+          <p id="step4Desc">等待向执法艇苏渔政001发送调度指令</p>
           <div class="phone-call" id="phoneCall" style="display:none">
             <div class="phone-icon"><i class="fa-solid fa-phone"></i></div>
             <div>
-              <div style="font-size:13px;color:#065f46;font-weight:600">正在呼叫...</div>
+              <div id="phoneCallTitle" style="font-size:13px;color:#065f46;font-weight:600">正在呼叫...</div>
               <div style="font-size:11px;color:#047857">苏渔政 001 - 船员3人</div>
             </div>
           </div>
@@ -1423,7 +1432,7 @@ function newChat() {
   document.querySelectorAll('.history-item').forEach((item, i) => {
     item.classList.toggle('active', i === 0);
   });
-  addMessage('已创建新对话，我是您的智慧渔业 AI 助理，有什么可以帮您？', false);
+  addMessage('已创建新对话。我可以协助查询法规、研判线索、调度资源和跟踪工单，请告诉我需要办理的事项。', false);
   
   // 显示我能做的工作
   setTimeout(() => {
@@ -1476,11 +1485,14 @@ function addMessage(text, isUser = false, actions = null) {
   const chat = document.getElementById('chatContainer');
   const msgClass = isUser ? 'user' : 'ai';
   const avatar = isUser ? 'user' : 'ai';
-  const icon = isUser ? 'fa-user' : 'fa-robot';
-  
+  // AI 侧用内联矢量标识（图标字体子集里没有对应字形，用 <i> 会渲染成空白）
+  const iconMarkup = isUser
+    ? '<i class="fa-solid fa-user"></i>'
+    : '<svg class="fz-ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#fzAide"/></svg>';
+
   let html = `
     <div class="chat-message ${msgClass}">
-      <div class="chat-avatar ${avatar}"><i class="fa-solid ${icon}"></i></div>
+      <div class="chat-avatar ${avatar}">${iconMarkup}</div>
       <div class="chat-content">
         <div class="chat-bubble">${text}</div>
         ${actions ? `<div class="chat-actions">${actions}</div>` : ''}
@@ -1681,7 +1693,7 @@ function addStreamingBubble() {
   const id = 'msg-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
   document.getElementById('chatContainer').insertAdjacentHTML('beforeend',
     '<div class="chat-message ai" id="' + id + '">' +
-      '<div class="chat-avatar ai"><i class="fa-solid fa-robot"></i></div>' +
+      '<div class="chat-avatar ai"><svg class="fz-ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#fzAide"/></svg></div>' +
       '<div class="chat-content"><div class="chat-bubble">' +
         '<div class="message-content"></div>' +
       '</div></div>' +
@@ -1879,7 +1891,7 @@ function showTyping() {
   if (document.getElementById('welcomeArea').style.display !== 'none') resetChat();
   document.getElementById('chatContainer').insertAdjacentHTML('beforeend',
     '<div class="chat-message ai" id="typingIndicator">' +
-      '<div class="chat-avatar ai"><i class="fa-solid fa-robot"></i></div>' +
+      '<div class="chat-avatar ai"><svg class="fz-ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#fzAide"/></svg></div>' +
       '<div class="chat-content">' +
         '<div class="chat-bubble typing"><span></span><span></span><span></span></div>' +
       '</div>' +
@@ -2162,7 +2174,7 @@ function showReport() {
   
   chat.insertAdjacentHTML('beforeend', `
     <div class="chat-message ai" id="${reportId}">
-      <div class="chat-avatar ai"><i class="fa-solid fa-robot"></i></div>
+      <div class="chat-avatar ai"><svg class="fz-ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#fzAide"/></svg></div>
       <div class="chat-content">
         <div class="report-container">
           <button class="report-close" onclick="closeReport('${reportId}')" title="关闭报表"><i class="fa-solid fa-xmark"></i></button>
@@ -2407,30 +2419,51 @@ function createWorkorder() {
   
   document.getElementById('workorderModal').classList.add('active');
   document.getElementById('workorderId').textContent = currentWorkorderId || nextWorkorderId();
+  // 每次打开都从第 4 步开始，避免上一次演示的完成状态残留
+  document.getElementById('step4').className = 'step-num active';
+  document.getElementById('step4').textContent = '4';
+  document.getElementById('line4').className = 'step-line';
+  document.getElementById('status4').className = 'workorder-status processing';
+  document.getElementById('status4').textContent = '等待通知';
+  document.getElementById('step4Desc').textContent = '等待向执法艇苏渔政001发送调度指令';
+  document.getElementById('step5').className = 'step-num';
+  document.getElementById('step5').textContent = '5';
+  document.getElementById('status5').className = 'workorder-status pending';
+  document.getElementById('status5').textContent = '待处理';
+  document.getElementById('phoneCall').style.display = 'none';
   const dispatchTime = getCurrentTime();
   timeline.dispatchCall = dispatchTime;
   
   let t1 = setTimeout(() => {
     document.getElementById('phoneCall').style.display = 'flex';
+    document.getElementById('phoneCallTitle').textContent = '正在呼叫...';
+    document.getElementById('step4Desc').textContent = '正在呼叫执法艇，等待执法人员接听';
+    document.getElementById('status4').textContent = '通知中';
     Voice.speak('正在呼叫苏渔政零零一号，船员三人。');
   }, 1000);
   workorderTimers.push(t1);
   
   let t2 = setTimeout(() => {
+    document.getElementById('phoneCallTitle').textContent = '已接通，确认接单';
+    document.getElementById('step4Desc').textContent = '执法人员已确认接收调度指令';
     document.getElementById('step4').className = 'step-num completed';
     document.getElementById('step4').innerHTML = '<i class="fa-solid fa-check"></i>';
     document.getElementById('status4').className = 'workorder-status completed';
-    document.getElementById('status4').textContent = '已完成';
+    document.getElementById('status4').textContent = '已接单';
     document.getElementById('line4').className = 'step-line active';
-    
-    document.getElementById('step5').className = 'step-num active';
-    document.getElementById('status5').className = 'workorder-status processing';
-    document.getElementById('status5').textContent = '执法中';
+    Voice.speak('执法人员已确认接单，调度环节完成。');
     
     const arriveTime = getCurrentTime();
     timeline.arrive = arriveTime;
     
+    // 明确停留在“已接单”，再进入现场处置，避免两步同时跳转
     let t2a = setTimeout(() => {
+      document.getElementById('step5').className = 'step-num active';
+      document.getElementById('status5').className = 'workorder-status processing';
+      document.getElementById('status5').textContent = '现场处置中';
+      Voice.speak('执法人员已到达现场，正在核查并处置。');
+
+      let t2b = setTimeout(() => {
       document.getElementById('step5').className = 'step-num completed';
       document.getElementById('step5').innerHTML = '<i class="fa-solid fa-check"></i>';
       document.getElementById('status5').className = 'workorder-status completed';
@@ -2439,7 +2472,7 @@ function createWorkorder() {
       const closeTime = getCurrentTime();
       timeline.close = closeTime;
       
-      let t2b = setTimeout(() => {
+      let t2c = setTimeout(() => {
         document.getElementById('workorderModal').classList.remove('active');
         
         const duration = Math.round((new Date() - demoStartTime) / 1000);
@@ -2476,11 +2509,13 @@ function createWorkorder() {
             </div>
           </div>
         `);
-      }, 1500);
+      }, 3000);
+      workorderTimers.push(t2c);
+      }, 9000);
       workorderTimers.push(t2b);
-    }, 4000);
+    }, 1800);
     workorderTimers.push(t2a);
-  }, 3000);
+  }, 7000);
   workorderTimers.push(t2);
 }
 
