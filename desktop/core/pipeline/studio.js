@@ -2924,6 +2924,7 @@ async function generateAssetsRaw(projectId, { only = null, chapterId = null, reg
            * 一句话盖住两种情况，等于把人往其中一条路上瞎指。
            */
           t.refsAvailable = result.refsAvailable ?? null;
+          t.refsAvailableLabels = result.refsAvailableLabels || [];
           t.consistency = {
             score: result.verification?.score ?? null,
             pass: result.verification?.pass ?? null,
@@ -3119,6 +3120,7 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
       t.bibleRefs = refImages.length ? assembled.refLabels : [];
       // 同上：0 张时界面要说得出是"没图"还是"有图没发"
       t.refsAvailable = (assembled.refImages || []).length;
+      t.refsAvailableLabels = assembled.refDetailed || [];
       t.consistency = {
         score: verification.score ?? null,
         pass: verification.pass ?? null,

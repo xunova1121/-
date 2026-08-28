@@ -379,6 +379,8 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
     refLabels: refs.labels,
     /** 和 refImages 一一对应：每张图是"你传的"还是"模型出的" */
     refSources: refs.sources,
+    /** 带来源的标签，供界面在"一张都没发"时说清那几张分别是谁 */
+    refDetailed: refs.detailed,
     // 和 refImages 一一对应。限时地址过期时靠它重新签一个（见 studio.js 的 refreshRefs）
     refPaths: refs.paths,
     cast: cast.map((c) => c.name),
@@ -464,7 +466,17 @@ export function collectReferences(bible, shot, { limit = 9 } = {}) {
     // 界面上直接显示"这次带了谁"，用户才知道重出为什么像/不像
     labels: unique.map((r) => `${glyph[r.kind]}·${r.name}`),
     /** 每张是"你传的照片"还是"模型出的设定图"。refMode 靠它筛。 */
-    sources: unique.map((r) => r.source || null)
+    sources: unique.map((r) => r.source || null),
+    /**
+     * 带来源的标签，界面直接用。
+     *
+     * ⚠ 只说"有 3 张可以带"是不够的 —— 用户传了照片、结果一张没发，
+     * 他需要知道的是**那三张分别是谁、哪张是他传的**。
+     * 很可能他的照片压根不在这三张里（挂到了别的条目上、
+     * 或者这一镜引用的角色名和设定集对不上），而那是完全另一个问题。
+     * 只报一个数字，等于让他继续猜。
+     */
+    detailed: unique.map((r) => `${glyph[r.kind]}·${r.name}${r.source === 'upload' ? '（你传的）' : '（模型出的）'}`)
   };
 }
 
@@ -965,7 +977,9 @@ export async function generateConsistentImage({
       prompt: assembled.prompt,
       refLabels: refImages.length ? assembled.refLabels : [],
       // 本来有几张可用（筛之前）。界面靠它分辨"没图"和"有图没发"
-      refsAvailable: (assembled.refImages || []).length
+      refsAvailable: (assembled.refImages || []).length,
+      // 那几张分别是谁、哪张是用户传的 —— 一张都没发时这才是有用的信息
+      refsAvailableLabels: assembled.refDetailed || []
     };
 
     if (!verifyEnabled || !cast.length || !image.url) {

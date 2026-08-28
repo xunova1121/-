@@ -8188,6 +8188,41 @@ section('传上去的照片：要真的用上，而且只用脸');
       (after.bibleRefs || []).length > 0, JSON.stringify(after.bibleRefs));
   }
 
+  /**
+   * ⚠ 一张都没发时，要说得出**那几张分别是谁、哪张是用户传的**。
+   *
+   * 用户报回来的是"设定集里有 3 张图可以带，但这一次一张都没发"——
+   * 一个数字，然后他还是不知道该干什么。真正要回答的是
+   * "我传的那张在不在这三张里"：
+   *   在   → 设置把它筛掉了，改设置就行
+   *   不在 → 完全另一个问题（照片挂到别的条目上了 /
+   *          这一镜引用的角色名和设定集对不上）
+   * 两件事的下一步毫不相干，而一个数字分不出来。
+   */
+  {
+    settings.patch({ refMode: 'auto' });
+    const mixed = mkBible('model');
+    // 再加一个**用户传过照片**的角色，两种来源混在一镜里
+    mixed.characters.push({
+      name: '老周', appearance: '花白胡子', seed: 3,
+      sheetPath: '/z.png', sheetUrl: 'https://x/z.png', sheetSource: 'upload',
+      variants: [{ id: 'v-default', name: '默认', sheetPath: '/z.png', sheetUrl: 'https://x/z.png', sheetSource: 'upload' }]
+    });
+    const two = cs.assemblePrompt(mixed, { ...shot, characters: ['阿澜', '老周'] });
+    check('每一张都标出来源（模型出的 / 你传的）',
+      two.refDetailed.some((x) => x.includes('（你传的）')) && two.refDetailed.some((x) => x.includes('（模型出的）')),
+      JSON.stringify(two.refDetailed));
+    check('标签里带得出是谁', two.refDetailed.some((x) => x.includes('老周')), JSON.stringify(two.refDetailed));
+    /**
+     * 而且 auto 要**真的只留那一张** —— 混着两种来源时最容易写错成"全留"或"全丢"。
+     */
+    const kept2 = cs.pickRefs(
+      { images: two.refImages, labels: two.refLabels, paths: two.refPaths, sources: two.refSources }, cs.refPlan()
+    );
+    check('auto 只留用户传的那一张，不多不少', kept2.images.length === 1 && kept2.uploaded === 1,
+      JSON.stringify({ kept: kept2.images.length, uploaded: kept2.uploaded, all: two.refImages.length }));
+  }
+
   // ── 模型自己出的设定图：默认仍然不发（那条路的老理由还成立）──
   {
     settings.patch({ refMode: 'auto' });

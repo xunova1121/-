@@ -2338,9 +2338,15 @@ export default {
                         shot.bibleRefs?.length
                           ? `上次出图参考：${shot.bibleRefs.join('、')}`
                           : shot.refsAvailable > 0
-                            ? `设定集里有 ${shot.refsAvailable} 张图可以带，但上次一张都没发 —— `
-                              + '脸完全由文字描述决定。去「设置 → 画面规格 → 出分镜图时带哪些参考图」'
-                              + '改成「只用我自己传的图」，再重出这一镜。'
+                            ? `设定集里有 ${shot.refsAvailable} 张图可以带`
+                              + (shot.refsAvailableLabels?.length ? `（${shot.refsAvailableLabels.join('、')}）` : '')
+                              + '，但上次一张都没发。'
+                              // 说清那几张是谁 —— 用户真正要判断的是"我传的那张在不在里面"
+                              + ((shot.refsAvailableLabels || []).some((x) => x.includes('你传的'))
+                                ? '你传的那张在里面，是设置把它筛掉了 —— 去「设置 → 画面规格 → '
+                                  + '出分镜图时带哪些参考图」改成「只用我自己传的图」。'
+                                : '⚠ 这几张全是模型出的，没有你传的那张 —— 问题不在设置。'
+                                  + '要么照片传到了别的条目上，要么这一镜引用的角色名和设定集里的对不上。')
                             : shot.refsAvailable === 0
                               ? '这一镜引用的角色/场景在设定集里还没有图 —— 没有图可带。先去给他出一张或传一张。'
                               : '这张图是早前出的，当时没记下带过哪些参考图。重出一次就知道了。')
