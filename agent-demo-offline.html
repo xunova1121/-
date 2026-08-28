@@ -91,45 +91,125 @@ body {
   min-height: 100vh;
   background: #f0f5f9;
 }
+/* ===== 门户底图（对齐真实门户首页截图） =====
+   如需直接使用真实门户截图作底图：把图片转成 base64 data URI 填到
+   --portal-shot 里，并给 <body> 加 class="portal-shot"，
+   下面的 .portal-shot 规则会自动隐藏 CSS 复刻的门户、改用截图。 */
+:root {
+  --portal-shot: none;
+  --portal-blue: #1677ff;
+  --portal-ink: #1f2937;
+}
 .portal-bg {
   position: fixed;
   inset: 0;
-  background: linear-gradient(180deg, #e8f0f5 0%, #f0f5f9 50%, #e8f0f5 100%);
+  background: linear-gradient(180deg, #eef4fa 0%, #f2f6fa 45%, #eaf1f8 100%);
   z-index: 0;
 }
-.top-nav {
-  position: fixed; top: 0; left: 0; right: 0; height: 52px;
-  background: #fff; border-bottom: 1px solid #e2e8f0;
-  display: flex; align-items: center; padding: 0 20px; z-index: 10;
+body.portal-shot .portal-bg {
+  background-image: var(--portal-shot);
+  background-size: cover;
+  background-position: top center;
+  background-repeat: no-repeat;
 }
-.nav-logo { width: 28px; height: 28px; background: linear-gradient(135deg, #1677ff, #0958d9); border-radius: 6px; display: flex; align-items: center; justify-content: center; color: white; font-size: 14px; margin-right: 10px; }
-.nav-title { font-size: 15px; font-weight: 600; color: #1f2937; }
-.nav-right { margin-left: auto; display: flex; align-items: center; gap: 16px; }
-.nav-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #4b5563; cursor: pointer; }
-.nav-user { width: 28px; height: 28px; background: linear-gradient(135deg, #1677ff, #0958d9); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; }
+body.portal-shot .top-nav,
+body.portal-shot .main-content { display: none; }
 
-.main-content { position: relative; z-index: 1; padding: 68px 16px 16px; max-width: 1400px; margin: 0 auto; }
-.welcome-card { background: #fff; border-radius: 10px; padding: 16px 20px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); display: flex; align-items: center; gap: 12px; }
-.welcome-icon { width: 40px; height: 40px; background: linear-gradient(135deg, #fef3c7, #fde68a); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
-.welcome-text h2 { font-size: 16px; color: #1f2937; margin-bottom: 2px; }
-.welcome-text p { font-size: 12px; color: #6b7280; }
+.top-nav {
+  position: fixed; top: 0; left: 0; right: 0; height: 60px;
+  background: #fff; border-bottom: 1px solid #e8eef5;
+  display: flex; align-items: center; padding: 0 24px; z-index: 10;
+  box-shadow: 0 1px 2px rgba(15,42,74,0.04);
+}
+.nav-logo { width: 34px; height: 34px; border-radius: 50%; border: 2px solid #0f3d78; display: flex; align-items: center; justify-content: center; color: #0f3d78; font-size: 15px; margin-right: 10px; background: #fff; flex-shrink: 0; }
+.nav-title { font-size: 19px; font-weight: 700; color: #17395f; letter-spacing: 0.5px; }
+.nav-right { margin-left: auto; display: flex; align-items: center; gap: 22px; }
+.nav-item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #4b5563; cursor: pointer; transition: color 0.2s; }
+.nav-item:hover { color: var(--portal-blue); }
+.nav-user { width: 30px; height: 30px; background: linear-gradient(135deg, #2b86ff, #0958d9); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 13px; }
 
-.quick-section { background: #fff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); margin-bottom: 12px; }
-.quick-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.quick-title { font-size: 14px; font-weight: 600; color: #1f2937; }
-.quick-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
-.quick-item { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px; background: #f8fafc; border-radius: 8px; cursor: pointer; transition: all 0.2s; }
-.quick-item:hover { background: #f0f7ff; }
-.quick-item-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
-.quick-item-icon.blue { background: #e6f4ff; color: #1677ff; }
-.quick-item-text { font-size: 11px; color: #4b5563; }
+.main-content { position: relative; z-index: 1; padding: 74px 22px 22px; max-width: 1560px; margin: 0 auto; }
 
-.agent-entry { position: fixed; bottom: 20px; right: 20px; z-index: 100; }
-.agent-btn { width: 52px; height: 52px; background: linear-gradient(135deg, #1677ff, #0958d9); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 22px; cursor: pointer; box-shadow: 0 4px 12px rgba(22,119,255,0.35); transition: all 0.3s; position: relative; }
-.agent-btn:hover { transform: scale(1.05); }
+/* --- 欢迎条 --- */
+.welcome-card { background: #fff; border-radius: 12px; padding: 14px 22px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(15,42,74,0.05); display: flex; align-items: center; gap: 10px; }
+.welcome-icon { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #f59e0b; }
+.welcome-text { display: flex; align-items: baseline; gap: 14px; }
+.welcome-text h2 { font-size: 16px; color: #6b7280; font-weight: 400; }
+.welcome-text h2 b { color: var(--portal-ink); font-weight: 700; }
+.welcome-text p { font-size: 13px; color: #9aa5b1; }
+.welcome-edit { margin-left: auto; display: flex; align-items: center; gap: 6px; padding: 7px 14px; border: 1px solid #dbe3ec; border-radius: 8px; font-size: 13px; color: #4b5563; background: #fff; cursor: pointer; transition: all 0.2s; }
+.welcome-edit:hover { border-color: var(--portal-blue); color: var(--portal-blue); }
+
+/* --- 头图横幅 --- */
+.portal-hero { position: relative; border-radius: 12px; overflow: hidden; margin-bottom: 16px; min-height: 300px; display: flex; align-items: center; box-shadow: 0 1px 3px rgba(15,42,74,0.05); background: linear-gradient(120deg, #eaf3fb 0%, #e4f0fa 40%, #dcebf7 100%); }
+.hero-scene { position: absolute; inset: 0; overflow: hidden; }
+.hero-sky { position: absolute; inset: 0; background: linear-gradient(180deg, #f4f9fd 0%, #e7f1fa 55%, #dbe9f5 100%); }
+.hero-skyline { position: absolute; right: 0; bottom: 33%; width: 60%; height: 42%; opacity: 0.30; filter: blur(0.6px); }
+.hero-water { position: absolute; left: 0; right: 0; bottom: 0; height: 34%; background: linear-gradient(180deg, rgba(215,232,245,0.75) 0%, rgba(207,227,243,0.85) 40%, rgba(198,220,239,0.92) 100%); }
+.hero-water::after { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(180deg, rgba(255,255,255,0.55) 0 1px, rgba(255,255,255,0) 1px 9px); }
+.hero-boats { position: absolute; right: 4%; bottom: 6%; width: 30%; opacity: 0.62; filter: blur(0.4px); }
+.hero-dots { position: absolute; right: 0; top: 0; width: 46%; height: 62%; background-image: radial-gradient(rgba(22,119,255,0.28) 1px, transparent 1px); background-size: 12px 12px; -webkit-mask-image: linear-gradient(200deg, #000 0%, transparent 62%); mask-image: linear-gradient(200deg, #000 0%, transparent 62%); }
+.hero-veil { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(244,249,253,0.96) 0%, rgba(244,249,253,0.78) 32%, rgba(244,249,253,0.18) 58%, rgba(244,249,253,0.30) 100%); }
+
+.hero-inner { position: relative; z-index: 2; display: flex; align-items: center; gap: 24px; width: 100%; padding: 42px 40px; }
+.hero-copy { flex: 1; min-width: 0; }
+.hero-badge { display: inline-flex; align-items: center; padding: 6px 16px; border-radius: 999px; background: rgba(22,119,255,0.10); color: #1a5fbf; font-size: 13px; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 18px; }
+.hero-title { font-size: 46px; line-height: 1.15; font-weight: 800; color: #0f3d78; letter-spacing: 2px; margin-bottom: 14px; }
+.hero-sub { font-size: 15px; color: #4b5b6e; margin-bottom: 24px; max-width: 640px; line-height: 1.7; }
+.hero-actions { display: flex; gap: 14px; flex-wrap: wrap; }
+.hero-btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 24px; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; border: 1px solid transparent; transition: all 0.2s; }
+.hero-btn.primary { background: linear-gradient(135deg, #1f6fe0, #17509f); color: #fff; box-shadow: 0 4px 12px rgba(22,90,190,0.28); }
+.hero-btn.primary:hover { filter: brightness(1.08); }
+.hero-btn.ghost { background: rgba(255,255,255,0.9); color: #33465c; border-color: #d2dfec; }
+.hero-btn.ghost:hover { border-color: var(--portal-blue); color: var(--portal-blue); }
+
+.hero-stats { display: grid; grid-template-columns: repeat(2, minmax(140px, 190px)); gap: 16px; flex-shrink: 0; }
+.stat-card { background: rgba(255,255,255,0.82); backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.9); border-radius: 10px; padding: 16px 18px; box-shadow: 0 6px 18px rgba(15,60,120,0.08); }
+.stat-label { font-size: 13px; color: #6b7280; margin-bottom: 8px; }
+.stat-value { font-size: 30px; font-weight: 700; color: #1a5fbf; line-height: 1; }
+
+/* --- 快捷入口 --- */
+.quick-section { background: #fff; border-radius: 12px; padding: 18px 20px; box-shadow: 0 1px 3px rgba(15,42,74,0.05); margin-bottom: 12px; }
+.quick-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 16px; }
+.quick-title { font-size: 17px; font-weight: 700; color: #17395f; display: flex; align-items: center; gap: 8px; }
+.quick-title i, .quick-title svg { color: var(--portal-blue); }
+.quick-search { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border: 1px solid #dbe3ec; border-radius: 8px; min-width: 280px; color: #9aa5b1; }
+.quick-search input { border: none; outline: none; font-size: 13px; color: #4b5563; width: 100%; background: transparent; }
+.quick-tabs { display: flex; flex-wrap: wrap; gap: 6px 26px; border-bottom: 1px solid #edf1f6; margin-bottom: 14px; }
+.quick-tab { position: relative; display: flex; align-items: center; gap: 7px; padding: 10px 2px 12px; font-size: 14px; color: #4b5563; cursor: pointer; white-space: nowrap; transition: color 0.2s; }
+.quick-tab:hover { color: var(--portal-blue); }
+.quick-tab.active { color: var(--portal-blue); font-weight: 600; }
+.quick-tab.active::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--portal-blue); border-radius: 2px; }
+.quick-tab .tab-badge { min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: #ef4444; color: #fff; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+.quick-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 10px; }
+.quick-item { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 8px; background: #f7fafd; border-radius: 10px; cursor: pointer; transition: all 0.2s; }
+.quick-item:hover { background: #eef6ff; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(22,119,255,0.10); }
+.quick-item-icon { width: 36px; height: 36px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 17px; }
+.quick-item-icon.blue { background: #e6f4ff; color: var(--portal-blue); }
+.quick-item-text { font-size: 12px; color: #4b5563; text-align: center; }
+
+/* ===== 右下角 AI 智能助手入口（替换原门户的“下载资源”悬浮按钮） ===== */
+.agent-entry { position: fixed; bottom: 26px; right: 26px; z-index: 100; }
+.agent-btn { width: 58px; height: 58px; background: linear-gradient(135deg, #2b86ff, #0b4fc4); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 24px; cursor: pointer; box-shadow: 0 8px 22px rgba(22,119,255,0.42); transition: all 0.3s; position: relative; }
+.agent-btn::before { content: ''; position: absolute; inset: -6px; border-radius: 50%; border: 2px solid rgba(22,119,255,0.30); animation: agentRing 2.4s ease-out infinite; }
+@keyframes agentRing { 0% { transform: scale(0.9); opacity: 0.9; } 100% { transform: scale(1.25); opacity: 0; } }
+.agent-btn:hover { transform: scale(1.06); box-shadow: 0 10px 26px rgba(22,119,255,0.55); }
 .agent-btn.alert { animation: btnAlert 0.8s ease-in-out infinite; background: linear-gradient(135deg, #ef4444, #dc2626); }
 @keyframes btnAlert { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
-.agent-badge { position: absolute; top: -2px; right: -2px; width: 18px; height: 18px; background: #ef4444; color: white; border-radius: 50%; font-size: 10px; font-weight: 600; display: flex; align-items: center; justify-content: center; border: 2px solid white; }
+.agent-badge { position: absolute; top: -2px; right: -2px; width: 20px; height: 20px; background: #ef4444; color: white; border-radius: 50%; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; border: 2px solid white; z-index: 2; }
+.agent-tip { position: absolute; right: 70px; top: 50%; transform: translateY(-50%); background: #17395f; color: #fff; font-size: 12px; padding: 6px 12px; border-radius: 6px; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+.agent-entry:hover .agent-tip { opacity: 1; }
+
+@media (max-width: 1280px) {
+  .hero-title { font-size: 36px; }
+  .quick-grid { grid-template-columns: repeat(6, 1fr); }
+}
+@media (max-width: 960px) {
+  .hero-inner { flex-direction: column; align-items: flex-start; padding: 28px 24px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); width: 100%; }
+  .quick-grid { grid-template-columns: repeat(4, 1fr); }
+  .quick-search { min-width: 0; }
+}
 
 .agent-modal { position: fixed; inset: 0; z-index: 200; display: none; background: rgba(0,0,0,0.4); backdrop-filter: blur(4px); }
 .agent-modal.active { display: flex; }
@@ -501,13 +581,13 @@ body {
 <div class="portal-bg"></div>
 
 <div class="top-nav">
-  <div class="nav-logo"><i class="fa-solid fa-eye"></i></div>
+  <div class="nav-logo"><i class="fa-solid fa-scale-balanced"></i></div>
   <div class="nav-title">渔政执法管理系统</div>
   <div class="nav-right">
     <div class="nav-item"><i class="fa-solid fa-arrow-left"></i> 返回首页</div>
     <div class="nav-item"><i class="fa-solid fa-gear"></i> 系统管理</div>
     <div class="nav-item"><i class="fa-solid fa-bell"></i></div>
-    <div class="nav-user">管</div>
+    <div class="nav-user"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5Z"/></svg></div>
     <div class="nav-item">管理员</div>
   </div>
 </div>
@@ -516,14 +596,100 @@ body {
   <div class="welcome-card">
     <div class="welcome-icon"><i class="fa-regular fa-lightbulb"></i></div>
     <div class="welcome-text">
-      <h2 id="greeting">你好，管理员</h2>
+      <h2 id="greeting">你好，<b>管理员</b></h2>
       <p id="portalClock">--</p>
+    </div>
+    <div class="welcome-edit">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+      个性化编辑
+    </div>
+  </div>
+
+  <!-- 门户头图：水域执法场景（纯 CSS/SVG 绘制，离线可用） -->
+  <div class="portal-hero">
+    <div class="hero-scene">
+      <div class="hero-sky"></div>
+      <svg class="hero-skyline" viewBox="0 0 600 200" preserveAspectRatio="none" aria-hidden="true">
+        <g fill="#9dc2e0">
+          <rect x="18" y="96" width="34" height="104"/><rect x="60" y="62" width="26" height="138"/>
+          <rect x="94" y="110" width="42" height="90"/><rect x="146" y="44" width="22" height="156"/>
+          <rect x="176" y="86" width="38" height="114"/><rect x="222" y="120" width="30" height="80"/>
+          <rect x="260" y="70" width="24" height="130"/><rect x="292" y="102" width="46" height="98"/>
+          <rect x="346" y="52" width="20" height="148"/><rect x="374" y="92" width="36" height="108"/>
+          <rect x="418" y="126" width="28" height="74"/><rect x="454" y="78" width="24" height="122"/>
+          <rect x="486" y="108" width="44" height="92"/><rect x="538" y="66" width="22" height="134"/>
+        </g>
+      </svg>
+      <div class="hero-water"></div>
+      <svg class="hero-boats" viewBox="0 0 420 110" aria-hidden="true">
+        <g fill="#ffffff" stroke="#a9c9e2" stroke-width="1.5">
+          <path d="M40 78h150l-16 20H56Z"/>
+          <path d="M74 60h84v18H74Z"/>
+          <path d="M96 46h40v14H96Z"/>
+          <path d="M112 26h4v20h-4Z" fill="#a9c9e2" stroke="none"/>
+        </g>
+        <g fill="#ffffff" stroke="#a9c9e2" stroke-width="1.2" opacity="0.85">
+          <path d="M250 88h116l-12 15h-92Z"/>
+          <path d="M276 74h64v14h-64Z"/>
+          <path d="M294 62h30v12h-30Z"/>
+          <path d="M306 46h3v16h-3Z" fill="#a9c9e2" stroke="none"/>
+        </g>
+      </svg>
+      <div class="hero-dots"></div>
+      <div class="hero-veil"></div>
+    </div>
+
+    <div class="hero-inner">
+      <div class="hero-copy">
+        <div class="hero-badge">江苏渔政 · 数字执法门户</div>
+        <div class="hero-title">渔政执法综合管理平台</div>
+        <div class="hero-sub">贯通巡查执勤、智能预警、执法办案和资源监管，支撑水域治理一屏协同、一体处置。</div>
+        <div class="hero-actions">
+          <div class="hero-btn primary"><i class="fa-solid fa-table-cells-large"></i> 进入工作台</div>
+          <div class="hero-btn ghost">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+            综合查询
+          </div>
+        </div>
+      </div>
+      <div class="hero-stats">
+        <div class="stat-card"><div class="stat-label">待办事项</div><div class="stat-value">2</div></div>
+        <div class="stat-card"><div class="stat-label">未读消息</div><div class="stat-value">0</div></div>
+        <div class="stat-card"><div class="stat-label">可用目录</div><div class="stat-value">16</div></div>
+        <div class="stat-card"><div class="stat-label">下载资源</div><div class="stat-value">4</div></div>
+      </div>
     </div>
   </div>
 
   <div class="quick-section">
     <div class="quick-header">
-      <div class="quick-title">快捷入口</div>
+      <div class="quick-title"><i class="fa-solid fa-table-cells-large"></i> 快捷入口</div>
+      <div class="quick-search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+        <input type="text" placeholder="搜索功能名称...">
+      </div>
+    </div>
+    <div class="quick-tabs">
+      <div class="quick-tab active">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 9.5l6.1-.9Z"/></svg>
+        常用功能 <span class="tab-badge">2</span>
+      </div>
+      <div class="quick-tab"><i class="fa-solid fa-gear"></i> 门户</div>
+      <div class="quick-tab"><i class="fa-solid fa-chart-pie"></i> 指挥调度驾驶舱</div>
+      <div class="quick-tab"><i class="fa-regular fa-clock"></i> 智能预警</div>
+      <div class="quick-tab"><i class="fa-solid fa-table-cells-large"></i> 重点人员管理</div>
+      <div class="quick-tab"><i class="fa-solid fa-clipboard-list"></i> 巡查执勤处置</div>
+      <div class="quick-tab"><i class="fa-solid fa-crosshairs"></i> 指挥调度</div>
+      <div class="quick-tab"><i class="fa-solid fa-table-cells-large"></i> 渔政队伍管理</div>
+      <div class="quick-tab"><i class="fa-solid fa-clipboard-check"></i> 资源信息采集</div>
+      <div class="quick-tab"><i class="fa-solid fa-file-lines"></i> 渔民鱼类鉴定</div>
+      <div class="quick-tab"><i class="fa-solid fa-scale-balanced"></i> 执法办案应用</div>
+      <div class="quick-tab"><i class="fa-solid fa-ship"></i> 渔政装备管理</div>
+      <div class="quick-tab"><i class="fa-solid fa-chart-line"></i> 业务能力中心</div>
+      <div class="quick-tab"><i class="fa-solid fa-chart-pie"></i> 数据能力中心</div>
+      <div class="quick-tab"><i class="fa-solid fa-brain"></i> AI中台</div>
+      <div class="quick-tab"><i class="fa-solid fa-rotate"></i> 运行管理中心</div>
+      <div class="quick-tab"><i class="fa-solid fa-eye"></i> 多元感知系统</div>
     </div>
     <div class="quick-grid">
       <div class="quick-item" onclick="toggleAgent()">
@@ -550,12 +716,22 @@ body {
         <div class="quick-item-icon blue"><i class="fa-solid fa-ship"></i></div>
         <div class="quick-item-text">船舶管理</div>
       </div>
+      <div class="quick-item">
+        <div class="quick-item-icon blue"><i class="fa-solid fa-triangle-exclamation"></i></div>
+        <div class="quick-item-text">智能预警</div>
+      </div>
+      <div class="quick-item">
+        <div class="quick-item-icon blue"><i class="fa-solid fa-clipboard-check"></i></div>
+        <div class="quick-item-text">巡查执勤</div>
+      </div>
     </div>
   </div>
 </div>
 
+<!-- 右下角智能助手图标：点击打开 AI Agent 对话框（原“下载资源”悬浮按钮已移除） -->
 <div class="agent-entry">
-  <div class="agent-btn" id="agentBtn" onclick="toggleAgent()">
+  <div class="agent-tip">智能助手 · 点击开始对话</div>
+  <div class="agent-btn" id="agentBtn" onclick="toggleAgent()" title="智能助手">
     <i class="fa-solid fa-robot"></i>
     <div class="agent-badge" id="agentBadge" style="display:none">1</div>
   </div>
@@ -1537,7 +1713,7 @@ function startPortalClock() {
     const g = document.getElementById('greeting');
     const c = document.getElementById('portalClock');
     const s = document.getElementById('sidebarStamp');
-    if (g) g.textContent = greet + '，管理员';
+    if (g) g.innerHTML = greet + '，<b>管理员</b>';
     if (c) c.textContent = formatDate(now) + ' 星期' + week + ' ' + formatTime(now);
     if (s) s.textContent = '截至 ' + pad2(now.getHours()) + ':' + pad2(now.getMinutes());
   };
