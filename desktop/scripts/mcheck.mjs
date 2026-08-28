@@ -874,6 +874,33 @@ await page.waitForTimeout(800);
     !/张图可以带/.test(txt) || /出分镜图时带哪些参考图/.test(txt) ? '✓' : `✕ ${txt.slice(0, 200)}`);
 }
 
+/**
+ * ⑬ 手机上传一张自己的图当设定图。
+ *
+ * 用户的原话："要么你在手机上添加一个上传图片的功能"。手机上原来完全没有 ——
+ * 而这件事恰恰最该在手机上做：想用的那张脸多半就在手机相册里。
+ *
+ * ⚠ 这一条以前**没登记进能力清单**，所以"三端对齐"那条自检从来没红过。
+ * 那份清单只在有人登记时才起作用，漏登记的功能它一个字都不会说。
+ */
+await page.locator('.tab', { hasText: '设定' }).click();
+await page.waitForTimeout(800);
+{
+  const card = page.locator('.card', { hasText: '阿澜' }).first();
+  const btn = card.locator('button', { hasText: '传一张图' });
+  console.log('⑬ 手机上有"传一张图"：', (await btn.count()) > 0 ? '✓' : '✕ 没有这个按钮');
+  console.log('   有文件选择器（点了要能打开相册）：',
+    (await card.locator('input[type=file]').count()) > 0 ? '✓' : '✕');
+  /**
+   * ⚠ 还要说清**这张图哪来的**。用户撞上的死结就是这个：
+   * 分镜说"没带你传的图"，而他确信设定集里就是他的照片 ——
+   * 两句话必有一句错，而在设定集上标出来源当场就分得清。
+   */
+  const t = await card.innerText();
+  console.log('   说得出这张图是谁出的：',
+    /这张是你传的|这张是模型出的/.test(t) ? '✓' : `✕ ${t.slice(0, 120)}`);
+}
+
 // 第 ② 步是**故意**敲错配对码，那一次 401 是预期之内的，不算页面报错
 const realErrs = errs.filter((e) => !/401/.test(e));
 console.log('意料之外的 4xx：', unexpected4xx.length ? `✕ ${unexpected4xx.slice(0, 4).join('、')}` : '无 ✓');

@@ -91,6 +91,24 @@ export const CAPABILITIES = [
     mobile: 'ui/m/m.js'
   },
   {
+    id: 'sheet-upload',
+    name: '传一张自己的图当设定图',
+    api: 'POST /projects/:id/bible/:kind/:name/upload',
+    pc: 'ui/views/bible.js',
+    /**
+     * ⚠ 这一条**一直没登记**，所以"三端对齐"那条自检从来没红过 ——
+     * 而手机上确实完全没有这个功能。用户的原话：
+     * "要么你在手机上添加一个上传图片的功能"。
+     *
+     * 而这件事恰恰最该在手机上做：想用的那张脸多半就在手机相册里，
+     * 为了传一张图专门开电脑，是把一个三秒钟的动作变成一趟路。
+     *
+     * 这也说明这份清单只在"有人登记"时才起作用 —— 漏登记的功能
+     * 它一个字都不会说。加功能时顺手登记，是这份清单唯一的维护方式。
+     */
+    mobile: 'ui/m/m.js'
+  },
+  {
     id: 'sheet-angles',
     name: '补出侧面 / 背面 / 俯视等角度',
     api: 'POST /projects/:id/bible/:kind/:name/angles',

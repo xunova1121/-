@@ -141,7 +141,22 @@ export default {
     const staleChars = (bible.characters || []).filter((c) => {
       const used = c.sheetPromptUsed || '';
       // 没出过图的不算"旧"，那是"还没出" —— 两件事，提示语也不一样
-      return c.sheetPath && !used.includes('角色三视图');
+      if (!c.sheetPath || used.includes('角色三视图')) return false;
+      /**
+       * ⚠⚠ **用户自己传的照片绝不能进这个名单。**
+       *
+       * 这是今天挖的坑，而且是破坏性的：判据本来是"sheetPromptUsed 里
+       * 没有'角色三视图'就算旧"，而**上传的照片根本没有这个字段**
+       *（上传不经过出图提示词）。于是每一张用户传的照片都被判成"老的半身图"，
+       * 列进"重出这 N 张"，点一下就被模型出的图**覆盖掉** ——
+       * 他传的那张脸没了，而且 sheetSource 跟着变成 model，
+       * 于是参考图那一层也不再把它当成"你传的"。
+       *
+       * 用户传照片是一句毫不含糊的"就用这张"。任何"帮你更新一下"的好意
+       * 都不该盖过它 —— 尤其是一个他没法撤销的覆盖。
+       */
+      if (c.sheetSource === 'upload') return false;
+      return true;
     });
 
     // ── 全片风格锚 ──
@@ -186,7 +201,7 @@ export default {
             + '而复核那一层比的全是半身图里有的东西，永远判 pass，不会报错。'),
           h('p', { class: 'panel-hint' },
             h('b', {}, staleChars.map((c) => c.name).join('、')),
-            '。重出会**按当前描述重画**，脸有可能和现在这张不完全一样 —— '
+            '。重出会按当前描述重画，脸有可能和现在这张不完全一样 —— '
             + '还没出过分镜图的话现在换最划算；已经出了一半，换完那些镜要跟着重出才对得上。'),
           h('div', { class: 'inline' }, redoAll, status))
       );
@@ -424,6 +439,7 @@ export default {
             uploadBtn.textContent = '上传中…';
             let err = null;
             await stream(
+              // cap:sheet-upload
               `/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}/upload`,
               { dataUrl, fileName: file.name },
               (ev) => {

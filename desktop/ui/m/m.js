@@ -1597,6 +1597,37 @@ function siteCard() {
   return host;
 }
 
+/**
+ * 把手机相册里那张大图缩到长边 maxSide，转成 dataUrl。
+ *
+ * 手机拍的照片五六 MB 很常见，base64 再胀三分之一 —— 直接传会被
+ * 请求体上限挡掉，而那个失败长得像"传不上去"，看不出是大小问题。
+ * 参考图本来也不需要那么大：它回答的是"这个人长什么样"，1280 绰绰有余。
+ */
+function shrinkImage(file, maxSide) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const hgt = Math.max(1, Math.round(img.height * scale));
+      const cv = document.createElement('canvas');
+      cv.width = w;
+      cv.height = hgt;
+      cv.getContext('2d').drawImage(img, 0, 0, w, hgt);
+      // JPEG 而不是 PNG：照片用 PNG 存反而更大，而参考图不需要无损
+      resolve(cv.toDataURL('image/jpeg', 0.9));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('这个文件读不出来，换一张图试试'));
+    };
+    img.src = url;
+  });
+}
+
 function bibleCard(kind, item, v) {
   const look = h('textarea', { rows: 3, class: 'mta' }, item.appearance || '');
   const save = h('button', { class: 'btn sm grow' }, '保存描述');
@@ -1617,6 +1648,59 @@ function bibleCard(kind, item, v) {
     } catch (err) {
       toast(err.message, 'err');
       save.disabled = false;
+    }
+  };
+
+  /**
+   * ── 传一张自己的图当设定图 ──
+   *
+   * 用户的原话："要么你在手机上添加一个上传图片的功能"。
+   *
+   * 手机上原来**完全没有**这个 —— 而这件事恰恰最该在手机上做：
+   * 想用的那张脸多半就在手机相册里，为了传一张图专门开电脑，
+   * 是把一个三秒钟的动作变成一趟路。而这条一直没登记进能力清单，
+   * 所以"三端对齐"那条自检从来没红过。
+   *
+   * ⚠ 传上去之后 sheetSource 记成 upload，出分镜图时默认就会带上它
+   *（见 consistency.refPlan 的 auto 档）—— 这两件事必须一起才算数：
+   * 只能传、传完不发，和不能传没有区别。
+   */
+  const pick = h('input', {
+    type: 'file',
+    accept: 'image/*',
+    style: 'display:none'
+  });
+  const up = h('button', { class: 'btn sm grow', disabled: job.running }, '传一张图');
+  up.onclick = () => pick.click();
+  pick.onchange = async () => {
+    const file = pick.files?.[0];
+    if (!file) return;
+    /**
+     * 手机拍的照片动辄五六 MB，base64 再胀三分之一。
+     * 服务端那条路收 dataUrl，太大直接被请求体上限挡掉 —— 而那个失败
+     * 长得像"传不上去"，看不出是大小问题。所以先在本地缩到长边 1280。
+     */
+    up.disabled = true;
+    const label0 = up.textContent;
+    up.textContent = '处理中…';
+    try {
+      const dataUrl = await shrinkImage(file, 1280);
+      let failed = null;
+      // cap:sheet-upload
+      await stream(
+        `/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}/upload`,
+        { dataUrl, fileName: file.name },
+        (ev) => { if (ev.type === 'error') failed = ev.message; }
+      );
+      if (failed) throw new Error(failed);
+      toast(`${item.name} 已换成你传的图，出分镜图时会带上它`, 'ok');
+      await reload();
+    } catch (err) {
+      toast(err.message, 'err');
+    } finally {
+      pick.value = '';
+      up.disabled = false;
+      up.textContent = label0;
     }
   };
 
@@ -1698,8 +1782,22 @@ function bibleCard(kind, item, v) {
         h('b', {}, item.name),
         item.role ? h('div', { class: 'muted' }, item.role) : null,
         item.seed != null ? h('div', { class: 'muted' }, `种子 ${item.seed}`) : null)),
+    /**
+     * 这张图哪来的 —— 一眼看得出是"你传的"还是"模型出的"。
+     *
+     * 这一条直接对应用户撞上的那个死结：分镜说"没带你传的图"，
+     * 而他确信设定集里就是他的照片。两句话必有一句错，
+     * 而在设定集上标出来源，当场就分得清。
+     */
+    item.sheetPath
+      ? h('div', { class: 'muted', style: 'margin-top:6px' },
+          item.sheetSource === 'upload'
+            ? `这张是你传的${item.sheetFileName ? `（${item.sheetFileName}）` : ''} —— 出分镜图时会带上它`
+            : '这张是模型出的。想用自己的照片就点下面「传一张图」')
+      : null,
     h('div', { style: 'margin-top:10px' }, look),
-    h('div', { class: 'row', style: 'margin-top:9px' }, save, redo, angleBtn));
+    pick,
+    h('div', { class: 'row', style: 'margin-top:9px' }, save, up, redo, angleBtn));
 }
 
 /** 画风和设定集里冻结的那段对不上时，给一条能一键换过来的提示 */
