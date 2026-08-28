@@ -86,12 +86,20 @@ text-rendering:auto;font-family:"Font Awesome 6 Free"}
 </script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-/* 内联矢量图标：尺寸/颜色跟随所在容器，替代图标字体里缺失的字形 */
+/* 内联矢量图标：尺寸与颜色跟随容器，替代图标字体里缺失的字形 */
 .fz-ico { width: 1em; height: 1em; display: inline-block; vertical-align: -0.125em; color: currentColor; }
 .nav-logo svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 1px 2px rgba(15,61,120,0.18)); }
-.agent-btn .entry-logo { width: 100%; height: 100%; display: block; border-radius: 50%; }
-.agent-header-icon svg, .welcome-logo svg { width: 68%; height: 68%; display: block; color: #fff; }
+.agent-header-icon svg, .welcome-logo svg { width: 100%; height: 100%; display: block; }
 .chat-avatar .fz-ico { width: 58%; height: 58%; }
+/* 右下角助手机器人：透明底 + 立体投影，脚下有落地阴影（画在 SVG 里） */
+.agent-btn .entry-logo { width: 100%; height: 100%; display: block; object-fit: contain;
+  filter: drop-shadow(0 10px 14px rgba(15,61,120,0.26)) drop-shadow(0 2px 3px rgba(15,61,120,0.18)); }
+.agent-btn { overflow: visible; }
+.agent-btn:hover .entry-logo { filter: drop-shadow(0 16px 20px rgba(15,61,120,0.32)) drop-shadow(0 3px 4px rgba(15,61,120,0.2)); }
+.agent-btn.alert .entry-logo { animation: botBob 0.9s ease-in-out infinite; }
+@keyframes botBob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+/* 待处理数字徽标：支持两位数 */
+.agent-badge { width: auto !important; min-width: 24px; padding: 0 6px; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   min-height: 100vh;
@@ -153,7 +161,7 @@ body.portal-shot .main-content { display: none; }
 .portal-hero::after { content:''; position:absolute; inset:0; background:linear-gradient(90deg, rgba(244,249,253,.96) 0%, rgba(244,249,253,.88) 31%, rgba(244,249,253,.42) 54%, rgba(244,249,253,.05) 76%); pointer-events:none; }
 .hero-scene { position: absolute; inset: 0; overflow: hidden; z-index: 0; }
 .hero-art { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-/* 本地实景图单独一层；文件不在时这层透明，自动露出下面的矢量实景图 */
+/* 本地实景图单独一层；文件不在时这层透明，自动露出下面矢量绘制的实景图 */
 .hero-photo { position: absolute; inset: 0; z-index: 1; background-image: url("file:///D:/360MoveData/Users/%E5%BE%90%E9%95%BF%E4%B9%90/Desktop/%E8%83%8C%E6%99%AF.png"); background-size: cover; background-position: center; background-repeat: no-repeat; }
 .hero-sky { position: absolute; inset: 0; background: linear-gradient(180deg, #f4f9fd 0%, #e7f1fa 55%, #dbe9f5 100%); }
 .hero-skyline { position: absolute; right: 0; bottom: 33%; width: 60%; height: 42%; opacity: 0.30; filter: blur(0.6px); }
@@ -202,13 +210,14 @@ body.portal-shot .main-content { display: none; }
 
 /* ===== 右下角执法助手入口：官方徽章式入口 ===== */
 .agent-entry { position: fixed; bottom: 24px; right: 24px; z-index: 100; }
-.agent-btn { width: 62px; height: 62px; padding: 5px; background: #fff; border: 2px solid #1768aa; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 8px 24px rgba(15,61,120,.28); transition: transform .2s, box-shadow .2s; position: relative; }
+.agent-btn { width: 82px; height: 82px; padding: 0; background: transparent; border: 0; border-radius: 18px; display: flex; align-items: center; justify-content: center; cursor: pointer; filter: drop-shadow(0 8px 12px rgba(15,61,120,.25)); transition: transform .2s, filter .2s; position: relative; }
 .agent-btn::before { content: none; }
-.agent-btn:hover { transform: translateY(-3px); box-shadow: 0 12px 30px rgba(15,61,120,.34); }
-.agent-btn.alert { box-shadow: 0 0 0 4px rgba(217,146,38,.28), 0 8px 24px rgba(15,61,120,.28); }
-.agent-btn .entry-logo { width:100%; height:100%; object-fit:contain; border-radius:50%; display:block; }
+.agent-btn:hover { transform: translateY(-3px) scale(1.03); filter: drop-shadow(0 12px 16px rgba(15,61,120,.32)); }
+.agent-btn.alert { filter: drop-shadow(0 8px 12px rgba(15,61,120,.25)); }
+.agent-btn .entry-logo { width:100%; height:100%; object-fit:contain; border-radius:0; display:block; }
 .agent-btn .entry-fallback { display:none; color:#155c96; font-size:24px; }
-.agent-btn .entry-chat-mark { position:absolute; right:-4px; bottom:-2px; width:23px; height:23px; display:flex; align-items:center; justify-content:center; border-radius:50%; background:#1768aa; color:#fff; border:2px solid #fff; font-size:10px; }
+.agent-btn .entry-chat-mark { display:none; }
+.agent-badge { top: 0; right: 0; width: 24px; height: 24px; font-size: 12px; box-shadow: 0 3px 8px rgba(150,20,20,.28); }
 .agent-badge { position: absolute; top: -2px; right: -2px; width: 20px; height: 20px; background: #ef4444; color: white; border-radius: 50%; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; border: 2px solid white; z-index: 2; }
 .agent-tip { display:none; }
 .demo-controls { display:none !important; }
@@ -230,7 +239,8 @@ body.portal-shot .main-content { display: none; }
 .agent-window.fullscreen { width: 95vw; height: 90vh; top: 5vh; left: 2.5vw; bottom: auto; right: auto; }
 
 .agent-header { background: #fff; padding: 12px 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
-.agent-header-icon { width: 32px; height: 32px; background: linear-gradient(135deg, #0ea5e9, #38bdf8); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-size: 16px; }
+.agent-header-icon { width: 36px; height: 36px; background: #fff; border: 1px solid #cbdcea; border-radius: 50%; display: flex; align-items: center; justify-content: center; overflow:hidden; flex-shrink:0; }
+.agent-header-icon img { width:100%; height:100%; object-fit:contain; }
 .agent-header-title { font-size: 15px; font-weight: 600; color: #1f2937; flex: 1; display: flex; align-items: center; gap: 8px; }
 .agent-header-title .status { width: 8px; height: 8px; background: #10b981; border-radius: 50%; animation: pulse 2s infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
@@ -259,7 +269,8 @@ body.portal-shot .main-content { display: none; }
 
 .welcome-area { flex: 1; overflow-y: auto; padding: 20px 24px; }
 .welcome-header { text-align: center; margin-bottom: 16px; }
-.welcome-logo { width: 48px; height: 48px; background: linear-gradient(135deg, #0ea5e9, #38bdf8); border-radius: 12px; display: flex; align-items: center; justify-content: center; color: white; font-size: 24px; margin: 0 auto 12px; box-shadow: 0 4px 12px rgba(14,165,233,0.25); }
+.welcome-logo { width: 62px; height: 62px; background: #fff; border: 1px solid #cbdcea; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 12px; box-shadow: 0 5px 16px rgba(15,61,120,.16); overflow:hidden; }
+.welcome-logo img { width:100%; height:100%; object-fit:contain; }
 .welcome-title { font-size: 20px; font-weight: 600; color: #1f2937; margin-bottom: 4px; }
 .welcome-title span { background: linear-gradient(90deg, #0ea5e9, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 .welcome-subtitle { font-size: 12px; color: #6b7280; }
@@ -591,7 +602,7 @@ body.portal-shot .main-content { display: none; }
 
 <body>
 
-<!-- 图标资源：中国渔政徽标 + 执法助手标识（矢量内联，全站复用，不依赖图标字体、不发外部请求） -->
+<!-- 图标资源：中国渔政徽标 / 执法助手标识 / 助手机器人（矢量内联，全站复用，不依赖图标字体与外部图片） -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
     <path id="fzArcTop" d="M 25,100 A 75,75 0 0 1 175,100" fill="none"/>
@@ -619,9 +630,90 @@ body.portal-shot .main-content { display: none; }
       <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
         <path d="M12 2.2 20.2 5.4v6.1c0 4.9-3.4 8.7-8.2 10.3C7.2 20.2 3.8 16.4 3.8 11.5V5.4Z" stroke-width="1.7"/>
         <circle cx="12" cy="11.6" r="4.6" stroke-width="1.5"/>
-        <path d="M13.9 11.6L18.1 11.6 M12.0 13.5L12.0 17.7 M10.1 11.6L5.9 11.6 M12.0 9.7L12.0 5.5 M13.3 12.9L16.3 15.9 M10.7 12.9L7.7 15.9 M10.7 10.3L7.7 7.3 M13.3 10.3L16.3 7.3" stroke-width="1.35"/>
+        <path d="M13.9 11.6L18.1 11.6 M12 13.5L12 17.7 M10.1 11.6L5.9 11.6 M12 9.7L12 5.5 M13.3 12.9L16.3 15.9 M10.7 12.9L7.7 15.9 M10.7 10.3L7.7 7.3 M13.3 10.3L16.3 7.3" stroke-width="1.35"/>
       </g>
-      <g fill="currentColor"><circle cx="16.6" cy="16.2" r="0.85"/><circle cx="7.4" cy="16.2" r="0.85"/><circle cx="7.4" cy="7.0" r="0.85"/><circle cx="16.6" cy="7.0" r="0.85"/><circle cx="18.5" cy="11.6" r="0.85"/><circle cx="12.0" cy="18.1" r="0.85"/><circle cx="5.5" cy="11.6" r="0.85"/><circle cx="12.0" cy="5.1" r="0.85"/><circle cx="12" cy="11.6" r="1.5"/></g>
+      <g fill="currentColor"><circle cx="18.5" cy="11.6" r="0.85"/><circle cx="12" cy="18.1" r="0.85"/><circle cx="5.5" cy="11.6" r="0.85"/><circle cx="12" cy="5.1" r="0.85"/><circle cx="16.6" cy="16.2" r="0.85"/><circle cx="7.4" cy="16.2" r="0.85"/><circle cx="7.4" cy="7" r="0.85"/><circle cx="16.6" cy="7" r="0.85"/><circle cx="12" cy="11.6" r="1.5"/></g>
+    </symbol>
+    <symbol id="fzBot" viewBox="0 0 120 140">
+      <defs>
+        <linearGradient id="botDome" x1="0.25" y1="0" x2="0.7" y2="1">
+          <stop offset="0" stop-color="#ffffff"/><stop offset="0.55" stop-color="#f4f8fe"/>
+          <stop offset="1" stop-color="#cfdff2"/></linearGradient>
+        <linearGradient id="botFrame" x1="0.2" y1="0" x2="0.75" y2="1">
+          <stop offset="0" stop-color="#5aa2ff"/><stop offset="0.45" stop-color="#2b7cf0"/>
+          <stop offset="1" stop-color="#0e4fc2"/></linearGradient>
+        <linearGradient id="botEar" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#63a8ff"/><stop offset="1" stop-color="#1257cc"/></linearGradient>
+        <radialGradient id="botScreen" cx="0.28" cy="0.2" r="0.95">
+          <stop offset="0" stop-color="#1b3d59"/><stop offset="0.6" stop-color="#0c1e30"/>
+          <stop offset="1" stop-color="#050d16"/></radialGradient>
+        <linearGradient id="botBib" x1="0.2" y1="0" x2="0.8" y2="1">
+          <stop offset="0" stop-color="#5aa2ff"/><stop offset="0.5" stop-color="#2273ea"/>
+          <stop offset="1" stop-color="#0d47b4"/></linearGradient>
+        <linearGradient id="botLimb" x1="0.2" y1="0" x2="0.7" y2="1">
+          <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#d3e2f4"/></linearGradient>
+        <radialGradient id="botGround" cx="0.5" cy="0.5" r="0.5">
+          <stop offset="0" stop-color="#0f3d78" stop-opacity="0.34"/>
+          <stop offset="0.65" stop-color="#0f3d78" stop-opacity="0.14"/>
+          <stop offset="1" stop-color="#0f3d78" stop-opacity="0"/></radialGradient>
+        <filter id="botSoft" x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation="1.6"/></filter>
+      </defs>
+
+      <!-- 脚下投影，做出立体落地感 -->
+      <ellipse cx="60" cy="129" rx="32" ry="6.5" fill="url(#botGround)"/>
+
+      <!-- 天线 -->
+      <path d="M58.6 26 60 9 61.4 26Z" fill="#f2f7fd" stroke="#b9d1ea" stroke-width="0.7"/>
+      <circle cx="60" cy="7" r="4.3" fill="#e03127"/>
+      <circle cx="60" cy="7" r="4.3" fill="none" stroke="#a81a12" stroke-width="0.6" opacity="0.5"/>
+      <ellipse cx="58.5" cy="5.5" rx="1.5" ry="1.1" fill="#ff9d94" opacity="0.9"/>
+
+      <!-- 耳朵 -->
+      <rect x="5" y="46" width="15" height="30" rx="7.5" fill="url(#botEar)"/>
+      <rect x="100" y="46" width="15" height="30" rx="7.5" fill="url(#botEar)"/>
+      <rect x="7.5" y="49" width="4" height="18" rx="2" fill="#ffffff" opacity="0.28"/>
+      <rect x="102.5" y="49" width="4" height="18" rx="2" fill="#ffffff" opacity="0.28"/>
+
+      <!-- 头壳 -->
+      <path d="M15 60c0-24.5 20-40 45-40s45 15.5 45 40v14c0 7-5.5 12-13 12H28c-7.5 0-13-5-13-12Z" fill="url(#botDome)"/>
+      <path d="M15 74v0c0 7 5.5 12 13 12h64c7.5 0 13-5 13-12v-4c0 8-6 13-14 13H29c-8 0-14-5-14-13Z" fill="#a9c4e2" opacity="0.35"/>
+      <ellipse cx="40" cy="38" rx="17" ry="10" fill="#ffffff" opacity="0.75" filter="url(#botSoft)" transform="rotate(-24 40 38)"/>
+
+      <!-- 头顶护额 -->
+      <path d="M46.5 38 52.5 22h15l6 16Z" fill="#f4f9ff" stroke="#2b7cf0" stroke-width="2.4" stroke-linejoin="round"/>
+
+      <!-- 屏幕 -->
+      <rect x="28" y="36" width="64" height="47" rx="17" fill="url(#botFrame)"/>
+      <rect x="30.5" y="38.5" width="59" height="20" rx="14" fill="#ffffff" opacity="0.18"/>
+      <rect x="34" y="42" width="52" height="35" rx="12" fill="url(#botScreen)"/>
+      <path d="M42 45c-5.5 2.5-8.5 7-8.5 12.5 0-9 7-14.5 17-14.5-3.2 0-6.2 0.7-8.5 2Z" fill="#ffffff" opacity="0.2"/>
+
+      <!-- 眼睛 -->
+      <g fill="none" stroke="#6df2e3" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M44 55.5h8.5V64"/><path d="M67.5 55.5H76V64"/>
+      </g>
+      <g fill="none" stroke="#6df2e3" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round" opacity="0.35" filter="url(#botSoft)">
+        <path d="M44 55.5h8.5V64"/><path d="M67.5 55.5H76V64"/>
+      </g>
+
+      <!-- 身体：白色裙摆两侧圆润手臂 + 中间蓝色胸甲 -->
+      <path d="M33 92c0-4.5 3.5-8 8-8h38c4.5 0 8 3.5 8 8v10c0 6-4.5 10.5-10.5 10.5-2.5 0-4.5-.8-6-2.2-1.5 6-6.5 10.2-12.5 10.2s-11-4.2-12.5-10.2c-1.5 1.4-3.5 2.2-6 2.2C37.5 112.5 33 108 33 102Z" fill="url(#botLimb)"/>
+      <g fill="none" stroke="#2b7cf0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.8">
+        <path d="M42.5 94.5H37v6"/><path d="M77.5 94.5H83v6"/>
+      </g>
+      <path d="M50 84h20v22c0 6.5-4.5 11.5-10 11.5S50 112.5 50 106Z" fill="url(#botBib)"/>
+      <path d="M52 86h6v20c0 3 1 5 2.5 6-4-1-8.5-5-8.5-10Z" fill="#ffffff" opacity="0.2"/>
+
+      <!-- 信号标 -->
+      <g fill="none" stroke="#6df2e3" stroke-width="2" stroke-linecap="round">
+        <path d="M55.7 101.4a6.2 6.2 0 0 1 8.6 0"/><path d="M52.6 97.6a11 11 0 0 1 14.8 0"/>
+      </g>
+      <circle cx="60" cy="105.6" r="2" fill="#6df2e3"/>
+
+      <!-- 脚 -->
+      <ellipse cx="51" cy="121" rx="8.5" ry="4.8" fill="url(#botLimb)"/>
+      <ellipse cx="69" cy="121" rx="8.5" ry="4.8" fill="url(#botLimb)"/>
     </symbol>
   </defs>
 </svg>
@@ -864,16 +956,16 @@ body.portal-shot .main-content { display: none; }
 <!-- 右下角执法助手入口 -->
 <div class="agent-entry">
   <div class="agent-btn" id="agentBtn" onclick="toggleAgent()" title="打开执法助手" role="button" tabindex="0" aria-label="打开执法助手">
-    <svg class="entry-logo" viewBox="0 0 200 200" aria-hidden="true"><use href="#fzLogo"/></svg>
+    <svg class="entry-logo" viewBox="0 0 120 140" aria-hidden="true"><use href="#fzBot"/></svg>
     <span class="entry-chat-mark" aria-hidden="true"><i class="fa-solid fa-message"></i></span>
-    <div class="agent-badge" id="agentBadge" style="display:none">1</div>
+    <div class="agent-badge" id="agentBadge" style="display:flex" aria-label="2个待处理事项">2</div>
   </div>
 </div>
 
 <div class="agent-modal" id="agentModal">
   <div class="agent-window" id="agentWindow">
     <div class="agent-header">
-      <div class="agent-header-icon"><svg viewBox="0 0 24 24"><use href="#fzAide"/></svg></div>
+      <div class="agent-header-icon"><svg viewBox="0 0 200 200"><use href="#fzLogo"/></svg></div>
       <div class="agent-header-title">
         渔政执法助手
         <span class="status"></span>
@@ -941,7 +1033,7 @@ body.portal-shot .main-content { display: none; }
       <div class="agent-main">
         <div class="welcome-area" id="welcomeArea">
           <div class="welcome-header">
-            <div class="welcome-logo"><svg viewBox="0 0 24 24"><use href="#fzAide"/></svg></div>
+            <div class="welcome-logo"><svg viewBox="0 0 200 200"><use href="#fzLogo"/></svg></div>
             <div class="welcome-title">你好，我是 <span>渔政执法助手</span></div>
             <div class="welcome-subtitle">基于移动九天大模型，为您提供法规查询、态势研判、执法调度和工单跟踪服务，关键处置由执法人员确认</div>
           </div>
@@ -1383,15 +1475,34 @@ const voiceSamples = [
 let voiceSampleIndex = 0;
 let voiceSampleTimers = [];
 
+// ===== 右下角机器人的「待处理事项」计数 =====
+// 数字是任务数，不是未读标记：打开对话框只停止提醒动画，不清零；
+// 处理完一项调 PendingTasks.dec()，新增预警调 PendingTasks.inc()。
+const PendingTasks = {
+  count: 2,                       // 初始待处理事项数
+  render() {
+    const el = document.getElementById('agentBadge');
+    if (!el) return;
+    el.textContent = this.count > 99 ? '99+' : String(this.count);
+    el.style.display = this.count > 0 ? 'flex' : 'none';
+    el.setAttribute('aria-label', this.count + '个待处理事项');
+    const btn = document.getElementById('agentBtn');
+    if (btn) btn.title = this.count > 0 ? ('执法助手 · ' + this.count + ' 个待处理事项') : '执法助手';
+  },
+  set(n) { this.count = Math.max(0, n | 0); this.render(); },
+  inc(n) { this.set(this.count + (n || 1)); },
+  dec(n) { this.set(this.count - (n || 1)); }
+};
+document.addEventListener('DOMContentLoaded', () => PendingTasks.render());
+
 function toggleAgent() {
   const modal = document.getElementById('agentModal');
   const wasActive = modal.classList.contains('active');
   modal.classList.toggle('active');
   
-  // 如果是打开对话框，取消闪烁和徽章
+  // 打开对话框只停止提醒动画；待处理数是任务数，不清零
   if (!wasActive) {
     document.getElementById('agentBtn').classList.remove('alert');
-    document.getElementById('agentBadge').style.display = 'none';
   }
 }
 
@@ -1485,11 +1596,10 @@ function addMessage(text, isUser = false, actions = null) {
   const chat = document.getElementById('chatContainer');
   const msgClass = isUser ? 'user' : 'ai';
   const avatar = isUser ? 'user' : 'ai';
-  // AI 侧用内联矢量标识（图标字体子集里没有对应字形，用 <i> 会渲染成空白）
-  const iconMarkup = isUser
-    ? '<i class="fa-solid fa-user"></i>'
+  // AI 侧用内联矢量标识（图标字体子集里没有该字形，用 <i> 会渲染成空白）
+  const iconMarkup = isUser ? '<i class="fa-solid fa-user"></i>'
     : '<svg class="fz-ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#fzAide"/></svg>';
-
+  
   let html = `
     <div class="chat-message ${msgClass}">
       <div class="chat-avatar ${avatar}">${iconMarkup}</div>
@@ -1750,23 +1860,40 @@ const Voice = {
 
   speak(text, opts) {
     opts = opts || {};
-    if (!this.on || !text) return;
-    this.toast(text);
-    if (opts.chime) this.chime();
-    if (!this.supported) return;
-    const fire = () => {
-      try {
-        if (opts.interrupt !== false) window.speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(text);
-        u.lang = 'zh-CN';
-        u.rate = 1.05;
-        u.pitch = 1;
-        if (this.voice) u.voice = this.voice;
-        if (opts.onend) u.onend = opts.onend;
-        window.speechSynthesis.speak(u);
-      } catch (e) { console.warn('语音播报失败:', e); }
-    };
-    opts.chime ? setTimeout(fire, 560) : fire();
+    return new Promise(resolve => {
+      if (!this.on || !text) { resolve(); return; }
+      this.toast(text);
+      if (opts.chime) this.chime();
+      const estimatedMs = Math.max(1800, Math.min(18000, text.length * 320));
+      if (!this.supported) { setTimeout(resolve, estimatedMs); return; }
+      let settled = false;
+      let watchdog = null;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(watchdog);
+        if (opts.onend) opts.onend();
+        resolve();
+      };
+      const fire = () => {
+        try {
+          if (opts.interrupt !== false) window.speechSynthesis.cancel();
+          const u = new SpeechSynthesisUtterance(text);
+          u.lang = 'zh-CN';
+          u.rate = 0.92;
+          u.pitch = 1;
+          if (this.voice) u.voice = this.voice;
+          u.onend = finish;
+          u.onerror = finish;
+          watchdog = setTimeout(finish, estimatedMs + 4000);
+          window.speechSynthesis.speak(u);
+        } catch (e) {
+          console.warn('语音播报失败:', e);
+          setTimeout(finish, estimatedMs);
+        }
+      };
+      opts.chime ? setTimeout(fire, 560) : fire();
+    });
   },
 
   cancel() {
@@ -2292,15 +2419,23 @@ function showAlertDetail() {
 }
 
 let monitorTimers = []; // 存储所有监控演示的定时器ID
+let monitorRunId = 0;   // 用于终止已关闭或已重新启动的流程
 let workorderTimers = []; // 存储工单演示的定时器ID
 
-function openMonitor() {
+function monitorPause(ms, runId) {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => resolve(runId === monitorRunId), ms);
+    monitorTimers.push(timer);
+  });
+}
+
+async function openMonitor() {
   // 清除之前的定时器
   monitorTimers.forEach(t => clearTimeout(t));
   monitorTimers = [];
+  const runId = ++monitorRunId;
   
   document.getElementById('monitorModal').classList.add('active');
-  Voice.speak('已接入太湖东区二号摄像头，开始目标识别。');
   demoStartTime = new Date();
   timeline = {};
   
@@ -2312,72 +2447,50 @@ function openMonitor() {
   document.getElementById('photoBtn').classList.remove('active');
   document.getElementById('analyzeBtn').classList.remove('active');
   document.getElementById('dispatchBtn').classList.remove('active');
-  
-  let t1 = setTimeout(() => {
-    Voice.speak('已锁定目标，违规垂钓，一人。');
-    document.getElementById('monitorStep').innerHTML = '<i class="fa-solid fa-crosshairs"></i> 检测目标...';
-    document.getElementById('targetBox').style.display = 'block';
-  }, 1000);
-  monitorTimers.push(t1);
-  
-  let t2 = setTimeout(() => {
-    Voice.speak('正在自动拍照取证。');
-    document.getElementById('monitorStep').innerHTML = '<i class="fa-solid fa-camera"></i> 自动拍照取证';
-    document.getElementById('photoBtn').classList.add('active');
-    document.getElementById('photoCount').style.display = 'flex';
-    
-    takePhoto(1);
-    timeline.photo1 = getCurrentTime();
-    let t2a = setTimeout(() => {
-      takePhoto(2);
-      timeline.photo2 = getCurrentTime();
-      let t2b = setTimeout(() => {
-        takePhoto(3);
-        timeline.photo3 = getCurrentTime();
-        document.getElementById('photoBtn').classList.remove('active');
-      }, 1500);
-      monitorTimers.push(t2b);
-    }, 1500);
-    monitorTimers.push(t2a);
-  }, 3000);
-  monitorTimers.push(t2);
-  
-  let t3 = setTimeout(() => {
-    Voice.speak('正在进行法规研判，匹配渔业法第三十八条、长江保护法第八十六条。');
-    document.getElementById('monitorStep').innerHTML = '<i class="fa-solid fa-brain"></i> RAG 法规分析';
-    document.getElementById('analyzeBtn').classList.add('active');
-    document.getElementById('ragSection').style.display = 'block';
-    timeline.rag = getCurrentTime();
-    
-    let t3a = setTimeout(() => {
-      document.getElementById('analyzeBtn').classList.remove('active');
-    }, 3000);
-    monitorTimers.push(t3a);
-  }, 9000);
-  monitorTimers.push(t3);
-  
-  let t4 = setTimeout(() => {
-    Voice.speak('就近调度苏渔政零零一号执法艇，距离一点二公里，预计八分钟到达。');
-    document.getElementById('monitorStep').innerHTML = '<i class="fa-solid fa-map"></i> GIS 就近分配';
-    document.getElementById('gisSection').style.display = 'block';
-    timeline.gis = getCurrentTime();
-  }, 13000);
-  monitorTimers.push(t4);
-  
-  let t5 = setTimeout(() => {
-    Voice.speak('工单已派发。');
-    document.getElementById('monitorStep').innerHTML = '<i class="fa-solid fa-paper-plane"></i> 派发工单';
-    document.getElementById('dispatchBtn').classList.add('active');
-    timeline.dispatch = getCurrentTime();
-    
-    let t5a = setTimeout(() => {
-      document.getElementById('dispatchBtn').classList.remove('active');
-      closeMonitor();
-      createWorkorder();
-    }, 2000);
-    monitorTimers.push(t5a);
-  }, 16000);
-  monitorTimers.push(t5);
+
+  await Voice.speak('已接入太湖东区二号摄像头，开始目标识别。', { interrupt: false });
+  if (runId !== monitorRunId || !await monitorPause(900, runId)) return;
+
+  document.getElementById('monitorStep').innerHTML = '<i class="fa-solid fa-crosshairs"></i> 检测目标';
+  document.getElementById('targetBox').style.display = 'block';
+  await Voice.speak('已锁定目标，现场发现一名人员正在进行疑似违规垂钓。', { interrupt: false });
+  if (runId !== monitorRunId || !await monitorPause(1000, runId)) return;
+
+  document.getElementById('monitorStep').innerHTML = '<i class="fa-solid fa-camera"></i> 自动拍照取证';
+  document.getElementById('photoBtn').classList.add('active');
+  document.getElementById('photoCount').style.display = 'flex';
+  await Voice.speak('开始拍照取证，将依次保存现场全景、人员行为和渔具细节三张照片。', { interrupt: false });
+  if (runId !== monitorRunId) return;
+  for (let photoNo = 1; photoNo <= 3; photoNo++) {
+    takePhoto(photoNo);
+    timeline['photo' + photoNo] = getCurrentTime();
+    if (!await monitorPause(1400, runId)) return;
+  }
+  document.getElementById('photoBtn').classList.remove('active');
+  if (!await monitorPause(800, runId)) return;
+
+  document.getElementById('monitorStep').innerHTML = '<i class="fa-solid fa-scale-balanced"></i> 法规辅助研判';
+  document.getElementById('analyzeBtn').classList.add('active');
+  document.getElementById('ragSection').style.display = 'block';
+  timeline.rag = getCurrentTime();
+  await Voice.speak('正在进行法规辅助研判。系统已匹配渔业法第三十八条和长江保护法第八十六条，研判结果等待执法人员确认。', { interrupt: false });
+  document.getElementById('analyzeBtn').classList.remove('active');
+  if (runId !== monitorRunId || !await monitorPause(1200, runId)) return;
+
+  document.getElementById('monitorStep').innerHTML = '<i class="fa-solid fa-map"></i> GIS 就近分配';
+  document.getElementById('gisSection').style.display = 'block';
+  timeline.gis = getCurrentTime();
+  await Voice.speak('根据当前位置和执法力量状态，建议调度苏渔政零零一号执法艇。该艇距离一点二公里，预计八分钟到达。', { interrupt: false });
+  if (runId !== monitorRunId || !await monitorPause(1200, runId)) return;
+
+  document.getElementById('monitorStep').innerHTML = '<i class="fa-solid fa-paper-plane"></i> 派发工单';
+  document.getElementById('dispatchBtn').classList.add('active');
+  timeline.dispatch = getCurrentTime();
+  await Voice.speak('调度信息已确认，执法工单现已派发。接下来进入接单和现场处置环节。', { interrupt: false });
+  if (runId !== monitorRunId || !await monitorPause(1200, runId)) return;
+  document.getElementById('dispatchBtn').classList.remove('active');
+  closeMonitor();
+  createWorkorder();
 }
 
 function takePhoto(num) {
@@ -2399,8 +2512,10 @@ function getCurrentTime() {
 
 function closeMonitor() {
   // 清除所有监控演示的定时器
+  monitorRunId++;
   monitorTimers.forEach(t => clearTimeout(t));
   monitorTimers = [];
+  Voice.cancel();
   
   document.getElementById('monitorModal').classList.remove('active');
   document.getElementById('targetBox').style.display = 'none';
@@ -2524,7 +2639,7 @@ function startFullDemo() {
   
   // 按钮闪烁提醒
   document.getElementById('agentBtn').classList.add('alert');
-  document.getElementById('agentBadge').style.display = 'flex';
+  PendingTasks.inc();   // 新预警进来，待处理 +1
   Voice.chime();
   
   // 2秒后自动打开对话框
@@ -2545,7 +2660,7 @@ function resetDemo() {
   workorderTimers = [];
   
   document.getElementById('agentBtn').classList.remove('alert');
-  document.getElementById('agentBadge').style.display = 'none';
+  PendingTasks.set(2);  // 重置回初始待处理数
   document.getElementById('agentModal').classList.remove('active');
   document.getElementById('monitorModal').classList.remove('active');
   document.getElementById('workorderModal').classList.remove('active');
