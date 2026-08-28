@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>渔政执法综合管理平台 - AI Agent</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Ccircle cx='100' cy='100' r='96' fill='%23fff' stroke='%231668b3' stroke-width='8'/%3E%3Ccircle cx='100' cy='100' r='70' fill='%237ba9db'/%3E%3Cpath d='M100 42 L118 96 L175 96 L129 130 L146 184 L100 150 L54 184 L71 130 L25 96 L82 96 Z' fill='%23e8382c' stroke='%23ffd200' stroke-width='7' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
 /* Font Awesome Free 6.7.2 —— 按本页实际用到的 49 个图标做了子集化，离线内嵌 */
 @font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;
@@ -86,6 +87,12 @@ text-rendering:auto;font-family:"Font Awesome 6 Free"}
 </script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
+html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+::selection { background: rgba(22,119,255,0.18); color: #0f3d78; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #c8d6e5; border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: #a8bccf; background-clip: content-box; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   min-height: 100vh;
@@ -116,23 +123,29 @@ body.portal-shot .top-nav,
 body.portal-shot .main-content { display: none; }
 
 .top-nav {
-  position: fixed; top: 0; left: 0; right: 0; height: 60px;
-  background: #fff; border-bottom: 1px solid #e8eef5;
+  position: fixed; top: 0; left: 0; right: 0; height: 62px;
+  background: rgba(255,255,255,0.92); backdrop-filter: saturate(180%) blur(10px);
+  border-bottom: 1px solid #e8eef5;
   display: flex; align-items: center; padding: 0 24px; z-index: 10;
-  box-shadow: 0 1px 2px rgba(15,42,74,0.04);
+  box-shadow: 0 1px 3px rgba(15,42,74,0.05);
 }
-.nav-logo { width: 34px; height: 34px; border-radius: 50%; border: 2px solid #0f3d78; display: flex; align-items: center; justify-content: center; color: #0f3d78; font-size: 15px; margin-right: 10px; background: #fff; flex-shrink: 0; }
+.top-nav::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: linear-gradient(90deg, #1668b3 0%, #4aa3ff 22%, rgba(74,163,255,0) 55%); opacity: 0.55; }
+.nav-logo { width: 38px; height: 38px; margin-right: 11px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.nav-logo svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 1px 2px rgba(15,61,120,0.18)); }
 .nav-title { font-size: 19px; font-weight: 700; color: #17395f; letter-spacing: 0.5px; }
 .nav-right { margin-left: auto; display: flex; align-items: center; gap: 22px; }
-.nav-item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #4b5563; cursor: pointer; transition: color 0.2s; }
-.nav-item:hover { color: var(--portal-blue); }
-.nav-user { width: 30px; height: 30px; background: linear-gradient(135deg, #2b86ff, #0958d9); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 13px; }
+.nav-item { position: relative; display: flex; align-items: center; gap: 6px; font-size: 13px; color: #4b5563; cursor: pointer; padding: 6px 10px; border-radius: 7px; transition: all 0.2s; }
+.nav-item:hover { color: var(--portal-blue); background: #f0f7ff; }
+.nav-item.has-dot::after { content: ''; position: absolute; top: 4px; right: 7px; width: 6px; height: 6px; border-radius: 50%; background: #ef4444; box-shadow: 0 0 0 2px #fff; }
+.nav-user { width: 32px; height: 32px; background: linear-gradient(135deg, #2b86ff, #0958d9); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 13px; box-shadow: 0 2px 6px rgba(22,119,255,0.30); }
 
 .main-content { position: relative; z-index: 1; padding: 74px 22px 22px; max-width: 1560px; margin: 0 auto; }
 
 /* --- 欢迎条 --- */
-.welcome-card { background: #fff; border-radius: 12px; padding: 14px 22px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(15,42,74,0.05); display: flex; align-items: center; gap: 10px; }
-.welcome-icon { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #f59e0b; }
+.welcome-card { position: relative; overflow: hidden; background: #fff; border-radius: 12px; padding: 14px 22px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(15,42,74,0.05); display: flex; align-items: center; gap: 10px; transition: box-shadow 0.25s; }
+.welcome-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: linear-gradient(180deg, #4aa3ff, #1668b3); }
+.welcome-card:hover { box-shadow: 0 4px 16px rgba(15,42,74,0.09); }
+.welcome-icon { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #f59e0b; filter: drop-shadow(0 1px 3px rgba(245,158,11,0.35)); }
 .welcome-text { display: flex; align-items: baseline; gap: 14px; }
 .welcome-text h2 { font-size: 16px; color: #6b7280; font-weight: 400; }
 .welcome-text h2 b { color: var(--portal-ink); font-weight: 700; }
@@ -141,7 +154,10 @@ body.portal-shot .main-content { display: none; }
 .welcome-edit:hover { border-color: var(--portal-blue); color: var(--portal-blue); }
 
 /* --- 头图横幅 --- */
-.portal-hero { position: relative; border-radius: 12px; overflow: hidden; margin-bottom: 16px; min-height: 300px; display: flex; align-items: center; box-shadow: 0 1px 3px rgba(15,42,74,0.05); background: linear-gradient(120deg, #eaf3fb 0%, #e4f0fa 40%, #dcebf7 100%); }
+.portal-hero { position: relative; border-radius: 14px; overflow: hidden; margin-bottom: 16px; min-height: 300px; display: flex; align-items: center; box-shadow: 0 2px 10px rgba(15,42,74,0.07); background: linear-gradient(120deg, #eaf3fb 0%, #e4f0fa 40%, #dcebf7 100%); }
+.portal-hero::after { content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: 14px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.85); }
+.hero-emblem { position: absolute; right: 29%; top: 48%; transform: translateY(-50%); width: 215px; height: 215px; opacity: 0.09; z-index: 1; }
+.hero-glow { position: absolute; right: -6%; top: -30%; width: 46%; height: 120%; background: radial-gradient(closest-side, rgba(120,190,255,0.35), rgba(120,190,255,0)); }
 .hero-scene { position: absolute; inset: 0; overflow: hidden; }
 .hero-sky { position: absolute; inset: 0; background: linear-gradient(180deg, #f4f9fd 0%, #e7f1fa 55%, #dbe9f5 100%); }
 .hero-skyline { position: absolute; right: 0; bottom: 33%; width: 60%; height: 42%; opacity: 0.30; filter: blur(0.6px); }
@@ -153,40 +169,46 @@ body.portal-shot .main-content { display: none; }
 
 .hero-inner { position: relative; z-index: 2; display: flex; align-items: center; gap: 24px; width: 100%; padding: 42px 40px; }
 .hero-copy { flex: 1; min-width: 0; }
-.hero-badge { display: inline-flex; align-items: center; padding: 6px 16px; border-radius: 999px; background: rgba(22,119,255,0.10); color: #1a5fbf; font-size: 13px; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 18px; }
-.hero-title { font-size: 46px; line-height: 1.15; font-weight: 800; color: #0f3d78; letter-spacing: 2px; margin-bottom: 14px; }
+.hero-badge { display: inline-flex; align-items: center; padding: 6px 16px; border-radius: 999px; background: rgba(22,119,255,0.10); border: 1px solid rgba(22,119,255,0.18); color: #1a5fbf; font-size: 13px; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 18px; }
+.hero-title { font-size: 46px; line-height: 1.15; font-weight: 800; letter-spacing: 2px; margin-bottom: 14px; background: linear-gradient(100deg, #0f3d78 0%, #175da8 55%, #1f78cf 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 .hero-sub { font-size: 15px; color: #4b5b6e; margin-bottom: 24px; max-width: 640px; line-height: 1.7; }
 .hero-actions { display: flex; gap: 14px; flex-wrap: wrap; }
 .hero-btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 24px; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; border: 1px solid transparent; transition: all 0.2s; }
 .hero-btn.primary { background: linear-gradient(135deg, #1f6fe0, #17509f); color: #fff; box-shadow: 0 4px 12px rgba(22,90,190,0.28); }
-.hero-btn.primary:hover { filter: brightness(1.08); }
+.hero-btn.primary:hover { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 8px 20px rgba(22,90,190,0.35); }
 .hero-btn.ghost { background: rgba(255,255,255,0.9); color: #33465c; border-color: #d2dfec; }
-.hero-btn.ghost:hover { border-color: var(--portal-blue); color: var(--portal-blue); }
+.hero-btn.ghost:hover { border-color: var(--portal-blue); color: var(--portal-blue); transform: translateY(-1px); box-shadow: 0 6px 16px rgba(22,119,255,0.16); }
 
 .hero-stats { display: grid; grid-template-columns: repeat(2, minmax(140px, 190px)); gap: 16px; flex-shrink: 0; }
-.stat-card { background: rgba(255,255,255,0.82); backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.9); border-radius: 10px; padding: 16px 18px; box-shadow: 0 6px 18px rgba(15,60,120,0.08); }
+.stat-card { position: relative; overflow: hidden; background: rgba(255,255,255,0.86); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.95); border-radius: 12px; padding: 16px 18px; box-shadow: 0 6px 18px rgba(15,60,120,0.10); transition: transform 0.25s, box-shadow 0.25s; cursor: default; }
+.stat-card::before { content: ''; position: absolute; left: 0; top: 0; width: 100%; height: 2px; background: linear-gradient(90deg, #4aa3ff, rgba(74,163,255,0)); }
+.stat-card:hover { transform: translateY(-3px); box-shadow: 0 12px 26px rgba(15,60,120,0.16); }
 .stat-label { font-size: 13px; color: #6b7280; margin-bottom: 8px; }
-.stat-value { font-size: 30px; font-weight: 700; color: #1a5fbf; line-height: 1; }
+.stat-value { font-size: 30px; font-weight: 700; line-height: 1; background: linear-gradient(135deg, #1f6fe0, #0b4fc4); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 
 /* --- 快捷入口 --- */
-.quick-section { background: #fff; border-radius: 12px; padding: 18px 20px; box-shadow: 0 1px 3px rgba(15,42,74,0.05); margin-bottom: 12px; }
+.quick-section { background: #fff; border-radius: 14px; padding: 18px 20px; box-shadow: 0 2px 10px rgba(15,42,74,0.06); margin-bottom: 12px; }
 .quick-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 16px; }
 .quick-title { font-size: 17px; font-weight: 700; color: #17395f; display: flex; align-items: center; gap: 8px; }
 .quick-title i, .quick-title svg { color: var(--portal-blue); }
-.quick-search { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border: 1px solid #dbe3ec; border-radius: 8px; min-width: 280px; color: #9aa5b1; }
+.quick-search { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: #f7fafd; border: 1px solid #e4ebf3; border-radius: 999px; min-width: 280px; color: #9aa5b1; transition: all 0.2s; }
+.quick-search:focus-within { background: #fff; border-color: #9ec7f5; box-shadow: 0 0 0 3px rgba(22,119,255,0.12); color: var(--portal-blue); }
 .quick-search input { border: none; outline: none; font-size: 13px; color: #4b5563; width: 100%; background: transparent; }
 .quick-tabs { display: flex; flex-wrap: wrap; gap: 6px 26px; border-bottom: 1px solid #edf1f6; margin-bottom: 14px; }
 .quick-tab { position: relative; display: flex; align-items: center; gap: 7px; padding: 10px 2px 12px; font-size: 14px; color: #4b5563; cursor: pointer; white-space: nowrap; transition: color 0.2s; }
 .quick-tab:hover { color: var(--portal-blue); }
+.quick-tab:hover::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: rgba(22,119,255,0.30); border-radius: 2px; }
 .quick-tab.active { color: var(--portal-blue); font-weight: 600; }
 .quick-tab.active::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--portal-blue); border-radius: 2px; }
 .quick-tab .tab-badge { min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: #ef4444; color: #fff; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
 .quick-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 10px; }
-.quick-item { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 8px; background: #f7fafd; border-radius: 10px; cursor: pointer; transition: all 0.2s; }
-.quick-item:hover { background: #eef6ff; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(22,119,255,0.10); }
-.quick-item-icon { width: 36px; height: 36px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 17px; }
+.quick-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 8px; background: #f7fafd; border: 1px solid #eef3f9; border-radius: 12px; cursor: pointer; transition: all 0.22s cubic-bezier(.4,0,.2,1); }
+.quick-item:hover { background: #fff; border-color: #cfe4fb; transform: translateY(-3px); box-shadow: 0 8px 20px rgba(22,119,255,0.14); }
+.quick-item:hover .quick-item-icon.blue { background: linear-gradient(135deg, #2b86ff, #0b4fc4); color: #fff; box-shadow: 0 4px 12px rgba(22,119,255,0.35); }
+.quick-item:hover .quick-item-text { color: var(--portal-blue); }
+.quick-item-icon { width: 38px; height: 38px; border-radius: 11px; display: flex; align-items: center; justify-content: center; font-size: 17px; transition: all 0.22s; }
 .quick-item-icon.blue { background: #e6f4ff; color: var(--portal-blue); }
-.quick-item-text { font-size: 12px; color: #4b5563; text-align: center; }
+.quick-item-text { font-size: 12px; color: #4b5563; text-align: center; transition: color 0.22s; }
 
 /* ===== 右下角 AI 智能助手入口（替换原门户的“下载资源”悬浮按钮） ===== */
 .agent-entry { position: fixed; bottom: 26px; right: 26px; z-index: 100; }
@@ -578,15 +600,41 @@ body.portal-shot .main-content { display: none; }
 
 <body>
 
+<!-- 中国渔政徽标（矢量重绘，全站复用，离线无外链） -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <path id="fzArcTop" d="M 25,100 A 75,75 0 0 1 175,100" fill="none"/>
+    <path id="fzArcBot" d="M 10,100 A 90,90 0 0 0 190,100" fill="none"/>
+    <symbol id="fzLogo" viewBox="0 0 200 200">
+    <circle cx="100" cy="100" r="98" fill="#ffffff" stroke="#1668b3" stroke-width="2.4"/>
+    <circle cx="100" cy="100" r="72" fill="#7ba9db" stroke="#1668b3" stroke-width="2.4"/>
+    <text font-family="'PingFang SC','Microsoft YaHei','Heiti SC',sans-serif" font-size="24" font-weight="700" fill="#1668b3" letter-spacing="10">
+      <textPath href="#fzArcTop" startOffset="50%" text-anchor="middle">中国渔政</textPath>
+    </text>
+    <text font-family="Arial,Helvetica,sans-serif" font-size="11.5" font-weight="700" fill="#1668b3" letter-spacing="0.6">
+      <textPath href="#fzArcBot" startOffset="50%" text-anchor="middle">CHINA FISHERIES LAW ENFORCEMENT</textPath>
+    </text>
+    <g stroke="#ffffff" stroke-linecap="round" fill="none">
+      <g stroke-width="4.4"><line x1="129.0" y1="120.0" x2="138.0" y2="120.0"/><line x1="120.51" y1="140.51" x2="126.87" y2="146.87"/><line x1="100.0" y1="149.0" x2="100.0" y2="158.0"/><line x1="79.49" y1="140.51" x2="73.13" y2="146.87"/><line x1="71.0" y1="120.0" x2="62.0" y2="120.0"/><line x1="79.49" y1="99.49" x2="73.13" y2="93.13"/><line x1="100.0" y1="91.0" x2="100.0" y2="82.0"/><line x1="120.51" y1="99.49" x2="126.87" y2="93.13"/></g>
+      <circle cx="100" cy="120" r="30.0" stroke-width="7"/>
+      <circle cx="100" cy="120" r="15" stroke-width="4.4"/>
+      <g stroke-width="4.4"><line x1="104.5" y1="120.0" x2="130.0" y2="120.0"/><line x1="103.18" y1="123.18" x2="121.21" y2="141.21"/><line x1="100.0" y1="124.5" x2="100.0" y2="150.0"/><line x1="96.82" y1="123.18" x2="78.79" y2="141.21"/><line x1="95.5" y1="120.0" x2="70.0" y2="120.0"/><line x1="96.82" y1="116.82" x2="78.79" y2="98.79"/><line x1="100.0" y1="115.5" x2="100.0" y2="90.0"/><line x1="103.18" y1="116.82" x2="121.21" y2="98.79"/></g>
+    </g>
+    <g fill="#ffffff"><circle cx="138.0" cy="120.0" r="5.9"/><circle cx="126.87" cy="146.87" r="5.9"/><circle cx="100.0" cy="158.0" r="5.9"/><circle cx="73.13" cy="146.87" r="5.9"/><circle cx="62.0" cy="120.0" r="5.9"/><circle cx="73.13" cy="93.13" r="5.9"/><circle cx="100.0" cy="82.0" r="5.9"/><circle cx="126.87" cy="93.13" r="5.9"/><circle cx="100" cy="120" r="6.0"/></g>
+    <path d="M 100.0,34.5 L 107.75,58.34 L 132.81,58.34 L 112.54,73.07 L 120.27,96.91 L 100.0,82.18 L 79.73,96.91 L 87.46,73.07 L 67.19,58.34 L 92.25,58.34 Z" fill="#ffd200"/>
+    <g><path d="M 100,69 L 93.26,59.73 L 100.0,39.0 Z" fill="#c9161e"/><path d="M 100,69 L 100.0,39.0 L 106.74,59.73 Z" fill="#e8382c"/><path d="M 100,69 L 106.74,59.73 L 128.53,59.73 Z" fill="#c9161e"/><path d="M 100,69 L 128.53,59.73 L 110.9,72.54 Z" fill="#e8382c"/><path d="M 100,69 L 110.9,72.54 L 117.63,93.27 Z" fill="#c9161e"/><path d="M 100,69 L 117.63,93.27 L 100.0,80.46 Z" fill="#e8382c"/><path d="M 100,69 L 100.0,80.46 L 82.37,93.27 Z" fill="#c9161e"/><path d="M 100,69 L 82.37,93.27 L 89.1,72.54 Z" fill="#e8382c"/><path d="M 100,69 L 89.1,72.54 L 71.47,59.73 Z" fill="#c9161e"/><path d="M 100,69 L 71.47,59.73 L 93.26,59.73 Z" fill="#e8382c"/></g>
+    </symbol>
+  </defs>
+</svg>
 <div class="portal-bg"></div>
 
 <div class="top-nav">
-  <div class="nav-logo"><i class="fa-solid fa-scale-balanced"></i></div>
+  <div class="nav-logo"><svg viewBox="0 0 200 200"><use href="#fzLogo"/></svg></div>
   <div class="nav-title">渔政执法管理系统</div>
   <div class="nav-right">
     <div class="nav-item"><i class="fa-solid fa-arrow-left"></i> 返回首页</div>
     <div class="nav-item"><i class="fa-solid fa-gear"></i> 系统管理</div>
-    <div class="nav-item"><i class="fa-solid fa-bell"></i></div>
+    <div class="nav-item has-dot"><i class="fa-solid fa-bell"></i></div>
     <div class="nav-user"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5Z"/></svg></div>
     <div class="nav-item">管理员</div>
   </div>
@@ -609,6 +657,7 @@ body.portal-shot .main-content { display: none; }
   <div class="portal-hero">
     <div class="hero-scene">
       <div class="hero-sky"></div>
+      <div class="hero-glow"></div>
       <svg class="hero-skyline" viewBox="0 0 600 200" preserveAspectRatio="none" aria-hidden="true">
         <g fill="#9dc2e0">
           <rect x="18" y="96" width="34" height="104"/><rect x="60" y="62" width="26" height="138"/>
@@ -636,6 +685,7 @@ body.portal-shot .main-content { display: none; }
         </g>
       </svg>
       <div class="hero-dots"></div>
+      <svg class="hero-emblem" viewBox="0 0 200 200" aria-hidden="true"><use href="#fzLogo"/></svg>
       <div class="hero-veil"></div>
     </div>
 
