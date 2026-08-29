@@ -165,6 +165,15 @@ export function blockingCanvas(stage, { size = 320, onChange = () => {} } = {}) 
     const subjects = stage.subjects || [];
     const cam = stage.cam;
 
+    // 无 WebGL 的降级画布也要看得见场景资产，而不是退回一张空坐标纸。
+    if (stage.backdrop?.image) {
+      layer.append(el('image', {
+        href: stage.backdrop.image, x: 0, y: 0, width: size, height: size,
+        preserveAspectRatio: 'xMidYMid slice', class: 'previz-top-backdrop', 'pointer-events': 'none'
+      }));
+      layer.append(el('rect', { x: 0, y: 0, width: size, height: size, class: 'previz-top-shade', 'pointer-events': 'none' }));
+    }
+
     /**
      * ── 东南西北 ──
      *
@@ -207,6 +216,14 @@ export function blockingCanvas(stage, { size = 320, onChange = () => {} } = {}) 
         continue;
       }
       const g = el('g');
+      if (mk.textureUrl || mk.thumbnail) {
+        const image = el('image', {
+          href: mk.textureUrl || mk.thumbnail, x: s.x(mk.x) - 18, y: s.y(mk.y) - 26,
+          width: 36, height: 36, preserveAspectRatio: 'xMidYMid meet', class: 'previz-top-asset'
+        });
+        draggable(image, (mx, my) => { mk.x = Number(mx.toFixed(2)); mk.y = Number(my.toFixed(2)); });
+        g.append(image);
+      }
       g.append(el('rect', {
         x: s.x(mk.x) - 9, y: s.y(mk.y) - 9, width: 18, height: 18, rx: 4, class: 'previz-mark'
       }));
@@ -319,6 +336,14 @@ export function blockingCanvas(stage, { size = 320, onChange = () => {} } = {}) 
       });
       g.append(tip);
 
+      if (sub.textureUrl || sub.thumbnail) {
+        const image = el('image', {
+          href: sub.textureUrl || sub.thumbnail, x: s.x(sub.x) - 22, y: s.y(sub.y) - 51,
+          width: 44, height: 58, preserveAspectRatio: 'xMidYMax meet', class: 'previz-top-character'
+        });
+        draggable(image, (mx, my) => { sub.x = Number(mx.toFixed(2)); sub.y = Number(my.toFixed(2)); });
+        g.append(image);
+      }
       const dot = el('circle', { cx: s.x(sub.x), cy: s.y(sub.y), r: 13, class: 'previz-sub' });
       draggable(dot, (mx, my) => {
         sub.x = Number(mx.toFixed(2));

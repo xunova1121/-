@@ -1233,6 +1233,7 @@ select.mini {
 .previz-webgl canvas { cursor:grab; }
 .previz-webgl canvas:active { cursor:grabbing; }
 .previz-gpu-note { position:absolute; left:10px; right:10px; bottom:10px; padding:7px 9px; border:1px solid color-mix(in srgb,var(--caution) 50%,var(--line)); border-radius:7px; background:color-mix(in srgb,var(--ground) 88%,transparent); color:var(--caution); font-size:10px; text-align:center; }
+.previz-top-backdrop { opacity:.72; }.previz-top-shade { fill:#09101a; opacity:.5; }.previz-top-asset,.previz-top-character { cursor:grab; filter:drop-shadow(0 3px 4px #000); }.previz-top-character { pointer-events:auto; }
 .previz-canvas[hidden] { display:none; }
 .previz-3d-sky { fill:color-mix(in srgb, var(--surface) 88%, var(--beam) 12%); }
 .previz-3d-grid { stroke:var(--line-soft); stroke-width:1; }
