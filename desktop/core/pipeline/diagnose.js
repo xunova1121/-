@@ -79,16 +79,18 @@ export function diagnose(shot, { bible = null, routing = null, prevShot = null }
    * 权重最高。文字说"特写"、图说"广角"，模型只能挑一句听 —— 而图几乎总是赢。
    * 用户看到的是"我标了特写，出来是远景"，然后会去怀疑模型不听话。
    */
-  if (/特写|近景/.test(String(shot.camera || ''))
-      && (shot.bibleRefs || []).some((x) => String(x).startsWith('景·'))) {
+  const refs = shot.bibleRefs || [];
+  const sceneAt = refs.findIndex((x) => String(x).startsWith('景·'));
+  if (/特写|近景/.test(String(shot.camera || '')) && sceneAt === 0 && refs.length > 1) {
     out.push(say(
       'wide-ref-on-tight',
-      `这一镜标着「${shot.camera}」，却带了一张场景基准图`,
-      '场景基准图是"空镜无人物、广角"出的，天生是远景构图；而它排在参考图第一位，'
-        + '权重最高。文字说特写、图说广角，模型只能挑一句听 —— 图几乎总是赢。'
+      `这一镜标着「${shot.camera}」，而场景基准图排在参考图第一位`,
+      '场景基准图是"空镜无人物、广角"出的，天生是远景构图；而多数厂商对'
+        + '首张参考图权重最高。文字说特写、图说广角，模型只能挑一句听 —— 图几乎总是赢。'
         + '这就是"标了特写、出来是远景"最常见的原因。',
-      '重出这一镜就行 —— 新版在特写/近景里不再发那张场景图了。'
-        + '如果这一镜其实该看得见环境，把景别改成中景或全景。',
+      '重出这一镜就行 —— 新版在特写/近景里会把那张场景图降到最后一位，'
+        + '并且明说它只管环境、不管构图。如果这一镜其实该看得见环境，'
+        + '把景别改成中景或全景。',
       { costs: true, weight: 3 }
     ));
   }

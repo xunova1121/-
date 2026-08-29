@@ -367,6 +367,20 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
   const staged = previz.cameraLine(shot, cast[0]?.name);
   if (staged) parts.push(`镜头：${staged}`);
   else if (shot.camera) parts.push(`镜头：${shot.camera}`);
+  /**
+   * ⚠ 特写/近景时，得**明说那张空镜只管环境、不管构图**。
+   *
+   * 场景基准图是「空镜无人物、广角」出的，天生是远景构图。不说清楚的话，
+   * 模型会把它的构图一起学过去 —— 文字说特写、图说广角，而图几乎总是赢。
+   * 用户报的就是这个："这个描述的正确吗，这是特写"，而图是整个广场的大远景。
+   *
+   * 光靠降权不够：降权只是让它别坐第一位，而"照着这张图的框"这个倾向
+   * 是要用话堵住的。两样一起上。
+   */
+  if (isTightShot(shot) && kept.images.length && kept.kinds?.includes?.('scene')) {
+    parts.push('参考图里那张空镜只用来定环境、建筑和色调，'
+      + `**不要照它的广角构图** —— 这一镜的景别按上面写的「${shot.camera}」来`);
+  }
   if (bible?.style?.palette) parts.push(`主色调：${bible.style.palette}`);
 
   return {
@@ -657,17 +671,25 @@ export function pickRefs({ images = [], labels = [], paths = [], sources = [], k
   if (!plan.send) return { images: [], labels: [], paths: [], kinds: [], sources: [], uploaded: 0 };
   const keep = images.map((_, i) => (plan.onlyUploaded ? sources[i] === 'upload' : true));
   /**
-   * ⚠ 特写/近景里**不发场景基准图**。
+   * ⚠ 特写/近景里，场景基准图**降到最后一位，但不丢掉**。
    *
-   * 那张图天生是广角空镜，排在第一位、权重最高，会把构图整个拽回远景 ——
-   * 文字说"特写"，图说"广角"，而图赢。用户看到的是"标了特写出来是远景"。
+   * ── 这里我改过一次，而且第一版改过头了 ──
    *
-   * 而且这不是"少发一张更保险"的取舍：特写里根本看不见环境，
-   * 那张图提供不了任何有用信息，纯粹是干扰。
+   * 第一版是直接不发它，理由是"特写里看不见环境，那张图纯粹是干扰"。
+   * 这句话只在**大特写**上成立。用户下一张图立刻撞上了代价：景别对了，
+   * 可环境完全由文字决定，模型自己编了一个广场 —— 他的原话是
+   * "提示词是在广场，怎么在广场外"。
+   *
+   * 真正要解决的是**那张图在支配构图**，不是它在提供环境。这两件事分得开：
+   *   问题：它排第一位，而多数厂商对首张参考图权重最高 → 构图被它拽成广角
+   *   价值：它是这一场戏环境和色调唯一的像素级基准 → 丢了就每镜一个样
+   * 所以降权，不丢。再配一句提示词说清"它只管环境、不管构图"
+   *（见 assemblePrompt 里那句）。
+   *
+   * ⚠ 这条改动**没有真机对比过**。降权到什么程度才压得住构图、
+   * 各家厂商是不是都按顺序给权重 —— 都只是按常见行为推的。
    */
-  if (tight) {
-    images.forEach((_, i) => { if (kinds[i] === 'scene') keep[i] = false; });
-  }
+  const demote = tight ? images.map((_, i) => kinds[i] === 'scene') : [];
 
   /**
    * ⚠ 上限要**按优先级砍**，不能直接 slice 前 N 张。
@@ -686,6 +708,8 @@ export function pickRefs({ images = [], labels = [], paths = [], sources = [], k
   // 按优先级排出来的顺序会把场景推到最后
   const live = new Set(survivors);
   const idxs = images.map((_, i) => i).filter((i) => keep[i] && live.has(i));
+  // 特写里把场景那张挪到最后：顺序即权重，它不该坐在第一位支配构图
+  if (tight) idxs.sort((a, b) => (demote[a] ? 1 : 0) - (demote[b] ? 1 : 0));
 
   return {
     images: idxs.map((i) => images[i]),

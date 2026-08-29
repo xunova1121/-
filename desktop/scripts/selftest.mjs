@@ -8735,8 +8735,16 @@ section('这一镜为什么不对');
   const tightWide = dg.diagnose({
     ...ok, camera: '特写', bibleRefs: ['景·宗门测灵根广场', '角·我', '道·测灵石']
   }, { routing });
-  check('标了特写却带着场景基准图，会被点出来',
+  check('特写而场景图排第一位，会被点出来',
     tightWide.some((x) => x.id === 'wide-ref-on-tight'), JSON.stringify(tightWide.map((x) => x.id)));
+  /**
+   * ⚠ 已经降到最后一位的**不报**。
+   * 那是新版重出过的镜头 —— 再报一次等于让人白重出，
+   * 而且他会开始怀疑这条提示到底准不准。
+   */
+  check('已经降到最后一位的就不报了（不然让人白重出一次）',
+    !dg.diagnose({ ...ok, camera: '特写', bibleRefs: ['角·我', '道·测灵石', '景·广场'] }, { routing })
+      .some((x) => x.id === 'wide-ref-on-tight'), '');
   /** ⚠ 中景/全景里那张场景图是有用的，不能跟着报 —— 误报一次这条就没人信了 */
   check('中景带场景图是正常的，不报',
     !dg.diagnose({ ...ok, camera: '中景', bibleRefs: ['景·码头'] }, { routing })
@@ -8913,15 +8921,24 @@ section('参考图：发哪几张、最多几张');
     sources: ['model', 'model', 'model']
   };
   const tightPick = cs.pickRefs(three, all, { tight: true });
-  check('特写里那张广角空镜不发', !tightPick.images.includes('scene'),
+  /**
+   * ⚠ **降权，不是丢掉。**这里我改过一次，第一版是直接不发。
+   *
+   * 用户下一张图立刻撞上了代价：景别对了，可环境完全由文字决定，
+   * 模型自己编了一个广场 —— 他的原话是"提示词是在广场，怎么在广场外"。
+   * 那张图是这一场戏环境和色调唯一的像素级基准，丢了就每镜一个样。
+   */
+  check('特写里场景图**留着**（它是环境唯一的像素级基准）',
+    tightPick.images.includes('scene'), JSON.stringify(tightPick.images));
+  /** ⚠ 但要排到**最后**：顺序即权重，它不该坐第一位支配构图 */
+  check('但被挪到最后一位（顺序即权重，别让它支配构图）',
+    tightPick.images.at(-1) === 'scene', JSON.stringify(tightPick.images));
+  check('人和道具排在它前面', tightPick.images.indexOf('face') < tightPick.images.indexOf('scene'),
     JSON.stringify(tightPick.images));
-  /** ⚠ 只丢场景那张，人和道具照旧 —— 丢多了就成了另一个 bug */
-  check('但人和道具照旧发（只丢场景那张）',
-    tightPick.images.includes('face') && tightPick.images.includes('prop'),
-    JSON.stringify(tightPick.images));
-  /** 中景/全景里那张场景图是有用的，不能跟着丢 */
-  check('中景全景照旧发场景图（那时候它是有用的）',
-    cs.pickRefs(three, all, { tight: false }).images.includes('scene'), '');
+  /** 中景/全景里它照旧排第一 —— 那时候环境正是最该被提醒的东西 */
+  check('中景全景里它还是排第一（那时候环境最该被提醒）',
+    cs.pickRefs(three, all, { tight: false }).images[0] === 'scene',
+    JSON.stringify(cs.pickRefs(three, all, { tight: false }).images));
 
   /** 判据本身：哪些景别算"近到看不见环境" */
   check('特写算近景', cs.isTightShot({ camera: '特写' }) === true, '');
@@ -8963,19 +8980,34 @@ section('参考图：发哪几张、最多几张');
     upstream.lastImageBody = null;
     await studioModule.regenerateShot(pT.id, 'tight', {}, () => {});
     const sentImgs = JSON.stringify(upstream.lastImageBody?.image || '');
-    check('单独重出一个特写时，场景基准图没发出去（金丝雀抓到过这条路漏传）',
-      !sentImgs.includes('码头'), sentImgs.slice(0, 120));
-    /** ⚠ 反面：角色那张必须还在，否则就是"丢多了"这个新 bug */
-    check('而角色那张照旧发（不是把参考图全丢了）',
-      sentImgs.includes('阿澜'), sentImgs.slice(0, 120));
+    /**
+     * ⚠ 判据落在**请求体里那几张图的顺序**上。
+     * 金丝雀验过：把 studio 那处漏掉，纯函数的断言照样全绿。
+     */
+    const arr = Array.isArray(upstream.lastImageBody?.image)
+      ? upstream.lastImageBody.image : [upstream.lastImageBody?.image];
+    check('单独重出一个特写时，场景图排在最后（金丝雀抓到过这条路漏传）',
+      arr.length > 1 && String(arr.at(-1)).includes('码头'), sentImgs.slice(0, 160));
+    check('而且它还在（降权不是丢掉 —— 丢了环境就没有基准了）',
+      sentImgs.includes('码头'), sentImgs.slice(0, 160));
+    check('角色那张排在它前面', sentImgs.indexOf('阿澜') < sentImgs.indexOf('码头'),
+      sentImgs.slice(0, 160));
 
-    /** 同一份设定集，中景时那张场景图要回来 */
+    /** 提示词里得**明说**它只管环境不管构图 —— 光降权压不住"照着这张框" */
+    check('提示词里明说了那张空镜不管构图',
+      /不要照它的广角构图/.test(String(upstream.lastImageBody?.prompt || '')),
+      String(upstream.lastImageBody?.prompt || '').slice(-120));
+
+    /** 同一份设定集，中景时它回到第一位 —— 那时候环境正是最该被提醒的 */
     store.update(pT.id, (x) => { x.shots[0].camera = '中景'; return x; });
     upstream.lastImageBody = null;
     await studioModule.regenerateShot(pT.id, 'tight', {}, () => {});
-    check('改成中景之后，场景图又发出去了',
-      JSON.stringify(upstream.lastImageBody?.image || '').includes('码头'),
-      JSON.stringify(upstream.lastImageBody?.image || '').slice(0, 120));
+    const arr2 = Array.isArray(upstream.lastImageBody?.image)
+      ? upstream.lastImageBody.image : [upstream.lastImageBody?.image];
+    check('改成中景之后，场景图回到第一位', String(arr2[0]).includes('码头'),
+      JSON.stringify(arr2).slice(0, 160));
+    check('而且中景时不说那句"别照广角构图"（它这时候是该照的）',
+      !/不要照它的广角构图/.test(String(upstream.lastImageBody?.prompt || '')), '');
     settings.patch({ refMode: keepMode2 });
   }
 
