@@ -99,13 +99,13 @@ export function renderControls(source = {}, { duration = 5, sampleEvery = 3 } = 
   const last = frames.at(-1);
   const objects = first.objects;
   const trajectory = sampled.map(({ frame, stage }) => ({ frame, time: Number((frame / FPS).toFixed(3)), x: stage.cam.x, y: stage.cam.y, height: stage.cam.height, rotation: stage.cam.rotation || 0, lens: stage.cam.lens || 35, aperture: stage.cam.aperture || 4, focusId: stage.cam.focusId || '' }));
-  const poseSequence = sampled.map(({ frame, stage }) => ({ frame, subjects: (stage.subjects || []).map((x) => ({ id: x.id, x: x.x, y: x.y, height: x.height, rotation: x.rotation, scale: x.scale, pose: x.pose || 'stand', action: x.action || '', animationName: x.animationName || '' })) }));
+  const poseSequence = sampled.map(({ frame, stage }) => ({ frame, subjects: (stage.subjects || []).map((x) => ({ id: x.id, x: x.x, y: x.y, height: x.height, rotation: x.rotation, scale: x.scale, pose: x.pose || 'stand', action: x.action || '', animationName: x.animationName || '', textureView: x.textureView || 'auto' })) }));
   const lightSequence = sampled.map(({ frame, stage }) => ({ frame, time: Number((frame / FPS).toFixed(3)), lights: (stage.lights || []).map((x) => ({ id: x.id, type: x.lightType, x: x.x, y: x.y, height: x.height, intensity: x.intensity, color: x.color, targetId: x.targetId || '' })) }));
   const motionPaths = (base.subjects || []).map((subject) => {
     const points = sampled.map(({ frame, stage }) => {
       const current = (stage.subjects || []).find((x) => x.id === subject.id) || subject;
       return { frame, time: Number((frame / FPS).toFixed(3)), x: Number(current.x || 0), y: Number(current.y || 0),
-        rotation: Number(current.rotation || 0), pose: current.pose || 'stand', action: current.action || '', animationName: current.animationName || '' };
+        rotation: Number(current.rotation || 0), pose: current.pose || 'stand', action: current.action || '', animationName: current.animationName || '', textureView: current.textureView || 'auto' };
     });
     let distance = 0;
     let peakSpeed = 0;

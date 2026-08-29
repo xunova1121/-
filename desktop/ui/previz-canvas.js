@@ -516,6 +516,22 @@ export function director3dCanvas(stage, {
     const source = item.textureUrl || item.thumbnail || item.image;
     if (!source) return new THREE.MeshStandardMaterial({ color, roughness: .7 });
     const map = textureLoader.load(source, () => renderer.render(scene3d, view)); map.colorSpace = THREE.SRGBColorSpace;
+    if (item.textureLayout === 'quad-character') {
+      const requested = item.textureView || 'auto';
+      let viewName = requested;
+      if (requested === 'auto') {
+        const cam = stage.cam || { x: 0, y: -3 };
+        const bearing = THREE.MathUtils.radToDeg(Math.atan2(Number(cam.x || 0) - Number(item.x || 0), Number(cam.y || 0) - Number(item.y || 0)));
+        const facing = Number(item.rotation ?? item.facing ?? 0);
+        const delta = Math.abs(((bearing - facing + 540) % 360) - 180);
+        viewName = delta <= 55 ? 'front' : delta >= 125 ? 'back' : 'side';
+      }
+      const panel = { closeup: 0, front: 1, side: 2, back: 3 }[viewName] ?? 1;
+      map.repeat.set(.25, 1);
+      map.offset.set(panel * .25, 0);
+      map.needsUpdate = true;
+      item.resolvedTextureView = viewName;
+    }
     return new THREE.MeshStandardMaterial({ map, transparent: true, alphaTest: .08, side: THREE.DoubleSide, roughness: .8 });
   }
   function actor(item) {
@@ -767,6 +783,7 @@ export function previzPanel(stage, {
     item.variantId = asset.variantId || item.variantId || 'default';
     item.textureUrl = asset.image || item.textureUrl || '';
     item.thumbnail = item.textureUrl;
+    item.textureLayout = asset.textureLayout || item.textureLayout || 'single';
     item.modelUrl = asset.modelUrl || item.modelUrl || '';
   };
   for (const item of stage.subjects || []) rebind(item, 'character');
@@ -791,7 +808,8 @@ export function previzPanel(stage, {
     onAssetDrop: (asset, p) => {
       const binding = {
         assetRef: asset.ref, variantId: asset.variantId || 'default',
-        textureUrl: asset.image || '', modelUrl: asset.modelUrl || ''
+        textureUrl: asset.image || '', textureLayout: asset.textureLayout || 'single',
+        textureView: asset.kind === 'character' ? 'auto' : '', modelUrl: asset.modelUrl || ''
       };
       if (asset.kind === 'scene') stage.backdrop = { name: asset.name, image: asset.image || '', ...binding };
       else if (asset.kind === 'character') stage.subjects.push({ name: asset.name, x: p.x, y: p.y, facing: 180, height: 1.72, thumbnail: asset.image, ...binding });
@@ -884,7 +902,8 @@ export function previzPanel(stage, {
     exportBtn.onclick = async () => {
       exportBtn.disabled = true; exportBtn.textContent = '正在输出…';
       try {
-        const result = await onExportControls(stage);
+        const renderedFrame = director.capture('image/png');
+        const result = await onExportControls(stage, { renderedFrame });
         const maps = result?.previews || result;
         controlShelf.replaceChildren(exportBtn);
         if (result?.frameCount) {
@@ -904,7 +923,7 @@ export function previzPanel(stage, {
             controlShelf.append(warning);
           }
         }
-        for (const [key, label] of [['start', '首帧'], ['end', '尾帧'], ['depth', '深度图'], ['pose', '人物姿态'], ['edge', '边缘图'], ['mask', '对象遮罩']]) {
+        for (const [key, label] of [['rendered', '3D真实渲染帧'], ['start', '首帧'], ['end', '尾帧'], ['depth', '深度图'], ['pose', '人物姿态'], ['edge', '边缘图'], ['mask', '对象遮罩']]) {
           if (!maps?.[key]) continue;
           const card = document.createElement('a'); card.className = 'previz-control'; card.href = maps[key]; card.target = '_blank';
           card.append(Object.assign(document.createElement('img'), { src: maps[key], alt: label }), Object.assign(document.createElement('span'), { textContent: label }));
@@ -965,6 +984,12 @@ export function previzPanel(stage, {
         ...(stage.marks || []).filter((x) => !x.far).map((x) => [x.id, x.name || x.id])];
       inspector.append(makeNumber('光圈 f/', 'aperture', '0.1'), makeSelect('对焦目标', 'focusId', targets));
     } else if (found.kind === 'subject') {
+      if (item.textureLayout === 'quad-character') {
+        inspector.append(makeSelect('贴图视角', 'textureView', [
+          ['auto', '自动随朝向'], ['front', '全身正面'], ['side', '全身侧面'],
+          ['back', '全身背面'], ['closeup', '上半身特写']
+        ]));
+      }
       inspector.append(makeSelect('姿态', 'pose', [
         ['stand', '站立'], ['walk', '行走'], ['run', '奔跑'], ['sit', '坐下'], ['crouch', '下蹲'],
         ['reach', '伸手'], ['fight', '打斗']

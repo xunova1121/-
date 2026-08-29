@@ -2864,7 +2864,7 @@ function recordGeneration(shot, entry) {
   if (shot.generationHistory.length > 40) shot.generationHistory.splice(0, shot.generationHistory.length - 40);
 }
 
-export function exportShotControls(projectId, shotId, stageOverride = null) {
+export function exportShotControls(projectId, shotId, stageOverride = null, renderedFrameDataUrl = '') {
   const project = store.read(projectId);
   const shot = project?.shots?.find((x) => x.id === shotId);
   if (!shot) throw new Error(`没有这一镜：${shotId}`);
@@ -2875,6 +2875,7 @@ export function exportShotControls(projectId, shotId, stageOverride = null) {
   const sequenceDir = path.join(dir, `${shot.id}.control-frames`);
   fs.mkdirSync(sequenceDir, { recursive: true });
   const files = {
+    rendered: path.join(dir, `${shot.id}.previz-render.png`),
     start: path.join(dir, `${shot.id}.control-start.svg`),
     end: path.join(dir, `${shot.id}.control-end.svg`),
     depth: path.join(dir, `${shot.id}.control-depth.svg`),
@@ -2883,6 +2884,14 @@ export function exportShotControls(projectId, shotId, stageOverride = null) {
     pose: path.join(dir, `${shot.id}.control-pose.svg`),
     manifest: path.join(dir, `${shot.id}.control-manifest.json`)
   };
+  const renderedMatch = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/s.exec(String(renderedFrameDataUrl || ''));
+  if (renderedMatch) {
+    const renderedBytes = Buffer.from(renderedMatch[1], 'base64');
+    if (renderedBytes.length > 15 * 1024 * 1024) throw new Error('3D预演渲染帧超过15MB，请降低窗口分辨率后重试');
+    if (renderedBytes.length >= 8) fs.writeFileSync(files.rendered, renderedBytes);
+  } else if (!fs.existsSync(files.rendered)) {
+    delete files.rendered;
+  }
   for (const key of ['start', 'end', 'depth', 'mask', 'edge', 'pose']) fs.writeFileSync(files[key], rendered[key], 'utf8');
   const sequence = rendered.frames.map((frame, index) => {
     const prefix = String(index).padStart(4, '0');
@@ -2899,7 +2908,7 @@ export function exportShotControls(projectId, shotId, stageOverride = null) {
     maxFrame: rendered.maxFrame, keyframes: rendered.keyframes, cameraTrajectory: rendered.trajectory,
     poseSequence: rendered.poseSequence, motionPaths: rendered.motionPaths, lightSequence: rendered.lightSequence, layers: rendered.layers, sequence,
     issues: rendered.issues,
-    maps: Object.fromEntries(['start', 'end', 'depth', 'mask', 'edge', 'pose'].map((key) => [key, files[key]]))
+    maps: Object.fromEntries(['rendered', 'start', 'end', 'depth', 'mask', 'edge', 'pose'].filter((key) => files[key]).map((key) => [key, files[key]]))
   }, null, 2), 'utf8');
   const updated = store.update(projectId, (p) => {
     const target = p.shots.find((x) => x.id === shotId);
@@ -3214,6 +3223,15 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
   const controlVideo = providerId === 'metaso' && /(^|[-_])H3([-_]|$)/i.test(model)
     ? await buildPrevizReferenceVideo(projectId, shot, controlBundle, { onEvent })
     : null;
+  let renderedPrevizRef = null;
+  if (controlBundle?.rendered && fs.existsSync(controlBundle.rendered)) {
+    try {
+      renderedPrevizRef = await toModelRef(controlBundle.rendered, { onEvent });
+      onEvent?.({ type: 'note', shotId, message: '已把3D预演真实渲染帧作为构图参考注入视频请求' });
+    } catch (err) {
+      onEvent?.({ type: 'note', shotId, message: `3D真实渲染帧未注入（${err.message}），轨迹控制仍然有效` });
+    }
+  }
   if (bibleRefs.labels.length) {
     onEvent?.({ type: 'note', message: `参考设定集：${bibleRefs.labels.join('、')}` });
   }
@@ -3225,7 +3243,7 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
       prompt: videoPrompt,
       firstFrameUrl: firstFrame,
       lastFrameUrl: ctx.lastFrameUrl,
-      refImages: bibleRefs.images,
+      refImages: renderedPrevizRef ? [...bibleRefs.images, renderedPrevizRef] : bibleRefs.images,
       refVideos: controlVideo ? [controlVideo] : [],
       duration: shot.duration,
       /**
@@ -4508,6 +4526,15 @@ async function generateVideosRaw(projectId, { only = null, chapterId = null, reg
       const controlVideo = useProvider === 'metaso' && /(^|[-_])H3([-_]|$)/i.test(useModel)
         ? await buildPrevizReferenceVideo(projectId, shot, controlBundle, { onEvent })
         : null;
+      let renderedPrevizRef = null;
+      if (controlBundle?.rendered && fs.existsSync(controlBundle.rendered)) {
+        try {
+          renderedPrevizRef = await toModelRef(controlBundle.rendered, { onEvent });
+          onEvent?.({ type: 'note', shotId: shot.id, message: '3D预演真实渲染帧已作为构图参考注入本镜视频请求' });
+        } catch (err) {
+          onEvent?.({ type: 'note', shotId: shot.id, message: `3D真实渲染帧未注入（${err.message}），继续使用轨迹控制` });
+        }
+      }
       onEvent?.({ type: 'shot', shotId: shot.id, status: 'running', message: `提交任务：${videoPrompt.slice(0, 60)}…` });
 
       /**
@@ -4522,7 +4549,7 @@ async function generateVideosRaw(projectId, { only = null, chapterId = null, reg
         prompt: videoPrompt,
         firstFrameUrl: firstFrame,
         lastFrameUrl: ctx.lastFrameUrl,
-        refImages: bibleRefs.images,
+        refImages: renderedPrevizRef ? [...bibleRefs.images, renderedPrevizRef] : bibleRefs.images,
         refVideos: controlVideo ? [controlVideo] : [],
         duration: shot.duration,
         // 同上：这部片子自己定的分辨率，优先于全局设置

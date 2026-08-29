@@ -1622,15 +1622,19 @@ export default {
                 return {
                   kind, name: x.name, ref: x.id || x.name, variantId: variant.id || 'default',
                   image: sheetPath ? mediaUrl(sheetPath) : '',
+                  textureLayout: kind === 'character' ? 'quad-character' : 'single',
                   modelUrl: variant.modelPath ? mediaUrl(variant.modelPath) : x.modelPath ? mediaUrl(x.modelPath) : ''
                 };
               }))
             ],
-            onExportControls: async (stage) => {
-              const r = await api(`/projects/${project.id}/shots/${shot.id}/controls`, { method: 'POST', body: { stage } });
+            onExportControls: async (stage, capture = {}) => {
+              const r = await api(`/projects/${project.id}/shots/${shot.id}/controls`, {
+                method: 'POST', body: { stage, renderedFrame: capture.renderedFrame || '' }
+              });
               const v = Date.now();
               return {
-                previews: Object.fromEntries(['start', 'end', 'depth', 'pose', 'edge', 'mask'].map((key) => [key, `${mediaUrl(r.controls[key])}&v=${v}`])),
+                previews: Object.fromEntries(['rendered', 'start', 'end', 'depth', 'pose', 'edge', 'mask']
+                  .filter((key) => r.controls[key]).map((key) => [key, `${mediaUrl(r.controls[key])}&v=${v}`])),
                 frameCount: r.controls.sequence?.length || 0,
                 controlFps: r.controls.controlFps || 0,
                 issues: r.controls.issues || [],

@@ -122,6 +122,7 @@ export function addKeyframe(stage, frame, objectIds = []) {
       values[id].pose = x.pose || 'stand';
       values[id].action = x.action || '';
       values[id].animationName = x.animationName || '';
+      values[id].textureView = x.textureView || 'auto';
     } else if (found.kind === 'light') {
       values[id].lightType = x.lightType;
       values[id].intensity = x.intensity;
@@ -155,7 +156,7 @@ export function frameState(stage, frame) {
       if (Number.isFinite(av) && Number.isFinite(bv)) out[key] = Number((av + (bv - av) * t).toFixed(4));
     }
     out.move = { ...((t < .5 ? a.move : b.move) || item.move || {}) };
-    for (const key of ['focusId', 'pose', 'action', 'animationName', 'lightType', 'color', 'targetId']) out[key] = (t < .5 ? a[key] : b[key]) ?? item[key];
+    for (const key of ['focusId', 'pose', 'action', 'animationName', 'textureView', 'lightType', 'color', 'targetId']) out[key] = (t < .5 ? a[key] : b[key]) ?? item[key];
     values[item.id] = out;
   }
   return { frame: f, left: left?.frame ?? null, right: right?.frame ?? null, t, values };
