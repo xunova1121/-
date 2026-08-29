@@ -20,6 +20,7 @@ export function normalizeStage(stage = {}) {
   stage.marks ||= [];
   stage.lights ||= [];
   stage.keyframes ||= [];
+  stage.motionEasing = ['linear', 'easeInOut', 'easeIn', 'easeOut'].includes(stage.motionEasing) ? stage.motionEasing : 'easeInOut';
   const used = new Set();
   const normalize = (kind, item, defaults = {}) => {
     for (const [key, value] of Object.entries(defaults)) {
@@ -32,14 +33,21 @@ export function normalizeStage(stage = {}) {
     item.locked = Boolean(item.locked);
     return item;
   };
-  normalize('camera', stage.cam, { name: '摄影机', x: 0, y: -3, height: 1.6, aperture: 4, focusId: '' });
+  normalize('camera', stage.cam, {
+    name: '摄影机', x: 0, y: -3, height: 1.6, aperture: 4, focusId: '',
+    focusDistance: 3, shutterAngle: 180, iso: 400
+  });
   stage.cam.aperture = Math.max(1, Math.min(22, Number(stage.cam.aperture || 4)));
   stage.cam.focusId = String(stage.cam.focusId || '');
+  stage.cam.focusDistance = Math.max(.1, Math.min(100, Number(stage.cam.focusDistance || 3)));
+  stage.cam.shutterAngle = Math.max(1, Math.min(360, Number(stage.cam.shutterAngle || 180)));
+  stage.cam.iso = Math.max(25, Math.min(12800, Number(stage.cam.iso || 400)));
   stage.subjects.forEach((x) => {
-    normalize('subject', x, { x: 0, y: 0, height: 1.72, pose: 'stand', action: '', animationName: '' });
+    normalize('subject', x, { x: 0, y: 0, height: 1.72, pose: 'stand', action: '', animationName: '', autoOrient: true });
     x.pose = ['stand', 'walk', 'run', 'sit', 'crouch', 'reach', 'fight'].includes(x.pose) ? x.pose : 'stand';
     x.action = String(x.action || '');
     x.animationName = String(x.animationName || '');
+    x.autoOrient = x.autoOrient !== false;
   });
   stage.marks.filter((x) => !x.far).forEach((x) => normalize('prop', x, { x: 0, y: 0, height: 0.9, width: 0.9 }));
   stage.lights.forEach((x) => {
@@ -122,6 +130,9 @@ export function addKeyframe(stage, frame, objectIds = []) {
       values[id].move = { ...(x.move || {}) };
       values[id].aperture = x.aperture;
       values[id].focusId = x.focusId || '';
+      values[id].focusDistance = x.focusDistance;
+      values[id].shutterAngle = x.shutterAngle;
+      values[id].iso = x.iso;
     } else if (found.kind === 'subject') {
       values[id].pose = x.pose || 'stand';
       values[id].action = x.action || '';
@@ -129,6 +140,7 @@ export function addKeyframe(stage, frame, objectIds = []) {
       values[id].textureView = x.textureView || 'auto';
       values[id].textureGrid = x.textureGrid || 'horizontal';
       values[id].textureInset = x.textureInset || 0;
+      values[id].autoOrient = x.autoOrient !== false;
     } else if (found.kind === 'light') {
       values[id].lightType = x.lightType;
       values[id].intensity = x.intensity;
@@ -151,21 +163,28 @@ export function frameState(stage, frame) {
   const left = [...keys].reverse().find((x) => x.frame <= f) || keys[0];
   const right = keys.find((x) => x.frame >= f) || keys.at(-1);
   const span = Math.max(1, Number(right?.frame || 0) - Number(left?.frame || 0));
-  const t = left && right ? Math.max(0, Math.min(1, (f - left.frame) / span)) : 0;
+  const rawT = left && right ? Math.max(0, Math.min(1, (f - left.frame) / span)) : 0;
+  const t = stage.motionEasing === 'easeInOut' ? rawT * rawT * (3 - 2 * rawT)
+    : stage.motionEasing === 'easeIn' ? rawT * rawT
+      : stage.motionEasing === 'easeOut' ? 1 - (1 - rawT) * (1 - rawT) : rawT;
   const values = {};
   for (const { item } of stageObjects(stage)) {
     const a = left?.values?.[item.id] || item;
     const b = right?.values?.[item.id] || a;
     const out = { ...item };
-    for (const key of ['x', 'y', 'elevation', 'height', 'rotation', 'rotationX', 'rotationZ', 'scale', 'scaleX', 'scaleY', 'scaleZ', 'textureInset', 'lens', 'aperture', 'intensity']) {
+    for (const key of ['x', 'y', 'elevation', 'height', 'rotation', 'rotationX', 'rotationZ', 'scale', 'scaleX', 'scaleY', 'scaleZ', 'textureInset', 'lens', 'aperture', 'focusDistance', 'shutterAngle', 'iso', 'intensity']) {
       const av = Number(a[key]), bv = Number(b[key]);
       if (Number.isFinite(av) && Number.isFinite(bv)) out[key] = Number((av + (bv - av) * t).toFixed(4));
     }
     out.move = { ...((t < .5 ? a.move : b.move) || item.move || {}) };
-    for (const key of ['focusId', 'pose', 'action', 'animationName', 'textureView', 'textureGrid', 'lightType', 'color', 'targetId']) out[key] = (t < .5 ? a[key] : b[key]) ?? item[key];
+    for (const key of ['focusId', 'pose', 'action', 'animationName', 'textureView', 'textureGrid', 'autoOrient', 'lightType', 'color', 'targetId']) out[key] = (rawT < .5 ? a[key] : b[key]) ?? item[key];
+    if (item.autoOrient !== false && stage.subjects.includes(item)) {
+      const dx = Number(b.x || 0) - Number(a.x || 0), dy = Number(b.y || 0) - Number(a.y || 0);
+      if (Math.hypot(dx, dy) > .001) out.rotation = Number((Math.atan2(dx, dy) * 180 / Math.PI).toFixed(4));
+    }
     values[item.id] = out;
   }
-  return { frame: f, left: left?.frame ?? null, right: right?.frame ?? null, t, values };
+  return { frame: f, left: left?.frame ?? null, right: right?.frame ?? null, t, rawT, values };
 }
 
 export function applyFrame(stage, frame) {

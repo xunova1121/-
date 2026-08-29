@@ -98,7 +98,13 @@ export function renderControls(source = {}, { duration = 5, sampleEvery = 3 } = 
   const first = frames[0];
   const last = frames.at(-1);
   const objects = first.objects;
-  const trajectory = sampled.map(({ frame, stage }) => ({ frame, time: Number((frame / FPS).toFixed(3)), x: stage.cam.x, y: stage.cam.y, height: stage.cam.height, rotation: stage.cam.rotation || 0, lens: stage.cam.lens || 35, aperture: stage.cam.aperture || 4, focusId: stage.cam.focusId || '' }));
+  const trajectory = sampled.map(({ frame, stage }) => ({
+    frame, time: Number((frame / FPS).toFixed(3)), x: stage.cam.x, y: stage.cam.y,
+    height: stage.cam.height, rotation: stage.cam.rotation || 0, lens: stage.cam.lens || 35,
+    aperture: stage.cam.aperture || 4, focusId: stage.cam.focusId || '',
+    focusDistance: stage.cam.focusDistance || 3, shutterAngle: stage.cam.shutterAngle || 180,
+    iso: stage.cam.iso || 400
+  }));
   const poseSequence = sampled.map(({ frame, stage }) => ({ frame, subjects: (stage.subjects || []).map((x) => ({ id: x.id, x: x.x, y: x.y, height: x.height, rotation: x.rotation, scale: x.scale, pose: x.pose || 'stand', action: x.action || '', animationName: x.animationName || '', textureView: x.textureView || 'auto' })) }));
   const lightSequence = sampled.map(({ frame, stage }) => ({ frame, time: Number((frame / FPS).toFixed(3)), lights: (stage.lights || []).map((x) => ({ id: x.id, type: x.lightType, x: x.x, y: x.y, height: x.height, intensity: x.intensity, color: x.color, targetId: x.targetId || '' })) }));
   const motionPaths = (base.subjects || []).map((subject) => {
@@ -137,7 +143,8 @@ export function renderControls(source = {}, { duration = 5, sampleEvery = 3 } = 
   }
   return { start: first.rgb, end: last.rgb, depth: first.depth, mask: first.mask, edge: first.edge, pose: first.pose,
     frames, sampleEvery: Math.max(1, sampleEvery), controlFps: Number((FPS / Math.max(1, sampleEvery)).toFixed(3)), width: W, height: H, fps: FPS, maxFrame,
-    keyframes: (base.keyframes || []).map((x) => x.frame), trajectory, poseSequence, motionPaths, lightSequence, layers, issues,
+    keyframes: (base.keyframes || []).map((x) => x.frame), motionEasing: base.motionEasing || 'easeInOut',
+    trajectory, poseSequence, motionPaths, lightSequence, layers, issues,
     objects: objects.map((x) => ({ id: x.item.id, name: x.item.name, kind: x.kind, depth: Number(x.depth.toFixed(3)) })) };
 }
 
@@ -158,7 +165,9 @@ export function videoControlPrompt(bundle = {}) {
   const lastCam = trajectory.at(-1) || firstCam;
   const camera = `摄影机从坐标(${Number(firstCam.x || 0).toFixed(2)},${Number(firstCam.y || 0).toFixed(2)},${Number(firstCam.height || 0).toFixed(2)})、${Number(firstCam.lens || 35).toFixed(0)}mm，`
     + `运动到(${Number(lastCam.x || 0).toFixed(2)},${Number(lastCam.y || 0).toFixed(2)},${Number(lastCam.height || 0).toFixed(2)})、${Number(lastCam.lens || 35).toFixed(0)}mm；`
-    + `焦点${firstCam.focusId || '跟随主体'}→${lastCam.focusId || '跟随主体'}，光圈f/${Number(firstCam.aperture || 4).toFixed(1)}→f/${Number(lastCam.aperture || 4).toFixed(1)}`;
+    + `焦点${firstCam.focusId || `${Number(firstCam.focusDistance || 3).toFixed(1)}m`}→${lastCam.focusId || `${Number(lastCam.focusDistance || 3).toFixed(1)}m`}，`
+    + `光圈f/${Number(firstCam.aperture || 4).toFixed(1)}→f/${Number(lastCam.aperture || 4).toFixed(1)}，`
+    + `快门角${Number(firstCam.shutterAngle || 180).toFixed(0)}°→${Number(lastCam.shutterAngle || 180).toFixed(0)}°，ISO ${Number(firstCam.iso || 400).toFixed(0)}→${Number(lastCam.iso || 400).toFixed(0)}`;
 
   const firstPose = new Map((poses[0]?.subjects || []).map((x) => [x.id, x]));
   const lastPose = new Map((poses.at(-1)?.subjects || []).map((x) => [x.id, x]));

@@ -425,6 +425,10 @@ export function director3dCanvas(stage, {
   scene3d.fog = new THREE.Fog(0x151a24, 14, 30);
   const view = new THREE.PerspectiveCamera(42, 1.38, 0.1, 80);
   view.position.set(9, 8, 10); view.lookAt(0, 0, 0);
+  const shotCamera = new THREE.PerspectiveCamera(42, 16 / 9, .05, 200);
+  let viewMode = 'director';
+  const activeView = () => viewMode === 'shot' ? shotCamera : view;
+  const renderNow = () => renderer.render(scene3d, activeView());
   const orbit = new OrbitControls(view, renderer.domElement);
   orbit.target.set(0, 1, 0);
   orbit.enableDamping = false;
@@ -460,6 +464,18 @@ export function director3dCanvas(stage, {
     gizmoButtons.set(mode, button);
     gizmoBar.append(button);
   }
+  const viewDivider = Object.assign(document.createElement('span'), { className: 'previz-gizmo-divider' });
+  const directorViewBtn = Object.assign(document.createElement('button'), { type: 'button', className: 'previz-gizmo-btn on', textContent: '导演视角' });
+  const shotViewBtn = Object.assign(document.createElement('button'), { type: 'button', className: 'previz-gizmo-btn', textContent: '摄影机画面' });
+  const setViewMode = (mode) => {
+    viewMode = mode; orbit.enabled = mode === 'director' && !transforming;
+    transformHelper.visible = mode === 'director';
+    directorViewBtn.classList.toggle('on', mode === 'director'); shotViewBtn.classList.toggle('on', mode === 'shot');
+    renderNow();
+  };
+  directorViewBtn.onclick = (event) => { event.stopPropagation(); setViewMode('director'); };
+  shotViewBtn.onclick = (event) => { event.stopPropagation(); setViewMode('shot'); };
+  gizmoBar.append(viewDivider, directorViewBtn, shotViewBtn);
   host.append(gizmoBar);
   scene3d.add(new THREE.HemisphereLight(0xbfd8ff, 0x2a2530, 1.5));
   const key = new THREE.DirectionalLight(0xffe3bd, 2.2); key.position.set(-5, 9, -3); key.castShadow = true; scene3d.add(key);
@@ -474,17 +490,19 @@ export function director3dCanvas(stage, {
   const mixers = new Map();
   let animationRaf = 0;
   let animationAt = performance.now();
+  let capturing = false;
   let backdropObject = null;
   const guides = [];
+  const pathHandles = [];
 
-  orbit.addEventListener('change', () => renderer.render(scene3d, view));
+  orbit.addEventListener('change', renderNow);
   transform.setMode(transformMode);
   transform.setTranslationSnap(.05);
   transform.setRotationSnap(THREE.MathUtils.degToRad(1));
   transform.setScaleSnap(.05);
   transform.addEventListener('dragging-changed', (event) => {
     transforming = Boolean(event.value);
-    orbit.enabled = !transforming;
+    orbit.enabled = !transforming && viewMode === 'director';
   });
   transform.addEventListener('objectChange', () => {
     const obj = transform.object;
@@ -502,7 +520,7 @@ export function director3dCanvas(stage, {
     item.scaleZ = Number(Math.max(.05, obj.scale.z).toFixed(2));
     item.scale = item.scaleX;
     onChange();
-    renderer.render(scene3d, view);
+    renderNow();
   });
   transform.addEventListener('mouseUp', () => { onCommit(); redraw(); });
   renderer.domElement.oncontextmenu = (ev) => ev.preventDefault();
@@ -533,7 +551,7 @@ export function director3dCanvas(stage, {
       const delta = Math.min(.05, Math.max(0, (now - animationAt) / 1000));
       animationAt = now;
       for (const mixer of mixers.values()) mixer.update(delta);
-      renderer.render(scene3d, view);
+      renderNow();
       animationRaf = requestAnimationFrame(tick);
     };
     animationRaf = requestAnimationFrame(tick);
@@ -577,10 +595,10 @@ export function director3dCanvas(stage, {
       }
       if (selected() === item.id) wrapper.add(new THREE.BoxHelper(model, 0x49c8ff));
       onModelReady(item, clips);
-      renderer.render(scene3d, view);
+      renderNow();
     }).catch(() => {
       wrapper.userData.modelError = true;
-      renderer.render(scene3d, view);
+      renderNow();
     });
     return wrapper;
   }
@@ -588,7 +606,7 @@ export function director3dCanvas(stage, {
   function materialFor(item, color) {
     const source = item.textureUrl || item.thumbnail || item.image;
     if (!source) return new THREE.MeshStandardMaterial({ color, roughness: .7 });
-    const map = textureLoader.load(source, () => renderer.render(scene3d, view)); map.colorSpace = THREE.SRGBColorSpace;
+    const map = textureLoader.load(source, renderNow); map.colorSpace = THREE.SRGBColorSpace;
     if (item.textureLayout === 'quad-character') {
       const requested = item.textureView || 'auto';
       let viewName = requested;
@@ -633,16 +651,28 @@ export function director3dCanvas(stage, {
     return g;
   }
   function addMotionGuide(item, kind) {
-    const points = (stage.keyframes || []).slice().sort((a,b) => a.frame-b.frame).map((key) => key.values?.[item.id]).filter(Boolean)
-      .map((x) => new THREE.Vector3(Number(x.x || 0), kind === 'camera' || kind === 'light' ? Number(x.height || item.height || 1) : .06, Number(x.y || 0)));
+    const keyed = (stage.keyframes || []).slice().sort((a,b) => a.frame-b.frame)
+      .map((key) => ({ key, value: key.values?.[item.id] })).filter((entry) => entry.value);
+    const points = keyed.map(({ value }) => new THREE.Vector3(
+      Number(value.x || 0),
+      kind === 'camera' || kind === 'light' ? Number(value.height || item.height || 1) : Number(value.elevation || 0) + .08,
+      Number(value.y || 0)
+    ));
     if (points.length < 2) return;
     const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
     const color = kind === 'camera' ? 0x49c8ff : kind === 'light' ? 0xffd08a : kind === 'subject' ? 0xffb648 : 0xaab7c7;
     const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(Math.max(16, points.length * 12))), new THREE.LineDashedMaterial({ color, dashSize:.18, gapSize:.1, transparent:true, opacity:.85 }));
     line.computeLineDistances(); scene3d.add(line); guides.push(line);
-    for (const point of points) {
-      const dot = new THREE.Mesh(new THREE.SphereGeometry(.055, 10, 8), new THREE.MeshBasicMaterial({ color }));
-      dot.position.copy(point); scene3d.add(dot); guides.push(dot);
+    for (let index = 0; index < points.length; index += 1) {
+      const point = points[index], entry = keyed[index];
+      const dot = new THREE.Mesh(
+        new THREE.SphereGeometry(.11, 14, 10),
+        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: .65, depthTest: false })
+      );
+      dot.position.copy(point);
+      dot.renderOrder = 20;
+      dot.userData.pathHandle = { item, value: entry.value, keyframe: entry.key, kind };
+      scene3d.add(dot); guides.push(dot); pathHandles.push(dot);
     }
   }
   function lightRig(item) {
@@ -677,6 +707,7 @@ export function director3dCanvas(stage, {
   }
   function redraw() {
     transform.detach();
+    pathHandles.length = 0;
     for (const obj of objects.values()) {
       scene3d.remove(obj);
       const mixer = mixers.get(obj);
@@ -693,7 +724,7 @@ export function director3dCanvas(stage, {
     if (stage.backdrop?.image || stage.backdrop?.modelUrl) {
       backdropObject = new THREE.Group();
       if (stage.backdrop.image) {
-        const map = textureLoader.load(stage.backdrop.image, () => renderer.render(scene3d, view));
+        const map = textureLoader.load(stage.backdrop.image, renderNow);
         map.colorSpace = THREE.SRGBColorSpace;
         const imageWall = new THREE.Mesh(
           new THREE.PlaneGeometry(12, 6.75),
@@ -710,7 +741,7 @@ export function director3dCanvas(stage, {
           if (backdropObject !== target) return;
           const environment = normalizedModel(gltf.scene, 12, { scene: true });
           target.add(environment);
-          renderer.render(scene3d, view);
+          renderNow();
         }).catch(() => { target.userData.modelError = true; });
       }
     }
@@ -726,7 +757,7 @@ export function director3dCanvas(stage, {
       const baseScale = Number(item.scale || 1);
       obj.scale.set(Number(item.scaleX || baseScale), Number(item.scaleY || baseScale), Number(item.scaleZ || baseScale));
       obj.userData = { item, kind };
-      if (selected() === item.id) { const box = new THREE.BoxHelper(obj, 0x49c8ff); obj.add(box); }
+      if (!capturing && selected() === item.id) { const box = new THREE.BoxHelper(obj, 0x49c8ff); obj.add(box); }
       objects.set(item.id, obj); scene3d.add(obj);
       addMotionGuide(item, kind);
     }
@@ -734,19 +765,62 @@ export function director3dCanvas(stage, {
     if (active && !active.userData.item.locked) transform.attach(active);
     const rect = host.getBoundingClientRect(); renderer.setSize(Math.max(320, rect.width || size), Math.max(230, rect.height || size * .72), false);
     view.aspect = Math.max(1, (rect.width || size) / (rect.height || size * .72)); view.updateProjectionMatrix(); renderer.render(scene3d, view);
+    const cam = stage.cam || {};
+    shotCamera.position.set(Number(cam.x || 0), Number(cam.height || 1.6), Number(cam.y || -3));
+    const focus = findObject(stage, cam.focusId)?.item || stage.subjects?.[0] || { x: 0, y: 0, height: 1.4 };
+    shotCamera.lookAt(Number(focus.x || 0), Number(focus.height || 1.4) * .72 + Number(focus.elevation || 0), Number(focus.y || 0));
+    shotCamera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(24 / (2 * Math.max(8, Number(cam.lens || 35)))));
+    shotCamera.aspect = 16 / 9; shotCamera.updateProjectionMatrix(); renderNow();
   }
   const pointer = (ev) => { const r = renderer.domElement.getBoundingClientRect(); mouse.set((ev.clientX-r.left)/r.width*2-1, -(ev.clientY-r.top)/r.height*2+1); ray.setFromCamera(mouse, view); };
   const hitGround = (ev) => { pointer(ev); const p = new THREE.Vector3(); return ray.ray.intersectPlane(ground, p) ? { x: clampM(p.x), y: clampM(p.z) } : { x: 0, y: 0 }; };
   let dragging = null;
-  renderer.domElement.onpointerdown = (ev) => { if (ev.button !== 0 || transforming || transform.axis) return; pointer(ev); const hits = ray.intersectObjects([...objects.values()], true); const root = hits[0]?.object; let obj = root; while (obj && !obj.userData?.item) obj = obj.parent; if (!obj) return; onSelect(obj.userData.item.id); if (!obj.userData.item.locked && transformMode === 'translate') { dragging = obj.userData.item; renderer.domElement.setPointerCapture(ev.pointerId); } redraw(); };
-  renderer.domElement.onpointermove = (ev) => { if (!dragging || transforming) return; const p = hitGround(ev); dragging.x = Number(p.x.toFixed(2)); dragging.y = Number(p.y.toFixed(2)); redraw(); onChange(); };
+  renderer.domElement.onpointerdown = (ev) => {
+    if (ev.button !== 0 || transforming || transform.axis) return;
+    pointer(ev);
+    const pathHit = ray.intersectObjects(pathHandles, false)[0]?.object?.userData?.pathHandle;
+    if (pathHit) {
+      onSelect(pathHit.item.id);
+      dragging = { item: pathHit.item, value: pathHit.value, keyframe: pathHit.keyframe };
+      renderer.domElement.setPointerCapture(ev.pointerId);
+      return;
+    }
+    const hits = ray.intersectObjects([...objects.values()], true);
+    const root = hits[0]?.object; let obj = root;
+    while (obj && !obj.userData?.item) obj = obj.parent;
+    if (!obj) return;
+    onSelect(obj.userData.item.id);
+    if (!obj.userData.item.locked && transformMode === 'translate') {
+      dragging = { item: obj.userData.item, value: obj.userData.item };
+      renderer.domElement.setPointerCapture(ev.pointerId);
+    }
+    redraw();
+  };
+  renderer.domElement.onpointermove = (ev) => {
+    if (!dragging || transforming) return;
+    const p = hitGround(ev), value = dragging.value;
+    value.x = Number(p.x.toFixed(2)); value.y = Number(p.y.toFixed(2));
+    if (value !== dragging.item) {
+      dragging.item.x = value.x; dragging.item.y = value.y;
+    }
+    redraw(); onChange();
+  };
   renderer.domElement.onpointerup = (ev) => { if (dragging) onCommit(); dragging = null; try { renderer.domElement.releasePointerCapture(ev.pointerId); } catch {} };
   host.ondragover = (ev) => ev.preventDefault();
   host.ondrop = (ev) => { ev.preventDefault(); try { onAssetDrop(JSON.parse(ev.dataTransfer.getData('application/x-futuredream-asset')), hitGround(ev)); } catch {} };
   new ResizeObserver(redraw).observe(host); redraw();
   const capture = (type = 'image/png', quality) => {
-    redraw();
-    return renderer.domElement.toDataURL(type, quality);
+    capturing = true; redraw();
+    // 生成模型需要的是镜头真正看到的画面，不是导演在舞台外观察的工作视角。
+    const rect = host.getBoundingClientRect(), restoreW = Math.max(320, rect.width || size), restoreH = Math.max(230, rect.height || size * .72);
+    transformHelper.visible = false;
+    renderer.setSize(1280, 720, false);
+    renderer.render(scene3d, shotCamera);
+    const data = renderer.domElement.toDataURL(type, quality);
+    renderer.setSize(restoreW, restoreH, false);
+    capturing = false; redraw();
+    transformHelper.visible = viewMode === 'director'; renderNow();
+    return data;
   };
   return { node: host, redraw, capture };
 }
@@ -1042,8 +1116,8 @@ export function previzPanel(stage, {
       const input = document.createElement('select');
       input.disabled = item.locked;
       for (const [value, text] of options) input.append(Object.assign(document.createElement('option'), { value, textContent: text }));
-      input.value = String(item[key] || '');
-      input.onchange = () => { item[key] = input.value; history.commit(); redrawAll(); onChange(); };
+      input.value = key === 'autoOrient' ? String(item[key] !== false) : String(item[key] || '');
+      input.onchange = () => { item[key] = key === 'autoOrient' ? input.value === 'true' : input.value; history.commit(); redrawAll(); onChange(); };
       const wrap = document.createElement('label');
       wrap.append(document.createTextNode(label), input);
       return wrap;
@@ -1063,7 +1137,8 @@ export function previzPanel(stage, {
     if (found.kind === 'camera') {
       const targets = [['', '自动跟随主体'], ...(stage.subjects || []).map((x) => [x.id, x.name || x.id]),
         ...(stage.marks || []).filter((x) => !x.far).map((x) => [x.id, x.name || x.id])];
-      inspector.append(makeNumber('光圈 f/', 'aperture', '0.1'), makeSelect('对焦目标', 'focusId', targets));
+      inspector.append(makeNumber('光圈 f/', 'aperture', '0.1'), makeSelect('对焦目标', 'focusId', targets),
+        makeNumber('手动焦距 m', 'focusDistance', '0.1'), makeNumber('快门角度°', 'shutterAngle', '1'), makeNumber('ISO', 'iso', '25'));
     } else if (found.kind === 'subject') {
       if (item.textureLayout === 'quad-character') {
         inspector.append(makeSelect('贴图视角', 'textureView', [
@@ -1076,7 +1151,8 @@ export function previzPanel(stage, {
       inspector.append(makeSelect('姿态', 'pose', [
         ['stand', '站立'], ['walk', '行走'], ['run', '奔跑'], ['sit', '坐下'], ['crouch', '下蹲'],
         ['reach', '伸手'], ['fight', '打斗']
-      ]), makeText('动作指令', 'action', '例如：右手拔剑，左脚向前'));
+      ]), makeSelect('路径朝向', 'autoOrient', [['true', '自动朝向移动方向'], ['false', '保持手动朝向']]),
+        makeText('动作指令', 'action', '例如：右手拔剑，左脚向前'));
       if (item.availableAnimations?.length) {
         inspector.append(makeSelect('模型骨骼动画', 'animationName', [
           ['', '按姿态自动匹配'], ...item.availableAnimations.map((name) => [name, name])
@@ -1129,11 +1205,17 @@ export function previzPanel(stage, {
       };
       playbackRaf = requestAnimationFrame(tick);
     };
-    const add = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '＋记录关键帧' });
-    add.onclick = () => { stopPlayback(); addKeyframe(stage, currentFrame); history.commit(); paintTimeline(); onChange(); };
+    const add = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '＋当前对象关键帧' });
+    add.onclick = () => {
+      stopPlayback();
+      addKeyframe(stage, currentFrame, selectedId ? [selectedId] : []);
+      history.commit(); paintTimeline(); director.redraw(); onChange();
+    };
+    const addAll = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '＋全场关键帧' });
+    addAll.onclick = () => { stopPlayback(); addKeyframe(stage, currentFrame); history.commit(); paintTimeline(); director.redraw(); onChange(); };
     const transport = document.createElement('div');
     transport.className = 'previz-transport';
-    transport.append(Object.assign(document.createElement('b'), { textContent: '关键帧时间线' }), play, frame, add);
+    transport.append(Object.assign(document.createElement('b'), { textContent: '关键帧时间线' }), play, frame, add, addAll);
     const scrub = document.createElement('div');
     scrub.className = 'previz-scrub'; scrub.append(range);
     const ruler = document.createElement('div'); ruler.className = 'previz-ruler';
@@ -1149,9 +1231,38 @@ export function previzPanel(stage, {
       const lane = document.createElement('div'); lane.className = 'previz-track-lane';
       for (const kf of stage.keyframes || []) {
         if (!kf.values?.[item.id]) continue;
-        const jump = Object.assign(document.createElement('button'), { className: 'previz-diamond', title: `${kf.frame}f` });
+        const jump = Object.assign(document.createElement('button'), { className: 'previz-diamond', title: `${kf.frame}f · 拖动改时刻 · 右键删除` });
         jump.style.left = `${kf.frame / maxFrame * 100}%`;
         jump.onclick = () => { stopPlayback(); currentFrame = kf.frame; showFrame(); paintTimeline(); };
+        jump.oncontextmenu = (event) => {
+          event.preventDefault(); event.stopPropagation();
+          delete kf.values[item.id];
+          if (!Object.keys(kf.values || {}).length) stage.keyframes = stage.keyframes.filter((entry) => entry !== kf);
+          history.commit(); paintTimeline(); director.redraw(); onChange();
+        };
+        jump.onpointerdown = (event) => {
+          if (event.button !== 0) return;
+          event.stopPropagation();
+          jump.setPointerCapture(event.pointerId);
+          const rect = lane.getBoundingClientRect(), startFrame = kf.frame;
+          let moved = false, nextFrame = startFrame;
+          const move = (moveEvent) => {
+            const ratio = Math.max(0, Math.min(1, (moveEvent.clientX - rect.left) / Math.max(1, rect.width)));
+            nextFrame = Math.round(ratio * maxFrame); moved ||= nextFrame !== startFrame;
+            jump.style.left = `${nextFrame / maxFrame * 100}%`; jump.title = `${nextFrame}f · 松开确认`;
+          };
+          const up = () => {
+            jump.removeEventListener('pointermove', move); jump.removeEventListener('pointerup', up);
+            if (!moved) return;
+            const collision = stage.keyframes.find((entry) => entry !== kf && entry.frame === nextFrame);
+            if (collision) { collision.values[item.id] = kf.values[item.id]; delete kf.values[item.id]; }
+            else kf.frame = nextFrame;
+            if (!Object.keys(kf.values || {}).length) stage.keyframes = stage.keyframes.filter((entry) => entry !== kf);
+            stage.keyframes.sort((a, b) => a.frame - b.frame);
+            currentFrame = nextFrame; history.commit(); paintTimeline(); director.redraw(); onChange();
+          };
+          jump.addEventListener('pointermove', move); jump.addEventListener('pointerup', up);
+        };
         lane.append(jump);
       }
       const playhead = document.createElement('i'); playhead.className = 'previz-playhead'; playhead.style.left = `${currentFrame / maxFrame * 100}%`; lane.append(playhead);
@@ -1170,6 +1281,14 @@ export function previzPanel(stage, {
       lensRow.append(btn(`${mm}`, Number(stage.cam.lens) === mm, () => { stage.cam.lens = mm; }));
     }
     controls.append(lensRow);
+
+    const easingRow = document.createElement('div');
+    easingRow.className = 'previz-row';
+    easingRow.append(Object.assign(document.createElement('span'), { className: 'previz-cap', textContent: '路径节奏' }));
+    for (const [value, label] of [['easeInOut', '缓入缓出'], ['linear', '匀速'], ['easeIn', '渐加速'], ['easeOut', '渐减速']]) {
+      easingRow.append(btn(label, stage.motionEasing === value, () => { stage.motionEasing = value; }));
+    }
+    controls.append(easingRow);
 
     const focusRow = document.createElement('div');
     focusRow.className = 'previz-row';
