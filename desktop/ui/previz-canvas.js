@@ -169,7 +169,7 @@ export function blockingCanvas(stage, { size = 320, onChange = () => {} } = {}) 
     if (stage.backdrop?.image) {
       layer.append(el('image', {
         href: stage.backdrop.image, x: 0, y: 0, width: size, height: size,
-        preserveAspectRatio: 'xMidYMid slice', class: 'previz-top-backdrop', 'pointer-events': 'none'
+        preserveAspectRatio: 'none', class: 'previz-top-backdrop', 'pointer-events': 'none'
       }));
       layer.append(el('rect', { x: 0, y: 0, width: size, height: size, class: 'previz-top-shade', 'pointer-events': 'none' }));
     }
@@ -216,21 +216,23 @@ export function blockingCanvas(stage, { size = 320, onChange = () => {} } = {}) 
         continue;
       }
       const g = el('g');
-      if (mk.textureUrl || mk.thumbnail) {
+      const hasTexture = Boolean(mk.textureUrl || mk.thumbnail);
+      if (hasTexture) {
         const image = el('image', {
-          href: mk.textureUrl || mk.thumbnail, x: s.x(mk.x) - 18, y: s.y(mk.y) - 26,
-          width: 36, height: 36, preserveAspectRatio: 'xMidYMid meet', class: 'previz-top-asset'
+          href: mk.textureUrl || mk.thumbnail, x: s.x(mk.x) - 35, y: s.y(mk.y) - 55,
+          width: 70, height: 70, preserveAspectRatio: 'xMidYMid meet', class: 'previz-top-asset'
         });
         draggable(image, (mx, my) => { mk.x = Number(mx.toFixed(2)); mk.y = Number(my.toFixed(2)); });
         g.append(image);
       }
-      g.append(el('rect', {
-        x: s.x(mk.x) - 9, y: s.y(mk.y) - 9, width: 18, height: 18, rx: 4, class: 'previz-mark'
-      }));
+      const markNode = el('rect', {
+        x: s.x(mk.x) - 9, y: s.y(mk.y) - 9, width: 18, height: 18, rx: 4, class: `previz-mark${hasTexture ? ' textured' : ''}`
+      });
+      g.append(markNode);
       const t = el('text', { x: s.x(mk.x), y: s.y(mk.y) + 4, class: 'previz-mark-label', 'pointer-events': 'none' });
       t.append(document.createTextNode((mk.name || '?').slice(0, 2)));
       g.append(t);
-      draggable(g.firstChild, (mx, my) => {
+      draggable(markNode, (mx, my) => {
         mk.x = Number(mx.toFixed(2));
         mk.y = Number(my.toFixed(2));
       });
@@ -336,15 +338,16 @@ export function blockingCanvas(stage, { size = 320, onChange = () => {} } = {}) 
       });
       g.append(tip);
 
-      if (sub.textureUrl || sub.thumbnail) {
+      const hasTexture = Boolean(sub.textureUrl || sub.thumbnail);
+      if (hasTexture) {
         const image = el('image', {
-          href: sub.textureUrl || sub.thumbnail, x: s.x(sub.x) - 22, y: s.y(sub.y) - 51,
-          width: 44, height: 58, preserveAspectRatio: 'xMidYMax meet', class: 'previz-top-character'
+          href: sub.textureUrl || sub.thumbnail, x: s.x(sub.x) - 45, y: s.y(sub.y) - 112,
+          width: 90, height: 120, preserveAspectRatio: 'xMidYMax meet', class: 'previz-top-character'
         });
         draggable(image, (mx, my) => { sub.x = Number(mx.toFixed(2)); sub.y = Number(my.toFixed(2)); });
         g.append(image);
       }
-      const dot = el('circle', { cx: s.x(sub.x), cy: s.y(sub.y), r: 13, class: 'previz-sub' });
+      const dot = el('circle', { cx: s.x(sub.x), cy: s.y(sub.y), r: 13, class: `previz-sub${hasTexture ? ' textured' : ''}` });
       draggable(dot, (mx, my) => {
         sub.x = Number(mx.toFixed(2));
         sub.y = Number(my.toFixed(2));
