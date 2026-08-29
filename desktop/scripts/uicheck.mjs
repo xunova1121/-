@@ -238,6 +238,36 @@ const hud = await page.evaluate(() => {
 check('右下角报了结果，且数字不是 0', /分镜完成/.test(hud) && !/\b0 /.test(hud), hud);
 
 /**
+ * ══════════ 开跑之前那张清单，真的画出来了吗 ══════════
+ *
+ * 服务端那边已经验过判据本身。这里补的是**它有没有到屏幕上** ——
+ * 清单是异步拉的，接口对了但渲染没接上的话，服务端自检照样全绿，
+ * 而用户看到的是那块地方什么都没有。
+ */
+console.log('\n开跑之前的清单');
+{
+  await page.goto(`${url}#/studio/${proj.id}`);
+  await page.waitForTimeout(1200);
+  await page.locator('.nav-step', { hasText: '视频生成' }).first().click();
+  await page.waitForTimeout(2000);
+  const box = page.locator('.stepcheck').first();
+  check('这一步的按钮上面有一块清单', (await box.count()) > 0);
+  if (await box.count()) {
+    const txt = await box.innerText();
+    check('说得出这一步要跑几镜', /这一步 \d+ 镜/.test(txt), txt.slice(0, 100));
+    /**
+     * 这个夹具里分镜出完了但图没出（走查只跑到分镜），
+     * 所以"还没有分镜图"这条 blocker 必须在。
+     * 它不在的话，说明清单虽然画出来了，但判据没接上真实数据。
+     */
+    check('点出了"还没出图就出视频"这条', /还没有分镜图/.test(txt), txt.slice(0, 200));
+    check('而且说了会怎样，不只是报一个数',
+      /最贵的一步|接不上/.test(txt), txt.slice(0, 300));
+  }
+}
+
+
+/**
  * ── 预演台 ──
  *
  * 这块是**拖出来**的：单元测试能验几何算得对不对，验不了

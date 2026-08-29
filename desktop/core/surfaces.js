@@ -416,6 +416,14 @@ export const CAPABILITIES = [
     why: ''
   },
   {
+    id: 'stepcheck',
+    name: '开跑之前先说清楚：这一步花多少、有哪几处该先改',
+    api: 'GET /projects/:id/stepcheck',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
     id: 'blockframe',
     name: '预演台拼一张构图底图，出图时带上它',
     api: 'POST /projects/:id/shots/:shotId/blockframe',

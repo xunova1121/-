@@ -35,6 +35,9 @@ import * as variants from './variants.js';
 import * as anglesLib from './angles.js';
 import * as previz from './previz.js';
 import * as blockframe from './blockframe.js';
+import * as stepcheck from './stepcheck.js';
+import * as estimate from './estimate.js';
+import * as pricing from '../pricing.js';
 import * as siteMod from './site.js';
 import * as outline from './outline.js';
 import * as oss from '../oss.js';
@@ -1167,6 +1170,41 @@ export function qualityReport(projectId) {
     lintResults: shotlint.lintShots(project.shots || [], { bible: project.bible }),
     threshold: settings.get('consistencyThreshold') ?? 75
   });
+}
+
+/**
+ * 开跑之前这一步该知道什么。清单 + 这一步要花多少。
+ *
+ * ⚠ 钱和清单**必须一起给**。只给清单的话，最省事的做法永远是直接按「开始」；
+ * 把"现在改免费、跑完再改要重花一次"摆出来，它才是一个决定。
+ */
+export function stepCheck(projectId, stage, { regenerate = false, only = null } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const result = stepcheck.check(project, stage, { regenerate, only });
+  const plan = estimate.forStage({
+    shots: result.targets ? (project.shots || []) : [],
+    stage,
+    routing: adapters.resolvedRouting(),
+    regenerate,
+    maxRetries: settings.get('consistencyMaxRetries') ?? 2
+  });
+  const rates = settings.get('rates') || {};
+  /**
+   * ⚠ 单价是**用户自己填的**，多数时候是空的。
+   *
+   * 算不出钱时 fmtMoney 回 null —— 这时候整句"要花多少"就不能说，
+   * 但清单照旧要给。编一个数字比不说更坏：他会照着那个数做决定。
+   */
+  const money = pricing.fmtMoney(estimate.price(plan, rates)?.base?.cny) || '';
+  return {
+    ...result,
+    money,
+    // 完整那句（含"复核不过要重出"之类）留给界面展开时用
+    detail: estimate.describe(plan, rates),
+    summary: stepcheck.summary(result, { money }),
+    skipCost: stepcheck.costOfSkipping(result, money)
+  };
 }
 
 export function bibleReadiness(project) {

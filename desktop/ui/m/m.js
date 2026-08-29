@@ -740,7 +740,30 @@ function paintFlow() {
           class: 'btn sm',
           disabled: job.running,
           // cap:run-stage
-          onclick: () => runStage(s.id, s.label)
+          onclick: async () => {
+            /**
+             * ══════════ 开跑之前先看一眼清单 ══════════
+             *
+             * ⚠ 手机上**更需要**这一下，不是更不需要。
+             *
+             * 出门在外按这一下的人，没法当场去翻分镜表核对"这几镜到底
+             * 排没排位、选没选技法卡"。而这一步照样真花钱 ——
+             * 花完之后他离能改的地方（电脑）更远。
+             *
+             * 电脑上那份是常驻清单（摆在按钮上面，看不看由人）；
+             * 手机上屏幕小、摆不下，所以做成**按下去那一刻**给一次。
+             * 有问题才拦，干净就直接跑 —— 干净时还弹一下等于纯骚扰。
+             */
+            const sc = await stepCheckFor(s.id);
+            if (sc && sc.items.length) {
+              const lines = sc.items.slice(0, 4).map((it) =>
+                `${it.level === 'blocker' ? '【要先处理】' : it.level === 'warn' ? '【建议先改】' : '【可选】'}${it.what}\n${it.fix}`);
+              const tail = sc.skipCost ? `\n\n${sc.skipCost}` : '';
+              // eslint-disable-next-line no-alert
+              if (!confirm(`${sc.summary}\n\n${lines.join('\n\n')}${tail}\n\n还是要现在跑吗？`)) return;
+            }
+            runStage(s.id, s.label);
+          }
         }, st === 'pending' ? '开始' : '继续'),
         // 出门在外最想按的其实是这个：把剩下几步一次串完，回去直接看成片。
         // 从这一步往后跑，前面几步的产出原样保留 —— 不重跑、不重复计费
@@ -1253,6 +1276,22 @@ function mRateFiller(missing, after) {
  * 拿服务端算好的一行字直接用 —— 手机上不重新拼一遍措辞，
  * 两端说法不一致比少一句话更糟。
  */
+/**
+ * 这一步开跑之前该知道什么。拿服务端算好的那一份 ——
+ * 手机上不重新判一遍，两端说法不一致比少一句话更糟。
+ *
+ * 拿不到（离线、超时）就回 null，照旧能跑 —— 检查不上不该把功能堵死。
+ */
+async function stepCheckFor(stage) {
+  try {
+    // cap:stepcheck
+    const r = await api(`/projects/${project.id}/stepcheck?stage=${encodeURIComponent(stage)}`);
+    return r && Array.isArray(r.items) ? r : null;
+  } catch {
+    return null;
+  }
+}
+
 async function costLineFor(stage, { from = null } = {}) {
   try {
     const q = from ? `stage=all&from=${encodeURIComponent(from)}` : `stage=${encodeURIComponent(stage)}`;

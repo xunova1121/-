@@ -786,6 +786,59 @@ export default {
        * 重查一次不产生任何生成费用，刚在「接口地址」里填对路径的话，
        * 这一下能把之前卡住的全收回来。
        */
+      /**
+       * ══════════ 开跑之前的那张清单 ══════════
+       *
+       * ⚠ **摆在按钮上面，而且不是弹窗。**
+       *
+       * 弹窗每次都拦一下，三次之后就变成"闭着眼点确定"—— 那时候它连
+       * blocker 一起被跳过了，比没有更坏。摆成一块常驻的、就在按钮上面的
+       * 清单，看不看由人，但它一直在那儿。
+       *
+       * 只有 blocker 才真的拦一下（那种跑下去几乎一定要重来的）。
+       *
+       * ⚠ 没问题时也要显示"检查过了，没发现问题"——
+       * 整块消失的话，"这里什么都没有"和"检查过了、干净的"就分不出来，
+       * 而前者会让人自己再查一遍，那正是这个功能要消灭的往返。
+       */
+      const stepCheckBox = h('div', { class: 'stepcheck' });
+      if (['assets', 'video', 'voice', 'compose'].includes(state.stage)) {
+        api(`/projects/${project.id}/stepcheck?stage=${state.stage}`).then((r) => {
+          if (!r) return;
+          clear(stepCheckBox);
+          const tone = r.blockers ? 'bad' : r.warns ? 'iffy' : 'ok';
+          add(stepCheckBox,
+            h('div', { class: `stepcheck-head ${tone}` }, r.summary),
+            ...r.items.map((it) => h('div', { class: `stepcheck-item ${it.level}` },
+              h('div', { class: 'stepcheck-what' },
+                h('span', { class: `stepcheck-dot ${it.level}` },
+                  it.level === 'blocker' ? '拦' : it.level === 'warn' ? '建议' : '可选'),
+                it.what),
+              h('div', { class: 'stepcheck-why' }, it.why),
+              h('div', { class: 'stepcheck-fix' }, `→ ${it.fix}`),
+              // 点镜号直接跳过去改 —— 说了"第 7、12、19 镜"却要人自己去翻，
+              // 等于把清单的价值折掉一半
+              it.shots?.length
+                ? h('div', { class: 'stepcheck-shots' },
+                    '涉及：',
+                    ...it.shots.slice(0, 12).map((n) => h('button', {
+                      class: 'btn ghost xs',
+                      onclick: () => {
+                        const card = document.querySelector(`[data-shot-index="${n}"]`);
+                        if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      }
+                    }, `第 ${n} 镜`)),
+                    it.shots.length > 12 ? h('span', { class: 'muted' }, ` 等 ${it.shots.length} 镜`) : null)
+                : null)),
+            /**
+             * 支点那句话。没有它的话，用户看到一堆黄字，
+             * 最省事的做法永远是直接按「开始」。
+             */
+            r.skipCost ? h('div', { class: 'stepcheck-cost' }, r.skipCost) : null);
+          state.lastStepCheck = r;
+        }).catch(() => {});
+      }
+
       const pendingBox = pendingCount && state.stage === 'video'
         ? h('div', { class: 'fail-box', style: 'margin-top:12px' },
             h('div', { class: 'fail-head' }, `${pendingCount} 个任务已提交，但没取回来`),
@@ -841,6 +894,17 @@ export default {
               onclick: () => {
                 // 原来这里写的是"按镜数计费且耗时较长"—— 一句正确但没有信息量的话。
                 // 现在把真数放进去（没填单价就放用量），人才有得判断
+                /**
+                 * ⚠ 只有 blocker 才拦。
+                 *
+                 * 把 warn 也拿来拦的话，这颗按钮会天天弹框 ——
+                 * 三次之后人就学会闭着眼点确定，那时候 blocker 一起被跳过了。
+                 */
+                const sc = state.lastStepCheck;
+                if (sc?.blockers && sc.stage === state.stage) {
+                  const first = sc.items.find((i) => i.level === 'blocker');
+                  if (!confirm(`${first.what}。\n\n${first.why}\n\n${first.fix}\n\n还是要现在跑吗？`)) return;
+                }
                 if (isCostly && missing.length > 3
                   && !costConfirm(`将为 ${missing.length} 个镜头生成视频，耗时较长。确定？`, state.stage)) return;
                 runStage(state.stage);
@@ -861,6 +925,8 @@ export default {
               : null
           )
         ),
+        // cap:stepcheck
+        stepCheckBox,
         total
           ? h('div', {},
               h('div', { class: 'progress-bar' }, h('div', { class: 'progress-fill', style: `width:${pct}%` })),
@@ -2214,7 +2280,12 @@ export default {
         }
 
         const card =
-          h('article', { class: `shot-card ${flagged ? 'flagged' : ''} ${failed ? 'failed' : ''}` },
+          h('article', {
+            class: `shot-card ${flagged ? 'flagged' : ''} ${failed ? 'failed' : ''}`,
+            // 开跑前清单里的「第 7 镜」按钮靠它跳过来。没有这个属性的话，
+            // 那颗按钮点了**什么都不会发生**，而且不报错
+            'data-shot-index': String(shot.index)
+          },
             h('div', { class: 'shot-thumb' }, thumb, liveEl),
             h('div', { class: 'shot-body' },
               h('div', { class: 'shot-head' },

@@ -8618,6 +8618,142 @@ section('传上去的照片：要真的用上，而且只用脸');
  * 而出图是自动跑几十镜的，没人能一镜一镜手动来。
  */
 /**
+ * ══════════ 开跑之前的那张清单 ══════════
+ *
+ * 这条流水线上每一步都真花钱。而绝大多数返工的原因，在按下「开始」之前
+ * 就已经明明白白摆在数据里了 —— 没排位、没选技法卡、台词根本念不完、
+ * 首帧图是照旧描述出的。
+ *
+ * ⚠ 这一节里**最重要的不是"检查得出问题"，是"没问题时闭嘴"**。
+ *
+ * 一个动不动就报一片黄的清单，三次之后就被整块跳过 —— 连真正该拦的
+ * 那条一起跳过，比没有更坏。所以这里既验"该说的说了"，
+ * 也验"干净的项目上一条都不说"。
+ */
+section('开跑之前：这一步花多少、哪几处该先改');
+{
+  const sck = await import('../core/pipeline/stepcheck.js');
+  const mkShot = (i, extra = {}) => ({
+    id: `s${i}`, index: i, scene: '码头', characters: ['阿澜'],
+    description: '阿澜走向栈桥', camera: '中景', duration: 4,
+    skills: ['act-walk'],
+    stage: { cam: { x: 0, y: -4, height: 1.6, lens: 35 }, subjects: [{ name: '阿澜', x: 0, y: 0 }] },
+    ...extra
+  });
+  const bible = {
+    style: { anchor: '国风', palette: '青灰', negative: '' },
+    characters: [{ name: '阿澜', voice: 'v1' }], scenes: [], props: []
+  };
+
+  /**
+   * ⚠ **干净的项目上一条都不报。**这条是整节的地基：它一红，
+   * 整个功能就该扔掉重做 —— 没人会看一个天天喊狼来了的清单。
+   */
+  const clean = sck.check({ bible, shots: [mkShot(1), mkShot(2)] }, 'assets');
+  check('干净的项目上，一条都不报', clean.items.length === 0,
+    JSON.stringify(clean.items.map((i) => i.what)));
+  /**
+   * ⚠ 但**要明说"检查过了"**，不能回空串。
+   * 整块消失的话，"这里什么都没有"和"检查过了、干净的"分不出来，
+   * 而前者会让人自己再查一遍 —— 那正是这个功能要消灭的往返。
+   */
+  check('干净时也要说一句"检查过了"，不能整块消失',
+    /没发现问题/.test(sck.summary(clean)), sck.summary(clean));
+
+  // ── 出图之前 ──
+  const noSkill = sck.check({ bible, shots: [mkShot(1, { skills: [] }), mkShot(2)] }, 'assets');
+  const skillItem = noSkill.items.find((i) => i.id === 'no-skill');
+  check('出图前：一张技法卡都没选的镜头会被点出来', Boolean(skillItem),
+    JSON.stringify(noSkill.items.map((i) => i.id)));
+  /**
+   * ⚠ 每一条都必须回答三件事：**是什么、会怎样、怎么改**。
+   * 缺"会怎样"的提示不如不做 —— 它只会训练用户无视所有提示。
+   */
+  check('而且说得出"会怎样"和"怎么改"，不是光报一个数',
+    Boolean(skillItem?.why) && Boolean(skillItem?.fix) && skillItem.why.length > 20,
+    JSON.stringify({ why: skillItem?.why?.slice(0, 30), fix: skillItem?.fix?.slice(0, 20) }));
+  check('点得出是哪几镜（不然要人自己去翻）',
+    JSON.stringify(skillItem?.shots) === JSON.stringify([1]), JSON.stringify(skillItem?.shots));
+
+  const noStage = sck.check({ bible, shots: [mkShot(1, { stage: null })] }, 'assets');
+  check('出图前：没排位的镜头会被点出来',
+    noStage.items.some((i) => i.id === 'no-stage'), JSON.stringify(noStage.items.map((i) => i.id)));
+
+  // ── 出视频之前 ──
+  const vid = sck.check({ bible, shots: [mkShot(1, { imagePath: null })] }, 'video');
+  const block = vid.items.find((i) => i.id === 'no-first-frame');
+  /**
+   * ⚠ 这条必须是 blocker：没有首帧图，视频的人脸服装场景全靠文字重新发挥，
+   * 而出视频是全流程里最贵的一步 —— 跑下去几乎一定要重做。
+   */
+  check('出视频前：还没出图是 blocker，不是"建议"',
+    block?.level === 'blocker', JSON.stringify({ level: block?.level }));
+  check('而且计到了 blockers 上（界面靠它决定拦不拦）', vid.blockers === 1, String(vid.blockers));
+
+  const staleFrame = sck.check({ bible, shots: [mkShot(1, {
+    imagePath: '/a.png', imageAt: '2026-01-01T00:00:00Z', editedAt: '2026-02-01T00:00:00Z'
+  })] }, 'video');
+  check('出视频前：描述改过而图是旧的，会被点出来',
+    staleFrame.items.some((i) => i.id === 'stale-frame'),
+    JSON.stringify(staleFrame.items.map((i) => i.id)));
+
+  const longLine = sck.check({ bible, shots: [mkShot(1, {
+    imagePath: '/a.png', duration: 2,
+    dialogue: '这句话很长很长很长很长很长很长很长很长很长很长很长很长很长很长'
+  })] }, 'video');
+  check('出视频前：台词在这个时长里念不完，会被点出来',
+    longLine.items.some((i) => i.id === 'dialogue-overflow'),
+    JSON.stringify(longLine.items.map((i) => i.id)));
+
+  // ── 配音之前 ──
+  const voice = sck.check({ bible, shots: [mkShot(1, { dialogue: '设备正常。', speaker: '' })] }, 'voice');
+  check('配音前：有台词没说是谁在说，会被点出来',
+    voice.items.some((i) => i.id === 'no-speaker'), JSON.stringify(voice.items.map((i) => i.id)));
+
+  /**
+   * ⚠ **只看这一步真要跑的那些镜头。**
+   *
+   * 已经出过图的那几镜有没有选技法卡，跟"这一次出图"毫无关系 ——
+   * 报了只会让清单一直挂着几条永远消不掉的黄字，而消不掉的提醒
+   * 会被当成噪音，连带着新出现的那条也被无视。
+   */
+  const partial = sck.check({ bible, shots: [
+    mkShot(1, { imagePath: '/done.png', skills: [] }), // 已经出过图，这次不跑它
+    mkShot(2)
+  ] }, 'assets');
+  check('只看这一步真要跑的那几镜（已出图的不算数）',
+    partial.items.length === 0 && partial.targets === 1,
+    JSON.stringify({ items: partial.items.map((i) => i.id), targets: partial.targets }));
+  /** 整步重跑时它们又都算数了 —— 那时候确实要重出 */
+  const redo = sck.check({ bible, shots: [
+    mkShot(1, { imagePath: '/done.png', skills: [] }), mkShot(2)
+  ] }, 'assets', { regenerate: true });
+  check('整步重跑时，已出图的那几镜又算数了',
+    redo.targets === 2 && redo.items.some((i) => i.id === 'no-skill'),
+    JSON.stringify({ targets: redo.targets }));
+
+  /**
+   * ⚠ **分级不能膨胀。**把"可以更好"标成 warn 的话，用户看到一片黄，
+   * 然后学会整块跳过 —— 连真正的 blocker 一起跳过。
+   */
+  const levels = new Set([...noSkill.items, ...vid.items, ...voice.items].map((i) => i.level));
+  check('分级只有三档，没有多出来的',
+    [...levels].every((l) => ['blocker', 'warn', 'tip'].includes(l)), JSON.stringify([...levels]));
+
+  /**
+   * 支点那句话：清单只是信息，"现在改免费、跑完再改要重花一次"
+   * 才把它变成一个决定。没有它的话，最省事的做法永远是直接按「开始」。
+   */
+  check('有问题且算得出钱时，说得出"不改的代价"',
+    /现在改是免费的/.test(sck.costOfSkipping(noSkill, '¥8.40')), sck.costOfSkipping(noSkill, '¥8.40'));
+  /** ⚠ 算不出钱时**不能编一个**：他会照着那个数做决定 */
+  check('算不出钱时就不说这句（编个数字比不说更坏）',
+    sck.costOfSkipping(noSkill, '') === '', sck.costOfSkipping(noSkill, ''));
+  check('没问题时也不说这句（没有代价可言）',
+    sck.costOfSkipping(clean, '¥8.40') === '', sck.costOfSkipping(clean, '¥8.40'));
+}
+
+/**
  * ══════════ 预演台排的位，到底有没有改变出图 ══════════
  *
  * 这一整节回答的是**唯一重要的那个问题**：把人往左拖两米，出来的图变不变。

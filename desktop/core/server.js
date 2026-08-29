@@ -1250,6 +1250,17 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
       }
       return undefined;
     }
+    /**
+     * 开跑之前这一步该知道什么：清单 + 要花多少。
+     *
+     * 纯读，不调任何模型、不花钱 —— 界面每次进这一步都会拉一次，
+     * 慢一点或者要钱的话，它就会被做成"点一下才查"，而那时候没人会点。
+     */
+    if (b && c === 'stepcheck' && method === 'GET') {
+      const stage = url.searchParams.get('stage') || 'assets';
+      const regenerate = url.searchParams.get('regenerate') === '1';
+      return json(res, 200, studio.stepCheck(b, stage, { regenerate }));
+    }
     if (b && c === 'tasks' && method === 'GET') {
       return json(res, 200, { pending: studio.listPendingTasks(b) });
     }
