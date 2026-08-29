@@ -146,7 +146,16 @@ export function sheetOf(variant, angleId) {
   if (!variant) return null;
   if (!angleId || angleId === PRIMARY) {
     return variant.sheetPath || variant.sheetUrl
-      ? { id: PRIMARY, sheetPath: variant.sheetPath || null, sheetUrl: variant.sheetUrl || null }
+      ? {
+        id: PRIMARY,
+        sheetPath: variant.sheetPath || null,
+        sheetUrl: variant.sheetUrl || null,
+        // ⚠ 这一条以前漏了。下游要靠它分辨"这张是用户自己传的照片"还是
+        // "模型出的设定图"（见 consistency.refPlan）—— 漏掉时靠 `||` 短路
+        // 侥幸没出错，但那是运气：谁哪天把 `||` 改成 `??` 就当场坏，
+        // 而坏的样子是"传的照片不再被当成上传的"，没有任何地方会红。
+        sheetSource: variant.sheetSource || null
+      }
       : null;
   }
   return (variant.angles || []).find((a) => a.id === angleId) || null;

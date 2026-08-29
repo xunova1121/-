@@ -2175,8 +2175,22 @@ export default {
                   // 不然重出来还是不像的时候，根本不知道是提示词的问题还是压根没带参考图
                   h('div', { class: 'shot-used' },
                     '单独重出会自动带上本镜的设定集：场景基准图 + 出场角色设定图 + 点到的道具图'),
-                  sc.image && shot.bibleRefs?.length
-                    ? h('div', { class: 'shot-used' }, `上次出图参考：${shot.bibleRefs.join('、')}`)
+                  sc.image
+                    ? h('div', { class: 'shot-used' }, shot.bibleRefs?.length
+                        ? `上次出图参考：${shot.bibleRefs.join('、')}`
+                        : shot.refsAvailable > 0
+                          ? `设定集有 ${shot.refsAvailable} 张图可用`
+                            + (shot.refsAvailableLabels?.length ? `（${shot.refsAvailableLabels.join('、')}）` : '')
+                            + '，但上次一张都没发。'
+                            + (shot.refBlockedHint ? `原因：${shot.refBlockedHint}。打开它再重出这一镜。` : '')
+                            + ((shot.refsAvailableLabels || []).some((x) => x.includes('你传的'))
+                              ? shot.refPolicy !== 'uploads-always'
+                                ? '这是旧版记录；请重出这一镜后再核对。'
+                                : '上传照片本应无条件发送却未发出，请查看完整请求记录。'
+                              : '')
+                          : shot.refsAvailable === 0
+                            ? '这一镜引用的角色或场景还没有参考图，请先生成或上传。'
+                            : '早期生成记录没有保存参考图状态，重出一次即可确认。')
                     : null,
                   sc.video && shot.videoRefs?.length
                     ? h('div', { class: 'shot-used' }, `上次出视频参考：${shot.videoRefs.join('、')}`)

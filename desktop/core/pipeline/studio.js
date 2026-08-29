@@ -197,6 +197,14 @@ function usableRef(ref) {
   return ref;
 }
 
+const SIGN_MARGIN_MS = 5 * 60 * 1000;
+function sendableRef(ref) {
+  if (!ref) return null;
+  const match = /[?&]Expires=(\d+)/i.exec(String(ref));
+  if (!match) return ref;
+  return Number(match[1]) * 1000 - Date.now() > SIGN_MARGIN_MS ? ref : null;
+}
+
 /** 一张内联图大到该想办法了。400KB 的 base64 ≈ 300KB 的图 */
 const FAT_INLINE = 400 * 1024;
 const fatInline = (u) => typeof u === 'string' && u.startsWith('data:') && u.length > FAT_INLINE;
@@ -269,7 +277,7 @@ async function refreshRefs(project, refs, { onEvent } = {}) {
 
   for (let i = 0; i < images.length; i += 1) {
     const fat = tooFat(images[i]);
-    if (usableRef(images[i]) && !fat) continue;
+    if (sendableRef(images[i]) && !fat) continue;
     const local = refs.paths?.[i];
     const label = refs.labels?.[i] || `第 ${i + 1} 张`;
     if (!local || !fs.existsSync(local)) {
@@ -303,12 +311,14 @@ async function refreshRefs(project, refs, { onEvent } = {}) {
     });
   }
 
-  const keep = images.map((u, i) => [u, i]).filter(([u]) => usableRef(u));
+  const keep = images.map((u, i) => [u, i]).filter(([u]) => sendableRef(u));
   return {
     ...refs,
     images: keep.map(([u]) => u),
-    labels: keep.map(([, i]) => refs.labels?.[i]).filter(Boolean),
-    paths: keep.map(([, i]) => refs.paths?.[i] ?? null)
+    labels: keep.map(([, i]) => refs.labels?.[i] ?? null),
+    paths: keep.map(([, i]) => refs.paths?.[i] ?? null),
+    kinds: keep.map(([, i]) => refs.kinds?.[i] ?? null),
+    sources: keep.map(([, i]) => refs.sources?.[i] ?? null)
   };
 }
 
@@ -356,7 +366,7 @@ export async function toModelRef(localPath, { onEvent, shrink = false } = {}) {
       const rel = path.relative(PROJECTS_DIR, localPath).split(path.sep).join('/');
       const key = rel.startsWith('..') ? `misc/${path.basename(localPath)}` : rel;
       const put = await oss.putFile(localPath, key);
-      OSS_KEYS.set(localPath, put.key);
+      rememberOssKey(localPath, put.key);
       const url = put.url;
       onEvent?.({ type: 'note', message: `参考图已上传到对象存储：${path.basename(localPath)}` });
       return url;
@@ -543,7 +553,7 @@ async function mirrorToOss(destPath, buf, onEvent) {
     // 落在项目目录之外的（比如画风预览图）也传，只是换个前缀，免得和项目产物混在一起
     const key = rel.startsWith('..') ? `misc/${path.basename(destPath)}` : rel;
     const put = await oss.putBuffer(key, buf, oss.contentTypeOf(destPath));
-    OSS_KEYS.set(destPath, put.key);
+    rememberOssKey(destPath, put.key);
     onEvent?.({ type: 'note', message: `已同步到对象存储：${path.basename(destPath)}` });
     /**
      * ⚠ 这里原来写的是 `return url` —— 而这个作用域里**根本没有 url**。
@@ -579,6 +589,19 @@ async function mirrorToOss(destPath, buf, onEvent) {
  */
 const OSS_KEYS = new Map();
 
+function fileSig(localPath) {
+  try {
+    const st = fs.statSync(localPath);
+    return String(st.mtimeMs) + `:` + String(st.size);
+  } catch {
+    return null;
+  }
+}
+
+function rememberOssKey(localPath, key) {
+  OSS_KEYS.set(localPath, { key, sig: fileSig(localPath) });
+}
+
 /**
  * 参考图要发给出图模型时，优先给公网地址。
  *
@@ -588,9 +611,10 @@ const OSS_KEYS = new Map();
  */
 export function publicUrlFor(localPath) {
   if (!localPath || !oss.ready()) return null;
-  const key = OSS_KEYS.get(localPath);
+  const hit = OSS_KEYS.get(localPath);
+  if (!hit || hit.sig !== fileSig(localPath)) return null;
   // 每次现签：私有桶那个地址是有期限的
-  return key ? oss.urlFor(key) : null;
+  return oss.urlFor(hit.key);
 }
 
 // ═══════════════════════ 设定集条目：三类共用的取值与提示词 ═══════════════════════
@@ -1308,6 +1332,7 @@ async function analyzeScriptRaw(projectId, {
   const inScope = outlineNow.beats.filter((b) => (chapter ? b.chapterId === chapter.id : true));
   const allPending = inScope.filter((b) => !b.locked).filter((b) => !scopeIds || scopeIds.includes(b.id));
   const SHOTS_PER_BATCH = 12;
+  const NO_OUTLINE_SHOT_CEILING = 30;
   const batching = inScope.length > 0;
   const takeByShots = (beats) => {
     const out = [];
@@ -1363,12 +1388,20 @@ async function analyzeScriptRaw(projectId, {
   // 镜头数跟着时长走。大纲那条路上人已经把每场多长定过了，按它反推最合理
   if (useOutline) shotCount = duration.planShotCount(targetSeconds);
 
+  if (!batching && shotCount > NO_OUTLINE_SHOT_CEILING) {
+    throw new Error(
+      `这个项目要一次拆 ${shotCount} 镜左右，而没有大纲的话只能一次全要，模型很可能因输出长度上限只返回半截内容。\n\n`
+      + '请先在「剧本」那一步点「从剧本生成大纲」，再回来拆分镜；有大纲后会按场次自动分批，已完成批次也会落盘保留。'
+    );
+  }
+
   const r = routing();
   onEvent?.({
     type: 'stage',
     stage: 'script',
     status: 'running',
     message: `${chapter ? `${chapter.title}：` : ''}${r.chat.provider} / ${r.chat.model} 拆分镜中…`
+      + (batching ? `（这一批 ${targetBeats.length} 场，还剩 ${restAfterThisBatch} 场）` : '')
   });
 
   const bibleDigest = JSON.stringify(
@@ -2753,6 +2786,10 @@ async function generateAssetsRaw(projectId, { only = null, chapterId = null, reg
           // 那时候这一镜的一致性只剩提示词撑着 —— 记下来，回头查得出
           t.refsSent = result.used?.refsSent ?? null;
           t.bibleRefs = result.refLabels || [];
+          t.refsAvailable = result.refsAvailable ?? null;
+          t.refsAvailableLabels = result.refsAvailableLabels || [];
+          t.refBlockedHint = result.refBlockedHint || '';
+          t.refPolicy = consistency.REF_POLICY;
           t.consistency = {
             score: result.verification?.score ?? null,
             pass: result.verification?.pass ?? null,
@@ -2939,17 +2976,25 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
   // 少带一样，重出的这一镜就会成为全片里唯一对不上的那一张。
   // 和批量出图保持一致：分镜图默认不走图生图（编辑模型会把这一镜画成
   // "被改过的角色设定图"）。开关在「设置 → 画面规格」。
-  const useEdit = settings.get('useEditModelForShots') === true;
-  // 过期的限时地址在这儿换掉，否则厂商只会回一句"下载不到你给的图"
+  const plan = consistency.refPlan();
+  const useEdit = plan.useEditModel;
+  const picked = consistency.pickRefs({
+    images: assembled.refImages,
+    labels: assembled.refLabels,
+    paths: assembled.refPaths,
+    sources: assembled.refSources,
+    kinds: assembled.refKinds
+  }, plan);
   const freshRefs =
-    !useEdit || settings.get('useReferenceImages') === false
-      ? { images: [], labels: [] }
+    !plan.send || !picked.images.length
+      ? { images: [], labels: [], kinds: [], sources: [] }
       : await refreshRefs(
         project,
-        { images: assembled.refImages, labels: assembled.refLabels, paths: assembled.refPaths },
+        { images: picked.images, labels: picked.labels, paths: picked.paths, kinds: picked.kinds, sources: picked.sources },
         { onEvent }
       );
   const refImages = freshRefs.images;
+  const faceRef = consistency.identityRef({ images: refImages, kinds: freshRefs.kinds, sources: freshRefs.sources });
   onEvent?.({ type: 'shot', shotId, status: 'running', message: `第 ${shot.index} 镜重出（${providerId} / ${model}）…` });
   if (refImages.length) {
     onEvent?.({ type: 'note', message: `参考设定集：${freshRefs.labels.join('、')}` });
@@ -2969,6 +3014,7 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
     aspectRatio: project.aspectRatio || null,
     seed,
     refImages,
+    identityRef: faceRef,
     label: `重出 #${shot.index}`,
     onEvent
   });
@@ -3005,7 +3051,11 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
       t.imageSize = size || null;
       t.modelUsed = `${providerId} / ${image.used?.model || model}`;
       t.refsSent = image.used?.refsSent ?? null;
-      t.bibleRefs = refImages.length ? assembled.refLabels : [];
+      t.bibleRefs = refImages.length ? freshRefs.labels : [];
+      t.refsAvailable = (assembled.refImages || []).length;
+      t.refsAvailableLabels = assembled.refDetailed || [];
+      t.refBlockedHint = plan.blockedHint || '';
+      t.refPolicy = consistency.REF_POLICY;
       t.consistency = {
         score: verification.score ?? null,
         pass: verification.pass ?? null,
@@ -5876,4 +5926,3 @@ export function compose(projectId, opts = {}) {
 export function runAll(projectId, opts = {}) {
   return meter.runIn({ projectId, stage: 'all' }, () => runAllRaw(projectId, opts));
 }
-

@@ -294,9 +294,11 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
    *
    * 所以这三个条件缺一不可：有图、没关掉参考图、而且这一步真的会发图。
    */
-  const willSendRefs = settings.get('useEditModelForShots') === true;
-  const hasRefs =
-    refs.images.length > 0 && settings.get('useReferenceImages') !== false && willSendRefs;
+  const plan = refPlan();
+  const kept = pickRefs(refs, plan);
+  const hasRefs = kept.images.length > 0;
+  /** 这一镜带的参考图里，有没有用户自己传的照片 */
+  const hasPhoto = kept.uploaded > 0;
 
   parts.push(shot.description || '');
 
@@ -308,7 +310,23 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
   for (const c of cast) {
     const v = variants.pickVariant(c, shot);
     const full = variants.describeWith(c, v);
-    if (hasRefs) {
+    if (hasPhoto) {
+      /**
+       * ⚠ 带的是**真人照片**时，说法要反过来：脸照着图，衣服照着字。
+       *
+       * 用户的原话："建议上传的人物脸保留、衣服是描述中的衣服"。
+       *
+       * 只说一句"外貌以参考图为准"的话，模型会把照片里的**衣服也一起抄过来** ——
+       * 而那多半是一件跟这部片子毫无关系的现代便装。于是每一镜都穿着那身，
+       * 设定集里写的"藏青立领制服"一次都没出现过。
+       *
+       * 所以这里把两件事分开点名：五官/发型/肤色跟着照片，
+       * 服装/配饰/场景跟着文字。而且服装那段要**完整给**，不能像下面那样
+       * 截前三段 —— 它现在是唯一的服装来源了。
+       */
+      parts.push(`【${c.name}】脸、发型、肤色以参考图那个人为准；`
+        + `服装与配饰按这里写的来：${full || '按设定集'}`);
+    } else if (hasRefs) {
       // 留三段而不是两段：第三段往往正好是服装配色，而配色是最强的身份线索之一。
       // 参考图给的是设定图（另一个姿势、另一个背景），文字仍然要把关键特征点住。
       const brief = full.split(/[，,。]/).slice(0, 3).join('，');
@@ -359,6 +377,12 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
     seed: (cast[0]?.seed ?? scene?.seed ?? 0) + (shot.index || 0),
     refImages: refs.images,
     refLabels: refs.labels,
+    /** 和 refImages 一一对应：每张图是"你传的"还是"模型出的" */
+    refSources: refs.sources,
+    /** 和 refImages 一一对应：每张图是景 / 角色 / 道具。挑"锁脸用的那一张"靠它 */
+    refKinds: refs.kinds,
+    /** 带来源的标签，供界面在"一张都没发"时说清那几张分别是谁 */
+    refDetailed: refs.detailed,
     // 和 refImages 一一对应。限时地址过期时靠它重新签一个（见 studio.js 的 refreshRefs）
     refPaths: refs.paths,
     cast: cast.map((c) => c.name),
@@ -417,7 +441,16 @@ export function collectReferences(bible, shot, { limit = 9 } = {}) {
     // 标签上带出角度，用户才知道这一镜为什么像 / 不像
     const base = variants.labelOf(item, v) || item.name;
     const name = angleId === anglesLib.PRIMARY ? base : `${base}·${anglesLib.labelOf(setKey, angleId)}`;
-    picked.push({ kind, name, url, path: localPath });
+    /**
+     * 带上**这张图哪来的**。
+     *
+     * "你自己传的照片"和"模型出的设定图"是两种东西，下游要分开对待：
+     * 传照片是一句毫不含糊的"我要这张脸"，而模型出的设定图只是一个近似。
+     * 不区分的话，"要不要发参考图"就只能一刀切 —— 而一刀切正是
+     * 上传功能形同虚设的原因（见下面 refMode）。
+     */
+    const src = angle?.sheetSource || v?.sheetSource || item.sheetSource || null;
+    picked.push({ kind, name, url, path: localPath, source: src });
   };
   const scene = matchScene(bible, shot);
   if (scene) ref('scene', scene);
@@ -433,8 +466,176 @@ export function collectReferences(bible, shot, { limit = 9 } = {}) {
     // 和 images 一一对应；过期的那张要靠它重新签（见 studio.js 的 refreshRefs）
     paths: unique.map((r) => r.path || null),
     // 界面上直接显示"这次带了谁"，用户才知道重出为什么像/不像
-    labels: unique.map((r) => `${glyph[r.kind]}·${r.name}`)
+    labels: unique.map((r) => `${glyph[r.kind]}·${r.name}`),
+    /** 每张是"你传的照片"还是"模型出的设定图"。refMode 靠它筛。 */
+    sources: unique.map((r) => r.source || null),
+    /**
+     * 每张是景 / 角色 / 道具。
+     *
+     * ⚠ 有些厂商的**身份通道只收一张图**：海螺的 subject_reference
+     * （字面写着 type: 'character'）、万相的 ref_img。而这个数组的顺序是
+     * 场景在最前、角色在后 —— 取 refImages[0] 就等于把**场景图**当成
+     * "这个人长什么样"发过去。那条通道是专门用来锁脸的，收错了就白开，
+     * 而且不报任何错：出来的人照旧不像，看不出是我们发错了图。
+     */
+    kinds: unique.map((r) => r.kind),
+    /**
+     * 带来源的标签，界面直接用。
+     *
+     * ⚠ 只说"有 3 张可以带"是不够的 —— 用户传了照片、结果一张没发，
+     * 他需要知道的是**那三张分别是谁、哪张是他传的**。
+     * 很可能他的照片压根不在这三张里（挂到了别的条目上、
+     * 或者这一镜引用的角色名和设定集对不上），而那是完全另一个问题。
+     * 只报一个数字，等于让他继续猜。
+     */
+    detailed: unique.map((r) => `${glyph[r.kind]}·${r.name}${r.source === 'upload' ? '（你传的）' : '（模型出的）'}`)
   };
+}
+
+/**
+ * ══════════ 出分镜图时，哪些参考图该发出去 ══════════
+ *
+ * 用户的原话："传本地图，出的分镜和自传图没有任何关系"。
+ *
+ * 他说的完全对，而且原因是结构性的：`useEditModelForShots` 这个开关
+ * 把**两件独立的事**捆在了一起 ——
+ *
+ *   ① 要不要带参考图
+ *   ② 要不要把模型换成图生图（编辑）模型
+ *
+ * 默认关掉它的理由（写在下面那段注释里）全是冲着 ② 去的：SeedEdit 这类
+ * 编辑模型拿到一张图是在**那张图上改**，出来的像"被改过的设定图"而不是那一场戏。
+ * 那个理由是对的。但它把 ① 也一起关掉了 —— 于是默认设置下，
+ * 出分镜图时**一张参考图都不发**，用户传的照片影响是零。
+ *
+ * 拆开之后：
+ *   auto（默认） 只发**你自己传的那些图**，模型不换。
+ *                传一张照片上去是一句毫不含糊的"我要这张脸"，
+ *                而模型出的设定图只是个近似，没必要冒 ② 那个险。
+ *   all          所有设定图都当参考发，模型不换。
+ *   edit         老行为：换成编辑模型 + 发图。构图会被带跑，慎用。
+ *   off          一张都不发（纯文字 + 稳定种子）。
+ *
+ * ⚠ 老的 useEditModelForShots=true 仍然等价于 edit —— 那些人的行为不能被悄悄改掉。
+ */
+
+/**
+ * ══════════ 这一镜是按哪一版规矩出的 ══════════
+ *
+ * 镜头卡上"带了哪几张参考图"那行，读的全是**出图那一刻存下来的**字段。
+ * 它是一份历史记录，不是当前状态 —— 改了代码、改了设置，它一个字都不会变，
+ * 除非把这一镜重出一次。
+ *
+ * 这件事坑过一整轮：上传图不再受开关管之后，用户更新了程序，
+ * 卡片上照旧写着"你传的那张没发出去，去改设置"—— 因为那行是**上一次出图时**
+ * 写下的，而上一次出图确实没发。他照着去改设置，改完还是那句话，
+ * 于是更确信"这功能是坏的"。而真正该做的只是重出一次。
+ *
+ * 所以每次出图都盖一个戳，界面靠它分清两件完全不同的事：
+ *   没有戳 → 这条记录是旧版留下的，它说什么都不作数，重出一次再看
+ *   有戳还是没发 → 那是真出了问题，得看请求记录，不是去改设置
+ */
+export const REF_POLICY = 'uploads-always';
+
+export function refPlan() {
+  const legacy = settings.get('useEditModelForShots') === true;
+  const mode = legacy ? 'edit' : (settings.get('refMode') || 'auto');
+  const refsOn = settings.get('useReferenceImages') !== false;
+  /**
+   * ⚠ **拦住参考图的开关有两个**，而它们在界面上隔着两个面板：
+   *
+   *   useReferenceImages  「设置 → 一致性引擎 → 出镜头图时带上角色设定图」（老开关）
+   *   refMode             「设置 → 画面规格 → 出分镜图时带哪些参考图」（新的）
+   *
+   * 关掉任何一个，结果都是"一张都没发"，而现象一模一样。
+   *
+   * 第一版的提示语只提了后者 —— 于是用户照着去改了那一项，
+   * 而真正关着的是前者，改完照旧不发。他会以为"改了没用，这功能是坏的"。
+   *
+   * 所以返回值里带上**到底是谁拦的**，界面照着说，不猜。
+   */
+  /**
+   * ══════════ 你自己传的照片，任何开关都拦不住 ══════════
+   *
+   * 到这里为止，一张上传的照片要被用上得闯过**四道关卡**：
+   *   ① useReferenceImages 得开着
+   *   ② refMode 不能是 off
+   *   ③ refMode 得是 auto 或 all
+   *   ④ 中途不能被"重出设定图"覆盖掉
+   * 任何一道没过，现象都一样：出来的脸跟他传的图毫无关系，
+   * 而界面（在补了几轮提示之前）一个字都不说。
+   *
+   * 用户为此来回折腾了七八轮，最后一句是"我服了"。他是对的 ——
+   * 问题不在他没找对开关，在于**这件事根本不该有开关**。
+   *
+   * 上传一张照片是一句**指名道姓的指令**："这个角色就长这样"。
+   * 而那两个开关表达的是**泛泛的偏好**："一般来说要不要带参考图"。
+   * 具体的指令压过泛泛的偏好 —— 这是设置该有的层级，反过来就是耍人。
+   *
+   * 所以：关掉开关只影响**模型自己出的**那些设定图；
+   * 用户亲手传的那张，永远发。真不想要，就在设定集里把它删掉/重出 ——
+   * 那才是"我不要这张图"的正确说法，而且是可见、可撤销的。
+   */
+  if (!refsOn) {
+    return {
+      mode: 'uploaded-only', send: true, useEditModel: false, onlyUploaded: true,
+      blockedBy: null,
+      note: '「出镜头图时把角色设定图作为参考图带上」是关着的，所以模型出的设定图不发；'
+        + '但你自己传的照片照发 —— 传一张图是指名道姓的指令，开关管不着它。'
+    };
+  }
+  if (mode === 'off') {
+    return {
+      mode: 'uploaded-only', send: true, useEditModel: false, onlyUploaded: true,
+      blockedBy: null,
+      note: '「出分镜图时带哪些参考图」选的是「一张都不发」，所以模型出的设定图不发；'
+        + '但你自己传的照片照发 —— 传一张图是指名道姓的指令，开关管不着它。'
+    };
+  }
+  if (mode === 'edit') return { mode, send: true, useEditModel: true, onlyUploaded: false, blockedBy: null };
+  if (mode === 'all') return { mode, send: true, useEditModel: false, onlyUploaded: false, blockedBy: null };
+  return { mode: 'auto', send: true, useEditModel: false, onlyUploaded: true, blockedBy: null };
+}
+
+/** 按当前策略筛一遍：auto 只留用户自己传的那些 */
+export function pickRefs({ images = [], labels = [], paths = [], sources = [], kinds = [] }, plan) {
+  if (!plan.send) return { images: [], labels: [], paths: [], kinds: [], sources: [], uploaded: 0 };
+  const keep = images.map((_, i) => (plan.onlyUploaded ? sources[i] === 'upload' : true));
+  return {
+    images: images.filter((_, i) => keep[i]),
+    labels: labels.filter((_, i) => keep[i]),
+    paths: paths.filter((_, i) => keep[i]),
+    // 一起筛，否则下游按下标去认"哪张是脸"时会整体错位
+    kinds: kinds.filter((_, i) => keep[i]),
+    sources: sources.filter((_, i) => keep[i]),
+    uploaded: images.filter((_, i) => keep[i] && sources[i] === 'upload').length
+  };
+}
+
+/**
+ * ══════════ 哪一张是"这个人长什么样" ══════════
+ *
+ * 有些厂商的身份通道**只收一张图**：海螺的 subject_reference（字面就写着
+ * type: 'character'）、万相的 ref_img。这些通道是专门用来锁脸的，
+ * 是目前云端唯一真能做到"换场景但还是这个人"的东西。
+ *
+ * 而参考图数组的顺序是**场景在最前**（多数厂商对首张权重最高，而出分镜时
+ * 最需要被提醒的是环境）。于是 refImages[0] 是场景图 —— 把它塞进
+ * "这个角色长这样"的字段，那条通道就等于没开。而且不报任何错：
+ * 出来的人照旧不像，看不出是我们发错了图。
+ *
+ * 挑选顺序：用户亲手传的角色照 > 模型出的角色设定图 > 退回第一张。
+ * 用户传的排前面，因为那是他指名道姓说"这个人就长这样"的那一张。
+ */
+export function identityRef({ images = [], kinds = [], sources = [] } = {}) {
+  if (!images.length) return null;
+  const at = (pred) => {
+    const i = images.findIndex((_, n) => pred(n));
+    return i === -1 ? null : images[i];
+  };
+  return at((i) => kinds[i] === 'character' && sources[i] === 'upload')
+    || at((i) => kinds[i] === 'character')
+    || images[0];
 }
 
 /**
@@ -804,16 +1005,41 @@ export async function generateConsistentImage({
    *
    * 所以默认走文生图 + 冻结描述 + 稳定种子。参考图那一层留给**出视频**
    * （首帧图 + r2v 通道），那边它是真的有用。
-   * 想试图生图的话，「设置 → 画面规格」里有开关。
+   * 想改这件事去「设置 → 画面规格 → 出分镜图时带哪些参考图」。
    */
-  const useEdit = settings.get('useEditModelForShots') === true;
-  const refsOn = settings.get('useReferenceImages') !== false;
+  const plan = refPlan();
+  const useEdit = plan.useEditModel;
+  // ⚠ 先按策略筛，再去续签地址 —— 筛掉的那些没必要费一次签名
+  const picked = pickRefs(
+    {
+      images: assembled.refImages,
+      labels: assembled.refLabels,
+      paths: assembled.refPaths,
+      sources: assembled.refSources,
+      kinds: assembled.refKinds
+    },
+    plan
+  );
   // 过期的限时地址在这儿换掉，否则厂商只会回一句"下载不到你给的图"
+  // ⚠ kinds / sources 一并传进去：refreshRefs 会筛掉发不出去的那几张，
+  // 不一起筛的话，回来的下标就对不上了（详见那边的注释）
   const fresh =
-    useEdit && refsOn && refresh
-      ? await refresh({ images: assembled.refImages, labels: assembled.refLabels, paths: assembled.refPaths })
+    plan.send && picked.images.length && refresh
+      ? await refresh({
+        images: picked.images, labels: picked.labels, paths: picked.paths,
+        kinds: picked.kinds, sources: picked.sources
+      })
       : null;
-  const baseRefs = !useEdit || !refsOn ? [] : (fresh?.images || assembled.refImages);
+  const baseRefs = plan.send ? (fresh?.images || picked.images) : [];
+  /**
+   * 哪一张代表"这个人长什么样"。只有身份通道（海螺 subject_reference、
+   * 万相 ref_img）用得上它 —— 那些通道只收一张，而默认的第一张是场景图。
+   */
+  const faceRef = identityRef({
+    images: baseRefs,
+    kinds: fresh?.kinds || picked.kinds,
+    sources: fresh?.sources || picked.sources
+  });
 
   /**
    * 邻镜参考：让这一镜的光线、色调、质感和同场景的其它镜连得住。
@@ -827,7 +1053,12 @@ export async function generateConsistentImage({
    * 多数厂商对首张参考图权重最高，顺序在这里是有意义的。
    */
   const neighborMode = settings.get('neighborRef') || 'scene-anchor';
-  const neighbor = useEdit && refsOn ? continuity.neighborRef(project, shot, { mode: neighborMode }) : null;
+  /**
+   * 邻镜参考只在**编辑模型**那条路上有意义：它是拿上一张成图去"改"出这一张。
+   * 走 auto/all（文生图 + 参考图）时不带它 —— 那条路上的参考图是**身份锚**，
+   * 混进一张构图完全不同的邻镜图，只会让模型在两个目标之间摇摆。
+   */
+  const neighbor = useEdit ? continuity.neighborRef(project, shot, { mode: neighborMode }) : null;
   /**
    * 本地路径 → 模型收得下的引用（公网 URL 或 data URI）。
    *
@@ -867,10 +1098,23 @@ export async function generateConsistentImage({
       aspectRatio: project.aspectRatio || null,
       seed,
       refImages,
+      // 只收一张的那些身份通道用它，别让它们拿到场景图（见 identityRef）
+      identityRef: faceRef,
       label: `出图 #${shot.index}`,
       onEvent
     });
-    last = { ...image, seed, prompt: assembled.prompt, refLabels: refImages.length ? assembled.refLabels : [] };
+    last = {
+      ...image,
+      seed,
+      prompt: assembled.prompt,
+      refLabels: refImages.length ? assembled.refLabels : [],
+      // 本来有几张可用（筛之前）。界面靠它分辨"没图"和"有图没发"
+      refsAvailable: (assembled.refImages || []).length,
+      // 那几张分别是谁、哪张是用户传的 —— 一张都没发时这才是有用的信息
+      refsAvailableLabels: assembled.refDetailed || [],
+      // 到底是哪个开关拦的。不记的话界面只能猜，而猜错会把人指到另一个面板
+      refBlockedHint: plan.blockedHint || ''
+    };
 
     if (!verifyEnabled || !cast.length || !image.url) {
       return { ...last, verification: { skipped: true }, trail };

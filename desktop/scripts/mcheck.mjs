@@ -849,6 +849,58 @@ await page.waitForTimeout(800);
   }
 }
 
+/**
+ * ⑫ 这一镜出图带了哪几张参考图。
+ *
+ * 用户传了自己的照片、出来的脸不是他的，而**手机上一个字都没有** ——
+ * 他没法判断是"图没发出去"还是"发了但模型没保住脸"，而这两件事
+ * 下一步完全不同。他的原话就是"我用的手机端"。
+ *
+ * ⚠ 一张都没带时**更要说**。走查机上的分镜就是没带参考图那种，
+ * 所以这里正好验到那条最要紧的分支：沉默在这里等于误导。
+ */
+await page.locator('.tab', { hasText: '分镜' }).click();
+await page.waitForTimeout(800);
+{
+  const txt = await page.locator('.shot').first().innerText().catch(() => '');
+  const said = /出图带了参考图|张图可以带|还没有图|早前出的/.test(txt);
+  console.log('⑫ 手机上说得出这一镜带没带参考图：', said ? '✓' : `✕ ${txt.slice(0, 120)}`);
+  /**
+   * ⚠ 没带的时候要说清**是哪一种没带** —— 那句话盖住的两种情况
+   * 下一步动作背道而驰：没有图（去出一张）vs 有图没发（去改设置）。
+   * 走查机上的分镜是"设定集有图、但这次没发"那种，所以该出现的是后一句。
+   */
+  console.log('   而且说得出是哪一种没带（有图没发 ≠ 压根没图）：',
+    !/张图可以带/.test(txt) || /出分镜图时带哪些参考图/.test(txt) ? '✓' : `✕ ${txt.slice(0, 200)}`);
+}
+
+/**
+ * ⑬ 手机上传一张自己的图当设定图。
+ *
+ * 用户的原话："要么你在手机上添加一个上传图片的功能"。手机上原来完全没有 ——
+ * 而这件事恰恰最该在手机上做：想用的那张脸多半就在手机相册里。
+ *
+ * ⚠ 这一条以前**没登记进能力清单**，所以"三端对齐"那条自检从来没红过。
+ * 那份清单只在有人登记时才起作用，漏登记的功能它一个字都不会说。
+ */
+await page.locator('.tab', { hasText: '设定' }).click();
+await page.waitForTimeout(800);
+{
+  const card = page.locator('.card', { hasText: '阿澜' }).first();
+  const btn = card.locator('button', { hasText: '传一张图' });
+  console.log('⑬ 手机上有"传一张图"：', (await btn.count()) > 0 ? '✓' : '✕ 没有这个按钮');
+  console.log('   有文件选择器（点了要能打开相册）：',
+    (await card.locator('input[type=file]').count()) > 0 ? '✓' : '✕');
+  /**
+   * ⚠ 还要说清**这张图哪来的**。用户撞上的死结就是这个：
+   * 分镜说"没带你传的图"，而他确信设定集里就是他的照片 ——
+   * 两句话必有一句错，而在设定集上标出来源当场就分得清。
+   */
+  const t = await card.innerText();
+  console.log('   说得出这张图是谁出的：',
+    /这张是你传的|这张是模型出的/.test(t) ? '✓' : `✕ ${t.slice(0, 120)}`);
+}
+
 // 第 ② 步是**故意**敲错配对码，那一次 401 是预期之内的，不算页面报错
 const realErrs = errs.filter((e) => !/401/.test(e));
 console.log('意料之外的 4xx：', unexpected4xx.length ? `✕ ${unexpected4xx.slice(0, 4).join('、')}` : '无 ✓');

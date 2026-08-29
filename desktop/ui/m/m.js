@@ -1445,6 +1445,27 @@ function siteCard() {
   return host;
 }
 
+function shrinkImage(file, maxSide) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', 0.9));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('这个文件读不出来，换一张图试试'));
+    };
+    img.src = url;
+  });
+}
+
 function bibleCard(kind, item, v) {
   const look = h('textarea', { rows: 3, class: 'mta' }, item.appearance || '');
   const save = h('button', { class: 'btn sm grow' }, '保存描述');
@@ -1465,6 +1486,35 @@ function bibleCard(kind, item, v) {
     } catch (err) {
       toast(err.message, 'err');
       save.disabled = false;
+    }
+  };
+
+  const pick = h('input', { type: 'file', accept: 'image/*', style: 'display:none' });
+  const up = h('button', { class: 'btn sm grow', disabled: job.running }, '传一张图');
+  up.onclick = () => pick.click();
+  pick.onchange = async () => {
+    const file = pick.files?.[0];
+    if (!file) return;
+    up.disabled = true;
+    const label = up.textContent;
+    up.textContent = '处理中…';
+    try {
+      const dataUrl = await shrinkImage(file, 1280);
+      let failed = null;
+      await stream(
+        `/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}/upload`,
+        { dataUrl, fileName: file.name },
+        (ev) => { if (ev.type === 'error') failed = ev.message; }
+      );
+      if (failed) throw new Error(failed);
+      toast(`${item.name} 已换成你传的图，出分镜图时会带上它`, 'ok');
+      await reload();
+    } catch (err) {
+      toast(err.message, 'err');
+    } finally {
+      pick.value = '';
+      up.disabled = false;
+      up.textContent = label;
     }
   };
 
@@ -1546,8 +1596,15 @@ function bibleCard(kind, item, v) {
         h('b', {}, item.name),
         item.role ? h('div', { class: 'muted' }, item.role) : null,
         item.seed != null ? h('div', { class: 'muted' }, `种子 ${item.seed}`) : null)),
+    item.sheetPath
+      ? h('div', { class: 'muted', style: 'margin-top:6px' },
+          item.sheetSource === 'upload'
+            ? `这张是你传的${item.sheetFileName ? `（${item.sheetFileName}）` : ''} —— 出分镜图时会带上它`
+            : '这张是模型出的。想用自己的照片就点下面「传一张图」')
+      : null,
     h('div', { style: 'margin-top:10px' }, look),
-    h('div', { class: 'row', style: 'margin-top:9px' }, save, redo, angleBtn));
+    pick,
+    h('div', { class: 'row', style: 'margin-top:9px' }, save, up, redo, angleBtn));
 }
 
 /** 画风和设定集里冻结的那段对不上时，给一条能一键换过来的提示 */
@@ -2029,6 +2086,24 @@ function paintShots() {
  * 没毛病的镜，那件事就是「改这一镜」；有毛病的镜，就是修它的那个重出。
  * 剩下的全部收进「⋯」，那里每一条都是整行大目标，比挤在一排的小按钮好点得多。
  */
+function refLine(s) {
+  if (s.bibleRefs?.length) return `出图带了参考图：${s.bibleRefs.join('、')}`;
+  if (s.refsAvailable > 0) {
+    const labels = s.refsAvailableLabels?.length ? `（${s.refsAvailableLabels.join('、')}）` : '';
+    const mine = (s.refsAvailableLabels || []).some((x) => x.includes('你传的'));
+    const head = `设定集里有 ${s.refsAvailable} 张图可以带${labels}，但这次一张都没发。`;
+    if (s.refBlockedHint) return `${head}原因：${s.refBlockedHint}。打开它再重出这一镜。`;
+    if (mine && s.refPolicy !== 'uploads-always') {
+      return `${head}这是一条旧版生成记录；新版中上传照片会无条件发送。请重出这一镜后再核对。`;
+    }
+    return head + (mine
+      ? '上传照片本应无条件发送却未发出，这是请求链路异常；请查看完整请求记录。'
+      : '其中没有你上传的照片，请检查照片绑定的角色。');
+  }
+  if (s.refsAvailable === 0) return '这一镜引用的角色或场景在设定集里还没有图，请先生成或上传参考图。';
+  return '这张图是早前生成的，当时没有记录参考图状态；重出一次即可确认。';
+}
+
 function shotCardOf(s, v, portrait, probs = shotIssues(s)) {
   const worst = probs.find((i) => i.level === 'blocker') || probs[0] || null;
   const tone = probs.some((i) => i.level === 'blocker') ? 'bad' : probs.length ? 'iffy' : '';
@@ -2094,6 +2169,9 @@ function shotCardOf(s, v, portrait, probs = shotIssues(s)) {
           : null,
         s.sfxPath && s.sfxOf === s.sound ? h('span', { class: 'tag' }, '有音效')
           : !s.sfxPath && s.sound ? h('span', { class: 'tag' }, '待出音效') : null),
+      s.imagePath
+        ? h('div', { class: 'muted', style: 'margin-top:6px;line-height:1.6' }, refLine(s))
+        : null,
       acts));
 }
 

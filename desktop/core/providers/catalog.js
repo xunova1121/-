@@ -162,6 +162,19 @@ export const PROVIDERS = [
      * 别家给的是公网直链，拿着就能下；这里必须带着密钥去取，
      * 所以适配层会把鉴权头一路传到落盘那一步。
      */
+    /**
+     * 出图带参考图时走 `/v1/images/edits`（multipart 传文件），
+     * 而不是往 `/images/generations` 的 JSON 里塞一个 image 字段 ——
+     * 后者那个参数在 OpenAI 这边**根本不存在**，会被整个忽略，
+     * 表现是"传了参考图但完全没起作用"。
+     *
+     * ⚠ 判据必须是这个显式声明，**不能用 family === 'openai'**：
+     * 火山方舟的 family 也是 'openai'（它那句注释写得很清楚：
+     * "对话侧完全兼容 OpenAI 协议"），但它的 SeedEdit 确实收 JSON 里的
+     * image 字段。拿 family 当判据会把火山那条正确的路一起改坏 ——
+     * 自检里五条既有断言当场红，就是这么撞出来的。
+     */
+    imageApi: 'openai-edits',
     videoApi: 'openai-videos',
     videoEndpoints: {
       create: '{{baseUrl}}/videos',
@@ -695,7 +708,24 @@ export const PROVIDERS = [
         hint: '部分接口（如语音）要求带 GroupId 查询参数，视频和出图一般不需要'
       }
     ],
-    capabilities: ['chat', 'vision', 't2i', 'i2v', 't2v', 'r2v'],
+    /**
+     * ⚠ **i2i 是为 image-01 的 subject_reference 补的。**
+     *
+     * 适配器里早就写了这一段：
+     *   body.subject_reference = [{ type: 'character', image_file: … }]
+     * 而能力表里没有 'i2i' —— 于是参考图在进那个 switch 之前就被
+     * "这家不支持图生图"那条分支剥掉了。整段代码够不到，是死的。
+     *
+     * 这件事的分量：subject_reference 是**云端少数几个真的按"这个人长什么样"
+     * 设计的通道**（字面就写着 type: 'character'），而 gpt-image 的 edits
+     * 做的是合成、不是身份保持。用户要的"换场景但还是这张脸"，云端这边
+     * 主要就指望它。留着一段够不到的代码，等于把这条路悄悄封了。
+     *
+     * ⚠ 这条改动**没有在真机上验过** —— 本机出网是白名单，打不到海螺。
+     * 验过的只有"参考图能走到请求体里、而且装的是角色那张"（见自检）。
+     * 厂商那边认不认这个字段，得你那边真跑一次才知道。
+     */
+    capabilities: ['chat', 'vision', 't2i', 'i2i', 'i2v', 't2v', 'r2v'],
     editableBaseUrl: true,
     endpoints: {
       chat: '{{baseUrl}}/text/chatcompletion_v2',

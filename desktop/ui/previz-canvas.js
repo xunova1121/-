@@ -352,7 +352,8 @@ export function director3dCanvas(stage, {
   const host = document.createElement('div');
   host.className = 'previz-canvas previz-3d previz-webgl';
   host.style.cssText = `width:100%;max-width:${size}px;aspect-ratio:1.38;touch-action:none;position:relative;overflow:hidden`;
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  // 保留最后一帧，才能把当前预演直接导出为视频模型的首帧参考。
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -607,7 +608,11 @@ export function director3dCanvas(stage, {
   host.ondragover = (ev) => ev.preventDefault();
   host.ondrop = (ev) => { ev.preventDefault(); try { onAssetDrop(JSON.parse(ev.dataTransfer.getData('application/x-futuredream-asset')), hitGround(ev)); } catch {} };
   new ResizeObserver(redraw).observe(host); redraw();
-  return { node: host, redraw };
+  const capture = (type = 'image/png', quality) => {
+    redraw();
+    return renderer.domElement.toDataURL(type, quality);
+  };
+  return { node: host, redraw, capture };
 }
 
 /**
@@ -779,9 +784,16 @@ export function previzPanel(stage, {
   viewBar.append(viewHint);
   const undoBtn = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '撤销' });
   const redoBtn = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '重做' });
+  const captureBtn = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '导出当前帧' });
   undoBtn.onclick = () => { if (history.undo()) { redrawAll(); onChange(); } };
   redoBtn.onclick = () => { if (history.redo()) { redrawAll(); onChange(); } };
-  viewBar.append(undoBtn, redoBtn);
+  captureBtn.onclick = () => {
+    const link = document.createElement('a');
+    link.href = director.capture('image/png');
+    link.download = `预演-${scene || '镜头'}-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
+    link.click();
+  };
+  viewBar.append(undoBtn, redoBtn, captureBtn);
   const readout = document.createElement('div');
   readout.className = 'previz-readout';
 

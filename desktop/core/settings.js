@@ -81,6 +81,8 @@ const DEFAULTS = {
    * 参考图那一层仍然在**出视频**时发挥作用（首帧图 + r2v 通道）。
    */
   useEditModelForShots: false,
+  // auto=只带用户上传图；all=全部设定图；edit=改走编辑模型；off=不带参考图。
+  refMode: 'auto',
   /**
    * 视频提示词的详略。
    *
