@@ -8636,6 +8636,7 @@ section('传上去的照片：要真的用上，而且只用脸');
 section('预演台：排的位真的改变出图');
 {
   const bf = await import('../core/pipeline/blockframe.js');
+  const cs2 = bf;
   const pz = await import('../core/pipeline/previz.js');
 
   const stage = (subs) => ({ cam: { x: 0, y: -4, height: 1.6, lens: 35 }, subjects: subs, marks: [] });
@@ -8686,6 +8687,184 @@ section('预演台：排的位真的改变出图');
   const farRect = bf.rectOf(tA, { width: 1000, height: 1000, aspect: 1 });
   check('远景地标是跨在地平线上的，不是站在上面',
     Math.abs((farRect.y + farRect.h / 2) - tA.feetY * 1000) < 0.001, JSON.stringify(farRect));
+
+  /**
+   * ══════════ 四视图设定图：只能贴其中一格 ══════════
+   *
+   * 这是两个各自都对的功能凑在一起坏掉的地方：角色设定图现在是一张
+   * **四视图拼版**，而构图底图要往画面上贴"一个人"。整张贴过去的话，
+   * 那个位置站的是一个矩形里的四个小人 —— 模型会照着那个矩形画。
+   */
+  const camAt = { x: 0, y: -4, height: 1.6, lens: 35 };
+  check('四视图：正对镜头取第二格（全身正面），不是整张',
+    JSON.stringify(bf.cropFor(bf.TURNAROUND_4, 'primary')) === JSON.stringify({ x: 0.25, y: 0, w: 0.25, h: 1 }),
+    JSON.stringify(bf.cropFor(bf.TURNAROUND_4, 'primary')));
+  /**
+   * ⚠ 用 ?. 而不是直接取 .x —— 判据回 null 时这里会**抛异常把整个套件带崩**，
+   * 而崩溃是不打印 ✗ 的。金丝雀验这条时就是这么崩的：
+   * 只数 ✗ 的话，一次崩溃看起来和"全绿"一模一样。
+   */
+  check('背对镜头取第四格（全身背面）',
+    bf.cropFor(bf.TURNAROUND_4, 'back')?.x === 0.75, JSON.stringify(bf.cropFor(bf.TURNAROUND_4, 'back')));
+  /**
+   * ⚠ 老项目的设定图是改版之前出的单视角半身像。按四分之一去裁会裁出
+   * 半个肩膀，而那种错看图很难看出来，只会觉得"底图怪怪的"。
+   */
+  check('没记排布的（老项目那些）一律不裁', bf.cropFor(null, 'primary') === null, '');
+  check('用户传的照片也不裁（上传时把标记清掉了）', bf.cropFor('', 'back') === null, '');
+
+  /**
+   * ⚠ 该用哪一格是**几何算出来的**，不是从描述里猜关键词。
+   * 人背对镜头时贴一张正脸，正是当初做四视图要解决的问题。
+   */
+  check('人背对机位时选背面那一格',
+    bf.viewOf(camAt, { x: 0, y: 0, facing: 0 }) === 'back',
+    bf.viewOf(camAt, { x: 0, y: 0, facing: 0 }));
+  check('人面对机位时选正面那一格',
+    bf.viewOf(camAt, { x: 0, y: 0, facing: 180 }) === 'primary',
+    bf.viewOf(camAt, { x: 0, y: 0, facing: 180 }));
+  check('人侧对机位时选侧面那一格',
+    bf.viewOf(camAt, { x: 0, y: 0, facing: 90 }) === 'side',
+    bf.viewOf(camAt, { x: 0, y: 0, facing: 90 }));
+
+  /** 版式层要把这些结论落到条目上，不然画布那边取不到 */
+  const turn = bf.layout(
+    { cam: camAt, subjects: [{ name: '阿澜', x: 0, y: 0, facing: 0 }], marks: [] },
+    { 阿澜: { url: '/media?p=sheet', sheetLayout: bf.TURNAROUND_4, source: 'model' } },
+    {}
+  );
+  check('版式上带着该裁哪一块', turn.items[0].crop?.x === 0.75, JSON.stringify(turn.items[0].crop));
+  check('模型出的图标成"可以抠背景"', turn.items[0].keyable === true, String(turn.items[0].keyable));
+  /**
+   * ⚠ 单独出过背面那张的话优先用它 —— 那是完整的一张单视角图，
+   * 比从拼版里裁四分之一清楚得多。而且用了它就**不能再裁**。
+   */
+  const withAngle = bf.layout(
+    { cam: camAt, subjects: [{ name: '阿澜', x: 0, y: 0, facing: 0 }], marks: [] },
+    { 阿澜: { url: '/media?p=sheet', sheetLayout: bf.TURNAROUND_4, source: 'model', angles: { back: '/media?p=back' } } },
+    {}
+  );
+  check('有单独的背面图就用它，而且不再裁',
+    withAngle.items[0].url === '/media?p=back' && withAngle.items[0].crop === null,
+    JSON.stringify({ url: withAngle.items[0].url, crop: withAngle.items[0].crop }));
+  /** 用户传的照片：不裁，也不抠背景（真实照片硬抠会挖出破洞） */
+  const shot0 = bf.layout(
+    { cam: camAt, subjects: [{ name: '阿澜', x: 0, y: 0, facing: 0 }], marks: [] },
+    { 阿澜: { url: '/media?p=mine', source: 'upload' } }, {}
+  );
+  check('用户传的照片不裁也不抠背景',
+    shot0.items[0].crop === null && shot0.items[0].keyable === false,
+    JSON.stringify({ crop: shot0.items[0].crop, keyable: shot0.items[0].keyable }));
+
+  /**
+   * ══════════ 排布标记：出图时真的记下来了吗 ══════════
+   *
+   * ⚠ 上面那些验的是"记了就会裁"。而**记没记**是另一回事，
+   * 而且它有三条路各写各的：批量出设定图、单独重出设定图、上传。
+   * 漏掉任何一条，那条路出的角色在底图上就会被整张四视图贴进去 ——
+   * 而另外两条是对的，于是现象是随机的，最难查。
+   */
+  {
+    /**
+     * ⚠ 走的是**整步「设定集」**（buildBible → 批量出设定图），不是手搓一份
+     * bible 再单独调出图。批量那条路上的落库代码和单独重出那条不是同一段，
+     * 而这整节要验的就是"两条路各记各的"。
+     */
+    const pM = store.create({ title: '排布标记', script: '阿澜在码头巡查。' });
+    await studioModule.buildBible(pM.id, { onEvent: () => {} });
+    const gotChar = store.read(pM.id).bible.characters[0];
+    const gotScene = store.read(pM.id).bible.scenes[0];
+    check('批量出设定图时记下了"这是四视图"',
+      (gotChar.variants[0].sheetLayout || gotChar.sheetLayout) === cs2.TURNAROUND_4,
+      String(gotChar.variants[0].sheetLayout));
+    /** ⚠ 只有角色是四视图。场景/道具记成四视图的话，背景会被裁掉四分之三 */
+    check('场景不记四视图（它不是拼版，裁了就毁）',
+      !(gotScene.variants[0].sheetLayout === cs2.TURNAROUND_4),
+      String(gotScene.variants[0].sheetLayout));
+
+    /**
+     * 重出设定图是**另一条路**，得各记各的。
+     *
+     * ⚠ **先把标记抹掉再重出。**
+     *
+     * 不抹的话，上一步 buildBible 已经把它写上了 —— 这条路就算一个字都不写，
+     * 断言看到的还是上一步留下的旧值，于是**恒真**。
+     * 金丝雀当场抓到了：把这条路的落库删掉，套件照样全绿。
+     */
+    store.update(pM.id, (x) => {
+      const v = x.bible.characters[0].variants[0];
+      v.sheetLayout = null;
+      x.bible.characters[0].sheetLayout = null;
+      return x;
+    });
+    check('抹干净了（下面那条断言的前提）',
+      !store.read(pM.id).bible.characters[0].variants[0].sheetLayout, '');
+    await studioModule.regenerateSheet(pM.id, 'char', '阿澜', {}, () => {});
+    check('单独重出设定图时也记下了（两条路各写各的，得各验各的）',
+      store.read(pM.id).bible.characters[0].variants[0].sheetLayout === cs2.TURNAROUND_4,
+      String(store.read(pM.id).bible.characters[0].variants[0].sheetLayout));
+
+    /**
+     * ⚠ 上传要把标记**清掉**。不清的话，一个原本有四视图的角色，
+     * 用户传的照片会被当成拼版、只裁走左起第二格 ——
+     * 一张正常照片被裁掉四分之三，而且不报任何错。
+     */
+    const tiny = `data:image/png;base64,${Buffer.from(
+      Buffer.from('89504e470d0a1a0a', 'hex').toString('binary') + 'x'.repeat(120), 'binary'
+    ).toString('base64')}`;
+    await studioModule.attachBibleSheet(pM.id, 'char', '阿澜', { dataUrl: tiny, fileName: 'me.png' }, () => {});
+    const after = store.read(pM.id).bible.characters[0].variants[0];
+    check('传了自己的照片之后，四视图标记被清掉了（不清会把照片裁掉四分之三）',
+      after.sheetSource === 'upload' && !after.sheetLayout,
+      JSON.stringify({ source: after.sheetSource, layout: after.sheetLayout }));
+  }
+
+  /**
+   * ══════════ 抠背景：从边缘漫延，不是按颜色全局筛 ══════════
+   *
+   * ⚠ 这条断言的**全部价值**在那个"浅色衣服"上。
+   *
+   * 全局按颜色筛的话，人身上任何接近底色的部分都会被一起挖空 ——
+   * 浅色衬衫、白袖口、灰头发。那种破洞在缩略图上看不出来，
+   * 到成图上表现为"这个人身上有一块背景透出来"，而且查不到原因。
+   * 所以夹具里**必须**有一块和背景同色、但不连着边框的区域。
+   */
+  {
+    const W = 12; const H = 12;
+    const px = { width: W, height: H, data: new Uint8ClampedArray(W * H * 4) };
+    const set = (x, y, r, g, b) => {
+      const i = (y * W + x) * 4;
+      px.data[i] = r; px.data[i + 1] = g; px.data[i + 2] = b; px.data[i + 3] = 255;
+    };
+    for (let y = 0; y < H; y += 1) for (let x = 0; x < W; x += 1) set(x, y, 235, 235, 235); // 浅灰底
+    // 中间一块深色"人"
+    for (let y = 3; y < 9; y += 1) for (let x = 4; x < 8; x += 1) set(x, y, 40, 40, 60);
+    // ⚠ 人身上一块**和背景同色**的浅色衣服，四面被深色围住、不连边框
+    set(5, 5, 235, 235, 235);
+    set(6, 5, 235, 235, 235);
+
+    const cleared = bf.keyOutFlatBackground(px);
+    const alphaAt = (x, y) => px.data[(y * W + x) * 4 + 3];
+    check('抠背景：四角变透明了', alphaAt(0, 0) === 0 && alphaAt(W - 1, H - 1) === 0, String(cleared));
+    check('人身上那块深色留着', alphaAt(4, 4) === 255, String(alphaAt(4, 4)));
+    check('人身上和背景同色的浅色衣服**没被挖穿**（全局筛就会挖穿这里）',
+      alphaAt(5, 5) === 255 && alphaAt(6, 5) === 255,
+      JSON.stringify([alphaAt(5, 5), alphaAt(6, 5)]));
+
+    /**
+     * ⚠ 背景不是纯色时（用户传的真实照片）什么都不该抠。
+     * 硬抠的结果是把照片挖得千疮百孔，而且没人看得出是我们干的。
+     */
+    const photo = { width: W, height: H, data: new Uint8ClampedArray(W * H * 4) };
+    for (let y = 0; y < H; y += 1) {
+      for (let x = 0; x < W; x += 1) {
+        const i = (y * W + x) * 4;
+        photo.data[i] = x * 20; photo.data[i + 1] = y * 20; photo.data[i + 2] = 120; photo.data[i + 3] = 255;
+      }
+    }
+    check('四个角颜色差太远（不是纯色背景）时一个像素都不抠',
+      bf.keyOutFlatBackground(photo) === 0, String(bf.keyOutFlatBackground(photo)));
+  }
 
   /**
    * ⚠ 底图配的那句话必须说"只用来定构图"。

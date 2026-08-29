@@ -867,6 +867,15 @@ async function generateSheets(projectId, targets, { onEvent, signal = null } = {
           tv.sheetSource = 'model';
           tv.sheetAt = new Date().toISOString();
           tv.sheetPromptUsed = prompt;
+          /**
+           * ⚠ 记下**这张图的排布**，下游要靠它决定裁不裁。
+           *
+           * 角色设定图现在是一张四视图拼版，而构图底图只能贴其中一格。
+           * 不记的话只能靠猜 —— 而老项目里的设定图是改版之前出的单视角
+           * 半身像，猜错就按四分之一去裁，裁出半个肩膀。
+           * 没这个字段的一律当单视角（老行为），只有明确记过的才裁。
+           */
+          tv.sheetLayout = kind === 'char' ? blockframe.TURNAROUND_4 : null;
           variants.normalizeItem(target, kind); // 条目上的镜像跟着更新
         }
         return p;
@@ -3580,6 +3589,10 @@ export async function regenerateSheet(projectId, kind, name, opts = {}, onEvent)
       // 就能指出"文字改过、图没跟上"这种提示词和参考图打架的情况
       tv.sheetAt = new Date().toISOString();
       tv.sheetPromptUsed = prompt;
+      // 同上：记下这张的排布，构图底图靠它决定裁不裁（见 blockframe.cropFor）。
+      // ⚠ 出设定图有两处，这是第二处 —— 漏掉一处的话，从这条路重出的角色
+      // 在底图上会被整张四视图贴进去，而另一条路出的是对的，现象随机
+      tv.sheetLayout = kind === 'char' ? blockframe.TURNAROUND_4 : null;
       // 种子挂在**条目**上：所有变体共用它，换了衣服还是同一张脸
       t.seed = seed;
       variants.normalizeItem(t, kind);
@@ -4014,6 +4027,14 @@ export async function attachBibleSheet(projectId, kind, name, { dataUrl, fileNam
       // 如实标明来源。界面要靠它说"这张是你传的"，
       // 不然过两天没人分得清哪张是模型出的、哪张是自己传的
       tv.sheetSource = 'upload';
+      /**
+       * ⚠ **必须清掉排布标记。**
+       *
+       * 这个角色之前可能有一张模型出的四视图，标记还挂在变体上。
+       * 不清的话，你传的这张照片会被当成四视图，在构图底图上**只裁走
+       * 左起第二格** —— 一张正常照片被裁掉四分之三，而且不报任何错。
+       */
+      tv.sheetLayout = null;
       tv.sheetFileName = fileName || path.basename(dest);
       tv.sheetAt = new Date().toISOString();
       variants.normalizeItem(t, kind);

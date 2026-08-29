@@ -1829,7 +1829,24 @@ export default {
            */
           const sheetOf = (item) => {
             const v = (item?.variants || []).find((x) => x.sheetPath) || item;
-            return v?.sheetPath ? { url: mediaUrl(v.sheetPath) } : null;
+            if (!v?.sheetPath) return null;
+            /**
+             * ⚠ 三样都要带上，缺一样底图就画错，而且都不报错：
+             *   sheetLayout  这张是不是四视图拼版 —— 决定裁不裁。
+             *                不带的话整张四视图会被当成"一个人"贴进画面
+             *   source       模型出的才抠背景。用户传的真实照片硬抠会挖出破洞
+             *   angles       单独出过的侧面/背面图。有就用它，比从拼版里裁清楚
+             */
+            const angles = {};
+            for (const a of v.angles || []) {
+              if (a?.sheetPath && a.id) angles[a.id] = mediaUrl(a.sheetPath);
+            }
+            return {
+              url: mediaUrl(v.sheetPath),
+              sheetLayout: v.sheetLayout || null,
+              source: v.sheetSource || null,
+              angles
+            };
           };
           const assets = {};
           for (const list of [project.bible?.characters, project.bible?.scenes, project.bible?.props]) {

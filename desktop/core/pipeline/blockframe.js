@@ -96,7 +96,30 @@ export function layout(stage, assets = {}, { scene = null } = {}) {
     const a = assets[s.name] || {};
     const spot = place(cam, aim, s, Number(a.heightM) || DEFAULT_SUBJECT_H);
     if (!spot) continue;
-    items.push({ ...spot, name: s.name, kind: 'character', url: a.url || null, facing: s.facing });
+    /**
+     * 机位在这个人的哪一边 → 该用四视图的哪一格。
+     *
+     * ⚠ 单独出过 side / back 那张的话**优先用它**：那本来就是一张完整的
+     * 单视角图，比从拼版里裁四分之一清楚得多。裁是退而求其次。
+     */
+    const view = viewOf(cam, s);
+    const own = a.angles?.[view] || null;
+    items.push({
+      ...spot,
+      name: s.name,
+      kind: 'character',
+      facing: s.facing,
+      view,
+      url: own || a.url || null,
+      // 用的是单独那张就不裁；用拼版才裁，而且只在确知是四视图时裁
+      crop: own ? null : cropFor(a.sheetLayout, view),
+      /**
+       * 能不能抠背景。模型出的设定图是"纯色浅灰背景"，抠了才不会
+       * 把一块灰底贴进画面；用户传的真实照片背景千奇百怪，硬抠只会挖出破洞。
+       */
+      keyable: a.source !== 'upload',
+      sheetLayout: a.sheetLayout || null
+    });
   }
 
   for (const m of st.marks) {
@@ -113,13 +136,14 @@ export function layout(stage, assets = {}, { scene = null } = {}) {
       if (sx === null) continue;
       items.push({
         cx: 0.5 + sx * 0.5, feetY: 0.5, hFrac: 0.18, depth: Infinity, sx,
-        name: m.name, kind: 'far', url: a.url || null
+        name: m.name, kind: 'far', url: a.url || null, crop: null, keyable: a.source !== 'upload'
       });
       continue;
     }
     const spot = place(cam, aim, m, Number(a.heightM) || DEFAULT_MARK_H);
     if (!spot) continue;
-    items.push({ ...spot, name: m.name, kind: 'prop', url: a.url || null });
+    // 道具设定图是"单体居中、纯色背景"的产品图，本来就是单视角，不用裁
+    items.push({ ...spot, name: m.name, kind: 'prop', url: a.url || null, crop: null, keyable: a.source !== 'upload' });
   }
 
   /**
@@ -143,6 +167,126 @@ export function layout(stage, assets = {}, { scene = null } = {}) {
     horizonY: 0.5,
     items
   };
+}
+
+/**
+ * ══════════ 四视图设定图：只能取其中一格 ══════════
+ *
+ * ⚠ **这是两个各自都对的功能凑在一起坏掉的地方。**
+ *
+ * 角色设定图现在是一张**四视图拼版**（charSheetPrompt 写死了排布：
+ * 16:9、横向并排、从左到右 ①上半身特写 ②全身正面 ③全身正侧 ④全身背面）。
+ * 而构图底图要往画面上贴"一个人"。整张贴过去的话，那个位置站的是
+ * **一个矩形里的四个小人** —— 不是效果差一点，是完全错的，
+ * 而且模型会照着那个矩形画。
+ *
+ * 所以按机位算出该用哪一格，只裁那一格出来。
+ *
+ * ⚠ 判据是 previz.facingRelation —— **几何算的，不是从描述里猜关键词**。
+ * 人背对镜头时贴一张正脸，正是当初做四视图要解决的问题；
+ * 在这条新路上再犯一次的话，等于白做。
+ */
+export const TURNAROUND_4 = 'turnaround-4';
+
+/** 四格从左到右的顺序，和 charSheetPrompt 里写的那句一一对应 */
+const TURNAROUND_SLOT = { closeup: 0, primary: 1, side: 2, back: 3 };
+
+/**
+ * 机位在这个人的哪一边 → 该用哪一格。
+ * 回的是 angles.js 的角度 id（primary / side / back），和别处一致。
+ */
+export function viewOf(cam, subject) {
+  return previz.facingRelation(cam, subject)?.sheet || 'primary';
+}
+
+/**
+ * 该从原图上裁哪一块（比例，0..1）。不是四视图就回 null（整张用）。
+ *
+ * ⚠ **只有确知是四视图的才裁。**老项目里的设定图是改版之前出的单视角
+ * 半身像，按四分之一去裁会裁出半个肩膀 —— 而那种错看图很难看出来，
+ * 只会觉得"底图怪怪的"。所以靠出图时记下的 sheetLayout 判断，不靠猜。
+ */
+export function cropFor(sheetLayout, view) {
+  if (sheetLayout !== TURNAROUND_4) return null;
+  const i = TURNAROUND_SLOT[view] ?? TURNAROUND_SLOT.primary;
+  return { x: i / 4, y: 0, w: 1 / 4, h: 1 };
+}
+
+/**
+ * ══════════ 把纯色背景抠掉 ══════════
+ *
+ * 设定图是**带背景的整张图**（charSheetPrompt 要的是"纯色浅灰背景、
+ * 均匀柔光、无投影"）。直接贴上去，等于把那块灰底也贴进画面 ——
+ * 底图会是一堆互相叠着的灰矩形，而模型很可能把那些硬边缘当成真实内容画进去。
+ *
+ * ⚠ **从边缘漫延，不是"按颜色全局筛"。**
+ *
+ * 全局筛的话，人物身上任何接近底色的部分都会被一起挖空 ——
+ * 浅色衬衫、白袖口、灰头发。那种破洞在缩略图上看不出来，
+ * 到了成图上表现为"这个人身上有一块背景透出来"，而且查不到原因。
+ * 从四条边往里漫延只会吃掉**真正连着边框**的那片背景，
+ * 人身上的浅色区域和边框不连通，碰不到。
+ *
+ * @param img  { data: Uint8ClampedArray|Array, width, height }，就地改 alpha
+ * @param tolerance 每个通道允许差多少（0..255）
+ * @returns 抠掉了多少个像素
+ */
+export function keyOutFlatBackground(img, { tolerance = 26 } = {}) {
+  const { data, width: w, height: h } = img;
+  if (!data || !w || !h) return 0;
+
+  /**
+   * 底色取**四个角的中位数**，不是平均值。
+   * 平均值会被某个角上探进来的人物边缘拽偏，然后整片背景都抠不干净。
+   */
+  const corners = [[0, 0], [w - 1, 0], [0, h - 1], [w - 1, h - 1]].map(([x, y]) => {
+    const i = (y * w + x) * 4;
+    return [data[i], data[i + 1], data[i + 2]];
+  });
+  const mid = (n) => {
+    const v = corners.map((c) => c[n]).sort((a, b) => a - b);
+    return (v[1] + v[2]) / 2;
+  };
+  const bg = [mid(0), mid(1), mid(2)];
+
+  /**
+   * ⚠ 四个角彼此差太远，说明这压根不是纯色背景（比如用户传的真实照片）——
+   * 这时候**什么都别抠**。硬抠的结果是把照片挖得千疮百孔，
+   * 比不抠难看得多，而且没人看得出是我们干的。
+   */
+  const spread = Math.max(...[0, 1, 2].map((n) => {
+    const v = corners.map((c) => c[n]);
+    return Math.max(...v) - Math.min(...v);
+  }));
+  if (spread > tolerance * 2) return 0;
+
+  const near = (i) => Math.abs(data[i] - bg[0]) <= tolerance
+    && Math.abs(data[i + 1] - bg[1]) <= tolerance
+    && Math.abs(data[i + 2] - bg[2]) <= tolerance;
+
+  // 从四条边往里漫延。用显式栈，不用递归 —— 一张 1024 宽的图会把调用栈撑爆
+  const seen = new Uint8Array(w * h);
+  const stack = [];
+  for (let x = 0; x < w; x += 1) { stack.push(x, x + (h - 1) * w); }
+  for (let y = 0; y < h; y += 1) { stack.push(y * w, w - 1 + y * w); }
+
+  let cleared = 0;
+  while (stack.length) {
+    const p = stack.pop();
+    if (seen[p]) continue;
+    seen[p] = 1;
+    const i = p * 4;
+    if (!near(i)) continue;
+    data[i + 3] = 0;
+    cleared += 1;
+    const x = p % w;
+    const y = (p - x) / w;
+    if (x > 0) stack.push(p - 1);
+    if (x < w - 1) stack.push(p + 1);
+    if (y > 0) stack.push(p - w);
+    if (y < h - 1) stack.push(p + w);
+  }
+  return cleared;
 }
 
 /**

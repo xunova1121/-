@@ -58,6 +58,53 @@ function drawPlaceholder(ctx, rect, name) {
   ctx.restore();
 }
 
+
+/** 要从原图上取的那一块（像素）。crop 是 0..1 的比例，null 表示整张 */
+function srcRect(img, crop) {
+  const W = img.naturalWidth;
+  const H = img.naturalHeight;
+  if (!crop) return { x: 0, y: 0, w: W, h: H };
+  return {
+    x: Math.round(crop.x * W),
+    y: Math.round(crop.y * H),
+    w: Math.max(1, Math.round(crop.w * W)),
+    h: Math.max(1, Math.round(crop.h * H))
+  };
+}
+
+/**
+ * 把原图的一块画到画面上，顺手把纯色背景抠掉。
+ *
+ * ⚠ 抠背景要先画进**离屏画布**再改像素，不能直接改主画布 ——
+ * 主画布上已经有背景图和先画的那几个人了，在上面按颜色改 alpha
+ * 会把他们身上颜色接近的地方一起挖穿。
+ *
+ * ⚠ 抠不干净（cleared 为 0，比如那张图背景不是纯色）时**照旧贴原样**。
+ * 不贴的话画面上会少一个人，而"少一个人"和"背景没抠掉"这两件事
+ * 严重程度差着量级。
+ */
+function drawCut(ctx, img, src, rect, keyable) {
+  const w = Math.max(1, Math.round(rect.w));
+  const h = Math.max(1, Math.round(rect.h));
+  if (!keyable) {
+    ctx.drawImage(img, src.x, src.y, src.w, src.h, rect.x, rect.y, rect.w, rect.h);
+    return;
+  }
+  const off = document.createElement('canvas');
+  off.width = w;
+  off.height = h;
+  const octx = off.getContext('2d', { willReadFrequently: true });
+  octx.drawImage(img, src.x, src.y, src.w, src.h, 0, 0, w, h);
+  try {
+    const px = octx.getImageData(0, 0, w, h);
+    blockframe.keyOutFlatBackground(px);
+    octx.putImageData(px, 0, 0);
+  } catch {
+    // getImageData 在跨域图上会抛 —— 抠不了就贴原样，别让整张底图作废
+  }
+  ctx.drawImage(off, rect.x, rect.y);
+}
+
 /**
  * 画出来。
  *
@@ -84,7 +131,7 @@ export async function compose(frame, urls = {}, { width = 1024, height = 576 } =
 
   if (!frame) return { canvas, dataUrl: canvas.toDataURL('image/png'), drawn: 0, missing: [] };
 
-  const back = frame.backdrop ? await loadImage(urls[frame.backdrop.name]) : null;
+  const back = frame.backdrop ? await loadImage(frame.backdrop.url || urls[frame.backdrop.name]) : null;
   if (back) drawCover(ctx, back, width, height);
 
   let drawn = 0;
@@ -92,16 +139,32 @@ export async function compose(frame, urls = {}, { width = 1024, height = 576 } =
   // frame.items 已经按"远的在前"排好了，照着画就是正确的遮挡关系
   for (const item of frame.items) {
     // eslint-disable-next-line no-await-in-loop
-    const img = await loadImage(urls[item.name]);
-    const aspect = img ? img.naturalWidth / img.naturalHeight : 0.55;
-    const rect = blockframe.rectOf(item, { width, height, aspect });
-    if (img) {
-      ctx.drawImage(img, rect.x, rect.y, rect.w, rect.h);
-      drawn += 1;
-    } else {
+    /**
+     * ⚠ 用**版式层已经选好的那张**（item.url），不是按名字再查一次。
+     *
+     * layout() 会在"单独出过的侧面/背面图"和"从四视图里裁一格"之间做选择，
+     * 结果写在 item.url 上。这里按名字重查等于把那个选择整个绕过去 ——
+     * 人背对镜头照样贴正脸，而版式层的单元测试全绿。
+     */
+    const img = await loadImage(item.url || urls[item.name]);
+    if (!img) {
+      const rect = blockframe.rectOf(item, { width, height, aspect: 0.55 });
       drawPlaceholder(ctx, rect, item.name);
       missing.push(item.name);
+      continue;
     }
+    /**
+     * ⚠ **比例要按裁完那一块算，不是按整张图。**
+     *
+     * 角色设定图是 16:9 的四视图拼版，裁走四分之一之后是 4:9 的竖条。
+     * 拿整张的 16:9 去反推宽度，一个人会被拉成一条 2.4 米宽的横板 ——
+     * 而且他还"站"在正确的位置上，所以第一眼只觉得"这人怎么这么胖"。
+     */
+    const src = srcRect(img, item.crop);
+    const aspect = src.w / src.h;
+    const rect = blockframe.rectOf(item, { width, height, aspect });
+    drawCut(ctx, img, src, rect, item.keyable !== false);
+    drawn += 1;
   }
 
   /**

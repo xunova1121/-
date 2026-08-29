@@ -1664,6 +1664,33 @@ console.log('\n预演台：排位拼底图');
     check('而且存回了服务端（不存的话出图时拿不到它）', posted.length > 0, String(posted.length));
     const note = await page.locator('.blockframe-panel .previz-readout').first().innerText();
     check('拼完会说清楚它接下来怎么用', /出图时会带上它/.test(note), note.slice(0, 120));
+
+    /**
+     * ⚠ **验版面。这是这套走查一直以来的盲区。**
+     *
+     * 上面几条只问"按钮在不在、图出没出、存没存"—— 功能对、样子烂时四层全绿。
+     * 构图底图第一版就是这么过的：拼出来的是 640px 宽的 PNG，挂在一个
+     * 320px 上下的编辑栏里，而 app.css 里一条相关样式都没有 ——
+     * 图按原始尺寸撑出去，把整块面板挤变形，而走查全绿。
+     *
+     * 判据是**渲染后的宽度不超过容器**，不是"有没有写 CSS"——
+     * 问后者的话，写了一条不生效的规则也算过。
+     */
+    const fit = await page.evaluate(() => {
+      const img = document.querySelector('.blockframe-img');
+      const box = document.querySelector('.blockframe-panel');
+      if (!img || !box) return null;
+      return { img: img.clientWidth, box: box.clientWidth, natural: img.naturalWidth };
+    });
+    check('底图预览不会把面板撑破（原始 PNG 比这一栏宽得多）',
+      Boolean(fit) && fit.img <= fit.box + 1 && fit.natural > fit.box,
+      JSON.stringify(fit));
+  }
+  {
+    /** 页面横向不该出现滚动条 —— 撑破版面最直接的症状 */
+    const overflow = await page.evaluate(() =>
+      document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    check('整页没有被撑出横向滚动', overflow <= 1, String(overflow));
   }
 }
 
