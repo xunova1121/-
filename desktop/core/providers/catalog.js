@@ -1099,6 +1099,17 @@ export const PROVIDERS = [
      * 请改成 Agnes 自己的编辑模型"，而 Agnes 根本没有单独的编辑模型。
      */
     i2iSameModel: true,
+    /**
+     * 出图最多收 6 张参考图。
+     *
+     * 这个数不是文档给的（文档没写上限），是真机回来的原话：
+     *   `too many input images: 8 provided, at most 6 allowed`
+     *
+     * 声明在这里是为了**在发出去之前就挤掉**多的那几张。不声明的话，
+     * 「设置 → 画面规格」里把参考图上限调到 6 以上的人，会在跑到一半时
+     * 撞一个 400，而那时候前面的镜头已经出完、钱也花了。
+     */
+    imageMaxRefs: 6,
     endpoints: {
       images: '{{baseUrl}}/images/generations',
       videos: '{{baseUrl}}/videos'
@@ -1186,17 +1197,41 @@ export const PROVIDERS = [
           extra_body: { response_format: 'url' }
         }
       },
+      /**
+       * ══════════ 下面两个模板是一组 A/B 对照，别删其中一个 ══════════
+       *
+       * 要回答的问题：参考图到底该放 `extra_body.image` 还是顶层 `image`？
+       * 文档两处说法不一样，而放错的表现是**不报错、不警告**，安静地
+       * 退化成一次纯文生图 —— 靠看日志永远查不出来。
+       *
+       * ⚠ 一开始的做法是两个位置都放。真机否掉了：服务端两处都读、
+       * 而且**加在一起**（4 张被数成 8 张，顶穿它 6 张的上限）。
+       * 所以只能二选一，只能靠对照实验定。
+       *
+       * 验法：两个都发一次，参考图给同一张辨识度极高的脸。
+       * 哪个出来的是那个人，哪个就是对的。出来的都不是 → 两个都不对，
+       * 去看是不是图的地址它取不到。
+       */
       {
-        /**
-         * ⚠ 这个模板存在的**首要目的**是让你亲手验一件事：
-         * 参考图到底该放 `image` 还是 `extra_body.image`。文档两处说法不一样，
-         * 而放错的表现是——不报错、不警告，安静地退化成一次纯文生图。
-         *
-         * 验法：给一张辨识度极高的参考图（比如一张脸），提示词写
-         * "保持这个人的长相"。出来的不是那个人，就是没吃到。
-         */
         id: 'i2i',
-        label: '图生图 / 多图合成（两个位置都放，见注释）',
+        label: 'A · 图生图（参考图放 extra_body，现在用的就是这个）',
+        capability: 'i2i',
+        method: 'POST',
+        url: '{{baseUrl}}/images/generations',
+        body: {
+          model: 'agnes-image-2.1-flash',
+          prompt: '保持这个人的长相和服装，把他放到雨夜的码头上',
+          size: '2K',
+          ratio: '16:9',
+          extra_body: {
+            response_format: 'url',
+            image: ['https://example.com/face.png']
+          }
+        }
+      },
+      {
+        id: 'i2i-toplevel',
+        label: 'B · 图生图（参考图放顶层，用来对照）',
         capability: 'i2i',
         method: 'POST',
         url: '{{baseUrl}}/images/generations',
@@ -1206,10 +1241,7 @@ export const PROVIDERS = [
           size: '2K',
           ratio: '16:9',
           image: ['https://example.com/face.png'],
-          extra_body: {
-            response_format: 'url',
-            image: ['https://example.com/face.png']
-          }
+          extra_body: { response_format: 'url' }
         }
       },
       {

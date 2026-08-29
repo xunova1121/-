@@ -9477,11 +9477,22 @@ section('Agnes AI 出图：三处和 OpenAI 长得像但不一样的地方');
      * 挑错一个 = 200、有图、请求记录里列着参考图，而图根本没进模型。
      * 两个都发，等确认了哪个对再删另一个。
      */
-    check('参考图放进了顶层 image（参数表那个位置）',
-      Array.isArray(last().image) && last().image.length === 2, JSON.stringify((last().image || []).length));
-    check('参考图也放进了 extra_body.image（正文那个位置）',
+    check('参考图放进了 extra_body.image',
       Array.isArray(last().extra_body?.image) && last().extra_body.image.length === 2,
       JSON.stringify((last().extra_body?.image || []).length));
+    /**
+     * ⚠ 这一条是真机换来的。原来两个位置都放（怕挑错一个静默降级），
+     * 结果服务端**两处都读、加在一起**：
+     *   `too many input images: 8 provided, at most 6 allowed`
+     * 4 张被数成 8 张，直接顶穿上限。
+     *
+     * 教训：在一个会累加的字段上做"两边都发"的冗余保险，保险本身就是故障。
+     */
+    check('**没有**同时放顶层 image（服务端两处都读、会加起来）',
+      !('image' in last()), JSON.stringify(Object.keys(last())));
+    const sent = [...(last().extra_body?.image || []), ...(last().image || [])];
+    check('整个请求体里这张脸只出现两次（两张图，不是四次）',
+      sent.filter((u) => u === facePng).length === 2, `出现 ${sent.filter((u) => u === facePng).length} 次`);
     /**
      * ⚠ 带参考图时不许换模型。
      *
@@ -9503,6 +9514,40 @@ section('Agnes AI 出图：三处和 OpenAI 长得像但不一样的地方');
      */
     check('也没弹"去配一个 Agnes 的编辑模型"（它没有，同一个模型两件事都干）',
       !notes.some((n) => /图生图模型|编辑模型/.test(n)), JSON.stringify(notes));
+  }
+
+  // ── ④b 超过它 6 张的上限时，在发出去之前就挤掉 ──
+  {
+    const notes = [];
+    const many = Array.from({ length: 9 }, (_, i) => `https://cdn.example.com/ref-${i}.png`);
+    const got = await adaptersMod.generateImage({
+      providerId: 'agnes', model: M, prompt: '一堆参考图', aspectRatio: '16:9',
+      refImages: many, label: '出图',
+      onEvent: (e) => { if (e?.type === 'note') notes.push(String(e.message || '')); }
+    });
+    check('9 张只发 6 张（它的上限，真机报错里给的数）',
+      last().extra_body.image.length === 6, String(last().extra_body.image.length));
+    check('留下的是排在前面那 6 张（人物在前，挤掉的是道具）',
+      JSON.stringify(last().extra_body.image) === JSON.stringify(many.slice(0, 6)),
+      JSON.stringify(last().extra_body.image));
+    check('挤掉了会说一声', notes.some((n) => n.includes('最多收 6 张')), JSON.stringify(notes));
+    /**
+     * ⚠ refsSent 记的必须是**发了几张**，不是**打算发几张**。
+     * 这个文件里已经为"记的是意图不是事实"修过好几回了；
+     * 这里一旦记 9，那条"这一镜一张参考图都没发"的诊断就跟着失真。
+     */
+    check('refsSent 记的是 6 不是 9（发了几张，不是打算发几张）',
+      got.used.refsSent === 6, JSON.stringify(got.used));
+  }
+
+  // ── ④c "图太多"要被认出来，不能只是一个裸的 400 ──
+  {
+    const real = 'too many input images: 8 provided, at most 6 allowed (request id: 2026...)';
+    check('认得出 Agnes 这句"图太多"（原话照抄自真机报错）',
+      adaptersMod.__isMediaLimitError(real), real);
+    /** ⚠ 别误伤：取不到图的地址不是"图太多"，认错了会一路减到 1 张还失败 */
+    check('没有把"取不到图片地址"也当成图太多',
+      !adaptersMod.__isMediaLimitError('cannot download media URL (2013)'), 'cannot download');
   }
 
   // ── ⑤ 纯文生图不许带 image 字段 ──
@@ -9560,10 +9605,26 @@ section('Agnes AI 出图：三处和 OpenAI 长得像但不一样的地方');
      * 目录里的模板是给联调台用的起手式。图生图那个模板要是没把两个位置
      * 都写上，用户手动验"参考图到底放哪"的时候就少了一半。
      */
-    const i2iTpl = p.templates.find((t) => t.id === 'i2i');
-    check('图生图模板两个位置都写了（用户要靠它验哪个对）',
-      Array.isArray(i2iTpl?.body?.image) && Array.isArray(i2iTpl?.body?.extra_body?.image),
-      JSON.stringify(i2iTpl?.body));
+    /**
+     * 联调台里那组 A/B 对照必须成对存在 —— 参考图放哪一个位置，
+     * 目前只能靠用户拿一张脸各发一次来定。少一个就没法对照了。
+     */
+    const A = p.templates.find((t) => t.id === 'i2i');
+    const B = p.templates.find((t) => t.id === 'i2i-toplevel');
+    check('A/B 两个对照模板都在', Boolean(A && B), JSON.stringify(p.templates.map((t) => t.id)));
+    check('A 把参考图放 extra_body，且顶层没有',
+      Array.isArray(A?.body?.extra_body?.image) && !('image' in (A?.body || {})), JSON.stringify(A?.body));
+    check('B 把参考图放顶层，且 extra_body 里没有',
+      Array.isArray(B?.body?.image) && !('image' in (B?.body?.extra_body || {})), JSON.stringify(B?.body));
+    /**
+     * ⚠ 两个模板都不许两处同时放 —— 那正是真机否掉的写法
+     *（服务端两处都读、加起来，4 张被数成 8 张）。
+     * 模板要是还留着那种写法，用户照着发一次又会撞同一个 400。
+     */
+    check('没有哪个模板还是"两处同时放"（真机否掉的那种写法）',
+      p.templates.every((t) => !(Array.isArray(t.body?.image) && Array.isArray(t.body?.extra_body?.image))),
+      JSON.stringify(p.templates.filter((t) => t.body?.image && t.body?.extra_body?.image).map((t) => t.id)));
+    check('声明了它 6 张的参考图上限', p.imageMaxRefs === 6, String(p.imageMaxRefs));
     check('模板里也没有顶层 response_format',
       p.templates.every((t) => !('response_format' in (t.body || {}))),
       JSON.stringify(p.templates.map((t) => t.id)));

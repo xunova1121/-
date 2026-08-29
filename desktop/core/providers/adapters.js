@@ -1006,27 +1006,44 @@ async function generateImageRaw({
       };
       if (refImages.length) {
         /**
-         * ══════════ 为什么同一份参考图要塞两个位置 ══════════
+         * ══════════ 参考图只放一个位置 ══════════
          *
-         * 文档自己说了两遍，两遍不一样：
-         *   「请求参数」那张表里写的是**顶层** `image`（string[]，图生图必填）
-         *   「图生图」「多图合成」两段正文写的是 `extra_body.image`
+         * 原来两个位置都放（顶层 image + extra_body.image），理由是文档
+         * 自己说了两遍且不一致，挑错一个会静默降级成纯文生图。
          *
-         * 只能挑一个的话就是在赌，而赌输的代价是这个项目里最贵的那一种：
-         * 接口返回 200、图也出来了、请求记录里明明白白列着参考图，
-         * 只是那几张图**根本没进模型** —— 表现就是"传了照片但脸不是我的"。
-         * 我们刚在 OpenAI 的 /images/generations 上踩过一模一样的坑
-         *（顶层 image 字段被整个忽略，不报错不警告）。
+         * 真机把这条否掉了。第 22 镜回来一句：
+         *   `too many input images: 8 provided, at most 6 allowed`
          *
-         * 两个位置都放，最坏的情况是多发一份被忽略的字段；
-         * 要是它严格校验未知字段，那会**报错**——报错是看得见的，
-         * 看得见就能修。静默降级看不见。
+         * 那说明服务端**两处都读、而且加在一起**。于是"保险"变成了双倍 ——
+         * 4 张参考图发出去被数成 8 张，直接顶穿它 6 张的上限。
+         * 这个教训值得单独记一笔：**在一个会累加的字段上做"两边都发"的
+         * 冗余保险，保险本身就是故障**。
          *
-         * 等哪天从「图生图」那个 curl 示例确认了到底是哪一个，
-         * 再把多余的那份删掉。在那之前这不是冗余，是保险。
+         * ── 为什么留下的是 extra_body.image ──
+         *
+         * 文档里三处正文都指向它（图生图、多图合成、Base64 输出那三段），
+         * 顶层只在「请求参数」那张总表里出现过一次。而且这家的
+         * `response_format` 明确要求放 extra_body、放顶层是错的 ——
+         * 说明 extra_body 才是真正透传给模型的那一层，顶层是兼容门面。
+         *
+         * ⚠ 这仍然是**推断，不是实测**。要验就用联调台里那两个 A/B 模板
+         *（「参考图放 extra_body」和「参考图放顶层」），拿一张辨识度高的
+         * 脸各发一次，看哪个出来的是那个人。验完把输的那个删掉。
          */
-        body.image = refImages;
-        body.extra_body.image = refImages;
+        const cap = Number(provider.imageMaxRefs) || 0;
+        let refs = refImages;
+        if (cap && refs.length > cap) {
+          onEvent?.({
+            type: 'note',
+            message: `${provider.name} 出图最多收 ${cap} 张参考图，这一镜有 ${refs.length} 张，`
+              + `只发前 ${cap} 张。排在前面的是人物，被挤掉的多半是道具 —— `
+              + '嫌挤的话去「设定集」把这一镜的关键道具删短一点。'
+          });
+          refs = refs.slice(0, cap);
+          /** ⚠ 挤掉了就要改这个数。它是"发了几张"的事实，不是"打算发几张" */
+          used.refsSent = refs.length;
+        }
+        body.extra_body.image = refs;
       }
 
       const res = await send(
@@ -1947,7 +1964,12 @@ function isMediaLimitError(message) {
    * 所以这里只认**明确在说数量**的那些话，不认厂商的私有错误码。
    */
   if (/cannot\s+download|download\s+media/i.test(m)) return false;
-  return /媒体数量|输入媒体数量|图片数量|number of (images|media)|media (count|number)|exceed.*(image|media)/i.test(m);
+  /**
+   * Agnes 的原话是 `too many input images: 8 provided, at most 6 allowed`——
+   * 上面那串都不匹配，于是它只能以一个裸的 HTTP 400 露面。
+   * 明确在说数量，收进来。
+   */
+  return /媒体数量|输入媒体数量|图片数量|too many input images|number of (images|media)|media (count|number)|exceed.*(image|media)/i.test(m);
 }
 
 /**
