@@ -1251,6 +1251,18 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
       return undefined;
     }
     /**
+     * 一次改一批镜头。
+     *
+     * ⚠ 服务端这条路**复用 updateShot 的规整**（见 studio.batchUpdateShots）——
+     * 单个改和批量改必须走同一份判据，不然会出现"单个改是对的、
+     * 批量改出来不一样"，而那种不一致最难查。
+     */
+    if (b && c === 'shots' && d === 'batch' && method === 'POST') {
+      const body = await readBody(req);
+      return json(res, 200, studio.batchUpdateShots(b, body));
+    }
+
+    /**
      * 开跑之前这一步该知道什么：清单 + 要花多少。
      *
      * 纯读，不调任何模型、不花钱 —— 界面每次进这一步都会拉一次，

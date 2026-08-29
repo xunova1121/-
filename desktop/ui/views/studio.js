@@ -11,6 +11,7 @@ import { ratioLabel } from '../ratios.js';
 import { skillPicker, customSkillForm } from '../skill-picker.js';
 import { previzPanel, blankStage } from '../previz-canvas.js';
 import { blockFramePanel } from '/blockframe-canvas.js';
+import { shotTable } from '../shot-table.js';
 import * as BLOCKFRAME from '/blockframe.js';
 import * as siteCanvasMod from '../site-canvas.js';
 import * as OUTLINE from '/outline.js';
@@ -2112,6 +2113,17 @@ export default {
         descEl.onclick = openEdit;
 
         /**
+         * 从表格里按回车过来的那一镜，落地就展开编辑器。
+         *
+         * ⚠ 标记要**当场清掉**。不清的话，下一次任何原因的重画都会再展开一次 ——
+         * 人正在别处看，编辑器自己弹开，而且看不出是谁干的。
+         */
+        if (state.openShotId === shot.id) {
+          state.openShotId = null;
+          queueMicrotask(() => { openEdit(); card.scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+        }
+
+        /**
          * ════════ 按**下游**分组 ════════
          *
          * 用户问的是"标连续动作、选技法、绑说话人到底该出现在哪一步"。
@@ -2590,12 +2602,155 @@ export default {
       }
     }
 
+    /**
+     * 选中的那几镜。**挂在闭包上，不挂在表格组件里** ——
+     * 这个界面每跑完一镜就重画一次，选择放在组件里会跟着组件一起没。
+     * 选了二十镜、跑完一镜、选择全丢，那是个能让人立刻放弃这个功能的 bug。
+     */
+    const picked = new Set();
+    const skillNameOf = {};
+    for (const g of skillGroups) for (const c of g.skills || []) skillNameOf[c.id] = c.name;
+
+    /**
+     * ══════════ 选中之后能干什么 ══════════
+     *
+     * ⚠ 只在**选了东西之后**出现。一条常驻的空工具条会占掉一行、
+     * 而且它每一颗按钮都是灰的 —— 那种界面会让人以为功能坏了。
+     *
+     * ⚠ 技法卡是**加/减**，不是覆盖（服务端也是这么做的）。
+     * 批量场景里几乎不存在"把这十镜的技法卡全换成这一张"，
+     * 常见的是"这十镜都加一张手持"。覆盖的话，每一镜原来各自挑的运镜
+     * 全没了 —— 而那是他一镜一镜挑出来的东西。
+     */
+    function paintBatchBar(bar, sel, tbl) {
+      clear(bar);
+      if (!sel.size) return;
+      const ids = [...sel];
+
+      const doBatch = async (body, okMsg) => {
+        try {
+          // cap:batch-edit
+          const r = await api(`/projects/${project.id}/shots/batch`, { method: 'POST', body: { ids, ...body } });
+          project = r.project || project;
+          if (r.dropped?.length) toast(`有 ${r.dropped.length} 张互斥的技法卡被规整掉了`, 'warn');
+          toast(`${okMsg}（${r.changed}/${r.total} 镜有变化）`, 'ok');
+          paintShots();
+        } catch (err) { toast(err.message, 'err'); }
+      };
+
+      const durInput = h('input', { type: 'number', step: '0.5', min: '0.5', class: 'cell-num', placeholder: '秒' });
+      const skillSel = h('select', {},
+        h('option', { value: '' }, '挑一张技法卡…'),
+        ...skillGroups.flatMap((g) => (g.skills || []).map((c) =>
+          h('option', { value: c.id }, `${g.label || g.id}·${c.name}`))));
+
+      add(bar,
+        h('span', { class: 'batch-count' }, `选中 ${sel.size} 镜`),
+        h('button', {
+          class: 'btn ghost sm',
+          onclick: () => { sel.clear(); tbl.refresh(); paintBatchBar(bar, sel, tbl); }
+        }, '清空选择'),
+        h('span', { class: 'batch-sep' }),
+
+        durInput,
+        h('button', {
+          class: 'btn sm',
+          onclick: () => {
+            const v = Number(durInput.value);
+            if (!(v > 0)) return toast('先填一个秒数', 'warn');
+            return doBatch({ patch: { duration: v } }, `这 ${ids.length} 镜的时长都改成 ${v} 秒`);
+          }
+        }, '改时长'),
+        h('span', { class: 'batch-sep' }),
+
+        skillSel,
+        h('button', {
+          class: 'btn sm',
+          onclick: () => skillSel.value
+            ? doBatch({ addSkills: [skillSel.value] }, '技法卡加上了')
+            : toast('先挑一张卡', 'warn')
+        }, '加上'),
+        h('button', {
+          class: 'btn ghost sm',
+          onclick: () => skillSel.value
+            ? doBatch({ removeSkills: [skillSel.value] }, '技法卡去掉了')
+            : toast('先挑一张卡', 'warn')
+        }, '去掉'),
+        h('span', { class: 'batch-sep' }),
+
+        /**
+         * 只跑选中的这几镜。
+         *
+         * ⚠ 这里必须**先问一下价钱**：它长得像个不起眼的小按钮，
+         * 而按下去是真花钱的。选了三十镜顺手一点，账单上是三十镜。
+         */
+        h('button', {
+          class: 'btn sm',
+          disabled: state.stage !== 'assets' && state.stage !== 'video',
+          title: state.stage === 'assets' || state.stage === 'video'
+            ? '只跑选中的这几镜（已经出过的会重出）'
+            : '在「镜头出图」或「视频生成」那一步才能用',
+          onclick: () => {
+            if (!costConfirm(`只跑选中的这 ${ids.length} 镜（已经出过的会重出）。`, state.stage)) return;
+            // cap:run-selected
+            runStage(state.stage, { only: ids });
+          }
+        }, state.stage === 'video' ? '只出这几镜的视频' : '只出这几镜的图')
+      );
+    }
+
     function paintShots() {
       clear(shotHost);
       shotCards.clear();
       if (!project.shots?.length) {
         shotHost.append(h('div', { class: 'empty' }, h('b', {}, '还没有分镜'),
           '左边菜单里按顺序走：先「剧本」，再「设定集」，然后到「分镜」这一步点开始。'));
+        return;
+      }
+
+      /**
+       * ══════════ 表格视图 ══════════
+       *
+       * 卡片一屏三四镜，五十镜要滚十几屏。表格解决的是**通读和批量改**——
+       * 那是卡片做不好的两件事。反过来看画面还是卡片好，所以两个都留着。
+       */
+      // cap:shot-table
+      shotHost.append(
+        h('div', { class: 'shot-view-bar' },
+          h('button', {
+            class: `btn ghost sm${state.shotView === 'table' ? '' : ' on'}`,
+            onclick: () => { state.shotView = 'cards'; paintShots(); }
+          }, '卡片'),
+          h('button', {
+            class: `btn ghost sm${state.shotView === 'table' ? ' on' : ''}`,
+            title: '一行一镜，能多选、能用上下键',
+            onclick: () => { state.shotView = 'table'; paintShots(); }
+          }, '表格'),
+          state.shotView === 'table'
+            ? h('span', { class: 'field-hint', style: 'margin:0' },
+                '↑↓ 移动 · 空格选中 · Shift+↑↓ 连选 · 回车打开 · Esc 清空')
+            : null)
+      );
+
+      if (state.shotView === 'table') {
+        const sortedAll = project.shots.slice().sort((a, b) => a.index - b.index);
+        const bar = h('div', { class: 'batch-bar' });
+        const tbl = shotTable(sortedAll, {
+          selected: picked,
+          skillNames: skillNameOf,
+          onSelect: () => paintBatchBar(bar, picked, tbl),
+          onOpen: (shot) => { state.openShotId = shot.id; state.shotView = 'cards'; paintShots(); },
+          onPatch: async (id, patch) => {
+            try {
+              await api(`/projects/${project.id}/shots/${id}`, { method: 'PATCH', body: patch });
+              const t = project.shots.find((x) => x.id === id);
+              if (t) Object.assign(t, patch);
+            } catch (err) { toast(err.message, 'err'); }
+          }
+        });
+        shotHost.append(bar, tbl.node);
+        paintBatchBar(bar, picked, tbl);
+        tbl.focus();
         return;
       }
       /**

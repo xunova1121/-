@@ -8618,6 +8618,206 @@ section('传上去的照片：要真的用上，而且只用脸');
  * 而出图是自动跑几十镜的，没人能一镜一镜手动来。
  */
 /**
+ * ══════════ 一次到底发几张参考图，发哪几张 ══════════
+ *
+ * 用户报的原话："我把道具取消了…还是不行，他一下给我喂了9张图"。
+ * 九正好是收集上限 —— 也就是说，能收多少就发多少，一张没筛。
+ *
+ * 两个独立的毛病凑在一起：
+ *   ① 道具关不掉：判据是"名字在描述文字里出现过"，而他能改的是
+ *      「关键道具」那一栏和预演台 —— 两个都管不着那个字符串匹配
+ *   ② 发太多：九张图发过去，模型要在九个目标之间找平衡，
+ *      最要紧的那张脸反而不像了
+ */
+section('参考图：发哪几张、最多几张');
+{
+  const cs = await import('../core/pipeline/consistency.js');
+  const bible = {
+    style: { anchor: '国风', palette: '青灰', negative: '' },
+    characters: [{ name: '阿澜', appearance: '短发', seed: 1 }],
+    scenes: [{ name: '码头', appearance: '雾', seed: 2 }],
+    props: [
+      { name: '柴刀', appearance: '木柄', seed: 3 },
+      { name: '灯笼', appearance: '红纸', seed: 4 }
+    ]
+  };
+
+  /**
+   * ⚠ 手填的「关键道具」说了算。
+   *
+   * 他在预演台把柴刀拿掉、从关键道具里删了，只要描述里还有"刀"这个字，
+   * 老判据照旧会把那张道具设定图发出去 —— 而他找不到任何地方能阻止它。
+   */
+  const listed = cs.matchProps(bible, { description: '阿澜握着柴刀走向灯笼', props: ['灯笼'] });
+  check('填了关键道具时，只带填的那几件（描述里提到的别的不算）',
+    listed.length === 1 && listed[0].name === '灯笼', JSON.stringify(listed.map((p) => p.name)));
+  /**
+   * ⚠ 这条是上一条的**反面**，必须一起验：
+   * 只验"填了就听它"的话，一个"永远返回空"的实现照样能过。
+   */
+  const fallback = cs.matchProps(bible, { description: '阿澜握着柴刀走向灯笼', props: [] });
+  check('没填关键道具时退回老行为（按描述里的名字找）',
+    fallback.length === 2, JSON.stringify(fallback.map((p) => p.name)));
+  check('删空关键道具就真的一件都不带',
+    cs.matchProps(bible, { description: '阿澜握着柴刀', props: ['不存在的东西'] }).length === 0, '');
+
+  /**
+   * ══════════ 上限：按优先级砍，不是砍前 N 张 ══════════
+   *
+   * ⚠ 参考图的排列顺序是**场景在最前**。直接 slice 前 N 张的话，
+   * 第一个被留下的是场景，而最容易被挤掉的恰恰是排在后面的角色 ——
+   * 脸没了，环境留着。这正好是最坏的那种砍法。
+   */
+  const many = {
+    images: ['s', 'c1', 'c2', 'p1', 'p2', 'p3', 'p4', 'p5', 'mine'],
+    labels: ['景', '角1', '角2', '道1', '道2', '道3', '道4', '道5', '我'],
+    paths: new Array(9).fill(null),
+    kinds: ['scene', 'character', 'character', 'prop', 'prop', 'prop', 'prop', 'prop', 'character'],
+    sources: ['model', 'model', 'model', 'model', 'model', 'model', 'model', 'model', 'upload']
+  };
+  const all = { mode: 'all', send: true, useEditModel: false, onlyUploaded: false, blockedBy: null };
+  const capped = cs.pickRefs(many, all);
+  check('九张可用时，只发默认上限那几张', capped.images.length === cs.DEFAULT_MAX_REFS,
+    JSON.stringify({ 发了: capped.images.length, 上限: cs.DEFAULT_MAX_REFS }));
+  /**
+   * ⚠ 这条是整节最要紧的一条：**用户亲手传的那张排在最后，
+   * 却绝对不能被挤掉。**被挤掉的话，这个人的脸就又回到"由文字决定"，
+   * 而那正是他传这张照片要解决的问题。
+   */
+  check('用户传的那张排在最后，照样活下来（这条是重点）',
+    capped.images.includes('mine'), JSON.stringify(capped.images));
+  check('角色图优先于道具图（脸比道具要紧）',
+    capped.images.includes('c1') && capped.images.includes('c2'), JSON.stringify(capped.images));
+  check('道具被挤掉的是多数（九张里五张道具，最多留一张）',
+    capped.images.filter((x) => x.startsWith('p')).length <= 1, JSON.stringify(capped.images));
+  /**
+   * ⚠ 砍完要**恢复原来的顺序**。按优先级排出来的顺序会把场景推到最后，
+   * 而多数厂商对首张权重最高 —— 顺序本身是有意义的。
+   */
+  const order = capped.images.map((x) => many.images.indexOf(x));
+  check('砍完之后顺序还是原来那个（场景仍在前面）',
+    order.every((v, i) => i === 0 || v > order[i - 1]), JSON.stringify(capped.images));
+  check('说得出被挤掉了几张（不说的话人只会觉得"设定集的图没发"）',
+    capped.capped === 5, String(capped.capped));
+
+  /** 没超上限时不该报"被挤掉" */
+  const few = cs.pickRefs({
+    images: ['s', 'c1'], labels: ['景', '角'], paths: [null, null],
+    kinds: ['scene', 'character'], sources: ['model', 'model']
+  }, all);
+  check('没超上限时不报"被挤掉"', few.capped === 0 && few.images.length === 2, String(few.capped));
+
+  /** 上限可调 —— 想多发的人不该被一个写死的 4 卡住 */
+  const keepMax = settings.get('maxRefs');
+  settings.patch({ maxRefs: 7 });
+  check('上限可以调大', cs.pickRefs(many, all).images.length === 7,
+    String(cs.pickRefs(many, all).images.length));
+  settings.patch({ maxRefs: keepMax });
+}
+
+/**
+ * ══════════ 一次改一批镜头 ══════════
+ *
+ * 五十镜逐个点开、改、关掉、再点下一个 —— 这是这个应用里最大的一块
+ * 时间黑洞，而且它不产生任何创作价值，纯粹是操作损耗。
+ *
+ * ⚠ 这一节里**最要紧的两条**都是关于"别悄悄毁掉已有的东西"：
+ *   ① 技法卡是加/减，不是覆盖 —— 覆盖会把每一镜各自挑的运镜全清掉
+ *   ② 规整要走 updateShot 那一份 —— 两份判据迟早漂，而漂的表现是
+ *      "单个改是对的、批量改出来不一样"，最难查
+ */
+section('批量改：一次改一批镜头');
+{
+  const pB = store.create({ title: '批量改' });
+  const mk = (i, extra = {}) => ({
+    id: `b${i}`, index: i, scene: '码头', characters: ['阿澜'],
+    description: `第 ${i} 镜`, camera: '中景', duration: 4, skills: [], ...extra
+  });
+  store.update(pB.id, (x) => {
+    x.shots = [
+      mk(1, { skills: ['tracking'] }),
+      mk(2, { skills: [] }),
+      mk(3, { duration: 9 })
+    ];
+    return x;
+  });
+
+  const r1 = studioModule.batchUpdateShots(pB.id, { ids: ['b1', 'b2'], patch: { duration: 6 } });
+  const after1 = store.read(pB.id).shots;
+  check('选中的那两镜时长都改了', after1[0].duration === 6 && after1[1].duration === 6,
+    JSON.stringify(after1.map((s) => s.duration)));
+  /** ⚠ 没选的那一镜**一个字都不能动**。批量最容易犯的错就是范围放大了 */
+  check('没选的那一镜原样没动', after1[2].duration === 9, String(after1[2].duration));
+  check('回报了几镜真的有变化（都一样的话应该是 0）', r1.changed === 2 && r1.total === 2,
+    JSON.stringify({ changed: r1.changed, total: r1.total }));
+
+  /**
+   * ⚠ **技法卡是加，不是覆盖。**
+   *
+   * 第 1 镜原来有一张手持。覆盖式实现会把它清掉换成新的 ——
+   * 而那是他一镜一镜挑出来的东西，清掉了不会有任何提示。
+   */
+  studioModule.batchUpdateShots(pB.id, { ids: ['b1', 'b2'], addSkills: ['low-angle'] });
+  const after2 = store.read(pB.id).shots;
+  check('加技法卡时，原来那张留着（不是覆盖）',
+    after2[0].skills.includes('tracking') && after2[0].skills.includes('low-angle'),
+    JSON.stringify(after2[0].skills));
+  check('原来没有的那一镜也加上了', after2[1].skills.includes('low-angle'),
+    JSON.stringify(after2[1].skills));
+
+  /** 去掉只去掉指定那张，别的不动 */
+  studioModule.batchUpdateShots(pB.id, { ids: ['b1'], removeSkills: ['low-angle'] });
+  const after3 = store.read(pB.id).shots;
+  check('去掉一张时，别的技法卡留着',
+    after3[0].skills.includes('tracking') && !after3[0].skills.includes('low-angle'),
+    JSON.stringify(after3[0].skills));
+
+  /** 重复加不该出现两份 */
+  studioModule.batchUpdateShots(pB.id, { ids: ['b1'], addSkills: ['tracking'] });
+  const dup = store.read(pB.id).shots[0].skills.filter((x) => x === 'tracking');
+  check('重复加同一张不会出现两份', dup.length === 1, JSON.stringify(store.read(pB.id).shots[0].skills));
+
+  /**
+   * ⚠ **规整必须和单个改是同一份。**
+   *
+   * updateShot 里那一大段（时长夹到 0.5~30、link 只认三种、技法卡互斥组）
+   * 是一年踩出来的。批量这条路自己再写一份的话，两边迟早漂 ——
+   * 而漂的表现是"单个改是对的、批量改出来不一样"，最难查。
+   *
+   * 判据：给一个越界的时长，两条路要夹到同一个数。
+   */
+  studioModule.batchUpdateShots(pB.id, { ids: ['b1'], patch: { duration: 999 } });
+  studioModule.updateShot(pB.id, 'b2', { duration: 999 });
+  const clamped = store.read(pB.id).shots;
+  check('越界的时长，批量和单个夹到同一个数（说明共用一份规整）',
+    clamped[0].duration === clamped[1].duration && clamped[0].duration === 30,
+    JSON.stringify([clamped[0].duration, clamped[1].duration]));
+
+  /** 乱值不该悄悄写进去 —— link 只认三种 */
+  studioModule.batchUpdateShots(pB.id, { ids: ['b1'], patch: { link: '瞎写的' } });
+  check('乱写的衔接关系不会被存进去', store.read(pB.id).shots[0].link !== '瞎写的',
+    String(store.read(pB.id).shots[0].link));
+
+  /** 空的、不存在的：要报错，不能默默成功 */
+  let err1 = '';
+  try { studioModule.batchUpdateShots(pB.id, { ids: [] }); } catch (e) { err1 = e.message; }
+  check('一镜都没选时会报错，不是默默什么都不做', /没说要改哪几镜/.test(err1), err1);
+  let err2 = '';
+  try { studioModule.batchUpdateShots(pB.id, { ids: ['不存在'], patch: { duration: 5 } }); } catch (e) { err2 = e.message; }
+  check('选中的镜头都不存在时说清楚（多半是页面旧了）', /一个都不存在/.test(err2), err2);
+
+  /**
+   * ⚠ 改过要盖 editedAt —— 出视频那步的"图比描述旧"靠它判。
+   * 批量改完不盖的话，那条检查在批量改过的镜头上永远是瞎的。
+   */
+  const before = store.read(pB.id).shots[2].editedAt || '';
+  studioModule.batchUpdateShots(pB.id, { ids: ['b3'], patch: { camera: '特写' } });
+  check('批量改也会盖上"改过的时间"（"图比描述旧"那条检查靠它）',
+    Boolean(store.read(pB.id).shots[2].editedAt) && store.read(pB.id).shots[2].editedAt !== before,
+    String(store.read(pB.id).shots[2].editedAt));
+}
+
+/**
  * ══════════ 开跑之前的那张清单 ══════════
  *
  * 这条流水线上每一步都真花钱。而绝大多数返工的原因，在按下「开始」之前

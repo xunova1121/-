@@ -1240,6 +1240,51 @@ select.mini {
 .previz-label { fill: var(--ink); }
 .previz-label-cam { fill: var(--ground); font-weight: 700; }
 .previz-controls { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+/* ── 分镜表：一行一镜 ──
+   卡片一屏三四镜，五十镜要滚十几屏。表格解决的是通读和批量改。 */
+.shot-view-bar { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+.shot-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r); }
+/* 键盘操作要有焦点框，不然人不知道按键会落在哪儿 */
+.shot-table-wrap:focus { outline: 2px solid var(--beam); outline-offset: -2px; }
+.shot-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.shot-table th {
+  text-align: left; font-weight: 600; color: var(--ink-faint); font-size: 12px;
+  padding: 7px 8px; border-bottom: 1px solid var(--line); background: var(--surface-2);
+  position: sticky; top: 0; z-index: 1;
+}
+.shot-table td { padding: 6px 8px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
+.shot-table tr:hover td { background: var(--surface-2); }
+/* 光标（键盘焦点在哪一行）和选中是两回事，要分得开 */
+.shot-table tr.cursor td { background: var(--beam-wash); }
+.shot-table tr.picked td { background: var(--caution-wash); }
+.shot-table tr.cursor.picked td { background: var(--caution-wash); box-shadow: inset 2px 0 0 var(--beam); }
+.shot-table .c-pick { width: 30px; }
+.shot-table .c-no { width: 38px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.shot-table .c-desc { min-width: 220px; }
+.shot-table .c-cam { width: 74px; color: var(--ink-dim); }
+.shot-table .c-dur { width: 70px; }
+.shot-table .c-skill { width: 150px; color: var(--ink-dim); }
+.shot-table .c-skill.none { color: var(--caution); }
+.shot-table .c-st { width: 52px; font-size: 12px; }
+.shot-table .c-st.done { color: var(--good); }
+.shot-table .c-st.half { color: var(--beam); }
+.shot-table .c-st.todo { color: var(--ink-faint); }
+.cell-num {
+  width: 58px; padding: 3px 5px; font-size: 12px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 5px; color: var(--ink);
+}
+
+/* ── 批量工具条 ──
+   只在选了东西之后出现：一条常驻的空工具条会让人以为功能坏了。 */
+.batch-bar {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  margin-bottom: 8px; padding: 7px 9px; border-radius: var(--r);
+  background: var(--caution-wash); border: 1px solid var(--caution);
+}
+.batch-bar:empty { display: none; padding: 0; border: 0; margin: 0; }
+.batch-count { font-size: 13px; font-weight: 600; color: var(--caution); }
+.batch-sep { width: 1px; height: 18px; background: var(--line); margin: 0 3px; }
+
 /* ── 开跑前清单 ──
    摆在「开始」按钮上面，不是弹窗：弹窗三次之后就变成闭眼点确定，
    连 blocker 一起被跳过，比没有更坏。 */

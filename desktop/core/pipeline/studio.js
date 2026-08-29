@@ -2290,6 +2290,64 @@ export function sceneLayoutOf(project, sceneName) {
   return { marks: layout.marks || [], sun: layout.sun || null };
 }
 
+/**
+ * ══════════ 一次改一批镜头 ══════════
+ *
+ * ── 为什么值得单开一个入口 ──
+ *
+ * 五十镜逐个点开、改时长、关掉、再点下一个 —— 这是这个应用里
+ * **最大的一块时间黑洞**，而且它不产生任何创作价值，纯粹是操作损耗。
+ * 同一场戏的十几镜往往要改成同一个时长、挂同一张技法卡、同一个档位。
+ *
+ * ── 为什么是循环调 updateShot，而不是自己写一遍 ──
+ *
+ * updateShot 里那一大段规整（时长夹到 0.5~30、link 只认三种、
+ * 技法卡互斥组、排位对象不能被 String() 掉、道具按中英文逗号拆）
+ * 是一年踩出来的。批量这条路要是自己再写一份，两边迟早漂 ——
+ * 而漂的表现是"单个改是对的，批量改出来不一样"，最难查。
+ *
+ * 代价是 N 次 store.update（N 次读写项目文件）。本地几十镜是毫秒级的事，
+ * 用不着为它去冒"两份规整逻辑"的风险。真慢到要优化的那天，
+ * 该做的是把规整抽成纯函数给两边共用，不是复制一份。
+ *
+ * ── 技法卡是**加/减**，不是覆盖 ──
+ *
+ * 批量场景里几乎不存在"把这十镜的技法卡全换成这一张"：更常见的是
+ * "这十镜都加一张手持"。直接覆盖的话，每一镜原来各自选的运镜全没了，
+ * 而那是他一镜一镜挑出来的东西。
+ */
+export function batchUpdateShots(projectId, { ids = [], patch = {}, addSkills = [], removeSkills = [] } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const want = new Set((ids || []).filter(Boolean));
+  if (!want.size) throw new Error('没说要改哪几镜');
+
+  const targets = (project.shots || []).filter((s) => want.has(s.id));
+  if (!targets.length) throw new Error('选中的这几镜一个都不存在了 —— 刷新一下再试');
+
+  const add = (addSkills || []).filter(Boolean);
+  const remove = new Set((removeSkills || []).filter(Boolean));
+
+  let changed = 0;
+  const dropped = [];
+  let last = project;
+  for (const shot of targets) {
+    const one = { ...patch };
+    if (add.length || remove.size) {
+      const now = shot.skills || [];
+      // 加进来的排在后面：先选的那些是他一镜一镜挑的，顺序也有意义
+      const merged = [...now.filter((x) => !remove.has(x)), ...add.filter((x) => !now.includes(x))];
+      one.skills = merged;
+    }
+    if (!Object.keys(one).length) continue;
+    const r = updateShot(projectId, shot.id, one);
+    if (r?.changed?.length) changed += 1;
+    if (r?.dropped?.length) dropped.push(...r.dropped);
+    last = r?.project || last;
+  }
+  return { project: last, changed, total: targets.length, dropped: [...new Set(dropped)] };
+}
+
 export function updateShot(projectId, shotId, patch = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);

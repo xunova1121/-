@@ -416,6 +416,37 @@ export const CAPABILITIES = [
     why: ''
   },
   {
+    id: 'shot-table',
+    name: '分镜表格视图：一行一镜、多选、键盘上下走',
+    api: '',
+    pc: 'ui/views/studio.js',
+    /**
+     * 手机上**故意不做**。
+     *
+     * 这个视图的价值全在"一屏看很多行 + 键盘连选"。6 寸屏一屏放不下几行，
+     * 而手机没有键盘 —— 剩下的只有一个比卡片更难点的复选框列表。
+     * 手机上翻分镜本来就该用卡片：一次看一镜，看的是画面。
+     */
+    mobile: null,
+    why: '价值全在"一屏很多行 + 键盘连选"，手机两样都没有；手机翻分镜用卡片更合适'
+  },
+  {
+    id: 'batch-edit',
+    name: '选中几镜一次改：时长、技法卡加/减',
+    api: 'POST /projects/:id/shots/batch',
+    pc: 'ui/views/studio.js',
+    mobile: null,
+    why: '批量改建立在多选之上，而多选依赖表格视图（手机上不做）'
+  },
+  {
+    id: 'run-selected',
+    name: '只跑选中的这几镜（已经出过的会重出）',
+    api: 'POST /projects/:id/stage/:stage',
+    pc: 'ui/views/studio.js',
+    mobile: null,
+    why: '同上：要先选得出来才谈得上只跑这几镜'
+  },
+  {
     id: 'stepcheck',
     name: '开跑之前先说清楚：这一步花多少、有哪几处该先改',
     api: 'GET /projects/:id/stepcheck',

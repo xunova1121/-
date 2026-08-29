@@ -597,18 +597,72 @@ export function refPlan() {
   return { mode: 'auto', send: true, useEditModel: false, onlyUploaded: true, blockedBy: null };
 }
 
+/**
+ * ══════════ 一次最多发几张参考图 ══════════
+ *
+ * ⚠ **上限不是省钱，是保效果。**
+ *
+ * 参考图不是越多越好。九张图发过去，模型要在九个目标之间找平衡，
+ * 每一张的权重都被摊薄 —— 最要紧的那张脸反而不像了。
+ * 走 /images/edits 那条路更直接：它会把九张**拼**进画面。
+ *
+ * 用户报的原话是"他一下给我喂了9张图"。九正好是 collectReferences 的
+ * 收集上限 —— 也就是说，能收多少就发多少，一张没筛。
+ *
+ * 4 张是一个保守的档：身份 1~2 张 + 场景 1 张 + 最要紧的道具 1 张。
+ * 想要更多去「设置 → 画面规格」调。
+ */
+export const DEFAULT_MAX_REFS = 4;
+
+/**
+ * 谁该留下来。数字越小越先留。
+ *
+ * ⚠ **用户亲手传的排第一。**那是他指名道姓说"这个人就长这样"的那张，
+ * 被上限挤掉的话，这个人的脸就又回到"由文字决定"了 —— 而那正是
+ * 他传这张照片要解决的问题。
+ */
+function refRank(kind, source) {
+  if (source === 'upload') return 0;
+  if (kind === 'character') return 1;
+  if (kind === 'scene') return 2;
+  return 3;
+}
+
 /** 按当前策略筛一遍：auto 只留用户自己传的那些 */
 export function pickRefs({ images = [], labels = [], paths = [], sources = [], kinds = [] }, plan) {
   if (!plan.send) return { images: [], labels: [], paths: [], kinds: [], sources: [], uploaded: 0 };
   const keep = images.map((_, i) => (plan.onlyUploaded ? sources[i] === 'upload' : true));
+
+  /**
+   * ⚠ 上限要**按优先级砍**，不能直接 slice 前 N 张。
+   *
+   * 参考图的排列顺序是场景在最前（多数厂商对首张权重最高，出分镜时
+   * 最该被提醒的是环境）。直接砍前 N 张的话，第一个被留下的是场景，
+   * 而**最容易被挤掉的恰恰是排在后面的角色**——脸没了，环境留着。
+   */
+  const cap = Math.max(1, Number(settings.get('maxRefs')) || DEFAULT_MAX_REFS);
+  const survivors = images
+    .map((_, i) => i)
+    .filter((i) => keep[i])
+    .sort((a, b) => refRank(kinds[a], sources[a]) - refRank(kinds[b], sources[b]))
+    .slice(0, cap);
+  // 砍完之后**恢复原来的顺序**：顺序本身是有意义的（场景在前），
+  // 按优先级排出来的顺序会把场景推到最后
+  const live = new Set(survivors);
+  const idxs = images.map((_, i) => i).filter((i) => keep[i] && live.has(i));
+
   return {
-    images: images.filter((_, i) => keep[i]),
-    labels: labels.filter((_, i) => keep[i]),
-    paths: paths.filter((_, i) => keep[i]),
+    images: idxs.map((i) => images[i]),
+    labels: idxs.map((i) => labels[i]),
+    paths: idxs.map((i) => paths[i]),
     // 一起筛，否则下游按下标去认"哪张是脸"时会整体错位
-    kinds: kinds.filter((_, i) => keep[i]),
-    sources: sources.filter((_, i) => keep[i]),
-    uploaded: images.filter((_, i) => keep[i] && sources[i] === 'upload').length
+    kinds: idxs.map((i) => kinds[i]),
+    sources: idxs.map((i) => sources[i]),
+    uploaded: idxs.filter((i) => sources[i] === 'upload').length,
+    /** 被上限挤掉了几张。界面要说出来，不然人只会觉得"设定集里的图没发" */
+    capped: idxs.length < images.filter((_, i) => keep[i]).length
+      ? images.filter((_, i) => keep[i]).length - idxs.length
+      : 0
   };
 }
 
@@ -892,8 +946,34 @@ export function matchScene(bible, shot) {
   return bible.scenes.find((s) => (shot.description || '').includes(s.name)) || null;
 }
 
+/**
+ * 这一镜要带哪些道具。
+ *
+ * ⚠ **手填的「关键道具」说了算，描述文本只是没填时的兜底。**
+ *
+ * 原来只按"道具名在描述文字里出现过"来判。两个毛病：
+ *
+ *   ① **关不掉。**用户在预演台上把柴刀拿掉了、把它从关键道具里删了，
+ *      只要描述里还有"刀"这个字，那张道具设定图照旧会被发出去。
+ *      他找不到任何地方能阻止它 —— 用户的原话是"我把道具取消了…还是不行，
+ *      他一下给我喂了9张图"。
+ *   ② **和别处判据不一致。**「道具消失又回来」那条连续性检查用的是
+ *      shot.props（手填的那份），而参考图用的是字符串匹配。
+ *      同一件事两套判据，迟早互相矛盾，而矛盾时谁也不报错。
+ *
+ * shot.props 界面上写着"这一镜画面里**看得见**的关键道具"——
+ * 那正是"该不该带这张参考图"要问的问题。它非空时就用它。
+ *
+ * 空的时候退回字符串匹配（老行为）：多数项目没有逐镜填过道具，
+ * 一刀切改成"没填就不带"会让那些项目突然少一层一致性，而且不报错。
+ */
 export function matchProps(bible, shot) {
   if (!bible?.props?.length) return [];
+  const listed = (shot?.props || []).map((x) => String(x).trim()).filter(Boolean);
+  if (listed.length) {
+    const want = new Set(listed);
+    return bible.props.filter((p) => want.has(p.name));
+  }
   const haystack = `${shot.description || ''} ${shot.prompt || ''}`;
   return bible.props.filter((p) => haystack.includes(p.name));
 }
