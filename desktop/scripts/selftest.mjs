@@ -8725,32 +8725,14 @@ section('这一镜为什么不对');
     clean[0].how.length > 20 && /种子|描述/.test(clean[0].how), clean[0].how.slice(0, 40));
 
   /**
-   * ══════════ 标了特写，却发了一张广角空镜 ══════════
+   * ⚠ 「参考图排第一位就报」那条**已经撤掉了**。
    *
-   * 用户报的："这个描述的正确吗，这是特写"—— 图是整个广场的大远景。
-   *
-   * 不是模型不听话：场景基准图的出图提示词里写死了「空镜无人物、广角」，
-   * 而它排在参考图第一位、权重最高。文字说特写、图说广角，图赢。
+   * 它属于上一版设计（拿参考图当杠杆去修构图）。现在分工改成
+   * "参考图管是什么、文字管怎么拍"，就不存在"排第一位"这个配置错误了 ——
+   * 再留着它就是在指一个已经不存在的问题，而那种提示比没有更坏。
    */
-  const tightWide = dg.diagnose({
-    ...ok, camera: '特写', bibleRefs: ['景·宗门测灵根广场', '角·我', '道·测灵石']
-  }, { routing });
-  check('特写而场景图排第一位，会被点出来',
-    tightWide.some((x) => x.id === 'wide-ref-on-tight'), JSON.stringify(tightWide.map((x) => x.id)));
-  /**
-   * ⚠ 已经降到最后一位的**不报**。
-   * 那是新版重出过的镜头 —— 再报一次等于让人白重出，
-   * 而且他会开始怀疑这条提示到底准不准。
-   */
-  check('已经降到最后一位的就不报了（不然让人白重出一次）',
-    !dg.diagnose({ ...ok, camera: '特写', bibleRefs: ['角·我', '道·测灵石', '景·广场'] }, { routing })
-      .some((x) => x.id === 'wide-ref-on-tight'), '');
-  /** ⚠ 中景/全景里那张场景图是有用的，不能跟着报 —— 误报一次这条就没人信了 */
-  check('中景带场景图是正常的，不报',
-    !dg.diagnose({ ...ok, camera: '中景', bibleRefs: ['景·码头'] }, { routing })
-      .some((x) => x.id === 'wide-ref-on-tight'), '');
-  check('特写但压根没带场景图的，也不报',
-    !dg.diagnose({ ...ok, camera: '特写', bibleRefs: ['角·我'] }, { routing })
+  check('不再因为"场景图排第一位"报错（那条随旧设计一起撤了）',
+    !dg.diagnose({ ...ok, camera: '特写', bibleRefs: ['景·广场', '角·我'] }, { routing })
       .some((x) => x.id === 'wide-ref-on-tight'), '');
 
   /**
@@ -8920,34 +8902,56 @@ section('参考图：发哪几张、最多几张');
     kinds: ['scene', 'character', 'prop'],
     sources: ['model', 'model', 'model']
   };
-  const tightPick = cs.pickRefs(three, all, { tight: true });
   /**
-   * ⚠ **降权，不是丢掉。**这里我改过一次，第一版是直接不发。
+   * ══════════ 分工：参考图管"是什么"，文字管"怎么拍" ══════════
    *
-   * 用户下一张图立刻撞上了代价：景别对了，可环境完全由文字决定，
-   * 模型自己编了一个广场 —— 他的原话是"提示词是在广场，怎么在广场外"。
-   * 那张图是这一场戏环境和色调唯一的像素级基准，丢了就每镜一个样。
+   * 这里绕过两版弯路。现象是"标了特写，出来是整个广场的大远景"——
+   * 场景基准图是「空镜无人物、广角」出的，天生远景构图，排在第一位、权重最高。
+   *
+   * 第一版：**不发那张图**。结果环境没了基准，模型自己编了个广场，
+   *         用户原话"提示词是在广场，怎么在广场外"。
+   * 第二版：**降权到最后**。治标，而且每来一种新情况就得再加一个特例。
+   *
+   * 两次都是拿参考图当杠杆去修构图 —— 用错了地方。现在的分工是一条线：
+   *   参考图  长相、服装、环境、色调  → 是什么
+   *   文字    景别、机位、构图、动作  → 怎么拍
+   * 而这条线必须**明写进提示词**，模型不会自己知道我们是这么分的。
    */
-  check('特写里场景图**留着**（它是环境唯一的像素级基准）',
-    tightPick.images.includes('scene'), JSON.stringify(tightPick.images));
-  /** ⚠ 但要排到**最后**：顺序即权重，它不该坐第一位支配构图 */
-  check('但被挪到最后一位（顺序即权重，别让它支配构图）',
-    tightPick.images.at(-1) === 'scene', JSON.stringify(tightPick.images));
-  check('人和道具排在它前面', tightPick.images.indexOf('face') < tightPick.images.indexOf('scene'),
-    JSON.stringify(tightPick.images));
-  /** 中景/全景里它照旧排第一 —— 那时候环境正是最该被提醒的东西 */
-  check('中景全景里它还是排第一（那时候环境最该被提醒）',
-    cs.pickRefs(three, all, { tight: false }).images[0] === 'scene',
-    JSON.stringify(cs.pickRefs(three, all, { tight: false }).images));
+  check('景别不再影响发哪几张图（撤掉了那堆特例）',
+    JSON.stringify(cs.pickRefs(three, all).images) === JSON.stringify(['scene', 'face', 'prop']),
+    JSON.stringify(cs.pickRefs(three, all).images));
 
-  /** 判据本身：哪些景别算"近到看不见环境" */
-  check('特写算近景', cs.isTightShot({ camera: '特写' }) === true, '');
-  check('大特写也算', cs.isTightShot({ camera: '大特写' }) === true, '');
-  check('近景算', cs.isTightShot({ camera: '近景' }) === true, '');
-  check('中景不算', cs.isTightShot({ camera: '中景' }) === false, '');
-  check('全景不算', cs.isTightShot({ camera: '全景' }) === false, '');
-  /** ⚠ 没填景别时不能当成特写 —— 那会让大量镜头莫名其妙丢掉场景图 */
-  check('没填景别时不算（不能默认当特写）', cs.isTightShot({}) === false, '');
+  /**
+   * ⚠ **每次带参考图都要声明这条分工**，不能只在特写时说。
+   * 只在特写时说的话，中景那些镜头照样会照抄参考图的取景。
+   */
+  const withRefs = cs.assemblePrompt({
+    style: { anchor: '国风', palette: '青灰', negative: '' },
+    characters: [{ name: '阿澜', appearance: '短发', seed: 1, sheetPath: '/a.png', sheetUrl: 'https://x/a.png', sheetSource: 'upload' }],
+    scenes: [], props: []
+  }, { id: 'z', index: 1, characters: ['阿澜'], description: '走过来', camera: '中景' });
+  check('带参考图时，明写"构图按文字来、别沿用参考图的取景"',
+    /不要沿用参考图的取景/.test(withRefs.prompt), withRefs.prompt.slice(-120));
+
+  /**
+   * ⚠ 景别要配一句**画面上能验的话**。
+   *
+   * "特写"是行话，两个字要和几百字的外貌、环境描述抢注意力，
+   * 而且各家模型理解不一致 —— 那正是"标了特写出来是远景"的另一半原因。
+   */
+  const pz2 = await import('../core/pipeline/previz.js');
+  check('特写配上"只到肩膀以上"这种能验的说明',
+    /肩膀以上/.test(pz2.framingHint('特写')), pz2.framingHint('特写'));
+  check('全景配的是"全身完整入镜"', /全身完整入镜/.test(pz2.framingHint('全景')), pz2.framingHint('全景'));
+  /** ⚠ 长的要先匹配，否则"大特写"会被当成"特写" */
+  check('大特写不会被当成特写（长的先匹配）',
+    pz2.framingHint('大特写') !== pz2.framingHint('特写')
+      && /面部局部/.test(pz2.framingHint('大特写')), pz2.framingHint('大特写'));
+  /** 用户手填的是自由文本，全等匹配十有八九对不上 */
+  check('手填的自由文本也认得出（"中景，过肩"）',
+    /腰部以上/.test(pz2.framingHint('中景，过肩')), pz2.framingHint('中景，过肩'));
+  check('没填景别时不硬塞一句', pz2.framingHint('') === '' && pz2.framingHint(null) === '', '');
+  check('认不出的词不硬塞', pz2.framingHint('随便拍拍') === '', pz2.framingHint('随便拍拍'));
 
   /**
    * ⚠ **端到端：单独重出这一镜时，那张场景图真的没发出去。**
@@ -8981,33 +8985,18 @@ section('参考图：发哪几张、最多几张');
     await studioModule.regenerateShot(pT.id, 'tight', {}, () => {});
     const sentImgs = JSON.stringify(upstream.lastImageBody?.image || '');
     /**
-     * ⚠ 判据落在**请求体里那几张图的顺序**上。
-     * 金丝雀验过：把 studio 那处漏掉，纯函数的断言照样全绿。
+     * ⚠ 判据落在**请求体**上。金丝雀验过：纯函数的断言绿，
+     * 不代表两条路（批量出图 / 单独重出）都接上了。
      */
-    const arr = Array.isArray(upstream.lastImageBody?.image)
-      ? upstream.lastImageBody.image : [upstream.lastImageBody?.image];
-    check('单独重出一个特写时，场景图排在最后（金丝雀抓到过这条路漏传）',
-      arr.length > 1 && String(arr.at(-1)).includes('码头'), sentImgs.slice(0, 160));
-    check('而且它还在（降权不是丢掉 —— 丢了环境就没有基准了）',
+    check('特写时那张场景图照发（环境的像素级基准，不能丢）',
       sentImgs.includes('码头'), sentImgs.slice(0, 160));
-    check('角色那张排在它前面', sentImgs.indexOf('阿澜') < sentImgs.indexOf('码头'),
-      sentImgs.slice(0, 160));
-
-    /** 提示词里得**明说**它只管环境不管构图 —— 光降权压不住"照着这张框" */
-    check('提示词里明说了那张空镜不管构图',
-      /不要照它的广角构图/.test(String(upstream.lastImageBody?.prompt || '')),
-      String(upstream.lastImageBody?.prompt || '').slice(-120));
-
-    /** 同一份设定集，中景时它回到第一位 —— 那时候环境正是最该被提醒的 */
-    store.update(pT.id, (x) => { x.shots[0].camera = '中景'; return x; });
-    upstream.lastImageBody = null;
-    await studioModule.regenerateShot(pT.id, 'tight', {}, () => {});
-    const arr2 = Array.isArray(upstream.lastImageBody?.image)
-      ? upstream.lastImageBody.image : [upstream.lastImageBody?.image];
-    check('改成中景之后，场景图回到第一位', String(arr2[0]).includes('码头'),
-      JSON.stringify(arr2).slice(0, 160));
-    check('而且中景时不说那句"别照广角构图"（它这时候是该照的）',
-      !/不要照它的广角构图/.test(String(upstream.lastImageBody?.prompt || '')), '');
+    check('角色那张也在', sentImgs.includes('阿澜'), sentImgs.slice(0, 160));
+    /** 构图交给文字：这两句必须都在提示词里 */
+    const pr = String(upstream.lastImageBody?.prompt || '');
+    check('提示词里明写了"构图按文字来，别沿用参考图的取景"',
+      /不要沿用参考图的取景/.test(pr), pr.slice(-160));
+    check('而且景别配了能验的说明（不是孤零零两个字）',
+      /肩膀以上/.test(pr), pr.slice(-160));
     settings.patch({ refMode: keepMode2 });
   }
 

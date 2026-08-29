@@ -295,7 +295,7 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
    * 所以这三个条件缺一不可：有图、没关掉参考图、而且这一步真的会发图。
    */
   const plan = refPlan();
-  const kept = pickRefs(refs, plan, { tight: isTightShot(shot) });
+  const kept = pickRefs(refs, plan);
   const hasRefs = kept.images.length > 0;
   /** 这一镜带的参考图里，有没有用户自己传的照片 */
   const hasPhoto = kept.uploaded > 0;
@@ -368,18 +368,38 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
   if (staged) parts.push(`镜头：${staged}`);
   else if (shot.camera) parts.push(`镜头：${shot.camera}`);
   /**
-   * ⚠ 特写/近景时，得**明说那张空镜只管环境、不管构图**。
+   * ⚠ 景别后面补一句**画面上能验的话**。
    *
-   * 场景基准图是「空镜无人物、广角」出的，天生是远景构图。不说清楚的话，
-   * 模型会把它的构图一起学过去 —— 文字说特写、图说广角，而图几乎总是赢。
-   * 用户报的就是这个："这个描述的正确吗，这是特写"，而图是整个广场的大远景。
-   *
-   * 光靠降权不够：降权只是让它别坐第一位，而"照着这张图的框"这个倾向
-   * 是要用话堵住的。两样一起上。
+   * "特写"是个行话，两个字要和几百字的外貌、环境描述抢注意力，
+   * 而且各家模型对它的理解不一致。"画面只到肩膀以上，脸占据主要面积"
+   * 具体得多，也难被无视得多 —— 这是"提示词说了算"这条路能不能走通的关键。
    */
-  if (isTightShot(shot) && kept.images.length && kept.kinds?.includes?.('scene')) {
-    parts.push('参考图里那张空镜只用来定环境、建筑和色调，'
-      + `**不要照它的广角构图** —— 这一镜的景别按上面写的「${shot.camera}」来`);
+  const framing = previz.framingHint(shot.camera);
+  if (framing) parts.push(framing);
+  /**
+   * ══════════ 参考图管"是什么"，文字管"怎么拍" ══════════
+   *
+   * ⚠ 这一句必须**每次带参考图时都说**，不能只在特写时说。
+   *
+   * ── 我在这儿绕了两版弯路 ──
+   *
+   * 现象是"标了特写，出来是整个广场的大远景"。场景基准图是
+   * 「空镜无人物、广角」出的，天生是远景构图，而它排在参考图第一位、
+   * 权重最高 —— 文字说特写、图说广角，图赢。
+   *
+   * 我先是**不发那张图**（结果环境没了基准，模型自己编了个广场），
+   * 又改成**降权到最后**（治标，而且每来一种新情况就要再加一个特例）。
+   * 两次都是在拿参考图当杠杆去修构图 —— 用错了地方。
+   *
+   * 正确的分工是一条线，不是一堆特例：
+   *   参考图  长相、服装、环境、色调  —— 是什么
+   *   文字    景别、机位、构图、动作  —— 怎么拍
+   *
+   * 那就把这条线**明写出来**。模型不会自己知道我们是这么分的。
+   */
+  if (kept.images.length) {
+    parts.push('参考图只用来确定人物长相、服装、场景环境和色调；'
+      + '**画面的景别、机位、构图完全按上面的文字来，不要沿用参考图的取景**');
   }
   if (bible?.style?.palette) parts.push(`主色调：${bible.style.palette}`);
 
@@ -612,30 +632,6 @@ export function refPlan() {
 }
 
 /**
- * ══════════ 这一镜是不是近到看不见环境 ══════════
- *
- * ⚠ 这一条直接决定"标了特写，出来却是远景"这个现象。
- *
- * 场景基准图的出图提示词里写死了「空镜无人物，**广角**」（见 studio.sheetPrompt）——
- * 它天生就是一张远景构图。而它又排在参考图的第一位，
- * 多数厂商对首张参考图权重最高。
- *
- * 于是一张特写镜头会同时收到两条互相矛盾的指令：
- *   文字说 "镜头：特写"
- *   图片说 "构图长这样"（而那是一张广角空镜）
- * 模型只能挑一句听，而**图几乎总是赢**。用户看到的是"标了特写、
- * 出来是远景"，然后会去怀疑模型不听话 —— 而实际上是我们自己递了张远景范本。
- *
- * 特写和近景里本来就看不见环境。这时候那张场景图不但没用，还在帮倒忙。
- */
-const TIGHT_WORDS = ['特写', '大特写', '近景', '中近景', '脸部', '面部'];
-export function isTightShot(shot) {
-  const cam = String(shot?.camera || '');
-  if (!cam) return false;
-  return TIGHT_WORDS.some((w) => cam.includes(w));
-}
-
-/**
  * ══════════ 一次最多发几张参考图 ══════════
  *
  * ⚠ **上限不是省钱，是保效果。**
@@ -667,29 +663,9 @@ function refRank(kind, source) {
 }
 
 /** 按当前策略筛一遍：auto 只留用户自己传的那些 */
-export function pickRefs({ images = [], labels = [], paths = [], sources = [], kinds = [] }, plan, { tight = false } = {}) {
+export function pickRefs({ images = [], labels = [], paths = [], sources = [], kinds = [] }, plan) {
   if (!plan.send) return { images: [], labels: [], paths: [], kinds: [], sources: [], uploaded: 0 };
   const keep = images.map((_, i) => (plan.onlyUploaded ? sources[i] === 'upload' : true));
-  /**
-   * ⚠ 特写/近景里，场景基准图**降到最后一位，但不丢掉**。
-   *
-   * ── 这里我改过一次，而且第一版改过头了 ──
-   *
-   * 第一版是直接不发它，理由是"特写里看不见环境，那张图纯粹是干扰"。
-   * 这句话只在**大特写**上成立。用户下一张图立刻撞上了代价：景别对了，
-   * 可环境完全由文字决定，模型自己编了一个广场 —— 他的原话是
-   * "提示词是在广场，怎么在广场外"。
-   *
-   * 真正要解决的是**那张图在支配构图**，不是它在提供环境。这两件事分得开：
-   *   问题：它排第一位，而多数厂商对首张参考图权重最高 → 构图被它拽成广角
-   *   价值：它是这一场戏环境和色调唯一的像素级基准 → 丢了就每镜一个样
-   * 所以降权，不丢。再配一句提示词说清"它只管环境、不管构图"
-   *（见 assemblePrompt 里那句）。
-   *
-   * ⚠ 这条改动**没有真机对比过**。降权到什么程度才压得住构图、
-   * 各家厂商是不是都按顺序给权重 —— 都只是按常见行为推的。
-   */
-  const demote = tight ? images.map((_, i) => kinds[i] === 'scene') : [];
 
   /**
    * ⚠ 上限要**按优先级砍**，不能直接 slice 前 N 张。
@@ -708,8 +684,6 @@ export function pickRefs({ images = [], labels = [], paths = [], sources = [], k
   // 按优先级排出来的顺序会把场景推到最后
   const live = new Set(survivors);
   const idxs = images.map((_, i) => i).filter((i) => keep[i] && live.has(i));
-  // 特写里把场景那张挪到最后：顺序即权重，它不该坐在第一位支配构图
-  if (tight) idxs.sort((a, b) => (demote[a] ? 1 : 0) - (demote[b] ? 1 : 0));
 
   return {
     images: idxs.map((i) => images[i]),
@@ -1158,9 +1132,7 @@ export async function generateConsistentImage({
       sources: assembled.refSources,
       kinds: assembled.refKinds
     },
-    plan,
-    // 特写里不发那张广角空镜 —— 它会把构图拽回远景（见 isTightShot）
-    { tight: isTightShot(shot) }
+    plan
   );
   // 过期的限时地址在这儿换掉，否则厂商只会回一句"下载不到你给的图"
   // ⚠ kinds / sources 一并传进去：refreshRefs 会筛掉发不出去的那几张，
