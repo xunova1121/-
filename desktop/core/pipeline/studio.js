@@ -3268,7 +3268,11 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
       sources: assembled.refSources,
       kinds: assembled.refKinds
     },
-    plan
+    plan,
+    // ⚠ 批量出图那条路里同样有一份 —— 两条路各写各的，就得各传各的。
+    // 漏了这里的话，"重出这一镜"会照旧发那张广角空镜，而整步出图不发，
+    // 现象是"整步跑出来是特写，单独重出又变回远景"
+    { tight: consistency.isTightShot(shot) }
   );
   const freshRefs =
     !plan.send || !picked.images.length

@@ -8725,6 +8725,27 @@ section('这一镜为什么不对');
     clean[0].how.length > 20 && /种子|描述/.test(clean[0].how), clean[0].how.slice(0, 40));
 
   /**
+   * ══════════ 标了特写，却发了一张广角空镜 ══════════
+   *
+   * 用户报的："这个描述的正确吗，这是特写"—— 图是整个广场的大远景。
+   *
+   * 不是模型不听话：场景基准图的出图提示词里写死了「空镜无人物、广角」，
+   * 而它排在参考图第一位、权重最高。文字说特写、图说广角，图赢。
+   */
+  const tightWide = dg.diagnose({
+    ...ok, camera: '特写', bibleRefs: ['景·宗门测灵根广场', '角·我', '道·测灵石']
+  }, { routing });
+  check('标了特写却带着场景基准图，会被点出来',
+    tightWide.some((x) => x.id === 'wide-ref-on-tight'), JSON.stringify(tightWide.map((x) => x.id)));
+  /** ⚠ 中景/全景里那张场景图是有用的，不能跟着报 —— 误报一次这条就没人信了 */
+  check('中景带场景图是正常的，不报',
+    !dg.diagnose({ ...ok, camera: '中景', bibleRefs: ['景·码头'] }, { routing })
+      .some((x) => x.id === 'wide-ref-on-tight'), '');
+  check('特写但压根没带场景图的，也不报',
+    !dg.diagnose({ ...ok, camera: '特写', bibleRefs: ['角·我'] }, { routing })
+      .some((x) => x.id === 'wide-ref-on-tight'), '');
+
+  /**
    * ══════════ 一张参考图都没发 ══════════
    * 这是"脸不像"最常见、也最容易被忽略的原因 —— 它不报任何错。
    */
@@ -8875,6 +8896,88 @@ section('参考图：发哪几张、最多几张');
     order.every((v, i) => i === 0 || v > order[i - 1]), JSON.stringify(capped.images));
   check('说得出被挤掉了几张（不说的话人只会觉得"设定集的图没发"）',
     capped.capped === 5, String(capped.capped));
+
+  /**
+   * ══════════ 特写里不发那张广角空镜 ══════════
+   *
+   * 场景基准图的出图提示词写死了「空镜无人物、广角」，它天生是远景构图，
+   * 而且排在参考图第一位、权重最高。特写镜头同时收到
+   * "文字：特写" 和 "图片：广角构图" 两条矛盾指令 —— 图几乎总是赢。
+   * 用户报的就是这个："这个描述的正确吗，这是特写"，而图是整个广场的大远景。
+   */
+  const three = {
+    images: ['scene', 'face', 'prop'],
+    labels: ['景·广场', '角·我', '道·石'],
+    paths: [null, null, null],
+    kinds: ['scene', 'character', 'prop'],
+    sources: ['model', 'model', 'model']
+  };
+  const tightPick = cs.pickRefs(three, all, { tight: true });
+  check('特写里那张广角空镜不发', !tightPick.images.includes('scene'),
+    JSON.stringify(tightPick.images));
+  /** ⚠ 只丢场景那张，人和道具照旧 —— 丢多了就成了另一个 bug */
+  check('但人和道具照旧发（只丢场景那张）',
+    tightPick.images.includes('face') && tightPick.images.includes('prop'),
+    JSON.stringify(tightPick.images));
+  /** 中景/全景里那张场景图是有用的，不能跟着丢 */
+  check('中景全景照旧发场景图（那时候它是有用的）',
+    cs.pickRefs(three, all, { tight: false }).images.includes('scene'), '');
+
+  /** 判据本身：哪些景别算"近到看不见环境" */
+  check('特写算近景', cs.isTightShot({ camera: '特写' }) === true, '');
+  check('大特写也算', cs.isTightShot({ camera: '大特写' }) === true, '');
+  check('近景算', cs.isTightShot({ camera: '近景' }) === true, '');
+  check('中景不算', cs.isTightShot({ camera: '中景' }) === false, '');
+  check('全景不算', cs.isTightShot({ camera: '全景' }) === false, '');
+  /** ⚠ 没填景别时不能当成特写 —— 那会让大量镜头莫名其妙丢掉场景图 */
+  check('没填景别时不算（不能默认当特写）', cs.isTightShot({}) === false, '');
+
+  /**
+   * ⚠ **端到端：单独重出这一镜时，那张场景图真的没发出去。**
+   *
+   * 上面全是纯函数。而传 tight 的地方有**两处**：批量出图（consistency）
+   * 和单独重出（studio）。金丝雀验的时候把 studio 那处删掉，
+   * 套件照样全绿 —— 也就是说纯函数绿不代表两条路都接上了。
+   * 判据必须落在请求体上。
+   */
+  {
+    const keepMode2 = settings.get('refMode');
+    settings.patch({ refMode: 'all', useReferenceImages: true });
+    const sheet = (n) => ({
+      name: n, appearance: `${n} 的样子`, seed: 7,
+      sheetPath: `/${n}.png`, sheetUrl: `https://x/${n}.png`, sheetSource: 'model',
+      variants: [{ id: 'v-default', name: '默认', sheetPath: `/${n}.png`, sheetUrl: `https://x/${n}.png`, sheetSource: 'model' }]
+    });
+    const pT = store.create({ title: '特写不发场景图' });
+    store.update(pT.id, (x) => {
+      x.bible = {
+        style: { anchor: '国风', palette: '青灰', negative: '' },
+        characters: [sheet('阿澜')], scenes: [sheet('码头')], props: []
+      };
+      x.shots = [{
+        id: 'tight', index: 1, scene: '码头', characters: ['阿澜'],
+        description: '阿澜的脸', camera: '特写', duration: 4
+      }];
+      return x;
+    });
+    upstream.lastImageBody = null;
+    await studioModule.regenerateShot(pT.id, 'tight', {}, () => {});
+    const sentImgs = JSON.stringify(upstream.lastImageBody?.image || '');
+    check('单独重出一个特写时，场景基准图没发出去（金丝雀抓到过这条路漏传）',
+      !sentImgs.includes('码头'), sentImgs.slice(0, 120));
+    /** ⚠ 反面：角色那张必须还在，否则就是"丢多了"这个新 bug */
+    check('而角色那张照旧发（不是把参考图全丢了）',
+      sentImgs.includes('阿澜'), sentImgs.slice(0, 120));
+
+    /** 同一份设定集，中景时那张场景图要回来 */
+    store.update(pT.id, (x) => { x.shots[0].camera = '中景'; return x; });
+    upstream.lastImageBody = null;
+    await studioModule.regenerateShot(pT.id, 'tight', {}, () => {});
+    check('改成中景之后，场景图又发出去了',
+      JSON.stringify(upstream.lastImageBody?.image || '').includes('码头'),
+      JSON.stringify(upstream.lastImageBody?.image || '').slice(0, 120));
+    settings.patch({ refMode: keepMode2 });
+  }
 
   /** 没超上限时不该报"被挤掉" */
   const few = cs.pickRefs({

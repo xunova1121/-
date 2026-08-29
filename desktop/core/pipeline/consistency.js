@@ -295,7 +295,7 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
    * 所以这三个条件缺一不可：有图、没关掉参考图、而且这一步真的会发图。
    */
   const plan = refPlan();
-  const kept = pickRefs(refs, plan);
+  const kept = pickRefs(refs, plan, { tight: isTightShot(shot) });
   const hasRefs = kept.images.length > 0;
   /** 这一镜带的参考图里，有没有用户自己传的照片 */
   const hasPhoto = kept.uploaded > 0;
@@ -598,6 +598,30 @@ export function refPlan() {
 }
 
 /**
+ * ══════════ 这一镜是不是近到看不见环境 ══════════
+ *
+ * ⚠ 这一条直接决定"标了特写，出来却是远景"这个现象。
+ *
+ * 场景基准图的出图提示词里写死了「空镜无人物，**广角**」（见 studio.sheetPrompt）——
+ * 它天生就是一张远景构图。而它又排在参考图的第一位，
+ * 多数厂商对首张参考图权重最高。
+ *
+ * 于是一张特写镜头会同时收到两条互相矛盾的指令：
+ *   文字说 "镜头：特写"
+ *   图片说 "构图长这样"（而那是一张广角空镜）
+ * 模型只能挑一句听，而**图几乎总是赢**。用户看到的是"标了特写、
+ * 出来是远景"，然后会去怀疑模型不听话 —— 而实际上是我们自己递了张远景范本。
+ *
+ * 特写和近景里本来就看不见环境。这时候那张场景图不但没用，还在帮倒忙。
+ */
+const TIGHT_WORDS = ['特写', '大特写', '近景', '中近景', '脸部', '面部'];
+export function isTightShot(shot) {
+  const cam = String(shot?.camera || '');
+  if (!cam) return false;
+  return TIGHT_WORDS.some((w) => cam.includes(w));
+}
+
+/**
  * ══════════ 一次最多发几张参考图 ══════════
  *
  * ⚠ **上限不是省钱，是保效果。**
@@ -629,9 +653,21 @@ function refRank(kind, source) {
 }
 
 /** 按当前策略筛一遍：auto 只留用户自己传的那些 */
-export function pickRefs({ images = [], labels = [], paths = [], sources = [], kinds = [] }, plan) {
+export function pickRefs({ images = [], labels = [], paths = [], sources = [], kinds = [] }, plan, { tight = false } = {}) {
   if (!plan.send) return { images: [], labels: [], paths: [], kinds: [], sources: [], uploaded: 0 };
   const keep = images.map((_, i) => (plan.onlyUploaded ? sources[i] === 'upload' : true));
+  /**
+   * ⚠ 特写/近景里**不发场景基准图**。
+   *
+   * 那张图天生是广角空镜，排在第一位、权重最高，会把构图整个拽回远景 ——
+   * 文字说"特写"，图说"广角"，而图赢。用户看到的是"标了特写出来是远景"。
+   *
+   * 而且这不是"少发一张更保险"的取舍：特写里根本看不见环境，
+   * 那张图提供不了任何有用信息，纯粹是干扰。
+   */
+  if (tight) {
+    images.forEach((_, i) => { if (kinds[i] === 'scene') keep[i] = false; });
+  }
 
   /**
    * ⚠ 上限要**按优先级砍**，不能直接 slice 前 N 张。
@@ -1098,7 +1134,9 @@ export async function generateConsistentImage({
       sources: assembled.refSources,
       kinds: assembled.refKinds
     },
-    plan
+    plan,
+    // 特写里不发那张广角空镜 —— 它会把构图拽回远景（见 isTightShot）
+    { tight: isTightShot(shot) }
   );
   // 过期的限时地址在这儿换掉，否则厂商只会回一句"下载不到你给的图"
   // ⚠ kinds / sources 一并传进去：refreshRefs 会筛掉发不出去的那几张，
