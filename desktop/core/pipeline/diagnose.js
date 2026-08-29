@@ -28,6 +28,7 @@
 
 import * as shotlint from './shotlint.js';
 import * as previz from './previz.js';
+import * as consistency from './consistency.js';
 
 /** 一条诊断：为什么、怎么办、这一下要不要花钱 */
 const say = (id, what, why, how, { costs = false, weight = 50 } = {}) =>
@@ -69,6 +70,34 @@ export function diagnose(shot, { bible = null, routing = null, prevShot = null }
         + '也可能是某个人的设定图没发出去 —— 那个人就会不像。',
       '「设置 → 画面规格」把上限调大，或者把这一镜的「关键道具」删短一点。',
       { costs: true, weight: 25 }
+    ));
+  }
+
+  /**
+   * ══════════ 分镜里点了名的人，设定集里找不到 ══════════
+   *
+   * 这一条排在很前面，因为它**看起来完全不像配置问题**。
+   *
+   * 名字对不上时，那个人的设定图不会发出去，而其它人的照发 ——
+   * 于是出来的图里少一个人、或者那个人的脸每一镜都在换。
+   * 人看到的是"模型不行""这一镜怎么只有一个人"，
+   * 会去改描述、换模型、重出十次，而真正的原因是设定集里叫
+   *「我（无灵根书信摊主）」、分镜里写的是「我」。
+   *
+   * 改名是免费的，而且改一次全片都好了 —— 这是性价比最高的一条。
+   */
+  const missing = bible ? consistency.unmatchedCast(bible, shot) : [];
+  if (missing.length) {
+    const have = (bible?.characters || []).map((c) => c.name);
+    out.push(say(
+      'cast-unmatched',
+      `分镜里的「${missing.join('」「')}」在设定集里找不到对应的角色`,
+      `所以${missing.length > 1 ? '这几个人' : '这个人'}的设定图一张都没发出去 —— `
+        + '他的长相完全由文字描述决定，每一镜都会换一张脸，而且不报任何错。'
+        + (have.length ? `设定集里现有的是：${have.join('、')}。` : ''),
+      '把两边的名字改成一致：要么改设定集里那个角色的名字，'
+        + '要么改这一镜的「出场角色」。改完重出这一镜。',
+      { costs: false, weight: 3 }
     ));
   }
 

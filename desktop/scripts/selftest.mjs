@@ -8816,6 +8816,164 @@ section('这一镜为什么不对');
   check('而且说得出为什么选它', /参考图/.test(list[0].why), list[0].why);
 }
 
+section('角色名对不上：少一个人，而且不报任何错');
+{
+  const cons = await import('../core/pipeline/consistency.js');
+  const diag = await import('../core/pipeline/diagnose.js');
+
+  /**
+   * ══════════ 真实事故（第 6 镜） ══════════
+   *
+   * 设定集里那个角色叫「我（无灵根书信摊主）」—— 括注是给人看的身份说明。
+   * 而分镜是模型拆的，它写的就是「我」。
+   *
+   * 原来的 matchCharacters 只认全等，而且 `.filter(Boolean)` 之后
+   * 只要还剩一个就整个短路返回。于是「我」被悄悄扔掉、「父亲」留下，
+   * 出来的图里**只有父亲一个人**，那句"塞进我手里"没有接的人。
+   *
+   * 全程零报错：界面显示"已带上参考图"，带的确实是参考图，只是少了一个人。
+   */
+  const bible = {
+    characters: [
+      { name: '父亲', sheetUrl: 'https://x/dad.png' },
+      { name: '我（无灵根书信摊主）', sheetUrl: 'https://x/me.png' }
+    ],
+    scenes: [{ name: '宗门测灵根广场', sheetUrl: 'https://x/plaza.png' }],
+    props: []
+  };
+  const shot = {
+    characters: ['父亲', '我'],
+    scene: '宗门测灵根广场',
+    description: '父亲伸手从怀里掏出几块灵石，塞进我手里'
+  };
+
+  const got = cons.matchCharacters(bible, shot).map((c) => c.name);
+  check('「我」对上了设定集里的「我（无灵根书信摊主）」（括注是给人看的）',
+    got.includes('我（无灵根书信摊主）'), JSON.stringify(got));
+  check('「父亲」也还在（不是修好一个丢了另一个）', got.includes('父亲'), JSON.stringify(got));
+  /**
+   * ⚠ 这一条盯的是**短路**那个毛病：部分命中时不许扔掉没命中的。
+   * 只断言"我在里面"是不够的 —— 顺序反过来（['我','父亲']）时，
+   * 老代码同样只返回一个，而那一个恰好是对的。
+   */
+  check('两个人都在（部分命中不许短路）', got.length === 2, JSON.stringify(got));
+  const labels = cons.collectReferences(bible, shot).labels;
+  check('两张脸真的进了参考图清单',
+    labels.includes('角·父亲') && labels.some((l) => l.startsWith('角·我')), JSON.stringify(labels));
+
+  /**
+   * ══════════ 提示词那一路也得带上他 ══════════
+   *
+   * castInFrame 原来自己抄了一份同样的"全等 + filter(Boolean)"。
+   * 两份一起漏 = 那个人**图也没有、字也没有**，模型只在原句里见过
+   *「我」这一个字，画不出人来一点都不奇怪。
+   *
+   * 这一条断言的是**提示词正文**，不是匹配函数的返回值 ——
+   * 只测 matchCharacters 的话，castInFrame 那份抄件照样能偷偷漏。
+   */
+  {
+    const withLooks = {
+      ...bible,
+      characters: [
+        { name: '父亲', appearance: '中年男子，藏青长衫', sheetUrl: 'https://x/dad.png' },
+        { name: '我（无灵根书信摊主）', appearance: '少女，灰布衣，左肩补丁', sheetUrl: 'https://x/me.png' }
+      ]
+    };
+    const prompt = cons.assemblePrompt(withLooks, shot).prompt;
+    check('提示词里有父亲的长相', prompt.includes('藏青长衫'), prompt.slice(0, 160));
+    check('提示词里也有「我」的长相（原来图和字一起漏）',
+      prompt.includes('左肩补丁'), prompt.slice(0, 300));
+  }
+
+  /**
+   * ══════════ castInFrame 那份抄件（走的是台词那一路） ══════════
+   *
+   * ⚠ 前两版断言都测错了地方，推红时纹丝不动：
+   *   第一版测「提示词里有长相」→ assemblePrompt 用的是 matchCharacters
+   *   第二版还是 assemblePrompt  → speechLine 挂在 assembleVideoPrompt 上
+   * 一条测不到目标代码的断言，绿着也只是绿着。
+   *
+   * castInFrame 真正的下游是 speechLine → **出视频**那条提示词。
+   * 它只问一句"画面里有没有人"：一镜里**所有**角色名都对不上时
+   * cast 为空 → 这一镜被当成空镜 →「嘴唇闭合」那句不发 →
+   * 明明没台词的人可能被画成正在说话。
+   */
+  {
+    const only = { characters: ['我'], description: '她低头看着掌心的灵石', dialogue: '' };
+    const p = cons.assembleVideoPrompt(bible, only);
+    check('名字带括注的角色也算"画面里有人"，出视频时会发「嘴唇闭合」',
+      /嘴唇闭合|面部安静/.test(p), String(p).slice(-160));
+  }
+
+  // ── 空镜：明确写了"没人"就不要退回读描述硬猜 ──
+  {
+    const p = cons.assembleVideoPrompt(bible, { characters: [], description: '桌上的灵石特写', dialogue: '' });
+    /**
+     * 空镜占一部片子三四成。这句话在空镜里是纯噪音，而且**会招人**——
+     * 提示词里出现"人物"，扩散模型很可能真给你画一个。
+     */
+    check('空数组 = 这一镜没人，不发「嘴唇闭合」（那句会凭空招出个人来）',
+      !/嘴唇闭合|面部安静/.test(p), String(p).slice(-160));
+  }
+
+  // ── 顺序反过来也一样（防止上面那条靠运气过） ──
+  {
+    const rev = cons.matchCharacters(bible, { ...shot, characters: ['我', '父亲'] }).map((c) => c.name);
+    check('名字顺序反过来，两个人照样都在', rev.length === 2, JSON.stringify(rev));
+  }
+
+  // ── 真找不到的时候要说出来，不能装作没事 ──
+  {
+    const s = { ...shot, characters: ['父亲', '师尊'] };
+    check('对得上的照带', cons.matchCharacters(bible, s).map((c) => c.name).join() === '父亲',
+      JSON.stringify(cons.matchCharacters(bible, s).map((c) => c.name)));
+    check('对不上的被挖出来（原来是悄悄扔掉）',
+      JSON.stringify(cons.unmatchedCast(bible, s)) === '["师尊"]',
+      JSON.stringify(cons.unmatchedCast(bible, s)));
+    const items = diag.diagnose({ ...s, imagePath: '/x/6.png' }, { bible });
+    const hit = items.find((i) => i.id === 'cast-unmatched');
+    check('诊断里点名说了是「师尊」对不上', hit && hit.what.includes('师尊'), JSON.stringify(hit?.what));
+    check('并且说了设定集里现有的是谁（好照着改名）',
+      hit && hit.why.includes('父亲'), JSON.stringify(hit?.why));
+    check('改名不花钱，所以标成不花钱', hit && hit.costs === false, JSON.stringify(hit?.costs));
+    /**
+     * 排序按"改了最可能有用"。改名免费、一次全片都好，
+     * 得排在"重出一次换颗种子"前面 —— 人只会试最上面那一两条。
+     */
+    check('排在"数据上看不出毛病"前面',
+      items.findIndex((i) => i.id === 'cast-unmatched') < items.findIndex((i) => i.id === 'nothing-found')
+        || !items.some((i) => i.id === 'nothing-found'),
+      JSON.stringify(items.map((i) => i.id)));
+  }
+
+  // ── 名字全对得上时不许瞎报 ──
+  {
+    const items = diag.diagnose({ ...shot, imagePath: '/x/6.png' }, { bible });
+    check('名字都对得上时不报这一条（不能变成一条永远成立的废话）',
+      !items.some((i) => i.id === 'cast-unmatched'), JSON.stringify(items.map((i) => i.id)));
+  }
+
+  // ── 两个人去掉括注后同名：宁可不带，也不能挑错人 ──
+  {
+    const twins = {
+      characters: [
+        { name: '师兄（大）', sheetUrl: 'https://x/a.png' },
+        { name: '师兄（小）', sheetUrl: 'https://x/b.png' }
+      ],
+      scenes: [], props: []
+    };
+    const s = { characters: ['师兄'], description: '师兄走过来' };
+    /**
+     * ⚠ 挑错人比不带更糟：不带只是"不像"，挑错是**像另一个人**，
+     * 而看图的人只会觉得"这演员怎么串戏了"，根本不会往名字上想。
+     */
+    check('两个人重名时不替你挑', cons.matchCharacters(twins, s).length === 0,
+      JSON.stringify(cons.matchCharacters(twins, s).map((c) => c.name)));
+    check('而且如实说这个名字没对上', JSON.stringify(cons.unmatchedCast(twins, s)) === '["师兄"]',
+      JSON.stringify(cons.unmatchedCast(twins, s)));
+  }
+}
+
 section('参考图：发哪几张、最多几张');
 {
   const cs = await import('../core/pipeline/consistency.js');

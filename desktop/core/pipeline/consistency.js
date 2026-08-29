@@ -865,12 +865,28 @@ export function assembleVideoPrompt(
  * 分镜表里的 characters 是权威的 —— 拆分镜的提示词明写着"空镜给空数组"。
  * 明确给了空数组就信它。只有**老项目**（压根没有这个字段）才退回扫描。
  */
+/**
+ * 这一镜画面里有谁 —— **提示词**那一路用的就是它。
+ *
+ * ⚠ 这里原来自己抄了一份"全等匹配 + filter(Boolean)"，和 matchCharacters
+ * 那份一模一样的毛病 —— 同一件事两条代码路径，只修一条等于没修。
+ *
+ * ── 漏在这里的具体后果 ──
+ *
+ * 下游只问它一句"画面里到底有没有人"（见 speechLine）。所以一镜里
+ * **所有**角色名都对不上时，cast 是空的 → 这一镜被当成空镜 →
+ * "嘴唇闭合、面部安静"那句不发。而画面里其实有两个人，
+ * 于是他们可能被画成正在说话 —— 明明这一镜没有台词。
+ *
+ * （长相描述是另一条路：assemblePrompt 直接用 matchCharacters，
+ * 那一份已经在上面修好了。别把两者记混。）
+ */
 function castInFrame(bible, shot) {
-  if (Array.isArray(shot?.characters)) {
-    return shot.characters
-      .map((n) => (bible?.characters || []).find((c) => c.name === n))
-      .filter(Boolean);
-  }
+  /**
+   * 只保留一处差别：**空数组 = 明确"这一镜没人"**（空镜）。
+   * 那种情况下不能退回读描述去猜 —— 猜出一个人来，空镜就不空了。
+   */
+  if (Array.isArray(shot?.characters) && !shot.characters.length) return [];
   return matchCharacters(bible, shot);
 }
 
@@ -959,14 +975,95 @@ function speechLine(bible, shot) {
 }
 
 /** 分镜里点名了谁。模型有时写"李队"有时写"李队长"，所以用包含匹配而不是全等。 */
+/** 去掉名字后面括注的说明："我（无灵根书信摊主）" → "我" */
+const bareName = (s) => String(s || '').replace(/[（(【[].*$/, '').trim();
+
+/**
+ * 分镜里写的这个名字，是设定集里的哪一个人。
+ *
+ * ══════════ 为什么不能只认全等 ══════════
+ *
+ * 设定集里的名字经常带括注 —— 「我（无灵根书信摊主）」「父亲（前宗门执事）」，
+ * 那是给人看的身份说明。而分镜是模型拆的，它写的就是「我」「父亲」。
+ * 只认全等的话，凡是带括注的角色**一律匹配不上**。
+ *
+ * 隔壁 matchScene 一直是有模糊匹配的（`includes` 双向）。同一件事两套判据，
+ * 场景能对上、角色对不上，而且谁也不报错。
+ *
+ * ── 三级，越往下越不确定 ──
+ *   ① 全等                     —— 不用想
+ *   ② 去掉括注之后相等          —— 「我」对「我（无灵根书信摊主）」，完全确定
+ *   ③ 互相包含，取最短的那个    —— 最后一招；最短 = 最贴
+ *
+ * ⚠ ② 里如果有两个人去掉括注后同名，**返回 null 而不是挑一个**。
+ * 挑错人的后果是这一镜带着另一个人的脸出图，比不带更糟：不带只是不像，
+ * 挑错是**像另一个人**，而看图的人只会觉得"这演员怎么串戏了"。
+ */
+function resolveCast(bible, name) {
+  const list = bible?.characters || [];
+  const q = String(name || '').trim();
+  if (!q) return null;
+
+  const exact = list.find((c) => c.name === q);
+  if (exact) return exact;
+
+  const bare = list.filter((c) => bareName(c.name) === bareName(q));
+  if (bare.length === 1) return bare[0];
+  if (bare.length > 1) return null; // 同名两个人，不敢替你挑
+
+  const loose = list.filter((c) => c.name.includes(q) || q.includes(c.name));
+  if (!loose.length) return null;
+  return loose.reduce((best, c) => (c.name.length < best.name.length ? c : best));
+}
+
+/**
+ * 这一镜有哪些人出镜。
+ *
+ * ⚠ **逐个解析，不许一个命中就收工。**
+ *
+ * 原来是这么写的：
+ *   const named = (shot.characters || []).map(n => 找全等).filter(Boolean);
+ *   if (named.length) return named;
+ *
+ * `.filter(Boolean)` 把没对上的那些**悄悄扔了**，然后只要还剩一个，
+ * 就整个短路返回。真实后果（第 6 镜）：分镜写的是 ['父亲','我']，
+ * 设定集里叫「我（无灵根书信摊主）」——「我」对不上被扔掉，「父亲」对上了，
+ * 于是直接返回只有父亲那一个。
+ *
+ * 出来的图里**只有父亲一个人**，那句"塞进我手里"没有接的人。
+ * 而全程不报任何错：界面显示"已带上参考图"，带的确实是参考图，
+ * 只是少了一个人。
+ */
 export function matchCharacters(bible, shot) {
   if (!bible?.characters?.length) return [];
+  const listed = (shot.characters || []).map((n) => String(n).trim()).filter(Boolean);
+  if (listed.length) {
+    const out = [];
+    for (const n of listed) {
+      const hit = resolveCast(bible, n);
+      if (hit && !out.includes(hit)) out.push(hit);
+    }
+    // 一个都没对上才退回读描述 —— 总比一张脸都不带强
+    if (out.length) return out;
+  }
   const haystack = `${shot.characters?.join(' ') || ''} ${shot.description || ''} ${shot.dialogue || ''}`;
-  const named = (shot.characters || [])
-    .map((n) => bible.characters.find((c) => c.name === n))
-    .filter(Boolean);
-  if (named.length) return named;
   return bible.characters.filter((c) => haystack.includes(c.name));
+}
+
+/**
+ * 分镜里点了名、但设定集里找不到的那些角色。
+ *
+ * 这是上面那个 bug 里**最要命的部分**：对不上不会报错，只会少一张脸。
+ * 而少一张脸的表现（"这一镜怎么只有一个人""他怎么又换了张脸"）
+ * 看起来像模型不行，没人会想到是名字对不上。
+ *
+ * 所以要把它挖出来单独说 —— 见 pipeline/diagnose.js 里的 cast-unmatched。
+ */
+export function unmatchedCast(bible, shot) {
+  if (!bible?.characters?.length) return [];
+  return (shot?.characters || [])
+    .map((n) => String(n).trim())
+    .filter((n) => n && !resolveCast(bible, n));
 }
 
 export function matchScene(bible, shot) {
