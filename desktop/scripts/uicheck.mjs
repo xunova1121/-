@@ -22,6 +22,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 // Playwright 不是这个项目的依赖，从全局装的那份里取。找不到就说清楚怎么装
 const PW = process.env.PLAYWRIGHT_PATH || 'playwright';
@@ -125,10 +126,23 @@ const stub = http.createServer((req, res) => {
 await new Promise((r) => stub.listen(0, '127.0.0.1', r));
 const stubUrl = `http://127.0.0.1:${stub.address().port}/v3`;
 
-const settings = await import('/home/user/-/desktop/core/settings.js');
-const vault = await import('/home/user/-/desktop/core/vault.js');
-const store = await import('/home/user/-/desktop/core/store.js');
-const { listen } = await import('/home/user/-/desktop/core/server.js');
+/**
+ * ⚠ **import 必须按这个脚本自己的位置算，绝对不能写死绝对路径。**
+ *
+ * 这里原来写的是 `import('/home/user/-/desktop/core/settings.js')` —— 我这台
+ * 开发机的路径。两个后果，第二个要命：
+ *   ① 换台机器（比如服务器上的 ~/fd/desktop）直接跑不起来，路径不存在
+ *   ② 在另一份检出里跑，它会**静默地 import 另一份代码**然后报绿 ——
+ *      走查了半天，验的根本不是眼前这份分支
+ * ② 就是"验错了对象"，比红灯坏得多：红灯会有人看，绿灯没人查。
+ */
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const CORE = (name) => path.join(HERE, '..', 'core', name);
+
+const settings = await import(CORE('settings.js'));
+const vault = await import(CORE('vault.js'));
+const store = await import(CORE('store.js'));
+const { listen } = await import(CORE('server.js'));
 
 vault.setSecret('ARK_API_KEY', 'stub-key');
 settings.patch({

@@ -12,6 +12,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 const PW = process.env.PLAYWRIGHT_PATH || 'playwright';
 let chromium; let devices;
@@ -32,9 +33,22 @@ try {
 const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'fd-m-'));
 process.env.FUTUREDREAM_DATA_DIR = SANDBOX;
 
-const settings = await import('/home/user/-/desktop/core/settings.js');
-const store = await import('/home/user/-/desktop/core/store.js');
-const srv = await import('/home/user/-/desktop/core/server.js');
+/**
+ * ⚠ **import 必须按这个脚本自己的位置算，绝对不能写死绝对路径。**
+ *
+ * 这里原来写的是 `import('/home/user/-/desktop/core/settings.js')` —— 我这台
+ * 开发机的路径。两个后果，第二个要命：
+ *   ① 换台机器（比如服务器上的 ~/fd/desktop）直接跑不起来，路径不存在
+ *   ② 在另一份检出里跑，它会**静默地 import 另一份代码**然后报绿 ——
+ *      走查了半天，验的根本不是眼前这份分支
+ * ② 就是"验错了对象"，比红灯坏得多：红灯会有人看，绿灯没人查。
+ */
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const CORE = (name) => path.join(HERE, '..', 'core', name);
+
+const settings = await import(CORE('settings.js'));
+const store = await import(CORE('store.js'));
+const srv = await import(CORE('server.js'));
 
 settings.patch({ autoCheckOnStart: false });
 const proj = store.create({ title: '手机端测试', aspectRatio: '9:16', script: '阿澜在码头巡查。' });
@@ -93,7 +107,7 @@ store.update(proj.id, (p) => {
  * 种的是**用量**不是钱 —— 账本本来就只存用量，这也顺带验了那件事：
  * 种完之后一个单价都没有，卡片上必须显示用量、并且挂着"还没填单价"。
  */
-const ledgerM = await import('/home/user/-/desktop/core/ledger.js');
+const ledgerM = await import(CORE('ledger.js'));
 ledgerM.add({ projectId: proj.id, stage: 'assets', provider: 'volcengine', model: 'doubao-seedream-3-0-t2i-250415', kind: 'image', units: 1 });
 ledgerM.add({ projectId: proj.id, stage: 'assets', provider: 'volcengine', model: 'doubao-seedream-3-0-t2i-250415', kind: 'image', units: 1 });
 ledgerM.add({ projectId: proj.id, stage: 'video', provider: 'volcengine', model: 'doubao-seedance-1-0-pro-250528', kind: 'video', units: 10 });
@@ -337,7 +351,7 @@ if (opened) {
  * 这里直接往登记表里塞一份活儿（它和这台服务器在同一个进程里），
  * 然后刷新页面 —— 走的正是用户切屏回来那条路。
  */
-const jobs = await import('/home/user/-/desktop/core/jobs.js');
+const jobs = await import(CORE('jobs.js'));
 {
   const cur = store.list()[0];
   const fake = jobs.start(cur.id, 'video');
