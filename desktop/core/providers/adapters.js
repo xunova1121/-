@@ -817,11 +817,28 @@ async function generateImageRaw({
     // 直接比字符串会把"没换"当成"换了"，于是每出一张图都要报一次假警
     const same = (a2, b2) => String(a2).replace(/[x×]/i, '*') === String(b2).replace(/[x×]/i, '*');
     if (!same(size, preset)) {
-      // 换过尺寸必须说一声：不说的话，你在请求记录里看到的尺寸和你选的画幅对不上，
-      // 会以为是这里算错了
+      /**
+       * 换过尺寸必须说一声：不说的话，你在请求记录里看到的尺寸和你选的画幅
+       * 对不上，会以为是这里算错了。
+       *
+       * ⚠ 但**为什么**换，各家不是一回事，不能共用一句话：
+       *
+       *   enum 那一类（gpt-image-1、Seedream 3.0）是真的**收不下** ——
+       *   发别的尺寸会被拒，或者被换成一个别的比例。
+       *
+       *   Agnes 是**收得下但会自己改** —— 它照收 1280×720，然后按自己那张
+       *   没公开的表映射到最近的档位。对这家说"它收不下"是错的，而错的
+       *   解释比不解释更坏：用户会去找一个根本不存在的报错。
+       *
+       * 所以理由写在目录的 imageSizes.why 里，谁的约束谁自己解释。
+       */
+      const why = imageSizeConstraint(provider, model)?.why;
       onEvent?.({
         type: 'note',
-        message: `${model} 的尺寸有约束，${wantRatio} 按 ${size.replace('*', '×')} 出（预设的 ${preset.replace('*', '×')} 它收不下，硬发会被它自己换成别的比例）`
+        message: why
+          ? `${model}：${wantRatio} 按 ${size.replace('*', '×')} 出 —— ${why}`
+          : `${model} 的尺寸有约束，${wantRatio} 按 ${size.replace('*', '×')} 出`
+            + `（预设的 ${preset.replace('*', '×')} 它收不下，硬发会被它自己换成别的比例）`
       });
     }
   }

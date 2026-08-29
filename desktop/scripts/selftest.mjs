@@ -9426,6 +9426,28 @@ section('Agnes AI 出图：三处和 OpenAI 长得像但不一样的地方');
     check('收下了 data[0].url', got.url === 'https://storage.googleapis.com/agnes-aigc/xxx.png', String(got.url));
   }
 
+  // ── ①b 换尺寸的理由要说对 ──
+  {
+    const notes = [];
+    await adaptersMod.generateImage({
+      providerId: 'agnes', model: M, prompt: '换尺寸提示', aspectRatio: '16:9', label: '出图',
+      onEvent: (e) => { if (e?.type === 'note') notes.push(String(e.message || '')); }
+    });
+    const sizeNote = notes.find((n) => n.includes('2624×1472'));
+    check('换过尺寸会说一声（不说的话请求记录和画幅对不上）', Boolean(sizeNote), JSON.stringify(notes));
+    /**
+     * ⚠ 通用那句写的是"它收不下，硬发会被它自己换成别的比例"——
+     * 那是给 enum 那一类（gpt-image-1、Seedream 3.0）写的，它们是真的收不下。
+     *
+     * Agnes 是**收得下但会自己改**。对这家说"收不下"是错的，而错的解释
+     * 比不解释更坏：用户会去找一个根本不存在的报错。
+     */
+    check('而且没照抄"它收不下"（Agnes 收得下，只是会自己改）',
+      sizeNote && !sizeNote.includes('收不下'), String(sizeNote));
+    check('说的是真正的理由：只有四档，1K 比 1080p 还矮',
+      sizeNote && sizeNote.includes('1312×736'), String(sizeNote));
+  }
+
   // ── ② response_format 绝不能在顶层 ──
   {
     check('顶层没有 response_format（文档专门用「重要说明」提的）',
