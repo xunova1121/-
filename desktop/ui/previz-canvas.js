@@ -375,11 +375,12 @@ export function previzPanel(stage, {
   /** 套用：把那个场景已经存过的布局搬过来 */
   sceneLayout = null,
   /**
-   * 设定集里的道具名。摆上去的道具**在构图底图上是用它自己那张设定图画的** ——
-   * 而"门/窗/桌"这些通用地标只是个占位框。
+   * 设定集里的道具名。
    *
-   * 所以这一排和上面那排地标不是一回事：地标解决的是"空间别塌"，
-   * 这一排解决的是"这一镜里那把柴刀该在画面哪儿"。
+   * 和上面那排通用地标（门/窗/桌）走同一套数学，但解决的问题不同：
+   * 地标解决的是"同一场戏的空间别塌"，这一排解决的是
+   * "这一镜里那把柴刀该在画面哪儿" —— 摆上去之后，提示词里会多一句
+   * "柴刀在画面右"，出图时模型据此摆放它。
    */
   bibleProps = []
 } = {}) {
@@ -449,9 +450,9 @@ export function previzPanel(stage, {
     /**
      * ── 设定集道具那一排 ──
      *
-     * 摆上去之后，构图底图上画的是**它自己那张设定图**，不是占位框。
-     * 这是"设定集的东西真的进画面"这条路上的最后一环：
-     * 人（角色设定图）、地（场景基准图）、物（道具参考图）三样齐了。
+     * 摆上去之后，提示词里会多一句"柴刀在画面右"。
+     * 和地标那排的区别：门窗桌椅整场继承（它们不搬家），
+     * 道具跟着这一镜的「关键道具」清单走（刀是被人拿着走的）。
      */
     if (bibleProps.length) {
       const propRow = document.createElement('div');
@@ -467,7 +468,7 @@ export function previzPanel(stage, {
         }));
       }
       propRow.append(Object.assign(document.createElement('span'), {
-        className: 'previz-cap', style: 'min-width:0', textContent: '摆上去会用它的设定图拼进底图'
+        className: 'previz-cap', style: 'min-width:0', textContent: '摆上去会写进提示词：它在画面哪一边'
       }));
       controls.append(propRow);
     }

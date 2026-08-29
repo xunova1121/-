@@ -10,9 +10,7 @@ import { openLightbox } from '../lightbox.js';
 import { ratioLabel } from '../ratios.js';
 import { skillPicker, customSkillForm } from '../skill-picker.js';
 import { previzPanel, blankStage } from '../previz-canvas.js';
-import { blockFramePanel } from '/blockframe-canvas.js';
 import { shotTable } from '../shot-table.js';
-import * as BLOCKFRAME from '/blockframe.js';
 import * as siteCanvasMod from '../site-canvas.js';
 import * as OUTLINE from '/outline.js';
 import { inheritStage } from '/previz.js';
@@ -1856,7 +1854,7 @@ export default {
              */
             const sameSeg = prevShot && Number(prevShot.segment || 1) === Number(shot.segment || 1);
             // ⚠ 第三个参数是**这一镜的道具清单**：地标整场继承，道具按清单筛。
-            // 不传的话，上一镜摆过的刀会一路跟到最后一镜，还会画进构图底图
+            // 不传的话，上一镜摆过的刀会一路跟到最后一镜，提示词里也一直说它在画面上
             stageDraft = (sameSeg && inheritStage(prevShot.stage, names, shot.props || []))
               || blankStage(names);
           }
@@ -1882,80 +1880,17 @@ export default {
             },
             onChange: () => { /* 拖动时只更新读数，存盘等你点保存 */ },
             /**
-             * 设定集里的道具。摆上去之后构图底图上画的是**它自己那张设定图**，
-             * 而不是一个占位框 —— 这是"设定集的东西真的进画面"的最后一环。
+             * 设定集里的道具。摆上去之后，提示词里会多一句「柴刀在画面右」——
+             * 和门窗桌椅走同一套数学，只是它跟着这一镜的关键道具清单走。
              */
             bibleProps: (project.bible?.props || []).map((x) => x.name)
           });
-
-          /**
-           * ══════════ 构图底图 ══════════
-           *
-           * ⚠ 图必须走 **mediaUrl（本机 /media）**，不能用 sheetUrl。
-           *
-           * 配了对象存储之后 sheetUrl 是跨域地址，跨域图画进 canvas 会把它污染，
-           * 紧接着 toDataURL() 抛 SecurityError —— 而在这之前一切正常：
-           * 预览画出来了、看着好好的，只有保存那一下炸。
-           */
-          const sheetOf = (item) => {
-            const v = (item?.variants || []).find((x) => x.sheetPath) || item;
-            if (!v?.sheetPath) return null;
-            /**
-             * ⚠ 三样都要带上，缺一样底图就画错，而且都不报错：
-             *   sheetLayout  这张是不是四视图拼版 —— 决定裁不裁。
-             *                不带的话整张四视图会被当成"一个人"贴进画面
-             *   source       模型出的才抠背景。用户传的真实照片硬抠会挖出破洞
-             *   angles       单独出过的侧面/背面图。有就用它，比从拼版里裁清楚
-             */
-            const angles = {};
-            for (const a of v.angles || []) {
-              if (a?.sheetPath && a.id) angles[a.id] = mediaUrl(a.sheetPath);
-            }
-            return {
-              url: mediaUrl(v.sheetPath),
-              sheetLayout: v.sheetLayout || null,
-              source: v.sheetSource || null,
-              angles
-            };
-          };
-          const assets = {};
-          for (const list of [project.bible?.characters, project.bible?.scenes, project.bible?.props]) {
-            for (const item of list || []) {
-              const a = sheetOf(item);
-              if (a) assets[item.name] = a;
-            }
-          }
 
           previzHost.append(
             h('div', { class: 'shot-edit-tip' },
               '拖大圆点摆人，拖小圆点转身，拖「机」摆机位。两个人之间那条线就是轴线 —— '
               + '机位跨过去，成片上两人就左右对调了。排完点下面的保存。'),
-            panel.node,
-            blockFramePanel({
-              stage: stageDraft,
-              scene: shot.scene || '',
-              assets,
-              saved: {
-                has: Boolean(shot.blockFramePath),
-                /**
-                 * ⚠ 过期判定用的是**和服务端同一份** stageStamp（共享原件）。
-                 * 界面另写一个的话，两边会漂：这里说"还作数"，出图那边不发它，
-                 * 而两句都是我们自己说的。
-                 */
-                stale: Boolean(shot.blockFramePath)
-                  && BLOCKFRAME.stageStamp(stageDraft) !== (shot.blockFrameStamp || ''),
-                url: shot.blockFramePath ? `${mediaUrl(shot.blockFramePath)}&v=${Date.parse(shot.blockFrameAt || '') || 0}` : null
-              },
-              // 这块面板只有 200px 宽，底图在里面看不清 —— 点开走 app 自己那套灯箱
-              onOpen: (src) => openLightbox(
-                [{ src, title: `第 ${shot.index} 镜 · 构图底图`, note: '出图时会带上它，模型只照它定构图' }], 0
-              ),
-              onSave: async (dataUrl) => {
-                // cap:blockframe
-                await stream(`/projects/${project.id}/shots/${shot.id}/blockframe`, { dataUrl }, () => {});
-                toast('构图底图存好了 —— 下次出这一镜会带上它', 'ok');
-              }
-            })
+            panel.node
           );
         });
 

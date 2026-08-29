@@ -1291,26 +1291,6 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
       return undefined;
     }
 
-    /**
-     * ── 预演台拼好的构图底图存回来 ──
-     *
-     * 图是**浏览器**拼的（设定集那些图 + blockframe 的版式），
-     * 服务端只负责落盘和记指纹。放在浏览器是因为拼图要用 canvas，
-     * 而这个项目不装图形库（零依赖），服务端这边没有能画图的东西。
-     */
-    if (b && c === 'shots' && d && e === 'blockframe' && method === 'POST') {
-      const body = await readBody(req);
-      const stream = ndjson(res);
-      req.on('close', () => stream.end());
-      try {
-        const saved = await studio.saveBlockFrame(b, d, body, (ev) => stream.send(ev));
-        stream.end({ type: 'finished', project: store.read(b), saved });
-      } catch (err) {
-        stream.end({ type: 'error', message: err.message });
-      }
-      return undefined;
-    }
-
     // ── 设定集条目：重出 / 新增 / 删除 ──
     if (b && c === 'bible' && d) {
       const kind = d; // char | scene | prop
@@ -1842,7 +1822,7 @@ export function createServer({ lan = false } = {}) {
        * 放行的是这两个确切的路径，不是"所有 .js"—— 后者会把电脑版
        * 整套界面代码一起放出去，那不是同一件事。
        */
-      const SHARED_MODULES = ['/previz-canvas.js', '/blockframe-canvas.js', '/site-canvas.js', '/previz.js', '/blockframe.js', '/site.js', '/outline.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js', '/pricing.js', '/estimate.js'];
+      const SHARED_MODULES = ['/previz-canvas.js', '/site-canvas.js', '/previz.js', '/site.js', '/outline.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js', '/pricing.js', '/estimate.js'];
       const isShell =
         url.pathname === '/m'
         || url.pathname.startsWith('/m/')
@@ -1907,20 +1887,6 @@ export function createServer({ lan = false } = {}) {
        * 前提是这个文件必须保持**零依赖**（它现在就是纯计算，不碰 node: 任何东西）。
        * 自检里有一条守着这件事 —— 哪天有人给它加个 import，那条会先红。
        */
-      /**
-       * 构图底图的版式算法，也发原件。
-       *
-       * 浏览器要按它把设定集的图拼成一张构图底图，服务端要按同一份版式
-       * 复核和写提示词。两边各写一份的话，界面上人站画面左、
-       * 发出去的提示词说他在右 —— 而两句都是我们自己说的。
-       */
-      if (url.pathname === '/blockframe.js') {
-        return fs.readFile(path.join(HERE, 'pipeline', 'blockframe.js'), (err, data) => {
-          if (err) return json(res, 404, { error: '找不到 blockframe.js' });
-          res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
-          res.end(data);
-        });
-      }
       if (url.pathname === '/previz.js') {
         return fs.readFile(path.join(HERE, 'pipeline', 'previz.js'), (err, data) => {
           if (err) return json(res, 404, { error: '找不到 previz.js' });

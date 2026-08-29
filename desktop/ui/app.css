@@ -1315,20 +1315,6 @@ select.mini {
 /* 支点那句话：清单只是信息，这句话把它变成一个决定 */
 .stepcheck-cost { margin-top: 8px; font-size: 12px; color: var(--ink); font-weight: 600; }
 
-/* ── 构图底图 ──
-   ⚠ .blockframe-img 那条 max-width 是必须的：拼出来的是 640px 宽的 PNG，
-   而它挂在一个 320px 上下的编辑栏里。没有这条的话图会按原始尺寸撑出去，
-   把整块编辑面板挤变形 —— 而界面走查只验"按钮在不在、图出没出"，
-   版面被撑坏它一个字都不会说。 */
-.blockframe-panel { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
-.blockframe-preview { margin-top: 8px; }
-.blockframe-img {
-  display: block; width: 100%; max-width: 100%; height: auto;
-  border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2);
-}
-/* 底图上的提醒（人出画了、没设定图）用和别处一致的警示色，别自成一套 */
-.blockframe-panel .previz-readout.warn { color: var(--alarm); }
-
 .previz-row { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .previz-cap { color: var(--ink-faint); font-size: 12px; min-width: 44px; }
 .previz-row .btn.on { border-color: var(--beam); color: var(--beam); }

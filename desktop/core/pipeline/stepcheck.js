@@ -37,7 +37,6 @@
 
 import * as shotlint from './shotlint.js';
 import * as duration from '../duration.js';
-import * as previz from './previz.js';
 
 /** 这一步会碰哪些镜头。和 estimate.pendingShots 一个口径，别各算各的 */
 function targetsOf(shots, stage, regenerate) {
@@ -85,73 +84,16 @@ function forAssets(project, shots) {
       level: 'warn',
       what: `${noStage.length} 镜没在预演台排位`,
       why: '没排位就没有机位、没有景别、没有轴线 —— 构图完全由文字决定，'
-        + '同一场戏的几镜很容易各画各的。预演台拼的构图底图也发不出去（它需要排位）。',
-      fix: '镜头卡上点「预演台」，把人和机位拖到位，再拼一张底图。',
+        + '同一场戏的几镜很容易各画各的。',
+      fix: '镜头卡上点「预演台」，把人和机位拖到位。',
       shots: idx(noStage)
     });
   }
 
-  /**
-   * 排了位、底图却是旧的 —— 比没排位更值得说。
-   * 人已经付出了排位的工夫，而那份工夫**一点没进到图里**。
-   */
-  const staleFrame = shots.filter((s) => s.stage?.cam && s.blockFramePath
-    && s.blockFrameStamp !== undefined
-    && s.blockFrameStamp !== stampOf(s.stage));
-  if (staleFrame.length) {
-    out.push({
-      id: 'stale-blockframe',
-      level: 'warn',
-      what: `${staleFrame.length} 镜排位改过，但构图底图还是老那张`,
-      why: '过期的底图不会被发出去（发了会按老位置构图）。也就是说，'
-        + '你改过的那些排位，这一次一点都不会生效。',
-      fix: '去预演台点一下「重拼底图」。',
-      shots: idx(staleFrame)
-    });
-  }
-
-  /**
-   * ⚠ "排了位但没拼底图"这条**只在你已经用过这个功能时才说**。
-   *
-   * 底图是可选的。对一个从没拼过底图的项目，这条会在**每一个**排过位的
-   * 镜头上常驻 —— 一行永远消不掉的黄字。那不是提示，是广告：
-   * 它不报告任何异常，只是在推销一个功能。
-   * 而永远消不掉的提醒会被当成噪音，连带着旁边真正要紧的那条一起被无视。
-   *
-   * 自检里那条"干净的项目上一条都不报"当场把它抓出来了 ——
-   * 我写那条断言正是为了防这种事，结果先防到了自己头上。
-   *
-   * 项目里**别处已经拼过**的话就不一样了：那说明你在用这个功能，
-   * 而这几镜漏了 —— 那是一处真的不一致，值得说一句。
-   */
-  const adopted = (project.shots || []).some((s) => s.blockFramePath);
-  const posed = adopted ? shots.filter((s) => s.stage?.cam && !s.blockFramePath) : [];
-  if (posed.length) {
-    out.push({
-      id: 'no-blockframe',
-      level: 'tip',
-      what: `${posed.length} 镜排了位但没拼构图底图（别的镜头拼了）`,
-      why: '排位只有拼成底图发出去才会影响画面。这几镜的排位这一次不会生效，'
-        + '而同一场戏里别的镜头会 —— 构图基准两套，接起来会别扭。',
-      fix: '预演台里点「拼一张底图」。',
-      shots: idx(posed)
-    });
-  }
 
   return out.concat(fromLint(project, shots));
 }
 
-/** 排位指纹。和 blockframe.stageStamp 同一套算法 —— 这里不 import 它是为了不成环 */
-function stampOf(stage) {
-  const st = previz.normalizeStage(stage);
-  if (!st) return '';
-  const n = (v) => Number(v || 0).toFixed(2);
-  return [
-    `c${n(st.cam.x)},${n(st.cam.y)},${n(st.cam.height)},${n(st.cam.lens)}`,
-    ...st.subjects.map((s) => `s${s.name}:${n(s.x)},${n(s.y)}`),
-    ...st.marks.map((m) => (m.far ? `f${m.name}:${n(m.deg)}` : `m${m.name}:${n(m.x)},${n(m.y)}`))
-  ].join('|');
-}
 
 /**
  * 分镜体检里那些**高危**项，汇总成一条。

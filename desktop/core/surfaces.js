@@ -455,25 +455,6 @@ export const CAPABILITIES = [
     why: ''
   },
   {
-    id: 'blockframe',
-    name: '预演台拼一张构图底图，出图时带上它',
-    api: 'POST /projects/:id/shots/:shotId/blockframe',
-    pc: 'ui/views/studio.js',
-    /**
-     * 手机上**故意不做**。
-     *
-     * 拼底图要先把人和机位拖准 —— 那是在一张俯视图上做精细定位的活，
-     * 手指在 6 寸屏上拖不出"差半米"这种精度，而排位差半米，
-     * 出来的构图就是另一回事。给个拼不准的入口，比没有更坏：
-     * 用户会拼一张歪的、带着它出图、然后以为是出图模型不行。
-     *
-     * 手机上能看到底图和"排位改过了"的提醒（那些跟着镜头卡走），
-     * 只是不能在手机上拼。
-     */
-    mobile: null,
-    why: '排位要在俯视图上拖到半米级的精度，手指做不到；拼歪的底图会带着出图，比没有更坏'
-  },
-  {
     id: 'comfy-workflow',
     name: '本地出图（ComfyUI）：贴工作流、当场看出打了哪几个标记',
     api: 'POST /comfy/inspect',
