@@ -26,6 +26,7 @@ import * as previz from '/previz.js';
 import * as THREE from '/three.js';
 import { GLTFLoader } from '/three-gltf-loader.js';
 import { OrbitControls } from '/three-orbit-controls.js';
+import { TransformControls } from '/three-transform-controls.js';
 import { clone as cloneSkeleton } from '/three-skeleton-utils.js';
 import { addKeyframe, applyFrame, createHistory, findObject, normalizeStage, stageObjects } from './previz-stage.js';
 
@@ -61,6 +62,22 @@ function makeScale(size) {
 
 function clampM(v) {
   return Math.max(-EXTENT, Math.min(EXTENT, v));
+}
+
+/** 把一张人物设定集切成可供贴片使用的单个视图，支持常见横排与 2×2 排版。 */
+export function quadTextureTransform(item, viewName) {
+  const order = Array.isArray(item.textureOrder) && item.textureOrder.length === 4
+    ? item.textureOrder : ['closeup', 'front', 'side', 'back'];
+  const panel = Math.max(0, order.indexOf(viewName));
+  const inset = Math.max(0, Math.min(.08, Number(item.textureInset || 0)));
+  if (item.textureGrid === '2x2') {
+    const col = panel % 2, row = Math.floor(panel / 2);
+    return {
+      repeatX: .5 - inset * 2, repeatY: .5 - inset * 2,
+      offsetX: col * .5 + inset, offsetY: (1 - row) * .5 + inset
+    };
+  }
+  return { repeatX: .25 - inset * 2, repeatY: 1 - inset * 2, offsetX: panel * .25 + inset, offsetY: inset };
 }
 
 /**
@@ -418,6 +435,32 @@ export function director3dCanvas(stage, {
   orbit.mouseButtons.MIDDLE = THREE.MOUSE.PAN;
   orbit.touches.ONE = null;
   orbit.touches.TWO = THREE.TOUCH.DOLLY_PAN;
+  const transform = new TransformControls(view, renderer.domElement);
+  const transformHelper = transform.getHelper();
+  scene3d.add(transformHelper);
+  let transformMode = 'translate';
+  let transforming = false;
+  const gizmoBar = document.createElement('div');
+  gizmoBar.className = 'previz-gizmo-bar';
+  gizmoBar.setAttribute('aria-label', '对象变换工具');
+  const gizmoButtons = new Map();
+  for (const [mode, label, title] of [
+    ['translate', '移动', '沿红绿蓝三轴移动'],
+    ['rotate', '旋转', '沿三轴旋转'],
+    ['scale', '缩放', '沿三轴缩放']
+  ]) {
+    const button = Object.assign(document.createElement('button'), { type: 'button', textContent: label, title });
+    button.className = `previz-gizmo-btn${mode === transformMode ? ' on' : ''}`;
+    button.onclick = (event) => {
+      event.stopPropagation();
+      transformMode = mode;
+      transform.setMode(mode);
+      for (const [key, node] of gizmoButtons) node.classList.toggle('on', key === mode);
+    };
+    gizmoButtons.set(mode, button);
+    gizmoBar.append(button);
+  }
+  host.append(gizmoBar);
   scene3d.add(new THREE.HemisphereLight(0xbfd8ff, 0x2a2530, 1.5));
   const key = new THREE.DirectionalLight(0xffe3bd, 2.2); key.position.set(-5, 9, -3); key.castShadow = true; scene3d.add(key);
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(24, 24), new THREE.MeshStandardMaterial({ color: 0x29313d, roughness: .92 }));
@@ -435,6 +478,33 @@ export function director3dCanvas(stage, {
   const guides = [];
 
   orbit.addEventListener('change', () => renderer.render(scene3d, view));
+  transform.setMode(transformMode);
+  transform.setTranslationSnap(.05);
+  transform.setRotationSnap(THREE.MathUtils.degToRad(1));
+  transform.setScaleSnap(.05);
+  transform.addEventListener('dragging-changed', (event) => {
+    transforming = Boolean(event.value);
+    orbit.enabled = !transforming;
+  });
+  transform.addEventListener('objectChange', () => {
+    const obj = transform.object;
+    const item = obj?.userData?.item;
+    if (!item) return;
+    item.x = Number(obj.position.x.toFixed(2));
+    item.y = Number(obj.position.z.toFixed(2));
+    item.elevation = Number(obj.position.y.toFixed(2));
+    item.rotation = Number((-THREE.MathUtils.radToDeg(obj.rotation.y)).toFixed(1));
+    item.rotationX = Number(THREE.MathUtils.radToDeg(obj.rotation.x).toFixed(1));
+    item.rotationZ = Number(THREE.MathUtils.radToDeg(obj.rotation.z).toFixed(1));
+    if (obj.userData.kind === 'subject') item.facing = item.rotation;
+    item.scaleX = Number(Math.max(.05, obj.scale.x).toFixed(2));
+    item.scaleY = Number(Math.max(.05, obj.scale.y).toFixed(2));
+    item.scaleZ = Number(Math.max(.05, obj.scale.z).toFixed(2));
+    item.scale = item.scaleX;
+    onChange();
+    renderer.render(scene3d, view);
+  });
+  transform.addEventListener('mouseUp', () => { onCommit(); redraw(); });
   renderer.domElement.oncontextmenu = (ev) => ev.preventDefault();
 
   function loadModel(url) {
@@ -529,9 +599,9 @@ export function director3dCanvas(stage, {
         const delta = Math.abs(((bearing - facing + 540) % 360) - 180);
         viewName = delta <= 55 ? 'front' : delta >= 125 ? 'back' : 'side';
       }
-      const panel = { closeup: 0, front: 1, side: 2, back: 3 }[viewName] ?? 1;
-      map.repeat.set(.25, 1);
-      map.offset.set(panel * .25, 0);
+      const crop = quadTextureTransform(item, viewName);
+      map.repeat.set(crop.repeatX, crop.repeatY);
+      map.offset.set(crop.offsetX, crop.offsetY);
       map.needsUpdate = true;
       item.resolvedTextureView = viewName;
     }
@@ -606,6 +676,7 @@ export function director3dCanvas(stage, {
     return g;
   }
   function redraw() {
+    transform.detach();
     for (const obj of objects.values()) {
       scene3d.remove(obj);
       const mixer = mixers.get(obj);
@@ -647,22 +718,28 @@ export function director3dCanvas(stage, {
     for (const { kind, item } of entries) {
       const fallback = kind === 'subject' ? actor(item) : kind === 'camera' ? cameraRig() : kind === 'light' ? lightRig(item) : prop(item);
       const obj = kind === 'camera' || kind === 'light' ? fallback : modelOrFallback(item, kind, fallback);
-      obj.position.set(Number(item.x || 0), 0, Number(item.y || 0));
+      obj.position.set(Number(item.x || 0), Number(item.elevation || 0), Number(item.y || 0));
       if (kind === 'camera' && stage.subjects?.[0]) obj.rotation.y = Math.atan2(Number(stage.subjects[0].x || 0) - Number(item.x || 0), Number(stage.subjects[0].y || 0) - Number(item.y || 0));
       else obj.rotation.y = -THREE.MathUtils.degToRad(Number(item.rotation || item.facing || 0));
-      obj.scale.setScalar(Number(item.scale || 1)); obj.userData = { item, kind };
+      obj.rotation.x = THREE.MathUtils.degToRad(Number(item.rotationX || 0));
+      obj.rotation.z = THREE.MathUtils.degToRad(Number(item.rotationZ || 0));
+      const baseScale = Number(item.scale || 1);
+      obj.scale.set(Number(item.scaleX || baseScale), Number(item.scaleY || baseScale), Number(item.scaleZ || baseScale));
+      obj.userData = { item, kind };
       if (selected() === item.id) { const box = new THREE.BoxHelper(obj, 0x49c8ff); obj.add(box); }
       objects.set(item.id, obj); scene3d.add(obj);
       addMotionGuide(item, kind);
     }
+    const active = objects.get(selected());
+    if (active && !active.userData.item.locked) transform.attach(active);
     const rect = host.getBoundingClientRect(); renderer.setSize(Math.max(320, rect.width || size), Math.max(230, rect.height || size * .72), false);
     view.aspect = Math.max(1, (rect.width || size) / (rect.height || size * .72)); view.updateProjectionMatrix(); renderer.render(scene3d, view);
   }
   const pointer = (ev) => { const r = renderer.domElement.getBoundingClientRect(); mouse.set((ev.clientX-r.left)/r.width*2-1, -(ev.clientY-r.top)/r.height*2+1); ray.setFromCamera(mouse, view); };
   const hitGround = (ev) => { pointer(ev); const p = new THREE.Vector3(); return ray.ray.intersectPlane(ground, p) ? { x: clampM(p.x), y: clampM(p.z) } : { x: 0, y: 0 }; };
   let dragging = null;
-  renderer.domElement.onpointerdown = (ev) => { if (ev.button !== 0) return; pointer(ev); const hits = ray.intersectObjects([...objects.values()], true); const root = hits[0]?.object; let obj = root; while (obj && !obj.userData?.item) obj = obj.parent; if (!obj) return; onSelect(obj.userData.item.id); if (!obj.userData.item.locked) { dragging = obj.userData.item; renderer.domElement.setPointerCapture(ev.pointerId); } redraw(); };
-  renderer.domElement.onpointermove = (ev) => { if (!dragging) return; const p = hitGround(ev); dragging.x = Number(p.x.toFixed(2)); dragging.y = Number(p.y.toFixed(2)); redraw(); onChange(); };
+  renderer.domElement.onpointerdown = (ev) => { if (ev.button !== 0 || transforming || transform.axis) return; pointer(ev); const hits = ray.intersectObjects([...objects.values()], true); const root = hits[0]?.object; let obj = root; while (obj && !obj.userData?.item) obj = obj.parent; if (!obj) return; onSelect(obj.userData.item.id); if (!obj.userData.item.locked && transformMode === 'translate') { dragging = obj.userData.item; renderer.domElement.setPointerCapture(ev.pointerId); } redraw(); };
+  renderer.domElement.onpointermove = (ev) => { if (!dragging || transforming) return; const p = hitGround(ev); dragging.x = Number(p.x.toFixed(2)); dragging.y = Number(p.y.toFixed(2)); redraw(); onChange(); };
   renderer.domElement.onpointerup = (ev) => { if (dragging) onCommit(); dragging = null; try { renderer.domElement.releasePointerCapture(ev.pointerId); } catch {} };
   host.ondragover = (ev) => ev.preventDefault();
   host.ondrop = (ev) => { ev.preventDefault(); try { onAssetDrop(JSON.parse(ev.dataTransfer.getData('application/x-futuredream-asset')), hitGround(ev)); } catch {} };
@@ -980,8 +1057,9 @@ export function previzPanel(stage, {
       className: `btn ghost sm${item.locked ? ' on' : ''}`, textContent: item.locked ? '🔒 已锁定' : '🔓 锁定'
     });
     lock.onclick = () => { item.locked = !item.locked; history.commit(); redrawAll(); onChange(); };
-    inspector.append(title, makeNumber('X', 'x'), makeNumber('Y', 'y'), makeNumber('高度', 'height'),
-      makeNumber('旋转°', 'rotation', '1'), makeNumber('缩放', 'scale'), lock);
+    inspector.append(title, makeNumber('X', 'x'), makeNumber('Y', 'y'), makeNumber('离地', 'elevation'), makeNumber('高度', 'height'),
+      makeNumber('水平旋转°', 'rotation', '1'), makeNumber('俯仰°', 'rotationX', '1'), makeNumber('翻滚°', 'rotationZ', '1'),
+      makeNumber('缩放X', 'scaleX'), makeNumber('缩放Y', 'scaleY'), makeNumber('缩放Z', 'scaleZ'), lock);
     if (found.kind === 'camera') {
       const targets = [['', '自动跟随主体'], ...(stage.subjects || []).map((x) => [x.id, x.name || x.id]),
         ...(stage.marks || []).filter((x) => !x.far).map((x) => [x.id, x.name || x.id])];
@@ -991,7 +1069,9 @@ export function previzPanel(stage, {
         inspector.append(makeSelect('贴图视角', 'textureView', [
           ['auto', '自动随朝向'], ['front', '全身正面'], ['side', '全身侧面'],
           ['back', '全身背面'], ['closeup', '上半身特写']
-        ]));
+        ]), makeSelect('设定集排版', 'textureGrid', [
+          ['horizontal', '横向四格'], ['2x2', '2×2 四宫格']
+        ]), makeNumber('裁切内缩', 'textureInset', '0.005'));
       }
       inspector.append(makeSelect('姿态', 'pose', [
         ['stand', '站立'], ['walk', '行走'], ['run', '奔跑'], ['sit', '坐下'], ['crouch', '下蹲'],

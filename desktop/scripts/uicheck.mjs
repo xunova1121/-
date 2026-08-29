@@ -125,10 +125,12 @@ const stub = http.createServer((req, res) => {
 await new Promise((r) => stub.listen(0, '127.0.0.1', r));
 const stubUrl = `http://127.0.0.1:${stub.address().port}/v3`;
 
-const settings = await import('/home/user/-/desktop/core/settings.js');
-const vault = await import('/home/user/-/desktop/core/vault.js');
-const store = await import('/home/user/-/desktop/core/store.js');
-const { listen } = await import('/home/user/-/desktop/core/server.js');
+// 不把某台开发机的绝对路径写进测试。脚本无论从克隆目录、CI 工作区还是
+// 解压后的源码目录启动，都应该解析到它旁边那份 core。
+const settings = await import(new URL('../core/settings.js', import.meta.url));
+const vault = await import(new URL('../core/vault.js', import.meta.url));
+const store = await import(new URL('../core/store.js', import.meta.url));
+const { listen } = await import(new URL('../core/server.js', import.meta.url));
 
 vault.setSecret('ARK_API_KEY', 'stub-key');
 settings.patch({

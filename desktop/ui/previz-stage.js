@@ -112,7 +112,11 @@ export function addKeyframe(stage, frame, objectIds = []) {
     const found = findObject(stage, id);
     if (!found) continue;
     const x = found.item;
-    values[id] = { x: x.x, y: x.y, height: x.height, rotation: x.rotation, scale: x.scale };
+    values[id] = {
+      x: x.x, y: x.y, elevation: x.elevation, height: x.height,
+      rotation: x.rotation, rotationX: x.rotationX, rotationZ: x.rotationZ,
+      scale: x.scale, scaleX: x.scaleX, scaleY: x.scaleY, scaleZ: x.scaleZ
+    };
     if (found.kind === 'camera') {
       values[id].lens = x.lens;
       values[id].move = { ...(x.move || {}) };
@@ -123,6 +127,8 @@ export function addKeyframe(stage, frame, objectIds = []) {
       values[id].action = x.action || '';
       values[id].animationName = x.animationName || '';
       values[id].textureView = x.textureView || 'auto';
+      values[id].textureGrid = x.textureGrid || 'horizontal';
+      values[id].textureInset = x.textureInset || 0;
     } else if (found.kind === 'light') {
       values[id].lightType = x.lightType;
       values[id].intensity = x.intensity;
@@ -151,12 +157,12 @@ export function frameState(stage, frame) {
     const a = left?.values?.[item.id] || item;
     const b = right?.values?.[item.id] || a;
     const out = { ...item };
-    for (const key of ['x', 'y', 'height', 'rotation', 'scale', 'lens', 'aperture', 'intensity']) {
+    for (const key of ['x', 'y', 'elevation', 'height', 'rotation', 'rotationX', 'rotationZ', 'scale', 'scaleX', 'scaleY', 'scaleZ', 'textureInset', 'lens', 'aperture', 'intensity']) {
       const av = Number(a[key]), bv = Number(b[key]);
       if (Number.isFinite(av) && Number.isFinite(bv)) out[key] = Number((av + (bv - av) * t).toFixed(4));
     }
     out.move = { ...((t < .5 ? a.move : b.move) || item.move || {}) };
-    for (const key of ['focusId', 'pose', 'action', 'animationName', 'textureView', 'lightType', 'color', 'targetId']) out[key] = (t < .5 ? a[key] : b[key]) ?? item[key];
+    for (const key of ['focusId', 'pose', 'action', 'animationName', 'textureView', 'textureGrid', 'lightType', 'color', 'targetId']) out[key] = (t < .5 ? a[key] : b[key]) ?? item[key];
     values[item.id] = out;
   }
   return { frame: f, left: left?.frame ?? null, right: right?.frame ?? null, t, values };
