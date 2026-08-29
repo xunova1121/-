@@ -9345,6 +9345,42 @@ section('OpenAI 家族带参考图：要走 /images/edits，不是塞个地址')
   settings.patch({ baseUrls: { openai: '' } });
 }
 
+section('「接口地址」那一屏：每个接口键都得有中文标签');
+{
+  /**
+   * ══════════ 为什么值得单独一条 ══════════
+   *
+   * 目录里加一个 endpoints 键，界面上就多一个输入框。而标签表在
+   * ui/views/providers.js 里，是**另一个文件** —— 漏了不报错、不报警，
+   * 只是那一行显示成裸的 `videos` / `se2v`。
+   *
+   * 后果不是难看，是**不敢改**：一排中文里夹一个英文键名，用户看不出
+   * 那是哪一步的地址，于是明明能自己修好的中转路径问题，会变成一句
+   * "填哪个？"。而「接口地址」这一块存在的全部理由就是让人自己改。
+   *
+   * 加这条的时候已经漏了三个（se2v、sfx，以及刚加的 videos）。
+   *
+   * ⚠ 用读源码的方式取那张表，而不是 import ——
+   * providers.js 是浏览器模块（依赖 DOM），Node 里 import 不动。
+   * core/surfaces.js 那套 `// cap:` 标记也是同样的做法。
+   */
+  const cat = await import('../core/providers/catalog.js');
+  const src = fs.readFileSync(new URL('../ui/views/providers.js', import.meta.url), 'utf8');
+  const block = /const ENDPOINT_LABELS = \{([\s\S]*?)\n\};/.exec(src);
+  check('找得到那张标签表（改名了的话这条要跟着改）', Boolean(block), '没匹配到 ENDPOINT_LABELS');
+
+  const labelled = new Set([...(block?.[1] || '').matchAll(/^\s*([A-Za-z0-9_]+)\s*:/gm)].map((m) => m[1]));
+  /** 夹具自检：表本身得真解析出东西来，不然下面那条恒真 */
+  check('标签表解析出来了（不是空集合，否则下一条恒真）',
+    labelled.size >= 10, `解析到 ${labelled.size} 条`);
+
+  const used = new Set();
+  for (const p of cat.PROVIDERS) for (const k of Object.keys(p.endpoints || {})) used.add(k);
+  const missing = [...used].filter((k) => !labelled.has(k)).sort();
+  check('目录里用到的每一个接口键都有中文标签',
+    missing.length === 0, `没标签的：${missing.join('、')}`);
+}
+
 section('Agnes AI 出图：三处和 OpenAI 长得像但不一样的地方');
 {
   const adaptersMod = await import('../core/providers/adapters.js');
