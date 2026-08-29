@@ -373,7 +373,15 @@ export function previzPanel(stage, {
   /** 存：把地标和光位挂到设定集的场景上。回一个 Promise */
   onSaveScene = null,
   /** 套用：把那个场景已经存过的布局搬过来 */
-  sceneLayout = null
+  sceneLayout = null,
+  /**
+   * 设定集里的道具名。摆上去的道具**在构图底图上是用它自己那张设定图画的** ——
+   * 而"门/窗/桌"这些通用地标只是个占位框。
+   *
+   * 所以这一排和上面那排地标不是一回事：地标解决的是"空间别塌"，
+   * 这一排解决的是"这一镜里那把柴刀该在画面哪儿"。
+   */
+  bibleProps = []
 } = {}) {
   const host = document.createElement('div');
   host.className = 'previz-panel';
@@ -437,6 +445,31 @@ export function previzPanel(stage, {
       textContent: '摆上就能算出"窗在画面哪边"'
     }));
     controls.append(markRow);
+
+    /**
+     * ── 设定集道具那一排 ──
+     *
+     * 摆上去之后，构图底图上画的是**它自己那张设定图**，不是占位框。
+     * 这是"设定集的东西真的进画面"这条路上的最后一环：
+     * 人（角色设定图）、地（场景基准图）、物（道具参考图）三样齐了。
+     */
+    if (bibleProps.length) {
+      const propRow = document.createElement('div');
+      propRow.className = 'previz-row';
+      propRow.append(Object.assign(document.createElement('span'), { className: 'previz-cap', textContent: '设定集道具' }));
+      for (const name of bibleProps.slice(0, 8)) {
+        const has = (stage.marks || []).some((m) => m.name === name);
+        propRow.append(btn(name, has, () => {
+          stage.marks = stage.marks || [];
+          if (has) stage.marks = stage.marks.filter((m) => m.name !== name);
+          else stage.marks.push({ name, x: (stage.marks.length % 2 ? 1 : -1) * 1.6, y: 1.2 });
+        }));
+      }
+      propRow.append(Object.assign(document.createElement('span'), {
+        className: 'previz-cap', style: 'min-width:0', textContent: '摆上去会用它的设定图拼进底图'
+      }));
+      controls.append(propRow);
+    }
 
     /**
      * ── 外景那一排 ──

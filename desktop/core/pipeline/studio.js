@@ -34,6 +34,7 @@ import * as skillsLib from '../skills.js';
 import * as variants from './variants.js';
 import * as anglesLib from './angles.js';
 import * as previz from './previz.js';
+import * as blockframe from './blockframe.js';
 import * as siteMod from './site.js';
 import * as outline from './outline.js';
 import * as oss from '../oss.js';
@@ -3150,12 +3151,37 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
         },
         { onEvent }
       );
-  const refImages = freshRefs.images;
+  const baseShotRefs = freshRefs.images;
   // 只收一张的那些身份通道，得拿到角色那张而不是排在最前的场景图。
   // ⚠ 批量出图那条路里同样有一份 —— 两条路各写各的，就得各验各的
   const faceRef = consistency.identityRef({
-    images: refImages, kinds: freshRefs.kinds, sources: freshRefs.sources
+    images: baseShotRefs, kinds: freshRefs.kinds, sources: freshRefs.sources
   });
+
+  /**
+   * ⚠ **构图底图：批量出图那条路里也有一份，这里必须同样接上。**
+   *
+   * 我今天已经在同一个地方栽过一次（参考图那个判据只改了批量那条，
+   * 用户按的却是这条「重出这一镜」）。写这段的时候第一版又只接了批量那边 ——
+   * 自检里"出图时把构图底图发出去了"当场就红了，因为它验的是请求体。
+   *
+   * 排在最后一张：首张权重最高，那个位置留给身份；底图只要一个弱位置。
+   */
+  const blockState = blockFrameState(shot);
+  let blockUrl = null;
+  if (blockState.has && !blockState.stale) {
+    blockUrl = await toModelRef(shot.blockFramePath, { onEvent }).catch(() => null);
+    if (blockUrl) onEvent?.({ type: 'note', shotId, message: '这一镜带上了预演台拼的构图底图' });
+  } else if (blockState.stale) {
+    onEvent?.({
+      type: 'note',
+      shotId,
+      message: '⚠ 预演台的排位改过，但构图底图还是老那张 —— 这次不发它（发了会按老位置构图）。'
+        + '去预演台点一下「重拼底图」再出这一镜。'
+    });
+  }
+  const refImages = blockUrl ? [...baseShotRefs, blockUrl] : baseShotRefs;
+  if (blockUrl) freshRefs.labels = [...(freshRefs.labels || []), '构图底图（预演台）'];
   if (!refImages.length && assembled.refImages.length) {
     /**
      * 有图可带、却一张都没带 —— 必须说出来。不说的话用户看到的只是
@@ -3224,7 +3250,15 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
       t.imageSize = size || null;
       t.modelUsed = `${providerId} / ${image.used?.model || model}`;
       t.refsSent = image.used?.refsSent ?? null;
-      t.bibleRefs = refImages.length ? assembled.refLabels : [];
+      /**
+       * ⚠ 记的是**真发出去的那几张**，不是"设定集里有的那几张"。
+       *
+       * 原来写的是 assembled.refLabels —— 那是筛选**之前**的全集。
+       * 于是设定集有 3 张、按设置只发了 1 张时，卡片上照旧列 3 张，
+       * 而用户会拿着这行字去判断"为什么不像"，判据本身是假的。
+       * freshRefs.labels 是筛完 + 续签完的那一份，跟 refImages 一一对应。
+       */
+      t.bibleRefs = refImages.length ? (freshRefs.labels || []) : [];
       // 同上：0 张时界面要说得出是"没图"还是"有图没发"
       t.refsAvailable = (assembled.refImages || []).length;
       t.refsAvailableLabels = assembled.refDetailed || [];
@@ -3875,6 +3909,70 @@ const IMAGE_MIME = {
  * 而是带上扩展名和 upload 标记：万一以后想知道"这张到底是谁出的"，
  * 光看文件名就够，不用去翻 project.json。
  */
+/**
+ * ══════════ 存下这一镜的构图底图 ══════════
+ *
+ * 底图是浏览器按 blockframe 的版式，把设定集那些图拼出来的一张 PNG。
+ * 它存在的**全部理由**是：让预演台排的位真的改变出图结果。
+ *
+ * ── 为什么必须是一张图 ──
+ *
+ * 排完位之后最自然的做法是把坐标写成一段话发给模型：
+ *   "摄影机(0,-4)、35mm；阿澜在(0,0)，老周在(1.5,0.5)……"
+ * 出图模型**不消费世界坐标**。这段话最好的结果是被忽略，最坏的结果是
+ * 挤占提示词预算，把真正起作用的部分稀释掉。排了半天位，画一点没变，
+ * 而没有任何东西会报错 —— 这是最难发现的一类失败。
+ *
+ * 模型吃的是画面。所以排位的产物必须是一张**图**，然后走参考图通道发出去。
+ *
+ * ⚠ 这张图**不是**成片的一帧，也不该被当成首帧。它是拼贴：边缘是硬的、
+ * 光不统一、比例是近似的。它只回答一个问题 —— 谁在画面哪儿、多大、谁挡谁。
+ * 提示词里必须说清这一点，否则模型会把拼贴痕迹当风格学过去。
+ */
+export async function saveBlockFrame(projectId, shotId, { dataUrl } = {}, onEvent) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const shot = project.shots?.find((s) => s.id === shotId);
+  if (!shot) throw new Error(`没有这一镜：${shotId}`);
+  if (!shot.stage?.cam) throw new Error('这一镜还没排位，先在预演台把人和机位摆好');
+
+  const m = /^data:image\/png;base64,(.+)$/s.exec(String(dataUrl || ''));
+  if (!m) throw new Error('没读到底图内容（需要 data:image/png;base64, 开头）');
+  const buf = Buffer.from(m[1], 'base64');
+  if (!buf.length) throw new Error('底图是空的');
+
+  const dir = store.assetDir(projectId);
+  fs.mkdirSync(dir, { recursive: true });
+  const dest = path.join(dir, `${shot.id}.blockframe.png`);
+  fs.writeFileSync(dest, buf);
+  onEvent?.({ type: 'note', shotId, message: `构图底图已存下（${(buf.length / 1024).toFixed(0)} KB）` });
+
+  store.update(projectId, (p) => {
+    const t = p.shots.find((s) => s.id === shotId);
+    if (t) {
+      t.blockFramePath = dest;
+      /**
+       * ⚠ 记下**是照哪一版排位拼的**。
+       *
+       * 排位改了、底图没重拼，那张旧底图会接着影响出图 —— 而界面上
+       * 预演台里人已经站到新位置了。两边对不上，用户看到的是
+       * "我明明挪过了，出来还是老样子"，而且查不出原因。
+       * 存一份指纹，改过就说出来。
+       */
+      t.blockFrameStamp = blockframe.stageStamp(t.stage);
+      t.blockFrameAt = new Date().toISOString();
+    }
+    return p;
+  });
+  return { path: dest, bytes: buf.length };
+}
+
+/** 这一镜的底图还作数吗 —— 排位动过就不作数了 */
+export function blockFrameState(shot) {
+  if (!shot?.blockFramePath || !fs.existsSync(shot.blockFramePath)) return { has: false, stale: false };
+  return { has: true, stale: blockframe.stageStamp(shot.stage) !== (shot.blockFrameStamp || '') };
+}
+
 export async function attachBibleSheet(projectId, kind, name, { dataUrl, fileName = '', variantId = null } = {}, onEvent) {
   const project = store.read(projectId);
   if (!project?.bible) throw new Error('还没有设定集');

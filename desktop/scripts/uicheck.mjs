@@ -1625,6 +1625,48 @@ await page.waitForTimeout(1200);
   }
 }
 
+/**
+ * ══════════ 预演台：排的位真的拼得出一张底图 ══════════
+ *
+ * 服务端那边已经验过"底图发得出去、换一份排位发的就不是同一张"。
+ * 这里补的是**浏览器这一半**：拼图是在 canvas 里做的，
+ * 而 canvas 有一个只在真浏览器里才会出现的坑 ——
+ * 跨域图片会污染画布，然后 toDataURL() 抛 SecurityError。
+ * 在那之前一切正常：预览画出来了、看着好好的，只有导出那一下炸。
+ * 服务端自检永远碰不到它。
+ */
+console.log('\n预演台：排位拼底图');
+{
+  /**
+   * ⚠ 上一节把页面留在了**项目页**，这儿得先回工作台的分镜那一步。
+   * 不回的话报的是"找不到预演台按钮"—— 看着像功能没做，其实是走查站错了地方。
+   */
+  await page.goto(`${url}#/studio/${proj.id}`);
+  await page.waitForTimeout(1200);
+  await page.locator('.nav-step', { hasText: '分镜' }).first().click();
+  await page.waitForTimeout(800);
+  await page.locator('button:has-text("预演台")').first().click();
+  await page.waitForTimeout(2000);
+  const posted = [];
+  page.on('request', (r) => { if (r.url().includes('/blockframe')) posted.push(r.url()); });
+
+  const mk = page.locator('button:has-text("拼一张底图"), button:has-text("重拼底图")').first();
+  check('镜头卡的预演台里有「拼底图」这颗按钮', (await mk.count()) > 0);
+  if (await mk.count()) {
+    await mk.click();
+    await page.waitForTimeout(3500);
+    const shown = await page.evaluate(() => {
+      const i = document.querySelector('.blockframe-img');
+      return i ? { w: i.naturalWidth, h: i.naturalHeight, data: i.src.startsWith('data:image/png') } : null;
+    });
+    check('画布真的产出了一张 PNG（跨域污染就会在这一步炸）',
+      Boolean(shown?.data) && shown.w > 0, JSON.stringify(shown));
+    check('而且存回了服务端（不存的话出图时拿不到它）', posted.length > 0, String(posted.length));
+    const note = await page.locator('.blockframe-panel .previz-readout').first().innerText();
+    check('拼完会说清楚它接下来怎么用', /出图时会带上它/.test(note), note.slice(0, 120));
+  }
+}
+
 check('全程没有页面报错', errs.length === 0, errs.slice(0, 3).join(' | '));
 
 await b.close();

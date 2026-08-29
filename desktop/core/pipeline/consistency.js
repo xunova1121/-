@@ -1070,8 +1070,41 @@ export async function generateConsistentImage({
   const neighborUrl = neighbor
     ? await (await import('./studio.js')).toModelRef(neighbor.path, { onEvent }).catch(() => null)
     : null;
-  const refImages = neighborUrl ? [...baseRefs, neighborUrl] : baseRefs;
+  /**
+   * ══════════ 构图底图：排位真正生效的地方 ══════════
+   *
+   * 预演台排完位之后，浏览器把设定集那些图按机位几何拼成一张 PNG。
+   * 它**必须走参考图通道发出去**，不能只写进提示词 —— 出图模型不消费
+   * 世界坐标，写成一段话等于没写，而且不报任何错：排了半天位，画一点没变。
+   *
+   * ⚠ 排在**最后一张**。多数厂商对首张参考图权重最高，而首张必须留给
+   * 身份（那是最难锁的东西）。底图要的只是"谁在哪儿"，一个弱位置足够，
+   * 权重给高了反而会把拼贴的边缘和光线一起带进画面。
+   *
+   * ⚠ 排位改过、底图没重拼的话**不发**。发一张旧底图比不发更坏：
+   * 预演台里人已经站在新位置，出来的图还按老位置构图，
+   * 而用户看到的是"我明明挪过了"—— 一个查不出原因的现象。
+   */
+  const studioMod = await import('./studio.js');
+  const blockState = studioMod.blockFrameState(shot);
+  let blockUrl = null;
+  if (blockState.has && !blockState.stale) {
+    blockUrl = await studioMod.toModelRef(shot.blockFramePath, { onEvent }).catch(() => null);
+    if (blockUrl) {
+      onEvent?.({ type: 'note', shotId: shot.id, message: '这一镜带上了预演台拼的构图底图' });
+    }
+  } else if (blockState.stale) {
+    onEvent?.({
+      type: 'note',
+      shotId: shot.id,
+      message: '⚠ 预演台的排位改过，但构图底图还是老那张 —— 这次不发它（发了会按老位置构图）。'
+        + '去预演台点一下「重拼底图」再出这一镜。'
+    });
+  }
+
+  const refImages = [...baseRefs, ...(neighborUrl ? [neighborUrl] : []), ...(blockUrl ? [blockUrl] : [])];
   if (neighbor && neighborUrl) assembled.refLabels = [...assembled.refLabels, neighbor.label];
+  if (blockUrl) assembled.refLabels = [...assembled.refLabels, '构图底图（预演台）'];
 
   let attempt = 0;
   let last = null;

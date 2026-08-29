@@ -8617,6 +8617,183 @@ section('传上去的照片：要真的用上，而且只用脸');
  * 更难堪的是代码注释里**写明了**这件事，然后让用户自己去联调台手动发 ——
  * 而出图是自动跑几十镜的，没人能一镜一镜手动来。
  */
+/**
+ * ══════════ 预演台排的位，到底有没有改变出图 ══════════
+ *
+ * 这一整节回答的是**唯一重要的那个问题**：把人往左拖两米，出来的图变不变。
+ *
+ * ── 为什么这个问题必须单独验 ──
+ *
+ * 隔壁分支做了一整套 3D 预演台，链路终点是把世界坐标写成一段中文：
+ *   "摄影机从坐标(-1.23,0.00,2.45)、35mm 运动到(0.42,1.10,1.80)…"
+ * 塞进提示词。出图和出视频的模型**不消费世界坐标**。排了半天位，
+ * 画一点没变，而且不报任何错 —— 这是最难发现的一类失败：
+ * 功能在、界面漂亮、测试全绿，就是不起作用。
+ *
+ * 所以判据只有一条，而且必须落在**请求体**上：
+ * 换一份排位，发出去的那张构图底图要真的不一样。
+ */
+section('预演台：排的位真的改变出图');
+{
+  const bf = await import('../core/pipeline/blockframe.js');
+  const pz = await import('../core/pipeline/previz.js');
+
+  const stage = (subs) => ({ cam: { x: 0, y: -4, height: 1.6, lens: 35 }, subjects: subs, marks: [] });
+  /**
+   * ⚠ 两人别站太开。镜头轴向永远朝 subjects[0]，35mm 的半视角只有 27°——
+   * 各站 ±1.5 米的话第二个人**已经出画**了，于是"他在画面右"这条断言
+   * 会红，而且红得像是版式算错了。夹具得落在镜头装得下的范围里。
+   */
+  const two = stage([{ name: '阿澜', x: -0.8, y: 0, facing: 180 }, { name: '老周', x: 0.8, y: 0, facing: 180 }]);
+
+  const assets = { 阿澜: { url: '/media?p=a' }, 老周: { url: '/media?p=b' }, 码头: { url: '/media?p=s' } };
+  const f = bf.layout(two, assets, { scene: '码头' });
+
+  check('排位算得出每个人落在画面哪儿', f.items.length === 2, JSON.stringify(f.items.map((i) => i.name)));
+  /**
+   * ⚠ 这条得**真的分得出左右**，不能只判"两个 cx 不相等"。
+   * aim 是朝 subjects[0] 的，所以第一个人不一定在正中 —— 判相对关系才可靠。
+   */
+  const lan = f.items.find((i) => i.name === '阿澜');
+  const zhou = f.items.find((i) => i.name === '老周');
+  check('站在左边的那个，画面上也在左边', lan.cx < zhou.cx,
+    JSON.stringify({ 阿澜: lan.cx, 老周: zhou.cx }));
+
+  /** 近的要大、要挡住远的 —— 这是"谁挡谁"的全部依据 */
+  const near = bf.layout(stage([{ name: '近', x: 0, y: -2 }, { name: '远', x: 0.6, y: 3 }]), {}, {});
+  check('近的人在画面里更大', near.items.at(-1).hFrac > near.items[0].hFrac,
+    JSON.stringify(near.items.map((i) => [i.name, i.hFrac.toFixed(3)])));
+  check('远的排在前面先画（后画的才挡得住先画的）', near.items[0].name === '远',
+    JSON.stringify(near.items.map((i) => i.name)));
+
+  /**
+   * ⚠ 远景地标（山、塔）**不能跟着机位横移**。
+   * 硬给它编一个坐标的话，机位挪三米山就在画面里跑半个屏 —— 而真山不会。
+   */
+  const farA = bf.layout({ cam: { x: 0, y: -4, height: 1.6, lens: 35 }, subjects: [{ name: '人', x: 0, y: 0 }], marks: [{ name: '塔', far: true, deg: 30 }] }, {}, {});
+  const farB = bf.layout({ cam: { x: 3, y: -4, height: 1.6, lens: 35 }, subjects: [{ name: '人', x: 3, y: 0 }], marks: [{ name: '塔', far: true, deg: 30 }] }, {}, {});
+  const tA = farA.items.find((i) => i.name === '塔');
+  const tB = farB.items.find((i) => i.name === '塔');
+  check('机位平移时，远景地标在画面里不动', Math.abs(tA.cx - tB.cx) < 0.001,
+    JSON.stringify({ 前: tA.cx, 后: tB.cx }));
+
+  /** 矩形：按高度定尺寸、用图自己的宽高比反推宽度，人才不会被压扁 */
+  const r = bf.rectOf(lan, { width: 1000, height: 1000, aspect: 0.5 });
+  check('矩形的宽是按图的比例反推的，不是写死的', Math.abs(r.w - r.h * 0.5) < 0.001,
+    JSON.stringify(r));
+  check('人是脚底着地，不是中心对齐（不然所有人的腰排成一条线）',
+    Math.abs((r.y + r.h) - lan.feetY * 1000) < 0.001, JSON.stringify(r));
+  const farRect = bf.rectOf(tA, { width: 1000, height: 1000, aspect: 1 });
+  check('远景地标是跨在地平线上的，不是站在上面',
+    Math.abs((farRect.y + farRect.h / 2) - tA.feetY * 1000) < 0.001, JSON.stringify(farRect));
+
+  /**
+   * ⚠ 底图配的那句话必须说"只用来定构图"。
+   *
+   * 不说清楚的话，模型会把拼贴的硬边缘、不统一的光线当成风格一起学过去，
+   * 出来一张"看得出是拼的"的图。这个失败是渐进的、不报错的，
+   * 而且很容易被当成"这个模型不行"。
+   */
+  const fp = bf.framePrompt(f);
+  check('底图那句话点明只借构图，不要学拼贴痕迹',
+    /只用来定构图/.test(fp) && /不要学/.test(fp), fp.slice(0, 80));
+  /**
+   * ⚠ 判的是**第二个人**。镜头轴向永远朝 subjects[0]（见 previz.aimBearing），
+   * 所以第一个人必然落在正中 —— 拿他判"在画面左"是判不出来的，
+   * 那条断言只会红，而且红得让人以为是版式算错了。
+   */
+  check('而且把谁在画面哪边说出来了（模型读文字比读图稳）',
+    fp.includes('老周在画面右'), fp.slice(0, 200));
+
+  /** 提醒：出画、太小、没设定图 —— 说出来但不拦着 */
+  const off = bf.layout(stage([{ name: '阿澜', x: 0, y: 0 }, { name: '跑远了', x: 20, y: 0 }]), {}, {});
+  const iss = bf.issues(off);
+  check('人出画了会说出来', iss.some((x) => /画面外|一丁点/.test(x)), JSON.stringify(iss));
+  check('场景没图也会说出来', iss.some((x) => /场景.*还没有图/.test(x)), JSON.stringify(iss));
+
+  /**
+   * ══════════ 端到端：换一份排位，发出去的底图真的不一样 ══════════
+   *
+   * ⚠ 上面全是纯函数。真正决定的是**请求体里那张图**，中间还隔着
+   * 落盘、指纹、参考图筛选、地址续签、适配器。任何一环断掉，
+   * 上面那些照样绿，而排位照样不起作用。
+   */
+  const settingsM = await import('../core/settings.js');
+  const keepMode = settingsM.get('refMode');
+  settingsM.patch({ refMode: 'all', useReferenceImages: true });
+
+  const png = (tint) => `data:image/png;base64,${Buffer.from(
+    Buffer.from('89504e470d0a1a0a', 'hex').toString('binary') + tint.repeat(80), 'binary'
+  ).toString('base64')}`;
+
+  const pB = store.create({ title: '排位改变出图' });
+  store.update(pB.id, (x) => {
+    x.bible = { style: { anchor: '国风', palette: '青灰', negative: '' }, characters: [], scenes: [], props: [] };
+    x.shots = [{
+      id: 'sb', index: 1, scene: '码头', characters: [], description: '两人对峙', camera: '中景',
+      stage: two
+    }];
+    return x;
+  });
+  await studioModule.saveBlockFrame(pB.id, 'sb', { dataUrl: png('A') }, () => {});
+  const savedA = store.read(pB.id).shots[0];
+  check('底图落盘了，并且记下了是照哪一版排位拼的',
+    Boolean(savedA.blockFramePath) && Boolean(savedA.blockFrameStamp), JSON.stringify(savedA.blockFrameStamp));
+  check('刚拼完的底图不算过期', studioModule.blockFrameState(savedA).stale === false, '');
+
+  upstream.lastImageBody = null;
+  await studioModule.regenerateShot(pB.id, 'sb', {}, () => {});
+  const sentA = JSON.stringify(upstream.lastImageBody?.image || '');
+  check('出图时把构图底图发出去了（这是排位唯一能起作用的通道）',
+    Boolean(upstream.lastImageBody?.image), JSON.stringify(Object.keys(upstream.lastImageBody || {})));
+  check('而且标签上说得出它是预演台来的',
+    (store.read(pB.id).shots[0].bibleRefs || []).some((x) => x.includes('构图底图')),
+    JSON.stringify(store.read(pB.id).shots[0].bibleRefs));
+
+  /**
+   * ⚠ **排位改了、底图没重拼 → 这次不发。**
+   *
+   * 发一张旧底图比不发更坏：预演台里人已经站到新位置，出来的图还按老位置构图，
+   * 用户看到的是"我明明挪过了"，而且查不出原因。
+   */
+  store.update(pB.id, (x) => {
+    x.shots[0].stage = stage([{ name: '阿澜', x: 1.5, y: 0 }, { name: '老周', x: -1.5, y: 0 }]);
+    return x;
+  });
+  check('排位一改，底图立刻被判成过期',
+    studioModule.blockFrameState(store.read(pB.id).shots[0]).stale === true, '');
+  const notesB = [];
+  upstream.lastImageBody = null;
+  await studioModule.regenerateShot(pB.id, 'sb', {}, (e) => notesB.push(e.message || ''));
+  check('过期的底图不会被发出去（发了会按老位置构图）',
+    !String(upstream.lastImageBody?.image || '').length || sentA !== JSON.stringify(upstream.lastImageBody?.image || ''),
+    '');
+  check('而且明说了为什么，以及该去干什么',
+    notesB.some((m) => /排位改过/.test(m) && /重拼底图/.test(m)), JSON.stringify(notesB.filter((m) => /底图/.test(m))));
+
+  /** 重拼之后又能发了，而且发的是**新那张** */
+  await studioModule.saveBlockFrame(pB.id, 'sb', { dataUrl: png('B') }, () => {});
+  upstream.lastImageBody = null;
+  await studioModule.regenerateShot(pB.id, 'sb', {}, () => {});
+  const sentB = JSON.stringify(upstream.lastImageBody?.image || '');
+  check('重拼之后又发得出去了', Boolean(upstream.lastImageBody?.image), '');
+  /**
+   * ⚠ 这条是整节的**结论**：换一份排位、重拼一次，
+   * 发给模型的东西**真的变了**。变不了的话，预演台就是个摆设。
+   */
+  check('换一份排位之后，发出去的底图和上一次不是同一张', sentA !== sentB && sentA.length > 0,
+    JSON.stringify({ 变了: sentA !== sentB }));
+
+  /** 运镜改了不该让底图过期 —— 它不影响静帧构图，乱报会让人学会无视提醒 */
+  const beforeMove = bf.stageStamp(store.read(pB.id).shots[0].stage);
+  store.update(pB.id, (x) => { x.shots[0].stage.cam.move = { kind: 'push', amount: 2 }; return x; });
+  check('只改运镜不会把底图判成过期（它不改变静帧构图）',
+    bf.stageStamp(store.read(pB.id).shots[0].stage) === beforeMove, '');
+
+  settingsM.patch({ refMode: keepMode });
+  void pz;
+}
+
 section('OpenAI 家族带参考图：要走 /images/edits，不是塞个地址');
 {
   const adaptersMod = await import('../core/providers/adapters.js');
@@ -12675,6 +12852,20 @@ section('钱：用量是我们的事实，单价是你的');
 server.close();
 upstream.close();
 fs.rmSync(SANDBOX, { recursive: true, force: true });
+
+server.close();
+upstream.close();
+fs.rmSync(SANDBOX, { recursive: true, force: true });
+
+server.close();
+upstream.close();
+fs.rmSync(SANDBOX, { recursive: true, force: true });
+
+server.close();
+upstream.close();
+fs.rmSync(SANDBOX, { recursive: true, force: true });
+
+
 
 console.log(`\n${'─'.repeat(50)}`);
 console.log(failed === 0 ? `\x1b[32m全部通过：${passed} 项\x1b[0m` : `\x1b[31m${failed} 项未通过\x1b[0m（通过 ${passed} 项）`);
