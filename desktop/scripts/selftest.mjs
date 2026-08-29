@@ -8629,6 +8629,182 @@ section('传上去的照片：要真的用上，而且只用脸');
  *   ② 发太多：九张图发过去，模型要在九个目标之间找平衡，
  *      最要紧的那张脸反而不像了
  */
+/**
+ * ══════════ 这一镜不满意，下一步该干什么 ══════════
+ *
+ * 不满意的时候，人手里只有一张图和一个「重出」按钮 —— 而再来一次多半
+ * 还是那样，因为他不知道该改什么。
+ *
+ * ⚠ 这一节里**最要紧的一条是"只说数据里有证据的原因"**。
+ *
+ * "可能是提示词不够具体"这种话永远成立、永远没用，而且会把真正的原因
+ * （这一镜一张参考图都没发）淹掉。所以既验"该说的说了"，
+ * 也验"没证据的时候老老实实说没查出来"。
+ */
+/**
+ * ══════════ 连播：排一遍时间轴 ══════════
+ *
+ * 出视频之前最后一道、也是最省钱的一道关。
+ *
+ * ⚠ 它必须在**还没有视频**的时候就能用 —— 那正是它全部的价值所在。
+ * 所以不能复用 edit.timeline（那个只收已经有视频的镜头，因为它算的是成片）。
+ * 这条断言守着这个区别：两者混用的话，连播在最该用的时候是空的。
+ */
+section('连播：排一遍时间轴');
+{
+  const ani = await import('../core/duration.js');
+  const mk = (i, extra = {}) => ({ id: `p${i}`, index: i, duration: 4, dialogue: '', ...extra });
+
+  /** ⚠ 一段视频都没有时照样排得出来 —— 这是它存在的全部理由 */
+  const none = ani.animaticLayout([mk(1), mk(2, { imagePath: '/b.png' })]);
+  check('一段视频都没有时照样排得出来（这是它存在的理由）',
+    none.rows.length === 2 && none.total === 8, JSON.stringify({ 行: none.rows.length, 总长: none.total }));
+  check('每一镜接着上一镜排，不重叠也不留缝',
+    none.rows[1].start === none.rows[0].span, JSON.stringify(none.rows.map((r) => r.start)));
+
+  /** 有视频的走视频、只有图的定住、什么都没有的也要占一格 */
+  const mixed = ani.animaticLayout([
+    mk(1, { videoPath: '/a.mp4', imagePath: '/a.png' }),
+    mk(2, { imagePath: '/b.png' }),
+    mk(3)
+  ]);
+  check('有视频走视频、只有图定住、什么都没有的也占一格',
+    mixed.rows.map((r) => r.kind).join() === 'video,image,blank',
+    JSON.stringify(mixed.rows.map((r) => r.kind)));
+
+  /**
+   * ⚠ 没设时长的**不能跳过**。跳过的话人在连播里看不到它，
+   * 于是永远不知道那一镜没设时长 —— 而它到合成那步会出问题。
+   */
+  const noDur = ani.animaticLayout([mk(1, { duration: 0 }), mk(2)]);
+  check('没设时长的不跳过，用兜底值占位', noDur.rows.length === 2 && noDur.rows[0].span === 3,
+    JSON.stringify(noDur.rows.map((r) => r.span)));
+  check('而且标出来"这是猜的"（不能悄悄替他决定）',
+    noDur.rows[0].guessed === true && noDur.rows[1].guessed === false,
+    JSON.stringify(noDur.rows.map((r) => r.guessed)));
+
+  /**
+   * ⚠ 时长口径必须和别处一致。另算一套的话，连播说 62 秒、导出说 58 秒，
+   * 而两个数都是我们自己给的。
+   */
+  const durMod = await import('../core/duration.js');
+  const one = mk(1, { duration: 5, actualDuration: 6.5 });
+  check('时长走 duration.shotSeconds 那一份（不另算一套）',
+    ani.animaticLayout([one]).total === durMod.shotSeconds(one),
+    JSON.stringify({ 连播: ani.animaticLayout([one]).total, 别处: durMod.shotSeconds(one) }));
+
+  check('空片子不炸', ani.animaticLayout([]).total === 0 && ani.animaticLayout().rows.length === 0, '');
+}
+
+section('这一镜为什么不对');
+{
+  const dg = await import('../core/pipeline/diagnose.js');
+  const routing = { image: { provider: 'volcengine', model: 'seedream' } };
+  const ok = {
+    id: 'd1', index: 1, description: '阿澜走向栈桥', camera: '中景', duration: 4,
+    imagePath: '/a.png',
+    imageAt: '2026-02-01T00:00:00Z', editedAt: '2026-01-01T00:00:00Z',
+    modelUsed: 'volcengine / seedream',
+    refsSent: 2, refsAvailable: 2,
+    consistency: { score: 88, pass: true, issues: [] }
+  };
+
+  /** 还没出图时不该诊断 —— 那是另一个问题（"缺东西"），别处已经在管 */
+  check('还没出图时什么都不说（那是另一类问题）',
+    dg.diagnose({ id: 'x', index: 1 }, { routing }).length === 0, '');
+
+  /**
+   * ⚠ **一切正常时，要老老实实说"没查出来"，而不是编一条。**
+   *
+   * 一个空列表和"这个功能没跑"长得一模一样，人会以为我们没检查。
+   */
+  const clean = dg.diagnose(ok, { routing });
+  check('都正常时只回一条"数据上看不出毛病"',
+    clean.length === 1 && clean[0].id === 'nothing-found', JSON.stringify(clean.map((x) => x.id)));
+  check('而且给了一个真能往前走的动作（不是"再试试"四个字）',
+    clean[0].how.length > 20 && /种子|描述/.test(clean[0].how), clean[0].how.slice(0, 40));
+
+  /**
+   * ══════════ 一张参考图都没发 ══════════
+   * 这是"脸不像"最常见、也最容易被忽略的原因 —— 它不报任何错。
+   */
+  const noRef = dg.diagnose({ ...ok, refsSent: 0, refsAvailable: 3 }, { routing });
+  check('一张参考图都没发会被点出来', noRef.some((x) => x.id === 'no-refs'),
+    JSON.stringify(noRef.map((x) => x.id)));
+  /**
+   * ⚠ 它必须排**第一**。人只会试最上面那一两条，
+   * 而这一条是"改了最可能有用"的那个。
+   */
+  check('而且排在最前面（人只会试最上面那一两条）', noRef[0].id === 'no-refs',
+    JSON.stringify(noRef.map((x) => x.id)));
+
+  /** 发了但被上限挤掉了 —— 和"一张没发"是两回事，下一步也不同 */
+  const capped = dg.diagnose({ ...ok, refsSent: 2, refsAvailable: 6 }, { routing });
+  check('发了但被挤掉几张，说法不一样',
+    capped.some((x) => x.id === 'refs-capped') && !capped.some((x) => x.id === 'no-refs'),
+    JSON.stringify(capped.map((x) => x.id)));
+
+  /** 图是改描述之前出的 —— "改了没用"的头号原因 */
+  const stale = dg.diagnose({ ...ok, editedAt: '2026-03-01T00:00:00Z' }, { routing });
+  check('图是改描述之前出的，会被点出来', stale.some((x) => x.id === 'stale-image'),
+    JSON.stringify(stale.map((x) => x.id)));
+  check('而且它比参考图那条还靠前（成本最低、最确定）',
+    dg.diagnose({ ...ok, editedAt: '2026-03-01T00:00:00Z', refsSent: 0, refsAvailable: 3 },
+      { routing })[0].id === 'stale-image', '');
+
+  /** 中途换过模型 —— 风格漂移最常见的原因，而它不报任何错 */
+  const swapped = dg.diagnose({ ...ok, modelUsed: 'openai / gpt-image-2' }, { routing });
+  check('中途换过模型会被点出来', swapped.some((x) => x.id === 'model-changed'),
+    JSON.stringify(swapped.map((x) => x.id)));
+  /** ⚠ 没换过时不能报 —— 误报一次，这条以后就没人信了 */
+  check('没换过模型时不报', !dg.diagnose(ok, { routing }).some((x) => x.id === 'model-changed'), '');
+
+  /**
+   * ⚠ 复核分数**改过文字之后就不作数了**。
+   * 拿它当依据会把人引向一个已经不存在的问题。
+   */
+  const staleScore = dg.diagnose({
+    ...ok, consistency: { score: 40, pass: false, stale: true, issues: ['脸不像'] }
+  }, { routing });
+  check('分数是改文案之前打的，就不拿它说事',
+    !staleScore.some((x) => x.id === 'verify-failed'), JSON.stringify(staleScore.map((x) => x.id)));
+  const lowScore = dg.diagnose({
+    ...ok, consistency: { score: 40, pass: false, issues: ['头发颜色不一致'] }
+  }, { routing });
+  check('分数作数且没过时，把复核的原话摆出来',
+    lowScore.some((x) => x.id === 'verify-failed' && /头发颜色不一致/.test(x.why)),
+    JSON.stringify(lowScore.find((x) => x.id === 'verify-failed')?.why));
+
+  /**
+   * ⚠ 每一条都要说清**这一下花不花钱**。
+   * 改描述是免费的，重出是要付钱的 —— 两者摆在一起时必须分得开。
+   */
+  check('要重出的那些标了"花钱"', noRef.find((x) => x.id === 'no-refs').costs === true, '');
+  const lint = dg.diagnose({ ...ok, description: '门外传来敲门声，他抬头' }, { routing });
+  const soundOne = lint.find((x) => x.id === 'lint-sound-in-frame');
+  check('描述里写了声音会被点出来', Boolean(soundOne), JSON.stringify(lint.map((x) => x.id)));
+  check('改描述这种不花钱的，没被标成花钱', soundOne?.costs === false, String(soundOne?.costs));
+
+  /**
+   * ══════════ 哪几镜"该重出" ══════════
+   *
+   * ⚠ 判据是**有可以动手的具体原因**，不是"分数低"。
+   *
+   * 按分数选的话，会把一堆"数据上看不出毛病、只是模型这次画成这样"的
+   * 镜头一起选上 —— 重出它们纯粹是碰运气，而每一次都真花钱。
+   */
+  const list = dg.needsRedo([
+    { ...ok, id: 'a', index: 1 },                                   // 干净的
+    { ...ok, id: 'b', index: 2, refsSent: 0, refsAvailable: 3 },    // 有具体原因
+    { ...ok, id: 'c', index: 3, editedAt: '2026-03-01T00:00:00Z' }  // 有具体原因
+  ], { routing });
+  check('只选查得出具体原因的那几镜', list.length === 2 && list.map((x) => x.index).join() === '2,3',
+    JSON.stringify(list.map((x) => x.index)));
+  check('干净的那一镜不会被选上（重出它纯属碰运气、还花钱）',
+    !list.some((x) => x.index === 1), JSON.stringify(list.map((x) => x.index)));
+  check('而且说得出为什么选它', /参考图/.test(list[0].why), list[0].why);
+}
+
 section('参考图：发哪几张、最多几张');
 {
   const cs = await import('../core/pipeline/consistency.js');

@@ -35,6 +35,7 @@ import * as variants from './variants.js';
 import * as anglesLib from './angles.js';
 import * as previz from './previz.js';
 import * as stepcheck from './stepcheck.js';
+import * as diagnose from './diagnose.js';
 import * as estimate from './estimate.js';
 import * as pricing from '../pricing.js';
 import * as siteMod from './site.js';
@@ -1194,6 +1195,40 @@ export function stepCheck(projectId, stage, { regenerate = false, only = null } 
     detail: estimate.describe(plan, rates),
     summary: stepcheck.summary(result, { money }),
     skipCost: stepcheck.costOfSkipping(result, money)
+  };
+}
+
+/**
+ * 这一镜为什么不满意、下一步该干什么。
+ *
+ * 放服务端是因为它要知道**当前路由到哪个模型**（判"中途换过模型"），
+ * 而那是设置里的东西，界面上现拿容易和服务端不一致。
+ */
+export function diagnoseShot(projectId, shotId) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const shots = (project.shots || []).slice().sort((a, b) => a.index - b.index);
+  const at = shots.findIndex((s) => s.id === shotId);
+  if (at < 0) throw new Error(`没有这一镜：${shotId}`);
+  return {
+    items: diagnose.diagnose(shots[at], {
+      bible: project.bible,
+      routing: adapters.resolvedRouting(),
+      prevShot: at > 0 ? shots[at - 1] : null
+    })
+  };
+}
+
+/** 全片里哪几镜有**具体原因**该重出（不是"分数低"那种碰运气的） */
+export function redoCandidates(projectId) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const shots = (project.shots || []).slice().sort((a, b) => a.index - b.index);
+  return {
+    shots: diagnose.needsRedo(shots, {
+      bible: project.bible,
+      routing: adapters.resolvedRouting()
+    })
   };
 }
 

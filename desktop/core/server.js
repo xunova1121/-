@@ -1268,6 +1268,14 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
      * 纯读，不调任何模型、不花钱 —— 界面每次进这一步都会拉一次，
      * 慢一点或者要钱的话，它就会被做成"点一下才查"，而那时候没人会点。
      */
+    /** 这一镜为什么不满意、下一步该干什么。纯读，不花钱 */
+    if (b && c === 'shots' && d && e === 'diagnose' && method === 'GET') {
+      return json(res, 200, studio.diagnoseShot(b, d));
+    }
+    /** 全片里哪几镜有具体原因该重出 */
+    if (b && c === 'redo-candidates' && method === 'GET') {
+      return json(res, 200, studio.redoCandidates(b));
+    }
     if (b && c === 'stepcheck' && method === 'GET') {
       const stage = url.searchParams.get('stage') || 'assets';
       const regenerate = url.searchParams.get('regenerate') === '1';

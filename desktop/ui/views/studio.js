@@ -11,6 +11,7 @@ import { ratioLabel } from '../ratios.js';
 import { skillPicker, customSkillForm } from '../skill-picker.js';
 import { previzPanel, blankStage } from '../previz-canvas.js';
 import { shotTable } from '../shot-table.js';
+import { animatic } from '../animatic.js';
 import * as siteCanvasMod from '../site-canvas.js';
 import * as OUTLINE from '/outline.js';
 import { inheritStage } from '/previz.js';
@@ -2039,6 +2040,9 @@ export default {
           descEl.style.display = '';
           mark(false);
         };
+        /** 「为什么不对」的结果挂这儿。默认空的 —— 不点就不占地方 */
+        const diagHost = h('div', { class: 'diag-host' });
+
         const openEdit = () => {
           editor.style.display = '';
           descEl.style.display = 'none';
@@ -2248,8 +2252,42 @@ export default {
                 h('button', { class: 'shot-edit-btn', title: '改这一镜的描述、景别、台词', onclick: openEdit }, '改文案'),
                 // 和「改文案」并排。藏在编辑面板底部时用户根本找不到它
                 stageBtn,
+                /**
+                 * ══════════ 「为什么不对」 ══════════
+                 *
+                 * ⚠ 出图之后才有意义，所以只在有图时摆出来。
+                 *
+                 * 不满意的时候，人手里只有一张图和一个「重出」按钮 ——
+                 * 而再来一次多半还是那样，因为他不知道该改什么。
+                 * 这颗按钮回答的就是那个问题，而且只说**数据里有证据**的原因。
+                 */
+                shot.imagePath
+                  ? h('button', {
+                      class: 'shot-edit-btn',
+                      title: '这一镜不满意？看看数据里查得出什么原因',
+                      onclick: async (e) => {
+                        const btn = e.currentTarget;
+                        btn.disabled = true;
+                        try {
+                          // cap:diagnose-shot
+                          const r = await api(`/projects/${project.id}/shots/${shot.id}/diagnose`);
+                          clear(diagHost);
+                          add(diagHost, ...(r.items || []).map((it) => h('div', { class: 'diag-item' },
+                            h('div', { class: 'diag-what' }, it.what),
+                            h('div', { class: 'diag-why' }, it.why),
+                            h('div', { class: 'diag-how' }, `→ ${it.how}`),
+                            // 花不花钱要写在动作旁边，不能只写在别处
+                            it.costs ? h('span', { class: 'diag-cost' }, '这一下要重新出图（花钱）') : null)));
+                        } catch (err) {
+                          clear(diagHost);
+                          add(diagHost, h('div', { class: 'diag-item' }, err.message));
+                        } finally { btn.disabled = false; }
+                      }
+                    }, '为什么不对')
+                  : null,
                 verBtn
               ),
+              diagHost,
               descEl,
               editor,
               h('div', { class: 'shot-meta' },
@@ -2661,15 +2699,82 @@ export default {
             title: '一行一镜，能多选、能用上下键',
             onclick: () => { state.shotView = 'table'; paintShots(); }
           }, '表格'),
+          /**
+           * ══════════ 连播 ══════════
+           *
+           * 出视频**之前**最后一道、也是最省钱的一道关：把分镜图按各自的
+           * 时长连起来播一遍，立刻能听出"第 7 镜太长"、"这三镜全是中景，闷"、
+           * "这句话根本来不及说完"。这些问题出完视频再发现，代价是整批重出。
+           */
+          h('button', {
+            class: `btn ghost sm${state.shotView === 'play' ? ' on' : ''}`,
+            title: '按各镜时长连起来播一遍 —— 不花钱，出视频之前先看节奏',
+            onclick: () => { state.shotView = 'play'; paintShots(); }
+          }, '连播'),
           state.shotView === 'table'
             ? h('span', { class: 'field-hint', style: 'margin:0' },
                 '↑↓ 移动 · 空格选中 · Shift+↑↓ 连选 · 回车打开 · Esc 清空')
             : null)
       );
 
+      if (state.shotView === 'play') {
+        const sortedAll = project.shots.slice().sort((a, b) => a.index - b.index);
+        // cap:animatic
+        const player = animatic(sortedAll, {
+          mediaUrl,
+          // 念出来的那段：署名和括注不算 —— 字幕上出现"（冷笑）"是错的
+          spokenOf: (s) => String(s.dialogue || '').replace(/[（(][^）)]*[）)]/g, '').replace(/^[^：:]{1,8}[：:]/, '').trim()
+        });
+        /**
+         * ⚠ 切走时必须停。不停的话 rAF 一直在跑、视频还在解码，
+         * 而且下次进来会有两个播放器同时在动 —— 表现是"越用越卡"。
+         */
+        state.stopAnimatic?.();
+        state.stopAnimatic = player.stop;
+        shotHost.append(
+          h('div', { class: 'field-hint', style: 'margin:0 0 8px' },
+            `全片 ${DUR.fmtSeconds(player.total)}`
+            + `${project.targetSeconds ? ` · 目标 ${DUR.fmtSeconds(project.targetSeconds)}` : ''}`
+            + ' —— 这一遍不花钱，是出视频之前最后一道关'),
+          player.node
+        );
+        player.focus();
+        return;
+      }
+      state.stopAnimatic?.();
+      state.stopAnimatic = null;
+
       if (state.shotView === 'table') {
         const sortedAll = project.shots.slice().sort((a, b) => a.index - b.index);
         const bar = h('div', { class: 'batch-bar' });
+        /**
+         * ══════════ 一键选上"该重出的那几镜" ══════════
+         *
+         * ⚠ 判据是**有可以动手的具体原因**，不是"分数低"。
+         *
+         * 按分数选的话会把一堆"数据上看不出毛病、只是模型这次画成这样"的
+         * 镜头一起选上 —— 重出它们纯粹是碰运气，而每一次都真花钱。
+         * 只选那些有明确原因的：图是旧描述出的、参考图没发、模型换过。
+         */
+        const redoBar = h('div', { class: 'redo-hint' });
+        // cap:redo-candidates
+        api(`/projects/${project.id}/redo-candidates`).then((r) => {
+          const list = r?.shots || [];
+          clear(redoBar);
+          if (!list.length) return;
+          const ids = list.map((x) => x.id);
+          add(redoBar,
+            h('span', {}, `有 ${list.length} 镜查得出具体原因该重出`),
+            h('button', {
+              class: 'btn ghost sm',
+              title: list.slice(0, 6).map((x) => `第 ${x.index} 镜：${x.why}`).join('\n'),
+              onclick: () => {
+                ids.forEach((id) => picked.add(id));
+                tbl.refresh();
+                paintBatchBar(bar, picked, tbl);
+              }
+            }, '把它们选上'));
+        }).catch(() => {});
         const tbl = shotTable(sortedAll, {
           selected: picked,
           skillNames: skillNameOf,
@@ -2683,7 +2788,7 @@ export default {
             } catch (err) { toast(err.message, 'err'); }
           }
         });
-        shotHost.append(bar, tbl.node);
+        shotHost.append(redoBar, bar, tbl.node);
         paintBatchBar(bar, picked, tbl);
         tbl.focus();
         return;

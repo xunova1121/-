@@ -2470,7 +2470,49 @@ function shotCardOf(s, v, portrait, probs = shotIssues(s)) {
       s.imagePath
         ? h('div', { class: 'muted', style: 'margin-top:6px;line-height:1.6' }, refLine(s))
         : null,
+      /**
+       * ══════════ 「为什么不对」 ══════════
+       *
+       * ⚠ 手机上**更该有**这一下。
+       *
+       * 出门在外看到一张不对的图，手里只有一个「重出」按钮 —— 而再来一次
+       * 多半还是那样，因为他不知道该改什么。而且他离能改的地方（电脑）更远，
+       * 白白重出一次的代价在手机上更高：钱花了，人还在路上。
+       *
+       * 只说数据里有证据的原因（服务端算的，两端同一份）。
+       */
+      s.imagePath ? diagBox(s) : null,
       acts));
+}
+
+/**
+ * 「为什么不对」那一块。点开才拉 —— 每张卡都预拉一次的话，
+ * 一屏十几镜就是十几个请求，而绝大多数你根本不会点开。
+ */
+function diagBox(s) {
+  const host = h('div', { class: 'diag-host' });
+  const btn = h('button', {
+    class: 'btn sm ghost',
+    style: 'margin-top:6px',
+    onclick: async () => {
+      btn.disabled = true;
+      btn.textContent = '查…';
+      try {
+        // cap:diagnose-shot
+        const r = await api(`/projects/${project.id}/shots/${s.id}/diagnose`);
+        clear(host);
+        add(host, ...(r.items || []).map((it) => h('div', { class: 'diag-item' },
+          h('div', { class: 'diag-what' }, it.what),
+          h('div', { class: 'diag-why' }, it.why),
+          h('div', { class: 'diag-how' }, `→ ${it.how}`),
+          it.costs ? h('span', { class: 'diag-cost' }, '这一下要重新出图（花钱）') : null)));
+      } catch (err) {
+        clear(host);
+        add(host, h('div', { class: 'diag-item' }, err.message));
+      } finally { btn.disabled = false; btn.textContent = '为什么不对'; }
+    }
+  }, '为什么不对');
+  return h('div', {}, btn, host);
 }
 
 /** 台词类型在卡片上只占一个字：整个词摆上去，一行就没了 */

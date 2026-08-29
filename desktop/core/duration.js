@@ -214,3 +214,41 @@ export function rescale(shots, targetSeconds, { min = 3, max = 10 } = {}) {
     duration: Math.round(Math.max(min, Math.min(max, value[i])) * 10) / 10
   }));
 }
+
+/**
+ * ══════════ 连播预览排一遍 ══════════
+ *
+ * 每一镜按自己的时长占一段，有视频放视频、只有图就定住。
+ *
+ * ⚠ **不能复用 edit.timeline。**那个只收已经有视频的镜头，因为它算的是成片；
+ * 而连播的全部价值恰恰在"还没出视频"那个时刻 —— 出视频之前最后一道、
+ * 也是最省钱的一道关。两者混用的话，连播在最该用的时候是空的。
+ *
+ * ⚠ 放在这个文件里，是为了让时长口径**只有一份**。
+ * 在界面那边另算一套的话，连播说 62 秒、导出说 58 秒，
+ * 而两个数都是我们自己给的。
+ */
+export function animaticLayout(shots = []) {
+  const rows = [];
+  let at = 0;
+  for (const shot of shots) {
+    const raw = shotSeconds(shot);
+    /**
+     * ⚠ 没设时长的**不跳过**，给个兜底值占位。
+     *
+     * 跳过的话，人在连播里根本看不到那一镜，于是永远不知道它没设时长 ——
+     * 而它到合成那一步会出问题。占着位置并标明"这是猜的"，
+     * 才有机会在最便宜的时刻被发现。
+     */
+    const span = raw > 0 ? raw : 3;
+    rows.push({
+      shot,
+      start: at,
+      span,
+      guessed: !(raw > 0),
+      kind: shot.videoPath ? 'video' : shot.imagePath ? 'image' : 'blank'
+    });
+    at += span;
+  }
+  return { rows, total: at };
+}

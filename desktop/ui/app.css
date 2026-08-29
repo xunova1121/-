@@ -1240,6 +1240,63 @@ select.mini {
 .previz-label { fill: var(--ink); }
 .previz-label-cam { fill: var(--ground); font-weight: 700; }
 .previz-controls { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+/* ── 连播预览 ──
+   出视频之前最后一道、也是最省钱的一道关。 */
+.animatic:focus { outline: none; }
+.ani-stage {
+  position: relative; aspect-ratio: 16 / 9; background: #000;
+  border: 1px solid var(--line); border-radius: var(--r); overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+.ani-media { max-width: 100%; max-height: 100%; display: block; object-fit: contain; }
+.ani-blank { color: var(--ink-faint); font-size: 14px; }
+/* 镜号和时长压在角上：看节奏时要随时知道现在是第几镜 */
+.ani-tag {
+  position: absolute; top: 8px; left: 10px; font-size: 12px;
+  color: #fff; background: rgba(0,0,0,.55); padding: 2px 8px; border-radius: 99px;
+}
+.ani-sub {
+  position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+  max-width: 88%; text-align: center; color: #fff; font-size: 15px; line-height: 1.5;
+  background: rgba(0,0,0,.55); padding: 4px 12px; border-radius: 6px;
+}
+/* 每镜一格，颜色说明它是静帧还是视频 —— 一眼看出还差几镜 */
+.ani-ticks { display: flex; gap: 1px; margin-top: 8px; }
+.ani-tick { height: 5px; border-radius: 2px; cursor: pointer; background: var(--line); }
+.ani-tick.image { background: var(--beam-deep); }
+.ani-tick.video { background: var(--good); }
+.ani-tick:hover { filter: brightness(1.4); }
+.ani-bar { height: 6px; border-radius: 3px; background: var(--surface-3); margin-top: 4px; cursor: pointer; }
+.ani-fill { height: 100%; border-radius: 3px; background: var(--beam); width: 0; }
+.ani-controls { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+.ani-clock { font-size: 13px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.ani-hint { font-size: 12px; color: var(--ink-faint); margin-top: 6px; }
+
+/* ── 「为什么不对」 ──
+   不满意时人手里只有一张图和一个「重出」按钮，而再来一次多半还是那样。
+   这一块回答"该改什么"，而且只说数据里有证据的原因。 */
+.diag-host:empty { display: none; }
+.diag-host { margin-top: 8px; }
+.diag-item {
+  padding: 8px 10px; margin-top: 6px; border-radius: 8px;
+  background: var(--surface-2); border-left: 3px solid var(--beam);
+}
+.diag-what { font-size: 13px; font-weight: 600; }
+.diag-why { font-size: 12px; color: var(--ink-faint); line-height: 1.6; margin-top: 4px; }
+.diag-how { font-size: 12px; color: var(--ink); line-height: 1.6; margin-top: 3px; }
+/* 花不花钱要写在动作旁边，不能只写在别处 */
+.diag-cost {
+  display: inline-block; margin-top: 5px; font-size: 11px; padding: 1px 6px;
+  border-radius: 99px; color: var(--caution); border: 1px solid var(--caution);
+}
+
+/* ── 一键选上"该重出的那几镜" ── */
+.redo-hint:empty { display: none; }
+.redo-hint {
+  display: flex; gap: 8px; align-items: center; margin-bottom: 8px;
+  font-size: 13px; color: var(--ink-dim);
+}
+
 /* ── 分镜表：一行一镜 ──
    卡片一屏三四镜，五十镜要滚十几屏。表格解决的是通读和批量改。 */
 .shot-view-bar { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }

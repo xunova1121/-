@@ -1655,6 +1655,98 @@ await page.waitForTimeout(1200);
   }
 }
 
+/**
+ * ══════════ 表格 / 连播 / 为什么不对 ══════════
+ *
+ * 这三样服务端那边都验过判据本身。这里补的是**它们有没有到屏幕上、
+ * 点下去有没有反应** —— 键盘、播放、异步拉取，服务端自检一样都碰不到。
+ */
+console.log('\n表格 · 连播 · 为什么不对');
+{
+  await page.goto(`${url}#/studio/${proj.id}`);
+  await page.waitForTimeout(1000);
+  /**
+   * ⚠ 先把**出图**跑掉。
+   *
+   * 「为什么不对」只在有图的镜头上出现（没图时那是另一类问题，
+   * 别处在管）。不跑这一步的话，这几条验的是一个空面板 ——
+   * 而空面板和"功能没做"长得一模一样。
+   * 上游全是桩，这一步不花钱。
+   */
+  await page.locator('.nav-step', { hasText: '镜头出图' }).first().click();
+  await page.waitForTimeout(600);
+  const go = page.locator('.stage-detail button:has-text("开始")').first();
+  if (await go.count()) {
+    await go.click();
+    await page.waitForFunction(() => !document.querySelector('.spin'), null, { timeout: 60000 }).catch(() => {});
+    await page.waitForTimeout(2500);
+  }
+
+  await page.locator('.nav-step', { hasText: '分镜' }).first().click();
+  await page.waitForTimeout(800);
+
+  // ── 表格视图 + 键盘 ──
+  await page.locator('button:has-text("表格")').first().click();
+  await page.waitForTimeout(600);
+  check('切得到表格视图', (await page.locator('.shot-table tbody tr').count()) > 0);
+  await page.locator('.shot-table-wrap').first().focus();
+  await page.keyboard.press(' ');
+  await page.waitForTimeout(300);
+  check('空格能选中当前那一行', (await page.locator('.shot-table tr.picked').count()) === 1,
+    String(await page.locator('.shot-table tr.picked').count()));
+  check('选中之后批量工具条才出现（没选时不该占地方）',
+    (await page.locator('.batch-bar .batch-count').count()) === 1);
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press(' ');
+  await page.waitForTimeout(300);
+  check('↑↓ 移动 + 空格能多选', (await page.locator('.shot-table tr.picked').count()) === 2,
+    String(await page.locator('.shot-table tr.picked').count()));
+  /**
+   * ⚠ **快捷键必须在输入框里失效。**表格里有就地改时长的数字框，
+   * 人在里面打字时按空格要出现空格，而不是跳着选中别的镜头。
+   */
+  await page.locator('.shot-table .cell-num').first().click();
+  await page.keyboard.press(' ');
+  await page.waitForTimeout(200);
+  check('在时长输入框里按空格，不会误触多选',
+    (await page.locator('.shot-table tr.picked').count()) === 2,
+    String(await page.locator('.shot-table tr.picked').count()));
+  await page.locator('.shot-table-wrap').first().focus();
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  check('Esc 清空选择', (await page.locator('.shot-table tr.picked').count()) === 0);
+
+  // ── 连播 ──
+  await page.locator('button:has-text("连播")').first().click();
+  await page.waitForTimeout(800);
+  check('切得到连播', (await page.locator('.animatic .ani-stage').count()) === 1);
+  const before = await page.locator('.ani-clock').first().innerText();
+  await page.locator('.animatic').first().focus();
+  await page.keyboard.press(' ');
+  await page.waitForTimeout(1200);
+  const after = await page.locator('.ani-clock').first().innerText();
+  /**
+   * 判据是**时间真的在走**，不是"有没有播放按钮"。
+   * 按钮在、点了没反应，是这类播放器最常见的坏法。
+   */
+  check('空格真的开始播了（时间在走）', before !== after, `${before} → ${after}`);
+  await page.keyboard.press(' ');
+  check('每一镜在进度条上占一格', (await page.locator('.ani-tick').count()) > 0,
+    String(await page.locator('.ani-tick').count()));
+
+  // ── 为什么不对 ──
+  await page.locator('button:has-text("卡片")').first().click();
+  await page.waitForTimeout(600);
+  const why = page.locator('button:has-text("为什么不对")').first();
+  check('出过图的镜头卡上有「为什么不对」', (await why.count()) > 0);
+  if (await why.count()) {
+    await why.click();
+    await page.waitForFunction(() => document.querySelector('.diag-item'), null, { timeout: 15000 }).catch(() => {});
+    const txt = await page.locator('.diag-host').first().innerText();
+    check('点下去给出了原因和下一步', /→/.test(txt) && txt.length > 20, txt.slice(0, 140));
+  }
+}
+
 check('全程没有页面报错', errs.length === 0, errs.slice(0, 3).join(' | '));
 
 await b.close();

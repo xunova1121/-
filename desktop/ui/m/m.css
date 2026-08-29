@@ -819,3 +819,19 @@ input {
   background: rgba(232, 180, 95, .14); color: var(--ink-dim);
   font-size: 12px; line-height: 1.6;
 }
+
+/* ── 「为什么不对」──
+   出门在外看到一张不对的图，手里只有一个「重出」按钮，而再来一次多半
+   还是那样。这一块回答"该改什么"，只说数据里有证据的原因。 */
+.diag-host:empty { display: none; }
+.diag-item {
+  padding: 8px 10px; margin-top: 6px; border-radius: 8px;
+  background: var(--surface-2); border-left: 3px solid var(--beam);
+}
+.diag-what { font-size: 14px; font-weight: 600; }
+.diag-why { font-size: 13px; color: var(--ink-faint); line-height: 1.6; margin-top: 4px; }
+.diag-how { font-size: 13px; color: var(--ink); line-height: 1.6; margin-top: 3px; }
+.diag-cost {
+  display: inline-block; margin-top: 5px; font-size: 12px; padding: 1px 7px;
+  border-radius: 99px; color: var(--caution); border: 1px solid var(--caution);
+}
