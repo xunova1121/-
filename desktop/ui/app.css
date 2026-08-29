@@ -1232,6 +1232,7 @@ select.mini {
 .previz-webgl { background:#151a24; box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--beam) 15%, transparent); }
 .previz-webgl canvas { cursor:grab; }
 .previz-webgl canvas:active { cursor:grabbing; }
+.previz-gpu-note { position:absolute; left:10px; right:10px; bottom:10px; padding:7px 9px; border:1px solid color-mix(in srgb,var(--caution) 50%,var(--line)); border-radius:7px; background:color-mix(in srgb,var(--ground) 88%,transparent); color:var(--caution); font-size:10px; text-align:center; }
 .previz-canvas[hidden] { display:none; }
 .previz-3d-sky { fill:color-mix(in srgb, var(--surface) 88%, var(--beam) 12%); }
 .previz-3d-grid { stroke:var(--line-soft); stroke-width:1; }

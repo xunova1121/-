@@ -353,7 +353,22 @@ export function director3dCanvas(stage, {
   host.className = 'previz-canvas previz-3d previz-webgl';
   host.style.cssText = `width:100%;max-width:${size}px;aspect-ratio:1.38;touch-action:none;position:relative;overflow:hidden`;
   // 保留最后一帧，才能把当前预演直接导出为视频模型的首帧参考。
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
+  let renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
+  } catch {
+    const fallback = blockingCanvas(stage, { size, onChange });
+    fallback.node.style.width = '100%'; fallback.node.style.height = '100%';
+    const note = Object.assign(document.createElement('div'), {
+      className: 'previz-gpu-note', textContent: '当前环境未启用 WebGL，已切换为俯视排位；位置、机位和关键帧仍可编辑'
+    });
+    host.append(fallback.node, note);
+    return {
+      node: host,
+      redraw: fallback.redraw,
+      capture: () => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(fallback.node))}`
+    };
+  }
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
