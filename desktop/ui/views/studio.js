@@ -104,7 +104,44 @@ const job = {
 };
 
 function jobBusy() {
-  return Boolean(job.stage) || job.shots.size > 0;
+  return Boolean(job.stage) || job.shots.size > 0 || Boolean(job.serverRunning);
+}
+
+/**
+ * ══════════ 到底在不在跑，只有服务端知道 ══════════
+ *
+ * ⚠ 原来这个判断**只看内存里那个变量**，而那是每个页面各存一份的。
+ *
+ * 于是：刷新一次、换台设备看、或者流断一次（手机锁屏、切个应用就够了），
+ * 客户端就以为跑完了，按钮亮回来 —— 而服务器还在一镜一镜地出。
+ * 人点下去，撞上一段"这个项目已经在跑（321 秒前开始）"的长文案，
+ * 而那句话本身就说明**这一下压根不该点得动**。
+ *
+ * 活儿登记在服务端（jobs.js 的内存表），那才是唯一的事实。问它。
+ */
+async function syncJob(projectId) {
+  if (!projectId) return;
+  try {
+    const live = await api(`/projects/${projectId}/job`);
+    const was = Boolean(job.serverRunning);
+    job.serverRunning = live?.running ? live : null;
+    /**
+     * ⚠ 只有**状态真的变了**才重画。
+     *
+     * 每三秒无条件重画一次的话，正在打字的输入框会被整个换掉 ——
+     * 而那种"打着打着字没了"的 bug 极难往轮询上想。
+     */
+    if (Boolean(job.serverRunning) !== was) jobNotify('server');
+  } catch {
+    /* 问不到就保持原样：网络抖一下不该把按钮全锁死 */
+  }
+}
+
+let jobPollTimer = 0;
+function startJobPoll(projectId) {
+  clearInterval(jobPollTimer);
+  syncJob(projectId);
+  jobPollTimer = setInterval(() => syncJob(projectId), 4000);
 }
 
 function jobNotify(kind) {
@@ -624,6 +661,14 @@ export default {
     // 出视频一镜要几分钟，中间全靠轮询。不把"现在轮到谁、轮询到第几次"显示出来，
     // 用户看到的就是一个卡住不动的界面，只能猜是不是死了。
     jobReset(project.id);
+    /**
+     * 进这个视图就开始问服务端"现在在跑什么"。
+     *
+     * ⚠ 这一下**必须在进来时就做**，不能等用户点了才发现在跑。
+     * 刷新、换设备、流断之后，页面自己那份状态全没了，
+     * 而服务器可能已经跑了五分钟。
+     */
+    startJobPoll(project.id);
     const live = job.live; // 状态在模块级，切页面不丢
     const liveBadge = h('span', {});
     const liveEls = new Map(); // shotId → 卡片上那块状态区
@@ -887,7 +932,32 @@ export default {
           ),
           h('div', { class: 'inline' },
 
-            h('button', {
+            /**
+             * ══════════ 在跑的时候，这颗按钮就是「停下来」 ══════════
+             *
+             * ⚠ 不是"变灰"，是**换成另一个动作**。
+             *
+             * 变灰的话，人看到的是一颗点不动的按钮和一段"已经在跑了"的长文案 ——
+             * 他真正想干的那件事（停下来）藏在别处。用户的原话是
+             * "你在出的话就不能点击继续出图，可以暂停"。
+             *
+             * 而且这里显示的是**服务端的进度**（第几镜、跑了多久），
+             * 不是这个页面自己记的那份 —— 刷新、换设备、流断都不影响它。
+             */
+            job.serverRunning
+              ? h('button', {
+                  class: 'btn',
+                  title: '停在当前这一镜之后。已经出好的都留着',
+                  disabled: job.serverRunning.cancelling,
+                  onclick: async () => {
+                    try {
+                      const r = await api(`/projects/${project.id}/cancel`, { method: 'POST' });
+                      toast(r.message || '正在停…', 'ok');
+                      syncJob(project.id);
+                    } catch (err) { toast(err.message, 'err'); }
+                  }
+                }, job.serverRunning.cancelling ? '正在停…' : '■ 停下来')
+              : h('button', {
               class: 'btn primary',
               disabled: !runnable,
               title: isCostly ? '视频按镜数计费，是这条流水线最大的开销' : '',
@@ -910,6 +980,16 @@ export default {
                 runStage(state.stage);
               }
             }, done ? `继续（还差 ${total - done}）` : '开始'),
+            /**
+             * 在跑的时候把**服务端的进度**摆出来。
+             * 页面自己记的那份一刷新就没了，而这个数是问出来的。
+             */
+            job.serverRunning
+              ? h('span', { class: 'field-hint', style: 'margin:0 0 0 8px' },
+                  `${job.serverRunning.stageLabel || job.serverRunning.stage} 中`
+                  + (job.serverRunning.shotIndex ? ` · 第 ${job.serverRunning.shotIndex} 镜` : '')
+                  + ` · 已跑 ${Math.round((job.serverRunning.elapsedMs || 0) / 1000)} 秒`)
+              : null,
             done && done === total
               ? h('button', {
                   class: 'btn ghost',
@@ -1078,6 +1158,20 @@ export default {
       if (kind === 'tick') {
         // 跑的过程只更新日志和**卡片自己的状态条**，右下角一声不吭
         paintLog();
+        return;
+      }
+      /**
+       * ⚠ 问服务端问出"在跑 / 不在跑"变了 —— 只重画**那一块面板**。
+       *
+       * 少了这一下，轮询把状态更新了却没人重画，按钮照旧是「继续出图」——
+       * 也就是用户撞到的那个：点下去回一段"这个项目已经在跑（321 秒前开始）"。
+       *
+       * ⚠ 只画 stage-detail，**不重画整页**。你可能正在某张卡片里改台词，
+       * 而这个轮询每四秒响一次 —— 重画整页等于每四秒把你打的字吃掉一次。
+       */
+      if (kind === 'server') {
+        paintStageDetail();
+        syncNav();
         return;
       }
       // done

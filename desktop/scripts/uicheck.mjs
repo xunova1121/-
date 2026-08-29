@@ -1747,6 +1747,46 @@ console.log('\n表格 · 连播 · 为什么不对');
   }
 }
 
+/**
+ * ══════════ 在跑的时候，那颗按钮必须是「停下来」 ══════════
+ *
+ * 用户报的：手机上点「继续出图」，撞上一段"这个项目已经在跑（321 秒前开始）"——
+ * 而那句话本身就说明这一下压根不该点得动。
+ *
+ * 根因：电脑版的"在不在跑"**只看页面自己内存里那个变量**，从不问服务端。
+ * 刷新一次、换台设备、或者流断一次（手机锁屏就够了），按钮就亮回来，
+ * 而服务器还在一镜一镜地出。
+ *
+ * ⚠ 判据是**在服务端登记一份活儿之后，界面自己变**，
+ * 不是"有没有写轮询代码"。
+ */
+console.log('\n在跑的时候不该能再点一次');
+{
+  const jobsMod = await import(CORE('jobs.js'));
+  const running = jobsMod.start(proj.id, 'assets');
+  await page.goto(`${url}#/studio/${proj.id}`);
+  await page.waitForTimeout(1500);
+  await page.locator('.nav-step', { hasText: '镜头出图' }).first().click();
+  await page.waitForTimeout(1500);
+
+  const stopBtn = page.locator('.stage-detail button:has-text("停下来")');
+  // 轮询是四秒一次，等它自己变 —— 判据是"界面最终会自己反应过来"
+  await page.waitForSelector('.stage-detail button:has-text("停下来")', { timeout: 15000 }).catch(() => {});
+  check('服务端在跑时，主按钮变成「停下来」', (await stopBtn.count()) > 0);
+  check('而且「开始/继续」不在了（不是变灰，是换了个动作）',
+    (await page.locator('.stage-detail button:has-text("开始")').count()) === 0
+    && (await page.locator('.stage-detail button:has-text("继续")').count()) === 0);
+  const head = await page.locator('.stage-detail-head').first().innerText();
+  /** 进度要来自服务端 —— 页面自己记的那份一刷新就没了 */
+  check('说得出在跑哪一步、跑了多久', /中 ·? ?已跑 \d+ 秒|已跑 \d+ 秒/.test(head), head.slice(0, 160));
+
+  jobsMod.finish(running);
+  await page.waitForTimeout(5000);
+  check('跑完之后按钮自己变回「开始」（不用手动刷新）',
+    (await page.locator('.stage-detail button:has-text("停下来")').count()) === 0
+    && (await page.locator('.stage-detail button:has-text("开始"), .stage-detail button:has-text("继续")').count()) > 0);
+}
+
 check('全程没有页面报错', errs.length === 0, errs.slice(0, 3).join(' | '));
 
 await b.close();

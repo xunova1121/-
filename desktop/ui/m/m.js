@@ -3136,12 +3136,24 @@ async function runStage(stageId, label, extra = {}) {
     job.fail += 1;
     job.message = err.message;
   } finally {
-    job.running = false;
-    job.stopping = false;
+    /**
+     * ⚠ 流断了**不等于跑完了**。
+     *
+     * 手机锁个屏、切个应用、网抖一下，这条流就断。而服务器那边还在
+     * 一镜一镜地出。这里无条件把 running 置成 false 的话，按钮立刻亮回来 ——
+     * 人再点一次，撞上一段"这个项目已经在跑（321 秒前开始）"的长文案，
+     * 而那句话本身就说明这一下压根不该点得动。
+     *
+     * 所以先问服务端：它说还在跑，就接着显示在跑（syncJob 会重开轮询）。
+     */
     job.streaming = false;
-    job.stage = '';
-    job.shotId = null;
-    job.shotIndex = null;
+    job.stopping = false;
+    await syncJob();
+    if (!job.running) {
+      job.stage = '';
+      job.shotId = null;
+      job.shotIndex = null;
+    }
     await reload();
   }
 }
