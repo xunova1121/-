@@ -1220,8 +1220,13 @@ select.mini {
    画布的**结构**两端共用（ui/previz-canvas.js），配色各自定义：
    手机端那套色板是独立的（见 ui/m/m.css 开头为什么），token 名字都不一样，
    共用一份样式表只会得到一堆解析不出来的变量。类名保持一致就够了。 */
-.previz-panel { margin-top: 10px; }
-.previz-viewbar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:8px; }
+.previz-panel { margin-top:10px; container-type:inline-size; }
+.previz-workbench { display:grid; grid-template-columns:180px minmax(520px,1fr) 280px; min-height:690px; border:1px solid var(--line); border-radius:12px; overflow:hidden; background:var(--ground); }
+.previz-center { min-width:0; padding:10px; border-inline:1px solid var(--line-soft); }
+.previz-right { min-width:0; padding:10px; overflow:auto; background:color-mix(in srgb,var(--surface) 80%,var(--ground)); }
+.previz-section-title { font-size:12px; font-weight:800; letter-spacing:.04em; color:var(--ink); padding:2px 0 9px; }
+.previz-viewbar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:8px; min-height:30px; }
+.previz-viewbar .field-hint { flex:1; min-width:140px; }
 .previz-viewbar .btn.on { border-color:var(--beam); color:var(--beam); background:var(--beam-wash); }
 .previz-canvas { border: 1px solid var(--line); border-radius: 10px; display: block; }
 .previz-webgl { background:#151a24; box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--beam) 15%, transparent); }
@@ -1242,11 +1247,16 @@ select.mini {
 .previz-light-beam { stroke:#ffd08a; stroke-width:1.5; stroke-dasharray:5 4; opacity:.7; }
 .previz-3d-label { fill:var(--ink); font-size:11px; font-weight:650; text-anchor:middle; paint-order:stroke; stroke:var(--surface); stroke-width:3px; }
 .previz-3d-label.cam { fill:var(--beam); }
-.previz-workspace { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(230px,.8fr); gap:9px; align-items:start; }
-.previz-assets { display:flex; align-items:center; gap:7px; overflow-x:auto; padding:7px 0; margin-bottom:7px; }
-.previz-assets > b { flex:none; color:var(--ink-dim); font-size:11px; }
-.previz-asset { flex:0 0 70px; height:74px; display:flex; flex-direction:column; overflow:hidden; border:1px solid var(--line-soft); border-radius:7px; background:var(--surface); cursor:grab; }
-.previz-asset img { width:100%; height:52px; object-fit:cover; }
+.previz-workspace { display:grid; grid-template-columns:minmax(0,1fr) 210px; gap:9px; align-items:start; }
+.previz-assets { min-width:0; padding:10px; overflow:auto; background:color-mix(in srgb,var(--surface) 80%,var(--ground)); }
+.previz-asset-group { margin:0 0 14px; }
+.previz-asset-group > b { display:block; margin-bottom:6px; color:var(--ink-dim); font-size:10px; }
+.previz-asset-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }
+.previz-asset { min-width:0; height:80px; display:flex; flex-direction:column; overflow:hidden; border:1px solid var(--line-soft); border-radius:7px; background:var(--surface); cursor:grab; }
+.previz-asset:hover { border-color:var(--beam); transform:translateY(-1px); }
+.previz-asset img,.previz-asset-ph { width:100%; height:57px; object-fit:cover; }
+.previz-asset-ph { display:grid; place-items:center; font-size:22px; font-weight:800; color:var(--ink-faint); background:linear-gradient(145deg,var(--surface-2),var(--ground)); }
+.previz-asset-ph.character { color:var(--beam); }.previz-asset-ph.scene { color:#8db8ff; }.previz-asset-ph.prop { color:var(--caution); }
 .previz-asset span { padding:3px 4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10px; }
 .previz-3d.drag-over { outline:2px dashed var(--beam); outline-offset:-5px; }
 .previz-camera-pane { display:flex; flex-direction:column; gap:6px; padding:8px; border:1px solid var(--line-soft); border-radius:9px; background:var(--ground); }
@@ -1258,8 +1268,20 @@ select.mini {
 .previz-camera-prop { fill:var(--surface-3); stroke:var(--ink-faint); }
 .previz-camera-label { fill:#fff; font-size:11px; text-anchor:middle; paint-order:stroke; stroke:#101116; stroke-width:3px; }
 .previz-camera-cross { fill:none; stroke:rgba(255,255,255,.65); stroke-width:1; }
-.previz-timeline { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:8px 0; padding:8px; border:1px solid var(--line-soft); border-radius:9px; }
-.previz-timeline input[type="range"] { flex:1; min-width:180px; }
+.previz-timeline { margin-top:9px; border:1px solid var(--line-soft); border-radius:9px; overflow:hidden; background:var(--surface); }
+.previz-transport { display:flex; align-items:center; gap:8px; min-height:40px; padding:6px 9px; border-bottom:1px solid var(--line-soft); }
+.previz-transport > b { margin-right:auto; font-size:12px; }
+.previz-scrub { position:relative; margin-left:150px; height:35px; border-bottom:1px solid var(--line-soft); }
+.previz-scrub input[type="range"] { position:absolute; z-index:2; inset:0; width:100%; opacity:.01; cursor:ew-resize; }
+.previz-ruler { position:absolute; inset:0; }
+.previz-ruler span { position:absolute; top:7px; color:var(--ink-faint); font:9px var(--code); transform:translateX(-50%); }
+.previz-ruler span::after { content:""; display:block; width:1px; height:11px; margin:3px auto; background:var(--line); }
+.previz-track { display:grid; grid-template-columns:150px minmax(0,1fr); min-height:30px; border-bottom:1px solid var(--line-soft); }
+.previz-track.selected { background:var(--beam-wash); }
+.previz-track-name { border:0; border-right:1px solid var(--line-soft); background:transparent; color:var(--ink-dim); padding:0 9px; text-align:left; font-size:10px; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.previz-track-lane { position:relative; background-image:linear-gradient(90deg,var(--line-soft) 1px,transparent 1px); background-size:20% 100%; }
+.previz-diamond { position:absolute; z-index:2; top:10px; width:9px; height:9px; padding:0; border:1px solid #ffd071; background:#d99022; transform:translateX(-50%) rotate(45deg); cursor:pointer; }
+.previz-playhead { position:absolute; z-index:1; top:0; bottom:0; width:1px; background:var(--beam); box-shadow:0 0 5px var(--beam); }
 .previz-key { border:1px solid var(--beam); border-radius:10px; background:var(--beam-wash); color:var(--beam); font:10px var(--code); cursor:pointer; }
 .previz-control-shelf { display:flex; gap:7px; align-items:center; overflow-x:auto; margin:8px 0; }
 .previz-control { flex:0 0 150px; display:flex; flex-direction:column; border:1px solid var(--line-soft); border-radius:7px; overflow:hidden; color:var(--ink-dim); text-decoration:none; }
@@ -1267,10 +1289,12 @@ select.mini {
 .previz-control span { padding:4px 6px; font-size:10px; }
 .previz-3d g.selected > * { filter:drop-shadow(0 0 4px var(--beam)); stroke-width:2.5px; }
 .previz-3d g.locked { opacity:.72; }
-.previz-inspector { display:grid; grid-template-columns:minmax(150px,1.6fr) repeat(5,minmax(70px,.7fr)) auto; gap:7px; align-items:end; margin:8px 0; padding:9px; border:1px solid var(--line-soft); border-radius:9px; background:var(--surface); }
+.previz-inspector { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; align-items:end; margin:0 0 10px; padding:9px; border:1px solid var(--line-soft); border-radius:9px; background:var(--surface); }
+.previz-inspector-title { grid-column:1/-1; padding-bottom:6px; border-bottom:1px solid var(--line-soft); font-size:11px; }
 .previz-inspector label { display:flex; flex-direction:column; gap:3px; margin:0; color:var(--ink-faint); font-size:10px; }
 .previz-inspector input, .previz-inspector select { min-width:0; padding:5px 6px; }
-@media (max-width:900px) { .previz-workspace { grid-template-columns:1fr; } .previz-inspector { grid-template-columns:repeat(3,1fr); } .previz-inspector > b { grid-column:1/-1; } }
+@container (max-width:1100px) { .previz-workbench { grid-template-columns:150px minmax(460px,1fr); } .previz-right { grid-column:1/-1; display:grid; grid-template-columns:280px 1fr; gap:10px; } }
+@container (max-width:760px) { .previz-workbench { display:block; } .previz-assets { max-height:220px; } .previz-asset-grid { grid-template-columns:repeat(4,minmax(70px,1fr)); } .previz-workspace { grid-template-columns:1fr; } .previz-right { display:block; } }
 .previz-bg { fill: var(--surface); }
 .previz-grid { stroke: var(--line-soft); stroke-width: 1; }
 .previz-axis { stroke: var(--line); stroke-width: 1.5; }

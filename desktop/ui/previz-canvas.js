@@ -816,14 +816,24 @@ export function previzPanel(stage, {
   const assetShelf = document.createElement('div');
   assetShelf.className = 'previz-assets';
   if (assets.length) {
-    assetShelf.append(Object.assign(document.createElement('b'), { textContent: '项目资产 · 拖到 3D 画布' }));
-    for (const asset of assets) {
-      const card = document.createElement('div');
-      card.className = 'previz-asset'; card.draggable = true; card.title = `拖入${asset.kind === 'character' ? '人物' : asset.kind === 'scene' ? '场景' : '道具'}：${asset.name}`;
-      if (asset.image) card.append(Object.assign(document.createElement('img'), { src: asset.image, alt: asset.name }));
-      card.append(Object.assign(document.createElement('span'), { textContent: asset.name }));
-      card.ondragstart = (ev) => ev.dataTransfer.setData('application/x-futuredream-asset', JSON.stringify(asset));
-      assetShelf.append(card);
+    assetShelf.append(Object.assign(document.createElement('div'), { className: 'previz-section-title', textContent: '设定集资产' }));
+    for (const [kind, label] of [['character', '人物'], ['scene', '场景'], ['prop', '道具']]) {
+      const group = document.createElement('section');
+      group.className = 'previz-asset-group';
+      group.append(Object.assign(document.createElement('b'), { textContent: label }));
+      const grid = document.createElement('div');
+      grid.className = 'previz-asset-grid';
+      for (const asset of assets.filter((x) => x.kind === kind)) {
+        const card = document.createElement('div');
+        card.className = 'previz-asset'; card.draggable = true; card.title = `拖入${label}：${asset.name}`;
+        if (asset.image) card.append(Object.assign(document.createElement('img'), { src: asset.image, alt: asset.name }));
+        else card.append(Object.assign(document.createElement('div'), { className: `previz-asset-ph ${kind}`, textContent: label.slice(0, 1) }));
+        card.append(Object.assign(document.createElement('span'), { textContent: asset.name }));
+        card.ondragstart = (ev) => ev.dataTransfer.setData('application/x-futuredream-asset', JSON.stringify(asset));
+        grid.append(card);
+      }
+      if (!grid.children.length) grid.append(Object.assign(document.createElement('div'), { className: 'field-hint', textContent: `暂无${label}资产` }));
+      group.append(grid); assetShelf.append(group);
     }
   }
   const controlShelf = document.createElement('div');
@@ -872,6 +882,7 @@ export function previzPanel(stage, {
     if (!found) return;
     const item = found.item;
     const title = Object.assign(document.createElement('b'), {
+      className: 'previz-inspector-title',
       textContent: `${found.kind === 'camera' ? '摄影机' : found.kind === 'light' ? '灯光' : item.name || '对象'} · ${item.id}`
     });
     const makeNumber = (label, key, step = '0.1') => {
@@ -971,12 +982,33 @@ export function previzPanel(stage, {
     };
     const add = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '＋记录关键帧' });
     add.onclick = () => { stopPlayback(); addKeyframe(stage, currentFrame); history.commit(); paintTimeline(); onChange(); };
-    timeline.append(Object.assign(document.createElement('span'), { className: 'previz-cap', textContent: '24fps 时间轴' }), play, range, frame, add);
-    for (const kf of stage.keyframes || []) {
-      const jump = Object.assign(document.createElement('button'), { className: 'previz-key', textContent: `${kf.frame}f` });
-      jump.onclick = () => { stopPlayback(); currentFrame = kf.frame; showFrame(); paintTimeline(); };
-      timeline.append(jump);
+    const transport = document.createElement('div');
+    transport.className = 'previz-transport';
+    transport.append(Object.assign(document.createElement('b'), { textContent: '关键帧时间线' }), play, frame, add);
+    const scrub = document.createElement('div');
+    scrub.className = 'previz-scrub'; scrub.append(range);
+    const ruler = document.createElement('div'); ruler.className = 'previz-ruler';
+    for (let second = 0; second <= Math.ceil(maxFrame / 24); second += 1) {
+      const tick = document.createElement('span'); tick.style.left = `${Math.min(100, second * 24 / maxFrame * 100)}%`; tick.textContent = `${second}s`; ruler.append(tick);
     }
+    scrub.append(ruler);
+    const tracks = document.createElement('div'); tracks.className = 'previz-tracks';
+    for (const { kind, item } of stageObjects(stage)) {
+      const row = document.createElement('div'); row.className = `previz-track ${selectedId === item.id ? 'selected' : ''}`;
+      const name = Object.assign(document.createElement('button'), { className: 'previz-track-name', textContent: `${kind === 'camera' ? '▣' : kind === 'light' ? '☀' : kind === 'subject' ? '♙' : '◇'} ${item.name || (kind === 'camera' ? '主摄影机' : item.id)}` });
+      name.onclick = () => { selectedId = item.id; redrawAll(); };
+      const lane = document.createElement('div'); lane.className = 'previz-track-lane';
+      for (const kf of stage.keyframes || []) {
+        if (!kf.values?.[item.id]) continue;
+        const jump = Object.assign(document.createElement('button'), { className: 'previz-diamond', title: `${kf.frame}f` });
+        jump.style.left = `${kf.frame / maxFrame * 100}%`;
+        jump.onclick = () => { stopPlayback(); currentFrame = kf.frame; showFrame(); paintTimeline(); };
+        lane.append(jump);
+      }
+      const playhead = document.createElement('i'); playhead.className = 'previz-playhead'; playhead.style.left = `${currentFrame / maxFrame * 100}%`; lane.append(playhead);
+      row.append(name, lane); tracks.append(row);
+    }
+    timeline.append(transport, scrub, tracks);
   }
 
   function rebuildControls() {
@@ -1228,11 +1260,15 @@ export function previzPanel(stage, {
   refresh();
   paintInspector();
   paintTimeline();
-  const viewWrap = document.createElement('div');
-  viewWrap.className = 'previz-workspace';
+  const center = document.createElement('div'); center.className = 'previz-center';
+  const viewWrap = document.createElement('div'); viewWrap.className = 'previz-workspace';
   viewWrap.append(director.node, Object.assign(document.createElement('div'), { className: 'previz-camera-pane' }));
   viewWrap.lastChild.append(Object.assign(document.createElement('b'), { textContent: '摄影机取景' }), viewport.node);
-  host.append(viewBar, assetShelf, viewWrap, canvas.node, inspector, timeline, controlShelf, controls, readout);
+  center.append(viewBar, viewWrap, canvas.node, timeline);
+  const right = document.createElement('aside'); right.className = 'previz-right';
+  right.append(Object.assign(document.createElement('div'), { className: 'previz-section-title', textContent: '对象属性' }), inspector, controls, controlShelf, readout);
+  const workbench = document.createElement('div'); workbench.className = 'previz-workbench';
+  workbench.append(assetShelf, center, right); host.append(workbench);
   return { node: host, refresh };
 }
 
