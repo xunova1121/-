@@ -196,7 +196,14 @@ console.log('   台词和说话人：', /阿澜：「设备正常。」/.test(aw
  * 早先只放开描述和时长，理由是"别的在手机上改起来慢"—— 那个判断是错的：
  * 最常当场想改的恰恰是台词和谁说的，一眼看得出不对，改起来也只是敲几个字。
  */
-await page.locator('button:has-text("改这一镜")').first().click();
+/**
+ * ⚠ 走的是**点描述**这条路，不是那颗按钮。
+ *
+ * 卡片按"你什么时候需要它"分了三层，「改这一镜」收进了折叠的详情区。
+ * 而改文案是审片时最高频的动作 —— 所以描述本身就能点。
+ * 这条断言守的正是那件事：**高频路径没有多一次点击**。
+ */
+await page.locator('.shot-desc.tappable').first().click();
 await page.waitForTimeout(400);
 /**
  * 编辑是**整屏一层**（.ed），不再是卡片里就地展开的手风琴。
@@ -773,7 +780,8 @@ if (sheetUp) {
   await page.waitForTimeout(1200);
   await page.locator('.tab', { hasText: '分镜' }).click();
   await page.waitForTimeout(800);
-  await page.locator('button:has-text("改这一镜")').first().click();
+  // 同上：走点描述这条高频路径（「改这一镜」在「⋯」那张动作表里）
+  await page.locator('.shot-desc.tappable').first().click();
   await page.waitForTimeout(500);
   const ed2 = page.locator('.ed');
   const state = {
@@ -917,6 +925,36 @@ await page.waitForTimeout(800);
 
 // 第 ② 步是**故意**敲错配对码，那一次 401 是预期之内的，不算页面报错
 const realErrs = errs.filter((e) => !/401/.test(e));
+/**
+ * ══════════ 镜头卡的分层 ══════════
+ *
+ * 用户："整个提示也好，卡片下面的功能也好都太杂太乱了"。
+ * 每报一个问题我就往卡上加一行字或一颗按钮，加了十几次、一次没删过。
+ *
+ * ⚠ 这几条守的是**克制**，而克制是最容易被下一次改动悄悄吃掉的东西：
+ * 下次再有人往卡上加一颗按钮，这里会红。
+ */
+{
+  await page.locator('.tab', { hasText: '分镜' }).click();
+  await page.waitForTimeout(800);
+  const card = page.locator('.card.shot').first();
+  const btns = card.locator('.shot-info > .acts > button');
+  const n = await btns.count();
+  console.log('\n⑭ 镜头卡分层：');
+  console.log('   卡面上最多两个按钮（一个主动作 + 一个「⋯」）：', n <= 2 ? '✓' : `✕ 有 ${n} 个`);
+  /** 高频动作（改文案）不该多一次点击 */
+  console.log('   点描述就能改（改文案是最高频的动作）：',
+    (await card.locator('.shot-desc.tappable').count()) === 1 ? '✓' : '✕');
+  /** 排查用的东西默认收起来，但一样都没少 */
+  const more = card.locator('details.shot-more');
+  console.log('   排查用的收进折叠区：', (await more.count()) === 1 ? '✓' : '✕');
+  console.log('   默认是折起来的：', (await more.evaluate((el) => el.open)) === false ? '✓' : '✕');
+  await more.locator('summary').click();
+  await page.waitForTimeout(300);
+  console.log('   点开之后参考图那行还在（藏起来 ≠ 删掉）：',
+    /参考图|还没有图|早前出的/.test(await more.innerText()) ? '✓' : `✕ ${(await more.innerText()).slice(0, 40)}`);
+}
+
 console.log('意料之外的 4xx：', unexpected4xx.length ? `✕ ${unexpected4xx.slice(0, 4).join('、')}` : '无 ✓');
 console.log('\n页面报错：', realErrs.length ? realErrs.slice(0, 4) : '无');
 await b.close();

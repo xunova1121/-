@@ -1272,6 +1272,18 @@ select.mini {
 .ani-clock { font-size: 13px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
 .ani-hint { font-size: 12px; color: var(--ink-faint); margin-top: 6px; }
 
+/* ── 镜头卡：出处与排查默认折起来 ──
+   下面那一整段（参考图、用了哪个模型、首帧核对、task_id、手动补入、提示词原文）
+   每一条都是有理由才加的，但加了十几条之后，浏览五十镜时它们就是五十份噪音。
+   ⚠ 折起来 ≠ 删掉：一样都没少，点一下就有。 */
+.shot-more { margin-top: 10px; border-top: 1px solid var(--line-soft); padding-top: 8px; }
+.shot-more > summary {
+  cursor: pointer; font-size: 12px; color: var(--ink-faint); list-style: none; padding: 3px 0;
+}
+.shot-more > summary::-webkit-details-marker { display: none; }
+.shot-more > summary::before { content: '▸ '; }
+.shot-more[open] > summary::before { content: '▾ '; }
+
 /* ── 「为什么不对」 ──
    不满意时人手里只有一张图和一个「重出」按钮，而再来一次多半还是那样。
    这一块回答"该改什么"，而且只说数据里有证据的原因。 */

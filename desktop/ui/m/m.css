@@ -835,3 +835,23 @@ input {
   display: inline-block; margin-top: 5px; font-size: 12px; padding: 1px 7px;
   border-radius: 99px; color: var(--caution); border: 1px solid var(--caution);
 }
+
+/* ── 镜头卡：三层 ──
+   一眼 / 有问题时 / 要动手时。详情默认折叠 —— 藏起来的是"排查时才翻"的那些，
+   浏览五十镜时它们全是噪音。 */
+.mediawrap .overlay .dot { font-size: 10px; line-height: 1; }
+.mediawrap .overlay .dot.blocker { color: var(--alarm); }
+.mediawrap .overlay .dot.warn { color: var(--caution); }
+/* 问题条压成一行：展开原因是「看看为什么」那颗按钮的事 */
+.shot-info .prob { margin: 8px 0 0; }
+.shot-more { margin-top: 10px; border-top: 1px solid var(--line-soft); padding-top: 8px; }
+.shot-more > summary {
+  cursor: pointer; font-size: 13px; color: var(--ink-faint);
+  list-style: none; padding: 4px 0;
+}
+.shot-more > summary::-webkit-details-marker { display: none; }
+.shot-more > summary::before { content: '▸ '; }
+.shot-more[open] > summary::before { content: '▾ '; }
+/* 点描述即编辑 —— 审片时最高频的动作，不该多一次点击 */
+.shot-desc.tappable { cursor: pointer; }
+.shot-desc.tappable:active { opacity: .6; }

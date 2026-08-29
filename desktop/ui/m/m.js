@@ -2389,27 +2389,100 @@ function refLine(s) {
   return '这张图是早前出的，当时没记下带过哪些参考图。重出一次就知道了。';
 }
 
+/**
+ * ══════════ 一张镜头卡 ══════════
+ *
+ * ── 为什么重写过一次 ──
+ *
+ * 每报一个问题我就往卡上加一行字或一颗按钮，加了十几次、一次没删过。
+ * 最后一张卡上同时挂着：警告横幅、三个标签、参考图那行、「为什么不对」、
+ * 「重出这段视频」、「改这一镜」、「⋯」—— 用户的原话是"都太杂太乱了"。
+ *
+ * ── 现在按"你什么时候需要它"分三层 ──
+ *
+ *   一眼      画面 + 镜号时长 + 一句描述 + 一个状态点     永远看得见
+ *   有问题时  一句话说清是什么 + **一颗**主按钮           只在这一镜有问题时
+ *   要动手时  标签、参考图、诊断、改文案、历史版本        点开「详情」才有
+ *
+ * ⚠ **一张卡最多一颗主按钮。**
+ *
+ * 原来「重出这段视频」和「为什么不对」并排摆着，可它们是**先后关系**
+ * 不是并列：先看为什么、再决定重不重出。并排摆等于让人在
+ * "花钱重来"和"先搞明白"之间凭感觉挑一个 —— 而多数人会挑那颗显眼的，
+ * 也就是花钱那颗。
+ *
+ * ⚠ 详情默认**折叠**，但折叠的东西一样都没少。
+ * 藏起来的是"排查时才翻"的那些；浏览五十镜时它们全是噪音，
+ * 而真要查一镜的时候点一下就有。
+ */
 function shotCardOf(s, v, portrait, probs = shotIssues(s)) {
   const worst = probs.find((i) => i.level === 'blocker') || probs[0] || null;
   const tone = probs.some((i) => i.level === 'blocker') ? 'bad' : probs.length ? 'iffy' : '';
   const fixable = probs.find((i) => i.fix) || null;
-
-  const acts = h('div', { class: 'acts' });
-  if (fixable) {
-    acts.append(
-      h('button', {
-        class: 'btn primary wide',
-        disabled: job.running,
-        onclick: () => regen(s, fixable.fix)
-      }, fixable.how),
-      h('button', { class: 'btn fixed', onclick: () => openEditor(s) }, '改这一镜'));
-  } else {
-    acts.append(h('button', { class: 'btn wide', onclick: () => openEditor(s) }, '改这一镜'));
-  }
-  acts.append(h('button', { class: 'iconbtn', onclick: () => openShotActions(s) }, '⋯'));
-
-  // 正在跑的那一张点亮：翻着分镜页等的时候，"轮到哪一镜了"一眼就有
   const live = job.running && job.shotId === s.id;
+
+  /**
+   * ── 第二层：有问题时的那一颗按钮 ──
+   *
+   * 出过图的镜头，第一动作永远是**先看为什么**（免费），不是直接重出（花钱）。
+   * 还没出图的没什么可诊断的，那时候「重出」才是第一动作。
+   */
+  const acts = h('div', { class: 'acts' });
+  if (worst && s.imagePath) {
+    acts.append(h('button', {
+      class: 'btn primary wide',
+      onclick: () => openWhy(s, fixable)
+    }, '看看为什么'));
+  } else if (fixable) {
+    acts.append(h('button', {
+      class: 'btn primary wide',
+      disabled: job.running,
+      onclick: () => regen(s, fixable.fix)
+    }, fixable.how));
+  } else {
+    // 没问题的镜头也得有个入口，否则这张卡除了看什么都做不了
+    acts.append(h('button', { class: 'btn wide', onclick: () => openShotActions(s) }, '这一镜还能做什么'));
+  }
+  /**
+   * ⚠ 「⋯」留在**表面**，不收进详情。
+   *
+   * 详情本身就是一个"更多"，再往里套一个"更多"是两层嵌套 ——
+   * 而那张动作表（重出图/重出视频/改这一镜/预演台…）是真正要动手时去的地方，
+   * 藏两层等于没有。
+   */
+  if (worst || fixable) {
+    acts.append(h('button', { class: 'iconbtn', onclick: () => openShotActions(s) }, '⋯'));
+  }
+
+  /** ── 第三层：详情。默认折叠，点开才有 ── */
+  const more = h('details', { class: 'shot-more' },
+    h('summary', {}, '详情'),
+    h('div', { class: 'tags', style: 'margin-top:8px' },
+      s.camera ? h('span', { class: 'tag' }, s.camera) : null,
+      s.scene ? h('span', { class: 'tag' }, s.scene) : null,
+      s.consistency?.score != null && s.consistency.pass
+        ? h('span', { class: 'tag ok' }, `一致性 ${s.consistency.score}`)
+        : null,
+      s.sfxPath && s.sfxOf === s.sound ? h('span', { class: 'tag' }, '有音效')
+        : !s.sfxPath && s.sound ? h('span', { class: 'tag' }, '待出音效') : null),
+    /**
+     * 这一镜出图时带了哪几张参考图。
+     *
+     * ⚠ **一张都没带的时候更要说**：你传了照片而这一镜根本没用上它 ——
+     * 那正是最需要知道的情况，沉默在这里等于误导。
+     * （收进详情是因为它是排查用的；浏览时不需要，排查时一点就有。）
+     */
+    // cap:shot-refs
+    s.imagePath
+      ? h('div', { class: 'muted', style: 'margin-top:8px;line-height:1.6' }, refLine(s))
+      : null,
+    // 还剩几条问题，在这儿一次说完 —— 上面那条只摆最要紧的
+    probs.length > 1
+      ? h('div', { class: 'muted', style: 'margin-top:8px;line-height:1.6' },
+          `还有 ${probs.length - 1} 条：${probs.slice(1).map((p) => p.what).join('；')}`)
+      : null,
+    );
+
   return h('div', { class: `card shot ${tone} ${live ? 'live-shot' : ''}` },
     // 镜号和时长压在画面上：省掉一整行，而且它们出现在眼睛已经在的地方
     h('div', { class: 'mediawrap' },
@@ -2420,99 +2493,82 @@ function shotCardOf(s, v, portrait, probs = shotIssues(s)) {
           : h('div', { class: 'shot-media', style: 'display:flex;align-items:center;justify-content:center;color:var(--ink-faint);font-size:13px' }, '还没出图'),
       h('div', { class: 'overlay tl' },
         h('span', {}, `SH ${String(s.index).padStart(3, '0')}`),
-        h('span', { class: 'dim' }, `${Number(s.duration).toFixed(1)}s`)),
+        h('span', { class: 'dim' }, `${Number(s.duration).toFixed(1)}s`),
+        /**
+         * ⚠ 状态用**一个点**，不用一整条横幅。
+         *
+         * 原来每张卡上都挂一条"有图没视频 —— 合成时这一镜会被直接跳过"。
+         * 一句正确的话，但 50 镜就是 50 条一模一样的话 —— 而顶上的筛选条
+         * 早就说了「缺视频 49」。重复的警告不会让人更警觉，只会让人不再看警告。
+         */
+        worst ? h('span', { class: `dot ${worst.level}` }, '●') : null),
       live ? h('div', { class: 'overlay bl running' }, h('span', { class: 'spin' }, '◐'), '正在跑') : null,
-      // 「连续动作」标在画面上而不是标签堆里：它说的是这一镜和上一镜的关系，
-      // 而人是在看画面接不接得上的时候想起这件事的
       s.link === 'continuous' ? h('div', { class: 'overlay bl link' }, '连续动作 ↑') : null),
 
-    /**
-     * 问题条。贴在按钮正上方，写清楚"哪儿不对"和"该按哪个键"。
-     * 这句话原来是标签堆里一枚和别的同色的小标签 —— 而它的全部价值就是被看见。
-     */
-    worst
-      ? h('div', { class: `prob ${worst.level}` },
-          h('span', {}, worst.level === 'blocker' ? '✕' : '!'),
-          h('span', { class: 'grow' }, worst.what),
-          probs.length > 1 ? h('span', { class: 'more' }, `＋${probs.length - 1}`) : null)
-      : null,
-
     h('div', { class: 'shot-info' },
-      h('div', { class: 'shot-desc', style: 'margin-top:0' }, s.description || '（无描述）'),
+      /**
+       * ⚠ **点描述就能改。**
+       *
+       * 「改这一镜」收进详情之后，改文案就多了一次点击 —— 而那是审片时
+       * 最高频的动作（看到一句不对，当场改掉）。电脑版本来就是点描述即编辑，
+       * 手机上没有，纯属漏了。
+       *
+       * 这样详情里那颗「改这一镜」变成"找得到的那个入口"，
+       * 而真正天天用的路径一次点击都没多。
+       */
+      h('div', {
+        class: 'shot-desc tappable', style: 'margin-top:0',
+        title: '点一下改这一镜',
+        onclick: () => openEditor(s)
+      }, s.description || '（无描述）'),
+      /** 有问题时**一句话**，不展开原因 —— 展开是「看看为什么」那颗按钮的事 */
+      worst
+        ? h('div', { class: `prob ${worst.level}` },
+            h('span', {}, worst.level === 'blocker' ? '✕' : '!'),
+            h('span', { class: 'grow' }, worst.what))
+        : null,
       s.dialogue
-        ? h('div', { class: 'row', style: 'margin-bottom:8px' },
+        ? h('div', { class: 'row', style: 'margin:8px 0 0' },
             h('span', { class: 'tag', style: 'flex:0 0 auto' }, LINE_KIND_SHORT[s.lineKind || (s.speaker ? 'speech' : 'voiceover')] || '白'),
             h('span', { class: 'muted grow', style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap' },
               `${s.speaker || '旁白'}：「${s.dialogue}」`))
         : null,
-      h('div', { class: 'tags' },
-        s.camera ? h('span', { class: 'tag' }, s.camera) : null,
-        s.scene ? h('span', { class: 'tag' }, s.scene) : null,
-        // 一致性过了才在卡上显示 —— 没过的那条已经在上面的问题条里说过了
-        s.consistency?.score != null && s.consistency.pass
-          ? h('span', { class: 'tag ok' }, `一致性 ${s.consistency.score}`)
-          : null,
-        s.sfxPath && s.sfxOf === s.sound ? h('span', { class: 'tag' }, '有音效')
-          : !s.sfxPath && s.sound ? h('span', { class: 'tag' }, '待出音效') : null),
-      /**
-       * ── 这一镜出图时带了哪几张参考图 ──
-       *
-       * 手机上原来**一个字都没有**（电脑版有一行「上次出图参考：…」）。
-       * 于是用户传了自己的照片、出来的脸不是他的，而他在手机上
-       * 完全无从判断是"图没发出去"还是"发了但模型没保住脸"——
-       * 这两件事的下一步完全不同。用户的原话就是"我用的手机端"。
-       *
-       * ⚠ **一张都没带的时候更要说**。电脑版那行只在有参考图时显示，
-       * 没带时反而一声不响 —— 而那恰恰是最需要知道的情况：
-       * 你传了照片，而这一镜根本没用上它。沉默在这里等于误导。
-       */
-      // cap:shot-refs
-      s.imagePath
-        ? h('div', { class: 'muted', style: 'margin-top:6px;line-height:1.6' }, refLine(s))
-        : null,
-      /**
-       * ══════════ 「为什么不对」 ══════════
-       *
-       * ⚠ 手机上**更该有**这一下。
-       *
-       * 出门在外看到一张不对的图，手里只有一个「重出」按钮 —— 而再来一次
-       * 多半还是那样，因为他不知道该改什么。而且他离能改的地方（电脑）更远，
-       * 白白重出一次的代价在手机上更高：钱花了，人还在路上。
-       *
-       * 只说数据里有证据的原因（服务端算的，两端同一份）。
-       */
-      s.imagePath ? diagBox(s) : null,
-      acts));
+      acts,
+      more));
 }
 
 /**
- * 「为什么不对」那一块。点开才拉 —— 每张卡都预拉一次的话，
- * 一屏十几镜就是十几个请求，而绝大多数你根本不会点开。
+ * 「看看为什么」：拉一次诊断，摆出原因 + 下一步。
+ *
+ * ⚠ 重出那颗按钮**只在这儿出现**，而且排在原因下面。
+ * 顺序就是判断顺序：先知道为什么，再决定要不要花这笔钱。
  */
-function diagBox(s) {
+async function openWhy(s, fixable) {
   const host = h('div', { class: 'diag-host' });
-  const btn = h('button', {
-    class: 'btn sm ghost',
-    style: 'margin-top:6px',
-    onclick: async () => {
-      btn.disabled = true;
-      btn.textContent = '查…';
-      try {
-        // cap:diagnose-shot
-        const r = await api(`/projects/${project.id}/shots/${s.id}/diagnose`);
-        clear(host);
-        add(host, ...(r.items || []).map((it) => h('div', { class: 'diag-item' },
-          h('div', { class: 'diag-what' }, it.what),
-          h('div', { class: 'diag-why' }, it.why),
-          h('div', { class: 'diag-how' }, `→ ${it.how}`),
-          it.costs ? h('span', { class: 'diag-cost' }, '这一下要重新出图（花钱）') : null)));
-      } catch (err) {
-        clear(host);
-        add(host, h('div', { class: 'diag-item' }, err.message));
-      } finally { btn.disabled = false; btn.textContent = '为什么不对'; }
+  const box = h('div', { class: 'card' },
+    h('div', { class: 'card-head' }, `第 ${s.index} 镜 · 为什么不对`),
+    host);
+  add(host, h('div', { class: 'muted' }, '查…'));
+  const { close } = openSheet(box);
+  try {
+    // cap:diagnose-shot
+    const r = await api(`/projects/${project.id}/shots/${s.id}/diagnose`);
+    clear(host);
+    add(host, ...(r.items || []).map((it) => h('div', { class: 'diag-item' },
+      h('div', { class: 'diag-what' }, it.what),
+      h('div', { class: 'diag-why' }, it.why),
+      h('div', { class: 'diag-how' }, `→ ${it.how}`),
+      it.costs ? h('span', { class: 'diag-cost' }, '这一下要重新出图（花钱）') : null)));
+    if (fixable) {
+      add(host, h('button', {
+        class: 'btn primary wide', style: 'margin-top:12px', disabled: job.running,
+        onclick: () => { close(); regen(s, fixable.fix); }
+      }, fixable.how));
     }
-  }, '为什么不对');
-  return h('div', {}, btn, host);
+  } catch (err) {
+    clear(host);
+    add(host, h('div', { class: 'diag-item' }, err.message));
+  }
 }
 
 /** 台词类型在卡片上只占一个字：整个词摆上去，一行就没了 */

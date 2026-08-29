@@ -1787,6 +1787,66 @@ console.log('\n在跑的时候不该能再点一次');
     && (await page.locator('.stage-detail button:has-text("开始"), .stage-detail button:has-text("继续")').count()) > 0);
 }
 
+/**
+ * ══════════ 镜头卡：出处与排查折起来了 ══════════
+ *
+ * 用户："卡片下面的功能都太杂太乱了"。
+ * ⚠ 这几条守的是**克制** —— 下次再有人往卡面上摊一块信息，这里会红。
+ */
+console.log('\n镜头卡的分层');
+{
+  /**
+   * ⚠ 要在**出过图**的那一步验。
+   *
+   * 分镜那一步还没有出处可言（没参考图、没模型、没首帧核对），
+   * 折叠区本来就该整个不存在 —— 拿那一步来验，验的是空气。
+   * 第一版就是这么写的，跑出来"折叠区里有：空字符串"。
+   */
+  await page.goto(`${url}#/studio/${proj.id}`);
+  await page.waitForTimeout(1000);
+  await page.locator('.nav-step', { hasText: '镜头出图' }).first().click();
+  await page.waitForTimeout(900);
+  const card = page.locator('.shot-card').first();
+  const more = card.locator('details.shot-more').first();
+  check('排查用的那一段收进了折叠区', (await more.count()) === 1);
+  check('默认是折起来的', (await more.evaluate((el) => el.open)) === false);
+  /**
+   * ⚠ 折起来 ≠ 删掉 —— 点开必须一样都不少。
+   * 展开本身是浏览器原生的 <details>，不是我们的代码，所以直接置 open：
+   * 这一节要验的是**内容分对了组**，不是原生行为能不能触发。
+   */
+  await more.evaluate((el) => { el.open = true; });
+  await page.waitForTimeout(200);
+  // ⚠ 用 textContent 不用 innerText：后者对没渲染出来的区域返回空串，
+  // 于是内容在不在会被读成没有内容—— 而那是两回事
+  const inner = await more.evaluate((el) => el.textContent);
+  check('点开之后参考图那行还在',
+    /参考图|张图可以带|还没有图|早前出的|没有图可带/.test(inner), inner.slice(0, 100));
+  check('提示词原文也还在', /提示词|发给模型|手动补入/.test(inner), inner.slice(0, 200));
+  /** 徽章留在外面：那是"这一镜是什么"，扫一眼就要看到，不是排查用的 */
+  const meta = card.locator('.shot-meta').first();
+  check('景别/场景那些徽章仍然摆在外面（扫一眼就要看到）',
+    (await meta.count()) === 1 && (await meta.evaluate((el) => !el.closest('details'))));
+
+  /**
+   * ⚠ **折叠区在的时候，里面必须真的有东西。**
+   *
+   * 第一版把这条写成了"分镜那一步不该有折叠区"—— 那是错的：
+   * 那时候里面有「发给模型的提示词」，是有意义的内容。
+   * 真正的不变量不是"某一步没有"，而是**永远不出现一个点开是空的折叠区**。
+   * 一个点开什么都没有的「出处与排查」，比多几行字更让人觉得这界面不靠谱。
+   */
+  await page.locator('.nav-step', { hasText: '分镜' }).first().click();
+  await page.waitForTimeout(800);
+  const emptyFolds = await page.evaluate(() =>
+    [...document.querySelectorAll('details.shot-more')]
+      .filter((d) => {
+        const sm = d.querySelector(':scope > summary');
+        return d.textContent.replace(sm ? sm.textContent : '', '').trim().length === 0;
+      }).length);
+  check('没有一个折叠区是点开就空的', emptyFolds === 0, `空的有 ${emptyFolds} 个`);
+}
+
 check('全程没有页面报错', errs.length === 0, errs.slice(0, 3).join(' | '));
 
 await b.close();
