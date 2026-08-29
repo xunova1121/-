@@ -802,15 +802,16 @@ export function previzPanel(stage, {
     onChange: () => { canvas.redraw(); refresh(); onChange(); }
   });
   const viewport = cameraViewport(stage, { width: Math.max(460, size) });
-  canvas.node.hidden = true;
+  // SVGElement 的 `.hidden` 在部分 Chromium 里只是 expando，不会生成 hidden 属性。
+  canvas.node.setAttribute('hidden', '');
   const viewBar = document.createElement('div');
   viewBar.className = 'previz-viewbar';
   const viewHint = Object.assign(document.createElement('span'), {
     className: 'field-hint', textContent: '拖人物、道具和摄影机；所有位置都按米保存，并与俯视图实时同步'
   });
   const switchView = (mode) => {
-    director.node.hidden = mode !== '3d';
-    canvas.node.hidden = mode === '3d';
+    director.node.toggleAttribute('hidden', mode !== '3d');
+    canvas.node.toggleAttribute('hidden', mode === '3d');
     for (const b of viewBar.querySelectorAll('button')) b.classList.toggle('on', b.dataset.mode === mode);
   };
   for (const [mode, label] of [['3d', '3D 导演画布'], ['top', '俯视排位']]) {
