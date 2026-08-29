@@ -9345,6 +9345,369 @@ section('OpenAI 家族带参考图：要走 /images/edits，不是塞个地址')
   settings.patch({ baseUrls: { openai: '' } });
 }
 
+section('Agnes AI 出图：三处和 OpenAI 长得像但不一样的地方');
+{
+  const adaptersMod = await import('../core/providers/adapters.js');
+  const cat = await import('../core/providers/catalog.js');
+
+  const seen = { bodies: [], paths: [], auth: [] };
+  const srv = http.createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      seen.paths.push(req.url);
+      seen.auth.push(req.headers.authorization || '');
+      seen.bodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        created: 1780000000,
+        data: [{ url: 'https://storage.googleapis.com/agnes-aigc/xxx.png', b64_json: null, revised_prompt: null }]
+      }));
+    });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  settings.patch({ baseUrls: { agnes: `http://127.0.0.1:${srv.address().port}/v1` } });
+  vault.setSecret('AGNES_API_KEY', 'sk-agnes-test');
+
+  const M = 'agnes-image-2.1-flash';
+  const facePng = `data:image/png;base64,${PIXEL_PNG.toString('base64')}`;
+  const last = () => seen.bodies.at(-1);
+
+  // ── ① 尺寸：档位 + 宽高比，不是像素 ──
+  {
+    const got = await adaptersMod.generateImage({
+      providerId: 'agnes', model: M, prompt: '执法艇破雾而行', aspectRatio: '16:9', label: '出图'
+    });
+    check('打到 /v1/images/generations', seen.paths.at(-1) === '/v1/images/generations', String(seen.paths.at(-1)));
+    check('Bearer 鉴权带上了', seen.auth.at(-1) === 'Bearer sk-agnes-test', seen.auth.at(-1));
+    /**
+     * ⚠ 这一条是这一节的核心。发 '1280*720' 过去不会报错 ——
+     * 文档明说不受支持的精确尺寸会被"自动标准化"，于是请求记录里写着
+     * 1280×720、任务成功、出来的图是别的尺寸。这种事看日志查不出来。
+     */
+    check('16:9 发的是档位 2K 而不是像素', last().size === '2K', JSON.stringify(last().size));
+    check('宽高比单独走 ratio 字段', last().ratio === '16:9', JSON.stringify(last().ratio));
+    check('收下了 data[0].url', got.url === 'https://storage.googleapis.com/agnes-aigc/xxx.png', String(got.url));
+  }
+
+  // ── ② response_format 绝不能在顶层 ──
+  {
+    check('顶层没有 response_format（文档专门用「重要说明」提的）',
+      !('response_format' in last()), JSON.stringify(Object.keys(last())));
+    check('它在 extra_body 里', last().extra_body?.response_format === 'url', JSON.stringify(last().extra_body));
+  }
+
+  // ── ③ 竖屏 ──
+  {
+    await adaptersMod.generateImage({
+      providerId: 'agnes', model: M, prompt: '竖屏短剧', aspectRatio: '9:16', label: '出图'
+    });
+    check('竖屏画幅出竖图（横图裁竖屏会把人裁掉半张脸）',
+      last().size === '2K' && last().ratio === '9:16', JSON.stringify({ size: last().size, ratio: last().ratio }));
+  }
+
+  // ── ④ 参考图：两个位置都要有 ──
+  {
+    const notes = [];
+    await adaptersMod.generateImage({
+      providerId: 'agnes', model: M, prompt: '保持这个人的长相', aspectRatio: '16:9',
+      refImages: [facePng, facePng], label: '出图',
+      onEvent: (e) => { if (e?.type === 'note') notes.push(String(e.message || '')); }
+    });
+    /**
+     * 文档「请求参数」表说顶层 image，正文两处说 extra_body.image。
+     * 挑错一个 = 200、有图、请求记录里列着参考图，而图根本没进模型。
+     * 两个都发，等确认了哪个对再删另一个。
+     */
+    check('参考图放进了顶层 image（参数表那个位置）',
+      Array.isArray(last().image) && last().image.length === 2, JSON.stringify((last().image || []).length));
+    check('参考图也放进了 extra_body.image（正文那个位置）',
+      Array.isArray(last().extra_body?.image) && last().extra_body.image.length === 2,
+      JSON.stringify((last().extra_body?.image || []).length));
+    /**
+     * ⚠ 带参考图时不许换模型。
+     *
+     * 「设置 → 图生图模型」默认是火山的 doubao-seededit-3-0-i2i。
+     * 没有 i2iSameModel 这个声明的话，这里会把那个火山 id 发给 Agnes，
+     * 或者弹一句"请改成 Agnes 自己的编辑模型"—— 而 Agnes 没有编辑模型，
+     * 同一个模型两件事都干。
+     */
+    check('模型没被换成别家的编辑模型', last().model === M, String(last().model));
+    /**
+     * ⚠ 上面那条**恒真**，别拿它当 i2iSameModel 的证据。
+     *
+     * 推红验过：把目录里的 i2iSameModel 去掉，那条照样绿 —— 因为
+     * doubao-seededit 不属于 Agnes，i2iBelongs 是 false，本来就换不成。
+     *
+     * 去掉之后真正会发生的是**弹一句误导的话**："Agnes 没有 doubao-seededit
+     * 这个模型，要用图生图的话改成 Agnes 自己的编辑模型" —— 而 Agnes
+     * 压根没有单独的编辑模型，照着改是死路。所以断言要落在这句话上。
+     */
+    check('也没弹"去配一个 Agnes 的编辑模型"（它没有，同一个模型两件事都干）',
+      !notes.some((n) => /图生图模型|编辑模型/.test(n)), JSON.stringify(notes));
+  }
+
+  // ── ⑤ 纯文生图不许带 image 字段 ──
+  {
+    await adaptersMod.generateImage({
+      providerId: 'agnes', model: M, prompt: '空镜', aspectRatio: '16:9', label: '出图'
+    });
+    check('没有参考图时不发空的 image 字段',
+      !('image' in last()) && !('image' in (last().extra_body || {})),
+      JSON.stringify({ top: last().image, inner: last().extra_body?.image }));
+  }
+
+  // ── ⑥ 负向词不能整段丢掉 ──
+  {
+    await adaptersMod.generateImage({
+      providerId: 'agnes', model: M, prompt: '广场上的书信摊', negative: '多余的手指', aspectRatio: '16:9', label: '出图'
+    });
+    check('文档没有 negative_prompt，负向词并进了正向描述',
+      last().prompt.includes('广场上的书信摊') && last().prompt.includes('多余的手指'), last().prompt);
+    check('而且没发一个它不认的 negative_prompt 字段',
+      !('negative_prompt' in last()), JSON.stringify(Object.keys(last())));
+  }
+
+  // ── ⑦ 尺寸反查表本身 ──
+  {
+    const { agnesSizeSpec } = adaptersMod;
+    const a = agnesSizeSpec('2624*1472');
+    check('像素能反查回档位（2624×1472 → 2K / 16:9）',
+      a.size === '2K' && a.ratio === '16:9' && a.guessed === false, JSON.stringify(a));
+    const b = agnesSizeSpec('1K');
+    check('直接给档位也认（联调台里手填的写法）',
+      b.size === '1K' && b.guessed === false, JSON.stringify(b));
+    const c = agnesSizeSpec('1920*1080');
+    check('表里没有的尺寸标记成 guessed（好让界面说一声）', c.guessed === true, JSON.stringify(c));
+    check('而且换算结果还是 16:9（别把比例也换掉）', c.ratio === '16:9', JSON.stringify(c));
+    /**
+     * ⚠ 目录里声明的 imageSizes 必须能被这张表反查到，否则每出一张图
+     * 都会走 guessed 分支、每张都报一次假警。两处数字必须是同一份。
+     */
+    const declared = cat.getProvider('agnes').imageSizes.enum;
+    const allHit = declared.every((sz) => agnesSizeSpec(sz).guessed === false);
+    check('目录里声明的每一个尺寸都能反查到（两处数字是同一份）', allHit,
+      JSON.stringify(declared.filter((sz) => agnesSizeSpec(sz).guessed)));
+  }
+
+  // ── ⑧ 目录条目本身 ──
+  {
+    const p = cat.getProvider('agnes');
+    check('Agnes 不走通用 OpenAI 分支（顶层 response_format 会害了它）',
+      p.family === 'agnes', String(p.family));
+    check('声明了 t2i 和 i2i', ['t2i', 'i2i'].every((c) => p.capabilities.includes(c)), JSON.stringify(p.capabilities));
+    check('声明了同模型图生图', p.i2iSameModel === true, String(p.i2iSameModel));
+    check('模型 id 和文档一致', p.models.some((m) => m.id === M), JSON.stringify(p.models.map((m) => m.id)));
+    /**
+     * 目录里的模板是给联调台用的起手式。图生图那个模板要是没把两个位置
+     * 都写上，用户手动验"参考图到底放哪"的时候就少了一半。
+     */
+    const i2iTpl = p.templates.find((t) => t.id === 'i2i');
+    check('图生图模板两个位置都写了（用户要靠它验哪个对）',
+      Array.isArray(i2iTpl?.body?.image) && Array.isArray(i2iTpl?.body?.extra_body?.image),
+      JSON.stringify(i2iTpl?.body));
+    check('模板里也没有顶层 response_format',
+      p.templates.every((t) => !('response_format' in (t.body || {}))),
+      JSON.stringify(p.templates.map((t) => t.id)));
+  }
+
+  srv.close();
+  settings.patch({ baseUrls: { agnes: '' } });
+}
+
+section('Agnes AI 出视频：异步任务、帧数规矩、以及"以回来的为准"');
+{
+  const adaptersMod = await import('../core/providers/adapters.js');
+  const cat = await import('../core/providers/catalog.js');
+  const idx = await import('../core/providers/index.js');
+
+  const seen = { bodies: [], paths: [] };
+  let mapping = null;
+  let seconds = '5.0';
+  const srv = http.createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      seen.paths.push(req.url);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      if (req.method === 'POST') {
+        seen.bodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'));
+        res.end(JSON.stringify({
+          id: 'task_X', task_id: 'task_X', video_id: 'video_Y',
+          object: 'video', status: 'queued', progress: 0, seconds: '5.0', size: '1280x720'
+        }));
+        return;
+      }
+      res.end(JSON.stringify({
+        id: 'task_X', video_id: 'video_Y', task_id: 'task_X', status: 'completed', progress: 100,
+        seconds,
+        size: '832x448',
+        metadata: {
+          ...(mapping ? { size_mapping: mapping } : {}),
+          url: 'https://platform-outputs.agnes-ai.space/videos/agnes-video-v2.0/task_X.mp4'
+        }
+      }));
+    });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const root = `http://127.0.0.1:${srv.address().port}`;
+  settings.patch({ baseUrls: { agnes: `${root}/v1` }, pollIntervalMs: 10 });
+  vault.setSecret('AGNES_API_KEY', 'sk-agnes-test');
+
+  const V = 'agnes-video-v2.0';
+  const last = () => seen.bodies.at(-1);
+  const frame = (n) => `https://cdn.example.com/shot-${n}.png`;
+
+  // ── ① {{apiRoot}}：查询地址不在 v1 下面 ──
+  {
+    const p = cat.getProvider('agnes');
+    const url = idx.interpolate(p.taskPoll.url, p);
+    check('查询地址落在 v1 外面（{{apiRoot}} 去掉了版本段）',
+      url === `${root}/agnesapi?video_id={taskId}`, url);
+    /**
+     * ⚠ 这一条是这一节里最容易被写死成绝对地址的地方。写死的话，
+     * 用户把根地址改到中转站之后：提交走新地址、查询走老地址 ——
+     * 任务提交成功然后永远查不到，表现是"卡在轮询里"。
+     */
+    check('改了根地址，查询地址跟着动（不是写死的绝对地址）',
+      !/agnes-ai\.cn/.test(url), url);
+  }
+
+  // ── ② 图生视频：帧数、尺寸、单张顶层 image ──
+  {
+    const notes = [];
+    const got = await adaptersMod.generateVideo({
+      providerId: 'agnes', model: V, prompt: '镜头缓慢推进',
+      firstFrameUrl: frame(1), duration: 5, aspectRatio: '16:9', resolution: '720P',
+      label: '出视频', onEvent: (e) => { if (e?.type === 'note') notes.push(String(e.message || '')); }
+    });
+    check('提交打到 /v1/videos', seen.paths[0] === '/v1/videos', JSON.stringify(seen.paths[0]));
+    check('轮询打到 /agnesapi?video_id=video_Y（用 video_id 不是 task_id）',
+      seen.paths.includes('/agnesapi?video_id=video_Y'), JSON.stringify(seen.paths));
+    check('5 秒 @24fps 发的是 121 帧（和文档的推荐值一致）', last().num_frames === 121, String(last().num_frames));
+    check('帧率一起发了', last().frame_rate === 24, String(last().frame_rate));
+    check('16:9 / 720P → 1280×720', last().width === 1280 && last().height === 720,
+      `${last().width}x${last().height}`);
+    check('首帧走顶层 image（单个 URL，不是数组）', last().image === frame(1), JSON.stringify(last().image));
+    check('没有 extra_body（那是关键帧模式的开关）', !('extra_body' in last()), JSON.stringify(Object.keys(last())));
+    check('拿到了 metadata.url', /task_X\.mp4$/.test(String(got.url)), String(got.url));
+  }
+
+  // ── ③ 首尾帧 = 关键帧模式，两种模式不能同时点 ──
+  {
+    await adaptersMod.generateVideo({
+      providerId: 'agnes', model: V, prompt: '过渡',
+      firstFrameUrl: frame(1), lastFrameUrl: frame(2),
+      duration: 5, aspectRatio: '16:9', resolution: '720P', label: '出视频'
+    });
+    check('末帧走 extra_body.image 数组（首帧在前、末帧在后）',
+      JSON.stringify(last().extra_body?.image) === JSON.stringify([frame(1), frame(2)]),
+      JSON.stringify(last().extra_body?.image));
+    check('并且打开了 keyframes 模式', last().extra_body?.mode === 'keyframes', String(last().extra_body?.mode));
+    /**
+     * ⚠ 这一条是这一节的核心。文档的接入清单把两者并排写着：
+     * "图生视频使用 image，关键帧动画使用 extra_body.image" —— 是**两种模式**。
+     *
+     * 两个都发等于同时点了两种模式，它挑哪个我们不知道；挑错的表现是
+     * 末帧被丢掉、衔接照样断，而界面会说这两镜是无缝的。
+     * 出图那条恰恰要两个都发（那边是同一件事的两种写法），别互相抄。
+     */
+    check('关键帧模式下**不再**发顶层 image（两种模式不能同时点）',
+      !('image' in last()), JSON.stringify(Object.keys(last())));
+  }
+
+  // ── ④ 8n+1 规矩 ──
+  {
+    const { agnesFrames } = adaptersMod;
+    const ok = (n) => n <= 441 && (n - 1) % 8 === 0;
+    const cases = [1, 2, 3, 3.4, 5, 7.7, 10, 18, 25];
+    check('任意秒数算出来的帧数都满足 8n+1 且 ≤441',
+      cases.every((s) => ok(agnesFrames(s))),
+      JSON.stringify(cases.map((s) => [s, agnesFrames(s)])));
+    check('超长的截在 441（文档写的硬上限）', agnesFrames(60) === 441, String(agnesFrames(60)));
+    /** 向上取：宁可多出来一点合成时裁掉，也不要把台词切断 */
+    check('向上取而不是就近取（3.4 秒 → 至少 3.4 秒的帧数）',
+      agnesFrames(3.4) / 24 >= 3.4, String(agnesFrames(3.4) / 24));
+    check('5 秒正好是 121 帧', agnesFrames(5) === 121, String(agnesFrames(5)));
+  }
+
+  // ── ⑤ 尺寸被它改过时要说出来 ──
+  {
+    mapping = {
+      adjusted: true, ratio: '16:9', resolution: '480p',
+      width: 832, height: 448, requested_width: 1024, requested_height: 576,
+      message: 'Input size 1024x576 was mapped to nearest preset 480p/16:9 (832x448)'
+    };
+    const notes = [];
+    await adaptersMod.generateVideo({
+      providerId: 'agnes', model: V, prompt: 'x', firstFrameUrl: frame(1),
+      duration: 5, aspectRatio: '16:9', resolution: '480P', label: '出视频',
+      onEvent: (e) => { if (e?.type === 'note') notes.push(String(e.message || '')); }
+    });
+    /**
+     * 它的档位表没有公开，我们猜不出来 —— 但它把改动如实写在
+     * metadata.size_mapping 里了。不读回来的话，请求记录写着 848×480、
+     * 成片是 832×448，而没有任何一处说过这件事。
+     */
+    check('它把尺寸换掉时，原话转达出来',
+      notes.some((n) => n.includes('832x448')), JSON.stringify(notes));
+    mapping = null;
+  }
+
+  // ── ⑥ 时长以回来的为准 ──
+  {
+    seconds = '5.0417';
+    const got = await adaptersMod.generateVideo({
+      providerId: 'agnes', model: V, prompt: 'x', firstFrameUrl: frame(1),
+      duration: 5, aspectRatio: '16:9', resolution: '720P', label: '出视频'
+    });
+    check('记的是响应里的秒数，不是下单时算的那个',
+      Math.abs(got.actualDuration - 5.0417) < 1e-6, String(got.actualDuration));
+    seconds = '5.0';
+  }
+
+  // ── ⑦ data URI 要在提交之前就拦住 ──
+  {
+    let err = null;
+    await adaptersMod.generateVideo({
+      providerId: 'agnes', model: V, prompt: 'x',
+      firstFrameUrl: `data:image/png;base64,${PIXEL_PNG.toString('base64')}`,
+      duration: 5, aspectRatio: '16:9', resolution: '720P', label: '出视频'
+    }).catch((e) => (err = e));
+    /**
+     * 和百炼一模一样的坑：文档写着"需要可公开访问的图片 URL"，
+     * 而我们默认发本地图转的 data URI。不先拦，任务会提交成功、
+     * 然后在轮询里失败 —— 白等一轮，报错里也看不出是这个原因。
+     */
+    check('本地图转的 data URI 在提交前就被拦下（不是白等一轮轮询）',
+      err && /公网 URL/.test(String(err.message)), String(err?.message).slice(0, 80));
+    check('报错里点名是 Agnes，不是照抄百炼那句',
+      err && /Agnes/.test(String(err.message)), String(err?.message).slice(0, 60));
+  }
+
+  // ── ⑧ 目录条目 ──
+  {
+    const p = cat.getProvider('agnes');
+    check('声明了出视频能力', ['t2v', 'i2v'].every((c) => p.capabilities.includes(c)), JSON.stringify(p.capabilities));
+    check('声明了支持末帧（衔接那一套要靠它）', p.videoDefaults?.endFrame === true, String(p.videoDefaults?.endFrame));
+    check('这一步最多两张图（首帧+末帧）', p.videoDefaults?.maxImages === 2, String(p.videoDefaults?.maxImages));
+    const vm = p.models.find((m) => m.id === V);
+    check('视频模型在目录里', Boolean(vm), JSON.stringify(p.models.map((m) => m.id)));
+    /**
+     * 时长上限必须和 441 帧那条硬规矩对得上。写大了的话，用户排一个
+     * 20 秒的镜头，界面显示合法、发出去被截成 18.4 秒，而没人说过这件事。
+     */
+    check('时长上限 18 秒和 441 帧对得上',
+      Math.max(...vm.durations) === Math.floor(441 / 24), JSON.stringify(vm.durations.slice(-3)));
+    check('每一档时长都出得来（算出的帧数不超 441）',
+      vm.durations.every((d) => adaptersMod.agnesFrames(d) <= 441),
+      JSON.stringify(vm.durations.filter((d) => adaptersMod.agnesFrames(d) > 441)));
+  }
+
+  srv.close();
+  settings.patch({ baseUrls: { agnes: '' } });
+}
+
 section('中转站只转对话：不该四条一起红');
 {
   /**

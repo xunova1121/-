@@ -24,13 +24,28 @@ export function catalogForUI() {
   }));
 }
 
-/** 把 {{baseUrl}} 之类的结构占位符展开（密钥占位符留给发送时展开） */
+/**
+ * 把 {{baseUrl}} 之类的结构占位符展开（密钥占位符留给发送时展开）。
+ *
+ * ── {{apiRoot}}：接口根地址去掉版本段 ──
+ *
+ * 有的厂商把个别接口挂在版本号**外面**。Agnes 就是：出视频是
+ * `/v1/videos`，查结果却是 `/agnesapi?video_id=…`，不带 v1。
+ *
+ * 写成绝对地址最省事，但那样用户在「接口地址」里改了根地址之后，
+ * 提交走新地址、查询还走老地址 —— 任务提交成功，然后一直查不到，
+ * 表现是"卡在轮询里"，而没人会想到是两个地址不一致。
+ */
 export function interpolate(text, provider, vars = {}) {
   if (typeof text !== 'string') return text;
-  return text.replace(/\{\{\s*baseUrl\s*\}\}/g, baseUrlOf(provider)).replace(
-    /\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g,
-    (whole, name) => (name in vars ? String(vars[name]) : whole)
-  );
+  const base = baseUrlOf(provider);
+  return text
+    .replace(/\{\{\s*apiRoot\s*\}\}/g, String(base || '').replace(/\/v\d+\/?$/, ''))
+    .replace(/\{\{\s*baseUrl\s*\}\}/g, base)
+    .replace(
+      /\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g,
+      (whole, name) => (name in vars ? String(vars[name]) : whole)
+    );
 }
 
 /**

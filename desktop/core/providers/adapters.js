@@ -71,6 +71,99 @@ function sizeToRatio(size) {
 }
 
 /**
+ * Agnes 的「输出尺寸参考」表，原样照抄，一个数没算。
+ *
+ * 为什么不按 ratio 自己乘：它的档位不是整倍缩放。16:9 的 1K 是 1312×736，
+ * 严格算 16:9 应该是 1308.4×736 —— 它取了 1312。这类零头只能抄，
+ * 算出来的和它实际给的差几个像素，就对不上表、白做一次匹配。
+ */
+const AGNES_SIZES = {
+  '1:1':  { '1K': '1024*1024', '2K': '2048*2048', '3K': '3072*3072', '4K': '4096*4096' },
+  '3:4':  { '1K': '864*1152',  '2K': '1728*2304', '3K': '2592*3456', '4K': '3456*4608' },
+  '4:3':  { '1K': '1152*864',  '2K': '2304*1728', '3K': '3456*2592', '4K': '4608*3456' },
+  '16:9': { '1K': '1312*736',  '2K': '2624*1472', '3K': '3936*2208', '4K': '5248*2944' },
+  '9:16': { '1K': '736*1312',  '2K': '1472*2624', '3K': '2208*3936', '4K': '2944*5248' },
+  '2:3':  { '1K': '832*1248',  '2K': '1664*2496', '3K': '2496*3744', '4K': '3328*4992' },
+  '3:2':  { '1K': '1248*832',  '2K': '2496*1664', '3K': '3744*2496', '4K': '4992*3328' },
+  '21:9': { '1K': '1568*672',  '2K': '3136*1344', '3K': '4704*2016', '4K': '6272*2688' }
+};
+
+/**
+ * 像素尺寸 → Agnes 的「档位 + 宽高比」。
+ *
+ * 走的是**反查**：目录里声明的 imageSizes 就是从这张表里抄的 2K 一行，
+ * fitImageSize 会把画幅折成其中一个，于是这里几乎总能精确命中。
+ *
+ * 命中不了才退回估算（用户在联调台里手填过尺寸、或者以后目录改了），
+ * 并且标记 guessed —— 调用方据此说一声。不标记的话，"你要的 1280×720"
+ * 和"它实际出的 1312×736"之间那一步换算就成了暗箱。
+ */
+export function agnesSizeSpec(size, fallbackRatio = '16:9') {
+  const want = String(size || '').replace(/[x×]/i, '*');
+  for (const [ratio, tiers] of Object.entries(AGNES_SIZES)) {
+    for (const [tier, px] of Object.entries(tiers)) {
+      if (px === want) return { size: tier, ratio, pixels: px, guessed: false };
+    }
+  }
+  // 档位本身（'2K'）也认 —— 联调台里手填的就是这个写法
+  const asTier = String(size || '').toUpperCase();
+  if (AGNES_SIZES['1:1'][asTier]) {
+    const ratio = AGNES_SIZES[fallbackRatio] ? fallbackRatio : '16:9';
+    return { size: asTier, ratio, pixels: AGNES_SIZES[ratio][asTier], guessed: false };
+  }
+  const ratio = sizeToRatio(want) in AGNES_SIZES ? sizeToRatio(want) : fallbackRatio;
+  const [w, h] = want.split('*').map(Number);
+  const longEdge = Math.max(w || 0, h || 0);
+  // 档位按长边挑最接近的一档，别按"够不够大"—— 够不够大会把 1280 顶到 2K，
+  // 而用户手填 1280 多半就是想要小图
+  const tier = ['1K', '2K', '3K', '4K'].reduce((best, cur) => {
+    const px = (s) => Math.max(...AGNES_SIZES[ratio][s].split('*').map(Number));
+    return Math.abs(px(cur) - longEdge) < Math.abs(px(best) - longEdge) ? cur : best;
+  });
+  return { size: tier, ratio, pixels: AGNES_SIZES[ratio][tier], guessed: true };
+}
+
+/**
+ * 秒数 → Agnes 的 num_frames。
+ *
+ * 它不收秒数，收帧数，而且帧数有两条硬规矩：**≤ 441**，并且**必须是 8n+1**。
+ * 违规的后果文档没说，但这类参数一般是直接 400 —— 那还算好的。
+ *
+ * 向**上**取到下一个 8n+1，和 alignDuration 的理由一样：宁可多出来一点
+ * 合成时裁掉，也不要少了把动作或台词切断。
+ *
+ * ⚠ 文档「视频时长控制」那张表给的是 3秒→81 帧，而 81/24 = 3.375 秒。
+ * 按这里算出来的是 73 帧（3.04 秒），比它的表更贴近 3 秒。两个都合法，
+ * 取更准的那个 —— 分镜表上写 3 秒，成片就该是 3 秒出头，不是 3.4 秒。
+ */
+export function agnesFrames(seconds, fps = 24) {
+  const raw = Math.max(1, Math.round((Number(seconds) || 0) * fps));
+  const snapped = Math.ceil((raw - 1) / 8) * 8 + 1;
+  return Math.min(441, Math.max(9, snapped));
+}
+
+/**
+ * 画幅 + 清晰度 → Agnes 的 width / height。
+ *
+ * ⚠ 这里算出来的**不是最终尺寸**。文档明说它会把不完全匹配的尺寸
+ * "自动映射到最接近的标准输出尺寸"，而它的档位表没有公开
+ *（响应示例里 1024×576 被映射成了 832×448）。
+ *
+ * 所以这个函数只负责"把意图表达清楚"，真实尺寸由响应里的
+ * `metadata.size_mapping` 说了算 —— 那个字段我们读回来并且如实报出去。
+ * 自己编一张档位表反而会让请求记录看起来比实际更确定。
+ */
+export function agnesVideoSize(ratio = '16:9', resolution = '720P') {
+  const shortEdge = { '480P': 480, '720P': 720, '1080P': 1080 }[String(resolution).toUpperCase()] || 720;
+  const [rw, rh] = String(ratio).split(':').map(Number);
+  if (!rw || !rh) return [1280, 720];
+  const even = (n) => Math.round(n / 16) * 16;
+  return rw >= rh
+    ? [even((shortEdge * rw) / rh), even(shortEdge)]
+    : [even(shortEdge), even((shortEdge * rh) / rw)];
+}
+
+/**
  * 画幅 → 出图尺寸。
  * 竖屏短剧必须出竖图，横图裁成竖屏会把人裁掉半张脸 ——
  * 所以出图和出视频共用「设置 → 画幅」这一个开关。
@@ -167,10 +260,10 @@ function endpoint(provider, key, fallback) {
  * 两者一撞，任务会**提交成功**然后在轮询里以 InvalidParameter 失败，
  * 白等一轮，报错里也看不出是这个原因。所以在发出去之前就拦下来，把出路说清楚。
  */
-function requirePublicUrl(url, label, what) {
+function requirePublicUrl(url, label, what, who = '阿里云百炼') {
   if (!url || !String(url).startsWith('data:')) return;
   throw new Error(
-    `${label}：阿里云百炼的${what}只认**公网 URL**，不收 base64 内联图，而这里给的是本地图转的 data URI。\n` +
+    `${label}：${who}的${what}只认**公网 URL**，不收 base64 内联图，而这里给的是本地图转的 data URI。\n` +
       `两条路：\n` +
       `① 在「设置 → 图片上传网关」里填一个接收 multipart 上传、返回 {url} 的接口（自建图床或 OSS 直传），` +
       `配好之后镜头图会先上传再把公网地址交给百炼；\n` +
@@ -800,8 +893,18 @@ async function generateImageRaw({
    * 但那说的是对话协议，它的出图确实收 JSON 里的 image 字段。
    */
   const usesEditsApi = provider.imageApi === 'openai-edits';
-  const switchable = !usesEditsApi && supportsI2I && i2iModel && i2iModel !== model && i2iBelongs;
-  if (wantsRef && i2iModel && i2iModel !== model && supportsI2I && !i2iBelongs && !usesEditsApi) {
+  /**
+   * "这家不用换模型"有两种情况，都不该去读「设置 → 图生图模型」：
+   *   走 /images/edits 的     —— 同一个模型自己就能编辑
+   *   目录声明 i2iSameModel 的 —— 同上，只是它连编辑接口都不分（Agnes）
+   *
+   * 分开判是因为下面还要用 usesEditsApi 决定走不走 multipart 那条路，
+   * 那是另一个问题。混成一个变量的话，加一家"同模型但走 JSON"的
+   * 就会被错误地送去 multipart。
+   */
+  const keepsModel = usesEditsApi || provider.i2iSameModel === true;
+  const switchable = !keepsModel && supportsI2I && i2iModel && i2iModel !== model && i2iBelongs;
+  if (wantsRef && i2iModel && i2iModel !== model && supportsI2I && !i2iBelongs && !keepsModel) {
     onEvent?.({
       type: 'note',
       message: `「设置 → 图生图模型」填的是 ${i2iModel}，而 ${provider.name} 没有这个模型 —— `
@@ -859,6 +962,72 @@ async function generateImageRaw({
       const url = firstMediaUrl(polled?.json ?? submitted.json);
       if (!url) throw new Error(`${label}：响应里没有图片 URL`);
       return { used, url, base64: null, raw: polled?.json ?? submitted.json };
+    }
+
+    case 'agnes': {
+      const spec = agnesSizeSpec(size);
+      if (spec.guessed) {
+        onEvent?.({
+          type: 'note',
+          message: `Agnes 只收 1K/2K/3K/4K 档位，${String(size).replace('*', '×')} 不在它的尺寸表里，`
+            + `按最接近的 ${spec.size} + ${spec.ratio} 发。它自己也会做这个映射，`
+            + '但映射规则不公开 —— 我们先算清楚，至少请求记录里写的就是实际出的。'
+        });
+      }
+      const body = {
+        model,
+        // negative_prompt 文档里没有这个参数。发过去多半被忽略（不报错），
+        // 那就等于负向词整段丢掉 —— 并进正向描述，至少模型看得到。
+        prompt: negative ? `${prompt}\n\n避免出现：${negative}` : prompt,
+        size: spec.size,
+        ratio: spec.ratio,
+        /**
+         * ⚠ `response_format` **绝不能放顶层** —— 文档专门用「重要说明」提了这一条。
+         * 通用 OpenAI 分支恰恰是往顶层放的，那也是这家不能复用它的原因之一。
+         */
+        extra_body: { response_format: 'url' }
+      };
+      if (refImages.length) {
+        /**
+         * ══════════ 为什么同一份参考图要塞两个位置 ══════════
+         *
+         * 文档自己说了两遍，两遍不一样：
+         *   「请求参数」那张表里写的是**顶层** `image`（string[]，图生图必填）
+         *   「图生图」「多图合成」两段正文写的是 `extra_body.image`
+         *
+         * 只能挑一个的话就是在赌，而赌输的代价是这个项目里最贵的那一种：
+         * 接口返回 200、图也出来了、请求记录里明明白白列着参考图，
+         * 只是那几张图**根本没进模型** —— 表现就是"传了照片但脸不是我的"。
+         * 我们刚在 OpenAI 的 /images/generations 上踩过一模一样的坑
+         *（顶层 image 字段被整个忽略，不报错不警告）。
+         *
+         * 两个位置都放，最坏的情况是多发一份被忽略的字段；
+         * 要是它严格校验未知字段，那会**报错**——报错是看得见的，
+         * 看得见就能修。静默降级看不见。
+         *
+         * 等哪天从「图生图」那个 curl 示例确认了到底是哪一个，
+         * 再把多余的那份删掉。在那之前这不是冗余，是保险。
+         */
+        body.image = refImages;
+        body.extra_body.image = refImages;
+      }
+
+      const res = await send(
+        {
+          provider: providerId,
+          label,
+          method: 'POST',
+          url: endpoint(provider, 'images', '{{baseUrl}}/images/generations'),
+          body,
+          timeoutMs
+        },
+        onEvent
+      );
+      if (!res.ok) fail(label, res);
+      const url = firstMediaUrl(res.json);
+      const base64 = url ? null : firstBase64(res.json);
+      if (!url && !base64) throw new Error(`${label}：响应里既没有图片 URL 也没有 base64`);
+      return { used, url, base64, raw: res.json };
     }
 
     case 'minimax': {
@@ -1255,6 +1424,51 @@ async function generateVideoRaw({
       };
       break;
 
+    case 'agnes': {
+      /**
+       * ⚠ 和百炼一个坑：文档写着"需要提供**可公开访问的图片 URL**"。
+       * 我们默认把本地图转成 data URI（Windows 用户不必先开一个 OSS 桶），
+       * 两者一撞，任务多半提交成功然后在轮询里失败，白等一轮。
+       */
+      requirePublicUrl(images[0], label, '图生视频', 'Agnes');
+      if (endFrame) requirePublicUrl(endFrame, label, '关键帧动画的末帧', 'Agnes');
+
+      const fps = 24;
+      const frames = agnesFrames(actualDuration, fps);
+      const [w, h] = agnesVideoSize(finalRatio, finalResolution);
+      const body = {
+        model,
+        prompt,
+        width: w,
+        height: h,
+        num_frames: frames,
+        frame_rate: fps
+        /**
+         * 文档里还有个 negative_prompt，这里没发 —— 出视频这条路上
+         * 整条链路都没有"负向词"这个东西（别家也都不收），
+         * 为一家单独贯通一个参数是另一件事，不夹带。
+         */
+      };
+      if (endFrame) {
+        /**
+         * 末帧走「关键帧动画」模式。
+         *
+         * 文档的接入清单把这两条并排写着，说明它们是**两种模式**不是两个写法：
+         *   图生视频     → 顶层 image（单个 URL）
+         *   关键帧动画   → extra_body.image（数组）+ extra_body.mode: 'keyframes'
+         *
+         * 所以这里和出图那条相反：**不能两个都发**。两个都发等于同时点了
+         * 两种模式，它挑哪个我们不知道，而挑错的表现是末帧被丢掉、
+         * 衔接照样断 —— 界面却会说这两镜是无缝的。
+         */
+        body.extra_body = { image: [images[0], endFrame], mode: 'keyframes' };
+      } else if (images[0]) {
+        body.image = images[0];
+      }
+      spec = { url: endpoint(provider, 'videos', '{{baseUrl}}/videos'), body };
+      break;
+    }
+
     case 'kling':
       spec = {
         url: endpoint(provider, 'i2v', '{{baseUrl}}/v1/videos/image2video'),
@@ -1322,9 +1536,35 @@ async function generateVideoRaw({
   const url = firstMediaUrl(polled?.json ?? submitted.json, { extensions: ['.mp4', '.mov', '.webm'] })
     || firstMediaUrl(polled?.json ?? submitted.json);
   if (!url) throw new Error(`${label}：响应里没有视频 URL`);
+
+  /**
+   * ══════════ 以回来的那份为准，不以下单时那份为准 ══════════
+   *
+   * 这个文件里已经为"记的是意图不是事实"修过好几回（modelUsed、refsSent、
+   * endFrameSent）。视频这一步有两个数最容易变成假的：**多长**和**多大**。
+   *
+   * Agnes 两样都会自己改：帧数按 8n+1 归一，尺寸按它自己的档位表映射
+   *（响应示例里 1024×576 被改成了 832×448，而那张表没有公开）。
+   * 好在它把改动如实写在了 `seconds` 和 `metadata.size_mapping` 里 ——
+   * 那就读回来，别拿我们请求时算的那个数去记账和显示。
+   */
+  const done = polled?.json ?? submitted.json;
+  const reported = Number(done?.seconds);
+  const mapping = done?.metadata?.size_mapping;
+  if (mapping?.adjusted && mapping?.message) {
+    onEvent?.({ type: 'note', message: `${provider.name} 把尺寸换过了：${mapping.message}` });
+  }
+  const truthfulDuration = Number.isFinite(reported) && reported > 0 ? reported : actualDuration;
+  if (Math.abs(truthfulDuration - actualDuration) > 0.05) {
+    onEvent?.({
+      type: 'note',
+      message: `实际出的是 ${truthfulDuration} 秒（下单时算的是 ${actualDuration} 秒）—— 按实际的记账和排版。`
+    });
+  }
+
   return {
     url,
-    actualDuration,
+    actualDuration: truthfulDuration,
     requestedDuration: duration,
     allowedDurations: allowed,
     resolution: finalResolution,
