@@ -203,7 +203,22 @@ export function blockFramePanel({
   /** 服务端记下的那一版：{ has, stale, url } */
   saved = null,
   onSave = async () => {},
-  width = 640
+  /**
+   * 点图看大图。这块面板挂在一个 200px 上下的编辑栏里 ——
+   * 底图在那儿只有 205×115，什么都看不清（用户原话："重拼的底图看不全"）。
+   * 而这张图是**要拿来判断构图对不对**的，看不清等于没有。
+   *
+   * 灯箱是 app 自己那一套，这个模块是发给浏览器的共享原件、不能 import 它，
+   * 所以由调用方传进来。没传就退化成"不能点开"，不报错。
+   */
+  onOpen = null,
+  /**
+   * 拼多大。**这是发给模型的那张图的分辨率**，不是预览尺寸。
+   *
+   * 640 太小：四个人挤在里面，每个人不到 100px 宽，模型读不出谁是谁。
+   * 1024 是各家出图模型的常见输入档位，base64 之后几百 KB，远在上限之内。
+   */
+  width = 1024
 } = {}) {
   const host = document.createElement('div');
   host.className = 'blockframe-panel';
@@ -237,12 +252,25 @@ export function blockFramePanel({
   } else {
     say('排好位之后拼一张：把设定集里的人、景、物按机位摆到画面上。这张图是排位唯一能影响出图的通道。');
   }
-  if (saved?.url) {
+  /** 挂一张图，并且让它可以点开看大图 */
+  const showImage = (src) => {
+    while (preview.firstChild) preview.removeChild(preview.firstChild);
     const img = new Image();
-    img.src = saved.url;
-    img.className = 'blockframe-img';
+    img.src = src;
+    img.className = `blockframe-img${onOpen ? ' zoomable' : ''}`;
+    if (onOpen) {
+      img.title = '点开看大图';
+      img.onclick = () => onOpen(src);
+    }
     preview.append(img);
-  }
+    if (onOpen) {
+      preview.append(Object.assign(document.createElement('div'), {
+        className: 'previz-cap', style: 'min-width:0;margin-top:4px', textContent: '点图看大图'
+      }));
+    }
+  };
+
+  if (saved?.url) showImage(saved.url);
 
   btn.onclick = async () => {
     btn.disabled = true;
@@ -254,11 +282,7 @@ export function blockFramePanel({
       const urls = Object.fromEntries(Object.entries(assets).map(([k, v]) => [k, v.url]));
       const { dataUrl, missing } = await compose(frame, urls, { width, height: Math.round(width * 9 / 16) });
 
-      while (preview.firstChild) preview.removeChild(preview.firstChild);
-      const img = new Image();
-      img.src = dataUrl;
-      img.className = 'blockframe-img';
-      preview.append(img);
+      showImage(dataUrl);
 
       await onSave(dataUrl);
 

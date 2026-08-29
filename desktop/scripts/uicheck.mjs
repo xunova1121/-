@@ -1685,6 +1685,29 @@ console.log('\n预演台：排位拼底图');
     check('底图预览不会把面板撑破（原始 PNG 比这一栏宽得多）',
       Boolean(fit) && fit.img <= fit.box + 1 && fit.natural > fit.box,
       JSON.stringify(fit));
+
+    /**
+     * ⚠ **能点开看大图。**
+     *
+     * 这块面板挂在一个 200px 上下的编辑栏里，底图在那儿只有 205×115 ——
+     * 而这张图是要拿来**判断构图对不对**的，那么小等于没有。
+     * 用户的原话是"重拼的底图看不全"。
+     *
+     * 判据是灯箱真的开了，不是"有没有绑 onclick"——绑了个空函数也算过。
+     */
+    check('底图这么小，得能点开看大图', fit.natural / Math.max(1, fit.img) > 2,
+      JSON.stringify(fit));
+    await page.locator('.blockframe-img').first().click();
+    await page.waitForTimeout(600);
+    const boxed = await page.evaluate(() => {
+      const lb = document.querySelector('.lightbox, .lb, [class*="lightbox"]');
+      const img = lb && lb.querySelector('img');
+      return lb ? { open: true, w: img ? img.clientWidth : 0 } : { open: false, w: 0 };
+    });
+    check('点一下真的开了灯箱，而且比面板里那张大得多',
+      boxed.open && boxed.w > fit.img * 2, JSON.stringify(boxed));
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
   }
   {
     /** 页面横向不该出现滚动条 —— 撑破版面最直接的症状 */

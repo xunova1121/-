@@ -462,7 +462,8 @@ export function previzPanel(stage, {
         propRow.append(btn(name, has, () => {
           stage.marks = stage.marks || [];
           if (has) stage.marks = stage.marks.filter((m) => m.name !== name);
-          else stage.marks.push({ name, x: (stage.marks.length % 2 ? 1 : -1) * 1.6, y: 1.2 });
+          // ⚠ 打上 prop 标记：道具跟着这一镜的道具清单走，不像门窗那样整场继承
+          else stage.marks.push({ name, prop: true, x: (stage.marks.length % 2 ? 1 : -1) * 1.6, y: 1.2 });
         }));
       }
       propRow.append(Object.assign(document.createElement('span'), {

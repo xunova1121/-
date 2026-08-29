@@ -1788,7 +1788,10 @@ export default {
              * 跨场次不继承 —— 那是另一个地方、另一段时间。
              */
             const sameSeg = prevShot && Number(prevShot.segment || 1) === Number(shot.segment || 1);
-            stageDraft = (sameSeg && inheritStage(prevShot.stage, names)) || blankStage(names);
+            // ⚠ 第三个参数是**这一镜的道具清单**：地标整场继承，道具按清单筛。
+            // 不传的话，上一镜摆过的刀会一路跟到最后一镜，还会画进构图底图
+            stageDraft = (sameSeg && inheritStage(prevShot.stage, names, shot.props || []))
+              || blankStage(names);
           }
           // 上一镜的排位拿来比对轴线 —— 越轴是**两镜之间**的事，单看一镜看不出来
           const panel = previzPanel(stageDraft, {
@@ -1876,6 +1879,10 @@ export default {
                   && BLOCKFRAME.stageStamp(stageDraft) !== (shot.blockFrameStamp || ''),
                 url: shot.blockFramePath ? `${mediaUrl(shot.blockFramePath)}&v=${Date.parse(shot.blockFrameAt || '') || 0}` : null
               },
+              // 这块面板只有 200px 宽，底图在里面看不清 —— 点开走 app 自己那套灯箱
+              onOpen: (src) => openLightbox(
+                [{ src, title: `第 ${shot.index} 镜 · 构图底图`, note: '出图时会带上它，模型只照它定构图' }], 0
+              ),
               onSave: async (dataUrl) => {
                 // cap:blockframe
                 await stream(`/projects/${project.id}/shots/${shot.id}/blockframe`, { dataUrl }, () => {});

@@ -383,7 +383,18 @@ export function normalizeStage(stage) {
       if (m.far || (m.deg !== undefined && m.x === undefined)) {
         return { name, far: true, deg: norm180(m.deg) };
       }
-      return { name, x: clampM(m.x), y: clampM(m.y) };
+      /**
+       * ⚠ **道具和地标不是一回事，得分开。**
+       *
+       * 地标（门窗桌床）不会因为换机位就搬家，所以整场戏原样继承 ——
+       * 那正是"画面左边是窗"这句话能跨镜成立的原因。
+       * 而设定集道具是**被人拿着走的**：柴刀在第 3 镜出现，
+       * 不等于第 4 镜到最后一镜都该有刀。
+       *
+       * 混在一个数组里的后果是：摆过一次，后面每一镜都带着它，
+       * 而且现在还会被画进构图底图、进而影响出图 —— 一把凭空多出来的刀。
+       */
+      return { name, x: clampM(m.x), y: clampM(m.y), ...(m.prop ? { prop: true } : {}) };
     })
     .filter((m) => m.name);
 
@@ -436,7 +447,7 @@ export function normalizeStage(stage) {
  * ⚠ 只在**同一场次**内继承。跨场次是另一个地方、另一段时间，
  * 把上一场的站位搬过来是错的，而且错得很隐蔽。
  */
-export function inheritStage(prevStage, names = []) {
+export function inheritStage(prevStage, names = [], props = null) {
   const base = normalizeStage(prevStage);
   if (!base) return null;
 
@@ -447,8 +458,23 @@ export function inheritStage(prevStage, names = []) {
    * 人是按这一镜的剧本来的（这一镜没有的人要丢掉，见下面），
    * 但门窗桌椅不会因为换了个机位就搬家。它们正是同一场戏里
    * 唯一不该变的东西 —— 丢了它们，"画面左边是窗"这句话下一镜就没了。
+   *
+   * ⚠ **设定集道具走人的那条规矩，不走地标这条。**
+   *
+   * 柴刀是被人拿着走的：第 3 镜出现不等于往后每一镜都该有刀。
+   * 原来它和地标共用一个数组、跟着一起原样继承 —— 摆过一次之后
+   * 每一镜都带着，而且会被画进构图底图、进而影响出图。
+   * 用户的原话是"预演台上的道具，没有添加，为啥还会有"。
+   *
+   * 所以按**这一镜自己的道具清单**（shot.props）筛：清单里有才留。
+   * 不传清单时保持老行为全留 —— 调用方没升级不该被悄悄改掉。
    */
-  const marks = base.marks.map((m) => ({ ...m }));
+  const keepProp = Array.isArray(props)
+    ? new Set(props.map((x) => String(x).trim()).filter(Boolean))
+    : null;
+  const marks = base.marks
+    .filter((m) => !m.prop || !keepProp || keepProp.has(m.name))
+    .map((m) => ({ ...m }));
   // 太阳更不会因为换机位就挪窝 —— 它是这一场戏里最不该变的东西
   const sun = base.sun ? { ...base.sun } : null;
   if (!want.length) return { marks, sun, cam: { ...base.cam }, subjects: base.subjects.map((s) => ({ ...s })) };

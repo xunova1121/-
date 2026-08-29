@@ -8636,8 +8636,8 @@ section('传上去的照片：要真的用上，而且只用脸');
 section('预演台：排的位真的改变出图');
 {
   const bf = await import('../core/pipeline/blockframe.js');
-  const cs2 = bf;
   const pz = await import('../core/pipeline/previz.js');
+  const cs2 = bf;
 
   const stage = (subs) => ({ cam: { x: 0, y: -4, height: 1.6, lens: 35 }, subjects: subs, marks: [] });
   /**
@@ -8755,6 +8755,57 @@ section('预演台：排的位真的改变出图');
   check('用户传的照片不裁也不抠背景',
     shot0.items[0].crop === null && shot0.items[0].keyable === false,
     JSON.stringify({ crop: shot0.items[0].crop, keyable: shot0.items[0].keyable }));
+
+  /**
+   * ══════════ 道具不该一路跟到最后一镜 ══════════
+   *
+   * 用户报的原话："预演台上的道具，没有添加，为啥还会有"。
+   *
+   * 地标（门窗桌床）整场原样继承 —— 它们不会因为换机位就搬家，
+   * 而那正是"画面左边是窗"能跨镜成立的原因。
+   * 但我把**设定集道具**塞进了同一个数组：柴刀是被人拿着走的，
+   * 第 3 镜摆过一次，第 4 镜到最后一镜就全都有刀 ——
+   * 而且现在还会被画进构图底图、进而影响出图。一把凭空多出来的刀。
+   */
+  {
+    const prev = {
+      cam: { x: 0, y: -4, height: 1.6, lens: 35 },
+      subjects: [{ name: '阿澜', x: 0, y: 0, facing: 180 }],
+      marks: [
+        { name: '窗', x: -2, y: 1 },            // 地标：不会搬家
+        { name: '柴刀', prop: true, x: 1, y: 0.5 } // 道具：被人拿着走
+      ]
+    };
+    /**
+     * ⚠ 这条断言必须**两样都验**。只验"刀丢了"的话，
+     * 一个"把 marks 整个清空"的实现照样能过 —— 而那会把窗也丢掉，
+     * 空间感当场塌掉，比多一把刀严重得多。
+     */
+    const next = pz.inheritStage(prev, ['阿澜'], []); // 这一镜的道具清单是空的
+    const names = next.marks.map((m) => m.name);
+    check('下一镜不带这一镜没列的道具（用户报的那个）',
+      !names.includes('柴刀'), JSON.stringify(names));
+    check('但地标照旧带过去（它不会因为换机位就搬家）',
+      names.includes('窗'), JSON.stringify(names));
+
+    /** 清单里还有的，当然要留 —— 连续两镜都拿着刀是最常见的情形 */
+    const still = pz.inheritStage(prev, ['阿澜'], ['柴刀']);
+    check('清单里还列着的道具留下来', still.marks.map((m) => m.name).includes('柴刀'),
+      JSON.stringify(still.marks.map((m) => m.name)));
+
+    /**
+     * ⚠ 不传清单时保持老行为（全留）。调用方没升级不该被悄悄改掉 ——
+     * 静默地丢东西比多东西更难查。
+     */
+    const legacy = pz.inheritStage(prev, ['阿澜']);
+    check('不传清单时保持老行为，一个都不丢',
+      legacy.marks.length === 2, JSON.stringify(legacy.marks.map((m) => m.name)));
+
+    /** prop 标记要能过 normalizeStage 那一关，否则筛不出来 */
+    check('道具标记在归一化之后还在（丢了就筛不出来）',
+      pz.normalizeStage(prev).marks.find((m) => m.name === '柴刀')?.prop === true,
+      JSON.stringify(pz.normalizeStage(prev).marks));
+  }
 
   /**
    * ══════════ 排布标记：出图时真的记下来了吗 ══════════
