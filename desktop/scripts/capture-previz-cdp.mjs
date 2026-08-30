@@ -27,6 +27,7 @@ await new Promise((resolve, reject) => {
 let serial = 0;
 const pending = new Map();
 const exceptions = [];
+const network = [];
 socket.addEventListener('message', (event) => {
   const message = JSON.parse(event.data);
   if (message.id && pending.has(message.id)) {
@@ -37,6 +38,14 @@ socket.addEventListener('message', (event) => {
   if (message.method === 'Runtime.exceptionThrown') {
     exceptions.push(message.params.exceptionDetails?.exception?.description || message.params.exceptionDetails?.text);
   }
+  if (message.method === 'Network.responseReceived') {
+    const response = message.params.response;
+    if (/previz|three|demo-assets/.test(response.url)) network.push({ url: response.url, status: response.status, mime: response.mimeType });
+  }
+  if (message.method === 'Network.loadingFailed') {
+    network.push({ failed: true, error: message.params.errorText, blocked: message.params.blockedReason || '' });
+  }
+  if (message.method === 'Log.entryAdded') exceptions.push(`${message.params.entry.level}: ${message.params.entry.text}`);
 });
 const send = (method, params = {}) => new Promise((resolve, reject) => {
   const id = ++serial;
@@ -46,18 +55,20 @@ const send = (method, params = {}) => new Promise((resolve, reject) => {
 
 await send('Runtime.enable');
 await send('Page.enable');
+await send('Network.enable');
+await send('Log.enable');
 await send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1100, deviceScaleFactor: 1, mobile: false });
 await send('Page.navigate', { url });
 await delay(12_000);
 const evaluated = await send('Runtime.evaluate', {
-  expression: `({title:document.title,canvas:document.querySelectorAll('canvas').length,buttons:document.querySelectorAll('button').length,error:document.querySelector('#demo-error')?.textContent||'',text:document.body.innerText.slice(0,500)})`,
+  expression: `({title:document.title,canvas:document.querySelectorAll('canvas').length,buttons:document.querySelectorAll('button').length,error:document.querySelector('#demo-error')?.textContent||'',demo:document.querySelector('#demo')?.innerHTML||'',resources:performance.getEntriesByType('resource').map(x=>x.name),text:document.body.innerText.slice(0,500)})`,
   returnByValue: true
 });
 const state = evaluated.result?.value || {};
 const shot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false, fromSurface: true });
 fs.mkdirSync(path.dirname(output), { recursive: true });
 fs.writeFileSync(output, Buffer.from(shot.data, 'base64'));
-console.log(`预演页面状态：${JSON.stringify(state)}`);
+console.log(`预演页面状态：${JSON.stringify({ ...state, network })}`);
 if (!state.canvas || !/3D导演预演台/.test(state.text || '')) {
   throw new Error(`Three.js 预演画布未完成渲染。异常：${exceptions.join(' | ') || state.error || '无运行时异常'}`);
 }
