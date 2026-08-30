@@ -8816,6 +8816,143 @@ section('这一镜为什么不对');
   check('而且说得出为什么选它', /参考图/.test(list[0].why), list[0].why);
 }
 
+section('指令框：把人话翻成计划，而且绝不替你动手');
+{
+  const cmd = await import('../core/pipeline/command.js');
+
+  const shots = Array.from({ length: 14 }, (_, i) => ({
+    id: `s${i + 1}`, index: i + 1, segment: i < 6 ? 1 : 2,
+    characters: i % 3 === 0 ? ['父亲', '我'] : ['我'],
+    imagePath: i < 10 ? '/x.png' : null,
+    videoPath: i < 3 ? '/v.mp4' : null,
+    dialogue: i % 2 ? '台词' : '',
+    skills: i === 5 ? ['tracking'] : []
+  }));
+  const project = { id: 'p1', shots };
+  const P = (t) => cmd.parse(t, project);
+
+  // ── 选哪几镜 ──
+  {
+    check('第 6-12 镜 → 7 镜', P('第6-12镜改成中景').targets.length === 7,
+      String(P('第6-12镜改成中景').targets.length));
+    check('第 6 镜 → 1 镜', P('第6镜改成特写').targets.length === 1, String(P('第6镜改成特写').targets.length));
+    check('按场次选（第 2 场 → 8 镜）', P('第2场转场改成叠化').targets.length === 8,
+      String(P('第2场转场改成叠化').targets.length));
+    check('按出场角色选（有父亲的 → 5 镜）', P('有父亲的镜头加上仰拍').targets.length === 5,
+      String(P('有父亲的镜头加上仰拍').targets.length));
+    /** 口径必须和筛选条一致：有图没视频才叫"缺视频" */
+    check('缺视频的口径 = 有图没视频（和筛选条同一套）',
+      P('缺视频的镜头时长改成4秒').targets.length === 7,
+      String(P('缺视频的镜头时长改成4秒').targets.length));
+  }
+
+  // ── 改什么 ──
+  {
+    const a = P('第6-12镜改成中景');
+    check('景别改成中景', a.patch?.camera === '中景', JSON.stringify(a.patch));
+    const b = P('缺视频的镜头时长改成4秒');
+    check('时长改成 4 秒（数字，不是字符串）', b.patch?.duration === 4, JSON.stringify(b.patch));
+    const c = P('第2场转场改成叠化');
+    check('转场认的是 id 不是中文标签', c.patch?.transition === 'dissolve', JSON.stringify(c.patch));
+    const d = P('有父亲的镜头加上仰拍');
+    check('技法卡是加，不是覆盖', d.addSkills?.includes('low-angle') && !d.patch?.skills,
+      JSON.stringify({ add: d.addSkills, patch: d.patch }));
+    /**
+     * ⚠ 中文两种语序都要认：「去掉跟拍」和「把跟拍去掉」。
+     * 只认前一种的话，后一种会被当成**加上**——意思正好反了，
+     * 而且是静默反：界面显示已加上，用户以为自己说错了话。
+     */
+    const e = P('把第6镜的跟拍去掉');
+    check('「把X去掉」认成减，不是加',
+      e.removeSkills?.includes('tracking') && !(e.addSkills || []).length,
+      JSON.stringify({ add: e.addSkills, remove: e.removeSkills }));
+    const f = P('第6镜去掉跟拍');
+    check('「去掉X」也认成减（两种语序都要过）', f.removeSkills?.includes('tracking'),
+      JSON.stringify(f.removeSkills));
+  }
+
+  // ── 花钱的必须标出来 ──
+  {
+    /**
+     * ⚠ costs 决定界面走不走预检和估算，而那两道闸门是用户被烧过之后加的。
+     * 标错 = 闸门形同虚设。
+     */
+    check('改文字不花钱', P('第6-12镜改成中景').costs === false, String(P('第6-12镜改成中景').costs));
+    check('跑出图要花钱', P('把缺视频的都跑了').costs === true, String(P('把缺视频的都跑了').costs));
+    check('问一问不花钱', P('这一轮要花多少钱').costs === false, String(P('这一轮要花多少钱').costs));
+    /** 每一条能跑的计划都得有 verb，界面靠它决定走哪条路 */
+    const verbs = ['第6-12镜改成中景', '把缺视频的都跑了', '第22镜为什么没图']
+      .map((t) => P(t).verb);
+    check('三种 verb 分得清', JSON.stringify(verbs) === '["edit","run","ask"]', JSON.stringify(verbs));
+  }
+
+  // ── 看不懂就说看不懂 ──
+  {
+    const bad = P('随便写点什么');
+    check('看不懂时 ok=false', bad.ok === false, JSON.stringify(bad));
+    /**
+     * ⚠ 这一条是整个模块最要紧的。猜错的代价是拿真钱重跑几十镜，
+     * 或者把几十镜的文案改坏；而"没听懂"的代价是你再打一遍。
+     */
+    check('看不懂时**不给** targets（不许猜一批出来）',
+      !bad.targets, JSON.stringify(bad.targets));
+    check('而且给了能照抄的例子', (bad.examples || []).length > 0, JSON.stringify(bad.examples));
+
+    const half = P('把第6镜怎么怎么样');
+    check('只认出镜头没认出动作时，说清楚认出了哪一半',
+      half.ok === false && half.why.includes('第 6 镜'), JSON.stringify(half.why));
+
+    const noTarget = P('改成中景');
+    check('说了要改什么但没说改哪几镜 → 追问，不默认全片',
+      noTarget.ok === false && /哪几镜/.test(noTarget.why), JSON.stringify(noTarget.why));
+
+    const empty = P('第9场改成中景');
+    check('选中零镜和"没说"分得开（零镜时直接说没有）',
+      empty.ok === false && /一镜都没有/.test(empty.why), JSON.stringify(empty.why));
+  }
+
+  // ── 这个模块不许有副作用 ──
+  {
+    /**
+     * ⚠ parse 只出计划，绝不执行。这里用**冻结**的输入验：
+     * 它要是往 project 或 shots 上写任何东西，冻结会让它当场抛错。
+     * 光看代码说"它是纯的"不算数。
+     */
+    const frozen = Object.freeze({ id: 'p2', shots: shots.map((s) => Object.freeze({ ...s })) });
+    let threw = null;
+    try {
+      cmd.parse('第6-12镜改成中景', frozen);
+      cmd.parse('把缺视频的都跑了', frozen);
+    } catch (err) { threw = err; }
+    check('对冻结的项目跑一遍不出错（说明它一个字都没往里写）', !threw, String(threw?.message));
+  }
+
+  // ── 例子必须都是真能跑通的 ──
+  {
+    /**
+     * ⚠ 界面上那几个例子是**可点的模板**，点一下就填进输入框。
+     * 里面要是有一句我们自己都解析不了的，用户第一次点就撞一堵墙 ——
+     * 而那是他对这个功能的第一印象。
+     */
+    const egs = cmd.examplesFor(project);
+    const bad = egs.filter((t) => !cmd.parse(t, project).ok);
+    check('界面上列的每个例子都真能解析', bad.length === 0, JSON.stringify(bad));
+    /**
+     * ⚠ 例子必须按**这个项目**生成。写死的话，"第 6-12 镜"在一个
+     * 只有 2 镜的项目里选不到任何东西 —— 用户第一次点例子就撞一堵墙。
+     * 走查夹具正好只有 2 镜，这个坑是在那儿撞出来的。
+     */
+    const tiny = { id: 'p3', shots: shots.slice(0, 2) };
+    const tinyBad = cmd.examplesFor(tiny).filter((t) => !cmd.parse(t, tiny).ok);
+    check('只有 2 镜的项目里，例子也全都选得中', tinyBad.length === 0, JSON.stringify(tinyBad));
+    check('例子里的镜号取自真实分镜（不是写死的 6-12）',
+      cmd.examplesFor(tiny).some((t) => t.includes('第 1-2 镜')), JSON.stringify(cmd.examplesFor(tiny)));
+    /** 空项目不能给出指向不存在镜头的例子 */
+    const empty = cmd.examplesFor({ shots: [] });
+    check('空项目的例子不提任何镜号', !empty.some((t) => /第 \d+ 镜/.test(t)), JSON.stringify(empty));
+  }
+}
+
 section('角色名对不上：少一个人，而且不报任何错');
 {
   const cons = await import('../core/pipeline/consistency.js');

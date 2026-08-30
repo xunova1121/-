@@ -855,3 +855,18 @@ input {
 /* 点描述即编辑 —— 审片时最高频的动作，不该多一次点击 */
 .shot-desc.tappable { cursor: pointer; }
 .shot-desc.tappable:active { opacity: .6; }
+
+/* ── 指令框 ──
+   预览区三种色：看不懂(alarm) / 免费改(good) / 要花钱(caution)。
+   花钱那个不用 alarm —— alarm 是"坏了"，而花钱不是坏事，是要你多看一眼。 */
+.cmd-preview { white-space: pre-wrap; margin-top: 10px; line-height: 1.5; font-size: 13px; }
+.cmd-preview:empty { display: none; }
+.cmd-preview.ok { color: var(--good); }
+.cmd-preview.bad { color: var(--alarm); }
+.cmd-preview.costly { color: var(--caution); }
+.cmd-eg { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+/* 例子是可点的模板，不是装饰 —— 点一下就填进输入框，省得手机上打长句 */
+.cmd-eg .fchip { margin: 0; font-size: 12px; }
+/* 第二个图标按钮不再吃剩余空间 —— 两个都 margin-left:auto 的话，
+   flex 会把空隙平分给它们，中间裂开一道缝 */
+.fchip.icon + .fchip.icon { margin-left: 6px; }

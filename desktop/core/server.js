@@ -35,6 +35,7 @@ import * as duration from './duration.js';
 import * as pricing from './pricing.js';
 import * as ledger from './ledger.js';
 import * as estimate from './pipeline/estimate.js';
+import * as command from './pipeline/command.js';
 import * as meter from './meter.js';
 import * as skillsLib from './skills.js';
 import * as zip from './zip.js';
@@ -1260,6 +1261,25 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
     if (b && c === 'shots' && d === 'batch' && method === 'POST') {
       const body = await readBody(req);
       return json(res, 200, studio.batchUpdateShots(b, body));
+    }
+
+    /**
+     * 指令框：把一句人话翻成一份**计划**。
+     *
+     * ⚠ 这条路**只解析，绝不执行**。
+     *
+     * 分成两个接口（这里出计划，执行走 shots/batch 或 stage/xxx 那几条现成的）
+     * 不是为了好看，是为了让"人确认"这一步没法被绕过 ——
+     * 合成一个接口的话，界面上少写一个确认框就变成了自动执行，
+     * 而这个应用里自动执行的代价是真钱。
+     *
+     * 纯读、不调模型、不花钱，所以可以边打字边预览。
+     */
+    if (b && c === 'command' && method === 'POST') {
+      const { text } = await readBody(req);
+      const project = store.read(b);
+      if (!project) return json(res, 404, { error: '项目不存在' });
+      return json(res, 200, command.parse(text, project));
     }
 
     /**

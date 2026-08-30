@@ -488,6 +488,18 @@ export const CAPABILITIES = [
     why: ''
   },
   {
+    /**
+     * 指令框。手机端更需要它 —— 51 张卡翻起来最费手的就是手机，
+     * 而批量操作在小屏上几乎没法做。所以这一条不能只上电脑端。
+     */
+    id: 'command-box',
+    name: '一句人话批量改分镜 / 跑某一步 / 问为什么（执行前先摆出要做什么）',
+    api: 'POST /projects/:id/command',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
     id: 'comfy-workflow',
     name: '本地出图（ComfyUI）：贴工作流、当场看出打了哪几个标记',
     api: 'POST /comfy/inspect',

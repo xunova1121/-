@@ -1894,6 +1894,12 @@ async function createProject(title) {
  * @param inner 面板内容（自己带 padding 的节点，比如一张 .card）
  * @param opts.bare true = 内容自己就是面板，不再包一层 .sheet-box
  */
+/** 切页签。原来只有页签按钮自己会改 tab，别处要跳过去就没有入口 */
+function goTab(id) {
+  tab = id;
+  paint();
+}
+
 function openSheet(inner, { bare = false } = {}) {
   const layer = h('div', { class: 'sheet' });
   const close = () => layer.remove();
@@ -2023,6 +2029,137 @@ function newProjectCard() {
  * 推门→进门→环视→停下，四镜是一件事。一镜一镜点四次容易漏掉中间那一镜，
  * 而漏掉的那一镜恰恰是断点 —— 出完片才看得出来。
  */
+/**
+ * ══════════ 指令框 ══════════
+ *
+ * 一句人话 → 先摆出**要做什么** → 你点了才执行。
+ *
+ * ⚠ 这三步中间那一步不能省。省掉它就变成了"说一句话它就动手"，
+ * 而这个应用里动手的代价是真钱和几十镜的文案。所以：
+ *   · 打字时实时预览（解析只在本地算，不调模型、不花钱）
+ *   · 执行按钮上写的是**这次到底要改哪几镜、改成什么**
+ *   · 花钱的动作按钮变色，而且照旧走原来那条预检 + 估算
+ *
+ * 看不懂时不猜。宁可让你再打一遍，也不拿真钱赌一个"最像的"。
+ */
+function commandCard(close) {
+  const box = h('textarea', {
+    class: 'mta', rows: '2', placeholder: '比如：第 6-12 镜改成中景'
+  });
+  const preview = h('div', { class: 'cmd-preview muted' });
+  const go = h('button', { class: 'btn sm grow', disabled: true }, '先说要做什么');
+  let plan = null;
+
+  const render = () => {
+    if (!plan) {
+      preview.className = 'cmd-preview muted';
+      preview.textContent = '';
+      go.disabled = true;
+      go.textContent = '先说要做什么';
+      return;
+    }
+    if (!plan.ok) {
+      preview.className = 'cmd-preview bad';
+      preview.textContent = plan.why + (plan.examples?.length ? `\n试试：${plan.examples[0]}` : '');
+      go.disabled = true;
+      go.textContent = '没听懂';
+      return;
+    }
+    preview.className = `cmd-preview ${plan.costs ? 'costly' : 'ok'}`;
+    preview.textContent = plan.say + (plan.costs ? '\n⚠ 这一步要花钱，按下去之前还会再过一遍预检和估算。' : '');
+    go.disabled = false;
+    go.className = `btn sm grow ${plan.costs ? 'primary' : ''}`;
+    go.textContent = plan.verb === 'ask' ? '看一下' : plan.costs ? '去预检' : '就这么改';
+  };
+
+  const egs = h('div', { class: 'cmd-eg' });
+  const paintEgs = (list) => {
+    clear(egs);
+    for (const s of list || []) {
+      egs.append(h('button', {
+        class: 'fchip',
+        onclick: () => { box.value = s; box.dispatchEvent(new Event('input')); }
+      }, s));
+    }
+  };
+  // 空串也问一次，纯粹为了把这个项目的例子拿回来填上
+  api(`/projects/${project.id}/command`, { method: 'POST', body: { text: '' } })
+    .then((r) => paintEgs(r.examples))
+    .catch(() => {});
+
+  let timer = null;
+  box.oninput = () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const text = box.value.trim();
+      if (!text) { plan = null; render(); return; }
+      try {
+        // cap:command-box
+        plan = await api(`/projects/${project.id}/command`, { method: 'POST', body: { text } });
+      } catch (err) {
+        plan = { ok: false, why: err.message, examples: [] };
+      }
+      if (plan?.examples?.length) paintEgs(plan.examples);
+      render();
+    }, 250);
+  };
+
+  go.onclick = async () => {
+    if (!plan?.ok) return;
+    if (plan.verb === 'edit') {
+      go.disabled = true;
+      try {
+        const r = await api(`/projects/${project.id}/shots/batch`, {
+          method: 'POST',
+          body: {
+            ids: plan.targets, patch: plan.patch,
+            addSkills: plan.addSkills, removeSkills: plan.removeSkills
+          }
+        });
+        toast(`改了 ${r.changed} 镜`, 'ok');
+        await reload();
+        close();
+      } catch (err) {
+        toast(err.message, 'bad');
+        go.disabled = false;
+      }
+      return;
+    }
+    /**
+     * 花钱的和"问一问"的都交回给现成的那条路 ——
+     * 预检、估算、停下来那一整套已经在那儿了，指令框不另起炉灶。
+     * 另起一套的话，那几道闸门就会有一条绕过它们的近路。
+     */
+    close();
+    if (plan.verb === 'run') {
+      toast(`到「流水线」按清单开始 —— ${plan.say}`, 'ok');
+      goTab('flow');
+      return;
+    }
+    if (plan.verb === 'ask' && plan.targets?.length === 1) {
+      const s = (project.shots || []).find((x) => x.id === plan.targets[0]);
+      if (s) { openWhy(s, true); return; }
+    }
+    toast(plan.say, 'ok');
+    goTab('flow');
+  };
+
+  return h('div', { class: 'sheet-card' },
+    h('h3', {}, '说一句话'),
+    box,
+    preview,
+    h('div', { class: 'row', style: 'margin-top:10px' }, go),
+    h('div', { class: 'muted', style: 'margin-top:10px;font-size:12px' },
+      '它只会做你本来就能做的事，做之前先摆给你看。'),
+    /**
+     * 例子是**可点的模板**，而且镜号人名全取自你自己的分镜表 ——
+     * 写死"第 6-12 镜"的话，在一个只有 2 镜的项目里点下去选不到任何东西，
+     * 而那是用户对这个功能的第一印象。服务端 examplesFor 已经按项目算好，
+     * 随任意一次解析回来（看不懂时那份就是给这儿用的）。
+     */
+    egs);
+}
+
 function linkRangeCard(shots) {
   const from = h('input', { type: 'number', min: 1, value: '1', style: 'width:80px' });
   const to = h('input', { type: 'number', min: 1, value: String(shots.length) , style: 'width:80px' });
@@ -2269,7 +2406,20 @@ function paintShots() {
     h('button', {
       class: 'fchip icon',
       onclick: () => openSheet(linkRangeCard(shots))
-    }, '⋯'));
+    }, '⋯'),
+    /**
+     * 指令框的入口。放在筛选条上，因为它做的正是筛选条做不到的那半件事：
+     * 筛选只能"看哪些"，它能"对这些做什么"。
+     */
+    h('button', {
+      class: 'fchip icon',
+      onclick: () => {
+        // openSheet 回的是 { close } —— 卡片要自己关掉自己，所以得先拿到它
+        const box = h('div');
+        const { close } = openSheet(box);
+        box.append(commandCard(close));
+      }
+    }, '⌘'));
 
   /**
    * 场次分隔条。手机上一屏只看得见一两镜，边界更容易被漏掉 ——

@@ -1822,3 +1822,22 @@ select.mini {
   .spend-row { grid-template-columns: 56px 1fr auto; font-size: 12px; }
   .rate-who { flex-basis: 100%; }
 }
+
+/* ── 指令框 ──
+   预览区三种色：看不懂(alarm) / 免费改(good) / 要花钱(caution)。
+   花钱不用 alarm —— alarm 是"坏了"，而花钱不是坏事，是要你多看一眼。 */
+.cmd-box { margin: 10px 0 14px; }
+.cmd-row { display: flex; gap: 8px; align-items: center; }
+.cmd-input { flex: 1; min-width: 0; }
+.cmd-preview { margin-top: 7px; line-height: 1.6; font-size: 13px; }
+.cmd-preview:empty { display: none; }
+.cmd-preview.ok { color: var(--good); }
+.cmd-preview.bad { color: var(--alarm); }
+.cmd-preview.costly { color: var(--caution); }
+/* 例子是可点的模板，不是装饰：点一下直接填进输入框 */
+.cmd-eg-btn {
+  display: inline-block; margin: 4px 6px 0 0; padding: 2px 9px;
+  border: 1px solid var(--line); border-radius: 999px; background: transparent;
+  color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
+}
+.cmd-eg-btn:hover { border-color: var(--beam); color: var(--ink); }

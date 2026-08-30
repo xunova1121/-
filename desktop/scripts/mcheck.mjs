@@ -14,6 +14,38 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
+/**
+ * ══════════ 汇总行 ══════════
+ *
+ * ⚠ 这一节是被一次真实的误读逼出来的。
+ *
+ * mcheck 原来只逐条打 ✓/✕，**没有汇总**。而另外三层都有一句
+ *「全部通过：N 项」。于是判据在这一层变成了"翻一遍输出自己数"——
+ * 而实际发生的是：只看了 `tail -2`（页面报错那一行），
+ * 两条早就红了的断言躺了整整一轮没人发现。
+ *
+ * 这和这个项目里反复强调的那条是同一件事：**判据必须是
+ * "有没有打出全过"，不是"我数了几个 ✕"**。人会数错，也会不数。
+ *
+ * 做法是拦 console.log 统计，而不是把几十处 ternary 全改一遍 ——
+ * 改几十处的风险比这一小段拦截大得多。
+ */
+let mFail = 0;
+let mPass = 0;
+{
+  const raw = console.log.bind(console);
+  console.log = (...args) => {
+    const line = args.join(' ');
+    if (line.includes('✕')) mFail += 1;
+    else if (line.includes('✓')) mPass += 1;
+    raw(...args);
+  };
+  process.on('exit', () => {
+    raw('\n' + '─'.repeat(50));
+    raw(mFail ? `手机走查 ${mFail} 项未通过（通过 ${mPass} 项）` : `手机走查全过：${mPass} 项`);
+  });
+}
+
 const PW = process.env.PLAYWRIGHT_PATH || 'playwright';
 let chromium; let devices;
 try {
@@ -287,8 +319,18 @@ if ((await novideo.count()) > 0) {
   console.log('   点「缺视频」只剩那一镜：', left === 1 ? '✓' : `✕ 还剩 ${left} 张`);
   console.log('   那一镜身上有问题条：',
     (await page.locator('.shot .prob').count()) >= 1 ? '✓' : '✕ 卡上不说哪儿不对');
+  /**
+   * ⚠ 这一条在卡片改成三层之后**过时了**，而当时没发现 ——
+   * 因为看的是 `tail -2`（页面报错那一行），而 mcheck 没有汇总行，
+   * 它是逐条打 ✓/✕ 的。判据错了，一条真红的断言就这么躺了一轮。
+   *
+   * 新设计里「重出」不在卡面上：卡面只有一颗主按钮「看看为什么」，
+   * 重出排在抽屉里那些原因**下面**——因为它们是先后关系不是并列。
+   * 所以这里验的是"卡面那颗主按钮是该按的那个"，
+   * 而重出按钮由 ⑭ 那一节在抽屉里验。
+   */
   console.log('   主按钮就是该按的那个：',
-    /重出这段视频/.test(await page.locator('.shot .btn.primary').first().innerText().catch(() => '')) ? '✓' : '✕');
+    /看看为什么/.test(await page.locator('.shot .btn.primary').first().innerText().catch(() => '')) ? '✓' : '✕');
   await page.locator('.filterbar .fchip:has-text("全部")').click();
   await page.waitForTimeout(400);
 } else {
@@ -645,7 +687,15 @@ if (sheetUp) {
   await page.locator('.tab', { hasText: '分镜' }).click();
   await page.waitForTimeout(800);
   // 它收在分镜页那排筛选后面的「⋯」里（偶尔用一次的东西不该占掉小半屏）
-  const more = page.locator('.fchip.icon').last();
+  /**
+   * ⚠ 按**图标**认，不要用 .last()。
+   *
+   * 原来筛选条上只有一个图标按钮，.last() 正好是「⋯」。后来加了指令框的
+   * 「⌘」，.last() 就变成了它 —— 于是这一节点开的是指令框，
+   * 然后报「分镜页上找不到整段标衔接」，看起来像接缝功能没了。
+   * 位置型选择器在界面长出新东西时会这样静默指错地方。
+   */
+  const more = page.locator('.fchip.icon', { hasText: '⋯' }).first();
   if (await more.count()) {
     await more.scrollIntoViewIfNeeded();
     await more.click({ force: true });
@@ -884,7 +934,15 @@ await page.waitForTimeout(800);
 await page.locator('.tab', { hasText: '分镜' }).click();
 await page.waitForTimeout(800);
 {
-  const txt = await page.locator('.shot').first().innerText().catch(() => '');
+  /**
+   * ⚠ 用 textContent 不用 innerText。
+   *
+   * 参考图那一行在卡片改成三层之后收进了折叠的「详情」，
+   * 而 innerText 对**没渲染出来**的内容返回空串 —— 于是这一条从那次
+   * 改版起就一直是红的，看起来像"手机上不说带没带参考图了"，
+   * 其实只是这条断言看不见折起来的部分。收起来 ≠ 删掉。
+   */
+  const txt = await page.locator('.shot').first().evaluate((el) => el.textContent || '').catch(() => '');
   const said = /出图带了参考图|张图可以带|还没有图|早前出的/.test(txt);
   console.log('⑫ 手机上说得出这一镜带没带参考图：', said ? '✓' : `✕ ${txt.slice(0, 120)}`);
   /**
@@ -953,6 +1011,64 @@ const realErrs = errs.filter((e) => !/401/.test(e));
   await page.waitForTimeout(300);
   console.log('   点开之后参考图那行还在（藏起来 ≠ 删掉）：',
     /参考图|还没有图|早前出的/.test(await more.innerText()) ? '✓' : `✕ ${(await more.innerText()).slice(0, 40)}`);
+}
+
+/**
+ * ⑮ 指令框（手机端）
+ *
+ * ⚠ 手机端更需要它 —— 51 张卡翻起来最费手的就是手机，批量操作在小屏上
+ * 几乎没法做。所以这一节验的不是"元素在不在"，是那条
+ * 输入 → 请求 → 预览 → 按钮变样 的链**在手机上也整条通**。
+ */
+{
+  console.log('\n⑮ 指令框：');
+  const chip = page.locator('.fchip.icon', { hasText: '⌘' }).first();
+  console.log('   筛选条上有入口：', (await chip.count()) === 1 ? '✓' : '✕');
+  await chip.click();
+  await page.waitForTimeout(600);
+  const ta = page.locator('.sheet textarea.mta').first();
+  console.log('   点开是个输入框：', (await ta.count()) === 1 ? '✓' : '✕');
+
+  // 例子按项目生成，先看它填没填上
+  const egs = page.locator('.cmd-eg .fchip');
+  const egN = await egs.count();
+  console.log('   给了可点的例子：', egN > 0 ? `✓ ${egN} 条` : '✕');
+
+  await ta.fill('第 1 镜改成特写');
+  await page.waitForTimeout(1200);
+  const prev = page.locator('.sheet .cmd-preview').first();
+  const said = (await prev.textContent()) || '';
+  console.log('   预览说清了要做什么：', /特写/.test(said) ? `✓ ${said.slice(0, 26)}` : `✕ ${said.slice(0, 40)}`);
+  const btn = page.locator('.sheet .cmd-preview ~ .row button').first();
+  console.log('   执行按钮可按：', !(await btn.isDisabled()) ? '✓' : '✕');
+
+  await ta.fill('哦豁');
+  await page.waitForTimeout(1200);
+  console.log('   看不懂时说看不懂：',
+    ((await prev.getAttribute('class')) || '').includes('bad') ? '✓' : '✕');
+  console.log('   而且按钮不可按（绝不执行没听懂的指令）：',
+    (await page.locator('.sheet .cmd-preview ~ .row button').first().isDisabled()) ? '✓' : '✕');
+
+  // 真按一次，验它确实改到了分镜
+  await ta.fill('第 1 镜改成特写');
+  await page.waitForTimeout(1200);
+  await page.locator('.sheet .cmd-preview ~ .row button').first().click();
+  await page.waitForTimeout(1500);
+  const gone = (await page.locator('.sheet').count()) === 0;
+  console.log('   改完把抽屉关掉：', gone ? '✓' : '✕');
+  /**
+   * ⚠ 改完要**真的改到了**，不是只把抽屉关掉。
+   * 只验"抽屉关了"的话，一个什么都不做、按完就关的按钮照样能过。
+   * 这里回列表看第 1 镜的景别标签。
+   */
+  console.log('   页面回到分镜列表：',
+    (await page.locator('.shot-desc.tappable').count()) > 0 ? '✓' : '✕');
+  /**
+   * ⚠ 用 textContent 不用 innerText。景别标签收在折叠的「详情」里，
+   * 而 innerText 对**没渲染出来**的内容返回空串 —— 这个坑这一轮已经踩过一次了。
+   */
+  const listText = await page.locator('#app').evaluate((el) => el.textContent || '');
+  console.log('   第 1 镜真的变成特写了：', /特写/.test(listText) ? '✓' : '✕ 列表里找不到「特写」');
 }
 
 console.log('意料之外的 4xx：', unexpected4xx.length ? `✕ ${unexpected4xx.slice(0, 4).join('、')}` : '无 ✓');

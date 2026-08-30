@@ -12,6 +12,7 @@ import { skillPicker, customSkillForm } from '../skill-picker.js';
 import { previzPanel, blankStage } from '../previz-canvas.js';
 import { shotTable } from '../shot-table.js';
 import { animatic } from '../animatic.js';
+import { commandBox } from '../command-box.js';
 import * as siteCanvasMod from '../site-canvas.js';
 import * as OUTLINE from '/outline.js';
 import { inheritStage } from '/previz.js';
@@ -2843,6 +2844,22 @@ export default {
                 '↑↓ 移动 · 空格选中 · Shift+↑↓ 连选 · 回车打开 · Esc 清空')
             : null)
       );
+
+      /**
+       * 指令框紧跟视图切换条 —— 和表格视图**互相印证**：
+       * 指令说"第 6-12 镜"，表格里就该看见那 7 行。
+       * 分开放的话，用户没法确认它选的和他想的是不是同一批，
+       * 而"选错一批然后批量改"是这个框最坏的失败方式。
+       */
+      // cap:command-box
+      shotHost.append(commandBox(project, {
+        onDone: () => rerender(),
+        onGo: (stage) => {
+          if (!stage) return;
+          state.stage = stage;
+          rerender();
+        }
+      }));
 
       if (state.shotView === 'play') {
         const sortedAll = project.shots.slice().sort((a, b) => a.index - b.index);

@@ -1793,6 +1793,79 @@ console.log('\n在跑的时候不该能再点一次');
  * 用户："卡片下面的功能都太杂太乱了"。
  * ⚠ 这几条守的是**克制** —— 下次再有人往卡面上摊一块信息，这里会红。
  */
+/**
+ * ══════════ 指令框 ══════════
+ *
+ * ⚠ 这一节必须**真的往框里打字**，不能只验"元素在不在"。
+ *
+ * 这个框的价值全在"执行前先摆出要做什么"那一步 —— 而那一步是
+ * 输入 → 请求 → 预览 → 按钮变样这一整条链。链上任何一环断了，
+ * 页面都不会报错，框还在，只是永远不出预览。
+ * 只验元素存在的话，那种断法一次都抓不到。
+ */
+console.log('\n指令框：打进去要能看见它理解成了什么');
+{
+  await page.goto(`${url}#/studio/${proj.id}`);
+  await page.waitForTimeout(1000);
+  await page.locator('.nav-step', { hasText: '镜头出图' }).first().click();
+  await page.waitForTimeout(900);
+
+  const input = page.locator('.cmd-input').first();
+  check('指令框在', (await input.count()) === 1);
+
+  await input.fill('第 1-3 镜改成中景');
+  // 250ms 防抖 + 一次请求
+  await page.waitForTimeout(1200);
+  const prev = page.locator('.cmd-preview').first();
+  const said = (await prev.textContent()) || '';
+  check(`预览说清楚了要做什么（${said.slice(0, 40)}）`, /景别/.test(said) && /中景/.test(said));
+  check('预览里带了镜数，不是光说"改一批"', /\d+\s*镜/.test(said));
+  /** 改文字不花钱 —— 不该被标成要花钱那一档，否则用户每次都被吓一下 */
+  check('免费的动作不标成花钱', !(await prev.getAttribute('class') || '').includes('costly'));
+
+  const btn = page.locator('.cmd-box button').first();
+  check('执行按钮上写的是这次动几镜，不是"确定"', /镜/.test((await btn.textContent()) || ''));
+  check('而且是可按的', !(await btn.isDisabled()));
+
+  // ── 花钱的那一类要变色 ──
+  await input.fill('把缺视频的都跑了');
+  await page.waitForTimeout(1200);
+  check('要花钱的动作，预览换成警示色',
+    ((await prev.getAttribute('class')) || '').includes('costly'));
+  check('并且说明按下去只是跳过去，还要再过一遍预检',
+    /预检|估算/.test((await prev.textContent()) || ''));
+
+  // ── 看不懂时不许装懂 ──
+  await input.fill('哦豁');
+  await page.waitForTimeout(1200);
+  check('看不懂时说看不懂', ((await prev.getAttribute('class')) || '').includes('bad'));
+  check('按钮变成不可按（绝不让它执行一个没听懂的指令）',
+    await page.locator('.cmd-box button').first().isDisabled());
+  check('并且给了能直接点的例子', (await page.locator('.cmd-eg-btn').count()) > 0);
+  /**
+   * 例子是可点的模板，不是装饰。
+   *
+   * ⚠ 而且例子里的镜号必须取自**这个项目** —— 第一版写死了"第 6-12 镜"，
+   * 而走查夹具只有 2 镜，点下去选不到任何东西。用户第一次点例子就撞墙，
+   * 那是他对这个功能的第一印象。这条断言就是在那儿撞出来的。
+   */
+  const egText = (await page.locator('.cmd-eg-btn').allTextContents()).join(' ');
+  const shotCount = await page.locator('.shot-card').count();
+  /**
+   * ⚠ 抓**所有**数字，不是"第"后面那一个。
+   * 第一版写的是 /第\s*(\d+)/，而"第 1-3 镜"里它只抓得到 1 ——
+   * 于是这条断言碰巧过了，而真正越界的那个 3 从来没被看过。
+   * 一条只检查一半的断言，绿着也只是绿着。
+   */
+  const nums = [...egText.matchAll(/\d+/g)].map((m) => Number(m[0]));
+  const tooBig = nums.filter((n) => n > shotCount);
+  check(`例子里的镜号都在这 ${shotCount} 镜之内（例子：${egText.slice(0, 40)}）`, tooBig.length === 0);
+  await page.locator('.cmd-eg-btn').first().click();
+  await page.waitForTimeout(1200);
+  check('点一下例子就填进去了，而且解析得出来',
+    !((await prev.getAttribute('class')) || '').includes('bad'));
+}
+
 console.log('\n镜头卡的分层');
 {
   /**
