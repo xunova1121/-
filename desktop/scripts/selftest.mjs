@@ -11012,7 +11012,8 @@ section('工业化升级：实例路由、任务账本和控制图');
   check('成果图由 Electron 实际页面和 Three.js 画布截图生成',
     /capturePage\(\)/.test(captureSource)
       && /querySelectorAll\('canvas'\)/.test(captureSource)
-      && /3D导演预演台/.test(captureSource));
+      && /3D导演预演台/.test(captureSource)
+      && /app\.exit\(exitCode\)/.test(captureSource));
   const captureWorkflow = fs.readFileSync(path.resolve(PROJECT_ROOT, '../.github/workflows/capture-previz.yml'), 'utf8');
   check('真实预演台截图可在 Windows 构建机手动生成并发布',
     /workflow_dispatch/.test(captureWorkflow)
