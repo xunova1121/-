@@ -11014,6 +11014,11 @@ section('工业化升级：实例路由、任务账本和控制图');
       && /querySelectorAll\('canvas'\)/.test(captureSource)
       && /3D导演预演台/.test(captureSource)
       && /app\.exit\(exitCode\)/.test(captureSource));
+  const previzDemo = fs.readFileSync(path.join(PROJECT_ROOT, 'ui', 'previz-demo.html'), 'utf8');
+  check('真实预演演示不依赖外部 CDN，离线 EXE 和构建机都能加载',
+    /"three":"\/three\.js"/.test(previzDemo)
+      && /"\/previz\.js":"\/previz\.js"/.test(previzDemo)
+      && !/esm\.sh|cdn\.jsdelivr\.net/.test(previzDemo));
   const captureWorkflow = fs.readFileSync(path.resolve(PROJECT_ROOT, '../.github/workflows/capture-previz.yml'), 'utf8');
   check('真实预演台截图可在 Windows 构建机手动生成并发布',
     /workflow_dispatch/.test(captureWorkflow)

@@ -70,6 +70,7 @@ jobs:
           if ($file.Length -lt 50000) { throw "截图异常小：$($file.Length) bytes" }
           Write-Host "截图大小：$([math]::Round($file.Length / 1KB, 1)) KB"
       - name: 上传真实预演台成果图
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: FutureDream-Previz-Stage4
