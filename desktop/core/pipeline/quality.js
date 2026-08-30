@@ -53,7 +53,10 @@ const LEVELS = ['blocker', 'warn', 'note'];
 /** 审批必须绑定到当前素材版本；重出或改文案后，旧签字不能继续放行。 */
 export function reviewRevision(shot = {}) {
   const last = (shot.generationHistory || []).at(-1);
-  return [shot.imagePath || '', shot.videoPath || '', shot.editedAt || '', last?.at || ''].join('|');
+  return [
+    shot.imagePath || '', shot.videoPath || '', shot.editedAt || '',
+    shot.controls?.at || '', shot.controls?.manifest || '', last?.at || ''
+  ].join('|');
 }
 
 function add(items, level, o) {

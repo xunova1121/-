@@ -10986,6 +10986,27 @@ section('工业化升级：实例路由、任务账本和控制图');
   const serverSource = fs.readFileSync(path.join(PROJECT_ROOT, 'core', 'server.js'), 'utf8');
   check('控制包导出后有独立的参考视频回读接口',
     /f === 'reference'/.test(serverSource) && /buildPrevizReferenceVideo/.test(serverSource));
+  const preserveProject = store.create({ title: '预演真实帧保留测试', script: '测试' });
+  const preserveFrame = path.join(store.assetDir(preserveProject.id), '0000.render.jpg');
+  fs.writeFileSync(preserveFrame, Buffer.alloc(256, 7));
+  store.update(preserveProject.id, (p) => {
+    p.shots = [{
+      id: 'shot-preserve', index: 1, duration: 2,
+      stage: { cam: { id: 'cam-main', x: 0, y: -3, height: 1.6, lens: 35 }, subjects: [{ id: 'actor-a', name: '阿澜', x: 0, y: 0, height: 1.72 }], marks: [], lights: [], keyframes: [] },
+      controls: { renderSequenceDir: path.dirname(preserveFrame), renderedSequence: [{ frame: 0, time: 0, file: preserveFrame }] }
+    }];
+    return p;
+  });
+  const preservedControls = studioModule.exportShotControls(preserveProject.id, 'shot-preserve').controls;
+  check('视频生成前重算轨迹不会清空已渲染的真实WebGL帧',
+    preservedControls.renderedSequence.length === 1 && preservedControls.renderedSequence[0].file === preserveFrame);
+  const qualityModule = await import('../core/pipeline/quality.js');
+  const reviewA = qualityModule.reviewRevision({ controls: { at: 'a', manifest: 'm' } });
+  const reviewB = qualityModule.reviewRevision({ controls: { at: 'b', manifest: 'm' } });
+  check('重新渲染3D控制包会让旧审片签字自动失效', reviewA !== reviewB);
+  check('3D预演控制包进入镜头生产清单',
+    /kind: 'previz'/.test(studioSource)
+      && /3D预演控制包/.test(fs.readFileSync(path.join(PROJECT_ROOT, 'ui', 'views', 'studio.js'), 'utf8')));
 }
 
 section('根地址：手机去手机版，电脑留电脑版');

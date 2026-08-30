@@ -1525,12 +1525,15 @@ export default {
               const box = h('div', { class: 'shot-manifest' },
                 h('b', {}, `第 ${shot.index} 镜生产清单`),
                 rows.length ? rows.map((x) => h('details', {},
-                  h('summary', {}, `${x.kind === 'video' ? '视频' : '图片'} · ${x.provider} / ${x.model} · ${new Date(x.at).toLocaleString('zh-CN')}`),
+                  h('summary', {}, `${x.kind === 'video' ? '视频' : x.kind === 'previz' ? '3D预演控制包' : '图片'} · ${x.provider} / ${x.model} · ${new Date(x.at).toLocaleString('zh-CN')}`),
                   h('div', { class: 'shot-prompt-body' },
                     x.seed !== undefined ? `种子：${x.seed}\n` : '',
                     x.resolution ? `清晰度：${x.resolution}\n` : '',
+                    x.renderedFrames ? `真实3D帧：${x.renderedFrames} 张 · ${x.controlFps || '—'}fps · ${x.keyframes || 0} 个关键帧\n` : '',
+                    x.controlReferenceAccess ? `秘塔参考回读：${x.controlReferenceAccess.ok ? `通过（HTTP ${x.controlReferenceAccess.status}，${x.controlReferenceAccess.latencyMs}ms）` : `失败（${x.controlReferenceAccess.status ? `HTTP ${x.controlReferenceAccess.status}` : x.controlReferenceAccess.message || x.controlReferenceAccess.code}）`}\n` : '',
                     x.refs?.length ? `参考：${x.refs.join('、')}\n` : '',
-                    `提示词：${x.prompt || '—'}\n产物：${x.output || '—'}`)
+                    x.prompt ? `提示词：${x.prompt}\n` : '',
+                    `产物：${x.output || '—'}${x.controlReferenceVideo ? `\n参考视频：${x.controlReferenceVideo}` : ''}`)
                 )) : h('div', { class: 'field-hint' }, '旧版本还没有生产清单；下一次单镜重出开始自动记录。'));
               editor.querySelector('.shot-manifest')?.remove();
               editor.append(box); openEdit(); box.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1539,7 +1542,8 @@ export default {
         }, '生产清单');
 
         const reviewCurrent = shot.review && shot.review.revision === [
-          shot.imagePath || '', shot.videoPath || '', shot.editedAt || '', (shot.generationHistory || []).at(-1)?.at || ''
+          shot.imagePath || '', shot.videoPath || '', shot.editedAt || '',
+          shot.controls?.at || '', shot.controls?.manifest || '', (shot.generationHistory || []).at(-1)?.at || ''
         ].join('|');
         const reviewBtn = h('button', {
           class: `shot-edit-btn ${reviewCurrent && shot.review.status === 'approved' ? 'ok' : ''}`,

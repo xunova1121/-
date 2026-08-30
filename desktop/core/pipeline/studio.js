@@ -2903,7 +2903,7 @@ export function exportShotControls(projectId, shotId, stageOverride = null, rend
     }
     return { frame: frame.frame, time: frame.time, maps };
   });
-  const renderedSequence = [];
+  let renderedSequence = [];
   if (Array.isArray(renderedSequenceData) && renderedSequenceData.length) {
     if (renderedSequenceData.length > 64) throw new Error('3D逐帧预演最多接收64帧，请降低采样率后重试');
     fs.mkdirSync(renderSequenceDir, { recursive: true });
@@ -2919,7 +2919,12 @@ export function exportShotControls(projectId, shotId, stageOverride = null, rend
       fs.writeFileSync(file, bytes);
       renderedSequence.push({ frame: Number(source.frame || 0), time: Number(source.time || 0), file });
     }
+  } else {
+    // 视频生成前会重新计算轨迹控制，但那次调用发生在服务端，没有浏览器 WebGL 帧。
+    // 不能因此把用户刚在预演台渲染好的真实序列清空；只复用仍真实存在的文件。
+    renderedSequence = (shot.controls?.renderedSequence || []).filter((item) => item?.file && fs.existsSync(item.file));
   }
+  versions.archive(files.manifest);
   fs.writeFileSync(files.manifest, JSON.stringify({
     schema: 'futuredream-control-bundle/v3', fps: rendered.fps, controlFps: rendered.controlFps,
     sampleEvery: rendered.sampleEvery, width: rendered.width, height: rendered.height,
@@ -2940,6 +2945,14 @@ export function exportShotControls(projectId, shotId, stageOverride = null, rend
       layers: rendered.layers, objects: rendered.objects, issues: rendered.issues,
       sequenceDir, sequence, renderSequenceDir: renderedSequence.length ? renderSequenceDir : '', renderedSequence,
       controlFps: rendered.controlFps, sampleEvery: rendered.sampleEvery, at: new Date().toISOString() };
+    if (Array.isArray(renderedSequenceData) && renderedSequenceData.length) {
+      recordGeneration(target, {
+        kind: 'previz', provider: 'local', model: 'Three.js WebGL + FFmpeg',
+        output: files.manifest, controlManifest: files.manifest,
+        renderedFrames: renderedSequence.length, controlFps: rendered.controlFps,
+        keyframes: rendered.keyframes?.length || 0
+      });
+    }
     return p;
   });
   return { project: updated, controls: updated.shots.find((x) => x.id === shotId).controls };
@@ -3001,6 +3014,7 @@ export async function buildPrevizReferenceVideo(projectId, shot, controls, { onE
   const output = path.join(store.assetDir(projectId), `${shot.id}.control-motion.mp4`);
   const pattern = path.join(controls.renderSequenceDir, '%04d.render.jpg');
   try {
+    versions.archive(output);
     await ffmpeg.run([
       '-y', '-framerate', String(controls.controlFps || 8), '-i', pattern,
       '-vf', 'fps=24,format=yuv420p', '-c:v', 'libx264', '-preset', 'veryfast',
@@ -3018,7 +3032,16 @@ export async function buildPrevizReferenceVideo(projectId, shot, controls, { onE
     const access = await probePrevizReferenceUrl(url);
     store.update(projectId, (p) => {
       const target = p.shots.find((item) => item.id === shot.id);
-      if (target?.controls) target.controls.referenceAccess = access;
+      if (target?.controls) {
+        target.controls.referenceAccess = access;
+        target.controls.referenceVideoPath = output;
+      }
+      const history = target?.generationHistory || [];
+      const entry = [...history].reverse().find((item) => item.kind === 'previz' && item.controlManifest === controls.manifest);
+      if (entry) {
+        entry.controlReferenceVideo = output;
+        entry.controlReferenceAccess = access;
+      }
       return p;
     });
     if (!access.ok) {
