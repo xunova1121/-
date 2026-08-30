@@ -2864,7 +2864,7 @@ function recordGeneration(shot, entry) {
   if (shot.generationHistory.length > 40) shot.generationHistory.splice(0, shot.generationHistory.length - 40);
 }
 
-export function exportShotControls(projectId, shotId, stageOverride = null, renderedFrameDataUrl = '') {
+export function exportShotControls(projectId, shotId, stageOverride = null, renderedFrameDataUrl = '', renderedSequenceData = []) {
   const project = store.read(projectId);
   const shot = project?.shots?.find((x) => x.id === shotId);
   if (!shot) throw new Error(`没有这一镜：${shotId}`);
@@ -2873,6 +2873,7 @@ export function exportShotControls(projectId, shotId, stageOverride = null, rend
   const rendered = renderControls(stage, { duration: shot.duration || 5 });
   const dir = store.assetDir(projectId);
   const sequenceDir = path.join(dir, `${shot.id}.control-frames`);
+  const renderSequenceDir = path.join(dir, `${shot.id}.previz-frames`);
   fs.mkdirSync(sequenceDir, { recursive: true });
   const files = {
     rendered: path.join(dir, `${shot.id}.previz-render.png`),
@@ -2902,11 +2903,30 @@ export function exportShotControls(projectId, shotId, stageOverride = null, rend
     }
     return { frame: frame.frame, time: frame.time, maps };
   });
+  const renderedSequence = [];
+  if (Array.isArray(renderedSequenceData) && renderedSequenceData.length) {
+    if (renderedSequenceData.length > 64) throw new Error('3D逐帧预演最多接收64帧，请降低采样率后重试');
+    fs.mkdirSync(renderSequenceDir, { recursive: true });
+    let totalBytes = 0;
+    for (let index = 0; index < renderedSequenceData.length; index += 1) {
+      const source = renderedSequenceData[index] || {};
+      const match = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/s.exec(String(source.data || ''));
+      if (!match) throw new Error(`第${index + 1}张3D预演帧不是JPEG图像`);
+      const bytes = Buffer.from(match[1], 'base64');
+      totalBytes += bytes.length;
+      if (bytes.length < 128 || totalBytes > 40 * 1024 * 1024) throw new Error('3D逐帧预演数据无效或总量超过40MB');
+      const file = path.join(renderSequenceDir, `${String(index).padStart(4, '0')}.render.jpg`);
+      fs.writeFileSync(file, bytes);
+      renderedSequence.push({ frame: Number(source.frame || 0), time: Number(source.time || 0), file });
+    }
+  }
   fs.writeFileSync(files.manifest, JSON.stringify({
-    schema: 'futuredream-control-bundle/v2', fps: rendered.fps, controlFps: rendered.controlFps,
+    schema: 'futuredream-control-bundle/v3', fps: rendered.fps, controlFps: rendered.controlFps,
     sampleEvery: rendered.sampleEvery, width: rendered.width, height: rendered.height,
     maxFrame: rendered.maxFrame, keyframes: rendered.keyframes, cameraTrajectory: rendered.trajectory,
-    poseSequence: rendered.poseSequence, motionPaths: rendered.motionPaths, lightSequence: rendered.lightSequence, layers: rendered.layers, sequence,
+    focusSequence: rendered.focusSequence, poseSequence: rendered.poseSequence, motionPaths: rendered.motionPaths,
+    lightSequence: rendered.lightSequence, attachmentSequence: rendered.attachmentSequence,
+    layers: rendered.layers, sequence, renderedSequence,
     issues: rendered.issues,
     maps: Object.fromEntries(['rendered', 'start', 'end', 'depth', 'mask', 'edge', 'pose'].filter((key) => files[key]).map((key) => [key, files[key]]))
   }, null, 2), 'utf8');
@@ -2915,8 +2935,11 @@ export function exportShotControls(projectId, shotId, stageOverride = null, rend
     target.stage = stage;
     target.controls = { ...files, width: rendered.width, height: rendered.height, fps: rendered.fps,
       maxFrame: rendered.maxFrame, keyframes: rendered.keyframes, trajectory: rendered.trajectory,
-      poseSequence: rendered.poseSequence, motionPaths: rendered.motionPaths, lightSequence: rendered.lightSequence, layers: rendered.layers, objects: rendered.objects, issues: rendered.issues,
-      sequenceDir, sequence, controlFps: rendered.controlFps, sampleEvery: rendered.sampleEvery, at: new Date().toISOString() };
+      focusSequence: rendered.focusSequence, poseSequence: rendered.poseSequence, motionPaths: rendered.motionPaths,
+      lightSequence: rendered.lightSequence, attachmentSequence: rendered.attachmentSequence,
+      layers: rendered.layers, objects: rendered.objects, issues: rendered.issues,
+      sequenceDir, sequence, renderSequenceDir: renderedSequence.length ? renderSequenceDir : '', renderedSequence,
+      controlFps: rendered.controlFps, sampleEvery: rendered.sampleEvery, at: new Date().toISOString() };
     return p;
   });
   return { project: updated, controls: updated.shots.find((x) => x.id === shotId).controls };
@@ -2924,13 +2947,16 @@ export function exportShotControls(projectId, shotId, stageOverride = null, rend
 
 /** 把逐帧预演控制图烘成秘塔 H3 可直接读取的运动参考视频。 */
 export async function buildPrevizReferenceVideo(projectId, shot, controls, { onEvent } = {}) {
-  if (!controls?.sequenceDir || !controls.sequence?.length) return null;
+  if (!controls?.renderSequenceDir || !controls.renderedSequence?.length) {
+    onEvent?.({ type: 'note', shotId: shot.id, message: '本镜尚未渲染真实3D逐帧预演：秘塔 H3 仅接收轨迹提示词；请先在预演台点击“渲染3D视频控制包”' });
+    return null;
+  }
   if (!ffmpeg.locate().available) {
     onEvent?.({ type: 'note', shotId: shot.id, message: '未检测到 FFmpeg：秘塔 H3 本镜先按轨迹提示词生成，未注入3D预演运动参考视频' });
     return null;
   }
   const output = path.join(store.assetDir(projectId), `${shot.id}.control-motion.mp4`);
-  const pattern = path.join(controls.sequenceDir, '%04d.rgb.svg');
+  const pattern = path.join(controls.renderSequenceDir, '%04d.render.jpg');
   try {
     await ffmpeg.run([
       '-y', '-framerate', String(controls.controlFps || 8), '-i', pattern,
@@ -2946,8 +2972,8 @@ export async function buildPrevizReferenceVideo(projectId, shot, controls, { onE
       onEvent?.({ type: 'note', shotId: shot.id, message: '3D预演运动视频已烘焙，但秘塔 H3 需要可拉取的 URL；请配置上传网关或对象存储，本镜暂按轨迹提示词降级' });
       return null;
     }
-    onEvent?.({ type: 'note', shotId: shot.id, message: `已向秘塔 H3 注入3D预演运动参考视频（${controls.sequence.length} 个控制采样）` });
-    return { url, role: 'reference_video', label: '3D预演运动参考', path: output };
+    onEvent?.({ type: 'note', shotId: shot.id, message: `已向秘塔 H3 注入真实3D预演参考视频（${controls.renderedSequence.length} 个WebGL渲染帧）` });
+    return { url, role: 'reference_video', label: '真实3D预演参考', path: output, source: 'webgl' };
   } catch (err) {
     onEvent?.({ type: 'note', shotId: shot.id, message: `3D预演运动参考视频未注入（${err.message}），本镜仍按轨迹提示词生成` });
     return null;

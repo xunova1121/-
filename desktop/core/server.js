@@ -1247,7 +1247,9 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
     if (b && c === 'shots' && d && e === 'controls' && method === 'POST') {
       try {
         const body = await readBody(req);
-        return json(res, 200, studio.exportShotControls(b, d, body.stage || null, body.renderedFrame || ''));
+        return json(res, 200, studio.exportShotControls(
+          b, d, body.stage || null, body.renderedFrame || '', body.renderedSequence || []
+        ));
       } catch (err) {
         return json(res, 400, { error: err.message });
       }

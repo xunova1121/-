@@ -1629,13 +1629,18 @@ export default {
             ],
             onExportControls: async (stage, capture = {}) => {
               const r = await api(`/projects/${project.id}/shots/${shot.id}/controls`, {
-                method: 'POST', body: { stage, renderedFrame: capture.renderedFrame || '' }
+                method: 'POST', body: {
+                  stage,
+                  renderedFrame: capture.renderedFrame || '',
+                  renderedSequence: capture.renderedSequence || []
+                }
               });
               const v = Date.now();
               return {
                 previews: Object.fromEntries(['rendered', 'start', 'end', 'depth', 'pose', 'edge', 'mask']
                   .filter((key) => r.controls[key]).map((key) => [key, `${mediaUrl(r.controls[key])}&v=${v}`])),
                 frameCount: r.controls.sequence?.length || 0,
+                renderedFrameCount: r.controls.renderedSequence?.length || 0,
                 controlFps: r.controls.controlFps || 0,
                 issues: r.controls.issues || [],
                 manifest: r.controls.manifest ? `${mediaUrl(r.controls.manifest)}&v=${v}` : ''

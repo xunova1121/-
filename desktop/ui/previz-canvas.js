@@ -28,7 +28,7 @@ import { GLTFLoader } from '/three-gltf-loader.js';
 import { OrbitControls } from '/three-orbit-controls.js';
 import { TransformControls } from '/three-transform-controls.js';
 import { clone as cloneSkeleton } from '/three-skeleton-utils.js';
-import { addKeyframe, applyFrame, attachmentPose, createHistory, findObject, normalizeStage, snapToGround, spatialIssues, stageObjects } from './previz-stage.js';
+import { addKeyframe, applyFrame, attachmentPose, createHistory, findObject, normalizeStage, restore, snapToGround, snapshot, spatialIssues, stageObjects } from './previz-stage.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -413,7 +413,8 @@ export function director3dCanvas(stage, {
     return {
       node: host,
       redraw: fallback.redraw,
-      capture: () => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(fallback.node))}`
+      capture: () => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(fallback.node))}`,
+      captureSequence: async () => []
     };
   }
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
@@ -903,20 +904,48 @@ export function director3dCanvas(stage, {
   host.ondragover = (ev) => ev.preventDefault();
   host.ondrop = (ev) => { ev.preventDefault(); try { onAssetDrop(JSON.parse(ev.dataTransfer.getData('application/x-futuredream-asset')), hitGround(ev)); } catch {} };
   new ResizeObserver(redraw).observe(host); redraw();
-  const capture = (type = 'image/png', quality) => {
+  const capture = (type = 'image/png', quality, { width = 1280, height = 720 } = {}) => {
     capturing = true; redraw();
     // 生成模型需要的是镜头真正看到的画面，不是导演在舞台外观察的工作视角。
     const rect = host.getBoundingClientRect(), restoreW = Math.max(320, rect.width || size), restoreH = Math.max(230, rect.height || size * .72);
     transformHelper.visible = false;
-    renderer.setSize(1280, 720, false);
-    renderDofPreview(1280, 720);
+    renderer.setSize(width, height, false);
+    renderDofPreview(width, height);
     const data = dofCanvas.toDataURL(type, quality);
     renderer.setSize(restoreW, restoreH, false);
     capturing = false; redraw();
     transformHelper.visible = viewMode === 'director'; renderNow();
     return data;
   };
-  return { node: host, redraw, capture };
+  const captureSequence = async ({ duration = 5, fps = 8, width = 640, height = 360, quality = .76, onProgress = () => {} } = {}) => {
+    const before = snapshot(stage);
+    const sourceFps = 24;
+    const maxFrame = Math.max(1, Math.round(Number(duration || 5) * sourceFps));
+    const step = Math.max(1, Math.round(sourceFps / Math.max(1, Number(fps || 8))));
+    const frames = [];
+    try {
+      for (let frame = 0; frame <= maxFrame; frame += step) {
+        applyFrame(stage, Math.min(frame, maxFrame));
+        redraw();
+        // 把 WebGL/贴图重绘机会交还一帧；否则连续采样可能全部截成同一画面。
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        frames.push({
+          frame: Math.min(frame, maxFrame),
+          time: Number((Math.min(frame, maxFrame) / sourceFps).toFixed(3)),
+          data: capture('image/jpeg', quality, { width, height })
+        });
+        onProgress(frames.length, Math.floor(maxFrame / step) + 1);
+      }
+      if (frames.at(-1)?.frame !== maxFrame) {
+        applyFrame(stage, maxFrame); redraw(); await new Promise((resolve) => requestAnimationFrame(resolve));
+        frames.push({ frame: maxFrame, time: Number((maxFrame / sourceFps).toFixed(3)), data: capture('image/jpeg', quality, { width, height }) });
+      }
+      return frames;
+    } finally {
+      restore(stage, before); redraw();
+    }
+  };
+  return { node: host, redraw, capture, captureSequence };
 }
 
 /**
@@ -1148,18 +1177,23 @@ export function previzPanel(stage, {
   const controlShelf = document.createElement('div');
   controlShelf.className = 'previz-control-shelf';
   if (onExportControls) {
-    const exportBtn = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '输出可控视频控制包' });
+    const exportBtn = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '渲染3D视频控制包' });
     exportBtn.onclick = async () => {
-      exportBtn.disabled = true; exportBtn.textContent = '正在输出…';
+      exportBtn.disabled = true; exportBtn.textContent = '正在逐帧渲染…';
       try {
         const renderedFrame = director.capture('image/png');
-        const result = await onExportControls(stage, { renderedFrame });
+        const renderedSequence = await director.captureSequence({
+          duration, fps: 8,
+          onProgress: (done, total) => { exportBtn.textContent = `正在逐帧渲染 ${done}/${total}`; }
+        });
+        exportBtn.textContent = '正在保存控制包…';
+        const result = await onExportControls(stage, { renderedFrame, renderedSequence });
         const maps = result?.previews || result;
         controlShelf.replaceChildren(exportBtn);
         if (result?.frameCount) {
           const summary = document.createElement('div');
           summary.className = 'previz-control-summary';
-          summary.textContent = `已输出 ${result.frameCount} 个控制时刻 · ${result.controlFps || '—'}fps · 每个时刻含画面/深度/姿态/边缘/遮罩`;
+          summary.textContent = `已输出 ${result.frameCount} 个控制时刻 · ${result.renderedFrameCount || 0} 张真实3D帧 · ${result.controlFps || '—'}fps · 可烘焙秘塔参考视频`;
           controlShelf.append(summary);
           if (result.manifest) {
             const manifest = document.createElement('a');
@@ -1179,7 +1213,7 @@ export function previzPanel(stage, {
           card.append(Object.assign(document.createElement('img'), { src: maps[key], alt: label }), Object.assign(document.createElement('span'), { textContent: label }));
           controlShelf.append(card);
         }
-      } finally { exportBtn.disabled = false; exportBtn.textContent = '重新输出控制包'; }
+      } finally { exportBtn.disabled = false; exportBtn.textContent = '重新渲染3D控制包'; }
     };
     controlShelf.append(exportBtn);
   }
