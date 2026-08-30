@@ -11024,6 +11024,9 @@ section('工业化升级：实例路由、任务账本和控制图');
     /"three":"\/three\.js"/.test(previzDemo)
       && /"\/previz\.js":"\/previz\.js"/.test(previzDemo)
       && !/esm\.sh|cdn\.jsdelivr\.net/.test(previzDemo));
+  check('Three.js r180 的核心模块有本地路由，不会让整个3D画布因404中止',
+    /url\.pathname === '\/three\.js' \|\| url\.pathname === '\/three\.core\.js'/.test(serverSource)
+      && /three\.core\.js/.test(serverSource));
   const captureWorkflow = fs.readFileSync(path.resolve(PROJECT_ROOT, '../.github/workflows/capture-previz.yml'), 'utf8');
   check('真实预演台截图可在 Windows 构建机手动生成并发布',
     /workflow_dispatch/.test(captureWorkflow)

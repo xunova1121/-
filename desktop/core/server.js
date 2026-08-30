@@ -1791,7 +1791,7 @@ export function createServer({ lan = false } = {}) {
        * 放行的是这两个确切的路径，不是"所有 .js"—— 后者会把电脑版
        * 整套界面代码一起放出去，那不是同一件事。
        */
-      const SHARED_MODULES = ['/previz-canvas.js', '/previz-stage.js', '/site-canvas.js', '/previz.js', '/three.js', '/three-gltf-loader.js', '/three-orbit-controls.js', '/three-transform-controls.js', '/three-buffer-utils.js', '/three-skeleton-utils.js', '/site.js', '/outline.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js', '/pricing.js', '/estimate.js'];
+      const SHARED_MODULES = ['/previz-canvas.js', '/previz-stage.js', '/site-canvas.js', '/previz.js', '/three.js', '/three.core.js', '/three-gltf-loader.js', '/three-orbit-controls.js', '/three-transform-controls.js', '/three-buffer-utils.js', '/three-skeleton-utils.js', '/site.js', '/outline.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js', '/pricing.js', '/estimate.js'];
       const isShell =
         url.pathname === '/m'
         || url.pathname.startsWith('/m/')
@@ -1863,8 +1863,9 @@ export function createServer({ lan = false } = {}) {
           res.end(data);
         });
       }
-      if (url.pathname === '/three.js') {
-        return fs.readFile(path.join(ROOT, 'node_modules', 'three', 'build', 'three.module.js'), (err, data) => {
+      if (url.pathname === '/three.js' || url.pathname === '/three.core.js') {
+        const buildFile = url.pathname === '/three.js' ? 'three.module.js' : 'three.core.js';
+        return fs.readFile(path.join(ROOT, 'node_modules', 'three', 'build', buildFile), (err, data) => {
           if (err) return json(res, 404, { error: '找不到 Three.js，请重新安装应用依赖' });
           res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'public, max-age=31536000' });
           res.end(data);
