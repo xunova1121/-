@@ -11024,6 +11024,7 @@ section('工业化升级：实例路由、任务账本和控制图');
     /workflow_dispatch/.test(captureWorkflow)
       && /msedge\.exe/.test(captureWorkflow)
       && /--enable-webgl/.test(captureWorkflow)
+      && /127\.0\.0\.1:5178\/previz-demo\.html/.test(captureWorkflow)
       && /FutureDream-Previz-Stage4\.png/.test(captureWorkflow));
   check('截图流水线不会顺带重复生成 EXE', !/build:win|electron-builder/.test(captureWorkflow));
 }

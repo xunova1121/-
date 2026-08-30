@@ -3,7 +3,7 @@ import { app, BrowserWindow } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const url = process.env.FD_PREVIZ_URL || 'http://127.0.0.1:5178/ui/previz-demo.html';
+const url = process.env.FD_PREVIZ_URL || 'http://127.0.0.1:5178/previz-demo.html';
 const output = path.resolve(process.env.FD_PREVIZ_SCREENSHOT || 'dist/FutureDream-Previz-Stage4.png');
 const deadline = (promise, ms, label) => Promise.race([
   promise,

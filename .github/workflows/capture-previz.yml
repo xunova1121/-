@@ -53,7 +53,7 @@ jobs:
           $arguments = @(
             '--headless=new', '--enable-webgl', '--ignore-gpu-blocklist',
             '--use-angle=swiftshader', "--screenshot=$output", '--window-size=1600,1100',
-            '--virtual-time-budget=12000', 'http://127.0.0.1:5178/ui/previz-demo.html'
+            '--virtual-time-budget=12000', 'http://127.0.0.1:5178/previz-demo.html'
           )
           $process = Start-Process -FilePath $edge -ArgumentList $arguments -PassThru -NoNewWindow
           if (-not $process.WaitForExit(60000)) {
