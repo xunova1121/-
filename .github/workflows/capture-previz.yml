@@ -1,0 +1,62 @@
+name: 截取真实3D预演台
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/claude-windows-app-upgrade
+    paths:
+      - .github/workflows/capture-previz.yml
+      - desktop/scripts/capture-previz.mjs
+      - desktop/ui/previz-demo.html
+      - desktop/ui/previz-canvas.js
+      - desktop/ui/previz-3d.js
+      - desktop/ui/demo-assets/**
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: 安装 Electron 与 Three.js
+        run: npm install
+      - name: 启动真实应用服务
+        shell: pwsh
+        run: |
+          $process = Start-Process node -ArgumentList 'core/server.js' -WorkingDirectory $PWD -PassThru
+          "FD_SERVER_PID=$($process.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          for ($i = 0; $i -lt 30; $i++) {
+            try {
+              $response = Invoke-WebRequest 'http://127.0.0.1:5178/api/health' -UseBasicParsing
+              if ($response.StatusCode -eq 200) { exit 0 }
+            } catch {}
+            Start-Sleep -Seconds 1
+          }
+          throw '应用服务30秒内未启动'
+      - name: Electron 实机渲染并截图
+        run: npx electron scripts/capture-previz.mjs
+      - name: 核验截图
+        shell: pwsh
+        run: |
+          $file = Get-Item 'dist/FutureDream-Previz-Stage4.png'
+          if ($file.Length -lt 50000) { throw "截图异常小：$($file.Length) bytes" }
+          Write-Host "截图大小：$([math]::Round($file.Length / 1KB, 1)) KB"
+      - name: 发布截图到快照版本
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! gh release view snapshot >/dev/null 2>&1; then
+            gh release create snapshot --title '未来创梦 开发快照' --notes '3D预演台开发快照' --prerelease
+          fi
+          gh release upload snapshot dist/FutureDream-Previz-Stage4.png --clobber

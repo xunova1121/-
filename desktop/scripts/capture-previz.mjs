@@ -1,0 +1,37 @@
+/** Windows 构建机上的真实 Electron/Three.js 预演台截图。 */
+import { app, BrowserWindow } from 'electron';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const url = process.env.FD_PREVIZ_URL || 'http://127.0.0.1:5178/ui/previz-demo.html';
+const output = path.resolve(process.env.FD_PREVIZ_SCREENSHOT || 'dist/FutureDream-Previz-Stage4.png');
+
+await app.whenReady();
+const win = new BrowserWindow({
+  width: 1600,
+  height: 1100,
+  show: false,
+  backgroundColor: '#0c0e13',
+  webPreferences: { backgroundThrottling: false }
+});
+
+try {
+  await win.loadURL(url);
+  await new Promise((resolve) => setTimeout(resolve, 5000));
+  const state = await win.webContents.executeJavaScript(`({
+    title: document.title,
+    canvas: document.querySelectorAll('canvas').length,
+    controls: document.querySelectorAll('button').length,
+    text: document.body.innerText.slice(0, 300)
+  })`);
+  if (!state.canvas || !/3D导演预演台/.test(state.text)) {
+    throw new Error(`预演组件未完成渲染：${JSON.stringify(state)}`);
+  }
+  const image = await win.webContents.capturePage();
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  fs.writeFileSync(output, image.toPNG());
+  console.log(`真实预演台截图：${output}（${image.getSize().width}×${image.getSize().height}）`);
+} finally {
+  win.destroy();
+  app.quit();
+}
