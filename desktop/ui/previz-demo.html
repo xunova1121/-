@@ -20,5 +20,13 @@
     "/previz.js":"/previz.js"
   }}</script>
 </head>
-<body><main class="demo-shell"><header class="demo-head"><div><h1>3D导演预演台</h1><p>仓库真实组件演示 · 拖拽排位、对象属性、灯光、机位与分轨关键帧</p></div><span class="demo-badge">真实组件 / 演示数据</span></header><div id="demo"></div></main><script type="module" src="./previz-demo.js"></script></body>
+<body><main class="demo-shell"><header class="demo-head"><div><h1>3D导演预演台</h1><p>仓库真实组件演示 · 拖拽排位、对象属性、灯光、机位与分轨关键帧</p></div><span class="demo-badge">真实组件 / 演示数据</span></header><div id="demo"></div><pre id="demo-error" hidden style="white-space:pre-wrap;color:#ff9b9b;background:#2a1115;border:1px solid #71313a;padding:12px;border-radius:8px"></pre></main><script>
+  const showDemoError = (value) => {
+    const node = document.querySelector('#demo-error');
+    node.hidden = false;
+    node.textContent = `预演组件初始化失败：${value?.stack || value?.message || value}`;
+  };
+  window.addEventListener('error', (event) => showDemoError(event.error || `${event.message} (${event.filename}:${event.lineno})`));
+  window.addEventListener('unhandledrejection', (event) => showDemoError(event.reason));
+</script><script type="module" src="./previz-demo.js"></script></body>
 </html>
