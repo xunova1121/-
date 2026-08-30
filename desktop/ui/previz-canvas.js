@@ -467,15 +467,32 @@ export function director3dCanvas(stage, {
   const viewDivider = Object.assign(document.createElement('span'), { className: 'previz-gizmo-divider' });
   const directorViewBtn = Object.assign(document.createElement('button'), { type: 'button', className: 'previz-gizmo-btn on', textContent: '导演视角' });
   const shotViewBtn = Object.assign(document.createElement('button'), { type: 'button', className: 'previz-gizmo-btn', textContent: '摄影机画面' });
+  const shotOverlay = document.createElement('div');
+  shotOverlay.className = 'previz-shot-overlay';
+  shotOverlay.innerHTML = '<i class="third v1"></i><i class="third v2"></i><i class="third h1"></i><i class="third h2"></i><i class="safe"></i><i class="focus"></i><span>安全框 · 三分构图</span>';
+  shotOverlay.hidden = true;
+  host.append(shotOverlay);
   const setViewMode = (mode) => {
     viewMode = mode; orbit.enabled = mode === 'director' && !transforming;
     transformHelper.visible = mode === 'director';
+    shotOverlay.hidden = mode !== 'shot';
     directorViewBtn.classList.toggle('on', mode === 'director'); shotViewBtn.classList.toggle('on', mode === 'shot');
     renderNow();
   };
   directorViewBtn.onclick = (event) => { event.stopPropagation(); setViewMode('director'); };
   shotViewBtn.onclick = (event) => { event.stopPropagation(); setViewMode('shot'); };
-  gizmoBar.append(viewDivider, directorViewBtn, shotViewBtn);
+  const backdropBtn = Object.assign(document.createElement('button'), {
+    type: 'button', className: 'previz-gizmo-btn', title: '场景设定图可作为环绕摄影棚或平面背景',
+    textContent: stage.backdrop?.projection === 'flat' ? '平面场景' : '环绕场景'
+  });
+  backdropBtn.onclick = (event) => {
+    event.stopPropagation();
+    if (!stage.backdrop) return;
+    stage.backdrop.projection = stage.backdrop.projection === 'flat' ? 'cyclorama' : 'flat';
+    backdropBtn.textContent = stage.backdrop.projection === 'flat' ? '平面场景' : '环绕场景';
+    onCommit(); redraw();
+  };
+  gizmoBar.append(viewDivider, directorViewBtn, shotViewBtn, backdropBtn);
   host.append(gizmoBar);
   scene3d.add(new THREE.HemisphereLight(0xbfd8ff, 0x2a2530, 1.5));
   const key = new THREE.DirectionalLight(0xffe3bd, 2.2); key.position.set(-5, 9, -3); key.castShadow = true; scene3d.add(key);
@@ -726,12 +743,31 @@ export function director3dCanvas(stage, {
       if (stage.backdrop.image) {
         const map = textureLoader.load(stage.backdrop.image, renderNow);
         map.colorSpace = THREE.SRGBColorSpace;
-        const imageWall = new THREE.Mesh(
-          new THREE.PlaneGeometry(12, 6.75),
-          new THREE.MeshBasicMaterial({ map, side: THREE.DoubleSide, toneMapped: false })
-        );
-        imageWall.position.set(0, 3.35, 5.8); imageWall.rotation.y = Math.PI;
-        backdropObject.add(imageWall);
+        if (stage.backdrop.projection === 'flat') {
+          const imageWall = new THREE.Mesh(
+            new THREE.PlaneGeometry(12, 6.75),
+            new THREE.MeshBasicMaterial({ map, side: THREE.DoubleSide, toneMapped: false })
+          );
+          imageWall.position.set(0, 3.35, 5.8); imageWall.rotation.y = Math.PI;
+          backdropObject.add(imageWall);
+        } else {
+          // 普通场景设定图也能变成半环绕摄影棚：不是伪造3D几何，而是给人物、
+          // 道具、灯光提供有包围感的真实环境，导演视角不会再看到一张孤零零的纸片。
+          const cyc = new THREE.Mesh(
+            new THREE.CylinderGeometry(8.8, 8.8, 6.4, 72, 1, true, Math.PI / 2, Math.PI),
+            new THREE.MeshBasicMaterial({ map, side: THREE.BackSide, toneMapped: false })
+          );
+          cyc.position.set(0, 3.15, 0);
+          backdropObject.add(cyc);
+          const floorMap = map.clone(); floorMap.needsUpdate = true;
+          floorMap.wrapS = floorMap.wrapT = THREE.ClampToEdgeWrapping;
+          const deck = new THREE.Mesh(
+            new THREE.CircleGeometry(8.75, 72, Math.PI, Math.PI),
+            new THREE.MeshStandardMaterial({ map: floorMap, color: 0x556070, roughness: .96, transparent: true, opacity: .28 })
+          );
+          deck.rotation.x = -Math.PI / 2; deck.position.y = .012; deck.receiveShadow = true;
+          backdropObject.add(deck);
+        }
       }
       backdropObject.userData = { kind: 'backdrop', assetRef: stage.backdrop.assetRef, variantId: stage.backdrop.variantId };
       scene3d.add(backdropObject);

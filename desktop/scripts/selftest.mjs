@@ -9212,9 +9212,12 @@ section('预演台升级为 3D 导演画布');
   check('保留原俯视排位画布', src.includes('export function blockingCanvas'));
   check('新增独立 3D 导演画布', src.includes('export function director3dCanvas'));
   check('3D 和俯视读取同一份 stage 坐标', src.includes('director3dCanvas(stage') && src.includes('blockingCanvas(stage'));
-  check('3D 画布的人物、道具和摄影机都可拖动', (src.match(/draggable\(g, item\)/g) || []).length >= 3);
+  check('3D 画布的人物、道具和摄影机都可拖动', src.includes('ray.intersectObjects([...objects.values()]') && src.includes("dragging = { item: obj.userData.item"));
   check('默认打开 3D 导演画布且可切回俯视', src.includes("['3d', '3D 导演画布']") && src.includes("['top', '俯视排位']"));
   check('道具栏增加常用可拖拽物件', ['椅', '沙发', '车', '剑'].every((x) => src.includes(`'${x}'`)));
+  check('场景设定图可切换平面与环绕摄影棚', src.includes("stage.backdrop.projection === 'flat'") && src.includes('CylinderGeometry(8.8'));
+  check('摄影机画面提供三分线、安全框和焦点标记', src.includes('previz-shot-overlay') && src.includes('安全框 · 三分构图'));
+  check('导出当前帧使用真实摄影机且不烙入辅助线', src.includes('renderer.render(scene3d, shotCamera)') && src.includes('transformHelper.visible = false'));
 }
 
 section('打包配置');
