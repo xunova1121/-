@@ -14,11 +14,12 @@ on:
       - desktop/ui/demo-assets/**
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   capture:
     runs-on: windows-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: desktop
@@ -43,20 +44,28 @@ jobs:
           }
           throw '应用服务30秒内未启动'
       - name: Electron 实机渲染并截图
-        run: npx electron scripts/capture-previz.mjs
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath 'npx.cmd' -ArgumentList 'electron','scripts/capture-previz.mjs' -PassThru -NoNewWindow
+          if (-not $process.WaitForExit(60000)) {
+            Write-Host '截图已等待60秒，回收 Electron 进程'
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          } elseif ($process.ExitCode -ne 0) {
+            throw "Electron 截图退出码：$($process.ExitCode)"
+          }
+          if (-not (Test-Path 'dist/FutureDream-Previz-Stage4.png')) {
+            throw 'Electron 未生成预演台截图'
+          }
       - name: 核验截图
         shell: pwsh
         run: |
           $file = Get-Item 'dist/FutureDream-Previz-Stage4.png'
           if ($file.Length -lt 50000) { throw "截图异常小：$($file.Length) bytes" }
           Write-Host "截图大小：$([math]::Round($file.Length / 1KB, 1)) KB"
-      - name: 发布截图到快照版本
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          if ! gh release view snapshot >/dev/null 2>&1; then
-            gh release create snapshot --title '未来创梦 开发快照' --notes '3D预演台开发快照' --prerelease
-          fi
-          gh release upload snapshot dist/FutureDream-Previz-Stage4.png --clobber
+      - name: 上传真实预演台成果图
+        uses: actions/upload-artifact@v4
+        with:
+          name: FutureDream-Previz-Stage4
+          path: desktop/dist/FutureDream-Previz-Stage4.png
+          if-no-files-found: error
+          retention-days: 30
