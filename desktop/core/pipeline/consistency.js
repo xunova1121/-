@@ -302,6 +302,10 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
 
   parts.push(shot.description || '');
 
+  // 两段角色描述只是隐含信号；明确报人数可防止模型把两个人揉成一个人。
+  // 只陈述事实，不要求“全部完整出现”，避免和特写等景别指令冲突。
+  if (cast.length > 1) parts.push(`画面里有 ${cast.length} 个人：${cast.map((c) => c.name).join('、')}`);
+
   /**
    * 变体：这一镜里这个人穿哪套、这个场景是什么时段。
    * 完整描述 = 身份锚 + 这一版变的那部分，身份永远在前
@@ -597,18 +601,38 @@ export function refPlan() {
   return { mode: 'auto', send: true, useEditModel: false, onlyUploaded: true, blockedBy: null };
 }
 
-/** 按当前策略筛一遍：auto 只留用户自己传的那些 */
+/** 默认最多四张：身份 1~2 + 场景 1 + 关键道具 1，避免参考信号互相稀释。 */
+export const DEFAULT_MAX_REFS = 4;
+
+function refRank(kind, source) {
+  if (source === 'upload') return 0;
+  if (kind === 'character') return 1;
+  if (kind === 'scene') return 2;
+  return 3;
+}
+
+/** 按当前策略筛一遍，并按“用户上传 > 人物 > 场景 > 道具”裁到安全上限。 */
 export function pickRefs({ images = [], labels = [], paths = [], sources = [], kinds = [] }, plan) {
   if (!plan.send) return { images: [], labels: [], paths: [], kinds: [], sources: [], uploaded: 0 };
   const keep = images.map((_, i) => (plan.onlyUploaded ? sources[i] === 'upload' : true));
+  const eligible = images.map((_, i) => i).filter((i) => keep[i]);
+  const cap = Math.max(1, Number(settings.get('maxRefs')) || DEFAULT_MAX_REFS);
+  const selected = eligible
+    .slice()
+    .sort((a, b) => refRank(kinds[a], sources[a]) - refRank(kinds[b], sources[b]))
+    .slice(0, cap);
+  // 选择时按重要性，发送时恢复原顺序；首张场景图的既有语义不变。
+  const live = new Set(selected);
+  const idxs = eligible.filter((i) => live.has(i));
   return {
-    images: images.filter((_, i) => keep[i]),
-    labels: labels.filter((_, i) => keep[i]),
-    paths: paths.filter((_, i) => keep[i]),
+    images: idxs.map((i) => images[i]),
+    labels: idxs.map((i) => labels[i]),
+    paths: idxs.map((i) => paths[i]),
     // 一起筛，否则下游按下标去认"哪张是脸"时会整体错位
-    kinds: kinds.filter((_, i) => keep[i]),
-    sources: sources.filter((_, i) => keep[i]),
-    uploaded: images.filter((_, i) => keep[i] && sources[i] === 'upload').length
+    kinds: idxs.map((i) => kinds[i]),
+    sources: idxs.map((i) => sources[i]),
+    uploaded: idxs.filter((i) => sources[i] === 'upload').length,
+    capped: Math.max(0, eligible.length - idxs.length)
   };
 }
 
@@ -779,9 +803,8 @@ export function assembleVideoPrompt(
  */
 function castInFrame(bible, shot) {
   if (Array.isArray(shot?.characters)) {
-    return shot.characters
-      .map((n) => (bible?.characters || []).find((c) => c.name === n))
-      .filter(Boolean);
+    if (!shot.characters.length) return [];
+    return matchCharacters(bible, shot);
   }
   return matchCharacters(bible, shot);
 }
@@ -870,15 +893,41 @@ function speechLine(bible, shot) {
   );
 }
 
-/** 分镜里点名了谁。模型有时写"李队"有时写"李队长"，所以用包含匹配而不是全等。 */
+/** 去掉给人看的身份括注：“我（书信摊主）” → “我”。 */
+const bareName = (value) => String(value || '').replace(/[（(【[].*$/, '').trim();
+
+function resolveCast(bible, name) {
+  const list = bible?.characters || [];
+  const query = String(name || '').trim();
+  if (!query) return null;
+  const exact = list.find((item) => item.name === query);
+  if (exact) return exact;
+  const bare = list.filter((item) => bareName(item.name) === bareName(query));
+  if (bare.length === 1) return bare[0];
+  if (bare.length > 1) return null; // 同名时不猜，错配另一张脸比少一张更糟
+  const loose = list.filter((item) => item.name.includes(query) || query.includes(item.name));
+  return loose.reduce((best, item) => (!best || item.name.length < best.name.length ? item : best), null);
+}
+
+/** 分镜里点名了谁：逐个解析，不能命中一个就把其余未命中的人静默丢掉。 */
 export function matchCharacters(bible, shot) {
   if (!bible?.characters?.length) return [];
+  const listed = (shot.characters || []).map((name) => String(name).trim()).filter(Boolean);
+  if (listed.length) {
+    const resolved = [];
+    for (const name of listed) {
+      const hit = resolveCast(bible, name);
+      if (hit && !resolved.includes(hit)) resolved.push(hit);
+    }
+    if (resolved.length) return resolved;
+  }
   const haystack = `${shot.characters?.join(' ') || ''} ${shot.description || ''} ${shot.dialogue || ''}`;
-  const named = (shot.characters || [])
-    .map((n) => bible.characters.find((c) => c.name === n))
-    .filter(Boolean);
-  if (named.length) return named;
   return bible.characters.filter((c) => haystack.includes(c.name));
+}
+
+export function unmatchedCast(bible, shot) {
+  if (!bible?.characters?.length) return [];
+  return (shot?.characters || []).map((name) => String(name).trim()).filter((name) => name && !resolveCast(bible, name));
 }
 
 export function matchScene(bible, shot) {
@@ -894,6 +943,10 @@ export function matchScene(bible, shot) {
 
 export function matchProps(bible, shot) {
   if (!bible?.props?.length) return [];
+  const listed = (shot?.props || []).map((name) => String(name).trim()).filter(Boolean);
+  if (listed.length) {
+    return bible.props.filter((prop) => listed.some((name) => name === prop.name || name.includes(prop.name) || prop.name.includes(name)));
+  }
   const haystack = `${shot.description || ''} ${shot.prompt || ''}`;
   return bible.props.filter((p) => haystack.includes(p.name));
 }
