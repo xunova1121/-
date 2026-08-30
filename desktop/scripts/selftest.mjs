@@ -11017,7 +11017,8 @@ section('工业化升级：实例路由、任务账本和控制图');
   const captureWorkflow = fs.readFileSync(path.resolve(PROJECT_ROOT, '../.github/workflows/capture-previz.yml'), 'utf8');
   check('真实预演台截图可在 Windows 构建机手动生成并发布',
     /workflow_dispatch/.test(captureWorkflow)
-      && /capture-previz\.mjs/.test(captureWorkflow)
+      && /msedge\.exe/.test(captureWorkflow)
+      && /--enable-webgl/.test(captureWorkflow)
       && /FutureDream-Previz-Stage4\.png/.test(captureWorkflow));
   check('截图流水线不会顺带重复生成 EXE', !/build:win|electron-builder/.test(captureWorkflow));
 }

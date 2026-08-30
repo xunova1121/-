@@ -43,18 +43,25 @@ jobs:
             Start-Sleep -Seconds 1
           }
           throw '应用服务30秒内未启动'
-      - name: Electron 实机渲染并截图
+      - name: Windows Edge 实机渲染 Three.js 并截图
         shell: pwsh
         run: |
-          $process = Start-Process -FilePath 'npx.cmd' -ArgumentList 'electron','scripts/capture-previz.mjs' -PassThru -NoNewWindow
+          $edge = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
+          if (-not (Test-Path $edge)) { throw "找不到 Windows Edge：$edge" }
+          New-Item -ItemType Directory -Force 'dist' | Out-Null
+          $output = (Resolve-Path 'dist').Path + '\FutureDream-Previz-Stage4.png'
+          $arguments = @(
+            '--headless=new', '--enable-webgl', '--ignore-gpu-blocklist',
+            '--use-angle=swiftshader', "--screenshot=$output", '--window-size=1600,1100',
+            '--virtual-time-budget=12000', 'http://127.0.0.1:5178/ui/previz-demo.html'
+          )
+          $process = Start-Process -FilePath $edge -ArgumentList $arguments -PassThru -NoNewWindow
           if (-not $process.WaitForExit(60000)) {
-            Write-Host '截图已等待60秒，回收 Electron 进程'
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-          } elseif ($process.ExitCode -ne 0) {
-            throw "Electron 截图退出码：$($process.ExitCode)"
+            throw 'Windows Edge 预演截图60秒超时'
           }
           if (-not (Test-Path 'dist/FutureDream-Previz-Stage4.png')) {
-            throw 'Electron 未生成预演台截图'
+            throw 'Windows Edge 未生成预演台截图'
           }
       - name: 核验截图
         shell: pwsh
