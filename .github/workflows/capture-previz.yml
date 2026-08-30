@@ -8,6 +8,7 @@ on:
     paths:
       - .github/workflows/capture-previz.yml
       - desktop/scripts/capture-previz.mjs
+      - desktop/scripts/capture-previz-cdp.mjs
       - desktop/ui/previz-demo.html
       - desktop/ui/previz-canvas.js
       - desktop/ui/previz-3d.js
@@ -49,16 +50,17 @@ jobs:
           $edge = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
           if (-not (Test-Path $edge)) { throw "找不到 Windows Edge：$edge" }
           New-Item -ItemType Directory -Force 'dist' | Out-Null
-          $output = (Resolve-Path 'dist').Path + '\FutureDream-Previz-Stage4.png'
+          $profile = (Resolve-Path 'dist').Path + '\edge-profile'
           $arguments = @(
             '--headless=new', '--enable-webgl', '--ignore-gpu-blocklist',
-            '--use-angle=swiftshader', "--screenshot=$output", '--window-size=1600,1100',
-            '--virtual-time-budget=12000', 'http://127.0.0.1:5178/previz-demo.html'
+            '--use-angle=swiftshader', '--remote-debugging-port=9222', "--user-data-dir=$profile",
+            '--window-size=1600,1100', 'about:blank'
           )
           $process = Start-Process -FilePath $edge -ArgumentList $arguments -PassThru -NoNewWindow
-          if (-not $process.WaitForExit(60000)) {
+          try {
+            node scripts/capture-previz-cdp.mjs
+          } finally {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-            throw 'Windows Edge 预演截图60秒超时'
           }
           if (-not (Test-Path 'dist/FutureDream-Previz-Stage4.png')) {
             throw 'Windows Edge 未生成预演台截图'

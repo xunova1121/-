@@ -11014,6 +11014,11 @@ section('工业化升级：实例路由、任务账本和控制图');
       && /querySelectorAll\('canvas'\)/.test(captureSource)
       && /3D导演预演台/.test(captureSource)
       && /app\.exit\(exitCode\)/.test(captureSource));
+  const browserCaptureSource = fs.readFileSync(path.join(PROJECT_ROOT, 'scripts', 'capture-previz-cdp.mjs'), 'utf8');
+  check('Windows 成果图会等到真实 Three.js 画布出现再保存',
+    /Page\.captureScreenshot/.test(browserCaptureSource)
+      && /querySelectorAll\('canvas'\)/.test(browserCaptureSource)
+      && /Runtime\.exceptionThrown/.test(browserCaptureSource));
   const previzDemo = fs.readFileSync(path.join(PROJECT_ROOT, 'ui', 'previz-demo.html'), 'utf8');
   check('真实预演演示不依赖外部 CDN，离线 EXE 和构建机都能加载',
     /"three":"\/three\.js"/.test(previzDemo)
@@ -11024,6 +11029,7 @@ section('工业化升级：实例路由、任务账本和控制图');
     /workflow_dispatch/.test(captureWorkflow)
       && /msedge\.exe/.test(captureWorkflow)
       && /--enable-webgl/.test(captureWorkflow)
+      && /capture-previz-cdp\.mjs/.test(captureWorkflow)
       && /127\.0\.0\.1:5178\/previz-demo\.html/.test(captureWorkflow)
       && /FutureDream-Previz-Stage4\.png/.test(captureWorkflow));
   check('截图流水线不会顺带重复生成 EXE', !/build:win|electron-builder/.test(captureWorkflow));
