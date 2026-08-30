@@ -2945,7 +2945,50 @@ export function exportShotControls(projectId, shotId, stageOverride = null, rend
   return { project: updated, controls: updated.shots.find((x) => x.id === shotId).controls };
 }
 
-/** 把逐帧预演控制图烘成秘塔 H3 可直接读取的运动参考视频。 */
+/**
+ * 从应用所在网络真实读取一次参考视频地址。
+ *
+ * 这不能冒充“秘塔机房一定能访问”，但能在付费提交前抓住最常见的错误：
+ * 签名过期、私有桶没带签名、上传网关返回假地址、对象其实是错误页。
+ */
+export async function probePrevizReferenceUrl(url, { attempts = 2, timeoutMs = 15000 } = {}) {
+  if (!/^https?:\/\//i.test(String(url || ''))) return { ok: false, code: 'not-public-url', message: '参考视频不是公网 HTTP 地址' };
+  let last = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const started = Date.now();
+    try {
+      const res = await fetch(url, {
+        method: 'GET', redirect: 'follow', headers: { Range: 'bytes=0-4095' },
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+      const type = String(res.headers.get('content-type') || '').toLowerCase();
+      let received = 0;
+      if (res.body) {
+        const reader = res.body.getReader();
+        const first = await reader.read();
+        received = first.value?.byteLength || 0;
+        await reader.cancel().catch(() => {});
+      }
+      const okStatus = res.ok || res.status === 206;
+      const mediaType = type.startsWith('video/') || type.includes('octet-stream') || /\.mp4(?:\?|$)/i.test(String(url));
+      const access = {
+        ok: okStatus && mediaType && received > 0,
+        code: okStatus ? (mediaType ? (received ? 'ok' : 'empty') : 'not-video') : `http-${res.status}`,
+        status: res.status, contentType: type || null, received, attempt,
+        latencyMs: Date.now() - started, checkedAt: new Date().toISOString()
+      };
+      if (access.ok) return access;
+      last = access;
+      // 403/404 属于配置或签名问题，原样重试不会变；只重试限流和服务端瞬时错误。
+      if (res.status < 500 && res.status !== 429) break;
+    } catch (err) {
+      last = { ok: false, code: 'network', message: String(err.message || err), attempt, latencyMs: Date.now() - started, checkedAt: new Date().toISOString() };
+    }
+  }
+  return last || { ok: false, code: 'unknown', message: '参考视频地址检测失败' };
+}
+
+/** 把真实 WebGL 逐帧预演烘成秘塔 H3 可直接读取的运动参考视频。 */
 export async function buildPrevizReferenceVideo(projectId, shot, controls, { onEvent } = {}) {
   if (!controls?.renderSequenceDir || !controls.renderedSequence?.length) {
     onEvent?.({ type: 'note', shotId: shot.id, message: '本镜尚未渲染真实3D逐帧预演：秘塔 H3 仅接收轨迹提示词；请先在预演台点击“渲染3D视频控制包”' });
@@ -2972,8 +3015,19 @@ export async function buildPrevizReferenceVideo(projectId, shot, controls, { onE
       onEvent?.({ type: 'note', shotId: shot.id, message: '3D预演运动视频已烘焙，但秘塔 H3 需要可拉取的 URL；请配置上传网关或对象存储，本镜暂按轨迹提示词降级' });
       return null;
     }
-    onEvent?.({ type: 'note', shotId: shot.id, message: `已向秘塔 H3 注入真实3D预演参考视频（${controls.renderedSequence.length} 个WebGL渲染帧）` });
-    return { url, role: 'reference_video', label: '真实3D预演参考', path: output, source: 'webgl' };
+    const access = await probePrevizReferenceUrl(url);
+    store.update(projectId, (p) => {
+      const target = p.shots.find((item) => item.id === shot.id);
+      if (target?.controls) target.controls.referenceAccess = access;
+      return p;
+    });
+    if (!access.ok) {
+      const detail = access.status ? `HTTP ${access.status}` : (access.message || access.code);
+      onEvent?.({ type: 'note', shotId: shot.id, message: `真实3D参考视频已上传，但回读检测失败（${detail}）；为避免秘塔付费后拉不到素材，本镜暂不注入参考视频` });
+      return null;
+    }
+    onEvent?.({ type: 'note', shotId: shot.id, message: `真实3D参考视频公网回读通过（HTTP ${access.status}，${access.latencyMs}ms），已准备注入秘塔 H3（${controls.renderedSequence.length} 个WebGL帧）` });
+    return { url, role: 'reference_video', label: '真实3D预演参考', path: output, source: 'webgl', access };
   } catch (err) {
     onEvent?.({ type: 'note', shotId: shot.id, message: `3D预演运动参考视频未注入（${err.message}），本镜仍按轨迹提示词生成` });
     return null;
@@ -3313,6 +3367,7 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
       t.videoRefs = bibleRefs.labels;
       t.controlVideoSent = Boolean(video.refVideosSent);
       t.controlVideoPath = controlVideo?.path || null;
+      t.controlVideoAccess = controlVideo?.access || controlBundle?.referenceAccess || null;
       t.link = ctx.link;
       /**
        * ⚠ 记的是**发出去了没有**，不是"我们打算发"。
@@ -3337,6 +3392,7 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
         duration: t.actualDuration, firstFrame: firstFrame || null, lastFrame: ctx.lastFrameUrl || null,
         controlManifest: controlBundle?.manifest || null,
         controlReferenceVideo: controlVideo?.path || null,
+        controlReferenceAccess: controlVideo?.access || controlBundle?.referenceAccess || null,
         controlVideoSent: Boolean(video.refVideosSent)
       });
     }
@@ -4616,6 +4672,7 @@ async function generateVideosRaw(projectId, { only = null, chapterId = null, reg
           t.videoRefs = bibleRefs.labels;
           t.controlVideoSent = Boolean(video.refVideosSent);
           t.controlVideoPath = controlVideo?.path || null;
+          t.controlVideoAccess = controlVideo?.access || controlBundle?.referenceAccess || null;
           t.link = ctx.link;
           /**
            * 末帧锁没锁上要如实记：界面上标着"连续动作"却其实没锁，
@@ -4642,6 +4699,7 @@ async function generateVideosRaw(projectId, { only = null, chapterId = null, reg
             firstFrame: firstFrame || null, lastFrame: ctx.lastFrameUrl || null,
             controlManifest: controlBundle?.manifest || null,
             controlReferenceVideo: controlVideo?.path || null,
+            controlReferenceAccess: controlVideo?.access || controlBundle?.referenceAccess || null,
             controlVideoSent: Boolean(video.refVideosSent)
           });
         }

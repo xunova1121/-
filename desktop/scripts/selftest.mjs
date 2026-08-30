@@ -10972,6 +10972,20 @@ section('工业化升级：实例路由、任务账本和控制图');
     /futuredream-control-bundle\/v3/.test(studioSource)
       && /focusSequence/.test(studioSource) && /attachmentSequence/.test(studioSource)
       && /renderSequenceDir/.test(studioSource));
+  const referenceProbeServer = http.createServer((req, res) => {
+    res.writeHead(206, { 'Content-Type': 'video/mp4', 'Content-Range': 'bytes 0-3/4' });
+    res.end(Buffer.from([0, 0, 0, 1]));
+  });
+  await new Promise((resolve) => referenceProbeServer.listen(0, '127.0.0.1', resolve));
+  const referenceProbe = await studioModule.probePrevizReferenceUrl(`http://127.0.0.1:${referenceProbeServer.address().port}/previz.mp4`);
+  referenceProbeServer.close();
+  check('秘塔参考视频提交前真实回读并校验媒体类型',
+    referenceProbe.ok && referenceProbe.status === 206 && referenceProbe.contentType === 'video/mp4' && referenceProbe.received > 0);
+  const nonPublicProbe = await studioModule.probePrevizReferenceUrl('data:video/mp4;base64,AAAA');
+  check('秘塔参考视频拒绝本地或内联地址', !nonPublicProbe.ok && nonPublicProbe.code === 'not-public-url');
+  const serverSource = fs.readFileSync(path.join(PROJECT_ROOT, 'core', 'server.js'), 'utf8');
+  check('控制包导出后有独立的参考视频回读接口',
+    /f === 'reference'/.test(serverSource) && /buildPrevizReferenceVideo/.test(serverSource));
 }
 
 section('根地址：手机去手机版，电脑留电脑版');

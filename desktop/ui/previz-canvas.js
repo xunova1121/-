@@ -1195,6 +1195,18 @@ export function previzPanel(stage, {
           summary.className = 'previz-control-summary';
           summary.textContent = `已输出 ${result.frameCount} 个控制时刻 · ${result.renderedFrameCount || 0} 张真实3D帧 · ${result.controlFps || '—'}fps · 可烘焙秘塔参考视频`;
           controlShelf.append(summary);
+          if (result.referenceAccess) {
+            const access = document.createElement('div');
+            access.className = `previz-warn${result.referenceAccess.ok ? '' : ' bad'}`;
+            access.textContent = result.referenceAccess.ok
+              ? `秘塔参考视频地址回读通过 · HTTP ${result.referenceAccess.status} · ${result.referenceAccess.latencyMs}ms`
+              : `秘塔参考视频地址回读失败 · ${result.referenceAccess.status ? `HTTP ${result.referenceAccess.status}` : result.referenceAccess.message || result.referenceAccess.code}`;
+            controlShelf.append(access);
+          }
+          for (const message of result.referenceNotes || []) {
+            if (result.referenceAccess?.ok && /回读通过/.test(message)) continue;
+            const note = document.createElement('div'); note.className = 'field-hint'; note.textContent = message; controlShelf.append(note);
+          }
           if (result.manifest) {
             const manifest = document.createElement('a');
             manifest.className = 'btn ghost sm'; manifest.href = result.manifest; manifest.target = '_blank';

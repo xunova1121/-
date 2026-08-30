@@ -1635,12 +1635,17 @@ export default {
                   renderedSequence: capture.renderedSequence || []
                 }
               });
+              const referenceCheck = await api(`/projects/${project.id}/shots/${shot.id}/controls/reference`, {
+                method: 'POST', body: {}
+              });
               const v = Date.now();
               return {
                 previews: Object.fromEntries(['rendered', 'start', 'end', 'depth', 'pose', 'edge', 'mask']
                   .filter((key) => r.controls[key]).map((key) => [key, `${mediaUrl(r.controls[key])}&v=${v}`])),
                 frameCount: r.controls.sequence?.length || 0,
                 renderedFrameCount: r.controls.renderedSequence?.length || 0,
+                referenceAccess: referenceCheck.reference?.access || null,
+                referenceNotes: (referenceCheck.events || []).map((event) => event.message).filter(Boolean),
                 controlFps: r.controls.controlFps || 0,
                 issues: r.controls.issues || [],
                 manifest: r.controls.manifest ? `${mediaUrl(r.controls.manifest)}&v=${v}` : ''

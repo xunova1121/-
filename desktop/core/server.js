@@ -1244,12 +1244,27 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
       }
     }
 
-    if (b && c === 'shots' && d && e === 'controls' && method === 'POST') {
+    if (b && c === 'shots' && d && e === 'controls' && !f && method === 'POST') {
       try {
         const body = await readBody(req);
         return json(res, 200, studio.exportShotControls(
           b, d, body.stage || null, body.renderedFrame || '', body.renderedSequence || []
         ));
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
+    }
+
+    if (b && c === 'shots' && d && e === 'controls' && f === 'reference' && method === 'POST') {
+      try {
+        const project = store.read(b);
+        const shot = project?.shots?.find((item) => item.id === d);
+        if (!shot) return json(res, 404, { error: '没有这一镜' });
+        const events = [];
+        const reference = await studio.buildPrevizReferenceVideo(b, shot, shot.controls, {
+          onEvent: (event) => events.push(event)
+        });
+        return json(res, 200, { reference: reference ? { path: reference.path, source: reference.source, access: reference.access } : null, events });
       } catch (err) {
         return json(res, 400, { error: err.message });
       }
