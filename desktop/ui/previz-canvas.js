@@ -402,7 +402,7 @@ export function director3dCanvas(stage, {
   // 保留最后一帧，才能把当前预演直接导出为视频模型的首帧参考。
   let renderer;
   try {
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
   } catch {
     const fallback = blockingCanvas(stage, { size, onChange });
     fallback.node.style.width = '100%'; fallback.node.style.height = '100%';
@@ -422,6 +422,10 @@ export function director3dCanvas(stage, {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.domElement.style.cssText = 'width:100%;height:100%;display:block';
   host.append(renderer.domElement);
+  const dofCanvas = document.createElement('canvas');
+  dofCanvas.className = 'previz-dof-canvas';
+  dofCanvas.hidden = true;
+  host.append(dofCanvas);
   const scene3d = new THREE.Scene();
   scene3d.background = new THREE.Color(0x151a24);
   scene3d.fog = new THREE.Fog(0x151a24, 14, 30);
@@ -430,7 +434,10 @@ export function director3dCanvas(stage, {
   const shotCamera = new THREE.PerspectiveCamera(42, 16 / 9, .05, 200);
   let viewMode = 'director';
   const activeView = () => viewMode === 'shot' ? shotCamera : view;
-  const renderNow = () => renderer.render(scene3d, activeView());
+  const renderNow = () => {
+    renderer.render(scene3d, activeView());
+    if (viewMode === 'shot') renderDofPreview();
+  };
   const orbit = new OrbitControls(view, renderer.domElement);
   orbit.target.set(0, 1, 0);
   orbit.enableDamping = false;
@@ -478,6 +485,7 @@ export function director3dCanvas(stage, {
     viewMode = mode; orbit.enabled = mode === 'director' && !transforming;
     transformHelper.visible = mode === 'director';
     shotOverlay.hidden = mode !== 'shot';
+    dofCanvas.hidden = mode !== 'shot';
     directorViewBtn.classList.toggle('on', mode === 'director'); shotViewBtn.classList.toggle('on', mode === 'shot');
     renderNow();
   };
@@ -513,6 +521,51 @@ export function director3dCanvas(stage, {
   let backdropObject = null;
   const guides = [];
   const pathHandles = [];
+
+  /**
+   * 离线景深预览：全场先虚化，再把焦平面里的对象锐利叠回去。
+   * 不依赖 Three.js examples 后处理模块，打进 EXE 后断网也能工作。
+   */
+  function renderDofPreview(outputWidth = null, outputHeight = null) {
+    const rect = host.getBoundingClientRect();
+    const width = outputWidth || Math.max(320, Math.round(rect.width || size));
+    const height = outputHeight || Math.max(230, Math.round(rect.height || size * .72));
+    if (dofCanvas.width !== width || dofCanvas.height !== height) { dofCanvas.width = width; dofCanvas.height = height; }
+    const ctx = dofCanvas.getContext('2d');
+    const cam = stage.cam || {};
+    const focusItem = findObject(stage, cam.focusId)?.item || stage.subjects?.[0] || null;
+    const focusPose = focusItem ? (attachmentPose(stage, focusItem) || focusItem) : null;
+    const focusDistance = focusPose
+      ? Math.hypot(Number(focusPose.x || 0) - Number(cam.x || 0), Number(focusPose.y || 0) - Number(cam.y || 0), Number(focusPose.elevation || focusPose.height || 1) - Number(cam.height || 1.6))
+      : Math.max(.1, Number(cam.focusDistance || 3));
+    const aperture = Math.max(1, Number(cam.aperture || 4));
+    const blur = Math.max(.35, Math.min(9, 11 / aperture));
+    const depthBand = Math.max(.3, aperture * .18);
+    try {
+      renderer.render(scene3d, shotCamera);
+      ctx.clearRect(0, 0, width, height);
+      ctx.save(); ctx.filter = `blur(${blur.toFixed(2)}px)`; ctx.drawImage(renderer.domElement, 0, 0, width, height); ctx.restore();
+      const visibility = [];
+      for (const [id, object] of objects) {
+        const item = object.userData.item;
+        const pose = object.userData.kind === 'prop' ? (attachmentPose(stage, item) || item) : item;
+        const distance = Math.hypot(Number(pose.x || 0) - Number(cam.x || 0), Number(pose.y || 0) - Number(cam.y || 0), Number(pose.elevation || pose.height || 1) - Number(cam.height || 1.6));
+        visibility.push([object, object.visible]);
+        object.visible = Math.abs(distance - focusDistance) <= depthBand || item.id === cam.focusId;
+      }
+      for (const guide of guides) { visibility.push([guide, guide.visible]); guide.visible = false; }
+      visibility.push([floor, floor.visible], [grid, grid.visible]); floor.visible = false; grid.visible = false;
+      if (backdropObject) { visibility.push([backdropObject, backdropObject.visible]); backdropObject.visible = false; }
+      const background = scene3d.background;
+      scene3d.background = null; renderer.setClearAlpha(0); renderer.render(scene3d, shotCamera);
+      ctx.drawImage(renderer.domElement, 0, 0, width, height);
+      scene3d.background = background; renderer.setClearAlpha(1);
+      for (const [object, visible] of visibility) object.visible = visible;
+      shotOverlay.querySelector('span').textContent = `焦点 ${focusItem?.name || `${focusDistance.toFixed(1)}m`} · f/${aperture.toFixed(1)} · 景深带 ±${depthBand.toFixed(1)}m`;
+    } catch {
+      dofCanvas.hidden = true; // 浏览器不支持 Canvas2D 合成时安全退回原 WebGL 画面
+    }
+  }
 
   orbit.addEventListener('change', renderNow);
   transform.setMode(transformMode);
@@ -856,8 +909,8 @@ export function director3dCanvas(stage, {
     const rect = host.getBoundingClientRect(), restoreW = Math.max(320, rect.width || size), restoreH = Math.max(230, rect.height || size * .72);
     transformHelper.visible = false;
     renderer.setSize(1280, 720, false);
-    renderer.render(scene3d, shotCamera);
-    const data = renderer.domElement.toDataURL(type, quality);
+    renderDofPreview(1280, 720);
+    const data = dofCanvas.toDataURL(type, quality);
     renderer.setSize(restoreW, restoreH, false);
     capturing = false; redraw();
     transformHelper.visible = viewMode === 'director'; renderNow();

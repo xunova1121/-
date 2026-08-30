@@ -107,6 +107,17 @@ export function renderControls(source = {}, { duration = 5, sampleEvery = 3 } = 
     focusDistance: stage.cam.focusDistance || 3, shutterAngle: stage.cam.shutterAngle || 180,
     iso: stage.cam.iso || 400
   }));
+  const focusSequence = sampled.map(({ frame, stage }) => {
+    const cam = stage.cam || {};
+    const target = stageObjects(stage).find((x) => x.item.id === cam.focusId)?.item;
+    const pose = target ? (attachmentPose(stage, target) || target) : null;
+    const distance = pose
+      ? Math.hypot(Number(pose.x || 0) - Number(cam.x || 0), Number(pose.y || 0) - Number(cam.y || 0), Number(pose.elevation || pose.height || 1) - Number(cam.height || 1.6))
+      : Number(cam.focusDistance || 3);
+    const aperture = Number(cam.aperture || 4);
+    return { frame, time: Number((frame / FPS).toFixed(3)), targetId: cam.focusId || '', targetName: target?.name || '',
+      distance: Number(distance.toFixed(3)), aperture, depthBand: Number(Math.max(.3, aperture * .18).toFixed(3)) };
+  });
   const poseSequence = sampled.map(({ frame, stage }) => ({ frame, subjects: (stage.subjects || []).map((x) => ({ id: x.id, x: x.x, y: x.y, height: x.height, rotation: x.rotation, scale: x.scale, pose: x.pose || 'stand', action: x.action || '', animationName: x.animationName || '', textureView: x.textureView || 'auto' })) }));
   const lightSequence = sampled.map(({ frame, stage }) => ({ frame, time: Number((frame / FPS).toFixed(3)), lights: (stage.lights || []).map((x) => ({ id: x.id, type: x.lightType, x: x.x, y: x.y, height: x.height, intensity: x.intensity, color: x.color, targetId: x.targetId || '' })) }));
   const attachmentSequence = sampled.map(({ frame, stage }) => ({
@@ -164,7 +175,7 @@ export function renderControls(source = {}, { duration = 5, sampleEvery = 3 } = 
   return { start: first.rgb, end: last.rgb, depth: first.depth, mask: first.mask, edge: first.edge, pose: first.pose,
     frames, sampleEvery: Math.max(1, sampleEvery), controlFps: Number((FPS / Math.max(1, sampleEvery)).toFixed(3)), width: W, height: H, fps: FPS, maxFrame,
     keyframes: (base.keyframes || []).map((x) => x.frame), motionEasing: base.motionEasing || 'easeInOut',
-    trajectory, poseSequence, motionPaths, lightSequence, attachmentSequence, layers, issues,
+    trajectory, focusSequence, poseSequence, motionPaths, lightSequence, attachmentSequence, layers, issues,
     objects: objects.map((x) => ({ id: x.item.id, name: x.item.name, kind: x.kind, depth: Number(x.depth.toFixed(3)) })) };
 }
 
@@ -180,6 +191,7 @@ export function videoControlPrompt(bundle = {}) {
   const paths = bundle.motionPaths || [];
   const lights = bundle.lightSequence || [];
   const attachments = bundle.attachmentSequence || [];
+  const focus = bundle.focusSequence || [];
   if (!trajectory.length && !poses.length && !paths.length && !lights.length && !attachments.length) return '';
 
   const firstCam = trajectory[0] || {};
@@ -207,10 +219,15 @@ export function videoControlPrompt(bundle = {}) {
   });
   const pointNames = { rightHand: '右手', leftHand: '左手', back: '背部', waist: '腰部' };
   const attachedProps = (attachments[0]?.props || []).map((item) => `${item.name || item.id}固定在${item.actorId}的${pointNames[item.point] || item.point || '挂点'}，全程随人物移动和转身，不得漂浮、穿模或换手`);
+  const firstFocus = focus[0], lastFocus = focus.at(-1) || firstFocus;
+  const focusPull = firstFocus && lastFocus
+    ? `焦点从${firstFocus.targetName || firstFocus.targetId || `${firstFocus.distance.toFixed(1)}米`}平滑拉到${lastFocus.targetName || lastFocus.targetId || `${lastFocus.distance.toFixed(1)}米`}，清晰范围约±${lastFocus.depthBand.toFixed(1)}米，焦点不得抽动`
+    : '';
 
   return `【3D预演控制】严格保持首尾构图与空间关系；${camera}`
     + `${actors.length ? `；人物轨迹：${actors.join('；')}` : ''}`
     + `${attachedProps.length ? `；人物道具绑定：${attachedProps.join('；')}` : ''}`
+    + `${focusPull ? `；焦点拉移：${focusPull}` : ''}`
     + `${lighting.length ? `；灯光连续性：${lighting.join('；')}` : ''}`
     + `；按 ${Number(bundle.fps || 24)}fps、${Number(bundle.maxFrame || 0)} 帧平滑插值，不要让人物、道具或机位瞬移。`;
 }
