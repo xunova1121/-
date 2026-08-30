@@ -9,6 +9,7 @@ on:
       - .github/workflows/capture-previz.yml
       - desktop/scripts/capture-previz.mjs
       - desktop/scripts/capture-previz-cdp.mjs
+      - desktop/core/server.js
       - desktop/ui/previz-demo.html
       - desktop/ui/previz-canvas.js
       - desktop/ui/previz-3d.js
