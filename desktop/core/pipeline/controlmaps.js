@@ -1,5 +1,5 @@
 /** 从预演台空间与关键帧导出可控视频模型能消费的控制包。 */
-import { attachmentPose, frameState, normalizeStage, stageObjects } from '../../ui/previz-stage.js';
+import { attachmentPose, frameState, normalizeStage, spatialIssues, stageObjects } from '../../ui/previz-stage.js';
 
 const W = 1280, H = 720, FPS = 24;
 const esc = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c]));
@@ -153,6 +153,13 @@ export function renderControls(source = {}, { duration = 5, sampleEvery = 3 } = 
   }
   for (const item of (base.marks || []).filter((x) => !x.far && x.attachToId)) {
     if (!knownIds.has(item.attachToId)) issues.push({ code: 'missing-attachment-target', propId: item.id, level: 'blocker', message: `${item.name || item.id}绑定的人物已不存在` });
+  }
+  const seenSpatial = new Set();
+  for (const { frame, stage } of sampled) for (const issue of spatialIssues(stage)) {
+    const signature = `${issue.code}:${(issue.objectIds || [issue.objectId]).filter(Boolean).join(',')}`;
+    if (seenSpatial.has(signature)) continue;
+    seenSpatial.add(signature);
+    issues.push({ ...issue, frame });
   }
   return { start: first.rgb, end: last.rgb, depth: first.depth, mask: first.mask, edge: first.edge, pose: first.pose,
     frames, sampleEvery: Math.max(1, sampleEvery), controlFps: Number((FPS / Math.max(1, sampleEvery)).toFixed(3)), width: W, height: H, fps: FPS, maxFrame,

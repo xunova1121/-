@@ -3216,6 +3216,8 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
   let controlBundle = null;
   if (shot.stage?.cam) {
     controlBundle = exportShotControls(projectId, shot.id).controls;
+    const blocker = (controlBundle.issues || []).find((issue) => issue.level === 'blocker');
+    if (blocker) throw new Error(`3D预演空间检查未通过：${blocker.message}。请回到预演台修正后再生成，避免付费出错片。`);
     onEvent?.({ type: 'note', shotId, message: `已把3D预演轨迹写入本镜生成请求（${controlBundle.keyframes?.length || 0} 个关键帧）` });
   }
   const controlPrompt = videoControlPrompt(controlBundle || {});
@@ -4520,6 +4522,8 @@ async function generateVideosRaw(projectId, { only = null, chapterId = null, reg
       let controlBundle = null;
       if (shot.stage?.cam) {
         controlBundle = exportShotControls(projectId, shot.id).controls;
+        const blocker = (controlBundle.issues || []).find((issue) => issue.level === 'blocker');
+        if (blocker) throw new Error(`第 ${shot.index} 镜3D预演空间检查未通过：${blocker.message}。请回到预演台修正后再生成。`);
         onEvent?.({ type: 'note', shotId: shot.id, message: `第 ${shot.index} 镜3D预演已进入生成请求（${controlBundle.keyframes?.length || 0} 个关键帧）` });
       }
       const videoPrompt = [ctx.videoPrompt, videoControlPrompt(controlBundle || {})].filter(Boolean).join('\n\n');

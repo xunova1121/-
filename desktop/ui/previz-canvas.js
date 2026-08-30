@@ -28,7 +28,7 @@ import { GLTFLoader } from '/three-gltf-loader.js';
 import { OrbitControls } from '/three-orbit-controls.js';
 import { TransformControls } from '/three-transform-controls.js';
 import { clone as cloneSkeleton } from '/three-skeleton-utils.js';
-import { addKeyframe, applyFrame, attachmentPose, createHistory, findObject, normalizeStage, stageObjects } from './previz-stage.js';
+import { addKeyframe, applyFrame, attachmentPose, createHistory, findObject, normalizeStage, snapToGround, spatialIssues, stageObjects } from './previz-stage.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -1159,8 +1159,9 @@ export function previzPanel(stage, {
       const input = document.createElement('select');
       input.disabled = item.locked;
       for (const [value, text] of options) input.append(Object.assign(document.createElement('option'), { value, textContent: text }));
-      input.value = key === 'autoOrient' ? String(item[key] !== false) : String(item[key] || '');
-      input.onchange = () => { item[key] = key === 'autoOrient' ? input.value === 'true' : input.value; history.commit(); redrawAll(); onChange(); };
+      const booleanKey = key === 'autoOrient' || key === 'grounded';
+      input.value = booleanKey ? String(item[key] !== false) : String(item[key] || '');
+      input.onchange = () => { item[key] = booleanKey ? input.value === 'true' : input.value; history.commit(); redrawAll(); onChange(); };
       const wrap = document.createElement('label');
       wrap.append(document.createTextNode(label), input);
       return wrap;
@@ -1183,6 +1184,9 @@ export function previzPanel(stage, {
       inspector.append(makeNumber('光圈 f/', 'aperture', '0.1'), makeSelect('对焦目标', 'focusId', targets),
         makeNumber('手动焦距 m', 'focusDistance', '0.1'), makeNumber('快门角度°', 'shutterAngle', '1'), makeNumber('ISO', 'iso', '25'));
     } else if (found.kind === 'subject') {
+      const ground = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '脚底贴地' });
+      ground.onclick = () => { snapToGround(item); history.commit(); redrawAll(); onChange(); };
+      inspector.append(makeSelect('地面约束', 'grounded', [['true', '脚底贴地检查'], ['false', '允许跳跃/悬空']]), ground);
       if (item.textureLayout === 'quad-character') {
         inspector.append(makeSelect('贴图视角', 'textureView', [
           ['auto', '自动随朝向'], ['front', '全身正面'], ['side', '全身侧面'],
@@ -1218,6 +1222,10 @@ export function previzPanel(stage, {
         inspector.append(makeSelect('绑定位置', 'attachPoint', [
           ['rightHand', '右手'], ['leftHand', '左手'], ['back', '背部'], ['waist', '腰部']
         ]), makeNumber('挂点左右', 'attachOffsetX', '0.01'), makeNumber('挂点上下', 'attachOffsetY', '0.01'), makeNumber('挂点前后', 'attachOffsetZ', '0.01'));
+      } else {
+        const ground = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '底部贴地' });
+        ground.onclick = () => { snapToGround(item); history.commit(); redrawAll(); onChange(); };
+        inspector.append(makeSelect('地面约束', 'grounded', [['true', '底部贴地检查'], ['false', '允许悬挂/悬空']]), ground);
       }
     }
   }
@@ -1544,6 +1552,12 @@ export function previzPanel(stage, {
       }
     }
     readout.append(chips);
+    for (const issue of spatialIssues(stage)) {
+      const warn = document.createElement('div');
+      warn.className = `previz-warn${issue.level === 'blocker' ? ' bad' : ''}`;
+      warn.textContent = `${issue.level === 'blocker' ? '⛔' : '⚠'} ${issue.message}`;
+      readout.append(warn);
+    }
 
     /**
      * 越轴当场报。

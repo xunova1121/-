@@ -43,17 +43,19 @@ export function normalizeStage(stage = {}) {
   stage.cam.shutterAngle = Math.max(1, Math.min(360, Number(stage.cam.shutterAngle || 180)));
   stage.cam.iso = Math.max(25, Math.min(12800, Number(stage.cam.iso || 400)));
   stage.subjects.forEach((x) => {
-    normalize('subject', x, { x: 0, y: 0, height: 1.72, pose: 'stand', action: '', animationName: '', autoOrient: true });
+    normalize('subject', x, { x: 0, y: 0, height: 1.72, pose: 'stand', action: '', animationName: '', autoOrient: true, grounded: true });
     x.pose = ['stand', 'walk', 'run', 'sit', 'crouch', 'reach', 'fight'].includes(x.pose) ? x.pose : 'stand';
     x.action = String(x.action || '');
     x.animationName = String(x.animationName || '');
     x.autoOrient = x.autoOrient !== false;
+    x.grounded = x.grounded !== false;
   });
   stage.marks.filter((x) => !x.far).forEach((x) => {
     normalize('prop', x, { x: 0, y: 0, height: 0.9, width: 0.9, attachToId: '', attachPoint: 'rightHand', attachOffsetX: 0, attachOffsetY: 0, attachOffsetZ: 0 });
     x.attachToId = String(x.attachToId || '');
     x.attachPoint = ['rightHand', 'leftHand', 'back', 'waist'].includes(x.attachPoint) ? x.attachPoint : 'rightHand';
     for (const key of ['attachOffsetX', 'attachOffsetY', 'attachOffsetZ']) x[key] = Number(x[key] || 0);
+    x.grounded = x.grounded !== false;
   });
   stage.lights.forEach((x) => {
     normalize('light', x, { name: '灯光', x: 0, y: -1, height: 2.6, lightType: 'spot', intensity: 2.5, color: '#ffd6a3', targetId: '' });
@@ -101,6 +103,44 @@ export function attachmentPose(stage, item) {
     elevation: Number(actor.elevation || 0) + anchor.y + Number(item.attachOffsetY || 0),
     rotation: Number(actor.rotation ?? actor.facing ?? 0) + Number(item.rotation || 0), actor
   };
+}
+
+export function snapToGround(item) {
+  if (!item) return item;
+  item.elevation = 0;
+  item.grounded = true;
+  return item;
+}
+
+/** 生成前的空间质检：脚底悬空/穿地、对象穿模、人物被另一人完全挡住。 */
+export function spatialIssues(stage = {}) {
+  normalizeStage(stage);
+  const issues = [];
+  const movable = [...(stage.subjects || []).map((item) => ({ kind: 'subject', item })),
+    ...(stage.marks || []).filter((x) => !x.far && !x.attachToId).map((item) => ({ kind: 'prop', item }))];
+  for (const { kind, item } of movable) {
+    if (item.grounded === false) continue;
+    const elevation = Number(item.elevation || 0);
+    if (elevation < -.02) issues.push({ code: 'below-floor', objectId: item.id, level: 'blocker', message: `${item.name || item.id}穿进地面 ${Math.abs(elevation).toFixed(2)} 米` });
+    else if (elevation > .06) issues.push({ code: 'floating-object', objectId: item.id, level: 'warn', message: `${item.name || item.id}脚底/底部悬空 ${elevation.toFixed(2)} 米` });
+  }
+  const colliders = movable.map(({ kind, item }) => ({ kind, item, x: Number(item.x || 0), y: Number(item.y || 0),
+    radius: kind === 'subject' ? .26 * Number(item.scale || 1) : Math.max(.12, Number(item.width || .6) * Number(item.scale || 1) * .36) }));
+  for (let i = 0; i < colliders.length; i += 1) for (let j = i + 1; j < colliders.length; j += 1) {
+    const a = colliders[i], b = colliders[j], distance = Math.hypot(a.x - b.x, a.y - b.y);
+    if (distance < (a.radius + b.radius) * .62) issues.push({ code: 'object-overlap', objectIds: [a.item.id, b.item.id], level: 'warn', message: `${a.item.name || a.item.id}与${b.item.name || b.item.id}发生明显穿模` });
+  }
+  const cam = stage.cam || { x: 0, y: -3 };
+  const subjects = (stage.subjects || []).map((item) => {
+    const dx = Number(item.x || 0) - Number(cam.x || 0), dy = Number(item.y || 0) - Number(cam.y || 0);
+    return { item, distance: Math.hypot(dx, dy), angle: Math.atan2(dy, dx) };
+  }).sort((a, b) => a.distance - b.distance);
+  for (let i = 0; i < subjects.length; i += 1) for (let j = i + 1; j < subjects.length; j += 1) {
+    const front = subjects[i], rear = subjects[j];
+    const delta = Math.abs(Math.atan2(Math.sin(front.angle - rear.angle), Math.cos(front.angle - rear.angle))) * 180 / Math.PI;
+    if (rear.distance - front.distance > .55 && delta < 4.5) issues.push({ code: 'subject-occluded', objectIds: [front.item.id, rear.item.id], level: 'warn', message: `${rear.item.name || rear.item.id}可能被${front.item.name || front.item.id}完全遮挡` });
+  }
+  return issues;
 }
 
 export function snapshot(stage) { return JSON.stringify(normalizeStage(stage)); }
