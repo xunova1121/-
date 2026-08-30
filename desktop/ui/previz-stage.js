@@ -49,7 +49,12 @@ export function normalizeStage(stage = {}) {
     x.animationName = String(x.animationName || '');
     x.autoOrient = x.autoOrient !== false;
   });
-  stage.marks.filter((x) => !x.far).forEach((x) => normalize('prop', x, { x: 0, y: 0, height: 0.9, width: 0.9 }));
+  stage.marks.filter((x) => !x.far).forEach((x) => {
+    normalize('prop', x, { x: 0, y: 0, height: 0.9, width: 0.9, attachToId: '', attachPoint: 'rightHand', attachOffsetX: 0, attachOffsetY: 0, attachOffsetZ: 0 });
+    x.attachToId = String(x.attachToId || '');
+    x.attachPoint = ['rightHand', 'leftHand', 'back', 'waist'].includes(x.attachPoint) ? x.attachPoint : 'rightHand';
+    for (const key of ['attachOffsetX', 'attachOffsetY', 'attachOffsetZ']) x[key] = Number(x[key] || 0);
+  });
   stage.lights.forEach((x) => {
     normalize('light', x, { name: '灯光', x: 0, y: -1, height: 2.6, lightType: 'spot', intensity: 2.5, color: '#ffd6a3', targetId: '' });
     x.lightType = ['spot', 'point', 'directional'].includes(x.lightType) ? x.lightType : 'spot';
@@ -73,6 +78,29 @@ export function stageObjects(stage = {}) {
 
 export function findObject(stage, id) {
   return stageObjects(stage).find((x) => x.item.id === id) || null;
+}
+
+/** 把人物局部挂点换算成舞台世界坐标；渲染、控制图与提示词共用同一份结果。 */
+export function attachmentPose(stage, item) {
+  const actor = (stage?.subjects || []).find((x) => x.id === item?.attachToId);
+  if (!actor) return null;
+  const h = Math.max(.5, Number(actor.height || 1.72));
+  const anchors = {
+    rightHand: { x: h * .28, y: h * .61, z: 0 },
+    leftHand: { x: -h * .28, y: h * .61, z: 0 },
+    back: { x: 0, y: h * .64, z: h * .13 },
+    waist: { x: h * .22, y: h * .48, z: h * .08 }
+  };
+  const anchor = anchors[item.attachPoint] || anchors.rightHand;
+  const lx = anchor.x + Number(item.attachOffsetX || 0);
+  const lz = anchor.z + Number(item.attachOffsetZ || 0);
+  const rad = -Number(actor.rotation ?? actor.facing ?? 0) * Math.PI / 180;
+  return {
+    x: Number(actor.x || 0) + lx * Math.cos(rad) + lz * Math.sin(rad),
+    y: Number(actor.y || 0) - lx * Math.sin(rad) + lz * Math.cos(rad),
+    elevation: Number(actor.elevation || 0) + anchor.y + Number(item.attachOffsetY || 0),
+    rotation: Number(actor.rotation ?? actor.facing ?? 0) + Number(item.rotation || 0), actor
+  };
 }
 
 export function snapshot(stage) { return JSON.stringify(normalizeStage(stage)); }

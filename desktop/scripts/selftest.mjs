@@ -10915,7 +10915,7 @@ section('工业化升级：实例路由、任务账本和控制图');
   jobsMod.__reset();
 
   const controls = await import('../core/pipeline/controlmaps.js');
-  const maps = controls.renderControls({ cam: { id: 'cam-main', x: 0, y: -3, height: 1.6, lens: 35 }, subjects: [{ id: 'actor-a', name: '阿澜', x: 0, y: 0, height: 1.72, thumbnail: '/api/media?path=alan.png' }], marks: [{ id: 'prop-table', name: '桌', x: 1, y: 1 }], keyframes: [
+  const maps = controls.renderControls({ cam: { id: 'cam-main', x: 0, y: -3, height: 1.6, lens: 35 }, subjects: [{ id: 'actor-a', name: '阿澜', x: 0, y: 0, height: 1.72, thumbnail: '/api/media?path=alan.png' }], marks: [{ id: 'prop-table', name: '桌', x: 1, y: 1 }, { id: 'prop-sword', name: '剑', x: 0, y: 0, height: .8, attachToId: 'actor-a', attachPoint: 'rightHand' }], keyframes: [
     { frame: 0, values: { 'cam-main': { x: 0, y: -3, height: 1.6, lens: 35 }, 'actor-a': { x: 0, y: 0, height: 1.72 } } },
     { frame: 120, values: { 'cam-main': { x: 1, y: -2, height: 1.8, lens: 50 }, 'actor-a': { x: 2, y: 0, height: 1.72 } } }
   ] }, { duration: 5 });
@@ -10932,9 +10932,14 @@ section('工业化升级：实例路由、任务账本和控制图');
   check('控制序列按8fps左右采样且首尾都保留',
     maps.controlFps === 8 && maps.frames[0].frame === 0 && maps.frames.at(-1).frame === 120);
   check('人物移动后的末帧控制图发生变化', maps.frames[0].rgb !== maps.frames.at(-1).rgb);
+  check('人物挂点道具随角色关键帧移动', maps.attachmentSequence[0].props[0].x !== maps.attachmentSequence.at(-1).props[0].x);
+  check('控制包保留人物、道具和挂点关系', maps.layers.some((x) => x.id === 'prop-sword' && x.attachToId === 'actor-a' && x.attachPoint === 'rightHand'));
   const controlPrompt = controls.videoControlPrompt(maps);
   check('3D预演轨迹能转成视频模型实际收到的导演指令',
     controlPrompt.includes('3D预演控制') && controlPrompt.includes('actor-a') && controlPrompt.includes('50mm'));
+  check('视频模型收到道具不漂浮不换手的绑定指令', controlPrompt.includes('剑固定在actor-a的右手') && controlPrompt.includes('不得漂浮、穿模或换手'));
+  const brokenAttachment = controls.renderControls({ cam: { id: 'cam-main', x: 0, y: -3 }, subjects: [], marks: [{ id: 'prop-sword', name: '剑', attachToId: 'actor-missing' }] });
+  check('绑定人物丢失会阻断控制包', brokenAttachment.issues.some((x) => x.code === 'missing-attachment-target' && x.level === 'blocker'));
 
   const previzUi = fs.readFileSync(path.join(PROJECT_ROOT, 'ui', 'previz-canvas.js'), 'utf8');
   check('工作台有摄影机取景、关键帧和资产拖入',

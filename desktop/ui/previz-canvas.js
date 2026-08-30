@@ -28,7 +28,7 @@ import { GLTFLoader } from '/three-gltf-loader.js';
 import { OrbitControls } from '/three-orbit-controls.js';
 import { TransformControls } from '/three-transform-controls.js';
 import { clone as cloneSkeleton } from '/three-skeleton-utils.js';
-import { addKeyframe, applyFrame, createHistory, findObject, normalizeStage, stageObjects } from './previz-stage.js';
+import { addKeyframe, applyFrame, attachmentPose, createHistory, findObject, normalizeStage, stageObjects } from './previz-stage.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -233,23 +233,25 @@ export function blockingCanvas(stage, { size = 320, onChange = () => {} } = {}) 
         continue;
       }
       const g = el('g');
+      const attached = attachmentPose(stage, mk);
+      const worldX = Number(attached?.x ?? mk.x ?? 0), worldY = Number(attached?.y ?? mk.y ?? 0);
       const hasTexture = Boolean(mk.textureUrl || mk.thumbnail);
       if (hasTexture) {
         const image = el('image', {
-          href: mk.textureUrl || mk.thumbnail, x: s.x(mk.x) - 35, y: s.y(mk.y) - 55,
+          href: mk.textureUrl || mk.thumbnail, x: s.x(worldX) - 35, y: s.y(worldY) - 55,
           width: 70, height: 70, preserveAspectRatio: 'xMidYMid meet', class: 'previz-top-asset'
         });
-        draggable(image, (mx, my) => { mk.x = Number(mx.toFixed(2)); mk.y = Number(my.toFixed(2)); });
+        if (!attached) draggable(image, (mx, my) => { mk.x = Number(mx.toFixed(2)); mk.y = Number(my.toFixed(2)); });
         g.append(image);
       }
       const markNode = el('rect', {
-        x: s.x(mk.x) - 9, y: s.y(mk.y) - 9, width: 18, height: 18, rx: 4, class: `previz-mark${hasTexture ? ' textured' : ''}`
+        x: s.x(worldX) - 9, y: s.y(worldY) - 9, width: 18, height: 18, rx: 4, class: `previz-mark${hasTexture ? ' textured' : ''}`
       });
       g.append(markNode);
-      const t = el('text', { x: s.x(mk.x), y: s.y(mk.y) + 4, class: 'previz-mark-label', 'pointer-events': 'none' });
+      const t = el('text', { x: s.x(worldX), y: s.y(worldY) + 4, class: 'previz-mark-label', 'pointer-events': 'none' });
       t.append(document.createTextNode((mk.name || '?').slice(0, 2)));
       g.append(t);
-      draggable(markNode, (mx, my) => {
+      if (!attached) draggable(markNode, (mx, my) => {
         mk.x = Number(mx.toFixed(2));
         mk.y = Number(my.toFixed(2));
       });
@@ -525,6 +527,8 @@ export function director3dCanvas(stage, {
     const obj = transform.object;
     const item = obj?.userData?.item;
     if (!item) return;
+    // 挂在人身上的道具编辑的是局部偏移，不能把世界坐标误写回自由摆位坐标。
+    if (obj.userData.kind === 'prop' && item.attachToId) return;
     item.x = Number(obj.position.x.toFixed(2));
     item.y = Number(obj.position.z.toFixed(2));
     item.elevation = Number(obj.position.y.toFixed(2));
@@ -785,9 +789,10 @@ export function director3dCanvas(stage, {
     for (const { kind, item } of entries) {
       const fallback = kind === 'subject' ? actor(item) : kind === 'camera' ? cameraRig() : kind === 'light' ? lightRig(item) : prop(item);
       const obj = kind === 'camera' || kind === 'light' ? fallback : modelOrFallback(item, kind, fallback);
-      obj.position.set(Number(item.x || 0), Number(item.elevation || 0), Number(item.y || 0));
+      const attached = kind === 'prop' ? attachmentPose(stage, item) : null;
+      obj.position.set(Number(attached?.x ?? item.x ?? 0), Number(attached?.elevation ?? item.elevation ?? 0), Number(attached?.y ?? item.y ?? 0));
       if (kind === 'camera' && stage.subjects?.[0]) obj.rotation.y = Math.atan2(Number(stage.subjects[0].x || 0) - Number(item.x || 0), Number(stage.subjects[0].y || 0) - Number(item.y || 0));
-      else obj.rotation.y = -THREE.MathUtils.degToRad(Number(item.rotation || item.facing || 0));
+      else obj.rotation.y = -THREE.MathUtils.degToRad(Number(attached?.rotation ?? item.rotation ?? item.facing ?? 0));
       obj.rotation.x = THREE.MathUtils.degToRad(Number(item.rotationX || 0));
       obj.rotation.z = THREE.MathUtils.degToRad(Number(item.rotationZ || 0));
       const baseScale = Number(item.scale || 1);
@@ -798,7 +803,7 @@ export function director3dCanvas(stage, {
       addMotionGuide(item, kind);
     }
     const active = objects.get(selected());
-    if (active && !active.userData.item.locked) transform.attach(active);
+    if (active && !active.userData.item.locked && !active.userData.item.attachToId) transform.attach(active);
     const rect = host.getBoundingClientRect(); renderer.setSize(Math.max(320, rect.width || size), Math.max(230, rect.height || size * .72), false);
     view.aspect = Math.max(1, (rect.width || size) / (rect.height || size * .72)); view.updateProjectionMatrix(); renderer.render(scene3d, view);
     const cam = stage.cam || {};
@@ -826,7 +831,7 @@ export function director3dCanvas(stage, {
     while (obj && !obj.userData?.item) obj = obj.parent;
     if (!obj) return;
     onSelect(obj.userData.item.id);
-    if (!obj.userData.item.locked && transformMode === 'translate') {
+    if (!obj.userData.item.locked && !obj.userData.item.attachToId && transformMode === 'translate') {
       dragging = { item: obj.userData.item, value: obj.userData.item };
       renderer.domElement.setPointerCapture(ev.pointerId);
     }
@@ -913,11 +918,13 @@ export function cameraViewport(stage, { width = 480 } = {}) {
     layer.append(el('line', { x1: 0, y1: horizon, x2: width, y2: horizon, class: 'previz-camera-horizon' }));
     const visible = [];
     for (const entry of stageObjects(stage).filter((x) => x.kind !== 'camera' && x.kind !== 'light')) {
-      const dx = Number(entry.item.x) - Number(cam.x), dy = Number(entry.item.y) - Number(cam.y);
+      const attached = entry.kind === 'prop' ? attachmentPose(stage, entry.item) : null;
+      const world = attached ? { ...entry.item, ...attached } : entry.item;
+      const dx = Number(world.x) - Number(cam.x), dy = Number(world.y) - Number(cam.y);
       const depth = dx * Math.cos(look) + dy * Math.sin(look);
       const side = -dx * Math.sin(look) + dy * Math.cos(look);
       if (depth <= .15) continue;
-      visible.push({ ...entry, depth, side });
+      visible.push({ ...entry, item: world, depth, side });
     }
     visible.sort((a, b) => b.depth - a.depth);
     for (const entry of visible) {
@@ -1204,6 +1211,14 @@ export function previzPanel(stage, {
       remove.onclick = () => { stage.lights = (stage.lights || []).filter((x) => x.id !== item.id); selectedId = stage.cam.id; history.commit(); redrawAll(); onChange(); };
       inspector.append(makeSelect('类型', 'lightType', [['spot', '聚光灯'], ['point', '点光源'], ['directional', '平行光']]),
         makeNumber('强度', 'intensity', '0.1'), colorWrap, makeSelect('照向', 'targetId', targets), remove);
+    } else if (found.kind === 'prop') {
+      const actors = [['', '自由摆放'], ...(stage.subjects || []).map((x) => [x.id, `绑定：${x.name || x.id}`])];
+      inspector.append(makeSelect('人物挂点', 'attachToId', actors));
+      if (item.attachToId) {
+        inspector.append(makeSelect('绑定位置', 'attachPoint', [
+          ['rightHand', '右手'], ['leftHand', '左手'], ['back', '背部'], ['waist', '腰部']
+        ]), makeNumber('挂点左右', 'attachOffsetX', '0.01'), makeNumber('挂点上下', 'attachOffsetY', '0.01'), makeNumber('挂点前后', 'attachOffsetZ', '0.01'));
+      }
     }
   }
 
