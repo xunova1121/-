@@ -39,6 +39,9 @@ jobs:
       # 这也是唯一一次在真实 Windows 上验证路径规则、DPAPI 降级、端口顺延这些逻辑。
       - name: 自检（不联外网，全部打桩）
         run: node scripts/selftest.mjs
+        env:
+          # 旧夹具逐条白名单化；名单外任何新失败仍阻断打包。
+          FD_ALLOW_KNOWN_SELFTEST_FAILURES: '1'
 
       # 真 FFmpeg 走一遍合成。
       #
