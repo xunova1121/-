@@ -26259,21 +26259,21 @@ react/cjs/react-jsx-runtime.development.js:
 
 /* ---------- 底图要素 ---------- */
 .rg-sea-deep{fill:url(#rgSeaGrad)}
-.rg-shelf{fill:none;stroke:#3fbfe0;stroke-width:2.2;opacity:.16;stroke-linejoin:round;
+.rg-shelf{fill:none;stroke:#3fbfe0;stroke-width:2;opacity:.11;stroke-linejoin:round;
   stroke-dasharray:1 0;filter:url(#rgLine)}
 .rg-settle{pointer-events:none}
 .rg-halo{fill:none;stroke:#2ea8d8;stroke-linejoin:round}
 .rg-land{fill:url(#rgLandGrad);stroke:#5fd0ef;stroke-width:1.2;stroke-linejoin:round;filter:url(#rgCoast)}
 .rg-island{fill:url(#rgLandGrad);stroke:#4fbde0;stroke-width:.9;filter:url(#rgCoast)}
-.rg-yangtze{fill:url(#rgSeaGrad);stroke:#4fb6da;stroke-width:.9;opacity:.95}
-.rg-river{fill:none;stroke:#3f9fce;stroke-linecap:round;stroke-linejoin:round;opacity:.72}
-.rg-lake{fill:#10496f;stroke:#57bede;stroke-width:.9;opacity:.95}
-.rg-boundary{fill:none;stroke:#4a86a8;stroke-width:.9;stroke-dasharray:7 4 2 4;opacity:.5}
+.rg-yangtze{fill:#072439;stroke:#3f9dc4;stroke-width:.9;opacity:.95}
+.rg-river{fill:none;stroke:#3a8cb8;stroke-linecap:round;stroke-linejoin:round;opacity:.55}
+.rg-lake{fill:#0a3352;stroke:#4aa8cc;stroke-width:.85;opacity:.9}
+.rg-boundary{fill:none;stroke:#3d7089;stroke-width:.8;stroke-dasharray:7 4 2 4;opacity:.32}
 .rg-citylight{fill:url(#rgCityGlow)}
 .rg-city-dot{fill:#bdf0ff}
-.rg-city-name{fill:#8fc4dd;font-size:11px;text-shadow:0 1px 3px #000}
-.rg-prov{fill:#5f9fc4;font-size:15px;letter-spacing:3px;opacity:.9}
-.rg-sea-name{fill:#2f86ad;font-size:17px;letter-spacing:9px;opacity:.72}
+.rg-city-name{fill:#7fb0c8;font-size:11px;text-shadow:0 1px 3px #000}
+.rg-prov{fill:#4c85a6;font-size:15px;letter-spacing:3px;opacity:.65}
+.rg-sea-name{fill:#2a7398;font-size:17px;letter-spacing:9px;opacity:.55}
 .rg-grid-label{fill:#3d7c99;font-size:9px;font-family:Consolas,Menlo,monospace}
 .rg-port{fill:#ffd166}
 .rg-port-name{fill:#c8a35a;font-size:9px}
@@ -26313,10 +26313,10 @@ react/cjs/react-jsx-runtime.development.js:
 .rg-vessel .bob{transform-box:fill-box;transform-origin:center;animation:rgBob 3.4s ease-in-out infinite}
 .rg-vessel:hover .hull{filter:url(#rgGlowL)}
 .rg-vessel .v-name{fill:#dff7ff;font-size:10.5px;font-weight:700;text-shadow:0 1px 4px #000;pointer-events:none}
-.rg-vessel .v-meta{fill:#7fb6cc;font-size:9px;text-shadow:0 1px 3px #000;pointer-events:none}
+.rg-vessel .v-meta{fill:#6a9cb2;font-size:9px;text-shadow:0 1px 3px #000;pointer-events:none}
 .rg-vessel .v-plate{fill:#04182bd0;stroke:#1f5f7d;stroke-width:.8;rx:3}
 .rg-fish{stroke:#0a2436;stroke-width:.6;cursor:pointer}
-.rg-fish.ok{fill:#38dfae}.rg-fish.warn{fill:#ffb44d}.rg-fish.bad{fill:#ff6b74;animation:rgPulse 1.1s ease-in-out infinite}
+.rg-fish.ok{fill:#2f9e83;opacity:.6}.rg-fish.warn{fill:#ffb44d}.rg-fish.bad{fill:#ff6b74;animation:rgPulse 1.1s ease-in-out infinite}
 .rg-fish-halo{fill:none;stroke:#ff6b74;stroke-width:1.2;transform-box:fill-box;transform-origin:center;
   animation:rgScan 2.2s ease-out infinite}
 
@@ -26453,27 +26453,12 @@ var GEO = {
   ],
   /* 主要水系 */
   rivers: [
-    { w:2.0, p:[[118.20,33.32],[118.90,33.55],[119.60,33.76],[120.10,33.86],[120.47,33.92]] },                /* 苏北灌溉总渠 */
-    { w:1.7, p:[[119.42,32.24],[119.48,32.70],[119.32,33.10],[119.10,33.52],[118.90,34.05],[118.55,34.55]] }, /* 京杭大运河 */
-    { w:1.6, p:[[119.75,33.55],[120.15,33.66],[120.45,33.72],[120.69,33.75]] },                               /* 射阳河 */
-    { w:1.5, p:[[120.30,32.55],[120.65,32.85],[120.95,33.15],[121.02,33.40]] },                               /* 通榆河北段 */
-    { w:1.5, p:[[120.28,32.50],[120.55,32.20],[120.80,31.98]] },                                              /* 通吕运河 */
-    { w:1.8, p:[[121.02,30.92],[121.22,31.08],[121.34,31.20],[121.44,31.32],[121.51,31.40]] },                /* 黄浦江 */
-    { w:1.9, p:[[119.60,30.05],[120.10,30.20],[120.55,30.32],[120.95,30.42],[121.20,30.58],[121.40,30.72]] }, /* 钱塘江 */
-    { w:1.4, p:[[118.60,32.40],[119.10,32.55],[119.60,32.62],[120.05,32.55]] },                               /* 里下河水网 */
-    { w:1.3, p:[[117.60,33.90],[118.20,34.05],[118.80,34.20],[119.30,34.35],[119.60,34.55]] },                /* 沂沭泗 */
-    { w:1.1, p:[[119.20,34.30],[119.70,34.20],[120.10,34.05],[120.41,34.02]] },
-    { w:1.1, p:[[119.00,33.90],[119.60,33.98],[120.05,34.02]] },
-    { w:1.1, p:[[119.40,33.30],[119.95,33.40],[120.40,33.52],[120.75,33.62]] },
-    { w:1.0, p:[[119.55,32.80],[120.05,32.95],[120.55,33.10],[120.90,33.22]] },
-    { w:1.0, p:[[119.70,32.45],[120.25,32.60],[120.70,32.72],[121.00,32.82]] },
-    { w:1.0, p:[[120.05,32.25],[120.50,32.35],[120.95,32.48],[121.25,32.62]] },
-    { w:1.0, p:[[118.55,32.85],[119.10,32.98],[119.65,33.05],[120.05,33.02]] },
-    { w:1.0, p:[[120.10,31.70],[120.55,31.62],[120.95,31.72],[121.20,31.80]] },
-    { w:1.0, p:[[120.40,31.28],[120.85,31.22],[121.20,31.16],[121.45,31.24]] },
-    { w:1.0, p:[[119.95,30.85],[120.40,30.88],[120.85,30.82],[121.15,30.90]] },
-    { w:1.0, p:[[117.80,32.60],[118.30,32.80],[118.85,32.92],[119.30,32.92]] },
-    { w:1.0, p:[[117.20,33.35],[117.85,33.45],[118.30,33.42]] }
+    { w:1.9, p:[[118.20,33.32],[118.90,33.55],[119.60,33.76],[120.10,33.86],[120.47,33.92]] },  /* 苏北灌溉总渠 */
+    { w:1.6, p:[[119.42,32.24],[119.48,32.70],[119.32,33.10],[119.10,33.52],[118.90,34.05],[118.55,34.55]] }, /* 京杭大运河 */
+    { w:1.5, p:[[119.75,33.55],[120.15,33.66],[120.45,33.72],[120.69,33.75]] },                 /* 射阳河 */
+    { w:1.4, p:[[120.30,32.55],[120.65,32.85],[120.95,33.15],[121.02,33.40]] },                 /* 通榆河 */
+    { w:1.6, p:[[121.02,30.92],[121.22,31.08],[121.34,31.20],[121.44,31.32],[121.51,31.40]] },  /* 黄浦江 */
+    { w:1.7, p:[[119.60,30.05],[120.10,30.20],[120.55,30.32],[120.95,30.42],[121.20,30.58],[121.40,30.72]] }  /* 钱塘江 */
   ],
   /* 湖泊 */
   lakes: [
@@ -26514,11 +26499,7 @@ var GEO = {
     [119.42,32.39,18],[119.92,32.46,16],[119.02,33.55,18],[120.75,30.75,20],
     [121.55,29.87,22],[118.28,33.96,15]
   ],
-  ports: [
-    { n:"连云港", ll:[119.47,34.74] }, { n:"滨海港", ll:[120.41,34.02] },
-    { n:"射阳港", ll:[120.58,33.82] }, { n:"大丰港", ll:[120.96,33.00] },
-    { n:"吕四港", ll:[121.63,32.10] }, { n:"启东港", ll:[121.83,31.79] }
-  ],
+  ports: [],
   labels: [
     { t:"江 苏 省", ll:[118.62,33.62], c:"rg-prov" },
     { t:"安 徽 省", ll:[117.10,32.60], c:"rg-prov" },
@@ -26531,9 +26512,7 @@ var GEO = {
     { n:"禁捕区 A", s:"海州湾产卵场", ll:[122.95,34.28],
       p:[[122.58,34.62],[123.22,34.70],[123.60,34.32],[123.38,33.92],[122.76,33.86],[122.44,34.22]] },
     { n:"禁捕区 B", s:"吕泗幼鱼保护区", ll:[123.05,32.30],
-      p:[[122.66,32.70],[123.32,32.76],[123.66,32.34],[123.40,31.88],[122.80,31.84],[122.56,32.26]] },
-    { n:"海洋牧场", s:"大丰增殖区", ll:[122.32,32.18],
-      p:[[122.14,32.38],[122.54,32.42],[122.66,32.10],[122.38,31.92],[122.06,32.04]] }
+      p:[[122.66,32.70],[123.32,32.76],[123.66,32.34],[123.40,31.88],[122.80,31.84],[122.56,32.26]] }
   ],
   /* 主航道（航道图层） */
   lanes: [
@@ -26553,18 +26532,13 @@ var GEO = {
   ],
   /* 在航渔船 */
   fish: [
-    [121.35,34.68,"ok"],[121.95,34.42,"ok"],[122.55,34.05,"warn"],[121.20,34.02,"ok"],
-    [121.70,33.72,"ok"],[122.30,33.58,"ok"],[121.32,33.32,"warn"],[122.05,33.02,"ok"],
-    [122.62,33.30,"ok"],[121.52,32.92,"bad"],[122.20,32.60,"ok"],[122.90,32.62,"ok"],
-    [121.10,34.35,"ok"],[122.75,34.42,"ok"],[123.05,33.72,"ok"],[122.42,32.10,"bad"],
-    [121.86,32.22,"ok"],[121.42,31.78,"ok"],[122.70,31.62,"ok"],[123.15,32.86,"ok"],
-    [122.15,31.42,"ok"],[121.30,31.35,"warn"]
+    [121.52,32.92,"bad"],[122.42,32.10,"bad"],
+    [122.55,34.05,"warn"],[121.32,33.32,"warn"],
+    [121.95,34.42,"ok"],[122.30,33.58,"ok"],[121.70,33.72,"ok"],
+    [122.90,32.62,"ok"],[121.86,32.22,"ok"],[122.75,34.42,"ok"]
   ],
   /* AIS 历史轨迹 */
-  tracks: [
-    [[120.58,33.82],[121.05,33.72],[121.50,33.58],[121.90,33.40],[122.18,33.24]],
-    [[121.63,32.10],[121.86,32.48],[121.98,32.86],[122.10,33.06],[122.18,33.24]]
-  ],
+  tracks: [],
   /* 气象：风场流线与大风区 */
   wind: [
     [[123.4,34.9],[122.7,34.5],[122.0,34.1],[121.4,33.8]],
@@ -26674,7 +26648,7 @@ function defs(){
   +'<linearGradient id="rgSeaGrad" x1="0" y1="0" x2="0.7" y2="1">'
    +'<stop offset="0" stop-color="#05294a"/><stop offset=".5" stop-color="#031a31"/><stop offset="1" stop-color="#010b16"/></linearGradient>'
   +'<linearGradient id="rgLandGrad" x1="0.1" y1="0" x2="1" y2="1">'
-   +'<stop offset="0" stop-color="#0e3b58"/><stop offset=".45" stop-color="#0a2c45"/><stop offset="1" stop-color="#061c2e"/></linearGradient>'
+   +'<stop offset="0" stop-color="#16506f"/><stop offset=".45" stop-color="#10405d"/><stop offset="1" stop-color="#0b2f47"/></linearGradient>'
   +'<radialGradient id="rgCityGlow"><stop offset="0" stop-color="#7fe4ff" stop-opacity=".55"/>'
    +'<stop offset=".45" stop-color="#3ba7d6" stop-opacity=".2"/><stop offset="1" stop-color="#1d6f94" stop-opacity="0"/></radialGradient>'
   +'<radialGradient id="rgWxGrad"><stop offset="0" stop-color="#ffb35c" stop-opacity=".30"/>'
@@ -26741,22 +26715,14 @@ function basemap(){
   GEO.islands.forEach(function(is){ s+='<path class="rg-island" d="'+smooth(is,true)+'"/>'; });
   GEO.rivers.forEach(function(r){ s+='<path class="rg-river" style="stroke-width:'+r.w+'" d="'+smooth(r.p,false)+'"/>'; });
   GEO.lakes.forEach(function(l){ s+='<path class="rg-lake" d="'+smooth(l,true)+'"/>'; });
-  GEO.boundaries.forEach(function(b){ s+='<path class="rg-boundary" d="'+smooth(b,false)+'"/>'; });
-  /* 聚落灯点：模拟夜光遥感底图的城镇肌理 */
-  var dots='';
-  for(var i=0;i<520;i++){
-    var x=rnd(i+1)*proj.w, y=rnd(i+97.3)*proj.h;
-    if(!inLand(x,y)) continue;
-    var r=(0.4+rnd(i+13.7)*1.1).toFixed(2), o=(0.14+rnd(i+31.1)*0.5).toFixed(2);
-    dots+='<circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="'+r+'" opacity="'+o+'"/>';
-  }
-  s+='<g class="rg-settle" fill="#8fdcf7">'+dots+'</g>';
   /* 近岸浅滩带 */
   s+='<path class="rg-shelf" d="'+land+'"/>';
   return s+'</g>';
 }
 
 function graticule(){
+  return '';   /* 经纬网已停用，保留函数便于随时开回来 */
+  /* eslint-disable no-unreachable */
   var s='<g class="rg-grat">', lon, lat;
   for(lon=Math.ceil(proj.lon0); lon<proj.lon0+proj.lonSpan; lon++){
     var x=proj.x(lon); if(x<26||x>proj.w-26) continue;
@@ -26904,6 +26870,7 @@ function fishLayer(){
     var p=P([f[0],f[1]]), st=f[2], r=3.6;
     if(inLand(p[0],p[1])) return;                       /* 落到陆地的点直接丢弃 */
     if(p[0]<8||p[0]>proj.w-8||p[1]<8||p[1]>proj.h-50) return;
+    if(st==='ok') r=2.6;
     if(st==='bad') s+='<circle class="rg-fish-halo" cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="10"/>';
     s+='<path class="rg-fish '+st+'" data-ship="'+(7+i%6)+'" data-tip="'+esc('苏渔 0'+(4200+i*37)+'|'+
         (st==='bad'?'告警 · 越界作业':st==='warn'?'关注 · 航速异常':'正常作业')+'|航速 '+(3+i%6)+'.'+(i%9)+' 节')+'" d="'
@@ -26918,14 +26885,13 @@ function patrolLayer(){
   GEO.patrol.forEach(function(v){ var a=P(v.ll); reserveBox(a[0]-19,a[1]-13,38,26); });
   GEO.patrol.forEach(function(v,i){
     var a=P(v.ll);
-    var t1=v.id, t2=v.sog+'节 · ETA '+v.eta+'分';
-    var bw=Math.max(textW(t1,10.5),textW(t2,9)), bh=22;
+    var t1=v.id, bw=textW(t1,11), bh=13;
     var far = a[0]<hub[0];   /* 靠陆一侧优先把标注放外侧，避免压住航线 */
     var cands = far
-      ? [[-22,-14,'end'],[22,-14,'start'],[-22,6,'end'],[22,6,'start'],[0,-26,'middle'],[0,18,'middle']]
-      : [[22,-14,'start'],[-22,-14,'end'],[22,6,'start'],[-22,6,'end'],[0,-26,'middle'],[0,18,'middle']];
+      ? [[-21,-4,'end'],[21,-4,'start'],[0,-17,'middle'],[0,22,'middle'],[-21,14,'end'],[21,14,'start']]
+      : [[21,-4,'start'],[-21,-4,'end'],[0,-17,'middle'],[0,22,'middle'],[21,14,'start'],[-21,14,'end']];
     var lp=placeBlock(a[0],a[1],bw,bh,cands,true);
-    var lx = lp ? (lp.x-a[0]) : 22, ly = lp ? (lp.y-a[1]) : -14, la = lp ? lp.a : 'start';
+    var lx = lp ? (lp.x-a[0]) : 21, ly = lp ? (lp.y-a[1]) : -4, la = lp ? lp.a : 'start';
     s+='<circle class="rg-cover" cx="'+a[0].toFixed(0)+'" cy="'+a[1].toFixed(0)+'" r="'+proj.km(38).toFixed(0)+'"/>';
     s+='<g class="rg-vessel" data-ship="'+[1,2,4,5,6][i]+'" data-v="'+i+'" data-tip="'
       +esc(v.id+' '+v.name+'|'+v.org+' · 航速 '+v.sog+' 节|预计 '+v.eta+' 分钟抵达目标船')+'">'
@@ -26935,8 +26901,7 @@ function patrolLayer(){
         +'<g class="bob"><g class="rg-rot"><use class="hull" href="#rgBoat" x="-16" y="-8" width="32" height="16"/></g></g>'
       +'</g>'
       +'<g class="rg-lab" data-lab="'+i+'" transform="translate('+a[0].toFixed(1)+','+a[1].toFixed(1)+')">'
-        +'<text class="v-name" text-anchor="'+la+'" x="'+lx.toFixed(0)+'" y="'+(ly+9).toFixed(0)+'">'+esc(t1)+'</text>'
-        +'<text class="v-meta" text-anchor="'+la+'" x="'+lx.toFixed(0)+'" y="'+(ly+21).toFixed(0)+'">'+esc(t2)+'</text>'
+        +'<text class="v-name" text-anchor="'+la+'" x="'+lx.toFixed(0)+'" y="'+(ly+10).toFixed(0)+'">'+esc(t1)+'</text>'
       +'</g></g>';
   });
   return s+'</g>';
@@ -26949,22 +26914,17 @@ function chrome(){
     eta+='<div data-eta="'+i+'"><em>'+esc(v.id)+'</em><u style="--p:'+(18+i*13)+'%"></u><s>'+v.eta+'分</s></div>';
   });
   return '<div class="rg-tools">'
-    +'<div class="rg-chip"><i></i><b>AIS / 北斗</b> 实时融合</div>'
     +'<button type="button" class="rg-chip on" data-act="flow"><i></i>航线动效</button>'
     +'<button type="button" class="rg-chip play" data-act="play"><i></i>航线推演</button>'
-    +'<button type="button" class="rg-chip" data-act="video">▣ 实时视频</button>'
   +'</div>'
   +'<div class="rg-panel">'
     +'<strong>周边执法力量与最优路径</strong>'
-    +'<span>已发现 <b>'+GEO.patrol.length+'艘</b> 可调度力量 · 规划航线 <b>'+GEO.patrol.length+'条</b></span>'
+    +'<span>AIS / 北斗实时融合 · 可调度 <b>'+GEO.patrol.length+'艘</b></span>'
     +'<div class="rg-eta">'+eta+'</div>'
   +'</div>'
   +'<div class="rg-legend">'
     +'<span class="dash"><i></i>规划航线</span>'
-    +'<span class="hist"><i></i>AIS历史轨迹</span>'
     +'<span class="zn"><i></i>禁捕区</span>'
-    +'<span><b class="dot" style="background:#38dfae"></b>正常 3,192</span>'
-    +'<span><b class="dot" style="background:#ffb44d"></b>关注 68</span>'
     +'<span><b class="dot" style="background:#ff6b74"></b>告警 8</span>'
     +'<em>执法力量 '+GEO.patrol.length+' · 规划路径 '+GEO.patrol.length+'</em>'
   +'</div>'
@@ -26978,7 +26938,7 @@ function render(map){
   proj=buildProj(w,h);
   placed=[];
   /* 为控件预留区域，参与标注避让 */
-  reserved=[[8,8,336,34],[w-234,8,228,142],[8,h-46,w-16,38]];
+  reserved=[[8,8,196,34],[w-234,8,228,142],[8,h-46,w-16,38]];
 
   var root=map.querySelector('.rg-root');
   if(!root){

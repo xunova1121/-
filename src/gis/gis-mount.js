@@ -5,22 +5,17 @@ function chrome(){
     eta+='<div data-eta="'+i+'"><em>'+esc(v.id)+'</em><u style="--p:'+(18+i*13)+'%"></u><s>'+v.eta+'分</s></div>';
   });
   return '<div class="rg-tools">'
-    +'<div class="rg-chip"><i></i><b>AIS / 北斗</b> 实时融合</div>'
     +'<button type="button" class="rg-chip on" data-act="flow"><i></i>航线动效</button>'
     +'<button type="button" class="rg-chip play" data-act="play"><i></i>航线推演</button>'
-    +'<button type="button" class="rg-chip" data-act="video">▣ 实时视频</button>'
   +'</div>'
   +'<div class="rg-panel">'
     +'<strong>周边执法力量与最优路径</strong>'
-    +'<span>已发现 <b>'+GEO.patrol.length+'艘</b> 可调度力量 · 规划航线 <b>'+GEO.patrol.length+'条</b></span>'
+    +'<span>AIS / 北斗实时融合 · 可调度 <b>'+GEO.patrol.length+'艘</b></span>'
     +'<div class="rg-eta">'+eta+'</div>'
   +'</div>'
   +'<div class="rg-legend">'
     +'<span class="dash"><i></i>规划航线</span>'
-    +'<span class="hist"><i></i>AIS历史轨迹</span>'
     +'<span class="zn"><i></i>禁捕区</span>'
-    +'<span><b class="dot" style="background:#38dfae"></b>正常 3,192</span>'
-    +'<span><b class="dot" style="background:#ffb44d"></b>关注 68</span>'
     +'<span><b class="dot" style="background:#ff6b74"></b>告警 8</span>'
     +'<em>执法力量 '+GEO.patrol.length+' · 规划路径 '+GEO.patrol.length+'</em>'
   +'</div>'
@@ -34,7 +29,7 @@ function render(map){
   proj=buildProj(w,h);
   placed=[];
   /* 为控件预留区域，参与标注避让 */
-  reserved=[[8,8,336,34],[w-234,8,228,142],[8,h-46,w-16,38]];
+  reserved=[[8,8,196,34],[w-234,8,228,142],[8,h-46,w-16,38]];
 
   var root=map.querySelector('.rg-root');
   if(!root){

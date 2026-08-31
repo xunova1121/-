@@ -100,6 +100,7 @@ function fishLayer(){
     var p=P([f[0],f[1]]), st=f[2], r=3.6;
     if(inLand(p[0],p[1])) return;                       /* 落到陆地的点直接丢弃 */
     if(p[0]<8||p[0]>proj.w-8||p[1]<8||p[1]>proj.h-50) return;
+    if(st==='ok') r=2.6;
     if(st==='bad') s+='<circle class="rg-fish-halo" cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="10"/>';
     s+='<path class="rg-fish '+st+'" data-ship="'+(7+i%6)+'" data-tip="'+esc('苏渔 0'+(4200+i*37)+'|'+
         (st==='bad'?'告警 · 越界作业':st==='warn'?'关注 · 航速异常':'正常作业')+'|航速 '+(3+i%6)+'.'+(i%9)+' 节')+'" d="'
@@ -114,14 +115,13 @@ function patrolLayer(){
   GEO.patrol.forEach(function(v){ var a=P(v.ll); reserveBox(a[0]-19,a[1]-13,38,26); });
   GEO.patrol.forEach(function(v,i){
     var a=P(v.ll);
-    var t1=v.id, t2=v.sog+'节 · ETA '+v.eta+'分';
-    var bw=Math.max(textW(t1,10.5),textW(t2,9)), bh=22;
+    var t1=v.id, bw=textW(t1,11), bh=13;
     var far = a[0]<hub[0];   /* 靠陆一侧优先把标注放外侧，避免压住航线 */
     var cands = far
-      ? [[-22,-14,'end'],[22,-14,'start'],[-22,6,'end'],[22,6,'start'],[0,-26,'middle'],[0,18,'middle']]
-      : [[22,-14,'start'],[-22,-14,'end'],[22,6,'start'],[-22,6,'end'],[0,-26,'middle'],[0,18,'middle']];
+      ? [[-21,-4,'end'],[21,-4,'start'],[0,-17,'middle'],[0,22,'middle'],[-21,14,'end'],[21,14,'start']]
+      : [[21,-4,'start'],[-21,-4,'end'],[0,-17,'middle'],[0,22,'middle'],[21,14,'start'],[-21,14,'end']];
     var lp=placeBlock(a[0],a[1],bw,bh,cands,true);
-    var lx = lp ? (lp.x-a[0]) : 22, ly = lp ? (lp.y-a[1]) : -14, la = lp ? lp.a : 'start';
+    var lx = lp ? (lp.x-a[0]) : 21, ly = lp ? (lp.y-a[1]) : -4, la = lp ? lp.a : 'start';
     s+='<circle class="rg-cover" cx="'+a[0].toFixed(0)+'" cy="'+a[1].toFixed(0)+'" r="'+proj.km(38).toFixed(0)+'"/>';
     s+='<g class="rg-vessel" data-ship="'+[1,2,4,5,6][i]+'" data-v="'+i+'" data-tip="'
       +esc(v.id+' '+v.name+'|'+v.org+' · 航速 '+v.sog+' 节|预计 '+v.eta+' 分钟抵达目标船')+'">'
@@ -131,8 +131,7 @@ function patrolLayer(){
         +'<g class="bob"><g class="rg-rot"><use class="hull" href="#rgBoat" x="-16" y="-8" width="32" height="16"/></g></g>'
       +'</g>'
       +'<g class="rg-lab" data-lab="'+i+'" transform="translate('+a[0].toFixed(1)+','+a[1].toFixed(1)+')">'
-        +'<text class="v-name" text-anchor="'+la+'" x="'+lx.toFixed(0)+'" y="'+(ly+9).toFixed(0)+'">'+esc(t1)+'</text>'
-        +'<text class="v-meta" text-anchor="'+la+'" x="'+lx.toFixed(0)+'" y="'+(ly+21).toFixed(0)+'">'+esc(t2)+'</text>'
+        +'<text class="v-name" text-anchor="'+la+'" x="'+lx.toFixed(0)+'" y="'+(ly+10).toFixed(0)+'">'+esc(t1)+'</text>'
       +'</g></g>';
   });
   return s+'</g>';

@@ -96,7 +96,7 @@ function defs(){
   +'<linearGradient id="rgSeaGrad" x1="0" y1="0" x2="0.7" y2="1">'
    +'<stop offset="0" stop-color="#05294a"/><stop offset=".5" stop-color="#031a31"/><stop offset="1" stop-color="#010b16"/></linearGradient>'
   +'<linearGradient id="rgLandGrad" x1="0.1" y1="0" x2="1" y2="1">'
-   +'<stop offset="0" stop-color="#0e3b58"/><stop offset=".45" stop-color="#0a2c45"/><stop offset="1" stop-color="#061c2e"/></linearGradient>'
+   +'<stop offset="0" stop-color="#16506f"/><stop offset=".45" stop-color="#10405d"/><stop offset="1" stop-color="#0b2f47"/></linearGradient>'
   +'<radialGradient id="rgCityGlow"><stop offset="0" stop-color="#7fe4ff" stop-opacity=".55"/>'
    +'<stop offset=".45" stop-color="#3ba7d6" stop-opacity=".2"/><stop offset="1" stop-color="#1d6f94" stop-opacity="0"/></radialGradient>'
   +'<radialGradient id="rgWxGrad"><stop offset="0" stop-color="#ffb35c" stop-opacity=".30"/>'
@@ -163,22 +163,14 @@ function basemap(){
   GEO.islands.forEach(function(is){ s+='<path class="rg-island" d="'+smooth(is,true)+'"/>'; });
   GEO.rivers.forEach(function(r){ s+='<path class="rg-river" style="stroke-width:'+r.w+'" d="'+smooth(r.p,false)+'"/>'; });
   GEO.lakes.forEach(function(l){ s+='<path class="rg-lake" d="'+smooth(l,true)+'"/>'; });
-  GEO.boundaries.forEach(function(b){ s+='<path class="rg-boundary" d="'+smooth(b,false)+'"/>'; });
-  /* 聚落灯点：模拟夜光遥感底图的城镇肌理 */
-  var dots='';
-  for(var i=0;i<520;i++){
-    var x=rnd(i+1)*proj.w, y=rnd(i+97.3)*proj.h;
-    if(!inLand(x,y)) continue;
-    var r=(0.4+rnd(i+13.7)*1.1).toFixed(2), o=(0.14+rnd(i+31.1)*0.5).toFixed(2);
-    dots+='<circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="'+r+'" opacity="'+o+'"/>';
-  }
-  s+='<g class="rg-settle" fill="#8fdcf7">'+dots+'</g>';
   /* 近岸浅滩带 */
   s+='<path class="rg-shelf" d="'+land+'"/>';
   return s+'</g>';
 }
 
 function graticule(){
+  return '';   /* 经纬网已停用，保留函数便于随时开回来 */
+  /* eslint-disable no-unreachable */
   var s='<g class="rg-grat">', lon, lat;
   for(lon=Math.ceil(proj.lon0); lon<proj.lon0+proj.lonSpan; lon++){
     var x=proj.x(lon); if(x<26||x>proj.w-26) continue;
