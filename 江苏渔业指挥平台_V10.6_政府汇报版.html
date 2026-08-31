@@ -26240,199 +26240,142 @@ react/cjs/react-jsx-runtime.development.js:
    *)
 */
 </script>
-<style id="fishery-gis-style">
-/* ===== V10.6 综合态势 · 真实感 GIS 一张图（离线内置，无需瓦片服务） ===== */
-.mapcard .map.js-real-gis{background:#04101f!important;isolation:isolate;contain:paint}
+<style id="v106-real-gis-style">
+/* V10.6 GIS enhancement: offline Jiangsu coastal command map */
+.mapcard .map.js-real-gis{background:#061b31!important;isolation:isolate}
 .js-real-gis>.land,.js-real-gis>.sea,.js-real-gis>.weather,.js-real-gis>.risk,
 .js-real-gis>.legend,.js-real-gis>.maplayers,.js-real-gis>.popup,.js-real-gis>.ship{display:none!important}
-
-.rg-root{position:absolute;z-index:2;inset:0;overflow:hidden;
-  background:radial-gradient(115% 150% at 58% 50%,#08355a 0,#052440 32%,#03152880 62%,#020c18 100%);
-  font-family:"Microsoft YaHei","PingFang SC","Source Han Sans SC",Arial,sans-serif;
-  cursor:default}
-.rg-root>svg{position:absolute;inset:0;width:100%;height:100%;display:block}
-/* 经纬网 + 暗角 */
-.rg-root:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:3;
-  box-shadow:inset 0 0 90px 10px #00060cd9;
-  background:linear-gradient(#1d6f9412 1px,transparent 1px),linear-gradient(90deg,#1d6f9412 1px,transparent 1px);
-  background-size:64px 64px}
-
-/* ---------- 底图要素 ---------- */
-.rg-sea-deep{fill:url(#rgSeaGrad)}
-.rg-shelf{fill:none;stroke:#3fbfe0;stroke-width:2;opacity:.11;stroke-linejoin:round;
-  stroke-dasharray:1 0;filter:url(#rgLine)}
-.rg-settle{pointer-events:none}
-.rg-halo{fill:none;stroke:#2ea8d8;stroke-linejoin:round}
-.rg-land{fill:url(#rgLandGrad);stroke:#5fd0ef;stroke-width:1.2;stroke-linejoin:round;filter:url(#rgCoast)}
-.rg-island{fill:url(#rgLandGrad);stroke:#4fbde0;stroke-width:.9;filter:url(#rgCoast)}
-.rg-yangtze{fill:#072439;stroke:#3f9dc4;stroke-width:.9;opacity:.95}
-.rg-river{fill:none;stroke:#3a8cb8;stroke-linecap:round;stroke-linejoin:round;opacity:.55}
-.rg-lake{fill:#0a3352;stroke:#4aa8cc;stroke-width:.85;opacity:.9}
-.rg-boundary{fill:none;stroke:#3d7089;stroke-width:.8;stroke-dasharray:7 4 2 4;opacity:.32}
-.rg-citylight{fill:url(#rgCityGlow)}
-.rg-city-dot{fill:#bdf0ff}
-.rg-city-name{fill:#7fb0c8;font-size:11px;text-shadow:0 1px 3px #000}
-.rg-prov{fill:#4c85a6;font-size:15px;letter-spacing:3px;opacity:.65}
-.rg-sea-name{fill:#2a7398;font-size:17px;letter-spacing:9px;opacity:.55}
-.rg-grid-label{fill:#3d7c99;font-size:9px;font-family:Consolas,Menlo,monospace}
-.rg-port{fill:#ffd166}
-.rg-port-name{fill:#c8a35a;font-size:9px}
-
-/* ---------- 禁捕区 / 围栏 ---------- */
-.rg-zone{fill:url(#rgHatch);stroke:#2fd8f4;stroke-width:1.4;stroke-dasharray:8 5;
-  animation:rgZoneDash 3.2s linear infinite}
-.rg-zone-label{fill:#57e6ff;font-size:12px;font-weight:700;letter-spacing:2px;text-shadow:0 1px 4px #000}
-.rg-zone-badge circle{fill:#0a2a3d;stroke:#ff9b3d;stroke-width:1.6}
-.rg-zone-badge path{fill:#ff9b3d}
-
-/* ---------- 航线 ---------- */
-.rg-route-base{fill:none;stroke:#1d7ea6;stroke-width:1.4;opacity:.4}
-.rg-route{fill:none;stroke:#3ee0ff;stroke-width:1.6;stroke-linecap:round;stroke-dasharray:9 7;
-  filter:url(#rgLine);animation:rgFlow 1s linear infinite}
-.rg-route.alt{stroke:#59c7e6;opacity:.82;animation-duration:1.45s}
-.rg-comet{fill:none;stroke:#d6f6ff;stroke-width:1.8;stroke-linecap:round;filter:url(#rgGlowS);opacity:.85}
-.rg-blip{fill:#ffffff;filter:url(#rgGlowS)}
-.rg-route{stroke-width:1.5}
-.rg-node{fill:#7df0ff;filter:url(#rgGlowS);animation:rgNode 2s ease-in-out infinite}
-.rg-track{fill:none;stroke:#3ad0b4;stroke-width:1.1;stroke-dasharray:2 4;opacity:.5}
-
-/* ---------- 目标船 / 雷达 ---------- */
-.rg-ring{fill:none;stroke:#5cecff;stroke-width:1.5;transform-box:fill-box;transform-origin:center;
-  animation:rgScan 3s cubic-bezier(.2,.6,.4,1) infinite}
-.rg-ring.d2{animation-delay:.75s}.rg-ring.d3{animation-delay:1.5s}.rg-ring.d4{animation-delay:2.25s}
-.rg-fixring{fill:none;stroke:#3ad3ee;stroke-width:1;opacity:.22;stroke-dasharray:3 5}
-.rg-sweep{fill:url(#rgSweep);transform-box:fill-box;transform-origin:center;animation:rgSweep 3.6s linear infinite}
-.rg-hub-core{fill:#4ce4ff;filter:url(#rgGlowL);animation:rgBlink 1.15s ease-in-out infinite}
-.rg-hub-ring{fill:none;stroke:#8ff4ff;stroke-width:1.8;animation:rgBlink 1.15s ease-in-out infinite}
-.rg-hub-flash{fill:none;stroke:#5ce9ff;stroke-width:2.4;opacity:0;filter:url(#rgGlowL);
-  animation:rgFlash 1.15s ease-out infinite}
-.rg-target{cursor:pointer}
-.rg-hub-label{fill:#eafdff;font-size:13px;font-weight:700;letter-spacing:1px;text-shadow:0 2px 6px #000}
-.rg-hub-sub{fill:#63dcf3;font-size:10px;text-shadow:0 1px 4px #000}
-
-/* ---------- 船舶 ---------- */
-.rg-vessel{cursor:pointer}
-.rg-vessel .hull{filter:url(#rgShadow)}
-.rg-vessel .bob{transform-box:fill-box;transform-origin:center;animation:rgBob 3.4s ease-in-out infinite}
-.rg-vessel:hover .hull{filter:url(#rgGlowL)}
-.rg-vessel .v-name{fill:#dff7ff;font-size:10.5px;font-weight:700;text-shadow:0 1px 4px #000;pointer-events:none}
-.rg-vessel .v-meta{fill:#6a9cb2;font-size:9px;text-shadow:0 1px 3px #000;pointer-events:none}
-.rg-vessel .v-plate{fill:#04182bd0;stroke:#1f5f7d;stroke-width:.8;rx:3}
-.rg-fish{stroke:#0a2436;stroke-width:.6;cursor:pointer}
-.rg-fish.ok{fill:#2f9e83;opacity:.6}.rg-fish.warn{fill:#ffb44d}.rg-fish.bad{fill:#ff6b74;animation:rgPulse 1.1s ease-in-out infinite}
-.rg-fish-halo{fill:none;stroke:#ff6b74;stroke-width:1.2;transform-box:fill-box;transform-origin:center;
-  animation:rgScan 2.2s ease-out infinite}
-
-/* ---------- 气象图层 ---------- */
-.rg-wx{opacity:0;transition:opacity .35s}
-.rg-wind{fill:none;stroke:#7fd8ff;stroke-width:1.2;stroke-linecap:round;opacity:.55;
-  stroke-dasharray:14 26;animation:rgWind 2.6s linear infinite}
-.rg-wx-blob{fill:url(#rgWxGrad)}
-.rg-wx-name{fill:#ffc98a;font-size:11px;font-weight:700;text-shadow:0 1px 4px #000}
-.rg-wx-label{fill:#8fd6ef;font-size:10px;text-shadow:0 1px 4px #000}
-.rg-wind-spd{fill:#9fdcf5;font-size:9.5px;text-shadow:0 1px 4px #000}
-
-/* ---------- 图层联动 ---------- */
-.js-real-gis[data-layer="气象"] .rg-wx{opacity:1}
-.js-real-gis[data-layer="气象"] .rg-route,.js-real-gis[data-layer="气象"] .rg-comet{opacity:.28}
-.js-real-gis[data-layer="围栏"] .rg-zone{stroke-width:2.4;filter:url(#rgLine)}
-.js-real-gis[data-layer="围栏"] .rg-zone-label{font-size:13px}
-.js-real-gis[data-layer="航道"] .rg-route{stroke-width:2.6}
-.js-real-gis[data-layer="航道"] .rg-lane{opacity:1}
-.rg-lane{opacity:0;transition:opacity .3s;fill:none;stroke:#8fd0ff;stroke-width:8;opacity:0}
-.js-real-gis[data-layer="航道"] .rg-lane{opacity:.13}
-.js-real-gis[data-layer="执法力量"] .rg-vessel .hull{filter:url(#rgGlowL)}
-.js-real-gis[data-layer="执法力量"] .rg-cover{opacity:1}
-.rg-cover{fill:#12b6d914;stroke:#25a7c8;stroke-width:1;stroke-dasharray:4 5;opacity:0;transition:opacity .3s}
-.js-real-gis[data-layer="渔船"] .rg-fish{transform-box:fill-box;transform-origin:center}
-
-/* ---------- 控件 ---------- */
-.rg-tools{position:absolute;z-index:5;left:158px;top:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-.rg-chip{height:26px;display:flex;align-items:center;gap:6px;padding:0 9px;border:1px solid #235c78;border-radius:4px;
-  background:#04182bd8;color:#7fb2c8;font-size:9px;backdrop-filter:blur(3px);box-shadow:0 6px 16px #0006;white-space:nowrap}
-.rg-chip b{color:#dff6ff;font-weight:700}
-.rg-chip i{width:6px;height:6px;border-radius:50%;background:#37dbbc;box-shadow:0 0 8px #37dbbc}
-.rg-chip.on{border-color:#2b9dbc;color:#5ce0f4;background:#062a44e0}
-.rg-chip.on i{background:#37dbf5;box-shadow:0 0 9px #37dbf5}
-button.rg-chip{cursor:pointer;font-family:inherit}
-.rg-chip.wind{gap:5px;border-color:#2a5f70;color:#8fc4d4}
-.rg-chip.wind b{color:#7ee8c4;margin-right:1px}
-.rg-chip.wind:hover{border-color:#3fb0a0;color:#b6f0e2}
-.rg-windrose{width:13px;height:13px;flex:none;fill:#5fe0bd;filter:drop-shadow(0 0 4px #37dbbc80)}
-button.rg-chip:hover{border-color:#38b4d4;color:#a8ecff}
-.rg-chip.play i{border-radius:0;width:0;height:0;background:none;box-shadow:none;
-  border-left:7px solid #5ce0f4;border-top:4px solid transparent;border-bottom:4px solid transparent}
-.rg-chip.play.running i{width:6px;height:8px;border:0;background:#5ce0f4;box-shadow:0 0 8px #5ce0f4;border-radius:1px}
-
-.rg-panel{position:absolute;z-index:5;right:12px;top:12px;width:auto;border:1px solid #24627d;
-  border-radius:5px;background:#04182beb;backdrop-filter:blur(4px);box-shadow:0 10px 24px #0007;overflow:hidden}
-.rg-panel-head{display:flex;align-items:center;gap:6px;width:100%;height:26px;padding:0 9px;border:0;
-  background:transparent;color:#9dc6d8;font-family:inherit;font-size:9px;cursor:pointer;white-space:nowrap}
-.rg-panel-head:hover{background:#0a2c46}
-.rg-panel-head i{width:7px;height:7px;border-radius:50%;background:#2dd9ee;box-shadow:0 0 9px #2dd9ee;
-  flex:none;animation:rgPulse 1.2s infinite}
-.rg-panel-head b{color:#e3fbff;font-weight:700}
-.rg-panel-head em{font-style:normal;color:#04182b;background:#37d0e6;border-radius:8px;padding:1px 6px;font-size:8.5px;font-weight:700}
-.rg-caret{width:0;height:0;margin-left:2px;border-left:4px solid transparent;border-right:4px solid transparent;
-  border-top:5px solid #6aa8c0;transition:transform .2s}
-.rg-panel[data-open="1"] .rg-caret{transform:rotate(180deg)}
-.rg-panel-body{width:0;max-height:0;opacity:0;overflow:hidden;
-  transition:max-height .25s ease,width .25s ease,opacity .2s}
-.rg-panel-body>div{width:212px;padding:2px 10px 9px;box-sizing:border-box}
-.rg-panel[data-open="1"] .rg-panel-body{width:212px;max-height:240px;opacity:1}
-.rg-panel-body p{margin:0 0 6px;color:#7ba7bb;font-size:9px;line-height:1.5}
-.rg-wxline{padding:5px 7px;border:1px solid #1c4e63;border-radius:3px;background:#062338;
-  color:#7ba7bb;font-size:8.5px;line-height:1.7}
-.rg-wxline b{color:#7ee8c4;font-weight:600}
-.rg-panel b{color:#48d9ef;font-weight:600}
-.rg-eta{margin-top:7px;padding-top:7px;border-top:1px solid #17455e;display:flex;flex-direction:column;gap:4px}
-.rg-eta div{display:flex;align-items:center;gap:6px;font-size:9px;color:#87b3c6}
-.rg-eta em{font-style:normal;color:#dff6ff;font-weight:700;width:38px}
-.rg-eta u{text-decoration:none;flex:1;height:3px;border-radius:2px;background:#12354a;overflow:hidden;position:relative}
-.rg-eta u:before{content:"";position:absolute;inset:0 auto 0 0;width:var(--p,40%);border-radius:2px;
-  background:linear-gradient(90deg,#1b8bb0,#4fe6ff)}
-.rg-eta s{text-decoration:none;color:#4fd7ef;width:34px;text-align:right}
-.rg-eta q{quotes:none;color:#6f96a8;font-size:8px;width:62px;text-align:right}
-
-.rg-legend{position:absolute;z-index:5;left:12px;right:12px;bottom:9px;height:28px;display:flex;align-items:center;gap:14px;
-  padding:0 11px;border:1px solid #1a4a66;border-radius:4px;background:#04182beb;backdrop-filter:blur(4px);
-  color:#7ba3b8;font-size:9px;box-shadow:0 6px 18px #0006;overflow:hidden}
-.rg-legend span{display:flex;align-items:center;gap:5px;white-space:nowrap}
-.rg-legend i{width:15px;height:2px;background:#3ee0ff;display:inline-block;flex:none}
-.rg-legend .dash i{background:repeating-linear-gradient(90deg,#3ee0ff 0 5px,transparent 5px 9px)}
-.rg-legend .hist i{background:repeating-linear-gradient(90deg,#3ad0b4 0 2px,transparent 2px 5px)}
-.rg-legend .zn i{height:9px;border:1px dashed #2fd8f4;background:#0a779522}
-.rg-legend .dot{width:7px;height:7px;border-radius:50%;flex:none}
-.rg-legend em{margin-left:auto;font-style:normal;color:#4fd8b0;white-space:nowrap}
-
-.rg-tip{position:absolute;z-index:6;pointer-events:none;opacity:0;transform:translate(-50%,-118%);
-  padding:6px 9px;border:1px solid #2a7a99;border-radius:4px;background:#031320f2;box-shadow:0 8px 20px #0008;
-  color:#cfeeff;font-size:9px;line-height:1.6;white-space:nowrap;transition:opacity .15s}
-.rg-tip b{display:block;color:#eafdff;font-size:10px;margin-bottom:2px}
-.rg-tip.show{opacity:1}
-
-@keyframes rgFlow{to{stroke-dashoffset:-32}}
-@keyframes rgZoneDash{to{stroke-dashoffset:-26}}
-@keyframes rgWind{to{stroke-dashoffset:-40}}
-@keyframes rgNode{50%{opacity:.3}}
-@keyframes rgPulse{50%{opacity:.5}}
-@keyframes rgBlink{0%,42%{opacity:1}58%,100%{opacity:.15}}
-@keyframes rgFlash{0%{opacity:.85;stroke-width:2.4;r:14}70%,100%{opacity:0;stroke-width:.8;r:26}}
-@keyframes rgScan{0%{transform:scale(.28);opacity:.9}100%{transform:scale(1.7);opacity:0}}
-@keyframes rgSweep{to{transform:rotate(360deg)}}
-@keyframes rgBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-2.5px)}}
-@media(max-width:1240px){
-  .rg-panel[data-open="1"] .rg-panel-body,
-  .rg-panel-body>div{width:188px}
-  .rg-eta q{display:none}
-  .rg-legend{gap:9px}.rg-legend span:nth-child(4),.rg-legend span:nth-child(5){display:none}
-}
-@media(prefers-reduced-motion:reduce){
-  .rg-route,.rg-zone,.rg-ring,.rg-sweep,.rg-hub-core,.rg-hub-ring,.rg-hub-flash,
-  .rg-node,.rg-wind,.rg-fish.bad{animation:none}
-  .rg-hub-flash{opacity:0}
-}
-
+.real-gis-overlay{position:absolute;z-index:2;inset:0;overflow:hidden;background:
+ radial-gradient(circle at 58% 50%,#0d4b7045 0,#082b4930 26%,transparent 52%),
+ linear-gradient(120deg,#06172a,#062945 56%,#04192c);font-family:"Microsoft YaHei","PingFang SC",Arial,sans-serif}
+.real-gis-overlay:before{content:"";position:absolute;inset:0;pointer-events:none;background:
+ linear-gradient(#2a7ca017 1px,transparent 1px),linear-gradient(90deg,#2a7ca017 1px,transparent 1px);
+ background-size:40px 40px;box-shadow:inset 0 0 60px #0008}
+.real-gis-overlay svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+.real-gis-overlay .coast-glow{fill:#0b2638;stroke:#2a8aaa;stroke-width:2;filter:url(#coastGlow)}
+.real-gis-overlay .land-fill{fill:url(#landShade);stroke:#1e6482;stroke-width:1.3}
+.real-gis-overlay .county-line{fill:none;stroke:#226079;stroke-width:.75;opacity:.58}
+.real-gis-overlay .map-label{fill:#72a8bd;font-size:14px;letter-spacing:1px}
+.real-gis-overlay .city-dot{fill:#2ac7e4;filter:url(#pointGlow)}
+.real-gis-overlay .city-name{fill:#7da9ba;font-size:12px}
+.real-gis-overlay .coord{fill:#3c7891;font-size:10px;font-family:monospace}
+.real-gis-overlay .sea-name{fill:#1f7393;font-size:20px;letter-spacing:12px;opacity:.75}
+.real-gis-overlay .zone{fill:#0a779516;stroke:#19a7c4;stroke-width:1.2;stroke-dasharray:5 4}
+.real-gis-overlay .zone-label{fill:#27b8d4;font-size:12px;letter-spacing:1px}
+.real-gis-overlay .route-base{fill:none;stroke:#0f7e9e;stroke-width:2;opacity:.28}
+.real-gis-overlay .route-flow{fill:none;stroke:#26d7f0;stroke-width:2.5;stroke-linecap:round;stroke-dasharray:8 8;
+ filter:url(#routeGlow);animation:gisRouteFlow 1.35s linear infinite}
+.real-gis-overlay .route-alt{stroke:#42a9c4;opacity:.7;animation-duration:1.9s}
+.real-gis-overlay .route-node{fill:#64efff;filter:url(#pointGlow);animation:gisNodePulse 1.8s ease-in-out infinite}
+.real-gis-overlay .scan-ring{fill:none;stroke:#3ce6ff;stroke-width:1.4;opacity:.8;transform-box:fill-box;transform-origin:center;
+ animation:gisScan 2.4s ease-out infinite}
+.real-gis-overlay .scan-ring.r2{animation-delay:.8s}.real-gis-overlay .scan-ring.r3{animation-delay:1.6s}
+.real-gis-overlay .target-core{fill:#20c5e7;filter:url(#targetGlow);animation:gisCore 1.4s ease-in-out infinite}
+.real-gis-overlay .target-label{fill:#dffaff;font-size:13px;font-weight:700}
+.real-gis-overlay .target-sub{fill:#52d8ee;font-size:10px}
+.real-gis-overlay .law-vessel{cursor:pointer;filter:url(#shipShadow)}
+.real-gis-overlay .law-vessel .boat-bob{animation:gisBoat 3s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
+.real-gis-overlay .law-vessel:hover .boat-bob{filter:brightness(1.25)}
+.real-gis-overlay .law-vessel .wake{fill:none;stroke:#69ddf3;stroke-width:2;stroke-linecap:round;opacity:.42;stroke-dasharray:3 4}
+.real-gis-overlay .law-vessel .vessel-name{fill:#bfeffd;font-size:11px;font-weight:700}
+.real-gis-overlay .law-vessel .vessel-speed{fill:#70a9bc;font-size:9px}
+.real-gis-overlay .fish-vessel{fill:#42d7ae;stroke:#d9fff4;stroke-width:.7;filter:url(#pointGlow)}
+.gis-toolbar{position:absolute;z-index:4;left:12px;top:12px;display:flex;gap:6px;align-items:center}
+.gis-chip{height:27px;display:flex;align-items:center;gap:6px;padding:0 9px;border:1px solid #245974;border-radius:4px;
+ background:#061b2edc;color:#78a9be;font-size:9px;box-shadow:0 6px 16px #0005}
+.gis-chip b{color:#d9f6ff;font-size:9px}.gis-chip i{width:6px;height:6px;border-radius:50%;background:#37dbbc;box-shadow:0 0 8px #37dbbc}
+.gis-chip.route-on{border-color:#228ba8;color:#4edcf0}.gis-chip.route-on i{background:#32d8ef;box-shadow:0 0 9px #32d8ef}
+.gis-float-status{position:absolute;z-index:4;right:12px;top:12px;width:205px;padding:8px 10px;border:1px solid #24627d;
+ border-radius:5px;background:#061a2ee8;box-shadow:0 8px 20px #0006}
+.gis-float-status strong{display:flex;align-items:center;color:#dff9ff;font-size:10px}.gis-float-status strong:before{content:"";width:7px;height:7px;border-radius:50%;background:#2dd9ee;box-shadow:0 0 10px #2dd9ee;margin-right:7px;animation:gisCore 1.2s infinite}
+.gis-float-status span{display:block;margin-top:5px;color:#6d9db2;font-size:9px}.gis-float-status b{color:#46d7ed;font-weight:500}
+.gis-bottom{position:absolute;z-index:4;left:12px;right:12px;bottom:9px;height:29px;display:flex;align-items:center;gap:13px;
+ padding:0 10px;border:1px solid #19445f;border-radius:4px;background:#06192ce8;color:#7199ae;font-size:9px;box-shadow:0 5px 16px #0005}
+.gis-bottom span{display:flex;align-items:center;gap:5px}.gis-bottom i{width:14px;height:2px;background:#28d7ef;display:inline-block}.gis-bottom .dash i{background:repeating-linear-gradient(90deg,#30d5ed 0 5px,transparent 5px 8px)}
+.gis-bottom .boat-legend{color:#e7f8ff;font-size:13px}.gis-bottom .target-legend{width:8px;height:8px;border:2px solid #35e0f3;border-radius:50%;background:#1383a8}
+.gis-bottom em{margin-left:auto;font-style:normal;color:#55d9ad}
+.js-real-gis[data-layer="气象"] .zone,.js-real-gis[data-layer="气象"] .route-flow{opacity:.25}
+.js-real-gis[data-layer="围栏"] .zone{fill:#0eb5d52b;stroke-width:2.2;filter:url(#routeGlow)}
+.js-real-gis[data-layer="航道"] .route-flow{stroke-width:3.2}
+.js-real-gis[data-layer="执法力量"] .law-vessel{filter:url(#targetGlow)}
+@keyframes gisRouteFlow{to{stroke-dashoffset:-32}}
+@keyframes gisNodePulse{50%{opacity:.35}}
+@keyframes gisScan{0%{transform:scale(.35);opacity:.95}100%{transform:scale(1.65);opacity:0}}
+@keyframes gisCore{50%{opacity:.55}}
+@keyframes gisBoat{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+@media(max-width:1100px){.gis-float-status{width:175px}.gis-float-status span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gis-bottom{gap:8px}.gis-bottom span:nth-child(3){display:none}}
+</style>
+<script id="v106-real-gis-script">
+(function(){
+  const gisMarkup=`<div class="real-gis-overlay" aria-label="江苏近海执法力量与航线规划GIS">
+    <div class="gis-toolbar"><div class="gis-chip"><i></i><b>AIS / 北斗</b> 实时融合</div><div class="gis-chip route-on"><i></i>智能航线规划</div></div>
+    <div class="gis-float-status"><strong>周边执法船艇与路线规划正在浮现</strong><span>已发现 <b>5艘</b> 可调度力量 · 最优路径测算中</span></div>
+    <svg viewBox="0 0 1000 520" preserveAspectRatio="none" role="img">
+      <defs>
+        <linearGradient id="landShade" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#102c3d"/><stop offset="1" stop-color="#071e31"/></linearGradient>
+        <filter id="coastGlow"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        <filter id="routeGlow"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        <filter id="pointGlow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        <filter id="targetGlow"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        <filter id="shipShadow"><feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000" flood-opacity=".8"/></filter>
+        <marker id="arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#2ed9ef"/></marker>
+        <symbol id="lawBoat" viewBox="0 0 64 30">
+          <path d="M4 19 L56 16 L62 20 L53 27 L14 27 L4 22 Z" fill="#e9f7fb" stroke="#68bed3" stroke-width="1"/>
+          <path d="M20 10 H44 L51 17 L14 19 Z" fill="#dceff4" stroke="#6fb7ca" stroke-width="1"/>
+          <path d="M27 4 H40 L44 10 H24 Z" fill="#f8fdff" stroke="#73bdd0" stroke-width="1"/>
+          <path d="M29 6 H34 V10 H27 Z M35 6 H39 L42 10 H35 Z" fill="#185b78"/>
+          <path d="M13 23 H54" stroke="#1b7ba1" stroke-width="2"/><circle cx="47" cy="13" r="1.6" fill="#ef5c66"/>
+          <path d="M34 4 V0 M34 1 L42 3" stroke="#bdebf5" stroke-width="1"/>
+        </symbol>
+      </defs>
+      <text class="coord" x="325" y="22">121°00′E</text><text class="coord" x="610" y="22">122°00′E</text><text class="coord" x="875" y="22">123°00′E</text>
+      <text class="coord" x="950" y="126">34°00′N</text><text class="coord" x="950" y="290">33°00′N</text><text class="coord" x="950" y="450">32°00′N</text>
+      <path class="coast-glow" d="M0 0H286 L301 32 L284 60 L307 88 L293 119 L320 151 L297 182 L316 211 L302 244 L329 273 L305 302 L326 335 L312 364 L338 394 L329 423 L358 454 L347 486 L375 520 H0Z"/>
+      <path class="land-fill" d="M0 0H280 L295 32 L278 61 L301 90 L287 119 L313 151 L290 182 L309 211 L295 244 L322 273 L298 302 L319 335 L305 364 L331 394 L322 423 L351 454 L340 486 L368 520 H0Z"/>
+      <path class="county-line" d="M0 82 C90 68 173 95 294 62 M0 166 C112 151 210 180 302 145 M0 252 C120 235 212 264 307 224 M0 342 C110 321 235 357 315 318 M0 432 C125 414 250 441 334 401 M82 0 C72 118 96 224 78 340 M185 0 C174 108 205 214 188 330"/>
+      <circle class="city-dot" cx="247" cy="66" r="3"/><text class="city-name" x="174" y="62">连云港市</text>
+      <circle class="city-dot" cx="287" cy="174" r="3"/><text class="city-name" x="217" y="170">盐城市</text>
+      <circle class="city-dot" cx="312" cy="315" r="3"/><text class="city-name" x="242" y="310">南通市</text>
+      <circle class="city-dot" cx="345" cy="405" r="3"/><text class="city-name" x="278" y="400">上海市</text>
+      <text class="map-label" x="45" y="116">江苏省</text><text class="sea-name" x="690" y="72">黄海</text>
+      <polygon class="zone" points="690,54 835,34 904,95 876,154 726,146 670,103"/><text class="zone-label" x="746" y="98">禁捕区 A</text>
+      <polygon class="zone" points="718,342 889,324 934,390 866,451 710,426 684,377"/><text class="zone-label" x="758" y="388">禁捕区 C</text>
+      <path class="route-base" d="M556 261 C507 181 449 143 392 113"/><path class="route-flow" marker-end="url(#arrow)" d="M392 113 C449 143 507 181 556 261"/>
+      <path class="route-base" d="M556 261 C477 244 440 226 390 237"/><path class="route-flow route-alt" marker-end="url(#arrow)" d="M390 237 C440 226 477 244 556 261"/>
+      <path class="route-base" d="M556 261 C646 204 712 182 777 196"/><path class="route-flow" marker-end="url(#arrow)" d="M777 196 C712 182 646 204 556 261"/>
+      <path class="route-base" d="M556 261 C639 289 711 313 786 303"/><path class="route-flow route-alt" marker-end="url(#arrow)" d="M786 303 C711 313 639 289 556 261"/>
+      <path class="route-base" d="M556 261 C646 350 705 395 811 425"/><path class="route-flow" marker-end="url(#arrow)" d="M811 425 C705 395 646 350 556 261"/>
+      <circle class="route-node" cx="474" cy="185" r="3"/><circle class="route-node" cx="458" cy="239" r="3"/><circle class="route-node" cx="688" cy="197" r="3"/><circle class="route-node" cx="693" cy="307" r="3"/><circle class="route-node" cx="701" cy="385" r="3"/>
+      <circle class="scan-ring" cx="556" cy="261" r="35"/><circle class="scan-ring r2" cx="556" cy="261" r="35"/><circle class="scan-ring r3" cx="556" cy="261" r="35"/>
+      <circle class="target-core" cx="556" cy="261" r="8"/><circle cx="556" cy="261" r="17" fill="none" stroke="#54e9fb" stroke-width="2"/>
+      <text class="target-label" x="574" y="255">T001 · 苏盐渔05168</text><text class="target-sub" x="574" y="272">目标船 · 8.6节 · 航向126°</text>
+      <g class="law-vessel" data-vessel="1" transform="translate(350 88) rotate(16)"><path class="wake" d="M-34 25 Q-13 28 2 22"/><g class="boat-bob"><use href="#lawBoat" width="64" height="30"/></g><text class="vessel-name" x="-4" y="-8">I002</text><text class="vessel-speed" x="-4" y="4">28.5节 · ETA 38分</text></g>
+      <g class="law-vessel" data-vessel="4" transform="translate(348 220) rotate(-4)"><path class="wake" d="M-38 26 Q-13 30 3 23"/><g class="boat-bob"><use href="#lawBoat" width="64" height="30"/></g><text class="vessel-name" x="-2" y="-9">I004</text><text class="vessel-speed" x="-2" y="3">23.7节 · ETA 22分</text></g>
+      <g class="law-vessel" data-vessel="6" transform="translate(775 176) rotate(165)"><path class="wake" d="M-36 26 Q-12 29 3 22"/><g class="boat-bob"><use href="#lawBoat" width="64" height="30"/></g><text class="vessel-name" x="3" y="-10" transform="rotate(-165 3 -10)">I006</text><text class="vessel-speed" x="-6" y="5" transform="rotate(-165 -6 5)">36.6节 · ETA 19分</text></g>
+      <g class="law-vessel" data-vessel="7" transform="translate(785 284) rotate(194)"><path class="wake" d="M-37 26 Q-12 29 3 22"/><g class="boat-bob"><use href="#lawBoat" width="64" height="30"/></g><text class="vessel-name" x="-18" y="-13" transform="rotate(-194 -18 -13)">I007</text><text class="vessel-speed" x="-42" y="0" transform="rotate(-194 -42 0)">30.6节 · ETA 31分</text></g>
+      <g class="law-vessel" data-vessel="8" transform="translate(805 408) rotate(205)"><path class="wake" d="M-37 26 Q-12 29 3 22"/><g class="boat-bob"><use href="#lawBoat" width="64" height="30"/></g><text class="vessel-name" x="-18" y="-12" transform="rotate(-205 -18 -12)">I008</text><text class="vessel-speed" x="-41" y="2" transform="rotate(-205 -41 2)">30.5节 · ETA 44分</text></g>
+      <path class="fish-vessel" d="M468 338 l8 -6 l6 8 l-8 5z"/><path class="fish-vessel" d="M610 112 l8 -6 l6 8 l-8 5z"/><path class="fish-vessel" d="M648 439 l8 -6 l6 8 l-8 5z"/>
+    </svg>
+    <div class="gis-bottom"><span class="boat-legend">▰</span><span class="dash"><i></i>规划航线</span><span><i></i>AIS历史轨迹</span><span><b class="target-legend"></b>目标船</span><em>执法力量 5 · 规划路径 5</em></div>
+  </div>`;
+  function syncLayer(map){
+    const on=[...document.querySelectorAll('.mapcard .seg button')].find(b=>b.classList.contains('on'));
+    map.dataset.layer=on?on.textContent.trim():'渔船';
+  }
+  function mount(){
+    const map=document.querySelector('.mapcard .map');
+    if(!map||map.dataset.realGis==='1')return;
+    map.dataset.realGis='1';map.classList.add('js-real-gis');map.insertAdjacentHTML('beforeend',gisMarkup);syncLayer(map);
+    map.querySelector('.real-gis-overlay').addEventListener('click',function(e){
+      const vessel=e.target.closest('[data-vessel]');if(!vessel)return;
+      const hidden=map.querySelector('.ship.s'+vessel.dataset.vessel);if(hidden)hidden.click();
+    });
+    document.querySelectorAll('.mapcard .seg button').forEach(b=>b.addEventListener('click',()=>setTimeout(()=>syncLayer(map),0)));
+  }
+  const observer=new MutationObserver(mount);observer.observe(document.documentElement,{childList:true,subtree:true});
+  mount();setTimeout(mount,300);setTimeout(mount,1200);
+})();
+</script><style id="fishery-radar-style">
 /* ===== 雷达态势视图 ===== */
 .rd-root{position:absolute;inset:0;z-index:3;display:grid;
   grid-template-columns:var(--padL) 1fr var(--padR);gap:var(--gap);padding:8px;
@@ -26508,16 +26451,21 @@ button.rg-chip:hover{border-color:#38b4d4;color:#a8ecff}
 .rd-wave .w3{stroke:#7ff0ff;opacity:.28}
 
 /* 双光通道 */
-.rd-right{display:flex;flex-direction:column;gap:var(--gap);min-width:0;min-height:0}
-.rd-ch{flex:1;min-height:120px;display:flex;flex-direction:column;border:1px solid #1d5f7c;border-radius:4px;
-  background:#03192b;overflow:hidden;min-height:0}
+.rd-right{display:flex;flex-direction:column;gap:var(--gap);min-width:0;min-height:0;
+  overflow-y:auto;overflow-x:hidden;padding-right:2px}
+.rd-right::-webkit-scrollbar{width:6px}
+.rd-right::-webkit-scrollbar-track{background:#04182b;border-radius:3px}
+.rd-right::-webkit-scrollbar-thumb{background:#1d5f7c;border-radius:3px}
+.rd-right::-webkit-scrollbar-thumb:hover{background:#2b86a8}
+.rd-right{scrollbar-width:thin;scrollbar-color:#1d5f7c #04182b}
+.rd-ch{flex:0 0 auto;display:flex;flex-direction:column;border:1px solid #1d5f7c;border-radius:4px;
+  background:#03192b;overflow:hidden}
+.rd-ch-img{aspect-ratio:672/347}
 .rd-ch h4{margin:0;padding:5px 9px;color:#dff6ff;font-size:10px;font-weight:700;letter-spacing:1px;
   background:#0a2b41;border-bottom:1px solid #17475f;display:flex;align-items:center;gap:6px}
 .rd-ch h4 em{width:6px;height:6px;border-radius:50%;background:#ff4d57;box-shadow:0 0 7px #ff4d57;
   animation:rdRec 1.4s infinite;margin-left:auto}
-.rd-ch-img{position:relative;flex:1;min-height:0;overflow:hidden;background:#020a12}
-.rd-root.full .rd-ch{flex:0 0 auto}
-.rd-root.full .rd-ch-img{flex:none;aspect-ratio:672/347}
+.rd-ch-img{position:relative;flex:none;overflow:hidden;background:#020a12}
 .rd-ch-img img{width:100%;height:100%;object-fit:cover;display:block}
 .rd-scan{position:absolute;left:0;right:0;height:38%;pointer-events:none;
   background:linear-gradient(#fff0,#7fe4ff14 55%,#7fe4ff26);animation:rdScanMove 5s linear infinite}
@@ -26536,8 +26484,8 @@ button.rg-chip:hover{border-color:#38b4d4;color:#a8ecff}
 .rd-ch.ir .rd-track i{border-color:#ff5bd0}
 
 /* 引出线 */
-.rd-detail{flex:1;min-height:0;border:1px solid #17475f;border-radius:4px;background:#03192bd9;
-  padding:9px 11px;overflow:auto}
+.rd-detail{flex:0 0 auto;border:1px solid #17475f;border-radius:4px;background:#03192bd9;
+  padding:9px 11px}
 .rd-detail h4{margin:0 0 7px;color:#cfeeff;font-size:10px;font-weight:700;letter-spacing:1px;
   display:flex;align-items:center;gap:7px}
 .rd-detail h4 b{margin-left:auto;padding:1px 6px;border:1px solid #ff3b4699;border-radius:2px;
@@ -26587,534 +26535,46 @@ button.rg-chip:hover{border-color:#38b4d4;color:#a8ecff}
 @media(prefers-reduced-motion:reduce){
   .rd-lock,.rd-ch h4 em,.rd-track,.rd-scan,.rd-tele .rd-bars i{animation:none}
 }
+
+/* 视图切换时隐藏页面自带的一张图覆盖层 */
+.rd-hidden{display:none!important}
+/* 自带覆盖层的工具条右移，给左上角的视图切换条让位 */
+.real-gis-overlay .gis-toolbar{left:158px}
+@media(max-width:1100px){.real-gis-overlay .gis-toolbar{left:12px;top:46px}}
+.rd-host{position:absolute;inset:0;z-index:3}
+
+/* 苏盐渔卡：默认收起，点目标船展开 */
+.gis-vessel-card{display:none}
+.gis-vessel-card.rd-card-on{display:block;animation:rdCardIn .18s ease-out}
+.gis-vessel-card.rd-card-on .card-head{padding-right:24px}
+.rd-card-x{position:absolute;right:5px;top:5px;width:18px;height:18px;padding:0;
+  border:1px solid #2b617a;border-radius:3px;background:#0b2439;color:#8fbdd2;
+  font-size:12px;line-height:1;cursor:pointer}
+.rd-card-x:hover{border-color:#48b8d8;color:#dff6ff}
+.rd-card-hit{fill:transparent;cursor:pointer}
+.real-gis-overlay .target-core,.real-gis-overlay .target-boat,
+.real-gis-overlay .target-label{cursor:pointer}
+@keyframes rdCardIn{from{opacity:0;transform:translateY(-6px)}}
+
+/* 移植：自带覆盖层的实况风速胶囊，沿用它自己的 .gis-chip 样式 */
+.rd-wind-chip{cursor:pointer;font-family:inherit;gap:5px}
+.rd-wind-chip b{color:#7ee8c4;margin-right:1px}
+.rd-wind-chip:hover{border-color:#3fb0a0;color:#b6f0e2}
+/* 自带覆盖层有一条 .real-gis-overlay svg{position:absolute;inset:0;width:100%}
+   是给底图 svg 用的，会把胶囊里这个小图标也铺满，必须显式压回去 */
+.real-gis-overlay .rd-windrose,.rd-windrose{position:static!important;inset:auto!important;
+  width:13px!important;height:13px!important;flex:none;fill:#5fe0bd;
+  filter:drop-shadow(0 0 4px #37dbbc80);display:inline-block!important}
+/* 移植：目标船由缓慢脉动改为明确闪烁 */
+.real-gis-overlay .target-core{animation:rdBlink 1.15s ease-in-out infinite!important}
+@keyframes rdBlink{0%,42%{opacity:1}58%,100%{opacity:.15}}
+@media(prefers-reduced-motion:reduce){.real-gis-overlay .target-core{animation:none!important}}
 </style>
-<script id="fishery-gis-script">
+<script id="fishery-radar-script">
 (function(){
 "use strict";
 var VIS_B64="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";
 var THERM_B64="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";
-/* ===== 江苏近海地理底图数据（经纬度，WGS84 近似） ===== */
-var GEO = {
-  /* 海岸线：赣榆 → 连云港 → 盐城 → 南通 → 长江口 → 上海 → 杭州湾 → 浙东，末尾向西闭合成陆地面 */
-  coast: [
-    [119.02,35.70],[119.08,35.46],[119.18,35.22],[119.28,35.03],[119.38,34.89],
-    [119.52,34.79],[119.68,34.73],[119.85,34.64],[120.00,34.55],[120.12,34.46],
-    [120.22,34.36],[120.30,34.26],[120.36,34.14],[120.41,34.02],[120.47,33.92],
-    [120.57,33.83],[120.69,33.75],[120.81,33.68],[120.91,33.60],[120.99,33.50],
-    [121.04,33.38],[121.06,33.26],[121.03,33.14],[120.96,33.02],[120.94,32.92],
-    [121.03,32.83],[121.13,32.75],[121.23,32.68],[121.33,32.60],[121.41,32.52],
-    [121.49,32.44],[121.56,32.35],[121.62,32.26],[121.69,32.16],[121.77,32.06],
-    [121.87,31.96],[121.95,31.88],
-    /* 长江口（河道单独成面，海岸线在此连续跨过） */
-    [121.96,31.78],[121.97,31.68],[121.95,31.57],
-    /* 上海东岸南下 */
-    [122.02,31.44],[122.00,31.32],[121.95,31.20],[121.88,31.08],[121.78,30.98],
-    [121.62,30.90],[121.46,30.86],
-    /* 杭州湾北岸向西 */
-    [121.26,30.82],[121.06,30.76],[120.86,30.69],[120.66,30.57],[120.48,30.45],
-    /* 杭州湾南岸向东 */
-    [120.58,30.31],[120.80,30.27],[121.02,30.24],[121.22,30.22],[121.42,30.24],
-    [121.60,30.28],[121.74,30.34],[121.88,30.29],[121.98,30.18],[122.06,30.05],
-    [122.02,29.82],[122.06,29.10],
-    /* 向西闭合 */
-    [112.00,29.10],[112.00,35.70]
-  ],
-  /* 长江河道 / 河口面 */
-  yangtze: [
-    [121.96,31.80],[121.78,31.84],[121.60,31.80],[121.42,31.82],[121.24,31.86],
-    [121.06,31.90],[120.88,31.95],[120.70,32.00],[120.52,32.05],[120.34,32.09],
-    [120.16,32.13],[119.98,32.17],[119.80,32.20],[119.62,32.22],[119.44,32.20],
-    [119.20,32.16],[118.90,32.08],[118.60,31.94],[118.30,31.74],[118.00,31.52],
-    [118.02,31.44],[118.34,31.64],[118.66,31.84],[118.96,31.98],[119.24,32.06],
-    [119.46,32.09],[119.64,32.09],[119.82,32.07],[120.00,32.03],[120.18,31.99],
-    [120.36,31.95],[120.54,31.91],[120.72,31.86],[120.90,31.81],[121.08,31.76],
-    [121.26,31.71],[121.44,31.67],[121.62,31.65],[121.80,31.62],[121.95,31.57]
-  ],
-  /* 岛屿 */
-  islands: [
-    [[121.10,31.82],[121.40,31.74],[121.70,31.64],[121.93,31.55],[121.86,31.47],[121.58,31.55],[121.28,31.66],[121.05,31.75]], /* 崇明岛 */
-    [[121.72,31.52],[121.88,31.46],[121.83,31.41],[121.68,31.47]],  /* 长兴 / 横沙 */
-    [[119.40,34.80],[119.52,34.79],[119.53,34.74],[119.41,34.75]],  /* 连岛 */
-    [[122.36,30.80],[122.55,30.76],[122.52,30.66],[122.33,30.70]],  /* 嵊泗列岛 */
-    [[122.02,30.02],[122.32,29.98],[122.40,29.82],[122.10,29.80]]   /* 舟山本岛 */
-  ],
-  /* 主要水系 */
-  rivers: [
-    { w:1.9, p:[[118.20,33.32],[118.90,33.55],[119.60,33.76],[120.10,33.86],[120.47,33.92]] },  /* 苏北灌溉总渠 */
-    { w:1.6, p:[[119.42,32.24],[119.48,32.70],[119.32,33.10],[119.10,33.52],[118.90,34.05],[118.55,34.55]] }, /* 京杭大运河 */
-    { w:1.5, p:[[119.75,33.55],[120.15,33.66],[120.45,33.72],[120.69,33.75]] },                 /* 射阳河 */
-    { w:1.4, p:[[120.30,32.55],[120.65,32.85],[120.95,33.15],[121.02,33.40]] },                 /* 通榆河 */
-    { w:1.6, p:[[121.02,30.92],[121.22,31.08],[121.34,31.20],[121.44,31.32],[121.51,31.40]] },  /* 黄浦江 */
-    { w:1.7, p:[[119.60,30.05],[120.10,30.20],[120.55,30.32],[120.95,30.42],[121.20,30.58],[121.40,30.72]] }  /* 钱塘江 */
-  ],
-  /* 湖泊 */
-  lakes: [
-    [[118.16,33.48],[118.30,33.60],[118.52,33.63],[118.70,33.55],[118.84,33.44],[118.95,33.30],[118.92,33.16],
-     [118.78,33.05],[118.60,32.99],[118.42,33.03],[118.28,33.14],[118.18,33.30]],                               /* 洪泽湖 */
-    [[119.08,33.08],[119.22,33.04],[119.31,32.94],[119.33,32.80],[119.28,32.70],[119.14,32.67],[119.04,32.78],
-     [119.02,32.95]],                                                                                           /* 高邮湖 */
-    [[119.88,31.38],[119.98,31.48],[120.14,31.53],[120.32,31.50],[120.45,31.41],[120.51,31.28],[120.48,31.13],
-     [120.36,31.02],[120.18,30.98],[120.02,31.04],[119.90,31.16],[119.85,31.28]],                               /* 太湖 */
-    [[118.06,34.12],[118.16,34.21],[118.32,34.23],[118.42,34.12],[118.40,33.99],[118.26,33.93],[118.10,33.98]]  /* 骆马湖 */
-  ],
-  /* 省界（示意） */
-  boundaries: [
-    [[116.60,34.60],[117.60,34.70],[118.60,34.95],[119.28,35.03]],                 /* 苏鲁界 */
-    [[116.30,31.90],[117.20,32.10],[118.00,32.30],[118.60,32.42],[119.10,32.35]],  /* 苏皖界 */
-    [[119.20,31.15],[119.85,31.25],[120.40,30.95],[120.90,30.78],[121.20,30.80]]   /* 苏浙沪界 */
-  ],
-  cities: [
-    { n:"连云港市", ll:[119.22,34.60], r:3.2, dx:-8, dy:-8, a:"end" },
-    { n:"盐城市",   ll:[120.16,33.35], r:3.2, dx:-8, dy:-8, a:"end" },
-    { n:"淮安市",   ll:[119.02,33.55], r:2.6, dx:-8, dy:4,  a:"end" },
-    { n:"宿迁市",   ll:[118.28,33.96], r:2.4, dx:-8, dy:-7, a:"end" },
-    { n:"南通市",   ll:[120.89,31.98], r:3.2, dx:-8, dy:12, a:"end" },
-    { n:"泰州市",   ll:[119.92,32.46], r:2.4, dx:-8, dy:-7, a:"end" },
-    { n:"扬州市",   ll:[119.42,32.39], r:2.4, dx:-8, dy:12, a:"end" },
-    { n:"南京市",   ll:[118.80,32.06], r:3.0, dx:-8, dy:-7, a:"end" },
-    { n:"常州市",   ll:[119.95,31.79], r:2.4, dx:-8, dy:-7, a:"end" },
-    { n:"无锡市",   ll:[120.30,31.57], r:2.4, dx:6,  dy:-7, a:"start" },
-    { n:"苏州市",   ll:[120.62,31.30], r:2.6, dx:6,  dy:13, a:"start" },
-    { n:"上海市",   ll:[121.47,31.23], r:3.6, dx:-9, dy:-9, a:"end" },
-    { n:"嘉兴市",   ll:[120.75,30.75], r:2.4, dx:-8, dy:-7, a:"end" },
-    { n:"宁波市",   ll:[121.55,29.87], r:2.6, dx:-8, dy:-7, a:"end" }
-  ],
-  /* 城市灯光团（半径为公里级视觉尺度） */
-  glows: [
-    [121.47,31.23,52],[120.62,31.30,30],[120.30,31.57,24],[119.95,31.79,22],
-    [120.89,31.98,26],[120.16,33.35,24],[119.22,34.60,22],[118.80,32.06,30],
-    [119.42,32.39,18],[119.92,32.46,16],[119.02,33.55,18],[120.75,30.75,20],
-    [121.55,29.87,22],[118.28,33.96,15]
-  ],
-  ports: [],
-  labels: [
-    { t:"江 苏 省", ll:[118.62,33.62], c:"rg-prov" },
-    { t:"安 徽 省", ll:[117.10,32.60], c:"rg-prov" },
-    { t:"浙 江 省", ll:[119.60,31.05], c:"rg-prov" },
-    { t:"黄　海",   ll:[121.75,34.68], c:"rg-sea-name" },
-    { t:"东　海",   ll:[123.05,31.62], c:"rg-sea-name" }
-  ],
-  /* 禁捕区 / 海洋牧场 */
-  zones: [
-    { n:"禁捕区 A", s:"海州湾产卵场", ll:[122.95,34.28],
-      p:[[122.58,34.62],[123.22,34.70],[123.60,34.32],[123.38,33.92],[122.76,33.86],[122.44,34.22]] },
-    { n:"禁捕区 B", s:"吕泗幼鱼保护区", ll:[123.05,32.30],
-      p:[[122.66,32.70],[123.32,32.76],[123.66,32.34],[123.40,31.88],[122.80,31.84],[122.56,32.26]] }
-  ],
-  /* 主航道（航道图层） */
-  lanes: [
-    [[121.95,31.88],[122.35,32.35],[122.70,32.95],[123.00,33.60]],
-    [[119.60,34.72],[120.55,34.45],[121.40,34.00],[122.20,33.55],[123.10,33.20]],
-    [[121.90,31.60],[122.50,31.45],[123.20,31.30]]
-  ],
-  /* 目标船（一张图中心） */
-  hub: { id:"T001", name:"苏盐渔05168", ll:[122.18,33.24], sog:"8.6节", cog:"126°", wind:"6级 12.4 m/s", heel:"18.6°" },
-  /* 周边执法力量 —— 每条都规划一条到目标船的航线 */
-  patrol: [
-    { id:"I002", wind:"6级 11.8 m/s", name:"中国渔政32568", ll:[120.92,34.42], sog:28.5, eta:38, bend: 0.26, org:"连云港支队" },
-    { id:"I004", wind:"6级 12.4 m/s", name:"中国渔政32601", ll:[121.66,33.76], sog:23.7, eta:22, bend:-0.20, org:"盐城支队" },
-    { id:"I006", wind:"7级 15.2 m/s", name:"中国海警2301",  ll:[123.30,34.02], sog:36.6, eta:19, bend:-0.24, org:"海警协同" },
-    { id:"I007", wind:"6级 13.1 m/s", name:"中国渔政32307", ll:[123.62,33.05], sog:30.6, eta:31, bend: 0.16, org:"南通支队" },
-    { id:"I008", wind:"5级 9.7 m/s", name:"中国渔政32115", ll:[123.20,32.10], sog:30.5, eta:44, bend: 0.26, org:"吕四基地" }
-  ],
-  /* 在航渔船 */
-  fish: [
-    [121.52,32.92,"bad"],[122.42,32.10,"bad"],
-    [122.55,34.05,"warn"],[121.32,33.32,"warn"],
-    [121.95,34.42,"ok"],[122.30,33.58,"ok"],[121.70,33.72,"ok"],
-    [122.90,32.62,"ok"],[121.86,32.22,"ok"],[122.75,34.42,"ok"]
-  ],
-  /* AIS 历史轨迹 */
-  tracks: [],
-  /* 实况风：防大风用，常驻显示 */
-  windNow: { from:"东北", dir:45, spd:12.4, lvl:6, gust:18.6, wave:2.1 },
-  /* 气象：风场流线（带风速）与大风区 */
-  wind: [
-    { spd:14.2, lvl:7, p:[[123.4,34.9],[122.7,34.5],[122.0,34.1],[121.4,33.8]] },
-    { spd:12.8, lvl:6, p:[[123.6,34.2],[122.9,33.8],[122.2,33.4],[121.6,33.1]] },
-    { spd:11.4, lvl:6, p:[[123.7,33.4],[123.0,33.0],[122.3,32.6],[121.7,32.3]] },
-    { spd:9.6,  lvl:5, p:[[123.5,32.6],[122.9,32.3],[122.3,32.0],[121.8,31.8]] },
-    { spd:16.1, lvl:7, p:[[123.0,35.0],[122.4,34.8],[121.8,34.6],[121.2,34.5]] }
-  ],
-  wxBlobs: [ [121.45,34.45,58,"大风区","阵风 9 级 · 22.4 m/s"], [122.05,32.02,44,"涌浪区","浪高 2.8 米 · 12.6 m/s"] ]
-};
-
-/* ===== 投影 ===== */
-var VIEW = { latTop:35.25, latSpan:4.15, anchorLon:122.00, stretch:1.55 };
-var proj = null;
-function buildProj(w,h){
-  var ky = h / VIEW.latSpan;
-  var latMid = VIEW.latTop - VIEW.latSpan/2;
-  var kx = ky * Math.cos(latMid*Math.PI/180) * VIEW.stretch;
-  var lonSpan = w / kx;
-  var lon0 = VIEW.anchorLon - lonSpan/2;
-  return {
-    w:w, h:h, kx:kx, ky:ky, lon0:lon0, lonSpan:lonSpan,
-    x:function(lon){ return (lon-lon0)*kx; },
-    y:function(lat){ return (VIEW.latTop-lat)*ky; },
-    /* 公里 → 像素（按纬度方向，避免拉伸失真） */
-    km:function(k){ return k/110.9*ky; }
-  };
-}
-function P(ll){ return [proj.x(ll[0]), proj.y(ll[1])]; }
-function poly(pts,close){
-  var d='';
-  for(var i=0;i<pts.length;i++){ var p=P(pts[i]); d+=(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1); }
-  return d+(close?'Z':'');
-}
-/* Catmull-Rom → 三次贝塞尔，海岸线/河流更自然 */
-function smooth(pts,close){
-  var q=pts.map(P), n=q.length;
-  if(n<3) return poly(pts,close);
-  var d='M'+q[0][0].toFixed(1)+' '+q[0][1].toFixed(1);
-  for(var i=0;i<n-1;i++){
-    var p0=q[i-1]||q[0], p1=q[i], p2=q[i+1], p3=q[i+2]||q[n-1];
-    d+='C'+(p1[0]+(p2[0]-p0[0])/6).toFixed(1)+' '+(p1[1]+(p2[1]-p0[1])/6).toFixed(1)+','
-      +(p2[0]-(p3[0]-p1[0])/6).toFixed(1)+' '+(p2[1]-(p3[1]-p1[1])/6).toFixed(1)+','
-      +p2[0].toFixed(1)+' '+p2[1].toFixed(1);
-  }
-  return d+(close?'Z':'');
-}
-
-/* ===== 标注避让 ===== */
-var reserved=[], placed=[];
-function hit(a,b){ return !(a[0]+a[2]<b[0]||b[0]+b[2]<a[0]||a[1]+a[3]<b[1]||b[1]+b[3]<a[1]); }
-function textW(t,fs){ var w=0; for(var i=0;i<t.length;i++){ w += t.charCodeAt(i)>255 ? fs : fs*0.55; } return w; }
-function place(x,y,t,fs,cands){
-  for(var i=0;i<cands.length;i++){
-    var c=cands[i], tx=x+c[0], ty=y+c[1], a=c[2], w=textW(t,fs);
-    var bx = a==='end' ? tx-w : a==='middle' ? tx-w/2 : tx;
-    var box=[bx-2,ty-fs,w+4,fs+4];
-    if(box[0]<2||box[0]+box[2]>proj.w-2||box[1]<2||box[1]+box[3]>proj.h-2) continue;
-    var bad=false, j;
-    for(j=0;j<reserved.length;j++) if(hit(box,reserved[j])){bad=true;break;}
-    if(!bad) for(j=0;j<placed.length;j++) if(hit(box,placed[j])){bad=true;break;}
-    if(bad) continue;
-    placed.push(box);
-    return {x:tx,y:ty,a:a};
-  }
-  return null;
-}
-var CAND=[[7,4,'start'],[-7,4,'end'],[0,-8,'middle'],[0,15,'middle'],[7,-7,'start'],[-7,-7,'end'],[7,15,'start'],[-7,15,'end']];
-/* 预留任意矩形（船体、雷达圈等），后续标注自动绕开 */
-function reserveBox(x,y,w,h){ placed.push([x,y,w,h]); }
-function fits(box){
-  if(box[0]<3||box[0]+box[2]>proj.w-3||box[1]<3||box[1]+box[3]>proj.h-3) return false;
-  var j;
-  for(j=0;j<reserved.length;j++) if(hit(box,reserved[j])) return false;
-  for(j=0;j<placed.length;j++) if(hit(box,placed[j])) return false;
-  return true;
-}
-/* 为宽 w、高 h 的标注块寻找不冲突的位置，cands 为 [dx,dy,anchor] */
-function placeBlock(x,y,w,h,cands,force){
-  var i,c,tx,ty,a,bx,box;
-  for(i=0;i<cands.length;i++){
-    c=cands[i]; tx=x+c[0]; ty=y+c[1]; a=c[2];
-    bx = a==='end' ? tx-w : a==='middle' ? tx-w/2 : tx;
-    box=[bx-3,ty-3,w+6,h+6];
-    if(!fits(box)) continue;
-    placed.push(box);
-    return {x:tx,y:ty,a:a};
-  }
-  if(!force) return null;
-  /* 兜底：选第一个不越界的候选位 */
-  for(i=0;i<cands.length;i++){
-    c=cands[i]; tx=x+c[0]; ty=y+c[1]; a=c[2];
-    bx = a==='end' ? tx-w : a==='middle' ? tx-w/2 : tx;
-    box=[bx-3,ty-3,w+6,h+6];
-    if(box[0]<3||box[0]+box[2]>proj.w-3||box[1]<3||box[1]+box[3]>proj.h-3) continue;
-    placed.push(box);
-    return {x:tx,y:ty,a:a};
-  }
-  return null;
-}
-
-/* ===== SVG 构建 ===== */
-function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-
-function defs(){
-  return '<defs>'
-  +'<linearGradient id="rgSeaGrad" x1="0" y1="0" x2="0.7" y2="1">'
-   +'<stop offset="0" stop-color="#05294a"/><stop offset=".5" stop-color="#031a31"/><stop offset="1" stop-color="#010b16"/></linearGradient>'
-  +'<linearGradient id="rgLandGrad" x1="0.1" y1="0" x2="1" y2="1">'
-   +'<stop offset="0" stop-color="#16506f"/><stop offset=".45" stop-color="#10405d"/><stop offset="1" stop-color="#0b2f47"/></linearGradient>'
-  +'<radialGradient id="rgCityGlow"><stop offset="0" stop-color="#7fe4ff" stop-opacity=".55"/>'
-   +'<stop offset=".45" stop-color="#3ba7d6" stop-opacity=".2"/><stop offset="1" stop-color="#1d6f94" stop-opacity="0"/></radialGradient>'
-  +'<radialGradient id="rgWxGrad"><stop offset="0" stop-color="#ffb35c" stop-opacity=".30"/>'
-   +'<stop offset=".6" stop-color="#e2803c" stop-opacity=".13"/><stop offset="1" stop-color="#c96a30" stop-opacity="0"/></radialGradient>'
-  +'<radialGradient id="rgHubGlow"><stop offset="0" stop-color="#5fe9ff" stop-opacity=".45"/>'
-   +'<stop offset=".55" stop-color="#1f9fc9" stop-opacity=".16"/><stop offset="1" stop-color="#0d5f80" stop-opacity="0"/></radialGradient>'
-  +'<linearGradient id="rgSweep" x1="0" y1="0" x2="1" y2="0">'
-   +'<stop offset="0" stop-color="#4fe8ff" stop-opacity=".38"/><stop offset="1" stop-color="#4fe8ff" stop-opacity="0"/></linearGradient>'
-  +'<pattern id="rgHatch" width="9" height="9" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">'
-   +'<rect width="9" height="9" fill="#0a5f7d" fill-opacity=".14"/>'
-   +'<line x1="0" y1="0" x2="0" y2="9" stroke="#2fd8f4" stroke-width="1.6" stroke-opacity=".34"/></pattern>'
-  +'<filter id="rgCoast" x="-15%" y="-15%" width="130%" height="130%">'
-   +'<feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'
-  +'<filter id="rgLine" x="-40%" y="-40%" width="180%" height="180%">'
-   +'<feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'
-  +'<filter id="rgGlowS" x="-90%" y="-90%" width="280%" height="280%">'
-   +'<feGaussianBlur stdDeviation="2.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'
-  +'<filter id="rgGlowL" x="-90%" y="-90%" width="280%" height="280%">'
-   +'<feGaussianBlur stdDeviation="4.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'
-  +'<filter id="rgShadow" x="-50%" y="-50%" width="200%" height="200%">'
-   +'<feDropShadow dx="0" dy="2" stdDeviation="2.4" flood-color="#000" flood-opacity=".85"/></filter>'
-  +'<marker id="rgArrow" markerWidth="6" markerHeight="6" refX="5.2" refY="3" orient="auto">'
-   +'<path d="M0 0 L6 3 L0 6 Z" fill="#3ee0ff"/></marker>'
-  /* 执法船艇符号：白色船体 + 冷蓝上层建筑，与参考图一致 */
-  +'<symbol id="rgBoat" viewBox="0 0 64 32">'
-   +'<path d="M3 20 L55 17 L62 21 L52 29 L13 29 L3 23 Z" fill="#f2fbff" stroke="#5fb6d0" stroke-width="1.1"/>'
-   +'<path d="M19 10 H45 L52 18 L13 20 Z" fill="#dceff6" stroke="#63b2c8" stroke-width="1"/>'
-   +'<path d="M26 3 H41 L45 10 H23 Z" fill="#ffffff" stroke="#69bad0" stroke-width="1"/>'
-   +'<path d="M28 5 H33 V9 H26 Z M35 5 H39 L42 9 H35 Z" fill="#12546f"/>'
-   +'<path d="M12 24 H53" stroke="#1d7ea6" stroke-width="2.2"/>'
-   +'<circle cx="47" cy="14" r="1.7" fill="#ff5f6b"/>'
-   +'<path d="M33 3 V0 M33 1 L41 3" stroke="#bfeaf5" stroke-width="1"/></symbol>'
-  +'</defs>';
-}
-
-/* 陆域判定：射线法，用于把聚落灯点撒在陆地上 */
-var landPts=null;
-function inLand(x,y){
-  if(!landPts) landPts=GEO.coast.map(P);
-  var c=false, n=landPts.length;
-  for(var i=0,j=n-1;i<n;j=i++){
-    var a=landPts[i], b=landPts[j];
-    if((a[1]>y)!==(b[1]>y) && x < (b[0]-a[0])*(y-a[1])/(b[1]-a[1])+a[0]) c=!c;
-  }
-  return c;
-}
-/* 确定性伪随机，保证每次渲染纹理一致 */
-function rnd(seed){ var t=Math.sin(seed*12.9898)*43758.5453; return t-Math.floor(t); }
-
-function basemap(){
-  var s='<g class="rg-base">';
-  s+='<rect class="rg-sea-deep" x="0" y="0" width="'+proj.w+'" height="'+proj.h+'"/>';
-  var land=smooth(GEO.coast,true);
-  /* 海岸辉光（由外到内三层） */
-  s+='<path class="rg-halo" d="'+land+'" stroke-width="11" opacity=".07"/>';
-  s+='<path class="rg-halo" d="'+land+'" stroke-width="5" opacity=".14"/>';
-  s+='<path class="rg-land" d="'+land+'"/>';
-  /* 城市灯光团（仅陆域，压在陆地之上） */
-  GEO.glows.forEach(function(g){
-    var p=P([g[0],g[1]]);
-    s+='<circle class="rg-citylight" cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+proj.km(g[2]*2.4).toFixed(1)+'"/>';
-  });
-  if(GEO.yangtze) s+='<path class="rg-yangtze" d="'+smooth(GEO.yangtze,true)+'"/>';
-  GEO.islands.forEach(function(is){ s+='<path class="rg-island" d="'+smooth(is,true)+'"/>'; });
-  GEO.rivers.forEach(function(r){ s+='<path class="rg-river" style="stroke-width:'+r.w+'" d="'+smooth(r.p,false)+'"/>'; });
-  GEO.lakes.forEach(function(l){ s+='<path class="rg-lake" d="'+smooth(l,true)+'"/>'; });
-  /* 近岸浅滩带 */
-  s+='<path class="rg-shelf" d="'+land+'"/>';
-  return s+'</g>';
-}
-
-function graticule(){
-  return '';   /* 经纬网已停用，保留函数便于随时开回来 */
-  /* eslint-disable no-unreachable */
-  var s='<g class="rg-grat">', lon, lat;
-  for(lon=Math.ceil(proj.lon0); lon<proj.lon0+proj.lonSpan; lon++){
-    var x=proj.x(lon); if(x<26||x>proj.w-26) continue;
-    var t=lon+'°00′E', box=[x-textW(t,9)/2-2,7,textW(t,9)+4,13];
-    if(!fits(box)) continue; placed.push(box);
-    s+='<text class="rg-grid-label" text-anchor="middle" x="'+x.toFixed(0)+'" y="18">'+t+'</text>';
-  }
-  for(lat=Math.ceil(VIEW.latTop-VIEW.latSpan); lat<VIEW.latTop; lat++){
-    var y=proj.y(lat); if(y<30||y>proj.h-66) continue;
-    var t2=lat+'°00′N', b2=[proj.w-8-textW(t2,9)-2,y-9,textW(t2,9)+4,13];
-    if(!fits(b2)) continue; placed.push(b2);
-    s+='<text class="rg-grid-label" text-anchor="end" x="'+(proj.w-8)+'" y="'+y.toFixed(0)+'">'+t2+'</text>';
-  }
-  return s+'</g>';
-}
-
-function annotations(){
-  var s='<g class="rg-anno">';
-  GEO.labels.forEach(function(l){
-    var p=P(l.ll), fs=l.c==='rg-prov'?15:17;
-    var box=[p[0]-textW(l.t,fs)/2-2,p[1]-fs,textW(l.t,fs)+4,fs+4];
-    var bad=false;
-    for(var j=0;j<reserved.length;j++) if(hit(box,reserved[j])) bad=true;
-    if(box[0]<2||box[0]+box[2]>proj.w-2||box[1]<2||box[1]+box[3]>proj.h-4) bad=true;
-    if(bad) return;
-    placed.push(box);
-    s+='<text class="'+l.c+'" text-anchor="middle" x="'+p[0].toFixed(0)+'" y="'+p[1].toFixed(0)+'">'+esc(l.t)+'</text>';
-  });
-  GEO.cities.forEach(function(c){
-    var p=P(c.ll);
-    if(p[0]<-20||p[0]>proj.w+20||p[1]<-20||p[1]>proj.h+20) return;
-    s+='<circle class="rg-city-dot" cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+c.r.toFixed(1)+'"/>';
-    var lp=place(p[0],p[1],c.n,11,CAND);
-    if(lp) s+='<text class="rg-city-name" text-anchor="'+lp.a+'" x="'+lp.x.toFixed(0)+'" y="'+lp.y.toFixed(0)+'">'+esc(c.n)+'</text>';
-  });
-  GEO.ports.forEach(function(pt){
-    var p=P(pt.ll);
-    s+='<path class="rg-port" d="M'+(p[0]-3.4).toFixed(1)+' '+(p[1]+3).toFixed(1)+' L'+p[0].toFixed(1)+' '+(p[1]-3.6).toFixed(1)
-      +' L'+(p[0]+3.4).toFixed(1)+' '+(p[1]+3).toFixed(1)+' Z"/>';
-    var lp=place(p[0],p[1],pt.n,9,CAND);
-    if(lp) s+='<text class="rg-port-name" text-anchor="'+lp.a+'" x="'+lp.x.toFixed(0)+'" y="'+lp.y.toFixed(0)+'">'+esc(pt.n)+'</text>';
-  });
-  return s+'</g>';
-}
-
-/* ===== 禁捕区 / 航道 / 气象 ===== */
-function zones(){
-  var s='<g class="rg-zones">';
-  GEO.zones.forEach(function(z,i){
-    s+='<path class="rg-zone" d="'+poly(z.p,true)+'"/>';
-    var c=P(z.ll);
-    reserveBox(c[0]-13,c[1]-1,26,26);
-    var lp=placeBlock(c[0],c[1],textW(z.n,12),15,[[0,-28,'middle'],[0,-40,'middle'],[-16,-4,'end'],[16,-4,'start']]);
-    if(lp) s+='<text class="rg-zone-label" text-anchor="middle" x="'+lp.x.toFixed(0)+'" y="'+(lp.y+12).toFixed(0)+'">'+esc(z.n)+'</text>';
-    /* 参考图中的橙色禁渔徽标 */
-    s+='<g class="rg-zone-badge" transform="translate('+c[0].toFixed(0)+','+(c[1]+10).toFixed(0)+')">'
-      +'<circle r="9"/>'
-      +'<path d="M-5.6 0 C-3.4 -3.4 1 -4 3.4 -1.6 L5.8 -3.6 L5.8 3.6 L3.4 1.6 C1 4 -3.4 3.4 -5.6 0 Z"/>'
-      +'<path d="M-6.6 -6.6 L6.6 6.6" stroke="#ff9b3d" stroke-width="1.8" fill="none"/></g>';
-  });
-  return s+'</g>';
-}
-function lanes(){
-  var s='<g class="rg-lanes">';
-  GEO.lanes.forEach(function(l){ s+='<path class="rg-lane" d="'+smooth(l,false)+'"/>'; });
-  return s+'</g>';
-}
-function weather(){
-  var s='<g class="rg-wx">';
-  GEO.wxBlobs.forEach(function(b){
-    var p=P([b[0],b[1]]);
-    s+='<circle class="rg-wx-blob" cx="'+p[0].toFixed(0)+'" cy="'+p[1].toFixed(0)+'" r="'+proj.km(b[2]*2).toFixed(0)+'"/>';
-    var bw=Math.max(textW(b[3],11),textW(b[4],10));
-    var lp=placeBlock(p[0],p[1],bw,24,[[0,-10,'middle'],[0,-30,'middle'],[0,14,'middle'],
-                                       [14,-10,'start'],[-14,-10,'end']],true);
-    if(lp){
-      s+='<text class="rg-wx-name" text-anchor="middle" x="'+lp.x.toFixed(0)+'" y="'+(lp.y+11).toFixed(0)+'">'+esc(b[3])+'</text>'
-        +'<text class="rg-wx-label" text-anchor="middle" x="'+lp.x.toFixed(0)+'" y="'+(lp.y+24).toFixed(0)+'">'+esc(b[4])+'</text>';
-    }
-  });
-  GEO.wind.forEach(function(w,i){
-    s+='<path class="rg-wind" style="animation-delay:'+(-i*0.5).toFixed(2)+'s" marker-end="url(#rgArrow)" d="'+smooth(w.p,false)+'"/>';
-    /* 流线末端标风速，位置走统一避让 */
-    var e=P(w.p[w.p.length-1]), a=P(w.p[w.p.length-2]);
-    var t=w.spd.toFixed(1)+' m/s · '+w.lvl+'级';
-    var lp=place(e[0],e[1],t,9.5,[[-9,4,'end'],[9,4,'start'],[0,-8,'middle'],[0,15,'middle'],
-                                  [-9,-8,'end'],[9,-8,'start'],[-9,16,'end'],[9,16,'start']]);
-    if(lp) s+='<text class="rg-wind-spd" text-anchor="'+lp.a+'" x="'+lp.x.toFixed(0)+'" y="'+lp.y.toFixed(0)+'">'+esc(t)+'</text>';
-  });
-  return s+'</g>';
-}
-function tracks(){
-  var s='<g class="rg-tracks">';
-  GEO.tracks.forEach(function(t){ s+='<path class="rg-track" d="'+smooth(t,false)+'"/>'; });
-  return s+'</g>';
-}
-
-/* ===== 航线（规划路径） ===== */
-function routeD(a,b,bend){
-  var mx=(a[0]+b[0])/2, my=(a[1]+b[1])/2, dx=b[0]-a[0], dy=b[1]-a[1];
-  return 'M'+a[0].toFixed(1)+' '+a[1].toFixed(1)+' Q'+(mx-dy*bend).toFixed(1)+' '+(my+dx*bend).toFixed(1)
-    +' '+b[0].toFixed(1)+' '+b[1].toFixed(1);
-}
-function routes(){
-  var hub=P(GEO.hub.ll), s='<g class="rg-routes">';
-  GEO.patrol.forEach(function(v,i){
-    var a=P(v.ll), d=routeD(a,hub,v.bend);
-    s+='<path class="rg-route-base" d="'+d+'"/>'
-      +'<path class="rg-route'+(i%2?' alt':'')+'" data-r="'+i+'" marker-end="url(#rgArrow)" d="'+d+'"/>'
-      +'<path class="rg-comet" data-c="'+i+'" d="'+d+'"/>';
-  });
-  /* 航路中间节点 */
-  GEO.patrol.forEach(function(v,i){
-    var a=P(v.ll), mx=(a[0]+hub[0])/2, my=(a[1]+hub[1])/2, dx=hub[0]-a[0], dy=hub[1]-a[1];
-    var qx=(a[0]+2*(mx-dy*v.bend)+hub[0])/4, qy=(a[1]+2*(my+dx*v.bend)+hub[1])/4;
-    s+='<circle class="rg-node" cx="'+qx.toFixed(1)+'" cy="'+qy.toFixed(1)+'" r="2.6"/>';
-  });
-  GEO.patrol.forEach(function(v,i){ s+='<circle class="rg-blip" data-b="'+i+'" r="2.6" cx="0" cy="0"/>'; });
-  return s+'</g>';
-}
-
-/* ===== 目标船（雷达中心） ===== */
-function hubLayer(){
-  var p=P(GEO.hub.ll), r=proj.km(46), s='<g class="rg-hub">';
-  s+='<circle cx="'+p[0].toFixed(0)+'" cy="'+p[1].toFixed(0)+'" r="'+(r*2.4).toFixed(0)+'" fill="url(#rgHubGlow)"/>';
-  /* 雷达扫描扇形 */
-  var a0=-Math.PI/2, a1=a0+Math.PI/3;
-  s+='<path class="rg-sweep" d="M'+p[0].toFixed(1)+' '+p[1].toFixed(1)
-    +'L'+(p[0]+r*Math.cos(a0)).toFixed(1)+' '+(p[1]+r*Math.sin(a0)).toFixed(1)
-    +'A'+r.toFixed(1)+' '+r.toFixed(1)+' 0 0 1 '+(p[0]+r*Math.cos(a1)).toFixed(1)+' '+(p[1]+r*Math.sin(a1)).toFixed(1)+'Z"/>';
-  ['','d2','d3','d4'].forEach(function(k){
-    s+='<circle class="rg-ring '+k+'" cx="'+p[0].toFixed(0)+'" cy="'+p[1].toFixed(0)+'" r="'+r.toFixed(0)+'"/>';
-  });
-  /* 静态定标圈 */
-  s+='<circle class="rg-fixring" cx="'+p[0].toFixed(0)+'" cy="'+p[1].toFixed(0)+'" r="'+(r*0.55).toFixed(0)+'"/>'
-    +'<circle class="rg-fixring" cx="'+p[0].toFixed(0)+'" cy="'+p[1].toFixed(0)+'" r="'+r.toFixed(0)+'"/>';
-  s+='<g class="rg-vessel rg-target" data-ship="3" data-tip="'+esc(
-      GEO.hub.id+' '+GEO.hub.name
-      +'|目标船 · 航速 '+GEO.hub.sog+' · 航向 '+GEO.hub.cog
-      +'|风速 '+GEO.hub.wind+' · 横倾 '+GEO.hub.heel
-      +'|2 项六防风险 · 4 路视频在线 · 点击查看详情')+'">';
-  /* 闪烁：外圈光晕 + 高亮环 + 核心，同相位 */
-  s+='<circle class="rg-hub-flash" cx="'+p[0].toFixed(0)+'" cy="'+p[1].toFixed(0)+'" r="22"/>';
-  s+='<circle class="rg-hub-ring" cx="'+p[0].toFixed(0)+'" cy="'+p[1].toFixed(0)+'" r="13"/>';
-  s+='<circle class="rg-hub-core" cx="'+p[0].toFixed(0)+'" cy="'+p[1].toFixed(0)+'" r="6"/>';
-  reserveBox(p[0]-15,p[1]-15,30,30);
-  var t1=GEO.hub.id+' · '+GEO.hub.name, t2='目标船 · '+GEO.hub.sog+' · 航向 '+GEO.hub.cog;
-  var bw=Math.max(textW(t1,13),textW(t2,10)), bh=26;
-  var lp=placeBlock(p[0],p[1],bw,bh,[[22,-10,'start'],[-22,-10,'end'],[22,8,'start'],[-22,8,'end'],
-                                     [0,-34,'middle'],[0,24,'middle'],[22,-30,'start'],[-22,-30,'end'],
-                                     [22,26,'start'],[-22,26,'end']],true);
-  if(lp){
-    s+='<text class="rg-hub-label" text-anchor="'+lp.a+'" x="'+lp.x.toFixed(0)+'" y="'+(lp.y+10).toFixed(0)+'">'+esc(t1)+'</text>';
-    s+='<text class="rg-hub-sub" text-anchor="'+lp.a+'" x="'+lp.x.toFixed(0)+'" y="'+(lp.y+24).toFixed(0)+'">'+esc(t2)+'</text>';
-  }
-  return s+'</g></g>';
-}
-
-/* ===== 渔船 & 执法船艇 ===== */
-function fishLayer(){
-  var s='<g class="rg-fish-layer">';
-  GEO.fish.forEach(function(f,i){
-    var p=P([f[0],f[1]]), st=f[2], r=3.6;
-    if(inLand(p[0],p[1])) return;                       /* 落到陆地的点直接丢弃 */
-    if(p[0]<8||p[0]>proj.w-8||p[1]<8||p[1]>proj.h-50) return;
-    if(st==='ok') r=2.6;
-    if(st==='bad') s+='<circle class="rg-fish-halo" cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="10"/>';
-    s+='<path class="rg-fish '+st+'" data-ship="'+(7+i%6)+'" data-tip="'+esc('苏渔 0'+(4200+i*37)+'|'+
-        (st==='bad'?'告警 · 越界作业':st==='warn'?'关注 · 航速异常':'正常作业')+'|航速 '+(3+i%6)+'.'+(i%9)+' 节')+'" d="'
-      +'M'+p[0].toFixed(1)+' '+(p[1]-r).toFixed(1)+' L'+(p[0]+r*0.8).toFixed(1)+' '+(p[1]+r).toFixed(1)
-      +' L'+(p[0]-r*0.8).toFixed(1)+' '+(p[1]+r).toFixed(1)+' Z"/>';
-  });
-  return s+'</g>';
-}
-function patrolLayer(){
-  var hub=P(GEO.hub.ll), s='<g class="rg-patrol">';
-  /* 先为所有船体占位，标注不会压到任何一条船 */
-  GEO.patrol.forEach(function(v){ var a=P(v.ll); reserveBox(a[0]-19,a[1]-13,38,26); });
-  GEO.patrol.forEach(function(v,i){
-    var a=P(v.ll);
-    var t1=v.id, bw=textW(t1,11), bh=13;
-    var far = a[0]<hub[0];   /* 靠陆一侧优先把标注放外侧，避免压住航线 */
-    var cands = far
-      ? [[-21,-4,'end'],[21,-4,'start'],[0,-17,'middle'],[0,22,'middle'],[-21,14,'end'],[21,14,'start']]
-      : [[21,-4,'start'],[-21,-4,'end'],[0,-17,'middle'],[0,22,'middle'],[21,14,'start'],[-21,14,'end']];
-    var lp=placeBlock(a[0],a[1],bw,bh,cands,true);
-    var lx = lp ? (lp.x-a[0]) : 21, ly = lp ? (lp.y-a[1]) : -4, la = lp ? lp.a : 'start';
-    s+='<circle class="rg-cover" cx="'+a[0].toFixed(0)+'" cy="'+a[1].toFixed(0)+'" r="'+proj.km(38).toFixed(0)+'"/>';
-    s+='<g class="rg-vessel" data-ship="'+[1,2,4,5,6][i]+'" data-v="'+i+'" data-tip="'
-      +esc(v.id+' '+v.name+'|'+v.org+' · 航速 '+v.sog+' 节|风速 '+(v.wind||'—')
-         +'|预计 '+v.eta+' 分钟抵达目标船')+'">'
-      +'<g class="rg-hull" data-hull="'+i+'" transform="translate('+a[0].toFixed(1)+','+a[1].toFixed(1)+')">'
-        +'<path class="wake" d="M-26 9 Q-13 12 -2 8" fill="none" stroke="#7fe0f5" stroke-width="1.6" '
-        +'stroke-linecap="round" opacity=".4" stroke-dasharray="3 4"/>'
-        +'<g class="bob"><g class="rg-rot"><use class="hull" href="#rgBoat" x="-16" y="-8" width="32" height="16"/></g></g>'
-      +'</g>'
-      +'<g class="rg-lab" data-lab="'+i+'" transform="translate('+a[0].toFixed(1)+','+a[1].toFixed(1)+')">'
-        +'<text class="v-name" text-anchor="'+la+'" x="'+lx.toFixed(0)+'" y="'+(ly+10).toFixed(0)+'">'+esc(t1)+'</text>'
-      +'</g></g>';
-  });
-  return s+'</g>';
-}
-
 /* ================= 雷达态势视图 =================
    极坐标原生数据：雷达操作员看到的就是方位/距离，不是经纬度。
    与一张图共用目标编号，两个视图讲同一件事，但不假装互为投影。 */
@@ -27392,117 +26852,66 @@ function linkLines(root){
     +'<circle class="rd-ln-d" cx="'+a[0].toFixed(0)+'" cy="'+a[1].toFixed(0)+'" r="2.5"/>';
 }
 
-/* ===== 控件 HTML ===== */
-function chrome(){
-  var eta='';
-  GEO.patrol.forEach(function(v,i){
-    eta+='<div data-eta="'+i+'"><em>'+esc(v.id)+'</em><u style="--p:'+(18+i*13)+'%"></u>'
-        +'<s>'+v.eta+'分</s><q>'+esc(v.wind||'')+'</q></div>';
-  });
-  var w=GEO.windNow;
-  /* 风向箭头指向风的去向（气象上风从 dir 方向来） */
-  var arrow='<svg class="rg-windrose" viewBox="0 0 20 20" style="transform:rotate('+(w.dir+180)+'deg)">'
-    +'<path d="M10 2 L14.5 17 L10 13.4 L5.5 17 Z"/></svg>';
-  return '<div class="rg-tools">'
-    +'<button type="button" class="rg-chip on" data-act="flow"><i></i>航线动效</button>'
-    +'<button type="button" class="rg-chip play" data-act="play"><i></i>航线推演</button>'
-    +'<button type="button" class="rg-chip wind" data-act="wx" title="查看气象图层">'
-      +arrow+'<b>'+w.spd.toFixed(1)+' m/s</b>'+esc(w.from)+'风 '+w.lvl+'级'
-    +'</button>'
-  +'</div>'
-  +'<div class="rg-panel" data-open="'+(panelOpen?1:0)+'">'
-    +'<button type="button" class="rg-panel-head" data-act="panel">'
-      +'<i></i><b>执法力量</b><em>'+GEO.patrol.length+'</em>'
-      +'<span class="rg-caret"></span>'
-    +'</button>'
-    +'<div class="rg-panel-body"><div>'
-      +'<p>AIS / 北斗实时融合 · 最优路径测算中</p>'
-      +'<div class="rg-wxline">实况 <b>'+esc(w.from)+'风 '+w.lvl+'级</b> · 风速 <b>'+w.spd.toFixed(1)+' m/s</b>'
-        +' · 阵风 <b>'+w.gust.toFixed(1)+' m/s</b> · 浪高 <b>'+w.wave.toFixed(1)+' m</b></div>'
-      +'<div class="rg-eta">'+eta+'</div>'
-    +'</div></div>'
-  +'</div>'
-  +'<div class="rg-legend">'
-    +'<span class="dash"><i></i>规划航线</span>'
-    +'<span class="zn"><i></i>禁捕区</span>'
-    +'<span><b class="dot" style="background:#ff6b74"></b>告警 8</span>'
-    +'<em>执法力量 '+GEO.patrol.length+' · 规划路径 '+GEO.patrol.length+'</em>'
-  +'</div>'
-  +'<div class="rg-tip"></div>';
+/* ===== 雷达态势挂载器 =====
+   本文件不改动页面自带的一张图（v105 覆盖层），只做三件事：
+   1. 加「一张图 / 雷达态势」视图切换与全屏
+   2. 把自带覆盖层里那张常驻的苏盐渔卡改成点击目标船才出现
+   3. 挂载雷达视图本身
+*/
+function esc(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                  .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-/* 信息板默认收起，展开状态跨重绘保持 */
-var panelOpen=false;
-/* 当前视图：map = 一张图，radar = 雷达态势 */
 var view='map';
 
-/* ===== 渲染 ===== */
-function render(map){
-  var box=map.getBoundingClientRect();
-  var w=Math.max(320,Math.round(box.width)), h=Math.max(200,Math.round(box.height));
-  proj=buildProj(w,h);
-  placed=[];
-  /* 为控件预留区域，参与标注避让 */
-  reserved=[[8,8,510,34],[w-146,8,140,34],[8,h-46,w-16,38]];
+/* ---------- 视图切换 ---------- */
+function overlayOf(map){ return map.querySelector('.real-gis-overlay'); }
 
-  var root=map.querySelector('.rg-root');
-  if(!root){
-    root=document.createElement('div');
-    root.className='rg-root';
-    root.setAttribute('aria-label','江苏近海执法力量与航线规划一张图');
-    map.appendChild(root);
-    bind(map,root);
-  }
-  root.hidden = (view!=='map');
-  renderRadar(map,w,h);
-  viewTabs(map);
-  if(view!=='map') return;
-  /* 生成顺序 = 标注优先级：目标船 → 执法船 → 禁捕区 → 经纬网 → 城市/港口 */
-  var gHub=hubLayer(), gPatrol=patrolLayer(), gZone=zones(), gGrat=graticule(), gAnno=annotations();
-  root.innerHTML='<svg viewBox="0 0 '+w+' '+h+'" width="'+w+'" height="'+h+'">'
-    +defs()+basemap()+lanes()+tracks()+gZone+weather()+gGrat+gAnno
-    +routes()+fishLayer()+gHub+gPatrol+'</svg>'+chrome();
-  setupAnim(map,root);
-}
-
-/* ===== 视图切换：一张图 / 雷达态势 ===== */
-function viewTabs(map){
+function applyView(map){
+  var ov=overlayOf(map);
+  if(ov) ov.classList.toggle('rd-hidden', view!=='map');
   var tabs=map.querySelector('.rd-viewtabs');
-  if(!tabs){
-    tabs=document.createElement('div');
-    tabs.className='rd-viewtabs';
-    tabs.innerHTML='<button type="button" data-view="map">一张图</button>'
-                  +'<button type="button" data-view="radar">雷达态势</button>';
-    tabs.addEventListener('click',function(e){
-      var b=e.target.closest('[data-view]'); if(!b) return;
-      view=b.dataset.view;
-      render(map);
-    });
-    map.appendChild(tabs);
-  }
-  [].forEach.call(tabs.querySelectorAll('[data-view]'),function(b){
+  if(tabs) [].forEach.call(tabs.querySelectorAll('[data-view]'),function(b){
     b.classList.toggle('on', b.dataset.view===view);
   });
   var exp=map.querySelector('.rd-expand');
-  if(view==='radar'&&!exp){
-    exp=document.createElement('button');
-    exp.type='button'; exp.className='rd-expand'; exp.textContent='⛶ 放大全屏';
-    exp.addEventListener('click',function(){ openFullRadar(); });
-    map.appendChild(exp);
-  } else if(view!=='radar'&&exp){ exp.remove(); }
-}
-function renderRadar(map,w,h){
-  var host=map.querySelector('.rd-host');
-  if(view!=='radar'){
+  if(view==='radar'){
+    if(!exp){
+      exp=document.createElement('button');
+      exp.type='button'; exp.className='rd-expand'; exp.textContent='⛶ 放大全屏';
+      exp.addEventListener('click',function(){ openFullRadar(); });
+      map.appendChild(exp);
+    }
+    renderRadar(map);
+  } else {
+    if(exp) exp.remove();
+    var host=map.querySelector('.rd-host');
     if(host){ stopRadar(); host.remove(); }
-    return;
+    hideCard(map);
   }
+}
+function viewTabs(map){
+  if(map.querySelector('.rd-viewtabs')) return;
+  var tabs=document.createElement('div');
+  tabs.className='rd-viewtabs';
+  tabs.innerHTML='<button type="button" data-view="map">一张图</button>'
+                +'<button type="button" data-view="radar">雷达态势</button>';
+  tabs.addEventListener('click',function(e){
+    var b=e.target.closest('[data-view]'); if(!b) return;
+    view=b.dataset.view; applyView(map);
+  });
+  map.appendChild(tabs);
+}
+
+/* ---------- 雷达 ---------- */
+function renderRadar(map){
+  var host=map.querySelector('.rd-host');
   if(!host){ host=document.createElement('div'); host.className='rd-host'; map.appendChild(host); }
-  host.innerHTML=radarMarkup(w,h,false);
+  host.innerHTML=radarMarkup(map.clientWidth, map.clientHeight, false);
   injectSweepGrad(host);
   startRadar(host);
 }
-/* 扫描扇渐变（两个视图各一份，避免 id 冲突时相互覆盖） */
 function injectSweepGrad(host){
   var svg=host.querySelector('.rd-scope svg'); if(!svg) return;
   var d=document.createElementNS('http://www.w3.org/2000/svg','defs');
@@ -27511,7 +26920,6 @@ function injectSweepGrad(host){
     +'<stop offset="1" stop-color="#7fe8ff" stop-opacity="0"/></linearGradient>';
   svg.insertBefore(d, svg.firstChild);
 }
-/* 全屏雷达大屏 */
 var fullWrap=null, fullRO=null;
 function openFullRadar(){
   if(fullWrap) return;
@@ -27519,18 +26927,18 @@ function openFullRadar(){
   fullWrap.className='rd-full-wrap';
   document.body.appendChild(fullWrap);
   function paint(){
-    var w=fullWrap.clientWidth, h=fullWrap.clientHeight;
     fullWrap.innerHTML='<div class="rd-full-title">全省海洋渔船雷达 · 双光谱协同态势'
-      +'<span>'+RADAR.station+'　量程 '+RADAR.rangeNm+' nm　目标 '+RADAR.targets.length+'</span></div>'
+      +'<span>'+esc(RADAR.station)+'　量程 '+RADAR.rangeNm+' nm　目标 '+RADAR.targets.length+'</span></div>'
       +'<button type="button" class="rd-close" aria-label="关闭">×</button>'
-      + radarMarkup(w,h,true);
+      + radarMarkup(fullWrap.clientWidth, fullWrap.clientHeight, true);
     injectSweepGrad(fullWrap);
     startRadar(fullWrap);
     fullWrap.querySelector('.rd-close').addEventListener('click',closeFullRadar);
   }
   paint();
-  fullRO=new ResizeObserver(function(){ clearTimeout(fullWrap._t);
-    fullWrap._t=setTimeout(paint,180); });
+  fullRO=new ResizeObserver(function(){
+    clearTimeout(fullWrap._t); fullWrap._t=setTimeout(paint,180);
+  });
   fullRO.observe(fullWrap);
   document.addEventListener('keydown',escFull);
 }
@@ -27541,165 +26949,105 @@ function closeFullRadar(){
   document.removeEventListener('keydown',escFull);
   fullWrap.remove(); fullWrap=null;
   var map=document.querySelector('.mapcard .map');
-  if(map&&view==='radar') renderRadar(map,map.clientWidth,map.clientHeight);
+  if(map&&view==='radar') renderRadar(map);
 }
-function escFull(e){ if(e.key==='Escape') closeFullRadar(); }
+function escFull(e){ if(e.key==='Escape'){ if(fullWrap) closeFullRadar(); } }
 
-/* ===== 动画：航线流光 + 航线推演 ===== */
-var anim=null;
-function setupAnim(map,root){
-  if(anim&&anim.raf) cancelAnimationFrame(anim.raf);
-  var hub=P(GEO.hub.ll);
-  var lanesArr=[].map.call(root.querySelectorAll('.rg-comet'),function(c,i){
-    var len=c.getTotalLength(), seg=Math.max(14,len*0.05);
-    c.setAttribute('stroke-dasharray',seg.toFixed(1)+' '+(len+seg).toFixed(1));
-    return {
-      comet:c, len:len, seg:seg,
-      blip:root.querySelector('.rg-blip[data-b="'+i+'"]'),
-      hull:root.querySelector('.rg-hull[data-hull="'+i+'"]'),
-      lab:root.querySelector('.rg-lab[data-lab="'+i+'"]'),
-      rot:root.querySelector('.rg-hull[data-hull="'+i+'"] .rg-rot'),
-      eta:root.querySelector('[data-eta="'+i+'"]'),
-      etaMin:GEO.patrol[i].eta,
-      dur:2600+i*430,
-      phase:i*0.19,
-      sail:0
-    };
-  });
-  /* 船艏初始朝向 = 航线起点切线 */
-  lanesArr.forEach(function(l){
-    var p0=l.comet.getPointAtLength(0), p1=l.comet.getPointAtLength(Math.min(12,l.len));
-    l.head=Math.atan2(p1.y-p0.y,p1.x-p0.x)*180/Math.PI;
-    l.x0=p0.x; l.y0=p0.y;
-    l.rot.setAttribute('transform','rotate('+l.head.toFixed(1)+')'+(Math.abs(l.head)>90?' scale(1,-1)':''));
-  });
-  anim={ raf:0, t0:performance.now(), playing:false, flow:true, lanes:lanesArr, root:root, hub:hub };
-  var last=anim.t0;
-  function frame(now){
-    var dt=Math.min(64,now-last); last=now;
-    anim.lanes.forEach(function(l){
-      if(anim.flow){
-        var prog=((now-anim.t0)/l.dur + l.phase)%1;
-        var head=prog*(l.len+l.seg);
-        l.comet.style.strokeDashoffset=(-head).toFixed(1);
-        var pt=l.comet.getPointAtLength(Math.max(0,Math.min(l.len,head-l.seg*0.5)));
-        l.blip.setAttribute('transform','translate('+pt.x.toFixed(1)+','+pt.y.toFixed(1)+')');
-        l.blip.style.opacity=(head<l.seg||head>l.len+l.seg*0.6)?0:1;
-      }
-      if(anim.playing){
-        l.sail+=dt/1000*(l.len/(l.etaMin*3.2));   /* ETA 分钟 → 演示秒 */
-        if(l.sail>l.len){ l.sail=0; }
-        var s=l.sail, p=l.comet.getPointAtLength(s), q=l.comet.getPointAtLength(Math.min(l.len,s+8));
-        var ang=Math.atan2(q.y-p.y,q.x-p.x)*180/Math.PI;
-        l.hull.setAttribute('transform','translate('+p.x.toFixed(1)+','+p.y.toFixed(1)+')');
-        l.lab.setAttribute('transform','translate('+p.x.toFixed(1)+','+p.y.toFixed(1)+')');
-        l.rot.setAttribute('transform','rotate('+ang.toFixed(1)+')'+(Math.abs(ang)>90?' scale(1,-1)':''));
-        if(l.eta){
-          var pct=Math.min(100,Math.round(l.sail/l.len*100));
-          l.eta.querySelector('u').style.setProperty('--p',pct+'%');
-          l.eta.querySelector('s').textContent=Math.max(0,Math.round(l.etaMin*(1-l.sail/l.len)))+'分';
-        }
-      }
-    });
-    anim.raf=requestAnimationFrame(frame);
+/* ---------- 苏盐渔卡：改成点击目标船才出现 ---------- */
+function showCard(map){
+  var c=map.querySelector('.gis-vessel-card'); if(!c) return;
+  c.classList.add('rd-card-on');
+}
+function hideCard(map){
+  var c=map.querySelector('.gis-vessel-card'); if(!c) return;
+  c.classList.remove('rd-card-on');
+}
+function wireCard(map){
+  var ov=overlayOf(map); if(!ov||ov.dataset.rdCard==='1') return;
+  ov.dataset.rdCard='1';
+  var card=map.querySelector('.gis-vessel-card');
+  if(card&&!card.querySelector('.rd-card-x')){
+    var x=document.createElement('button');
+    x.type='button'; x.className='rd-card-x'; x.textContent='×';
+    x.setAttribute('aria-label','关闭');
+    card.appendChild(x);
   }
-  anim.raf=requestAnimationFrame(frame);
-}
-function resetSail(){
-  if(!anim) return;
-  anim.lanes.forEach(function(l){
-    l.sail=0;
-    l.hull.setAttribute('transform','translate('+l.x0.toFixed(1)+','+l.y0.toFixed(1)+')');
-    l.lab.setAttribute('transform','translate('+l.x0.toFixed(1)+','+l.y0.toFixed(1)+')');
-    l.rot.setAttribute('transform','rotate('+l.head.toFixed(1)+')'+(Math.abs(l.head)>90?' scale(1,-1)':''));
-    if(l.eta){ l.eta.querySelector('s').textContent=l.etaMin+'分'; }
-  });
-}
-
-/* ===== 交互 ===== */
-function bind(map,root){
-  root.addEventListener('click',function(e){
-    var btn=e.target.closest('[data-act]');
-    if(btn){
-      var act=btn.dataset.act;
-      if(act==='flow'){
-        anim.flow=!anim.flow; btn.classList.toggle('on',anim.flow);
-        root.querySelectorAll('.rg-route').forEach(function(p){ p.style.animationPlayState=anim.flow?'running':'paused'; });
-        root.querySelectorAll('.rg-comet,.rg-blip').forEach(function(p){ p.style.opacity=anim.flow?'':'0'; });
-      } else if(act==='play'){
-        anim.playing=!anim.playing; btn.classList.toggle('running',anim.playing);
-        btn.lastChild.nodeValue=anim.playing?'停止推演':'航线推演';
-        if(!anim.playing) resetSail();
-      } else if(act==='panel'){
-        panelOpen=!panelOpen;
-        btn.parentNode.dataset.open=panelOpen?1:0;
-      } else if(act==='wx'){
-        var seg=[].filter.call(document.querySelectorAll('.mapcard .seg button'),function(x){
-          return x.textContent.trim()==='气象';
-        })[0];
-        if(seg) seg.click();
-      } else if(act==='video'){
-        proxyClick(map,'.popup button');
-      }
+  /* 目标船本身很小，补一个透明的点击热区 */
+  var core=ov.querySelector('.target-core');
+  if(core&&!ov.querySelector('.rd-card-hit')){
+    var hit=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    hit.setAttribute('class','rd-card-hit');
+    hit.setAttribute('cx',core.getAttribute('cx'));
+    hit.setAttribute('cy',core.getAttribute('cy'));
+    hit.setAttribute('r','30');
+    var ttl=document.createElementNS('http://www.w3.org/2000/svg','title');
+    ttl.textContent='点击查看 苏盐渔05168 详情';
+    hit.appendChild(ttl);
+    core.parentNode.insertBefore(hit, core.nextSibling);
+  }
+  ov.addEventListener('click',function(e){
+    if(e.target.closest('.rd-card-x')){ hideCard(map); return; }
+    if(e.target.closest('[data-gis-action]')) return;        /* 卡内按钮走原逻辑 */
+    if(e.target.closest('.gis-vessel-card')) return;
+    if(e.target.closest('.rd-card-hit,.target-core,.target-boat,.target-label,.target-sub')){
+      var c=map.querySelector('.gis-vessel-card');
+      if(c) c.classList.toggle('rd-card-on');
       return;
     }
-    var v=e.target.closest('[data-ship]');
-    if(v) proxyClick(map,'.ship.s'+v.dataset.ship);
-  });
-  root.addEventListener('mousemove',function(e){
-    var tip=root.querySelector('.rg-tip'); if(!tip) return;
-    var v=e.target.closest('[data-tip]');
-    if(!v){ tip.classList.remove('show'); return; }
-    var parts=v.dataset.tip.split('|');
-    tip.innerHTML='<b>'+esc(parts[0])+'</b>'+parts.slice(1).map(esc).join('<br>');
-    var r=root.getBoundingClientRect();
-    tip.style.left=Math.max(70,Math.min(r.width-70,e.clientX-r.left))+'px';
-    tip.style.top=(e.clientY-r.top-6)+'px';
-    tip.classList.add('show');
-  });
-  root.addEventListener('mouseleave',function(){
-    var t=root.querySelector('.rg-tip'); if(t) t.classList.remove('show');
-  });
-}
-/* 复用页面原有 React 交互（船舶详情抽屉 / 视频墙） */
-function proxyClick(map,sel){
-  var el=map.querySelector(sel);
-  if(el) el.click();
+    hideCard(map);                                            /* 点空白收起 */
+  },true);
 }
 
-/* ===== 图层联动 ===== */
-function syncLayer(map){
-  var on=[].filter.call(document.querySelectorAll('.mapcard .seg button'),function(b){
-    return b.classList.contains('on');
-  })[0];
-  map.dataset.layer=on?on.textContent.trim():'渔船';
+/* ---------- 移植到自带覆盖层：实况风速胶囊 + 目标船闪烁 ----------
+   这两项是先前已确认的需求，原本做在重制版地图里；
+   现在一张图改用页面自带覆盖层，所以在它的工具条上补回来。 */
+var WIND={ from:"东北", dir:45, spd:12.4, lvl:6, gust:18.6, wave:2.1 };
+function wireWind(map){
+  var bar=map.querySelector('.real-gis-overlay .gis-toolbar');
+  if(!bar||bar.dataset.rdWind==='1') return;
+  bar.dataset.rdWind='1';
+  var chip=document.createElement('button');
+  chip.type='button';
+  chip.className='gis-chip rd-wind-chip';
+  chip.title='实况风况　阵风 '+WIND.gust.toFixed(1)+' m/s　浪高 '+WIND.wave.toFixed(1)+' m　点击查看气象图层';
+  chip.innerHTML='<svg class="rd-windrose" viewBox="0 0 20 20" style="transform:rotate('
+    +(WIND.dir+180)+'deg)"><path d="M10 2 L14.5 17 L10 13.4 L5.5 17 Z"/></svg>'
+    +'<b>'+WIND.spd.toFixed(1)+' m/s</b>'+esc(WIND.from)+'风 '+WIND.lvl+'级';
+  chip.addEventListener('click',function(){
+    var seg=[].filter.call(document.querySelectorAll('.mapcard .seg button'),function(x){
+      return x.textContent.trim()==='气象';
+    })[0];
+    if(seg) seg.click();
+  });
+  bar.appendChild(chip);
 }
 
-/* ===== 挂载 ===== */
-var ro=null, rt=0;
-function mount(){
+/* ---------- 挂载 ---------- */
+var rdRO=null, rdT=0;
+function rdMount(){
   var map=document.querySelector('.mapcard .map');
   if(!map) return;
-  if(map.dataset.realGis==='1'&&map.querySelector('.rg-root')) return;
-  map.dataset.realGis='1';
-  map.classList.add('js-real-gis');
-  render(map);
-  syncLayer(map);
-  document.querySelectorAll('.mapcard .seg button').forEach(function(b){
-    b.addEventListener('click',function(){ setTimeout(function(){ syncLayer(map); },0); });
-  });
-  if(ro) ro.disconnect();
-  ro=new ResizeObserver(function(){
-    clearTimeout(rt);
-    rt=setTimeout(function(){
-      if(document.body.contains(map)){ var pl=anim&&anim.playing; render(map); if(pl){ anim.playing=true;
-        var b=map.querySelector('[data-act="play"]'); if(b){ b.classList.add('running'); b.lastChild.nodeValue='停止推演'; } } }
-    },160);
-  });
-  ro.observe(map);
+  wireCard(map);
+  wireWind(map);
+  viewTabs(map);
+  if(map.dataset.rdInit!=='1'){
+    map.dataset.rdInit='1';
+    applyView(map);
+    if(rdRO) rdRO.disconnect();
+    rdRO=new ResizeObserver(function(){
+      clearTimeout(rdT);
+      rdT=setTimeout(function(){
+        if(document.body.contains(map)&&view==='radar') renderRadar(map);
+      },180);
+    });
+    rdRO.observe(map);
+  }
 }
-var mo=new MutationObserver(function(){ mount(); });
-mo.observe(document.documentElement,{childList:true,subtree:true});
-mount(); setTimeout(mount,300); setTimeout(mount,1200);
+new MutationObserver(function(){
+  var map=document.querySelector('.mapcard .map');
+  if(map&&map.dataset.rdInit!=='1') rdMount();
+  else if(map&&!map.querySelector('.rd-viewtabs')) rdMount();
+}).observe(document.documentElement,{childList:true,subtree:true});
+rdMount(); setTimeout(rdMount,400); setTimeout(rdMount,1300);
 })();
 </script></body></html>

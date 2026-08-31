@@ -73,16 +73,21 @@
 .rd-wave .w3{stroke:#7ff0ff;opacity:.28}
 
 /* 双光通道 */
-.rd-right{display:flex;flex-direction:column;gap:var(--gap);min-width:0;min-height:0}
-.rd-ch{flex:1;min-height:120px;display:flex;flex-direction:column;border:1px solid #1d5f7c;border-radius:4px;
-  background:#03192b;overflow:hidden;min-height:0}
+.rd-right{display:flex;flex-direction:column;gap:var(--gap);min-width:0;min-height:0;
+  overflow-y:auto;overflow-x:hidden;padding-right:2px}
+.rd-right::-webkit-scrollbar{width:6px}
+.rd-right::-webkit-scrollbar-track{background:#04182b;border-radius:3px}
+.rd-right::-webkit-scrollbar-thumb{background:#1d5f7c;border-radius:3px}
+.rd-right::-webkit-scrollbar-thumb:hover{background:#2b86a8}
+.rd-right{scrollbar-width:thin;scrollbar-color:#1d5f7c #04182b}
+.rd-ch{flex:0 0 auto;display:flex;flex-direction:column;border:1px solid #1d5f7c;border-radius:4px;
+  background:#03192b;overflow:hidden}
+.rd-ch-img{aspect-ratio:672/347}
 .rd-ch h4{margin:0;padding:5px 9px;color:#dff6ff;font-size:10px;font-weight:700;letter-spacing:1px;
   background:#0a2b41;border-bottom:1px solid #17475f;display:flex;align-items:center;gap:6px}
 .rd-ch h4 em{width:6px;height:6px;border-radius:50%;background:#ff4d57;box-shadow:0 0 7px #ff4d57;
   animation:rdRec 1.4s infinite;margin-left:auto}
-.rd-ch-img{position:relative;flex:1;min-height:0;overflow:hidden;background:#020a12}
-.rd-root.full .rd-ch{flex:0 0 auto}
-.rd-root.full .rd-ch-img{flex:none;aspect-ratio:672/347}
+.rd-ch-img{position:relative;flex:none;overflow:hidden;background:#020a12}
 .rd-ch-img img{width:100%;height:100%;object-fit:cover;display:block}
 .rd-scan{position:absolute;left:0;right:0;height:38%;pointer-events:none;
   background:linear-gradient(#fff0,#7fe4ff14 55%,#7fe4ff26);animation:rdScanMove 5s linear infinite}
@@ -101,8 +106,8 @@
 .rd-ch.ir .rd-track i{border-color:#ff5bd0}
 
 /* 引出线 */
-.rd-detail{flex:1;min-height:0;border:1px solid #17475f;border-radius:4px;background:#03192bd9;
-  padding:9px 11px;overflow:auto}
+.rd-detail{flex:0 0 auto;border:1px solid #17475f;border-radius:4px;background:#03192bd9;
+  padding:9px 11px}
 .rd-detail h4{margin:0 0 7px;color:#cfeeff;font-size:10px;font-weight:700;letter-spacing:1px;
   display:flex;align-items:center;gap:7px}
 .rd-detail h4 b{margin-left:auto;padding:1px 6px;border:1px solid #ff3b4699;border-radius:2px;
@@ -152,3 +157,37 @@
 @media(prefers-reduced-motion:reduce){
   .rd-lock,.rd-ch h4 em,.rd-track,.rd-scan,.rd-tele .rd-bars i{animation:none}
 }
+
+/* 视图切换时隐藏页面自带的一张图覆盖层 */
+.rd-hidden{display:none!important}
+/* 自带覆盖层的工具条右移，给左上角的视图切换条让位 */
+.real-gis-overlay .gis-toolbar{left:158px}
+@media(max-width:1100px){.real-gis-overlay .gis-toolbar{left:12px;top:46px}}
+.rd-host{position:absolute;inset:0;z-index:3}
+
+/* 苏盐渔卡：默认收起，点目标船展开 */
+.gis-vessel-card{display:none}
+.gis-vessel-card.rd-card-on{display:block;animation:rdCardIn .18s ease-out}
+.gis-vessel-card.rd-card-on .card-head{padding-right:24px}
+.rd-card-x{position:absolute;right:5px;top:5px;width:18px;height:18px;padding:0;
+  border:1px solid #2b617a;border-radius:3px;background:#0b2439;color:#8fbdd2;
+  font-size:12px;line-height:1;cursor:pointer}
+.rd-card-x:hover{border-color:#48b8d8;color:#dff6ff}
+.rd-card-hit{fill:transparent;cursor:pointer}
+.real-gis-overlay .target-core,.real-gis-overlay .target-boat,
+.real-gis-overlay .target-label{cursor:pointer}
+@keyframes rdCardIn{from{opacity:0;transform:translateY(-6px)}}
+
+/* 移植：自带覆盖层的实况风速胶囊，沿用它自己的 .gis-chip 样式 */
+.rd-wind-chip{cursor:pointer;font-family:inherit;gap:5px}
+.rd-wind-chip b{color:#7ee8c4;margin-right:1px}
+.rd-wind-chip:hover{border-color:#3fb0a0;color:#b6f0e2}
+/* 自带覆盖层有一条 .real-gis-overlay svg{position:absolute;inset:0;width:100%}
+   是给底图 svg 用的，会把胶囊里这个小图标也铺满，必须显式压回去 */
+.real-gis-overlay .rd-windrose,.rd-windrose{position:static!important;inset:auto!important;
+  width:13px!important;height:13px!important;flex:none;fill:#5fe0bd;
+  filter:drop-shadow(0 0 4px #37dbbc80);display:inline-block!important}
+/* 移植：目标船由缓慢脉动改为明确闪烁 */
+.real-gis-overlay .target-core{animation:rdBlink 1.15s ease-in-out infinite!important}
+@keyframes rdBlink{0%,42%{opacity:1}58%,100%{opacity:.15}}
+@media(prefers-reduced-motion:reduce){.real-gis-overlay .target-core{animation:none!important}}

@@ -5,6 +5,8 @@ import re, sys, pathlib
 BASE = pathlib.Path(__file__).parent
 SRC  = sys.argv[1]
 DST  = sys.argv[2]
+# --keep-map：保留页面自带的一张图覆盖层，只追加雷达态势视图
+KEEP = '--keep-map' in sys.argv[3:]
 
 css = (BASE/'gis.css').read_text(encoding='utf-8') + '\n' \
     + (BASE/'gis-radar.css').read_text(encoding='utf-8')
@@ -16,18 +18,31 @@ vis   = (BASE/'assets'/'vis.b64').read_text(encoding='utf-8').strip()
 therm = (BASE/'assets'/'therm.b64').read_text(encoding='utf-8').strip()
 js = ('var VIS_B64="%s";\nvar THERM_B64="%s";\n' % (vis, therm)) + js
 
+if KEEP:
+    css = (BASE/'gis-radar.css').read_text(encoding='utf-8')
+    js  = '\n'.join((BASE/f).read_text(encoding='utf-8')
+                    for f in ('gis-radar.js','gis-radar-mount.js'))
+    js  = ('var VIS_B64="%s";\nvar THERM_B64="%s";\n' % (vis, therm)) + js
+    sid, jid = 'fishery-radar-style', 'fishery-radar-script'
+else:
+    sid, jid = 'fishery-gis-style', 'fishery-gis-script'
+
 block = (
-    '<style id="fishery-gis-style">\n' + css.rstrip() + '\n</style>\n'
-    '<script id="fishery-gis-script">\n(function(){\n'
+    '<style id="%s">\n' % sid + css.rstrip() + '\n</style>\n'
+    '<script id="%s">\n(function(){\n' % jid +
     '"use strict";\n' + js.rstrip() + '\n})();\n</script>'
 )
 
 html = pathlib.Path(SRC).read_text(encoding='utf-8')
 
-# 认三种 id：V10.5 / V10.6 自带的覆盖层，以及本脚本自己写过的
-pat = re.compile(
-    r'<style id="(?:v10\d-real-gis-style|fishery-gis-style)">.*?</script>(?=\s*</body>)',
-    re.S)
+if KEEP:
+    # 只替换自己写过的雷达区块，页面自带的 v10x 覆盖层原样保留
+    pat = re.compile(r'<style id="fishery-radar-style">.*?</script>(?=\s*</body>)', re.S)
+else:
+    # 认三种 id：V10.5 / V10.6 自带的覆盖层，以及本脚本自己写过的
+    pat = re.compile(
+        r'<style id="(?:v10\d-real-gis-style|fishery-gis-style)">.*?</script>(?=\s*</body>)',
+        re.S)
 if pat.search(html):
     html = pat.sub(lambda m: block, html, count=1)
 else:                                   # 首次注入
