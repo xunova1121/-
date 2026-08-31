@@ -416,6 +416,90 @@ export const CAPABILITIES = [
     why: ''
   },
   {
+    id: 'animatic',
+    name: '连播预览：按各镜时长连起来播一遍，出视频之前先看节奏',
+    api: '',
+    pc: 'ui/views/studio.js',
+    /**
+     * 手机上**故意不做**。
+     *
+     * 这一遍要看的是节奏，而节奏要在一块够大的屏幕上、安静地看完一整遍
+     * 才判断得出来。6 寸屏上一边挤地铁一边看，得出的结论多半是错的 ——
+     * 而这个结论会决定要不要重出一整批视频（这条流水线上最贵的一步）。
+     *
+     * 手机上该做的是"看某一镜对不对"，那是卡片，已经有了。
+     */
+    mobile: null,
+    why: '看的是整片节奏，要大屏幕安静看完一遍；手机上得出的结论多半是错的，而它决定要不要重出一整批视频'
+  },
+  {
+    id: 'diagnose-shot',
+    name: '这一镜为什么不对：只说数据里有证据的原因，外加下一步',
+    api: 'GET /projects/:id/shots/:shotId/diagnose',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
+    id: 'redo-candidates',
+    name: '一键选上"查得出具体原因该重出"的那几镜',
+    api: 'GET /projects/:id/redo-candidates',
+    pc: 'ui/views/studio.js',
+    mobile: null,
+    why: '它建立在多选之上，而多选依赖表格视图（手机上不做）'
+  },
+  {
+    id: 'shot-table',
+    name: '分镜表格视图：一行一镜、多选、键盘上下走',
+    api: '',
+    pc: 'ui/views/studio.js',
+    /**
+     * 手机上**故意不做**。
+     *
+     * 这个视图的价值全在"一屏看很多行 + 键盘连选"。6 寸屏一屏放不下几行，
+     * 而手机没有键盘 —— 剩下的只有一个比卡片更难点的复选框列表。
+     * 手机上翻分镜本来就该用卡片：一次看一镜，看的是画面。
+     */
+    mobile: null,
+    why: '价值全在"一屏很多行 + 键盘连选"，手机两样都没有；手机翻分镜用卡片更合适'
+  },
+  {
+    id: 'batch-edit',
+    name: '选中几镜一次改：时长、技法卡加/减',
+    api: 'POST /projects/:id/shots/batch',
+    pc: 'ui/views/studio.js',
+    mobile: null,
+    why: '批量改建立在多选之上，而多选依赖表格视图（手机上不做）'
+  },
+  {
+    id: 'run-selected',
+    name: '只跑选中的这几镜（已经出过的会重出）',
+    api: 'POST /projects/:id/stage/:stage',
+    pc: 'ui/views/studio.js',
+    mobile: null,
+    why: '同上：要先选得出来才谈得上只跑这几镜'
+  },
+  {
+    id: 'stepcheck',
+    name: '开跑之前先说清楚：这一步花多少、有哪几处该先改',
+    api: 'GET /projects/:id/stepcheck',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
+    /**
+     * 指令框。手机端更需要它 —— 51 张卡翻起来最费手的就是手机，
+     * 而批量操作在小屏上几乎没法做。所以这一条不能只上电脑端。
+     */
+    id: 'command-box',
+    name: '一句人话批量改分镜 / 跑某一步 / 问为什么（执行前先摆出要做什么）',
+    api: 'POST /projects/:id/command',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
     id: 'comfy-workflow',
     name: '本地出图（ComfyUI）：贴工作流、当场看出打了哪几个标记',
     api: 'POST /comfy/inspect',

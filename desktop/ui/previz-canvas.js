@@ -1049,7 +1049,10 @@ export function previzPanel(stage, {
   onSaveScene = null,
   /** 套用：把那个场景已经存过的布局搬过来 */
   sceneLayout = null,
-  onExportControls = null
+
+  onExportControls = null,
+  bibleProps = []
+
 } = {}) {
   normalizeStage(stage);
   // 实例只保存稳定的设定资产 / 变体 ID；打开镜头时用最新设定图重绑。
@@ -1504,6 +1507,32 @@ export function previzPanel(stage, {
       textContent: '摆上就能算出"窗在画面哪边"'
     }));
     controls.append(markRow);
+
+    /**
+     * ── 设定集道具那一排 ──
+     *
+     * 摆上去之后，提示词里会多一句"柴刀在画面右"。
+     * 和地标那排的区别：门窗桌椅整场继承（它们不搬家），
+     * 道具跟着这一镜的「关键道具」清单走（刀是被人拿着走的）。
+     */
+    if (bibleProps.length) {
+      const propRow = document.createElement('div');
+      propRow.className = 'previz-row';
+      propRow.append(Object.assign(document.createElement('span'), { className: 'previz-cap', textContent: '设定集道具' }));
+      for (const name of bibleProps.slice(0, 8)) {
+        const has = (stage.marks || []).some((m) => m.name === name);
+        propRow.append(btn(name, has, () => {
+          stage.marks = stage.marks || [];
+          if (has) stage.marks = stage.marks.filter((m) => m.name !== name);
+          // ⚠ 打上 prop 标记：道具跟着这一镜的道具清单走，不像门窗那样整场继承
+          else stage.marks.push({ name, prop: true, x: (stage.marks.length % 2 ? 1 : -1) * 1.6, y: 1.2 });
+        }));
+      }
+      propRow.append(Object.assign(document.createElement('span'), {
+        className: 'previz-cap', style: 'min-width:0', textContent: '摆上去会写进提示词：它在画面哪一边'
+      }));
+      controls.append(propRow);
+    }
 
     /**
      * ── 外景那一排 ──

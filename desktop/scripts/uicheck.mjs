@@ -22,6 +22,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 // Playwright 不是这个项目的依赖，从全局装的那份里取。找不到就说清楚怎么装
 const PW = process.env.PLAYWRIGHT_PATH || 'playwright';
@@ -125,12 +126,25 @@ const stub = http.createServer((req, res) => {
 await new Promise((r) => stub.listen(0, '127.0.0.1', r));
 const stubUrl = `http://127.0.0.1:${stub.address().port}/v3`;
 
-// 不把某台开发机的绝对路径写进测试。脚本无论从克隆目录、CI 工作区还是
-// 解压后的源码目录启动，都应该解析到它旁边那份 core。
-const settings = await import(new URL('../core/settings.js', import.meta.url));
-const vault = await import(new URL('../core/vault.js', import.meta.url));
-const store = await import(new URL('../core/store.js', import.meta.url));
-const { listen } = await import(new URL('../core/server.js', import.meta.url));
+
+/**
+ * ⚠ **import 必须按这个脚本自己的位置算，绝对不能写死绝对路径。**
+ *
+ * 这里原来写的是 `import('/home/user/-/desktop/core/settings.js')` —— 我这台
+ * 开发机的路径。两个后果，第二个要命：
+ *   ① 换台机器（比如服务器上的 ~/fd/desktop）直接跑不起来，路径不存在
+ *   ② 在另一份检出里跑，它会**静默地 import 另一份代码**然后报绿 ——
+ *      走查了半天，验的根本不是眼前这份分支
+ * ② 就是"验错了对象"，比红灯坏得多：红灯会有人看，绿灯没人查。
+ */
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const CORE = (name) => path.join(HERE, '..', 'core', name);
+
+const settings = await import(CORE('settings.js'));
+const vault = await import(CORE('vault.js'));
+const store = await import(CORE('store.js'));
+const { listen } = await import(CORE('server.js'));
+
 
 vault.setSecret('ARK_API_KEY', 'stub-key');
 settings.patch({
@@ -224,6 +238,36 @@ const hud = await page.evaluate(() => {
 });
 // 右下角只在出结果时冒一次，而且要报出真实产出 —— "0 项完成"等于说白跑了
 check('右下角报了结果，且数字不是 0', /分镜完成/.test(hud) && !/\b0 /.test(hud), hud);
+
+/**
+ * ══════════ 开跑之前那张清单，真的画出来了吗 ══════════
+ *
+ * 服务端那边已经验过判据本身。这里补的是**它有没有到屏幕上** ——
+ * 清单是异步拉的，接口对了但渲染没接上的话，服务端自检照样全绿，
+ * 而用户看到的是那块地方什么都没有。
+ */
+console.log('\n开跑之前的清单');
+{
+  await page.goto(`${url}#/studio/${proj.id}`);
+  await page.waitForTimeout(1200);
+  await page.locator('.nav-step', { hasText: '视频生成' }).first().click();
+  await page.waitForTimeout(2000);
+  const box = page.locator('.stepcheck').first();
+  check('这一步的按钮上面有一块清单', (await box.count()) > 0);
+  if (await box.count()) {
+    const txt = await box.innerText();
+    check('说得出这一步要跑几镜', /这一步 \d+ 镜/.test(txt), txt.slice(0, 100));
+    /**
+     * 这个夹具里分镜出完了但图没出（走查只跑到分镜），
+     * 所以"还没有分镜图"这条 blocker 必须在。
+     * 它不在的话，说明清单虽然画出来了，但判据没接上真实数据。
+     */
+    check('点出了"还没出图就出视频"这条', /还没有分镜图/.test(txt), txt.slice(0, 200));
+    check('而且说了会怎样，不只是报一个数',
+      /最贵的一步|接不上/.test(txt), txt.slice(0, 300));
+  }
+}
+
 
 /**
  * ── 预演台 ──
@@ -1612,6 +1656,273 @@ await page.waitForTimeout(1200);
     check('工作台上填的单价，这里也算数', /¥\d/.test(body), body.slice(0, 200));
   }
 }
+
+
+/**
+ * ══════════ 表格 / 连播 / 为什么不对 ══════════
+ *
+ * 这三样服务端那边都验过判据本身。这里补的是**它们有没有到屏幕上、
+ * 点下去有没有反应** —— 键盘、播放、异步拉取，服务端自检一样都碰不到。
+ */
+console.log('\n表格 · 连播 · 为什么不对');
+{
+  await page.goto(`${url}#/studio/${proj.id}`);
+  await page.waitForTimeout(1000);
+  /**
+   * ⚠ 先把**出图**跑掉。
+   *
+   * 「为什么不对」只在有图的镜头上出现（没图时那是另一类问题，
+   * 别处在管）。不跑这一步的话，这几条验的是一个空面板 ——
+   * 而空面板和"功能没做"长得一模一样。
+   * 上游全是桩，这一步不花钱。
+   */
+  await page.locator('.nav-step', { hasText: '镜头出图' }).first().click();
+  await page.waitForTimeout(600);
+  const go = page.locator('.stage-detail button:has-text("开始")').first();
+  if (await go.count()) {
+    await go.click();
+    await page.waitForFunction(() => !document.querySelector('.spin'), null, { timeout: 60000 }).catch(() => {});
+    await page.waitForTimeout(2500);
+  }
+
+  await page.locator('.nav-step', { hasText: '分镜' }).first().click();
+  await page.waitForTimeout(800);
+
+  // ── 表格视图 + 键盘 ──
+  await page.locator('button:has-text("表格")').first().click();
+  await page.waitForTimeout(600);
+  check('切得到表格视图', (await page.locator('.shot-table tbody tr').count()) > 0);
+  await page.locator('.shot-table-wrap').first().focus();
+  await page.keyboard.press(' ');
+  await page.waitForTimeout(300);
+  check('空格能选中当前那一行', (await page.locator('.shot-table tr.picked').count()) === 1,
+    String(await page.locator('.shot-table tr.picked').count()));
+  check('选中之后批量工具条才出现（没选时不该占地方）',
+    (await page.locator('.batch-bar .batch-count').count()) === 1);
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press(' ');
+  await page.waitForTimeout(300);
+  check('↑↓ 移动 + 空格能多选', (await page.locator('.shot-table tr.picked').count()) === 2,
+    String(await page.locator('.shot-table tr.picked').count()));
+  /**
+   * ⚠ **快捷键必须在输入框里失效。**表格里有就地改时长的数字框，
+   * 人在里面打字时按空格要出现空格，而不是跳着选中别的镜头。
+   */
+  await page.locator('.shot-table .cell-num').first().click();
+  await page.keyboard.press(' ');
+  await page.waitForTimeout(200);
+  check('在时长输入框里按空格，不会误触多选',
+    (await page.locator('.shot-table tr.picked').count()) === 2,
+    String(await page.locator('.shot-table tr.picked').count()));
+  await page.locator('.shot-table-wrap').first().focus();
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  check('Esc 清空选择', (await page.locator('.shot-table tr.picked').count()) === 0);
+
+  // ── 连播 ──
+  await page.locator('button:has-text("连播")').first().click();
+  await page.waitForTimeout(800);
+  check('切得到连播', (await page.locator('.animatic .ani-stage').count()) === 1);
+  const before = await page.locator('.ani-clock').first().innerText();
+  await page.locator('.animatic').first().focus();
+  await page.keyboard.press(' ');
+  await page.waitForTimeout(1200);
+  const after = await page.locator('.ani-clock').first().innerText();
+  /**
+   * 判据是**时间真的在走**，不是"有没有播放按钮"。
+   * 按钮在、点了没反应，是这类播放器最常见的坏法。
+   */
+  check('空格真的开始播了（时间在走）', before !== after, `${before} → ${after}`);
+  await page.keyboard.press(' ');
+  check('每一镜在进度条上占一格', (await page.locator('.ani-tick').count()) > 0,
+    String(await page.locator('.ani-tick').count()));
+
+  // ── 为什么不对 ──
+  await page.locator('button:has-text("卡片")').first().click();
+  await page.waitForTimeout(600);
+  const why = page.locator('button:has-text("为什么不对")').first();
+  check('出过图的镜头卡上有「为什么不对」', (await why.count()) > 0);
+  if (await why.count()) {
+    await why.click();
+    await page.waitForFunction(() => document.querySelector('.diag-item'), null, { timeout: 15000 }).catch(() => {});
+    const txt = await page.locator('.diag-host').first().innerText();
+    check('点下去给出了原因和下一步', /→/.test(txt) && txt.length > 20, txt.slice(0, 140));
+  }
+}
+
+/**
+ * ══════════ 在跑的时候，那颗按钮必须是「停下来」 ══════════
+ *
+ * 用户报的：手机上点「继续出图」，撞上一段"这个项目已经在跑（321 秒前开始）"——
+ * 而那句话本身就说明这一下压根不该点得动。
+ *
+ * 根因：电脑版的"在不在跑"**只看页面自己内存里那个变量**，从不问服务端。
+ * 刷新一次、换台设备、或者流断一次（手机锁屏就够了），按钮就亮回来，
+ * 而服务器还在一镜一镜地出。
+ *
+ * ⚠ 判据是**在服务端登记一份活儿之后，界面自己变**，
+ * 不是"有没有写轮询代码"。
+ */
+console.log('\n在跑的时候不该能再点一次');
+{
+  const jobsMod = await import(CORE('jobs.js'));
+  const running = jobsMod.start(proj.id, 'assets');
+  await page.goto(`${url}#/studio/${proj.id}`);
+  await page.waitForTimeout(1500);
+  await page.locator('.nav-step', { hasText: '镜头出图' }).first().click();
+  await page.waitForTimeout(1500);
+
+  const stopBtn = page.locator('.stage-detail button:has-text("停下来")');
+  // 轮询是四秒一次，等它自己变 —— 判据是"界面最终会自己反应过来"
+  await page.waitForSelector('.stage-detail button:has-text("停下来")', { timeout: 15000 }).catch(() => {});
+  check('服务端在跑时，主按钮变成「停下来」', (await stopBtn.count()) > 0);
+  check('而且「开始/继续」不在了（不是变灰，是换了个动作）',
+    (await page.locator('.stage-detail button:has-text("开始")').count()) === 0
+    && (await page.locator('.stage-detail button:has-text("继续")').count()) === 0);
+  const head = await page.locator('.stage-detail-head').first().innerText();
+  /** 进度要来自服务端 —— 页面自己记的那份一刷新就没了 */
+  check('说得出在跑哪一步、跑了多久', /中 ·? ?已跑 \d+ 秒|已跑 \d+ 秒/.test(head), head.slice(0, 160));
+
+  jobsMod.finish(running);
+  await page.waitForTimeout(5000);
+  check('跑完之后按钮自己变回「开始」（不用手动刷新）',
+    (await page.locator('.stage-detail button:has-text("停下来")').count()) === 0
+    && (await page.locator('.stage-detail button:has-text("开始"), .stage-detail button:has-text("继续")').count()) > 0);
+}
+
+/**
+ * ══════════ 镜头卡：出处与排查折起来了 ══════════
+ *
+ * 用户："卡片下面的功能都太杂太乱了"。
+ * ⚠ 这几条守的是**克制** —— 下次再有人往卡面上摊一块信息，这里会红。
+ */
+/**
+ * ══════════ 指令框 ══════════
+ *
+ * ⚠ 这一节必须**真的往框里打字**，不能只验"元素在不在"。
+ *
+ * 这个框的价值全在"执行前先摆出要做什么"那一步 —— 而那一步是
+ * 输入 → 请求 → 预览 → 按钮变样这一整条链。链上任何一环断了，
+ * 页面都不会报错，框还在，只是永远不出预览。
+ * 只验元素存在的话，那种断法一次都抓不到。
+ */
+console.log('\n指令框：打进去要能看见它理解成了什么');
+{
+  await page.goto(`${url}#/studio/${proj.id}`);
+  await page.waitForTimeout(1000);
+  await page.locator('.nav-step', { hasText: '镜头出图' }).first().click();
+  await page.waitForTimeout(900);
+
+  const input = page.locator('.cmd-input').first();
+  check('指令框在', (await input.count()) === 1);
+
+  await input.fill('第 1-3 镜改成中景');
+  // 250ms 防抖 + 一次请求
+  await page.waitForTimeout(1200);
+  const prev = page.locator('.cmd-preview').first();
+  const said = (await prev.textContent()) || '';
+  check(`预览说清楚了要做什么（${said.slice(0, 40)}）`, /景别/.test(said) && /中景/.test(said));
+  check('预览里带了镜数，不是光说"改一批"', /\d+\s*镜/.test(said));
+  /** 改文字不花钱 —— 不该被标成要花钱那一档，否则用户每次都被吓一下 */
+  check('免费的动作不标成花钱', !(await prev.getAttribute('class') || '').includes('costly'));
+
+  const btn = page.locator('.cmd-box button').first();
+  check('执行按钮上写的是这次动几镜，不是"确定"', /镜/.test((await btn.textContent()) || ''));
+  check('而且是可按的', !(await btn.isDisabled()));
+
+  // ── 花钱的那一类要变色 ──
+  await input.fill('把缺视频的都跑了');
+  await page.waitForTimeout(1200);
+  check('要花钱的动作，预览换成警示色',
+    ((await prev.getAttribute('class')) || '').includes('costly'));
+  check('并且说明按下去只是跳过去，还要再过一遍预检',
+    /预检|估算/.test((await prev.textContent()) || ''));
+
+  // ── 看不懂时不许装懂 ──
+  await input.fill('哦豁');
+  await page.waitForTimeout(1200);
+  check('看不懂时说看不懂', ((await prev.getAttribute('class')) || '').includes('bad'));
+  check('按钮变成不可按（绝不让它执行一个没听懂的指令）',
+    await page.locator('.cmd-box button').first().isDisabled());
+  check('并且给了能直接点的例子', (await page.locator('.cmd-eg-btn').count()) > 0);
+  /**
+   * 例子是可点的模板，不是装饰。
+   *
+   * ⚠ 而且例子里的镜号必须取自**这个项目** —— 第一版写死了"第 6-12 镜"，
+   * 而走查夹具只有 2 镜，点下去选不到任何东西。用户第一次点例子就撞墙，
+   * 那是他对这个功能的第一印象。这条断言就是在那儿撞出来的。
+   */
+  const egText = (await page.locator('.cmd-eg-btn').allTextContents()).join(' ');
+  const shotCount = await page.locator('.shot-card').count();
+  /**
+   * ⚠ 抓**所有**数字，不是"第"后面那一个。
+   * 第一版写的是 /第\s*(\d+)/，而"第 1-3 镜"里它只抓得到 1 ——
+   * 于是这条断言碰巧过了，而真正越界的那个 3 从来没被看过。
+   * 一条只检查一半的断言，绿着也只是绿着。
+   */
+  const nums = [...egText.matchAll(/\d+/g)].map((m) => Number(m[0]));
+  const tooBig = nums.filter((n) => n > shotCount);
+  check(`例子里的镜号都在这 ${shotCount} 镜之内（例子：${egText.slice(0, 40)}）`, tooBig.length === 0);
+  await page.locator('.cmd-eg-btn').first().click();
+  await page.waitForTimeout(1200);
+  check('点一下例子就填进去了，而且解析得出来',
+    !((await prev.getAttribute('class')) || '').includes('bad'));
+}
+
+console.log('\n镜头卡的分层');
+{
+  /**
+   * ⚠ 要在**出过图**的那一步验。
+   *
+   * 分镜那一步还没有出处可言（没参考图、没模型、没首帧核对），
+   * 折叠区本来就该整个不存在 —— 拿那一步来验，验的是空气。
+   * 第一版就是这么写的，跑出来"折叠区里有：空字符串"。
+   */
+  await page.goto(`${url}#/studio/${proj.id}`);
+  await page.waitForTimeout(1000);
+  await page.locator('.nav-step', { hasText: '镜头出图' }).first().click();
+  await page.waitForTimeout(900);
+  const card = page.locator('.shot-card').first();
+  const more = card.locator('details.shot-more').first();
+  check('排查用的那一段收进了折叠区', (await more.count()) === 1);
+  check('默认是折起来的', (await more.evaluate((el) => el.open)) === false);
+  /**
+   * ⚠ 折起来 ≠ 删掉 —— 点开必须一样都不少。
+   * 展开本身是浏览器原生的 <details>，不是我们的代码，所以直接置 open：
+   * 这一节要验的是**内容分对了组**，不是原生行为能不能触发。
+   */
+  await more.evaluate((el) => { el.open = true; });
+  await page.waitForTimeout(200);
+  // ⚠ 用 textContent 不用 innerText：后者对没渲染出来的区域返回空串，
+  // 于是内容在不在会被读成没有内容—— 而那是两回事
+  const inner = await more.evaluate((el) => el.textContent);
+  check('点开之后参考图那行还在',
+    /参考图|张图可以带|还没有图|早前出的|没有图可带/.test(inner), inner.slice(0, 100));
+  check('提示词原文也还在', /提示词|发给模型|手动补入/.test(inner), inner.slice(0, 200));
+  /** 徽章留在外面：那是"这一镜是什么"，扫一眼就要看到，不是排查用的 */
+  const meta = card.locator('.shot-meta').first();
+  check('景别/场景那些徽章仍然摆在外面（扫一眼就要看到）',
+    (await meta.count()) === 1 && (await meta.evaluate((el) => !el.closest('details'))));
+
+  /**
+   * ⚠ **折叠区在的时候，里面必须真的有东西。**
+   *
+   * 第一版把这条写成了"分镜那一步不该有折叠区"—— 那是错的：
+   * 那时候里面有「发给模型的提示词」，是有意义的内容。
+   * 真正的不变量不是"某一步没有"，而是**永远不出现一个点开是空的折叠区**。
+   * 一个点开什么都没有的「出处与排查」，比多几行字更让人觉得这界面不靠谱。
+   */
+  await page.locator('.nav-step', { hasText: '分镜' }).first().click();
+  await page.waitForTimeout(800);
+  const emptyFolds = await page.evaluate(() =>
+    [...document.querySelectorAll('details.shot-more')]
+      .filter((d) => {
+        const sm = d.querySelector(':scope > summary');
+        return d.textContent.replace(sm ? sm.textContent : '', '').trim().length === 0;
+      }).length);
+  check('没有一个折叠区是点开就空的', emptyFolds === 0, `空的有 ${emptyFolds} 个`);
+}
+
 
 check('全程没有页面报错', errs.length === 0, errs.slice(0, 3).join(' | '));
 

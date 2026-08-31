@@ -1180,6 +1180,10 @@ select.mini {
 .chain-seg.good b { color: var(--good); }
 .chain-seg.bad { background: var(--alarm-wash); }
 .chain-seg.bad b { color: var(--alarm); }
+
+/* 「这家没有这个模型」是黄不是红：这一家其实是通的，错的是模型 id。
+   画成红的会让人去查网络和密钥 —— 而那两样都是好的。 */
+
 .chain-seg.warn { background: var(--caution-wash); cursor: pointer; }
 .chain-seg.warn b { color: var(--caution); }
 /* 红叉是**能点的** —— 光标要说出这件事，否则原因永远藏在 title 里没人看得到 */
@@ -1315,6 +1319,150 @@ select.mini {
 .previz-label { fill: var(--ink); }
 .previz-label-cam { fill: var(--ground); font-weight: 700; }
 .previz-controls { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+/* ── 连播预览 ──
+   出视频之前最后一道、也是最省钱的一道关。 */
+.animatic:focus { outline: none; }
+.ani-stage {
+  position: relative; aspect-ratio: 16 / 9; background: #000;
+  border: 1px solid var(--line); border-radius: var(--r); overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+.ani-media { max-width: 100%; max-height: 100%; display: block; object-fit: contain; }
+.ani-blank { color: var(--ink-faint); font-size: 14px; }
+/* 镜号和时长压在角上：看节奏时要随时知道现在是第几镜 */
+.ani-tag {
+  position: absolute; top: 8px; left: 10px; font-size: 12px;
+  color: #fff; background: rgba(0,0,0,.55); padding: 2px 8px; border-radius: 99px;
+}
+.ani-sub {
+  position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+  max-width: 88%; text-align: center; color: #fff; font-size: 15px; line-height: 1.5;
+  background: rgba(0,0,0,.55); padding: 4px 12px; border-radius: 6px;
+}
+/* 每镜一格，颜色说明它是静帧还是视频 —— 一眼看出还差几镜 */
+.ani-ticks { display: flex; gap: 1px; margin-top: 8px; }
+.ani-tick { height: 5px; border-radius: 2px; cursor: pointer; background: var(--line); }
+.ani-tick.image { background: var(--beam-deep); }
+.ani-tick.video { background: var(--good); }
+.ani-tick:hover { filter: brightness(1.4); }
+.ani-bar { height: 6px; border-radius: 3px; background: var(--surface-3); margin-top: 4px; cursor: pointer; }
+.ani-fill { height: 100%; border-radius: 3px; background: var(--beam); width: 0; }
+.ani-controls { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+.ani-clock { font-size: 13px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.ani-hint { font-size: 12px; color: var(--ink-faint); margin-top: 6px; }
+
+/* ── 镜头卡：出处与排查默认折起来 ──
+   下面那一整段（参考图、用了哪个模型、首帧核对、task_id、手动补入、提示词原文）
+   每一条都是有理由才加的，但加了十几条之后，浏览五十镜时它们就是五十份噪音。
+   ⚠ 折起来 ≠ 删掉：一样都没少，点一下就有。 */
+.shot-more { margin-top: 10px; border-top: 1px solid var(--line-soft); padding-top: 8px; }
+.shot-more > summary {
+  cursor: pointer; font-size: 12px; color: var(--ink-faint); list-style: none; padding: 3px 0;
+}
+.shot-more > summary::-webkit-details-marker { display: none; }
+.shot-more > summary::before { content: '▸ '; }
+.shot-more[open] > summary::before { content: '▾ '; }
+
+/* ── 「为什么不对」 ──
+   不满意时人手里只有一张图和一个「重出」按钮，而再来一次多半还是那样。
+   这一块回答"该改什么"，而且只说数据里有证据的原因。 */
+.diag-host:empty { display: none; }
+.diag-host { margin-top: 8px; }
+.diag-item {
+  padding: 8px 10px; margin-top: 6px; border-radius: 8px;
+  background: var(--surface-2); border-left: 3px solid var(--beam);
+}
+.diag-what { font-size: 13px; font-weight: 600; }
+.diag-why { font-size: 12px; color: var(--ink-faint); line-height: 1.6; margin-top: 4px; }
+.diag-how { font-size: 12px; color: var(--ink); line-height: 1.6; margin-top: 3px; }
+/* 花不花钱要写在动作旁边，不能只写在别处 */
+.diag-cost {
+  display: inline-block; margin-top: 5px; font-size: 11px; padding: 1px 6px;
+  border-radius: 99px; color: var(--caution); border: 1px solid var(--caution);
+}
+
+/* ── 一键选上"该重出的那几镜" ── */
+.redo-hint:empty { display: none; }
+.redo-hint {
+  display: flex; gap: 8px; align-items: center; margin-bottom: 8px;
+  font-size: 13px; color: var(--ink-dim);
+}
+
+/* ── 分镜表：一行一镜 ──
+   卡片一屏三四镜，五十镜要滚十几屏。表格解决的是通读和批量改。 */
+.shot-view-bar { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+.shot-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r); }
+/* 键盘操作要有焦点框，不然人不知道按键会落在哪儿 */
+.shot-table-wrap:focus { outline: 2px solid var(--beam); outline-offset: -2px; }
+.shot-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.shot-table th {
+  text-align: left; font-weight: 600; color: var(--ink-faint); font-size: 12px;
+  padding: 7px 8px; border-bottom: 1px solid var(--line); background: var(--surface-2);
+  position: sticky; top: 0; z-index: 1;
+}
+.shot-table td { padding: 6px 8px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
+.shot-table tr:hover td { background: var(--surface-2); }
+/* 光标（键盘焦点在哪一行）和选中是两回事，要分得开 */
+.shot-table tr.cursor td { background: var(--beam-wash); }
+.shot-table tr.picked td { background: var(--caution-wash); }
+.shot-table tr.cursor.picked td { background: var(--caution-wash); box-shadow: inset 2px 0 0 var(--beam); }
+.shot-table .c-pick { width: 30px; }
+.shot-table .c-no { width: 38px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.shot-table .c-desc { min-width: 220px; }
+.shot-table .c-cam { width: 74px; color: var(--ink-dim); }
+.shot-table .c-dur { width: 70px; }
+.shot-table .c-skill { width: 150px; color: var(--ink-dim); }
+.shot-table .c-skill.none { color: var(--caution); }
+.shot-table .c-st { width: 52px; font-size: 12px; }
+.shot-table .c-st.done { color: var(--good); }
+.shot-table .c-st.half { color: var(--beam); }
+.shot-table .c-st.todo { color: var(--ink-faint); }
+.cell-num {
+  width: 58px; padding: 3px 5px; font-size: 12px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 5px; color: var(--ink);
+}
+
+/* ── 批量工具条 ──
+   只在选了东西之后出现：一条常驻的空工具条会让人以为功能坏了。 */
+.batch-bar {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  margin-bottom: 8px; padding: 7px 9px; border-radius: var(--r);
+  background: var(--caution-wash); border: 1px solid var(--caution);
+}
+.batch-bar:empty { display: none; padding: 0; border: 0; margin: 0; }
+.batch-count { font-size: 13px; font-weight: 600; color: var(--caution); }
+.batch-sep { width: 1px; height: 18px; background: var(--line); margin: 0 3px; }
+
+/* ── 开跑前清单 ──
+   摆在「开始」按钮上面，不是弹窗：弹窗三次之后就变成闭眼点确定，
+   连 blocker 一起被跳过，比没有更坏。 */
+.stepcheck { margin-top: 12px; }
+.stepcheck-head {
+  font-size: 13px; font-weight: 600; padding: 7px 10px; border-radius: 8px;
+  background: var(--surface-2); border: 1px solid var(--line);
+}
+.stepcheck-head.bad { border-color: var(--alarm); color: var(--alarm); background: var(--alarm-wash); }
+.stepcheck-head.iffy { border-color: var(--caution); color: var(--caution); }
+.stepcheck-item {
+  margin-top: 8px; padding: 8px 10px; border-radius: 8px;
+  background: var(--surface-2); border-left: 3px solid var(--line);
+}
+.stepcheck-item.blocker { border-left-color: var(--alarm); }
+.stepcheck-item.warn { border-left-color: var(--caution); }
+.stepcheck-item.tip { border-left-color: var(--line); }
+.stepcheck-what { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.stepcheck-dot {
+  font-size: 11px; font-weight: 500; padding: 1px 6px; border-radius: 99px;
+  background: var(--surface); border: 1px solid var(--line); color: var(--ink-faint);
+}
+.stepcheck-dot.blocker { color: var(--alarm); border-color: var(--alarm); }
+.stepcheck-dot.warn { color: var(--caution); border-color: var(--caution); }
+.stepcheck-why { font-size: 12px; color: var(--ink-faint); line-height: 1.6; margin-top: 4px; }
+.stepcheck-fix { font-size: 12px; color: var(--ink); line-height: 1.6; margin-top: 3px; }
+.stepcheck-shots { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 6px; font-size: 12px; color: var(--ink-faint); }
+/* 支点那句话：清单只是信息，这句话把它变成一个决定 */
+.stepcheck-cost { margin-top: 8px; font-size: 12px; color: var(--ink); font-weight: 600; }
+
 .previz-row { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .previz-cap { color: var(--ink-faint); font-size: 12px; min-width: 44px; }
 .previz-row .btn.on { border-color: var(--beam); color: var(--beam); }
@@ -1619,7 +1767,9 @@ select.mini {
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
   font-size: 12px; line-height: 1.6;
 }
+
 .previz-warn.bad { border-color:color-mix(in srgb, var(--bad) 55%, var(--line)); color:var(--bad); }
+
 .ob-pending b { font-size: 13px; }
 .ob-pending span { flex: 1; min-width: 200px; color: var(--ink-dim); }
 
@@ -1754,7 +1904,28 @@ select.mini {
   .spend-row { grid-template-columns: 56px 1fr auto; font-size: 12px; }
   .rate-who { flex-basis: 100%; }
 }
+
 .previz-gizmo-bar{position:absolute;z-index:8;top:10px;left:10px;display:flex;gap:4px;padding:4px;border:1px solid #3a4658;border-radius:8px;background:rgba(12,16,23,.88);box-shadow:0 6px 18px rgba(0,0,0,.24)}
 .previz-gizmo-btn{border:0;border-radius:5px;padding:6px 9px;background:#202938;color:#c7d0de;font-size:12px;cursor:pointer}
 .previz-gizmo-btn:hover{background:#2a3649}.previz-gizmo-btn.on{background:#1677b8;color:#fff;box-shadow:inset 0 0 0 1px #54bce9}
 .previz-gizmo-divider{width:1px;align-self:stretch;margin:1px 3px;background:#465267}
+
+
+/* ── 指令框 ──
+   预览区三种色：看不懂(alarm) / 免费改(good) / 要花钱(caution)。
+   花钱不用 alarm —— alarm 是"坏了"，而花钱不是坏事，是要你多看一眼。 */
+.cmd-box { margin: 10px 0 14px; }
+.cmd-row { display: flex; gap: 8px; align-items: center; }
+.cmd-input { flex: 1; min-width: 0; }
+.cmd-preview { margin-top: 7px; line-height: 1.6; font-size: 13px; }
+.cmd-preview:empty { display: none; }
+.cmd-preview.ok { color: var(--good); }
+.cmd-preview.bad { color: var(--alarm); }
+.cmd-preview.costly { color: var(--caution); }
+/* 例子是可点的模板，不是装饰：点一下直接填进输入框 */
+.cmd-eg-btn {
+  display: inline-block; margin: 4px 6px 0 0; padding: 2px 9px;
+  border: 1px solid var(--line); border-radius: 999px; background: transparent;
+  color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
+}
+.cmd-eg-btn:hover { border-color: var(--beam); color: var(--ink); }

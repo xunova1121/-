@@ -302,9 +302,31 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
 
   parts.push(shot.description || '');
 
-  // 两段角色描述只是隐含信号；明确报人数可防止模型把两个人揉成一个人。
-  // 只陈述事实，不要求“全部完整出现”，避免和特写等景别指令冲突。
-  if (cast.length > 1) parts.push(`画面里有 ${cast.length} 个人：${cast.map((c) => c.name).join('、')}`);
+  /**
+   * ══════════ 这一镜画面里有几个人 ══════════
+   *
+   * 提示词原来从头到尾没说过这件事。两个【角色】段落只是**隐含**信号 ——
+   * 而"画面里有几个人"恰恰是扩散模型最容易漏的约束之一：
+   * 它会把两段人物描述**揉成一个人**，或者干脆只画写在前面那个。
+   *
+   * 真实事故（第 6 镜）：「父亲伸手从怀里掏出几块灵石，塞进我手里」，
+   * 出来只有父亲一个人，没有接的那个。那一镜的成因里有名字对不上那条
+   *（已修），但即使名字对上了，靠两段描述去暗示"这里有两个人"仍然很弱。
+   *
+   * ── 为什么只报数和名字，不写"两人同框"「都要完整出现」 ──
+   *
+   * 那会和景别打架。这一镜要是特写，"两个人都要完整出现"就是一条
+   * 和「特写」直接矛盾的指令，而两句矛盾的话一起发过去，模型挑哪句
+   * 你控制不了 —— 这个项目已经为"两句话打架"单独做过一条诊断了。
+   *
+   * 报数是**事实陈述**（shot.characters 就是这么写的），
+   * 取景交给景别那句管，各说各的、不互相压。
+   *
+   * 一个人时不说：那是废话，还白占提示词字数（视频精准模式只有 200 字）。
+   */
+  if (cast.length > 1) {
+    parts.push(`画面里有 ${cast.length} 个人：${cast.map((c) => c.name).join('、')}`);
+  }
 
   /**
    * 变体：这一镜里这个人穿哪套、这个场景是什么时段。
@@ -371,6 +393,40 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
   const staged = previz.cameraLine(shot, cast[0]?.name);
   if (staged) parts.push(`镜头：${staged}`);
   else if (shot.camera) parts.push(`镜头：${shot.camera}`);
+  /**
+   * ⚠ 景别后面补一句**画面上能验的话**。
+   *
+   * "特写"是个行话，两个字要和几百字的外貌、环境描述抢注意力，
+   * 而且各家模型对它的理解不一致。"画面只到肩膀以上，脸占据主要面积"
+   * 具体得多，也难被无视得多 —— 这是"提示词说了算"这条路能不能走通的关键。
+   */
+  const framing = previz.framingHint(shot.camera);
+  if (framing) parts.push(framing);
+  /**
+   * ══════════ 参考图管"是什么"，文字管"怎么拍" ══════════
+   *
+   * ⚠ 这一句必须**每次带参考图时都说**，不能只在特写时说。
+   *
+   * ── 我在这儿绕了两版弯路 ──
+   *
+   * 现象是"标了特写，出来是整个广场的大远景"。场景基准图是
+   * 「空镜无人物、广角」出的，天生是远景构图，而它排在参考图第一位、
+   * 权重最高 —— 文字说特写、图说广角，图赢。
+   *
+   * 我先是**不发那张图**（结果环境没了基准，模型自己编了个广场），
+   * 又改成**降权到最后**（治标，而且每来一种新情况就要再加一个特例）。
+   * 两次都是在拿参考图当杠杆去修构图 —— 用错了地方。
+   *
+   * 正确的分工是一条线，不是一堆特例：
+   *   参考图  长相、服装、环境、色调  —— 是什么
+   *   文字    景别、机位、构图、动作  —— 怎么拍
+   *
+   * 那就把这条线**明写出来**。模型不会自己知道我们是这么分的。
+   */
+  if (kept.images.length) {
+    parts.push('参考图只用来确定人物长相、服装、场景环境和色调；'
+      + '**画面的景别、机位、构图完全按上面的文字来，不要沿用参考图的取景**');
+  }
   if (bible?.style?.palette) parts.push(`主色调：${bible.style.palette}`);
 
   return {
@@ -601,8 +657,31 @@ export function refPlan() {
   return { mode: 'auto', send: true, useEditModel: false, onlyUploaded: true, blockedBy: null };
 }
 
-/** 默认最多四张：身份 1~2 + 场景 1 + 关键道具 1，避免参考信号互相稀释。 */
+
+/**
+ * ══════════ 一次最多发几张参考图 ══════════
+ *
+ * ⚠ **上限不是省钱，是保效果。**
+ *
+ * 参考图不是越多越好。九张图发过去，模型要在九个目标之间找平衡，
+ * 每一张的权重都被摊薄 —— 最要紧的那张脸反而不像了。
+ * 走 /images/edits 那条路更直接：它会把九张**拼**进画面。
+ *
+ * 用户报的原话是"他一下给我喂了9张图"。九正好是 collectReferences 的
+ * 收集上限 —— 也就是说，能收多少就发多少，一张没筛。
+ *
+ * 4 张是一个保守的档：身份 1~2 张 + 场景 1 张 + 最要紧的道具 1 张。
+ * 想要更多去「设置 → 画面规格」调。
+ */
 export const DEFAULT_MAX_REFS = 4;
+
+/**
+ * 谁该留下来。数字越小越先留。
+ *
+ * ⚠ **用户亲手传的排第一。**那是他指名道姓说"这个人就长这样"的那张，
+ * 被上限挤掉的话，这个人的脸就又回到"由文字决定"了 —— 而那正是
+ * 他传这张照片要解决的问题。
+ */
 
 function refRank(kind, source) {
   if (source === 'upload') return 0;
@@ -611,19 +690,31 @@ function refRank(kind, source) {
   return 3;
 }
 
-/** 按当前策略筛一遍，并按“用户上传 > 人物 > 场景 > 道具”裁到安全上限。 */
+
+/** 按当前策略筛一遍：auto 只留用户自己传的那些 */
 export function pickRefs({ images = [], labels = [], paths = [], sources = [], kinds = [] }, plan) {
   if (!plan.send) return { images: [], labels: [], paths: [], kinds: [], sources: [], uploaded: 0 };
   const keep = images.map((_, i) => (plan.onlyUploaded ? sources[i] === 'upload' : true));
-  const eligible = images.map((_, i) => i).filter((i) => keep[i]);
+
+  /**
+   * ⚠ 上限要**按优先级砍**，不能直接 slice 前 N 张。
+   *
+   * 参考图的排列顺序是场景在最前（多数厂商对首张权重最高，出分镜时
+   * 最该被提醒的是环境）。直接砍前 N 张的话，第一个被留下的是场景，
+   * 而**最容易被挤掉的恰恰是排在后面的角色**——脸没了，环境留着。
+   */
   const cap = Math.max(1, Number(settings.get('maxRefs')) || DEFAULT_MAX_REFS);
-  const selected = eligible
-    .slice()
+  const survivors = images
+    .map((_, i) => i)
+    .filter((i) => keep[i])
     .sort((a, b) => refRank(kinds[a], sources[a]) - refRank(kinds[b], sources[b]))
     .slice(0, cap);
-  // 选择时按重要性，发送时恢复原顺序；首张场景图的既有语义不变。
-  const live = new Set(selected);
-  const idxs = eligible.filter((i) => live.has(i));
+  // 砍完之后**恢复原来的顺序**：顺序本身是有意义的（场景在前），
+  // 按优先级排出来的顺序会把场景推到最后
+  const live = new Set(survivors);
+  const idxs = images.map((_, i) => i).filter((i) => keep[i] && live.has(i));
+
+
   return {
     images: idxs.map((i) => images[i]),
     labels: idxs.map((i) => labels[i]),
@@ -632,7 +723,12 @@ export function pickRefs({ images = [], labels = [], paths = [], sources = [], k
     kinds: idxs.map((i) => kinds[i]),
     sources: idxs.map((i) => sources[i]),
     uploaded: idxs.filter((i) => sources[i] === 'upload').length,
-    capped: Math.max(0, eligible.length - idxs.length)
+
+    /** 被上限挤掉了几张。界面要说出来，不然人只会觉得"设定集里的图没发" */
+    capped: idxs.length < images.filter((_, i) => keep[i]).length
+      ? images.filter((_, i) => keep[i]).length - idxs.length
+      : 0
+
   };
 }
 
@@ -801,11 +897,30 @@ export function assembleVideoPrompt(
  * 分镜表里的 characters 是权威的 —— 拆分镜的提示词明写着"空镜给空数组"。
  * 明确给了空数组就信它。只有**老项目**（压根没有这个字段）才退回扫描。
  */
+/**
+ * 这一镜画面里有谁 —— **提示词**那一路用的就是它。
+ *
+ * ⚠ 这里原来自己抄了一份"全等匹配 + filter(Boolean)"，和 matchCharacters
+ * 那份一模一样的毛病 —— 同一件事两条代码路径，只修一条等于没修。
+ *
+ * ── 漏在这里的具体后果 ──
+ *
+ * 下游只问它一句"画面里到底有没有人"（见 speechLine）。所以一镜里
+ * **所有**角色名都对不上时，cast 是空的 → 这一镜被当成空镜 →
+ * "嘴唇闭合、面部安静"那句不发。而画面里其实有两个人，
+ * 于是他们可能被画成正在说话 —— 明明这一镜没有台词。
+ *
+ * （长相描述是另一条路：assemblePrompt 直接用 matchCharacters，
+ * 那一份已经在上面修好了。别把两者记混。）
+ */
 function castInFrame(bible, shot) {
-  if (Array.isArray(shot?.characters)) {
-    if (!shot.characters.length) return [];
-    return matchCharacters(bible, shot);
-  }
+
+  /**
+   * 只保留一处差别：**空数组 = 明确"这一镜没人"**（空镜）。
+   * 那种情况下不能退回读描述去猜 —— 猜出一个人来，空镜就不空了。
+   */
+  if (Array.isArray(shot?.characters) && !shot.characters.length) return [];
+
   return matchCharacters(bible, shot);
 }
 
@@ -893,41 +1008,100 @@ function speechLine(bible, shot) {
   );
 }
 
-/** 去掉给人看的身份括注：“我（书信摊主）” → “我”。 */
-const bareName = (value) => String(value || '').replace(/[（(【[].*$/, '').trim();
 
+/** 分镜里点名了谁。模型有时写"李队"有时写"李队长"，所以用包含匹配而不是全等。 */
+/** 去掉名字后面括注的说明："我（无灵根书信摊主）" → "我" */
+const bareName = (s) => String(s || '').replace(/[（(【[].*$/, '').trim();
+
+/**
+ * 分镜里写的这个名字，是设定集里的哪一个人。
+ *
+ * ══════════ 为什么不能只认全等 ══════════
+ *
+ * 设定集里的名字经常带括注 —— 「我（无灵根书信摊主）」「父亲（前宗门执事）」，
+ * 那是给人看的身份说明。而分镜是模型拆的，它写的就是「我」「父亲」。
+ * 只认全等的话，凡是带括注的角色**一律匹配不上**。
+ *
+ * 隔壁 matchScene 一直是有模糊匹配的（`includes` 双向）。同一件事两套判据，
+ * 场景能对上、角色对不上，而且谁也不报错。
+ *
+ * ── 三级，越往下越不确定 ──
+ *   ① 全等                     —— 不用想
+ *   ② 去掉括注之后相等          —— 「我」对「我（无灵根书信摊主）」，完全确定
+ *   ③ 互相包含，取最短的那个    —— 最后一招；最短 = 最贴
+ *
+ * ⚠ ② 里如果有两个人去掉括注后同名，**返回 null 而不是挑一个**。
+ * 挑错人的后果是这一镜带着另一个人的脸出图，比不带更糟：不带只是不像，
+ * 挑错是**像另一个人**，而看图的人只会觉得"这演员怎么串戏了"。
+ */
 function resolveCast(bible, name) {
   const list = bible?.characters || [];
-  const query = String(name || '').trim();
-  if (!query) return null;
-  const exact = list.find((item) => item.name === query);
+  const q = String(name || '').trim();
+  if (!q) return null;
+
+  const exact = list.find((c) => c.name === q);
   if (exact) return exact;
-  const bare = list.filter((item) => bareName(item.name) === bareName(query));
+
+  const bare = list.filter((c) => bareName(c.name) === bareName(q));
   if (bare.length === 1) return bare[0];
-  if (bare.length > 1) return null; // 同名时不猜，错配另一张脸比少一张更糟
-  const loose = list.filter((item) => item.name.includes(query) || query.includes(item.name));
-  return loose.reduce((best, item) => (!best || item.name.length < best.name.length ? item : best), null);
+  if (bare.length > 1) return null; // 同名两个人，不敢替你挑
+
+  const loose = list.filter((c) => c.name.includes(q) || q.includes(c.name));
+  if (!loose.length) return null;
+  return loose.reduce((best, c) => (c.name.length < best.name.length ? c : best));
 }
 
-/** 分镜里点名了谁：逐个解析，不能命中一个就把其余未命中的人静默丢掉。 */
+/**
+ * 这一镜有哪些人出镜。
+ *
+ * ⚠ **逐个解析，不许一个命中就收工。**
+ *
+ * 原来是这么写的：
+ *   const named = (shot.characters || []).map(n => 找全等).filter(Boolean);
+ *   if (named.length) return named;
+ *
+ * `.filter(Boolean)` 把没对上的那些**悄悄扔了**，然后只要还剩一个，
+ * 就整个短路返回。真实后果（第 6 镜）：分镜写的是 ['父亲','我']，
+ * 设定集里叫「我（无灵根书信摊主）」——「我」对不上被扔掉，「父亲」对上了，
+ * 于是直接返回只有父亲那一个。
+ *
+ * 出来的图里**只有父亲一个人**，那句"塞进我手里"没有接的人。
+ * 而全程不报任何错：界面显示"已带上参考图"，带的确实是参考图，
+ * 只是少了一个人。
+ */
 export function matchCharacters(bible, shot) {
   if (!bible?.characters?.length) return [];
-  const listed = (shot.characters || []).map((name) => String(name).trim()).filter(Boolean);
+  const listed = (shot.characters || []).map((n) => String(n).trim()).filter(Boolean);
   if (listed.length) {
-    const resolved = [];
-    for (const name of listed) {
-      const hit = resolveCast(bible, name);
-      if (hit && !resolved.includes(hit)) resolved.push(hit);
+    const out = [];
+    for (const n of listed) {
+      const hit = resolveCast(bible, n);
+      if (hit && !out.includes(hit)) out.push(hit);
     }
-    if (resolved.length) return resolved;
+    // 一个都没对上才退回读描述 —— 总比一张脸都不带强
+    if (out.length) return out;
+
   }
   const haystack = `${shot.characters?.join(' ') || ''} ${shot.description || ''} ${shot.dialogue || ''}`;
   return bible.characters.filter((c) => haystack.includes(c.name));
 }
 
+
+/**
+ * 分镜里点了名、但设定集里找不到的那些角色。
+ *
+ * 这是上面那个 bug 里**最要命的部分**：对不上不会报错，只会少一张脸。
+ * 而少一张脸的表现（"这一镜怎么只有一个人""他怎么又换了张脸"）
+ * 看起来像模型不行，没人会想到是名字对不上。
+ *
+ * 所以要把它挖出来单独说 —— 见 pipeline/diagnose.js 里的 cast-unmatched。
+ */
 export function unmatchedCast(bible, shot) {
   if (!bible?.characters?.length) return [];
-  return (shot?.characters || []).map((name) => String(name).trim()).filter((name) => name && !resolveCast(bible, name));
+  return (shot?.characters || [])
+    .map((n) => String(n).trim())
+    .filter((n) => n && !resolveCast(bible, n));
+
 }
 
 export function matchScene(bible, shot) {
@@ -941,11 +1115,35 @@ export function matchScene(bible, shot) {
   return bible.scenes.find((s) => (shot.description || '').includes(s.name)) || null;
 }
 
+/**
+ * 这一镜要带哪些道具。
+ *
+ * ⚠ **手填的「关键道具」说了算，描述文本只是没填时的兜底。**
+ *
+ * 原来只按"道具名在描述文字里出现过"来判。两个毛病：
+ *
+ *   ① **关不掉。**用户在预演台上把柴刀拿掉了、把它从关键道具里删了，
+ *      只要描述里还有"刀"这个字，那张道具设定图照旧会被发出去。
+ *      他找不到任何地方能阻止它 —— 用户的原话是"我把道具取消了…还是不行，
+ *      他一下给我喂了9张图"。
+ *   ② **和别处判据不一致。**「道具消失又回来」那条连续性检查用的是
+ *      shot.props（手填的那份），而参考图用的是字符串匹配。
+ *      同一件事两套判据，迟早互相矛盾，而矛盾时谁也不报错。
+ *
+ * shot.props 界面上写着"这一镜画面里**看得见**的关键道具"——
+ * 那正是"该不该带这张参考图"要问的问题。它非空时就用它。
+ *
+ * 空的时候退回字符串匹配（老行为）：多数项目没有逐镜填过道具，
+ * 一刀切改成"没填就不带"会让那些项目突然少一层一致性，而且不报错。
+ */
 export function matchProps(bible, shot) {
   if (!bible?.props?.length) return [];
-  const listed = (shot?.props || []).map((name) => String(name).trim()).filter(Boolean);
+
+  const listed = (shot?.props || []).map((x) => String(x).trim()).filter(Boolean);
   if (listed.length) {
-    return bible.props.filter((prop) => listed.some((name) => name === prop.name || name.includes(prop.name) || prop.name.includes(name)));
+    const want = new Set(listed);
+    return bible.props.filter((p) => want.has(p.name));
+
   }
   const haystack = `${shot.description || ''} ${shot.prompt || ''}`;
   return bible.props.filter((p) => haystack.includes(p.name));

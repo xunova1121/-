@@ -34,6 +34,10 @@ import * as skillsLib from '../skills.js';
 import * as variants from './variants.js';
 import * as anglesLib from './angles.js';
 import * as previz from './previz.js';
+import * as stepcheck from './stepcheck.js';
+import * as diagnose from './diagnose.js';
+import * as estimate from './estimate.js';
+import * as pricing from '../pricing.js';
 import * as siteMod from './site.js';
 import * as outline from './outline.js';
 import * as oss from '../oss.js';
@@ -197,12 +201,39 @@ function usableRef(ref) {
   return ref;
 }
 
-const SIGN_MARGIN_MS = 5 * 60 * 1000;
+
+/**
+ * ══════════ 这个地址**现在**发得出去吗 ══════════
+ *
+ * ⚠ 和上面那个 usableRef 问的**不是同一件事**，混用会把参考图全吃掉。
+ *
+ *   usableRef   ——「这个**存下来的**地址还能不能直接复用」
+ *                  带 Expires 就一律说不能，让调用方去重签。这是对的：
+ *                  重签是纯本地计算，不值得为省它去赌一个可能过期的地址。
+ *   sendableRef ——「这个地址**现在**发给厂商行不行」
+ *                  只有**真的已经过期**才说不行。
+ *
+ * 把前者当后者用，就会出现这样一件很荒谬的事，而它真的发生了：
+ * refreshRefs 发现地址带 Expires → 判定不可用 → 去重签 → 签出一个
+ * 崭新的、完全有效的地址 → 还告诉用户"已经重新传了一份" →
+ * 最后一行再用同一个判据过一遍 → **刚签好的这张也带 Expires，扔掉。**
+ *
+ * 结果：只要配了对象存储，参考图就一张都发不出去，而日志里写着重传成功。
+ * 用户那边看到的是"设定集里有 3 张图可以带，但这一次一张都没发"，
+ * 他传的照片也在里面 —— 于是所有讨论都跑去了开关和设置上，
+ * 而真正的原因在这一行，来回折腾了七八轮。
+ *
+ * 测试没抓到是因为夹具用的是 https://x/z.png —— 不带 Expires，
+ * 整段续签逻辑一次都没跑过。凡是"只在真实形状下才走到"的路，
+ * 夹具就得长成真实的样子。
+ */
+const SIGN_MARGIN_MS = 5 * 60 * 1000; // 出图请求本身要跑一会儿，别掐着点发
 function sendableRef(ref) {
   if (!ref) return null;
-  const match = /[?&]Expires=(\d+)/i.exec(String(ref));
-  if (!match) return ref;
-  return Number(match[1]) * 1000 - Date.now() > SIGN_MARGIN_MS ? ref : null;
+  const m = /[?&]Expires=(\d+)/i.exec(String(ref));
+  if (!m) return ref; // 内联图、上传网关、公开桶 —— 本来就不过期
+  return Number(m[1]) * 1000 - Date.now() > SIGN_MARGIN_MS ? ref : null;
+
 }
 
 /** 一张内联图大到该想办法了。400KB 的 base64 ≈ 300KB 的图 */
@@ -277,6 +308,16 @@ async function refreshRefs(project, refs, { onEvent } = {}) {
 
   for (let i = 0; i < images.length; i += 1) {
     const fat = tooFat(images[i]);
+
+    /**
+     * ⚠ 这里也该问"现在发得出去吗"，而不是"能不能复用"。
+     *
+     * 用 usableRef 的话，一个**还有 50 分钟才过期**的签名地址会被判成过期：
+     * 白重签一次（OSS 那趟是要走网络的，每镜每张都来一遍），
+     * 而万一本地那张源图不在了，还会报一句"地址过期了，本地图也找不到了"——
+     * 一条彻头彻尾的假警报，指着一个根本没坏的地址。
+     */
+
     if (sendableRef(images[i]) && !fat) continue;
     const local = refs.paths?.[i];
     const label = refs.labels?.[i] || `第 ${i + 1} 张`;
@@ -311,7 +352,23 @@ async function refreshRefs(project, refs, { onEvent } = {}) {
     });
   }
 
+
+  // ⚠ 这里问的是"现在发得出去吗"，不是"能不能复用"—— 上面刚重签出来的
+  // 那些地址必然带 Expires，用 usableRef 过会把它们连同好图一起扔掉
   const keep = images.map((u, i) => [u, i]).filter(([u]) => sendableRef(u));
+  /**
+   * ⚠ **这几个数组是一一对应的，必须一起筛。**
+   *
+   * kinds（这张是景/角/道）和 sources（模型出的还是你传的）下游要用来挑出
+   * "哪张是这个人的脸"—— 海螺的 subject_reference、万相的 ref_img 都只收
+   * 一张，收错了那条通道就白开。少筛一个数组，对应关系就整体错位，
+   * 而错位不报错：它只是让"角色身份"通道收到一张场景图。
+   *
+   * labels 原来还多挂了一个 .filter(Boolean)：某一张恰好没有标签时，
+   * 后面所有标签都往前挪一格，于是卡片上把 A 的名字写在 B 那张上。
+   * 一起去掉 —— 对齐比"数组里别有空值"重要得多。
+   */
+
   return {
     ...refs,
     images: keep.map(([u]) => u),
@@ -587,12 +644,35 @@ async function mirrorToOss(destPath, buf, onEvent) {
  *
  * 放内存不落盘：它是缓存，不是数据。桶换了、前缀改了，重启一次就干净了。
  */
+/**
+ * 本地文件 → 对象存储里的 key。
+ *
+ * ⚠ **值里必须带上"当时那份文件长什么样"，否则重传一张图不会生效。**
+ *
+ * ── 这是一个真的把人坑过的 bug ──
+ *
+ * 上传设定图落盘用的是**固定文件名**（ref-角色-变体-upload.png）——
+ * 同一个角色重传第二张，写的是同一个路径。而这张表原来只按路径记：
+ *
+ *   第一次传 → 上传到 OSS，记下 路径→key
+ *   第二次传 → 覆盖同一个本地文件（新内容）
+ *            → publicUrlFor 按路径命中缓存，直接返回**旧地址**
+ *            → 新图一次都没被上传，设定集指向的还是第一张
+ *
+ * 于是用户换了一张脸，每一镜出来的还是上一张脸，而且没有任何报错、
+ * 日志里也不会说"用了缓存"。他只会觉得"重传没用"。
+ *
+ * 所以记下 mtime + 大小，对不上就当没缓存，重传一次。
+ */
 const OSS_KEYS = new Map();
 
+
+/** 这份文件此刻的样子。内容一变，它就变 */
 function fileSig(localPath) {
   try {
     const st = fs.statSync(localPath);
-    return String(st.mtimeMs) + `:` + String(st.size);
+    return `${st.mtimeMs}:${st.size}`;
+
   } catch {
     return null;
   }
@@ -612,7 +692,11 @@ function rememberOssKey(localPath, key) {
 export function publicUrlFor(localPath) {
   if (!localPath || !oss.ready()) return null;
   const hit = OSS_KEYS.get(localPath);
-  if (!hit || hit.sig !== fileSig(localPath)) return null;
+
+  if (!hit) return null;
+  // ⚠ 文件变过就当没缓存 —— 否则重传的那张图永远发不出去（见 OSS_KEYS 上面）
+  if (hit.sig !== fileSig(localPath)) return null;
+
   // 每次现签：私有桶那个地址是有期限的
   return oss.urlFor(hit.key);
 }
@@ -633,21 +717,69 @@ export function bibleBucket(bible, kind) {
  * 混用一套模板的话，道具图里会莫名其妙站个人。
  */
 /**
- * 角色身份锚使用同一次生成的四视图，避免分开生成导致脸、服装和背面细节互相漂移。
- * 这张图只做参考，不进入成片，因此固定横画幅，不跟随竖屏项目画幅。
+
+ * ══════════ 角色设定图：一张四视图，不是一张正面半身 ══════════
+ *
+ * 原来这里出的是「正面半身，中性表情」—— 一张只到胸口的正脸。
+ *
+ * 用户的原话："设定集中人物出图现在都是上半身，在后面出视频的时候很难统一。"
+ *
+ * 说的是实情，而且这个洞的形状很具体：**没画出来的部分，模型每一镜都在重新发明**。
+ * 半身图里没有腿、没有鞋、没有裙摆长度、没有后脑勺的发型、没有衣服背面。
+ * 于是全景一出，裤子和鞋每镜一个样；人一转身，后背的图案凭空长出来；
+ * 侧脸一给，鼻梁和发际线跟正面对不上。
+ *
+ * 而这件事**不会报错**。复核那一层比的是"发型发色瞳色脸型服装配色"，
+ * 全都是半身图里有的东西 —— 它看不见腿和背面，所以永远判 pass。
+ * 表现就是"每一镜单看都对，连起来就是不像同一个人"。
+ *
+ * ── 为什么是一张图里四个视角，而不是四张图 ──
+ *
+ * 四张分开的图（那是 angles.js 在做的事，见下）解决的是另一个问题：
+ * "这一镜是背影，给它背面那张当参考"。它是**定向的**。
+ *
+ * 而这里要的是**身份锚**：这个人从各个方向看是什么样，一次说清。
+ * 一张图里四视图有两个四张图给不了的好处：
+ *   · 四个视角是**同一次生成**的，天然自洽 —— 分四次出，四张之间就会互相不像，
+ *     那时候"以哪张为准"变成一个新问题；
+ *   · r2v（参考图生视频）那条通道只收有限几张参考图，
+ *     一张四视图 = 用一个名额换四个角度的信息。
+ *
+ * angles.js 那套照旧留着，两者不冲突：这张是锚，那几张是定向补给。
+ *
+ * ── 提示词里每一句都在防一件具体的事 ──
  */
 export function charSheetPrompt(anchor, own) {
   return `${anchor}，角色三视图设定图。`
+    // 说死"一张图、横向排开"：不说的话，模型很可能只画一个视角就交差
+
     + '一张图里横向并排四个视角，从左到右依次：'
     + '① 上半身特写（正面，中性表情，五官和领口细节清晰）；'
     + '② 全身正面站姿（头到鞋完整入镜，双臂自然下垂）；'
     + '③ 全身正侧面站姿（90° 正侧，同一姿势）；'
     + '④ 全身背面站姿（完全背对，后脑发型与服装背面清晰）。'
+
+    // 四个视角必须是同一个人同一套衣服 —— 这是整张图存在的理由，得说出来
     + '四个视角是同一个人、同一套服装、同一配色，身高等比对齐。'
+    // 参考图不该自带方向光：它会和这一镜的布光打架，人就"每镜光不一样"
     + '纯色浅灰背景，均匀柔光、无明显方向光和投影。'
+    // 模型很爱在三视图上加 FRONT/SIDE/BACK 标注和分格线，
+    // 而这张图会被当参考图发给出视频那一步 —— 那些字会被一起学进画面里
+
     + '画面中不得出现任何文字、标注、箭头、分格线或边框，无其他人物。'
     + own;
 }
+
+
+/**
+ * 角色设定图**自己的画幅**，不跟项目走。
+ *
+ * 四个视角横向排开要宽。竖屏短剧（9:16）下跟着项目画幅走的话，
+ * 四个人挤在一条竖条里，每个宽不到成图的四分之一 —— 出来是四条竹竿，
+ * 看不清脸也看不清衣服，等于白出。
+ *
+ * 这张图不进成片，它只当参考，所以它没有"必须和成片同画幅"的义务。
+ */
 
 export const CHAR_SHEET_RATIO = '16:9';
 
@@ -719,6 +851,15 @@ async function generateSheets(projectId, targets, { onEvent, signal = null } = {
       const prompt = sheetPrompt(kind, bible, item, variant);
       onEvent?.({ type: 'note', message: `提示词：${prompt.slice(0, 120)}${prompt.length > 120 ? '…' : ''}` });
 
+
+      /**
+       * 角色那张走**自己的画幅**（四视图横排要宽），场景和道具跟项目走。
+       *
+       * 场景基准图必须跟项目画幅：它是这一场的取景底图，画幅不一样就没法对位。
+       * 角色设定图不进成片、只当参考，没有对齐画幅的义务 —— 反而跟着 9:16
+       * 会把四个视角挤成四条竹竿。见 CHAR_SHEET_RATIO。
+       */
+
       const sheetRatio = kind === 'char' ? CHAR_SHEET_RATIO : (project.aspectRatio || null);
       const image = await adapters.generateImage({
         providerId: r.image.provider,
@@ -734,6 +875,10 @@ async function generateSheets(projectId, targets, { onEvent, signal = null } = {
 
       const dest = path.join(dir, `ref-${kind}-${safeFileName(item.name)}-${safeFileName(variant.id)}.png`);
       await saveMedia(image, dest, onEvent);
+
+      // ⚠ 比的是**这张图自己要的画幅**，不是项目画幅 —— 角色那张本来就不跟项目走，
+      // 拿项目画幅去比会对每一张角色设定图报一次假警
+
       checkRatio(dest, sheetRatio || settings.get('aspectRatio'), `${label} 的设定图`, onEvent);
       const modelRef = await toModelRef(dest, { onEvent });
 
@@ -1039,6 +1184,7 @@ export function qualityReport(projectId) {
   });
 }
 
+
 /** 给当前镜头版本签字。重出/改文案后 revision 改变，旧签字自动失效。 */
 export function reviewShot(projectId, shotId, { status = 'approved', note = '', reviewer = '' } = {}) {
   if (!['approved', 'rejected', 'pending'].includes(status)) throw new Error('审核状态只能是通过、退回或待审');
@@ -1055,6 +1201,76 @@ export function reviewShot(projectId, shotId, { status = 'approved', note = '', 
   };
   store.save(project);
   return { project: store.read(projectId), review: shot.review };
+}
+
+/**
+ * 开跑之前这一步该知道什么。清单 + 这一步要花多少。
+ *
+ * ⚠ 钱和清单**必须一起给**。只给清单的话，最省事的做法永远是直接按「开始」；
+ * 把"现在改免费、跑完再改要重花一次"摆出来，它才是一个决定。
+ */
+export function stepCheck(projectId, stage, { regenerate = false, only = null } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const result = stepcheck.check(project, stage, { regenerate, only });
+  const plan = estimate.forStage({
+    shots: result.targets ? (project.shots || []) : [],
+    stage,
+    routing: adapters.resolvedRouting(),
+    regenerate,
+    maxRetries: settings.get('consistencyMaxRetries') ?? 2
+  });
+  const rates = settings.get('rates') || {};
+  /**
+   * ⚠ 单价是**用户自己填的**，多数时候是空的。
+   *
+   * 算不出钱时 fmtMoney 回 null —— 这时候整句"要花多少"就不能说，
+   * 但清单照旧要给。编一个数字比不说更坏：他会照着那个数做决定。
+   */
+  const money = pricing.fmtMoney(estimate.price(plan, rates)?.base?.cny) || '';
+  return {
+    ...result,
+    money,
+    // 完整那句（含"复核不过要重出"之类）留给界面展开时用
+    detail: estimate.describe(plan, rates),
+    summary: stepcheck.summary(result, { money }),
+    skipCost: stepcheck.costOfSkipping(result, money)
+  };
+}
+
+/**
+ * 这一镜为什么不满意、下一步该干什么。
+ *
+ * 放服务端是因为它要知道**当前路由到哪个模型**（判"中途换过模型"），
+ * 而那是设置里的东西，界面上现拿容易和服务端不一致。
+ */
+export function diagnoseShot(projectId, shotId) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const shots = (project.shots || []).slice().sort((a, b) => a.index - b.index);
+  const at = shots.findIndex((s) => s.id === shotId);
+  if (at < 0) throw new Error(`没有这一镜：${shotId}`);
+  return {
+    items: diagnose.diagnose(shots[at], {
+      bible: project.bible,
+      routing: adapters.resolvedRouting(),
+      prevShot: at > 0 ? shots[at - 1] : null
+    })
+  };
+}
+
+/** 全片里哪几镜有**具体原因**该重出（不是"分数低"那种碰运气的） */
+export function redoCandidates(projectId) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const shots = (project.shots || []).slice().sort((a, b) => a.index - b.index);
+  return {
+    shots: diagnose.needsRedo(shots, {
+      bible: project.bible,
+      routing: adapters.resolvedRouting()
+    })
+  };
+
 }
 
 export function bibleReadiness(project) {
@@ -1147,6 +1363,9 @@ export async function buildOutline(projectId, { chapterId = null, onEvent } = {}
     user: `目标片长：${project.targetDuration || 60} 秒\n\n剧本：\n${String(source).slice(0, 12000)}`,
     temperature: 0.6,
     jsonMode: true,
+
+    // 长生成：走流式，判据从"总共等了多久"换成"多久没动静"
+
     stream: true,
     label: '生成大纲',
     onEvent
@@ -1280,7 +1499,21 @@ export function editOutlineBeat(projectId, beatId, fields = {}) {
 }
 
 async function analyzeScriptRaw(projectId, {
-  shotCount = 8, chapterId = null, force = false, onEvent, signal = null, scopeIds = null
+
+  shotCount = 8, chapterId = null, force = false, onEvent, signal = null,
+  /**
+   * 这一趟**开跑时**就定下来的场次范围（id 列表）。
+   *
+   * 分批之后这一步会循环好几分钟，而人完全可能在这几分钟里往大纲里插一场
+   *（他正看着大纲）。不定死范围的话，后面某一批会顺手把它捞进去拆掉 ——
+   * 那一场"什么时候被拆"取决于它插进来的时机和当时跑到第几批，
+   * 而这种时序上的巧合是最难解释、也最难复现的一类行为。
+   *
+   * 定死之后规矩很简单：**这一趟只拆开跑时就在的那些场**，
+   * 中途加的属于下一趟。界面上本来就有"还有 N 场没拆分镜"的提示接着它。
+   */
+  scopeIds = null
+
 } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
@@ -1330,22 +1563,89 @@ async function analyzeScriptRaw(projectId, {
    */
   const outlineNow = outline.normalizeOutline(project.outline);
   const inScope = outlineNow.beats.filter((b) => (chapter ? b.chapterId === chapter.id : true));
-  const allPending = inScope.filter((b) => !b.locked).filter((b) => !scopeIds || scopeIds.includes(b.id));
+
+  const allPending = inScope
+    .filter((b) => !b.locked)
+    // 第一批定范围，后面几批照着这个范围走 —— 中途插进来的不算数
+    .filter((b) => !scopeIds || scopeIds.includes(b.id));
+  /**
+   * ══════════ 一次只拆这么多场 ══════════
+   *
+   * 用户的问题："现在遇到几十个分镜就这样了，后面如果更多怎么办"。
+   *
+   * 这个问题问到了根子上，而**流式治不了它** —— 流式解决的是"慢被误判成死"，
+   * 解决不了"一次要吐的东西超过模型一次能吐的上限"。
+   *
+   * 算一笔账：一个 shot 对象十来个字段，中文描述加起来大约 150~250 token。
+   *   30 镜 ≈ 6000 token   ← 已经接近不少模型单次输出的上限
+   *   60 镜 ≈ 12000 token  ← 多数中转站会截断
+   *  200 镜 ≈ 40000 token  ← 一次调用绝无可能
+   *
+   * 而超限的表现是**最坏的那一种**：JSON 从中间断掉。不报错、状态 200，
+   * 只是最后一镜写到一半没了 —— 解析失败的话整批白跑，解析"成功"的话
+   * 你会拿到一份少了后半截的分镜表，而且没有任何地方说少了。
+   *
+   * 所以按**大纲的场次**分批：每批只拆固定几场，输出量就被钉死了，
+   * 和整个剧本多长没有关系。
+   *
+   * ── 为什么这件事几乎不用写新代码 ──
+   *
+   * 下面那套合并逻辑本来就是为"只重拆某一场"写的：id 去重、按场次顺序排、
+   * **只锁这一批发出去的那几场**。所以跑完一批，这一批的场次就锁上了，
+   * 下一批重新算 targetBeats 时它们自然不在里面 —— 循环即可，
+   * 每一批都是一次完整、独立、已落盘的拆分。
+   *
+   * 三个附带的好处，每一个单独拿出来都值得做：
+   *   · 断了不用全重来。第 7 批挂了，前 6 批已经在盘上、已经上锁
+   *   · 进度看得见。"第 3/8 批"而不是一条僵五分钟的进度条
+   *   · 出来的东西更好。模型在长结构化输出上会越写越散，
+   *     十几镜一批时它还端得住全局
+   */
+  /**
+   * ⚠ 一批切多少，量的是**这一批会写出多少镜**，不是"几场"。
+   *
+   * 第一版按场数切（一批 6 场），用户真机上跑出来这样：
+   *     已经收到 277463 字节，然后 90 秒没有新内容
+   * 27 万字节 ≈ 4600 token 的正文 —— 一批还是太大。
+   *
+   * 原因是"场"根本不是一个均匀的单位：一场 20 秒和一场 90 秒，
+   * 拆出来的镜数差四倍多。按场数切，等于**不知道自己一次要多少东西**，
+   * 碰上几场长的就又撞上限了。
+   *
+   * 按镜数切就钉死了：每批 12 镜上下 ≈ 2500 token，离任何模型的上限都远。
+   * 至少切一场（一场再长也不能不拆），所以最长的那种场仍然可能偏大 ——
+   * 那种情况下真正该做的是把那一场在大纲里拆成两场，而那是人的判断。
+   */
   const SHOTS_PER_BATCH = 12;
+  /**
+   * 没有大纲时，一次最多敢拆多少镜。
+   *
+   * 30 镜 ≈ 6000 token，还在多数模型的输出上限之内；再多就开始赌。
+   * 用户在这家中转站上一次出过 51 镜（那次成了），也撞过 length（那次没成）——
+   * 说明 50 上下正好在边界上，而边界上的东西不该拿用户的钱去试。
+   */
   const NO_OUTLINE_SHOT_CEILING = 30;
+  // ⚠ useOutline 在下面才定义，这里直接用它的来源 —— 提前引用 const 会 TDZ 报错
+
   const batching = inScope.length > 0;
   const takeByShots = (beats) => {
     const out = [];
     let shots = 0;
-    for (const beat of beats) {
-      const count = duration.planShotCount(outline.estimateSeconds(beat).suggested);
-      if (out.length && shots + count > SHOTS_PER_BATCH) break;
-      out.push(beat);
-      shots += count;
+
+    for (const b of beats) {
+      const n = duration.planShotCount(outline.estimateSeconds(b).suggested);
+      // 头一场无论多大都要收下 —— 否则一场特别长的戏会让这一批空转，永远出不去
+      if (out.length && shots + n > SHOTS_PER_BATCH) break;
+      out.push(b);
+      shots += n;
+
     }
     return out;
   };
   const targetBeats = batching ? takeByShots(allPending) : allPending;
+
+  /** 这一批之后还剩几场没拆。跑完拿它决定要不要接着来。 */
+
   const restAfterThisBatch = batching ? allPending.length - targetBeats.length : 0;
   const useOutline = inScope.length > 0;
 
@@ -1388,10 +1688,32 @@ async function analyzeScriptRaw(projectId, {
   // 镜头数跟着时长走。大纲那条路上人已经把每场多长定过了，按它反推最合理
   if (useOutline) shotCount = duration.planShotCount(targetSeconds);
 
+
+  /**
+   * ⚠ **没有大纲的长剧本，在发出去之前就拦住。**
+   *
+   * 分批是按大纲的场次切的 —— 没有大纲就切不了，只能一次全要。
+   * 而"一次全要"在镜数一多时是**必定**撞模型输出上限的：
+   * 一个 shot 十来个字段、150~250 token，四五十镜就是一万上下。
+   *
+   * 用户真实撞上的正是这个：finish_reason=length，跑了几分钟、花了钱、
+   * 拿到半截东西。而这件事**在点下去之前就完全算得出来** ——
+   * 镜数是我们自己定的，模型的上限也不是秘密。
+   *
+   * 所以不让它跑：说清为什么、以及那条能跑通的路在哪儿。
+   * 跑一次失败要三分钟加一次钱，而这句话是免费的。
+   */
   if (!batching && shotCount > NO_OUTLINE_SHOT_CEILING) {
     throw new Error(
-      `这个项目要一次拆 ${shotCount} 镜左右，而没有大纲的话只能一次全要，模型很可能因输出长度上限只返回半截内容。\n\n`
-      + '请先在「剧本」那一步点「从剧本生成大纲」，再回来拆分镜；有大纲后会按场次自动分批，已完成批次也会落盘保留。'
+      `这个项目要一次拆 ${shotCount} 镜左右，而没有大纲的话只能**一次全要** —— `
+      + `一镜十来个字段、150~250 token，${shotCount} 镜大约 ${Math.round(shotCount * 200 / 1000)}k token，`
+      + '多数模型一次写不完，写到一半会被自己的长度上限截断（finish_reason=length）。\n\n'
+      + '走大纲那条路：先在「剧本」那一步点「从剧本生成大纲」，再回来拆分镜。\n'
+      + '出了大纲之后，拆分镜会**按场次自动分批**，一批十来镜，剧本多长都不会撞上限；'
+      + '而且断在第几批都不用从头再来 —— 拆过的那几场会锁上，再点一次从没拆的接着走。\n\n'
+      + `（真想一次硬拆的话，把目标时长调短到 ${Math.round(NO_OUTLINE_SHOT_CEILING * 4.5)} 秒以内，`
+      + '或者把剧本按章节分开传。）'
+
     );
   }
 
@@ -1443,6 +1765,14 @@ async function analyzeScriptRaw(projectId, {
     user: sourceScript,
     temperature: 0.7,
     jsonMode: true,
+
+    /**
+     * 拆分镜是全流程里**最长的一次生成** —— 要吐几千 token 的分镜 JSON。
+     * 非流式的话那几分钟里连接上一个字节都没有，我们分不清"在认真写"
+     * 和"已经死了"，只能等一个固定总时长到点掐断（真实事故：中转站 +
+     * Claude Opus，体检 1.89 秒回，真跑 180 秒零字节被自己掐了）。
+     */
+
     stream: true,
     onEvent,
     label: chapter ? `拆分镜·${chapter.title}` : '拆分镜'
@@ -1713,7 +2043,27 @@ async function analyzeScriptRaw(projectId, {
     return p;
   });
 
+
+  /**
+   * 这一批完了，还有剩的就接着拆。
+   *
+   * ⚠ 递归**必须放在 store.update 之后** —— 也就是这一批已经落盘、
+   * 而且它那几场已经上锁之后。放在前面的话，下一批算 targetBeats 时
+   * 会把这一批又算进去，于是同样几场被反复拆，永远出不去循环。
+   *
+   * 也正因为落盘在先，中途断掉不用全重来：已经跑完的批次都在盘上、
+   * 都锁着，再点一次「拆分镜」会从没锁的那一场接着往下走。
+   */
   if (restAfterThisBatch > 0) {
+    /**
+     * 停在批与批之间。
+     *
+     * 分批之后这一步从"一次调用"变成了十几次，**能停下来**就比以前重要得多：
+     * 一份两百镜的剧本要跑十来分钟，中途发现大纲写错了却只能干等到底，
+     * 那些钱全是白花的。停在这儿是最干净的位置 —— 刚落盘、刚上锁，
+     * 已经拆完的一场都不会丢，再点一次从没锁的那场接着走。
+     */
+
     jobs.checkpoint(signal, `还剩 ${restAfterThisBatch} 场没拆`);
     onEvent?.({
       type: 'note',
@@ -1721,7 +2071,10 @@ async function analyzeScriptRaw(projectId, {
     });
     return analyzeScriptRaw(projectId, {
       shotCount, chapterId, force: false, onEvent, signal,
-      scopeIds: scopeIds || allPending.map((beat) => beat.id)
+
+      // 把这一趟的范围原样传下去（第一批算出来的那份）
+      scopeIds: scopeIds || allPending.map((b) => b.id)
+
     });
   }
 
@@ -2021,6 +2374,64 @@ export function sceneLayoutOf(project, sceneName) {
   return { marks: layout.marks || [], sun: layout.sun || null };
 }
 
+/**
+ * ══════════ 一次改一批镜头 ══════════
+ *
+ * ── 为什么值得单开一个入口 ──
+ *
+ * 五十镜逐个点开、改时长、关掉、再点下一个 —— 这是这个应用里
+ * **最大的一块时间黑洞**，而且它不产生任何创作价值，纯粹是操作损耗。
+ * 同一场戏的十几镜往往要改成同一个时长、挂同一张技法卡、同一个档位。
+ *
+ * ── 为什么是循环调 updateShot，而不是自己写一遍 ──
+ *
+ * updateShot 里那一大段规整（时长夹到 0.5~30、link 只认三种、
+ * 技法卡互斥组、排位对象不能被 String() 掉、道具按中英文逗号拆）
+ * 是一年踩出来的。批量这条路要是自己再写一份，两边迟早漂 ——
+ * 而漂的表现是"单个改是对的，批量改出来不一样"，最难查。
+ *
+ * 代价是 N 次 store.update（N 次读写项目文件）。本地几十镜是毫秒级的事，
+ * 用不着为它去冒"两份规整逻辑"的风险。真慢到要优化的那天，
+ * 该做的是把规整抽成纯函数给两边共用，不是复制一份。
+ *
+ * ── 技法卡是**加/减**，不是覆盖 ──
+ *
+ * 批量场景里几乎不存在"把这十镜的技法卡全换成这一张"：更常见的是
+ * "这十镜都加一张手持"。直接覆盖的话，每一镜原来各自选的运镜全没了，
+ * 而那是他一镜一镜挑出来的东西。
+ */
+export function batchUpdateShots(projectId, { ids = [], patch = {}, addSkills = [], removeSkills = [] } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const want = new Set((ids || []).filter(Boolean));
+  if (!want.size) throw new Error('没说要改哪几镜');
+
+  const targets = (project.shots || []).filter((s) => want.has(s.id));
+  if (!targets.length) throw new Error('选中的这几镜一个都不存在了 —— 刷新一下再试');
+
+  const add = (addSkills || []).filter(Boolean);
+  const remove = new Set((removeSkills || []).filter(Boolean));
+
+  let changed = 0;
+  const dropped = [];
+  let last = project;
+  for (const shot of targets) {
+    const one = { ...patch };
+    if (add.length || remove.size) {
+      const now = shot.skills || [];
+      // 加进来的排在后面：先选的那些是他一镜一镜挑的，顺序也有意义
+      const merged = [...now.filter((x) => !remove.has(x)), ...add.filter((x) => !now.includes(x))];
+      one.skills = merged;
+    }
+    if (!Object.keys(one).length) continue;
+    const r = updateShot(projectId, shot.id, one);
+    if (r?.changed?.length) changed += 1;
+    if (r?.dropped?.length) dropped.push(...r.dropped);
+    last = r?.project || last;
+  }
+  return { project: last, changed, total: targets.length, dropped: [...new Set(dropped)] };
+}
+
 export function updateShot(projectId, shotId, patch = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
@@ -2270,6 +2681,9 @@ export async function suggestLinks(projectId, { only = null, onEvent } = {}) {
     user: JSON.stringify(payload),
     temperature: 0.2,
     jsonMode: true,
+
+    // 全片一次过，输出跟着镜数走，镜多了同样会很长
+
     stream: true,
     label: '标衔接关系'
   });
@@ -2786,9 +3200,21 @@ async function generateAssetsRaw(projectId, { only = null, chapterId = null, reg
           // 那时候这一镜的一致性只剩提示词撑着 —— 记下来，回头查得出
           t.refsSent = result.used?.refsSent ?? null;
           t.bibleRefs = result.refLabels || [];
+
+          /**
+           * ⚠ 还要记下**本来有几张可用**。
+           *
+           * 只记"带了哪几张"的话，界面在 0 张时只能说一句"没带任何参考图"——
+           * 而"没带"至少有两种原因，修法完全不同：
+           *   设定集里这个角色压根没有图  → 去出一张 / 传一张
+           *   有图，但按当前设置没发      → 去设置里改一项
+           * 一句话盖住两种情况，等于把人往其中一条路上瞎指。
+           */
           t.refsAvailable = result.refsAvailable ?? null;
           t.refsAvailableLabels = result.refsAvailableLabels || [];
           t.refBlockedHint = result.refBlockedHint || '';
+          // 这一镜是按哪一版参考图规矩出的。界面靠它分清"记录是旧的"和"真没发出去"
+
           t.refPolicy = consistency.REF_POLICY;
           t.consistency = {
             score: result.verification?.score ?? null,
@@ -3088,25 +3514,67 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
   // 少带一样，重出的这一镜就会成为全片里唯一对不上的那一张。
   // 和批量出图保持一致：分镜图默认不走图生图（编辑模型会把这一镜画成
   // "被改过的角色设定图"）。开关在「设置 → 画面规格」。
+
+  /**
+   * ⚠ **单独重出这一镜，和批量出图是两条路** —— 而参考图那个判据只改了批量那条。
+   *
+   * 用户："完全和我传的图片没关系啊"。他按的是每一镜的「重出」，走的正是这条。
+   * 而这里还写着老判据 `useEditModelForShots === true`（默认 false），
+   * 于是 refImages 恒为空 —— 无论设置里怎么选，他传的照片一张都不会发出去。
+   *
+   * 最难堪的是我今天自己在自检注释里写过这句话：
+   *   "写 modelUsed 的地方有两处：批量出图一处、单独重出一处。
+   *    两条路各写一份同样的逻辑，就一定要各验一份。"
+   * 知道有两条路，然后还是只改了一条。
+   *
+   * 现在两条路共用 consistency.refPlan()/pickRefs 这一份判据，不再各写各的。
+   */
   const plan = consistency.refPlan();
   const useEdit = plan.useEditModel;
-  const picked = consistency.pickRefs({
-    images: assembled.refImages,
-    labels: assembled.refLabels,
-    paths: assembled.refPaths,
-    sources: assembled.refSources,
-    kinds: assembled.refKinds
-  }, plan);
+  const picked = consistency.pickRefs(
+    {
+      images: assembled.refImages,
+      labels: assembled.refLabels,
+      paths: assembled.refPaths,
+      sources: assembled.refSources,
+      kinds: assembled.refKinds
+    },
+    plan
+  );
+
   const freshRefs =
     !plan.send || !picked.images.length
       ? { images: [], labels: [], kinds: [], sources: [] }
       : await refreshRefs(
         project,
-        { images: picked.images, labels: picked.labels, paths: picked.paths, kinds: picked.kinds, sources: picked.sources },
+
+        {
+          images: picked.images, labels: picked.labels, paths: picked.paths,
+          kinds: picked.kinds, sources: picked.sources
+        },
         { onEvent }
       );
-  const refImages = freshRefs.images;
-  const faceRef = consistency.identityRef({ images: refImages, kinds: freshRefs.kinds, sources: freshRefs.sources });
+  const baseShotRefs = freshRefs.images;
+  // 只收一张的那些身份通道，得拿到角色那张而不是排在最前的场景图。
+  // ⚠ 批量出图那条路里同样有一份 —— 两条路各写各的，就得各验各的
+  const faceRef = consistency.identityRef({
+    images: baseShotRefs, kinds: freshRefs.kinds, sources: freshRefs.sources
+  });
+
+  const refImages = baseShotRefs;
+  if (!refImages.length && assembled.refImages.length) {
+    /**
+     * 有图可带、却一张都没带 —— 必须说出来。不说的话用户看到的只是
+     * "重出了、还是不像"，而真正的原因（设置里选了不发）一个字都没有。
+     */
+    onEvent?.({
+      type: 'note',
+      message: `这一镜有 ${assembled.refImages.length} 张参考图可用，但按当前设置一张都没发`
+        + `（当前是「${plan.mode}」）。传过照片的话，去「设置 → 画面规格 → 出分镜图时带哪些参考图」`
+        + '改成「只用我自己传的图」。'
+    });
+  }
+
   onEvent?.({ type: 'shot', shotId, status: 'running', message: `第 ${shot.index} 镜重出（${providerId} / ${model}）…` });
   if (refImages.length) {
     onEvent?.({ type: 'note', message: `参考设定集：${freshRefs.labels.join('、')}` });
@@ -3163,10 +3631,22 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
       t.imageSize = size || null;
       t.modelUsed = `${providerId} / ${image.used?.model || model}`;
       t.refsSent = image.used?.refsSent ?? null;
-      t.bibleRefs = refImages.length ? freshRefs.labels : [];
+
+      /**
+       * ⚠ 记的是**真发出去的那几张**，不是"设定集里有的那几张"。
+       *
+       * 原来写的是 assembled.refLabels —— 那是筛选**之前**的全集。
+       * 于是设定集有 3 张、按设置只发了 1 张时，卡片上照旧列 3 张，
+       * 而用户会拿着这行字去判断"为什么不像"，判据本身是假的。
+       * freshRefs.labels 是筛完 + 续签完的那一份，跟 refImages 一一对应。
+       */
+      t.bibleRefs = refImages.length ? (freshRefs.labels || []) : [];
+      // 同上：0 张时界面要说得出是"没图"还是"有图没发"
       t.refsAvailable = (assembled.refImages || []).length;
       t.refsAvailableLabels = assembled.refDetailed || [];
       t.refBlockedHint = plan.blockedHint || '';
+      // 同上：这一镜是按哪一版参考图规矩出的
+
       t.refPolicy = consistency.REF_POLICY;
       t.consistency = {
         score: verification.score ?? null,
@@ -6009,9 +6489,36 @@ export const __refreshRefs = refreshRefs;
 /** 只给自检用 */
 export const __reusableFrameRef = reusableFrameRef;
 
+
+/**
+ * ══════════ 记账的归属钉在这一层 ══════════
+ *
+ * 每个跑流水线的函数第一个参数就是 projectId，所以**这里是全应用唯一
+ * 一处天然知道"这笔钱是谁的"的地方**。在这里圈上下文，往下无论调多深、
+ * await 多少次，适配层记的账都会落到对的项目上（见 core/meter.js）。
+ *
+ * ── 为什么不只圈在 HTTP 那一层 ──
+ *
+ * 服务端路由那儿也圈了一次，而且今天**所有**入口确实都是 HTTP，
+ * 所以那一层单独就够用了 —— 今天。
+ *
+ * 问题是它靠的是一个会过期的前提："进来的路只有 HTTP 这一条"。
+ * 哪天加一个定时重跑、一个命令行、一条 Electron 的 IPC，
+ * 归属就会安静地断掉，而断掉的样子是**账还在记，只是记到了"未归属"**——
+ * 总数看起来正常，某个项目的账莫名其妙少了一截，没有任何地方会红。
+ *
+ * 自检就先撞上了这个：它直接调 generateVideos（不走 HTTP），
+ * 于是那笔漏账落进了"未归属"。测试是这么发现的，用户不会。
+ *
+ * 钉在这一层之后，谁调都对，包括还没写出来的那些调用方。
+ * 两层都圈不冲突：内层沿用外层的 projectId，只把 stage 说得更准。
+ */
+
+
 export function buildBible(projectId, opts = {}) {
   return meter.runIn({ projectId, stage: 'bible' }, () => buildBibleRaw(projectId, opts));
 }
+
 
 /** 把 GLB 模型绑到设定集变体，预演台优先用模型，加载失败仍可退回设定图。 */
 export async function attachBibleModel(projectId, kind, name, { dataUrl, fileName = '', variantId = null } = {}, onEvent) {
@@ -6061,6 +6568,7 @@ export function generateVoice(projectId, opts = {}) {
 export function compose(projectId, opts = {}) {
   return meter.runIn({ projectId, stage: 'compose' }, () => composeRaw(projectId, opts));
 }
+
 export function runAll(projectId, opts = {}) {
   return meter.runIn({ projectId, stage: 'all' }, () => runAllRaw(projectId, opts));
 }

@@ -51,6 +51,11 @@ import { speechSeconds, SPEECH_HEADROOM } from '/duration.js';
 import * as SEAM from '/seam.js';
 import * as SITE from '/site-canvas.js';
 import * as OUTLINE from '/outline.js';
+/**
+ * 单价换算取服务端原件。手机上那句话和电脑上那句话必须同源 ——
+ * 两端各拼一份措辞，迟早会出现同一笔账两个说法。
+ */
+import * as PRICING from '/pricing.js';
 
 const canInstall = window.isSecureContext && 'serviceWorker' in navigator;
 if (canInstall) {
@@ -735,7 +740,30 @@ function paintFlow() {
           class: 'btn sm',
           disabled: job.running,
           // cap:run-stage
-          onclick: () => runStage(s.id, s.label)
+          onclick: async () => {
+            /**
+             * ══════════ 开跑之前先看一眼清单 ══════════
+             *
+             * ⚠ 手机上**更需要**这一下，不是更不需要。
+             *
+             * 出门在外按这一下的人，没法当场去翻分镜表核对"这几镜到底
+             * 排没排位、选没选技法卡"。而这一步照样真花钱 ——
+             * 花完之后他离能改的地方（电脑）更远。
+             *
+             * 电脑上那份是常驻清单（摆在按钮上面，看不看由人）；
+             * 手机上屏幕小、摆不下，所以做成**按下去那一刻**给一次。
+             * 有问题才拦，干净就直接跑 —— 干净时还弹一下等于纯骚扰。
+             */
+            const sc = await stepCheckFor(s.id);
+            if (sc && sc.items.length) {
+              const lines = sc.items.slice(0, 4).map((it) =>
+                `${it.level === 'blocker' ? '【要先处理】' : it.level === 'warn' ? '【建议先改】' : '【可选】'}${it.what}\n${it.fix}`);
+              const tail = sc.skipCost ? `\n\n${sc.skipCost}` : '';
+              // eslint-disable-next-line no-alert
+              if (!confirm(`${sc.summary}\n\n${lines.join('\n\n')}${tail}\n\n还是要现在跑吗？`)) return;
+            }
+            runStage(s.id, s.label);
+          }
         }, st === 'pending' ? '开始' : '继续'),
         // 出门在外最想按的其实是这个：把剩下几步一次串完，回去直接看成片。
         // 从这一步往后跑，前面几步的产出原样保留 —— 不重跑、不重复计费
@@ -745,8 +773,19 @@ function paintFlow() {
           title: '从这一步一路跑到合成',
           onclick: async () => {
             const rest = STEPS.length - i;
+            /**
+             * 先问服务端这一趟要花多少，再弹确认。
+             *
+             * 原来这句写的是"视频那步按镜数计费，可能是最大的一笔开销"——
+             * 正确，但没有信息量。出门在外按下这一下的人**比坐在电脑前的人
+             * 更需要一个数**：他没法当场去翻厂商后台核对。
+             *
+             * 多一次往返换一个数，值。真要拿不到（离线、超时）就照旧弹，
+             * 不能因为算不出价钱就把「往后全跑」这个功能堵死。
+             */
+            const cost = await costLineFor('all', { from: s.id });
             // eslint-disable-next-line no-alert
-            if (!confirm(`从「${s.label}」一路跑到合成，共 ${rest} 步。视频那步按镜数计费，可能是最大的一笔开销。确定？`)) return;
+            if (!confirm(`从「${s.label}」一路跑到合成，共 ${rest} 步。\n\n${cost || '视频那步按镜数计费，可能是最大的一笔开销。'}`)) return;
             // cap:run-from
             runStage('all', `${s.label} → 合成`, { from: s.id });
           }
@@ -1101,6 +1140,7 @@ function paintBible() {
    */
   out.push(extendCard());
   out.push(siteCard());
+  out.push(spendCard());
   return out;
 }
 
@@ -1112,6 +1152,157 @@ function paintBible() {
  * 没有参考图、没有外貌描述、复核没有基准，静默降级成"文生图"，
  * 而流水线一路绿。
  */
+/**
+ * ══════════ 手机上的账 ══════════
+ *
+ * 为什么手机上也要有：出门在外点「往后全跑」的人，比坐在电脑前的人
+ * **更需要**先知道这一下多少钱 —— 他没法当场去翻厂商后台核对。
+ * 只在电脑上显示价钱，等于把手机版又做回一个"能按但不知道按下去会怎样"的遥控器。
+ *
+ * 和电脑版的实现不一样：这里走服务端那条预估接口，不在浏览器里自己算。
+ * 电脑版之所以在本地算，是因为它已经把整份 catalog（路由 + 厂商档位）
+ * 载进内存了；手机版没有，为了一行字去拉整份目录不划算。
+ * 两端算的是同一套东西 —— 服务端用的就是 estimate.js 那个文件。
+ */
+function spendCard() {
+  const host = h('details', { class: 'card site-details' });
+  const head = h('summary', {}, '花了多少 ', h('span', { class: 'muted' }, '用量是实数，钱按你填的单价算'));
+  const body = h('div', {});
+  let loaded = false;
+
+  const paint = (data) => {
+    clear(body);
+    if (data?.error) {
+      body.append(h('div', { class: 'muted', style: 'line-height:1.7' }, `读不出来：${data.error}`));
+      return;
+    }
+    body.append(h('div', { style: 'line-height:1.7;font-size:13px' }, data.line || ''));
+
+    for (const [kind, spec] of Object.entries(data.kinds || {})) {
+      const b = data.total?.byKind?.[kind];
+      if (!b || !b.calls) continue;
+      body.append(h('div', { class: 'spend-row' },
+        h('span', { class: 'spend-kind' }, spec.label),
+        h('span', { class: 'spend-units' }, PRICING.describeUnits(kind, b.units)),
+        h('span', { class: 'spend-money' }, b.priced ? PRICING.fmtMoney(b.cny) : '没填单价')));
+    }
+
+    if (data.unmetered) {
+      body.append(h('div', { class: 'muted', style: 'line-height:1.7;margin-top:6px' },
+        `另有 ${data.unmetered} 次没记上账 —— 厂商没回用量。这几次的钱确实花了，只是数不出来。`));
+    }
+
+    const missing = data.total?.missing || [];
+    if (missing.length) body.append(mRateFiller(missing, load));
+  };
+
+  async function load() {
+    try {
+      paint(await api(`/projects/${project.id}/spend`));
+    } catch (err) {
+      paint({ error: err.message });
+    }
+  }
+
+  host.append(head, body);
+  host.addEventListener('toggle', () => {
+    if (host.open && !loaded) {
+      loaded = true;
+      // cap:spend-project
+      load();
+    }
+  });
+  return host;
+}
+
+/**
+ * 手机上就地填单价。
+ *
+ * 和电脑版一样**不预填任何厂商的价** —— 预填等于给一个看起来权威的默认值，
+ * 而多数人会直接点保存。照自己账单上的抄才是对的。
+ */
+function mRateFiller(missing, after) {
+  const box = h('div', { style: 'margin-top:10px' });
+  const inputs = new Map();
+  box.append(h('div', { class: 'muted', style: 'line-height:1.7' }, '这几样用过了但没填单价：'));
+  for (const m of missing) {
+    const spec = PRICING.KINDS[m.kind] || {};
+    const row = h('div', { class: 'rate-row' });
+    row.append(h('span', { class: 'rate-who' }, PRICING.describeMissing(m)));
+    if (spec.pair) {
+      const i1 = h('input', { class: 'input sm', type: 'number', step: 'any', min: '0', placeholder: '输入' });
+      const i2 = h('input', { class: 'input sm', type: 'number', step: 'any', min: '0', placeholder: '输出' });
+      inputs.set(m.key, { pair: true, i1, i2 });
+      row.append(i1, i2);
+    } else {
+      const i1 = h('input', { class: 'input sm', type: 'number', step: 'any', min: '0', placeholder: spec.priceUnit || '单价' });
+      inputs.set(m.key, { pair: false, i1 });
+      row.append(i1);
+    }
+    box.append(row);
+  }
+  box.append(h('button', {
+    class: 'fbtn',
+    style: 'margin-top:8px',
+    // cap:spend-rates
+    onclick: async () => {
+      const rates = {};
+      for (const [key, f] of inputs) {
+        if (f.pair) {
+          if (f.i1.value === '' || f.i2.value === '') continue;
+          rates[key] = { in: Number(f.i1.value), out: Number(f.i2.value) };
+        } else {
+          if (f.i1.value === '') continue;
+          rates[key] = { cny: Number(f.i1.value) };
+        }
+      }
+      if (!Object.keys(rates).length) return toast('还没填');
+      try {
+        await api('/rates', { method: 'PUT', body: { rates } });
+        appSettings = await api('/settings');
+        toast('存下了，过去的账也按新单价重算了');
+        await after();
+      } catch (err) {
+        toast(`存不下：${err.message}`);
+      }
+    }
+  }, '存单价'));
+  return box;
+}
+
+/**
+ * 跑之前那句话。
+ *
+ * 拿服务端算好的一行字直接用 —— 手机上不重新拼一遍措辞，
+ * 两端说法不一致比少一句话更糟。
+ */
+/**
+ * 这一步开跑之前该知道什么。拿服务端算好的那一份 ——
+ * 手机上不重新判一遍，两端说法不一致比少一句话更糟。
+ *
+ * 拿不到（离线、超时）就回 null，照旧能跑 —— 检查不上不该把功能堵死。
+ */
+async function stepCheckFor(stage) {
+  try {
+    // cap:stepcheck
+    const r = await api(`/projects/${project.id}/stepcheck?stage=${encodeURIComponent(stage)}`);
+    return r && Array.isArray(r.items) ? r : null;
+  } catch {
+    return null;
+  }
+}
+
+async function costLineFor(stage, { from = null } = {}) {
+  try {
+    const q = from ? `stage=all&from=${encodeURIComponent(from)}` : `stage=${encodeURIComponent(stage)}`;
+    // cap:spend-estimate
+    const r = await api(`/projects/${project.id}/estimate?${q}`);
+    return r.line || '';
+  } catch {
+    return '';
+  }
+}
+
 function extendCard() {
   const host = h('details', { class: 'card site-details' });
   const head = h('summary', {}, '剧本又加了新章？ ', h('span', { class: 'muted' }, '只补没见过的角色和场景'));
@@ -1445,6 +1636,15 @@ function siteCard() {
   return host;
 }
 
+
+/**
+ * 把手机相册里那张大图缩到长边 maxSide，转成 dataUrl。
+ *
+ * 手机拍的照片五六 MB 很常见，base64 再胀三分之一 —— 直接传会被
+ * 请求体上限挡掉，而那个失败长得像"传不上去"，看不出是大小问题。
+ * 参考图本来也不需要那么大：它回答的是"这个人长什么样"，1280 绰绰有余。
+ */
+
 function shrinkImage(file, maxSide) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -1452,11 +1652,16 @@ function shrinkImage(file, maxSide) {
     img.onload = () => {
       URL.revokeObjectURL(url);
       const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.max(1, Math.round(img.width * scale));
-      canvas.height = Math.max(1, Math.round(img.height * scale));
-      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL('image/jpeg', 0.9));
+
+      const w = Math.max(1, Math.round(img.width * scale));
+      const hgt = Math.max(1, Math.round(img.height * scale));
+      const cv = document.createElement('canvas');
+      cv.width = w;
+      cv.height = hgt;
+      cv.getContext('2d').drawImage(img, 0, 0, w, hgt);
+      // JPEG 而不是 PNG：照片用 PNG 存反而更大，而参考图不需要无损
+      resolve(cv.toDataURL('image/jpeg', 0.9));
+
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
@@ -1489,18 +1694,48 @@ function bibleCard(kind, item, v) {
     }
   };
 
-  const pick = h('input', { type: 'file', accept: 'image/*', style: 'display:none' });
+
+  /**
+   * ── 传一张自己的图当设定图 ──
+   *
+   * 用户的原话："要么你在手机上添加一个上传图片的功能"。
+   *
+   * 手机上原来**完全没有**这个 —— 而这件事恰恰最该在手机上做：
+   * 想用的那张脸多半就在手机相册里，为了传一张图专门开电脑，
+   * 是把一个三秒钟的动作变成一趟路。而这条一直没登记进能力清单，
+   * 所以"三端对齐"那条自检从来没红过。
+   *
+   * ⚠ 传上去之后 sheetSource 记成 upload，出分镜图时默认就会带上它
+   *（见 consistency.refPlan 的 auto 档）—— 这两件事必须一起才算数：
+   * 只能传、传完不发，和不能传没有区别。
+   */
+  const pick = h('input', {
+    type: 'file',
+    accept: 'image/*',
+    style: 'display:none'
+  });
+
   const up = h('button', { class: 'btn sm grow', disabled: job.running }, '传一张图');
   up.onclick = () => pick.click();
   pick.onchange = async () => {
     const file = pick.files?.[0];
     if (!file) return;
+
+    /**
+     * 手机拍的照片动辄五六 MB，base64 再胀三分之一。
+     * 服务端那条路收 dataUrl，太大直接被请求体上限挡掉 —— 而那个失败
+     * 长得像"传不上去"，看不出是大小问题。所以先在本地缩到长边 1280。
+     */
     up.disabled = true;
-    const label = up.textContent;
+    const label0 = up.textContent;
+
     up.textContent = '处理中…';
     try {
       const dataUrl = await shrinkImage(file, 1280);
       let failed = null;
+
+      // cap:sheet-upload
+
       await stream(
         `/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}/upload`,
         { dataUrl, fileName: file.name },
@@ -1514,7 +1749,9 @@ function bibleCard(kind, item, v) {
     } finally {
       pick.value = '';
       up.disabled = false;
-      up.textContent = label;
+
+      up.textContent = label0;
+
     }
   };
 
@@ -1596,6 +1833,15 @@ function bibleCard(kind, item, v) {
         h('b', {}, item.name),
         item.role ? h('div', { class: 'muted' }, item.role) : null,
         item.seed != null ? h('div', { class: 'muted' }, `种子 ${item.seed}`) : null)),
+
+    /**
+     * 这张图哪来的 —— 一眼看得出是"你传的"还是"模型出的"。
+     *
+     * 这一条直接对应用户撞上的那个死结：分镜说"没带你传的图"，
+     * 而他确信设定集里就是他的照片。两句话必有一句错，
+     * 而在设定集上标出来源，当场就分得清。
+     */
+
     item.sheetPath
       ? h('div', { class: 'muted', style: 'margin-top:6px' },
           item.sheetSource === 'upload'
@@ -1662,6 +1908,12 @@ async function createProject(title) {
  * @param inner 面板内容（自己带 padding 的节点，比如一张 .card）
  * @param opts.bare true = 内容自己就是面板，不再包一层 .sheet-box
  */
+/** 切页签。原来只有页签按钮自己会改 tab，别处要跳过去就没有入口 */
+function goTab(id) {
+  tab = id;
+  paint();
+}
+
 function openSheet(inner, { bare = false } = {}) {
   const layer = h('div', { class: 'sheet' });
   const close = () => layer.remove();
@@ -1791,6 +2043,137 @@ function newProjectCard() {
  * 推门→进门→环视→停下，四镜是一件事。一镜一镜点四次容易漏掉中间那一镜，
  * 而漏掉的那一镜恰恰是断点 —— 出完片才看得出来。
  */
+/**
+ * ══════════ 指令框 ══════════
+ *
+ * 一句人话 → 先摆出**要做什么** → 你点了才执行。
+ *
+ * ⚠ 这三步中间那一步不能省。省掉它就变成了"说一句话它就动手"，
+ * 而这个应用里动手的代价是真钱和几十镜的文案。所以：
+ *   · 打字时实时预览（解析只在本地算，不调模型、不花钱）
+ *   · 执行按钮上写的是**这次到底要改哪几镜、改成什么**
+ *   · 花钱的动作按钮变色，而且照旧走原来那条预检 + 估算
+ *
+ * 看不懂时不猜。宁可让你再打一遍，也不拿真钱赌一个"最像的"。
+ */
+function commandCard(close) {
+  const box = h('textarea', {
+    class: 'mta', rows: '2', placeholder: '比如：第 6-12 镜改成中景'
+  });
+  const preview = h('div', { class: 'cmd-preview muted' });
+  const go = h('button', { class: 'btn sm grow', disabled: true }, '先说要做什么');
+  let plan = null;
+
+  const render = () => {
+    if (!plan) {
+      preview.className = 'cmd-preview muted';
+      preview.textContent = '';
+      go.disabled = true;
+      go.textContent = '先说要做什么';
+      return;
+    }
+    if (!plan.ok) {
+      preview.className = 'cmd-preview bad';
+      preview.textContent = plan.why + (plan.examples?.length ? `\n试试：${plan.examples[0]}` : '');
+      go.disabled = true;
+      go.textContent = '没听懂';
+      return;
+    }
+    preview.className = `cmd-preview ${plan.costs ? 'costly' : 'ok'}`;
+    preview.textContent = plan.say + (plan.costs ? '\n⚠ 这一步要花钱，按下去之前还会再过一遍预检和估算。' : '');
+    go.disabled = false;
+    go.className = `btn sm grow ${plan.costs ? 'primary' : ''}`;
+    go.textContent = plan.verb === 'ask' ? '看一下' : plan.costs ? '去预检' : '就这么改';
+  };
+
+  const egs = h('div', { class: 'cmd-eg' });
+  const paintEgs = (list) => {
+    clear(egs);
+    for (const s of list || []) {
+      egs.append(h('button', {
+        class: 'fchip',
+        onclick: () => { box.value = s; box.dispatchEvent(new Event('input')); }
+      }, s));
+    }
+  };
+  // 空串也问一次，纯粹为了把这个项目的例子拿回来填上
+  api(`/projects/${project.id}/command`, { method: 'POST', body: { text: '' } })
+    .then((r) => paintEgs(r.examples))
+    .catch(() => {});
+
+  let timer = null;
+  box.oninput = () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const text = box.value.trim();
+      if (!text) { plan = null; render(); return; }
+      try {
+        // cap:command-box
+        plan = await api(`/projects/${project.id}/command`, { method: 'POST', body: { text } });
+      } catch (err) {
+        plan = { ok: false, why: err.message, examples: [] };
+      }
+      if (plan?.examples?.length) paintEgs(plan.examples);
+      render();
+    }, 250);
+  };
+
+  go.onclick = async () => {
+    if (!plan?.ok) return;
+    if (plan.verb === 'edit') {
+      go.disabled = true;
+      try {
+        const r = await api(`/projects/${project.id}/shots/batch`, {
+          method: 'POST',
+          body: {
+            ids: plan.targets, patch: plan.patch,
+            addSkills: plan.addSkills, removeSkills: plan.removeSkills
+          }
+        });
+        toast(`改了 ${r.changed} 镜`, 'ok');
+        await reload();
+        close();
+      } catch (err) {
+        toast(err.message, 'bad');
+        go.disabled = false;
+      }
+      return;
+    }
+    /**
+     * 花钱的和"问一问"的都交回给现成的那条路 ——
+     * 预检、估算、停下来那一整套已经在那儿了，指令框不另起炉灶。
+     * 另起一套的话，那几道闸门就会有一条绕过它们的近路。
+     */
+    close();
+    if (plan.verb === 'run') {
+      toast(`到「流水线」按清单开始 —— ${plan.say}`, 'ok');
+      goTab('flow');
+      return;
+    }
+    if (plan.verb === 'ask' && plan.targets?.length === 1) {
+      const s = (project.shots || []).find((x) => x.id === plan.targets[0]);
+      if (s) { openWhy(s, true); return; }
+    }
+    toast(plan.say, 'ok');
+    goTab('flow');
+  };
+
+  return h('div', { class: 'sheet-card' },
+    h('h3', {}, '说一句话'),
+    box,
+    preview,
+    h('div', { class: 'row', style: 'margin-top:10px' }, go),
+    h('div', { class: 'muted', style: 'margin-top:10px;font-size:12px' },
+      '它只会做你本来就能做的事，做之前先摆给你看。'),
+    /**
+     * 例子是**可点的模板**，而且镜号人名全取自你自己的分镜表 ——
+     * 写死"第 6-12 镜"的话，在一个只有 2 镜的项目里点下去选不到任何东西，
+     * 而那是用户对这个功能的第一印象。服务端 examplesFor 已经按项目算好，
+     * 随任意一次解析回来（看不懂时那份就是给这儿用的）。
+     */
+    egs);
+}
+
 function linkRangeCard(shots) {
   const from = h('input', { type: 'number', min: 1, value: '1', style: 'width:80px' });
   const to = h('input', { type: 'number', min: 1, value: String(shots.length) , style: 'width:80px' });
@@ -2037,7 +2420,20 @@ function paintShots() {
     h('button', {
       class: 'fchip icon',
       onclick: () => openSheet(linkRangeCard(shots))
-    }, '⋯'));
+    }, '⋯'),
+    /**
+     * 指令框的入口。放在筛选条上，因为它做的正是筛选条做不到的那半件事：
+     * 筛选只能"看哪些"，它能"对这些做什么"。
+     */
+    h('button', {
+      class: 'fchip icon',
+      onclick: () => {
+        // openSheet 回的是 { close } —— 卡片要自己关掉自己，所以得先拿到它
+        const box = h('div');
+        const { close } = openSheet(box);
+        box.append(commandCard(close));
+      }
+    }, '⌘'));
 
   /**
    * 场次分隔条。手机上一屏只看得见一两镜，边界更容易被漏掉 ——
@@ -2086,45 +2482,173 @@ function paintShots() {
  * 没毛病的镜，那件事就是「改这一镜」；有毛病的镜，就是修它的那个重出。
  * 剩下的全部收进「⋯」，那里每一条都是整行大目标，比挤在一排的小按钮好点得多。
  */
+
+/**
+ * 这一镜出图带了哪几张参考图 —— 而且**说得出没带的原因**。
+ *
+ * 只说"没带任何参考图"是不够的：那句话盖住了两种完全不同的情况，
+ * 而它们的下一步动作背道而驰 ——
+ *
+ *   设定集里这个角色压根没有图 → 去给他出一张 / 传一张
+ *   有图，但按当前设置没发     → 去设置里改一项，图早就有了
+ *
+ * 用户看到"没带"之后跑去传图，而图其实一直都在，只是没发 ——
+ * 那一趟白跑，而且会让他更确信"这功能是坏的"。
+ */
 function refLine(s) {
   if (s.bibleRefs?.length) return `出图带了参考图：${s.bibleRefs.join('、')}`;
   if (s.refsAvailable > 0) {
-    const labels = s.refsAvailableLabels?.length ? `（${s.refsAvailableLabels.join('、')}）` : '';
+    /**
+     * ⚠ 一张都没发时，**必须说清那几张分别是谁**。
+     *
+     * 只报一个数字（"有 3 张可以带"）等于让人继续猜。真正要回答的是：
+     * 我传的那张照片**在不在这三张里**？
+     *   在  → 是设置把它筛掉了，改设置就行
+     *   不在 → 完全另一个问题：照片挂到了别的条目上，
+     *          或者这一镜引用的角色名和设定集里的对不上
+     * 这两件事的下一步毫不相干，而一个数字分不出来。
+     */
+    const list = s.refsAvailableLabels?.length ? `（${s.refsAvailableLabels.join('、')}）` : '';
     const mine = (s.refsAvailableLabels || []).some((x) => x.includes('你传的'));
-    const head = `设定集里有 ${s.refsAvailable} 张图可以带${labels}，但这次一张都没发。`;
-    if (s.refBlockedHint) return `${head}原因：${s.refBlockedHint}。打开它再重出这一镜。`;
+    const head = `设定集里有 ${s.refsAvailable} 张图可以带${list}，但这一次一张都没发。\n`;
+    /**
+     * ⚠ **拦住它的开关有两个**，而它们隔着两个设置面板。
+     * 上一版这里写死了指向其中一个 —— 用户照着去改，而真正关着的是另一个，
+     * 改完照旧不发，他只会以为"改了没用"。
+     * 所以现在用出图时**记下来的那句话**，不猜。
+     */
+    if (s.refBlockedHint) {
+      return `${head}原因：${s.refBlockedHint}。\n`
+        + (mine ? '你传的那张就在上面那几张里 —— 把这一项打开，再重出这一镜就会带上它。'
+          : '打开之后会带上上面那几张（不过里面没有你传的照片，见下）。');
+    }
+    /**
+     * ⚠ **卡片是历史记录，不是当前状态。**
+     *
+     * 这一行读的全是出图那一刻存下来的字段。程序更新了、设置改了，
+     * 它一个字都不会变 —— 除非把这一镜重出一次。
+     *
+     * 上传图改成"不受开关管"之后，用户更新完，卡片照旧写着
+     * "去改设置"（那是上一次出图时写下的），他改了、没用、又来问。
+     * 来回三轮，全在讨论一条早就作废的记录。
+     *
+     * 所以先看有没有戳：没戳就说清"这条记录是旧的"，别再指挥他去改设置。
+     */
     if (mine && s.refPolicy !== 'uploads-always') {
-      return `${head}这是一条旧版生成记录；新版中上传照片会无条件发送。请重出这一镜后再核对。`;
+      return `${head}⚠ 不过这条记录是程序更新之前出这张图时留下的，现在已经不作数了 ——`
+        + '新版里你自己传的照片不受任何开关管，一定会发出去。'
+        + '把这一镜重出一次，这行字才反映现在的情况。';
     }
     return head + (mine
-      ? '上传照片本应无条件发送却未发出，这是请求链路异常；请查看完整请求记录。'
-      : '其中没有你上传的照片，请检查照片绑定的角色。');
+      ? '⚠ 这一镜是新版出的，你传的照片本该无条件发出去，却没发 —— 这是程序的问题，'
+        + '不是设置的问题，去改设置没有用。把这一镜的「完整请求记录」发给我。'
+      : '⚠ 这几张全是模型出的，没有你传的那张 —— 所以问题不在设置。'
+        + '要么照片传到了别的条目上，要么这一镜引用的角色名和设定集里的对不上。'
+        + '先去设定集确认：那个角色的图是不是你传的那张。');
   }
-  if (s.refsAvailable === 0) return '这一镜引用的角色或场景在设定集里还没有图，请先生成或上传参考图。';
-  return '这张图是早前生成的，当时没有记录参考图状态；重出一次即可确认。';
+  if (s.refsAvailable === 0) {
+    return '这一镜引用的角色/场景在设定集里还没有图 —— 没有图可带，'
+      + '脸完全由文字描述决定。先去设定集给他出一张或传一张。';
+  }
+  // refsAvailable 是 null/undefined：这张图是**这次改动之前**出的，那时候没记这个数
+  return '这张图是早前出的，当时没记下带过哪些参考图。重出一次就知道了。';
 }
+
+/**
+ * ══════════ 一张镜头卡 ══════════
+ *
+ * ── 为什么重写过一次 ──
+ *
+ * 每报一个问题我就往卡上加一行字或一颗按钮，加了十几次、一次没删过。
+ * 最后一张卡上同时挂着：警告横幅、三个标签、参考图那行、「为什么不对」、
+ * 「重出这段视频」、「改这一镜」、「⋯」—— 用户的原话是"都太杂太乱了"。
+ *
+ * ── 现在按"你什么时候需要它"分三层 ──
+ *
+ *   一眼      画面 + 镜号时长 + 一句描述 + 一个状态点     永远看得见
+ *   有问题时  一句话说清是什么 + **一颗**主按钮           只在这一镜有问题时
+ *   要动手时  标签、参考图、诊断、改文案、历史版本        点开「详情」才有
+ *
+ * ⚠ **一张卡最多一颗主按钮。**
+ *
+ * 原来「重出这段视频」和「为什么不对」并排摆着，可它们是**先后关系**
+ * 不是并列：先看为什么、再决定重不重出。并排摆等于让人在
+ * "花钱重来"和"先搞明白"之间凭感觉挑一个 —— 而多数人会挑那颗显眼的，
+ * 也就是花钱那颗。
+ *
+ * ⚠ 详情默认**折叠**，但折叠的东西一样都没少。
+ * 藏起来的是"排查时才翻"的那些；浏览五十镜时它们全是噪音，
+ * 而真要查一镜的时候点一下就有。
+ */
 
 function shotCardOf(s, v, portrait, probs = shotIssues(s)) {
   const worst = probs.find((i) => i.level === 'blocker') || probs[0] || null;
   const tone = probs.some((i) => i.level === 'blocker') ? 'bad' : probs.length ? 'iffy' : '';
   const fixable = probs.find((i) => i.fix) || null;
-
-  const acts = h('div', { class: 'acts' });
-  if (fixable) {
-    acts.append(
-      h('button', {
-        class: 'btn primary wide',
-        disabled: job.running,
-        onclick: () => regen(s, fixable.fix)
-      }, fixable.how),
-      h('button', { class: 'btn fixed', onclick: () => openEditor(s) }, '改这一镜'));
-  } else {
-    acts.append(h('button', { class: 'btn wide', onclick: () => openEditor(s) }, '改这一镜'));
-  }
-  acts.append(h('button', { class: 'iconbtn', onclick: () => openShotActions(s) }, '⋯'));
-
-  // 正在跑的那一张点亮：翻着分镜页等的时候，"轮到哪一镜了"一眼就有
   const live = job.running && job.shotId === s.id;
+
+  /**
+   * ── 第二层：有问题时的那一颗按钮 ──
+   *
+   * 出过图的镜头，第一动作永远是**先看为什么**（免费），不是直接重出（花钱）。
+   * 还没出图的没什么可诊断的，那时候「重出」才是第一动作。
+   */
+  const acts = h('div', { class: 'acts' });
+  if (worst && s.imagePath) {
+    acts.append(h('button', {
+      class: 'btn primary wide',
+      onclick: () => openWhy(s, fixable)
+    }, '看看为什么'));
+  } else if (fixable) {
+    acts.append(h('button', {
+      class: 'btn primary wide',
+      disabled: job.running,
+      onclick: () => regen(s, fixable.fix)
+    }, fixable.how));
+  } else {
+    // 没问题的镜头也得有个入口，否则这张卡除了看什么都做不了
+    acts.append(h('button', { class: 'btn wide', onclick: () => openShotActions(s) }, '这一镜还能做什么'));
+  }
+  /**
+   * ⚠ 「⋯」留在**表面**，不收进详情。
+   *
+   * 详情本身就是一个"更多"，再往里套一个"更多"是两层嵌套 ——
+   * 而那张动作表（重出图/重出视频/改这一镜/预演台…）是真正要动手时去的地方，
+   * 藏两层等于没有。
+   */
+  if (worst || fixable) {
+    acts.append(h('button', { class: 'iconbtn', onclick: () => openShotActions(s) }, '⋯'));
+  }
+
+  /** ── 第三层：详情。默认折叠，点开才有 ── */
+  const more = h('details', { class: 'shot-more' },
+    h('summary', {}, '详情'),
+    h('div', { class: 'tags', style: 'margin-top:8px' },
+      s.camera ? h('span', { class: 'tag' }, s.camera) : null,
+      s.scene ? h('span', { class: 'tag' }, s.scene) : null,
+      s.consistency?.score != null && s.consistency.pass
+        ? h('span', { class: 'tag ok' }, `一致性 ${s.consistency.score}`)
+        : null,
+      s.sfxPath && s.sfxOf === s.sound ? h('span', { class: 'tag' }, '有音效')
+        : !s.sfxPath && s.sound ? h('span', { class: 'tag' }, '待出音效') : null),
+    /**
+     * 这一镜出图时带了哪几张参考图。
+     *
+     * ⚠ **一张都没带的时候更要说**：你传了照片而这一镜根本没用上它 ——
+     * 那正是最需要知道的情况，沉默在这里等于误导。
+     * （收进详情是因为它是排查用的；浏览时不需要，排查时一点就有。）
+     */
+    // cap:shot-refs
+    s.imagePath
+      ? h('div', { class: 'muted', style: 'margin-top:8px;line-height:1.6' }, refLine(s))
+      : null,
+    // 还剩几条问题，在这儿一次说完 —— 上面那条只摆最要紧的
+    probs.length > 1
+      ? h('div', { class: 'muted', style: 'margin-top:8px;line-height:1.6' },
+          `还有 ${probs.length - 1} 条：${probs.slice(1).map((p) => p.what).join('；')}`)
+      : null,
+    );
+
   return h('div', { class: `card shot ${tone} ${live ? 'live-shot' : ''}` },
     // 镜号和时长压在画面上：省掉一整行，而且它们出现在眼睛已经在的地方
     h('div', { class: 'mediawrap' },
@@ -2135,44 +2659,84 @@ function shotCardOf(s, v, portrait, probs = shotIssues(s)) {
           : h('div', { class: 'shot-media', style: 'display:flex;align-items:center;justify-content:center;color:var(--ink-faint);font-size:13px' }, '还没出图'),
       h('div', { class: 'overlay tl' },
         h('span', {}, `SH ${String(s.index).padStart(3, '0')}`),
-        h('span', { class: 'dim' }, `${Number(s.duration).toFixed(1)}s`)),
+        h('span', { class: 'dim' }, `${Number(s.duration).toFixed(1)}s`),
+        /**
+         * ⚠ 状态用**一个点**，不用一整条横幅。
+         *
+         * 原来每张卡上都挂一条"有图没视频 —— 合成时这一镜会被直接跳过"。
+         * 一句正确的话，但 50 镜就是 50 条一模一样的话 —— 而顶上的筛选条
+         * 早就说了「缺视频 49」。重复的警告不会让人更警觉，只会让人不再看警告。
+         */
+        worst ? h('span', { class: `dot ${worst.level}` }, '●') : null),
       live ? h('div', { class: 'overlay bl running' }, h('span', { class: 'spin' }, '◐'), '正在跑') : null,
-      // 「连续动作」标在画面上而不是标签堆里：它说的是这一镜和上一镜的关系，
-      // 而人是在看画面接不接得上的时候想起这件事的
       s.link === 'continuous' ? h('div', { class: 'overlay bl link' }, '连续动作 ↑') : null),
 
-    /**
-     * 问题条。贴在按钮正上方，写清楚"哪儿不对"和"该按哪个键"。
-     * 这句话原来是标签堆里一枚和别的同色的小标签 —— 而它的全部价值就是被看见。
-     */
-    worst
-      ? h('div', { class: `prob ${worst.level}` },
-          h('span', {}, worst.level === 'blocker' ? '✕' : '!'),
-          h('span', { class: 'grow' }, worst.what),
-          probs.length > 1 ? h('span', { class: 'more' }, `＋${probs.length - 1}`) : null)
-      : null,
-
     h('div', { class: 'shot-info' },
-      h('div', { class: 'shot-desc', style: 'margin-top:0' }, s.description || '（无描述）'),
+      /**
+       * ⚠ **点描述就能改。**
+       *
+       * 「改这一镜」收进详情之后，改文案就多了一次点击 —— 而那是审片时
+       * 最高频的动作（看到一句不对，当场改掉）。电脑版本来就是点描述即编辑，
+       * 手机上没有，纯属漏了。
+       *
+       * 这样详情里那颗「改这一镜」变成"找得到的那个入口"，
+       * 而真正天天用的路径一次点击都没多。
+       */
+      h('div', {
+        class: 'shot-desc tappable', style: 'margin-top:0',
+        title: '点一下改这一镜',
+        onclick: () => openEditor(s)
+      }, s.description || '（无描述）'),
+      /** 有问题时**一句话**，不展开原因 —— 展开是「看看为什么」那颗按钮的事 */
+      worst
+        ? h('div', { class: `prob ${worst.level}` },
+            h('span', {}, worst.level === 'blocker' ? '✕' : '!'),
+            h('span', { class: 'grow' }, worst.what))
+        : null,
       s.dialogue
-        ? h('div', { class: 'row', style: 'margin-bottom:8px' },
+        ? h('div', { class: 'row', style: 'margin:8px 0 0' },
             h('span', { class: 'tag', style: 'flex:0 0 auto' }, LINE_KIND_SHORT[s.lineKind || (s.speaker ? 'speech' : 'voiceover')] || '白'),
             h('span', { class: 'muted grow', style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap' },
               `${s.speaker || '旁白'}：「${s.dialogue}」`))
         : null,
-      h('div', { class: 'tags' },
-        s.camera ? h('span', { class: 'tag' }, s.camera) : null,
-        s.scene ? h('span', { class: 'tag' }, s.scene) : null,
-        // 一致性过了才在卡上显示 —— 没过的那条已经在上面的问题条里说过了
-        s.consistency?.score != null && s.consistency.pass
-          ? h('span', { class: 'tag ok' }, `一致性 ${s.consistency.score}`)
-          : null,
-        s.sfxPath && s.sfxOf === s.sound ? h('span', { class: 'tag' }, '有音效')
-          : !s.sfxPath && s.sound ? h('span', { class: 'tag' }, '待出音效') : null),
-      s.imagePath
-        ? h('div', { class: 'muted', style: 'margin-top:6px;line-height:1.6' }, refLine(s))
-        : null,
-      acts));
+
+      acts,
+      more));
+}
+
+/**
+ * 「看看为什么」：拉一次诊断，摆出原因 + 下一步。
+ *
+ * ⚠ 重出那颗按钮**只在这儿出现**，而且排在原因下面。
+ * 顺序就是判断顺序：先知道为什么，再决定要不要花这笔钱。
+ */
+async function openWhy(s, fixable) {
+  const host = h('div', { class: 'diag-host' });
+  const box = h('div', { class: 'card' },
+    h('div', { class: 'card-head' }, `第 ${s.index} 镜 · 为什么不对`),
+    host);
+  add(host, h('div', { class: 'muted' }, '查…'));
+  const { close } = openSheet(box);
+  try {
+    // cap:diagnose-shot
+    const r = await api(`/projects/${project.id}/shots/${s.id}/diagnose`);
+    clear(host);
+    add(host, ...(r.items || []).map((it) => h('div', { class: 'diag-item' },
+      h('div', { class: 'diag-what' }, it.what),
+      h('div', { class: 'diag-why' }, it.why),
+      h('div', { class: 'diag-how' }, `→ ${it.how}`),
+      it.costs ? h('span', { class: 'diag-cost' }, '这一下要重新出图（花钱）') : null)));
+    if (fixable) {
+      add(host, h('button', {
+        class: 'btn primary wide', style: 'margin-top:12px', disabled: job.running,
+        onclick: () => { close(); regen(s, fixable.fix); }
+      }, fixable.how));
+    }
+  } catch (err) {
+    clear(host);
+    add(host, h('div', { class: 'diag-item' }, err.message));
+  }
+
 }
 
 /** 台词类型在卡片上只占一个字：整个词摆上去，一行就没了 */
@@ -2818,12 +3382,24 @@ async function runStage(stageId, label, extra = {}) {
     job.fail += 1;
     job.message = err.message;
   } finally {
-    job.running = false;
-    job.stopping = false;
+    /**
+     * ⚠ 流断了**不等于跑完了**。
+     *
+     * 手机锁个屏、切个应用、网抖一下，这条流就断。而服务器那边还在
+     * 一镜一镜地出。这里无条件把 running 置成 false 的话，按钮立刻亮回来 ——
+     * 人再点一次，撞上一段"这个项目已经在跑（321 秒前开始）"的长文案，
+     * 而那句话本身就说明这一下压根不该点得动。
+     *
+     * 所以先问服务端：它说还在跑，就接着显示在跑（syncJob 会重开轮询）。
+     */
     job.streaming = false;
-    job.stage = '';
-    job.shotId = null;
-    job.shotIndex = null;
+    job.stopping = false;
+    await syncJob();
+    if (!job.running) {
+      job.stage = '';
+      job.shotId = null;
+      job.shotIndex = null;
+    }
     await reload();
   }
 }

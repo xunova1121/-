@@ -1027,6 +1027,272 @@ export const PROVIDERS = [
     ]
   },
 
+  // ───────────────────────── 出图专线：Agnes AI ─────────────────────────
+  /**
+   * 路径长得和 OpenAI 一模一样（/v1/images/generations、Bearer 鉴权），
+   * 但**不能当 OpenAI 兼容家族接**，有三处不一样，每一处错了都不报错：
+   *
+   *   1. `response_format` 不能放在请求体顶层，要放进 `extra_body`。
+   *      通用分支恰恰是往顶层放的。
+   *   2. 尺寸不收任意像素，收 `1K`/`2K`/`3K`/`4K` 档位 + `ratio` 宽高比。
+   *      发 1280x720 这类"不受原生支持的精确尺寸"，文档明说会被
+   *      **自动映射到最接近的档位** —— 也就是你在请求记录里看到 1280x720、
+   *      任务成功、出来的图却是别的尺寸。这正是 fitImageSize 那段注释里
+   *      写的"最坏的那一种"表现。
+   *   3. 参考图字段的位置文档自己说了两遍，两遍不一样（见 adapters 里的 agnes 分支）。
+   *
+   * 所以它有自己的 family。
+   */
+  {
+    id: 'agnes',
+    name: 'Agnes AI（Agnes Image）',
+    docs: 'https://www.agnes-ai.cn/zh-Hans/docs/',
+    baseUrl: 'https://api.agnes-ai.cn/v1',
+    family: 'agnes',
+    auth: { type: 'bearer', secret: 'AGNES_API_KEY' },
+    secrets: [
+      {
+        name: 'AGNES_API_KEY',
+        label: 'API Key',
+        required: true,
+        hint:
+          'Agnes 控制台签发。文档上写着「所有支持的输出分辨率档位和输入参考图片当前均免费」——' +
+          '注意那个「当前」，别把它当成长期承诺来排产。'
+      }
+    ],
+    capabilities: ['t2i', 'i2i', 't2v', 'i2v'],
+    /**
+     * 出视频是异步任务：POST 拿号，再查。
+     *
+     * ⚠ 查结果那条**不在 v1 下面** —— 提交是 `/v1/videos`，查询是
+     * `/agnesapi?video_id=…`。所以用 {{apiRoot}}（接口根地址去掉版本段）
+     * 而不是 {{baseUrl}}，这样用户把根地址改到中转站时两条一起动。
+     *
+     * idPath 取 video_id：响应里 id / task_id / video_id 三个都有，
+     * 文档说"新接入建议使用 video_id"，也只有它配这条推荐的查询地址。
+     */
+    taskPoll: {
+      url: '{{apiRoot}}/agnesapi?video_id={taskId}',
+      method: 'GET',
+      idPath: 'video_id',
+      statusPath: 'status',
+      successStates: ['completed'],
+      failureStates: ['failed']
+    },
+    videoDefaults: {
+      resolution: '720P',
+      resolutions: ['480P', '720P', '1080P'],
+      /**
+       * 末帧走「关键帧动画」模式（extra_body.mode: 'keyframes'），
+       * 所以这一步最多两张：首帧 + 末帧。设定集的参考图这一步带不上。
+       */
+      endFrame: true,
+      maxImages: 2,
+      refNote: 'Agnes 出视频只收首帧（和末帧），一致性由首帧图和提示词里的冻结设定承担'
+    },
+    /**
+     * 同一个模型既文生图也图生图，不需要另配「图生图模型」。
+     *
+     * 不声明这个的话，带参考图时会去读「设置 → 图生图模型」，
+     * 那一项默认是火山的 doubao-seededit-3-0-i2i —— 于是要么把一个
+     * 火山的模型 id 发给 Agnes，要么弹一句"Agnes 没有这个模型，
+     * 请改成 Agnes 自己的编辑模型"，而 Agnes 根本没有单独的编辑模型。
+     */
+    i2iSameModel: true,
+    /**
+     * 出图最多收 6 张参考图。
+     *
+     * 这个数不是文档给的（文档没写上限），是真机回来的原话：
+     *   `too many input images: 8 provided, at most 6 allowed`
+     *
+     * 声明在这里是为了**在发出去之前就挤掉**多的那几张。不声明的话，
+     * 「设置 → 画面规格」里把参考图上限调到 6 以上的人，会在跑到一半时
+     * 撞一个 400，而那时候前面的镜头已经出完、钱也花了。
+     */
+    imageMaxRefs: 6,
+    endpoints: {
+      images: '{{baseUrl}}/images/generations',
+      videos: '{{baseUrl}}/videos'
+    },
+    /**
+     * 出图尺寸锁在 2K 这一档。
+     *
+     * 为什么不是 1K：16:9 的 1K 是 1312×736，比 1080p 还矮。这个项目最后要出
+     * 1080p 的片子，拿一张 736 高的图去做首帧，放大的糊是躲不掉的。
+     * 文档自己也建议"要 1920×1080 就请求 2K + 16:9，再在下游缩放"。
+     *
+     * 为什么不是 4K：出图慢、下游还要重新编码，多出来的像素在成片里看不见。
+     *
+     * 写成 enum 是为了复用 fitImageSize —— 它会在同方向里挑比例最接近的那个，
+     * 并且换过尺寸时自动说一声。这里数字全部照抄文档的「输出尺寸参考」表，
+     * 一个都没算，因为算出来的和它实际给的对不上就白搭。
+     */
+    imageSizes: {
+      why: '它只收 1K/2K/3K/4K 四档，1K 的 16:9 只有 1312×736（比 1080p 还矮）'
+        + '，所以取 2K。发 1280×720 它不会报错，但会自己映射到最近的一档，而那张映射表没公开。',
+      enum: [
+        '2048*2048',  // 1:1
+        '1728*2304',  // 3:4
+        '2304*1728',  // 4:3
+        '2624*1472',  // 16:9
+        '1472*2624',  // 9:16
+        '1664*2496',  // 2:3
+        '2496*1664',  // 3:2
+        '3136*1344'   // 21:9
+      ]
+    },
+    models: [
+      {
+        id: 'agnes-image-2.1-flash',
+        capability: 't2i',
+        label: 'Agnes Image 2.1 Flash（文生图 / 图生图 / 多图合成）'
+      },
+      {
+        id: 'agnes-video-v2.0',
+        capability: 'i2v',
+        label: 'Agnes Video 2.0（图生视频 / 首尾帧）',
+        /**
+         * 时长不是档位，是**帧数**：num_frames ≤ 441 且必须是 8n+1。
+         * 24 fps 下这等于 1/3 秒一档 —— 实际上是连续的。
+         *
+         * 这里列整秒 1~18，是为了让 alignDuration 有东西可对齐，而不是
+         * 因为它只能出这几个数。真正发出去的帧数由 agnesFrames 算，
+         * 出来多长以响应里的 seconds 为准。
+         *
+         * 上限 18 是 441 帧 ÷ 24 fps 的结果，不是拍脑袋定的。
+         */
+        durations: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+      }
+    ],
+    /**
+     * 自检发一次最小的文生图。
+     *
+     * 这家没有「列模型」接口，只能靠真发一次 —— 所以档位挑最小的 1K、
+     * 提示词也给最短的，别让一次自检跑掉半分钟。
+     */
+    probe: {
+      label: '连通性自检（出一张 1K 小图）',
+      method: 'POST',
+      url: '{{baseUrl}}/images/generations',
+      body: {
+        model: 'agnes-image-2.1-flash',
+        prompt: 'a single red apple on a white table',
+        size: '1K',
+        ratio: '1:1',
+        extra_body: { response_format: 'url' }
+      }
+    },
+    templates: [
+      {
+        id: 't2i',
+        label: '文生图（档位 + 宽高比）',
+        capability: 't2i',
+        method: 'POST',
+        url: '{{baseUrl}}/images/generations',
+        body: {
+          model: 'agnes-image-2.1-flash',
+          prompt: '国风水墨，太湖清晨，执法艇破雾而行，电影感构图',
+          size: '2K',
+          ratio: '16:9',
+          extra_body: { response_format: 'url' }
+        }
+      },
+      /**
+       * ══════════ 下面两个模板是一组 A/B 对照，别删其中一个 ══════════
+       *
+       * 要回答的问题：参考图到底该放 `extra_body.image` 还是顶层 `image`？
+       * 文档两处说法不一样，而放错的表现是**不报错、不警告**，安静地
+       * 退化成一次纯文生图 —— 靠看日志永远查不出来。
+       *
+       * ⚠ 一开始的做法是两个位置都放。真机否掉了：服务端两处都读、
+       * 而且**加在一起**（4 张被数成 8 张，顶穿它 6 张的上限）。
+       * 所以只能二选一，只能靠对照实验定。
+       *
+       * 验法：两个都发一次，参考图给同一张辨识度极高的脸。
+       * 哪个出来的是那个人，哪个就是对的。出来的都不是 → 两个都不对，
+       * 去看是不是图的地址它取不到。
+       */
+      {
+        id: 'i2i',
+        label: 'A · 图生图（参考图放 extra_body，现在用的就是这个）',
+        capability: 'i2i',
+        method: 'POST',
+        url: '{{baseUrl}}/images/generations',
+        body: {
+          model: 'agnes-image-2.1-flash',
+          prompt: '保持这个人的长相和服装，把他放到雨夜的码头上',
+          size: '2K',
+          ratio: '16:9',
+          extra_body: {
+            response_format: 'url',
+            image: ['https://example.com/face.png']
+          }
+        }
+      },
+      {
+        id: 'i2i-toplevel',
+        label: 'B · 图生图（参考图放顶层，用来对照）',
+        capability: 'i2i',
+        method: 'POST',
+        url: '{{baseUrl}}/images/generations',
+        body: {
+          model: 'agnes-image-2.1-flash',
+          prompt: '保持这个人的长相和服装，把他放到雨夜的码头上',
+          size: '2K',
+          ratio: '16:9',
+          image: ['https://example.com/face.png'],
+          extra_body: { response_format: 'url' }
+        }
+      },
+      {
+        id: 'i2v',
+        label: '图生视频（异步任务）',
+        capability: 'i2v',
+        method: 'POST',
+        url: '{{baseUrl}}/videos',
+        async: true,
+        body: {
+          model: 'agnes-video-v2.0',
+          prompt: '镜头缓慢推进，水面泛起波光',
+          image: 'https://example.com/first-frame.png',
+          width: 1280,
+          height: 720,
+          num_frames: 121,
+          frame_rate: 24
+        }
+      },
+      {
+        /**
+         * ⚠ 首尾帧在这一家叫「关键帧动画」，而且和图生视频是**两种模式**：
+         * 顶层 image 是图生视频，extra_body.image + mode:'keyframes' 才是首尾帧。
+         * 两个一起发等于同时点了两种模式 —— 别照着出图那个模板抄。
+         */
+        id: 'keyframes',
+        label: '首尾帧（关键帧动画）',
+        capability: 'i2v',
+        method: 'POST',
+        url: '{{baseUrl}}/videos',
+        async: true,
+        body: {
+          model: 'agnes-video-v2.0',
+          prompt: '在两个关键帧之间生成流畅过渡，保持人物一致',
+          extra_body: {
+            image: ['https://example.com/keyframe1.png', 'https://example.com/keyframe2.png'],
+            mode: 'keyframes'
+          },
+          num_frames: 121,
+          frame_rate: 24
+        }
+      },
+      {
+        id: 'video-query',
+        label: '查视频任务（用 video_id）',
+        method: 'GET',
+        url: '{{apiRoot}}/agnesapi?video_id=PUT_VIDEO_ID_HERE'
+      }
+    ]
+  },
+
   // ───────────────────────── 视频专线 ─────────────────────────
   {
     id: 'kling',

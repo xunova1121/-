@@ -38,6 +38,7 @@ const providersMod = await import('../core/providers/index.js');
 const store = await import('../core/store.js');
 const styleModule = await import('../core/styles.js');
 const studioModule = await import('../core/pipeline/studio.js');
+const ledgerMod = await import('../core/ledger.js');
 
 let passed = 0;
 let failed = 0;
@@ -354,6 +355,24 @@ const upstream = http.createServer((req, res) => {
         const ids = [...user.matchAll(/【场次\s*([a-z0-9-]+)】/gi)].map((m) => m[1]);
         upstream.lastShotPrompt = { system, user };
         /**
+
+         * 每一次拆分镜都留一份**用户消息原文**。
+         *
+         * 分批那一节靠它数"这一批到底发了哪几场" —— 只留 lastShotPrompt
+         * 的话，分没分批根本看不出来（最后一次长得和一次性那次一模一样）。
+         */
+        upstream.shotPrompts = upstream.shotPrompts || [];
+        upstream.shotPrompts.push(user);
+        // system 也留一份：验"这一批的时长预算 = 这一批那几场之和"要用
+        upstream.shotSystems = upstream.shotSystems || [];
+        upstream.shotSystems.push(system);
+        // 让测试能造出"跑到第 N 批挂掉"，验前面几批不白跑
+        if (upstream.failShotsAfter && upstream.shotPrompts.length > upstream.failShotsAfter) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: { message: '上游炸了（测试造的）' } }));
+        }
+        /**
+
          * 打开这个开关就**一个 beatId 都不标** —— 模型真会这样
          *（提示词只是请求，它想不理就不理）。而那条路是最危险的分支：
          * 收口时不知道每一镜属于哪一场，只能保守地把整批换掉。
@@ -446,7 +465,24 @@ const upstream = http.createServer((req, res) => {
         content = '{}';
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ choices: [{ message: { content } }] }));
+      /**
+       * 带上 usage。
+       *
+       * 这个假上游原来不回 usage —— 而真实厂商全都回。少了它，
+       * 记账那条路在自检里从头到尾走的是"读不出用量"的分支，
+       * 于是「真跑一步之后账上有 token」这条断言查出来是空的。
+       *
+       * 假上游比真实厂商**少给**的字段，会让一整条代码路径从来没被跑过，
+       * 而且表现是"测试绿的"。按真实形态回，那条路才真的被验到。
+       */
+      res.end(JSON.stringify({
+        choices: [{ message: { content } }],
+        usage: {
+          prompt_tokens: Math.max(1, Math.round(JSON.stringify(body).length / 4)),
+          completion_tokens: Math.max(1, Math.round(content.length / 4)),
+          total_tokens: 0
+        }
+      }));
     });
     return undefined;
   }
@@ -475,6 +511,34 @@ const upstream = http.createServer((req, res) => {
       status: done ? 'succeeded' : 'running',
       content: done ? { video_url: `${upstreamUrl}/out.mp4` } : undefined
     }));
+  }
+
+  /**
+   * 海螺出图。加它是因为**身份通道只在这条路上**（subject_reference），
+   * 而火山那条路没有这个字段 —— 只验火山，等于那条通道从没被跑过。
+   */
+  // 对象存储的桩：记下每次 PUT 的内容，"重传有没有真的传上去"靠它判
+  if (url.pathname.startsWith('/ossput/')) {
+    let raw = '';
+    req.on('data', (c) => (raw += c));
+    req.on('end', () => {
+      upstream.ossPuts = upstream.ossPuts || [];
+      upstream.ossPuts.push({ key: url.pathname, body: raw });
+      res.writeHead(200, { ETag: '"stub"' });
+      res.end();
+    });
+    return undefined;
+  }
+
+  if (url.pathname === '/image_generation') {
+    let raw = '';
+    req.on('data', (c) => (raw += c));
+    req.on('end', () => {
+      upstream.lastMinimaxImageBody = JSON.parse(raw || '{}');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ data: { image_urls: [`${upstreamUrl}/pixel.png`] } }));
+    });
+    return undefined;
   }
 
   if (url.pathname === '/v3/images/generations') {
@@ -1001,6 +1065,12 @@ check('提示词里仍然注入了冻结的外貌（没有参考图时靠它撑�
 {
   settings.patch({ useEditModelForShots: true });
   upstream.lastImageBody = null;
+  // 进这一段之前的两个基准，后面拿差值比 —— 写死数字会随着加用例失准
+  const imageCallsAtBlockStart = upstream.imageCalls || 0;
+  const bookedAtBlockStart = ledgerMod.forProject(project.id, {}).items
+    .filter((x) => x.kind === 'image').reduce((n, x) => n + x.calls, 0);
+  const editCallsAtBlockStart = ledgerMod.forProject(project.id, {}).items
+    .find((x) => x.kind === 'image' && x.model === settings.get('imageEditModel'))?.calls || 0;
   const evs = await ndjson(`/projects/${project.id}/shots/${afterAssets.shots[0].id}/regenerate`, {});
   check('打开开关后才带参考图', Boolean(upstream.lastImageBody?.image));
   check('而且必须换成图生图模型（不换的话参考图会被文生图模型忽略）',
@@ -1045,6 +1115,54 @@ check('提示词里仍然注入了冻结的外貌（没有参考图时靠它撑�
   check('批量出图那条路记的也是真正出图的模型',
     String(batch?.modelUsed || '').includes(settings.get('imageEditModel')),
     `${batch?.modelUsed} / 期望含 ${settings.get('imageEditModel')}`);
+
+  /**
+   * ⚠ **账本上记的也必须是真正出图的那个模型。**
+   *
+   * 上面两条验的是"存进这一镜的字段"，而账本是**另一份记录**，
+   * 走的是另一段代码（适配层那个外包的壳）。金丝雀把它改成记入参的 model，
+   * 上面两条照样全绿 —— 因为它们查的是 shot.modelUsed，不是账。
+   *
+   * 这件事在钱上比在卡片上更要紧：t2i 和 i2i 单价不一样，
+   * 记错模型 = 账按另一个价算，而总数看起来完全正常。
+   * 这正是 modelUsed 当初说谎的那个坑，只是换了个地方重新挖了一遍。
+   */
+  const editModel = settings.get('imageEditModel');
+  const bookItems = ledgerMod.forProject(project.id, {}).items.filter((x) => x.kind === 'image');
+
+  /**
+   * ⚠ 这条**不能**写成"账上存在 i2i 这个模型"。
+   *
+   * 试过，金丝雀直接识破：上面那个"把编辑模型误设成出图路由"的小节
+   * 已经用同一个模型 id 出过一张图了，所以那条记录**无论这里对不对
+   * 都躺在账上**。断言于是恒真 —— 一条看起来严格、其实什么都没验的绿。
+   * 这和今天早些时候那几处退化夹具是同一个病：夹具本身满足了断言，
+   * 和被测代码没关系。
+   *
+   * 改成看**这一段之内的增量**：这一段里发出去的每一次出图请求，
+   * 都必须记在 i2i 那个模型头上。记成入参那个（t2i）的话增量是 0，当场红。
+   */
+  const editCallsNow = bookItems.find((x) => x.model === editModel)?.calls || 0;
+  check('账本上记的是真正出图的那个模型（不是路由到的那个）',
+    editCallsNow - editCallsAtBlockStart === upstream.imageCalls - imageCallsAtBlockStart,
+    `i2i 名下多了 ${editCallsNow - editCallsAtBlockStart} 笔，而这段里发了 ${upstream.imageCalls - imageCallsAtBlockStart} 次`);
+  /**
+   * ⚠ 这里不能写死"应该是 N 笔"。
+   *
+   * 试过写死 2，红了 —— 实际是 3，因为上面那个"把编辑模型误设成出图路由"
+   * 的小节也用同一个模型出过一张。而**账本是对的，我的期望值是错的**。
+   * 写死的数字还会随着以后往这一段里加用例而再次失准，
+   * 到时候红的又是一条正确的断言 —— 那种红会教人去改断言，而不是查代码。
+   *
+   * 要守的其实是一句和顺序无关的话：**厂商收到几次请求，账上就有几笔**。
+   * 所以拿假上游自己数的次数来比，前后各取一次差值。
+   */
+  const callsBefore = imageCallsAtBlockStart;
+  const bookedNow = ledgerMod.forProject(project.id, {}).items
+    .filter((x) => x.kind === 'image').reduce((n, x) => n + x.calls, 0);
+  check('厂商收到几次出图请求，账上就有几笔',
+    bookedNow - bookedAtBlockStart === upstream.imageCalls - callsBefore,
+    `账上多了 ${bookedNow - bookedAtBlockStart} 笔，厂商收到 ${upstream.imageCalls - callsBefore} 次`);
   settings.patch({ useEditModelForShots: false });
 }
 
@@ -2415,6 +2533,32 @@ section('预演台：把"中景"变成一组数');
    * 场地图那一层走同一条路（/site.js），只许 import previz ——
    * 在浏览器里 `./previz.js` 从 `/site.js` 出发正好解析到 `/previz.js`。
    */
+  /**
+   * 单价换算（/pricing.js）也要原样发给浏览器 —— 界面上那句"这一下约 ¥12"
+   * 和服务端记的账必须是同一套算法。一个四舍五入一个截断、一个把未定价
+   * 当 0 一个当未知，就会出现"说好 ¥12、跑完变 ¥31"，而人是照着那个数下的手。
+   */
+  const pricingSrc = fs.readFileSync(path.join(PROJECT_ROOT, 'core', 'pricing.js'), 'utf8');
+  const pricingImports = [...pricingSrc.matchAll(/^\s*import\s.*?from\s+'([^']+)'/gm)].map((m) => m[1]);
+  check('pricing.js 保持零依赖（它要原样发给浏览器）', pricingImports.length === 0, pricingImports.join(' / '));
+  check('pricing.js 里没有 node: 内置', !/from\s+'node:/.test(pricingSrc));
+
+  /**
+   * 预估（/estimate.js）只许 import 那两个同样发给浏览器的 ——
+   * 在浏览器里 `../pricing.js` 和 `../duration.js` 从 `/estimate.js` 出发
+   * 正好解析到 `/pricing.js` 和 `/duration.js`，两条路由都有。
+   *
+   * 多 import 一个（顺手拿了 settings.js 之类）浏览器就会去请求一个
+   * 不存在的地址，而 import 失败会让**整个界面模块加载不起来**——
+   * 表现不是"少一行价钱"，是整个工作台白屏。
+   */
+  const estSrc = fs.readFileSync(path.join(PROJECT_ROOT, 'core', 'pipeline', 'estimate.js'), 'utf8');
+  const estImports = [...estSrc.matchAll(/^\s*import\s.*?from\s+'([^']+)'/gm)].map((m) => m[1]);
+  const estAllowed = ['../pricing.js', '../duration.js'];
+  check('estimate.js 只 import 那两个也发给浏览器的模块',
+    estImports.every((x) => estAllowed.includes(x)), estImports.join(' / '));
+  check('estimate.js 里没有 node: 内置', !/from\s+'node:/.test(estSrc));
+
   const siteSrc = fs.readFileSync(path.join(PROJECT_ROOT, 'core', 'pipeline', 'site.js'), 'utf8');
   const siteImports = [...siteSrc.matchAll(/^\s*import\s.*?from\s+'([^']+)'/gm)].map((m) => m[1]);
   check('site.js 只 import previz（它自己也要原样发给浏览器）',
@@ -3021,6 +3165,9 @@ section('大纲 → 分镜：只拆没拆过的场次');
 
   {
     const p = mk();
+    // ⚠ 清零：这两个数组整轮共用，不清的话数到的是"开机以来所有拆分镜请求"
+    upstream.shotPrompts = [];
+    upstream.shotSystems = [];
     await studio.analyzeScript(p.id, { force: true });
     const after = store.read(p.id);
 
@@ -3030,7 +3177,14 @@ section('大纲 → 分镜：只拆没拆过的场次');
      * 不查这个的话，大纲那一层可以完全没接上而这里全绿 ——
      * 分镜照样拆得出来（模型读原始剧本一样能拆），只是你改的那份没起作用。
      */
-    const sent = String(upstream.lastShotPrompt?.user || '');
+    /**
+     * ⚠ 要看**所有批次**，不能只看最后一批。
+     *
+     * 拆分镜现在是分批跑的，b-07 可能落在第一批里，而 lastShotPrompt
+     * 只留了最后一批 —— 那样这条断言的成败取决于它恰好排在第几批，
+     * 是一条会随批大小随机红绿的断言。
+     */
+    const sent = (upstream.shotPrompts || []).join('\n');
     check('喂给模型的是大纲里那几场，不是原始剧本',
       /【场次 b-07】/.test(sent) && /走向栈桥/.test(sent), sent.slice(0, 120));
     check('原始剧本没有被直接丢进去', !/发现缆绳被割断。$/.test(sent.trim()) || /【场次/.test(sent));
@@ -3044,11 +3198,33 @@ section('大纲 → 分镜：只拆没拆过的场次');
      * 时长按**大纲上每一场自己的估算**走，不再按字数比例分摊。
      * 字数是个很糙的代理：同样两千字，全是对话的一场念完要 90 秒。
      */
-    const sysPrompt = String(upstream.lastShotPrompt?.system || '');
-    const want = ol.estimateSeconds({ summary: '走向栈桥。', dialogue: '设备正常。', seconds: 30 }).suggested
-      + ol.estimateSeconds({ summary: '发现缆绳被割断。', dialogue: '', seconds: 40 }).suggested;
-    check('时长预算来自大纲，不是项目的目标时长',
-      sysPrompt.includes(String(want)), `期望含 ${want}；项目目标是 120`);
+    /**
+     * ⚠ 分批之后这条要**逐批**验：每一批的预算 = 这一批那几场的估算之和。
+     *
+     * 原来写的是"最后一批的 system 里含两场之和"，那在一次拆完时成立，
+     * 分批之后两场可能落在不同批里 —— 断言会随批大小随机红绿，
+     * 而它验的那件事其实一直是对的。
+     */
+    // 这一节的大纲固定就是 mk() 里那两场，直接拿来算期望值
+    const beatsNow = ol.normalizeOutline({
+      beats: [
+        { id: 'b-07', scene: '码头', characters: ['阿澜'], summary: '走向栈桥。', dialogue: '设备正常。', seconds: 30 },
+        { id: 'b-04', scene: '码头', characters: ['阿澜'], summary: '发现缆绳被割断。', dialogue: '', seconds: 40 }
+      ]
+    }).beats;
+    const byId = new Map(beatsNow.map((b) => [b.id, b]));
+    const budgets = (upstream.shotSystems || []).map((sys) => {
+      const m = sys.match(/控制在\s*(\d+)\s*秒/);
+      return m ? Number(m[1]) : null;
+    });
+    const perBatchIds = (upstream.shotPrompts || [])
+      .map((u) => [...u.matchAll(/【场次\s*([a-z0-9-]+)】/gi)].map((x) => x[1]));
+    const expected = perBatchIds.map((ids) => ids.reduce(
+      (sum, id) => sum + (byId.has(id) ? ol.estimateSeconds(byId.get(id)).suggested : 0), 0
+    ));
+    check('每一批的时长预算都来自大纲那几场，不是项目的目标时长',
+      budgets.length > 0 && budgets.every((got, i) => got !== null && Math.abs(got - expected[i]) <= 1),
+      JSON.stringify({ 发出去的: budgets, 按大纲算的: expected, 项目目标: 120 }));
   }
 
   // ── 再拆一次：全锁着，要拦住并说清出路 ──
@@ -7454,6 +7630,2541 @@ section('场景的东南西北：机位相对房间，不只相对人');
     !seq.some((i) => i.to === 3), JSON.stringify(seq.map((i) => [i.from, i.to])));
 }
 
+/**
+ * ════════ 长生成走流式：慢和死是两回事 ════════
+ *
+ * 用户真实事故：拆分镜走中转站（api.teamorouter.com）+ Claude Opus。
+ * 体检那一下几个 token、**1.89 秒**就回；真跑起来要吐几千 token 的分镜 JSON，
+ * 180 秒到点被我们自己掐断，**一个字节都没收到**。
+ *
+ * 而"跑了 180 秒"本身根本不是问题 —— 二十镜的分镜表，慢一点的模型出三四分钟
+ * 很正常。固定总时长把两件完全不同的事一视同仁：
+ *
+ *   还在吐字，只是慢  → 健康，该等
+ *   一个字节都不来    → 死了，等再久也没用
+ *
+ * 所以长生成改成流式 + 空闲超时。这一节验的是**流式那条路真的走得通**——
+ * 上面那个假上游回的是 application/json，于是 stream:true 会被优雅地
+ * 退回非流式解析，整条流式路径在自检里从头到尾一次都没跑过。
+ * 那正是"绿着的没测过的代码"，今天已经栽过一次（假上游不回 usage）。
+ */
+section('长生成走流式：慢和死是两回事');
+{
+  const adaptersMod = await import('../core/providers/adapters.js');
+  const ledgerMod2 = await import('../core/ledger.js');
+
+  /** 起一个真会吐 SSE 的假上游，行为由查询串控制 */
+  const sse = http.createServer((req, res) => {
+    /**
+     * ⚠ 模式走**路径**不走查询串。
+     *
+     * baseUrl 后面还会被拼上 `/chat/completions`，所以
+     * `http://h/x?mode=silent` 会变成 `http://h/x?mode=silent/chat/completions`——
+     * mode 的值成了 "silent/chat/completions"，永远匹配不上，
+     * 于是三条"该失败"的用例全都走了正常分支、全都假绿。
+     */
+    const mode = (req.url.split('/').filter(Boolean)[0] || 'ok');
+    let raw = '';
+    req.on('data', (c) => { raw += c; });
+    req.on('end', () => {
+      const body = JSON.parse(raw || '{}');
+      sse.lastBody = body;
+      if (mode === 'silent') return; // 连响应头都不给：模拟"一个字节都不回"
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      const frame = (o) => `data: ${JSON.stringify(o)}\n\n`;
+      res.write(frame({ choices: [{ delta: { content: '{"beats":' } }] }));
+      if (mode === 'stall') return; // 开了个头就不动了：模拟中转站中途掐断
+      res.write(frame({ choices: [{ delta: { content: '[]}' } }] }));
+      // 用量在**最后一个事件**里 —— 流式最容易漏账的地方就是这儿
+      res.write(frame({ choices: [{ delta: {} }], usage: { prompt_tokens: 4321, completion_tokens: 765 } }));
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+  });
+  await new Promise((r) => sse.listen(0, '127.0.0.1', r));
+  const sseUrl = `http://127.0.0.1:${sse.address().port}`;
+
+  settings.patch({ baseUrls: { openai: `${sseUrl}/ok` } });
+  vault.setSecret('OPENAI_API_KEY', 'sk-stream-test');
+
+  // ── 正常流式 ──
+  {
+    ledgerMod2.reset({ wipe: true });
+    const r = await adaptersMod.chat({
+      providerId: 'openai', model: 'claude-opus-5', user: '拆一下', jsonMode: true, stream: true, label: '流式'
+    });
+    check('流式拼出来的正文是完整的', r.text === '{"beats":[]}', JSON.stringify(r.text));
+    check('请求体里带了 stream:true（不带的话对面不会流）', sse.lastBody?.stream === true, JSON.stringify(sse.lastBody?.stream));
+
+    /**
+     * ⚠ 流式的用量藏在**最后一个 SSE 事件**里，不在 res.json（那是 null）。
+     * 不挖的话，一开流式 token 那本账就全变成漏账 —— 而且是静默的：
+     * 用量表上少一大截，没有任何地方会红。
+     */
+    const acct = ledgerMod2.forProject('(未归属)', {});
+    check('流式的 token 用量照样记上了（藏在最后一个事件里）',
+      acct.total.byKind.token?.units?.in === 4321 && acct.total.byKind.token?.units?.out === 765,
+      JSON.stringify(acct.total.byKind.token));
+    check('而且没有被当成漏账', acct.unmetered === 0, String(acct.unmetered));
+    ledgerMod2.reset({ wipe: true });
+  }
+
+  // ── 一个字节都不回：这就是用户撞上的那种 ──
+  {
+    settings.patch({ baseUrls: { openai: `${sseUrl}/silent` } });
+    let msg = '';
+    await adaptersMod.chatNoFallback({
+      providerId: 'openai', model: 'claude-opus-5', user: '拆一下', stream: true,
+      timeoutMs: 1200, idleTimeoutMs: 1200, label: '流式·哑巴'
+    }).catch((e) => { msg = e.message; });
+    check('对面一声不吭时会失败（不是无限等）', Boolean(msg), msg);
+    check('并且说清是"一个字节都没回"', /没有任何响应/.test(msg), msg.slice(0, 120));
+    check('还点名了发往哪个主机', /127\.0\.0\.1/.test(msg), msg.slice(0, 80));
+  }
+
+  // ── 开了个头然后停住：JSON 真的不完整，才该报错 ──
+  {
+    settings.patch({ baseUrls: { openai: `${sseUrl}/stall` } });
+    let msg = '';
+    const t0 = Date.now();
+    await adaptersMod.chatNoFallback({
+      providerId: 'openai', model: 'claude-opus-5', user: '拆一下', stream: true, jsonMode: true,
+      timeoutMs: 60000, idleTimeoutMs: 900, label: '流式·半路死'
+    }).catch((e) => { msg = e.message; });
+    check('吐了一半就停住、而且解析不出来时，报错', Boolean(msg), msg);
+    /**
+     * 这条是空闲超时存在的**全部意义**：总时长给了 60 秒，它在 0.9 秒
+     * 没动静时就掐了。靠总时长的话要白等 60 秒才知道对面已经死了。
+     */
+    check('靠的是"多久没动静"，不是等总时长到点', Date.now() - t0 < 10000, `等了 ${Date.now() - t0}ms`);
+    check('说清了收到多少字节、以及这一段是真的不完整',
+      /收到 \d+ 字节/.test(msg) && /解析不出完整结果/.test(msg), msg.slice(0, 200));
+    /**
+     * ⚠ 这句"不完整"必须是**验出来的**，不是猜的 —— 所以报错里敢这么写。
+     * 下一组验的正是反面：内容其实完整时，绝不能扔。
+     */
+    /**
+     * ⚠ **报错里要带上收到的那点内容**，不能只报一个字节数。
+     *
+     * 用户第二次报的是"收到 1013 字节后 90 秒没有新内容"——
+     * 1013 字节 ≈ 18 个 token，模型刚开口就没声了。而光凭这个数字，
+     * 我和他都只能猜：中转站掐了？模型在思考？还是它回的根本不是 JSON
+     * 而是一句英文报错？
+     *
+     * 三种情况下一步动作完全不同，而**收到的那点内容本身就是答案**。
+     * 它一直在请求记录里躺着，但没人会为了看一句话专门去翻日志。
+     */
+    check('报错里把收到的那点内容直接摆出来（不然只能靠猜）',
+      /实际收到的是：「/.test(msg) && /beats/.test(msg), msg.slice(0, 260));
+    check('收得特别少时，点破"思考型模型不吐字"这条最常见的原因',
+      /extended thinking|思考型模型/.test(msg), msg.slice(0, 400));
+    check('并且给了分辨方法（像 JSON 开头 = 在写；像英文报错 = 中转站断的）',
+      /像 JSON 开头/.test(msg), msg.slice(-200));
+  }
+
+  // ── 正文发完了但不收尾：**这份是完整的，不许扔** ──
+  {
+    /**
+     * 中转站很常见的一种坏法：正文全发完，但不发 [DONE]、也不关连接。
+     * 从我们这边看和"半路死"长得一模一样（都是"收到 N 字节然后没动静"），
+     * 但那份内容是**完整的**，而且是花过钱的。
+     *
+     * 用户真实撞上的就是这个：收到 277463 字节 ≈ 4600 token 的正文，
+     * 而我们连看都没看一眼就整个丢掉，让他从头再跑一次、再花一次钱。
+     *
+     * 判据只有一个，而且是验出来的：能不能解析成 JSON。
+     */
+    const whole = http.createServer((req, res) => {
+      req.on('data', () => {});
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        const f = (t) => `data: ${JSON.stringify({ choices: [{ delta: { content: t } }] })}\n\n`;
+        res.write(f('{"shots":[{"description":"阿澜走向栈桥"}]}'));
+        // 故意**不发 [DONE]、不 res.end()** —— 连接就这么挂着
+      });
+    });
+    await new Promise((r) => whole.listen(0, '127.0.0.1', r));
+    settings.patch({ baseUrls: { openai: `http://127.0.0.1:${whole.address().port}/x` } });
+    let out = null;
+    let err = '';
+    const notes = [];
+    await adaptersMod.chat({
+      providerId: 'openai', model: 'claude-opus-5', user: '拆', stream: true, jsonMode: true,
+      timeoutMs: 60000, idleTimeoutMs: 900, label: '流式·发完了不收尾',
+      onEvent: (ev) => { if (ev.type === 'note') notes.push(ev.message); }
+    }).then((r) => { out = r; }).catch((e) => { err = e.message; });
+
+    check('正文发完但没收尾时，收到的东西照常用（不是白花钱）',
+      out?.text === '{"shots":[{"description":"阿澜走向栈桥"}]}', err || JSON.stringify(out?.text));
+    check('而且说了一声"对面没正常收尾"（不能悄悄当正常处理）',
+      notes.some((m) => /没有正常收尾/.test(m)), JSON.stringify(notes));
+    whole.close();
+  }
+
+  // ── 流式跑不通就退回非流式：**最坏也不能比没有流式时更糟** ──
+  {
+    /**
+     * 用户的原话："先前没有出现这个问题啊，刚一下次还拆分了51个镜头"。
+     *
+     * 他是对的，而且那是我改出来的回归：加流式之前，同一家中转站上
+     * 非流式一次出 51 镜是跑通过的；换成流式之后开始各种断。
+     *
+     * 流式本身的道理没错（慢和死要分开），但它建立在一个我**没验证过的前提**上：
+     * 这家中转站的 SSE 和它的非流式一样可靠。事实是不一定。
+     *
+     * 所以流式只是"优先尝试"，它特有的失败一律退回非流式再来一次 ——
+     * 这样最坏情况是"和以前一样"，而不是"比以前更糟"。
+     */
+    let sawStream = 0;
+    let sawPlain = 0;
+    const flaky = http.createServer((req, res) => {
+      let raw = '';
+      req.on('data', (c) => { raw += c; });
+      req.on('end', () => {
+        const body = JSON.parse(raw || '{}');
+        if (body.stream) {
+          // 流式：开个头就不动了（正是用户撞上的那种）
+          sawStream += 1;
+          res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: '{"sh' } }] })}\n\n`);
+          return;
+        }
+        // 非流式：一次性回完整结果 —— 这条路本来就是通的
+        sawPlain += 1;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          choices: [{ message: { content: '{"shots":[{"description":"阿澜走向栈桥"}]}' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 100, completion_tokens: 50 }
+        }));
+      });
+    });
+    await new Promise((r) => flaky.listen(0, '127.0.0.1', r));
+    settings.patch({ baseUrls: { openai: `http://127.0.0.1:${flaky.address().port}/x` } });
+    const notes = [];
+    const got = await adaptersMod.chat({
+      providerId: 'openai', model: 'claude-opus-5', user: '拆', stream: true, jsonMode: true,
+      timeoutMs: 60000, idleTimeoutMs: 800, label: '拆分镜',
+      onEvent: (ev) => { if (ev.type === 'note') notes.push(ev.message); }
+    });
+    check('流式断了会自动退回非流式，最终拿到完整结果',
+      got?.text === '{"shots":[{"description":"阿澜走向栈桥"}]}', JSON.stringify(got?.text));
+    check('两条路都真的走过（先流式、再非流式）', sawStream === 1 && sawPlain === 1,
+      JSON.stringify({ 流式: sawStream, 非流式: sawPlain }));
+    check('而且说了一声换路了（不能悄悄多花一次钱）',
+      notes.some((m) => /换成非流式/.test(m)), JSON.stringify(notes));
+    flaky.close();
+  }
+
+  // ── 但**真的错误**不许重试：重发一次只是再错一次，还多花一次钱 ──
+  {
+    let hits = 0;
+    const denied = http.createServer((req, res) => {
+      req.on('data', () => {});
+      req.on('end', () => {
+        hits += 1;
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: { message: '密钥不对' } }));
+      });
+    });
+    await new Promise((r) => denied.listen(0, '127.0.0.1', r));
+    settings.patch({ baseUrls: { openai: `http://127.0.0.1:${denied.address().port}/x` } });
+    await adaptersMod.chat({
+      providerId: 'openai', model: 'x', user: 'y', stream: true, jsonMode: true, label: '拆分镜'
+    }).catch(() => {});
+    check('401 这种真错误只发一次，不退回去再错一遍', hits === 1, `发了 ${hits} 次`);
+    denied.close();
+  }
+
+  // ── 那个"完整不完整"的判据本身 ──
+  {
+    check('完整的 JSON 认得出', adaptersMod.looksCompleteJSON('{"a":1}') === true);
+    check('断在半路的认得出来是断的', adaptersMod.looksCompleteJSON('{"a":1,"b":') === false);
+    check('前后带闲话的也能捞出来（模型爱加一句"好的，这是结果："）',
+      adaptersMod.looksCompleteJSON('好的：\n{"a":1}\n以上。') === true);
+    /**
+     * ⚠ 用真解析，不用正则数括号 —— 描述里带花括号完全可能，
+     * 数括号会把一段完整的 JSON 判成不完整，然后把它扔掉。
+     */
+    check('描述里带花括号也不会被误判',
+      adaptersMod.looksCompleteJSON('{"d":"他说\\"{喂}\\"然后走了"}') === true);
+    check('空的就是不完整', adaptersMod.looksCompleteJSON('') === false);
+  }
+
+  // ── 还在吐字就一直等：慢不该被当成死 ──
+  {
+    const slow = http.createServer((req, res) => {
+      req.on('data', () => {});
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        const frame = (t) => `data: ${JSON.stringify({ choices: [{ delta: { content: t } }] })}\n\n`;
+        // 每 300ms 吐一小段，一共吐够 1.5 秒 —— 远超 900ms 的空闲阈值，
+        // 但因为一直在动，不该被判死
+        let n = 0;
+        const iv = setInterval(() => {
+          n += 1;
+          res.write(frame(String(n)));
+          if (n >= 5) {
+            clearInterval(iv);
+            res.write('data: [DONE]\n\n');
+            res.end();
+          }
+        }, 300);
+      });
+    });
+    await new Promise((r) => slow.listen(0, '127.0.0.1', r));
+    settings.patch({ baseUrls: { openai: `http://127.0.0.1:${slow.address().port}/x` } });
+    let out = null;
+    let err = '';
+    await adaptersMod.chat({
+      providerId: 'openai', model: 'claude-opus-5', user: '慢慢写', stream: true,
+      timeoutMs: 1000, idleTimeoutMs: 900, label: '流式·慢但活着'
+    }).then((r) => { out = r; }).catch((e) => { err = e.message; });
+    /**
+     * ⚠ 这一条是整个改动的**要害**。
+     *
+     * 总时长只给了 1 秒，而这次生成花了 1.5 秒 —— 换成老逻辑必挂。
+     * 它能过，说明判据真的换成了"多久没动静"：一直在吐字就一直等。
+     * 反过来，要是哪天有人把空闲计时器去掉，这条会立刻红。
+     */
+    check('一直在吐字就一直等（总时长 1 秒，实际跑了 1.5 秒也不该掐）',
+      out?.text === '12345', err || JSON.stringify(out?.text));
+    slow.close();
+  }
+
+  // ── 中转站不认 response_format 时的逃生口 ──
+  {
+    settings.patch({ baseUrls: { openai: `${sseUrl}/ok` } });
+    await adaptersMod.chat({ providerId: 'openai', model: 'claude-opus-5', user: 'x', jsonMode: true, stream: true, label: 'jm' });
+    check('默认会带 response_format（支持的厂商靠它保证严格 JSON）',
+      sse.lastBody?.response_format?.type === 'json_object', JSON.stringify(sse.lastBody?.response_format));
+
+    /**
+     * Anthropic 原生接口里**根本没有 response_format**。中转站把 OpenAI 协议
+     * 翻译过去时遇上它可能直接卡住不回 —— 表现是一个字节都不返回，而不是报错。
+     * 所以要能一键关掉；下游本来就有 extractJSON 兜底，不带这个字段照样能用。
+     */
+    settings.patch({ jsonModeOff: true });
+    await adaptersMod.chat({ providerId: 'openai', model: 'claude-opus-5', user: 'x', jsonMode: true, stream: true, label: 'jm2' });
+    check('关掉之后请求体里就没有它了', sse.lastBody?.response_format === undefined,
+      JSON.stringify(sse.lastBody?.response_format));
+    settings.patch({ jsonModeOff: false });
+  }
+
+  sse.close();
+  settings.patch({ baseUrls: { openai: '' } });
+}
+
+/**
+ * ════════ 长剧本：拆分镜要能一批一批来 ════════
+ *
+ * 用户的问题："现在遇到几十个分镜就这样了，后面如果更多怎么办"。
+ *
+ * 问到了根子上，而**流式治不了它**。流式解决的是"慢被误判成死"；
+ * 这里的毛病是"一次要吐的东西超过模型一次能吐的量"。
+ *
+ *   30 镜 ≈ 6000 token   已经接近不少模型单次输出的上限
+ *   60 镜 ≈ 12000 token  多数中转站会截断
+ *  200 镜 ≈ 40000 token  一次调用绝无可能
+ *
+ * 而超限的表现是最坏的那种：JSON 从中间断掉、状态 200、没有错误字段。
+ *
+ * 所以按大纲的场次分批。这一节验的是**真的分批了**、**断了能接着来**、
+ * 以及**批与批之间不会打架**（id 撞车、顺序错乱）——
+ * 后两样是分批最容易引入的新毛病。
+ */
+section('长剧本：拆分镜一批一批来');
+{
+  const ol = await import('../core/pipeline/outline.js');
+
+  /** 造一个有 N 场的大纲，直接写进项目 —— 不必绕模型 */
+  const makeProject = async (title, beatCount) => {
+    const p = await (await fetch(`${appUrl}/api/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, script: '阿澜在码头巡查。', targetDuration: 300 })
+    })).json();
+    await ndjson(`/projects/${p.id}/stage/bible`, {});
+    store.update(p.id, (proj) => {
+      proj.outline = ol.normalizeOutline({
+        beats: Array.from({ length: beatCount }, (_, i) => ({
+          scene: '码头',
+          time: '清晨',
+          characters: ['阿澜'],
+          summary: `第 ${i + 1} 场：阿澜走过第 ${i + 1} 段栈桥。`,
+          dialogue: '设备正常。',
+          seconds: 20
+        }))
+      });
+      return proj;
+    });
+    return p;
+  };
+
+  // ── 14 场 → 该分 3 批（6 + 6 + 2），不是一次全要 ──
+  {
+    const p = await makeProject('长剧本·分批', 14);
+    // ⚠ 必须清零：这个数组是整轮自检共用的，前面几十节早就往里塞过东西了。
+    //   不清的话数出来的是"从开机到现在所有拆分镜请求"，
+    //   而那个数**永远大于等于**真实批数 —— 断言会以一种看不出来的方式变松
+    upstream.shotPrompts = [];
+    const evs = await ndjson(`/projects/${p.id}/stage/script`, {});
+
+    const after = store.read(p.id);
+    const o = ol.normalizeOutline(after.outline);
+
+    /**
+     * ⚠ 这一条是整节的要害：**每一批只把这一批的场次发出去**。
+     * 一次全发的话，无论分不分批，请求次数都是 1，而输出照样会撞上限。
+     */
+    const prompts = upstream.shotPrompts || [];
+    check('分成了多批（不是一次把 14 场全发出去）', prompts.length >= 3, `实际发了 ${prompts.length} 次`);
+    const perCall = prompts.map((u) => [...u.matchAll(/【场次\s*[a-z0-9-]+】/gi)].length);
+    /**
+     * ⚠ 量的是"这一批会写出多少镜"，不是"几场"。
+     *
+     * 第一版按场数切（一批 6 场），用户真机上还是撞了：
+     * 收到 277463 字节（≈4600 token）后被掐。因为"场"根本不是均匀单位 ——
+     * 一场 20 秒和一场 90 秒，拆出来的镜数差四倍多，按场数切等于
+     * **不知道自己一次要多少东西**。
+     *
+     * 这里的大纲每场 20 秒 ≈ 4 镜，所以一批 12 镜 ≈ 3 场。
+     * 断言按镜数写，以后调 SHOTS_PER_BATCH 也不会误伤这条。
+     */
+    check('每一批的预计镜数不超过上限（输出量被钉死，和剧本多长无关）',
+      perCall.every((n) => n > 0 && n * 4 <= 12 + 4), JSON.stringify(perCall));
+    check('加起来正好是全部 14 场，不多不少（漏一场 = 成片少一段，没人会发现）',
+      perCall.reduce((a, b) => a + b, 0) === 14, JSON.stringify(perCall));
+
+    // ── 分批最容易引入的两个新毛病 ──
+    check('所有场次都拆完了（没有一场被跳过）', o.beats.every((b) => b.locked),
+      JSON.stringify(o.beats.filter((b) => !b.locked).map((b) => b.id)));
+    const ids = (after.shots || []).map((s) => s.id);
+    check('镜头 id 没有撞车（每批都从 1 开始编，不去重就会互相覆盖）',
+      new Set(ids).size === ids.length, `${ids.length} 镜 / ${new Set(ids).size} 个不同 id`);
+    check('镜号是连续的 1..N（批与批之间不能有断号或重号）',
+      (after.shots || []).every((s, i) => s.index === i + 1),
+      JSON.stringify((after.shots || []).map((s) => s.index).slice(0, 20)));
+
+    /**
+     * ⚠ 顺序必须按**大纲里场次的顺序**，不能按各批自己的镜号。
+     * 排错了的话，成片里第 2 场演到一半插进第 8 场的镜头，
+     * 而每一镜单看都正常 —— 这是分批最阴的一种坏法。
+     */
+    const beatOrder = new Map(o.beats.map((b, i) => [b.id, i]));
+    const ranks = (after.shots || []).filter((s) => s.beatId).map((s) => beatOrder.get(s.beatId));
+    check('镜头按场次顺序排（不是按批次先后、也不是按各批的镜号）',
+      ranks.every((v, i) => i === 0 || v >= ranks[i - 1]), JSON.stringify(ranks.slice(0, 24)));
+
+    check('跑完这一步说的是"拆完了"', evs.some((e) => e.type === 'stage' && e.status === 'done'),
+      JSON.stringify(evs.filter((e) => e.type === 'stage').map((e) => e.status)));
+    await fetch(`${appUrl}/api/projects/${p.id}`, { method: 'DELETE' });
+  }
+
+  // ── 中途断了，前面几批不能白跑 ──
+  {
+    /**
+     * 这是分批**最值钱**的那个好处。一次性那条路上，第 190 镜出错等于
+     * 前 189 镜全部作废、钱全白花。分批之后每一批跑完就落盘、就上锁，
+     * 断在第 3 批，前两批稳稳地在盘上。
+     */
+    const p = await makeProject('长剧本·断在中间', 14);
+    upstream.shotPrompts = [];
+    upstream.failShotsAfter = 2; // 第 3 次拆分镜调用直接报错
+    await ndjson(`/projects/${p.id}/stage/script`, {});
+    upstream.failShotsAfter = 0;
+
+    const mid = store.read(p.id);
+    const o = ol.normalizeOutline(mid.outline);
+    const locked = o.beats.filter((b) => b.locked).length;
+    const open = o.beats.filter((b) => !b.locked).length;
+    check('断在第 3 批时，前两批已经落盘了', (mid.shots || []).length > 0, String((mid.shots || []).length));
+    /**
+     * 不写死锁了几场 —— 那取决于每批装几镜，调一次 SHOTS_PER_BATCH 就失准，
+     * 而失准时红的是一条**正确的**断言，那种红会教人去改断言而不是查代码。
+     * 要守的是这句和批大小无关的话：**跑过的锁上，没跑到的开着，一场不落**。
+     */
+    check('而且跑过的那几场已经上锁（再跑不会重拆、不会重复计费）',
+      locked > 0 && locked < 14, `锁了 ${locked} 场`);
+    check('没跑到的那几场还开着（它们是"还没拆"，不是"拆过了"）',
+      open > 0 && locked + open === 14, JSON.stringify({ locked, open }));
+
+    // 再点一次，从没锁的那一场接着走
+    const shotsBefore = (mid.shots || []).length;
+    upstream.shotPrompts = [];
+    await ndjson(`/projects/${p.id}/stage/script`, {});
+    const done = store.read(p.id);
+    check('再点一次接着往下拆，不从头再来',
+      ol.normalizeOutline(done.outline).beats.every((b) => b.locked)
+      && (done.shots || []).length > shotsBefore,
+      JSON.stringify({ before: shotsBefore, after: (done.shots || []).length }));
+    const resumedIds = upstream.shotPrompts.flatMap((u) => [...u.matchAll(/【场次\s*([a-z0-9-]+)】/gi)].map((m) => m[1]));
+    const wasLocked = new Set(o.beats.filter((b) => b.locked).map((b) => b.id));
+    check('续跑时一场都不重发（已经拆过的重发 = 重复计费，而且会覆盖手改过的镜头）',
+      resumedIds.every((id) => !wasLocked.has(id)), JSON.stringify({ resumedIds: resumedIds.slice(0, 10) }));
+    check('而且把剩下的那几场都补齐了',
+      new Set(resumedIds).size === open, JSON.stringify({ 发了: new Set(resumedIds).size, 该发: open }));
+    await fetch(`${appUrl}/api/projects/${p.id}`, { method: 'DELETE' });
+  }
+
+  // ── 输出被截断：不能当成正常结果 ──
+  {
+    /**
+     * 模型吐到自己上限时回的是 finish_reason:"length" —— 状态 200、
+     * 没有错误字段，只是 JSON 从中间断掉。两种下场都很糟：
+     * 解析失败（报错说"模型没返回合法 JSON"，让人以为模型不听话），
+     * 或者碰巧解析出来（拿到少了后半截的分镜表，而且没人说它少了）。
+     */
+    const adaptersMod = await import('../core/providers/adapters.js');
+    const cut = http.createServer((req, res) => {
+      req.on('data', () => {});
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          choices: [{ message: { content: '{"shots":[{"desc' }, finish_reason: 'length' }],
+          usage: { prompt_tokens: 10, completion_tokens: 4096 }
+        }));
+      });
+    });
+    await new Promise((r) => cut.listen(0, '127.0.0.1', r));
+    settings.patch({ baseUrls: { openai: `http://127.0.0.1:${cut.address().port}` } });
+    vault.setSecret('OPENAI_API_KEY', 'sk-cut');
+    let msg = '';
+    await adaptersMod.chat({ providerId: 'openai', model: 'x', user: '拆', label: '拆分镜' })
+      .catch((e) => { msg = e.message; });
+    check('输出被截断时当场报错，不把半截内容往下传', /截断/.test(msg), msg.slice(0, 100));
+    check('并且说清这不是网络问题、也不是模型不听话',
+      /不是网络问题/.test(msg) && /finish_reason=length/.test(msg), msg.slice(0, 200));
+    check('还给了出路（先出大纲，按场次分批）', /先出大纲/.test(msg), msg.slice(-120));
+    cut.close();
+    settings.patch({ baseUrls: { openai: '' } });
+  }
+}
+
+/**
+ * ════════ 传上去的照片，要真的进到出图那一步 ════════
+ *
+ * 用户的原话："传本地图，出的分镜和自传图没有任何关系，
+ * 建议上传的人物脸保留、衣服是描述中的衣服。"
+ *
+ * 他说的完全对，而且原因是结构性的：useEditModelForShots 把两件独立的事
+ * 捆成了一个开关 —— ①发不发参考图 ②换不换成编辑模型 —— 而它默认关着。
+ * 于是出分镜图时**一张参考图都不发**，传上去的照片影响是零。
+ *
+ * 注释里默认关掉它的理由全是冲着②去的（编辑模型会画出"被改过的设定图"
+ * 而不是那一场戏），那个理由是对的 —— 但它顺手把①也关了。
+ */
+section('传上去的照片：要真的用上，而且只用脸');
+{
+  const cs = await import('../core/pipeline/consistency.js');
+  const mkBible = (source) => ({
+    style: { anchor: '国风', palette: '青灰', negative: '' },
+    characters: [{
+      name: '阿澜', appearance: '短发，藏青立领制服，袖口两道银线，左胸编号牌', seed: 1,
+      sheetPath: '/a.png', sheetUrl: 'https://x/a.png', sheetSource: source,
+      variants: [{ id: 'v-default', name: '默认', sheetPath: '/a.png', sheetUrl: 'https://x/a.png', sheetSource: source }]
+    }],
+    scenes: [{ name: '码头', appearance: '雾', seed: 2, variants: [{ id: 'v-default', name: '默认' }] }],
+    props: []
+  });
+  const shot = { id: 's1', index: 1, scene: '码头', characters: ['阿澜'], description: '阿澜走向栈桥', camera: '中景' };
+
+  const keep = settings.get('refMode');
+
+  // ── auto（默认）：用户传的图要发出去 ──
+  {
+    settings.patch({ refMode: 'auto', useEditModelForShots: false });
+    const up = cs.assemblePrompt(mkBible('upload'), shot);
+    const plan = cs.refPlan();
+    const kept = cs.pickRefs(
+      { images: up.refImages, labels: up.refLabels, paths: up.refPaths, sources: up.refSources }, plan
+    );
+    /**
+     * ⚠ 这是整节的要害。在修之前这里是 0 —— 传了照片，一张也不发。
+     */
+    check('传了照片时，参考图真的会发出去（修之前这里是 0）',
+      kept.images.length === 1, JSON.stringify({ 发出去的: kept.images, 全部: up.refImages }));
+    check('而且不换成编辑模型（换了构图会被带跑，画出"被改过的照片"）',
+      plan.useEditModel === false, JSON.stringify(plan));
+
+    /**
+     * ⚠ 提示词要把两件事**分开点名**：脸照着图，衣服照着字。
+     *
+     * 只说"外貌以参考图为准"的话，模型会把照片里的衣服也一起抄过来 ——
+     * 而那多半是一件跟这部片子毫无关系的现代便装。于是每一镜都穿着那身，
+     * 设定集里写的"藏青立领制服"一次都没出现过。
+     */
+    check('提示词说清了"脸以参考图为准"', /脸、发型、肤色以参考图那个人为准/.test(up.prompt), up.prompt.slice(0, 200));
+    check('并且说清了"衣服按文字来"', /服装与配饰按这里写的来/.test(up.prompt), up.prompt.slice(0, 240));
+    check('服装描述是**完整**给的，不是截前三段（它现在是唯一的服装来源）',
+      up.prompt.includes('左胸编号牌'), up.prompt.slice(0, 260));
+  }
+
+  /**
+   * ⚠ **两条路都要验：批量出图 和 单独重出。**
+   *
+   * 用户："完全和我传的图片没关系啊"—— 他按的是每一镜的「重出」，
+   * 而我上一版只改了批量那条（consistency.js），单独重出那条
+   *（studio.regenerateShot）还写着老判据 useEditModelForShots，默认 false，
+   * 于是那条路上参考图**恒为空**，设置里怎么选都没用。
+   *
+   * 更难堪的是我今天自己在别处的注释里写过"这件事有两处，各验一份"——
+   * 知道有两条路，然后还是只改了一条。所以这条断言走的是**真的重出**，
+   * 不是再验一遍那个纯函数。
+   */
+  {
+    settings.patch({ refMode: 'auto', useEditModelForShots: false, useReferenceImages: true });
+    const p2 = store.create({ title: '传图·单独重出' });
+    store.update(p2.id, (x) => {
+      x.bible = mkBible('upload');
+      x.shots = [{ ...shot, id: 's1' }];
+      return x;
+    });
+    upstream.lastImageBody = null;
+    await studioModule.regenerateShot(p2.id, 's1', {}, () => {});
+    /**
+     * 判据是**请求体里到底有没有那张图**，不是"函数返回了什么"——
+     * 中间任何一层把它丢掉，这里都会红。
+     */
+    const sentImage = upstream.lastImageBody?.image;
+    check('单独重出这一镜时，传的照片真的发出去了（修之前这条恒空）',
+      Boolean(sentImage), JSON.stringify(Object.keys(upstream.lastImageBody || {})));
+    const after = store.read(p2.id).shots[0];
+    check('而且这一镜记下了带过哪几张（手机上那行靠它显示）',
+      (after.bibleRefs || []).length > 0, JSON.stringify(after.bibleRefs));
+  }
+
+  /**
+   * ⚠ 一张都没发时，要说得出**那几张分别是谁、哪张是用户传的**。
+   *
+   * 用户报回来的是"设定集里有 3 张图可以带，但这一次一张都没发"——
+   * 一个数字，然后他还是不知道该干什么。真正要回答的是
+   * "我传的那张在不在这三张里"：
+   *   在   → 设置把它筛掉了，改设置就行
+   *   不在 → 完全另一个问题（照片挂到别的条目上了 /
+   *          这一镜引用的角色名和设定集对不上）
+   * 两件事的下一步毫不相干，而一个数字分不出来。
+   */
+  {
+    settings.patch({ refMode: 'auto' });
+    const mixed = mkBible('model');
+    // 再加一个**用户传过照片**的角色，两种来源混在一镜里
+    mixed.characters.push({
+      name: '老周', appearance: '花白胡子', seed: 3,
+      sheetPath: '/z.png', sheetUrl: 'https://x/z.png', sheetSource: 'upload',
+      variants: [{ id: 'v-default', name: '默认', sheetPath: '/z.png', sheetUrl: 'https://x/z.png', sheetSource: 'upload' }]
+    });
+    const two = cs.assemblePrompt(mixed, { ...shot, characters: ['阿澜', '老周'] });
+    check('每一张都标出来源（模型出的 / 你传的）',
+      two.refDetailed.some((x) => x.includes('（你传的）')) && two.refDetailed.some((x) => x.includes('（模型出的）')),
+      JSON.stringify(two.refDetailed));
+    check('标签里带得出是谁', two.refDetailed.some((x) => x.includes('老周')), JSON.stringify(two.refDetailed));
+    /**
+     * 而且 auto 要**真的只留那一张** —— 混着两种来源时最容易写错成"全留"或"全丢"。
+     */
+    const kept2 = cs.pickRefs(
+      { images: two.refImages, labels: two.refLabels, paths: two.refPaths, sources: two.refSources }, cs.refPlan()
+    );
+    check('auto 只留用户传的那一张，不多不少', kept2.images.length === 1 && kept2.uploaded === 1,
+      JSON.stringify({ kept: kept2.images.length, uploaded: kept2.uploaded, all: two.refImages.length }));
+  }
+
+  /**
+   * ⚠ **用户那个确切场景，端到端跑一遍：两个开关都关着 + 单独重出 + 传过照片。**
+   *
+   * 前面那些验的是 refPlan / pickRefs 这两个纯函数。而用户撞的是**整条链路**：
+   * 他按「重出这一镜」，走 studio.regenerateShot，中间要经过
+   * assemblePrompt → refSources → pickRefs → refreshRefs → generateImage。
+   * 任何一环把 sources 丢了，纯函数照样绿，而他的照片照样发不出去。
+   *
+   * 判据是**请求体里到底有没有那张图**，不是函数返回了什么。
+   */
+  {
+    settings.patch({ useReferenceImages: false, refMode: 'off', useEditModelForShots: false });
+    const p3 = store.create({ title: '两个开关都关着' });
+    store.update(p3.id, (x) => {
+      x.bible = mkBible('upload');
+      x.shots = [{ ...shot, id: 's1' }];
+      return x;
+    });
+    upstream.lastImageBody = null;
+    await studioModule.regenerateShot(p3.id, 's1', {}, () => {});
+    check('两个开关都关着，单独重出时用户传的照片照样发出去了',
+      Boolean(upstream.lastImageBody?.image),
+      JSON.stringify({ 请求体字段: Object.keys(upstream.lastImageBody || {}) }));
+    const got3 = store.read(p3.id).shots[0];
+    check('而且这一镜记下了带过它', (got3.bibleRefs || []).length === 1, JSON.stringify(got3.bibleRefs));
+    /**
+     * 同时**模型出的那些确实被挡住了** —— 否则那两个开关就成了摆设，
+     * 而摆设比没有更糟：用户关了它，以为省了钱/省了干扰，其实什么也没发生。
+     */
+    const p4 = store.create({ title: '两个开关都关着·模型图' });
+    store.update(p4.id, (x) => {
+      x.bible = mkBible('model');
+      x.shots = [{ ...shot, id: 's1' }];
+      return x;
+    });
+    upstream.lastImageBody = null;
+    await studioModule.regenerateShot(p4.id, 's1', {}, () => {});
+    check('而模型自己出的设定图，这时确实一张都没发（开关不是摆设）',
+      !upstream.lastImageBody?.image,
+      JSON.stringify({ 请求体字段: Object.keys(upstream.lastImageBody || {}) }));
+    /**
+     * ⚠ **同样的场景，换成「整步出图」再验一遍 —— 这是另一条路。**
+     *
+     * 上面那两块走的是 regenerateShot（单独重出这一镜），它在 studio.js 里
+     * 自己调了一次 refPlan/pickRefs。而用户平时按的是「出图」这一整步，
+     * 走的是 generateAssets → consistency.generateConsistentImage ——
+     * 那里**另有一次** refPlan/pickRefs，中间还多经过一趟 refreshRefs。
+     *
+     * 我上一轮只验了前者就跟用户说"验过了，去更新"，而他更新完照旧没发。
+     * 两条路各写各的判据，就得各验各的 —— 这句话我自己在别处写过一遍，
+     * 这次又栽在同一个地方。判据仍然是**请求体里有没有那张图**。
+     */
+    const p5 = store.create({ title: '两个开关都关着·整步出图' });
+    store.update(p5.id, (x) => {
+      x.bible = mkBible('upload');
+      x.shots = [{ ...shot, id: 's1', imagePath: null }];
+      return x;
+    });
+    upstream.lastImageBody = null;
+    await studioModule.generateAssets(p5.id, { onEvent: () => {} });
+    check('整步出图时，两个开关都关着也照样发出用户传的照片',
+      Boolean(upstream.lastImageBody?.image),
+      JSON.stringify({ 请求体字段: Object.keys(upstream.lastImageBody || {}) }));
+    const got5 = store.read(p5.id).shots[0];
+    check('整步出图这条路上，这一镜也记下了带过它',
+      (got5.bibleRefs || []).length === 1, JSON.stringify(got5.bibleRefs));
+
+    /**
+     * ⚠ **两条路都得盖上"按哪一版规矩出的"这个戳。**
+     *
+     * 界面靠它分清"这条记录是旧版留下的"和"新版真没发出去"——
+     * 这两件事的下一步完全相反（一个是重出一次，一个是查请求记录）。
+     * 漏盖的那条路，卡片会永远说自己是旧记录，永远劝人重出，
+     * 而重出之后还是那句话 —— 一个自己骗自己的死循环。
+     */
+    check('整步出图会盖上"按新规矩出的"这个戳', got5.refPolicy === cs.REF_POLICY,
+      JSON.stringify({ got: got5.refPolicy, want: cs.REF_POLICY }));
+    check('单独重出这一镜也盖同一个戳（两条路，各盖各的，得各验一份）',
+      store.read(p3.id).shots[0].refPolicy === cs.REF_POLICY,
+      JSON.stringify(store.read(p3.id).shots[0].refPolicy));
+
+    /**
+     * ══════════ 参考图存在对象存储里时（也就是真实情况）══════════
+     *
+     * ⚠ **上面所有这些断言，夹具用的都是 https://x/a.png —— 一个不带
+     * Expires 的地址。而真实用户配了对象存储，OSS 签出来的地址永远带
+     * Expires。整段续签逻辑（refreshRefs）因此一次都没被跑到过。**
+     *
+     * 而那里面藏着真正吃掉照片的那一行：判"能不能复用"和判"现在发不发得
+     * 出去"用了同一个函数。带 Expires 就说不可用 → 去重签 → 签出一个崭新
+     * 的地址 → 还报了句"已经重新传了一份" → 最后一行用同一个判据再过一遍
+     * → 刚签好的这张也带 Expires → 扔掉。
+     *
+     * 净效果：只要配了对象存储，参考图一张都发不出去，而日志说重传成功。
+     * 用户来回问了七八轮，全被引到开关和设置上，因为界面看到的现象是
+     * "设定集里有 3 张图可以带，但这一次一张都没发"。
+     *
+     * 教训是老的那条：**凡是"只在真实形状下才走到"的路，夹具就得长成
+     * 真实的样子。**一个简化过头的夹具不会让测试变红，它只会让整条路
+     * 从来不被执行 —— 而绿灯照常亮着。
+     */
+    const signed = (name, secondsLeft) =>
+      `https://b.oss-cn-hongkong.aliyuncs.com/${name}`
+      + `?OSSAccessKeyId=STUB&Expires=${Math.floor(Date.now() / 1000) + secondsLeft}&Signature=stub`;
+
+    const ossBible = mkBible('upload');
+    // 还有 50 分钟才过期 —— 完全可用的地址
+    ossBible.characters[0].sheetUrl = signed('a.png', 3000);
+    ossBible.characters[0].variants[0].sheetUrl = signed('a.png', 3000);
+
+    const p6 = store.create({ title: '参考图在对象存储里' });
+    store.update(p6.id, (x) => {
+      x.bible = ossBible;
+      x.shots = [{ ...shot, id: 's1', imagePath: null }];
+      return x;
+    });
+    upstream.lastImageBody = null;
+    const notes6 = [];
+    await studioModule.generateAssets(p6.id, { onEvent: (e) => notes6.push(e.message || '') });
+    check('参考图是对象存储的签名地址时，照样发得出去（修之前这里恒空）',
+      Boolean(upstream.lastImageBody?.image),
+      JSON.stringify({ 请求体字段: Object.keys(upstream.lastImageBody || {}) }));
+    check('而且发出去的就是那个签名地址本身，没被换成别的',
+      String(upstream.lastImageBody?.image || '').includes('oss-cn-hongkong'),
+      String(upstream.lastImageBody?.image || '').slice(0, 80));
+    /**
+     * 还没过期的地址不该被当成过期：白重签一次（走网络），
+     * 而且源图不在时会报一句指着好地址的假警报。
+     */
+    check('没过期的签名地址不会被误报成"地址过期了"',
+      !notes6.some((m) => /过期/.test(m)), JSON.stringify(notes6.filter((m) => /过期/.test(m))));
+
+    /**
+     * 反面：**真过期了的**地址、而且本地源图也找不着，那才该丢 ——
+     * 否则这个修法就成了"什么都不过滤"，等于把 403 留到厂商那边去报，
+     * 而厂商只会说一句"下载不到你给的图"，指不到过期这件事上。
+     */
+    const deadBible = mkBible('upload');
+    deadBible.characters[0].sheetUrl = signed('a.png', -60); // 一分钟前就过期了
+    deadBible.characters[0].variants[0].sheetUrl = signed('a.png', -60);
+    const p7 = store.create({ title: '签名地址真过期了' });
+    store.update(p7.id, (x) => {
+      x.bible = deadBible;
+      x.shots = [{ ...shot, id: 's1', imagePath: null }];
+      return x;
+    });
+    upstream.lastImageBody = null;
+    const notes7 = [];
+    await studioModule.generateAssets(p7.id, { onEvent: (e) => notes7.push(e.message || '') });
+    check('真过期、本地源图又没了的，还是要丢掉（别把 403 留给厂商去报）',
+      !upstream.lastImageBody?.image,
+      String(upstream.lastImageBody?.image || '').slice(0, 80));
+    check('而且明说是过期了（不然这一镜"不太像"的原因永远查不出来）',
+      notes7.some((m) => /过期/.test(m)), JSON.stringify(notes7.slice(-3)));
+
+    /**
+     * ══════════ 只收一张的那些"身份通道"，得收到角色那张 ══════════
+     *
+     * 海螺的 subject_reference（字面写着 type: 'character'）、万相的 ref_img
+     * 都只收一张图，而它们是目前云端唯一真能做到"换场景但还是这个人"的东西。
+     *
+     * 参考图的排列顺序是**场景在最前**（多数厂商对首张权重最高，出分镜时
+     * 最需要被提醒的是环境）。这两处原来取 refImages[0] —— 于是"这个角色
+     * 长什么样"的字段里装的是一张**场景图**。那条通道等于没开，
+     * 而且不报任何错：出来的人照旧不像，看不出是我们发错了图。
+     *
+     * ⚠ 这条断言必须防恒真：得**真的有一张场景图排在角色前面**，
+     * 否则 identityRef 取第一张也照样对，测试永远绿。
+     */
+    // ⚠ 默认夹具的场景条目**没有图**，于是参考图里压根没有场景那张 ——
+    // 用它测"场景排在角色前面"会连前提都不成立。真实项目里场景是有图的
+    const withScene = mkBible('upload');
+    withScene.scenes[0].sheetPath = '/s.png';
+    withScene.scenes[0].sheetUrl = 'https://x/s.png';
+    withScene.scenes[0].sheetSource = 'model';
+    withScene.scenes[0].variants[0].sheetPath = '/s.png';
+    withScene.scenes[0].variants[0].sheetUrl = 'https://x/s.png';
+    withScene.scenes[0].variants[0].sheetSource = 'model';
+    const ordered = cs.assemblePrompt(withScene, shot);
+    check('参考图顺序确实是场景排在角色前面（下面那条断言的前提）',
+      ordered.refKinds[0] === 'scene' && ordered.refKinds.includes('character'),
+      JSON.stringify(ordered.refKinds));
+    const face = cs.identityRef({
+      images: ordered.refImages, kinds: ordered.refKinds, sources: ordered.refSources
+    });
+    check('挑"这个人长什么样"时挑的是角色那张，不是排在最前的场景图',
+      face === ordered.refImages[ordered.refKinds.indexOf('character')] && face !== ordered.refImages[0],
+      JSON.stringify({ 挑中: face, 第一张: ordered.refImages[0] }));
+    /** 用户亲手传的排在模型出的前面 —— 那是他指名道姓说"就长这样"的那张 */
+    check('两张角色图并存时，优先用户传的那张',
+      cs.identityRef({
+        images: ['scene', 'mine', 'theirs'],
+        kinds: ['scene', 'character', 'character'],
+        sources: ['model', 'upload', 'model']
+      }) === 'mine', '');
+    /** 一张角色图都没有时退回第一张，别退回 null 把通道整个关掉 */
+    check('一张角色图都没有时退回第一张（别把通道整个关掉）',
+      cs.identityRef({ images: ['a', 'b'], kinds: ['scene', 'prop'], sources: ['model', 'model'] }) === 'a', '');
+
+    /**
+     * ⚠ **上面三条验的都是纯函数。真正决定的是请求体里那个字段装了什么。**
+     *
+     * identityRef 挑对了不等于它被发出去了 —— 中间还隔着 pickRefs、
+     * refreshRefs（会重新筛一遍数组，kinds 没跟着筛就整体错位）、
+     * 以及适配器里那个 switch。这一整段路我今天已经在别处栽过两次了。
+     *
+     * 所以直接打到海螺的出图请求体上，看 subject_reference 里装的是谁。
+     */
+    const adaptersModule = await import('../core/providers/adapters.js');
+    // 自检用的假密钥。海螺这条路前面没人跑过，所以金库里还没有它
+    vault.setSecret('MINIMAX_API_KEY', 'sk-minimax-test');
+    const keepBase = settings.get('baseUrls') || {};
+    settings.patch({ baseUrls: { ...keepBase, minimax: upstreamUrl } });
+    upstream.lastMinimaxImageBody = null;
+    await adaptersModule.generateImage({
+      providerId: 'minimax',
+      model: 'image-01',
+      prompt: '测试',
+      refImages: ['https://x/scene.png', 'https://x/face.png'],
+      identityRef: 'https://x/face.png',
+      label: '身份通道'
+    });
+    check('海螺的 subject_reference 里装的是角色那张，不是场景那张',
+      upstream.lastMinimaxImageBody?.subject_reference?.[0]?.image_file === 'https://x/face.png',
+      JSON.stringify(upstream.lastMinimaxImageBody?.subject_reference));
+    /** 不传 identityRef 时保持老行为，别让直接调这个函数的地方跟着崩 */
+    upstream.lastMinimaxImageBody = null;
+    await adaptersModule.generateImage({
+      providerId: 'minimax',
+      model: 'image-01',
+      prompt: '测试',
+      refImages: ['https://x/only.png'],
+      label: '身份通道'
+    });
+    check('没传 identityRef 时退回第一张（老调用方不受影响）',
+      upstream.lastMinimaxImageBody?.subject_reference?.[0]?.image_file === 'https://x/only.png',
+      JSON.stringify(upstream.lastMinimaxImageBody?.subject_reference));
+    settings.patch({ baseUrls: keepBase });
+
+    settings.patch({ useReferenceImages: true, refMode: 'auto' });
+  }
+
+  // ── 模型自己出的设定图：默认仍然不发（那条路的老理由还成立）──
+  {
+    settings.patch({ refMode: 'auto' });
+    const gen = cs.assemblePrompt(mkBible('model'), shot);
+    const kept = cs.pickRefs(
+      { images: gen.refImages, labels: gen.refLabels, paths: gen.refPaths, sources: gen.refSources }, cs.refPlan()
+    );
+    check('模型自己出的设定图，默认还是不发（不改老行为）', kept.images.length === 0, JSON.stringify(kept.images));
+    check('这时候提示词不说"以参考图为准"（说了就是撒谎 —— 图根本没发）',
+      !/以参考图/.test(gen.prompt), gen.prompt.slice(0, 200));
+    check('而是把完整外貌写进去（那是唯一的身份来源）',
+      gen.prompt.includes('袖口两道银线'), gen.prompt.slice(0, 200));
+  }
+
+  /**
+   * ⚠ **拦住参考图的开关有两个**，而它们隔着两个设置面板：
+   *
+   *   useReferenceImages  「一致性引擎 → 出镜头图时把角色设定图带上」（老开关）
+   *   refMode             「画面规格 → 出分镜图时带哪些参考图」（新的）
+   *
+   * 关掉任何一个现象一模一样："一张都没发"。
+   *
+   * 用户真实撞上的就是这个：他传的照片明明在列表里、也标着"你传的"，
+   * auto 本该正好发它，却一张没发 —— 因为关着的是**另一个**开关。
+   * 而我的提示语只提了 refMode，把他指去改一个本来就对的设置。
+   *
+   * 所以要验的不是"没发"，而是**说不说得出是谁拦的**。
+   */
+  {
+    /**
+     * ⚠ **你自己传的照片，任何开关都拦不住。**
+     *
+     * 用户来回折腾了七八轮，最后一句是"我服了"。他是对的 ——
+     * 一张上传的照片原来要闯过四道关卡才能被用上，任何一道没过，
+     * 现象都一样：脸跟他传的图毫无关系。
+     *
+     * 问题不在他没找对开关，在于**这件事根本不该有开关**：
+     * 上传一张照片是指名道姓的指令（"这个角色就长这样"），
+     * 而那两个开关表达的是泛泛的偏好（"一般要不要带参考图"）。
+     * 具体压过泛泛 —— 反过来就是耍人。
+     */
+    const withUpload = mkBible('upload');
+    const asm = () => cs.assemblePrompt(withUpload, shot);
+    const keptWith = (a) => cs.pickRefs(
+      { images: a.refImages, labels: a.refLabels, paths: a.refPaths, sources: a.refSources }, cs.refPlan()
+    ).images.length;
+
+    settings.patch({ refMode: 'auto', useReferenceImages: false });
+    check('老开关关着，用户传的照片照样发', keptWith(asm()) === 1, JSON.stringify(cs.refPlan()));
+
+    settings.patch({ useReferenceImages: true, refMode: 'off' });
+    check('新开关选了"一张都不发"，用户传的照片照样发', keptWith(asm()) === 1, JSON.stringify(cs.refPlan()));
+
+    /**
+     * 但关掉开关**确实要有效果** —— 它管的是模型自己出的那些设定图。
+     * 两个都不管的话，那两个开关就成了摆设，而摆设比没有更糟。
+     */
+    const modelOnly = mkBible('model');
+    const asm2 = cs.assemblePrompt(modelOnly, shot);
+    check('而模型自己出的设定图，关掉开关就真的不发', cs.pickRefs(
+      { images: asm2.refImages, labels: asm2.refLabels, paths: asm2.refPaths, sources: asm2.refSources },
+      cs.refPlan()
+    ).images.length === 0, JSON.stringify(asm2.refDetailed));
+    check('并且说清了"关的是什么、没关的是什么"',
+      /你自己传的照片照发/.test(cs.refPlan().note || ''), cs.refPlan().note);
+
+    settings.patch({ useReferenceImages: true, refMode: 'auto' });
+  }
+
+  // ── all / off / 老开关 ──
+  {
+    settings.patch({ refMode: 'all' });
+    const g = cs.assemblePrompt(mkBible('model'), shot);
+    check('选 all 时模型出的图也发', cs.pickRefs(
+      { images: g.refImages, labels: g.refLabels, paths: g.refPaths, sources: g.refSources }, cs.refPlan()
+    ).images.length === 1);
+    check('但 all 也不换编辑模型', cs.refPlan().useEditModel === false);
+
+    /**
+     * ⚠ off 的含义**变了**，而且是有意变的。
+     *
+     * 原来 off = 一张都不发。现在 off = **模型出的那些不发，你自己传的照发**。
+     *
+     * 因为一张上传的照片是指名道姓的指令（"这个角色就长这样"），
+     * 而这个开关表达的是泛泛的偏好（"一般要不要带参考图"）——
+     * 具体压过泛泛。反过来的话，用户传了照片却怎么也用不上，
+     * 而他要闯过四道开关才找得到原因（真实发生过，他最后说"我服了"）。
+     */
+    settings.patch({ refMode: 'off', useReferenceImages: true });
+    const offPlan = cs.refPlan();
+    const gm = cs.assemblePrompt(mkBible('model'), shot);
+    check('选 off 时，模型出的设定图一张都不发', cs.pickRefs(
+      { images: gm.refImages, labels: gm.refLabels, paths: gm.refPaths, sources: gm.refSources }, offPlan
+    ).images.length === 0, JSON.stringify(gm.refDetailed));
+    const gu = cs.assemblePrompt(mkBible('upload'), shot);
+    check('但你自己传的照片照发（开关管不着指名道姓的那一张）', cs.pickRefs(
+      { images: gu.refImages, labels: gu.refLabels, paths: gu.refPaths, sources: gu.refSources }, offPlan
+    ).images.length === 1, JSON.stringify(gu.refDetailed));
+
+    /**
+     * ⚠ 老开关不能被悄悄改掉行为：已经打开 useEditModelForShots 的人，
+     * 走的还得是"换编辑模型 + 发图"那条路。
+     */
+    settings.patch({ refMode: 'auto', useEditModelForShots: true });
+    check('老的 useEditModelForShots=true 仍然等价于 edit（不改已有用户的行为）',
+      cs.refPlan().mode === 'edit' && cs.refPlan().useEditModel === true, JSON.stringify(cs.refPlan()));
+    settings.patch({ useEditModelForShots: false, refMode: keep });
+  }
+}
+
+/**
+ * ════════ OpenAI 家族带参考图：必须走 /images/edits ════════
+ *
+ * 用户："我用的出图是 gpt-image-2，我自己传的图，还是不是用的我的脸"。
+ *
+ * 不是。原因不在他那边 —— 我们**把参考图发到了一个不存在的字段上**。
+ * OpenAI 的 /v1/images/generations 没有 image 这个参数，
+ * 参考图必须走 /v1/images/edits，而且是 multipart 传**文件本身**。
+ * 发到 generations 上的 image 字段会被整个忽略：不报错、不警告，
+ * 就是一次纯文生图。于是"传了照片但脸不是我的"。
+ *
+ * 更难堪的是代码注释里**写明了**这件事，然后让用户自己去联调台手动发 ——
+ * 而出图是自动跑几十镜的，没人能一镜一镜手动来。
+ */
+/**
+ * ══════════ 一次到底发几张参考图，发哪几张 ══════════
+ *
+ * 用户报的原话："我把道具取消了…还是不行，他一下给我喂了9张图"。
+ * 九正好是收集上限 —— 也就是说，能收多少就发多少，一张没筛。
+ *
+ * 两个独立的毛病凑在一起：
+ *   ① 道具关不掉：判据是"名字在描述文字里出现过"，而他能改的是
+ *      「关键道具」那一栏和预演台 —— 两个都管不着那个字符串匹配
+ *   ② 发太多：九张图发过去，模型要在九个目标之间找平衡，
+ *      最要紧的那张脸反而不像了
+ */
+/**
+ * ══════════ 这一镜不满意，下一步该干什么 ══════════
+ *
+ * 不满意的时候，人手里只有一张图和一个「重出」按钮 —— 而再来一次多半
+ * 还是那样，因为他不知道该改什么。
+ *
+ * ⚠ 这一节里**最要紧的一条是"只说数据里有证据的原因"**。
+ *
+ * "可能是提示词不够具体"这种话永远成立、永远没用，而且会把真正的原因
+ * （这一镜一张参考图都没发）淹掉。所以既验"该说的说了"，
+ * 也验"没证据的时候老老实实说没查出来"。
+ */
+/**
+ * ══════════ 连播：排一遍时间轴 ══════════
+ *
+ * 出视频之前最后一道、也是最省钱的一道关。
+ *
+ * ⚠ 它必须在**还没有视频**的时候就能用 —— 那正是它全部的价值所在。
+ * 所以不能复用 edit.timeline（那个只收已经有视频的镜头，因为它算的是成片）。
+ * 这条断言守着这个区别：两者混用的话，连播在最该用的时候是空的。
+ */
+section('连播：排一遍时间轴');
+{
+  const ani = await import('../core/duration.js');
+  const mk = (i, extra = {}) => ({ id: `p${i}`, index: i, duration: 4, dialogue: '', ...extra });
+
+  /** ⚠ 一段视频都没有时照样排得出来 —— 这是它存在的全部理由 */
+  const none = ani.animaticLayout([mk(1), mk(2, { imagePath: '/b.png' })]);
+  check('一段视频都没有时照样排得出来（这是它存在的理由）',
+    none.rows.length === 2 && none.total === 8, JSON.stringify({ 行: none.rows.length, 总长: none.total }));
+  check('每一镜接着上一镜排，不重叠也不留缝',
+    none.rows[1].start === none.rows[0].span, JSON.stringify(none.rows.map((r) => r.start)));
+
+  /** 有视频的走视频、只有图的定住、什么都没有的也要占一格 */
+  const mixed = ani.animaticLayout([
+    mk(1, { videoPath: '/a.mp4', imagePath: '/a.png' }),
+    mk(2, { imagePath: '/b.png' }),
+    mk(3)
+  ]);
+  check('有视频走视频、只有图定住、什么都没有的也占一格',
+    mixed.rows.map((r) => r.kind).join() === 'video,image,blank',
+    JSON.stringify(mixed.rows.map((r) => r.kind)));
+
+  /**
+   * ⚠ 没设时长的**不能跳过**。跳过的话人在连播里看不到它，
+   * 于是永远不知道那一镜没设时长 —— 而它到合成那步会出问题。
+   */
+  const noDur = ani.animaticLayout([mk(1, { duration: 0 }), mk(2)]);
+  check('没设时长的不跳过，用兜底值占位', noDur.rows.length === 2 && noDur.rows[0].span === 3,
+    JSON.stringify(noDur.rows.map((r) => r.span)));
+  check('而且标出来"这是猜的"（不能悄悄替他决定）',
+    noDur.rows[0].guessed === true && noDur.rows[1].guessed === false,
+    JSON.stringify(noDur.rows.map((r) => r.guessed)));
+
+  /**
+   * ⚠ 时长口径必须和别处一致。另算一套的话，连播说 62 秒、导出说 58 秒，
+   * 而两个数都是我们自己给的。
+   */
+  const durMod = await import('../core/duration.js');
+  const one = mk(1, { duration: 5, actualDuration: 6.5 });
+  check('时长走 duration.shotSeconds 那一份（不另算一套）',
+    ani.animaticLayout([one]).total === durMod.shotSeconds(one),
+    JSON.stringify({ 连播: ani.animaticLayout([one]).total, 别处: durMod.shotSeconds(one) }));
+
+  check('空片子不炸', ani.animaticLayout([]).total === 0 && ani.animaticLayout().rows.length === 0, '');
+}
+
+section('这一镜为什么不对');
+{
+  const dg = await import('../core/pipeline/diagnose.js');
+  const routing = { image: { provider: 'volcengine', model: 'seedream' } };
+  const ok = {
+    id: 'd1', index: 1, description: '阿澜走向栈桥', camera: '中景', duration: 4,
+    imagePath: '/a.png',
+    imageAt: '2026-02-01T00:00:00Z', editedAt: '2026-01-01T00:00:00Z',
+    modelUsed: 'volcengine / seedream',
+    refsSent: 2, refsAvailable: 2,
+    consistency: { score: 88, pass: true, issues: [] }
+  };
+
+  /** 还没出图时不该诊断 —— 那是另一个问题（"缺东西"），别处已经在管 */
+  check('还没出图时什么都不说（那是另一类问题）',
+    dg.diagnose({ id: 'x', index: 1 }, { routing }).length === 0, '');
+
+  /**
+   * ⚠ **一切正常时，要老老实实说"没查出来"，而不是编一条。**
+   *
+   * 一个空列表和"这个功能没跑"长得一模一样，人会以为我们没检查。
+   */
+  const clean = dg.diagnose(ok, { routing });
+  check('都正常时只回一条"数据上看不出毛病"',
+    clean.length === 1 && clean[0].id === 'nothing-found', JSON.stringify(clean.map((x) => x.id)));
+  check('而且给了一个真能往前走的动作（不是"再试试"四个字）',
+    clean[0].how.length > 20 && /种子|描述/.test(clean[0].how), clean[0].how.slice(0, 40));
+
+  /**
+   * ⚠ 「参考图排第一位就报」那条**已经撤掉了**。
+   *
+   * 它属于上一版设计（拿参考图当杠杆去修构图）。现在分工改成
+   * "参考图管是什么、文字管怎么拍"，就不存在"排第一位"这个配置错误了 ——
+   * 再留着它就是在指一个已经不存在的问题，而那种提示比没有更坏。
+   */
+  check('不再因为"场景图排第一位"报错（那条随旧设计一起撤了）',
+    !dg.diagnose({ ...ok, camera: '特写', bibleRefs: ['景·广场', '角·我'] }, { routing })
+      .some((x) => x.id === 'wide-ref-on-tight'), '');
+
+  /**
+   * ══════════ 一张参考图都没发 ══════════
+   * 这是"脸不像"最常见、也最容易被忽略的原因 —— 它不报任何错。
+   */
+  const noRef = dg.diagnose({ ...ok, refsSent: 0, refsAvailable: 3 }, { routing });
+  check('一张参考图都没发会被点出来', noRef.some((x) => x.id === 'no-refs'),
+    JSON.stringify(noRef.map((x) => x.id)));
+  /**
+   * ⚠ 它必须排**第一**。人只会试最上面那一两条，
+   * 而这一条是"改了最可能有用"的那个。
+   */
+  check('而且排在最前面（人只会试最上面那一两条）', noRef[0].id === 'no-refs',
+    JSON.stringify(noRef.map((x) => x.id)));
+
+  /** 发了但被上限挤掉了 —— 和"一张没发"是两回事，下一步也不同 */
+  const capped = dg.diagnose({ ...ok, refsSent: 2, refsAvailable: 6 }, { routing });
+  check('发了但被挤掉几张，说法不一样',
+    capped.some((x) => x.id === 'refs-capped') && !capped.some((x) => x.id === 'no-refs'),
+    JSON.stringify(capped.map((x) => x.id)));
+
+  /** 图是改描述之前出的 —— "改了没用"的头号原因 */
+  const stale = dg.diagnose({ ...ok, editedAt: '2026-03-01T00:00:00Z' }, { routing });
+  check('图是改描述之前出的，会被点出来', stale.some((x) => x.id === 'stale-image'),
+    JSON.stringify(stale.map((x) => x.id)));
+  check('而且它比参考图那条还靠前（成本最低、最确定）',
+    dg.diagnose({ ...ok, editedAt: '2026-03-01T00:00:00Z', refsSent: 0, refsAvailable: 3 },
+      { routing })[0].id === 'stale-image', '');
+
+  /** 中途换过模型 —— 风格漂移最常见的原因，而它不报任何错 */
+  const swapped = dg.diagnose({ ...ok, modelUsed: 'openai / gpt-image-2' }, { routing });
+  check('中途换过模型会被点出来', swapped.some((x) => x.id === 'model-changed'),
+    JSON.stringify(swapped.map((x) => x.id)));
+  /** ⚠ 没换过时不能报 —— 误报一次，这条以后就没人信了 */
+  check('没换过模型时不报', !dg.diagnose(ok, { routing }).some((x) => x.id === 'model-changed'), '');
+
+  /**
+   * ⚠ 复核分数**改过文字之后就不作数了**。
+   * 拿它当依据会把人引向一个已经不存在的问题。
+   */
+  const staleScore = dg.diagnose({
+    ...ok, consistency: { score: 40, pass: false, stale: true, issues: ['脸不像'] }
+  }, { routing });
+  check('分数是改文案之前打的，就不拿它说事',
+    !staleScore.some((x) => x.id === 'verify-failed'), JSON.stringify(staleScore.map((x) => x.id)));
+  const lowScore = dg.diagnose({
+    ...ok, consistency: { score: 40, pass: false, issues: ['头发颜色不一致'] }
+  }, { routing });
+  check('分数作数且没过时，把复核的原话摆出来',
+    lowScore.some((x) => x.id === 'verify-failed' && /头发颜色不一致/.test(x.why)),
+    JSON.stringify(lowScore.find((x) => x.id === 'verify-failed')?.why));
+
+  /**
+   * ⚠ 每一条都要说清**这一下花不花钱**。
+   * 改描述是免费的，重出是要付钱的 —— 两者摆在一起时必须分得开。
+   */
+  check('要重出的那些标了"花钱"', noRef.find((x) => x.id === 'no-refs').costs === true, '');
+  const lint = dg.diagnose({ ...ok, description: '门外传来敲门声，他抬头' }, { routing });
+  const soundOne = lint.find((x) => x.id === 'lint-sound-in-frame');
+  check('描述里写了声音会被点出来', Boolean(soundOne), JSON.stringify(lint.map((x) => x.id)));
+  check('改描述这种不花钱的，没被标成花钱', soundOne?.costs === false, String(soundOne?.costs));
+
+  /**
+   * ══════════ 哪几镜"该重出" ══════════
+   *
+   * ⚠ 判据是**有可以动手的具体原因**，不是"分数低"。
+   *
+   * 按分数选的话，会把一堆"数据上看不出毛病、只是模型这次画成这样"的
+   * 镜头一起选上 —— 重出它们纯粹是碰运气，而每一次都真花钱。
+   */
+  const list = dg.needsRedo([
+    { ...ok, id: 'a', index: 1 },                                   // 干净的
+    { ...ok, id: 'b', index: 2, refsSent: 0, refsAvailable: 3 },    // 有具体原因
+    { ...ok, id: 'c', index: 3, editedAt: '2026-03-01T00:00:00Z' }  // 有具体原因
+  ], { routing });
+  check('只选查得出具体原因的那几镜', list.length === 2 && list.map((x) => x.index).join() === '2,3',
+    JSON.stringify(list.map((x) => x.index)));
+  check('干净的那一镜不会被选上（重出它纯属碰运气、还花钱）',
+    !list.some((x) => x.index === 1), JSON.stringify(list.map((x) => x.index)));
+  check('而且说得出为什么选它', /参考图/.test(list[0].why), list[0].why);
+}
+
+section('指令框：把人话翻成计划，而且绝不替你动手');
+{
+  const cmd = await import('../core/pipeline/command.js');
+
+  const shots = Array.from({ length: 14 }, (_, i) => ({
+    id: `s${i + 1}`, index: i + 1, segment: i < 6 ? 1 : 2,
+    characters: i % 3 === 0 ? ['父亲', '我'] : ['我'],
+    imagePath: i < 10 ? '/x.png' : null,
+    videoPath: i < 3 ? '/v.mp4' : null,
+    dialogue: i % 2 ? '台词' : '',
+    skills: i === 5 ? ['tracking'] : []
+  }));
+  const project = { id: 'p1', shots };
+  const P = (t) => cmd.parse(t, project);
+
+  // ── 选哪几镜 ──
+  {
+    check('第 6-12 镜 → 7 镜', P('第6-12镜改成中景').targets.length === 7,
+      String(P('第6-12镜改成中景').targets.length));
+    check('第 6 镜 → 1 镜', P('第6镜改成特写').targets.length === 1, String(P('第6镜改成特写').targets.length));
+    check('按场次选（第 2 场 → 8 镜）', P('第2场转场改成叠化').targets.length === 8,
+      String(P('第2场转场改成叠化').targets.length));
+    check('按出场角色选（有父亲的 → 5 镜）', P('有父亲的镜头加上仰拍').targets.length === 5,
+      String(P('有父亲的镜头加上仰拍').targets.length));
+    /** 口径必须和筛选条一致：有图没视频才叫"缺视频" */
+    check('缺视频的口径 = 有图没视频（和筛选条同一套）',
+      P('缺视频的镜头时长改成4秒').targets.length === 7,
+      String(P('缺视频的镜头时长改成4秒').targets.length));
+  }
+
+  // ── 改什么 ──
+  {
+    const a = P('第6-12镜改成中景');
+    check('景别改成中景', a.patch?.camera === '中景', JSON.stringify(a.patch));
+    const b = P('缺视频的镜头时长改成4秒');
+    check('时长改成 4 秒（数字，不是字符串）', b.patch?.duration === 4, JSON.stringify(b.patch));
+    const c = P('第2场转场改成叠化');
+    check('转场认的是 id 不是中文标签', c.patch?.transition === 'dissolve', JSON.stringify(c.patch));
+    const d = P('有父亲的镜头加上仰拍');
+    check('技法卡是加，不是覆盖', d.addSkills?.includes('low-angle') && !d.patch?.skills,
+      JSON.stringify({ add: d.addSkills, patch: d.patch }));
+    /**
+     * ⚠ 中文两种语序都要认：「去掉跟拍」和「把跟拍去掉」。
+     * 只认前一种的话，后一种会被当成**加上**——意思正好反了，
+     * 而且是静默反：界面显示已加上，用户以为自己说错了话。
+     */
+    const e = P('把第6镜的跟拍去掉');
+    check('「把X去掉」认成减，不是加',
+      e.removeSkills?.includes('tracking') && !(e.addSkills || []).length,
+      JSON.stringify({ add: e.addSkills, remove: e.removeSkills }));
+    const f = P('第6镜去掉跟拍');
+    check('「去掉X」也认成减（两种语序都要过）', f.removeSkills?.includes('tracking'),
+      JSON.stringify(f.removeSkills));
+  }
+
+  // ── 花钱的必须标出来 ──
+  {
+    /**
+     * ⚠ costs 决定界面走不走预检和估算，而那两道闸门是用户被烧过之后加的。
+     * 标错 = 闸门形同虚设。
+     */
+    check('改文字不花钱', P('第6-12镜改成中景').costs === false, String(P('第6-12镜改成中景').costs));
+    check('跑出图要花钱', P('把缺视频的都跑了').costs === true, String(P('把缺视频的都跑了').costs));
+    check('问一问不花钱', P('这一轮要花多少钱').costs === false, String(P('这一轮要花多少钱').costs));
+    /** 每一条能跑的计划都得有 verb，界面靠它决定走哪条路 */
+    const verbs = ['第6-12镜改成中景', '把缺视频的都跑了', '第22镜为什么没图']
+      .map((t) => P(t).verb);
+    check('三种 verb 分得清', JSON.stringify(verbs) === '["edit","run","ask"]', JSON.stringify(verbs));
+  }
+
+  // ── 看不懂就说看不懂 ──
+  {
+    const bad = P('随便写点什么');
+    check('看不懂时 ok=false', bad.ok === false, JSON.stringify(bad));
+    /**
+     * ⚠ 这一条是整个模块最要紧的。猜错的代价是拿真钱重跑几十镜，
+     * 或者把几十镜的文案改坏；而"没听懂"的代价是你再打一遍。
+     */
+    check('看不懂时**不给** targets（不许猜一批出来）',
+      !bad.targets, JSON.stringify(bad.targets));
+    check('而且给了能照抄的例子', (bad.examples || []).length > 0, JSON.stringify(bad.examples));
+
+    const half = P('把第6镜怎么怎么样');
+    check('只认出镜头没认出动作时，说清楚认出了哪一半',
+      half.ok === false && half.why.includes('第 6 镜'), JSON.stringify(half.why));
+
+    const noTarget = P('改成中景');
+    check('说了要改什么但没说改哪几镜 → 追问，不默认全片',
+      noTarget.ok === false && /哪几镜/.test(noTarget.why), JSON.stringify(noTarget.why));
+
+    const empty = P('第9场改成中景');
+    check('选中零镜和"没说"分得开（零镜时直接说没有）',
+      empty.ok === false && /一镜都没有/.test(empty.why), JSON.stringify(empty.why));
+  }
+
+  // ── 这个模块不许有副作用 ──
+  {
+    /**
+     * ⚠ parse 只出计划，绝不执行。这里用**冻结**的输入验：
+     * 它要是往 project 或 shots 上写任何东西，冻结会让它当场抛错。
+     * 光看代码说"它是纯的"不算数。
+     */
+    const frozen = Object.freeze({ id: 'p2', shots: shots.map((s) => Object.freeze({ ...s })) });
+    let threw = null;
+    try {
+      cmd.parse('第6-12镜改成中景', frozen);
+      cmd.parse('把缺视频的都跑了', frozen);
+    } catch (err) { threw = err; }
+    check('对冻结的项目跑一遍不出错（说明它一个字都没往里写）', !threw, String(threw?.message));
+  }
+
+  // ── 例子必须都是真能跑通的 ──
+  {
+    /**
+     * ⚠ 界面上那几个例子是**可点的模板**，点一下就填进输入框。
+     * 里面要是有一句我们自己都解析不了的，用户第一次点就撞一堵墙 ——
+     * 而那是他对这个功能的第一印象。
+     */
+    const egs = cmd.examplesFor(project);
+    const bad = egs.filter((t) => !cmd.parse(t, project).ok);
+    check('界面上列的每个例子都真能解析', bad.length === 0, JSON.stringify(bad));
+    /**
+     * ⚠ 例子必须按**这个项目**生成。写死的话，"第 6-12 镜"在一个
+     * 只有 2 镜的项目里选不到任何东西 —— 用户第一次点例子就撞一堵墙。
+     * 走查夹具正好只有 2 镜，这个坑是在那儿撞出来的。
+     */
+    const tiny = { id: 'p3', shots: shots.slice(0, 2) };
+    const tinyBad = cmd.examplesFor(tiny).filter((t) => !cmd.parse(t, tiny).ok);
+    check('只有 2 镜的项目里，例子也全都选得中', tinyBad.length === 0, JSON.stringify(tinyBad));
+    check('例子里的镜号取自真实分镜（不是写死的 6-12）',
+      cmd.examplesFor(tiny).some((t) => t.includes('第 1-2 镜')), JSON.stringify(cmd.examplesFor(tiny)));
+    /** 空项目不能给出指向不存在镜头的例子 */
+    const empty = cmd.examplesFor({ shots: [] });
+    check('空项目的例子不提任何镜号', !empty.some((t) => /第 \d+ 镜/.test(t)), JSON.stringify(empty));
+  }
+}
+
+section('角色名对不上：少一个人，而且不报任何错');
+{
+  const cons = await import('../core/pipeline/consistency.js');
+  const diag = await import('../core/pipeline/diagnose.js');
+
+  /**
+   * ══════════ 真实事故（第 6 镜） ══════════
+   *
+   * 设定集里那个角色叫「我（无灵根书信摊主）」—— 括注是给人看的身份说明。
+   * 而分镜是模型拆的，它写的就是「我」。
+   *
+   * 原来的 matchCharacters 只认全等，而且 `.filter(Boolean)` 之后
+   * 只要还剩一个就整个短路返回。于是「我」被悄悄扔掉、「父亲」留下，
+   * 出来的图里**只有父亲一个人**，那句"塞进我手里"没有接的人。
+   *
+   * 全程零报错：界面显示"已带上参考图"，带的确实是参考图，只是少了一个人。
+   */
+  const bible = {
+    characters: [
+      { name: '父亲', sheetUrl: 'https://x/dad.png' },
+      { name: '我（无灵根书信摊主）', sheetUrl: 'https://x/me.png' }
+    ],
+    scenes: [{ name: '宗门测灵根广场', sheetUrl: 'https://x/plaza.png' }],
+    props: []
+  };
+  const shot = {
+    characters: ['父亲', '我'],
+    scene: '宗门测灵根广场',
+    description: '父亲伸手从怀里掏出几块灵石，塞进我手里'
+  };
+
+  const got = cons.matchCharacters(bible, shot).map((c) => c.name);
+  check('「我」对上了设定集里的「我（无灵根书信摊主）」（括注是给人看的）',
+    got.includes('我（无灵根书信摊主）'), JSON.stringify(got));
+  check('「父亲」也还在（不是修好一个丢了另一个）', got.includes('父亲'), JSON.stringify(got));
+  /**
+   * ⚠ 这一条盯的是**短路**那个毛病：部分命中时不许扔掉没命中的。
+   * 只断言"我在里面"是不够的 —— 顺序反过来（['我','父亲']）时，
+   * 老代码同样只返回一个，而那一个恰好是对的。
+   */
+  check('两个人都在（部分命中不许短路）', got.length === 2, JSON.stringify(got));
+  const labels = cons.collectReferences(bible, shot).labels;
+  check('两张脸真的进了参考图清单',
+    labels.includes('角·父亲') && labels.some((l) => l.startsWith('角·我')), JSON.stringify(labels));
+
+  /**
+   * ══════════ 提示词那一路也得带上他 ══════════
+   *
+   * castInFrame 原来自己抄了一份同样的"全等 + filter(Boolean)"。
+   * 两份一起漏 = 那个人**图也没有、字也没有**，模型只在原句里见过
+   *「我」这一个字，画不出人来一点都不奇怪。
+   *
+   * 这一条断言的是**提示词正文**，不是匹配函数的返回值 ——
+   * 只测 matchCharacters 的话，castInFrame 那份抄件照样能偷偷漏。
+   */
+  {
+    const withLooks = {
+      ...bible,
+      characters: [
+        { name: '父亲', appearance: '中年男子，藏青长衫', sheetUrl: 'https://x/dad.png' },
+        { name: '我（无灵根书信摊主）', appearance: '少女，灰布衣，左肩补丁', sheetUrl: 'https://x/me.png' }
+      ]
+    };
+    const prompt = cons.assemblePrompt(withLooks, shot).prompt;
+    check('提示词里有父亲的长相', prompt.includes('藏青长衫'), prompt.slice(0, 160));
+    check('提示词里也有「我」的长相（原来图和字一起漏）',
+      prompt.includes('左肩补丁'), prompt.slice(0, 300));
+  }
+
+  /**
+   * ══════════ castInFrame 那份抄件（走的是台词那一路） ══════════
+   *
+   * ⚠ 前两版断言都测错了地方，推红时纹丝不动：
+   *   第一版测「提示词里有长相」→ assemblePrompt 用的是 matchCharacters
+   *   第二版还是 assemblePrompt  → speechLine 挂在 assembleVideoPrompt 上
+   * 一条测不到目标代码的断言，绿着也只是绿着。
+   *
+   * castInFrame 真正的下游是 speechLine → **出视频**那条提示词。
+   * 它只问一句"画面里有没有人"：一镜里**所有**角色名都对不上时
+   * cast 为空 → 这一镜被当成空镜 →「嘴唇闭合」那句不发 →
+   * 明明没台词的人可能被画成正在说话。
+   */
+  {
+    const only = { characters: ['我'], description: '她低头看着掌心的灵石', dialogue: '' };
+    const p = cons.assembleVideoPrompt(bible, only);
+    check('名字带括注的角色也算"画面里有人"，出视频时会发「嘴唇闭合」',
+      /嘴唇闭合|面部安静/.test(p), String(p).slice(-160));
+  }
+
+  // ── 空镜：明确写了"没人"就不要退回读描述硬猜 ──
+  {
+    const p = cons.assembleVideoPrompt(bible, { characters: [], description: '桌上的灵石特写', dialogue: '' });
+    /**
+     * 空镜占一部片子三四成。这句话在空镜里是纯噪音，而且**会招人**——
+     * 提示词里出现"人物"，扩散模型很可能真给你画一个。
+     */
+    check('空数组 = 这一镜没人，不发「嘴唇闭合」（那句会凭空招出个人来）',
+      !/嘴唇闭合|面部安静/.test(p), String(p).slice(-160));
+  }
+
+  /**
+   * ══════════ 提示词要说清楚这一镜有几个人 ══════════
+   *
+   * 原来从头到尾没说过。两段【角色】只是隐含信号，而"画面里有几个人"
+   * 是扩散模型最容易漏的约束之一 —— 它会把两段描述揉成一个人，
+   * 或者只画写在前面那个。第 6 镜出来只有父亲，没有接灵石的那个。
+   */
+  {
+    const p = cons.assemblePrompt(bible, shot).prompt;
+    check('两个人时，提示词明说"画面里有 2 个人"', /画面里有 2 个人/.test(p), p.slice(0, 200));
+    check('而且点了名（不然模型不知道是哪两个）',
+      /画面里有 2 个人：.*父亲/.test(p) && /画面里有 2 个人：.*我（/.test(p), p.slice(0, 200));
+    /**
+     * ⚠ 只报数，不许写"两人同框""都要完整出现" —— 那会和景别直接打架。
+     * 这一镜是特写的话，两句矛盾的指令一起发过去，模型挑哪句你控制不了。
+     */
+    check('不写"都要完整出现"这类会和景别打架的话',
+      !/同框|都要完整|全部入镜/.test(p), p.slice(0, 250));
+  }
+  {
+    const one = { characters: ['父亲'], description: '父亲独自站在广场上' };
+    const p = cons.assemblePrompt(bible, one).prompt;
+    /** 一个人时这句是废话，还白占字数（视频精准模式只有 200 字） */
+    check('只有一个人时不说这句（废话，还占字数）', !/画面里有 \d 个人/.test(p), p.slice(0, 200));
+  }
+
+  // ── 顺序反过来也一样（防止上面那条靠运气过） ──
+  {
+    const rev = cons.matchCharacters(bible, { ...shot, characters: ['我', '父亲'] }).map((c) => c.name);
+    check('名字顺序反过来，两个人照样都在', rev.length === 2, JSON.stringify(rev));
+  }
+
+  // ── 真找不到的时候要说出来，不能装作没事 ──
+  {
+    const s = { ...shot, characters: ['父亲', '师尊'] };
+    check('对得上的照带', cons.matchCharacters(bible, s).map((c) => c.name).join() === '父亲',
+      JSON.stringify(cons.matchCharacters(bible, s).map((c) => c.name)));
+    check('对不上的被挖出来（原来是悄悄扔掉）',
+      JSON.stringify(cons.unmatchedCast(bible, s)) === '["师尊"]',
+      JSON.stringify(cons.unmatchedCast(bible, s)));
+    const items = diag.diagnose({ ...s, imagePath: '/x/6.png' }, { bible });
+    const hit = items.find((i) => i.id === 'cast-unmatched');
+    check('诊断里点名说了是「师尊」对不上', hit && hit.what.includes('师尊'), JSON.stringify(hit?.what));
+    check('并且说了设定集里现有的是谁（好照着改名）',
+      hit && hit.why.includes('父亲'), JSON.stringify(hit?.why));
+    check('改名不花钱，所以标成不花钱', hit && hit.costs === false, JSON.stringify(hit?.costs));
+    /**
+     * 排序按"改了最可能有用"。改名免费、一次全片都好，
+     * 得排在"重出一次换颗种子"前面 —— 人只会试最上面那一两条。
+     */
+    check('排在"数据上看不出毛病"前面',
+      items.findIndex((i) => i.id === 'cast-unmatched') < items.findIndex((i) => i.id === 'nothing-found')
+        || !items.some((i) => i.id === 'nothing-found'),
+      JSON.stringify(items.map((i) => i.id)));
+  }
+
+  // ── 名字全对得上时不许瞎报 ──
+  {
+    const items = diag.diagnose({ ...shot, imagePath: '/x/6.png' }, { bible });
+    check('名字都对得上时不报这一条（不能变成一条永远成立的废话）',
+      !items.some((i) => i.id === 'cast-unmatched'), JSON.stringify(items.map((i) => i.id)));
+  }
+
+  // ── 两个人去掉括注后同名：宁可不带，也不能挑错人 ──
+  {
+    const twins = {
+      characters: [
+        { name: '师兄（大）', sheetUrl: 'https://x/a.png' },
+        { name: '师兄（小）', sheetUrl: 'https://x/b.png' }
+      ],
+      scenes: [], props: []
+    };
+    const s = { characters: ['师兄'], description: '师兄走过来' };
+    /**
+     * ⚠ 挑错人比不带更糟：不带只是"不像"，挑错是**像另一个人**，
+     * 而看图的人只会觉得"这演员怎么串戏了"，根本不会往名字上想。
+     */
+    check('两个人重名时不替你挑', cons.matchCharacters(twins, s).length === 0,
+      JSON.stringify(cons.matchCharacters(twins, s).map((c) => c.name)));
+    check('而且如实说这个名字没对上', JSON.stringify(cons.unmatchedCast(twins, s)) === '["师兄"]',
+      JSON.stringify(cons.unmatchedCast(twins, s)));
+  }
+}
+
+section('参考图：发哪几张、最多几张');
+{
+  const cs = await import('../core/pipeline/consistency.js');
+  const bible = {
+    style: { anchor: '国风', palette: '青灰', negative: '' },
+    characters: [{ name: '阿澜', appearance: '短发', seed: 1 }],
+    scenes: [{ name: '码头', appearance: '雾', seed: 2 }],
+    props: [
+      { name: '柴刀', appearance: '木柄', seed: 3 },
+      { name: '灯笼', appearance: '红纸', seed: 4 }
+    ]
+  };
+
+  /**
+   * ⚠ 手填的「关键道具」说了算。
+   *
+   * 他在预演台把柴刀拿掉、从关键道具里删了，只要描述里还有"刀"这个字，
+   * 老判据照旧会把那张道具设定图发出去 —— 而他找不到任何地方能阻止它。
+   */
+  const listed = cs.matchProps(bible, { description: '阿澜握着柴刀走向灯笼', props: ['灯笼'] });
+  check('填了关键道具时，只带填的那几件（描述里提到的别的不算）',
+    listed.length === 1 && listed[0].name === '灯笼', JSON.stringify(listed.map((p) => p.name)));
+  /**
+   * ⚠ 这条是上一条的**反面**，必须一起验：
+   * 只验"填了就听它"的话，一个"永远返回空"的实现照样能过。
+   */
+  const fallback = cs.matchProps(bible, { description: '阿澜握着柴刀走向灯笼', props: [] });
+  check('没填关键道具时退回老行为（按描述里的名字找）',
+    fallback.length === 2, JSON.stringify(fallback.map((p) => p.name)));
+  check('删空关键道具就真的一件都不带',
+    cs.matchProps(bible, { description: '阿澜握着柴刀', props: ['不存在的东西'] }).length === 0, '');
+
+  /**
+   * ══════════ 上限：按优先级砍，不是砍前 N 张 ══════════
+   *
+   * ⚠ 参考图的排列顺序是**场景在最前**。直接 slice 前 N 张的话，
+   * 第一个被留下的是场景，而最容易被挤掉的恰恰是排在后面的角色 ——
+   * 脸没了，环境留着。这正好是最坏的那种砍法。
+   */
+  const many = {
+    images: ['s', 'c1', 'c2', 'p1', 'p2', 'p3', 'p4', 'p5', 'mine'],
+    labels: ['景', '角1', '角2', '道1', '道2', '道3', '道4', '道5', '我'],
+    paths: new Array(9).fill(null),
+    kinds: ['scene', 'character', 'character', 'prop', 'prop', 'prop', 'prop', 'prop', 'character'],
+    sources: ['model', 'model', 'model', 'model', 'model', 'model', 'model', 'model', 'upload']
+  };
+  const all = { mode: 'all', send: true, useEditModel: false, onlyUploaded: false, blockedBy: null };
+  const capped = cs.pickRefs(many, all);
+  check('九张可用时，只发默认上限那几张', capped.images.length === cs.DEFAULT_MAX_REFS,
+    JSON.stringify({ 发了: capped.images.length, 上限: cs.DEFAULT_MAX_REFS }));
+  /**
+   * ⚠ 这条是整节最要紧的一条：**用户亲手传的那张排在最后，
+   * 却绝对不能被挤掉。**被挤掉的话，这个人的脸就又回到"由文字决定"，
+   * 而那正是他传这张照片要解决的问题。
+   */
+  check('用户传的那张排在最后，照样活下来（这条是重点）',
+    capped.images.includes('mine'), JSON.stringify(capped.images));
+  check('角色图优先于道具图（脸比道具要紧）',
+    capped.images.includes('c1') && capped.images.includes('c2'), JSON.stringify(capped.images));
+  check('道具被挤掉的是多数（九张里五张道具，最多留一张）',
+    capped.images.filter((x) => x.startsWith('p')).length <= 1, JSON.stringify(capped.images));
+  /**
+   * ⚠ 砍完要**恢复原来的顺序**。按优先级排出来的顺序会把场景推到最后，
+   * 而多数厂商对首张权重最高 —— 顺序本身是有意义的。
+   */
+  const order = capped.images.map((x) => many.images.indexOf(x));
+  check('砍完之后顺序还是原来那个（场景仍在前面）',
+    order.every((v, i) => i === 0 || v > order[i - 1]), JSON.stringify(capped.images));
+  check('说得出被挤掉了几张（不说的话人只会觉得"设定集的图没发"）',
+    capped.capped === 5, String(capped.capped));
+
+  /**
+   * ══════════ 特写里不发那张广角空镜 ══════════
+   *
+   * 场景基准图的出图提示词写死了「空镜无人物、广角」，它天生是远景构图，
+   * 而且排在参考图第一位、权重最高。特写镜头同时收到
+   * "文字：特写" 和 "图片：广角构图" 两条矛盾指令 —— 图几乎总是赢。
+   * 用户报的就是这个："这个描述的正确吗，这是特写"，而图是整个广场的大远景。
+   */
+  const three = {
+    images: ['scene', 'face', 'prop'],
+    labels: ['景·广场', '角·我', '道·石'],
+    paths: [null, null, null],
+    kinds: ['scene', 'character', 'prop'],
+    sources: ['model', 'model', 'model']
+  };
+  /**
+   * ══════════ 分工：参考图管"是什么"，文字管"怎么拍" ══════════
+   *
+   * 这里绕过两版弯路。现象是"标了特写，出来是整个广场的大远景"——
+   * 场景基准图是「空镜无人物、广角」出的，天生远景构图，排在第一位、权重最高。
+   *
+   * 第一版：**不发那张图**。结果环境没了基准，模型自己编了个广场，
+   *         用户原话"提示词是在广场，怎么在广场外"。
+   * 第二版：**降权到最后**。治标，而且每来一种新情况就得再加一个特例。
+   *
+   * 两次都是拿参考图当杠杆去修构图 —— 用错了地方。现在的分工是一条线：
+   *   参考图  长相、服装、环境、色调  → 是什么
+   *   文字    景别、机位、构图、动作  → 怎么拍
+   * 而这条线必须**明写进提示词**，模型不会自己知道我们是这么分的。
+   */
+  check('景别不再影响发哪几张图（撤掉了那堆特例）',
+    JSON.stringify(cs.pickRefs(three, all).images) === JSON.stringify(['scene', 'face', 'prop']),
+    JSON.stringify(cs.pickRefs(three, all).images));
+
+  /**
+   * ⚠ **每次带参考图都要声明这条分工**，不能只在特写时说。
+   * 只在特写时说的话，中景那些镜头照样会照抄参考图的取景。
+   */
+  const withRefs = cs.assemblePrompt({
+    style: { anchor: '国风', palette: '青灰', negative: '' },
+    characters: [{ name: '阿澜', appearance: '短发', seed: 1, sheetPath: '/a.png', sheetUrl: 'https://x/a.png', sheetSource: 'upload' }],
+    scenes: [], props: []
+  }, { id: 'z', index: 1, characters: ['阿澜'], description: '走过来', camera: '中景' });
+  check('带参考图时，明写"构图按文字来、别沿用参考图的取景"',
+    /不要沿用参考图的取景/.test(withRefs.prompt), withRefs.prompt.slice(-120));
+
+  /**
+   * ⚠ 景别要配一句**画面上能验的话**。
+   *
+   * "特写"是行话，两个字要和几百字的外貌、环境描述抢注意力，
+   * 而且各家模型理解不一致 —— 那正是"标了特写出来是远景"的另一半原因。
+   */
+  const pz2 = await import('../core/pipeline/previz.js');
+  check('特写配上"只到肩膀以上"这种能验的说明',
+    /肩膀以上/.test(pz2.framingHint('特写')), pz2.framingHint('特写'));
+  check('全景配的是"全身完整入镜"', /全身完整入镜/.test(pz2.framingHint('全景')), pz2.framingHint('全景'));
+  /** ⚠ 长的要先匹配，否则"大特写"会被当成"特写" */
+  check('大特写不会被当成特写（长的先匹配）',
+    pz2.framingHint('大特写') !== pz2.framingHint('特写')
+      && /面部局部/.test(pz2.framingHint('大特写')), pz2.framingHint('大特写'));
+  /** 用户手填的是自由文本，全等匹配十有八九对不上 */
+  check('手填的自由文本也认得出（"中景，过肩"）',
+    /腰部以上/.test(pz2.framingHint('中景，过肩')), pz2.framingHint('中景，过肩'));
+  check('没填景别时不硬塞一句', pz2.framingHint('') === '' && pz2.framingHint(null) === '', '');
+  check('认不出的词不硬塞', pz2.framingHint('随便拍拍') === '', pz2.framingHint('随便拍拍'));
+
+  /**
+   * ⚠ **端到端：单独重出这一镜时，那张场景图真的没发出去。**
+   *
+   * 上面全是纯函数。而传 tight 的地方有**两处**：批量出图（consistency）
+   * 和单独重出（studio）。金丝雀验的时候把 studio 那处删掉，
+   * 套件照样全绿 —— 也就是说纯函数绿不代表两条路都接上了。
+   * 判据必须落在请求体上。
+   */
+  {
+    const keepMode2 = settings.get('refMode');
+    settings.patch({ refMode: 'all', useReferenceImages: true });
+    const sheet = (n) => ({
+      name: n, appearance: `${n} 的样子`, seed: 7,
+      sheetPath: `/${n}.png`, sheetUrl: `https://x/${n}.png`, sheetSource: 'model',
+      variants: [{ id: 'v-default', name: '默认', sheetPath: `/${n}.png`, sheetUrl: `https://x/${n}.png`, sheetSource: 'model' }]
+    });
+    const pT = store.create({ title: '特写不发场景图' });
+    store.update(pT.id, (x) => {
+      x.bible = {
+        style: { anchor: '国风', palette: '青灰', negative: '' },
+        characters: [sheet('阿澜')], scenes: [sheet('码头')], props: []
+      };
+      x.shots = [{
+        id: 'tight', index: 1, scene: '码头', characters: ['阿澜'],
+        description: '阿澜的脸', camera: '特写', duration: 4
+      }];
+      return x;
+    });
+    upstream.lastImageBody = null;
+    await studioModule.regenerateShot(pT.id, 'tight', {}, () => {});
+    const sentImgs = JSON.stringify(upstream.lastImageBody?.image || '');
+    /**
+     * ⚠ 判据落在**请求体**上。金丝雀验过：纯函数的断言绿，
+     * 不代表两条路（批量出图 / 单独重出）都接上了。
+     */
+    check('特写时那张场景图照发（环境的像素级基准，不能丢）',
+      sentImgs.includes('码头'), sentImgs.slice(0, 160));
+    check('角色那张也在', sentImgs.includes('阿澜'), sentImgs.slice(0, 160));
+    /** 构图交给文字：这两句必须都在提示词里 */
+    const pr = String(upstream.lastImageBody?.prompt || '');
+    check('提示词里明写了"构图按文字来，别沿用参考图的取景"',
+      /不要沿用参考图的取景/.test(pr), pr.slice(-160));
+    check('而且景别配了能验的说明（不是孤零零两个字）',
+      /肩膀以上/.test(pr), pr.slice(-160));
+    settings.patch({ refMode: keepMode2 });
+  }
+
+  /** 没超上限时不该报"被挤掉" */
+  const few = cs.pickRefs({
+    images: ['s', 'c1'], labels: ['景', '角'], paths: [null, null],
+    kinds: ['scene', 'character'], sources: ['model', 'model']
+  }, all);
+  check('没超上限时不报"被挤掉"', few.capped === 0 && few.images.length === 2, String(few.capped));
+
+  /** 上限可调 —— 想多发的人不该被一个写死的 4 卡住 */
+  const keepMax = settings.get('maxRefs');
+  settings.patch({ maxRefs: 7 });
+  check('上限可以调大', cs.pickRefs(many, all).images.length === 7,
+    String(cs.pickRefs(many, all).images.length));
+  settings.patch({ maxRefs: keepMax });
+}
+
+/**
+ * ══════════ 一次改一批镜头 ══════════
+ *
+ * 五十镜逐个点开、改、关掉、再点下一个 —— 这是这个应用里最大的一块
+ * 时间黑洞，而且它不产生任何创作价值，纯粹是操作损耗。
+ *
+ * ⚠ 这一节里**最要紧的两条**都是关于"别悄悄毁掉已有的东西"：
+ *   ① 技法卡是加/减，不是覆盖 —— 覆盖会把每一镜各自挑的运镜全清掉
+ *   ② 规整要走 updateShot 那一份 —— 两份判据迟早漂，而漂的表现是
+ *      "单个改是对的、批量改出来不一样"，最难查
+ */
+section('批量改：一次改一批镜头');
+{
+  const pB = store.create({ title: '批量改' });
+  const mk = (i, extra = {}) => ({
+    id: `b${i}`, index: i, scene: '码头', characters: ['阿澜'],
+    description: `第 ${i} 镜`, camera: '中景', duration: 4, skills: [], ...extra
+  });
+  store.update(pB.id, (x) => {
+    x.shots = [
+      mk(1, { skills: ['tracking'] }),
+      mk(2, { skills: [] }),
+      mk(3, { duration: 9 })
+    ];
+    return x;
+  });
+
+  const r1 = studioModule.batchUpdateShots(pB.id, { ids: ['b1', 'b2'], patch: { duration: 6 } });
+  const after1 = store.read(pB.id).shots;
+  check('选中的那两镜时长都改了', after1[0].duration === 6 && after1[1].duration === 6,
+    JSON.stringify(after1.map((s) => s.duration)));
+  /** ⚠ 没选的那一镜**一个字都不能动**。批量最容易犯的错就是范围放大了 */
+  check('没选的那一镜原样没动', after1[2].duration === 9, String(after1[2].duration));
+  check('回报了几镜真的有变化（都一样的话应该是 0）', r1.changed === 2 && r1.total === 2,
+    JSON.stringify({ changed: r1.changed, total: r1.total }));
+
+  /**
+   * ⚠ **技法卡是加，不是覆盖。**
+   *
+   * 第 1 镜原来有一张手持。覆盖式实现会把它清掉换成新的 ——
+   * 而那是他一镜一镜挑出来的东西，清掉了不会有任何提示。
+   */
+  studioModule.batchUpdateShots(pB.id, { ids: ['b1', 'b2'], addSkills: ['low-angle'] });
+  const after2 = store.read(pB.id).shots;
+  check('加技法卡时，原来那张留着（不是覆盖）',
+    after2[0].skills.includes('tracking') && after2[0].skills.includes('low-angle'),
+    JSON.stringify(after2[0].skills));
+  check('原来没有的那一镜也加上了', after2[1].skills.includes('low-angle'),
+    JSON.stringify(after2[1].skills));
+
+  /** 去掉只去掉指定那张，别的不动 */
+  studioModule.batchUpdateShots(pB.id, { ids: ['b1'], removeSkills: ['low-angle'] });
+  const after3 = store.read(pB.id).shots;
+  check('去掉一张时，别的技法卡留着',
+    after3[0].skills.includes('tracking') && !after3[0].skills.includes('low-angle'),
+    JSON.stringify(after3[0].skills));
+
+  /** 重复加不该出现两份 */
+  studioModule.batchUpdateShots(pB.id, { ids: ['b1'], addSkills: ['tracking'] });
+  const dup = store.read(pB.id).shots[0].skills.filter((x) => x === 'tracking');
+  check('重复加同一张不会出现两份', dup.length === 1, JSON.stringify(store.read(pB.id).shots[0].skills));
+
+  /**
+   * ⚠ **规整必须和单个改是同一份。**
+   *
+   * updateShot 里那一大段（时长夹到 0.5~30、link 只认三种、技法卡互斥组）
+   * 是一年踩出来的。批量这条路自己再写一份的话，两边迟早漂 ——
+   * 而漂的表现是"单个改是对的、批量改出来不一样"，最难查。
+   *
+   * 判据：给一个越界的时长，两条路要夹到同一个数。
+   */
+  studioModule.batchUpdateShots(pB.id, { ids: ['b1'], patch: { duration: 999 } });
+  studioModule.updateShot(pB.id, 'b2', { duration: 999 });
+  const clamped = store.read(pB.id).shots;
+  check('越界的时长，批量和单个夹到同一个数（说明共用一份规整）',
+    clamped[0].duration === clamped[1].duration && clamped[0].duration === 30,
+    JSON.stringify([clamped[0].duration, clamped[1].duration]));
+
+  /** 乱值不该悄悄写进去 —— link 只认三种 */
+  studioModule.batchUpdateShots(pB.id, { ids: ['b1'], patch: { link: '瞎写的' } });
+  check('乱写的衔接关系不会被存进去', store.read(pB.id).shots[0].link !== '瞎写的',
+    String(store.read(pB.id).shots[0].link));
+
+  /** 空的、不存在的：要报错，不能默默成功 */
+  let err1 = '';
+  try { studioModule.batchUpdateShots(pB.id, { ids: [] }); } catch (e) { err1 = e.message; }
+  check('一镜都没选时会报错，不是默默什么都不做', /没说要改哪几镜/.test(err1), err1);
+  let err2 = '';
+  try { studioModule.batchUpdateShots(pB.id, { ids: ['不存在'], patch: { duration: 5 } }); } catch (e) { err2 = e.message; }
+  check('选中的镜头都不存在时说清楚（多半是页面旧了）', /一个都不存在/.test(err2), err2);
+
+  /**
+   * ⚠ 改过要盖 editedAt —— 出视频那步的"图比描述旧"靠它判。
+   * 批量改完不盖的话，那条检查在批量改过的镜头上永远是瞎的。
+   */
+  const before = store.read(pB.id).shots[2].editedAt || '';
+  studioModule.batchUpdateShots(pB.id, { ids: ['b3'], patch: { camera: '特写' } });
+  check('批量改也会盖上"改过的时间"（"图比描述旧"那条检查靠它）',
+    Boolean(store.read(pB.id).shots[2].editedAt) && store.read(pB.id).shots[2].editedAt !== before,
+    String(store.read(pB.id).shots[2].editedAt));
+}
+
+/**
+ * ══════════ 开跑之前的那张清单 ══════════
+ *
+ * 这条流水线上每一步都真花钱。而绝大多数返工的原因，在按下「开始」之前
+ * 就已经明明白白摆在数据里了 —— 没排位、没选技法卡、台词根本念不完、
+ * 首帧图是照旧描述出的。
+ *
+ * ⚠ 这一节里**最重要的不是"检查得出问题"，是"没问题时闭嘴"**。
+ *
+ * 一个动不动就报一片黄的清单，三次之后就被整块跳过 —— 连真正该拦的
+ * 那条一起跳过，比没有更坏。所以这里既验"该说的说了"，
+ * 也验"干净的项目上一条都不说"。
+ */
+section('开跑之前：这一步花多少、哪几处该先改');
+{
+  const sck = await import('../core/pipeline/stepcheck.js');
+  const mkShot = (i, extra = {}) => ({
+    id: `s${i}`, index: i, scene: '码头', characters: ['阿澜'],
+    description: '阿澜走向栈桥', camera: '中景', duration: 4,
+    skills: ['act-walk'],
+    stage: { cam: { x: 0, y: -4, height: 1.6, lens: 35 }, subjects: [{ name: '阿澜', x: 0, y: 0 }] },
+    ...extra
+  });
+  const bible = {
+    style: { anchor: '国风', palette: '青灰', negative: '' },
+    characters: [{ name: '阿澜', voice: 'v1' }], scenes: [], props: []
+  };
+
+  /**
+   * ⚠ **干净的项目上一条都不报。**这条是整节的地基：它一红，
+   * 整个功能就该扔掉重做 —— 没人会看一个天天喊狼来了的清单。
+   */
+  const clean = sck.check({ bible, shots: [mkShot(1), mkShot(2)] }, 'assets');
+  check('干净的项目上，一条都不报', clean.items.length === 0,
+    JSON.stringify(clean.items.map((i) => i.what)));
+  /**
+   * ⚠ 但**要明说"检查过了"**，不能回空串。
+   * 整块消失的话，"这里什么都没有"和"检查过了、干净的"分不出来，
+   * 而前者会让人自己再查一遍 —— 那正是这个功能要消灭的往返。
+   */
+  check('干净时也要说一句"检查过了"，不能整块消失',
+    /没发现问题/.test(sck.summary(clean)), sck.summary(clean));
+
+  // ── 出图之前 ──
+  const noSkill = sck.check({ bible, shots: [mkShot(1, { skills: [] }), mkShot(2)] }, 'assets');
+  const skillItem = noSkill.items.find((i) => i.id === 'no-skill');
+  check('出图前：一张技法卡都没选的镜头会被点出来', Boolean(skillItem),
+    JSON.stringify(noSkill.items.map((i) => i.id)));
+  /**
+   * ⚠ 每一条都必须回答三件事：**是什么、会怎样、怎么改**。
+   * 缺"会怎样"的提示不如不做 —— 它只会训练用户无视所有提示。
+   */
+  check('而且说得出"会怎样"和"怎么改"，不是光报一个数',
+    Boolean(skillItem?.why) && Boolean(skillItem?.fix) && skillItem.why.length > 20,
+    JSON.stringify({ why: skillItem?.why?.slice(0, 30), fix: skillItem?.fix?.slice(0, 20) }));
+  check('点得出是哪几镜（不然要人自己去翻）',
+    JSON.stringify(skillItem?.shots) === JSON.stringify([1]), JSON.stringify(skillItem?.shots));
+
+  const noStage = sck.check({ bible, shots: [mkShot(1, { stage: null })] }, 'assets');
+  check('出图前：没排位的镜头会被点出来',
+    noStage.items.some((i) => i.id === 'no-stage'), JSON.stringify(noStage.items.map((i) => i.id)));
+
+  // ── 出视频之前 ──
+  const vid = sck.check({ bible, shots: [mkShot(1, { imagePath: null })] }, 'video');
+  const block = vid.items.find((i) => i.id === 'no-first-frame');
+  /**
+   * ⚠ 这条必须是 blocker：没有首帧图，视频的人脸服装场景全靠文字重新发挥，
+   * 而出视频是全流程里最贵的一步 —— 跑下去几乎一定要重做。
+   */
+  check('出视频前：还没出图是 blocker，不是"建议"',
+    block?.level === 'blocker', JSON.stringify({ level: block?.level }));
+  check('而且计到了 blockers 上（界面靠它决定拦不拦）', vid.blockers === 1, String(vid.blockers));
+
+  const staleFrame = sck.check({ bible, shots: [mkShot(1, {
+    imagePath: '/a.png', imageAt: '2026-01-01T00:00:00Z', editedAt: '2026-02-01T00:00:00Z'
+  })] }, 'video');
+  check('出视频前：描述改过而图是旧的，会被点出来',
+    staleFrame.items.some((i) => i.id === 'stale-frame'),
+    JSON.stringify(staleFrame.items.map((i) => i.id)));
+
+  const longLine = sck.check({ bible, shots: [mkShot(1, {
+    imagePath: '/a.png', duration: 2,
+    dialogue: '这句话很长很长很长很长很长很长很长很长很长很长很长很长很长很长'
+  })] }, 'video');
+  check('出视频前：台词在这个时长里念不完，会被点出来',
+    longLine.items.some((i) => i.id === 'dialogue-overflow'),
+    JSON.stringify(longLine.items.map((i) => i.id)));
+
+  // ── 配音之前 ──
+  const voice = sck.check({ bible, shots: [mkShot(1, { dialogue: '设备正常。', speaker: '' })] }, 'voice');
+  check('配音前：有台词没说是谁在说，会被点出来',
+    voice.items.some((i) => i.id === 'no-speaker'), JSON.stringify(voice.items.map((i) => i.id)));
+
+  /**
+   * ⚠ **只看这一步真要跑的那些镜头。**
+   *
+   * 已经出过图的那几镜有没有选技法卡，跟"这一次出图"毫无关系 ——
+   * 报了只会让清单一直挂着几条永远消不掉的黄字，而消不掉的提醒
+   * 会被当成噪音，连带着新出现的那条也被无视。
+   */
+  const partial = sck.check({ bible, shots: [
+    mkShot(1, { imagePath: '/done.png', skills: [] }), // 已经出过图，这次不跑它
+    mkShot(2)
+  ] }, 'assets');
+  check('只看这一步真要跑的那几镜（已出图的不算数）',
+    partial.items.length === 0 && partial.targets === 1,
+    JSON.stringify({ items: partial.items.map((i) => i.id), targets: partial.targets }));
+  /** 整步重跑时它们又都算数了 —— 那时候确实要重出 */
+  const redo = sck.check({ bible, shots: [
+    mkShot(1, { imagePath: '/done.png', skills: [] }), mkShot(2)
+  ] }, 'assets', { regenerate: true });
+  check('整步重跑时，已出图的那几镜又算数了',
+    redo.targets === 2 && redo.items.some((i) => i.id === 'no-skill'),
+    JSON.stringify({ targets: redo.targets }));
+
+  /**
+   * ⚠ **分级不能膨胀。**把"可以更好"标成 warn 的话，用户看到一片黄，
+   * 然后学会整块跳过 —— 连真正的 blocker 一起跳过。
+   */
+  const levels = new Set([...noSkill.items, ...vid.items, ...voice.items].map((i) => i.level));
+  check('分级只有三档，没有多出来的',
+    [...levels].every((l) => ['blocker', 'warn', 'tip'].includes(l)), JSON.stringify([...levels]));
+
+  /**
+   * 支点那句话：清单只是信息，"现在改免费、跑完再改要重花一次"
+   * 才把它变成一个决定。没有它的话，最省事的做法永远是直接按「开始」。
+   */
+  check('有问题且算得出钱时，说得出"不改的代价"',
+    /现在改是免费的/.test(sck.costOfSkipping(noSkill, '¥8.40')), sck.costOfSkipping(noSkill, '¥8.40'));
+  /** ⚠ 算不出钱时**不能编一个**：他会照着那个数做决定 */
+  check('算不出钱时就不说这句（编个数字比不说更坏）',
+    sck.costOfSkipping(noSkill, '') === '', sck.costOfSkipping(noSkill, ''));
+  check('没问题时也不说这句（没有代价可言）',
+    sck.costOfSkipping(clean, '¥8.40') === '', sck.costOfSkipping(clean, '¥8.40'));
+}
+
+section('OpenAI 家族带参考图：要走 /images/edits，不是塞个地址');
+{
+  const adaptersMod = await import('../core/providers/adapters.js');
+  const seen = { paths: [], types: [], bodies: [] };
+  const oa = http.createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      seen.paths.push(new URL(req.url, 'http://x').pathname);
+      seen.types.push(req.headers['content-type'] || '');
+      seen.bodies.push(Buffer.concat(chunks));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      /**
+       * ⚠ base64 要给**真实长度**的。firstBase64 有一条 `length > 100` 的护栏
+       *（防止把随便一个短字符串当成图片），给 'aGk=' 这种四个字符的假数据，
+       * 走到的是"响应里没有图"那条错误分支 —— 而那不是被测代码的问题，
+       * 是夹具比真实响应短了两个数量级。
+       */
+      res.end(JSON.stringify({ data: [{ b64_json: PIXEL_PNG.toString('base64').repeat(3) }] }));
+    });
+  });
+  await new Promise((r) => oa.listen(0, '127.0.0.1', r));
+  settings.patch({ baseUrls: { openai: `http://127.0.0.1:${oa.address().port}/v1` } });
+  vault.setSecret('OPENAI_API_KEY', 'sk-edits-test');
+
+  // 一张真 PNG（就是那个 1×1 像素），当成"用户传的脸"
+  const facePng = `data:image/png;base64,${PIXEL_PNG.toString('base64')}`;
+
+  {
+    const got = await adaptersMod.generateImage({
+      providerId: 'openai', model: 'gpt-image-2', prompt: '阿澜走向栈桥',
+      size: '1024*1024', refImages: [facePng], label: '出图'
+    });
+    check('带参考图时发到 /images/edits（不是 /images/generations）',
+      seen.paths.at(-1) === '/v1/images/edits', JSON.stringify(seen.paths));
+    /**
+     * ⚠ 必须是 multipart。发成 JSON 的话 OpenAI 那边收不到文件 ——
+     * 而这正是修之前的样子：JSON 里一个 image 字段，被整个忽略。
+     */
+    check('而且是 multipart 上传文件，不是 JSON 里塞地址',
+      /multipart\/form-data; boundary=/.test(seen.types.at(-1)), seen.types.at(-1));
+    const raw = seen.bodies.at(-1).toString('latin1');
+    // 中文要按 utf8 读 —— 上面那份 latin1 是给二进制部分用的
+    const text = seen.bodies.at(-1).toString('utf8');
+    check('请求体里真的带了图片文件（不是一个 URL 字符串）',
+      /name="image\[\]"; filename="ref-1\.png"/.test(raw), raw.slice(0, 200));
+    check('文件类型标对了（后缀不对 OpenAI 会直接拒收）',
+      /Content-Type: image\/png/.test(raw), raw.slice(0, 300));
+    check('提示词也一起发过去了（脸来自图，衣服和场景来自它）',
+      /name="prompt"[\s\S]*阿澜走向栈桥/.test(text), text.slice(0, 400));
+    /**
+     * ⚠ **发过去的模型得是这一家真有的。**
+     *
+     * 「图生图模型」默认是火山的 doubao-seededit-3-0-i2i，而原来那个 switch
+     * 只判"这家支不支持 i2i"—— OpenAI 支持，于是把一个**火山的模型 id
+     * 发给了 OpenAI**。必然"模型不存在"，而用户看到的只是出图失败。
+     * 这条是上面那条打印请求体时顺手撞出来的。
+     */
+    check('发过去的模型还是 gpt-image-2（没被换成别家的编辑模型）',
+      /name="model"[\s\S]*gpt-image-2/.test(text), text.slice(0, 200));
+    check('出来的图收下了', typeof got.base64 === 'string' && got.base64.length > 100, String(got.base64).slice(0, 40));
+    /**
+     * refsSent 要如实 —— 今天已经为"记的是意图不是事实"修过两回了。
+     */
+    check('如实记下发了几张参考图', got.used?.refsSent === 1, JSON.stringify(got.used));
+  }
+
+  // ── 不带参考图时照旧走 generations ──
+  {
+    await adaptersMod.generateImage({
+      providerId: 'openai', model: 'gpt-image-2', prompt: '空镜', size: '1024*1024', label: '出图'
+    });
+    check('没有参考图时还是走 /images/generations（别把纯文生图也改道）',
+      seen.paths.at(-1) === '/v1/images/generations', JSON.stringify(seen.paths));
+    check('那条路照旧是 JSON', /application\/json/.test(seen.types.at(-1)), seen.types.at(-1));
+  }
+
+  // ── 多张参考图 ──
+  {
+    await adaptersMod.generateImage({
+      providerId: 'openai', model: 'gpt-image-2', prompt: '两个人', size: '1024*1024',
+      refImages: [facePng, facePng], label: '出图'
+    });
+    const raw = seen.bodies.at(-1).toString('latin1');
+    const parts = (raw.match(/filename="ref-\d+\.png"/g) || []).length;
+    check('多张参考图each一个文件部分（不是只发第一张）', parts === 2, `${parts} 个文件部分`);
+  }
+
+  oa.close();
+  settings.patch({ baseUrls: { openai: '' } });
+}
+
+section('「接口地址」那一屏：每个接口键都得有中文标签');
+{
+  /**
+   * ══════════ 为什么值得单独一条 ══════════
+   *
+   * 目录里加一个 endpoints 键，界面上就多一个输入框。而标签表在
+   * ui/views/providers.js 里，是**另一个文件** —— 漏了不报错、不报警，
+   * 只是那一行显示成裸的 `videos` / `se2v`。
+   *
+   * 后果不是难看，是**不敢改**：一排中文里夹一个英文键名，用户看不出
+   * 那是哪一步的地址，于是明明能自己修好的中转路径问题，会变成一句
+   * "填哪个？"。而「接口地址」这一块存在的全部理由就是让人自己改。
+   *
+   * 加这条的时候已经漏了三个（se2v、sfx，以及刚加的 videos）。
+   *
+   * ⚠ 用读源码的方式取那张表，而不是 import ——
+   * providers.js 是浏览器模块（依赖 DOM），Node 里 import 不动。
+   * core/surfaces.js 那套 `// cap:` 标记也是同样的做法。
+   */
+  const cat = await import('../core/providers/catalog.js');
+  const src = fs.readFileSync(new URL('../ui/views/providers.js', import.meta.url), 'utf8');
+  const block = /const ENDPOINT_LABELS = \{([\s\S]*?)\n\};/.exec(src);
+  check('找得到那张标签表（改名了的话这条要跟着改）', Boolean(block), '没匹配到 ENDPOINT_LABELS');
+
+  const labelled = new Set([...(block?.[1] || '').matchAll(/^\s*([A-Za-z0-9_]+)\s*:/gm)].map((m) => m[1]));
+  /** 夹具自检：表本身得真解析出东西来，不然下面那条恒真 */
+  check('标签表解析出来了（不是空集合，否则下一条恒真）',
+    labelled.size >= 10, `解析到 ${labelled.size} 条`);
+
+  const used = new Set();
+  for (const p of cat.PROVIDERS) for (const k of Object.keys(p.endpoints || {})) used.add(k);
+  const missing = [...used].filter((k) => !labelled.has(k)).sort();
+  check('目录里用到的每一个接口键都有中文标签',
+    missing.length === 0, `没标签的：${missing.join('、')}`);
+}
+
+section('Agnes AI 出图：三处和 OpenAI 长得像但不一样的地方');
+{
+  const adaptersMod = await import('../core/providers/adapters.js');
+  const cat = await import('../core/providers/catalog.js');
+
+  const seen = { bodies: [], paths: [], auth: [] };
+  const srv = http.createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      seen.paths.push(req.url);
+      seen.auth.push(req.headers.authorization || '');
+      seen.bodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        created: 1780000000,
+        data: [{ url: 'https://storage.googleapis.com/agnes-aigc/xxx.png', b64_json: null, revised_prompt: null }]
+      }));
+    });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  settings.patch({ baseUrls: { agnes: `http://127.0.0.1:${srv.address().port}/v1` } });
+  vault.setSecret('AGNES_API_KEY', 'sk-agnes-test');
+
+  const M = 'agnes-image-2.1-flash';
+  const facePng = `data:image/png;base64,${PIXEL_PNG.toString('base64')}`;
+  const last = () => seen.bodies.at(-1);
+
+  // ── ① 尺寸：档位 + 宽高比，不是像素 ──
+  {
+    const got = await adaptersMod.generateImage({
+      providerId: 'agnes', model: M, prompt: '执法艇破雾而行', aspectRatio: '16:9', label: '出图'
+    });
+    check('打到 /v1/images/generations', seen.paths.at(-1) === '/v1/images/generations', String(seen.paths.at(-1)));
+    check('Bearer 鉴权带上了', seen.auth.at(-1) === 'Bearer sk-agnes-test', seen.auth.at(-1));
+    /**
+     * ⚠ 这一条是这一节的核心。发 '1280*720' 过去不会报错 ——
+     * 文档明说不受支持的精确尺寸会被"自动标准化"，于是请求记录里写着
+     * 1280×720、任务成功、出来的图是别的尺寸。这种事看日志查不出来。
+     */
+    check('16:9 发的是档位 2K 而不是像素', last().size === '2K', JSON.stringify(last().size));
+    check('宽高比单独走 ratio 字段', last().ratio === '16:9', JSON.stringify(last().ratio));
+    check('收下了 data[0].url', got.url === 'https://storage.googleapis.com/agnes-aigc/xxx.png', String(got.url));
+  }
+
+  // ── ①b 换尺寸的理由要说对 ──
+  {
+    const notes = [];
+    await adaptersMod.generateImage({
+      providerId: 'agnes', model: M, prompt: '换尺寸提示', aspectRatio: '16:9', label: '出图',
+      onEvent: (e) => { if (e?.type === 'note') notes.push(String(e.message || '')); }
+    });
+    const sizeNote = notes.find((n) => n.includes('2624×1472'));
+    check('换过尺寸会说一声（不说的话请求记录和画幅对不上）', Boolean(sizeNote), JSON.stringify(notes));
+    /**
+     * ⚠ 通用那句写的是"它收不下，硬发会被它自己换成别的比例"——
+     * 那是给 enum 那一类（gpt-image-1、Seedream 3.0）写的，它们是真的收不下。
+     *
+     * Agnes 是**收得下但会自己改**。对这家说"收不下"是错的，而错的解释
+     * 比不解释更坏：用户会去找一个根本不存在的报错。
+     */
+    check('而且没照抄"它收不下"（Agnes 收得下，只是会自己改）',
+      sizeNote && !sizeNote.includes('收不下'), String(sizeNote));
+    check('说的是真正的理由：只有四档，1K 比 1080p 还矮',
+      sizeNote && sizeNote.includes('1312×736'), String(sizeNote));
+  }
+
+  // ── ② response_format 绝不能在顶层 ──
+  {
+    check('顶层没有 response_format（文档专门用「重要说明」提的）',
+      !('response_format' in last()), JSON.stringify(Object.keys(last())));
+    check('它在 extra_body 里', last().extra_body?.response_format === 'url', JSON.stringify(last().extra_body));
+  }
+
+  // ── ③ 竖屏 ──
+  {
+    await adaptersMod.generateImage({
+      providerId: 'agnes', model: M, prompt: '竖屏短剧', aspectRatio: '9:16', label: '出图'
+    });
+    check('竖屏画幅出竖图（横图裁竖屏会把人裁掉半张脸）',
+      last().size === '2K' && last().ratio === '9:16', JSON.stringify({ size: last().size, ratio: last().ratio }));
+  }
+
+  // ── ④ 参考图：两个位置都要有 ──
+  {
+    const notes = [];
+    await adaptersMod.generateImage({
+      providerId: 'agnes', model: M, prompt: '保持这个人的长相', aspectRatio: '16:9',
+      refImages: [facePng, facePng], label: '出图',
+      onEvent: (e) => { if (e?.type === 'note') notes.push(String(e.message || '')); }
+    });
+    /**
+     * 文档「请求参数」表说顶层 image，正文两处说 extra_body.image。
+     * 挑错一个 = 200、有图、请求记录里列着参考图，而图根本没进模型。
+     * 两个都发，等确认了哪个对再删另一个。
+     */
+    check('参考图放进了 extra_body.image',
+      Array.isArray(last().extra_body?.image) && last().extra_body.image.length === 2,
+      JSON.stringify((last().extra_body?.image || []).length));
+    /**
+     * ⚠ 这一条是真机换来的。原来两个位置都放（怕挑错一个静默降级），
+     * 结果服务端**两处都读、加在一起**：
+     *   `too many input images: 8 provided, at most 6 allowed`
+     * 4 张被数成 8 张，直接顶穿上限。
+     *
+     * 教训：在一个会累加的字段上做"两边都发"的冗余保险，保险本身就是故障。
+     */
+    check('**没有**同时放顶层 image（服务端两处都读、会加起来）',
+      !('image' in last()), JSON.stringify(Object.keys(last())));
+    const sent = [...(last().extra_body?.image || []), ...(last().image || [])];
+    check('整个请求体里这张脸只出现两次（两张图，不是四次）',
+      sent.filter((u) => u === facePng).length === 2, `出现 ${sent.filter((u) => u === facePng).length} 次`);
+    /**
+     * ⚠ 带参考图时不许换模型。
+     *
+     * 「设置 → 图生图模型」默认是火山的 doubao-seededit-3-0-i2i。
+     * 没有 i2iSameModel 这个声明的话，这里会把那个火山 id 发给 Agnes，
+     * 或者弹一句"请改成 Agnes 自己的编辑模型"—— 而 Agnes 没有编辑模型，
+     * 同一个模型两件事都干。
+     */
+    check('模型没被换成别家的编辑模型', last().model === M, String(last().model));
+    /**
+     * ⚠ 上面那条**恒真**，别拿它当 i2iSameModel 的证据。
+     *
+     * 推红验过：把目录里的 i2iSameModel 去掉，那条照样绿 —— 因为
+     * doubao-seededit 不属于 Agnes，i2iBelongs 是 false，本来就换不成。
+     *
+     * 去掉之后真正会发生的是**弹一句误导的话**："Agnes 没有 doubao-seededit
+     * 这个模型，要用图生图的话改成 Agnes 自己的编辑模型" —— 而 Agnes
+     * 压根没有单独的编辑模型，照着改是死路。所以断言要落在这句话上。
+     */
+    check('也没弹"去配一个 Agnes 的编辑模型"（它没有，同一个模型两件事都干）',
+      !notes.some((n) => /图生图模型|编辑模型/.test(n)), JSON.stringify(notes));
+  }
+
+  // ── ④b 超过它 6 张的上限时，在发出去之前就挤掉 ──
+  {
+    const notes = [];
+    const many = Array.from({ length: 9 }, (_, i) => `https://cdn.example.com/ref-${i}.png`);
+    const got = await adaptersMod.generateImage({
+      providerId: 'agnes', model: M, prompt: '一堆参考图', aspectRatio: '16:9',
+      refImages: many, label: '出图',
+      onEvent: (e) => { if (e?.type === 'note') notes.push(String(e.message || '')); }
+    });
+    check('9 张只发 6 张（它的上限，真机报错里给的数）',
+      last().extra_body.image.length === 6, String(last().extra_body.image.length));
+    check('留下的是排在前面那 6 张（人物在前，挤掉的是道具）',
+      JSON.stringify(last().extra_body.image) === JSON.stringify(many.slice(0, 6)),
+      JSON.stringify(last().extra_body.image));
+    check('挤掉了会说一声', notes.some((n) => n.includes('最多收 6 张')), JSON.stringify(notes));
+    /**
+     * ⚠ refsSent 记的必须是**发了几张**，不是**打算发几张**。
+     * 这个文件里已经为"记的是意图不是事实"修过好几回了；
+     * 这里一旦记 9，那条"这一镜一张参考图都没发"的诊断就跟着失真。
+     */
+    check('refsSent 记的是 6 不是 9（发了几张，不是打算发几张）',
+      got.used.refsSent === 6, JSON.stringify(got.used));
+  }
+
+  // ── ④c "图太多"要被认出来，不能只是一个裸的 400 ──
+  {
+    const real = 'too many input images: 8 provided, at most 6 allowed (request id: 2026...)';
+    check('认得出 Agnes 这句"图太多"（原话照抄自真机报错）',
+      adaptersMod.__isMediaLimitError(real), real);
+    /** ⚠ 别误伤：取不到图的地址不是"图太多"，认错了会一路减到 1 张还失败 */
+    check('没有把"取不到图片地址"也当成图太多',
+      !adaptersMod.__isMediaLimitError('cannot download media URL (2013)'), 'cannot download');
+  }
+
+  // ── ⑤ 纯文生图不许带 image 字段 ──
+  {
+    await adaptersMod.generateImage({
+      providerId: 'agnes', model: M, prompt: '空镜', aspectRatio: '16:9', label: '出图'
+    });
+    check('没有参考图时不发空的 image 字段',
+      !('image' in last()) && !('image' in (last().extra_body || {})),
+      JSON.stringify({ top: last().image, inner: last().extra_body?.image }));
+  }
+
+  // ── ⑥ 负向词不能整段丢掉 ──
+  {
+    await adaptersMod.generateImage({
+      providerId: 'agnes', model: M, prompt: '广场上的书信摊', negative: '多余的手指', aspectRatio: '16:9', label: '出图'
+    });
+    check('文档没有 negative_prompt，负向词并进了正向描述',
+      last().prompt.includes('广场上的书信摊') && last().prompt.includes('多余的手指'), last().prompt);
+    check('而且没发一个它不认的 negative_prompt 字段',
+      !('negative_prompt' in last()), JSON.stringify(Object.keys(last())));
+  }
+
+  // ── ⑦ 尺寸反查表本身 ──
+  {
+    const { agnesSizeSpec } = adaptersMod;
+    const a = agnesSizeSpec('2624*1472');
+    check('像素能反查回档位（2624×1472 → 2K / 16:9）',
+      a.size === '2K' && a.ratio === '16:9' && a.guessed === false, JSON.stringify(a));
+    const b = agnesSizeSpec('1K');
+    check('直接给档位也认（联调台里手填的写法）',
+      b.size === '1K' && b.guessed === false, JSON.stringify(b));
+    const c = agnesSizeSpec('1920*1080');
+    check('表里没有的尺寸标记成 guessed（好让界面说一声）', c.guessed === true, JSON.stringify(c));
+    check('而且换算结果还是 16:9（别把比例也换掉）', c.ratio === '16:9', JSON.stringify(c));
+    /**
+     * ⚠ 目录里声明的 imageSizes 必须能被这张表反查到，否则每出一张图
+     * 都会走 guessed 分支、每张都报一次假警。两处数字必须是同一份。
+     */
+    const declared = cat.getProvider('agnes').imageSizes.enum;
+    const allHit = declared.every((sz) => agnesSizeSpec(sz).guessed === false);
+    check('目录里声明的每一个尺寸都能反查到（两处数字是同一份）', allHit,
+      JSON.stringify(declared.filter((sz) => agnesSizeSpec(sz).guessed)));
+  }
+
+  // ── ⑧ 目录条目本身 ──
+  {
+    const p = cat.getProvider('agnes');
+    check('Agnes 不走通用 OpenAI 分支（顶层 response_format 会害了它）',
+      p.family === 'agnes', String(p.family));
+    check('声明了 t2i 和 i2i', ['t2i', 'i2i'].every((c) => p.capabilities.includes(c)), JSON.stringify(p.capabilities));
+    check('声明了同模型图生图', p.i2iSameModel === true, String(p.i2iSameModel));
+    check('模型 id 和文档一致', p.models.some((m) => m.id === M), JSON.stringify(p.models.map((m) => m.id)));
+    /**
+     * 目录里的模板是给联调台用的起手式。图生图那个模板要是没把两个位置
+     * 都写上，用户手动验"参考图到底放哪"的时候就少了一半。
+     */
+    /**
+     * 联调台里那组 A/B 对照必须成对存在 —— 参考图放哪一个位置，
+     * 目前只能靠用户拿一张脸各发一次来定。少一个就没法对照了。
+     */
+    const A = p.templates.find((t) => t.id === 'i2i');
+    const B = p.templates.find((t) => t.id === 'i2i-toplevel');
+    check('A/B 两个对照模板都在', Boolean(A && B), JSON.stringify(p.templates.map((t) => t.id)));
+    check('A 把参考图放 extra_body，且顶层没有',
+      Array.isArray(A?.body?.extra_body?.image) && !('image' in (A?.body || {})), JSON.stringify(A?.body));
+    check('B 把参考图放顶层，且 extra_body 里没有',
+      Array.isArray(B?.body?.image) && !('image' in (B?.body?.extra_body || {})), JSON.stringify(B?.body));
+    /**
+     * ⚠ 两个模板都不许两处同时放 —— 那正是真机否掉的写法
+     *（服务端两处都读、加起来，4 张被数成 8 张）。
+     * 模板要是还留着那种写法，用户照着发一次又会撞同一个 400。
+     */
+    check('没有哪个模板还是"两处同时放"（真机否掉的那种写法）',
+      p.templates.every((t) => !(Array.isArray(t.body?.image) && Array.isArray(t.body?.extra_body?.image))),
+      JSON.stringify(p.templates.filter((t) => t.body?.image && t.body?.extra_body?.image).map((t) => t.id)));
+    check('声明了它 6 张的参考图上限', p.imageMaxRefs === 6, String(p.imageMaxRefs));
+    check('模板里也没有顶层 response_format',
+      p.templates.every((t) => !('response_format' in (t.body || {}))),
+      JSON.stringify(p.templates.map((t) => t.id)));
+  }
+
+  srv.close();
+  settings.patch({ baseUrls: { agnes: '' } });
+}
+
+section('Agnes AI 出视频：异步任务、帧数规矩、以及"以回来的为准"');
+{
+  const adaptersMod = await import('../core/providers/adapters.js');
+  const cat = await import('../core/providers/catalog.js');
+  const idx = await import('../core/providers/index.js');
+
+  const seen = { bodies: [], paths: [] };
+  let mapping = null;
+  let seconds = '5.0';
+  const srv = http.createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      seen.paths.push(req.url);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      if (req.method === 'POST') {
+        seen.bodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'));
+        res.end(JSON.stringify({
+          id: 'task_X', task_id: 'task_X', video_id: 'video_Y',
+          object: 'video', status: 'queued', progress: 0, seconds: '5.0', size: '1280x720'
+        }));
+        return;
+      }
+      res.end(JSON.stringify({
+        id: 'task_X', video_id: 'video_Y', task_id: 'task_X', status: 'completed', progress: 100,
+        seconds,
+        size: '832x448',
+        metadata: {
+          ...(mapping ? { size_mapping: mapping } : {}),
+          url: 'https://platform-outputs.agnes-ai.space/videos/agnes-video-v2.0/task_X.mp4'
+        }
+      }));
+    });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const root = `http://127.0.0.1:${srv.address().port}`;
+  settings.patch({ baseUrls: { agnes: `${root}/v1` }, pollIntervalMs: 10 });
+  vault.setSecret('AGNES_API_KEY', 'sk-agnes-test');
+
+  const V = 'agnes-video-v2.0';
+  const last = () => seen.bodies.at(-1);
+  const frame = (n) => `https://cdn.example.com/shot-${n}.png`;
+
+  // ── ① {{apiRoot}}：查询地址不在 v1 下面 ──
+  {
+    const p = cat.getProvider('agnes');
+    const url = idx.interpolate(p.taskPoll.url, p);
+    check('查询地址落在 v1 外面（{{apiRoot}} 去掉了版本段）',
+      url === `${root}/agnesapi?video_id={taskId}`, url);
+    /**
+     * ⚠ 这一条是这一节里最容易被写死成绝对地址的地方。写死的话，
+     * 用户把根地址改到中转站之后：提交走新地址、查询走老地址 ——
+     * 任务提交成功然后永远查不到，表现是"卡在轮询里"。
+     */
+    check('改了根地址，查询地址跟着动（不是写死的绝对地址）',
+      !/agnes-ai\.cn/.test(url), url);
+  }
+
+  // ── ② 图生视频：帧数、尺寸、单张顶层 image ──
+  {
+    const notes = [];
+    const got = await adaptersMod.generateVideo({
+      providerId: 'agnes', model: V, prompt: '镜头缓慢推进',
+      firstFrameUrl: frame(1), duration: 5, aspectRatio: '16:9', resolution: '720P',
+      label: '出视频', onEvent: (e) => { if (e?.type === 'note') notes.push(String(e.message || '')); }
+    });
+    check('提交打到 /v1/videos', seen.paths[0] === '/v1/videos', JSON.stringify(seen.paths[0]));
+    check('轮询打到 /agnesapi?video_id=video_Y（用 video_id 不是 task_id）',
+      seen.paths.includes('/agnesapi?video_id=video_Y'), JSON.stringify(seen.paths));
+    check('5 秒 @24fps 发的是 121 帧（和文档的推荐值一致）', last().num_frames === 121, String(last().num_frames));
+    check('帧率一起发了', last().frame_rate === 24, String(last().frame_rate));
+    check('16:9 / 720P → 1280×720', last().width === 1280 && last().height === 720,
+      `${last().width}x${last().height}`);
+    check('首帧走顶层 image（单个 URL，不是数组）', last().image === frame(1), JSON.stringify(last().image));
+    check('没有 extra_body（那是关键帧模式的开关）', !('extra_body' in last()), JSON.stringify(Object.keys(last())));
+    check('拿到了 metadata.url', /task_X\.mp4$/.test(String(got.url)), String(got.url));
+  }
+
+  // ── ③ 首尾帧 = 关键帧模式，两种模式不能同时点 ──
+  {
+    await adaptersMod.generateVideo({
+      providerId: 'agnes', model: V, prompt: '过渡',
+      firstFrameUrl: frame(1), lastFrameUrl: frame(2),
+      duration: 5, aspectRatio: '16:9', resolution: '720P', label: '出视频'
+    });
+    check('末帧走 extra_body.image 数组（首帧在前、末帧在后）',
+      JSON.stringify(last().extra_body?.image) === JSON.stringify([frame(1), frame(2)]),
+      JSON.stringify(last().extra_body?.image));
+    check('并且打开了 keyframes 模式', last().extra_body?.mode === 'keyframes', String(last().extra_body?.mode));
+    /**
+     * ⚠ 这一条是这一节的核心。文档的接入清单把两者并排写着：
+     * "图生视频使用 image，关键帧动画使用 extra_body.image" —— 是**两种模式**。
+     *
+     * 两个都发等于同时点了两种模式，它挑哪个我们不知道；挑错的表现是
+     * 末帧被丢掉、衔接照样断，而界面会说这两镜是无缝的。
+     * 出图那条恰恰要两个都发（那边是同一件事的两种写法），别互相抄。
+     */
+    check('关键帧模式下**不再**发顶层 image（两种模式不能同时点）',
+      !('image' in last()), JSON.stringify(Object.keys(last())));
+  }
+
+  // ── ④ 8n+1 规矩 ──
+  {
+    const { agnesFrames } = adaptersMod;
+    const ok = (n) => n <= 441 && (n - 1) % 8 === 0;
+    const cases = [1, 2, 3, 3.4, 5, 7.7, 10, 18, 25];
+    check('任意秒数算出来的帧数都满足 8n+1 且 ≤441',
+      cases.every((s) => ok(agnesFrames(s))),
+      JSON.stringify(cases.map((s) => [s, agnesFrames(s)])));
+    check('超长的截在 441（文档写的硬上限）', agnesFrames(60) === 441, String(agnesFrames(60)));
+    /** 向上取：宁可多出来一点合成时裁掉，也不要把台词切断 */
+    check('向上取而不是就近取（3.4 秒 → 至少 3.4 秒的帧数）',
+      agnesFrames(3.4) / 24 >= 3.4, String(agnesFrames(3.4) / 24));
+    check('5 秒正好是 121 帧', agnesFrames(5) === 121, String(agnesFrames(5)));
+  }
+
+  // ── ⑤ 尺寸被它改过时要说出来 ──
+  {
+    mapping = {
+      adjusted: true, ratio: '16:9', resolution: '480p',
+      width: 832, height: 448, requested_width: 1024, requested_height: 576,
+      message: 'Input size 1024x576 was mapped to nearest preset 480p/16:9 (832x448)'
+    };
+    const notes = [];
+    await adaptersMod.generateVideo({
+      providerId: 'agnes', model: V, prompt: 'x', firstFrameUrl: frame(1),
+      duration: 5, aspectRatio: '16:9', resolution: '480P', label: '出视频',
+      onEvent: (e) => { if (e?.type === 'note') notes.push(String(e.message || '')); }
+    });
+    /**
+     * 它的档位表没有公开，我们猜不出来 —— 但它把改动如实写在
+     * metadata.size_mapping 里了。不读回来的话，请求记录写着 848×480、
+     * 成片是 832×448，而没有任何一处说过这件事。
+     */
+    check('它把尺寸换掉时，原话转达出来',
+      notes.some((n) => n.includes('832x448')), JSON.stringify(notes));
+    mapping = null;
+  }
+
+  // ── ⑥ 时长以回来的为准 ──
+  {
+    seconds = '5.0417';
+    const got = await adaptersMod.generateVideo({
+      providerId: 'agnes', model: V, prompt: 'x', firstFrameUrl: frame(1),
+      duration: 5, aspectRatio: '16:9', resolution: '720P', label: '出视频'
+    });
+    check('记的是响应里的秒数，不是下单时算的那个',
+      Math.abs(got.actualDuration - 5.0417) < 1e-6, String(got.actualDuration));
+    seconds = '5.0';
+  }
+
+  // ── ⑦ data URI 要在提交之前就拦住 ──
+  {
+    let err = null;
+    await adaptersMod.generateVideo({
+      providerId: 'agnes', model: V, prompt: 'x',
+      firstFrameUrl: `data:image/png;base64,${PIXEL_PNG.toString('base64')}`,
+      duration: 5, aspectRatio: '16:9', resolution: '720P', label: '出视频'
+    }).catch((e) => (err = e));
+    /**
+     * 和百炼一模一样的坑：文档写着"需要可公开访问的图片 URL"，
+     * 而我们默认发本地图转的 data URI。不先拦，任务会提交成功、
+     * 然后在轮询里失败 —— 白等一轮，报错里也看不出是这个原因。
+     */
+    check('本地图转的 data URI 在提交前就被拦下（不是白等一轮轮询）',
+      err && /公网 URL/.test(String(err.message)), String(err?.message).slice(0, 80));
+    check('报错里点名是 Agnes，不是照抄百炼那句',
+      err && /Agnes/.test(String(err.message)), String(err?.message).slice(0, 60));
+  }
+
+  // ── ⑧ 目录条目 ──
+  {
+    const p = cat.getProvider('agnes');
+    check('声明了出视频能力', ['t2v', 'i2v'].every((c) => p.capabilities.includes(c)), JSON.stringify(p.capabilities));
+    check('声明了支持末帧（衔接那一套要靠它）', p.videoDefaults?.endFrame === true, String(p.videoDefaults?.endFrame));
+    check('这一步最多两张图（首帧+末帧）', p.videoDefaults?.maxImages === 2, String(p.videoDefaults?.maxImages));
+    const vm = p.models.find((m) => m.id === V);
+    check('视频模型在目录里', Boolean(vm), JSON.stringify(p.models.map((m) => m.id)));
+    /**
+     * 时长上限必须和 441 帧那条硬规矩对得上。写大了的话，用户排一个
+     * 20 秒的镜头，界面显示合法、发出去被截成 18.4 秒，而没人说过这件事。
+     */
+    check('时长上限 18 秒和 441 帧对得上',
+      Math.max(...vm.durations) === Math.floor(441 / 24), JSON.stringify(vm.durations.slice(-3)));
+    check('每一档时长都出得来（算出的帧数不超 441）',
+      vm.durations.every((d) => adaptersMod.agnesFrames(d) <= 441),
+      JSON.stringify(vm.durations.filter((d) => adaptersMod.agnesFrames(d) > 441)));
+  }
+
+  srv.close();
+  settings.patch({ baseUrls: { agnes: '' } });
+}
+
 section('中转站只转对话：不该四条一起红');
 {
   /**
@@ -7633,6 +10344,75 @@ section('连不上境外服务商时，报的是原因不是四个红叉');
   check('给了填中转地址这条路，并指明在哪儿', /接口根地址/.test(oa), oa.slice(-400));
   check('给了"让服务器跑"这条路（他的服务器本来就是通的）',
     /引擎在哪儿跑/.test(oa), oa.slice(-400));
+
+  /**
+   * ⚠ **超时那一支也要说这些话** —— 而它原来一个字都不说。
+   *
+   * 用户真实报上来的：「script】openai / claude-opus-5 拆分镜中…
+   * ✕ 请求超时（180151ms 未返回）」。三分钟，零信息。
+   *
+   * 原因就在 execute 里那一行：
+   *     const message = aborted ? `请求超时(...)` : explainNetworkError(err, url);
+   * 上面这一整段最对症的话，**恰恰在最对症的那次不会出现**。
+   *
+   * 因为墙对这些域名的做法是**丢包**，不是拒绝：TCP 不报错、TLS 不报错，
+   * 连接就挂在那儿，直到我们自己的计时器把它掐掉 —— 走的是 aborted 那一支。
+   * 于是唯一为这种情况写的建议，永远轮不到它出场。
+   */
+  const to = hc.timeoutHintForTest('https://api.openai.com/v1/chat/completions', 180000);
+  check('超时也说清是发往哪个主机的', /api\.openai\.com/.test(to), to.slice(0, 80));
+  check('超时也说了等了多久', /180 秒/.test(to), to.slice(0, 80));
+  check('境外域名超时时，那段"境内直连不通"的话照样给出来',
+    /直连基本不通/.test(to) && /引擎在哪儿跑/.test(to), to.slice(0, 200));
+
+  /**
+   * 不在墙名单里的主机（中转站、本地服务）超时是另一回事，
+   * 要分清"没连上"和"连上了但不吐字"—— 两者下一步动作完全不同，
+   * 而"请求超时"四个字对两者一视同仁。
+   */
+  const relayTo = hc.timeoutHintForTest('https://my-relay.example.com/v1/chat/completions', 180000);
+  check('中转站超时时不乱说"被墙"', !/直连基本不通/.test(relayTo), relayTo.slice(0, 120));
+  check('而是把两种可能摊开（没连上 / 连上了不吐字）',
+    /根本没连上/.test(relayTo) && /不吐字/.test(relayTo), relayTo.slice(0, 200));
+  check('并且指向体检那条最快的路（几秒 vs 三分钟）',
+    /上线前体检/.test(relayTo), relayTo.slice(-160));
+  // 报错是拿 textContent 显示的，写 ** 只会原样印出一堆星号
+  check('这些话里没有 markdown 星号（界面是纯文本渲染的）',
+    !to.includes('**') && !relayTo.includes('**'), `${to.slice(0, 60)} / ${relayTo.slice(0, 60)}`);
+
+  /**
+   * ── 模型 ID 和服务商对不上，要在**发出去之前**就说 ──
+   *
+   * 真实事故：路由配成「openai / claude-opus-5」。claude-opus-5 是 Anthropic 的
+   * 模型 id，OpenAI 那家根本没有。而这个搭配一路畅通：能选、能存、能发，
+   * 然后在拆分镜那步卡满三分钟，回一句"请求超时"。
+   *
+   * 三分钟换来零信息，而这件事在点下去之前就完全判断得出来 ——
+   * 目录里明明白白列着这家有哪些模型。
+   */
+  const cat = await import('../core/providers/catalog.js');
+  const mism = cat.modelWarning('openai', 'claude-opus-5');
+  check('「openai / claude-opus-5」当场认出对不上', Boolean(mism), JSON.stringify(mism));
+  check('并且点出它看着是哪一家的模型（人一眼知道自己选串行了）',
+    /Anthropic/.test(mism?.text || ''), mism?.text?.slice(0, 100));
+  check('还顺手列出这家真有哪些模型', /gpt-4o/.test(mism?.text || ''), mism?.text?.slice(-160));
+
+  /**
+   * ⚠ **中转站不能报警。**
+   *
+   * 国内很多人唯一能用的路就是"OpenAI 的协议、别家的模型"：
+   * 把 openai 的接口根地址指到中转站，然后用它支持的任意模型 id。
+   * 那完全合法。见到不认识的就报警，等于对着最需要这个应用的那批人一直嚷嚷。
+   *
+   * 判据是两条一起看：目录里没有 **且** 地址没被改过。
+   */
+  check('改过接口根地址（= 接的是中转站）就闭嘴',
+    cat.modelWarning('openai', 'claude-opus-5', { baseUrlOverridden: true }) === null);
+  check('正常搭配不吭声', cat.modelWarning('openai', 'gpt-4o-mini') === null);
+  check('模型留空不吭声（那是"还没选"，不是"选错了"）',
+    cat.modelWarning('openai', '') === null);
+  // 目录里没列模型的那几家（只当网关用的）无从判断，也不该瞎猜
+  check('这家压根没列模型时不猜', cat.modelWarning('comfy', '随便什么') === null);
 
   // 换个到不了的方式，话要照样说到
   for (const code of ['ETIMEDOUT', 'ECONNRESET', 'ENOTFOUND', 'ECONNREFUSED']) {
@@ -8675,6 +11455,57 @@ section('配完对象存储，老项目要跟上');
   check('配完 OSS，胖内联图不再复用（这次能换成地址）', reuse(fat) === null);
   check('小的内联图仍然复用（换它没意义，白传一趟）', reuse(thin) === thin);
   check('已经是地址的照旧复用', reuse(url) === url);
+  /**
+   * ══════════ 重传一张图，得**真的**换成新的那张 ══════════
+   *
+   * 用户："重传了第二张自己不同的图片，分镜怎么还是用的第一张图片生成"。
+   *
+   * 上传设定图落盘用的是固定文件名（ref-角色-变体-upload.png）——
+   * 重传写的是同一个路径。而"本地路径 → 对象存储 key"那张表原来只按路径记：
+   *
+   *   第一次传 → 上传，记下 路径→key
+   *   第二次传 → 覆盖同一个本地文件（新内容）
+   *            → publicUrlFor 按路径命中缓存，返回**旧地址**
+   *            → 新图一次都没被上传
+   *
+   * 没有任何报错，日志也不说"用了缓存"。用户只会觉得"重传没用"，
+   * 而且每一镜出来的还是上一张脸。
+   *
+   * ⚠ 判据得是**桶里那份内容变没变**，不是"返回的地址变没变"——
+   * 私有桶每次现签，地址里的 Signature 本来就每次都不一样，
+   * 拿地址做判据是一条恒真的断言。
+   */
+  {
+    process.env.FUTUREDREAM_OSS_ENDPOINT = `${upstreamUrl}/ossput`;
+    upstream.ossPuts = [];
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fd-reupload-'));
+    const shot1 = path.join(tmpDir, 'ref-char-me-v-default-upload.png');
+
+    fs.writeFileSync(shot1, Buffer.from('第一张图的内容'));
+    const url1 = await studioModule.toModelRef(shot1, {});
+    check('第一次传：真的上传了一次', upstream.ossPuts.length === 1,
+      JSON.stringify(upstream.ossPuts.map((x) => x.body)));
+
+    // 同一个路径再问一次：这次该走缓存，不该白传一趟
+    const again = await studioModule.toModelRef(shot1, {});
+    check('内容没变时走缓存，不重复上传', upstream.ossPuts.length === 1 && Boolean(again),
+      String(upstream.ossPuts.length));
+
+    // ⚠ 重传第二张：同一个文件名，不同内容。mtime 只有毫秒精度，
+    // 写得太快会和上一次同毫秒 —— 那样连 sig 都不变，测试会变成恒真
+    await new Promise((r) => setTimeout(r, 12));
+    fs.writeFileSync(shot1, Buffer.from('第二张图的内容，和第一张完全不同'));
+    await studioModule.toModelRef(shot1, {});
+    check('重传第二张：又上传了一次（修之前这里恒为 1）',
+      upstream.ossPuts.length === 2, String(upstream.ossPuts.length));
+    check('而且传上去的是第二张的内容，不是第一张',
+      String(upstream.ossPuts[1]?.body || '').includes('第二张图的内容'),
+      String(upstream.ossPuts[1]?.body || '').slice(0, 40));
+
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    delete process.env.FUTUREDREAM_OSS_ENDPOINT;
+  }
+
   settings.patch({ oss: { enabled: false } });
   vault.setSecret('ALIYUN_OSS_KEY_ID', '');
   vault.setSecret('ALIYUN_OSS_KEY_SECRET', '');
@@ -8880,6 +11711,8 @@ section('待认领的任务不能变成黑洞');
     const keepModel = settings.get('videoModel');
     settings.patch({ videoProvider: 'metaso', videoModel: 'MiniMax-H3' });
     upstream.videoFail = '厂商那边出片失败：内容审核不通过';
+    // 失败之前先记下账上已有几笔视频，好证明失败那一次一笔都没多记
+    const videoCallsBefore = ledgerMod.forProject(project.id, {}).total.byKind.video?.calls || 0;
     await studioModule.generateVideos(project.id, { only: [s1.id], onEvent: () => {} }).catch(() => {});
     upstream.videoFail = null;
     settings.patch({ videoProvider: keepProvider, videoModel: keepModel });
@@ -8890,6 +11723,30 @@ section('待认领的任务不能变成黑洞');
       /审核不通过/.test(hurt?.videoError?.message || ''), hurt?.videoError?.message);
     check('并且记下了时间（不然分不清是这次的还是上次的）',
       Boolean(hurt?.videoError?.at), String(hurt?.videoError?.at));
+
+    /**
+     * ⚠ **出视频失败了，账上要留一条"这里有一次没记上"。**
+     *
+     * 视频是先下单后取件的。拿不到片子**不等于**厂商没做、没计费 ——
+     * 多半是做了、计了，只是我们没接住。所以这一次既不能记一个猜的秒数
+     * （假数），也不能当无事发生（少账）。
+     *
+     * "少账"是这里最危险的一种：它让总数偏小，而偏小的总数看起来
+     * 完全正常，没有任何地方会红。用户拿着一个漂亮的数去对账单，
+     * 对不上，然后不知道该信哪个。
+     *
+     * 金丝雀把这一处的 blind() 关掉时，上面三条全绿 —— 它们查的是
+     * 这一镜身上的 videoError，和账本是两份记录。
+     */
+    const bookAfterFail = ledgerMod.forProject(project.id, {});
+    check('出视频失败了，账上留了一条"没记上"',
+      bookAfterFail.unmetered > 0, `unmetered=${bookAfterFail.unmetered}`);
+    check('而且说得清是哪一家的哪个模型没记上',
+      bookAfterFail.blind.some((x) => x.kind === 'video'),
+      JSON.stringify(bookAfterFail.blind));
+    check('失败的那一次没有被当成"出了 N 秒"记进用量里',
+      (bookAfterFail.total.byKind.video?.calls || 0) === videoCallsBefore,
+      `失败前 ${videoCallsBefore} 笔，失败后 ${bookAfterFail.total.byKind.video?.calls || 0} 笔`);
   }
 
   settings.patch({ baseUrls: { metaso: `${upstreamUrl}/ms` } });
@@ -9519,9 +12376,46 @@ section('全流程：竖屏短剧从剧本到合成');
   check('① 每个条目都出了参考图（缺一张，引用它的每一镜都少一份基准）',
     [...cur.bible.characters, ...cur.bible.scenes, ...(cur.bible.props || [])].every((x) => x.sheetPath),
     JSON.stringify([...cur.bible.characters, ...cur.bible.scenes].map((x) => Boolean(x.sheetPath))));
-  check('① 设定图也按竖屏出',
-    upstream.imageBodies.every((b) => b.size === '720x1280'),
-    JSON.stringify([...new Set(upstream.imageBodies.map((b) => b.size))]));
+  /**
+   * ① 画幅：场景跟着项目走，角色**不跟**。
+   *
+   * 原来这条写的是"所有设定图都按竖屏出"。那在角色设定图还是一张正面半身时
+   * 是对的；改成四视图之后就不对了 —— 四个视角横向排开，塞进 9:16
+   * 会挤成四条竹竿，脸和衣服都看不清，等于白出。
+   *
+   * 所以拆成两条，比原来那条更严：不光验"有没有跟项目画幅"，
+   * 还验了"该跟的跟了、不该跟的没跟"。
+   */
+  const charSheets = upstream.imageBodies.filter((b) => /角色三视图/.test(b.prompt || ''));
+  const otherSheets = upstream.imageBodies.filter((b) => !/角色三视图/.test(b.prompt || ''));
+  check('① 场景和道具的基准图跟着项目画幅（竖屏项目就出竖的）',
+    otherSheets.length > 0 && otherSheets.every((b) => b.size === '720x1280'),
+    JSON.stringify([...new Set(otherSheets.map((b) => b.size))]));
+  check('① 角色三视图走自己的横画幅（跟着竖屏走会挤成四条竹竿）',
+    charSheets.length > 0 && charSheets.every((b) => b.size === '1280x720'),
+    JSON.stringify([...new Set(charSheets.map((b) => b.size))]));
+
+  /**
+   * ⚠ 提示词里那几句"防具体的事"的话必须真的发出去。
+   *
+   * 三视图最容易翻车的两处，都不会报错：
+   *   · 模型在图上加 FRONT / SIDE / BACK 标注和分格线 ——
+   *     而这张图会当参考图发给出视频那一步，那些字会被一起学进画面
+   *   · 四个视角画成了四个不同的人（换了衣服、换了配色）
+   * 所以这两句是功能的一部分，不是文案。
+   */
+  const csPrompt = charSheets[0]?.prompt || '';
+  check('① 三视图说清了是"一张图里四个视角"',
+    /一张图里横向并排四个视角/.test(csPrompt), csPrompt.slice(0, 80));
+  check('① 四个视角都点了名（上半身特写/正面/侧面/背面）',
+    ['上半身特写', '全身正面', '全身正侧面', '全身背面'].every((k) => csPrompt.includes(k)), csPrompt.slice(0, 200));
+  check('① 交代了四个视角必须是同一个人同一套衣服',
+    /同一个人、同一套服装、同一配色/.test(csPrompt), csPrompt.slice(0, 200));
+  check('① 明确不许出现文字标注和分格线（会被当参考图学进画面）',
+    /不得出现任何文字、标注、箭头、分格线/.test(csPrompt), csPrompt.slice(0, 240));
+  check('① 角色的外貌描述仍然带在后面（三视图不能把描述挤掉）',
+    cur.bible.characters.some((c) => c.appearance && csPrompt.includes(c.appearance.slice(0, 12))),
+    csPrompt.slice(-120));
   check('① 没有整步失败', !bibleEvents.some((e) => e.type === 'error'),
     JSON.stringify(bibleEvents.filter((e) => e.type === 'error').map((e) => e.message)));
 
@@ -11067,11 +13961,382 @@ section('根地址：手机去手机版，电脑留电脑版');
     withKey.status === 302 && withKey.to === '/m?k=ABC123', JSON.stringify(withKey));
 }
 
+section('钱：用量是我们的事实，单价是你的');
+{
+  const pricing = await import('../core/pricing.js');
+  const ledger = await import('../core/ledger.js');
+  const meter = await import('../core/meter.js');
+  const estimate = await import('../core/pipeline/estimate.js');
+
+  const K = pricing.rateKey;
+
+  // ── 未定价必须是"未知"，不能是 0 ──
+  {
+    /**
+     * 这一组是整个功能的地基。一旦某处把未知当成 0 参与求和，
+     * 总价就会是一个**看起来正常的偏小的数** —— 用户会照着它下手。
+     */
+    const rates = { [K('volcengine', 'seedream', 'image')]: { cny: 0.2 } };
+    const mixed = pricing.sum(
+      [
+        { kind: 'image', provider: 'volcengine', model: 'seedream', units: 5, calls: 5 },
+        { kind: 'video', provider: 'kling', model: 'kling-v2', units: 30, calls: 3 }
+      ],
+      rates
+    );
+    check('有定价的算进去了', Math.abs(mixed.cny - 1.0) < 1e-9, String(mixed.cny));
+    check('没定价的没有被当成 0 混进总数', mixed.partial === true && mixed.unpriced.length === 1);
+    check('说得出还差哪一个单价',
+      mixed.missing.length === 1 && mixed.missing[0].key === K('kling', 'kling-v2', 'video'),
+      JSON.stringify(mixed.missing));
+
+    // 一个都没定价的时候，总数是 null 而不是 0 —— 0 会被显示成"免费"
+    const none = pricing.sum([{ kind: 'video', provider: 'kling', model: 'kling-v2', units: 30 }], {});
+    check('一个都没定价时总数是"算不出"，不是 ¥0', none.cny === null, String(none.cny));
+    check('这时候的措辞是"还没填单价"',
+      pricing.describeSum(none).includes('还没填单价'), pricing.describeSum(none));
+
+    /**
+     * ⚠ **一次都没花过 ≠ 没填单价。**
+     *
+     * 这两句一度合成了一句："没有用量 —— 还没填单价，算不出钱"，
+     * 读起来像"你少填了点什么所以算不出来"，而真相是根本还没花过。
+     * 手机走查上第一眼看到的就是它。
+     *
+     * 这种话的坏处很具体：它会让人跑去填一张根本不需要填的表，
+     * 而且填完那句话也不会变 —— 因为问题从来不在那儿。
+     */
+    const nothing = pricing.describeSum(pricing.sum([], rates));
+    check('一次都没花过的时候说"还没花过"，不提单价', nothing.includes('还没花过'), nothing);
+    check('而且不会把它说成"算不出钱"', !nothing.includes('算不出钱'), nothing);
+    check('部分定价的措辞里必须有"至少"和"没算进去"',
+      pricing.describeSum(mixed).includes('至少') && pricing.describeSum(mixed).includes('没算进去'),
+      pricing.describeSum(mixed));
+    // 全都定了价的时候不许再说"至少" —— 那会让一个准确的数看起来不准
+    const full = pricing.sum([{ kind: 'image', provider: 'volcengine', model: 'seedream', units: 5 }], rates);
+    check('全都定了价就不说"至少"', !pricing.describeSum(full).includes('至少'), pricing.describeSum(full));
+  }
+
+  // ── 不许拿相近的型号去猜价 ──
+  {
+    /**
+     * `doubao-seedream-3-0-t2i-250415` 和 `doubao-seedream-4-0-250828`
+     * 前缀一大半是一样的，而两者价钱不同。要是哪天有人给 rateFor
+     * 加了"前缀匹配"图省事，这条会红。
+     */
+    const rates = { [K('volcengine', 'doubao-seedream-3-0-t2i-250415', 'image')]: { cny: 0.2 } };
+    const got = pricing.rateFor('volcengine', 'doubao-seedream-4-0-250828', 'image', rates);
+    check('填了 3.0 的价，不会被拿去当 4.0 的价', got === null, JSON.stringify(got));
+    const same = pricing.rateFor('volcengine', 'doubao-seedream-3-0-t2i-250415', 'image', rates);
+    check('填对了型号当然要认', same?.cny === 0.2 && same.matched === 'model');
+  }
+
+  // ── 厂商级兜底 ──
+  {
+    const rates = {
+      [K('volcengine', '', 'image')]: { cny: 0.5 },
+      [K('volcengine', 'seedream', 'image')]: { cny: 0.2 }
+    };
+    // 数字故意取得不一样：两级都命中时若拿错了级，金额会不同
+    check('没填型号的走厂商兜底', pricing.rateFor('volcengine', 'whatever', 'image', rates)?.cny === 0.5);
+    check('填了型号的以型号为准（不是兜底那个）',
+      pricing.rateFor('volcengine', 'seedream', 'image', rates)?.cny === 0.2);
+  }
+
+  // ── 本地跑的不是"没填价"，是真的不要钱 ──
+  {
+    const local = pricing.sum([{ kind: 'image', provider: 'comfy', model: 'workflow', units: 8 }], {});
+    check('本地 ComfyUI 出图算 0 元', local.cny === 0, String(local.cny));
+    check('而且不会挂一条"还没填单价"', local.missing.length === 0 && local.partial === false);
+  }
+
+  // ── 进出 token 分开计价 ──
+  {
+    // 进出单价故意差 4 倍：算反了、或者只用其中一个，金额都对不上
+    const rates = { [K('volcengine', 'doubao', 'token')]: { in: 1, out: 4 } };
+    const one = pricing.sum([{ kind: 'token', provider: 'volcengine', model: 'doubao', units: { in: 2000000, out: 500000 } }], rates);
+    check('进出各按各的单价算', Math.abs(one.cny - (2 + 2)) < 1e-9, String(one.cny));
+    check('只填了进没填出，这条不算数',
+      pricing.rateFor('volcengine', 'doubao', 'token', { [K('volcengine', 'doubao', 'token')]: { in: 1 } }) === null);
+  }
+
+  // ── 账本：存的是用量，钱现算 ──
+  {
+    /**
+     * 这一条是"只存用量不存钱"那个决定的**唯一证据**：
+     * 同一份账，换一份单价就换一个数，而且过去的账会亮起来。
+     */
+    ledger.reset({ wipe: true });
+    ledger.add({ projectId: 'proj-money', stage: '出图', provider: 'volcengine', model: 'seedream', kind: 'image', units: 1 });
+    ledger.add({ projectId: 'proj-money', stage: '出图', provider: 'volcengine', model: 'seedream', kind: 'image', units: 1 });
+    ledger.add({ projectId: 'proj-money', stage: '配音', provider: 'dashscope', model: 'cosy', kind: 'tts', units: 10000 });
+
+    const blindRead = ledger.forProject('proj-money', {});
+    check('还没填单价时，用量已经在了',
+      blindRead.total.byKind.image.units === 2 && blindRead.total.byKind.tts.units === 10000,
+      JSON.stringify(blindRead.total.byKind));
+    check('还没填单价时，钱是"算不出"', blindRead.total.cny === null);
+
+    const later = ledger.forProject('proj-money', {
+      [K('volcengine', 'seedream', 'image')]: { cny: 0.2 },
+      [K('dashscope', 'cosy', 'tts')]: { cny: 1 }
+    });
+    check('事后补填单价，过去的账立刻亮起来', Math.abs(later.total.cny - (0.4 + 1)) < 1e-9, String(later.total.cny));
+
+    // 改一次价，同一份账要给出不同的数 —— 证明它真的没把钱存进去
+    const cheaper = ledger.forProject('proj-money', {
+      [K('volcengine', 'seedream', 'image')]: { cny: 0.1 },
+      [K('dashscope', 'cosy', 'tts')]: { cny: 1 }
+    });
+    check('换一份单价，同一份账给出不同的数', Math.abs(cheaper.total.cny - 1.2) < 1e-9, String(cheaper.total.cny));
+  }
+
+  // ── 记不上的那些，要能说出来 ──
+  {
+    ledger.reset({ wipe: true });
+    ledger.add({ projectId: 'p-blind', provider: 'volcengine', model: 'doubao', kind: 'token', units: { in: 100, out: 20 } });
+    ledger.addUnmetered({ projectId: 'p-blind', provider: 'someco', model: 'quiet-1', kind: 'token', why: '响应里没有 usage' });
+    ledger.addUnmetered({ projectId: 'p-blind', provider: 'someco', model: 'quiet-1', kind: 'token', why: '响应里没有 usage' });
+    const acct = ledger.forProject('p-blind', {});
+    check('漏记的次数走得出来', acct.unmetered === 2, String(acct.unmetered));
+    check('而且说得出是谁漏的',
+      acct.blind.length === 1 && acct.blind[0].model === 'quiet-1' && acct.blind[0].hits === 2,
+      JSON.stringify(acct.blind));
+    check('漏记的不会被算进用量里', acct.total.byKind.token.units.in === 100, JSON.stringify(acct.total.byKind));
+
+    // 猜不出用量就不许记 —— 记一个假数比少一条坏得多
+    const before = ledger.forProject('p-blind', {}).calls;
+    ledger.add({ projectId: 'p-blind', provider: 'x', model: 'y', kind: 'image', units: 0 });
+    ledger.add({ projectId: 'p-blind', provider: 'x', model: 'y', kind: 'image', units: null });
+    check('用量是 0 或读不出来时，一笔都不记', ledger.forProject('p-blind', {}).calls === before);
+  }
+
+  // ── token 用量：拆不开进出就不算数 ──
+  {
+    check('标准的 OpenAI 形态读得出',
+      JSON.stringify(meter.readTokenUsage({ usage: { prompt_tokens: 10, completion_tokens: 3 } })) === '{"in":10,"out":3}');
+    check('百炼那种 input/output 也读得出',
+      JSON.stringify(meter.readTokenUsage({ usage: { input_tokens: 7, output_tokens: 2 } })) === '{"in":7,"out":2}');
+    check('只给了 total_tokens 的，宁可算漏账也不硬拆',
+      meter.readTokenUsage({ usage: { total_tokens: 999 } }) === null);
+    check('压根没有 usage 的返回 null', meter.readTokenUsage({ choices: [] }) === null);
+  }
+
+  // ── 预估：秒数要按厂商档位对齐 ──
+  {
+    /**
+     * 分镜写 4 秒，厂商只出 5 秒档，**按 5 秒计费**。
+     * 不对齐的话每一镜都少估一截，二十镜下来差四分之一。
+     * 4 和 5 是两个不同的数，所以这条断言不会因为"碰巧相等"而假绿。
+     */
+    const shots = [
+      { id: 's1', duration: 4, imagePath: 'a.png' },
+      { id: 's2', duration: 6, imagePath: 'b.png' }
+    ];
+    const aligned = estimate.forStage({
+      shots,
+      stage: 'video',
+      routing: { video: { provider: 'volcengine', model: 'seedance', durations: [5, 10] } }
+    });
+    check('4 秒和 6 秒按 5/10 档位算成 15 秒', aligned.items[0].units === 15, JSON.stringify(aligned.items));
+    check('镜数和秒数是两个数，都要报', aligned.items[0].calls === 2 && aligned.shots === 2);
+
+    const noDurations = estimate.forStage({
+      shots,
+      stage: 'video',
+      routing: { video: { provider: 'x', model: 'y', durations: [] } }
+    });
+    check('厂商档位不知道时按原样算（10 秒），不假装对齐过', noDurations.items[0].units === 10);
+  }
+
+  // ── 预估：全跑时，出视频那一步要把"马上就会有图"的镜算进去 ──
+  {
+    /**
+     * 一个刚拆完分镜、一张图都没有的项目，点「往后全跑」——
+     * 要是照当前镜况算，出视频那步会估成 0 秒，
+     * 而那正是这一整趟里最贵的一步。
+     */
+    const fresh = [
+      { id: 's1', duration: 5, imagePath: null, dialogue: '走吧。' },
+      { id: 's2', duration: 5, imagePath: null, dialogue: '' }
+    ];
+    const routing = {
+      image: { provider: 'volcengine', model: 'seedream' },
+      video: { provider: 'volcengine', model: 'seedance', durations: [5, 10] },
+      tts: { provider: 'dashscope', model: 'cosy' }
+    };
+    const whole = estimate.forRun({ shots: fresh, from: 'assets', routing });
+    const vid = whole.items.find((i) => i.kind === 'video');
+    check('一张图都没有的项目，全跑也能估出视频那步的钱', vid && vid.units === 10, JSON.stringify(whole.items));
+
+    // 但只从「出视频」开始跑的时候，没图的镜是真的出不了 —— 不能算进去
+    const onlyVideo = estimate.forRun({ shots: fresh, from: 'video', routing });
+    check('单跑出视频时，没图的镜不算进去',
+      !onlyVideo.items.some((i) => i.kind === 'video'), JSON.stringify(onlyVideo.items));
+  }
+
+  // ── 预估：三种不同的真相，三种说法 ──
+  {
+    const routing = { image: { provider: 'volcengine', model: 'seedream' } };
+    const rates = { [K('volcengine', 'seedream', 'image')]: { cny: 0.2 } };
+
+    const composePlan = estimate.forStage({ shots: [{ id: 's1' }], stage: 'compose', routing });
+    check('合成那步说的是"不花钱"，不是"¥0"',
+      estimate.describe(composePlan, rates).includes('不花钱')
+      && !estimate.describe(composePlan, rates).includes('¥0'),
+      estimate.describe(composePlan, rates));
+
+    const nothing = estimate.forStage({ shots: [{ id: 's1', imagePath: 'a.png' }], stage: 'assets', routing });
+    check('没东西要出的时候不显示金额', estimate.describe(nothing, rates).includes('没有要出的东西'),
+      estimate.describe(nothing, rates));
+
+    const scriptPlan = estimate.forStage({ shots: [], stage: 'script', routing });
+    check('拆分镜明说"事前算不出来"',
+      estimate.describe(scriptPlan, rates).includes('算不出来'), estimate.describe(scriptPlan, rates));
+    check('而且不给它编一个数', scriptPlan.items.length === 0);
+
+    // 重试要单独说，不能并进总数 —— 并进去的话每个数都偏高，人会学会不看
+    const withRetry = estimate.forStage({
+      shots: [{ id: 's1' }, { id: 's2' }],
+      stage: 'assets',
+      routing,
+      maxRetries: 2
+    });
+    const priced = estimate.price(withRetry, rates);
+    check('正常情况按不重试算', Math.abs(priced.base.cny - 0.4) < 1e-9, String(priced.base.cny));
+    check('最坏情况另给一个数', Math.abs(priced.worst.cny - 1.2) < 1e-9, String(priced.worst.cny));
+    check('两个数都要出现在那句话里',
+      estimate.describe(withRetry, rates).includes('¥0.40') && estimate.describe(withRetry, rates).includes('¥1.20'),
+      estimate.describe(withRetry, rates));
+  }
+
+  // ── 配音字数：标点也算，跟厂商一个口径 ──
+  {
+    const shot = { dialogue: '你到底是谁？我等了三年！' };
+    check('标点算在字数里', estimate.dialogueChars(shot) === 12, String(estimate.dialogueChars(shot)));
+    check('空台词是 0 字', estimate.dialogueChars({ dialogue: '' }) === 0);
+  }
+
+  // ── 接口这一层 ──
+  {
+    const created = await (await fetch(`${appUrl}/api/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '记账验收', script: '第一章\n\n他推开门。' })
+    })).json();
+
+    const spend = await (await fetch(`${appUrl}/api/projects/${created.id}/spend`)).json();
+    check('新项目的账是空的但接口不报错', spend.calls === 0 && spend.total.cny === null, JSON.stringify(spend.total));
+    check('账那条接口会给出一句人话', typeof spend.line === 'string' && spend.line.includes('这个项目到现在'));
+
+    const est = await (await fetch(`${appUrl}/api/projects/${created.id}/estimate?stage=compose`)).json();
+    check('预估是另一条接口，不和账混在一起', est.priced.free === true && est.line.includes('不花钱'), est.line);
+
+    // 单价表只收认得的键
+    const put = await fetch(`${appUrl}/api/rates`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        rates: {
+          [K('volcengine', 'seedream', 'image')]: { cny: 0.25 },
+          'garbage-key': { cny: 99 },
+          [K('volcengine', 'seedream', 'nosuchkind')]: { cny: 88 }
+        }
+      })
+    });
+    const saved = await put.json();
+    check('填对格式的单价存下来了', saved.rates[K('volcengine', 'seedream', 'image')]?.cny === 0.25);
+    check('乱填的键不进设置',
+      !('garbage-key' in saved.rates) && !(K('volcengine', 'seedream', 'nosuchkind') in saved.rates),
+      JSON.stringify(Object.keys(saved.rates)));
+
+    // 填错了要能删掉 —— 一个填错的 0 会让某项永远显示成免费
+    const del = await (await fetch(`${appUrl}/api/rates`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rates: { [K('volcengine', 'seedream', 'image')]: null } })
+    })).json();
+    check('单价能删掉，不是只能改成别的数',
+      !(K('volcengine', 'seedream', 'image') in del.rates), JSON.stringify(del.rates));
+
+    await fetch(`${appUrl}/api/projects/${created.id}`, { method: 'DELETE' });
+  }
+
+  // ── 真跑一步，看账有没有自己记上 ──
+  {
+    /**
+     * 上面那些验的是零件。这一条验的是**接线** —— 走完整条
+     * 「HTTP 进来 → 圈上下文 → 流水线 → 适配层 → 记账」，
+     * 中间任何一环没接上，这里就是空账。
+     *
+     * 这是唯一能抓住"归属圈漏了"的断言：零件测试全绿而账是空的，
+     * 正是这个功能最可能的坏法。
+     */
+    ledger.reset({ wipe: true });
+    const p = await (await fetch(`${appUrl}/api/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '记账接线', script: '第一章\n\n他推开门，屋里没有人。' })
+    })).json();
+    await ndjson(`/projects/${p.id}/stage/bible`, {});
+    await ndjson(`/projects/${p.id}/stage/script`, { shotCount: 2 });
+    await ndjson(`/projects/${p.id}/stage/assets`, {});
+    ledger.flush();
+
+    const acct = ledger.forProject(p.id, {});
+    check('真跑一步之后，这个项目名下有账了', acct.calls > 0, JSON.stringify(acct.total.byKind));
+    check('出的图记成了图，不是别的口径',
+      (acct.total.byKind.image?.units || 0) > 0, JSON.stringify(acct.total.byKind));
+    check('拆分镜那几次对话也记上了 token',
+      (acct.total.byKind.token?.units?.in || 0) > 0, JSON.stringify(acct.total.byKind));
+
+    const stages = new Set(ledger.recent({ projectId: p.id, limit: 200 }).map((e) => e.stage));
+    check('每一笔都知道自己是哪一步花的',
+      stages.has('assets') && stages.has('script'), [...stages].join('、'));
+    check('没有一笔落进"未归属"', ledger.forProject('(未归属)', {}).calls === 0);
+
+    await fetch(`${appUrl}/api/projects/${p.id}`, { method: 'DELETE' });
+    ledger.reset({ wipe: true });
+  }
+
+  // ── 归属：项目 id 是自动带上的，不靠调用点记得传 ──
+  {
+    ledger.reset({ wipe: true });
+    await meter.runIn({ projectId: 'ctx-proj', stage: '出图' }, async () => {
+      // 隔一次 await，模拟真实链路里的十几层调用
+      await new Promise((r) => setTimeout(r, 1));
+      meter.record({ kind: 'image', provider: 'volcengine', model: 'seedream', units: 1 });
+    });
+    const acct = ledger.forProject('ctx-proj', {});
+    check('await 之后记的账仍然落在对的项目上', acct.calls === 1, JSON.stringify(acct));
+    check('而且带着是哪一步', ledger.recent({ projectId: 'ctx-proj' })[0]?.stage === '出图');
+
+    // 没圈过的照样有账，只是不归任何项目 —— 联调台里手发的请求就是这种
+    meter.record({ kind: 'image', provider: 'volcengine', model: 'seedream', units: 1 });
+    check('圈外面的记到"未归属"，不是丢掉', ledger.forProject('(未归属)', {}).calls === 1);
+    ledger.reset({ wipe: true });
+  }
+}
+
 // ─────────────────────── 收尾 ───────────────────────
 
 server.close();
 upstream.close();
 fs.rmSync(SANDBOX, { recursive: true, force: true });
+
+server.close();
+upstream.close();
+fs.rmSync(SANDBOX, { recursive: true, force: true });
+
+server.close();
+upstream.close();
+fs.rmSync(SANDBOX, { recursive: true, force: true });
+
+server.close();
+upstream.close();
+fs.rmSync(SANDBOX, { recursive: true, force: true });
+
+
 
 console.log(`\n${'─'.repeat(50)}`);
 console.log(failed === 0 ? `\x1b[32m全部通过：${passed} 项\x1b[0m` : `\x1b[31m${failed} 项未通过\x1b[0m（通过 ${passed} 项）`);

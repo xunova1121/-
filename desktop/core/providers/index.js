@@ -1,7 +1,9 @@
 /**
  * 服务商运行时：解析模板 → 补鉴权 → 发请求 →（异步任务的话）轮询到终态。
  */
+
 import { PROVIDERS, getProvider as catalogGetProvider, publicCatalog, CAPABILITIES, modelWarning } from './catalog.js';
+
 import { buildAuthHeaders, credentialStatus, AuthError } from './auth.js';
 import { getSecret } from '../vault.js';
 import { execute, poll, HttpError } from '../http-client.js';
@@ -64,13 +66,28 @@ export function catalogForUI() {
   }));
 }
 
-/** 把 {{baseUrl}} 之类的结构占位符展开（密钥占位符留给发送时展开） */
+/**
+ * 把 {{baseUrl}} 之类的结构占位符展开（密钥占位符留给发送时展开）。
+ *
+ * ── {{apiRoot}}：接口根地址去掉版本段 ──
+ *
+ * 有的厂商把个别接口挂在版本号**外面**。Agnes 就是：出视频是
+ * `/v1/videos`，查结果却是 `/agnesapi?video_id=…`，不带 v1。
+ *
+ * 写成绝对地址最省事，但那样用户在「接口地址」里改了根地址之后，
+ * 提交走新地址、查询还走老地址 —— 任务提交成功，然后一直查不到，
+ * 表现是"卡在轮询里"，而没人会想到是两个地址不一致。
+ */
 export function interpolate(text, provider, vars = {}) {
   if (typeof text !== 'string') return text;
-  return text.replace(/\{\{\s*baseUrl\s*\}\}/g, baseUrlOf(provider)).replace(
-    /\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g,
-    (whole, name) => (name in vars ? String(vars[name]) : whole)
-  );
+  const base = baseUrlOf(provider);
+  return text
+    .replace(/\{\{\s*apiRoot\s*\}\}/g, String(base || '').replace(/\/v\d+\/?$/, ''))
+    .replace(/\{\{\s*baseUrl\s*\}\}/g, base)
+    .replace(
+      /\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g,
+      (whole, name) => (name in vars ? String(vars[name]) : whole)
+    );
 }
 
 /**
@@ -138,6 +155,17 @@ export async function send(spec, onEvent) {
       body: spec.body,
       stream: spec.stream,
       timeoutMs,
+
+      /**
+       * ⚠ 这两个必须**显式转发**。
+       *
+       * 这里是照着字段一个一个抄进去的（不是 `...spec`），
+       * 所以新加的字段默认会被**安静地丢掉** —— 表现是空闲超时压根没生效，
+       * 而错误信息看起来完全正常（还是那句"响应读取超时"）。
+       * 自检里那条"总时长 1 秒、实际跑 1.5 秒也不该掐"当场就红了，
+       * 否则这个洞会一直躺到用户身上。
+       */
+
       idleTimeoutMs: spec.idleTimeoutMs,
       maxTotalMs: spec.maxTotalMs
     },
@@ -385,6 +413,17 @@ export async function probeRouting() {
     }
     const provider = getProvider(providerId);
     const r = results.get(providerId) || {};
+
+    /**
+     * 顺带核一下"这家有没有这个模型"。
+     *
+     * 探针探的是**这家通不通**（列模型 / 最小对话），它可能一路绿灯，
+     * 而你真正要用的那个模型这家根本没有 —— 「openai / claude-opus-5」
+     * 就是这么过的体检，然后在拆分镜那步干等三分钟。
+     *
+     * 这一条不发任何请求，纯查目录，所以放在这儿不花钱也不拖慢。
+     */
+
     const modelOf = {
       chat: s.chatModel, director: s.directorModel || s.chatModel, vision: s.visionModel,
       image: s.imageModel, video: s.videoModel, tts: s.ttsModel

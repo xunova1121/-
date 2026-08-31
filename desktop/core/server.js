@@ -35,6 +35,9 @@ import * as duration from './duration.js';
 import * as pricing from './pricing.js';
 import * as ledger from './ledger.js';
 import * as estimate from './pipeline/estimate.js';
+
+import * as command from './pipeline/command.js';
+
 import * as meter from './meter.js';
 import * as skillsLib from './skills.js';
 import * as zip from './zip.js';
@@ -414,10 +417,32 @@ function serveMedia(req, res, url) {
   fs.createReadStream(full).pipe(res);
 }
 
+
+/**
+ * 记账的归属就圈在这一层。
+ *
+ * 每一条 `/api/projects/:id/...` 都自动带上项目 id，往下无论调多深、
+ * await 多少次，适配层记的那笔账都会落到对的项目上（core/meter.js）。
+ *
+ * ── 为什么在这里圈，而不是在跑流水线那一处 ──
+ *
+ * 花钱的入口远不止「跑一步」那一条：单镜重出、重出一张设定图、
+ * 试一句配音、预演台里改完重出……每一条都在花钱。在每个入口手工圈一次，
+ * 就等于回到了"调用点手工登记"—— 而漏掉的那条不会红，
+ * 它只是安静地把账记到 `(未归属)` 里，或者根本不记。
+ *
+ * 圈在路由分发的最外面，新加的路由天生就带着归属，没人需要记得这件事。
+ * 阶段名（stage）由具体路由自己再细化，圈在这里的只是项目。
+ */
+
 async function handleApi(req, res, url, opts = {}) {
   const seg = url.pathname.split('/').filter(Boolean);
   const projectId = seg[1] === 'projects' && seg[2] ? seg[2] : null;
   if (!projectId) return handleApiInner(req, res, url, opts);
+
+  // /projects/:id/stage/assets → 'assets'，不是 'stage'。
+  // 记成 'stage' 的话，流水账里每一条都写着同一个词，等于没记
+
   const stage = seg[3] === 'stage' ? seg[4] || 'stage' : seg[3] || '';
   return meter.runIn({ projectId, stage }, () => handleApiInner(req, res, url, opts));
 }
@@ -771,6 +796,62 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
 
   if (a === 'routing' && b === 'check' && method === 'POST') {
     return json(res, 200, await providers.probeRouting());
+  }
+
+  /**
+   * ─────────────── 账 ───────────────
+   *
+   * 三条：总账、单价表、预估。
+   *
+   * 单价表放在 settings 里（明文、可手改、能贴给同事），**不是** vault ——
+   * 它不是机密，是一份"我这边多少钱"的备忘。放进 vault 会让人改不动，
+   * 而这张表是要经常改的：厂商调价、换了额度包、谈下新协议。
+   */
+  if (a === 'spend' && !b && method === 'GET') {
+    const rates = settings.get('rates') || {};
+    const all = ledger.overall(rates);
+    return json(res, 200, {
+      ...all,
+      // cap:spend-overall
+      line: pricing.describeSum(all.total, { prefix: '全部项目合计：' }),
+      kinds: pricing.KINDS
+    });
+  }
+
+  /**
+   * 这里本来还有一条 GET /spend/recent（跨项目流水）。删掉了 ——
+   * 界面上没有任何地方读它，而单项目那条接口已经带着自己的 recent。
+   * 一条没人调的接口不是"以后可能有用"，是一份没人验的负担：
+   * 它会在重构时被当成还在用的东西保着，而它的坏掉没有任何测试会红。
+   */
+
+  if (a === 'rates' && !b) {
+    if (method === 'GET') {
+      return json(res, 200, { rates: settings.get('rates') || {}, kinds: pricing.KINDS });
+    }
+    if (method === 'PUT' || method === 'POST') {
+      const body = await readBody(req);
+      const given = body?.rates && typeof body.rates === 'object' ? body.rates : {};
+      /**
+       * 只收认得的口径和形状。乱填的键会永远留在设置里占位，
+       * 而且会让"还差哪些单价"那张清单里冒出一条谁也对不上的。
+       */
+      const clean = {};
+      for (const [key, val] of Object.entries(given)) {
+        const parts = String(key).split(':');
+        if (parts.length !== 3 || !pricing.isKind(parts[2])) continue;
+        if (val === null) {
+          clean[key] = null; // 明确删掉这一条，见 settings.patch
+          continue;
+        }
+        if (!val || typeof val !== 'object') continue;
+        clean[key] = pricing.KINDS[parts[2]].pair
+          ? { in: Number(val.in) || 0, out: Number(val.out) || 0 }
+          : { cny: Number(val.cny) || 0 };
+      }
+      settings.patch({ rates: clean });
+      return json(res, 200, { ok: true, rates: settings.get('rates') || {} });
+    }
   }
 
   if (a === 'providers' && b) {
@@ -1282,6 +1363,56 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
       }
       return undefined;
     }
+    /**
+     * 一次改一批镜头。
+     *
+     * ⚠ 服务端这条路**复用 updateShot 的规整**（见 studio.batchUpdateShots）——
+     * 单个改和批量改必须走同一份判据，不然会出现"单个改是对的、
+     * 批量改出来不一样"，而那种不一致最难查。
+     */
+    if (b && c === 'shots' && d === 'batch' && method === 'POST') {
+      const body = await readBody(req);
+      return json(res, 200, studio.batchUpdateShots(b, body));
+    }
+
+    /**
+     * 指令框：把一句人话翻成一份**计划**。
+     *
+     * ⚠ 这条路**只解析，绝不执行**。
+     *
+     * 分成两个接口（这里出计划，执行走 shots/batch 或 stage/xxx 那几条现成的）
+     * 不是为了好看，是为了让"人确认"这一步没法被绕过 ——
+     * 合成一个接口的话，界面上少写一个确认框就变成了自动执行，
+     * 而这个应用里自动执行的代价是真钱。
+     *
+     * 纯读、不调模型、不花钱，所以可以边打字边预览。
+     */
+    if (b && c === 'command' && method === 'POST') {
+      const { text } = await readBody(req);
+      const project = store.read(b);
+      if (!project) return json(res, 404, { error: '项目不存在' });
+      return json(res, 200, command.parse(text, project));
+    }
+
+    /**
+     * 开跑之前这一步该知道什么：清单 + 要花多少。
+     *
+     * 纯读，不调任何模型、不花钱 —— 界面每次进这一步都会拉一次，
+     * 慢一点或者要钱的话，它就会被做成"点一下才查"，而那时候没人会点。
+     */
+    /** 这一镜为什么不满意、下一步该干什么。纯读，不花钱 */
+    if (b && c === 'shots' && d && e === 'diagnose' && method === 'GET') {
+      return json(res, 200, studio.diagnoseShot(b, d));
+    }
+    /** 全片里哪几镜有具体原因该重出 */
+    if (b && c === 'redo-candidates' && method === 'GET') {
+      return json(res, 200, studio.redoCandidates(b));
+    }
+    if (b && c === 'stepcheck' && method === 'GET') {
+      const stage = url.searchParams.get('stage') || 'assets';
+      const regenerate = url.searchParams.get('regenerate') === '1';
+      return json(res, 200, studio.stepCheck(b, stage, { regenerate }));
+    }
     if (b && c === 'tasks' && method === 'GET') {
       return json(res, 200, { pending: studio.listPendingTasks(b) });
     }
@@ -1584,6 +1715,52 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
     if (b && c === 'cancel' && method === 'POST') return json(res, 200, jobs.cancel(b));
 
     // 跑某一阶段，进度流式回传
+    /**
+     * 这个项目到现在花了什么。
+     *
+     * 用量是记下来的事实，钱是按**当前**单价现算的 —— 所以刚填完单价
+     * 刷新一下，过去的账立刻就有数了。
+     */
+    if (b && c === 'spend' && method === 'GET') {
+      const rates = settings.get('rates') || {};
+      const acct = ledger.forProject(b, rates);
+      return json(res, 200, {
+        // cap:spend-project
+        ...acct,
+        line: pricing.describeSum(acct.total, { prefix: '这个项目到现在：' }),
+        kinds: pricing.KINDS,
+        recent: ledger.recent({ projectId: b, limit: 40 })
+      });
+    }
+
+    /**
+     * 按下去之前会花多少。
+     *
+     * 和上面那条是**两种不同的真相**，接口也分开：一条讲已经发生的，
+     * 一条讲还没发生的。合成一条的话，界面上迟早会出现
+     * "花了 ¥12"其实是预估、或者反过来 —— 而这两者差着一个数量级的确定性。
+     */
+    if (b && c === 'estimate' && method === 'GET') {
+      const p = store.read(b);
+      if (!p) return json(res, 404, { error: '项目不存在' });
+      const rates = settings.get('rates') || {};
+      const stage = url.searchParams.get('stage') || 'assets';
+      const regenerate = url.searchParams.get('regenerate') === '1';
+      const routing = estimateRouting();
+      const maxRetries = settings.get('consistencyVerify') ? Number(settings.get('consistencyMaxRetries')) || 0 : 0;
+      const plan =
+        stage === 'all'
+          ? estimate.forRun({ shots: p.shots || [], from: url.searchParams.get('from') || 'assets', routing, maxRetries })
+          : estimate.forStage({ shots: p.shots || [], stage, routing, regenerate, maxRetries });
+      return json(res, 200, {
+        // cap:spend-estimate
+        stage,
+        plan,
+        priced: estimate.price(plan, rates),
+        line: estimate.describe(plan, rates)
+      });
+    }
+
     if (b && c === 'stage' && d && method === 'POST') {
       const opts = await readBody(req);
       const runners = {
@@ -1709,19 +1886,12 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
   return json(res, 404, { error: `未知接口 ${url.pathname}` });
 }
 
-function summarize(r) {
-  const s = r.submitted || r;
-  return {
-    logId: s.logId,
-    status: s.status,
-    ok: s.ok,
-    totalMs: s.totalMs,
-    ttfbMs: s.ttfbMs,
-    task: r.task || null,
-    polledStatus: r.polled?.status ?? null
-  };
-}
-
+/**
+ * 把当前路由折成预估要的形状。
+ *
+ * 视频那一档必须带上**这家的合法时长档位** —— 分镜写 4 秒、厂商只出 5 秒档、
+ * 按 5 秒计费。不带档位的话每一镜都少估一截，二十镜下来差四分之一。
+ */
 function estimateRouting() {
   const r = adapters.resolvedRouting();
   const videoProvider = providers.getProvider(r.video?.provider) || null;
@@ -1733,6 +1903,19 @@ function estimateRouting() {
       durations: videoProvider ? duration.allowedDurations(videoProvider, r.video?.model) : []
     },
     tts: { provider: r.tts?.provider, model: r.tts?.model }
+  };
+}
+
+function summarize(r) {
+  const s = r.submitted || r;
+  return {
+    logId: s.logId,
+    status: s.status,
+    ok: s.ok,
+    totalMs: s.totalMs,
+    ttfbMs: s.ttfbMs,
+    task: r.task || null,
+    polledStatus: r.polled?.status ?? null
   };
 }
 
@@ -1791,7 +1974,9 @@ export function createServer({ lan = false } = {}) {
        * 放行的是这两个确切的路径，不是"所有 .js"—— 后者会把电脑版
        * 整套界面代码一起放出去，那不是同一件事。
        */
+
       const SHARED_MODULES = ['/previz-canvas.js', '/previz-stage.js', '/site-canvas.js', '/previz.js', '/three.js', '/three.core.js', '/three-gltf-loader.js', '/three-orbit-controls.js', '/three-transform-controls.js', '/three-buffer-utils.js', '/three-skeleton-utils.js', '/site.js', '/outline.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js', '/pricing.js', '/estimate.js'];
+
       const isShell =
         url.pathname === '/m'
         || url.pathname.startsWith('/m/')
@@ -1912,6 +2097,32 @@ export function createServer({ lan = false } = {}) {
       if (url.pathname === '/duration.js') {
         return fs.readFile(path.join(HERE, 'duration.js'), (err, data) => {
           if (err) return json(res, 404, { error: '找不到 duration.js' });
+          res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
+          res.end(data);
+        });
+      }
+      /**
+       * 单价换算和用量预估，也发原件。
+       *
+       * 这两个必须两端同源，而且是**最不能两端不一致**的一对：
+       * 界面上那句"这一下约 ¥12"和跑完之后账本上记的，如果一个用四舍五入
+       * 一个用截断、一个把未定价当 0 一个当未知，就会出现
+       * "说好 ¥12，跑完变 ¥31"—— 那比不显示还坏，因为人是照着那个数下的手。
+       *
+       * estimate.js 只 import ../pricing.js 和 ../duration.js，
+       * 在浏览器里从 /estimate.js 出发正好解析到 /pricing.js 和 /duration.js，
+       * 两条路由都在。自检守着"只许 import 这两个"。
+       */
+      if (url.pathname === '/pricing.js') {
+        return fs.readFile(path.join(HERE, 'pricing.js'), (err, data) => {
+          if (err) return json(res, 404, { error: '找不到 pricing.js' });
+          res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
+          res.end(data);
+        });
+      }
+      if (url.pathname === '/estimate.js') {
+        return fs.readFile(path.join(HERE, 'pipeline', 'estimate.js'), (err, data) => {
+          if (err) return json(res, 404, { error: '找不到 estimate.js' });
           res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
           res.end(data);
         });
@@ -2190,4 +2401,3 @@ if (invokedDirectly) {
 
 /** 只给自检用：心跳是看不见的东西，不测就永远不知道它有没有在跳 */
 export const __ndjson = ndjson;
-

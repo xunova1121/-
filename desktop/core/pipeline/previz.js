@@ -89,13 +89,58 @@ export function framedHeight(distanceM, lensMm = DEFAULT_LENS) {
   return (d * SENSOR_H) / f;
 }
 
+/**
+ * ══════════ 景别：术语 + 一句可执行的说明 ══════════
+ *
+ * ⚠ 光给术语不够。"特写"两个字要和几百字的外貌、环境描述抢注意力，
+ * 而且它是个**行话**——模型对它的理解未必和你一样，各家理解也不一致。
+ *
+ * 现象是"标了特写，出来是整个广场的大远景"。当时的提示词里，
+ * 景别就只有孤零零一个词，排在风格锚 + 人物外貌（60~90 字）+
+ * 场景描述之后。而参考图那边是一张现成的广角构图 —— 一边是两个字，
+ * 一边是一整张图，输得不冤。
+ *
+ * 所以每个档位配一句**画面上能验的话**："人物全身完整入镜，头顶到脚"
+ * 比"全景"具体得多，也难被无视得多。
+ */
 const SIZES = [
-  { id: 'closeup', label: '特写', max: 0.5 },
-  { id: 'medium-closeup', label: '近景', max: 1.0 },
-  { id: 'medium', label: '中景', max: 1.7 },
-  { id: 'full', label: '全景', max: 2.8 },
-  { id: 'wide', label: '远景', max: Infinity }
+  { id: 'closeup', label: '特写', max: 0.5, how: '画面只到肩膀以上，脸占据主要面积，背景大幅虚化' },
+  { id: 'medium-closeup', label: '近景', max: 1.0, how: '画面到胸口以上，能看清表情，背景轻度虚化' },
+  { id: 'medium', label: '中景', max: 1.7, how: '画面到腰部以上，人物动作和上半身姿态清晰' },
+  { id: 'full', label: '全景', max: 2.8, how: '人物全身完整入镜，头顶到鞋子都在画面内' },
+  { id: 'wide', label: '远景', max: Infinity, how: '人物在环境中显得较小，环境占据画面主体' }
 ];
+
+/**
+ * 一个景别词 → 那句可执行的说明。
+ *
+ * 用**包含**匹配而不是全等：用户手填的是"特写"、"大特写"、"中近景"
+ * 这类自由文本，全等的话十有八九匹配不上，而匹配不上时这个功能就等于没有。
+ * 长的先匹配（"大特写"要先于"特写"命中，否则"大特写"会被当成"特写"）。
+ */
+const SIZE_WORDS = [
+  ...SIZES.map((s) => ({ word: s.label, how: s.how })),
+  { word: '大特写', how: '画面只有面部局部（眼睛或嘴），占满整个画面' }
+]
+  /**
+   * ⚠ **长的必须先匹配。**
+   *
+   * 上面那个数组是按档位从近到远写的，"特写"排在"大特写"前面 ——
+   * 不排序的话，"大特写"会先命中"特写"，拿到一句松得多的说明，
+   * 而**没有任何地方会报错**：它只是让大特写变成普通特写。
+   *
+   * 这一行曾经形同虚设：我把"大特写"手写在数组第一位，于是排不排序
+   * 结果都一样，金丝雀把排序删掉之后测试照样全绿。现在顺序反过来写，
+   * 这条排序才是真的在干活、也才验得出来。
+   */
+  .sort((a, b) => b.word.length - a.word.length);
+
+export function framingHint(cameraText) {
+  const t = String(cameraText || '');
+  if (!t) return '';
+  const hit = SIZE_WORDS.find((x) => t.includes(x.word));
+  return hit ? hit.how : '';
+}
 
 /** 景别：按"画面装得下多高"分档，而不是按感觉 */
 export function shotSize(distanceM, lensMm = DEFAULT_LENS) {
@@ -383,7 +428,18 @@ export function normalizeStage(stage) {
       if (m.far || (m.deg !== undefined && m.x === undefined)) {
         return { name, far: true, deg: norm180(m.deg) };
       }
-      return { name, x: clampM(m.x), y: clampM(m.y) };
+      /**
+       * ⚠ **道具和地标不是一回事，得分开。**
+       *
+       * 地标（门窗桌床）不会因为换机位就搬家，所以整场戏原样继承 ——
+       * 那正是"画面左边是窗"这句话能跨镜成立的原因。
+       * 而设定集道具是**被人拿着走的**：柴刀在第 3 镜出现，
+       * 不等于第 4 镜到最后一镜都该有刀。
+       *
+       * 混在一个数组里的后果是：摆过一次，后面每一镜都带着它，
+       * 而且提示词里会一直写着「它在画面上」—— 一把凭空多出来的刀。
+       */
+      return { name, x: clampM(m.x), y: clampM(m.y), ...(m.prop ? { prop: true } : {}) };
     })
     .filter((m) => m.name);
 
@@ -436,7 +492,7 @@ export function normalizeStage(stage) {
  * ⚠ 只在**同一场次**内继承。跨场次是另一个地方、另一段时间，
  * 把上一场的站位搬过来是错的，而且错得很隐蔽。
  */
-export function inheritStage(prevStage, names = []) {
+export function inheritStage(prevStage, names = [], props = null) {
   const base = normalizeStage(prevStage);
   if (!base) return null;
 
@@ -447,8 +503,23 @@ export function inheritStage(prevStage, names = []) {
    * 人是按这一镜的剧本来的（这一镜没有的人要丢掉，见下面），
    * 但门窗桌椅不会因为换了个机位就搬家。它们正是同一场戏里
    * 唯一不该变的东西 —— 丢了它们，"画面左边是窗"这句话下一镜就没了。
+   *
+   * ⚠ **设定集道具走人的那条规矩，不走地标这条。**
+   *
+   * 柴刀是被人拿着走的：第 3 镜出现不等于往后每一镜都该有刀。
+   * 原来它和地标共用一个数组、跟着一起原样继承 —— 摆过一次之后
+   * 每一镜都带着，提示词里也一直说它在画面上。
+   * 用户的原话是"预演台上的道具，没有添加，为啥还会有"。
+   *
+   * 所以按**这一镜自己的道具清单**（shot.props）筛：清单里有才留。
+   * 不传清单时保持老行为全留 —— 调用方没升级不该被悄悄改掉。
    */
-  const marks = base.marks.map((m) => ({ ...m }));
+  const keepProp = Array.isArray(props)
+    ? new Set(props.map((x) => String(x).trim()).filter(Boolean))
+    : null;
+  const marks = base.marks
+    .filter((m) => !m.prop || !keepProp || keepProp.has(m.name))
+    .map((m) => ({ ...m }));
   // 太阳更不会因为换机位就挪窝 —— 它是这一场戏里最不该变的东西
   const sun = base.sun ? { ...base.sun } : null;
   if (!want.length) return { marks, sun, cam: { ...base.cam }, subjects: base.subjects.map((s) => ({ ...s })) };

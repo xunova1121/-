@@ -10,6 +10,9 @@ import { openLightbox } from '../lightbox.js';
 import { ratioLabel } from '../ratios.js';
 import { skillPicker, customSkillForm } from '../skill-picker.js';
 import { previzPanel, blankStage } from '../previz-canvas.js';
+import { shotTable } from '../shot-table.js';
+import { animatic } from '../animatic.js';
+import { commandBox } from '../command-box.js';
 import * as siteCanvasMod from '../site-canvas.js';
 import * as OUTLINE from '/outline.js';
 import { inheritStage } from '/previz.js';
@@ -28,6 +31,15 @@ import * as FX from '/fx.js';
  */
 import * as EDIT from '/edit.js';
 import * as DUR from '/duration.js';
+/**
+ * 预估和单价换算，取的是**服务端那两个文件的原件**（/estimate.js、/pricing.js）。
+ *
+ * 界面上那句"这一下大概多少钱"和跑完之后账本上记的，必须是同一套算法。
+ * 在这边另抄一份的话，两边迟早会分叉，而分叉的样子是
+ * "说好 ¥12、跑完变 ¥31" —— 那比不显示还坏，因为人是照着那个数下的手。
+ */
+import * as EST from '/estimate.js';
+import * as PRICING from '/pricing.js';
 import { stepsOf, stepProgress } from '../pipeline.js';
 import bibleView from './bible.js';
 
@@ -93,7 +105,44 @@ const job = {
 };
 
 function jobBusy() {
-  return Boolean(job.stage) || job.shots.size > 0;
+  return Boolean(job.stage) || job.shots.size > 0 || Boolean(job.serverRunning);
+}
+
+/**
+ * ══════════ 到底在不在跑，只有服务端知道 ══════════
+ *
+ * ⚠ 原来这个判断**只看内存里那个变量**，而那是每个页面各存一份的。
+ *
+ * 于是：刷新一次、换台设备看、或者流断一次（手机锁屏、切个应用就够了），
+ * 客户端就以为跑完了，按钮亮回来 —— 而服务器还在一镜一镜地出。
+ * 人点下去，撞上一段"这个项目已经在跑（321 秒前开始）"的长文案，
+ * 而那句话本身就说明**这一下压根不该点得动**。
+ *
+ * 活儿登记在服务端（jobs.js 的内存表），那才是唯一的事实。问它。
+ */
+async function syncJob(projectId) {
+  if (!projectId) return;
+  try {
+    const live = await api(`/projects/${projectId}/job`);
+    const was = Boolean(job.serverRunning);
+    job.serverRunning = live?.running ? live : null;
+    /**
+     * ⚠ 只有**状态真的变了**才重画。
+     *
+     * 每三秒无条件重画一次的话，正在打字的输入框会被整个换掉 ——
+     * 而那种"打着打着字没了"的 bug 极难往轮询上想。
+     */
+    if (Boolean(job.serverRunning) !== was) jobNotify('server');
+  } catch {
+    /* 问不到就保持原样：网络抖一下不该把按钮全锁死 */
+  }
+}
+
+let jobPollTimer = 0;
+function startJobPoll(projectId) {
+  clearInterval(jobPollTimer);
+  syncJob(projectId);
+  jobPollTimer = setInterval(() => syncJob(projectId), 4000);
 }
 
 function jobNotify(kind) {
@@ -613,6 +662,14 @@ export default {
     // 出视频一镜要几分钟，中间全靠轮询。不把"现在轮到谁、轮询到第几次"显示出来，
     // 用户看到的就是一个卡住不动的界面，只能猜是不是死了。
     jobReset(project.id);
+    /**
+     * 进这个视图就开始问服务端"现在在跑什么"。
+     *
+     * ⚠ 这一下**必须在进来时就做**，不能等用户点了才发现在跑。
+     * 刷新、换设备、流断之后，页面自己那份状态全没了，
+     * 而服务器可能已经跑了五分钟。
+     */
+    startJobPoll(project.id);
     const live = job.live; // 状态在模块级，切页面不丢
     const liveBadge = h('span', {});
     const liveEls = new Map(); // shotId → 卡片上那块状态区
@@ -803,6 +860,59 @@ export default {
        * 重查一次不产生任何生成费用，刚在「接口地址」里填对路径的话，
        * 这一下能把之前卡住的全收回来。
        */
+      /**
+       * ══════════ 开跑之前的那张清单 ══════════
+       *
+       * ⚠ **摆在按钮上面，而且不是弹窗。**
+       *
+       * 弹窗每次都拦一下，三次之后就变成"闭着眼点确定"—— 那时候它连
+       * blocker 一起被跳过了，比没有更坏。摆成一块常驻的、就在按钮上面的
+       * 清单，看不看由人，但它一直在那儿。
+       *
+       * 只有 blocker 才真的拦一下（那种跑下去几乎一定要重来的）。
+       *
+       * ⚠ 没问题时也要显示"检查过了，没发现问题"——
+       * 整块消失的话，"这里什么都没有"和"检查过了、干净的"就分不出来，
+       * 而前者会让人自己再查一遍，那正是这个功能要消灭的往返。
+       */
+      const stepCheckBox = h('div', { class: 'stepcheck' });
+      if (['assets', 'video', 'voice', 'compose'].includes(state.stage)) {
+        api(`/projects/${project.id}/stepcheck?stage=${state.stage}`).then((r) => {
+          if (!r) return;
+          clear(stepCheckBox);
+          const tone = r.blockers ? 'bad' : r.warns ? 'iffy' : 'ok';
+          add(stepCheckBox,
+            h('div', { class: `stepcheck-head ${tone}` }, r.summary),
+            ...r.items.map((it) => h('div', { class: `stepcheck-item ${it.level}` },
+              h('div', { class: 'stepcheck-what' },
+                h('span', { class: `stepcheck-dot ${it.level}` },
+                  it.level === 'blocker' ? '拦' : it.level === 'warn' ? '建议' : '可选'),
+                it.what),
+              h('div', { class: 'stepcheck-why' }, it.why),
+              h('div', { class: 'stepcheck-fix' }, `→ ${it.fix}`),
+              // 点镜号直接跳过去改 —— 说了"第 7、12、19 镜"却要人自己去翻，
+              // 等于把清单的价值折掉一半
+              it.shots?.length
+                ? h('div', { class: 'stepcheck-shots' },
+                    '涉及：',
+                    ...it.shots.slice(0, 12).map((n) => h('button', {
+                      class: 'btn ghost xs',
+                      onclick: () => {
+                        const card = document.querySelector(`[data-shot-index="${n}"]`);
+                        if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      }
+                    }, `第 ${n} 镜`)),
+                    it.shots.length > 12 ? h('span', { class: 'muted' }, ` 等 ${it.shots.length} 镜`) : null)
+                : null)),
+            /**
+             * 支点那句话。没有它的话，用户看到一堆黄字，
+             * 最省事的做法永远是直接按「开始」。
+             */
+            r.skipCost ? h('div', { class: 'stepcheck-cost' }, r.skipCost) : null);
+          state.lastStepCheck = r;
+        }).catch(() => {});
+      }
+
       const pendingBox = pendingCount && state.stage === 'video'
         ? h('div', { class: 'fail-box', style: 'margin-top:12px' },
             h('div', { class: 'fail-head' }, `${pendingCount} 个任务已提交，但没取回来`),
@@ -831,34 +941,105 @@ export default {
                 ? h('span', { class: 'badge', style: 'margin-left:8px',
                     title: '出图和出视频都按这个画幅。改它去「项目」页' }, `画幅 ${ratio}`)
                 : null),
-            h('div', { class: 'stage-detail-hint' }, meta.hint)
+            h('div', { class: 'stage-detail-hint' }, meta.hint),
+            /**
+             * 这一下要花多少 —— 摆在按钮**上面**。
+             *
+             * 这句话是给"还没按"的那个人看的。按完再告诉他花了多少就晚了，
+             * 而这条流水线上最贵的一步（出视频）恰恰是最没法反悔的一步。
+             *
+             * 没填单价就显示用量（12 张图、60 秒），那同样是一个能拿来
+             * 做决定的数，而且一个字都不是猜的。
+             */
+            // cap:spend-estimate
+            (() => {
+              const line = costText(state.stage);
+              if (!line) return null;
+              const unpriced = line.includes('还没填单价') || line.includes('没算进去');
+              return h('div', { class: `cost-line${unpriced ? ' unpriced' : ''}` }, line);
+            })()
           ),
           h('div', { class: 'inline' },
 
-            h('button', {
+            /**
+             * ══════════ 在跑的时候，这颗按钮就是「停下来」 ══════════
+             *
+             * ⚠ 不是"变灰"，是**换成另一个动作**。
+             *
+             * 变灰的话，人看到的是一颗点不动的按钮和一段"已经在跑了"的长文案 ——
+             * 他真正想干的那件事（停下来）藏在别处。用户的原话是
+             * "你在出的话就不能点击继续出图，可以暂停"。
+             *
+             * 而且这里显示的是**服务端的进度**（第几镜、跑了多久），
+             * 不是这个页面自己记的那份 —— 刷新、换设备、流断都不影响它。
+             */
+            job.serverRunning
+              ? h('button', {
+                  class: 'btn',
+                  title: '停在当前这一镜之后。已经出好的都留着',
+                  disabled: job.serverRunning.cancelling,
+                  onclick: async () => {
+                    try {
+                      const r = await api(`/projects/${project.id}/cancel`, { method: 'POST' });
+                      toast(r.message || '正在停…', 'ok');
+                      syncJob(project.id);
+                    } catch (err) { toast(err.message, 'err'); }
+                  }
+                }, job.serverRunning.cancelling ? '正在停…' : '■ 停下来')
+              : h('button', {
               class: 'btn primary',
               disabled: !runnable,
               title: isCostly ? '视频按镜数计费，是这条流水线最大的开销' : '',
               onclick: () => {
-                if (isCostly && !confirmGeneration('video', missing, {}, '批量生成视频')) return;
+
+                // 原来这里写的是"按镜数计费且耗时较长"—— 一句正确但没有信息量的话。
+                // 现在把真数放进去（没填单价就放用量），人才有得判断
+                /**
+                 * ⚠ 只有 blocker 才拦。
+                 *
+                 * 把 warn 也拿来拦的话，这颗按钮会天天弹框 ——
+                 * 三次之后人就学会闭着眼点确定，那时候 blocker 一起被跳过了。
+                 */
+                const sc = state.lastStepCheck;
+                if (sc?.blockers && sc.stage === state.stage) {
+                  const first = sc.items.find((i) => i.level === 'blocker');
+                  if (!confirm(`${first.what}。\n\n${first.why}\n\n${first.fix}\n\n还是要现在跑吗？`)) return;
+                }
+                if (isCostly && missing.length > 3
+                  && !costConfirm(`将为 ${missing.length} 个镜头生成视频，耗时较长。确定？`, state.stage)) return;
+
                 runStage(state.stage);
               }
             }, done ? `继续（还差 ${total - done}）` : '开始'),
+            /**
+             * 在跑的时候把**服务端的进度**摆出来。
+             * 页面自己记的那份一刷新就没了，而这个数是问出来的。
+             */
+            job.serverRunning
+              ? h('span', { class: 'field-hint', style: 'margin:0 0 0 8px' },
+                  `${job.serverRunning.stageLabel || job.serverRunning.stage} 中`
+                  + (job.serverRunning.shotIndex ? ` · 第 ${job.serverRunning.shotIndex} 镜` : '')
+                  + ` · 已跑 ${Math.round((job.serverRunning.elapsedMs || 0) / 1000)} 秒`)
+              : null,
             done && done === total
               ? h('button', {
                   class: 'btn ghost',
                   disabled: !runnable,
                   onclick: () => {
-                    const targets = state.stage === 'video' ? shots.filter((s) => s.imagePath) : shots;
-                    if (state.stage === 'video') {
-                      if (!confirmGeneration('video', targets, {}, '整步重跑视频')) return;
-                    } else if (!confirm('这一步已经完成，重跑会覆盖已有产出并重新计费。确定？')) return;
+
+                    // 整步重跑是**全部重出**，不是补缺口 —— 预估也要按 regenerate 算，
+                    // 否则这里会显示一个"还差 0 个"的 ¥0，而实际要重出一整步
+                    if (!costConfirm('这一步已经完成，重跑会覆盖已有产出并重新计费。确定？',
+                      state.stage, { regenerate: true })) return;
+
                     runStage(state.stage, { regenerate: true });
                   }
                 }, '整步重跑')
               : null
           )
         ),
+        // cap:stepcheck
+        stepCheckBox,
         total
           ? h('div', {},
               h('div', { class: 'progress-bar' }, h('div', { class: 'progress-fill', style: `width:${pct}%` })),
@@ -938,6 +1119,14 @@ export default {
         job.stage = null;
         job.live.clear();
         jobNotify('done');
+        /**
+         * 跑完把账重新拉一遍。
+         *
+         * 不拉的话，刚花完钱的那一刻账面上还是上一次的数 —— 而
+         * "我刚跑完这一步，到底花了多少"正是最想当场知道的那个问题。
+         * 停下来和失败也要拉：那两种情况下钱**照样花了一部分**。
+         */
+        loadSpend();
         toast(
           cancelled
             ? `已停下，用时 ${fmtMs(spent)}。已经跑完的都存着了，接着跑就从这一步「往后全跑」`
@@ -1002,6 +1191,20 @@ export default {
       if (kind === 'tick') {
         // 跑的过程只更新日志和**卡片自己的状态条**，右下角一声不吭
         paintLog();
+        return;
+      }
+      /**
+       * ⚠ 问服务端问出"在跑 / 不在跑"变了 —— 只重画**那一块面板**。
+       *
+       * 少了这一下，轮询把状态更新了却没人重画，按钮照旧是「继续出图」——
+       * 也就是用户撞到的那个：点下去回一段"这个项目已经在跑（321 秒前开始）"。
+       *
+       * ⚠ 只画 stage-detail，**不重画整页**。你可能正在某张卡片里改台词，
+       * 而这个轮询每四秒响一次 —— 重画整页等于每四秒把你打的字吃掉一次。
+       */
+      if (kind === 'server') {
+        paintStageDetail();
+        syncNav();
         return;
       }
       // done
@@ -1172,6 +1375,225 @@ export default {
      * 只想把后面几步串起来跑。从头跑一遍不但白花钱，还会**把你改过的分镜文案冲掉**
      * （重拆分镜等于推翻重来）。所以摆两条路，并且把各自会跑哪几步写清楚。
      */
+    /**
+     * ══════════════ 这一下要花多少 ══════════════
+     *
+     * 界面里讲了一整年的钱 —— "视频那步最贵""改这个要重出""重跑按镜数计费" ——
+     * 却从来没给过一个数。这几个函数就是把那些话变成数。
+     *
+     * 算在**浏览器这一边**，用的是和服务端同一份 estimate.js / pricing.js
+     * （从 /estimate.js 直接取原件）。不走接口是因为这个数要跟着
+     * "切了一下阶段""勾了整步重跑"实时变 —— 每次都发一趟请求的话，
+     * 数字会比手慢半拍，而慢半拍的价钱等于没有。
+     */
+    function costRouting() {
+      const r = state.catalog?.routing || {};
+      return {
+        image: { provider: r.image?.provider, model: r.image?.model },
+        video: {
+          provider: r.video?.provider,
+          model: r.video?.model,
+          // 厂商档位必须带上：分镜写 4 秒、厂商只出 5 秒档、按 5 秒计费
+          durations: state.catalog?.videoDurations || []
+        },
+        tts: { provider: r.tts?.provider, model: r.tts?.model }
+      };
+    }
+
+    function costRates() {
+      return state.catalog?.settings?.rates || {};
+    }
+
+    function costRetries() {
+      const s = state.catalog?.settings || {};
+      return s.consistencyVerify ? Number(s.consistencyMaxRetries) || 0 : 0;
+    }
+
+    /** 某一步的预估。stage 传 'all' 时按「从这一步往后跑」算。 */
+    function costPlan(stage, { regenerate = false, from = null } = {}) {
+      const shots = project.shots || [];
+      const routing = costRouting();
+      const maxRetries = costRetries();
+      return from
+        ? EST.forRun({ shots, from, routing, maxRetries })
+        : EST.forStage({ shots, stage, routing, regenerate, maxRetries });
+    }
+
+    function costText(stage, opts = {}) {
+      try {
+        return EST.describe(costPlan(stage, opts), costRates());
+      } catch {
+        // 预估算不出来绝不能挡住跑流水线这件事本身
+        return '';
+      }
+    }
+
+    /**
+     * 确认框里的那句话。
+     *
+     * 原来写的是"按镜数计费且耗时较长"—— 一句正确但没有信息量的话。
+     * 现在把真数放进去。没填单价的时候放**用量**（12 张图、60 秒），
+     * 那同样是一个能拿来做决定的数，而且一个字都不是猜的。
+     */
+    function costConfirm(question, stage, opts = {}) {
+      const line = costText(stage, opts);
+      return confirm(line ? `${question}\n\n${line}` : question);
+    }
+
+    /**
+     * ══════════════ 这个项目到现在花了多少 ══════════════
+     *
+     * 和上面那个是**两种不同的真相**，所以摆在不同的地方、用不同的措辞：
+     * 上面讲还没发生的（"要发"），这里讲已经发生的（"已经发了"）。
+     *
+     * 用量是记下来的事实；钱是拿你填的单价现算的。没填就只显示用量 ——
+     * 那部分永远是真的，而且已经比什么都不说强得多。
+     */
+    const spendHost = h('div', { class: 'card', style: 'margin-top:14px' });
+    let spend = null;
+    let spendOpen = false;
+
+    async function loadSpend() {
+      try {
+        // cap:spend-project
+        spend = await api(`/projects/${project.id}/spend`);
+      } catch (err) {
+        spend = { error: err.message };
+      }
+      paintSpend();
+    }
+
+    function paintSpend() {
+      clear(spendHost);
+      if (!spend) {
+        add(spendHost, h('div', { class: 'field-hint' }, '正在读这个项目的账…'));
+        return;
+      }
+      if (spend.error) {
+        add(spendHost, h('div', { class: 'field-hint' }, `账读不出来：${spend.error}`));
+        return;
+      }
+
+      const missing = spend.total?.missing || [];
+      const head = h('summary', { class: 'card-title' },
+        '这个项目花了多少',
+        h('span', { class: 'badge', style: 'margin-left:8px' },
+          spend.calls ? `${spend.calls} 次调用` : '还没花过'));
+
+      const body = h('div', {});
+
+      add(body, h('div', { class: 'spend-line' }, spend.line));
+
+      /**
+       * 分口径摊开。只摊有数的那些 —— 一整排 0 是噪音，
+       * 而"这个项目一次视频都没出"本来就该由那一行的缺席来表达。
+       */
+      const rows = [];
+      for (const [kind, spec] of Object.entries(spend.kinds || {})) {
+        const b = spend.total?.byKind?.[kind];
+        if (!b || !b.calls) continue;
+        const money = PRICING.fmtMoney(b.cny);
+        rows.push(h('div', { class: 'spend-row' },
+          h('span', { class: 'spend-kind' }, spec.label),
+          h('span', { class: 'spend-units' }, PRICING.describeUnits(kind, b.units)),
+          h('span', { class: 'spend-money' },
+            b.priced ? money : h('span', { class: 'field-hint' }, '没填单价'))));
+      }
+      if (rows.length) add(body, h('div', { class: 'spend-table' }, ...rows));
+
+      /**
+       * 漏账要说出来。
+       *
+       * "有 3 次调用厂商没回用量"是一句难看的话，但它是真的 ——
+       * 而一个悄悄少了 3 次的总数看起来完全正常，那才是真正的问题。
+       */
+      if (spend.unmetered) {
+        add(body, h('div', { class: 'field-hint', style: 'margin-top:8px' },
+          `另有 ${spend.unmetered} 次调用没记上账 —— `,
+          spend.blind?.length
+            ? `${spend.blind.map((x) => `${x.provider}/${x.model}`).join('、')} 没在响应里回用量。`
+            : '厂商没在响应里回用量。',
+          '这几次的钱确实花了，只是我们数不出来。'));
+      }
+
+      // 还差哪些单价 —— 就地填，不用跑去设置页
+      if (missing.length) add(body, rateFiller(missing, '这几样已经用过了，但还没填单价：'));
+
+      add(spendHost, h('details', { open: spendOpen, ontoggle: (e) => { spendOpen = e.target.open; } },
+        head, body));
+    }
+
+    /**
+     * 就地填单价。
+     *
+     * ⚠ 这里**不预填任何厂商的价**。理由见 core/pricing.js 开头：
+     * 各家单价我只有个印象，印象填进输入框就变成了一个看起来权威的默认值，
+     * 而用户多半会直接点保存。而且标价根本不是他的价 ——
+     * 有额度包、有企业协议、走中转的能差一倍。让他照着自己的账单抄。
+     */
+    function rateFiller(missing, title) {
+      const box = h('div', { class: 'rate-filler' });
+      const inputs = new Map();
+
+      add(box, h('div', { class: 'field-hint', style: 'margin:10px 0 6px' }, title));
+      for (const m of missing) {
+        const spec = PRICING.KINDS[m.kind] || {};
+        const row = h('div', { class: 'rate-row' });
+        add(row, h('span', { class: 'rate-who' }, PRICING.describeMissing(m)));
+        if (spec.pair) {
+          const i1 = h('input', { class: 'input sm', type: 'number', step: 'any', min: '0', placeholder: '输入' });
+          const i2 = h('input', { class: 'input sm', type: 'number', step: 'any', min: '0', placeholder: '输出' });
+          inputs.set(m.key, { pair: true, i1, i2 });
+          add(row, i1, i2);
+        } else {
+          const i1 = h('input', { class: 'input sm', type: 'number', step: 'any', min: '0', placeholder: spec.priceUnit || '单价' });
+          inputs.set(m.key, { pair: false, i1 });
+          add(row, i1);
+        }
+        add(box, row);
+      }
+
+      add(box,
+        h('div', { class: 'inline', style: 'margin-top:8px' },
+          h('button', {
+            class: 'btn sm primary',
+            // cap:spend-rates
+            onclick: async (e) => {
+              const rates = {};
+              for (const [key, f] of inputs) {
+                if (f.pair) {
+                  // 进出两个都得填 —— 只填一个算不出钱，存下来只会让人以为填过了
+                  if (f.i1.value === '' || f.i2.value === '') continue;
+                  rates[key] = { in: Number(f.i1.value), out: Number(f.i2.value) };
+                } else {
+                  if (f.i1.value === '') continue;
+                  rates[key] = { cny: Number(f.i1.value) };
+                }
+              }
+              if (!Object.keys(rates).length) return toast('还没填任何单价');
+              e.target.disabled = true;
+              try {
+                await api('/rates', { method: 'PUT', body: { rates } });
+                // 目录里那份 settings 要一起刷新，不然预估还在用旧单价
+                state.catalog = await api('/catalog');
+                await loadSpend();
+                // 预估那几行也要跟着重画 —— 刚填完单价，上面还写着
+                // "还没填单价，算不出钱"的话，人会以为没存进去
+                paintStageDetail();
+                toast('单价存下了，过去的账也按新单价重算了');
+              } catch (err) {
+                toast(`存不下：${err.message}`);
+              } finally {
+                e.target.disabled = false;
+              }
+            }
+          }, '存单价'),
+          h('span', { class: 'field-hint' },
+            '照你自己账单上的价填。我们不预填任何数 —— 标价不是你的价，'
+            + '有额度包、有协议、走中转的能差一倍。')));
+      return box;
+    }
+
     const runChoice = h('div', { style: 'display:none;margin:8px 0 2px' });
 
     function paintRunChoice() {
@@ -1198,7 +1620,7 @@ export default {
                 disabled: jobBusy(),
                 title: '前面几步保留已有产出，不重跑、不重复计费',
                 onclick: () => {
-                  if (!confirm(`从「${label}」往后跑 ${rest} 步。视频那步按镜数计费，可能是最大的一笔开销。确定？`)) return;
+                  if (!costConfirm(`从「${label}」往后跑 ${rest} 步。`, 'all', { from: state.stage })) return;
                   runChoice.style.display = 'none';
                   runStage('all', { from: state.stage });
                 }
@@ -1211,7 +1633,9 @@ export default {
         h('div', { class: 'field-hint', style: 'margin:6px 0 0' },
           at >= 0
             ? '从这一步往后跑：前面几步的产出原样保留，不重跑也不重复计费。日常用这条。'
-            : '当前这一步不在流水线里（比如「剧本」），只能从头跑。'));
+            : '当前这一步不在流水线里（比如「剧本」），只能从头跑。'),
+        // 「往后跑」那几步加起来多少钱 —— 这是整条链路上最该有个数的地方
+        at >= 0 ? h('div', { class: 'cost-line' }, costText('all', { from: state.stage })) : null);
     }
 
     /**
@@ -1608,7 +2032,10 @@ export default {
              * 跨场次不继承 —— 那是另一个地方、另一段时间。
              */
             const sameSeg = prevShot && Number(prevShot.segment || 1) === Number(shot.segment || 1);
-            stageDraft = (sameSeg && inheritStage(prevShot.stage, names)) || blankStage(names);
+            // ⚠ 第三个参数是**这一镜的道具清单**：地标整场继承，道具按清单筛。
+            // 不传的话，上一镜摆过的刀会一路跟到最后一镜，提示词里也一直说它在画面上
+            stageDraft = (sameSeg && inheritStage(prevShot.stage, names, shot.props || []))
+              || blankStage(names);
           }
           // 上一镜的排位拿来比对轴线 —— 越轴是**两镜之间**的事，单看一镜看不出来
           const panel = previzPanel(stageDraft, {
@@ -1672,8 +2099,14 @@ export default {
                 toast(err.message, 'err');
               }
             },
-            onChange: () => { /* 拖动时只更新读数，存盘等你点保存 */ }
+            onChange: () => { /* 拖动时只更新读数，存盘等你点保存 */ },
+            /**
+             * 设定集里的道具。摆上去之后，提示词里会多一句「柴刀在画面右」——
+             * 和门窗桌椅走同一套数学，只是它跟着这一镜的关键道具清单走。
+             */
+            bibleProps: (project.bible?.props || []).map((x) => x.name)
           });
+
           previzHost.append(
             h('div', { class: 'shot-edit-tip' },
               '拖大圆点摆人，拖小圆点转身，拖「机」摆机位。两个人之间那条线就是轴线 —— '
@@ -1827,6 +2260,9 @@ export default {
           descEl.style.display = '';
           mark(false);
         };
+        /** 「为什么不对」的结果挂这儿。默认空的 —— 不点就不占地方 */
+        const diagHost = h('div', { class: 'diag-host' });
+
         const openEdit = () => {
           editor.style.display = '';
           descEl.style.display = 'none';
@@ -1836,6 +2272,19 @@ export default {
         descEl.onclick = openEdit;
 
         /**
+
+         * 从表格里按回车过来的那一镜，落地就展开编辑器。
+         *
+         * ⚠ 标记要**当场清掉**。不清的话，下一次任何原因的重画都会再展开一次 ——
+         * 人正在别处看，编辑器自己弹开，而且看不出是谁干的。
+         */
+        if (state.openShotId === shot.id) {
+          state.openShotId = null;
+          queueMicrotask(() => { openEdit(); card.scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+        }
+
+        /**
+
          * ════════ 按**下游**分组 ════════
          *
          * 用户问的是"标连续动作、选技法、绑说话人到底该出现在哪一步"。
@@ -2004,7 +2453,12 @@ export default {
         }
 
         const card =
-          h('article', { class: `shot-card ${flagged ? 'flagged' : ''} ${failed ? 'failed' : ''}` },
+          h('article', {
+            class: `shot-card ${flagged ? 'flagged' : ''} ${failed ? 'failed' : ''}`,
+            // 开跑前清单里的「第 7 镜」按钮靠它跳过来。没有这个属性的话，
+            // 那颗按钮点了**什么都不会发生**，而且不报错
+            'data-shot-index': String(shot.index)
+          },
             h('div', { class: 'shot-thumb' }, thumb, liveEl),
             h('div', { class: 'shot-body' },
               h('div', { class: 'shot-head' },
@@ -2020,10 +2474,46 @@ export default {
                 h('button', { class: 'shot-edit-btn', title: '改这一镜的描述、景别、台词', onclick: openEdit }, '改文案'),
                 // 和「改文案」并排。藏在编辑面板底部时用户根本找不到它
                 stageBtn,
+
+                /**
+                 * ══════════ 「为什么不对」 ══════════
+                 *
+                 * ⚠ 出图之后才有意义，所以只在有图时摆出来。
+                 *
+                 * 不满意的时候，人手里只有一张图和一个「重出」按钮 ——
+                 * 而再来一次多半还是那样，因为他不知道该改什么。
+                 * 这颗按钮回答的就是那个问题，而且只说**数据里有证据**的原因。
+                 */
+                shot.imagePath
+                  ? h('button', {
+                      class: 'shot-edit-btn',
+                      title: '这一镜不满意？看看数据里查得出什么原因',
+                      onclick: async (e) => {
+                        const btn = e.currentTarget;
+                        btn.disabled = true;
+                        try {
+                          // cap:diagnose-shot
+                          const r = await api(`/projects/${project.id}/shots/${shot.id}/diagnose`);
+                          clear(diagHost);
+                          add(diagHost, ...(r.items || []).map((it) => h('div', { class: 'diag-item' },
+                            h('div', { class: 'diag-what' }, it.what),
+                            h('div', { class: 'diag-why' }, it.why),
+                            h('div', { class: 'diag-how' }, `→ ${it.how}`),
+                            // 花不花钱要写在动作旁边，不能只写在别处
+                            it.costs ? h('span', { class: 'diag-cost' }, '这一下要重新出图（花钱）') : null)));
+                        } catch (err) {
+                          clear(diagHost);
+                          add(diagHost, h('div', { class: 'diag-item' }, err.message));
+                        } finally { btn.disabled = false; }
+                      }
+                    }, '为什么不对')
+                  : null,
                 verBtn,
                 manifestBtn,
                 reviewBtn
+
               ),
+              diagHost,
               descEl,
               editor,
               h('div', { class: 'shot-meta' },
@@ -2193,22 +2683,70 @@ export default {
                   // 不然重出来还是不像的时候，根本不知道是提示词的问题还是压根没带参考图
                   h('div', { class: 'shot-used' },
                     '单独重出会自动带上本镜的设定集：场景基准图 + 出场角色设定图 + 点到的道具图'),
+
+                  /**
+                   * ⚠ **一张都没带的时候更要说**。
+                   *
+                   * 这一行原来只在带了参考图时显示，没带时一声不响 ——
+                   * 而那恰恰是最需要知道的情况：用户传了自己的照片、
+                   * 出来的脸不是他的，而界面上没有任何东西告诉他
+                   * 那张照片根本没被用上。沉默在这里等于误导。
+                   */
+                  /**
+                   * ══════════ 出处与排查：默认折起来 ══════════
+                   *
+                   * 下面这一整段（带了哪几张参考图、哪个模型出的、首帧核对、
+                   * task_id、手动补入、提示词原文）是**排查时才翻**的东西。
+                   *
+                   * 它们每一条都是有理由才加上的，但加了十几条之后，
+                   * 浏览五十镜时它们就是五十份噪音 —— 用户的原话是"太杂太乱"。
+                   *
+                   * ⚠ **折起来 ≠ 删掉。**一样都没少，点一下就有。
+                   * 徽章（景别/场景/角色/一致性）留在外面 —— 那是"这一镜是什么"，
+                   * 扫一眼就要看到的东西，不是排查用的。
+                   */
+                  /**
+                   * ⚠ **一条内容都没有就整个不渲染。**
+                   *
+                   * 一个点开什么都没有的「出处与排查」，比多几行字更让人觉得
+                   * 这界面不靠谱。
+                   *
+                   * ⚠ 老实说：这一行**目前够不到** —— promptPanel 总会回点东西，
+                   * 所以 kids 从来不是空的。金丝雀把它删掉，走查照样全绿。
+                   * 留着是因为它一行、且是对的；但别把它当成"验过了"。
+                   * 真正在守这件事的是走查里那条**不变量**断言
+                   *（"没有一个折叠区是点开就空的"）—— 它不管实现怎么变，
+                   * 只要哪天真出现一个空折叠区就会红。
+                   */
+                  (() => {
+                    const kids = [
+                  // cap:shot-refs
                   sc.image
-                    ? h('div', { class: 'shot-used' }, shot.bibleRefs?.length
-                        ? `上次出图参考：${shot.bibleRefs.join('、')}`
-                        : shot.refsAvailable > 0
-                          ? `设定集有 ${shot.refsAvailable} 张图可用`
-                            + (shot.refsAvailableLabels?.length ? `（${shot.refsAvailableLabels.join('、')}）` : '')
-                            + '，但上次一张都没发。'
-                            + (shot.refBlockedHint ? `原因：${shot.refBlockedHint}。打开它再重出这一镜。` : '')
-                            + ((shot.refsAvailableLabels || []).some((x) => x.includes('你传的'))
-                              ? shot.refPolicy !== 'uploads-always'
-                                ? '这是旧版记录；请重出这一镜后再核对。'
-                                : '上传照片本应无条件发送却未发出，请查看完整请求记录。'
-                              : '')
-                          : shot.refsAvailable === 0
-                            ? '这一镜引用的角色或场景还没有参考图，请先生成或上传。'
-                            : '早期生成记录没有保存参考图状态，重出一次即可确认。')
+                    ? h('div', { class: 'shot-used' },
+                        shot.bibleRefs?.length
+                          ? `上次出图参考：${shot.bibleRefs.join('、')}`
+                          : shot.refsAvailable > 0
+                            ? `设定集里有 ${shot.refsAvailable} 张图可以带`
+                              + (shot.refsAvailableLabels?.length ? `（${shot.refsAvailableLabels.join('、')}）` : '')
+                              + '，但上次一张都没发。'
+                              // 说清那几张是谁 —— 用户真正要判断的是"我传的那张在不在里面"
+                              // 拦住它的开关有两个，隔着两个面板 —— 用出图时记下的那句，别猜
+                              + (shot.refBlockedHint
+                                ? `原因：${shot.refBlockedHint}。打开它再重出这一镜。`
+                                : (shot.refsAvailableLabels || []).some((x) => x.includes('你传的'))
+                                  // 卡片是**历史记录**：没盖新版的戳，就说明这条是更新之前
+                                  // 写下的，它说什么都不作数。手机端同一处有更长的说明
+                                  ? shot.refPolicy !== 'uploads-always'
+                                    ? '⚠ 不过这条记录是程序更新之前留下的，已经不作数了 ——'
+                                      + '新版里你传的照片不受任何开关管，一定会发。重出这一镜才反映现在的情况。'
+                                    : '⚠ 这一镜是新版出的，你传的照片本该无条件发出去却没发 ——'
+                                      + '这是程序的问题，不是设置的问题，改设置没有用。把完整请求记录发出来。'
+                                  : '⚠ 这几张全是模型出的，没有你传的那张 —— 问题不在设置。'
+                                    + '要么照片传到了别的条目上，要么这一镜引用的角色名和设定集里的对不上。')
+                            : shot.refsAvailable === 0
+                              ? '这一镜引用的角色/场景在设定集里还没有图 —— 没有图可带。先去给他出一张或传一张。'
+                              : '这张图是早前出的，当时没记下带过哪些参考图。重出一次就知道了。')
+
                     : null,
                   sc.video && shot.videoRefs?.length
                     ? h('div', { class: 'shot-used' }, `上次出视频参考：${shot.videoRefs.join('、')}`)
@@ -2287,6 +2825,11 @@ export default {
                    * 两条都摆出来：现在会发的、上次发过的。
                    */
                   promptPanel(project, shot, sc)
+                    ].filter(Boolean);
+                    return kids.length
+                      ? h('details', { class: 'shot-more' }, h('summary', {}, '出处与排查'), ...kids)
+                      : null;
+                  })()
                 )
               )
             )
@@ -2296,12 +2839,238 @@ export default {
       }
     }
 
+    /**
+     * 选中的那几镜。**挂在闭包上，不挂在表格组件里** ——
+     * 这个界面每跑完一镜就重画一次，选择放在组件里会跟着组件一起没。
+     * 选了二十镜、跑完一镜、选择全丢，那是个能让人立刻放弃这个功能的 bug。
+     */
+    const picked = new Set();
+    const skillNameOf = {};
+    for (const g of skillGroups) for (const c of g.skills || []) skillNameOf[c.id] = c.name;
+
+    /**
+     * ══════════ 选中之后能干什么 ══════════
+     *
+     * ⚠ 只在**选了东西之后**出现。一条常驻的空工具条会占掉一行、
+     * 而且它每一颗按钮都是灰的 —— 那种界面会让人以为功能坏了。
+     *
+     * ⚠ 技法卡是**加/减**，不是覆盖（服务端也是这么做的）。
+     * 批量场景里几乎不存在"把这十镜的技法卡全换成这一张"，
+     * 常见的是"这十镜都加一张手持"。覆盖的话，每一镜原来各自挑的运镜
+     * 全没了 —— 而那是他一镜一镜挑出来的东西。
+     */
+    function paintBatchBar(bar, sel, tbl) {
+      clear(bar);
+      if (!sel.size) return;
+      const ids = [...sel];
+
+      const doBatch = async (body, okMsg) => {
+        try {
+          // cap:batch-edit
+          const r = await api(`/projects/${project.id}/shots/batch`, { method: 'POST', body: { ids, ...body } });
+          project = r.project || project;
+          if (r.dropped?.length) toast(`有 ${r.dropped.length} 张互斥的技法卡被规整掉了`, 'warn');
+          toast(`${okMsg}（${r.changed}/${r.total} 镜有变化）`, 'ok');
+          paintShots();
+        } catch (err) { toast(err.message, 'err'); }
+      };
+
+      const durInput = h('input', { type: 'number', step: '0.5', min: '0.5', class: 'cell-num', placeholder: '秒' });
+      const skillSel = h('select', {},
+        h('option', { value: '' }, '挑一张技法卡…'),
+        ...skillGroups.flatMap((g) => (g.skills || []).map((c) =>
+          h('option', { value: c.id }, `${g.label || g.id}·${c.name}`))));
+
+      add(bar,
+        h('span', { class: 'batch-count' }, `选中 ${sel.size} 镜`),
+        h('button', {
+          class: 'btn ghost sm',
+          onclick: () => { sel.clear(); tbl.refresh(); paintBatchBar(bar, sel, tbl); }
+        }, '清空选择'),
+        h('span', { class: 'batch-sep' }),
+
+        durInput,
+        h('button', {
+          class: 'btn sm',
+          onclick: () => {
+            const v = Number(durInput.value);
+            if (!(v > 0)) return toast('先填一个秒数', 'warn');
+            return doBatch({ patch: { duration: v } }, `这 ${ids.length} 镜的时长都改成 ${v} 秒`);
+          }
+        }, '改时长'),
+        h('span', { class: 'batch-sep' }),
+
+        skillSel,
+        h('button', {
+          class: 'btn sm',
+          onclick: () => skillSel.value
+            ? doBatch({ addSkills: [skillSel.value] }, '技法卡加上了')
+            : toast('先挑一张卡', 'warn')
+        }, '加上'),
+        h('button', {
+          class: 'btn ghost sm',
+          onclick: () => skillSel.value
+            ? doBatch({ removeSkills: [skillSel.value] }, '技法卡去掉了')
+            : toast('先挑一张卡', 'warn')
+        }, '去掉'),
+        h('span', { class: 'batch-sep' }),
+
+        /**
+         * 只跑选中的这几镜。
+         *
+         * ⚠ 这里必须**先问一下价钱**：它长得像个不起眼的小按钮，
+         * 而按下去是真花钱的。选了三十镜顺手一点，账单上是三十镜。
+         */
+        h('button', {
+          class: 'btn sm',
+          disabled: state.stage !== 'assets' && state.stage !== 'video',
+          title: state.stage === 'assets' || state.stage === 'video'
+            ? '只跑选中的这几镜（已经出过的会重出）'
+            : '在「镜头出图」或「视频生成」那一步才能用',
+          onclick: () => {
+            if (!costConfirm(`只跑选中的这 ${ids.length} 镜（已经出过的会重出）。`, state.stage)) return;
+            // cap:run-selected
+            runStage(state.stage, { only: ids });
+          }
+        }, state.stage === 'video' ? '只出这几镜的视频' : '只出这几镜的图')
+      );
+    }
+
     function paintShots() {
       clear(shotHost);
       shotCards.clear();
       if (!project.shots?.length) {
         shotHost.append(h('div', { class: 'empty' }, h('b', {}, '还没有分镜'),
           '左边菜单里按顺序走：先「剧本」，再「设定集」，然后到「分镜」这一步点开始。'));
+        return;
+      }
+
+      /**
+       * ══════════ 表格视图 ══════════
+       *
+       * 卡片一屏三四镜，五十镜要滚十几屏。表格解决的是**通读和批量改**——
+       * 那是卡片做不好的两件事。反过来看画面还是卡片好，所以两个都留着。
+       */
+      // cap:shot-table
+      shotHost.append(
+        h('div', { class: 'shot-view-bar' },
+          h('button', {
+            class: `btn ghost sm${state.shotView === 'table' ? '' : ' on'}`,
+            onclick: () => { state.shotView = 'cards'; paintShots(); }
+          }, '卡片'),
+          h('button', {
+            class: `btn ghost sm${state.shotView === 'table' ? ' on' : ''}`,
+            title: '一行一镜，能多选、能用上下键',
+            onclick: () => { state.shotView = 'table'; paintShots(); }
+          }, '表格'),
+          /**
+           * ══════════ 连播 ══════════
+           *
+           * 出视频**之前**最后一道、也是最省钱的一道关：把分镜图按各自的
+           * 时长连起来播一遍，立刻能听出"第 7 镜太长"、"这三镜全是中景，闷"、
+           * "这句话根本来不及说完"。这些问题出完视频再发现，代价是整批重出。
+           */
+          h('button', {
+            class: `btn ghost sm${state.shotView === 'play' ? ' on' : ''}`,
+            title: '按各镜时长连起来播一遍 —— 不花钱，出视频之前先看节奏',
+            onclick: () => { state.shotView = 'play'; paintShots(); }
+          }, '连播'),
+          state.shotView === 'table'
+            ? h('span', { class: 'field-hint', style: 'margin:0' },
+                '↑↓ 移动 · 空格选中 · Shift+↑↓ 连选 · 回车打开 · Esc 清空')
+            : null)
+      );
+
+      /**
+       * 指令框紧跟视图切换条 —— 和表格视图**互相印证**：
+       * 指令说"第 6-12 镜"，表格里就该看见那 7 行。
+       * 分开放的话，用户没法确认它选的和他想的是不是同一批，
+       * 而"选错一批然后批量改"是这个框最坏的失败方式。
+       */
+      // cap:command-box
+      shotHost.append(commandBox(project, {
+        onDone: () => rerender(),
+        onGo: (stage) => {
+          if (!stage) return;
+          state.stage = stage;
+          rerender();
+        }
+      }));
+
+      if (state.shotView === 'play') {
+        const sortedAll = project.shots.slice().sort((a, b) => a.index - b.index);
+        // cap:animatic
+        const player = animatic(sortedAll, {
+          mediaUrl,
+          // 念出来的那段：署名和括注不算 —— 字幕上出现"（冷笑）"是错的
+          spokenOf: (s) => String(s.dialogue || '').replace(/[（(][^）)]*[）)]/g, '').replace(/^[^：:]{1,8}[：:]/, '').trim()
+        });
+        /**
+         * ⚠ 切走时必须停。不停的话 rAF 一直在跑、视频还在解码，
+         * 而且下次进来会有两个播放器同时在动 —— 表现是"越用越卡"。
+         */
+        state.stopAnimatic?.();
+        state.stopAnimatic = player.stop;
+        shotHost.append(
+          h('div', { class: 'field-hint', style: 'margin:0 0 8px' },
+            `全片 ${DUR.fmtSeconds(player.total)}`
+            + `${project.targetSeconds ? ` · 目标 ${DUR.fmtSeconds(project.targetSeconds)}` : ''}`
+            + ' —— 这一遍不花钱，是出视频之前最后一道关'),
+          player.node
+        );
+        player.focus();
+        return;
+      }
+      state.stopAnimatic?.();
+      state.stopAnimatic = null;
+
+      if (state.shotView === 'table') {
+        const sortedAll = project.shots.slice().sort((a, b) => a.index - b.index);
+        const bar = h('div', { class: 'batch-bar' });
+        /**
+         * ══════════ 一键选上"该重出的那几镜" ══════════
+         *
+         * ⚠ 判据是**有可以动手的具体原因**，不是"分数低"。
+         *
+         * 按分数选的话会把一堆"数据上看不出毛病、只是模型这次画成这样"的
+         * 镜头一起选上 —— 重出它们纯粹是碰运气，而每一次都真花钱。
+         * 只选那些有明确原因的：图是旧描述出的、参考图没发、模型换过。
+         */
+        const redoBar = h('div', { class: 'redo-hint' });
+        // cap:redo-candidates
+        api(`/projects/${project.id}/redo-candidates`).then((r) => {
+          const list = r?.shots || [];
+          clear(redoBar);
+          if (!list.length) return;
+          const ids = list.map((x) => x.id);
+          add(redoBar,
+            h('span', {}, `有 ${list.length} 镜查得出具体原因该重出`),
+            h('button', {
+              class: 'btn ghost sm',
+              title: list.slice(0, 6).map((x) => `第 ${x.index} 镜：${x.why}`).join('\n'),
+              onclick: () => {
+                ids.forEach((id) => picked.add(id));
+                tbl.refresh();
+                paintBatchBar(bar, picked, tbl);
+              }
+            }, '把它们选上'));
+        }).catch(() => {});
+        const tbl = shotTable(sortedAll, {
+          selected: picked,
+          skillNames: skillNameOf,
+          onSelect: () => paintBatchBar(bar, picked, tbl),
+          onOpen: (shot) => { state.openShotId = shot.id; state.shotView = 'cards'; paintShots(); },
+          onPatch: async (id, patch) => {
+            try {
+              await api(`/projects/${project.id}/shots/${id}`, { method: 'PATCH', body: patch });
+              const t = project.shots.find((x) => x.id === id);
+              if (t) Object.assign(t, patch);
+            } catch (err) { toast(err.message, 'err'); }
+          }
+        });
+        shotHost.append(redoBar, bar, tbl.node);
+        paintBatchBar(bar, picked, tbl);
+        tbl.focus();
         return;
       }
       /**
@@ -4223,7 +4992,12 @@ export default {
     // 只读那一行摆在分镜面板顶上，跟着"视频"这一步出现
     shotsPanel.insertBefore(durationLine, shotsPanel.firstChild.nextSibling);
 
-    root.append(stagePanel, ...allPanels);
+    /**
+     * 账摆在所有步骤下面，而且**每一步都在** —— 它是项目级的事实，
+     * 不属于某一步。默认折起来：日常不用看，要看的时候在手边。
+     */
+    root.append(stagePanel, ...allPanels, spendHost);
+    loadSpend();
 
     function applyStepPanels() {
       const wanted = new Set((stepPanels[state.stage] || [shotsPanel]).filter(Boolean));
