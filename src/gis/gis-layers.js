@@ -24,11 +24,23 @@ function weather(){
   var s='<g class="rg-wx">';
   GEO.wxBlobs.forEach(function(b){
     var p=P([b[0],b[1]]);
-    s+='<circle class="rg-wx-blob" cx="'+p[0].toFixed(0)+'" cy="'+p[1].toFixed(0)+'" r="'+proj.km(b[2]*2).toFixed(0)+'"/>'
-      +'<text class="rg-wx-label" text-anchor="middle" x="'+p[0].toFixed(0)+'" y="'+p[1].toFixed(0)+'">'+esc(b[3])+'</text>';
+    s+='<circle class="rg-wx-blob" cx="'+p[0].toFixed(0)+'" cy="'+p[1].toFixed(0)+'" r="'+proj.km(b[2]*2).toFixed(0)+'"/>';
+    var bw=Math.max(textW(b[3],11),textW(b[4],10));
+    var lp=placeBlock(p[0],p[1],bw,24,[[0,-10,'middle'],[0,-30,'middle'],[0,14,'middle'],
+                                       [14,-10,'start'],[-14,-10,'end']],true);
+    if(lp){
+      s+='<text class="rg-wx-name" text-anchor="middle" x="'+lp.x.toFixed(0)+'" y="'+(lp.y+11).toFixed(0)+'">'+esc(b[3])+'</text>'
+        +'<text class="rg-wx-label" text-anchor="middle" x="'+lp.x.toFixed(0)+'" y="'+(lp.y+24).toFixed(0)+'">'+esc(b[4])+'</text>';
+    }
   });
   GEO.wind.forEach(function(w,i){
-    s+='<path class="rg-wind" style="animation-delay:'+(-i*0.5).toFixed(2)+'s" marker-end="url(#rgArrow)" d="'+smooth(w,false)+'"/>';
+    s+='<path class="rg-wind" style="animation-delay:'+(-i*0.5).toFixed(2)+'s" marker-end="url(#rgArrow)" d="'+smooth(w.p,false)+'"/>';
+    /* 流线末端标风速，位置走统一避让 */
+    var e=P(w.p[w.p.length-1]), a=P(w.p[w.p.length-2]);
+    var t=w.spd.toFixed(1)+' m/s · '+w.lvl+'级';
+    var lp=place(e[0],e[1],t,9.5,[[-9,4,'end'],[9,4,'start'],[0,-8,'middle'],[0,15,'middle'],
+                                  [-9,-8,'end'],[9,-8,'start'],[-9,16,'end'],[9,16,'start']]);
+    if(lp) s+='<text class="rg-wind-spd" text-anchor="'+lp.a+'" x="'+lp.x.toFixed(0)+'" y="'+lp.y.toFixed(0)+'">'+esc(t)+'</text>';
   });
   return s+'</g>';
 }
@@ -77,7 +89,13 @@ function hubLayer(){
   /* 静态定标圈 */
   s+='<circle class="rg-fixring" cx="'+p[0].toFixed(0)+'" cy="'+p[1].toFixed(0)+'" r="'+(r*0.55).toFixed(0)+'"/>'
     +'<circle class="rg-fixring" cx="'+p[0].toFixed(0)+'" cy="'+p[1].toFixed(0)+'" r="'+r.toFixed(0)+'"/>';
-  s+='<g class="rg-vessel" data-ship="3" data-tip="'+esc(GEO.hub.name+'|目标船 · 航速 '+GEO.hub.sog+' · 航向 '+GEO.hub.cog+'|2 项六防风险 · 4 路视频在线')+'">';
+  s+='<g class="rg-vessel rg-target" data-ship="3" data-tip="'+esc(
+      GEO.hub.id+' '+GEO.hub.name
+      +'|目标船 · 航速 '+GEO.hub.sog+' · 航向 '+GEO.hub.cog
+      +'|风速 '+GEO.hub.wind+' · 横倾 '+GEO.hub.heel
+      +'|2 项六防风险 · 4 路视频在线 · 点击查看详情')+'">';
+  /* 闪烁：外圈光晕 + 高亮环 + 核心，同相位 */
+  s+='<circle class="rg-hub-flash" cx="'+p[0].toFixed(0)+'" cy="'+p[1].toFixed(0)+'" r="22"/>';
   s+='<circle class="rg-hub-ring" cx="'+p[0].toFixed(0)+'" cy="'+p[1].toFixed(0)+'" r="13"/>';
   s+='<circle class="rg-hub-core" cx="'+p[0].toFixed(0)+'" cy="'+p[1].toFixed(0)+'" r="6"/>';
   reserveBox(p[0]-15,p[1]-15,30,30);
@@ -124,7 +142,8 @@ function patrolLayer(){
     var lx = lp ? (lp.x-a[0]) : 21, ly = lp ? (lp.y-a[1]) : -4, la = lp ? lp.a : 'start';
     s+='<circle class="rg-cover" cx="'+a[0].toFixed(0)+'" cy="'+a[1].toFixed(0)+'" r="'+proj.km(38).toFixed(0)+'"/>';
     s+='<g class="rg-vessel" data-ship="'+[1,2,4,5,6][i]+'" data-v="'+i+'" data-tip="'
-      +esc(v.id+' '+v.name+'|'+v.org+' · 航速 '+v.sog+' 节|预计 '+v.eta+' 分钟抵达目标船')+'">'
+      +esc(v.id+' '+v.name+'|'+v.org+' · 航速 '+v.sog+' 节|风速 '+(v.wind||'—')
+         +'|预计 '+v.eta+' 分钟抵达目标船')+'">'
       +'<g class="rg-hull" data-hull="'+i+'" transform="translate('+a[0].toFixed(1)+','+a[1].toFixed(1)+')">'
         +'<path class="wake" d="M-26 9 Q-13 12 -2 8" fill="none" stroke="#7fe0f5" stroke-width="1.6" '
         +'stroke-linecap="round" opacity=".4" stroke-dasharray="3 4"/>'

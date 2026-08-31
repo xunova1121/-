@@ -2,16 +2,31 @@
 function chrome(){
   var eta='';
   GEO.patrol.forEach(function(v,i){
-    eta+='<div data-eta="'+i+'"><em>'+esc(v.id)+'</em><u style="--p:'+(18+i*13)+'%"></u><s>'+v.eta+'分</s></div>';
+    eta+='<div data-eta="'+i+'"><em>'+esc(v.id)+'</em><u style="--p:'+(18+i*13)+'%"></u>'
+        +'<s>'+v.eta+'分</s><q>'+esc(v.wind||'')+'</q></div>';
   });
+  var w=GEO.windNow;
+  /* 风向箭头指向风的去向（气象上风从 dir 方向来） */
+  var arrow='<svg class="rg-windrose" viewBox="0 0 20 20" style="transform:rotate('+(w.dir+180)+'deg)">'
+    +'<path d="M10 2 L14.5 17 L10 13.4 L5.5 17 Z"/></svg>';
   return '<div class="rg-tools">'
     +'<button type="button" class="rg-chip on" data-act="flow"><i></i>航线动效</button>'
     +'<button type="button" class="rg-chip play" data-act="play"><i></i>航线推演</button>'
+    +'<button type="button" class="rg-chip wind" data-act="wx" title="查看气象图层">'
+      +arrow+'<b>'+w.spd.toFixed(1)+' m/s</b>'+esc(w.from)+'风 '+w.lvl+'级'
+    +'</button>'
   +'</div>'
-  +'<div class="rg-panel">'
-    +'<strong>周边执法力量与最优路径</strong>'
-    +'<span>AIS / 北斗实时融合 · 可调度 <b>'+GEO.patrol.length+'艘</b></span>'
-    +'<div class="rg-eta">'+eta+'</div>'
+  +'<div class="rg-panel" data-open="'+(panelOpen?1:0)+'">'
+    +'<button type="button" class="rg-panel-head" data-act="panel">'
+      +'<i></i><b>执法力量</b><em>'+GEO.patrol.length+'</em>'
+      +'<span class="rg-caret"></span>'
+    +'</button>'
+    +'<div class="rg-panel-body"><div>'
+      +'<p>AIS / 北斗实时融合 · 最优路径测算中</p>'
+      +'<div class="rg-wxline">实况 <b>'+esc(w.from)+'风 '+w.lvl+'级</b> · 风速 <b>'+w.spd.toFixed(1)+' m/s</b>'
+        +' · 阵风 <b>'+w.gust.toFixed(1)+' m/s</b> · 浪高 <b>'+w.wave.toFixed(1)+' m</b></div>'
+      +'<div class="rg-eta">'+eta+'</div>'
+    +'</div></div>'
   +'</div>'
   +'<div class="rg-legend">'
     +'<span class="dash"><i></i>规划航线</span>'
@@ -22,6 +37,9 @@ function chrome(){
   +'<div class="rg-tip"></div>';
 }
 
+/* 信息板默认收起，展开状态跨重绘保持 */
+var panelOpen=false;
+
 /* ===== 渲染 ===== */
 function render(map){
   var box=map.getBoundingClientRect();
@@ -29,7 +47,7 @@ function render(map){
   proj=buildProj(w,h);
   placed=[];
   /* 为控件预留区域，参与标注避让 */
-  reserved=[[8,8,196,34],[w-234,8,228,142],[8,h-46,w-16,38]];
+  reserved=[[8,8,360,34],[w-146,8,140,34],[8,h-46,w-16,38]];
 
   var root=map.querySelector('.rg-root');
   if(!root){
@@ -132,6 +150,14 @@ function bind(map,root){
         anim.playing=!anim.playing; btn.classList.toggle('running',anim.playing);
         btn.lastChild.nodeValue=anim.playing?'停止推演':'航线推演';
         if(!anim.playing) resetSail();
+      } else if(act==='panel'){
+        panelOpen=!panelOpen;
+        btn.parentNode.dataset.open=panelOpen?1:0;
+      } else if(act==='wx'){
+        var seg=[].filter.call(document.querySelectorAll('.mapcard .seg button'),function(x){
+          return x.textContent.trim()==='气象';
+        })[0];
+        if(seg) seg.click();
       } else if(act==='video'){
         proxyClick(map,'.popup button');
       }

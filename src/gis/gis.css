@@ -7,7 +7,7 @@
   background:radial-gradient(115% 150% at 58% 50%,#08355a 0,#052440 32%,#03152880 62%,#020c18 100%);
   font-family:"Microsoft YaHei","PingFang SC","Source Han Sans SC",Arial,sans-serif;
   cursor:default}
-.rg-root svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+.rg-root>svg{position:absolute;inset:0;width:100%;height:100%;display:block}
 /* 经纬网 + 暗角 */
 .rg-root:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:3;
   box-shadow:inset 0 0 90px 10px #00060cd9;
@@ -59,8 +59,11 @@
 .rg-ring.d2{animation-delay:.75s}.rg-ring.d3{animation-delay:1.5s}.rg-ring.d4{animation-delay:2.25s}
 .rg-fixring{fill:none;stroke:#3ad3ee;stroke-width:1;opacity:.22;stroke-dasharray:3 5}
 .rg-sweep{fill:url(#rgSweep);transform-box:fill-box;transform-origin:center;animation:rgSweep 3.6s linear infinite}
-.rg-hub-core{fill:#37d7f5;filter:url(#rgGlowL);animation:rgPulse 1.5s ease-in-out infinite}
-.rg-hub-ring{fill:none;stroke:#7ff0ff;stroke-width:1.6}
+.rg-hub-core{fill:#4ce4ff;filter:url(#rgGlowL);animation:rgBlink 1.15s ease-in-out infinite}
+.rg-hub-ring{fill:none;stroke:#8ff4ff;stroke-width:1.8;animation:rgBlink 1.15s ease-in-out infinite}
+.rg-hub-flash{fill:none;stroke:#5ce9ff;stroke-width:2.4;opacity:0;filter:url(#rgGlowL);
+  animation:rgFlash 1.15s ease-out infinite}
+.rg-target{cursor:pointer}
 .rg-hub-label{fill:#eafdff;font-size:13px;font-weight:700;letter-spacing:1px;text-shadow:0 2px 6px #000}
 .rg-hub-sub{fill:#63dcf3;font-size:10px;text-shadow:0 1px 4px #000}
 
@@ -82,7 +85,9 @@
 .rg-wind{fill:none;stroke:#7fd8ff;stroke-width:1.2;stroke-linecap:round;opacity:.55;
   stroke-dasharray:14 26;animation:rgWind 2.6s linear infinite}
 .rg-wx-blob{fill:url(#rgWxGrad)}
-.rg-wx-label{fill:#8fd6ef;font-size:10px}
+.rg-wx-name{fill:#ffc98a;font-size:11px;font-weight:700;text-shadow:0 1px 4px #000}
+.rg-wx-label{fill:#8fd6ef;font-size:10px;text-shadow:0 1px 4px #000}
+.rg-wind-spd{fill:#9fdcf5;font-size:9.5px;text-shadow:0 1px 4px #000}
 
 /* ---------- 图层联动 ---------- */
 .js-real-gis[data-layer="气象"] .rg-wx{opacity:1}
@@ -107,17 +112,35 @@
 .rg-chip.on{border-color:#2b9dbc;color:#5ce0f4;background:#062a44e0}
 .rg-chip.on i{background:#37dbf5;box-shadow:0 0 9px #37dbf5}
 button.rg-chip{cursor:pointer;font-family:inherit}
+.rg-chip.wind{gap:5px;border-color:#2a5f70;color:#8fc4d4}
+.rg-chip.wind b{color:#7ee8c4;margin-right:1px}
+.rg-chip.wind:hover{border-color:#3fb0a0;color:#b6f0e2}
+.rg-windrose{width:13px;height:13px;flex:none;fill:#5fe0bd;filter:drop-shadow(0 0 4px #37dbbc80)}
 button.rg-chip:hover{border-color:#38b4d4;color:#a8ecff}
 .rg-chip.play i{border-radius:0;width:0;height:0;background:none;box-shadow:none;
   border-left:7px solid #5ce0f4;border-top:4px solid transparent;border-bottom:4px solid transparent}
 .rg-chip.play.running i{width:6px;height:8px;border:0;background:#5ce0f4;box-shadow:0 0 8px #5ce0f4;border-radius:1px}
 
-.rg-panel{position:absolute;z-index:5;right:12px;top:12px;width:212px;padding:9px 10px;border:1px solid #24627d;
-  border-radius:5px;background:#04182beb;backdrop-filter:blur(4px);box-shadow:0 10px 24px #0007}
-.rg-panel strong{display:flex;align-items:center;color:#e3fbff;font-size:10px;font-weight:700}
-.rg-panel strong:before{content:"";width:7px;height:7px;border-radius:50%;background:#2dd9ee;box-shadow:0 0 10px #2dd9ee;
-  margin-right:7px;animation:rgPulse 1.2s infinite}
-.rg-panel span{display:block;margin-top:5px;color:#7ba7bb;font-size:9px;line-height:1.5}
+.rg-panel{position:absolute;z-index:5;right:12px;top:12px;width:auto;border:1px solid #24627d;
+  border-radius:5px;background:#04182beb;backdrop-filter:blur(4px);box-shadow:0 10px 24px #0007;overflow:hidden}
+.rg-panel-head{display:flex;align-items:center;gap:6px;width:100%;height:26px;padding:0 9px;border:0;
+  background:transparent;color:#9dc6d8;font-family:inherit;font-size:9px;cursor:pointer;white-space:nowrap}
+.rg-panel-head:hover{background:#0a2c46}
+.rg-panel-head i{width:7px;height:7px;border-radius:50%;background:#2dd9ee;box-shadow:0 0 9px #2dd9ee;
+  flex:none;animation:rgPulse 1.2s infinite}
+.rg-panel-head b{color:#e3fbff;font-weight:700}
+.rg-panel-head em{font-style:normal;color:#04182b;background:#37d0e6;border-radius:8px;padding:1px 6px;font-size:8.5px;font-weight:700}
+.rg-caret{width:0;height:0;margin-left:2px;border-left:4px solid transparent;border-right:4px solid transparent;
+  border-top:5px solid #6aa8c0;transition:transform .2s}
+.rg-panel[data-open="1"] .rg-caret{transform:rotate(180deg)}
+.rg-panel-body{width:0;max-height:0;opacity:0;overflow:hidden;
+  transition:max-height .25s ease,width .25s ease,opacity .2s}
+.rg-panel-body>div{width:212px;padding:2px 10px 9px;box-sizing:border-box}
+.rg-panel[data-open="1"] .rg-panel-body{width:212px;max-height:240px;opacity:1}
+.rg-panel-body p{margin:0 0 6px;color:#7ba7bb;font-size:9px;line-height:1.5}
+.rg-wxline{padding:5px 7px;border:1px solid #1c4e63;border-radius:3px;background:#062338;
+  color:#7ba7bb;font-size:8.5px;line-height:1.7}
+.rg-wxline b{color:#7ee8c4;font-weight:600}
 .rg-panel b{color:#48d9ef;font-weight:600}
 .rg-eta{margin-top:7px;padding-top:7px;border-top:1px solid #17455e;display:flex;flex-direction:column;gap:4px}
 .rg-eta div{display:flex;align-items:center;gap:6px;font-size:9px;color:#87b3c6}
@@ -126,6 +149,7 @@ button.rg-chip:hover{border-color:#38b4d4;color:#a8ecff}
 .rg-eta u:before{content:"";position:absolute;inset:0 auto 0 0;width:var(--p,40%);border-radius:2px;
   background:linear-gradient(90deg,#1b8bb0,#4fe6ff)}
 .rg-eta s{text-decoration:none;color:#4fd7ef;width:34px;text-align:right}
+.rg-eta q{quotes:none;color:#6f96a8;font-size:8px;width:62px;text-align:right}
 
 .rg-legend{position:absolute;z-index:5;left:12px;right:12px;bottom:9px;height:28px;display:flex;align-items:center;gap:14px;
   padding:0 11px;border:1px solid #1a4a66;border-radius:4px;background:#04182beb;backdrop-filter:blur(4px);
@@ -149,13 +173,19 @@ button.rg-chip:hover{border-color:#38b4d4;color:#a8ecff}
 @keyframes rgWind{to{stroke-dashoffset:-40}}
 @keyframes rgNode{50%{opacity:.3}}
 @keyframes rgPulse{50%{opacity:.5}}
+@keyframes rgBlink{0%,42%{opacity:1}58%,100%{opacity:.15}}
+@keyframes rgFlash{0%{opacity:.85;stroke-width:2.4;r:14}70%,100%{opacity:0;stroke-width:.8;r:26}}
 @keyframes rgScan{0%{transform:scale(.28);opacity:.9}100%{transform:scale(1.7);opacity:0}}
 @keyframes rgSweep{to{transform:rotate(360deg)}}
 @keyframes rgBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-2.5px)}}
 @media(max-width:1240px){
-  .rg-panel{width:180px}
+  .rg-panel[data-open="1"] .rg-panel-body,
+  .rg-panel-body>div{width:188px}
+  .rg-eta q{display:none}
   .rg-legend{gap:9px}.rg-legend span:nth-child(4),.rg-legend span:nth-child(5){display:none}
 }
 @media(prefers-reduced-motion:reduce){
-  .rg-route,.rg-zone,.rg-ring,.rg-sweep,.rg-hub-core,.rg-node,.rg-wind,.rg-fish.bad{animation:none}
+  .rg-route,.rg-zone,.rg-ring,.rg-sweep,.rg-hub-core,.rg-hub-ring,.rg-hub-flash,
+  .rg-node,.rg-wind,.rg-fish.bad{animation:none}
+  .rg-hub-flash{opacity:0}
 }

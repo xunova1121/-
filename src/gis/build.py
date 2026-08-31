@@ -11,15 +11,16 @@ js  = '\n'.join((BASE/f).read_text(encoding='utf-8')
                 for f in ('gis-data.js','gis-core.js','gis-layers.js','gis-mount.js'))
 
 block = (
-    '<style id="v106-real-gis-style">\n' + css.rstrip() + '\n</style>\n'
-    '<script id="v106-real-gis-script">\n(function(){\n'
+    '<style id="fishery-gis-style">\n' + css.rstrip() + '\n</style>\n'
+    '<script id="fishery-gis-script">\n(function(){\n'
     '"use strict";\n' + js.rstrip() + '\n})();\n</script>'
 )
 
 html = pathlib.Path(SRC).read_text(encoding='utf-8')
 
+# 认三种 id：V10.5 / V10.6 自带的覆盖层，以及本脚本自己写过的
 pat = re.compile(
-    r'<style id="v106-real-gis-style">.*?</script>(?=\s*</body>)',
+    r'<style id="(?:v10\d-real-gis-style|fishery-gis-style)">.*?</script>(?=\s*</body>)',
     re.S)
 if pat.search(html):
     html = pat.sub(lambda m: block, html, count=1)
