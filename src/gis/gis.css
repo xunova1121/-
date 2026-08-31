@@ -1,0 +1,161 @@
+/* ===== V10.6 综合态势 · 真实感 GIS 一张图（离线内置，无需瓦片服务） ===== */
+.mapcard .map.js-real-gis{background:#04101f!important;isolation:isolate;contain:paint}
+.js-real-gis>.land,.js-real-gis>.sea,.js-real-gis>.weather,.js-real-gis>.risk,
+.js-real-gis>.legend,.js-real-gis>.maplayers,.js-real-gis>.popup,.js-real-gis>.ship{display:none!important}
+
+.rg-root{position:absolute;z-index:2;inset:0;overflow:hidden;
+  background:radial-gradient(115% 150% at 58% 50%,#08355a 0,#052440 32%,#03152880 62%,#020c18 100%);
+  font-family:"Microsoft YaHei","PingFang SC","Source Han Sans SC",Arial,sans-serif;
+  cursor:default}
+.rg-root svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+/* 经纬网 + 暗角 */
+.rg-root:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:3;
+  box-shadow:inset 0 0 90px 10px #00060cd9;
+  background:linear-gradient(#1d6f9412 1px,transparent 1px),linear-gradient(90deg,#1d6f9412 1px,transparent 1px);
+  background-size:64px 64px}
+
+/* ---------- 底图要素 ---------- */
+.rg-sea-deep{fill:url(#rgSeaGrad)}
+.rg-shelf{fill:none;stroke:#3fbfe0;stroke-width:2.2;opacity:.16;stroke-linejoin:round;
+  stroke-dasharray:1 0;filter:url(#rgLine)}
+.rg-settle{pointer-events:none}
+.rg-halo{fill:none;stroke:#2ea8d8;stroke-linejoin:round}
+.rg-land{fill:url(#rgLandGrad);stroke:#5fd0ef;stroke-width:1.2;stroke-linejoin:round;filter:url(#rgCoast)}
+.rg-island{fill:url(#rgLandGrad);stroke:#4fbde0;stroke-width:.9;filter:url(#rgCoast)}
+.rg-yangtze{fill:url(#rgSeaGrad);stroke:#4fb6da;stroke-width:.9;opacity:.95}
+.rg-river{fill:none;stroke:#3f9fce;stroke-linecap:round;stroke-linejoin:round;opacity:.72}
+.rg-lake{fill:#10496f;stroke:#57bede;stroke-width:.9;opacity:.95}
+.rg-boundary{fill:none;stroke:#4a86a8;stroke-width:.9;stroke-dasharray:7 4 2 4;opacity:.5}
+.rg-citylight{fill:url(#rgCityGlow)}
+.rg-city-dot{fill:#bdf0ff}
+.rg-city-name{fill:#8fc4dd;font-size:11px;text-shadow:0 1px 3px #000}
+.rg-prov{fill:#5f9fc4;font-size:15px;letter-spacing:3px;opacity:.9}
+.rg-sea-name{fill:#2f86ad;font-size:17px;letter-spacing:9px;opacity:.72}
+.rg-grid-label{fill:#3d7c99;font-size:9px;font-family:Consolas,Menlo,monospace}
+.rg-port{fill:#ffd166}
+.rg-port-name{fill:#c8a35a;font-size:9px}
+
+/* ---------- 禁捕区 / 围栏 ---------- */
+.rg-zone{fill:url(#rgHatch);stroke:#2fd8f4;stroke-width:1.4;stroke-dasharray:8 5;
+  animation:rgZoneDash 3.2s linear infinite}
+.rg-zone-label{fill:#57e6ff;font-size:12px;font-weight:700;letter-spacing:2px;text-shadow:0 1px 4px #000}
+.rg-zone-badge circle{fill:#0a2a3d;stroke:#ff9b3d;stroke-width:1.6}
+.rg-zone-badge path{fill:#ff9b3d}
+
+/* ---------- 航线 ---------- */
+.rg-route-base{fill:none;stroke:#1d7ea6;stroke-width:1.4;opacity:.4}
+.rg-route{fill:none;stroke:#3ee0ff;stroke-width:1.6;stroke-linecap:round;stroke-dasharray:9 7;
+  filter:url(#rgLine);animation:rgFlow 1s linear infinite}
+.rg-route.alt{stroke:#59c7e6;opacity:.82;animation-duration:1.45s}
+.rg-comet{fill:none;stroke:#d6f6ff;stroke-width:1.8;stroke-linecap:round;filter:url(#rgGlowS);opacity:.85}
+.rg-blip{fill:#ffffff;filter:url(#rgGlowS)}
+.rg-route{stroke-width:1.5}
+.rg-node{fill:#7df0ff;filter:url(#rgGlowS);animation:rgNode 2s ease-in-out infinite}
+.rg-track{fill:none;stroke:#3ad0b4;stroke-width:1.1;stroke-dasharray:2 4;opacity:.5}
+
+/* ---------- 目标船 / 雷达 ---------- */
+.rg-ring{fill:none;stroke:#5cecff;stroke-width:1.5;transform-box:fill-box;transform-origin:center;
+  animation:rgScan 3s cubic-bezier(.2,.6,.4,1) infinite}
+.rg-ring.d2{animation-delay:.75s}.rg-ring.d3{animation-delay:1.5s}.rg-ring.d4{animation-delay:2.25s}
+.rg-fixring{fill:none;stroke:#3ad3ee;stroke-width:1;opacity:.22;stroke-dasharray:3 5}
+.rg-sweep{fill:url(#rgSweep);transform-box:fill-box;transform-origin:center;animation:rgSweep 3.6s linear infinite}
+.rg-hub-core{fill:#37d7f5;filter:url(#rgGlowL);animation:rgPulse 1.5s ease-in-out infinite}
+.rg-hub-ring{fill:none;stroke:#7ff0ff;stroke-width:1.6}
+.rg-hub-label{fill:#eafdff;font-size:13px;font-weight:700;letter-spacing:1px;text-shadow:0 2px 6px #000}
+.rg-hub-sub{fill:#63dcf3;font-size:10px;text-shadow:0 1px 4px #000}
+
+/* ---------- 船舶 ---------- */
+.rg-vessel{cursor:pointer}
+.rg-vessel .hull{filter:url(#rgShadow)}
+.rg-vessel .bob{transform-box:fill-box;transform-origin:center;animation:rgBob 3.4s ease-in-out infinite}
+.rg-vessel:hover .hull{filter:url(#rgGlowL)}
+.rg-vessel .v-name{fill:#dff7ff;font-size:10.5px;font-weight:700;text-shadow:0 1px 4px #000;pointer-events:none}
+.rg-vessel .v-meta{fill:#7fb6cc;font-size:9px;text-shadow:0 1px 3px #000;pointer-events:none}
+.rg-vessel .v-plate{fill:#04182bd0;stroke:#1f5f7d;stroke-width:.8;rx:3}
+.rg-fish{stroke:#0a2436;stroke-width:.6;cursor:pointer}
+.rg-fish.ok{fill:#38dfae}.rg-fish.warn{fill:#ffb44d}.rg-fish.bad{fill:#ff6b74;animation:rgPulse 1.1s ease-in-out infinite}
+.rg-fish-halo{fill:none;stroke:#ff6b74;stroke-width:1.2;transform-box:fill-box;transform-origin:center;
+  animation:rgScan 2.2s ease-out infinite}
+
+/* ---------- 气象图层 ---------- */
+.rg-wx{opacity:0;transition:opacity .35s}
+.rg-wind{fill:none;stroke:#7fd8ff;stroke-width:1.2;stroke-linecap:round;opacity:.55;
+  stroke-dasharray:14 26;animation:rgWind 2.6s linear infinite}
+.rg-wx-blob{fill:url(#rgWxGrad)}
+.rg-wx-label{fill:#8fd6ef;font-size:10px}
+
+/* ---------- 图层联动 ---------- */
+.js-real-gis[data-layer="气象"] .rg-wx{opacity:1}
+.js-real-gis[data-layer="气象"] .rg-route,.js-real-gis[data-layer="气象"] .rg-comet{opacity:.28}
+.js-real-gis[data-layer="围栏"] .rg-zone{stroke-width:2.4;filter:url(#rgLine)}
+.js-real-gis[data-layer="围栏"] .rg-zone-label{font-size:13px}
+.js-real-gis[data-layer="航道"] .rg-route{stroke-width:2.6}
+.js-real-gis[data-layer="航道"] .rg-lane{opacity:1}
+.rg-lane{opacity:0;transition:opacity .3s;fill:none;stroke:#8fd0ff;stroke-width:8;opacity:0}
+.js-real-gis[data-layer="航道"] .rg-lane{opacity:.13}
+.js-real-gis[data-layer="执法力量"] .rg-vessel .hull{filter:url(#rgGlowL)}
+.js-real-gis[data-layer="执法力量"] .rg-cover{opacity:1}
+.rg-cover{fill:#12b6d914;stroke:#25a7c8;stroke-width:1;stroke-dasharray:4 5;opacity:0;transition:opacity .3s}
+.js-real-gis[data-layer="渔船"] .rg-fish{transform-box:fill-box;transform-origin:center}
+
+/* ---------- 控件 ---------- */
+.rg-tools{position:absolute;z-index:5;left:12px;top:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.rg-chip{height:26px;display:flex;align-items:center;gap:6px;padding:0 9px;border:1px solid #235c78;border-radius:4px;
+  background:#04182bd8;color:#7fb2c8;font-size:9px;backdrop-filter:blur(3px);box-shadow:0 6px 16px #0006;white-space:nowrap}
+.rg-chip b{color:#dff6ff;font-weight:700}
+.rg-chip i{width:6px;height:6px;border-radius:50%;background:#37dbbc;box-shadow:0 0 8px #37dbbc}
+.rg-chip.on{border-color:#2b9dbc;color:#5ce0f4;background:#062a44e0}
+.rg-chip.on i{background:#37dbf5;box-shadow:0 0 9px #37dbf5}
+button.rg-chip{cursor:pointer;font-family:inherit}
+button.rg-chip:hover{border-color:#38b4d4;color:#a8ecff}
+.rg-chip.play i{border-radius:0;width:0;height:0;background:none;box-shadow:none;
+  border-left:7px solid #5ce0f4;border-top:4px solid transparent;border-bottom:4px solid transparent}
+.rg-chip.play.running i{width:6px;height:8px;border:0;background:#5ce0f4;box-shadow:0 0 8px #5ce0f4;border-radius:1px}
+
+.rg-panel{position:absolute;z-index:5;right:12px;top:12px;width:212px;padding:9px 10px;border:1px solid #24627d;
+  border-radius:5px;background:#04182beb;backdrop-filter:blur(4px);box-shadow:0 10px 24px #0007}
+.rg-panel strong{display:flex;align-items:center;color:#e3fbff;font-size:10px;font-weight:700}
+.rg-panel strong:before{content:"";width:7px;height:7px;border-radius:50%;background:#2dd9ee;box-shadow:0 0 10px #2dd9ee;
+  margin-right:7px;animation:rgPulse 1.2s infinite}
+.rg-panel span{display:block;margin-top:5px;color:#7ba7bb;font-size:9px;line-height:1.5}
+.rg-panel b{color:#48d9ef;font-weight:600}
+.rg-eta{margin-top:7px;padding-top:7px;border-top:1px solid #17455e;display:flex;flex-direction:column;gap:4px}
+.rg-eta div{display:flex;align-items:center;gap:6px;font-size:9px;color:#87b3c6}
+.rg-eta em{font-style:normal;color:#dff6ff;font-weight:700;width:38px}
+.rg-eta u{text-decoration:none;flex:1;height:3px;border-radius:2px;background:#12354a;overflow:hidden;position:relative}
+.rg-eta u:before{content:"";position:absolute;inset:0 auto 0 0;width:var(--p,40%);border-radius:2px;
+  background:linear-gradient(90deg,#1b8bb0,#4fe6ff)}
+.rg-eta s{text-decoration:none;color:#4fd7ef;width:34px;text-align:right}
+
+.rg-legend{position:absolute;z-index:5;left:12px;right:12px;bottom:9px;height:28px;display:flex;align-items:center;gap:14px;
+  padding:0 11px;border:1px solid #1a4a66;border-radius:4px;background:#04182beb;backdrop-filter:blur(4px);
+  color:#7ba3b8;font-size:9px;box-shadow:0 6px 18px #0006;overflow:hidden}
+.rg-legend span{display:flex;align-items:center;gap:5px;white-space:nowrap}
+.rg-legend i{width:15px;height:2px;background:#3ee0ff;display:inline-block;flex:none}
+.rg-legend .dash i{background:repeating-linear-gradient(90deg,#3ee0ff 0 5px,transparent 5px 9px)}
+.rg-legend .hist i{background:repeating-linear-gradient(90deg,#3ad0b4 0 2px,transparent 2px 5px)}
+.rg-legend .zn i{height:9px;border:1px dashed #2fd8f4;background:#0a779522}
+.rg-legend .dot{width:7px;height:7px;border-radius:50%;flex:none}
+.rg-legend em{margin-left:auto;font-style:normal;color:#4fd8b0;white-space:nowrap}
+
+.rg-tip{position:absolute;z-index:6;pointer-events:none;opacity:0;transform:translate(-50%,-118%);
+  padding:6px 9px;border:1px solid #2a7a99;border-radius:4px;background:#031320f2;box-shadow:0 8px 20px #0008;
+  color:#cfeeff;font-size:9px;line-height:1.6;white-space:nowrap;transition:opacity .15s}
+.rg-tip b{display:block;color:#eafdff;font-size:10px;margin-bottom:2px}
+.rg-tip.show{opacity:1}
+
+@keyframes rgFlow{to{stroke-dashoffset:-32}}
+@keyframes rgZoneDash{to{stroke-dashoffset:-26}}
+@keyframes rgWind{to{stroke-dashoffset:-40}}
+@keyframes rgNode{50%{opacity:.3}}
+@keyframes rgPulse{50%{opacity:.5}}
+@keyframes rgScan{0%{transform:scale(.28);opacity:.9}100%{transform:scale(1.7);opacity:0}}
+@keyframes rgSweep{to{transform:rotate(360deg)}}
+@keyframes rgBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-2.5px)}}
+@media(max-width:1240px){
+  .rg-panel{width:180px}
+  .rg-legend{gap:9px}.rg-legend span:nth-child(4),.rg-legend span:nth-child(5){display:none}
+}
+@media(prefers-reduced-motion:reduce){
+  .rg-route,.rg-zone,.rg-ring,.rg-sweep,.rg-hub-core,.rg-node,.rg-wind,.rg-fish.bad{animation:none}
+}

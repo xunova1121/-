@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+"""把新的 GIS 样式与脚本注入到 V10.6 离线单页中（替换旧的 real-gis 区块）。"""
+import re, sys, pathlib
+
+BASE = pathlib.Path(__file__).parent
+SRC  = sys.argv[1]
+DST  = sys.argv[2]
+
+css = (BASE/'gis.css').read_text(encoding='utf-8')
+js  = '\n'.join((BASE/f).read_text(encoding='utf-8')
+                for f in ('gis-data.js','gis-core.js','gis-layers.js','gis-mount.js'))
+
+block = (
+    '<style id="v106-real-gis-style">\n' + css.rstrip() + '\n</style>\n'
+    '<script id="v106-real-gis-script">\n(function(){\n'
+    '"use strict";\n' + js.rstrip() + '\n})();\n</script>'
+)
+
+html = pathlib.Path(SRC).read_text(encoding='utf-8')
+
+pat = re.compile(
+    r'<style id="v106-real-gis-style">.*?</script>(?=\s*</body>)',
+    re.S)
+if pat.search(html):
+    html = pat.sub(lambda m: block, html, count=1)
+else:                                   # 首次注入
+    assert '</body>' in html
+    html = html.replace('</body>', block + '</body>', 1)
+
+pathlib.Path(DST).write_text(html, encoding='utf-8')
+print('wrote', DST, len(html), 'chars')
