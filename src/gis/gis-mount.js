@@ -39,6 +39,8 @@ function chrome(){
 
 /* 信息板默认收起，展开状态跨重绘保持 */
 var panelOpen=false;
+/* 当前视图：map = 一张图，radar = 雷达态势 */
+var view='map';
 
 /* ===== 渲染 ===== */
 function render(map){
@@ -47,7 +49,7 @@ function render(map){
   proj=buildProj(w,h);
   placed=[];
   /* 为控件预留区域，参与标注避让 */
-  reserved=[[8,8,360,34],[w-146,8,140,34],[8,h-46,w-16,38]];
+  reserved=[[8,8,510,34],[w-146,8,140,34],[8,h-46,w-16,38]];
 
   var root=map.querySelector('.rg-root');
   if(!root){
@@ -57,6 +59,10 @@ function render(map){
     map.appendChild(root);
     bind(map,root);
   }
+  root.hidden = (view!=='map');
+  renderRadar(map,w,h);
+  viewTabs(map);
+  if(view!=='map') return;
   /* 生成顺序 = 标注优先级：目标船 → 执法船 → 禁捕区 → 经纬网 → 城市/港口 */
   var gHub=hubLayer(), gPatrol=patrolLayer(), gZone=zones(), gGrat=graticule(), gAnno=annotations();
   root.innerHTML='<svg viewBox="0 0 '+w+' '+h+'" width="'+w+'" height="'+h+'">'
@@ -64,6 +70,86 @@ function render(map){
     +routes()+fishLayer()+gHub+gPatrol+'</svg>'+chrome();
   setupAnim(map,root);
 }
+
+/* ===== 视图切换：一张图 / 雷达态势 ===== */
+function viewTabs(map){
+  var tabs=map.querySelector('.rd-viewtabs');
+  if(!tabs){
+    tabs=document.createElement('div');
+    tabs.className='rd-viewtabs';
+    tabs.innerHTML='<button type="button" data-view="map">一张图</button>'
+                  +'<button type="button" data-view="radar">雷达态势</button>';
+    tabs.addEventListener('click',function(e){
+      var b=e.target.closest('[data-view]'); if(!b) return;
+      view=b.dataset.view;
+      render(map);
+    });
+    map.appendChild(tabs);
+  }
+  [].forEach.call(tabs.querySelectorAll('[data-view]'),function(b){
+    b.classList.toggle('on', b.dataset.view===view);
+  });
+  var exp=map.querySelector('.rd-expand');
+  if(view==='radar'&&!exp){
+    exp=document.createElement('button');
+    exp.type='button'; exp.className='rd-expand'; exp.textContent='⛶ 放大全屏';
+    exp.addEventListener('click',function(){ openFullRadar(); });
+    map.appendChild(exp);
+  } else if(view!=='radar'&&exp){ exp.remove(); }
+}
+function renderRadar(map,w,h){
+  var host=map.querySelector('.rd-host');
+  if(view!=='radar'){
+    if(host){ stopRadar(); host.remove(); }
+    return;
+  }
+  if(!host){ host=document.createElement('div'); host.className='rd-host'; map.appendChild(host); }
+  host.innerHTML=radarMarkup(w,h,false);
+  injectSweepGrad(host);
+  startRadar(host);
+}
+/* 扫描扇渐变（两个视图各一份，避免 id 冲突时相互覆盖） */
+function injectSweepGrad(host){
+  var svg=host.querySelector('.rd-scope svg'); if(!svg) return;
+  var d=document.createElementNS('http://www.w3.org/2000/svg','defs');
+  d.innerHTML='<linearGradient id="rdSweepGrad" x1="1" y1="0" x2="0" y2="0.6">'
+    +'<stop offset="0" stop-color="#7fe8ff" stop-opacity=".55"/>'
+    +'<stop offset="1" stop-color="#7fe8ff" stop-opacity="0"/></linearGradient>';
+  svg.insertBefore(d, svg.firstChild);
+}
+/* 全屏雷达大屏 */
+var fullWrap=null, fullRO=null;
+function openFullRadar(){
+  if(fullWrap) return;
+  fullWrap=document.createElement('div');
+  fullWrap.className='rd-full-wrap';
+  document.body.appendChild(fullWrap);
+  function paint(){
+    var w=fullWrap.clientWidth, h=fullWrap.clientHeight;
+    fullWrap.innerHTML='<div class="rd-full-title">全省海洋渔船雷达 · 双光谱协同态势'
+      +'<span>'+RADAR.station+'　量程 '+RADAR.rangeNm+' nm　目标 '+RADAR.targets.length+'</span></div>'
+      +'<button type="button" class="rd-close" aria-label="关闭">×</button>'
+      + radarMarkup(w,h,true);
+    injectSweepGrad(fullWrap);
+    startRadar(fullWrap);
+    fullWrap.querySelector('.rd-close').addEventListener('click',closeFullRadar);
+  }
+  paint();
+  fullRO=new ResizeObserver(function(){ clearTimeout(fullWrap._t);
+    fullWrap._t=setTimeout(paint,180); });
+  fullRO.observe(fullWrap);
+  document.addEventListener('keydown',escFull);
+}
+function closeFullRadar(){
+  if(!fullWrap) return;
+  stopRadar();
+  if(fullRO){ fullRO.disconnect(); fullRO=null; }
+  document.removeEventListener('keydown',escFull);
+  fullWrap.remove(); fullWrap=null;
+  var map=document.querySelector('.mapcard .map');
+  if(map&&view==='radar') renderRadar(map,map.clientWidth,map.clientHeight);
+}
+function escFull(e){ if(e.key==='Escape') closeFullRadar(); }
 
 /* ===== 动画：航线流光 + 航线推演 ===== */
 var anim=null;

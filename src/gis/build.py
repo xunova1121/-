@@ -6,9 +6,15 @@ BASE = pathlib.Path(__file__).parent
 SRC  = sys.argv[1]
 DST  = sys.argv[2]
 
-css = (BASE/'gis.css').read_text(encoding='utf-8')
+css = (BASE/'gis.css').read_text(encoding='utf-8') + '\n' \
+    + (BASE/'gis-radar.css').read_text(encoding='utf-8')
 js  = '\n'.join((BASE/f).read_text(encoding='utf-8')
-                for f in ('gis-data.js','gis-core.js','gis-layers.js','gis-mount.js'))
+                for f in ('gis-data.js','gis-core.js','gis-layers.js',
+                          'gis-radar.js','gis-mount.js'))
+# 双光通道画面：由 gen-channels.py 从页面内嵌实拍图预处理而来
+vis   = (BASE/'assets'/'vis.b64').read_text(encoding='utf-8').strip()
+therm = (BASE/'assets'/'therm.b64').read_text(encoding='utf-8').strip()
+js = ('var VIS_B64="%s";\nvar THERM_B64="%s";\n' % (vis, therm)) + js
 
 block = (
     '<style id="fishery-gis-style">\n' + css.rstrip() + '\n</style>\n'

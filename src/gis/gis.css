@@ -104,7 +104,7 @@
 .js-real-gis[data-layer="渔船"] .rg-fish{transform-box:fill-box;transform-origin:center}
 
 /* ---------- 控件 ---------- */
-.rg-tools{position:absolute;z-index:5;left:12px;top:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.rg-tools{position:absolute;z-index:5;left:158px;top:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .rg-chip{height:26px;display:flex;align-items:center;gap:6px;padding:0 9px;border:1px solid #235c78;border-radius:4px;
   background:#04182bd8;color:#7fb2c8;font-size:9px;backdrop-filter:blur(3px);box-shadow:0 6px 16px #0006;white-space:nowrap}
 .rg-chip b{color:#dff6ff;font-weight:700}
