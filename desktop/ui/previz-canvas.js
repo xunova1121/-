@@ -518,6 +518,7 @@ export function director3dCanvas(stage, {
   const mixers = new Map();
   let animationRaf = 0;
   let animationAt = performance.now();
+  let timelineFrame = 0;
   let capturing = false;
   let backdropObject = null;
   const guides = [];
@@ -618,6 +619,38 @@ export function director3dCanvas(stage, {
     return clips.find((clip) => terms.some((term) => clip.name.toLowerCase().includes(term))) || clips[0];
   }
 
+  /**
+   * 让 GLB 骨骼与预演时间线同帧。实时预览可以继续自然播放，但批量截图绝不能
+   * "第 48 帧的位置 + 第 3 帧的手势"—— 那样传给视频模型的动作控制是自相矛盾的。
+   */
+  function seekModelAnimation(wrapper, item, frame = timelineFrame) {
+    const mixer = mixers.get(wrapper);
+    const clips = wrapper.userData.animationClips || [];
+    if (!mixer || !clips.length) return;
+    const clip = animationClip(clips, item);
+    if (!clip) return;
+    let action = wrapper.userData.animationAction;
+    if (wrapper.userData.animationClip !== clip.name || !action) {
+      mixer.stopAllAction();
+      action = mixer.clipAction(clip).reset().play();
+      wrapper.userData.animationAction = action;
+      wrapper.userData.animationClip = clip.name;
+    }
+    const seconds = Math.max(0, Number(frame) || 0) / 24;
+    const duration = Math.max(.001, Number(clip.duration) || .001);
+    action.paused = true;
+    action.time = seconds % duration;
+    mixer.update(0);
+  }
+
+  function setTimelineFrame(frame) {
+    timelineFrame = Math.max(0, Number(frame) || 0);
+    for (const wrapper of objects.values()) {
+      if (wrapper.userData.kind === 'subject') seekModelAnimation(wrapper, wrapper.userData.item, timelineFrame);
+    }
+    renderNow();
+  }
+
   function ensureAnimationLoop() {
     if (animationRaf) return;
     animationAt = performance.now();
@@ -625,7 +658,13 @@ export function director3dCanvas(stage, {
       if (!host.isConnected || !mixers.size) { animationRaf = 0; return; }
       const delta = Math.min(.05, Math.max(0, (now - animationAt) / 1000));
       animationAt = now;
-      for (const mixer of mixers.values()) mixer.update(delta);
+      if (!capturing) {
+        for (const [wrapper, mixer] of mixers) {
+          const action = wrapper.userData.animationAction;
+          if (action?.paused) action.paused = false;
+          mixer.update(delta);
+        }
+      }
       renderNow();
       animationRaf = requestAnimationFrame(tick);
     };
@@ -663,9 +702,9 @@ export function director3dCanvas(stage, {
       const clip = kind === 'subject' ? animationClip(clips, item) : null;
       if (clip) {
         const mixer = new THREE.AnimationMixer(model);
-        mixer.clipAction(clip).reset().play();
         mixers.set(wrapper, mixer);
-        wrapper.userData.animationClip = clip.name;
+        wrapper.userData.animationClips = clips;
+        seekModelAnimation(wrapper, item, timelineFrame);
         ensureAnimationLoop();
       }
       if (selected() === item.id) wrapper.add(new THREE.BoxHelper(model, 0x49c8ff));
@@ -910,6 +949,7 @@ export function director3dCanvas(stage, {
   host.ondrop = (ev) => { ev.preventDefault(); try { onAssetDrop(JSON.parse(ev.dataTransfer.getData('application/x-futuredream-asset')), hitGround(ev)); } catch {} };
   new ResizeObserver(redraw).observe(host); redraw();
   const capture = (type = 'image/png', quality, { width = 1280, height = 720 } = {}) => {
+    const wasCapturing = capturing;
     capturing = true; redraw();
     // 生成模型需要的是镜头真正看到的画面，不是导演在舞台外观察的工作视角。
     const rect = host.getBoundingClientRect(), restoreW = Math.max(320, rect.width || size), restoreH = Math.max(230, rect.height || size * .72);
@@ -918,39 +958,45 @@ export function director3dCanvas(stage, {
     renderDofPreview(width, height);
     const data = dofCanvas.toDataURL(type, quality);
     renderer.setSize(restoreW, restoreH, false);
-    capturing = false; redraw();
+    capturing = wasCapturing; redraw();
     transformHelper.visible = viewMode === 'director'; renderNow();
     return data;
   };
   const captureSequence = async ({ duration = 5, fps = 8, width = 640, height = 360, quality = .76, onProgress = () => {} } = {}) => {
     const before = snapshot(stage);
+    const beforeTimelineFrame = timelineFrame;
+    const wasCapturing = capturing;
+    capturing = true;
     const sourceFps = 24;
     const maxFrame = Math.max(1, Math.round(Number(duration || 5) * sourceFps));
     const step = Math.max(1, Math.round(sourceFps / Math.max(1, Number(fps || 8))));
     const frames = [];
     try {
       for (let frame = 0; frame <= maxFrame; frame += step) {
-        applyFrame(stage, Math.min(frame, maxFrame));
+        const sampledFrame = Math.min(frame, maxFrame);
+        applyFrame(stage, sampledFrame);
+        setTimelineFrame(sampledFrame);
         redraw();
         // 把 WebGL/贴图重绘机会交还一帧；否则连续采样可能全部截成同一画面。
         await new Promise((resolve) => requestAnimationFrame(resolve));
         frames.push({
-          frame: Math.min(frame, maxFrame),
-          time: Number((Math.min(frame, maxFrame) / sourceFps).toFixed(3)),
+          frame: sampledFrame,
+          time: Number((sampledFrame / sourceFps).toFixed(3)),
           data: capture('image/jpeg', quality, { width, height })
         });
         onProgress(frames.length, Math.floor(maxFrame / step) + 1);
       }
       if (frames.at(-1)?.frame !== maxFrame) {
-        applyFrame(stage, maxFrame); redraw(); await new Promise((resolve) => requestAnimationFrame(resolve));
+        applyFrame(stage, maxFrame); setTimelineFrame(maxFrame); redraw(); await new Promise((resolve) => requestAnimationFrame(resolve));
         frames.push({ frame: maxFrame, time: Number((maxFrame / sourceFps).toFixed(3)), data: capture('image/jpeg', quality, { width, height }) });
       }
       return frames;
     } finally {
-      restore(stage, before); redraw();
+      capturing = wasCapturing;
+      restore(stage, before); setTimelineFrame(beforeTimelineFrame); redraw();
     }
   };
-  return { node: host, redraw, capture, captureSequence };
+  return { node: host, redraw, capture, captureSequence, setTimelineFrame };
 }
 
 /**
@@ -1349,6 +1395,7 @@ export function previzPanel(stage, {
     };
     const showFrame = () => {
       if ((stage.keyframes || []).length) applyFrame(stage, currentFrame);
+      director.setTimelineFrame(currentFrame);
       canvas.redraw(); director.redraw(); viewport.redraw(); paintInspector(); refresh();
     };
     range.oninput = () => {
