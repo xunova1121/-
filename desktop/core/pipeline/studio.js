@@ -3486,6 +3486,58 @@ export async function buildPrevizReferenceVideo(projectId, shot, controls, { onE
 }
 
 /**
+ * 从真实 WebGL 序列里挑出等距的导演参考帧。
+ *
+ * 不能只取开头和结尾：人物绕过道具、转身或递出物件常常发生在中段；又不能把
+ * 几十帧全塞进请求，H3 与中转线路都有图片数量/体积上限。默认四帧覆盖起、承、转、合。
+ */
+export function pickPrevizReferenceFrames(sequence = [], limit = 4) {
+  const usable = (sequence || []).filter((item) => item?.file);
+  const count = Math.max(0, Math.min(Math.floor(Number(limit) || 0), usable.length));
+  if (!count) return [];
+  if (usable.length <= count) return usable;
+  const picked = new Set();
+  for (let index = 0; index < count; index += 1) {
+    picked.add(Math.round(index * (usable.length - 1) / Math.max(1, count - 1)));
+  }
+  return [...picked].sort((a, b) => a - b).map((index) => usable[index]);
+}
+
+/**
+ * 把首、中、尾的真实 3D 帧变成模型可拉取的 URL；仅给明确支持多图的 H3 使用。
+ * 本地 EXE 没有上传网关/OSS 时不会伪装成“已注入”，而是安全退回轨迹提示词与首帧。
+ */
+export async function buildPrevizFrameReferences(projectId, shot, controls, { onEvent, limit = 4 } = {}) {
+  const frames = pickPrevizReferenceFrames(controls?.renderedSequence || [], limit)
+    .filter((item) => fs.existsSync(item.file));
+  if (!frames.length) return [];
+  const refs = [];
+  for (const item of frames) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const url = await toModelRef(item.file, { onEvent });
+      if (!/^https?:\/\//i.test(String(url || ''))) {
+        onEvent?.({ type: 'note', shotId: shot.id, message: '3D关键帧没有公网 URL，秘塔不接收内联图片；本镜保留轨迹提示词与首帧控制' });
+        continue;
+      }
+      refs.push({ url, frame: Number(item.frame || 0), time: Number(item.time || 0), path: item.file });
+    } catch (err) {
+      onEvent?.({ type: 'note', shotId: shot.id, message: `第 ${item.frame || 0} 帧3D参考图未注入（${err.message}）` });
+    }
+  }
+  const unique = refs.filter((item, index, all) => all.findIndex((other) => other.url === item.url) === index);
+  if (unique.length) {
+    store.update(projectId, (project) => {
+      const target = project.shots.find((item) => item.id === shot.id);
+      if (target?.controls) target.controls.referenceFrames = unique.map(({ url, frame, time, path }) => ({ url, frame, time, path }));
+      return project;
+    });
+    onEvent?.({ type: 'note', shotId: shot.id, message: `已把 ${unique.length} 张真实3D关键帧按时间顺序作为秘塔多帧参考注入` });
+  }
+  return unique;
+}
+
+/**
  * 重出某一镜的图。
  *
  * 批量出图必然有零星失败或不满意的 —— 为了三张图重跑整个阶段，
@@ -3806,10 +3858,17 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
     onEvent?.({ type: 'note', shotId, message: `已把3D预演轨迹写入本镜生成请求（${controlBundle.keyframes?.length || 0} 个关键帧）` });
   }
   const controlPrompt = videoControlPrompt(controlBundle || {});
-  const videoPrompt = [opts.prompt?.trim() || ctx.videoPrompt, controlPrompt].filter(Boolean).join('\n\n');
-  const controlVideo = providerId === 'metaso' && /(^|[-_])H3([-_]|$)/i.test(model)
+  const isMetasoH3 = providerId === 'metaso' && /(^|[-_])H3([-_]|$)/i.test(model);
+  const controlVideo = isMetasoH3
     ? await buildPrevizReferenceVideo(projectId, shot, controlBundle, { onEvent })
     : null;
+  const previzFrameRefs = isMetasoH3
+    ? await buildPrevizFrameReferences(projectId, shot, controlBundle, { onEvent })
+    : [];
+  const multiFramePrompt = previzFrameRefs.length
+    ? `【真实3D多帧参考】后续 ${previzFrameRefs.length} 张图片按时间从早到晚排列，对应预演帧 ${previzFrameRefs.map((item) => item.frame).join('→')}；严格保持人物走位、道具挂点、机位和光线的连续变化。`
+    : '';
+  const videoPrompt = [opts.prompt?.trim() || ctx.videoPrompt, controlPrompt, multiFramePrompt].filter(Boolean).join('\n\n');
   let renderedPrevizRef = null;
   if (controlBundle?.rendered && fs.existsSync(controlBundle.rendered)) {
     try {
@@ -3830,7 +3889,12 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
       prompt: videoPrompt,
       firstFrameUrl: firstFrame,
       lastFrameUrl: ctx.lastFrameUrl,
-      refImages: renderedPrevizRef ? [...bibleRefs.images, renderedPrevizRef] : bibleRefs.images,
+      refImages: [
+        ...(previzFrameRefs.length
+          ? previzFrameRefs.map((item) => item.url)
+          : (renderedPrevizRef ? [renderedPrevizRef] : [])),
+        ...bibleRefs.images
+      ],
       refVideos: controlVideo ? [controlVideo] : [],
       duration: shot.duration,
       /**
@@ -5113,10 +5177,18 @@ async function generateVideosRaw(projectId, { only = null, chapterId = null, reg
         if (blocker) throw new Error(`第 ${shot.index} 镜3D预演空间检查未通过：${blocker.message}。请回到预演台修正后再生成。`);
         onEvent?.({ type: 'note', shotId: shot.id, message: `第 ${shot.index} 镜3D预演已进入生成请求（${controlBundle.keyframes?.length || 0} 个关键帧）` });
       }
-      const videoPrompt = [ctx.videoPrompt, videoControlPrompt(controlBundle || {})].filter(Boolean).join('\n\n');
-      const controlVideo = useProvider === 'metaso' && /(^|[-_])H3([-_]|$)/i.test(useModel)
+      const controlPrompt = videoControlPrompt(controlBundle || {});
+      const isMetasoH3 = useProvider === 'metaso' && /(^|[-_])H3([-_]|$)/i.test(useModel);
+      const controlVideo = isMetasoH3
         ? await buildPrevizReferenceVideo(projectId, shot, controlBundle, { onEvent })
         : null;
+      const previzFrameRefs = isMetasoH3
+        ? await buildPrevizFrameReferences(projectId, shot, controlBundle, { onEvent })
+        : [];
+      const multiFramePrompt = previzFrameRefs.length
+        ? `【真实3D多帧参考】后续 ${previzFrameRefs.length} 张图片按时间从早到晚排列，对应预演帧 ${previzFrameRefs.map((item) => item.frame).join('→')}；严格保持人物走位、道具挂点、机位和光线的连续变化。`
+        : '';
+      const videoPrompt = [ctx.videoPrompt, controlPrompt, multiFramePrompt].filter(Boolean).join('\n\n');
       let renderedPrevizRef = null;
       if (controlBundle?.rendered && fs.existsSync(controlBundle.rendered)) {
         try {
@@ -5140,7 +5212,12 @@ async function generateVideosRaw(projectId, { only = null, chapterId = null, reg
         prompt: videoPrompt,
         firstFrameUrl: firstFrame,
         lastFrameUrl: ctx.lastFrameUrl,
-        refImages: renderedPrevizRef ? [...bibleRefs.images, renderedPrevizRef] : bibleRefs.images,
+        refImages: [
+          ...(previzFrameRefs.length
+            ? previzFrameRefs.map((item) => item.url)
+            : (renderedPrevizRef ? [renderedPrevizRef] : [])),
+          ...bibleRefs.images
+        ],
         refVideos: controlVideo ? [controlVideo] : [],
         duration: shot.duration,
         // 同上：这部片子自己定的分辨率，优先于全局设置
