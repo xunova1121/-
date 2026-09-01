@@ -93,6 +93,31 @@ export function retryCandidates(shots = []) {
     .sort((a, b) => (a.severity === b.severity ? Number(a.index) - Number(b.index) : a.severity === 'high' ? -1 : 1));
 }
 
+/** 单镜实际出片的可解释评分；不调模型，只汇总已获得的首帧/接缝/一致性证据。 */
+export function shotQualityReport(shot = {}, { previous = null } = {}) {
+  const character = Number(shot.consistency?.score);
+  const characterScore = Number.isFinite(character) ? Math.max(0, Math.min(100, character)) : null;
+  const visualScore = shot.headMatch?.verdict === 'mismatch' ? 35 : shot.headMatch?.ok ? 92 : null;
+  let motionScore = shot.tailAlign?.verdict === 'missed' ? 25 : shot.tailAlign?.verdict === 'partial' ? 68 : 92;
+  const predicted = previous && shot.link === 'continuous' && previous.controls && shot.controls
+    ? actionContinuityIssues(previous.controls, shot.controls) : [];
+  if (predicted.some((item) => item.severity === 'high')) motionScore = Math.min(motionScore, 45);
+  else if (predicted.length) motionScore = Math.min(motionScore, 72);
+  const scores = [characterScore, visualScore, motionScore].filter(Number.isFinite);
+  const score = scores.length ? Math.round(scores.reduce((sum, value) => sum + value, 0) / scores.length) : null;
+  const errors = [
+    ...(shot.headMatch?.verdict === 'mismatch' ? ['首帧未承接参考图'] : []),
+    ...(shot.tailAlign?.verdict === 'missed' ? ['连续动作接缝未锁住'] : []),
+    ...predicted.map((item) => item.what)
+  ];
+  const decision = errors.some((item) => /未承接|未锁住|相差/.test(item)) ? 'regenerate'
+    : score !== null && score < 75 ? 'review' : 'pass';
+  const repair = decision === 'regenerate' ? '回退到预演关键帧，以当前控制包重出视频'
+    : decision === 'review' ? '人工复核动作、人物与场景连续性后决定是否重出' : '当前版本可进入人工审片';
+  return { shotId: shot.id, index: shot.index, visual_quality_score: visualScore, character_consistency_score: characterScore,
+    motion_quality_score: motionScore, score, confidence: scores.length / 3, errors, decision, repair };
+}
+
 /**
  * 一致性分数还作数吗。
  *
@@ -385,7 +410,8 @@ export function audit(project, { lintResults = [], threshold = 75 } = {}) {
 
   // 排序：先按严重程度，同档保持发现顺序（那个顺序本身是有意义的：产物 → 一致性 → 文字）
   items.sort((a, b) => LEVELS.indexOf(a.level) - LEVELS.indexOf(b.level));
-  return { score, verdict, items, counts, retryCandidates: retryCandidates(shots) };
+  return { score, verdict, items, counts, retryCandidates: retryCandidates(shots),
+    shotQualityReports: shots.map((shot, index) => shotQualityReport(shot, { previous: shots[index - 1] || null })) };
 }
 
 export const VERDICT_LABELS = {
