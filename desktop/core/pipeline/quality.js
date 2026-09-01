@@ -45,6 +45,7 @@
  * 只印一个分数的界面是在假装精确。
  */
 import * as site from './site.js';
+import { actionContinuityIssues } from './controlmaps.js';
 
 const WEIGHT = { blocker: 12, warn: 4, note: 1 };
 
@@ -208,6 +209,26 @@ export function audit(project, { lintResults = [], threshold = 75 } = {}) {
       what: `${driftSeam.length} 处接缝有轻微漂移（第 ${driftSeam.map((s) => s.index).join('、')} 镜）`,
       why: '厂商吃了末帧参数但没完全收住，接缝会轻微跳一下。',
       fix: '重出这一镜多半会好；要求不高的话也可以放着。'
+    });
+  }
+
+  // 末帧有没有真的传给厂商是一回事，预演数据本身是否自相矛盾是另一回事。
+  // 只有标为“连续动作”的相邻镜才按接缝标准比较；普通硬切可以合理地换姿态、换灯光。
+  const actionBreaks = [];
+  for (let index = 1; index < shots.length; index += 1) {
+    const next = shots[index], prev = shots[index - 1];
+    if (next.link !== 'continuous' || !prev.controls || !next.controls) continue;
+    for (const issue of actionContinuityIssues(prev.controls, next.controls)) {
+      actionBreaks.push({ ...issue, from: prev.index, to: next.index });
+    }
+  }
+  if (actionBreaks.length) {
+    const high = actionBreaks.filter((item) => item.severity === 'high');
+    add(items, high.length ? 'warn' : 'note', {
+      id: 'previz-action-continuity',
+      what: `${actionBreaks.length} 处连续动作预演接不上${high.length ? `（${high.length} 处高风险）` : ''}`,
+      why: actionBreaks.slice(0, 3).map((item) => `第 ${item.from}→${item.to} 镜：${item.what}`).join('；') + (actionBreaks.length > 3 ? ' 等' : ''),
+      fix: '打开预演台，把下一镜首个关键帧与上一镜末帧对齐；确实需要断开时，把衔接关系改成硬切或加入过渡镜。'
     });
   }
 

@@ -269,3 +269,62 @@ export function videoControlPrompt(bundle = {}) {
     + `；按 ${Number(bundle.fps || 24)}fps、${Number(bundle.maxFrame || 0)} 帧平滑插值，不要让人物、道具或机位瞬移。`;
 }
 
+/**
+ * 连续动作镜的上一镜“最后状态”与下一镜“第一状态”能不能接上。
+ *
+ * 这项检查只看预演控制数据，不碰视频模型也不读图片，所以在花钱生成前、成片
+ * 审核时都能跑。它不替代首尾帧像素复核，而是提前发现更基本的导演错误：人已经
+ * 走到门边，下一镜却回到屋中央；刀上一镜在右手，下一镜跳到左手。
+ */
+export function actionContinuityIssues(previous = {}, next = {}) {
+  const out = [];
+  const prevPose = previous.poseSequence?.at(-1)?.subjects || [];
+  const nextPose = next.poseSequence?.[0]?.subjects || [];
+  const byId = new Map(prevPose.map((item) => [item.id, item]));
+  for (const start of nextPose) {
+    const end = byId.get(start.id);
+    if (!end) continue;
+    const distance = Math.hypot(Number(start.x || 0) - Number(end.x || 0), Number(start.y || 0) - Number(end.y || 0));
+    if (distance > 1.25) out.push({
+      kind: 'actor-position-break', severity: 'high', actorId: start.id,
+      what: `${start.id} 在两镜接缝相差 ${distance.toFixed(2)} 米`,
+      why: '连续动作的下一镜首帧应承接上一镜末帧；人物突然换位会被读成瞬移。',
+      fix: '把下一镜人物首个关键帧对齐到上一镜末帧，或把两镜改为硬切。'
+    });
+    const turn = Math.abs((((Number(start.rotation || 0) - Number(end.rotation || 0)) + 540) % 360) - 180);
+    if (turn > 95) out.push({
+      kind: 'actor-facing-break', severity: 'normal', actorId: start.id,
+      what: `${start.id} 在接缝突然转向 ${Math.round(turn)}°`,
+      why: '没有中间转身动作时，人物朝向大幅跳变会显得穿帮。',
+      fix: '在上一镜尾部或下一镜开头加入转身关键帧，再让动作路径平滑承接。'
+    });
+    if ((start.pose || 'stand') !== (end.pose || 'stand') && !String(start.action || '').trim()) out.push({
+      kind: 'actor-pose-break', severity: 'normal', actorId: start.id,
+      what: `${start.id} 从${end.pose || 'stand'}直接变为${start.pose || 'stand'}`,
+      why: '姿态改变没有对应动作说明，模型容易把它做成跳帧或肢体畸变。',
+      fix: '为下一镜首帧填写动作指令，或在上一镜尾部补一个姿态过渡关键帧。'
+    });
+  }
+  const prevProps = new Map((previous.attachmentSequence?.at(-1)?.props || []).map((item) => [item.id, item]));
+  for (const item of next.attachmentSequence?.[0]?.props || []) {
+    const before = prevProps.get(item.id);
+    if (before && (before.actorId !== item.actorId || before.point !== item.point)) out.push({
+      kind: 'prop-hand-break', severity: 'high', propId: item.id,
+      what: `${item.name || item.id} 从${before.actorId}的${before.point}跳到${item.actorId}的${item.point}`,
+      why: '手持道具换手或换人却没有交接动作，连续镜头里会非常明显。',
+      fix: '保持首尾挂点一致；确实要交接时拆成独立动作镜，并写明交接过程。'
+    });
+  }
+  const prevLights = new Map((previous.lightSequence?.at(-1)?.lights || []).map((item) => [item.id, item]));
+  for (const item of next.lightSequence?.[0]?.lights || []) {
+    const before = prevLights.get(item.id);
+    if (before && before.color !== item.color) out.push({
+      kind: 'light-color-break', severity: 'normal', lightId: item.id,
+      what: `${item.id} 的灯色从${before.color}变为${item.color}`,
+      why: '同一瞬间的色温跳变会让两个镜头像不同时间、不同地点拍的。',
+      fix: '保持接缝两端灯色一致；需要变色时在上一镜内用关键帧渐变。'
+    });
+  }
+  return out;
+}
+
