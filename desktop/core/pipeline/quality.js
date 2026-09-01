@@ -65,6 +65,35 @@ function add(items, level, o) {
 }
 
 /**
+ * 把预演风险和真实出片核验汇成“该重做哪一镜、为什么”的候选清单。
+ * 只建议、不自动花钱重跑：首次 100 镜仍保留人工审核，避免把合理的导演跳切误判成失败。
+ */
+export function retryCandidates(shots = []) {
+  const byId = new Map();
+  const addCandidate = (shot, reason, severity = 'normal') => {
+    if (!shot?.id) return;
+    const item = byId.get(shot.id) || { shotId: shot.id, index: shot.index, severity: 'normal', reasons: [], action: 'regenerate-video' };
+    item.reasons.push(reason);
+    if (severity === 'high') item.severity = 'high';
+    byId.set(shot.id, item);
+  };
+  for (let index = 0; index < shots.length; index += 1) {
+    const shot = shots[index];
+    if (shot.headMatch?.verdict === 'mismatch') addCandidate(shot, '实际视频首帧未承接本镜参考图', 'high');
+    if (shot.tailAlign?.verdict === 'missed') addCandidate(shot, '连续动作接缝未锁住', 'high');
+    else if (shot.tailAlign?.verdict === 'partial') addCandidate(shot, '连续动作接缝有漂移');
+    const prev = shots[index - 1];
+    if (prev && shot.link === 'continuous' && prev.controls && shot.controls) {
+      for (const issue of actionContinuityIssues(prev.controls, shot.controls)) {
+        addCandidate(shot, `预演接缝：${issue.what}`, issue.severity);
+      }
+    }
+  }
+  return [...byId.values()].map((item) => ({ ...item, reasons: [...new Set(item.reasons)] }))
+    .sort((a, b) => (a.severity === b.severity ? Number(a.index) - Number(b.index) : a.severity === 'high' ? -1 : 1));
+}
+
+/**
  * 一致性分数还作数吗。
  *
  * 手改过描述之后那个分数是给**旧描述**打的（studio 里会标 stale）。
@@ -356,7 +385,7 @@ export function audit(project, { lintResults = [], threshold = 75 } = {}) {
 
   // 排序：先按严重程度，同档保持发现顺序（那个顺序本身是有意义的：产物 → 一致性 → 文字）
   items.sort((a, b) => LEVELS.indexOf(a.level) - LEVELS.indexOf(b.level));
-  return { score, verdict, items, counts };
+  return { score, verdict, items, counts, retryCandidates: retryCandidates(shots) };
 }
 
 export const VERDICT_LABELS = {

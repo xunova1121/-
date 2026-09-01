@@ -3402,7 +3402,15 @@ export default {
                   ' ', h('b', {}, i.what),
                   h('span', { class: 'field-hint', style: 'display:block;margin-top:2px' }, i.why),
                   h('span', { class: 'field-hint', style: 'display:block' }, `→ ${i.fix}`))))
-                : h('p', {}, '四类检查都过了：产物齐、一致性达标、接缝对得上、分镜没有高危项。')));
+                : h('p', {}, '四类检查都过了：产物齐、一致性达标、接缝对得上、分镜没有高危项。'),
+              r.retryCandidates?.length
+                ? h('div', { class: 'notice warn', style: 'margin-top:10px' },
+                  h('b', {}, `建议优先重做 ${r.retryCandidates.length} 镜`),
+                  ...r.retryCandidates.slice(0, 8).map((candidate) => h('p', { style: 'margin:6px 0' },
+                    h('span', { class: `badge ${candidate.severity === 'high' ? 'warn' : ''}` }, candidate.severity === 'high' ? '高风险' : '建议复核'),
+                    ` 第 ${candidate.index} 镜：${candidate.reasons.join('；')}`)),
+                  h('span', { class: 'field-hint', style: 'display:block' }, '这是重做候选，不会自动扣费；可在对应分镜卡点击“重出视频”。'))
+                : null));
         }).catch(() => { /* 体检拉不到不该把成片页弄坏 */ });
         return h('div', {},
           // cap:quality-report
@@ -5135,4 +5143,3 @@ function describe(ev) {
       return null;
   }
 }
-
