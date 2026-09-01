@@ -1866,6 +1866,60 @@ console.log('\n指令框：打进去要能看见它理解成了什么');
     !((await prev.getAttribute('class')) || '').includes('bad'));
 }
 
+/**
+ * ══════════ 撤销 ══════════
+ *
+ * ⚠ 验的是**整条链**：批量改 → 撤销条出现且带名字 → 点了真的退回去。
+ * 只验"按钮在不在"的话，一个按下去什么都不做的按钮照样能过 ——
+ * 而这个功能的全部价值就在"按下去真的回得来"。
+ */
+console.log('\n撤销：改完之后真能退回去');
+{
+  await page.goto(`${url}#/studio/${proj.id}`);
+  await page.waitForTimeout(1000);
+  await page.locator('.nav-step', { hasText: '镜头出图' }).first().click();
+  await page.waitForTimeout(900);
+
+  const before = await page.locator('.shot-card').count();
+  const input = page.locator('.cmd-input').first();
+  await input.fill('第 1 镜改成大特写');
+  await page.waitForTimeout(1200);
+  await page.locator('.cmd-box button').first().click();
+  await page.waitForTimeout(1600);
+
+  const undoBtn = page.locator('.undo-bar button').first();
+  check('改完之后出现了撤销条', (await undoBtn.count()) === 1);
+  const label = (await undoBtn.textContent()) || '';
+  /** 一列没有名字的时间戳，人一条都不敢按 —— 所以名字是这条路能不能用的关键 */
+  check(`撤销条上写着退的是哪一步（${label.slice(0, 30)}）`, /景别|镜/.test(label));
+
+  page.once('dialog', (d) => d.accept());
+  await undoBtn.click();
+  await page.waitForTimeout(1800);
+  const after = await page.locator('.shot-card').count();
+  check('退回去之后镜头一个没少', after === before);
+  /**
+   * ⚠ 读**那个输入框的值**，不要读整张卡的 textContent。
+   *
+   * 第一版写的是 `!/大特写/.test(卡片textContent)` —— 一直红，
+   * 看起来像撤销没生效。实际上撤销好好的（输入框里就是「中景」），
+   * 红是因为卡片里别处也有「大特写」三个字：预演台的景别档位清单、
+   * 道具那段帮助文字。**对着一个大容器的整段文字做断言，验的是运气。**
+   */
+  const camAfter = await page.locator('.shot-card').first()
+    .locator('input[placeholder*="中景"]').first().inputValue();
+  check(`第 1 镜的景别退回去了（现在是${camAfter}）`, camAfter === '中景');
+
+  // 再分清"数据真退了"还是"只有界面看着退了"：重进一次页面
+  await page.reload();
+  await page.waitForTimeout(1200);
+  await page.locator('.nav-step', { hasText: '镜头出图' }).first().click();
+  await page.waitForTimeout(900);
+  const camFresh = await page.locator('.shot-card').first()
+    .locator('input[placeholder*="中景"]').first().inputValue();
+  check('重进页面还是中景（说明退的是数据，不只是界面）', camFresh === '中景');
+}
+
 console.log('\n镜头卡的分层');
 {
   /**

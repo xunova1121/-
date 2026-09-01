@@ -128,9 +128,47 @@ export function commandBox(project, { onDone = () => {}, onGo = () => {} } = {})
     onGo(plan.topic === 'estimate' ? 'assets' : null, plan);
   };
 
+  /**
+   * ══════════ 撤销 ══════════
+   *
+   * ⚠ 它和指令框放在一起，是因为**它是指令框的配套**：
+   * 一个回车能改五十镜的工具，必须让人一眼看得到回头路在哪。
+   * 藏进设置里的撤销，等于没有。
+   *
+   * 每一步都带名字（"批量改了 7 镜（景别→中景）"）——
+   * 一列没有名字的时间戳，人不知道该退到哪一条，于是一条都不敢按。
+   */
+  const undoBar = h('div', { class: 'undo-bar' });
+  const paintUndo = async () => {
+    clear(undoBar);
+    let r;
+    try {
+      r = await api(`/projects/${project.id}/undo`);
+    } catch { return; }
+    if (!r.items?.length) return;
+    const top = r.items[0];
+    undoBar.append(
+      h('button', {
+        class: 'btn ghost sm',
+        title: '把分镜表退回这一步之前。已经出好的图和视频不动',
+        onclick: async () => {
+          if (!window.confirm(`退回到「${top.label}」之前？\n\n分镜表会回到那一刻（${top.shots} 镜）。`
+            + '\n已经出好的图和视频不动 —— 所以可能出现"这张图是照旧描述出的"。')) return;
+          await api(`/projects/${project.id}/undo/${top.n}`, { method: 'POST' });
+          toast('已退回', 'ok');
+          onDone();
+        }
+      }, `↶ 撤销：${top.label}`),
+      r.items.length > 1
+        ? h('span', { class: 'field-hint', style: 'margin:0' }, `还能再往前退 ${r.items.length - 1} 步`)
+        : null);
+  };
+  paintUndo();
+
   return h('div', { class: 'cmd-box' },
     h('div', { class: 'cmd-row' }, box, go),
     preview,
+    undoBar,
     h('div', { class: 'field-hint', style: 'margin:6px 0 0' },
       '它只会做你本来就能做的事，做之前先摆给你看。看不懂就说看不懂，不猜。'));
 }

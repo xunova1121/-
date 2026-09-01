@@ -870,3 +870,6 @@ input {
 /* 第二个图标按钮不再吃剩余空间 —— 两个都 margin-left:auto 的话，
    flex 会把空隙平分给它们，中间裂开一道缝 */
 .fchip.icon + .fchip.icon { margin-left: 6px; }
+/* 撤销：和指令框同一张卡 —— 它是指令框的配套，藏起来等于没有 */
+.undo-bar { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.undo-bar:empty { display: none; }

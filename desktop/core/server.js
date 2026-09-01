@@ -1264,6 +1264,21 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
     }
 
     /**
+     * 撤销：有哪几步能退 / 退回某一步。
+     *
+     * ⚠ 和产物版本（shots/:id/versions）是**两条独立的路**：
+     * 那条管的是"这一镜的图重出过几版"，这条管的是"整张分镜表退回上一步"。
+     * 合成一条的话，"退回文案"会顺手把已经花钱出的图也退掉 —— 那不是人要的。
+     */
+    if (b && c === 'undo' && method === 'GET') {
+      // cap:undo
+      return json(res, 200, studio.undoList(b));
+    }
+    if (b && c === 'undo' && d && method === 'POST') {
+      return json(res, 200, { project: studio.undoTo(b, Number(d)) });
+    }
+
+    /**
      * 指令框：把一句人话翻成一份**计划**。
      *
      * ⚠ 这条路**只解析，绝不执行**。

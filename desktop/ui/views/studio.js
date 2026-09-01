@@ -2852,6 +2852,7 @@ export default {
        * 而"选错一批然后批量改"是这个框最坏的失败方式。
        */
       // cap:command-box
+      // cap:undo
       shotHost.append(commandBox(project, {
         onDone: () => rerender(),
         onGo: (stage) => {

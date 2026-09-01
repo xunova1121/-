@@ -27,6 +27,7 @@ import { safeFileName, PROJECTS_DIR } from '../paths.js';
 import * as chapters from './chapters.js';
 import * as duration from '../duration.js';
 import * as versions from '../versions.js';
+import * as undo from '../undo.js';
 import * as autocut from '../autocut.js';
 import * as meter from '../meter.js';
 import * as quality from './quality.js';
@@ -1474,6 +1475,17 @@ async function analyzeScriptRaw(projectId, {
   if (!project) throw new Error(`项目不存在：${projectId}`);
   if (!project.bible) throw new Error('请先跑「设定集」—— 没有冻结人设，分镜会自己发挥外貌描述');
 
+  /**
+   * ⚠ 重拆分镜是这个应用里**最能一次抹掉东西**的操作：
+   * 整张表重来，你逐镜改过的景别、技法卡、道具、衔接全没了。
+   *
+   * 存在动手之前 —— 已经拆过一遍、改了两小时之后手滑再点一次「拆分镜」，
+   * 这张快照就是唯一的出路。
+   */
+  if ((project.shots || []).length) {
+    undo.snapshot(store.projectDir(projectId), `重拆分镜（拆之前有 ${project.shots.length} 镜）`);
+  }
+
   // 设定图要出齐再往下走：缺一张，后面引用它的每一镜都少一张参考图、
   // 少一份复核基准，一致性从那儿开始塌 —— 而那时候你已经在出几十张图了
   const ready = bibleReadiness(project);
@@ -2139,6 +2151,9 @@ export function setLinkRange(projectId, { from, to, link }) {
   const hi = Math.max(Number(from), Number(to));
   if (!Number.isFinite(lo) || !Number.isFinite(hi)) throw new Error('镜号不对');
 
+  // 整段标衔接一次动几十镜，而"标错一段"是很容易发生的
+  undo.snapshot(store.projectDir(projectId), `整段标衔接：第 ${lo}-${hi} 镜 → ${link}`);
+
   const changed = [];
   const next = store.update(projectId, (p) => {
     for (const s of p.shots || []) {
@@ -2341,6 +2356,26 @@ export function sceneLayoutOf(project, sceneName) {
  * "这十镜都加一张手持"。直接覆盖的话，每一镜原来各自选的运镜全没了，
  * 而那是他一镜一镜挑出来的东西。
  */
+/**
+ * 这次批量改的是什么，写成人话给撤销列表用。
+ *
+ * ⚠ 不能只写"批量修改"。撤销列表里五条一模一样的"批量修改"，
+ * 和没有列表是一回事 —— 人不知道该退到哪一条，于是一条都不敢按。
+ */
+function describePatch(patch = {}, addSkills = [], removeSkills = []) {
+  const NAMES = {
+    camera: '景别', duration: '时长', transition: '转场', description: '描述',
+    dialogue: '台词', scene: '场景', segment: '场次', link: '衔接',
+    characters: '出场角色', props: '关键道具', motion: '运镜', sound: '音效', tier: '模型档'
+  };
+  const bits = Object.keys(patch)
+    .filter((k) => NAMES[k])
+    .map((k) => `${NAMES[k]}→${String(patch[k]).slice(0, 12)}`);
+  if (addSkills.length) bits.push(`加 ${addSkills.length} 张技法卡`);
+  if (removeSkills.length) bits.push(`去掉 ${removeSkills.length} 张技法卡`);
+  return bits.length ? bits.join('、') : '没动任何字段';
+}
+
 export function batchUpdateShots(projectId, { ids = [], patch = {}, addSkills = [], removeSkills = [] } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
@@ -2349,6 +2384,17 @@ export function batchUpdateShots(projectId, { ids = [], patch = {}, addSkills = 
 
   const targets = (project.shots || []).filter((s) => want.has(s.id));
   if (!targets.length) throw new Error('选中的这几镜一个都不存在了 —— 刷新一下再试');
+
+  /**
+   * ⚠ 动手之前先存一张。
+   *
+   * 这条路是指令框驱动的 —— **一个回车能改掉五十镜的文案**。
+   * 说岔一句（想改第 6-12 镜、它理解成了「全部」而你按快了），
+   * 整张分镜表就没了。一个能一次改五十镜的工具，必须配一条一次退回来的路。
+   *
+   * 标签要写得人敢按：一列没有名字的时间戳，没人会去点。
+   */
+  undo.snapshot(store.projectDir(projectId), `批量改了 ${targets.length} 镜（${describePatch(patch, addSkills, removeSkills)}）`);
 
   const add = (addSkills || []).filter(Boolean);
   const remove = new Set((removeSkills || []).filter(Boolean));
@@ -6134,6 +6180,29 @@ async function runAllRaw(projectId, { shotCount = 8, from = null, onEvent, signa
   return last || store.read(projectId);
 }
 
+
+/**
+ * 有哪几步可以退回去 / 退回某一步。
+ *
+ * ⚠ 退回来之后**产物不动**：图和视频还在盘上，只是分镜表回到了那一刻。
+ * 这是有意的 —— 退一步文案不该顺手把已经花钱出的图删掉。
+ * 代价是可能出现"这张图是照旧描述出的"，而那件事诊断里已经有一条专门说它。
+ */
+export function undoList(projectId) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  return {
+    items: undo.list(store.projectDir(projectId)).map(({ n, at, label, shots }) => ({ n, at, label, shots })),
+    bytes: undo.bytes(store.projectDir(projectId))
+  };
+}
+
+export function undoTo(projectId, n) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  undo.restore(store.projectDir(projectId), n);
+  return store.read(projectId);
+}
 
 /** 只给自检用：这条判断错了会以"厂商下不到图"的样子出现，极难查 */
 export const __usableRef = usableRef;

@@ -1071,6 +1071,41 @@ const realErrs = errs.filter((e) => !/401/.test(e));
   console.log('   第 1 镜真的变成特写了：', /特写/.test(listText) ? '✓' : '✕ 列表里找不到「特写」');
 }
 
+/**
+ * ⑯ 撤销（手机端）
+ *
+ * 手滑最容易发生在手机上，所以这条路在手机上比在电脑上更要紧。
+ * 验的是整条链：改 → 撤销按钮带名字地出现 → 点了真的退回去。
+ */
+{
+  console.log('\n⑯ 撤销：');
+  const chip = page.locator('.fchip.icon', { hasText: '⌘' }).first();
+  await chip.click();
+  await page.waitForTimeout(700);
+  const ta = page.locator('.sheet textarea.mta').first();
+  await ta.fill('第 1 镜改成大特写');
+  await page.waitForTimeout(1200);
+  await page.locator('.sheet .cmd-preview ~ .row button').first().click();
+  await page.waitForTimeout(1600);
+
+  await chip.click();
+  await page.waitForTimeout(900);
+  const undoBtn = page.locator('.sheet .undo-bar button').first();
+  console.log('   改完之后有撤销按钮：', (await undoBtn.count()) === 1 ? '✓' : '✕');
+  const label = (await undoBtn.textContent().catch(() => '')) || '';
+  console.log('   按钮上写着退的是哪一步：', /景别|镜/.test(label) ? `✓ ${label.slice(0, 26)}` : `✕ ${label}`);
+  page.once('dialog', (d) => d.accept());
+  await undoBtn.click();
+  await page.waitForTimeout(1800);
+  /**
+   * ⚠ 读**折叠区里那个标签的文本**要用 textContent，而且要读得准 ——
+   * 整页 textContent 里"大特写"会在别处出现（帮助文字、档位清单），
+   * 那样验的是运气。这里只读第一张卡。
+   */
+  const card1 = await page.locator('.shot').first().evaluate((el) => el.textContent || '').catch(() => '');
+  console.log('   第 1 镜退回去了：', !/大特写/.test(card1) ? '✓' : `✕ ${card1.slice(0, 60)}`);
+}
+
 console.log('意料之外的 4xx：', unexpected4xx.length ? `✕ ${unexpected4xx.slice(0, 4).join('、')}` : '无 ✓');
 console.log('\n页面报错：', realErrs.length ? realErrs.slice(0, 4) : '无');
 await b.close();

@@ -1841,3 +1841,6 @@ select.mini {
   color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
 }
 .cmd-eg-btn:hover { border-color: var(--beam); color: var(--ink); }
+/* 撤销条：和指令框同一块地方 —— 它是指令框的配套，藏起来等于没有 */
+.undo-bar { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+.undo-bar:empty { display: none; }

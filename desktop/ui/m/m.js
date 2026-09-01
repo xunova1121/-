@@ -2144,6 +2144,36 @@ function commandCard(close) {
     goTab('flow');
   };
 
+  /**
+   * ══════════ 撤销 ══════════
+   *
+   * ⚠ 和指令框同一张卡，因为**它是指令框的配套**：一个回车能改五十镜的
+   * 工具，必须让人一眼看得到回头路。而手滑最容易发生在手机上。
+   *
+   * 每一步带名字 —— 一列没有名字的时间戳，人一条都不敢按。
+   */
+  const undoBar = h('div', { class: 'undo-bar' });
+  // cap:undo
+  api(`/projects/${project.id}/undo`).then((r) => {
+    if (!r.items?.length) return;
+    const top = r.items[0];
+    undoBar.append(h('button', {
+      class: 'btn sm block',
+      onclick: async () => {
+        if (!confirm(`退回到「${top.label}」之前？\n\n分镜表会回到那一刻（${top.shots} 镜）。`
+          + '\n已经出好的图和视频不动。')) return;
+        await api(`/projects/${project.id}/undo/${top.n}`, { method: 'POST' });
+        toast('已退回', 'ok');
+        await reload();
+        close();
+      }
+    }, `↶ 撤销：${top.label}`));
+    if (r.items.length > 1) {
+      undoBar.append(h('div', { class: 'muted', style: 'font-size:12px;margin-top:6px' },
+        `还能再往前退 ${r.items.length - 1} 步`));
+    }
+  }).catch(() => {});
+
   return h('div', { class: 'sheet-card' },
     h('h3', {}, '说一句话'),
     box,
@@ -2157,7 +2187,8 @@ function commandCard(close) {
      * 而那是用户对这个功能的第一印象。服务端 examplesFor 已经按项目算好，
      * 随任意一次解析回来（看不懂时那份就是给这儿用的）。
      */
-    egs);
+    egs,
+    undoBar);
 }
 
 function linkRangeCard(shots) {
