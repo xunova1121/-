@@ -77,6 +77,28 @@ const EYE_H = 1.6;
 export const DEFAULT_LENS = 35;
 
 /**
+ * 一支镜头在指定画幅里真正能看见多少。
+ *
+ * 3D 取景锥、摄影机画面、控制包和提示词必须以同一套光学数据为准；否则导演台里
+ * 看着是中景，导出首帧却成了近景。16:9 并不是把 3:2 全画幅硬拉伸，而是从它
+ * 的有效成像面裁出对应高度（竖幅时反过来裁宽度）。
+ */
+export function cameraFieldOfView(lensMm = DEFAULT_LENS, aspect = 16 / 9) {
+  const lens = Math.max(8, Math.min(400, Number(lensMm) || DEFAULT_LENS));
+  const ratio = Math.max(.25, Math.min(4, Number(aspect) || 16 / 9));
+  const fullAspect = SENSOR_W / SENSOR_H;
+  const sensorWidth = ratio >= fullAspect ? SENSOR_W : SENSOR_H * ratio;
+  const sensorHeight = ratio >= fullAspect ? SENSOR_W / ratio : SENSOR_H;
+  const fovX = 2 * Math.atan(sensorWidth / (2 * lens));
+  const fovY = 2 * Math.atan(sensorHeight / (2 * lens));
+  return {
+    lensMm: lens, aspect: ratio, sensorWidth, sensorHeight, fovX, fovY,
+    fovXDeg: Number((fovX * 180 / Math.PI).toFixed(2)),
+    fovYDeg: Number((fovY * 180 / Math.PI).toFixed(2))
+  };
+}
+
+/**
  * 这个镜头在这个距离上，画面里能装下多高（米）。
  *
  * 这才是景别的本体。同样说"中景"，35mm 站 2 米和 85mm 站 5 米

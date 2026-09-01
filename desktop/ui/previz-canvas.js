@@ -712,14 +712,16 @@ export function director3dCanvas(stage, {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, w * .75), materialFor(item, 0x758196));
     mesh.position.y = h / 2; mesh.castShadow = true; mesh.receiveShadow = true; return mesh;
   }
-  function cameraRig() {
+  function cameraRig(item) {
     const g = new THREE.Group();
+    const optics = previz.cameraFieldOfView(item?.lens, 16 / 9);
+    const height = Number(item?.height || 1.6);
     const body = new THREE.Mesh(new THREE.BoxGeometry(.65, .38, .35), new THREE.MeshStandardMaterial({ color: 0x34b7eb, metalness: .35 }));
-    body.position.y = 1.55; body.castShadow = true; g.add(body);
+    body.position.y = height; body.castShadow = true; g.add(body);
     const lens = new THREE.Mesh(new THREE.CylinderGeometry(.16, .2, .34, 20), new THREE.MeshStandardMaterial({ color: 0x101820, metalness: .7 }));
-    lens.rotation.x = Math.PI / 2; lens.position.set(0, 1.55, .33); g.add(lens);
-    for (const x of [-.28, .28]) { const leg = new THREE.Mesh(new THREE.CylinderGeometry(.025, .035, 1.45, 8), new THREE.MeshStandardMaterial({ color: 0x71879a })); leg.position.set(x, .72, 0); leg.rotation.z = x * .2; g.add(leg); }
-    const depth = 2.2, halfW = .82 * 35 / Math.max(12, Number(stage.cam.lens || 35)), halfH = halfW / 1.78, y = 1.55;
+    lens.rotation.x = Math.PI / 2; lens.position.set(0, height, .33); g.add(lens);
+    for (const x of [-.28, .28]) { const leg = new THREE.Mesh(new THREE.CylinderGeometry(.025, .035, Math.max(.25, height - .12), 8), new THREE.MeshStandardMaterial({ color: 0x71879a })); leg.position.set(x, Math.max(.13, height / 2 - .06), 0); leg.rotation.z = x * .2; g.add(leg); }
+    const depth = 2.6, halfH = depth * Math.tan(optics.fovY / 2), halfW = depth * Math.tan(optics.fovX / 2), y = height;
     const p = [new THREE.Vector3(0, y, .5), new THREE.Vector3(-halfW, y - halfH, depth), new THREE.Vector3(halfW, y - halfH, depth), new THREE.Vector3(halfW, y + halfH, depth), new THREE.Vector3(-halfW, y + halfH, depth)];
     const edges = [p[0],p[1],p[0],p[2],p[0],p[3],p[0],p[4],p[1],p[2],p[2],p[3],p[3],p[4],p[4],p[1]];
     g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(edges), new THREE.LineBasicMaterial({ color:0x49c8ff, transparent:true, opacity:.55 })));
@@ -843,7 +845,7 @@ export function director3dCanvas(stage, {
     }
     const entries = [...(stage.subjects || []).map((item) => ({ kind: 'subject', item })), ...(stage.marks || []).filter((x) => !x.far).map((item) => ({ kind: 'prop', item })), ...(stage.lights || []).map((item) => ({ kind: 'light', item })), { kind: 'camera', item: stage.cam }];
     for (const { kind, item } of entries) {
-      const fallback = kind === 'subject' ? actor(item) : kind === 'camera' ? cameraRig() : kind === 'light' ? lightRig(item) : prop(item);
+      const fallback = kind === 'subject' ? actor(item) : kind === 'camera' ? cameraRig(item) : kind === 'light' ? lightRig(item) : prop(item);
       const obj = kind === 'camera' || kind === 'light' ? fallback : modelOrFallback(item, kind, fallback);
       const attached = kind === 'prop' ? attachmentPose(stage, item) : null;
       obj.position.set(Number(attached?.x ?? item.x ?? 0), Number(attached?.elevation ?? item.elevation ?? 0), Number(attached?.y ?? item.y ?? 0));
@@ -866,8 +868,9 @@ export function director3dCanvas(stage, {
     shotCamera.position.set(Number(cam.x || 0), Number(cam.height || 1.6), Number(cam.y || -3));
     const focus = findObject(stage, cam.focusId)?.item || stage.subjects?.[0] || { x: 0, y: 0, height: 1.4 };
     shotCamera.lookAt(Number(focus.x || 0), Number(focus.height || 1.4) * .72 + Number(focus.elevation || 0), Number(focus.y || 0));
-    shotCamera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(24 / (2 * Math.max(8, Number(cam.lens || 35)))));
-    shotCamera.aspect = 16 / 9; shotCamera.updateProjectionMatrix(); renderNow();
+    const optics = previz.cameraFieldOfView(cam.lens, 16 / 9);
+    shotCamera.fov = optics.fovYDeg;
+    shotCamera.aspect = optics.aspect; shotCamera.updateProjectionMatrix(); renderNow();
   }
   const pointer = (ev) => { const r = renderer.domElement.getBoundingClientRect(); mouse.set((ev.clientX-r.left)/r.width*2-1, -(ev.clientY-r.top)/r.height*2+1); ray.setFromCamera(mouse, view); };
   const hitGround = (ev) => { pointer(ev); const p = new THREE.Vector3(); return ray.ray.intersectPlane(ground, p) ? { x: clampM(p.x), y: clampM(p.z) } : { x: 0, y: 0 }; };
