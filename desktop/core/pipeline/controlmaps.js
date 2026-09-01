@@ -175,6 +175,7 @@ export function renderControls(source = {}, { duration = 5, sampleEvery = 3 } = 
   return { start: first.rgb, end: last.rgb, depth: first.depth, mask: first.mask, edge: first.edge, pose: first.pose,
     frames, sampleEvery: Math.max(1, sampleEvery), controlFps: Number((FPS / Math.max(1, sampleEvery)).toFixed(3)), width: W, height: H, fps: FPS, maxFrame,
     keyframes: (base.keyframes || []).map((x) => x.frame), motionEasing: base.motionEasing || 'easeInOut',
+    pathInterpolation: base.pathInterpolation || 'linear',
     trajectory, focusSequence, poseSequence, motionPaths, lightSequence, attachmentSequence, layers, issues,
     objects: objects.map((x) => ({ id: x.item.id, name: x.item.name, kind: x.kind, depth: Number(x.depth.toFixed(3)) })) };
 }
@@ -224,7 +225,8 @@ export function videoControlPrompt(bundle = {}) {
     ? `焦点从${firstFocus.targetName || firstFocus.targetId || `${firstFocus.distance.toFixed(1)}米`}平滑拉到${lastFocus.targetName || lastFocus.targetId || `${lastFocus.distance.toFixed(1)}米`}，清晰范围约±${lastFocus.depthBand.toFixed(1)}米，焦点不得抽动`
     : '';
 
-  return `【3D预演控制】严格保持首尾构图与空间关系；${camera}`
+  const pathShape = bundle.pathInterpolation === 'smooth' ? '所有机位与人物移动按平滑曲线过弯' : '所有机位与人物按关键帧之间直线移动';
+  return `【3D预演控制】严格保持首尾构图与空间关系；${pathShape}；${camera}`
     + `${actors.length ? `；人物轨迹：${actors.join('；')}` : ''}`
     + `${attachedProps.length ? `；人物道具绑定：${attachedProps.join('；')}` : ''}`
     + `${focusPull ? `；焦点拉移：${focusPull}` : ''}`

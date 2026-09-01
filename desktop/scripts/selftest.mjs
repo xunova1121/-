@@ -13781,6 +13781,20 @@ section('预演台工业对象模型');
   check('重做恢复拖动后坐标', history.redo() && stage.subjects[0].x === 3);
   const key = ps.addKeyframe(stage, 24, [stage.cam.id, stage.subjects[0].id]);
   check('关键帧按稳定 ID 保存空间变换', key.frame === 24 && Boolean(key.values[stage.cam.id]) && Boolean(key.values[stage.subjects[0].id]));
+  const curveStage = ps.normalizeStage({ pathInterpolation: 'smooth', cam: { id: 'cam-main', x: 0, y: -3 }, subjects: [{ id: 'actor-curve', name: '曲线人物', x: 0, y: 0 }], keyframes: [
+    { frame: 0, values: { 'actor-curve': { x: 0, y: 0 } } },
+    { frame: 24, values: { 'cam-main': { x: 1, y: -3 } } },
+    { frame: 48, values: { 'actor-curve': { x: 2, y: 2 } } },
+    { frame: 72, values: { 'actor-curve': { x: 4, y: 0 } } }
+  ] });
+  const curved = ps.frameState(curveStage, 24).values['actor-curve'];
+  const actorOnlyStage = structuredClone(curveStage);
+  actorOnlyStage.keyframes = actorOnlyStage.keyframes.filter((entry) => entry.frame !== 24);
+  const actorOnly = ps.frameState(actorOnlyStage, 24).values['actor-curve'];
+  const linearStage = structuredClone(actorOnlyStage); linearStage.pathInterpolation = 'linear';
+  const linearMid = ps.frameState(linearStage, 24).values['actor-curve'];
+  check('人物按自己的关键帧轨道求值，不受摄影机中间帧干扰', curved.x === actorOnly.x && curved.y === actorOnly.y);
+  check('平滑路径在中点真实弯曲而不是只把引导线画弯', curved.y > linearMid.y);
   check('对象锁定字段进入可持久化数据', (stage.subjects[0].locked = true) && JSON.parse(ps.snapshot(stage)).subjects[0].locked === true);
   const qualityStage = ps.normalizeStage({ cam: { x: 0, y: -3 }, subjects: [
     { id: 'actor-front', name: '前景人物', x: 0, y: 0, elevation: -.12 },
@@ -13829,6 +13843,7 @@ section('工业化升级：实例路由、任务账本和控制图');
   check('控制包有首尾帧、姿态和边缘图', [maps.start, maps.end, maps.pose, maps.edge].every((x) => x.startsWith('<svg')));
   check('真实人物图片进入首帧合成', maps.start.includes('/api/media?path=alan.png'));
   check('摄影机关键帧被插值成轨迹', maps.trajectory.length > 2 && maps.trajectory.at(-1).x === 1 && maps.trajectory.at(-1).lens === 50);
+  check('控制包声明真实使用的路径插值方式', maps.pathInterpolation === 'linear');
   check('人物姿态序列和分层合成清单齐全', maps.poseSequence.length === maps.trajectory.length && maps.layers.some((x) => x.id === 'actor-a'));
   check('逐帧控制序列包含画面、深度、姿态、边缘和遮罩',
     maps.frames.length === maps.trajectory.length

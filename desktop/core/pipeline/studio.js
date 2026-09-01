@@ -3354,7 +3354,8 @@ export function exportShotControls(projectId, shotId, stageOverride = null, rend
   fs.writeFileSync(files.manifest, JSON.stringify({
     schema: 'futuredream-control-bundle/v3', fps: rendered.fps, controlFps: rendered.controlFps,
     sampleEvery: rendered.sampleEvery, width: rendered.width, height: rendered.height,
-    maxFrame: rendered.maxFrame, keyframes: rendered.keyframes, cameraTrajectory: rendered.trajectory,
+    maxFrame: rendered.maxFrame, keyframes: rendered.keyframes, motionEasing: rendered.motionEasing,
+    pathInterpolation: rendered.pathInterpolation, cameraTrajectory: rendered.trajectory,
     focusSequence: rendered.focusSequence, poseSequence: rendered.poseSequence, motionPaths: rendered.motionPaths,
     lightSequence: rendered.lightSequence, attachmentSequence: rendered.attachmentSequence,
     layers: rendered.layers, sequence, renderedSequence,
@@ -3365,7 +3366,8 @@ export function exportShotControls(projectId, shotId, stageOverride = null, rend
     const target = p.shots.find((x) => x.id === shotId);
     target.stage = stage;
     target.controls = { ...files, width: rendered.width, height: rendered.height, fps: rendered.fps,
-      maxFrame: rendered.maxFrame, keyframes: rendered.keyframes, trajectory: rendered.trajectory,
+      maxFrame: rendered.maxFrame, keyframes: rendered.keyframes, motionEasing: rendered.motionEasing,
+      pathInterpolation: rendered.pathInterpolation, trajectory: rendered.trajectory,
       focusSequence: rendered.focusSequence, poseSequence: rendered.poseSequence, motionPaths: rendered.motionPaths,
       lightSequence: rendered.lightSequence, attachmentSequence: rendered.attachmentSequence,
       layers: rendered.layers, objects: rendered.objects, issues: rendered.issues,

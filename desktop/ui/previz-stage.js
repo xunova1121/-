@@ -21,6 +21,7 @@ export function normalizeStage(stage = {}) {
   stage.lights ||= [];
   stage.keyframes ||= [];
   stage.motionEasing = ['linear', 'easeInOut', 'easeIn', 'easeOut'].includes(stage.motionEasing) ? stage.motionEasing : 'easeInOut';
+  stage.pathInterpolation = ['linear', 'smooth'].includes(stage.pathInterpolation) ? stage.pathInterpolation : 'linear';
   const used = new Set();
   const normalize = (kind, item, defaults = {}) => {
     for (const [key, value] of Object.entries(defaults)) {
@@ -223,7 +224,37 @@ export function addKeyframe(stage, frame, objectIds = []) {
   return key;
 }
 
-/** 在两个关键帧之间线性求值，供时间轴预览和控制图序列共用。 */
+function eased(rawT, mode) {
+  return mode === 'easeInOut' ? rawT * rawT * (3 - 2 * rawT)
+    : mode === 'easeIn' ? rawT * rawT
+      : mode === 'easeOut' ? 1 - (1 - rawT) * (1 - rawT) : rawT;
+}
+
+/** Catmull-Rom 曲线。端点重复，确保首尾严格落在关键帧上。 */
+function catmull(p0, p1, p2, p3, t) {
+  const t2 = t * t, t3 = t2 * t;
+  return .5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2
+    + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+}
+
+function curveValue(track, index, id, key, t, fallback) {
+  const read = (at, otherwise) => {
+    const value = Number(track[Math.max(0, Math.min(track.length - 1, at))]?.values?.[id]?.[key]);
+    return Number.isFinite(value) ? value : otherwise;
+  };
+  const p1 = read(index, Number(fallback) || 0);
+  const p2 = read(index + 1, p1);
+  const p0 = read(index - 1, p1);
+  const p3 = read(index + 2, p2);
+  return catmull(p0, p1, p2, p3, t);
+}
+
+/**
+ * 按对象自己的关键帧轨道求值，供时间轴预览、真实 WebGL 逐帧和控制图共用。
+ *
+ * 不能拿“全场最近关键帧”给每个对象插值：摄影机在 24f 打了一帧，不代表人物
+ * 也在 24f 打了帧。混用会让人物先朝当前舞台位置漂一下，再突然回到自己的轨迹。
+ */
 export function frameState(stage, frame) {
   normalizeStage(stage);
   const keys = (stage.keyframes || []).slice().sort((a, b) => a.frame - b.frame);
@@ -232,22 +263,40 @@ export function frameState(stage, frame) {
   const right = keys.find((x) => x.frame >= f) || keys.at(-1);
   const span = Math.max(1, Number(right?.frame || 0) - Number(left?.frame || 0));
   const rawT = left && right ? Math.max(0, Math.min(1, (f - left.frame) / span)) : 0;
-  const t = stage.motionEasing === 'easeInOut' ? rawT * rawT * (3 - 2 * rawT)
-    : stage.motionEasing === 'easeIn' ? rawT * rawT
-      : stage.motionEasing === 'easeOut' ? 1 - (1 - rawT) * (1 - rawT) : rawT;
+  const t = eased(rawT, stage.motionEasing);
   const values = {};
   for (const { item } of stageObjects(stage)) {
-    const a = left?.values?.[item.id] || item;
-    const b = right?.values?.[item.id] || a;
+    const track = keys.filter((key) => key.values?.[item.id]);
+    if (!track.length) { values[item.id] = { ...item }; continue; }
+    let leftIndex = 0;
+    for (let i = 0; i < track.length; i += 1) if (track[i].frame <= f) leftIndex = i;
+    if (f < track[0].frame) leftIndex = 0;
+    const rightIndex = f <= track[0].frame ? 0 : Math.min(track.length - 1, leftIndex + (track[leftIndex].frame < f ? 1 : 0));
+    const objectLeft = track[leftIndex], objectRight = track[rightIndex];
+    const objectSpan = Math.max(1, Number(objectRight.frame) - Number(objectLeft.frame));
+    const objectRawT = leftIndex === rightIndex ? 0 : Math.max(0, Math.min(1, (f - objectLeft.frame) / objectSpan));
+    const objectT = eased(objectRawT, stage.motionEasing);
+    const a = objectLeft.values[item.id];
+    const b = objectRight.values[item.id] || a;
     const out = { ...item };
     for (const key of ['x', 'y', 'elevation', 'height', 'rotation', 'rotationX', 'rotationZ', 'scale', 'scaleX', 'scaleY', 'scaleZ', 'textureInset', 'lens', 'aperture', 'focusDistance', 'shutterAngle', 'iso', 'intensity']) {
       const av = Number(a[key]), bv = Number(b[key]);
-      if (Number.isFinite(av) && Number.isFinite(bv)) out[key] = Number((av + (bv - av) * t).toFixed(4));
+      if (!Number.isFinite(av) || !Number.isFinite(bv)) continue;
+      const spatial = ['x', 'y', 'elevation', 'height'].includes(key);
+      const value = stage.pathInterpolation === 'smooth' && spatial && leftIndex !== rightIndex
+        ? curveValue(track, leftIndex, item.id, key, objectT, av)
+        : av + (bv - av) * objectT;
+      out[key] = Number(value.toFixed(4));
     }
-    out.move = { ...((t < .5 ? a.move : b.move) || item.move || {}) };
-    for (const key of ['focusId', 'pose', 'action', 'animationName', 'textureView', 'textureGrid', 'autoOrient', 'lightType', 'color', 'targetId']) out[key] = (rawT < .5 ? a[key] : b[key]) ?? item[key];
-    if (item.autoOrient !== false && stage.subjects.includes(item)) {
-      const dx = Number(b.x || 0) - Number(a.x || 0), dy = Number(b.y || 0) - Number(a.y || 0);
+    out.move = { ...((objectT < .5 ? a.move : b.move) || item.move || {}) };
+    for (const key of ['focusId', 'pose', 'action', 'animationName', 'textureView', 'textureGrid', 'autoOrient', 'lightType', 'color', 'targetId']) out[key] = (objectRawT < .5 ? a[key] : b[key]) ?? item[key];
+    if (out.autoOrient !== false && stage.subjects.includes(item)) {
+      let dx = Number(b.x || 0) - Number(a.x || 0), dy = Number(b.y || 0) - Number(a.y || 0);
+      if (stage.pathInterpolation === 'smooth' && leftIndex !== rightIndex) {
+        const before = Math.max(0, objectT - .01), after = Math.min(1, objectT + .01);
+        dx = curveValue(track, leftIndex, item.id, 'x', after, a.x) - curveValue(track, leftIndex, item.id, 'x', before, a.x);
+        dy = curveValue(track, leftIndex, item.id, 'y', after, a.y) - curveValue(track, leftIndex, item.id, 'y', before, a.y);
+      }
       if (Math.hypot(dx, dy) > .001) out.rotation = Number((Math.atan2(dx, dy) * 180 / Math.PI).toFixed(4));
     }
     values[item.id] = out;

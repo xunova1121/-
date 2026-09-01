@@ -734,9 +734,11 @@ export function director3dCanvas(stage, {
       Number(value.y || 0)
     ));
     if (points.length < 2) return;
-    const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
+    const guidePoints = stage.pathInterpolation === 'smooth'
+      ? new THREE.CatmullRomCurve3(points, false, 'catmullrom', .5).getPoints(Math.max(16, points.length * 12))
+      : points;
     const color = kind === 'camera' ? 0x49c8ff : kind === 'light' ? 0xffd08a : kind === 'subject' ? 0xffb648 : 0xaab7c7;
-    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(Math.max(16, points.length * 12))), new THREE.LineDashedMaterial({ color, dashSize:.18, gapSize:.1, transparent:true, opacity:.85 }));
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(guidePoints), new THREE.LineDashedMaterial({ color, dashSize:.18, gapSize:.1, transparent:true, opacity:.85 }));
     line.computeLineDistances(); scene3d.add(line); guides.push(line);
     for (let index = 0; index < points.length; index += 1) {
       const point = points[index], entry = keyed[index];
@@ -970,6 +972,7 @@ export const LENSES = [24, 35, 50, 85, 135];
 export function blankStage(names = []) {
   const list = (names.length ? names : ['主体']).slice(0, 4);
   return normalizeStage({
+    pathInterpolation: 'smooth',
     cam: { x: 0, y: -3, height: 1.6, lens: 35, move: {} },
     subjects: list.map((name, i) => ({
       name,
@@ -1451,6 +1454,18 @@ export function previzPanel(stage, {
     }
     controls.append(easingRow);
 
+    const pathRow = document.createElement('div');
+    pathRow.className = 'previz-row';
+    pathRow.append(Object.assign(document.createElement('span'), { className: 'previz-cap', textContent: '路径形状' }));
+    for (const [value, label] of [['smooth', '平滑曲线'], ['linear', '直线折点']]) {
+      pathRow.append(btn(label, stage.pathInterpolation === value, () => { stage.pathInterpolation = value; }));
+    }
+    pathRow.append(Object.assign(document.createElement('span'), {
+      className: 'field-hint',
+      textContent: stage.pathInterpolation === 'smooth' ? '人物与机位沿曲线过弯，实际导出与舞台轨迹一致' : '逐段直线移动，适合机械位移和精确走位'
+    }));
+    controls.append(pathRow);
+
     const focusRow = document.createElement('div');
     focusRow.className = 'previz-row';
     focusRow.append(Object.assign(document.createElement('span'), { className: 'previz-cap', textContent: '焦点/景深' }));
@@ -1732,4 +1747,3 @@ export function previzPanel(stage, {
   workbench.append(assetShelf, center, right); host.append(workbench);
   return { node: host, refresh };
 }
-
