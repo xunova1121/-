@@ -118,6 +118,24 @@ export function shotQualityReport(shot = {}, { previous = null } = {}) {
     motion_quality_score: motionScore, score, confidence: scores.length / 3, errors, decision, repair };
 }
 
+/** 把质量证据变成可执行、但不自动扣费的修复路线。 */
+export function repairRoute(report = {}) {
+  const errors = report.errors || [];
+  if (errors.some((item) => /接缝未锁住|相差|换手/.test(item))) {
+    return { route: 'keyframe-rollback', label: '回退预演关键帧重出', requiresApproval: true,
+      steps: ['对齐上一镜末帧与下一镜首帧', '保留人物/道具/灯光控制包', '确认费用后重出下一镜视频'] };
+  }
+  if (errors.some((item) => /首帧未承接/.test(item))) {
+    return { route: 'video-regenerate', label: '强化首帧参考重出视频', requiresApproval: true,
+      steps: ['保留当前分镜图与设定集引用', '提高首帧/多帧参考优先级', '确认费用后重出当前镜'] };
+  }
+  if (report.decision === 'review') {
+    return { route: 'manual-review', label: '人工审核后决定', requiresApproval: false,
+      steps: ['查看首、中、尾帧', '确认人物、动作和场景是否可接受', '必要时选择重出或插入过渡镜'] };
+  }
+  return { route: 'pass', label: '进入人工审片', requiresApproval: false, steps: ['保留当前版本', '继续下一镜或成片合成'] };
+}
+
 /**
  * 一致性分数还作数吗。
  *
@@ -410,8 +428,9 @@ export function audit(project, { lintResults = [], threshold = 75 } = {}) {
 
   // 排序：先按严重程度，同档保持发现顺序（那个顺序本身是有意义的：产物 → 一致性 → 文字）
   items.sort((a, b) => LEVELS.indexOf(a.level) - LEVELS.indexOf(b.level));
+  const shotQualityReports = shots.map((shot, index) => shotQualityReport(shot, { previous: shots[index - 1] || null }));
   return { score, verdict, items, counts, retryCandidates: retryCandidates(shots),
-    shotQualityReports: shots.map((shot, index) => shotQualityReport(shot, { previous: shots[index - 1] || null })) };
+    shotQualityReports: shotQualityReports.map((report) => ({ ...report, repairRoute: repairRoute(report) })) };
 }
 
 export const VERDICT_LABELS = {
