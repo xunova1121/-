@@ -3406,9 +3406,13 @@ export default {
               r.retryCandidates?.length
                 ? h('div', { class: 'notice warn', style: 'margin-top:10px' },
                   h('b', {}, `建议优先重做 ${r.retryCandidates.length} 镜`),
-                  ...r.retryCandidates.slice(0, 8).map((candidate) => h('p', { style: 'margin:6px 0' },
-                    h('span', { class: `badge ${candidate.severity === 'high' ? 'warn' : ''}` }, candidate.severity === 'high' ? '高风险' : '建议复核'),
-                    ` 第 ${candidate.index} 镜：${candidate.reasons.join('；')}`)),
+                  ...r.retryCandidates.slice(0, 8).map((candidate) => {
+                    const report = (r.shotQualityReports || []).find((item) => item.shotId === candidate.shotId);
+                    return h('p', { style: 'margin:6px 0' },
+                      h('span', { class: `badge ${candidate.severity === 'high' ? 'warn' : ''}` }, candidate.severity === 'high' ? '高风险' : '建议复核'),
+                      ` 第 ${candidate.index} 镜：${candidate.reasons.join('；')}`,
+                      report?.repairRoute ? h('span', { class: 'field-hint', style: 'display:block;margin-top:2px' }, `→ ${report.repairRoute.label}`) : null);
+                  }),
                   h('span', { class: 'field-hint', style: 'display:block' }, '这是重做候选，不会自动扣费；可在对应分镜卡点击“重出视频”。'))
                 : null));
         }).catch(() => { /* 体检拉不到不该把成片页弄坏 */ });
