@@ -26558,6 +26558,200 @@ react/cjs/react-jsx-runtime.development.js:
 .real-gis-overlay .target-core{animation:rdBlink 1.15s ease-in-out infinite!important}
 @keyframes rdBlink{0%,42%{opacity:1}58%,100%{opacity:.15}}
 @media(prefers-reduced-motion:reduce){.real-gis-overlay .target-core{animation:none!important}}
+
+/* ===== 江苏渔业智慧平台 · 一张图 ===== */
+/* 隔离页面自身的全局元素样式。必须用 :where() 把特指度压到 0，
+   否则 .om-wrap div（0,1,1）会盖过下面所有单类名规则（0,1,0）。 */
+.om-wrap *,.om-wrap *:before,.om-wrap *:after{box-sizing:border-box}
+:where(.om-wrap) :where(div,span,b,em,i,u,small,p,button){
+  margin:0;padding:0;border:0;background:none;font:inherit;color:inherit;text-decoration:none;
+  letter-spacing:normal;line-height:normal;box-shadow:none;border-radius:0;
+  width:auto;height:auto;text-align:left}
+.om-wrap{position:fixed;inset:0;z-index:120;overflow:auto;
+  background:#04121f radial-gradient(120% 90% at 50% 0,#0a3355 0,#06223a 42%,#03101c 100%);
+  font-family:"Microsoft YaHei","PingFang SC","Source Han Sans SC",Arial,sans-serif;
+  color:#d6e8f2;transition:opacity .3s ease,transform .3s ease}
+.om-wrap.om-out{opacity:0;transform:scale(1.015);pointer-events:none}
+.om-root{height:100%;display:flex;flex-direction:column;gap:10px;padding:14px 16px 12px;
+  min-width:1120px}
+.om-wrap:before{content:"";position:fixed;inset:0;pointer-events:none;
+  background:linear-gradient(#1d6f9410 1px,transparent 1px),linear-gradient(90deg,#1d6f9410 1px,transparent 1px);
+  background-size:56px 56px}
+
+/* 顶栏 */
+.om-head{display:flex;align-items:center;gap:14px;padding:0 4px 12px;
+  border-bottom:1px solid #1b4a68;position:relative}
+.om-logo{width:40px;height:40px;border-radius:8px;flex:none;display:grid;place-items:center;
+  background:linear-gradient(135deg,#1877b5,#12a5b8);color:#fff;font-size:19px;font-weight:700;
+  box-shadow:0 6px 18px #0b6f9a55}
+.om-h1{font-size:21px;letter-spacing:1.5px;color:#eaf7ff;font-weight:700;line-height:1.2}
+.om-sub{margin-top:4px;font-size:11px;color:#7ea8bf;letter-spacing:.5px}
+.om-live{margin-left:auto;display:flex;align-items:center;font-size:11px;color:#8fb6c9}
+.om-live i{width:7px;height:7px;border-radius:50%;background:#3ddba0;box-shadow:0 0 9px #3ddba0;
+  margin-right:8px;animation:omPulse 1.4s infinite}
+.om-live b{color:#dff6ff;font-weight:600}
+.om-enter{margin-left:16px;height:38px;padding:0 20px;border:1px solid #2fa8c8;border-radius:6px;
+  background:linear-gradient(135deg,#1580bd,#13a2b4);color:#fff;font-family:inherit;font-size:13px;
+  font-weight:700;letter-spacing:1px;cursor:pointer;display:flex;align-items:center;gap:9px;
+  box-shadow:0 8px 22px #0b6f9a4d;transition:transform .15s,box-shadow .15s}
+.om-enter span{transition:transform .18s}
+.om-enter:hover{transform:translateY(-1px);box-shadow:0 12px 26px #0b6f9a70}
+.om-enter:hover span{transform:translateX(4px)}
+
+/* 核心指标 */
+.om-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.om-kpi{position:relative;padding:11px 13px;border:1px solid #1e5372;border-radius:6px;
+  background:linear-gradient(135deg,#0e304c,#0a2437);overflow:hidden}
+.om-kpi:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--c,#2f9fd0)}
+.om-kpi.blue{--c:#3f9fe0}.om-kpi.cyan{--c:#2fd0e0}.om-kpi.orange{--c:#f2a94c}
+.om-kpi.green{--c:#3ddba0}.om-kpi.purple{--c:#9a8ff0}
+.om-kpi span{display:block;font-size:11px;color:#89aec2}
+.om-kpi b{display:block;margin:4px 0 3px;font-size:25px;font-weight:700;color:#eaf7ff;line-height:1.1}
+.om-kpi b em{font-style:normal;font-size:12px;color:#7fb0c6;margin-left:4px;font-weight:400}
+.om-kpi small{font-size:10px;color:#6f96aa}
+
+/* 主体三栏 */
+.om-body{flex:1;display:grid;grid-template-columns:288px 1fr 300px;
+  grid-template-rows:minmax(0,1fr);gap:10px;min-height:0}
+.om-left,.om-right,.om-mid{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
+.om-box{border:1px solid #1e5372;border-radius:6px;background:#0b2740cc;padding:11px 12px}
+.om-box.om-grow,.om-box.om-full{flex:1;display:flex;flex-direction:column;min-height:0}
+.om-h3{margin:0 0 10px;font-size:12px;font-weight:700;color:#e2f4ff;letter-spacing:1px;
+  display:flex;align-items:center;gap:8px}
+.om-h3:before{content:"";width:3px;height:12px;border-radius:2px;background:#2fa8c8}
+.om-h3 span{margin-left:auto;font-size:10px;font-weight:400;color:#7ea8bf;letter-spacing:0}
+
+/* 六防 */
+.om-def{display:flex;flex-direction:column;gap:6px}
+.om-d{display:flex;align-items:center;gap:9px;padding:6px 8px;border:1px solid #1a4661;
+  border-radius:4px;background:#0a2237}
+.om-d i{width:26px;height:26px;border-radius:6px;flex:none;display:grid;place-items:center;
+  font-style:normal;font-size:12px;font-weight:700}
+.om-d.red i{background:#4a1d26;color:#ff7b84}.om-d.orange i{background:#4a3418;color:#f7b95e}
+.om-d.green i{background:#14402f;color:#4bd9a4}
+.om-d b{display:block;font-size:11px;color:#dceef8}
+.om-d small{display:block;font-size:9.5px;color:#7396a9;margin-top:2px}
+.om-d em{margin-left:auto;font-style:normal;font-size:10px;color:#9dc4d6}
+.om-d.red em{color:#ff8f97}.om-d.orange em{color:#f7c078}.om-d.green em{color:#4bd9a4}
+
+/* 告警 */
+.om-alerts{display:flex;flex-direction:column;gap:5px;overflow:auto;min-height:0}
+.om-a{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:4px;background:#0a2237;
+  border:1px solid #16405a}
+.om-a i{width:3px;height:26px;border-radius:2px;flex:none}
+.om-a i.lv1{background:#ff5b63;box-shadow:0 0 8px #ff5b6355}
+.om-a i.lv2{background:#f2a94c}.om-a i.lv3{background:#3f9fe0}
+.om-a b{display:block;font-size:11px;color:#e2f2fa}
+.om-a small{display:block;font-size:9.5px;color:#7396a9;margin-top:2px}
+.om-a .om-t{margin-left:auto;font-size:10px;color:#6f96aa;font-family:Consolas,monospace}
+
+/* 九大业务能力 */
+.om-mods{flex:1;display:grid;grid-template-columns:repeat(3,1fr);
+  grid-auto-rows:minmax(0,1fr);gap:9px;min-height:0}
+.om-mod{display:flex;flex-direction:column;gap:7px;padding:11px 12px;overflow:hidden;border:1px solid #1e5372;
+  border-radius:6px;text-align:left;cursor:pointer;
+  font-family:inherit;color:inherit;transition:border-color .18s,transform .18s,box-shadow .18s}
+.om-mod{background:linear-gradient(150deg,#0e3049,#0a2336)}
+.om-mod:hover{border-color:#38b4d4;transform:translateY(-2px);box-shadow:0 10px 24px #0007}
+.om-mod:hover u{opacity:1;transform:translateX(0)}
+.om-mod-h{display:flex;align-items:center;gap:9px}
+.om-mod-h i{width:28px;height:28px;border-radius:7px;flex:none;display:grid;place-items:center;
+  background:#12455f;color:#4fd2e6;font-style:normal;font-size:14px}
+.om-mod-h b{font-size:13px;color:#eaf7ff;letter-spacing:.5px}
+.om-mod-h u{margin-left:auto;text-decoration:none;font-size:10px;color:#4fd2e6;opacity:0;
+  transform:translateX(-4px);transition:opacity .18s,transform .18s}
+.om-mod p{margin:0;font-size:10px;color:#7ea8bf;line-height:1.6}
+.om-mod-m{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:auto}
+.om-mod-f{margin-bottom:2px}
+.om-mod-m div{padding:6px 8px;border-radius:4px;background:#08283d;border:1px solid #16405a}
+.om-mod-m span{display:block;font-size:9.5px;color:#7396a9}
+.om-mod-m b{display:block;margin-top:3px;font-size:13px;color:#5fd8ec;font-weight:700}
+.om-mod-f{display:flex;flex-wrap:wrap;gap:4px}
+.om-mod-f span{padding:2px 6px;border:1px solid #1d4e69;border-radius:3px;background:#0a2740;
+  color:#7fa9be;font-size:9px;white-space:nowrap}
+
+/* 平台能力架构 */
+.om-run{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.om-run div{padding:6px 8px;border:1px solid #16405a;border-radius:4px;background:#0a2237}
+.om-run span{display:block;font-size:9.5px;color:#7396a9}
+.om-run b{display:block;margin-top:3px;font-size:14px;color:#5fd8ec;font-weight:700}
+.om-arch{flex:1;display:flex;flex-direction:column;justify-content:center;gap:0;
+  min-height:0;overflow:hidden}
+.om-layer{padding:10px 11px;border:1px solid #23617f;border-radius:5px;
+  background:linear-gradient(135deg,#103a58,#0a2740)}
+.om-layer:nth-child(1){border-color:#2fa8c8;background:linear-gradient(135deg,#12506f,#0c3450)}
+.om-layer-h{display:flex;align-items:center;gap:8px}
+.om-layer-h b{font-size:12px;color:#eaf7ff;letter-spacing:1px}
+.om-layer-h em{margin-left:auto;font-style:normal;font-size:11px;color:#5fd8ec;font-weight:700}
+.om-layer p{margin:5px 0 0;font-size:9.5px;color:#7ea8bf;line-height:1.6}
+.om-flow{height:22px;display:grid;place-items:center;position:relative}
+.om-flow:before{content:"";position:absolute;top:0;bottom:0;width:1px;
+  background:repeating-linear-gradient(#2b7fa0 0 4px,transparent 4px 8px)}
+.om-flow i{position:absolute;width:5px;height:5px;border-radius:50%;background:#5fd8ec;
+  box-shadow:0 0 8px #5fd8ec;animation:omFlow 1.8s linear infinite}
+
+/* 底栏 */
+.om-foot{display:flex;align-items:center;gap:22px;padding:9px 12px;border:1px solid #1b4a68;
+  border-radius:6px;background:#0a2337cc}
+.om-foot>div{display:flex;align-items:center;gap:7px;font-size:10px;color:#7396a9}
+.om-foot b{color:#c9e6f4;font-weight:600}
+.om-foot-hint{margin-left:auto;font-size:10px;color:#5d829a}
+
+/* 返回按钮 */
+.om-back{position:fixed;z-index:70;right:14px;bottom:14px;height:32px;padding:0 14px;
+  border:1px solid #2a6c88;border-radius:6px;background:#08243acc;backdrop-filter:blur(4px);
+  color:#9dd2e6;font-family:"Microsoft YaHei","PingFang SC",Arial,sans-serif;font-size:11px;
+  cursor:pointer;display:flex;align-items:center;gap:7px;box-shadow:0 6px 18px #0006}
+.om-back span{transition:transform .18s}
+.om-back:hover{border-color:#48b8d8;color:#dff6ff}
+.om-back:hover span{transform:translateX(-3px)}
+
+@keyframes omPulse{50%{opacity:.4}}
+@keyframes omFlow{0%{top:100%;opacity:0}20%{opacity:1}80%{opacity:1}100%{top:-4px;opacity:0}}
+@media(max-width:1400px){
+  .om-body{grid-template-columns:250px 1fr 260px}
+  .om-mod-f span:nth-child(3){display:none}
+}
+@media(prefers-reduced-motion:reduce){
+  .om-live i,.om-flow i{animation:none}
+  .om-wrap,.om-enter,.om-mod{transition:none}
+}
+
+/* 矮屏（1366×768 这类笔记本）压缩到一屏，一张图不该出现滚动条 */
+@media(max-height:830px){
+  .om-root{padding:8px 12px 7px;gap:7px}
+  .om-head{padding-bottom:9px}
+  .om-logo{width:34px;height:34px;font-size:16px}
+  .om-h1{font-size:18px}.om-sub{font-size:10px;margin-top:3px}
+  .om-enter{height:33px;padding:0 16px;font-size:12px}
+  .om-kpis{gap:8px}
+  .om-kpi{padding:8px 11px}
+  .om-kpi b{font-size:20px;margin:3px 0 2px}
+  .om-kpi span{font-size:10px}.om-kpi small{font-size:9px}
+  .om-body{gap:8px}
+  .om-box{padding:9px 10px}
+  .om-h3{margin-bottom:7px;font-size:11px}
+  .om-def{gap:4px}
+  .om-d{padding:4px 7px}.om-d i{width:22px;height:22px;font-size:11px}
+  .om-d small{font-size:9px}
+  .om-alerts{gap:4px}
+  .om-a{padding:5px 7px}.om-a i{height:22px}
+  .om-mods{gap:7px}
+  .om-mod{padding:8px 10px;gap:5px}
+  .om-mod-h i{width:24px;height:24px;font-size:12px}
+  .om-mod-h b{font-size:12px}
+  .om-mod p{font-size:9.5px;line-height:1.5}
+  .om-mod-m{gap:6px}
+  .om-mod-m div{padding:5px 7px}
+  .om-mod-m b{font-size:12px}
+  .om-mod-f span{padding:1px 5px;font-size:8.5px}
+  .om-mod-f span:nth-child(n+3){display:none}
+  .om-run{gap:5px}.om-run div{padding:5px 7px}.om-run b{font-size:12px}
+  .om-layer{padding:7px 9px}
+  .om-layer-h b{font-size:11px}.om-layer p{font-size:9px;margin-top:4px}
+  .om-flow{height:14px}
+  .om-foot{padding:6px 11px;gap:16px}
+}
 </style>
 <script id="fishery-radar-script">
 (function(){
@@ -27038,5 +27232,217 @@ new MutationObserver(function(){
   else if(map&&!map.querySelector('.rd-viewtabs')) rdMount();
 }).observe(document.documentElement,{childList:true,subtree:true});
 rdMount(); setTimeout(rdMount,400); setTimeout(rdMount,1300);
+
+/* ================= 江苏渔业智慧平台 · 一张图 =================
+   平台级总览：核心指标 + 六防态势 + 九大业务能力 + 平台能力架构。
+   所有数字取自 demo 后端的 ModuleWorkspace.data 与 page.tsx，未另造数据。
+   右上角「进入工作区」进入 demo；业务卡片可直接进对应模块。 */
+var OM = {
+  kpi: [
+    ["接入渔船","3,268","艘","目标 3,200","blue"],
+    ["海上作业","2,146","艘","65.7% 在航","cyan"],
+    ["今日预警","38","条","6 条待处置","orange"],
+    ["设备在线率","98.7","%","较昨日 +0.3%","green"],
+    ["链路平均时延","386","ms","卫星 / 5G 自适应","purple"]
+  ],
+  defense: [
+    ["防大风","风",3,"阵风 9 级","orange"], ["防碰撞","撞",2,"CPA < 0.5nm","red"],
+    ["防侧翻","倾",1,"横倾 18.6°","red"],  ["防漏水","水",1,"舱底高水位","orange"],
+    ["防火灾","火",0,"烟温正常","green"],  ["防中毒","气",1,"CO 32ppm","orange"]
+  ],
+  alerts: [
+    ["紧急","疑似脱编","苏盐渔 05168","射阳港东南 42 海里","09:17"],
+    ["紧急","驾驶舱离岗 7 分钟","苏连渔 01832","燕尾港东北 28 海里","09:03"],
+    ["重要","商渔碰撞风险","苏通渔 03277","吕四港外航道","08:41"],
+    ["重要","船员配员不符","苏盐渔 07215","滨海港出港口","08:28"],
+    ["提示","卫星链路波动","苏连渔 02690","前三岛东 61 海里","07:56"]
+  ],
+  /* 九大业务能力：指标取自各模块 metrics 首两项 */
+  modules: [
+    { n:"综合态势", i:"◈", d:"六防监管一张图 · 位置/视频/姿态/环境/告警/执法联动",
+      m:[["接入渔船","3,268 艘"],["海上作业","2,146 艘"]],
+      f:["雷达 + 双光谱协同","编组“226”校验","电子围栏与禁捕区"] },
+    { n:"智能预警", i:"△", d:"六防 AI 预警 · 自动派单 · 闭环处置",
+      m:[["今日预警","38 条"],["平均响应","46 秒"]],
+      f:["视频行为识别","六防传感器融合","法规规则匹配"] },
+    { n:"视频监控", i:"▣", d:"船端 4-8 路 · AI 感知压缩 · 时空水印取证",
+      m:[["视频在线","12,704"],["AI 分析通道","8,432"]],
+      f:["离岗/救生衣/烟火识别","船端30天·平台90天","截图录像哈希固证"] },
+    { n:"港航监管", i:"⌘", d:"进出港报告核验 · 红黄绿码 · 最低配员",
+      m:[["今日出港","186 艘"],["电子围栏","36 处"]],
+      f:["渔船码 绿3118/黄126/红24","船员证书到期预警","18 港区 AI 抓拍"] },
+    { n:"执法办案", i:"▤", d:"线上核查—证据固定—线下处置闭环",
+      m:[["在办案件","47 件"],["电子证据","318 份"]],
+      f:["时间戳+GPS+视频哈希","电子检查单与签名","跨部门线索移交"] },
+    { n:"应急指挥", i:"✣", d:"多方会商 · 力量调度 · 求救响应",
+      m:[["应急事件","3 起"],["指令时延","18 秒"]],
+      f:["12 席位 3 部门在线","执法船8·编组互助12","台风/海浪/风暴潮"] },
+    { n:"数据研判", i:"⌁", d:"风险趋势 · 专题研判 · 数据交换",
+      m:[["数据总量","18.6 TB"],["轨迹记录","4.7 亿"]],
+      f:["违规高发海域热力","异常停留关联分析","接口 13 类 99.6%"] },
+    { n:"设备运维", i:"⚙", d:"船载终端实时运维 · 远程诊断与升级",
+      m:[["终端在线","98.7%"],["待处理故障","43 个"]],
+      f:["远程升级成功率99.2%","备件 终端32/摄像头86","响应<60分 恢复<4h"] },
+    { n:"共享流量池", i:"◉", d:"卫星 / 5G 自适应调度 · 费用管控",
+      m:[["本月用量","96.4 TB"],["异常用量","8 艘"]],
+      f:["近岸5G 远海卫星","应急任务不限额","闲时断点续传"] }
+  ],
+  /* 运行概览：page.tsx 下半部分与各模块 summary */
+  run: [
+    ["当前编组","842"], ["编组渔船","2,387"], ["异常脱编","6"],
+    ["配员合规率","96.8%"], ["视频在线","12,704 路"], ["电子围栏","36 处"]
+  ],
+  /* 平台能力架构：自下而上 */
+  arch: [
+    { n:"应用层", c:"九大业务应用 · 省市县三级贯通", v:"9 大模块" },
+    { n:"数据层", c:"结构化180天 · 视频90天 · 苏渔安/海事/气象/自然资源", v:"18.6 TB" },
+    { n:"网络层", c:"卫星 42.7TB · 5G 53.7TB · 共享流量池调度", v:"386 ms" },
+    { n:"感知层", c:"船载终端 · 摄像头 · 六防传感器 · 渔港 AI 抓拍", v:"3,268 终端" }
+  ],
+  foot: [
+    ["信创环境","麒麟 OS · 达梦数据库"],
+    ["平台可用率","99.98%"],
+    ["数据刷新","每 60 秒"],
+    ["接口交换","13 类 · 成功率 99.6%"]
+  ]
+};
+
+function omEsc(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                  .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function omMarkup(){
+  var s='<div class="om-root">';
+  /* 顶栏 */
+  s+='<div class="om-head">'
+    +'<div class="om-logo">苏</div>'
+    +'<div class="om-title"><div class="om-h1">江苏渔业智慧平台 · 一张图</div>'
+      +'<div class="om-sub">海洋渔船“宽带入海” · 省级监管驾驶舱 · 感知 / 网络 / 数据 / 应用全链路</div></div>'
+    +'<div class="om-live"><i></i>全省数据实时接入　<b>2026-08-25 09:26</b></div>'
+    +'<button type="button" class="om-enter" data-om="enter">进入工作区 <span>→</span></button>'
+  +'</div>';
+
+  /* 核心指标条 */
+  s+='<div class="om-kpis">';
+  OM.kpi.forEach(function(k){
+    s+='<div class="om-kpi '+k[4]+'"><span>'+omEsc(k[0])+'</span>'
+      +'<b>'+omEsc(k[1])+'<em>'+omEsc(k[2])+'</em></b>'
+      +'<small>'+omEsc(k[3])+'</small></div>';
+  });
+  s+='</div>';
+
+  s+='<div class="om-body">';
+
+  /* 左栏：六防态势 + 实时告警 */
+  s+='<div class="om-left">';
+  s+='<div class="om-box"><div class="om-h3">六防态势<span>8 项风险</span></div><div class="om-def">';
+  OM.defense.forEach(function(d){
+    s+='<div class="om-d '+d[4]+'"><i>'+omEsc(d[1])+'</i>'
+      +'<div><b>'+omEsc(d[0])+'</b><small>'+omEsc(d[3])+'</small></div>'
+      +'<em>'+(d[2]?d[2]+' 艘':'正常')+'</em></div>';
+  });
+  s+='</div></div>';
+  s+='<div class="om-box om-grow"><div class="om-h3">实时告警<span>6 条待处置</span></div><div class="om-alerts">';
+  OM.alerts.forEach(function(a){
+    s+='<div class="om-a"><i class="'+(a[0]==='紧急'?'lv1':a[0]==='重要'?'lv2':'lv3')+'"></i>'
+      +'<div><b>'+omEsc(a[1])+'</b><small>'+omEsc(a[2])+' · '+omEsc(a[3])+'</small></div>'
+      +'<span class="om-t">'+omEsc(a[4])+'</span></div>';
+  });
+  s+='</div></div></div>';
+
+  /* 中栏：九大业务能力 */
+  s+='<div class="om-mid"><div class="om-box om-full">'
+    +'<div class="om-h3">九大业务能力<span>点击卡片直接进入对应工作区</span></div>'
+    +'<div class="om-mods">';
+  OM.modules.forEach(function(m){
+    s+='<button type="button" class="om-mod" data-om="mod" data-mod="'+omEsc(m.n)+'">'
+      +'<div class="om-mod-h"><i>'+omEsc(m.i)+'</i><b>'+omEsc(m.n)+'</b><u>进入 →</u></div>'
+      +'<p>'+omEsc(m.d)+'</p>'
+      +'<div class="om-mod-f">'
+        + m.f.map(function(x){ return '<span>'+omEsc(x)+'</span>'; }).join('')
+      +'</div>'
+      +'<div class="om-mod-m">'
+        + m.m.map(function(x){ return '<div><span>'+omEsc(x[0])+'</span><b>'+omEsc(x[1])+'</b></div>'; }).join('')
+      +'</div></button>';
+  });
+  s+='</div></div></div>';
+
+  /* 右栏：平台能力架构 */
+  s+='<div class="om-right">';
+  s+='<div class="om-box"><div class="om-h3">运行概览<span>全省实时</span></div><div class="om-run">';
+  OM.run.forEach(function(r){
+    s+='<div><span>'+omEsc(r[0])+'</span><b>'+omEsc(r[1])+'</b></div>';
+  });
+  s+='</div></div>';
+  s+='<div class="om-box om-full">'
+    +'<div class="om-h3">平台能力架构<span>自下而上贯通</span></div><div class="om-arch">';
+  OM.arch.forEach(function(a,i){
+    s+='<div class="om-layer" style="--i:'+i+'"><div class="om-layer-h"><b>'+omEsc(a.n)+'</b>'
+      +'<em>'+omEsc(a.v)+'</em></div><p>'+omEsc(a.c)+'</p></div>';
+    if(i<OM.arch.length-1) s+='<div class="om-flow"><i style="animation-delay:'+(i*0.3).toFixed(1)+'s"></i></div>';
+  });
+  s+='</div></div></div>';
+
+  s+='</div>';   /* /om-body */
+
+  /* 底栏 */
+  s+='<div class="om-foot">';
+  OM.foot.forEach(function(f){ s+='<div><span>'+omEsc(f[0])+'</span><b>'+omEsc(f[1])+'</b></div>'; });
+  s+='<div class="om-foot-hint">数据来源：苏渔安 · 海事 · 气象 · 自然资源</div>';
+  s+='</div></div>';
+  return s;
+}
+
+/* ---------- 挂载与进出 ---------- */
+var omWrap=null, omBack=null;
+function omOpen(){
+  if(omWrap){ omWrap.classList.remove('om-out'); return; }
+  omWrap=document.createElement('div');
+  omWrap.className='om-wrap';
+  omWrap.innerHTML=omMarkup();
+  document.body.appendChild(omWrap);
+  omWrap.addEventListener('click',function(e){
+    var t=e.target.closest('[data-om]'); if(!t) return;
+    if(t.dataset.om==='enter') omEnter(null);
+    else if(t.dataset.om==='mod') omEnter(t.dataset.mod);
+  });
+  document.addEventListener('keydown',omKey);
+}
+function omEnter(mod){
+  if(!omWrap) return;
+  omWrap.classList.add('om-out');
+  setTimeout(function(){
+    if(omWrap){ omWrap.remove(); omWrap=null; }
+    document.removeEventListener('keydown',omKey);
+    if(mod) omGoModule(mod);
+    omBackBtn();
+  },320);
+}
+/* 进入指定模块：复用页面左侧导航，不另起一套路由 */
+function omGoModule(name){
+  var btn=[].filter.call(document.querySelectorAll('aside nav button'),function(b){
+    return b.textContent.indexOf(name)>=0;      /* 含图标与角标，取包含匹配 */
+  })[0];
+  if(btn) btn.click();
+}
+function omBackBtn(){
+  if(omBack&&document.body.contains(omBack)) return;
+  omBack=document.createElement('button');
+  omBack.type='button'; omBack.className='om-back';
+  omBack.innerHTML='<span>←</span> 平台一张图';
+  omBack.addEventListener('click',function(){
+    omBack.remove(); omBack=null; omOpen();
+  });
+  document.body.appendChild(omBack);
+}
+function omKey(e){ if(e.key==='Enter'||e.key==='Escape') omEnter(null); }
+
+/* 首屏即一张图；等 React 挂上再插，避免被首次渲染顶掉 */
+function omBoot(){
+  if(document.querySelector('.shell')) omOpen();
+  else setTimeout(omBoot,120);
+}
+omBoot();
 })();
 </script></body></html>

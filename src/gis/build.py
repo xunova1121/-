@@ -27,6 +27,10 @@ if KEEP:
 else:
     sid, jid = 'fishery-gis-style', 'fishery-gis-script'
 
+# 平台一张图：与地图模式无关，两种构建都带上
+css += '\n' + (BASE/'gis-onemap.css').read_text(encoding='utf-8')
+js  += '\n' + (BASE/'gis-onemap.js').read_text(encoding='utf-8')
+
 block = (
     '<style id="%s">\n' % sid + css.rstrip() + '\n</style>\n'
     '<script id="%s">\n(function(){\n' % jid +

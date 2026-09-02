@@ -11,6 +11,8 @@
 | `gis-data.js` | 地理数据：海岸线、长江口、岛屿、水系、湖泊、城市、禁捕区、航道、目标船、执法船艇、渔船、风场（均为 WGS84 经纬度） |
 | `gis-core.js` | 投影、Catmull-Rom 平滑、标注避让、SVG defs、底图（海陆、河湖）、城市标注 |
 | `gis-layers.js` | 禁捕区、航道、气象、航线、目标船雷达、渔船、执法船艇 |
+| `gis-onemap.js` | 平台一张图：总览数据、版面、进出工作区 |
+| `gis-onemap.css` | 平台一张图样式 |
 | `gis-radar.js` | 雷达态势视图：极坐标目标数据、雷达盘、双光通道、扫描动画 |
 | `gis-radar.css` | 雷达视图样式 |
 | `gen-channels.py` | 从页面内嵌实拍图生成两路光电通道画面 |
@@ -195,3 +197,40 @@ python3 src/gis/gen-channels.py 源单页.html
 面板固定比例（`aspect-ratio:672/347`）、`flex:0 0 auto`，右栏 `overflow-y:auto`。
 装不下就滚动，不再互相挤扁——紧凑模式下三块（可见光 / 热成像 / 锁定目标）
 共 585px，卡片高 349px，滚动查看。
+
+## 平台一张图
+
+`gis-onemap.js` / `gis-onemap.css`，两种构建模式都会带上。
+打开页面先落在这张图，右上角「进入工作区 →」进 demo，右下角「← 平台一张图」回来。
+九张业务卡片可直接进对应模块（复用页面左侧导航，不另起路由）。
+
+### 数据来源
+
+全部取自 demo 自身，没有另造数字：
+
+| 板块 | 取自 |
+| --- | --- |
+| 核心指标 5 项 | `page.tsx` 的 `Kpi` |
+| 六防态势 | `page.tsx` 的 `defenses` |
+| 实时告警 | `page.tsx` 的 `alerts` |
+| 九大业务能力 | `ModuleWorkspace.tsx` 的 `data`（metrics 取前两项，summary 转成能力标签） |
+| 运行概览 | `page.tsx` 下半部分与各模块 summary |
+| 平台能力架构 | 各模块 summary 里的链路/存储/接口口径 |
+
+### 两个坑
+
+**一、不能用语义标签。** 页面自身的 CSS 对 `header` / `aside` / `main` / `section` / `h1` / `h3`
+有**全局**规则（`aside` 是它的侧边栏、`header` 是它的顶栏），覆盖层一用这些标签就被套进去，
+版面直接崩掉。一张图内部全部用 `div` + 类名。
+
+**二、隔离样式要用 `:where()` 压特指度。** 写成 `.om-wrap div{...}` 是 (0,1,1)，
+会盖过下面所有单类名规则 (0,1,0)，等于把自己的样式全清了。
+正确写法是 `:where(.om-wrap) :where(div,span,...)`，特指度 0，任何类名规则都能覆盖。
+
+### 一屏不滚
+
+`.om-root` 必须是 `height:100%` 而不是 `min-height:100%`——后者高度仍由内容驱动，
+`flex:1` 没有可分配的余量，`.om-body` 会一直保持 min-content 高度压不下去。
+配合 `.om-body{grid-template-rows:minmax(0,1fr)}` 与
+`.om-mods{grid-auto-rows:minmax(0,1fr)}`（`1fr` 的行不会缩到 min-content 以下），
+1280×720 至 2560×1440 全部一屏无滚动条。矮屏另有 `@media(max-height:830px)` 压缩版。
