@@ -39,13 +39,13 @@
 
 /* 核心指标 */
 .om-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
-.om-kpi{position:relative;padding:11px 13px;border:1px solid #1e5372;border-radius:6px;
+.om-kpi{position:relative;padding:9px 13px;border:1px solid #1e5372;border-radius:6px;
   background:linear-gradient(135deg,#0e304c,#0a2437);overflow:hidden}
 .om-kpi:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--c,#2f9fd0)}
 .om-kpi.blue{--c:#3f9fe0}.om-kpi.cyan{--c:#2fd0e0}.om-kpi.orange{--c:#f2a94c}
 .om-kpi.green{--c:#3ddba0}.om-kpi.purple{--c:#9a8ff0}
 .om-kpi span{display:block;font-size:11px;color:#89aec2}
-.om-kpi b{display:block;margin:4px 0 3px;font-size:25px;font-weight:700;color:#eaf7ff;line-height:1.1}
+.om-kpi b{display:block;margin:3px 0 2px;font-size:23px;font-weight:700;color:#eaf7ff;line-height:1.1}
 .om-kpi b em{font-style:normal;font-size:12px;color:#7fb0c6;margin-left:4px;font-weight:400}
 .om-kpi small{font-size:10px;color:#6f96aa}
 
@@ -62,9 +62,9 @@
 
 /* 六防 */
 .om-def{display:flex;flex-direction:column;gap:6px}
-.om-d{display:flex;align-items:center;gap:9px;padding:6px 8px;border:1px solid #1a4661;
+.om-d{display:flex;align-items:center;gap:8px;padding:4px 8px;border:1px solid #1a4661;
   border-radius:4px;background:#0a2237}
-.om-d i{width:26px;height:26px;border-radius:6px;flex:none;display:grid;place-items:center;
+.om-d i{width:23px;height:23px;border-radius:5px;flex:none;display:grid;place-items:center;
   font-style:normal;font-size:12px;font-weight:700}
 .om-d.red i{background:#4a1d26;color:#ff7b84}.om-d.orange i{background:#4a3418;color:#f7b95e}
 .om-d.green i{background:#14402f;color:#4bd9a4}
@@ -74,10 +74,15 @@
 .om-d.red em{color:#ff8f97}.om-d.orange em{color:#f7c078}.om-d.green em{color:#4bd9a4}
 
 /* 告警 */
-.om-alerts{display:flex;flex-direction:column;gap:5px;overflow:auto;min-height:0}
-.om-a{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:4px;background:#0a2237;
+.om-alerts{display:flex;flex-direction:column;gap:5px;overflow-y:auto;min-height:0;
+  scrollbar-width:thin;scrollbar-color:#1d5f7c #0a2237;padding-right:3px}
+.om-alerts::-webkit-scrollbar{width:5px}
+.om-alerts::-webkit-scrollbar-track{background:#0a2237;border-radius:3px}
+.om-alerts::-webkit-scrollbar-thumb{background:#1d5f7c;border-radius:3px}
+.om-alerts::-webkit-scrollbar-thumb:hover{background:#2b86a8}
+.om-a{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:4px;background:#0a2237;
   border:1px solid #16405a}
-.om-a i{width:3px;height:26px;border-radius:2px;flex:none}
+.om-a i{width:3px;height:24px;border-radius:2px;flex:none}
 .om-a i.lv1{background:#ff5b63;box-shadow:0 0 8px #ff5b6355}
 .om-a i.lv2{background:#f2a94c}.om-a i.lv3{background:#3f9fe0}
 .om-a b{display:block;font-size:11px;color:#e2f2fa}
@@ -85,29 +90,61 @@
 .om-a .om-t{margin-left:auto;font-size:10px;color:#6f96aa;font-family:Consolas,monospace}
 
 /* 九大业务能力 */
-.om-mods{flex:1;display:grid;grid-template-columns:repeat(3,1fr);
-  grid-auto-rows:minmax(0,1fr);gap:9px;min-height:0}
-.om-mod{display:flex;flex-direction:column;gap:7px;padding:11px 12px;overflow:hidden;border:1px solid #1e5372;
+.om-modbar{flex:none}
+.om-mods{display:grid;grid-template-columns:repeat(9,1fr);gap:8px}
+.om-mod{display:flex;flex-direction:column;gap:5px;padding:8px 10px;overflow:hidden;border:1px solid #1e5372;
   border-radius:6px;text-align:left;cursor:pointer;
   font-family:inherit;color:inherit;transition:border-color .18s,transform .18s,box-shadow .18s}
 .om-mod{background:linear-gradient(150deg,#0e3049,#0a2336)}
 .om-mod:hover{border-color:#38b4d4;transform:translateY(-2px);box-shadow:0 10px 24px #0007}
-.om-mod:hover u{opacity:1;transform:translateX(0)}
 .om-mod-h{display:flex;align-items:center;gap:9px}
-.om-mod-h i{width:28px;height:28px;border-radius:7px;flex:none;display:grid;place-items:center;
+.om-mod-h i{width:25px;height:25px;border-radius:6px;flex:none;display:grid;place-items:center;
   background:#12455f;color:#4fd2e6;font-style:normal;font-size:14px}
-.om-mod-h b{font-size:13px;color:#eaf7ff;letter-spacing:.5px}
-.om-mod-h u{margin-left:auto;text-decoration:none;font-size:10px;color:#4fd2e6;opacity:0;
-  transform:translateX(-4px);transition:opacity .18s,transform .18s}
-.om-mod p{margin:0;font-size:10px;color:#7ea8bf;line-height:1.6}
-.om-mod-m{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:auto}
-.om-mod-f{margin-bottom:2px}
-.om-mod-m div{padding:6px 8px;border-radius:4px;background:#08283d;border:1px solid #16405a}
-.om-mod-m span{display:block;font-size:9.5px;color:#7396a9}
-.om-mod-m b{display:block;margin-top:3px;font-size:13px;color:#5fd8ec;font-weight:700}
+.om-mod-h b{font-size:12px;color:#eaf7ff;letter-spacing:.5px;white-space:nowrap}
+.om-mod>u{position:absolute;right:9px;top:9px;text-decoration:none;font-size:9px;color:#4fd2e6;
+  opacity:0;transition:opacity .18s;pointer-events:none}
+.om-mod{position:relative}
+.om-mod:hover>u{opacity:1}
+.om-mod p{margin:0;font-size:9px;color:#7ea8bf;line-height:1.45;
+  display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.om-mod-m{display:flex;flex-direction:column;gap:4px}
+.om-mod-m div{display:flex;align-items:baseline;gap:5px;padding:3px 7px;border-radius:4px;
+  background:#08283d;border:1px solid #16405a}
+.om-mod-m b{font-size:12px;color:#5fd8ec;font-weight:700;white-space:nowrap}
+.om-mod-m span{font-size:9px;color:#7396a9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .om-mod-f{display:flex;flex-wrap:wrap;gap:4px}
 .om-mod-f span{padding:2px 6px;border:1px solid #1d4e69;border-radius:3px;background:#0a2740;
   color:#7fa9be;font-size:9px;white-space:nowrap}
+
+/* 中部 GIS 一张图 */
+.om-mapbox{flex:1;min-height:0}
+.om-map{position:relative;flex:1;min-height:0;border-radius:4px;overflow:hidden;
+  background:#04121f;border:1px solid #16405a}
+.om-map>svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+.om-map-lg{position:absolute;left:8px;right:8px;bottom:7px;height:24px;display:flex;
+  align-items:center;gap:14px;padding:0 10px;border:1px solid #1a4a66;border-radius:4px;
+  background:#04182bdd;color:#7ba3b8;font-size:9px}
+.om-map-lg span{display:flex;align-items:center;gap:5px;white-space:nowrap}
+.om-map-lg i{width:14px;height:2px;display:inline-block;flex:none}
+.om-map-lg .dash i{background:repeating-linear-gradient(90deg,#3ee0ff 0 5px,transparent 5px 9px)}
+.om-map-lg .zn i{height:9px;border:1px dashed #2fd8f4;background:#0a779522}
+.om-map-lg .dot{width:7px;height:7px;border-radius:50%;flex:none}
+.om-map-lg em{margin-left:auto;font-style:normal;color:#4fd8b0}
+
+/* 重点功能图片 */
+.om-shotbox{flex:none}
+.om-mid>.om-mapbox{flex:1 1 auto}
+.om-shots{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}
+.om-shot{display:flex;flex-direction:column;gap:6px}
+.om-shot-img{position:relative;aspect-ratio:16/9;border-radius:4px;overflow:hidden;
+  border:1px solid #1d5f7c;background:#04121f}
+.om-shot-img img{width:100%;height:100%;object-fit:cover;display:block}
+.om-shot-img:after{content:"";position:absolute;inset:0;
+  background:linear-gradient(#0000 42%,#04182bcc)}
+.om-shot-t{position:absolute;left:8px;bottom:6px;z-index:2;color:#eaf7ff;font-size:11px;
+  font-weight:700;text-shadow:0 1px 4px #000}
+.om-shot p{margin:0;font-size:9px;color:#7ea8bf;line-height:1.5;
+  display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
 
 /* 平台能力架构 */
 .om-run{display:grid;grid-template-columns:1fr 1fr;gap:6px}
@@ -175,16 +212,22 @@
   .om-d small{font-size:9px}
   .om-alerts{gap:4px}
   .om-a{padding:5px 7px}.om-a i{height:22px}
-  .om-mods{gap:7px}
-  .om-mod{padding:8px 10px;gap:5px}
-  .om-mod-h i{width:24px;height:24px;font-size:12px}
-  .om-mod-h b{font-size:12px}
-  .om-mod p{font-size:9.5px;line-height:1.5}
-  .om-mod-m{gap:6px}
-  .om-mod-m div{padding:5px 7px}
-  .om-mod-m b{font-size:12px}
-  .om-mod-f span{padding:1px 5px;font-size:8.5px}
-  .om-mod-f span:nth-child(n+3){display:none}
+  .om-mods{gap:6px}
+  .om-mod{padding:7px 8px;gap:5px}
+  .om-mod-h i{width:22px;height:22px;font-size:11px}
+  .om-mod-h b{font-size:11px}
+  .om-mod p{-webkit-line-clamp:1;font-size:8.5px}
+  .om-mod-m{gap:3px}
+  .om-mod-m div{padding:3px 6px}
+  .om-mod-m b{font-size:11px}
+  .om-mod>u{font-size:9px}
+  .om-shots{gap:7px}
+  .om-shot{gap:4px}
+  .om-shot p{font-size:8.5px;line-height:1.45;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .om-shot-f span{padding:1px 5px;font-size:8px}
+  .om-shot-f span:nth-child(n+2){display:none}
+  .om-map-lg{height:20px;font-size:8.5px;gap:10px}
   .om-run{gap:5px}.om-run div{padding:5px 7px}.om-run b{font-size:12px}
   .om-layer{padding:7px 9px}
   .om-layer-h b{font-size:11px}.om-layer p{font-size:9px;margin-top:4px}

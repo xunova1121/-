@@ -27,7 +27,15 @@ if KEEP:
 else:
     sid, jid = 'fishery-gis-style', 'fishery-gis-script'
 
-# 平台一张图：与地图模式无关，两种构建都带上
+# 平台一张图：与地图模式无关，两种构建都带上。
+# 它中部的 GIS 复用重制版地图的投影与图层，keep-map 模式下也要把这几支带进来。
+if KEEP:
+    css += '\n' + (BASE/'gis.css').read_text(encoding='utf-8')
+    js  += '\n' + '\n'.join((BASE/f).read_text(encoding='utf-8')
+                             for f in ('gis-data.js','gis-core.js','gis-layers.js'))
+shots = {k: (BASE/'assets'/('shot_%s.b64' % k)).read_text(encoding='utf-8').strip()
+         for k in ('watch','collide','enforce','board')}
+js += '\nvar SHOT_B64={' + ','.join('"%s":"%s"' % (k, v) for k, v in shots.items()) + '};'
 css += '\n' + (BASE/'gis-onemap.css').read_text(encoding='utf-8')
 js  += '\n' + (BASE/'gis-onemap.js').read_text(encoding='utf-8')
 
