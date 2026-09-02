@@ -197,11 +197,17 @@ export function renderControls(source = {}, { duration = 5, sampleEvery = 3 } = 
     seenSpatial.add(signature);
     issues.push({ ...issue, frame });
   }
+  // 这是跨镜头“视觉状态记忆”的可序列化基线：下一镜既能拿它作接缝核验，
+  // 也能把上一镜落点作为首帧约束，而不是只记一段泛泛的提示词。
+  const visualStateMemory = {
+    start: { frame: first.frame, subjects: poseSequence[0]?.subjects || [], props: attachmentSequence[0]?.props || [], camera: trajectory[0] || {}, lights: lightSequence[0]?.lights || [] },
+    end: { frame: last.frame, subjects: poseSequence.at(-1)?.subjects || [], props: attachmentSequence.at(-1)?.props || [], camera: trajectory.at(-1) || {}, lights: lightSequence.at(-1)?.lights || [] }
+  };
   return { start: first.rgb, end: last.rgb, depth: first.depth, mask: first.mask, edge: first.edge, pose: first.pose,
     frames, sampleEvery: Math.max(1, sampleEvery), controlFps: Number((FPS / Math.max(1, sampleEvery)).toFixed(3)), width: W, height: H, fps: FPS, maxFrame,
     keyframes: (base.keyframes || []).map((x) => x.frame), motionEasing: base.motionEasing || 'easeInOut',
     pathInterpolation: base.pathInterpolation || 'linear',
-    trajectory, focusSequence, poseSequence, actionSequence, motionPaths, lightSequence, attachmentSequence, layers, issues,
+    trajectory, focusSequence, poseSequence, actionSequence, motionPaths, lightSequence, attachmentSequence, visualStateMemory, layers, issues,
     objects: objects.map((x) => ({ id: x.item.id, name: x.item.name, kind: x.kind, depth: Number(x.depth.toFixed(3)) })) };
 }
 
@@ -219,6 +225,7 @@ export function videoControlPrompt(bundle = {}) {
   const lights = bundle.lightSequence || [];
   const attachments = bundle.attachmentSequence || [];
   const focus = bundle.focusSequence || [];
+  const state = bundle.visualStateMemory || {};
   if (!trajectory.length && !poses.length && !paths.length && !actions.length && !lights.length && !attachments.length) return '';
 
   const firstCam = trajectory[0] || {};
@@ -260,12 +267,14 @@ export function videoControlPrompt(bundle = {}) {
     : '';
 
   const pathShape = bundle.pathInterpolation === 'smooth' ? '所有机位与人物移动按平滑曲线过弯' : '所有机位与人物按关键帧之间直线移动';
+  const endState = state.end?.subjects?.length ? `本镜结束状态已冻结：${state.end.subjects.map((item) => `${item.id}位于(${Number(item.x || 0).toFixed(2)},${Number(item.y || 0).toFixed(2)})、朝向${Number(item.rotation || 0).toFixed(0)}°`).join('；')}；后续连续镜必须承接此状态` : '';
   return `【3D预演控制】严格保持首尾构图与空间关系；${pathShape}；${camera}`
     + `${actors.length ? `；人物轨迹：${actors.join('；')}` : ''}`
     + `${actionBeats.length ? `；动作节拍（严格按时间顺序，不得提前、倒放或漏做）：${actionBeats.join('；')}` : ''}`
     + `${attachedProps.length ? `；人物道具绑定：${attachedProps.join('；')}` : ''}`
     + `${focusPull ? `；焦点拉移：${focusPull}` : ''}`
     + `${lighting.length ? `；灯光连续性：${lighting.join('；')}` : ''}`
+    + `${endState ? `；${endState}` : ''}`
     + `；按 ${Number(bundle.fps || 24)}fps、${Number(bundle.maxFrame || 0)} 帧平滑插值，不要让人物、道具或机位瞬移。`;
 }
 

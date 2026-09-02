@@ -114,8 +114,18 @@ export function shotQualityReport(shot = {}, { previous = null } = {}) {
     : score !== null && score < 75 ? 'review' : 'pass';
   const repair = decision === 'regenerate' ? '回退到预演关键帧，以当前控制包重出视频'
     : decision === 'review' ? '人工复核动作、人物与场景连续性后决定是否重出' : '当前版本可进入人工审片';
+  const reviewFrames = (shot.videoReviewFrames?.frames || []).map(({ role, at, path }) => ({ role, at, path }));
+  // VLM 审核的输入契约先固定下来：只允许审真实成片帧，并带上预演/资产约束。
+  // 实际调用由显式“审核”动作触发，避免打开成片页就产生模型费用。
+  const vlmReview = reviewFrames.length === 3 ? {
+    status: shot.vlmReview?.revision === reviewRevision(shot) ? shot.vlmReview.status : 'ready',
+    revision: reviewRevision(shot),
+    evidence: reviewFrames,
+    rubric: ['人物脸部与服装是否漂移', '场景与核心道具是否保留', '首中尾动作是否连续', '光线与机位是否突变'],
+    allowedDecisions: ['pass', 'review', 'regenerate']
+  } : { status: 'waiting-evidence', evidence: reviewFrames, rubric: [], allowedDecisions: ['review'] };
   return { shotId: shot.id, index: shot.index, visual_quality_score: visualScore, character_consistency_score: characterScore,
-    motion_quality_score: motionScore, score, confidence: scores.length / 3, errors, decision, repair };
+    motion_quality_score: motionScore, score, confidence: scores.length / 3, errors, decision, repair, reviewFrames, vlmReview };
 }
 
 /** 把质量证据变成可执行、但不自动扣费的修复路线。 */
@@ -134,6 +144,43 @@ export function repairRoute(report = {}) {
       steps: ['查看首、中、尾帧', '确认人物、动作和场景是否可接受', '必要时选择重出或插入过渡镜'] };
   }
   return { route: 'pass', label: '进入人工审片', requiresApproval: false, steps: ['保留当前版本', '继续下一镜或成片合成'] };
+}
+
+/** 将 VLM 的问题收束到预演里真正可编辑的对象，避免只给一句“请重出”。 */
+export function previsRepairPlan({ issues = [], controls = null } = {}) {
+  const text = issues.join('；');
+  const targets = [];
+  if (/脸|五官|发型|服装|人物|角色/.test(text)) targets.push('人物设定集与人物关键帧');
+  if (/动作|姿势|手|走|跑|朝向|道具/.test(text)) targets.push('动作路径、姿态关键帧与道具挂点');
+  if (/场景|背景|机位|构图|景别|镜头/.test(text)) targets.push('摄影机关键帧与场景资产绑定');
+  if (/光|暗|亮|色温|阴影/.test(text)) targets.push('灯光位置、颜色与强度关键帧');
+  if (!targets.length) targets.push('当前镜头的首／中／尾预演关键帧');
+  return {
+    mode: 'keyframe-rollback',
+    targets: [...new Set(targets)],
+    keyframeCount: controls?.keyframes?.length || 0,
+    steps: ['在 3D 预演台定位上述对象', '修正首／中／尾关键帧后重新导出控制包', '确认费用后再重出视频']
+  };
+}
+
+/** 连续镜不必一律重出：给出“直接接 / 关键帧桥接 / 插入过渡镜”的导演决策。 */
+export function motionBridgePlans(shots = []) {
+  const plans = [];
+  for (let index = 1; index < shots.length; index += 1) {
+    const prev = shots[index - 1], next = shots[index];
+    if (next.link !== 'continuous' || !prev.controls || !next.controls) continue;
+    const issues = actionContinuityIssues(prev.controls, next.controls);
+    if (!issues.length) continue;
+    const high = issues.filter((item) => item.severity === 'high');
+    const hard = high.some((item) => /相差|换手|道具/.test(item.what));
+    plans.push({ fromIndex: prev.index, toIndex: next.index, issues: issues.map((item) => item.what),
+      mode: hard ? 'insert-transition-shot' : 'keyframe-motion-bridge',
+      label: hard ? '插入过渡镜' : '补动作桥关键帧',
+      steps: hard
+        ? ['在两镜之间新增 0.5–1 秒过渡镜', '保持上一镜末帧人物、道具和光线', '用推拉、平移或遮挡完成转场']
+        : ['把下一镜首个关键帧对齐上一镜末帧', '补 2–3 个动作／机位中间关键帧', '重新导出控制包后确认费用重出'] });
+  }
+  return plans;
 }
 
 /**
@@ -430,6 +477,7 @@ export function audit(project, { lintResults = [], threshold = 75 } = {}) {
   items.sort((a, b) => LEVELS.indexOf(a.level) - LEVELS.indexOf(b.level));
   const shotQualityReports = shots.map((shot, index) => shotQualityReport(shot, { previous: shots[index - 1] || null }));
   return { score, verdict, items, counts, retryCandidates: retryCandidates(shots),
+    motionBridgePlans: motionBridgePlans(shots),
     shotQualityReports: shotQualityReports.map((report) => ({ ...report, repairRoute: repairRoute(report) })) };
 }
 

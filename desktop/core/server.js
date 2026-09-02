@@ -1302,24 +1302,26 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
 
     // 单镜生产清单：每次生成的服务商、模型、提示词、参考图、种子和产物可追溯。
     if (b && c === 'shots' && d && e === 'manifest' && method === 'GET') {
-      const project = store.read(b);
-      const shot = project?.shots?.find((s) => s.id === d);
-      if (!shot) return json(res, 404, { error: '没有这一镜' });
-      return json(res, 200, {
-        projectId: b, shotId: shot.id, index: shot.index,
-        current: {
-          image: shot.imagePath || null, video: shot.videoPath || null,
-          imageModel: shot.modelUsed || null, videoModel: shot.videoModelUsed || null,
-          seed: shot.seed ?? null, imagePrompt: shot.prompt || null, videoPrompt: shot.videoPrompt || null
-        },
-        history: shot.generationHistory || []
-      });
+      try {
+        return json(res, 200, studio.shotProductionManifest(b, d));
+      } catch (err) {
+        return json(res, 404, { error: err.message });
+      }
     }
 
     // 人工审片签字：签的是当前素材版本，不是永久贴在镜头上的标签。
     if (b && c === 'shots' && d && e === 'review' && method === 'POST') {
       try {
         return json(res, 200, studio.reviewShot(b, d, await readBody(req)));
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
+    }
+
+    // 成片三帧 VLM 审核：必须由用户在镜头卡上显式触发，绝不随生成自动扣费。
+    if (b && c === 'shots' && d && e === 'vlm-review' && method === 'POST') {
+      try {
+        return json(res, 200, { review: await studio.reviewVideoFrames(b, d) });
       } catch (err) {
         return json(res, 400, { error: err.message });
       }
@@ -1531,6 +1533,14 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
     if (b && c === 'quality' && method === 'GET') {
       try {
         return json(res, 200, studio.qualityReport(b));
+      } catch (err) {
+        return json(res, 404, { error: err.message });
+      }
+    }
+
+    if (b && c === 'acceptance' && method === 'GET') {
+      try {
+        return json(res, 200, studio.productionAcceptance(b));
       } catch (err) {
         return json(res, 404, { error: err.message });
       }
@@ -2057,15 +2067,17 @@ export function createServer({ lan = false } = {}) {
         });
       }
       const threeAddon = {
-        '/three-gltf-loader.js': ['examples', 'jsm', 'loaders', 'GLTFLoader.js'],
-        '/three-orbit-controls.js': ['examples', 'jsm', 'controls', 'OrbitControls.js'],
-        '/three-transform-controls.js': ['examples', 'jsm', 'controls', 'TransformControls.js'],
-        '/three-buffer-utils.js': ['examples', 'jsm', 'utils', 'BufferGeometryUtils.js'],
-        '/three-skeleton-utils.js': ['examples', 'jsm', 'utils', 'SkeletonUtils.js']
+        // 这些不是可选 npm 依赖：它们就是预演台的相机、拖拽、GLB 和骨骼能力。
+        // electron-builder 会过滤 three/examples，发布包中改由 ui/vendor 显式携带。
+        '/three-gltf-loader.js': 'GLTFLoader.js',
+        '/three-orbit-controls.js': 'OrbitControls.js',
+        '/three-transform-controls.js': 'TransformControls.js',
+        '/three-buffer-utils.js': 'BufferGeometryUtils.js',
+        '/three-skeleton-utils.js': 'SkeletonUtils.js'
       }[url.pathname];
       if (threeAddon) {
-        return fs.readFile(path.join(ROOT, 'node_modules', 'three', ...threeAddon), (err, data) => {
-          if (err) return json(res, 404, { error: `找不到 ${path.basename(threeAddon.at(-1))}` });
+        return fs.readFile(path.join(UI_DIR, 'vendor', 'three', threeAddon), (err, data) => {
+          if (err) return json(res, 404, { error: `找不到 ${path.basename(threeAddon)}` });
           res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'public, max-age=31536000' });
           const source = url.pathname === '/three-gltf-loader.js'
             ? data.toString('utf8').replace("from '../utils/BufferGeometryUtils.js'", "from '/three-buffer-utils.js'")

@@ -33,6 +33,22 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow = null;
 let serverInfo = null;
 
+// 窗口白屏时，Chromium 的 Console 默认只留在开发者工具里；用户无法把它交给我们诊断。
+// 把首屏消息落到用户数据目录，且保留最近一次启动，菜单能直接打开。
+function startupLogPath() {
+  return path.join(app.getPath('userData'), 'startup-diagnostic.log');
+}
+
+function writeStartupDiagnostic(kind, detail) {
+  const stamp = new Date().toISOString();
+  const line = `[${stamp}] ${kind}: ${String(detail).replace(/\r?\n/g, ' ')}\n`;
+  try {
+    fs.appendFileSync(startupLogPath(), line, 'utf8');
+  } catch {
+    // 诊断日志写不进时不能影响主窗口本身。
+  }
+}
+
 // 同一时间只允许一个实例：两个实例会抢同一份项目文件，写坏了很难查
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -272,6 +288,18 @@ function buildMenu() {
                 `所有数据留在本机，密钥由 Windows DPAPI 加密保存。`
             });
           }
+        },
+        {
+          label: '打开启动诊断日志',
+          click: async () => {
+            const target = startupLogPath();
+            try {
+              if (!fs.existsSync(target)) fs.writeFileSync(target, '本次启动暂未记录到渲染器错误。\n', 'utf8');
+              await shell.openPath(target);
+            } catch (err) {
+              dialog.showErrorBox('无法打开诊断日志', err.message);
+            }
+          }
         }
       ]
     }
@@ -280,6 +308,8 @@ function buildMenu() {
 }
 
 async function createWindow() {
+  // 每次启动都从一份干净的诊断日志开始，避免把上一轮的错误误认为当前错误。
+  try { fs.writeFileSync(startupLogPath(), `未来创梦启动诊断\n数据目录：${DATA_DIR}\n`); } catch { /* 非关键能力 */ }
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 920,
@@ -298,6 +328,17 @@ async function createWindow() {
   });
 
   mainWindow.once('ready-to-show', () => mainWindow.show());
+
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    // level >= 2 是 warning/error；首屏报错全保留，方便定位某台 Windows 专有问题。
+    if (level >= 2) writeStartupDiagnostic('renderer-console', `${sourceId || '?'}:${line || '?'} ${message}`);
+  });
+  mainWindow.webContents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
+    if (isMainFrame) writeStartupDiagnostic('did-fail-load', `${code} ${description} (${url})`);
+  });
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    writeStartupDiagnostic('render-process-gone', `${details.reason || 'unknown'} / ${details.exitCode ?? '?'}`);
+  });
 
   // 站外链接一律交给系统浏览器，不在应用里开
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {

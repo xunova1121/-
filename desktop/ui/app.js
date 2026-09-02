@@ -512,6 +512,8 @@ export async function go(id) {
 /** 起不来时也要给出下一步，而不是一句"连不上" */
 function showBootError(reachable, message) {
   if (reachable) {
+    const host = $('#view-inner');
+    if (host) clear(host).append(h('div', { class: 'empty' }, h('b', {}, '启动检查未完成'), h('div', {}, message), h('div', { style: 'margin-top:10px;font-size:12px' }, '点右上角「刷新」重试；若仍失败，到「设置」检查数据目录和 FFmpeg。')));
     toast(`本地服务是通的，但有一项没读出来：${message}`, 'err');
     return;
   }
@@ -529,12 +531,14 @@ function showBootError(reachable, message) {
 }
 
 function initTheme() {
-  const saved = localStorage.getItem('fd.theme') || 'dark';
+  // 某些企业安全策略会禁用 localStorage。主题记忆失败不该让整个桌面端白屏。
+  let saved = 'dark';
+  try { saved = localStorage.getItem('fd.theme') || 'dark'; } catch { /* 使用默认主题 */ }
   document.documentElement.dataset.theme = saved;
   $('#btn-theme').addEventListener('click', () => {
     const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
     document.documentElement.dataset.theme = next;
-    localStorage.setItem('fd.theme', next);
+    try { localStorage.setItem('fd.theme', next); } catch { /* 主题仅在本次运行生效 */ }
   });
 }
 
@@ -730,7 +734,10 @@ async function boot() {
   });
 
   try {
-    await refreshCatalog();
+    await Promise.race([
+      refreshCatalog(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('启动检查超过 8 秒没有返回')), 8000))
+    ]);
   } catch (err) {
     // 服务器模式下没带口令 / 口令不对，走登录屏而不是"连不上"那一屏 ——
     // 这两件事的下一步动作完全不同
@@ -743,8 +750,6 @@ async function boot() {
     // 服务好好的，用户却被堵在门外，连进去重填密钥的机会都没有。
     const reachable = await fetch('/api/health').then((r) => r.ok).catch(() => false);
     showBootError(reachable, err.message);
-    // 服务是通的就照常进界面：具体哪个页面能不能用，让那个页面自己说
-    if (reachable) await go(state.current);
     return;
   }
   await go(state.current);
@@ -762,4 +767,5 @@ async function boot() {
   startIdleWatch();
 }
 
-boot();
+// boot 内部只包住了接口预检；其余初始化错误也必须显示出来，不能成为未处理拒绝。
+boot().catch((err) => showBootError(false, err?.message || String(err)));

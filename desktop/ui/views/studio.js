@@ -1945,9 +1945,13 @@ export default {
           onclick: async () => {
             try {
               const m = await api(`/projects/${project.id}/shots/${shot.id}/manifest`);
-              const rows = [...m.history].reverse();
+              const rows = [...(m.generation?.history || [])].reverse();
               const box = h('div', { class: 'shot-manifest' },
-                h('b', {}, `第 ${shot.index} 镜生产清单`),
+                h('b', {}, `第 ${shot.index} 镜生产档案`),
+                h('div', { class: 'field-hint', style: 'margin:6px 0' },
+                  `资产绑定 ${m.assetBindings?.length || 0} 项 · 3D关键帧 ${m.previs?.keyframes?.length || 0} 个 · 真实复核帧 ${m.evidence?.reviewFrames?.length || 0} 张 · ${m.review?.vlm?.status ? `VLM：${m.review.vlm.status}` : 'VLM未执行'}`),
+                m.recovery?.plan ? h('div', { class: `field-hint ${m.recovery.plan.safe ? '' : 'warn'}`, style: 'margin-bottom:6px' }, `断点恢复：${m.recovery.plan.label} · ${m.recovery.plan.detail}`) : null,
+                m.continuity?.bridge ? h('div', { class: 'field-hint', style: 'margin-bottom:6px' }, `连续性：${m.continuity.bridge.label}（第 ${m.continuity.bridge.fromIndex}→${m.continuity.bridge.toIndex} 镜）`) : null,
                 rows.length ? rows.map((x) => h('details', {},
                   h('summary', {}, `${x.kind === 'video' ? '视频' : x.kind === 'previz' ? '3D预演控制包' : '图片'} · ${x.provider} / ${x.model} · ${new Date(x.at).toLocaleString('zh-CN')}`),
                   h('div', { class: 'shot-prompt-body' },
@@ -1988,6 +1992,24 @@ export default {
         }, reviewCurrent
           ? (shot.review.status === 'approved' ? '✓ 已审' : shot.review.status === 'rejected' ? '↩ 退回' : '待审')
           : (shot.review ? '审批已过期' : '审片'));
+
+        const hasReviewFrames = (shot.videoReviewFrames?.frames || []).length >= 3;
+        const vlmBtn = h('button', {
+          class: 'shot-edit-btn', disabled: !hasReviewFrames,
+          title: hasReviewFrames ? '使用已配置的视觉模型审核真实首／中／尾成片帧；会产生模型调用费用，需手动确认' : '需先生成视频并留档真实首／中／尾帧',
+          onclick: async () => {
+            if (!confirm(`审核第 ${shot.index} 镜的真实首／中／尾帧？\n将调用已配置的视觉模型，可能产生费用；不会自动重出视频。`)) return;
+            vlmBtn.disabled = true;
+            try {
+              const r = await api(`/projects/${project.id}/shots/${shot.id}/vlm-review`, { method: 'POST' });
+              const label = { pass: '通过', review: '需人工复核', regenerate: '建议回退预演重出', skipped: '未执行' }[r.review.status] || r.review.status;
+              const repair = r.review.repairPlan?.targets?.length ? `；回退检查：${r.review.repairPlan.targets.join('、')}` : '';
+              toast(`第 ${shot.index} 镜 VLM 审核：${label}${r.review.score !== null ? `（${r.review.score}分）` : ''}${repair}`, r.review.status === 'pass' ? 'ok' : 'err');
+              project = await api(`/projects/${project.id}`); paintShots();
+            } catch (err) { toast(err.message, 'err'); }
+            finally { vlmBtn.disabled = false; }
+          }
+        }, shot.vlmReview?.status === 'pass' ? 'VLM ✓' : 'VLM 审核');
 
         // 厂商的时长档位：设 4 秒而模型只出 5/10 秒时，得在这儿就说清楚
         const steps = state.catalog.videoDurations || [];
@@ -2510,7 +2532,8 @@ export default {
                   : null,
                 verBtn,
                 manifestBtn,
-                reviewBtn
+                reviewBtn,
+                vlmBtn
 
               ),
               diagHost,
@@ -3364,8 +3387,20 @@ export default {
 
     // ───────────── 成片 ─────────────
     // 合成那一步的产出不在分镜网格里，得有个地方能直接看
+    const acceptanceHost = h('div', { style: 'margin:0 0 12px' }, h('p', { class: 'field-hint' }, '正在检查生产验收…'));
+    api(`/projects/${project.id}/acceptance`).then((report) => {
+      clear(acceptanceHost);
+      const tone = report.readyForRelease ? 'ok' : report.readyForCompose ? 'warn' : 'bad';
+      acceptanceHost.append(h('div', { class: `notice ${tone === 'bad' ? 'warn' : ''}` },
+        h('b', {}, `生产验收：${report.readyForRelease ? '可发布' : report.readyForCompose ? '可合成，暂不可发布' : '暂不可合成'}`),
+        h('span', { class: 'field-hint', style: 'display:block;margin-top:3px' }, `合成：${report.readyForCompose ? '通过' : '未通过'} · 发布：${report.readyForRelease ? '通过' : '未通过'} · 质量 ${report.quality.score} 分`),
+        report.checks?.length ? h('div', { style: 'margin-top:6px' }, ...report.checks.slice(0, 5).map((item) => h('p', { style: 'margin:4px 0' },
+          h('span', { class: `badge ${item.level === 'blocker' ? 'warn' : ''}` }, item.level === 'blocker' ? '先处理' : item.level === 'warn' ? '注意' : '提示'),
+          ` ${item.what} · ${item.fix}`))) : h('p', { style: 'margin:6px 0 0' }, '验收通过：合成、审核、恢复和导出前置条件均已检查。')));
+    }).catch(() => { clear(acceptanceHost); acceptanceHost.append(h('p', { class: 'field-hint' }, '生产验收暂时不可用，不影响现有成片。')); });
     const composePanel = h('div', { class: 'panel', style: 'display:none' },
       h('h2', { class: 'panel-title' }, '成片'),
+      acceptanceHost,
       (() => {
         const v = Date.parse(project.updatedAt || '') || 0;
         if (!project.outputs?.video) {
@@ -3414,6 +3449,27 @@ export default {
                       report?.repairRoute ? h('span', { class: 'field-hint', style: 'display:block;margin-top:2px' }, `→ ${report.repairRoute.label}`) : null);
                   }),
                   h('span', { class: 'field-hint', style: 'display:block' }, '这是重做候选，不会自动扣费；可在对应分镜卡点击“重出视频”。'))
+                : null,
+              r.motionBridgePlans?.length
+                ? h('div', { class: 'notice warn', style: 'margin-top:10px' },
+                  h('b', {}, '连续动作桥接建议'),
+                  ...r.motionBridgePlans.map((plan) => h('p', { style: 'margin:7px 0' },
+                    h('span', { class: 'badge warn' }, plan.label),
+                    ` 第 ${plan.fromIndex}→${plan.toIndex} 镜：${plan.issues.join('；')}`,
+                    h('span', { class: 'field-hint', style: 'display:block;margin-top:2px' }, `→ ${plan.steps.join(' → ')}`))))
+                : null,
+              (r.shotQualityReports || []).filter((report) => report.reviewFrames?.length).length
+                ? h('div', { class: 'notice', style: 'margin-top:10px' },
+                  h('b', {}, '真实成片复核帧'),
+                  h('span', { class: 'field-hint', style: 'display:block;margin:4px 0 8px' }, '以下均由实际视频抽帧，不是分镜图或预演控制图；可用于人工审片与后续 VLM 复核。'),
+                  ...(r.shotQualityReports || []).filter((report) => report.reviewFrames?.length).map((report) => {
+                    const thumbnails = report.reviewFrames.map((frame) => h('a', { href: mediaUrl(frame.path), target: '_blank', style: 'display:block;width:132px;color:inherit;text-decoration:none' },
+                      h('img', { src: mediaUrl(frame.path), alt: `第 ${report.index} 镜${frame.role}帧`, style: 'width:132px;height:74px;object-fit:cover;border-radius:6px;border:1px solid var(--line);background:#111;display:block' }),
+                      h('span', { class: 'field-hint', style: 'display:block;text-align:center' }, ({ head: '首帧', middle: '中帧', tail: '尾帧' }[frame.role] || frame.role))));
+                    return h('div', { style: 'margin-top:10px;padding-top:8px;border-top:1px solid var(--line)' },
+                      h('b', {}, `第 ${report.index} 镜 · ${report.repairRoute?.label || '人工审片'}`),
+                      h('div', { class: 'inline', style: 'margin-top:7px;gap:8px;align-items:flex-start;flex-wrap:wrap' }, ...thumbnails));
+                  }))
                 : null));
         }).catch(() => { /* 体检拉不到不该把成片页弄坏 */ });
         return h('div', {},

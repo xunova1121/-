@@ -49,6 +49,29 @@
 
     <div class="toast-stack" id="toasts" role="status" aria-live="polite"></div>
     <script type="importmap">{"imports":{"three":"/three.js"}}</script>
+    <script>
+      // 发布包里无论是模块加载、异步拒绝还是本地服务卡住，都不能只留下空壳。
+      // 这段刻意不依赖 app.js：app.js 本身无法加载时它仍然能工作。
+      (function () {
+        function showBootFailure(reason) {
+          var host = document.getElementById('view-inner');
+          if (!host || host.dataset.bootError || host.children.length) return;
+          host.dataset.bootError = '1';
+          var msg = String(reason && (reason.message || reason) || '脚本没有加载').replace(/[<>&]/g, '');
+          host.innerHTML = '<div class="empty"><b>界面启动失败</b><div style="margin-top:8px">' + msg +
+            '</div><div style="margin-top:10px;font-size:12px">请打开开发者工具的 Console，复制第一条红色错误；这能定位到具体文件和行号。</div></div>';
+        }
+        window.addEventListener('error', function (event) { showBootFailure(event.error || event.message); }, true);
+        window.addEventListener('unhandledrejection', function (event) { showBootFailure(event.reason); });
+        window.setTimeout(function () {
+          var nav = document.getElementById('nav');
+          var host = document.getElementById('view-inner');
+          if (nav && host && !nav.children.length && !host.children.length) {
+            showBootFailure('界面初始化超过 12 秒没有完成。请检查 Console 的第一条红色错误。');
+          }
+        }, 12000);
+      }());
+    </script>
     <script type="module" src="/app.js"></script>
   </body>
 </html>
