@@ -438,6 +438,19 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
   const framing = previz.framingHint(shot.camera);
   add('framing', '景别怎么算数（画面上验得出的那句）', framing);
   /**
+   * ══════════ 焦段 ══════════
+   *
+   * 借 Blender 的相机：景别不是一个形容词，是**焦距 + 距离**算出来的。
+   * "中景"没有确切含义 —— 35mm 站 2 米和 85mm 站 5 米都叫中景，
+   * 而两张画完全不同（后者背景压缩、透视平）。
+   *
+   * ⚠ 排过位的以**排位里那个焦段**为准（它更具体）；没排位的用这一镜
+   * 自己选的。两个都没有就一个字不说 —— 补一句默认的 35mm 说明，
+   * 等于替用户做了一个他没做过的决定，而且是一个听起来很具体的谎。
+   */
+  const lensMm = shot?.stage?.cam?.lens ?? shot?.lens;
+  add('lens', '焦段（背景压缩、透视）', previz.lensHint(lensMm));
+  /**
    * ══════════ 参考图管"是什么"，文字管"怎么拍" ══════════
    *
    * ⚠ 这一句必须**每次带参考图时都说**，不能只在特写时说。

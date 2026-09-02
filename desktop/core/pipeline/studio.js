@@ -2101,6 +2101,12 @@ const SHOT_EDITABLE = [
    * 不进白名单的话，界面上关了存不下去 —— 而"改了没反应"是最难查的一类。
    */
   'promptMute',
+  /**
+   * 这一镜用多少毫米的镜头。排过位的以预演台里那个为准，这个字段是
+   * 给**没排位**的镜头用的 —— 而那是绝大多数镜头。
+   * 不给它一个位置的话，焦段就只对排过位的那几镜存在。
+   */
+  'lens',
   // 这一镜画面里看得见的关键道具。不进白名单的话界面上改了存不下去，
   // 而道具消失那条检查就永远只能听模型的、人纠正不了
   'props',
@@ -2435,7 +2441,13 @@ export function updateShot(projectId, shotId, patch = {}) {
   for (const key of SHOT_EDITABLE) {
     if (!(key in patch)) continue;
     let value = patch[key];
-    if (key === 'promptMute') {
+    if (key === 'lens') {
+      const mm = Number(value);
+      // 收不下的值就当没设 —— 存一个 0 或者字符串进去，lensHint 会静默返回空，
+      // 表现是"我选了焦段但提示词里没有"，而没有任何一处报错
+      value = Number.isFinite(mm) && mm >= 8 && mm <= 400 ? mm : null;
+      if (value === null) continue;
+    } else if (key === 'promptMute') {
       // 只收字符串数组。存进去一个对象或数字，assemblePrompt 那边的
       // Set.has 会静默失配 —— 表现是"关了没生效"，而没有任何一处报错
       value = Array.isArray(value) ? value.map((x) => String(x)).filter(Boolean) : [];

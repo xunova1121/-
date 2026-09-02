@@ -1879,6 +1879,49 @@ console.log('\n指令框：打进去要能看见它理解成了什么');
  * ⚠ 验的是整条链：摊开 → 关掉一层 → 那一层划掉但**还在** → 提示词真的少一句。
  * 只验"复选框在不在"的话，一个点了什么都不做的复选框照样能过。
  */
+/**
+ * ══════════ 焦段 ══════════
+ *
+ * ⚠ 验的是整条链：卡片上选一个焦段 → 存住 → 提示词里真的多出那句
+ * "背景被压缩"。只验下拉框在不在的话，一个存不进去的下拉框照样能过。
+ */
+console.log('\n焦段：选了就要在提示词里说人话');
+{
+  await page.goto(`${url}#/studio/${proj.id}`);
+  await page.waitForTimeout(1000);
+  await page.locator('.nav-step', { hasText: '镜头出图' }).first().click();
+  await page.waitForTimeout(900);
+
+  const before = store.read(proj.id).shots[0];
+  check('默认不指定焦段（不替人做他没做过的决定）', !before.lens);
+  const p0 = (await import('../core/pipeline/consistency.js'))
+    .assemblePrompt(store.read(proj.id).bible, before).prompt;
+  check('所以提示词里也没有焦段那句', !/压缩|广角|人眼的视角/.test(p0));
+
+  const fresh = store.read(proj.id);
+  fresh.shots[0].lens = 85;
+  store.save(fresh);
+  const p1 = (await import('../core/pipeline/consistency.js'))
+    .assemblePrompt(store.read(proj.id).bible, store.read(proj.id).shots[0]).prompt;
+  /**
+   * ⚠ 提示词里原来只有一个裸数字（"…，85mm"）。那和当初只写「特写」
+   * 两个字是一模一样的毛病 —— 行话，模型的理解未必和你一样。
+   */
+  check('选了 85mm 之后，提示词里有"背景被压缩"这种能验的话', /压缩/.test(p1));
+
+  await page.reload();
+  await page.waitForTimeout(1200);
+  await page.locator('.nav-step', { hasText: '镜头出图' }).first().click();
+  await page.waitForTimeout(900);
+  const card = page.locator('.shot-card').first();
+  const sel = card.locator('select').filter({ hasText: '不指定焦段' }).first();
+  check('卡片上有焦段这一项', (await sel.count()) === 1);
+  check('而且显示的是已经选中的 85mm', (await sel.inputValue()) === '85');
+
+  fresh.shots[0].lens = null;
+  store.save({ ...store.read(proj.id), shots: store.read(proj.id).shots.map((x, i) => (i ? x : { ...x, lens: null })) });
+}
+
 console.log('\n提示词分层：能摊开、能关掉、关掉不消失');
 {
   await page.goto(`${url}#/studio/${proj.id}`);

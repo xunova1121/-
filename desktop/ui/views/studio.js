@@ -1993,6 +1993,24 @@ export default {
         const fields = {
           description: h('textarea', { rows: 3 }, shot.description || ''),
           camera: h('input', { type: 'text', placeholder: '中景 / 特写 / 航拍…', value: shot.camera || '' }),
+          /**
+           * ══════════ 焦段 ══════════
+           *
+           * 借 Blender 的相机：景别不是形容词，是**焦距 + 距离**算出来的。
+           * "中景"没有确切含义 —— 35mm 站 2 米和 85mm 站 5 米都叫中景，
+           * 而两张画完全不同（后者背景压缩、透视平）。
+           *
+           * 预演台里早就有焦段了，但那只对**排过位**的镜头存在 ——
+           * 而绝大多数镜头没排过位。这里给它们一个位置。
+           *
+           * ⚠ 默认是「不指定」，不是 35mm。默认一个值等于替人做了一个
+           * 他没做过的决定，而提示词里会因此多出一句听起来很具体的话。
+           */
+          lens: h('select', {},
+            h('option', { value: '', selected: !shot.lens }, '不指定焦段'),
+            ...[24, 35, 50, 85, 135].map((mm) => h('option', {
+              value: String(mm), selected: Number(shot.lens) === mm
+            }, `${mm}mm${{ 24: '（广角，背景显得远）', 35: '（接近人眼）', 50: '（标准）', 85: '（背景压缩、虚化强）', 135: '（长焦，主体从环境里抽离）' }[mm]}`))),
           motion: h('input', { type: 'text', placeholder: '镜头缓慢推进…', value: shot.motion || '' }),
           // 这一镜走哪一档视频模型。自动判定给一个，判错的那几镜由人改
           tier: h('select', {},
@@ -2076,6 +2094,8 @@ export default {
                 body: {
                   description: fields.description.value,
                   camera: fields.camera.value,
+                  // 空串 = 不指定。服务端把收不下的值当没设，所以这里直接传
+                  lens: fields.lens.value === '' ? null : Number(fields.lens.value),
                   motion: fields.motion.value,
                   // cap:tier-routing
                   tier: fields.tier.value,
@@ -2191,6 +2211,8 @@ export default {
             fields.description,
             h('div', { class: 'shot-edit-grid' },
               h('div', {}, h('label', {}, '景别'), fields.camera),
+              // cap:shot-lens
+              h('div', {}, h('label', {}, '焦段'), fields.lens),
               h('div', {}, h('label', {}, '场景'), fields.scene),
               h('div', {}, h('label', {}, '出场角色'), fields.characters),
               h('div', {}, h('label', {}, '画面里的道具'), fields.props)),

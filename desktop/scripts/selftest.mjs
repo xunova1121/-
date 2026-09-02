@@ -8816,6 +8816,62 @@ section('这一镜为什么不对');
   check('而且说得出为什么选它', /参考图/.test(list[0].why), list[0].why);
 }
 
+section('焦段：景别是算出来的，不是一个形容词');
+{
+  const previz = await import('../core/pipeline/previz.js');
+  const cons = await import('../core/pipeline/consistency.js');
+
+  /**
+   * ══════════ 为什么要给焦段配一句话 ══════════
+   *
+   * 提示词里原来只有一个裸数字（"…，85mm"）。那和当初只写「特写」两个字
+   * 是一模一样的毛病：行话，模型的理解未必和你一样，而它要和几百字的
+   * 描述抢注意力。「特写」那次的解法是配一句能验的话，这里照办。
+   */
+  check('广角说的是"背景显得远"', /开阔|远/.test(previz.lensHint(24)), previz.lensHint(24));
+  check('长焦说的是"背景被压缩"', /压缩/.test(previz.lensHint(85)), previz.lensHint(85));
+  check('两头说的不是同一句（否则这张表等于没有）',
+    previz.lensHint(24) !== previz.lensHint(85), previz.lensHint(24));
+  /**
+   * ⚠ 没选焦段就**一个字都不说**。
+   * 补一句默认 35mm 的说明，等于替用户做了一个他没做过的决定 ——
+   * 而且是一个听起来很具体的谎。这个项目为"没摆地标就别编"专门写过一段。
+   */
+  check('没给焦段时返回空，不替人编一个默认的',
+    previz.lensHint(null) === '' && previz.lensHint(0) === '' && previz.lensHint('x') === '',
+    JSON.stringify([previz.lensHint(null), previz.lensHint(0), previz.lensHint('x')]));
+
+  const bible = {
+    style: { anchor: '国风水墨' },
+    characters: [{ name: '阿澜', appearance: '少年', seed: 1 }],
+    scenes: [], props: []
+  };
+  const base = { index: 1, characters: ['阿澜'], description: '阿澜走向栈桥', camera: '中景', skills: [] };
+
+  check('没选焦段的镜头，提示词里没有焦段那一层',
+    !cons.assemblePrompt(bible, base).layers.some((l) => l.id === 'lens'),
+    JSON.stringify(cons.assemblePrompt(bible, base).layers.map((l) => l.id)));
+
+  {
+    const r = cons.assemblePrompt(bible, { ...base, lens: 85 });
+    check('选了 85mm，提示词里就有"背景被压缩"那句', /压缩/.test(r.prompt), r.prompt);
+    check('而且它是单独一层（能单独关掉）',
+      r.layers.some((l) => l.id === 'lens'), JSON.stringify(r.layers.map((l) => l.id)));
+  }
+
+  {
+    /**
+     * ⚠ 排过位的以**排位里那个焦段**为准 —— 它更具体（那是真在俯视图上摆过的）。
+     * 反过来的话，用户在预演台上把镜头换成 85mm，提示词里却还是卡片上填的那个，
+     * 而两处都显示着各自的数，谁也不知道哪个算数。
+     */
+    const staged = { ...base, lens: 24, stage: { cam: { x: 0, y: -3, height: 1.6, lens: 85 } } };
+    check('排过位时以预演台里那个焦段为准',
+      /压缩/.test(cons.assemblePrompt(bible, staged).prompt),
+      cons.assemblePrompt(bible, staged).prompt);
+  }
+}
+
 section('提示词分层：显出来、能关掉，但一个字都不许改变');
 {
   const cons = await import('../core/pipeline/consistency.js');

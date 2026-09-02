@@ -48,6 +48,18 @@ let mPass = 0;
 
 const rejections = [];
 
+/**
+ * 关掉所有抽屉。
+ *
+ * ⚠ 点 `.sheet` 的边角是关不掉的 —— openSheet 只在 `e.target === layer`
+ * 时关，而点到 (5,5) 往往落在里面的 `.sheet-box` 上。留一张开着的抽屉
+ * 会把**后面每一节**都挡住，然后报成"页签点不到"，查半天在查别的事。
+ */
+const closeSheets = (pg) => pg.evaluate(() => {
+  // 编辑器是 .ed（自己挂在 body 上的一层），不是 .sheet —— 两种都要收
+  for (const el of document.querySelectorAll('.sheet, .ed')) el.remove();
+});
+
 const PW = process.env.PLAYWRIGHT_PATH || 'playwright';
 let chromium; let devices;
 try {
@@ -1159,6 +1171,67 @@ const realErrs = errs.filter((e) => !/401/.test(e));
   } else {
     console.log('   ✕ 分镜页上找不到「看看为什么」按钮');
   }
+}
+
+/**
+ * ⑱ 焦段（手机端）
+ *
+ * 审片时发现"这几镜背景太散"，换个长焦是当场就想做的事 ——
+ * 而审片正是在手机上做的。
+ */
+{
+  console.log('\n⑱ 焦段：');
+  /**
+   * ⚠ 先把上一节可能还开着的抽屉关掉。
+   * 留一张开着的抽屉会挡住页签，然后报成"页签点不到"——
+   * 查半天在查一件跟本节毫无关系的事。
+   */
+  await closeSheets(page);
+  await page.waitForTimeout(300);
+  await page.locator('.tab', { hasText: '分镜' }).click();
+  await page.waitForTimeout(700);
+  await page.locator('.shot-desc.tappable').first().click();
+  await page.waitForTimeout(1400);
+  /**
+   * ⚠ 编辑器是分页的（内容 / 镜头 / 预演台 / 高级），默认停在「内容」。
+   * 景别和焦段在「镜头」那一页 —— 不切过去的话，选择器永远匹配不到，
+   * 而且不报错，看起来像"这个功能没做"。
+   */
+  await page.locator('.ed-tab', { hasText: '镜头' }).first().click();
+  await page.waitForTimeout(500);
+  // ⚠ 编辑器**不是** .sheet：openEditor 自己往 body 上挂了一层。
+  //    带 .sheet 前缀的选择器在这儿永远匹配不到，而且不报错。
+  const row = page.locator('.ed-group', { hasText: '焦段' }).first();
+  console.log('   编辑器里有焦段这一项：', (await row.count()) >= 1 ? '✓' : '✕');
+  const chips85 = page.locator('.chip', { hasText: '背景压缩' }).first();
+  /** 括注写的是画面上看得出来的那件事，不是参数 —— 选的人未必懂毫米数 */
+  console.log('   选项写的是人话不是参数：', (await chips85.count()) === 1 ? '✓ 85 背景压缩' : '✕');
+  if (await chips85.count()) {
+    await chips85.evaluate((el) => el.click());
+    await page.waitForTimeout(300);
+    const save = page.locator('button', { hasText: '保存' }).first();
+    if (await save.count()) {
+      await save.evaluate((el) => el.click());
+      await page.waitForTimeout(1600);
+      /**
+       * ⚠ 用**界面自己**验存没存住：重新打开编辑器，看那颗芯片还亮着没有。
+       *
+       * 第一版是在页面里 fetch 一个自己拼的地址，而 id 拼空了 → 401，
+       * 于是"意料之外的 4xx"那条护栏红了 —— 走查自己制造了一个假故障。
+       * 同样的错这一轮已经犯过一次（指令框那节）。
+       */
+      await closeSheets(page);
+      await page.locator('.shot-desc.tappable').first().click();
+      await page.waitForTimeout(1300);
+      await page.locator('.ed-tab', { hasText: '镜头' }).first().click();
+      await page.waitForTimeout(500);
+      const on = await page.locator('.chip.on', { hasText: '背景压缩' }).count();
+      console.log('   选完存得住（重开编辑器还亮着）：', on === 1 ? '✓ 85mm' : '✕');
+    }
+  }
+  await closeSheets(page);
+  await page.evaluate(() => { for (const el of document.querySelectorAll('.ed')) el.remove(); });
+  await page.waitForTimeout(300);
 }
 
 rejections.push(...(await page.evaluate(() => window.__fdRejections || []).catch(() => [])));
