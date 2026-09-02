@@ -33,12 +33,20 @@
 .om-enter:hover{transform:translateY(-1px);box-shadow:0 12px 26px #0b6f9a70}
 .om-enter:hover span{transform:translateX(4px)}
 
-/* 舞台：地图铺满，面板浮在其上 */
-.om-stage{flex:1;position:relative;min-height:0;overflow:hidden}
-.om-map{position:absolute;inset:0}
-.om-map-svg{width:100%;height:100%;display:block}
-.om-stage:after{content:"";position:absolute;inset:0;pointer-events:none;
-  box-shadow:inset 0 0 160px 30px #00060c99}
+/* 版式：指标条 + 三栏主体 + 九大能力 */
+.om-root{height:100%;display:flex;flex-direction:column;gap:8px;padding:0 14px 10px;overflow:hidden}
+.om-head{margin:0 -14px}
+.om-kpis{flex:none;display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.om-body{flex:1;display:grid;grid-template-columns:286px 1fr 286px;
+  grid-template-rows:minmax(0,1fr);gap:8px;min-height:0}
+.om-col{display:flex;flex-direction:column;gap:8px;min-height:0;min-width:0}
+.om-card{border:1px solid #1e5372;border-radius:6px;background:#0a2337cc;padding:9px 10px}
+.om-card.om-grow{flex:1;display:flex;flex-direction:column;min-height:0}
+.om-mapcard{flex:1;display:flex;flex-direction:column;min-height:0;padding:9px 10px}
+.om-shotcard{flex:none}
+.om-map{position:relative;flex:1;min-height:0;border-radius:5px;overflow:hidden;
+  background:#03101c;border:1px solid #16405a}
+.om-map-photo{width:100%;height:100%;object-fit:cover;display:block}
 
 /* ---- 地图要素 ---- */
 /* 覆盖 gis.css 的通用底图配色：整屏大图需要更强的海陆对比 */
@@ -48,8 +56,8 @@
 .om-map-svg .rg-river{stroke:#8fdcf5;opacity:.42;stroke-width:1.1}
 .om-map-svg .rg-lake{fill:#0d3550;stroke:#63c4e4;stroke-width:1;opacity:.9}
 .om-map-svg .rg-yangtze{fill:#08243a;stroke:#3f93b8;stroke-width:.9;opacity:.75}
-.om-map-svg .rg-citylight{opacity:1}
-.om-settle{fill:#cdf3ff;pointer-events:none}
+.om-map-svg .rg-citylight{opacity:.72}
+.om-settle{fill:#a8e4fb;pointer-events:none;opacity:.72}
 .om-shelf{fill:none;stroke:#3fbfe0;stroke-width:2.4;opacity:.13;stroke-linejoin:round}
 .om-prov{fill:#5f9fc4;font-size:26px;letter-spacing:8px;opacity:.5;font-weight:300}
 .om-city{fill:#cfe9f6;font-size:13px;letter-spacing:1px;text-shadow:0 1px 5px #000}
@@ -76,29 +84,19 @@
 .om-lab-v{fill:#7fd0e8;font-size:11px;text-shadow:0 1px 5px #000}
 
 /* ---- 浮层面板 ---- */
-.om-panel{position:absolute;top:16px;bottom:56px;z-index:4;width:284px;
-  display:flex;flex-direction:column;gap:10px;pointer-events:none}
-.om-panel.om-l{left:16px}
-.om-panel.om-r{right:16px;width:262px}
-.om-card{pointer-events:auto;border:1px solid #1e5372a8;border-radius:7px;
-  background:#062032d9;backdrop-filter:blur(9px);padding:11px 12px;
-  box-shadow:0 10px 30px #0006}
-.om-card.om-grow{flex:1;display:flex;flex-direction:column;min-height:0}
 .om-h3{margin:0 0 9px;font-size:12px;font-weight:700;color:#e2f4ff;letter-spacing:1px;
   display:flex;align-items:center;gap:8px}
 .om-h3:before{content:"";width:3px;height:12px;border-radius:2px;background:#2fa8c8}
 .om-h3 span{margin-left:auto;font-size:10px;font-weight:400;color:#7ea8bf;letter-spacing:0}
 
-.om-kpis{display:grid;grid-template-columns:1fr 1fr;gap:7px}
-.om-kpi{position:relative;padding:7px 9px;border-radius:5px;background:#0a2740a6;
-  border:1px solid #17455e}
-.om-kpi:first-child{grid-column:1 / -1}
+.om-kpi{position:relative;padding:8px 12px;border-radius:6px;
+  background:linear-gradient(135deg,#0e304c,#0a2437);border:1px solid #1e5372}
 .om-kpi:before{content:"";position:absolute;left:0;top:6px;bottom:6px;width:2px;
   border-radius:2px;background:var(--c,#2f9fd0)}
 .om-kpi.blue{--c:#3f9fe0}.om-kpi.cyan{--c:#2fd0e0}.om-kpi.orange{--c:#f2a94c}
 .om-kpi.green{--c:#3ddba0}.om-kpi.purple{--c:#9a8ff0}
-.om-kpi span{display:block;font-size:10px;color:#89aec2;padding-left:7px}
-.om-kpi b{display:block;margin-top:2px;padding-left:7px;font-size:19px;font-weight:700;
+.om-kpi span{display:block;font-size:10.5px;color:#89aec2;padding-left:8px}
+.om-kpi b{display:block;margin-top:2px;padding-left:8px;font-size:22px;font-weight:700;
   color:#eaf7ff;line-height:1.15}
 .om-kpi b em{font-style:normal;font-size:10.5px;color:#7fb0c6;margin-left:3px;font-weight:400}
 
@@ -128,20 +126,83 @@
 .om-a small{display:block;font-size:9px;color:#7396a9;margin-top:1px}
 .om-a .om-t{margin-left:auto;font-size:10px;color:#6f96aa;font-family:Consolas,monospace}
 
+/* 智能预警 */
+.om-ai-m{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:7px}
+.om-ai-m div{padding:5px 8px;border:1px solid #17455e;border-radius:4px;background:#0a2740}
+.om-ai-m span{display:block;font-size:9px;color:#7396a9}
+.om-ai-m b{display:block;margin-top:2px;font-size:13px;color:#5fd8ec;font-weight:700}
+.om-ai-e{flex:1;display:flex;flex-direction:column;gap:4px;overflow-y:auto;min-height:0;
+  scrollbar-width:thin;scrollbar-color:#1d5f7c #0a2237;padding-right:3px}
+.om-ai-e::-webkit-scrollbar{width:5px}
+.om-ai-e::-webkit-scrollbar-thumb{background:#1d5f7c;border-radius:3px}
+.om-ae{display:flex;align-items:center;gap:7px;padding:4px 7px;border-radius:4px;
+  background:#0a2237;border:1px solid #16405a}
+.om-ae i{width:3px;height:22px;border-radius:2px;flex:none}
+.om-ae.lv1 i{background:#ff5b63;box-shadow:0 0 8px #ff5b6355}
+.om-ae.lv2 i{background:#f2a94c}
+.om-ae b{display:block;font-size:10.5px;color:#e2f2fa}
+.om-ae small{display:block;font-size:9px;color:#7396a9;margin-top:1px}
+.om-ae em{margin-left:auto;font-style:normal;font-size:9px;padding:1px 5px;border-radius:3px}
+.om-ae.lv1 em{background:#4a1d26;color:#ff8f97}
+.om-ae.lv2 em{background:#4a3418;color:#f7c078}
+
+/* 运行概况 / 平台能力 */
+.om-run{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.om-run div{padding:5px 8px;border:1px solid #16405a;border-radius:4px;background:#0a2237}
+.om-run span{display:block;font-size:9px;color:#7396a9}
+.om-run b{display:block;margin-top:2px;font-size:13px;color:#5fd8ec;font-weight:700}
+.om-arch{display:flex;flex-direction:column}
+.om-layer{padding:6px 9px;border:1px solid #23617f;border-radius:5px;
+  background:linear-gradient(135deg,#103a58,#0a2740)}
+.om-layer:first-child{border-color:#2fa8c8;background:linear-gradient(135deg,#12506f,#0c3450)}
+.om-layer-h{display:flex;align-items:center;gap:8px}
+.om-layer-h b{font-size:11px;color:#eaf7ff;letter-spacing:1px}
+.om-layer-h em{margin-left:auto;font-style:normal;font-size:10.5px;color:#5fd8ec;font-weight:700}
+.om-layer p{margin:3px 0 0;font-size:8.5px;color:#7ea8bf;line-height:1.5}
+.om-flow{height:13px;display:grid;place-items:center;position:relative}
+.om-flow:before{content:"";position:absolute;top:0;bottom:0;width:1px;
+  background:repeating-linear-gradient(#2b7fa0 0 3px,transparent 3px 6px)}
+.om-flow i{position:absolute;width:4px;height:4px;border-radius:50%;background:#5fd8ec;
+  box-shadow:0 0 7px #5fd8ec;animation:omUp 1.8s linear infinite}
+
+/* 九大业务能力 */
+.om-modbar{flex:none}
+.om-mods{display:grid;grid-template-columns:repeat(9,1fr);gap:7px}
+.om-mod{position:relative;display:flex;flex-direction:column;gap:5px;padding:7px 8px;
+  border:1px solid #1e5372;border-radius:5px;background:linear-gradient(150deg,#0e3049,#0a2336);
+  cursor:pointer;font-family:inherit;color:inherit;overflow:hidden;
+  transition:border-color .18s,transform .18s}
+.om-mod:hover{border-color:#38b4d4;transform:translateY(-2px)}
+.om-mod:hover>u{opacity:1}
+.om-mod-h{display:flex;align-items:center;gap:7px}
+.om-mod-h i{width:22px;height:22px;border-radius:5px;flex:none;display:grid;place-items:center;
+  background:#12455f;color:#4fd2e6;font-style:normal;font-size:11px}
+.om-mod-h b{font-size:11.5px;color:#eaf7ff;white-space:nowrap}
+.om-mod-m{display:flex;flex-direction:column;gap:4px}
+.om-mod-m div{display:flex;align-items:baseline;gap:5px;padding:3px 6px;border-radius:4px;
+  background:#08283d;border:1px solid #16405a}
+.om-mod-m b{font-size:11px;color:#5fd8ec;font-weight:700;white-space:nowrap}
+.om-mod-m span{font-size:8.5px;color:#7396a9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.om-mod>u{position:absolute;right:7px;top:7px;font-size:8.5px;color:#4fd2e6;opacity:0;
+  transition:opacity .18s;pointer-events:none;text-decoration:none}
+
 /* 重点功能 */
-.om-shots{flex:1;display:flex;flex-direction:column;gap:9px;min-height:0;overflow:hidden}
-.om-shot{flex:1;display:flex;flex-direction:column;gap:5px;min-height:0}
-.om-shot-img{flex:1;min-height:0;border-radius:5px;overflow:hidden;border:1px solid #1d5f7c88;
-  background:#04121f}
+.om-shots{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.om-shot{display:flex;flex-direction:column;gap:4px}
+.om-shot-img{position:relative;aspect-ratio:16/9;border-radius:4px;overflow:hidden;
+  border:1px solid #1d5f7c;background:#04121f}
 .om-shot-img img{width:100%;height:100%;object-fit:cover;display:block}
-.om-shot-x b{display:block;font-size:11px;color:#eaf7ff;font-weight:700}
-.om-shot-x small{display:block;margin-top:2px;font-size:9px;color:#7ea8bf}
+.om-shot-img:after{content:"";position:absolute;inset:0;background:linear-gradient(#0000 45%,#04182bd9)}
+.om-shot-t{position:absolute;left:7px;bottom:5px;z-index:2;color:#eaf7ff;font-size:10.5px;
+  font-weight:700;text-shadow:0 1px 4px #000}
+.om-shot>small{font-size:8.5px;color:#7ea8bf;line-height:1.45;
+  display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
 
 /* 底部图例 */
-.om-legend{position:absolute;left:50%;transform:translateX(-50%);bottom:14px;z-index:5;
-  display:flex;align-items:center;gap:18px;height:34px;padding:0 18px;
-  border:1px solid #1e5372a8;border-radius:7px;background:#062032db;backdrop-filter:blur(9px);
-  color:#9dc4d6;font-size:11px;box-shadow:0 10px 30px #0006;white-space:nowrap}
+.om-legend{position:absolute;left:50%;transform:translateX(-50%);bottom:8px;z-index:5;
+  display:flex;align-items:center;gap:13px;height:28px;padding:0 13px;
+  border:1px solid #1e5372a8;border-radius:6px;background:#062032db;backdrop-filter:blur(9px);
+  color:#9dc4d6;font-size:10px;box-shadow:0 8px 22px #0006;white-space:nowrap}
 .om-legend span{display:flex;align-items:center;gap:7px}
 .om-legend u{width:15px;height:11px;display:inline-block;flex:none;text-decoration:none;
   background-repeat:no-repeat;background-position:center}
@@ -154,8 +215,8 @@
 .om-legend .lg-ais{height:11px;background:#7f9fd0;clip-path:polygon(50% 0,80% 30%,68% 100%,32% 100%,20% 30%)}
 
 /* 缩放控件 */
-.om-zoom{position:absolute;right:16px;bottom:60px;z-index:5;display:flex;flex-direction:column;gap:6px}
-.om-zoom button{width:32px;height:32px;border:1px solid #1e5372a8;border-radius:6px;
+.om-zoom{position:absolute;right:9px;bottom:44px;z-index:5;display:flex;flex-direction:column;gap:6px}
+.om-zoom button{width:27px;height:27px;font-size:13px;border:1px solid #1e5372a8;border-radius:6px;
   background:#062032db;backdrop-filter:blur(9px);color:#9dd2e6;font-size:15px;line-height:1;
   cursor:pointer;display:grid;place-items:center;font-family:inherit;box-shadow:0 6px 18px #0005}
 .om-zoom button:hover{border-color:#38b4d4;color:#dff6ff}
@@ -186,4 +247,20 @@
 @media(prefers-reduced-motion:reduce){
   .om-live i,.om-route,.om-zone,.om-boat-halo{animation:none}
   .om-wrap,.om-enter{transition:none}
+}
+
+@keyframes omUp{0%{top:100%;opacity:0}20%{opacity:1}80%{opacity:1}100%{top:-3px;opacity:0}}
+@media(max-height:830px){
+  .om-head{height:52px}
+  .om-kpi{padding:6px 10px}.om-kpi b{font-size:18px}
+  .om-card{padding:7px 9px}
+  .om-h3{margin-bottom:6px}
+  .om-d{padding:3px 7px}.om-d i{width:20px;height:20px}
+  .om-ai-m div{padding:4px 7px}.om-ai-m b{font-size:12px}
+  .om-layer{padding:5px 8px}.om-layer p{display:none}
+  .om-flow{height:9px}
+  .om-shot>small{display:none}
+  .om-mod{padding:6px 7px;gap:4px}
+  .om-mod-m div{padding:2px 6px}
+  .om-legend{gap:9px;font-size:9px;height:24px}
 }

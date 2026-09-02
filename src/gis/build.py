@@ -36,6 +36,9 @@ if KEEP:
 shots = {k: (BASE/'assets'/('shot_%s.b64' % k)).read_text(encoding='utf-8').strip()
          for k in ('watch','collide','enforce','board')}
 js += '\nvar SHOT_B64={' + ','.join('"%s":"%s"' % (k, v) for k, v in shots.items()) + '};'
+# 一张图中部底图：放了 assets/map.b64 就用它，否则回落到内置矢量图
+_map = BASE / 'assets' / 'map.b64'
+js += '\nvar MAP_IMG_B64="%s";' % (_map.read_text(encoding='utf-8').strip() if _map.exists() else '')
 css += '\n' + (BASE/'gis-onemap.css').read_text(encoding='utf-8')
 js  += '\n' + (BASE/'gis-onemap.js').read_text(encoding='utf-8')
 

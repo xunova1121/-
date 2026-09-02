@@ -24,6 +24,44 @@ var OM = {
     ["重要","船员配员不符","苏盐渔 07215","滨海港出港口","08:28"],
     ["提示","卫星链路波动","苏连渔 02690","前三岛东 61 海里","07:56"]
   ],
+  /* 运行概况（page.tsx 下半部分与各模块 summary） */
+  run: [
+    ["当前编组","842"], ["编组渔船","2,387"], ["异常脱编","6"],
+    ["配员合规率","96.8%"], ["视频在线","12,704 路"], ["电子围栏","36 处"]
+  ],
+  /* 平台能力架构：自下而上 */
+  arch: [
+    { n:"应用层", v:"9 大模块", c:"九大业务应用 · 省市县三级贯通" },
+    { n:"数据层", v:"18.6 TB", c:"结构化180天 · 视频90天 · 轨迹 4.7 亿" },
+    { n:"网络层", v:"386 ms",  c:"卫星 42.7TB · 5G 53.7TB · 流量池调度" },
+    { n:"感知层", v:"3,268 终端", c:"摄像头 12,704 · 六防传感器 · 渔港抓拍" }
+  ],
+  /* 智能预警（AIWarningWorkspace） */
+  ai: {
+    engine:"边缘模型 3,225 实例 · 云端研判集群 12 节点",
+    metrics:[["今日扫描帧","328,760"],["模型推理次数","8,421,320"],
+             ["平均推理时延","82 ms"],["识别准确率","94.8%"]],
+    events:[
+      ["防碰撞","苏盐渔05168","CPA 降至 0.38nm","紧急"],
+      ["驾驶舱值守","苏连渔01832","连续 7 分钟未检测到人员","紧急"],
+      ["防侧翻","苏盐渔05168","横倾角持续 18.6°","紧急"],
+      ["未穿救生衣","苏通渔03277","甲板作业人员 2 名","重要"],
+      ["异常轨迹","苏盐渔07215","疑似违规作业停留","重要"],
+      ["防中毒","苏连渔02690","机舱 CO 浓度 32ppm","重要"]
+    ]
+  },
+  /* 九大业务能力（ModuleWorkspace.data，指标取前两项） */
+  modules: [
+    { n:"综合态势", i:"◈", m:[["接入渔船","3,268 艘"],["海上作业","2,146 艘"]] },
+    { n:"智能预警", i:"△", m:[["今日预警","38 条"],["平均响应","46 秒"]] },
+    { n:"视频监控", i:"▣", m:[["视频在线","12,704"],["AI 通道","8,432"]] },
+    { n:"港航监管", i:"⌘", m:[["今日出港","186 艘"],["电子围栏","36 处"]] },
+    { n:"执法办案", i:"▤", m:[["在办案件","47 件"],["电子证据","318 份"]] },
+    { n:"应急指挥", i:"✣", m:[["应急事件","3 起"],["指令时延","18 秒"]] },
+    { n:"数据研判", i:"⌁", m:[["数据总量","18.6 TB"],["轨迹记录","4.7 亿"]] },
+    { n:"设备运维", i:"⚙", m:[["终端在线","98.7%"],["待处理故障","43 个"]] },
+    { n:"共享流量池", i:"◉", m:[["本月用量","96.4 TB"],["异常用量","8 艘"]] }
+  ],
   /* 重点功能：实景图取自页面内嵌照片，见 gen-shots.py */
   shots: [
     { k:"watch",   t:"驾驶舱值守识别", d:"连续离岗 7 分钟自动告警" },
@@ -102,7 +140,7 @@ function omMapSvg(w,h){
   s+='<path class="rg-land" d="'+land+'"/>';
   GEO.glows.forEach(function(g){
     var p=P([g[0],g[1]]);
-    s+='<circle class="rg-citylight" cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+omKm(g[2]*2.6).toFixed(1)+'"/>';
+    s+='<circle class="rg-citylight" cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+omKm(g[2]*1.9).toFixed(1)+'"/>';
   });
   if(GEO.yangtze) s+='<path class="rg-yangtze" d="'+smooth(GEO.yangtze,true)+'"/>';
   GEO.islands.forEach(function(is){ s+='<path class="rg-island" d="'+smooth(is,true)+'"/>'; });
@@ -124,7 +162,8 @@ function omMapSvg(w,h){
     return false;
   }
   var dots='';
-  for(var i=0;i<4200;i++){
+  var N=Math.max(600,Math.min(4200,Math.round(w*h/320)));
+  for(var i=0;i<N;i++){
     var dx=rnd(i+1)*w, dy=rnd(i+97.3)*h;
     if(!inLand(dx,dy)||inLake(dx,dy)) continue;
     dots+='<circle cx="'+dx.toFixed(1)+'" cy="'+dy.toFixed(1)+'" r="'
@@ -212,8 +251,8 @@ function omMapSvg(w,h){
 function omDefs(){
   return '<defs>'
     +'<linearGradient id="omLand" x1="0.1" y1="0" x2="1" y2="1">'
-      +'<stop offset="0" stop-color="#27678a"/><stop offset=".5" stop-color="#194b6a"/>'
-      +'<stop offset="1" stop-color="#103450"/></linearGradient>'
+      +'<stop offset="0" stop-color="#1e5878"/><stop offset=".5" stop-color="#14415e"/>'
+      +'<stop offset="1" stop-color="#0c2c44"/></linearGradient>'
     +'<linearGradient id="omSea" x1="0" y1="0" x2="0.6" y2="1">'
       +'<stop offset="0" stop-color="#04203a"/><stop offset="1" stop-color="#01070e"/></linearGradient>'
     +'<pattern id="omHatch" width="7" height="7" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">'
@@ -237,7 +276,7 @@ function omDefs(){
     +'</defs>';
 }
 
-/* ---------- 页面结构：整屏地图 + 浮层 ---------- */
+/* ---------- 页面结构 ---------- */
 function omMarkup(){
   var s='<div class="om-root">';
 
@@ -249,21 +288,65 @@ function omMarkup(){
     +'<button type="button" class="om-enter" data-om="enter">进入工作区 <span>→</span></button>'
   +'</div>';
 
-  s+='<div class="om-stage"><div class="om-map"></div>';
-
-  /* 左浮层：核心指标 / 六防 / 告警 */
-  s+='<div class="om-panel om-l">';
-  s+='<div class="om-card"><div class="om-kpis">';
+  /* 核心指标 */
+  s+='<div class="om-kpis">';
   OM.kpi.forEach(function(k){
     s+='<div class="om-kpi '+k[3]+'"><span>'+omEsc(k[0])+'</span>'
       +'<b>'+omEsc(k[1])+'<em>'+omEsc(k[2])+'</em></b></div>';
   });
-  s+='</div></div>';
+  s+='</div>';
+
+  s+='<div class="om-body">';
+
+  /* 左：六防态势 + 智能预警 */
+  s+='<div class="om-col om-l">';
   s+='<div class="om-card"><div class="om-h3">六防态势<span>8 项风险</span></div><div class="om-def">';
   OM.defense.forEach(function(d){
     s+='<div class="om-d '+d[4]+'"><i>'+omEsc(d[1])+'</i>'
       +'<div><b>'+omEsc(d[0])+'</b><small>'+omEsc(d[3])+'</small></div>'
       +'<em>'+(d[2]?d[2]+' 艘':'正常')+'</em></div>';
+  });
+  s+='</div></div>';
+  s+='<div class="om-card om-grow"><div class="om-h3">智能预警<span>AI 监管引擎运行中</span></div>'
+    +'<div class="om-ai-m">';
+  OM.ai.metrics.forEach(function(m){
+    s+='<div><span>'+omEsc(m[0])+'</span><b>'+omEsc(m[1])+'</b></div>';
+  });
+  s+='</div><div class="om-ai-e">';
+  OM.ai.events.forEach(function(e){
+    s+='<div class="om-ae '+(e[3]==='紧急'?'lv1':'lv2')+'"><i></i>'
+      +'<div><b>'+omEsc(e[0])+'</b><small>'+omEsc(e[1])+' · '+omEsc(e[2])+'</small></div>'
+      +'<em>'+omEsc(e[3])+'</em></div>';
+  });
+  s+='</div></div></div>';
+
+  /* 中：地图 + 重点功能 */
+  s+='<div class="om-col om-c">';
+  s+='<div class="om-card om-mapcard"><div class="om-h3">全省海洋渔船六防监管一张图'
+    +'<span>位置 · 视频 · 姿态 · 环境 · 告警 · 执法联动</span></div>'
+    +'<div class="om-map"></div></div>';
+  s+='<div class="om-card om-shotcard"><div class="om-h3">重点功能<span>实景演示</span></div>'
+    +'<div class="om-shots">';
+  OM.shots.forEach(function(sh){
+    s+='<div class="om-shot"><div class="om-shot-img">'
+      +'<img alt="'+omEsc(sh.t)+'" src="data:image/jpeg;base64,'+SHOT_B64[sh.k]+'"/>'
+      +'<span class="om-shot-t">'+omEsc(sh.t)+'</span></div>'
+      +'<small>'+omEsc(sh.d)+'</small></div>';
+  });
+  s+='</div></div></div>';
+
+  /* 右：运行概况 + 平台能力 + 实时告警 */
+  s+='<div class="om-col om-r">';
+  s+='<div class="om-card"><div class="om-h3">运行概况<span>全省实时</span></div><div class="om-run">';
+  OM.run.forEach(function(r){
+    s+='<div><span>'+omEsc(r[0])+'</span><b>'+omEsc(r[1])+'</b></div>';
+  });
+  s+='</div></div>';
+  s+='<div class="om-card"><div class="om-h3">平台能力架构<span>自下而上贯通</span></div><div class="om-arch">';
+  OM.arch.forEach(function(a,i){
+    s+='<div class="om-layer"><div class="om-layer-h"><b>'+omEsc(a.n)+'</b><em>'+omEsc(a.v)+'</em></div>'
+      +'<p>'+omEsc(a.c)+'</p></div>';
+    if(i<OM.arch.length-1) s+='<div class="om-flow"><i style="animation-delay:'+(i*0.3).toFixed(1)+'s"></i></div>';
   });
   s+='</div></div>';
   s+='<div class="om-card om-grow"><div class="om-h3">实时告警<span>6 条待处置</span></div><div class="om-alerts">';
@@ -274,18 +357,27 @@ function omMarkup(){
   });
   s+='</div></div></div>';
 
-  /* 右浮层：重点功能实景 */
-  s+='<div class="om-panel om-r"><div class="om-card om-grow">'
-    +'<div class="om-h3">重点功能<span>实景演示</span></div><div class="om-shots">';
-  OM.shots.forEach(function(sh){
-    s+='<div class="om-shot"><div class="om-shot-img">'
-      +'<img alt="'+omEsc(sh.t)+'" src="data:image/jpeg;base64,'+SHOT_B64[sh.k]+'"/></div>'
-      +'<div class="om-shot-x"><b>'+omEsc(sh.t)+'</b><small>'+omEsc(sh.d)+'</small></div></div>';
-  });
-  s+='</div></div></div>';
+  s+='</div>';   /* /om-body */
 
-  /* 底部图例 */
-  s+='<div class="om-legend">'
+  /* 九大业务能力 */
+  s+='<div class="om-card om-modbar"><div class="om-h3">九大业务能力'
+    +'<span>点击卡片直接进入对应工作区</span></div><div class="om-mods">';
+  OM.modules.forEach(function(m){
+    s+='<button type="button" class="om-mod" data-om="mod" data-mod="'+omEsc(m.n)+'">'
+      +'<div class="om-mod-h"><i>'+omEsc(m.i)+'</i><b>'+omEsc(m.n)+'</b></div>'
+      +'<div class="om-mod-m">'
+      + m.m.map(function(x){ return '<div><b>'+omEsc(x[1])+'</b><span>'+omEsc(x[0])+'</span></div>'; }).join('')
+      +'</div><u>进入 →</u></button>';
+  });
+  s+='</div></div>';
+
+  s+='</div>';
+  return s;
+}
+
+/* 图例与缩放控件：两种底图下都叠在地图上 */
+function omMapOverlay(){
+  return '<div class="om-legend">'
     +'<span><u class="lg-patrol"></u>执法船艇</span>'
     +'<span><u class="lg-boat"></u>渔船</span>'
     +'<span><u class="lg-route"></u>航线</span>'
@@ -293,15 +385,10 @@ function omMarkup(){
     +'<span><u class="lg-core"></u>核心禁捕区</span>'
     +'<span><u class="lg-cam"></u>视频监控</span>'
     +'<span><u class="lg-ais"></u>AIS基站</span>'
-  +'</div>';
-
-  /* 缩放控件（示意） */
-  s+='<div class="om-zoom"><button type="button" aria-label="定位">◎</button>'
+  +'</div>'
+  +'<div class="om-zoom"><button type="button" aria-label="定位">◎</button>'
     +'<button type="button" aria-label="放大">＋</button>'
     +'<button type="button" aria-label="缩小">－</button></div>';
-
-  s+='</div></div>';
-  return s;
 }
 
 /* ---------- 挂载与进出 ---------- */
@@ -309,8 +396,14 @@ var omWrap=null, omBack=null, omRO=null;
 function omDrawMap(){
   var box=omWrap&&omWrap.querySelector('.om-map');
   if(!box||typeof buildProj!=='function') return;
-  var w=Math.max(400,Math.round(box.clientWidth)), h=Math.max(300,Math.round(box.clientHeight));
-  box.innerHTML=omMapSvg(w,h);
+  var w=Math.max(400,Math.round(box.clientWidth)), h=Math.max(240,Math.round(box.clientHeight));
+  /* 放了外部底图就直接用（assets/map.b64），否则回落到矢量图 */
+  if(typeof MAP_IMG_B64==='string'&&MAP_IMG_B64){
+    box.innerHTML='<img class="om-map-photo" alt="江苏近海监管一张图" '
+      +'src="data:image/jpeg;base64,'+MAP_IMG_B64+'"/>'+omMapOverlay();
+  } else {
+    box.innerHTML=omMapSvg(w,h)+omMapOverlay();
+  }
 }
 function omOpen(){
   if(omWrap){ omWrap.classList.remove('om-out'); return; }
@@ -322,6 +415,7 @@ function omOpen(){
   omWrap.addEventListener('click',function(e){
     var t=e.target.closest('[data-om]'); if(!t) return;
     if(t.dataset.om==='enter') omEnter();
+    else if(t.dataset.om==='mod') omEnter(t.dataset.mod);
   });
   document.addEventListener('keydown',omKey);
   if(omRO) omRO.disconnect();
@@ -330,13 +424,14 @@ function omOpen(){
   });
   omRO.observe(omWrap);
 }
-function omEnter(){
+function omEnter(mod){
   if(!omWrap) return;
   omWrap.classList.add('om-out');
   setTimeout(function(){
     if(omRO){ omRO.disconnect(); omRO=null; }
     if(omWrap){ omWrap.remove(); omWrap=null; }
     document.removeEventListener('keydown',omKey);
+    if(mod) omGoModule(mod);
     omBackBtn();
   },300);
 }
@@ -347,6 +442,13 @@ function omBackBtn(){
   omBack.innerHTML='<span>←</span> 平台一张图';
   omBack.addEventListener('click',function(){ omBack.remove(); omBack=null; omOpen(); });
   document.body.appendChild(omBack);
+}
+/* 进入指定模块：复用页面左侧导航，不另起路由 */
+function omGoModule(name){
+  var btn=[].filter.call(document.querySelectorAll('aside nav button'),function(b){
+    return b.textContent.indexOf(name)>=0;
+  })[0];
+  if(btn) btn.click();
 }
 function omKey(e){ if(e.key==='Enter'||e.key==='Escape') omEnter(); }
 function omBoot(){
