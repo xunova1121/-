@@ -260,8 +260,43 @@ export async function buildBible(project, { onEvent } = {}) {
  * 人设由参考图压（第③层），不靠在提示词里堆字数 —— 见函数体里的说明。
  */
 export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
+  /**
+   * ══════════ 提示词是一摞层，不是一根字符串 ══════════
+   *
+   * 借的是 Blender 的 Modifier Stack：原始数据不动，上面叠一串
+   * **可开关、有名字、看得见自己塞了什么**的层。
+   *
+   * ── 为什么这件事对这个应用特别值 ──
+   *
+   * 这一摞层的顺序是被反复争论出来的：画面描述曾经被埋在 150 字之后
+   *（"人是对的、可就是没在演这一镜"）、景别曾经被参考图的构图压过去
+   *（"标了特写，出来是整个广场"）、两句话打架过（"都要完整出现"撞特写）。
+   *
+   * 每一次的结论都只活在注释里 —— 你看不见，也验不了，只能信我。
+   * 摊成一摞层之后，"场景那段抢戏"这种判断你自己关掉一层出张图就知道了，
+   * 不用等我推理。
+   *
+   * ── 关掉 ≠ 删掉 ──
+   *
+   * 静音的层**照样出现在列表里**，只是不进提示词。删掉的话它从界面上
+   * 消失，人就再也打不开了 —— 那不是非破坏性，那是破坏性带个开关。
+   */
+  const muted = new Set(Array.isArray(shot?.promptMute) ? shot.promptMute : []);
+  const layers = [];
   const parts = [];
-  if (includeStyle && bible?.style?.anchor) parts.push(bible.style.anchor);
+  /**
+   * @param id   稳定的层名。存在 shot.promptMute 里，所以**不能随便改**——
+   *             改了等于把用户关掉的层全部打开，而且不报错。
+   * @param name 人话，界面上显示的
+   */
+  const add = (id, name, text) => {
+    if (!text) return;
+    const off = muted.has(id);
+    layers.push({ id, name, text, muted: off });
+    if (!off) parts.push(text);
+  };
+
+  if (includeStyle && bible?.style?.anchor) add('style', '画风锚', bible.style.anchor);
 
   const cast = matchCharacters(bible, shot);
   const scene = matchScene(bible, shot);
@@ -300,7 +335,7 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
   /** 这一镜带的参考图里，有没有用户自己传的照片 */
   const hasPhoto = kept.uploaded > 0;
 
-  parts.push(shot.description || '');
+  add('description', '这一镜演什么', shot.description || '');
 
   /**
    * ══════════ 这一镜画面里有几个人 ══════════
@@ -325,7 +360,7 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
    * 一个人时不说：那是废话，还白占提示词字数（视频精准模式只有 200 字）。
    */
   if (cast.length > 1) {
-    parts.push(`画面里有 ${cast.length} 个人：${cast.map((c) => c.name).join('、')}`);
+    add('headcount', '画面里有几个人', `画面里有 ${cast.length} 个人：${cast.map((c) => c.name).join('、')}`);
   }
 
   /**
@@ -350,15 +385,15 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
        * 服装/配饰/场景跟着文字。而且服装那段要**完整给**，不能像下面那样
        * 截前三段 —— 它现在是唯一的服装来源了。
        */
-      parts.push(`【${c.name}】脸、发型、肤色以参考图那个人为准；`
+      add('cast', '人物长相', `【${c.name}】脸、发型、肤色以参考图那个人为准；`
         + `服装与配饰按这里写的来：${full || '按设定集'}`);
     } else if (hasRefs) {
       // 留三段而不是两段：第三段往往正好是服装配色，而配色是最强的身份线索之一。
       // 参考图给的是设定图（另一个姿势、另一个背景），文字仍然要把关键特征点住。
       const brief = full.split(/[，,。]/).slice(0, 3).join('，');
-      parts.push(brief ? `【${c.name}】${brief}，外貌以参考图为准` : `【${c.name}】外貌以参考图为准`);
+      add('cast', '人物长相', brief ? `【${c.name}】${brief}，外貌以参考图为准` : `【${c.name}】外貌以参考图为准`);
     } else {
-      parts.push(`【${c.name}】${full}`);
+      add('cast', '人物长相', `【${c.name}】${full}`);
     }
   }
 
@@ -366,11 +401,11 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
     const sv = variants.pickVariant(scene, shot);
     const full = variants.describeWith(scene, sv);
     const brief = full.split(/[，,。]/).slice(0, 3).join('，');
-    parts.push(`【场景·${scene.name}】${hasRefs ? brief : full}`);
+    add('scene', '场景环境', `【场景·${scene.name}】${hasRefs ? brief : full}`);
   }
 
   for (const prop of props) {
-    parts.push(`【${prop.name}】${prop.appearance}`);
+    add('props', '关键道具', `【${prop.name}】${prop.appearance}`);
   }
 
   /**
@@ -380,7 +415,7 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
    * 对一张静态图说"镜头缓慢推进"没有意义，只会占掉画面描述的权重。
    */
   const skillParts = skills.fragmentsFor(shot.skills, { target: 'image' });
-  parts.push(...skillParts.look, ...skillParts.action, ...skillParts.mood);
+  for (const t of [...skillParts.look, ...skillParts.action, ...skillParts.mood]) add('skills', '技法卡', t);
 
   /**
    * 排过位的话，机位用**算出来的那句**，而不是 `camera: "中景"`。
@@ -391,8 +426,8 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
    * 其实是我们从来没说清楚过。
    */
   const staged = previz.cameraLine(shot, cast[0]?.name);
-  if (staged) parts.push(`镜头：${staged}`);
-  else if (shot.camera) parts.push(`镜头：${shot.camera}`);
+  if (staged) add('camera', '机位与景别', `镜头：${staged}`);
+  else if (shot.camera) add('camera', '机位与景别', `镜头：${shot.camera}`);
   /**
    * ⚠ 景别后面补一句**画面上能验的话**。
    *
@@ -401,7 +436,7 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
    * 具体得多，也难被无视得多 —— 这是"提示词说了算"这条路能不能走通的关键。
    */
   const framing = previz.framingHint(shot.camera);
-  if (framing) parts.push(framing);
+  add('framing', '景别怎么算数（画面上验得出的那句）', framing);
   /**
    * ══════════ 参考图管"是什么"，文字管"怎么拍" ══════════
    *
@@ -424,13 +459,16 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
    * 那就把这条线**明写出来**。模型不会自己知道我们是这么分的。
    */
   if (kept.images.length) {
-    parts.push('参考图只用来确定人物长相、服装、场景环境和色调；'
+    add('ref-policy', '参考图管"是什么"、文字管"怎么拍"',
+      '参考图只用来确定人物长相、服装、场景环境和色调；'
       + '**画面的景别、机位、构图完全按上面的文字来，不要沿用参考图的取景**');
   }
-  if (bible?.style?.palette) parts.push(`主色调：${bible.style.palette}`);
+  add('palette', '主色调', bible?.style?.palette ? `主色调：${bible.style.palette}` : '');
 
   return {
     prompt: parts.filter(Boolean).join('，'),
+    /** 这一摞层：界面上摊开给人看、给人关。关掉的也在里面（标着 muted） */
+    layers,
     negative: bible?.style?.negative || '',
     // 镜头种子 = 角色种子（有主角时）+ 镜号偏移。
     // 完全用同一颗种子会导致每镜构图雷同，加镜号偏移既保风格又留变化。

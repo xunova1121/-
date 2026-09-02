@@ -873,3 +873,14 @@ input {
 /* 撤销：和指令框同一张卡 —— 它是指令框的配套，藏起来等于没有 */
 .undo-bar { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 .undo-bar:empty { display: none; }
+
+/* ── 提示词分层（Modifier Stack）── */
+.layer-stack { display: flex; flex-direction: column; gap: 2px; }
+.layer-row {
+  display: grid; grid-template-columns: 20px 1fr; gap: 8px 8px; align-items: baseline;
+  padding: 7px 4px; border-radius: 7px; font-size: 12.5px;
+}
+.layer-row .layer-name { font-weight: 600; }
+.layer-row .layer-text { grid-column: 2; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+/* 关掉的层要看得见还在（划掉、变淡），不是消失 —— 消失了就再也打不开 */
+.layer-row.off .layer-name, .layer-row.off .layer-text { opacity: .42; text-decoration: line-through; }

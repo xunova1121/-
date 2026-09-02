@@ -2096,6 +2096,11 @@ async function analyzeScriptRaw(projectId, {
  */
 const SHOT_EDITABLE = [
   'description', 'camera', 'motion', 'dialogue', 'scene', 'characters', 'duration', 'link', 'skills',
+  /**
+   * 这一镜关掉了提示词的哪几层（见 consistency.assemblePrompt 的 Modifier Stack）。
+   * 不进白名单的话，界面上关了存不下去 —— 而"改了没反应"是最难查的一类。
+   */
+  'promptMute',
   // 这一镜画面里看得见的关键道具。不进白名单的话界面上改了存不下去，
   // 而道具消失那条检查就永远只能听模型的、人纠正不了
   'props',
@@ -2430,7 +2435,11 @@ export function updateShot(projectId, shotId, patch = {}) {
   for (const key of SHOT_EDITABLE) {
     if (!(key in patch)) continue;
     let value = patch[key];
-    if (key === 'duration') {
+    if (key === 'promptMute') {
+      // 只收字符串数组。存进去一个对象或数字，assemblePrompt 那边的
+      // Set.has 会静默失配 —— 表现是"关了没生效"，而没有任何一处报错
+      value = Array.isArray(value) ? value.map((x) => String(x)).filter(Boolean) : [];
+    } else if (key === 'duration') {
       value = Number(value);
       if (!Number.isFinite(value) || value <= 0) continue;
       value = Math.min(30, Math.max(0.5, value));
@@ -4175,6 +4184,13 @@ export function promptsFor(projectId, shotId) {
 
   return {
     now: { image: image.prompt, video },
+    /**
+     * 这一镜的提示词是哪几层拼出来的（借 Blender 的 Modifier Stack）。
+     *
+     * ⚠ 关掉的层**也在这里面**，标着 muted —— 不然界面上那一层直接消失，
+     * 人就再也打不开了。那不是非破坏性，那是破坏性带个开关。
+     */
+    layers: image.layers || [],
     used: { image: shot.prompt || '', video: shot.videoPrompt || '' },
     // 改过描述但没重出 → 现算的和上次用的不一样，说清楚哪一条会在重出时生效
     imageStale: Boolean(shot.prompt && shot.prompt !== image.prompt),

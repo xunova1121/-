@@ -46,6 +46,8 @@ let mPass = 0;
   });
 }
 
+const rejections = [];
+
 const PW = process.env.PLAYWRIGHT_PATH || 'playwright';
 let chromium; let devices;
 try {
@@ -188,6 +190,18 @@ page.on('response', (r) => {
 });
 const errs = [];
 page.on('pageerror', (e) => errs.push(e.message));
+/**
+ * ⚠ async 函数里抛出的错**不会**变成 pageerror，它是 unhandledrejection。
+ *
+ * 这条护栏是拿一个真 bug 换来的：openWhy 是 async，里面一个
+ * `add is not defined`（那个函数只存在于电脑端 lib.js）让手机上
+ * 「看看为什么」整颗按钮失效了一整轮，而走查全绿 —— 因为只监听 pageerror。
+ */
+await page.addInitScript(() => {
+  window.addEventListener('unhandledrejection', (e) => {
+    (window.__fdRejections ||= []).push(String(e.reason?.message || e.reason));
+  });
+});
 page.on('console', (m) => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
 
 // ①② 这两步是**故意**不带码 / 带错码的，那些 401 是预期结果
@@ -1105,6 +1119,50 @@ const realErrs = errs.filter((e) => !/401/.test(e));
   const card1 = await page.locator('.shot').first().evaluate((el) => el.textContent || '').catch(() => '');
   console.log('   第 1 镜退回去了：', !/大特写/.test(card1) ? '✓' : `✕ ${card1.slice(0, 60)}`);
 }
+
+/**
+ * ⑰ 提示词分层（手机端）
+ *
+ * 放在「看看为什么」抽屉里：先看有没有明确原因 → 没有的话看看是不是
+ * 哪一层在抢戏 → 再决定花不花这笔钱。顺序就是判断顺序。
+ */
+{
+  console.log('\n⑰ 提示词分层：');
+  await page.locator('.tab', { hasText: '分镜' }).click();
+  await page.waitForTimeout(700);
+  const why = page.locator('.shot .btn.primary', { hasText: '为什么' }).first();
+  if (await why.count()) {
+    await why.evaluate((el) => el.click());
+    await page.waitForTimeout(1800);
+    const fold = page.locator('.sheet details.layer-fold').first();
+    console.log('   「看看为什么」里有分层这一块：', (await fold.count()) === 1 ? '✓' : '✕');
+    await fold.evaluate((el) => { el.open = true; }).catch(() => {});
+    await page.waitForTimeout(900);
+    const rows = await page.locator('.sheet .layer-row').count();
+    console.log('   摊开了几层：', rows >= 3 ? `✓ ${rows} 层` : `✕ ${rows}`);
+    const names = (await page.locator('.sheet .layer-name').allTextContents()).join('|');
+    console.log('   每层有中文名：', /演什么|画风|人物|场景|景别/.test(names) ? `✓ ${names.slice(0, 30)}` : `✕ ${names}`);
+    /**
+     * ⚠ 比的是 **DOM 顺序**，不是文本里谁先出现。
+     * 第一版拿 indexOf('重出') 找按钮，结果匹配到的是**诊断正文**里的
+     * "→ 重出这张图。"。用文本位置代替元素位置，验的是运气。
+     */
+    const order = await page.locator('.sheet').first().evaluate((el) => {
+      const f = el.querySelector('details.layer-fold');
+      const btn = [...el.querySelectorAll('button')].find((b) => /重出|再出一张/.test(b.textContent || ''));
+      if (!f) return 'no-fold';
+      if (!btn) return 'no-btn';
+      return (f.compareDocumentPosition(btn) & 4) ? 'ok' : 'wrong';
+    });
+    console.log('   分层排在重出按钮之前（先搞明白，再决定花钱）：',
+      order === 'ok' || order === 'no-btn' ? '✓' : `✕ ${order}`);
+  } else {
+    console.log('   ✕ 分镜页上找不到「看看为什么」按钮');
+  }
+}
+
+rejections.push(...(await page.evaluate(() => window.__fdRejections || []).catch(() => [])));
+console.log('未处理的 Promise 拒绝：', rejections.length ? `✕ ${rejections.slice(0, 3).join(' | ')}` : '无 ✓');
 
 console.log('意料之外的 4xx：', unexpected4xx.length ? `✕ ${unexpected4xx.slice(0, 4).join('、')}` : '无 ✓');
 console.log('\n页面报错：', realErrs.length ? realErrs.slice(0, 4) : '无');

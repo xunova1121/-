@@ -489,6 +489,18 @@ export const CAPABILITIES = [
   },
   {
     /**
+     * 提示词分层。这是**排查用的**，但归"内容"不归"配置"——
+     * "这一镜为什么不像"是创作问题，而审片是在手机上做的。
+     */
+    id: 'prompt-layers',
+    name: '看这条提示词由哪几层拼成，并且能关掉某一层',
+    api: 'GET /projects/:id/shots/:sid/prompts → layers',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
+    /**
      * 撤销。指令框一个回车能改五十镜，所以这一条和它是配套的 ——
      * 两端都要有：手滑最容易发生在手机上。
      */

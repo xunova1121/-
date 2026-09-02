@@ -120,6 +120,22 @@ function h(tag, attrs = {}, ...kids) {
   return el;
 }
 
+/**
+ * 往一个元素里塞若干子节点，跳过 null。
+ *
+ * ⚠ 这个函数**曾经不存在**，而 openWhy 里用了它五次 ——
+ * 电脑端 lib.js 有 add()，手机端没有，改版时照着电脑端那边抄了过来。
+ *
+ * 后果：手机上「看看为什么」按下去**什么都不发生**，从卡片改版那次
+ * 起就一直是坏的。而它没被任何一层走查抓到，因为 openWhy 是 async ——
+ * ReferenceError 变成了 **unhandled rejection**，不是 pageerror，
+ * 而走查只监听 pageerror。现在 mcheck 也监听未处理的 Promise 拒绝了。
+ */
+const add = (el, ...kids) => {
+  for (const k of kids) if (k !== null && k !== undefined && k !== false) el.append(k);
+  return el;
+};
+
 const clear = (el) => {
   while (el.firstChild) el.removeChild(el.firstChild);
   return el;
@@ -2740,6 +2756,57 @@ async function openWhy(s, fixable) {
       h('div', { class: 'diag-why' }, it.why),
       h('div', { class: 'diag-how' }, `→ ${it.how}`),
       it.costs ? h('span', { class: 'diag-cost' }, '这一下要重新出图（花钱）') : null)));
+
+    /**
+     * ══════════ 提示词是哪几层拼出来的 ══════════
+     *
+     * 放在诊断**下面**、重出按钮**上面**，因为顺序就是判断顺序：
+     * 先看有没有明确原因 → 没有的话看看是不是哪一层在抢戏 → 再决定花不花这笔钱。
+     *
+     * 关掉一层不删任何东西，随时能打开（借 Blender 的 Modifier Stack）。
+     */
+    // cap:prompt-layers
+    if (s.imagePath) {
+      const stack = h('div', { class: 'layer-stack' });
+      const paintLayers = (list) => {
+        clear(stack);
+        for (const l of list || []) {
+          stack.append(h('label', { class: `layer-row${l.muted ? ' off' : ''}` },
+            h('input', {
+              type: 'checkbox',
+              checked: !l.muted,
+              onchange: async (e) => {
+                const now = new Set((list || []).filter((x) => x.muted).map((x) => x.id));
+                if (e.target.checked) now.delete(l.id); else now.add(l.id);
+                try {
+                  await api(`/projects/${project.id}/shots/${s.id}`, {
+                    method: 'PATCH', body: { promptMute: [...now] }
+                  });
+                  const fresh = await api(`/projects/${project.id}/shots/${s.id}/prompts`);
+                  paintLayers(fresh.layers || []);
+                  toast(e.target.checked ? `打开了「${l.name}」` : `关掉了「${l.name}」—— 重出才生效`, 'ok');
+                } catch (err) {
+                  toast(err.message, 'bad');
+                  e.target.checked = !e.target.checked;
+                }
+              }
+            }),
+            h('span', { class: 'layer-name' }, l.name),
+            h('span', { class: 'layer-text' }, l.text)));
+        }
+      };
+      // ⚠ 自己的 class：shot-more 手机端别处也在用，混着取会抓错人
+      const fold = h('details', { class: 'layer-fold', style: 'margin-top:12px' },
+        h('summary', {}, '这条提示词由哪几层拼成'),
+        h('div', { class: 'muted', style: 'font-size:12px;margin:6px 0' },
+          '关掉一层再重出一张，就能看出那一层起了多大作用。关掉不删任何东西。'),
+        stack);
+      add(host, fold);
+      api(`/projects/${project.id}/shots/${s.id}/prompts`)
+        .then((pr) => paintLayers(pr.layers || []))
+        .catch(() => { stack.append(h('div', { class: 'muted' }, '取不到')); });
+    }
+
     if (fixable) {
       add(host, h('button', {
         class: 'btn primary wide', style: 'margin-top:12px', disabled: job.running,

@@ -8816,6 +8816,136 @@ section('这一镜为什么不对');
   check('而且说得出为什么选它', /参考图/.test(list[0].why), list[0].why);
 }
 
+section('提示词分层：显出来、能关掉，但一个字都不许改变');
+{
+  const cons = await import('../core/pipeline/consistency.js');
+
+  /**
+   * ══════════ 这一节的第一条最重要 ══════════
+   *
+   * assemblePrompt 是全应用最要命的函数：全片每一张图都从它出来。
+   * 把它拆成"分层"是为了让人看得见、关得掉 —— 但**不许顺手改变输出**。
+   *
+   * 所以先钉一根桩：一个固定的分镜，拼出来的提示词必须一字不差。
+   * 这条断言的价值不在今天，在以后每一次有人动这个函数的时候。
+   */
+  const bible = {
+    style: { anchor: '国风水墨', palette: '青灰与赭石', negative: '多余的手指' },
+    characters: [{ name: '阿澜', appearance: '少年，藏青立领制服，左胸编号牌', seed: 100 }],
+    scenes: [{ name: '码头', appearance: '清晨，薄雾，木栈桥', seed: 7 }],
+    props: []
+  };
+  const shot = {
+    index: 3, characters: ['阿澜'], scene: '码头',
+    description: '阿澜走向栈桥', camera: '中景', skills: []
+  };
+
+  const EXPECT = '国风水墨，阿澜走向栈桥，【阿澜】少年，藏青立领制服，左胸编号牌，'
+    + '【场景·码头】清晨，薄雾，木栈桥，镜头：中景，画面到腰部以上，人物动作和上半身姿态清晰，'
+    + '主色调：青灰与赭石';
+  check('拼出来的提示词一字没变（这根桩是给以后每次改这个函数用的）',
+    cons.assemblePrompt(bible, shot).prompt === EXPECT,
+    cons.assemblePrompt(bible, shot).prompt);
+
+  // ── 分层看得见 ──
+  {
+    const { layers } = cons.assemblePrompt(bible, shot);
+    check('返回了分层', Array.isArray(layers) && layers.length > 0, JSON.stringify(layers?.length));
+    const ids = layers.map((l) => l.id);
+    check('每层有 id、有中文名、有它塞进去的那句话',
+      layers.every((l) => l.id && l.name && typeof l.text === 'string'), JSON.stringify(layers[0]));
+    /**
+     * ⚠ 顺序就是拼进提示词的顺序 —— 这一天里为这个顺序争论过三回
+     *（描述被埋在 150 字之后、景别被参考图压过去、两句话打架）。
+     * 层的顺序要是和实际拼接顺序不一致，那这个面板就是在骗人。
+     */
+    check('层的顺序 = 真实拼接顺序',
+      layers.filter((l) => l.text).map((l) => l.text).join('，') === EXPECT,
+      layers.filter((l) => l.text).map((l) => l.text).join('，'));
+    check('画面描述排在风格锚之后、角色之前',
+      ids.indexOf('description') > ids.indexOf('style') && ids.indexOf('description') < ids.indexOf('cast'),
+      JSON.stringify(ids));
+  }
+
+  // ── 能关掉，而且只关掉那一层 ──
+  {
+    const muted = cons.assemblePrompt(bible, { ...shot, promptMute: ['scene'] });
+    check('关掉「场景」那一层，场景那句就没了',
+      !muted.prompt.includes('木栈桥'), muted.prompt);
+    check('别的层一个都没受影响',
+      muted.prompt.includes('阿澜走向栈桥') && muted.prompt.includes('国风水墨')
+        && muted.prompt.includes('画面到腰部以上'), muted.prompt);
+    /**
+     * ⚠ 关掉 ≠ 删掉。层还在列表里，只是标着 muted ——
+     * 否则界面上那一层直接消失，人就没法把它打开了。
+     */
+    const layer = muted.layers.find((l) => l.id === 'scene');
+    check('那一层还在列表里，只是标成关着（否则再也打不开）',
+      layer && layer.muted === true, JSON.stringify(layer));
+  }
+
+  {
+    /** 关掉一个不存在的层不该出事 —— 老项目里存着早年层名的情况会有 */
+    const ok = cons.assemblePrompt(bible, { ...shot, promptMute: ['不存在的层'] });
+    check('关一个不认识的层，提示词照旧', ok.prompt === EXPECT, ok.prompt);
+  }
+}
+
+section('关掉一层，真的少发那一句（不是只在界面上划掉）');
+{
+  /**
+   * ⚠ 上一节验的是 assemblePrompt 这个函数。这一节验的是**整条链**：
+   * 关掉 → 存下来 → 下次出图时真的少发那一句。
+   *
+   * 这个项目里反复出现的失败就是"同一件事两条路径、只接了一条"。
+   * 只测函数、不测接线，接线断了照样全绿 —— 而表现是
+   * "我明明关了那一层，出来还是老样子"，看不出是哪儿断的。
+   */
+  const studioMod = await import('../core/pipeline/studio.js');
+  const storeMod = await import('../core/store.js');
+
+  const p = storeMod.create({ title: '分层走查' });
+  storeMod.save({
+    ...storeMod.read(p.id),
+    bible: {
+      style: { anchor: '国风水墨', palette: '青灰与赭石', negative: '' },
+      characters: [{ name: '阿澜', appearance: '少年，藏青立领制服', seed: 1 }],
+      scenes: [{ name: '码头', appearance: '清晨，薄雾，木栈桥', seed: 2 }],
+      props: []
+    },
+    shots: [{
+      id: 'sh1', index: 1, characters: ['阿澜'], scene: '码头',
+      description: '阿澜走向栈桥', camera: '中景', skills: [], imagePath: '/x.png'
+    }]
+  });
+
+  const before = studioMod.promptsFor(p.id, 'sh1');
+  check('接口把分层带出来了', (before.layers || []).length > 0, String(before.layers?.length));
+  check('没关任何层时，场景那句在提示词里', before.now.image.includes('木栈桥'), before.now.image);
+
+  /** 存进去要能存住 —— 不进 SHOT_EDITABLE 白名单的话，改了存不下去而且不报错 */
+  studioMod.updateShot(p.id, 'sh1', { promptMute: ['scene'] });
+  check('promptMute 存得住（在可改字段白名单里）',
+    JSON.stringify(storeMod.read(p.id).shots[0].promptMute) === '["scene"]',
+    JSON.stringify(storeMod.read(p.id).shots[0].promptMute));
+
+  const after = studioMod.promptsFor(p.id, 'sh1');
+  check('关掉之后，下次出图那条真的不带场景了', !after.now.image.includes('木栈桥'), after.now.image);
+  check('别的层一句没少',
+    after.now.image.includes('阿澜走向栈桥') && after.now.image.includes('国风水墨'), after.now.image);
+  const sc = after.layers.find((l) => l.id === 'scene');
+  check('那一层还列在接口返回里（标着关着，否则界面上再也打不开）',
+    sc && sc.muted === true, JSON.stringify(sc));
+
+  /** 乱值不能静默失配：存进去一个数字，Set.has 永远不命中，表现是"关了没生效" */
+  studioMod.updateShot(p.id, 'sh1', { promptMute: [123, '', 'scene'] });
+  check('乱值被规整成字符串数组（不然关了没生效，还不报错）',
+    JSON.stringify(storeMod.read(p.id).shots[0].promptMute) === '["123","scene"]',
+    JSON.stringify(storeMod.read(p.id).shots[0].promptMute));
+
+  storeMod.remove(p.id);
+}
+
 section('撤销：一个回车能改五十镜，就得有一条退回来的路');
 {
   const undo = await import('../core/undo.js');

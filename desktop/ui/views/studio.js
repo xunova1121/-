@@ -4920,6 +4920,69 @@ export default {
  * 两样打架时模型多半跟着图走。所以改完描述只重出视频是不够的，
  * 图也得重出一张，否则会得到"画面还是旧的、动作有点新"的四不像。
  */
+/**
+ * ══════════ 提示词的那一摞层 ══════════
+ *
+ * 借 Blender 的 Modifier Stack：原始数据不动，上面叠一串**可开关、
+ * 有名字、看得见自己塞了什么**的层。
+ *
+ * ── 为什么这个面板值得存在 ──
+ *
+ * 这一摞的顺序是被反复争论出来的：画面描述曾经被埋在 150 字之后
+ *（"人是对的、可就是没在演这一镜"）、景别曾经被参考图的构图压过去
+ *（"标了特写，出来是整个广场"）。每一次的结论都只活在代码注释里 ——
+ * 你看不见，也验不了，只能信我。
+ *
+ * 摊开之后，"场景那段抢戏"这种判断你自己关掉一层重出一张就知道了。
+ *
+ * ⚠ 关掉的层**照样列在这儿**（划掉、复选框不打勾），不是消失 ——
+ * 消失了人就再也打不开。
+ */
+function layerStack(project, shot, layers) {
+  if (!layers?.length) return null;
+  const host = h('div', { class: 'layer-stack' });
+
+  const paint = (list) => {
+    clear(host);
+    add(host,
+      h('div', { class: 'field-hint', style: 'margin:0 0 6px' },
+        '这条提示词是下面这几层按顺序拼出来的。关掉一层再重出一张，'
+        + '就能看出那一层到底起了多大作用 —— 关掉不删任何东西，随时能打开。'),
+      ...list.map((l) => h('label', { class: `layer-row${l.muted ? ' off' : ''}` },
+        h('input', {
+          type: 'checkbox',
+          checked: !l.muted,
+          onchange: async (e) => {
+            const now = new Set(list.filter((x) => x.muted).map((x) => x.id));
+            if (e.target.checked) now.delete(l.id);
+            else now.add(l.id);
+            try {
+              await api(`/projects/${project.id}/shots/${shot.id}`, {
+                method: 'PATCH', body: { promptMute: [...now] }
+              });
+              const fresh = await api(`/projects/${project.id}/shots/${shot.id}/prompts`);
+              paint(fresh.layers || []);
+              toast(e.target.checked ? `打开了「${l.name}」` : `关掉了「${l.name}」—— 重出这一镜才生效`, 'ok');
+            } catch (err) {
+              toast(err.message, 'bad');
+              e.target.checked = !e.target.checked;
+            }
+          }
+        }),
+        h('span', { class: 'layer-name' }, l.name),
+        h('span', { class: 'layer-text mono' }, l.text))));
+  };
+  paint(layers);
+  /**
+   * ⚠ 用**自己的 class**（layer-fold），不要复用 shot-prompt。
+   * shot-prompt 被技法卡那边也用着 —— 一张卡上有三个 `.shot-prompt`，
+   * 任何按位置取的选择器都会抓错人，而抓错时没有任何报错。
+   */
+  return h('details', { class: 'layer-fold', style: 'margin-top:10px' },
+    h('summary', {}, `这条提示词由 ${layers.length} 层拼成（可以关掉某一层试试）`),
+    host);
+}
+
 function promptPanel(project, shot, sc) {
   if (!shot.imagePath && !shot.videoPath) return null;
   const body = h('div', { class: 'shot-prompt-body' }, '点开加载…');
@@ -4966,7 +5029,9 @@ function promptPanel(project, shot, sc) {
                 : '这一镜还没出过，上面这条就是它将要用的。'),
         r.refs?.length
           ? h('div', { class: 'field-hint', style: 'margin:6px 0 0' }, `随提示词一起发的设定集参考图：${r.refs.join('、')}`)
-          : null);
+          : null,
+        // cap:prompt-layers
+        layerStack(project, shot, r.layers));
     } catch (e) {
       clear(body);
       body.append(`取不到：${e.message}`);
