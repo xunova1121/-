@@ -1,4 +1,4 @@
-/* ===== 江苏渔业智慧平台 · 一张图 ===== */
+/* ===== 江苏渔业智慧平台 · 一张图（整屏地图 + 浮层） ===== */
 /* 隔离页面自身的全局元素样式。必须用 :where() 把特指度压到 0，
    否则 .om-wrap div（0,1,1）会盖过下面所有单类名规则（0,1,0）。 */
 .om-wrap *,.om-wrap *:before,.om-wrap *:after{box-sizing:border-box}
@@ -6,30 +6,26 @@
   margin:0;padding:0;border:0;background:none;font:inherit;color:inherit;text-decoration:none;
   letter-spacing:normal;line-height:normal;box-shadow:none;border-radius:0;
   width:auto;height:auto;text-align:left}
-.om-wrap{position:fixed;inset:0;z-index:120;overflow:auto;
-  background:#04121f radial-gradient(120% 90% at 50% 0,#0a3355 0,#06223a 42%,#03101c 100%);
+
+.om-wrap{position:fixed;inset:0;z-index:120;overflow:hidden;background:#03101c;
   font-family:"Microsoft YaHei","PingFang SC","Source Han Sans SC",Arial,sans-serif;
   color:#d6e8f2;transition:opacity .3s ease,transform .3s ease}
 .om-wrap.om-out{opacity:0;transform:scale(1.015);pointer-events:none}
-.om-root{height:100%;display:flex;flex-direction:column;gap:10px;padding:14px 16px 12px;
-  min-width:1120px}
-.om-wrap:before{content:"";position:fixed;inset:0;pointer-events:none;
-  background:linear-gradient(#1d6f9410 1px,transparent 1px),linear-gradient(90deg,#1d6f9410 1px,transparent 1px);
-  background-size:56px 56px}
+.om-root{height:100%;display:flex;flex-direction:column}
 
 /* 顶栏 */
-.om-head{display:flex;align-items:center;gap:14px;padding:0 4px 12px;
-  border-bottom:1px solid #1b4a68;position:relative}
-.om-logo{width:40px;height:40px;border-radius:8px;flex:none;display:grid;place-items:center;
-  background:linear-gradient(135deg,#1877b5,#12a5b8);color:#fff;font-size:19px;font-weight:700;
+.om-head{flex:none;display:flex;align-items:center;gap:14px;height:62px;padding:0 20px;
+  background:linear-gradient(#062134,#05192a);border-bottom:1px solid #1b4a68;position:relative;z-index:6}
+.om-logo{width:36px;height:36px;border-radius:8px;flex:none;display:grid;place-items:center;
+  background:linear-gradient(135deg,#1877b5,#12a5b8);color:#fff;font-size:17px;font-weight:700;
   box-shadow:0 6px 18px #0b6f9a55}
-.om-h1{font-size:21px;letter-spacing:1.5px;color:#eaf7ff;font-weight:700;line-height:1.2}
-.om-sub{margin-top:4px;font-size:11px;color:#7ea8bf;letter-spacing:.5px}
+.om-h1{font-size:19px;letter-spacing:1.5px;color:#eaf7ff;font-weight:700;line-height:1.2}
+.om-sub{margin-top:3px;font-size:10.5px;color:#7ea8bf;letter-spacing:.5px}
 .om-live{margin-left:auto;display:flex;align-items:center;font-size:11px;color:#8fb6c9}
 .om-live i{width:7px;height:7px;border-radius:50%;background:#3ddba0;box-shadow:0 0 9px #3ddba0;
   margin-right:8px;animation:omPulse 1.4s infinite}
 .om-live b{color:#dff6ff;font-weight:600}
-.om-enter{margin-left:16px;height:38px;padding:0 20px;border:1px solid #2fa8c8;border-radius:6px;
+.om-enter{margin-left:18px;height:36px;padding:0 20px;border:1px solid #2fa8c8;border-radius:6px;
   background:linear-gradient(135deg,#1580bd,#13a2b4);color:#fff;font-family:inherit;font-size:13px;
   font-weight:700;letter-spacing:1px;cursor:pointer;display:flex;align-items:center;gap:9px;
   box-shadow:0 8px 22px #0b6f9a4d;transition:transform .15s,box-shadow .15s}
@@ -37,141 +33,132 @@
 .om-enter:hover{transform:translateY(-1px);box-shadow:0 12px 26px #0b6f9a70}
 .om-enter:hover span{transform:translateX(4px)}
 
-/* 核心指标 */
-.om-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
-.om-kpi{position:relative;padding:9px 13px;border:1px solid #1e5372;border-radius:6px;
-  background:linear-gradient(135deg,#0e304c,#0a2437);overflow:hidden}
-.om-kpi:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--c,#2f9fd0)}
-.om-kpi.blue{--c:#3f9fe0}.om-kpi.cyan{--c:#2fd0e0}.om-kpi.orange{--c:#f2a94c}
-.om-kpi.green{--c:#3ddba0}.om-kpi.purple{--c:#9a8ff0}
-.om-kpi span{display:block;font-size:11px;color:#89aec2}
-.om-kpi b{display:block;margin:3px 0 2px;font-size:23px;font-weight:700;color:#eaf7ff;line-height:1.1}
-.om-kpi b em{font-style:normal;font-size:12px;color:#7fb0c6;margin-left:4px;font-weight:400}
-.om-kpi small{font-size:10px;color:#6f96aa}
+/* 舞台：地图铺满，面板浮在其上 */
+.om-stage{flex:1;position:relative;min-height:0;overflow:hidden}
+.om-map{position:absolute;inset:0}
+.om-map-svg{width:100%;height:100%;display:block}
+.om-stage:after{content:"";position:absolute;inset:0;pointer-events:none;
+  box-shadow:inset 0 0 160px 30px #00060c99}
 
-/* 主体三栏 */
-.om-body{flex:1;display:grid;grid-template-columns:288px 1fr 300px;
-  grid-template-rows:minmax(0,1fr);gap:10px;min-height:0}
-.om-left,.om-right,.om-mid{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
-.om-box{border:1px solid #1e5372;border-radius:6px;background:#0b2740cc;padding:11px 12px}
-.om-box.om-grow,.om-box.om-full{flex:1;display:flex;flex-direction:column;min-height:0}
-.om-h3{margin:0 0 10px;font-size:12px;font-weight:700;color:#e2f4ff;letter-spacing:1px;
+/* ---- 地图要素 ---- */
+/* 覆盖 gis.css 的通用底图配色：整屏大图需要更强的海陆对比 */
+.om-map-svg .rg-sea-deep{fill:url(#omSea)}
+.om-map-svg .rg-land{fill:url(#omLand);stroke:#6fdcf8;stroke-width:1.4}
+.om-map-svg .rg-island{fill:url(#omLand);stroke:#6fdcf8}
+.om-map-svg .rg-river{stroke:#8fdcf5;opacity:.42;stroke-width:1.1}
+.om-map-svg .rg-lake{fill:#0d3550;stroke:#63c4e4;stroke-width:1;opacity:.9}
+.om-map-svg .rg-yangtze{fill:#08243a;stroke:#3f93b8;stroke-width:.9;opacity:.75}
+.om-map-svg .rg-citylight{opacity:1}
+.om-settle{fill:#cdf3ff;pointer-events:none}
+.om-shelf{fill:none;stroke:#3fbfe0;stroke-width:2.4;opacity:.13;stroke-linejoin:round}
+.om-prov{fill:#5f9fc4;font-size:26px;letter-spacing:8px;opacity:.5;font-weight:300}
+.om-city{fill:#cfe9f6;font-size:13px;letter-spacing:1px;text-shadow:0 1px 5px #000}
+.om-city-dot{fill:#eafcff;filter:drop-shadow(0 0 4px #7fd8f0)}
+.om-sea{fill:#2f86ad;font-size:22px;letter-spacing:12px;opacity:.5}
+.om-zone{fill:url(#omHatch);stroke:#3fe0fa;stroke-width:1.3;stroke-dasharray:7 5;
+  animation:omDash 3.4s linear infinite}
+.om-zone-t{fill:#6fe6ff;font-size:14px;font-weight:700;letter-spacing:2px;text-shadow:0 1px 5px #000}
+.om-core{stroke:#4dffd0;stroke-dasharray:none;stroke-width:1.6;animation:none;fill:url(#omHatch)}
+.om-core-t{fill:#6bffd8}
+.om-route-b{fill:none;stroke:#1d7ea6;stroke-width:1.2;opacity:.35}
+.om-route{fill:none;stroke:#5fe4ff;stroke-width:1.5;stroke-dasharray:6 7;opacity:.9;
+  filter:drop-shadow(0 0 4px #2fd8f480);animation:omFlow 1.1s linear infinite}
+.om-arrow{fill:#8ff0ff;opacity:.8}
+.om-buoy{color:#3fb8d8;opacity:.9}
+.om-buoy.cam{color:#4fd2e6}
+.om-buoy.ais{color:#7f9fd0}
+.om-patrol{filter:drop-shadow(0 2px 4px #000c)}
+.om-boat{filter:drop-shadow(0 2px 4px #000c)}
+.om-boat-halo{fill:none;stroke:#5fe4ff;stroke-width:1.2;opacity:.35;
+  animation:omHalo 2.6s ease-out infinite}
+.om-lab-l{stroke:#5fe4ff;stroke-width:1;opacity:.6}
+.om-lab-n{fill:#eafcff;font-size:12px;font-weight:700;text-shadow:0 1px 5px #000}
+.om-lab-v{fill:#7fd0e8;font-size:11px;text-shadow:0 1px 5px #000}
+
+/* ---- 浮层面板 ---- */
+.om-panel{position:absolute;top:16px;bottom:56px;z-index:4;width:284px;
+  display:flex;flex-direction:column;gap:10px;pointer-events:none}
+.om-panel.om-l{left:16px}
+.om-panel.om-r{right:16px;width:262px}
+.om-card{pointer-events:auto;border:1px solid #1e5372a8;border-radius:7px;
+  background:#062032d9;backdrop-filter:blur(9px);padding:11px 12px;
+  box-shadow:0 10px 30px #0006}
+.om-card.om-grow{flex:1;display:flex;flex-direction:column;min-height:0}
+.om-h3{margin:0 0 9px;font-size:12px;font-weight:700;color:#e2f4ff;letter-spacing:1px;
   display:flex;align-items:center;gap:8px}
 .om-h3:before{content:"";width:3px;height:12px;border-radius:2px;background:#2fa8c8}
 .om-h3 span{margin-left:auto;font-size:10px;font-weight:400;color:#7ea8bf;letter-spacing:0}
 
-/* 六防 */
-.om-def{display:flex;flex-direction:column;gap:6px}
-.om-d{display:flex;align-items:center;gap:8px;padding:4px 8px;border:1px solid #1a4661;
-  border-radius:4px;background:#0a2237}
-.om-d i{width:23px;height:23px;border-radius:5px;flex:none;display:grid;place-items:center;
-  font-style:normal;font-size:12px;font-weight:700}
+.om-kpis{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.om-kpi{position:relative;padding:7px 9px;border-radius:5px;background:#0a2740a6;
+  border:1px solid #17455e}
+.om-kpi:first-child{grid-column:1 / -1}
+.om-kpi:before{content:"";position:absolute;left:0;top:6px;bottom:6px;width:2px;
+  border-radius:2px;background:var(--c,#2f9fd0)}
+.om-kpi.blue{--c:#3f9fe0}.om-kpi.cyan{--c:#2fd0e0}.om-kpi.orange{--c:#f2a94c}
+.om-kpi.green{--c:#3ddba0}.om-kpi.purple{--c:#9a8ff0}
+.om-kpi span{display:block;font-size:10px;color:#89aec2;padding-left:7px}
+.om-kpi b{display:block;margin-top:2px;padding-left:7px;font-size:19px;font-weight:700;
+  color:#eaf7ff;line-height:1.15}
+.om-kpi b em{font-style:normal;font-size:10.5px;color:#7fb0c6;margin-left:3px;font-weight:400}
+
+.om-def{display:flex;flex-direction:column;gap:5px}
+.om-d{display:flex;align-items:center;gap:8px;padding:4px 8px;border:1px solid #1a466188;
+  border-radius:4px;background:#0a2237a6}
+.om-d i{width:22px;height:22px;border-radius:5px;flex:none;display:grid;place-items:center;
+  font-style:normal;font-size:11px;font-weight:700}
 .om-d.red i{background:#4a1d26;color:#ff7b84}.om-d.orange i{background:#4a3418;color:#f7b95e}
 .om-d.green i{background:#14402f;color:#4bd9a4}
 .om-d b{display:block;font-size:11px;color:#dceef8}
-.om-d small{display:block;font-size:9.5px;color:#7396a9;margin-top:2px}
+.om-d small{display:block;font-size:9px;color:#7396a9;margin-top:1px}
 .om-d em{margin-left:auto;font-style:normal;font-size:10px;color:#9dc4d6}
 .om-d.red em{color:#ff8f97}.om-d.orange em{color:#f7c078}.om-d.green em{color:#4bd9a4}
 
-/* 告警 */
 .om-alerts{display:flex;flex-direction:column;gap:5px;overflow-y:auto;min-height:0;
   scrollbar-width:thin;scrollbar-color:#1d5f7c #0a2237;padding-right:3px}
 .om-alerts::-webkit-scrollbar{width:5px}
 .om-alerts::-webkit-scrollbar-track{background:#0a2237;border-radius:3px}
 .om-alerts::-webkit-scrollbar-thumb{background:#1d5f7c;border-radius:3px}
-.om-alerts::-webkit-scrollbar-thumb:hover{background:#2b86a8}
-.om-a{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:4px;background:#0a2237;
-  border:1px solid #16405a}
+.om-a{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:4px;
+  background:#0a2237a6;border:1px solid #16405a88}
 .om-a i{width:3px;height:24px;border-radius:2px;flex:none}
 .om-a i.lv1{background:#ff5b63;box-shadow:0 0 8px #ff5b6355}
 .om-a i.lv2{background:#f2a94c}.om-a i.lv3{background:#3f9fe0}
 .om-a b{display:block;font-size:11px;color:#e2f2fa}
-.om-a small{display:block;font-size:9.5px;color:#7396a9;margin-top:2px}
+.om-a small{display:block;font-size:9px;color:#7396a9;margin-top:1px}
 .om-a .om-t{margin-left:auto;font-size:10px;color:#6f96aa;font-family:Consolas,monospace}
 
-/* 九大业务能力 */
-.om-modbar{flex:none}
-.om-mods{display:grid;grid-template-columns:repeat(9,1fr);gap:8px}
-.om-mod{display:flex;flex-direction:column;gap:5px;padding:8px 10px;overflow:hidden;border:1px solid #1e5372;
-  border-radius:6px;text-align:left;cursor:pointer;
-  font-family:inherit;color:inherit;transition:border-color .18s,transform .18s,box-shadow .18s}
-.om-mod{background:linear-gradient(150deg,#0e3049,#0a2336)}
-.om-mod:hover{border-color:#38b4d4;transform:translateY(-2px);box-shadow:0 10px 24px #0007}
-.om-mod-h{display:flex;align-items:center;gap:9px}
-.om-mod-h i{width:25px;height:25px;border-radius:6px;flex:none;display:grid;place-items:center;
-  background:#12455f;color:#4fd2e6;font-style:normal;font-size:14px}
-.om-mod-h b{font-size:12px;color:#eaf7ff;letter-spacing:.5px;white-space:nowrap}
-.om-mod>u{position:absolute;right:9px;top:9px;text-decoration:none;font-size:9px;color:#4fd2e6;
-  opacity:0;transition:opacity .18s;pointer-events:none}
-.om-mod{position:relative}
-.om-mod:hover>u{opacity:1}
-.om-mod p{margin:0;font-size:9px;color:#7ea8bf;line-height:1.45;
-  display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
-.om-mod-m{display:flex;flex-direction:column;gap:4px}
-.om-mod-m div{display:flex;align-items:baseline;gap:5px;padding:3px 7px;border-radius:4px;
-  background:#08283d;border:1px solid #16405a}
-.om-mod-m b{font-size:12px;color:#5fd8ec;font-weight:700;white-space:nowrap}
-.om-mod-m span{font-size:9px;color:#7396a9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.om-mod-f{display:flex;flex-wrap:wrap;gap:4px}
-.om-mod-f span{padding:2px 6px;border:1px solid #1d4e69;border-radius:3px;background:#0a2740;
-  color:#7fa9be;font-size:9px;white-space:nowrap}
-
-/* 中部 GIS 一张图 */
-.om-mapbox{flex:1;min-height:0}
-.om-map{position:relative;flex:1;min-height:0;border-radius:4px;overflow:hidden;
-  background:#04121f;border:1px solid #16405a}
-.om-map>svg{position:absolute;inset:0;width:100%;height:100%;display:block}
-.om-map-lg{position:absolute;left:8px;right:8px;bottom:7px;height:24px;display:flex;
-  align-items:center;gap:14px;padding:0 10px;border:1px solid #1a4a66;border-radius:4px;
-  background:#04182bdd;color:#7ba3b8;font-size:9px}
-.om-map-lg span{display:flex;align-items:center;gap:5px;white-space:nowrap}
-.om-map-lg i{width:14px;height:2px;display:inline-block;flex:none}
-.om-map-lg .dash i{background:repeating-linear-gradient(90deg,#3ee0ff 0 5px,transparent 5px 9px)}
-.om-map-lg .zn i{height:9px;border:1px dashed #2fd8f4;background:#0a779522}
-.om-map-lg .dot{width:7px;height:7px;border-radius:50%;flex:none}
-.om-map-lg em{margin-left:auto;font-style:normal;color:#4fd8b0}
-
-/* 重点功能图片 */
-.om-shotbox{flex:none}
-.om-mid>.om-mapbox{flex:1 1 auto}
-.om-shots{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}
-.om-shot{display:flex;flex-direction:column;gap:6px}
-.om-shot-img{position:relative;aspect-ratio:16/9;border-radius:4px;overflow:hidden;
-  border:1px solid #1d5f7c;background:#04121f}
+/* 重点功能 */
+.om-shots{flex:1;display:flex;flex-direction:column;gap:9px;min-height:0;overflow:hidden}
+.om-shot{flex:1;display:flex;flex-direction:column;gap:5px;min-height:0}
+.om-shot-img{flex:1;min-height:0;border-radius:5px;overflow:hidden;border:1px solid #1d5f7c88;
+  background:#04121f}
 .om-shot-img img{width:100%;height:100%;object-fit:cover;display:block}
-.om-shot-img:after{content:"";position:absolute;inset:0;
-  background:linear-gradient(#0000 42%,#04182bcc)}
-.om-shot-t{position:absolute;left:8px;bottom:6px;z-index:2;color:#eaf7ff;font-size:11px;
-  font-weight:700;text-shadow:0 1px 4px #000}
-.om-shot p{margin:0;font-size:9px;color:#7ea8bf;line-height:1.5;
-  display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.om-shot-x b{display:block;font-size:11px;color:#eaf7ff;font-weight:700}
+.om-shot-x small{display:block;margin-top:2px;font-size:9px;color:#7ea8bf}
 
-/* 平台能力架构 */
-.om-run{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-.om-run div{padding:6px 8px;border:1px solid #16405a;border-radius:4px;background:#0a2237}
-.om-run span{display:block;font-size:9.5px;color:#7396a9}
-.om-run b{display:block;margin-top:3px;font-size:14px;color:#5fd8ec;font-weight:700}
-.om-arch{flex:1;display:flex;flex-direction:column;justify-content:center;gap:0;
-  min-height:0;overflow:hidden}
-.om-layer{padding:10px 11px;border:1px solid #23617f;border-radius:5px;
-  background:linear-gradient(135deg,#103a58,#0a2740)}
-.om-layer:nth-child(1){border-color:#2fa8c8;background:linear-gradient(135deg,#12506f,#0c3450)}
-.om-layer-h{display:flex;align-items:center;gap:8px}
-.om-layer-h b{font-size:12px;color:#eaf7ff;letter-spacing:1px}
-.om-layer-h em{margin-left:auto;font-style:normal;font-size:11px;color:#5fd8ec;font-weight:700}
-.om-layer p{margin:5px 0 0;font-size:9.5px;color:#7ea8bf;line-height:1.6}
-.om-flow{height:22px;display:grid;place-items:center;position:relative}
-.om-flow:before{content:"";position:absolute;top:0;bottom:0;width:1px;
-  background:repeating-linear-gradient(#2b7fa0 0 4px,transparent 4px 8px)}
-.om-flow i{position:absolute;width:5px;height:5px;border-radius:50%;background:#5fd8ec;
-  box-shadow:0 0 8px #5fd8ec;animation:omFlow 1.8s linear infinite}
+/* 底部图例 */
+.om-legend{position:absolute;left:50%;transform:translateX(-50%);bottom:14px;z-index:5;
+  display:flex;align-items:center;gap:18px;height:34px;padding:0 18px;
+  border:1px solid #1e5372a8;border-radius:7px;background:#062032db;backdrop-filter:blur(9px);
+  color:#9dc4d6;font-size:11px;box-shadow:0 10px 30px #0006;white-space:nowrap}
+.om-legend span{display:flex;align-items:center;gap:7px}
+.om-legend u{width:15px;height:11px;display:inline-block;flex:none;text-decoration:none;
+  background-repeat:no-repeat;background-position:center}
+.om-legend .lg-boat{background:#eafcff;clip-path:polygon(10% 55%,90% 55%,72% 100%,28% 100%);height:9px}
+.om-legend .lg-patrol{background:#7ff0ff;clip-path:polygon(6% 50%,94% 50%,76% 100%,24% 100%);height:9px}
+.om-legend .lg-route{height:0;border-top:2px dashed #5fe4ff}
+.om-legend .lg-zone{height:11px;border:1px dashed #2fd8f4;border-radius:50%;background:#0a779522}
+.om-legend .lg-core{height:11px;border:1px solid #4dffd0;background:#0a779522}
+.om-legend .lg-cam{height:11px;background:#4fd2e6;clip-path:polygon(50% 0,80% 30%,68% 100%,32% 100%,20% 30%)}
+.om-legend .lg-ais{height:11px;background:#7f9fd0;clip-path:polygon(50% 0,80% 30%,68% 100%,32% 100%,20% 30%)}
 
-/* 底栏 */
-.om-foot{display:flex;align-items:center;gap:22px;padding:9px 12px;border:1px solid #1b4a68;
-  border-radius:6px;background:#0a2337cc}
-.om-foot>div{display:flex;align-items:center;gap:7px;font-size:10px;color:#7396a9}
-.om-foot b{color:#c9e6f4;font-weight:600}
-.om-foot-hint{margin-left:auto;font-size:10px;color:#5d829a}
+/* 缩放控件 */
+.om-zoom{position:absolute;right:16px;bottom:60px;z-index:5;display:flex;flex-direction:column;gap:6px}
+.om-zoom button{width:32px;height:32px;border:1px solid #1e5372a8;border-radius:6px;
+  background:#062032db;backdrop-filter:blur(9px);color:#9dd2e6;font-size:15px;line-height:1;
+  cursor:pointer;display:grid;place-items:center;font-family:inherit;box-shadow:0 6px 18px #0005}
+.om-zoom button:hover{border-color:#38b4d4;color:#dff6ff}
 
 /* 返回按钮 */
 .om-back{position:fixed;z-index:70;right:14px;bottom:14px;height:32px;padding:0 14px;
@@ -183,54 +170,20 @@
 .om-back:hover span{transform:translateX(-3px)}
 
 @keyframes omPulse{50%{opacity:.4}}
-@keyframes omFlow{0%{top:100%;opacity:0}20%{opacity:1}80%{opacity:1}100%{top:-4px;opacity:0}}
-@media(max-width:1400px){
-  .om-body{grid-template-columns:250px 1fr 260px}
-  .om-mod-f span:nth-child(3){display:none}
+@keyframes omFlow{to{stroke-dashoffset:-26}}
+@keyframes omDash{to{stroke-dashoffset:-24}}
+@keyframes omHalo{0%{r:9;opacity:.5}100%{r:22;opacity:0}}
+@media(max-width:1500px){
+  .om-panel{width:262px}.om-panel.om-r{width:238px}
+  .om-legend{gap:13px;font-size:10px;padding:0 13px}
+}
+@media(max-height:800px){
+  .om-head{height:54px}
+  .om-panel{top:12px;bottom:52px}
+  .om-kpi b{font-size:17px}
+  .om-d{padding:3px 8px}.om-d i{width:20px;height:20px}
 }
 @media(prefers-reduced-motion:reduce){
-  .om-live i,.om-flow i{animation:none}
-  .om-wrap,.om-enter,.om-mod{transition:none}
-}
-
-/* 矮屏（1366×768 这类笔记本）压缩到一屏，一张图不该出现滚动条 */
-@media(max-height:830px){
-  .om-root{padding:8px 12px 7px;gap:7px}
-  .om-head{padding-bottom:9px}
-  .om-logo{width:34px;height:34px;font-size:16px}
-  .om-h1{font-size:18px}.om-sub{font-size:10px;margin-top:3px}
-  .om-enter{height:33px;padding:0 16px;font-size:12px}
-  .om-kpis{gap:8px}
-  .om-kpi{padding:8px 11px}
-  .om-kpi b{font-size:20px;margin:3px 0 2px}
-  .om-kpi span{font-size:10px}.om-kpi small{font-size:9px}
-  .om-body{gap:8px}
-  .om-box{padding:9px 10px}
-  .om-h3{margin-bottom:7px;font-size:11px}
-  .om-def{gap:4px}
-  .om-d{padding:4px 7px}.om-d i{width:22px;height:22px;font-size:11px}
-  .om-d small{font-size:9px}
-  .om-alerts{gap:4px}
-  .om-a{padding:5px 7px}.om-a i{height:22px}
-  .om-mods{gap:6px}
-  .om-mod{padding:7px 8px;gap:5px}
-  .om-mod-h i{width:22px;height:22px;font-size:11px}
-  .om-mod-h b{font-size:11px}
-  .om-mod p{-webkit-line-clamp:1;font-size:8.5px}
-  .om-mod-m{gap:3px}
-  .om-mod-m div{padding:3px 6px}
-  .om-mod-m b{font-size:11px}
-  .om-mod>u{font-size:9px}
-  .om-shots{gap:7px}
-  .om-shot{gap:4px}
-  .om-shot p{font-size:8.5px;line-height:1.45;
-    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-  .om-shot-f span{padding:1px 5px;font-size:8px}
-  .om-shot-f span:nth-child(n+2){display:none}
-  .om-map-lg{height:20px;font-size:8.5px;gap:10px}
-  .om-run{gap:5px}.om-run div{padding:5px 7px}.om-run b{font-size:12px}
-  .om-layer{padding:7px 9px}
-  .om-layer-h b{font-size:11px}.om-layer p{font-size:9px;margin-top:4px}
-  .om-flow{height:14px}
-  .om-foot{padding:6px 11px;gap:16px}
+  .om-live i,.om-route,.om-zone,.om-boat-halo{animation:none}
+  .om-wrap,.om-enter{transition:none}
 }
