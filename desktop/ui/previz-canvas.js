@@ -1194,7 +1194,10 @@ export function previzPanel(stage, {
     const b = document.createElement('button');
     b.className = `btn ghost sm${active ? ' on' : ''}`;
     b.textContent = label;
-    b.onclick = () => { on(); rebuildControls(); redrawAll(); onChange(); };
+    // 这一排按钮会改变舞台数据：焦点、地标、远景、太阳和灯光。
+    // 收敛在公共入口提交历史，避免某个新增按钮漏掉 commit，造成“撤销无反应”。
+    // 旧回调若已主动提交，第二次 commit 会因状态未变化而成为 no-op。
+    b.onclick = () => { on(); history.commit(); rebuildControls(); redrawAll(); onChange(); };
     return b;
   };
 
