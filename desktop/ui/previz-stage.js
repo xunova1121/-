@@ -125,6 +125,21 @@ export function nearestAttachment(stage, item, { maxDistance = 1.4 } = {}) {
   return best?.distance <= maxDistance ? best : null;
 }
 
+/** 解除人物挂点时，把道具留在解绑瞬间的世界坐标，避免回到旧坐标而瞬移。 */
+export function detachAttachment(stage, item, { ground = true } = {}) {
+  if (!item) return null;
+  const pose = attachmentPose(stage, item);
+  if (pose) {
+    item.x = Number(Number(pose.x).toFixed(2));
+    item.y = Number(Number(pose.y).toFixed(2));
+    item.rotation = Number(Number(pose.rotation || 0).toFixed(1));
+    item.elevation = ground ? 0 : Number(Number(pose.elevation || 0).toFixed(2));
+  }
+  item.attachToId = '';
+  if (ground) item.grounded = true;
+  return item;
+}
+
 export function snapToGround(item) {
   if (!item) return item;
   item.elevation = 0;

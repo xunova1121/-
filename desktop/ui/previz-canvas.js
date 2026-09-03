@@ -28,7 +28,7 @@ import { GLTFLoader } from '/three-gltf-loader.js';
 import { OrbitControls } from '/three-orbit-controls.js';
 import { TransformControls } from '/three-transform-controls.js';
 import { clone as cloneSkeleton } from '/three-skeleton-utils.js';
-import { addKeyframe, applyFrame, attachmentPose, createHistory, findObject, nearestAttachment, normalizeStage, restore, snapToGround, snapshot, spatialIssues, stageObjects } from './previz-stage.js';
+import { addKeyframe, applyFrame, attachmentPose, createHistory, detachAttachment, findObject, nearestAttachment, normalizeStage, restore, snapToGround, snapshot, spatialIssues, stageObjects } from './previz-stage.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -1458,7 +1458,24 @@ export function previzPanel(stage, {
         makeNumber('强度', 'intensity', '0.1'), colorWrap, makeSelect('照向', 'targetId', targets), remove);
     } else if (found.kind === 'prop') {
       const actors = [['', '自由摆放'], ...(stage.subjects || []).map((x) => [x.id, `绑定：${x.name || x.id}`])];
-      inspector.append(makeSelect('人物挂点', 'attachToId', actors));
+      // 自由摆放先保留当前挂点世界坐标，避免解绑后回到旧坐标而瞬移。
+      const attachmentWrap = document.createElement('label'); attachmentWrap.textContent = '人物挂点';
+      const attachmentSelect = document.createElement('select');
+      for (const [value, label] of actors) attachmentSelect.append(new Option(label, value));
+      attachmentSelect.value = item.attachToId || '';
+      attachmentSelect.onchange = () => {
+        const nextActorId = attachmentSelect.value;
+        if (!nextActorId && item.attachToId) detachAttachment(stage, item);
+        else if (nextActorId) {
+          item.attachToId = nextActorId;
+          item.attachPoint = item.attachPoint || 'rightHand';
+          item.attachOffsetX = Number(item.attachOffsetX || 0);
+          item.attachOffsetY = Number(item.attachOffsetY || 0);
+          item.attachOffsetZ = Number(item.attachOffsetZ || 0);
+        }
+        history.commit(); redrawAll(); onChange();
+      };
+      attachmentWrap.append(attachmentSelect); inspector.append(attachmentWrap);
       if (item.attachToId) {
         inspector.append(makeSelect('绑定位置', 'attachPoint', [
           ['rightHand', '右手'], ['leftHand', '左手'], ['back', '背部'], ['waist', '腰部']
