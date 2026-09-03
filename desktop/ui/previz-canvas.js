@@ -1343,7 +1343,14 @@ export function previzPanel(stage, {
     } else if (found.kind === 'subject') {
       const ground = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '脚底贴地' });
       ground.onclick = () => { snapToGround(item); history.commit(); redrawAll(); onChange(); };
-      inspector.append(makeSelect('地面约束', 'grounded', [['true', '脚底贴地检查'], ['false', '允许跳跃/悬空']]), ground);
+      // 正常情况下，人物被前景人物完全挡住应该报警；但肩前景、门框遮挡
+      // 这类构图是有意的。显式标出来，既不把警告全关掉，也不会反复报假问题。
+      const occlusion = Object.assign(document.createElement('select'), { disabled: item.locked });
+      occlusion.append(new Option('遮挡：自动检查', 'check'), new Option('遮挡：有意前景遮挡', 'intentional'));
+      occlusion.value = item.occlusionMode || 'check';
+      occlusion.onchange = () => { item.occlusionMode = occlusion.value; history.commit(); redrawAll(); onChange(); };
+      const occlusionWrap = document.createElement('label'); occlusionWrap.append(document.createTextNode('构图遮挡'), occlusion);
+      inspector.append(makeSelect('地面约束', 'grounded', [['true', '脚底贴地检查'], ['false', '允许跳跃/悬空']]), ground, occlusionWrap);
       if (item.textureLayout === 'quad-character') {
         inspector.append(makeSelect('贴图视角', 'textureView', [
           ['auto', '自动随朝向'], ['front', '全身正面'], ['side', '全身侧面'],
