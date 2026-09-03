@@ -1324,6 +1324,38 @@ check('成片体检把"点名了设定集里没有的人"报出来了',
  * 用户的原话是"不要全部推到重来"。这一节量的就是那句话：
  * 没勾的一条都不动，锁着的一条都碰不了。
  */
+/**
+ * ══════════ 流式处理器里的错不许被吞 ══════════
+ *
+ * ⚠ 这一条是真事换来的：用户点「从剧本生成大纲」，按钮变「拆场次中…」
+ * 然后变回来，**大纲没出来、也没有任何报错**。
+ *
+ * 原因在 lib.js 的 stream()：解析和分发包在同一个 try 里，
+ * 那个 catch 本意只是"半截行忽略"，却把 onEvent 里抛的每一个错
+ * 也一起吃掉了 —— 而 onEvent 做的正是渲染这类真会出错的事。
+ *
+ * 这个应用里最难查的一类问题就是"看起来什么都没发生"。
+ * 所以这里直接验：处理器里抛一个错，它必须**炸出来**。
+ */
+console.log('\n流式：处理器里的错要炸出来，不能静默吞掉');
+{
+  const r = await page.evaluate(async () => {
+    const lib = await import('/lib.js');
+    let reached = false;
+    try {
+      await lib.stream(`/projects/${location.hash.split('/')[2] || ''}/outline/build`, {}, () => {
+        reached = true;
+        throw new Error('CANARY 处理器炸了');
+      });
+      return { reached, threw: false };
+    } catch (err) {
+      return { reached, threw: true, msg: String(err.message).slice(0, 40) };
+    }
+  });
+  check(`处理器抛的错传到了调用方（${r.threw ? r.msg : '被吞了'}）`, r.threw === true);
+  check('而且确实进过处理器（不然上一条等于没验）', r.reached === true);
+}
+
 console.log('\n大纲');
 await step('剧本').click().catch(() => {});
 await page.waitForTimeout(1000);
