@@ -81,6 +81,25 @@ export function quadTextureTransform(item, viewName) {
 }
 
 /**
+ * 人物设定集是一张四视图时，不能只在贴图内部悄悄切格子。
+ * 这份判断同时供 3D 材质、检查器读数和后续参考帧导出使用，避免
+ * “舞台看的是侧面、导出却拿了正面”这种很难察觉的不一致。
+ */
+export function resolvedTextureView(stage = {}, item = {}) {
+  const requested = item.textureView || 'auto';
+  if (requested !== 'auto') return requested;
+  const cam = stage.cam || { x: 0, y: -3 };
+  const bearing = THREE.MathUtils.radToDeg(Math.atan2(Number(cam.x || 0) - Number(item.x || 0), Number(cam.y || 0) - Number(item.y || 0)));
+  const facing = Number(item.rotation ?? item.facing ?? 0);
+  const delta = Math.abs(((bearing - facing + 540) % 360) - 180);
+  return delta <= 55 ? 'front' : delta >= 125 ? 'back' : 'side';
+}
+
+export function textureViewLabel(viewName) {
+  return ({ front: '全身正面', side: '全身侧面', back: '全身背面', closeup: '上半身特写' })[viewName] || '自动判断中';
+}
+
+/**
  * 建一块排位画布。
  *
  * stage 形如 { cam: {x,y,height,lens,move}, subjects: [{name,x,y,facing}] }，
@@ -722,15 +741,7 @@ export function director3dCanvas(stage, {
     if (!source) return new THREE.MeshStandardMaterial({ color, roughness: .7 });
     const map = textureLoader.load(source, renderNow); map.colorSpace = THREE.SRGBColorSpace;
     if (item.textureLayout === 'quad-character') {
-      const requested = item.textureView || 'auto';
-      let viewName = requested;
-      if (requested === 'auto') {
-        const cam = stage.cam || { x: 0, y: -3 };
-        const bearing = THREE.MathUtils.radToDeg(Math.atan2(Number(cam.x || 0) - Number(item.x || 0), Number(cam.y || 0) - Number(item.y || 0)));
-        const facing = Number(item.rotation ?? item.facing ?? 0);
-        const delta = Math.abs(((bearing - facing + 540) % 360) - 180);
-        viewName = delta <= 55 ? 'front' : delta >= 125 ? 'back' : 'side';
-      }
+      const viewName = resolvedTextureView(stage, item);
       const crop = quadTextureTransform(item, viewName);
       map.repeat.set(crop.repeatX, crop.repeatY);
       map.offset.set(crop.offsetX, crop.offsetY);
@@ -1358,6 +1369,10 @@ export function previzPanel(stage, {
         ]), makeSelect('设定集排版', 'textureGrid', [
           ['horizontal', '横向四格'], ['2x2', '2×2 四宫格']
         ]), makeNumber('裁切内缩', 'textureInset', '0.005'));
+        const resolved = document.createElement('div');
+        resolved.className = 'previz-cap';
+        resolved.textContent = '当前贴图：' + textureViewLabel(resolvedTextureView(stage, item));
+        inspector.append(resolved);
       }
       inspector.append(makeSelect('姿态', 'pose', [
         ['stand', '站立'], ['walk', '行走'], ['run', '奔跑'], ['sit', '坐下'], ['crouch', '下蹲'],
