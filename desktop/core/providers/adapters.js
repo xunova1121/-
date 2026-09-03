@@ -2496,6 +2496,17 @@ async function generateVideoMiniMax({
    *
    * 通了就按 服务商+地址+模型 记住，同一批后面的镜头直接用。
    */
+  /**
+   * ⚠ H3 只是把**顺序**换过来，梯子不能砍成一级。
+   *
+   * 上面那段注释写着"与其押一个然后安静地失效…不如按可能性排序试一遍"——
+   * 而这里一度变成了 H3 只有 content-role 这一根梯子。那正是注释里
+   * 警告的那件事：押错了没有后手，末帧安静地不生效，成片照样出得来，
+   * 只是接缝那儿的画面不是你要的那个。
+   *
+   * 保留"H3 优先 content-role"（那是实测得来的判断，不该丢），
+   * 但把 last_frame_image 放回第二级 —— 它不花钱，只多一次往返。
+   */
   const endFrameShapes = isH3 ? [
     {
       id: 'content-role',
@@ -2503,6 +2514,10 @@ async function generateVideoMiniMax({
         ...b,
         content: [...(b.content || []), { type: 'image_url', image_url: { url }, role: 'last_frame' }]
       })
+    },
+    {
+      id: 'last_frame_image',
+      apply: (b, url) => ({ ...b, last_frame_image: url })
     }
   ] : [
     {

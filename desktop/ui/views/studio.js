@@ -1005,8 +1005,18 @@ export default {
                   const first = sc.items.find((i) => i.level === 'blocker');
                   if (!confirm(`${first.what}。\n\n${first.why}\n\n${first.fix}\n\n还是要现在跑吗？`)) return;
                 }
-                if (isCostly && missing.length > 3
-                  && !costConfirm(`将为 ${missing.length} 个镜头生成视频，耗时较长。确定？`, state.stage)) return;
+                /**
+                 * ⚠ 出视频**每一次都要确认**，不看镜数。
+                 *
+                 * 原来的条件是 `missing.length > 3` —— 于是跑 1~3 镜的视频
+                 * 一声不吭直接开跑，而**单镜重出**反倒每次都弹确认框。
+                 * 便宜的那条路问、批量的那条不问，正好反了。
+                 *
+                 * 而且换成 confirmGeneration：它会把服务商、模型、调用次数、
+                 * 预计视频秒数摆出来。costConfirm 只说"耗时较长"——
+                 * 耗时不是重点，钱才是。
+                 */
+                if (isCostly && !confirmGeneration('video', missing, {}, '整步生成视频')) return;
 
                 runStage(state.stage);
               }

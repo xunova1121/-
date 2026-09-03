@@ -89,7 +89,23 @@ function renderFrameControls(stage, title) {
 export function renderControls(source = {}, { duration = 5, sampleEvery = 3 } = {}) {
   const base = structuredClone(source || {});
   normalizeStage(base);
-  const maxFrame = Math.max(1, Math.round(Number(duration || 5) * FPS));
+  /**
+   * ⚠ 时长收不下的值要在门口挡掉，不能让它往下走。
+   *
+   * 原来是 `Math.max(1, Math.round(Number(duration || 5) * FPS))`。
+   * duration 传进来一个非数字字符串（'5秒'、老项目里没规整过的字段）时：
+   *   Number('5秒') → NaN → maxFrame 是 NaN
+   *   → 采样过滤 `x <= NaN` 把所有帧都筛掉 → frames 是空数组
+   *   → 下面 `first.objects` 抛 "Cannot read properties of undefined"
+   *
+   * 一个"时长写错了"的问题，最后以一句看不懂的 TypeError 露面，
+   * 而且指向的是一行跟时长毫无关系的代码。
+   *
+   * 负数同理：-3 会静默变成 1 帧，出一个谁也没要的单帧计划。
+   */
+  const seconds = Number(duration);
+  const safeSeconds = Number.isFinite(seconds) && seconds > 0 ? seconds : 5;
+  const maxFrame = Math.max(1, Math.round(safeSeconds * FPS));
   const frameSet = new Set([0, ...(base.keyframes || []).map((x) => x.frame), maxFrame]);
   for (let frame = 0; frame <= maxFrame; frame += Math.max(1, sampleEvery)) frameSet.add(frame);
   const sampled = [...frameSet].filter((x) => x >= 0 && x <= maxFrame).sort((a, b) => a - b).map((frame) => ({ frame, stage: stageAt(base, frame) }));
