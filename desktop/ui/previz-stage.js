@@ -247,6 +247,13 @@ export function addKeyframe(stage, frame, objectIds = []) {
       values[id].textureGrid = x.textureGrid || 'horizontal';
       values[id].textureInset = x.textureInset || 0;
       values[id].autoOrient = x.autoOrient !== false;
+    } else if (found.kind === 'prop') {
+      values[id].attachToId = x.attachToId || '';
+      values[id].attachPoint = x.attachPoint || 'rightHand';
+      values[id].attachOffsetX = Number(x.attachOffsetX || 0);
+      values[id].attachOffsetY = Number(x.attachOffsetY || 0);
+      values[id].attachOffsetZ = Number(x.attachOffsetZ || 0);
+      values[id].grounded = x.grounded !== false;
     } else if (found.kind === 'light') {
       values[id].lightType = x.lightType;
       values[id].intensity = x.intensity;
@@ -316,7 +323,7 @@ export function frameState(stage, frame) {
     const a = objectLeft.values[item.id];
     const b = objectRight.values[item.id] || a;
     const out = { ...item };
-    for (const key of ['x', 'y', 'elevation', 'height', 'rotation', 'rotationX', 'rotationZ', 'scale', 'scaleX', 'scaleY', 'scaleZ', 'textureInset', 'lens', 'aperture', 'focusDistance', 'shutterAngle', 'iso', 'intensity']) {
+    for (const key of ['x', 'y', 'elevation', 'height', 'rotation', 'rotationX', 'rotationZ', 'scale', 'scaleX', 'scaleY', 'scaleZ', 'textureInset', 'lens', 'aperture', 'focusDistance', 'shutterAngle', 'iso', 'intensity', 'attachOffsetX', 'attachOffsetY', 'attachOffsetZ']) {
       const av = Number(a[key]), bv = Number(b[key]);
       if (!Number.isFinite(av) || !Number.isFinite(bv)) continue;
       const spatial = ['x', 'y', 'elevation', 'height'].includes(key);
@@ -326,7 +333,7 @@ export function frameState(stage, frame) {
       out[key] = Number(value.toFixed(4));
     }
     out.move = { ...((objectT < .5 ? a.move : b.move) || item.move || {}) };
-    for (const key of ['focusId', 'pose', 'action', 'animationName', 'textureView', 'textureGrid', 'autoOrient', 'lightType', 'color', 'targetId']) out[key] = (objectRawT < .5 ? a[key] : b[key]) ?? item[key];
+    for (const key of ['focusId', 'pose', 'action', 'animationName', 'textureView', 'textureGrid', 'autoOrient', 'lightType', 'color', 'targetId', 'attachToId', 'attachPoint', 'grounded']) out[key] = (objectRawT < .5 ? a[key] : b[key]) ?? item[key];
     if (out.autoOrient !== false && stage.subjects.includes(item)) {
       let dx = Number(b.x || 0) - Number(a.x || 0), dy = Number(b.y || 0) - Number(a.y || 0);
       if (stage.pathInterpolation === 'smooth' && leftIndex !== rightIndex) {
