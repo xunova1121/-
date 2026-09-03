@@ -372,6 +372,55 @@ await page.waitForTimeout(1000);
 console.log('⑤b 手机上改剧本：',
   /三天前的那通电话/.test(store.read(proj.id).script) ? '存下了 ✓' : '✕');
 console.log('   画风也能选：', (await page.locator('.style-mini-card').count()) > 3 ? '✓' : '✕');
+
+/**
+ * ══════════ 大纲（手机端） ══════════
+ *
+ * ⚠ 这一节是**零覆盖**补上的：大纲在能力清单里登记着、两端代码都在、
+ * 电脑端走查从头到尾验过一遍 —— 而手机端一个字都没验过。
+ * 而"改大纲最常发生在手机上"正是当初把它做到手机端的理由。
+ * 用得最多的那一端没人验，这个组合迟早出事。
+ *
+ * ⚠ 验的是**画得出来**，不是**生成得出来**。
+ *
+ * mcheck 整套不打模型的桩（不像 uicheck），所以在这儿点「生成大纲」
+ * 必然拿不到场次 —— 那是夹具的边界，不是功能坏了。
+ * 第一版就是这么写的，红了之后差点被当成产品 bug 报出去。
+ *
+ * 所以这里直接把一份大纲塞进项目，验手机端**渲染**那一半：
+ * 那正好是"服务端拆出来了、手机上却是空的"这类问题会出现的地方。
+ */
+{
+  const seeded = store.read(proj.id);
+  seeded.outline = {
+    beats: [
+      { id: 'b-01', scene: '码头', time: '清晨', characters: ['阿澜'], summary: '阿澜走向栈桥', dialogue: '设备正常。', seconds: 20 },
+      { id: 'b-02', scene: '码头', time: '清晨', characters: ['阿澜'], summary: '发现缆绳被割断', dialogue: '割口是新的。', seconds: 25 },
+      { id: 'b-03', scene: '栈桥', time: '清晨', characters: ['阿澜'], summary: '望向雾里的灯塔', dialogue: '', seconds: 12 }
+    ],
+    updatedAt: new Date().toISOString()
+  };
+  store.save(seeded);
+  await page.reload();
+  await page.waitForTimeout(1200);
+  await page.locator('.tab', { hasText: '剧本' }).click();
+  await page.waitForTimeout(900);
+
+  console.log('   剧本页上有大纲这一块：',
+    (await page.locator('button:has-text("从剧本生成大纲")').count()) > 0 ? '✓' : '✕ 手机上根本看不到大纲');
+  /**
+   * ⚠ 手机端有**自己的**一套 class（mob-row / mob-floor），
+   * 不是电脑端那套（ob-row / ob-floor）。第一版照抄了电脑端的选择器，
+   * 于是"画出 0 行"——而页面上内容明明在。差点又报一个假 bug。
+   */
+  const rows = await page.locator('.mob-row').count();
+  console.log('   已有的大纲画得出来：', rows >= 3 ? `✓ ${rows} 行` : `✕ 只画出 ${rows} 行（存着 3 场）`);
+  const txt = await page.locator('#app').evaluate((el) => el.textContent || '');
+  console.log('   每一场的内容也在：', /缆绳被割断/.test(txt) ? '✓' : '✕ 行画出来了但内容是空的');
+  /** 台词的硬下限和"节奏偏长"是两回事：前者除非删台词否则压不下去 */
+  console.log('   有台词的场次标出了念完要多久：',
+    (await page.locator('.mob-floor').count()) > 0 ? '✓' : '✕');
+}
 // <img> 带不了鉴权头 —— 漏了口令的话整排缩略图 401，显示成一片空框，
 // 而"图裂了"最容易被当成图片本身有问题
 const broken = await page.locator('.style-mini-card img').evaluateAll(
