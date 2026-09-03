@@ -140,7 +140,7 @@ export function spatialIssues(stage = {}) {
     const front = subjects[i], rear = subjects[j];
     const delta = Math.abs(Math.atan2(Math.sin(front.angle - rear.angle), Math.cos(front.angle - rear.angle))) * 180 / Math.PI;
     // 只有明确标成“有意前景遮挡”的人物才跳过提示；默认仍保持严格检查。
-    if (rear.occlusionMode !== 'intentional' && rear.distance - front.distance > .55 && delta < 4.5) {
+    if (rear.item.occlusionMode !== 'intentional' && rear.distance - front.distance > .55 && delta < 4.5) {
       issues.push({ code: 'subject-occluded', objectIds: [front.item.id, rear.item.id], level: 'warn', message: `${rear.item.name || rear.item.id}可能被${front.item.name || front.item.id}完全遮挡` });
     }
   }
