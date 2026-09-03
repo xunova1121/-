@@ -106,6 +106,25 @@ export function attachmentPose(stage, item) {
   };
 }
 
+/**
+ * 找离自由道具最近的可用挂点。只有在手边的道具才建议吸附，避免把
+ * 房间另一头的剑一键“瞬移”到人物手上。返回结果可直接写回道具绑定字段。
+ */
+export function nearestAttachment(stage, item, { maxDistance = 1.4 } = {}) {
+  normalizeStage(stage);
+  if (!item || item.attachToId) return null;
+  const pointNames = ['rightHand', 'leftHand'];
+  let best = null;
+  for (const actor of stage.subjects || []) {
+    for (const attachPoint of pointNames) {
+      const pose = attachmentPose(stage, { ...item, attachToId: actor.id, attachPoint });
+      const distance = Math.hypot(Number(item.x || 0) - pose.x, Number(item.y || 0) - pose.y);
+      if (!best || distance < best.distance) best = { actor, attachPoint, pose, distance };
+    }
+  }
+  return best?.distance <= maxDistance ? best : null;
+}
+
 export function snapToGround(item) {
   if (!item) return item;
   item.elevation = 0;

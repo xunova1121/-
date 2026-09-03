@@ -28,7 +28,7 @@ import { GLTFLoader } from '/three-gltf-loader.js';
 import { OrbitControls } from '/three-orbit-controls.js';
 import { TransformControls } from '/three-transform-controls.js';
 import { clone as cloneSkeleton } from '/three-skeleton-utils.js';
-import { addKeyframe, applyFrame, attachmentPose, createHistory, findObject, normalizeStage, restore, snapToGround, snapshot, spatialIssues, stageObjects } from './previz-stage.js';
+import { addKeyframe, applyFrame, attachmentPose, createHistory, findObject, nearestAttachment, normalizeStage, restore, snapToGround, snapshot, spatialIssues, stageObjects } from './previz-stage.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -1464,6 +1464,18 @@ export function previzPanel(stage, {
           ['rightHand', '右手'], ['leftHand', '左手'], ['back', '背部'], ['waist', '腰部']
         ]), makeNumber('挂点左右', 'attachOffsetX', '0.01'), makeNumber('挂点上下', 'attachOffsetY', '0.01'), makeNumber('挂点前后', 'attachOffsetZ', '0.01'));
       } else {
+        const nearest = nearestAttachment(stage, item);
+        if (nearest) {
+          const hand = nearest.attachPoint === 'rightHand' ? '右手' : '左手';
+          const snap = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '吸附到' + (nearest.actor.name || nearest.actor.id) + '的' + hand });
+          snap.onclick = () => {
+            item.attachToId = nearest.actor.id;
+            item.attachPoint = nearest.attachPoint;
+            item.attachOffsetX = 0; item.attachOffsetY = 0; item.attachOffsetZ = 0;
+            history.commit(); redrawAll(); onChange();
+          };
+          inspector.append(snap);
+        }
         const ground = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '底部贴地' });
         ground.onclick = () => { snapToGround(item); history.commit(); redrawAll(); onChange(); };
         inspector.append(makeSelect('地面约束', 'grounded', [['true', '底部贴地检查'], ['false', '允许悬挂/悬空']]), ground);
