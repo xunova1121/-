@@ -48,6 +48,7 @@ import * as transitions from '../transitions.js';
 import * as fx from '../fx.js';
 import * as jobs from '../jobs.js';
 import { renderControls, videoControlPrompt } from './controlmaps.js';
+import { planVideoRecovery } from './video-recovery.js';
 
 export const extractJSON = consistency.extractJSON;
 
@@ -5059,8 +5060,8 @@ async function generateVideosRaw(projectId, { only = null, chapterId = null, reg
    * 打断它的办法很简单：重跑之前先查一次待认领。查任务是**免费**的，
    * 而它能省下的是一整镜的视频钱 —— 这笔账没有任何一侧是划算的反面。
    *
-   * ⚠ 这一步失败了绝不能拖垮整批：捞不回来就照常重出，
-   * 那是原来的行为，不会更糟。
+   * ⚠ 查询失败不能拖垮整批，也不能自动重出同一任务。仍有 pendingTask 的镜头
+   * 保留待认领状态；只有厂商明确失败并清掉任务号，才进入后续重试。
    */
   /**
    * 只在"补齐缺的"时候捞，明确点了「重出」就不捞 ——
@@ -5076,18 +5077,18 @@ async function generateVideosRaw(projectId, { only = null, chapterId = null, reg
     try {
       await recheckPendingTasks(projectId, { onEvent });
     } catch (err) {
-      onEvent?.({ type: 'note', message: `捞了一下没捞着（${err.message}），这几镜照常重出。` });
+      onEvent?.({ type: 'note', message: `待认领任务查询失败（${err.message}）。任务号已保留，本轮不重复提交，避免二次计费。` });
     }
-    // 捞回来的那几镜已经有 videoPath 了，从这一批里去掉，别再花一次钱
+    // 已取回的跳过；仍待认领的也跳过。仅厂商明确失败、pendingTask 已清除的镜头可重试。
     const fresh = store.read(projectId);
-    const stillNeed = new Set((fresh.shots || []).filter((s) => !s.videoPath).map((s) => s.id));
-    const before = targets.length;
-    targets = targets.filter((s) => stillNeed.has(s.id));
-    if (targets.length < before) {
-      onEvent?.({ type: 'note', message: `捞回来 ${before - targets.length} 镜，这几镜不用再出了（省下的就是这几镜的视频钱）` });
-    }
+    const recovery = planVideoRecovery(targets, fresh.shots || []);
+    const retryIds = new Set(recovery.retryIds);
+    targets = targets.filter((s) => retryIds.has(s.id));
+    if (recovery.recoveredIds.length) onEvent?.({ type: 'note', message: `捞回来 ${recovery.recoveredIds.length} 镜，这几镜不用再出了（省下的就是这几镜的视频钱）` });
+    if (recovery.deferredIds.length) onEvent?.({ type: 'note', message: `${recovery.deferredIds.length} 镜仍在厂商处理中或暂时查不到，已保留任务号并跳过重复提交。` });
     if (!targets.length) {
-      onEvent?.({ type: 'stage', stage: 'video', status: 'done', message: '全都捞回来了，一分钱没花' });
+      onEvent?.({ type: 'stage', stage: 'video', status: recovery.deferredIds.length ? 'pending' : 'done',
+        message: recovery.deferredIds.length ? '本轮没有安全可重试的镜头；待认领任务已保留' : '全都捞回来了，一分钱没花' });
       return store.read(projectId);
     }
   }
