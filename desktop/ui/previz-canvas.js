@@ -282,6 +282,19 @@ export function blockingCanvas(stage, { size = 320, onChange = () => {} } = {}) 
       const g = el('g');
       const attached = attachmentPose(stage, mk);
       const worldX = Number(attached?.x ?? mk.x ?? 0), worldY = Number(attached?.y ?? mk.y ?? 0);
+      // 道具被人物拿着/背着时，不能只在 3D 里悄悄跟随。俯视排位也画出
+      // 连接线和挂点名称，用户一眼能分清它是落在地上还是绑定在角色身上。
+      if (attached?.actor) {
+        const actor = attached.actor;
+        g.append(el('line', {
+          x1: s.x(actor.x), y1: s.y(actor.y), x2: s.x(worldX), y2: s.y(worldY),
+          stroke: '#c4a7ff', 'stroke-width': 2, 'stroke-dasharray': '4 3', opacity: .92, 'pointer-events': 'none'
+        }));
+        g.append(el('circle', { cx: s.x(worldX), cy: s.y(worldY), r: 6, fill: '#c4a7ff', opacity: .9, 'pointer-events': 'none' }));
+        const mount = el('text', { x: s.x(worldX) + 8, y: s.y(worldY) - 7, class: 'previz-mark-label', 'pointer-events': 'none' });
+        mount.append(document.createTextNode(({ rightHand: '右手', leftHand: '左手', back: '背部', waist: '腰部' })[mk.attachPoint] || '挂点'));
+        g.append(mount);
+      }
       const hasTexture = Boolean(mk.textureUrl || mk.thumbnail);
       if (hasTexture) {
         const image = topAsset(mk, { x: s.x(worldX) - 35, y: s.y(worldY) - 55, width: 70, height: 70, className: 'previz-top-asset' });
