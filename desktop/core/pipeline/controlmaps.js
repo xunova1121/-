@@ -359,6 +359,29 @@ export function actionContinuityIssues(previous = {}, next = {}) {
       fix: '保持首尾挂点一致；确实要交接时拆成独立动作镜，并写明交接过程。'
     });
   }
+  // 全量道具状态可发现落地道具在两镜之间凭空跳位；旧项目回退到持有道具序列。
+  const previousPropStates = previous.propSequence?.at(-1)?.props || previous.attachmentSequence?.at(-1)?.props || [];
+  const nextPropStates = next.propSequence?.[0]?.props || next.attachmentSequence?.[0]?.props || [];
+  const allPreviousProps = new Map(previousPropStates.map((item) => [item.id, item]));
+  for (const item of nextPropStates) {
+    const before = allPreviousProps.get(item.id);
+    if (!before) continue;
+    const distance = Math.hypot(Number(item.x || 0) - Number(before.x || 0), Number(item.y || 0) - Number(before.y || 0), Number(item.elevation || 0) - Number(before.elevation || 0));
+    const heldBefore = before.actorId ? `${before.actorId}:${before.point || 'rightHand'}` : '';
+    const heldAfter = item.actorId ? `${item.actorId}:${item.point || 'rightHand'}` : '';
+    if (distance > 1.25 && !heldBefore && !heldAfter) out.push({
+      kind: 'prop-position-break', severity: 'high', propId: item.id,
+      what: `${item.name || item.id} 在两镜接缝相差 ${distance.toFixed(2)} 米`,
+      why: '静止或落地道具突然换位会被读成凭空移动。',
+      fix: '把下一镜首帧道具坐标对齐上一镜末帧，或增加一段拿取/移动的过渡镜。'
+    });
+    if (heldBefore !== heldAfter && !(heldBefore && heldAfter)) out.push({
+      kind: 'prop-pickup-break', severity: 'normal', propId: item.id,
+      what: `${item.name || item.id} 在接缝${heldBefore ? '突然放下' : '突然被拿起'}`,
+      why: '拿起或放下没有对应动作节拍，视频模型容易做成闪现。',
+      fix: '在上一镜尾部或下一镜开头增加道具交互关键帧，并填写拿取/放下动作。'
+    });
+  }
   const prevLights = new Map((previous.lightSequence?.at(-1)?.lights || []).map((item) => [item.id, item]));
   for (const item of next.lightSequence?.[0]?.lights || []) {
     const before = prevLights.get(item.id);
