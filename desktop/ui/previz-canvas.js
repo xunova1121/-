@@ -1166,6 +1166,23 @@ export function previzPanel(stage, {
   let selectedId = stage.cam.id;
 
   const redrawAll = () => { canvas.redraw(); director.redraw(); viewport.redraw(); refresh(); paintInspector(); paintTimeline(); };
+  /**
+   * 用户的设定集常见两种布局：超宽横排四格，或接近正方形的 2×2。
+   * 仅在没有人工选择时推断一次；之后保存 textureGrid，绝不在用户改过
+   * 排版后又擅自覆盖。图片未加载、对象已被撤销时也不写回舞台。
+   */
+  const inferCharacterSheetGrid = (item) => {
+    const source = item?.textureUrl || item?.thumbnail || item?.image;
+    if (!source || item.textureLayout !== 'quad-character' || item.textureGrid) return;
+    const image = new Image();
+    image.onload = () => {
+      if (item.textureGrid || !(stage.subjects || []).includes(item)) return;
+      item.textureGrid = image.naturalWidth / Math.max(1, image.naturalHeight) >= 1.55 ? 'horizontal' : '2x2';
+      item.textureGridInferred = true;
+      history.commit(); redrawAll(); onChange();
+    };
+    image.src = source;
+  };
   const canvas = blockingCanvas(stage, { size, onChange: () => { director.redraw(); refresh(); onChange(); } });
   const director = director3dCanvas(stage, {
     size: Math.max(460, size), selected: () => selectedId,
@@ -1182,10 +1199,12 @@ export function previzPanel(stage, {
       else if (asset.kind === 'character') stage.subjects.push({ name: asset.name, x: p.x, y: p.y, facing: 180, height: 1.72, thumbnail: asset.image, ...binding });
       else stage.marks.push({ name: asset.name, x: p.x, y: p.y, height: .9, width: .9, thumbnail: asset.image, ...binding });
       normalizeStage(stage);
+      if (asset.kind === 'character') inferCharacterSheetGrid(stage.subjects.at(-1));
       history.commit(); redrawAll(); onChange();
     },
     onChange: () => { canvas.redraw(); refresh(); onChange(); }
   });
+  for (const item of stage.subjects || []) inferCharacterSheetGrid(item);
   const viewport = cameraViewport(stage, { width: Math.max(460, size) });
   // SVGElement 的 `.hidden` 在部分 Chromium 里只是 expando，不会生成 hidden 属性。
   canvas.node.setAttribute('hidden', '');
@@ -1385,12 +1404,20 @@ export function previzPanel(stage, {
       const occlusionWrap = document.createElement('label'); occlusionWrap.append(document.createTextNode('构图遮挡'), occlusion);
       inspector.append(makeSelect('地面约束', 'grounded', [['true', '脚底贴地检查'], ['false', '允许跳跃/悬空']]), ground, occlusionWrap);
       if (item.textureLayout === 'quad-character') {
+        const textureGrid = Object.assign(document.createElement('select'), { disabled: item.locked });
+        textureGrid.append(new Option('横向四格', 'horizontal'), new Option('2×2 四宫格', '2x2'));
+        textureGrid.value = item.textureGrid || 'horizontal';
+        textureGrid.onchange = () => {
+          item.textureGrid = textureGrid.value;
+          item.textureGridInferred = false;
+          history.commit(); redrawAll(); onChange();
+        };
+        const textureGridWrap = document.createElement('label');
+        textureGridWrap.append(document.createTextNode(item.textureGridInferred ? '设定集排版（已自动识别）' : '设定集排版'), textureGrid);
         inspector.append(makeSelect('贴图视角', 'textureView', [
           ['auto', '自动随朝向'], ['front', '全身正面'], ['side', '全身侧面'],
           ['back', '全身背面'], ['closeup', '上半身特写']
-        ]), makeSelect('设定集排版', 'textureGrid', [
-          ['horizontal', '横向四格'], ['2x2', '2×2 四宫格']
-        ]), makeNumber('裁切内缩', 'textureInset', '0.005'));
+        ]), textureGridWrap, makeNumber('裁切内缩', 'textureInset', '0.005'));
         const resolved = document.createElement('div');
         resolved.className = 'previz-cap';
         resolved.textContent = '当前贴图：' + textureViewLabel(resolvedTextureView(stage, item));
