@@ -136,13 +136,16 @@ export function renderControls(source = {}, { duration = 5, sampleEvery = 3 } = 
   });
   const poseSequence = sampled.map(({ frame, stage }) => ({ frame, subjects: (stage.subjects || []).map((x) => ({ id: x.id, x: x.x, y: x.y, height: x.height, rotation: x.rotation, scale: x.scale, pose: x.pose || 'stand', action: x.action || '', animationName: x.animationName || '', textureView: x.textureView || 'auto' })) }));
   const lightSequence = sampled.map(({ frame, stage }) => ({ frame, time: Number((frame / FPS).toFixed(3)), lights: (stage.lights || []).map((x) => ({ id: x.id, type: x.lightType, x: x.x, y: x.y, height: x.height, intensity: x.intensity, color: x.color, targetId: x.targetId || '' })) }));
-  const attachmentSequence = sampled.map(({ frame, stage }) => ({
-    frame, time: Number((frame / FPS).toFixed(3)), props: (stage.marks || []).filter((x) => !x.far && x.attachToId).map((item) => {
+  // 全量道具状态不能只保留“当前被拿着的”；拿起、递交、放下的未绑定帧也重要。
+  const propSequence = sampled.map(({ frame, stage }) => ({
+    frame, time: Number((frame / FPS).toFixed(3)), props: (stage.marks || []).filter((x) => !x.far).map((item) => {
       const world = attachmentPose(stage, item);
-      return { id: item.id, name: item.name, actorId: item.attachToId, point: item.attachPoint,
-        x: Number(world?.x || item.x || 0), y: Number(world?.y || item.y || 0), elevation: Number(world?.elevation || item.elevation || 0) };
+      return { id: item.id, name: item.name, actorId: item.attachToId || '', point: item.attachPoint || '',
+        x: Number(world?.x ?? item.x ?? 0), y: Number(world?.y ?? item.y ?? 0), elevation: Number(world?.elevation ?? item.elevation ?? 0),
+        offsetX: Number(item.attachOffsetX || 0), offsetY: Number(item.attachOffsetY || 0), offsetZ: Number(item.attachOffsetZ || 0), grounded: item.grounded !== false };
     })
   }));
+  const attachmentSequence = propSequence.map(({ frame, time, props }) => ({ frame, time, props: props.filter((item) => item.actorId) }));
   // 动作不能只留在最后一帧的文字里：例如第 0 帧“持刀警戒”、第 48 帧“右手拔刀”，
   // 两句之间的顺序正是视频模型最容易颠倒的地方。把变化点单列成节拍，既能喂模型，
   // 也能在出片失败时追溯“到底要求它在哪一帧做什么”。
@@ -216,14 +219,14 @@ export function renderControls(source = {}, { duration = 5, sampleEvery = 3 } = 
   // 这是跨镜头“视觉状态记忆”的可序列化基线：下一镜既能拿它作接缝核验，
   // 也能把上一镜落点作为首帧约束，而不是只记一段泛泛的提示词。
   const visualStateMemory = {
-    start: { frame: first.frame, subjects: poseSequence[0]?.subjects || [], props: attachmentSequence[0]?.props || [], camera: trajectory[0] || {}, lights: lightSequence[0]?.lights || [] },
-    end: { frame: last.frame, subjects: poseSequence.at(-1)?.subjects || [], props: attachmentSequence.at(-1)?.props || [], camera: trajectory.at(-1) || {}, lights: lightSequence.at(-1)?.lights || [] }
+    start: { frame: first.frame, subjects: poseSequence[0]?.subjects || [], props: propSequence[0]?.props || [], camera: trajectory[0] || {}, lights: lightSequence[0]?.lights || [] },
+    end: { frame: last.frame, subjects: poseSequence.at(-1)?.subjects || [], props: propSequence.at(-1)?.props || [], camera: trajectory.at(-1) || {}, lights: lightSequence.at(-1)?.lights || [] }
   };
   return { start: first.rgb, end: last.rgb, depth: first.depth, mask: first.mask, edge: first.edge, pose: first.pose,
     frames, sampleEvery: Math.max(1, sampleEvery), controlFps: Number((FPS / Math.max(1, sampleEvery)).toFixed(3)), width: W, height: H, fps: FPS, maxFrame,
     keyframes: (base.keyframes || []).map((x) => x.frame), motionEasing: base.motionEasing || 'easeInOut',
     pathInterpolation: base.pathInterpolation || 'linear',
-    trajectory, focusSequence, poseSequence, actionSequence, motionPaths, lightSequence, attachmentSequence, visualStateMemory, layers, issues,
+    trajectory, focusSequence, poseSequence, actionSequence, motionPaths, lightSequence, propSequence, attachmentSequence, visualStateMemory, layers, issues,
     objects: objects.map((x) => ({ id: x.item.id, name: x.item.name, kind: x.kind, depth: Number(x.depth.toFixed(3)) })) };
 }
 
@@ -240,6 +243,7 @@ export function videoControlPrompt(bundle = {}) {
   const actions = bundle.actionSequence || [];
   const lights = bundle.lightSequence || [];
   const attachments = bundle.attachmentSequence || [];
+  const props = bundle.propSequence || attachments;
   const focus = bundle.focusSequence || [];
   const state = bundle.visualStateMemory || {};
   if (!trajectory.length && !poses.length && !paths.length && !actions.length && !lights.length && !attachments.length) return '';
@@ -268,7 +272,22 @@ export function videoControlPrompt(bundle = {}) {
     return `${start.id}使用${start.type || 'spot'}光，颜色${start.color || '#ffffff'}，强度${Number(start.intensity || 0).toFixed(1)}→${Number(end.intensity || 0).toFixed(1)}，照向${end.targetId || '主体'}`;
   });
   const pointNames = { rightHand: '右手', leftHand: '左手', back: '背部', waist: '腰部' };
-  const attachedProps = (attachments[0]?.props || []).map((item) => `${item.name || item.id}固定在${item.actorId}的${pointNames[item.point] || item.point || '挂点'}，全程随人物移动和转身，不得漂浮、穿模或换手`);
+  const propBeats = new Map();
+  for (const state of props) for (const item of state.props || []) {
+    const signature = [item.actorId || '', item.point || '', Number(item.x || 0).toFixed(2), Number(item.y || 0).toFixed(2), Number(item.elevation || 0).toFixed(2)].join('|');
+    const track = propBeats.get(item.id) || { name: item.name || item.id, beats: [], signature: null };
+    if (track.signature !== signature) {
+      track.beats.push({ frame: state.frame, actorId: item.actorId, point: item.point, x: item.x, y: item.y, elevation: item.elevation });
+      track.signature = signature;
+    }
+    propBeats.set(item.id, track);
+  }
+  const propActions = [...propBeats.values()].map((track) => {
+    const beats = track.beats.slice(0, 6).map((beat) => beat.actorId
+      ? `${beat.frame}帧由${beat.actorId}持于${pointNames[beat.point] || beat.point || '挂点'}`
+      : `${beat.frame}帧落在(${Number(beat.x || 0).toFixed(2)},${Number(beat.y || 0).toFixed(2)},${Number(beat.elevation || 0).toFixed(2)})`);
+    return beats.length ? `${track.name}：${beats.join(' → ')}` : '';
+  }).filter(Boolean);
   const actionBeats = actions.map((track) => {
     const beats = (track.beats || []).slice(0, 6).map((beat) => {
       const held = (beat.heldProps || []).map((item) => `${item.name}在${pointNames[item.point] || item.point}`).join('、');
@@ -287,7 +306,7 @@ export function videoControlPrompt(bundle = {}) {
   return `【3D预演控制】严格保持首尾构图与空间关系；${pathShape}；${camera}`
     + `${actors.length ? `；人物轨迹：${actors.join('；')}` : ''}`
     + `${actionBeats.length ? `；动作节拍（严格按时间顺序，不得提前、倒放或漏做）：${actionBeats.join('；')}` : ''}`
-    + `${attachedProps.length ? `；人物道具绑定：${attachedProps.join('；')}` : ''}`
+    + `${propActions.length ? `；道具状态节拍（严格执行拿起、交接、放下顺序，不得凭空出现、漂浮或换手）：${propActions.join('；')}` : ''}`
     + `${focusPull ? `；焦点拉移：${focusPull}` : ''}`
     + `${lighting.length ? `；灯光连续性：${lighting.join('；')}` : ''}`
     + `${endState ? `；${endState}` : ''}`
