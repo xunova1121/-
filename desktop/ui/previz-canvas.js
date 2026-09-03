@@ -125,8 +125,35 @@ export function blockingCanvas(stage, { size = 320, onChange = () => {} } = {}) 
     }));
   }
 
+  // 设定集四视图在俯视图中也必须裁到当前那一格。否则人物已经朝侧面，
+  // 俯视排位却仍显示整张“正侧背+特写”拼图，会把真正的站位遮住。
+  const defs = el('defs');
   const layer = el('g');
-  svg.append(layer);
+  svg.append(defs, layer);
+
+  function topAsset(item, { x, y, width, height, className }) {
+    const source = item.textureUrl || item.thumbnail || item.image;
+    if (!source) return null;
+    if (item.textureLayout !== 'quad-character') {
+      return el('image', { href: source, x, y, width, height, preserveAspectRatio: 'xMidYMid meet', class: className });
+    }
+    const viewName = resolvedTextureView(stage, item);
+    const crop = quadTextureTransform(item, viewName);
+    // Three.js 的 texture offset 原点在左下，SVG 图片原点在左上；这里换算
+    // 后，2D 排位、3D 贴片和导出的参考帧拿到的是同一格设定图。
+    const fullWidth = width / crop.repeatX;
+    const fullHeight = height / crop.repeatY;
+    const topOffset = 1 - crop.offsetY - crop.repeatY;
+    const clipId = 'previz-sheet-' + String(item.id || item.name || 'asset').replace(/[^a-zA-Z0-9_-]/g, '_') + '-' + viewName;
+    const clip = el('clipPath', { id: clipId });
+    clip.append(el('rect', { x, y, width, height }));
+    defs.append(clip);
+    return el('image', {
+      href: source, x: x - crop.offsetX * fullWidth, y: y - topOffset * fullHeight,
+      width: fullWidth, height: fullHeight, preserveAspectRatio: 'none', class: className,
+      'clip-path': 'url(#' + clipId + ')', 'data-texture-view': viewName
+    });
+  }
 
   /** 一次拖动。pointer 事件让鼠标和手指走同一条路 */
   function draggable(node, onMove) {
@@ -198,6 +225,7 @@ export function blockingCanvas(stage, { size = 320, onChange = () => {} } = {}) 
 
   function redraw() {
     while (layer.firstChild) layer.removeChild(layer.firstChild);
+    while (defs.firstChild) defs.removeChild(defs.firstChild);
     const subjects = stage.subjects || [];
     const cam = stage.cam;
 
@@ -256,10 +284,7 @@ export function blockingCanvas(stage, { size = 320, onChange = () => {} } = {}) 
       const worldX = Number(attached?.x ?? mk.x ?? 0), worldY = Number(attached?.y ?? mk.y ?? 0);
       const hasTexture = Boolean(mk.textureUrl || mk.thumbnail);
       if (hasTexture) {
-        const image = el('image', {
-          href: mk.textureUrl || mk.thumbnail, x: s.x(worldX) - 35, y: s.y(worldY) - 55,
-          width: 70, height: 70, preserveAspectRatio: 'xMidYMid meet', class: 'previz-top-asset'
-        });
+        const image = topAsset(mk, { x: s.x(worldX) - 35, y: s.y(worldY) - 55, width: 70, height: 70, className: 'previz-top-asset' });
         if (!attached) draggable(image, (mx, my) => { mk.x = Number(mx.toFixed(2)); mk.y = Number(my.toFixed(2)); });
         g.append(image);
       }
@@ -378,10 +403,7 @@ export function blockingCanvas(stage, { size = 320, onChange = () => {} } = {}) 
 
       const hasTexture = Boolean(sub.textureUrl || sub.thumbnail);
       if (hasTexture) {
-        const image = el('image', {
-          href: sub.textureUrl || sub.thumbnail, x: s.x(sub.x) - 45, y: s.y(sub.y) - 112,
-          width: 90, height: 120, preserveAspectRatio: 'xMidYMax meet', class: 'previz-top-character'
-        });
+        const image = topAsset(sub, { x: s.x(sub.x) - 45, y: s.y(sub.y) - 112, width: 90, height: 120, className: 'previz-top-character' });
         draggable(image, (mx, my) => { sub.x = Number(mx.toFixed(2)); sub.y = Number(my.toFixed(2)); });
         g.append(image);
       }
