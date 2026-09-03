@@ -308,11 +308,41 @@ if (await previz.count()) {
    * 鼠标会按下在完全不相干的地方。第一版就栽在这儿：面板在 y≈744，
    * 而视口只有 720 高，于是"拖了但没反应"，看起来像功能坏了。
    */
+  /**
+   * ⚠ 先切回「俯视排位」。
+   *
+   * 加了 3D 之后，这个面板**默认开在 3D 导演画布**，2D 那张 svg 是
+   * display:none —— 于是下面找 `.previz-cam` 会一直等到超时，
+   * 看起来像"2D 排位没了"。实际上它好好的，切过去就在：
+   * 实测拖一次机位，圆点 cx/cy 从 160,240 变到 240,96，
+   * 读数从「机位在主体正面方向」变成「机位在主体右侧侧后方向」。
+   *
+   * 功能没坏，是走查没跟上界面的改动。
+   */
+  const topView = page.locator('button', { hasText: '俯视排位' }).first();
+  check('预演台有 2D／3D 切换', (await topView.count()) > 0);
+  if (await topView.count()) {
+    await topView.evaluate((el) => el.click());
+    await page.waitForTimeout(1200);
+  }
+
   const cam = page.locator('.previz-cam').first();
   await cam.scrollIntoViewIfNeeded();
   await page.waitForTimeout(200);
   const box = await cam.boundingBox();
-  const cbox = await canvas.boundingBox();
+  /**
+   * ⚠ 终点必须取**圆点自己所在的那张 svg**，不能用
+   * `.previz-canvas` 的 .first()。
+   *
+   * 加了 3D 之后页面上有两张 `.previz-canvas`，.first() 可能是隐藏的那张 ——
+   * 它的 boundingBox 要么是 null、要么落在视口外（实测拿到过 y=-295），
+   * 于是鼠标松在一个负坐标上，拖拽等于没发生。而现象是"读数没变"，
+   * 看起来像功能坏了。查这个坑花的时间比修它长得多。
+   */
+  const cbox = await cam.evaluate((el) => {
+    const r = el.ownerSVGElement.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
+  });
   const vp = page.viewportSize();
   check('机位圆点在视口里（不然鼠标会按在别处，测了个寂寞）',
     Boolean(box) && box.y >= 0 && box.y + box.height <= vp.height,
@@ -320,7 +350,7 @@ if (await previz.count()) {
   if (box && cbox) {
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();
-    await page.mouse.move(cbox.x + cbox.width * 0.8, cbox.y + cbox.height * 0.2, { steps: 12 });
+    await page.mouse.move(cbox.x + cbox.width * 0.75, cbox.y + cbox.height * 0.3, { steps: 14 });
     await page.mouse.up();
     await page.waitForTimeout(300);
   }
