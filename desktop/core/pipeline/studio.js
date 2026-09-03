@@ -3357,7 +3357,7 @@ export function exportShotControls(projectId, shotId, stageOverride = null, rend
     maxFrame: rendered.maxFrame, keyframes: rendered.keyframes, motionEasing: rendered.motionEasing,
     pathInterpolation: rendered.pathInterpolation, cameraTrajectory: rendered.trajectory,
     focusSequence: rendered.focusSequence, poseSequence: rendered.poseSequence, actionSequence: rendered.actionSequence, motionPaths: rendered.motionPaths,
-    lightSequence: rendered.lightSequence, propSequence: rendered.propSequence, attachmentSequence: rendered.attachmentSequence,
+    lightSequence: rendered.lightSequence, propSequence: rendered.propSequence, propEvents: rendered.propEvents, attachmentSequence: rendered.attachmentSequence,
     layers: rendered.layers, sequence, renderedSequence,
     issues: rendered.issues,
     maps: Object.fromEntries(['rendered', 'start', 'end', 'depth', 'mask', 'edge', 'pose'].filter((key) => files[key]).map((key) => [key, files[key]]))
@@ -3369,7 +3369,7 @@ export function exportShotControls(projectId, shotId, stageOverride = null, rend
       maxFrame: rendered.maxFrame, keyframes: rendered.keyframes, motionEasing: rendered.motionEasing,
       pathInterpolation: rendered.pathInterpolation, trajectory: rendered.trajectory,
       focusSequence: rendered.focusSequence, poseSequence: rendered.poseSequence, actionSequence: rendered.actionSequence, motionPaths: rendered.motionPaths,
-      lightSequence: rendered.lightSequence, propSequence: rendered.propSequence, attachmentSequence: rendered.attachmentSequence,
+      lightSequence: rendered.lightSequence, propSequence: rendered.propSequence, propEvents: rendered.propEvents, attachmentSequence: rendered.attachmentSequence,
       layers: rendered.layers, objects: rendered.objects, issues: rendered.issues,
       sequenceDir, sequence, renderSequenceDir: renderedSequence.length ? renderSequenceDir : '', renderedSequence,
       controlFps: rendered.controlFps, sampleEvery: rendered.sampleEvery, at: new Date().toISOString() };

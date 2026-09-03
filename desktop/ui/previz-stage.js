@@ -333,7 +333,10 @@ export function frameState(stage, frame) {
       out[key] = Number(value.toFixed(4));
     }
     out.move = { ...((objectT < .5 ? a.move : b.move) || item.move || {}) };
-    for (const key of ['focusId', 'pose', 'action', 'animationName', 'textureView', 'textureGrid', 'autoOrient', 'lightType', 'color', 'targetId', 'attachToId', 'attachPoint', 'grounded']) out[key] = (objectRawT < .5 ? a[key] : b[key]) ?? item[key];
+    for (const key of ['focusId', 'pose', 'action', 'animationName', 'textureView', 'textureGrid', 'autoOrient', 'lightType', 'color', 'targetId']) out[key] = (objectRawT < .5 ? a[key] : b[key]) ?? item[key];
+    // 挂点是一次明确的导演事件，不是可补间的视觉属性。第 24 帧拿起就必须
+    // 到第 24 帧才切换；若在两关键帧中点切换，会造成道具提前瞬移到人物手里。
+    for (const key of ['attachToId', 'attachPoint', 'grounded']) out[key] = (objectRawT < 1 ? a[key] : b[key]) ?? item[key];
     if (out.autoOrient !== false && stage.subjects.includes(item)) {
       let dx = Number(b.x || 0) - Number(a.x || 0), dy = Number(b.y || 0) - Number(a.y || 0);
       if (stage.pathInterpolation === 'smooth' && leftIndex !== rightIndex) {
