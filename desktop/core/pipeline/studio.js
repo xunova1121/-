@@ -5099,6 +5099,10 @@ async function generateVideosRaw(projectId, { only = null, chapterId = null, reg
   for (const shot of targets) {
     jobs.checkpoint(signal, `第 ${shot.index} 镜起往后的 ${targets.length - targets.indexOf(shot)} 镜`);
     onEvent?.({ type: 'shot', shotId: shot.id, status: 'running', message: `第 ${shot.index} 镜出视频…` });
+    // catch 在 try 的块级作用域之外。把这一镜真正使用的路由提前留档，
+    // 否则分级路由到别家后，待认领任务仍会被错误记成全局默认服务商。
+    let attemptedProvider = r.video.provider;
+    let attemptedModel = r.video.model;
     try {
       /**
        * 上下文要**先**算，而且要用**刚读出来的项目**。
@@ -5122,6 +5126,8 @@ async function generateVideosRaw(projectId, { only = null, chapterId = null, reg
       const tierRoute = tiers.routeFor(tier, settings.get('videoTiers'));
       const useProvider = tierRoute?.provider || r.video.provider;
       const useModel = tierRoute?.model || r.video.model;
+      attemptedProvider = useProvider;
+      attemptedModel = useModel;
       if (tierRoute) {
         onEvent?.({
           type: 'note',
@@ -5327,12 +5333,13 @@ async function generateVideosRaw(projectId, { only = null, chapterId = null, reg
       store.update(projectId, (p) => {
         const t = p.shots.find((s) => s.id === shot.id);
         if (!t) return p;
-        if (taskId) t.pendingTask = { taskId, provider: r.video.provider, at: new Date().toISOString() };
+        if (taskId) t.pendingTask = { taskId, provider: attemptedProvider, model: attemptedModel, at: new Date().toISOString() };
         t.videoError = {
           at: new Date().toISOString(),
           message: String(err.message || '未说明原因').slice(0, 400),
           taskId: taskId || null,
-          provider: r.video.provider || null
+          provider: attemptedProvider || null,
+          model: attemptedModel || null
         };
         return p;
       });
