@@ -1,5 +1,5 @@
 /** 从预演台空间与关键帧导出可控视频模型能消费的控制包。 */
-import { attachmentPose, frameState, normalizeStage, spatialIssues, stageObjects } from '../../ui/previz-stage.js';
+import { attachmentPose, frameState, normalizeStage, propEventBetween, spatialIssues, stageObjects } from '../../ui/previz-stage.js';
 
 const W = 1280, H = 720, FPS = 24;
 const esc = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c]));
@@ -150,8 +150,8 @@ export function renderControls(source = {}, { duration = 5, sampleEvery = 3 } = 
   const previousPropState = new Map();
   for (const state of propSequence) for (const item of state.props || []) {
     const before = previousPropState.get(item.id);
-    if (before && ((before.actorId || '') !== (item.actorId || '') || (before.point || '') !== (item.point || ''))) {
-      const type = !before.actorId && item.actorId ? 'pickup' : before.actorId && !item.actorId ? 'drop' : 'handoff';
+    const type = propEventBetween(before, item);
+    if (type) {
       propEvents.push({ type, frame: state.frame, time: state.time, propId: item.id, propName: item.name || item.id,
         fromActorId: before.actorId || '', fromPoint: before.point || '', toActorId: item.actorId || '', toPoint: item.point || '',
         x: item.x, y: item.y, elevation: item.elevation });

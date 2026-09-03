@@ -140,6 +140,19 @@ export function detachAttachment(stage, item, { ground = true } = {}) {
   return item;
 }
 
+/** 两个道具关键帧之间发生的离散交互；时间线和视频控制包共用。 */
+export function propEventBetween(before, after) {
+  if (!before || !after) return '';
+  const fromActor = String(before.attachToId || before.actorId || '');
+  const toActor = String(after.attachToId || after.actorId || '');
+  const fromPoint = String(before.attachPoint || before.point || '');
+  const toPoint = String(after.attachPoint || after.point || '');
+  if (fromActor === toActor && fromPoint === toPoint) return '';
+  if (!fromActor && toActor) return 'pickup';
+  if (fromActor && !toActor) return 'drop';
+  return 'handoff';
+}
+
 export function snapToGround(item) {
   if (!item) return item;
   item.elevation = 0;
@@ -356,4 +369,3 @@ export function applyFrame(stage, frame) {
   for (const { item } of stageObjects(stage)) Object.assign(item, state.values[item.id] || {});
   return state;
 }
-

@@ -28,7 +28,7 @@ import { GLTFLoader } from '/three-gltf-loader.js';
 import { OrbitControls } from '/three-orbit-controls.js';
 import { TransformControls } from '/three-transform-controls.js';
 import { clone as cloneSkeleton } from '/three-skeleton-utils.js';
-import { addKeyframe, applyFrame, attachmentPose, createHistory, detachAttachment, findObject, nearestAttachment, normalizeStage, restore, snapToGround, snapshot, spatialIssues, stageObjects } from './previz-stage.js';
+import { addKeyframe, applyFrame, attachmentPose, createHistory, detachAttachment, findObject, nearestAttachment, normalizeStage, propEventBetween, restore, snapToGround, snapshot, spatialIssues, stageObjects } from './previz-stage.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -1559,9 +1559,20 @@ export function previzPanel(stage, {
       const name = Object.assign(document.createElement('button'), { className: 'previz-track-name', textContent: `${kind === 'camera' ? '▣' : kind === 'light' ? '☀' : kind === 'subject' ? '♙' : '◇'} ${item.name || (kind === 'camera' ? '主摄影机' : item.id)}` });
       name.onclick = () => { selectedId = item.id; redrawAll(); };
       const lane = document.createElement('div'); lane.className = 'previz-track-lane';
-      for (const kf of stage.keyframes || []) {
-        if (!kf.values?.[item.id]) continue;
-        const jump = Object.assign(document.createElement('button'), { className: 'previz-diamond', title: `${kf.frame}f · 拖动改时刻 · 右键删除` });
+      const objectFrames = (stage.keyframes || []).filter((kf) => kf.values?.[item.id]).slice().sort((a, b) => a.frame - b.frame);
+      for (let frameIndex = 0; frameIndex < objectFrames.length; frameIndex += 1) {
+        const kf = objectFrames[frameIndex];
+        const before = objectFrames[frameIndex - 1]?.values?.[item.id];
+        const after = kf.values[item.id];
+        const propEvent = kind === 'prop' ? propEventBetween(before, after) : '';
+        const eventText = { pickup: '拿', drop: '放', handoff: '交' }[propEvent] || '';
+        const eventTitle = { pickup: '拿起', drop: '放下', handoff: '交接/换手' }[propEvent] || '';
+        const jump = Object.assign(document.createElement('button'), {
+          className: `previz-diamond${propEvent ? ` previz-prop-event ${propEvent}` : ''}`,
+          textContent: eventText,
+          title: `${kf.frame}f${eventTitle ? ` · ${eventTitle}${item.name || item.id}` : ''} · 点击定位 · 拖动改时刻 · 右键删除`
+        });
+        if (propEvent) jump.dataset.event = propEvent;
         jump.style.left = `${kf.frame / maxFrame * 100}%`;
         jump.onclick = () => { stopPlayback(); currentFrame = kf.frame; showFrame(); paintTimeline(); };
         jump.oncontextmenu = (event) => {
@@ -1579,7 +1590,7 @@ export function previzPanel(stage, {
           const move = (moveEvent) => {
             const ratio = Math.max(0, Math.min(1, (moveEvent.clientX - rect.left) / Math.max(1, rect.width)));
             nextFrame = Math.round(ratio * maxFrame); moved ||= nextFrame !== startFrame;
-            jump.style.left = `${nextFrame / maxFrame * 100}%`; jump.title = `${nextFrame}f · 松开确认`;
+            jump.style.left = `${nextFrame / maxFrame * 100}%`; jump.title = `${nextFrame}f${eventTitle ? ` · ${eventTitle}${item.name || item.id}` : ''} · 松开确认`;
           };
           const up = () => {
             jump.removeEventListener('pointermove', move); jump.removeEventListener('pointerup', up);
