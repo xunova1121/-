@@ -248,13 +248,38 @@ async function stream(path, body, onEvent) {
     buf = lines.pop() || '';
     for (const line of lines) {
       if (!line.trim()) continue;
-      try {
-        onEvent(JSON.parse(line));
-      } catch {
-        /* 半行，等下一块 */
-      }
+      dispatchLine(line, onEvent);
     }
   }
+  /**
+   * 收尾：最后一截没有换行的也要处理。
+   * 服务端的 end() 现在是带换行的，所以这行平时用不上 —— 留着是因为
+   * "最后一个事件恰好被丢掉"这种故障看起来和"服务端没回"一模一样。
+   */
+  if (buf.trim()) dispatchLine(buf.trim(), onEvent);
+}
+
+/**
+ * ══════════ 半截行该忽略，处理器里的错不许吞 ══════════
+ *
+ * 原来解析和分发包在**同一个 try** 里，那个 catch 的本意只是
+ * "网络切在一行中间，残行丢掉等下一块" —— 但它把 onEvent 里抛的
+ * **每一个错**也一起吃掉了。而 onEvent 做的是渲染、落盘、弹提示，
+ * 那才是真正会出错的地方。
+ *
+ * 后果：事件到了、渲染时抛了异常、被静默吞掉，于是**东西没出来、
+ * 也没有任何报错**，按钮照常变回原样。用户看到的是"点了没反应"。
+ *
+ * 这个应用里最难查的一类问题就是它：看起来什么都没发生。
+ */
+function dispatchLine(line, onEvent) {
+  let ev;
+  try {
+    ev = JSON.parse(line);
+  } catch {
+    return; // 半截行，等下一块
+  }
+  onEvent(ev);
 }
 
 /**

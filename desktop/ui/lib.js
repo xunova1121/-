@@ -143,20 +143,39 @@ export async function stream(path, body, onEvent, { signal } = {}) {
       const line = buffer.slice(0, nl).trim();
       buffer = buffer.slice(nl + 1);
       if (!line) continue;
-      try {
-        onEvent(JSON.parse(line));
-      } catch {
-        /* 半截行，忽略 */
-      }
+      dispatch(line, onEvent);
     }
   }
-  if (buffer.trim()) {
-    try {
-      onEvent(JSON.parse(buffer.trim()));
-    } catch {
-      /* 收尾残渣 */
-    }
+  if (buffer.trim()) dispatch(buffer.trim(), onEvent);
+}
+
+/**
+ * ══════════ 半截行该忽略，处理器里的错不许吞 ══════════
+ *
+ * 原来这两件事包在**同一个 try** 里：
+ *
+ *   try { onEvent(JSON.parse(line)); } catch { 半截行，忽略 }
+ *
+ * 那个 catch 的本意只是"网络切在一行中间，残行丢掉等下一块"。
+ * 但它把 `onEvent` 里抛的**每一个错**也一起当成残行吃掉了 ——
+ * 而 onEvent 里做的是渲染、落盘、弹提示，那才是真正会出错的地方。
+ *
+ * 后果长这样（真事）：`finished` 事件到了、界面渲染时抛了个异常、
+ * 被静默吞掉，于是**大纲没出来、也没有任何报错**，按钮照常变回原样。
+ * 用户看到的是"点了没反应"，而日志、控制台、提示条里一个字都没有。
+ *
+ * 这个应用里最难查的一类问题就是它：**看起来什么都没发生**。
+ * 所以分开 —— 解析失败是意料之中（继续读下一块），
+ * 处理失败是意料之外（必须炸出来，让调用方的 catch 弹给人看）。
+ */
+function dispatch(line, onEvent) {
+  let ev;
+  try {
+    ev = JSON.parse(line);
+  } catch {
+    return; // 半截行，等下一块
   }
+  onEvent(ev);
 }
 
 // ───────────────────────── 展示 ─────────────────────────
