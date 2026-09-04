@@ -1930,6 +1930,12 @@ async function analyzeScriptRaw(projectId, {
   const segBrief = segments.summarize(segs, shots);
   if (segBrief) onEvent?.({ type: 'note', message: segBrief });
 
+  // 模型已成功返回、即将覆盖分镜时才存快照；失败的生成不污染撤销历史。
+  if ((project.shots || []).length) {
+    const scope = chapter ? `章节「${chapter.title || chapter.id}」` : '当前分镜表';
+    undo.snapshot(store.projectDir(projectId), `重拆${scope}（原有 ${project.shots.length} 镜）`);
+  }
+
   store.update(projectId, (p) => {
     if (!p.logline) p.logline = parsed.logline || '';
     // 场次表存下来：界面要按它把分镜分组显示，出图那步也要靠它判断场景锚
@@ -2199,6 +2205,9 @@ export function setLinkRange(projectId, { from, to, link }) {
   const lo = Math.min(Number(from), Number(to));
   const hi = Math.max(Number(from), Number(to));
   if (!Number.isFinite(lo) || !Number.isFinite(hi)) throw new Error('镜号不对');
+
+  const willChange = (project.shots || []).some((shot) => shot.index >= lo && shot.index <= hi && shot.link !== link);
+  if (willChange) undo.snapshot(store.projectDir(projectId), `整段标衔接：第 ${lo}-${hi} 镜 → ${link}`);
 
   const changed = [];
   const next = store.update(projectId, (p) => {
