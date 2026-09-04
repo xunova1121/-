@@ -2797,16 +2797,30 @@ export default {
                           : `首帧核对：和这一镜的图 ${shot.headMatch.similarity}% 像` +
                             `（${shot.headMatch.ok ? '厂商吃了这张首帧' : '⚠ 多半没吃'}）`)
                     : null,
-                  // 任务提交成功但查不到状态时，把 task_id 亮出来
+                  // 待认领不是“生成失败”。把厂商、模型、查询次数和最后状态一起展示，
+                  // 用户才能判断该继续等、重查，还是去厂商平台手动取回。
                   sc.video && shot.pendingTask
                     ? h('div', { class: 'fail-box', style: 'margin-top:10px' },
-                        h('div', { class: 'fail-head' }, '有一个任务查不到状态'),
+                        h('div', { class: 'fail-head' }, '厂商任务待认领（不会自动重复计费）'),
                         h('div', { class: 'fail-row' },
                           h('span', { class: 'fail-who' }, 'task_id'),
                           h('span', { class: 'fail-msg mono' }, shot.pendingTask.taskId)),
+                        h('div', { class: 'fail-row' },
+                          h('span', { class: 'fail-who' }, '路由'),
+                          h('span', { class: 'fail-msg' }, [shot.pendingTask.provider, shot.pendingTask.model].filter(Boolean).join(' / ') || '未知服务商')),
+                        h('div', { class: 'fail-row' },
+                          h('span', { class: 'fail-who' }, '查询'),
+                          h('span', { class: 'fail-msg' }, `${Number(shot.pendingTask.checkCount || 0)} 次${shot.pendingTask.lastState ? ` · ${shot.pendingTask.lastState}` : ''}`)),
+                        shot.pendingTask.lastCheckedAt
+                          ? h('div', { class: 'fail-row' }, h('span', { class: 'fail-who' }, '最后检查'), h('span', { class: 'fail-msg' }, new Date(shot.pendingTask.lastCheckedAt).toLocaleString('zh-CN')))
+                          : null,
+                        shot.pendingTask.lastCheckError
+                          ? h('div', { class: 'fail-tip warn' }, `最近查询异常：${shot.pendingTask.lastCheckError}`)
+                          : null,
                         h('div', { class: 'fail-tip' },
-                          `提交是成功的（${shot.pendingTask.provider}），片子多半已经在平台上出好了。` +
-                          '用上面的「重查待认领任务」再问一次，或者直接在下面贴地址补回来。'))
+                          shot.pendingTask.lastState
+                            ? `厂商当前状态：${shot.pendingTask.lastReason || shot.pendingTask.lastState}。可稍后用「重查待认领任务」免费查询。`
+                            : '任务号已经保存。可用「重查待认领任务」免费查询，或从厂商平台复制成片地址在下面补回。'))
                     : null,
                   // 手动补入**常驻**，不以"有没有记下 task_id"为前提。
                   // 逃生口设成有条件的，等于在最需要它的时候没有它 ——

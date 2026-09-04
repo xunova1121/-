@@ -17,3 +17,11 @@ export function planVideoRecovery(candidateShots = [], freshShots = [], { regene
   }
   return { retryIds, recoveredIds, deferredIds };
 }
+
+/** 把厂商单次查询结果归一成稳定状态，避免“还在跑”和“接口暂时不可达”被误报为失败。 */
+export function taskQueryOutcome(result = {}, error = null) {
+  if (error) return { kind: 'unreachable', terminal: false, message: String(error.message || error || '查询失败') };
+  if (result?.done && result?.url) return { kind: 'claimed', terminal: true, url: result.url, message: '任务完成' };
+  if (result?.failed) return { kind: 'failed', terminal: true, message: String(result.reason || '厂商任务失败') };
+  return { kind: 'pending', terminal: false, state: String(result?.state || 'pending'), message: String(result?.reason || '厂商仍在处理') };
+}

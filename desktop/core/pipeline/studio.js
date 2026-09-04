@@ -48,7 +48,7 @@ import * as transitions from '../transitions.js';
 import * as fx from '../fx.js';
 import * as jobs from '../jobs.js';
 import { renderControls, videoControlPrompt } from './controlmaps.js';
-import { planVideoRecovery } from './video-recovery.js';
+import { planVideoRecovery, taskQueryOutcome } from './video-recovery.js';
 
 export const extractJSON = consistency.extractJSON;
 
@@ -5439,6 +5439,9 @@ export async function recheckPendingTasks(projectId, { onEvent } = {}) {
   onEvent?.({ type: 'stage', stage: 'video', status: 'running', message: `重查 ${pending.length} 个任务…` });
   const dir = store.assetDir(projectId);
   let claimed = 0;
+  let failed = 0;
+  let waiting = 0;
+  let unreachable = 0;
 
   for (const task of pending) {
     onEvent?.({ type: 'shot', shotId: task.shotId, status: 'running', message: `查 ${task.taskId}…` });
@@ -5450,38 +5453,65 @@ export async function recheckPendingTasks(projectId, { onEvent } = {}) {
         onEvent: (ev) => onEvent?.({ ...ev, shotId: task.shotId })
       });
 
-      if (r.done && r.url) {
+      const outcome = taskQueryOutcome(r);
+      if (outcome.kind === 'claimed') {
         const dest = path.join(dir, `${task.shotId}.mp4`);
-        await saveMedia({ url: r.url }, dest, onEvent);
+        await saveMedia({ url: outcome.url }, dest, onEvent);
         store.update(projectId, (p) => {
           const t = p.shots.find((s) => s.id === task.shotId);
           if (t) {
             t.videoPath = dest;
+            t.videoAt = new Date().toISOString();
+            t.videoModelUsed = [task.provider, task.model].filter(Boolean).join(' / ') || '待认领任务';
             t.status = 'video-ready';
+            t.videoError = null;
+            recordGeneration(t, { kind: 'video', provider: task.provider || '', model: task.model || '', output: dest, recoveredTaskId: task.taskId });
             delete t.pendingTask;
           }
           return p;
         });
         claimed += 1;
         onEvent?.({ type: 'shot', shotId: task.shotId, status: 'done', message: '已收回' });
-      } else if (r.failed) {
-        // 厂商那边确实失败了：把它从待认领里摘掉，这一镜该重跑
+      } else if (outcome.kind === 'failed') {
+        // 厂商明确返回失败才解除防重提保护，并保留终态原因供重做决策与验收报告使用。
         store.update(projectId, (p) => {
           const t = p.shots.find((s) => s.id === task.shotId);
-          if (t) delete t.pendingTask;
+          if (t) {
+            t.videoError = { at: new Date().toISOString(), message: outcome.message, taskId: task.taskId,
+              provider: task.provider || null, model: task.model || null, terminal: true };
+            delete t.pendingTask;
+          }
           return p;
         });
-        onEvent?.({ type: 'shot', shotId: task.shotId, status: 'failed', message: r.reason });
+        failed += 1;
+        onEvent?.({ type: 'shot', shotId: task.shotId, status: 'failed', message: outcome.message });
       } else {
+        store.update(projectId, (p) => {
+          const t = p.shots.find((s) => s.id === task.shotId);
+          if (t?.pendingTask) t.pendingTask = { ...t.pendingTask,
+            checkCount: Number(t.pendingTask.checkCount || 0) + 1,
+            lastCheckedAt: new Date().toISOString(), lastState: outcome.state, lastReason: outcome.message, lastCheckError: null };
+          return p;
+        });
+        waiting += 1;
         onEvent?.({
           type: 'shot',
           shotId: task.shotId,
-          status: 'failed',
-          message: r.reason || `还是查不到（状态 ${r.state || '空'}）`
+          status: 'running',
+          message: `${outcome.message}（状态 ${outcome.state}），任务号已保留`
         });
       }
     } catch (err) {
-      onEvent?.({ type: 'shot', shotId: task.shotId, status: 'failed', message: err.message });
+      const outcome = taskQueryOutcome({}, err);
+      store.update(projectId, (p) => {
+        const t = p.shots.find((s) => s.id === task.shotId);
+        if (t?.pendingTask) t.pendingTask = { ...t.pendingTask,
+          checkCount: Number(t.pendingTask.checkCount || 0) + 1,
+          lastCheckedAt: new Date().toISOString(), lastCheckError: outcome.message };
+        return p;
+      });
+      unreachable += 1;
+      onEvent?.({ type: 'shot', shotId: task.shotId, status: 'running', message: `暂时无法查询：${outcome.message}；任务号已保留` });
     }
   }
 
@@ -5494,8 +5524,8 @@ export async function recheckPendingTasks(projectId, { onEvent } = {}) {
   onEvent?.({
     type: 'stage',
     stage: 'video',
-    status: 'done',
-    message: `收回 ${claimed}/${pending.length} 个`
+    status: waiting || unreachable ? 'pending' : 'done',
+    message: `收回 ${claimed} · 仍处理中 ${waiting} · 查询异常 ${unreachable} · 明确失败 ${failed}`
   });
   return store.read(projectId);
 }
