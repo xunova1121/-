@@ -301,6 +301,13 @@ export function videoControlPrompt(bundle = {}) {
       : `${beat.frame}帧落在(${Number(beat.x || 0).toFixed(2)},${Number(beat.y || 0).toFixed(2)},${Number(beat.elevation || 0).toFixed(2)})`);
     return beats.length ? `${track.name}：${beats.join(' → ')}` : '';
   }).filter(Boolean);
+  // 整镜始终挂在同一人物同一挂点的道具，必须给模型一条明确的持续绑定约束。
+  // 有拿起、放下或交接的道具不放进这里，避免“全程固定”和事件节拍互相打架。
+  const firstPropState = props[0]?.props || [];
+  const stableBindings = firstPropState.filter((item) => item.actorId && props.every((frame) => {
+    const current = (frame.props || []).find((prop) => prop.id === item.id);
+    return current?.actorId === item.actorId && current?.point === item.point;
+  })).map((item) => `${item.name || item.id}固定在${item.actorId}的${pointNames[item.point] || item.point || '挂点'}，跟随人物骨骼、动作和位移，不得漂浮、穿模或换手`);
   const eventNames = { pickup: '拿起', drop: '放下', handoff: '交接' };
   const propEventActions = propEvents.slice(0, 12).map((event) => `${event.frame}帧${eventNames[event.type] || event.type}${event.propName || event.propId}${event.toActorId ? `，交给${event.toActorId}的${pointNames[event.toPoint] || event.toPoint || '挂点'}` : ''}`);
   const actionBeats = actions.map((track) => {
@@ -321,6 +328,7 @@ export function videoControlPrompt(bundle = {}) {
   return `【3D预演控制】严格保持首尾构图与空间关系；${pathShape}；${camera}`
     + `${actors.length ? `；人物轨迹：${actors.join('；')}` : ''}`
     + `${actionBeats.length ? `；动作节拍（严格按时间顺序，不得提前、倒放或漏做）：${actionBeats.join('；')}` : ''}`
+    + `${stableBindings.length ? `；道具持续绑定：${stableBindings.join('；')}` : ''}`
     + `${propActions.length ? `；道具状态节拍（严格执行拿起、交接、放下顺序，不得凭空出现、漂浮或换手）：${propActions.join('；')}` : ''}`
     + `${propEventActions.length ? `；道具交互事件：${propEventActions.join(' → ')}` : ''}`
     + `${focusPull ? `；焦点拉移：${focusPull}` : ''}`
