@@ -402,6 +402,9 @@ export function assemblePrompt(bible, shot, { includeStyle = true } = {}) {
    */
   const framing = previz.framingHint(shot.camera);
   if (framing) parts.push(framing);
+  const lensMm = shot?.stage?.cam?.lens ?? shot?.lens;
+  const lens = previz.lensHint(lensMm);
+  if (lens) parts.push(`焦段 ${lensMm}mm：${lens}`);
   /**
    * ══════════ 参考图管"是什么"，文字管"怎么拍" ══════════
    *

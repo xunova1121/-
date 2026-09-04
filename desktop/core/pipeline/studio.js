@@ -2144,7 +2144,7 @@ async function analyzeScriptRaw(projectId, {
  *      所以只落盘、记一个 editedAt，重出由用户自己点。
  */
 const SHOT_EDITABLE = [
-  'description', 'camera', 'motion', 'dialogue', 'scene', 'characters', 'duration', 'link', 'skills',
+  'description', 'camera', 'lens', 'motion', 'dialogue', 'scene', 'characters', 'duration', 'link', 'skills',
   // 这一镜画面里看得见的关键道具。不进白名单的话界面上改了存不下去，
   // 而道具消失那条检查就永远只能听模型的、人纠正不了
   'props',
@@ -2456,7 +2456,13 @@ export function updateShot(projectId, shotId, patch = {}) {
   for (const key of SHOT_EDITABLE) {
     if (!(key in patch)) continue;
     let value = patch[key];
-    if (key === 'duration') {
+    if (key === 'lens') {
+      if (value === null || value === '') value = null;
+      else {
+        value = Number(value);
+        if (!Number.isFinite(value) || value < 8 || value > 400) continue;
+      }
+    } else if (key === 'duration') {
       value = Number(value);
       if (!Number.isFinite(value) || value <= 0) continue;
       value = Math.min(30, Math.max(0.5, value));

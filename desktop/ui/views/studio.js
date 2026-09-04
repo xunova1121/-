@@ -2150,6 +2150,11 @@ export default {
         const fields = {
           description: h('textarea', { rows: 3 }, shot.description || ''),
           camera: h('input', { type: 'text', placeholder: '中景 / 特写 / 航拍…', value: shot.camera || '' }),
+          lens: h('select', {},
+            h('option', { value: '', selected: !shot.lens }, '不指定焦段'),
+            ...[24, 35, 50, 85, 135].map((mm) => h('option', {
+              value: String(mm), selected: Number(shot.lens) === mm
+            }, `${mm}mm${{ 24: '（广角，空间更深）', 35: '（接近人眼）', 50: '（标准）', 85: '（背景压缩）', 135: '（长焦抽离主体）' }[mm]}`))),
           motion: h('input', { type: 'text', placeholder: '镜头缓慢推进…', value: shot.motion || '' }),
           // 这一镜走哪一档视频模型。自动判定给一个，判错的那几镜由人改
           tier: h('select', {},
@@ -2233,6 +2238,7 @@ export default {
                 body: {
                   description: fields.description.value,
                   camera: fields.camera.value,
+                  lens: fields.lens.value === '' ? null : Number(fields.lens.value),
                   motion: fields.motion.value,
                   // cap:tier-routing
                   tier: fields.tier.value,
@@ -2350,6 +2356,7 @@ export default {
             fields.description,
             h('div', { class: 'shot-edit-grid' },
               h('div', {}, h('label', {}, '景别'), fields.camera),
+              h('div', {}, h('label', {}, '焦段'), fields.lens),
               h('div', {}, h('label', {}, '场景'), fields.scene),
               h('div', {}, h('label', {}, '出场角色'), fields.characters),
               h('div', {}, h('label', {}, '画面里的道具'), fields.props)),

@@ -2796,6 +2796,10 @@ const LINE_KIND_SHORT = { speech: '白', inner: '心', voiceover: '旁', offscre
  * 只是排布上按"最常改的放最上面"。
  */
 const CAMERAS = ['特写', '近景', '中景', '全景', '远景', '过肩', '俯视', '仰视'];
+const LENSES = [
+  ['', '不指定'], ['24', '24mm 广角'], ['35', '35mm 人眼'],
+  ['50', '50mm 标准'], ['85', '85mm 背景压缩'], ['135', '135mm 长焦']
+];
 const MOTIONS = ['固定', '缓推', '缓拉', '横移', '跟随', '手持'];
 
 function field(label, control, hint) {
@@ -2859,6 +2863,7 @@ function openEditor(s, jump = 'content') {
     ...cast.map((n) => h('option', { value: n, selected: s.speaker === n }, n)));
 
   let camera = s.camera || '';
+  let lens = s.lens ? String(s.lens) : '';
   let motion = s.motion || '';
   // 这一镜走哪一档模型。自动判定给一个，判错的那几镜由人改
   let tier = s.tier || '';
@@ -3031,6 +3036,11 @@ function openEditor(s, jump = 'content') {
         h('h4', {}, '怎么拍', h('span', {}, '出视频用的')),
         // cap:shot-camera
         field('景别', chips(CAMERAS, camera, (v) => (camera = v))),
+        field('焦段',
+          chips(LENSES.map(([, label]) => label),
+            LENSES.find(([value]) => value === lens)?.[1] || '不指定',
+            (label) => { lens = LENSES.find(([, text]) => text === label)?.[0] || ''; }),
+          '同样是中景，85mm会压缩背景，24mm会强化空间透视。'),
         field('运镜', chips(MOTIONS, motion, (v) => (motion = v))),
         field('时长（秒）', dur, '有台词的话，上一组里会告诉你够不够念。'),
         redo(s.videoPath, '⚠ 这一镜已经出过视频了。改完要重出视频才生效。图不受影响，不用重出。')),
@@ -3139,6 +3149,7 @@ function openEditor(s, jump = 'content') {
           // cap:shot-segment
           segment: Number(segIn.value) || 1,
           camera,
+          lens: lens === '' ? null : Number(lens),
           motion,
           tier,
           duration: Number(dur.value) || s.duration,
@@ -3668,4 +3679,3 @@ async function boot() {
 }
 
 boot();
-

@@ -98,6 +98,22 @@ export function cameraFieldOfView(lensMm = DEFAULT_LENS, aspect = 16 / 9) {
   };
 }
 
+const LENS_HINTS = [
+  { max: 20, text: '超广角，视野极开阔，画面边缘透视明显拉伸，空间显得比实际大' },
+  { max: 28, text: '广角，视野开阔，背景显得远而深，边缘略有透视拉伸' },
+  { max: 40, text: '接近人眼的视角，透视自然，背景既不压缩也不夸张' },
+  { max: 65, text: '标准镜头，透视平实，主体与背景的距离关系接近肉眼所见' },
+  { max: 105, text: '中长焦，背景被压缩、虚化更明显，人物从环境里浮出来' },
+  { max: Infinity, text: '长焦，背景被强烈压缩成一片并大幅虚化，主体被从环境中抽离出来' }
+];
+
+/** 将毫米数翻译成视频模型和审片人都能直接验证的画面结果。 */
+export function lensHint(lensMm) {
+  const lens = Number(lensMm);
+  if (!Number.isFinite(lens) || lens <= 0) return '';
+  return LENS_HINTS.find((item) => lens <= item.max).text;
+}
+
 /**
  * 这个镜头在这个距离上，画面里能装下多高（米）。
  *
