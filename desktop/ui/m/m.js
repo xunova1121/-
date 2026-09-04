@@ -2181,6 +2181,23 @@ function commandCard(close) {
     goTab('flow');
   };
 
+  const undoBar = h('div', { class: 'undo-bar' });
+  api(`/projects/${project.id}/undo`).then((result) => {
+    if (!result.items?.length) return;
+    const top = result.items[0];
+    undoBar.append(h('button', {
+      class: 'btn sm block',
+      onclick: async () => {
+        if (!confirm(`退回到「${top.label}」之前？\n\n分镜表会恢复到当时的 ${top.shots} 镜；已经生成的图片和视频不会删除。`)) return;
+        await api(`/projects/${project.id}/undo/${top.n}`, { method: 'POST' });
+        toast('已退回上一步', 'ok');
+        await reload();
+        close();
+      }
+    }, `↶ 撤销：${top.label}`));
+    if (result.items.length > 1) undoBar.append(h('div', { class: 'muted', style: 'font-size:12px;margin-top:6px' }, `还能再退 ${result.items.length - 1} 步`));
+  }).catch(() => {});
+
   return h('div', { class: 'sheet-card' },
     h('h3', {}, '说一句话'),
     box,
@@ -2194,7 +2211,8 @@ function commandCard(close) {
      * 而那是用户对这个功能的第一印象。服务端 examplesFor 已经按项目算好，
      * 随任意一次解析回来（看不懂时那份就是给这儿用的）。
      */
-    egs);
+    egs,
+    undoBar);
 }
 
 function linkRangeCard(shots) {
