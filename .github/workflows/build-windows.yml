@@ -124,6 +124,47 @@ jobs:
             -DestinationPath "dist/FutureDream-Lite-NodeOnly.zip" -CompressionLevel Optimal -Force
           Remove-Item -Recurse -Force dist/portable-src
 
+      # ── 给快照产物打上分支标记 ──
+      #
+      # snapshot 这个 Release 是所有分支共用的，而上传用的是 `--clobber`（同名直接覆盖）。
+      # 于是两条分支各自构建时，后构建的会把先构建的**整个顶掉**：页面地址没变、
+      # 文件名没变，只有说明里那行"构建自 xx 分支"悄悄换了，
+      # 下载的人拿到的其实是另一条线的产物，而旧包没有任何备份。
+      #
+      # 这个坑真踩到过：主线的包被另一条分支的构建覆盖，只能重新构建才拿得回来。
+      # 加上分支后缀之后，两条线的包并排挂在同一个 Release 上，谁也顶不掉谁。
+      #
+      # 正式版（打 v tag）不加后缀 —— 那是唯一的、对外的名字。
+      - name: 给快照产物打上分支标记
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        shell: pwsh
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          # 取分支名第一段：claude/xxx → claude，codex/xxx → codex。
+          # 附件名必须是纯 ASCII（GitHub 会把非 ASCII 字符换成点），其余一律转成 -
+          $slug = ($env:BRANCH -split '/')[0] -replace '[^A-Za-z0-9]', '-'
+          if ([string]::IsNullOrWhiteSpace($slug)) { $slug = 'build' }
+
+          # ⚠ 先用 @() 把清单**一次取全**再改名。
+          #   Get-ChildItem 是流式的，边枚举边改名会把刚改好的文件又枚举进来，
+          #   于是出现 FutureDream-Setup-0.1.0-x64-claude-claude.exe 这种货色。
+          $files = @(Get-ChildItem dist -File | Where-Object { $_.Extension -in '.exe', '.zip' })
+          foreach ($f in $files) {
+            if ($f.BaseName -like "*-$slug") {
+              Write-Host "  跳过（已带标记）$($f.Name)"
+              continue
+            }
+            $new = "$($f.BaseName)-$slug$($f.Extension)"
+            Write-Host "  $($f.Name)  ->  $new"
+            Rename-Item -LiteralPath $f.FullName -NewName $new
+          }
+
+          Write-Host "改名后待上传的产物："
+          Get-ChildItem dist -File |
+            Where-Object { $_.Extension -in '.exe', '.zip' } |
+            ForEach-Object { Write-Host "  $($_.Name)" }
+
       - name: 列出产物
         shell: pwsh
         run: Get-ChildItem dist -File | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
@@ -143,22 +184,36 @@ jobs:
             TAG="${GITHUB_REF_NAME}"
             TITLE="未来创梦 ${TAG}"
             PRERELEASE=""
+            SLUG=""
           else
             TAG="snapshot"
             TITLE="未来创梦 开发快照"
             PRERELEASE="--prerelease"
+            # 必须和"给快照产物打上分支标记"那一步同一套规则，否则说明里写的后缀是错的
+            SLUG="${GITHUB_REF_NAME%%/*}"
+            SLUG="${SLUG//[^A-Za-z0-9]/-}"
+            [[ -n "$SLUG" ]] || SLUG="build"
+          fi
+
+          # 快照页面上并排挂着多条分支的包，得告诉下载的人怎么认后缀
+          if [[ -n "$SLUG" ]]; then
+            BRANCH_NOTE="> ⚠ 这个页面同时挂着**多条分支**的包，**文件名末尾的后缀就是分支**（\`-claude\` = 主线，\`-codex\` = 3D 预演扩展线）。认准后缀下载 —— 两条线各自更新各自那一组，互不覆盖。本次更新的是 \`-${SLUG}\` 这一组。"
+          else
+            BRANCH_NOTE=""
           fi
 
           cat > notes.md <<NOTES
           构建自 \`${GITHUB_REF_NAME}\` 分支，提交 \`${GITHUB_SHA:0:7}\`。
 
+          ${BRANCH_NOTE}
+
           ## 下载哪个（挑一个就行）
 
           | 文件 | 大小 | 前提 | 说明 |
           |---|---|---|---|
-          | \`FutureDream-Lite-NodeOnly.zip\` | **约 0.2 MB** | 装了 Node 18+ | **嫌慢就下这个。** 解压后双击 \`启动.bat\`，功能完全一样 |
-          | \`FutureDream-Setup-*.exe\` | 约 90 MB | 无 | 安装版，可选目录，建桌面快捷方式 |
-          | \`FutureDream-Portable-*.exe\` | 约 90 MB | 无 | 免安装版，双击即用，可放 U 盘 |
+          | \`FutureDream-Lite-NodeOnly-*.zip\` | **约 1–5 MB** | 装了 Node 18+ | **嫌慢就下这个。** 解压后双击 \`启动.bat\`，功能完全一样 |
+          | \`FutureDream-Setup-*.exe\` | 约 75 MB | 无 | 安装版，可选目录，建桌面快捷方式 |
+          | \`FutureDream-Portable-*.exe\` | 约 75 MB | 无 | 免安装版，双击即用，可放 U 盘 |
 
           两个 exe 之所以大，是因为里面塞了一整个 Chromium（Electron 外壳）。
           应用自身零运行时依赖，源码总共才一百多 KB —— 所以已经有 Node 的话，
