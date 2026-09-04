@@ -128,9 +128,33 @@ export function commandBox(project, { onDone = () => {}, onGo = () => {} } = {})
     onGo(plan.topic === 'estimate' ? 'assets' : null, plan);
   };
 
+  const undoBar = h('div', { class: 'undo-bar' });
+  const paintUndo = async () => {
+    clear(undoBar);
+    let result;
+    try { result = await api(`/projects/${project.id}/undo`); } catch { return; }
+    if (!result.items?.length) return;
+    const top = result.items[0];
+    undoBar.append(
+      h('button', {
+        class: 'btn ghost sm',
+        title: '把分镜表退回这一步之前；已经生成的图片和视频不删除',
+        onclick: async () => {
+          if (!window.confirm(`退回到「${top.label}」之前？\n\n分镜表会恢复到当时的 ${top.shots} 镜，已经生成的媒体文件不会删除。`)) return;
+          await api(`/projects/${project.id}/undo/${top.n}`, { method: 'POST' });
+          toast('已退回上一步', 'ok');
+          onDone();
+        }
+      }, `↶ 撤销：${top.label}`),
+      result.items.length > 1 ? h('span', { class: 'field-hint', style: 'margin:0' }, `还能再退 ${result.items.length - 1} 步`) : null
+    );
+  };
+  paintUndo();
+
   return h('div', { class: 'cmd-box' },
     h('div', { class: 'cmd-row' }, box, go),
     preview,
+    undoBar,
     h('div', { class: 'field-hint', style: 'margin:6px 0 0' },
       '它只会做你本来就能做的事，做之前先摆给你看。看不懂就说看不懂，不猜。'));
 }

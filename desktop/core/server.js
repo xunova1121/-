@@ -1377,6 +1377,13 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
       return json(res, 200, studio.batchUpdateShots(b, body));
     }
 
+    if (b && c === 'undo' && method === 'GET') {
+      return json(res, 200, studio.undoList(b));
+    }
+    if (b && c === 'undo' && d && method === 'POST') {
+      return json(res, 200, { project: studio.undoTo(b, Number(d)) });
+    }
+
     /**
      * 指令框：把一句人话翻成一份**计划**。
      *

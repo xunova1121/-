@@ -28,6 +28,7 @@ import * as chapters from './chapters.js';
 import * as meter from '../meter.js';
 import * as duration from '../duration.js';
 import * as versions from '../versions.js';
+import * as undo from '../undo.js';
 import * as autocut from '../autocut.js';
 import * as quality from './quality.js';
 import * as skillsLib from '../skills.js';
@@ -2401,6 +2402,15 @@ export function sceneLayoutOf(project, sceneName) {
  * "这十镜都加一张手持"。直接覆盖的话，每一镜原来各自选的运镜全没了，
  * 而那是他一镜一镜挑出来的东西。
  */
+function describePatch(patch = {}, addSkills = [], removeSkills = []) {
+  const names = { camera: '景别', duration: '时长', transition: '转场', description: '描述', dialogue: '台词',
+    scene: '场景', segment: '场次', link: '衔接', characters: '出场角色', props: '关键道具', motion: '运镜', sound: '音效', tier: '模型档' };
+  const bits = Object.keys(patch).filter((key) => names[key]).map((key) => `${names[key]}→${String(patch[key]).slice(0, 12)}`);
+  if (addSkills.length) bits.push(`加 ${addSkills.length} 张技法卡`);
+  if (removeSkills.length) bits.push(`去掉 ${removeSkills.length} 张技法卡`);
+  return bits.length ? bits.join('、') : '没动任何字段';
+}
+
 export function batchUpdateShots(projectId, { ids = [], patch = {}, addSkills = [], removeSkills = [] } = {}) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
@@ -2409,6 +2419,8 @@ export function batchUpdateShots(projectId, { ids = [], patch = {}, addSkills = 
 
   const targets = (project.shots || []).filter((s) => want.has(s.id));
   if (!targets.length) throw new Error('选中的这几镜一个都不存在了 —— 刷新一下再试');
+
+  undo.snapshot(store.projectDir(projectId), `批量改了 ${targets.length} 镜（${describePatch(patch, addSkills, removeSkills)}）`);
 
   const add = (addSkills || []).filter(Boolean);
   const remove = new Set((removeSkills || []).filter(Boolean));
@@ -6631,6 +6643,23 @@ export const __reusableFrameRef = reusableFrameRef;
  * 两层都圈不冲突：内层沿用外层的 projectId，只把 stage 说得更准。
  */
 
+
+/** 分镜表撤销栈；只恢复项目数据，不删除已经生成的媒体文件。 */
+export function undoList(projectId) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  return {
+    items: undo.list(store.projectDir(projectId)).map(({ n, at, label, shots }) => ({ n, at, label, shots })),
+    bytes: undo.bytes(store.projectDir(projectId))
+  };
+}
+
+export function undoTo(projectId, n) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  undo.restore(store.projectDir(projectId), n);
+  return store.read(projectId);
+}
 
 export function buildBible(projectId, opts = {}) {
   return meter.runIn({ projectId, stage: 'bible' }, () => buildBibleRaw(projectId, opts));

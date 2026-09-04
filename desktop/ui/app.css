@@ -1933,3 +1933,4 @@ select.mini {
   color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
 }
 .cmd-eg-btn:hover { border-color: var(--beam); color: var(--ink); }
+.undo-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}
