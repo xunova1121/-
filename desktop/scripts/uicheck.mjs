@@ -377,7 +377,19 @@ if (await previz.count()) {
    * 摆一个地标上去 —— 观众判断"人在房间里的哪儿"靠的就是这些不动的东西。
    * 摆上之后必须能当场算出它在画面的哪一边。
    */
-  const markBtn = page.locator('.previz-row button', { hasText: '窗' }).first();
+  /**
+   * ⚠ 这里**不能**用 `.previz-row button` 的 .first()，踩过：
+   *
+   * 摆上地标之前，全页只有「地标」那一排有「窗」，.first() 恰好是对的；
+   * 可是摆上之后，「焦点/景深」那一排会多出一个同名的「窗」（可以对焦到它），
+   * 而焦点行**排在地标行前面** —— 于是 .first() 悄悄改指到了对焦按钮上。
+   * 第二次点击等于设了个对焦点，地标当然撤不掉，红的是测试自己点错了地方。
+   *
+   * 教训是那个反复出现的老毛病：**动作本身改变了 DOM，位置选择器就会失准**。
+   * 所以锁死到「地标」那一行上，前后两次点的保证是同一个按钮。
+   */
+  const markRow = page.locator('.shot-previz[open] .previz-row').filter({ hasText: '地标' });
+  const markBtn = markRow.locator('button', { hasText: '窗' }).first();
   if (await markBtn.count()) {
     await markBtn.click();
     await page.waitForTimeout(400);
@@ -386,8 +398,8 @@ if (await previz.count()) {
     const withMark = await page.locator('.previz-chips').first().innerText().catch(() => '');
     check('并且当场算出它在画面哪一边（或者出画了）',
       /窗：(画面左|画面右|正中|画外)/.test(withMark), withMark.slice(0, 160));
-    // 再点一下收回去 —— 摆错了要能撤
-    await page.locator('.previz-row button', { hasText: '窗' }).first().click();
+    // 再点一下收回去 —— 摆错了要能撤。点的是同一个按钮，不是同名的另一个
+    await markBtn.click();
     await page.waitForTimeout(300);
     check('再点一下能把它撤掉', (await page.locator('.previz-mark').count()) === 0,
       String(await page.locator('.previz-mark').count()));
