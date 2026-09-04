@@ -3418,6 +3418,11 @@ export default {
       acceptanceHost.append(h('div', { class: `notice ${tone === 'bad' ? 'warn' : ''}` },
         h('b', {}, `生产验收：${report.readyForRelease ? '可发布' : report.readyForCompose ? '可合成，暂不可发布' : '暂不可合成'}`),
         h('span', { class: 'field-hint', style: 'display:block;margin-top:3px' }, `合成：${report.readyForCompose ? '通过' : '未通过'} · 发布：${report.readyForRelease ? '通过' : '未通过'} · 质量 ${report.quality.score} 分`),
+        (() => {
+          const review = report.reviewSummary || report.quality?.reviewSummary;
+          return review ? h('span', { class: 'field-hint', style: 'display:block;margin-top:3px' },
+            `当前版本审核：通过 ${review.approved} · 退回 ${review.rejected} · 待审 ${review.pending} · 已过期 ${review.stale} · 未审核 ${review.unreviewed}`) : null;
+        })(),
         report.checks?.length ? h('div', { style: 'margin-top:6px' }, ...report.checks.slice(0, 5).map((item) => h('p', { style: 'margin:4px 0' },
           h('span', { class: `badge ${item.level === 'blocker' ? 'warn' : ''}` }, item.level === 'blocker' ? '先处理' : item.level === 'warn' ? '注意' : '提示'),
           ` ${item.what} · ${item.fix}`))) : h('p', { style: 'margin:6px 0 0' }, '验收通过：合成、审核、恢复和导出前置条件均已检查。')));
@@ -3462,6 +3467,8 @@ export default {
                   h('span', { class: 'field-hint', style: 'display:block;margin-top:2px' }, i.why),
                   h('span', { class: 'field-hint', style: 'display:block' }, `→ ${i.fix}`))))
                 : h('p', {}, '四类检查都过了：产物齐、一致性达标、接缝对得上、分镜没有高危项。'),
+              r.reviewSummary ? h('p', { class: 'field-hint', style: 'margin:8px 0' },
+                `当前版本审核：通过 ${r.reviewSummary.approved} · 退回 ${r.reviewSummary.rejected} · 待审 ${r.reviewSummary.pending} · 已过期 ${r.reviewSummary.stale} · 未审核 ${r.reviewSummary.unreviewed}`) : null,
               r.retryCandidates?.length
                 ? h('div', { class: 'notice warn', style: 'margin-top:10px' },
                   h('b', {}, `建议优先重做 ${r.retryCandidates.length} 镜`),

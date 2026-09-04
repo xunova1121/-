@@ -60,6 +60,26 @@ export function reviewRevision(shot = {}) {
   ].join('|');
 }
 
+/** 把人工审批解释成“针对当前版本”的状态，供验收、重做建议和界面共用。 */
+export function reviewState(shot = {}) {
+  const review = shot.review || null;
+  const revision = reviewRevision(shot);
+  if (!review) return { status: 'unreviewed', current: false, revision, review: null };
+  const current = review.revision === revision;
+  return { status: current ? review.status : 'stale', current, revision, review };
+}
+
+export function reviewSummary(shots = []) {
+  const result = { approved: 0, rejected: 0, pending: 0, stale: 0, unreviewed: 0, total: shots.length, staleShots: [], rejectedShots: [] };
+  for (const shot of shots) {
+    const state = reviewState(shot);
+    result[state.status] = Number(result[state.status] || 0) + 1;
+    if (state.status === 'stale') result.staleShots.push(shot.index);
+    if (state.status === 'rejected') result.rejectedShots.push({ index: shot.index, note: state.review?.note || '' });
+  }
+  return result;
+}
+
 function add(items, level, o) {
   items.push({ level, ...o });
 }
@@ -79,6 +99,10 @@ export function retryCandidates(shots = []) {
   };
   for (let index = 0; index < shots.length; index += 1) {
     const shot = shots[index];
+    const humanReview = reviewState(shot);
+    if (humanReview.status === 'rejected') {
+      addCandidate(shot, `人工退回${humanReview.review?.note ? `：${humanReview.review.note}` : '：请按审片意见返工'}`, 'high');
+    }
     if (shot.headMatch?.verdict === 'mismatch') addCandidate(shot, '实际视频首帧未承接本镜参考图', 'high');
     if (shot.tailAlign?.verdict === 'missed') addCandidate(shot, '连续动作接缝未锁住', 'high');
     else if (shot.tailAlign?.verdict === 'partial') addCandidate(shot, '连续动作接缝有漂移');
@@ -476,7 +500,7 @@ export function audit(project, { lintResults = [], threshold = 75 } = {}) {
   // 排序：先按严重程度，同档保持发现顺序（那个顺序本身是有意义的：产物 → 一致性 → 文字）
   items.sort((a, b) => LEVELS.indexOf(a.level) - LEVELS.indexOf(b.level));
   const shotQualityReports = shots.map((shot, index) => shotQualityReport(shot, { previous: shots[index - 1] || null }));
-  return { score, verdict, items, counts, retryCandidates: retryCandidates(shots),
+  return { score, verdict, items, counts, reviewSummary: reviewSummary(shots), retryCandidates: retryCandidates(shots),
     motionBridgePlans: motionBridgePlans(shots),
     shotQualityReports: shotQualityReports.map((report) => ({ ...report, repairRoute: repairRoute(report) })) };
 }
