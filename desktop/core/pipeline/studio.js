@@ -1358,11 +1358,21 @@ export async function buildOutline(projectId, { chapterId = null, onEvent } = {}
   const r = routing();
   onEvent?.({ type: 'stage', stage: 'outline', status: 'running', message: `${r.chat.provider} / ${r.chat.model} 拆场次中…` });
 
+  /**
+   * ⚠ 剧本超长要**当场说**，不能默默砍掉后半段。
+   *
+   * 原来这里是 `String(source).slice(0, 12000)`，一声不吭。三万字的剧本
+   * 模型只看到前一万二，然后老老实实给前 40% 出了一份**完整**的大纲 ——
+   * 界面上没有任何异常，用户看到的是"生成大纲长度限制，出了一半不能用"。
+   */
+  const cap = outline.capScript(source);
+  if (cap.note) onEvent?.({ type: 'note', message: cap.note });
+
   const { text } = await adapters.chat({
     providerId: r.chat.provider,
     model: r.chat.model,
     system: OUTLINE_PROMPT,
-    user: `目标片长：${project.targetDuration || 60} 秒\n\n剧本：\n${String(source).slice(0, 12000)}`,
+    user: `目标片长：${project.targetDuration || 60} 秒\n\n剧本：\n${cap.sent}`,
     temperature: 0.6,
     jsonMode: true,
 
@@ -1384,8 +1394,35 @@ export async function buildOutline(projectId, { chapterId = null, onEvent } = {}
    * 新生成的接在后面，而不是整份换掉。
    */
   const next = store.update(projectId, (p) => {
-    const kept = outline.normalizeOutline(p.outline).beats.filter((b) => b.locked);
-    const tagged = fresh.beats.map((b) => ({ ...b, chapterId: chapter ? chapter.id : '' }));
+    /**
+     * 留下两类场次：
+     *
+     *   1. **锁住的** —— 后面挂着出好的图和视频，见上面那段
+     *   2. **别章的** —— 按章生成时，这一章之外的场次不该被牵连
+     *
+     * ⚠ 第 2 条原来没有，于是"分章"这条本该用来对付长剧本的路**自己是坏的**：
+     *   生成第二章会把第一章的大纲整个抹掉（除非它恰好锁着）。
+     *   实测过：第一章生成后 2 场，第二章生成后共 2 场、属于第一章的 0 场。
+     *   而这正是剧本超长时我们让人去走的那条路。
+     */
+    const before = outline.normalizeOutline(p.outline).beats;
+    const kept = before.filter(
+      (b) => b.locked || (chapter && b.chapterId && b.chapterId !== chapter.id)
+    );
+
+    /**
+     * ⚠ 新场次的 id 必须避开留下来的那些。
+     *
+     * normalizeBeat 是按**数组下标**编号的（b-01、b-02…），只有没 id 的才编。
+     * 留下一个 b-03 再生成三场，新的第三场又叫 b-03 —— 两场同号，
+     * 后面所有"按 id 找场次"的地方都会认错人（改到别的场、删错场）。
+     */
+    const acc = [...kept];
+    const tagged = fresh.beats.map((b) => {
+      const beat = { ...b, id: outline.freshId(acc), chapterId: chapter ? chapter.id : '' };
+      acc.push(beat);
+      return beat;
+    });
     p.outline = { beats: [...kept, ...tagged], updatedAt: new Date().toISOString() };
     return p;
   });
@@ -1396,6 +1433,8 @@ export async function buildOutline(projectId, { chapterId = null, onEvent } = {}
     stage: 'outline',
     status: 'done',
     message: `${outline.summarize(next.outline, next.targetDuration)}${kept ? `（${kept} 场锁着的原样留下了）` : ''}`
+      // note 会被后面的消息刷走，而"这份大纲只覆盖了前半本"是事后回看也要知道的事
+      + (cap.note ? `\n\n${cap.note}` : '')
   });
   return next;
 }
