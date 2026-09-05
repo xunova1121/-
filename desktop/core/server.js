@@ -1782,6 +1782,7 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
       const opts = await readBody(req);
       const runners = {
         bible: studio.buildBible,
+        outline: studio.buildOutline,
         script: studio.analyzeScript,
         assets: studio.generateAssets,
         video: studio.generateVideos,

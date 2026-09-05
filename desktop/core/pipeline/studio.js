@@ -6679,6 +6679,14 @@ async function composeRaw(projectId, { onEvent, signal = null } = {}) {
 /** 一键跑完时按这个顺序走。名字和 store.STAGES 对齐，界面上说的"从哪一步开始"就是这里的 id */
 const RUN_ORDER = [
   { id: 'bible', label: '设定集', run: (id, o) => buildBible(id, o) },
+  /**
+   * ⚠ 大纲排在分镜**前面**，而且一键跑完时会真的跑。
+   *
+   * 多一次模型调用，换来的是拆分镜从"一次全要"变成"按场次分批"——
+   * 而"一次全要"在镜数一多时是**必定**撞输出上限的（用户真机上撞过）。
+   * 那一撞的代价是跑几分钟、花了钱、拿到半截，比这一次调用贵得多。
+   */
+  { id: 'outline', label: '大纲', run: (id, o) => buildOutline(id, o) },
   { id: 'script', label: '分镜', run: (id, o) => analyzeScript(id, o) },
   { id: 'assets', label: '镜头出图', run: (id, o) => generateAssets(id, o) },
   { id: 'video', label: '视频生成', run: (id, o) => generateVideos(id, o) },

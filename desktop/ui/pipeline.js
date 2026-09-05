@@ -1,5 +1,5 @@
 /**
- * 流水线的七步，以及每一步的完成度。
+ * 流水线的八步，以及每一步的完成度。
  *
  * ── 为什么单独一个模块 ──
  *
@@ -44,6 +44,16 @@ export function stepProgress(project, id) {
     case 'bible': {
       const all = bible ? [...bible.characters, ...bible.scenes, ...(bible.props || [])] : [];
       return { done: all.filter((x) => x.sheetPath).length, total: all.length, unit: '张参考图' };
+    }
+    case 'outline': {
+      /**
+       * 大纲这一步的"完成度"是**几场戏**。
+       *
+       * ⚠ 不是"跑没跑过"。跑过但一场都没拆出来（剧本太短、模型没听懂）
+       * 该显示成没完成 —— 和别的步骤一个口径：看得见的产出才算数。
+       */
+      const beats = project?.outline?.beats || [];
+      return { done: beats.length, total: beats.length || 0, unit: '场戏' };
     }
     case 'script':
       return { done: shots.length, total: shots.length || 0, unit: '个分镜' };

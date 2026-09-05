@@ -192,6 +192,7 @@ export function __reset() {
 
 const STAGE_LABELS = {
   bible: '设定集',
+  outline: '拆大纲',
   script: '拆分镜',
   assets: '出图',
   video: '出视频',
