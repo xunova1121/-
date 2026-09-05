@@ -274,6 +274,65 @@ console.log('\n开跑之前的清单');
  * "手指按下去、拖过去，那个圆点跟不跟着走"。而拖动最容易坏的地方
  * 恰恰在显示尺寸和 viewBox 不一致的换算上 —— 那种错只有真拖一次才看得见。
  */
+console.log('\n镜头卡那一排按钮');
+{
+  const head = page.locator('.shot-card .shot-head').first();
+  const info = await head.evaluate((n) => {
+    const box = n.getBoundingClientRect();
+    const btns = [...n.querySelectorAll('.shot-edit-btn')];
+    return {
+      labels: btns.map((b) => b.textContent.trim()),
+      over: btns.filter((b) => b.getBoundingClientRect().right > box.right + 1).map((b) => b.textContent.trim()),
+      rows: new Set(btns.map((b) => Math.round(b.getBoundingClientRect().top))).size,
+      width: Math.round(box.width)
+    };
+  });
+  console.log(`  卡片宽 ${info.width}px，这一排共 ${info.labels.length} 颗：${info.labels.join(' / ')}`);
+  console.log(`  占了 ${info.rows} 行，露在卡外的：${info.over.join('、') || '无'}`);
+
+  // 展开「改文案」，量编辑面板到底堆了多少东西
+  await page.locator('.shot-edit-btn', { hasText: '改文案' }).first().click();
+  await page.waitForTimeout(500);
+  const ed = await page.evaluate(() => {
+    const n = document.querySelector('.shot-edit');
+    if (!n) return null;
+    const labels = [...n.querySelectorAll('label')].map((x) => x.textContent.trim()).filter(Boolean);
+    return {
+      height: Math.round(n.getBoundingClientRect().height),
+      fields: n.querySelectorAll('input, textarea, select').length,
+      buttons: n.querySelectorAll('button').length,
+      folds: n.querySelectorAll('details').length,
+      labels: labels.slice(0, 30)
+    };
+  });
+  console.log('  编辑面板：', JSON.stringify({ 高: ed?.height + 'px', 字段: ed?.fields, 按钮: ed?.buttons, 折叠区: ed?.folds }));
+  console.log('  面板里的标签：', (ed?.labels || []).join(' / '));
+  const groups = await page.evaluate(() => [...document.querySelectorAll('.shot-group')].map((g) => ({
+    title: g.querySelector('b')?.textContent?.trim(),
+    h: Math.round(g.getBoundingClientRect().height),
+    fields: g.querySelectorAll('input,textarea,select').length,
+    btns: g.querySelectorAll('button').length
+  })));
+  for (const g of groups) console.log(`    ${g.title}: ${g.h}px  字段${g.fields} 按钮${g.btns}`);
+
+  /**
+   * ⚠ 防回潮的守卫。
+   *
+   * 这张面板改之前是 **1896px** —— 你点「改文案」想改一句话，
+   * 展开的是两屏高的表单。四组常年全开、技法四十五颗按钮平铺。
+   * 折起来之后 775px。
+   *
+   * 这种膨胀是**一次加一点**长回来的：每个人都只加了一个"很小"的字段。
+   * 所以钉一个数在这儿：谁把它顶回 900px 以上，这条当场红。
+   * 真的需要加东西，就再折一层，或者把这个数连同理由一起改掉。
+   */
+  check('编辑面板默认不超过 900px（改之前是 1896，两屏高）',
+    (ed?.height || 0) > 0 && ed.height < 900, `${ed?.height}px`);
+  check('四组里默认只开一组（其余标题还在，一眼看得到里面是什么）',
+    groups.filter((g) => g.h > 100).length === 1,
+    JSON.stringify(groups.map((g) => `${g.title}:${g.h}`)));
+}
+
 console.log('\n预演台');
 /**
  * 入口要在**卡片上**看得见。
@@ -1548,7 +1607,16 @@ await page.waitForTimeout(500);
 
   const inGroup = async (title, label) => page.locator('.shot-group', { hasText: title })
     .locator('label', { hasText: label }).count();
-  check('技法归在「出图用的」下面', (await inGroup('出图用的', '技法')) > 0);
+  /**
+   * ⚠ 技法那一块从一个 <label> 变成了折叠区（45 颗按钮，占掉面板一大半）。
+   * 断言跟着改成找折叠区的标题，而不是把功能挪走了还让旧断言绿着。
+   */
+  check('技法归在「出图用的」下面（现在是个折叠区）',
+    (await page.locator('.shot-group', { hasText: '出图用的' })
+      .locator('.skill-fold summary').count()) > 0);
+  check('折起来时也说得出选了几张（不然你不知道该不该点开）',
+    /技法 ·/.test(await page.locator('.skill-fold summary').first().innerText()),
+    await page.locator('.skill-fold summary').first().innerText());
   check('「和上一镜的关系」归在「出视频用的」下面',
     (await inGroup('出视频用的', '和上一镜')) > 0);
   check('「谁说的」归在「配音用的」下面', (await inGroup('配音用的', '谁说的')) > 0);
@@ -1571,7 +1639,26 @@ await page.waitForTimeout(500);
   const says = (re) => redo.some((t) => re.test(t));
   check('出过图才提示要重出图', says(/重出这一镜的图/) === state.img,
     JSON.stringify({ state, redo }));
-  check('出过视频才提示要重出视频', says(/重出视频/) === state.vid, JSON.stringify({ state, redo }));
+  /**
+   * ⚠ 这一条改了口径：完整那句警告现在在折叠区**里面**，收起时读不到。
+   * 但"这一镜已经出过了"这个**状态**必须在收起时也看得见 ——
+   * 所以改成验 summary 上那个标记，而不是把断言删掉了事。
+   */
+  const flags = await page.locator('.shot-edit:visible .shot-group-flag').count();
+  const produced = [state.img, state.vid, state.aud].filter(Boolean).length;
+  check('出过的那几组，收起来也标着"已出过·改了要重跑"',
+    flags >= produced, JSON.stringify({ state, flags, produced }));
+  /**
+   * ⚠ 上面那份 redo 是在**组还收着**的时候读的，读到的当然是空。
+   * 断言写着"展开之后"，代码却没展开 —— 名不副实的断言比没有断言更糟，
+   * 它会一直绿着骗人。这里真的把每一组打开再读。
+   */
+  await page.locator('.shot-edit:visible .shot-group:not([open]) > summary').evaluateAll(
+    (nodes) => nodes.forEach((n) => n.click()));
+  await page.waitForTimeout(300);
+  const redoOpen = await page.locator('.shot-edit:visible .shot-group-redo').allInnerTexts();
+  check('展开之后能读到完整那句（要重出什么）',
+    produced === 0 || redoOpen.some((t) => /重出/.test(t)), JSON.stringify(redoOpen).slice(0, 200));
   check('配过音才提示要重配音', says(/重新配音/) === state.aud, JSON.stringify({ state, redo }));
   /**
    * 出图那一条必须说清**视频也得跟着重出** —— 视频是跟着图走的。
