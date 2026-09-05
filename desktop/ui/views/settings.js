@@ -13,7 +13,10 @@ function statusGlyph(status) {
 }
 
 const CAP_META = [
-  ['chat', '剧本与分镜', 'chatProvider', 'chatModel', '读剧本、拆分镜、写设定集。长文本能力优先'],
+  ['chat', '剧本与分镜', 'chatProvider', 'chatModel',
+    '拆分镜、写设定集。⚠ 这一行**别配推理型模型** —— 拆分镜是全流程最长的一次生成，'
+    + '思考过程会吃掉输出预算，表现是写到一半断掉（finish_reason=length）。'
+    + '选指令遵循稳、长输出稳的：Claude Sonnet 4 / GPT-4.1 / doubao-1-5-pro / Qwen Max / DeepSeek V3（不是 R1）'],
   /**
    * 调度和剧本分开，是因为要的能力不是一回事：
    * 写剧本是**生成**，写得顺就行；调度是**判断** —— 端着全片二十镜，
@@ -21,6 +24,20 @@ const CAP_META = [
    * 便宜模型在判断题上会稳定地犯同一种错：每镜孤立地看都像那么回事，连起来全是矛盾。
    * 调用次数又极少（全片各一次），所以这一行值得单配一个更聪明的。
    */
+  /**
+   * 大纲和分镜也要分开，理由和上面一样，而且更硬：
+   *
+   *   大纲  判断题。通读全本找"时间跳了/地点换了"的边界。输出小，要全局一致。
+   *   分镜  生成题。**全流程最长的一次生成** —— 几千 token 的 JSON，每镜十来个字段。
+   *
+   * ⚠ 推理型模型跑分镜有个实打实的坑：思考过程要么吃掉输出预算、要么半天不吐字节。
+   * 用户真机上撞过 finish_reason=length，就是这么来的。
+   * 所以这两行该配**相反**的模型 —— 挤在一行里必然有一头将就。
+   */
+  ['chat', '大纲（拆场次 / 商量着改大纲）', 'outlineProvider', 'outlineModel',
+    '判断题，值得配推理型：doubao-seed-1-6-thinking、DeepSeek Reasoner、Claude Sonnet 4、o4-mini。'
+    + '长篇还要长上下文（qwen-long / glm-4-long / Kimi 128K）。不配就跟随剧本模型',
+    { follow: true }],
   ['chat', '调度（挑技法 / 绑说话人 / 分章）', 'directorProvider', 'directorModel',
     '推荐火山方舟的 doubao-seed-1-6-thinking-250615（思考型）；DeepSeek R1、Qwen Max 也合适。不配就跟随剧本模型',
     { follow: true }],

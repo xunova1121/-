@@ -442,6 +442,9 @@ const upstream = http.createServer((req, res) => {
       } else if (system.includes('分场编辑')) {
         // 记下这一支真正收到的用户消息 —— 下面"剧本超长"那节要验模型到底看到多少
         upstream.lastOutlineUser = body.messages?.[1]?.content || '';
+        // 以及**真正发出去的那个模型** —— 验"大纲走的是自己的槽"只能看这个，
+        // 看 resolvedRouting() 是看不出来的（那是路由表，不是请求）
+        upstream.lastOutlineModel = body.model || '';
         /**
          * 大纲：拆场次。
          *
@@ -7891,6 +7894,73 @@ section('场景的东南西北：机位相对房间，不只相对人');
  * 而拆分镜的提示词写着"characters 和 scene 必须严格用设定集里给出的名字"——
  * 两套名字对不上，只能靠模糊匹配去救，那正是"某个角色被静默丢掉"的来源。
  */
+/**
+ * ════════ 大纲有自己的模型槽 ════════
+ *
+ * 大纲和分镜原来共用 chatModel，而它们是**性质相反**的两种活：
+ *
+ *   大纲  判断题。通读全本找"时间跳了/地点换了"的边界。输出小，要全局一致。
+ *   分镜  生成题。全流程最长的一次生成 —— 几千 token 的 JSON，每镜十来个字段。
+ *
+ * ⚠ 推理型模型跑分镜有个实打实的坑：思考过程要么吃掉输出预算、要么半天不吐字节。
+ * 用户真机上撞过 finish_reason=length。挤在一行里，必然有一头将就。
+ */
+section('大纲有自己的模型槽（和分镜要配相反的模型）');
+{
+  const ad = await import('../core/providers/adapters.js');
+  const before = { p: settings.get('outlineProvider'), m: settings.get('outlineModel') };
+
+  settings.patch({ outlineProvider: '', outlineModel: '' });
+  const r0 = ad.resolvedRouting();
+  check('不配的时候跟随剧本模型（不给人多加一个必填项）',
+    r0.outline.model === r0.chat.model && r0.outline.followsChat === true,
+    `${r0.outline.model} / follows=${r0.outline.followsChat}`);
+
+  /**
+   * ⚠ 第一版这三条只看 resolvedRouting().outline.model —— 那是**路由表**，
+   * 不是真正发出去的请求。把 buildOutline 的调用点退回 r.chat 去打靶，
+   * 这几条**照样是绿的**：断言根本够不着目标。今天第五次栽在这上面。
+   *
+   * 所以改成跑一次真的大纲，验请求里那个 model 字段。
+   * 用打桩放行的两个模型之一，且和剧本模型不同，才区分得开。
+   */
+  const DISTINCT = 'doubao-seed-1-6-250615';
+  settings.patch({ outlineModel: DISTINCT });
+  const r1 = ad.resolvedRouting();
+  check('路由表上大纲已经指到自己那个', r1.outline.model === DISTINCT, r1.outline.model);
+  check('followsChat 如实反映"人自己配过了"', r1.outline.followsChat === false);
+
+  {
+    const pz = store.create({ title: '验大纲真的走自己的槽', targetDuration: 60 });
+    store.update(pz.id, (x) => { x.script = '阿澜在码头巡查，发现缆绳被割断。'; return x; });
+    upstream.lastOutlineModel = '';
+    await ndjson(`/projects/${pz.id}/stage/outline`, {});
+    check('⚠ 真正发出去的那条请求，用的就是大纲槽里那个模型',
+      upstream.lastOutlineModel === DISTINCT,
+      `请求里是 ${upstream.lastOutlineModel}，剧本模型是 ${r1.chat.model}`);
+    check('⚠ 而分镜**不受影响**，还是走剧本那个（这正是分槽的意义）',
+      r1.chat.model !== DISTINCT && r1.chat.model === r0.chat.model,
+      `${r1.chat.model} vs ${r0.chat.model}`);
+  }
+
+  // ── 真跑一次，看请求发给了谁 ──
+  {
+    settings.patch({ outlineProvider: '', outlineModel: '' });
+    const p5 = store.create({ title: '大纲走自己的槽', targetDuration: 60 });
+    store.update(p5.id, (x) => { x.script = '阿澜在码头巡查，发现缆绳被割断。'; return x; });
+    upstream.lastOutlineModel = '';
+    const evs = await ndjson(`/projects/${p5.id}/stage/outline`, {});
+    check('跑大纲时界面说得出用的是哪个模型',
+      evs.some((e) => /拆场次中/.test(e.message || '')),
+      JSON.stringify(evs.map((e) => e.message).filter(Boolean).slice(0, 1)));
+    check('没单配时那句话里点明了"跟随剧本模型"，并且说了单配会更好',
+      evs.some((e) => /跟随剧本模型/.test(e.message || '') && /推理型/.test(e.message || '')),
+      JSON.stringify(evs.map((e) => e.message).filter(Boolean).slice(0, 1)));
+  }
+
+  settings.patch({ outlineProvider: before.p, outlineModel: before.m });
+}
+
 section('设定集照着大纲的名单出（名字从源头就是一套）');
 {
   const cs = await import('../core/pipeline/consistency.js');
@@ -12462,9 +12532,21 @@ section('开机自动探一遍路由到的服务商');
   const probesAfter = probeLog().length;
   const touched = new Set(fresh.map((x) => x.provider));
 
-  check('六种能力都给了结论（剧本、调度、复核、出图、视频、配音）',
-    Object.keys(r.capabilities || {}).length === 6, JSON.stringify(Object.keys(r.capabilities || {})));
-  // 调度没单配时跟着剧本模型走，不该多探一次同一家
+  /**
+   * ⚠ 这里**逐个点名**，不是只数个数。
+   *
+   * 只断言 length === 7 的话，加一条路由、漏掉另一条，数字照样对得上 ——
+   * 而"体检里少了一条路"意味着那条路要等真跑起来才发现配错了。
+   */
+  const capKeys = Object.keys(r.capabilities || {});
+  check('七种能力都给了结论（剧本/大纲/调度/复核/出图/视频/配音）',
+    ['chat', 'outline', 'director', 'vision', 'image', 'video', 'tts'].every((k) => capKeys.includes(k))
+      && capKeys.length === 7,
+    JSON.stringify(capKeys));
+  // 大纲和调度都没单配时跟着剧本模型走，不该多探一次同一家
+  check('大纲没单配时跟随剧本模型',
+    r.capabilities?.outline?.provider === r.capabilities?.chat?.provider,
+    JSON.stringify({ outline: r.capabilities?.outline?.provider, chat: r.capabilities?.chat?.provider }));
   check('调度没单配时跟随剧本模型',
     r.capabilities?.director?.provider === r.capabilities?.chat?.provider,
     JSON.stringify([r.capabilities?.director?.provider, r.capabilities?.chat?.provider]));

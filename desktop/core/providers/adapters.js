@@ -3234,6 +3234,15 @@ export function resolvedRouting() {
       model: s.directorModel || s.chatModel,
       followsChat: !s.directorProvider && !s.directorModel
     },
+    /**
+     * 大纲（拆场次 / 和模型商量着改大纲）。没单独配就跟着剧本模型走 ——
+     * 和 director 一个规矩：多一个必填项换来的抱怨，比这点质量提升多得多。
+     */
+    outline: {
+      provider: s.outlineProvider || s.chatProvider,
+      model: s.outlineModel || s.chatModel,
+      followsChat: !s.outlineProvider && !s.outlineModel
+    },
     vision: { provider: s.visionProvider, model: s.visionModel },
     image: { provider: s.imageProvider, model: s.imageModel },
     video: { provider: s.videoProvider, model: s.videoModel },

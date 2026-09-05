@@ -1356,7 +1356,11 @@ export async function buildOutline(projectId, { chapterId = null, onEvent } = {}
   if (!String(source || '').trim()) throw new Error('剧本是空的');
 
   const r = routing();
-  onEvent?.({ type: 'stage', stage: 'outline', status: 'running', message: `${r.chat.provider} / ${r.chat.model} 拆场次中…` });
+  onEvent?.({
+    type: 'stage', stage: 'outline', status: 'running',
+    message: `${r.outline.provider} / ${r.outline.model} 拆场次中…`
+      + (r.outline.followsChat ? '（跟随剧本模型；拆场次是判断题，单配一个推理型模型会更仔细）' : '')
+  });
 
   /**
    * ⚠ 剧本超长要**当场说**，不能默默砍掉后半段。
@@ -1365,12 +1369,14 @@ export async function buildOutline(projectId, { chapterId = null, onEvent } = {}
    * 模型只看到前一万二，然后老老实实给前 40% 出了一份**完整**的大纲 ——
    * 界面上没有任何异常，用户看到的是"生成大纲长度限制，出了一半不能用"。
    */
-  const cap = outline.capScript(source, outline.scriptCapFor(r.chat.model));
+  // ⚠ 上限要按**大纲这一步真正用的那个模型**算，不是剧本模型 ——
+  //   两者可以是不同的家、不同的上下文窗口
+  const cap = outline.capScript(source, outline.scriptCapFor(r.outline.model));
   if (cap.note) onEvent?.({ type: 'note', message: cap.note });
 
   const { text } = await adapters.chat({
-    providerId: r.chat.provider,
-    model: r.chat.model,
+    providerId: r.outline.provider,
+    model: r.outline.model,
     system: OUTLINE_PROMPT,
     user: `目标片长：${project.targetDuration || 60} 秒\n\n剧本：\n${cap.sent}`,
     temperature: 0.6,
@@ -1455,7 +1461,7 @@ export async function reviseOutline(projectId, { instruction, onEvent } = {}) {
   if (!say) throw new Error('想改什么？说一句');
 
   const r = routing();
-  onEvent?.({ type: 'note', message: `${r.chat.provider} / ${r.chat.model} 想办法中…` });
+  onEvent?.({ type: 'note', message: `${r.outline.provider} / ${r.outline.model} 想办法中…` });
 
   const table = now.beats.map((b, i) => ({
     id: b.id,
@@ -1470,8 +1476,8 @@ export async function reviseOutline(projectId, { instruction, onEvent } = {}) {
   }));
 
   const { text } = await adapters.chat({
-    providerId: r.chat.provider,
-    model: r.chat.model,
+    providerId: r.outline.provider,
+    model: r.outline.model,
     system: REVISE_PROMPT,
     user: `目标片长：${project.targetDuration || 60} 秒\n\n现在的大纲：\n${JSON.stringify(table, null, 1)}\n\n我想要：${say}`,
     temperature: 0.4,
