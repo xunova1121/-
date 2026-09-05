@@ -534,7 +534,21 @@ label {
 .shot-thumb img, .shot-thumb video { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 .shot-body { padding: 11px 13px 12px; display: flex; flex-direction: column; gap: 7px; }
-.shot-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+/*
+ * ⚠ 必须 wrap。
+ *
+ * 这一排上挂着「改文案 / 预演台 / 历史版本 / 生产清单 / 审片…」好几颗按钮，
+ * 而卡片那一栏只有四百来像素宽。原来没写 flex-wrap（默认 nowrap），
+ * 按钮又是 flex:none（不许压缩）—— 于是一排放不下就**溢出被切掉**：
+ * 最后一颗只露半个字，再后面的整颗看不见。
+ *
+ * 最坏的是它不像坏了：按钮确实存在、点得到（如果你知道它在那儿），
+ * 只是**看不见**。用户的原话是"后面还有文字，但是看不见，再后面不知道有没有"。
+ */
+.shot-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 8px; flex-wrap: wrap; row-gap: 6px;
+}
 .shot-no {
   font-family: var(--code); font-size: 10.5px; letter-spacing: .06em;
   color: var(--ink-faint); font-variant-numeric: tabular-nums;
@@ -1934,3 +1948,35 @@ select.mini {
 }
 .cmd-eg-btn:hover { border-color: var(--beam); color: var(--ink); }
 .undo-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}
+
+/* ══════════════════════ 预演台弹窗 ══════════════════════ */
+/*
+ * 为什么要弹窗：卡片那一栏只有四百来像素宽，而预演台要拖人、拖机位、看轴线。
+ * 3D 画布挤在那个宽度里，圆点叠成一团，拖不准也看不清。
+ * 这里铺满屏幕，把宽度还给画布。
+ */
+.previz-modal {
+  position: fixed; inset: 0; z-index: 90;
+  background: rgba(0, 0, 0, .55);
+  display: grid; place-items: center;
+  padding: 24px;
+}
+.previz-modal-box {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
+  /* 铺到屏幕的九成，但留一圈边 —— 贴边的弹窗看着像"页面坏了"而不是"打开了一个东西" */
+  width: min(1600px, 94vw); height: min(1000px, 92vh);
+  display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, .35);
+}
+.previz-modal-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px; border-bottom: 1px solid var(--line); flex: 0 0 auto;
+}
+.previz-modal-head strong { font-family: var(--display); font-size: 14px; white-space: nowrap; }
+.previz-modal-head .shot-edit-tip { flex: 1 1 auto; min-width: 0; }
+/* 画布这一块要能长 —— min-height:0 不写的话 flex 子项撑不开，画布会被压成一条 */
+.previz-modal-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 16px; }
+.previz-modal-foot {
+  display: flex; gap: 10px; align-items: center;
+  padding: 12px 16px; border-top: 1px solid var(--line); flex: 0 0 auto;
+}

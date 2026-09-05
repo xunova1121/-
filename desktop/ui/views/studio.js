@@ -1874,16 +1874,7 @@ export default {
           title: shot.stage?.cam
             ? '这一镜排过位了。点开调整机位、看景别、查越轴'
             : '排一下机位：拖人、拖机位，景别和越轴当场算给你看',
-          onclick: () => {
-            // 编辑面板里那块才是真正的画布，这里负责把它打开并滚过去
-            openEdit();
-            const box = editor.querySelector('.shot-previz');
-            if (box) {
-              box.open = true;
-              box.dispatchEvent(new Event('toggle'));
-              box.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-          }
+          onclick: () => openPrevizModal()
         }, shot.stage?.cam ? '预演台 ·' : '预演台');
 
         /**
@@ -2048,11 +2039,24 @@ export default {
          * 上面那个 camera 文本框只在没排位时兜底 —— 两个都留着是有意的。
          */
         let stageDraft = shot.stage || null;
-        const previzHost = h('details', { class: 'shot-previz' },
-          h('summary', {}, stageDraft ? '预演台 · 已排位（点开调整）' : '预演台 · 排一下机位（可选）'));
-        previzHost.addEventListener('toggle', () => {
-          if (!previzHost.open || previzHost.dataset.built) return;
-          previzHost.dataset.built = '1';
+
+        /**
+         * ══════════ 预演台走**弹窗**，不再嵌在编辑面板里 ══════════
+         *
+         * 用户的原话：「codex 的预演台太窄了，我都没办法操作」。
+         *
+         * 卡片那一栏就四百来像素宽，而这里要拖人、拖机位、看轴线 ——
+         * 一个 3D 画布塞进那么窄的地方，圆点挤成一团，拖不准也看不清。
+         * 走查里那次拖拽要"两个端点都先验证在视口内"才做得成，
+         * 那不是测试写得刁钻，那是**这个面板在那个宽度下本来就不好用**的证据。
+         *
+         * 弹窗铺满屏幕，画布拿到该有的尺寸。Esc、点遮罩、点✕ 都能关。
+         * 弹窗自带保存 —— 原来排完位还得关掉、回编辑面板再点另一个保存，
+         * 那个"下面的保存"在弹窗里根本不存在。
+         */
+        const openPrevizModal = () => {
+          // 已经开着就别再叠一个：两块 3D 画布同时跑，风扇会响，拖的也是错的那块
+          if (document.querySelector('.previz-modal')) return;
           if (!stageDraft) {
             const names = String(shot.characters || '').split(/[,，、]/).map((x) => x.trim()).filter(Boolean);
             /**
@@ -2070,6 +2074,56 @@ export default {
               || blankStage(names);
           }
           // 上一镜的排位拿来比对轴线 —— 越轴是**两镜之间**的事，单看一镜看不出来
+          const body = h('div', { class: 'previz-modal-body' });
+          let closeModal = () => {};
+          const onKey = (e) => { if (e.key === 'Escape') closeModal(); };
+          const overlay = h('div', {
+            class: 'previz-modal',
+            // 只有点在**遮罩本身**上才关；点在弹窗里面不该关
+            onclick: (e) => { if (e.target === overlay) closeModal(); }
+          }, h('div', { class: 'previz-modal-box' },
+            h('div', { class: 'previz-modal-head' },
+              h('strong', {}, `第 ${shot.index} 镜 · 预演台`),
+              h('span', { class: 'shot-edit-tip' },
+                '拖大圆点摆人，拖小圆点转身，拖「机」摆机位。两个人之间那条线就是轴线 —— '
+                + '机位跨过去，成片上两人就左右对调了。'),
+              h('button', { class: 'btn ghost sm', onclick: () => closeModal() }, '✕ 关闭')),
+            body,
+            h('div', { class: 'previz-modal-foot' },
+              h('button', {
+                class: 'btn',
+                onclick: async (ev) => {
+                  const btn = ev.currentTarget;
+                  btn.disabled = true;
+                  try {
+                    // cap:shot-stage
+                    const r = await api(`/projects/${project.id}/shots/${shot.id}`, {
+                      method: 'PATCH', body: { stage: stageDraft }
+                    });
+                    project = r.project;
+                    toast(`第 ${shot.index} 镜的机位已存下`, 'ok');
+                    closeModal();
+                    await refreshShot(shot.id);
+                  } catch (err) {
+                    toast(err.message, 'err');
+                    btn.disabled = false;
+                  }
+                }
+              }, '保存这一镜的机位'),
+              h('button', { class: 'btn ghost', onclick: () => closeModal() }, '不保存，关掉'))));
+
+          document.body.append(overlay);
+          closeModal = () => {
+            document.removeEventListener('keydown', onKey);
+            overlay.remove();
+          };
+          document.addEventListener('keydown', onKey);
+
+          /**
+           * ⚠ 面板**必须在容器进了页面之后**再建。
+           * three.js 按容器的实际尺寸初始化画布 —— 容器还没进 DOM 时量到 0×0，
+           * 出来是一块空白，而且不报错。
+           */
           const panel = previzPanel(stageDraft, {
             prevStage: prevShot?.stage || null,
             duration: shot.duration || 5,
@@ -2139,13 +2193,8 @@ export default {
             bibleProps: (project.bible?.props || []).map((x) => x.name)
           });
 
-          previzHost.append(
-            h('div', { class: 'shot-edit-tip' },
-              '拖大圆点摆人，拖小圆点转身，拖「机」摆机位。两个人之间那条线就是轴线 —— '
-              + '机位跨过去，成片上两人就左右对调了。排完点下面的保存。'),
-            panel.node
-          );
-        });
+          body.append(panel.node);
+        };
 
         const fields = {
           description: h('textarea', { rows: 3 }, shot.description || ''),
@@ -2434,7 +2483,7 @@ export default {
                   }))
               ]
             : null,
-            previzHost),
+            null),
 
           group('出视频用的', '改这些只要重出视频，图不用动', shot.videoPath,
             '⚠ 这一镜已经出过视频了。改完要**重出视频**才生效。图不受影响，不用重出。',

@@ -276,6 +276,33 @@ console.log('\n开跑之前的清单');
  * "手指按下去、拖过去，那个圆点跟不跟着走"。而拖动最容易坏的地方
  * 恰恰在显示尺寸和 viewBox 不一致的换算上 —— 那种错只有真拖一次才看得见。
  */
+console.log('\n镜头卡那一排按钮');
+/**
+ * ⚠ 这一排必须**换行**，不能溢出。
+ *
+ * 用户的原话："这个生成清单后面还有文字，但是看不见，再后面不知道有没有"。
+ * .shot-head 原来是 flex 但没写 flex-wrap（默认 nowrap），按钮又是 flex:none，
+ * 于是一排放不下就被切掉 —— 按钮还在、点得到，只是**看不见**。
+ * 这种漏法比崩溃隐蔽：功能在、测试绿、用户找不到。
+ */
+{
+  const head = page.locator('.shot-card .shot-head').first();
+  const info = await head.evaluate((n) => {
+    const box = n.getBoundingClientRect();
+    const btns = [...n.querySelectorAll('.shot-edit-btn')];
+    return {
+      labels: btns.map((b) => b.textContent.trim()),
+      over: btns.filter((b) => b.getBoundingClientRect().right > box.right + 1).map((b) => b.textContent.trim()),
+      rows: new Set(btns.map((b) => Math.round(b.getBoundingClientRect().top))).size
+    };
+  });
+  console.log(`  这一排共 ${info.labels.length} 颗：${info.labels.join(' / ')}`);
+  console.log(`  占了 ${info.rows} 行`);
+  check('没有一颗按钮被切出卡片外（切掉的那几颗用户根本看不见）',
+    info.over.length === 0, `露在外面的：${info.over.join('、') || '无'}`);
+  check('数量对得上（漏一颗就是一个功能没人找得到）', info.labels.length >= 4, String(info.labels.length));
+}
+
 console.log('\n预演台');
 /**
  * 入口要在**卡片上**看得见。
@@ -291,9 +318,20 @@ const stageEntry = page.locator('.shot-edit-btn', { hasText: '预演台' }).firs
 check('卡片上直接看得到预演台入口', (await stageEntry.count()) > 0);
 await stageEntry.click();
 await page.waitForTimeout(600);
-const previz = page.locator('.shot-previz').first();
-check('点一下就展开了（不用再自己去翻）',
-  (await previz.count()) > 0 && (await previz.evaluate((n) => n.open)) === true);
+/**
+ * 现在点开的是**全屏弹窗**，不再是编辑面板里那个折叠块。
+ *
+ * 用户的原话：「codex 的预演台太窄了，我都没办法操作」。卡片那一栏四百来像素，
+ * 3D 画布挤在里面圆点叠成一团 —— 下面那段拖拽要"两个端点都先验证在视口内"
+ * 才做得成，那本来就是这个面板在那个宽度下不好用的证据。
+ */
+const previz = page.locator('.previz-modal').first();
+check('点一下弹出全屏弹窗（不再是那个挤在卡片里的折叠块）', (await previz.count()) > 0);
+check('弹窗比卡片宽得多（画布终于有地方了）', await previz.evaluate(
+  (n) => n.querySelector('.previz-modal-box')?.getBoundingClientRect().width > 900),
+  String(await previz.evaluate((n) => Math.round(n.querySelector('.previz-modal-box')?.getBoundingClientRect().width || 0))));
+check('弹窗自带保存（原来排完位得关掉再回编辑面板点另一个保存）',
+  await previz.locator('button', { hasText: '保存这一镜的机位' }).count() === 1);
 if (await previz.count()) {
   const canvas = page.locator('.previz-canvas').first();
   check('画布画出来了', await canvas.count() > 0);
@@ -388,7 +426,7 @@ if (await previz.count()) {
    * 教训是那个反复出现的老毛病：**动作本身改变了 DOM，位置选择器就会失准**。
    * 所以锁死到「地标」那一行上，前后两次点的保证是同一个按钮。
    */
-  const markRow = page.locator('.shot-previz[open] .previz-row').filter({ hasText: '地标' });
+  const markRow = page.locator('.previz-modal .previz-row').filter({ hasText: '地标' });
   const markBtn = markRow.locator('button', { hasText: '窗' }).first();
   if (await markBtn.count()) {
     await markBtn.click();
@@ -454,6 +492,26 @@ if (await previz.count()) {
     check('高度那三档也点得到',
       (await page.locator('.previz-row button', { hasText: '正午顶光' }).count()) >= 1);
   }
+
+  /**
+   * ⚠ 跑完一定要**把弹窗关掉**。
+   *
+   * 它是全屏遮罩，开着的时候后面所有测试点什么都点不到 —— 第一版忘了关，
+   * 于是下一节点「设定集」那颗按钮超时死掉，报错说
+   * `.previz-assets … intercepts pointer events`，看起来像是资产面板的 bug，
+   * 其实是这里没收尾。
+   */
+  await page.locator('.previz-modal button', { hasText: '关闭' }).first().click();
+  await page.waitForTimeout(300);
+  check('✕ 关得掉（不关的话它挡住整页）',
+    (await page.locator('.previz-modal').count()) === 0);
+
+  // Esc 也要能关 —— 全屏遮罩只留一个出口是很容易把人困住的
+  await page.locator('.shot-edit-btn', { hasText: '预演台' }).first().click();
+  await page.waitForTimeout(500);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  check('按 Esc 也关得掉', (await page.locator('.previz-modal').count()) === 0);
 }
 
 
