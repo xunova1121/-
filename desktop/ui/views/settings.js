@@ -417,8 +417,8 @@ export default {
     }, '开始体检');
 
     root.append(
-      h('div', { class: 'panel' },
-        h('h2', { class: 'panel-title' }, '上线前体检'),
+      h('details', { class: 'panel', open: false },
+        h('summary', { class: 'panel-title' }, '上线前体检'),
         h('p', { class: 'panel-hint' },
           '按下面的路由配置，把五条能力各真跑一次最小调用。哪条不通、服务端原话是什么、下一步该改哪里，一次说清 —— 比跑到第 04 步才发现模型 ID 填错省事得多。'),
         optionRow,
@@ -428,9 +428,9 @@ export default {
     );
 
     root.append(
-      h('div', { class: 'panel' },
+      h('details', { class: 'panel', open: true },
         // cap:routing
-        h('h2', { class: 'panel-title' }, '能力路由'),
+        h('summary', { class: 'panel-title' }, '能力路由'),
         h('p', { class: 'panel-hint' },
           '每种能力单独挑服务商。各家强项差别很大 —— 剧本用便宜的长文本模型就够，出图和一致性复核才值得上好的。'),
         routeGrid
@@ -496,8 +496,8 @@ export default {
     );
 
     root.append(
-      h('div', { class: 'panel' },
-        h('h2', { class: 'panel-title' }, '画面规格'),
+      h('details', { class: 'panel', open: true },
+        h('summary', { class: 'panel-title' }, '画面规格'),
         h('p', { class: 'panel-hint' },
           '分辨率越高越贵、出得越慢。建议先用低档跑通全流程、确认分镜和人设都对，最后一遍再拉到高档重出。'),
         h('div', { class: 'grid2' },
@@ -644,8 +644,8 @@ export default {
     });
 
     root.append(
-      h('div', { class: 'panel' },
-        h('h2', { class: 'panel-title' }, '合成'),
+      h('details', { class: 'panel', open: false },
+        h('summary', { class: 'panel-title' }, '合成'),
         h('p', { class: 'panel-hint' },
           '这几样只影响**合成那一步**，改完重新合成一次就生效 —— 不用重新生成任何镜头，不花钱。'
           + '（顺序、入出点、转场、画面效果、背景音乐在成片那一步的「剪辑台」里改。）'),
@@ -671,8 +671,8 @@ export default {
           check(loudBox,
             '统一响度：把整条音轨拉到 −16 LUFS（短视频平台的常见口径）。'
             + '不做的话，不同厂商的配音和不同来源的背景音乐各有各的响度，观众要一集一集去调音量'))),
-      h('div', { class: 'panel' },
-        h('h2', { class: 'panel-title' }, '一致性引擎'),
+      h('details', { class: 'panel', open: false },
+        h('summary', { class: 'panel-title' }, '一致性引擎'),
         h('p', { class: 'panel-hint' },
           '四层叠加：冻结设定 → 固定种子 → 参考图引用 → 视觉复核。第三层是效果最大的一层，第四层负责把"错了没人发现"变成"错了自动重来"。'),
         h('div', { class: 'stack', style: 'gap:10px' },
@@ -812,8 +812,8 @@ export default {
     paintFfmpeg();
 
     root.append(
-      h('div', { class: 'panel' },
-        h('h2', { class: 'panel-title' }, '本机环境', ffBadge, ffRecheck),
+      h('details', { class: 'panel', open: false },
+        h('summary', { class: 'panel-title' }, '本机环境', ffBadge, ffRecheck),
         ffText,
         ffWhere,
         h('div', { class: 'grid2' },
@@ -943,8 +943,8 @@ export default {
     paintLan();
 
     root.append(
-      h('div', { class: 'panel' },
-        h('h2', { class: 'panel-title' }, '手机遥控'),
+      h('details', { class: 'panel', open: false },
+        h('summary', { class: 'panel-title' }, '手机遥控'),
         h('p', { class: 'panel-hint' },
           '手机上看进度、审分镜、看成片，也能点「重出这一镜」。'
           + '引擎始终在这台电脑上 —— 密钥、FFmpeg、几百 MB 的中间文件都不该跑到手机里去。'),
@@ -1345,8 +1345,8 @@ export default {
     }
 
     root.append(
-      h('div', { class: 'panel' },
-        h('h2', { class: 'panel-title' }, '镜头分级（省钱）'),
+      h('details', { class: 'panel', open: false },
+        h('summary', { class: 'panel-title' }, '镜头分级（省钱）'),
         h('p', { class: 'panel-hint' },
           '不配就是现在的行为，一模一样 —— 这一层是选配。只有你明确给某一档指定了别的模型，它才开始起作用。'),
         tierHost)
@@ -1354,8 +1354,8 @@ export default {
     paintTiers();
 
     root.append(
-      h('div', { class: 'panel' },
-        h('h2', { class: 'panel-title' }, '账号与设备'),
+      h('details', { class: 'panel', open: false },
+        h('summary', { class: 'panel-title' }, '账号与设备'),
         h('p', { class: 'panel-hint' },
           '账号密码解决的是"谁能进"。数据在哪儿是另一件事 —— 想让电脑和手机看到同一份，'
           + '要让电脑版也连服务器（菜单「文件 → 引擎在哪儿跑…」）。'),
@@ -1364,8 +1364,8 @@ export default {
     paintAccount();
 
     root.append(
-      h('div', { class: 'panel' },
-        h('h2', { class: 'panel-title' }, '对象存储'),
+      h('details', { class: 'panel', open: false },
+        h('summary', { class: 'panel-title' }, '对象存储'),
         h('p', { class: 'panel-hint' },
           '真写、真读、真删一次才算通。只"看看能不能连上"是不够的 —— '
           + '一把只读的 AccessKey 在任何测试里都表现正常，直到第一次出图完才报错，那时候钱已经花了。'),

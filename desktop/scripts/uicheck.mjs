@@ -661,7 +661,27 @@ await page.waitForTimeout(900);
  * 还让用户去「设置 → 音效音量」找一个不存在的地方。
  */
 {
+  /**
+   * ⚠ 设置页的各节现在是**折叠**的（实测平铺时近 4800px、61 个输入框、7440 字）。
+   * 默认只展开「能力路由」和「画面规格」——每部片子真会改的就这两节。
+   *
+   * 下面这些断言验的是"东西在不在"，不是"默认展不展开"，所以先全部展开再读。
+   * 默认折叠这件事另有一条断言单独钉（就在这一段末尾）。
+   */
+  const collapsed = await page.locator('#view-inner .panel:not([open])').count();
+  const openedByDefault = await page.locator('#view-inner .panel[open] > summary').allInnerTexts();
+  await page.locator('#view-inner .panel:not([open]) > summary').evaluateAll(
+    (ns) => ns.forEach((n) => n.click()));
+  await page.waitForTimeout(300);
+
   const body = await page.locator('#view-inner').innerText();
+  check('⚠ 默认是折起来的，只开该开的那两节（不折的话这一页近 4800px）',
+    collapsed >= 6 && openedByDefault.length === 2
+      && openedByDefault.join('').includes('能力路由') && openedByDefault.join('').includes('画面规格'),
+    `收起 ${collapsed} 节，默认展开：${JSON.stringify(openedByDefault.map((t) => t.trim().slice(0, 8)))}`);
+  check('折起来时标题一行不少（折的是位置，不是入口）',
+    (await page.locator('#view-inner .panel > summary').count()) >= 8,
+    String(await page.locator('#view-inner .panel > summary').count()));
   check('设置里有「合成」这一块', /合成/.test(body) && /时长策略/.test(body), body.slice(0, 200));
   const durSel = page.locator('select').filter({ has: page.locator('option[value="keep"]') }).first();
   check('时长策略选得到', (await durSel.count()) === 1);

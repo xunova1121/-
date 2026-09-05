@@ -2006,3 +2006,21 @@ select.mini {
   font-size: 10px; color: var(--caution); border: 1px solid var(--caution);
   border-radius: 3px; padding: 0 5px; white-space: nowrap; flex: none;
 }
+
+/* ── 设置页分节折叠 ──
+ *
+ * .panel 从 div 改成了 details。实测这一页平铺时近 4800px、61 个输入框、
+ * 7440 字正文 —— 而真正"每部片子会改"的只有能力路由和画面规格，
+ * 其余七节是装一次就不动、或者排错才用。
+ *
+ * ⚠ 折的是位置不是入口：标题一行不减，而且标题里原有的状态徽章
+ *（比如「本机环境」那个 FFmpeg 未安装）收起时照样看得见 —— 
+ * 会出问题的状态不能跟着折没了。
+ */
+.panel > summary.panel-title { cursor: pointer; list-style: none; }
+.panel > summary.panel-title::-webkit-details-marker { display: none; }
+.panel > summary.panel-title::before {
+  content: '▸'; display: inline-block; width: 1em; margin-right: 2px;
+  color: var(--ink-faint); font-size: 12px; transition: transform .12s;
+}
+.panel[open] > summary.panel-title::before { transform: rotate(90deg); }
