@@ -43,6 +43,25 @@ const DEFAULTS = {
    */
   directorProvider: '',
   directorModel: '',
+  /**
+   * 大纲模型：从剧本拆场次、以及"和模型商量着改大纲"。
+   *
+   * ⚠ 为什么值得单独一个槽 —— 大纲和分镜是**性质相反**的两种活，
+   * 而它们原来共用 chatModel，必然有一头将就：
+   *
+   *   大纲  判断题。通读全本找"时间跳了/地点换了"的边界、分配时长预算。
+   *         输出很小，但要全局一致 —— 推理型模型强一档。
+   *   分镜  生成题。按一份很长的规格吐几千 token 的 JSON，每镜十来个字段。
+   *         **这是全流程最长的一次生成**，要的是指令遵循和长输出稳定。
+   *
+   * ⚠ 而且推理模型跑分镜有个实打实的坑：思考过程要么吃掉输出预算、
+   * 要么半天不吐字节（见 adapters 里 idleTimeoutMs 那段注释）——
+   * 用户真机上撞过 finish_reason=length，就是这么来的。
+   *
+   * 留空 = 跟随剧本模型。不想多配一个的人什么都不用做。
+   */
+  outlineProvider: '',
+  outlineModel: '',
   visionProvider: 'volcengine',
   visionModel: 'doubao-seed-1-6-250615',
   imageProvider: 'volcengine',

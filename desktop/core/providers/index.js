@@ -304,7 +304,8 @@ export async function sendAsync(spec, onEvent) {
  * probe.capability 标出来，按对应的路由替换。
  */
 const PROBE_ROUTES = {
-  chat: [['chatProvider', 'chatModel'], ['directorProvider', 'directorModel'], ['visionProvider', 'visionModel']],
+  chat: [['chatProvider', 'chatModel'], ['outlineProvider', 'outlineModel'],
+    ['directorProvider', 'directorModel'], ['visionProvider', 'visionModel']],
   video: [['videoProvider', 'videoModel']],
   image: [['imageProvider', 'imageModel']],
   tts: [['ttsProvider', 'ttsModel']]
@@ -342,6 +343,7 @@ export async function probeRouting() {
     chat: s.chatProvider,
     // 调度可以单配一家（挑技法、绑说话人、分章走它）。没配就是跟着剧本模型，
     // 那一档下面会被去重掉，不会白探一次
+    outline: s.outlineProvider || s.chatProvider,
     director: s.directorProvider || s.chatProvider,
     vision: s.visionProvider,
     image: s.imageProvider,
@@ -379,7 +381,8 @@ export async function probeRouting() {
      * 这一条不发任何请求，纯查目录，所以放在这儿不花钱也不拖慢。
      */
     const modelOf = {
-      chat: s.chatModel, director: s.directorModel || s.chatModel, vision: s.visionModel,
+      chat: s.chatModel, outline: s.outlineModel || s.chatModel,
+      director: s.directorModel || s.chatModel, vision: s.visionModel,
       image: s.imageModel, video: s.videoModel, tts: s.ttsModel
     };
     const warn = modelWarning(providerId, modelOf[cap], {
@@ -524,8 +527,8 @@ export async function probe(providerId) {
  */
 function chatProbeModel(provider) {
   const s = settings.all();
-  for (const [pk, mk] of [['chatProvider', 'chatModel'], ['directorProvider', 'directorModel'],
-    ['visionProvider', 'visionModel']]) {
+  for (const [pk, mk] of [['chatProvider', 'chatModel'], ['outlineProvider', 'outlineModel'],
+    ['directorProvider', 'directorModel'], ['visionProvider', 'visionModel']]) {
     if (s[pk] === provider.id && s[mk]) return s[mk];
   }
   const m = (provider.models || []).find((x) => x.capability === 'chat')
