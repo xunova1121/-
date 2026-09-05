@@ -178,6 +178,16 @@ export default {
           statusEl
         ),
         h('div', { class: 'cap-list' }, (p.capabilities || []).map((c) => h('span', { class: 'cap' }, c))),
+        /**
+         * ⚠ 这家要转英文的话，必须在选它之前就说 ——
+         * 转一次 = 多一次对话调用 = 多一笔钱。事后从账单里发现
+         * "怎么多了一堆小额调用"是最糟的知情方式。
+         */
+        p.promptLang === 'en'
+          ? h('div', { class: 'field-hint' },
+              '⚠ 这家挂的是海外模型，提示词会**先用你配的对话模型翻成英文**再发。'
+              + '同一句话只翻一次（有缓存），但新提示词每句都要多花一次对话调用的钱。')
+          : null,
         reasonEl,
         ...inputs,
         baseInput ? h('div', { class: 'field' }, h('label', {}, '接口根地址'), baseInput,

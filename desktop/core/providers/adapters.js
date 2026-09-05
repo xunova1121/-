@@ -296,6 +296,68 @@ function rejectsTokenLimit(res) {
   return /max_tokens|max_completion_tokens|maximum tokens|token limit|unsupported[_ ]parameter|unrecognized/i.test(said);
 }
 
+/**
+ * ══════════ 提示词转英文 ══════════
+ *
+ * 有的服务商挂的是海外模型（flux / veo / wan / seedance），中文提示词出来的
+ * 东西明显差一档：构图散、要素漏。服务商条目里声明 promptLang: 'en' 的，
+ * 发出去之前在这里翻一遍。
+ *
+ * 三个决定值得说清楚：
+ *
+ *   · **温度 0**。同一句话必须每次翻出同样的英文 —— 否则同一个角色在第 3 镜
+ *     和第 11 镜拿到的是两句不同的英文，一致性就毁在这一步上，
+ *     而且查起来完全看不出来（提示词"看着一样"，因为人看的是中文那份）。
+ *   · **缓存**。一批几十镜共用同一段画风、同一个人物描述，不缓存等于把
+ *     同一句话翻几十遍，每遍都花钱。
+ *   · **翻不动不阻断生成**。翻译失败就按原文发，并且当场说一声。
+ *     为了一次翻译失败把整批出图掐掉，比出一张偏一点的图糟得多。
+ */
+const EN_CACHE = new Map();
+const CJK = /[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/;
+
+const EN_PROMPT = `You translate image/video generation prompts from Chinese into English.
+
+Rules:
+- Output ONLY the translated prompt. No explanation, no quotes, no preamble.
+- Keep it a prompt, not a sentence about a prompt.
+- Preserve every concrete visual element, camera term, and style word.
+- Keep proper nouns (character names) as-is in pinyin if they have no English form.
+- Keep the comma-separated structure if the input has one.`;
+
+export function __resetEnCache() { EN_CACHE.clear(); }
+
+export async function toEnglishPrompt(text, { onEvent = null, label = '提示词' } = {}) {
+  const raw = String(text || '').trim();
+  // 已经是英文（或空）就别白花一次调用
+  if (!raw || !CJK.test(raw)) return { text: raw, translated: false };
+  if (EN_CACHE.has(raw)) return { text: EN_CACHE.get(raw), translated: true, cached: true };
+
+  const r = resolvedRouting();
+  try {
+    const { text: out } = await chat({
+      providerId: r.chat.provider,
+      model: r.chat.model,
+      system: EN_PROMPT,
+      user: raw,
+      temperature: 0,
+      maxTokens: 1500,
+      label: `${label}·转英文`
+    });
+    const en = String(out || '').trim();
+    if (!en) throw new Error('翻译回了空');
+    EN_CACHE.set(raw, en);
+    return { text: en, translated: true };
+  } catch (err) {
+    onEvent?.({
+      type: 'note',
+      message: `提示词转英文没成（${String(err.message).split('\n')[0].slice(0, 60)}），`
+        + '这一次按中文原样发 —— 这家模型对中文理解差一档，出来的东西可能偏。'
+    });
+    return { text: raw, translated: false, failed: true };
+  }
+}
+
 function fail(label, res) {
   const why = diagnose(res);
   if (looksLikeContextOverflow(why)) {
@@ -1025,6 +1087,27 @@ async function generateImageRaw({
     }
   }
 
+  /**
+   * ⚠ 这一家要英文提示词就在这儿翻，翻完再进各家分支。
+   *
+   * 放在分支**外面**是有意的：放进分支里的话，以后再加一家要英文的，
+   * 就得记得再抄一遍 —— 而漏抄不会红，只会让那一家悄悄地出得差一点。
+   * 这个应用里 modelUsed 和 refsSent 都是这么开始说谎的。
+   */
+  if (provider.promptLang === 'en') {
+    const en = await toEnglishPrompt(prompt, { onEvent, label });
+    if (en.translated) {
+      prompt = en.text;
+      // 如实记下来：请求记录里发的是英文，卡片上也该看得出这一步发生过
+      used.promptLang = 'en';
+      used.promptTranslated = true;
+    }
+    if (negative) {
+      const neg = await toEnglishPrompt(negative, { onEvent, label: `${label}·负面词` });
+      if (neg.translated) negative = neg.text;
+    }
+  }
+
   used.refsSent = refImages.length;
 
   switch (family) {
@@ -1060,6 +1143,61 @@ async function generateImageRaw({
       const url = firstMediaUrl(polled?.json ?? submitted.json);
       if (!url) throw new Error(`${label}：响应里没有图片 URL`);
       return { used, url, base64: null, raw: polled?.json ?? submitted.json };
+    }
+
+    case 'wavespeed': {
+      /**
+       * 提交地址**跟着模型走**：POST {{baseUrl}}/{模型路径}。
+       * 模型 id 本身就是 URL 的一段（wavespeed-ai/flux-dev），
+       * 所以这里是拼出来的，不是从 endpoints 里查一个固定路径。
+       */
+      const base = endpoint(provider, 'images', '{{baseUrl}}');
+      const body = {
+        prompt,
+        // ⚠ 尺寸字段的确切写法**没能从可达的文档里确认**（官网在本机被出网代理拦了）。
+        //   按这一族最通行的 1024*1024 写法发。这家不认的话会回一个 400，
+        //   而 fail() 会把服务端原话原样摆出来 —— 那比我猜一个字段名然后静默出错强。
+        size: String(size || '1024*1024').replace(/x/i, '*'),
+        enable_base64_output: false
+      };
+      if (negative) body.negative_prompt = negative;
+      if (seed !== null) body.seed = seed;
+      if (refImages.length) {
+        /**
+         * ⚠ 图生图的图字段名同样未经实测确认，按图生视频那边确认过的 `image` 发。
+         * 而且它收的是**公网 URL**，不是 base64 —— 本地图要先能被对面取到。
+         */
+        const face = identityRef || refImages[0];
+        requirePublicUrl(face, label, '参考图生图');
+        body.image = face;
+        // 只带得动一张，如实记账，别让卡片上写着"发了 5 张"
+        used.refsSent = 1;
+      }
+
+      const { submitted, polled } = await sendAsync(
+        { provider: providerId, label, method: 'POST', url: `${base}/${model}`, body, timeoutMs },
+        onEvent
+      );
+      if (!submitted.ok) fail(label, submitted);
+
+      /**
+       * ⚠ **显式读 data.outputs，不要用满对象找链接的那个通用函数。**
+       *
+       * firstMediaUrl 是"在响应里找第一个 http 链接"。而这家做图生图时，
+       * 请求里那张输入图的 URL 很可能被响应原样回显 —— 通用找法会把
+       * **输入图**当成输出图返回。那种错最恶心：图是好的、流程是绿的，
+       * 只是你拿到的是自己刚发出去的那一张。
+       */
+      const done = polled?.json ?? submitted.json;
+      const outputs = done?.data?.outputs;
+      const url = Array.isArray(outputs) ? outputs.find((x) => typeof x === 'string' && /^https?:/i.test(x)) : null;
+      if (!url) {
+        throw new Error(
+          `${label}：任务完成了，但 data.outputs 里没有可用的图片地址。\n`
+          + `服务端返回的是：${JSON.stringify(done).slice(0, 400)}`
+        );
+      }
+      return { used, url, base64: null, raw: done };
     }
 
     case 'agnes': {
@@ -1520,6 +1658,15 @@ async function generateVideoRaw({
     });
   }
 
+  /**
+   * 出视频这一路也要翻。理由和出图那边一样，见 toEnglishPrompt 上面那段。
+   * ⚠ 出视频没有"负向词"这个东西（整条链路都没有），所以这里只翻正向。
+   */
+  if (provider.promptLang === 'en') {
+    const en = await toEnglishPrompt(prompt, { onEvent, label });
+    if (en.translated) prompt = en.text;
+  }
+
   let spec;
   switch (family) {
     case 'dashscope':
@@ -1540,6 +1687,56 @@ async function generateVideoRaw({
         }
       };
       break;
+
+    case 'wavespeed': {
+      /**
+       * 和出图同一套：POST {{baseUrl}}/{模型路径} 拿 data.id，
+       * 再查 /predictions/{id}/result，完成后读 data.outputs。
+       */
+      const base = endpoint(provider, 'videos', '{{baseUrl}}');
+      const body = { prompt, enable_base64_output: false };
+
+      if (images.length) {
+        /**
+         * ⚠ 这家收的是**公网 URL**，不是 base64。
+         * 不先拦的话，任务多半提交成功、然后在轮询里失败 —— 白等一轮，
+         * 而报错说的是模型的事，人不会想到是图没传上去。
+         */
+        requirePublicUrl(images[0], label, '图生视频', 'WaveSpeed');
+        body.image = images[0];
+        if (endFrame) {
+          requirePublicUrl(endFrame, label, '末帧', 'WaveSpeed');
+          // ⚠ 末帧字段名未经实测确认。不认的话它会 400，服务端原话会原样摆出来
+          body.last_image = endFrame;
+        }
+      }
+      if (actualDuration) body.duration = actualDuration;
+      if (finalResolution) body.resolution = finalResolution;
+      if (seed !== null && seed !== undefined) body.seed = seed;
+
+      const { submitted, polled } = await sendAsync(
+        { provider: providerId, label, method: 'POST', url: `${base}/${model}`, body, timeoutMs },
+        onEvent
+      );
+      if (!submitted.ok) fail(label, submitted);
+
+      /**
+       * ⚠ 显式读 data.outputs，理由同出图那支：
+       * 图生视频时请求里那张输入图的 URL 很可能被响应回显，
+       * "满对象找第一个链接"会把**输入图**当成输出视频返回。
+       * 那种错查起来最费劲 —— 流程全绿，只是拿到的是自己刚发出去的东西。
+       */
+      const done = polled?.json ?? submitted.json;
+      const outputs = done?.data?.outputs;
+      const url = Array.isArray(outputs) ? outputs.find((x) => typeof x === 'string' && /^https?:/i.test(x)) : null;
+      if (!url) {
+        throw new Error(
+          `${label}：任务完成了，但 data.outputs 里没有可用的视频地址。\n`
+          + `服务端返回的是：${JSON.stringify(done).slice(0, 400)}`
+        );
+      }
+      return { url, actualDuration, raw: done };
+    }
 
     case 'agnes': {
       /**
