@@ -342,6 +342,8 @@ const upstream = http.createServer((req, res) => {
       const system = JSON.stringify(body.messages?.[0]?.content || '');
       let content;
       if (system.includes('美术总监')) {
+        // 记下这一支收到的用户消息 —— 下面要验"设定集有没有照着大纲的名单出"
+        upstream.lastBibleUser = body.messages?.[1]?.content || '';
         content = JSON.stringify(BIBLE_REPLY);
       } else if (system.includes('分镜导演')) {
         /**
@@ -7846,6 +7848,75 @@ section('场景的东南西北：机位相对房间，不只相对人');
  *   · 而它恰恰是长剧本唯一的出路（拆分镜按场次分批靠的就是它）
  *   · 于是只能在**报错里**教育"先出大纲再拆分镜"，而用户往往已经在走那条路了
  */
+/**
+ * ════════ 设定集照着大纲的名单出 ════════
+ *
+ * 大纲的每一场都带着 scene 和 characters —— 一份权威的"有哪些场景、哪些人"清单。
+ * 而设定集原来是**另起一次模型调用、从原始剧本重新认一遍**，两次各认各的，
+ * 名字就会漂：大纲写「码头」、设定集出「老渔港」。
+ *
+ * 而拆分镜的提示词写着"characters 和 scene 必须严格用设定集里给出的名字"——
+ * 两套名字对不上，只能靠模糊匹配去救，那正是"某个角色被静默丢掉"的来源。
+ */
+section('设定集照着大纲的名单出（名字从源头就是一套）');
+{
+  const cs = await import('../core/pipeline/consistency.js');
+
+  check('⚠ 大纲排在设定集**前面**（排后面的话设定集看不到它的名单）',
+    store.STAGES.indexOf('outline') < store.STAGES.indexOf('bible'),
+    store.STAGES.join(' → '));
+
+  // ── 有大纲：名单要发出去 ──
+  {
+    const p3 = store.create({ title: '照着大纲出设定集' });
+    store.update(p3.id, (x) => {
+      /**
+       * ⚠ 大纲里的名字**故意和剧本里的不一样**。
+       *
+       * 第一版剧本里就写着「码头」「林溪」，于是"场景名发出去了"这条
+       * 在名单根本没发的时候**照样是绿的** —— 那几个词从剧本那条路就进去了。
+       * 恒真的断言比没有断言更糟。
+       *
+       * 名字只出现在大纲里，它能到达请求就只有一条路：那份名单。
+       */
+      x.script = '两个人在一处地方碰面，然后各自离开。';
+      x.outline = { beats: [
+        { id: 'b-01', scene: '锈锚渡口', characters: ['沈砚舟'], summary: '巡查', seconds: 20 },
+        { id: 'b-02', scene: '旧盐仓', characters: ['祁无衣', '沈砚舟'], summary: '对峙', seconds: 25 }
+      ] };
+      return x;
+    });
+    upstream.lastBibleUser = '';
+    const notes = [];
+    await cs.buildBible(store.read(p3.id), { onEvent: (e) => notes.push(e) });
+    const sent = upstream.lastBibleUser;
+    check('大纲里的场景名发出去了（这几个词剧本里没有，只可能来自名单）',
+      /锈锚渡口/.test(sent) && /旧盐仓/.test(sent), sent.slice(-220));
+    check('大纲里的角色名也发出去了', /沈砚舟/.test(sent) && /祁无衣/.test(sent));
+    check('而且明说了"别另起名字"（不说的话模型照样会自己编）',
+      /严格用|不要另起/.test(sent), sent.slice(-160));
+    check('当场告诉人这一次是照着大纲出的',
+      notes.some((e) => /照着大纲的名单/.test(e.message || '')),
+      JSON.stringify(notes.map((e) => e.message).slice(0, 2)));
+  }
+
+  // ── ⚠ 没有大纲：不能崩，退回老路 ──
+  {
+    const p4 = store.create({ title: '跳过大纲直接出设定集' });
+    store.update(p4.id, (x) => { x.script = '林溪在码头巡查。'; return x; });
+    upstream.lastBibleUser = '';
+    const notes = [];
+    const bible = await cs.buildBible(store.read(p4.id), { onEvent: (e) => notes.push(e) });
+    check('⚠ 没有大纲照样跑得出来（大纲是一步，但不是强制的）',
+      Boolean(bible?.characters?.length), JSON.stringify(Object.keys(bible || {})));
+    check('这时候不发那段名单（发一份空名单等于误导模型）',
+      !/额外要求/.test(upstream.lastBibleUser), upstream.lastBibleUser.slice(-120));
+    check('并且提示人"先出大纲名字会更齐"',
+      notes.some((e) => /还没有大纲/.test(e.message || '')),
+      JSON.stringify(notes.map((e) => e.message).slice(0, 2)));
+  }
+}
+
 section('大纲是正式一步（不再是分镜里的一个面板）');
 {
   const ol2 = await import('../core/pipeline/outline.js');
