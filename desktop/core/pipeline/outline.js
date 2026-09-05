@@ -124,31 +124,48 @@ const PRACTICAL_MAX_CHARS = 60000;
 /** 留给系统提示词和模型自己要吐的输出。中文按 1 字 ≈ 1 token 保守估 */
 const RESERVE_TOKENS = 8000;
 
-/** 认得出的模型家族 → 上下文窗口（token）。数字取保守值 */
+/**
+ * 认得出的模型家族 → 上下文窗口（token）。数字取保守值。
+ *
+ * ⚠ 一律用**不锚定**的匹配，而不是 /^claude[-.]/ 那种。
+ *
+ * 原因是中转网关的模型 ID 完全没有规矩，同一个模型能写成：
+ *   claude-opus-4 ／ claude5.6 ／ claude5-6 ／ anthropic/claude-5.6 ／ Claude5.6
+ * 第一版锚定写法只认中间那种带分隔符的，其余全部落回默认 12000 ——
+ * 也就是说用户明明配了个 200K 的模型，还是被截成一万二，
+ * 而他完全不知道为什么。这种"配了等于没配"是最难查的一类。
+ *
+ * 关键词本身够独特（claude / gemini / deepseek 不会出现在别家模型名里），
+ * 所以放宽到子串匹配不会误伤。
+ */
 const KNOWN_CONTEXT = [
-  [/^claude[-.]/i, 200000],
-  [/^gemini-2\.5/i, 1000000],
-  [/^gpt-4\.1/i, 1000000],
-  [/^gpt-4o/i, 128000],
-  [/^o[0-9]/i, 200000],
-  [/^deepseek/i, 64000],
-  [/^qwen-long/i, 1000000],
-  [/^moonshot|^kimi/i, 128000],
-  [/^glm-4/i, 128000]
+  [/claude/i, 200000],
+  [/gemini[-._]?2\.?5/i, 1000000],
+  [/gemini/i, 128000],
+  [/gpt[-._]?4\.1/i, 1000000],
+  [/gpt[-._]?4o/i, 128000],
+  [/(?:^|[-._/])o[134](?:[-._]|$)/i, 200000],
+  [/deepseek/i, 64000],
+  [/qwen[-._]?long/i, 1000000],
+  [/moonshot|kimi/i, 128000],
+  [/glm[-._]?4/i, 128000]
 ];
 
 /** 从模型名里读出窗口大小：...-32k-... → 32000，...-128k → 128000 */
 function windowFromName(model) {
-  const m = String(model || '').match(/(?:^|[-_])(\d{1,4})k(?:[-_]|$)/i);
+  const name = String(model || '');
+  const m = name.match(/(?:^|[-._])(\d{1,4})k(?:[-._]|$)/i);
   if (m) return Number(m[1]) * 1000;
-  if (/(?:^|[-_])1m(?:[-_]|$)/i.test(String(model || ''))) return 1000000;
+  if (/(?:^|[-._])1m(?:[-._]|$)/i.test(name)) return 1000000;
   return 0;
 }
 
 export function contextTokensFor(model) {
-  const named = windowFromName(model);
+  // 去掉 `厂商/` 前缀：anthropic/claude-5.6、openrouter/anthropic/claude-… 都常见
+  const name = String(model || '').split('/').pop() || '';
+  const named = windowFromName(name);
   if (named) return named;
-  for (const [re, tokens] of KNOWN_CONTEXT) if (re.test(String(model || ''))) return tokens;
+  for (const [re, tokens] of KNOWN_CONTEXT) if (re.test(name)) return tokens;
   return 0;
 }
 

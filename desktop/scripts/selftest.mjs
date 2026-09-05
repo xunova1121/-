@@ -3159,7 +3159,18 @@ section('剧本超长：砍了要出声，分章要真能用');
     check('模型名里写着窗口就照它算（32k → 24000 字）',
       ol.scriptCapFor('doubao-1-5-pro-32k-250115') === 24000,
       String(ol.scriptCapFor('doubao-1-5-pro-32k-250115')));
-    check('认得出 Claude 家族（200K）', ol.contextTokensFor('claude-opus-4') === 200000);
+    /**
+     * ⚠ 中转网关的模型 ID **完全没有规矩**，同一个模型能写成一堆样子。
+     * 第一版用 /^claude[-.]/ 锚定匹配，只认中间那种带分隔符的写法，
+     * 其余全部落回默认 12000 —— 用户明明配了 200K 的模型还是被截成一万二，
+     * 而且完全不知道为什么。"配了等于没配"是最难查的一类问题。
+     */
+    for (const id of ['claude-opus-4', 'claude-opus-5', 'claude5.6', 'claude-5.6',
+      'claude5-6', 'Claude5.6', 'anthropic/claude-5.6', 'claude'])
+      check(`认得出是 Claude：${id}`, ol.contextTokensFor(id) === 200000, String(ol.contextTokensFor(id)));
+
+    check('带厂商前缀的也认得（anthropic/… openrouter/…）',
+      ol.scriptCapFor('anthropic/claude-5.6') === ol.scriptCapFor('claude-opus-4'));
     check('Claude 的剧本上限远大于默认',
       ol.scriptCapFor('claude-opus-4') > ol.SCRIPT_CHARS_MAX * 4,
       String(ol.scriptCapFor('claude-opus-4')));
