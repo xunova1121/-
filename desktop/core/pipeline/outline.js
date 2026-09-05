@@ -95,6 +95,74 @@ export function normalizeBeat(beat, i = 0) {
  *
  * note 为 null 表示没截；不为 null 就必须让人看见。
  */
+/**
+ * 这个模型一次能吃下多少字 —— **上限跟着模型走，不写死**。
+ *
+ * ── 为什么 ──
+ *
+ * 原来三处都写死 12000，那是给 32K 上下文（默认的 doubao-1-5-pro-32k）留的余量。
+ * 可路由是能改的：中转网关上挂着 200K 的 Claude、1M 的 Gemini。
+ * 拿 200K 的模型只发 12000 字，等于买了卡车只装一箱货。
+ * 用户原话：「用的 claude-opus-5，怎么还做限制」。
+ *
+ * ── 怎么认 ──
+ *
+ *   1. 模型名里直接写着窗口的（国产模型大多如此：doubao-1-5-pro-**32k**-250115）
+ *   2. 认得出家族的查表
+ *   3. **都认不出就退回 12000** —— 也就是今天的行为，不会有回归
+ *
+ * ⚠ 宁可猜小。猜大了是一次 400（虽然现在会翻译成人话），猜小了只是少发一点、
+ *   而且会当场说。所以表里的数字一律取各家公开窗口的保守值。
+ *
+ * ⚠ 还有个**实际**上限：就算模型吃得下 100 万 token，把一整本小说塞进一次
+ *   请求里，出来的大纲也是糊的，钱还烧得多。长篇本来就该分章。
+ */
+
+/** 一次请求最多发多少字。再大模型也吃得下，但大纲质量会垮，而且贵 */
+const PRACTICAL_MAX_CHARS = 60000;
+
+/** 留给系统提示词和模型自己要吐的输出。中文按 1 字 ≈ 1 token 保守估 */
+const RESERVE_TOKENS = 8000;
+
+/** 认得出的模型家族 → 上下文窗口（token）。数字取保守值 */
+const KNOWN_CONTEXT = [
+  [/^claude[-.]/i, 200000],
+  [/^gemini-2\.5/i, 1000000],
+  [/^gpt-4\.1/i, 1000000],
+  [/^gpt-4o/i, 128000],
+  [/^o[0-9]/i, 200000],
+  [/^deepseek/i, 64000],
+  [/^qwen-long/i, 1000000],
+  [/^moonshot|^kimi/i, 128000],
+  [/^glm-4/i, 128000]
+];
+
+/** 从模型名里读出窗口大小：...-32k-... → 32000，...-128k → 128000 */
+function windowFromName(model) {
+  const m = String(model || '').match(/(?:^|[-_])(\d{1,4})k(?:[-_]|$)/i);
+  if (m) return Number(m[1]) * 1000;
+  if (/(?:^|[-_])1m(?:[-_]|$)/i.test(String(model || ''))) return 1000000;
+  return 0;
+}
+
+export function contextTokensFor(model) {
+  const named = windowFromName(model);
+  if (named) return named;
+  for (const [re, tokens] of KNOWN_CONTEXT) if (re.test(String(model || ''))) return tokens;
+  return 0;
+}
+
+/**
+ * 这个模型这一次最多发多少字剧本。认不出模型就退回 SCRIPT_CHARS_MAX。
+ */
+export function scriptCapFor(model) {
+  const tokens = contextTokensFor(model);
+  if (!tokens) return SCRIPT_CHARS_MAX;
+  const usable = tokens - RESERVE_TOKENS;
+  if (usable <= SCRIPT_CHARS_MAX) return SCRIPT_CHARS_MAX;
+  return Math.min(usable, PRACTICAL_MAX_CHARS);
+}
+
 export const SCRIPT_CHARS_MAX = 12000;
 
 export function capScript(text, max = SCRIPT_CHARS_MAX, what = '剧本') {
@@ -106,10 +174,12 @@ export function capScript(text, max = SCRIPT_CHARS_MAX, what = '剧本') {
     sent: full.slice(0, cap),
     dropped,
     note:
-      `⚠ ${what}共 ${full.length} 字，一次能交给模型的上限是 ${cap} 字 —— ` +
+      `⚠ ${what}共 ${full.length} 字，当前这个模型一次能吃下 ${cap} 字 —— ` +
       `**后面 ${dropped} 字（${Math.round((dropped / full.length) * 100)}%）这次没参与**，` +
       `所以结果只覆盖前面那一部分，不是全本。\n` +
-      `要处理全本：把剧本分章，一章一章来 —— 各章的结果会累加，不会互相覆盖。`
+      `两条路：① 把剧本分章，一章一章来 —— 各章结果会累加，不会互相覆盖；` +
+      `② 在「服务商与密钥」里把**对话模型**换成上下文更大的一家 —— ` +
+      `这个上限是跟着模型走的，不是写死的。`
   };
 }
 

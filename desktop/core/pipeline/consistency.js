@@ -104,7 +104,7 @@ export async function scanCast(project, { source, onEvent } = {}) {
 
   // ⚠ 超长要出声：只扫到前一万二的话，后半段才出场的人物**一个都进不了设定集**，
   //   而且没有任何提示 —— 后面出图时那些人就没有参考图，画成谁都不知道
-  const cap = outlineLib.capScript(text0);
+  const cap = outlineLib.capScript(text0, outlineLib.scriptCapFor(routing.chat.model));
   if (cap.note) onEvent?.({ type: 'note', message: cap.note });
 
   const { text } = await adapters.chat({
@@ -194,7 +194,7 @@ export async function buildBible(project, { onEvent } = {}) {
     ? project.chapters.map((c) => c.script).join('\n\n')
     : String(project.script || '');
   const capped = project.chapters?.length
-    ? outlineLib.capScript(whole, undefined, '各章剧本合起来')
+    ? outlineLib.capScript(whole, outlineLib.scriptCapFor(routing.chat.model), '各章剧本合起来')
     : { sent: whole, dropped: 0, note: null };
   if (capped.note) onEvent?.({ type: 'note', message: capped.note });
   const source = capped.sent;

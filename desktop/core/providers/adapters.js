@@ -271,8 +271,31 @@ function requirePublicUrl(url, label, what, who = '阿里云百炼') {
   );
 }
 
+/**
+ * "上下文塞不下"长什么样 —— 各家措辞不同，但都在说同一件事。
+ *
+ * ⚠ 单独认它，是因为这个错**有明确的下一步**，而原文一律是英文技术黑话
+ * （context_length_exceeded / maximum context length is 32768 tokens…）。
+ * 人看到那串东西只会以为"又坏了"，其实他要做的只是分章或者换个大模型。
+ */
+const CONTEXT_OVERFLOW = /context[ _-]?length|maximum context|context window|too many tokens|tokens? exceed|input is too long|prompt is too long|reduce the length|上下文.*(超|过长|不足)|输入.*过长/i;
+
+export function looksLikeContextOverflow(text) {
+  return CONTEXT_OVERFLOW.test(String(text || ''));
+}
+
 function fail(label, res) {
-  throw new Error(`${label} 失败（HTTP ${res.status}）：${diagnose(res)}`);
+  const why = diagnose(res);
+  if (looksLikeContextOverflow(why)) {
+    throw new Error(
+      `${label} 失败（HTTP ${res.status}）：**剧本太长，这个模型一次吃不下。**\n\n` +
+      `两条路：\n` +
+      `① 把剧本分章，一章一章来 —— 各章结果会累加，不会互相覆盖；\n` +
+      `② 在「服务商与密钥」里把**对话模型**换成上下文更大的一家。\n\n` +
+      `服务商原话：${why}`
+    );
+  }
+  throw new Error(`${label} 失败（HTTP ${res.status}）：${why}`);
 }
 
 // ──────────────────────────────── 对话 ────────────────────────────────
