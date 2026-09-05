@@ -7838,6 +7838,70 @@ section('场景的东南西北：机位相对房间，不只相对人');
  *      会把输入图当成输出图返回：图是好的、流程全绿，只是那是你刚发出去的那张
  *   3. 它挂的是海外模型，中文提示词出来的东西差一档，要先翻成英文
  */
+/**
+ * ════════ 大纲是正式一步 ════════
+ *
+ * 它原来不在 STAGES 里 —— 只是「分镜」那一步里的一个面板。后果：
+ *   · 新用户根本看不到它
+ *   · 而它恰恰是长剧本唯一的出路（拆分镜按场次分批靠的就是它）
+ *   · 于是只能在**报错里**教育"先出大纲再拆分镜"，而用户往往已经在走那条路了
+ */
+section('大纲是正式一步（不再是分镜里的一个面板）');
+{
+  const ol2 = await import('../core/pipeline/outline.js');
+  const pipe = await import('../ui/pipeline.js');
+
+  const at = store.STAGES.indexOf('outline');
+  check('大纲进了阶段列表', at >= 0, JSON.stringify(store.STAGES));
+  check('⚠ 排在分镜**前面**（它是给分镜用的，排后面等于没用）',
+    at >= 0 && at < store.STAGES.indexOf('script'),
+    `outline@${at} script@${store.STAGES.indexOf('script')}`);
+  check('有中文名，不是把 id 直接显示给人看', store.STAGE_LABELS.outline === '大纲');
+  check('提示语说清了它为什么值得跑（分批、不撞上限）',
+    /分批|上限/.test(store.STAGE_HINTS.outline || ''), (store.STAGE_HINTS.outline || '').slice(0, 40));
+
+  // ── 新项目 / 老项目都要有这一格 ──
+  {
+    const fresh = store.create({ title: '新项目' });
+    check('新项目的阶段状态里有大纲这一格',
+      Object.prototype.hasOwnProperty.call(store.read(fresh.id).stageStatus, 'outline'));
+
+    /**
+     * ⚠ 老项目是**没有这个键**的。缺键会让阶段轨上那一格永远显示"未开始"，
+     * 而且不会报错 —— 所以要验它真的被补上，不能想当然。
+     */
+    store.update(fresh.id, (p) => { delete p.stageStatus.outline; return p; });
+    check('老项目缺这一格时会被补上（不补的话那一格永远灰着）',
+      Object.prototype.hasOwnProperty.call(store.read(fresh.id).stageStatus, 'outline'));
+  }
+
+  // ── 真的能当一步跑 ──
+  {
+    const p2 = store.create({ title: '大纲当一步跑', targetDuration: 60 });
+    store.update(p2.id, (x) => { x.script = '阿澜在码头巡查，发现缆绳被割断。'; return x; });
+    const evs = await ndjson(`/projects/${p2.id}/stage/outline`, {});
+    /**
+     * ⚠ 这条第一版写成只看 e.message —— 而 runner 表里没有这一步时，
+     * 服务端回的是 400 + {"error":"未知阶段：outline"}，字段叫 error 不叫 message。
+     * 于是把 runner 拿掉打靶，这条**照样是绿的**：断言根本够不着目标。
+     * 两个字段都看。
+     */
+    const said = JSON.stringify(evs);
+    check('POST /stage/outline 认得这一步（原来会回"未知阶段"）',
+      !/未知阶段/.test(said), said.slice(0, 160));
+    const beats = ol2.normalizeOutline(store.read(p2.id).outline).beats;
+    check('真的拆出了场次', beats.length > 0, String(beats.length));
+    check('跑完报的是"完成"', evs.some((e) => e.type === 'stage' && e.status === 'done'));
+
+    // ── 完成度按场数算，不是"跑没跑过" ──
+    check('步骤条上数的是场数',
+      pipe.stepProgress(store.read(p2.id), 'outline').done === beats.length,
+      JSON.stringify(pipe.stepProgress(store.read(p2.id), 'outline')));
+    check('一场都没拆出来时不算完成（和别的步骤一个口径）',
+      pipe.stepProgress({ outline: { beats: [] } }, 'outline').done === 0);
+  }
+}
+
 section('WaveSpeed：地址拼法、只认 outputs、提示词转英文');
 {
   const ad = await import('../core/providers/adapters.js');

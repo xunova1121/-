@@ -24,10 +24,23 @@ function writeAtomic(file, data) {
   fs.renameSync(tmp, file);
 }
 
-export const STAGES = ['bible', 'script', 'assets', 'video', 'voice', 'compose', 'export'];
+/**
+ * ⚠ 大纲是**正式一步**，插在设定集和分镜之间。
+ *
+ * 它原来不在这个列表里 —— 只是「分镜」那一步里的一个面板。后果是：
+ *   · 新用户根本看不到它
+ *   · 而它恰恰是长剧本唯一的出路（拆分镜按场次分批，靠的就是它）
+ *   · 于是我们只能在**报错里**教育"先出大纲再拆分镜"——
+ *     要靠报错来教的东西，本身就是摆错了位置
+ *
+ * 插在分镜正前方而不是排到最前，是因为它就是给分镜用的；
+ * 也不打乱大家已经习惯的"剧本 → 设定集"这个开头。
+ */
+export const STAGES = ['bible', 'outline', 'script', 'assets', 'video', 'voice', 'compose', 'export'];
 
 export const STAGE_LABELS = {
   bible: '设定集',
+  outline: '大纲',
   script: '分镜',
   assets: '镜头出图',
   video: '视频生成',
@@ -38,6 +51,8 @@ export const STAGE_LABELS = {
 
 export const STAGE_HINTS = {
   bible: '冻结角色与场景外貌，并出参考图 —— 后面所有镜头都引用它，这是一致性的地基。不满意就在下面的设定集里改描述、单独重出那一张',
+  outline: '一行一场戏 —— 剧本和分镜之间可以商量的那一层。在这儿改一句话，比拆完分镜再去改十几行省事得多；'
+    + '而且拆分镜会**按场次分批**，每批只写几场，多长的剧本都不会撞模型一次能写的上限',
   script: '按已冻结的设定拆分镜，分镜里只写画面不写外貌',
   assets: '逐镜出图，自动带上参考图并做一致性复核，不达标会重试',
   video: '以镜头图为首帧生成视频片段',
