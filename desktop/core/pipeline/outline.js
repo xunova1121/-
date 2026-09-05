@@ -79,6 +79,40 @@ export function normalizeBeat(beat, i = 0) {
   };
 }
 
+/**
+ * 把要交给模型的剧本按上限截一刀，**并且说清楚截掉了多少**。
+ *
+ * ── 为什么要有这个函数 ──
+ *
+ * 原来三处（拆场次、扫新增设定、建设定集）各自写着 `.slice(0, 12000)`，
+ * 一声不吭。用户的剧本三万字，模型只看到前一万二 —— 它老老实实给前 40%
+ * 出了一份**完整**的大纲，界面上没有任何异常、没有任何报错。
+ * 用户那句话是"生成大纲长度限制，出了一半不能用"。
+ *
+ * 上限本身不是错：默认对话模型是 32K 上下文（doubao-1-5-pro-32k），
+ * 一个中文字约一个 token，还得给系统提示词和模型自己要吐的输出留地方。
+ * **不吭声才是错。** 这个应用里最难查的一类问题就是"看起来什么都没发生"。
+ *
+ * note 为 null 表示没截；不为 null 就必须让人看见。
+ */
+export const SCRIPT_CHARS_MAX = 12000;
+
+export function capScript(text, max = SCRIPT_CHARS_MAX, what = '剧本') {
+  const full = String(text || '');
+  const cap = Number.isFinite(max) && max > 0 ? Math.floor(max) : SCRIPT_CHARS_MAX;
+  if (full.length <= cap) return { sent: full, dropped: 0, note: null };
+  const dropped = full.length - cap;
+  return {
+    sent: full.slice(0, cap),
+    dropped,
+    note:
+      `⚠ ${what}共 ${full.length} 字，一次能交给模型的上限是 ${cap} 字 —— ` +
+      `**后面 ${dropped} 字（${Math.round((dropped / full.length) * 100)}%）这次没参与**，` +
+      `所以结果只覆盖前面那一部分，不是全本。\n` +
+      `要处理全本：把剧本分章，一章一章来 —— 各章的结果会累加，不会互相覆盖。`
+  };
+}
+
 export function normalizeOutline(outline) {
   const beats = (Array.isArray(outline?.beats) ? outline.beats : [])
     .map((b, i) => normalizeBeat(b, i))
@@ -172,7 +206,7 @@ export function budgetCheck(outline, targetSeconds) {
 }
 
 /** 生成一个不和现有 id 撞的新 id */
-function freshId(beats) {
+export function freshId(beats) {
   let n = beats.length + 1;
   const used = new Set(beats.map((b) => b.id));
   let id = `b-${String(n).padStart(2, '0')}`;

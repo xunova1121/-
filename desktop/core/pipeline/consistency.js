@@ -27,6 +27,7 @@ import * as variants from './variants.js';
 import * as anglesLib from './angles.js';
 import * as previz from './previz.js';
 import { resolveStyle } from '../styles.js';
+import * as outlineLib from './outline.js';
 
 /** 由项目和名字派生稳定种子。同一项目里同一角色，永远同一颗种子。 */
 export function deriveSeed(projectId, name) {
@@ -100,11 +101,17 @@ export async function scanCast(project, { source, onEvent } = {}) {
   if (!text0) return { characters: [], scenes: [], props: [] };
 
   onEvent?.({ type: 'note', message: `扫描新增角色与场景（${routing.chat.provider} / ${routing.chat.model}）…` });
+
+  // ⚠ 超长要出声：只扫到前一万二的话，后半段才出场的人物**一个都进不了设定集**，
+  //   而且没有任何提示 —— 后面出图时那些人就没有参考图，画成谁都不知道
+  const cap = outlineLib.capScript(text0);
+  if (cap.note) onEvent?.({ type: 'note', message: cap.note });
+
   const { text } = await adapters.chat({
     providerId: routing.chat.provider,
     model: routing.chat.model,
     system: BIBLE_PROMPT,
-    user: `画风要求：${style.anchor}\n\n剧本：\n${text0.slice(0, 12000)}`,
+    user: `画风要求：${style.anchor}\n\n剧本：\n${cap.sent}`,
     temperature: 0.6,
     jsonMode: true,
     label: '扫描新增设定'
@@ -178,9 +185,19 @@ export async function buildBible(project, { onEvent } = {}) {
 
   // 长篇只把前若干字交给模型定人设：设定集要的是"谁长什么样"，
   // 不是完整剧情，喂全文既超上下文又稀释重点。
-  const source = project.chapters?.length
-    ? project.chapters.map((c) => c.script).join('\n\n').slice(0, 12000)
-    : project.script;
+  /**
+   * ⚠ 这里的截断只发生在**分章**那一支，单剧本那一支是整篇发出去的 ——
+   * 这个不一致是原样保留的（改了会让长单篇项目从"能跑"变成"被砍"），
+   * 但截了就必须说。
+   */
+  const whole = project.chapters?.length
+    ? project.chapters.map((c) => c.script).join('\n\n')
+    : String(project.script || '');
+  const capped = project.chapters?.length
+    ? outlineLib.capScript(whole, undefined, '各章剧本合起来')
+    : { sent: whole, dropped: 0, note: null };
+  if (capped.note) onEvent?.({ type: 'note', message: capped.note });
+  const source = capped.sent;
 
   const { text } = await adapters.chat({
     providerId: routing.chat.provider,

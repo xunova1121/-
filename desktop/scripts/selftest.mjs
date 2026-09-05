@@ -406,6 +406,8 @@ const upstream = http.createServer((req, res) => {
           }))
         });
       } else if (system.includes('分场编辑')) {
+        // 记下这一支真正收到的用户消息 —— 下面"剧本超长"那节要验模型到底看到多少
+        upstream.lastOutlineUser = body.messages?.[1]?.content || '';
         /**
          * 大纲：拆场次。
          *
@@ -3118,6 +3120,101 @@ section('大纲：改动指令，不是推倒重来');
     const bad = studioModule.applyOutlineOps(p.id, { ops: [{ op: 'delete', id: 'b-07' }] });
     check('锁着的那一场，走接口也删不掉',
       store.read(p.id).outline.beats.length === 3 && bad.refused.length === 1);
+  }
+}
+
+/**
+ * ════════ 剧本超长：砍了要出声，分章要真能用 ════════
+ *
+ * 用户原话：「生成大纲长度限制，出了一半不能用」。
+ *
+ * 查出来是两个叠在一起的问题，而且**都不报错**：
+ *
+ *   1. 剧本被 slice(0, 12000) 静默砍掉。三万字只发前一万二，
+ *      模型老老实实给前 40% 出了一份完整大纲 —— 界面上一切正常。
+ *   2. 于是让人去走"分章"这条路，**而那条路自己是坏的**：
+ *      生成第二章会把第一章的大纲整个抹掉（除非恰好锁着）。
+ *
+ * 第 2 条尤其毒 —— 它把唯一的绕行方案也堵死了，而且同样悄无声息。
+ */
+section('剧本超长：砍了要出声，分章要真能用');
+{
+  const ol = await import('../core/pipeline/outline.js');
+
+  // ── capScript 本身 ──
+  check('没超的原样放过，不吭声',
+    ol.capScript('阿澜在码头巡查。').note === null);
+  {
+    const r = ol.capScript('字'.repeat(30000));
+    check('超了就截到上限', r.sent.length === ol.SCRIPT_CHARS_MAX, String(r.sent.length));
+    check('丢了多少算得对', r.dropped === 30000 - ol.SCRIPT_CHARS_MAX, String(r.dropped));
+    check('提示里带原长、上限、丢掉多少三个数',
+      r.note.includes('30000') && r.note.includes(String(ol.SCRIPT_CHARS_MAX)) && r.note.includes(String(r.dropped)),
+      r.note);
+    check('提示里指出了下一步该干什么（分章）', /分章/.test(r.note), r.note);
+  }
+
+  // ── 真跑一次 buildOutline：模型到底收到多少，人有没有被告知 ──
+  {
+    const long = '第一幕。阿澜走向栈桥。'.repeat(3000).slice(0, 30000);
+    const p = store.create({ title: '超长剧本', targetDuration: 60 });
+    store.update(p.id, (x) => { x.script = long; return x; });
+
+    const notes = [];
+    upstream.lastOutlineUser = '';
+    await studioModule.buildOutline(p.id, { onEvent: (e) => notes.push(e) });
+
+    const sent = upstream.lastOutlineUser.slice(upstream.lastOutlineUser.indexOf('剧本：') + 3).trim();
+    check('模型收到的确实是截过的', sent.length === ol.SCRIPT_CHARS_MAX, String(sent.length));
+    check('⚠ 而且当场告诉了人（原来这里一声不吭）',
+      notes.some((e) => e.type === 'note' && /没参与/.test(e.message || '')),
+      JSON.stringify(notes.filter((e) => e.type === 'note').map((e) => e.message)).slice(0, 200));
+    check('收尾那条消息里也带着（note 会被刷走，结果消息不会）',
+      notes.some((e) => e.status === 'done' && /没参与/.test(e.message || '')));
+
+    // 没超的项目不该被这句话骚扰
+    const q = store.create({ title: '短剧本', targetDuration: 60 });
+    store.update(q.id, (x) => { x.script = '阿澜在码头巡查，发现缆绳被割断。'; return x; });
+    const quiet = [];
+    await studioModule.buildOutline(q.id, { onEvent: (e) => quiet.push(e) });
+    check('没超的时候不多嘴', !quiet.some((e) => /没参与/.test(e.message || '')));
+  }
+
+  // ── 分章：这条逃生通道必须真的通 ──
+  {
+    const p = store.create({ title: '两章', targetDuration: 120 });
+    store.update(p.id, (x) => {
+      x.chapters = [
+        { id: 'c1', title: '第一章', script: '阿澜在码头巡查，发现缆绳被割断。' },
+        { id: 'c2', title: '第二章', script: '阿澜追查割绳的人，在仓库遇到对手。' }
+      ];
+      return x;
+    });
+
+    const a = await studioModule.buildOutline(p.id, { chapterId: 'c1' });
+    const n1 = a.outline.beats.length;
+    check('第一章拆出了场次', n1 > 0, String(n1));
+    check('都挂在第一章名下', a.outline.beats.every((b) => b.chapterId === 'c1'));
+
+    const b = await studioModule.buildOutline(p.id, { chapterId: 'c2' });
+    const ch1 = b.outline.beats.filter((x) => x.chapterId === 'c1');
+    const ch2 = b.outline.beats.filter((x) => x.chapterId === 'c2');
+    check('⚠ 生成第二章之后，第一章还在（原来会被整个抹掉）',
+      ch1.length === n1, `第一章剩 ${ch1.length} 场，本该 ${n1} 场`);
+    check('第二章也拆出来了', ch2.length > 0, String(ch2.length));
+    check('两章加起来才是全部', b.outline.beats.length === ch1.length + ch2.length);
+
+    // ⚠ id 撞号：normalizeBeat 按下标编号，留下 b-01 再生成一批，新的又叫 b-01
+    const ids = b.outline.beats.map((x) => x.id);
+    check('⚠ 合并之后没有两场同号（同号会让"按 id 改某一场"改到别人身上）',
+      new Set(ids).size === ids.length, ids.join(','));
+
+    // 重新生成第一章：第二章不能受牵连，也不能撞号
+    const c = await studioModule.buildOutline(p.id, { chapterId: 'c1' });
+    const ids2 = c.outline.beats.map((x) => x.id);
+    check('重新生成第一章，第二章原样还在',
+      c.outline.beats.filter((x) => x.chapterId === 'c2').length === ch2.length);
+    check('重新生成之后仍然没有同号', new Set(ids2).size === ids2.length, ids2.join(','));
   }
 }
 
