@@ -1666,29 +1666,28 @@ async function analyzeScriptRaw(projectId, {
    * 说明 50 上下正好在边界上，而边界上的东西不该拿用户的钱去试。
    */
   const NO_OUTLINE_SHOT_CEILING = 30;
-  // ⚠ useOutline 在下面才定义，这里直接用它的来源 —— 提前引用 const 会 TDZ 报错
-
   const batching = inScope.length > 0;
-  const takeByShots = (beats) => {
+  const useOutline = inScope.length > 0;
+  const takeByShots = (beats, cap) => {
     const out = [];
     let shots = 0;
-
     for (const b of beats) {
       const n = duration.planShotCount(outline.estimateSeconds(b).suggested);
       // 头一场无论多大都要收下 —— 否则一场特别长的戏会让这一批空转，永远出不去
-      if (out.length && shots + n > SHOTS_PER_BATCH) break;
+      if (out.length && shots + n > cap) break;
       out.push(b);
       shots += n;
-
     }
     return out;
   };
-  const targetBeats = batching ? takeByShots(allPending) : allPending;
-
+  /**
+   * 这一批按多少镜切。**是变量不是常量** —— 撞上输出上限时会对折重来，
+   * 见下面「写不完就少写点」那一段。
+   */
+  let batchCap = SHOTS_PER_BATCH;
+  let targetBeats = batching ? takeByShots(allPending, batchCap) : allPending;
   /** 这一批之后还剩几场没拆。跑完拿它决定要不要接着来。 */
-
-  const restAfterThisBatch = batching ? allPending.length - targetBeats.length : 0;
-  const useOutline = inScope.length > 0;
+  let restAfterThisBatch = batching ? allPending.length - targetBeats.length : 0;
 
   if (useOutline && !targetBeats.length) {
     throw new Error(
@@ -1704,7 +1703,7 @@ async function analyzeScriptRaw(projectId, {
    * 用大纲时喂的是**这几场的正文**，每一场前面标着它的 id ——
    * 模型据此把每一镜标回哪一场，我们才知道下次只重拆哪几镜。
    */
-  const sourceScript = useOutline
+  let sourceScript = useOutline
     ? targetBeats.map((b) => {
         const who = b.characters.length ? `（${b.characters.join('、')}）` : '';
         const when = b.time ? `·${b.time}` : '';
@@ -1714,7 +1713,7 @@ async function analyzeScriptRaw(projectId, {
 
   // 时长预算：分章时按本章字数占全片的比例分摊，长章自然分到更多秒数
   const totalTarget = Number(project.targetDuration) || 60;
-  const targetSeconds = useOutline
+  let targetSeconds = useOutline
     // 大纲上每一场自己估过秒数（台词念得完是硬下限）—— 比字数比例准得多
     ? Math.max(10, targetBeats.reduce((sum, b) => sum + outline.estimateSeconds(b).suggested, 0))
     : chapter
@@ -1728,6 +1727,25 @@ async function analyzeScriptRaw(projectId, {
 
   // 镜头数跟着时长走。大纲那条路上人已经把每场多长定过了，按它反推最合理
   if (useOutline) shotCount = duration.planShotCount(targetSeconds);
+
+  /**
+   * 按当前的 batchCap 把这一批重新算一遍 —— 缩批重试时靠它同步更新那几个值。
+   */
+  const deriveBatch = () => {
+    targetBeats = batching ? takeByShots(allPending, batchCap) : allPending;
+    restAfterThisBatch = batching ? allPending.length - targetBeats.length : 0;
+    sourceScript = useOutline
+      ? targetBeats.map((b) => {
+          const who = b.characters.length ? `（${b.characters.join('、')}）` : '';
+          const when = b.time ? `·${b.time}` : '';
+          return `【场次 ${b.id}】${b.scene}${when}${who}\n${b.summary}${b.dialogue ? `\n台词：${b.dialogue}` : ''}`;
+        }).join('\n\n')
+      : sourceScript;
+    if (useOutline) {
+      targetSeconds = Math.max(10, targetBeats.reduce((sum, b) => sum + outline.estimateSeconds(b).suggested, 0));
+      shotCount = duration.planShotCount(targetSeconds);
+    }
+  };
 
 
   /**
@@ -1783,41 +1801,78 @@ async function analyzeScriptRaw(projectId, {
     2
   );
 
-  const { text } = await adapters.chat({
-    providerId: r.chat.provider,
-    model: r.chat.model,
-    system: SHOT_PROMPT.replace('{{SHOT_COUNT}}', String(shotCount))
-      .replace('{{TARGET_SECONDS}}', String(targetSeconds))
-      .replace('{{BIBLE}}', bibleDigest)
+  /**
+   * ══════════ 写不完就少写点，而不是把错甩给人 ══════════
+   *
+   * 用户报的：deepseek / 拆分镜 /「这一批 4 场，还剩 2 场」/ finish_reason=length，
+   * 而且**换了服务商还是一样** —— 不是某一家的毛病，是这一批要写的东西本来就
+   * 超过了模型一次能写的量。
+   *
+   * 光把 max_tokens 发足不够：deepseek 的输出上限本来就是 8192，我们已经在要
+   * 最大值了。要到最大还写不完，唯一的出路是**让它一次少写几场**。
+   *
+   * 批的大小原来是**估**出来的（注释：12 镜 ≈ 2500 token），那是紧凑写法的估算，
+   * 模型写细一点翻一倍很正常。估错的代价全落在用户身上：跑几分钟、花了钱、
+   * 拿到半截，然后被提示"先出大纲再拆分镜"—— 而他已经在走那条路了。
+   */
+  let text;
+  for (;;) {
+    try {
+      ({ text } = await adapters.chat({
+        providerId: r.chat.provider,
+        model: r.chat.model,
+        system: SHOT_PROMPT.replace('{{SHOT_COUNT}}', String(shotCount))
+          .replace('{{TARGET_SECONDS}}', String(targetSeconds))
+          .replace('{{BIBLE}}', bibleDigest)
+          /**
+           * 大纲那条路上追加一段：每一镜要标回它属于哪一场。
+           *
+           * 追加而不是改 SHOT_PROMPT 本身 —— 那一份是所有项目共用的，
+           * 而"标回场次"只在有大纲时才成立。改主提示词会让没有大纲的项目
+           * 也收到一句它看不懂的要求。
+           */
+          + (useOutline
+            ? `\n\n──────── 这一次的额外要求 ────────\n\n`
+              + `剧本里每一场前面都标着【场次 b-XX】。**每一镜都要多带一个字段 beatId**，`
+              + `填它属于的那个场次 id（比如 "b-04"）。\n`
+              + `这个字段决定了以后能不能只重拆某一场 —— 标错或者不标，`
+              + `重拆一场就会连带重拆这一批全部。`
+            : ''),
+        user: sourceScript,
+        temperature: 0.7,
+        jsonMode: true,
+
+        /**
+         * 拆分镜是全流程里**最长的一次生成** —— 要吐几千 token 的分镜 JSON。
+         * 非流式的话那几分钟里连接上一个字节都没有，我们分不清"在认真写"
+         * 和"已经死了"，只能等一个固定总时长到点掐断（真实事故：中转站 +
+         * Claude Opus，体检 1.89 秒回，真跑 180 秒零字节被自己掐了）。
+         */
+
+        stream: true,
+        onEvent,
+        label: chapter ? `拆分镜·${chapter.title}` : '拆分镜'
+      }));
+      break;
+    } catch (err) {
       /**
-       * 大纲那条路上追加一段：每一镜要标回它属于哪一场。
-       *
-       * 追加而不是改 SHOT_PROMPT 本身 —— 那一份是所有项目共用的，
-       * 而"标回场次"只在有大纲时才成立。改主提示词会让没有大纲的项目
-       * 也收到一句它看不懂的要求。
+       * ⚠ 只在**输出被截断**这一种上缩批。401、模型不存在、内容审核缩了
+       * 也是再错一次，还多花一次钱。缩不动了（只剩一场）就老实抛出去 ——
+       * 一场戏再长也不能不拆，那种情况该回大纲把那一场拆成两场，那是人的判断。
        */
-      + (useOutline
-        ? `\n\n──────── 这一次的额外要求 ────────\n\n`
-          + `剧本里每一场前面都标着【场次 b-XX】。**每一镜都要多带一个字段 beatId**，`
-          + `填它属于的那个场次 id（比如 "b-04"）。\n`
-          + `这个字段决定了以后能不能只重拆某一场 —— 标错或者不标，`
-          + `重拆一场就会连带重拆这一批全部。`
-        : ''),
-    user: sourceScript,
-    temperature: 0.7,
-    jsonMode: true,
-
-    /**
-     * 拆分镜是全流程里**最长的一次生成** —— 要吐几千 token 的分镜 JSON。
-     * 非流式的话那几分钟里连接上一个字节都没有，我们分不清"在认真写"
-     * 和"已经死了"，只能等一个固定总时长到点掐断（真实事故：中转站 +
-     * Claude Opus，体检 1.89 秒回，真跑 180 秒零字节被自己掐了）。
-     */
-
-    stream: true,
-    onEvent,
-    label: chapter ? `拆分镜·${chapter.title}` : '拆分镜'
-  });
+      const truncated = /finish_reason=length/.test(String(err?.message || ''));
+      if (!truncated || !batching || !useOutline || targetBeats.length <= 1) throw err;
+      const before = targetBeats.length;
+      batchCap = Math.max(1, Math.floor(batchCap / 2));
+      deriveBatch();
+      if (targetBeats.length >= before) throw err; // 缩不动，别空转
+      onEvent?.({
+        type: 'note',
+        message: `这一批（${before} 场）超过了模型一次能写的量，对折成 ${targetBeats.length} 场重来一次 ——`
+          + '上一次的钱已经花了，这次让它少写点。'
+      });
+    }
+  }
 
   const parsed = extractJSON(text);
   /**
