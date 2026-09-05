@@ -1043,6 +1043,77 @@ export const PROVIDERS = [
    *
    * 所以它有自己的 family。
    */
+  /**
+   * ══════════ WaveSpeed AI ══════════
+   *
+   * 一个**模型聚合**平台：flux、seedance、wan、veo、minimax… 都挂在它下面，
+   * 走同一套接口。所以它有自己的 family —— 三处和别家都不一样：
+   *
+   *   1. **提交地址跟着模型走**。别家是固定的 /images/generations，
+   *      这家是 POST /api/v3/{模型路径}，模型 id 本身就是 URL 的一段
+   *      （wavespeed-ai/flux-dev、bytedance/seedance-2.0/image-to-video）。
+   *   2. 图和视频**都是异步任务**：提交拿 data.id，再查 /predictions/{id}/result。
+   *   3. 结果在 data.outputs（URL 数组）。
+   *
+   * ⚠ 提示词要**英文**。挂在这里的多是海外模型（flux / veo / wan），
+   * 中文提示词出来的东西明显更差 —— 所以声明 promptLang: 'en'，
+   * 发出去之前先用对话模型翻一遍，见 adapters 里 toEnglishPrompt。
+   */
+  {
+    id: 'wavespeed',
+    name: 'WaveSpeed AI（模型聚合）',
+    docs: 'https://wavespeed.ai/docs',
+    baseUrl: 'https://api.wavespeed.ai/api/v3',
+    family: 'wavespeed',
+    auth: { type: 'bearer', secret: 'WAVESPEED_API_KEY' },
+    secrets: [
+      {
+        name: 'WAVESPEED_API_KEY',
+        label: 'API Key',
+        required: true,
+        hint: '在 wavespeed.ai/accesskey 签发。⚠ 账号要先充值，钥匙才会生效 —— '
+          + '没充值时它长得和「钥匙填错了」一模一样（一样是 401），别在那儿反复检查钥匙。'
+      }
+    ],
+    capabilities: ['t2i', 'i2i', 't2v', 'i2v'],
+    /**
+     * 提示词发英文。
+     *
+     * 不是"最好用英文"，是这一批模型对中文的理解明显差一档：
+     * 同一句话中文出来构图散、要素漏。翻译一次几百 token，
+     * 比出一张废图便宜得多。
+     */
+    promptLang: 'en',
+    /**
+     * 提交回 data.id，查 /predictions/{id}/result，完成后读 data.outputs。
+     *
+     * ⚠ 状态取值只有 completed 是文档里明确写了的（"On completed, read
+     * output values from data.outputs"）。failed/error 两个都列上是**保险**：
+     * 漏了终态的后果是轮询到超时才罢休 —— 一次失败要白等好几分钟，
+     * 而且报的是"超时"，人会往网络上想。多列一个不会错杀。
+     */
+    taskPoll: {
+      url: '{{baseUrl}}/predictions/{taskId}/result',
+      method: 'GET',
+      idPath: 'data.id',
+      statusPath: 'data.status',
+      successStates: ['completed', 'succeeded'],
+      failureStates: ['failed', 'error', 'canceled']
+    },
+    /**
+     * 模型 id 就是文档里那一段路径，照抄。
+     * 这个清单只是常用的几个 —— 它家上新很快，填别的一样能跑，
+     * 因为地址是拼出来的，不需要我们这边登记。
+     */
+    models: [
+      { id: 'wavespeed-ai/flux-dev', capability: 't2i', label: 'FLUX.1 Dev（出图）' },
+      { id: 'wavespeed-ai/flux-dev-lora', capability: 't2i', label: 'FLUX.1 Dev + LoRA' },
+      { id: 'bytedance/seedance-2.0/image-to-video', capability: 'i2v', label: 'Seedance 2.0（图生视频）' },
+      { id: 'alibaba/wan-3.0/image-to-video', capability: 'i2v', label: '通义万相 3.0（图生视频）' },
+      { id: 'google/veo3.1/text-to-video', capability: 't2v', label: 'Veo 3.1（文生视频）' }
+    ],
+    hint: '模型 id 就是官网模型页地址里 /models/ 后面那一段，照抄即可（例：wavespeed-ai/flux-dev）。'
+  },
   {
     id: 'agnes',
     name: 'Agnes AI（Agnes Image）',
@@ -1617,6 +1688,13 @@ export function publicCatalog(overrides = {}) {
     capabilities: p.capabilities,
     models: p.models,
     // 界面上的分辨率下拉直接读这个，免得前端再抄一份档位清单
+    /**
+     * 这家要不要把提示词转成英文。
+     *
+     * ⚠ 必须让界面看得见：转一次 = 多一次对话调用 = 多一笔钱。
+     * 用户有权在选这家之前就知道，而不是事后从账单里发现多了一堆小额调用。
+     */
+    promptLang: p.promptLang || null,
     videoDefaults: p.videoDefaults || null,
     // 音色清单：每个角色配一个，界面要拿它渲染下拉
     voices: p.voices || [],

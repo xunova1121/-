@@ -7827,6 +7827,93 @@ section('场景的东南西北：机位相对房间，不只相对人');
  * ⚠ 又不能无脑加：o 系列不认 max_tokens，有的模型嫌值太大直接 400。
  * 所以做成梯子，逐级退让，最后一级"什么都不发"就是今天的行为。
  */
+/**
+ * ════════ WaveSpeed：模型聚合 + 提示词转英文 ════════
+ *
+ * 这一家和别家不一样的三处，每一处都能悄悄出错：
+ *
+ *   1. 提交地址**跟着模型走**（POST /api/v3/{模型路径}），拼错就是 404
+ *   2. 结果在 data.outputs —— 而做图生图时，请求里那张输入图的 URL
+ *      **很可能被响应原样回显**。用"满对象找第一个链接"的通用办法，
+ *      会把输入图当成输出图返回：图是好的、流程全绿，只是那是你刚发出去的那张
+ *   3. 它挂的是海外模型，中文提示词出来的东西差一档，要先翻成英文
+ */
+section('WaveSpeed：地址拼法、只认 outputs、提示词转英文');
+{
+  const ad = await import('../core/providers/adapters.js');
+  const cat = await import('../core/providers/catalog.js');
+
+  const entry = cat.publicCatalog().find((x) => x.id === 'wavespeed');
+  check('服务商登记进目录了', !!entry, String(!!entry));
+  check('四种能力都声明了',
+    ['t2i', 'i2i', 't2v', 'i2v'].every((c) => (entry?.capabilities || []).includes(c)));
+  check('声明了要英文提示词', entry?.promptLang === 'en', String(entry?.promptLang));
+
+  /** 假的 WaveSpeed：提交回 data.id，查结果回 data.outputs */
+  const srv = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', (c) => { raw += c; });
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      if (req.url.includes('/predictions/')) {
+        return res.end(JSON.stringify({
+          data: {
+            id: 'task-1',
+            status: 'completed',
+            /**
+             * ⚠ 故意把**输入图的地址**也放回来（真实接口经常回显输入）。
+             * 通用的"找第一个链接"会先撞上它 —— 这一条就是钉这个的。
+             */
+            input: { image: 'https://example.com/INPUT-DO-NOT-USE.png' },
+            outputs: ['https://cdn.example.com/REAL-OUTPUT.png']
+          }
+        }));
+      }
+      srv.lastSubmit = { url: req.url, body: JSON.parse(raw || '{}') };
+      res.end(JSON.stringify({ data: { id: 'task-1', status: 'created' } }));
+    });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${srv.address().port}`;
+  settings.patch({ baseUrls: { wavespeed: url } });
+  vault.setSecret('WAVESPEED_API_KEY', 'sk-ws-test');
+
+  // 翻译要走对话模型 —— 指到打桩上，并让它回一句可辨认的英文
+  settings.patch({ routing: { ...settings.get('routing'), chat: { provider: 'openai', model: 'gpt-4o-mini' } } });
+
+  {
+    ad.__resetEnCache();
+    const r = await ad.generateImage({
+      providerId: 'wavespeed', model: 'wavespeed-ai/flux-dev',
+      prompt: '林溪站在码头，晨雾', size: '1024*1024', label: '出图'
+    });
+    check('提交地址是 基址 + 模型路径（拼错就是 404）',
+      srv.lastSubmit?.url.endsWith('/wavespeed-ai/flux-dev'), srv.lastSubmit?.url);
+    check('⚠ 取的是 data.outputs 里那个，不是响应里回显的输入图',
+      r.url === 'https://cdn.example.com/REAL-OUTPUT.png', r.url);
+    check('如实记下这一次发的是英文', r.used?.promptLang === 'en' && r.used?.promptTranslated === true,
+      JSON.stringify({ lang: r.used?.promptLang, t: r.used?.promptTranslated }));
+    check('发出去的提示词不再是中文原文',
+      srv.lastSubmit?.body?.prompt && !/[\u4e00-\u9fff]/.test(srv.lastSubmit.body.prompt),
+      String(srv.lastSubmit?.body?.prompt).slice(0, 60));
+  }
+
+  // ── 翻译本身 ──
+  {
+    ad.__resetEnCache();
+    const en = await ad.toEnglishPrompt('a girl on the pier');
+    check('已经是英文的不再翻一遍（白花一次调用）', en.translated === false && en.text === 'a girl on the pier');
+
+    const a = await ad.toEnglishPrompt('码头的晨雾');
+    const b = await ad.toEnglishPrompt('码头的晨雾');
+    check('⚠ 同一句话第二次走缓存（一批几十镜共用画风，不缓存等于翻几十遍）',
+      b.cached === true && a.text === b.text, JSON.stringify({ a: a.text, cached: b.cached }));
+  }
+
+  srv.close();
+  settings.patch({ baseUrls: {} });
+}
+
 section('输出上限：得告诉对面能写多少');
 {
   const ad = await import('../core/providers/adapters.js');
