@@ -2387,10 +2387,34 @@ export default {
          * 每一组下面那句「改了要重出 X」**只在那样产物已经出过时**才显示：
          * 还没出过的时候它是废话，而废话会把真正要紧的那句挤没。
          */
-        const group = (title, note, done, redo, ...kids) => h('div', { class: 'shot-group' },
-          h('div', { class: 'shot-group-head' },
+        /**
+         * ══════════ 这四组默认只开一组 ══════════
+         *
+         * 分组本身很好：它按"改了要重跑哪一步"分，等于把每一项的代价写在标题上。
+         * 坏的是**四组常年全开** —— 实测这张面板高 1896px，
+         * 你点「改文案」想改一句话，展开的是两屏高的表单。
+         *
+         * 所以改成折叠，只开「出图用的」那一组 —— 画面描述在那儿，
+         * 那正是你点「改文案」要找的东西。其余三组标题照旧摆着
+         *（"改这些只要重出视频，图不用动"），一眼看得到里面是什么、代价是什么。
+         *
+         * ⚠ 折的是**位置**，不是入口。标题一行不减，展开一下就在 ——
+         * 这个应用吃过"藏起来等于没做"的亏（用户原话："没找到预演台"）。
+         */
+        const DEFAULT_OPEN_GROUP = '出图用的';
+        const group = (title, note, done, redo, ...kids) => h('details',
+          { class: 'shot-group', open: title === DEFAULT_OPEN_GROUP },
+          h('summary', { class: 'shot-group-head' },
             h('b', {}, title),
-            h('span', {}, note)),
+            h('span', {}, note),
+            /**
+             * ⚠ "这一镜已经出过了"必须在**收起时也看得见**。
+             *
+             * 完整那句警告（"改完要重出视频才生效"）在组里面，收起来就没了 ——
+             * 于是扫一眼面板不知道这一镜已经有产出、改它要花钱重出。
+             * 折叠不该把**状态**一起折掉，只该折**细节**。
+             */
+            done ? h('span', { class: 'shot-group-flag', title: redo }, '已出过 · 改了要重跑') : null),
           ...kids.filter(Boolean),
           done ? h('div', { class: 'shot-group-redo' }, redo) : null);
 
@@ -2451,7 +2475,15 @@ export default {
           // 真正让画面有电影感的是具体手法。术语你未必天天记得住，模型却认得很准。
           skillGroups.length
             ? [
-                h('label', { style: 'margin-top:8px' }, '技法'),
+                /**
+                 * ⚠ 技法这一块是**四十五颗按钮**，一个人占掉这张面板一大半。
+                 * 折起来，标题上写清已经选了几张 —— 折的是位置，不是入口：
+                 * "已选 2 张"这种状态必须在收起时也看得见，
+                 * 否则你不知道该不该点开，那才是真的藏起来了。
+                 */
+                h('details', { class: 'skill-fold' },
+                  h('summary', {},
+                    `技法${pickedSkills.length ? ` · 已选 ${pickedSkills.length} 张` : ' · 还没选'}`),
                 (() => {
                   const host = h('div', {});
                   host.append(skillPicker(skillGroups, pickedSkills, () => {}));
@@ -2480,7 +2512,7 @@ export default {
                   customSkillForm(skillGroups, (groups) => {
                     skillGroups = groups;
                     paintShots();
-                  }))
+                  })))
               ]
             : null,
             null),

@@ -1980,3 +1980,29 @@ select.mini {
   display: flex; gap: 10px; align-items: center;
   padding: 12px 16px; border-top: 1px solid var(--line); flex: 0 0 auto;
 }
+/* ── 分组折叠 ──
+ *
+ * .shot-group 从 div 改成了 details（四组默认只开一组，见 studio.js 那段注释）。
+ * summary 默认带一个小三角并且是 list-item 布局，会把原来的 flex 排版顶乱，
+ * 所以这里把它按回去。
+ */
+.shot-group > summary.shot-group-head { cursor: pointer; list-style: none; }
+.shot-group > summary.shot-group-head::-webkit-details-marker { display: none; }
+/* 自己画一个指示符：collapsed 时朝右，展开朝下。没有指示符的话，
+ * 收起的组看着像一行标题，人不知道它点得开 */
+.shot-group > summary.shot-group-head b::before {
+  content: '▸'; display: inline-block; width: 1em;
+  color: var(--ink-faint); font-size: 11px; transition: transform .12s;
+}
+.shot-group[open] > summary.shot-group-head b::before { transform: rotate(90deg); }
+
+.skill-fold > summary {
+  cursor: pointer; font-size: 10.5px; color: var(--ink-faint);
+  margin-top: 8px; padding: 3px 0;
+}
+.skill-fold > summary:hover { color: var(--ink); }
+/* 收起时也要看得见"这一镜已经出过了" —— 折叠只折细节，不折状态 */
+.shot-group-flag {
+  font-size: 10px; color: var(--caution); border: 1px solid var(--caution);
+  border-radius: 3px; padding: 0 5px; white-space: nowrap; flex: none;
+}
