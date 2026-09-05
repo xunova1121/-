@@ -7834,6 +7834,103 @@ section('场景的东南西北：机位相对房间，不只相对人');
  * 退回非流式解析，整条流式路径在自检里从头到尾一次都没跑过。
  * 那正是"绿着的没测过的代码"，今天已经栽过一次（假上游不回 usage）。
  */
+/**
+ * ════════ 输出上限：必须显式发 ════════
+ *
+ * 用户报："生成大纲……finish_reason=length，拿到的是半截内容"，
+ * 而他的剧本**只有一两千字**。看起来像"剧本太长"，其实完全不是 ——
+ * 请求体里原来是 `{ model, messages, temperature }`，一个字都没提输出上限。
+ *
+ * 对 OpenAI 原生接口没事（不传 = 模型默认，通常很大）。但他走的是中转站转
+ * Claude，而 Anthropic 的接口里 max_tokens **是必填的** —— 中转站只能替他
+ * 编一个默认值，编的普遍很小（1024/4096）。于是大纲写到一半就断。
+ *
+ * ⚠ 又不能无脑加：o 系列不认 max_tokens，有的模型嫌值太大直接 400。
+ * 所以做成梯子，逐级退让，最后一级"什么都不发"就是今天的行为。
+ */
+section('输出上限：得告诉对面能写多少');
+{
+  const ad = await import('../core/providers/adapters.js');
+
+  /** 行为按**路径**分（不能用查询串：后面还会拼 /chat/completions） */
+  const srv = http.createServer((req, res) => {
+    const mode = req.url.split('/').filter(Boolean)[0] || 'ok';
+    let raw = '';
+    req.on('data', (c) => { raw += c; });
+    req.on('end', () => {
+      const body = JSON.parse(raw || '{}');
+      srv.calls.push(body);
+      const reply = (code, obj) => {
+        res.writeHead(code, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(obj));
+      };
+      if (mode === 'auth') return reply(401, { error: { message: 'Invalid API key' } });
+      if (mode === 'nomt' && 'max_tokens' in body)
+        return reply(400, { error: { message: "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead." } });
+      /**
+       * ⚠ 按**值**拒绝，不看字段名 —— 真嫌 8192 太大的模型，
+       * 你把字段改叫 max_completion_tokens 它一样嫌。
+       * 第一版只拒 max_tokens===8192，于是梯子在第二级就"成功"了，
+       * 第三级（退到 4096）根本没被验到。
+       */
+      const want = body.max_tokens ?? body.max_completion_tokens;
+      if (mode === 'toobig' && want > 4096)
+        return reply(400, { error: { message: 'max_tokens: must be <= 4096' } });
+      reply(200, { choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }] });
+    });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${srv.address().port}`;
+  vault.setSecret('OPENAI_API_KEY', 'sk-maxtok-test');
+  const run = async (mode, extra = {}) => {
+    srv.calls = [];
+    settings.patch({ baseUrls: { openai: `${url}/${mode}` } });
+    return ad.chat({ providerId: 'openai', model: 'claude5.6', user: '拆一下', label: '上限', ...extra });
+  };
+
+  // ── 正常情况：上限必须真的发出去 ──
+  {
+    await run('ok');
+    check('⚠ 请求体里带了输出上限（原来一个字都没提，中转站只能替你编个小的）',
+      srv.calls[0]?.max_tokens === 8192, JSON.stringify(srv.calls[0]?.max_tokens));
+    check('只发了一次（没白白退让）', srv.calls.length === 1, String(srv.calls.length));
+  }
+
+  // ── 调用方可以往上要 ──
+  {
+    await run('ok', { maxTokens: 16384 });
+    check('要多少给多少', srv.calls[0]?.max_tokens === 16384, JSON.stringify(srv.calls[0]?.max_tokens));
+  }
+
+  // ── o 系列那种不认 max_tokens 的 ──
+  {
+    const r = await run('nomt');
+    check('对面不认 max_tokens 时换 max_completion_tokens 再试',
+      srv.calls.length === 2 && srv.calls[1]?.max_completion_tokens === 8192 && !('max_tokens' in srv.calls[1]),
+      JSON.stringify(srv.calls.map((c) => Object.keys(c).filter((k) => /max/.test(k)))));
+    check('而且最后是成功拿到内容的', r.text === '{"ok":true}', r.text);
+  }
+
+  // ── 嫌值太大的 ──
+  {
+    const r = await run('toobig');
+    check('嫌 8192 太大就退到 4096',
+      srv.calls.some((c) => c.max_tokens === 4096) && r.text === '{"ok":true}',
+      JSON.stringify(srv.calls.map((c) => c.max_tokens ?? c.max_completion_tokens)));
+  }
+
+  // ── ⚠ 不该退让的：401 退了也是再错一次，还多花一次往返 ──
+  {
+    let threw = false;
+    try { await run('auth'); } catch { threw = true; }
+    check('401 不触发退让，只请求一次', srv.calls.length === 1, String(srv.calls.length));
+    check('而且照样报错出来', threw);
+  }
+
+  srv.close();
+  settings.patch({ baseUrls: {} });
+}
+
 section('长生成走流式：慢和死是两回事');
 {
   const adaptersMod = await import('../core/providers/adapters.js');

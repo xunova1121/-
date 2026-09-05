@@ -284,6 +284,18 @@ export function looksLikeContextOverflow(text) {
   return CONTEXT_OVERFLOW.test(String(text || ''));
 }
 
+/**
+ * 这个 400/422 是在嫌"输出上限"这个参数吗。
+ *
+ * 只认参数本身的问题 —— 401、模型不存在、内容审核都不该触发退让，
+ * 退了也是再错一次，还多花一次往返。
+ */
+function rejectsTokenLimit(res) {
+  if (res.status !== 400 && res.status !== 422) return false;
+  const said = `${JSON.stringify(res.json || '')} ${res.raw || ''}`;
+  return /max_tokens|max_completion_tokens|maximum tokens|token limit|unsupported[_ ]parameter|unrecognized/i.test(said);
+}
+
 function fail(label, res) {
   const why = diagnose(res);
   if (looksLikeContextOverflow(why)) {
@@ -370,6 +382,13 @@ async function chatOnce({
   images = [],
   temperature = 0.7,
   jsonMode = false,
+  /**
+   * 让模型最多写多少 token。**必须显式发**，理由见下面那段梯子。
+   *
+   * 8192 是个各家基本都吃得下的量，也够写完一份十几场的大纲。
+   * 要写更长的（几十镜的分镜表）由调用方自己往上要。
+   */
+  maxTokens = 8192,
   timeoutMs = 180000,
   /**
    * 走不走流式。**长生成一律该走**（拆分镜、出大纲、挑技法这些）。
@@ -442,22 +461,59 @@ async function chatOnce({
    * 顺带还有两个好处：界面上能看见它在动（那几分钟不再是一条僵住的进度条），
    * 以及中转站的响应更早开始 —— 很多中转站对非流式的长请求本来就有自己的超时。
    */
-  const res = await send(
-    {
-      provider: providerId,
-      label,
-      method: 'POST',
-      url: endpoint(provider, 'chat', '{{baseUrl}}/chat/completions'),
-      body: stream ? { ...body, stream: true } : body,
-      stream: stream || undefined,
-      timeoutMs,
-      // 空闲多久算死。给得比"模型思考一会儿"宽裕，比"人还愿意等"短
-      idleTimeoutMs: stream ? idleTimeoutMs : 0,
-      // 绝对上限兜底：对面一直发心跳却永远不结束时不至于挂到天荒地老
-      maxTotalMs: stream ? Math.max(timeoutMs, idleTimeoutMs * 6) : 0
-    },
-    onEvent
-  );
+  /**
+   * ══════════ 输出上限：必须显式发，而且要按可能性退让 ══════════
+   *
+   * 原来请求体是 `{ model, messages, temperature }` —— **一个字都没提输出上限**。
+   *
+   * 对 OpenAI 原生接口没事（不传 = 用模型默认，通常很大）。但用户走的是
+   * 中转站转 Claude，而 **Anthropic 的接口里 max_tokens 是必填的** ——
+   * 中转站只能替你编一个默认值，而它们编的普遍很小（1024 / 4096）。
+   *
+   * 后果就是用户报的那个：一两千字的剧本，大纲写到一半
+   * `finish_reason=length` 断掉。看起来像"剧本太长"，其实剧本根本不长，
+   * 是**我们没告诉对面可以写多少**。
+   *
+   * ⚠ 不能无脑加：o 系列不认 max_tokens（要 max_completion_tokens），
+   * 有的模型又会嫌值太大直接 400。所以按可能性排一个梯子挨个试 ——
+   * 与其押一个然后安静地失效，不如试一遍。参数被拒是 400，不计费，
+   * 只多一次往返；而最后一级"什么都不发"就是今天的行为，
+   * 所以**最坏情况不会比现在更糟**。
+   */
+  const rungs = [
+    { max_tokens: maxTokens },
+    { max_completion_tokens: maxTokens },   // o 系列
+    { max_tokens: 4096 },                   // 嫌上面那个值太大的
+    {}                                      // 都不认：退回今天的行为
+  ];
+
+  let res = null;
+  for (let i = 0; i < rungs.length; i++) {
+    const attempt = { ...body, ...rungs[i] };
+    res = await send(
+      {
+        provider: providerId,
+        label,
+        method: 'POST',
+        url: endpoint(provider, 'chat', '{{baseUrl}}/chat/completions'),
+        body: stream ? { ...attempt, stream: true } : attempt,
+        stream: stream || undefined,
+        timeoutMs,
+        // 空闲多久算死。给得比"模型思考一会儿"宽裕，比"人还愿意等"短
+        idleTimeoutMs: stream ? idleTimeoutMs : 0,
+        // 绝对上限兜底：对面一直发心跳却永远不结束时不至于挂到天荒地老
+        maxTotalMs: stream ? Math.max(timeoutMs, idleTimeoutMs * 6) : 0
+      },
+      onEvent
+    );
+    if (res.ok) break;
+    // 只在"这个参数不合口味"上退让。401、模型不存在、内容审核退了也是再错一次
+    if (i === rungs.length - 1 || !rejectsTokenLimit(res)) break;
+    onEvent?.({
+      type: 'note',
+      message: `这家不认 ${Object.keys(rungs[i])[0] || '（无上限字段）'}，换一种写法再试一次（参数被拒不计费）`
+    });
+  }
   if (!res.ok) fail(label, res);
 
   /**
