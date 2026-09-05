@@ -33,10 +33,18 @@ function writeAtomic(file, data) {
  *   · 于是我们只能在**报错里**教育"先出大纲再拆分镜"——
  *     要靠报错来教的东西，本身就是摆错了位置
  *
- * 插在分镜正前方而不是排到最前，是因为它就是给分镜用的；
- * 也不打乱大家已经习惯的"剧本 → 设定集"这个开头。
+ * ⚠ 它排在**设定集前面**，这一条是后来改的，理由比"顺序好看"实在：
+ *
+ * 大纲的每一场都带着 scene 和 characters —— 它已经产出了一份权威的
+ * "这片子有哪些场景、哪些人"清单。而设定集原来是**另起一次模型调用、
+ * 从原始剧本重新认一遍**，两次各认各的，名字就会漂：
+ * 大纲写「码头」、设定集出「老渔港」。
+ *
+ * 而拆分镜的提示词写着"characters 和 scene 必须严格用设定集里给出的名字"——
+ * 两套名字对不上，只能靠模糊匹配去救，而那正是"某个角色被静默丢掉"的来源。
+ * 大纲先跑，设定集照着它的名单出，名字从源头就是一套。
  */
-export const STAGES = ['bible', 'outline', 'script', 'assets', 'video', 'voice', 'compose', 'export'];
+export const STAGES = ['outline', 'bible', 'script', 'assets', 'video', 'voice', 'compose', 'export'];
 
 export const STAGE_LABELS = {
   bible: '设定集',

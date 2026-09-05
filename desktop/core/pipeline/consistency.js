@@ -199,11 +199,47 @@ export async function buildBible(project, { onEvent } = {}) {
   if (capped.note) onEvent?.({ type: 'note', message: capped.note });
   const source = capped.sent;
 
+  /**
+   * ══════════ 照着大纲的名单出，别另起一套名字 ══════════
+   *
+   * 大纲的每一场都带着 scene 和 characters —— 它已经是一份权威的
+   * "这片子有哪些场景、哪些人"清单。
+   *
+   * 不给的话，设定集是**另起一次模型调用、从原始剧本重新认一遍**，
+   * 两次各认各的，名字就会漂：大纲写「码头」、设定集出「老渔港」。
+   * 而拆分镜的提示词写着"characters 和 scene 必须严格用设定集里给出的名字"——
+   * 两套名字对不上，只能靠模糊匹配去救，而那正是"某个角色被静默丢掉"的来源。
+   *
+   * ⚠ **没有大纲不能崩**。大纲是一步，但不是强制的 —— 有人会跳过它
+   * 直接出设定集，那时候退回"只看剧本"这条老路，行为和以前一模一样。
+   *
+   * ⚠ 名单是**加进用户消息**，不是改 BIBLE_PROMPT ——
+   * 那份提示词是和 scanCast（增量补设定）共用的，
+   * 改它等于给一条用不上这个名单的路也塞了一段它看不懂的要求。
+   */
+  const beats = outlineLib.normalizeOutline(project.outline).beats;
+  const scenes = [...new Set(beats.map((b) => b.scene).filter(Boolean))];
+  const people = [...new Set(beats.flatMap((b) => b.characters || []).filter(Boolean))];
+  const roster = (scenes.length || people.length)
+    ? `\n\n──────── 这一次的额外要求 ────────\n\n`
+      + `大纲已经把这部片子拆成 ${beats.length} 场。**场景名和角色名请严格用下面两份清单里的写法**，`
+      + `不要另起名字 —— 后面拆分镜会按名字去设定集里找，名字对不上那一镜就拿不到参考图。\n`
+      + `场景：${scenes.join('、') || '（大纲里没写）'}\n`
+      + `角色：${people.join('、') || '（大纲里没写）'}\n`
+      + `清单之外，剧本里还有别的重要角色或场景，照样可以加。`
+    : '';
+  onEvent?.({
+    type: 'note',
+    message: roster
+      ? `照着大纲的名单出设定集：${scenes.length} 个场景、${people.length} 个角色 —— 名字和大纲对齐，后面拆分镜才找得到`
+      : '这个项目还没有大纲，设定集只能从剧本里自己认人认景 —— 先出大纲再出设定集，名字会更齐'
+  });
+
   const { text } = await adapters.chat({
     providerId: routing.chat.provider,
     model: routing.chat.model,
     system: BIBLE_PROMPT,
-    user: `画风要求：${style.anchor}\n\n剧本：\n${source}`,
+    user: `画风要求：${style.anchor}\n\n剧本：\n${source}${roster}`,
     temperature: 0.6,
     jsonMode: true,
     label: '生成设定集'
