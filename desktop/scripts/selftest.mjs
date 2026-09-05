@@ -363,6 +363,18 @@ const upstream = http.createServer((req, res) => {
         // system 也留一份：验"这一批的时长预算 = 这一批那几场之和"要用
         upstream.shotSystems = upstream.shotSystems || [];
         upstream.shotSystems.push(system);
+        /**
+         * 让测试能造出"这一批太大，模型一次写不完"。
+         * 真实形态就是这样：HTTP 200、连接正常收尾，只是 finish_reason=length，
+         * 正文从中间断掉 —— 所以这里也必须回 200，不能图省事回 500。
+         */
+        if (upstream.truncateShotsOverBeats && ids.length > upstream.truncateShotsOverBeats) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({
+            choices: [{ message: { content: '{"logline":"半截","shots":[{"index":1,"scene":"码' }, finish_reason: 'length' }],
+            usage: { prompt_tokens: 200, completion_tokens: 8192, total_tokens: 8392 }
+          }));
+        }
         // 让测试能造出"跑到第 N 批挂掉"，验前面几批不白跑
         if (upstream.failShotsAfter && upstream.shotPrompts.length > upstream.failShotsAfter) {
           res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -8249,6 +8261,37 @@ section('长剧本：拆分镜一批一批来');
     });
     return p;
   };
+
+  /**
+   * ── 这一批太大写不完 → 自己对折重来 ──
+   *
+   * 用户真机上撞的：deepseek / 拆分镜 /「这一批 4 场，还剩 2 场」/
+   * finish_reason=length，而且**换了服务商还是一样**。
+   *
+   * 分批本身早就有了，但批的大小是**估**出来的（12 镜 ≈ 2500 token），
+   * 估小了就撞上限。估算错了的代价原来全落在用户身上：跑几分钟、花了钱、
+   * 拿到半截，然后被告诉"先出大纲再拆分镜"—— 而他**已经**是在走那条路了。
+   */
+  {
+    const p = await makeProject('写不完就少写点', 14);
+    upstream.shotPrompts = [];
+    // 只有"一批一场"才写得完 —— 逼着它一路对折下去
+    upstream.truncateShotsOverBeats = 1;
+    const evs = await ndjson(`/projects/${p.id}/stage/script`, {});
+    upstream.truncateShotsOverBeats = 0;
+
+    const perCall = (upstream.shotPrompts || [])
+      .map((u) => [...u.matchAll(/【场次\s*[a-z0-9-]+】/gi)].length);
+    check('⚠ 撞上限之后自己把这一批缩小了（原来是直接把错甩给人）',
+      perCall.length > 1 && Math.min(...perCall) < perCall[0], JSON.stringify(perCall));
+    check('一直缩到写得完为止（最后真的拆出了分镜）',
+      (store.read(p.id).shots || []).length > 0, String((store.read(p.id).shots || []).length));
+    check('14 场一场没落下', ol.normalizeOutline(store.read(p.id).outline).beats.every((b) => b.locked));
+    check('而且当场说了为什么重来', evs.some((e) => /对折成/.test(e.message || '')),
+      JSON.stringify(evs.filter((e) => e.message).map((e) => e.message).slice(-3)));
+    check('跑完说的还是"拆完了"，不是报错',
+      evs.some((e) => e.type === 'stage' && e.status === 'done'));
+  }
 
   // ── 14 场 → 该分 3 批（6 + 6 + 2），不是一次全要 ──
   {
