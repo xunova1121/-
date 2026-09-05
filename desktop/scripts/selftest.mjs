@@ -3154,9 +3154,60 @@ section('剧本超长：砍了要出声，分章要真能用');
     check('提示里指出了下一步该干什么（分章）', /分章/.test(r.note), r.note);
   }
 
+  // ── 上限跟着模型走 ──
+  {
+    check('模型名里写着窗口就照它算（32k → 24000 字）',
+      ol.scriptCapFor('doubao-1-5-pro-32k-250115') === 24000,
+      String(ol.scriptCapFor('doubao-1-5-pro-32k-250115')));
+    check('认得出 Claude 家族（200K）', ol.contextTokensFor('claude-opus-4') === 200000);
+    check('Claude 的剧本上限远大于默认',
+      ol.scriptCapFor('claude-opus-4') > ol.SCRIPT_CHARS_MAX * 4,
+      String(ol.scriptCapFor('claude-opus-4')));
+    /**
+     * ⚠ 别写成"gemini 的上限 === claude 的上限" —— 那条在把 scriptCapFor
+     * 整个打回默认值时**照样是绿的**（两边一起变成 12000，仍然相等）。
+     * 要钉的是实际上限那个数本身：1M 窗口不能换来 1M 字的请求。
+     */
+    check('再大的窗口也压在实际上限内（一整本塞进去，大纲会糊、钱还烧得多）',
+      ol.scriptCapFor('gemini-2.5-pro') === 60000 && ol.contextTokensFor('gemini-2.5-pro') === 1000000,
+      `上限 ${ol.scriptCapFor('gemini-2.5-pro')}，窗口 ${ol.contextTokensFor('gemini-2.5-pro')}`);
+    check('⚠ 认不出的模型退回老上限，不制造回归',
+      ol.scriptCapFor('ep-20240101-abcde') === ol.SCRIPT_CHARS_MAX
+        && ol.scriptCapFor('') === ol.SCRIPT_CHARS_MAX
+        && ol.scriptCapFor(null) === ol.SCRIPT_CHARS_MAX);
+    check('窗口比默认还小的模型也不会把上限抬上去',
+      ol.scriptCapFor('tiny-8k-model') === ol.SCRIPT_CHARS_MAX,
+      String(ol.scriptCapFor('tiny-8k-model')));
+    check('大窗口模型下，三万字整篇发过去、一句废话不说',
+      ol.capScript('字'.repeat(30000), ol.scriptCapFor('claude-opus-4')).note === null);
+  }
+
+  // ── 上下文真的塞不下时，报错要说人话 ──
+  {
+    const ad = await import('../core/providers/adapters.js');
+    for (const msg of [
+      "This model's maximum context length is 32768 tokens",
+      'context_length_exceeded',
+      'Input is too long for requested model',
+      '输入内容过长'
+    ]) check(`认得出这是"塞不下"：${msg.slice(0, 28)}`, ad.looksLikeContextOverflow(msg));
+
+    // ⚠ 不能见错就说"太长了" —— 那会把 401 和模型名写错也误导成剧本问题
+    for (const msg of ['Invalid API key provided', '404 model not found', 'rate limit exceeded'])
+      check(`不误伤：${msg}`, !ad.looksLikeContextOverflow(msg));
+  }
+
   // ── 真跑一次 buildOutline：模型到底收到多少，人有没有被告知 ──
   {
-    const long = '第一幕。阿澜走向栈桥。'.repeat(3000).slice(0, 30000);
+    /**
+     * ⚠ 夹具**不能用同一句话重复拼**。
+     * 第一版就是 `'第一幕。阿澜走向栈桥。'.repeat(3000)` —— 于是"末尾 200 字
+     * 有没有被发出去"这条断言恒真（那 200 字在前半段里也一模一样地出现过），
+     * 测了个寂寞。每一行带上唯一编号，前后半段才真的区分得开。
+     */
+    let long = '';
+    for (let i = 1; long.length < 30000; i++) long += `第${i}场。阿澜走向栈桥，编号${i}。\n`;
+    long = long.slice(0, 30000);
     const p = store.create({ title: '超长剧本', targetDuration: 60 });
     store.update(p.id, (x) => { x.script = long; return x; });
 
@@ -3164,8 +3215,19 @@ section('剧本超长：砍了要出声，分章要真能用');
     upstream.lastOutlineUser = '';
     await studioModule.buildOutline(p.id, { onEvent: (e) => notes.push(e) });
 
-    const sent = upstream.lastOutlineUser.slice(upstream.lastOutlineUser.indexOf('剧本：') + 3).trim();
-    check('模型收到的确实是截过的', sent.length === ol.SCRIPT_CHARS_MAX, String(sent.length));
+    /**
+     * ⚠ 不要靠"总长减前缀"去算正文有多长 —— 我第一版就是这么写的，
+     * 前缀字数手算错了两个字，红了半天，而产品侧其实一直是对的。
+     * 直接比字符串：发出去的必须**正好**是剧本按这个模型的上限截出来的那一段。
+     */
+    const routed = (await import('../core/providers/adapters.js')).resolvedRouting().chat.model;
+    const expect = long.slice(0, ol.scriptCapFor(routed));
+    check('发出去的正好是按这个模型的上限截出来的那一段',
+      upstream.lastOutlineUser.endsWith(expect) && expect.length < long.length,
+      `模型 ${routed}，上限 ${ol.scriptCapFor(routed)}，原文 ${long.length}`);
+    check('后半段确实没发出去',
+      !upstream.lastOutlineUser.includes(long.slice(-200)),
+      '末尾 200 字不该出现在请求里');
     check('⚠ 而且当场告诉了人（原来这里一声不吭）',
       notes.some((e) => e.type === 'note' && /没参与/.test(e.message || '')),
       JSON.stringify(notes.filter((e) => e.type === 'note').map((e) => e.message)).slice(0, 200));

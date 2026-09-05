@@ -1323,7 +1323,7 @@ export async function buildOutline(projectId, { chapterId = null, onEvent } = {}
    * 模型只看到前一万二，然后老老实实给前 40% 出了一份**完整**的大纲 ——
    * 界面上没有任何异常，用户看到的是"生成大纲长度限制，出了一半不能用"。
    */
-  const cap = outline.capScript(source);
+  const cap = outline.capScript(source, outline.scriptCapFor(r.chat.model));
   if (cap.note) onEvent?.({ type: 'note', message: cap.note });
 
   const { text } = await adapters.chat({
