@@ -377,6 +377,49 @@ function lintProps(shot, prev, next) {
 }
 
 /**
+ * 一场戏里，人凭空不见了又回来。
+ *
+ * ── 用户真机上撞的那一次 ──
+ *
+ * 第 4 场里：第 6 镜「林晚把手机举到耳边」，第 7 镜「手机屏幕特写」，
+ * 而第 7 镜的 characters 是空的 —— 模型觉得"这一镜拍的是屏幕，不是人"。
+ *
+ * 但**图不是这么出的**。一个出租屋里的手机屏幕特写，扩散模型照样会把
+ * 举着手机的那个人画进去 —— 只是这一次没有她的参考图、没有她的外貌描述、
+ * 也没有一致性复核的基准。于是她换了张脸、换了身衣服，
+ * 而这两镜是同一场戏里连着的两秒钟。
+ *
+ * ⚠ 和道具那条一样只在**三明治**成立时报：前有、后有、中间这一镜没有。
+ * 只看"前一镜有"的话，人正常走出画面会被报成穿帮 —— 而那是大多数情况。
+ *
+ * ⚠ 而且**只报特写和近景**。真正的空镜（桌上一支钢笔、窗外的雨）
+ * 用的是别的景别，报它们就是假警报，而假警报比没有检查更糟。
+ */
+const TIGHT = /特写|近景|大特写|插入镜头|细节/;
+function lintCastGap(shot, prev, next) {
+  if (!prev || !next) return [];
+  const sameSeg = Number(shot.segment || 1) === Number(prev.segment || 1)
+    && Number(shot.segment || 1) === Number(next.segment || 1);
+  if (!sameSeg) return [];
+  if (!TIGHT.test(String(shot.camera || ''))) return [];
+
+  const here = new Set(shot.characters || []);
+  const gone = (prev.characters || []).filter((x) => (next.characters || []).includes(x) && !here.has(x));
+  if (!gone.length) return [];
+  return [{
+    kind: 'cast-gap',
+    severity: 'high',
+    what: `${gone.map((x) => `「${x}」`).join('')}在前后两镜里都在，偏偏这一镜没列`,
+    why: `这一镜是${shot.camera || '特写'}，而特写里往往**还是会画出人**（举着东西的手、半张脸、肩膀）。`
+      + '没列进去的话，这一镜不带她的参考图、提示词里没有她的外貌、复核也没有基准 —— '
+      + '出来多半换了张脸、换了身衣服，而这是同一场戏里连着的两秒钟。',
+    fix: `把${gone.map((x) => `「${x}」`).join('')}加进这一镜的角色里。`
+      + '如果这一镜真的一个人都看不见（纯屏幕、纯物件），那就把景别写成能说明这件事的写法，'
+      + '并且在画面描述里写清楚"画面里没有人"。'
+  }];
+}
+
+/**
  * 这一镜点名的道具，设定集里有吗。
  *
  * 和角色那条是同一个道理：找不到就悄悄丢掉，那一镜没有道具参考图、
@@ -416,7 +459,8 @@ export function lintShots(shots = [], { bible = null } = {}) {
         ...lintCast(s, bible),
         ...lintPropNames(s, bible),
         // 三明治：前有、后有、中间这一镜没有。要看得到后一镜，所以传 sorted[i+1]
-        ...lintProps(s, i ? sorted[i - 1] : null, sorted[i + 1] || null)
+        ...lintProps(s, i ? sorted[i - 1] : null, sorted[i + 1] || null),
+        ...lintCastGap(s, i ? sorted[i - 1] : null, sorted[i + 1] || null)
       ]
     }))
     .filter((r) => r.issues.length);

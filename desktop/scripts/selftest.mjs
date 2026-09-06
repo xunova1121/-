@@ -8347,6 +8347,97 @@ section('大纲是正式一步（不再是分镜里的一个面板）');
  * 想加一场得去跟模型说一句话、等它想、再勾一条。加一场空白的不该花一次模型调用。
  */
 /**
+ * ════════ 特写里漏掉人 / 道具描述里写了剧情 ════════
+ *
+ * 用户真机上一次拍到两件事：
+ *
+ * 第 4 场第 6 镜「林晚把手机举到耳边」，第 7 镜「手机屏幕特写」——
+ * 两镜是同一场戏里连着的两秒钟，而第 7 镜的人换了身衣服、换了张脸。
+ * 原因是第 7 镜的 characters 是空的：模型觉得"这一镜拍的是屏幕，不是人"。
+ * 但图不是这么出的 —— 扩散模型照样把举着手机的人画进去了，
+ * 只是这一次没有她的参考图、没有外貌描述、也没有复核基准。
+ *
+ * 第二件：她把手机贴在耳朵上那一镜，手机**背面印着一张地图**。
+ * 那张地图是道具描述里写的"屏幕上显示…"，而道具描述会注入到
+ * 出现这件道具的每一镜 —— 包括屏幕根本不朝向镜头的那些。
+ */
+section('特写不等于没有人；道具只写它长什么样，不写它当时在显示什么');
+{
+  const lint = await import('../core/pipeline/shotlint.js');
+
+  const shotOf = (i, over = {}) => ({
+    id: `s${i}`, index: i, segment: 1,
+    characters: ['林晚'], props: ['手机'], scene: '出租屋',
+    camera: '中景', description: '林晚在桌前', dialogue: '', ...over
+  });
+
+  // ── 三明治：前有、后有，中间这一镜没列 ──
+  {
+    const shots = [
+      shotOf(6),
+      shotOf(7, { characters: [], camera: '特写', description: '手机屏幕特写，浮出一行小字' }),
+      shotOf(8)
+    ];
+    const res = lint.lintShots(shots);
+    const hit = res.find((r) => r.index === 7)?.issues.find((x) => x.kind === 'cast-gap');
+    check('⚠ 特写里漏掉的那个人被查出来了', !!hit,
+      JSON.stringify(res.map((r) => [r.index, r.issues.map((i) => i.kind)])));
+    check('点名说的是漏了谁', /林晚/.test(hit?.what || ''), hit?.what);
+    check('⚠ 说清了后果是"换脸换衣服"，不是干说"少一个角色"',
+      /换了张脸|换了身衣服/.test(hit?.why || ''), hit?.why?.slice(0, 60));
+    check('给了两条出路（加进去 / 说明这一镜真没人）',
+      /加进这一镜/.test(hit?.fix || '') && /没有人/.test(hit?.fix || ''), hit?.fix?.slice(0, 60));
+    check('算高危 —— 它坏掉的是一致性，不是好看不好看', hit?.severity === 'high');
+  }
+
+  // ── 不能变成满屏假警报 ──
+  {
+    /**
+     * ⚠ 这四条是这一节真正的重点。
+     * 一个动不动就报的检查，人看两次就学会无视**所有**警报了 ——
+     * 那时候连真问题也一起被无视，比没有这个检查更糟。
+     */
+    const wide = [shotOf(6), shotOf(7, { characters: [], camera: '全景' }), shotOf(8)];
+    check('⚠ 全景空镜不报（那才是真的没有人）',
+      !lint.lintShots(wide).some((r) => r.issues.some((i) => i.kind === 'cast-gap')),
+      JSON.stringify(lint.lintShots(wide).map((r) => r.issues.map((i) => i.kind))));
+
+    const leaves = [shotOf(6), shotOf(7, { characters: [], camera: '特写' }), shotOf(8, { characters: [] })];
+    check('⚠ 人正常走出画面不报（后面也没有他了，那是退场不是漏列）',
+      !lint.lintShots(leaves).some((r) => r.issues.some((i) => i.kind === 'cast-gap')));
+
+    const cross = [
+      shotOf(6), shotOf(7, { characters: [], camera: '特写', segment: 2 }), shotOf(8, { segment: 3 })
+    ];
+    check('⚠ 跨场次不报（另一个地方、另一段时间）',
+      !lint.lintShots(cross).some((r) => r.issues.some((i) => i.kind === 'cast-gap')));
+
+    const ok = [shotOf(6), shotOf(7, { camera: '特写' }), shotOf(8)];
+    check('列全了当然不报', !lint.lintShots(ok).some((r) => r.issues.some((i) => i.kind === 'cast-gap')));
+  }
+
+  // ── 两份提示词的规矩 ──
+  {
+    const st = fs.readFileSync(path.join(PROJECT_ROOT, 'core', 'pipeline', 'studio.js'), 'utf8');
+    const at = st.indexOf('const SHOT_PROMPT = `');
+    const shotBlock = at === -1 ? '' : st.slice(at, st.indexOf('\n`;', at));
+    check('⚠ 读到了 SHOT_PROMPT（读不到的话下面两条等于没查）', shotBlock.length > 500, String(shotBlock.length));
+    check('分镜提示词写明了"看得见的人全部列进去，特写也一样"',
+      /特写不等于没有人/.test(shotBlock), shotBlock.slice(0, 60));
+    check('并且说了漏列的代价是不带参考图',
+      /不会带她的参考图/.test(shotBlock));
+
+    const cs = fs.readFileSync(path.join(PROJECT_ROOT, 'core', 'pipeline', 'consistency.js'), 'utf8');
+    const bat = cs.indexOf('const BIBLE_PROMPT = `');
+    const bibleBlock = bat === -1 ? '' : cs.slice(bat, cs.indexOf('\n`;', bat));
+    check('⚠ 设定集提示词要求道具只写它本身，不写当时的状态',
+      /不写它当时的状态/.test(bibleBlock), bibleBlock.slice(0, 60));
+    check('并且把"手机贴在耳朵上背面也印着地图"这个后果摆出来了',
+      /贴在耳朵上/.test(bibleBlock));
+  }
+}
+
+/**
  * ════════ 没有实体形象的角色不出人设图 ════════
  *
  * 用户报的原话：「古代神秘者，怎么是现代的」。
