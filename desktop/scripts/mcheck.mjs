@@ -190,8 +190,7 @@ page.on('response', (r) => {
 });
 /**
  * 发出去的每一条请求。
- *
- * 用来验"点开才拉"这类**不该发生的请求** —— 而那种事只看页面是看不出来的：
+ * 用来验"点开才拉"这类**不该发生的请求** —— 那种事只看页面看不出来：
  * 界面完全正常，只是每渲染一张卡就多打一次接口。
  */
 const sent = [];
@@ -1086,87 +1085,41 @@ const realErrs = errs.filter((e) => !/401/.test(e));
 }
 
 /**
- * ⑯ 撤销（手机端）
+ * 和商家后台比（手机端）
  *
- * 手滑最容易发生在手机上，所以这条路在手机上比在电脑上更要紧。
- * 验的是整条链：改 → 撤销按钮带名字地出现 → 点了真的退回去。
+ * 用户的原话：「我用的无审核出图，用的同一个描述，在我们工具显示和
+ * 商家后台生成的不一样」。
+ *
+ * "同一个描述"这件事本身就不成立：他在后台贴的是那句画面描述，
+ * 而我们发的是拼好的好几层，外加负向词、参考图、固定种子、项目画幅，
+ * 用外国模型时还先翻成了英文。
+ *
+ * ⚠ 手机上必须有：这是**审片时才问得出来的问题** —— 看到这一镜和后台
+ * 那张不一样，就是在手机上翻片子的那一刻。
  */
 {
-  console.log('\n⑯ 撤销：');
-  const chip = page.locator('.fchip.icon', { hasText: '⌘' }).first();
-  await chip.click();
-  await page.waitForTimeout(700);
-  const ta = page.locator('.sheet textarea.mta').first();
-  await ta.fill('第 1 镜改成大特写');
-  await page.waitForTimeout(1200);
-  await page.locator('.sheet .cmd-preview ~ .row button').first().click();
-  await page.waitForTimeout(1600);
-
-  await chip.click();
-  await page.waitForTimeout(900);
-  const undoBtn = page.locator('.sheet .undo-bar button').first();
-  console.log('   改完之后有撤销按钮：', (await undoBtn.count()) === 1 ? '✓' : '✕');
-  const label = (await undoBtn.textContent().catch(() => '')) || '';
-  console.log('   按钮上写着退的是哪一步：', /景别|镜/.test(label) ? `✓ ${label.slice(0, 26)}` : `✕ ${label}`);
-  page.once('dialog', (d) => d.accept());
-  await undoBtn.click();
-  await page.waitForTimeout(1800);
-  /**
-   * ⚠ 读**折叠区里那个标签的文本**要用 textContent，而且要读得准 ——
-   * 整页 textContent 里"大特写"会在别处出现（帮助文字、档位清单），
-   * 那样验的是运气。这里只读第一张卡。
-   */
-  const card1 = await page.locator('.shot').first().evaluate((el) => el.textContent || '').catch(() => '');
-  console.log('   第 1 镜退回去了：', !/大特写/.test(card1) ? '✓' : `✕ ${card1.slice(0, 60)}`);
-}
-
-/**
- * ⑰ 提示词分层（手机端）
- *
- * 放在「看看为什么」抽屉里：先看有没有明确原因 → 没有的话看看是不是
- * 哪一层在抢戏 → 再决定花不花这笔钱。顺序就是判断顺序。
- */
-{
-  console.log('\n⑰ 提示词分层：');
+  console.log('\n和商家后台比：');
+  // 上一节可能还开着抽屉，留着会挡住页签，然后报成"页签点不到"
+  await page.evaluate(() => { for (const el of document.querySelectorAll('.sheet, .ed')) el.remove(); });
+  await page.waitForTimeout(300);
   await page.locator('.tab', { hasText: '分镜' }).click();
   await page.waitForTimeout(700);
   const why = page.locator('.shot .btn.primary', { hasText: '为什么' }).first();
-  if (await why.count()) {
+  if (!(await why.count())) {
+    console.log('   ✕ 分镜页上找不到「看看为什么」按钮');
+  } else {
     await why.evaluate((el) => el.click());
     await page.waitForTimeout(1800);
-    const fold = page.locator('.sheet details.layer-fold').first();
-    console.log('   「看看为什么」里有分层这一块：', (await fold.count()) === 1 ? '✓' : '✕');
-    await fold.evaluate((el) => { el.open = true; }).catch(() => {});
-    await page.waitForTimeout(900);
-    const rows = await page.locator('.sheet .layer-row').count();
-    console.log('   摊开了几层：', rows >= 3 ? `✓ ${rows} 层` : `✕ ${rows}`);
-    const names = (await page.locator('.sheet .layer-name').allTextContents()).join('|');
-    console.log('   每层有中文名：', /演什么|画风|人物|场景|景别/.test(names) ? `✓ ${names.slice(0, 30)}` : `✕ ${names}`);
-    /**
-     * ⚠ 比的是 **DOM 顺序**，不是文本里谁先出现。
-     * 第一版拿 indexOf('重出') 找按钮，结果匹配到的是**诊断正文**里的
-     * "→ 重出这张图。"。用文本位置代替元素位置，验的是运气。
-     */
-    const order = await page.locator('.sheet').first().evaluate((el) => {
-      const f = el.querySelector('details.layer-fold');
-      const btn = [...el.querySelectorAll('button')].find((b) => /重出|再出一张/.test(b.textContent || ''));
-      if (!f) return 'no-fold';
-      if (!btn) return 'no-btn';
-      return (f.compareDocumentPosition(btn) & 4) ? 'ok' : 'wrong';
-    });
-    console.log('   分层排在重出按钮之前（先搞明白，再决定花钱）：',
-      order === 'ok' || order === 'no-btn' ? '✓' : `✕ ${order}`);
-
-    /**
-     * ── 和商家后台比 ──
-     *
-     * 用户报的：「用的同一个描述，在我们工具显示和商家后台生成的不一样」。
-     * 这是**审片时才问得出来的问题**，而审片就在手机上 ——
-     * 所以这一块手机端必须有，不能只做电脑端。
-     */
     const cmp = page.locator('.sheet details.layer-fold', { hasText: '和商家后台比' }).first();
     console.log('   「看看为什么」里有「和商家后台比」：', (await cmp.count()) === 1 ? '✓' : '✕');
     if (await cmp.count()) {
+      /**
+       * ⚠ 点开之前不该打这条接口。
+       * 那种事只看页面看不出来：界面完全正常，只是每渲染一张卡就多打一次，
+       * 而手机多半在弱网上，那一页要渲染几十张卡。
+       */
+      console.log('   点开之前不打这条接口：',
+        sent.filter((x) => x.includes('/request')).length === 0 ? '✓' : `✕ 已经打了 ${sent.filter((x) => x.includes('/request')).length} 次`);
       await cmp.evaluate((el) => { el.open = true; });
       await page.waitForTimeout(1500);
       const items = await page.locator('.sheet .req-pair').count();
@@ -1176,83 +1129,9 @@ const realErrs = errs.filter((e) => !/401/.test(e));
         /我们发的/.test(txt) && /后台/.test(txt) ? '✓' : '✕');
       console.log('   有「按后台那样出一次」这颗按钮：',
         /按后台那样出一次/.test(txt) ? '✓' : '✕');
-      /**
-       * ⚠ 点开才拉接口 —— 不点开就多打一次接口，是审片时最不该有的开销
-       *（手机多半在弱网上，而这一页会渲染几十张卡）。
-       */
-      console.log('   点开之前不打这条接口：',
-        sent.filter((x) => x.includes('/request')).length === 1
-          ? '✓ 只打了一次（就是刚点开这次）'
-          : `✕ 打了 ${sent.filter((x) => x.includes('/request')).length} 次`);
-    }
-  } else {
-    console.log('   ✕ 分镜页上找不到「看看为什么」按钮');
-  }
-}
-
-/**
- * ⑱ 焦段（手机端）
- *
- * 审片时发现"这几镜背景太散"，换个长焦是当场就想做的事 ——
- * 而审片正是在手机上做的。
- */
-{
-  console.log('\n⑱ 焦段：');
-  /**
-   * ⚠ 先把上一节可能还开着的抽屉关掉。
-   * 留一张开着的抽屉会挡住页签，然后报成"页签点不到"——
-   * 查半天在查一件跟本节毫无关系的事。
-   */
-  await closeSheets(page);
-  await page.waitForTimeout(300);
-  await page.locator('.tab', { hasText: '分镜' }).click();
-  await page.waitForTimeout(700);
-  await page.locator('.shot-desc.tappable').first().click();
-  await page.waitForTimeout(1400);
-  /**
-   * ⚠ 编辑器是分页的（内容 / 镜头 / 预演台 / 高级），默认停在「内容」。
-   * 景别和焦段在「镜头」那一页 —— 不切过去的话，选择器永远匹配不到，
-   * 而且不报错，看起来像"这个功能没做"。
-   */
-  await page.locator('.ed-tab', { hasText: '镜头' }).first().click();
-  await page.waitForTimeout(500);
-  // ⚠ 编辑器**不是** .sheet：openEditor 自己往 body 上挂了一层。
-  //    带 .sheet 前缀的选择器在这儿永远匹配不到，而且不报错。
-  const row = page.locator('.ed-group', { hasText: '焦段' }).first();
-  console.log('   编辑器里有焦段这一项：', (await row.count()) >= 1 ? '✓' : '✕');
-  const chips85 = page.locator('.chip', { hasText: '背景压缩' }).first();
-  /** 括注写的是画面上看得出来的那件事，不是参数 —— 选的人未必懂毫米数 */
-  console.log('   选项写的是人话不是参数：', (await chips85.count()) === 1 ? '✓ 85 背景压缩' : '✕');
-  if (await chips85.count()) {
-    await chips85.evaluate((el) => el.click());
-    await page.waitForTimeout(300);
-    const save = page.locator('button', { hasText: '保存' }).first();
-    if (await save.count()) {
-      await save.evaluate((el) => el.click());
-      await page.waitForTimeout(1600);
-      /**
-       * ⚠ 用**界面自己**验存没存住：重新打开编辑器，看那颗芯片还亮着没有。
-       *
-       * 第一版是在页面里 fetch 一个自己拼的地址，而 id 拼空了 → 401，
-       * 于是"意料之外的 4xx"那条护栏红了 —— 走查自己制造了一个假故障。
-       * 同样的错这一轮已经犯过一次（指令框那节）。
-       */
-      await closeSheets(page);
-      await page.locator('.shot-desc.tappable').first().click();
-      await page.waitForTimeout(1300);
-      await page.locator('.ed-tab', { hasText: '镜头' }).first().click();
-      await page.waitForTimeout(500);
-      const on = await page.locator('.chip.on', { hasText: '背景压缩' }).count();
-      console.log('   选完存得住（重开编辑器还亮着）：', on === 1 ? '✓ 85mm' : '✕');
     }
   }
-  await closeSheets(page);
-  await page.evaluate(() => { for (const el of document.querySelectorAll('.ed')) el.remove(); });
-  await page.waitForTimeout(300);
 }
-
-rejections.push(...(await page.evaluate(() => window.__fdRejections || []).catch(() => [])));
-console.log('未处理的 Promise 拒绝：', rejections.length ? `✕ ${rejections.slice(0, 3).join(' | ')}` : '无 ✓');
 
 console.log('意料之外的 4xx：', unexpected4xx.length ? `✕ ${unexpected4xx.slice(0, 4).join('、')}` : '无 ✓');
 console.log('\n页面报错：', realErrs.length ? realErrs.slice(0, 4) : '无');

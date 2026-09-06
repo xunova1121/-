@@ -5067,6 +5067,13 @@ export function promptsFor(projectId, shotId) {
     // 图比描述旧：出视频时首帧和提示词会互相打架，这个必须显眼
     imageOlderThanEdit: Boolean(shot.imagePath && edited && (!imagedAt || edited > imagedAt)),
     refs: consistency.collectReferences(project.bible, shot).labels,
+    /**
+     * 这一镜的提示词是哪几层拼出来的（借 Blender 的 Modifier Stack）。
+     *
+     * ⚠ 关掉的层**也在这里面**，标着 muted —— 不然界面上那一层直接消失，
+     * 人就再也打不开了。那不是非破坏性，那是破坏性带个开关。
+     */
+    layers: image.layers || [],
     // 界面要说清楚这条是按哪种详略算的 —— 不然"怎么这么短"又要问一遍
     videoPromptMode: settings.get('videoPromptMode') || 'precise',
     link

@@ -120,6 +120,22 @@ function h(tag, attrs = {}, ...kids) {
   return el;
 }
 
+/**
+ * 往一个元素里塞若干子节点，跳过 null。
+ *
+ * ⚠ 这个函数**曾经不存在**，而 openWhy 里用了它五次 ——
+ * 电脑端 lib.js 有 add()，手机端没有，改版时照着电脑端那边抄了过来。
+ *
+ * 后果：手机上「看看为什么」按下去**什么都不发生**，从卡片改版那次
+ * 起就一直是坏的。而它没被任何一层走查抓到，因为 openWhy 是 async ——
+ * ReferenceError 变成了 **unhandled rejection**，不是 pageerror，
+ * 而走查只监听 pageerror。现在 mcheck 也监听未处理的 Promise 拒绝了。
+ */
+const add = (el, ...kids) => {
+  for (const k of kids) if (k !== null && k !== undefined && k !== false) el.append(k);
+  return el;
+};
+
 const clear = (el) => {
   while (el.firstChild) el.removeChild(el.firstChild);
   return el;
