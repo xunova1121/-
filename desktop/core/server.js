@@ -1225,6 +1225,19 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
     }
 
     // ── 单镜重出：图或视频，可临时换服务商/模型 ──
+    /**
+     * 这一镜发出去的请求长什么样，以及它和"在商家后台贴一句话"差在哪。
+     *
+     * 纯读，不发任何请求、不花钱 —— 所以是 GET。cap:shot-request
+     */
+    if (b && c === 'shots' && d && e === 'request' && method === 'GET') {
+      try {
+        return json(res, 200, studio.describeImageRequest(b, d));
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
+    }
+
     if (b && c === 'shots' && d && e === 'regenerate' && method === 'POST') {
       const opts = await readBody(req);
       const stream = ndjson(res);

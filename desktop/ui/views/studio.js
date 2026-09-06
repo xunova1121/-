@@ -2557,6 +2557,84 @@ export default {
                       }
                     }, '为什么不对')
                   : null,
+                /**
+                 * ══════════ 「和后台比」 ══════════
+                 *
+                 * 用户的原话：「我用的无审核出图，用的同一个描述，
+                 * 在我们工具显示和商家后台生成的不一样」。
+                 *
+                 * 他没说错 —— 但"同一个描述"这件事本身就不成立：
+                 * 他在后台贴的是卡片上那句画面描述，而我们发出去的是
+                 * 拼好的六七层，外加负向词、参考图、固定种子、项目画幅。
+                 *
+                 * 原来这些散落在「出处与排查」里，而且只提过参考图那一条。
+                 * 这颗按钮把它们**逐条并排摆出来**：我们发的 / 后台是什么 /
+                 * 这一条会怎么改变画面。不花钱，纯读。
+                 */
+                h('button', {
+                  class: 'shot-edit-btn',
+                  title: '在商家后台贴同一句话，出来的不一样？看看我们到底多发了什么',
+                  onclick: async (e) => {
+                    const btn = e.currentTarget;
+                    btn.disabled = true;
+                    try {
+                      // cap:shot-request
+                      const r = await api(`/projects/${project.id}/shots/${shot.id}/request`);
+                      clear(diagHost);
+                      add(diagHost,
+                        h('div', { class: 'diag-item' },
+                          h('div', { class: 'diag-what' },
+                            `和"在后台贴一句话"相比，这一镜有 ${r.diffCount} 项不一样`),
+                          h('div', { class: 'diag-why' },
+                            `当前走的是${r.endpoint === 'edit' ? '**编辑 / 图生图**接口' : '文生图接口'}，`
+                            + `${r.provider} / ${r.model}。`)),
+                        ...r.rows.map((row) => h('div', { class: `diag-item${row.same ? ' same' : ''}` },
+                          h('div', { class: 'diag-what' }, `${row.same ? '✓ ' : '✕ '}${row.what}`),
+                          h('div', { class: 'req-pair' },
+                            h('div', {}, h('b', {}, '我们发的：'), h('span', {}, row.ours)),
+                            h('div', {}, h('b', {}, '后台贴一句话：'), h('span', {}, row.theirs))),
+                          h('div', { class: 'diag-why' }, row.why))),
+                        /**
+                         * 提示词那几层单独摊一次 —— 「衣服为什么不一样」的答案
+                         * 十有八九就在「人物长相」那一层里（设定集把衣服冻住了），
+                         * 而那一层是**可以单独关掉**的（下面的提示词分层里）。
+                         */
+                        r.layers.length
+                          ? h('details', { class: 'shot-prompt' },
+                              h('summary', {}, `提示词由 ${r.layers.length} 层拼成（点开看是哪一层在管什么）`),
+                              h('div', { class: 'shot-prompt-body' },
+                                ...r.layers.map((L) => h('div', { class: 'shot-used' },
+                                  `${L.name}${L.muted ? '（已关掉）' : ''}：${L.text}`)),
+                                h('div', { class: 'diag-why', style: 'margin-top:8px' },
+                                  '想让某一层不生效，用下面「这条提示词由 N 层拼成」里的开关关掉它，再重出这一镜。'
+                                  + '衣服和后台不一样，多半是「人物长相」那一层 —— 设定集把衣服冻住了，'
+                                  + '而你在后台没写衣服，模型就自己发挥。')))
+                          : null,
+                        h('div', { class: 'diag-how' },
+                          '→ 想一次问到底：点下面的「按后台那样出一次」——'
+                          + '只发提示词，不带参考图、不带负向词、种子随机。'
+                          + '出来像了就说明差别是我们加的这几样；还是不像，那就是厂商那边的事。'),
+                        (() => {
+                          const go = h('button', { class: 'btn sm' }, '按后台那样出一次（要花一次出图的钱）');
+                          go.onclick = async () => {
+                            if (!confirm('按后台那样重出这一镜？\n\n只发提示词，不带参考图、不带负向词、种子随机。\n\n⚠ 这会覆盖掉这一镜现在的图，而且要花一次出图的钱。')) return;
+                            go.disabled = true;
+                            try {
+                              // cap:shot-request
+                              await stream(`/projects/${project.id}/shots/${shot.id}/regenerate`, { bare: true }, (ev) => {
+                                if (ev.type === 'error') toast(ev.message, 'err');
+                                if (ev.type === 'finished') { toast('出好了 —— 和后台那张比一比', 'ok'); rerender(); }
+                              });
+                            } catch (err) { toast(err.message, 'err'); } finally { go.disabled = false; }
+                          };
+                          return h('div', { style: 'margin-top:8px' }, go);
+                        })());
+                    } catch (err) {
+                      clear(diagHost);
+                      add(diagHost, h('div', { class: 'diag-item' }, err.message));
+                    } finally { btn.disabled = false; }
+                  }
+                }, '和后台比'),
                 verBtn
               ),
               diagHost,
@@ -2793,6 +2871,17 @@ export default {
                     ? h('div', { class: 'shot-used' }, `上次出视频参考：${shot.videoRefs.join('、')}`)
                     : null,
                   sc.image && shot.modelUsed ? h('div', { class: 'shot-used' }, `出图用了 ${shot.modelUsed}`) : null,
+                  /**
+                   * ⚠ 提示词被翻成英文这件事必须看得见。
+                   *
+                   * 这件事一直在做（服务商声明了 promptLang: 'en' 就自动翻），
+                   * 但界面上从来没说过 —— 于是用户来问「能不能自动翻译」。
+                   * 一个默默做了又不说的功能，等于没做。
+                   */
+                  sc.image && shot.promptTranslated
+                    ? h('div', { class: 'shot-used' },
+                        '这一镜的提示词发出去之前被自动翻成了英文 —— 这家模型只认英文，中文发过去出得明显差一档')
+                    : null,
                   sc.video && shot.videoModelUsed
                     ? h('div', { class: 'shot-used' },
                         `出视频用了 ${shot.videoModelUsed}${shot.videoResolution ? ` · ${shot.videoResolution}` : ''}`)

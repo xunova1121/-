@@ -8314,6 +8314,209 @@ section('大纲是正式一步（不再是分镜里的一个面板）');
  * 想加一场得去跟模型说一句话、等它想、再勾一条。加一场空白的不该花一次模型调用。
  */
 /**
+ * ════════ 「同一个描述，我们和商家后台出来不一样」 ════════
+ *
+ * 用户的原话：「我用的无审核出图，用的同一个描述，在我们工具显示和
+ * 商家后台生成的不一样」。
+ *
+ * 他没说错，但"同一个描述"这件事本身就不成立 —— 他在后台贴的是卡片上
+ * 那句画面描述，而我们发出去的是拼好的六七层，外加负向词、参考图、
+ * 固定种子、项目画幅。每一样都会改变画面，而界面上原来一样都没正面说过。
+ */
+section('和商家后台比：我们到底多发了什么');
+{
+  const st3 = await import('../core/pipeline/studio.js');
+
+  const p = store.create({ title: '和后台比', targetDuration: 60, aspectRatio: '9:16' });
+  store.update(p.id, (x) => { x.script = '阿澜在码头巡查，发现缆绳被割断。'; return x; });
+  await ndjson(`/projects/${p.id}/stage/outline`, {});
+  await ndjson(`/projects/${p.id}/stage/bible`, {});
+  await ndjson(`/projects/${p.id}/stage/script`, {});
+  const sid = store.read(p.id).shots[0].id;
+
+  const r = await api(`/projects/${p.id}/shots/${sid}/request`);
+  check('接口通了', !r.error, JSON.stringify(r).slice(0, 120));
+  check('逐条列了差别', Array.isArray(r.rows) && r.rows.length >= 5, String(r.rows?.length));
+  check('每一条都说得出"我们发的"和"后台是什么"',
+    r.rows.every((x) => x.ours !== undefined && x.theirs !== undefined && x.why),
+    JSON.stringify(r.rows.map((x) => x.key)));
+
+  /**
+   * ⚠ 这一条是整节的核心：**提示词确实不是那句画面描述**。
+   * 用户以为两边发的是同一句话，而真相是我们发的长得多。
+   */
+  const promptRow = r.rows.find((x) => x.key === 'prompt');
+  const desc = store.read(p.id).shots[0].description;
+  check('⚠ 点明了提示词不是卡片上那句画面描述',
+    promptRow.same === false && promptRow.ours.length > desc.length,
+    `我们 ${promptRow.ours.length} 字 / 描述 ${desc.length} 字`);
+  check('而且把两边的字数都摆出来了（不是干说"不一样"）',
+    /\d+ 字/.test(promptRow.why), promptRow.why.slice(0, 60));
+
+  /**
+   * ⚠ 一样的那几条也要在列表里。
+   * 只列不一样的，人没法确认"那其余的呢"—— 而"查过了，这条一样"
+   * 和"这条我没查"在排错时是完全不同的两件事。
+   */
+  check('⚠ 一样的那几条也留在列表里（标着 same，不是消失）',
+    r.rows.some((x) => typeof x.same === 'boolean'), JSON.stringify(r.rows.map((x) => [x.key, x.same])));
+  check('种子这条必然不一样（我们固定、后台随机）',
+    r.rows.find((x) => x.key === 'seed')?.same === false);
+  check('画幅这条也说清了', r.rows.find((x) => x.key === 'ratio')?.ours === '9:16',
+    r.rows.find((x) => x.key === 'ratio')?.ours);
+
+  /**
+   * ⚠ 描述必须和**真正发出去的**一致，不能是另写一份"我们大概会发什么"。
+   * 另写一份的话它迟早和真实请求分家，而分家之后它给出的每一条都是错的，
+   * 还看起来很权威。所以这里比对同一个 assemblePrompt 的输出。
+   */
+  {
+    const cs3 = await import('../core/pipeline/consistency.js');
+    const real = cs3.assemblePrompt(store.read(p.id).bible, store.read(p.id).shots[0]);
+    check('⚠ 报的提示词就是真正发出去的那一份（不是另推的一份）',
+      r.prompt === real.prompt, `${r.prompt?.slice(0, 40)} vs ${real.prompt.slice(0, 40)}`);
+    check('⚠ 报的种子也是真正用的那一个', r.seed === real.seed, `${r.seed} vs ${real.seed}`);
+    check('负向词同理', r.negative === (real.negative || ''), `${r.negative} vs ${real.negative}`);
+    check('层也是那几层', r.layers.length === (real.layers || []).length,
+      `${r.layers.length} vs ${(real.layers || []).length}`);
+  }
+
+  check('说得出走的是文生图还是编辑接口',
+    ['edit', 'text-to-image'].includes(r.endpoint), r.endpoint);
+
+  /**
+   * ⚠ 翻成英文这件事**必须看得见**。
+   *
+   * 用户问的原话：「wavespeed.ai 他只识别英文，能不能自动识别用他的时候
+   * 给我进行翻译」—— 而这件事早就在做了（按 promptLang 自动翻）。
+   * 他会问，是因为界面上从头到尾一个字都没说过。
+   * 一个默默做了又不说的功能，等于没做。
+   */
+  {
+    const before = { p: settings.get('imageProvider'), m: settings.get('imageModel') };
+    settings.patch({ imageProvider: 'wavespeed' });
+    const rw = await api(`/projects/${p.id}/shots/${sid}/request`);
+    const lang = rw.rows.find((x) => x.key === 'lang');
+    check('⚠ 用只认英文的服务商时，"提示词会被翻成英文"这条摆出来了',
+      !!lang, JSON.stringify(rw.rows.map((x) => x.key)));
+    check('并且说清了后台那边贴的是中文原文，两边喂的是两句话',
+      /两句话/.test(lang?.why || ''), lang?.why?.slice(0, 60));
+
+    settings.patch({ imageProvider: before.p || 'volcengine', imageModel: before.m });
+    const rz = await api(`/projects/${p.id}/shots/${sid}/request`);
+    check('⚠ 而中文服务商不摆这一条（摆了就是假信息）',
+      !rz.rows.some((x) => x.key === 'lang'), JSON.stringify(rz.rows.map((x) => x.key)));
+  }
+
+  /**
+   * ⚠ 真跑一次，验"翻过了"这个标记落到了镜头上。
+   *
+   * 光验接口那几行文案不够 —— 那只证明我们**会说**这件事，
+   * 不证明它**发生过**。而卡片上那句话是照着镜头上的标记显示的。
+   *
+   * ⚠ 而且**两条路各验一遍**：批量出图一条、单独重出一条。
+   * 这个代码库里 modelUsed 和 refsSent 都是因为只改了一条路而说过谎。
+   */
+  {
+    const before = {
+      p: settings.get('imageProvider'), m: settings.get('imageModel'),
+      base: settings.get('baseUrls')?.wavespeed
+    };
+    /**
+     * 自己起一个 WaveSpeed 形状的假上游。
+     *
+     * ⚠ 出图那张必须是**真的能下下来**的 —— 这一条走的是完整流水线
+     * （下载、存盘、校画幅），给一个下不到的地址会死在存盘那一步，
+     * 而那时候红的是另一件事，翻译这件事根本没验到。
+     * 所以让它回主打桩那张 pixel.png。
+     */
+    const ws = http.createServer((req, res) => {
+      let raw = '';
+      req.on('data', (c) => { raw += c; });
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        if (req.url.includes('/predictions/')) {
+          return res.end(JSON.stringify({
+            data: { id: 't1', status: 'completed', outputs: [`${upstreamUrl}/pixel.png`] }
+          }));
+        }
+        ws.lastSubmit = JSON.parse(raw || '{}');
+        res.end(JSON.stringify({ data: { id: 't1', status: 'created' } }));
+      });
+    });
+    await new Promise((r) => ws.listen(0, '127.0.0.1', r));
+    const wsUrl = `http://127.0.0.1:${ws.address().port}`;
+
+    settings.patch({
+      imageProvider: 'wavespeed',
+      imageModel: 'test/model',
+      baseUrls: { ...(settings.get('baseUrls') || {}), wavespeed: wsUrl }
+    });
+    vault.setSecret('WAVESPEED_API_KEY', 'ws-test-key');
+
+    await ndjson(`/projects/${p.id}/shots/${sid}/regenerate`, {});
+    check('⚠ 单独重出：镜头上记下了"提示词翻过"',
+      store.read(p.id).shots[0].promptTranslated === true,
+      String(store.read(p.id).shots[0].promptTranslated));
+
+    // 清掉再走批量那条，确认它不是上一次留下的
+    store.update(p.id, (x) => { x.shots[0].promptTranslated = false; return x; });
+    await ndjson(`/projects/${p.id}/stage/assets`, { only: [sid], regenerate: true });
+    check('⚠ 批量出图：同样记下了（两条路各写一份，就得各验一份）',
+      store.read(p.id).shots[0].promptTranslated === true,
+      String(store.read(p.id).shots[0].promptTranslated));
+
+    settings.patch({ imageProvider: before.p || 'volcengine', imageModel: before.m });
+    // 换回中文服务商再出一次：标记必须落回 false，不能一直挂着
+    store.update(p.id, (x) => { x.shots[0].promptTranslated = true; return x; });
+    await ndjson(`/projects/${p.id}/shots/${sid}/regenerate`, {});
+    check('⚠ 换回中文服务商之后标记落回 false（不能永远挂着说谎）',
+      store.read(p.id).shots[0].promptTranslated === false,
+      String(store.read(p.id).shots[0].promptTranslated));
+
+    // 顺带确认发出去的真的是英文，不只是标记写对了
+    check('⚠ 发给 WaveSpeed 的提示词里没有中文（不然标记就是空口说白话）',
+      ws.lastSubmit && !/[\u4e00-\u9fa5]/.test(String(ws.lastSubmit.prompt || '')),
+      String(ws.lastSubmit?.prompt || '').slice(0, 80));
+
+    ws.close();
+    settings.patch({ baseUrls: { ...(settings.get('baseUrls') || {}), wavespeed: before.base } });
+  }
+
+  // ── 按后台那样出一次：把我们加的全摘掉 ──
+  {
+    upstream.lastImageBody = null;
+    await ndjson(`/projects/${p.id}/shots/${sid}/regenerate`, { bare: true });
+    const sent = upstream.lastImageBody || {};
+    /**
+     * ⚠ 负向词怎么发是**按厂商分**的：有的是独立字段 negative_prompt，
+     * 火山这条路上是并进正向描述（`\n\n避免出现：…`）。
+     *
+     * 第一版这条只看 `sent.negative_prompt` —— 而火山根本没有那个字段，
+     * 于是它对 bare 和普通重出**都是绿的**：断言够不着目标。
+     * 下面那条「普通重出照旧带负向词」是红的，才把这件事翻出来。
+     * 两条一起看同一个真实痕迹：提示词里有没有那句"避免出现"。
+     */
+    const hasNeg = (b2) => /避免出现/.test(String(b2.prompt || '')) || Boolean(b2.negative_prompt || b2.negative);
+    check('⚠ 对照那一次没带负向词', !hasNeg(sent), String(sent.prompt || '').slice(-80));
+    check('⚠ 也没带种子（交给厂商随机）',
+      sent.seed === undefined || sent.seed === null, String(sent.seed));
+    check('⚠ 提示词还是照发（要对照的就是它）',
+      String(sent.prompt || '').length > 0, String(sent.prompt || '').slice(0, 40));
+    check('画幅照旧跟项目走（后台你同样会选画幅，摘掉它这个实验就白做了）',
+      JSON.stringify(sent).includes('9:16') || sent.size || sent.width,
+      JSON.stringify(sent).slice(0, 200));
+
+    // 普通重出还是带负向词的 —— 别把对照模式的行为漏到正常那条路上
+    upstream.lastImageBody = null;
+    await ndjson(`/projects/${p.id}/shots/${sid}/regenerate`, {});
+    const normal = upstream.lastImageBody || {};
+    check('⚠ 而普通重出照旧带负向词（对照模式不能漏到正常那条路上）',
+      hasNeg(normal), String(normal.prompt || '').slice(-80));
+  }
+}
+
+/**
  * ════════ 特写里漏掉人 / 道具描述里写了剧情 ════════
  *
  * 用户真机上一次拍到两件事：

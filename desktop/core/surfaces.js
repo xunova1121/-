@@ -555,6 +555,15 @@ export const CAPABILITIES = [
     why: ''
   },
   {
+    id: 'shot-request',
+    name: '这一镜发出去的请求，和"在商家后台贴一句话"差在哪（含按后台那样出一次）',
+    api: 'GET /projects/:id/shots/:sid/request',
+    pc: 'ui/views/studio.js',
+    mobile: '',
+    why: '排错工具。要对着长提示词、参考图清单、种子逐条看，手机屏幕上摆不下；'
+      + '而且这是坐下来查问题时做的事，不是路上顺手点一下。'
+  },
+  {
     id: 'bible-embodied',
     name: '标出没有实体形象的角色（旁白、画外音 —— 不出人设图、不带脸进镜头）',
     api: 'PATCH /projects/:id/bible/char/:name { embodied }',
