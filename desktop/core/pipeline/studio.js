@@ -41,6 +41,7 @@ import * as estimate from './estimate.js';
 import * as pricing from '../pricing.js';
 import * as siteMod from './site.js';
 import * as outline from './outline.js';
+import * as scriptlint from './script.js';
 import * as oss from '../oss.js';
 import * as tiers from '../tiers.js';
 import * as shotlint from './shotlint.js';
@@ -1253,7 +1254,11 @@ export function bibleReadiness(project) {
 
 const OUTLINE_PROMPT = `你是分场编辑。把剧本拆成**一场一场戏**（不是分镜，是场次）。
 
-一场戏 = 同一个地点、同一段连续时间里发生的事。换地方或者跳时间，就是新的一场。
+一场戏 = **一个能单独拍出来的片段**：同一个地点、同一段连续时间、一件完整的小事。
+
+换地方、跳时间，一定是新的一场。
+地点和时间都没变，但**动作转了个弯、说话的人换了、情绪翻了一次**，也要切开 ——
+后面每一场都要单独出图、出视频，一场里装着两三件事就没法拍。
 
 只回 JSON：
 {
@@ -1274,8 +1279,13 @@ const OUTLINE_PROMPT = `你是分场编辑。把剧本拆成**一场一场戏**�
    概括一下就算不准了。没有台词的场次留空字符串。
    ⚠ 但台词里如果有引号，一律用中文的「」，**不要用英文双引号 "**——
    原样抄一个 " 进来会让整份 JSON 当场解析失败，这一步就全废了。
-2. 场次数量按剧情来，不要凑数。一场戏就是一场戏。
-3. seconds 按这一场的内容估。有大段对话的场次自然长，一个转场空镜自然短。`;
+2. **宁可切细，不要切粗。** 这是这份大纲最要紧的一条。
+   · 一场戏**最多 {{BEAT_CEILING}} 秒**。估出来比这长，就在动作或情绪的转折处切成两场。
+   · 整份大纲**至少 {{MIN_BEATS}} 场**。不到这个数，说明切粗了 —— 回去按上一条再切一遍。
+   · 切粗的代价是看不见的：一场装了三件事，出图时只能画其中一件，
+     另外两件在成片里就消失了，而没有任何地方会报错。
+3. seconds 按这一场的内容估，加起来接近**目标片长 {{TARGET_SECONDS}} 秒**。
+   有大段对话的场次自然长，一个转场空镜自然短。`;
 
 const REVISE_PROMPT = `你在帮人改一份**已经存在**的大纲。
 
@@ -1299,6 +1309,127 @@ const REVISE_PROMPT = `你在帮人改一份**已经存在**的大纲。
 4. 标着「锁住」的场次已经拆过分镜了 —— 你可以建议改它，但那条多半会被拒绝。
    能用别的办法达到目的就别动它。
 5. 只做人要求的那件事。顺手"优化"一下别的场次会让人没法判断该不该勾。`;
+
+const TIDY_PROMPT = `你在给一份剧本挑毛病。**只挑，不改写。**
+
+只回 JSON：
+{
+  "fixes": [
+    { "kind": "typo",  "find": "原文里要改的那一小段（原样抄）", "replace": "改成什么", "why": "为什么" },
+    { "kind": "quote", "find": "他说\\u300c走吧\\u300d", "replace": "他说\\u300c走吧\\u300d", "why": "英文引号会让后面拆大纲整步失败" }
+  ],
+  "note": "一句话总结这份剧本的状况"
+}
+
+kind 只有四种：typo（错别字）、quote（引号）、punct（标点）、other。
+
+⚠ 最要紧的四条：
+
+1. **find 必须是原文里一字不差的一小段，而且在全文里只出现一次。**
+   找不到、或者出现两次以上，这一条会被丢掉 —— 因为不知道该改哪一处，
+   而猜错等于改了一句人没看过的台词。
+   所以 find 要带上足够的上下文（前后各几个字）让它唯一。
+
+2. **一条改动只管一处。** 不要写"把所有的 X 都改成 Y"。
+
+3. **不要润色。** 不要改语气、不要调语序、不要把口语改成书面语。
+   这是别人的剧本，你只负责挑错字和会出事的符号。
+   看着别扭但没错的地方，一个字都不要动。
+
+4. **英文双引号 " 一律换成中文的「」。** 这不是审美问题：
+   台词里的 " 会被原样抄进 JSON 字符串，让后面拆大纲、拆分镜整步解析失败。
+
+没有毛病就回 { "fixes": [], "note": "看着没什么问题" } —— 不要为了交差编几条出来。`;
+
+/**
+ * 体检剧本：本地那层免费的，加模型挑错别字那层。
+ *
+ * ⚠ **不落盘。** 回的是一串建议，人勾完再调 applyScriptFixes。
+ * 和大纲那边「商量着改」是同一条规矩：模型建议和实际改动必须是两件事。
+ */
+export async function tidyScript(projectId, { onEvent, useModel = true } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const source = String(project.script || '');
+  if (!source.trim()) throw new Error('还没有剧本');
+
+  // ── 免费那层：先跑，永远跑 ──
+  const report = scriptlint.scan(source);
+  for (const line of report.notes) onEvent?.({ type: 'note', message: line });
+  if (!useModel) return { scan: report, fixes: [], note: '' };
+
+  const r = routing();
+  onEvent?.({
+    type: 'stage',
+    stage: 'script-src',
+    status: 'running',
+    message: `${r.outline.provider} / ${r.outline.model} 通读剧本找错字中…`
+  });
+
+  /**
+   * ⚠ 走**大纲那个槽**，不是剧本槽。
+   *
+   * 挑错别字是判断题，和拆场次是同一类活；而剧本槽上人多半配的是
+   * 擅长长篇生成的那种模型，用它来挑错字既慢又贵。
+   */
+  const cap = outline.capScript(source, outline.scriptCapFor(r.outline.model));
+  if (cap.note) onEvent?.({ type: 'note', message: cap.note });
+
+  const { parsed } = await chatJSON({
+    providerId: r.outline.provider,
+    model: r.outline.model,
+    system: TIDY_PROMPT,
+    user: `剧本：\n${cap.sent}`,
+    temperature: 0.2,
+    jsonMode: true,
+    stream: true,
+    label: '通读剧本',
+    onEvent
+  }, { onEvent, label: '通读剧本' });
+
+  /**
+   * 当场按"能不能唯一定位"过一遍 —— 在**试着落盘之前**就知道哪几条做不了。
+   * 界面上要把做不了的那几条标出来（划掉、说明原因），
+   * 而不是让人勾完点了应用才发现少改了三条。
+   */
+  const dry = scriptlint.applyFixes(source, parsed.fixes);
+  const refusedFor = new Map(dry.refused.map((x) => [x.fix, x.why]));
+  const fixes = (Array.isArray(parsed.fixes) ? parsed.fixes : []).map((f) => ({
+    ...f,
+    text: scriptlint.describeFix(f),
+    refused: refusedFor.get(f) || ''
+  }));
+
+  onEvent?.({
+    type: 'stage',
+    stage: 'script-src',
+    status: 'done',
+    message: fixes.length
+      ? `挑出 ${fixes.length} 处，其中 ${fixes.filter((f) => !f.refused).length} 处能改`
+      : '通读完了，没挑出错字'
+  });
+
+  return { scan: report, fixes, note: String(parsed.note || '') };
+}
+
+/** 把人勾中的那几条落到剧本上 */
+export function applyScriptFixes(projectId, { fixes = [] } = {}) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const r = scriptlint.applyFixes(project.script || '', fixes);
+  const next = store.update(projectId, (p) => {
+    p.script = r.script;
+    return p;
+  });
+  return { project: next, applied: r.applied.length, refused: r.refused, scan: scriptlint.scan(r.script) };
+}
+
+/** 只跑免费那层（保存剧本之后自动跑，不花钱） */
+export function scanScript(projectId) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  return scriptlint.scan(project.script || '');
+}
 
 /**
  * 从剧本生成一份大纲。
@@ -1340,11 +1471,38 @@ export async function buildOutline(projectId, { chapterId = null, onEvent } = {}
   const cap = outline.capScript(source, outline.scriptCapFor(r.outline.model));
   if (cap.note) onEvent?.({ type: 'note', message: cap.note });
 
+  /**
+   * ══════════ 一场最长多少秒、整份至少几场 ══════════
+   *
+   * 用户报的：一两千字的剧本，大纲只拆出**一场**，设定集认出两个场景，
+   * 分镜也只有一场 —— 「产出的和实际都不符合，我希望越详细越好」。
+   *
+   * 根因在提示词里：原来那句"一场戏 = 同一个地点、同一段连续时间"
+   * 对一段发生在同一个地方的剧本来说，**一场是完全正确的答案**。
+   * 而且提示词从头到尾不知道目标片长 —— 60 秒的片子和 10 分钟的片子
+   * 拿到的是同一句要求。
+   *
+   * 所以给它两条硬线，都从目标片长算：
+   *
+   *   一场最多多少秒   目标的五分之一，夹在 8~30 秒之间
+   *   整份至少几场     目标 ÷ 那个上限
+   *
+   * 为什么是五分之一：再粗就没法在这一层商量了（改一场等于改掉全片的
+   * 五分之一以上）。上限压 30 秒是因为一场 30 秒往下拆已经是六七镜，
+   * 再长的一场对出图那一步没有意义。
+   */
+  const targetSeconds = Number(project.targetDuration) || 60;
+  const beatCeiling = Math.max(8, Math.min(30, Math.round(targetSeconds / 5)));
+  const minBeats = Math.max(3, Math.round(targetSeconds / beatCeiling));
+
   const { parsed } = await chatJSON({
     providerId: r.outline.provider,
     model: r.outline.model,
-    system: OUTLINE_PROMPT,
-    user: `目标片长：${project.targetDuration || 60} 秒\n\n剧本：\n${cap.sent}`,
+    system: OUTLINE_PROMPT
+      .replace('{{BEAT_CEILING}}', String(beatCeiling))
+      .replace('{{MIN_BEATS}}', String(minBeats))
+      .replace('{{TARGET_SECONDS}}', String(targetSeconds)),
+    user: `目标片长：${targetSeconds} 秒\n\n剧本：\n${cap.sent}`,
     temperature: 0.6,
     jsonMode: true,
     // 长生成：走流式，判据从"总共等了多久"换成"多久没动静"
@@ -1397,6 +1555,26 @@ export async function buildOutline(projectId, { chapterId = null, onEvent } = {}
   });
 
   const kept = outline.normalizeOutline(next.outline).beats.filter((b) => b.locked).length;
+
+  /**
+   * ⚠ 提示词里那两条硬线是**请求，不是保证** —— 模型想不理就不理。
+   *
+   * 而"拆粗了"是这一步唯一一种**不报错、也看不出来**的坏结果：
+   * 一份只有一场的大纲和一份拆得很好的大纲，界面上长得一模一样，
+   * 只是后面出的片子少了三分之二的内容。所以拆完当场对一次数。
+   *
+   * 只是说一句，不自动重跑 —— 重跑要再花一次钱，那是人的决定。
+   */
+  if (fresh.beats.length < minBeats) {
+    onEvent?.({
+      type: 'note',
+      message: `这次只拆出 ${fresh.beats.length} 场，而 ${targetSeconds} 秒的片子按一场最多 ${beatCeiling} 秒算，`
+        + `本该有 ${minBeats} 场上下 —— 拆粗了。\n`
+        + '拆粗的代价看不见：一场里装了三件事，出图时只能画其中一件，另外两件在成片里就没了。\n'
+        + '两条路：① 在下面说一句「每一场再拆细一点」；② 用行内的「＋」自己补几场。'
+    });
+  }
+
   onEvent?.({
     type: 'stage',
     stage: 'outline',

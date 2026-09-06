@@ -555,6 +555,22 @@ export const CAPABILITIES = [
     why: ''
   },
   {
+    id: 'script-scan',
+    name: '剧本体检（免费那层：会让 JSON 炸掉的符号、字数、该不该分章）',
+    api: 'GET /projects/:id/script/scan',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
+    id: 'script-tidy',
+    name: '让模型通读剧本挑错别字（只回建议，逐条勾）',
+    api: 'POST /projects/:id/script/tidy',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
     id: 'outline',
     name: '大纲：一行一场戏，剧本和分镜之间那一层（含台词硬下限估算）',
     api: 'POST /projects/:id/outline/build',

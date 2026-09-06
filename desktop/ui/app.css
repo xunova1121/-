@@ -1906,3 +1906,19 @@ select.mini {
   color: var(--ink-faint); font-size: 12px; transition: transform .12s;
 }
 .panel[open] > summary.panel-title::before { transform: rotate(90deg); }
+
+/* ── 剧本体检 ── */
+/* 一条条摆出来，不折叠：这几条是"跑之前就该知道"的事，藏起来等于没有 */
+.sc-note {
+  margin-top: 8px; padding: 8px 10px; border-radius: 8px;
+  background: var(--caution-wash); border-left: 3px solid var(--caution);
+  color: var(--ink); font-size: 12.5px; line-height: 1.75; white-space: pre-wrap;
+}
+.sc-fix {
+  display: flex; gap: 8px; align-items: flex-start;
+  margin-top: 6px; padding: 7px 9px; border-radius: 8px;
+  background: var(--surface-2); font-size: 12.5px; line-height: 1.6; cursor: pointer;
+}
+/* 定位不到的划掉，但**留在列表里** —— 消失的话人会以为模型没挑出这一条 */
+.sc-fix.refused { opacity: .55; text-decoration: line-through; cursor: default; }
+.sc-refused { color: var(--alarm); text-decoration: none; }
