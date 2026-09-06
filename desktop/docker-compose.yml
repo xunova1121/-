@@ -1,0 +1,45 @@
+# 一条命令跑起来：docker compose up -d
+#
+# 两个容器：应用本身 + Caddy（自动申请并续期 HTTPS 证书）。
+# 为什么必须有 Caddy：访问口令在明文 HTTP 上跑等于在公网广播它。
+# Caddy 只要填对域名就自动去 Let's Encrypt 签证书，不用你碰 certbot。
+services:
+  app:
+    build:
+      context: .
+      args:
+        # 跑的是哪个提交。更新脚本会自动填，手动 build 时不填也能跑（显示 dev）
+        FD_BUILD: "${FD_BUILD:-}"
+    restart: unless-stopped
+    environment:
+      # ⚠ 这两个必须改成你自己的
+      FUTUREDREAM_PUBLIC_HOST: "${FD_HOST:?请在 .env 里写 FD_HOST=你的域名}"
+      # 不给的话第一次启动会自己生成一个，打印在 docker logs 里
+      FUTUREDREAM_ACCESS_TOKEN: "${FD_TOKEN:-}"
+      # 给了它，密钥的加密钥匙就不落盘了（强烈建议给）
+      FUTUREDREAM_VAULT_PASS: "${FD_VAULT_PASS:-}"
+    volumes:
+      - fd-data:/data
+    # 不对外暴露端口：只有 Caddy 能连到它
+    expose:
+      - "5178"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      FD_HOST: "${FD_HOST:?请在 .env 里写 FD_HOST=你的域名}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+
+volumes:
+  fd-data:
+  caddy-data:
+  caddy-config:

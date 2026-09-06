@@ -1,0 +1,11 @@
+{
+  "artboards": [
+    { "file": "Notes.dc.html", "x": 0, "y": 0, "w": 760, "h": 844 },
+    { "file": "Main.dc.html", "x": 880, "y": 0, "w": 390, "h": 844 },
+    { "file": "ShotActions.dc.html", "x": 1360, "y": 0, "w": 390, "h": 844 },
+    { "file": "ShotEdit.dc.html", "x": 1840, "y": 0, "w": 390, "h": 844 },
+    { "file": "Pipeline.dc.html", "x": 2320, "y": 0, "w": 390, "h": 844 },
+    { "file": "Film.dc.html", "x": 2800, "y": 0, "w": 390, "h": 844 }
+  ],
+  "launch": { "view": "canvas" }
+}

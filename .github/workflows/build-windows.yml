@@ -1,0 +1,288 @@
+# 让 GitHub 的 Windows 机器替你打包「未来创梦」，本机不用装任何工具链。
+#
+# 触发方式三选一：
+#   1. 推代码到任意分支 —— 更新 snapshot 预发布，永远指向最新一次构建
+#   2. Actions 页面手动点「Run workflow」
+#   3. 打 v 开头的 tag（如 v0.1.0）—— 发一个正式 Release
+#
+# 产物发到 Releases 页面，不走 Actions Artifacts ——
+# Artifacts 有独立的存储配额，满了就传不上去（这个仓库已经踩过一次），
+# 而 Release 附件不占那份配额，链接也更稳定、更好分享。
+name: 构建 Windows 安装包
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+    # 刻意不加 paths 过滤：GitHub 的路径过滤对 tag 推送同样生效，
+    # 加了会出现"打了 tag 却不发版"这种很难查的情况。
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # 先跑自检再打包：源码本身有问题的话，没必要浪费几分钟去打一个坏包。
+      # 这也是唯一一次在真实 Windows 上验证路径规则、DPAPI 降级、端口顺延这些逻辑。
+      - name: 自检（不联外网，全部打桩）
+        run: node scripts/selftest.mjs
+
+      # 真 FFmpeg 走一遍合成。
+      #
+      # 这一步补的是自检补不了的洞：自检验的是"参数拼得对不对"，
+      # 而真跑一遍才能发现"命令全都成功、片子却不对"那一类 ——
+      # 加这一步的当天就抓出两个：叠化那一小段长了一倍（时间轴全体错位），
+      # 以及配音比画面短时**成片结尾被砍掉**。两个都躲过了一千多项自检。
+      #
+      # ⚠ Windows runner **不自带 ffmpeg**。
+      # 第一版这里写着"runner 自带，直接用"，结果这一步每次都安静地跳过 ——
+      # 加了一个验证步骤，而它什么都没验。幸好脚本在跳过时会大声说一句
+      # "这次没有验过"，不然就是一个看着绿、其实空转的检查。
+      #
+      # 装到临时目录而不是 desktop/node_modules：那个 80MB 的二进制
+      # 不该被 electron-builder 打进安装包里。
+      - name: 装一个真 FFmpeg（临时目录）
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ffbin"
+          cd "$RUNNER_TEMP/ffbin"
+          npm init -y >/dev/null
+          npm install ffmpeg-static >/dev/null
+          node -e "console.log(require('ffmpeg-static'))" > ffpath.txt
+          echo "FFMPEG_PATH=$(cat ffpath.txt)" >> "$GITHUB_ENV"
+          "$(cat ffpath.txt)" -version | head -1
+
+      # REALCHECK_REQUIRED=1：这里找不到 ffmpeg 就红，不许安静跳过。
+      # 没有这一行的话，上面"装 ffmpeg"那步一旦哪天悄悄失效，
+      # 这个检查会变回空转，而流水线依然一片绿。
+      - name: 真 FFmpeg 合成自检
+        env:
+          REALCHECK_REQUIRED: '1'
+        run: node scripts/realcheck.mjs
+
+      # 把提交号写进文件，跟着源码一起打进包里。
+      #
+      # 这里不能用环境变量：electron-builder 把源码打进 asar，
+      # 用户双击运行的时候，构建机上那个变量早就不存在了。
+      # 少了这一步，所有 exe 用户在设置页看到的都是 "dev" ——
+      # 而"你装的是哪一版"恰恰是排错时第一个要问的问题。
+      #
+      # 放在自检**之后**：自检里有一条断言"没注入时老实说 dev"，
+      # 写在前面会把那条弄红。
+      - name: 把提交号写进包里
+        shell: bash
+        run: echo "{\"build\":\"${GITHUB_SHA:0:7}\"}" > core/build.json
+
+      # 应用本身零运行时依赖，这一步装的只有 electron 和 electron-builder。
+      # 没有 lockfile，所以用 install 而不是 ci。
+      - name: 安装打包工具
+        run: npm install
+
+      # 真的把 Electron 主进程拉起来探一次 /api/health。
+      # 加这一步是因为吃过亏：主进程里一个 Windows 专属的 ESM 加载错误
+      # 躲过了全部单元自检，直到用户双击 exe 才炸出来 ——
+      # "主进程能不能起来"这件事，只有真跑一次才测得到。
+      - name: Electron 冒烟自检
+        run: npm run smoke
+
+      - name: 打包（安装版 + 免安装版）
+        run: npm run build:win
+        env:
+          # 未签名的包，跳过 electron-builder 的公证/签名流程
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      # 应用本身零运行时依赖，源码整包也就一百多 KB ——
+      # 比 Electron 安装包小三个数量级。国内下 GitHub 本来就慢，
+      # 已经装了 Node 的人没必要为了同一个应用去拖 90MB 的 Electron。
+      - name: 打一个绿色源码包（只要 Node，几百 KB）
+        shell: pwsh
+        run: |
+          $stage = "dist/portable-src/FutureDream"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item -Recurse core, ui, scripts -Destination $stage
+          # 启动脚本是中文名，用通配符拷，免得 PowerShell 的编码问题在这里绊一跤
+          Copy-Item package.json, README.md -Destination $stage
+          Copy-Item *.bat -Destination $stage
+          # 附件名必须是纯 ASCII：GitHub 会把非 ASCII 字符替换成点，
+          # 中文名传上去会变成一串 "...zip"，谁也认不出那是什么
+          Compress-Archive -Path "dist/portable-src/FutureDream" `
+            -DestinationPath "dist/FutureDream-Lite-NodeOnly.zip" -CompressionLevel Optimal -Force
+          Remove-Item -Recurse -Force dist/portable-src
+
+      # ── 给快照产物打上分支标记 ──
+      #
+      # snapshot 这个 Release 是所有分支共用的，而上传用的是 `--clobber`（同名直接覆盖）。
+      # 于是两条分支各自构建时，后构建的会把先构建的**整个顶掉**：页面地址没变、
+      # 文件名没变，只有说明里那行"构建自 xx 分支"悄悄换了，
+      # 下载的人拿到的其实是另一条线的产物，而旧包没有任何备份。
+      #
+      # 这个坑真踩到过：主线的包被另一条分支的构建覆盖，只能重新构建才拿得回来。
+      # 加上分支后缀之后，两条线的包并排挂在同一个 Release 上，谁也顶不掉谁。
+      #
+      # 正式版（打 v tag）不加后缀 —— 那是唯一的、对外的名字。
+      - name: 给快照产物打上分支标记
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        shell: pwsh
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          # 取分支名第一段：claude/xxx → claude，codex/xxx → codex。
+          # 附件名必须是纯 ASCII（GitHub 会把非 ASCII 字符换成点），其余一律转成 -
+          $slug = ($env:BRANCH -split '/')[0] -replace '[^A-Za-z0-9]', '-'
+          if ([string]::IsNullOrWhiteSpace($slug)) { $slug = 'build' }
+
+          # ⚠ 先用 @() 把清单**一次取全**再改名。
+          #   Get-ChildItem 是流式的，边枚举边改名会把刚改好的文件又枚举进来，
+          #   于是出现 FutureDream-Setup-0.1.0-x64-claude-claude.exe 这种货色。
+          $files = @(Get-ChildItem dist -File | Where-Object { $_.Extension -in '.exe', '.zip' })
+          foreach ($f in $files) {
+            if ($f.BaseName -like "*-$slug") {
+              Write-Host "  跳过（已带标记）$($f.Name)"
+              continue
+            }
+            $new = "$($f.BaseName)-$slug$($f.Extension)"
+            Write-Host "  $($f.Name)  ->  $new"
+            Rename-Item -LiteralPath $f.FullName -NewName $new
+          }
+
+          Write-Host "改名后待上传的产物："
+          Get-ChildItem dist -File |
+            Where-Object { $_.Extension -in '.exe', '.zip' } |
+            ForEach-Object { Write-Host "  $($_.Name)" }
+
+      - name: 列出产物
+        shell: pwsh
+        run: Get-ChildItem dist -File | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
+
+      # ── 发布 ──
+      # 用 runner 自带的 gh CLI，不引第三方 action。
+      # tag 推送发正式版；日常推送更新同一个 snapshot 预发布，
+      # 这样下载链接永远是那一个，不会每次构建多出一条。
+      - name: 发布到 Releases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            TITLE="未来创梦 ${TAG}"
+            PRERELEASE=""
+            SLUG=""
+          else
+            TAG="snapshot"
+            TITLE="未来创梦 开发快照"
+            PRERELEASE="--prerelease"
+            # 必须和"给快照产物打上分支标记"那一步同一套规则，否则说明里写的后缀是错的
+            SLUG="${GITHUB_REF_NAME%%/*}"
+            SLUG="${SLUG//[^A-Za-z0-9]/-}"
+            [[ -n "$SLUG" ]] || SLUG="build"
+          fi
+
+          # 快照页面上并排挂着多条分支的包，得告诉下载的人怎么认后缀
+          if [[ -n "$SLUG" ]]; then
+            BRANCH_NOTE="> ⚠ 这个页面同时挂着**多条分支**的包，**文件名末尾的后缀就是分支**（\`-claude\` = 主线，\`-codex\` = 3D 预演扩展线）。认准后缀下载 —— 两条线各自更新各自那一组，互不覆盖。本次更新的是 \`-${SLUG}\` 这一组。"
+          else
+            BRANCH_NOTE=""
+          fi
+
+          cat > notes.md <<NOTES
+          构建自 \`${GITHUB_REF_NAME}\` 分支，提交 \`${GITHUB_SHA:0:7}\`。
+
+          ${BRANCH_NOTE}
+
+          ## 下载哪个（挑一个就行）
+
+          | 文件 | 大小 | 前提 | 说明 |
+          |---|---|---|---|
+          | \`FutureDream-Lite-NodeOnly-*.zip\` | **约 1–5 MB** | 装了 Node 18+ | **嫌慢就下这个。** 解压后双击 \`启动.bat\`，功能完全一样 |
+          | \`FutureDream-Setup-*.exe\` | 约 75 MB | 无 | 安装版，可选目录，建桌面快捷方式 |
+          | \`FutureDream-Portable-*.exe\` | 约 75 MB | 无 | 免安装版，双击即用，可放 U 盘 |
+
+          两个 exe 之所以大，是因为里面塞了一整个 Chromium（Electron 外壳）。
+          应用自身零运行时依赖，源码总共才一百多 KB —— 所以已经有 Node 的话，
+          绿色版是**快几百倍**的那条路。没有 Node：\`winget install OpenJS.NodeJS.LTS\`，
+          装一次以后所有更新都只下那 0.2 MB。
+
+          ### 下载还是慢？
+
+          GitHub 在国内时快时慢。把下载链接前面拼一个公共代理前缀通常能好很多，例如：
+
+          \`\`\`
+          https://ghfast.top/  +  原始下载链接
+          https://gh-proxy.com/ +  原始下载链接
+          \`\`\`
+
+          这些是第三方公共镜像，我不控制它们的可用性和内容，介意的话就直连或者挂代理。
+
+          ## 首次打开
+
+          Windows SmartScreen 会拦一下（这个包没做代码签名）——
+          点「更多信息 → 仍要运行」。绿色版不会被拦。
+
+          打开后先去左侧「服务商与密钥」配一把 API Key 才能用；
+          最省事的是只配火山引擎方舟一家，剧本／出图／视频／一致性复核都走它。
+          详细步骤见 [desktop/README.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/desktop/README.md)。
+          NOTES
+
+          # 一个附件一个附件地传，并且带重试。
+          #
+          # 踩过的坑：`gh release upload --clobber` 一把梭传三个文件，
+          # GitHub 的附件接口偶尔回 500（替换已有附件时尤其容易），
+          # 加上 set -e，整步就红了 —— 包明明都打好了，却一个也没发出去，
+          # 用户那边看到的还是上一版。
+          #
+          # --clobber 是"先删再传"，卡住的旧附件会让它一直 500，
+          # 所以重试前先显式删一次。
+          upload_one() {
+            local file="$1" name
+            name="$(basename "$file")"
+            for attempt in 1 2 3; do
+              if gh release upload "$TAG" "$file" --clobber; then
+                echo "  ✓ $name"
+                return 0
+              fi
+              echo "  ! $name 第 $attempt 次没传上去，删掉残留的同名附件再试"
+              gh release delete-asset "$TAG" "$name" --yes >/dev/null 2>&1 || true
+              sleep $((attempt * 5))
+            done
+            echo "  ✗ $name 三次都没传上去"
+            return 1
+          }
+
+          # snapshot 是滚动的：已存在就换掉旧附件，不存在才新建
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TITLE" --notes-file notes.md --target "$GITHUB_SHA"
+          else
+            gh release create "$TAG" \
+              --title "$TITLE" \
+              --notes-file notes.md \
+              --target "$GITHUB_SHA" \
+              $PRERELEASE
+          fi
+
+          failed=0
+          for f in dist/*.exe dist/*.zip; do
+            upload_one "$f" || failed=1
+          done
+
+          echo "下载地址：https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+
+          # 有附件没传上去就让这一步红着 —— 但前面传成功的那些已经在 Release 上了，
+          # 至少不会出现"全都没发出去还以为发了"
+          exit $failed

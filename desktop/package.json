@@ -1,0 +1,71 @@
+{
+  "name": "futuredream-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "未来创梦 —— AI 短剧工作台：剧本到成片的一致性流水线，内置第三方 API 联调台",
+  "author": "未来创梦",
+  "main": "electron/main.js",
+  "type": "module",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "start": "node core/server.js",
+    "dev": "electron .",
+    "selftest": "node scripts/selftest.mjs",
+    "uicheck": "node scripts/uicheck.mjs",
+    "mcheck": "node scripts/mcheck.mjs",
+    "smoke": "electron . --smoke",
+    "icon": "node scripts/make-icon.mjs",
+    "build:win": "electron-builder --win nsis portable",
+    "realcheck": "node scripts/realcheck.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "shots": "node scripts/shots.mjs"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.futuredream.studio",
+    "productName": "未来创梦",
+    "files": [
+      "electron/**",
+      "core/**",
+      "ui/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "bin",
+        "to": "bin",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "compression": "maximum",
+    "electronLanguages": [
+      "zh-CN",
+      "en-US"
+    ],
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "未来创梦",
+      "artifactName": "FutureDream-Setup-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "FutureDream-Portable-${version}-${arch}.${ext}"
+    }
+  }
+}

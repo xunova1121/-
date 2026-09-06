@@ -1,3 +1,10 @@
+> **本仓库现在有两部分：**
+> - `desktop/` —— **未来创梦**，AI 短剧工作台桌面版（Windows 优先），
+>   内置第三方 API 联调台与角色/场景一致性引擎。见 [desktop/README.md](desktop/README.md)
+> - 下面是原来的渔政执法 AI Agent 单页演示，保持不变。
+
+---
+
 # 渔政执法 AI Agent 演示页
 
 `agent-demo-offline.html` —— 单文件，双击浏览器打开即可演示。

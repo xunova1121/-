@@ -1,0 +1,21 @@
+# 证书全自动：填对域名、把 80/443 放行，Caddy 自己去 Let's Encrypt 申请和续期。
+{$FD_HOST} {
+	# 成片和素材包动辄几百 MB，默认的超时会把大文件下载掐断
+	reverse_proxy app:5178 {
+		flush_interval -1
+	}
+
+	# 出图出视频那几步要跑十几分钟，NDJSON 是边跑边推的 —— 不能被缓冲，也不能被超时掐掉
+	request_body {
+		max_size 64MB
+	}
+
+	encode gzip
+
+	header {
+		# 这些是给浏览器看的最低限度防护；应用自己那层规矩在 core/deploy.js
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+}
