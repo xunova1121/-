@@ -107,7 +107,7 @@ export async function scanCast(project, { source, onEvent } = {}) {
   const cap = outlineLib.capScript(text0, outlineLib.scriptCapFor(routing.chat.model));
   if (cap.note) onEvent?.({ type: 'note', message: cap.note });
 
-  const { text } = await adapters.chat({
+  const { parsed } = await chatJSON({
     providerId: routing.chat.provider,
     model: routing.chat.model,
     system: BIBLE_PROMPT,
@@ -115,8 +115,7 @@ export async function scanCast(project, { source, onEvent } = {}) {
     temperature: 0.6,
     jsonMode: true,
     label: '扫描新增设定'
-  });
-  const parsed = extractJSON(text);
+  }, { onEvent, label: '扫描新增设定' });
   const clean = (list) => (Array.isArray(list) ? list : [])
     .filter((x) => x && typeof x === 'object' && String(x.name || '').trim())
     .map((x) => ({ name: String(x.name).trim(), role: x.role || '', appearance: x.appearance || '' }));
@@ -235,7 +234,7 @@ export async function buildBible(project, { onEvent } = {}) {
       : '这个项目还没有大纲，设定集只能从剧本里自己认人认景 —— 先出大纲再出设定集，名字会更齐'
   });
 
-  const { text } = await adapters.chat({
+  const { parsed } = await chatJSON({
     providerId: routing.chat.provider,
     model: routing.chat.model,
     system: BIBLE_PROMPT,
@@ -243,9 +242,7 @@ export async function buildBible(project, { onEvent } = {}) {
     temperature: 0.6,
     jsonMode: true,
     label: '生成设定集'
-  });
-
-  const parsed = extractJSON(text);
+  }, { onEvent, label: '生成设定集' });
 
   const bible = {
     frozenAt: new Date().toISOString(),
@@ -1242,7 +1239,7 @@ export async function verifyShot({ shotImageUrl, character, threshold = 75, igno
   if (!routing.vision?.provider) return { skipped: true, reason: '未配置视觉模型' };
 
   try {
-    const { text } = await adapters.chat({
+    const { parsed } = await chatJSON({
       providerId: routing.vision.provider,
       model: routing.vision.model,
       system: VERIFY_PROMPT.replace('{{THRESHOLD}}', String(threshold)).replace(
@@ -1258,8 +1255,7 @@ export async function verifyShot({ shotImageUrl, character, threshold = 75, igno
       jsonMode: true,
       label: '一致性复核',
       timeoutMs: 90000
-    });
-    const parsed = extractJSON(text);
+    }, { onEvent, label: '一致性复核' });
     const score = Number(parsed.score) || 0;
     const pass = parsed.verdict === 'pass' || score >= threshold;
     onEvent?.({
@@ -1464,6 +1460,50 @@ export async function generateConsistentImage({
 }
 
 /** 与 studio.js 共用的 JSON 提取（模型总爱包一层代码块） */
+/**
+ * JSON 坏在哪儿 —— **把出错的那几个字摆出来**。
+ *
+ * ⚠ 这个函数存在的理由是一次真实故障：用户点「拆场次」，拿到的是
+ *
+ *   Expected ',' or '}' after property value in JSON at position 180 (line 8 column 28)
+ *
+ * 一句原始的 JS 语法错误，没有模型名、没有模型到底回了什么、没有下一步。
+ * 那是解析器写给程序员看的话，不是给用一个应用的人看的。
+ *
+ * 而位置信息其实很值钱：把那个位置前后各几十个字截出来，
+ * 十有八九一眼就看出是什么 —— 台词里有个没转义的引号、
+ * 或者字符串里直接换了行。
+ */
+function explainBadJSON(body, err) {
+  const msg = String(err?.message || '');
+  const at = Number(msg.match(/position (\d+)/)?.[1] ?? -1);
+
+  // 括号配不平 = 多半是被截断了，那和"写错了"是两回事，下一步也不同
+  const opens = (body.match(/[{[]/g) || []).length;
+  const closes = (body.match(/[}\]]/g) || []).length;
+  const looksCut = closes < opens;
+
+  let where = '';
+  if (at >= 0) {
+    const from = Math.max(0, at - 70);
+    const head = body.slice(from, at);
+    const tail = body.slice(at, at + 40);
+    where = `\n\n出错的位置（第 ${at} 个字符）前后长这样：\n`
+      + `…${head}⟪这里⟫${tail}…`;
+  }
+
+  const why = looksCut
+    ? `括号没配平（${opens} 个开、${closes} 个关）—— 这更像是**没写完就断了**，`
+      + '而不是写错了。多半是这一次要它写的东西超过了它一次能写的量。'
+    : '括号是配平的，所以不是被截断，是**写出来的 JSON 本身不合法** —— '
+      + '最常见的是台词里带了没转义的英文引号，或者字符串中间直接换了行。';
+
+  return `模型回的东西不是合法 JSON，这一步没法往下走。\n\n${why}${where}\n\n`
+    + '可以试：① 重跑一次（模型下一次未必再错在同一处）；'
+    + '② 换一个模型（指令遵循更稳的那些对严格 JSON 更靠谱）；'
+    + `③ 原始报错：${msg}`;
+}
+
 export function extractJSON(text) {
   if (!text) throw new Error('模型没有返回内容');
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -1473,7 +1513,91 @@ export function extractJSON(text) {
   } catch {
     const start = candidate.indexOf('{');
     const end = candidate.lastIndexOf('}');
-    if (start !== -1 && end > start) return JSON.parse(candidate.slice(start, end + 1));
-    throw new Error(`模型返回的不是合法 JSON：${candidate.slice(0, 200)}`);
+    /**
+     * ⚠ 这两种要分开说，因为**下一步完全不同**：
+     *
+     *   一个 { 都没有   模型没在写 JSON，是在跟你聊天（或者回了一句拒绝）
+     *   有 { 没有 }     写了一半断了 —— 而这正是最常见的截断形态，
+     *                   原来它走的是这条早退分支，连翻译都没走到
+     */
+    if (start === -1) {
+      throw new Error(
+        '模型没有按要求回 JSON，回的是一段普通文字。\n\n'
+        + '常见原因：这个模型不认 response_format（中转站转 Anthropic 时尤其容易），'
+        + '或者它把要求当成了聊天。可以试：重跑一次，或者换一个模型。\n\n'
+        + `它实际回的是：${candidate.slice(0, 200)}`
+      );
+    }
+    if (end <= start) {
+      throw new Error(
+        '模型回的 JSON **没写完就断了**（有开头没有结尾）。\n\n'
+        + '这不是写错了，是这一次要它写的东西超过了它一次能写的量。\n'
+        + '出分镜的话：先出大纲再拆分镜，那条路按场次分批，每批要写的东西少得多。\n\n'
+        + `已经收到的部分：${candidate.slice(0, 200)}…`
+      );
+    }
+    const body = candidate.slice(start, end + 1);
+    try {
+      return JSON.parse(body);
+    } catch (err) {
+      /**
+       * ⚠ 这一层原来是**裸抛**的 —— 用户看到的就是解析器那句
+       * "Expected ',' or '}' after property value in JSON at position 180"。
+       * 现在翻译成人话，并且把出错那几个字摆出来。
+       */
+      throw new Error(explainBadJSON(body, err));
+    }
+  }
+}
+
+/**
+ * ══════════ 要一份 JSON：解析不了就带着错让它重写一次 ══════════
+ *
+ * 用户真机上连着撞了两次：
+ *   Expected ',' or '}' after property value in JSON at position 180 (line 8 column 28)
+ *   Expected ',' or '}' after property value in JSON at position 924 (line 39 column 31)
+ *
+ * 根因是提示词自己造的：它要求"dialogue 原样抄剧本里的台词"，
+ * 而台词里带英文引号时，原样抄进 JSON 字符串就是不合法的。
+ * 提示词那边已经加了"引号用「」"的规矩，但那只降低概率，挡不住每一次。
+ *
+ * ⚠ 为什么**不**做自动修复：
+ *
+ * 试过"把提前收尾的那个引号转义掉再重试"这条路，在常见情形下能修对，
+ * 但一份大纲里有两处以上时它会**把两个字段并进同一个字符串**——
+ * 解析成功了，内容却是错的（台词并进了摘要）。我还写了一道
+ * "字段数不能变少"的护栏，结果护栏也识别不出来：被并进字符串里的
+ * `":"` 照样被数进去。
+ *
+ * "解析成功但内容是错的"比报错糟得多 —— 你不会知道它错了。
+ * 所以宁可多花一次调用，让模型自己重写一份干净的。
+ *
+ * 重写只做一次。第二次还坏就老实报错 —— 那时候多半不是运气问题，
+ * 而是这个模型写不了严格 JSON，该换一个。
+ *
+ * ⚠ 只兜"写歪了"。**不兜截断** —— 截断是 adapters.chat 抛的错，
+ * 根本走不到这里；那一种该由调用方缩批重来（见 studio.analyzeScript）。
+ */
+export async function chatJSON(args, { onEvent, label = '这一步' } = {}) {
+  const first = await adapters.chat(args);
+  try {
+    return { parsed: extractJSON(first.text), text: first.text, retried: false };
+  } catch (err) {
+    const why = String(err.message).split('\n')[0].slice(0, 80);
+    onEvent?.({
+      type: 'note',
+      message: `${label}：模型这次回的 JSON 解析不了（${why}），`
+        + '带着错让它重写一遍 —— 这一次的钱已经花了，重写会再花一次。'
+    });
+    const retry = await adapters.chat({
+      ...args,
+      user: `${args.user}\n\n──────── 上一次的输出没能解析 ────────\n\n`
+        + `${String(err.message).slice(0, 300)}\n\n`
+        + '请重新输出一份**严格合法的 JSON**：\n'
+        + '· 字符串里的引号一律用中文「」，**不要用英文双引号**；\n'
+        + '· 字符串里不要直接换行；\n'
+        + '· 不要代码块围栏，不要任何解释文字。'
+    });
+    return { parsed: extractJSON(retry.text), text: retry.text, retried: true };
   }
 }
