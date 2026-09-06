@@ -2819,6 +2819,16 @@ function shotCardOf(s, v, portrait, probs = shotIssues(s)) {
     s.imagePath
       ? h('div', { class: 'muted', style: 'margin-top:8px;line-height:1.6' }, refLine(s))
       : null,
+    /**
+     * ⚠ 提示词被翻成英文这件事必须看得见。
+     *
+     * 这件事一直在做（服务商声明了只认英文就自动翻），但界面上从来没说过——
+     * 于是用户来问「能不能自动翻译」。默默做了又不说，等于没做。
+     */
+    s.imagePath && s.promptTranslated
+      ? h('div', { class: 'muted', style: 'margin-top:6px;line-height:1.6' },
+          '提示词发出去之前被自动翻成了英文 —— 这家模型只认英文')
+      : null,
     // 还剩几条问题，在这儿一次说完 —— 上面那条只摆最要紧的
     probs.length > 1
       ? h('div', { class: 'muted', style: 'margin-top:8px;line-height:1.6' },
@@ -2903,6 +2913,127 @@ async function openWhy(s, fixable) {
       h('div', { class: 'diag-why' }, it.why),
       h('div', { class: 'diag-how' }, `→ ${it.how}`),
       it.costs ? h('span', { class: 'diag-cost' }, '这一下要重新出图（花钱）') : null)));
+
+    /**
+     * ══════════ 提示词是哪几层拼出来的 ══════════
+     *
+     * 放在诊断**下面**、重出按钮**上面**，因为顺序就是判断顺序：
+     * 先看有没有明确原因 → 没有的话看看是不是哪一层在抢戏 → 再决定花不花这笔钱。
+     *
+     * 关掉一层不删任何东西，随时能打开（借 Blender 的 Modifier Stack）。
+     */
+    // cap:prompt-layers
+    if (s.imagePath) {
+      const stack = h('div', { class: 'layer-stack' });
+      const paintLayers = (list) => {
+        clear(stack);
+        for (const l of list || []) {
+          stack.append(h('label', { class: `layer-row${l.muted ? ' off' : ''}` },
+            h('input', {
+              type: 'checkbox',
+              checked: !l.muted,
+              onchange: async (e) => {
+                const now = new Set((list || []).filter((x) => x.muted).map((x) => x.id));
+                if (e.target.checked) now.delete(l.id); else now.add(l.id);
+                try {
+                  await api(`/projects/${project.id}/shots/${s.id}`, {
+                    method: 'PATCH', body: { promptMute: [...now] }
+                  });
+                  const fresh = await api(`/projects/${project.id}/shots/${s.id}/prompts`);
+                  paintLayers(fresh.layers || []);
+                  toast(e.target.checked ? `打开了「${l.name}」` : `关掉了「${l.name}」—— 重出才生效`, 'ok');
+                } catch (err) {
+                  toast(err.message, 'bad');
+                  e.target.checked = !e.target.checked;
+                }
+              }
+            }),
+            h('span', { class: 'layer-name' }, l.name),
+            h('span', { class: 'layer-text' }, l.text)));
+        }
+      };
+      // ⚠ 自己的 class：shot-more 手机端别处也在用，混着取会抓错人
+      const fold = h('details', { class: 'layer-fold', style: 'margin-top:12px' },
+        h('summary', {}, '这条提示词由哪几层拼成'),
+        h('div', { class: 'muted', style: 'font-size:12px;margin:6px 0' },
+          '关掉一层再重出一张，就能看出那一层起了多大作用。关掉不删任何东西。'),
+        stack);
+      add(host, fold);
+      api(`/projects/${project.id}/shots/${s.id}/prompts`)
+        .then((pr) => paintLayers(pr.layers || []))
+        .catch(() => { stack.append(h('div', { class: 'muted' }, '取不到')); });
+    }
+
+    /**
+     * ══════════ 和商家后台比 ══════════
+     *
+     * 用户的原话：「我用的无审核出图，用的同一个描述，在我们工具显示和
+     * 商家后台生成的不一样」。
+     *
+     * "同一个描述"这件事本身就不成立：他在后台贴的是那句画面描述，
+     * 而我们发的是拼好的六七层，外加负向词、参考图、固定种子、项目画幅，
+     * 用外国模型时还先翻成了英文。
+     *
+     * ⚠ 手机上也要有。这件事是**审片时才会问出来的**——
+     * 看到这一镜和后台那张不一样，就是在手机上翻片子的那一刻。
+     * 电脑上才查得到的话，等于让他记着回去再说，而他多半会忘了是哪一镜。
+     *
+     * 折起来放：它是排错用的，不该挡着上面那几条明确原因。
+     */
+    if (s.imagePath) {
+      const cmpHost = h('div', {});
+      const cmpFold = h('details', { class: 'layer-fold', style: 'margin-top:12px' },
+        h('summary', {}, '和商家后台比：我们多发了什么'),
+        cmpHost);
+      add(host, cmpFold);
+      cmpFold.addEventListener('toggle', async () => {
+        // 点开才拉 —— 不点开就不该多打一次接口
+        if (!cmpFold.open || cmpFold.dataset.loaded) return;
+        cmpFold.dataset.loaded = '1';
+        add(cmpHost, h('div', { class: 'muted' }, '查…'));
+        try {
+          // cap:shot-request
+          const r = await api(`/projects/${project.id}/shots/${s.id}/request`);
+          clear(cmpHost);
+          add(cmpHost,
+            h('div', { class: 'muted', style: 'font-size:12px;line-height:1.7;margin-bottom:8px' },
+              `和"在后台贴一句话"相比有 ${r.diffCount} 项不一样。`
+              + `当前走的是${r.endpoint === 'edit' ? '编辑 / 图生图' : '文生图'}接口，${r.provider} / ${r.model}。`),
+            ...r.rows.map((row) => h('div', { class: `diag-item${row.same ? ' same' : ''}` },
+              h('div', { class: 'diag-what' }, `${row.same ? '✓ ' : '✕ '}${row.what}`),
+              h('div', { class: 'req-pair' },
+                h('div', {}, h('b', {}, '我们发的：'), h('span', {}, row.ours)),
+                h('div', {}, h('b', {}, '后台：'), h('span', {}, row.theirs))),
+              h('div', { class: 'diag-why' }, row.why))),
+            h('div', { class: 'diag-how', style: 'margin-top:8px' },
+              '→ 衣服和后台不一样，多半是上面「人物长相」那一层 —— 设定集把衣服冻住了，'
+              + '而你在后台没写衣服。关掉那一层再重出就接近后台了。'),
+            (() => {
+              const go = h('button', { class: 'btn wide', style: 'margin-top:10px' }, '按后台那样出一次（花一次钱）');
+              go.onclick = async () => {
+                if (!confirm('按后台那样重出这一镜？\n\n只发提示词，不带参考图、不带负向词、种子随机。\n\n⚠ 会覆盖这一镜现在的图，并花一次出图的钱。')) return;
+                go.disabled = true;
+                try {
+                  // cap:shot-request
+                  let failed = null;
+                  await stream(`/projects/${project.id}/shots/${s.id}/regenerate`, { bare: true }, (ev) => {
+                    if (ev.type === 'error') failed = ev.message;
+                  });
+                  if (failed) throw new Error(failed);
+                  toast('出好了 —— 和后台那张比一比', 'ok');
+                  close();
+                  await reload();
+                } catch (err) { toast(err.message, 'bad'); go.disabled = false; }
+              };
+              return go;
+            })());
+        } catch (err) {
+          clear(cmpHost);
+          add(cmpHost, h('div', { class: 'diag-item' }, err.message));
+        }
+      });
+    }
+
     if (fixable) {
       add(host, h('button', {
         class: 'btn primary wide', style: 'margin-top:12px', disabled: job.running,

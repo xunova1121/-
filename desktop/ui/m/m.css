@@ -919,3 +919,25 @@ input {
 /* 第二个图标按钮不再吃剩余空间 —— 两个都 margin-left:auto 的话，
    flex 会把空隙平分给它们，中间裂开一道缝 */
 .fchip.icon + .fchip.icon { margin-left: 6px; }
+/* 撤销：和指令框同一张卡 —— 它是指令框的配套，藏起来等于没有 */
+.undo-bar { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.undo-bar:empty { display: none; }
+
+/* ── 提示词分层（Modifier Stack）── */
+.layer-stack { display: flex; flex-direction: column; gap: 2px; }
+.layer-row {
+  display: grid; grid-template-columns: 20px 1fr; gap: 8px 8px; align-items: baseline;
+  padding: 7px 4px; border-radius: 7px; font-size: 12.5px;
+}
+.layer-row .layer-name { font-weight: 600; }
+.layer-row .layer-text { grid-column: 2; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+/* 关掉的层要看得见还在（划掉、变淡），不是消失 —— 消失了就再也打不开 */
+.layer-row.off .layer-name, .layer-row.off .layer-text { opacity: .42; text-decoration: line-through; }
+
+/* ── 和商家后台比 ── */
+/* 一样的那几条压暗但留着：只列不一样的，人没法确认"那其余的呢" */
+.diag-item.same { opacity: .55; }
+.req-pair { margin: 5px 0; font-size: 12px; line-height: 1.7; }
+.req-pair b { color: var(--ink-faint); font-weight: 500; }
+/* 提示词可能几百字：手机上必须能换行，不然整块横着撑出屏幕 */
+.req-pair span { word-break: break-word; }
