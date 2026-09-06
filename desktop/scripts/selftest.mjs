@@ -720,6 +720,16 @@ async function ndjson(pathname, body) {
     .map((l) => JSON.parse(l));
 }
 
+/** 一发一收的接口（不是流）。名字和界面那边的 api() 对齐，读起来是一回事 */
+async function api(pathname, { method = 'GET', body } = {}) {
+  const res = await fetch(`${appUrl}/api${pathname}`, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined
+  });
+  return res.json();
+}
+
 // ─────────────────────── 1. 保险箱 ───────────────────────
 
 section('凭据保险箱');
@@ -8213,6 +8223,122 @@ section('大纲是正式一步（不再是分镜里的一个面板）');
       JSON.stringify(pipe.stepProgress(store.read(p2.id), 'outline')));
     check('一场都没拆出来时不算完成（和别的步骤一个口径）',
       pipe.stepProgress({ outline: { beats: [] } }, 'outline').done === 0);
+  }
+
+  /**
+   * ══ 每一步都得有自己那几块面板 ══
+   *
+   * 用户报的原话：「在大纲流水线怎么会显示分镜」。
+   *
+   * 原因是 studio.js 里那张 stepPanels 表**漏了 outline 这一行** ——
+   * 我把大纲提成正式一步的时候只改了服务端和左边菜单，没改这张表。
+   * 漏一行不报错、不变红，applyStepPanels 走默认分支显示分镜网格，
+   * 于是点「大纲」看见的是分镜。这种"显示成另一步"的错只能靠盯着表查。
+   *
+   * ⚠ 用正则读源码是没办法的办法（这一段在渲染函数里，import 不出来）。
+   * 所以下面同时验"确实读到了那张表"—— 表名改了的话这一条会红，
+   * 而不是悄悄变成"什么都没查"。
+   */
+  {
+    const src = fs.readFileSync(path.join(PROJECT_ROOT, 'ui', 'views', 'studio.js'), 'utf8');
+    const at = src.indexOf('const stepPanels = {');
+    const table = at === -1 ? '' : src.slice(at, src.indexOf('\n    };', at));
+    check('⚠ 读到了 stepPanels 那张表（读不到的话下面几条等于没查）',
+      table.length > 40 && /shotsPanel/.test(table), String(table.length));
+
+    // export 不在界面上（它是导出，没有自己的面板），别的每一步都要有
+    const need = store.STAGES.filter((s) => s !== 'export');
+    for (const id of need) {
+      check(`「${store.STAGE_LABELS[id] || id}」这一步有自己的面板`,
+        new RegExp(`(^|[\\s{,])${id}:`, 'm').test(table), table.slice(0, 200));
+    }
+    check('剧本那一步也有（它是界面自己加的第一步）', /'script-src':/.test(table));
+
+    /**
+     * ⚠ 大纲只能出现在大纲那一步。
+     *
+     * 原来剧本那一步和分镜那一步各挂了一份，加上它自己就是三份 ——
+     * 用户的原话：「剧本下的大纲放到流水线上的大纲吧，他两个本身就是一个事情」。
+     */
+    const outlineRows = table.split('\n').filter((l) => /outlinePanel/.test(l));
+    check('⚠ 大纲面板只挂在大纲那一步（不是三个地方各一份）',
+      outlineRows.length === 1 && /^\s*outline:/.test(outlineRows[0]),
+      JSON.stringify(outlineRows));
+  }
+}
+
+/**
+ * ════════ 大纲这一步自己能增删改 ════════
+ *
+ * 用户的原话：「应该是一条条的故事梗概啊，可以修修改增加，为分镜做准备」。
+ *
+ * 后端 applyOps 一直支持 insert / delete / move / edit，界面上却只接了 edit——
+ * 想加一场得去跟模型说一句话、等它想、再勾一条。加一场空白的不该花一次模型调用。
+ */
+section('大纲这一步：加一场、删一场、挪一场（不经过模型）');
+{
+  const ol3 = await import('../core/pipeline/outline.js');
+  const p = store.create({ title: '手改大纲', targetDuration: 60 });
+  store.update(p.id, (x) => { x.script = '阿澜在码头巡查，发现缆绳被割断。'; return x; });
+  await ndjson(`/projects/${p.id}/stage/outline`, {});
+
+  const beatsOf = () => ol3.normalizeOutline(store.read(p.id).outline).beats;
+  const n0 = beatsOf().length;
+  check('先有一份大纲垫底（不然下面全是空转）', n0 >= 2, String(n0));
+
+  // ── 加 ──
+  const first = beatsOf()[0];
+  let r = await api(`/projects/${p.id}/outline/apply`, {
+    method: 'POST',
+    body: { ops: [{ op: 'insert', after: first.id, beat: { scene: '（新的一场）', summary: '', seconds: 8 } }] }
+  });
+  check('插了一场', r.applied === 1 && beatsOf().length === n0 + 1, `${r.applied} / ${beatsOf().length}`);
+  check('⚠ 插在了指定那一场后面，不是甩到末尾',
+    beatsOf()[1].scene === '（新的一场）', JSON.stringify(beatsOf().map((b) => b.scene)));
+  check('空摘要的一场也收得下（先占位，再点「改」填内容）',
+    beatsOf()[1].summary === '', JSON.stringify(beatsOf()[1]));
+
+  // ── 挪 ──
+  const mid = beatsOf()[1];
+  r = await api(`/projects/${p.id}/outline/apply`, {
+    method: 'POST', body: { ops: [{ op: 'move', id: mid.id, after: null }] }
+  });
+  check('挪到最前面（after:null 不能被当成"没说"）',
+    beatsOf()[0].id === mid.id, JSON.stringify(beatsOf().map((b) => b.scene)));
+
+  // ── 删 ──
+  r = await api(`/projects/${p.id}/outline/apply`, {
+    method: 'POST', body: { ops: [{ op: 'delete', id: mid.id }] }
+  });
+  check('删掉了', beatsOf().length === n0 && !beatsOf().some((b) => b.id === mid.id), String(beatsOf().length));
+
+  /**
+   * 锁着的（已经拆过分镜的）不能删不能挪 —— 删了之后那几镜就挂在
+   * 一个不存在的场次上，而它们可能已经出过图、花过钱。
+   */
+  {
+    store.update(p.id, (x) => {
+      x.outline.beats[0].locked = true;
+      return x;
+    });
+    const lockedId = beatsOf()[0].id;
+    const rr = await api(`/projects/${p.id}/outline/apply`, {
+      method: 'POST', body: { ops: [{ op: 'delete', id: lockedId }] }
+    });
+    check('⚠ 锁着的那一场删不掉', rr.refused?.length === 1 && beatsOf().some((b) => b.id === lockedId),
+      JSON.stringify(rr.refused));
+    check('而且说清了为什么（不是干瞪眼）', /锁|拆过分镜/.test(rr.refused?.[0]?.why || ''),
+      rr.refused?.[0]?.why);
+  }
+
+  // ── 界面上真的有这几颗按钮 ──
+  {
+    const src = fs.readFileSync(path.join(PROJECT_ROOT, 'ui', 'views', 'studio.js'), 'utf8');
+    check('⚠ 界面上接了 insert（不然后端支持也没人点得到）', /op: 'insert'/.test(src));
+    check('界面上接了 delete', /op: 'delete'/.test(src));
+    check('界面上接了 move', /op: 'move'/.test(src));
+    check('空大纲时也有一个"加一场"的入口（不生成也能自己敲）',
+      /ob-empty[\s\S]{0,600}ob-tail/.test(src));
   }
 }
 

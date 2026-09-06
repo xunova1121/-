@@ -304,7 +304,7 @@ export default {
         'div',
         { class: 'panel' },
         h('h2', { class: 'panel-title' }, '剧本'),
-        h('p', { class: 'panel-hint' }, '小说片段、大纲、完整剧本都行。保存之后，去左边菜单里点第 02 步「设定集」往下走。'),
+        h('p', { class: 'panel-hint' }, '小说片段、大纲、完整剧本都行。保存之后，去左边菜单里点第 02 步「大纲」往下走。'),
         scriptArea,
         h('div', { class: 'row', style: 'margin-top:11px' },
           h('div', { class: 'shrink', style: 'width:150px' }, h('label', {}, '每章目标镜数'), shotCount),
@@ -3106,7 +3106,9 @@ export default {
     const stageName = h('span', { class: 'badge beam' });
 
     const HINTS = {
-      'script-src': '剧本是整条流水线的输入。保存之后就可以往下走 —— 长篇建议先分章，后面每一步都能按章单独跑。',
+      'script-src': '剧本是整条流水线的输入。保存之后去下一步「大纲」—— 长篇建议先分章，后面每一步都能按章单独跑。',
+      outline: '一行一场戏的故事梗概，是剧本和分镜之间那一层。在这儿改一句话的事，到了分镜表上就是改十几行。'
+        + '改顺了、加够了再往下走 —— 拆出来的分镜是你已经同意过的。',
       bible: '这一步只出文字，几秒钟就回来。去「设定集」页把描述过一遍，确认没问题再跑下一步出图。',
       sheets: '按已确认的描述出设定图，出完自动冻结。之后想改：去「设定集」页解冻 → 改描述 → 重出那一张。',
       script: '分镜是后面所有步骤的清单。每镜的时长在这里分配，加起来就是计划时长。',
@@ -4492,15 +4494,44 @@ export default {
       const budgetHost = h('div', {});
       const chatHost = h('div', { class: 'ob-chat' });
 
+      /**
+       * ── 增删挪：直接点，不用跟模型商量 ──
+       *
+       * 后端 applyOps 一直支持 insert / delete / move，界面上却只接了 edit ——
+       * 想加一场得去下面那个输入框跟模型说一句，等它想，再勾一条。
+       * 加一场空白的是**十秒钟的事**，不该走一次模型调用。
+       */
+      const runOps = async (ops, okMsg) => {
+        try {
+          // cap:outline-revise
+          const r = await api(`/projects/${project.id}/outline/apply`, { method: 'POST', body: { ops } });
+          project.outline = r.project.outline;
+          paintOutline();
+          if (r.refused?.length) toast(`没做成：${r.refused[0].why}`, 'err');
+          else if (okMsg) toast(okMsg, 'ok');
+        } catch (err) { toast(err.message, 'err'); }
+      };
+
       const paintOutline = () => {
         clear(listHost); clear(budgetHost);
         const o = OUTLINE.normalizeOutline(project.outline);
         sumLine.textContent = OUTLINE.summarize(project.outline, project.targetDuration);
+        /**
+         * 末尾那颗「加一场」。
+         *
+         * 先建出来是因为**空列表时它也得在** —— 没有剧本、或者不想让模型
+         * 拆，自己一场一场敲出来是完全成立的一条路。
+         */
+        const tailAdd = h('button', { class: 'btn ghost sm' }, '＋ 在末尾加一场');
+        tailAdd.onclick = () => runOps(
+          [{ op: 'insert', beat: { scene: '（新的一场）', summary: '', dialogue: '', seconds: 8 } }],
+          '加好了 —— 点「改」把内容填上');
         if (!o.beats.length) {
           listHost.append(h('div', { class: 'ob-empty' },
             '还没有大纲。先生成一份 —— 十来行、一行一场戏，改顺了再拆分镜。',
             h('br'),
-            '在这一层改比在分镜表上改省事得多，而且拆出来的分镜是你已经同意过的。'));
+            '在这一层改比在分镜表上改省事得多，而且拆出来的分镜是你已经同意过的。',
+            h('div', { class: 'ob-tail' }, tailAdd)));
           return;
         }
         for (const [i, b] of o.beats.entries()) {
@@ -4533,6 +4564,29 @@ export default {
            * 摆一个点了就报错的按钮比不摆更糟。
            */
           const editBtn = b.locked ? null : h('button', { class: 'btn ghost sm', title: '自己改这一场' }, '改');
+          /**
+           * 增删挪三颗。锁着的那几场不给删、不给挪 —— applyOps 会拒，
+           * 摆一个点了就报错的按钮比不摆更糟（和「改」一个道理）。
+           * 「加」不受锁影响：在一场锁着的后面插一场，插进来的是新的。
+           */
+          const addBtn = h('button', { class: 'btn ghost sm', title: '在这一场后面插一场空的' }, '＋');
+          addBtn.onclick = () => runOps(
+            [{ op: 'insert', after: b.id, beat: { scene: '（新的一场）', summary: '', dialogue: '', seconds: 8 } }],
+            '插好了 —— 点「改」把内容填上');
+          const delBtn = b.locked ? null : h('button', { class: 'btn ghost sm', title: '删掉这一场' }, '删');
+          if (delBtn) {
+            delBtn.onclick = () => {
+              if (!confirm(`删掉第 ${i + 1} 场「${b.scene || '未定'}」？`)) return;
+              runOps([{ op: 'delete', id: b.id }], '删了');
+            };
+          }
+          const upBtn = (i > 0 && !b.locked)
+            ? h('button', { class: 'btn ghost sm', title: '和上一场换个位置' }, '↑') : null;
+          if (upBtn) {
+            // 往前挪 = 插到"上上一场"后面；已经是第二场的话 after:null（挪到最前）
+            const target = i >= 2 ? o.beats[i - 2].id : null;
+            upBtn.onclick = () => runOps([{ op: 'move', id: b.id, after: target }]);
+          }
           if (editBtn) {
             editBtn.onclick = () => {
               const f = {
@@ -4617,9 +4671,12 @@ export default {
                 } catch (err) { toast(err.message, 'err'); } finally { un.disabled = false; }
               };
               return un;
-            })() : (editBtn || ''));
+            })() : (editBtn || ''),
+            upBtn || '', addBtn, delBtn || '');
           listHost.append(row);
         }
+
+        listHost.append(h('div', { class: 'ob-tail' }, tailAdd));
 
         /**
          * ── 还没拆分镜的那几场 ──
@@ -4897,10 +4954,25 @@ export default {
         }, '去分镜改时长'));
     }
 
+    /**
+     * ── 每一步显示哪几块 ──
+     *
+     * ⚠ 这张表**必须给每一个 stage 都留一行**。大纲刚成为正式一步时
+     * 这里漏了它，于是 applyStepPanels 走了默认分支（[shotsPanel]）——
+     * 点「大纲」看见的是分镜网格。用户报的就是这个。
+     * 漏一行不会报错、不会红，只会显示成另一步，所以下面有一条自检盯着。
+     *
+     * ── 大纲只在大纲那一步 ──
+     *
+     * 原来剧本那一步和分镜那一步各挂了一份大纲面板，加上大纲自己这一步，
+     * 同一块东西出现在三个地方。"剧本下面的大纲"和"流水线上的大纲"
+     * 本来就是一件事 —— 一件事只该有一个地方。
+     */
     const stepPanels = {
-      'script-src': [scriptPanel, chapterPanel, outlinePanel],
+      'script-src': [scriptPanel, chapterPanel],
+      outline: [outlinePanel],
       bible: [readinessHost, extendHost, biblePanel, sitePanelHost],
-      script: [durationPanel, chapterPanel, outlinePanel, shotsPanel],
+      script: [durationPanel, chapterPanel, shotsPanel],
       assets: [shotsPanel],
       video: [shotsPanel],
       voice: [shotsPanel],
