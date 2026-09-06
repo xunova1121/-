@@ -4208,6 +4208,35 @@ export function updateBibleEntry(projectId, kind, name, patch = {}) {
   const changed = [];
   let renamedTo = null;
 
+  /**
+   * ── 有没有实体形象 ──
+   *
+   * 单独处理，不能进下面那个循环：那里一律 `String(value).trim()`，
+   * 而这是个布尔 —— 进去会变成字符串 "false"，而 "false" 是真值。
+   *
+   * 关掉的时候把已经出好的那张图**摘掉**（只清指针，不删文件）。
+   * 用户按这个开关的意思就是"这东西不该有脸"，留着那张图的话它
+   * 照样在设定集页上挂着、也照样能被别处捞到，而他会以为开关没起作用。
+   */
+  let unsheeted = 0;
+  if (kind === 'char' && 'embodied' in patch) {
+    const want = patch.embodied !== false && patch.embodied !== 'false';
+    if (want !== variants.isEmbodied(item)) {
+      item.embodied = want;
+      changed.push('embodied');
+      if (!want) {
+        for (const v of variants.variantsOf(item)) {
+          if (v.sheetPath || v.sheetUrl) unsheeted += 1;
+          v.sheetPath = null;
+          v.sheetUrl = null;
+        }
+        if (item.sheetPath || item.sheetUrl) unsheeted += 1;
+        item.sheetPath = null;
+        item.sheetUrl = null;
+      }
+    }
+  }
+
   for (const key of BIBLE_EDITABLE) {
     if (!(key in patch)) continue;
     let value = patch[key];
@@ -4225,7 +4254,7 @@ export function updateBibleEntry(projectId, kind, name, patch = {}) {
     changed.push(key);
   }
 
-  if (!changed.length) return { project, changed: [], renamed: 0 };
+  if (!changed.length) return { project, changed: [], renamed: 0, unsheeted: 0 };
 
   // 文字改了、图还是按旧描述出的 —— 记一个时间戳，界面据此提醒"图没跟上"
   if (changed.some((k) => k === 'appearance' || k === 'sheetPrompt')) {
@@ -4280,7 +4309,7 @@ export function updateBibleEntry(projectId, kind, name, patch = {}) {
   }
 
   store.save(project);
-  return { project: store.read(projectId), changed, renamed, renamedTo };
+  return { project: store.read(projectId), changed, renamed, renamedTo, unsheeted };
 }
 
 /**

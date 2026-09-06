@@ -1807,6 +1807,45 @@ function shrinkImage(file, maxSide) {
 function bibleCard(kind, item, v) {
   const look = h('textarea', { rows: 3, class: 'mta' }, item.appearance || '');
   const save = h('button', { class: 'btn sm grow' }, '保存描述');
+
+  /**
+   * ── 有没有实体形象 ──
+   *
+   * 用户报的：一个叫「神秘声音」的角色，设定里写着"无实体形象，仅以声音
+   * 和文字出现在手机屏幕中"，我们照样给它出了人设图 —— 模型没有身体可画，
+   * 只能自己编一个，编出来是个现代女生，然后跟进它出现的每一镜。
+   *
+   * 手机上也要有：这是**审片时才会发现**的问题（图出来了才看得出不对），
+   * 而审片正是手机端最主要的用法。
+   */
+  const emBox = kind === 'char'
+    ? h('input', { type: 'checkbox', checked: item.embodied !== false })
+    : null;
+  if (emBox) {
+    emBox.onchange = async () => {
+      emBox.disabled = true;
+      try {
+        // cap:bible-embodied
+        const r = await api(`/projects/${project.id}/bible/${kind}/${encodeURIComponent(item.name)}`, {
+          method: 'PATCH', body: { embodied: emBox.checked }
+        });
+        toast(r.unsheeted
+          ? `已标为无实体形象，摘掉了 ${r.unsheeted} 张凭空画出来的人设图`
+          : (emBox.checked ? '会给它出人设图' : '不再给它出人设图'), 'ok');
+        await reload();
+      } catch (err) {
+        toast(err.message, 'err');
+        emBox.checked = !emBox.checked;
+      } finally { emBox.disabled = false; }
+    };
+  }
+  const emRow = emBox
+    ? h('label', {
+        class: 'row', style: 'margin-top:9px;align-items:center;gap:8px;cursor:pointer'
+      },
+      emBox,
+      h('span', { class: 'muted' }, '有实体形象（画得出人）。旁白、画外音、只有声音的角色勾掉'))
+    : null;
   save.onclick = async () => {
     save.disabled = true;
     try {
@@ -1972,6 +2011,7 @@ function bibleCard(kind, item, v) {
             : '这张是模型出的。想用自己的照片就点下面「传一张图」')
       : null,
     h('div', { style: 'margin-top:10px' }, look),
+    emRow,
     pick,
     h('div', { class: 'row', style: 'margin-top:9px' }, save, up, redo, angleBtn));
 }

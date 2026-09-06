@@ -224,6 +224,55 @@ check('设定图挂上了', (await page.locator('#view-inner img').count()) > 0)
 check('左边菜单打上了对勾',
   (await page.locator('.nav-step', { hasText: '设定集' }).first().innerText()).includes('✓'));
 
+/**
+ * ── 「有实体形象」那个开关 ──
+ *
+ * 用户报的：一个叫「神秘声音」、设定里写着"无实体形象"的角色，
+ * 我们照样给它出了张人设图，出来是个穿卫衣的现代女生 ——
+ * 然后那张脸跟进它出现的每一镜。模型自己会判，但会判错，
+ * 所以这个开关必须**在界面上够得着**：判错了要能在一个地方改掉。
+ */
+{
+  const box = page.locator('label:has-text("有实体形象") input[type=checkbox]').first();
+  check('角色卡上有「有实体形象」这个开关', (await box.count()) > 0);
+  if (await box.count()) {
+    check('默认是勾着的（老项目行为不能变）', await box.isChecked());
+    await box.scrollIntoViewIfNeeded();
+    await box.uncheck();
+    await page.waitForTimeout(1800);
+    const saved = await page.evaluate(async (id) => {
+      const p = await (await fetch(`/api/projects/${id}`)).json();
+      const c = p.bible.characters[0];
+      return { embodied: c.embodied, sheet: c.sheetPath, vsheet: c.variants?.[0]?.sheetPath };
+    }, proj.id);
+    check('⚠ 关掉之后真的落盘了', saved.embodied === false, String(saved.embodied));
+    check('⚠ 而且把已经出好的那张图摘掉了（留着它照样会被捞出去用）',
+      !saved.sheet && !saved.vsheet, JSON.stringify(saved));
+
+    /**
+     * 复原：后面几十节都指望这个角色有图。
+     *
+     * ⚠ 走接口而不是再点一次「开始」—— 跑过一次之后那颗按钮就不叫「开始」了，
+     * 按文字找它会一直等到超时。这一段的目的是把数据摆回去，不是验按钮。
+     */
+    await page.locator('label:has-text("有实体形象") input[type=checkbox]').first().check();
+    await page.waitForTimeout(1500);
+    await page.evaluate(async (id) => {
+      const res = await fetch(`/api/projects/${id}/stage/bible`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+      });
+      await res.text();
+    }, proj.id);
+    await page.reload();
+    await page.waitForTimeout(2000);
+    check('改回来并重出之后，图又回来了（不然下面几十条全是空转）',
+      await page.evaluate(async (id) => {
+        const p = await (await fetch(`/api/projects/${id}`)).json();
+        return Boolean(p.bible.characters[0].variants?.[0]?.sheetPath);
+      }, proj.id));
+  }
+}
+
 // ── 第 03 步：分镜 ──
 await step('分镜').click();
 await page.waitForTimeout(600);
