@@ -2042,3 +2042,11 @@ select.mini {
 /* 定位不到的划掉，但**留在列表里** —— 消失的话人会以为模型没挑出这一条 */
 .sc-fix.refused { opacity: .55; text-decoration: line-through; cursor: default; }
 .sc-refused { color: var(--alarm); text-decoration: none; }
+
+/* ── 「和后台比」：我们发的 vs 后台贴一句话 ── */
+/* 一样的那几条也留着（压暗），只列不一样的话，人没法确认"那其余的呢" */
+.diag-item.same { opacity: .6; }
+.req-pair { margin: 5px 0; font-size: 12px; line-height: 1.7; }
+.req-pair b { color: var(--ink-dim); font-weight: 500; }
+/* 提示词可能几百字：给它自己的滚动条，别把整张卡片撑开 */
+.req-pair span { word-break: break-word; }

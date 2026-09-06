@@ -3520,6 +3520,18 @@ async function generateAssetsRaw(projectId, { only = null, chapterId = null, reg
           t.modelUsed = `${r.image.provider} / ${result.used?.model || r.image.model}`;
           // 参考图**真的发出去了几张**。厂商不支持图生图时它们会被丢掉，
           // 那时候这一镜的一致性只剩提示词撑着 —— 记下来，回头查得出
+          /**
+           * ⚠ 提示词被翻成英文这件事**必须看得见**。
+           *
+           * 用户问的原话：「wavespeed.ai 我用的这个外国的商家大模型，
+           * 他只识别英文，能不能自动识别用他的时候给我进行翻译」——
+           * 而这件事**早就在做了**（adapters 里按 promptLang 自动翻）。
+           * 他会问，是因为界面上从头到尾一个字都没说过。
+           *
+           * 一个默默做了、又不说的功能，等于没做：他没法确认，
+           * 只能来问，或者干脆以为它是坏的。
+           */
+          t.promptTranslated = result.used?.promptTranslated === true;
           t.refsSent = result.used?.refsSent ?? null;
           t.bibleRefs = result.refLabels || [];
 
@@ -3872,6 +3884,161 @@ export async function buildPrevizFrameReferences(projectId, shot, controls, { on
  * @param {string} [opts.prompt]   手写提示词，完全覆盖自动装配的那套
  * @param {number} [opts.seed]     指定种子；不传则在原种子上偏移，避开上次那个坑
  */
+/**
+ * ══════════ 我们发出去的，和你在商家后台贴的那一句，差在哪 ══════════
+ *
+ * 用户的原话：「我用的无审核出图，用的同一个描述，在我们工具显示和
+ * 商家后台生成的不一样」。
+ *
+ * 他没说错，而且差别比"同一个描述"这四个字大得多。他在后台贴一句话，
+ * 走的是**文生图、一张参考图都没有、没有负向词、随机种子**；
+ * 而我们这边同一镜发出去的是：
+ *
+ *   提示词    不是他看到的那句，是拼好的六七层（画风锚 + 外貌 + 场景 + …）
+ *   负向词    设定集里冻结的那一串
+ *   参考图    场景图 + 角色图 + 道具图，两三张，还可能走 /images/edits
+ *   种子      按项目和镜号推出来的固定值
+ *   画幅      项目的画幅，不是厂商默认的 1:1
+ *
+ * 每一样都会改变出来的画面，而界面上原来一样都没有正面说过 ——
+ * 只在「出处与排查」里零散地提过参考图那一条。
+ *
+ * ⚠ 这个函数**不重新推导任何东西**：每一项都从真正发请求时用的那几个
+ * helper 里取（assemblePrompt / refPlan / pickRefs / identityRef）。
+ * 另写一份"我们大概会发什么"的话，它和真实请求迟早会分家 ——
+ * 而分家之后它给出的每一条都是错的，还看起来很权威。
+ *
+ * 不花钱：纯读，不发任何请求。
+ */
+export function describeImageRequest(projectId, shotId) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const shot = (project.shots || []).find((s) => s.id === shotId);
+  if (!shot) throw new Error(`没有这一镜：${shotId}`);
+  if (!project.bible) throw new Error('缺少设定集');
+
+  const r = routing();
+  const assembled = consistency.assemblePrompt(project.bible, shot);
+  const plan = consistency.refPlan();
+  const picked = consistency.pickRefs(
+    {
+      images: assembled.refImages,
+      labels: assembled.refLabels,
+      paths: assembled.refPaths,
+      sources: assembled.refSources,
+      kinds: assembled.refKinds
+    },
+    plan
+  );
+  const willSendRefs = plan.send ? picked.labels : [];
+
+  /**
+   * 逐条列差别。每条三样：我们发的、后台贴一句话时是什么、这一条会怎么影响画面。
+   * `same: true` 的那几条摆出来是为了让人知道**它被查过了**——
+   * 只列不一样的，人没法确认"那其余的呢"。
+   */
+  const rows = [];
+  const bare = String(shot.description || '').trim();
+  rows.push({
+    key: 'prompt',
+    what: '提示词',
+    ours: assembled.prompt,
+    theirs: bare,
+    same: assembled.prompt.trim() === bare,
+    why: `我们发的是拼好的 ${assembled.layers?.length || 0} 层、共 ${assembled.prompt.length} 字，`
+      + `而卡片上显示的那句画面描述只有 ${bare.length} 字。多出来的是画风锚、角色外貌、`
+      + '场景环境、机位景别这些 —— 它们正是让全片看起来是一部片子的东西，'
+      + '但也确实让这一次的画面和你在后台贴一句话得到的不一样。'
+  });
+  rows.push({
+    key: 'negative',
+    what: '负向提示词',
+    ours: assembled.negative || '（空）',
+    theirs: '（空）',
+    same: !assembled.negative,
+    why: '后台贴一句话时通常不填负向词。负向词会实打实地改变画面 —— 画风预设里那串'
+      + '（"3D渲染, 塑料质感, 现代元素…"）就是专门用来把画面往某个方向推的。'
+  });
+  rows.push({
+    key: 'refs',
+    what: '参考图',
+    ours: willSendRefs.length ? `${willSendRefs.length} 张：${willSendRefs.join('、')}` : '不发',
+    theirs: '不发',
+    same: !willSendRefs.length,
+    why: willSendRefs.length
+      ? '**这一条差别最大。** 带着参考图发出去，模型是在"照着这几张画"，'
+        + '而不是从一句话凭空生成 —— 出来的东西和纯文生图不是一个量级的差别。'
+        + (plan.useEditModel
+          ? '而且当前走的是**编辑/图生图**那条路（/images/edits 之类），'
+            + '它是在给出的图上改，更不可能和后台的文生图一样。'
+          : '')
+      : '这一项和后台一致。'
+  });
+  /**
+   * 提示词语言。
+   *
+   * 声明了 promptLang: 'en' 的服务商（WaveSpeed 这类外国模型），
+   * 发出去之前会自动翻成英文 —— 而用户在后台贴的多半是中文原文。
+   * 这一条不摆出来的话，"同一句话出来不一样"里最大的一块差别是隐形的。
+   */
+  const provMeta = catalog.PROVIDERS.find((x) => x.id === r.image.provider);
+  if (provMeta?.promptLang === 'en') {
+    rows.push({
+      key: 'lang',
+      what: '提示词语言',
+      ours: '自动翻成英文再发',
+      theirs: '你贴进去的原文（多半是中文）',
+      same: false,
+      why: '这家模型只认英文，中文发过去出来的东西明显差一档 —— 所以我们发之前会翻一遍。'
+        + '而你在后台贴的是中文原文，两边喂给模型的根本是两句话。'
+        + '想对照的话，把翻好的英文贴进后台再出一次才是公平的比较。'
+    });
+  }
+
+  rows.push({
+    key: 'seed',
+    what: '随机种子',
+    ours: String(assembled.seed),
+    theirs: '（每次随机）',
+    same: false,
+    why: '我们按项目和镜号推出一个固定种子，让同一个人每次长得一样。'
+      + '后台每次是随机的 —— 所以哪怕别的全都一样，两边也不会得到同一张图。'
+  });
+  rows.push({
+    key: 'ratio',
+    what: '画幅',
+    ours: project.aspectRatio || '（跟随设置）',
+    theirs: '（后台默认，多数是 1:1）',
+    same: false,
+    why: '画幅不只是裁切：多数模型在不同画幅下的构图是重新生成的，不是同一张图切一刀。'
+  });
+  rows.push({
+    key: 'model',
+    what: '服务商 / 模型',
+    ours: `${r.image.provider} / ${r.image.model}`,
+    theirs: '（你在后台选的那个）',
+    same: false,
+    why: '同一家的不同模型、甚至同一模型的不同接口路径，出来的东西可以差很远。'
+      + '先确认后台选的和这里是同一个。'
+  });
+
+  return {
+    shotIndex: shot.index,
+    provider: r.image.provider,
+    model: r.image.model,
+    endpoint: plan.useEditModel ? 'edit' : 'text-to-image',
+    prompt: assembled.prompt,
+    layers: assembled.layers || [],
+    negative: assembled.negative || '',
+    seed: assembled.seed,
+    aspectRatio: project.aspectRatio || '',
+    refs: willSendRefs,
+    refMode: plan.mode,
+    rows,
+    diffCount: rows.filter((x) => !x.same).length
+  };
+}
+
 export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
@@ -3950,12 +4117,43 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
         + '改成「只用我自己传的图」。'
     });
   }
-
-  onEvent?.({ type: 'shot', shotId, status: 'running', message: `第 ${shot.index} 镜重出（${providerId} / ${model}）…` });
-  if (refImages.length) {
+  onEvent?.({
+    type: 'shot',
+    shotId,
+    status: 'running',
+    message: opts.bare
+      ? `第 ${shot.index} 镜：按后台那样出一次（${providerId} / ${model}）…`
+      : `第 ${shot.index} 镜重出（${providerId} / ${model}）…`
+  });
+  if (opts.bare) {
+    onEvent?.({
+      type: 'note',
+      message: '这一次只发提示词：不带参考图、不带负向词、不走编辑模型、种子交给厂商随机 ——'
+        + '和你在后台贴一句话是同一种发法。\n'
+        + '出来像了，说明差别是我们额外加的那几样；还是不像，说明差别在厂商那边。'
+    });
+  } else if (refImages.length) {
     onEvent?.({ type: 'note', message: `参考设定集：${freshRefs.labels.join('、')}` });
   }
 
+  /**
+   * ══════════ 「按后台那样出一次」 ══════════
+   *
+   * 用户报的：「用的同一个描述，在我们工具显示和商家后台生成的不一样」。
+   *
+   * 逐条列差别（见 describeImageRequest）能说清**可能**是哪几项，
+   * 但说不清**到底**是哪一项 —— 而这件事只有做一次对照实验才能定。
+   *
+   * 所以这条路把我们额外加的东西全摘掉，只发提示词：
+   * 不带参考图、不带负向词、不走编辑模型、种子交给厂商随机。
+   *
+   * 出来的结果只有两种，而两种的下一步完全不同：
+   *   和后台像了   差别是我们加的那几样 —— 逐条关掉就能定位到具体是哪一样
+   *   还是不像     差别在厂商那边（账号、模型版本、接口路径），我们这边再调也没用
+   *
+   * ⚠ 画幅照旧跟项目走：后台你同样会选画幅，把它一起摘掉的话，
+   *   两边又多出一个不一样的变量，这个实验就白做了。
+   */
   const image = await adapters.generateImage({
     providerId,
     model,
@@ -3964,14 +4162,14 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
      * 用户在卡片上专门挑了一个模型，那就照他挑的发 ——
      * 界面上写着一个模型、实际发的是另一个，比参考图不生效更糟。
      */
-    editModel: opts.model || !useEdit ? null : undefined,
+    editModel: opts.bare || opts.model || !useEdit ? null : undefined,
     prompt: opts.prompt?.trim() || assembled.prompt,
-    negative: assembled.negative,
+    negative: opts.bare ? '' : assembled.negative,
     aspectRatio: project.aspectRatio || null,
-    seed,
-    refImages,
-    identityRef: faceRef,
-    label: `重出 #${shot.index}`,
+    seed: opts.bare ? null : seed,
+    refImages: opts.bare ? [] : refImages,
+    identityRef: opts.bare ? null : faceRef,
+    label: opts.bare ? `对照后台 #${shot.index}` : `重出 #${shot.index}`,
     onEvent
   });
 
@@ -4006,6 +4204,9 @@ export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
       t.imageAt = new Date().toISOString();
       t.imageSize = size || null;
       t.modelUsed = `${providerId} / ${image.used?.model || model}`;
+      // ⚠ 两条路各写一份，就得各写这一行 —— 只改批量那条的话，
+      //   单独重出的镜头上这个标记永远是 false，而那正是排错时最常走的那条路
+      t.promptTranslated = image.used?.promptTranslated === true;
       t.refsSent = image.used?.refsSent ?? null;
 
       /**
