@@ -1521,11 +1521,30 @@ console.log('\n流式：处理器里的错要炸出来，不能静默吞掉');
 }
 
 console.log('\n大纲');
-await step('剧本').click().catch(() => {});
+/**
+ * ⚠ 大纲在**大纲那一步**，不在剧本那一步。
+ *
+ * 原来这里点的是「剧本」—— 那时候大纲面板挂在三个地方（剧本、大纲、分镜），
+ * 而大纲自己那一步反而漏了，点进去看见的是分镜网格。用户报的就是这个。
+ * 现在一件事只有一个地方，这里也跟着改成点「大纲」。
+ */
+await step('大纲').click().catch(() => {});
 await page.waitForTimeout(1000);
 
+/**
+ * ⚠ 这里必须量**看得见的**分镜卡。
+ *
+ * 分镜面板是 display:none 藏起来的，卡片一直挂在 DOM 上 ——
+ * locator.count() 不管可见性，照样数得出十几张。第一版就是这么写的，
+ * 于是这条断言在产品完全正确的时候变红。`:visible` 才是要问的那个问题。
+ */
+check('⚠ 大纲这一步显示的是大纲，不是分镜网格',
+  (await page.locator('#view-inner .shot-card:visible').count()) === 0
+  && /一行一场戏/.test(await inner()),
+  (await inner()).slice(0, 160));
+
 const buildBtn = page.locator('button:has-text("从剧本生成大纲")').first();
-check('剧本这一步有大纲面板', (await buildBtn.count()) > 0);
+check('大纲这一步有大纲面板', (await buildBtn.count()) > 0);
 if (await buildBtn.count()) {
   await buildBtn.scrollIntoViewIfNeeded();
   await buildBtn.click();
@@ -1550,6 +1569,42 @@ if (await buildBtn.count()) {
     return p.outline?.beats?.[0]?.seconds;
   }, proj.id);
   check('手改秒数真的落盘了', savedSecs === 77, String(savedSecs));
+
+  /**
+   * ── 增删挪：点按钮，不经过模型 ──
+   *
+   * 后端一直支持，界面上原来只接了「改」—— 想加一场得跟模型说一句话、
+   * 等它想、再勾一条。用户的原话：「可以修修改增加，为分镜做准备」。
+   */
+  {
+    const nBefore = await page.locator('.ob-row').count();
+    await page.locator('.ob-tail button').first().click();
+    await page.waitForTimeout(1200);
+    check('末尾那颗「加一场」真的加了一行',
+      (await page.locator('.ob-row').count()) === nBefore + 1,
+      `${nBefore} → ${await page.locator('.ob-row').count()}`);
+    check('⚠ 加出来的那一场落盘了（不是只在界面上）',
+      await page.evaluate(async (id) => {
+        const p = await (await fetch(`/api/projects/${id}`)).json();
+        return (p.outline?.beats || []).some((b) => b.scene === '（新的一场）');
+      }, proj.id));
+
+    // 行内那颗＋：插在**这一场后面**，不是甩到末尾
+    await page.locator('.ob-row').first().locator('button:has-text("＋")').click();
+    await page.waitForTimeout(1200);
+    check('行内的＋插在了那一行后面，不是末尾',
+      (await page.locator('.ob-row').nth(1).innerText()).includes('新的一场'),
+      (await page.locator('.ob-row').nth(1).innerText()).slice(0, 60));
+
+    // 删回去
+    const nMid = await page.locator('.ob-row').count();
+    page.once('dialog', (d) => d.accept());
+    await page.locator('.ob-row').nth(1).locator('button:has-text("删")').click();
+    await page.waitForTimeout(1200);
+    check('「删」真的删掉一行',
+      (await page.locator('.ob-row').count()) === nMid - 1,
+      `${nMid} → ${await page.locator('.ob-row').count()}`);
+  }
 
   // ── 和模型商量 ──
   sent.length = 0;

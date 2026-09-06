@@ -1521,6 +1521,8 @@ select.mini {
   padding: 1px 6px; border-radius: 999px; background: var(--caution-wash);
 }
 .ob-empty { color: var(--ink-dim); font-size: 13px; line-height: 1.8; padding: 10px 0; }
+/* 末尾那颗「加一场」：和上面的行拉开一点，别看着像最后一行的一部分 */
+.ob-tail { padding: 8px 0 2px; }
 .ob-issue {
   margin-top: 10px; padding: 9px 11px; border-radius: 8px;
   background: var(--caution-wash); border-left: 3px solid var(--caution);
