@@ -51,6 +51,12 @@ import * as jobs from '../jobs.js';
 
 export const extractJSON = consistency.extractJSON;
 
+/**
+ * 要一份 JSON：解析不了就带着错让模型重写一次。
+ * 实现和"为什么不做自动修复"写在 consistency.js 里（挨着 extractJSON）。
+ */
+const chatJSON = consistency.chatJSON;
+
 const SHOT_PROMPT = `你是动态漫画的分镜导演。把剧本拆成可直接投产的分镜表。
 
 **分两步，顺序不能反**：
@@ -87,7 +93,7 @@ const SHOT_PROMPT = `你是动态漫画的分镜导演。把剧本拆成可直�
       "description": "这一镜画面里发生的事，只写看得见的画面，不写心理活动、不写声音",
       "camera": "镜头语言：特写 / 中景 / 全景 / 俯拍 / 跟拍 / 推镜 等",
       "motion": "给图生视频的运镜与动态提示，一句话",
-      "dialogue": "旁白或台词，没有留空字符串",
+      "dialogue": "旁白或台词，没有留空字符串。⚠ 台词里的引号一律用中文「」，不要用英文双引号 \" —— 那会让整份 JSON 解析失败",
       "speaker": "这句台词是谁说的，填角色名；旁白或没有台词就留空字符串",
       "sound": "⚠ 绝大多数镜这里都该留空。只有当这个声音本身在传递画面没说的信息时才填（关着的门后传来敲门声、画外一声玻璃碎）。全片最多三五处。环境音（风声、脚步声、街市声）一律留空 —— 那种东西每镜一个会让成片听起来很乱",
       "transition": "进入这一镜的方式：cut（硬切，默认）/ fade（黑场淡入，换时间换地点用）/ dissolve（叠化，时间流逝或情绪转折用）。绝大多数镜都该是 cut",
@@ -1266,6 +1272,8 @@ const OUTLINE_PROMPT = `你是分场编辑。把剧本拆成**一场一场戏**�
 要紧的三条：
 1. dialogue 要**原样抄剧本里的台词**，不要复述。这个字段用来算"念完要多久"，
    概括一下就算不准了。没有台词的场次留空字符串。
+   ⚠ 但台词里如果有引号，一律用中文的「」，**不要用英文双引号 "**——
+   原样抄一个 " 进来会让整份 JSON 当场解析失败，这一步就全废了。
 2. 场次数量按剧情来，不要凑数。一场戏就是一场戏。
 3. seconds 按这一场的内容估。有大段对话的场次自然长，一个转场空镜自然短。`;
 
@@ -1332,7 +1340,7 @@ export async function buildOutline(projectId, { chapterId = null, onEvent } = {}
   const cap = outline.capScript(source, outline.scriptCapFor(r.outline.model));
   if (cap.note) onEvent?.({ type: 'note', message: cap.note });
 
-  const { text } = await adapters.chat({
+  const { parsed } = await chatJSON({
     providerId: r.outline.provider,
     model: r.outline.model,
     system: OUTLINE_PROMPT,
@@ -1343,8 +1351,7 @@ export async function buildOutline(projectId, { chapterId = null, onEvent } = {}
     stream: true,
     label: '生成大纲',
     onEvent
-  });
-  const parsed = extractJSON(text);
+  }, { onEvent, label: '拆大纲' });
   const fresh = outline.normalizeOutline({ beats: parsed.beats });
   if (!fresh.beats.length) throw new Error('模型没有拆出场次 —— 换一家或者把剧本写具体些');
 
@@ -1431,7 +1438,7 @@ export async function reviseOutline(projectId, { instruction, onEvent } = {}) {
     锁住: b.locked || undefined
   }));
 
-  const { text } = await adapters.chat({
+  const { parsed } = await chatJSON({
     providerId: r.outline.provider,
     model: r.outline.model,
     system: REVISE_PROMPT,
@@ -1441,8 +1448,7 @@ export async function reviseOutline(projectId, { instruction, onEvent } = {}) {
     stream: true,
     label: '改大纲',
     onEvent
-  });
-  const parsed = extractJSON(text);
+  }, { onEvent, label: '改大纲' });
   const ops = Array.isArray(parsed.ops) ? parsed.ops : [];
 
   /**
@@ -1787,10 +1793,19 @@ async function analyzeScriptRaw(projectId, {
    * 所以撞上限就把这一批对折、重算、再来。上一次的钱确实白花了 ——
    * 但对折之后大概率能过，比让人自己去猜"该分几场"强得多。
    */
-  let text;
+  /**
+   * 两层重试叠在一起，各管一件事，顺序不能反：
+   *
+   *   内层（chatJSON）—— 回来的 JSON 解析不了，带着错让它重写一份。
+   *   外层（这个 for）—— 输出被自己的长度上限截断，把这一批对折再来。
+   *
+   * 内层在里面是对的：截断的错是 adapters.chat 抛的，会穿过 chatJSON
+   * 冒到外层来缩批；而"写歪了"的错缩批也没用，重写一次才有用。
+   */
+  let parsed;
   for (;;) {
     try {
-      ({ text } = await adapters.chat({
+      ({ parsed } = await chatJSON({
         providerId: r.chat.provider,
         model: r.chat.model,
         system: SHOT_PROMPT.replace('{{SHOT_COUNT}}', String(shotCount))
@@ -1822,7 +1837,7 @@ async function analyzeScriptRaw(projectId, {
         stream: true,
         onEvent,
         label: chapter ? `拆分镜·${chapter.title}` : '拆分镜'
-      }));
+      }, { onEvent, label: chapter ? `拆分镜·${chapter.title}` : '拆分镜' }));
       break;
     } catch (err) {
       /**
@@ -1846,7 +1861,6 @@ async function analyzeScriptRaw(projectId, {
     }
   }
 
-  const parsed = extractJSON(text);
   /**
    * 场次先落地。**先决定在哪儿断，再决定拆成几镜** —— 见 pipeline/segments.js。
    * 模型没给这一段（老模型、输出跑偏）时回空数组，下面会退回按场景名推断，
@@ -2793,7 +2807,7 @@ export async function suggestLinks(projectId, { only = null, onEvent } = {}) {
    */
   const payload = all.map(linkPayloadOf);
 
-  const { text } = await adapters.chat({
+  const { parsed } = await chatJSON({
     providerId: r.director.provider,
     model: r.director.model,
     system: LINK_PROMPT,
@@ -2803,9 +2817,8 @@ export async function suggestLinks(projectId, { only = null, onEvent } = {}) {
     // 全片一次过，输出跟着镜数走，镜多了同样会很长
     stream: true,
     label: '标衔接关系'
-  });
+  }, { onEvent, label: '标衔接关系' });
 
-  const parsed = consistency.extractJSON(text);
   const picks = new Map(
     (Array.isArray(parsed.shots) ? parsed.shots : [])
       .filter((x) => x && x.link === 'continuous' && Number.isFinite(Number(x.index)))
@@ -2951,7 +2964,7 @@ export async function suggestSkills(projectId, { only = null, onEvent } = {}) {
       : { ...forModel(s), pick: false, skills: s.skills || [] }
   );
 
-  const { text } = await adapters.chat({
+  const { parsed } = await chatJSON({
     providerId: r.director.provider,
     model: r.director.model,
     system: SKILL_PROMPT.replace('{{SKILLS}}', listing),
@@ -2960,9 +2973,7 @@ export async function suggestSkills(projectId, { only = null, onEvent } = {}) {
     jsonMode: true,
     stream: true,
     label: '挑技法'
-  });
-
-  const parsed = consistency.extractJSON(text);
+  }, { onEvent, label: '挑技法' });
   const picks = Array.isArray(parsed.shots) ? parsed.shots : [];
 
   const touched = [];
@@ -3126,7 +3137,7 @@ export async function smartSplitChapters(projectId, { targetChars = 3000, onEven
   for (const [i, win] of windows.entries()) {
     onEvent?.({ type: 'note', message: `第 ${i + 1}/${windows.length} 段（${win.start}~${win.end} 字）…` });
     try {
-      const { text } = await adapters.chat({
+      const { parsed } = await chatJSON({
         // 断章是判断题不是生成题，和挑技法、绑说话人一样走调度模型
         providerId: r.director.provider,
         model: r.director.model,
@@ -3136,8 +3147,7 @@ export async function smartSplitChapters(projectId, { targetChars = 3000, onEven
         jsonMode: true,
         stream: true,
         label: `分章 ${i + 1}/${windows.length}`
-      });
-      const parsed = consistency.extractJSON(text);
+      }, { onEvent, label: `分章 ${i + 1}/${windows.length}` });
       const got = Array.isArray(parsed.breaks) ? parsed.breaks : [];
       anchors.push(...got);
       onEvent?.({ type: 'note', message: `这一段给出 ${got.length} 个断点` });
@@ -5394,7 +5404,7 @@ export async function autoBindSpeakers(projectId, { useModel = true, onEvent } =
       message: `把这 ${unsure.length} 条连同上下文交给调度模型 ${r.director.model}（${r.director.provider}）…`
     });
     try {
-      const { text } = await adapters.chat({
+      const { parsed } = await chatJSON({
         providerId: r.director.provider,
         model: r.director.model,
         system: SPEAKER_PROMPT.replace('{{CAST}}', cast || '  （设定集里还没有角色）'),
@@ -5403,8 +5413,8 @@ export async function autoBindSpeakers(projectId, { useModel = true, onEvent } =
         jsonMode: true,
         stream: true,
         label: '绑说话人'
-      });
-      const picks = consistency.extractJSON(text)?.shots || [];
+      }, { onEvent, label: '绑说话人' });
+      const picks = parsed?.shots || [];
       store.update(projectId, (p) => {
         for (const pick of picks) {
           if (!need.has(pick.id)) continue; // 只认要判的那几条

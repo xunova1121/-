@@ -341,6 +341,30 @@ const upstream = http.createServer((req, res) => {
 
       const system = JSON.stringify(body.messages?.[0]?.content || '');
       let content;
+
+      /**
+       * ══ 造一次"模型把台词里的英文引号原样抄进 JSON" ══
+       *
+       * 用户真机上撞的就是这个形态：HTTP 200、内容完整、括号配平，
+       * 只是字符串里多了两个没转义的引号，`JSON.parse` 当场炸。
+       *
+       * 重写那一次的用户消息里带着「上一次的输出没能解析」——
+       * 靠它区分"第一次"和"重写"，不然会无限坏下去，测的就不是重试了。
+       */
+      if (upstream.badJSONOnce || upstream.badJSONAlways) {
+        const user = String(body.messages?.[1]?.content || '');
+        if (upstream.badJSONAlways || !user.includes('上一次的输出没能解析')) {
+          upstream.badJSONCalls = (upstream.badJSONCalls || 0) + 1;
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({
+            choices: [{
+              message: { content: '{"beats":[{"scene":"码头","summary":"巡查","dialogue":"他说"走吧"，然后转身","seconds":20}]}' }
+            }],
+            usage: { prompt_tokens: 100, completion_tokens: 40, total_tokens: 140 }
+          }));
+        }
+        upstream.badJSONRetries = (upstream.badJSONRetries || 0) + 1;
+      }
       if (system.includes('美术总监')) {
         // 记下这一支收到的用户消息 —— 下面要验"设定集有没有照着大纲的名单出"
         upstream.lastBibleUser = body.messages?.[1]?.content || '';
@@ -7872,6 +7896,155 @@ section('场景的东南西北：机位相对房间，不只相对人');
  * ⚠ 推理型模型跑分镜有个实打实的坑：思考过程要么吃掉输出预算、要么半天不吐字节。
  * 用户真机上撞过 finish_reason=length。挤在一行里，必然有一头将就。
  */
+/**
+ * ════════ JSON 坏了要说人话 ════════
+ *
+ * 用户真机上拿到的是这么一句：
+ *
+ *   ✕ Expected ',' or '}' after property value in JSON at position 180 (line 8 column 28)
+ *
+ * 那是解析器写给程序员看的话 —— 没有模型名、没有模型到底回了什么、没有下一步。
+ * 而位置信息其实很值钱：把那个位置前后截出来，十有八九一眼看出是什么。
+ *
+ * 根因也找到了：大纲提示词里写着"dialogue 要**原样抄剧本里的台词**"，
+ * 而剧本里的台词带英文引号时，原样抄进 JSON 字符串就是不合法的 ——
+ * **这条指令本身在制造这个 bug**。所以两头都修：报错说人话 + 提示词加引号规则。
+ */
+section('JSON 坏了要说人话（并且从提示词上少坏几次）');
+{
+  const cs = await import('../core/pipeline/consistency.js');
+
+  // ── 台词里没转义的引号：括号是配平的，属于"写错了" ──
+  {
+    const bad = '{"beats":[{"scene":"码头","dialogue":"他说"走吧"，然后转身","seconds":20}]}';
+    let msg = '';
+    try { cs.extractJSON(bad); } catch (e) { msg = e.message; }
+    check('⚠ 不再裸抛解析器那句话', !/^Expected/.test(msg), msg.slice(0, 60));
+    check('把出错那几个字摆出来了（一眼看出是引号）', /⟪这里⟫/.test(msg), msg.slice(0, 200));
+    check('说清了这是"写错了"不是"被截断"', /不是被截断|本身不合法/.test(msg));
+    check('给了下一步（重跑 / 换模型）', /重跑一次/.test(msg) && /换一个模型/.test(msg));
+    check('原始报错也留着（要查还查得到）', /Expected/.test(msg));
+  }
+
+  // ── 括号没配平：那是被截断，和写错了是两回事 ──
+  {
+    const cut = '{"beats":[{"scene":"码头","summary":"巡查","dialogue":"这里的缆绳';
+    let msg = '';
+    try { cs.extractJSON(cut); } catch (e) { msg = e.message; }
+    check('⚠ 括号没配平时说的是"没写完就断了"，不是"写错了"',
+      /没写完就断了/.test(msg), msg.slice(0, 160));
+  }
+
+  // ── 好的 JSON 照常解析，别把正常路也搞坏 ──
+  check('合法 JSON 照样解析得出来',
+    cs.extractJSON('{"beats":[{"scene":"码头"}]}').beats[0].scene === '码头');
+  check('带代码围栏的也认', cs.extractJSON('```json\n{"a":1}\n```').a === 1);
+
+  // ── 提示词从源头少制造一次 ──
+  {
+    /**
+     * ⚠ 别数全文件的出现次数 —— 重写指令里也有这句话，加一处就把断言撞红，
+     * 而那不是回归。盯**那两份提示词**本身。
+     */
+    const src = fs.readFileSync(path.join(PROJECT_ROOT, 'core', 'pipeline', 'studio.js'), 'utf8');
+    const block = (name) => {
+      const at = src.indexOf(`const ${name} = \``);
+      return at === -1 ? '' : src.slice(at, src.indexOf('\n`;', at));
+    };
+    check('大纲的提示词写明了台词里的引号用「」',
+      /不要用英文双引号/.test(block('OUTLINE_PROMPT')), String(block('OUTLINE_PROMPT').length));
+    check('分镜的提示词也写明了', /不要用英文双引号/.test(block('SHOT_PROMPT')),
+      String(block('SHOT_PROMPT').length));
+  }
+
+  /**
+   * ══ 解析不了就带着错让它重写一次 ══
+   *
+   * 提示词那条规矩只降低概率，挡不住每一次。所以真撞上时要能自己救回来。
+   *
+   * ⚠ 明确**不做**自动修复：试过"把提前收尾的那个引号转义掉"，
+   * 一份大纲里有两处以上时它会把两个字段并进同一个字符串 ——
+   * 解析成功了，内容却是错的。那种比报错糟得多。
+   */
+  {
+    const p = store.create({ title: '大纲撞上坏 JSON', targetDuration: 60 });
+    store.update(p.id, (x) => { x.script = '阿澜在码头巡查，发现缆绳被割断。'; return x; });
+
+    upstream.badJSONOnce = true;
+    upstream.badJSONCalls = 0;
+    upstream.badJSONRetries = 0;
+    const evs = await ndjson(`/projects/${p.id}/stage/outline`, {});
+    upstream.badJSONOnce = false;
+
+    check('⚠ 第一次回的是坏 JSON，但这一步没有报错收场',
+      !evs.some((e) => e.type === 'error'),
+      JSON.stringify(evs.filter((e) => e.type === 'error').slice(0, 1)));
+    check('确实撞上了坏 JSON（不是打桩没生效，白测一场）',
+      upstream.badJSONCalls === 1, String(upstream.badJSONCalls));
+    check('带着错重写了一次', upstream.badJSONRetries >= 1, String(upstream.badJSONRetries));
+    check('界面上说了这次要重写，也说了会再花一次钱',
+      evs.some((e) => /重写一遍/.test(e.message || '') && /再花一次/.test(e.message || '')),
+      JSON.stringify(evs.map((e) => e.message).filter((m) => /重写/.test(m || '')).slice(0, 1)));
+    check('⚠ 重写那次的结果真的落地了（大纲不是空的）',
+      (store.read(p.id).outline?.beats || []).length > 0,
+      String((store.read(p.id).outline?.beats || []).length));
+  }
+
+  /**
+   * 分镜那条路上两层重试是**叠着**的：
+   *   内层 chatJSON —— 写歪了，重写一次
+   *   外层 for      —— 被自己的长度上限截断，这一批对折再来
+   * 顺序反了的话，写歪了会去缩批（缩了也还是歪），所以要单独验一次。
+   */
+  {
+    const p = store.create({ title: '分镜撞上坏 JSON', targetDuration: 60 });
+    store.update(p.id, (x) => { x.script = '阿澜在码头巡查，发现缆绳被割断。'; return x; });
+    await ndjson(`/projects/${p.id}/stage/outline`, {});
+    await ndjson(`/projects/${p.id}/stage/bible`, {});
+
+    upstream.badJSONOnce = true;
+    upstream.badJSONCalls = 0;
+    upstream.badJSONRetries = 0;
+    const evs = await ndjson(`/projects/${p.id}/stage/script`, {});
+    upstream.badJSONOnce = false;
+
+    check('⚠ 拆分镜也走重写这条路（不是只有大纲修好了）',
+      upstream.badJSONCalls >= 1 && upstream.badJSONRetries >= 1,
+      `坏 ${upstream.badJSONCalls} 次 / 重写 ${upstream.badJSONRetries} 次`);
+    check('拆分镜没有因此报错收场',
+      !evs.some((e) => e.type === 'error'),
+      JSON.stringify(evs.filter((e) => e.type === 'error').slice(0, 1)));
+    check('⚠ 分镜真的出来了', (store.read(p.id).shots || []).length > 0,
+      String((store.read(p.id).shots || []).length));
+    check('⚠ 而且走的是"重写"不是"缩批"（写歪了缩批也还是歪）',
+      !evs.some((e) => /对折成/.test(e.message || '')),
+      JSON.stringify(evs.map((e) => e.message).filter((m) => /对折/.test(m || ''))));
+  }
+
+  /**
+   * 重写只做一次。第二次还坏就老实报错 ——
+   * 那时候多半不是运气问题，而是这个模型写不了严格 JSON，该换一个。
+   * 没有这条的话，"无限重试烧钱"会是绿的。
+   */
+  {
+    const p = store.create({ title: '重写也还是坏', targetDuration: 60 });
+    store.update(p.id, (x) => { x.script = '阿澜在码头巡查，发现缆绳被割断。'; return x; });
+
+    upstream.badJSONAlways = true;
+    upstream.badJSONCalls = 0;
+    const evs = await ndjson(`/projects/${p.id}/stage/outline`, {});
+    upstream.badJSONAlways = false;
+
+    check('⚠ 一直坏下去时会报错，不会无限重试烧钱',
+      evs.some((e) => e.type === 'error'), JSON.stringify(evs.slice(-1)));
+    check('⚠ 一共只请求了两次（原来那次 + 重写一次）',
+      upstream.badJSONCalls === 2, `${upstream.badJSONCalls} 次`);
+    check('报的还是那句人话，不是解析器原话',
+      evs.some((e) => /⟪这里⟫/.test(e.message || '')),
+      JSON.stringify(evs.filter((e) => e.type === 'error').map((e) => (e.message || '').slice(0, 80))));
+  }
+}
+
 section('大纲有自己的模型槽（和分镜要配相反的模型）');
 {
   const ad = await import('../core/providers/adapters.js');
