@@ -200,6 +200,14 @@ page.on('response', (r) => {
   if (r.status() < 400 || expect401) return;
   unexpected4xx.push(`${r.status()} ${new URL(r.url()).pathname}`);
 });
+/**
+ * 发出去的每一条请求。
+ *
+ * 用来验"点开才拉"这类**不该发生的请求** —— 而那种事只看页面是看不出来的：
+ * 界面完全正常，只是每渲染一张卡就多打一次接口。
+ */
+const sent = [];
+page.on('request', (r) => { try { sent.push(new URL(r.url()).pathname); } catch { /* data: 之类 */ } });
 const errs = [];
 page.on('pageerror', (e) => errs.push(e.message));
 /**
@@ -1217,6 +1225,35 @@ const realErrs = errs.filter((e) => !/401/.test(e));
     });
     console.log('   分层排在重出按钮之前（先搞明白，再决定花钱）：',
       order === 'ok' || order === 'no-btn' ? '✓' : `✕ ${order}`);
+
+    /**
+     * ── 和商家后台比 ──
+     *
+     * 用户报的：「用的同一个描述，在我们工具显示和商家后台生成的不一样」。
+     * 这是**审片时才问得出来的问题**，而审片就在手机上 ——
+     * 所以这一块手机端必须有，不能只做电脑端。
+     */
+    const cmp = page.locator('.sheet details.layer-fold', { hasText: '和商家后台比' }).first();
+    console.log('   「看看为什么」里有「和商家后台比」：', (await cmp.count()) === 1 ? '✓' : '✕');
+    if (await cmp.count()) {
+      await cmp.evaluate((el) => { el.open = true; });
+      await page.waitForTimeout(1500);
+      const items = await page.locator('.sheet .req-pair').count();
+      console.log('   逐条摆出了差别：', items >= 5 ? `✓ ${items} 条` : `✕ ${items}`);
+      const txt = await cmp.innerText();
+      console.log('   每条都说得出"我们发的"和"后台"：',
+        /我们发的/.test(txt) && /后台/.test(txt) ? '✓' : '✕');
+      console.log('   有「按后台那样出一次」这颗按钮：',
+        /按后台那样出一次/.test(txt) ? '✓' : '✕');
+      /**
+       * ⚠ 点开才拉接口 —— 不点开就多打一次接口，是审片时最不该有的开销
+       *（手机多半在弱网上，而这一页会渲染几十张卡）。
+       */
+      console.log('   点开之前不打这条接口：',
+        sent.filter((x) => x.includes('/request')).length === 1
+          ? '✓ 只打了一次（就是刚点开这次）'
+          : `✕ 打了 ${sent.filter((x) => x.includes('/request')).length} 次`);
+    }
   } else {
     console.log('   ✕ 分镜页上找不到「看看为什么」按钮');
   }
