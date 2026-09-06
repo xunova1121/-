@@ -469,6 +469,8 @@ const upstream = http.createServer((req, res) => {
         // 以及**真正发出去的那个模型** —— 验"大纲走的是自己的槽"只能看这个，
         // 看 resolvedRouting() 是看不出来的（那是路由表，不是请求）
         upstream.lastOutlineModel = body.model || '';
+        // system 也留一份：验"一场最多多少秒、整份至少几场是按目标片长算的"要用
+        upstream.lastOutlineSystem = String(body.messages?.[0]?.content || '');
         /**
          * 大纲：拆场次。
          *
@@ -482,6 +484,22 @@ const upstream = http.createServer((req, res) => {
             { scene: '码头', time: '清晨', characters: ['阿澜'], summary: '阿澜走向栈桥，例行巡查。', dialogue: '设备正常。', seconds: 20 },
             { scene: '码头', time: '清晨', characters: ['阿澜'], summary: '发现缆绳被割断。', dialogue: '这里的缆绳被人动过。', seconds: 25 }
           ]
+        });
+      } else if (system.includes('挑毛病')) {
+        /**
+         * 剧本体检。回三条，故意让其中两条**定位不到** ——
+         * 模型真会这样：记错原文、或者顺手把引文润色了。
+         * 落盘那一层必须把它们拦下来，而不是猜一个位置改下去。
+         */
+        const user = String(body.messages?.[1]?.content || '');
+        upstream.lastTidyUser = user;
+        content = JSON.stringify({
+          fixes: [
+            { kind: 'quote', find: '说"走吧"', replace: '说「走吧」', why: '英文引号会让拆大纲整步失败' },
+            { kind: 'typo', find: '这句原文里根本没有', replace: '随便什么', why: '模型记错了' },
+            { kind: 'typo', find: '。', replace: '。', why: '出现很多次，说不清改哪一处' }
+          ],
+          note: '主要是引号的问题'
         });
       } else if (system.includes('改动指令')) {
         // 改大纲：回一串 ops，不回新大纲
@@ -8308,6 +8326,202 @@ section('大纲是正式一步（不再是分镜里的一个面板）');
  * 后端 applyOps 一直支持 insert / delete / move / edit，界面上却只接了 edit——
  * 想加一场得去跟模型说一句话、等它想、再勾一条。加一场空白的不该花一次模型调用。
  */
+/**
+ * ════════ 剧本体检 ════════
+ *
+ * 用户的原话：「在剧本那块，我上传完，你应该调度大模型去看里面有没有
+ * json 处理不了的，哪边有错别字，故事长的话自动分章，然后输出你整理好的剧本」。
+ *
+ * 三件事，两层：查符号和字数是本地算的（免费、当场），挑错别字要调模型。
+ */
+section('剧本体检：会炸 JSON 的符号、错别字、该不该分章');
+{
+  const sl = await import('../core/pipeline/script.js');
+
+  // ── 免费那层 ──
+  {
+    const r = sl.scan('阿澜说"走吧"，然后转身。');
+    check('查得出英文双引号', r.risky.some((x) => x.id === 'dquote'), JSON.stringify(r.risky.map((x) => x.id)));
+    check('数得清有几处', r.risky.find((x) => x.id === 'dquote')?.count === 2,
+      String(r.risky.find((x) => x.id === 'dquote')?.count));
+    check('⚠ 说清了它会造成什么后果（不是干说"有个引号"）',
+      /解析失败/.test(r.risky[0]?.why || ''), r.risky[0]?.why);
+    check('给了怎么改', /「」/.test(r.risky[0]?.fix || ''), r.risky[0]?.fix);
+    check('定位到了第几行第几列', r.risky[0]?.hits?.[0]?.line === 1 && r.risky[0]?.hits?.[0]?.col > 0,
+      JSON.stringify(r.risky[0]?.hits?.[0]));
+    check('把出错那句前后截了一段出来（一眼认得出是哪句）',
+      /走吧/.test(r.risky[0]?.hits?.[0]?.around || ''), r.risky[0]?.hits?.[0]?.around);
+  }
+  {
+    const r = sl.scan('阿澜说「走吧」，然后转身。');
+    check('规规矩矩的剧本不报警（狼来了比不报还糟）', r.clean === true, JSON.stringify(r.notes));
+    check('没毛病时一条 note 都不出', r.notes.length === 0, JSON.stringify(r.notes));
+  }
+  {
+    const r = sl.scan('一'.repeat(5000));
+    check('太长的会说该分章', r.needChapters === true);
+    check('给了个具体的章数，不是"建议分章"四个字',
+      r.suggestChapters >= 2 && /分成 \d+ 章/.test(r.notes.join('')), String(r.suggestChapters));
+    check('字数不算空白', sl.scan('一 二\n三').chars === 3, String(sl.scan('一 二\n三').chars));
+  }
+  {
+    // 反斜杠也会炸 JSON，而且炸法更隐蔽（吃掉后面一个字符）
+    const r = sl.scan('路径是 C:\\渡口\\旧船。');
+    check('反斜杠也查得出', r.risky.some((x) => x.id === 'backslash'), JSON.stringify(r.risky.map((x) => x.id)));
+  }
+
+  // ── 落改动那层：定位不到的一律不做 ──
+  {
+    const src = '阿澜走向栈桥。缆绳被人动过。阿澜走向栈桥。';
+    const r = sl.applyFixes(src, [
+      { find: '缆绳被人动过', replace: '缆绳被人割断' },
+      { find: '阿澜走向栈桥', replace: '阿澜走上栈桥' },
+      { find: '根本没有这句话', replace: '随便什么' },
+      { find: '一样的', replace: '一样的' }
+    ]);
+    check('唯一那条改了', /缆绳被人割断/.test(r.script));
+    check('⚠ 出现两次的那条不做（不知道改哪一处，猜错等于改了没看过的台词）',
+      r.script.split('阿澜走向栈桥').length - 1 === 2,
+      r.script);
+    check('找不到的那条不做', r.refused.some((x) => /找不到/.test(x.why)), JSON.stringify(r.refused));
+    check('两处那条说清了是"有几处"', r.refused.some((x) => /有 2 处/.test(x.why)), JSON.stringify(r.refused));
+    check('改前改后一样的也拦掉', r.refused.some((x) => /一模一样/.test(x.why)));
+    check('一共做成 1 条', r.applied.length === 1, String(r.applied.length));
+  }
+
+  // ── 真的跑一遍：接口 + 模型那层 ──
+  {
+    const p = store.create({ title: '剧本体检', targetDuration: 60 });
+    store.update(p.id, (x) => { x.script = '阿澜说"走吧"。老周点头。'; return x; });
+
+    const scanned = await api(`/projects/${p.id}/script/scan`);
+    check('GET /script/scan 通了，并且查出了引号',
+      scanned.risky?.some((x) => x.id === 'dquote'), JSON.stringify(scanned).slice(0, 160));
+
+    const evs = await ndjson(`/projects/${p.id}/script/tidy`, {});
+    const fin = evs.find((e) => e.type === 'finished');
+    check('POST /script/tidy 通了', !!fin, JSON.stringify(evs.slice(-1)));
+    check('免费那层的结果也一起回来了（不用再问一次）',
+      Array.isArray(fin?.scan?.risky), JSON.stringify(fin?.scan || {}).slice(0, 120));
+    check('模型挑出来的每一条都带"改前 → 改后"',
+      (fin?.fixes || []).every((f) => /→/.test(f.text || '')),
+      JSON.stringify((fin?.fixes || []).map((f) => f.text)));
+
+    /**
+     * ⚠ **不落盘**。这一条是这一节的核心 ——
+     * 和大纲那边「商量着改」一个道理：模型建议和实际改动必须是两件事。
+     */
+    check('⚠ 通读完剧本一个字都没变（只是建议）',
+      store.read(p.id).script === '阿澜说"走吧"。老周点头。', store.read(p.id).script);
+
+    // 勾中的那几条才落盘
+    const good = (fin?.fixes || []).filter((f) => !f.refused);
+    if (good.length) {
+      const res = await api(`/projects/${p.id}/script/fix`, { method: 'POST', body: { fixes: good } });
+      check('应用之后剧本才变', store.read(p.id).script !== '阿澜说"走吧"。老周点头。', store.read(p.id).script);
+      check('回了改完之后的新体检结果（人当场看得到还剩什么问题）',
+        Array.isArray(res.scan?.risky), JSON.stringify(res.scan || {}).slice(0, 120));
+    }
+  }
+
+  // ── 提示词本身的规矩 ──
+  {
+    const src = fs.readFileSync(path.join(PROJECT_ROOT, 'core', 'pipeline', 'studio.js'), 'utf8');
+    const at = src.indexOf('const TIDY_PROMPT = `');
+    const block = at === -1 ? '' : src.slice(at, src.indexOf('\n`;', at));
+    check('⚠ 读到了 TIDY_PROMPT（读不到的话下面几条等于没查）', block.length > 200, String(block.length));
+    check('明说了不要润色（这是别人的剧本）', /不要润色/.test(block));
+    check('明说了 find 要在全文里唯一', /只出现一次/.test(block));
+    check('明说了没毛病就回空，别为了交差编几条', /不要为了交差/.test(block));
+  }
+}
+
+/**
+ * ════════ 大纲不能拆粗 ════════
+ *
+ * 用户报的：一两千字的剧本，大纲只拆出**一场**，设定集认出两个场景，
+ * 分镜也只有一场 ——「产出的和实际都不符合，我希望越详细越好」。
+ *
+ * 根因在提示词里：原来那句"一场戏 = 同一个地点、同一段连续时间"，
+ * 对一段发生在同一个地方的剧本来说，一场是**完全正确的答案**。
+ * 而且提示词从头到尾不知道目标片长 —— 60 秒和 10 分钟拿到同一句要求。
+ */
+section('大纲不能拆粗：一场最多多少秒、整份至少几场');
+{
+  const runOutline = async (targetDuration) => {
+    const p = store.create({ title: `大纲粒度 ${targetDuration}s`, targetDuration });
+    store.update(p.id, (x) => { x.script = '阿澜在码头巡查，发现缆绳被割断。'; return x; });
+    upstream.lastOutlineSystem = '';
+    const evs = await ndjson(`/projects/${p.id}/stage/outline`, {});
+    return { p, evs, system: upstream.lastOutlineSystem };
+  };
+
+  const numsIn = (s) => (s.match(/\d+/g) || []).map(Number);
+
+  {
+    const { system } = await runOutline(60);
+    check('⚠ 提示词里真的带上了目标片长（原来它完全不知道要做多长的片子）',
+      /60 秒/.test(system), system.slice(-400));
+    check('说了一场最多多少秒', /一场戏\*\*最多 \d+ 秒/.test(system), system.slice(-400));
+    check('说了整份至少几场', /至少 \d+ 场/.test(system), system.slice(-400));
+
+    // 60 秒 → 一场最多 12 秒、至少 5 场
+    check('60 秒的片子：一场最多 12 秒',
+      /最多 12 秒/.test(system), (system.match(/最多 \d+ 秒/) || [])[0]);
+    check('60 秒的片子：至少 5 场',
+      /至少 5 场/.test(system), (system.match(/至少 \d+ 场/) || [])[0]);
+  }
+
+  {
+    /**
+     * ⚠ 长片必须换出不同的数 —— 不然这两条硬线是常量，
+     * "从目标片长算出来"这句话就没被验到。
+     */
+    const { system } = await runOutline(600);
+    check('⚠ 10 分钟的片子换出的是另一组数（说明真是算出来的）',
+      /最多 30 秒/.test(system) && /至少 20 场/.test(system),
+      `${(system.match(/最多 \d+ 秒/) || [])[0]} / ${(system.match(/至少 \d+ 场/) || [])[0]}`);
+
+    // 上限压在 30 秒：一场 30 秒往下拆已经是六七镜，再长对出图没意义
+    const ceil = numsIn((system.match(/最多 \d+ 秒/) || [''])[0])[0];
+    check('一场的上限压在 30 秒以内', ceil <= 30, String(ceil));
+  }
+
+  {
+    // 很短的片子：至少 3 场兜底，不能算出 1 场（那就等于没这条规矩）
+    const { system } = await runOutline(15);
+    const min = numsIn((system.match(/至少 \d+ 场/) || [''])[0])[0];
+    check('再短的片子也至少 3 场（1 场等于没有大纲这一层）', min >= 3, String(min));
+  }
+
+  /**
+   * 拆完要对一次数。这是这一步唯一一种**不报错也看不出来**的坏结果：
+   * 一份只有一场的大纲和一份拆得好的大纲，界面上长得一模一样。
+   */
+  {
+    const { evs } = await runOutline(600); // 要 20 场，打桩只回 2 场
+    const said = evs.map((e) => e.message || '').join('\n');
+    check('⚠ 拆粗了会当场说出来（不是默默过去）',
+      /拆粗了/.test(said), said.slice(0, 200));
+    check('说清了差多少（几场 vs 本该几场）',
+      /只拆出 2 场/.test(said) && /本该有 20 场/.test(said), said.slice(0, 300));
+    check('说了拆粗的代价是什么（看不见的那种）',
+      /只能画其中一件|成片里就没了/.test(said));
+    check('给了两条具体出路，不是干说一句"拆粗了"',
+      /再拆细一点/.test(said) && /＋/.test(said));
+    check('⚠ 但没有自己重跑一次（重跑要再花一次钱，那是人的决定）',
+      evs.filter((e) => /拆场次中/.test(e.message || '')).length === 1,
+      String(evs.filter((e) => /拆场次中/.test(e.message || '')).length));
+  }
+
+  {
+    // 够细的时候不要瞎报警 —— 报错狼来了比不报还糟
+    const { evs } = await runOutline(15); // 要 3 场，打桩回 2 场…
+    const said = evs.map((e) => e.message || '').join('\n');
+    check('（短片这一档打桩只回 2 场，仍然算粗，所以照样报）', /拆粗了/.test(said));
+  }
+}
+
 section('大纲这一步：加一场、删一场、挪一场（不经过模型）');
 {
   const ol3 = await import('../core/pipeline/outline.js');

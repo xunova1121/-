@@ -107,8 +107,20 @@ const stub = http.createServer((req, res) => {
         ],
         note: '第二场砍一半，中间插个空镜换气'
       };
+      /**
+       * 剧本体检。故意让第二条**定位不到**（模型真会记错原文），
+       * 界面上那条"划掉但留在列表里"才验得到。
+       */
+      const TIDY = {
+        fixes: [
+          { kind: 'quote', find: '说"走吧"', replace: '说「走吧」', why: '英文引号会让拆大纲整步失败' },
+          { kind: 'typo', find: '这句原文里根本没有', replace: '随便什么', why: '模型记错了' }
+        ],
+        note: '主要是引号的问题'
+      };
       const content = system.includes('美术总监')
         ? JSON.stringify(user.includes('老周') ? richer : BIBLE)
+        : system.includes('挑毛病') ? JSON.stringify(TIDY)
         : system.includes('分场编辑') ? JSON.stringify(OUTLINE)
         : system.includes('改动指令') ? JSON.stringify(REVISE)
         : system.includes('分镜导演') ? JSON.stringify(SHOTS)
@@ -1372,6 +1384,76 @@ const chBefore = await page.evaluate(async (id) => {
   return { n: (p.chapters || []).length, first: (p.chapters || [])[0]?.script || '' };
 }, proj.id);
 check('分出章节了', chBefore.n >= 1, String(chBefore.n));
+
+/**
+ * ── 剧本体检 ──
+ *
+ * 免费那层（查会炸 JSON 的符号、查字数）进页面就该跑完，不用点任何东西。
+ * 用户的原话：「我上传完，你应该调度大模型去看里面有没有 json 处理不了的」。
+ */
+console.log('\n剧本体检');
+{
+  const scriptBox = page.locator('#view-inner textarea').first();
+  await scriptBox.fill('阿澜说"走吧"，然后转身走向栈桥。');
+  await page.locator('button:has-text("保存剧本")').first().click();
+  await page.waitForTimeout(1800);
+
+  const notes = page.locator('.sc-note');
+  check('⚠ 保存完自己就查了，不用点任何东西', (await notes.count()) > 0,
+    `${await notes.count()} 条 / ${sent.filter((x) => x.includes('script/scan')).length} 次体检请求`);
+  const noteText = await page.locator('#view-inner').innerText();
+  check('查出了英文双引号，并且说清了后果',
+    /英文双引号/.test(noteText) && /解析失败/.test(noteText),
+    (noteText.match(/有 \d+ 处[^\n]*/) || [''])[0]);
+
+  // 模型那层：只回建议，一个字都不落盘
+  const tidy = page.locator('button:has-text("让模型通读一遍")').first();
+  check('有一颗"让模型通读一遍"的按钮', (await tidy.count()) > 0);
+  if (await tidy.count()) {
+    await tidy.scrollIntoViewIfNeeded();
+    await tidy.click();
+    await page.waitForTimeout(3500);
+    const fixes = await page.locator('.sc-fix').count();
+    check('它把挑出来的每一条都摊开了', fixes >= 1, `${fixes} 条`);
+    check('每条都说得出"改前 → 改后"',
+      /→/.test(await page.locator('.sc-fix').first().innerText()),
+      await page.locator('.sc-fix').first().innerText());
+    /**
+     * ⚠ 定位不到的那几条要**划掉留在列表里**，不是消失 ——
+     * 消失的话人会以为模型没挑出这一条。
+     */
+    check('定位不到的划掉了，但还在列表里',
+      (await page.locator('.sc-fix.refused').count()) >= 1,
+      `${await page.locator('.sc-fix.refused').count()} 条`);
+    check('而且说清了为什么改不了',
+      /改不了/.test(await page.locator('#view-inner').innerText()));
+
+    const stillRaw = await page.evaluate(async (id) => {
+      const p = await (await fetch(`/api/projects/${id}`)).json();
+      return p.script;
+    }, proj.id);
+    check('⚠ 这时候剧本一个字都没变（只是建议）',
+      stillRaw.includes('"走吧"'), stillRaw.slice(0, 60));
+
+    await page.locator('button:has-text("应用勾中的")').first().click();
+    await page.waitForTimeout(1800);
+    const fixed = await page.evaluate(async (id) => {
+      const p = await (await fetch(`/api/projects/${id}`)).json();
+      return p.script;
+    }, proj.id);
+    check('应用之后引号才被换掉', fixed.includes('「走吧」') && !fixed.includes('"走吧"'), fixed.slice(0, 60));
+    check('输入框里那份也跟着变了（不然一按保存就盖回去）',
+      (await scriptBox.inputValue()).includes('「走吧」'),
+      (await scriptBox.inputValue()).slice(0, 60));
+  }
+
+  // 复原：后面几节还要用这个项目的剧本
+  await scriptBox.fill(chBefore.first || '阿澜走向栈桥。');
+  await page.locator('button:has-text("保存剧本")').first().click();
+  await page.waitForTimeout(1500);
+  await step('剧本').click().catch(() => {});
+  await page.waitForTimeout(800);
+}
 
 const apPanel = page.locator('details.append-chapter').first();
 check('章节面板上有「追加一章」', (await apPanel.count()) > 0);

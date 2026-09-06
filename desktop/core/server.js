@@ -1629,6 +1629,50 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
     }
 
     /**
+     * ── 剧本体检 ──
+     *
+     * 剧本是整条流水线唯一的输入，它里面的毛病不会停在这一步。
+     * 台词里一个英文引号会让拆大纲整步解析失败（用户真机上撞过两次），
+     * 而那是**跑之前几秒钟就能查出来**的事。
+     */
+    if (b && c === 'script') {
+      // 免费那层：查引号、查长度、该不该分章。cap:script-scan
+      if (d === 'scan' && method === 'GET') {
+        try {
+          return json(res, 200, studio.scanScript(b));
+        } catch (err) {
+          return json(res, 404, { error: err.message });
+        }
+      }
+      /**
+       * 加上模型那层：挑错别字。**只回建议，不落盘**。cap:script-tidy
+       *
+       * 走流式：它要通读整篇，长剧本上是几十秒的事。
+       */
+      if (d === 'tidy' && method === 'POST') {
+        const opts = await readBody(req);
+        const stream = ndjson(res);
+        req.on('close', () => stream.end());
+        try {
+          const out = await studio.tidyScript(b, { ...opts, onEvent: (ev) => stream.send(ev) });
+          stream.end({ type: 'finished', ...out });
+        } catch (err) {
+          stream.end({ type: 'error', message: err.message });
+        }
+        return undefined;
+      }
+      // 把人勾中的那几条落盘。cap:script-tidy
+      if (d === 'fix' && method === 'POST') {
+        const { fixes } = await readBody(req);
+        try {
+          return json(res, 200, studio.applyScriptFixes(b, { fixes }));
+        } catch (err) {
+          return json(res, 400, { error: err.message });
+        }
+      }
+    }
+
+    /**
      * ── 大纲 ──
      *
      * 剧本和分镜之间那一层，**可以商量的那一层**。

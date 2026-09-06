@@ -1003,11 +1003,107 @@ function paintScript() {
         + '已经出好的图和视频不会自动跟着变。'),
       ta,
       h('div', { class: 'row', style: 'margin-top:10px' }, save)),
+    tidyCard(ta),
     outlineCard(),
     appendChapterCard(),
     formatCard(),
     styleCard()
   ];
+}
+
+/**
+ * 剧本体检。
+ *
+ * ── 为什么手机上也要有 ──
+ *
+ * 剧本在手机上是能改的（改一句开头是最常在路上做的事），而这一块查的
+ * 恰恰是**改剧本时最容易带进来的毛病**：手机输入法打出的英文引号会让
+ * 后面拆大纲整步解析失败。在电脑上才查得到的话，等于人在手机上改完、
+ * 回电脑上跑、才发现跑不动。
+ *
+ * 免费那层（引号、字数）进页面就跑；挑错别字要调模型，得人点。
+ */
+function tidyCard(ta) {
+  const noteHost = h('div', {});
+  const fixHost = h('div', {});
+
+  const paintScan = (rep) => {
+    clear(noteHost);
+    for (const line of rep?.notes || []) {
+      noteHost.append(h('div', { class: 'muted', style: 'line-height:1.7;margin-top:6px' }, line));
+    }
+    if (rep && rep.clean) {
+      noteHost.append(h('div', { class: 'muted', style: 'margin-top:6px' }, '体检没查出问题。'));
+    }
+  };
+
+  (async () => {
+    if (!project.script?.trim()) return;
+    try {
+      // cap:script-scan
+      paintScan(await api(`/projects/${project.id}/script/scan`));
+    } catch { /* 查不出来不该挡着人写剧本 */ }
+  })();
+
+  const btn = h('button', { class: 'btn sm grow' }, '让模型挑错别字');
+  btn.onclick = async () => {
+    btn.disabled = true;
+    const old = btn.textContent;
+    btn.textContent = '通读中…';
+    clear(fixHost);
+    try {
+      // cap:script-tidy
+      await stream(`/projects/${project.id}/script/tidy`, {}, (ev) => {
+        if (ev.type === 'error') toast(ev.message, 'err');
+        if (ev.type !== 'finished') return;
+        paintScan(ev.scan);
+        const list = ev.fixes || [];
+        if (!list.length) {
+          fixHost.append(h('div', { class: 'muted', style: 'margin-top:8px' }, '没挑出错字。'));
+          return;
+        }
+        const boxes = [];
+        for (const one of list) {
+          const cb = h('input', { type: 'checkbox' });
+          cb.checked = !one.refused;
+          cb.disabled = Boolean(one.refused);
+          boxes.push({ cb, fix: one });
+          fixHost.append(h('label', {
+            class: 'mfix',
+            style: `display:flex;gap:8px;align-items:flex-start;margin-top:6px;line-height:1.6${one.refused ? ';opacity:.55' : ''}`
+          }, cb, h('span', {}, one.text + (one.refused ? `（改不了：${one.refused}）` : ''))));
+        }
+        const apply = h('button', { class: 'btn primary sm grow' }, '应用勾中的');
+        apply.onclick = async () => {
+          const fixes = boxes.filter((x) => x.cb.checked).map((x) => x.fix);
+          if (!fixes.length) { toast('一条都没勾', 'err'); return; }
+          apply.disabled = true;
+          try {
+            // cap:script-tidy
+            const res = await api(`/projects/${project.id}/script/fix`, { method: 'POST', body: { fixes } });
+            project.script = res.project.script;
+            // 输入框里那份也要跟着变 —— 不然一按保存就把改动盖回去了
+            ta.value = res.project.script;
+            clear(fixHost);
+            paintScan(res.scan);
+            toast(`改了 ${res.applied} 处`, 'ok');
+          } catch (err) { toast(err.message, 'err'); } finally { apply.disabled = false; }
+        };
+        fixHost.append(h('div', { class: 'row', style: 'margin-top:10px' }, apply));
+      });
+    } catch (err) { toast(err.message, 'err'); } finally {
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  };
+
+  return h('div', { class: 'card' },
+    h('b', {}, '剧本体检'),
+    h('p', { class: 'muted', style: 'margin:6px 0 8px' },
+      '剧本里的毛病不会停在这一步：台词里一个英文引号，就能让后面拆大纲整步失败。'),
+    noteHost,
+    h('div', { class: 'row', style: 'margin-top:10px' }, btn),
+    fixHost);
 }
 
 /**

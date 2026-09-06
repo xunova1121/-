@@ -299,6 +299,102 @@ export default {
     const scriptArea = h('textarea', { rows: 14 }, project.script || '');
     const shotCount = h('input', { type: 'number', value: 8, min: 2, max: 60 });
 
+    /**
+     * ── 剧本体检 ──
+     *
+     * 剧本是整条流水线唯一的输入，它里面的毛病不会停在这一步。
+     * 台词里一个英文引号会让拆大纲整步解析失败（用户真机上撞过两次），
+     * 而那是**跑之前几秒钟就能查出来**的事。
+     *
+     * 分两层：查符号和字数是本地算的，保存完自动跑，零成本；
+     * 挑错别字要调模型，所以得人点。
+     */
+    const scanHost = h('div', {});
+    const tidyHost = h('div', {});
+
+    const paintScan = (rep) => {
+      clear(scanHost);
+      if (!rep || !rep.notes?.length) return;
+      for (const line of rep.notes) {
+        scanHost.append(h('div', { class: 'sc-note' }, line));
+      }
+      if (rep.needChapters) {
+        /**
+         * 指到「章节」那一块，而不是在这儿再放一颗分章按钮。
+         *
+         * 那一块下面摆着两条路（按字数切是免费的、让模型按情节切要花钱）
+         * 和它们各自的说明 —— 在这儿复制一颗按钮就等于把那份说明丢掉，
+         * 而"这一下会不会花钱"正是人在这一刻要知道的事。
+         */
+        const go = h('button', { class: 'btn sm', style: 'margin-top:6px' }, `去分章（建议 ${rep.suggestChapters} 章上下）`);
+        go.onclick = () => chapterPanel?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        scanHost.append(go);
+      }
+    };
+    const loadScan = async () => {
+      if (!project.script?.trim()) { clear(scanHost); return; }
+      try {
+        // cap:script-scan
+        paintScan(await api(`/projects/${project.id}/script/scan`));
+      } catch { /* 体检查不出来不该挡着人写剧本 */ }
+    };
+
+    const tidyBtn = h('button', { class: 'btn ghost' }, '让模型通读一遍（挑错别字）');
+    tidyBtn.onclick = async () => {
+      tidyBtn.disabled = true;
+      const old = tidyBtn.textContent;
+      tidyBtn.textContent = '通读中…';
+      clear(tidyHost);
+      try {
+        // cap:script-tidy
+        await stream(`/projects/${project.id}/script/tidy`, {}, (ev) => {
+          if (ev.type === 'error') toast(ev.message, 'err');
+          if (ev.type === 'finished') {
+            paintScan(ev.scan);
+            const list = ev.fixes || [];
+            if (ev.note) tidyHost.append(h('div', { class: 'sc-note' }, ev.note));
+            if (!list.length) {
+              tidyHost.append(h('div', { class: 'sc-note' }, '通读完了，没挑出错字。'));
+              return;
+            }
+            const boxes = [];
+            for (const one of list) {
+              const cb = h('input', { type: 'checkbox' });
+              cb.checked = !one.refused;
+              cb.disabled = Boolean(one.refused);
+              boxes.push({ cb, fix: one });
+              tidyHost.append(h('label', { class: `sc-fix${one.refused ? ' refused' : ''}` },
+                cb,
+                h('span', {}, one.text),
+                // 定位不到的当场标出来 —— 勾了不生效，人会以为按钮坏了
+                one.refused ? h('span', { class: 'sc-refused' }, `（改不了：${one.refused}）`) : ''));
+            }
+            const apply = h('button', { class: 'btn' }, '应用勾中的');
+            apply.onclick = async () => {
+              const fixes = boxes.filter((x) => x.cb.checked).map((x) => x.fix);
+              if (!fixes.length) { toast('一条都没勾', 'err'); return; }
+              apply.disabled = true;
+              try {
+                // cap:script-tidy
+                const res = await api(`/projects/${project.id}/script/fix`, { method: 'POST', body: { fixes } });
+                project.script = res.project.script;
+                scriptArea.value = res.project.script;
+                clear(tidyHost);
+                paintScan(res.scan);
+                toast(`改了 ${res.applied} 处`, 'ok');
+              } catch (err) { toast(err.message, 'err'); } finally { apply.disabled = false; }
+            };
+            const drop = h('button', { class: 'btn ghost' }, '算了');
+            drop.onclick = () => clear(tidyHost);
+            tidyHost.append(h('div', { class: 'inline', style: 'margin-top:10px' }, apply, drop));
+          }
+        });
+      } catch (err) { toast(err.message, 'err'); } finally {
+        tidyBtn.disabled = false;
+        tidyBtn.textContent = old;
+      }
+    };
+
     const scriptPanel =
       h(
         'div',
@@ -306,10 +402,12 @@ export default {
         h('h2', { class: 'panel-title' }, '剧本'),
         h('p', { class: 'panel-hint' }, '小说片段、大纲、完整剧本都行。保存之后，去左边菜单里点第 02 步「大纲」往下走。'),
         scriptArea,
+        scanHost,
         h('div', { class: 'row', style: 'margin-top:11px' },
           h('div', { class: 'shrink', style: 'width:150px' }, h('label', {}, '每章目标镜数'), shotCount),
           h('div', {}),
-          h('div', { class: 'shrink' },
+          h('div', { class: 'shrink inline' },
+            tidyBtn,
             h('button', {
               class: 'btn',
               onclick: async () => {
@@ -317,12 +415,28 @@ export default {
                   method: 'PATCH',
                   body: { script: scriptArea.value }
                 });
+                project.script = scriptArea.value;
                 toast('已保存', 'ok');
+                /**
+                 * ⚠ 体检在这儿**显式跑一次**，不能指望 rerender 重建时自己跑。
+                 *
+                 * 第一版就是那么写的（"新的那一份在构建时自己 loadScan()"），
+                 * 走查里量出来：保存之后一条体检结果都没有，
+                 * 而且那一次之后**再没发出过 /script/scan**——
+                 * rerender 走的是刷新按钮那条路，这一块并没有被当场重建。
+                 * 于是"保存完自动体检"这件事在真机上根本不发生。
+                 *
+                 * 现在这样两头都对：这次直接画进还活着的 scanHost；
+                 * 将来真被重建了，新的那一份构建时还会再跑一次。
+                 */
+                await loadScan();
                 rerender();
               }
             }, '保存剧本'))
-        )
+        ),
+        tidyHost
       );
+    loadScan();
 
     // ───────────── 时长 ─────────────
     // 三个数分开摆：目标是你要的，计划是分镜表算的，实际是厂商档位吃完剩的。
@@ -817,6 +931,15 @@ export default {
                   await api(`/projects/${project.id}`, { method: 'PATCH', body: { script: scriptArea.value } });
                   project = await api(`/projects/${project.id}`);
                   toast('剧本已保存', 'ok');
+                  /**
+                   * ⚠ 体检也要在这儿跑一次。
+                   *
+                   * 「保存剧本」有**两颗** —— 一颗在这条步骤栏上，一颗在下面
+                   * 剧本面板里。而人先看到的是这一颗（它排在页面最上面）。
+                   * 只在下面那颗上接体检的话，走查里量出来是"保存完一条结果都没有"，
+                   * 而代码看上去完全正确 —— 两条路只修了一条，今天第二次。
+                   */
+                  await loadScan();
                   syncNav();
                   paintStageDetail();
                 }
