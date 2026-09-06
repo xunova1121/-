@@ -386,7 +386,7 @@ const upstream = http.createServer((req, res) => {
       if (system.includes('美术总监')) {
         // 记下这一支收到的用户消息 —— 下面要验"设定集有没有照着大纲的名单出"
         upstream.lastBibleUser = body.messages?.[1]?.content || '';
-        content = JSON.stringify(BIBLE_REPLY);
+        content = JSON.stringify(upstream.bibleWithVoice ? BIBLE_REPLY_GHOST : BIBLE_REPLY);
       } else if (system.includes('分镜导演')) {
         /**
          * 大纲那条路上，剧本里每一场前面标着【场次 b-XX】，
@@ -698,6 +698,26 @@ const BIBLE_REPLY = {
   ],
   scenes: [{ name: '码头', appearance: '晨雾未散，冷白顶光，木质栈桥', sheetPrompt: '空镜广角' }],
   props: [{ name: '执法记录仪', appearance: '黑色方形，胸前佩戴' }]
+};
+
+/**
+ * 带一个**没有实体形象**的角色的版本。
+ *
+ * 照抄用户真机上那一条：一个只以声音和文字出现的求救者。
+ * 它要说话（所以是角色、要分音色），但没有任何东西可以画 ——
+ * 照着这段描述去出人设图，模型只能自己编一个现代人出来。
+ */
+const BIBLE_REPLY_GHOST = {
+  ...BIBLE_REPLY,
+  characters: [
+    ...BIBLE_REPLY.characters,
+    {
+      name: '神秘声音',
+      role: '来自古代的求救者，身份未明',
+      embodied: false,
+      appearance: '无实体形象，仅以声音和文字出现在手机屏幕中，字迹为墨色毛笔手写体，潦草急促'
+    }
+  ]
 };
 
 /**
@@ -8326,6 +8346,147 @@ section('大纲是正式一步（不再是分镜里的一个面板）');
  * 后端 applyOps 一直支持 insert / delete / move / edit，界面上却只接了 edit——
  * 想加一场得去跟模型说一句话、等它想、再勾一条。加一场空白的不该花一次模型调用。
  */
+/**
+ * ════════ 没有实体形象的角色不出人设图 ════════
+ *
+ * 用户报的原话：「古代神秘者，怎么是现代的」。
+ *
+ * 那个角色叫「神秘声音」，设定集里自己写着：
+ *   「来自古代的求救者，无实体形象，仅以声音和文字出现在手机屏幕中」
+ *
+ * 而我们照样照着这段话去出了一张**人物设定图** —— 模型拿到一段
+ * 没有身体的描述，只能自己编一个人出来，编出来的是个穿卫衣牛仔裤的
+ * 现代女生。然后这张凭空捏的脸会作为参考图跟进它出现的每一镜。
+ *
+ * ⚠ 这比"没有图"糟得多：没有图只是少一条约束，
+ *   有一张错的图是一条**错的**约束，而且它一路往下传。
+ */
+section('没有实体形象的角色：不出人设图，也不把脸带进镜头');
+{
+  const va = await import('../core/pipeline/variants.js');
+  const cs2 = await import('../core/pipeline/consistency.js');
+
+  // ── 缺省必须是"有实体" ──
+  check('⚠ 没写这个字段的角色算有实体（老项目行为一个字都不能变）',
+    va.isEmbodied({ name: '阿澜' }) === true);
+  check('明确写 false 才算没有实体', va.isEmbodied({ name: '声音', embodied: false }) === false);
+  check('写 true 当然也是有实体', va.isEmbodied({ name: '阿澜', embodied: true }) === true);
+
+  // ── 不给它排出图 ──
+  {
+    const bible = {
+      characters: [
+        { name: '阿澜', appearance: '藏青立领制服', variants: [{ id: 'v0', name: '默认' }] },
+        { name: '神秘声音', embodied: false, appearance: '无实体形象，仅以声音和文字出现', variants: [{ id: 'v0', name: '默认' }] }
+      ],
+      scenes: [{ name: '码头', appearance: '木栈桥', variants: [{ id: 'v0', name: '默认' }] }],
+      props: []
+    };
+    const t = va.sheetTargets(bible);
+    const names = t.map((x) => x.item.name);
+    check('⚠ 无实体的那个不在待出图清单里', !names.includes('神秘声音'), JSON.stringify(names));
+    check('有实体的还在（别把好人一起误伤）', names.includes('阿澜'), JSON.stringify(names));
+    check('场景不受影响（这条规矩只管角色）', names.includes('码头'), JSON.stringify(names));
+  }
+
+  // ── 就算身上已经有一张，也不发出去 ──
+  {
+    /**
+     * ⚠ 这一条钉的是**老项目**：那张凭空捏的脸已经存下来了。
+     * 只在出图那一步跳过是不够的 —— 用户把开关关掉之后，
+     * 如果收参考图这里还照发，那张现代女生照样跟进每一镜，
+     * 而他会以为开关根本没起作用。
+     */
+    const bible = {
+      style: { anchor: '国风水墨' },
+      characters: [{
+        name: '神秘声音',
+        embodied: false,
+        appearance: '无实体形象',
+        sheetPath: 'a.png',
+        sheetUrl: 'http://x/WRONG-FACE.png',
+        variants: [{ id: 'v0', name: '默认', sheetPath: 'a.png', sheetUrl: 'http://x/WRONG-FACE.png' }]
+      }],
+      scenes: [],
+      props: []
+    };
+    const shot = { index: 1, characters: ['神秘声音'], description: '手机屏幕亮起', dialogue: '救我' };
+    const refs = cs2.collectReferences(bible, shot);
+    check('⚠ 老项目里那张错的脸也不会被当参考图发出去',
+      !JSON.stringify(refs).includes('WRONG-FACE'), JSON.stringify(refs).slice(0, 200));
+  }
+
+  // ── 真的跑一遍：设定集里有这么一个角色 ──
+  {
+    const p = store.create({ title: '无实体角色', targetDuration: 60 });
+    store.update(p.id, (x) => { x.script = '阿澜在码头巡查，手机上浮出一行墨色毛笔字。'; return x; });
+    upstream.bibleWithVoice = true;
+    await ndjson(`/projects/${p.id}/stage/bible`, {});
+    upstream.bibleWithVoice = false;
+
+    const b = store.read(p.id).bible;
+    const ghost = (b.characters || []).find((c) => c.name === '神秘声音');
+    check('设定集里收下了这个角色（它要说话，所以是角色）', !!ghost, JSON.stringify((b.characters || []).map((c) => c.name)));
+    check('⚠ 而且记住了它没有实体', ghost?.embodied === false, String(ghost?.embodied));
+    check('⚠ 没给它出人设图', !ghost?.sheetPath && !ghost?.variants?.[0]?.sheetPath,
+      JSON.stringify({ s: ghost?.sheetPath, v: ghost?.variants?.[0]?.sheetPath }));
+    check('有实体的那个照出不误', (b.characters || []).find((c) => c.name === '阿澜')?.variants?.[0]?.sheetPath,
+      JSON.stringify((b.characters || []).map((c) => [c.name, !!c.variants?.[0]?.sheetPath])));
+
+    /**
+     * 它仍然是个能说话的角色 —— 分音色这一步不能跳过它。
+     * 「没有形象」和「不参与」是两件完全不同的事。
+     */
+    const st2 = await import('../core/pipeline/studio.js');
+    const done = st2.assignVoices(p.id, { force: true });
+    check('⚠ 照样分到了音色（没有形象不等于不说话）',
+      done.voices.some((v) => v.name === '神秘声音'), JSON.stringify(done.voices));
+  }
+
+  // ── 判错了要能一键改回来 ──
+  {
+    const p = store.create({ title: '手动标无实体', targetDuration: 60 });
+    store.update(p.id, (x) => { x.script = '阿澜在码头巡查。'; return x; });
+    await ndjson(`/projects/${p.id}/stage/bible`, {});
+    const who = store.read(p.id).bible.characters[0].name;
+    check('先确认它是有图的（不然下面等于空转）',
+      !!store.read(p.id).bible.characters[0].variants[0].sheetPath);
+
+    const r = await api(`/projects/${p.id}/bible/char/${encodeURIComponent(who)}`, {
+      method: 'PATCH', body: { embodied: false }
+    });
+    const after = store.read(p.id).bible.characters[0];
+    check('标成无实体之后，字段真的落盘了', after.embodied === false, String(after.embodied));
+    check('⚠ 已经出好的那张图被摘掉了（留着的话它照样会被捞出去用）',
+      !after.sheetPath && !after.variants[0].sheetPath,
+      JSON.stringify({ s: after.sheetPath, v: after.variants[0].sheetPath }));
+    check('并且回了摘掉几张，界面才说得出发生了什么', r.unsheeted >= 1, String(r.unsheeted));
+
+    // 改回来
+    await api(`/projects/${p.id}/bible/char/${encodeURIComponent(who)}`, {
+      method: 'PATCH', body: { embodied: true }
+    });
+    check('⚠ 改回有实体（布尔别被当成字符串 "false"，那是个真值）',
+      store.read(p.id).bible.characters[0].embodied === true,
+      String(store.read(p.id).bible.characters[0].embodied));
+  }
+
+  // ── 提示词里得把这件事说清楚 ──
+  {
+    const src = fs.readFileSync(path.join(PROJECT_ROOT, 'core', 'pipeline', 'consistency.js'), 'utf8');
+    const at = src.indexOf('const BIBLE_PROMPT = `');
+    const block = at === -1 ? '' : src.slice(at, src.indexOf('\n`;', at));
+    check('⚠ 读到了 BIBLE_PROMPT（读不到的话下面几条等于没查）', block.length > 300, String(block.length));
+    check('提示词里要求判断有没有身体', /embodied/.test(block));
+    check('举了旁白、画外音这类例子（光说"没有身体"太抽象）',
+      /旁白/.test(block) && /画外音/.test(block));
+    check('说清了判错的后果（会凭空编一个现代人出来）',
+      /只能自己编一个人/.test(block), block.slice(0, 80));
+    check('⚠ 也要求了年代要对上（古代题材别画成现代打扮）',
+      /年代要对上/.test(block) && /古代/.test(block));
+  }
+}
+
 /**
  * ════════ 剧本体检 ════════
  *

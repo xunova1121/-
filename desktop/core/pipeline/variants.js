@@ -92,7 +92,14 @@ export function normalizeItem(item, kind = 'char') {
 
 export function normalizeBible(bible) {
   if (!bible) return bible;
-  for (const c of bible.characters || []) normalizeItem(c, 'char');
+  for (const c of bible.characters || []) {
+    /**
+     * 老项目没有这个字段。补成 true —— 它们以前每个角色都出图，
+     * 补成别的等于在一次升级里悄悄改掉已有项目的行为。
+     */
+    if (typeof c.embodied !== 'boolean') c.embodied = true;
+    normalizeItem(c, 'char');
+  }
   for (const s of bible.scenes || []) normalizeItem(s, 'scene');
   for (const p of bible.props || []) normalizeItem(p, 'prop');
   return bible;
@@ -158,10 +165,32 @@ export function makeVariant({ name, appearance = '' }) {
  * 全片一共要出多少张设定图、还差几张。
  * 按**变体**数，不是按条目数 —— 三套衣服就是三张，缺一张就少一个基准。
  */
+/**
+ * 这个角色有没有实体形象。
+ *
+ * ⚠ 缺省 true —— 老项目和不理这个字段的模型必须和以前一模一样。
+ * 只有明确写了 false 才算"没有实体"。
+ */
+export function isEmbodied(item) {
+  return item?.embodied !== false;
+}
+
 export function sheetTargets(bible) {
   const out = [];
   const push = (kind, items) => {
     for (const item of items || []) {
+      /**
+       * ⚠ 没有实体形象的角色不出人设图。
+       *
+       * 用户报的原话：「古代神秘者，怎么是现代的」。那个角色叫「神秘声音」，
+       * 设定里明写着"无实体形象，仅以声音和文字出现在手机屏幕中"——
+       * 然后我们照样去出了一张人物设定图，模型拿到一段没有身体的描述，
+       * **只能自己编一个人**，编出来的是个穿卫衣牛仔裤的现代女生。
+       *
+       * 而那张图会作为参考图跟进它出现的每一镜 ——
+       * 比没有图糟得多：没有图只是少一条约束，有一张错的图是一条**错的**约束。
+       */
+      if (kind === 'char' && !isEmbodied(item)) continue;
       for (const v of variantsOf(item)) out.push({ kind, item, variant: v });
     }
   };

@@ -44,6 +44,24 @@ const BIBLE_PROMPT = `你是动画片的美术总监。基于剧本，为每个�
 - 每个角色的 appearance 控制在 60~90 个字，太短锁不住，太长会稀释镜头本身的描述；
 - 服装配色要给具体颜色词（"藏青立领制服、袖口两道银线"），不要写"帅气的制服"。
 
+⚠ **先判断这个角色有没有身体。**
+
+旁白、画外音、只以声音出现的、只以文字出现在屏幕上的、神只闻其声、
+系统提示音、亡者的回声 —— 这些都是**没有实体形象**的角色：
+它们要说话（所以是角色），但**没有任何东西可以画**。
+
+这种角色 embodied 填 false。填错的代价很实在：
+我们会照着 appearance 去出一张人物设定图，而模型拿到一段没有身体的描述时
+**只能自己编一个人出来**，编出来的多半是个默认的现代年轻人 ——
+然后这张凭空捏的脸会作为参考图跟进它出现的每一镜。
+
+embodied 为 false 时，appearance 写**它是怎么出现的**（声音的质感、
+字迹的样子、光的形态），不要写脸和衣服。
+
+- 年代要对上。故事发生在什么年代，服装、发型、配饰就得是那个年代的 ——
+  剧本里出现"古代""民国""末世"这类线索时尤其要盯住，
+  写成现代打扮是这一步最常见、也最难在出图之后补救的错。
+
 严格只输出 JSON，不要任何解释、不要代码块：
 
 {
@@ -55,7 +73,8 @@ const BIBLE_PROMPT = `你是动画片的美术总监。基于剧本，为每个�
   "characters": [
     {
       "name": "角色名",
-      "appearance": "冻结的外貌描述（60~90字）",
+      "embodied": true,
+      "appearance": "冻结的外貌描述（60~90字）。embodied 为 false 时写它是怎么出现的，不要写脸和衣服",
       "sheetPrompt": "留空。出图提示词由 appearance 现推，这里填了反而会顶掉描述",
       "role": "在故事里的身份"
     }
@@ -259,6 +278,16 @@ export async function buildBible(project, { onEvent } = {}) {
     characters: (parsed.characters || []).map((c) => ({
       name: c.name,
       role: c.role || '',
+      /**
+       * 有没有实体形象。
+       *
+       * ⚠ **缺省是 true**，不是 false。老项目、以及不理这个字段的模型，
+       * 行为要和加这个字段之前一模一样 —— 一个新字段悄悄把所有角色
+       * 变成"不出图"，比它想修的那个 bug 严重得多。
+       *
+       * 只有模型明确说了 false 才当没有实体。
+       */
+      embodied: c.embodied !== false,
       appearance: c.appearance || '',
       // 刻意**不**存模型给的 sheetPrompt。它一旦有值就会顶掉 appearance，
       // 于是改描述再重出图，画的还是旧描述 —— 这个坑踩过一次。
@@ -530,6 +559,14 @@ export function collectReferences(bible, shot, { limit = 9 } = {}) {
    * sheetPath 一直都存着（见 variants.js），以前只是没往外传。
    */
   const ref = (kind, item) => {
+    /**
+     * ⚠ 没有实体形象的角色不发参考图，**哪怕它身上已经有一张**。
+     *
+     * 光在出图那一步跳过是不够的：老项目里那张凭空捏出来的脸已经存下来了，
+     * 用户把开关关掉之后，如果这里还照发，那张现代女生照样跟进每一镜 ——
+     * 而他会以为开关没用。
+     */
+    if (kind === 'character' && !variants.isEmbodied(item)) return;
     const v = variants.pickVariant(item, shot);
 
     /**
@@ -1296,7 +1333,15 @@ export async function generateConsistentImage({
   const threshold = settings.get('consistencyThreshold') ?? 75;
   const verifyEnabled = settings.get('consistencyVerify') !== false;
   const assembled = assemblePrompt(bible, shot);
-  const cast = matchCharacters(bible, shot);
+  /**
+   * ⚠ 一致性复核只认**有实体形象**的角色。
+   *
+   * 复核干的事是"把成图和这个角色的设定图比对"，而没有实体的角色
+   * 根本没有设定图。拿它当基准的话，要么复核直接跳过（好一点），
+   * 要么拿一张凭空捏的脸去比对成图 —— 然后判不一致、自动换种子重出、
+   * 重出还是不一致，把重试次数和钱一起烧光，而根因看不出来。
+   */
+  const cast = matchCharacters(bible, shot).filter((c) => variants.isEmbodied(c));
 
   /**
    * 分镜图默认**不走图生图**。

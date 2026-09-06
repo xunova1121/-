@@ -340,6 +340,50 @@ export default {
               : null)
         : null;
 
+      /**
+       * ── 有没有实体形象 ──
+       *
+       * 用户报的原话：「古代神秘者，怎么是现代的」。那个角色叫「神秘声音」，
+       * 设定里写着"无实体形象，仅以声音和文字出现在手机屏幕中"，
+       * 而我们照样给它出了一张人物设定图 —— 模型拿到一段没有身体的描述，
+       * 只能自己编一个人，编出来的是穿卫衣牛仔裤的现代女生。
+       * 那张脸接着会作为参考图跟进它出现的每一镜。
+       *
+       * 模型现在会自己判断，但它会判错，所以这里必须有一个开关：
+       * **判错的东西要能在一个地方改掉**，而不是去改八段外貌描述。
+       */
+      const embodiedBox = kind === 'char'
+        ? h('input', { type: 'checkbox', checked: item.embodied !== false })
+        : null;
+      const embodiedRow = embodiedBox
+        ? h('label', {
+            class: 'sheet-actions',
+            style: 'cursor:pointer',
+            title: '旁白、画外音、只以声音或文字出现的角色勾掉这个。勾掉之后不出人设图，也不会把一张脸带进它出现的镜头'
+          },
+          embodiedBox,
+          h('span', { class: 'sheet-seed', style: 'flex:none' }, '有实体形象（画得出人）'),
+          item.embodied === false
+            ? h('span', { class: 'sheet-seed', style: 'flex:none;color:var(--ink-dim)' }, '· 不出人设图')
+            : null)
+        : null;
+      if (embodiedBox) {
+        embodiedBox.onchange = async () => {
+          embodiedBox.disabled = true;
+          try {
+            // cap:bible-embodied
+            const r = await saveText({ embodied: embodiedBox.checked });
+            toast(r.unsheeted
+              ? `已标为无实体形象，摘掉了 ${r.unsheeted} 张凭空画出来的人设图`
+              : (embodiedBox.checked ? '已标为有实体形象，会给它出人设图' : '已标为无实体形象，不再给它出人设图'), 'ok');
+            rerender();
+          } catch (err) {
+            toast(err.message, 'err');
+            embodiedBox.checked = !embodiedBox.checked;
+          } finally { embodiedBox.disabled = false; }
+        };
+      }
+
       const provSel = h('select', { class: 'mini' },
         h('option', { value: '' }, `默认（${state.catalog.routing.image.provider}）`),
         ...imageProviders.map((p) => h('option', { value: p.id }, p.name)));
@@ -720,6 +764,7 @@ export default {
             ? h('div', { class: 'sheet-seed', style: 'margin-top:6px;color:var(--caution)' },
                 '文字改过了，图还是按旧描述出的 —— 出图时提示词和参考图会打架。想让图跟上就点「改完重出」。')
             : null,
+          embodiedRow,
           voiceSel
             ? h('div', { class: 'sheet-actions' },
                 h('span', { class: 'sheet-seed', style: 'flex:none' }, '音色'), voiceSel)

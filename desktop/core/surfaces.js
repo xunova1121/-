@@ -518,6 +518,14 @@ export const CAPABILITIES = [
     why: ''
   },
   {
+    id: 'bible-embodied',
+    name: '标出没有实体形象的角色（旁白、画外音 —— 不出人设图、不带脸进镜头）',
+    api: 'PATCH /projects/:id/bible/char/:name { embodied }',
+    pc: 'ui/views/bible.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
     id: 'script-scan',
     name: '剧本体检（免费那层：会让 JSON 炸掉的符号、字数、该不该分章）',
     api: 'GET /projects/:id/script/scan',
