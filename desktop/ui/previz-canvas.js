@@ -28,7 +28,7 @@ import { GLTFLoader } from '/three-gltf-loader.js';
 import { OrbitControls } from '/three-orbit-controls.js';
 import { TransformControls } from '/three-transform-controls.js';
 import { clone as cloneSkeleton } from '/three-skeleton-utils.js';
-import { addKeyframe, applyFrame, attachmentPose, createHistory, detachAttachment, findObject, nearestAttachment, normalizeStage, propEventBetween, restore, snapToGround, snapshot, spatialIssues, stageObjects } from './previz-stage.js';
+import { addKeyframe, applyFrame, attachmentPose, createHistory, detachAttachment, findObject, nearestAttachment, normalizeStage, propEventBetween, removeStageObject, restore, snapToGround, snapshot, spatialIssues, stageObjects } from './previz-stage.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -1400,6 +1400,19 @@ export function previzPanel(stage, {
     inspector.append(title, makeNumber('X', 'x'), makeNumber('Y', 'y'), makeNumber('离地', 'elevation'), makeNumber('高度', 'height'),
       makeNumber('水平旋转°', 'rotation', '1'), makeNumber('俯仰°', 'rotationX', '1'), makeNumber('翻滚°', 'rotationZ', '1'),
       makeNumber('缩放X', 'scaleX'), makeNumber('缩放Y', 'scaleY'), makeNumber('缩放Z', 'scaleZ'), lock);
+    if (found.kind !== 'camera') {
+      const remove = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '从预演台移除', disabled: Boolean(item.locked) });
+      const feedback = Object.assign(document.createElement('div'), { className: 'field-hint' });
+      feedback.setAttribute('role', 'status');
+      remove.title = '只移除舞台实例及其关键帧，保留素材库，可撤销';
+      remove.onclick = () => {
+        stopPlayback();
+        const result = removeStageObject(stage, item.id);
+        if (!result.ok) { feedback.textContent = result.reason; return; }
+        selectedId = stage.cam.id; history.commit(); redrawAll(); onChange();
+      };
+      inspector.append(remove, feedback);
+    }
     if (found.kind === 'camera') {
       const targets = [['', '自动跟随主体'], ...(stage.subjects || []).map((x) => [x.id, x.name || x.id]),
         ...(stage.marks || []).filter((x) => !x.far).map((x) => [x.id, x.name || x.id])];
@@ -1452,10 +1465,8 @@ export function previzPanel(stage, {
       color.onchange = () => { history.commit(); paintTimeline(); };
       const colorWrap = document.createElement('label'); colorWrap.append(document.createTextNode('颜色'), color);
       const targets = [['', '自动主体'], ...(stage.subjects || []).map((x) => [x.id, x.name || x.id]), ...(stage.marks || []).filter((x) => !x.far).map((x) => [x.id, x.name || x.id])];
-      const remove = Object.assign(document.createElement('button'), { className: 'btn ghost sm', textContent: '删除灯光' });
-      remove.onclick = () => { stage.lights = (stage.lights || []).filter((x) => x.id !== item.id); selectedId = stage.cam.id; history.commit(); redrawAll(); onChange(); };
       inspector.append(makeSelect('类型', 'lightType', [['spot', '聚光灯'], ['point', '点光源'], ['directional', '平行光']]),
-        makeNumber('强度', 'intensity', '0.1'), colorWrap, makeSelect('照向', 'targetId', targets), remove);
+        makeNumber('强度', 'intensity', '0.1'), colorWrap, makeSelect('照向', 'targetId', targets));
     } else if (found.kind === 'prop') {
       const actors = [['', '自由摆放'], ...(stage.subjects || []).map((x) => [x.id, `绑定：${x.name || x.id}`])];
       // 自由摆放先保留当前挂点世界坐标，避免解绑后回到旧坐标而瞬移。

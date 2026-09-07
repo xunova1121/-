@@ -83,6 +83,32 @@ export function findObject(stage, id) {
   return stageObjects(stage).find((x) => x.item.id === id) || null;
 }
 
+/** 只移除舞台实例；素材文件不动。有跨对象引用时明确拒绝，不能留下悬空挂点。 */
+export function removeStageObject(stage, id) {
+  const found = findObject(stage, id);
+  if (!found) return { ok: false, reason: '对象已不存在' };
+  if (found.kind === 'camera') return { ok: false, reason: '主摄影机不能移除' };
+  if (found.item.locked) return { ok: false, reason: '请先解锁对象' };
+  const references = [];
+  const inspect = (value, label) => {
+    if (['attachToId', 'focusId', 'targetId'].some((key) => value?.[key] === id)) references.push(label);
+  };
+  for (const { item } of stageObjects(stage)) {
+    if (item.id !== id) inspect(item, item.name || item.id);
+  }
+  for (const frame of stage.keyframes || []) {
+    for (const [owner, value] of Object.entries(frame.values || {})) {
+      if (owner !== id) inspect(value, `${frame.frame}帧 ${owner}`);
+    }
+  }
+  if (references.length) return { ok: false, reason: `请先解除挂点、对焦或照向引用：${[...new Set(references)].join('、')}` };
+  const bucket = { subject: 'subjects', prop: 'marks', light: 'lights' }[found.kind];
+  stage[bucket] = stage[bucket].filter((item) => item.id !== id);
+  for (const frame of stage.keyframes || []) delete frame.values?.[id];
+  stage.keyframes = (stage.keyframes || []).filter((frame) => Object.keys(frame.values || {}).length);
+  return { ok: true };
+}
+
 /** 把人物局部挂点换算成舞台世界坐标；渲染、控制图与提示词共用同一份结果。 */
 export function attachmentPose(stage, item) {
   const actor = (stage?.subjects || []).find((x) => x.id === item?.attachToId);
