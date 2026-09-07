@@ -518,6 +518,14 @@ export const CAPABILITIES = [
     why: ''
   },
   {
+    id: 'prompt-layers',
+    name: '看这条提示词由哪几层拼成，并且能关掉某一层',
+    api: 'GET /projects/:id/shots/:sid/prompts → layers',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
     id: 'shot-request',
     name: '这一镜发出去的请求，和"在商家后台贴一句话"差在哪（含按后台那样出一次）',
     api: 'GET /projects/:id/shots/:sid/request',

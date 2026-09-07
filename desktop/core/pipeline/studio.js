@@ -2449,6 +2449,12 @@ async function analyzeScriptRaw(projectId, {
  */
 const SHOT_EDITABLE = [
   'description', 'camera', 'lens', 'motion', 'dialogue', 'scene', 'characters', 'duration', 'link', 'skills',
+  /**
+   * 这一镜关掉了提示词的哪几层（见 consistency.assemblePrompt 的 Modifier Stack）。
+   * 不进白名单的话，界面上关了存不下去 —— 而"改了没反应"是最难查的一类：
+   * 接口回 200，值就是没进去。
+   */
+  'promptMute',
   // 这一镜画面里看得见的关键道具。不进白名单的话界面上改了存不下去，
   // 而道具消失那条检查就永远只能听模型的、人纠正不了
   'props',
@@ -2769,6 +2775,10 @@ export function updateShot(projectId, shotId, patch = {}) {
         value = Number(value);
         if (!Number.isFinite(value) || value < 8 || value > 400) continue;
       }
+    } else if (key === 'promptMute') {
+      // 只收字符串数组。存进去一个对象或数字，assemblePrompt 那边的
+      // Set.has 会静默失配 —— 表现是"关了没生效"，而没有任何一处报错
+      value = Array.isArray(value) ? value.map((x) => String(x)).filter(Boolean) : [];
     } else if (key === 'duration') {
       value = Number(value);
       if (!Number.isFinite(value) || value <= 0) continue;
