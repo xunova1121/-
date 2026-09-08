@@ -46,6 +46,20 @@ let mPass = 0;
   });
 }
 
+const rejections = [];
+
+/**
+ * 关掉所有抽屉。
+ *
+ * ⚠ 点 `.sheet` 的边角是关不掉的 —— openSheet 只在 `e.target === layer`
+ * 时关，而点到 (5,5) 往往落在里面的 `.sheet-box` 上。留一张开着的抽屉
+ * 会把**后面每一节**都挡住，然后报成"页签点不到"，查半天在查别的事。
+ */
+const closeSheets = (pg) => pg.evaluate(() => {
+  // 编辑器是 .ed（自己挂在 body 上的一层），不是 .sheet —— 两种都要收
+  for (const el of document.querySelectorAll('.sheet, .ed')) el.remove();
+});
+
 const PW = process.env.PLAYWRIGHT_PATH || 'playwright';
 let chromium; let devices;
 try {
@@ -197,6 +211,18 @@ const sent = [];
 page.on('request', (r) => { try { sent.push(new URL(r.url()).pathname); } catch { /* data: 之类 */ } });
 const errs = [];
 page.on('pageerror', (e) => errs.push(e.message));
+/**
+ * ⚠ async 函数里抛出的错**不会**变成 pageerror，它是 unhandledrejection。
+ *
+ * 这条护栏是拿一个真 bug 换来的：openWhy 是 async，里面一个
+ * `add is not defined`（那个函数只存在于电脑端 lib.js）让手机上
+ * 「看看为什么」整颗按钮失效了一整轮，而走查全绿 —— 因为只监听 pageerror。
+ */
+await page.addInitScript(() => {
+  window.addEventListener('unhandledrejection', (e) => {
+    (window.__fdRejections ||= []).push(String(e.reason?.message || e.reason));
+  });
+});
 page.on('console', (m) => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
 
 // ①② 这两步是**故意**不带码 / 带错码的，那些 401 是预期结果
@@ -355,6 +381,55 @@ await page.waitForTimeout(1000);
 console.log('⑤b 手机上改剧本：',
   /三天前的那通电话/.test(store.read(proj.id).script) ? '存下了 ✓' : '✕');
 console.log('   画风也能选：', (await page.locator('.style-mini-card').count()) > 3 ? '✓' : '✕');
+
+/**
+ * ══════════ 大纲（手机端） ══════════
+ *
+ * ⚠ 这一节是**零覆盖**补上的：大纲在能力清单里登记着、两端代码都在、
+ * 电脑端走查从头到尾验过一遍 —— 而手机端一个字都没验过。
+ * 而"改大纲最常发生在手机上"正是当初把它做到手机端的理由。
+ * 用得最多的那一端没人验，这个组合迟早出事。
+ *
+ * ⚠ 验的是**画得出来**，不是**生成得出来**。
+ *
+ * mcheck 整套不打模型的桩（不像 uicheck），所以在这儿点「生成大纲」
+ * 必然拿不到场次 —— 那是夹具的边界，不是功能坏了。
+ * 第一版就是这么写的，红了之后差点被当成产品 bug 报出去。
+ *
+ * 所以这里直接把一份大纲塞进项目，验手机端**渲染**那一半：
+ * 那正好是"服务端拆出来了、手机上却是空的"这类问题会出现的地方。
+ */
+{
+  const seeded = store.read(proj.id);
+  seeded.outline = {
+    beats: [
+      { id: 'b-01', scene: '码头', time: '清晨', characters: ['阿澜'], summary: '阿澜走向栈桥', dialogue: '设备正常。', seconds: 20 },
+      { id: 'b-02', scene: '码头', time: '清晨', characters: ['阿澜'], summary: '发现缆绳被割断', dialogue: '割口是新的。', seconds: 25 },
+      { id: 'b-03', scene: '栈桥', time: '清晨', characters: ['阿澜'], summary: '望向雾里的灯塔', dialogue: '', seconds: 12 }
+    ],
+    updatedAt: new Date().toISOString()
+  };
+  store.save(seeded);
+  await page.reload();
+  await page.waitForTimeout(1200);
+  await page.locator('.tab', { hasText: '剧本' }).click();
+  await page.waitForTimeout(900);
+
+  console.log('   剧本页上有大纲这一块：',
+    (await page.locator('button:has-text("从剧本生成大纲")').count()) > 0 ? '✓' : '✕ 手机上根本看不到大纲');
+  /**
+   * ⚠ 手机端有**自己的**一套 class（mob-row / mob-floor），
+   * 不是电脑端那套（ob-row / ob-floor）。第一版照抄了电脑端的选择器，
+   * 于是"画出 0 行"——而页面上内容明明在。差点又报一个假 bug。
+   */
+  const rows = await page.locator('.mob-row').count();
+  console.log('   已有的大纲画得出来：', rows >= 3 ? `✓ ${rows} 行` : `✕ 只画出 ${rows} 行（存着 3 场）`);
+  const txt = await page.locator('#app').evaluate((el) => el.textContent || '');
+  console.log('   每一场的内容也在：', /缆绳被割断/.test(txt) ? '✓' : '✕ 行画出来了但内容是空的');
+  /** 台词的硬下限和"节奏偏长"是两回事：前者除非删台词否则压不下去 */
+  console.log('   有台词的场次标出了念完要多久：',
+    (await page.locator('.mob-floor').count()) > 0 ? '✓' : '✕');
+}
 // <img> 带不了鉴权头 —— 漏了口令的话整排缩略图 401，显示成一片空框，
 // 而"图裂了"最容易被当成图片本身有问题
 const broken = await page.locator('.style-mini-card img').evaluateAll(
@@ -1085,6 +1160,41 @@ const realErrs = errs.filter((e) => !/401/.test(e));
 }
 
 /**
+ * ⑯ 撤销（手机端）
+ *
+ * 手滑最容易发生在手机上，所以这条路在手机上比在电脑上更要紧。
+ * 验的是整条链：改 → 撤销按钮带名字地出现 → 点了真的退回去。
+ */
+{
+  console.log('\n⑯ 撤销：');
+  const chip = page.locator('.fchip.icon', { hasText: '⌘' }).first();
+  await chip.click();
+  await page.waitForTimeout(700);
+  const ta = page.locator('.sheet textarea.mta').first();
+  await ta.fill('第 1 镜改成大特写');
+  await page.waitForTimeout(1200);
+  await page.locator('.sheet .cmd-preview ~ .row button').first().click();
+  await page.waitForTimeout(1600);
+
+  await chip.click();
+  await page.waitForTimeout(900);
+  const undoBtn = page.locator('.sheet .undo-bar button').first();
+  console.log('   改完之后有撤销按钮：', (await undoBtn.count()) === 1 ? '✓' : '✕');
+  const label = (await undoBtn.textContent().catch(() => '')) || '';
+  console.log('   按钮上写着退的是哪一步：', /景别|镜/.test(label) ? `✓ ${label.slice(0, 26)}` : `✕ ${label}`);
+  page.once('dialog', (d) => d.accept());
+  await undoBtn.click();
+  await page.waitForTimeout(1800);
+  /**
+   * ⚠ 读**折叠区里那个标签的文本**要用 textContent，而且要读得准 ——
+   * 整页 textContent 里"大特写"会在别处出现（帮助文字、档位清单），
+   * 那样验的是运气。这里只读第一张卡。
+   */
+  const card1 = await page.locator('.shot').first().evaluate((el) => el.textContent || '').catch(() => '');
+  console.log('   第 1 镜退回去了：', !/大特写/.test(card1) ? '✓' : `✕ ${card1.slice(0, 60)}`);
+}
+
+/**
  * ⑰ 提示词分层（手机端）
  *
  * 放在「看看为什么」抽屉里：先看有没有明确原因 → 没有的话看看是不是
@@ -1173,6 +1283,70 @@ const realErrs = errs.filter((e) => !/401/.test(e));
     }
   }
 }
+
+/**
+ * ⑱ 焦段（手机端）
+ *
+ * 审片时发现"这几镜背景太散"，换个长焦是当场就想做的事 ——
+ * 而审片正是在手机上做的。
+ */
+{
+  console.log('\n⑱ 焦段：');
+  /**
+   * ⚠ 先把上一节可能还开着的抽屉关掉。
+   * 留一张开着的抽屉会挡住页签，然后报成"页签点不到"——
+   * 查半天在查一件跟本节毫无关系的事。
+   */
+  await closeSheets(page);
+  await page.waitForTimeout(300);
+  await page.locator('.tab', { hasText: '分镜' }).click();
+  await page.waitForTimeout(700);
+  await page.locator('.shot-desc.tappable').first().click();
+  await page.waitForTimeout(1400);
+  /**
+   * ⚠ 编辑器是分页的（内容 / 镜头 / 预演台 / 高级），默认停在「内容」。
+   * 景别和焦段在「镜头」那一页 —— 不切过去的话，选择器永远匹配不到，
+   * 而且不报错，看起来像"这个功能没做"。
+   */
+  await page.locator('.ed-tab', { hasText: '镜头' }).first().click();
+  await page.waitForTimeout(500);
+  // ⚠ 编辑器**不是** .sheet：openEditor 自己往 body 上挂了一层。
+  //    带 .sheet 前缀的选择器在这儿永远匹配不到，而且不报错。
+  const row = page.locator('.ed-group', { hasText: '焦段' }).first();
+  console.log('   编辑器里有焦段这一项：', (await row.count()) >= 1 ? '✓' : '✕');
+  const chips85 = page.locator('.chip', { hasText: '背景压缩' }).first();
+  /** 括注写的是画面上看得出来的那件事，不是参数 —— 选的人未必懂毫米数 */
+  console.log('   选项写的是人话不是参数：', (await chips85.count()) === 1 ? '✓ 85 背景压缩' : '✕');
+  if (await chips85.count()) {
+    await chips85.evaluate((el) => el.click());
+    await page.waitForTimeout(300);
+    const save = page.locator('button', { hasText: '保存' }).first();
+    if (await save.count()) {
+      await save.evaluate((el) => el.click());
+      await page.waitForTimeout(1600);
+      /**
+       * ⚠ 用**界面自己**验存没存住：重新打开编辑器，看那颗芯片还亮着没有。
+       *
+       * 第一版是在页面里 fetch 一个自己拼的地址，而 id 拼空了 → 401，
+       * 于是"意料之外的 4xx"那条护栏红了 —— 走查自己制造了一个假故障。
+       * 同样的错这一轮已经犯过一次（指令框那节）。
+       */
+      await closeSheets(page);
+      await page.locator('.shot-desc.tappable').first().click();
+      await page.waitForTimeout(1300);
+      await page.locator('.ed-tab', { hasText: '镜头' }).first().click();
+      await page.waitForTimeout(500);
+      const on = await page.locator('.chip.on', { hasText: '背景压缩' }).count();
+      console.log('   选完存得住（重开编辑器还亮着）：', on === 1 ? '✓ 85mm' : '✕');
+    }
+  }
+  await closeSheets(page);
+  await page.evaluate(() => { for (const el of document.querySelectorAll('.ed')) el.remove(); });
+  await page.waitForTimeout(300);
+}
+
+rejections.push(...(await page.evaluate(() => window.__fdRejections || []).catch(() => [])));
+console.log('未处理的 Promise 拒绝：', rejections.length ? `✕ ${rejections.slice(0, 3).join(' | ')}` : '无 ✓');
 
 console.log('意料之外的 4xx：', unexpected4xx.length ? `✕ ${unexpected4xx.slice(0, 4).join('、')}` : '无 ✓');
 console.log('\n页面报错：', realErrs.length ? realErrs.slice(0, 4) : '无');

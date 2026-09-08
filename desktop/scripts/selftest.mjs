@@ -10546,6 +10546,196 @@ section('这一镜为什么不对');
   check('而且说得出为什么选它', /参考图/.test(list[0].why), list[0].why);
 }
 
+section('焦段：景别是算出来的，不是一个形容词');
+{
+  const previz = await import('../core/pipeline/previz.js');
+  const cons = await import('../core/pipeline/consistency.js');
+
+  /**
+   * ══════════ 为什么要给焦段配一句话 ══════════
+   *
+   * 提示词里原来只有一个裸数字（"…，85mm"）。那和当初只写「特写」两个字
+   * 是一模一样的毛病：行话，模型的理解未必和你一样，而它要和几百字的
+   * 描述抢注意力。「特写」那次的解法是配一句能验的话，这里照办。
+   */
+  check('广角说的是"背景显得远"', /开阔|远/.test(previz.lensHint(24)), previz.lensHint(24));
+  check('长焦说的是"背景被压缩"', /压缩/.test(previz.lensHint(85)), previz.lensHint(85));
+  check('两头说的不是同一句（否则这张表等于没有）',
+    previz.lensHint(24) !== previz.lensHint(85), previz.lensHint(24));
+  /**
+   * ⚠ 没选焦段就**一个字都不说**。
+   * 补一句默认 35mm 的说明，等于替用户做了一个他没做过的决定 ——
+   * 而且是一个听起来很具体的谎。这个项目为"没摆地标就别编"专门写过一段。
+   */
+  check('没给焦段时返回空，不替人编一个默认的',
+    previz.lensHint(null) === '' && previz.lensHint(0) === '' && previz.lensHint('x') === '',
+    JSON.stringify([previz.lensHint(null), previz.lensHint(0), previz.lensHint('x')]));
+
+  const bible = {
+    style: { anchor: '国风水墨' },
+    characters: [{ name: '阿澜', appearance: '少年', seed: 1 }],
+    scenes: [], props: []
+  };
+  const base = { index: 1, characters: ['阿澜'], description: '阿澜走向栈桥', camera: '中景', skills: [] };
+
+  check('没选焦段的镜头，提示词里没有焦段那一层',
+    !cons.assemblePrompt(bible, base).layers.some((l) => l.id === 'lens'),
+    JSON.stringify(cons.assemblePrompt(bible, base).layers.map((l) => l.id)));
+
+  {
+    const r = cons.assemblePrompt(bible, { ...base, lens: 85 });
+    check('选了 85mm，提示词里就有"背景被压缩"那句', /压缩/.test(r.prompt), r.prompt);
+    check('而且它是单独一层（能单独关掉）',
+      r.layers.some((l) => l.id === 'lens'), JSON.stringify(r.layers.map((l) => l.id)));
+  }
+
+  {
+    /**
+     * ⚠ 排过位的以**排位里那个焦段**为准 —— 它更具体（那是真在俯视图上摆过的）。
+     * 反过来的话，用户在预演台上把镜头换成 85mm，提示词里却还是卡片上填的那个，
+     * 而两处都显示着各自的数，谁也不知道哪个算数。
+     */
+    const staged = { ...base, lens: 24, stage: { cam: { x: 0, y: -3, height: 1.6, lens: 85 } } };
+    check('排过位时以预演台里那个焦段为准',
+      /压缩/.test(cons.assemblePrompt(bible, staged).prompt),
+      cons.assemblePrompt(bible, staged).prompt);
+  }
+}
+
+section('撤销：一个回车能改五十镜，就得有一条退回来的路');
+{
+  const undo = await import('../core/undo.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fd-undo-'));
+  const file = path.join(dir, 'project.json');
+  const put = (n) => fs.writeFileSync(file, JSON.stringify({ id: 'p', shots: Array.from({ length: n }, (_, i) => ({ id: `s${i}`, camera: '中景' })) }), 'utf8');
+  const now = () => JSON.parse(fs.readFileSync(file, 'utf8'));
+
+  put(10);
+  undo.snapshot(dir, '批量改了 10 镜（景别→中景）');
+  put(3);
+
+  {
+    const items = undo.list(dir);
+    check('存下了一步', items.length === 1, JSON.stringify(items.map((i) => i.label)));
+    /**
+     * ⚠ 标签是这条路能不能用的关键。
+     * 一列没有名字的时间戳，人不知道该退到哪一条，于是一条都不敢按 ——
+     * 那和没有撤销是一回事。
+     */
+    check('这一步有名字，不是光一个时间戳',
+      items[0].label.includes('景别'), JSON.stringify(items[0].label));
+    check('记下了那一刻有几镜（好让人确认退对了没）', items[0].shots === 10, String(items[0].shots));
+  }
+
+  {
+    undo.restore(dir, undo.list(dir).find((i) => i.label.includes('景别')).n);
+    check('退回去之后分镜表回到 10 镜', now().shots.length === 10, String(now().shots.length));
+    /**
+     * ⚠ `_undo` 是快照自己的元数据，不能跟着写回正式档。
+     * 写回去的话，下一张快照会把上一张的标签当成自己的 ——
+     * 撤销列表里会出现一串一模一样的名字，而那正好毁掉标签的全部价值。
+     */
+    check('正式档里没有留下快照的元数据', !('_undo' in now()), JSON.stringify(Object.keys(now())));
+  }
+
+  {
+    /**
+     * ⚠ 撤销本身也要能撤销。
+     * 不然"手滑点了撤销"就成了一个没法挽回的操作 ——
+     * 而这个模块存在的全部理由就是消灭那种操作。
+     */
+    const items = undo.list(dir);
+    check('退回去之前，把当时的状态也存了一张',
+      items.some((i) => i.label.includes('撤销前')), JSON.stringify(items.map((i) => i.label)));
+    const back = items.find((i) => i.label.includes('撤销前'));
+    check('而且那一张记的是 3 镜（撤销前的样子）', back.shots === 3, String(back.shots));
+    undo.restore(dir, back.n);
+    check('所以撤销是可以再撤销回来的', now().shots.length === 3, String(now().shots.length));
+  }
+
+  {
+    /**
+     * ⚠ 上限写**死数字**，不要写 undo.KEEP。
+     *
+     * 第一版写的是 `list().length === undo.KEEP` —— 两边用的是同一个常量，
+     * 那条断言**恒真**：把 KEEP 改成 99、快照堆到 99 张，它照样绿。
+     * 推红时才发现的。用常量比常量，等于什么都没验。
+     */
+    for (let i = 0; i < 20; i += 1) undo.snapshot(dir, `第 ${i} 步`);
+    check('最多留 8 步（再多意义很小，每张是一整份分镜表）',
+      undo.list(dir).length === 8, String(undo.list(dir).length));
+    check('而且 KEEP 就是 8（改了它，上面那条也得跟着改）', undo.KEEP === 8, String(undo.KEEP));
+    check('留下的是最新那几步，不是最旧的',
+      undo.list(dir)[0].label.includes('第 19 步'), JSON.stringify(undo.list(dir)[0].label));
+  }
+
+  {
+    /**
+     * ⚠ 坏文件要跳过，不能让整条路不可用。
+     * 撤销列表是给人救急用的 —— 写到一半崩了留下的半截文件，
+     * 不该导致"一步都退不了"。
+     */
+    fs.writeFileSync(path.join(dir, 'project.undo-999.json'), '{ 半截', 'utf8');
+    const items = undo.list(dir);
+    check('一个坏快照不会让整个列表挂掉', items.length >= 1, String(items.length));
+    check('而且坏的那个不出现在列表里',
+      !items.some((i) => i.n === 999), JSON.stringify(items.map((i) => i.n)));
+  }
+
+  {
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'fd-undo2-'));
+    check('没有 project.json 时存快照返回 null（不抛错）', undo.snapshot(empty, 'x') === null, 'x');
+    check('空目录列出来是空数组', JSON.stringify(undo.list(empty)) === '[]', JSON.stringify(undo.list(empty)));
+    fs.rmSync(empty, { recursive: true, force: true });
+  }
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+section('撤销接到了真流水线上：批量改完真能退回去');
+{
+  /**
+   * ⚠ 上一节验的是 undo.js 本身。这一节验的是**它真的被接上了**——
+   * 这个项目里反复出现的那一类失败正是"同一件事两条路径、只接了一条"。
+   * 光测模块、不测接线，接线断了照样全绿。
+   */
+  const studioMod = await import('../core/pipeline/studio.js');
+  const storeMod = await import('../core/store.js');
+  const undoMod = await import('../core/undo.js');
+
+  const p = storeMod.create({ title: '撤销走查' });
+  const shots = [1, 2, 3].map((i) => ({ id: `sh${i}`, index: i, camera: '中景', duration: 3 }));
+  storeMod.save({ ...storeMod.read(p.id), shots });
+
+  studioMod.batchUpdateShots(p.id, { ids: ['sh1', 'sh2', 'sh3'], patch: { camera: '特写' } });
+  check('批量改真的改了', storeMod.read(p.id).shots.every((s) => s.camera === '特写'),
+    JSON.stringify(storeMod.read(p.id).shots.map((s) => s.camera)));
+
+  const items = studioMod.undoList(p.id).items;
+  check('批量改之前自动存了一步', items.length >= 1, JSON.stringify(items.map((i) => i.label)));
+  /**
+   * 标签要说清楚**改了什么**，不能只说"批量修改"。
+   * 五条一模一样的"批量修改"和没有列表是一回事。
+   */
+  check('标签写明了改的是景别和改了几镜',
+    /3 镜/.test(items[0].label) && /景别/.test(items[0].label), JSON.stringify(items[0].label));
+
+  studioMod.undoTo(p.id, items[0].n);
+  check('退回去之后景别回到中景',
+    storeMod.read(p.id).shots.every((s) => s.camera === '中景'),
+    JSON.stringify(storeMod.read(p.id).shots.map((s) => s.camera)));
+  check('退回去之后镜头一个没少', storeMod.read(p.id).shots.length === 3,
+    String(storeMod.read(p.id).shots.length));
+
+  /** 整段标衔接也是一次动几十镜，同样要能退 */
+  studioMod.setLinkRange(p.id, { from: 1, to: 3, link: 'continuous' });
+  const after = studioMod.undoList(p.id).items;
+  check('整段标衔接之前也存了一步',
+    after.some((i) => i.label.includes('整段标衔接')), JSON.stringify(after.map((i) => i.label)));
+
+  storeMod.remove(p.id);
+}
+
 section('指令框：把人话翻成计划，而且绝不替你动手');
 {
   const cmd = await import('../core/pipeline/command.js');

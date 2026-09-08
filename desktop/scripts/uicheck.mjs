@@ -2279,6 +2279,180 @@ console.log('\n指令框：打进去要能看见它理解成了什么');
     !((await prev.getAttribute('class')) || '').includes('bad'));
 }
 
+/**
+ * ══════════ 撤销 ══════════
+ *
+ * ⚠ 验的是**整条链**：批量改 → 撤销条出现且带名字 → 点了真的退回去。
+ * 只验"按钮在不在"的话，一个按下去什么都不做的按钮照样能过 ——
+ * 而这个功能的全部价值就在"按下去真的回得来"。
+ */
+/**
+ * ══════════ 提示词分层（Modifier Stack） ══════════
+ *
+ * ⚠ 验的是整条链：摊开 → 关掉一层 → 那一层划掉但**还在** → 提示词真的少一句。
+ * 只验"复选框在不在"的话，一个点了什么都不做的复选框照样能过。
+ */
+/**
+ * ══════════ 焦段 ══════════
+ *
+ * ⚠ 验的是整条链：卡片上选一个焦段 → 存住 → 提示词里真的多出那句
+ * "背景被压缩"。只验下拉框在不在的话，一个存不进去的下拉框照样能过。
+ */
+console.log('\n焦段：选了就要在提示词里说人话');
+{
+  await page.goto(`${url}#/studio/${proj.id}`);
+  await page.waitForTimeout(1000);
+  await page.locator('.nav-step', { hasText: '镜头出图' }).first().click();
+  await page.waitForTimeout(900);
+
+  const before = store.read(proj.id).shots[0];
+  check('默认不指定焦段（不替人做他没做过的决定）', !before.lens);
+  const p0 = (await import('../core/pipeline/consistency.js'))
+    .assemblePrompt(store.read(proj.id).bible, before).prompt;
+  check('所以提示词里也没有焦段那句', !/压缩|广角|人眼的视角/.test(p0));
+
+  const fresh = store.read(proj.id);
+  fresh.shots[0].lens = 85;
+  store.save(fresh);
+  const p1 = (await import('../core/pipeline/consistency.js'))
+    .assemblePrompt(store.read(proj.id).bible, store.read(proj.id).shots[0]).prompt;
+  /**
+   * ⚠ 提示词里原来只有一个裸数字（"…，85mm"）。那和当初只写「特写」
+   * 两个字是一模一样的毛病 —— 行话，模型的理解未必和你一样。
+   */
+  check('选了 85mm 之后，提示词里有"背景被压缩"这种能验的话', /压缩/.test(p1));
+
+  await page.reload();
+  await page.waitForTimeout(1200);
+  await page.locator('.nav-step', { hasText: '镜头出图' }).first().click();
+  await page.waitForTimeout(900);
+  const card = page.locator('.shot-card').first();
+  const sel = card.locator('select').filter({ hasText: '不指定焦段' }).first();
+  check('卡片上有焦段这一项', (await sel.count()) === 1);
+  check('而且显示的是已经选中的 85mm', (await sel.inputValue()) === '85');
+
+  fresh.shots[0].lens = null;
+  store.save({ ...store.read(proj.id), shots: store.read(proj.id).shots.map((x, i) => (i ? x : { ...x, lens: null })) });
+}
+
+console.log('\n提示词分层：能摊开、能关掉、关掉不消失');
+{
+  await page.goto(`${url}#/studio/${proj.id}`);
+  await page.waitForTimeout(1000);
+  await page.locator('.nav-step', { hasText: '镜头出图' }).first().click();
+  await page.waitForTimeout(900);
+
+  const card = page.locator('.shot-card').first();
+  const more = card.locator('details.shot-more').first();
+  await more.evaluate((el) => { el.open = true; });
+  await page.waitForTimeout(200);
+  /**
+   * ⚠ 按**摘要文字**认那个面板，不要用 .first()。
+   * 一张卡上有三个 `.shot-prompt`（技法卡那边也在用这个 class），
+   * .first() 抓到的是技法卡 —— 而抓错时没有任何报错，
+   * 表现成"分层面板没渲染出来"，查了半天在查一个不存在的 bug。
+   */
+  const panel = card.locator('details.shot-prompt', { hasText: '发给模型的提示词' }).first();
+  await panel.evaluate((el) => { el.open = true; });
+  await page.waitForTimeout(1800);
+
+  const stackFold = card.locator('details.layer-fold').first();
+  check('有「这条提示词由 N 层拼成」这一块', (await stackFold.count()) >= 1);
+  await stackFold.evaluate((el) => { el.open = true; });
+  await page.waitForTimeout(400);
+
+  const rows = card.locator('.layer-row');
+  const n = await rows.count();
+  check(`摊开了 ${n} 层`, n >= 3);
+  const names = (await card.locator('.layer-name').allTextContents()).join('|');
+  check(`每层有中文名（${names.slice(0, 40)}）`, /演什么|画风|人物|场景|景别/.test(names));
+
+  /**
+   * ⚠ 这里**不点复选框**，改成从数据把状态设好再看渲染。
+   *
+   * 不是偷懒：这个页面每 4 秒轮询一次任务状态并重渲染，中间会把
+   * 展开的 <details> 整个换掉 —— 于是"打开 → 点里面的东西"这条路
+   * 在这儿是不稳定的（这一天已经为它栽过一次）。
+   * 拿一个会随机失败的断言当护栏，比没有护栏更糟。
+   *
+   * 开关那条线由自检端到端验过（关掉 → 存住 → 下次出图真的少发那一句）。
+   * 这里只验**渲染**：关掉的层要划掉、而且还在。
+   */
+  {
+    const fresh = store.read(proj.id);
+    fresh.shots[0].promptMute = ['scene'];
+    store.save(fresh);
+    await page.reload();
+    await page.waitForTimeout(1200);
+    await page.locator('.nav-step', { hasText: '镜头出图' }).first().click();
+    await page.waitForTimeout(900);
+    const c2 = page.locator('.shot-card').first();
+    await c2.locator('details.shot-more').first().evaluate((el) => { el.open = true; });
+    await c2.locator('details.shot-prompt', { hasText: '发给模型的提示词' }).first()
+      .evaluate((el) => { el.open = true; });
+    await page.waitForTimeout(1800);
+    await c2.locator('details.layer-fold').first().evaluate((el) => { el.open = true; });
+    await page.waitForTimeout(300);
+
+    const off = c2.locator('.layer-row.off');
+    /** ⚠ 关掉 ≠ 消失。消失了人就再也打不开 —— 那不是非破坏性，是破坏性带个开关 */
+    check('关掉的那一层还在列表里（划掉，不是消失）', (await off.count()) === 1);
+    check('划掉的正是场景那一层',
+      /场景/.test((await off.first().textContent()) || ''), (await off.first().textContent()) || '');
+    check('别的层没被连累', (await c2.locator('.layer-row:not(.off)').count()) >= 3);
+
+    fresh.shots[0].promptMute = [];
+    store.save(store.read(proj.id) && { ...store.read(proj.id), shots: store.read(proj.id).shots.map((x, i) => (i ? x : { ...x, promptMute: [] })) });
+  }
+}
+
+console.log('\n撤销：改完之后真能退回去');
+{
+  await page.goto(`${url}#/studio/${proj.id}`);
+  await page.waitForTimeout(1000);
+  await page.locator('.nav-step', { hasText: '镜头出图' }).first().click();
+  await page.waitForTimeout(900);
+
+  const before = await page.locator('.shot-card').count();
+  const input = page.locator('.cmd-input').first();
+  await input.fill('第 1 镜改成大特写');
+  await page.waitForTimeout(1200);
+  await page.locator('.cmd-box button').first().click();
+  await page.waitForTimeout(1600);
+
+  const undoBtn = page.locator('.undo-bar button').first();
+  check('改完之后出现了撤销条', (await undoBtn.count()) === 1);
+  const label = (await undoBtn.textContent()) || '';
+  /** 一列没有名字的时间戳，人一条都不敢按 —— 所以名字是这条路能不能用的关键 */
+  check(`撤销条上写着退的是哪一步（${label.slice(0, 30)}）`, /景别|镜/.test(label));
+
+  page.once('dialog', (d) => d.accept());
+  await undoBtn.click();
+  await page.waitForTimeout(1800);
+  const after = await page.locator('.shot-card').count();
+  check('退回去之后镜头一个没少', after === before);
+  /**
+   * ⚠ 读**那个输入框的值**，不要读整张卡的 textContent。
+   *
+   * 第一版写的是 `!/大特写/.test(卡片textContent)` —— 一直红，
+   * 看起来像撤销没生效。实际上撤销好好的（输入框里就是「中景」），
+   * 红是因为卡片里别处也有「大特写」三个字：预演台的景别档位清单、
+   * 道具那段帮助文字。**对着一个大容器的整段文字做断言，验的是运气。**
+   */
+  const camAfter = await page.locator('.shot-card').first()
+    .locator('input[placeholder*="中景"]').first().inputValue();
+  check(`第 1 镜的景别退回去了（现在是${camAfter}）`, camAfter === '中景');
+
+  // 再分清"数据真退了"还是"只有界面看着退了"：重进一次页面
+  await page.reload();
+  await page.waitForTimeout(1200);
+  await page.locator('.nav-step', { hasText: '镜头出图' }).first().click();
+  await page.waitForTimeout(900);
+  const camFresh = await page.locator('.shot-card').first()
+    .locator('input[placeholder*="中景"]').first().inputValue();
+  check('重进页面还是中景（说明退的是数据，不只是界面）', camFresh === '中景');
+}
+
 console.log('\n镜头卡的分层');
 {
   /**

@@ -2552,6 +2552,7 @@ export default {
             fields.description,
             h('div', { class: 'shot-edit-grid' },
               h('div', {}, h('label', {}, '景别'), fields.camera),
+              // cap:shot-lens
               h('div', {}, h('label', {}, '焦段'), fields.lens),
               h('div', {}, h('label', {}, '场景'), fields.scene),
               h('div', {}, h('label', {}, '出场角色'), fields.characters),
@@ -3334,6 +3335,7 @@ export default {
        * 而"选错一批然后批量改"是这个框最坏的失败方式。
        */
       // cap:command-box
+      // cap:undo
       shotHost.append(commandBox(project, {
         onDone: () => rerender(),
         onGo: (stage) => {

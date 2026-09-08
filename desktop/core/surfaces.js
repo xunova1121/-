@@ -489,6 +489,31 @@ export const CAPABILITIES = [
   },
   {
     /**
+     * 焦段。预演台里早就有，但那只对**排过位**的镜头存在 ——
+     * 而绝大多数镜头没排过位。手机上也要有：审片时发现"这几镜背景太散"，
+     * 换个长焦是当场就想做的事。
+     */
+    id: 'shot-lens',
+    name: '这一镜用多少毫米的镜头（景别是焦距+距离算出来的）',
+    api: 'PATCH /projects/:id/shots/:sid { lens }',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
+    /**
+     * 撤销。指令框一个回车能改五十镜，所以这一条和它是配套的 ——
+     * 两端都要有：手滑最容易发生在手机上。
+     */
+    id: 'undo',
+    name: '把分镜表退回上一步（改文字也能后悔）',
+    api: 'GET /projects/:id/undo',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js',
+    why: ''
+  },
+  {
+    /**
      * 指令框。手机端更需要它 —— 51 张卡翻起来最费手的就是手机，
      * 而批量操作在小屏上几乎没法做。所以这一条不能只上电脑端。
      */

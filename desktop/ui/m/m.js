@@ -2333,6 +2333,7 @@ function commandCard(close) {
     goTab('flow');
   };
 
+  // cap:undo
   const undoBar = h('div', { class: 'undo-bar' });
   api(`/projects/${project.id}/undo`).then((result) => {
     if (!result.items?.length) return;
@@ -3319,6 +3320,7 @@ function openEditor(s, jump = 'content') {
         h('h4', {}, '怎么拍', h('span', {}, '出视频用的')),
         // cap:shot-camera
         field('景别', chips(CAMERAS, camera, (v) => (camera = v))),
+        // cap:shot-lens
         field('焦段',
           chips(LENSES.map(([, label]) => label),
             LENSES.find(([value]) => value === lens)?.[1] || '不指定',
