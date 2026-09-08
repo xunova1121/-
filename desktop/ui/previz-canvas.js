@@ -656,7 +656,13 @@ export function director3dCanvas(stage, {
   renderer.domElement.oncontextmenu = (ev) => ev.preventDefault();
 
   function loadModel(url) {
-    if (!modelCache.has(url)) modelCache.set(url, gltfLoader.loadAsync(url));
+    if (!modelCache.has(url)) {
+      const pending = gltfLoader.loadAsync(url).catch((error) => {
+        if (modelCache.get(url) === pending) modelCache.delete(url);
+        throw error;
+      });
+      modelCache.set(url, pending);
+    }
     return modelCache.get(url);
   }
 
@@ -734,11 +740,14 @@ export function director3dCanvas(stage, {
     const size3 = box.getSize(new THREE.Vector3());
     const wanted = scene ? Math.max(5, targetHeight) : targetHeight;
     const scale = wanted / Math.max(.001, scene ? Math.max(size3.x, size3.z) : size3.y);
-    root.scale.setScalar(scale);
-    const fitted = new THREE.Box3().setFromObject(root);
+    // Preserve authored transforms and animation tracks on the imported root.
+    const fittedRoot = new THREE.Group();
+    fittedRoot.add(root);
+    fittedRoot.scale.setScalar(scale);
+    const fitted = new THREE.Box3().setFromObject(fittedRoot);
     const center = fitted.getCenter(new THREE.Vector3());
-    root.position.set(-center.x, -fitted.min.y, -center.z);
-    return root;
+    fittedRoot.position.set(-center.x, -fitted.min.y, -center.z);
+    return fittedRoot;
   }
 
   function modelOrFallback(item, kind, fallback) {
@@ -748,8 +757,8 @@ export function director3dCanvas(stage, {
     loadModel(item.modelUrl).then((gltf) => {
       // 拖动/重绘可能已经换了实例，旧请求不能回头篡改新舞台。
       if (objects.get(item.id) !== wrapper) return;
-      wrapper.clear();
       const model = normalizedModel(gltf.scene, Number(item.height || (kind === 'subject' ? 1.72 : .9)));
+      wrapper.clear();
       wrapper.add(model);
       const clips = gltf.animations || [];
       item.availableAnimations = clips.map((clip) => clip.name).filter(Boolean);
