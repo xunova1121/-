@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>demo 换图与人员标注工具</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:#0d1b26;color:#dbeafe;padding:24px;line-height:1.6}
+.wrap{max-width:1180px;margin:0 auto}
+h1{font-size:20px;color:#67e8f9;margin-bottom:6px}
+.sub{font-size:13px;color:#8fb3c7;margin-bottom:20px}
+.step{background:rgba(255,255,255,.04);border:1px solid rgba(103,232,249,.25);border-radius:10px;padding:16px 18px;margin-bottom:14px}
+.step h2{font-size:14px;color:#67e8f9;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.num{width:20px;height:20px;border-radius:50%;background:#0891b2;color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+input[type=file]{font-size:13px;color:#dbeafe}
+.ok{color:#34d399;font-size:12px;margin-left:8px}
+.stage{position:relative;display:inline-block;max-width:100%;border:1px solid rgba(103,232,249,.3);border-radius:6px;overflow:hidden;background:#000}
+.stage img{display:block;max-width:100%;height:auto}
+.mark{position:absolute;border:2px solid #22d3ee;box-shadow:0 0 10px rgba(34,211,238,.8);cursor:move}
+.mark .tag{position:absolute;left:50%;transform:translateX(-50%);top:-19px;white-space:nowrap;background:#22d3ee;color:#062b3d;font-size:10px;font-weight:700;padding:1px 7px;border-radius:3px}
+.mark.below .tag{top:auto;bottom:-19px}
+.mark .grip{position:absolute;right:-5px;bottom:-5px;width:11px;height:11px;background:#22d3ee;border-radius:2px;cursor:nwse-resize}
+.hint{font-size:12px;color:#8fb3c7;margin-top:10px}
+button{background:linear-gradient(135deg,#0891b2,#0e7490);color:#fff;border:0;border-radius:7px;padding:11px 22px;font-size:14px;font-weight:600;cursor:pointer}
+button:disabled{opacity:.4;cursor:not-allowed}
+button:hover:not(:disabled){filter:brightness(1.12)}
+.coords{font-family:Consolas,Menlo,monospace;font-size:12px;color:#67e8f9;margin-top:10px}
+.msg{margin-top:12px;font-size:13px}
+.err{color:#f87171}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>demo 换图与人员标注工具</h1>
+  <div class="sub">离线运行，文件不上传任何服务器，全部在本机浏览器里处理。</div>
+
+  <div class="step">
+    <h2><span class="num">1</span>选择 demo1.html</h2>
+    <input type="file" id="fHtml" accept=".html,.htm">
+    <span class="ok" id="okHtml"></span>
+  </div>
+
+  <div class="step">
+    <h2><span class="num">2</span>选择要替换的监控实景图</h2>
+    <input type="file" id="fImg" accept="image/*">
+    <span class="ok" id="okImg"></span>
+  </div>
+
+  <div class="step" id="stepMark" style="display:none">
+    <h2><span class="num">3</span>拖动两个框，框住船上的两个人</h2>
+    <div class="stage" id="stage">
+      <img id="preview" alt="预览">
+      <div class="mark" id="m1"><span class="tag">人员1</span><span class="grip"></span></div>
+      <div class="mark below" id="m2"><span class="tag">人员2</span><span class="grip"></span></div>
+    </div>
+    <div class="hint">框内任意位置按住拖动可移动；右下角小方块拖动可缩放。</div>
+    <div class="coords" id="coords"></div>
+  </div>
+
+  <div class="step">
+    <h2><span class="num">4</span>生成并下载</h2>
+    <button id="btn" disabled>生成 demo1.html</button>
+    <div class="msg" id="msg"></div>
+  </div>
+</div>
+
+<script>
+let htmlText = null, imgDataUrl = null;
+
+document.getElementById('fHtml').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    htmlText = r.result;
+    const hasImg = /<img class="real-scene" src="data:image\/[a-z]+;base64,/.test(htmlText);
+    const hasMark = /const PERSON_MARKS = \[/.test(htmlText);
+    document.getElementById('okHtml').textContent =
+      hasImg && hasMark ? '✓ 已读取，格式正确' : '✗ 文件里找不到实景图或标注配置，请确认选的是最新版 demo1.html';
+    document.getElementById('okHtml').className = hasImg && hasMark ? 'ok' : 'ok err';
+    check();
+  };
+  r.readAsText(f, 'utf-8');
+});
+
+document.getElementById('fImg').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    imgDataUrl = r.result;
+    document.getElementById('preview').src = imgDataUrl;
+    document.getElementById('okImg').textContent = '✓ 已读取（' + Math.round(f.size/1024) + ' KB）';
+    document.getElementById('stepMark').style.display = 'block';
+    setTimeout(initMarks, 60);
+    check();
+  };
+  r.readAsDataURL(f);
+});
+
+function check(){ document.getElementById('btn').disabled = !(htmlText && imgDataUrl); }
+
+// 初始框位置（相对图片的比例），与 demo 里的默认值一致
+const DEF = [ {x:0.6620,y:0.4740,w:0.0180,h:0.0640}, {x:0.6850,y:0.4980,w:0.0190,h:0.0560} ];
+
+function initMarks(){
+  const img = document.getElementById('preview');
+  ['m1','m2'].forEach((id,i)=>{
+    const el = document.getElementById(id), d = DEF[i];
+    el.style.left = d.x*img.clientWidth + 'px';
+    el.style.top  = d.y*img.clientHeight + 'px';
+    el.style.width  = Math.max(10, d.w*img.clientWidth) + 'px';
+    el.style.height = Math.max(14, d.h*img.clientHeight) + 'px';
+    makeDraggable(el);
+  });
+  updateCoords();
+}
+
+function makeDraggable(el){
+  let mode=null, sx=0, sy=0, ox=0, oy=0, ow=0, oh=0;
+  el.addEventListener('pointerdown', ev=>{
+    mode = ev.target.classList.contains('grip') ? 'resize' : 'move';
+    sx=ev.clientX; sy=ev.clientY;
+    ox=parseFloat(el.style.left); oy=parseFloat(el.style.top);
+    ow=parseFloat(el.style.width); oh=parseFloat(el.style.height);
+    el.setPointerCapture(ev.pointerId); ev.preventDefault();
+  });
+  el.addEventListener('pointermove', ev=>{
+    if(!mode) return;
+    const dx=ev.clientX-sx, dy=ev.clientY-sy;
+    if(mode==='move'){ el.style.left=(ox+dx)+'px'; el.style.top=(oy+dy)+'px'; }
+    else { el.style.width=Math.max(8,ow+dx)+'px'; el.style.height=Math.max(10,oh+dy)+'px'; }
+    updateCoords();
+  });
+  el.addEventListener('pointerup', ()=>{ mode=null; updateCoords(); });
+}
+
+function marks(){
+  const img = document.getElementById('preview');
+  const W = img.clientWidth, H = img.clientHeight;
+  return ['m1','m2'].map(id=>{
+    const el = document.getElementById(id);
+    return { x:+(parseFloat(el.style.left)/W).toFixed(4), y:+(parseFloat(el.style.top)/H).toFixed(4),
+             w:+(parseFloat(el.style.width)/W).toFixed(4), h:+(parseFloat(el.style.height)/H).toFixed(4) };
+  });
+}
+
+function updateCoords(){
+  const m = marks();
+  document.getElementById('coords').textContent =
+    `人员1  x=${m[0].x} y=${m[0].y} w=${m[0].w} h=${m[0].h}    人员2  x=${m[1].x} y=${m[1].y} w=${m[1].w} h=${m[1].h}`;
+}
+
+document.getElementById('btn').addEventListener('click', ()=>{
+  const msg = document.getElementById('msg');
+  try{
+    let out = htmlText;
+    const before = out.length;
+    out = out.replace(/(<img class="real-scene" src=")data:image\/[a-z]+;base64,[A-Za-z0-9+/=]+(")/,
+                      (mm,a,b)=> a + imgDataUrl + b);
+    if(out.length === before) throw new Error('实景图替换失败：没有匹配到 <img class="real-scene">');
+
+    const m = marks();
+    const block = `const PERSON_MARKS = [\n` +
+      `  { el: 'personBox1', x: ${m[0].x}, y: ${m[0].y}, w: ${m[0].w}, h: ${m[0].h} },\n` +
+      `  { el: 'personBox2', x: ${m[1].x}, y: ${m[1].y}, w: ${m[1].w}, h: ${m[1].h} }\n];`;
+    const out2 = out.replace(/const PERSON_MARKS = \[[\s\S]*?\];/, block);
+    if(out2 === out) throw new Error('标注坐标替换失败：没有匹配到 PERSON_MARKS');
+
+    const blob = new Blob([out2], {type:'text/html;charset=utf-8'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'demo1.html';
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+    msg.className = 'msg'; msg.style.color = '#34d399';
+    msg.textContent = '✓ 已生成并下载 demo1.html，双击打开即可演示。';
+  }catch(e){
+    msg.className = 'msg err'; msg.textContent = '✗ ' + e.message;
+  }
+});
+</script>
+</body>
+</html>
