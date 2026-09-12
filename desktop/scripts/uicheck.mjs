@@ -743,6 +743,23 @@ await page.waitForTimeout(900);
   check('折起来时标题一行不少（折的是位置，不是入口）',
     (await page.locator('#view-inner .panel > summary').count()) >= 8,
     String(await page.locator('#view-inner .panel > summary').count()));
+  /**
+   * ── 换电脑 ──
+   *
+   * 用户换了台电脑，第一句话是「里面服务商的 API 和 url 全不见了」。
+   * 在这之前，"换电脑"的答案是他自己去 %APPDATA% 里找文件拷。
+   */
+  check('设置里有「换电脑 / 备份配置」这一块',
+    /换电脑/.test(body) && /导出配置/.test(body), body.slice(-400));
+  /**
+   * ⚠ 「不含密钥」这句话必须写在**按钮旁边**，不能只写在文档里。
+   * 导出文件会被随手转发，而人是在点按钮那一刻决定要不要发出去的。
+   */
+  check('⚠ 按钮旁边就写着"不含 API 密钥"',
+    /不含 API 密钥|不含密钥/.test(body), body.slice(-400));
+  check('说清了密钥为什么搬不过去（绑机器和账户，不是我们偷懒）',
+    /绑定这台机器/.test(body), body.slice(-400));
+
   check('设置里有「合成」这一块', /合成/.test(body) && /时长策略/.test(body), body.slice(0, 200));
   const durSel = page.locator('select').filter({ has: page.locator('option[value="keep"]') }).first();
   check('时长策略选得到', (await durSel.count()) === 1);

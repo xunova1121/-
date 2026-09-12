@@ -543,6 +543,15 @@ export const CAPABILITIES = [
     why: ''
   },
   {
+    id: 'settings-portable',
+    name: '换电脑：导出 / 导入配置（不含密钥）',
+    api: 'GET /settings/export · POST /settings/import',
+    pc: 'ui/views/settings.js',
+    mobile: '',
+    why: '整台机器的配置搬家是坐在电脑前做的事，而且导出的是一个要存到硬盘上的文件。'
+      + '手机上既没有"另一台电脑"这个概念，也不该往手机里存这种文件。',
+  },
+  {
     id: 'prompt-layers',
     name: '看这条提示词由哪几层拼成，并且能关掉某一层',
     api: 'GET /projects/:id/shots/:sid/prompts → layers',

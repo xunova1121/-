@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 
 import { ROOT, UI_DIR, DATA_DIR, ensureDirs, safeFileName } from './paths.js';
 import * as settings from './settings.js';
+import * as portable from './portable.js';
 import * as vault from './vault.js';
 import * as logbus from './logbus.js';
 import * as httpClient from './http-client.js';
@@ -548,6 +549,26 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
 
   // ---- 设置 ----
   if (a === 'settings') {
+    /**
+     * 换电脑：把配置带走，把密钥留下。cap:settings-portable
+     *
+     * 用户换了台电脑，第一句话是「里面服务商的 API 和 url 全不见了」。
+     * 在这之前，"换电脑"的答案是他自己去 %APPDATA% 里找文件拷。
+     *
+     * ⚠ 导出**不含密钥**，而且不是嘴上保证 —— 每个值都扫过一遍，
+     * 看着像密钥的（中转站地址里挂的 ?key=sk-xxx 这类）会被抹掉并如实报出来。
+     */
+    if (b === 'export' && method === 'GET') {
+      const out = portable.exportSettings();
+      return json(res, 200, out);
+    }
+    if (b === 'import' && method === 'POST') {
+      try {
+        return json(res, 200, portable.importSettings(await readBody(req)));
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
+    }
     if (method === 'GET') return json(res, 200, settings.all());
     if (method === 'POST') return json(res, 200, settings.patch(await readBody(req)));
   }

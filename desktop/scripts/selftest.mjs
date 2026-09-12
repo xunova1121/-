@@ -8352,6 +8352,184 @@ section('大纲是正式一步（不再是分镜里的一个面板）');
  * 想加一场得去跟模型说一句话、等它想、再勾一条。加一场空白的不该花一次模型调用。
  */
 /**
+ * ════════ 换电脑：配置带得走，密钥带不走 ════════
+ *
+ * 用户的原话：「我新换的电脑，里面服务商的 API 和 url 全不见了」。
+ *
+ * 两件事：
+ *   ① 有一份读不出来的凭据文件时，**必须说为什么** ——
+ *      原来只认"命令行模式打不开 DPAPI"一种，而"换了台电脑"
+ *      和"钥匙文件没拷过来"都悄悄变成了"一个密钥都没有"
+ *   ② 配置要能导出导入，而且**导出文件里绝不能有密钥**
+ */
+section('换电脑：读不出来的凭据文件要说清为什么');
+{
+  const { VAULT_FILE } = await import('../core/paths.js');
+  // ⚠ 全局 crypto 是 WebCrypto（没有 randomBytes），要的是 node: 那一个
+  const ncrypto = await import('node:crypto');
+  const saved = fs.existsSync(VAULT_FILE) ? fs.readFileSync(VAULT_FILE) : null;
+
+  // ── 文件压根没有：那本来就该是空的，不该报警 ──
+  {
+    if (fs.existsSync(VAULT_FILE)) fs.rmSync(VAULT_FILE);
+    vault.reload();
+    const st = vault.status();
+    check('⚠ 没有凭据文件时不报警（新电脑上本来就是空的）',
+      st.locked === false && !st.reason, JSON.stringify(st));
+    check('也不给一句没用的"出路"', !st.fix, st.fix);
+  }
+
+  // ── 从别的机器拷来的 DPAPI 文件 ──
+  {
+    /**
+     * 伪造：前六字节是 DPAPI1，后面是随机字节。
+     * 命令行模式下走的是 VAULT_BACKEND_MISMATCH 那条 —— 那条本来就有话说。
+     */
+    fs.writeFileSync(VAULT_FILE, Buffer.concat([Buffer.from('DPAPI1'), ncrypto.randomBytes(32)]));
+    vault.reload();
+    const st = vault.status();
+    check('DPAPI 文件 + 命令行模式：说得出原因', st.locked === true && /DPAPI/.test(st.reason), st.reason);
+    check('而且出路是"换个 exe 打开"，不是"重填"（重填在这一种上是白费力气）',
+      /exe 打开/.test(st.fix), st.fix?.slice(0, 40));
+  }
+
+  // ── 钥匙文件对不上的 AES 文件（只拷了 credentials.enc，没拷 .vaultkey）──
+  {
+    /**
+     * ⚠ 这一种原来是**完全静默**的：文件在、解不开、界面显示"没有密钥"，
+     * 一个字都不说。而"只拷了一个文件"恰恰是换电脑时最容易做的事。
+     */
+    fs.writeFileSync(VAULT_FILE, Buffer.concat([Buffer.from('AESG01'), ncrypto.randomBytes(64)]));
+    vault.reload();
+    const st = vault.status();
+    check('⚠ 钥匙对不上时不再装作"没有密钥"', st.locked === true, JSON.stringify(st));
+    check('说清了是缺钥匙文件，还点名了 .vaultkey',
+      /\.vaultkey/.test(st.reason), st.reason);
+    check('并且告诉他拷的时候要连钥匙一起拷',
+      /一起拷/.test(st.reason), st.reason?.slice(-40));
+    check('⚠ 读不出来也不能把界面搞崩（还是回空清单，不抛）',
+      Array.isArray(vault.listMasked()) && vault.listMasked().length === 0);
+  }
+
+  // ── 格式认不出来 ──
+  {
+    fs.writeFileSync(VAULT_FILE, Buffer.from('这不是凭据文件'));
+    vault.reload();
+    check('乱七八糟的文件也说一句，不静默', vault.status().locked === true, vault.status().reason);
+  }
+
+  if (saved) fs.writeFileSync(VAULT_FILE, saved);
+  else if (fs.existsSync(VAULT_FILE)) fs.rmSync(VAULT_FILE);
+  vault.reload();
+}
+
+section('换电脑：导出 / 导入配置，而且导出文件里没有密钥');
+{
+  const portable = await import('../core/portable.js');
+
+  const before = {
+    baseUrls: settings.get('baseUrls'),
+    chatModel: settings.get('chatModel'),
+    rates: settings.get('rates')
+  };
+
+  settings.patch({
+    baseUrls: { volcengine: 'https://ark.example.com/api/v3' },
+    chatModel: 'doubao-1-5-pro-32k-250115',
+    rates: { 'image.volcengine': 0.25 }
+  });
+
+  const r = await api('/settings/export');
+  check('导出接口通了', !r.error && r.file, JSON.stringify(r).slice(0, 120));
+  check('带上了格式标记（以后换格式时认得出来）', r.file.format === 'futuredream.settings.v1', r.file.format);
+  check('服务商地址带走了', r.file.settings.baseUrls?.volcengine === 'https://ark.example.com/api/v3',
+    JSON.stringify(r.file.settings.baseUrls));
+  check('模型路由带走了', r.file.settings.chatModel === 'doubao-1-5-pro-32k-250115');
+  check('单价带走了（一条条填出来的，重填最烦）', r.file.settings.rates?.['image.volcengine'] === 0.25);
+  check('⚠ 文件里写了一句给"拿到这个文件的人"看的说明（它会被转发）',
+    /没有 API 密钥/.test(r.file.note || ''), r.file.note);
+
+  /**
+   * ⚠ 这一条是整节的核心：**导出文件里不能有密钥**。
+   *
+   * 而且不是查"我们有没有故意放"，是把整份文件当字符串扫一遍 ——
+   * 以后往设置里加一个带敏感值的字段时，这条会红。
+   */
+  {
+    vault.setSecret('ARK_API_KEY', 'ark-abcdef0123456789-secret');
+    const r2 = await api('/settings/export');
+    const dumped = JSON.stringify(r2.file);
+    check('⚠ 保险箱里的密钥一个字都没进导出文件',
+      !dumped.includes('ark-abcdef0123456789-secret'), dumped.slice(0, 200));
+    check('⚠ 连密钥的名字都不用出现', !dumped.includes('ARK_API_KEY'), dumped.slice(0, 200));
+  }
+
+  /**
+   * ⚠ 中转站的地址里挂一个 ?key=sk-xxx 是很常见的写法，而那也是密钥。
+   * "我们没打算带密钥"和"里面真的没有密钥"是两回事 —— 所以要真的扫。
+   */
+  {
+    settings.patch({ baseUrls: { relay: 'https://relay.example.com/v1?key=sk-liveKey0123456789' } });
+    const r3 = await api('/settings/export');
+    const dumped = JSON.stringify(r3.file);
+    check('⚠ 地址里挂着的密钥被抹掉了', !dumped.includes('sk-liveKey0123456789'), dumped.slice(0, 240));
+    check('抹掉的地方留了记号，不是悄悄删成空', /已抹掉/.test(dumped), dumped.slice(0, 240));
+    check('⚠ 而且**如实报出来抹了哪一项**（不说的话，他会到新电脑上查"为什么连不上"）',
+      (r3.redacted || []).includes('baseUrls'), JSON.stringify(r3.redacted));
+  }
+
+  // ── 导入 ──
+  {
+    settings.patch({ baseUrls: {}, chatModel: 'someone-else', rates: {} });
+    const res = await api('/settings/import', {
+      method: 'POST',
+      body: {
+        format: 'futuredream.settings.v1',
+        settings: {
+          baseUrls: { volcengine: 'https://restored.example.com/v3' },
+          chatModel: 'doubao-1-5-pro-32k-250115',
+          rates: { 'image.volcengine': 0.25 },
+          // 白名单之外的东西：必须被丢掉并报出来
+          lanToken: '偷偷塞一个访问口令',
+          随便什么: 1
+        }
+      }
+    });
+    check('导入之后设置真的变了',
+      settings.get('baseUrls')?.volcengine === 'https://restored.example.com/v3',
+      JSON.stringify(settings.get('baseUrls')));
+    check('单价也回来了', settings.get('rates')?.['image.volcengine'] === 0.25);
+    check('⚠ 白名单之外的键一律丢掉（拼错的键会永远躺在设置里不生效）',
+      res.skipped?.includes('lanToken') && res.skipped?.includes('随便什么'),
+      JSON.stringify(res.skipped));
+    check('⚠ 而且真的没写进去', settings.get('lanToken') !== '偷偷塞一个访问口令',
+      String(settings.get('lanToken')));
+  }
+
+  // ── 导入一份手改过、塞了密钥的文件 ──
+  {
+    const res = await api('/settings/import', {
+      method: 'POST',
+      body: { settings: { baseUrls: { relay: 'https://x.example.com/v1?token=sk-shouldNotLand123' } } }
+    });
+    check('⚠ 导入的文件里带密钥时也抹掉（别人手改过的文件什么都可能有）',
+      !JSON.stringify(settings.get('baseUrls')).includes('sk-shouldNotLand123'),
+      JSON.stringify(settings.get('baseUrls')));
+    check('并且报出来是哪一项', (res.stripped || []).includes('baseUrls'), JSON.stringify(res.stripped));
+  }
+
+  // ── 喂垃圾 ──
+  {
+    const bad1 = await api('/settings/import', { method: 'POST', body: { format: '别的格式', settings: {} } });
+    check('格式对不上时说得出认的是哪个格式', /futuredream\.settings\.v1/.test(bad1.error || ''), bad1.error);
+    const bad2 = await api('/settings/import', { method: 'POST', body: { settings: { 全是没用的: 1 } } });
+    check('一项都导不进时明说，不是假装成功', /没有一项/.test(bad2.error || ''), bad2.error);
+  }
+
+  settings.patch(before);
+}
+
+/**
  * ════════ 「同一个描述，我们和商家后台出来不一样」 ════════
  *
  * 用户的原话：「我用的无审核出图，用的同一个描述，在我们工具显示和
