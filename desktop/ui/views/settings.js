@@ -1390,6 +1390,83 @@ export default {
     );
     paintOss();
 
+    /**
+     * ══════════ 换电脑 ══════════
+     *
+     * 用户换了台电脑，第一句话是「里面服务商的 API 和 url 全不见了」。
+     * 在这之前，"换电脑"的答案是他自己去 %APPDATA% 里找文件拷 ——
+     * 对一个要卖的产品来说，这不叫方案。
+     *
+     * ⚠ 导出**不含密钥**，而且这句话不是嘴上保证：服务端逐个值扫过一遍，
+     * 中转站地址里挂着的 ?key=sk-xxx 这类会被抹掉，并且**如实报出来**。
+     * 抹掉了却不说的话，用户会带着一份缺了地址的配置去新电脑，
+     * 然后在那边查"为什么连不上"—— 而线索已经断在两台机器之外了。
+     */
+    {
+      const host = h('div', {});
+      const out = h('button', { class: 'btn' }, '导出配置（不含密钥）');
+      out.onclick = async () => {
+        out.disabled = true;
+        try {
+          // cap:settings-portable
+          const r = await api('/settings/export');
+          const name = `futuredream-settings-${new Date().toISOString().slice(0, 10)}.json`;
+          const blob = new Blob([JSON.stringify(r.file, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = h('a', { href: url, download: name });
+          document.body.append(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 4000);
+          clear(host);
+          add(host, h('div', { class: 'field-hint' },
+            `导出了 ${r.count} 项设置到 ${name}。`
+            + (r.redacted?.length
+              ? `\n⚠ 其中 ${r.redacted.join('、')} 里有看着像密钥的内容，已经抹掉 —— `
+                + '到新电脑上这几项要手填一次。'
+              : '\n里面没有密钥。密钥去各家控制台重新获取，在新电脑上手填。')));
+        } catch (err) { toast(err.message, 'err'); } finally { out.disabled = false; }
+      };
+
+      const file = h('input', { type: 'file', accept: '.json,application/json', style: 'display:none' });
+      const pick = h('button', { class: 'btn ghost' }, '导入配置…');
+      pick.onclick = () => file.click();
+      file.onchange = async () => {
+        const f = file.files?.[0];
+        if (!f) return;
+        try {
+          const text = await f.text();
+          let parsed;
+          try { parsed = JSON.parse(text); } catch { throw new Error('这个文件不是合法的 JSON'); }
+          // cap:settings-portable
+          const r = await api('/settings/import', { method: 'POST', body: parsed });
+          clear(host);
+          add(host, h('div', { class: 'field-hint' },
+            `导入了 ${r.applied.length} 项。`
+            + (r.skipped?.length ? `\n有 ${r.skipped.length} 项不认识，跳过了：${r.skipped.slice(0, 6).join('、')}` : '')
+            + (r.stripped?.length ? `\n⚠ ${r.stripped.join('、')} 里有看着像密钥的内容，没有存进去。` : '')
+            + '\n密钥不在这份文件里 —— 去上面「服务商与密钥」把它们填上就能跑了。'));
+          toast(`导入了 ${r.applied.length} 项设置`, 'ok');
+          // 路由变了，目录得跟着重拉 —— 不然界面上还显示着导入前那几个模型
+          await refreshCatalog();
+        } catch (err) { toast(err.message, 'err'); } finally { file.value = ''; }
+      };
+
+      root.append(
+        h('details', { class: 'panel', open: false },
+          h('summary', { class: 'panel-title' }, '换电脑 / 备份配置'),
+          h('p', { class: 'panel-hint' },
+            '导出的是服务商地址、接口覆盖、模型路由、画幅和单价 —— **不含 API 密钥**。'
+            + '密钥用的是绑定这台机器和这个 Windows 账户的加密，拷到别的电脑打不开，'
+            + '所以换电脑一定要去各家控制台重新复制一遍。这是 Windows 的设计，绕不过去。'),
+          h('p', { class: 'panel-hint' },
+            '⚠ 导出文件会被随手发微信、丢网盘。里面带密钥的话，等于把账单交给所有看得到它的人 —— '
+            + '所以我们宁可让你多填一次密钥。'),
+          h('div', { class: 'inline' }, out, pick, file),
+          host)
+      );
+    }
+
     return root;
   }
 };

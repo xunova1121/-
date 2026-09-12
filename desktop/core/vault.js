@@ -87,14 +87,54 @@ function decrypt(buf) {
       err.code = 'VAULT_BACKEND_MISMATCH';
       throw err;
     }
-    return safeStorage.decryptString(buf.subarray(6));
+    /**
+     * ⚠ **换了台电脑**这一种，原来是静默的。
+     *
+     * DPAPI 的钥匙绑着"这台机器 + 这个 Windows 账户"，所以把
+     * credentials.enc 拷到新电脑上，这一行必然抛 —— 而抛出来的是
+     * 一个没有 code 的普通错误，load() 那边只认 VAULT_BACKEND_MISMATCH，
+     * 于是 lockedReason 是空的，界面显示"一个密钥都没有"，**一句解释都没有**。
+     *
+     * 用户看到的是：文件明明在，密钥全没了，而且不知道为什么。
+     * 他会以为是自己没配，然后重填 —— 重填其实是对的，
+     * 但没人告诉他这一点，他也可能以为程序坏了。
+     *
+     * 换电脑是最常撞上这条路的场景，不能不说话。
+     */
+    try {
+      return safeStorage.decryptString(buf.subarray(6));
+    } catch {
+      const err = new Error(
+        '这份凭据文件解不开 —— 它是用**另一台电脑（或另一个 Windows 账户）**加密的。'
+        + 'DPAPI 的钥匙绑着机器和账户，拷过来的文件在这里打不开，这是 Windows 的设计，绕不过去。'
+      );
+      err.code = 'VAULT_FOREIGN';
+      throw err;
+    }
   }
   if (tag !== 'AESG01') throw new Error('凭据文件格式无法识别');
   const iv = buf.subarray(6, 18);
   const authTag = buf.subarray(18, 34);
-  const decipher = crypto.createDecipheriv('aes-256-gcm', localKey(), iv);
-  decipher.setAuthTag(authTag);
-  return Buffer.concat([decipher.update(buf.subarray(34)), decipher.final()]).toString('utf8');
+  /**
+   * ⚠ 同样不能静默。AES 这条路解不开有两种来由，用户能做的事不一样：
+   *   · 只拷了 credentials.enc，没拷旁边那个 .vaultkey
+   *   · 用了 FUTUREDREAM_VAULT_PASS，而这次给的口令不对
+   * 两种都会在 final() 上抛认证失败，而原来那个错一样会被 load() 吞掉。
+   */
+  try {
+    const decipher = crypto.createDecipheriv('aes-256-gcm', localKey(), iv);
+    decipher.setAuthTag(authTag);
+    return Buffer.concat([decipher.update(buf.subarray(34)), decipher.final()]).toString('utf8');
+  } catch {
+    const err = new Error(
+      (process.env.FUTUREDREAM_VAULT_PASS || '').trim()
+        ? '这份凭据文件解不开 —— FUTUREDREAM_VAULT_PASS 和加密时用的那个口令对不上。'
+        : '这份凭据文件解不开 —— 缺了配套的钥匙文件（数据目录下的 .vaultkey）。'
+          + '从别处拷 credentials.enc 时，必须连 .vaultkey 一起拷，只拷一个是打不开的。'
+    );
+    err.code = 'VAULT_KEY_MISMATCH';
+    throw err;
+  }
 }
 
 let cache = null;
@@ -118,7 +158,17 @@ function load() {
     cache = JSON.parse(decrypt(fs.readFileSync(VAULT_FILE)));
     lockedReason = '';
   } catch (err) {
-    lockedReason = err.code === 'VAULT_BACKEND_MISMATCH' ? err.message : '';
+    /**
+     * ⚠ 分清"**没有**密钥"和"有一份**读不出来**的密钥"。
+     *
+     * 文件压根不存在（首次运行、或者干净的新电脑）→ 什么都不用说，
+     * 那本来就该是空的。
+     *
+     * 文件在、但解不开 → **必须说**。这里原来只认 VAULT_BACKEND_MISMATCH
+     * 一种，于是"换了台电脑"和"钥匙文件没拷过来"两种都悄悄变成了
+     * "一个密钥都没有" —— 而那正是用户最容易撞上的两种。
+     */
+    lockedReason = err.code === 'ENOENT' ? '' : (err.message || '凭据文件读不出来');
     cache = {};
   }
   return cache;
@@ -138,12 +188,24 @@ export function status() {
     backend: backendName(),
     locked: Boolean(lockedReason),
     reason: lockedReason,
-    // 重填一次就好了，而且新写的这份两种模式都读得出来 —— 这句话得说出去
-    fix: lockedReason
-      ? '两条路：① 用安装版/免安装版 exe 打开（那边有 DPAPI，能解开这份旧的）；' +
-        '② 就在这里把密钥重新填一遍 —— 重填后会改用本机 AES-256-GCM 存，' +
-        '这种格式桌面版也读得出来，以后两边都能用。旧文件会自动备份成 credentials.enc.dpapi-backup，不会被直接覆盖掉。'
-      : ''
+    /**
+     * 出路要**按原因分**。三种情况能做的事完全不同，
+     * 给一句通用的"重填一次"会把人指到错的方向上：
+     * 命令行模式那种，换个 exe 打开就好了，根本不用重填。
+     */
+    fix: !lockedReason
+      ? ''
+      : /DPAPI 加密，请在桌面应用里打开/.test(lockedReason)
+        ? '两条路：① 用安装版/免安装版 exe 打开（那边有 DPAPI，能解开这份旧的）；'
+          + '② 就在这里把密钥重新填一遍 —— 重填后会改用本机 AES-256-GCM 存，'
+          + '这种格式桌面版也读得出来，以后两边都能用。旧文件会自动备份成 credentials.enc.dpapi-backup，不会被直接覆盖掉。'
+        : /另一台电脑/.test(lockedReason)
+          ? '换电脑只能重填一次密钥 —— 去各家控制台复制，在下面重新填进来。'
+            + '⚠ 密钥搬不过来，但**别的设置能搬**：把旧电脑上 %APPDATA%\\FutureDream\\settings.json '
+            + '拷过来（或者在旧电脑上用「导出配置」），服务商地址、模型、单价就都回来了。'
+            + '重填后旧文件会自动备份成 credentials.enc.dpapi-backup，不会被直接覆盖掉。'
+          : '把密钥重新填一遍就好 —— 重填会用本机的钥匙重新加密一份。'
+            + '旧文件会自动备份成 credentials.enc.dpapi-backup，不会被直接覆盖掉。'
   };
 }
 
