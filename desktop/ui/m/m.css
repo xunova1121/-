@@ -1,0 +1,894 @@
+/**
+ * 手机端样式。刻意不复用电脑版那套 —— 那一套是给鼠标和 1440px 宽设计的，
+ * 缩到 390px 只会得到一堆点不准的小按钮。
+ *
+ * 三条规矩：
+ *   ① 触控目标不小于 44px（拇指的实际接触面积就是这么大）；
+ *   ② 一屏只做一件事，靠底部 tab 切换，不做横向滚动；
+ *   ③ 安全区（刘海、底部横条）用 env(safe-area-inset-*) 留出来。
+ */
+/**
+ * ── 两套配色 ──
+ *
+ * 用户的原话："手机版要有白天使用模式，现在 ui 全是黑的，晚上看不见"。
+ * 深色在暗处很好，在**日光下的手机屏**上是另一回事：屏幕反光加上
+ * 深底浅字，对比度直接塌掉，什么都看不清。这一端本来就是给"在路上"
+ * 设计的，而在路上最常见的光线恰恰是白天的户外。
+ *
+ * 三态，和系统一致：
+ *   跟随系统（默认）—— 不写 data-theme，靠 prefers-color-scheme
+ *   data-theme="dark"  强制深色
+ *   data-theme="light" 强制浅色
+ *
+ * 深色写在裸 :root 上而不是媒体查询里：那样即便 prefers-color-scheme
+ * 探不到（老 WebView、加到主屏的 PWA 偶尔会这样），也有一套完整的值兜底，
+ * 不会出现"某几个变量没定义"那种半拉子配色。
+ */
+:root {
+  --ground: #16130f;
+  --surface-1: #1e1a15;
+  --surface-2: #272119;
+  --line: #3a3128;
+  --line-soft: #2b241c;
+  --ink: #f2ece3;
+  --ink-dim: #b6ab9b;
+  --ink-faint: #7d7365;
+  --beam: #e8b45f;
+  /* 选中的胶囊那层淡底。原来 .chip.on 直接写 var(--beam-wash) 而这个变量
+     从来没定义过 —— 无效值等于没写，选中态只剩描边，在小屏上很难分辨 */
+  --beam-wash: rgba(232, 180, 95, .14);
+  --good: #6fbf8a;
+  --caution: #d9a441;
+  --alarm: #d9614c;
+  --r: 12px;
+  /* 亮色按钮上的字。深色主题下 beam 很亮，压深色字；浅色主题下反过来 */
+  --on-beam: #241b0c;
+  --shadow: rgba(0, 0, 0, .45);
+  color-scheme: dark;
+}
+
+/**
+ * 浅色。**不是把深色反过来**：
+ *   · beam 从 #e8b45f 压到 #a8700f —— 浅底上的金色必须压暗，
+ *     否则白底上一片浅金，按钮和背景糊成一团（对比度不到 2:1）
+ *   · good / caution / alarm 同理，全部压深一档
+ *   · surface-1 用纯白、ground 用暖白，卡片才浮得起来
+ */
+:root[data-theme='light'] {
+  --ground: #faf7f2;
+  --surface-1: #ffffff;
+  --surface-2: #f3ede4;
+  --line: #d9cfbf;
+  --line-soft: #e9e1d5;
+  --ink: #201b15;
+  --ink-dim: #5f564a;
+  --ink-faint: #8b8071;
+  --beam: #a8700f;
+  --beam-wash: rgba(168, 112, 15, .12);
+  --good: #2c7a4b;
+  --caution: #8a5d0c;
+  --alarm: #b03a26;
+  --on-beam: #ffffff;
+  --shadow: rgba(60, 46, 20, .16);
+  color-scheme: light;
+}
+
+/* 没明确选过就跟系统走。`:not([data-theme])` 保证手动选的深色不会被系统覆盖 */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --ground: #faf7f2;
+    --surface-1: #ffffff;
+    --surface-2: #f3ede4;
+    --line: #d9cfbf;
+    --line-soft: #e9e1d5;
+    --ink: #201b15;
+    --ink-dim: #5f564a;
+    --ink-faint: #8b8071;
+    --beam: #a8700f;
+    --beam-wash: rgba(168, 112, 15, .12);
+    --good: #2c7a4b;
+    --caution: #8a5d0c;
+    --alarm: #b03a26;
+    --on-beam: #ffffff;
+    --shadow: rgba(60, 46, 20, .16);
+    color-scheme: light;
+  }
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font: 15px/1.6 -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif;
+  overscroll-behavior-y: contain;
+}
+
+#app { min-height: 100vh; display: flex; flex-direction: column; }
+.boot { padding: 60px 24px; text-align: center; color: var(--ink-faint); }
+
+/* ── 顶栏 ── */
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding: calc(env(safe-area-inset-top) + 10px) 14px 10px;
+  background: color-mix(in srgb, var(--ground) 92%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line-soft);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.top-title { font-weight: 600; font-size: 16px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 项目切换：手上同时做着几部片子是常事 */
+.top-pick {
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+}
+textarea { font-family: inherit; }
+
+/* ── 内容 ── */
+.body { flex: 1; padding: 12px 14px calc(env(safe-area-inset-bottom) + 76px); }
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r);
+  padding: 13px;
+  margin-bottom: 11px;
+}
+.muted { color: var(--ink-faint); font-size: 13px; line-height: 1.6; }
+.row { display: flex; align-items: center; gap: 9px; }
+.grow { flex: 1; min-width: 0; }
+
+/* ── 按钮：拇指点得中 ── */
+.btn {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+.btn:active { transform: scale(.98); }
+.btn.primary { background: var(--beam); border-color: var(--beam); color: var(--on-beam); font-weight: 600; }
+.btn.sm { min-height: 36px; padding: 0 12px; font-size: 13.5px; }
+.btn[disabled] { opacity: .45; }
+.btn.block { width: 100%; }
+
+input {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 13px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px; /* 小于 16px 时 iOS 会自动放大整页 */
+}
+
+/* ── 流水线 ── */
+.step {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.step:last-child { border-bottom: 0; }
+.step-num { font-size: 11px; color: var(--ink-faint); font-variant-numeric: tabular-nums; width: 18px; }
+.step-name { flex: 1; display: block; }
+.step-count { font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.step-mark { width: 18px; text-align: center; }
+.step.done .step-mark { color: var(--good); }
+.step.partial .step-mark { color: var(--caution); }
+
+/* ── 分镜 ── */
+.shot { padding: 0; overflow: hidden; }
+.shot-media { width: 100%; display: block; background: #000; aspect-ratio: 16 / 9; object-fit: contain; }
+.shot-media.portrait { aspect-ratio: 9 / 16; max-height: 62vh; }
+.shot-info { padding: 11px 13px 13px; }
+.shot-no { font-size: 11.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.shot-desc { margin: 4px 0 8px; }
+.tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 9px; }
+.tag {
+  font-size: 11.5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--ink-dim);
+}
+.tag.ok { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, var(--line)); }
+.tag.warn { color: var(--caution); border-color: color-mix(in srgb, var(--caution) 45%, var(--line)); }
+
+/* ── 底部 tab ── */
+.tabs {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 20;
+  display: flex;
+  padding-bottom: env(safe-area-inset-bottom);
+  background: color-mix(in srgb, var(--ground) 94%, transparent);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid var(--line-soft);
+}
+.tab {
+  flex: 1;
+  min-height: 54px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-faint);
+  font: inherit;
+  font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+}
+.tab.active { color: var(--beam); }
+.tab-dot { font-size: 15px; line-height: 1; }
+
+/* ── 跑起来之后的状态条：钉在 tab 上面 ── */
+.live {
+  position: fixed;
+  left: 10px; right: 10px;
+  bottom: calc(env(safe-area-inset-bottom) + 62px);
+  z-index: 21;
+  padding: 10px 12px;
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: var(--surface-1);
+  box-shadow: 0 8px 26px var(--shadow);
+  font-size: 13px;
+}
+.live[hidden] { display: none; }
+.live.bad { border-color: color-mix(in srgb, var(--alarm) 60%, var(--line)); }
+.live.good { border-color: color-mix(in srgb, var(--good) 55%, var(--line)); }
+.live-line { color: var(--ink-dim); font-size: 12px; margin-top: 4px; }
+
+/* ── 配对 ── */
+.pair { padding: calc(env(safe-area-inset-top) + 48px) 22px 40px; }
+.pair h1 { font-size: 21px; margin: 0 0 6px; }
+.pair .code { letter-spacing: .28em; text-align: center; font-size: 22px; font-family: ui-monospace, Menlo, monospace; }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom) + 130px);
+  transform: translateX(-50%);
+  z-index: 40;
+  max-width: 88vw;
+  padding: 11px 16px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  font-size: 13.5px;
+}
+.toast.err { border-color: var(--alarm); color: var(--alarm); }
+.spin { display: inline-block; animation: sp 1s linear infinite; }
+@keyframes sp { to { transform: rotate(360deg); } }
+
+/* ══════════════════════ 能干活的那部分 ══════════════════════
+   手机端从"遥控器"变成"能改东西的客户端"之后加的这些控件，
+   有一条共同的规矩：**可点的东西不小于 44px**。拇指的接触面就是那么大，
+   比这小的按钮在路上颠簸时点不中 —— 而这一端本来就是给"在路上"设计的。 */
+
+.mfield { margin-bottom: 14px; }
+.mfield > label {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-dim);
+  margin-bottom: 6px;
+}
+
+/* 输入类一律 16px 起。iOS 上小于 16px 的输入框会在聚焦时把整页放大，
+   放大之后布局全乱，而且退不回去 —— 这不是审美问题，是能不能用的问题 */
+.mta, .msel {
+  width: 100%;
+  padding: 11px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.6;
+}
+.mta { resize: vertical; min-height: 64px; }
+.msel { min-height: 46px; }
+
+/* 景别、运镜这些是从固定几项里选，用胶囊比下拉快得多 —— 一眼看全，一下点中 */
+.chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.chip {
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 14px;
+}
+.chip.on {
+  border-color: var(--beam);
+  background: var(--beam-wash);
+  color: var(--ink);
+}
+
+/* 分节标题：三类设定之间要有个喘气的地方 */
+.sec {
+  margin: 18px 4px 8px;
+  font-size: 12px;
+  letter-spacing: .12em;
+  color: var(--ink-faint);
+}
+
+/* 设定集条目的那张小图。固定尺寸，不然一行行高低不齐 */
+.sheet-thumb {
+  width: 68px;
+  height: 68px;
+  flex: 0 0 68px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.sheet-thumb.blank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+/* 画风选择：横向滑动的一排缩略图。竖着堆十二张要滚很久 */
+.style-mini {
+  display: flex;
+  gap: 9px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  margin-bottom: 10px;
+  -webkit-overflow-scrolling: touch;
+}
+.style-mini-card {
+  flex: 0 0 96px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--ink-dim);
+  overflow: hidden;
+  font: inherit;
+}
+.style-mini-card.on { border-color: var(--beam); color: var(--ink); }
+.style-mini-card img, .style-mini-blank {
+  display: block;
+  width: 100%;
+  height: 68px;
+  object-fit: cover;
+  background: var(--surface-3);
+}
+.style-mini-name { display: block; padding: 7px 4px; font-size: 12px; text-align: center; }
+
+.card.warn { border-color: color-mix(in srgb, var(--caution) 45%, var(--line)); }
+
+/* 五个页签之后，每个标签的字要收一点，不然在小屏上会折行 */
+.tabs .tab { font-size: 10.5px; }
+
+/* ── 全屏看图 ──
+   审片时最需要的动作就是放大："这个人的手怎么了"、"衣领花纹和上一镜对不上"，
+   不放大根本看不出来。而页面头上的 user-scalable=no 把系统缩放关掉了
+   （不关的话点输入框会把整页放大且退不回去），所以这一层是必须自己补的。 */
+.viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  overflow: hidden;
+  /* 手势全部自己处理：交给浏览器的话，拖动会变成页面滚动 */
+  touch-action: none;
+}
+.viewer-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transform-origin: center center;
+  will-change: transform;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.viewer-x {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 10px);
+  right: 12px;
+  z-index: 2;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, .55);
+  color: #fff;
+  font-size: 19px;
+  line-height: 1;
+}
+.viewer-hint {
+  position: absolute;
+  bottom: calc(env(safe-area-inset-bottom) + 22px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, .55);
+  color: rgba(255, 255, 255, .82);
+  font-size: 12px;
+  transition: opacity .3s;
+}
+.viewer-hint.gone { opacity: 0; }
+
+/* 能点开的图给一点"可以点"的暗示，不然没人知道它能点 */
+.shot-media[onclick], .sheet-thumb[onclick] { cursor: zoom-in; }
+
+/* 场次分隔。手机上一屏只看得见一两镜，边界更容易被漏掉 ——
+   而跨边界不能锁末帧、不能拿邻镜当参考 */
+.seg-head {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  margin: 18px 4px 8px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.seg-head b { font-size: 13px; }
+
+/* ── 预演台：俯视排位 ──
+   结构和电脑版共用同一份（ui/previz-canvas.js），类名一致，
+   配色用这一端自己的 token —— 两端色板本来就是分开的。
+   触控目标比电脑版大一圈：手指按不准 8px 的点。 */
+.previz-panel { margin-top: 10px; }
+.previz-canvas { border: 1px solid var(--line); border-radius: var(--r); display: block; }
+.previz-bg { fill: var(--surface-1); }
+.previz-grid { stroke: var(--line-soft); stroke-width: 1; }
+.previz-axis { stroke: var(--line); stroke-width: 1.5; }
+.previz-line { stroke: var(--caution); stroke-width: 2.5; stroke-dasharray: 6 4; }
+.previz-fov { fill: rgba(232, 180, 95, 0.12); }
+.previz-cam { fill: var(--beam); stroke: var(--ink); stroke-width: 2; }
+.previz-sub { fill: var(--surface-2); stroke: var(--ink-dim); stroke-width: 2; }
+.previz-facing { stroke: var(--ink-dim); stroke-width: 2; }
+.previz-tip { fill: var(--ink-dim); }
+.previz-label, .previz-label-cam { font-size: 12px; text-anchor: middle; pointer-events: none; }
+.previz-label { fill: var(--ink); }
+.previz-label-cam { fill: var(--ground); font-weight: 700; }
+.previz-controls { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.previz-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.previz-cap { color: var(--ink-faint); font-size: 12px; min-width: 40px; }
+.previz-row .btn.on { border-color: var(--beam); color: var(--beam); }
+.previz-readout { margin-top: 10px; }
+.previz-line-text { font-size: 13px; line-height: 1.7; }
+.previz-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.previz-warn {
+  margin-top: 8px; padding: 9px 11px; border-radius: 10px;
+  background: rgba(217, 97, 76, 0.14); color: var(--alarm);
+  font-size: 12px; line-height: 1.6;
+}
+.previz-details > summary { cursor: pointer; color: var(--ink-dim); font-size: 13px; padding: 6px 0; }
+
+/* 场地图那张卡片用原生 details。触控目标要够大：summary 默认只有一行文字高 */
+.site-details > summary {
+  cursor: pointer; padding: 4px 0; font-weight: 700;
+  min-height: 32px; display: flex; align-items: center; gap: 6px;
+}
+.site-details > summary .muted { font-weight: 400; font-size: 12px; }
+
+/* ── 场地图 ──
+   这一块在手机上比在电脑上顺手：两指捏合缩放、一指平移是触屏的母语，
+   鼠标那边反而要靠滚轮凑合。圆点半径由脚本给（它固定在屏幕上、不跟缩放变），
+   这里只管颜色。 */
+.site-panel { margin-top: 8px; }
+.site-canvas { border: 1px solid var(--line); border-radius: var(--r); display: block; }
+.site-bg { fill: var(--surface-1); }
+.site-grid { stroke: var(--line-soft); stroke-width: 1; }
+.site-axis { stroke: var(--line); stroke-width: 1.5; }
+.site-scalebar { stroke: var(--ink-faint); stroke-width: 2; }
+.site-scale-label { fill: var(--ink-faint); font-size: 10px; }
+.site-compass { fill: var(--ink-faint); font-size: 12px; text-anchor: middle; }
+.site-place { fill: var(--surface-2); stroke: var(--ink-dim); stroke-width: 2; }
+.site-place-on { fill: var(--beam); stroke: var(--ink); }
+.site-place-label { fill: var(--ink); font-size: 11px; text-anchor: middle; }
+.site-place-sun { stroke: var(--caution); stroke-width: 2; }
+.site-far { fill: var(--surface-2); stroke: var(--ink-faint); stroke-width: 2; }
+.site-far-label { fill: var(--ink-dim); font-size: 10px; text-anchor: middle; }
+.site-sun { fill: rgba(232, 180, 95, 0.18); stroke: var(--caution); stroke-width: 2; }
+.site-sun-label { fill: var(--caution); font-size: 12px; text-anchor: middle; }
+.site-link { stroke: var(--beam); stroke-width: 1.5; stroke-dasharray: 5 4; opacity: .85; }
+.site-link-label { fill: var(--beam); font-size: 10px; text-anchor: middle; }
+.site-summary { color: var(--ink-dim); font-size: 12px; margin-bottom: 8px; }
+.site-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.site-tools { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.site-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.site-cap { color: var(--ink-faint); font-size: 12px; min-width: 40px; }
+.site-row .btn.on { border-color: var(--beam); color: var(--beam); }
+.site-pick { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.site-pick-name { font-weight: 700; font-size: 13px; }
+.site-pick-line { color: var(--ink-dim); font-size: 12px; }
+.site-hint { color: var(--ink-faint); font-size: 12px; line-height: 1.6; }
+.site-issues { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.site-ok { color: var(--ink-faint); font-size: 12px; }
+.site-issue {
+  padding: 9px 11px; border-radius: 10px;
+  background: rgba(232, 180, 95, 0.14); border-left: 3px solid var(--caution);
+}
+.site-issue-what { font-size: 12px; line-height: 1.6; }
+.site-issue-why { color: var(--ink-dim); font-size: 11px; line-height: 1.6; margin-top: 3px; }
+.site-empty { padding: 12px 0; display: flex; flex-direction: column; gap: 8px; }
+.site-empty-title { font-weight: 700; }
+.site-empty-why { color: var(--ink-dim); font-size: 12px; line-height: 1.7; }
+
+/* ── 浮层：新建项目那一类 ──
+   不用 prompt()：它在部分安卓浏览器和加到主屏的 WebAPK 里根本不弹，
+   点了没反应是最难报的故障 —— 用户只会觉得按钮坏了。 */
+.sheet {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex; align-items: flex-end; justify-content: center;
+  padding: 16px;
+  /* 底部横条、刘海都要让开，否则按钮会被系统手势条压住 */
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}
+.sheet-box {
+  width: 100%; max-width: 520px;
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 16px;
+}
+.sheet-box input { width: 100%; }
+
+/* ══════════════════════ 拇指版排布 ══════════════════════
+   前一版的毛病不在配色也不在字号，在**落点**：
+     ① 一张分镜卡底下五个等宽灰按钮，一屏塞不下，也分不出主次；
+     ② 「改这一镜」就地展开十二个字段，把卡撑到要滚很久，
+        滚着滚着人就不知道自己在改哪一镜了；
+     ③ 一致性、比例、首帧、音效四种毛病挤成一排同色小标签，
+        要一镜一镜翻才看得见。
+   所以这一段只动层级和落点，token 一个没换 —— 换色板是另一件事，
+   混在一起改的话，出了问题分不清是哪一改带来的。 */
+
+/* ── 筛选条：审片时第一句话永远是"哪几镜不对" ── */
+.filterbar {
+  position: sticky;
+  top: calc(env(safe-area-inset-top) + 60px);
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 -14px 4px;
+  padding: 9px 14px;
+  background: color-mix(in srgb, var(--ground) 92%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line-soft);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.fchip {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 13px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 13px;
+}
+.fchip.on { border-color: var(--beam); background: rgba(232, 180, 95, .14); color: var(--ink); }
+.fchip.bad { color: var(--alarm); border-color: color-mix(in srgb, var(--alarm) 45%, var(--line)); }
+.fchip.bad.on { background: rgba(217, 97, 76, .14); }
+.fchip.warnish { color: var(--caution); border-color: color-mix(in srgb, var(--caution) 45%, var(--line)); }
+.fchip.icon { width: 32px; padding: 0; text-align: center; margin-left: auto; }
+
+/* ── 分镜卡 ── */
+.shot.bad { border-color: color-mix(in srgb, var(--alarm) 50%, var(--line)); }
+.shot.iffy { border-color: color-mix(in srgb, var(--caution) 45%, var(--line)); }
+
+/* 镜号和时长压到画面上：省一行，而且看图时它们就在眼睛已经在的地方 */
+.mediawrap { position: relative; }
+.overlay {
+  position: absolute;
+  display: flex;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, .55);
+  color: var(--ink);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.overlay.tl { left: 10px; top: 10px; }
+.overlay.bl { left: 10px; bottom: 10px; }
+.overlay .dim { color: var(--ink-dim); }
+.overlay.link { color: var(--good); background: rgba(111, 191, 138, .2); }
+
+/* 问题条：贴在按钮正上方，写清楚"哪儿不对"和"该按哪个键"。
+   写在标签堆里没人看得见 —— 而这句话的全部价值就是被看见 */
+.prob {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 8px 13px;
+  border-top: 1px solid var(--line-soft);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.prob.blocker { background: rgba(217, 97, 76, .13); color: var(--alarm); }
+.prob.warn { background: rgba(217, 164, 65, .11); color: var(--caution); }
+.prob .grow { min-width: 0; }
+.prob .more { flex: 0 0 auto; opacity: .75; font-size: 11.5px; }
+
+/* 三个目标，不是五个 */
+.acts { display: flex; gap: 8px; margin-top: 12px; }
+.acts .btn { min-height: 44px; }
+.acts .btn.wide { flex: 1; }
+.acts .btn.fixed { flex: 0 0 96px; padding: 0 8px; }
+.iconbtn {
+  flex: 0 0 44px;
+  width: 44px;
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 17px;
+  line-height: 1;
+}
+
+/* ── 动作面板：卡片上放不下的都收到这儿，每条都是整行大目标 ── */
+.acts-sheet .row-act {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 0;
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+}
+.acts-sheet .row-act:disabled { opacity: .4; }
+.acts-sheet .row-act .ic { flex: 0 0 26px; text-align: center; font-size: 16px; color: var(--ink-dim); }
+.acts-sheet .row-act .ic.hot { color: var(--beam); }
+.acts-sheet .row-act .sub { color: var(--ink-faint); font-size: 11.5px; line-height: 1.4; }
+.acts-sheet .grab { width: 38px; height: 4px; border-radius: 2px; background: var(--line); margin: -6px auto 12px; }
+
+/* ── 单镜编辑：整屏，不是卡片里展开的手风琴 ──
+   撑开卡片那种做法在手机上有一个致命处：滚到第七个字段时，
+   屏幕上已经没有任何东西写着"你在改第几镜"了。 */
+.ed {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  background: var(--ground);
+}
+.ed-top {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: calc(env(safe-area-inset-top) + 9px) 14px 9px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.ed-top .side { flex: 0 0 64px; }
+.ed-top .mid { flex: 1; text-align: center; min-width: 0; }
+.ed-top .mid b { font-size: 15px; display: block; line-height: 1.2; }
+.ed-top .mid span { color: var(--ink-faint); font-size: 11px; }
+.ed-top .btn { min-height: 40px; }
+.ed-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  padding: 8px 14px 10px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.ed-tab {
+  flex: 1;
+  min-height: 40px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 13.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+.ed-tab.on { background: var(--beam); border-color: var(--beam); color: var(--on-beam); font-weight: 600; }
+.ed-tab .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--good); }
+.ed-tab.on .dot { background: var(--on-beam); }
+.ed-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 12px 14px 24px; }
+.ed-foot {
+  flex: 0 0 auto;
+  padding: 10px 14px calc(env(safe-area-inset-bottom) + 14px);
+  border-top: 1px solid var(--line-soft);
+  background: var(--ground);
+}
+.ed-note { color: var(--ink-faint); font-size: 11.5px; text-align: center; margin-top: 7px; }
+/* 编辑面板里的分组：一屏只答一类问题 */
+.ed-group {
+  background: var(--surface-1);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r);
+  padding: 13px;
+  margin-bottom: 11px;
+}
+.ed-group > h4 { margin: 0 0 8px; font-size: 13.5px; font-weight: 600; }
+.ed-group > h4 span { color: var(--ink-faint); font-size: 11.5px; font-weight: 400; margin-left: 7px; }
+.ed-group .mfield:last-child { margin-bottom: 0; }
+/* 台词念不念得完，在改的时候就说，不是等生成完才发现 */
+.fit { display: flex; align-items: center; gap: 8px; margin-top: 11px; padding: 9px 11px; border-radius: 10px; font-size: 12px; line-height: 1.45; }
+.fit.ok { background: rgba(111, 191, 138, .12); color: var(--good); }
+.fit.over { background: rgba(217, 97, 76, .13); color: var(--alarm); }
+
+/* ── 流水线：数字进度直接画成条 ── */
+.pbar { height: 4px; border-radius: 2px; background: var(--surface-2); margin-top: 6px; overflow: hidden; }
+.pbar > i { display: block; height: 4px; border-radius: 2px; background: var(--beam); }
+.step.done .pbar > i { background: var(--good); }
+.step.running { background: rgba(232, 180, 95, .07); }
+.step-body { flex: 1; min-width: 0; }
+
+/* 有镜头带着问题时，分镜那个页签上点一个红点 —— 不用点进去也知道 */
+.tab { position: relative; }
+.tab-flag {
+  position: absolute;
+  top: 9px;
+  margin-left: 24px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--alarm);
+}
+
+/* 正在跑的那一镜。翻着分镜页等的时候，"轮到哪一镜了"一眼就该有 —— 
+   而流断了之后这个信息是从 GET /job 接回来的，不靠那条流 */
+.shot.live-shot { border-color: var(--beam); box-shadow: 0 0 0 1px var(--beam) inset; }
+.overlay.running { color: var(--beam); background: rgba(232, 180, 95, .22); align-items: center; }
+
+/* ── 大纲 ──
+   一行一场戏。手机上这一层反而比分镜表合适：十来行看得完，
+   而分镜表那种一屏六七个字段的东西才是手机装不下的。 */
+.mob-row { padding: 8px 0; border-top: 1px solid var(--line-soft); }
+/* 锁住的那几场已经拆过分镜、后面挂着出好的图，要一眼分得开 */
+.mob-row.locked { background: var(--surface-2); border-radius: 8px; padding: 8px; }
+.mob-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mob-head b { font-size: 13.5px; }
+/* 台词的硬下限：除非删台词否则压不下去，和"节奏偏长"不是一回事 */
+.mob-floor {
+  color: var(--caution); font-size: 11px;
+  padding: 1px 7px; border-radius: 999px; background: rgba(232, 180, 95, .14);
+}
+.mob-issue {
+  margin-top: 10px; padding: 9px 11px; border-radius: 10px;
+  background: rgba(232, 180, 95, .14); border-left: 3px solid var(--caution);
+  font-size: 12px;
+}
+.mob-issue.hard { background: rgba(217, 97, 76, .14); border-left-color: var(--alarm); }
+.mob-op {
+  display: flex; gap: 9px; align-items: flex-start;
+  padding: 9px 4px; font-size: 13px; line-height: 1.6;
+  border-top: 1px solid var(--line-soft);
+}
+.mob-op.refused { opacity: .6; }
+.mob-refused { color: var(--alarm); font-size: 12px; }
+
+/* 还没拆分镜的那几场。不是警告，是**下一步** —— 和"出问题了"那种橙红分开 */
+.mob-pending {
+  margin-top: 10px; padding: 10px 12px; border-radius: 10px;
+  background: var(--beam-wash); border-left: 3px solid var(--beam);
+  font-size: 12.5px;
+}
+.mob-pending b { font-size: 13.5px; }
+
+/* 「改了要重出 X」。只在那样产物已经出过时才显示 —— 还没出过的时候
+   它是废话，而废话会把真正要紧的那句挤没 */
+.ed-redo {
+  margin-top: 9px; padding: 8px 10px; border-radius: 8px;
+  background: rgba(232, 180, 95, .14); color: var(--ink-dim);
+  font-size: 12px; line-height: 1.6;
+}
+
+/* ── 「为什么不对」──
+   出门在外看到一张不对的图，手里只有一个「重出」按钮，而再来一次多半
+   还是那样。这一块回答"该改什么"，只说数据里有证据的原因。 */
+.diag-host:empty { display: none; }
+.diag-item {
+  padding: 8px 10px; margin-top: 6px; border-radius: 8px;
+  background: var(--surface-2); border-left: 3px solid var(--beam);
+}
+.diag-what { font-size: 14px; font-weight: 600; }
+.diag-why { font-size: 13px; color: var(--ink-faint); line-height: 1.6; margin-top: 4px; }
+.diag-how { font-size: 13px; color: var(--ink); line-height: 1.6; margin-top: 3px; }
+.diag-cost {
+  display: inline-block; margin-top: 5px; font-size: 12px; padding: 1px 7px;
+  border-radius: 99px; color: var(--caution); border: 1px solid var(--caution);
+}
+
+/* ── 镜头卡：三层 ──
+   一眼 / 有问题时 / 要动手时。详情默认折叠 —— 藏起来的是"排查时才翻"的那些，
+   浏览五十镜时它们全是噪音。 */
+.mediawrap .overlay .dot { font-size: 10px; line-height: 1; }
+.mediawrap .overlay .dot.blocker { color: var(--alarm); }
+.mediawrap .overlay .dot.warn { color: var(--caution); }
+/* 问题条压成一行：展开原因是「看看为什么」那颗按钮的事 */
+.shot-info .prob { margin: 8px 0 0; }
+.shot-more { margin-top: 10px; border-top: 1px solid var(--line-soft); padding-top: 8px; }
+.shot-more > summary {
+  cursor: pointer; font-size: 13px; color: var(--ink-faint);
+  list-style: none; padding: 4px 0;
+}
+.shot-more > summary::-webkit-details-marker { display: none; }
+.shot-more > summary::before { content: '▸ '; }
+.shot-more[open] > summary::before { content: '▾ '; }
+/* 点描述即编辑 —— 审片时最高频的动作，不该多一次点击 */
+.shot-desc.tappable { cursor: pointer; }
+.shot-desc.tappable:active { opacity: .6; }
+
+/* ── 指令框 ──
+   预览区三种色：看不懂(alarm) / 免费改(good) / 要花钱(caution)。
+   花钱那个不用 alarm —— alarm 是"坏了"，而花钱不是坏事，是要你多看一眼。 */
+.cmd-preview { white-space: pre-wrap; margin-top: 10px; line-height: 1.5; font-size: 13px; }
+.cmd-preview:empty { display: none; }
+.cmd-preview.ok { color: var(--good); }
+.cmd-preview.bad { color: var(--alarm); }
+.cmd-preview.costly { color: var(--caution); }
+.cmd-eg { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+/* 例子是可点的模板，不是装饰 —— 点一下就填进输入框，省得手机上打长句 */
+.cmd-eg .fchip { margin: 0; font-size: 12px; }
+/* 第二个图标按钮不再吃剩余空间 —— 两个都 margin-left:auto 的话，
+   flex 会把空隙平分给它们，中间裂开一道缝 */
+.fchip.icon + .fchip.icon { margin-left: 6px; }
+/* 撤销：和指令框同一张卡 —— 它是指令框的配套，藏起来等于没有 */
+.undo-bar { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.undo-bar:empty { display: none; }
+
+/* ── 提示词分层（Modifier Stack）── */
+.layer-stack { display: flex; flex-direction: column; gap: 2px; }
+.layer-row {
+  display: grid; grid-template-columns: 20px 1fr; gap: 8px 8px; align-items: baseline;
+  padding: 7px 4px; border-radius: 7px; font-size: 12.5px;
+}
+.layer-row .layer-name { font-weight: 600; }
+.layer-row .layer-text { grid-column: 2; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+/* 关掉的层要看得见还在（划掉、变淡），不是消失 —— 消失了就再也打不开 */
+.layer-row.off .layer-name, .layer-row.off .layer-text { opacity: .42; text-decoration: line-through; }
+
+/* ── 和商家后台比 ── */
+/* 一样的那几条压暗但留着：只列不一样的，人没法确认"那其余的呢" */
+.diag-item.same { opacity: .55; }
+.req-pair { margin: 5px 0; font-size: 12px; line-height: 1.7; }
+.req-pair b { color: var(--ink-faint); font-weight: 500; }
+/* 提示词可能几百字：手机上必须能换行，不然整块横着撑出屏幕 */
+.req-pair span { word-break: break-word; }

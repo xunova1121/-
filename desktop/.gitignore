@@ -1,0 +1,13 @@
+node_modules/
+dist/
+
+# 打包时放进来的 ffmpeg.exe 不进版本库（几十 MB，且许可证独立）
+bin/*.exe
+
+# 本地临时
+*.log
+.DS_Store
+
+# 构建时生成，写的是那次构建的提交号。不进版本库 ——
+# 提交进去的话它永远指向"上次提交时的上一个提交"，比没有更误导
+core/build.json

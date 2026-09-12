@@ -1,0 +1,30 @@
+apply plugin: 'com.android.application'
+
+android {
+  namespace 'com.futuredream.remote'
+  compileSdk 34
+
+  defaultConfig {
+    applicationId "com.futuredream.remote"
+    minSdk 24          // 7.0。再往下的机器连 WebView 的现代特性都不全
+    targetSdk 34
+    versionCode 1
+    versionName "0.1.0"
+  }
+
+  buildTypes {
+    // 只出 debug 包：它用 Android 自带的调试签名，装机就能用。
+    // release 包要自己的 keystore，而把私钥放进仓库是绝对不行的 ——
+    // 想上架应用商店时再自己签。
+    debug {
+      minifyEnabled false
+    }
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+}
+
+dependencies { }

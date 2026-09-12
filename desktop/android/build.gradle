@@ -1,0 +1,19 @@
+// 根构建脚本。安卓这一侧刻意只有一个 WebView 壳，
+// 不引 Capacitor / React Native —— 界面已经是一套零构建的网页，
+// 再套一层跨端框架只会多出一套要维护的依赖，换不来任何新能力。
+buildscript {
+  repositories {
+    google()
+    mavenCentral()
+  }
+  dependencies {
+    classpath 'com.android.tools.build:gradle:8.5.2'
+  }
+}
+
+allprojects {
+  repositories {
+    google()
+    mavenCentral()
+  }
+}

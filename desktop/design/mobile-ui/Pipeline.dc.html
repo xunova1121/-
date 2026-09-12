@@ -1,0 +1,127 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; background: #16130f; color: #f2ece3;
+           font: 15px/1.6 -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif;
+           -webkit-font-smoothing: antialiased; }
+  </style>
+</helmet>
+
+<div style="width: 390px; height: 844px; overflow: hidden; position: relative; display: flex; flex-direction: column; background: #16130f">
+
+  <div style="flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #2b241c">
+    <div style="flex: 1; min-width: 0; height: 40px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 9px; border: 1px solid #3a3128; background: #272119; font-size: 15px; font-weight: 600">
+      <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">深巷第七夜</span>
+      <span style="color: #7d7365; font-size: 11px">▾</span>
+    </div>
+    <div style="width: 40px; height: 40px; border-radius: 9px; border: 1px solid #3a3128; background: #272119; display: flex; align-items: center; justify-content: center; color: #b6ab9b; font-size: 16px">⟳</div>
+  </div>
+
+  <div style="flex: 1; overflow: hidden; padding: 12px 14px 0">
+
+    <!-- 正在跑什么：进度条 + 停下来，摆在最上面而不是浮在 tab 上方 -->
+    <div style="border: 1px solid #5a4a35; border-radius: 12px; background: #1e1a15; padding: 13px; margin-bottom: 12px">
+      <div style="display: flex; align-items: center; gap: 9px">
+        <span style="color: #e8b45f; font-size: 15px">◐</span>
+        <b style="flex: 1; font-size: 15px">视频生成 · 第 5 / 12 镜</b>
+        <div style="height: 36px; padding: 0 12px; border-radius: 9px; border: 1px solid #3a3128; background: #272119; color: #b6ab9b; font-size: 13px; display: flex; align-items: center">停在这一镜之后</div>
+      </div>
+      <div style="height: 6px; border-radius: 3px; background: #272119; margin: 11px 0 8px; overflow: hidden">
+        <div style="width: 41%; height: 6px; border-radius: 3px; background: #e8b45f"></div>
+      </div>
+      <div style="color: #7d7365; font-size: 12px; line-height: 1.5">在电脑上跑，关掉这个页面也不影响它继续跑。</div>
+    </div>
+
+    <!-- 六步：每一步一行，数字进度直接画成条 -->
+    <div style="border: 1px solid #2b241c; border-radius: 12px; background: #1e1a15; overflow: hidden; margin-bottom: 12px">
+
+      <div style="display: flex; align-items: center; gap: 11px; padding: 12px 13px; border-bottom: 1px solid #2b241c">
+        <span style="width: 20px; color: #7d7365; font-size: 11px; font-variant-numeric: tabular-nums">01</span>
+        <div style="flex: 1; min-width: 0">
+          <div style="font-size: 15px">设定集</div>
+          <div style="height: 4px; border-radius: 2px; background: #272119; margin-top: 6px; overflow: hidden"><div style="width: 100%; height: 4px; background: #6fbf8a"></div></div>
+        </div>
+        <span style="color: #6fbf8a; font-size: 14px; width: 16px; text-align: center">✓</span>
+        <div style="width: 56px; height: 36px; border-radius: 9px; border: 1px solid #3a3128; background: #272119; color: #b6ab9b; font-size: 13px; display: flex; align-items: center; justify-content: center">重跑</div>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 11px; padding: 12px 13px; border-bottom: 1px solid #2b241c">
+        <span style="width: 20px; color: #7d7365; font-size: 11px; font-variant-numeric: tabular-nums">02</span>
+        <div style="flex: 1; min-width: 0">
+          <div style="font-size: 15px">分镜 <span style="color: #7d7365; font-size: 12px">12 镜</span></div>
+          <div style="height: 4px; border-radius: 2px; background: #272119; margin-top: 6px; overflow: hidden"><div style="width: 100%; height: 4px; background: #6fbf8a"></div></div>
+        </div>
+        <span style="color: #6fbf8a; font-size: 14px; width: 16px; text-align: center">✓</span>
+        <div style="width: 56px; height: 36px; border-radius: 9px; border: 1px solid #3a3128; background: #272119; color: #b6ab9b; font-size: 13px; display: flex; align-items: center; justify-content: center">重跑</div>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 11px; padding: 12px 13px; border-bottom: 1px solid #2b241c">
+        <span style="width: 20px; color: #7d7365; font-size: 11px; font-variant-numeric: tabular-nums">03</span>
+        <div style="flex: 1; min-width: 0">
+          <div style="font-size: 15px">镜头出图 <span style="color: #7d7365; font-size: 12px">12 / 12</span></div>
+          <div style="height: 4px; border-radius: 2px; background: #272119; margin-top: 6px; overflow: hidden"><div style="width: 100%; height: 4px; background: #6fbf8a"></div></div>
+        </div>
+        <span style="color: #6fbf8a; font-size: 14px; width: 16px; text-align: center">✓</span>
+        <div style="width: 56px; height: 36px; border-radius: 9px; border: 1px solid #3a3128; background: #272119; color: #b6ab9b; font-size: 13px; display: flex; align-items: center; justify-content: center">重跑</div>
+      </div>
+
+      <!-- 正在跑的这一步：整行点亮，按钮让位给上面的"停下来" -->
+      <div style="display: flex; align-items: center; gap: 11px; padding: 12px 13px; border-bottom: 1px solid #2b241c; background: rgba(232,180,95,.07)">
+        <span style="width: 20px; color: #e8b45f; font-size: 11px; font-variant-numeric: tabular-nums">04</span>
+        <div style="flex: 1; min-width: 0">
+          <div style="font-size: 15px">视频生成 <span style="color: #7d7365; font-size: 12px">4 / 12</span></div>
+          <div style="height: 4px; border-radius: 2px; background: #272119; margin-top: 6px; overflow: hidden"><div style="width: 34%; height: 4px; background: #e8b45f"></div></div>
+        </div>
+        <span style="color: #e8b45f; font-size: 13px; width: 16px; text-align: center">◐</span>
+        <div style="width: 56px; height: 36px; border-radius: 9px; border: 1px solid #2b241c; background: #1e1a15; color: #7d7365; font-size: 13px; display: flex; align-items: center; justify-content: center">跑着</div>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 11px; padding: 12px 13px; border-bottom: 1px solid #2b241c">
+        <span style="width: 20px; color: #7d7365; font-size: 11px; font-variant-numeric: tabular-nums">05</span>
+        <div style="flex: 1; min-width: 0">
+          <div style="font-size: 15px; color: #b6ab9b">配音</div>
+          <div style="height: 4px; border-radius: 2px; background: #272119; margin-top: 6px"></div>
+        </div>
+        <span style="width: 16px"></span>
+        <div style="width: 56px; height: 36px; border-radius: 9px; border: 1px solid #3a3128; background: #272119; color: #f2ece3; font-size: 13px; display: flex; align-items: center; justify-content: center">开始</div>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 11px; padding: 12px 13px">
+        <span style="width: 20px; color: #7d7365; font-size: 11px; font-variant-numeric: tabular-nums">06</span>
+        <div style="flex: 1; min-width: 0">
+          <div style="font-size: 15px; color: #b6ab9b">合成</div>
+          <div style="height: 4px; border-radius: 2px; background: #272119; margin-top: 6px"></div>
+        </div>
+        <span style="width: 16px"></span>
+        <div style="width: 56px; height: 36px; border-radius: 9px; border: 1px solid #3a3128; background: #272119; color: #f2ece3; font-size: 13px; display: flex; align-items: center; justify-content: center">开始</div>
+      </div>
+
+    </div>
+
+    <!-- 出门在外最想按的那个键，单独一条，说清楚它要花多少 -->
+    <div style="border: 1px solid #3a3128; border-radius: 12px; background: #1e1a15; padding: 13px">
+      <div style="height: 46px; border-radius: 10px; border: 1px solid #e8b45f; color: #e8b45f; font-size: 15px; display: flex; align-items: center; justify-content: center">从「配音」一路跑到合成</div>
+      <div style="color: #7d7365; font-size: 11.5px; line-height: 1.5; margin-top: 8px">前面几步的产出原样保留，不重跑、不重复计费。视频那步按镜数计费，通常是最大的一笔。</div>
+    </div>
+
+  </div>
+
+  <div style="flex: 0 0 auto; display: flex; border-top: 1px solid #2b241c; background: #16130f; padding-bottom: 8px">
+    <div style="flex: 1; height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: #e8b45f; font-size: 10.5px"><span style="font-size: 15px; line-height: 1">◍</span>流水线</div>
+    <div style="flex: 1; height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: #7d7365; font-size: 10.5px"><span style="font-size: 15px; line-height: 1">✎</span>剧本</div>
+    <div style="flex: 1; height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: #7d7365; font-size: 10.5px"><span style="font-size: 15px; line-height: 1">☰</span>设定</div>
+    <div style="flex: 1; height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: #7d7365; font-size: 10.5px; position: relative"><span style="font-size: 15px; line-height: 1">▤</span>分镜<span style="position: absolute; top: 8px; margin-left: 22px; width: 6px; height: 6px; border-radius: 50%; background: #d9614c"></span></div>
+    <div style="flex: 1; height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: #7d7365; font-size: 10.5px"><span style="font-size: 15px; line-height: 1">▶</span>成片</div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

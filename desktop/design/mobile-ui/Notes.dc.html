@@ -1,0 +1,89 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; background: #16130f; color: #f2ece3;
+           font: 15px/1.6 -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif;
+           -webkit-font-smoothing: antialiased; }
+  </style>
+</helmet>
+
+<div style="width: 760px; height: 844px; overflow: hidden; background: #16130f; padding: 34px 36px; box-sizing: border-box">
+
+  <div style="font-size: 12px; letter-spacing: .16em; color: #7d7365">未来创梦 · 手机端</div>
+  <div style="font-size: 27px; font-weight: 700; margin: 6px 0 4px">改的是"一屏能不能做完一件事"</div>
+  <div style="color: #b6ab9b; font-size: 14px; max-width: 620px; line-height: 1.7">配色、字号、圆角、44px 触控目标都沿用 ui/m/m.css 里现有的 token，没有新造一套。动的只有信息层级和落点。</div>
+
+  <div style="height: 1px; background: #2b241c; margin: 22px 0"></div>
+
+  <div style="display: flex; gap: 16px">
+
+    <div style="flex: 1; border: 1px solid #2b241c; border-radius: 12px; background: #1e1a15; padding: 16px">
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px">
+        <span style="width: 22px; height: 22px; border-radius: 50%; background: #e8b45f; color: #241b0c; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center">1</span>
+        <b style="font-size: 15px">一张卡只留一个主按钮</b>
+      </div>
+      <div style="color: #d9614c; font-size: 12.5px; line-height: 1.6; margin-bottom: 8px">原来：重出图 / 重出视频 / 改这一镜 / 预演台 / 历史版本，五个等宽灰按钮，一屏塞不下，也分不出主次。</div>
+      <div style="color: #b6ab9b; font-size: 12.5px; line-height: 1.6">现在：卡片按状态决定那一个亮色主按钮 —— 首帧没接上就是「重出这段视频」，正常镜就是「改这一镜」。另外两个位置固定：一个次按钮、一个 44px 的「⋯」。剩下的全进动作面板。</div>
+    </div>
+
+    <div style="flex: 1; border: 1px solid #2b241c; border-radius: 12px; background: #1e1a15; padding: 16px">
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px">
+        <span style="width: 22px; height: 22px; border-radius: 50%; background: #e8b45f; color: #241b0c; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center">2</span>
+        <b style="font-size: 15px">编辑从卡片里搬出来</b>
+      </div>
+      <div style="color: #d9614c; font-size: 12.5px; line-height: 1.6; margin-bottom: 8px">原来：「改这一镜」就地展开 12 个字段，把卡片撑到要滚很久，滚着滚着就不知道自己在改哪一镜了。</div>
+      <div style="color: #b6ab9b; font-size: 12.5px; line-height: 1.6">现在：整屏面板，顶上永远写着「第 3 镜 · 第 1 场」，12 个字段分成内容 / 镜头 / 预演台 / 高级四组，保存和取消永远够得着。预演台排过位的镜，组标签上带个绿点。</div>
+    </div>
+
+    <div style="flex: 1; border: 1px solid #2b241c; border-radius: 12px; background: #1e1a15; padding: 16px">
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px">
+        <span style="width: 22px; height: 22px; border-radius: 50%; background: #e8b45f; color: #241b0c; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center">3</span>
+        <b style="font-size: 15px">问题自己找上门</b>
+      </div>
+      <div style="color: #d9614c; font-size: 12.5px; line-height: 1.6; margin-bottom: 8px">原来：一致性、比例不符、首帧没吃、音效过时全挤成一排同色小标签，要一镜一镜翻才看得见。</div>
+      <div style="color: #b6ab9b; font-size: 12.5px; line-height: 1.6">现在：有问题的卡整张描边变色，问题条直接贴在按钮上面写清楚「该按哪个键」；顶上一条筛选「有问题 3」一键只看它们；成片页给一个分数和最要紧的那几条。</div>
+    </div>
+
+  </div>
+
+  <div style="height: 1px; background: #2b241c; margin: 22px 0"></div>
+
+  <div style="display: flex; gap: 26px; align-items: flex-start">
+
+    <div style="flex: 0 0 300px">
+      <div style="font-size: 12px; letter-spacing: .12em; color: #7d7365; margin-bottom: 10px">沿用的 token</div>
+      <div style="display: flex; flex-wrap: wrap; gap: 8px">
+        <div style="width: 88px"><div style="height: 34px; border-radius: 8px; background: #16130f; border: 1px solid #3a3128"></div><div style="color: #7d7365; font-size: 10.5px; margin-top: 4px">ground 16130f</div></div>
+        <div style="width: 88px"><div style="height: 34px; border-radius: 8px; background: #1e1a15; border: 1px solid #3a3128"></div><div style="color: #7d7365; font-size: 10.5px; margin-top: 4px">surface-1 1e1a15</div></div>
+        <div style="width: 88px"><div style="height: 34px; border-radius: 8px; background: #272119; border: 1px solid #3a3128"></div><div style="color: #7d7365; font-size: 10.5px; margin-top: 4px">surface-2 272119</div></div>
+        <div style="width: 88px"><div style="height: 34px; border-radius: 8px; background: #e8b45f"></div><div style="color: #7d7365; font-size: 10.5px; margin-top: 4px">beam e8b45f</div></div>
+        <div style="width: 88px"><div style="height: 34px; border-radius: 8px; background: #6fbf8a"></div><div style="color: #7d7365; font-size: 10.5px; margin-top: 4px">good 6fbf8a</div></div>
+        <div style="width: 88px"><div style="height: 34px; border-radius: 8px; background: #d9a441"></div><div style="color: #7d7365; font-size: 10.5px; margin-top: 4px">caution d9a441</div></div>
+        <div style="width: 88px"><div style="height: 34px; border-radius: 8px; background: #d9614c"></div><div style="color: #7d7365; font-size: 10.5px; margin-top: 4px">alarm d9614c</div></div>
+      </div>
+    </div>
+
+    <div style="flex: 1">
+      <div style="font-size: 12px; letter-spacing: .12em; color: #7d7365; margin-bottom: 10px">没动的几条规矩</div>
+      <div style="color: #b6ab9b; font-size: 13px; line-height: 1.9">
+        · 可点的东西不小于 44px，输入框字号不小于 16px（小于 16 时 iOS 会把整页放大且退不回去）<br>
+        · 一屏只做一件事，靠底部五个 tab 切换，不做横向滚动<br>
+        · 刘海和底部横条用 env(safe-area-inset-*) 留出来<br>
+        · 密钥、路由、请求记录仍然只在电脑上 —— 手机丢了不等于密钥丢了
+      </div>
+      <div style="color: #7d7365; font-size: 12px; line-height: 1.7; margin-top: 14px">五个 tab 不变。分镜 tab 上那个红点表示"有镜头带着问题"，不用点进去也知道。</div>
+    </div>
+
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>
