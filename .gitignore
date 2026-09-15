@@ -1,2 +1,4 @@
 # build.py 每次按当前输入 HTML 重新生成，内容取决于最后一次构建的 base，不入库
 src/gis/assets/light-auto.css
+src/gis/assets/type-auto.css
+__pycache__/

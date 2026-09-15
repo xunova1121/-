@@ -79,6 +79,25 @@ aside nav button.active{background:var(--lt-accent-soft)!important;color:var(--l
 aside nav button:hover:not(.active){background:#eef4fa!important}
 .sidefoot,.sidefoot>div{background:var(--lt-surface-2)!important;
   border:1px solid var(--lt-edge-2)!important;border-radius:6px!important}
+/* 导航字号上去之后，950px 高的屏上侧栏排不下，flex 会把最后那行
+   「平台服务可用率 99.98%」压成 20px 把字裁掉。让侧栏自己滚，各行不许被压。 */
+aside{overflow-y:auto;overflow-x:hidden}
+aside>*{flex-shrink:0}
+/* 这行原来靠 float:right 把 99.98% 顶到右边。字号一大「平台服务可用率」
+   就占满 172px 的侧栏宽度，浮动元素掉到第二行，而 float 不会把 p 撑高，
+   于是数字压在下面的绿条上。改成 flex，两头对齐，撑不下就整行变高。 */
+.sidefoot p{height:auto!important;min-height:0;display:flex;align-items:baseline;gap:6px}
+.sidefoot p strong{float:none!important;margin-left:auto;white-space:nowrap}
+/* 侧栏内容宽只有 150px（174 减两侧 12 的内边距）。这三行是角标不是模块正文，
+   按正文档位放大会折行——「平台服务可用率」的「率」掉到第二行。压回能一行放下的尺寸。 */
+.sidefoot>div b{font-size:13px!important}
+.sidefoot>div small{font-size:12px!important}
+.sidefoot p,.sidefoot p strong{font-size:12px!important}
+
+/* 媒体面里的 img 是 inline 元素，基线下面留一条 ~7px 的空隙，
+   在写死高度 + overflow:hidden 的盒子里就成了「内容比盒子高 7px」。 */
+.mainFeed>img,.evidenceMedia>img,.conferenceMain>img,.conferenceTiles img,
+.video>img,.feedList img{display:block}
 
 /* ---- 按钮 ---- */
 .pagehead button,.moduletitle button,.filters button,.seg button,.righttabs button,
@@ -110,28 +129,27 @@ aside nav button:hover:not(.active){background:#eef4fa!important}
 .selecteddetail{border-left:2px solid var(--lt-accent)!important}
 .receipt{border-left:2px solid var(--lt-green)!important;background:#e2f3ea!important}
 
-/* ---- 字号整体上调一档（原 7~11px 在投影和打印上偏小） ---- */
+/* ---- 字号 ----
+   整套字号由 gen-type.py 按档位生成（assets/type-auto.css，292 处）。
+   页面自带样式里 font-size 的分布是 7px×55 / 8px×65 / 9px×51，
+   模块正文的大头压在 7–9px，手工挑选择器改只改得到标题。
+   这里只留生成器覆盖不到的几条。 */
 .shell{font-size:15px}
-.title span,.moduletitle span,.panelHead span,.pagehead p,.aiHead span{font-size:12.5px!important}
-.title b,.moduletitle b,.panelHead b,.aiHead b{font-size:15px!important}
-.kpi p b,.modulekpis b{font-size:26px!important}
-.kpi>div>span,.modulekpis span{font-size:13px!important}
-.kpi p em,.kpi small,.modulekpis small{font-size:11.5px!important}
-.pagehead h2{font-size:22px!important}
-.defensebar b{font-size:12.5px!important}
-.defensebar span{font-size:10.5px!important}
-.maplayers,.legend,.popup small{font-size:11px!important}
-.coremodules b{font-size:12.5px!important}
-.coremodules span{font-size:10px!important}
-.scanText p,.modelFlow span{font-size:12px!important}
-/* 顶部四个统计条：数字是主角，别跟着小字一起缩 */
-.videoStats span b{font-size:22px!important}
-.videoStats span small,.videoStats span i{font-size:12px!important}
-.tablehead,.reasonSteps span,.autoActions p{font-size:12px!important}
-.feedList button b{font-size:13px!important}
-.feedList button span{font-size:11.5px!important}
-.rp{font-size:12px!important}
-.rp b{font-size:10px!important}
+.pagehead h2{font-size:24px!important}
+.pagehead p{font-size:13.5px!important}
+/* <small> 没有自己的规则时走浏览器默认的 smaller（约 0.83em），
+   13.5px 的父级就掉回 11.25px——编组那两行「3/3 艘 距离 4.2 海里」就是这么小的。
+   给它一个不那么狠的台阶；有自己规则的 small 由生成表 !important 盖过这条。 */
+.shell small{font-size:.92em}
+.live b{font-size:13px!important}
+
+/* 运营班次那块挤在 272px 的窄栏里，三列都是 fr，字号一上去
+   「00:00—08:00」和「值班负责人」都会断成两行。时间列改成按内容定宽并禁止折行，
+   整块比正文小半档——原值是 7~8px，12px 已经是翻倍还多。 */
+.portPeopleShift p{grid-template-columns:auto 1fr auto!important;gap:7px;font-size:12px!important}
+.portPeopleShift p strong{white-space:nowrap;font-size:12px!important}
+.portPeopleShift p span{min-width:0}
+.portPeopleShift p small,.portPeopleShift p em{font-size:11.5px!important}
 
 /* ---- 六防条 / 图例等小构件 ---- */
 .defensebar button>i{background:var(--lt-accent-soft)!important;color:var(--lt-accent)!important}
@@ -203,6 +221,23 @@ aside nav button:hover:not(.active){background:#eef4fa!important}
 .modelFlow{border-top:1px solid var(--lt-edge)!important}
 
 /* ---- 自带 GIS 覆盖层（v10x-real-gis）：海要有海的样子，别一片灰 ---- */
+/* 图上的标注位置是覆盖层自己按原字号算好的避让结果，行间距也是写死在 JS 里的 dy。
+   跟着正文那套档位放大（9px→12.5px，1.4 倍）会把船名和航速两行顶到船图标上。
+   所以这里只加 +2px 左右，并给所有图上文字加一圈白描边——
+   万一还是压到图标或航线上，字仍然读得出。这是地图标注的通行做法。
+   原值：map-label 14 / sea-name 20 / city 12 / coord 10 / zone 12
+        target-label 13 / target-sub 10 / vessel-name 11 / vessel-speed 9 */
+.real-gis-overlay text{paint-order:stroke fill;stroke:#ffffffd9;stroke-width:3px;
+  stroke-linejoin:round;stroke-linecap:round}
+.real-gis-overlay .sea-name{stroke-width:5px}
+.real-gis-overlay .map-label{font-size:16px!important}
+.real-gis-overlay .city-name{font-size:14px!important}
+.real-gis-overlay .coord{font-size:12px!important}
+.real-gis-overlay .zone-label{font-size:14px!important}
+.real-gis-overlay .target-label{font-size:15px!important}
+.real-gis-overlay .target-sub{font-size:12px!important}
+.real-gis-overlay .vessel-name{font-size:13px!important}
+.real-gis-overlay .vessel-speed{font-size:11px!important}
 .mapcard .map.js-real-gis{background:#cbe0f0!important}
 .real-gis-overlay{background:linear-gradient(120deg,#d6e8f6,#c6dcee 56%,#b7d2e8)!important}
 .real-gis-overlay .land-fill{fill:#e9edde!important;stroke:#6b9fc0!important}

@@ -49,9 +49,12 @@ if ONEMAP:
 import subprocess
 subprocess.run([sys.executable, str(BASE/'gen-light.py'), SRC], check=True,
                stdout=subprocess.DEVNULL)
-_auto = BASE/'assets'/'light-auto.css'
-if _auto.exists():
-    css += '\n' + _auto.read_text(encoding='utf-8')
+subprocess.run([sys.executable, str(BASE/'gen-type.py'), SRC], check=True,
+               stdout=subprocess.DEVNULL)
+for _gen in ('light-auto.css', 'type-auto.css'):
+    _f = BASE/'assets'/_gen
+    if _f.exists():
+        css += '\n' + _f.read_text(encoding='utf-8')
 css += '\n' + (BASE/'gis-light.css').read_text(encoding='utf-8')
 
 # 雷达态势是一块「屏」，整块留深色。但 gis-light.css 里那条
@@ -59,6 +62,11 @@ css += '\n' + (BASE/'gis-light.css').read_text(encoding='utf-8')
 # 把 rd- 面板里的浅色小字变成深底深字（目标信息、系统状态那几块就是这么瞎的）。
 # 这里把 gis-radar.css 自己的 color 声明按原样重申一遍，前面加 .shell 抬特指度。
 # 好处是跟着 gis-radar.css 走，改配色不用两头同步。
+import importlib.util as _ilu
+_spec = _ilu.spec_from_file_location('gen_type', BASE/'gen-type.py')
+_gt = _ilu.module_from_spec(_spec); _spec.loader.exec_module(_gt)
+_scale_font = _gt.scale_font
+
 _RD_SKIP = ('.rd-card-x', '.rd-wind-chip')   # 这两个挂在浅色一张图上，不能跟着回深
 def _reassert_radar(radar_css):
     import re as _re
@@ -68,12 +76,19 @@ def _reassert_radar(radar_css):
         sel = ' '.join(sel.split())
         if not sel.startswith('.rd-') or any(k in sel for k in _RD_SKIP):
             continue
+        decls = []
         m = _re.search(r'(?:^|;)\s*color\s*:\s*([^;]+)', body)
-        if not m:
+        if m:
+            decls.append('color:%s!important' % m.group(1).strip())
+        # 雷达面板自己的字号是 8~10px，比页面正文还小。gen-type.py 只读页面自带的
+        # 样式表，管不到这支，所以在这里套同一张档位表，两边保持一致。
+        m = _re.search(r'(?:^|;)\s*font-size\s*:\s*([\d.]+)px', body)
+        if m:
+            decls.append('font-size:%gpx!important' % _scale_font(float(m.group(1))))
+        if not decls:
             continue
         parts = [' '.join(x.split()) for x in sel.split(',')]
-        out.append(','.join('.shell ' + x for x in parts)
-                   + '{color:%s!important}' % m.group(1).strip())
+        out.append(','.join('.shell ' + x for x in parts) + '{%s}' % ';'.join(decls))
     return '\n'.join(out)
 css += ('\n/* ---- 雷达视图配色重申（自 gis-radar.css 生成） ---- */\n'
         + _reassert_radar((BASE/'gis-radar.css').read_text(encoding='utf-8')))
