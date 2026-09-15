@@ -500,6 +500,30 @@ let projects = [];
  */
 let appSettings = {};
 let tab = 'flow';
+/**
+ * 连播播放器的停止句柄。
+ *
+ * ⚠ 必须是模块级的。整页会因为任何一次 paint() 重画，而重画之后
+ * 旧那个播放器的 rAF 和 <video> 还活着 —— 手机上那表现为"越用越烫、
+ * 越用越卡"，而没人会想到是一个已经不在页面上的播放器还在解码。
+ */
+let stopAnimatic = null;
+
+/**
+ * 分镜页上选中的那几镜。
+ *
+ * ── 为什么手机上也要有多选 ──
+ *
+ * 能力清单里原来把多选、批量、只跑选中的三条一起划成"电脑端专属"，
+ * 理由是"多选依赖表格视图，而表格在 390px 上摆不下"。
+ * 表格摆不下是对的，但**多选并不依赖表格** —— 卡片一样能选。
+ *
+ * 而这三条串起来正好是手机上最常走的那条路：
+ * 翻片子 → 看到几镜不对 → 只把这几镜重出。
+ * 没有它的话，五镜要挨个点五次，每次都要等一轮。
+ */
+let picked = new Set();
+let selecting = false;
 const job = { running: false, label: '', message: '', fail: 0 };
 
 // ───────────────────────── 配对 ─────────────────────────
@@ -2627,7 +2651,22 @@ function paintShots() {
         const { close } = openSheet(box);
         box.append(commandCard(close));
       }
-    }, '⌘'));
+    }, '⌘'),
+    /**
+     * 多选开关。
+     *
+     * ⚠ 默认关着。一直开着的话，翻片子时手指一碰就选上了 ——
+     * 而这一页最常做的事是"看"，不是"选"。
+     */
+    h('button', {
+      class: `fchip icon ${selecting ? 'on' : ''}`,
+      title: '多选：选几镜一次重出',
+      onclick: () => {
+        selecting = !selecting;
+        if (!selecting) picked.clear();
+        paint();
+      }
+    }, '☑'));
 
   /**
    * 场次分隔条。手机上一屏只看得见一两镜，边界更容易被漏掉 ——
@@ -2637,6 +2676,69 @@ function paintShots() {
   const segs = project.segments || [];
   let lastSeg = null;
   const out = [bar];
+
+  /**
+   * ══════════ 选中了几镜，能对它们做什么 ══════════
+   *
+   * 只在多选模式下出现。两个动作，顺序就是判断顺序：
+   * 先让它替你选出"查得出具体原因该重出"的那几镜，再决定跑不跑。
+   */
+  if (selecting) {
+    const selBar = h('div', { class: 'card', style: 'margin-top:10px' });
+    const paintSel = () => {
+      clear(selBar);
+      const ids = [...picked];
+      /**
+       * 一键选上"该重出的那几镜"。
+       *
+       * ⚠ 判据是**有可以动手的具体原因**，不是"分数低"。
+       * 按分数选会把一堆"数据上看不出毛病、只是模型这次画成这样"的镜头
+       * 一起选上 —— 重出它们纯粹是碰运气，而每一次都真花钱。
+       */
+      const redoHost = h('div', {});
+      // cap:redo-candidates
+      api(`/projects/${project.id}/redo-candidates`).then((r) => {
+        const list = r?.shots || [];
+        clear(redoHost);
+        if (!list.length) return;
+        const go = h('button', { class: 'btn sm grow' }, `选上该重出的 ${list.length} 镜`);
+        go.onclick = () => {
+          for (const x of list) picked.add(x.id);
+          paint();
+        };
+        add(redoHost,
+          h('div', { class: 'muted', style: 'margin:6px 0;line-height:1.6' },
+            `有 ${list.length} 镜查得出具体原因该重出：`
+            + list.slice(0, 3).map((x) => `第 ${x.index} 镜 ${x.why}`).join('；')
+            + (list.length > 3 ? '…' : '')),
+          h('div', { class: 'row' }, go));
+      }).catch(() => { /* 拉不到不该把分镜页弄坏 */ });
+
+      const canRun = ids.length > 0;
+      const runImg = h('button', { class: 'btn primary sm grow', disabled: !canRun || job.running }, `只出这 ${ids.length} 镜的图`);
+      runImg.onclick = () => {
+        if (!confirm(`只出这 ${ids.length} 镜的图？已经出过的会重出，要花钱。`)) return;
+        // cap:run-selected
+        runStage('assets', '镜头出图', { only: ids });
+      };
+      const runVid = h('button', { class: 'btn sm grow', disabled: !canRun || job.running }, `只出这 ${ids.length} 镜的视频`);
+      runVid.onclick = () => {
+        if (!confirm(`只出这 ${ids.length} 镜的视频？已经出过的会重出，要花钱。`)) return;
+        // cap:run-selected
+        runStage('video', '视频生成', { only: ids });
+      };
+      const none = h('button', { class: 'btn ghost sm' }, '全不选');
+      none.onclick = () => { picked.clear(); paint(); };
+
+      add(selBar,
+        h('b', {}, ids.length ? `已选 ${ids.length} 镜` : '点卡片上的方块选中'),
+        redoHost,
+        h('div', { class: 'row', style: 'margin-top:8px' }, runImg, runVid),
+        ids.length ? h('div', { class: 'row', style: 'margin-top:8px' }, none) : null);
+    };
+    paintSel();
+    out.push(selBar);
+  }
 
   const visible = shots.filter(keep);
   if (!visible.length) {
@@ -2851,9 +2953,31 @@ function shotCardOf(s, v, portrait, probs = shotIssues(s)) {
       : null,
     );
 
-  return h('div', { class: `card shot ${tone} ${live ? 'live-shot' : ''}` },
+  /**
+   * 多选时那颗方块，压在画面左上角。
+   *
+   * ⚠ 只在多选模式下出现，而且**整张画面都能点** —— 拇指点一个
+   * 20px 的小方块在手机上是不现实的。不在多选模式时完全不插手，
+   * 那时候点画面是放大看图（zoomable），那才是这一页的主用法。
+   */
+  const on = picked.has(s.id);
+  const pickBox = selecting
+    ? h('button', {
+        class: `shot-pick ${on ? 'on' : ''}`,
+        title: on ? '取消选中' : '选中这一镜',
+        onclick: (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          if (picked.has(s.id)) picked.delete(s.id); else picked.add(s.id);
+          paint();
+        }
+      }, on ? '☑' : '☐')
+    : null;
+
+  return h('div', { class: `card shot ${tone} ${live ? 'live-shot' : ''} ${on ? 'picked' : ''}` },
     // 镜号和时长压在画面上：省掉一整行，而且它们出现在眼睛已经在的地方
     h('div', { class: 'mediawrap' },
+      pickBox,
       s.videoPath
         ? h('video', { class: `shot-media ${portrait ? 'portrait' : ''}`, src: media(s.videoPath, v), controls: true, preload: 'metadata', playsinline: true })
         : s.imagePath
@@ -3565,6 +3689,9 @@ function assetRow(label, note, href) {
  */
 // cap:film-view cap:asset-pack
 function paintFilm() {
+  // 上一次画出来的那个播放器已经不在页面上了，但它还在跑 —— 先停掉
+  stopAnimatic?.();
+  stopAnimatic = null;
   const out = project?.outputs;
   const v = Date.parse(project?.updatedAt || '') || 0;
   const shots = (project?.shots || []).slice().sort((a, b) => a.index - b.index);
@@ -3664,7 +3791,67 @@ function paintFilm() {
           assetRow(`第 ${s.index} 镜 音效`, s.sfxOf || s.sound || '', media(s.sfxPath, v))))
     : null;
 
-  return [...head, qualityHost, material];
+  /**
+   * ══════════ 连播预览 ══════════
+   *
+   * 出视频之前先把分镜图按各自的时长连起来播一遍 —— 这条流水线上
+   * **最后一道、也是最省钱的一道关**：第 7 镜太长、这三镜连着全是中景、
+   * 这句话来不及说完，这些毛病出完视频再发现就是整批重出。
+   *
+   * ⚠ 原来这一块只有电脑端，理由写的是"看整片节奏要大屏幕安静看完，
+   * 手机上得出的结论多半是错的"。这条理由站不住 ——
+   * 那是替用户判断他该在哪儿看片，而不是一条技术约束。
+   * 而且这个应用里"审片"这件事本来就主要发生在手机上
+   *（整份能力清单里到处写着这句话），把最该在审片时用的那一块
+   * 留在电脑上，是自相矛盾的。
+   *
+   * 折起来：它要拉视频和图，不点开就不该开始解码。
+   */
+  const aniHost = h('div', {});
+  const aniFold = shots.length
+    ? h('details', { class: 'layer-fold', style: 'margin-top:12px' },
+        h('summary', {}, `连播预览（${shots.length} 镜，先看节奏再花钱出视频）`),
+        aniHost)
+    : null;
+  if (aniFold) {
+    aniFold.addEventListener('toggle', async () => {
+      if (!aniFold.open) {
+        // ⚠ 折起来就必须停。不停的话 rAF 一直在跑、视频还在解码，
+        //   而手机上那表现为"越用越烫、越用越卡"，而且没人想得到是这儿。
+        stopAnimatic?.();
+        stopAnimatic = null;
+        clear(aniHost);
+        return;
+      }
+      if (aniHost.firstChild) return;
+      try {
+        const { animatic } = await import('/animatic.js');
+        // cap:animatic
+        const player = animatic(shots, {
+          mediaUrl: (x) => media(x, v),
+          // 念出来的那段：署名和括注不算 —— 字幕上出现"（冷笑）"是错的
+          spokenOf: (s) => String(s.dialogue || '')
+            .replace(/[（(][^）)]*[）)]/g, '')
+            .replace(/^[^：:]{1,8}[：:]/, '')
+            .trim()
+        });
+        // ⚠ 是 node 不是 el —— 写错的话这里静默地什么都不显示
+        clear(aniHost).append(player.node);
+        /**
+         * 画面比例跟着这部片子走。
+         * 竖屏短剧塞进 16:9 的框里，上下各留一大片黑 ——
+         * 而手机上本来就没多少地方。
+         */
+        const ratio = String(project.aspectRatio || '16:9').replace(':', ' / ');
+        player.node.querySelector('.ani-stage')?.style.setProperty('--ani-ratio', ratio);
+        stopAnimatic = player.stop;
+      } catch (err) {
+        clear(aniHost).append(h('div', { class: 'muted' }, `连播起不来：${err.message}`));
+      }
+    });
+  }
+
+  return [...head, qualityHost, aniFold, material];
 }
 
 // ───────────────────────── 动作 ─────────────────────────

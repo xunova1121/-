@@ -1944,7 +1944,7 @@ export function createServer({ lan = false } = {}) {
        * 放行的是这两个确切的路径，不是"所有 .js"—— 后者会把电脑版
        * 整套界面代码一起放出去，那不是同一件事。
        */
-      const SHARED_MODULES = ['/previz-canvas.js', '/site-canvas.js', '/previz.js', '/site.js', '/outline.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js', '/pricing.js', '/estimate.js'];
+      const SHARED_MODULES = ['/previz-canvas.js', '/site-canvas.js', '/previz.js', '/site.js', '/outline.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js', '/pricing.js', '/estimate.js', '/animatic.js'];
       const isShell =
         url.pathname === '/m'
         || url.pathname.startsWith('/m/')

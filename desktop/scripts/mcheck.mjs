@@ -525,6 +525,66 @@ const jobs = await import(CORE('jobs.js'));
   await page.waitForTimeout(1200);
 }
 
+/**
+ * 多选 + 只跑选中的 + 一键选上该重出的（手机端）
+ *
+ * 这三条原来一起划成"电脑端专属"，理由是"多选依赖表格视图，
+ * 而表格在 390px 上摆不下"。表格摆不下是对的，但**多选不依赖表格** ——
+ * 卡片一样能选。而"翻片子 → 看到几镜不对 → 只把这几镜重出"
+ * 正是手机上最常走的那条路：没有它，五镜要挨个点五次。
+ */
+{
+  console.log('\n多选与批量重出：');
+  await closeSheets(page);
+  await page.locator('.tab', { hasText: '分镜' }).click();
+  await page.waitForTimeout(700);
+
+  /**
+   * ⚠ 默认必须是关着的。一直开着的话，翻片子时手指一碰就选上了 ——
+   * 而这一页最常做的事是"看"，不是"选"。
+   */
+  console.log('   默认不在多选模式：',
+    (await page.locator('#app .shot-pick').count()) === 0 ? '✓' : '✕ 一进来就有勾选框');
+
+  const toggle = page.locator('#app .fchip.icon', { hasText: '☑' }).first();
+  console.log('   筛选条上有多选开关：', (await toggle.count()) === 1 ? '✓' : '✕');
+  if (await toggle.count()) {
+    await toggle.click();
+    await page.waitForTimeout(600);
+    const boxes = await page.locator('#app .shot-pick').count();
+    console.log('   打开之后每张卡上有勾选框：', boxes >= 2 ? `✓ ${boxes} 张` : `✕ ${boxes}`);
+    /**
+     * ⚠ 44px 是拇指的下限。20px 的小方块在手机上点不准，
+     * 而"点不准"这件事只有量出来才发现得了 —— 看截图是看不出来的。
+     */
+    const box = await page.locator('#app .shot-pick').first()
+      .evaluate((el) => { const r = el.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) }; });
+    console.log('   勾选框够大（拇指点得中）：',
+      box.w >= 40 && box.h >= 40 ? `✓ ${box.w}×${box.h}` : `✕ ${box.w}×${box.h}`);
+
+    await page.locator('#app .shot-pick').first().click();
+    await page.waitForTimeout(600);
+    const barText = await page.locator('#app').innerText();
+    console.log('   选中之后说得出选了几镜：', /已选 1 镜/.test(barText) ? '✓' : '✕');
+    console.log('   选中的卡片整张看得出来：',
+      (await page.locator('#app .card.shot.picked').count()) === 1 ? '✓' : '✕');
+    console.log('   给得出"只出这几镜"的动作：',
+      /只出这 1 镜的图/.test(barText) && /只出这 1 镜的视频/.test(barText) ? '✓' : '✕');
+
+    // 关掉多选要把选中一起清掉 —— 留着的话下次打开还选着，人不知道
+    await toggle.click();
+    await page.waitForTimeout(500);
+    console.log('   关掉多选之后勾选框收掉了：',
+      (await page.locator('#app .shot-pick').count()) === 0 ? '✓' : '✕');
+    await toggle.click();
+    await page.waitForTimeout(600);
+    console.log('   ⚠ 而且选中被清空了（不清的话下次打开还选着，人不知道）：',
+      !/已选 \d+ 镜/.test(await page.locator('#app').innerText()) ? '✓' : '✕ 还留着上次的选中');
+    await toggle.click();
+    await page.waitForTimeout(400);
+  }
+}
+
 // ⑥ 成片 + 交给剪映的素材
 await page.locator('.tab', { hasText: '成片' }).click();
 await page.waitForTimeout(700);
@@ -541,6 +601,54 @@ console.log('   字幕：', /字幕 \.srt/.test(filmText) ? '✓' : '✕');
  * 而它红着的这段时间里，真正的毛病没人发现：少一镜的素材包看起来和齐了的
  * 一模一样，人拖进剪映排完才发现中间缺一段。现在断言改成量这件事。
  */
+/**
+ * ── 连播预览 ──
+ *
+ * 出视频之前最后一道、也是最省钱的一道关。原来只有电脑端，
+ * 理由是"节奏要在大屏幕上安静看完"—— 而那是替用户判断他该在哪儿看片，
+ * 不是技术约束。审片本来就主要发生在手机上。
+ */
+{
+  const fold = page.locator('#app details.layer-fold', { hasText: '连播预览' }).first();
+  console.log('   成片页上有连播预览：', (await fold.count()) === 1 ? '✓' : '✕');
+  if (await fold.count()) {
+    /**
+     * ⚠ 点开才加载。不点开就去拉视频和图的话，这一页每次打开都在解码 ——
+     * 手机上那表现为"越用越烫"，而没人会想到是一个没展开的折叠区干的。
+     */
+    console.log('   点开之前不加载播放器：',
+      (await page.locator('#app .ani-stage').count()) === 0 ? '✓' : '✕ 没点开就已经建好了');
+    await fold.evaluate((el) => { el.open = true; });
+    await page.waitForTimeout(1500);
+    console.log('   点开之后播放器出来了：',
+      (await page.locator('#app .ani-stage').count()) === 1 ? '✓' : '✕');
+    console.log('   每镜一格的进度条也在：',
+      (await page.locator('#app .ani-tick').count()) >= 2
+        ? `✓ ${await page.locator('#app .ani-tick').count()} 格` : '✕');
+    /**
+     * ⚠ 画面比例要跟着这部片子走。竖屏短剧塞进 16:9 的框，
+     * 上下各留一大片黑 —— 而手机上本来就没多少地方。
+     */
+    const ratio = await page.locator('#app .ani-stage').first()
+      .evaluate((el) => el.style.getPropertyValue('--ani-ratio') || '(没设)');
+    console.log('   画面比例跟着项目走：', /\d+\s*\/\s*\d+/.test(ratio) ? `✓ ${ratio}` : `✕ ${ratio}`);
+    /**
+     * ⚠ 整块不能横着溢出屏幕。这是把电脑端的东西搬到 390px 上
+     * 最容易出的那种事，而且只有量出来才发现得了。
+     */
+    const overflow = await page.locator('#app .animatic').first().evaluate((el) => ({
+      w: Math.round(el.getBoundingClientRect().width),
+      vw: window.innerWidth
+    }));
+    console.log('   没有横着溢出屏幕：',
+      overflow.w <= overflow.vw ? `✓ ${overflow.w}/${overflow.vw}px` : `✕ ${overflow.w}/${overflow.vw}px`);
+    // 折回去要停掉，不然 rAF 和 <video> 一直在跑
+    await fold.evaluate((el) => { el.open = false; });
+    await page.waitForTimeout(500);
+    console.log('   折回去之后播放器收掉了：',
+      (await page.locator('#app .ani-stage').count()) === 0 ? '✓' : '✕ 还在跑');
+  }
+}
 console.log('   出了视频的镜列出来了：', /第 1 镜/.test(filmText) ? '✓' : '✕');
 console.log('   没出视频的镜点名说缺：',
   /第 2 镜还没出视频/.test(filmText) ? '✓' : '✕ 素材包缺一镜却不说，进剪映才会发现');
