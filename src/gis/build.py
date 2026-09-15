@@ -40,6 +40,15 @@ js += '\nvar SHOT_B64={' + ','.join('"%s":"%s"' % (k, v) for k, v in shots.items
 _map = BASE / 'assets' / 'map.b64'
 js += '\nvar MAP_IMG_B64="%s";' % (_map.read_text(encoding='utf-8').strip() if _map.exists() else '')
 css += '\n' + (BASE/'gis-onemap.css').read_text(encoding='utf-8')
+# 浅色主题：先按**当前底稿**自动生成映射表，再叠手写微调（后者靠文档顺序取胜）。
+# 必须每次重算——不同底稿的深色表不一样，复用上一次的会串色。
+import subprocess
+subprocess.run([sys.executable, str(BASE/'gen-light.py'), SRC], check=True,
+               stdout=subprocess.DEVNULL)
+_auto = BASE/'assets'/'light-auto.css'
+if _auto.exists():
+    css += '\n' + _auto.read_text(encoding='utf-8')
+css += '\n' + (BASE/'gis-light.css').read_text(encoding='utf-8')
 js  += '\n' + (BASE/'gis-onemap.js').read_text(encoding='utf-8')
 
 block = (

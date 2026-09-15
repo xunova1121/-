@@ -1,0 +1,139 @@
+/* ===== 浅色主题覆盖：把页面自带的深色驾驶舱改成浅蓝底 =====
+   页面自带样式 777 条规则、169 种背景、247 种文字色，全是手写深色十六进制。
+   这里不逐条重写，而是：
+     1. 主要容器（shell / header / aside / card / kpi / title / 表格 / 抽屉）显式改浅；
+     2. 文字用一条广播规则统一压到深墨色，再把语义色（红/橙/绿/青）单独还原；
+     3. 字号整体上调一档，投影与打印都能看清。
+   本表由 build.py 最后注入，同特指度下靠文档顺序取胜。 */
+
+:root{
+  --lt-ground:#e7eff7; --lt-surface:#ffffff; --lt-surface-2:#f2f7fc;
+  --lt-edge:#bed4e6; --lt-edge-2:#d8e6f2;
+  --lt-ink:#0d2b44; --lt-ink-2:#3b647e; --lt-ink-3:#6b8ba0;
+  --lt-accent:#0b6ea8;
+  --lt-red:#b82a62; --lt-amber:#a06b02; --lt-green:#0f7a43;
+}
+
+/* ---- 底与主要容器 ---- */
+html,body,#root{background:var(--lt-ground)!important}
+body{color:var(--lt-ink);font-size:15px;line-height:1.5}
+.shell{background:var(--lt-ground)!important}
+header{background:var(--lt-surface)!important;border-bottom:1px solid var(--lt-edge)!important;
+  box-shadow:0 1px 6px #0d2b4414!important}
+aside{background:var(--lt-surface)!important;border-right:1px solid var(--lt-edge)!important}
+.card,.kpi,.modulekpis>div,.drawer,.actionDialog,.moduleside,.moduletable{
+  background:var(--lt-surface)!important;border-color:var(--lt-edge)!important;
+  box-shadow:0 1px 3px #0d2b440f!important}
+.kpi,.modulekpis>div{background:var(--lt-surface-2)!important}
+.title,.moduletitle,.panelHead,.aiHead,.righttabs,.tablehead,.sceneTop,.aiTop,.emTop{
+  background:var(--lt-surface-2)!important;border-color:var(--lt-edge-2)!important}
+.tablerow{border-bottom:1px solid var(--lt-edge-2)!important}
+.tablerow:hover,.tablerow.selected,.objectList>button.on,.inferenceList button.on,
+.resourceList button.on,.alertlist>button.selected{background:#e4eef7!important}
+
+/* ---- 文字：统一压深，再还原语义色 ---- */
+.shell,.shell :is(div,section,li,td,th,dt,dd){color:var(--lt-ink)}
+.shell :is(span,small,p,label,time,figcaption){color:var(--lt-ink-2)!important}
+.shell :is(b,strong,h1,h2,h3,h4,h5){color:var(--lt-ink)!important}
+.shell :is(input,textarea,select){background:var(--lt-surface)!important;
+  border:1px solid var(--lt-edge)!important;color:var(--lt-ink)!important}
+.shell ::placeholder{color:var(--lt-ink-3)!important}
+/* 强调与语义色还原（放在广播规则之后） */
+.shell :is(.link,.title span.link,.aiPulse b){color:var(--lt-accent)!important}
+.shell :is(.redCode,.rp.danger,.ship.danger,.hot,.lv1) ,
+.shell :is(i.紧急,.tablerow .hot){color:var(--lt-red)!important}
+.shell .greenCode,.shell .demoReceipt,.shell .receipt{color:var(--lt-green)!important}
+.shell em{color:var(--lt-ink-2)}
+
+/* ---- 侧栏导航 ---- */
+aside nav button{color:var(--lt-ink-2)!important;font-size:15px!important}
+aside nav button.active{background:#dceaf6!important;color:var(--lt-accent)!important;
+  box-shadow:inset 3px 0 var(--lt-accent)!important}
+aside nav button:hover:not(.active){background:#eef4fa!important}
+.sidefoot,.sidefoot>div{background:var(--lt-surface-2)!important;border-color:var(--lt-edge-2)!important}
+
+/* ---- 按钮 ---- */
+.pagehead button,.moduletitle button,.filters button,.seg button,.righttabs button,
+.defensebar button,.coremodules button{
+  background:var(--lt-surface)!important;border:1px solid var(--lt-edge)!important;
+  color:var(--lt-ink-2)!important}
+.shell button.primary,.shell .primary,.pagehead button.primary,.moduletitle button.primary,
+.videoActions .primary,.talkbar .primary,.draweractions .primary{
+  background:linear-gradient(135deg,#0b6ea8,#118aa8)!important;border-color:#0b6ea8!important;
+  color:#fff!important}
+.shell button.primary *,.shell .primary *{color:#fff!important}
+.filters button.on,.seg button.on,.righttabs button.on,.defensebar button.on{
+  background:#dceaf6!important;border-color:var(--lt-accent)!important;color:var(--lt-accent)!important}
+
+/* ---- 表格与列表 ---- */
+.tablehead{color:var(--lt-ink-3)!important;font-size:12px!important}
+.tablerow{color:var(--lt-ink)!important;font-size:13px!important}
+.alertlist>button{color:var(--lt-ink)!important}
+
+/* ---- 字号整体上调一档（原 8~11px 在投影和打印上偏小） ---- */
+.shell{font-size:15px}
+.title span,.moduletitle span,.panelHead span,.pagehead p{font-size:12.5px!important}
+.title b,.moduletitle b,.panelHead b{font-size:15px!important}
+.kpi b,.modulekpis b{font-size:26px!important}
+.kpi span,.modulekpis span{font-size:13px!important}
+.kpi small,.modulekpis small{font-size:11.5px!important}
+.pagehead h2{font-size:22px!important}
+.defensebar b{font-size:12.5px!important}
+.defensebar span{font-size:10.5px!important}
+.maplayers,.legend,.popup small{font-size:11px!important}
+.coremodules b{font-size:12.5px!important}
+.coremodules span{font-size:10px!important}
+
+/* ---- 六防条 / 图例等小构件 ---- */
+.defensebar button>i{background:#dceaf6!important;color:var(--lt-accent)!important}
+.defensebar button.red i{background:#f6d9e4!important;color:var(--lt-red)!important}
+.defensebar button.orange i{background:#f6e7c8!important;color:var(--lt-amber)!important}
+.defensebar button.green i{background:#d8efe2!important;color:var(--lt-green)!important}
+
+/* ---- 自带 GIS 覆盖层（v10x-real-gis）也转浅 ---- */
+.mapcard .map.js-real-gis{background:#d3e5f3!important}
+.real-gis-overlay{background:linear-gradient(120deg,#dbeaf6,#cfe2f1 56%,#c6dcee)!important}
+.real-gis-overlay .land-fill{fill:#e8ecdf!important;stroke:#7aa8c6!important}
+.real-gis-overlay .coast-glow{fill:#dfe6d6!important;stroke:#4a86ab!important;filter:none!important}
+.real-gis-overlay .county-line{stroke:#a9c4d6!important}
+.real-gis-overlay .map-label,.real-gis-overlay .sea-name{fill:#5a8fb5!important}
+.real-gis-overlay .city-name{fill:#0d2b44!important}
+.real-gis-overlay .city-dot{fill:#0b6ea8!important;filter:none!important}
+.real-gis-overlay .coord{fill:#6b8ba0!important}
+.real-gis-overlay .zone{fill:#1565a81a!important;stroke:#1565a8!important}
+.real-gis-overlay .zone-label{fill:#0d4f7c!important}
+.real-gis-overlay .route-base{stroke:#7aa8c6!important}
+.real-gis-overlay .route-flow{stroke:#1571b8!important;filter:none!important}
+.real-gis-overlay .route-node,.real-gis-overlay .target-core{fill:#0b6ea8!important;filter:none!important}
+.real-gis-overlay .scan-ring{stroke:#1571b8!important}
+.real-gis-overlay .target-label{fill:#0d2b44!important}
+.real-gis-overlay .target-sub,.real-gis-overlay .vessel-speed{fill:#3b647e!important}
+.real-gis-overlay .vessel-name{fill:#0d2b44!important}
+.real-gis-overlay .fish-vessel{fill:#0f7a43!important;filter:none!important}
+.gis-chip,.gis-float-status,.gis-bottom,.gis-vessel-card{
+  background:#ffffffe8!important;border-color:var(--lt-edge)!important;color:var(--lt-ink-2)!important;
+  box-shadow:0 1px 4px #0d2b4414!important}
+.gis-chip b,.gis-float-status strong,.gis-vessel-card strong{color:var(--lt-ink)!important}
+
+/* ---- 打印：铺满纸面、去掉阴影与毛玻璃、强制浅底 ---- */
+@media print{
+  @page{size:A4 landscape;margin:8mm}
+  html,body,#root,.shell,.om-wrap{background:#fff!important}
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;
+    box-shadow:none!important;backdrop-filter:none!important;text-shadow:none!important}
+  .om-wrap{position:static!important;height:auto!important}
+  .om-root{height:auto!important}
+  .om-body{height:auto!important}
+  .om-p,.om-modbar,.card,.kpi{break-inside:avoid;page-break-inside:avoid}
+  .om-enter,.om-back,.om-zoom,.om-nav{display:none!important}
+  .om-route,.om-zone,.om-boat-halo,.om-flow i,.om-live i{animation:none!important}
+}
+
+/* ---- 自带 GIS 卡片里的徽标与按钮（原为深底浅字） ---- */
+.gis-vessel-card em{background:#f6d9e4!important;color:#96204f!important}
+.gis-vessel-card button,.gis-chip button{color:#0b6ea8!important}
+.gis-vessel-card .card-actions{border-top-color:var(--lt-edge-2)!important}
+.rd-card-x{background:#f2f7fc!important;border-color:var(--lt-edge)!important;color:#3b647e!important}
+/* 状态小字统一压到过 3:1 的深度 */
+.shell :is(.sidefoot b,.opsfoot b,.statusOk,.receipt,.demoReceipt){color:#0f7a43!important}
+.sidefoot div b{color:#0f7a43!important}

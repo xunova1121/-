@@ -6,11 +6,15 @@
      流量构成 卫星/5G  #3987e5 / #199e70（分类槽 1、3，all-pairs 通过）
    状态色一律「色 + 图标/文字」双编码，不靠颜色单独表意。 */
 
+/* 浅色底（面板 #ffffff）上经 dataviz 校验器验证：
+   预警三级 #b82a62/#a06b02/#1565a8 —— 五项全 PASS（色盲 ΔE 10.4 / 常视觉 ΔE 19.0）
+   流量池   #2a78d6/#15996a —— all-pairs 全 PASS
+   折线单序列 #1571b8 —— 对比度 ≥3:1 */
 var VIZ = {
-  urgent:"#d43a66", major:"#c98500", info:"#2f8fd4",
-  sat:"#3987e5", g5:"#199e70",
-  line:"#3fb8d8",
-  ok:"#0ca30c", warn:"#c98500", bad:"#d43a66"
+  urgent:"#b82a62", major:"#a06b02", info:"#1565a8",
+  sat:"#2a78d6", g5:"#15996a",
+  line:"#1571b8",
+  ok:"#0f7a43", warn:"#a06b02", bad:"#b82a62"
 };
 
 var OM = {
@@ -98,7 +102,7 @@ function donut(items,total,unit,size){
   var sum=items.reduce(function(a,b){ return a+b[1]; },0);
   s+='<svg class="om-donut" viewBox="0 0 '+size+' '+size+'" width="'+size+'" height="'+size+'">';
   s+='<circle cx="'+R+'" cy="'+R+'" r="'+((rOut+rIn)/2).toFixed(1)+'" fill="none" '
-    +'stroke="#12354a" stroke-width="'+(rOut-rIn)+'"/>';
+    +'stroke="#dde8f1" stroke-width="'+(rOut-rIn)+'"/>';
   items.forEach(function(it){
     var a0=acc/sum*360, a1=(acc+it[1])/sum*360;
     acc+=it[1];
@@ -113,7 +117,7 @@ function donut(items,total,unit,size){
 function gauge(label,pct,size){
   var R=size/2, r=R-4, C=2*Math.PI*r;
   return '<div class="om-gauge"><svg viewBox="0 0 '+size+' '+size+'" width="'+size+'" height="'+size+'">'
-    +'<circle cx="'+R+'" cy="'+R+'" r="'+r+'" fill="none" stroke="#12354a" stroke-width="5"/>'
+    +'<circle cx="'+R+'" cy="'+R+'" r="'+r+'" fill="none" stroke="#dde8f1" stroke-width="5"/>'
     +'<circle cx="'+R+'" cy="'+R+'" r="'+r+'" fill="none" stroke="'+VIZ.line+'" stroke-width="5"'
       +' stroke-linecap="round" stroke-dasharray="'+(C*pct/100).toFixed(1)+' '+C.toFixed(1)+'"'
       +' transform="rotate(-90 '+R+' '+R+')"/>'
@@ -192,7 +196,7 @@ var OMAP = {
 };
 
 /* ---------- 地图绘制 ---------- */
-function omMapSvg(w,h){
+function omMapSvg(w,h,box){
   var keep={latTop:VIEW.latTop,latSpan:VIEW.latSpan,anchorLon:VIEW.anchorLon,stretch:VIEW.stretch};
   VIEW.latTop=OMAP.view.latTop; VIEW.latSpan=OMAP.view.latSpan;
   VIEW.anchorLon=OMAP.view.anchorLon; VIEW.stretch=OMAP.view.stretch;
@@ -233,7 +237,8 @@ function omMapSvg(w,h){
     return false;
   }
   var dots='';
-  var N=Math.max(600,Math.min(4200,Math.round(w*h/320)));
+  var lit=getComputedStyle(box).getPropertyValue('--map-settle')||'';
+  var N = lit.trim()==='0' ? 0 : Math.max(600,Math.min(4200,Math.round(w*h/320)));
   for(var i=0;i<N;i++){
     var dx=rnd(i+1)*w, dy=rnd(i+97.3)*h;
     if(!inLand(dx,dy)||inLake(dx,dy)) continue;
@@ -322,12 +327,14 @@ function omMapSvg(w,h){
 function omDefs(){
   return '<defs>'
     +'<linearGradient id="omLand" x1="0.1" y1="0" x2="1" y2="1">'
-      +'<stop offset="0" stop-color="#1e5878"/><stop offset=".5" stop-color="#14415e"/>'
-      +'<stop offset="1" stop-color="#0c2c44"/></linearGradient>'
+      +'<stop offset="0" style="stop-color:var(--map-land-1)"/>'
+      +'<stop offset=".5" style="stop-color:var(--map-land-2)"/>'
+      +'<stop offset="1" style="stop-color:var(--map-land-3)"/></linearGradient>'
     +'<linearGradient id="omSea" x1="0" y1="0" x2="0.6" y2="1">'
-      +'<stop offset="0" stop-color="#04203a"/><stop offset="1" stop-color="#01070e"/></linearGradient>'
+      +'<stop offset="0" style="stop-color:var(--map-sea-1)"/>'
+      +'<stop offset="1" style="stop-color:var(--map-sea-2)"/></linearGradient>'
     +'<pattern id="omHatch" width="7" height="7" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">'
-      +'<line x1="0" y1="0" x2="0" y2="7" stroke="#4fe4fa" stroke-width="1.2" stroke-opacity=".34"/></pattern>'
+      +'<line x1="0" y1="0" x2="0" y2="7" style="stroke:var(--map-hatch)" stroke-width="1.2" stroke-opacity=".5"/></pattern>'
     +'<symbol id="omBoat" viewBox="-12 -9 24 18" width="24" height="18" x="-12" y="-9">'
       +'<path d="M-9 3 L9 3 L6.5 7 L-6.5 7 Z" fill="#eafcff"/>'
       +'<path d="M-6 -1 H5 L7 2.4 H-8 Z" fill="#9fe8ff"/>'
@@ -421,16 +428,16 @@ function omMarkup(){
         return '<div class="om-tile"><i>'+omEsc(t[3])+'</i><b>'+omEsc(t[1])+'<em>'+omEsc(t[2])+'</em></b>'
           +'<span>'+omEsc(t[0])+'</span></div>';
       }).join('') +'</div>');
-  s+=omPanel('今日预警趋势','条 · 每 2 小时', areaChart(OM.trend,300,104));
+  s+=omPanel('今日预警趋势','条 · 每 2 小时', areaChart(OM.trend,300,86));
   s+=omPanel('核心指标达成','%','<div class="om-gauges">'
-    + OM.gauges.map(function(g){ return gauge(g[0],g[1],50); }).join('') +'</div>');
+    + OM.gauges.map(function(g){ return gauge(g[0],g[1],44); }).join('') +'</div>');
   s+=omPanel('平台能力架构','自下而上贯通','<div class="om-arch">'
     + OM.arch.map(function(a,i){
         return '<div class="om-layer"><div class="om-layer-h"><b>'+omEsc(a.n)+'</b><em>'+omEsc(a.v)+'</em></div>'
           +'<p>'+omEsc(a.c)+'</p></div>'
           + (i<OM.arch.length-1?'<div class="om-flow"><i style="animation-delay:'+(i*0.3).toFixed(1)+'s"></i></div>':'');
       }).join('') +'</div>');
-  var pool='<div class="om-mix">'+donut(OM.pool.items,OM.pool.total,OM.pool.unit+' 本月',100)
+  var pool='<div class="om-mix">'+donut(OM.pool.items,OM.pool.total,OM.pool.unit+' 本月',92)
     +'<div class="om-mix-l">'
     + OM.pool.items.map(function(p){
         var pct=(p[1]/(OM.pool.items[0][1]+OM.pool.items[1][1])*100).toFixed(1);
@@ -476,7 +483,7 @@ function omDrawMap(){
     box.innerHTML='<img class="om-map-photo" alt="江苏近海监管一张图" '
       +'src="data:image/jpeg;base64,'+MAP_IMG_B64+'"/>'+omMapOverlay();
   } else {
-    box.innerHTML=omMapSvg(w,h)+omMapOverlay();
+    box.innerHTML=omMapSvg(w,h,box)+omMapOverlay();
   }
 }
 var omT0=Date.now();

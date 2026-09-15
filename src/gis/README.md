@@ -13,6 +13,8 @@
 | `gis-layers.js` | 禁捕区、航道、气象、航线、目标船雷达、渔船、执法船艇 |
 | `gis-onemap.js` | 平台一张图：总览数据、版面、进出工作区 |
 | `gis-onemap.css` | 平台一张图样式 |
+| `gen-light.py` | 读页面自带的深色样式表，反推出浅色覆盖规则，写成 `assets/light-auto.css` |
+| `gis-light.css` | 手写的浅色覆盖与放大字号，叠在自动生成的那层之后；含 `@media print` |
 | `gis-radar.js` | 雷达态势视图：极坐标目标数据、雷达盘、双光通道、扫描动画 |
 | `gis-radar.css` | 雷达视图样式 |
 | `gen-channels.py` | 从页面内嵌实拍图生成两路光电通道画面 |
@@ -263,3 +265,70 @@ python3 src/gis/gen-channels.py 源单页.html
 配合 `.om-body{grid-template-rows:minmax(0,1fr)}` 与
 `.om-mods{grid-auto-rows:minmax(0,1fr)}`（`1fr` 的行不会缩到 min-content 以下），
 1280×720 至 2560×1440 全部一屏无滚动条。矮屏另有 `@media(max-height:830px)` 压缩版。
+
+## 浅色主题（打印/投影）
+
+原来整个 demo 是深蓝驾驶舱配色，打印出来一片暗、字也小。这一版改成浅蓝底、深墨字，
+字号整体上调一档，**版面结构与交互一行没动**。
+
+### 为什么不手改
+
+页面自带的那张样式表有 777 条规则、169 种背景色、247 种文字色，全是手写的深色十六进制，
+逐条翻一遍既不现实也留不住。所以拆成两层：
+
+| 层 | 文件 | 谁写的 |
+| --- | --- | --- |
+| 自动 | `assets/light-auto.css`（334 条） | `gen-light.py` 读页面自带的深色规则反推 |
+| 手写 | `gis-light.css`（139 行） | 容器、广播文字规则、导航、按钮、自带 GIS 覆盖层、打印 |
+
+两层都由 `build.py` 在最后注入，自动层在前、手写层在后——同特指度下靠文档顺序取胜。
+`light-auto.css` 是**构建产物**，`build.py` 每次都按当前输入 HTML 重新生成
+（早先复用上一个输入留下的旧文件，换 base 后有一批规则对不上）。
+
+### `gen-light.py` 的两个关键点
+
+**一、按花括号深度切块，不能用正则切 `@media`。**
+第一版用 `re.split(r'@media[^{]*{')` 分段，结果把媒体块**之后**的所有规则一起裹进了
+那个媒体查询里——大屏下整段失效。用 CSSOM 数出来 843 条规则却找不到 `.lawMatch`
+才定位到。现在 `split_rules()` 逐字符走深度，返回 `(选择器, 声明, 所属媒体)` 三元组。
+
+**二、CSS 变量按「变量名」判角色，不能只看亮度。**
+`--red:#ff5b68` 的相对亮度是 0.299，刚好掉到 0.30 的「这是背景色」阈值下面，
+被当成面翻成了淡粉；`--muted` 同样被判成面翻成浅蓝。两处都把语义丢了。改成先看名字：
+
+```python
+if any(k in name for k in ('bg','panel','surface','line','border','edge','track')):
+    return map_background(value)
+return map_color(value)
+```
+
+另外：解析前先剥掉 `/* ... */`，否则注释内容会跟进选择器；生成器要同时读裸 `<style>`
+和 `<style id="v10?-real-gis-style">` 两张表（只读前者时自带 GIS 覆盖层还是深的）。
+
+### 配色过了 `dataviz` 的校验
+
+语义三色 `#b82a62` / `#a06b02` / `#1565a8` 六项全过：色盲模拟 ΔE 10.4、常视 ΔE 19.0、
+对白底对比度 ≥3:1。中间被打回两次：
+
+- 第一次语义色只到 2.8–2.99:1，`darken_keep_hue` 的目标亮度从 0.40 压到 0.33 才过线；
+- 第二次主按钮文字看不见——我把 `.primary` 写进了「文字改深墨色」那条广播规则里，
+  字色等于底色。去掉后另加一条特指度更高的实心按钮规则：
+
+```css
+.shell button.primary,.shell .primary,...{
+  background:linear-gradient(135deg,#0b6ea8,#118aa8)!important;color:#fff!important}
+```
+
+一张图的地图渐变改成读 `var(--map-land-1)` 等 token；`--map-settle:0` 让浅色下不画夜灯。
+
+### 打印
+
+`@media print` 里 `@page{size:A4 landscape;margin:8mm}`，全局 `print-color-adjust:exact`
+（否则浏览器会把浅色底再洗一遍），阴影/毛玻璃/动画全关，`.om-wrap` 从定位布局退回
+静态流、高度交给内容，卡片加 `break-inside:avoid`，缩放与「进入工作区」按钮不打印。
+
+### 字号与代价
+
+正文 13→15px、KPI 数字 →26px、页标题 →22px、标注 11px 起。一张图右栏因此变高，
+趋势图 104→86、仪表 50→44、池塘环 100→92 压回来一部分，但**1920×1080 以下右栏要滚动**，
+1920×1080 正好一屏。汇报投影按 1920×1080 出，打印走上面的横向 A4。
