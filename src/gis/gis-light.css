@@ -1,17 +1,26 @@
 /* ===== 浅色主题覆盖：把页面自带的深色驾驶舱改成浅蓝底 =====
    页面自带样式 777 条规则、169 种背景、247 种文字色，全是手写深色十六进制。
-   这里不逐条重写，而是：
-     1. 主要容器（shell / header / aside / card / kpi / title / 表格 / 抽屉）显式改浅；
-     2. 文字用一条广播规则统一压到深墨色，再把语义色（红/橙/绿/青）单独还原；
-     3. 字号整体上调一档，投影与打印都能看清。
-   本表由 build.py 最后注入，同特指度下靠文档顺序取胜。 */
+   不逐条重写，而是：
+     1. gen-light.py 先自动铺一层机械映射（assets/light-auto.css）；
+     2. 本表叠在其后做设计层——层次、语义色、以及**机械映射必然做错的那几类**。
+   本表由 build.py 最后注入，同特指度下靠文档顺序取胜。
+
+   机械映射做错的三类，全部在这里纠回来：
+     A. 摄像头画面 / 会场 / 取证照 / 假视频墙——这些是「屏幕」，不是界面。
+        翻白之后压在上面的白字全看不见，光效也没了。一律留深底。
+     B. 雷达盘这种靠渐变画出来的可视化，background 被整条替换后只剩一块白板。
+        要重画一套浅色的环与扫描线。
+     C. 语义色（红橙绿青）按亮度会被误判成面色，翻成淡粉淡黄。按名字/类名还原。 */
 
 :root{
-  --lt-ground:#e7eff7; --lt-surface:#ffffff; --lt-surface-2:#f2f7fc;
-  --lt-edge:#bed4e6; --lt-edge-2:#d8e6f2;
-  --lt-ink:#0d2b44; --lt-ink-2:#3b647e; --lt-ink-3:#6b8ba0;
-  --lt-accent:#0b6ea8;
+  /* 底比面更蓝、更深一档：原来 #e7eff7 和纯白几乎同值，卡片浮不起来，整屏发灰 */
+  --lt-ground:#d7e6f3; --lt-ground-2:#cadcec;
+  --lt-surface:#ffffff; --lt-surface-2:#eef5fb; --lt-surface-3:#e3eef8;
+  --lt-edge:#bcd3e6; --lt-edge-2:#d9e6f2; --lt-edge-strong:#9dbdd6;
+  --lt-ink:#0c2a42; --lt-ink-2:#3a6480; --lt-ink-3:#5e7f95;
+  --lt-accent:#0b6ea8; --lt-accent-2:#0d7f92; --lt-accent-soft:#dbeaf6;
   --lt-red:#b82a62; --lt-amber:#a06b02; --lt-green:#0f7a43;
+  --lt-shadow:0 1px 2px #0c2a4212,0 6px 18px #0c2a420d;
 }
 
 /* ---- 底与主要容器 ---- */
@@ -19,17 +28,33 @@ html,body,#root{background:var(--lt-ground)!important}
 body{color:var(--lt-ink);font-size:15px;line-height:1.5}
 .shell{background:var(--lt-ground)!important}
 header{background:var(--lt-surface)!important;border-bottom:1px solid var(--lt-edge)!important;
-  box-shadow:0 1px 6px #0d2b4414!important}
+  box-shadow:0 1px 0 #ffffff,0 2px 10px #0c2a4214!important}
 aside{background:var(--lt-surface)!important;border-right:1px solid var(--lt-edge)!important}
-.card,.kpi,.modulekpis>div,.drawer,.actionDialog,.moduleside,.moduletable{
-  background:var(--lt-surface)!important;border-color:var(--lt-edge)!important;
-  box-shadow:0 1px 3px #0d2b440f!important}
-.kpi,.modulekpis>div{background:var(--lt-surface-2)!important}
-.title,.moduletitle,.panelHead,.aiHead,.righttabs,.tablehead,.sceneTop,.aiTop,.emTop{
-  background:var(--lt-surface-2)!important;border-color:var(--lt-edge-2)!important}
-.tablerow{border-bottom:1px solid var(--lt-edge-2)!important}
+
+/* 卡片：白面 + 实边 + 一点点投影，才和蓝底分得开 */
+.card,.drawer,.actionDialog,.moduleside,.moduletable,.aiScene,.inference,
+.emPanel,.casePanel,.portPanel,.opsPanel{
+  background:var(--lt-surface)!important;border:1px solid var(--lt-edge)!important;
+  border-radius:8px!important;box-shadow:var(--lt-shadow)!important}
+
+/* 卡片的「帽子」：浅蓝带 + 一条实底边，每块内容有头有身 */
+.title,.moduletitle,.panelHead,.aiHead,.righttabs,.tablehead,.sceneTop{
+  background:var(--lt-surface-2)!important;
+  border-bottom:1px solid var(--lt-edge)!important;border-top:0!important;
+  border-left:0!important;border-right:0!important}
+.tablerow{border-bottom:1px solid var(--lt-edge-2)!important;background:transparent!important}
 .tablerow:hover,.tablerow.selected,.objectList>button.on,.inferenceList button.on,
-.resourceList button.on,.alertlist>button.selected{background:#e4eef7!important}
+.resourceList button.on,.alertlist>button.selected,.feedList button.on,.scanText p.on{
+  background:var(--lt-accent-soft)!important;box-shadow:inset 3px 0 var(--lt-accent)!important}
+
+/* KPI：字号调大后 92px 的盒子装不下，放开高度 */
+.kpi,.modulekpis>div,.videoStats span{
+  background:linear-gradient(180deg,#ffffff,var(--lt-surface-2))!important;
+  border:1px solid var(--lt-edge)!important;border-radius:8px!important;
+  box-shadow:var(--lt-shadow)!important;height:auto!important;min-height:106px}
+.videoStats span{min-height:0;height:62px!important}
+.kpi>i,.summary>i,.resourceList>button>i,.coremodules>button>i,.person>i,.sensorgrid i{
+  background:var(--lt-accent-soft)!important;color:var(--lt-accent)!important}
 
 /* ---- 文字：统一压深，再还原语义色 ---- */
 .shell,.shell :is(div,section,li,td,th,dt,dd){color:var(--lt-ink)}
@@ -38,102 +63,185 @@ aside{background:var(--lt-surface)!important;border-right:1px solid var(--lt-edg
 .shell :is(input,textarea,select){background:var(--lt-surface)!important;
   border:1px solid var(--lt-edge)!important;color:var(--lt-ink)!important}
 .shell ::placeholder{color:var(--lt-ink-3)!important}
-/* 强调与语义色还原（放在广播规则之后） */
 .shell :is(.link,.title span.link,.aiPulse b){color:var(--lt-accent)!important}
-.shell :is(.redCode,.rp.danger,.ship.danger,.hot,.lv1) ,
+.shell :is(.redCode,.rp.danger,.ship.danger,.hot,.lv1),
 .shell :is(i.紧急,.tablerow .hot){color:var(--lt-red)!important}
-.shell .greenCode,.shell .demoReceipt,.shell .receipt{color:var(--lt-green)!important}
+.shell .greenCode{color:var(--lt-green)!important}
 .shell em{color:var(--lt-ink-2)}
+.shell :is(.sidefoot b,.opsfoot b,.statusOk,.receipt,.demoReceipt){color:var(--lt-green)!important}
+.sidefoot div b{color:var(--lt-green)!important}
 
 /* ---- 侧栏导航 ---- */
-aside nav button{color:var(--lt-ink-2)!important;font-size:15px!important}
-aside nav button.active{background:#dceaf6!important;color:var(--lt-accent)!important;
-  box-shadow:inset 3px 0 var(--lt-accent)!important}
+aside nav button{color:var(--lt-ink-2)!important;font-size:15px!important;
+  border-radius:0 6px 6px 0!important}
+aside nav button.active{background:var(--lt-accent-soft)!important;color:var(--lt-accent)!important;
+  box-shadow:inset 3px 0 var(--lt-accent)!important;font-weight:600}
 aside nav button:hover:not(.active){background:#eef4fa!important}
-.sidefoot,.sidefoot>div{background:var(--lt-surface-2)!important;border-color:var(--lt-edge-2)!important}
+.sidefoot,.sidefoot>div{background:var(--lt-surface-2)!important;
+  border:1px solid var(--lt-edge-2)!important;border-radius:6px!important}
 
 /* ---- 按钮 ---- */
 .pagehead button,.moduletitle button,.filters button,.seg button,.righttabs button,
-.defensebar button,.coremodules button{
+.defensebar button,.coremodules button,.videoActions button,.talkbar button,
+.draweractions button,.videocontrol button,.person>button,.panelHead>button{
   background:var(--lt-surface)!important;border:1px solid var(--lt-edge)!important;
-  color:var(--lt-ink-2)!important}
+  color:var(--lt-ink-2)!important;border-radius:6px!important}
 .shell button.primary,.shell .primary,.pagehead button.primary,.moduletitle button.primary,
 .videoActions .primary,.talkbar .primary,.draweractions .primary{
-  background:linear-gradient(135deg,#0b6ea8,#118aa8)!important;border-color:#0b6ea8!important;
-  color:#fff!important}
+  background:linear-gradient(135deg,#0b6ea8,#118aa8)!important;border-color:#0a6294!important;
+  color:#fff!important;box-shadow:0 1px 2px #0b6ea833!important}
 .shell button.primary *,.shell .primary *{color:#fff!important}
-.filters button.on,.seg button.on,.righttabs button.on,.defensebar button.on{
-  background:#dceaf6!important;border-color:var(--lt-accent)!important;color:var(--lt-accent)!important}
+.filters button.on,.seg button.on,.righttabs button.on,.defensebar button.on,
+.coremodules button:hover,.feedList button.on{
+  background:var(--lt-accent-soft)!important;border-color:var(--lt-accent)!important;
+  color:var(--lt-accent)!important}
+.righttabs button.on{box-shadow:inset 0 -2px var(--lt-accent)!important}
 
 /* ---- 表格与列表 ---- */
-.tablehead{color:var(--lt-ink-3)!important;font-size:12px!important}
+.tablehead{color:var(--lt-ink-3)!important;font-size:12px!important;letter-spacing:.04em}
 .tablerow{color:var(--lt-ink)!important;font-size:13px!important}
-.alertlist>button{color:var(--lt-ink)!important}
+.alertlist>button{color:var(--lt-ink)!important;border-bottom:1px solid var(--lt-edge-2)!important}
+/* 选中行底色变浅蓝后，行内那批灰字只剩 2.94:1。带类名的（状态色）不动。 */
+.shell .tablerow :is(span,small,em,i,p):not([class]){color:var(--lt-ink-2)!important}
+.summary,.selecteddetail,.receipt,.process span,.modelFlow span,.reasonSteps>div,
+.sensorgrid>div,.infoGrid,.autoActions p,.log p,.commandBox,.profile p{
+  background:var(--lt-surface-2)!important;border-color:var(--lt-edge-2)!important}
+.infoGrid{background:var(--lt-edge-2)!important}
+.selecteddetail{border-left:2px solid var(--lt-accent)!important}
+.receipt{border-left:2px solid var(--lt-green)!important;background:#e2f3ea!important}
 
-/* ---- 字号整体上调一档（原 8~11px 在投影和打印上偏小） ---- */
+/* ---- 字号整体上调一档（原 7~11px 在投影和打印上偏小） ---- */
 .shell{font-size:15px}
-.title span,.moduletitle span,.panelHead span,.pagehead p{font-size:12.5px!important}
-.title b,.moduletitle b,.panelHead b{font-size:15px!important}
-.kpi b,.modulekpis b{font-size:26px!important}
-.kpi span,.modulekpis span{font-size:13px!important}
-.kpi small,.modulekpis small{font-size:11.5px!important}
+.title span,.moduletitle span,.panelHead span,.pagehead p,.aiHead span{font-size:12.5px!important}
+.title b,.moduletitle b,.panelHead b,.aiHead b{font-size:15px!important}
+.kpi p b,.modulekpis b{font-size:26px!important}
+.kpi>div>span,.modulekpis span{font-size:13px!important}
+.kpi p em,.kpi small,.modulekpis small{font-size:11.5px!important}
 .pagehead h2{font-size:22px!important}
 .defensebar b{font-size:12.5px!important}
 .defensebar span{font-size:10.5px!important}
 .maplayers,.legend,.popup small{font-size:11px!important}
 .coremodules b{font-size:12.5px!important}
 .coremodules span{font-size:10px!important}
+.scanText p,.modelFlow span{font-size:12px!important}
+/* 顶部四个统计条：数字是主角，别跟着小字一起缩 */
+.videoStats span b{font-size:22px!important}
+.videoStats span small,.videoStats span i{font-size:12px!important}
+.tablehead,.reasonSteps span,.autoActions p{font-size:12px!important}
+.feedList button b{font-size:13px!important}
+.feedList button span{font-size:11.5px!important}
+.rp{font-size:12px!important}
+.rp b{font-size:10px!important}
 
 /* ---- 六防条 / 图例等小构件 ---- */
-.defensebar button>i{background:#dceaf6!important;color:var(--lt-accent)!important}
-.defensebar button.red i{background:#f6d9e4!important;color:var(--lt-red)!important}
-.defensebar button.orange i{background:#f6e7c8!important;color:var(--lt-amber)!important}
-.defensebar button.green i{background:#d8efe2!important;color:var(--lt-green)!important}
+.defensebar button>i{background:var(--lt-accent-soft)!important;color:var(--lt-accent)!important}
+.defensebar button.red i{background:#f7dbe6!important;color:var(--lt-red)!important}
+.defensebar button.orange i{background:#f7e8cb!important;color:var(--lt-amber)!important}
+.defensebar button.green i{background:#d9efe3!important;color:var(--lt-green)!important}
 
-/* ---- 自带 GIS 覆盖层（v10x-real-gis）也转浅 ---- */
-.mapcard .map.js-real-gis{background:#d3e5f3!important}
-.real-gis-overlay{background:linear-gradient(120deg,#dbeaf6,#cfe2f1 56%,#c6dcee)!important}
-.real-gis-overlay .land-fill{fill:#e8ecdf!important;stroke:#7aa8c6!important}
-.real-gis-overlay .coast-glow{fill:#dfe6d6!important;stroke:#4a86ab!important;filter:none!important}
-.real-gis-overlay .county-line{stroke:#a9c4d6!important}
-.real-gis-overlay .map-label,.real-gis-overlay .sea-name{fill:#5a8fb5!important}
-.real-gis-overlay .city-name{fill:#0d2b44!important}
+/* =====================================================================
+   A. 媒体面：摄像头画面、视频墙、会场、取证照——一律留深底
+   机械映射把它们翻成了白，结果压在画面上的白字全瞎了（驾驶舱那张照片上
+   「驾驶舱01·船岸对讲」深蓝字压在亮木纹上，完全读不出来）。
+   ===================================================================== */
+.mainFeed,.videowall,.videos,.video,.evidenceMedia,.conferenceMain,.conferenceTiles>div{
+  background:#0a1b28!important;border-color:#2c5f7c!important}
+.videos{background:#050e16!important}
+.video{background:linear-gradient(155deg,#17303f 0 35%,#254050 36% 52%,#0c1d29 53%)!important}
+.video.v1{background:linear-gradient(160deg,#1b3445 0 40%,#637b83 41% 46%,#15242e 47%)!important}
+.video.v2{background:radial-gradient(circle at 62% 45%,#873c31 0 3%,transparent 4%),
+  linear-gradient(135deg,#2c3d42,#15242d)!important}
+.video.v3{background:linear-gradient(170deg,#142d3c 0 45%,#385766 46% 52%,#10232f 53%)!important}
+.video.feed{background:#020a12!important}
+.mainFeed{border:1px solid #2c5f7c!important}
+/* 画面上的字回到白，并压一层暗角，保证压在亮照片上也读得出 */
+.shell :is(.mainFeed,.evidenceMedia,.conferenceMain,.conferenceTiles,.video,.videowall)
+  :is(b,strong,span,small,em,i,p,div){color:#eaf4fb!important;text-shadow:0 1px 3px #00131fcc}
+.shell .mainFeed .feedInfo span,.shell .video.feed span{color:#7fe8c4!important}
+.shell .mainFeed .feedInfo em,.shell .video.feed small{color:#bcd9e8!important}
+.mainFeed .feedInfo{background:linear-gradient(transparent,#03131fd9 60%)!important;
+  left:0!important;right:0!important;bottom:0!important;padding:26px 16px 12px!important}
+.evidenceMedia>div,.speaker,.conferenceTiles>div>span,.videowall .videos+*{
+  background:#04131fdb!important;border-color:#3a7a94!important}
+.speaker{border-left:2px solid #42d2df!important}
+/* 会场里的单位头像是浅色圆片，不能跟着画面文字一起转白 */
+.shell :is(.conferenceTiles,.conferenceMain) i:not([class]),
+.shell :is(.conferenceTiles,.conferenceMain) .avatar{
+  background:#0b6ea8!important;color:#fff!important;text-shadow:none!important}
+/* 画面上的红色徽标：机械映射翻成了淡粉，压白字更看不见 */
+/* 取证照上的 ● REC 原本是红的，被上面那条「画面上的字一律转白」盖掉了 */
+.shell .evidenceMedia b{color:#ff7a88!important}
+.liveBadge,.meetingTag,.video>i,.video.feed i{
+  background:#c0223f!important;color:#fff!important;text-shadow:none!important}
+.shell :is(.liveBadge,.meetingTag,.video>i){color:#fff!important}
+.callOverlay{background:#ffffffef!important;border:1px solid var(--lt-edge)!important;
+  border-radius:6px!important;box-shadow:0 4px 16px #00131f40!important}
+.shell .callOverlay :is(b,strong){color:var(--lt-ink)!important;text-shadow:none!important}
+.shell .callOverlay :is(span,small,i){color:var(--lt-ink-2)!important;text-shadow:none!important}
+.shell .callOverlay i{color:var(--lt-green)!important}
+
+/* =====================================================================
+   B. 雷达盘：原来靠三层 gradient 画环和中轴，background 被整条替换后
+   只剩一块白板，五个目标浮在空白里。这里重画一套浅色的。
+   ===================================================================== */
+.radar{background:
+  repeating-radial-gradient(circle at center,transparent 0 40px,#6ba7cc55 41px 42px),
+  linear-gradient(90deg,transparent 49.8%,#4a8cb366 50%,transparent 50.2%),
+  linear-gradient(0deg,transparent 49.8%,#4a8cb366 50%,transparent 50.2%),
+  radial-gradient(circle at center,#e8f2fa 0%,#d2e4f2 62%,#c2d9ec 100%)!important;
+  border:1px solid var(--lt-edge)!important}
+.radar:after{background:conic-gradient(from 0deg,transparent 0 335deg,
+  #0b6ea833 350deg,transparent 360deg)!important}
+.radar>i{background:var(--lt-accent)!important;box-shadow:0 0 14px #0b6ea888!important}
+.rp{color:var(--lt-green)!important;font-weight:600}
+.rp.warn{color:var(--lt-amber)!important}
+.rp.danger{color:var(--lt-red)!important}
+.shell .rp b{color:inherit!important}
+.scanText{background:var(--lt-surface)!important}
+.scanText p{border-bottom:1px solid var(--lt-edge-2)!important}
+.shell .scanText p.on,.shell .scanText p.on :is(b,i,span){color:#0a5f6e!important}
+.modelFlow{border-top:1px solid var(--lt-edge)!important}
+
+/* ---- 自带 GIS 覆盖层（v10x-real-gis）：海要有海的样子，别一片灰 ---- */
+.mapcard .map.js-real-gis{background:#cbe0f0!important}
+.real-gis-overlay{background:linear-gradient(120deg,#d6e8f6,#c6dcee 56%,#b7d2e8)!important}
+.real-gis-overlay .land-fill{fill:#e9edde!important;stroke:#6b9fc0!important}
+.real-gis-overlay .coast-glow{fill:#e0e7d4!important;stroke:#3d7ba2!important;filter:none!important}
+.real-gis-overlay .county-line{stroke:#9dbbd0!important}
+.real-gis-overlay .map-label,.real-gis-overlay .sea-name{fill:#3f7da6!important}
+.real-gis-overlay .city-name{fill:#0c2a42!important}
 .real-gis-overlay .city-dot{fill:#0b6ea8!important;filter:none!important}
 .real-gis-overlay .coord{fill:#6b8ba0!important}
-.real-gis-overlay .zone{fill:#1565a81a!important;stroke:#1565a8!important}
+.real-gis-overlay .zone{fill:#1565a81f!important;stroke:#1565a8!important}
 .real-gis-overlay .zone-label{fill:#0d4f7c!important}
-.real-gis-overlay .route-base{stroke:#7aa8c6!important}
-.real-gis-overlay .route-flow{stroke:#1571b8!important;filter:none!important}
+.real-gis-overlay .route-base{stroke:#6b9fc0!important}
+.real-gis-overlay .route-flow{stroke:#0f5f9e!important;filter:none!important;stroke-width:2!important}
 .real-gis-overlay .route-node,.real-gis-overlay .target-core{fill:#0b6ea8!important;filter:none!important}
-.real-gis-overlay .scan-ring{stroke:#1571b8!important}
-.real-gis-overlay .target-label{fill:#0d2b44!important}
-.real-gis-overlay .target-sub,.real-gis-overlay .vessel-speed{fill:#3b647e!important}
-.real-gis-overlay .vessel-name{fill:#0d2b44!important}
+.real-gis-overlay .scan-ring{stroke:#0f5f9e!important}
+.real-gis-overlay .target-label{fill:#0c2a42!important}
+.real-gis-overlay .target-sub,.real-gis-overlay .vessel-speed{fill:#3a6480!important}
+.real-gis-overlay .vessel-name{fill:#0c2a42!important}
 .real-gis-overlay .fish-vessel{fill:#0f7a43!important;filter:none!important}
 .gis-chip,.gis-float-status,.gis-bottom,.gis-vessel-card{
-  background:#ffffffe8!important;border-color:var(--lt-edge)!important;color:var(--lt-ink-2)!important;
-  box-shadow:0 1px 4px #0d2b4414!important}
+  background:#ffffffee!important;border:1px solid var(--lt-edge)!important;color:var(--lt-ink-2)!important;
+  box-shadow:0 2px 8px #0c2a421f!important;border-radius:6px!important}
 .gis-chip b,.gis-float-status strong,.gis-vessel-card strong{color:var(--lt-ink)!important}
+.gis-vessel-card em{background:#f7dbe6!important;color:#8f1f4c!important}
+.gis-vessel-card button,.gis-chip button{color:var(--lt-accent)!important}
+.gis-vessel-card .card-actions{border-top-color:var(--lt-edge-2)!important}
+.rd-card-x{background:var(--lt-surface-2)!important;border-color:var(--lt-edge)!important;
+  color:var(--lt-ink-2)!important}
 
 /* ---- 打印：铺满纸面、去掉阴影与毛玻璃、强制浅底 ---- */
 @media print{
   @page{size:A4 landscape;margin:8mm}
-  html,body,#root,.shell,.om-wrap{background:#fff!important}
+  html,body,#root,.shell{background:#fff!important}
   *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;
-    box-shadow:none!important;backdrop-filter:none!important;text-shadow:none!important}
-  .om-wrap{position:static!important;height:auto!important}
-  .om-root{height:auto!important}
-  .om-body{height:auto!important}
-  .om-p,.om-modbar,.card,.kpi{break-inside:avoid;page-break-inside:avoid}
+    box-shadow:none!important;backdrop-filter:none!important}
+  aside,header{box-shadow:none!important}
+  .card,.kpi,.modulekpis>div{break-inside:avoid;page-break-inside:avoid}
+  .radar:after,.route-flow,.scan-ring,.aiPulse{animation:none!important}
+  /* --onemap 构建才有的那层，普通构建里不存在，留着不碍事 */
+  .om-wrap,.om-root,.om-body{position:static!important;height:auto!important;background:#fff!important}
   .om-enter,.om-back,.om-zoom,.om-nav{display:none!important}
-  .om-route,.om-zone,.om-boat-halo,.om-flow i,.om-live i{animation:none!important}
 }
-
-/* ---- 自带 GIS 卡片里的徽标与按钮（原为深底浅字） ---- */
-.gis-vessel-card em{background:#f6d9e4!important;color:#96204f!important}
-.gis-vessel-card button,.gis-chip button{color:#0b6ea8!important}
-.gis-vessel-card .card-actions{border-top-color:var(--lt-edge-2)!important}
-.rd-card-x{background:#f2f7fc!important;border-color:var(--lt-edge)!important;color:#3b647e!important}
-/* 状态小字统一压到过 3:1 的深度 */
-.shell :is(.sidefoot b,.opsfoot b,.statusOk,.receipt,.demoReceipt){color:#0f7a43!important}
-.sidefoot div b{color:#0f7a43!important}
