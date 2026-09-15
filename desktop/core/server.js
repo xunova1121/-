@@ -2071,7 +2071,7 @@ export function createServer({ lan = false } = {}) {
        * 整套界面代码一起放出去，那不是同一件事。
        */
 
-      const SHARED_MODULES = ['/previz-canvas.js', '/previz-stage.js', '/site-canvas.js', '/previz.js', '/three.js', '/three.core.js', '/three-gltf-loader.js', '/three-orbit-controls.js', '/three-transform-controls.js', '/three-buffer-utils.js', '/three-skeleton-utils.js', '/site.js', '/outline.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js', '/pricing.js', '/estimate.js'];
+      const SHARED_MODULES = ['/previz-canvas.js', '/previz-stage.js', '/site-canvas.js', '/previz.js', '/three.js', '/three.core.js', '/three-gltf-loader.js', '/three-orbit-controls.js', '/three-transform-controls.js', '/three-buffer-utils.js', '/three-skeleton-utils.js', '/site.js', '/outline.js', '/duration.js', '/transitions.js', '/fx.js', '/edit.js', '/seam.js', '/pricing.js', '/estimate.js', '/animatic.js'];
 
       const isShell =
         url.pathname === '/m'

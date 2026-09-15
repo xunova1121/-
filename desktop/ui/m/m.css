@@ -941,3 +941,52 @@ input {
 .req-pair b { color: var(--ink-faint); font-weight: 500; }
 /* 提示词可能几百字：手机上必须能换行，不然整块横着撑出屏幕 */
 .req-pair span { word-break: break-word; }
+
+/* ══════════ 连播预览 ══════════
+   出视频之前最后一道、也是最省钱的一道关。
+   ⚠ 样式是从电脑端那份抄过来再改的，两处不一样，都是为了 390px：
+     · 画面比例跟着项目走（竖屏片子塞进 16:9 会上下留一大片黑）
+     · 控件排成可换行，拇指点得到 */
+.animatic:focus { outline: none; }
+.ani-stage {
+  position: relative; aspect-ratio: var(--ani-ratio, 16 / 9); background: #000;
+  border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  /* 竖屏片子在手机上会很高 —— 压住，别让它把整页顶出去 */
+  max-height: 62vh; margin: 0 auto;
+}
+.ani-media { max-width: 100%; max-height: 100%; display: block; object-fit: contain; }
+.ani-blank { color: var(--ink-faint); font-size: 14px; }
+/* 镜号和时长压在角上：看节奏时要随时知道现在是第几镜 */
+.ani-tag {
+  position: absolute; top: 8px; left: 10px; font-size: 12px;
+  color: #fff; background: rgba(0,0,0,.55); padding: 2px 8px; border-radius: 99px;
+}
+.ani-sub {
+  position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+  max-width: 88%; text-align: center; color: #fff; font-size: 15px; line-height: 1.5;
+  background: rgba(0,0,0,.55); padding: 4px 12px; border-radius: 6px;
+}
+/* 每镜一格，颜色说明它是静帧还是视频 —— 一眼看出还差几镜 */
+.ani-ticks { display: flex; gap: 1px; margin-top: 8px; }
+.ani-tick { height: 6px; border-radius: 2px; background: var(--line); }
+.ani-tick.image { background: var(--beam); opacity: .55; }
+.ani-tick.video { background: var(--good); }
+.ani-bar { height: 8px; border-radius: 4px; background: var(--surface-2); margin-top: 4px; }
+.ani-fill { height: 100%; border-radius: 4px; background: var(--beam); width: 0; }
+/* ⚠ 换行：手机上这一排是按钮 + 时间 + 提示，不换行会横着溢出屏幕 */
+.ani-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+.ani-clock { font-size: 13px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.ani-hint { font-size: 12px; color: var(--ink-faint); margin-top: 6px; line-height: 1.6; }
+
+/* ── 多选 ── */
+/* ⚠ 够大才点得中：44px 是拇指的下限，20px 的小方块在手机上点不准 */
+.shot-pick {
+  position: absolute; top: 8px; right: 8px; z-index: 3;
+  width: 44px; height: 44px; border-radius: 12px;
+  border: none; background: rgba(0,0,0,.55); color: #fff; font-size: 22px;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.shot-pick.on { background: var(--beam); color: #fff; }
+/* 选中的卡片整张要看得出来 —— 只靠角上那个勾，翻起来分不清 */
+.card.shot.picked { outline: 2px solid var(--beam); outline-offset: -2px; }
