@@ -46,6 +46,7 @@
  */
 import * as site from './site.js';
 import { actionContinuityIssues } from './controlmaps.js';
+import * as sing from './sing.js';
 
 const WEIGHT = { blocker: 12, warn: 4, note: 1 };
 
@@ -284,13 +285,39 @@ export function audit(project, { lintResults = [], threshold = 75 } = {}) {
    * 画面在演、嘴在动、**没有声音**。这是所有错里最刺眼的一种，
    * 而它不会让任何一步失败：合成照样成功，成片照样导得出来。
    */
-  const silent = shots.filter((s) => String(s.dialogue || '').trim() && !s.audioPath);
+  // 唱段不配音（声音是歌本身），不算"有台词没配音"
+  const silent = shots.filter((s) => String(s.dialogue || '').trim() && !s.audioPath && !sing.singOf(s));
   if (silent.length) {
     add(items, 'blocker', {
       id: 'missing-voice',
       what: `${silent.length} 镜有台词但没配音（第 ${silent.map((s) => s.index).join('、')} 镜）`,
       why: '画面在演、嘴在动，而那句话没有声音。合成不会因此失败，成片照样导得出来 —— 所以只能靠这里发现。',
       fix: '跑「配音」那一步。'
+    });
+  }
+
+  /**
+   * ── 唱段 ──
+   *
+   * 两种都是"片子出得来、合成也成功、只是嘴和歌对不上"的错 —— 只能靠这里发现。
+   */
+  const sungShots = shots.filter((s) => sing.singOf(s));
+  if (sungShots.length && !sing.songOf(project)) {
+    add(items, 'blocker', {
+      id: 'sing-no-song',
+      what: `第 ${sungShots.map((s) => s.index).join('、')} 镜标成了唱段，但这部片子还没有歌`,
+      why: '唱段出视频要带着那一段歌让模型对口型，合成时也要用这首歌 —— 没有歌，这几镜既出不了视频，成片里也是哑的。',
+      fix: '在「分镜」页传一首唱段用的歌（或在剪辑台传背景音乐）。'
+    });
+  }
+  const staleSing = sungShots.filter((s) => s.videoPath
+    && JSON.stringify(s.videoSing || null) !== JSON.stringify(sing.singOf(s)));
+  if (staleSing.length) {
+    add(items, 'blocker', {
+      id: 'sing-stale',
+      what: `第 ${staleSing.map((s) => s.index).join('、')} 镜的片子不是照着现在这段歌对的口型`,
+      why: '唱段的起止秒改过，或者这一镜是先出了片子才标成唱段的。合成时摆的是现在这段歌，而画面里的嘴是照着另一段（或者根本没照着歌）动的。',
+      fix: '把这几镜的视频重出一次。'
     });
   }
 

@@ -212,6 +212,13 @@ export const CAPABILITIES = [
     mobile: 'ui/m/m.js'
   },
   {
+    id: 'sing',
+    name: '唱段（这一镜是唱的：绑定歌里的一段，照着歌对口型，合成用歌本身）',
+    api: 'PATCH /projects/:id/shots/:sid { sing } · POST /projects/:id/song',
+    pc: 'ui/views/studio.js',
+    mobile: 'ui/m/m.js'
+  },
+  {
     id: 'quality-report',
     name: '成片体检（现在能不能发）',
     api: 'GET /projects/:id/quality',

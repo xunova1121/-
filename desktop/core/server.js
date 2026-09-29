@@ -1060,6 +1060,27 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
       if (!p) return json(res, 404, { error: '项目不存在' });
       return json(res, 200, studio.detachMusic(b));
     }
+    /**
+     * 唱段用的歌。cap:sing
+     * 和背景音乐同一套流式上传（一首歌十几 MB，闷着等没有任何反馈）。
+     */
+    if (b && c === 'song' && !d && method === 'POST') {
+      const body = await readBody(req, 28 * 1024 * 1024);
+      const stream = ndjson(res);
+      req.on('close', () => stream.end());
+      try {
+        const project = await studio.attachSong(b, body, (ev) => stream.send(ev));
+        stream.end({ type: 'finished', project });
+      } catch (err) {
+        stream.end({ type: 'error', message: err.message });
+      }
+      return undefined;
+    }
+    if (b && c === 'song' && !d && method === 'DELETE') {
+      const p = store.read(b);
+      if (!p) return json(res, 404, { error: '项目不存在' });
+      return json(res, 200, studio.detachSong(b));
+    }
 
     if (b && !c && method === 'DELETE') return json(res, 200, { ok: store.remove(b) });
 
@@ -1112,8 +1133,9 @@ async function handleApiInner(req, res, url, { lan = false } = {}) {
     if (b && c === 'shots' && d && !e && method === 'PATCH') {
       const patch = await readBody(req);
       try {
-        const { project, changed } = studio.updateShot(b, d, patch);
-        return json(res, 200, { project, changed });
+        // dropped 要带回去：唱段填了 12 秒这种"没存上"的，界面得能说清楚为什么
+        const { project, changed, dropped } = studio.updateShot(b, d, patch);
+        return json(res, 200, { project, changed, dropped });
       } catch (err) {
         return json(res, 404, { error: err.message });
       }
@@ -1998,7 +2020,12 @@ function estimateRouting() {
       model: r.video?.model,
       durations: videoProvider ? duration.allowedDurations(videoProvider, r.video?.model) : []
     },
-    tts: { provider: r.tts?.provider, model: r.tts?.model }
+    tts: { provider: r.tts?.provider, model: r.tts?.model },
+    sing: {
+      provider: r.sing?.provider,
+      model: r.sing?.model,
+      durations: duration.allowedDurations(providers.getProvider(r.sing?.provider), r.sing?.model)
+    }
   };
 }
 

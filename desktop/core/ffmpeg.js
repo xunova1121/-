@@ -425,6 +425,16 @@ export function planAudio(usable, bgm, { total = 0, loudness = false, duck = tru
     if (Number(bgm.fadeOut) > 0 && total > Number(bgm.fadeOut)) {
       chain.push(`afade=t=out:st=${(total - Number(bgm.fadeOut)).toFixed(2)}:d=${Number(bgm.fadeOut).toFixed(2)}`);
     }
+    /**
+     * 唱段那几段里背景音乐让开（整段静音，不是压低）。
+     *
+     * 唱段的声音就是歌本身；背景音乐往往也是这首歌 —— 不让开的话，
+     * 同一首歌两个位置同时在放。压低也不行：两段旋律错着拍，压多低都听得出来。
+     * `t` 是成片时间：音乐从 0 秒开始铺，窗口也是按成片时间算的。
+     */
+    for (const [a, b] of Array.isArray(bgm.silence) ? bgm.silence : []) {
+      if (Number(b) > Number(a)) chain.push(`volume=0:enable='between(t,${Number(a).toFixed(3)},${Number(b).toFixed(3)})'`);
+    }
     chain.push(FMT);
     parts.push(`[${mi}:a]${chain.join(',')}[bgm]`);
 

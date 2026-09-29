@@ -51,6 +51,7 @@ import * as fx from '../fx.js';
 import * as jobs from '../jobs.js';
 import { renderControls, videoControlPrompt } from './controlmaps.js';
 import { planVideoRecovery, taskQueryOutcome } from './video-recovery.js';
+import * as sing from './sing.js';
 
 export const extractJSON = consistency.extractJSON;
 
@@ -2477,6 +2478,11 @@ const SHOT_EDITABLE = [
    */
   'lineKind',
   /**
+   * 唱段：这一镜唱的是歌里的哪一段（{ from, to } 秒；null = 不是唱段）。
+   * 见 pipeline/sing.js。给 'auto' 的话接在前面最近一个唱段的终点上。
+   */
+  'sing',
+  /**
    * 预演台排位：人站哪、朝哪、机位在哪、什么焦段、怎么运镜。
    *
    * 它是 camera 那个文本字段的**上位替代**：排过位之后，
@@ -2814,6 +2820,16 @@ export function updateShot(projectId, shotId, patch = {}) {
        * 下次读出来是一坨没法用的字符串。规整一遍再存。
        */
       value = previz.normalizeStage(value);
+    } else if (key === 'sing') {
+      /**
+       * 收不下的值**不存、并且说出来**：存一个 12 秒的唱段进去，
+       * 出视频时万相只出 10 秒，后面两秒的歌没有画面对着 —— 到那时才发现就晚了。
+       */
+      const norm = value === 'auto'
+        ? sing.normalizeSing(sing.suggestSing(project.shots, shotId))
+        : sing.normalizeSing(value);
+      if (norm.why) { dropped.push({ id: 'sing', why: `唱段没存上：${norm.why}` }); continue; }
+      value = norm.value;
     } else if (key === 'characters' || key === 'props') {
       // 界面上是一行逗号分隔的文本，中英文逗号和顿号都得认
       value = Array.isArray(value)
@@ -2822,12 +2838,26 @@ export function updateShot(projectId, shotId, patch = {}) {
     } else {
       value = String(value ?? '').trim();
     }
-    const same = key === 'characters' || key === 'props' || key === 'skills' || key === 'variants' || key === 'stage'
-      ? JSON.stringify(value) === JSON.stringify(shot[key] ?? (key === 'variants' ? {} : key === 'stage' ? null : []))
+    const same = key === 'characters' || key === 'props' || key === 'skills' || key === 'variants' || key === 'stage' || key === 'sing'
+      ? JSON.stringify(value) === JSON.stringify(shot[key] ?? (key === 'variants' ? {} : key === 'stage' || key === 'sing' ? null : []))
       : value === shot[key];
     if (same) continue;
     shot[key] = value;
     changed.push(key);
+  }
+
+  /**
+   * 唱段的长度**就是**镜头的长度 —— 两个数各存各的，迟早对不上：
+   * 镜头 4 秒、唱段 3.2 秒，合成时画面按 4 秒切，歌按 3.2 秒摆，后面 0.8 秒是哑的。
+   * 所以唱段一定下来，时长跟着改；同一次里单独改时长的那个值不算数。
+   */
+  const singNow = sing.singOf(shot);
+  if (singNow && (changed.includes('sing') || changed.includes('duration')) && shot.duration !== sing.spanOf(singNow)) {
+    if ('duration' in patch && !('sing' in patch)) {
+      dropped.push({ id: 'duration', why: `这一镜是唱段，时长跟着唱的那一段走（${sing.spanOf(singNow)} 秒）—— 要改长短，改唱段的起止秒` });
+    }
+    shot.duration = sing.spanOf(singNow);
+    if (!changed.includes('duration')) changed.push('duration');
   }
 
   if (changed.length) {
@@ -2838,7 +2868,7 @@ export function updateShot(projectId, shotId, patch = {}) {
     // 手改过的镜头，上一次的一致性分数是对**旧描述**打的，留着会误导。
     // 产物本身不删 —— 用户可能只是修个错别字，没必要把已经出好的图弄没。
     // 时长和衔接关系改的不是画面内容，出好的图还是那张图，分数依然作数
-    if (changed.some((k) => k !== 'duration' && k !== 'link') && shot.consistency) {
+    if (changed.some((k) => k !== 'duration' && k !== 'link' && k !== 'sing') && shot.consistency) {
       shot.consistency = { ...shot.consistency, stale: true };
     }
     store.save(project);
@@ -4402,8 +4432,13 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
    */
   const tier = tiers.tierOf(shot);
   const tierRoute = tiers.routeFor(tier, settings.get('videoTiers'));
-  const providerId = opts.provider || tierRoute?.provider || r.video.provider;
-  const model = opts.model || tierRoute?.model || r.video.model;
+  /**
+   * 唱段压过分级和全局路由（和批量那条路同一个函数）。
+   * 手动指定的模型照样最优先 —— 指定了一个做不了唱段的，适配器会当场说清楚，不会悄悄出一段对不上嘴的片子。
+   */
+  const singPrep = await singPrepFor(project, shot, { onEvent, providerId: opts.provider || null, model: opts.model || null });
+  const providerId = opts.provider || singPrep?.provider || tierRoute?.provider || r.video.provider;
+  const model = opts.model || singPrep?.model || tierRoute?.model || r.video.model;
 
   onEvent?.({ type: 'shot', shotId, status: 'running', message: `第 ${shot.index} 镜重出视频（${providerId} / ${model}）…` });
 
@@ -4467,7 +4502,8 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
         ...bibleRefs.images
       ],
       refVideos: controlVideo ? [controlVideo] : [],
-      duration: shot.duration,
+      duration: singPrep ? singPrep.span : shot.duration,
+      drivingAudioUrl: singPrep?.audioUrl || null,
       /**
        * 优先级：这一次指定 > **这部片子自己的** > 全局设置 > 厂商默认。
        *
@@ -4503,6 +4539,7 @@ export async function regenerateShotVideo(projectId, shotId, opts = {}, onEvent)
       t.videoPrompt = videoPrompt;
       t.videoAt = new Date().toISOString();
       t.videoModelUsed = `${providerId} / ${model}`;
+      t.videoSing = singPrep ? { ...singPrep.sing } : null;
       t.videoResolution = video.resolution || null;
       t.videoRefs = bibleRefs.labels;
       t.controlVideoSent = Boolean(video.refVideosSent);
@@ -5230,6 +5267,61 @@ function seamWhyNot({ shot, prev, next, link, nextLink, seamMode, takesEndFrame,
   return head + how;
 }
 
+/**
+ * ══════════ 唱段这一镜出视频前要做的事 ══════════
+ *
+ * 不是唱段回 null，调用方照原来走。是唱段的话：
+ *
+ *   ① 路由固定换成万相（sing.routeOf）—— 只有它能照着一段歌声对口型。
+ *      镜头分级、全局路由在这里都不算数：路由到一个做不了的模型，
+ *      片子照样出来、钱照样花，只是嘴和歌对不上
+ *   ② 切出歌的那一段。长度按**实际出片的时长**切（见 sing.drivingSegment）
+ *   ③ 传成公网地址 —— 百炼只收公网地址。传不上去就在花钱之前停下
+ *
+ * ⚠ 批量出视频和单镜重出**都走这一个函数**。两条路各写一份的话，
+ * 只修一条等于没修 —— 这个项目里这种事已经出过好几次。
+ */
+async function singPrepFor(project, shot, { onEvent, providerId = null, model = null } = {}) {
+  const s = sing.singOf(shot);
+  if (!s) return null;
+  const song = sing.songOf(project);
+  if (!song || !fs.existsSync(song.path)) {
+    throw new Error(`第 ${shot.index} 镜标成了唱段，但这部片子还没有歌（或歌的文件不在了）—— 先在「分镜」页传一首唱段用的歌，或在剪辑台传背景音乐`);
+  }
+  const route = sing.routeOf((k) => settings.get(k));
+  const useProvider = providerId || route.provider;
+  const useModel = model || route.model;
+  const provider = catalog.getProvider(useProvider);
+  const genSeconds = duration.alignDuration(sing.spanOf(s), duration.allowedDurations(provider, useModel));
+  const seg = sing.drivingSegment(s, genSeconds);
+  /**
+   * 文件名带上起止秒：改了唱哪一段，传上去的就是一个**新地址**。
+   * 同名覆盖的话，厂商那边或者 CDN 缓存着旧的那段歌，模型会照着旧的对口型 —— 而这一点从片子上根本看不出来。
+   * 旧的那几个切片顺手删掉，不然每改一次起点就多一个文件。
+   */
+  const dir = store.assetDir(project.id);
+  const prefix = `${shot.id}.sing-`.replace(/\./g, '_');
+  const cut = path.join(dir, `${prefix}${`${seg.seek.toFixed(2)}-${seg.length.toFixed(2)}`.replace(/\./g, '_')}.mp3`);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const f of fs.readdirSync(dir)) {
+    if (f.startsWith(prefix) && f.endsWith('.mp3') && f !== path.basename(cut)) fs.rmSync(path.join(dir, f), { force: true });
+  }
+  const bin = ffmpeg.locate();
+  if (!bin.available) throw new Error(`第 ${shot.index} 镜是唱段，要用 FFmpeg 切出歌的那一段。${bin.hint}`);
+  await ffmpeg.run(sing.cutArgs(song.path, seg, cut));
+  const audioUrl = await toModelRef(cut, { onEvent });
+  if (!/^https?:\/\//i.test(String(audioUrl || ''))) {
+    throw new Error(`第 ${shot.index} 镜是唱段：歌要传成公网地址，百炼才下载得到，而现在传不上去（多半是没配对象存储）。在「设置 → 对象存储」或「图片上传网关」里配好再出这一镜`);
+  }
+  onEvent?.({
+    type: 'note',
+    shotId: shot.id,
+    message: `第 ${shot.index} 镜是唱段：走 ${useProvider} / ${useModel}，带上歌的第 ${seg.seek}~${(seg.seek + seg.length).toFixed(1)} 秒让它照着对口型`
+      + `（这一镜用 ${sing.spanOf(s)} 秒，片子出 ${genSeconds} 秒，多出来的合成时裁掉）`
+  });
+  return { provider: useProvider, model: useModel, audioUrl, span: sing.spanOf(s), sing: s };
+}
+
 async function videoContextFor(project, shot, { onEvent, providerId = null, explain = false } = {}) {
   const { prev, next, link, nextLink } = continuity.neighbors(project.shots || [], shot.id);
 
@@ -5730,11 +5822,13 @@ async function generateVideosRaw(projectId, { only = null, chapterId = null, reg
        */
       const tier = tiers.tierOf(shot);
       const tierRoute = tiers.routeFor(tier, settings.get('videoTiers'));
-      const useProvider = tierRoute?.provider || r.video.provider;
-      const useModel = tierRoute?.model || r.video.model;
+      // 唱段压过分级和全局路由：只有万相能照着歌对口型
+      const singPrep = await singPrepFor(store.read(projectId), shot, { onEvent });
+      const useProvider = singPrep?.provider || tierRoute?.provider || r.video.provider;
+      const useModel = singPrep?.model || tierRoute?.model || r.video.model;
       attemptedProvider = useProvider;
       attemptedModel = useModel;
-      if (tierRoute) {
+      if (tierRoute && !singPrep) {
         onEvent?.({
           type: 'note',
           shotId: shot.id,
@@ -5832,7 +5926,8 @@ async function generateVideosRaw(projectId, { only = null, chapterId = null, reg
           ...bibleRefs.images
         ],
         refVideos: controlVideo ? [controlVideo] : [],
-        duration: shot.duration,
+        duration: singPrep ? singPrep.span : shot.duration,
+        drivingAudioUrl: singPrep?.audioUrl || null,
         // 同上：这部片子自己定的分辨率，优先于全局设置
         resolution: project.videoResolution || null,
         aspectRatio: project.aspectRatio || null,
@@ -5861,6 +5956,8 @@ async function generateVideosRaw(projectId, { only = null, chapterId = null, reg
           t.videoPrompt = videoPrompt;
           t.videoAt = new Date().toISOString();
           t.videoModelUsed = `${useProvider} / ${useModel}`;
+          // 这段片子是照着歌的哪一段对的口型。之后改了起点，合成时要能认出"片子是旧的"
+          t.videoSing = singPrep ? { ...singPrep.sing } : null;
           // 记下走的哪一档：出完之后"这一镜为什么糊"最先该查的就是它
           t.videoTier = tier;
           t.videoResolution = video.resolution || null;
@@ -6371,8 +6468,16 @@ async function generateVoiceRaw(projectId, { onEvent, signal = null } = {}) {
   // 只给**真台词**配音。台词字段里塞的音效提示（"（远处传来汽笛声）"）
   // 要是丢给 TTS，就会出现"画面里没人张嘴，声音里却在念汽笛声"
   const skipped = [];
+  /**
+   * 唱段不配音：TTS 只会把歌词**念**一遍，而这一镜的声音是那首歌本身（合成时摆进去）。
+   * 配了也会在合成时被歌顶掉 —— 白花一次钱。
+   */
+  const sung = fresh.shots.filter((s) => sing.singOf(s) && s.dialogue?.trim());
+  if (sung.length) {
+    onEvent?.({ type: 'note', message: `第 ${sung.map((s) => s.index).join('、')} 镜是唱段，不配音 —— 这几镜的声音用歌本身` });
+  }
   const targets = fresh.shots.filter((s) => {
-    if (s.audioPath || !s.dialogue?.trim()) return false;
+    if (s.audioPath || !s.dialogue?.trim() || sing.singOf(s)) return false;
     const said = speakerLib.spokenText(s.dialogue);
     if (said.kind !== 'speech') {
       skipped.push({ index: s.index, why: said.dropped[0] || s.dialogue.trim() });
@@ -6608,10 +6713,11 @@ const MUSIC_MAX = 20 * 1024 * 1024;
  * 存下来就完了：混音发生在合成那一步（见 ffmpeg.buildAudioTrack），
  * 所以换音量、开关避让、换一首，都只要重新合成一次，一分钱不花。
  */
-export async function attachMusic(projectId, { dataUrl, fileName = '' } = {}, onEvent) {
-  const project = store.read(projectId);
-  if (!project) throw new Error(`项目不存在：${projectId}`);
-
+/**
+ * 收下一个上传的音频文件：解 data URL、认格式、卡大小、存盘、探时长。
+ * 背景音乐和唱段的歌走同一份 —— 两份各写各的，迟早一份认 .flac 一份不认。
+ */
+async function saveAudioUpload(projectId, { dataUrl, fileName = '' } = {}, prefix, onEvent) {
   const m = /^data:([^;,]*);base64,(.+)$/s.exec(String(dataUrl || ''));
   if (!m) throw new Error('没读到音频内容（需要 data:audio/...;base64, 开头的内容）');
   const mime = m[1].toLowerCase();
@@ -6625,10 +6731,10 @@ export async function attachMusic(projectId, { dataUrl, fileName = '' } = {}, on
   const buf = Buffer.from(m[2], 'base64');
   if (!buf.length) throw new Error('这个音频文件是空的');
   if (buf.length > MUSIC_MAX) {
-    throw new Error(`这首有 ${(buf.length / 1024 / 1024).toFixed(1)}MB，超过 ${MUSIC_MAX / 1024 / 1024}MB。转成 MP3 再传，音质对背景音乐来说完全够。`);
+    throw new Error(`这首有 ${(buf.length / 1024 / 1024).toFixed(1)}MB，超过 ${MUSIC_MAX / 1024 / 1024}MB。转成 MP3 再传，音质完全够。`);
   }
 
-  const dest = path.join(store.assetDir(projectId), `music-${safeFileName(path.parse(fileName || 'bgm').name)}${ext}`);
+  const dest = path.join(store.assetDir(projectId), `${prefix}-${safeFileName(path.parse(fileName || (prefix === 'music' ? 'bgm' : prefix)).name)}${ext}`);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.writeFileSync(dest, buf);
   onEvent?.({ type: 'note', message: `已存下 ${path.basename(dest)}（${(buf.length / 1024 / 1024).toFixed(1)}MB）` });
@@ -6643,6 +6749,13 @@ export async function attachMusic(projectId, { dataUrl, fileName = '' } = {}, on
   } catch {
     /* 没装 FFmpeg，或者这个格式解不了。到合成那步再说 */
   }
+  return { dest, seconds };
+}
+
+export async function attachMusic(projectId, { dataUrl, fileName = '' } = {}, onEvent) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const { dest, seconds } = await saveAudioUpload(projectId, { dataUrl, fileName }, 'music', onEvent);
 
   const next = store.update(projectId, (p) => {
     const before = edit.normalizeMusic(p.edit?.music);
@@ -6671,6 +6784,41 @@ export async function attachMusic(projectId, { dataUrl, fileName = '' } = {}, on
       + '⚠ 曲子的授权要你自己确认，商用别用没买过的。'
   });
   return next;
+}
+
+/**
+ * 唱段用的歌。cap:sing
+ *
+ * 和背景音乐分开放：很多时候是同一首，但不一定 —— 背景音乐可能是纯伴奏，
+ * 而唱段要的是带人声的原曲（模型要照着人声对口型）。
+ * 没传这一首时，唱段退回用背景音乐（见 sing.songOf）。
+ *
+ * ⚠ 歌是用户自己提供的。我们不内置、也不去网上找任何歌。
+ */
+export async function attachSong(projectId, { dataUrl, fileName = '' } = {}, onEvent) {
+  const project = store.read(projectId);
+  if (!project) throw new Error(`项目不存在：${projectId}`);
+  const { dest, seconds } = await saveAudioUpload(projectId, { dataUrl, fileName }, 'song', onEvent);
+  const next = store.update(projectId, (p) => {
+    p.song = { path: dest, name: fileName || path.basename(dest), seconds };
+    return p;
+  });
+  const sung = (next.shots || []).filter((x) => sing.singOf(x) && x.videoPath);
+  onEvent?.({
+    type: 'note',
+    message: `唱段用的歌就位${seconds ? `（${seconds.toFixed(1)} 秒）` : ''}。在分镜里把要唱的那几镜标成唱段、填上唱歌里的第几秒到第几秒。`
+      + (sung.length ? `已经出过片子的唱段（第 ${sung.map((x) => x.index).join('、')} 镜）是照着上一首对的口型，要重出。` : '')
+      + '⚠ 歌的授权要你自己确认，商用别用没买过的。'
+  });
+  return next;
+}
+
+/** 撤下唱段用的歌（不删文件）。撤了之后唱段退回用背景音乐 */
+export function detachSong(projectId) {
+  return store.update(projectId, (p) => {
+    p.song = null;
+    return p;
+  });
 }
 
 /** 把背景音乐撤下来。**不删文件** —— 想换回来还得找得着 */
@@ -7018,6 +7166,32 @@ async function composeRaw(projectId, { onEvent, signal = null } = {}) {
     }
   }
 
+  /**
+   * ══════════ 唱段：这几镜的声音就是歌本身 ══════════
+   *
+   * 放在"模型出声"那一段**之后**：唱段的片子也带音轨（万相照着歌出的），
+   * 那一段会把它当成模型原声摆进来 —— 这里统一换成原歌。
+   * 原歌是用户给的原文件，音质和节奏都比模型转一手的准。
+   */
+  const singPlan = sing.composeSing({ timeline, project: store.read(projectId), voiceOn });
+  if (singPlan.ids.size) {
+    audioAt = [...audioAt.filter((a) => !singPlan.ids.has(a.id)), ...singPlan.entries];
+    const idx = [...new Set(timeline.filter((r) => singPlan.ids.has(r.shot.id)).map((r) => r.shot.index))];
+    if (singPlan.missingSong) {
+      onEvent?.({ type: 'note', message: `第 ${idx.join('、')} 镜是唱段，但这部片子没有歌 —— 这几镜这次是哑的。在「分镜」页传一首唱段用的歌再合成` });
+    } else if (singPlan.entries.length) {
+      onEvent?.({ type: 'note', message: `第 ${idx.join('、')} 镜是唱段，声音用歌的那一段；背景音乐在这几段里让开，不然两段音乐叠在一起` });
+    }
+    const stale = store.read(projectId).shots.filter((s) => singPlan.ids.has(s.id) && s.videoPath
+      && JSON.stringify(s.videoSing || null) !== JSON.stringify(sing.singOf(s)));
+    if (stale.length) {
+      onEvent?.({
+        type: 'note',
+        message: `⚠ 第 ${stale.map((s) => s.index).join('、')} 镜的片子不是照着现在这段歌对的口型（唱段起止改过，或者先出的片子后标的唱段）—— 嘴和歌会对不上，重出这几镜的视频`
+      });
+    }
+  }
+
   if (sfxAt.length) {
     onEvent?.({ type: 'note', message: `混入 ${sfxAt.length} 条画外音效，音量压到 ${(sfxAt[0].gain * 100).toFixed(0)}%（台词要压得住它）` });
   }
@@ -7026,8 +7200,8 @@ async function composeRaw(projectId, { onEvent, signal = null } = {}) {
   // 要么把台词改短，两个都是导演的决定。不说的话它只会表现为"后面几句压到了下一镜"。
   const overruns = [];
   for (const a of audioAt) {
-    // 模型原声那几条已经按镜头长度截好了，量的是整个片段，不算"念不完"
-    if (a.native) continue;
+    // 模型原声、唱段那几条已经按镜头长度截好了，量的是整个文件，不算"念不完"
+    if (a.native || a.sing) continue;
     const secs = await ffmpeg.probeDuration(a.path);
     if (secs && a.span && secs > a.span + 0.25) overruns.push({ index: a.index, secs, span: a.span });
   }
@@ -7119,7 +7293,8 @@ async function composeRaw(projectId, { onEvent, signal = null } = {}) {
   const filmSeconds = timeline.length
     ? Number((timeline[timeline.length - 1].start + timeline[timeline.length - 1].span).toFixed(2))
     : 0;
-  const music = edit.musicOf(project.edit);
+  const baseMusic = edit.musicOf(project.edit);
+  const music = baseMusic && singPlan.windows.length ? { ...baseMusic, silence: singPlan.windows } : baseMusic;
   if (music) {
     onEvent?.({
       type: 'note',

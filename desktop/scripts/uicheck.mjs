@@ -754,6 +754,12 @@ await page.waitForTimeout(900);
     check('⚠ 选项旁边写着代价（每一镜声音不一样），不只写好处',
       /每一镜的声音会不一样/.test(await field.innerText().catch(() => '')));
   }
+  {
+    const field = page.locator('#view-inner .field', { has: page.locator('label', { hasText: '唱段用哪个模型' }) });
+    const opts = await field.locator('option').evaluateAll((os) => os.map((o) => o.value));
+    check('设置里有「唱段用哪个模型」，只列万相 2.5 起（别的对不上歌）',
+      (await field.count()) === 1 && opts.includes('wan2.6-i2v') && opts.every((v) => /^wan2\.[5-9]/.test(v)), JSON.stringify(opts));
+  }
   check('折起来时标题一行不少（折的是位置，不是入口）',
     (await page.locator('#view-inner .panel > summary').count()) >= 8,
     String(await page.locator('#view-inner .panel > summary').count()));
@@ -2008,6 +2014,67 @@ await page.waitForTimeout(500);
  * 直接发原件给浏览器的模块。它们要是 import 挂了，**整个工作台白屏**——
  * 不是少一行价钱。Node 里的自检永远看不到这一类坏法。
  */
+/**
+ * ── 唱段 ──
+ *
+ * 单元测试验得了"存进去的是不是 {from, to}"，验不了"人点得到、填得进、存得上、
+ * 卡片上看得见"。唱段改的是这一镜的声音从哪儿来、走哪个模型 —— 看不见就会被忘掉。
+ */
+console.log('\n唱段');
+{
+  const keep = store.read(proj.id);
+  await step('分镜').click();
+  await page.waitForTimeout(800);
+  await page.locator('.shot-card .shot-edit-btn', { hasText: '改文案' }).first().click();
+  await page.waitForTimeout(400);
+  const card = page.locator('.shot-card').first();
+  // 唱段在「出视频用的」那一组里，默认折着 —— 点开
+  await card.locator('.shot-group > summary', { hasText: '出视频用的' }).click();
+  await page.waitForTimeout(200);
+  const on = card.locator('[data-sing="on"]');
+  check('编辑面板里有「唱段」开关（在出视频用的那一组）', (await on.count()) === 1 && (await on.isVisible()));
+  check('⚠ 没有歌时当场说出来（不然标完唱段才发现出不了视频）',
+    /还没有歌|用背景音乐/.test(await card.locator('[data-sing="song"]').innerText().catch(() => '')));
+
+  // 传一首歌：内容是假的也行 —— 探不出时长不算失败，要验的是这条路通不通
+  await card.locator('[data-sing="file"]').setInputFiles({ name: '晚风.wav', mimeType: 'audio/wav', buffer: Buffer.from('RIFF0000WAVEfmt ') });
+  await page.waitForTimeout(800);
+  check('⚠ 传歌这条路是通的（存上了，界面上也换成了歌名）',
+    store.read(proj.id).song?.name === '晚风.wav' && /晚风\.wav/.test(await card.locator('[data-sing="song"]').innerText().catch(() => '')),
+    JSON.stringify(store.read(proj.id).song));
+
+  await on.check();
+  await card.locator('[data-sing="from"]').fill('12');
+  await card.locator('[data-sing="to"]').fill('15.2');
+  await card.locator('button', { hasText: '保存文案' }).click();
+  await page.waitForTimeout(900);
+  const saved = store.read(proj.id).shots.find((x) => x.id === keep.shots[0].id);
+  check('勾上、填起止、保存 —— 存上了', JSON.stringify(saved?.sing) === '{"from":12,"to":15.2}', JSON.stringify(saved?.sing));
+  check('⚠ 时长跟着唱段走了（3.2 秒）', saved?.duration === 3.2, String(saved?.duration));
+  const badge = page.locator('.shot-card').first().locator('[data-sing="badge"]');
+  check('⚠ 卡片收起时也看得见「♪ 12–15.2s」（唱段改了声音来源和模型，看不见就会被忘掉）',
+    (await badge.count()) === 1 && /12–15\.2s/.test(await badge.innerText()), await badge.innerText().catch(() => '(没有)'));
+
+  // 起止填 12 秒长：不存，而且说出来
+  await page.locator('.shot-card .shot-edit-btn', { hasText: '改文案' }).first().click();
+  await page.waitForTimeout(300);
+  const card2 = page.locator('.shot-card').first();
+  await card2.locator('.shot-group > summary', { hasText: '出视频用的' }).click().catch(() => {});
+  await card2.locator('[data-sing="to"]').fill('24');
+  await card2.locator('button', { hasText: '保存文案' }).click();
+  await page.waitForTimeout(700);
+  const toastText = await page.locator('.toast, #toast, .toasts').allInnerTexts().catch(() => []);
+  check('⚠ 填了 12 秒长的唱段：没存，而且界面上说了为什么',
+    JSON.stringify(store.read(proj.id).shots.find((x) => x.id === keep.shots[0].id)?.sing) === '{"from":12,"to":15.2}'
+      && /10 秒/.test(toastText.join(' ')),
+    toastText.join(' | ').slice(0, 160));
+
+  // 还原：后面几节量的是这一镜原来的样子
+  store.save({ ...store.read(proj.id), song: keep.song ?? null, shots: keep.shots });
+  await page.reload();
+  await page.waitForTimeout(900);
+}
+
 console.log('\n钱：预估那句话在不在屏幕上');
 await step('出图').click();
 await page.waitForTimeout(900);

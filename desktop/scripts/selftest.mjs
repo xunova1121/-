@@ -8567,6 +8567,413 @@ section('能出声的视频模型：目录、请求、提示词、合成');
   settings.patch(before);
 }
 
+/**
+ * ════════ 唱段 ════════
+ *
+ * 用户问「那些模仿唱歌的剧情怎么生成」，然后说「开发」。
+ *
+ * 唱段的每一环错了都**不报错**：片子照样出来、成片照样合成，
+ * 只是嘴和歌对不上、或者两段音乐叠在一起。所以每一环都要有一条
+ * 会在它坏掉时变红的断言，而且端到端那几条要用真 FFmpeg 量出来。
+ */
+section('唱段：照着歌对口型、不配音、合成用歌本身');
+{
+  const sg = await import('../core/pipeline/sing.js');
+  const st = studioModule;
+  const cs = consistency;
+  const ff = await import('../core/ffmpeg.js');
+  const ad = await import('../core/providers/adapters.js');
+  const keys = ['videoProvider', 'videoModel', 'baseUrls', 'uploadGateway', 'ffmpegPath', 'videoPromptMode', 'videoAudio', 'singModel', 'pollIntervalMs', 'autoCut'];
+  const before = Object.fromEntries(keys.map((k) => [k, settings.get(k)]));
+
+  // ── 规整：收不下的值不存，并说得出为什么 ──
+  {
+    const n = sg.normalizeSing;
+    check('关掉：null → 不是唱段、也不算出错', n(null).value === null && !n(null).why);
+    check('正常一段收下，秒数取两位', JSON.stringify(n({ from: '12.345', to: 15.5 }).value) === '{"from":12.35,"to":15.5}',
+      JSON.stringify(n({ from: '12.345', to: 15.5 })));
+    check('⚠ 超过 10 秒不收，并且说清为什么（万相一次最多出 10 秒）',
+      !n({ from: 0, to: 12 }).value && /10 秒/.test(n({ from: 0, to: 12 }).why || ''), n({ from: 0, to: 12 }).why);
+    check('短于 1 秒不收（一个字的口型都做不完整）', !n({ from: 3, to: 3.5 }).value && Boolean(n({ from: 3, to: 3.5 }).why));
+    check('终点在起点前面不收', !n({ from: 5, to: 2 }).value);
+    check('负数不收', !n({ from: -1, to: 2 }).value);
+    check('填了字不收', !n({ from: 'abc', to: 3 }).value && /数字/.test(n({ from: 'abc', to: 3 }).why || ''));
+    check('存着的坏值读出来也不算唱段（老数据、手改的 JSON）', sg.singOf({ sing: { from: 0, to: 30 } }) === null);
+  }
+
+  // ── 歌词：只留要唱的字 ──
+  check('⚠ 歌词去掉说话人、（唱）、引号和 ♪（不然模型以为那也是歌词）',
+    sg.lyricsOf({ dialogue: '小满：（唱）「♪晚风吹过我的脸♪」' }) === '晚风吹过我的脸',
+    sg.lyricsOf({ dialogue: '小满：（唱）「♪晚风吹过我的脸♪」' }));
+
+  // ── 发给模型的那段歌 ──
+  {
+    const seg = sg.drivingSegment({ from: 12, to: 15.2 }, 5);
+    check('⚠ 发过去的歌按**出片时长**切（5 秒），不是这一段的 3.2 秒 —— 短了模型后半段不知道怎么张嘴',
+      seg.seek === 12 && seg.length === 5, JSON.stringify(seg));
+    const a = sg.cutArgs('/song.mp3', { seek: 12, length: 5 }, '/o.mp3');
+    const ii = a.indexOf('-i');
+    check('⚠ -ss 在 -i 前面（从歌的第 12 秒开始读）',
+      a.indexOf('-ss') > -1 && a.indexOf('-ss') < ii && a[a.indexOf('-ss') + 1] === '12.000', JSON.stringify(a));
+    check('⚠ -t 在 -i 后面、配 apad（输出恰好 5 秒；歌提前完了补静音）',
+      a.indexOf('-t') > ii && a.includes('apad') && a[a.indexOf('-t') + 1] === '5.000', JSON.stringify(a));
+  }
+
+  // ── 接着上一段唱 ──
+  {
+    const shots = [
+      { id: 'a', index: 1, sing: { from: 0, to: 3.5 } },
+      { id: 'b', index: 2 },
+      { id: 'c', index: 3, duration: 4 }
+    ];
+    const sug = sg.suggestSing(shots, 'c');
+    check('⚠ 新唱段接在前面最近一个唱段的终点上（中间不唱的那镜跳过）',
+      sug?.from === 3.5 && sug?.to === 7.5, JSON.stringify(sug));
+    check('前面没有唱段时从 0 开始', sg.suggestSing(shots, 'a')?.from === 0);
+  }
+
+  // ── 合成怎么摆 ──
+  {
+    const S1 = { id: 'S1', index: 1, sing: { from: 10, to: 14 }, videoPath: '/s1.mp4' };
+    const N2 = { id: 'N2', index: 2, videoPath: '/n2.mp4' };
+    const tl = [
+      { shot: S1, start: 0, span: 4, first: true },
+      { shot: N2, start: 4, span: 3, first: true },
+      // 唱段被剪刀切成两段：第二段从入点 1.5 秒开始
+      { shot: S1, start: 7, span: 2, first: false, win: { in: 1.5, out: 3.5 } }
+    ];
+    const proj = { song: { path: '/song.mp3' } };
+    const plan = sg.composeSing({ timeline: tl, project: proj });
+    check('⚠ 被切成两段的唱段两段都摆（唱的是歌的不同位置，第二段不摆就是哑的）',
+      plan.entries.length === 2, JSON.stringify(plan.entries));
+    check('⚠ 第二段从 from + 入点开始读歌（10 + 1.5 = 11.5），只摆 2 秒',
+      plan.entries.some((e) => e.at === 7 && e.seek === 11.5 && e.trimTo === 2), JSON.stringify(plan.entries));
+    check('背景音乐让开的窗口就是这两段', JSON.stringify(plan.windows) === '[[0,4],[7,9]]', JSON.stringify(plan.windows));
+    check('歌不带 gain —— 在混音里算人声', plan.entries.every((e) => e.gain === undefined && e.sing === true));
+    const noSong = sg.composeSing({ timeline: tl, project: {} });
+    check('⚠ 没有歌时背景音乐**不**让开（让开的话那几段一片死寂）',
+      noSong.windows.length === 0 && noSong.missingSong === true, JSON.stringify(noSong));
+    check('没单独传歌时退回用背景音乐', sg.songOf({ edit: { music: { path: '/bgm.mp3' } } })?.path === '/bgm.mp3');
+    check('单独传过歌时用那一首（背景音乐可能是纯伴奏）',
+      sg.songOf({ song: { path: '/vocal.mp3' }, edit: { music: { path: '/bgm.mp3' } } })?.path === '/vocal.mp3');
+    const off = sg.composeSing({ timeline: tl, project: proj, voiceOn: false });
+    check('台词轨关了：歌不摆，背景音乐也不让开', !off.entries.length && !off.windows.length);
+    const mute = sg.composeSing({ timeline: tl.map((r) => (r.start === 7 ? { ...r, muted: true } : r)), project: proj });
+    check('标了静音的那一段不摆歌、也不让开', mute.entries.length === 1 && mute.windows.length === 1);
+
+    const pa = ff.planAudio([{ path: '/song.mp3', at: 0, seek: 10, trimTo: 4 }],
+      { path: '/bgm.mp3', gain: 0.3, silence: plan.windows }, { total: 9, outputPath: '/o.m4a' });
+    const fc = pa[pa.indexOf('-filter_complex') + 1];
+    check('⚠ 背景音乐在唱段的窗口里整段静音（滤镜里写着）',
+      fc.includes("volume=0:enable='between(t,0.000,4.000)'") && fc.includes("volume=0:enable='between(t,7.000,9.000)'"), fc.slice(0, 300));
+  }
+
+  // ── 存唱段：时长跟着唱段走 ──
+  const bible = {
+    style: { anchor: '写实电影感' },
+    characters: [{ name: '小满', appearance: '十七八岁，马尾，白色连衣裙' }],
+    scenes: [{ name: '天台', appearance: '黄昏，晚霞' }],
+    props: []
+  };
+  const p = store.create({ title: '唱段自检', aspectRatio: '16:9', targetDuration: 20 });
+  store.update(p.id, (x) => {
+    x.bible = bible;
+    x.shots = [
+      { id: 'x1', index: 1, segment: 1, scene: '天台', camera: '中景', duration: 4, characters: ['小满'], speaker: '小满',
+        description: '小满握着话筒对着晚霞', dialogue: '小满：（唱）「晚风吹过我的脸」' },
+      { id: 'x2', index: 2, segment: 1, scene: '天台', camera: '特写', duration: 5, characters: ['小满'], speaker: '小满',
+        description: '小满回头', dialogue: '小满：你来了' },
+      { id: 'x3', index: 3, segment: 1, scene: '天台', camera: '全景', duration: 4, characters: ['小满'], speaker: '小满',
+        description: '小满张开双臂', dialogue: '（唱）「吹过那片海」' }
+    ];
+    return x;
+  });
+  const shotOf = (id) => store.read(p.id).shots.find((s) => s.id === id);
+  {
+    let r = st.updateShot(p.id, 'x1', { sing: { from: 12, to: 15.2 } });
+    check('唱段存上了', JSON.stringify(shotOf('x1').sing) === '{"from":12,"to":15.2}', JSON.stringify(shotOf('x1').sing));
+    check('⚠ 时长跟着唱段走（3.2 秒）—— 两个数各存各的，合成时画面和歌就会差一截',
+      shotOf('x1').duration === 3.2, String(shotOf('x1').duration));
+    r = st.updateShot(p.id, 'x3', { sing: 'auto' });
+    check('⚠ 起止留空 = 接在上一个唱段后面（15.2 起，按原时长 4 秒）',
+      JSON.stringify(shotOf('x3').sing) === '{"from":15.2,"to":19.2}', JSON.stringify(shotOf('x3').sing));
+    r = st.updateShot(p.id, 'x2', { sing: { from: 0, to: 12 } });
+    check('⚠ 12 秒的唱段不存，并且说得出为什么',
+      !shotOf('x2').sing && (r.dropped || []).some((d) => /10 秒/.test(d.why || '')), JSON.stringify(r.dropped));
+    r = st.updateShot(p.id, 'x1', { duration: 6 });
+    check('⚠ 唱段单独改时长会被校回来，并说一声（不然人以为改成了）',
+      shotOf('x1').duration === 3.2 && (r.dropped || []).some((d) => /唱段/.test(d.why || '')), JSON.stringify(r.dropped));
+    r = st.updateShot(p.id, 'x2', { sing: null });
+    check('不是唱段的镜发 null 算没改', !r.changed.includes('sing'), JSON.stringify(r.changed));
+  }
+
+  // ── 提示词 ──
+  {
+    settings.patch({ videoPromptMode: 'precise', videoAudio: 'ours' });
+    const words = '晚风吹过我的脸，吹过那片海，我还在这里等你回来';
+    const shotP = {
+      id: 'pp', index: 1, scene: '天台', camera: '中景', characters: ['小满'], speaker: '小满',
+      imagePath: '/frame.png', sing: { from: 0, to: 4 }, dialogue: `小满：（唱）「${words}」`, duration: 4,
+      // ⚠ 描述故意写得很长：短了截断根本不会发生，"歌词一字不少"就是恒真的
+      description: '小满站在天台边缘，晚风把她的马尾吹得向后扬起，她一只手握着话筒，另一只手扶着锈迹斑斑的栏杆，'
+        + '远处的城市灯火一盏接一盏亮起来，晚霞从橘红慢慢褪成紫色，几只鸽子从她身后的水箱上飞起，'
+        + '她闭上眼睛深吸一口气，嘴角带着一点笑，脚下的影子被拉得很长，一直延伸到天台门口那盏昏黄的灯下'
+    };
+    const q = cs.assembleVideoPrompt(bible, shotP, {});
+    check('唱段的提示词写的是"正在唱歌"，歌词一字不少', q.includes('正在唱歌') && q.includes(words), q.slice(-150));
+    check('⚠ 不是"开口说"（说和唱的口型是两回事）', !/开口说/.test(q), q.slice(-150));
+    check('写明"是在唱，不是在说话"（不写它常演成边念边点头）', /是在唱，不是在说话/.test(q));
+    check('⚠ 夹具真的够长：截断确实发生了，而且截在唱的那句之前',
+      q.includes('…') && q.indexOf('…') < q.indexOf('正在唱歌'), q.slice(0, 80));
+    check('精准模式 200 字上限还在', q.length <= 200, `${q.length} 字`);
+    const plain = cs.assembleVideoPrompt(bible, { ...shotP, sing: null }, {});
+    check('同一镜不是唱段时照老样子（不写唱歌）', !/正在唱歌/.test(plain));
+  }
+
+  // ── 适配器：只有万相 2.5 起收，别家当场报错 ──
+  {
+    let seen = null;
+    const srv = http.createServer((req, res) => {
+      let raw = '';
+      req.on('data', (c) => { raw += c; });
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        if (req.method === 'POST') { seen = JSON.parse(raw || '{}'); return res.end(JSON.stringify({ output: { task_id: 't1' } })); }
+        return res.end(JSON.stringify({ output: { task_status: 'SUCCEEDED', video_url: 'https://example.com/v.mp4' } }));
+      });
+    });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    settings.patch({
+      baseUrls: { ...(settings.get('baseUrls') || {}), dashscope: `http://127.0.0.1:${srv.address().port}`, volcengine: `${upstreamUrl}/v3` },
+      pollIntervalMs: 50
+    });
+    vault.setSecret('DASHSCOPE_API_KEY', 'ds-selftest');
+    vault.setSecret('ARK_API_KEY', 'ark-selftest');
+    const go = (providerId, model, drivingAudioUrl) => ad.generateVideo({
+      providerId, model, prompt: '唱歌', firstFrameUrl: 'https://example.com/a.png', duration: 5, drivingAudioUrl
+    }).then(() => null, (e) => e);
+
+    await go('dashscope', 'wan2.6-i2v', 'https://example.com/song.mp3');
+    check('⚠ 万相的请求里带上了那段歌（input.audio_url）', seen?.input?.audio_url === 'https://example.com/song.mp3',
+      JSON.stringify(seen?.input || {}).slice(0, 200));
+    check('parameters 里没多东西（百炼对不认识的参数是严格的）',
+      JSON.stringify(Object.keys(seen?.parameters || {}).sort()) === '["duration","resolution"]', JSON.stringify(seen?.parameters));
+    seen = null;
+    await go('dashscope', 'wan2.6-i2v', null);
+    check('不是唱段时万相请求里没有 audio_url（别的镜不受影响）', seen && !('audio_url' in (seen.input || {})), JSON.stringify(seen?.input));
+
+    upstream.lastVideoBody = null;
+    const e1 = await go('volcengine', 'doubao-seedance-1-5-pro-000000', 'https://example.com/song.mp3');
+    check('⚠ 别家拿到唱段当场报错、**一个请求都不发**（悄悄丢掉的话片子照出、嘴对不上、钱白花）',
+      Boolean(e1) && /万相 2\.5/.test(e1.message) && upstream.lastVideoBody === null, e1?.message);
+    seen = null;
+    const e2 = await go('dashscope', 'wan2.2-i2v-plus', 'https://example.com/song.mp3');
+    check('万相 2.2（收不了音频）也当场报错', Boolean(e2) && seen === null, e2?.message);
+    const e3 = await go('dashscope', 'wan2.6-i2v', 'data:audio/mpeg;base64,AAAA');
+    check('⚠ 歌是内联的 data: 时在发之前拦下，并指向对象存储',
+      Boolean(e3) && /对象存储/.test(e3.message) && seen === null, e3?.message);
+    srv.close();
+  }
+
+  // ── 端到端：真 FFmpeg ──
+  let ffStatic = '';
+  try { const m = await import('ffmpeg-static'); ffStatic = m.default || m; } catch { /* 没装 */ }
+  if (ffStatic) { settings.patch({ ffmpegPath: ffStatic }); ff.locate({ refresh: true }); }
+  if (!ff.locate().available) {
+    console.log('  \x1b[33m—\x1b[0m 这台机器没装 FFmpeg，唱段端到端那几条跳过（切歌、混音要真跑）');
+  } else {
+    const run = (args) => ff.run(['-y', '-loglevel', 'error', ...args]);
+    const dir = store.assetDir(p.id);
+    fs.mkdirSync(dir, { recursive: true });
+    const song = path.join(dir, 'song-test.wav');
+    // 一首 20 秒的"歌"：前 10 秒 300Hz，后 10 秒 800Hz —— 切对了没有，量频率就知道
+    await run(['-f', 'lavfi', '-i', 'sine=f=300:d=10', '-f', 'lavfi', '-i', 'sine=f=800:d=10',
+      '-filter_complex', '[0][1]concat=n=2:v=0:a=1', song]);
+    for (const id of ['x1', 'x2', 'x3']) {
+      await run(['-f', 'lavfi', '-i', 'color=c=red:s=640x360', '-frames:v', '1', path.join(dir, `${id}.png`)]);
+    }
+    const clip = path.join(SANDBOX, 'sing-out.mp4');
+    await run(['-f', 'lavfi', '-i', 'color=c=white:s=640x360:d=5', '-f', 'lavfi', '-i', 'sine=f=600:d=5',
+      '-shortest', '-c:v', 'libx264', '-c:a', 'aac', clip]);
+    store.update(p.id, (x) => {
+      for (const s of x.shots) s.imagePath = path.join(dir, `${s.id}.png`);
+      x.song = { path: song, name: 'song-test.wav', seconds: 20 };
+      return x;
+    });
+
+    /** 某一段里 f 赫兹的能量（Goertzel）。比数过零点可靠：两个频率混在一起时也分得开 */
+    const powerAt = async (file, from, len, f) => {
+      const buf = await ff.runCapture(['-v', 'error', '-ss', String(from), '-t', String(len), '-i', file, '-f', 's16le', '-ac', '1', '-ar', '8000', '-']);
+      const n = Math.floor(buf.length / 2);
+      const k = 2 * Math.cos((2 * Math.PI * f) / 8000);
+      let s1 = 0; let s2 = 0;
+      for (let i = 0; i < n; i += 1) { const s0 = buf.readInt16LE(i * 2) / 32768 + k * s1 - s2; s2 = s1; s1 = s0; }
+      return (s1 * s1 + s2 * s2 - k * s1 * s2) / Math.max(1, n);
+    };
+
+    // 仿百炼 + 仿上传网关 + 片子下载
+    const hits = { submits: [], uploads: [] };
+    const srv = http.createServer((req, res) => {
+      const chunks = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => {
+        const raw = Buffer.concat(chunks);
+        const base = `http://127.0.0.1:${srv.address().port}`;
+        if (req.url === '/upload') {
+          const name = /filename="([^"]+)"/.exec(raw.toString('latin1'))?.[1] || 'x';
+          const s = raw.indexOf('\r\n\r\n') + 4;
+          const e = raw.lastIndexOf('\r\n--');
+          const saved = path.join(SANDBOX, `up-${hits.uploads.length}-${name}`);
+          fs.writeFileSync(saved, raw.subarray(s, e));
+          hits.uploads.push({ name, saved, url: `${base}/files/${hits.uploads.length}/${encodeURIComponent(name)}` });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ url: hits.uploads[hits.uploads.length - 1].url }));
+        }
+        if (req.url === '/clip.mp4') { res.writeHead(200, { 'Content-Type': 'video/mp4' }); return fs.createReadStream(clip).pipe(res); }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        if (req.method === 'POST') {
+          hits.submits.push(JSON.parse(raw.toString() || '{}'));
+          return res.end(JSON.stringify({ output: { task_id: `t${hits.submits.length}`, task_status: 'PENDING' } }));
+        }
+        return res.end(JSON.stringify({ output: { task_status: 'SUCCEEDED', video_url: `${base}/clip.mp4` } }));
+      });
+    });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const stub = `http://127.0.0.1:${srv.address().port}`;
+    settings.patch({
+      uploadGateway: `${stub}/upload`,
+      baseUrls: { ...(settings.get('baseUrls') || {}), dashscope: stub },
+      // ⚠ 全局路由故意是**火山 1.0**：唱段要压过它走万相，不然这条端到端量的是巧合
+      videoProvider: 'volcengine',
+      videoModel: 'doubao-seedance-1-0-pro-250528',
+      singModel: 'wan2.6-i2v'
+    });
+    const songUpload = () => hits.uploads.filter((u) => /\.mp3$/.test(u.name)).at(-1);
+
+    // 批量出视频
+    upstream.lastVideoBody = null;
+    const notes = [];
+    await st.generateVideos(p.id, { only: ['x1'], onEvent: (ev) => { if (ev.message) notes.push(ev.message); } })
+      .catch((e) => notes.push(`ERR ${e.message}`));
+    const b1 = hits.submits[0];
+    check('⚠ 全局路由是火山，唱段这一镜照样走了万相（火山一个请求都没收到）',
+      hits.submits.length === 1 && b1?.model === 'wan2.6-i2v' && upstream.lastVideoBody === null,
+      `${hits.submits.length} 次 / ${b1?.model} / ${notes.filter((m) => /ERR|失败/.test(m)).join(' | ').slice(0, 200)}`);
+    check('请求里带着传上去的那段歌', Boolean(b1?.input?.audio_url) && b1.input.audio_url === songUpload()?.url,
+      JSON.stringify(b1?.input || {}).slice(0, 200));
+    const up1 = songUpload()?.saved;
+    const len1 = up1 ? await ff.probeDuration(up1) : 0;
+    check('⚠ 传上去的那段歌是 5 秒（按出片时长切，不是 3.2 秒）', Math.abs(len1 - 5) < 0.15, String(len1));
+    const hi = up1 ? await powerAt(up1, 0.5, 3, 800) : 0;
+    const lo = up1 ? await powerAt(up1, 0.5, 3, 300) : 0;
+    check('⚠ 而且是从歌的第 12 秒切的（800Hz 那一半，不是开头的 300Hz）', hi > lo * 20, `800Hz ${hi.toExponential(2)} / 300Hz ${lo.toExponential(2)}`);
+    check('片子记下了是照着哪一段歌对的口型', JSON.stringify(shotOf('x1').videoSing) === '{"from":12,"to":15.2}',
+      JSON.stringify(shotOf('x1').videoSing));
+    check('记下的模型是万相', shotOf('x1').videoModelUsed === 'dashscope / wan2.6-i2v', shotOf('x1').videoModelUsed);
+    check('日志里说了为什么走万相、带的是哪几秒', notes.some((m) => /唱段.*万相|走 dashscope/.test(m) && /12/.test(m)),
+      notes.join(' | ').slice(0, 300));
+
+    // 单镜重出：同一个函数，改了起点
+    st.updateShot(p.id, 'x1', { sing: { from: 2, to: 5.2 } });
+    const firstUrl = b1?.input?.audio_url;
+    await st.regenerateShotVideo(p.id, 'x1', {}, () => {}).catch((e) => notes.push(`ERR2 ${e.message}`));
+    const b2 = hits.submits[1];
+    check('⚠ 单镜重出也走万相、也带歌（两条路同一个函数 —— 只修一条等于没修）',
+      b2?.model === 'wan2.6-i2v' && Boolean(b2?.input?.audio_url), JSON.stringify(b2?.input || {}).slice(0, 160));
+    check('⚠ 改了起点，传上去的是一个新地址（同名覆盖的话 CDN 可能还给旧的那段）',
+      Boolean(b2?.input?.audio_url) && b2.input.audio_url !== firstUrl, `${firstUrl} → ${b2?.input?.audio_url}`);
+    const up2 = songUpload()?.saved;
+    const lo2 = up2 ? await powerAt(up2, 0.5, 2, 300) : 0;
+    const hi2 = up2 ? await powerAt(up2, 0.5, 2, 800) : 0;
+    check('这一次切的是第 2 秒起（300Hz 那一半）', lo2 > hi2 * 20, `300Hz ${lo2.toExponential(2)} / 800Hz ${hi2.toExponential(2)}`);
+    {
+      const mp3s = hits.uploads.filter((u) => /\.mp3$/.test(u.name)).map((u) => u.name);
+      check('⚠ 两次传上去的切片**文件名不同**（对象存储按文件名定地址，同名覆盖的话 CDN 可能还给旧的那段）',
+        mp3s.length >= 2 && mp3s.at(-1) !== mp3s.at(-2), JSON.stringify(mp3s));
+    }
+    check('旧的那个切片删掉了（不然每改一次起点多一个文件）',
+      fs.readdirSync(dir).filter((f) => /_sing-.*\.mp3$/.test(f)).length === 1, fs.readdirSync(dir).join(','));
+    check('片子重新记成照着新的那段对的口型', JSON.stringify(shotOf('x1').videoSing) === '{"from":2,"to":5.2}');
+
+    // 配音：唱段跳过。TTS 指到桩上，量**到底发了哪几句** —— 光看有没有 audioPath 是恒真的：
+    // 没配 TTS 的话整步失败，唱段那一镜同样没有 audioPath
+    const vnotes = [];
+    const ttsKeep = { ttsProvider: settings.get('ttsProvider'), ttsModel: settings.get('ttsModel') };
+    settings.patch({ ttsProvider: 'volcengine', ttsModel: 'stub-tts' });
+    upstream.ttsBodies = [];
+    await st.generateVoice(p.id, { onEvent: (ev) => { if (ev.message) vnotes.push(ev.message); } })
+      .catch((e) => vnotes.push(`ERR ${e.message}`));
+    settings.patch(ttsKeep);
+    const said = (upstream.ttsBodies || []).map((b) => String(b.input || ''));
+    check('配音这一步真的跑到了 TTS（不是唱段的那一镜念出去了）', said.some((t) => /你来了/.test(t)),
+      `${JSON.stringify(said)} / ${vnotes.filter((m) => /ERR|失败/.test(m)).join(' | ').slice(0, 200)}`);
+    check('⚠ 唱段的歌词一句都没发给 TTS（TTS 只会把歌词念一遍，还白花钱）',
+      !said.some((t) => /晚风|那片海/.test(t)), JSON.stringify(said));
+    check('并且说了一声哪几镜是唱段、不配音', vnotes.some((m) => /第 1、3 镜是唱段，不配音/.test(m)), vnotes.join(' | ').slice(0, 300));
+
+    // 混音：唱段那几秒只有歌，背景音乐让开
+    {
+      const bgm = path.join(SANDBOX, 'bgm-300.wav');
+      await run(['-f', 'lavfi', '-i', 'sine=f=300:d=8', bgm]);
+      // 混音出的是 AAC，要放进 m4a（放进 .wav 容器里解不出来）
+      const out = path.join(SANDBOX, 'sing-mix.m4a');
+      await ff.buildAudioTrack(
+        [{ path: song, at: 0, seek: 12, trimTo: 3, sing: true }],
+        out,
+        { music: { path: bgm, gain: 1, duck: false, loop: false, fadeIn: 0, fadeOut: 0, silence: [[0, 3]] }, total: 8 }
+      );
+      const inSong300 = await powerAt(out, 0.5, 2, 300);
+      const inSong800 = await powerAt(out, 0.5, 2, 800);
+      const after300 = await powerAt(out, 4, 3, 300);
+      check('⚠ 唱段那 3 秒里只有歌（背景音乐整段让开，不是压低）',
+        inSong800 > 1e-4 && inSong300 < inSong800 / 100, `800Hz ${inSong800.toExponential(2)} / 300Hz ${inSong300.toExponential(2)}`);
+      check('唱段一过，背景音乐回来了', after300 > 1e-4, after300.toExponential(2));
+    }
+    srv.close();
+  }
+
+  // ── 体检 ──
+  {
+    const q = await import('../core/pipeline/quality.js');
+    const base = store.read(p.id);
+    const shots = base.shots.map((s) => ({ ...s, videoPath: '/v.mp4', audioPath: s.id === 'x2' ? '/a.wav' : null }));
+    const ids = (proj) => q.audit(proj).items.map((i) => i.id);
+    const good = ids({ ...base, shots: shots.map((s) => (s.sing ? { ...s, videoSing: { ...s.sing } } : s)) });
+    check('⚠ 唱段没配音不算"有台词没配音"', !good.includes('missing-voice'), JSON.stringify(good));
+    check('片子对得上时不报唱段的问题', !good.includes('sing-stale') && !good.includes('sing-no-song'), JSON.stringify(good));
+    const stale = ids({ ...base, shots: shots.map((s) => (s.id === 'x1' ? { ...s, videoSing: { from: 0, to: 3.2 } } : s)) });
+    check('⚠ 唱段起止改过、片子是旧的 → 报出来（嘴和歌会对不上）', stale.includes('sing-stale'), JSON.stringify(stale));
+    const nosong = ids({ ...base, song: null, edit: {}, shots });
+    check('⚠ 标了唱段却没有歌 → 报出来', nosong.includes('sing-no-song'), JSON.stringify(nosong));
+  }
+
+  // ── 预估 ──
+  {
+    const est = await import('../core/pipeline/estimate.js');
+    const shots = [
+      { id: 'a', imagePath: '/a.png', duration: 3.2, sing: { from: 0, to: 3.2 }, dialogue: '（唱）晚风' },
+      { id: 'b', imagePath: '/b.png', duration: 4, dialogue: '你来了' }
+    ];
+    const routing = {
+      video: { provider: 'volcengine', model: 'seed', durations: [5, 10] },
+      sing: { provider: 'dashscope', model: 'wan2.6-i2v', durations: [5, 10] },
+      tts: { provider: 't', model: 'm' }
+    };
+    const v = est.forStage({ shots, stage: 'video', routing });
+    const bySing = v.items.find((i) => i.provider === 'dashscope');
+    check('⚠ 唱段那一镜按万相的价算（不是全局那家）', bySing?.units === 5 && bySing?.calls === 1, JSON.stringify(v.items));
+    check('其余的照旧按全局那家算', v.items.some((i) => i.provider === 'volcengine' && i.calls === 1));
+    const vo = est.forStage({ shots, stage: 'voice', routing });
+    check('唱段不配音，也不算配音的钱', vo.items[0]?.calls === 1 && vo.items[0]?.units === 3, JSON.stringify(vo.items));
+  }
+
+  check('换电脑导出时带上唱段用哪个模型', (await import('../core/portable.js')).PORTABLE_KEYS.includes('singModel'));
+  check('唱段默认走万相 2.6', (await import('../core/providers/adapters.js')).resolvedRouting().sing?.model === (settings.get('singModel') || 'wan2.6-i2v'));
+
+  settings.patch(before);
+  ff.locate({ refresh: true });
+}
+
 section('换电脑：读不出来的凭据文件要说清为什么');
 {
   const { VAULT_FILE } = await import('../core/paths.js');
