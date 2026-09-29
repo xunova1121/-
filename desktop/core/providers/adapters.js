@@ -7,7 +7,7 @@
  *
  * 各家踩过的坑写在对应分支的注释里 —— 这些都是联调时最费时间的部分。
  */
-import { getProvider, resolveResolution, videoResolutions } from './catalog.js';
+import { getProvider, resolveResolution, videoResolutions, nativeAudioOf } from './catalog.js';
 import { allowedDurations, alignDuration } from '../duration.js';
 import { send, sendAsync, baseUrlOf, interpolate, diagnose } from './index.js';
 import { buildAuthHeaders } from './auth.js';
@@ -1494,6 +1494,8 @@ async function generateVideoRaw({
   aspectRatio = null,
   timeoutMs = 600000,
   label = '出视频',
+  // 要不要模型自己出声。不给就按设置里的 videoAudio 算（见 settings.js）
+  audio = null,
   // 取消信号。只影响**轮询**，不打断已经发出去的提交 ——
   // 提交半路被掐是最坏的情况：可能已经计费，而 task_id 没拿到
   signal = null,
@@ -1502,6 +1504,14 @@ async function generateVideoRaw({
   const provider = getProvider(providerId);
   if (!provider) throw new Error(`未知服务商：${providerId}`);
   const family = provider.family || 'openai';
+  /**
+   * 这一段要不要模型自己出声。
+   *
+   * 只有两件事同时成立才要：模型**能**出声，而且设置里选的是"模型自己出"。
+   * 调用方可以用 audio 显式指定（探路、单镜重出时临时换一种）。
+   */
+  const audioCapable = nativeAudioOf(providerId, model);
+  const wantAudio = audioCapable && (audio ?? settings.get('videoAudio') === 'model');
 
   // 分辨率：调用方指定 > 设置里选的 > 这家的默认档。
   // 统一在这里翻译成该厂商认识的写法，各分支只管把 finalResolution 塞进自己的字段。
@@ -1834,6 +1844,16 @@ async function generateVideoRaw({
         url: endpoint(provider, 'videoTasks', '{{baseUrl}}/contents/generations/tasks'),
         body: { model, content }
       };
+      /**
+       * ⚠ 能出声的模型（Seedance 1.5 pro 起）**必须显式写**这一项，两个方向都要写。
+       *
+       * 原来从来不写 —— 出不出声全看厂商默认值，而那个默认值我们没核实过。
+       * 默认出声的话：配了配音，这段声音在合成时被丢掉，钱白花（有声更贵）；
+       * 没配配音，模型自己编的声音进了成片，而提示词还写着"人物不说话"。
+       *
+       * ⚠ 不能出声的模型**一个字都不加**：1.0 不认这个字段，多发一个可能被整单拒掉。
+       */
+      if (audioCapable) spec.body.generate_audio = wantAudio;
     }
   }
 
@@ -1887,6 +1907,13 @@ async function generateVideoRaw({
      * 界面说谎比少一个功能糟糕得多，所以由发请求的这一层如实回报。
      */
     endFrameSent: Boolean(endFrame),
+    /**
+     * 这一段**请求的时候**要没要声音。合成时不以它为准 ——
+     * 以片段里实际有没有音轨为准（那一层会自己去量），这里只是如实记下意图，
+     * 界面上"这一镜的声音是模型出的"那句话靠它。
+     */
+    audioRequested: wantAudio,
+    audioCapable,
     raw: polled?.json ?? submitted.json
   };
 }

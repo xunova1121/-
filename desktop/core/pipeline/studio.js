@@ -3765,6 +3765,44 @@ export function describeImageRequest(projectId, shotId) {
   };
 }
 
+/**
+ * 声音由模型出时，这一片的声音怎么摆。纯函数，不碰文件 —— 自检直接验它。
+ *
+ * 规则：
+ *   片段**带**音轨的镜  用片段原声，顶替这一镜的配音和音效（模型的声音里已经有了）
+ *   片段**不带**音轨的镜 照旧用我们的配音和音效 —— 退路，不然那句台词就凭空没了
+ *
+ * ⚠ 原声条目要**每一段都放**，不能只放第一段（台词那边是只放第一段的）。
+ * 同一镜被剪刀切成两段时，两段画面不一样、各自的声音也不一样；
+ * 而台词只放一次是因为那是一条独立的配音文件，放两次就念两遍。
+ *
+ * ⚠ 从入点开始读、只读这一段那么长（seek / trimTo），不然声画错位。
+ * 不带 gain，所以在混音里算"人声"：背景音乐会自动给它让路。
+ */
+export function nativeAudioPlan({ timeline = [], audioAt = [], sfxAt = [], hasAudio = () => false, voiceOn = true }) {
+  if (!voiceOn) return { audioAt, sfxAt, native: [], fallback: [] };
+  const rows = timeline.filter((r) => !r.muted && r.shot?.videoPath && hasAudio(r.shot));
+  const ids = new Set(rows.map((r) => r.shot.id));
+  const nativeEntries = rows.map((r) => ({
+    id: r.shot.id,
+    path: r.shot.videoPath,
+    at: r.start,
+    seek: Number(r.win?.in) || 0,
+    trimTo: r.span,
+    index: r.shot.index,
+    span: r.span,
+    native: true
+  }));
+  const native = [...new Set(rows.map((r) => r.shot.index))];
+  const fallback = [...new Set(audioAt.filter((a) => !ids.has(a.id)).map((a) => a.index))];
+  return {
+    audioAt: [...audioAt.filter((a) => !ids.has(a.id)), ...nativeEntries],
+    sfxAt: sfxAt.filter((a) => !ids.has(a.id)),
+    native,
+    fallback
+  };
+}
+
 export async function regenerateShot(projectId, shotId, opts = {}, onEvent) {
   const project = store.read(projectId);
   if (!project) throw new Error(`项目不存在：${projectId}`);
@@ -6487,9 +6525,9 @@ async function composeRaw(projectId, { onEvent, signal = null } = {}) {
    * 而它的配音只有一条。两段都摆的话同一句话被念两遍，第二遍还会盖到
    * 后面镜头的台词上 —— 而那听起来像"配音错乱"，很难想到是切了一刀造成的。
    */
-  const audioAt = (voiceOn ? timeline : [])
+  let audioAt = (voiceOn ? timeline : [])
     .filter((r) => r.first && !r.muted && r.shot.audioPath && fs.existsSync(r.shot.audioPath))
-    .map((r) => ({ path: r.shot.audioPath, at: r.start, index: r.shot.index, span: r.span }));
+    .map((r) => ({ id: r.shot.id, path: r.shot.audioPath, at: r.start, index: r.shot.index, span: r.span }));
 
   /**
    * 画外音效走**同一条时间轴**，只是音量压低。
@@ -6519,15 +6557,46 @@ async function composeRaw(projectId, { onEvent, signal = null } = {}) {
       });
     }
   }
-  const sfxAt = (sfxOff ? [] : timeline)
+  let sfxAt = (sfxOff ? [] : timeline)
     .filter((r) => r.first && !r.muted && r.shot.sfxPath && fs.existsSync(r.shot.sfxPath))
     .map((r) => ({
+      id: r.shot.id,
       path: r.shot.sfxPath,
       at: r.start,
       index: r.shot.index,
       span: r.span,
       gain: Number.isFinite(sfxGain) && sfxGain > 0 ? sfxGain : 0.35 // 只在"没填"时兜底，0 是明确的关
     }));
+  /**
+   * ══════════ 声音由模型出：用片段自带的声音顶替那一镜的配音和音效 ══════════
+   *
+   * 只看**片段里实际有没有音轨**，不看请求时要没要 —— 请求了厂商也可能没给，
+   * 没请求也可能给了。以文件为准。
+   */
+  if (settings.get('videoAudio') === 'model') {
+    const has = new Map();
+    for (const r of timeline) {
+      if (has.has(r.shot.id)) continue;
+      const info = r.shot.videoPath ? await ffmpeg.probeStreams(r.shot.videoPath) : null;
+      has.set(r.shot.id, info?.hasAudio === true);
+    }
+    const plan = nativeAudioPlan({ timeline, audioAt, sfxAt, hasAudio: (shot) => has.get(shot.id) === true, voiceOn });
+    audioAt = plan.audioAt;
+    sfxAt = plan.sfxAt;
+    if (plan.native.length) {
+      onEvent?.({
+        type: 'note',
+        message: `第 ${plan.native.join('、')} 镜用模型自己出的声音（对白 + 音效），顶替了我们的配音和音效`
+          + (plan.fallback.length ? `；第 ${plan.fallback.join('、')} 镜的片段里没有声音，退回用我们的配音` : '')
+      });
+    } else if (timeline.length) {
+      onEvent?.({
+        type: 'note',
+        message: '设置里选了"声音由模型出"，但这些片段一段都不带声音（多半是出片时用的模型不能出声）—— 这次照旧用我们的配音'
+      });
+    }
+  }
+
   if (sfxAt.length) {
     onEvent?.({ type: 'note', message: `混入 ${sfxAt.length} 条画外音效，音量压到 ${(sfxAt[0].gain * 100).toFixed(0)}%（台词要压得住它）` });
   }
@@ -6536,6 +6605,8 @@ async function composeRaw(projectId, { onEvent, signal = null } = {}) {
   // 要么把台词改短，两个都是导演的决定。不说的话它只会表现为"后面几句压到了下一镜"。
   const overruns = [];
   for (const a of audioAt) {
+    // 模型原声那几条已经按镜头长度截好了，量的是整个片段，不算"念不完"
+    if (a.native) continue;
     const secs = await ffmpeg.probeDuration(a.path);
     if (secs && a.span && secs > a.span + 0.25) overruns.push({ index: a.index, secs, span: a.span });
   }

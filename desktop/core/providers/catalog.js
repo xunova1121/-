@@ -112,6 +112,34 @@ function openaiCompatible({
   };
 }
 
+/**
+ * 这个视频模型能不能自己出声（对白 + 口型 + 音效一次出）。
+ *
+ * 两种来源：
+ *   ① 目录里标了 nativeAudio 的
+ *   ② 用户在设置里「自定义」手填的 ID —— 按名字认
+ *
+ * ② 是必须的：Seedance 1.5 pro 起能出声，但它的 ID 带日期后缀，
+ * 我们查不到原文、也不猜，所以没写进目录。用户从方舟控制台复制过来
+ * 填进「自定义」，这里要认得出它，不然"声音由模型出"那个开关对它不起作用。
+ *
+ * ⚠ 认不出的一律当**不能出声**。当错的代价不对等：
+ *   把哑模型当成能出声 → 合成时去它的片段里找声音，找到的是一段静音，
+ *                        而那一镜的配音已经被让掉了 —— 成片里那句台词就没了
+ *   把能出声的当成哑的 → 照旧走我们的配音，只是没用上它的新本事
+ * 所以推理接入点（ep-…）这种看不出型号的，也按不能出声算。
+ */
+export function nativeAudioOf(providerId, modelId) {
+  const id = String(modelId || '').trim();
+  if (!id) return false;
+  const p = PROVIDERS.find((x) => x.id === providerId);
+  const listed = (p?.models || []).find((m) => m.id === id);
+  if (listed) return listed.nativeAudio === true;
+  if (providerId === 'volcengine') return /seedance-(1-5|[2-9])(\b|-|\.)/i.test(id);
+  if (providerId === 'dashscope') return /^wan(2\.[5-9]|[3-9])/i.test(id) && /i2v|t2v|r2v/i.test(id);
+  return false;
+}
+
 export const PROVIDERS = [
   // ───────────────────────── OpenAI 标准接口 ─────────────────────────
   openaiCompatible({
@@ -474,6 +502,18 @@ export const PROVIDERS = [
       { id: 'wanx2.1-t2i-plus', capability: 't2i', label: '通义万相 2.1 文生图 Plus' },
       { id: 'wanx-v1', capability: 't2i', label: '通义万相 v1（老版，便宜）' },
       { id: 'wanx2.1-imageedit', capability: 'i2i', label: '通义万相 图像编辑（保角色）' },
+      /**
+       * ── 能出声的两个 ──
+       *
+       * 官方文档：2.5 起是音画一体生成，**默认就出声**（对白、音效、音乐一次出，
+       * 口型对得上），不用传 audio_url。ID 是阿里云帮助中心页面上原样写的，
+       * 不带日期后缀。
+       *
+       * durations 只写 5/10：两个版本都支持这两档。2.6 据说还有 15 秒，
+       * 但我没在原文里核实到，不写 —— 写错一档的代价是任务提交失败。
+       */
+      { id: 'wan2.6-i2v', capability: 'i2v', label: '通义万相 2.6 图生视频（能出声）', durations: [5, 10], nativeAudio: true },
+      { id: 'wan2.5-i2v-preview', capability: 'i2v', label: '通义万相 2.5 图生视频 预览版（能出声）', durations: [5, 10], nativeAudio: true },
       { id: 'wan2.2-i2v-flash', capability: 'i2v', label: '通义万相 2.2 图生视频 Flash', durations: [5] },
       { id: 'wan2.2-i2v-plus', capability: 'i2v', label: '通义万相 2.2 图生视频 Plus', durations: [5] },
       { id: 'wanx2.1-i2v-turbo', capability: 'i2v', label: '通义万相 2.1 图生视频 Turbo', durations: [3, 4, 5] },
