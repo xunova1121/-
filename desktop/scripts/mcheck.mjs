@@ -1428,6 +1428,67 @@ const realErrs = errs.filter((e) => !/401/.test(e));
   await page.waitForTimeout(300);
 }
 
+/**
+ * ── 唱段 ──
+ *
+ * 审片时发现"这一镜其实是唱的"，最顺手的就是当场在手机上标掉 ——
+ * 歌也常常就在手机里。和电脑端同一套：开关 + 起止秒 + 传歌。
+ */
+console.log('\n⑬ 唱段（手机上也能标、能传歌）');
+{
+  await closeSheets(page);
+  await page.evaluate(() => { for (const el of document.querySelectorAll('.ed')) el.remove(); });
+  await page.locator('.tab', { hasText: '分镜' }).click();
+  await page.waitForTimeout(700);
+  const keep = store.read(proj.id);
+  const first = [...keep.shots].sort((a, b) => a.index - b.index)[0];
+  /**
+   * ⚠ 夹具：第一镜有台词、没配音 —— 标唱段之前它**必须**被报"没配音"，
+   * 不然下面"标了唱段就不再报"那条是恒真的（打靶时它就这么绿过一次）。
+   */
+  store.save({ ...keep, shots: keep.shots.map((x) => (x.id === first.id ? { ...x, dialogue: '（唱）晚风吹过我的脸', audioPath: null } : x)) });
+  await page.reload();
+  await page.waitForTimeout(1200);
+  await page.locator('.tab', { hasText: '分镜' }).click();
+  await page.waitForTimeout(700);
+  const cardOf = () => page.locator('.shot-desc.tappable').first().locator('xpath=ancestor::*[contains(@class,"card")][1]');
+  const probBefore = await cardOf().locator('.prob').allInnerTexts().catch(() => []);
+  console.log('   （夹具）标唱段之前，这一镜被报"没配音"：', probBefore.some((t) => /没配音/.test(t)) ? '✓' : `✕ ${probBefore.join(' | ') || '(没有问题行)'}`);
+  await page.locator('.shot-desc.tappable').first().click();
+  await page.waitForTimeout(1300);
+  await page.locator('.ed-tab', { hasText: '镜头' }).first().click();
+  await page.waitForTimeout(400);
+  const on = page.locator('.ed [data-sing="on"]');
+  console.log('   「镜头」页里有唱段开关：', (await on.count()) === 1 ? '✓' : '✕');
+  const row = page.locator('.ed .sing-block label.row').first();
+  const rh = await row.evaluate((n) => Math.round(n.getBoundingClientRect().height)).catch(() => 0);
+  console.log('   开关那一整行都能点，而且够高（拇指点得准）：', rh >= 44 ? `✓ ${rh}px` : `✕ ${rh}px`);
+  console.log('   没有歌时当场说出来：',
+    /还没有歌|用背景音乐/.test(await page.locator('.ed [data-sing="song"]').innerText().catch(() => '')) ? '✓' : '✕');
+  await page.locator('.ed [data-sing="file"]').setInputFiles({ name: '海风.wav', mimeType: 'audio/wav', buffer: Buffer.from('RIFF0000WAVEfmt ') });
+  await page.waitForTimeout(1000);
+  console.log('   传歌这条路是通的：',
+    store.read(proj.id).song?.name === '海风.wav' && /海风\.wav/.test(await page.locator('.ed [data-sing="song"]').innerText().catch(() => ''))
+      ? '✓' : `✕ ${JSON.stringify(store.read(proj.id).song)}`);
+  await row.click();
+  await page.locator('.ed [data-sing="from"]').fill('3');
+  await page.locator('.ed [data-sing="to"]').fill('7');
+  await page.locator('.ed-top button:has-text("保存")').click();
+  await page.waitForTimeout(1500);
+  const sv = store.read(proj.id).shots.find((x) => x.id === first.id);
+  console.log('   勾上、填起止、保存 —— 存上了：', JSON.stringify(sv?.sing) === '{"from":3,"to":7}' ? '✓' : `✕ ${JSON.stringify(sv?.sing)}`);
+  console.log('   时长跟着唱段走（4 秒）：', sv?.duration === 4 ? '✓' : `✕ ${sv?.duration}`);
+  const badge = page.locator('[data-sing="badge"]').first();
+  console.log('   卡片上看得见「唱 ♪ 3–7s」：',
+    (await badge.count()) && /3–7s/.test(await badge.innerText()) ? '✓' : `✕ ${await badge.innerText().catch(() => '(没有)')}`);
+  const prob = await cardOf().locator('.prob').allInnerTexts().catch(() => []);
+  console.log('   ⚠ 唱段不再被报"有台词但没配音"：', prob.some((t) => /没配音/.test(t)) ? `✕ ${prob.join(' | ')}` : '✓');
+  // 还原：别让后面几节量到一个被改过的第一镜
+  store.save({ ...store.read(proj.id), song: keep.song ?? null, shots: keep.shots });
+  await page.reload();
+  await page.waitForTimeout(1200);
+}
+
 rejections.push(...(await page.evaluate(() => window.__fdRejections || []).catch(() => [])));
 console.log('未处理的 Promise 拒绝：', rejections.length ? `✕ ${rejections.slice(0, 3).join(' | ')}` : '无 ✓');
 

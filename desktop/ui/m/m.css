@@ -941,3 +941,7 @@ input {
 .shot-pick.on { background: var(--beam); color: #fff; }
 /* 选中的卡片整张要看得出来 —— 只靠角上那个勾，翻起来分不清 */
 .card.shot.picked { outline: 2px solid var(--beam); outline-offset: -2px; }
+
+/* 唱段开关：整行都是点的范围（44px 高）—— 20px 的方块拇指点不准 */
+.sing-block label.row { min-height: 44px; cursor: pointer; }
+.sing-block input[type=checkbox] { width: 22px; height: 22px; flex: 0 0 auto; }

@@ -54,7 +54,9 @@ export const PORTABLE_KEYS = [
   // 其它跑起来会影响结果的偏好
   'videoPromptMode', 'seamMode', 'durationPolicy', 'autoCheckOnStart',
   // 声音由谁出：换电脑之后默认退回「我们配」的话，人会以为模型不出声了
-  'videoAudio'
+  'videoAudio',
+  // 唱段用万相的哪一版
+  'singModel'
 ];
 
 /**

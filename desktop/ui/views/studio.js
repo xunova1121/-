@@ -1487,7 +1487,9 @@ export default {
           // 厂商档位必须带上：分镜写 4 秒、厂商只出 5 秒档、按 5 秒计费
           durations: state.catalog?.videoDurations || []
         },
-        tts: { provider: r.tts?.provider, model: r.tts?.model }
+        tts: { provider: r.tts?.provider, model: r.tts?.model },
+        // 唱段走的是万相，不是上面那家 —— 按它的档位和单价算
+        sing: { provider: r.sing?.provider, model: r.sing?.model, durations: [5, 10] }
       };
     }
 
@@ -2135,6 +2137,32 @@ export default {
               value: String(mm), selected: Number(shot.lens) === mm
             }, `${mm}mm${{ 24: '（广角，背景显得远）', 35: '（接近人眼）', 50: '（标准）', 85: '（背景压缩、虚化强）', 135: '（长焦，主体从环境里抽离）' }[mm]}`))),
           motion: h('input', { type: 'text', placeholder: '镜头缓慢推进…', value: shot.motion || '' }),
+          /**
+           * 时长。「出视频用的」那一组里一直摆着「时长」这个标签，底下却没有输入框 ——
+           * 分组那次改版时引用了 fields.duration 而没定义它。唱段让时长变成要紧的事，顺手补上。
+           * 唱段的时长由起止秒定，这里改了会被服务端按唱段校回来（并说一声）。
+           */
+          duration: h('input', {
+            type: 'number', min: 0.5, max: 30, step: 0.5, style: 'width:80px',
+            value: String(shot.duration || ''), disabled: Boolean(shot.sing),
+            title: shot.sing ? '唱段的时长跟着唱的那一段走，改起止秒' : ''
+          }),
+          /**
+           * ══════════ 唱段 ══════════ cap:sing
+           *
+           * 这一镜是**唱**的：绑定歌里的一段（第几秒到第几秒），
+           * 出视频时把这一段歌发给万相照着对口型，合成时用歌本身当这一镜的声音。
+           * 起止秒留空 = 接在前面最近一个唱段的终点上（一首歌通常连着拆成几镜）。
+           */
+          singOn: h('input', { type: 'checkbox', checked: Boolean(shot.sing), 'data-sing': 'on' }),
+          singFrom: h('input', {
+            type: 'number', min: 0, step: 0.1, style: 'width:90px', placeholder: '接上一段',
+            value: shot.sing ? String(shot.sing.from) : '', 'data-sing': 'from'
+          }),
+          singTo: h('input', {
+            type: 'number', min: 0, step: 0.1, style: 'width:90px', placeholder: '自动',
+            value: shot.sing ? String(shot.sing.to) : '', 'data-sing': 'to'
+          }),
           // 这一镜走哪一档视频模型。自动判定给一个，判错的那几镜由人改
           tier: h('select', {},
             h('option', { value: '', selected: !shot.tier }, '自动判定'),
@@ -2206,6 +2234,69 @@ export default {
               h('option', { value: l.id, selected: l.id === link, title: l.hint }, l.label)))
         };
 
+        /**
+         * 唱段那一块：开关 + 起止秒 + 这部片子用的是哪首歌（没有就在这儿传）。
+         *
+         * 歌是整部片子共用的，放在每一镜里传看起来重复 —— 但人是在标唱段的那一刻
+         * 才发现"还没有歌"的，让他去别的页面找入口，这一步就断了。
+         */
+        const singBlock = () => {
+          const song = project.song?.path
+            ? `唱段用的歌：${project.song.name || '（未命名）'}${project.song.seconds ? `（${Number(project.song.seconds).toFixed(1)} 秒）` : ''}`
+            : project.edit?.music?.path
+              ? `没单独传唱段的歌，用背景音乐「${project.edit.music.name || '背景音乐'}」`
+              : '⚠ 这部片子还没有歌 —— 唱段出不了视频';
+          const songInput = h('input', {
+            type: 'file', style: 'display:none', 'data-sing': 'file',
+            accept: 'audio/mpeg,audio/mp4,audio/x-m4a,audio/aac,audio/wav,audio/flac,audio/ogg,.mp3,.m4a,.wav,.flac,.ogg'
+          });
+          const songBtn = h('button', { class: 'btn ghost sm', onclick: () => songInput.click() },
+            project.song?.path ? '换一首' : '传唱段用的歌');
+          songInput.onchange = async () => {
+            const file = songInput.files?.[0];
+            if (!file) return;
+            songBtn.disabled = true;
+            songBtn.textContent = '上传中…';
+            try {
+              const dataUrl = await new Promise((resolve, reject) => {
+                const fr = new FileReader();
+                fr.onload = () => resolve(fr.result);
+                fr.onerror = () => reject(new Error('这个文件读不出来'));
+                fr.readAsDataURL(file);
+              });
+              let err = null;
+              // cap:sing
+              await stream(`/projects/${project.id}/song`, { dataUrl, fileName: file.name }, (ev) => {
+                if (ev.type === 'finished' && ev.project) project.song = ev.project.song;
+                if (ev.type === 'note') toast(ev.message, 'ok');
+                if (ev.type === 'error') err = ev.message;
+              });
+              if (err) throw new Error(err);
+              songNote.textContent = `唱段用的歌：${project.song?.name || file.name}`;
+              songBtn.textContent = '换一首';
+            } catch (e) {
+              toast(e.message, 'err');
+              songBtn.textContent = project.song?.path ? '换一首' : '传唱段用的歌';
+            } finally {
+              songBtn.disabled = false;
+              songInput.value = '';
+            }
+          };
+          const songNote = h('span', { class: 'field-hint', style: 'margin:0', 'data-sing': 'song' }, song);
+          return h('div', { class: 'sing-block', style: 'margin-top:10px' },
+            h('label', { class: 'inline', style: 'gap:6px;cursor:pointer' },
+              fields.singOn, h('b', {}, '唱段'), h('span', { class: 'field-hint', style: 'margin:0' }, '这一镜是唱的，不是说的')),
+            h('div', { class: 'shot-edit-grid' },
+              h('div', {}, h('label', {}, '唱歌里的第几秒起'), fields.singFrom),
+              h('div', {}, h('label', {}, '唱到第几秒'), fields.singTo)),
+            h('div', { class: 'inline', style: 'gap:8px;margin-top:4px' }, songNote, songBtn, songInput),
+            h('div', { class: 'hint' },
+              '唱段出视频固定走万相（只有它能照着一段歌声对口型），把歌的这一段一起发过去；'
+              + '这一镜不配音，合成时声音就是歌本身，背景音乐在这一段让开。'
+              + '一镜最多 10 秒，时长跟着起止秒走。起止留空 = 接在上一个唱段后面。'
+              + '歌要是你有权使用的 —— 我们不会去网上找歌。'));
+        };
+
         const saveEdit = h('button', {
           class: 'btn sm primary',
           onclick: async () => {
@@ -2232,6 +2323,13 @@ export default {
                   transition: fields.transition.value,
                   // cap:shot-segment
                   segment: Number(fields.segment.value) || 1,
+                  ...(fields.duration.value !== '' && !fields.duration.disabled ? { duration: Number(fields.duration.value) } : {}),
+                  // cap:sing —— 勾上但起止没填 = 接在上一个唱段后面（服务端算）
+                  sing: fields.singOn.checked
+                    ? (fields.singFrom.value === '' || fields.singTo.value === ''
+                      ? 'auto'
+                      : { from: Number(fields.singFrom.value), to: Number(fields.singTo.value) })
+                    : null,
                   link: fields.link.value,
                   skills: pickedSkills,
                   variants: pickedVariants,
@@ -2468,7 +2566,8 @@ export default {
               h('div', {}, h('label', {}, '第几场'), fields.segment)),
             h('div', { class: 'hint' },
               '场次 = 同一时间同一地点的一段戏。跨场次不能锁末帧、不能拿邻镜当参考图，'
-              + '转场也只该出现在场次之间 —— 划错了这几件事都会做在错的地方。')),
+              + '转场也只该出现在场次之间 —— 划错了这几件事都会做在错的地方。'),
+            singBlock()),
 
           group('配音用的', '改这些只要重配音，图和视频都不用动', shot.audioPath,
             '⚠ 这一镜已经配过音了。改完要**重新配音**才生效。图和视频都不受影响。',
@@ -2520,6 +2619,20 @@ export default {
                   shot.actualDuration && shot.actualDuration !== shot.duration
                     ? h('span', { style: 'color:var(--caution)' }, ` →${shot.actualDuration}s`)
                     : null),
+                /**
+                 * 唱段要在**收起时**也看得见：它改变了这一镜的声音从哪儿来、走哪个模型，
+                 * 而编辑面板默认是关着的。片子是照着旧的那段歌对的口型时标黄 —— 嘴和歌会对不上。
+                 */
+                shot.sing
+                  ? h('span', {
+                      class: 'shot-no sing-badge',
+                      'data-sing': 'badge',
+                      style: JSON.stringify(shot.videoSing || null) !== JSON.stringify(shot.sing) && shot.videoPath ? 'color:var(--caution)' : '',
+                      title: shot.videoPath && JSON.stringify(shot.videoSing || null) !== JSON.stringify(shot.sing)
+                        ? '片子不是照着现在这段歌对的口型（起止改过，或先出片后标的唱段）—— 重出视频'
+                        : '唱段：出视频带着这段歌对口型，合成时用歌本身'
+                    }, `♪ ${shot.sing.from}–${shot.sing.to}s`)
+                  : null,
                 // 光靠"描述可点"没人发现得了，摆个明确的入口
                 h('button', { class: 'shot-edit-btn', title: '改这一镜的描述、景别、台词', onclick: openEdit }, '改文案'),
                 // 和「改文案」并排。藏在编辑面板底部时用户根本找不到它

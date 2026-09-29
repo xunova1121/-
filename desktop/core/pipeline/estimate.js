@@ -60,6 +60,18 @@ export function dialogueChars(shot) {
 }
 
 /**
+ * 这一镜是不是唱段。
+ *
+ * ⚠ 不 import sing.js：这个文件要在浏览器里单独取（/estimate.js），
+ * 多一个 import 就多一个要放行的模块。判据只是"起止秒有效"，和 sing.normalizeSing 同一条线。
+ */
+function isSung(s) {
+  const from = Number(s?.sing?.from);
+  const to = Number(s?.sing?.to);
+  return Number.isFinite(from) && Number.isFinite(to) && to - from >= 1 && to - from <= 10.001 && from >= 0;
+}
+
+/**
  * 这一镜的视频会被按多少秒计费。
  *
  * `durations` 是这家厂商的合法档位；给空数组就按原样，
@@ -93,13 +105,24 @@ export function forStage({ shots = [], stage, routing = {}, regenerate = false, 
       }
     }
   } else if (stage === 'video') {
+    /**
+     * 唱段那几镜走的是万相（见 pipeline/sing.js），不是全局那家 ——
+     * 按全局那家的单价算的话，一部唱段占一半的片子会估错一半。
+     */
     const r = routing.video || {};
-    const seconds = targets.reduce((sum, s) => sum + billedSeconds(s, r.durations || []), 0);
-    if (seconds > 0) items.push({ kind: 'video', provider: r.provider, model: r.model, units: seconds, calls: targets.length });
+    const sr = routing.sing || { provider: 'dashscope', model: 'wan2.6-i2v', durations: [5, 10] };
+    const plain = targets.filter((s) => !isSung(s));
+    const sung = targets.filter(isSung);
+    const seconds = plain.reduce((sum, s) => sum + billedSeconds(s, r.durations || []), 0);
+    if (seconds > 0) items.push({ kind: 'video', provider: r.provider, model: r.model, units: seconds, calls: plain.length });
+    const sungSeconds = sung.reduce((sum, s) => sum + billedSeconds(s, sr.durations || []), 0);
+    if (sungSeconds > 0) items.push({ kind: 'video', provider: sr.provider, model: sr.model, units: sungSeconds, calls: sung.length, sing: true });
   } else if (stage === 'voice') {
+    // 唱段不配音（声音是歌本身），不算钱
     const r = routing.tts || {};
-    const chars = targets.reduce((sum, s) => sum + dialogueChars(s), 0);
-    if (chars > 0) items.push({ kind: 'tts', provider: r.provider, model: r.model, units: chars, calls: targets.length });
+    const spoken = targets.filter((s) => !isSung(s));
+    const chars = spoken.reduce((sum, s) => sum + dialogueChars(s), 0);
+    if (chars > 0) items.push({ kind: 'tts', provider: r.provider, model: r.model, units: chars, calls: spoken.length });
   } else if (stage === 'compose') {
     /**
      * 合成整步一分钱不花 —— 全是本机 FFmpeg。

@@ -2555,8 +2555,12 @@ function shotIssues(s, prev = null) {
       how: `去重出第 ${prev.index} 镜 —— 接缝做在上一镜身上`
     });
   }
-  if (String(s.dialogue || '').trim() && !s.audioPath) {
+  // 唱段不配音（声音是歌本身），不算"有台词没配音"
+  if (String(s.dialogue || '').trim() && !s.audioPath && !s.sing) {
     out.push({ level: 'blocker', what: '有台词但没配音 —— 嘴在动，没有声音', fix: null, how: '去流水线跑「配音」' });
+  }
+  if (s.sing && s.videoPath && JSON.stringify(s.videoSing || null) !== JSON.stringify(s.sing)) {
+    out.push({ level: 'blocker', what: '唱段的片子不是照着现在这段歌对的口型 —— 嘴和歌会对不上', fix: 'video', how: '重出这段视频' });
   }
   if (s.headMatch?.verdict === 'mismatch') {
     out.push({ level: 'warn', what: '视频首帧和发过去的图对不上', fix: 'video', how: '重出这段视频' });
@@ -3019,7 +3023,13 @@ function shotCardOf(s, v, portrait, probs = shotIssues(s)) {
             h('span', {}, worst.level === 'blocker' ? '✕' : '!'),
             h('span', { class: 'grow' }, worst.what))
         : null,
-      s.dialogue
+      s.sing
+        ? h('div', { class: 'row', style: 'margin:8px 0 0', 'data-sing': 'badge' },
+            h('span', { class: 'tag', style: 'flex:0 0 auto' }, '唱'),
+            h('span', { class: 'muted grow', style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap' },
+              `♪ ${s.sing.from}–${s.sing.to}s${s.dialogue ? `「${s.dialogue}」` : ''}`))
+        : null,
+      s.dialogue && !s.sing
         ? h('div', { class: 'row', style: 'margin:8px 0 0' },
             h('span', { class: 'tag', style: 'flex:0 0 auto' }, LINE_KIND_SHORT[s.lineKind || (s.speaker ? 'speech' : 'voiceover')] || '白'),
             h('span', { class: 'muted grow', style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap' },
@@ -3270,6 +3280,51 @@ function openEditor(s, jump = 'content') {
   //「敲门声」最常见的下场是画出一扇开着的门，而这一镜的前提是门还关着
   const sfx = h('input', { type: 'text', class: 'min', placeholder: '敲门声、脚步声…', value: s.sound || '' });
   const dur = h('input', { type: 'number', step: '0.5', min: '0.5', max: '30', value: String(s.duration ?? 4) });
+  /**
+   * 唱段。cap:sing
+   * 和电脑端同一套：勾上 + 起止秒；起止留空 = 接在上一个唱段后面（服务端算）。
+   * 歌也能在这儿传 —— 手机里本来就存着歌，没理由非得回电脑上传。
+   */
+  const singOn = h('input', { type: 'checkbox', checked: Boolean(s.sing), 'data-sing': 'on' });
+  const singFrom = h('input', { type: 'number', step: '0.1', min: '0', placeholder: '接上一段', value: s.sing ? String(s.sing.from) : '', 'data-sing': 'from' });
+  const singTo = h('input', { type: 'number', step: '0.1', min: '0', placeholder: '自动', value: s.sing ? String(s.sing.to) : '', 'data-sing': 'to' });
+  const songText = () => (project?.song?.path
+    ? `唱段用的歌：${project.song.name || '（未命名）'}`
+    : project?.edit?.music?.path
+      ? `没单独传唱段的歌，用背景音乐「${project.edit.music.name || '背景音乐'}」`
+      : '⚠ 还没有歌 —— 唱段出不了视频');
+  const songNote = h('div', { class: 'muted', 'data-sing': 'song' }, songText());
+  const songInput = h('input', { type: 'file', accept: 'audio/*,.mp3,.m4a,.wav,.flac,.ogg', style: 'display:none', 'data-sing': 'file' });
+  const songBtn = h('button', { class: 'btn', onclick: () => songInput.click() }, project?.song?.path ? '换一首' : '传唱段用的歌');
+  songInput.onchange = async () => {
+    const file = songInput.files?.[0];
+    if (!file) return;
+    songBtn.disabled = true;
+    songBtn.textContent = '上传中…';
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result);
+        fr.onerror = () => reject(new Error('这个文件读不出来'));
+        fr.readAsDataURL(file);
+      });
+      let err = null;
+      // cap:sing
+      await stream(`/projects/${project.id}/song`, { dataUrl, fileName: file.name }, (ev) => {
+        if (ev.type === 'finished' && ev.project) project.song = ev.project.song;
+        if (ev.type === 'error') err = ev.message;
+      });
+      if (err) throw new Error(err);
+      songNote.textContent = songText();
+      toast('唱段用的歌就位', 'ok');
+    } catch (e) {
+      toast(e.message, 'err');
+    } finally {
+      songBtn.disabled = false;
+      songBtn.textContent = project?.song?.path ? '换一首' : '传唱段用的歌';
+      songInput.value = '';
+    }
+  };
 
   // 说话人只能从设定集里的角色里选 —— 手打一个名字，配音那步就配不上音色
   const cast = (project?.bible?.characters || []).map((c) => c.name);
@@ -3436,8 +3491,18 @@ function openEditor(s, jump = 'content') {
             (v) => { lens = LENSES.find(([, label]) => label === v)?.[0] || ''; }),
           '景别是焦距加距离算出来的。同样是「中景」，85mm 的背景会被压缩、虚化更强。'),
         field('运镜', chips(MOTIONS, motion, (v) => (motion = v))),
-        field('时长（秒）', dur, '有台词的话，上一组里会告诉你够不够念。'),
+        field('时长（秒）', dur, s.sing ? '这一镜是唱段，时长跟着唱的那一段走 —— 改下面的起止秒。' : '有台词的话，上一组里会告诉你够不够念。'),
         redo(s.videoPath, '⚠ 这一镜已经出过视频了。改完要重出视频才生效。图不受影响，不用重出。')),
+      h('div', { class: 'ed-group sing-block' },
+        h('h4', {}, '唱段', h('span', {}, '这一镜是唱的，不是说的')),
+        h('label', { class: 'row', style: 'gap:8px;margin:0 0 8px' }, singOn, h('span', {}, '这一镜是唱段')),
+        field('唱歌里的第几秒起', singFrom),
+        field('唱到第几秒', singTo, '一镜最多 10 秒。起止留空 = 接在上一个唱段后面。'),
+        songNote,
+        h('div', { class: 'row', style: 'margin-top:6px' }, songBtn, songInput),
+        h('div', { class: 'muted', style: 'margin-top:6px' },
+          '唱段出视频固定走万相，把歌的这一段发过去照着对口型；这一镜不配音，合成时声音就是歌本身，背景音乐在这一段让开。'
+          + '歌要是你有权使用的。')),
       h('div', { class: 'ed-group' },
         h('h4', {}, '怎么进来', h('span', {}, '合成用的，不花钱')),
         // cap:shot-transition
@@ -3547,7 +3612,12 @@ function openEditor(s, jump = 'content') {
           lens: lens === '' ? null : Number(lens),
           motion,
           tier,
-          duration: Number(dur.value) || s.duration,
+          // 唱段的时长由起止秒定，不发时长 —— 发了也会被服务端按唱段校回来
+          ...(singOn.checked ? {} : { duration: Number(dur.value) || s.duration }),
+          // cap:sing
+          sing: singOn.checked
+            ? (singFrom.value === '' || singTo.value === '' ? 'auto' : { from: Number(singFrom.value), to: Number(singTo.value) })
+            : null,
           ...(stageDraft ? { stage: stageDraft } : {})
         }
       });

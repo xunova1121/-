@@ -29,6 +29,7 @@ import * as previz from './previz.js';
 import { resolveStyle } from '../styles.js';
 import * as outlineLib from './outline.js';
 import { nativeAudioOf } from '../providers/catalog.js';
+import * as sing from './sing.js';
 
 /** 由项目和名字派生稳定种子。同一项目里同一角色，永远同一颗种子。 */
 export function deriveSeed(projectId, name) {
@@ -1011,11 +1012,19 @@ export function assembleVideoPrompt(
    * 所以这时候先把台词（和"不要背景音乐"那半句）留出位置，截的是别的。
    * 背景音乐那半句也是必须的：模型顺手配一段乐，合成时我们再混一条，就是两条音乐叠在一起。
    */
-  const byModel = voiceByModel();
-  const keep = byModel
+  /**
+   * 唱段：嘴要跟着**传过去的那段歌**动，而不是"开口说"。
+   *
+   * 和"模型出声"那一路同一个道理：这句话必须留出位置、不许被截 ——
+   * 截掉的话提示词里只剩"开口说"那一套（或者什么都没有），
+   * 模型会把它演成说话，嘴型和歌完全两回事。
+   */
+  const singing = singLine(bible, shot);
+  const byModel = !singing && voiceByModel();
+  const keep = singing || (byModel
     ? [speech, '声音只要对白和自然的环境声、动作声，不要背景音乐'].filter(Boolean).join('，')
-    : '';
-  if (!byModel) parts.push(speech);
+    : '');
+  if (!singing && !byModel) parts.push(speech);
 
   // 衔接约束放在最后：它是对整段的约束，不是画面内容。
   // 放前面会挤掉"演什么"的权重 —— 那才是这一镜的主语。
@@ -1095,6 +1104,26 @@ export function voiceByModel() {
   if (settings.get('videoAudio') !== 'model') return false;
   const v = adapters.resolvedRouting()?.video;
   return Boolean(v && nativeAudioOf(v.provider, v.model));
+}
+
+/**
+ * 唱段的那一句：谁在唱、唱的是哪几个字、身体怎么跟着歌走。
+ *
+ * 歌词写进去是为了口型：模型知道唱的是哪几个字，长音、闭口音更容易对准。
+ * "是在唱不是在说话"要明说 —— 不说的话它常常演成一边念一边点头。
+ * 不是唱段回空串。
+ */
+function singLine(bible, shot) {
+  if (!sing.singOf(shot)) return '';
+  const cast = castInFrame(bible, shot);
+  const named = shot.speaker && shot.speaker !== '旁白' ? shot.speaker : '';
+  const who = named || cast[0]?.name || '画面中的人';
+  const words = sing.lyricsOf(shot);
+  return [
+    words ? `${who}正在唱歌，唱的是：「${words}」` : `${who}正在唱歌`,
+    '口型、呼吸和表情跟着传入的歌声走，长音时嘴保持张开，换气时自然吸气，身体随节奏轻轻摆动',
+    '是在唱，不是在说话'
+  ].join('，');
 }
 
 function speechLine(bible, shot) {

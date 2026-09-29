@@ -1496,6 +1496,12 @@ async function generateVideoRaw({
   label = '出视频',
   // 要不要模型自己出声。不给就按设置里的 videoAudio 算（见 settings.js）
   audio = null,
+  /**
+   * 唱段：一段歌（公网地址），让模型**照着这段声音**对口型（见 pipeline/sing.js）。
+   * 只有万相 2.5 起收（input.audio_url）。别家拿到它会直接报错，不悄悄丢掉 ——
+   * 丢掉的话片子照样出来，只是人嘴和歌完全对不上，而且钱已经花了。
+   */
+  drivingAudioUrl = null,
   // 取消信号。只影响**轮询**，不打断已经发出去的提交 ——
   // 提交半路被掐是最坏的情况：可能已经计费，而 task_id 没拿到
   signal = null,
@@ -1512,6 +1518,12 @@ async function generateVideoRaw({
    */
   const audioCapable = nativeAudioOf(providerId, model);
   const wantAudio = audioCapable && (audio ?? settings.get('videoAudio') === 'model');
+  if (drivingAudioUrl && !(family === 'dashscope' && audioCapable)) {
+    throw new Error(
+      `${label}：唱段要"照着一段歌声对口型"，只有万相 2.5 起能做（百炼 input.audio_url），`
+      + `${provider.name} / ${model} 做不了。去「设置 → 画面规格 → 唱段用哪个模型」选一个万相 2.5 以上的`
+    );
+  }
 
   // 分辨率：调用方指定 > 设置里选的 > 这家的默认档。
   // 统一在这里翻译成该厂商认识的写法，各分支只管把 finalResolution 塞进自己的字段。
@@ -1680,12 +1692,16 @@ async function generateVideoRaw({
       // 任务会提交成功、然后在轮询里以 InvalidParameter 失败 ——
       // 白等一轮，报错还看不出是这个原因。
       requirePublicUrl(images[0], label, '图生视频');
+      // 歌不能套用上面那句"换一家收 base64 的"：唱段只有百炼能做，出路只有一条
+      if (drivingAudioUrl && !/^https?:\/\//i.test(String(drivingAudioUrl))) {
+        throw new Error(`${label}：唱段的歌要先传成公网地址，百炼才下载得到。在「设置 → 对象存储」或「图片上传网关」里配好再出这一镜`);
+      }
       spec = {
         url: endpoint(provider, 'i2v', '{{baseUrl}}/api/v1/services/aigc/video-generation/video-synthesis'),
         headers: { 'X-DashScope-Async': 'enable' },
         body: {
           model,
-          input: { prompt, img_url: images[0] },
+          input: { prompt, img_url: images[0], ...(drivingAudioUrl ? { audio_url: drivingAudioUrl } : {}) },
           // 万相图生视频的画幅**跟着首帧图走**，这里不额外塞尺寸字段 ——
           // 百炼对未知参数是严格的，多给一个反而会把整个任务顶掉。
           // 所以这条路上"比例对不对"取决于首帧图，而首帧图出完就量过了（见 checkRatio）
@@ -1913,6 +1929,7 @@ async function generateVideoRaw({
      * 界面上"这一镜的声音是模型出的"那句话靠它。
      */
     audioRequested: wantAudio,
+    drivingAudio: Boolean(drivingAudioUrl),
     audioCapable,
     raw: polled?.json ?? submitted.json
   };
@@ -3237,7 +3254,9 @@ export function resolvedRouting() {
     video: { provider: s.videoProvider, model: s.videoModel },
     tts: { provider: s.ttsProvider, model: s.ttsModel },
     // 音效。没配就是不做音效 —— 不回退到配音模型，那会念出"敲门声"三个字
-    sfx: { provider: s.sfxProvider || '', model: s.sfxModel || '' }
+    sfx: { provider: s.sfxProvider || '', model: s.sfxModel || '' },
+    // 唱段：固定走万相（只有它能照着一段歌声对口型），见 pipeline/sing.js
+    sing: { provider: 'dashscope', model: String(s.singModel || '').trim() || 'wan2.6-i2v' }
   };
 }
 
