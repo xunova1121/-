@@ -1,0 +1,88 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; background: #16130f; color: #f2ece3;
+           font: 15px/1.6 -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif;
+           -webkit-font-smoothing: antialiased; }
+  </style>
+</helmet>
+
+<div style="width: 390px; height: 844px; overflow: hidden; position: relative; background: #16130f">
+
+  <!-- 背后压暗的分镜页 -->
+  <div style="position: absolute; inset: 0; opacity: .5">
+    <div style="height: 62px; border-bottom: 1px solid #2b241c"></div>
+    <div style="height: 50px; border-bottom: 1px solid #2b241c"></div>
+    <div style="margin: 22px 14px 0; height: 196px; border-radius: 12px 12px 0 0; background: linear-gradient(160deg, #3a3128 0%, #221c16 55%, #14110d 100%)"></div>
+    <div style="margin: 0 14px; height: 120px; border-radius: 0 0 12px 12px; background: #1e1a15"></div>
+  </div>
+  <div style="position: absolute; inset: 0; background: rgba(0,0,0,.55)"></div>
+
+  <!-- 动作面板：五个按钮从卡片上搬到这里，每个都是整行大目标 -->
+  <div style="position: absolute; left: 0; right: 0; bottom: 0; padding: 16px 14px 24px; background: #1e1a15; border: 1px solid #3a3128; border-bottom: 0; border-radius: 16px 16px 0 0">
+
+    <div style="width: 38px; height: 4px; border-radius: 2px; background: #3a3128; margin: -6px auto 12px"></div>
+
+    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px">
+      <div style="width: 54px; height: 34px; border-radius: 7px; background: linear-gradient(160deg, #3a3128, #14110d); flex: 0 0 54px"></div>
+      <div style="flex: 1; min-width: 0">
+        <b style="font-size: 15px">第 3 镜</b>
+        <div style="color: #7d7365; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">阿澈把门推开一条缝…</div>
+      </div>
+    </div>
+
+    <div style="height: 1px; background: #2b241c; margin: 12px 0 4px"></div>
+
+    <div style="display: flex; align-items: center; gap: 12px; height: 56px">
+      <span style="width: 26px; text-align: center; color: #e8b45f; font-size: 16px">↻</span>
+      <div style="flex: 1; min-width: 0">
+        <div style="font-size: 15px">重出这张图</div>
+        <div style="color: #7d7365; font-size: 11.5px; line-height: 1.4">改完描述先出图，看对了再出视频 —— 省一次视频钱</div>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 12px; height: 56px; border-top: 1px solid #2b241c">
+      <span style="width: 26px; text-align: center; color: #e8b45f; font-size: 16px">▶</span>
+      <div style="flex: 1; min-width: 0">
+        <div style="font-size: 15px">重出这段视频</div>
+        <div style="color: #7d7365; font-size: 11.5px; line-height: 1.4">按首尾帧重出，会重新接上一镜的末帧</div>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 12px; height: 56px; border-top: 1px solid #2b241c">
+      <span style="width: 26px; text-align: center; color: #b6ab9b; font-size: 16px">⌖</span>
+      <div style="flex: 1; min-width: 0">
+        <div style="font-size: 15px; display: flex; align-items: center; gap: 6px">预演台
+          <span style="padding: 1px 7px; border-radius: 999px; background: rgba(111,191,138,.16); color: #6fbf8a; font-size: 10.5px">已排位</span>
+        </div>
+        <div style="color: #7d7365; font-size: 11.5px; line-height: 1.4">排机位、算景别、查越轴</div>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 12px; height: 56px; border-top: 1px solid #2b241c">
+      <span style="width: 26px; text-align: center; color: #b6ab9b; font-size: 16px">⏱</span>
+      <div style="flex: 1; min-width: 0">
+        <div style="font-size: 15px">历史版本</div>
+        <div style="color: #7d7365; font-size: 11.5px; line-height: 1.4">留最近 5 版，换回去是可逆的</div>
+      </div>
+      <span style="color: #7d7365; font-size: 12px">图 3 · 视频 2</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 12px; height: 56px; border-top: 1px solid #2b241c">
+      <span style="width: 26px; text-align: center; color: #b6ab9b; font-size: 16px">⤢</span>
+      <div style="flex: 1; min-width: 0">
+        <div style="font-size: 15px">看大图</div>
+        <div style="color: #7d7365; font-size: 11.5px; line-height: 1.4">双指放大，查手指、查衣领花纹</div>
+      </div>
+    </div>
+
+    <div style="height: 44px; margin-top: 14px; border-radius: 10px; border: 1px solid #3a3128; background: #272119; display: flex; align-items: center; justify-content: center; font-size: 15px">取消</div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

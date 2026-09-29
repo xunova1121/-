@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- 底色和网页那套一致（#16130f）：冷启动那一瞬间不会先闪一下白屏 -->
+  <style name="AppTheme" parent="android:Theme.Material.NoActionBar">
+    <item name="android:windowBackground">#16130f</item>
+    <item name="android:statusBarColor">#16130f</item>
+    <item name="android:navigationBarColor">#16130f</item>
+  </style>
+</resources>

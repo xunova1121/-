@@ -1,0 +1,2 @@
+rootProject.name = "未来创梦遥控"
+include ':app'

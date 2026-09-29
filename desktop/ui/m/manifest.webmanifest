@@ -1,0 +1,16 @@
+{
+  "name": "未来创梦 · 手机端",
+  "short_name": "未来创梦",
+  "description": "遥控电脑上的流水线：看进度、审分镜、看成片",
+  "start_url": "/m",
+  "scope": "/m/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#16130f",
+  "theme_color": "#16130f",
+  "icons": [
+    { "src": "/m/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/m/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/m/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -1,0 +1,117 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; background: #16130f; color: #f2ece3;
+           font: 15px/1.6 -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif;
+           -webkit-font-smoothing: antialiased; }
+  </style>
+</helmet>
+
+<div style="width: 390px; height: 844px; overflow: hidden; position: relative; display: flex; flex-direction: column; background: #16130f">
+
+  <!-- 顶栏 -->
+  <div style="flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #2b241c; background: #16130f">
+    <div style="flex: 1; min-width: 0; height: 40px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 9px; border: 1px solid #3a3128; background: #272119; font-size: 15px; font-weight: 600">
+      <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">深巷第七夜</span>
+      <span style="color: #7d7365; font-size: 11px">▾</span>
+    </div>
+    <div style="width: 40px; height: 40px; border-radius: 9px; border: 1px solid #3a3128; background: #272119; display: flex; align-items: center; justify-content: center; color: #b6ab9b; font-size: 16px">⟳</div>
+  </div>
+
+  <!-- 筛选条：审片时最先问的就是"哪几镜不对" -->
+  <div style="flex: 0 0 auto; display: flex; align-items: center; gap: 7px; padding: 9px 14px; border-bottom: 1px solid #2b241c; background: #16130f">
+    <div style="height: 32px; display: flex; align-items: center; padding: 0 13px; border-radius: 999px; border: 1px solid #e8b45f; background: rgba(232,180,95,.14); color: #f2ece3; font-size: 13px">全部 12</div>
+    <div style="height: 32px; display: flex; align-items: center; gap: 5px; padding: 0 13px; border-radius: 999px; border: 1px solid #6b4a3a; background: #272119; color: #d9614c; font-size: 13px">有问题 3</div>
+    <div style="height: 32px; display: flex; align-items: center; padding: 0 13px; border-radius: 999px; border: 1px solid #3a3128; background: #272119; color: #b6ab9b; font-size: 13px">缺视频 5</div>
+    <div style="flex: 1"></div>
+    <div style="width: 32px; height: 32px; border-radius: 999px; border: 1px solid #3a3128; background: #272119; color: #b6ab9b; font-size: 15px; display: flex; align-items: center; justify-content: center">⋯</div>
+  </div>
+
+  <!-- 列表 -->
+  <div style="flex: 1; overflow: hidden; padding: 0 14px">
+
+    <!-- 场次分隔：整条通栏，跨场不能锁末帧，这条线必须一眼看见 -->
+    <div style="display: flex; align-items: center; gap: 8px; margin: 13px 0 9px">
+      <div style="width: 3px; height: 15px; border-radius: 2px; background: #e8b45f"></div>
+      <b style="font-size: 13px">第 1 场</b>
+      <span style="color: #7d7365; font-size: 12.5px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">客厅 · 夜 · 4 镜</span>
+      <span style="font-size: 11.5px; color: #7d7365; padding: 2px 8px; border-radius: 999px; border: 1px solid #3a3128">黑场进入</span>
+    </div>
+
+    <!-- 有问题的一镜：整张卡带警示描边，主按钮直接变成"该做的那件事" -->
+    <div style="border: 1px solid #6b4a3a; border-radius: 12px; background: #1e1a15; overflow: hidden; margin-bottom: 11px">
+      <div style="position: relative; height: 196px; background: linear-gradient(160deg, #3a3128 0%, #221c16 55%, #14110d 100%)">
+        <div style="position: absolute; left: 10px; top: 10px; display: flex; gap: 6px">
+          <span style="padding: 3px 8px; border-radius: 7px; background: rgba(0,0,0,.55); color: #f2ece3; font-size: 11.5px; font-variant-numeric: tabular-nums">SH 003</span>
+          <span style="padding: 3px 8px; border-radius: 7px; background: rgba(0,0,0,.55); color: #b6ab9b; font-size: 11.5px; font-variant-numeric: tabular-nums">3.2s</span>
+        </div>
+        <div style="position: absolute; right: 10px; top: 10px; width: 30px; height: 30px; border-radius: 8px; background: rgba(0,0,0,.55); color: #f2ece3; font-size: 13px; display: flex; align-items: center; justify-content: center">⤢</div>
+        <div style="position: absolute; left: 50%; top: 50%; margin: -22px 0 0 -22px; width: 44px; height: 44px; border-radius: 50%; background: rgba(0,0,0,.5); border: 1px solid rgba(242,236,227,.35); color: #f2ece3; font-size: 15px; display: flex; align-items: center; justify-content: center">▶</div>
+      </div>
+
+      <!-- 问题条：说清楚"哪儿不对"和"该按哪个键"，就贴在按钮上面 -->
+      <div style="display: flex; align-items: center; gap: 7px; padding: 8px 13px; background: rgba(217,97,76,.13); border-bottom: 1px solid #2b241c">
+        <span style="color: #d9614c; font-size: 13px">✕</span>
+        <span style="flex: 1; font-size: 12.5px; color: #d9614c; line-height: 1.45">首帧没吃上一镜末帧 · 重出这段视频才会接上</span>
+      </div>
+
+      <div style="padding: 11px 13px 13px">
+        <div style="font-size: 15px; line-height: 1.5; max-height: 45px; overflow: hidden">阿澈把门推开一条缝，走廊的冷光切在他半张脸上。</div>
+        <div style="display: flex; align-items: center; gap: 6px; margin-top: 7px">
+          <span style="flex: 0 0 auto; padding: 1px 6px; border-radius: 5px; background: #272119; color: #b6ab9b; font-size: 11px">心</span>
+          <span style="flex: 1; min-width: 0; color: #7d7365; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">阿澈：「这门不该是开的。」</span>
+        </div>
+        <div style="display: flex; gap: 5px; margin-top: 9px">
+          <span style="font-size: 11.5px; padding: 3px 8px; border-radius: 999px; border: 1px solid #3a3128; color: #b6ab9b">近景</span>
+          <span style="font-size: 11.5px; padding: 3px 8px; border-radius: 999px; border: 1px solid #5a4a35; color: #d9a441">一致性 71</span>
+          <span style="font-size: 11.5px; padding: 3px 8px; border-radius: 999px; border: 1px solid #3a3128; color: #7d7365">＋2</span>
+        </div>
+
+        <!-- 三个目标，不是五个：一个主按钮 + 一个常用 + 一个"更多" -->
+        <div style="display: flex; gap: 8px; margin-top: 12px">
+          <div style="flex: 1; height: 44px; border-radius: 10px; background: #e8b45f; color: #241b0c; font-size: 14.5px; font-weight: 600; display: flex; align-items: center; justify-content: center">重出这段视频</div>
+          <div style="flex: 0 0 96px; height: 44px; border-radius: 10px; border: 1px solid #3a3128; background: #272119; color: #f2ece3; font-size: 14.5px; display: flex; align-items: center; justify-content: center">改这一镜</div>
+          <div style="flex: 0 0 44px; height: 44px; border-radius: 10px; border: 1px solid #3a3128; background: #272119; color: #b6ab9b; font-size: 17px; display: flex; align-items: center; justify-content: center">⋯</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 正常的一镜：主按钮让位给"改这一镜"，没有红条 -->
+    <div style="border: 1px solid #2b241c; border-radius: 12px; background: #1e1a15; overflow: hidden">
+      <div style="position: relative; height: 196px; background: linear-gradient(150deg, #2c2620 0%, #1a1610 60%, #100e0b 100%)">
+        <div style="position: absolute; left: 10px; top: 10px; display: flex; gap: 6px">
+          <span style="padding: 3px 8px; border-radius: 7px; background: rgba(0,0,0,.55); color: #f2ece3; font-size: 11.5px; font-variant-numeric: tabular-nums">SH 004</span>
+          <span style="padding: 3px 8px; border-radius: 7px; background: rgba(0,0,0,.55); color: #b6ab9b; font-size: 11.5px; font-variant-numeric: tabular-nums">2.4s</span>
+        </div>
+        <div style="position: absolute; left: 10px; bottom: 10px; display: flex; gap: 6px">
+          <span style="padding: 3px 8px; border-radius: 7px; background: rgba(111,191,138,.18); color: #6fbf8a; font-size: 11.5px">连续动作 ↑</span>
+        </div>
+        <div style="position: absolute; left: 50%; top: 50%; margin: -22px 0 0 -22px; width: 44px; height: 44px; border-radius: 50%; background: rgba(0,0,0,.5); border: 1px solid rgba(242,236,227,.35); color: #f2ece3; font-size: 15px; display: flex; align-items: center; justify-content: center">▶</div>
+      </div>
+      <div style="padding: 11px 13px 13px">
+        <div style="font-size: 15px; line-height: 1.5; max-height: 45px; overflow: hidden">门缝里伸进一只手，指节压在门框上，慢慢把门推到底。</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 底部 tab -->
+  <div style="flex: 0 0 auto; display: flex; border-top: 1px solid #2b241c; background: #16130f; padding-bottom: 8px">
+    <div style="flex: 1; height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: #7d7365; font-size: 10.5px"><span style="font-size: 15px; line-height: 1">◍</span>流水线</div>
+    <div style="flex: 1; height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: #7d7365; font-size: 10.5px"><span style="font-size: 15px; line-height: 1">✎</span>剧本</div>
+    <div style="flex: 1; height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: #7d7365; font-size: 10.5px"><span style="font-size: 15px; line-height: 1">☰</span>设定</div>
+    <div style="flex: 1; height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: #e8b45f; font-size: 10.5px"><span style="font-size: 15px; line-height: 1">▤</span>分镜</div>
+    <div style="flex: 1; height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: #7d7365; font-size: 10.5px"><span style="font-size: 15px; line-height: 1">▶</span>成片</div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>
