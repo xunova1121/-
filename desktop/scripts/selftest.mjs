@@ -8362,6 +8362,211 @@ section('大纲是正式一步（不再是分镜里的一个面板）');
  *      和"钥匙文件没拷过来"都悄悄变成了"一个密钥都没有"
  *   ② 配置要能导出导入，而且**导出文件里绝不能有密钥**
  */
+/**
+ * ════════ 能出声的视频模型 ════════
+ *
+ * 用户的原话：「把目录里的视频模型更新到能出声的版本」。
+ *
+ * 光把模型加进下拉框是个陷阱：能出声的模型**默认就出声**，而合成那一步
+ * 配了配音会把它的声音丢掉（钱白花），没配配音会把它编的声音混进成片
+ * （而提示词还写着"人物不说话"）。所以一起做了"声音由谁出"这个开关，
+ * 下面每一处都要有一条会在它坏掉时变红的断言。
+ */
+section('能出声的视频模型：目录、请求、提示词、合成');
+{
+  const cat = await import('../core/providers/catalog.js');
+  const ad = await import('../core/providers/adapters.js');
+  const cs = await import('../core/pipeline/consistency.js');
+  const st = await import('../core/pipeline/studio.js');
+  const before = {
+    videoAudio: settings.get('videoAudio'),
+    videoProvider: settings.get('videoProvider'),
+    videoModel: settings.get('videoModel'),
+    baseUrls: settings.get('baseUrls')
+  };
+
+  // ── 目录 ──
+  const dash = cat.PROVIDERS.find((p) => p.id === 'dashscope');
+  for (const id of ['wan2.6-i2v', 'wan2.5-i2v-preview']) {
+    const m = (dash.models || []).find((x) => x.id === id);
+    check(`目录里有 ${id}，而且标着能出声`, m?.nativeAudio === true && m?.capability === 'i2v', JSON.stringify(m));
+  }
+
+  // ── 认得出哪些能出声 ──
+  /**
+   * ⚠ Seedance 1.5 pro 的 ID 带日期后缀、我们查不到原文，所以**没写进目录**，
+   * 靠用户从控制台复制进「自定义」。这里验的是"填进来之后认得出"。
+   * 下面几个 ID 是编来测规则的，不是真 ID。
+   */
+  check('自定义填的 Seedance 1.5 pro 认得出能出声', cat.nativeAudioOf('volcengine', 'doubao-seedance-1-5-pro-000000'));
+  check('Seedance 2.x 也认得出', cat.nativeAudioOf('volcengine', 'doubao-seedance-2-0-000000'));
+  check('⚠ Seedance 1.0 不算（它不出声）', !cat.nativeAudioOf('volcengine', 'doubao-seedance-1-0-pro-250528'));
+  check('⚠ 推理接入点 ep-… 看不出型号，按不能出声算（当错的代价不对等）',
+    !cat.nativeAudioOf('volcengine', 'ep-20260101-abcdef'));
+  check('万相 2.2 不算', !cat.nativeAudioOf('dashscope', 'wan2.2-i2v-plus'));
+  check('⚠ 万相 2.5 的**文生图**模型不算（名字像，但它不是视频）', !cat.nativeAudioOf('dashscope', 'wan2.5-t2i-preview'));
+  check('别家一律不算（可灵 3.0 的 ID 我们没核实到）', !cat.nativeAudioOf('kling', 'kling-v3'));
+
+  // ── 火山的请求：能出声的模型要**显式**写 generate_audio，两个方向都写 ──
+  settings.patch({ baseUrls: { ...(settings.get('baseUrls') || {}), volcengine: `${upstreamUrl}/v3` } });
+  vault.setSecret('ARK_API_KEY', 'ark-selftest');
+  const sendVideo = async (model) => {
+    upstream.lastVideoBody = null;
+    await ad.generateVideo({ providerId: 'volcengine', model, prompt: '码头', firstFrameUrl: 'https://example.com/a.png', duration: 5 });
+    return upstream.lastVideoBody || {};
+  };
+  settings.patch({ videoAudio: 'ours' });
+  {
+    const b = await sendVideo('doubao-seedance-1-5-pro-000000');
+    check('⚠ 「我们配」时，能出声的 Seedance 被明确告知别出声（不然它的声音被丢掉、钱白花）',
+      b.generate_audio === false, JSON.stringify(b.generate_audio));
+  }
+  settings.patch({ videoAudio: 'model' });
+  {
+    const b = await sendVideo('doubao-seedance-1-5-pro-000000');
+    check('「模型自己出」时发 generate_audio: true', b.generate_audio === true, JSON.stringify(b.generate_audio));
+    const b0 = await sendVideo('doubao-seedance-1-0-pro-250528');
+    check('⚠ Seedance 1.0 一个字都不加（它不认这个字段，多发可能被整单拒掉）',
+      !('generate_audio' in b0), JSON.stringify(Object.keys(b0)));
+  }
+
+  // ── 万相：一个音频参数都不发 ──
+  {
+    /**
+     * 百炼对不认识的参数是严格的（产品代码里记过这个坑）。官方说 2.5 起默认就出声，
+     * 所以什么都不用写 —— 写了反而可能把整个任务顶掉。
+     */
+    let seen = null;
+    const srv = http.createServer((req, res) => {
+      let raw = '';
+      req.on('data', (c) => { raw += c; });
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        if (req.method === 'POST') { seen = JSON.parse(raw || '{}'); return res.end(JSON.stringify({ output: { task_id: 't1' } })); }
+        return res.end(JSON.stringify({ output: { task_status: 'SUCCEEDED', video_url: 'https://example.com/v.mp4' } }));
+      });
+    });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    settings.patch({ baseUrls: { ...(settings.get('baseUrls') || {}), dashscope: `http://127.0.0.1:${srv.address().port}` } });
+    vault.setSecret('DASHSCOPE_API_KEY', 'ds-selftest');
+    await ad.generateVideo({ providerId: 'dashscope', model: 'wan2.6-i2v', prompt: '码头', firstFrameUrl: 'https://example.com/a.png', duration: 5 }).catch(() => {});
+    srv.close();
+    const dumped = JSON.stringify(seen || {});
+    check('万相 2.6 的请求发出去了', Boolean(seen), dumped.slice(0, 120));
+    check('⚠ 万相那边一个音频参数都没发（百炼碰到不认识的参数会整单拒掉）',
+      !/audio|generate_audio/i.test(dumped), dumped.slice(0, 200));
+  }
+
+  // ── 提示词：模型出声时台词给全、写明念出来，而且不许被截掉 ──
+  {
+    const bible = {
+      style: { anchor: '写实' },
+      characters: [{ name: '阿澜', appearance: '二十七八岁，短发，藏青制服' }],
+      scenes: [{ name: '码头', appearance: '晨雾' }],
+      props: []
+    };
+    const long = '这里的缆绳被人动过，昨晚值班的是谁，你把交接本拿过来我看一眼再说';
+    const shot = {
+      id: 's1', index: 1, scene: '码头', characters: ['阿澜'], speaker: '阿澜',
+      /**
+       * ⚠ 描述故意写得很长。第一版这里只有四十来字，整条提示词本来就不到 200 字 ——
+       * 截断根本没发生，"台词没被截掉"就是恒真的。把台词保护拿掉打靶，它照样绿。
+       * 夹具短到够不着那条代码路径，断言就只是在验运气。
+       */
+      description: '阿澜蹲下查看缆绳的断口，断口很齐，像是被刀割的，他眉头紧锁，伸手摸了摸断口处的纤维，'
+        + '又回头看向身后亮着灯的值班室，值班室的窗帘拉了一半，里面似乎有人影晃动，他站起身，'
+        + '拍了拍膝盖上的灰，目光扫过停在远处的三条渔船，最后落在最靠外那条船的船头上，'
+        + '船头挂着的那盏马灯还在微微摇晃，灯罩上沾着新鲜的油渍，甲板上散落着几截同样齐整的缆绳头，'
+        + '潮水正一点点漫上石阶，远处传来第一声汽笛',
+      camera: '中景', motion: '镜头缓慢推进', dialogue: `阿澜：「${long}」`, duration: 5,
+      // 有首帧才走精准模式（200 字上限）；没首帧会自动按完整写，上限 380，这条夹具就又够不着截断了
+      imagePath: '/frame.png'
+    };
+    settings.patch({ videoAudio: 'ours', videoProvider: 'dashscope', videoModel: 'wan2.6-i2v', videoPromptMode: 'precise' });
+    const quiet = cs.assembleVideoPrompt(bible, shot, {});
+    check('「我们配」时提示词和原来一样（台词截到 26 个字，只用来对口型）',
+      !quiet.includes(long) && !/不要背景音乐/.test(quiet), quiet.slice(-80));
+
+    settings.patch({ videoAudio: 'model' });
+    const loud = cs.assembleVideoPrompt(bible, shot, {});
+    check('⚠ 模型出声时台词**一字不少**（截掉的后半句它就不会念）', loud.includes(long), loud.slice(-120));
+    check('并且写明了"开口说"', /阿澜开口说/.test(loud), loud.slice(-120));
+    check('⚠ 写了不要背景音乐（不然它配一段、合成时我们再混一段，两条音乐叠在一起）',
+      /不要背景音乐/.test(loud));
+    // 「我们配」时台词只留 26 字，不到 200 字很正常；要验的是模型出声这条真的触发了截断，
+    // 并且截断落在台词前面 —— 不然"台词一字不少"就是恒真的
+    check('⚠ 夹具真的够长 —— 模型出声时确实发生了截断，且截在台词之前（不然上一条是恒真的）',
+      loud.includes('…') && loud.indexOf('…') < loud.indexOf(long), loud.slice(0, 60));
+    check('⚠ 精准模式的 200 字上限还在，但被截的是别的，不是台词', loud.length <= 200 && loud.includes(long),
+      `${loud.length} 字`);
+
+    // 选了"模型出"，但路由到的模型是哑的 —— 提示词照老样子写
+    settings.patch({ videoModel: 'wan2.2-i2v-plus' });
+    const mute = cs.assembleVideoPrompt(bible, shot, {});
+    check('⚠ 选了"模型出"但模型是哑的：提示词照老样子（不然白让它张嘴）',
+      !mute.includes(long) && !/开口说/.test(mute), mute.slice(-80));
+
+    // 旁白
+    settings.patch({ videoModel: 'wan2.6-i2v' });
+    const vo = cs.assembleVideoPrompt(bible, { ...shot, speaker: '旁白', dialogue: '旁白：那一夜，码头上的灯一盏都没亮' }, {});
+    check('旁白也写出要念的那句（原来只写"嘴唇闭合"）', /旁白念：「那一夜/.test(vo), vo.slice(-80));
+  }
+
+  // ── 合成：用片段原声顶替那一镜的配音和音效 ──
+  {
+    const A = { id: 'A', index: 1, videoPath: '/a.mp4' };
+    const B = { id: 'B', index: 2, videoPath: '/b.mp4' };
+    const timeline = [
+      { shot: A, start: 0, span: 4, first: true },
+      { shot: B, start: 4, span: 3, first: true },
+      // A 被剪刀切成两段：第二段从入点 1.5 秒开始
+      { shot: A, start: 7, span: 2, first: false, win: { in: 1.5, out: 3.5 } }
+    ];
+    const audioAt = [
+      { id: 'A', path: '/tts-a.wav', at: 0, index: 1, span: 4 },
+      { id: 'B', path: '/tts-b.wav', at: 4, index: 2, span: 3 }
+    ];
+    const sfxAt = [{ id: 'A', path: '/sfx-a.wav', at: 0, index: 1, span: 4, gain: 0.35 }];
+    const plan = st.nativeAudioPlan({ timeline, audioAt, sfxAt, hasAudio: (s) => s.id === 'A' });
+
+    check('⚠ 带声音的那一镜，我们的配音被让掉了（不然两个声音同时说话）',
+      !plan.audioAt.some((a) => a.path === '/tts-a.wav'), JSON.stringify(plan.audioAt.map((a) => a.path)));
+    check('它的音效也让掉了（模型的声音里已经有了）', !plan.sfxAt.some((a) => a.id === 'A'));
+    check('⚠ 片段里没声音的那一镜，照旧用我们的配音（退路 —— 不然那句台词凭空没了）',
+      plan.audioAt.some((a) => a.path === '/tts-b.wav'));
+    const nat = plan.audioAt.filter((a) => a.native);
+    check('⚠ 被切成两段的那一镜，两段各放各的原声（台词只放一次，原声不一样）',
+      nat.length === 2, JSON.stringify(nat.map((a) => [a.at, a.seek])));
+    check('⚠ 第二段从入点开始读（不然声画错位，口型整段对不上）',
+      nat.some((a) => a.at === 7 && a.seek === 1.5 && a.trimTo === 2), JSON.stringify(nat));
+    check('原声不带 gain —— 在混音里算人声，背景音乐会给它让路', nat.every((a) => a.gain === undefined));
+    check('说得出哪几镜用了原声、哪几镜退回了配音',
+      JSON.stringify(plan.native) === '[1]' && JSON.stringify(plan.fallback) === '[2]',
+      JSON.stringify({ native: plan.native, fallback: plan.fallback }));
+
+    const muted = st.nativeAudioPlan({
+      timeline: timeline.map((r) => (r.shot.id === 'A' ? { ...r, muted: true } : r)), audioAt, sfxAt, hasAudio: () => true
+    });
+    check('标了静音的镜不放原声', !muted.audioAt.some((a) => a.native && a.id === 'A'));
+    const off = st.nativeAudioPlan({ timeline, audioAt, sfxAt, hasAudio: () => true, voiceOn: false });
+    check('⚠ 剪辑台把台词轨关了时，原声也不放（它里面就是台词）', !off.audioAt.some((a) => a.native));
+  }
+
+  // ── 读入点：ffmpeg 那一层真的把 -ss 放在对应的 -i 前面 ──
+  {
+    const ff = await import('../core/ffmpeg.js');
+    const args = ff.planAudio([{ path: '/clip.mp4', at: 7, seek: 1.5, trimTo: 2 }], null, { outputPath: '/o.m4a' });
+    const i = args.indexOf('/clip.mp4');
+    check('⚠ -ss 1.500 紧挨在这个文件的 -i 前面（放后面就成了"输出从第几秒开始"）',
+      args[i - 1] === '-i' && args.slice(0, i).includes('-ss') && args[args.indexOf('-ss') + 1] === '1.500',
+      JSON.stringify(args.slice(0, i + 1)));
+  }
+
+  check('换电脑导出时带上这一项', (await import('../core/portable.js')).PORTABLE_KEYS.includes('videoAudio'));
+
+  settings.patch(before);
+}
+
 section('换电脑：读不出来的凭据文件要说清为什么');
 {
   const { VAULT_FILE } = await import('../core/paths.js');

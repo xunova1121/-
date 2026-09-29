@@ -343,6 +343,14 @@ export function planAudio(usable, bgm, { total = 0, loudness = false, duck = tru
     // trimTo：音效比镜头长时裁掉多出来的部分，否则它会响到下一镜上。
     // -t 放在 -i **前面**才是"只读这么长"，放后面变成"输出这么长"，那是另一回事
     if (Number(e.trimTo) > 0) args.push('-t', String(e.trimTo));
+    /**
+     * seek：从这个文件的第几秒开始读。
+     *
+     * 给"视频片段自带的声音"用的 —— 剪辑台上设过入点的镜头，画面从入点开始，
+     * 它的声音也得从入点开始。不跳的话声音比画面早了那么几秒，
+     * 口型整段对不上，而那正是用模型原声的全部意义。
+     */
+    if (Number(e.seek) > 0) args.push('-ss', Number(e.seek).toFixed(3));
     args.push('-i', e.path);
   }
   if (bgm) {

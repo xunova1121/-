@@ -28,6 +28,7 @@ import * as anglesLib from './angles.js';
 import * as previz from './previz.js';
 import { resolveStyle } from '../styles.js';
 import * as outlineLib from './outline.js';
+import { nativeAudioOf } from '../providers/catalog.js';
 
 /** 由项目和名字派生稳定种子。同一项目里同一角色，永远同一颗种子。 */
 export function deriveSeed(projectId, name) {
@@ -1004,7 +1005,23 @@ export function assembleVideoPrompt(
   if (sk.motion.length) parts.push(...sk.motion);
   else parts.push(shot.motion || '镜头缓慢推进');
 
-  parts.push(speechLine(bible, shot));
+  const speech = speechLine(bible, shot);
+  /**
+   * ══════════ 声音由模型出时，台词不许被截掉 ══════════
+   *
+   * 下面那一行会把超长的提示词**从尾巴截掉**（精准模式 200 字），
+   * 而台词原本就排在尾巴附近。哑模型那边无所谓 —— 台词只是对口型的参考；
+   * 可声音由模型出时，被截掉的就是它**要念的那句话**：
+   * 成片里那句台词少半句、或者整句没了，而且不报任何错。
+   *
+   * 所以这时候先把台词（和"不要背景音乐"那半句）留出位置，截的是别的。
+   * 背景音乐那半句也是必须的：模型顺手配一段乐，合成时我们再混一条，就是两条音乐叠在一起。
+   */
+  const byModel = voiceByModel();
+  const keep = byModel
+    ? [speech, '声音只要对白和自然的环境声、动作声，不要背景音乐'].filter(Boolean).join('，')
+    : '';
+  if (!byModel) parts.push(speech);
 
   // 衔接约束放在最后：它是对整段的约束，不是画面内容。
   // 放前面会挤掉"演什么"的权重 —— 那才是这一镜的主语。
@@ -1012,8 +1029,9 @@ export function assembleVideoPrompt(
 
   let prompt = parts.filter(Boolean).join('，');
   // 视频模型的提示词普遍比图像模型短，超长会被截断或稀释，主动收一下
-  if (prompt.length > cap) prompt = `${prompt.slice(0, cap - 1)}…`;
-  return prompt;
+  const room = keep ? Math.max(20, cap - keep.length - 1) : cap;
+  if (prompt.length > room) prompt = `${prompt.slice(0, room - 1)}…`;
+  return keep ? `${prompt}，${keep}` : prompt;
 }
 
 /**
@@ -1071,9 +1089,33 @@ function castInFrame(bible, shot) {
   return matchCharacters(bible, shot);
 }
 
+/**
+ * 这一镜的声音是不是由**视频模型自己**出。
+ *
+ * 两件事同时成立才是：设置里选了"模型自己出"，而且路由到的视频模型**能**出声。
+ * 只满足前一条的话（选了模型出、但模型是哑的），提示词照老样子写 ——
+ * 合成那一步会发现片段里没声音，退回用我们的配音。
+ *
+ * ⚠ 看的是全局路由到的那个视频模型。镜头分级把某几镜路由到别的模型时，
+ * 那几镜的提示词会按全局那个模型的能力写 —— 已知的粗糙处，先不细分。
+ */
+export function voiceByModel() {
+  if (settings.get('videoAudio') !== 'model') return false;
+  const v = adapters.resolvedRouting()?.video;
+  return Boolean(v && nativeAudioOf(v.provider, v.model));
+}
+
 function speechLine(bible, shot) {
   const cast = castInFrame(bible, shot);
   const said = speaker.spokenText(shot.dialogue);
+  /**
+   * 模型自己出声时，**台词要给全、要写明念出来**。
+   *
+   * 原来那套是给哑模型写的：台词只是用来对口型的参考，截到 26 个字够用了；
+   * 旁白、画外音只要写"嘴唇闭合"。可一旦声音由模型出，
+   * 截掉的后半句它就**不会念** —— 成片里那句话只剩半句，而且没有任何报错。
+   */
+  const byModel = voiceByModel();
 
   /**
    * ⚠ 画面里一个人都没有时，**什么都别说**。
@@ -1132,6 +1174,13 @@ function speechLine(bible, shot) {
     // 心里话：他自己的声音，但嘴闭着。加一句表情提示，否则模型会画成发呆
     const who = r.speaker || cast[0]?.name;
     const others = cast.filter((c) => c.name !== who);
+    if (byModel) {
+      return (
+        `${who ? `${who}的内心独白` : '内心独白'}，用他自己的声音念出来：「${said.text}」，`
+        + '但他嘴唇闭合、没有开口，眼神有戏、若有所思'
+        + (others.length ? `，${others.map((c) => c.name).join('、')}嘴唇闭合` : '')
+      );
+    }
     return (
       `${who ? `${who}的内心独白` : '内心独白'}，声音是他自己的但不出声，嘴唇闭合，眼神有戏、若有所思`
       + (others.length ? `，${others.map((c) => c.name).join('、')}嘴唇闭合` : '')
@@ -1139,15 +1188,28 @@ function speechLine(bible, shot) {
   }
   if (kind === 'offscreen') {
     // 画外音：说话人不在这一镜画面里，画面里的人是在听
+    if (byModel) {
+      return `画外传来${r.speaker ? `${r.speaker}的` : ''}声音：「${said.text}」，说话的人不在画面里，画面中的人在听、嘴唇闭合`;
+    }
     return `说话的人不在画面里，声音来自画外，画面中的人在听、嘴唇闭合${
       r.speaker ? `（说话的是${r.speaker}）` : ''}`;
   }
   // 旁白：有台词，但声音来自画外，画面里的人照样闭嘴
-  if (kind === 'voiceover' || !r.speaker) return '画外旁白，声音来自画外，画面中的人嘴唇闭合';
+  if (kind === 'voiceover' || !r.speaker) {
+    return byModel
+      ? `画外旁白念：「${said.text}」，画面中的人嘴唇闭合`
+      : '画外旁白，声音来自画外，画面中的人嘴唇闭合';
+  }
 
   // 台词太长会把提示词吃掉一大块，而口型只需要知道说的是什么、有多长
-  const line = said.text.length > 26 ? `${said.text.slice(0, 26)}…` : said.text;
   const others = cast.filter((c) => c.name !== r.speaker);
+  if (byModel) {
+    return (
+      `${r.speaker}开口说：「${said.text}」，声音和口型对上，只有他在说话`
+      + (others.length ? `，${others.map((c) => c.name).join('、')}嘴唇闭合` : '')
+    );
+  }
+  const line = said.text.length > 26 ? `${said.text.slice(0, 26)}…` : said.text;
   return (
     `只有${r.speaker}在说话，口型对上台词「${line}」` +
     // 这半句是正面说法：说的是别人该是什么样，而不是"不要张嘴"

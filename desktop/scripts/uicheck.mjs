@@ -740,6 +740,20 @@ await page.waitForTimeout(900);
     collapsed >= 6 && openedByDefault.length === 2
       && openedByDefault.join('').includes('能力路由') && openedByDefault.join('').includes('画面规格'),
     `收起 ${collapsed} 节，默认展开：${JSON.stringify(openedByDefault.map((t) => t.trim().slice(0, 8)))}`);
+  /**
+   * ── 声音由谁出 ──
+   * 代价必须写在选项旁边：选"模型出"的人得先知道每一镜的声音会不一样。
+   */
+  {
+    const field = page.locator('#view-inner .field', { has: page.locator('label', { hasText: '声音由谁出' }) });
+    const opts = await field.locator('option').evaluateAll((os) => os.map((o) => o.value));
+    check('设置里有「声音由谁出」，两个选项都在，默认是我们配',
+      (await field.count()) === 1 && opts.join() === 'ours,model'
+        && (await field.locator('select').inputValue()) === 'ours',
+      JSON.stringify(opts));
+    check('⚠ 选项旁边写着代价（每一镜声音不一样），不只写好处',
+      /每一镜的声音会不一样/.test(await field.innerText().catch(() => '')));
+  }
   check('折起来时标题一行不少（折的是位置，不是入口）',
     (await page.locator('#view-inner .panel > summary').count()) >= 8,
     String(await page.locator('#view-inner .panel > summary').count()));
