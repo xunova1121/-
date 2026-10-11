@@ -4,6 +4,9 @@ name: 贾维斯桌面版安装包
 
 on:
   push:
+    branches: ['**']
+    # 打正式版：推送 desktop-v* 标签（GitHub 不对标签推送检查 paths）
+    tags: ['desktop-v*']
     paths:
       - 'jarvis/src/**'
       - 'jarvis/server/**'
@@ -12,7 +15,6 @@ on:
       - 'jarvis/index.html'
       - 'jarvis/package*.json'
       - '.github/workflows/jarvis-desktop.yml'
-    tags: ['desktop-v*']
   workflow_dispatch:
 
 permissions:
