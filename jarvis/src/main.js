@@ -6,12 +6,12 @@
  *   注入事件（SSE）           ─┘                                        ├─▶ stage.frame()
  *   人脸角度 / 麦克风包络 / 播报包络 ─────────────────────────────────┘
  *
- * 主视觉是全息胸像（全息 / 线框 / 点阵 三种样式）。情绪通过颜色、轮廓光强度、扫描速度、
- * 光环转速和故障强度表达。
+ * 主视觉默认是“光核”（发光能量球 + 会变形状的眼睛），可切换为全息胸像 / 线框胸像。
+ * 情绪通过颜色、眼睛形状、轮廓光强度、光环转速与扫描速度表达。
  * 减少动画：在初始化 WebGL 之前判断，命中则根本不 import three.js、不下载网格。
  */
 import { EmotionMachine } from './core/emotionMachine.js';
-import { EMOTION_PARAMS } from './core/emotions.js';
+import { EMOTION_PARAMS, EYE_SHAPES } from './core/emotions.js';
 import { ParamTween } from './core/tween.js';
 import { followTarget, smoothToward } from './core/faceMath.js';
 import { SentenceChunker } from './core/sentenceChunker.js';
@@ -45,10 +45,10 @@ const isMobile = matchMedia('(pointer: coarse)').matches;
 const reducedMql = matchMedia('(prefers-reduced-motion: reduce)');
 
 // ---------------------------------------------------------------- 情绪
-const tween = new ParamTween({ ...EMOTION_PARAMS.平静 }, { duration: 400 });
+const tween = new ParamTween({ ...EMOTION_PARAMS.平静, ...EYE_SHAPES.平静 }, { duration: 400 });
 const machine = new EmotionMachine({
   onChange: (emotion) => {
-    tween.set(EMOTION_PARAMS[emotion], now());
+    tween.set({ ...EMOTION_PARAMS[emotion], ...EYE_SHAPES[emotion] }, now());
     document.documentElement.style.setProperty('--hue', String(EMOTION_PARAMS[emotion].hue));
     dashboard.setEmotion(emotion, EMOTION_PARAMS[emotion].hue);
   }
@@ -65,7 +65,10 @@ const live = {
   breath: 0,
   speak: 0, // 语音输出包络（0..1）
   boundaryAt: 0, // 最近一次词边界事件时间
-  burstUntil: 0 // 随机故障闪烁截止时间
+  glitch: 0,
+  nextBlink: 2500, // 下一次眨眼的时间
+  glance: { yaw: 0, pitch: 0 }, // 待机时随机张望的目标（度）
+  nextGlance: 4000
 };
 
 // ---------------------------------------------------------------- 渲染策略
@@ -97,8 +100,14 @@ function frame(dt, t) {
   // 光环转速 / 扫描速度：情绪表的角速度；用户说话时放慢到 0.12（需求 6.3）
   const omega = live.voiceListening ? 0.12 : p.spin;
 
-  // 人脸跟随：只转头，肩膀不动（着色器按高度混合）
-  const tgt = settings.faceFollow && live.face ? live.face : { yaw: 0, pitch: 0 };
+  // 人脸跟随：光核的眼睛在球面上滑向你；胸像只转头、肩膀不动（着色器按高度混合）。
+  // 没有跟随目标时，每隔几秒随机看一眼别处，再回到正前方 —— 显得是“活的”
+  if (t > live.nextGlance) {
+    const look = Math.random() < 0.55;
+    live.glance = look ? { yaw: (Math.random() - 0.5) * 24, pitch: (Math.random() - 0.5) * 12 } : { yaw: 0, pitch: 0 };
+    live.nextGlance = t + (look ? 900 + Math.random() * 900 : 3000 + Math.random() * 4000);
+  }
+  const tgt = settings.faceFollow && live.face ? live.face : live.glance;
   live.yaw = smoothToward(live.yaw, tgt.yaw, 0.12, dt || 16.7);
   live.pitch = smoothToward(live.pitch, tgt.pitch, 0.12, dt || 16.7);
 
@@ -117,16 +126,32 @@ function frame(dt, t) {
   }
   live.speak += (speakTarget - live.speak) * (speakTarget > live.speak ? 0.5 : 0.12);
 
-  // 故障：基础强度来自情绪的抖动档位，另外每隔几秒随机闪一下（全息信号不稳的质感）
-  if (t > live.burstUntil + 2500 && Math.random() < dt / 4000) live.burstUntil = t + 120 + Math.random() * 160;
-  const glitch = Math.min(1, p.jitter * 1.6 + (t < live.burstUntil ? 0.55 : 0));
+  // 故障切片只在“警觉”时出现，平时画面保持稳定、柔和
+  live.glitch += ((machine.state === '警觉' ? 0.3 : 0) - live.glitch) * 0.08;
+
+  // 眨眼：每 3–6 秒一次，闭合约 150ms；偶尔连眨两下
+  let blink = 1;
+  const sinceBlink = t - live.nextBlink;
+  if (sinceBlink > 0) {
+    blink = Math.abs(sinceBlink - 75) / 75;
+    if (sinceBlink > 150) {
+      blink = 1;
+      live.nextBlink = t + (Math.random() < 0.15 ? 220 : 3000 + Math.random() * 3000);
+    }
+  }
 
   return {
     hue: p.hue,
     glow: p.glow,
     spin: omega,
     scanSpeed: 0.05 + omega * 0.3,
-    glitch,
+    glitch: live.glitch,
+    blink,
+    eyeW: p.eyeW,
+    eyeH: p.eyeH,
+    eyeY: p.eyeY,
+    happy: p.happy,
+    calm: p.calm,
     yaw: live.yaw * DEG,
     pitch: live.pitch * DEG,
     breath: live.breath,
@@ -147,7 +172,7 @@ async function ensureStage() {
         onContextChange: (s, ms) => console.info(`[stage] WebGL 上下文${s === 'lost' ? '丢失' : `已恢复（${Math.round(ms)}ms）`}`)
       });
       stage.onFrame(frame);
-      stage.setStyle(settings.style);
+      stage.setStyle(settings.look);
       applyFpsCap();
       stage.setPaused('hidden', document.hidden);
       stage.setPaused('offscreen', !canvasVisible);
@@ -560,8 +585,8 @@ $('#btn-fullscreen').addEventListener('click', () => {
 });
 
 function setStyle(style) {
-  if (!['holo', 'wire', 'dots'].includes(style)) style = 'holo';
-  setSetting('style', style);
+  if (!['orb', 'holo', 'wire'].includes(style)) style = 'orb';
+  setSetting('look', style);
   for (const c of document.querySelectorAll('[data-style]')) c.setAttribute('aria-checked', String(c.dataset.style === style));
   stage?.setStyle(style);
 }
@@ -604,7 +629,7 @@ $('#set-persist').checked = settings.persistMemory;
 dashboard.setTurns(history.filter((m) => m.role === 'user').length);
 $('#set-motion').value = settings.reducedMotion;
 for (const x of document.querySelectorAll('#set-vad button')) x.setAttribute('aria-checked', String(x.dataset.v === settings.vadSensitivity));
-setStyle(settings.style);
+setStyle(settings.look);
 setFocusView(settings.focusView);
 applyEmotionOverride(settings.emotionOverride);
 applyMotionMode();
@@ -625,7 +650,7 @@ renderMemory();
 
 // ---------------------------------------------------------------- 键盘快捷键
 //   Esc 打断播报/生成   /  聚焦输入框   Alt+1..4 切换视图   Alt+F 专注视图   Alt+V 直接对话
-//   Alt+H / Alt+W / Alt+D 全息 / 线框 / 点阵   按住空格：按下说话（降级模式、焦点不在输入框时）
+//   Alt+O / Alt+H / Alt+W 光核 / 胸像 / 线框   按住空格：按下说话（降级模式、焦点不在输入框时）
 const VIEWS = ['console', 'chat', 'memory', 'settings'];
 const typing = (el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
 document.addEventListener('keydown', (e) => {
@@ -640,9 +665,9 @@ document.addEventListener('keydown', (e) => {
     if (n) setView(VIEWS[n - 1]);
     else if (k === 'KeyF') setFocusView(!settings.focusView);
     else if (k === 'KeyV' && speechRecognitionSupported) setDirectVoice(voice.mode === 'off');
+    else if (k === 'KeyO') setStyle('orb');
     else if (k === 'KeyH') setStyle('holo');
     else if (k === 'KeyW') setStyle('wire');
-    else if (k === 'KeyD') setStyle('dots');
     else return;
     e.preventDefault();
     return;

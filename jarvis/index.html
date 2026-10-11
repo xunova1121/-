@@ -118,7 +118,7 @@
         <dt><kbd>Alt</kbd>+<kbd>1</kbd>–<kbd>4</kbd></dt><dd>控制台 / 对话 / 记忆 / 设置</dd>
         <dt><kbd>Alt</kbd>+<kbd>F</kbd></dt><dd>专注视图</dd>
         <dt><kbd>Alt</kbd>+<kbd>V</kbd></dt><dd>直接对话开关</dd>
-        <dt><kbd>Alt</kbd>+<kbd>H</kbd>/<kbd>W</kbd>/<kbd>D</kbd></dt><dd>全息 / 线框 / 点阵</dd>
+        <dt><kbd>Alt</kbd>+<kbd>O</kbd>/<kbd>H</kbd>/<kbd>W</kbd></dt><dd>光核 / 胸像 / 线框</dd>
         <dt>按住 <kbd>空格</kbd></dt><dd>按下说话（降级模式）</dd>
       </dl>
     </div>
@@ -131,9 +131,9 @@
     <label class="sr-only" for="prompt">输入消息</label>
     <input id="prompt" name="prompt" type="text" placeholder="说出你的想法…（按 / 聚焦）" enterkeyhint="send" />
     <div class="form-chips" role="radiogroup" aria-label="显示样式">
-      <button type="button" class="chip" data-style="holo" role="radio" title="全息（Alt+H）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c-3 0-5 2.4-5 5.6 0 2.6 1.3 4.6 2.6 5.6L9 16c-2.6.6-4.5 2-5 5h16c-.5-3-2.4-4.4-5-5l-.6-1.8C15.7 13.2 17 11.2 17 8.6 17 5.4 15 3 12 3z" /></svg>全息</button>
-      <button type="button" class="chip" data-style="wire" role="radio" title="线框（Alt+W）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 7v10l7 4 7-4V7zM5 7l7 4 7-4M12 11v10" /></svg>线框</button>
-      <button type="button" class="chip" data-style="dots" role="radio" title="点阵（Alt+D）"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="1.2" class="fill" /><circle cx="12" cy="6" r="1.2" class="fill" /><circle cx="18" cy="6" r="1.2" class="fill" /><circle cx="6" cy="12" r="1.2" class="fill" /><circle cx="12" cy="12" r="1.2" class="fill" /><circle cx="18" cy="12" r="1.2" class="fill" /><circle cx="6" cy="18" r="1.2" class="fill" /><circle cx="12" cy="18" r="1.2" class="fill" /><circle cx="18" cy="18" r="1.2" class="fill" /></svg>点阵</button>
+      <button type="button" class="chip" data-style="orb" role="radio" title="光核（Alt+O）"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><ellipse cx="9.2" cy="11" rx="1.2" ry="1.8" class="fill" /><ellipse cx="14.8" cy="11" rx="1.2" ry="1.8" class="fill" /></svg>光核</button>
+      <button type="button" class="chip" data-style="holo" role="radio" title="全息胸像（Alt+H）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c-3 0-5 2.4-5 5.6 0 2.6 1.3 4.6 2.6 5.6L9 16c-2.6.6-4.5 2-5 5h16c-.5-3-2.4-4.4-5-5l-.6-1.8C15.7 13.2 17 11.2 17 8.6 17 5.4 15 3 12 3z" /></svg>胸像</button>
+      <button type="button" class="chip" data-style="wire" role="radio" title="线框胸像（Alt+W）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 7v10l7 4 7-4V7zM5 7l7 4 7-4M12 11v10" /></svg>线框</button>
     </div>
     <button type="button" class="stop" id="btn-stop" title="打断（Esc）" aria-label="打断播报">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" class="fill" /></svg>

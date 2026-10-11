@@ -31,19 +31,19 @@ const browser = await chromium.launch({
     return { vertices: s.vertices, drawCalls: s.drawCalls, isWebGL2: s.isWebGL2, fps: s.fps, bloom: s.bloom, style: s.style };
   });
   check('WebGL 主视觉启动', true, JSON.stringify(stats));
-  check('全息胸像网格加载', stats.vertices > 8000 && stats.style === 'holo', `${stats.vertices} 顶点`);
+  check('默认“光核”样式，胸像网格已加载', stats.vertices > 8000 && stats.style === 'orb', `${stats.style} / ${stats.vertices} 顶点`);
   check('泛光开启时 draw calls ≤ 12', stats.bloom === true && stats.drawCalls <= 12, `bloom=${stats.bloom} calls=${stats.drawCalls}`);
 
   await page.waitForTimeout(1500);
   await page.screenshot({ path: `${OUT}/01-holo.png` });
 
-  // 显示样式：全息 / 线框 / 点阵
-  for (const style of ['wire', 'dots', 'holo']) {
+  // 显示样式：胸像 / 线框 / 光核
+  for (const style of ['holo', 'wire', 'orb']) {
     await page.click(`[data-style="${style}"]`);
     await page.waitForTimeout(500);
-    const cur = await page.evaluate(() => ({ s: window.__jarvis.stage.stats.style, saved: window.__jarvis.settings.style, calls: window.__jarvis.stage.stats.drawCalls }));
+    const cur = await page.evaluate(() => ({ s: window.__jarvis.stage.stats.style, saved: window.__jarvis.settings.look, calls: window.__jarvis.stage.stats.drawCalls }));
     check(`切换样式：${style}`, cur.s === style && cur.saved === style && cur.calls <= 12, JSON.stringify(cur));
-    if (style !== 'holo') await page.screenshot({ path: `${OUT}/02-${style}.png` });
+    if (style !== 'orb') await page.screenshot({ path: `${OUT}/02-${style}.png` });
   }
 
   // 对话：关键词/提示驱动情绪

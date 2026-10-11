@@ -1,7 +1,9 @@
 /**
  * 全息胸像着色器。GLSL ES 1.00 写法，WebGL1 / WebGL2 共用（three.js 在 WebGL2 下自动转写）。
  *
- * 所有“身体”部件（网格 / 线框 / 点阵 / 电路线 / 眼睛）共用同一段顶点变换 HOLO_TRANSFORM：
+ * 两种主体：
+ *   光核（默认）：发光能量球 + 着色器里画的一双会变形状的眼睛（orbVertex / orbFragment）；
+ *   胸像：全息头像（全息 / 线框），以下部件共用同一段顶点变换 HOLO_TRANSFORM：
  *   - 人脸跟随：只转头 —— 按高度权重（颈部以上 1、肩部 0）混合旋转，脖子自然扭转、肩膀不动；
  *   - 待机时头部轻微摆动；
  *   - 聆听：表面沿法线随麦克风包络起伏（输入）；
@@ -11,6 +13,13 @@ const common = /* glsl */ `
 mat3 rotY(float a) { float c = cos(a), s = sin(a); return mat3(c, 0.0, -s, 0.0, 1.0, 0.0, s, 0.0, c); }
 mat3 rotX(float a) { float c = cos(a), s = sin(a); return mat3(1.0, 0.0, 0.0, 0.0, c, s, 0.0, -s, c); }
 float hash1(float n) { return fract(sin(n) * 43758.5453); }
+float hash3(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+float vnoise(vec3 p) {
+  vec3 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hash3(i), hash3(i + vec3(1,0,0)), f.x), mix(hash3(i + vec3(0,1,0)), hash3(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(hash3(i + vec3(0,0,1)), hash3(i + vec3(1,0,1)), f.x), mix(hash3(i + vec3(0,1,1)), hash3(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
 vec3 hsl2rgb(float h, float s, float l) {
   vec3 rgb = clamp(abs(mod(h / 60.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
   return l + s * (rgb - 0.5) * (1.0 - abs(2.0 * l - 1.0));
@@ -47,7 +56,6 @@ const HOLO_TRANSFORM = /* glsl */ `
 
 export const holoVertex = /* glsl */ `
 ${transformUniforms}
-uniform float u_pointSize;     // 点阵样式：像素尺度
 varying vec3 v_normal;
 varying vec3 v_view;
 varying float v_y;
@@ -61,9 +69,6 @@ void main() {
   v_view = normalize(-mv.xyz);
   v_y = position.y;
   gl_Position = projectionMatrix * mv;
-#ifdef DOTS
-  gl_PointSize = clamp(u_pointSize / -mv.z, 1.0, 4.0);
-#endif
 }
 `;
 
@@ -79,16 +84,19 @@ varying vec3 v_normal;
 varying vec3 v_view;
 varying float v_y;
 ${common}
+// 正面柔光 + 轮廓光：脸的正面整体是亮的（像发光的雕塑），而不是只有边缘发光的“暗脸”——
+// 后者在暗背景里很像骷髅，看着吓人
 vec4 holo(float fill, float rimPow) {
-  float fres = pow(1.0 - abs(dot(normalize(v_normal), normalize(v_view))), rimPow);
-  float lines = smoothstep(0.82, 1.0, 0.5 + 0.5 * sin(v_y * 2.4 - u_time * 5.0)) * 0.10;
+  float facing = abs(dot(normalize(v_normal), normalize(v_view)));
+  float fres = pow(1.0 - facing, rimPow);
+  float front = pow(facing, 1.6) * 0.3;
+  float lines = smoothstep(0.85, 1.0, 0.5 + 0.5 * sin(v_y * 2.4 - u_time * 3.0)) * 0.05;
   float sy = fract((v_y - u_scanBase) / 130.0 - u_time * u_scanSpeed);
-  float band = exp(-pow((sy - 0.5) * 22.0, 2.0)) * 0.55;
+  float band = exp(-pow((sy - 0.5) * 18.0, 2.0)) * 0.3;
   float fade = smoothstep(u_bottom, u_bottom + 14.0, v_y);
-  float flicker = 0.95 + 0.05 * sin(u_time * 47.0) * sin(u_time * 13.0);
-  float k = (fill + fres * (1.1 + 0.6 * u_speak) * (0.6 + u_glow) + lines + band) * fade * flicker;
-  vec3 base = hsl2rgb(u_hue, 0.85, 0.55);
-  vec3 col = base * k + vec3(0.75, 0.9, 1.0) * pow(fres, 3.0) * 0.5 * fade;
+  float k = (fill + front + fres * (0.9 + 0.5 * u_speak) * (0.6 + u_glow) + lines + band) * fade;
+  vec3 base = hsl2rgb(u_hue, 0.8, 0.6);
+  vec3 col = base * k + vec3(0.8, 0.93, 1.0) * (pow(fres, 3.0) * 0.3 + front * 0.25) * fade;
   return vec4(col, k);
 }
 `;
@@ -96,13 +104,7 @@ vec4 holo(float fill, float rimPow) {
 export const holoFragment = /* glsl */ `
 ${holoShading}
 void main() {
-#ifdef DOTS
-  vec2 d = gl_PointCoord - 0.5;
-  if (dot(d, d) > 0.25) discard;
-  gl_FragColor = holo(0.16, 1.6) * 0.55;
-#else
-  gl_FragColor = holo(0.07, 2.2);
-#endif
+  gl_FragColor = holo(0.1, 2.6);
 }
 `;
 
@@ -160,16 +162,20 @@ void main() {
 }
 `;
 
+/** 眼睛：横向的柔和椭圆光，会眨眼（u_blink 1 = 睁开，接近 0 = 闭上） */
 export const eyeFragment = /* glsl */ `
 uniform float u_hue;
 uniform float u_intensity;
+uniform float u_blink;
 ${common}
 void main() {
-  float r = length(gl_PointCoord - 0.5) * 2.0;
+  vec2 d = (gl_PointCoord - 0.5) * 2.0;
+  d.y *= 2.4 / max(u_blink, 0.06);
+  float r = length(d);
   if (r > 1.0) discard;
-  float core = exp(-r * r * 18.0);
-  float halo = pow(1.0 - r, 2.5) * 0.45;
-  vec3 c = mix(hsl2rgb(u_hue, 0.9, 0.62), vec3(1.0), core * 0.85);
+  float core = exp(-r * r * 5.0) * 0.75;
+  float halo = pow(1.0 - r, 2.0) * 0.35;
+  vec3 c = mix(hsl2rgb(u_hue, 0.8, 0.65), vec3(0.95, 0.98, 1.0), core * 0.6);
   float a = (core + halo) * u_intensity;
   gl_FragColor = vec4(c * a, a);
 }
@@ -281,5 +287,103 @@ void main() {
   float r = length(gl_PointCoord - 0.5);
   if (r > 0.5) discard;
   gl_FragColor = vec4(hsl2rgb(u_hue, 0.5, 0.7) * v_a, v_a * smoothstep(0.5, 0.0, r));
+}
+`;
+
+/**
+ * 光核：发光能量球。表面有缓慢流动的柔光纹理；聆听时随麦克风起伏（输入），播报时整体脉动（输出）。
+ */
+export const orbVertex = /* glsl */ `
+uniform float u_time;
+uniform float u_motion;
+uniform float u_breath;
+uniform float u_speak;
+varying vec3 v_dir;
+varying vec3 v_normal;
+varying vec3 v_view;
+${common}
+void main() {
+  float t = u_time * u_motion;
+  vec3 dir = normalize(position);
+  float ripple = (vnoise(dir * 3.0 + vec3(0.0, t * 1.5, 0.0)) - 0.5) * u_breath * 2.2;
+  vec3 p = position * (1.0 + u_speak * 0.035 * (0.6 + 0.4 * sin(t * 18.0))) + dir * ripple;
+  vec4 mv = modelViewMatrix * vec4(p, 1.0);
+  v_dir = dir;
+  v_normal = normalize(normalMatrix * normal);
+  v_view = normalize(-mv.xyz);
+  gl_Position = projectionMatrix * mv;
+}
+`;
+
+/**
+ * 眼睛在“注视坐标系”里画：把球面方向转到注视方向下，前半球的 (x, y) 就是脸的平面坐标。
+ * 注视方向 = 人脸跟随 / 待机时随机张望，所以眼睛会在球面上滑动，像在看你。
+ * 形状：椭圆眼（宽 / 高 / 眨眼），可混合成 “^” 笑眼（happy）或 “∪” 闭眼（calm）。
+ */
+export const orbFragment = /* glsl */ `
+uniform float u_time;
+uniform float u_hue;
+uniform float u_glow;
+uniform float u_speak;
+uniform float u_yaw;
+uniform float u_pitch;
+uniform float u_eyeW;
+uniform float u_eyeH;
+uniform float u_eyeY;
+uniform float u_happy;
+uniform float u_calm;
+uniform float u_blink;
+uniform float u_glitch;
+varying vec3 v_dir;
+varying vec3 v_normal;
+varying vec3 v_view;
+${common}
+float arcEye(vec2 e, float dir) {
+  // 抛物线弧：dir = +1 为 “^”，-1 为 “∪”
+  float x = clamp(e.x / u_eyeW, -1.0, 1.0);
+  float yc = dir * (u_eyeH * 0.55) * (1.0 - x * x) - dir * u_eyeH * 0.2;
+  float d = abs(e.y - yc);
+  float th = 0.045;
+  return (1.0 - smoothstep(th * 0.5, th, d)) * (1.0 - smoothstep(0.9, 1.05, abs(e.x) / u_eyeW));
+}
+float eye(vec2 f, float side) {
+  vec2 e = f - vec2(side * 0.3, u_eyeY);
+  float h = max(u_eyeH * u_blink, 0.012);
+  float ell = 1.0 - smoothstep(0.82, 1.0, length(e / vec2(u_eyeW, h)));
+  float m = mix(ell, arcEye(e, 1.0), u_happy);
+  return mix(m, arcEye(e, -1.0), u_calm);
+}
+void main() {
+  float t = u_time;
+  float facing = abs(dot(normalize(v_normal), normalize(v_view)));
+  float fres = pow(1.0 - facing, 2.4);
+  float inner = pow(facing, 1.8);
+
+  // 柔光流纹：两层噪声相互穿插，慢慢流动
+  float n1 = vnoise(v_dir * 2.6 + vec3(t * 0.12, t * 0.07, 0.0));
+  float n2 = vnoise(v_dir * 5.0 - vec3(0.0, t * 0.15, t * 0.05));
+  float swirl = smoothstep(0.45, 0.85, n1 * 0.65 + n2 * 0.35);
+
+  // 注视坐标系（与人脸跟随同向）
+  vec3 q = rotX(-u_pitch) * rotY(-u_yaw) * v_dir;
+  float eyes = 0.0;
+  if (q.z > 0.2) {
+    vec2 f = q.xy;
+    // 故障：警觉时眼睛横向轻微抖动
+    f.x += (hash1(floor(t * 14.0)) - 0.5) * 0.04 * u_glitch;
+    eyes = max(eye(f, 1.0), eye(f, -1.0)) * smoothstep(0.2, 0.45, q.z);
+  }
+
+  vec3 base = hsl2rgb(u_hue, 0.85, 0.55);
+  // 按感知亮度归一：黄 / 青这类亮色不会糊成一片，眼睛在任何颜色上都看得清
+  float luma = dot(base, vec3(0.299, 0.587, 0.114));
+  base *= clamp(0.45 / max(luma, 0.05), 0.55, 1.4);
+  float k = 0.1 + inner * (0.22 + 0.12 * u_glow) + swirl * inner * 0.22 + fres * (0.8 + 0.6 * u_glow + 0.6 * u_speak);
+  vec3 col = base * k + vec3(0.85, 0.95, 1.0) * pow(fres, 3.5) * 0.4;
+  // 眼睛：接近白色的亮光，略带主色
+  vec3 eyeCol = mix(vec3(1.0), hsl2rgb(u_hue, 0.9, 0.8), 0.25) * (1.1 + 0.4 * u_speak);
+  col = mix(col, eyeCol, eyes);
+  // 加色混合：alpha 取 1，亮度全部体现在颜色里
+  gl_FragColor = vec4(col, 1.0);
 }
 `;

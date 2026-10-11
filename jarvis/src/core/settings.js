@@ -9,7 +9,7 @@ export const DEFAULT_SETTINGS = {
   emotionOverride: 'auto',
   focusView: false,
   reducedMotion: 'system', // system | on | off
-  style: 'holo', // holo 全息 | wire 线框 | dots 点阵
+  look: 'orb', // orb 光核 | holo 全息胸像 | wire 线框胸像
   quality: 'auto', // auto | high | standard | eco
   persistMemory: false // 记忆跨会话保存到本机 localStorage
 };

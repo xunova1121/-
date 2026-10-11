@@ -22,6 +22,21 @@ export const EMOTION_PARAMS = {
   警觉: { hue: 0, spin: 0.55, glow: 1.0, jitter: JITTER.高 }
 };
 
+/**
+ * “光核”形态下每种情绪的眼睛形状（单位：光核半径）。
+ * w / h：眼睛半宽 / 半高；y：眼睛中心高度；
+ * happy：向上弯的笑眼“^”程度；calm：向下弯的闭眼“∪”程度（安抚时像温和地闭着眼）。
+ */
+export const EYE_SHAPES = {
+  平静: { eyeW: 0.12, eyeH: 0.17, eyeY: 0.08, happy: 0, calm: 0 },
+  专注: { eyeW: 0.14, eyeH: 0.075, eyeY: 0.07, happy: 0, calm: 0 },
+  聆听: { eyeW: 0.13, eyeH: 0.21, eyeY: 0.11, happy: 0, calm: 0 },
+  亲和: { eyeW: 0.13, eyeH: 0.12, eyeY: 0.08, happy: 1, calm: 0 },
+  安抚: { eyeW: 0.13, eyeH: 0.1, eyeY: 0.06, happy: 0, calm: 1 },
+  愉悦: { eyeW: 0.15, eyeH: 0.14, eyeY: 0.09, happy: 1, calm: 0 },
+  警觉: { eyeW: 0.15, eyeH: 0.23, eyeY: 0.08, happy: 0, calm: 0 }
+};
+
 /** 文本关键词（需求 4.1 第二层）。“聆听”由输入事件触发，不做关键词匹配。 */
 export const EMOTION_KEYWORDS = {
   安抚: ['没关系', '不用担心', '慢慢来', '我理解', '别着急'],
