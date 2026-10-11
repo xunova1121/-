@@ -153,18 +153,37 @@
           <canvas id="evo-ring" width="132" height="132" aria-hidden="true"></canvas>
           <div class="evo-stats" id="evo-stats"></div>
         </div>
-        <p class="muted small">学习发生在这台电脑上：它会记住你的偏好，从你的 👎 反馈里总结教训，把做成功的多步任务沉淀为技能，下次直接复用。大模型本身的参数不会改变。</p>
+        <p class="muted small">学习发生在这台电脑上：记住你的偏好与身份，同一件事的新说法会自动取代旧的（旧版本留作历史），每段对话结束后自动整理要点；从 👎 反馈里总结教训，把做成功的任务沉淀为技能。大模型本身的参数不会改变。</p>
+        <details class="core-mem" id="core-mem" open>
+          <summary>核心记忆 <span class="muted small">每轮对话都会带上，贾维斯也会自己更新</span></summary>
+          <label class="field"><span>关于你</span><textarea id="core-human" rows="3" maxlength="1200" placeholder="例如：称呼我老王；产品经理；回答尽量简洁，先给结论"></textarea></label>
+          <label class="field"><span>贾维斯的设定</span><textarea id="core-persona" rows="2" maxlength="1200" placeholder="例如：用“您”称呼我；语气沉稳干练，偶尔幽默"></textarea></label>
+          <div class="pane-actions"><button class="btn sm" type="button" id="btn-core-save">保存核心记忆</button><span class="muted small" id="core-status" role="status"></span></div>
+        </details>
+        <div class="mem-engine">
+          <label class="inline-check small"><input type="checkbox" id="set-automem" /> 对话停下后自动整理记忆</label>
+          <button class="btn ghost sm" type="button" id="btn-reflect">立即整理</button>
+          <span class="muted small" id="mem-engine"></span>
+        </div>
         <div class="tabs" role="tablist">
           <button role="tab" type="button" data-mtab="memories" aria-selected="true">记忆</button>
-          <button role="tab" type="button" data-mtab="skills" aria-selected="false">技能</button>
+          <button role="tab" type="button" data-mtab="episodes" aria-selected="false">对话片段</button>
+          <button role="tab" type="button" data-mtab="skills" aria-selected="false">习得技能</button>
           <button role="tab" type="button" data-mtab="lessons" aria-selected="false">教训</button>
           <button role="tab" type="button" data-mtab="events" aria-selected="false">日志</button>
+          <button role="tab" type="button" data-mtab="archived" aria-selected="false">已归档</button>
           <button role="tab" type="button" data-mtab="history" aria-selected="false">对话</button>
         </div>
         <ul class="mind-list" id="mind-list"></ul>
         <div class="pane-actions" id="history-actions" hidden>
           <label class="inline-check"><input type="checkbox" id="set-persist" /> 对话记录跨会话保存</label>
           <button class="btn ghost sm" id="btn-clear-memory" type="button">清空对话记录</button>
+        </div>
+        <div class="pane-actions mem-backup">
+          <button class="btn ghost sm" type="button" id="btn-mem-export">导出记忆备份</button>
+          <button class="btn ghost sm" type="button" id="btn-mem-import">导入备份</button>
+          <input type="file" id="mem-import-input" accept=".json,application/json" hidden />
+          <span class="muted small">换电脑时把记忆、技能、教训一起带走</span>
         </div>
       </section>
 

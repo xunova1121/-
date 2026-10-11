@@ -25,24 +25,43 @@ export function createTools(ctx) {
   const tools = [
     {
       name: 'remember',
-      description: '把关于用户的长期信息存入记忆（偏好、身份、习惯、重要事实）。用户说“记住……”或透露了以后用得上的个人信息时调用。不要记录密码、密钥等敏感信息。',
-      input_schema: S({ content: str('要记住的一句话，用第三人称陈述，如“用户喜欢简洁的回答”'), category: { type: 'string', enum: ['preference', 'profile', 'fact', 'other'] } }, ['content']),
-      run: async ({ content, category }) => `已记住（${(await memory.remember(content, category)).content}）`
+      description: '把关于用户的长期信息存入记忆（偏好、身份、习惯、目标、重要事实）。用户说“记住……”或透露了以后用得上的个人信息时调用。和已有记忆重复会自动合并，同一件事的新说法会自动取代旧的（旧版本保留为历史）。不要记录密码、密钥等敏感信息。',
+      input_schema: S({
+        content: str('要记住的一句话，用第三人称陈述，如“用户喜欢简洁的回答”'),
+        category: { type: 'string', enum: ['profile', 'preference', 'fact', 'goal', 'other'], description: 'profile 身份 / preference 偏好 / fact 事实 / goal 目标' },
+        importance: { type: 'integer', minimum: 1, maximum: 5, description: '重要度 1–5，身份信息和明确的长期偏好给 4–5' }
+      }, ['content']),
+      run: async ({ content, category, importance }) => {
+        const m = await memory.remember(content, category, { importance });
+        return m.action === 'NOOP' ? `这条已经记得（${m.content}），已刷新。`
+          : m.action === 'UPDATE' ? `已更新记忆：「${m.previous}」→「${m.content}」（旧的保留为历史）。`
+            : `已记住（${m.content}）。`;
+      }
     },
     {
       name: 'recall',
-      description: '在长期记忆中检索与问题相关的内容。',
+      description: '在长期记忆和过往对话摘要中检索与问题相关的内容。',
       input_schema: S({ query: str('检索关键词或问题') }, ['query']),
       run: async ({ query }) => {
-        const hits = await memory.recall(query);
-        return hits.length ? hits.map((m) => `- [${m.id}] ${m.content}`).join('\n') : '没有相关记忆。';
+        const r = await memory.recall(query);
+        const lines = [
+          ...r.memories.map((m) => `- [${m.id}] ${m.content}（${memory.CATEGORIES[m.category] ?? '其他'}，重要度 ${m.importance}${m.history?.length ? `，更新过 ${m.history.length} 次` : ''}）`),
+          ...r.episodes.map((e) => `- [对话 ${new Date(e.ts).toLocaleDateString('zh-CN')}] ${e.summary}`)
+        ];
+        return lines.length ? lines.join('\n') : '没有相关记忆。';
       }
     },
     {
       name: 'forget',
-      description: '删除一条记忆（用户要求忘掉某事时）。先用 recall 找到 id。',
+      description: '让一条记忆失效（用户要求忘掉某事时）。先用 recall 找到 id。失效的记忆归档保存，不再出现在上下文里。',
       input_schema: S({ id: str('记忆 id') }, ['id']),
-      run: async ({ id }) => { await memory.forget(id); return '已删除。'; }
+      run: async ({ id }) => { await memory.forget(id); return '已忘记。'; }
+    },
+    {
+      name: 'core_memory_update',
+      description: '改写核心记忆（每轮对话都会带上的两段简短文字）。human：关于用户最重要的信息（称呼、身份、长期目标、沟通偏好）；persona：你在这位用户面前的设定（语气、称呼方式、约定）。用整段新内容替换旧内容，保留仍然有效的信息，控制在 300 字以内。',
+      input_schema: S({ block: { type: 'string', enum: ['human', 'persona'] }, content: str('新的完整内容') }, ['block', 'content']),
+      run: async ({ block, content }) => { const t = await memory.setCore(block, content); return `核心记忆（${block === 'human' ? '关于用户' : '我的设定'}）已更新，共 ${t.length} 字。`; }
     },
     {
       name: 'save_skill',

@@ -8,8 +8,10 @@
  * 与“学会的技能”（memory.saveSkill，模型自己总结的做法）不同，这里是用户安装的、可启用 / 停用 / 卸载的技能包。
  */
 import { collection } from './store.js';
+import { BUILTIN_SKILLS, MORE_BUILTIN_SKILLS } from './skillCatalog.js';
 
 const packs = collection('packs');
+const kv = collection('kv');
 
 const MAX_FILE = 256 * 1024;
 const MAX_TOTAL = 3 * 1024 * 1024;
@@ -235,4 +237,25 @@ export function matchSlash(text, names) {
   if (!m) return null;
   const name = names.find((n) => n.toLowerCase() === m[1].toLowerCase());
   return name ? { name, rest: m[2].trim() } : null;
+}
+
+/**
+ * 预置常用技能：首次启动时自动安装全部内置技能；以后新增的内置技能也会自动装上。
+ * 用户卸载过的不会再被装回来（记录在 kv 里）。
+ * @returns {Promise<string[]>} 这次新装的技能名
+ */
+export async function seedBuiltins() {
+  const seen = new Set((await kv.get('packs-seeded'))?.names ?? []);
+  const added = [];
+  for (const s of [...BUILTIN_SKILLS, ...MORE_BUILTIN_SKILLS]) {
+    const name = parseFrontmatter(s.text).meta.name;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    if (!(await packs.get(name))) {
+      await installFromText(s.text, '内置');
+      added.push(name);
+    }
+  }
+  await kv.put({ id: 'packs-seeded', names: [...seen] });
+  return added;
 }

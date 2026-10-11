@@ -22,6 +22,7 @@ import { runAgent } from './agent/agent.js';
 import { createTools } from './agent/tools.js';
 import * as ws from './agent/workspace.js';
 import * as agentMemory from './agent/memory.js';
+import { createEmbedder } from './llm/embeddings.js';
 import { initPanels } from './ui/panels.js';
 import { loadConfig, saveConfig, createAdapter, displayName, providerById, resolveVoice } from './llm/config.js';
 import { initVoicePanel } from './ui/voicePanel.js';
@@ -304,6 +305,7 @@ async function detectGateway() {
     panels.refreshModels();
     voicePanel.render();
     mcpPanel.refresh();
+    syncMemoryEngine();
     updateModelLabels();
   })().finally(() => { probing = null; });
   return probing;
@@ -414,6 +416,42 @@ function makeSpeech() {
     flush() { for (const s of chunker.flush()) speaker.speak(s); }
   };
 }
+
+// ---------------------------------------------------------------- 记忆引擎：整理用的大模型 + 语义向量，随配置变化
+function syncMemoryEngine() {
+  const { adapter, model, problem } = createAdapter(llmConfig, { gateway });
+  const real = !problem && providerById(llmConfig.provider)?.kind !== 'mock';
+  agentMemory.configureMemory({
+    llm: real ? async ({ system, prompt }) => {
+      let text = '';
+      const r = await adapter.stream({ model, system: [system], messages: [{ role: 'user', content: prompt }], tools: [], onText: (d) => { text += d; } });
+      return r?.text || text;
+    } : null,
+    embedder: createEmbedder(llmConfig, { gateway })
+  });
+}
+
+/** 自动整理记忆：对话停下来 90 秒后，把这段对话交给记忆整理（抽取事实、写摘要） */
+let reflectFrom = history.length;
+let reflectTimer = 0;
+function scheduleReflect() {
+  clearTimeout(reflectTimer);
+  if (!settings.autoMemory) return;
+  reflectTimer = setTimeout(reflectNow, 90_000);
+}
+async function reflectNow({ manual = false } = {}) {
+  clearTimeout(reflectTimer);
+  const turns = history.slice(reflectFrom);
+  if (!turns.some((t) => t.role === 'user')) { if (manual) toast('没有新的对话需要整理'); return; }
+  reflectFrom = history.length;
+  try {
+    const r = await agentMemory.reflect(turns);
+    const n = r.memories.filter((m) => m.action !== 'NOOP').length;
+    if (n || manual) toast(`记忆已整理：新增或更新 ${n} 条${r.episode ? '，并记下这段对话的摘要' : ''}`);
+    panels.refreshMind();
+  } catch (e) { console.warn('[memory] 整理失败', e); }
+}
+addEventListener('pagehide', () => { if (settings.autoMemory) reflectNow(); });
 
 /** 光核旁的建议标注（启动末尾创建） */
 let callouts = null;
@@ -552,6 +590,7 @@ async function send(text) {
     $('#mode-pill').classList.remove('offline');
     turn.streamDone = true;
     callouts?.set(followUpSuggestions({ tools: usedTools, userText: text, desktop: Boolean(DESKTOP) }));
+    scheduleReflect();
     if (!speaker.speaking) finishTurn();
   } catch (err) {
     if (err.name === 'AbortError' || active !== turn) return;
@@ -831,7 +870,9 @@ const panels = initPanels({
   settings,
   getGateway: () => gateway,
   getHistory: () => history,
-  onConfigChange: (cfg) => { llmConfig = cfg; updateModelLabels(); },
+  onConfigChange: (cfg) => { llmConfig = cfg; updateModelLabels(); syncMemoryEngine(); },
+  onReflect: () => reflectNow({ manual: true }),
+  onAutoMemory: (on) => { setSetting('autoMemory', on); if (!on) clearTimeout(reflectTimer); },
   onClearHistory: () => { history.length = 0; clearMemory(storage); toast('对话记录已清空'); },
   onPersistChange: (on) => {
     setSetting('persistMemory', on);
@@ -930,8 +971,10 @@ const palette = initPalette({
       ...(!mic.hidden ? [toggle('set-voice', '直接对话'), toggle('set-wake', '唤醒词')] : []),
       toggle('set-face', '人脸跟随'),
       { id: 'focus', group: '开关', title: body.classList.contains('focus-view') ? '退出专注视图' : '进入专注视图', keys: 'Alt F', run: () => $('#btn-focus').click() },
-      { id: 'new', group: '操作', title: '新对话', hint: '清空屏幕与上下文（记忆、知识库、技能保留）', run: () => {
+      { id: 'new', group: '操作', title: '新对话', hint: '清空屏幕与上下文（记忆、知识库、技能保留）', run: async () => {
         interrupt();
+        await reflectNow();
+        reflectFrom = 0;
         history.length = 0;
         if (settings.persistMemory) saveMemory(history, storage);
         $('#transcript').replaceChildren();
@@ -1041,6 +1084,8 @@ showPanel(PANES.includes(startPane) ? startPane : 'workspace');
 if (narrow.matches) body.classList.remove('side-open');
 setTask('idle');
 renderWelcome();
+syncMemoryEngine();
+agentMemory.maintain().catch(() => {});
 
 // ---------------------------------------------------------------- 光核旁的建议标注
 callouts = initCallouts({
@@ -1117,6 +1162,7 @@ window.__jarvis = {
   get palette() { return palette; },
   get mcp() { return mcpPanel; },
   get callouts() { return callouts; },
+  reflectNow,
   settings,
   live,
   get stage() { return stage; },

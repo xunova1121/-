@@ -108,11 +108,17 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('欢迎页与快捷任务', (await page.locator('.welcome .quick').count()) === 6 && /我是贾维斯/.test(await page.textContent('.welcome h1')));
   check('HUD 时钟与模型', /^\d{2}:\d{2}:\d{2}$/.test(await page.textContent('#hud-time')) && (await page.textContent('#hud-model')).length > 0);
 
-  // —— 技能：一键安装内置技能 → “/” 自动补全 → 点名使用
+  // —— 技能：首次启动预置常用技能；卸载后可从推荐里重装 → “/” 自动补全 → 点名使用
   await page.evaluate(() => window.__jarvis.showPanel('skills'));
+  await page.waitForFunction(() => document.querySelectorAll('#skill-list .skill').length >= 16, null, { timeout: 5000 }).catch(() => {});
+  check('首次启动预置 16 个常用技能', (await page.locator('#skill-list .skill').count()) === 16 && /16 \/ 16 个启用/.test(await page.textContent('#skill-count')), await page.textContent('#skill-count'));
+  const wr = page.locator('#skill-list .skill', { hasText: '/weekly-report' });
+  await wr.getByRole('button', { name: '卸载' }).click();
+  await wr.getByRole('button', { name: '确认卸载' }).click();
+  await page.waitForTimeout(200);
   await page.locator('.skill-tile', { hasText: '/weekly-report' }).locator('button').click();
-  await page.waitForFunction(() => document.querySelectorAll('#skill-list .skill').length === 1, null, { timeout: 5000 }).catch(() => {});
-  check('安装内置技能', (await page.locator('#skill-list .skill').count()) === 1 && /1 \/ 1 个启用/.test(await page.textContent('#skill-count')));
+  await page.waitForFunction(() => document.querySelectorAll('#skill-list .skill').length === 16, null, { timeout: 5000 }).catch(() => {});
+  check('卸载后可从推荐里重新安装', (await page.locator('#skill-list .skill', { hasText: '/weekly-report' }).count()) === 1);
   await page.fill('#prompt', '/wee');
   await page.waitForTimeout(150);
   check('输入 / 弹出技能补全', await page.isVisible('#slash-menu') && /weekly-report/.test(await page.textContent('#slash-menu')));
@@ -125,9 +131,9 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   const skillReply = await page.locator('.msg.agent').last().innerText();
   check('“/技能名”让智能体先读取技能说明', /使用技能/.test(skillReply) && /已加载技能「weekly-report」/.test(skillReply), skillReply.slice(0, 80));
   check('欢迎页在开始对话后收起', (await page.locator('.welcome').count()) === 0);
-  await page.locator('#skill-list .skill').locator('.switch').click();
+  await page.locator('#skill-list .skill', { hasText: '/weekly-report' }).locator('.switch').click();
   await page.waitForTimeout(200);
-  check('停用技能', /0 \/ 1 个启用/.test(await page.textContent('#skill-count')));
+  check('停用技能', /15 \/ 16 个启用/.test(await page.textContent('#skill-count')));
 
   // —— 命令面板
   await page.keyboard.press('Control+k');
@@ -212,6 +218,37 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.click('[data-panel="mind"]');
   await page.waitForTimeout(300);
   check('记忆写入并显示', /我喜欢简洁的回答/.test(await page.textContent('#mind-list')));
+  // 同一件事的新说法取代旧的：旧版本进入“已归档”
+  await ask(page, '记住我住在上海');
+  reply = await ask(page, '记住我住在杭州');
+  check('同一属性的新说法自动取代旧记忆', /已更新记忆：「我住在上海」→「我住在杭州」/.test(await page.locator('.msg.agent').last().locator('.tool-card pre').textContent()));
+  await page.evaluate(() => window.__jarvis.showPanel('mind'));
+  await page.click('[data-mtab="archived"]');
+  await page.waitForTimeout(250);
+  check('旧记忆在“已归档”里，可恢复', /我住在上海/.test(await page.textContent('#mind-list')) && (await page.locator('#mind-list button', { hasText: '恢复' }).count()) >= 1);
+  await page.click('[data-mtab="memories"]');
+  // 核心记忆：编辑后进入每轮上下文
+  await page.fill('#core-human', '称呼我老王；产品经理');
+  await page.click('#btn-core-save');
+  await page.waitForTimeout(200);
+  await page.click('[data-mtab="episodes"]');
+  await page.click('[data-mtab="memories"]');
+  await page.waitForTimeout(200);
+  check('核心记忆保存（刷新面板后仍在）', /老王/.test(await page.inputValue('#core-human')));
+  // 自动整理：离线规则从对话中抽取事实，并写对话摘要
+  await ask(page, '顺便说一下，我叫小林');
+  await page.evaluate(() => window.__jarvis.reflectNow({ manual: true }));
+  await page.waitForTimeout(400);
+  await page.evaluate(() => window.__jarvis.showPanel('mind'));
+  await page.click('[data-mtab="episodes"]');
+  await page.waitForTimeout(250);
+  check('整理对话：写下对话摘要', /我叫小林/.test(await page.textContent('#mind-list')));
+  await page.click('[data-mtab="memories"]');
+  await page.waitForTimeout(250);
+  check('整理对话：抽取出新记忆（自动）', /用户叫小林/.test(await page.textContent('#mind-list')) && /自动/.test(await page.textContent('#mind-list')));
+  const [memDl] = await Promise.all([page.waitForEvent('download'), page.click('#btn-mem-export')]);
+  const backup = JSON.parse(await (await import('node:fs')).promises.readFile(await memDl.path(), 'utf8'));
+  check('导出记忆备份', backup.format === 'jarvis-memory' && backup.memories.length >= 3 && /老王/.test(backup.core.human), `${backup.memories.length} 条`);
   await ask(page, '今天心情不错');
   await page.locator('.msg.agent').last().locator('.feedback button').nth(1).click();
   await page.fill('.lesson-box input', '回答太长了');

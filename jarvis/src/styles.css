@@ -319,6 +319,25 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 .x-btn:hover { color: var(--bad); }
 .empty { color: var(--dim); font-size: 13px; padding: 10px; border: 1px dashed var(--line); border-radius: 8px; text-align: center; }
 
+/* ---- 记忆面板 ---- */
+.core-mem { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px 10px; background: var(--surface); }
+.core-mem summary { cursor: pointer; font-size: 13px; font-weight: 600; display: flex; gap: 8px; align-items: baseline; }
+.core-mem[open] summary { margin-bottom: 8px; }
+.core-mem textarea { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--bg-2); color: var(--text); font: 13px/1.55 var(--font-ui); resize: vertical; }
+.mem-engine { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.mem-engine #mem-engine { flex-basis: 100%; }
+.mind-list li.mem { align-items: flex-start; }
+.mem-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mind-list .fn.wrap { white-space: normal; overflow: visible; }
+.mem-meta { display: flex; gap: 8px; align-items: center; font-size: 11px; color: var(--dim); }
+.mem-stars { border: 0; background: none; padding: 0; color: var(--warn); font-size: 11px; letter-spacing: 1px; cursor: pointer; }
+.mem-pin { border: 0; background: none; padding: 2px 4px; font-size: 12px; opacity: .25; filter: grayscale(1); cursor: pointer; }
+.mem-pin.on, .mem-pin:hover { opacity: 1; filter: none; }
+.mind-list li.pinned { border-color: var(--line-strong); background: var(--accent-soft); }
+.mind-list li.archived .fn { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--dim); }
+.mem-edit { flex: 1; min-width: 0; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--accent); background: var(--bg-2); color: var(--text); font-size: 13px; }
+.mem-backup { flex-wrap: wrap; }
+
 /* ---- 桌面版：顶栏即标题栏（可拖动），给系统窗口按钮留位置 ---- */
 body.desktop .topbar { -webkit-app-region: drag; user-select: none; }
 body.desktop .topbar button, body.desktop .topbar a, body.desktop .topbar input { -webkit-app-region: no-drag; }
@@ -421,8 +440,9 @@ body.desktop.os-win32 .topbar, body.desktop.os-linux .topbar { padding-right: 15
 .evo-stats div { display: flex; flex-direction: column; }
 .evo-stats b { font: 600 20px var(--font-display); color: var(--text); font-variant-numeric: tabular-nums; }
 .evo-stats span { font-size: 11px; color: var(--muted); letter-spacing: 0.08em; }
-.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); }
-.tabs button { padding: 6px 12px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font-size: 13px; }
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button { flex: none; white-space: nowrap; padding: 6px 10px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font-size: 13px; }
 .tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
 .mind-list li { align-items: flex-start; border-bottom: 1px solid var(--line); border-radius: 0; }
 .mind-list .tag { font: 10px var(--font-mono); color: var(--accent); padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; flex: none; margin-top: 3px; }

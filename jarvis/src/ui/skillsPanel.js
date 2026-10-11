@@ -3,7 +3,7 @@
  * 以及输入框里的“/技能名”自动补全。
  */
 import * as packs from '../agent/skillPacks.js';
-import { BUILTIN_SKILLS, GITHUB_SKILLS } from '../agent/skillCatalog.js';
+import { BUILTIN_SKILLS, MORE_BUILTIN_SKILLS, GITHUB_SKILLS } from '../agent/skillCatalog.js';
 import { parseFrontmatter } from '../agent/skillPacks.js';
 import { renderBlocks } from './transcript.js';
 
@@ -76,7 +76,7 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
 
   function renderRecommend() {
     const have = new Set(installed.map((p) => p.name));
-    const builtin = BUILTIN_SKILLS.map((s) => {
+    const builtin = [...BUILTIN_SKILLS, ...MORE_BUILTIN_SKILLS].map((s) => {
       const { meta } = parseFrontmatter(s.text);
       return tile({ title: s.title, name: meta.name, desc: meta.description.replace(/。.*$/, '。'), tag: '内置', installed: have.has(meta.name), install: () => packs.installFromText(s.text, '内置') });
     });
@@ -192,6 +192,7 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
     }
   }, true);
 
-  refresh();
+  // 首次启动：预置常用技能
+  packs.seedBuiltins().then((added) => { if (added.length) toast(`已预置 ${added.length} 个常用技能，输入 / 可以点名使用`); }).catch(() => {}).finally(refresh);
   return { refresh, installFile, get installed() { return installed; } };
 }

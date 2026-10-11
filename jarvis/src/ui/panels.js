@@ -16,7 +16,7 @@ const el = (tag, props = {}, ...kids) => {
   return e;
 };
 
-export function initPanels({ toast, getGateway, onConfigChange, getHistory, onClearHistory, onPersistChange, settings }) {
+export function initPanels({ toast, getGateway, onConfigChange, getHistory, onClearHistory, onPersistChange, settings, onReflect, onAutoMemory }) {
   const fresh = new Set();
   let current = null; // 当前预览的文件
   let objectUrls = [];
@@ -209,14 +209,19 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, onCl
   async function refreshMind() {
     const [all, docs] = await Promise.all([memory.listAll(), kb.listDocuments()]);
     const tasks = all.events.filter((e) => e.kind === 'task').length;
-    const lv = memory.levelOf({ memories: all.memories.length, lessons: all.lessons.length, skills: all.skills.length, docs: docs.length, tasks });
+    const lv = memory.levelOf({ memories: all.memories.length, lessons: all.lessons.length, skills: all.skills.length, docs: docs.length, tasks, episodes: all.episodes.length });
     $('#level-num').textContent = lv.level;
     $('#level-bar').style.width = `${Math.round(lv.progress * 100)}%`;
     $('#mind-level').textContent = `LV ${lv.level} · ${lv.xp} XP`;
     $('#level-chip').title = `进化等级 ${lv.level}：经验 ${lv.xp} / ${lv.next}`;
-    $('#evo-stats').replaceChildren(...[['记忆', all.memories.length], ['技能', all.skills.length], ['教训', all.lessons.length], ['知识文档', docs.length], ['完成任务', tasks], ['下一级', `${lv.next - lv.xp} XP`]]
+    $('#evo-stats').replaceChildren(...[['记忆', all.memories.length], ['对话片段', all.episodes.length], ['习得技能', all.skills.length], ['教训', all.lessons.length], ['知识文档', docs.length], ['下一级', `${lv.next - lv.xp} XP`]]
       .map(([k, v]) => el('div', {}, el('b', { textContent: v }), el('span', { textContent: k }))));
     drawRing(lv);
+    // 核心记忆（正在编辑时不覆盖）
+    for (const [id, key] of [['#core-human', 'human'], ['#core-persona', 'persona']]) if (document.activeElement !== $(id)) $(id).value = all.core[key];
+    const eng = memory.memoryEngine();
+    $('#mem-engine').textContent = `整理：${eng.llm ? '大模型' : '本地规则'} · 检索：${eng.embeddings ? `关键词 + 语义（${eng.embeddings.split(':').pop()}）` : '关键词（填 OpenAI / 硅基流动密钥可启用语义检索）'}`;
+    $('#set-automem').checked = settings.autoMemory !== false;
     const list = $('#mind-list');
     $('#history-actions').hidden = mindTab !== 'history';
     const del = (kind, id) => {
@@ -226,14 +231,72 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, onCl
     };
     const when = (ts) => new Date(ts).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
     let items = [];
-    if (mindTab === 'memories') items = all.memories.map((m) => el('li', {}, el('span', { className: 'tag', textContent: { preference: '偏好', profile: '身份', fact: '事实' }[m.category] ?? '其他' }), el('span', { className: 'fn', textContent: m.content }), el('span', { className: 'fs', textContent: when(m.ts) }), del('memories', m.id)));
+    if (mindTab === 'memories') items = all.memories.map(memoryRow);
+    else if (mindTab === 'archived') items = all.archived.map((m) => el('li', { className: 'mem archived' }, el('span', { className: 'tag', textContent: memory.CATEGORIES[m.category] ?? '其他' }), el('span', { className: 'fn', textContent: m.content, title: m.archivedReason || (m.supersededBy ? '已被新版本取代' : '') }), el('span', { className: 'fs', textContent: m.supersededBy ? '已更新' : (m.archivedReason || '已归档') }), (() => {
+      const r = el('button', { type: 'button', className: 'btn ghost sm', textContent: '恢复' });
+      r.addEventListener('click', async () => { await memory.updateMemory(m.id, { validTo: null, archivedReason: undefined, supersededBy: undefined }); refreshMind(); });
+      return r;
+    })(), del('memories', m.id)));
+    else if (mindTab === 'episodes') items = all.episodes.map((e) => el('li', {}, el('span', { className: 'fs', textContent: when(e.ts) }), el('span', { className: 'fn wrap', textContent: e.summary, title: (e.topics || []).join('、') }), del('episodes', e.id)));
     else if (mindTab === 'skills') items = all.skills.map((s) => el('li', {}, el('span', { className: 'tag', textContent: `v${s.version}` }), el('details', {}, el('summary', { textContent: s.name }), el('pre', { textContent: `${s.description ? `${s.description}\n\n` : ''}${s.steps}` })), del('skills', s.id)));
     else if (mindTab === 'lessons') items = all.lessons.map((l) => el('li', {}, el('span', { className: 'fn', textContent: l.content }), el('span', { className: 'fs', textContent: when(l.ts) }), del('lessons', l.id)));
     else if (mindTab === 'events') items = all.events.slice(0, 80).map((e) => el('li', {}, el('span', { className: 'fs', textContent: new Date(e.ts).toLocaleString('zh-CN', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }), el('span', { className: 'fn', textContent: e.text })));
     else if (mindTab === 'history') items = getHistory().slice(-40).reverse().map((m) => el('li', {}, el('span', { className: 'tag', textContent: m.role === 'user' ? '你' : '贾维斯' }), el('span', { className: 'fn', textContent: m.content.slice(0, 120) })));
-    const emptyText = { memories: '还没有记忆。告诉我“记住我喜欢……”，或者在对话中透露你的偏好。', skills: '还没有技能。完成多步任务后，我会把可复用的做法存成技能。', lessons: '还没有教训。对不满意的回答点 👎 并说明原因，我会记住。', events: '还没有进化记录。', history: '还没有对话。' }[mindTab];
+    const emptyText = { archived: '没有归档的记忆。被新说法取代、被要求忘记、或长期不用的记忆会出现在这里。', episodes: '还没有对话片段。每段对话停下来之后，我会写一段摘要，以后能想起“上次聊到哪”。', memories: '还没有记忆。告诉我“记住我喜欢……”，或者在对话中透露你的偏好。', skills: '还没有技能。完成多步任务后，我会把可复用的做法存成技能。', lessons: '还没有教训。对不满意的回答点 👎 并说明原因，我会记住。', events: '还没有进化记录。', history: '还没有对话。' }[mindTab];
     list.replaceChildren(...(items.length ? items : [el('li', { className: 'empty', textContent: emptyText })]));
   }
+  /** 一条记忆：分类、内容（可编辑）、重要度星级、钉住、使用次数、更新历史 */
+  function memoryRow(m) {
+    const text = el('span', { className: 'fn wrap', textContent: m.content, title: m.history?.length ? `历史：\n${m.history.map((h) => `· ${h.content}`).join('\n')}` : '' });
+    const stars = el('button', { type: 'button', className: 'mem-stars', title: '重要度（点击调整）', textContent: '★'.repeat(m.importance) + '☆'.repeat(5 - m.importance) });
+    stars.addEventListener('click', async () => { await memory.updateMemory(m.id, { importance: (m.importance % 5) + 1 }); refreshMind(); });
+    const pin = el('button', { type: 'button', className: `mem-pin${m.pinned ? ' on' : ''}`, title: m.pinned ? '取消钉住' : '钉住：每次对话都带上', textContent: '📌' });
+    pin.addEventListener('click', async () => { await memory.updateMemory(m.id, { pinned: !m.pinned }); refreshMind(); });
+    const edit = el('button', { type: 'button', className: 'x-btn', title: '编辑', textContent: '✎' });
+    edit.addEventListener('click', () => {
+      const input = el('input', { className: 'mem-edit', value: m.content });
+      text.replaceWith(input);
+      input.focus();
+      const save = async () => { if (input.value.trim() && input.value.trim() !== m.content) await memory.updateMemory(m.id, { content: input.value.trim() }); refreshMind(); };
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') refreshMind(); });
+      input.addEventListener('blur', save);
+    });
+    const meta = [m.uses ? `用过 ${m.uses} 次` : '', m.history?.length ? `更新 ${m.history.length} 次` : '', m.source === 'auto' ? '自动' : ''].filter(Boolean).join(' · ');
+    const x = el('button', { type: 'button', className: 'x-btn', title: '删除', textContent: '✕' });
+    x.addEventListener('click', async () => { await memory.deleteItem('memories', m.id); refreshMind(); });
+    return el('li', { className: `mem${m.pinned ? ' pinned' : ''}` },
+      el('span', { className: 'tag', textContent: memory.CATEGORIES[m.category] ?? '其他' }),
+      el('div', { className: 'mem-main' }, text, el('div', { className: 'mem-meta' }, stars, meta ? el('span', { textContent: meta }) : null)),
+      pin, edit, x);
+  }
+
+  $('#btn-core-save').addEventListener('click', async () => {
+    await memory.setCore('human', $('#core-human').value);
+    await memory.setCore('persona', $('#core-persona').value);
+    $('#core-status').textContent = '已保存';
+    setTimeout(() => { $('#core-status').textContent = ''; }, 2000);
+  });
+  $('#set-automem').addEventListener('change', (e) => onAutoMemory?.(e.target.checked));
+  $('#btn-reflect').addEventListener('click', async () => { await onReflect?.(); refreshMind(); });
+  $('#btn-mem-export').addEventListener('click', async () => {
+    const data = await memory.exportAll();
+    const a = el('a', { href: URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })), download: `贾维斯记忆备份-${new Date().toISOString().slice(0, 10)}.json` });
+    document.body.append(a);
+    a.click();
+    a.remove();
+  });
+  $('#btn-mem-import').addEventListener('click', () => $('#mem-import-input').click());
+  $('#mem-import-input').addEventListener('change', async (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    try {
+      const r = await memory.importAll(JSON.parse(await f.text()));
+      toast(`已导入：记忆 ${r.memories} 条、技能 ${r.skills} 个、教训 ${r.lessons} 条、对话片段 ${r.episodes} 段`);
+      refreshMind();
+    } catch (err) { toast(`导入失败：${err.message}`); }
+  });
+
   function drawRing(lv) {
     const c = $('#evo-ring');
     const g = c.getContext('2d');
