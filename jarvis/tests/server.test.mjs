@@ -142,3 +142,47 @@ describe('网关', () => {
     expect(await (await fetch(`${base}/api/health`)).json()).toMatchObject({ backend: 'mock' });
   });
 });
+
+describe('大模型代理与网页读取', () => {
+  let server, base, upstream, seen;
+  beforeAll(async () => {
+    const { createServer: cs } = await import('../server/server.mjs');
+    const http = await import('node:http');
+    upstream = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (c) => (body += c));
+      req.on('end', () => { seen = { url: req.url, headers: req.headers, body }; res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.end('data: {"ok":true}\n\n'); });
+    });
+    await new Promise((r) => upstream.listen(0, '127.0.0.1', r));
+    const providers = await import('../shared/providers.js');
+    providers.providerById('deepseek').baseURL = `http://127.0.0.1:${upstream.address().port}/v1`;
+    server = cs({ agent: new MockAgent({ charDelayMs: 0 }), staticDir: '/nonexistent' });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    base = `http://127.0.0.1:${server.address().port}`;
+  });
+  afterAll(() => { server.close(); upstream.close(); });
+
+  it('转发到服务商、保留路径与流式响应，注入网关密钥', async () => {
+    process.env.DEEPSEEK_API_KEY = 'sk-env';
+    const r = await fetch(`${base}/api/llm/deepseek/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"model":"m"}' });
+    expect(await r.text()).toBe('data: {"ok":true}\n\n');
+    expect(seen.url).toBe('/v1/chat/completions');
+    expect(seen.headers.authorization).toBe('Bearer sk-env');
+    expect(seen.body).toBe('{"model":"m"}');
+    const r2 = await fetch(`${base}/api/llm/deepseek/chat/completions`, { method: 'POST', headers: { Authorization: 'Bearer sk-user' }, body: '{}' });
+    await r2.text();
+    expect(seen.headers.authorization).toBe('Bearer sk-user');
+    delete process.env.DEEPSEEK_API_KEY;
+  });
+
+  it('未知服务商与自定义地址不代理', async () => {
+    expect((await fetch(`${base}/api/llm/evil/x`, { method: 'POST' })).status).toBe(404);
+    expect((await fetch(`${base}/api/llm/custom/x`, { method: 'POST' })).status).toBe(404);
+  });
+
+  it('网页读取拒绝内网地址', async () => {
+    for (const u of ['http://127.0.0.1:1/', 'http://localhost/', 'http://192.168.1.1/', 'file:///etc/passwd', 'http://[::1]/']) {
+      expect((await fetch(`${base}/api/fetch?url=${encodeURIComponent(u)}`)).status).toBe(403);
+    }
+  });
+});

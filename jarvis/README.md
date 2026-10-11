@@ -1,48 +1,87 @@
 # 贾维斯智能体（J.A.R.V.I.S.）
 
-按《贾维斯智能体开发需求文档 v2.0》实现的 Web 应用：实时 WebGL **光核 / 全息胸像** + 情绪表达 + 本地人脸跟随 + 语音对话 + Claude 对话网关。
+一个跑在浏览器里的个人智能体：**多家大模型可切换**，会**记忆、积累经验和技能**，有**本地知识库**，能**读写 Word / PDF / PPT / Excel**，能**自己写代码、运行并预览**；配实时 WebGL 光核形象、情绪表达、人脸跟随与语音对话。
 
-> v3 起主视觉由“粒子人形 ⇄ 粒子核心”改为全息胸像（应使用方要求：粒子形态不够好看，改为更科幻的全息投影风格），需求文档第三章的点云 / 形变部分不再适用，见下文“v3 全息胸像”。
+> 演进：v2.0 需求文档（粒子人形）→ v3 全息胸像 → v3.1 光核 → **v4 智能体化**（本版）。
 
 ## 怎么用
 
-### 方式一：单文件版（推荐给只想用的人）
+### 方式一：单文件版（下载即用）
 
-下载仓库根目录的 **`jarvis-standalone.html`**，双击用 Chrome / Edge 打开即可，不用安装任何东西。
+下载仓库根目录的 **`jarvis-standalone.html`**（约 5.5 MB），双击用 Chrome / Edge 打开。不用安装、不用联网也能跑（内置离线演示模型）。
 
-- 对话：默认是内置演示助手；在“设置 → Claude API Key”里填自己的密钥，即可直连 Claude（密钥只存在这台电脑的浏览器里）。
-- 语音输入 / 朗读：可用（语音识别依赖浏览器自带服务，需要联网）。
-- 人脸跟随、语音活动检测：首次开启时从公共 CDN 下载模型（只下载，不上传画面或声音），没联网时自动降级。
-- 仪表：没有本机服务，显示的是浏览器能拿到的近似值（页面主线程繁忙度、页面内存、网络状态）。
+1. 左侧“模型”面板选服务商、填 API Key，点“测试连接”。密钥只存在这台电脑的浏览器里。
+2. 直接交代任务：“帮我写一个网页”“把这份 PDF 加进知识库”“做一个 PPT”“记住我在上海工作”。
+3. 工作区可“连接本地文件夹”：之后生成的文件直接写进这个文件夹（只新增，不删除、不覆盖）。
 
-重新生成：`npm run build:standalone`。
+单文件版的限制：通义千问、Kimi、智谱、豆包等服务商**不允许浏览器直连**（CORS），需用完整版；Python 运行首次需联网下载 Pyodide。
 
-### 方式二：完整版（本机网关 + 真实系统指标）
+### 方式二：完整版（本机网关）
 
-需要 Node.js 18+。Windows 双击 `jarvis/启动.bat`，Mac / Linux 运行 `jarvis/start.sh`：首次会自动安装依赖、构建并打开浏览器。
-
-手动方式：
+需要 Node.js 18+。Windows 双击 `jarvis/启动.bat`，Mac / Linux 运行 `jarvis/start.sh`。
 
 ```bash
 cd jarvis
-npm install                 # 会自动把 MediaPipe / VAD / ORT 的 WASM 与人脸模型放到 public/vendor、public/models
-npm run build
-npm run server              # http://127.0.0.1:8787
-# 接入 Claude：
-ANTHROPIC_API_KEY=sk-ant-... npm run server
+npm install && npm run build
+# 密钥可放在网关环境变量里（前端不再需要填写），任选：
+ANTHROPIC_API_KEY=... OPENAI_API_KEY=... DEEPSEEK_API_KEY=... DASHSCOPE_API_KEY=... npm run server   # http://127.0.0.1:8787
 ```
 
-开发模式：一个终端 `npm run server`，另一个 `npm run dev`（Vite 把 `/api` 代理到 8787）。
-
-不配置 `ANTHROPIC_API_KEY` 时网关使用**本地演示智能体**（规则回复 + 真实的本机指标工具），整条链路——流式、`emotion_hint`、`task_state`、工具调用——都能离线演示。网关连不上时，前端会自动改在浏览器内运行智能体。
+网关提供：`/api/llm/<服务商>/…` 统一代理（解决 CORS，注入环境变量里的密钥）、`/api/fetch` 网页抓取（拒绝内网地址）、真实的本机 CPU / 内存 / GPU 指标。默认只监听 127.0.0.1。
 
 | 命令 | 作用 |
 |---|---|
-| `npm test` | 单元 + 集成测试（Vitest，75 项） |
-| `npm run e2e` | 完整版浏览器冒烟测试（Playwright + Chromium，41 项；需先 build 并启动 server） |
-| `npm run e2e:standalone` | 单文件版测试（file:// 直接打开，10 项） |
+| `npm test` | 单元 + 集成测试（Vitest，104 项） |
+| `npm run e2e` | 完整版浏览器测试（Playwright，46 项；需先 build 并启动 server） |
+| `npm run e2e:standalone` | 单文件版测试（file:// 直接打开，11 项） |
 | `npm run build:standalone` | 生成单文件版 `../jarvis-standalone.html` |
-| `npm run build-model` | 重新从 `assets/LeePerrySmith.glb` 生成胸像网格 |
+
+## v4 能力一览
+
+### 1. 多模型
+
+| 服务商 | 接入方式 | 单文件版直连 |
+|---|---|---|
+| Anthropic Claude（默认 Opus 5.5，可选服务端网页搜索） | 原生 Messages API，提示缓存、工具调用、模型自动降级 | ✓ |
+| OpenAI、Google Gemini、DeepSeek、硅基流动、OpenRouter、Ollama（本地） | OpenAI 兼容接口，流式 + 工具调用 | ✓ |
+| 通义千问、Kimi、智谱 GLM、豆包 | OpenAI 兼容接口 | 需完整版网关 |
+| 自定义 | 任意 OpenAI 兼容地址 | 视对方 CORS |
+| 离线演示 | 内置规则模型，无需密钥 | ✓ |
+
+所有模型共用同一套智能体循环（`src/agent/agent.js`）和工具，换模型不换能力。
+
+### 2. 自主学习与进化（如实说明）
+
+不训练模型权重；“进化”指智能体**把经验沉淀到本地**并在之后的对话里用上：
+
+- **记忆**：对话中自动或按要求 `remember`，下次按相关度检索注入上下文。
+- **经验教训**：回答下方 👍 / 👎，👎 时可写一句“哪里不对”，形成 lesson，之后同类任务会先看到。
+- **技能**：完成过的多步任务可存为技能（步骤模板），下次直接复用。
+- **等级**：记忆、技能、经验、完成任务数折算成经验值与等级，在“进化”面板查看全部内容，可逐条删除。
+
+### 3. 记忆与知识库
+
+全部存在浏览器 IndexedDB（可在“进化”面板关闭持久化）。知识库支持导入 PDF / Word / PPT / Excel / Markdown / 网页 / 文本，按段切分，BM25 检索（中文按双字切词），回答注明来源。配 Tavily 密钥或 Claude 网页搜索后可查最新资料。
+
+### 4. 文件处理
+
+| 格式 | 读 | 写 |
+|---|---|---|
+| Word .docx | ✓（mammoth） | ✓（docx） |
+| PDF | ✓（pdf.js） | 生成排版好的页面，工作区“导出 PDF”用浏览器打印保存（中文清晰、文件小） |
+| PPT .pptx | ✓（解析幻灯片 XML） | ✓（PptxGenJS） |
+| Excel .xlsx / .xls / .csv | ✓ | ✓（SheetJS 0.18.5；该版本有已知的原型污染 / ReDoS 问题，只建议打开可信文件） |
+| HTML / Markdown / 代码 / 文本 | ✓ | ✓ |
+
+能操作的是**工作区**：浏览器内的虚拟文件夹，或你授权连接的本地文件夹。浏览器出于安全不允许操作其他程序或整个硬盘。
+
+### 5. 编程
+
+工具 `write_file` + `run_javascript`（Worker 沙箱，8 秒超时）+ `run_python`（Pyodide，可读写工作区文件）+ `preview`（工作区内沙箱 iframe 预览网页）：智能体可以写代码 → 运行 → 看结果 → 修改。
+
+### 6. 界面
+
+重做为深色 HUD：顶栏状态与等级、左侧功能栏（`Alt+1…6`）、中间光核与对话、右侧面板（工作区 / 知识库 / 进化 / 模型 / 系统 / 设置）；工具调用以卡片实时展示，支持拖拽上传，窄屏自动改为底部导航。
 
 ## v3.1 默认形态改为“光核”
 

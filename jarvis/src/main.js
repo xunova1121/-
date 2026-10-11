@@ -2,7 +2,7 @@
  * 贾维斯前端入口：状态管理层 + 渲染策略控制器。
  *
  *   感知（人脸 / VAD / 识别） ─┐
- *   对话流（SSE）             ─┼─▶ EmotionMachine ─▶ ParamTween(400ms) ─┐
+ *   智能体事件（agent.js）     ─┼─▶ EmotionMachine ─▶ ParamTween(400ms) ─┐
  *   注入事件（SSE）           ─┘                                        ├─▶ stage.frame()
  *   人脸角度 / 麦克风包络 / 播报包络 ─────────────────────────────────┘
  *
@@ -17,7 +17,13 @@ import { followTarget, smoothToward } from './core/faceMath.js';
 import { SentenceChunker } from './core/sentenceChunker.js';
 import { SILENCE_BY_SENSITIVITY } from './core/vadGate.js';
 import { loadSettings, saveSettings, wantsReducedMotion } from './core/settings.js';
-import { chat, chatBackend, getBrowserKey, setBrowserKey } from './api/chat.js';
+import { browserMetrics } from './api/browserMetrics.js';
+import { runAgent } from './agent/agent.js';
+import { createTools } from './agent/tools.js';
+import * as ws from './agent/workspace.js';
+import * as agentMemory from './agent/memory.js';
+import { initPanels } from './ui/panels.js';
+import { loadConfig, createAdapter, displayName, providerById } from './llm/config.js';
 import { MetricsPoller } from './api/metrics.js';
 import { subscribeAgentEvents } from './api/agentEvents.js';
 import { Dashboard } from './ui/dashboard.js';
@@ -26,7 +32,7 @@ import { Speaker } from './perception/speaker.js';
 import { VoiceInput, speechRecognitionSupported } from './perception/voiceInput.js';
 import { FIGURE, STANDALONE } from './config.js';
 import { resolveQuality } from './core/quality.js';
-import { loadMemory, saveMemory, clearMemory, groupByDay } from './core/memoryStore.js';
+import { loadMemory, saveMemory, clearMemory } from './core/memoryStore.js';
 
 const $ = (s) => document.querySelector(s);
 const body = document.body;
@@ -51,6 +57,7 @@ const machine = new EmotionMachine({
     tween.set({ ...EMOTION_PARAMS[emotion], ...EYE_SHAPES[emotion] }, now());
     document.documentElement.style.setProperty('--hue', String(EMOTION_PARAMS[emotion].hue));
     dashboard.setEmotion(emotion, EMOTION_PARAMS[emotion].hue);
+    $('#hud-emotion').textContent = emotion;
   }
 });
 setInterval(() => machine.tick(), 100);
@@ -254,17 +261,46 @@ function applyEmotionOverride(v) {
   $('#set-emotion').value = v;
 }
 
+
+// ---------------------------------------------------------------- 模型与网关
+let gateway = null; // 完整版：{ origin, keys }；单文件版为 null
+let llmConfig = loadConfig();
+
+async function detectGateway() {
+  if (STANDALONE || location.protocol === 'file:') return;
+  try {
+    const h = await (await fetch('/api/health', { cache: 'no-store' })).json();
+    gateway = { origin: location.origin, keys: h.gatewayKeys ?? [] };
+  } catch { gateway = null; }
+  panels.refreshModels();
+  updateModelLabels();
+}
+
+function updateModelLabels() {
+  const name = displayName(llmConfig);
+  $('#mode-text').textContent = name;
+  $('#model-chip-text').textContent = name;
+  $('#mode-pill').title = `当前模型：${name}${gateway ? '（经本机网关）' : ''}。点击切换`;
+}
+
+const metrics = () => (gateway ? fetch('/api/local/metrics').then((r) => r.json()) : browserMetrics());
+const fetchViaGateway = () => (gateway
+  ? (url, init) => (url.startsWith('https://api.tavily.com/')
+    ? fetch(`/api/llm/tavily/${url.slice('https://api.tavily.com/'.length)}`, init)
+    : fetch(`/api/fetch?url=${encodeURIComponent(url)}`))
+  : null);
+
 // ---------------------------------------------------------------- 对话
 const transcript = new Transcript($('#transcript'));
-// 记忆：开启“跨会话保存”时从 localStorage 恢复；每条带时间戳，按天分组显示
 const storage = (() => { try { return localStorage; } catch { return null; } })();
 const history = settings.persistMemory ? loadMemory(storage) : [];
-function remember(role, content) {
+function rememberTurn(role, content) {
   history.push({ role, content, ts: Date.now() });
   if (settings.persistMemory) saveMemory(history, storage);
 }
 let turns = 0;
-let active = null; // { ctrl, streamDone }
+let active = null; // { ctrl, streamDone, bubble }
+const attachments = [];
 
 const speaker = new Speaker({
   onStart: () => {
@@ -278,8 +314,9 @@ const speaker = new Speaker({
   },
   onBoundary: () => { live.boundaryAt = now(); }
 });
+speaker.enabled = settings.speechOutput;
 
-/** 打断（barge-in）：停止播报并中止正在生成的回复 */
+/** 打断（barge-in）：停止朗读并中止正在执行的任务 */
 function interrupt() {
   const had = speaker.speaking || active;
   if (active) {
@@ -292,12 +329,16 @@ function interrupt() {
   return Boolean(had);
 }
 $('#btn-stop').addEventListener('click', () => interrupt());
-speaker.enabled = settings.speechOutput;
 
-function setTask(state, sub) {
-  machine.setTaskState(state);
+const TASK_LABEL = { idle: '待命', listening: '生成中', processing: '执行中', error: '出错', done: '完成' };
+function setTask(state, sub = '') {
+  machine.setTaskState(state === 'listening' && !live.voiceListening ? 'listening' : state);
   dashboard.setTask(state, sub);
-  body.classList.toggle('generating', Boolean(active) && state !== 'done');
+  const label = sub || TASK_LABEL[state] || state;
+  $('#hud-task').textContent = label;
+  $('#task-text').textContent = label;
+  body.classList.toggle('generating', Boolean(active) && state !== 'done' && state !== 'error' && state !== 'idle');
+  $('#mode-pill').classList.toggle('busy', Boolean(active) && state !== 'done');
 }
 
 function finishTurn() {
@@ -306,121 +347,182 @@ function finishTurn() {
   turns++;
   dashboard.setTurns(turns);
   setTask('done');
-  setTimeout(() => { if (!active) dashboard.setTask('idle'); }, 3000);
-  renderMemory();
+  setTimeout(() => { if (!active) setTask('idle'); }, 3000);
+  panels.refreshMind();
+}
+
+/** 朗读只读正文：代码块（``` 包围的部分，包括还没闭合的）不读 */
+function makeSpeech() {
+  const chunker = new SentenceChunker();
+  let full = '';
+  let fed = 0;
+  return {
+    push(delta) {
+      full += delta;
+      const spoken = full.replace(/```[\s\S]*?```/g, '\n').replace(/```[\s\S]*$/, '');
+      if (spoken.length > fed) {
+        for (const s of chunker.push(spoken.slice(fed))) speaker.speak(s);
+        fed = spoken.length;
+      }
+    },
+    flush() { for (const s of chunker.flush()) speaker.speak(s); }
+  };
 }
 
 async function send(text) {
-  text = text.trim();
-  if (!text) return;
-  if (active) {
-    active.ctrl.abort();
-    active = null;
-  }
+  text = String(text || '').trim();
+  if (!text && !attachments.length) return;
+  if (active) { active.ctrl.abort(); active = null; }
   speaker.cancel();
-  transcript.add('user', text);
-  remember('user', text);
+
+  const files = attachments.splice(0);
+  renderAttachments();
+  const userText = files.length ? `${text}\n\n[已上传到工作区：${files.join('、')}]` : text;
+  transcript.add('user', userText);
+  const llmHistory = history.slice(-20).map(({ role, content }) => ({ role, content }));
+  rememberTurn('user', userText);
 
   if (machine.task !== 'listening') machine.beginUserTurn();
-  setTask('processing', '请求已发出');
-
   const ctrl = new AbortController();
   const bubble = transcript.add('agent');
   bubble.el.classList.add('streaming');
   const turn = { ctrl, streamDone: false, bubble };
   active = turn;
-  const chunker = new SentenceChunker();
-  let reply = '';
-  let firstToken = 0;
-  const t0 = now();
+  setTask('processing', '思考中');
 
+  const { adapter, model, problem } = createAdapter(llmConfig, { gateway });
+  if (problem) {
+    bubble.append(problem);
+    bubble.done();
+    active = null;
+    setTask('error', '需要配置模型');
+    showPanel('models');
+    return;
+  }
+
+  const speech = makeSpeech();
+  const cards = new Map();
+  let firstToken = 0;
+  let serverCard = null;
+  const t0 = now();
   try {
-    await chat({
-      messages: history.slice(-12).map(({ role, content }) => ({ role, content })),
-      signal: ctrl.signal,
-      onMessage: (msg) => {
+    const result = await runAgent({
+      adapter, model, history: llmHistory, userText, signal: ctrl.signal,
+      tools: createTools({
+        metrics,
+        tavilyKey: llmConfig.tavilyKey,
+        fetchViaGateway: fetchViaGateway(),
+        onPreview: (path) => { showPanel('workspace'); panels.openFile(path); },
+        onFileChanged: (path) => { panels.markFresh(path); panels.refreshFiles(); }
+      }),
+      emit: (e) => {
         if (active !== turn) return;
-        if (msg.emotion_hint) machine.setStreamHint(msg.emotion_hint);
-        if (msg.task_state && msg.task_state !== 'done') {
-          setTask(msg.task_state, msg.tool ? `调用 ${msg.tool}` : msg.task_state === 'listening' ? '生成回复' : '');
-        }
-        if (msg.delta) {
+        if (e.type === 'text') {
           if (!firstToken) firstToken = now();
-          reply += msg.delta;
-          bubble.append(msg.delta);
-          machine.feedResponseText(msg.delta);
-          for (const s of chunker.push(msg.delta)) speaker.speak(s);
-        }
+          if (serverCard) { serverCard.done(true, '由 Claude 服务端完成', Math.round(now() - serverCard.t0)); serverCard = null; }
+          bubble.append(e.delta);
+          machine.feedResponseText(e.delta);
+          speech.push(e.delta);
+        } else if (e.type === 'emotion') machine.setStreamHint(e.value);
+        else if (e.type === 'state' && e.value !== 'done') setTask(e.value, e.value === 'listening' ? '生成回答' : '');
+        else if (e.type === 'tool_start') {
+          cards.set(e.id, bubble.toolCard(e.name, e.args));
+          setTask('processing', `${e.name}`);
+        } else if (e.type === 'tool_end') {
+          cards.get(e.id)?.done(e.ok, e.output, e.ms);
+          if (/remember|forget|save_skill/.test(e.name)) panels.refreshMind();
+        } else if (e.type === 'server_tool') {
+          serverCard = Object.assign(bubble.toolCard('web_search', { query: 'Claude 联网搜索' }), { t0: now() });
+        } else if (e.type === 'sources') bubble.sources(e.items);
       }
     });
     if (active !== turn) return;
-    for (const s of chunker.flush()) speaker.speak(s);
+    speech.flush();
     const total = now() - t0;
-    const latency = firstToken ? `首字 ${Math.round(firstToken - t0)}ms · 生成 ${(total / 1000).toFixed(1)}s` : '';
-    bubble.done(latency);
+    bubble.done(`${firstToken ? `首字 ${Math.round(firstToken - t0)}ms · ` : ''}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}`, {
+      onFeedback: async (kind, comment) => {
+        if (kind === 'up') await agentMemory.noteTask(`获得好评：${text.slice(0, 30)}`);
+        else {
+          await agentMemory.addLesson(`关于「${text.slice(0, 40)}」的回答，用户不满意：${comment || '未说明原因，下次先确认需求再回答'}`, text);
+          toast('已记下这条教训，之后遇到类似问题会注意');
+        }
+        panels.refreshMind();
+      }
+    });
     dashboard.setLatency(firstToken ? firstToken - t0 : null, total);
-    remember('assistant', reply || '（空回复）');
+    rememberTurn('assistant', result.text || '（完成）');
     $('#mode-pill').classList.remove('offline');
-    updateBackendLabel();
     turn.streamDone = true;
     if (!speaker.speaking) finishTurn();
   } catch (err) {
-    if (err.name === 'AbortError') return;
-    if (active !== turn) return;
-    if (!reply) bubble.append(`（连接失败：${err.message}）`);
+    if (err.name === 'AbortError' || active !== turn) return;
+    const msg = String(err.message || err);
+    const cors = /Failed to fetch|NetworkError|Load failed|CORS/i.test(msg);
+    bubble.append(`\n（出错了：${msg}${cors ? '。多半是该服务商不允许网页直接调用，请改用完整版（双击 启动.bat / start.sh）或换一家服务商' : ''}）`);
     bubble.done();
-    history.pop();
-    if (settings.persistMemory) saveMemory(history, storage);
     $('#mode-pill').classList.add('offline');
     active = null;
-    setTask('error', '对话接口不可用');
+    setTask('error', '请求失败');
   }
 }
 
+// —— 输入框：Enter 发送，Shift+Enter 换行；随内容自动增高
+const prompt = $('#prompt');
+function autosize() { prompt.style.height = 'auto'; prompt.style.height = `${Math.min(prompt.scrollHeight, 200)}px`; }
 $('#inputbar').addEventListener('submit', (e) => {
   e.preventDefault();
-  const input = $('#prompt');
-  const v = input.value;
-  input.value = '';
+  const v = prompt.value;
+  prompt.value = '';
+  autosize();
   send(v);
 });
-// 用户开始输入 → 聆听（由输入事件触发，而不是关键词）
-$('#prompt').addEventListener('input', (e) => {
-  if (e.target.value && speaker.speaking) speaker.cancel(); // 开始打字即打断播报
+prompt.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    $('#inputbar').requestSubmit();
+  }
+});
+prompt.addEventListener('input', (e) => {
+  autosize();
+  if (e.target.value && speaker.speaking) speaker.cancel(); // 开始打字即打断朗读
   if (e.target.value && !active && machine.task !== 'listening') machine.beginUserTurn();
-  dashboard.setTask(machine.task);
 });
 
-/** 顶部胶囊悬停提示：当前对话后端 */
-function updateBackendLabel(server) {
-  const label = {
-    server: server?.backend === 'claude' ? `对话后端：Claude（${server.model}，经本机网关）` : '对话后端：本机网关（演示智能体，未配置 ANTHROPIC_API_KEY）',
-    'claude-browser': '对话后端：Claude（浏览器直连，使用你在设置里填写的密钥）',
-    local: '对话后端：内置演示智能体（在设置里填写 Claude API Key 可接入真正的大模型）'
-  }[chatBackend()];
-  if (label) $('#mode-pill').title = label;
-  $('#mode-text').textContent = chatBackend() === 'local' ? '本机助手 · 演示' : '本机助手';
+// —— 附件：上传 / 拖入的文件放进工作区“上传/”目录，并附在下一条消息里
+async function addFiles(list) {
+  for (const f of list) {
+    try {
+      const r = await ws.write(`上传/${f.name}`, f);
+      attachments.push(r.path);
+      panels.markFresh(r.path);
+    } catch (e) { toast(`${f.name}：${e.message}`); }
+  }
+  renderAttachments();
+  panels.refreshFiles();
+  prompt.focus();
 }
-if (STANDALONE) updateBackendLabel();
-else {
-  fetch('/api/health').then((r) => r.json()).then(updateBackendLabel).catch(() => updateBackendLabel());
+function renderAttachments() {
+  const box = $('#attach-list');
+  box.hidden = !attachments.length;
+  box.replaceChildren(...attachments.map((p, i) => {
+    const x = Object.assign(document.createElement('button'), { type: 'button', textContent: '✕', title: '移除' });
+    x.addEventListener('click', () => { attachments.splice(i, 1); renderAttachments(); });
+    const s = document.createElement('span');
+    s.append(p.replace(/^上传\//, ''), x);
+    return s;
+  }));
 }
-
-// —— Claude 密钥（单文件版 / 没有网关时使用）：只存在本机浏览器
-$('#set-key').value = getBrowserKey() ? '••••••••' : '';
-$('#btn-save-key').addEventListener('click', () => {
-  const v = $('#set-key').value.trim();
-  if (!v || v.startsWith('••')) return;
-  setBrowserKey(v);
-  $('#set-key').value = '••••••••';
-  updateBackendLabel();
-  toast('密钥已保存在本机浏览器');
-});
-$('#btn-clear-key').addEventListener('click', () => {
-  setBrowserKey('');
-  $('#set-key').value = '';
-  updateBackendLabel();
-  toast('密钥已删除');
+$('#btn-attach').addEventListener('click', () => $('#file-input').click());
+$('#file-input').addEventListener('change', (e) => { addFiles([...e.target.files]); e.target.value = ''; });
+let dragDepth = 0;
+window.addEventListener('dragenter', (e) => { if (e.dataTransfer?.types?.includes('Files')) { dragDepth++; $('#drop-overlay').hidden = false; } });
+window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; $('#drop-overlay').hidden = true; } });
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dragDepth = 0;
+  $('#drop-overlay').hidden = true;
+  if (e.dataTransfer?.files?.length) addFiles([...e.dataTransfer.files]);
 });
 
 // ---------------------------------------------------------------- 语音
@@ -451,6 +553,7 @@ const voice = new VoiceInput({
       ptt: '语音活动检测不可用，已降级为“按下说话”：按住麦克风说话，松开提交。'
     }[m];
     $('#btn-mic').setAttribute('aria-pressed', String(m !== 'off'));
+    body.classList.toggle('voice-on', m !== 'off');
     $('#btn-mic').title = m === 'ptt' ? '按住说话' : '直接对话';
   },
   onError: (code) => {
@@ -552,56 +655,45 @@ async function setFaceFollow(on) {
   }
 }
 
-// ---------------------------------------------------------------- 视图与设置面板
-function setView(view) {
-  for (const b of document.querySelectorAll('.nav-item')) b.classList.toggle('active', b.dataset.view === view);
-  body.classList.toggle('view-chat', view === 'chat');
-  $('#drawer-memory').hidden = view !== 'memory';
-  $('#drawer-settings').hidden = view !== 'settings';
-  if (view === 'memory') renderMemory();
-}
-for (const b of document.querySelectorAll('.nav-item')) {
-  b.addEventListener('click', () => setView(b.classList.contains('active') && b.dataset.view !== 'console' ? 'console' : b.dataset.view));
-}
-$('#btn-nav').addEventListener('click', () => body.classList.toggle('nav-collapsed'));
 
-function renderMemory() {
-  const root = $('#memory-list');
-  if (!history.length) {
-    const p = document.createElement('p');
-    p.className = 'muted';
-    p.textContent = '暂无';
-    root.replaceChildren(p);
+// ---------------------------------------------------------------- 右侧面板
+const PANES = ['workspace', 'knowledge', 'mind', 'models', 'system', 'settings'];
+let currentPane = null;
+const narrow = matchMedia('(max-width: 860px)');
+function showPanel(name, { toggle = false } = {}) {
+  if (toggle && name === currentPane && (narrow.matches ? body.classList.contains('side-open') : !body.classList.contains('side-closed'))) {
+    body.classList.add('side-closed');
+    body.classList.remove('side-open');
+    currentPane = null;
     return;
   }
-  root.replaceChildren(...groupByDay(history).map((g) => {
-    const day = document.createElement('details');
-    day.open = g.label === '今天';
-    const sum = document.createElement('summary');
-    sum.textContent = `${g.label} · ${g.items.filter((m) => m.role === 'user').length} 轮`;
-    const ol = document.createElement('ol');
-    for (const m of g.items) {
-      const li = document.createElement('li');
-      li.className = m.role;
-      const time = new Date(m.ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
-      li.textContent = `${time} ${m.role === 'user' ? '你' : '贾维斯'}：${m.content.slice(0, 90)}${m.content.length > 90 ? '…' : ''}`;
-      ol.append(li);
-    }
-    day.append(sum, ol);
-    return day;
-  }));
+  currentPane = name;
+  body.classList.remove('side-closed');
+  body.classList.add('side-open');
+  for (const p of document.querySelectorAll('[data-pane]')) p.hidden = p.dataset.pane !== name;
+  for (const b of document.querySelectorAll('.rail-btn')) b.classList.toggle('active', b.dataset.panel === name);
+  try { localStorage.setItem('jarvis.pane', name); } catch { /* ignore */ }
+  if (name === 'workspace') panels.refreshFiles();
+  if (name === 'knowledge') panels.refreshKb();
+  if (name === 'mind') panels.refreshMind();
+  if (name === 'models') panels.refreshModels();
 }
-$('#btn-clear-memory').addEventListener('click', () => {
-  history.length = 0;
-  clearMemory(storage);
-  renderMemory();
-  toast('记忆已清空');
-});
-$('#set-persist').addEventListener('change', (e) => {
-  setSetting('persistMemory', e.target.checked);
-  if (e.target.checked) saveMemory(history, storage);
-  else clearMemory(storage);
-  toast(e.target.checked ? '记忆将保存在本机浏览器中' : '已停止保存，并删除本机保存的记忆');
+for (const b of document.querySelectorAll('.rail-btn')) b.addEventListener('click', () => showPanel(b.dataset.panel, { toggle: true }));
+for (const b of document.querySelectorAll('[data-open]')) b.addEventListener('click', () => showPanel(b.dataset.open));
+
+const panels = initPanels({
+  toast: (t) => toast(t),
+  settings,
+  getGateway: () => gateway,
+  getHistory: () => history,
+  onConfigChange: (cfg) => { llmConfig = cfg; updateModelLabels(); },
+  onClearHistory: () => { history.length = 0; clearMemory(storage); toast('对话记录已清空'); },
+  onPersistChange: (on) => {
+    setSetting('persistMemory', on);
+    if (on) saveMemory(history, storage);
+    else clearMemory(storage);
+    toast(on ? '对话记录将保存在本机浏览器中' : '已停止保存，并删除本机保存的对话记录');
+  }
 });
 $('#set-quality').addEventListener('change', (e) => {
   setSetting('quality', e.target.value);
@@ -662,7 +754,6 @@ function toast(text) {
 // ---------------------------------------------------------------- 恢复上次的设置
 $('#set-tts').checked = settings.speechOutput;
 $('#set-quality').value = settings.quality;
-$('#set-persist').checked = settings.persistMemory;
 dashboard.setTurns(history.filter((m) => m.role === 'user').length);
 $('#set-motion').value = settings.reducedMotion;
 for (const x of document.querySelectorAll('#set-vad button')) x.setAttribute('aria-checked', String(x.dataset.v === settings.vadSensitivity));
@@ -683,23 +774,32 @@ async function restoreDevice(permission, key, enable) {
 }
 restoreDevice('camera', 'faceFollow', setFaceFollow);
 if (speechRecognitionSupported) restoreDevice('microphone', 'directVoice', setDirectVoice);
-renderMemory();
+
+
+// ---------------------------------------------------------------- 启动
+updateModelLabels();
+detectGateway();
+panels.refreshMind();
+let startPane = 'workspace';
+try { startPane = localStorage.getItem('jarvis.pane') || startPane; } catch { /* ignore */ }
+if (narrow.matches) body.classList.add('side-closed');
+showPanel(PANES.includes(startPane) ? startPane : 'workspace');
+if (narrow.matches) body.classList.remove('side-open');
+setTask('idle');
 
 // ---------------------------------------------------------------- 键盘快捷键
-//   Esc 打断播报/生成   /  聚焦输入框   Alt+1..4 切换视图   Alt+F 专注视图   Alt+V 直接对话
+//   Esc 打断   /  聚焦输入框   Alt+1..6 面板   Alt+F 专注视图   Alt+V 直接对话
 //   Alt+O / Alt+H / Alt+W 光核 / 胸像 / 线框   按住空格：按下说话（降级模式、焦点不在输入框时）
-const VIEWS = ['console', 'chat', 'memory', 'settings'];
 const typing = (el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (interrupt()) { e.preventDefault(); toast('已打断'); return; }
-    if (!$('#drawer-settings').hidden || !$('#drawer-memory').hidden) setView('console');
+    if (interrupt()) { e.preventDefault(); toast('已打断'); }
     return;
   }
   if (e.altKey && !e.ctrlKey && !e.metaKey) {
     const k = e.code;
-    const n = /^Digit([1-4])$/.exec(k)?.[1];
-    if (n) setView(VIEWS[n - 1]);
+    const n = /^Digit([1-6])$/.exec(k)?.[1];
+    if (n) showPanel(PANES[n - 1]);
     else if (k === 'KeyF') setFocusView(!settings.focusView);
     else if (k === 'KeyV' && speechRecognitionSupported) setDirectVoice(voice.mode === 'off');
     else if (k === 'KeyO') setStyle('orb');
@@ -712,7 +812,7 @@ document.addEventListener('keydown', (e) => {
   if (typing(document.activeElement)) return;
   if (e.key === '/') {
     e.preventDefault();
-    $('#prompt').focus();
+    prompt.focus();
   } else if (e.code === 'Space' && voice.mode === 'ptt' && !e.repeat) {
     e.preventDefault();
     mic.classList.add('ptt-active');
@@ -732,7 +832,11 @@ window.__jarvis = {
   settings,
   live,
   get stage() { return stage; },
+  get config() { return llmConfig; },
+  get gateway() { return gateway; },
+  panels,
   send,
   interrupt,
+  showPanel,
   get quality() { return quality; }
 };

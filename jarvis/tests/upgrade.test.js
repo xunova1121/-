@@ -63,3 +63,16 @@ describe('极简 Markdown', () => {
     expect(parseMarkdown('<img src=x onerror=1>')[0].spans[0].text).toBe('<img src=x onerror=1>');
   });
 });
+
+describe('Markdown 标题与表格', () => {
+  it('解析 1–3 级标题', () => {
+    const b = parseMarkdown('# 一\n## 二\n### 三\n#### 不是');
+    expect(b.slice(0, 3).map((x) => [x.type, x.level])).toEqual([['heading', 1], ['heading', 2], ['heading', 3]]);
+    expect(b[3].type).toBe('p');
+  });
+  it('解析表格并跳过分隔行', () => {
+    const b = parseMarkdown('| 名称 | 数量 |\n| --- | :-: |\n| 苹果 | 3 |\n| 梨 | 5 |\n\n结尾');
+    expect(b[0]).toEqual({ type: 'table', rows: [['名称', '数量'], ['苹果', '3'], ['梨', '5']] });
+    expect(b[1].type).toBe('p');
+  });
+});

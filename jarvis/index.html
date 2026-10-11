@@ -4,160 +4,242 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="color-scheme" content="dark" />
-  <title>贾维斯 · J.A.R.V.I.S.</title>
+  <title>贾维斯 J.A.R.V.I.S.</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" />
   <link rel="stylesheet" href="/src/styles.css" />
 </head>
 <body>
-  <!-- 主视觉：WebGL 画布；减少动画时不创建 WebGL，只显示下面的 CSS 渐变 -->
-  <div id="stage-wrap" aria-hidden="true">
-    <div id="fallback-bg"></div>
-    <canvas id="stage"></canvas>
+  <div class="app">
+    <!-- 顶栏 -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-name">贾维斯</span>
+        <span class="brand-sub">J.A.R.V.I.S. · 个人智能体</span>
+      </div>
+      <button class="status-pill" id="mode-pill" type="button" title="当前模型" data-open="models">
+        <span class="dot" aria-hidden="true"></span><span id="mode-text">内置演示</span><span class="pill-sep" aria-hidden="true">/</span><span id="task-text">待命</span>
+      </button>
+      <div class="top-actions">
+        <button class="level-chip" id="level-chip" type="button" data-open="mind" title="进化等级">
+          <span class="lv">LV</span><b id="level-num">1</b><span class="xpbar"><i id="level-bar"></i></span>
+        </button>
+        <button class="icon-btn" id="btn-focus" type="button" aria-pressed="false" title="专注视图（Alt+F）" aria-label="专注视图">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
+        </button>
+        <button class="icon-btn" id="btn-fullscreen" type="button" title="全屏" aria-label="全屏">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2" /></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- 左侧导航：切换右侧面板 -->
+    <nav class="rail" aria-label="功能">
+      <button class="rail-btn" data-panel="workspace" type="button" title="工作区（Alt+1）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h7l2 2h9v10H3z" /></svg><span>工作区</span></button>
+      <button class="rail-btn" data-panel="knowledge" type="button" title="知识库（Alt+2）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6a2 2 0 0 1 2 2v13a2 2 0 0 0-2-2H4zM20 5h-6a2 2 0 0 0-2 2v13a2 2 0 0 1 2-2h6z" /></svg><span>知识库</span></button>
+      <button class="rail-btn" data-panel="mind" type="button" title="记忆与进化（Alt+3）"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" /></svg><span>进化</span></button>
+      <button class="rail-btn" data-panel="models" type="button" title="模型（Alt+4）"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" /><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4" /></svg><span>模型</span></button>
+      <button class="rail-btn" data-panel="system" type="button" title="系统状态（Alt+5）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4" /></svg><span>系统</span></button>
+      <button class="rail-btn" data-panel="settings" type="button" title="设置（Alt+6）"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg><span>设置</span></button>
+    </nav>
+
+    <!-- 中间：光核 + 对话 + 输入 -->
+    <main class="main" id="main">
+      <section class="stage" id="stage-wrap" aria-label="贾维斯">
+        <div id="fallback-bg"></div>
+        <canvas id="stage"></canvas>
+        <div class="hud hud-left" aria-hidden="true">
+          <div class="hud-k">表达</div><div class="hud-v" id="hud-emotion">平静</div>
+          <div class="hud-k">任务</div><div class="hud-v" id="hud-task">待命</div>
+        </div>
+        <div class="hud hud-right">
+          <div class="form-chips" role="radiogroup" aria-label="形态">
+            <button type="button" class="chip" data-style="orb" role="radio" title="光核（Alt+O）">光核</button>
+            <button type="button" class="chip" data-style="holo" role="radio" title="全息胸像（Alt+H）">胸像</button>
+            <button type="button" class="chip" data-style="wire" role="radio" title="线框（Alt+W）">线框</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="transcript" id="transcript" aria-live="polite" aria-label="对话"></section>
+
+      <form class="composer" id="inputbar" autocomplete="off">
+        <div class="attach-list" id="attach-list" hidden></div>
+        <div class="composer-row">
+          <button type="button" class="icon-btn" id="btn-attach" title="添加文件（Word / PDF / PPT / Excel / 图片 / 代码）" aria-label="添加文件">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5 12.6 20a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8" /></svg>
+          </button>
+          <input type="file" id="file-input" multiple hidden />
+          <span class="vad-meter" id="vad-meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+          <label class="sr-only" for="prompt">输入消息</label>
+          <textarea id="prompt" rows="1" placeholder="交给我一个任务：写代码、做 PPT、分析文件、查资料……（Enter 发送，Shift+Enter 换行）"></textarea>
+          <button type="button" class="model-chip" id="model-chip" data-open="models" title="切换模型"><span id="model-chip-text">内置演示</span></button>
+          <button type="button" class="stop" id="btn-stop" title="打断（Esc）" aria-label="打断">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" class="fill" /></svg>
+          </button>
+          <button type="button" class="mic" id="btn-mic" aria-pressed="false" aria-label="直接对话" title="直接对话（Alt+V）">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
+          </button>
+          <button type="submit" class="send" id="btn-send" aria-label="发送" title="发送">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6" /></svg>
+          </button>
+        </div>
+      </form>
+    </main>
+
+    <!-- 右侧面板 -->
+    <aside class="side" id="panel" aria-label="面板">
+      <!-- 工作区 -->
+      <section class="pane" data-pane="workspace" hidden>
+        <header class="pane-head">
+          <h2>工作区</h2>
+          <span class="badge" id="ws-mode">浏览器内</span>
+        </header>
+        <div class="pane-actions">
+          <button class="btn" type="button" id="btn-folder">连接本地文件夹</button>
+          <button class="btn ghost" type="button" id="btn-upload">上传文件</button>
+        </div>
+        <p class="muted small" id="ws-hint">智能体写的代码、生成的文档都在这里。连接本地文件夹后，它就能直接读写那个文件夹（不会删除文件，也不会覆盖同名文件）。</p>
+        <ul class="file-list" id="file-list"></ul>
+        <div class="viewer" id="viewer" hidden>
+          <div class="viewer-bar">
+            <span class="viewer-name" id="viewer-name"></span>
+            <div class="viewer-actions">
+              <button class="btn ghost sm" type="button" id="btn-v-open">新窗口打开</button>
+              <button class="btn ghost sm" type="button" id="btn-v-pdf">导出 PDF</button>
+              <button class="btn ghost sm" type="button" id="btn-v-kb">加入知识库</button>
+              <button class="btn sm" type="button" id="btn-v-download">下载</button>
+            </div>
+          </div>
+          <div class="viewer-body" id="viewer-body"></div>
+        </div>
+      </section>
+
+      <!-- 知识库 -->
+      <section class="pane" data-pane="knowledge" hidden>
+        <header class="pane-head"><h2>知识库</h2><span class="badge" id="kb-count">0 份</span></header>
+        <label class="dropzone" id="kb-drop" for="kb-input">
+          <input type="file" id="kb-input" multiple hidden accept=".docx,.pdf,.pptx,.xlsx,.xls,.csv,.txt,.md,.html,.htm,.json" />
+          <b>拖入或点击导入文档</b>
+          <span>Word · PDF · PPT · Excel · TXT · Markdown · 网页。在本机解析与索引，不上传。</span>
+        </label>
+        <ul class="doc-list" id="kb-list"></ul>
+        <div class="kb-test">
+          <label class="sr-only" for="kb-query">检索测试</label>
+          <input type="search" id="kb-query" placeholder="试试检索：输入问题回车" />
+          <ol class="kb-hits" id="kb-hits"></ol>
+        </div>
+      </section>
+
+      <!-- 记忆与进化 -->
+      <section class="pane" data-pane="mind" hidden>
+        <header class="pane-head"><h2>记忆与进化</h2><span class="badge" id="mind-level">LV 1</span></header>
+        <div class="evo">
+          <canvas id="evo-ring" width="132" height="132" aria-hidden="true"></canvas>
+          <div class="evo-stats" id="evo-stats"></div>
+        </div>
+        <p class="muted small">学习发生在这台电脑上：它会记住你的偏好，从你的 👎 反馈里总结教训，把做成功的多步任务沉淀为技能，下次直接复用。大模型本身的参数不会改变。</p>
+        <div class="tabs" role="tablist">
+          <button role="tab" type="button" data-mtab="memories" aria-selected="true">记忆</button>
+          <button role="tab" type="button" data-mtab="skills" aria-selected="false">技能</button>
+          <button role="tab" type="button" data-mtab="lessons" aria-selected="false">教训</button>
+          <button role="tab" type="button" data-mtab="events" aria-selected="false">日志</button>
+          <button role="tab" type="button" data-mtab="history" aria-selected="false">对话</button>
+        </div>
+        <ul class="mind-list" id="mind-list"></ul>
+        <div class="pane-actions" id="history-actions" hidden>
+          <label class="inline-check"><input type="checkbox" id="set-persist" /> 对话记录跨会话保存</label>
+          <button class="btn ghost sm" id="btn-clear-memory" type="button">清空对话记录</button>
+        </div>
+      </section>
+
+      <!-- 模型 -->
+      <section class="pane" data-pane="models" hidden>
+        <header class="pane-head"><h2>模型</h2><span class="badge" id="gw-badge">单文件版</span></header>
+        <label class="field" for="llm-provider"><span>服务商</span><select id="llm-provider"></select></label>
+        <p class="note" id="llm-note" hidden></p>
+        <label class="field" for="llm-model"><span>型号</span><input id="llm-model" list="llm-models" spellcheck="false" /><datalist id="llm-models"></datalist></label>
+        <label class="field" for="llm-base" id="row-base" hidden><span>接口地址</span><input id="llm-base" placeholder="https://…/v1" spellcheck="false" /></label>
+        <label class="field" for="llm-key" id="row-key"><span>API Key</span><input type="password" id="llm-key" placeholder="sk-…" autocomplete="off" spellcheck="false" /></label>
+        <p class="muted small" id="llm-key-hint"></p>
+        <div class="pane-actions">
+          <button class="btn" type="button" id="btn-llm-save">保存并使用</button>
+          <button class="btn ghost" type="button" id="btn-llm-test">测试连接</button>
+        </div>
+        <p class="muted small" id="llm-status" role="status"></p>
+        <h3 class="sub">联网获取最新信息</h3>
+        <label class="inline-check"><input type="checkbox" id="set-websearch" /> Claude 内置联网搜索（使用 Claude 时生效）</label>
+        <label class="field" for="tavily-key"><span>Tavily 搜索 Key（其他模型联网用，可选）</span><input type="password" id="tavily-key" placeholder="tvly-…" autocomplete="off" /></label>
+        <p class="muted small">密钥只保存在这台电脑的浏览器里，请求直接发往服务商（或经由你本机的网关）。不要在公用电脑上保存密钥。</p>
+      </section>
+
+      <!-- 系统 -->
+      <section class="pane" data-pane="system" hidden>
+        <header class="pane-head"><h2>系统状态</h2></header>
+        <div class="dashboard" id="dashboard"></div>
+      </section>
+
+      <!-- 设置 -->
+      <section class="pane" data-pane="settings" hidden>
+        <header class="pane-head"><h2>设置</h2></header>
+        <div class="setting">
+          <label><input type="checkbox" id="set-face" /> 人脸跟随</label>
+          <p class="muted">人脸检测在本机完成，摄像头画面不会上传至服务器。开启后光核的眼睛会看向你。</p>
+          <p class="muted" id="face-status" role="status"></p>
+        </div>
+        <div class="setting" id="row-voice">
+          <label><input type="checkbox" id="set-voice" /> 直接对话</label>
+          <p class="muted">语音活动检测在本机完成；识别文本只用于对话，不做任何语音情感分析。</p>
+          <p class="muted" id="voice-status" role="status"></p>
+        </div>
+        <div class="setting"><label><input type="checkbox" id="set-tts" /> 语音朗读回答</label></div>
+        <div class="setting">
+          <span class="label">VAD 灵敏度</span>
+          <div class="seg" role="radiogroup" aria-label="VAD 灵敏度" id="set-vad">
+            <button type="button" role="radio" data-v="低">低</button><button type="button" role="radio" data-v="中">中</button><button type="button" role="radio" data-v="高">高</button>
+          </div>
+          <p class="muted">低 = 停顿 1.2 秒提交，中 = 0.8 秒，高 = 0.5 秒。</p>
+        </div>
+        <div class="setting">
+          <label for="set-emotion" class="label">表情手动锁定</label>
+          <select id="set-emotion">
+            <option value="auto">自动</option>
+            <option>平静</option><option>专注</option><option>聆听</option><option>亲和</option><option>安抚</option><option>愉悦</option><option>警觉</option>
+          </select>
+        </div>
+        <div class="setting"><label><input type="checkbox" id="set-focus" /> 专注视图（收起光核，对话全屏）</label></div>
+        <div class="setting">
+          <label for="set-quality" class="label">画质</label>
+          <select id="set-quality">
+            <option value="auto">自动</option><option value="high">高（泛光）</option><option value="standard">标准</option><option value="eco">省电（24fps，无泛光与星尘）</option>
+          </select>
+        </div>
+        <div class="setting">
+          <label for="set-motion" class="label">减少动画</label>
+          <select id="set-motion"><option value="system">跟随系统</option><option value="on">开启</option><option value="off">关闭</option></select>
+          <p class="muted" id="motion-status"></p>
+        </div>
+        <div class="setting">
+          <span class="label">键盘快捷键</span>
+          <dl class="shortcuts">
+            <dt><kbd>Enter</kbd></dt><dd>发送（<kbd>Shift</kbd>+<kbd>Enter</kbd> 换行）</dd>
+            <dt><kbd>Esc</kbd></dt><dd>打断朗读 / 停止任务</dd>
+            <dt><kbd>/</kbd></dt><dd>聚焦输入框</dd>
+            <dt><kbd>Alt</kbd>+<kbd>1</kbd>–<kbd>6</kbd></dt><dd>工作区 / 知识库 / 进化 / 模型 / 系统 / 设置</dd>
+            <dt><kbd>Alt</kbd>+<kbd>F</kbd></dt><dd>专注视图</dd>
+            <dt><kbd>Alt</kbd>+<kbd>V</kbd></dt><dd>直接对话开关</dd>
+            <dt><kbd>Alt</kbd>+<kbd>O</kbd>/<kbd>H</kbd>/<kbd>W</kbd></dt><dd>光核 / 胸像 / 线框</dd>
+          </dl>
+        </div>
+        <p class="muted small">界面中的“表情”是表达风格，由回复内容、模型指令和任务状态决定，不代表模型拥有真实情绪，也不会推断你的情绪。</p>
+        <p class="muted small attribution">Head scan by Lee Perry-Smith (<a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noopener">CC BY 3.0</a>, Infinite-Realities / triplegangers.com)</p>
+      </section>
+    </aside>
   </div>
 
-  <header class="topbar">
-    <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">贾维斯</span><span class="brand-line" aria-hidden="true"></span></div>
-    <div class="mode-pill" id="mode-pill" title="对话后端状态"><span class="dot" aria-hidden="true"></span><span id="mode-text">本机助手</span></div>
-    <div class="win-actions">
-      <button class="icon-btn" id="btn-focus" type="button" aria-pressed="false" title="专注视图" aria-label="专注视图">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg>
-      </button>
-      <button class="icon-btn" id="btn-fullscreen" type="button" title="全屏" aria-label="全屏">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2" /></svg>
-      </button>
-    </div>
-  </header>
-
-  <nav class="sidenav" id="sidenav" aria-label="主导航">
-    <button class="nav-item active" data-view="console" type="button">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11 12 4l8 7v9h-5v-6H9v6H4z" /></svg><span>控制台</span>
-    </button>
-    <button class="nav-item" data-view="chat" type="button">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z" /></svg><span>对话</span>
-    </button>
-    <button class="nav-item" data-view="memory" type="button">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></svg><span>记忆</span>
-    </button>
-    <button class="nav-item" data-view="settings" type="button">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="2.5" class="fill" /></svg><span>设置</span>
-    </button>
-    <button class="nav-collapse icon-btn" id="btn-nav" type="button" aria-label="收起导航">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h3M10 6h10M4 12h3M10 12h10M4 18h3M10 18h10" /></svg>
-    </button>
-  </nav>
-
-  <!-- 右侧悬浮仪表 -->
-  <aside class="dashboard" id="dashboard" aria-label="系统仪表"></aside>
-
-  <!-- 对话区：控制台视图下是字幕式的最近几条，对话视图/专注视图下展开为完整记录 -->
-  <section class="transcript" id="transcript" aria-live="polite" aria-label="对话记录"></section>
-
-  <!-- 记忆 / 设置 抽屉 -->
-  <section class="drawer" id="drawer-memory" hidden aria-label="记忆">
-    <h2>记忆</h2>
-    <p class="muted">对话按天归档；发给模型的上下文为最近 12 条。</p>
-    <label class="inline-check"><input type="checkbox" id="set-persist" /> 跨会话保存（仅保存在本机浏览器）</label>
-    <div id="memory-list" class="memory-list"></div>
-    <button class="btn" id="btn-clear-memory" type="button">清空记忆</button>
-  </section>
-
-  <section class="drawer" id="drawer-settings" hidden aria-label="设置">
-    <h2>设置</h2>
-    <div class="setting">
-      <label><input type="checkbox" id="set-face" /> 人脸跟随</label>
-      <p class="muted">人脸检测在本机完成，摄像头画面不会上传至服务器。开启后智能体在人形形态下会转向你。</p>
-      <p class="muted" id="face-status" role="status"></p>
-    </div>
-    <div class="setting" id="row-voice">
-      <label><input type="checkbox" id="set-voice" /> 直接对话</label>
-      <p class="muted">语音活动检测在本机完成；识别文本只用于对话，不做任何语音情感分析。</p>
-      <p class="muted" id="voice-status" role="status"></p>
-    </div>
-    <div class="setting">
-      <label><input type="checkbox" id="set-tts" /> 语音输出</label>
-    </div>
-    <div class="setting">
-      <label for="set-key" class="label">Claude API Key（可选）</label>
-      <div class="key-row">
-        <input type="password" id="set-key" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" />
-        <button class="btn" type="button" id="btn-save-key">保存</button>
-        <button class="btn" type="button" id="btn-clear-key">删除</button>
-      </div>
-      <p class="muted">没有部署网关（例如直接双击打开单文件版）时使用：密钥只保存在这台电脑的浏览器里，对话直接发给 Anthropic。不填则使用内置演示助手。请不要在公用电脑上保存密钥。</p>
-    </div>
-    <div class="setting">
-      <span class="label">VAD 灵敏度</span>
-      <div class="seg" role="radiogroup" aria-label="VAD 灵敏度" id="set-vad">
-        <button type="button" role="radio" data-v="低">低</button><button type="button" role="radio" data-v="中">中</button><button type="button" role="radio" data-v="高">高</button>
-      </div>
-      <p class="muted">低 = 停顿 1.2 秒提交，中 = 0.8 秒，高 = 0.5 秒。</p>
-    </div>
-    <div class="setting">
-      <label for="set-emotion" class="label">情绪手动覆盖</label>
-      <select id="set-emotion">
-        <option value="auto">自动</option>
-        <option>平静</option><option>专注</option><option>聆听</option><option>亲和</option><option>安抚</option><option>愉悦</option><option>警觉</option>
-      </select>
-    </div>
-    <div class="setting">
-      <label><input type="checkbox" id="set-focus" /> 专注视图</label>
-    </div>
-    <div class="setting">
-      <label for="set-quality" class="label">画质</label>
-      <select id="set-quality">
-        <option value="auto">自动</option>
-        <option value="high">高（泛光）</option>
-        <option value="standard">标准</option>
-        <option value="eco">省电（24fps，无泛光与星尘）</option>
-      </select>
-    </div>
-    <div class="setting">
-      <label for="set-motion" class="label">减少动画</label>
-      <select id="set-motion">
-        <option value="system">跟随系统</option>
-        <option value="on">开启</option>
-        <option value="off">关闭</option>
-      </select>
-      <p class="muted" id="motion-status"></p>
-    </div>
-    <div class="setting">
-      <span class="label">键盘快捷键</span>
-      <dl class="shortcuts">
-        <dt><kbd>Esc</kbd></dt><dd>打断播报 / 停止生成</dd>
-        <dt><kbd>/</kbd></dt><dd>聚焦输入框</dd>
-        <dt><kbd>Alt</kbd>+<kbd>1</kbd>–<kbd>4</kbd></dt><dd>控制台 / 对话 / 记忆 / 设置</dd>
-        <dt><kbd>Alt</kbd>+<kbd>F</kbd></dt><dd>专注视图</dd>
-        <dt><kbd>Alt</kbd>+<kbd>V</kbd></dt><dd>直接对话开关</dd>
-        <dt><kbd>Alt</kbd>+<kbd>O</kbd>/<kbd>H</kbd>/<kbd>W</kbd></dt><dd>光核 / 胸像 / 线框</dd>
-        <dt>按住 <kbd>空格</kbd></dt><dd>按下说话（降级模式）</dd>
-      </dl>
-    </div>
-    <p class="muted small">界面中的“情绪”是表达风格，由回复文本、后端指令和任务状态决定，不代表模型拥有真实情绪，也不会推断你的情绪。</p>
-  </section>
-
-  <!-- 底部输入栏 -->
-  <form class="inputbar" id="inputbar" autocomplete="off">
-    <span class="vad-meter" id="vad-meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
-    <label class="sr-only" for="prompt">输入消息</label>
-    <input id="prompt" name="prompt" type="text" placeholder="说出你的想法…（按 / 聚焦）" enterkeyhint="send" />
-    <div class="form-chips" role="radiogroup" aria-label="显示样式">
-      <button type="button" class="chip" data-style="orb" role="radio" title="光核（Alt+O）"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><ellipse cx="9.2" cy="11" rx="1.2" ry="1.8" class="fill" /><ellipse cx="14.8" cy="11" rx="1.2" ry="1.8" class="fill" /></svg>光核</button>
-      <button type="button" class="chip" data-style="holo" role="radio" title="全息胸像（Alt+H）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c-3 0-5 2.4-5 5.6 0 2.6 1.3 4.6 2.6 5.6L9 16c-2.6.6-4.5 2-5 5h16c-.5-3-2.4-4.4-5-5l-.6-1.8C15.7 13.2 17 11.2 17 8.6 17 5.4 15 3 12 3z" /></svg>胸像</button>
-      <button type="button" class="chip" data-style="wire" role="radio" title="线框胸像（Alt+W）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 7v10l7 4 7-4V7zM5 7l7 4 7-4M12 11v10" /></svg>线框</button>
-    </div>
-    <button type="button" class="stop" id="btn-stop" title="打断（Esc）" aria-label="打断播报">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" class="fill" /></svg>
-    </button>
-    <button type="button" class="mic" id="btn-mic" aria-pressed="false" aria-label="直接对话">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
-    </button>
-  </form>
-
+  <div class="drop-overlay" id="drop-overlay" hidden><div>松开即可添加到工作区，并附加到这条消息</div></div>
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-
-  <footer class="attribution">
-    Head scan by Lee Perry-Smith (<a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noopener">CC BY 3.0</a>, Infinite-Realities / triplegangers.com)
-  </footer>
-
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

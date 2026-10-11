@@ -26,6 +26,12 @@
     "@anthropic-ai/sdk": "^0.133.0",
     "@mediapipe/tasks-vision": "^1.1.0",
     "@ricky0123/vad-web": "^0.0.31",
-    "three": "0.162.0"
+    "docx": "^9.10.0",
+    "jszip": "^3.10.2",
+    "mammoth": "^1.13.0",
+    "pdfjs-dist": "^4.10.38",
+    "pptxgenjs": "^4.0.1",
+    "three": "0.162.0",
+    "xlsx": "^0.18.5"
   }
 }

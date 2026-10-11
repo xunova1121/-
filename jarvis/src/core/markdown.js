@@ -1,6 +1,6 @@
 /**
  * 极简 Markdown → 结构化块（不产出 HTML 字符串，DOM 侧用 textContent 组装，杜绝注入）。
- * 支持：段落、换行、- / * / 1. 列表、``` 代码块、**粗体**、`行内代码`。
+ * 支持：# 标题（1–3 级）、段落、换行、- / * / 1. 列表、``` 代码块、| 表格 |、**粗体**、`行内代码`。
  */
 export function parseMarkdown(text) {
   const blocks = [];
@@ -17,6 +17,24 @@ export function parseMarkdown(text) {
       const code = [];
       for (i++; i < lines.length && !/^```/.test(lines[i]); i++) code.push(lines[i]);
       blocks.push({ type: 'code', text: code.join('\n') });
+      continue;
+    }
+    const h = line.match(/^(#{1,3})\s+(.*)$/);
+    if (h) {
+      flush();
+      blocks.push({ type: 'heading', level: h[1].length, spans: inline(h[2].trim()) });
+      continue;
+    }
+    if (/^\s*\|.*\|\s*$/.test(line)) {
+      flush();
+      const rows = [];
+      for (; i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i]); i++) {
+        const cells = lines[i].trim().slice(1, -1).split('|').map((c) => c.trim());
+        if (cells.every((c) => /^:?-+:?$/.test(c))) continue; // 分隔行
+        rows.push(cells);
+      }
+      i--;
+      blocks.push({ type: 'table', rows });
       continue;
     }
     const li = line.match(/^\s*(?:[-*•]|\d+[.、)])\s+(.*)$/);

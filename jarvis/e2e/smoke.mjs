@@ -1,164 +1,213 @@
 /**
- * 浏览器冒烟测试（Playwright + Chromium）：npm run build && npm run server 后执行
+ * 浏览器端到端测试（Playwright + Chromium）：npm run build && npm run server 后执行
  *   node e2e/smoke.mjs [截图输出目录]
+ *
+ * 覆盖：渲染与表情、智能体执行任务（写网页 + 预览、生成文档、运行代码）、知识库（TXT / PDF）、
+ * 记忆与教训、OpenAI 兼容接口（本地假服务端，含流式工具调用）、打断与快捷键、画质、
+ * 后台暂停、上下文恢复、减少动画、窄屏、人脸 / 语音（假设备）、隐私、Firefox 式降级。
  */
 import { chromium } from 'playwright';
+import http from 'node:http';
 
 const BASE = process.env.JARVIS_URL || 'http://127.0.0.1:8787';
 const OUT = process.argv[2] || '.';
 const results = [];
 const check = (name, ok, detail = '') => {
-  results.push({ name, ok, detail });
-  console.log(`${ok ? '✓' : '✗'} ${name}${detail ? ` — ${detail}` : ''}`);
+  results.push({ name, ok });
+  console.log(`${ok ? '✓' : '✗'} ${name}${detail ? ` — ${String(detail).slice(0, 160)}` : ''}`);
 };
 
-const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM_PATH || undefined,
-  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist']
-});
+/** 发一条消息并等这一轮结束 */
+async function ask(page, q, timeout = 40000) {
+  const before = await page.locator('.msg.agent').count();
+  await page.fill('#prompt', q);
+  await page.press('#prompt', 'Enter');
+  await page.waitForFunction((n) => document.querySelectorAll('.msg.agent').length > n && !document.querySelector('.msg.agent.streaming'), before, { timeout });
+  await page.waitForTimeout(150);
+  return page.locator('.msg.agent').last().innerText();
+}
 
-// ---------- 1. 正常模式 ----------
+/** 本地假 OpenAI 兼容服务端：第一次请求返回流式工具调用，第二次返回文本 */
+function fakeOpenAI() {
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
+    if (req.method === 'OPTIONS') return res.writeHead(204, cors).end();
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      const j = JSON.parse(body);
+      seen.push(j);
+      res.writeHead(200, { ...cors, 'Content-Type': 'text/event-stream' });
+      const send = (o) => res.write(`data: ${JSON.stringify(o)}\n\n`);
+      const hasResult = j.messages.some((m) => m.role === 'tool');
+      if (!hasResult) {
+        send({ choices: [{ delta: { content: '<emotion>专注</emotion>我来写个文件。' } }] });
+        send({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'write_file', arguments: '{"path":"notes/hel' } }] } }] });
+        send({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: 'lo.md","content":"# 你好\\n来自假模型"}' } }] }, finish_reason: 'tool_calls' }] });
+      } else {
+        send({ choices: [{ delta: { content: '<emotion>愉悦</emotion>已写好 notes/hello.md。' } }] });
+        send({ choices: [{ delta: {}, finish_reason: 'stop' }] });
+      }
+      res.end('data: [DONE]\n\n');
+    });
+  });
+  return new Promise((r) => server.listen(0, '127.0.0.1', () => r({ server, seen, url: `http://127.0.0.1:${server.address().port}/v1` })));
+}
+
+const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+
+// ---------- 1. 主流程 ----------
 {
-  const ctx = await browser.newContext({ viewport: { width: 1672, height: 941 }, reducedMotion: 'no-preference' });
+  const ctx = await browser.newContext({ viewport: { width: 1600, height: 960 }, reducedMotion: 'no-preference' });
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('console', (m) => { if (m.type() === 'error' && !/fonts\.(googleapis|gstatic)/.test(m.text())) errors.push(m.text()); });
   await page.goto(BASE);
-  await page.waitForFunction(() => window.__jarvis?.stage?.stats.frames > 20, null, { timeout: 30000 });
-  const stats = await page.evaluate(() => {
-    const s = window.__jarvis.stage.stats;
-    return { vertices: s.vertices, drawCalls: s.drawCalls, isWebGL2: s.isWebGL2, fps: s.fps, bloom: s.bloom, style: s.style };
-  });
-  check('WebGL 主视觉启动', true, JSON.stringify(stats));
-  check('默认“光核”样式，胸像网格已加载', stats.vertices > 8000 && stats.style === 'orb', `${stats.style} / ${stats.vertices} 顶点`);
-  check('泛光开启时 draw calls ≤ 12', stats.bloom === true && stats.drawCalls <= 12, `bloom=${stats.bloom} calls=${stats.drawCalls}`);
+  await page.waitForFunction(() => window.__jarvis?.stage?.stats.frames > 10, null, { timeout: 30000 });
+  const stats = await page.evaluate(() => { const s = window.__jarvis.stage.stats; return { style: s.style, calls: s.drawCalls, bloom: s.bloom, gl2: s.isWebGL2 }; });
+  check('主视觉启动（光核）', stats.style === 'orb', JSON.stringify(stats));
+  check('泛光开启时 draw calls ≤ 12', stats.bloom && stats.calls <= 12, String(stats.calls));
+  await page.waitForFunction(() => window.__jarvis.gateway, null, { timeout: 5000 }).catch(() => {});
+  check('识别到本机网关', await page.evaluate(() => Boolean(window.__jarvis.gateway)), await page.textContent('#gw-badge'));
 
-  await page.waitForTimeout(1500);
-  await page.screenshot({ path: `${OUT}/01-holo.png` });
-
-  // 显示样式：胸像 / 线框 / 光核
-  for (const style of ['holo', 'wire', 'orb']) {
-    await page.click(`[data-style="${style}"]`);
-    await page.waitForTimeout(500);
-    const cur = await page.evaluate(() => ({ s: window.__jarvis.stage.stats.style, saved: window.__jarvis.settings.look, calls: window.__jarvis.stage.stats.drawCalls }));
-    check(`切换样式：${style}`, cur.s === style && cur.saved === style && cur.calls <= 12, JSON.stringify(cur));
-    if (style !== 'orb') await page.screenshot({ path: `${OUT}/02-${style}.png` });
+  for (const s of ['holo', 'wire', 'orb']) {
+    await page.click(`[data-style="${s}"]`);
+    await page.waitForTimeout(300);
+    const cur = await page.evaluate(() => ({ s: window.__jarvis.stage.stats.style, calls: window.__jarvis.stage.stats.drawCalls }));
+    check(`形态切换：${s}`, cur.s === s && cur.calls <= 12, JSON.stringify(cur));
   }
 
-  // 对话：关键词/提示驱动情绪
-  await page.fill('#prompt', '最近压力好大');
-  const listening = await page.evaluate(() => window.__jarvis.machine.state);
-  check('开始输入 → 聆听', listening === '聆听', listening);
-  const seen = new Set();
-  const watcher = setInterval(async () => { try { seen.add(await page.evaluate(() => window.__jarvis.machine.state)); } catch {} }, 60);
-  await page.press('#prompt', 'Enter');
-  await page.waitForFunction(() => window.__jarvis.machine.task === 'done', null, { timeout: 20000 });
-  clearInterval(watcher);
-  check('请求发出 → 专注', seen.has('专注'), [...seen].join(','));
-  check('回复 emotion_hint → 安抚', seen.has('安抚'), [...seen].join(','));
-  const after = await page.evaluate(() => window.__jarvis.machine.state);
-  check('回合结束 → 亲和', after === '亲和', after);
-  await page.screenshot({ path: `${OUT}/04-chat.png` });
-  await page.waitForTimeout(3200);
-  const calm = await page.evaluate(() => window.__jarvis.machine.state);
-  check('3 秒后回落平静', calm === '平静', calm);
-
-  // 工具调用 → 指标问答
-  await page.fill('#prompt', '电脑现在状态怎么样');
-  await page.press('#prompt', 'Enter');
-  await page.waitForFunction(() => window.__jarvis.machine.task === 'done', null, { timeout: 20000 });
-  const lastMsg = await page.locator('.msg.agent').last().textContent();
-  check('工具调用回复', /CPU/.test(lastMsg), lastMsg.slice(0, 40));
-
-  // 手动覆盖
-  await page.click('#emotion-btn');
-  await page.click('[data-emotion="警觉"]');
-  await page.waitForTimeout(500);
-  check('手动锁定警觉', await page.evaluate(() => window.__jarvis.machine.state === '警觉'));
-  await page.screenshot({ path: `${OUT}/05-alert.png` });
-  await page.click('#emotion-btn');
-  await page.click('[data-emotion="auto"]');
-
-  // 仪表视差 / 倾斜
-  await page.mouse.move(1500, 300, { steps: 5 });
-  await page.waitForTimeout(400);
-  const tilt = await page.evaluate(() => document.querySelector('.dash-tilt').style.transform);
-  check('指针靠近仪表 → 倾斜', /rotateY\((?!0\.000)/.test(tilt), tilt);
-  await page.mouse.move(10, 10);
-  await page.evaluate(() => document.documentElement.dispatchEvent(new MouseEvent('mouseleave')));
-  await page.waitForTimeout(1200);
-  const rest = await page.evaluate(() => document.querySelector('.dash-tilt').style.transform);
-  const angles = [...rest.matchAll(/-?\d+(\.\d+)?/g)].map((m) => Math.abs(Number(m[0])));
-  check('移出后归位', angles.length === 2 && angles.every((a) => a < 0.05), rest);
-
-  // 后台暂停
-  const reqs = [];
-  page.on('request', (r) => { if (r.url().includes('/api/local/metrics')) reqs.push(Date.now()); });
-  await page.evaluate(() => {
-    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
-    document.dispatchEvent(new Event('visibilitychange'));
-  });
-  const f1 = await page.evaluate(() => window.__jarvis.stage.stats.frames);
-  const n0 = reqs.length;
-  await page.waitForTimeout(7000);
-  const f2 = await page.evaluate(() => window.__jarvis.stage.stats.frames);
-  check('隐藏后渲染循环停止', f1 === f2 && !(await page.evaluate(() => window.__jarvis.stage.running)), `${f1} → ${f2}`);
-  check('隐藏后指标轮询停止', reqs.length === n0, `${reqs.length - n0} 次请求`);
-  await page.evaluate(() => {
-    Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
-    document.dispatchEvent(new Event('visibilitychange'));
-  });
+  // —— 智能体：写网页 → 预览
+  let reply = await ask(page, '帮我写一个网页');
+  const tools1 = await page.locator('.msg.agent').last().locator('.tool-card .tn').allTextContents();
+  check('智能体写网页：写入文件 → 打开预览', tools1.join(',') === '写入文件,打开预览', tools1.join(','));
+  const frame = page.frameLocator('#viewer-body iframe');
   await page.waitForTimeout(800);
-  const f3 = await page.evaluate(() => window.__jarvis.stage.stats.frames);
-  check('返回后恢复渲染', f3 > f2, `${f2} → ${f3}`);
+  const clock = await frame.locator('#t').textContent().catch(() => '');
+  check('网页在沙箱 iframe 里运行', /\d{1,2}:\d{2}:\d{2}/.test(clock), clock);
+  check('回答里没有残留表达标签', !reply.includes('<emotion>'), reply.slice(0, 60));
+  await page.screenshot({ path: `${OUT}/e2e-01-webpage.png` });
 
-  // 专注视图
-  await page.click('#btn-focus');
-  await page.waitForTimeout(400);
-  await page.screenshot({ path: `${OUT}/06-focus.png` });
-  const fa = await page.evaluate(() => window.__jarvis.stage.stats.frames);
-  await page.waitForTimeout(2000);
-  const fb = await page.evaluate(() => window.__jarvis.stage.stats.frames);
-  check('专注视图降频到 ~20fps', (fb - fa) / 2 <= 22, `${((fb - fa) / 2).toFixed(1)} fps`);
-  await page.click('#btn-focus');
+  // —— 生成 Word / PPT / Excel
+  for (const [q, ext] of [['生成一份Word周报', 'docx'], ['做一个PPT', 'pptx'], ['做一个Excel表格', 'xlsx']]) {
+    await ask(page, q);
+    const listed = await page.locator('#file-list li', { hasText: `示例.${ext}` }).count();
+    check(`生成 ${ext} 并出现在工作区`, listed === 1);
+  }
+  await page.locator('#file-list li', { hasText: '示例.docx' }).click();
+  await page.waitForFunction(() => /项目周报/.test(document.querySelector('#viewer-body')?.textContent || ''), null, { timeout: 15000 }).catch(() => {});
+  check('Word 在工作区里可预览（解析出文字）', /项目周报/.test(await page.textContent('#viewer-body')));
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 5000 }).catch(() => null), page.click('#btn-v-download')]);
+  // 无头 Chromium 会把非 ASCII 的下载文件名替换成 “download”（桌面版 Chrome / Edge 正常保留中文名），所以这里校验内容：docx 是 ZIP，以 PK 开头
+  const fs = await import('node:fs');
+  const head = dl ? fs.readFileSync(await dl.path()).subarray(0, 2).toString() : '';
+  check('工作区文件可下载（docx 内容完整）', head === 'PK', dl?.suggestedFilename());
 
-  // —— 升级功能：打断、快捷键、画质、记忆
-  await page.evaluate(() => { window.__barge = window.__jarvis.send('最近压力好大'); });
-  await page.waitForFunction(() => document.querySelector('.msg.agent.streaming .body')?.textContent.length > 3, null, { timeout: 10000 });
+  // —— 运行代码
+  reply = await ask(page, '运行一段代码');
+  check('沙箱运行 JavaScript', /1\.\.10 的平方/.test(reply) && /返回值：55/.test(reply), reply.slice(0, 100));
+
+  // —— 知识库：TXT 与真实 PDF
+  await page.click('[data-panel="knowledge"]');
+  await page.setInputFiles('#kb-input', { name: '员工手册.txt', mimeType: 'text/plain', buffer: Buffer.from('第三章 假期\n\n年假规定：入职满一年的员工每年享有带薪年假十天。\n\n病假需提供医院证明。') });
+  await page.waitForFunction(() => document.querySelectorAll('#kb-list li:not(.empty)').length >= 1, null, { timeout: 10000 });
+  const pdfPage = await ctx.newPage();
+  await pdfPage.setContent('<h1>Quarterly Report</h1><p>Revenue grew 23 percent this quarter.</p><p>报销流程：先在系统提交，再由部门经理审批。</p>');
+  const pdf = await pdfPage.pdf({ format: 'A4' });
+  await pdfPage.close();
+  await page.setInputFiles('#kb-input', { name: '季度报告.pdf', mimeType: 'application/pdf', buffer: pdf });
+  await page.waitForFunction(() => document.querySelectorAll('#kb-list li:not(.empty)').length >= 2, null, { timeout: 20000 }).catch(() => {});
+  const kbItems = await page.locator('#kb-list li .fn').allTextContents();
+  check('知识库导入 TXT 与 PDF（本地解析）', kbItems.includes('员工手册.txt') && kbItems.includes('季度报告.pdf'), kbItems.join(','));
+  await page.fill('#kb-query', 'Revenue');
+  await page.press('#kb-query', 'Enter');
+  await page.waitForTimeout(300);
+  const hitsText = await page.textContent('#kb-hits');
+  check('PDF 文字可检索', /23 percent/.test(hitsText), hitsText);
+  reply = await ask(page, '根据知识库，年假有几天？');
+  const sources = await page.locator('.msg.agent').last().locator('.sources').textContent().catch(() => '');
+  check('回答引用知识库来源', sources.includes('员工手册.txt') && /十天/.test(reply), sources);
+
+  // —— 记忆与教训
+  await ask(page, '记住我喜欢简洁的回答');
+  await page.click('[data-panel="mind"]');
+  await page.waitForTimeout(300);
+  check('记忆写入并显示', /我喜欢简洁的回答/.test(await page.textContent('#mind-list')));
+  await ask(page, '今天心情不错');
+  await page.locator('.msg.agent').last().locator('.feedback button').nth(1).click();
+  await page.fill('.lesson-box input', '回答太长了');
+  await page.press('.lesson-box input', 'Enter');
+  await page.click('[data-mtab="lessons"]');
+  await page.waitForTimeout(300);
+  check('👎 反馈记为教训', /回答太长了/.test(await page.textContent('#mind-list')));
+  const lv = await page.textContent('#mind-level');
+  check('进化等级随积累增长', /XP/.test(lv) && Number(lv.match(/(\d+) XP/)[1]) > 5, lv);
+  await page.screenshot({ path: `${OUT}/e2e-02-mind.png` });
+
+  // —— 缺少密钥时引导到模型面板
+  await page.click('[data-panel="models"]');
+  await page.selectOption('#llm-provider', 'deepseek');
+  await page.fill('#llm-key', '');
+  await page.click('#btn-llm-save');
+  reply = await ask(page, '你好');
+  check('未填密钥时给出明确提示', /API Key/.test(reply), reply.slice(0, 60));
+
+  // —— OpenAI 兼容接口（本地假服务端）：流式文本 + 分片工具调用 + 第二轮回传
+  const fake = await fakeOpenAI();
+  await page.selectOption('#llm-provider', 'custom');
+  await page.fill('#llm-base', fake.url);
+  await page.fill('#llm-model', 'fake-model');
+  await page.fill('#llm-key', 'sk-test');
+  await page.click('#btn-llm-save');
+  check('模型标签更新', /fake-model/.test(await page.textContent('#model-chip-text')));
+  reply = await ask(page, '写个笔记');
+  const req = fake.seen[0];
+  check('OpenAI 兼容：请求带工具定义与系统提示', req?.stream === true && req.tools?.some((t) => t.function.name === 'write_file') && req.messages[0].role === 'system', `${req?.tools?.length} 个工具`);
+  check('OpenAI 兼容：第二轮回传 tool 结果', fake.seen[1]?.messages.some((m) => m.role === 'tool' && /已写入 notes\/hello.md/.test(m.content)));
+  check('OpenAI 兼容：流式文本到达界面', /已写好/.test(reply), reply.slice(-40));
+  await page.click('[data-panel="workspace"]');
+  check('假模型写的文件出现在工作区', (await page.locator('#file-list li', { hasText: 'notes/hello.md' }).count()) === 1);
+  fake.server.close();
+  await page.click('[data-panel="models"]');
+  await page.selectOption('#llm-provider', 'mock');
+  await page.click('#btn-llm-save');
+
+  // —— 打断、快捷键、画质
+  await page.evaluate(() => { window.__barge = window.__jarvis.send('帮我写一个网页'); });
+  await page.waitForFunction(() => document.querySelector('.msg.agent.streaming .body')?.textContent.length > 2, null, { timeout: 10000 });
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
-  const barge = await page.evaluate(() => ({
-    streaming: document.querySelectorAll('.msg.agent.streaming').length,
-    meta: [...document.querySelectorAll('.msg.agent .meta')].at(-1)?.textContent,
-    gen: document.body.classList.contains('generating')
-  }));
-  check('Esc 打断生成', barge.streaming === 0 && barge.meta === '已打断' && !barge.gen, JSON.stringify(barge));
-
+  const barge = await page.evaluate(() => ({ streaming: document.querySelectorAll('.msg.agent.streaming').length, meta: [...document.querySelectorAll('.msg.agent .meta')].at(-1)?.textContent }));
+  check('Esc 打断任务', barge.streaming === 0 && /已打断/.test(barge.meta), JSON.stringify(barge));
   await page.keyboard.press('Alt+Digit2');
-  check('Alt+2 切到对话视图', await page.evaluate(() => document.body.classList.contains('view-chat')));
-  await page.keyboard.press('Alt+Digit1');
+  check('Alt+2 打开知识库', await page.isVisible('[data-pane="knowledge"]'));
+  await page.keyboard.press('Alt+Digit6');
+  await page.selectOption('#set-quality', 'eco');
+  await page.waitForTimeout(400);
+  const eco = await page.evaluate(() => ({ bloom: window.__jarvis.stage.stats.bloom, fps: window.__jarvis.quality.fps }));
+  check('省电档：关泛光、24fps', !eco.bloom && eco.fps === 24, JSON.stringify(eco));
+  await page.selectOption('#set-quality', 'auto');
+  await page.click('#prompt');
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => document.activeElement.blur());
   await page.keyboard.press('/');
   check('/ 聚焦输入框', await page.evaluate(() => document.activeElement.id === 'prompt'));
-  await page.evaluate(() => document.activeElement.blur());
 
-  const who = await page.locator('.msg.agent .who').first().textContent();
-  check('消息带发送者与时间', /^贾维斯 · \d{2}:\d{2}$/.test(who), who);
+  // —— 后台暂停与恢复
+  await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); });
+  const f1 = await page.evaluate(() => window.__jarvis.stage.stats.frames);
+  await page.waitForTimeout(1500);
+  const f2 = await page.evaluate(() => window.__jarvis.stage.stats.frames);
+  check('隐藏后渲染循环停止', f1 === f2, `${f1} → ${f2}`);
+  await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); document.dispatchEvent(new Event('visibilitychange')); });
+  await page.waitForTimeout(800);
+  check('返回后恢复渲染', (await page.evaluate(() => window.__jarvis.stage.stats.frames)) > f2);
 
-  await page.click('[data-view="settings"]');
-  await page.selectOption('#set-quality', 'eco');
-  const e0 = await page.evaluate(() => window.__jarvis.stage.stats.frames);
-  await page.waitForTimeout(2000);
-  const e1 = await page.evaluate(() => window.__jarvis.stage.stats.frames);
-  const eco = await page.evaluate(() => ({ bloom: window.__jarvis.stage.stats.bloom, q: window.__jarvis.quality }));
-  check('省电档：关泛光、≤ 24fps', !eco.bloom && eco.q.fps === 24 && (e1 - e0) / 2 <= 25, `${((e1 - e0) / 2).toFixed(1)}fps`);
-  await page.selectOption('#set-quality', 'auto');
-  await page.click('[data-view="settings"]');
-
-  // 上下文丢失恢复
+  // —— 上下文丢失恢复
   const restored = await page.evaluate(async () => {
-    const gl = window.__jarvis.stage.renderer.getContext();
-    const ext = gl.getExtension('WEBGL_lose_context');
+    const ext = window.__jarvis.stage.renderer.getContext().getExtension('WEBGL_lose_context');
     if (!ext) return 'no-ext';
     ext.loseContext();
     await new Promise((r) => setTimeout(r, 100));
@@ -169,123 +218,93 @@ const browser = await chromium.launch({
     return Math.round(performance.now() - t0);
   });
   check('WebGL 上下文丢失后恢复 ≤ 500ms', typeof restored === 'number' && restored <= 500, `${restored}ms`);
-
   check('无页面错误', errors.length === 0, errors.join(' | '));
   await ctx.close();
 }
 
-// ---------- 1b. 记忆跨会话保存 ----------
+// ---------- 2. 对话记录跨会话保存 ----------
 {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   const page = await ctx.newPage();
   await page.goto(BASE);
-  await page.click('[data-view="memory"]');
+  await page.click('[data-panel="mind"]');
+  await page.click('[data-mtab="history"]');
   await page.check('#set-persist');
-  await page.fill('#prompt', '现在几点');
-  await page.press('#prompt', 'Enter');
-  await page.waitForFunction(() => window.__jarvis.machine.task === 'done', null, { timeout: 20000 });
+  await ask(page, '现在几点');
   await page.reload();
-  await page.click('[data-view="memory"]');
-  const mem = await page.textContent('#memory-list');
-  check('开启保存后刷新仍保留记忆，按天分组', mem.includes('今天') && mem.includes('现在几点'), mem.slice(0, 60));
-  await page.click('#btn-clear-memory');
-  await page.reload();
-  await page.click('[data-view="memory"]');
-  check('清空后不再保留', (await page.textContent('#memory-list')).includes('暂无'));
+  await page.evaluate(() => window.__jarvis.showPanel('mind'));
+  await page.click('[data-mtab="history"]');
+  await page.waitForFunction(() => /现在几点/.test(document.querySelector('#mind-list').textContent), null, { timeout: 5000 }).catch(() => {});
+  check('对话记录刷新后仍在', /现在几点/.test(await page.textContent('#mind-list')));
   await ctx.close();
 }
 
-// ---------- 2. 减少动画 ----------
+// ---------- 3. 减少动画 ----------
 {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: 'reduce' });
   const page = await ctx.newPage();
   const urls = [];
   page.on('request', (r) => urls.push(r.url()));
   await page.goto(BASE);
-  await page.waitForTimeout(2500);
-  const loaded3d = urls.filter((u) => /stage-|bust-mesh|three/.test(u));
-  check('reduced-motion 不加载 3D 资源', loaded3d.length === 0, loaded3d.join(','));
-  check('reduced-motion 显示 CSS 背景', await page.evaluate(() => document.body.classList.contains('reduced-motion') && !window.__jarvis.stage));
+  await page.waitForTimeout(2000);
+  check('reduced-motion 不加载 3D 资源', !urls.some((u) => /stage-|bust-mesh|three/.test(u)));
   await page.evaluate(() => window.__jarvis.machine.setManual('亲和'));
   await page.waitForTimeout(600);
-  const hue = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--hue').trim());
-  check('reduced-motion 仍以颜色表达情绪', hue === '35', `--hue=${hue}`);
-  await page.screenshot({ path: `${OUT}/07-reduced.png` });
+  check('reduced-motion 仍以颜色表达', (await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--hue').trim())) === '35');
   await ctx.close();
 }
 
-// ---------- 3. 窄屏 ----------
+// ---------- 4. 手机宽度 ----------
 {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const page = await ctx.newPage();
   await page.goto(BASE);
-  await page.waitForTimeout(3000);
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
-  check('手机宽度无横向溢出', !overflow);
-  await page.screenshot({ path: `${OUT}/08-mobile.png` });
+  await page.waitForTimeout(2500);
+  check('手机宽度无横向溢出', !(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)));
+  await page.click('[data-panel="workspace"]');
+  check('手机上面板以全屏抽屉打开', await page.isVisible('[data-pane="workspace"]'));
+  await page.screenshot({ path: `${OUT}/e2e-03-mobile.png` });
   await ctx.close();
 }
 
-// ---------- 4. 人脸跟随 / 直接对话（假摄像头、假麦克风；画面里没有人脸） ----------
+// ---------- 5. 人脸跟随 / 直接对话（假设备） ----------
 {
-  const b2 = await chromium.launch({
-    args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream']
-  });
+  const b2 = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
   const ctx = await b2.newContext({ viewport: { width: 1400, height: 900 }, permissions: ['camera', 'microphone'] });
   const page = await ctx.newPage();
-  const errors = [];
-  page.on('pageerror', (e) => errors.push(e.message));
   const outbound = [];
-  page.on('request', (r) => {
-    const u = new URL(r.url());
-    if (u.origin !== new URL(BASE).origin || r.method() !== 'GET') outbound.push(`${r.method()} ${r.url().slice(0, 80)}`);
-  });
   await page.goto(BASE);
   await page.waitForTimeout(1500);
-  outbound.length = 0;
-  page.on('request', () => {});
-
-  await page.click('[data-view="settings"]');
+  page.on('request', (r) => { if (r.method() !== 'GET' || !r.url().startsWith(BASE)) outbound.push(`${r.method()} ${r.url().slice(0, 80)}`); });
+  await page.click('[data-panel="settings"]');
   await page.check('#set-face');
   await page.waitForFunction(() => /跟随中|未检测到|降至/.test(document.querySelector('#face-status').textContent), null, { timeout: 30000 });
-  check('人脸跟随启动（Worker + 本地模型）', true, await page.textContent('#face-status'));
+  check('人脸跟随启动（本地模型）', true, await page.textContent('#face-status'));
   await page.waitForFunction(() => document.querySelector('#face-status').textContent.includes('未检测到人脸'), null, { timeout: 45000 });
-  check('连续未检测到人脸 → 轻量提示', true);
-  const camOn = await page.evaluate(() => [...document.querySelectorAll('video')].length === 0); // 视频元素不挂到 DOM
-  check('摄像头画面不显示/不挂载到页面', camOn);
+  check('无人脸时轻量提示', true);
   await page.uncheck('#set-face');
-  await page.waitForTimeout(300);
-  check('关闭人脸跟随', (await page.textContent('#face-status')) === '');
-
   await page.check('#set-voice');
   await page.waitForFunction(() => /已开启|按下说话/.test(document.querySelector('#voice-status').textContent), null, { timeout: 30000 });
-  const vs = await page.textContent('#voice-status');
-  check('直接对话：VAD 模型加载', vs.includes('已开启'), vs);
+  check('直接对话：VAD 模型加载', (await page.textContent('#voice-status')).includes('已开启'));
   await page.uncheck('#set-voice');
-
-  // 只统计“上传类”请求：POST/PUT 或发往外部域名的请求
-  const uploads = outbound.filter((x) => !x.startsWith('GET http://127.0.0.1') && !x.includes('/api/chat'));
+  const uploads = outbound.filter((x) => !/fonts\.(googleapis|gstatic)/.test(x));
   check('感知期间无数据外发', uploads.length === 0, uploads.join(' | '));
-  check('感知流程无页面错误', errors.length === 0, errors.join(' | '));
   await b2.close();
 }
 
-// ---------- 5. 不支持 SpeechRecognition（模拟 Firefox） ----------
+// ---------- 6. 不支持语音识别（模拟 Firefox） ----------
 {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   await ctx.addInitScript(() => { delete window.SpeechRecognition; delete window.webkitSpeechRecognition; });
   const page = await ctx.newPage();
   await page.goto(BASE);
-  await page.waitForTimeout(1000);
-  check('无语音识别时隐藏麦克风按钮', await page.isHidden('#btn-mic'));
-  await page.fill('#prompt', '你好');
-  await page.press('#prompt', 'Enter');
-  await page.waitForFunction(() => window.__jarvis.machine.task === 'done', null, { timeout: 20000 });
-  check('文本输入仍可用', (await page.locator('.msg.agent').count()) === 1);
+  await page.waitForTimeout(800);
+  check('无语音识别时隐藏麦克风', await page.isHidden('#btn-mic'));
+  check('文本对话仍可用', /离线演示模式/.test(await ask(page, '你好')));
   await ctx.close();
 }
 
 await browser.close();
-const failed = results.filter((r) => !r.ok);
-console.log(`\n${results.length - failed.length}/${results.length} 通过`);
-process.exit(failed.length ? 1 : 0);
+const failed = results.filter((r) => !r.ok).length;
+console.log(`\n${results.length - failed}/${results.length} 通过`);
+process.exit(failed ? 1 : 0);

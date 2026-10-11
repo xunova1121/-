@@ -12,56 +12,63 @@ const OUT = process.argv[2] || '.';
 const results = [];
 const check = (name, ok, detail = '') => {
   results.push(ok);
-  console.log(`${ok ? '✓' : '✗'} ${name}${detail ? ` — ${detail}` : ''}`);
+  console.log(`${ok ? '✓' : '✗'} ${name}${detail ? ` — ${String(detail).slice(0, 140)}` : ''}`);
 };
+async function ask(page, q) {
+  const before = await page.locator('.msg.agent').count();
+  await page.fill('#prompt', q);
+  await page.press('#prompt', 'Enter');
+  await page.waitForFunction((n) => document.querySelectorAll('.msg.agent').length > n && !document.querySelector('.msg.agent.streaming'), before, { timeout: 40000 });
+  await page.waitForTimeout(150);
+  return page.locator('.msg.agent').last().innerText();
+}
 
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+const ctx = await browser.newContext({ viewport: { width: 1600, height: 960 } });
+const page = await ctx.newPage();
 const errors = [];
 const requests = [];
 page.on('pageerror', (e) => errors.push(e.message));
-page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text().slice(0, 200)); });
+page.on('console', (m) => { if (m.type() === 'error' && !/fonts\.(googleapis|gstatic)|ERR_NAME_NOT_RESOLVED|ERR_INTERNET_DISCONNECTED/.test(m.text())) errors.push(m.text().slice(0, 200)); });
 page.on('request', (r) => requests.push(r.url()));
 
 await page.goto(FILE);
 await page.waitForFunction(() => window.__jarvis?.stage?.stats.frames > 10, null, { timeout: 30000 });
 const stats = await page.evaluate(() => window.__jarvis.stage.stats);
-check('双击打开即渲染（file://，无服务器）', true, `${stats.style} / ${stats.vertices} 顶点 / ${stats.drawCalls} draw calls`);
+check('双击打开即渲染（file://，无服务器）', true, `${stats.style} / ${stats.drawCalls} draw calls`);
+check('单文件版标识', (await page.textContent('#gw-badge')) === '单文件版');
 
-await page.fill('#prompt', '最近压力好大');
-await page.press('#prompt', 'Enter');
-await page.waitForFunction(() => window.__jarvis.machine.task === 'done', null, { timeout: 20000 });
-const reply = await page.locator('.msg.agent .body').last().textContent();
-check('内置演示助手可以对话', reply.includes('没关系'), reply.slice(0, 30));
+let reply = await ask(page, '帮我写一个网页');
+await page.waitForTimeout(600);
+check('写网页并预览', /\d{1,2}:\d{2}:\d{2}/.test(await page.frameLocator('#viewer-body iframe').locator('#t').textContent().catch(() => '')));
+reply = await ask(page, '做一个PPT');
+check('生成 PPT', /示例\.pptx/.test(reply), reply.slice(-60));
+reply = await ask(page, '运行一段代码');
+check('运行代码（沙箱 Worker）', /返回值：55/.test(reply));
 
-await page.fill('#prompt', '电脑现在状态怎么样');
-await page.press('#prompt', 'Enter');
-await page.waitForFunction(() => window.__jarvis.machine.task === 'done', null, { timeout: 20000 });
-const reply2 = await page.locator('.msg.agent .body').last().textContent();
-check('本机状态问答（浏览器指标）', /网络在线|网络离线/.test(reply2), reply2.slice(0, 50));
+await page.click('[data-panel="knowledge"]');
+const pdfPage = await ctx.newPage();
+await pdfPage.setContent('<p>出差补贴标准：一线城市每天 300 元，其他城市每天 200 元。</p>');
+const pdf = await pdfPage.pdf({ format: 'A4' });
+await pdfPage.close();
+await page.setInputFiles('#kb-input', { name: '差旅制度.pdf', mimeType: 'application/pdf', buffer: pdf });
+await page.waitForFunction(() => document.querySelectorAll('#kb-list li:not(.empty)').length >= 1, null, { timeout: 20000 }).catch(() => {});
+check('导入 PDF 到知识库（内联 pdf.js Worker）', /差旅制度\.pdf/.test(await page.textContent('#kb-list')), await page.textContent('#kb-list'));
+reply = await ask(page, '根据知识库，出差补贴标准是多少？');
+check('依据知识库回答', /300/.test(reply), reply.slice(0, 80));
 
-await page.waitForTimeout(3500);
-const conn = await page.locator('[data-conn]').first().textContent();
-check('仪表显示浏览器估算指标', conn === '浏览器估算', conn);
-
-await page.click('[data-view="settings"]');
-await page.fill('#set-key', 'sk-ant-test-123');
-await page.click('#btn-save-key');
-const title = await page.getAttribute('#mode-pill', 'title');
-check('保存密钥后切到 Claude 直连', title.includes('浏览器直连'), title);
-await page.click('#btn-clear-key');
-check('删除密钥后回到演示助手', (await page.getAttribute('#mode-pill', 'title')).includes('内置演示'));
-await page.click('[data-view="settings"]');
-
-for (const s of ['holo', 'orb']) {
-  await page.click(`[data-style="${s}"]`);
-  await page.waitForTimeout(400);
-  check(`样式切换：${s}`, await page.evaluate((s) => window.__jarvis.stage.stats.style === s, s));
-}
+await ask(page, '记住我在上海工作');
+await page.click('[data-panel="mind"]');
+await page.waitForTimeout(300);
+check('记住信息', /我在上海工作/.test(await page.textContent('#mind-list')));
 await page.screenshot({ path: `${OUT}/standalone.png` });
 
-const external = requests.filter((u) => !u.startsWith('file:') && !u.startsWith('data:') && !u.startsWith('blob:'));
-check('启动与对话不依赖网络', external.length === 0, external.join(' | '));
+await page.click('[data-panel="models"]');
+await page.selectOption('#llm-provider', 'qwen');
+check('不允许浏览器直连的服务商有提示', /完整版/.test(await page.textContent('#llm-note')));
+
+const external = requests.filter((u) => !/^(file|data|blob):/.test(u) && !/fonts\.(googleapis|gstatic)\.com/.test(u));
+check('除可选的网页字体外不依赖网络', external.length === 0, external.join(' | '));
 check('无页面错误', errors.length === 0, errors.join(' | '));
 
 await browser.close();
