@@ -76,6 +76,15 @@
       <label><input type="checkbox" id="set-tts" /> 语音输出</label>
     </div>
     <div class="setting">
+      <label for="set-key" class="label">Claude API Key（可选）</label>
+      <div class="key-row">
+        <input type="password" id="set-key" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" />
+        <button class="btn" type="button" id="btn-save-key">保存</button>
+        <button class="btn" type="button" id="btn-clear-key">删除</button>
+      </div>
+      <p class="muted">没有部署网关（例如直接双击打开单文件版）时使用：密钥只保存在这台电脑的浏览器里，对话直接发给 Anthropic。不填则使用内置演示助手。请不要在公用电脑上保存密钥。</p>
+    </div>
+    <div class="setting">
       <span class="label">VAD 灵敏度</span>
       <div class="seg" role="radiogroup" aria-label="VAD 灵敏度" id="set-vad">
         <button type="button" role="radio" data-v="低">低</button><button type="button" role="radio" data-v="中">中</button><button type="button" role="radio" data-v="高">高</button>

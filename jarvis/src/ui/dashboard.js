@@ -104,7 +104,7 @@ export class Dashboard {
   // ---------- 数据 ----------
   setMetrics(m) {
     this.connected = true;
-    this.root.querySelectorAll('[data-conn]').forEach((el) => { el.textContent = '已连接'; });
+    this.root.querySelectorAll('[data-conn]').forEach((el) => { el.textContent = m?.source === 'browser' ? '浏览器估算' : '已连接'; });
     const cpu = m?.cpu?.percent;
     const mem = m?.memory?.percent;
     // 网络：在线时按吞吐量映射到 0–100（对数刻度，1MB/s ≈ 100）

@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { timingSafeEqual } from 'node:crypto';
 import { ClaudeAgent, MockAgent } from './agents.mjs';
 import { collectMetrics } from './metrics.mjs';
-import { EMOTIONS } from './emotionTag.mjs';
+import { EMOTIONS } from '../shared/emotionTag.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(ROOT, 'dist');

@@ -46,7 +46,10 @@ export class FaceTracker {
     await video.play();
     this.video = video;
 
-    this.worker = new Worker(new URL('./face.worker.js', import.meta.url), { type: 'module' });
+    // 单文件版：Worker 代码内联为 blob，模型与 WASM 从 CDN 下载
+    this.worker = __STANDALONE__
+      ? new (await import('./face.worker.js?worker&inline')).default()
+      : new Worker(new URL('./face.worker.js', import.meta.url), { type: 'module' });
     await new Promise((resolve, reject) => {
       this.worker.onmessage = ({ data }) => {
         if (data.type === 'ready') resolve();

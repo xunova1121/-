@@ -2,3 +2,4 @@ node_modules/
 dist/
 public/vendor/
 public/models/face_landmarker.task
+dist-standalone/

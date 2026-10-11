@@ -138,6 +138,9 @@ body.focus-view .msg { font-size: 16px; max-width: 90%; }
 .seg button { background: none; border: 0; padding: 6px 18px; }
 .seg button[aria-checked="true"] { background: var(--accent-soft); color: var(--accent); }
 .btn { margin-top: 14px; padding: 8px 18px; border-radius: 8px; border: 1px solid var(--accent-line); background: var(--accent-soft); }
+.key-row { display: flex; gap: 8px; margin-top: 8px; }
+.key-row input { flex: 1; min-width: 0; padding: 8px; background: #061520; border: 1px solid var(--accent-line); border-radius: 6px; }
+.key-row .btn { margin-top: 0; }
 .memory-list { margin-top: 12px; font-size: 14px; line-height: 1.7; }
 .memory-list details { border-left: 2px solid var(--accent-line); padding: 2px 0 2px 12px; margin-bottom: 10px; }
 .memory-list summary { cursor: pointer; color: var(--accent); letter-spacing: .1em; }

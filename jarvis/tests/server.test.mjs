@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { EmotionTagStripper } from '../server/emotionTag.mjs';
+import { EmotionTagStripper } from '../shared/emotionTag.js';
 import { sanitizeHistory, MockAgent } from '../server/agents.mjs';
 import { createServer } from '../server/server.mjs';
 import { parseFrame } from '../src/api/chat.js';

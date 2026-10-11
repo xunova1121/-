@@ -4,6 +4,25 @@
 
 > v3 起主视觉由“粒子人形 ⇄ 粒子核心”改为全息胸像（应使用方要求：粒子形态不够好看，改为更科幻的全息投影风格），需求文档第三章的点云 / 形变部分不再适用，见下文“v3 全息胸像”。
 
+## 怎么用
+
+### 方式一：单文件版（推荐给只想用的人）
+
+下载仓库根目录的 **`jarvis-standalone.html`**，双击用 Chrome / Edge 打开即可，不用安装任何东西。
+
+- 对话：默认是内置演示助手；在“设置 → Claude API Key”里填自己的密钥，即可直连 Claude（密钥只存在这台电脑的浏览器里）。
+- 语音输入 / 朗读：可用（语音识别依赖浏览器自带服务，需要联网）。
+- 人脸跟随、语音活动检测：首次开启时从公共 CDN 下载模型（只下载，不上传画面或声音），没联网时自动降级。
+- 仪表：没有本机服务，显示的是浏览器能拿到的近似值（页面主线程繁忙度、页面内存、网络状态）。
+
+重新生成：`npm run build:standalone`。
+
+### 方式二：完整版（本机网关 + 真实系统指标）
+
+需要 Node.js 18+。Windows 双击 `jarvis/启动.bat`，Mac / Linux 运行 `jarvis/start.sh`：首次会自动安装依赖、构建并打开浏览器。
+
+手动方式：
+
 ```bash
 cd jarvis
 npm install                 # 会自动把 MediaPipe / VAD / ORT 的 WASM 与人脸模型放到 public/vendor、public/models
@@ -15,15 +34,15 @@ ANTHROPIC_API_KEY=sk-ant-... npm run server
 
 开发模式：一个终端 `npm run server`，另一个 `npm run dev`（Vite 把 `/api` 代理到 8787）。
 
-不配置 `ANTHROPIC_API_KEY` 时网关使用**本地演示智能体**（规则回复 + 真实的本机指标工具），整条链路——流式、`emotion_hint`、`task_state`、工具调用——都能离线演示。
+不配置 `ANTHROPIC_API_KEY` 时网关使用**本地演示智能体**（规则回复 + 真实的本机指标工具），整条链路——流式、`emotion_hint`、`task_state`、工具调用——都能离线演示。网关连不上时，前端会自动改在浏览器内运行智能体。
 
 | 命令 | 作用 |
 |---|---|
 | `npm test` | 单元 + 集成测试（Vitest，75 项） |
-| `npm run e2e` | 浏览器冒烟测试（Playwright + Chromium，41 项；需先 build 并启动 server） |
-| `npm run build-model` | 重新从 `assets/LeePerrySmith.glb` 生成全息胸像网格与电路线 |
-
----
+| `npm run e2e` | 完整版浏览器冒烟测试（Playwright + Chromium，41 项；需先 build 并启动 server） |
+| `npm run e2e:standalone` | 单文件版测试（file:// 直接打开，10 项） |
+| `npm run build:standalone` | 生成单文件版 `../jarvis-standalone.html` |
+| `npm run build-model` | 重新从 `assets/LeePerrySmith.glb` 生成胸像网格 |
 
 ## v3.1 默认形态改为“光核”
 
@@ -90,10 +109,12 @@ src/
     speaker.js             SpeechSynthesis 句子队列
   api/                     chat（SSE over fetch）、metrics 轮询、注入事件订阅
   ui/                      dashboard（视差/倾斜/光晕）、transcript
+shared/                    网关与单文件版共用
+  agents.js                ClaudeAgent（官方 SDK，流式 + 工具循环）/ MockAgent，指标来源由调用方注入
+  emotionTag.js            从回复开头剥离 <emotion>X</emotion> → emotion_hint
 server/
   server.mjs               网关 + 静态资源
-  agents.mjs               ClaudeAgent（官方 SDK，流式 + 工具循环）/ MockAgent
-  emotionTag.mjs           从回复开头剥离 <emotion>X</emotion> → emotion_hint
+  agents.mjs               注入 Node 本机指标与环境变量
   metrics.mjs              本机指标
 scripts/
   build-hologram.mjs       头部扫描 → 全息胸像网格、眼睛位置、投影到表面的电路线

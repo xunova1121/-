@@ -17,14 +17,14 @@ import { followTarget, smoothToward } from './core/faceMath.js';
 import { SentenceChunker } from './core/sentenceChunker.js';
 import { SILENCE_BY_SENSITIVITY } from './core/vadGate.js';
 import { loadSettings, saveSettings, wantsReducedMotion } from './core/settings.js';
-import { streamChat } from './api/chat.js';
+import { chat, chatBackend, getBrowserKey, setBrowserKey } from './api/chat.js';
 import { MetricsPoller } from './api/metrics.js';
 import { subscribeAgentEvents } from './api/agentEvents.js';
 import { Dashboard } from './ui/dashboard.js';
 import { Transcript } from './ui/transcript.js';
 import { Speaker } from './perception/speaker.js';
 import { VoiceInput, speechRecognitionSupported } from './perception/voiceInput.js';
-import { FIGURE } from './config.js';
+import { FIGURE, STANDALONE } from './config.js';
 import { resolveQuality } from './core/quality.js';
 import { loadMemory, saveMemory, clearMemory, groupByDay } from './core/memoryStore.js';
 
@@ -77,6 +77,14 @@ let stageLoading = null;
 let figurePromise = null;
 
 function loadFigure() {
+  // 单文件版：网格以 data URL 内联在页面里，元数据直接打包进脚本
+  if (STANDALONE) {
+    figurePromise ??= Promise.all([
+      import('../public/models/bust-mesh.bin?inline').then((m) => fetch(m.default)).then((r) => r.arrayBuffer()),
+      import('../public/models/bust.json').then((m) => m.default)
+    ]).then(([mesh, meta]) => ({ mesh, meta }));
+    return figurePromise;
+  }
   figurePromise ??= Promise.all([
     fetch(FIGURE.mesh).then((r) => {
       if (!r.ok) throw new Error(`网格加载失败 ${r.status}`);
@@ -327,7 +335,7 @@ async function send(text) {
   const t0 = now();
 
   try {
-    await streamChat({
+    await chat({
       messages: history.slice(-12).map(({ role, content }) => ({ role, content })),
       signal: ctrl.signal,
       onMessage: (msg) => {
@@ -353,6 +361,7 @@ async function send(text) {
     dashboard.setLatency(firstToken ? firstToken - t0 : null, total);
     remember('assistant', reply || '（空回复）');
     $('#mode-pill').classList.remove('offline');
+    updateBackendLabel();
     turn.streamDone = true;
     if (!speaker.speaking) finishTurn();
   } catch (err) {
@@ -382,9 +391,37 @@ $('#prompt').addEventListener('input', (e) => {
   dashboard.setTask(machine.task);
 });
 
-fetch('/api/health').then((r) => r.json()).then((h) => {
-  $('#mode-pill').title = h.backend === 'claude' ? `对话后端：Claude（${h.model}）` : '对话后端：本地演示智能体（未配置 ANTHROPIC_API_KEY）';
-}).catch(() => $('#mode-pill').classList.add('offline'));
+/** 顶部胶囊悬停提示：当前对话后端 */
+function updateBackendLabel(server) {
+  const label = {
+    server: server?.backend === 'claude' ? `对话后端：Claude（${server.model}，经本机网关）` : '对话后端：本机网关（演示智能体，未配置 ANTHROPIC_API_KEY）',
+    'claude-browser': '对话后端：Claude（浏览器直连，使用你在设置里填写的密钥）',
+    local: '对话后端：内置演示智能体（在设置里填写 Claude API Key 可接入真正的大模型）'
+  }[chatBackend()];
+  if (label) $('#mode-pill').title = label;
+  $('#mode-text').textContent = chatBackend() === 'local' ? '本机助手 · 演示' : '本机助手';
+}
+if (STANDALONE) updateBackendLabel();
+else {
+  fetch('/api/health').then((r) => r.json()).then(updateBackendLabel).catch(() => updateBackendLabel());
+}
+
+// —— Claude 密钥（单文件版 / 没有网关时使用）：只存在本机浏览器
+$('#set-key').value = getBrowserKey() ? '••••••••' : '';
+$('#btn-save-key').addEventListener('click', () => {
+  const v = $('#set-key').value.trim();
+  if (!v || v.startsWith('••')) return;
+  setBrowserKey(v);
+  $('#set-key').value = '••••••••';
+  updateBackendLabel();
+  toast('密钥已保存在本机浏览器');
+});
+$('#btn-clear-key').addEventListener('click', () => {
+  setBrowserKey('');
+  $('#set-key').value = '';
+  updateBackendLabel();
+  toast('密钥已删除');
+});
 
 // ---------------------------------------------------------------- 语音
 const voice = new VoiceInput({
