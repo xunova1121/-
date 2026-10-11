@@ -81,7 +81,7 @@ jobs:
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('desktop-build-{0}', github.run_number) }}
           target_commitish: ${{ github.sha }}
-          name: 贾维斯桌面版 ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('测试版 #{0}', github.run_number) }}
+          name: "贾维斯桌面版 ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('测试版 第{0}次构建', github.run_number) }}"
           prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
           files: dist/*
           body: |
