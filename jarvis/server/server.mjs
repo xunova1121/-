@@ -28,8 +28,8 @@ import { collectMetrics } from './metrics.mjs';
 import { EMOTIONS } from '../shared/emotionTag.js';
 import { upstreamFor, providerById, ENV_KEYS } from '../shared/providers.js';
 
-const EXTRA_UPSTREAMS = { tavily: 'https://api.tavily.com' };
-const FORWARD_HEADERS = ['content-type', 'accept', 'authorization', 'x-api-key', 'anthropic-version', 'anthropic-beta'];
+export const EXTRA_UPSTREAMS = { tavily: 'https://api.tavily.com', elevenlabs: 'https://api.elevenlabs.io' };
+const FORWARD_HEADERS = ['content-type', 'accept', 'authorization', 'x-api-key', 'anthropic-version', 'anthropic-beta', 'xi-api-key'];
 
 /** 内网 / 本机地址：/api/fetch 不允许访问，避免被用来探测局域网 */
 export function isPrivateHost(host) {
@@ -130,13 +130,25 @@ export function createServer({
   }
 
   async function handleLlmProxy(req, res, id, rest, search) {
-    const base = upstreamFor(id) ?? EXTRA_UPSTREAMS[id];
+    let base = upstreamFor(id) ?? EXTRA_UPSTREAMS[id];
+    if (id === 'custom') {
+      // 自定义（OpenAI 兼容）接口：地址由前端在请求头里给出；允许内网地址（本机 / 局域网自建模型很常见）
+      try {
+        const u = new URL(String(req.headers['x-jarvis-upstream'] || ''));
+        if (/^https?:$/.test(u.protocol)) base = u.href;
+      } catch { /* 无效地址 */ }
+      if (!base) return json(res, 400, { error: '自定义接口地址无效（需以 http:// 或 https:// 开头）' });
+    }
     if (!base) return json(res, 404, { error: `不支持代理的服务商：${id}` });
     const headers = {};
     for (const h of FORWARD_HEADERS) if (req.headers[h]) headers[h] = req.headers[h];
     // 浏览器没填密钥：用网关环境变量里的
     const envKey = process.env[ENV_KEYS[id]];
-    if (id === 'anthropic') {
+    if (id === 'elevenlabs') {
+      if (!headers['xi-api-key'] || headers['xi-api-key'] === 'use-gateway-key') {
+        if (envKey) headers['xi-api-key'] = envKey; else delete headers['xi-api-key'];
+      }
+    } else if (id === 'anthropic') {
       if (!headers['x-api-key'] || headers['x-api-key'] === 'use-gateway-key') {
         if (envKey) headers['x-api-key'] = envKey; else delete headers['x-api-key'];
       }

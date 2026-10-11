@@ -27,6 +27,30 @@ async function ask(page, q, timeout = 40000) {
   return page.locator('.msg.agent').last().innerText();
 }
 
+/** 本地假语音服务（OpenAI 兼容 /audio/speech）：返回一段 0.8 秒的 WAV；fail=true 时返回 500 */
+function fakeTTS({ fail = false } = {}) {
+  const seen = [];
+  const rate = 24000;
+  const n = Math.floor(rate * 0.8);
+  const wav = Buffer.alloc(44 + n * 2);
+  wav.write('RIFF', 0); wav.writeUInt32LE(36 + n * 2, 4); wav.write('WAVEfmt ', 8);
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(rate, 24); wav.writeUInt32LE(rate * 2, 28);
+  wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(n * 2, 40);
+  for (let i = 0; i < n; i++) wav.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 220 * i) / rate) * 0.5 * 32767 * (0.6 + 0.4 * Math.sin(i / 900))), 44 + i * 2);
+  const server = http.createServer((req, res) => {
+    const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
+    if (req.method === 'OPTIONS') return res.writeHead(204, cors).end();
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      seen.push({ url: req.url, body: JSON.parse(body) });
+      if (fail) return res.writeHead(500, { ...cors, 'Content-Type': 'application/json' }).end('{"error":{"message":"boom"}}');
+      res.writeHead(200, { ...cors, 'Content-Type': 'audio/wav' }).end(wav);
+    });
+  });
+  return new Promise((r) => server.listen(0, '127.0.0.1', () => r({ server, seen, url: `http://127.0.0.1:${server.address().port}/v1` })));
+}
+
 /** 本地假 OpenAI 兼容服务端：第一次请求返回流式工具调用，第二次返回文本 */
 function fakeOpenAI() {
   const seen = [];
@@ -63,7 +87,8 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  page.on('console', (m) => { if (m.type() === 'error' && !/fonts\.(googleapis|gstatic)/.test(m.text())) errors.push(m.text()); });
+  // 故意返回 500 的假语音服务会产生一条资源加载错误，不计入
+  page.on('console', (m) => { if (m.type() === 'error' && !/fonts\.(googleapis|gstatic)/.test(m.text()) && !(/status of 500/.test(m.text()) && /audio\/speech/.test(m.location().url))) errors.push(m.text()); });
   await page.goto(BASE);
   await page.waitForFunction(() => window.__jarvis?.stage?.stats.frames > 10, null, { timeout: 30000 });
   const stats = await page.evaluate(() => { const s = window.__jarvis.stage.stats; return { style: s.style, calls: s.drawCalls, bloom: s.bloom, gl2: s.isWebGL2 }; });
@@ -173,6 +198,40 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.click('[data-panel="models"]');
   await page.selectOption('#llm-provider', 'mock');
   await page.click('#btn-llm-save');
+
+  // —— 科幻声线：云端语音（假服务）→ 效果链 → 真实音量驱动光核
+  check('默认声线：贾维斯；浏览器声音时效果不可用', await page.evaluate(() => {
+    const on = document.querySelector('#tts-fx [aria-checked="true"]');
+    return on?.value === 'jarvis' && on.disabled;
+  }));
+  const tts = await fakeTTS();
+  await page.selectOption('#tts-engine', 'custom');
+  await page.fill('#tts-url', tts.url);
+  await page.press('#tts-url', 'Tab');
+  await page.fill('#tts-model', 'fake-tts');
+  await page.press('#tts-model', 'Tab');
+  check('云端语音可选声线效果', await page.isEnabled('#tts-fx button[value="holo"]'));
+  await page.click('#tts-fx button[value="holo"]');
+  await page.evaluate(() => {
+    window.__peak = 0;
+    const tick = () => { const l = window.__jarvis.speaker.level(); if (l) window.__peak = Math.max(window.__peak, l); requestAnimationFrame(tick); };
+    tick();
+  });
+  await ask(page, '你好');
+  await page.waitForFunction(() => window.__peak > 0.05, null, { timeout: 15000 }).catch(() => {});
+  check('云端语音：请求 /audio/speech 并带上回答文字', tts.seen.some((x) => x.url === '/v1/audio/speech' && x.body.model === 'fake-tts' && x.body.input.length > 0), tts.seen.map((x) => x.body.input).join(' / ').slice(0, 80));
+  check('云端语音经效果链播放，光核由真实音量驱动', await page.evaluate(() => window.__peak > 0.05), `峰值 ${(await page.evaluate(() => window.__peak)).toFixed(2)}`);
+  await page.waitForFunction(() => !window.__jarvis.speaker.speaking, null, { timeout: 30000 }).catch(() => {});
+  tts.server.close();
+  const bad = await fakeTTS({ fail: true });
+  await page.fill('#tts-url', bad.url);
+  await page.press('#tts-url', 'Tab');
+  await ask(page, '你好');
+  await page.waitForFunction(() => /语音合成失败：500 boom/.test(document.querySelector('#toast')?.textContent || ''), null, { timeout: 10000 }).catch(() => {});
+  check('语音服务出错时提示并退回浏览器声音', /语音合成失败：500 boom/.test(await page.evaluate(() => document.querySelector('#toast')?.textContent || '')));
+  await page.evaluate(() => window.__jarvis.interrupt());
+  bad.server.close();
+  await page.selectOption('#tts-engine', 'auto');
 
   // —— 打断、快捷键、画质
   await page.evaluate(() => { window.__barge = window.__jarvis.send('帮我写一个网页'); });

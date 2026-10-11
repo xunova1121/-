@@ -36,5 +36,5 @@ export function upstreamFor(id) {
 export const ENV_KEYS = {
   anthropic: 'ANTHROPIC_API_KEY', openai: 'OPENAI_API_KEY', gemini: 'GEMINI_API_KEY', deepseek: 'DEEPSEEK_API_KEY',
   qwen: 'DASHSCOPE_API_KEY', moonshot: 'MOONSHOT_API_KEY', zhipu: 'ZHIPU_API_KEY', doubao: 'ARK_API_KEY',
-  siliconflow: 'SILICONFLOW_API_KEY', openrouter: 'OPENROUTER_API_KEY'
+  siliconflow: 'SILICONFLOW_API_KEY', openrouter: 'OPENROUTER_API_KEY', elevenlabs: 'ELEVENLABS_API_KEY'
 };

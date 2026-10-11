@@ -171,6 +171,20 @@
         <h3 class="sub">联网获取最新信息</h3>
         <label class="inline-check"><input type="checkbox" id="set-websearch" /> Claude 内置联网搜索（使用 Claude 时生效）</label>
         <label class="field" for="tavily-key"><span>Tavily 搜索 Key（其他模型联网用，可选）</span><input type="password" id="tavily-key" placeholder="tvly-…" autocomplete="off" /></label>
+        <h3 class="sub">声音</h3>
+        <label class="field" for="tts-engine"><span>语音引擎</span><select id="tts-engine"></select></label>
+        <p class="note" id="tts-note" hidden></p>
+        <label class="field" for="tts-voice" id="row-tts-voice"><span>声音</span><select id="tts-voice"></select></label>
+        <label class="field" for="tts-voice-id" id="row-tts-voice-id" hidden><span>声音 ID</span><input id="tts-voice-id" spellcheck="false" placeholder="ElevenLabs 声音 ID" /></label>
+        <label class="field" for="tts-url" id="row-tts-url" hidden><span>接口地址（…/v1）</span><input id="tts-url" spellcheck="false" placeholder="http://127.0.0.1:9880/v1" /></label>
+        <label class="field" for="tts-model" id="row-tts-model" hidden><span>语音模型</span><input id="tts-model" spellcheck="false" placeholder="tts-1" /></label>
+        <label class="field" for="tts-key" id="row-tts-key"><span>API Key</span><input type="password" id="tts-key" autocomplete="off" spellcheck="false" /></label>
+        <p class="muted small" id="tts-key-hint"></p>
+        <div class="field"><span>声线效果</span><div class="seg" role="radiogroup" aria-label="声线效果" id="tts-fx"></div></div>
+        <p class="muted small" id="tts-fx-desc"></p>
+        <label class="inline-check"><input type="checkbox" id="tts-cues" /> 开口 / 说完时的科幻提示音</label>
+        <div class="pane-actions"><button class="btn" type="button" id="btn-tts-preview">试听</button></div>
+        <p class="muted small" id="tts-status" role="status"></p>
         <p class="muted small">密钥只保存在这台电脑的浏览器里，请求直接发往服务商（或经由你本机的网关）。不要在公用电脑上保存密钥。</p>
       </section>
 

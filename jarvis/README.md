@@ -14,7 +14,7 @@
 2. 直接交代任务：“帮我写一个网页”“把这份 PDF 加进知识库”“做一个 PPT”“记住我在上海工作”。
 3. 工作区可“连接本地文件夹”：之后生成的文件直接写进这个文件夹（只新增，不删除、不覆盖）。
 
-单文件版的限制：通义千问、Kimi、智谱、豆包等服务商**不允许浏览器直连**（CORS），需用完整版；Python 运行首次需联网下载 Pyodide。
+单文件版的限制：通义千问、Kimi、智谱、豆包，以及很多中转 / 自建接口**不允许网页直接调用**（跨域限制，表现为“Failed to fetch”），需用完整版——完整版的网关可以转发任何接口，包括“自定义（OpenAI 兼容）”地址；Python 运行首次需联网下载 Pyodide。
 
 ### 方式二：完整版（本机网关）
 
@@ -31,8 +31,8 @@ ANTHROPIC_API_KEY=... OPENAI_API_KEY=... DEEPSEEK_API_KEY=... DASHSCOPE_API_KEY=
 
 | 命令 | 作用 |
 |---|---|
-| `npm test` | 单元 + 集成测试（Vitest，104 项） |
-| `npm run e2e` | 完整版浏览器测试（Playwright，46 项；需先 build 并启动 server） |
+| `npm test` | 单元 + 集成测试（Vitest，116 项） |
+| `npm run e2e` | 完整版浏览器测试（Playwright，51 项；需先 build 并启动 server） |
 | `npm run e2e:standalone` | 单文件版测试（file:// 直接打开，11 项） |
 | `npm run build:standalone` | 生成单文件版 `../jarvis-standalone.html` |
 
@@ -79,7 +79,18 @@ ANTHROPIC_API_KEY=... OPENAI_API_KEY=... DEEPSEEK_API_KEY=... DASHSCOPE_API_KEY=
 
 工具 `write_file` + `run_javascript`（Worker 沙箱，8 秒超时）+ `run_python`（Pyodide，可读写工作区文件）+ `preview`（工作区内沙箱 iframe 预览网页）：智能体可以写代码 → 运行 → 看结果 → 修改。
 
-### 6. 界面
+### 6. 科幻声线
+
+“模型”面板 →“声音”：
+
+- **引擎**：OpenAI（gpt-4o-mini-tts，用文字“导演”成沉稳、自然的 AI 管家语气，而不是播报腔）、ElevenLabs（最接近真人；可填任意克隆声音 ID）、硅基流动 CosyVoice2（中文自然，需完整版）、自定义 OpenAI 兼容 `/audio/speech`（自建 CosyVoice / GPT-SoVITS 等）、浏览器自带（免费）。“自动”会按已填的密钥挑最自然的云端声音。
+- **声线效果**（Web Audio 效果链，只对云端语音生效）：贾维斯（略低沉 + 双声部光泽 + 少量空间）、全息通讯（频带收窄 + 细微金属颤动）、星舰主机（更低沉 + 大空间混响）、原声。效果都很克制，要的是电影里有质感的人声，不是机器人怪声。
+- 开口 / 说完时有轻微的科幻提示音（可关）；云端语音播放时光核由**真实音量**驱动。
+- 某句合成失败时，这一句自动改用浏览器声音读完并提示原因，不会中断。
+- 浏览器自带声音拿不到音频流，无法加效果；免费方案里 Edge 的“Yunjian / Yunxi (Natural)”最自然，会被优先选用。
+- 完整版可在网关环境变量里放 `ELEVENLABS_API_KEY`。
+
+### 7. 界面
 
 重做为深色 HUD：顶栏状态与等级、左侧功能栏（`Alt+1…6`）、中间光核与对话、右侧面板（工作区 / 知识库 / 进化 / 模型 / 系统 / 设置）；工具调用以卡片实时展示，支持拖拽上传，窄屏自动改为底部导航。
 

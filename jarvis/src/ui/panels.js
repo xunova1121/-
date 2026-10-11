@@ -292,6 +292,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, onCl
     $('#llm-key-hint').replaceChildren(...(p.kind === 'mock' ? ['无需密钥，离线可用。能演示写网页、生成文档、记忆、知识库等完整流程，但“理解力”是规则写死的。']
       : [gwKey ? '本机网关已配置该服务商的密钥，这里可以留空。' : p.needsKey === false ? '本机模型无需密钥。' : '', p.keyUrl ? el('a', { href: p.keyUrl, target: '_blank', rel: 'noopener', textContent: ' 获取密钥 →' }) : '']));
     const notes = [];
+    if (!gw && p.custom) notes.push('很多中转 / 自建接口不允许网页直接调用（跨域限制），单文件版里会显示“Failed to fetch”。这时请用完整版（双击 启动.bat / start.sh），它会通过本机网关转发，任何接口都能连。');
     if (!gw && p.browser === false) notes.push('该服务商不允许网页直接调用（跨域限制），单文件版里可能连不上。请用完整版（双击 启动.bat / start.sh），它会通过本机网关转发。');
     if (p.note) notes.push(p.note);
     if (p.custom && gw) notes.push('自定义地址不经网关转发，由浏览器直接请求。');
@@ -344,6 +345,8 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, onCl
     refreshMind,
     importToKb,
     refreshModels: fillModels,
-    get config() { return cfg; }
+    get config() { return cfg; },
+    /** 其他面板（如语音）修改配置：统一保存并通知 */
+    patchConfig(fn) { cfg = fn(cfg); saveConfig(cfg); onConfigChange(cfg); return cfg; }
   };
 }

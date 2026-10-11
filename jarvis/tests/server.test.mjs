@@ -156,6 +156,8 @@ describe('大模型代理与网页读取', () => {
     await new Promise((r) => upstream.listen(0, '127.0.0.1', r));
     const providers = await import('../shared/providers.js');
     providers.providerById('deepseek').baseURL = `http://127.0.0.1:${upstream.address().port}/v1`;
+    const srv = await import('../server/server.mjs');
+    srv.EXTRA_UPSTREAMS.elevenlabs = `http://127.0.0.1:${upstream.address().port}`;
     server = cs({ agent: new MockAgent({ charDelayMs: 0 }), staticDir: '/nonexistent' });
     await new Promise((r) => server.listen(0, '127.0.0.1', r));
     base = `http://127.0.0.1:${server.address().port}`;
@@ -175,9 +177,29 @@ describe('大模型代理与网页读取', () => {
     delete process.env.DEEPSEEK_API_KEY;
   });
 
-  it('未知服务商与自定义地址不代理', async () => {
+  it('ElevenLabs 语音：转发 xi-api-key，未填时用网关密钥', async () => {
+    process.env.ELEVENLABS_API_KEY = 'el-env';
+    await (await fetch(`${base}/api/llm/elevenlabs/v1/text-to-speech/abc?output_format=mp3_44100_128`, { method: 'POST', headers: { 'xi-api-key': 'use-gateway-key' }, body: '{}' })).text();
+    expect(seen.url).toBe('/v1/text-to-speech/abc?output_format=mp3_44100_128');
+    expect(seen.headers['xi-api-key']).toBe('el-env');
+    await (await fetch(`${base}/api/llm/elevenlabs/v1/text-to-speech/abc`, { method: 'POST', headers: { 'xi-api-key': 'el-user' }, body: '{}' })).text();
+    expect(seen.headers['xi-api-key']).toBe('el-user');
+    delete process.env.ELEVENLABS_API_KEY;
+  });
+
+  it('自定义接口：按请求头里的地址转发（绕开浏览器跨域）', async () => {
+    const up = `http://127.0.0.1:${upstream.address().port}/v1`;
+    const r = await fetch(`${base}/api/llm/custom/chat/completions`, { method: 'POST', headers: { 'x-jarvis-upstream': up, Authorization: 'Bearer sk-custom' }, body: '{"model":"x"}' });
+    expect(await r.text()).toBe('data: {"ok":true}\n\n');
+    expect(seen.url).toBe('/v1/chat/completions');
+    expect(seen.headers.authorization).toBe('Bearer sk-custom');
+    expect(seen.headers['x-jarvis-upstream']).toBeUndefined();
+  });
+
+  it('未知服务商、无效的自定义地址不代理', async () => {
     expect((await fetch(`${base}/api/llm/evil/x`, { method: 'POST' })).status).toBe(404);
-    expect((await fetch(`${base}/api/llm/custom/x`, { method: 'POST' })).status).toBe(404);
+    expect((await fetch(`${base}/api/llm/custom/x`, { method: 'POST' })).status).toBe(400);
+    expect((await fetch(`${base}/api/llm/custom/x`, { method: 'POST', headers: { 'x-jarvis-upstream': 'file:///etc/passwd' } })).status).toBe(400);
   });
 
   it('网页读取拒绝内网地址', async () => {

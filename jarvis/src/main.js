@@ -23,7 +23,8 @@ import { createTools } from './agent/tools.js';
 import * as ws from './agent/workspace.js';
 import * as agentMemory from './agent/memory.js';
 import { initPanels } from './ui/panels.js';
-import { loadConfig, createAdapter, displayName, providerById } from './llm/config.js';
+import { loadConfig, saveConfig, createAdapter, displayName, providerById, resolveVoice } from './llm/config.js';
+import { initVoicePanel } from './ui/voicePanel.js';
 import { MetricsPoller } from './api/metrics.js';
 import { subscribeAgentEvents } from './api/agentEvents.js';
 import { Dashboard } from './ui/dashboard.js';
@@ -133,7 +134,11 @@ function frame(dt, t) {
   // 输出：播报时由词边界事件“敲”一下再衰减；语音包不发边界事件时用合成起伏兜底。
   // 输入驱动表面起伏，输出驱动轮廓光、眼睛与底座 —— 两者分开，一眼能看出是谁在说话
   let speakTarget = 0;
-  if (speaker.speaking) {
+  const audioLevel = speaker.speaking ? speaker.level() : null;
+  if (audioLevel !== null) {
+    // 云端语音：由真实音量驱动
+    speakTarget = 0.3 + 0.7 * audioLevel;
+  } else if (speaker.speaking) {
     const since = t - live.boundaryAt;
     speakTarget = since < 600
       ? 0.45 + 0.55 * Math.exp(-since / 140)
@@ -312,7 +317,11 @@ const speaker = new Speaker({
     body.classList.remove('speaking');
     if (active?.streamDone) finishTurn();
   },
-  onBoundary: () => { live.boundaryAt = now(); }
+  onBoundary: () => { live.boundaryAt = now(); },
+  onError: (e) => toast(`${e.message}（这句先用浏览器声音朗读）`),
+  getVoiceConfig: () => resolveVoice(llmConfig, gateway),
+  getKeys: () => llmConfig.keys,
+  getGateway: () => gateway
 });
 speaker.enabled = settings.speechOutput;
 
@@ -374,6 +383,7 @@ async function send(text) {
   if (!text && !attachments.length) return;
   if (active) { active.ctrl.abort(); active = null; }
   speaker.cancel();
+  speaker.unlock(); // 发送多由点击 / 回车触发：顺便启动音频上下文，云端语音才能播放
 
   const files = attachments.splice(0);
   renderAttachments();
@@ -676,7 +686,7 @@ function showPanel(name, { toggle = false } = {}) {
   if (name === 'workspace') panels.refreshFiles();
   if (name === 'knowledge') panels.refreshKb();
   if (name === 'mind') panels.refreshMind();
-  if (name === 'models') panels.refreshModels();
+  if (name === 'models') { panels.refreshModels(); voicePanel.render(); }
 }
 for (const b of document.querySelectorAll('.rail-btn')) b.addEventListener('click', () => showPanel(b.dataset.panel, { toggle: true }));
 for (const b of document.querySelectorAll('[data-open]')) b.addEventListener('click', () => showPanel(b.dataset.open));
@@ -695,6 +705,7 @@ const panels = initPanels({
     toast(on ? '对话记录将保存在本机浏览器中' : '已停止保存，并删除本机保存的对话记录');
   }
 });
+const voicePanel = initVoicePanel({ panels, speaker, getGateway: () => gateway });
 $('#set-quality').addEventListener('change', (e) => {
   setSetting('quality', e.target.value);
   applyFpsCap();
@@ -829,6 +840,7 @@ document.addEventListener('keyup', (e) => {
 // 调试 / 自动化测试入口
 window.__jarvis = {
   machine,
+  speaker,
   settings,
   live,
   get stage() { return stage; },
