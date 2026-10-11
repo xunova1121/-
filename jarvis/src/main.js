@@ -28,6 +28,8 @@ import { initVoicePanel } from './ui/voicePanel.js';
 import * as skillPacks from './agent/skillPacks.js';
 import { initSkillsPanel } from './ui/skillsPanel.js';
 import { initPalette } from './ui/palette.js';
+import { initCallouts } from './ui/callouts.js';
+import { openingSuggestions, followUpSuggestions } from './core/suggest.js';
 import * as mcp from './agent/mcpClient.js';
 import { createDesktopTools } from './agent/desktopTools.js';
 import { initMcpPanel } from './ui/mcpPanel.js';
@@ -74,6 +76,7 @@ setInterval(() => machine.tick(), 100);
 
 // ---------------------------------------------------------------- 实时量
 const live = {
+  pulse: 0, // 点击建议时光核闪一下（0..1，逐帧衰减）
   voiceListening: false, // VAD 确认用户在说话
   voiceEnergy: 0,
   face: null, // 跟随目标 { yaw, pitch }（度）
@@ -153,6 +156,8 @@ function frame(dt, t) {
       ? 0.45 + 0.55 * Math.exp(-since / 140)
       : 0.4 + 0.25 * (0.5 + 0.5 * Math.sin(t / 95)) * (0.5 + 0.5 * Math.sin(t / 333));
   }
+  speakTarget = Math.max(speakTarget, live.pulse);
+  live.pulse *= 0.9;
   live.speak += (speakTarget - live.speak) * (speakTarget > live.speak ? 0.5 : 0.12);
 
   // 故障切片只在“警觉”时出现，平时画面保持稳定、柔和
@@ -359,6 +364,7 @@ speaker.enabled = settings.speechOutput;
 /** 打断（barge-in）：停止朗读并中止正在执行的任务 */
 function interrupt() {
   const had = speaker.speaking || active;
+  if (active) callouts?.show();
   if (active) {
     active.ctrl.abort();
     active.bubble?.done('已打断');
@@ -408,6 +414,9 @@ function makeSpeech() {
     flush() { for (const s of chunker.flush()) speaker.speak(s); }
   };
 }
+
+/** 光核旁的建议标注（启动末尾创建） */
+let callouts = null;
 
 // ---------------------------------------------------------------- 桌面版与 MCP
 /** 桌面版（Electron）由 preload 注入；网页版为 undefined */
@@ -465,6 +474,7 @@ async function send(text) {
   if (problem) {
     bubble.append(problem);
     bubble.done();
+    callouts?.set(followUpSuggestions({ error: true, userText: text }));
     active = null;
     setTask('error', '需要配置模型');
     showPanel('models');
@@ -476,6 +486,8 @@ async function send(text) {
   let firstToken = 0;
   let serverCard = null;
   const t0 = now();
+  const usedTools = [];
+  callouts?.retract();
   try {
     const result = await runAgent({
       adapter, model, history: llmHistory, userText: await expandSlash(userText), signal: ctrl.signal,
@@ -511,6 +523,7 @@ async function send(text) {
         else if (e.type === 'state' && e.value !== 'done') setTask(e.value, e.value === 'listening' ? '生成回答' : '');
         else if (e.type === 'tool_start') {
           cards.set(e.id, bubble.toolCard(e.name, e.args));
+          usedTools.push(e.name);
           setTask('processing', `${e.name}`);
         } else if (e.type === 'tool_end') {
           cards.get(e.id)?.done(e.ok, e.output, e.ms);
@@ -538,6 +551,7 @@ async function send(text) {
     rememberTurn('assistant', result.text || '（完成）');
     $('#mode-pill').classList.remove('offline');
     turn.streamDone = true;
+    callouts?.set(followUpSuggestions({ tools: usedTools, userText: text, desktop: Boolean(DESKTOP) }));
     if (!speaker.speaking) finishTurn();
   } catch (err) {
     if (err.name === 'AbortError' || active !== turn) return;
@@ -549,6 +563,7 @@ async function send(text) {
     $('#mode-pill').classList.add('offline');
     active = null;
     setTask('error', '请求失败');
+    callouts?.set(followUpSuggestions({ error: true, userText: text, desktop: Boolean(DESKTOP) }));
   }
 }
 
@@ -921,6 +936,7 @@ const palette = initPalette({
         if (settings.persistMemory) saveMemory(history, storage);
         $('#transcript').replaceChildren();
         renderWelcome();
+        callouts?.set(openingSuggestions({ desktop: Boolean(DESKTOP), hasSkills: skillsPanel.installed.some((x) => x.enabled) }));
       } },
       { id: 'stop', group: '操作', title: '打断 / 停止当前任务', keys: 'Esc', run: () => interrupt() },
       { id: 'preview-voice', group: '操作', title: '试听当前声音', run: () => speaker.preview() },
@@ -1026,6 +1042,33 @@ if (narrow.matches) body.classList.remove('side-open');
 setTask('idle');
 renderWelcome();
 
+// ---------------------------------------------------------------- 光核旁的建议标注
+callouts = initCallouts({
+  root: $('#stage-wrap'),
+  getAnchor: () => stage?.anchor?.() ?? null,
+  reducedMotion: () => body.classList.contains('reduced-motion'),
+  // 鼠标移到建议上：光核的眼睛看向它
+  onHover: (point, orb) => {
+    if (point && orb) {
+      const clamp = (v, m) => Math.max(-m, Math.min(m, v));
+      live.glance = { yaw: clamp(((point.x - orb.x) / Math.max(orb.r, 1)) * 7, 26), pitch: clamp(((orb.y - point.y) / Math.max(orb.r, 1)) * 5, 14) };
+      live.nextGlance = Infinity;
+    } else {
+      live.glance = { yaw: 0, pitch: 0 };
+      live.nextGlance = now() + 1500;
+    }
+  },
+  // 点击：光点飞进光核后，光核闪一下，再执行
+  onPick: (item) => {
+    live.pulse = 1;
+    live.glance = { yaw: 0, pitch: 0 };
+    live.nextGlance = now() + 1500;
+    if (item.panel) { showPanel(item.panel); callouts.show(); return; }
+    setTimeout(() => send(item.prompt), 160);
+  }
+});
+callouts.set(openingSuggestions({ desktop: Boolean(DESKTOP), hasSkills: false }));
+
 // ---------------------------------------------------------------- 键盘快捷键
 //   Esc 打断   /  聚焦输入框   Alt+1..6 面板   Alt+F 专注视图   Alt+V 直接对话
 //   Alt+O / Alt+H / Alt+W 光核 / 胸像 / 线框   按住空格：按下说话（降级模式、焦点不在输入框时）
@@ -1073,6 +1116,7 @@ window.__jarvis = {
   get skills() { return skillsPanel; },
   get palette() { return palette; },
   get mcp() { return mcpPanel; },
+  get callouts() { return callouts; },
   settings,
   live,
   get stage() { return stage; },

@@ -137,6 +137,25 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.waitForTimeout(200);
   check('命令面板执行“打开设置”', !(await page.isVisible('.palette')) && await page.isVisible('[data-pane="settings"]'));
 
+  // —— 光核旁的建议标注：虚线连到光核；悬停时光核看向它；点击即执行，回答后换一组
+  await page.evaluate(() => window.__jarvis.interrupt());
+  await page.waitForFunction(() => window.__jarvis.callouts.visible, null, { timeout: 5000 }).catch(() => {});
+  const cl = await page.evaluate(() => ({ n: document.querySelectorAll('.callout:not([hidden])').length, d: [...document.querySelectorAll('.cl-line')].map((x) => x.getAttribute('d')) }));
+  check('光核旁有 3 条建议，各自有虚线连到光核', cl.n === 3 && cl.d.every((d) => /^M[\d.]+,[\d.]+ L/.test(d || '')), JSON.stringify(cl.d[0]));
+  await page.hover('.callout:nth-child(1)');
+  await page.waitForTimeout(250);
+  check('悬停建议：虚线变亮、光核看向它', await page.evaluate(() => document.querySelector('.cl-g.hot') !== null && window.__jarvis.live.glance.yaw > 3));
+  await page.mouse.move(5, 500);
+  const nBefore = await page.locator('.msg.agent').count();
+  const target = await page.evaluate(() => window.__jarvis.callouts.items[1].prompt);
+  const beforeTitles = await page.evaluate(() => window.__jarvis.callouts.items.map((x) => x.title).join(' / '));
+  await page.click('.callout:nth-child(2)');
+  await page.waitForFunction((n) => document.querySelectorAll('.msg.agent').length > n && !document.querySelector('.msg.agent.streaming'), nBefore, { timeout: 20000 });
+  check('点击建议即发送', (await page.locator('.msg.user').last().innerText()).includes(target), target);
+  await page.waitForTimeout(400);
+  const after = await page.evaluate(() => window.__jarvis.callouts.items.map((x) => x.title));
+  check('回答后换成新的跟进建议', after.length === 3 && after.join(' / ') !== beforeTitles, `${beforeTitles} → ${after.join(' / ')}`);
+
   // —— 智能体：写网页 → 预览
   let reply = await ask(page, '帮我写一个网页');
   const tools1 = await page.locator('.msg.agent').last().locator('.tool-card .tn').allTextContents();

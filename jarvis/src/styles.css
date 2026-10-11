@@ -124,6 +124,47 @@ body.side-closed .side { display: none; }
 body.reduced-motion #fallback-bg, body.no-webgl #fallback-bg { opacity: 1; }
 body.reduced-motion #stage, body.no-webgl #stage { display: none; }
 body.focus-view .stage { height: 120px; }
+/* ---- 光核旁的建议标注：编号卡片 + 从光核引出的流动虚线 ---- */
+.callout-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 1; }
+.callouts { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.cl-line { fill: none; stroke: var(--accent); stroke-width: 1.3; stroke-dasharray: 5 6; stroke-linecap: round; opacity: .7; animation: cl-flow 1.4s linear infinite; transition: opacity 200ms, stroke-width 200ms; }
+@keyframes cl-flow { to { stroke-dashoffset: -22; } }
+.cl-g.hot .cl-line { opacity: 1; stroke-width: 2; animation-duration: .45s; }
+.cl-mask { fill: none; stroke: #fff; stroke-width: 14; stroke-dasharray: 1 1; stroke-dashoffset: 1; transition: stroke-dashoffset 750ms cubic-bezier(.2,.7,.3,1); }
+.cl-in .cl-mask { stroke-dashoffset: 0; }
+#cl-mask-1 .cl-mask { transition-delay: 140ms; }
+#cl-mask-2 .cl-mask { transition-delay: 280ms; }
+.cl-retract .cl-mask { stroke-dashoffset: 1; transition-duration: 320ms; transition-delay: 0ms; }
+.cl-node { fill: var(--accent); opacity: 0; transition: opacity 300ms; }
+.cl-in .cl-node { opacity: .9; transition-delay: 500ms; }
+.cl-node.end { fill: var(--bg); stroke: var(--accent); stroke-width: 1.4; }
+.cl-g.hot .cl-node.end { fill: var(--accent); }
+.cl-spark { fill: #fff; opacity: 0; }
+.cl-spark.on { opacity: 1; }
+.callout { position: absolute; left: 0; top: 0; pointer-events: auto; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 7px 12px 7px 8px; border: 1px solid var(--line-strong); border-radius: 10px; background: rgba(4, 10, 18, 0.74); backdrop-filter: blur(6px); color: var(--text); text-align: left; opacity: 0; scale: .94; transition: opacity 260ms, scale 260ms, border-color 160ms, box-shadow 160ms; }
+.cl-in .callout { opacity: 1; scale: 1; transition-delay: 420ms; }
+.cl-in .callout:nth-child(2) { transition-delay: 560ms; }
+.cl-in .callout:nth-child(3) { transition-delay: 700ms; }
+.cl-in .callout.hot, .cl-in .callout.picked { transition-delay: 0ms; }
+.cl-retract .callout { opacity: 0; scale: .94; pointer-events: none; transition-delay: 0ms; }
+.cl-hidden .callouts, .cl-hidden .callout-lines { display: none; }
+.cl-num { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--accent); color: var(--accent); font: 600 12px var(--font-display); box-shadow: 0 0 10px var(--accent-soft); transition: background 160ms, color 160ms; }
+.cl-body { display: flex; flex-direction: column; min-width: 0; }
+.cl-k { font: 10px var(--font-display); letter-spacing: 0.16em; color: var(--dim); }
+.cl-title { font-size: 13px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.callout.hot { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft), 0 0 26px var(--accent-soft); }
+.callout.hot .cl-num, .callout.picked .cl-num { background: var(--accent); color: var(--bg); }
+.callout:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.stage[data-cl-mode="row"] .callout { padding: 6px 8px; gap: 6px; min-height: 50px; }
+.stage[data-cl-mode="row"] .cl-k { display: none; }
+.stage[data-cl-mode="row"] .cl-num { width: 18px; height: 18px; font-size: 11px; }
+.stage[data-cl-mode="row"] .cl-title { font-size: 12px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.stage[data-cl-mode="row"] .hud-clock { display: none; }
+body.reduced-motion .cl-line { animation: none; }
+body.reduced-motion .cl-mask, body.reduced-motion .callout, body.reduced-motion .cl-node { transition: none; }
+@media (prefers-reduced-motion: reduce) { .cl-line { animation: none; } }
+.hud, .form-chips { z-index: 3; }
+
 .hud { position: absolute; top: 14px; display: grid; gap: 2px 10px; font: 11px var(--font-display); letter-spacing: 0.12em; pointer-events: none; }
 .hud-left { left: 18px; grid-template-columns: auto auto; }
 .hud-k { color: var(--dim); }

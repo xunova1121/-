@@ -9,7 +9,7 @@
 import {
   WebGLRenderer, Scene, PerspectiveCamera, BufferGeometry, BufferAttribute, Points, Mesh, LineSegments,
   ShaderMaterial, AdditiveBlending, PlaneGeometry, CylinderGeometry, WireframeGeometry, IcosahedronGeometry,
-  Vector2, DoubleSide, FrontSide
+  Vector2, Vector3, DoubleSide, FrontSide
 } from 'three';
 import { createBloom } from './bloom.js';
 import {
@@ -257,6 +257,8 @@ export function createStage(canvas, { figure, lowEnd = false, onContextChange } 
     eyeUniforms.u_size.value = scale * 3.6;
     bloom?.setSize();
   }
+  const anchorV = new Vector3();
+  const anchorE = new Vector3();
   const ro = new ResizeObserver(resize);
   ro.observe(canvas);
   resize();
@@ -367,6 +369,18 @@ export function createStage(canvas, { figure, lowEnd = false, onContextChange } 
     },
     get running() { return raf !== 0; },
     setFpsCap(n) { fpsCap = n; },
+    /**
+     * 光核（或胸像头部）在画布上的位置与半径（CSS 像素，相对画布左上角）。
+     * 建议标注的虚线从这里引出，跟着光核的浮动一起动。
+     */
+    anchor() {
+      const w = canvas.clientWidth || 1;
+      const h = canvas.clientHeight || 1;
+      const y = style === 'orb' ? orb.position.y : meta.haloY;
+      const c = anchorV.set(0, y, 0).project(camera);
+      const e = anchorE.set(ORB_RADIUS * (style === 'orb' ? 1 : 1.25), y, 0).project(camera);
+      return { x: (c.x + 1) / 2 * w, y: (1 - c.y) / 2 * h, r: Math.abs(e.x - c.x) / 2 * w };
+    },
     /** 显示样式：orb 光核 / holo 全息胸像 / wire 线框胸像 */
     setStyle(next) {
       if (next !== 'orb' && !body[next]) return;
