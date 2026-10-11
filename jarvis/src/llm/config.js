@@ -2,7 +2,7 @@
  * 模型配置（只存在这台电脑的浏览器 localStorage 里）与适配器工厂。
  * 有本机网关（完整版）时请求经网关转发：没有浏览器跨域限制，也可以用网关环境变量里的密钥。
  */
-import { PROVIDERS, providerById, upstreamFor } from '../../shared/providers.js';
+import { PROVIDERS, providerById, upstreamFor, customViaGateway } from '../../shared/providers.js';
 import { createOpenAIAdapter } from './openai.js';
 import { createAnthropicAdapter } from './anthropic.js';
 import { createMockAdapter } from './mock.js';
@@ -69,7 +69,7 @@ export function createAdapter(cfg, { gateway = null } = {}) {
   }
   if (p.custom && !cfg.baseURLs.custom) return { problem: '请填写接口地址' };
   // 自定义接口在完整版里也经网关转发（绕开跨域限制），目标地址放在请求头里
-  const viaGw = viaGateway || (gateway && p.custom);
+  const viaGw = viaGateway || (p.custom && customViaGateway(gateway, cfg.baseURLs.custom));
   const baseURL = viaGw ? `${gateway.origin}/api/llm/${p.id}` : (p.custom ? cfg.baseURLs.custom : p.baseURL);
   const headers = p.id === 'openrouter' ? { 'HTTP-Referer': 'https://jarvis.local', 'X-Title': 'Jarvis' } : {};
   if (viaGw && p.custom) headers['x-jarvis-upstream'] = cfg.baseURLs.custom.trim();

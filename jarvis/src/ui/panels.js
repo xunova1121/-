@@ -280,7 +280,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, onCl
   function fillModels() {
     const p = providerById(sel.value);
     const gw = getGateway();
-    $('#gw-badge').textContent = gw ? '本机网关' : '单文件版';
+    $('#gw-badge').textContent = gw ? (gw.cors ? '单文件版 · 已连网关' : '本机网关') : '单文件版';
     $('#gw-badge').classList.toggle('on', Boolean(gw));
     $('#llm-model').value = cfg.models[p.id] || p.models[0] || '';
     $('#llm-models').replaceChildren(...p.models.filter(Boolean).map((m) => el('option', { value: m })));
@@ -292,10 +292,10 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, onCl
     $('#llm-key-hint').replaceChildren(...(p.kind === 'mock' ? ['无需密钥，离线可用。能演示写网页、生成文档、记忆、知识库等完整流程，但“理解力”是规则写死的。']
       : [gwKey ? '本机网关已配置该服务商的密钥，这里可以留空。' : p.needsKey === false ? '本机模型无需密钥。' : '', p.keyUrl ? el('a', { href: p.keyUrl, target: '_blank', rel: 'noopener', textContent: ' 获取密钥 →' }) : '']));
     const notes = [];
-    if (!gw && p.custom) notes.push('很多中转 / 自建接口不允许网页直接调用（跨域限制），单文件版里会显示“Failed to fetch”。这时请用完整版（双击 启动.bat / start.sh），它会通过本机网关转发，任何接口都能连。');
-    if (!gw && p.browser === false) notes.push('该服务商不允许网页直接调用（跨域限制），单文件版里可能连不上。请用完整版（双击 启动.bat / start.sh），它会通过本机网关转发。');
+    const fix = '解决：双击 jarvis 文件夹里的 启动.bat（Mac / Linux 运行 start.sh）并保持窗口开着，这个页面会自动连上本机网关，经它转发就不受限制了。';
+    if (!gw && p.custom) notes.push(`很多中转 / 自建接口不允许网页直接调用（跨域限制），会显示“Failed to fetch”。${fix}`);
+    if (!gw && p.browser === false) notes.push(`该服务商不允许网页直接调用（跨域限制）。${fix}`);
     if (p.note) notes.push(p.note);
-    if (p.custom && gw) notes.push('自定义地址不经网关转发，由浏览器直接请求。');
     $('#llm-note').hidden = !notes.length;
     $('#llm-note').textContent = notes.join(' ');
     $('#llm-status').textContent = '';
@@ -328,7 +328,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, onCl
       await adapter.stream({ model, system: ['你是连接测试。只回复：连接成功', ''], messages: [{ role: 'user', content: 'ping' }], tools: [], signal: ctrl.signal, onText: (d) => { out += d; } });
       status.textContent = `连接成功（${Math.round(performance.now() - t0)}ms）：${out.replace(/<emotion>[^<]*<\/emotion>/, '').slice(0, 40)}`;
     } catch (e) {
-      status.textContent = `连接失败：${e.name === 'AbortError' ? '超时' : e.message}${/Failed to fetch|NetworkError|CORS/i.test(e.message) ? '（多半是跨域限制，请改用完整版网关）' : ''}`;
+      status.textContent = `连接失败：${e.name === 'AbortError' ? '超时' : e.message}${/Failed to fetch|NetworkError|CORS/i.test(e.message) ? '（多半是跨域限制：双击 启动.bat 并保持窗口开着，本页面会自动连上本机网关）' : ''}`;
     } finally { clearTimeout(timer); }
   });
   $('#set-websearch').checked = cfg.claudeWebSearch;

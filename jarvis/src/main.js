@@ -25,6 +25,8 @@ import * as agentMemory from './agent/memory.js';
 import { initPanels } from './ui/panels.js';
 import { loadConfig, saveConfig, createAdapter, displayName, providerById, resolveVoice } from './llm/config.js';
 import { initVoicePanel } from './ui/voicePanel.js';
+import { matchWake, WakeWindow } from './core/wakeWord.js';
+import { playCue } from './perception/voiceFx.js';
 import { MetricsPoller } from './api/metrics.js';
 import { subscribeAgentEvents } from './api/agentEvents.js';
 import { Dashboard } from './ui/dashboard.js';
@@ -271,14 +273,32 @@ function applyEmotionOverride(v) {
 let gateway = null; // 完整版：{ origin, keys }；单文件版为 null
 let llmConfig = loadConfig();
 
+/** 单文件版也会尝试连接本机网关（双击 启动.bat 后运行在 127.0.0.1:8787），连上后不受浏览器跨域限制 */
+const LOCAL_GATEWAY = 'http://127.0.0.1:8787';
+let probing = null;
 async function detectGateway() {
-  if (STANDALONE || location.protocol === 'file:') return;
-  try {
-    const h = await (await fetch('/api/health', { cache: 'no-store' })).json();
-    gateway = { origin: location.origin, keys: h.gatewayKeys ?? [] };
-  } catch { gateway = null; }
-  panels.refreshModels();
-  updateModelLabels();
+  const local = STANDALONE || location.protocol === 'file:';
+  probing ??= (async () => {
+    try {
+      const url = local ? `${LOCAL_GATEWAY}/api/health` : '/api/health';
+      const h = await (await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout?.(1500) })).json();
+      if (!h?.ok) throw new Error('not a gateway');
+      const found = !gateway;
+      gateway = { origin: local ? LOCAL_GATEWAY : location.origin, keys: h.gatewayKeys ?? [], cors: Boolean(h.cors) };
+      if (local && found) toast('已连接本机网关：所有服务商和自定义接口都可以用了');
+    } catch {
+      gateway = null;
+    }
+    panels.refreshModels();
+    voicePanel.render();
+    updateModelLabels();
+  })().finally(() => { probing = null; });
+  return probing;
+}
+// 单文件版：回到页面时再找一次网关（用户可能刚双击了 启动.bat）
+if (STANDALONE || location.protocol === 'file:') {
+  let last = 0;
+  addEventListener('focus', () => { if (!gateway && Date.now() - last > 5000) { last = Date.now(); detectGateway(); } });
 }
 
 function updateModelLabels() {
@@ -288,8 +308,9 @@ function updateModelLabels() {
   $('#mode-pill').title = `当前模型：${name}${gateway ? '（经本机网关）' : ''}。点击切换`;
 }
 
-const metrics = () => (gateway ? fetch('/api/local/metrics').then((r) => r.json()) : browserMetrics());
-const fetchViaGateway = () => (gateway
+const metrics = () => (gateway ? fetch(`${gateway.origin}/api/local/metrics`).then((r) => r.json()) : browserMetrics());
+// 网页读取只对完整版开放（单文件版跨域连网关时网关不提供 /api/fetch）
+const fetchViaGateway = () => (gateway && !gateway.cors
   ? (url, init) => (url.startsWith('https://api.tavily.com/')
     ? fetch(`/api/llm/tavily/${url.slice('https://api.tavily.com/'.length)}`, init)
     : fetch(`/api/fetch?url=${encodeURIComponent(url)}`))
@@ -313,6 +334,7 @@ const speaker = new Speaker({
     body.classList.add('speaking');
   },
   onIdle: () => {
+    if (wake.awake) wake.wake(); // 回答说完后重新计时，方便接着问
     voice.setSuppressed(false);
     body.classList.remove('speaking');
     if (active?.streamDone) finishTurn();
@@ -468,7 +490,8 @@ async function send(text) {
     if (err.name === 'AbortError' || active !== turn) return;
     const msg = String(err.message || err);
     const cors = /Failed to fetch|NetworkError|Load failed|CORS/i.test(msg);
-    bubble.append(`\n（出错了：${msg}${cors ? '。多半是该服务商不允许网页直接调用，请改用完整版（双击 启动.bat / start.sh）或换一家服务商' : ''}）`);
+    bubble.append(`\n（出错了：${msg}${cors ? '。多半是该服务商不允许网页直接调用：双击 jarvis 文件夹里的 启动.bat（或 start.sh）并保持窗口开着，本页面会自动连上本机网关，然后重试即可' : ''}）`);
+    if (cors && !gateway) detectGateway();
     bubble.done();
     $('#mode-pill').classList.add('offline');
     active = null;
@@ -536,8 +559,21 @@ window.addEventListener('drop', (e) => {
 });
 
 // ---------------------------------------------------------------- 语音
+// 唤醒词：未唤醒时只听不动——不打断正在进行的回答，不显示识别中的文字
+const wake = new WakeWindow();
+const asleep = () => settings.wakeWord && !wake.awake;
+const DISMISS = /^(退下|没事了|休息吧|再见|就这样)[。.！!]*$/;
+setInterval(() => document.body.classList.toggle('awake', settings.wakeWord && wake.awake), 250);
+function onWake() {
+  wake.wake();
+  const ctx = speaker.unlock();
+  if (ctx?.state === 'running') playCue(ctx, 'start', 0.08);
+  machine.beginUserTurn();
+}
+
 const voice = new VoiceInput({
   onConfirm: () => {
+    if (asleep()) return;
     live.voiceListening = true;
     if (active) { active.ctrl.abort(); active = null; speaker.cancel(); }
     machine.beginUserTurn();
@@ -545,11 +581,28 @@ const voice = new VoiceInput({
     $('#vad-meter').classList.add('on');
   },
   onCancel: () => endListening(),
-  onInterim: (t) => transcript.interim(t),
+  onInterim: (t) => { if (!asleep() || matchWake(t).woke) transcript.interim(t); },
   onFinal: (t) => {
     endListening();
     transcript.clearInterim();
-    send(t);
+    if (!settings.wakeWord) return send(t);
+    const m = matchWake(t);
+    if (!wake.awake && !m.woke) return; // 没叫名字：忽略
+    const cmd = m.woke ? m.rest : t;
+    if (DISMISS.test(cmd)) {
+      wake.sleep();
+      speaker.speak('好的，有需要再叫我。');
+      return;
+    }
+    onWake();
+    if (!cmd) {
+      if (active) { active.ctrl.abort(); active = null; }
+      speaker.cancel();
+      speaker.speak('我在。');
+      setTask('listening', '已唤醒');
+      return;
+    }
+    send(cmd);
   },
   onEnergy: (e) => {
     live.voiceEnergy = e;
@@ -734,6 +787,7 @@ for (const c of document.querySelectorAll('[data-style]')) c.addEventListener('c
 
 $('#set-face').addEventListener('change', (e) => setFaceFollow(e.target.checked));
 $('#set-voice').addEventListener('change', (e) => setDirectVoice(e.target.checked));
+$('#set-wake').addEventListener('change', (e) => { setSetting('wakeWord', e.target.checked); wake.sleep(); });
 $('#set-tts').addEventListener('change', (e) => {
   setSetting('speechOutput', e.target.checked);
   speaker.enabled = e.target.checked;
@@ -764,6 +818,7 @@ function toast(text) {
 
 // ---------------------------------------------------------------- 恢复上次的设置
 $('#set-tts').checked = settings.speechOutput;
+$('#set-wake').checked = settings.wakeWord;
 $('#set-quality').value = settings.quality;
 dashboard.setTurns(history.filter((m) => m.role === 'user').length);
 $('#set-motion').value = settings.reducedMotion;
@@ -841,6 +896,7 @@ document.addEventListener('keyup', (e) => {
 window.__jarvis = {
   machine,
   speaker,
+  get voice() { return voice; },
   settings,
   live,
   get stage() { return stage; },

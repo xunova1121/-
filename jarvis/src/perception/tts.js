@@ -8,6 +8,8 @@
  * 云端引擎返回音频，经 voiceFx 效果链后播放。
  */
 
+import { customViaGateway } from '../../shared/providers.js';
+
 /** 给 gpt-4o-mini-tts 的“表演指导”：要像电影里的 AI 管家，而不是导航播报 */
 export const DIRECTION = [
   'Voice: a calm, precise, quietly confident AI butler from a science-fiction film.',
@@ -66,7 +68,7 @@ export async function synthesize(vc, keys, text, { gateway = null, signal, fetch
   if (!e || e.id === 'browser') throw new Error('不是云端语音引擎');
   const voice = vc.voices?.[e.id] || e.voices[0]?.[0] || '';
   const key = keys?.[e.keyFrom] || '';
-  const viaGateway = Boolean(gateway) && !e.custom;
+  const viaGateway = e.custom ? customViaGateway(gateway, vc.customURL) : Boolean(gateway);
   if (!key && !e.custom && !(viaGateway && gateway.keys?.includes(e.keyFrom))) throw new Error(`请先填写 ${e.name} 的 API Key`);
 
   let url;
@@ -79,13 +81,14 @@ export async function synthesize(vc, keys, text, { gateway = null, signal, fetch
       body: JSON.stringify({ text, model_id: e.model, voice_settings: { stability: 0.5, similarity_boost: 0.8, style: 0.15, use_speaker_boost: true } })
     };
   } else {
-    const base = e.custom ? (vc.customURL || '').replace(/\/$/, '') : viaGateway ? `${gateway.origin}/api/llm/${e.id}` : (e.id === 'openai' ? 'https://api.openai.com/v1' : 'https://api.siliconflow.cn/v1');
-    if (!base) throw new Error('请填写自定义语音接口地址');
+    if (e.custom && !vc.customURL) throw new Error('请填写自定义语音接口地址');
+    const base = viaGateway ? `${gateway.origin}/api/llm/${e.id}` : e.custom ? vc.customURL.replace(/\/$/, '') : (e.id === 'openai' ? 'https://api.openai.com/v1' : 'https://api.siliconflow.cn/v1');
     url = `${base}/audio/speech`;
     const body = { model: e.custom ? (vc.customModel || 'tts-1') : e.model, input: text, voice: e.id === 'siliconflow' ? `${e.model}:${voice}` : voice, response_format: 'mp3' };
     if (e.id === 'openai') body.instructions = DIRECTION;
     if (e.custom && vc.customVoice) body.voice = vc.customVoice;
     const headers = { 'content-type': 'application/json' };
+    if (e.custom && viaGateway) headers['x-jarvis-upstream'] = vc.customURL.trim();
     if (key || viaGateway) headers.authorization = `Bearer ${key || 'use-gateway-key'}`;
     init = { headers, body: JSON.stringify(body) };
   }

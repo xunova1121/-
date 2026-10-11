@@ -38,3 +38,18 @@ export const ENV_KEYS = {
   qwen: 'DASHSCOPE_API_KEY', moonshot: 'MOONSHOT_API_KEY', zhipu: 'ZHIPU_API_KEY', doubao: 'ARK_API_KEY',
   siliconflow: 'SILICONFLOW_API_KEY', openrouter: 'OPENROUTER_API_KEY', elevenlabs: 'ELEVENLABS_API_KEY'
 };
+
+/** 内网 / 本机地址：网关的网页读取不允许访问；单文件版跨域连网关时也不允许转发到这些地址，避免被用来探测局域网 */
+export function isPrivateHost(host) {
+  const h = host.replace(/^\[|\]$/g, '').toLowerCase();
+  return h === 'localhost' || h.endsWith('.local') || h === '::1' || h === '0.0.0.0' ||
+    /^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(h) || /^f[cd][0-9a-f]{2}:/.test(h) || /^fe80:/.test(h);
+}
+
+/** 自定义地址要不要经网关转发：完整版一律转发；单文件版连着网关时，内网地址由浏览器直连（网关不转发内网） */
+export function customViaGateway(gateway, url) {
+  if (!gateway) return false;
+  if (!gateway.cors) return true;
+  try { return !isPrivateHost(new URL(url).hostname); } catch { return false; }
+}

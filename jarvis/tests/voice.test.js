@@ -52,6 +52,17 @@ describe('云端语音请求', () => {
     expect(c.body).toMatchObject({ model: 'cosyvoice', voice: 'jarvis' });
   });
 
+  it('自定义接口：完整版经网关转发（目标放请求头）；单文件版连网关时内网地址直连', async () => {
+    const vc = { engine: 'custom', voices: {}, customURL: 'https://tts.example.com/v1', customModel: 'm' };
+    let f = fakeFetch();
+    await synthesize(vc, {}, 'hi', { fetchImpl: f, gateway: { origin: 'http://127.0.0.1:8787', keys: [] } });
+    expect(f.calls[0].url).toBe('http://127.0.0.1:8787/api/llm/custom/audio/speech');
+    expect(f.calls[0].init.headers['x-jarvis-upstream']).toBe('https://tts.example.com/v1');
+    f = fakeFetch();
+    await synthesize({ ...vc, customURL: 'http://127.0.0.1:9880/v1' }, {}, 'hi', { fetchImpl: f, gateway: { origin: 'http://127.0.0.1:8787', keys: [], cors: true } });
+    expect(f.calls[0].url).toBe('http://127.0.0.1:9880/v1/audio/speech');
+  });
+
   it('缺密钥、接口报错时给出可读的错误', async () => {
     await expect(synthesize({ engine: 'openai', voices: {} }, {}, 'x', { fetchImpl: fakeFetch() })).rejects.toThrow(/API Key/);
     const bad = async () => ({ ok: false, status: 401, json: async () => ({ error: { message: 'Invalid key' } }) });

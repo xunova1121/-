@@ -14,11 +14,13 @@
 2. 直接交代任务：“帮我写一个网页”“把这份 PDF 加进知识库”“做一个 PPT”“记住我在上海工作”。
 3. 工作区可“连接本地文件夹”：之后生成的文件直接写进这个文件夹（只新增，不删除、不覆盖）。
 
-单文件版的限制：通义千问、Kimi、智谱、豆包，以及很多中转 / 自建接口**不允许网页直接调用**（跨域限制，表现为“Failed to fetch”），需用完整版——完整版的网关可以转发任何接口，包括“自定义（OpenAI 兼容）”地址；Python 运行首次需联网下载 Pyodide。
+单文件版的限制：通义千问、Kimi、智谱、豆包，以及很多中转 / 自建接口**不允许网页直接调用**（跨域限制，表现为“Failed to fetch”）。解决办法：双击 `jarvis/启动.bat`（Mac / Linux 运行 `start.sh`）并保持窗口开着——单文件版会**自动连上这个本机网关**（模型面板右上角显示“单文件版 · 已连网关”），之后任何接口都能用。Python 运行首次需联网下载 Pyodide。
+
+> 单文件版跨域使用网关时有三条限制，防止别的网页借用它：不会使用网关环境变量里的密钥（用你在页面里填的）；不转发到内网地址（内网接口由浏览器直连）；只开放模型转发和系统指标，不开放网页读取。
 
 ### 方式二：完整版（本机网关）
 
-需要 Node.js 18+。Windows 双击 `jarvis/启动.bat`，Mac / Linux 运行 `jarvis/start.sh`。
+需要 Node.js 18+。Windows 双击 `jarvis/启动.bat`，Mac / Linux 运行 `jarvis/start.sh`。首次运行自动安装依赖并构建；以后拉取新版本再双击，会自动更新依赖并重新构建。
 
 ```bash
 cd jarvis
@@ -31,9 +33,9 @@ ANTHROPIC_API_KEY=... OPENAI_API_KEY=... DEEPSEEK_API_KEY=... DASHSCOPE_API_KEY=
 
 | 命令 | 作用 |
 |---|---|
-| `npm test` | 单元 + 集成测试（Vitest，116 项） |
-| `npm run e2e` | 完整版浏览器测试（Playwright，51 项；需先 build 并启动 server） |
-| `npm run e2e:standalone` | 单文件版测试（file:// 直接打开，11 项） |
+| `npm test` | 单元 + 集成测试（Vitest，121 项） |
+| `npm run e2e` | 完整版浏览器测试（Playwright，56 项；需先 build 并启动 server） |
+| `npm run e2e:standalone` | 单文件版测试（file:// 直接打开，含“单文件版 + 本机网关”场景，14 项） |
 | `npm run build:standalone` | 生成单文件版 `../jarvis-standalone.html` |
 
 ## v4 能力一览
@@ -90,7 +92,11 @@ ANTHROPIC_API_KEY=... OPENAI_API_KEY=... DEEPSEEK_API_KEY=... DASHSCOPE_API_KEY=
 - 浏览器自带声音拿不到音频流，无法加效果；免费方案里 Edge 的“Yunjian / Yunxi (Natural)”最自然，会被优先选用。
 - 完整版可在网关环境变量里放 `ELEVENLABS_API_KEY`。
 
-### 7. 界面
+### 7. 唤醒词“贾维斯”
+
+设置 → 开启“直接对话”和“唤醒词”：只响应以“贾维斯 / 嘿，贾维斯 / Jarvis”开头的话（也认“嘉维斯”等常见同音识别结果），名字会从指令里去掉；只叫名字时回答“我在。”。唤醒后 20 秒内（每次回答说完重新计时）可以接着说，说“退下”结束。未唤醒时旁人说话不会打断正在进行的回答，也不会显示识别文字。唤醒期间输入栏会发光。
+
+### 8. 界面
 
 重做为深色 HUD：顶栏状态与等级、左侧功能栏（`Alt+1…6`）、中间光核与对话、右侧面板（工作区 / 知识库 / 进化 / 模型 / 系统 / 设置）；工具调用以卡片实时展示，支持拖拽上传，窄屏自动改为底部导航。
 

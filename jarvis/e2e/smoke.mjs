@@ -233,6 +233,29 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   bad.server.close();
   await page.selectOption('#tts-engine', 'auto');
 
+  // —— 唤醒词：没叫名字的话被忽略；叫了名字后去掉名字再执行；窗口期内可以接着说
+  await page.evaluate(() => window.__jarvis.showPanel('settings'));
+  await page.check('#set-wake');
+  const userCount = () => page.locator('.msg.user').count();
+  const n0 = await userCount();
+  await page.evaluate(() => window.__jarvis.voice.onFinal('今天中午吃什么'));
+  await page.waitForTimeout(400);
+  check('唤醒词：没叫名字时不响应', (await userCount()) === n0);
+  await page.evaluate(() => window.__jarvis.voice.onFinal('贾维斯，现在几点'));
+  await page.waitForFunction((n) => document.querySelectorAll('.msg.user').length > n && !document.querySelector('.msg.agent.streaming'), n0, { timeout: 20000 });
+  check('唤醒词：叫名字后执行指令（去掉名字）', (await page.locator('.msg.user').last().innerText()).includes('现在几点') && !(await page.locator('.msg.user').last().innerText()).includes('贾维斯'));
+  check('唤醒后输入栏发光提示', await page.evaluate(() => new Promise((r) => setTimeout(() => r(document.body.classList.contains('awake')), 400))));
+  await page.evaluate(() => window.__jarvis.voice.onFinal('帮我写一个网页'));
+  await page.waitForFunction((n) => document.querySelectorAll('.msg.user').length > n + 1, n0, { timeout: 20000 }).catch(() => {});
+  check('唤醒词：窗口期内不用再叫名字', (await userCount()) === n0 + 2);
+  await page.evaluate(() => window.__jarvis.voice.onFinal('退下'));
+  check('说“退下”结束唤醒', await page.evaluate(() => new Promise((r) => setTimeout(() => r(!document.body.classList.contains('awake')), 400))));
+  await page.waitForFunction(() => !document.querySelector('.msg.agent.streaming') && !window.__jarvis.speaker.speaking, null, { timeout: 20000 }).catch(() => {});
+  await page.waitForTimeout(500);
+  await page.evaluate(() => window.__jarvis.showPanel('settings'));
+  await page.uncheck('#set-wake');
+  await page.evaluate(() => window.__jarvis.interrupt());
+
   // —— 打断、快捷键、画质
   await page.evaluate(() => { window.__barge = window.__jarvis.send('帮我写一个网页'); });
   await page.waitForFunction(() => document.querySelector('.msg.agent.streaming .body')?.textContent.length > 2, null, { timeout: 10000 });

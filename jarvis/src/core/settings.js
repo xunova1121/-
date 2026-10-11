@@ -4,6 +4,7 @@
 export const DEFAULT_SETTINGS = {
   faceFollow: false,
   directVoice: false,
+  wakeWord: false, // 直接对话时只在听到“贾维斯”后响应
   speechOutput: true,
   vadSensitivity: '中',
   emotionOverride: 'auto',

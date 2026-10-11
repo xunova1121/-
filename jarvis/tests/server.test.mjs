@@ -196,6 +196,32 @@ describe('大模型代理与网页读取', () => {
     expect(seen.headers['x-jarvis-upstream']).toBeUndefined();
   });
 
+  it('单文件版（Origin: null）可跨域使用：只开放模型转发，不注入网关密钥，不转发到内网', async () => {
+    const pre = await fetch(`${base}/api/llm/deepseek/chat/completions`, { method: 'OPTIONS', headers: { Origin: 'null', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'authorization, content-type, x-stainless-os' } });
+    expect(pre.status).toBe(204);
+    expect(pre.headers.get('access-control-allow-origin')).toBe('null');
+    expect(pre.headers.get('access-control-allow-headers')).toBe('authorization, content-type, x-stainless-os');
+    expect(pre.headers.get('access-control-allow-private-network')).toBeNull();
+
+    const h = await fetch(`${base}/api/health`, { headers: { Origin: 'null' } });
+    expect(h.headers.get('access-control-allow-origin')).toBe('null');
+    process.env.DEEPSEEK_API_KEY = 'sk-env';
+    expect(await h.json()).toMatchObject({ ok: true, cors: true, gatewayKeys: [] });
+
+    await (await fetch(`${base}/api/llm/deepseek/chat/completions`, { method: 'POST', headers: { Origin: 'null' }, body: '{}' })).text();
+    expect(seen.headers.authorization).toBeUndefined(); // 环境变量里的密钥不会借给跨域请求
+    await (await fetch(`${base}/api/llm/deepseek/chat/completions`, { method: 'POST', headers: { Origin: 'null', Authorization: 'Bearer sk-user' }, body: '{}' })).text();
+    expect(seen.headers.authorization).toBe('Bearer sk-user');
+    delete process.env.DEEPSEEK_API_KEY;
+
+    const up = `http://127.0.0.1:${upstream.address().port}/v1`;
+    expect((await fetch(`${base}/api/llm/custom/chat/completions`, { method: 'POST', headers: { Origin: 'null', 'x-jarvis-upstream': up }, body: '{}' })).status).toBe(400);
+    const f = await fetch(`${base}/api/fetch?url=${encodeURIComponent('https://example.com/')}`, { headers: { Origin: 'null' } });
+    expect(f.headers.get('access-control-allow-origin')).toBeNull();
+    const other = await fetch(`${base}/api/health`, { headers: { Origin: 'https://evil.example' } });
+    expect(other.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
   it('未知服务商、无效的自定义地址不代理', async () => {
     expect((await fetch(`${base}/api/llm/evil/x`, { method: 'POST' })).status).toBe(404);
     expect((await fetch(`${base}/api/llm/custom/x`, { method: 'POST' })).status).toBe(400);

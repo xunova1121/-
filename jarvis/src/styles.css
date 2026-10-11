@@ -159,6 +159,9 @@ body.focus-view .stage { height: 120px; }
 /* ---------- 输入栏 ---------- */
 .composer { flex: none; margin: 0 max(12px, calc((100% - 900px) / 2)) 14px; border: 1px solid var(--line-strong); border-radius: 16px; background: var(--surface); backdrop-filter: blur(10px); box-shadow: 0 0 0 1px rgba(0,0,0,.4), 0 10px 40px rgba(0,0,0,.35); }
 .composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+body.awake .composer { border-color: var(--accent); animation: awake-pulse 1.6s ease-in-out infinite; }
+@keyframes awake-pulse { 50% { box-shadow: 0 0 0 4px var(--accent-soft), 0 0 28px var(--accent-soft); } }
+@media (prefers-reduced-motion: reduce) { body.awake .composer { animation: none; box-shadow: 0 0 0 3px var(--accent-soft); } }
 .composer-row { display: flex; align-items: flex-end; gap: 6px; padding: 8px; }
 #prompt { flex: 1; min-width: 0; resize: none; border: 0; outline: 0; background: none; padding: 7px 4px; max-height: 200px; line-height: 1.5; font-size: 15px; }
 #prompt::placeholder { color: var(--dim); }

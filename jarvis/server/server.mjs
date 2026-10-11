@@ -26,18 +26,13 @@ import { timingSafeEqual } from 'node:crypto';
 import { ClaudeAgent, MockAgent } from './agents.mjs';
 import { collectMetrics } from './metrics.mjs';
 import { EMOTIONS } from '../shared/emotionTag.js';
-import { upstreamFor, providerById, ENV_KEYS } from '../shared/providers.js';
+import { upstreamFor, providerById, ENV_KEYS, isPrivateHost } from '../shared/providers.js';
 
+const CORS_PATHS = /^\/api\/(health|local\/metrics|llm\/.+)$/;
 export const EXTRA_UPSTREAMS = { tavily: 'https://api.tavily.com', elevenlabs: 'https://api.elevenlabs.io' };
 const FORWARD_HEADERS = ['content-type', 'accept', 'authorization', 'x-api-key', 'anthropic-version', 'anthropic-beta', 'xi-api-key'];
 
-/** 内网 / 本机地址：/api/fetch 不允许访问，避免被用来探测局域网 */
-export function isPrivateHost(host) {
-  const h = host.replace(/^\[|\]$/g, '').toLowerCase();
-  return h === 'localhost' || h.endsWith('.local') || h === '::1' || h === '0.0.0.0' ||
-    /^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(h) || /^f[cd][0-9a-f]{2}:/.test(h) || /^fe80:/.test(h);
-}
+export { isPrivateHost };
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(ROOT, 'dist');
@@ -129,21 +124,22 @@ export function createServer({
     json(res, 202, { ok: true, delivered: subscribers.size });
   }
 
-  async function handleLlmProxy(req, res, id, rest, search) {
+  async function handleLlmProxy(req, res, id, rest, search, cross = false) {
     let base = upstreamFor(id) ?? EXTRA_UPSTREAMS[id];
     if (id === 'custom') {
       // 自定义（OpenAI 兼容）接口：地址由前端在请求头里给出；允许内网地址（本机 / 局域网自建模型很常见）
       try {
         const u = new URL(String(req.headers['x-jarvis-upstream'] || ''));
-        if (/^https?:$/.test(u.protocol)) base = u.href;
+        // 来自单文件版（跨域）的请求不允许指向内网，防止被网页当跳板探测局域网
+        if (/^https?:$/.test(u.protocol) && !(cross && isPrivateHost(u.hostname))) base = u.href;
       } catch { /* 无效地址 */ }
       if (!base) return json(res, 400, { error: '自定义接口地址无效（需以 http:// 或 https:// 开头）' });
     }
     if (!base) return json(res, 404, { error: `不支持代理的服务商：${id}` });
     const headers = {};
     for (const h of FORWARD_HEADERS) if (req.headers[h]) headers[h] = req.headers[h];
-    // 浏览器没填密钥：用网关环境变量里的
-    const envKey = process.env[ENV_KEYS[id]];
+    // 浏览器没填密钥：用网关环境变量里的（跨域请求不注入，避免别的网页借用你的密钥）
+    const envKey = cross ? undefined : process.env[ENV_KEYS[id]];
     if (id === 'elevenlabs') {
       if (!headers['xi-api-key'] || headers['xi-api-key'] === 'use-gateway-key') {
         if (envKey) headers['xi-api-key'] = envKey; else delete headers['xi-api-key'];
@@ -196,6 +192,22 @@ export function createServer({
 
   return http.createServer(async (req, res) => {
     const { pathname } = new URL(req.url, 'http://x');
+    // 单文件版（file:// 打开，Origin 为 null）可以借用本机网关转发模型请求，只开放这几个接口。
+    // 不返回 Access-Control-Allow-Private-Network：Chrome 会因此拦下公网网页对本机网关的请求。
+    const cross = req.headers.origin === 'null' && CORS_PATHS.test(pathname);
+    if (cross) {
+      res.setHeader('Access-Control-Allow-Origin', 'null');
+      res.setHeader('Vary', 'Origin');
+      if (req.method === 'OPTIONS') {
+        const asked = String(req.headers['access-control-request-headers'] || '');
+        res.writeHead(204, {
+          'Access-Control-Allow-Methods': 'GET, POST',
+          'Access-Control-Allow-Headers': /^[\w\-, ]*$/.test(asked) ? asked : 'content-type, authorization',
+          'Access-Control-Max-Age': '600'
+        });
+        return res.end();
+      }
+    }
     try {
       if (pathname === '/api/chat' && req.method === 'POST') return await handleChat(req, res);
       if (pathname === '/api/local/metrics' && req.method === 'GET') return json(res, 200, await collectMetrics({ tasks: { active: activeChats } }));
@@ -206,11 +218,12 @@ export function createServer({
           ok: true,
           backend: agent.model === 'mock' ? 'mock' : 'claude',
           model: agent.model,
-          gatewayKeys: Object.entries(ENV_KEYS).filter(([, env]) => process.env[env]).map(([id]) => id)
+          cors: cross,
+          gatewayKeys: cross ? [] : Object.entries(ENV_KEYS).filter(([, env]) => process.env[env]).map(([id]) => id)
         });
       }
       const llm = pathname.match(/^\/api\/llm\/([a-z0-9-]+)\/(.*)$/);
-      if (llm) return await handleLlmProxy(req, res, llm[1], llm[2], new URL(req.url, 'http://x').search);
+      if (llm) return await handleLlmProxy(req, res, llm[1], llm[2], new URL(req.url, 'http://x').search, cross);
       if (pathname === '/api/fetch' && req.method === 'GET') return await handleFetch(req, res, new URL(req.url, 'http://x').searchParams.get('url'));
       if (pathname.startsWith('/api/')) return json(res, 404, { error: 'not found' });
       if (req.method !== 'GET' && req.method !== 'HEAD') return json(res, 405, { error: 'method not allowed' });
