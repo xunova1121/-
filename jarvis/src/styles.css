@@ -69,7 +69,7 @@ body.side-closed .side { display: none; }
 .topbar { grid-area: top; display: flex; align-items: center; gap: 16px; padding: 0 16px; border-bottom: 1px solid var(--line); background: linear-gradient(var(--bg-2), transparent); }
 .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .brand-mark { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--accent); box-shadow: inset 0 0 0 4px var(--bg), inset 0 0 0 7px var(--accent), 0 0 14px var(--accent-soft); flex: none; }
-.brand-name { font: 600 18px var(--font-display); letter-spacing: 0.32em; }
+.brand-name { font: 600 18px var(--font-display); letter-spacing: 0.32em; white-space: nowrap; }
 .brand-sub { font: 11px var(--font-display); letter-spacing: 0.16em; color: var(--muted); white-space: nowrap; }
 .status-pill { margin-left: auto; display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface); font: 12px var(--font-display); letter-spacing: 0.06em; max-width: 46vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .status-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); flex: none; }

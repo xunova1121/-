@@ -563,6 +563,11 @@ window.addEventListener('drop', (e) => {
 const wake = new WakeWindow();
 const asleep = () => settings.wakeWord && !wake.awake;
 const DISMISS = /^(退下|没事了|休息吧|再见|就这样)[。.！!]*$/;
+// 窄屏用短提示语，避免输入框被撑成好几行
+const narrowPrompt = matchMedia('(max-width: 860px)');
+const setPlaceholder = () => { $('#prompt').placeholder = narrowPrompt.matches ? '交给我一个任务……' : '交给我一个任务：写代码、做 PPT、分析文件、查资料……（Enter 发送，Shift+Enter 换行）'; };
+narrowPrompt.addEventListener?.('change', setPlaceholder);
+setPlaceholder();
 setInterval(() => document.body.classList.toggle('awake', settings.wakeWord && wake.awake), 250);
 function onWake() {
   wake.wake();
