@@ -61,6 +61,7 @@
           <div class="hud-k">模型</div><div class="hud-v dim" id="hud-model">—</div>
           <div class="hud-k">首字</div><div class="hud-v dim" id="hud-latency">—</div>
           <div class="hud-k">技能</div><div class="hud-v dim" id="hud-skills">0</div>
+          <div class="hud-k">MCP</div><div class="hud-v dim" id="hud-mcp">未连接</div>
         </div>
         <div class="hud hud-clock" aria-hidden="true">
           <div class="hud-time" id="hud-time">00:00:00</div>
@@ -169,7 +170,7 @@
 
       <!-- 技能 -->
       <section class="pane" data-pane="skills" hidden>
-        <header class="pane-head"><h2>技能</h2><span class="badge" id="skill-count">0 个</span></header>
+        <header class="pane-head"><h2>技能与工具</h2><span class="badge" id="skill-count">0 个</span></header>
         <p class="muted small">技能是一份“做法说明书”（SKILL.md，可附带模板与脚本），与开源 Agent Skills 格式通用。安装后贾维斯会在合适的时候自动使用；也可以在输入框输入 <kbd>/</kbd> 点名使用。技能内容会交给大模型执行，只安装你信任的来源。</p>
         <div class="skill-install">
           <input id="skill-url" spellcheck="false" placeholder="GitHub 技能地址：github.com/用户/仓库/tree/分支/技能文件夹" />
@@ -183,6 +184,31 @@
         <h3 class="sub">已安装</h3>
         <ul class="skill-list" id="skill-list"></ul>
         <div class="skill-viewer" id="skill-viewer" hidden></div>
+
+        <section id="mcp-section" class="mcp-section">
+          <h3 class="sub">MCP 工具连接 <span class="badge" id="mcp-count"></span></h3>
+          <p class="muted small">MCP 是大模型连接外部工具的通用标准：接上浏览器自动化、地图、GitHub、数据库、各类办公软件的 MCP 服务后，贾维斯就能直接使用它们。技能教它“怎么做”，MCP 让它“能接触到”。</p>
+          <p class="note" id="mcp-unavailable">MCP 服务要在本机启动程序，单文件版用不了。请使用<b>桌面版</b>，或双击 jarvis 文件夹里的 启动.bat 打开完整版。</p>
+          <div id="mcp-body" hidden>
+            <ul class="skill-list" id="mcp-list"></ul>
+            <div class="mcp-presets" id="mcp-presets"></div>
+            <form class="mcp-form" id="mcp-form" hidden autocomplete="off">
+              <h4 id="mcp-form-title">添加 MCP 服务</h4>
+              <p class="muted small" id="mcp-form-desc"></p>
+              <label class="field"><span>名称</span><input name="name" required maxlength="40" /></label>
+              <label class="field"><span>类型</span><select name="type"><option value="stdio">本机命令（stdio）</option><option value="http">远程地址（HTTP / SSE）</option></select></label>
+              <label class="field" data-for="stdio"><span>命令</span><input name="command" placeholder="npx" spellcheck="false" /></label>
+              <label class="field" data-for="stdio"><span>参数（空格分隔，含空格的用引号）</span><textarea name="args" rows="2" spellcheck="false" placeholder="-y @modelcontextprotocol/server-filesystem &quot;D:\我的资料&quot;"></textarea></label>
+              <label class="field" data-for="stdio"><span>环境变量（每行 KEY=VALUE，可选）</span><textarea name="env" rows="2" spellcheck="false"></textarea></label>
+              <label class="field" data-for="http" hidden><span>服务地址</span><input name="url" placeholder="https://…/mcp" spellcheck="false" /></label>
+              <label class="field" data-for="http" hidden><span>请求头（每行 Key: Value，可选）</span><textarea name="headers" rows="2" spellcheck="false" placeholder="Authorization: Bearer …"></textarea></label>
+              <div class="pane-actions"><button class="btn" type="submit">保存并连接</button><button class="btn ghost" type="button" id="mcp-cancel">取消</button></div>
+            </form>
+            <p class="muted small" id="mcp-status" role="status"></p>
+            <p class="muted small">本机命令类服务需要电脑上装有 Node.js（npx）或 uv（uvx）。配置保存在：<code id="mcp-config-path"></code></p>
+          </div>
+        </section>
+
         <h3 class="sub">推荐技能</h3>
         <div class="skill-grid" id="skill-recommend"></div>
       </section>
@@ -217,6 +243,11 @@
         <p class="muted small" id="tts-fx-desc"></p>
         <label class="inline-check"><input type="checkbox" id="tts-cues" /> 开口 / 说完时的科幻提示音</label>
         <div class="pane-actions"><button class="btn" type="button" id="btn-tts-preview">试听</button></div>
+        <h3 class="sub">语音识别</h3>
+        <label class="field" for="stt-engine"><span>识别引擎（直接对话、唤醒词用）</span><select id="stt-engine"></select></label>
+        <p class="note" id="stt-note" hidden></p>
+        <label class="field" for="stt-url" id="row-stt-url" hidden><span>接口地址（…/v1）</span><input id="stt-url" spellcheck="false" placeholder="http://127.0.0.1:9000/v1" /></label>
+        <label class="field" for="stt-model" id="row-stt-model" hidden><span>识别模型</span><input id="stt-model" spellcheck="false" placeholder="whisper-1" /></label>
         <p class="muted small" id="tts-status" role="status"></p>
         <p class="muted small">密钥只保存在这台电脑的浏览器里，请求直接发往服务商（或经由你本机的网关）。不要在公用电脑上保存密钥。</p>
       </section>

@@ -79,12 +79,21 @@ function span(s) {
   return el;
 }
 
+export function toolLabel(name) {
+  if (TOOL_LABEL[name]) return TOOL_LABEL[name];
+  if (name.startsWith('mcp_')) return `MCP · ${name.split('__').pop()}`;
+  return name;
+}
+
 const TOOL_LABEL = {
   remember: '记住', recall: '回忆', forget: '遗忘', save_skill: '习得技能', kb_search: '检索知识库',
   list_files: '列出文件', read_file: '读取文件', write_file: '写入文件', create_document: '生成文档',
   run_javascript: '运行 JS', run_python: '运行 Python', preview: '打开预览', fetch_url: '读取网页',
   web_search: '联网搜索', get_current_time: '读取时间', get_local_metrics: '读取系统状态',
-  use_skill: '使用技能', read_skill_file: '读取技能文件'
+  use_skill: '使用技能', read_skill_file: '读取技能文件',
+  computer_list_dir: '查看文件夹', computer_read_file: '读取电脑文件', computer_write_file: '写入电脑文件', computer_save_from_workspace: '保存到电脑',
+  computer_move: '移动 / 重命名', computer_copy: '复制文件', computer_trash: '移到回收站', computer_search: '搜索文件', computer_open: '打开',
+  computer_run: '运行命令', computer_screenshot: '截屏', clipboard_read: '读剪贴板', clipboard_write: '写剪贴板', computer_notify: '系统通知'
 };
 
 function summarizeArgs(name, a = {}) {
@@ -94,7 +103,11 @@ function summarizeArgs(name, a = {}) {
   if (a.content) return a.content.slice(0, 60);
   if (a.code) return a.code.split('\n')[0].slice(0, 60);
   if (a.name) return a.name;
-  return '';
+  if (a.command) return a.command.slice(0, 80);
+  if (a.target) return a.target;
+  if (a.from) return `${a.from} → ${a.to ?? ''}`;
+  const json = JSON.stringify(a);
+  return json === '{}' ? '' : json.slice(0, 80);
 }
 
 /** 👍 / 👎：👎 时展开一行输入框，让用户说明哪里不好，这会成为“经验教训” */
@@ -176,7 +189,7 @@ export class Transcript {
         card.className = 'tool-card';
         const sum = document.createElement('summary');
         const st = document.createElement('span'); st.className = 'st';
-        const tn = document.createElement('span'); tn.className = 'tn'; tn.textContent = TOOL_LABEL[name] ?? name;
+        const tn = document.createElement('span'); tn.className = 'tn'; tn.textContent = toolLabel(name);
         const ta = document.createElement('span'); ta.className = 'ta'; ta.textContent = summarizeArgs(name, args);
         const tm = document.createElement('span'); tm.className = 'tm'; tm.textContent = '…';
         sum.append(st, tn, ta, tm);
@@ -197,6 +210,42 @@ export class Transcript {
             self.#scroll();
           }
         };
+      },
+      /**
+       * 征求同意：在气泡里显示确认卡片。
+       * @returns {Promise<'once'|'session'|'deny'>}
+       */
+      confirm({ title, detail }) {
+        const box = document.createElement('div');
+        box.className = 'confirm-card';
+        const h = document.createElement('div');
+        h.className = 'confirm-title';
+        h.textContent = title;
+        box.append(h);
+        if (detail) {
+          const pre = document.createElement('pre');
+          pre.textContent = detail;
+          box.append(pre);
+        }
+        const row = document.createElement('div');
+        row.className = 'confirm-actions';
+        box.append(row);
+        el.insertBefore(box, cur);
+        self.#scroll();
+        return new Promise((resolve) => {
+          const done = (v, label) => {
+            row.replaceChildren(Object.assign(document.createElement('span'), { className: `confirm-result ${v === 'deny' ? 'no' : 'yes'}`, textContent: label }));
+            box.classList.add('answered');
+            resolve(v);
+          };
+          for (const [v, label, cls, result] of [['once', '允许', 'btn sm', '已允许'], ['session', '本次都允许', 'btn ghost sm', '已允许（本次会话不再询问）'], ['deny', '拒绝', 'btn ghost sm danger', '已拒绝']]) {
+            const b = Object.assign(document.createElement('button'), { type: 'button', className: cls, textContent: label });
+            b.addEventListener('click', () => done(v, result));
+            row.append(b);
+          }
+          row.querySelector('button').focus({ preventScroll: true });
+          box.cancel = () => done('deny', '已取消');
+        });
       },
       sources(names) {
         const box = document.createElement('div');

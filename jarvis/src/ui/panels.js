@@ -280,7 +280,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, onCl
   function fillModels() {
     const p = providerById(sel.value);
     const gw = getGateway();
-    $('#gw-badge').textContent = gw ? (gw.cors ? '单文件版 · 已连网关' : '本机网关') : '单文件版';
+    $('#gw-badge').textContent = window.jarvisDesktop ? '桌面版' : gw ? (gw.cors ? '单文件版 · 已连网关' : '本机网关') : '单文件版';
     $('#gw-badge').classList.toggle('on', Boolean(gw));
     $('#llm-model').value = cfg.models[p.id] || p.models[0] || '';
     $('#llm-models').replaceChildren(...p.models.filter(Boolean).map((m) => el('option', { value: m })));

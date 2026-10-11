@@ -12,14 +12,24 @@
  */
 import { VadGate } from '../core/vadGate.js';
 import { VAD } from '../config.js';
+import { encodeWav } from './stt.js';
 
 const SR = globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition;
 
 export const speechRecognitionSupported = Boolean(SR);
 
+const PREROLL_FRAMES = 12; // 约 380ms：VAD 判定开口前的声音也要带上，否则会吃掉第一个字
+const MAX_FRAMES = 31 * 30; // 单句最长约 30 秒
+
 export class VoiceInput {
-  constructor({ onOnset, onConfirm, onCancel, onInterim, onFinal, onEnergy, onMode, onError } = {}) {
-    Object.assign(this, { onOnset, onConfirm, onCancel, onInterim, onFinal, onEnergy, onMode, onError });
+  /**
+   * @param {object} o
+   * @param {() => ((wav: Blob) => Promise<string>) | null} [o.getTranscriber]  返回云端转写函数时，用 VAD 切句 + 云端识别代替浏览器识别
+   */
+  constructor({ onOnset, onConfirm, onCancel, onInterim, onFinal, onEnergy, onMode, onError, getTranscriber } = {}) {
+    Object.assign(this, { onOnset, onConfirm, onCancel, onInterim, onFinal, onEnergy, onMode, onError, getTranscriber });
+    this.preroll = [];
+    this.capture = null; // 云端识别：正在录的这句话的帧
     this.mode = 'off'; // off | loading | vad | ptt
     this.vad = null;
     this.rec = null;
@@ -37,8 +47,13 @@ export class VoiceInput {
     });
   }
 
+  /** 当前用哪种识别：云端转写函数，或 null（浏览器识别） */
+  get cloud() {
+    return this.getTranscriber?.() ?? null;
+  }
+
   async enable({ silenceMs = 800 } = {}) {
-    if (!SR) throw new Error('当前浏览器不支持语音识别');
+    if (!SR && !this.cloud) throw new Error('当前环境没有可用的语音识别：请在“模型 → 声音”里选择云端语音识别');
     this.gate.silenceMs = silenceMs;
     this.#setMode('loading');
     try {
@@ -61,7 +76,10 @@ export class VoiceInput {
       console.warn('[voice] VAD 不可用，降级为按下说话：', err);
       this.vad?.destroy?.();
       this.vad = null;
-      if (this.mode === 'loading') this.#setMode('ptt');
+      if (this.mode === 'loading') {
+        if (this.cloud && !SR) { this.#setMode('off'); throw new Error('本地语音活动检测模型加载失败，云端识别需要它来切分句子'); }
+        this.#setMode('ptt');
+      }
     }
     return this.mode;
   }
@@ -112,10 +130,24 @@ export class VoiceInput {
     this.energy = rms > this.energy ? rms * 0.6 + this.energy * 0.4 : this.energy * 0.85;
     this.onEnergy?.(this.gate.speaking && !this.suppressed ? Math.min(1, this.energy * 8) : 0);
     if (this.suppressed) return;
+    // 云端识别：保留开口前的一小段，以及整句的声音
+    if (this.capture) {
+      if (this.capture.length < MAX_FRAMES) this.capture.push(frame.slice());
+    } else {
+      this.preroll.push(frame.slice());
+      if (this.preroll.length > PREROLL_FRAMES) this.preroll.shift();
+    }
     this.gate.update(prob, performance.now());
   }
 
   #openRecognizer() {
+    if (this.cloud && this.mode === 'vad') {
+      if (this.capture) return;
+      this.capture = [...this.preroll];
+      this.preroll = [];
+      this.onOnset?.();
+      return;
+    }
     if (this.rec) return;
     this.finals = '';
     this.interim = '';
@@ -175,6 +207,23 @@ export class VoiceInput {
   }
 
   #commit() {
+    if (this.capture) {
+      const frames = this.capture;
+      this.capture = null;
+      const fn = this.cloud;
+      const n = frames.reduce((a, f) => a + f.length, 0);
+      const pcm = new Float32Array(n);
+      let o = 0;
+      for (const f of frames) { pcm.set(f, o); o += f.length; }
+      this.onInterim?.('（识别中…）');
+      fn(encodeWav(pcm, 16000)).then((text) => {
+        if (text) this.onFinal?.(text); else this.onCancel?.();
+      }, (err) => {
+        this.onCancel?.();
+        this.onError?.(err.message || String(err));
+      });
+      return;
+    }
     if (!this.rec) return;
     this.committing = true;
     this.wantRunning = false;
@@ -182,6 +231,11 @@ export class VoiceInput {
   }
 
   #abortRecognizer() {
+    if (this.capture) {
+      this.capture = null;
+      this.onCancel?.();
+      return;
+    }
     this.wantRunning = false;
     const rec = this.rec;
     this.rec = null;

@@ -12,7 +12,8 @@ const store = (() => { try { return globalThis.localStorage ?? null; } catch { r
 
 /** 语音：engine 为 auto 时按已有密钥自动挑最自然的云端声音，都没有就用浏览器自带 */
 export const DEFAULT_VOICE = { engine: 'auto', voices: {}, fx: 'jarvis', cues: true, browserVoice: '', customURL: '', customModel: '', customVoice: '' };
-export const DEFAULT_CONFIG = { provider: 'mock', models: {}, keys: {}, baseURLs: {}, claudeWebSearch: true, tavilyKey: '', voice: DEFAULT_VOICE };
+export const DEFAULT_STT = { engine: 'auto', customURL: '', customModel: '' };
+export const DEFAULT_CONFIG = { provider: 'mock', models: {}, keys: {}, baseURLs: {}, claudeWebSearch: true, tavilyKey: '', voice: DEFAULT_VOICE, stt: DEFAULT_STT };
 
 export function loadConfig() {
   let cfg = { ...DEFAULT_CONFIG };
@@ -29,6 +30,7 @@ export function loadConfig() {
   } catch { /* ignore */ }
   if (!providerById(cfg.provider)) cfg.provider = 'mock';
   cfg.voice = { ...DEFAULT_VOICE, ...(cfg.voice || {}), voices: { ...(cfg.voice?.voices || {}) } };
+  cfg.stt = { ...DEFAULT_STT, ...(cfg.stt || {}) };
   return cfg;
 }
 

@@ -1,0 +1,99 @@
+# 贾维斯桌面版：在 Windows / macOS / Linux 上分别打包安装包，并发布到 Releases 页面。
+# 触发：推送了 jarvis/ 下的改动、推送 desktop-v* 标签，或在 Actions 页面手动运行。
+name: 贾维斯桌面版安装包
+
+on:
+  push:
+    paths:
+      - 'jarvis/src/**'
+      - 'jarvis/server/**'
+      - 'jarvis/shared/**'
+      - 'jarvis/desktop/**'
+      - 'jarvis/index.html'
+      - 'jarvis/package*.json'
+      - '.github/workflows/jarvis-desktop.yml'
+    tags: ['desktop-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: jarvis-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: 打包 (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            jarvis/package-lock.json
+            jarvis/desktop/package-lock.json
+      - name: 安装网页依赖
+        run: npm ci --no-audit --no-fund
+      - name: 单元测试
+        if: runner.os == 'Linux'
+        run: npm test
+      - name: 安装桌面版依赖
+        working-directory: jarvis/desktop
+        run: npm ci --no-audit --no-fund
+      - name: 打包
+        working-directory: jarvis/desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run dist -- --publish never
+      - name: 上传安装包
+        uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-desktop-${{ runner.os }}
+          if-no-files-found: error
+          path: |
+            jarvis/desktop/release/*.exe
+            jarvis/desktop/release/*.zip
+            jarvis/desktop/release/*.dmg
+            jarvis/desktop/release/*.AppImage
+
+  release:
+    name: 发布到 Releases
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: 发布
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('desktop-build-{0}', github.run_number) }}
+          target_commitish: ${{ github.sha }}
+          name: 贾维斯桌面版 ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('测试版 #{0}', github.run_number) }}
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          files: dist/*
+          body: |
+            ## 下载哪个文件
+            - **Windows**：`Jarvis-Setup-*.exe`（安装版，推荐）或 `Jarvis-*-win-x64.zip`（免安装，解压后运行 Jarvis.exe）
+            - **Mac（M1/M2/M3/M4 芯片）**：`Jarvis-*-mac-arm64.dmg`
+            - **Mac（Intel 芯片）**：`Jarvis-*-mac-x64.dmg`
+            - **Linux**：`Jarvis-*-linux-x86_64.AppImage`
+
+            ## 首次打开
+            - 安装包没有购买代码签名证书：Windows 提示“已保护你的电脑”时点 **更多信息 → 仍要运行**；
+              Mac 提示“无法验证开发者”时，在“访达 → 应用程序”里**右键 → 打开**，或在终端运行 `xattr -cr /Applications/Jarvis.app`。
+            - 使用 MCP 本机工具需要电脑上装有 Node.js（npx）或 uv（uvx）。
+
+            构建自 ${{ github.sha }}

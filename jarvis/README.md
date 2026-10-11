@@ -6,6 +6,10 @@
 
 ## 怎么用
 
+### 方式零：桌面版（推荐）
+
+Windows / Mac / Linux 安装包在仓库的 **Releases** 页面，能直接操作电脑、连接 MCP 工具、托盘常驻、快捷键呼出。详见 [desktop/README.md](desktop/README.md)。
+
 ### 方式一：单文件版（下载即用）
 
 下载仓库根目录的 **`jarvis-standalone.html`**（约 5.5 MB），双击用 Chrome / Edge 打开。不用安装、不用联网也能跑（内置离线演示模型）。
@@ -33,9 +37,10 @@ ANTHROPIC_API_KEY=... OPENAI_API_KEY=... DEEPSEEK_API_KEY=... DASHSCOPE_API_KEY=
 
 | 命令 | 作用 |
 |---|---|
-| `npm test` | 单元 + 集成测试（Vitest，132 项） |
+| `npm test` | 单元 + 集成测试（Vitest，150 项） |
 | `npm run e2e` | 完整版浏览器测试（Playwright，66 项；需先 build 并启动 server） |
 | `npm run e2e:standalone` | 单文件版测试（file:// 直接打开，含“单文件版 + 本机网关”场景，14 项） |
+| `xvfb-run -a node e2e/desktop.mjs` | 桌面版测试（启动真正的 Electron 应用，16 项） |
 | `npm run build:standalone` | 生成单文件版 `../jarvis-standalone.html` |
 
 ## v4 能力一览
@@ -106,7 +111,15 @@ ANTHROPIC_API_KEY=... OPENAI_API_KEY=... DEEPSEEK_API_KEY=... DASHSCOPE_API_KEY=
 - 只收文本文件（单个 ≤ 256 KB，总计 ≤ 3 MB），二进制文件会列为“未安装”。从 GitHub 安装先用 1 次 API 请求列出文件，再从 raw.githubusercontent.com 下载；接口受限时退回只装 `SKILL.md`。
 - 技能内容会交给大模型执行，只安装信任的来源。
 
-### 9. 界面
+### 9. MCP 工具连接
+
+“技能与工具”面板 → MCP：添加本机命令（stdio，如 `npx -y @modelcontextprotocol/server-filesystem D:\资料`）或远程地址（Streamable HTTP，自动退回 SSE）的 MCP 服务；内置文件系统、浏览器自动化（Playwright）、知识图谱记忆、分步思考、高德地图、GitHub、网页抓取等预设。连接后每个工具以 `mcp_服务__工具` 的名字提供给智能体；未勾选“自动允许”的服务，每次调用前在对话里确认。
+
+- 由本机网关管理（`server/mcp.mjs`），桌面版与完整版可用；单文件版不能启动本机程序，所以不支持。
+- 配置保存在 `~/.jarvis/mcp.json`（桌面版在应用数据目录），可用 `JARVIS_HOME` 改位置；`JARVIS_NO_MCP=1` 关闭。
+- MCP 接口只接受本机贾维斯页面的请求：Host 必须是本机地址（防 DNS 重绑定），有 Origin 时必须同源，并且必须带 `x-jarvis-client` 请求头（跨站请求因此会被预检拦下）。
+
+### 10. 界面
 
 - 欢迎页：按时段问候 + 6 个快捷任务卡片；开始对话后收起。
 - 命令面板（`Ctrl+K` / `⌘K`）：搜索并执行任何操作——打开面板、切换形态、开关语音 / 唤醒词 / 人脸跟随、点名技能、新对话；没有匹配时按回车直接把这句话发给贾维斯。

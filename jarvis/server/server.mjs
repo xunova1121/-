@@ -21,12 +21,13 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { timingSafeEqual } from 'node:crypto';
 import { ClaudeAgent, MockAgent } from './agents.mjs';
 import { collectMetrics } from './metrics.mjs';
 import { EMOTIONS } from '../shared/emotionTag.js';
 import { upstreamFor, providerById, ENV_KEYS, isPrivateHost } from '../shared/providers.js';
+import { createMcpManager } from './mcp.mjs';
 
 const CORS_PATHS = /^\/api\/(health|local\/metrics|llm\/.+)$/;
 export const EXTRA_UPSTREAMS = { tavily: 'https://api.tavily.com', elevenlabs: 'https://api.elevenlabs.io' };
@@ -40,7 +41,8 @@ const DIST = path.join(ROOT, 'dist');
 export function createServer({
   agent = process.env.ANTHROPIC_API_KEY ? new ClaudeAgent() : new MockAgent(),
   internalToken = process.env.JARVIS_INTERNAL_TOKEN || '',
-  staticDir = DIST
+  staticDir = DIST,
+  mcp = null // createMcpManager() 的结果；为 null 时不提供 MCP 接口
 } = {}) {
   const subscribers = new Set();
   let activeChats = 0;
@@ -53,6 +55,38 @@ export function createServer({
   function json(res, status, body) {
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify(body));
+  }
+
+  /**
+   * 只允许本机页面调用的接口（MCP 能启动本机程序）：
+   *   Host 必须是本机地址（防 DNS 重绑定）；有 Origin 时必须与 Host 同源（防其他网站跨站提交）；
+   *   必须带自定义请求头（跨站请求会因此触发预检而被拦下）。
+   */
+  function sameOriginOnly(req) {
+    const host = String(req.headers.host || '');
+    const hostname = host.replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+    if (!['127.0.0.1', 'localhost', '::1'].includes(hostname)) return false;
+    const origin = req.headers.origin;
+    if (origin && origin !== `http://${host}`) return false;
+    return req.headers['x-jarvis-client'] === '1';
+  }
+
+  async function handleMcp(req, res, pathname) {
+    if (!sameOriginOnly(req)) return json(res, 403, { error: '只允许本机贾维斯页面调用' });
+    if (!mcp) return json(res, 404, { error: '当前网关没有启用 MCP', available: false });
+    if (pathname === '/api/mcp' && req.method === 'GET') return json(res, 200, { available: true, configPath: mcp.configPath, servers: mcp.list() });
+    if (pathname === '/api/mcp/call' && req.method === 'POST') {
+      const { server, tool, arguments: args } = await readJson(req, 1024 * 1024);
+      return json(res, 200, await mcp.call(String(server), String(tool), args && typeof args === 'object' ? args : {}));
+    }
+    const m = pathname.match(/^\/api\/mcp\/servers\/([^/]+)(\/restart)?$/);
+    if (m) {
+      const id = decodeURIComponent(m[1]);
+      if (m[2] && req.method === 'POST') return json(res, 200, await mcp.restart(id));
+      if (!m[2] && req.method === 'PUT') return json(res, 200, await mcp.upsert({ ...(await readJson(req)), id }));
+      if (!m[2] && req.method === 'DELETE') { await mcp.remove(id); return json(res, 200, { ok: true }); }
+    }
+    return json(res, 404, { error: 'not found' });
   }
 
   async function readJson(req, limit = 256 * 1024) {
@@ -219,11 +253,13 @@ export function createServer({
           backend: agent.model === 'mock' ? 'mock' : 'claude',
           model: agent.model,
           cors: cross,
+          mcp: Boolean(mcp) && !cross,
           gatewayKeys: cross ? [] : Object.entries(ENV_KEYS).filter(([, env]) => process.env[env]).map(([id]) => id)
         });
       }
       const llm = pathname.match(/^\/api\/llm\/([a-z0-9-]+)\/(.*)$/);
       if (llm) return await handleLlmProxy(req, res, llm[1], llm[2], new URL(req.url, 'http://x').search, cross);
+      if (pathname === '/api/mcp' || pathname.startsWith('/api/mcp/')) return await handleMcp(req, res, pathname);
       if (pathname === '/api/fetch' && req.method === 'GET') return await handleFetch(req, res, new URL(req.url, 'http://x').searchParams.get('url'));
       if (pathname.startsWith('/api/')) return json(res, 404, { error: 'not found' });
       if (req.method !== 'GET' && req.method !== 'HEAD') return json(res, 405, { error: 'method not allowed' });
@@ -241,10 +277,16 @@ const MIME = {
   '.task': 'application/octet-stream', '.svg': 'image/svg+xml', '.png': 'image/png', '.glb': 'model/gltf-binary'
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// 直接运行（node server/server.mjs）时启动；用 pathToFileURL 比较，Windows 路径（C:\\…）也能匹配
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const port = Number(process.env.PORT || 8787);
   const host = process.env.HOST || '127.0.0.1';
-  const server = createServer();
+  const mcp = process.env.JARVIS_NO_MCP ? null : createMcpManager({ log: (m) => console.log(m) });
+  const server = createServer({ mcp });
+  mcp?.startAll();
+  const shutdown = async () => { await mcp?.closeAll(); process.exit(0); };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
   server.listen(port, host, () => {
     console.log(`贾维斯网关已启动: http://127.0.0.1:${port}`);
     const keys = Object.entries(ENV_KEYS).filter(([, env]) => process.env[env]).map(([id]) => providerById(id)?.name ?? id);

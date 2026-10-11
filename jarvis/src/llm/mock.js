@@ -27,7 +27,7 @@ p{opacity:.6}</style></head>
 </body></html>`;
 
 /** 根据最后一条用户消息与已有的工具结果决定下一步 */
-export function plan(messages) {
+export function plan(messages, tools = []) {
   const { text: q, index } = lastUserText(messages);
   const after = messages.slice(index + 1);
   const results = after.filter((m) => m.role === 'tool');
@@ -38,6 +38,10 @@ export function plan(messages) {
   if (results.length) {
     const failed = results.find((r) => r.isError);
     if (failed) return { emotion: '安抚', text: `执行时遇到问题：${failed.content.slice(0, 120)}。我们换个方式再试一次？` };
+    const mcpUsed = [...used].find((n) => n.startsWith('mcp_'));
+    if (mcpUsed) return { emotion: '专注', text: `MCP 工具返回：${lastResult.content.slice(0, 400)}` };
+    const pc = [...used].find((n) => n.startsWith('computer_') || n.startsWith('clipboard_'));
+    if (pc) return { emotion: '专注', text: `完成了。结果：\n\n${lastResult.content.slice(0, 500)}` };
     if (used.has('use_skill')) {
       if (/^没有名为|已被用户停用/.test(lastResult.content)) return { emotion: '平静', text: lastResult.content };
       const name = lastResult.content.match(/^# 技能：(.+)$/m)?.[1] ?? '';
@@ -78,6 +82,32 @@ export function plan(messages) {
   }
 
   // —— 还没调用工具：按意图选择工具
+  // —— MCP：“用 MCP 的 echo 工具……”
+  if (/mcp/i.test(q)) {
+    const mcpTools = tools.filter((t) => t.name.startsWith('mcp_'));
+    if (!mcpTools.length) return { emotion: '平静', text: '现在还没有连接任何 MCP 服务。可以在“技能与工具”面板里添加。' };
+    const t = mcpTools.find((x) => q.toLowerCase().includes(x.name.split('__').pop().toLowerCase())) ?? mcpTools[0];
+    const props = t.input_schema?.properties ?? {};
+    const nums = (q.match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
+    const args = {};
+    for (const [k, v] of Object.entries(props)) {
+      if (v.type === 'number' || v.type === 'integer') args[k] = nums.shift() ?? 0;
+      else if (v.type === 'string') args[k] = q.replace(/^.*(工具|mcp)[：:，,\s]*/i, '') || q;
+    }
+    return { emotion: '专注', calls: [call(t.name, args)] };
+  }
+  // —— 桌面版：操作电脑
+  if (tools.some((t) => t.name === 'computer_run')) {
+    const dir = q.match(/(列出|看看|查看)(桌面|文档|下载)/);
+    if (dir) return { emotion: '专注', calls: [call('computer_list_dir', { path: dir[2] })] };
+    if (/截屏|截图/.test(q)) return { emotion: '专注', calls: [call('computer_screenshot', {})] };
+    const cmd = q.match(/运行命令[：:\s]*(.+)/);
+    if (cmd) return { emotion: '专注', calls: [call('computer_run', { command: cmd[1].trim() })] };
+    const open = q.match(/^打开\s*(.+)/);
+    if (open) return { emotion: '专注', calls: [call('computer_open', { target: open[1].trim() })] };
+    const save = q.match(/写.*文件.*?([\w\u4e00-\u9fa5/\\.~-]+\.(txt|md))/);
+    if (save) return { emotion: '专注', calls: [call('computer_write_file', { path: save[1], content: '由贾维斯写入的测试文件' })] };
+  }
   const skill = q.match(/请使用技能「([^」]+)」/);
   if (skill) return { emotion: '专注', calls: [call('use_skill', { name: skill[1] })] };
   const m = q.match(/记住[：:,，\s]*(.+)/) || q.match(/^(我(?:喜欢|讨厌|叫|是|的|习惯|住在|在).+)/);
@@ -116,9 +146,9 @@ export function plan(messages) {
 export function createMockAdapter({ charDelayMs = 12 } = {}) {
   return {
     kind: 'mock',
-    async stream({ messages, signal, onText }) {
+    async stream({ messages, tools, signal, onText }) {
       await sleep(250, signal);
-      const p = plan(messages);
+      const p = plan(messages, tools);
       let text = '';
       const body = (p.emotion ? `<emotion>${p.emotion}</emotion>` : '') + (p.text ?? '');
       // 标签整体发出；正文每次 3 个字，模拟流式输出

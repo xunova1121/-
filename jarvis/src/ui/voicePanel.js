@@ -4,6 +4,8 @@
 import { TTS_ENGINES, ttsEngineById } from '../perception/tts.js';
 import { FX_PRESETS } from '../perception/voiceFx.js';
 import { resolveVoice } from '../llm/config.js';
+import { STT_ENGINES, sttEngineById, resolveStt } from '../perception/stt.js';
+import { speechRecognitionSupported } from '../perception/voiceInput.js';
 
 const $ = (s) => document.querySelector(s);
 const opt = (value, text) => Object.assign(document.createElement('option'), { value, textContent: text });
@@ -121,8 +123,36 @@ export function initVoicePanel({ panels, speaker, getGateway }) {
     clearTimeout(render.t);
     render.t = setTimeout(() => { $('#tts-status').textContent = ''; }, 5000);
   });
+  // ------------------------------------------------------------ 语音识别
+  const browserSR = speechRecognitionSupported && !window.jarvisDesktop;
+  const sttSel = $('#stt-engine');
+  sttSel.replaceChildren(opt('auto', '自动'), ...STT_ENGINES.filter((e) => e.id !== 'browser' || browserSR).map((e) => opt(e.id, e.name)));
+  function renderStt() {
+    const cfg = panels.config;
+    const gateway = getGateway();
+    sttSel.value = cfg.stt.engine;
+    const id = resolveStt(cfg, { gateway, browserSupported: browserSR });
+    const e = sttEngineById(id);
+    const notes = [];
+    if (cfg.stt.engine === 'auto') notes.push(`当前使用：${e ? e.name : '无'}`);
+    if (id === 'none') notes.push(window.jarvisDesktop ? '桌面版没有浏览器自带的语音识别。请在“模型”里填写硅基流动或 OpenAI 的密钥（会自动用于语音识别），或选择自定义识别服务。' : '没有可用的语音识别：请填写硅基流动或 OpenAI 的密钥。');
+    else if (e && e.browser === false && !gateway) notes.push(`${e.name} 需要通过本机网关调用（桌面版或完整版）。`);
+    if (e && e.id !== 'browser') notes.push('说话的声音由本机检测、按句切分后上传识别，不会持续录音。');
+    $('#stt-note').hidden = !notes.length;
+    $('#stt-note').textContent = notes.join(' ');
+    const custom = id === 'custom' || cfg.stt.engine === 'custom';
+    $('#row-stt-url').hidden = $('#row-stt-model').hidden = !custom;
+    $('#stt-url').value = cfg.stt.customURL || '';
+    $('#stt-model').value = cfg.stt.customModel || '';
+  }
+  const patchStt = (patch) => panels.patchConfig((c) => ({ ...c, stt: { ...c.stt, ...patch } }));
+  sttSel.addEventListener('change', () => { patchStt({ engine: sttSel.value }); renderStt(); });
+  $('#stt-url').addEventListener('change', (ev) => patchStt({ customURL: ev.target.value.trim() }));
+  $('#stt-model').addEventListener('change', (ev) => patchStt({ customModel: ev.target.value.trim() }));
+
   speaker.onVoicesChanged = () => render();
 
   render();
-  return { render };
+  renderStt();
+  return { render: () => { render(); renderStt(); } };
 }

@@ -28,6 +28,9 @@ import { initVoicePanel } from './ui/voicePanel.js';
 import * as skillPacks from './agent/skillPacks.js';
 import { initSkillsPanel } from './ui/skillsPanel.js';
 import { initPalette } from './ui/palette.js';
+import * as mcp from './agent/mcpClient.js';
+import { createDesktopTools } from './agent/desktopTools.js';
+import { initMcpPanel } from './ui/mcpPanel.js';
 import { matchWake, WakeWindow } from './core/wakeWord.js';
 import { playCue } from './perception/voiceFx.js';
 import { MetricsPoller } from './api/metrics.js';
@@ -36,6 +39,7 @@ import { Dashboard } from './ui/dashboard.js';
 import { Transcript } from './ui/transcript.js';
 import { Speaker } from './perception/speaker.js';
 import { VoiceInput, speechRecognitionSupported } from './perception/voiceInput.js';
+import { resolveStt, transcribe } from './perception/stt.js';
 import { FIGURE, STANDALONE } from './config.js';
 import { resolveQuality } from './core/quality.js';
 import { loadMemory, saveMemory, clearMemory } from './core/memoryStore.js';
@@ -287,13 +291,14 @@ async function detectGateway() {
       const h = await (await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout?.(1500) })).json();
       if (!h?.ok) throw new Error('not a gateway');
       const found = !gateway;
-      gateway = { origin: local ? LOCAL_GATEWAY : location.origin, keys: h.gatewayKeys ?? [], cors: Boolean(h.cors) };
+      gateway = { origin: local ? LOCAL_GATEWAY : location.origin, keys: h.gatewayKeys ?? [], cors: Boolean(h.cors), mcp: Boolean(h.mcp) };
       if (local && found) toast('已连接本机网关：所有服务商和自定义接口都可以用了');
     } catch {
       gateway = null;
     }
     panels.refreshModels();
     voicePanel.render();
+    mcpPanel.refresh();
     updateModelLabels();
   })().finally(() => { probing = null; });
   return probing;
@@ -404,6 +409,28 @@ function makeSpeech() {
   };
 }
 
+// ---------------------------------------------------------------- 桌面版与 MCP
+/** 桌面版（Electron）由 preload 注入；网页版为 undefined */
+const DESKTOP = window.jarvisDesktop;
+/** 本次会话里用户选了“本次都允许”的操作类别 */
+const sessionApprovals = new Set();
+if (DESKTOP) {
+  body.classList.add('desktop', `os-${DESKTOP.platform}`);
+  // 全局快捷键呼出：聚焦输入框
+  DESKTOP.onSummon?.(() => { $('#prompt').focus(); });
+}
+let mcpState = { available: false, servers: [] };
+async function refreshMcp() {
+  if (!gateway?.mcp) { mcpState = { available: false, servers: [] }; return mcpState; }
+  try { mcpState = await mcp.listServers(gateway.origin); } catch { mcpState = { available: false, servers: [] }; }
+  return mcpState;
+}
+async function loadMcpTools() {
+  if (!gateway?.mcp) return [];
+  await refreshMcp();
+  return mcp.mcpTools(gateway.origin, mcpState.servers);
+}
+
 /** “/技能名 内容” → 明确要求模型使用该技能（界面上仍显示用户原话） */
 async function expandSlash(text) {
   if (!text.startsWith('/')) return text;
@@ -452,13 +479,26 @@ async function send(text) {
   try {
     const result = await runAgent({
       adapter, model, history: llmHistory, userText: await expandSlash(userText), signal: ctrl.signal,
-      tools: createTools({
-        metrics,
-        tavilyKey: llmConfig.tavilyKey,
-        fetchViaGateway: fetchViaGateway(),
-        onPreview: (path) => { showPanel('workspace'); panels.openFile(path); },
-        onFileChanged: (path) => { panels.markFresh(path); panels.refreshFiles(); }
-      }),
+      tools: [
+        ...createTools({
+          metrics,
+          tavilyKey: llmConfig.tavilyKey,
+          fetchViaGateway: fetchViaGateway(),
+          onPreview: (path) => { showPanel('workspace'); panels.openFile(path); },
+          onFileChanged: (path) => { panels.markFresh(path); panels.refreshFiles(); }
+        }),
+        ...(DESKTOP ? createDesktopTools(DESKTOP, { onFileChanged: (path) => { panels.markFresh(path); panels.refreshFiles(); } }) : []),
+        ...(await loadMcpTools())
+      ],
+      approve: (req) => {
+        if (req.key && sessionApprovals.has(req.key)) return true;
+        setTask('processing', '等待你确认');
+        const aborted = new Promise((r) => ctrl.signal.addEventListener('abort', () => r('deny'), { once: true }));
+        return Promise.race([bubble.confirm(req), aborted]).then((v) => {
+          if (v === 'session' && req.key) sessionApprovals.add(req.key);
+          return v !== 'deny';
+        });
+      },
       emit: (e) => {
         if (active !== turn) return;
         if (e.type === 'text') {
@@ -589,7 +629,14 @@ function onWake() {
   machine.beginUserTurn();
 }
 
+// 语音识别：网页版优先用浏览器自带识别；桌面版（Electron 没有浏览器识别）或用户指定时走云端转写
+const browserSR = speechRecognitionSupported && !window.jarvisDesktop;
+const sttEngine = () => resolveStt(llmConfig, { gateway, browserSupported: browserSR });
 const voice = new VoiceInput({
+  getTranscriber: () => {
+    const id = sttEngine();
+    return id === 'browser' || id === 'none' ? null : (wav) => transcribe(id, llmConfig, wav, { gateway });
+  },
   onConfirm: () => {
     if (asleep()) return;
     live.voiceListening = true;
@@ -638,7 +685,7 @@ const voice = new VoiceInput({
     $('#btn-mic').title = m === 'ptt' ? '按住说话' : '直接对话';
   },
   onError: (code) => {
-    toast(code === 'not-allowed' ? '麦克风权限被拒绝' : `语音识别出错：${code}`);
+    toast(code === 'not-allowed' ? '麦克风权限被拒绝' : /^语音识别/.test(code) ? code : `语音识别出错：${code}`);
   }
 });
 
@@ -660,6 +707,7 @@ async function setDirectVoice(on) {
       await voice.enable({ silenceMs: SILENCE_BY_SENSITIVITY[settings.vadSensitivity] });
     } catch (err) {
       toast(err.message);
+      if (/云端语音识别/.test(err.message)) showPanel('models');
       setSetting('directVoice', false);
       $('#set-voice').checked = false;
     }
@@ -670,7 +718,7 @@ async function setDirectVoice(on) {
 }
 
 const mic = $('#btn-mic');
-if (!speechRecognitionSupported) {
+if (!browserSR && !window.jarvisDesktop && sttEngine() === 'none') {
   // Firefox 等：隐藏语音输入，保留文本输入与语音输出（需求 6.1 / 10）
   mic.hidden = true;
   $('#row-voice').hidden = true;
@@ -758,7 +806,7 @@ function showPanel(name, { toggle = false } = {}) {
   if (name === 'knowledge') panels.refreshKb();
   if (name === 'mind') panels.refreshMind();
   if (name === 'models') { panels.refreshModels(); voicePanel.render(); }
-  if (name === 'skills') skillsPanel.refresh();
+  if (name === 'skills') { skillsPanel.refresh(); mcpPanel.refresh(); }
 }
 for (const b of document.querySelectorAll('.rail-btn')) b.addEventListener('click', () => showPanel(b.dataset.panel, { toggle: true }));
 for (const b of document.querySelectorAll('[data-open]')) b.addEventListener('click', () => showPanel(b.dataset.open));
@@ -778,6 +826,14 @@ const panels = initPanels({
   }
 });
 const voicePanel = initVoicePanel({ panels, speaker, getGateway: () => gateway });
+const mcpPanel = initMcpPanel({
+  getGateway: () => gateway,
+  toast: (t) => toast(t),
+  onChange: (servers) => {
+    const ready = servers.filter((x) => x.status === 'ready');
+    $('#hud-mcp').textContent = ready.length ? `${ready.length} 个 · ${ready.reduce((n, x) => n + x.tools.length, 0)} 工具` : '未连接';
+  }
+});
 const skillsPanel = initSkillsPanel({
   toast: (t) => toast(t),
   onUse: (name) => {
@@ -856,7 +912,7 @@ const palette = initPalette({
       { id: 'f-holo', group: '形态', title: '切换为全息胸像', keys: 'Alt H', run: () => setStyle('holo') },
       { id: 'f-wire', group: '形态', title: '切换为线框', keys: 'Alt W', run: () => setStyle('wire') },
       toggle('set-tts', '语音朗读'),
-      ...(speechRecognitionSupported ? [toggle('set-voice', '直接对话'), toggle('set-wake', '唤醒词')] : []),
+      ...(!mic.hidden ? [toggle('set-voice', '直接对话'), toggle('set-wake', '唤醒词')] : []),
       toggle('set-face', '人脸跟随'),
       { id: 'focus', group: '开关', title: body.classList.contains('focus-view') ? '退出专注视图' : '进入专注视图', keys: 'Alt F', run: () => $('#btn-focus').click() },
       { id: 'new', group: '操作', title: '新对话', hint: '清空屏幕与上下文（记忆、知识库、技能保留）', run: () => {
@@ -955,7 +1011,7 @@ async function restoreDevice(permission, key, enable) {
   else setSetting(key, false);
 }
 restoreDevice('camera', 'faceFollow', setFaceFollow);
-if (speechRecognitionSupported) restoreDevice('microphone', 'directVoice', setDirectVoice);
+if (!mic.hidden) restoreDevice('microphone', 'directVoice', setDirectVoice);
 
 
 // ---------------------------------------------------------------- 启动
@@ -984,7 +1040,7 @@ document.addEventListener('keydown', (e) => {
     const n = /^Digit([1-7])$/.exec(k)?.[1];
     if (n) showPanel(PANES[n - 1]);
     else if (k === 'KeyF') setFocusView(!settings.focusView);
-    else if (k === 'KeyV' && speechRecognitionSupported) setDirectVoice(voice.mode === 'off');
+    else if (k === 'KeyV' && !mic.hidden) setDirectVoice(voice.mode === 'off');
     else if (k === 'KeyO') setStyle('orb');
     else if (k === 'KeyH') setStyle('holo');
     else if (k === 'KeyW') setStyle('wire');
@@ -1016,6 +1072,7 @@ window.__jarvis = {
   get voice() { return voice; },
   get skills() { return skillsPanel; },
   get palette() { return palette; },
+  get mcp() { return mcpPanel; },
   settings,
   live,
   get stage() { return stage; },
