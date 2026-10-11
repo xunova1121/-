@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { lerpHue, ParamTween, ScalarTween, easeInOutCubic } from '../src/core/tween.js';
+import { lerpHue, ParamTween, easeInOutCubic } from '../src/core/tween.js';
 import { Spring } from '../src/core/spring.js';
 import { SentenceChunker, clean } from '../src/core/sentenceChunker.js';
-import { yawPitchFromMatrix, followTarget, smoothToward, followEnabled } from '../src/core/faceMath.js';
+import { yawPitchFromMatrix, followTarget, smoothToward } from '../src/core/faceMath.js';
 import { VadGate, SILENCE_BY_SENSITIVITY } from '../src/core/vadGate.js';
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, wantsReducedMotion } from '../src/core/settings.js';
 
@@ -35,18 +35,11 @@ describe('ParamTween（情绪 400ms 过渡）', () => {
   });
 });
 
-describe('ScalarTween（形态 1.2s）', () => {
-  it('1.2s 内单调完成 0 → 1', () => {
-    const tw = new ScalarTween(0, 1200);
-    tw.set(1, 0);
-    let prev = -1;
-    for (let t = 0; t <= 1200; t += 16) {
-      const v = tw.update(t);
-      expect(v).toBeGreaterThanOrEqual(prev);
-      prev = v;
-    }
-    expect(tw.update(1200)).toBe(1);
+describe('缓动', () => {
+  it('easeInOutCubic 端点与中点', () => {
+    expect(easeInOutCubic(0)).toBe(0);
     expect(easeInOutCubic(0.5)).toBeCloseTo(0.5);
+    expect(easeInOutCubic(1)).toBe(1);
   });
 });
 
@@ -136,10 +129,6 @@ describe('人脸跟随数学', () => {
     expect(Math.abs(a)).toBeLessThan(30 * 0.05);
   });
 
-  it('morph > 0.6 停用跟随', () => {
-    expect(followEnabled(0.6)).toBe(true);
-    expect(followEnabled(0.61)).toBe(false);
-  });
 });
 
 describe('VadGate', () => {

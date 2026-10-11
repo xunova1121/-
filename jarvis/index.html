@@ -118,7 +118,7 @@
         <dt><kbd>Alt</kbd>+<kbd>1</kbd>–<kbd>4</kbd></dt><dd>控制台 / 对话 / 记忆 / 设置</dd>
         <dt><kbd>Alt</kbd>+<kbd>F</kbd></dt><dd>专注视图</dd>
         <dt><kbd>Alt</kbd>+<kbd>V</kbd></dt><dd>直接对话开关</dd>
-        <dt><kbd>Alt</kbd>+<kbd>H</kbd>/<kbd>P</kbd>/<kbd>A</kbd></dt><dd>人形 / 粒子 / 自动</dd>
+        <dt><kbd>Alt</kbd>+<kbd>H</kbd>/<kbd>W</kbd>/<kbd>D</kbd></dt><dd>全息 / 线框 / 点阵</dd>
         <dt>按住 <kbd>空格</kbd></dt><dd>按下说话（降级模式）</dd>
       </dl>
     </div>
@@ -130,10 +130,10 @@
     <span class="vad-meter" id="vad-meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
     <label class="sr-only" for="prompt">输入消息</label>
     <input id="prompt" name="prompt" type="text" placeholder="说出你的想法…（按 / 聚焦）" enterkeyhint="send" />
-    <div class="form-chips" role="radiogroup" aria-label="形态">
-      <button type="button" class="chip" data-form="auto" role="radio"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="12" rx="9" ry="3.6" /><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(60 12 12)" /><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(120 12 12)" /></svg>自动</button>
-      <button type="button" class="chip" data-form="human" role="radio"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5" /><path d="M5 20c1-4 4-6 7-6s6 2 7 6" /></svg>人形</button>
-      <button type="button" class="chip" data-form="particle" role="radio"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2" class="fill" /><circle cx="12" cy="4" r="1" class="fill" /><circle cx="12" cy="20" r="1" class="fill" /><circle cx="4" cy="12" r="1" class="fill" /><circle cx="20" cy="12" r="1" class="fill" /><circle cx="6.5" cy="6.5" r="1" class="fill" /><circle cx="17.5" cy="17.5" r="1" class="fill" /><circle cx="17.5" cy="6.5" r="1" class="fill" /><circle cx="6.5" cy="17.5" r="1" class="fill" /></svg>粒子</button>
+    <div class="form-chips" role="radiogroup" aria-label="显示样式">
+      <button type="button" class="chip" data-style="holo" role="radio" title="全息（Alt+H）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c-3 0-5 2.4-5 5.6 0 2.6 1.3 4.6 2.6 5.6L9 16c-2.6.6-4.5 2-5 5h16c-.5-3-2.4-4.4-5-5l-.6-1.8C15.7 13.2 17 11.2 17 8.6 17 5.4 15 3 12 3z" /></svg>全息</button>
+      <button type="button" class="chip" data-style="wire" role="radio" title="线框（Alt+W）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 7v10l7 4 7-4V7zM5 7l7 4 7-4M12 11v10" /></svg>线框</button>
+      <button type="button" class="chip" data-style="dots" role="radio" title="点阵（Alt+D）"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="1.2" class="fill" /><circle cx="12" cy="6" r="1.2" class="fill" /><circle cx="18" cy="6" r="1.2" class="fill" /><circle cx="6" cy="12" r="1.2" class="fill" /><circle cx="12" cy="12" r="1.2" class="fill" /><circle cx="18" cy="12" r="1.2" class="fill" /><circle cx="6" cy="18" r="1.2" class="fill" /><circle cx="12" cy="18" r="1.2" class="fill" /><circle cx="18" cy="18" r="1.2" class="fill" /></svg>点阵</button>
     </div>
     <button type="button" class="stop" id="btn-stop" title="打断（Esc）" aria-label="打断播报">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" class="fill" /></svg>
@@ -146,7 +146,7 @@
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
   <footer class="attribution">
-    Cesium Man model licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, donated by Cesium
+    Head scan by Lee Perry-Smith (<a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noopener">CC BY 3.0</a>, Infinite-Realities / triplegangers.com)
   </footer>
 
   <script type="module" src="/src/main.js"></script>

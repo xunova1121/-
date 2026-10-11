@@ -27,4 +27,8 @@ export const API = {
   metricsIntervalMs: 3000
 };
 
-export const HUMAN_POINTS_URL = `${base}models/cesium-man-points.bin`;
+/** 全息胸像：网格 + 元数据（scripts/build-hologram.mjs 生成） */
+export const FIGURE = {
+  mesh: `${base}models/bust-mesh.bin`,
+  meta: `${base}models/bust.json`
+};

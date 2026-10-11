@@ -1,158 +1,262 @@
 /**
- * GLSL ES 1.00 写法，WebGL1 与 WebGL2 共用（three.js 在 WebGL2 下会自动转写 attribute/varying）。
- * 不依赖 Transform Feedback：所有运动都是时间的解析函数，因此降级到 WebGL1 时不需要另一套 CPU 粒子逻辑。
+ * 全息胸像着色器。GLSL ES 1.00 写法，WebGL1 / WebGL2 共用（three.js 在 WebGL2 下自动转写）。
+ *
+ * 所有“身体”部件（网格 / 线框 / 点阵 / 电路线 / 眼睛）共用同一段顶点变换 HOLO_TRANSFORM：
+ *   - 人脸跟随：只转头 —— 按高度权重（颈部以上 1、肩部 0）混合旋转，脖子自然扭转、肩膀不动；
+ *   - 待机时头部轻微摆动；
+ *   - 聆听：表面沿法线随麦克风包络起伏（输入）；
+ *   - 故障切片：按水平条带随机横移（警觉 / 愉悦时更频繁）。
  */
 const common = /* glsl */ `
 mat3 rotY(float a) { float c = cos(a), s = sin(a); return mat3(c, 0.0, -s, 0.0, 1.0, 0.0, s, 0.0, c); }
 mat3 rotX(float a) { float c = cos(a), s = sin(a); return mat3(1.0, 0.0, 0.0, 0.0, c, s, 0.0, -s, c); }
-// 便宜的 3D 值噪声 + 有限差分旋度：无散度的流场，粒子像流体一样卷动而不是抖动
-float hash3(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
-float vnoise(vec3 p) {
-  vec3 i = floor(p), f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-  return mix(mix(mix(hash3(i), hash3(i + vec3(1,0,0)), f.x), mix(hash3(i + vec3(0,1,0)), hash3(i + vec3(1,1,0)), f.x), f.y),
-             mix(mix(hash3(i + vec3(0,0,1)), hash3(i + vec3(1,0,1)), f.x), mix(hash3(i + vec3(0,1,1)), hash3(i + vec3(1,1,1)), f.x), f.y), f.z);
-}
-vec3 curl(vec3 p) {
-  const float e = 0.1;
-  vec3 a = vec3(vnoise(p), vnoise(p + 31.4), vnoise(p + 67.1));
-  float dy1 = vnoise(p + vec3(0, e, 0)) - a.x, dz1 = vnoise(p + vec3(0, 0, e)) - a.x;
-  float dx2 = vnoise(p + 31.4 + vec3(e, 0, 0)) - a.y, dz2 = vnoise(p + 31.4 + vec3(0, 0, e)) - a.y;
-  float dx3 = vnoise(p + 67.1 + vec3(e, 0, 0)) - a.z, dy3 = vnoise(p + 67.1 + vec3(0, e, 0)) - a.z;
-  return vec3(dy3 - dz2, dz1 - dx3, dx2 - dy1) / e;
-}
+float hash1(float n) { return fract(sin(n) * 43758.5453); }
 vec3 hsl2rgb(float h, float s, float l) {
   vec3 rgb = clamp(abs(mod(h / 60.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
   return l + s * (rgb - 0.5) * (1.0 - abs(2.0 * l - 1.0));
 }
 `;
 
-export const particleVertex = /* glsl */ `
+const transformUniforms = /* glsl */ `
 uniform float u_time;
-uniform float u_morphFactor;
-uniform float u_spin;          // 粒子核心累计旋转角（rad），角速度由情绪调制
-uniform float u_yaw;           // 人脸跟随：偏航（rad）
-uniform float u_pitch;         // 人脸跟随：俯仰（rad）
-uniform float u_sway;          // 人形正面摆动幅度（模型单位）
-uniform float u_orbitJitter;   // 轨道倾角抖动（rad）
-uniform float u_inward;        // 内部粒子向心流速
-uniform float u_breath;        // 呼吸振幅（VAD 音量包络驱动）
-uniform float u_radius;        // 粒子核心半径
-uniform float u_perspectiveScale;
-uniform float u_pointScale;
-uniform float u_hue;
-uniform float u_motion;        // 0 = 冻结所有运动
-uniform float u_flow;          // 旋度噪声流动强度（形变中途最强）
-uniform float u_speak;         // 语音输出包络：驱动核心与球面的脉动（输出）
+uniform float u_motion;   // 0 = 冻结运动
+uniform float u_yaw;      // 人脸跟随偏航（rad）
+uniform float u_pitch;    // 人脸跟随俯仰（rad）
+uniform float u_neckY;    // 头颈分界高度
+uniform float u_breath;   // 麦克风输入包络
+uniform float u_glitch;   // 故障强度 0..1
+`;
 
-attribute vec3 a_humanPosition;
-attribute vec3 a_spherePosition;
-attribute vec4 a_meta;
+/** 输入 p（模型坐标）、n（法线），输出变换后的 p、n */
+const HOLO_TRANSFORM = /* glsl */ `
+  float t = u_time * u_motion;
+  float headW = smoothstep(u_neckY - 10.0, u_neckY + 6.0, p.y);
+  float idleYaw = sin(t * 0.31) * 0.06 + sin(t * 0.17 + 1.0) * 0.03;
+  float idlePitch = sin(t * 0.23 + 2.0) * 0.025;
+  mat3 R = rotY((u_yaw + idleYaw) * headW) * rotX((u_pitch + idlePitch) * headW);
+  vec3 pivot = vec3(0.0, u_neckY - 6.0, 0.0);
+  p = pivot + R * (p - pivot);
+  n = R * n;
+  p += n * u_breath;
+  // 故障：每 1/14 秒重新抽签，命中的水平条带整体横移
+  float slice = floor(p.y / 3.5);
+  float tick = floor(t * 14.0);
+  float hit = step(1.0 - u_glitch * 0.22, hash1(slice * 13.1 + tick * 7.7));
+  p.x += hit * (hash1(slice + tick) - 0.5) * 9.0 * u_glitch;
+`;
 
-varying vec3 v_color;
-varying float v_alpha;
+export const holoVertex = /* glsl */ `
+${transformUniforms}
+uniform float u_pointSize;     // 点阵样式：像素尺度
+varying vec3 v_normal;
+varying vec3 v_view;
+varying float v_y;
 ${common}
 void main() {
-  float kind = a_meta.x;
-  float seed = a_meta.y;
-  float contour = a_meta.z;
-  float ring = a_meta.w;
-  float t = u_time * u_motion;
-  float humanW = 1.0 - smoothstep(0.0, 0.5, u_morphFactor);
+  vec3 p = position;
+  vec3 n = normal;
+  ${HOLO_TRANSFORM}
+  vec4 mv = modelViewMatrix * vec4(p, 1.0);
+  v_normal = normalize(normalMatrix * n);
+  v_view = normalize(-mv.xyz);
+  v_y = position.y;
+  gl_Position = projectionMatrix * mv;
+#ifdef DOTS
+  gl_PointSize = clamp(u_pointSize / -mv.z, 1.0, 4.0);
+#endif
+}
+`;
 
-  // —— 人形：0.15Hz 低频正弦摆动 + 人脸跟随朝向
-  vec3 h = a_humanPosition;
-  h.x += sin(6.2831853 * 0.15 * t) * u_sway * humanW;
-  h.y += sin(6.2831853 * 0.075 * t + 1.3) * u_sway * 0.25 * humanW;
-  h = rotY(u_yaw) * rotX(u_pitch) * h;
+const holoShading = /* glsl */ `
+uniform float u_time;
+uniform float u_hue;
+uniform float u_glow;      // 情绪发光强度
+uniform float u_speak;     // 播报包络（输出）
+uniform float u_scanSpeed; // 扫描光带速度（专注时更快）
+uniform float u_bottom;    // 胸像底部：向下渐隐进投影光柱
+uniform float u_scanBase;
+varying vec3 v_normal;
+varying vec3 v_view;
+varying float v_y;
+${common}
+vec4 holo(float fill, float rimPow) {
+  float fres = pow(1.0 - abs(dot(normalize(v_normal), normalize(v_view))), rimPow);
+  float lines = smoothstep(0.82, 1.0, 0.5 + 0.5 * sin(v_y * 2.4 - u_time * 5.0)) * 0.10;
+  float sy = fract((v_y - u_scanBase) / 130.0 - u_time * u_scanSpeed);
+  float band = exp(-pow((sy - 0.5) * 22.0, 2.0)) * 0.55;
+  float fade = smoothstep(u_bottom, u_bottom + 14.0, v_y);
+  float flicker = 0.95 + 0.05 * sin(u_time * 47.0) * sin(u_time * 13.0);
+  float k = (fill + fres * (1.1 + 0.6 * u_speak) * (0.6 + u_glow) + lines + band) * fade * flicker;
+  vec3 base = hsl2rgb(u_hue, 0.85, 0.55);
+  vec3 col = base * k + vec3(0.75, 0.9, 1.0) * pow(fres, 3.0) * 0.5 * fade;
+  return vec4(col, k);
+}
+`;
 
-  // —— 粒子核心
-  vec3 s;
-  float alpha = 1.0;
-  float size = 1.0;
-  if (kind < 0.5) {
-    float br = 1.0 + 0.035 * sin(t * 1.1 + seed * 6.2831853) + u_breath
-             + u_speak * 0.06 * (0.6 + 0.4 * sin(seed * 40.0 + t * 9.0));
-    s = rotY(u_spin) * (a_spherePosition * u_radius * br);
-    size = 0.9 + seed * 0.6;
-  } else if (kind < 1.5) {
-    float rf = a_spherePosition.x;
-    float tilt = a_spherePosition.y + u_orbitJitter * sin(t * 0.7 + ring * 2.1);
-    float ang = seed * 6.2831853 + t * 0.5 / rf;
-    vec3 local = vec3(cos(ang), 0.0, sin(ang)) * u_radius * rf;
-    s = rotY(u_spin * 0.6 + a_spherePosition.z) * rotX(tilt) * local;
-    size = 1.1 + seed * 1.4;
-  } else {
-    // 向心流动：沿半径从外向内循环，“吸入核心”
-    float f = fract(seed * 7.31 - t * u_inward);
-    s = rotY(u_spin * 1.3) * (a_spherePosition * u_radius * mix(1.0, 0.12, f));
-    alpha = sin(f * 3.1415926);
-    size = 0.7 + seed * 0.8;
-  }
+export const holoFragment = /* glsl */ `
+${holoShading}
+void main() {
+#ifdef DOTS
+  vec2 d = gl_PointCoord - 0.5;
+  if (dot(d, d) > 0.25) discard;
+  gl_FragColor = holo(0.16, 1.6) * 0.55;
+#else
+  gl_FragColor = holo(0.07, 2.2);
+#endif
+}
+`;
 
-  // 每个粒子错开一点起止时间：形变像流动而不是整体平移。
-  // morph=0 时所有粒子 m=0，morph=1 时所有粒子 m=1，端点处不会跳变。
-  float m = clamp(u_morphFactor * 1.3 - seed * 0.3, 0.0, 1.0);
-  m = m * m * (3.0 - 2.0 * m);
-  vec3 p = mix(h, s, m);
-  // 形变途中流场最强（sin(πm)），静止形态下只留一点微流动，人形轮廓不被扰乱
-  float flowAmt = u_flow * (0.08 + 1.0 * sin(3.1415926 * m)) * u_motion;
-  if (flowAmt > 0.001) p += curl(p * 0.045 + vec3(0.0, t * 0.12, seed)) * flowAmt;
+/** 线框样式 / 电路线：没有法线，亮度来自自身 */
+export const lineVertex = /* glsl */ `
+${transformUniforms}
+attribute float a_t;     // 沿折线的弧长参数（电路线上的数据流脉冲用）
+varying float v_y;
+varying float v_t;
+${common}
+void main() {
+  vec3 p = position;
+  vec3 n = vec3(0.0, 0.0, 1.0);
+  ${HOLO_TRANSFORM}
+  v_y = position.y;
+  v_t = a_t;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+}
+`;
 
+export const lineFragment = /* glsl */ `
+uniform float u_time;
+uniform float u_hue;
+uniform float u_glow;
+uniform float u_intensity;
+uniform float u_pulse;      // 1 = 电路线：沿线流动的数据脉冲
+uniform float u_bottom;
+uniform float u_scanBase;
+uniform float u_scanSpeed;
+varying float v_y;
+varying float v_t;
+${common}
+void main() {
+  float fade = smoothstep(u_bottom, u_bottom + 14.0, v_y);
+  float sy = fract((v_y - u_scanBase) / 130.0 - u_time * u_scanSpeed);
+  float band = exp(-pow((sy - 0.5) * 22.0, 2.0));
+  float pulse = u_pulse * 1.4 * exp(-pow((fract(v_t - u_time * 0.25) - 0.5) * 9.0, 2.0));
+  float k = (u_intensity * (0.6 + 0.5 * u_glow) + band * 0.5 + pulse) * fade;
+  gl_FragColor = vec4(hsl2rgb(u_hue, 0.8, 0.6 + 0.2 * pulse) * k, k);
+}
+`;
+
+/** 眼睛：两个大光点 */
+export const eyeVertex = /* glsl */ `
+${transformUniforms}
+uniform float u_size;
+${common}
+void main() {
+  vec3 p = position;
+  vec3 n = vec3(0.0, 0.0, 1.0);
+  ${HOLO_TRANSFORM}
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
   gl_Position = projectionMatrix * mv;
-
-  float humanSize = 0.85 + contour * 0.9;
-  size = mix(humanSize, size, m) * u_pointScale;
-  gl_PointSize = clamp(size * u_perspectiveScale / -mv.z, 1.0, 24.0);
-
-  float light = 0.52 + 0.28 * contour * (1.0 - m) + (kind > 1.5 ? 0.18 : 0.0) + 0.1 * seed;
-  v_color = hsl2rgb(mod(u_hue - 8.0 * seed, 360.0), 0.85, clamp(light, 0.0, 0.92));
-  v_alpha = alpha * mix(0.75, 0.9, m) * (1.0 + u_speak * 0.35 * m);
+  gl_PointSize = u_size / -mv.z;
 }
 `;
 
-export const particleFragment = /* glsl */ `
-precision mediump float;
-varying vec3 v_color;
-varying float v_alpha;
+export const eyeFragment = /* glsl */ `
+uniform float u_hue;
+uniform float u_intensity;
+${common}
 void main() {
-  vec2 d = gl_PointCoord - 0.5;
-  float r = length(d);
-  if (r > 0.5) discard;
-  float a = smoothstep(0.5, 0.0, r);
-  vec3 c = v_color + vec3(0.55) * smoothstep(0.18, 0.0, r);
-  gl_FragColor = vec4(c, a * a * v_alpha);
+  float r = length(gl_PointCoord - 0.5) * 2.0;
+  if (r > 1.0) discard;
+  float core = exp(-r * r * 18.0);
+  float halo = pow(1.0 - r, 2.5) * 0.45;
+  vec3 c = mix(hsl2rgb(u_hue, 0.9, 0.62), vec3(1.0), core * 0.85);
+  float a = (core + halo) * u_intensity;
+  gl_FragColor = vec4(c * a, a);
 }
 `;
 
-/** 发光核心：billboard 四边形，径向渐变，强度 u_coreGlow */
-export const coreVertex = /* glsl */ `
-uniform float u_size;
-varying vec2 v_uv;
+/** 投影光柱：从底座射向胸像的锥形光，自下而上渐隐，带上行条纹 */
+export const coneVertex = /* glsl */ `
+varying vec3 v_normal;
+varying vec3 v_view;
+varying float v_h;
 void main() {
-  v_uv = position.xy;
-  vec4 mv = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
-  mv.xy += position.xy * u_size;
+  v_h = uv.y;
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  v_normal = normalize(normalMatrix * normal);
+  v_view = normalize(-mv.xyz);
   gl_Position = projectionMatrix * mv;
 }
 `;
 
-export const coreFragment = /* glsl */ `
-precision mediump float;
-uniform float u_coreGlow;
+export const coneFragment = /* glsl */ `
+uniform float u_time;
 uniform float u_hue;
-uniform float u_pulse;
+uniform float u_intensity;
+varying vec3 v_normal;
+varying vec3 v_view;
+varying float v_h;
+${common}
+void main() {
+  float facing = abs(dot(normalize(v_normal), normalize(v_view)));
+  float edge = pow(1.0 - facing, 1.5);
+  float stripes = 0.65 + 0.35 * sin(v_h * 40.0 - u_time * 3.0);
+  float k = (1.0 - v_h) * (1.0 - v_h) * (0.12 + edge * 0.35) * stripes * u_intensity;
+  gl_FragColor = vec4(hsl2rgb(u_hue, 0.85, 0.6) * k, k);
+}
+`;
+
+/**
+ * 全息装置线框（一个 LineSegments）：底座同心环 + 头后光环与刻度。
+ * a_anim = (中心 y, 中心 z, 旋转轴 0=Y/1=Z, 角速度)；a_bright 为该段亮度。
+ */
+export const rigVertex = /* glsl */ `
+uniform float u_rigTime;
+attribute vec4 a_anim;
+attribute float a_bright;
+varying float v_bright;
+${common}
+void main() {
+  float ang = u_rigTime * a_anim.w;
+  float c = cos(ang), s = sin(ang);
+  vec3 p = position;
+  if (a_anim.z < 0.5) p = vec3(c * p.x + s * p.z, p.y, -s * p.x + c * p.z);
+  else p = vec3(c * p.x - s * p.y, s * p.x + c * p.y, p.z);
+  p += vec3(0.0, a_anim.x, a_anim.y);
+  v_bright = a_bright;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+}
+`;
+
+export const rigFragment = /* glsl */ `
+uniform float u_hue;
+uniform float u_opacity;
+varying float v_bright;
+${common}
+void main() { gl_FragColor = vec4(hsl2rgb(u_hue, 0.8, 0.55 + 0.25 * v_bright) * v_bright * u_opacity, v_bright * u_opacity); }
+`;
+
+/** 底座光盘：亮环 + 中心光斑 + 缓慢旋转的放射纹 */
+export const padVertex = /* glsl */ `
+varying vec2 v_uv;
+void main() { v_uv = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+`;
+
+export const padFragment = /* glsl */ `
+uniform float u_hue;
+uniform float u_time;
+uniform float u_intensity;
 varying vec2 v_uv;
 ${common}
 void main() {
   float r = length(v_uv);
   if (r > 1.0) discard;
-  float halo = pow(1.0 - r, 3.0) * 0.55;
-  float hot = exp(-r * r * 60.0) * (1.0 + u_pulse);
-  vec3 tint = hsl2rgb(u_hue, 0.85, 0.6);
-  vec3 c = tint * halo + mix(tint, vec3(1.0), 0.75) * hot;
-  gl_FragColor = vec4(c * u_coreGlow, (halo + hot) * u_coreGlow);
+  float rim = exp(-pow((r - 0.42) * 26.0, 2.0)) + 0.5 * exp(-pow((r - 0.75) * 40.0, 2.0));
+  float center = exp(-r * r * 9.0) * 0.6;
+  float a = atan(v_uv.y, v_uv.x);
+  float spokes = smoothstep(0.75, 1.0, sin(a * 24.0 + u_time * 0.4)) * smoothstep(0.45, 0.6, r) * smoothstep(0.75, 0.62, r) * 0.25;
+  float v = (rim + center + spokes) * u_intensity;
+  gl_FragColor = vec4(hsl2rgb(u_hue, 0.85, 0.6) * v, v);
 }
 `;
 
@@ -164,19 +268,18 @@ varying float v_a;
 void main() {
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * mv;
-  gl_PointSize = clamp((1.2 + a_seed * 2.0) * u_perspectiveScale / -mv.z, 1.0, 4.0);
-  v_a = 0.25 + 0.35 * (0.5 + 0.5 * sin(u_time * (0.4 + a_seed) + a_seed * 40.0));
+  gl_PointSize = clamp((1.2 + a_seed * 2.0) * u_perspectiveScale / -mv.z, 1.0, 3.0);
+  v_a = 0.15 + 0.3 * (0.5 + 0.5 * sin(u_time * (0.4 + a_seed) + a_seed * 40.0));
 }
 `;
 
 export const starFragment = /* glsl */ `
-precision mediump float;
 uniform float u_hue;
 varying float v_a;
 ${common}
 void main() {
   float r = length(gl_PointCoord - 0.5);
   if (r > 0.5) discard;
-  gl_FragColor = vec4(hsl2rgb(u_hue, 0.6, 0.7), smoothstep(0.5, 0.0, r) * v_a);
+  gl_FragColor = vec4(hsl2rgb(u_hue, 0.5, 0.7) * v_a, v_a * smoothstep(0.5, 0.0, r));
 }
 `;

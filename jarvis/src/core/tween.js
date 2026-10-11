@@ -45,27 +45,3 @@ export class ParamTween {
     return this.value;
   }
 }
-
-/** 单值缓动（形态 morphFactor 用：1.2s easeInOutCubic） */
-export class ScalarTween {
-  constructor(value, duration) {
-    this.value = value;
-    this.from = value;
-    this.target = value;
-    this.duration = duration;
-    this.start = 0;
-  }
-
-  set(target, now) {
-    if (target === this.target) return;
-    this.from = this.value;
-    this.target = target;
-    this.start = now;
-  }
-
-  update(now) {
-    const t = clamp((now - this.start) / this.duration, 0, 1);
-    this.value = lerp(this.from, this.target, easeInOutCubic(t));
-    return this.value;
-  }
-}

@@ -1,6 +1,8 @@
 # 贾维斯智能体（J.A.R.V.I.S.）
 
-按《贾维斯智能体开发需求文档 v2.0》实现的 Web 应用：实时 WebGL 粒子人形 + 情绪表达 + 本地人脸跟随 + 语音对话 + Claude 对话网关。
+按《贾维斯智能体开发需求文档 v2.0》实现的 Web 应用：实时 WebGL **全息胸像** + 情绪表达 + 本地人脸跟随 + 语音对话 + Claude 对话网关。
+
+> v3 起主视觉由“粒子人形 ⇄ 粒子核心”改为全息胸像（应使用方要求：粒子形态不够好看，改为更科幻的全息投影风格），需求文档第三章的点云 / 形变部分不再适用，见下文“v3 全息胸像”。
 
 ```bash
 cd jarvis
@@ -17,11 +19,24 @@ ANTHROPIC_API_KEY=sk-ant-... npm run server
 
 | 命令 | 作用 |
 |---|---|
-| `npm test` | 单元 + 集成测试（Vitest，76 项） |
-| `npm run e2e` | 浏览器冒烟测试（Playwright + Chromium，40 项；需先 build 并启动 server） |
-| `npm run sample-model` | 重新从 `assets/CesiumMan.glb` 采样点云 |
+| `npm test` | 单元 + 集成测试（Vitest，75 项） |
+| `npm run e2e` | 浏览器冒烟测试（Playwright + Chromium，41 项；需先 build 并启动 server） |
+| `npm run build-model` | 重新从 `assets/LeePerrySmith.glb` 生成全息胸像网格与电路线 |
 
 ---
+
+## v3 全息胸像
+
+参照“全息投影胸像”的参考图重做主视觉，去掉粒子形态：
+
+- **胸像本体**：Lee Perry-Smith 头部扫描（CC BY 3.0）。`scripts/build-hologram.mjs` 离线处理：换算坐标、焊接 UV 接缝处的重复顶点并重算平滑法线、删掉嘴部被嘴唇挡住的口腔内层（不删的话加色混合会勾出一个“口罩”状亮框）、定位双眼，输出 311KB 的紧凑网格（运行时直接建 BufferGeometry，不需要 GLTFLoader）。
+- **全息着色**：菲涅尔轮廓光 + 细扫描线 + 自下而上扫过的亮带 + 轻微闪烁 + 底部渐隐进投影光柱；随机的“信号不稳”故障切片（警觉 / 愉悦时更频繁）。
+- **三种显示样式**（输入栏切换，`Alt+H / W / D`）：全息（实体网格）/ 线框（完整三角网）/ 点阵（网格顶点）。
+- **电路线**：在正面设计的折线，用射线求交投影到网格表面，画成发光线条，线上有流动的数据脉冲。
+- **双眼**发光；**光环**（头后同心弧 + 刻度，缓慢反向旋转）；**全息底座**（同心环、虚线环、放射纹光盘）与**投影光柱**。
+- **人脸跟随只转头**：顶点着色器按高度权重混合旋转，脖子自然扭转、肩膀不动；待机时头部有轻微自主摆动。
+- **情绪映射**：色相、轮廓光与眼睛亮度（glow）、光环转速与扫描速度（spin）、故障强度（jitter）。输入（麦克风）让表面随音量起伏，输出（播报）点亮轮廓光、眼睛与底座。
+- Draw calls：7 个，加泛光 4 个 pass 共 11（≤ 12）。
 
 ## v2.1 升级（参考开源项目）
 
@@ -29,10 +44,10 @@ ANTHROPIC_API_KEY=sk-ant-... npm run server
 
 | 借鉴自 | 思路 | 本项目里的实现 |
 |---|---|---|
-| [alexanderqchen/orb-ui](https://github.com/alexanderqchen/orb-ui)（MIT） | 输入音量与输出音量分开驱动不同部位 | 麦克风电平 → 外层呼吸 + 麦克风按钮外圈；播报 → 核心脉动、球面鼓动、泛光增强（`speechSynthesis` 不暴露音频流，用词边界事件近似包络，没有事件时合成起伏兜底） |
-| [three.js 论坛 Particles Transition Bloom](https://discourse.threejs.org/t/particles-transition-bloom/89382) | 形变中途旋度噪声流动 + 泛光 | 顶点着色器内的值噪声旋度场，强度按 `sin(πm)` 在形变中途最大；自写 4-pass 轻量泛光（`render/bloom.js`），总 draw call 10，仍在 12 的预算内 |
+| [alexanderqchen/orb-ui](https://github.com/alexanderqchen/orb-ui)（MIT） | 输入音量与输出音量分开驱动不同部位 | 麦克风电平 → 胸像表面起伏 + 麦克风按钮外圈；播报 → 轮廓光、眼睛、底座与泛光增强（`speechSynthesis` 不暴露音频流，用词边界事件近似包络，没有事件时合成起伏兜底） |
+| [three.js 论坛 Particles Transition Bloom](https://discourse.threejs.org/t/particles-transition-bloom/89382) | 泛光 | 自写 4-pass 轻量泛光（`render/bloom.js`），总 draw call 11，仍在 12 的预算内（v2.1 的粒子旋度流动随粒子形态一起在 v3 移除） |
 | [jincocodev/openclaw-jarvis-ui](https://github.com/jincocodev/openclaw-jarvis-ui)（ISC） | 省电模式、带时间戳的聊天、按天的记忆时间线 | 画质档位 自动/高/标准/省电（省电：24fps、无泛光与星尘、关闭毛玻璃）；消息带发送者与时间、回复完成后按极简 Markdown 排版（纯 DOM 构建，不插 HTML）；记忆抽屉按 今天/昨天/日期 分组，可选跨会话保存到本机 |
-| [ethanplusai/jarvis](https://github.com/ethanplusai/jarvis) | 打断（barge-in）、每轮时延可见、快捷键 | `Esc` / 停止按钮 / 开始打字 即打断播报与生成；仪表“经验”面板显示首字延迟与生成时长；`/`、`Alt+1–4`、`Alt+F/V/H/P/A`、按住空格说话 |
+| [ethanplusai/jarvis](https://github.com/ethanplusai/jarvis) | 打断（barge-in）、每轮时延可见、快捷键 | `Esc` / 停止按钮 / 开始打字 即打断播报与生成；仪表“经验”面板显示首字延迟与生成时长；`/`、`Alt+1–4`、`Alt+F/V/H/W/D`、按住空格说话 |
 
 ## 架构
 
@@ -52,8 +67,7 @@ src/
     faceMath.js            变换矩阵 → 偏航/俯仰、钳制、指数平滑
     settings.js            localStorage 持久化
   render/                  只在非“减少动画”模式下才动态 import
-    particles.js           几何：a_humanPosition / a_spherePosition / a_meta
-    shaders.js             顶点着色器内完成形变、轨道、向心流、摆动、人脸朝向
+    shaders.js             全息着色（菲涅尔 / 扫描线 / 光带 / 故障）、只转头的人脸跟随、底座与光环
     stage.js               Three.js 场景、渲染循环、暂停原因集合、上下文恢复
     bloom.js               4-pass 轻量泛光
   perception/
@@ -70,18 +84,15 @@ server/
   emotionTag.mjs           从回复开头剥离 <emotion>X</emotion> → emotion_hint
   metrics.mjs              本机指标
 scripts/
-  sample-cesium-man.mjs    GLB → 4600 点泊松盘点云（离线预采样）
+  build-hologram.mjs       头部扫描 → 全息胸像网格、眼睛位置、投影到表面的电路线
   vendor-assets.mjs        自托管 WASM / 模型
 ```
 
 ## 需求对照
 
-### 形态与渲染（第三章）
+### 渲染（第三章，v3 已改为全息胸像）
 
-- **点云**：`scripts/sample-cesium-man.mjs` 解析 GLB，按面积加权取候选点，用“曲率 + 正面剪影度”合成权重做**变半径泊松盘采样**（权重越高半径越小，轮廓更密），二分基准半径得到恰好 4600 点，换算到 Y 向上、身高 100 单位。结果预存为 72KB 的 `public/models/cesium-man-points.bin`，运行时不需要下载 430KB 的 GLB 和 GLTFLoader。
-- **粒子核心**：球面层（斐波那契球）、轨道环（总数的 15%，三条倾斜轨道，轨迹在着色器里参数化）、1200 个内部体积粒子（半径 0.3–1.0，越靠核心越稀疏）、billboard 发光核心（径向渐变，强度 `u_coreGlow`）。
-- **形变**：`mix(a_humanPosition, a_spherePosition, u_morphFactor)` 在顶点着色器完成；CPU 只更新一个 uniform。每个粒子按种子错开一点起止时间，端点处严格为 0/1，不会跳变。人形高度排序后对应球面纬度，头顶飞向北极。
-- **draw calls**：场景 6 个（粒子、核心、三条轨道线、星尘）；开启泛光再加 4 个全屏 pass，共 10 个。
+见上文“v3 全息胸像”。原需求的 Cesium Man 点云、粒子核心与 `u_morphFactor` 形变已移除；情绪表的“变形倾向”一列随之不再使用。
 
 ### 情绪（第四章）
 
@@ -94,7 +105,7 @@ scripts/
 
 选用**路径 B**（直接用 `@mediapipe/tasks-vision` 的 `FaceLandmarker`，放在 Web Worker 里），没有用 `mediapipe-three`：它在主线程跑推理，并把智能体挂到人脸锚点上（会跟着平移），和“只转朝向、不跟随平移”的要求相反。
 
-- 只取偏航/俯仰，丢弃横滚；指数平滑 0.12/帧（按 dt 折算，120Hz 屏延迟一致）；超出 ±45° / ±25° 回到正面；`morph > 0.6` 停用。
+- 只取偏航/俯仰，丢弃横滚；指数平滑 0.12/帧（按 dt 折算，120Hz 屏延迟一致）；超出 ±45° / ±25° 回到正面；只有头部转动，肩膀保持不动。
 - 15fps / 640×480 起步，推理连续 5 次 > 33ms 降到 10fps / 320×240；连续 30 次无人脸提示“未检测到人脸”，转 2fps 低频探测，找回后自动恢复。
 - 不开启 blendshape；Worker 只回传 4×4 矩阵。
 
@@ -123,10 +134,10 @@ curl -X POST http://127.0.0.1:8787/api/agent/emotion \
 ### 仪表、无障碍、降级（第八–十章）
 
 - 仪表：分层视差 3/7/12px、倾斜 ≤ 6°/3°（弹簧 0.08/0.85）、悬停光晕取指标数值色（>80% 红、<30% 蓝）、移出归位。弹簧收敛后停掉 rAF。
-- `prefers-reduced-motion`（或设置里手动开启）：**在初始化 WebGL 之前**判断，命中就不 import three.js、不下载点云，显示 CSS 渐变；情绪只通过颜色表达。
+- `prefers-reduced-motion`（或设置里手动开启）：**在初始化 WebGL 之前**判断，命中就不 import three.js、不下载网格，显示 CSS 渐变；情绪只通过颜色表达。
 - 页面隐藏 / 画布离开视口：停渲染循环；隐藏时同时停指标轮询和人脸推理。
 - 专注视图：画布缩到左上角，渲染降到 20fps，对话区展开。
-- 低端设备（`hardwareConcurrency ≤ 2` 或 `deviceMemory < 4`）：粒子降到 40%，去掉轨道与内部粒子。
+- 低端设备（`hardwareConcurrency ≤ 2` 或 `deviceMemory < 4`）：画质“自动”档降为标准（无泛光），星尘减少。
 - WebGL2 不可用：three r162 自动回退 WebGL1；着色器是 GLSL ES 1.00 写法，不依赖 Transform Feedback，所以两种上下文共用一套。**three 锁定在 0.162.0**，r163 起不再支持 WebGL1。
 - 上下文丢失：自动恢复（实测约 420ms）。
 - 设置全部存 localStorage。摄像头/麦克风开关只在浏览器**已经授权**时才随页面加载恢复，否则复位为关闭，加载时不会弹权限请求。
@@ -139,7 +150,7 @@ curl -X POST http://127.0.0.1:8787/api/agent/emotion \
 
 ## 验收情况
 
-自动化验证（`npm test` 76 项 + `npm run e2e` 40 项，全部通过）覆盖：形变 1.2s 完成且单调无跳变；七种情绪的关键词 / 注入 / 任务状态触发与手动覆盖；参数表与 400ms 过渡；对话联动（输入 → 聆听、请求 → 专注、回复 → 安抚、结束 → 亲和 → 3 秒平静）；人脸角度提取、钳制、平滑与 600ms 回正；VAD 时序（300–500ms 确认、800–1000ms 提交）；后台暂停渲染与轮询；专注视图约 20fps；reduced-motion 不加载 3D 资源且颜色仍随情绪变化；Firefox 式降级；人脸 Worker 在假摄像头下启动并报告“未检测到人脸”；VAD 模型加载；感知期间无外发；上下文恢复 ≤ 500ms；手机宽度无横向溢出。
+自动化验证（`npm test` 75 项 + `npm run e2e` 41 项，全部通过）覆盖：全息胸像加载与三种样式切换（draw call ≤ 12）；七种情绪的关键词 / 注入 / 任务状态触发与手动覆盖；参数表与 400ms 过渡；对话联动（输入 → 聆听、请求 → 专注、回复 → 安抚、结束 → 亲和 → 3 秒平静）；人脸角度提取、钳制、平滑与 600ms 回正；VAD 时序（300–500ms 确认、800–1000ms 提交）；后台暂停渲染与轮询；专注视图约 20fps；reduced-motion 不加载 3D 资源且颜色仍随情绪变化；Firefox 式降级；人脸 Worker 在假摄像头下启动并报告“未检测到人脸”；VAD 模型加载；感知期间无外发；上下文恢复 ≤ 500ms；手机宽度无横向溢出。
 
 **未能在本环境验证、需要在真机上确认的：**
 
@@ -150,4 +161,4 @@ curl -X POST http://127.0.0.1:8787/api/agent/emotion \
 
 ## 署名
 
-Cesium Man model licensed under CC BY 4.0, donated by Cesium（页脚已展示）。模型文件来自 KhronosGroup/glTF-Sample-Assets，原始 GLB 位于 `assets/CesiumMan.glb`。
+Head scan by Lee Perry-Smith, licensed under CC BY 3.0（Infinite-Realities，基于 www.triplegangers.com 的作品；页脚已展示）。原始 GLB 来自 three.js 示例（`examples/models/gltf/LeePerrySmith`），位于 `assets/LeePerrySmith.glb`。

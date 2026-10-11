@@ -4,14 +4,16 @@
  *   感知（人脸 / VAD / 识别） ─┐
  *   对话流（SSE）             ─┼─▶ EmotionMachine ─▶ ParamTween(400ms) ─┐
  *   注入事件（SSE）           ─┘                                        ├─▶ stage.frame()
- *   形态模式 / 情绪基线 ─────────▶ ScalarTween(1.2s, easeInOutCubic) ───┘
+ *   人脸角度 / 麦克风包络 / 播报包络 ─────────────────────────────────┘
  *
- * 减少动画：在初始化 WebGL 之前判断，命中则根本不 import three.js、不下载点云。
+ * 主视觉是全息胸像（全息 / 线框 / 点阵 三种样式）。情绪通过颜色、轮廓光强度、扫描速度、
+ * 光环转速和故障强度表达。
+ * 减少动画：在初始化 WebGL 之前判断，命中则根本不 import three.js、不下载网格。
  */
 import { EmotionMachine } from './core/emotionMachine.js';
 import { EMOTION_PARAMS } from './core/emotions.js';
-import { ParamTween, ScalarTween, clamp } from './core/tween.js';
-import { followTarget, smoothToward, followEnabled } from './core/faceMath.js';
+import { ParamTween } from './core/tween.js';
+import { followTarget, smoothToward } from './core/faceMath.js';
 import { SentenceChunker } from './core/sentenceChunker.js';
 import { SILENCE_BY_SENSITIVITY } from './core/vadGate.js';
 import { loadSettings, saveSettings, wantsReducedMotion } from './core/settings.js';
@@ -22,7 +24,7 @@ import { Dashboard } from './ui/dashboard.js';
 import { Transcript } from './ui/transcript.js';
 import { Speaker } from './perception/speaker.js';
 import { VoiceInput, speechRecognitionSupported } from './perception/voiceInput.js';
-import { HUMAN_POINTS_URL } from './config.js';
+import { FIGURE } from './config.js';
 import { resolveQuality } from './core/quality.js';
 import { loadMemory, saveMemory, clearMemory, groupByDay } from './core/memoryStore.js';
 
@@ -49,66 +51,63 @@ const machine = new EmotionMachine({
     tween.set(EMOTION_PARAMS[emotion], now());
     document.documentElement.style.setProperty('--hue', String(EMOTION_PARAMS[emotion].hue));
     dashboard.setEmotion(emotion, EMOTION_PARAMS[emotion].hue);
-    updateMorphTarget();
   }
 });
 setInterval(() => machine.tick(), 100);
 
-// ---------------------------------------------------------------- 形态
-const morph = new ScalarTween(EMOTION_PARAMS.平静.morph, 1200);
+// ---------------------------------------------------------------- 实时量
 const live = {
   voiceListening: false, // VAD 确认用户在说话
   voiceEnergy: 0,
   face: null, // 跟随目标 { yaw, pitch }（度）
   yaw: 0,
   pitch: 0,
-  spinAngle: 0,
   breath: 0,
   speak: 0, // 语音输出包络（0..1）
-  boundaryAt: 0 // 最近一次词边界事件时间
+  boundaryAt: 0, // 最近一次词边界事件时间
+  burstUntil: 0 // 随机故障闪烁截止时间
 };
-
-function morphTarget() {
-  if (settings.formMode === 'human') return 0;
-  if (settings.formMode === 'particle') return 1;
-  if (live.voiceListening) return 0.45;
-  return EMOTION_PARAMS[machine.state].morph;
-}
-function updateMorphTarget() {
-  morph.set(morphTarget(), now());
-}
 
 // ---------------------------------------------------------------- 渲染策略
 let stage = null;
 let stageLoading = null;
-let humanPoints = null;
+let figurePromise = null;
+
+function loadFigure() {
+  figurePromise ??= Promise.all([
+    fetch(FIGURE.mesh).then((r) => {
+      if (!r.ok) throw new Error(`网格加载失败 ${r.status}`);
+      return r.arrayBuffer();
+    }),
+    fetch(FIGURE.meta).then((r) => {
+      if (!r.ok) throw new Error(`元数据加载失败 ${r.status}`);
+      return r.json();
+    })
+  ]).then(([mesh, meta]) => ({ mesh, meta })).catch((err) => {
+    figurePromise = null;
+    throw err;
+  });
+  return figurePromise;
+}
 const DEG = Math.PI / 180;
 
 function frame(dt, t) {
   const p = tween.update(t);
-  const m = morph.update(t);
 
-  // 角速度：情绪表 → 说话时降到 0.12（需求 6.3） → 手动粒子形态时不低于 0.3（需求 3.3）
-  let omega = p.spin;
-  if (live.voiceListening) omega = 0.12;
-  if (settings.formMode === 'particle') omega = Math.max(omega, 0.3);
-  live.spinAngle += omega * (dt / 1000);
+  // 光环转速 / 扫描速度：情绪表的角速度；用户说话时放慢到 0.12（需求 6.3）
+  const omega = live.voiceListening ? 0.12 : p.spin;
 
-  // 人脸跟随：只在人形区域（morph ≤ 0.6）生效，否则平滑回正
-  const tgt = settings.faceFollow && followEnabled(m) && live.face ? live.face : { yaw: 0, pitch: 0 };
+  // 人脸跟随：只转头，肩膀不动（着色器按高度混合）
+  const tgt = settings.faceFollow && live.face ? live.face : { yaw: 0, pitch: 0 };
   live.yaw = smoothToward(live.yaw, tgt.yaw, 0.12, dt || 16.7);
   live.pitch = smoothToward(live.pitch, tgt.pitch, 0.12, dt || 16.7);
 
-  // 向心流速：接近粒子核心时出现，“专注”时加快
-  const near = clamp((m - 0.7) / 0.3, 0, 1);
-  const inward = 0.03 + 0.07 * near + (machine.state === '专注' ? 0.14 : 0);
-
-  // 呼吸：只在聆听且用户正在说话时随音量包络起伏
-  const breathTarget = live.voiceListening ? live.voiceEnergy * 0.12 : 0;
+  // 输入：用户说话时胸像表面随麦克风包络起伏
+  const breathTarget = live.voiceListening ? live.voiceEnergy * 1.6 : 0;
   live.breath += (breathTarget - live.breath) * 0.2;
 
-  // 输出包络：播报时由词边界事件“敲”一下再衰减；语音包不发边界事件时用合成起伏兜底。
-  // 输入（麦克风）驱动外层呼吸，输出（播报）驱动核心脉动 —— 两者分开，一眼能看出是谁在说话
+  // 输出：播报时由词边界事件“敲”一下再衰减；语音包不发边界事件时用合成起伏兜底。
+  // 输入驱动表面起伏，输出驱动轮廓光、眼睛与底座 —— 两者分开，一眼能看出是谁在说话
   let speakTarget = 0;
   if (speaker.speaking) {
     const since = t - live.boundaryAt;
@@ -118,18 +117,20 @@ function frame(dt, t) {
   }
   live.speak += (speakTarget - live.speak) * (speakTarget > live.speak ? 0.5 : 0.12);
 
+  // 故障：基础强度来自情绪的抖动档位，另外每隔几秒随机闪一下（全息信号不稳的质感）
+  if (t > live.burstUntil + 2500 && Math.random() < dt / 4000) live.burstUntil = t + 120 + Math.random() * 160;
+  const glitch = Math.min(1, p.jitter * 1.6 + (t < live.burstUntil ? 0.55 : 0));
+
   return {
-    morph: m,
     hue: p.hue,
     glow: p.glow,
-    jitter: p.jitter,
-    spinAngle: live.spinAngle,
+    spin: omega,
+    scanSpeed: 0.05 + omega * 0.3,
+    glitch,
     yaw: live.yaw * DEG,
     pitch: live.pitch * DEG,
-    inward,
     breath: live.breath,
     speak: live.speak,
-    flow: quality.flow,
     motion: 1
   };
 }
@@ -138,21 +139,15 @@ async function ensureStage() {
   if (stage || stageLoading) return stageLoading;
   stageLoading = (async () => {
     try {
-      const [{ createStage }, points] = await Promise.all([
-        import('./render/stage.js'),
-        humanPoints ?? fetch(HUMAN_POINTS_URL).then((r) => {
-          if (!r.ok) throw new Error(`点云加载失败 ${r.status}`);
-          return r.arrayBuffer();
-        }).then((b) => new Float32Array(b))
-      ]);
-      humanPoints = points;
+      const [{ createStage }, figure] = await Promise.all([import('./render/stage.js'), loadFigure()]);
       if (wantsReducedMotion(settings, reducedMql)) return null; // 加载期间切换成了减少动画
       stage = createStage($('#stage'), {
-        humanPoints,
+        figure,
         lowEnd,
         onContextChange: (s, ms) => console.info(`[stage] WebGL 上下文${s === 'lost' ? '丢失' : `已恢复（${Math.round(ms)}ms）`}`)
       });
       stage.onFrame(frame);
+      stage.setStyle(settings.style);
       applyFpsCap();
       stage.setPaused('hidden', document.hidden);
       stage.setPaused('offscreen', !canvasVisible);
@@ -373,7 +368,6 @@ const voice = new VoiceInput({
     if (active) { active.ctrl.abort(); active = null; speaker.cancel(); }
     machine.beginUserTurn();
     dashboard.setTask('listening', '正在听');
-    updateMorphTarget();
     $('#vad-meter').classList.add('on');
   },
   onCancel: () => endListening(),
@@ -408,7 +402,6 @@ function endListening() {
   live.voiceEnergy = 0;
   transcript.clearInterim();
   $('#vad-meter').classList.remove('on');
-  updateMorphTarget();
   // 识别被取消且没有发出请求：回到空闲；保持情绪不变以外的状态（no-speech 不触发警觉）
   if (!active && machine.task === 'listening') setTask('idle');
 }
@@ -566,12 +559,13 @@ $('#btn-fullscreen').addEventListener('click', () => {
   else document.documentElement.requestFullscreen?.().catch(() => {});
 });
 
-function setFormMode(mode) {
-  setSetting('formMode', mode);
-  for (const c of document.querySelectorAll('[data-form]')) c.setAttribute('aria-checked', String(c.dataset.form === mode));
-  updateMorphTarget();
+function setStyle(style) {
+  if (!['holo', 'wire', 'dots'].includes(style)) style = 'holo';
+  setSetting('style', style);
+  for (const c of document.querySelectorAll('[data-style]')) c.setAttribute('aria-checked', String(c.dataset.style === style));
+  stage?.setStyle(style);
 }
-for (const c of document.querySelectorAll('[data-form]')) c.addEventListener('click', () => setFormMode(c.dataset.form));
+for (const c of document.querySelectorAll('[data-style]')) c.addEventListener('click', () => setStyle(c.dataset.style));
 
 $('#set-face').addEventListener('change', (e) => setFaceFollow(e.target.checked));
 $('#set-voice').addEventListener('change', (e) => setDirectVoice(e.target.checked));
@@ -610,7 +604,7 @@ $('#set-persist').checked = settings.persistMemory;
 dashboard.setTurns(history.filter((m) => m.role === 'user').length);
 $('#set-motion').value = settings.reducedMotion;
 for (const x of document.querySelectorAll('#set-vad button')) x.setAttribute('aria-checked', String(x.dataset.v === settings.vadSensitivity));
-setFormMode(settings.formMode);
+setStyle(settings.style);
 setFocusView(settings.focusView);
 applyEmotionOverride(settings.emotionOverride);
 applyMotionMode();
@@ -631,7 +625,7 @@ renderMemory();
 
 // ---------------------------------------------------------------- 键盘快捷键
 //   Esc 打断播报/生成   /  聚焦输入框   Alt+1..4 切换视图   Alt+F 专注视图   Alt+V 直接对话
-//   Alt+H / Alt+P / Alt+A 人形 / 粒子 / 自动   按住空格：按下说话（降级模式、焦点不在输入框时）
+//   Alt+H / Alt+W / Alt+D 全息 / 线框 / 点阵   按住空格：按下说话（降级模式、焦点不在输入框时）
 const VIEWS = ['console', 'chat', 'memory', 'settings'];
 const typing = (el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
 document.addEventListener('keydown', (e) => {
@@ -646,9 +640,9 @@ document.addEventListener('keydown', (e) => {
     if (n) setView(VIEWS[n - 1]);
     else if (k === 'KeyF') setFocusView(!settings.focusView);
     else if (k === 'KeyV' && speechRecognitionSupported) setDirectVoice(voice.mode === 'off');
-    else if (k === 'KeyH') setFormMode('human');
-    else if (k === 'KeyP') setFormMode('particle');
-    else if (k === 'KeyA') setFormMode('auto');
+    else if (k === 'KeyH') setStyle('holo');
+    else if (k === 'KeyW') setStyle('wire');
+    else if (k === 'KeyD') setStyle('dots');
     else return;
     e.preventDefault();
     return;
@@ -676,7 +670,6 @@ window.__jarvis = {
   settings,
   live,
   get stage() { return stage; },
-  get morph() { return morph.value; },
   send,
   interrupt,
   get quality() { return quality; }

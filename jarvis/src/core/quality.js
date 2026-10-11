@@ -2,7 +2,7 @@
  * 画质档位：
  *   high      泛光 + 星尘 + 60fps
  *   standard  无泛光 + 星尘 + 60fps
- *   eco       省电：无泛光、无星尘、24fps、流场减弱
+ *   eco       省电：无泛光、无星尘、24fps
  *   auto      桌面高端 → high；移动端 / 低端 → standard（低端另外已把粒子降到 40%）
  * 移动端无论档位都上限 30fps；专注视图上限 20fps（需求 9.3 / 10）。
  */
@@ -12,9 +12,9 @@ export function resolveQuality(setting, { lowEnd = false, isMobile = false, focu
   let tier = setting;
   if (!['high', 'standard', 'eco'].includes(tier)) tier = lowEnd || isMobile ? 'standard' : 'high';
   const base = {
-    high: { bloom: true, stars: true, fps: 60, flow: 1 },
-    standard: { bloom: false, stars: true, fps: 60, flow: 1 },
-    eco: { bloom: false, stars: false, fps: 24, flow: 0.4 }
+    high: { bloom: true, stars: true, fps: 60 },
+    standard: { bloom: false, stars: true, fps: 60 },
+    eco: { bloom: false, stars: false, fps: 24 }
   }[tier];
   let fps = base.fps;
   if (isMobile) fps = Math.min(fps, 30);

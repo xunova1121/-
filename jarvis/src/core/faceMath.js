@@ -36,9 +36,3 @@ export function smoothToward(current, target, factor = 0.12, dtMs = 1000 / 60) {
   const k = 1 - Math.pow(1 - factor, dtMs / (1000 / 60));
   return current + (target - current) * k;
 }
-
-/** 形态接近粒子核心（> 0.6）时停用跟随 */
-export const FOLLOW_MORPH_CUTOFF = 0.6;
-export function followEnabled(morph) {
-  return morph <= FOLLOW_MORPH_CUTOFF;
-}

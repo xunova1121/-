@@ -14,10 +14,10 @@ describe('情绪参数表', () => {
   it('七种情绪都有完整参数，且数值与需求 4.2 一致', () => {
     expect(EMOTIONS).toHaveLength(7);
     for (const e of EMOTIONS) {
-      expect(Object.keys(EMOTION_PARAMS[e]).sort()).toEqual(['glow', 'hue', 'jitter', 'morph', 'spin']);
+      expect(Object.keys(EMOTION_PARAMS[e]).sort()).toEqual(['glow', 'hue', 'jitter', 'spin']);
     }
-    expect(EMOTION_PARAMS.平静).toMatchObject({ hue: 200, spin: 0.15, morph: 0.85, glow: 0.6 });
-    expect(EMOTION_PARAMS.警觉).toMatchObject({ hue: 0, spin: 0.55, morph: 0.3, glow: 1.0 });
+    expect(EMOTION_PARAMS.平静).toMatchObject({ hue: 200, spin: 0.15, glow: 0.6 });
+    expect(EMOTION_PARAMS.警觉).toMatchObject({ hue: 0, spin: 0.55, glow: 1.0 });
     expect(EMOTION_PARAMS.安抚.jitter).toBeLessThan(EMOTION_PARAMS.平静.jitter);
     expect(EMOTION_PARAMS.愉悦.jitter).toBeGreaterThan(EMOTION_PARAMS.专注.jitter);
   });

@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "sample-model": "node scripts/sample-cesium-man.mjs",
+    "build-model": "node scripts/build-hologram.mjs",
     "server": "node server/server.mjs",
     "start": "vite build && node server/server.mjs",
     "postinstall": "node scripts/vendor-assets.mjs",

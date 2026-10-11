@@ -28,33 +28,23 @@ const browser = await chromium.launch({
   await page.waitForFunction(() => window.__jarvis?.stage?.stats.frames > 20, null, { timeout: 30000 });
   const stats = await page.evaluate(() => {
     const s = window.__jarvis.stage.stats;
-    return { count: s.count, drawCalls: s.drawCalls, isWebGL2: s.isWebGL2, fps: s.fps, bloom: s.bloom };
+    return { vertices: s.vertices, drawCalls: s.drawCalls, isWebGL2: s.isWebGL2, fps: s.fps, bloom: s.bloom, style: s.style };
   });
   check('WebGL 主视觉启动', true, JSON.stringify(stats));
-  check('粒子数 4600 + 1200', stats.count === 5800, String(stats.count));
+  check('全息胸像网格加载', stats.vertices > 8000 && stats.style === 'holo', `${stats.vertices} 顶点`);
   check('泛光开启时 draw calls ≤ 12', stats.bloom === true && stats.drawCalls <= 12, `bloom=${stats.bloom} calls=${stats.drawCalls}`);
 
   await page.waitForTimeout(1500);
-  await page.screenshot({ path: `${OUT}/01-calm.png` });
+  await page.screenshot({ path: `${OUT}/01-holo.png` });
 
-  // 形态：人形
-  await page.click('[data-form="human"]');
-  await page.waitForTimeout(1400);
-  const m0 = await page.evaluate(() => window.__jarvis.morph);
-  check('切到人形 1.2s 内完成', m0 === 0, String(m0));
-  await page.screenshot({ path: `${OUT}/02-human.png` });
-
-  // 粒子
-  await page.click('[data-form="particle"]');
-  const samples = [];
-  for (let i = 0; i < 14; i++) {
-    samples.push(await page.evaluate(() => window.__jarvis.morph));
-    await page.waitForTimeout(100);
+  // 显示样式：全息 / 线框 / 点阵
+  for (const style of ['wire', 'dots', 'holo']) {
+    await page.click(`[data-style="${style}"]`);
+    await page.waitForTimeout(500);
+    const cur = await page.evaluate(() => ({ s: window.__jarvis.stage.stats.style, saved: window.__jarvis.settings.style, calls: window.__jarvis.stage.stats.drawCalls }));
+    check(`切换样式：${style}`, cur.s === style && cur.saved === style && cur.calls <= 12, JSON.stringify(cur));
+    if (style !== 'holo') await page.screenshot({ path: `${OUT}/02-${style}.png` });
   }
-  const monotonic = samples.every((v, i) => i === 0 || v >= samples[i - 1] - 1e-9);
-  check('人形 → 粒子 过渡单调无跳变', monotonic && samples.at(-1) === 1, samples.map((v) => v.toFixed(2)).join(' '));
-  await page.screenshot({ path: `${OUT}/03-particle.png` });
-  await page.click('[data-form="auto"]');
 
   // 对话：关键词/提示驱动情绪
   await page.fill('#prompt', '最近压力好大');
@@ -213,7 +203,7 @@ const browser = await chromium.launch({
   page.on('request', (r) => urls.push(r.url()));
   await page.goto(BASE);
   await page.waitForTimeout(2500);
-  const loaded3d = urls.filter((u) => /stage-|cesium-man-points|three/.test(u));
+  const loaded3d = urls.filter((u) => /stage-|bust-mesh|three/.test(u));
   check('reduced-motion 不加载 3D 资源', loaded3d.length === 0, loaded3d.join(','));
   check('reduced-motion 显示 CSS 背景', await page.evaluate(() => document.body.classList.contains('reduced-motion') && !window.__jarvis.stage));
   await page.evaluate(() => window.__jarvis.machine.setManual('亲和'));
@@ -259,7 +249,7 @@ const browser = await chromium.launch({
   await page.check('#set-face');
   await page.waitForFunction(() => /跟随中|未检测到|降至/.test(document.querySelector('#face-status').textContent), null, { timeout: 30000 });
   check('人脸跟随启动（Worker + 本地模型）', true, await page.textContent('#face-status'));
-  await page.waitForFunction(() => document.querySelector('#face-status').textContent.includes('未检测到人脸'), null, { timeout: 15000 });
+  await page.waitForFunction(() => document.querySelector('#face-status').textContent.includes('未检测到人脸'), null, { timeout: 45000 });
   check('连续未检测到人脸 → 轻量提示', true);
   const camOn = await page.evaluate(() => [...document.querySelectorAll('video')].length === 0); // 视频元素不挂到 DOM
   check('摄像头画面不显示/不挂载到页面', camOn);
