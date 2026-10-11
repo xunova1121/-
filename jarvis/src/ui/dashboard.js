@@ -68,6 +68,9 @@ export class Dashboard {
           <div class="glow"></div>
           <h3 class="layer" data-depth="back">经验</h3>
           <span class="status"><span id="exp-turns">0 轮</span></span>
+          <div class="latency layer" data-depth="mid" id="latency" title="最近一轮：首字延迟 / 总生成时长">
+            <span><b id="lat-first">—</b><small>首字</small></span><span><b id="lat-total">—</b><small>生成</small></span>
+          </div>
           <div class="emotion-picker" id="emotion-picker" hidden role="group" aria-label="情绪手动覆盖">
             <button type="button" data-emotion="auto">自动</button>
             ${EMOTIONS.map((e) => `<button type="button" data-emotion="${e}">${e}</button>`).join('')}
@@ -151,6 +154,13 @@ export class Dashboard {
     const pct = { idle: 10, listening: 45, processing: 75, error: 95, done: 20 }[state] ?? 10;
     this.root.querySelector('[data-panel="task"]').style.setProperty('--glow-color', metricColor(pct));
     this.#drawTask();
+  }
+
+  /** 每轮时延（需求外的可观测性：慢的回合一眼可见） */
+  setLatency(firstMs, totalMs) {
+    this.root.querySelector('#lat-first').textContent = firstMs == null ? '—' : `${Math.round(firstMs)}ms`;
+    this.root.querySelector('#lat-total').textContent = `${(totalMs / 1000).toFixed(1)}s`;
+    this.root.querySelector('#latency').style.setProperty('--glow-color', metricColor(firstMs == null ? null : Math.min(100, firstMs / 30)));
   }
 
   setTurns(n) {

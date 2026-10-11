@@ -17,11 +17,22 @@ ANTHROPIC_API_KEY=sk-ant-... npm run server
 
 | 命令 | 作用 |
 |---|---|
-| `npm test` | 单元 + 集成测试（Vitest，68 项） |
-| `npm run e2e` | 浏览器冒烟测试（Playwright + Chromium，33 项；需先 build 并启动 server） |
+| `npm test` | 单元 + 集成测试（Vitest，76 项） |
+| `npm run e2e` | 浏览器冒烟测试（Playwright + Chromium，40 项；需先 build 并启动 server） |
 | `npm run sample-model` | 重新从 `assets/CesiumMan.glb` 采样点云 |
 
 ---
+
+## v2.1 升级（参考开源项目）
+
+调研了几个同类开源项目，**只借鉴思路、全部自行实现**（其中 ethanplusai/jarvis 仅限非商业使用，没有复制任何代码）：
+
+| 借鉴自 | 思路 | 本项目里的实现 |
+|---|---|---|
+| [alexanderqchen/orb-ui](https://github.com/alexanderqchen/orb-ui)（MIT） | 输入音量与输出音量分开驱动不同部位 | 麦克风电平 → 外层呼吸 + 麦克风按钮外圈；播报 → 核心脉动、球面鼓动、泛光增强（`speechSynthesis` 不暴露音频流，用词边界事件近似包络，没有事件时合成起伏兜底） |
+| [three.js 论坛 Particles Transition Bloom](https://discourse.threejs.org/t/particles-transition-bloom/89382) | 形变中途旋度噪声流动 + 泛光 | 顶点着色器内的值噪声旋度场，强度按 `sin(πm)` 在形变中途最大；自写 4-pass 轻量泛光（`render/bloom.js`），总 draw call 10，仍在 12 的预算内 |
+| [jincocodev/openclaw-jarvis-ui](https://github.com/jincocodev/openclaw-jarvis-ui)（ISC） | 省电模式、带时间戳的聊天、按天的记忆时间线 | 画质档位 自动/高/标准/省电（省电：24fps、无泛光与星尘、关闭毛玻璃）；消息带发送者与时间、回复完成后按极简 Markdown 排版（纯 DOM 构建，不插 HTML）；记忆抽屉按 今天/昨天/日期 分组，可选跨会话保存到本机 |
+| [ethanplusai/jarvis](https://github.com/ethanplusai/jarvis) | 打断（barge-in）、每轮时延可见、快捷键 | `Esc` / 停止按钮 / 开始打字 即打断播报与生成；仪表“经验”面板显示首字延迟与生成时长；`/`、`Alt+1–4`、`Alt+F/V/H/P/A`、按住空格说话 |
 
 ## 架构
 
@@ -33,6 +44,9 @@ src/
     emotionMachine.js      规则引擎：手动 > API 注入 > 关键词(800ms 防抖) > 任务状态
     keywordScanner.js      最近 200 字滑动窗口打分
     tween.js / spring.js   400ms HSL 过渡、1.2s easeInOutCubic 形变、仪表弹簧
+    quality.js             画质档位解析（泛光 / 星尘 / 帧率上限）
+    memoryStore.js         记忆持久化与按天分组
+    markdown.js            极简 Markdown → 结构化块
     vadGate.js             VAD → 识别的时序门控（300ms 确认 / 静默阈值提交）
     sentenceChunker.js     流式文本切句送 TTS
     faceMath.js            变换矩阵 → 偏航/俯仰、钳制、指数平滑
@@ -41,6 +55,7 @@ src/
     particles.js           几何：a_humanPosition / a_spherePosition / a_meta
     shaders.js             顶点着色器内完成形变、轨道、向心流、摆动、人脸朝向
     stage.js               Three.js 场景、渲染循环、暂停原因集合、上下文恢复
+    bloom.js               4-pass 轻量泛光
   perception/
     face.worker.js         MediaPipe Face Landmarker（Web Worker，只回传 4×4 矩阵）
     networkGuard.js        Worker 出站守卫（见“隐私”）
@@ -66,7 +81,7 @@ scripts/
 - **点云**：`scripts/sample-cesium-man.mjs` 解析 GLB，按面积加权取候选点，用“曲率 + 正面剪影度”合成权重做**变半径泊松盘采样**（权重越高半径越小，轮廓更密），二分基准半径得到恰好 4600 点，换算到 Y 向上、身高 100 单位。结果预存为 72KB 的 `public/models/cesium-man-points.bin`，运行时不需要下载 430KB 的 GLB 和 GLTFLoader。
 - **粒子核心**：球面层（斐波那契球）、轨道环（总数的 15%，三条倾斜轨道，轨迹在着色器里参数化）、1200 个内部体积粒子（半径 0.3–1.0，越靠核心越稀疏）、billboard 发光核心（径向渐变，强度 `u_coreGlow`）。
 - **形变**：`mix(a_humanPosition, a_spherePosition, u_morphFactor)` 在顶点着色器完成；CPU 只更新一个 uniform。每个粒子按种子错开一点起止时间，端点处严格为 0/1，不会跳变。人形高度排序后对应球面纬度，头顶飞向北极。
-- **draw calls = 6**（粒子、核心、三条轨道线、星尘）。
+- **draw calls**：场景 6 个（粒子、核心、三条轨道线、星尘）；开启泛光再加 4 个全屏 pass，共 10 个。
 
 ### 情绪（第四章）
 
@@ -124,7 +139,7 @@ curl -X POST http://127.0.0.1:8787/api/agent/emotion \
 
 ## 验收情况
 
-自动化验证（`npm test` 68 项 + `npm run e2e` 33 项，全部通过）覆盖：形变 1.2s 完成且单调无跳变；七种情绪的关键词 / 注入 / 任务状态触发与手动覆盖；参数表与 400ms 过渡；对话联动（输入 → 聆听、请求 → 专注、回复 → 安抚、结束 → 亲和 → 3 秒平静）；人脸角度提取、钳制、平滑与 600ms 回正；VAD 时序（300–500ms 确认、800–1000ms 提交）；后台暂停渲染与轮询；专注视图约 20fps；reduced-motion 不加载 3D 资源且颜色仍随情绪变化；Firefox 式降级；人脸 Worker 在假摄像头下启动并报告“未检测到人脸”；VAD 模型加载；感知期间无外发；上下文恢复 ≤ 500ms；手机宽度无横向溢出。
+自动化验证（`npm test` 76 项 + `npm run e2e` 40 项，全部通过）覆盖：形变 1.2s 完成且单调无跳变；七种情绪的关键词 / 注入 / 任务状态触发与手动覆盖；参数表与 400ms 过渡；对话联动（输入 → 聆听、请求 → 专注、回复 → 安抚、结束 → 亲和 → 3 秒平静）；人脸角度提取、钳制、平滑与 600ms 回正；VAD 时序（300–500ms 确认、800–1000ms 提交）；后台暂停渲染与轮询；专注视图约 20fps；reduced-motion 不加载 3D 资源且颜色仍随情绪变化；Firefox 式降级；人脸 Worker 在假摄像头下启动并报告“未检测到人脸”；VAD 模型加载；感知期间无外发；上下文恢复 ≤ 500ms；手机宽度无横向溢出。
 
 **未能在本环境验证、需要在真机上确认的：**
 

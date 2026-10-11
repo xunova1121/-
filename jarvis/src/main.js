@@ -23,6 +23,8 @@ import { Transcript } from './ui/transcript.js';
 import { Speaker } from './perception/speaker.js';
 import { VoiceInput, speechRecognitionSupported } from './perception/voiceInput.js';
 import { HUMAN_POINTS_URL } from './config.js';
+import { resolveQuality } from './core/quality.js';
+import { loadMemory, saveMemory, clearMemory, groupByDay } from './core/memoryStore.js';
 
 const $ = (s) => document.querySelector(s);
 const body = document.body;
@@ -61,7 +63,9 @@ const live = {
   yaw: 0,
   pitch: 0,
   spinAngle: 0,
-  breath: 0
+  breath: 0,
+  speak: 0, // 语音输出包络（0..1）
+  boundaryAt: 0 // 最近一次词边界事件时间
 };
 
 function morphTarget() {
@@ -103,6 +107,17 @@ function frame(dt, t) {
   const breathTarget = live.voiceListening ? live.voiceEnergy * 0.12 : 0;
   live.breath += (breathTarget - live.breath) * 0.2;
 
+  // 输出包络：播报时由词边界事件“敲”一下再衰减；语音包不发边界事件时用合成起伏兜底。
+  // 输入（麦克风）驱动外层呼吸，输出（播报）驱动核心脉动 —— 两者分开，一眼能看出是谁在说话
+  let speakTarget = 0;
+  if (speaker.speaking) {
+    const since = t - live.boundaryAt;
+    speakTarget = since < 600
+      ? 0.45 + 0.55 * Math.exp(-since / 140)
+      : 0.4 + 0.25 * (0.5 + 0.5 * Math.sin(t / 95)) * (0.5 + 0.5 * Math.sin(t / 333));
+  }
+  live.speak += (speakTarget - live.speak) * (speakTarget > live.speak ? 0.5 : 0.12);
+
   return {
     morph: m,
     hue: p.hue,
@@ -113,6 +128,8 @@ function frame(dt, t) {
     pitch: live.pitch * DEG,
     inward,
     breath: live.breath,
+    speak: live.speak,
+    flow: quality.flow,
     motion: 1
   };
 }
@@ -157,8 +174,12 @@ function disposeStage() {
   stage = null;
 }
 
+let quality = resolveQuality(settings.quality, { lowEnd, isMobile, focusView: settings.focusView });
 function applyFpsCap() {
-  stage?.setFpsCap(settings.focusView ? 20 : isMobile ? 30 : 60);
+  quality = resolveQuality(settings.quality, { lowEnd, isMobile, focusView: settings.focusView });
+  stage?.setFpsCap(quality.fps);
+  stage?.setQuality({ bloom: quality.bloom, stars: quality.stars });
+  body.classList.toggle('eco', quality.tier === 'eco');
 }
 
 function applyMotionMode() {
@@ -207,22 +228,48 @@ function applyEmotionOverride(v) {
 
 // ---------------------------------------------------------------- 对话
 const transcript = new Transcript($('#transcript'));
-const history = [];
+// 记忆：开启“跨会话保存”时从 localStorage 恢复；每条带时间戳，按天分组显示
+const storage = (() => { try { return localStorage; } catch { return null; } })();
+const history = settings.persistMemory ? loadMemory(storage) : [];
+function remember(role, content) {
+  history.push({ role, content, ts: Date.now() });
+  if (settings.persistMemory) saveMemory(history, storage);
+}
 let turns = 0;
 let active = null; // { ctrl, streamDone }
 
 const speaker = new Speaker({
-  onStart: () => voice.setSuppressed(true),
+  onStart: () => {
+    voice.setSuppressed(true);
+    body.classList.add('speaking');
+  },
   onIdle: () => {
     voice.setSuppressed(false);
+    body.classList.remove('speaking');
     if (active?.streamDone) finishTurn();
-  }
+  },
+  onBoundary: () => { live.boundaryAt = now(); }
 });
+
+/** 打断（barge-in）：停止播报并中止正在生成的回复 */
+function interrupt() {
+  const had = speaker.speaking || active;
+  if (active) {
+    active.ctrl.abort();
+    active.bubble?.done('已打断');
+    active = null;
+    setTask('idle');
+  }
+  speaker.cancel();
+  return Boolean(had);
+}
+$('#btn-stop').addEventListener('click', () => interrupt());
 speaker.enabled = settings.speechOutput;
 
 function setTask(state, sub) {
   machine.setTaskState(state);
   dashboard.setTask(state, sub);
+  body.classList.toggle('generating', Boolean(active) && state !== 'done');
 }
 
 function finishTurn() {
@@ -244,16 +291,16 @@ async function send(text) {
   }
   speaker.cancel();
   transcript.add('user', text);
-  history.push({ role: 'user', content: text });
+  remember('user', text);
 
   if (machine.task !== 'listening') machine.beginUserTurn();
   setTask('processing', '请求已发出');
 
   const ctrl = new AbortController();
-  const turn = { ctrl, streamDone: false };
-  active = turn;
   const bubble = transcript.add('agent');
   bubble.el.classList.add('streaming');
+  const turn = { ctrl, streamDone: false, bubble };
+  active = turn;
   const chunker = new SentenceChunker();
   let reply = '';
   let firstToken = 0;
@@ -261,7 +308,7 @@ async function send(text) {
 
   try {
     await streamChat({
-      messages: history.slice(-12),
+      messages: history.slice(-12).map(({ role, content }) => ({ role, content })),
       signal: ctrl.signal,
       onMessage: (msg) => {
         if (active !== turn) return;
@@ -280,17 +327,21 @@ async function send(text) {
     });
     if (active !== turn) return;
     for (const s of chunker.flush()) speaker.speak(s);
-    bubble.done(firstToken ? `首字 ${Math.round(firstToken - t0)}ms` : '');
-    history.push({ role: 'assistant', content: reply || '（空回复）' });
+    const total = now() - t0;
+    const latency = firstToken ? `首字 ${Math.round(firstToken - t0)}ms · 生成 ${(total / 1000).toFixed(1)}s` : '';
+    bubble.done(latency);
+    dashboard.setLatency(firstToken ? firstToken - t0 : null, total);
+    remember('assistant', reply || '（空回复）');
     $('#mode-pill').classList.remove('offline');
     turn.streamDone = true;
     if (!speaker.speaking) finishTurn();
   } catch (err) {
     if (err.name === 'AbortError') return;
     if (active !== turn) return;
+    if (!reply) bubble.append(`（连接失败：${err.message}）`);
     bubble.done();
-    bubble.append(reply ? '' : `（连接失败：${err.message}）`);
     history.pop();
+    if (settings.persistMemory) saveMemory(history, storage);
     $('#mode-pill').classList.add('offline');
     active = null;
     setTask('error', '对话接口不可用');
@@ -306,6 +357,7 @@ $('#inputbar').addEventListener('submit', (e) => {
 });
 // 用户开始输入 → 聆听（由输入事件触发，而不是关键词）
 $('#prompt').addEventListener('input', (e) => {
+  if (e.target.value && speaker.speaking) speaker.cancel(); // 开始打字即打断播报
   if (e.target.value && !active && machine.task !== 'listening') machine.beginUserTurn();
   dashboard.setTask(machine.task);
 });
@@ -333,7 +385,7 @@ const voice = new VoiceInput({
   },
   onEnergy: (e) => {
     live.voiceEnergy = e;
-    $('#vad-meter').style.setProperty('--e', e.toFixed(2));
+    $('#inputbar').style.setProperty('--e', e.toFixed(2));
   },
   onMode: (m) => {
     $('#voice-status').textContent = {
@@ -459,18 +511,46 @@ for (const b of document.querySelectorAll('.nav-item')) {
 $('#btn-nav').addEventListener('click', () => body.classList.toggle('nav-collapsed'));
 
 function renderMemory() {
-  const list = $('#memory-list');
-  list.replaceChildren(...history.slice(-24).map((m) => {
-    const li = document.createElement('li');
-    li.textContent = `${m.role === 'user' ? '你' : '贾维斯'}：${m.content.slice(0, 80)}${m.content.length > 80 ? '…' : ''}`;
-    return li;
+  const root = $('#memory-list');
+  if (!history.length) {
+    const p = document.createElement('p');
+    p.className = 'muted';
+    p.textContent = '暂无';
+    root.replaceChildren(p);
+    return;
+  }
+  root.replaceChildren(...groupByDay(history).map((g) => {
+    const day = document.createElement('details');
+    day.open = g.label === '今天';
+    const sum = document.createElement('summary');
+    sum.textContent = `${g.label} · ${g.items.filter((m) => m.role === 'user').length} 轮`;
+    const ol = document.createElement('ol');
+    for (const m of g.items) {
+      const li = document.createElement('li');
+      li.className = m.role;
+      const time = new Date(m.ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+      li.textContent = `${time} ${m.role === 'user' ? '你' : '贾维斯'}：${m.content.slice(0, 90)}${m.content.length > 90 ? '…' : ''}`;
+      ol.append(li);
+    }
+    day.append(sum, ol);
+    return day;
   }));
-  if (!history.length) list.innerHTML = '<li class="muted">暂无</li>';
 }
 $('#btn-clear-memory').addEventListener('click', () => {
   history.length = 0;
+  clearMemory(storage);
   renderMemory();
   toast('记忆已清空');
+});
+$('#set-persist').addEventListener('change', (e) => {
+  setSetting('persistMemory', e.target.checked);
+  if (e.target.checked) saveMemory(history, storage);
+  else clearMemory(storage);
+  toast(e.target.checked ? '记忆将保存在本机浏览器中' : '已停止保存，并删除本机保存的记忆');
+});
+$('#set-quality').addEventListener('change', (e) => {
+  setSetting('quality', e.target.value);
+  applyFpsCap();
 });
 
 function setFocusView(on) {
@@ -525,6 +605,9 @@ function toast(text) {
 
 // ---------------------------------------------------------------- 恢复上次的设置
 $('#set-tts').checked = settings.speechOutput;
+$('#set-quality').value = settings.quality;
+$('#set-persist').checked = settings.persistMemory;
+dashboard.setTurns(history.filter((m) => m.role === 'user').length);
 $('#set-motion').value = settings.reducedMotion;
 for (const x of document.querySelectorAll('#set-vad button')) x.setAttribute('aria-checked', String(x.dataset.v === settings.vadSensitivity));
 setFormMode(settings.formMode);
@@ -546,6 +629,47 @@ restoreDevice('camera', 'faceFollow', setFaceFollow);
 if (speechRecognitionSupported) restoreDevice('microphone', 'directVoice', setDirectVoice);
 renderMemory();
 
+// ---------------------------------------------------------------- 键盘快捷键
+//   Esc 打断播报/生成   /  聚焦输入框   Alt+1..4 切换视图   Alt+F 专注视图   Alt+V 直接对话
+//   Alt+H / Alt+P / Alt+A 人形 / 粒子 / 自动   按住空格：按下说话（降级模式、焦点不在输入框时）
+const VIEWS = ['console', 'chat', 'memory', 'settings'];
+const typing = (el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (interrupt()) { e.preventDefault(); toast('已打断'); return; }
+    if (!$('#drawer-settings').hidden || !$('#drawer-memory').hidden) setView('console');
+    return;
+  }
+  if (e.altKey && !e.ctrlKey && !e.metaKey) {
+    const k = e.code;
+    const n = /^Digit([1-4])$/.exec(k)?.[1];
+    if (n) setView(VIEWS[n - 1]);
+    else if (k === 'KeyF') setFocusView(!settings.focusView);
+    else if (k === 'KeyV' && speechRecognitionSupported) setDirectVoice(voice.mode === 'off');
+    else if (k === 'KeyH') setFormMode('human');
+    else if (k === 'KeyP') setFormMode('particle');
+    else if (k === 'KeyA') setFormMode('auto');
+    else return;
+    e.preventDefault();
+    return;
+  }
+  if (typing(document.activeElement)) return;
+  if (e.key === '/') {
+    e.preventDefault();
+    $('#prompt').focus();
+  } else if (e.code === 'Space' && voice.mode === 'ptt' && !e.repeat) {
+    e.preventDefault();
+    mic.classList.add('ptt-active');
+    voice.pttStart();
+  }
+});
+document.addEventListener('keyup', (e) => {
+  if (e.code === 'Space' && voice.mode === 'ptt' && mic.classList.contains('ptt-active')) {
+    mic.classList.remove('ptt-active');
+    voice.pttEnd();
+  }
+});
+
 // 调试 / 自动化测试入口
 window.__jarvis = {
   machine,
@@ -553,5 +677,7 @@ window.__jarvis = {
   live,
   get stage() { return stage; },
   get morph() { return morph.value; },
-  send
+  send,
+  interrupt,
+  get quality() { return quality; }
 };

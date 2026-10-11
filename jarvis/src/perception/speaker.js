@@ -5,8 +5,8 @@ const synth = globalThis.speechSynthesis;
 export const speechSynthesisSupported = Boolean(synth && globalThis.SpeechSynthesisUtterance);
 
 export class Speaker {
-  constructor({ lang = 'zh-CN', rate = 0.95, pitch = 1.0, onStart, onIdle } = {}) {
-    Object.assign(this, { lang, rate, pitch, onStart, onIdle });
+  constructor({ lang = 'zh-CN', rate = 0.95, pitch = 1.0, onStart, onIdle, onBoundary } = {}) {
+    Object.assign(this, { lang, rate, pitch, onStart, onIdle, onBoundary });
     this.enabled = true;
     this.pending = 0;
     this.voice = null;
@@ -40,6 +40,8 @@ export class Speaker {
       this.pending = Math.max(0, this.pending - 1);
       if (this.pending === 0) this.onIdle?.();
     };
+    // speechSynthesis 不暴露音频流，没法做真实音量分析；用词边界事件近似“说话包络”
+    u.onboundary = () => this.onBoundary?.();
     u.onend = done;
     u.onerror = done;
     if (this.pending++ === 0) this.onStart?.();

@@ -9,7 +9,9 @@ export const DEFAULT_SETTINGS = {
   emotionOverride: 'auto',
   focusView: false,
   reducedMotion: 'system', // system | on | off
-  formMode: 'auto' // auto | human | particle
+  formMode: 'auto', // auto | human | particle
+  quality: 'auto', // auto | high | standard | eco
+  persistMemory: false // 记忆跨会话保存到本机 localStorage
 };
 
 const KEY = 'jarvis.settings.v1';

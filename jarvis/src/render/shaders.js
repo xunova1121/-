@@ -5,6 +5,22 @@
 const common = /* glsl */ `
 mat3 rotY(float a) { float c = cos(a), s = sin(a); return mat3(c, 0.0, -s, 0.0, 1.0, 0.0, s, 0.0, c); }
 mat3 rotX(float a) { float c = cos(a), s = sin(a); return mat3(1.0, 0.0, 0.0, 0.0, c, s, 0.0, -s, c); }
+// 便宜的 3D 值噪声 + 有限差分旋度：无散度的流场，粒子像流体一样卷动而不是抖动
+float hash3(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+float vnoise(vec3 p) {
+  vec3 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hash3(i), hash3(i + vec3(1,0,0)), f.x), mix(hash3(i + vec3(0,1,0)), hash3(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(hash3(i + vec3(0,0,1)), hash3(i + vec3(1,0,1)), f.x), mix(hash3(i + vec3(0,1,1)), hash3(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+vec3 curl(vec3 p) {
+  const float e = 0.1;
+  vec3 a = vec3(vnoise(p), vnoise(p + 31.4), vnoise(p + 67.1));
+  float dy1 = vnoise(p + vec3(0, e, 0)) - a.x, dz1 = vnoise(p + vec3(0, 0, e)) - a.x;
+  float dx2 = vnoise(p + 31.4 + vec3(e, 0, 0)) - a.y, dz2 = vnoise(p + 31.4 + vec3(0, 0, e)) - a.y;
+  float dx3 = vnoise(p + 67.1 + vec3(e, 0, 0)) - a.z, dy3 = vnoise(p + 67.1 + vec3(0, e, 0)) - a.z;
+  return vec3(dy3 - dz2, dz1 - dx3, dx2 - dy1) / e;
+}
 vec3 hsl2rgb(float h, float s, float l) {
   vec3 rgb = clamp(abs(mod(h / 60.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
   return l + s * (rgb - 0.5) * (1.0 - abs(2.0 * l - 1.0));
@@ -26,6 +42,8 @@ uniform float u_perspectiveScale;
 uniform float u_pointScale;
 uniform float u_hue;
 uniform float u_motion;        // 0 = 冻结所有运动
+uniform float u_flow;          // 旋度噪声流动强度（形变中途最强）
+uniform float u_speak;         // 语音输出包络：驱动核心与球面的脉动（输出）
 
 attribute vec3 a_humanPosition;
 attribute vec3 a_spherePosition;
@@ -53,7 +71,8 @@ void main() {
   float alpha = 1.0;
   float size = 1.0;
   if (kind < 0.5) {
-    float br = 1.0 + 0.035 * sin(t * 1.1 + seed * 6.2831853) + u_breath;
+    float br = 1.0 + 0.035 * sin(t * 1.1 + seed * 6.2831853) + u_breath
+             + u_speak * 0.06 * (0.6 + 0.4 * sin(seed * 40.0 + t * 9.0));
     s = rotY(u_spin) * (a_spherePosition * u_radius * br);
     size = 0.9 + seed * 0.6;
   } else if (kind < 1.5) {
@@ -76,6 +95,9 @@ void main() {
   float m = clamp(u_morphFactor * 1.3 - seed * 0.3, 0.0, 1.0);
   m = m * m * (3.0 - 2.0 * m);
   vec3 p = mix(h, s, m);
+  // 形变途中流场最强（sin(πm)），静止形态下只留一点微流动，人形轮廓不被扰乱
+  float flowAmt = u_flow * (0.08 + 1.0 * sin(3.1415926 * m)) * u_motion;
+  if (flowAmt > 0.001) p += curl(p * 0.045 + vec3(0.0, t * 0.12, seed)) * flowAmt;
 
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
   gl_Position = projectionMatrix * mv;
@@ -86,7 +108,7 @@ void main() {
 
   float light = 0.52 + 0.28 * contour * (1.0 - m) + (kind > 1.5 ? 0.18 : 0.0) + 0.1 * seed;
   v_color = hsl2rgb(mod(u_hue - 8.0 * seed, 360.0), 0.85, clamp(light, 0.0, 0.92));
-  v_alpha = alpha * mix(0.75, 0.9, m);
+  v_alpha = alpha * mix(0.75, 0.9, m) * (1.0 + u_speak * 0.35 * m);
 }
 `;
 

@@ -54,8 +54,9 @@
   <!-- 记忆 / 设置 抽屉 -->
   <section class="drawer" id="drawer-memory" hidden aria-label="记忆">
     <h2>记忆</h2>
-    <p class="muted">本次会话中保留的上下文（最近 12 轮）。仅保存在当前页面内存中。</p>
-    <ol id="memory-list" class="memory-list"></ol>
+    <p class="muted">对话按天归档；发给模型的上下文为最近 12 条。</p>
+    <label class="inline-check"><input type="checkbox" id="set-persist" /> 跨会话保存（仅保存在本机浏览器）</label>
+    <div id="memory-list" class="memory-list"></div>
     <button class="btn" id="btn-clear-memory" type="button">清空记忆</button>
   </section>
 
@@ -92,6 +93,15 @@
       <label><input type="checkbox" id="set-focus" /> 专注视图</label>
     </div>
     <div class="setting">
+      <label for="set-quality" class="label">画质</label>
+      <select id="set-quality">
+        <option value="auto">自动</option>
+        <option value="high">高（泛光）</option>
+        <option value="standard">标准</option>
+        <option value="eco">省电（24fps，无泛光与星尘）</option>
+      </select>
+    </div>
+    <div class="setting">
       <label for="set-motion" class="label">减少动画</label>
       <select id="set-motion">
         <option value="system">跟随系统</option>
@@ -100,6 +110,18 @@
       </select>
       <p class="muted" id="motion-status"></p>
     </div>
+    <div class="setting">
+      <span class="label">键盘快捷键</span>
+      <dl class="shortcuts">
+        <dt><kbd>Esc</kbd></dt><dd>打断播报 / 停止生成</dd>
+        <dt><kbd>/</kbd></dt><dd>聚焦输入框</dd>
+        <dt><kbd>Alt</kbd>+<kbd>1</kbd>–<kbd>4</kbd></dt><dd>控制台 / 对话 / 记忆 / 设置</dd>
+        <dt><kbd>Alt</kbd>+<kbd>F</kbd></dt><dd>专注视图</dd>
+        <dt><kbd>Alt</kbd>+<kbd>V</kbd></dt><dd>直接对话开关</dd>
+        <dt><kbd>Alt</kbd>+<kbd>H</kbd>/<kbd>P</kbd>/<kbd>A</kbd></dt><dd>人形 / 粒子 / 自动</dd>
+        <dt>按住 <kbd>空格</kbd></dt><dd>按下说话（降级模式）</dd>
+      </dl>
+    </div>
     <p class="muted small">界面中的“情绪”是表达风格，由回复文本、后端指令和任务状态决定，不代表模型拥有真实情绪，也不会推断你的情绪。</p>
   </section>
 
@@ -107,12 +129,15 @@
   <form class="inputbar" id="inputbar" autocomplete="off">
     <span class="vad-meter" id="vad-meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
     <label class="sr-only" for="prompt">输入消息</label>
-    <input id="prompt" name="prompt" type="text" placeholder="说出你的想法…" enterkeyhint="send" />
+    <input id="prompt" name="prompt" type="text" placeholder="说出你的想法…（按 / 聚焦）" enterkeyhint="send" />
     <div class="form-chips" role="radiogroup" aria-label="形态">
       <button type="button" class="chip" data-form="auto" role="radio"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="12" rx="9" ry="3.6" /><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(60 12 12)" /><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(120 12 12)" /></svg>自动</button>
       <button type="button" class="chip" data-form="human" role="radio"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5" /><path d="M5 20c1-4 4-6 7-6s6 2 7 6" /></svg>人形</button>
       <button type="button" class="chip" data-form="particle" role="radio"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2" class="fill" /><circle cx="12" cy="4" r="1" class="fill" /><circle cx="12" cy="20" r="1" class="fill" /><circle cx="4" cy="12" r="1" class="fill" /><circle cx="20" cy="12" r="1" class="fill" /><circle cx="6.5" cy="6.5" r="1" class="fill" /><circle cx="17.5" cy="17.5" r="1" class="fill" /><circle cx="17.5" cy="6.5" r="1" class="fill" /><circle cx="6.5" cy="17.5" r="1" class="fill" /></svg>粒子</button>
     </div>
+    <button type="button" class="stop" id="btn-stop" title="打断（Esc）" aria-label="打断播报">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" class="fill" /></svg>
+    </button>
     <button type="button" class="mic" id="btn-mic" aria-pressed="false" aria-label="直接对话">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
     </button>

@@ -8,6 +8,7 @@ import {
   WebGLRenderer, Scene, PerspectiveCamera, BufferGeometry, BufferAttribute, Points,
   ShaderMaterial, AdditiveBlending, Mesh, PlaneGeometry, LineLoop, LineBasicMaterial, Color, Vector2
 } from 'three';
+import { createBloom } from './bloom.js';
 import { buildParticles, buildStars, RINGS, CORE_RADIUS } from './particles.js';
 import {
   particleVertex, particleFragment, coreVertex, coreFragment, starVertex, starFragment
@@ -16,9 +17,11 @@ import {
 const FOV = 38;
 
 export function createStage(canvas, { humanPoints, lowEnd = false, onContextChange } = {}) {
-  const renderer = new WebGLRenderer({ canvas, antialias: false, alpha: true, powerPreference: 'high-performance' });
+  const renderer = new WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setClearColor(0x000000, 0);
+  renderer.setClearColor(0x02060b, 1);
+  // 一帧里有多次 render（泛光各 pass），draw call 统计按帧手动清零
+  renderer.info.autoReset = false;
   const isWebGL2 = renderer.capabilities.isWebGL2;
 
   const scene = new Scene();
@@ -47,7 +50,9 @@ export function createStage(canvas, { humanPoints, lowEnd = false, onContextChan
     u_perspectiveScale: { value: 500 },
     u_pointScale: { value: 1 },
     u_hue: { value: 200 },
-    u_motion: { value: 1 }
+    u_motion: { value: 1 },
+    u_flow: { value: 1 },
+    u_speak: { value: 0 }
   };
   const particles = new Points(geo, new ShaderMaterial({
     uniforms,
@@ -114,8 +119,11 @@ export function createStage(canvas, { humanPoints, lowEnd = false, onContextChan
     camera.position.z = w / h < 1 ? 250 / Math.max(0.55, w / h) : 250;
     camera.updateProjectionMatrix();
     uniforms.u_perspectiveScale.value = renderer.getDrawingBufferSize(tmpSize).y / (2 * Math.tan((FOV * Math.PI) / 360));
+    bloom?.setSize();
   }
   const tmpSize = new Vector2();
+  let bloom = null;
+  let quality = { bloom: false, stars: true };
   const ro = new ResizeObserver(resize);
   ro.observe(canvas);
   resize();
@@ -137,7 +145,7 @@ export function createStage(canvas, { humanPoints, lowEnd = false, onContextChan
     lastDrawn = now;
     const s = frameFn?.(dt, now);
     if (s) apply(s, now);
-    renderer.render(scene, camera);
+    draw();
     stats.frames++;
     stats.drawCalls = renderer.info.render.calls;
     stats._acc += dt;
@@ -147,6 +155,12 @@ export function createStage(canvas, { humanPoints, lowEnd = false, onContextChan
       stats._acc = 0;
       stats._n = 0;
     }
+  }
+
+  function draw() {
+    renderer.info.reset();
+    if (bloom) bloom.render(scene, camera);
+    else renderer.render(scene, camera);
   }
 
   function apply(s, now) {
@@ -161,8 +175,11 @@ export function createStage(canvas, { humanPoints, lowEnd = false, onContextChan
     uniforms.u_hue.value = s.hue;
     uniforms.u_motion.value = s.motion;
     coreUniforms.u_coreGlow.value = s.glow;
-    coreUniforms.u_pulse.value = s.breath * 6;
-    coreUniforms.u_size.value = 18 + 16 * s.morph + s.breath * 60;
+    uniforms.u_speak.value = s.speak;
+    uniforms.u_flow.value = s.flow;
+    coreUniforms.u_pulse.value = s.breath * 6 + s.speak * 1.6;
+    coreUniforms.u_size.value = 18 + 16 * s.morph + s.breath * 60 + s.speak * 10;
+    if (bloom) bloom.strength = 0.7 + s.glow * 0.9 + s.speak * 0.5;
     const t = (now / 1000) * s.motion;
     for (const [i, r] of rings.entries()) {
       r.line.rotation.set(r.def.tilt + s.jitter * Math.sin(t * 0.7 + i * 2.1), s.spinAngle * 0.6 + r.def.phase, 0);
@@ -209,16 +226,31 @@ export function createStage(canvas, { humanPoints, lowEnd = false, onContextChan
       sync();
     },
     get running() { return raf !== 0; },
+    /** 画质：bloom 泛光开关、星尘开关 */
+    setQuality(q) {
+      quality = { ...quality, ...q };
+      if (quality.bloom && !bloom) {
+        bloom = createBloom(renderer);
+        bloom.setSize();
+      } else if (!quality.bloom && bloom) {
+        bloom.dispose();
+        bloom = null;
+        renderer.setRenderTarget(null);
+      }
+      stars.visible = quality.stars;
+      stats.bloom = Boolean(bloom);
+    },
     setFpsCap(n) { fpsCap = n; },
     renderOnce(now = performance.now()) {
       const s = frameFn?.(0, now);
       if (s) apply(s, now);
-      renderer.render(scene, camera);
+      draw();
     },
     dispose() {
       cancelAnimationFrame(raf);
       raf = 0;
       ro.disconnect();
+      bloom?.dispose();
       scene.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); });
       renderer.dispose();
     }

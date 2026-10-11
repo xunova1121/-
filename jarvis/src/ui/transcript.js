@@ -1,29 +1,75 @@
-/** 对话记录 DOM。用 textContent 写入，杜绝把模型输出当 HTML 插入。 */
+/**
+ * 对话记录 DOM。流式阶段用 textContent 追加纯文本；回复完成后按极简 Markdown 重排，
+ * 全程只用 createElement + textContent，从不把模型输出当 HTML 插入。
+ */
+import { parseMarkdown } from '../core/markdown.js';
+
+const LABEL = { user: '你', agent: '贾维斯' };
+
+export function renderBlocks(container, text) {
+  container.replaceChildren(...parseMarkdown(text).map((b) => {
+    if (b.type === 'code') {
+      const pre = document.createElement('pre');
+      pre.textContent = b.text;
+      return pre;
+    }
+    if (b.type === 'list') {
+      const list = document.createElement(b.ordered ? 'ol' : 'ul');
+      for (const spans of b.items) {
+        const li = document.createElement('li');
+        li.append(...spans.map(span));
+        list.append(li);
+      }
+      return list;
+    }
+    const p = document.createElement('p');
+    p.append(...b.spans.map(span));
+    return p;
+  }));
+}
+
+function span(s) {
+  if (!s.bold && !s.code) return document.createTextNode(s.text);
+  const el = document.createElement(s.code ? 'code' : 'strong');
+  el.textContent = s.text;
+  return el;
+}
+
+const hhmm = (ts) => new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+
 export class Transcript {
   constructor(root) {
     this.root = root;
     this.interimEl = null;
   }
 
-  add(role, text = '') {
+  add(role, text = '', ts = Date.now()) {
     this.clearInterim();
     const el = document.createElement('div');
     el.className = `msg ${role}`;
-    el.textContent = text;
+    const head = document.createElement('span');
+    head.className = 'who';
+    head.textContent = `${LABEL[role] ?? role} · ${hhmm(ts)}`;
+    const body = document.createElement('div');
+    body.className = 'body';
+    body.textContent = text;
+    el.append(head, body);
     this.root.append(el);
     this.#scroll();
+    let raw = text;
     return {
       el,
-      append: (d) => { el.textContent += d; this.#scroll(); },
-      set: (t) => { el.textContent = t; },
+      append: (d) => { raw += d; body.textContent = raw; this.#scroll(); },
       done: (meta) => {
         el.classList.remove('streaming');
+        if (role === 'agent' && raw) renderBlocks(body, raw);
         if (meta) {
           const m = document.createElement('span');
           m.className = 'meta';
           m.textContent = meta;
           el.append(m);
         }
+        this.#scroll();
       }
     };
   }

@@ -28,11 +28,11 @@ const browser = await chromium.launch({
   await page.waitForFunction(() => window.__jarvis?.stage?.stats.frames > 20, null, { timeout: 30000 });
   const stats = await page.evaluate(() => {
     const s = window.__jarvis.stage.stats;
-    return { count: s.count, drawCalls: s.drawCalls, isWebGL2: s.isWebGL2, fps: s.fps };
+    return { count: s.count, drawCalls: s.drawCalls, isWebGL2: s.isWebGL2, fps: s.fps, bloom: s.bloom };
   });
   check('WebGL 主视觉启动', true, JSON.stringify(stats));
   check('粒子数 4600 + 1200', stats.count === 5800, String(stats.count));
-  check('draw calls ≤ 12', stats.drawCalls <= 12, String(stats.drawCalls));
+  check('泛光开启时 draw calls ≤ 12', stats.bloom === true && stats.drawCalls <= 12, `bloom=${stats.bloom} calls=${stats.drawCalls}`);
 
   await page.waitForTimeout(1500);
   await page.screenshot({ path: `${OUT}/01-calm.png` });
@@ -133,6 +133,38 @@ const browser = await chromium.launch({
   check('专注视图降频到 ~20fps', (fb - fa) / 2 <= 22, `${((fb - fa) / 2).toFixed(1)} fps`);
   await page.click('#btn-focus');
 
+  // —— 升级功能：打断、快捷键、画质、记忆
+  await page.evaluate(() => { window.__barge = window.__jarvis.send('最近压力好大'); });
+  await page.waitForFunction(() => document.querySelector('.msg.agent.streaming .body')?.textContent.length > 3, null, { timeout: 10000 });
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  const barge = await page.evaluate(() => ({
+    streaming: document.querySelectorAll('.msg.agent.streaming').length,
+    meta: [...document.querySelectorAll('.msg.agent .meta')].at(-1)?.textContent,
+    gen: document.body.classList.contains('generating')
+  }));
+  check('Esc 打断生成', barge.streaming === 0 && barge.meta === '已打断' && !barge.gen, JSON.stringify(barge));
+
+  await page.keyboard.press('Alt+Digit2');
+  check('Alt+2 切到对话视图', await page.evaluate(() => document.body.classList.contains('view-chat')));
+  await page.keyboard.press('Alt+Digit1');
+  await page.keyboard.press('/');
+  check('/ 聚焦输入框', await page.evaluate(() => document.activeElement.id === 'prompt'));
+  await page.evaluate(() => document.activeElement.blur());
+
+  const who = await page.locator('.msg.agent .who').first().textContent();
+  check('消息带发送者与时间', /^贾维斯 · \d{2}:\d{2}$/.test(who), who);
+
+  await page.click('[data-view="settings"]');
+  await page.selectOption('#set-quality', 'eco');
+  const e0 = await page.evaluate(() => window.__jarvis.stage.stats.frames);
+  await page.waitForTimeout(2000);
+  const e1 = await page.evaluate(() => window.__jarvis.stage.stats.frames);
+  const eco = await page.evaluate(() => ({ bloom: window.__jarvis.stage.stats.bloom, q: window.__jarvis.quality }));
+  check('省电档：关泛光、≤ 24fps', !eco.bloom && eco.q.fps === 24 && (e1 - e0) / 2 <= 25, `${((e1 - e0) / 2).toFixed(1)}fps`);
+  await page.selectOption('#set-quality', 'auto');
+  await page.click('[data-view="settings"]');
+
   // 上下文丢失恢复
   const restored = await page.evaluate(async () => {
     const gl = window.__jarvis.stage.renderer.getContext();
@@ -149,6 +181,27 @@ const browser = await chromium.launch({
   check('WebGL 上下文丢失后恢复 ≤ 500ms', typeof restored === 'number' && restored <= 500, `${restored}ms`);
 
   check('无页面错误', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
+// ---------- 1b. 记忆跨会话保存 ----------
+{
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  const page = await ctx.newPage();
+  await page.goto(BASE);
+  await page.click('[data-view="memory"]');
+  await page.check('#set-persist');
+  await page.fill('#prompt', '现在几点');
+  await page.press('#prompt', 'Enter');
+  await page.waitForFunction(() => window.__jarvis.machine.task === 'done', null, { timeout: 20000 });
+  await page.reload();
+  await page.click('[data-view="memory"]');
+  const mem = await page.textContent('#memory-list');
+  check('开启保存后刷新仍保留记忆，按天分组', mem.includes('今天') && mem.includes('现在几点'), mem.slice(0, 60));
+  await page.click('#btn-clear-memory');
+  await page.reload();
+  await page.click('[data-view="memory"]');
+  check('清空后不再保留', (await page.textContent('#memory-list')).includes('暂无'));
   await ctx.close();
 }
 
