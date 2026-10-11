@@ -15,8 +15,9 @@ export function parseMarkdown(text) {
     if (/^```/.test(line)) {
       flush();
       const code = [];
+      const lang = line.slice(3).trim().split(/\s/)[0] || '';
       for (i++; i < lines.length && !/^```/.test(lines[i]); i++) code.push(lines[i]);
-      blocks.push({ type: 'code', text: code.join('\n') });
+      blocks.push({ type: 'code', text: code.join('\n'), lang });
       continue;
     }
     const h = line.match(/^(#{1,3})\s+(.*)$/);

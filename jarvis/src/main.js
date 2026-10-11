@@ -25,6 +25,9 @@ import * as agentMemory from './agent/memory.js';
 import { initPanels } from './ui/panels.js';
 import { loadConfig, saveConfig, createAdapter, displayName, providerById, resolveVoice } from './llm/config.js';
 import { initVoicePanel } from './ui/voicePanel.js';
+import * as skillPacks from './agent/skillPacks.js';
+import { initSkillsPanel } from './ui/skillsPanel.js';
+import { initPalette } from './ui/palette.js';
 import { matchWake, WakeWindow } from './core/wakeWord.js';
 import { playCue } from './perception/voiceFx.js';
 import { MetricsPoller } from './api/metrics.js';
@@ -306,6 +309,7 @@ function updateModelLabels() {
   $('#mode-text').textContent = name;
   $('#model-chip-text').textContent = name;
   $('#mode-pill').title = `当前模型：${name}${gateway ? '（经本机网关）' : ''}。点击切换`;
+  $('#hud-model').textContent = name.length > 22 ? `${name.slice(0, 21)}…` : name;
 }
 
 const metrics = () => (gateway ? fetch(`${gateway.origin}/api/local/metrics`).then((r) => r.json()) : browserMetrics());
@@ -400,6 +404,14 @@ function makeSpeech() {
   };
 }
 
+/** “/技能名 内容” → 明确要求模型使用该技能（界面上仍显示用户原话） */
+async function expandSlash(text) {
+  if (!text.startsWith('/')) return text;
+  const names = (await skillPacks.enabled().catch(() => [])).map((p) => p.name);
+  const m = skillPacks.matchSlash(text, names);
+  return m ? `请使用技能「${m.name}」完成：${m.rest || '（用户没有补充内容，先说明这个技能能做什么并询问需要的材料）'}` : text;
+}
+
 async function send(text) {
   text = String(text || '').trim();
   if (!text && !attachments.length) return;
@@ -439,7 +451,7 @@ async function send(text) {
   const t0 = now();
   try {
     const result = await runAgent({
-      adapter, model, history: llmHistory, userText, signal: ctrl.signal,
+      adapter, model, history: llmHistory, userText: await expandSlash(userText), signal: ctrl.signal,
       tools: createTools({
         metrics,
         tavilyKey: llmConfig.tavilyKey,
@@ -482,6 +494,7 @@ async function send(text) {
       }
     });
     dashboard.setLatency(firstToken ? firstToken - t0 : null, total);
+    $('#hud-latency').textContent = firstToken ? `${Math.round(firstToken - t0)} ms` : '—';
     rememberTurn('assistant', result.text || '（完成）');
     $('#mode-pill').classList.remove('offline');
     turn.streamDone = true;
@@ -725,7 +738,7 @@ async function setFaceFollow(on) {
 
 
 // ---------------------------------------------------------------- 右侧面板
-const PANES = ['workspace', 'knowledge', 'mind', 'models', 'system', 'settings'];
+const PANES = ['workspace', 'knowledge', 'mind', 'skills', 'models', 'system', 'settings'];
 let currentPane = null;
 const narrow = matchMedia('(max-width: 860px)');
 function showPanel(name, { toggle = false } = {}) {
@@ -745,6 +758,7 @@ function showPanel(name, { toggle = false } = {}) {
   if (name === 'knowledge') panels.refreshKb();
   if (name === 'mind') panels.refreshMind();
   if (name === 'models') { panels.refreshModels(); voicePanel.render(); }
+  if (name === 'skills') skillsPanel.refresh();
 }
 for (const b of document.querySelectorAll('.rail-btn')) b.addEventListener('click', () => showPanel(b.dataset.panel, { toggle: true }));
 for (const b of document.querySelectorAll('[data-open]')) b.addEventListener('click', () => showPanel(b.dataset.open));
@@ -764,6 +778,103 @@ const panels = initPanels({
   }
 });
 const voicePanel = initVoicePanel({ panels, speaker, getGateway: () => gateway });
+const skillsPanel = initSkillsPanel({
+  toast: (t) => toast(t),
+  onUse: (name) => {
+    $('#prompt').value = `/${name} `;
+    if (narrow.matches) body.classList.remove('side-open');
+    $('#prompt').focus();
+  },
+  onChange: (list) => {
+    panels.refreshMind();
+    $('#hud-skills').textContent = `${list.filter((p) => p.enabled).length} 个启用`;
+  }
+});
+
+// ---------------------------------------------------------------- 欢迎页、HUD 时钟、命令面板
+const QUICK = [
+  { icon: '⌘', title: '写一个网页', desc: '写代码并在工作区实时预览', prompt: '帮我写一个网页' },
+  { icon: '▤', title: '做汇报 PPT', desc: '结论先行，一页一个观点', prompt: '做一个PPT' },
+  { icon: '▦', title: '分析表格', desc: '上传 Excel / CSV，找趋势与异常', upload: true },
+  { icon: '◎', title: '导入知识库', desc: 'PDF、Word、PPT 都能读', panel: 'knowledge' },
+  { icon: 'ϟ', title: '安装技能', desc: '一键获得新的做事方法', panel: 'skills' },
+  { icon: '◉', title: '记住偏好', desc: '告诉我你的习惯，越用越懂你', prompt: '记住我喜欢简洁的回答' }
+];
+function greeting() {
+  const h = new Date().getHours();
+  return h < 5 ? '夜深了' : h < 11 ? '早上好' : h < 13 ? '中午好' : h < 18 ? '下午好' : '晚上好';
+}
+function renderWelcome() {
+  if (document.querySelector('#transcript .msg')) return;
+  const cards = QUICK.map((q) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'quick';
+    b.innerHTML = '<span class="quick-icon"></span><span class="quick-title"></span><span class="quick-desc"></span>';
+    b.querySelector('.quick-icon').textContent = q.icon;
+    b.querySelector('.quick-title').textContent = q.title;
+    b.querySelector('.quick-desc').textContent = q.desc;
+    b.addEventListener('click', () => {
+      if (q.prompt) send(q.prompt);
+      else if (q.panel) showPanel(q.panel);
+      else if (q.upload) $('#btn-attach')?.click();
+    });
+    return b;
+  });
+  const w = document.createElement('div');
+  w.className = 'welcome';
+  const h = document.createElement('h1');
+  h.textContent = `${greeting()}，我是贾维斯`;
+  const p = document.createElement('p');
+  p.textContent = narrow.matches ? '交给我一个任务，或者试试下面这些。输入 / 可以点名技能。' : '交给我一个任务，或者试试下面这些。输入 / 可以点名技能，Ctrl + K 搜索任何操作。';
+  const grid = document.createElement('div');
+  grid.className = 'quick-grid';
+  grid.append(...cards);
+  w.append(h, p, grid);
+  $('#transcript').prepend(w);
+}
+
+const WEEK = '日一二三四五六';
+function tickClock() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  $('#hud-time').textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  $('#hud-date').textContent = `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())} · 星期${WEEK[d.getDay()]}`;
+}
+tickClock();
+setInterval(tickClock, 1000);
+
+const PANE_TITLE = { workspace: '工作区', knowledge: '知识库', mind: '记忆与进化', skills: '技能', models: '模型与声音', system: '系统状态', settings: '设置' };
+const palette = initPalette({
+  commands: () => {
+    const toggle = (id, title) => ({ id: `t-${id}`, group: '开关', title: `${$(`#${id}`).checked ? '关闭' : '开启'}${title}`, run: () => $(`#${id}`).click() });
+    return [
+      ...QUICK.filter((q) => q.prompt).map((q) => ({ id: `q-${q.title}`, group: '常用任务', title: q.title, hint: q.desc, run: () => send(q.prompt) })),
+      ...skillsPanel.installed.filter((p) => p.enabled).map((p) => ({ id: `s-${p.name}`, group: '技能', title: `/${p.name}`, hint: p.description, run: () => { $('#prompt').value = `/${p.name} `; $('#prompt').focus(); } })),
+      ...PANES.map((p, i) => ({ id: `p-${p}`, group: '面板', title: `打开${PANE_TITLE[p]}`, keys: `Alt ${i + 1}`, run: () => showPanel(p) })),
+      { id: 'f-orb', group: '形态', title: '切换为光核', keys: 'Alt O', run: () => setStyle('orb') },
+      { id: 'f-holo', group: '形态', title: '切换为全息胸像', keys: 'Alt H', run: () => setStyle('holo') },
+      { id: 'f-wire', group: '形态', title: '切换为线框', keys: 'Alt W', run: () => setStyle('wire') },
+      toggle('set-tts', '语音朗读'),
+      ...(speechRecognitionSupported ? [toggle('set-voice', '直接对话'), toggle('set-wake', '唤醒词')] : []),
+      toggle('set-face', '人脸跟随'),
+      { id: 'focus', group: '开关', title: body.classList.contains('focus-view') ? '退出专注视图' : '进入专注视图', keys: 'Alt F', run: () => $('#btn-focus').click() },
+      { id: 'new', group: '操作', title: '新对话', hint: '清空屏幕与上下文（记忆、知识库、技能保留）', run: () => {
+        interrupt();
+        history.length = 0;
+        if (settings.persistMemory) saveMemory(history, storage);
+        $('#transcript').replaceChildren();
+        renderWelcome();
+      } },
+      { id: 'stop', group: '操作', title: '打断 / 停止当前任务', keys: 'Esc', run: () => interrupt() },
+      { id: 'preview-voice', group: '操作', title: '试听当前声音', run: () => speaker.preview() },
+      { id: 'fullscreen', group: '操作', title: '全屏', run: () => $('#btn-fullscreen').click() }
+    ];
+  }
+});
+palette.onFallback = (text) => send(text);
+$('#btn-palette').addEventListener('click', () => palette.open());
+if (/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) $('#palette-kbd').textContent = '⌘K';
 $('#set-quality').addEventListener('change', (e) => {
   setSetting('quality', e.target.value);
   applyFpsCap();
@@ -857,6 +968,7 @@ if (narrow.matches) body.classList.add('side-closed');
 showPanel(PANES.includes(startPane) ? startPane : 'workspace');
 if (narrow.matches) body.classList.remove('side-open');
 setTask('idle');
+renderWelcome();
 
 // ---------------------------------------------------------------- 键盘快捷键
 //   Esc 打断   /  聚焦输入框   Alt+1..6 面板   Alt+F 专注视图   Alt+V 直接对话
@@ -869,7 +981,7 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.altKey && !e.ctrlKey && !e.metaKey) {
     const k = e.code;
-    const n = /^Digit([1-6])$/.exec(k)?.[1];
+    const n = /^Digit([1-7])$/.exec(k)?.[1];
     if (n) showPanel(PANES[n - 1]);
     else if (k === 'KeyF') setFocusView(!settings.focusView);
     else if (k === 'KeyV' && speechRecognitionSupported) setDirectVoice(voice.mode === 'off');
@@ -902,6 +1014,8 @@ window.__jarvis = {
   machine,
   speaker,
   get voice() { return voice; },
+  get skills() { return skillsPanel; },
+  get palette() { return palette; },
   settings,
   live,
   get stage() { return stage; },

@@ -38,6 +38,12 @@ export function plan(messages) {
   if (results.length) {
     const failed = results.find((r) => r.isError);
     if (failed) return { emotion: '安抚', text: `执行时遇到问题：${failed.content.slice(0, 120)}。我们换个方式再试一次？` };
+    if (used.has('use_skill')) {
+      if (/^没有名为|已被用户停用/.test(lastResult.content)) return { emotion: '平静', text: lastResult.content };
+      const name = lastResult.content.match(/^# 技能：(.+)$/m)?.[1] ?? '';
+      const steps = [...lastResult.content.matchAll(/^#{2,3}\s+(.+)$/gm)].map((x) => `- ${x[1]}`).slice(0, 6).join('\n');
+      return { emotion: '专注', text: `已加载技能「${name}」。按这个技能的做法，要点是：\n${steps || '（见技能说明）'}\n\n离线演示模型只能展示流程；在“模型”里接入大模型后，我会按这个技能完整执行。` };
+    }
     if (used.has('write_file') && !used.has('preview') && /网页|页面|网站|游戏|html/i.test(q)) {
       return { calls: [call('preview', { path: 'demo/clock.html' })] };
     }
@@ -72,6 +78,8 @@ export function plan(messages) {
   }
 
   // —— 还没调用工具：按意图选择工具
+  const skill = q.match(/请使用技能「([^」]+)」/);
+  if (skill) return { emotion: '专注', calls: [call('use_skill', { name: skill[1] })] };
   const m = q.match(/记住[：:,，\s]*(.+)/) || q.match(/^(我(?:喜欢|讨厌|叫|是|的|习惯|住在|在).+)/);
   if (m) return { emotion: '亲和', calls: [call('remember', { content: m[1].trim(), category: /喜欢|讨厌|习惯/.test(m[1]) ? 'preference' : 'profile' })] };
   if (/(写|做|开发|生成|编写).{0,8}(网页|页面|网站|游戏|小程序|html)/i.test(q)) {

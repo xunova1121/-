@@ -9,9 +9,32 @@ const LABEL = { user: '你', agent: '贾维斯' };
 export function renderBlocks(container, text) {
   container.replaceChildren(...parseMarkdown(text).map((b) => {
     if (b.type === 'code') {
+      // 代码块：语言标签 + 复制按钮
+      const wrap = document.createElement('div');
+      wrap.className = 'code';
+      const bar = document.createElement('div');
+      bar.className = 'code-bar';
+      const lang = document.createElement('span');
+      lang.textContent = b.lang || 'text';
+      const copy = document.createElement('button');
+      copy.type = 'button';
+      copy.className = 'code-copy';
+      copy.textContent = '复制';
+      copy.addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(b.text); copy.textContent = '已复制'; } catch {
+          const r = document.createRange();
+          r.selectNodeContents(pre);
+          getSelection().removeAllRanges();
+          getSelection().addRange(r);
+          copy.textContent = '已选中，按 Ctrl+C';
+        }
+        setTimeout(() => { copy.textContent = '复制'; }, 1600);
+      });
+      bar.append(lang, copy);
       const pre = document.createElement('pre');
       pre.textContent = b.text;
-      return pre;
+      wrap.append(bar, pre);
+      return wrap;
     }
     if (b.type === 'heading') {
       const h = document.createElement(`h${b.level + 2}`);
@@ -60,7 +83,8 @@ const TOOL_LABEL = {
   remember: '记住', recall: '回忆', forget: '遗忘', save_skill: '习得技能', kb_search: '检索知识库',
   list_files: '列出文件', read_file: '读取文件', write_file: '写入文件', create_document: '生成文档',
   run_javascript: '运行 JS', run_python: '运行 Python', preview: '打开预览', fetch_url: '读取网页',
-  web_search: '联网搜索', get_current_time: '读取时间', get_local_metrics: '读取系统状态'
+  web_search: '联网搜索', get_current_time: '读取时间', get_local_metrics: '读取系统状态',
+  use_skill: '使用技能', read_skill_file: '读取技能文件'
 };
 
 function summarizeArgs(name, a = {}) {
@@ -119,6 +143,7 @@ export class Transcript {
    */
   add(role, text = '', ts = Date.now()) {
     this.clearInterim();
+    this.root.querySelector('.welcome')?.remove();
     const el = document.createElement('div');
     el.className = `msg ${role}`;
     const head = document.createElement('span');

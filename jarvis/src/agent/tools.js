@@ -7,6 +7,7 @@ import * as memory from './memory.js';
 import * as kb from './knowledge.js';
 import { parseFile, generate, htmlToText } from './docs.js';
 import { runJavaScript, runPython } from './sandbox.js';
+import * as packs from './skillPacks.js';
 
 const S = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const str = (description) => ({ type: 'string', description });
@@ -48,6 +49,28 @@ export function createTools(ctx) {
       description: '把刚刚完成的、以后可复用的做法保存为技能（例如“生成周报的格式与步骤”）。同名技能会升级为新版本。只在多步任务成功后、且方法确实可复用时调用。',
       input_schema: S({ name: str('技能名称'), description: str('什么情况下用'), steps: str('具体步骤 / 模板 / 要点') }, ['name', 'steps']),
       run: async (a) => { const s = await memory.saveSkill(a); return `技能「${s.name}」已保存（v${s.version}）。`; }
+    },
+    {
+      name: 'use_skill',
+      description: '读取一个已安装技能的完整说明（SKILL.md）。任务与“已安装的技能”里某个技能的描述相符，或用户用“/技能名”点名时，先调用它，再按说明执行。',
+      input_schema: S({ name: str('技能名称') }, ['name']),
+      run: async ({ name }) => {
+        const p = await packs.get(name);
+        if (!p) return `没有名为「${name}」的技能。已安装：${(await packs.enabled()).map((x) => x.name).join('、') || '无'}`;
+        if (!p.enabled) return `技能「${name}」已被用户停用。`;
+        return clip(packs.render(p), 30000);
+      }
+    },
+    {
+      name: 'read_skill_file',
+      description: '读取技能附带的文件（模板、参考资料、脚本），路径来自 use_skill 返回的文件列表。',
+      input_schema: S({ name: str('技能名称'), path: str('文件相对路径') }, ['name', 'path']),
+      run: async ({ name, path }) => {
+        const p = await packs.get(name);
+        const text = p?.files?.[path.replace(/^\.?\//, '')];
+        if (text == null) throw new Error(`技能「${name}」里没有文件 ${path}`);
+        return clip(text, 30000);
+      }
     },
     {
       name: 'kb_search',

@@ -22,14 +22,18 @@
         <span class="dot" aria-hidden="true"></span><span id="mode-text">内置演示</span><span class="pill-sep" aria-hidden="true">/</span><span id="task-text">待命</span>
       </button>
       <div class="top-actions">
+        <button class="cmd-btn" id="btn-palette" type="button" title="命令面板（Ctrl+K）" aria-label="命令面板">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m20 20-4.5-4.5" /></svg>
+          <span>搜索命令</span><kbd id="palette-kbd">Ctrl K</kbd>
+        </button>
         <button class="level-chip" id="level-chip" type="button" data-open="mind" title="进化等级">
           <span class="lv">LV</span><b id="level-num">1</b><span class="xpbar"><i id="level-bar"></i></span>
         </button>
         <button class="icon-btn" id="btn-focus" type="button" aria-pressed="false" title="专注视图（Alt+F）" aria-label="专注视图">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></svg>
         </button>
         <button class="icon-btn" id="btn-fullscreen" type="button" title="全屏" aria-label="全屏">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2" /></svg>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
         </button>
       </div>
     </header>
@@ -39,9 +43,10 @@
       <button class="rail-btn" data-panel="workspace" type="button" title="工作区（Alt+1）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h7l2 2h9v10H3z" /></svg><span>工作区</span></button>
       <button class="rail-btn" data-panel="knowledge" type="button" title="知识库（Alt+2）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6a2 2 0 0 1 2 2v13a2 2 0 0 0-2-2H4zM20 5h-6a2 2 0 0 0-2 2v13a2 2 0 0 1 2-2h6z" /></svg><span>知识库</span></button>
       <button class="rail-btn" data-panel="mind" type="button" title="记忆与进化（Alt+3）"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" /></svg><span>进化</span></button>
-      <button class="rail-btn" data-panel="models" type="button" title="模型（Alt+4）"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" /><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4" /></svg><span>模型</span></button>
-      <button class="rail-btn" data-panel="system" type="button" title="系统状态（Alt+5）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4" /></svg><span>系统</span></button>
-      <button class="rail-btn" data-panel="settings" type="button" title="设置（Alt+6）"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg><span>设置</span></button>
+      <button class="rail-btn" data-panel="skills" type="button" title="技能（Alt+4）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z" /></svg><span>技能</span></button>
+      <button class="rail-btn" data-panel="models" type="button" title="模型（Alt+5）"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" /><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4" /></svg><span>模型</span></button>
+      <button class="rail-btn" data-panel="system" type="button" title="系统状态（Alt+6）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4" /></svg><span>系统</span></button>
+      <button class="rail-btn" data-panel="settings" type="button" title="设置（Alt+7）"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg><span>设置</span></button>
     </nav>
 
     <!-- 中间：光核 + 对话 + 输入 -->
@@ -49,9 +54,17 @@
       <section class="stage" id="stage-wrap" aria-label="贾维斯">
         <div id="fallback-bg"></div>
         <canvas id="stage"></canvas>
+        <div class="hud-frame" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
         <div class="hud hud-left" aria-hidden="true">
           <div class="hud-k">表达</div><div class="hud-v" id="hud-emotion">平静</div>
           <div class="hud-k">任务</div><div class="hud-v" id="hud-task">待命</div>
+          <div class="hud-k">模型</div><div class="hud-v dim" id="hud-model">—</div>
+          <div class="hud-k">首字</div><div class="hud-v dim" id="hud-latency">—</div>
+          <div class="hud-k">技能</div><div class="hud-v dim" id="hud-skills">0</div>
+        </div>
+        <div class="hud hud-clock" aria-hidden="true">
+          <div class="hud-time" id="hud-time">00:00:00</div>
+          <div class="hud-date" id="hud-date"></div>
         </div>
         <div class="hud hud-right">
           <div class="form-chips" role="radiogroup" aria-label="形态">
@@ -154,6 +167,26 @@
         </div>
       </section>
 
+      <!-- 技能 -->
+      <section class="pane" data-pane="skills" hidden>
+        <header class="pane-head"><h2>技能</h2><span class="badge" id="skill-count">0 个</span></header>
+        <p class="muted small">技能是一份“做法说明书”（SKILL.md，可附带模板与脚本），与开源 Agent Skills 格式通用。安装后贾维斯会在合适的时候自动使用；也可以在输入框输入 <kbd>/</kbd> 点名使用。技能内容会交给大模型执行，只安装你信任的来源。</p>
+        <div class="skill-install">
+          <input id="skill-url" spellcheck="false" placeholder="GitHub 技能地址：github.com/用户/仓库/tree/分支/技能文件夹" />
+          <div class="pane-actions">
+            <button class="btn" type="button" id="btn-skill-url">从 GitHub 安装</button>
+            <button class="btn ghost" type="button" id="btn-skill-file">上传 .zip / SKILL.md</button>
+            <input type="file" id="skill-input" accept=".zip,.md" multiple hidden />
+          </div>
+          <p class="muted small" id="skill-status" role="status"></p>
+        </div>
+        <h3 class="sub">已安装</h3>
+        <ul class="skill-list" id="skill-list"></ul>
+        <div class="skill-viewer" id="skill-viewer" hidden></div>
+        <h3 class="sub">推荐技能</h3>
+        <div class="skill-grid" id="skill-recommend"></div>
+      </section>
+
       <!-- 模型 -->
       <section class="pane" data-pane="models" hidden>
         <header class="pane-head"><h2>模型</h2><span class="badge" id="gw-badge">单文件版</span></header>
@@ -244,7 +277,7 @@
             <dt><kbd>Enter</kbd></dt><dd>发送（<kbd>Shift</kbd>+<kbd>Enter</kbd> 换行）</dd>
             <dt><kbd>Esc</kbd></dt><dd>打断朗读 / 停止任务</dd>
             <dt><kbd>/</kbd></dt><dd>聚焦输入框</dd>
-            <dt><kbd>Alt</kbd>+<kbd>1</kbd>–<kbd>6</kbd></dt><dd>工作区 / 知识库 / 进化 / 模型 / 系统 / 设置</dd>
+            <dt><kbd>Alt</kbd>+<kbd>1</kbd>–<kbd>7</kbd></dt><dd>工作区 / 知识库 / 进化 / 技能 / 模型 / 系统 / 设置</dd>
             <dt><kbd>Alt</kbd>+<kbd>F</kbd></dt><dd>专注视图</dd>
             <dt><kbd>Alt</kbd>+<kbd>V</kbd></dt><dd>直接对话开关</dd>
             <dt><kbd>Alt</kbd>+<kbd>O</kbd>/<kbd>H</kbd>/<kbd>W</kbd></dt><dd>光核 / 胸像 / 线框</dd>

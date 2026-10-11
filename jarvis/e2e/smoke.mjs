@@ -104,6 +104,39 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
     check(`形态切换：${s}`, cur.s === s && cur.calls <= 12, JSON.stringify(cur));
   }
 
+  // —— 欢迎页、HUD
+  check('欢迎页与快捷任务', (await page.locator('.welcome .quick').count()) === 6 && /我是贾维斯/.test(await page.textContent('.welcome h1')));
+  check('HUD 时钟与模型', /^\d{2}:\d{2}:\d{2}$/.test(await page.textContent('#hud-time')) && (await page.textContent('#hud-model')).length > 0);
+
+  // —— 技能：一键安装内置技能 → “/” 自动补全 → 点名使用
+  await page.evaluate(() => window.__jarvis.showPanel('skills'));
+  await page.locator('.skill-tile', { hasText: '/weekly-report' }).locator('button').click();
+  await page.waitForFunction(() => document.querySelectorAll('#skill-list .skill').length === 1, null, { timeout: 5000 }).catch(() => {});
+  check('安装内置技能', (await page.locator('#skill-list .skill').count()) === 1 && /1 \/ 1 个启用/.test(await page.textContent('#skill-count')));
+  await page.fill('#prompt', '/wee');
+  await page.waitForTimeout(150);
+  check('输入 / 弹出技能补全', await page.isVisible('#slash-menu') && /weekly-report/.test(await page.textContent('#slash-menu')));
+  await page.press('#prompt', 'Enter');
+  check('回车选中补全项', (await page.inputValue('#prompt')) === '/weekly-report ');
+  await page.type('#prompt', '本周完成登录模块');
+  const before = await page.locator('.msg.agent').count();
+  await page.press('#prompt', 'Enter');
+  await page.waitForFunction((n) => document.querySelectorAll('.msg.agent').length > n && !document.querySelector('.msg.agent.streaming'), before, { timeout: 20000 });
+  const skillReply = await page.locator('.msg.agent').last().innerText();
+  check('“/技能名”让智能体先读取技能说明', /使用技能/.test(skillReply) && /已加载技能「weekly-report」/.test(skillReply), skillReply.slice(0, 80));
+  check('欢迎页在开始对话后收起', (await page.locator('.welcome').count()) === 0);
+  await page.locator('#skill-list .skill').locator('.switch').click();
+  await page.waitForTimeout(200);
+  check('停用技能', /0 \/ 1 个启用/.test(await page.textContent('#skill-count')));
+
+  // —— 命令面板
+  await page.keyboard.press('Control+k');
+  check('Ctrl+K 打开命令面板', await page.isVisible('.palette'));
+  await page.keyboard.type('设置');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(200);
+  check('命令面板执行“打开设置”', !(await page.isVisible('.palette')) && await page.isVisible('[data-pane="settings"]'));
+
   // —— 智能体：写网页 → 预览
   let reply = await ask(page, '帮我写一个网页');
   const tools1 = await page.locator('.msg.agent').last().locator('.tool-card .tn').allTextContents();
@@ -265,7 +298,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('Esc 打断任务', barge.streaming === 0 && /已打断/.test(barge.meta), JSON.stringify(barge));
   await page.keyboard.press('Alt+Digit2');
   check('Alt+2 打开知识库', await page.isVisible('[data-pane="knowledge"]'));
-  await page.keyboard.press('Alt+Digit6');
+  await page.keyboard.press('Alt+Digit7');
   await page.selectOption('#set-quality', 'eco');
   await page.waitForTimeout(400);
   const eco = await page.evaluate(() => ({ bloom: window.__jarvis.stage.stats.bloom, fps: window.__jarvis.quality.fps }));
