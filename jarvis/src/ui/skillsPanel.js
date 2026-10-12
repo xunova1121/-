@@ -60,6 +60,7 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
         el('span', { className: 'muted small', textContent: files ? `附带 ${files} 个文件` : '' }), view, use, del));
   }
 
+  const missing = (p) => Object.entries(p.files || {}).filter(([, f]) => f?.stub).map(([k]) => k);
   function show(p) {
     const v = $('#skill-viewer');
     v.dataset.name = p.name;
@@ -72,7 +73,8 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
       el('div', { className: 'skill-viewer-head' }, el('code', { textContent: `${p.name}/SKILL.md` }), close),
       body,
       files.length ? el('div', { className: 'muted small' }, `附带文件：${files.join('、')}`) : null,
-      p.skipped?.length ? el('div', { className: 'muted small' }, `未安装：${p.skipped.slice(0, 8).join('、')}${p.skipped.length > 8 ? ' …' : ''}`) : null
+      p.skipped?.length ? el('div', { className: 'muted small' }, `没装上的 ${p.skipped.length} 个文件：${p.skipped.slice(0, 40).join('、')}${p.skipped.length > 40 ? ' …' : ''}`) : null,
+      missing(p).length ? el('div', { className: 'muted small' }, `这台设备上缺 ${missing(p).length} 个附件（同步时不传大附件）：重新安装一次这个技能即可补齐`) : null
     ].filter(Boolean));
     v.hidden = false;
     v.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -114,8 +116,10 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
     try {
       const p = await packs.installFromGitHub(url, { onProgress: (m) => { status.textContent = m; } });
       const names = [p, ...(p.also || [])].map((x) => `「${x.name}」`).join('');
-      const skipped = [p, ...(p.also || [])].reduce((n, x) => n + x.skipped.length, 0);
-      status.textContent = `已安装${names}${skipped ? `（${skipped} 个文件未安装：二进制或过大）` : ''}`;
+      const all = [p, ...(p.also || [])];
+      const files = all.reduce((n, x) => n + Object.keys(x.files || {}).length, 0);
+      const skipped = all.flatMap((x) => x.skipped);
+      status.textContent = `已安装${names}，共 ${files + all.length} 个文件${skipped.length ? `；${skipped.length} 个没装上：${skipped.slice(0, 5).join('、')}${skipped.length > 5 ? ' …（点“查看”看全部）' : ''}` : ''}`;
       await refresh();
       return p;
     } catch (e) {
@@ -143,7 +147,7 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
   async function installFile(f) {
     try {
       const p = /\.zip$/i.test(f.name) ? await packs.installFromZip(await f.arrayBuffer(), f.name) : await packs.installFromText(await f.text(), f.name);
-      status.textContent = `已安装「${p.name}」${p.skipped.length ? `（${p.skipped.length} 个文件未安装）` : ''}`;
+      status.textContent = `已安装「${p.name}」${p.skipped.length ? `（${p.skipped.length} 个文件没装上：${p.skipped.slice(0, 5).join('、')}${p.skipped.length > 5 ? ' …' : ''}）` : ''}`;
       toast(`已安装技能：${p.name}`);
       await refresh();
       return p;

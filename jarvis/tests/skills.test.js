@@ -49,18 +49,21 @@ describe('安装与管理', () => {
     expect(await packs.list()).toEqual([]);
   });
 
-  it('从 zip 安装：SKILL.md 在子文件夹里，附带文本文件和模板 / 图片（二进制），跳过不认识的文件', async () => {
+  it('从 zip 安装：SKILL.md 在子文件夹里，附带文本文件和模板 / 图片 / 字体（二进制），跳过可执行文件和系统垃圾', async () => {
     const zip = new JSZip();
     zip.file('my-skill/SKILL.md', SKILL);
     zip.file('my-skill/templates/report.md', '# 模板');
     zip.file('my-skill/scripts/count.py', 'print(1)');
     zip.file('my-skill/logo.png', new Uint8Array([137, 80, 78, 71]));
+    zip.file('my-skill/fonts/思源黑体.otf2', new Uint8Array([1, 2]));
     zip.file('my-skill/tool.exe', new Uint8Array([77, 90]));
+    zip.file('my-skill/node_modules/x/index.js', 'x');
     zip.file('__MACOSX/my-skill/._SKILL.md', 'x');
     const p = await packs.installFromZip(await zip.generateAsync({ type: 'uint8array' }));
-    expect(Object.keys(p.files).sort()).toEqual(['logo.png', 'scripts/count.py', 'templates/report.md']);
+    expect(Object.keys(p.files).sort()).toEqual(['fonts/思源黑体.otf2', 'logo.png', 'scripts/count.py', 'templates/report.md']);
     expect(packs.isBinaryFile(p.files['logo.png'])).toBe(true);
-    expect(p.skipped).toContain('my-skill/tool.exe');
+    expect(packs.isBinaryFile(p.files['fonts/思源黑体.otf2'])).toBe(true);
+    expect(p.skipped).toEqual([]);
   });
 
   it('没有 SKILL.md 时给出明确错误', async () => {
@@ -93,7 +96,7 @@ describe('安装与管理', () => {
     };
     const p = await packs.installFromGitHub('https://github.com/o/r/tree/main/skills/demo', { fetchImpl });
     expect(p).toMatchObject({ name: 'demo', source: 'github.com/o/r/skills/demo', files: { 'ref/guide.md': '指南' } });
-    expect(p.skipped).toEqual(['font.ttf']);
+    expect(p.skipped).toEqual(['font.ttf（下载失败：HTTP 404）']);
     expect(urls.filter((u) => u.includes('api.github.com')).length).toBe(1);
   });
 
@@ -200,14 +203,14 @@ describe('技能附带的二进制模板', () => {
     const tpl = new Uint8Array([80, 75, 3, 4, 1, 2, 3]);
     const fetchImpl = async (url) => {
       if (url.endsWith('/repos/o/r')) return { ok: true, json: async () => ({ default_branch: 'main' }) };
-      if (url.includes('/git/trees/')) return { ok: true, json: async () => ({ tree: [{ type: 'blob', path: 'SKILL.md', size: 50 }, { type: 'blob', path: 'templates/cute/template.pptx', size: tpl.length }, { type: 'blob', path: 'big.pptx', size: 20 * 1024 * 1024 }] }) };
+      if (url.includes('/git/trees/')) return { ok: true, json: async () => ({ tree: [{ type: 'blob', path: 'SKILL.md', size: 50 }, { type: 'blob', path: 'templates/cute/template.pptx', size: tpl.length }, { type: 'blob', path: 'big.pptx', size: 40 * 1024 * 1024 }] }) };
       if (url.endsWith('SKILL.md')) return { ok: true, text: async () => '---\nname: ppt-maker\ndescription: 做 PPT\n---\n用模板 templates/cute/template.pptx' };
       return { ok: true, arrayBuffer: async () => tpl.buffer.slice(0) };
     };
     const p = await packs.installFromGitHub('github.com/o/r', { fetchImpl });
     expect(packs.isBinaryFile(p.files['templates/cute/template.pptx'])).toBe(true);
     expect(p.files['templates/cute/template.pptx'].size).toBe(7);
-    expect(p.skipped).toContain('big.pptx');
+    expect(p.skipped).toEqual(['big.pptx（40.0 MB，太大）']);
     expect(packs.render(p)).toMatch(/template\.pptx（二进制，0 KB）[\s\S]*|copy_skill_file/);
     const tools = Object.fromEntries(createTools({ metrics: async () => ({}) }).map((t) => [t.name, t]));
     expect(await tools.read_skill_file.run({ name: 'ppt-maker', path: 'templates/cute/template.pptx' })).toMatch('copy_skill_file');
@@ -216,5 +219,38 @@ describe('技能附带的二进制模板', () => {
     const ws = await import('../src/agent/workspace.js');
     const blob = await ws.readBlob('skills/ppt-maker/templates/cute/template.pptx');
     expect([...new Uint8Array(await blob.arrayBuffer())]).toEqual([...tpl]);
+  });
+});
+
+
+describe('大技能（几十上百个文件）', () => {
+  it('GitHub 上 150 个文件（模板、图片、脚本、不认识的格式）全部装上', async () => {
+    const tree = [{ type: 'blob', path: 'SKILL.md', size: 50 }, { type: 'blob', path: '.github/workflows/ci.yml', size: 5 }];
+    for (let i = 0; i < 50; i++) tree.push({ type: 'blob', path: `templates/t${i}.pptx`, size: 3 }, { type: 'blob', path: `assets/img${i}.png`, size: 3 }, { type: 'blob', path: `scripts/s${i}.jsx`, size: 3 });
+    let busy = 0; let peak = 0;
+    const fetchImpl = async (url) => {
+      if (url.endsWith('/repos/o/big')) return { ok: true, json: async () => ({ default_branch: 'main' }) };
+      if (url.includes('/git/trees/')) return { ok: true, json: async () => ({ tree }) };
+      busy++; peak = Math.max(peak, busy);
+      await new Promise((r) => setTimeout(r, 1));
+      busy--;
+      if (url.endsWith('SKILL.md')) return { ok: true, text: async () => '---\nname: big-ppt\ndescription: 做 PPT\n---\n用 templates 里的模板' };
+      return { ok: true, status: 200, text: async () => 'x', arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer };
+    };
+    const p = await packs.installFromGitHub('github.com/o/big', { fetchImpl });
+    expect(Object.keys(p.files).length).toBe(150);
+    expect(p.skipped).toEqual([]);
+    expect(packs.isBinaryFile(p.files['templates/t7.pptx'])).toBe(true);
+    expect(p.files['scripts/s3.jsx']).toBe('x');
+    expect(peak).toBeGreaterThan(1); // 并发下载
+  });
+  it('同步只传附件占位，写回时保留本机已有的附件内容', () => {
+    const full = { id: 'k', files: { 'a.md': 'x', 't.pptx': { binary: true, b64: 'QUJD', size: 3 } } };
+    const stub = packs.stubForSync(full);
+    expect(stub.files['t.pptx']).toEqual({ binary: true, stub: true, size: 3 });
+    expect(stub.files['a.md']).toBe('x');
+    expect(packs.keepLocalBinaries(stub, full).files['t.pptx'].b64).toBe('QUJD');
+    expect(packs.keepLocalBinaries(stub, null).files['t.pptx'].stub).toBe(true);
+    expect(() => packs.fileBlob(stub.files['t.pptx'])).toThrow(/重新安装/);
   });
 });

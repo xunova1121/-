@@ -19,14 +19,18 @@ export function changed() {
 }
 const kv = collection('kv');
 
-const MAX_FILE = 256 * 1024;
-const MAX_TOTAL = 3 * 1024 * 1024;
-const MAX_FILES = 80;
-const TEXT_EXT = /\.(md|markdown|txt|json|ya?ml|toml|csv|tsv|xml|html?|css|js|mjs|cjs|ts|py|sh|bat|ps1|sql|ini|cfg|conf|tex|rst|svg)$/i;
-// 模板、图片、字体等二进制附件（如 PPT 技能的 template.pptx）：存成 Base64，用 copy_skill_file 放进工作区再用
-const BIN_EXT = /\.(pptx|potx|ppt|docx|dotx|doc|xlsx|xltx|xls|pdf|png|jpe?g|gif|webp|ico|bmp|ttf|otf|woff2?)$/i;
-const MAX_BIN = 15 * 1024 * 1024;
-const MAX_BIN_TOTAL = 40 * 1024 * 1024;
+// 一个技能最多装多少：PPT / 设计类技能常带几十上百个模板、图片、字体、脚本
+const MAX_FILE = 2 * 1024 * 1024; // 单个文本文件
+const MAX_TOTAL = 20 * 1024 * 1024; // 文本合计
+const MAX_FILES = 600;
+const TEXT_EXT = /\.(md|markdown|txt|json|jsonc|ya?ml|toml|csv|tsv|xml|html?|css|scss|less|js|mjs|cjs|jsx|ts|tsx|vue|py|ipynb|r|rb|go|java|kt|swift|c|h|cpp|hpp|cs|lua|php|pl|sh|bash|zsh|bat|cmd|ps1|sql|ini|cfg|conf|env|properties|tex|bib|rst|svg|log|gitignore|editorconfig)$/i;
+// 其余文件（模板 .pptx、图片、字体、音视频等）都当二进制附件：存成 Base64，用 copy_skill_file 放进工作区再用
+const MAX_BIN = 30 * 1024 * 1024;
+const MAX_BIN_TOTAL = 100 * 1024 * 1024;
+// 仓库里和技能无关的东西
+const IGNORE = /(^|\/)(\.git|\.github|node_modules|__pycache__|\.venv|venv|\.idea|\.vscode|__MACOSX|\.pytest_cache|dist-info)(\/|$)|(^|\/)(\.DS_Store|Thumbs\.db)$|\.(pyc|pyo|exe|dll|so|dylib|msi|dmg|apk)$/i;
+const isText = (p) => TEXT_EXT.test(p) || /(^|\/)(SKILL\.md|LICENSE|README|Makefile|Dockerfile|requirements\.txt)$/i.test(p);
+const mb = (n) => `${(n / 1048576).toFixed(n < 1048576 ? 2 : 1)} MB`;
 
 /** 技能附件是不是二进制（{ binary, b64, size }） */
 export const isBinaryFile = (f) => Boolean(f && typeof f === 'object' && f.binary);
@@ -35,7 +39,21 @@ const b64 = (buf) => { const u8 = new Uint8Array(buf); let s = ''; for (let i = 
 /** ArrayBuffer → 技能里保存的二进制附件 */
 export const binaryFile = (buf) => ({ binary: true, b64: b64(buf), size: buf.byteLength });
 /** 技能附件 → Blob（写进工作区用） */
-export const fileBlob = (f) => (isBinaryFile(f) ? new Blob([Uint8Array.from(atob(f.b64), (c) => c.charCodeAt(0))]) : new Blob([String(f)]));
+export const fileBlob = (f) => {
+  if (f?.stub) throw new Error('这个附件没有同步到本设备（同步时不传大附件）：请在“技能”里重新安装这个技能，或在原设备上使用');
+  return isBinaryFile(f) ? new Blob([Uint8Array.from(atob(f.b64), (c) => c.charCodeAt(0))]) : new Blob([String(f)]);
+};
+
+/** 同步用：二进制附件只传“占位”（名字和大小），不传内容（PPT 模板等动辄几十 MB） */
+export const stubForSync = (pack) => ({
+  ...pack,
+  files: Object.fromEntries(Object.entries(pack.files || {}).map(([k, f]) => [k, isBinaryFile(f) ? { binary: true, stub: true, size: f.size } : f]))
+});
+/** 同步写回：远端传来的占位，本机有同名附件就保留本机的内容 */
+export const keepLocalBinaries = (incoming, local) => ({
+  ...incoming,
+  files: Object.fromEntries(Object.entries(incoming.files || {}).map(([k, f]) => [k, f?.stub && isBinaryFile(local?.files?.[k]) && !local.files[k].stub ? local.files[k] : f]))
+});
 
 // ---------------------------------------------------------------- SKILL.md 解析
 
@@ -95,7 +113,8 @@ export async function installFromFiles(files, { source = '本地', skipped = [] 
     const f = files[p];
     const n = sizeOf(f);
     const bin = isBinaryFile(f);
-    if (Object.keys(own).length >= MAX_FILES || (bin ? binTotal + n > MAX_BIN_TOTAL : total + n > MAX_TOTAL)) { skipped.push(rel); continue; }
+    if (Object.keys(own).length >= MAX_FILES) { skipped.push(`${rel}（超过 ${MAX_FILES} 个文件）`); continue; }
+    if (bin ? binTotal + n > MAX_BIN_TOTAL : total + n > MAX_TOTAL) { skipped.push(`${rel}（技能总大小超过 ${mb(bin ? MAX_BIN_TOTAL : MAX_TOTAL)}）`); continue; }
     own[rel] = f;
     if (bin) binTotal += n; else total += n;
   }
@@ -128,17 +147,16 @@ export async function installFromZip(data, source = 'zip') {
   const files = {};
   const skipped = [];
   for (const [p, entry] of Object.entries(zip.files)) {
-    if (entry.dir || /(^|\/)(__MACOSX|\.git)\//.test(p) || /(^|\/)\.DS_Store$/.test(p)) continue;
-    if (BIN_EXT.test(p)) {
-      const buf = await entry.async('arraybuffer');
-      if (buf.byteLength > MAX_BIN) { skipped.push(p); continue; }
-      files[p] = binaryFile(buf);
+    if (entry.dir || IGNORE.test(p)) continue;
+    if (isText(p)) {
+      const text = await entry.async('string');
+      if (text.length > MAX_FILE) { skipped.push(`${p}（${mb(text.length)}，太大）`); continue; }
+      files[p] = text;
       continue;
     }
-    if (!TEXT_EXT.test(p) && !/SKILL\.md$/i.test(p)) { skipped.push(p); continue; }
-    const text = await entry.async('string');
-    if (text.length > MAX_FILE) { skipped.push(p); continue; }
-    files[p] = text;
+    const buf = await entry.async('arraybuffer');
+    if (buf.byteLength > MAX_BIN) { skipped.push(`${p}（${mb(buf.byteLength)}，太大）`); continue; }
+    files[p] = binaryFile(buf);
   }
   return installFromFiles(files, { source, skipped });
 }
@@ -240,27 +258,30 @@ export async function installFromGitHub(url, { fetchImpl = globalThis.fetch, onP
   }
   const installedPacks = [];
   for (const [i, prefix] of dirs.entries()) {
-    const blobs = all.filter((t) => t.type === 'blob' && t.path.startsWith(prefix));
+    const blobs = all.filter((t) => t.type === 'blob' && t.path.startsWith(prefix) && !IGNORE.test(t.path.slice(prefix.length)));
     const files = {};
     const skipped = [];
-    let total = 0;
     const wanted = blobs.filter((b) => {
       const rel = b.path.slice(prefix.length);
-      const ok = ((TEXT_EXT.test(rel) || rel === 'SKILL.md') && (b.size ?? 0) <= MAX_FILE) || (BIN_EXT.test(rel) && (b.size ?? 0) <= MAX_BIN);
-      if (!ok) skipped.push(rel);
-      return ok;
-    }).slice(0, MAX_FILES + 1);
+      const size = b.size ?? 0;
+      if (size > (isText(rel) ? MAX_FILE : MAX_BIN)) { skipped.push(`${rel}（${mb(size)}，太大）`); return false; }
+      return true;
+    });
+    for (const b of wanted.slice(MAX_FILES + 1)) skipped.push(`${b.path.slice(prefix.length)}（超过 ${MAX_FILES} 个文件）`);
+    // 同时下载 6 个（raw.githubusercontent.com 没有接口次数限制）
     let done = 0;
-    for (const b of wanted) {
-      const rel = b.path.slice(prefix.length);
-      const bin = BIN_EXT.test(rel);
-      if (bin ? total + (b.size ?? 0) > MAX_BIN_TOTAL + MAX_TOTAL : total > MAX_TOTAL) { skipped.push(rel); continue; }
-      const r = await raw(ref, b.path);
-      if (!r.ok) { skipped.push(rel); continue; }
-      files[rel] = bin ? binaryFile(await r.arrayBuffer()) : await r.text();
-      total += sizeOf(files[rel]);
-      onProgress?.(`${dirs.length > 1 ? `第 ${i + 1}/${dirs.length} 个技能：` : ''}正在下载 ${++done}/${wanted.length}`);
-    }
+    const queue = wanted.slice(0, MAX_FILES + 1);
+    const worker = async () => {
+      for (let b = queue.shift(); b; b = queue.shift()) {
+        const rel = b.path.slice(prefix.length);
+        let r = null;
+        for (let tryNo = 0; tryNo < 2 && !r?.ok; tryNo++) r = await raw(ref, b.path).catch(() => null);
+        if (!r?.ok) { skipped.push(`${rel}（下载失败${r ? `：HTTP ${r.status}` : ''}）`); continue; }
+        files[rel] = isText(rel) ? await r.text() : binaryFile(await r.arrayBuffer());
+        onProgress?.(`${dirs.length > 1 ? `第 ${i + 1}/${dirs.length} 个技能：` : ''}正在下载 ${++done}/${wanted.length}`);
+      }
+    };
+    await Promise.all(Array.from({ length: 6 }, worker));
     const sub = prefix.replace(/\/$/, '');
     installedPacks.push(await installFromFiles(files, { source: `github.com/${owner}/${repo}${sub ? `/${sub}` : ''}`, skipped }));
   }
@@ -296,7 +317,8 @@ export function render(pack) {
   return [
     `# 技能：${pack.name}`,
     pack.body,
-    files.length ? `\n---\n附带文件（文本用 read_skill_file 读取；模板等二进制文件用 copy_skill_file 复制到工作区，再用 run_python 处理，如 python-pptx 打开 .pptx 模板；脚本可写入工作区后用 run_python / run_javascript 运行）：\n${files.map((f) => `- ${f}${isBinaryFile(pack.files[f]) ? `（二进制，${Math.round(pack.files[f].size / 1024)} KB）` : ''}`).join('\n')}` : ''
+    pack.skipped?.length ? `\n（注意：安装时有 ${pack.skipped.length} 个文件没装上：${pack.skipped.slice(0, 10).join('、')}。如果做法依赖它们，告诉用户需要用 zip 上传完整技能）` : '',
+    files.length ? `\n---\n附带文件（文本用 read_skill_file 读取；模板等二进制文件用 copy_skill_file 复制到工作区，再用 run_python 处理，如 python-pptx 打开 .pptx 模板；脚本可写入工作区后用 run_python / run_javascript 运行）：\n${files.map((f) => `- ${f}${isBinaryFile(pack.files[f]) ? `（二进制，${Math.round(pack.files[f].size / 1024)} KB${pack.files[f].stub ? '，本设备上没有，需要重新安装技能' : ''}）` : ''}`).join('\n')}` : ''
   ].join('\n');
 }
 

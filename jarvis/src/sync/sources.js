@@ -2,6 +2,7 @@
  * 同步的数据来源：把本机各处的数据整理成“id → 记录”，以及把合并结果写回去。
  */
 import { collection } from '../agent/store.js';
+import { stubForSync, keepLocalBinaries } from '../agent/skillPacks.js';
 
 const MEMORY_COLLECTIONS = ['memories', 'lessons', 'skills', 'packs', 'episodes'];
 const MEMORY_KV = ['core', 'habits'];
@@ -12,7 +13,8 @@ export function memorySource({ coll = collection } = {}) {
   return {
     async read() {
       const out = {};
-      for (const c of MEMORY_COLLECTIONS) for (const r of await coll(c).all()) out[`${c}:${r.id}`] = r;
+      // 技能的二进制附件（模板、图片）不同步内容，只同步占位
+      for (const c of MEMORY_COLLECTIONS) for (const r of await coll(c).all()) out[`${c}:${r.id}`] = c === 'packs' ? stubForSync(r) : r;
       for (const id of MEMORY_KV) { const r = await kv.get(id); if (r) out[`kv:${id}`] = r; }
       return out;
     },
@@ -20,7 +22,11 @@ export function memorySource({ coll = collection } = {}) {
       const split = (key) => { const i = key.indexOf(':'); return [key.slice(0, i), key.slice(i + 1)]; };
       const allowed = (c, id) => (c === 'kv' ? MEMORY_KV.includes(id) : MEMORY_COLLECTIONS.includes(c));
       for (const key of del) { const [c, id] = split(key); if (allowed(c, id)) await coll(c).delete(id); }
-      for (const { key, rec } of put) { const [c, id] = split(key); if (allowed(c, id) && rec?.id === id) await coll(c).put(rec); }
+      for (const { key, rec } of put) {
+        const [c, id] = split(key);
+        if (!allowed(c, id) || rec?.id !== id) continue;
+        await coll(c).put(c === 'packs' ? keepLocalBinaries(rec, await coll(c).get(id)) : rec);
+      }
     }
   };
 }
