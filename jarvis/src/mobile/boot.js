@@ -2,6 +2,7 @@
  * 安卓 App 启动时的适配（在 main.js 的其他代码之前运行；其他版本里什么都不做）：
  *   网络：服务商不允许跨域时改走系统原生网络
  *   朗读：WebView 没有 speechSynthesis，用系统 TTS 补上
+ *   听写：直接对话用系统语音识别
  *   同步：阿里云 OSS 请求走原生网络（可以设置 Date 头、没有跨域限制）
  */
 import { MOBILE } from '../config.js';
@@ -13,6 +14,10 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
   const native = nativeFetcher(CapacitorHttp);
   globalThis.__jarvisNativeFetch = native;
   globalThis.fetch = wrapFetch(globalThis.fetch.bind(globalThis), native, location.origin);
+  try {
+    const { SpeechRecognition } = await import('@capacitor-community/speech-recognition');
+    globalThis.__jarvisSpeech = SpeechRecognition; // 直接对话用系统语音识别（见 nativeVoice.js）
+  } catch { /* 没有识别插件：走云端转写 */ }
   try {
     const { TextToSpeech } = await import('@capacitor-community/text-to-speech');
     installSpeechShim(TextToSpeech);

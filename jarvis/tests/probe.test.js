@@ -52,3 +52,21 @@ describe('手机原生网络', () => {
     expect(g.__jarvisNetVia('https://teamorouter.com/v1')).toBe('native');
   });
 });
+
+describe('手机原生网络上传文件', () => {
+  it('FormData 转成插件的 formData 格式（文件 Base64）', async () => {
+    let req;
+    const http = { request: async (r) => { req = r; return { status: 200, headers: {}, data: '{"text":"你好"}' }; } };
+    const form = new FormData();
+    form.append('file', new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/wav' }), 'speech.wav');
+    form.append('model', 'whisper-1');
+    const res = await nativeFetcher(http)('https://x/v1/audio/transcriptions', { method: 'POST', headers: { authorization: 'Bearer k' }, body: form });
+    expect(req.dataType).toBe('formData');
+    expect(req.headers['content-type']).toBe('multipart/form-data');
+    expect(req.data).toEqual([
+      { key: 'file', value: 'AQID', type: 'base64File', fileName: 'speech.wav', contentType: 'audio/wav' },
+      { key: 'model', value: 'whisper-1', type: 'string' }
+    ]);
+    expect((await res.json()).text).toBe('你好');
+  });
+});

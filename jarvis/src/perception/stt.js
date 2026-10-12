@@ -2,14 +2,18 @@
  * 云端语音识别：本地 VAD 切出一句话 → 编码成 16 kHz WAV → 上传转写。
  * 桌面版（Electron）没有浏览器自带的语音识别，靠它实现直接对话和唤醒词；网页版也可以选用（不依赖 Google 服务）。
  */
-import { customViaGateway } from '../../shared/providers.js';
+import { customViaGateway, providerById, upstreamFor } from '../../shared/providers.js';
 
 export const STT_ENGINES = [
   { id: 'browser', name: '浏览器自带（Chrome / Edge，需联网）' },
   { id: 'siliconflow', name: '硅基流动 SenseVoice（中文快且便宜）', keyFrom: 'siliconflow', model: 'FunAudioLLM/SenseVoiceSmall', base: 'https://api.siliconflow.cn/v1', browser: false },
   { id: 'openai', name: 'OpenAI 语音转写', keyFrom: 'openai', model: 'gpt-4o-mini-transcribe', base: 'https://api.openai.com/v1', browser: true },
-  { id: 'custom', name: '自定义（OpenAI 兼容 /audio/transcriptions）', keyFrom: 'stt-custom', custom: true, browser: true }
+  { id: 'custom', name: '自定义（OpenAI 兼容 /audio/transcriptions）', keyFrom: 'stt-custom', custom: true, browser: true },
+  { id: 'provider', name: '用当前模型服务商转写（不用另配密钥，需服务商支持）', fromProvider: true, browser: true }
 ];
+/** 用模型服务商转写时依次尝试的模型；试成功的记住 */
+export const PROVIDER_STT_MODELS = ['gpt-4o-mini-transcribe', 'whisper-1', 'gpt-4o-transcribe'];
+const workingModel = new Map(); // baseURL → 模型
 export const sttEngineById = (id) => STT_ENGINES.find((e) => e.id === id);
 
 /**
@@ -25,6 +29,9 @@ export function resolveStt(cfg, { gateway = null, browserSupported }) {
   if (has('siliconflow') && gateway) return 'siliconflow';
   if (has('openai')) return 'openai';
   if (has('siliconflow')) return 'siliconflow';
+  // 都没有：试试当前的模型服务商（中转平台大多也提供 OpenAI 兼容的语音转写）
+  const p = providerById(cfg.provider);
+  if (p?.kind === 'openai' && (has(p.id) || p.needsKey === false) && (!p.custom || cfg.baseURLs?.custom)) return 'provider';
   return 'none';
 }
 
@@ -56,6 +63,7 @@ export const cleanTranscript = (t) => String(t || '').replace(/<\|[^|]*\|>/g, ''
 export async function transcribe(engineId, cfg, audio, { gateway = null, signal, fetchImpl = globalThis.fetch } = {}) {
   const e = sttEngineById(engineId);
   if (!e || e.id === 'browser') throw new Error('不是云端识别引擎');
+  if (e.fromProvider) return transcribeViaProvider(cfg, audio, { gateway, signal, fetchImpl });
   const key = cfg.keys?.[e.keyFrom] || '';
   const customURL = cfg.stt?.customURL || '';
   const viaGateway = e.custom ? customViaGateway(gateway, customURL) : Boolean(gateway);
@@ -77,4 +85,36 @@ export async function transcribe(engineId, cfg, audio, { gateway = null, signal,
   }
   const j = await res.json().catch(() => ({}));
   return cleanTranscript(j.text);
+}
+
+/** 用当前模型服务商的 /audio/transcriptions；依次试几个常见转写模型，记住能用的那个 */
+async function transcribeViaProvider(cfg, audio, { gateway, signal, fetchImpl }) {
+  const p = providerById(cfg.provider);
+  if (p?.kind !== 'openai') throw new Error('语音识别：当前服务商不支持语音转写，请在“模型 → 声音”里选择云端语音识别');
+  const key = cfg.keys?.[p.id] || '';
+  const viaGw = p.custom ? customViaGateway(gateway, cfg.baseURLs?.custom) : Boolean(gateway && upstreamFor(p.id));
+  const base = viaGw ? `${gateway.origin}/api/llm/${p.id}` : (p.custom ? cfg.baseURLs.custom : p.baseURL).replace(/\/$/, '');
+  const headers = {};
+  if (key || viaGw) headers.authorization = `Bearer ${key || 'use-gateway-key'}`;
+  if (viaGw && p.custom) headers['x-jarvis-upstream'] = cfg.baseURLs.custom.trim();
+  const known = workingModel.get(base);
+  const models = known ? [known] : PROVIDER_STT_MODELS;
+  let last = '';
+  for (const model of models) {
+    const form = new FormData();
+    form.append('file', audio, 'speech.wav');
+    form.append('model', model);
+    form.append('language', 'zh');
+    const res = await fetchImpl(`${base}/audio/transcriptions`, { method: 'POST', headers, body: form, signal });
+    if (res.ok) {
+      workingModel.set(base, model);
+      const j = await res.json().catch(() => ({}));
+      return cleanTranscript(j.text);
+    }
+    let msg = '';
+    try { const j = await res.json(); msg = j.error?.message || j.message || ''; } catch { /* 非 JSON */ }
+    last = `${res.status} ${msg}`.trim();
+    if (res.status === 401 || res.status === 403) break; // 密钥问题：换模型也没用
+  }
+  throw new Error(`语音识别：你的模型服务商不支持语音转写（${last.slice(0, 80)}）。可在“模型 → 声音”填硅基流动的 Key 用 SenseVoice（中文准、注册送额度）`);
 }

@@ -26,8 +26,10 @@ export class VoiceInput {
    * @param {object} o
    * @param {() => ((wav: Blob) => Promise<string>) | null} [o.getTranscriber]  返回云端转写函数时，用 VAD 切句 + 云端识别代替浏览器识别
    */
-  constructor({ onOnset, onConfirm, onCancel, onInterim, onFinal, onEnergy, onMode, onError, getTranscriber } = {}) {
+  constructor({ onOnset, onConfirm, onCancel, onInterim, onFinal, onEnergy, onMode, onError, getTranscriber, allowBrowserSR = true } = {}) {
     Object.assign(this, { onOnset, onConfirm, onCancel, onInterim, onFinal, onEnergy, onMode, onError, getTranscriber });
+    // 桌面版（Electron）里有 webkitSpeechRecognition 但连不上谷歌服务，识别不出任何字：不能用
+    this.sr = allowBrowserSR ? SR : null;
     this.preroll = [];
     this.capture = null; // 云端识别：正在录的这句话的帧
     this.mode = 'off'; // off | loading | vad | ptt
@@ -53,7 +55,7 @@ export class VoiceInput {
   }
 
   async enable({ silenceMs = 800 } = {}) {
-    if (!SR && !this.cloud) throw new Error('当前环境没有可用的语音识别：请在“模型 → 声音”里选择云端语音识别');
+    if (!this.sr && !this.cloud) throw new Error('当前环境没有可用的语音识别：请在“模型 → 声音”里选择云端语音识别');
     this.gate.silenceMs = silenceMs;
     this.#setMode('loading');
     try {
@@ -77,7 +79,7 @@ export class VoiceInput {
       this.vad?.destroy?.();
       this.vad = null;
       if (this.mode === 'loading') {
-        if (this.cloud && !SR) { this.#setMode('off'); throw new Error('本地语音活动检测模型加载失败，云端识别需要它来切分句子'); }
+        if (this.cloud && !this.sr) { this.#setMode('off'); throw new Error('本地语音活动检测模型加载失败，云端识别需要它来切分句子'); }
         this.#setMode('ptt');
       }
     }
@@ -148,6 +150,7 @@ export class VoiceInput {
       this.onOnset?.();
       return;
     }
+    if (!this.sr) return; // 没有浏览器识别（桌面版 / 手机）：只能走云端切句
     if (this.rec) return;
     this.finals = '';
     this.interim = '';
@@ -158,7 +161,7 @@ export class VoiceInput {
   }
 
   #startRec() {
-    const rec = new SR();
+    const rec = new this.sr();
     rec.lang = 'zh-CN';
     rec.continuous = false;
     rec.interimResults = true;

@@ -14,6 +14,18 @@ export function safeHeaders(h = {}) {
   return out;
 }
 
+const toB64 = (buf) => { const u8 = new Uint8Array(buf); let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(s); };
+
+/** FormData → CapacitorHttp 的 formData 格式 */
+export async function formDataEntries(form) {
+  const entries = [];
+  for (const [key, value] of form.entries()) {
+    if (typeof value === 'string') entries.push({ key, value, type: 'string' });
+    else entries.push({ key, value: toB64(await value.arrayBuffer()), type: 'base64File', fileName: value.name || 'file', contentType: value.type || 'application/octet-stream' });
+  }
+  return { data: entries, dataType: 'formData' };
+}
+
 /** 原生请求 → 标准 Response */
 export function nativeFetcher(http) {
   return async (input, init = {}) => {
@@ -21,7 +33,16 @@ export function nativeFetcher(http) {
     const headers = Object.fromEntries(new Headers(init.headers || {}).entries());
     const signal = init.signal;
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-    const req = http.request({ url, method: init.method || 'GET', headers, data: init.body ?? undefined, responseType: 'text', connectTimeout: 20000, readTimeout: 180000 });
+    let data = init.body ?? undefined;
+    let dataType;
+    if (typeof FormData !== 'undefined' && data instanceof FormData) {
+      // 上传文件（如语音转写）：转成原生插件认识的格式，文件内容用 Base64
+      ({ data, dataType } = await formDataEntries(data));
+      headers['content-type'] = 'multipart/form-data';
+    } else if (data instanceof Blob || data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
+      data = await new Response(data).text();
+    }
+    const req = http.request({ url, method: init.method || 'GET', headers, data, dataType, responseType: 'text', connectTimeout: 20000, readTimeout: 180000 });
     const res = await (signal ? Promise.race([req, new Promise((_, rej) => signal.addEventListener('abort', () => rej(new DOMException('Aborted', 'AbortError')), { once: true }))]) : req);
     const body = typeof res.data === 'string' ? res.data : res.data == null ? '' : JSON.stringify(res.data);
     return new Response([204, 205, 304].includes(res.status) ? null : body, { status: res.status || 200, headers: safeHeaders(res.headers) });

@@ -58,6 +58,7 @@ import { Speaker } from './perception/speaker.js';
 import { VoiceInput, speechRecognitionSupported } from './perception/voiceInput.js';
 import { resolveStt, transcribe } from './perception/stt.js';
 import { STANDALONE, MOBILE } from './config.js';
+import { NativeVoice } from './mobile/nativeVoice.js';
 import { createFormDirector } from './core/formDirector.js';
 import { composeGreeting, GREET_GAP_MS } from './core/greeting.js';
 import { classifyTask, routeFor, TASKS } from './llm/router.js';
@@ -992,13 +993,9 @@ function onWake() {
 }
 
 // 语音识别：网页版优先用浏览器自带识别；桌面版（Electron 没有浏览器识别）或用户指定时走云端转写
-const browserSR = speechRecognitionSupported && !window.jarvisDesktop;
+const browserSR = speechRecognitionSupported && !window.jarvisDesktop && !MOBILE; // 桌面版、手机 App 里的浏览器识别都用不了
 const sttEngine = () => resolveStt(llmConfig, { gateway, browserSupported: browserSR });
-const voice = new VoiceInput({
-  getTranscriber: () => {
-    const id = sttEngine();
-    return id === 'browser' || id === 'none' ? null : (wav) => transcribe(id, llmConfig, wav, { gateway });
-  },
+const voiceHandlers = {
   onConfirm: () => {
     if (asleep()) return;
     live.voiceListening = true;
@@ -1050,7 +1047,22 @@ const voice = new VoiceInput({
   onError: (code) => {
     toast(code === 'not-allowed' ? '麦克风权限被拒绝' : /^语音识别/.test(code) ? code : `语音识别出错：${code}`);
   }
+};
+let voice = new VoiceInput({
+  allowBrowserSR: browserSR,
+  getTranscriber: () => {
+    const id = sttEngine();
+    return id === 'browser' || id === 'none' ? null : (wav) => transcribe(id, llmConfig, wav, { gateway });
+  },
+  ...voiceHandlers
 });
+// 安卓 App：有系统语音识别就用它（免费、不用密钥、自己判断说完）；没有再走云端转写
+const nativeVoiceReady = MOBILE && globalThis.__jarvisSpeech
+  ? NativeVoice.available(globalThis.__jarvisSpeech).then((ok) => {
+    if (ok) voice = new NativeVoice({ plugin: globalThis.__jarvisSpeech, ...voiceHandlers });
+    return ok;
+  })
+  : Promise.resolve(false);
 
 function endListening() {
   if (!live.voiceListening) return;
@@ -1064,6 +1076,7 @@ function endListening() {
 }
 
 async function setDirectVoice(on) {
+  await nativeVoiceReady; // 手机上先确定用不用系统识别
   setSetting('directVoice', on);
   $('#set-voice').checked = on;
   if (on) {
@@ -1082,7 +1095,7 @@ async function setDirectVoice(on) {
 }
 
 const mic = $('#btn-mic');
-if (!browserSR && !window.jarvisDesktop && sttEngine() === 'none') {
+if (!browserSR && !window.jarvisDesktop && !MOBILE && sttEngine() === 'none') {
   // Firefox 等：隐藏语音输入，保留文本输入与语音输出（需求 6.1 / 10）
   mic.hidden = true;
   $('#row-voice').hidden = true;
