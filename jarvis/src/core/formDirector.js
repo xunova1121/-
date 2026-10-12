@@ -77,7 +77,8 @@ export function createFormDirector(target, { now = () => performance.now(), rand
   function go(name) {
     if (!name || name === current) { pending = null; return; }
     const t = now();
-    if (t - since < MIN_HOLD) { pending = name; return; }
+    // 还没停够：先记下。已经排着一个工具 / 语义造型时，不让“回到光核”把它顶掉（它稍后会自然回到光核）
+    if (t - since < MIN_HOLD) { if (!(pending && pending !== 'core' && name === 'core')) pending = name; return; }
     if (target.setForm(name) !== false) { current = name; since = t; history.push(name); if (history.length > 30) history.shift(); }
     pending = null;
   }

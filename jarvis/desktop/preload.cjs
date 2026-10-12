@@ -21,5 +21,13 @@ contextBridge.exposeInMainWorld('jarvisDesktop', {
   onStop(fn) {
     ipcRenderer.on('jarvis:stop', () => fn());
   },
+  /** 离开电脑一段时间后回来了（{ awayMs, reason }） */
+  onPresence(fn) {
+    ipcRenderer.on('jarvis:presence', (_e, info) => fn(info));
+  },
+  /** 桌面背景窗口：接收主窗口同步过来的状态 */
+  onWallpaper(fn) {
+    ipcRenderer.on('jarvis:wallpaper', (_e, payload) => fn(payload));
+  },
   setAlwaysOnTop: (on) => ipcRenderer.invoke('jarvis:window', 'alwaysOnTop', on)
 });

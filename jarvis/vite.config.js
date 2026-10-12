@@ -26,6 +26,8 @@ export default defineConfig(({ mode }) => {
       target: 'es2022',
       chunkSizeWarningLimit: 4000,
       outDir: standalone ? 'dist-standalone' : 'dist',
+      // 正常版另有桌面背景页（桌面版用）；单文件版只有一个页面
+      ...(!standalone && { rollupOptions: { input: { main: 'index.html', wallpaper: 'wallpaper.html' } } }),
       ...(standalone && { assetsInlineLimit: 100 * 1024 * 1024 })
     },
     optimizeDeps: { exclude: ['@ricky0123/vad-web', 'onnxruntime-web'] },

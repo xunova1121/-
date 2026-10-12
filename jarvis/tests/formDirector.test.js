@@ -64,6 +64,17 @@ describe('造型导演', () => {
     expect(forms).toEqual(['helix', 'lattice']);
   });
 
+  it('排着的工具造型不会被“回到光核”顶掉', () => {
+    const { d, forms, advance } = setup([0]);
+    d.setState('processing'); // helix
+    d.onToolStart('write_file'); // 停留不够，排队
+    d.setState('speaking'); // 想回光核，但工具造型先展示
+    advance(1700);
+    expect(forms).toEqual(['helix', 'lattice']);
+    advance(1700);
+    expect(forms).toEqual(['helix', 'lattice', 'core']);
+  });
+
   it('出错时竖起尖刺，过后回到光核', () => {
     const { d, forms, advance } = setup([0]);
     d.setState('error');

@@ -613,6 +613,19 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await ctx.close();
 }
 
+// ---------- 5f. 主动问好（模拟离开一小时后回来） ----------
+{
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  const page = await ctx.newPage();
+  await page.goto(BASE);
+  await page.waitForFunction(() => window.__jarvis?.showPanel);
+  const said = await page.evaluate(() => window.__jarvis.greetOnReturn({ awayMs: 3600_000, reason: 'test' }));
+  check('回来时主动问好（对话里出现主动问候）', Boolean(said) && (await page.locator('#transcript .msg.agent.proactive').count()) === 1, said);
+  const again = await page.evaluate(() => window.__jarvis.greetOnReturn({ awayMs: 3600_000 }));
+  check('40 分钟内不重复问好', again === null);
+  await ctx.close();
+}
+
 // ---------- 6. 不支持语音识别（模拟 Firefox） ----------
 {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });

@@ -15,6 +15,7 @@ export const DEFAULT_SETTINGS = {
   persistMemory: false, // 旧版：单条对话流存 localStorage（启动时迁移成会话）
   saveSessions: true, // 对话历史保存到本机（多会话）
   autoMemory: true, // 对话停下后自动整理记忆（抽取事实、写摘要）
+  greetOnReturn: true, // 离开电脑一段时间后回来时主动问好
   teamMode: 'auto' // 多助手分工：auto 复杂任务自动组团 | on 总是 | off 关闭（任何时候都可用“/团队 …”强制）
 };
 

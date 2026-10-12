@@ -54,6 +54,7 @@ import { VoiceInput, speechRecognitionSupported } from './perception/voiceInput.
 import { resolveStt, transcribe } from './perception/stt.js';
 import { STANDALONE } from './config.js';
 import { createFormDirector } from './core/formDirector.js';
+import { composeGreeting, GREET_GAP_MS } from './core/greeting.js';
 import { FORMS } from './render/formations.js';
 import { resolveQuality } from './core/quality.js';
 import { loadMemory, clearMemory } from './core/memoryStore.js';
@@ -82,6 +83,7 @@ const machine = new EmotionMachine({
     document.documentElement.style.setProperty('--hue', String(EMOTION_PARAMS[emotion].hue));
     dashboard.setEmotion(emotion, EMOTION_PARAMS[emotion].hue);
     $('#hud-emotion').textContent = emotion;
+    wp({ emotion });
   }
 });
 setInterval(() => machine.tick(), 100);
@@ -114,6 +116,7 @@ const director = createFormDirector({
     const el = document.querySelector('#hud-form');
     if (el) { el.textContent = FORMS[name]?.name ?? name; el.parentElement.classList.remove('flash'); void el.offsetWidth; el.parentElement.classList.add('flash'); }
     queueMicrotask(updateOrbitStatus);
+    wp({ form: name, energy: ENERGY[machine.task] ?? 0, task: $('#hud-task')?.textContent });
     return stage ? stage.setForm(name) !== false || stage.form === name : true;
   }
 });
@@ -526,6 +529,14 @@ async function openSession(id) {
 
 /** 光核旁的建议标注（启动末尾创建） */
 let callouts = null;
+/** 桌面背景同步：主窗口在做什么，桌面上的粒子体就跟着做（桌面版开了背景模式时） */
+function wp(payload) { if (window.jarvisDesktop) window.jarvisDesktop.invoke('wallpaperEvent', payload).catch(() => {}); }
+const hud = {
+  think(text, kind) { orbit?.think(text, kind); wp({ think: text }); },
+  toolStart(id, label) { orbit?.toolStart(id, label); wp({ tool: { id, label } }); },
+  toolEnd(id, ok) { orbit?.toolEnd(id, ok); wp({ toolDone: { id, ok } }); },
+  newTurn() { orbit?.newTurn(); wp({ newTurn: true }); }
+};
 function updateOrbitStatus() {
   orbit?.setStatus(`${(FORMS[director.form]?.id ?? director.form).toUpperCase()} · LINK ${window.jarvisDesktop ? 'DESKTOP' : gateway ? 'GATEWAY' : 'LOCAL'}`);
 }
@@ -548,6 +559,8 @@ if (DESKTOP) {
   body.classList.add('desktop', `os-${DESKTOP.platform}`);
   // 全局快捷键呼出：聚焦输入框
   DESKTOP.onSummon?.(() => { $('#prompt').focus(); });
+  // 离开电脑一段时间后回来：主动问好
+  DESKTOP.onPresence?.((info) => { greetOnReturn(info); });
   // 紧急停止热键：打断当前任务
   DESKTOP.onStop?.(() => { controlActive = false; interrupt(); toast('已紧急停止电脑操作'); });
 }
@@ -581,6 +594,49 @@ async function buildTools({ background = false } = {}) {
     ...(await loadMcpTools())
   ];
 }
+
+// ---------------------------------------------------------------- 主动问好：你回到电脑前时
+let lastGreetAt = (() => { try { return Number(localStorage.getItem('jarvis.lastGreet')) || 0; } catch { return 0; } })();
+/**
+ * @param {{ awayMs: number, reason?: string, force?: boolean }} info
+ * @returns {Promise<string|null>} 说了什么（没说返回 null）
+ */
+async function greetOnReturn({ awayMs, reason = '', force = false }) {
+  if (!force && (!settings.greetOnReturn || active || Date.now() - lastGreetAt < GREET_GAP_MS || awayMs < 10 * 60_000)) return null;
+  lastGreetAt = Date.now();
+  try { localStorage.setItem('jarvis.lastGreet', String(lastGreetAt)); } catch { /* 隐私模式 */ }
+  const [core, schedules, open, habitTips] = await Promise.all([
+    agentMemory.getCore().catch(() => ({})),
+    scheduler.list().catch(() => []),
+    agentMemory.openItems({ k: 2 }).catch(() => []),
+    habitHints().catch(() => [])
+  ]);
+  const { text } = await composeGreeting({ awayMs, coreHuman: core.human, schedules: schedules.filter((x) => x.enabled), openItems: open, habits: habitTips, llm: helperLlm() });
+  // 很久没说话的旧对话：开一段新的，问候放在新对话里
+  const lastTs = history.at(-1)?.ts ?? 0;
+  if (history.length && Date.now() - lastTs > 3 * 3600_000) await switchTo(sessionsApi.create());
+  const b = transcript.add('agent', text);
+  b.el.classList.add('proactive');
+  b.done(`主动问候 · ${reason === 'face' ? '看到你回来了' : '你回到电脑前'}`);
+  rememberTurn('assistant', text, { proactive: true });
+  director.onEmotion('亲和');
+  wp({ say: text, emotion: '亲和' });
+  hud.think(`◆ 主动问候（离开 ${Math.round(awayMs / 60000)} 分钟）`);
+  if (settings.speechOutput) speaker.speak(text);
+  if (document.hidden && DESKTOP && !settings.speechOutput) DESKTOP.invoke('notify', { title: '贾维斯', body: text }).catch(() => {});
+  openingCallouts();
+  return text;
+}
+/** 习惯提示（操作习惯学习开启后才有，见 habits.js） */
+let habitHints = async () => [];
+
+// 网页版：标签页隐藏 30 分钟以上再回来，也算“回来了”
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  if (!DESKTOP && hiddenAt && Date.now() - hiddenAt >= 30 * 60_000) greetOnReturn({ awayMs: Date.now() - hiddenAt, reason: 'tab' });
+  hiddenAt = 0;
+});
 
 // ---------------------------------------------------------------- 定时任务
 /** 系统通知：桌面版用系统通知；网页版用浏览器通知（需要授权），并总是弹一条提示 */
@@ -654,8 +710,8 @@ async function send(text) {
   const thumbs = imgs.map((i) => i.thumb);
   transcript.add('user', userText, Date.now(), { thumbs });
   director.onUserText(text);
-  orbit?.newTurn();
-  orbit?.think(`◂ 收到：${text.slice(0, 30)}`);
+  hud.newTurn();
+  hud.think(`◂ 收到：${text.slice(0, 30)}`);
   const llmHistory = history.slice(-20).map(({ role, content }) => ({ role, content }));
   rememberTurn('user', userText, thumbs.length ? { thumbs } : {});
 
@@ -708,7 +764,7 @@ async function send(text) {
       emit: (e) => {
         if (active !== turn) return;
         if (e.type === 'text') {
-          if (!firstToken) { firstToken = now(); orbit?.think('生成回答'); }
+          if (!firstToken) { firstToken = now(); hud.think('生成回答'); }
           if (serverCard) { serverCard.done(true, '由 Claude 服务端完成', Math.round(now() - serverCard.t0)); serverCard = null; }
           bubble.append(e.delta);
           machine.feedResponseText(e.delta);
@@ -717,24 +773,24 @@ async function send(text) {
         else if (e.type === 'state' && e.value !== 'done') setTask(e.value, e.value === 'listening' ? '生成回答' : '');
         else if (e.type === 'tool_start') {
           director.onToolStart(e.name);
-          orbit?.toolStart(e.id, toolLabel(e.name));
-          orbit?.think(`▸ ${toolLabel(e.name)}  ${summarizeArgs(e.name, e.args)}`);
+          hud.toolStart(e.id, toolLabel(e.name));
+          hud.think(`▸ ${toolLabel(e.name)}  ${summarizeArgs(e.name, e.args)}`);
           cards.set(e.id, bubble.toolCard(e.name, e.args));
           usedTools.push(e.name);
           setTask('processing', toolLabel(e.name));
         } else if (e.type === 'tool_progress') {
           cards.get(e.id)?.progress(e.text);
-          orbit?.think(`  ${e.text}`, 'sub');
+          hud.think(`  ${e.text}`, 'sub');
           setTask('processing', e.text.slice(0, 30));
         } else if (e.type === 'tool_end') {
           cards.get(e.id)?.done(e.ok, e.output, e.ms);
-          orbit?.toolEnd(e.id, e.ok);
-          if (!e.ok) orbit?.think(`✕ ${toolLabel(e.name)} 失败`, 'bad');
+          hud.toolEnd(e.id, e.ok);
+          if (!e.ok) hud.think(`✕ ${toolLabel(e.name)} 失败`, 'bad');
           if (/remember|forget|save_skill/.test(e.name)) panels.refreshMind();
         } else if (e.type === 'server_tool') {
           serverCard = Object.assign(bubble.toolCard('web_search', { query: 'Claude 联网搜索' }), { t0: now() });
         } else if (e.type === 'sources') bubble.sources(e.items);
-        else if (e.type === 'team_plan') { orbit?.think(`团队分工 · ${e.steps.map((x) => x.roleName).join(' → ')}`); teamCard = bubble.teamCard(e.steps); setTask('processing', `团队分工 · ${e.steps.length} 步`); }
+        else if (e.type === 'team_plan') { hud.think(`团队分工 · ${e.steps.map((x) => x.roleName).join(' → ')}`); teamCard = bubble.teamCard(e.steps); setTask('processing', `团队分工 · ${e.steps.length} 步`); }
         else if (e.type === 'team_step') {
           teamCard?.step(e.index, e.status, e.note);
           if (e.status === 'running' || e.status === 'redo') setTask('processing', `第 ${e.index + 1} 步${e.status === 'redo' ? ' · 返工' : ''}`);
@@ -755,8 +811,9 @@ async function send(text) {
       }
     });
     dashboard.setLatency(firstToken ? firstToken - t0 : null, total);
-    orbit?.think(`✓ 完成 · ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · ${result.toolCalls} 个工具` : ''}`, 'ok');
+    hud.think(`✓ 完成 · ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · ${result.toolCalls} 个工具` : ''}`, 'ok');
     $('#hud-latency').textContent = firstToken ? `${Math.round(firstToken - t0)} ms` : '—';
+    if (result.text) wp({ say: result.text.replace(/```[\s\S]*?```/g, '').replace(/[#*>`|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 140) });
     rememberTurn('assistant', result.text || '（完成）', usedTools.length ? { tools: [...new Set(usedTools)] } : {});
     $('#mode-pill').classList.remove('offline');
     turn.streamDone = true;
@@ -773,7 +830,7 @@ async function send(text) {
     $('#mode-pill').classList.add('offline');
     active = null;
     setTask('error', '请求失败');
-    orbit?.think(`✕ ${msg.slice(0, 40)}`, 'bad');
+    hud.think(`✕ ${msg.slice(0, 40)}`, 'bad');
     callouts?.set(followUpSuggestions({ error: true, userText: text, desktop: Boolean(DESKTOP) }));
   } finally {
     endControl();
@@ -1011,7 +1068,13 @@ async function setFaceFollow(on) {
       onAngles: (a) => {
         if (!a) return;
         const t = followTarget(a);
+        const had = live.face;
         live.face = t.inRange ? t : null;
+        // 摄像头看到你回来了（之前 10 分钟以上没看到人）
+        if (live.face) {
+          if (!had && live.faceGoneAt && Date.now() - live.faceGoneAt >= 10 * 60_000) greetOnReturn({ awayMs: Date.now() - live.faceGoneAt, reason: 'face' });
+          live.faceGoneAt = 0;
+        } else if (had) live.faceGoneAt = Date.now();
       },
       onStatus: (s) => {
         status.textContent = {
@@ -1207,6 +1270,19 @@ $('#set-tts').addEventListener('change', (e) => {
   speaker.enabled = e.target.checked;
   if (!e.target.checked) speaker.cancel();
 });
+// 主动问好 / 桌面背景
+$('#set-greet').checked = settings.greetOnReturn !== false;
+$('#set-greet').addEventListener('change', (e) => setSetting('greetOnReturn', e.target.checked));
+if (DESKTOP) {
+  $('#row-wallpaper').hidden = false;
+  DESKTOP.invoke('wallpaperState').then((r) => { $('#set-wallpaper').checked = r.on; }).catch(() => {});
+  $('#set-wallpaper').addEventListener('change', async (e) => {
+    try {
+      const r = await DESKTOP.invoke('setWallpaper', { on: e.target.checked });
+      toast(r.on ? '已开启桌面背景：贾维斯会待在桌面上，干活时跟着变形' : '已关闭桌面背景');
+    } catch (err) { toast(err.message); e.target.checked = false; }
+  });
+}
 for (const b of document.querySelectorAll('#set-team button')) {
   b.setAttribute('aria-checked', String(b.dataset.v === settings.teamMode));
   b.addEventListener('click', () => {
@@ -1418,6 +1494,7 @@ window.__jarvis = {
   get palette() { return palette; },
   get mcp() { return mcpPanel; },
   get localModels() { return localModels; },
+  greetOnReturn,
   director,
   get callouts() { return callouts; },
   schedulerTick,

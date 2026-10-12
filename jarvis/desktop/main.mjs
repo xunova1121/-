@@ -5,12 +5,15 @@
  *   - 通过 preload 给页面提供“操作电脑”的能力（文件、打开程序、运行命令、截屏、剪贴板、通知）
  *   - 托盘常驻、全局快捷键 Ctrl/⌘+Shift+J 随时呼出、开机自启
  */
-import { app, BrowserWindow, ipcMain, shell, clipboard, Notification, desktopCapturer, screen, Tray, Menu, nativeImage, globalShortcut, session, systemPreferences } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, clipboard, Notification, desktopCapturer, screen, Tray, Menu, nativeImage, globalShortcut, session, systemPreferences, powerMonitor } from 'electron';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createOps, userPaths } from './ops.mjs';
 import { createControl, STOP_HOTKEY } from './control.mjs';
+import { createWallpaper } from './wallpaper.mjs';
+import { createPresence } from './presence.mjs';
+import fs from 'node:fs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const APP_DIR = path.join(here, 'bundle');
@@ -102,6 +105,34 @@ Object.assign(ops, {
   }
 });
 
+// ---------------------------------------------------------------- 桌面背景 + 在场检测
+const prefsFile = () => path.join(process.env.JARVIS_HOME, 'desktop.json');
+function readPrefs() { try { return JSON.parse(fs.readFileSync(prefsFile(), 'utf8')); } catch { return {}; } }
+function writePrefs(patch) {
+  const next = { ...readPrefs(), ...patch };
+  try { fs.mkdirSync(path.dirname(prefsFile()), { recursive: true }); fs.writeFileSync(prefsFile(), JSON.stringify(next, null, 2)); } catch (e) { console.warn(e); }
+  return next;
+}
+let wallpaper = null;
+function setWallpaper(on) {
+  writePrefs({ wallpaper: on });
+  if (on) wallpaper.show(); else wallpaper.close();
+  tray?.setContextMenu(trayMenu?.());
+  return { on: wallpaper.open };
+}
+const presence = createPresence({
+  powerMonitor,
+  onBack: (info) => win?.webContents.send('jarvis:presence', info)
+});
+Object.assign(ops, {
+  setWallpaper: ({ on }) => setWallpaper(Boolean(on)),
+  wallpaperState: () => ({ on: Boolean(wallpaper?.open), mode: wallpaper?.mode ?? '' }),
+  /** 主窗口把粒子体的状态 / 要说的话同步到桌面背景 */
+  async wallpaperEvent(payload) { wallpaper?.send(payload); return { ok: true }; },
+  /** 测试用：模拟“离开一段时间后回来” */
+  async presenceTest({ awayMs = 3600000 } = {}) { if (!TEST) throw new Error('仅测试模式可用'); win?.webContents.send('jarvis:presence', { awayMs, reason: 'test' }); return { ok: true }; }
+});
+
 const fromOurPage = (e) => Boolean(origin) && String(e.senderFrame?.url || '').startsWith(`${origin}/`);
 ipcMain.handle('jarvis:desktop', async (e, op, args) => {
   if (!fromOurPage(e)) return { ok: false, error: '拒绝：调用来源不是贾维斯页面' };
@@ -176,6 +207,7 @@ function summon() {
   win.webContents.send('jarvis:summon');
 }
 
+let trayMenu = null;
 function createTray() {
   const img = nativeImage.createFromPath(ICON).resize({ width: process.platform === 'darwin' ? 18 : 16, height: process.platform === 'darwin' ? 18 : 16 });
   tray = new Tray(img);
@@ -183,11 +215,13 @@ function createTray() {
   const menu = () => Menu.buildFromTemplate([
     { label: '呼出贾维斯', accelerator: HOTKEY, click: summon },
     { type: 'separator' },
+    { label: '桌面背景模式', type: 'checkbox', checked: Boolean(wallpaper?.open), click: (i) => setWallpaper(i.checked) },
     { label: '开机时自动启动', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin, click: (i) => { app.setLoginItemSettings({ openAtLogin: i.checked, args: ['--hidden'] }); } },
     { label: '打开数据文件夹', click: () => shell.openPath(process.env.JARVIS_HOME) },
     { type: 'separator' },
     { label: '退出', click: () => { quitting = true; app.quit(); } }
   ]);
+  trayMenu = menu;
   tray.setContextMenu(menu());
   tray.on('click', summon);
 }
@@ -211,6 +245,8 @@ app.on('activate', () => summon());
 app.on('before-quit', () => { quitting = true; });
 app.on('will-quit', () => {
   control.close();
+  presence.stop();
+  wallpaper?.close();
   globalShortcut.unregisterAll();
   mcp?.closeAll();
   server?.close();
@@ -234,6 +270,9 @@ app.whenReady().then(async () => {
   }
   setMenu();
   createWindow();
+  wallpaper = createWallpaper({ BrowserWindow, screen, url: `${origin}/wallpaper.html`, preload: path.join(here, 'preload.cjs'), icon: ICON, onLog: (m) => console.log(m) });
+  if (readPrefs().wallpaper) wallpaper.show();
+  presence.start();
   if (!TEST) {
     createTray();
     if (!globalShortcut.register(HOTKEY, summon)) console.warn(`快捷键 ${HOTKEY} 已被其他程序占用`);

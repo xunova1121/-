@@ -109,6 +109,31 @@ await page.screenshot({ path: `${OUT}/desktop-main.png` });
   check('电脑操作结束后贾维斯窗口回到前台', await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()));
 }
 
+// —— 桌面背景 + 主动问好
+{
+  await page.evaluate(() => window.jarvisDesktop.invoke('setWallpaper', { on: true }));
+  let wpPage = null;
+  for (let i = 0; i < 50 && !wpPage; i++) { wpPage = app.windows().find((w) => w.url().includes('wallpaper.html')); if (!wpPage) await page.waitForTimeout(200); }
+  await wpPage.waitForFunction(() => window.__wallpaper?.stage?.stats.frames > 3, null, { timeout: 30000 }).catch(() => {});
+  check('桌面背景在渲染粒子体', await wpPage.evaluate(() => window.__wallpaper.stage.stats.frames > 3));
+  const wpInfo = await app.evaluate(({ BrowserWindow, screen }) => { const w = BrowserWindow.getAllWindows().find((x) => /wallpaper/.test(x.webContents.getURL())); const b = w?.getBounds(); const d = screen.getPrimaryDisplay().bounds; return w ? { focusable: w.isFocusable(), visible: w.isVisible(), full: b.width === d.width && b.height === d.height } : null; });
+  check('开启桌面背景：出现铺满屏幕、不抢焦点的背景窗口', wpInfo?.visible && wpInfo.full && !wpInfo.focusable, JSON.stringify(wpInfo));
+  const hb = await page.locator('#transcript .msg.agent').count();
+  await page.evaluate(() => window.jarvisDesktop.invoke('presenceTest', { awayMs: 2 * 3600_000 }));
+  await page.waitForFunction((n) => document.querySelectorAll('#transcript .msg.agent').length > n, hb, { timeout: 10000 }).catch(() => {});
+  const greet = await page.locator('#transcript .msg.agent').last().innerText();
+  check('离开后回来：主窗口主动问好', /主动问候/.test(greet), greet.replace(/\n/g, ' ').slice(0, 80));
+  await wpPage.waitForFunction(() => !document.querySelector('#wp-say').hidden, null, { timeout: 5000 }).catch(() => {});
+  check('问候同步显示在桌面背景上', (await wpPage.textContent('#wp-say')).length > 4, await wpPage.textContent('#wp-say'));
+  await page.evaluate(() => window.__jarvis.send('帮我写一个网页'));
+  await wpPage.waitForFunction(() => window.__wallpaper.forms.includes('lattice'), null, { timeout: 15000 }).catch(() => {});
+  check('主窗口干活时，桌面背景上的粒子体同步变形', await wpPage.evaluate(() => window.__wallpaper.forms.includes('lattice')), await wpPage.evaluate(() => window.__wallpaper.forms.join(' → ')));
+  await wpPage.screenshot({ path: `${OUT}/desktop-wallpaper.png` });
+  await page.waitForFunction(() => !document.querySelector('#transcript .msg.agent.streaming'), null, { timeout: 30000 });
+  await page.evaluate(() => window.jarvisDesktop.invoke('setWallpaper', { on: false }));
+  check('关闭桌面背景', !(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some((w) => /wallpaper/.test(w.webContents.getURL())))));
+}
+
 // —— MCP：在界面里添加本机 stdio 服务 → 智能体调用（先确认）
 await page.evaluate(() => window.__jarvis.showPanel('skills'));
 await page.waitForSelector('#mcp-body:not([hidden])', { timeout: 10000 });

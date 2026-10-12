@@ -337,6 +337,14 @@
         </div>
         <div class="setting"><label><input type="checkbox" id="set-tts" /> 语音朗读回答</label></div>
         <div class="setting">
+          <label><input type="checkbox" id="set-greet" /> 回到电脑前时主动问好</label>
+          <p class="muted">离开 10 分钟以上再回来（桌面版看键盘鼠标；开了人脸跟随时也看摄像头；网页版看标签页），贾维斯会结合时间、今天的定时任务、上次没做完的事打个招呼。40 分钟内最多一次。</p>
+        </div>
+        <div class="setting" id="row-wallpaper" hidden>
+          <label><input type="checkbox" id="set-wallpaper" /> 桌面背景模式</label>
+          <p class="muted">粒子体铺满桌面、待在所有窗口下面；贾维斯在后台干活、说话时，桌面上的它也跟着变形。按 Ctrl+Shift+J 或托盘图标打开对话。</p>
+        </div>
+        <div class="setting">
           <span class="label">多助手分工</span>
           <div class="seg" role="radiogroup" aria-label="多助手分工" id="set-team">
             <button type="button" role="radio" data-v="auto">自动</button><button type="button" role="radio" data-v="on">总是</button><button type="button" role="radio" data-v="off">关闭</button>

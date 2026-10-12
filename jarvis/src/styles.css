@@ -682,3 +682,18 @@ body.focus-view .thought-log, body.focus-view .orbit-hud { display: none; }
 @keyframes boot-spin { to { transform: rotate(360deg); } }
 body.reduced-motion .boot { display: none; }
 @media (prefers-reduced-motion: reduce) { .boot { display: none; } }
+
+/* ================= 桌面背景模式 ================= */
+body.wallpaper { background: var(--bg); overflow: hidden; cursor: default; user-select: none; }
+.wp { position: fixed; inset: 0; }
+.wp #stage { position: absolute; inset: 0; width: 100%; height: 100%; -webkit-mask-image: none; mask-image: none; }
+.wp::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse 75% 85% at 50% 45%, transparent 50%, rgba(1,4,8,.7) 100%); }
+.wp-clock { position: absolute; left: 6vw; bottom: 10vh; z-index: 2; }
+.wp-time { font: 500 clamp(48px, 8vw, 128px)/1 var(--font-display); letter-spacing: .08em; color: var(--text); text-shadow: 0 0 40px var(--accent-soft); font-variant-numeric: tabular-nums; }
+.wp-date { margin-top: 10px; font: 14px var(--font-display); letter-spacing: .3em; color: var(--muted); }
+.wp-form { position: absolute; right: 6vw; bottom: 10vh; z-index: 2; display: grid; justify-items: end; gap: 4px; font: 11px var(--font-mono); letter-spacing: .3em; color: var(--dim); }
+.wp-form b { font: 600 20px var(--font-display); letter-spacing: .2em; color: var(--accent); }
+.wp-say { position: absolute; left: 50%; top: 14vh; z-index: 3; max-width: min(640px, 80vw); translate: -50% 0; padding: 14px 22px; border: 1px solid var(--line-strong); border-radius: 14px; background: rgba(4, 10, 18, .72); backdrop-filter: blur(8px); font-size: 17px; line-height: 1.7; color: var(--text); box-shadow: 0 0 40px var(--accent-soft); opacity: 0; transition: opacity .6s, translate .6s; }
+.wp-say.in { opacity: 1; translate: -50% 8px; }
+.wp-say::before { content: "J.A.R.V.I.S."; display: block; font: 10px var(--font-display); letter-spacing: .3em; color: var(--accent); margin-bottom: 4px; }
+body.wallpaper .thought-log { right: 6vw; bottom: calc(10vh + 70px); width: 320px; }
