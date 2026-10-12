@@ -98,7 +98,7 @@ check('无页面错误', errors.length === 0, errors.join(' | '));
   await p2.goto(FILE);
   await p2.waitForFunction(() => window.__jarvis?.showPanel);
   await p2.evaluate(() => window.__jarvis.showPanel('models'));
-  await p2.waitForFunction(() => /已连网关/.test(document.querySelector('#gw-badge').textContent), null, { timeout: 10000 }).catch(() => {});
+  await p2.waitForFunction(() => /已连网关/.test(document.querySelector('#gw-badge').textContent), null, { timeout: 20000 }).catch(() => {});
   check('自动连上本机网关', /已连网关/.test(await p2.textContent('#gw-badge')));
   await p2.selectOption('#llm-provider', 'custom');
   await p2.fill('#llm-base', `http://relay-${relay.address().port}.test:${relay.address().port}/v1`);

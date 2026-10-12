@@ -53,8 +53,11 @@ export function createStage(canvas, { lowEnd = false, onContextChange } = {}) {
     u_rigTime: { value: 0 }
   };
 
-  // —— 粒子体
-  const N = lowEnd ? 6000 : 14000;
+  // —— 粒子体：没有显卡（软件渲染）时也用轻量粒子数
+  const gl = renderer.getContext();
+  const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+  const softGL = /swiftshader|llvmpipe|software|basic render/i.test(dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '');
+  const N = lowEnd || softGL ? 6000 : 14000;
   const formCache = new Map();
   const form = (name) => {
     if (!formCache.has(name)) formCache.set(name, buildForm(name, N));

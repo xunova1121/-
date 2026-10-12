@@ -185,6 +185,10 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   let reply = await ask(page, '帮我写一个网页');
   const formsUsed = await page.evaluate((n) => window.__jarvis.director.history.slice(n), histBefore);
   check('粒子体按任务自动变形（写网页 → 晶格）', formsUsed.includes('lattice'), formsUsed.join(' → '));
+  const sats = await page.evaluate(() => [...document.querySelectorAll('.oh-sat text')].map((t) => t.textContent));
+  check('轨道 HUD：这一轮用到的工具显示为卫星节点', sats.includes('写入文件'), sats.join('、'));
+  const thoughts = await page.locator('.thought-log li').allTextContents();
+  check('思考流记录每一步', thoughts.some((t) => /写入文件/.test(t)) && thoughts.some((t) => /完成/.test(t)), thoughts.join(' | '));
   const tools1 = await page.locator('#transcript .msg.agent').last().locator('.tool-card .tn').allTextContents();
   check('智能体写网页：写入文件 → 打开预览', tools1.join(',') === '写入文件,打开预览', tools1.join(','));
   const frame = page.frameLocator('#viewer-body iframe');

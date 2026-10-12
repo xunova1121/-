@@ -96,7 +96,7 @@ const TOOL_LABEL = {
   computer_run: '运行命令', computer_screenshot: '截屏', computer_look: '看屏幕', computer_click: '点击', computer_type: '键盘输入', computer_key: '按键', computer_scroll: '滚动', computer_drag: '拖动', clipboard_read: '读剪贴板', clipboard_write: '写剪贴板', computer_notify: '系统通知'
 };
 
-function summarizeArgs(name, a = {}) {
+export function summarizeArgs(name, a = {}) {
   if (a.path) return a.path;
   if (a.query) return a.query;
   if (a.question) return a.question;

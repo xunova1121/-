@@ -42,12 +42,13 @@ import * as mcp from './agent/mcpClient.js';
 import { createDesktopTools } from './agent/desktopTools.js';
 import { initMcpPanel } from './ui/mcpPanel.js';
 import { initLocalModelsPanel } from './ui/localModelsPanel.js';
+import { initOrbitHud } from './ui/orbitHud.js';
 import { matchWake, WakeWindow } from './core/wakeWord.js';
 import { playCue } from './perception/voiceFx.js';
 import { MetricsPoller } from './api/metrics.js';
 import { subscribeAgentEvents } from './api/agentEvents.js';
 import { Dashboard } from './ui/dashboard.js';
-import { Transcript, toolLabel } from './ui/transcript.js';
+import { Transcript, toolLabel, summarizeArgs } from './ui/transcript.js';
 import { Speaker } from './perception/speaker.js';
 import { VoiceInput, speechRecognitionSupported } from './perception/voiceInput.js';
 import { resolveStt, transcribe } from './perception/stt.js';
@@ -112,10 +113,13 @@ const director = createFormDirector({
   setForm: (name) => {
     const el = document.querySelector('#hud-form');
     if (el) { el.textContent = FORMS[name]?.name ?? name; el.parentElement.classList.remove('flash'); void el.offsetWidth; el.parentElement.classList.add('flash'); }
+    queueMicrotask(updateOrbitStatus);
     return stage ? stage.setForm(name) !== false || stage.form === name : true;
   }
 });
 let directorTick = 0;
+/** 粒子体周围的轨道 HUD 与思考流（启动末尾创建） */
+let orbit = null;
 
 function frame(dt, t) {
   const p = tween.update(t);
@@ -262,7 +266,7 @@ const dashboard = new Dashboard($('#dashboard'), {
   onEmotionPick: (v) => applyEmotionOverride(v)
 });
 const poller = new MetricsPoller({
-  onData: (m) => dashboard.setMetrics(m),
+  onData: (m) => { dashboard.setMetrics(m); orbit?.setMetrics({ cpu: (m.cpu?.percent ?? 0) / 100, mem: (m.memory?.percent ?? 0) / 100 }); },
   onError: () => dashboard.setDisconnected()
 });
 if (!document.hidden) poller.start();
@@ -296,6 +300,8 @@ async function detectGateway() {
       if (local && found) toast('已连接本机网关：所有服务商和自定义接口都可以用了');
     } catch {
       gateway = null;
+      // 单文件版：启动时页面忙可能超时，过几秒再试两次
+      if (local && (detectGateway.retries = (detectGateway.retries ?? 0) + 1) <= 2) setTimeout(() => detectGateway(), 3000);
     }
     panels.refreshModels();
     voicePanel.render();
@@ -520,6 +526,9 @@ async function openSession(id) {
 
 /** 光核旁的建议标注（启动末尾创建） */
 let callouts = null;
+function updateOrbitStatus() {
+  orbit?.setStatus(`${(FORMS[director.form]?.id ?? director.form).toUpperCase()} · LINK ${window.jarvisDesktop ? 'DESKTOP' : gateway ? 'GATEWAY' : 'LOCAL'}`);
+}
 let sessionsPanel = null;
 let schedulesPanel = null;
 
@@ -645,6 +654,8 @@ async function send(text) {
   const thumbs = imgs.map((i) => i.thumb);
   transcript.add('user', userText, Date.now(), { thumbs });
   director.onUserText(text);
+  orbit?.newTurn();
+  orbit?.think(`◂ 收到：${text.slice(0, 30)}`);
   const llmHistory = history.slice(-20).map(({ role, content }) => ({ role, content }));
   rememberTurn('user', userText, thumbs.length ? { thumbs } : {});
 
@@ -697,7 +708,7 @@ async function send(text) {
       emit: (e) => {
         if (active !== turn) return;
         if (e.type === 'text') {
-          if (!firstToken) firstToken = now();
+          if (!firstToken) { firstToken = now(); orbit?.think('生成回答'); }
           if (serverCard) { serverCard.done(true, '由 Claude 服务端完成', Math.round(now() - serverCard.t0)); serverCard = null; }
           bubble.append(e.delta);
           machine.feedResponseText(e.delta);
@@ -706,19 +717,24 @@ async function send(text) {
         else if (e.type === 'state' && e.value !== 'done') setTask(e.value, e.value === 'listening' ? '生成回答' : '');
         else if (e.type === 'tool_start') {
           director.onToolStart(e.name);
+          orbit?.toolStart(e.id, toolLabel(e.name));
+          orbit?.think(`▸ ${toolLabel(e.name)}  ${summarizeArgs(e.name, e.args)}`);
           cards.set(e.id, bubble.toolCard(e.name, e.args));
           usedTools.push(e.name);
-          setTask('processing', `${e.name}`);
+          setTask('processing', toolLabel(e.name));
         } else if (e.type === 'tool_progress') {
           cards.get(e.id)?.progress(e.text);
+          orbit?.think(`  ${e.text}`, 'sub');
           setTask('processing', e.text.slice(0, 30));
         } else if (e.type === 'tool_end') {
           cards.get(e.id)?.done(e.ok, e.output, e.ms);
+          orbit?.toolEnd(e.id, e.ok);
+          if (!e.ok) orbit?.think(`✕ ${toolLabel(e.name)} 失败`, 'bad');
           if (/remember|forget|save_skill/.test(e.name)) panels.refreshMind();
         } else if (e.type === 'server_tool') {
           serverCard = Object.assign(bubble.toolCard('web_search', { query: 'Claude 联网搜索' }), { t0: now() });
         } else if (e.type === 'sources') bubble.sources(e.items);
-        else if (e.type === 'team_plan') { teamCard = bubble.teamCard(e.steps); setTask('processing', `团队分工 · ${e.steps.length} 步`); }
+        else if (e.type === 'team_plan') { orbit?.think(`团队分工 · ${e.steps.map((x) => x.roleName).join(' → ')}`); teamCard = bubble.teamCard(e.steps); setTask('processing', `团队分工 · ${e.steps.length} 步`); }
         else if (e.type === 'team_step') {
           teamCard?.step(e.index, e.status, e.note);
           if (e.status === 'running' || e.status === 'redo') setTask('processing', `第 ${e.index + 1} 步${e.status === 'redo' ? ' · 返工' : ''}`);
@@ -739,6 +755,7 @@ async function send(text) {
       }
     });
     dashboard.setLatency(firstToken ? firstToken - t0 : null, total);
+    orbit?.think(`✓ 完成 · ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · ${result.toolCalls} 个工具` : ''}`, 'ok');
     $('#hud-latency').textContent = firstToken ? `${Math.round(firstToken - t0)} ms` : '—';
     rememberTurn('assistant', result.text || '（完成）', usedTools.length ? { tools: [...new Set(usedTools)] } : {});
     $('#mode-pill').classList.remove('offline');
@@ -756,6 +773,7 @@ async function send(text) {
     $('#mode-pill').classList.add('offline');
     active = null;
     setTask('error', '请求失败');
+    orbit?.think(`✕ ${msg.slice(0, 40)}`, 'bad');
     callouts?.set(followUpSuggestions({ error: true, userText: text, desktop: Boolean(DESKTOP) }));
   } finally {
     endControl();
@@ -1050,7 +1068,7 @@ const panels = initPanels({
   settings,
   getGateway: () => gateway,
   getHistory: () => history,
-  onConfigChange: (cfg) => { llmConfig = cfg; updateModelLabels(); syncMemoryEngine(); },
+  onConfigChange: (cfg) => { llmConfig = cfg; updateModelLabels(); syncMemoryEngine(); updateOrbitStatus(); },
   onReflect: () => reflectNow({ manual: true }),
   onAutoMemory: (on) => { setSetting('autoMemory', on); if (!on) clearTimeout(reflectTimer); },
 });
@@ -1289,6 +1307,40 @@ setTimeout(schedulerTick, 4000);
 agentMemory.maintain().catch(() => {});
 
 // ---------------------------------------------------------------- 光核旁的建议标注
+// 开机序列：每次打开（同一标签页内刷新不重复）播放约 2 秒的系统自检；减少动画时跳过
+(async () => {
+  let seen = false;
+  try { seen = sessionStorage.getItem('jarvis.booted') === '1'; sessionStorage.setItem('jarvis.booted', '1'); } catch { /* 隐私模式 */ }
+  const boot = $('#boot');
+  if (seen || body.classList.contains('reduced-motion') || !boot) { boot?.remove(); return; }
+  const all = await agentMemory.listAll().catch(() => null);
+  const lines = [
+    ['神经粒子核心', `${lowEnd ? 6000 : 14000} 粒子`],
+    ['长期记忆', all ? `${all.memories.length} 条` : '在线'],
+    ['习得技能 / 教训', all ? `${all.skills.length} / ${all.lessons.length}` : '在线'],
+    ['对话历史', `${(await sessionsApi.list().catch(() => [])).length} 段`],
+    ['模型链路', displayName(llmConfig)],
+    ['系统', '全部就绪']
+  ];
+  $('#boot-lines').replaceChildren(...lines.map(([k, v], i) => {
+    const d = document.createElement('div');
+    d.style.animationDelay = `${150 + i * 210}ms`;
+    d.textContent = `> ${k} `;
+    const b = document.createElement('b');
+    b.textContent = v;
+    d.append(b);
+    return d;
+  }));
+  setTimeout(() => boot.classList.add('out'), 1900);
+  setTimeout(() => boot.remove(), 2500);
+})();
+
+// 有对话时舞台稍微收矮，给对话留空间
+new MutationObserver(() => body.classList.toggle('has-convo', Boolean(document.querySelector('#transcript .msg')))).observe($('#transcript'), { childList: true });
+
+orbit = initOrbitHud({ root: $('#stage-wrap'), getAnchor: () => stage?.anchor?.() ?? null, reducedMotion: () => body.classList.contains('reduced-motion') });
+updateOrbitStatus();
+orbit.think('系统就绪 · 粒子核心在线');
 callouts = initCallouts({
   root: $('#stage-wrap'),
   getAnchor: () => stage?.anchor?.() ?? null,
