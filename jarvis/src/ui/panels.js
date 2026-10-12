@@ -424,6 +424,14 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     refreshModels: fillModels,
     get config() { return cfg; },
     /** 其他面板（如语音）修改配置：统一保存并通知 */
-    patchConfig(fn) { cfg = fn(cfg); saveConfig(cfg); onConfigChange(cfg); return cfg; }
+    patchConfig(fn) { cfg = fn(cfg); saveConfig(cfg); onConfigChange(cfg); return cfg; },
+    /** 切换到指定服务商与型号（如本机模型面板里点“使用”） */
+    useModel(provider, model) {
+      cfg = { ...cfg, provider, models: { ...cfg.models, [provider]: model } };
+      saveConfig(cfg);
+      sel.value = provider;
+      fillModels();
+      onConfigChange(cfg);
+    }
   };
 }

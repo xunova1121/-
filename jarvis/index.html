@@ -259,6 +259,14 @@
           <button class="btn ghost" type="button" id="btn-llm-test">测试连接</button>
         </div>
         <p class="muted small" id="llm-status" role="status"></p>
+        <h3 class="sub">本机模型（免费 · 离线 · 数据不出电脑）</h3>
+        <div class="local-status" id="local-status" role="status"></div>
+        <ul class="lm-list" id="local-list"></ul>
+        <form class="lm-custom" id="local-custom" hidden>
+          <label class="sr-only" for="local-custom-name">其他模型名</label>
+          <input id="local-custom-name" placeholder="其他模型，如 qwen3:30b-a3b" spellcheck="false" />
+          <button class="btn ghost sm" type="submit">下载</button>
+        </form>
         <h3 class="sub">联网获取最新信息</h3>
         <label class="inline-check"><input type="checkbox" id="set-websearch" /> Claude 内置联网搜索（使用 Claude 时生效）</label>
         <label class="field" for="tavily-key"><span>Tavily 搜索 Key（其他模型联网用，可选）</span><input type="password" id="tavily-key" placeholder="tvly-…" autocomplete="off" /></label>

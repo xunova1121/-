@@ -8,6 +8,7 @@
  *   GET  /api/health            后端模式、已配置密钥的服务商
  *   ANY  /api/llm/<服务商>/...   大模型接口代理：绕过浏览器跨域限制；浏览器没带密钥时注入环境变量里的密钥
  *   GET  /api/fetch?url=         读取网页（智能体的 fetch_url 工具用；拒绝内网地址）
+ *   /api/ollama/...             本机模型：检测 / 启动 / 下载 / 删除（见 ollama.mjs；仅本机页面可调用）
  *   其它                         dist/ 下的静态文件（先 npm run build）
  *
  * 环境变量：
@@ -28,6 +29,7 @@ import { collectMetrics } from './metrics.mjs';
 import { EMOTIONS } from '../shared/emotionTag.js';
 import { upstreamFor, providerById, ENV_KEYS, isPrivateHost } from '../shared/providers.js';
 import { createMcpManager } from './mcp.mjs';
+import { createOllama } from './ollama.mjs';
 
 const CORS_PATHS = /^\/api\/(health|local\/metrics|llm\/.+)$/;
 export const EXTRA_UPSTREAMS = { tavily: 'https://api.tavily.com', elevenlabs: 'https://api.elevenlabs.io' };
@@ -42,7 +44,8 @@ export function createServer({
   agent = process.env.ANTHROPIC_API_KEY ? new ClaudeAgent() : new MockAgent(),
   internalToken = process.env.JARVIS_INTERNAL_TOKEN || '',
   staticDir = DIST,
-  mcp = null // createMcpManager() 的结果；为 null 时不提供 MCP 接口
+  mcp = null, // createMcpManager() 的结果；为 null 时不提供 MCP 接口
+  ollama = createOllama()
 } = {}) {
   const subscribers = new Set();
   let activeChats = 0;
@@ -86,6 +89,26 @@ export function createServer({
       if (!m[2] && req.method === 'PUT') return json(res, 200, await mcp.upsert({ ...(await readJson(req)), id }));
       if (!m[2] && req.method === 'DELETE') { await mcp.remove(id); return json(res, 200, { ok: true }); }
     }
+    return json(res, 404, { error: 'not found' });
+  }
+
+  async function handleOllama(req, res, pathname) {
+    if (!sameOriginOnly(req)) return json(res, 403, { error: '只允许本机贾维斯页面调用' });
+    if (pathname === '/api/ollama/status' && req.method === 'GET') return json(res, 200, await ollama.status());
+    if (pathname === '/api/ollama/start' && req.method === 'POST') return json(res, 200, await ollama.start());
+    if (pathname === '/api/ollama/pull' && req.method === 'POST') {
+      const { model } = await readJson(req, 4096);
+      const ac = new AbortController();
+      res.on('close', () => ac.abort());
+      const upstream = await ollama.pull(String(model || ''), ac.signal);
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store' });
+      try {
+        for await (const chunk of upstream.body) res.write(chunk);
+      } catch { /* 用户取消 */ }
+      return res.end();
+    }
+    const m = pathname.match(/^\/api\/ollama\/models\/(.+)$/);
+    if (m && req.method === 'DELETE') return json(res, 200, await ollama.remove(decodeURIComponent(m[1])));
     return json(res, 404, { error: 'not found' });
   }
 
@@ -159,7 +182,7 @@ export function createServer({
   }
 
   async function handleLlmProxy(req, res, id, rest, search, cross = false) {
-    let base = upstreamFor(id) ?? EXTRA_UPSTREAMS[id];
+    let base = id === 'ollama' ? `${ollama.host}/v1` : (upstreamFor(id) ?? EXTRA_UPSTREAMS[id]);
     if (id === 'custom') {
       // 自定义（OpenAI 兼容）接口：地址由前端在请求头里给出；允许内网地址（本机 / 局域网自建模型很常见）
       try {
@@ -254,12 +277,14 @@ export function createServer({
           model: agent.model,
           cors: cross,
           mcp: Boolean(mcp) && !cross,
+          ollama: !cross,
           gatewayKeys: cross ? [] : Object.entries(ENV_KEYS).filter(([, env]) => process.env[env]).map(([id]) => id)
         });
       }
       const llm = pathname.match(/^\/api\/llm\/([a-z0-9-]+)\/(.*)$/);
       if (llm) return await handleLlmProxy(req, res, llm[1], llm[2], new URL(req.url, 'http://x').search, cross);
       if (pathname === '/api/mcp' || pathname.startsWith('/api/mcp/')) return await handleMcp(req, res, pathname);
+      if (pathname.startsWith('/api/ollama/')) return await handleOllama(req, res, pathname);
       if (pathname === '/api/fetch' && req.method === 'GET') return await handleFetch(req, res, new URL(req.url, 'http://x').searchParams.get('url'));
       if (pathname.startsWith('/api/')) return json(res, 404, { error: 'not found' });
       if (req.method !== 'GET' && req.method !== 'HEAD') return json(res, 405, { error: 'method not allowed' });

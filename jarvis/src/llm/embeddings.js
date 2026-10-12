@@ -4,7 +4,9 @@
  */
 export const EMBEDDING_ENGINES = [
   { id: 'siliconflow', name: '硅基流动 BGE-M3（中文效果好）', keyFrom: 'siliconflow', model: 'BAAI/bge-m3', base: 'https://api.siliconflow.cn/v1', browser: false },
-  { id: 'openai', name: 'OpenAI text-embedding-3-small', keyFrom: 'openai', model: 'text-embedding-3-small', base: 'https://api.openai.com/v1', browser: true }
+  { id: 'openai', name: 'OpenAI text-embedding-3-small', keyFrom: 'openai', model: 'text-embedding-3-small', base: 'https://api.openai.com/v1', browser: true },
+  // 完全本机：在“模型 → 本机模型”里下载 bge-m3 后点“用于按意思检索”启用（不参与 auto）
+  { id: 'ollama', name: 'Ollama 本机向量（bge-m3）', local: true, model: 'bge-m3', base: 'http://127.0.0.1:11434/v1', browser: false }
 ];
 
 /** auto：按已有密钥选；返回 null 表示只用本地检索 */
@@ -12,7 +14,8 @@ export function resolveEmbedding(cfg, gateway = null) {
   const want = cfg.embedding?.engine || 'auto';
   if (want === 'off') return null;
   const has = (id) => Boolean(cfg.keys?.[id]) || Boolean(gateway?.keys?.includes(id));
-  const list = want === 'auto' ? EMBEDDING_ENGINES : EMBEDDING_ENGINES.filter((e) => e.id === want);
+  if (want === 'ollama') return gateway ? { ...EMBEDDING_ENGINES.find((e) => e.id === 'ollama'), model: cfg.embedding?.model || 'bge-m3' } : null;
+  const list = want === 'auto' ? EMBEDDING_ENGINES.filter((e) => !e.local) : EMBEDDING_ENGINES.filter((e) => e.id === want);
   return list.find((e) => has(e.keyFrom) && (e.browser || gateway)) ?? null;
 }
 
@@ -22,7 +25,7 @@ export function resolveEmbedding(cfg, gateway = null) {
 export function createEmbedder(cfg, { gateway = null, fetchImpl = globalThis.fetch } = {}) {
   const e = resolveEmbedding(cfg, gateway);
   if (!e) return null;
-  const key = cfg.keys?.[e.keyFrom] || '';
+  const key = e.local ? 'ollama' : cfg.keys?.[e.keyFrom] || '';
   const base = gateway ? `${gateway.origin}/api/llm/${e.id}` : e.base;
   return {
     model: `${e.id}:${e.model}`,

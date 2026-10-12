@@ -87,21 +87,34 @@ export function createAccumulator(onText) {
   };
 }
 
+/** 已知不支持工具调用的模型（本次运行内记住，避免每轮都先失败一次） */
+const noToolModels = new Set();
+
 export function createOpenAIAdapter({ baseURL, apiKey, headers = {} }) {
   return {
     kind: 'openai',
     async stream({ model, system, messages, tools, signal, onText }) {
-      const res = await fetch(`${baseURL.replace(/\/$/, '')}/chat/completions`, {
+      const send = (withTools) => fetch(`${baseURL.replace(/\/$/, '')}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(apiKey && { Authorization: `Bearer ${apiKey}` }), ...headers },
         body: JSON.stringify({
           model,
           stream: true,
           messages: toOpenAIMessages(system, messages),
-          ...(tools?.length && { tools: toOpenAITools(tools) })
+          ...(withTools && tools?.length && { tools: toOpenAITools(tools) })
         }),
         signal
       });
+      const useTools = !noToolModels.has(model);
+      let res = await send(useTools);
+      // 有些本机模型（如 gemma3、qwen2.5vl）不支持工具调用：去掉工具再试，只聊天
+      if (useTools && tools?.length && res.status === 400) {
+        const detail = await res.clone().text().catch(() => '');
+        if (/does not support tools|tools? (is|are) not supported/i.test(detail)) {
+          noToolModels.add(model);
+          res = await send(false);
+        }
+      }
       if (!res.ok || !res.body) {
         let detail = '';
         try { detail = (await res.text()).slice(0, 300); } catch { /* ignore */ }

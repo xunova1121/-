@@ -20,7 +20,7 @@ export const PROVIDERS = [
   { id: 'doubao', name: '豆包（火山方舟）', kind: 'openai', baseURL: 'https://ark.cn-beijing.volces.com/api/v3', models: ['doubao-seed-1-6-250615'], keyUrl: 'https://console.volcengine.com/ark', browser: false, note: '型号处可填写方舟控制台里的“推理接入点 ID”' },
   { id: 'siliconflow', name: '硅基流动 SiliconFlow', kind: 'openai', baseURL: 'https://api.siliconflow.cn/v1', models: ['deepseek-ai/DeepSeek-V3', 'Qwen/Qwen2.5-72B-Instruct'], keyUrl: 'https://cloud.siliconflow.cn/account/ak', browser: false },
   { id: 'openrouter', name: 'OpenRouter（聚合）', kind: 'openai', baseURL: 'https://openrouter.ai/api/v1', models: ['openai/gpt-5', 'google/gemini-2.5-pro', 'deepseek/deepseek-chat'], keyUrl: 'https://openrouter.ai/keys', browser: true },
-  { id: 'ollama', name: 'Ollama（本机模型）', kind: 'openai', baseURL: 'http://localhost:11434/v1', models: ['qwen2.5:7b', 'llama3.1:8b'], needsKey: false, browser: true, note: '浏览器直连需以 OLLAMA_ORIGINS=* 启动 Ollama；用完整版网关则不需要' },
+  { id: 'ollama', name: 'Ollama（本机模型）', kind: 'openai', baseURL: 'http://127.0.0.1:11434/v1', models: ['qwen3:8b', 'qwen3:4b'], needsKey: false, browser: true, note: '浏览器直连需以 OLLAMA_ORIGINS=* 启动 Ollama；用完整版网关则不需要' },
   { id: 'custom', name: '自定义（OpenAI 兼容）', kind: 'openai', baseURL: '', models: [''], browser: true, custom: true }
 ];
 

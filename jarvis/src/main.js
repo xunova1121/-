@@ -40,6 +40,7 @@ import { openingSuggestions, followUpSuggestions } from './core/suggest.js';
 import * as mcp from './agent/mcpClient.js';
 import { createDesktopTools } from './agent/desktopTools.js';
 import { initMcpPanel } from './ui/mcpPanel.js';
+import { initLocalModelsPanel } from './ui/localModelsPanel.js';
 import { matchWake, WakeWindow } from './core/wakeWord.js';
 import { playCue } from './perception/voiceFx.js';
 import { MetricsPoller } from './api/metrics.js';
@@ -303,7 +304,7 @@ async function detectGateway() {
       const h = await (await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout?.(1500) })).json();
       if (!h?.ok) throw new Error('not a gateway');
       const found = !gateway;
-      gateway = { origin: local ? LOCAL_GATEWAY : location.origin, keys: h.gatewayKeys ?? [], cors: Boolean(h.cors), mcp: Boolean(h.mcp) };
+      gateway = { origin: local ? LOCAL_GATEWAY : location.origin, keys: h.gatewayKeys ?? [], cors: Boolean(h.cors), mcp: Boolean(h.mcp), ollama: Boolean(h.ollama) };
       if (local && found) toast('已连接本机网关：所有服务商和自定义接口都可以用了');
     } catch {
       gateway = null;
@@ -311,6 +312,7 @@ async function detectGateway() {
     panels.refreshModels();
     voicePanel.render();
     mcpPanel.refresh();
+    localModels.refresh();
     syncMemoryEngine();
     updateModelLabels();
   })().finally(() => { probing = null; });
@@ -988,7 +990,7 @@ function showPanel(name, { toggle = false } = {}) {
   if (name === 'workspace') panels.refreshFiles();
   if (name === 'knowledge') panels.refreshKb();
   if (name === 'mind') panels.refreshMind();
-  if (name === 'models') { panels.refreshModels(); voicePanel.render(); }
+  if (name === 'models') { panels.refreshModels(); voicePanel.render(); localModels.refresh(); }
   if (name === 'skills') { skillsPanel.refresh(); mcpPanel.refresh(); }
   if (name === 'sessions') sessionsPanel?.refresh();
   if (name === 'system') schedulesPanel?.refresh();
@@ -1006,6 +1008,13 @@ const panels = initPanels({
   onAutoMemory: (on) => { setSetting('autoMemory', on); if (!on) clearTimeout(reflectTimer); },
 });
 const voicePanel = initVoicePanel({ panels, speaker, getGateway: () => gateway });
+const localModels = initLocalModelsPanel({
+  getGateway: () => gateway,
+  getConfig: () => panels.config,
+  useModel: (p, m) => panels.useModel(p, m),
+  patchConfig: (fn) => panels.patchConfig(fn),
+  toast: (t) => toast(t)
+});
 const mcpPanel = initMcpPanel({
   getGateway: () => gateway,
   toast: (t) => toast(t),
@@ -1312,6 +1321,7 @@ window.__jarvis = {
   get skills() { return skillsPanel; },
   get palette() { return palette; },
   get mcp() { return mcpPanel; },
+  get localModels() { return localModels; },
   get callouts() { return callouts; },
   schedulerTick,
   reflectNow,

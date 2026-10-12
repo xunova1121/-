@@ -521,6 +521,32 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await b2.close();
 }
 
+// ---------- 5b. 本机模型（Ollama）：检测、一键下载、切换使用 ----------
+{
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  const page = await ctx.newPage();
+  await page.goto(BASE);
+  await page.waitForFunction(() => window.__jarvis?.showPanel);
+  await page.evaluate(() => window.__jarvis.showPanel('models'));
+  await page.waitForFunction(() => !/正在检测/.test(document.querySelector('#local-status').textContent) && document.querySelector('#local-status').textContent, null, { timeout: 10000 });
+  const st = await page.textContent('#local-status');
+  if (!process.env.JARVIS_FAKE_OLLAMA) {
+    check('本机模型：未运行时给出安装 / 启动指引', /没有检测到 Ollama|没有运行|运行中/.test(st), st);
+  } else {
+    check('本机模型：检测到 Ollama', /运行中/.test(st), st);
+    check('本机模型：推荐清单与已装模型', (await page.locator('.lm-row').count()) >= 8 && await page.isVisible('[data-use="llama3.2:3b"]'));
+    await page.click('[data-pull="qwen3:4b"]');
+    await page.waitForSelector('.lm-progress', { timeout: 5000 });
+    check('本机模型：下载显示进度条', true, await page.textContent('.lm-pct'));
+    await page.screenshot({ path: `${OUT}/local-models.png` });
+    await page.waitForFunction(() => document.querySelector('[data-use="qwen3:4b"]')?.textContent === '使用中', null, { timeout: 15000 });
+    check('本机模型：下载完成后自动切换使用', (await page.inputValue('#llm-provider')) === 'ollama');
+    const r = await ask(page, '你好');
+    check('本机模型：经网关对话', /本机模型 qwen3:4b 收到/.test(r), r);
+  }
+  await ctx.close();
+}
+
 // ---------- 6. 不支持语音识别（模拟 Firefox） ----------
 {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
