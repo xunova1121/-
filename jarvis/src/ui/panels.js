@@ -445,17 +445,21 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   $('#set-websearch').checked = cfg.claudeWebSearch;
   $('#set-websearch').addEventListener('change', (e) => { cfg = { ...cfg, claudeWebSearch: e.target.checked }; saveConfig(cfg); onConfigChange(cfg); });
   $('#tavily-key').value = cfg.tavilyKey || '';
+  $('#search-region').value = cfg.searchRegion || 'auto';
+  $('#search-region').addEventListener('change', (e) => { cfg = { ...cfg, searchRegion: e.target.value }; saveConfig(cfg); onConfigChange(cfg); });
   $('#tavily-key').addEventListener('change', (e) => { cfg = { ...cfg, tavilyKey: e.target.value.trim() }; saveConfig(cfg); onConfigChange(cfg); });
   // 测试联网搜索：用现在的设置真搜一次，告诉用户能不能用、用的是哪个搜索源
   $('#btn-search-test').addEventListener('click', async () => {
     const out = $('#search-test-result');
     out.textContent = '正在搜索…';
     try {
-      const engine = createSearch({ tavilyKey: $('#tavily-key').value.trim(), fetchViaGateway: searchFetch?.() });
+      const engine = createSearch({ tavilyKey: $('#tavily-key').value.trim(), fetchViaGateway: searchFetch?.(), searchRegion: $('#search-region').value });
       if (!engine) { out.textContent = '当前环境没有可用的搜索：请填 Tavily Key，或在电脑上运行启动程序'; return; }
       const t0 = Date.now();
+      const region = await engine.regionNow?.();
       const hits = await engine.search('今日新闻', 5);
-      out.textContent = hits.length ? `✓ ${engine.name} 可用：${hits.length} 条结果，${((Date.now() - t0) / 1000).toFixed(1)} 秒（第一条：${hits[0].title.slice(0, 24)}）` : `${engine.name} 没有返回结果，建议填 Tavily Key`;
+      const where = region ? `（${region === 'cn' ? '国内网络' : '国外网络'}）` : '';
+      out.textContent = hits.length ? `✓ ${engine.name}${where} 可用：${hits.length} 条结果，${((Date.now() - t0) / 1000).toFixed(1)} 秒（第一条：${hits[0].title.slice(0, 24)}）` : `${engine.name}${where} 没有返回结果，建议填 Tavily Key`;
     } catch (e) { out.textContent = `✕ ${e.message}`; }
   });
 

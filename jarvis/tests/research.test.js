@@ -32,7 +32,7 @@ describe('免密钥搜索结果解析', () => {
     expect(createSearch({})).toBeNull();
     expect(createSearch({ tavilyKey: 'k' }).name).toBe('Tavily');
     const asked = [];
-    const s = createSearch({ fetchViaGateway: async (url) => { asked.push(url); return new Response(/bing/.test(url) ? '<html>验证</html>' : DDG); } });
+    const s = createSearch({ searchRegion: 'global', fetchViaGateway: async (url) => { asked.push(url); return new Response(/bing/.test(url) ? '<html>验证</html>' : DDG); } });
     const hits = await s.search('ollama 本机模型');
     expect(asked[0]).toMatch(/^https:\/\/cn\.bing\.com\/search\?q=ollama/);
     expect(asked[1]).toMatch(/duckduckgo/);
@@ -137,12 +137,12 @@ describe('手机上也能联网搜索', () => {
   });
   it('必应结果太少时再查 DuckDuckGo，合并去重', async () => {
     const one = BING.replace(/<li class="b_algo"><h2><a href="https:\/\/example[\s\S]*?<\/li>/, '');
-    const s = createSearch({ fetchViaGateway: async (url) => new Response(/bing/.test(url) ? one : DDG) });
+    const s = createSearch({ searchRegion: 'global', fetchViaGateway: async (url) => new Response(/bing/.test(url) ? one : DDG) });
     const hits = await s.search('qwen', 6);
     expect(hits.map((h) => h.url)).toEqual(['https://ollama.com/library/qwen3', 'https://github.com/ollama/ollama']);
   });
   it('web_search 一次并行搜多个词，各自给出结果或失败原因', async () => {
-    const tools = Object.fromEntries(createTools({ metrics: async () => ({}), fetchViaGateway: async (url) => {
+    const tools = Object.fromEntries(createTools({ metrics: async () => ({}), searchRegion: 'global', fetchViaGateway: async (url) => {
       if (/Malm/.test(decodeURIComponent(url))) throw new Error('网络不通');
       return new Response(/bing/.test(url) ? BING : DDG);
     } }).map((t) => [t.name, t]));
@@ -154,5 +154,46 @@ describe('手机上也能联网搜索', () => {
     expect(STABLE_PROMPT).toMatch(/逐个查/);
     expect(STABLE_PROMPT).toMatch(/Atalanta/);
     expect(STABLE_PROMPT).toMatch(/核对/);
+  });
+});
+
+import { parseBaidu, parseSo360, detectRegion, searchPlan } from '../src/agent/webSearch.js';
+const BAIDU = `<div id="content_left">
+<div class="result c-container xpath-log new-pmd" srcid="1599" id="1" tpl="se_com_default" mu="https://sports.sina.com.cn/g/seriea/2026-10-12/doc-1.shtml" data-op="{}"><div class="c-container"><h3 class="c-title t t tts-title"><a href="http://www.baidu.com/link?url=AbC" target="_blank">亚特兰大3-1威尼斯 <em>克尔斯托维奇</em>梅开二度</a></h3><div class="c-row"><span class="content-right_8Zs40">2026年10月12日 意甲第6轮，亚特兰大主场3比1击败威尼斯……</span></div></div></div>
+<div mu="http://nourl.ubs.baidu.com/123" class="result c-container new-pmd" id="2"><h3 class="t"><a href="http://www.baidu.com/link?url=XyZ">竞彩赛果 周一001</a></h3><div class="c-abstract">周一001 迪拜连接 1:3 吉达国民</div></div>
+<div class="result-op c-container ec_tuiguang_ad" data-tuiguang="1"><h3><a href="http://e.baidu.com/ad">推广</a></h3></div>
+</div>`;
+const SO = `<ul class="result">
+<li class="res-list" data-lazyload="1"><h3 class="res-title "><a href="https://www.so.com/link?m=abc" rel="noopener" data-mdurl="https://www.dongqiudi.com/articles/123.html" target="_blank">考文垂4-1纽卡斯尔 - 懂球帝</a></h3><p class="res-desc">英超第6轮，考文垂主场4比1大胜纽卡斯尔。</p></li>
+<li class="res-list"><h3 class="res-title"><a href="https://e.so.com/search/ad">广告</a></h3></li>
+</ul>`;
+describe('国内搜索源', () => {
+  it('百度：取真实地址（mu），没有就用跳转链接；跳过推广', () => {
+    expect(parseBaidu(BAIDU)).toEqual([
+      { title: '亚特兰大3-1威尼斯 克尔斯托维奇梅开二度', url: 'https://sports.sina.com.cn/g/seriea/2026-10-12/doc-1.shtml', snippet: '意甲第6轮，亚特兰大主场3比1击败威尼斯……' },
+      { title: '竞彩赛果 周一001', url: 'http://www.baidu.com/link?url=XyZ', snippet: '周一001 迪拜连接 1:3 吉达国民' }
+    ]);
+  });
+  it('360：取 data-mdurl 真实地址，跳过广告', () => {
+    expect(parseSo360(SO)).toEqual([{ title: '考文垂4-1纽卡斯尔 - 懂球帝', url: 'https://www.dongqiudi.com/articles/123.html', snippet: '英超第6轮，考文垂主场4比1大胜纽卡斯尔。' }]);
+  });
+  it('按网络判断地区：谷歌连不上 = 国内；连得上再看时区', async () => {
+    expect(await detectRegion(async () => { throw new TypeError('blocked'); })).toBe('cn');
+    expect(await detectRegion(() => new Promise(() => {}), { timeoutMs: 20 })).toBe('cn');
+    expect(await detectRegion(async () => new Response(null, { status: 204 }), { timeZone: 'Europe/London' })).toBe('global');
+    expect(await detectRegion(async () => new Response(null, { status: 204 }), { timeZone: 'Asia/Shanghai' })).toBe('cn');
+  });
+  it('国内：中文用必应中国 → 百度 → 360；英文用必应国际版；国外：必应 → DuckDuckGo', () => {
+    expect(searchPlan('马尔默 卡尔马 比分', 'cn').map((x) => x[0])).toEqual(['必应中国', '百度', '360']);
+    expect(searchPlan('Malmo Kalmar', 'cn')[0][1]).toMatch(/cn\.bing\.com.*ensearch=1/);
+    expect(searchPlan('Malmo Kalmar', 'global').map((x) => x[0])).toEqual(['必应', 'DuckDuckGo']);
+  });
+  it('国内模式：必应中国被拦时用百度、360 的结果补上', async () => {
+    const asked = [];
+    const s = createSearch({ searchRegion: 'cn', fetchViaGateway: async (url) => { asked.push(new URL(url).host); return new Response(/baidu/.test(url) ? BAIDU : /so\.com/.test(url) ? SO : '<html>验证</html>'); } });
+    const hits = await s.search('竞彩 赛果 周一', 6);
+    expect(asked).toEqual(['cn.bing.com', 'www.baidu.com', 'www.so.com']);
+    expect(hits.map((h) => new URL(h.url).host)).toEqual(['sports.sina.com.cn', 'www.baidu.com', 'www.dongqiudi.com']);
+    expect(s.name).toMatch(/百度/);
   });
 });

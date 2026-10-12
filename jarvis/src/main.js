@@ -642,6 +642,7 @@ async function buildTools({ background = false } = {}) {
     ...createTools({
       metrics,
       tavilyKey: llmConfig.tavilyKey,
+      searchRegion: llmConfig.searchRegion || 'auto',
       fetchViaGateway: fetchViaGateway(),
       llm: helperLlm('write'), // 深度调研：用写作模型
       onPreview: background ? () => {} : COMPACT

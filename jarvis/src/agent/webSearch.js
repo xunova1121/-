@@ -1,7 +1,8 @@
 /**
  * 联网搜索：
  *   - 填了 Tavily Key：用 Tavily（结果质量最好，带摘要）
- *   - 没填但有本机网关（完整版 / 桌面版）：经网关读取必应搜索结果页（国内外都能访问），失败再试 DuckDuckGo，免密钥
+ *   - 没填但能直接上网（桌面版经本机网关、手机 App 用系统网络）：读取搜索结果页，免密钥。
+ *     按网络判断地区：在国内（访问不了谷歌，或时区在中国）用必应中国、百度、360，在国外用必应、DuckDuckGo
  *   - 都没有：不提供搜索
  * 结果统一为 [{ title, url, snippet }]
  */
@@ -64,11 +65,75 @@ export function parseDuckDuckGo(html) {
   return out;
 }
 
+/** 百度：结果块的 mu 属性是真实地址（没有就用百度跳转链接，读网页时会自动跳转） */
+export function parseBaidu(html) {
+  const out = [];
+  // 只按最外层结果块切（里面还嵌着 class 里也有 c-container 的 div）
+  // 切出来的块以完整的开始标签开头（mu 属性在里面，位置不固定）
+  const outer = /(?=<div\b[^>]*\bclass="[^"]*\bresult(?:-op)?\b[^"]*\bc-container\b)/;
+  let blocks = String(html).split(outer).filter((b) => /^<div/.test(b));
+  if (!blocks.length) blocks = String(html).split(/(?=<div\b[^>]*\bclass="[^"]*\bc-container\b)/).filter((b) => /^<div/.test(b));
+  for (const b of blocks) {
+    const a = b.match(/<h3[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/);
+    if (!a) continue;
+    const head = b.slice(0, b.indexOf('>') + 1);
+    const mu = decode(head.match(/\bmu="([^"]+)"/)?.[1] ?? '');
+    const url = /^https?:/.test(mu) && !/nourl/.test(mu) ? mu : decode(a[1]);
+    if (!/^https?:/.test(url) || /tuiguang|e\.baidu\.com/.test(url + head)) continue; // 推广
+    const s = b.match(/class="[^"]*(?:c-abstract|content-right_[\w-]+|c-span-last|c-color-text)[^"]*"[^>]*>([\s\S]*?)<\/(?:div|span)>/);
+    const snippet = decode(s?.[1] ?? b.replace(a[0], '')).slice(0, 300);
+    out.push({ title: decode(a[2]), url, snippet: snippet.replace(/^(\d{4}年\d{1,2}月\d{1,2}日)\s*/, '') });
+  }
+  return out;
+}
+
+/** 360 搜索：链接上的 data-mdurl 是真实地址 */
+export function parseSo360(html) {
+  const out = [];
+  const blocks = String(html).split(/<li[^>]+class="[^"]*\bres-list\b[^"]*"/).slice(1);
+  for (const b of blocks) {
+    const tag = b.match(/<h3[^>]*>[\s\S]*?(<a\b[^>]*>)([\s\S]*?)<\/a>/);
+    if (!tag) continue;
+    const attr = (n) => decode(tag[1].match(new RegExp(`\\b${n}="([^"]+)"`))?.[1] ?? '');
+    const url = [attr('data-mdurl'), attr('data-url'), attr('href')].find((u) => /^https?:/.test(u) && !/so\.com\/link/.test(u)) || attr('href');
+    if (!/^https?:/.test(url) || /e\.so\.com|ad\./.test(url)) continue;
+    const s = b.match(/class="[^"]*(?:res-desc|res-comm-con|res-rich)[^"]*"[^>]*>([\s\S]*?)<\/(?:p|div)>/);
+    out.push({ title: decode(tag[2]), url, snippet: decode(s?.[1] ?? '').slice(0, 300) });
+  }
+  return out;
+}
+
+const CN_TZ = /^Asia\/(Shanghai|Chongqing|Chungking|Harbin|Urumqi|Kashgar)$/;
+/**
+ * 判断用国内还是国外的搜索源：先看网络（谷歌连不上 = 在国内网络里），再看时区。
+ * @returns {Promise<'cn'|'global'>}
+ */
+export async function detectRegion(fetchImpl, { timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone, timeoutMs = 3500 } = {}) {
+  const probe = Promise.race([
+    fetchImpl('https://www.google.com/generate_204').then((r) => r.status === 204 || r.ok),
+    new Promise((resolve) => setTimeout(() => resolve(false), timeoutMs))
+  ]).catch(() => false);
+  if (!(await probe)) return 'cn';
+  return CN_TZ.test(timeZone || '') ? 'cn' : 'global';
+}
+
+/** 各地区用哪些搜索源 */
+export function searchPlan(query, region) {
+  const q = encodeURIComponent(query);
+  const zh = /[\u4e00-\u9fff]/.test(query);
+  if (region === 'cn') {
+    return zh
+      ? [['必应中国', `https://cn.bing.com/search?q=${q}&count=10&setlang=zh-Hans`, parseBing], ['百度', `https://www.baidu.com/s?wd=${q}&rn=10`, parseBaidu], ['360', `https://www.so.com/s?q=${q}`, parseSo360]]
+      : [['必应中国（国际版）', `https://cn.bing.com/search?q=${q}&count=10&ensearch=1`, parseBing], ['百度', `https://www.baidu.com/s?wd=${q}&rn=10`, parseBaidu], ['360', `https://www.so.com/s?q=${q}`, parseSo360]];
+  }
+  return [[zh ? '必应中国' : '必应', `https://${zh ? 'cn.' : 'www.'}bing.com/search?q=${q}&count=10${zh ? '&setlang=zh-Hans' : ''}`, parseBing], ['DuckDuckGo', `https://html.duckduckgo.com/html/?q=${q}`, parseDuckDuckGo]];
+}
+
 /**
  * @param {{ tavilyKey?: string, fetchViaGateway?: (url: string, init?: object) => Promise<Response> }} ctx
  * @returns {{ name: string, search: (query: string, n?: number) => Promise<Array<{title,url,snippet}>> } | null}
  */
-export function createSearch({ tavilyKey, fetchViaGateway } = {}) {
+export function createSearch({ tavilyKey, fetchViaGateway, searchRegion = 'auto' } = {}) {
   if (tavilyKey) {
     return {
       name: 'Tavily',
@@ -83,24 +148,28 @@ export function createSearch({ tavilyKey, fetchViaGateway } = {}) {
     };
   }
   if (!fetchViaGateway) return null;
+  // 地区：用户指定的，或自动判断（结果记 30 分钟：开关代理后会重新判断）
+  let region = searchRegion === 'cn' || searchRegion === 'global' ? searchRegion : null;
+  let checkedAt = 0;
+  const regionNow = async () => {
+    if (searchRegion === 'cn' || searchRegion === 'global') return searchRegion;
+    if (!region || Date.now() - checkedAt > 30 * 60e3) { region = await detectRegion(fetchViaGateway); checkedAt = Date.now(); }
+    return region;
+  };
   return {
-    name: '必应',
+    get name() { return region === 'cn' ? '必应中国、百度、360（国内）' : region === 'global' ? '必应、DuckDuckGo' : '按网络自动选择（国内：必应中国、百度、360；国外：必应、DuckDuckGo）'; },
+    regionNow,
     async search(query, n = 6) {
-      const q = encodeURIComponent(query);
-      const zh = /[一-鿿]/.test(query);
-      const tries = [
-        [`https://${zh ? 'cn.' : 'www.'}bing.com/search?q=${q}&count=${Math.max(10, n)}${zh ? '&setlang=zh-Hans' : ''}`, parseBing],
-        [`https://html.duckduckgo.com/html/?q=${q}`, parseDuckDuckGo]
-      ];
+      const plan = searchPlan(query, await regionNow());
       // 一个来源结果太少（被拦、只有广告）时再查下一个，合并去重
       let lastErr = null;
       const hits = [];
-      for (const [url, parse] of tries) {
+      for (const [, url, parse] of plan) {
         try {
           const res = await fetchViaGateway(url);
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           for (const h of parse(await res.text())) if (!hits.some((x) => x.url === h.url)) hits.push(h);
-          if (hits.length >= Math.min(3, n)) break;
+          if (hits.length >= Math.min(4, n)) break;
         } catch (e) { lastErr = e; }
       }
       if (!hits.length && lastErr) throw new Error(`搜索失败（${lastErr.message}）。可在“模型”面板填 Tavily 搜索 Key（免费申请）获得更稳定的搜索`);
