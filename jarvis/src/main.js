@@ -59,6 +59,7 @@ import { VoiceInput, speechRecognitionSupported } from './perception/voiceInput.
 import { resolveStt, transcribe } from './perception/stt.js';
 import { STANDALONE, MOBILE } from './config.js';
 import { NativeVoice } from './mobile/nativeVoice.js';
+import { initChips } from './ui/chips.js';
 import { createFormDirector } from './core/formDirector.js';
 import { composeGreeting, GREET_GAP_MS } from './core/greeting.js';
 import { classifyTask, routeFor, TASKS } from './llm/router.js';
@@ -114,6 +115,9 @@ const live = {
 };
 
 // ---------------------------------------------------------------- 渲染策略
+/** 手机 App：不放大舞台（不跑 WebGL 和舞台动画，省电、不卡），粒子缩成顶栏小球，工作进展进对话 */
+const COMPACT = MOBILE;
+document.body.classList.toggle('compact', COMPACT);
 /** 舞台底色（与 styles.css 里 .stage 的中心颜色一致，画布边缘渐隐时才接得上） */
 const STAGE_BG = 0x2b2f58;
 let stage = null;
@@ -209,6 +213,7 @@ function frame(dt, t) {
 }
 
 async function ensureStage() {
+  if (COMPACT) return null;
   if (stage || stageLoading) return stageLoading;
   stageLoading = (async () => {
     try {
@@ -271,7 +276,7 @@ document.addEventListener('visibilitychange', () => {
   const hidden = document.hidden;
   stage?.setPaused('hidden', hidden);
   if (hidden) poller.stop();
-  else poller.start();
+  else if (!COMPACT) poller.start();
   face?.setPaused(hidden);
 });
 
@@ -283,7 +288,7 @@ const poller = new MetricsPoller({
   onData: (m) => { dashboard.setMetrics(m); orbit?.setMetrics({ cpu: (m.cpu?.percent ?? 0) / 100, mem: (m.memory?.percent ?? 0) / 100 }); },
   onError: () => dashboard.setDisconnected()
 });
-if (!document.hidden) poller.start();
+if (!document.hidden && !COMPACT) poller.start(); // 手机上没有仪表盘
 
 subscribeAgentEvents({ onEmotion: (state, ttl) => machine.inject(state, ttl ?? 5000) });
 
@@ -350,7 +355,7 @@ const fetchViaGateway = () => (gateway && !gateway.cors
   : null);
 
 // ---------------------------------------------------------------- 对话
-const transcript = new Transcript($('#transcript'));
+const transcript = new Transcript($('#transcript'), { progress: COMPACT });
 const storage = (() => { try { return localStorage; } catch { return null; } })();
 // 当前会话；history 指向它的消息列表（切换会话时一起换掉）
 let session = sessionsApi.create();
@@ -605,7 +610,9 @@ async function buildTools({ background = false } = {}) {
       tavilyKey: llmConfig.tavilyKey,
       fetchViaGateway: fetchViaGateway(),
       llm: helperLlm('write'), // 深度调研：用写作模型
-      onPreview: background ? () => {} : (path) => { showPanel('workspace'); panels.openFile(path); },
+      onPreview: background ? () => {} : COMPACT
+        ? (path) => { panels.openFile(path); toast(`已生成 ${path}：点下方“工作区”查看`); } // 手机上不自动盖住对话
+        : (path) => { showPanel('workspace'); panels.openFile(path); },
       onFileChanged,
       onSchedulesChanged: () => schedulesPanel?.refresh(),
       currentSessionId: () => session?.id
@@ -1284,6 +1291,13 @@ function renderWelcome() {
   const grid = document.createElement('div');
   grid.className = 'quick-grid';
   grid.append(...cards);
+  if (COMPACT) {
+    const orb = document.createElement('div');
+    orb.className = 'welcome-orb';
+    orb.setAttribute('aria-hidden', 'true');
+    orb.innerHTML = '<i></i><i></i>';
+    w.append(orb);
+  }
   w.append(h, p, grid);
   $('#transcript').prepend(w);
 }
@@ -1567,7 +1581,7 @@ agentMemory.maintain().catch(() => {});
   let seen = false;
   try { seen = sessionStorage.getItem('jarvis.booted') === '1'; sessionStorage.setItem('jarvis.booted', '1'); } catch { /* 隐私模式 */ }
   const boot = $('#boot');
-  if (seen || body.classList.contains('reduced-motion') || !boot) { boot?.remove(); return; }
+  if (seen || COMPACT || body.classList.contains('reduced-motion') || !boot) { boot?.remove(); return; }
   const all = await agentMemory.listAll().catch(() => null);
   const lines = [
     ['神经粒子核心', `${lowEnd ? 6000 : 14000} 粒子`],
@@ -1593,10 +1607,10 @@ agentMemory.maintain().catch(() => {});
 // 有对话时舞台稍微收矮，给对话留空间
 new MutationObserver(() => body.classList.toggle('has-convo', Boolean(document.querySelector('#transcript .msg')))).observe($('#transcript'), { childList: true });
 
-orbit = initOrbitHud({ root: $('#stage-wrap'), getAnchor: () => stage?.anchor?.() ?? null, reducedMotion: () => body.classList.contains('reduced-motion') });
+orbit = COMPACT ? null : initOrbitHud({ root: $('#stage-wrap'), getAnchor: () => stage?.anchor?.() ?? null, reducedMotion: () => body.classList.contains('reduced-motion') });
 updateOrbitStatus();
-orbit.think('系统就绪 · 粒子核心在线');
-callouts = initCallouts({
+orbit?.think('系统就绪 · 粒子核心在线');
+callouts = (COMPACT ? initChips : initCallouts)({
   root: $('#stage-wrap'),
   getAnchor: () => stage?.anchor?.() ?? null,
   reducedMotion: () => body.classList.contains('reduced-motion'),
@@ -1616,7 +1630,7 @@ callouts = initCallouts({
     live.pulse = 1;
     live.glance = { yaw: 0, pitch: 0 };
     live.nextGlance = now() + 1500;
-    if (item.panel) { showPanel(item.panel); callouts.show(); return; }
+    if (item.panel) { showPanel(item.panel); callouts?.show(); return; }
     setTimeout(() => send(item.prompt), 160);
   }
 });

@@ -151,9 +151,11 @@ function feedbackButtons(meta, onFeedback) {
 const hhmm = (ts) => new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
 
 export class Transcript {
-  constructor(root) {
+  /** @param {HTMLElement} root  @param {{ progress?: boolean }} [o] progress：工具调用合并成一张“工作进展”卡片（手机） */
+  constructor(root, { progress = false } = {}) {
     this.root = root;
     this.interimEl = null;
+    this.progress = progress;
   }
 
   /**
@@ -185,6 +187,73 @@ export class Transcript {
     let cur = body;
     let curRaw = text;
     const self = this;
+    // —— “工作进展”卡片（手机）：每次调用工具加一行；整条回答结束后折叠成一行摘要
+    let prog = null;
+    const t0 = Date.now();
+    const fmt = (ms) => (ms < 1000 ? `${ms}ms` : ms < 60000 ? `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s` : `${Math.floor(ms / 60000)}:${String(Math.round(ms / 1000) % 60).padStart(2, '0')}`);
+    function progressPanel() {
+      if (prog) return prog;
+      const box = document.createElement('details');
+      box.className = 'progress-card working';
+      box.open = true;
+      const sum = document.createElement('summary');
+      const title = Object.assign(document.createElement('strong'), { textContent: '工作进展' });
+      const count = Object.assign(document.createElement('span'), { className: 'pc-count' });
+      const time = Object.assign(document.createElement('span'), { className: 'pc-time' });
+      sum.append(title, count, time);
+      const bar = Object.assign(document.createElement('div'), { className: 'pc-bar' });
+      const list = Object.assign(document.createElement('ol'), { className: 'pc-steps' });
+      box.append(sum, bar, list);
+      el.insertBefore(box, el.querySelector('.body'));
+      const timer = setInterval(() => { time.textContent = fmt(Date.now() - t0); }, 1000);
+      prog = { box, list, count, time, timer, n: 0, done: 0 };
+      return prog;
+    }
+    function progressStep(name, args) {
+      const p = progressPanel();
+      p.n++;
+      p.count.textContent = `第 ${p.n} 步`;
+      const li = document.createElement('li');
+      li.dataset.st = 'now';
+      const d = document.createElement('details');
+      const sm = document.createElement('summary');
+      const ic = Object.assign(document.createElement('span'), { className: 'pc-ic' });
+      const tx = document.createElement('span');
+      tx.className = 'pc-tx';
+      tx.append(Object.assign(document.createElement('b'), { textContent: toolLabel(name) }), Object.assign(document.createElement('small'), { textContent: summarizeArgs(name, args) }));
+      const tm = Object.assign(document.createElement('span'), { className: 'pc-tm' });
+      sm.append(ic, tx, tm);
+      const pre = document.createElement('pre');
+      d.append(sm, pre);
+      li.append(d);
+      p.list.append(li);
+      const t1 = Date.now();
+      self.#scroll();
+      let log = '';
+      return {
+        progress(text) {
+          log += `${log ? '\n' : ''}· ${text}`;
+          pre.textContent = log;
+          tx.querySelector('small').textContent = text.slice(0, 40);
+        },
+        done(ok, output, ms) {
+          li.dataset.st = ok ? 'ok' : 'fail';
+          tm.textContent = fmt(ms ?? Date.now() - t1);
+          pre.textContent = log ? `${log}\n\n${output}` : output;
+          p.done++;
+          self.#scroll();
+        }
+      };
+    }
+    function finishProgress() {
+      if (!prog) return;
+      clearInterval(prog.timer);
+      prog.box.classList.remove('working');
+      for (const li of prog.list.querySelectorAll('li[data-st="now"]')) li.dataset.st = 'stop';
+      prog.count.textContent = `用了 ${prog.n} 步`;
+      prog.time.textContent = fmt(Date.now() - t0);
+      prog.box.open = false;
+    }
     return {
       el,
       get text() { return raw; },
@@ -197,6 +266,7 @@ export class Transcript {
       /** 工具执行卡片：执行中显示动画，结束后可展开查看输出 */
       toolCard(name, args) {
         if (role === 'agent' && curRaw) renderBlocks(cur, curRaw);
+        if (self.progress) return progressStep(name, args);
         const card = document.createElement('details');
         card.className = 'tool-card';
         const sum = document.createElement('summary');
@@ -327,6 +397,7 @@ export class Transcript {
       },
       done(meta, { onFeedback } = {}) {
         el.classList.remove('streaming');
+        finishProgress();
         if (role === 'agent' && curRaw) renderBlocks(cur, curRaw);
         for (const b of el.querySelectorAll('.body')) if (!b.textContent.trim() && !b.children.length) b.remove();
         const m = document.createElement('div');

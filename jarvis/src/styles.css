@@ -921,3 +921,80 @@ h3.sub { margin-top: 14px; font: 600 var(--fs-sm)/1.4 var(--font-ui); letter-spa
 .stage .callout:hover { background: rgba(36, 39, 68, 0.72); }
 /* 窄屏（导航在底部）时舞台也是卡片 */
 @media (max-width: 860px) { .stage, :root[data-theme="light"] .stage { margin: 8px 10px 0; border-radius: 16px; overflow: hidden; } }
+
+/* ================================================================
+ * 手机（.compact）：不放大舞台；粒子缩成顶栏的小球；工作进展进对话；建议在输入框上方
+ * ================================================================ */
+.compact .stage { display: none; }
+/* 粒子小球（纯 CSS，不用 WebGL）：待命蓝色慢呼吸，工作中金色、转得快，说话时跳动 */
+.compact .brand-mark, .welcome-orb {
+  position: relative; border: 0; border-radius: 50%; box-shadow: none;
+  background:
+    radial-gradient(circle, hsl(var(--hue) 95% 82% / .95) 0 7%, transparent 8%),
+    radial-gradient(circle, hsl(var(--hue) 90% 80% / .75) 0.9px, transparent 1.4px) 0 0 / 4px 4px,
+    radial-gradient(circle at 50% 45%, hsl(var(--hue) 90% 62% / .6), hsl(calc(var(--hue) + 20) 80% 40% / .18) 62%, transparent 70%);
+  -webkit-mask: radial-gradient(circle, #000 58%, transparent 71%); mask: radial-gradient(circle, #000 58%, transparent 71%);
+  animation: orb-breathe 3.6s ease-in-out infinite;
+}
+.compact .brand-mark { width: 30px; height: 30px; }
+.compact .brand-mark::before, .compact .brand-mark::after, .welcome-orb i {
+  content: ""; position: absolute; top: 40%; width: 13%; height: 17%; border-radius: 40%; background: #fff; box-shadow: 0 0 6px #fff;
+}
+.compact .brand-mark::before, .welcome-orb i:first-child { left: 33%; }
+.compact .brand-mark::after, .welcome-orb i:last-child { right: 33%; }
+.compact.generating .brand-mark { --hue: 40; animation: orb-work 1.1s ease-in-out infinite; }
+.compact.speaking .brand-mark { animation: orb-speak .5s ease-in-out infinite; }
+.compact.voice-on .brand-mark { outline: 1.5px solid hsl(var(--hue) 80% 72% / .55); outline-offset: 2px; }
+@keyframes orb-breathe { 50% { transform: scale(1.06); opacity: .88; } }
+@keyframes orb-work { 0%, 100% { transform: scale(1) rotate(0); } 50% { transform: scale(1.1) rotate(180deg); } }
+@keyframes orb-speak { 50% { transform: scale(1.12); } }
+body.reduced-motion .brand-mark, body.reduced-motion .welcome-orb { animation: none !important; }
+.welcome-orb { width: 92px; height: 92px; margin: 6px auto 4px; }
+.compact .welcome { text-align: center; }
+.compact .welcome .quick-grid { text-align: left; }
+
+/* 工作进展卡片 */
+.progress-card { margin: 6px 0 8px; border-radius: 14px; background: rgba(28, 30, 54, 0.55); border: 1px solid rgba(255, 255, 255, 0.1); padding: 8px 12px; }
+:root[data-theme="light"] .progress-card { background: rgba(255, 255, 255, 0.75); border-color: var(--line); }
+.progress-card > summary { display: flex; align-items: baseline; gap: 8px; cursor: pointer; list-style: none; font-size: 13px; color: var(--muted); }
+.progress-card > summary::-webkit-details-marker { display: none; }
+.progress-card > summary strong { color: var(--text); font-weight: 600; font-size: 13.5px; }
+.progress-card .pc-time { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 12px; color: var(--dim); }
+.progress-card > summary::after { content: "⌄"; color: var(--dim); transition: transform 160ms; }
+.progress-card[open] > summary::after { transform: rotate(180deg); }
+.progress-card .pc-bar { height: 3px; border-radius: 2px; margin: 8px 0 4px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.progress-card.working .pc-bar { background: linear-gradient(90deg, transparent, hsl(var(--hue) 80% 70% / .8), #f0c36a, transparent) 0 0 / 40% 100% no-repeat, rgba(255, 255, 255, 0.08); animation: pc-scan 1.4s linear infinite; }
+.progress-card:not(.working) .pc-bar { display: none; }
+@keyframes pc-scan { from { background-position: -40% 0, 0 0; } to { background-position: 140% 0, 0 0; } }
+.pc-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.pc-steps summary { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 5px 0; cursor: pointer; list-style: none; }
+.pc-steps summary::-webkit-details-marker { display: none; }
+.pc-tx { min-width: 0; font-size: 13.5px; }
+.pc-tx b { font-weight: 500; }
+.pc-tx small { display: block; color: var(--dim); font-size: 11.5px; line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-tm { font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; padding-top: 2px; }
+.pc-ic { width: 18px; height: 18px; border-radius: 50%; margin-top: 2px; display: grid; place-items: center; font-size: 11px; }
+li[data-st="ok"] .pc-ic { background: hsl(150 60% 55% / .18); color: var(--ok); }
+li[data-st="ok"] .pc-ic::before { content: "✓"; }
+li[data-st="fail"] .pc-ic { background: hsl(0 70% 60% / .18); color: var(--bad); }
+li[data-st="fail"] .pc-ic::before { content: "✕"; }
+li[data-st="stop"] .pc-ic { border: 1.5px solid var(--line-strong); }
+li[data-st="now"] .pc-ic { border: 2px solid #f0c36a; border-top-color: transparent; animation: pc-spin .8s linear infinite; }
+li[data-st="now"] .pc-tx b { color: #f6dca0; }
+:root[data-theme="light"] li[data-st="now"] .pc-tx b { color: #9a6400; }
+@keyframes pc-spin { to { transform: rotate(360deg); } }
+.pc-steps pre { margin: 0 0 6px 28px; padding: 8px 10px; border-radius: 8px; background: var(--code-bg); font: 12px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; color: var(--muted); }
+
+/* 建议标签 */
+.chip-bar { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 0 12px 8px; flex: none; }
+.chip-bar::-webkit-scrollbar { display: none; }
+.chip-bar .chip { flex: none; font-size: 13px; padding: 6px 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); color: var(--text); white-space: nowrap; }
+body.generating .chip-bar { display: none; }
+
+/* 手机流畅度：去掉代价高的实时模糊和大阴影，背景不固定（滚动时不用每帧重绘整屏渐变） */
+.compact *, .compact *::before, .compact *::after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+:root:not([data-theme="light"]) .compact, .compact { background-attachment: scroll !important; }
+.compact .composer { box-shadow: none !important; }
+.compact .quick { transition: none; }
+/* 手机：提示放在输入框上方，不挡消息 */
+.compact .toast { top: auto; bottom: calc(150px + env(safe-area-inset-bottom, 0px)); max-width: calc(100vw - 32px); border-radius: 14px; text-align: center; }
