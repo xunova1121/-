@@ -466,6 +466,8 @@ body.desktop.os-win32 .topbar, body.desktop.os-linux .topbar { padding-right: 15
 .viewer-body iframe { display: block; width: 100%; height: 56vh; border: 0; background: #fff; }
 .viewer-body pre { margin: 0; padding: 12px; font: 12px/1.6 var(--font-mono); white-space: pre-wrap; color: var(--text); }
 .viewer-body img { display: block; max-width: 100%; margin: 0 auto; }
+.viewer-body .docx-view { min-height: 200px; }
+body.compact .viewer-body:has(.docx-view) { max-height: none; }
 
 /* 知识库 */
 .dropzone { display: grid; gap: 4px; place-items: center; text-align: center; padding: 22px 14px; border-radius: 12px; border: 1px dashed var(--line-strong); background: var(--accent-soft); cursor: pointer; }

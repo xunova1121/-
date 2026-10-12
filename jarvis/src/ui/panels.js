@@ -10,6 +10,7 @@ import { renderBlocks } from './transcript.js';
 import { PROVIDERS, providerById, loadConfig, saveConfig, modelOf, createAdapter } from '../llm/config.js';
 import { probeEndpoint } from '../llm/probe.js';
 import { saveFile } from './saveFile.js';
+import { renderDocx } from './docxView.js';
 import { MOBILE } from '../config.js';
 
 const $ = (s) => document.querySelector(s);
@@ -92,8 +93,11 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     return html;
   }
 
+  let docxFit = null;
+  addEventListener('resize', () => docxFit?.());
   async function openFile(path) {
     current = path;
+    docxFit = null;
     fresh.delete(path);
     for (const u of objectUrls) URL.revokeObjectURL(u);
     objectUrls = [];
@@ -118,6 +122,16 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
         const u = URL.createObjectURL(blob);
         objectUrls.push(u);
         body.replaceChildren(el('img', { src: u, alt: path }));
+      } else if (e === 'docx') {
+        // Word：按真实样式排版预览；解析失败（文件损坏等）退回纯文字
+        const host = el('div', { className: 'docx-view' });
+        body.replaceChildren(host);
+        try {
+          const view = await renderDocx(blob, host);
+          docxFit = view.fit;
+        } catch {
+          body.replaceChildren(el('pre', { textContent: (await parseFile(blob, path)).text }));
+        }
       } else if (ws.isText(path)) {
         body.replaceChildren(el('pre', { textContent: await blob.text() }));
       } else {

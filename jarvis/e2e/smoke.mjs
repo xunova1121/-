@@ -218,8 +218,10 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
     check(`生成 ${ext} 并出现在工作区`, listed === 1);
   }
   await page.locator('#file-list li', { hasText: '示例.docx' }).click();
-  await page.waitForFunction(() => /项目周报/.test(document.querySelector('#viewer-body')?.textContent || ''), null, { timeout: 15000 }).catch(() => {});
-  check('Word 在工作区里可预览（解析出文字）', /项目周报/.test(await page.textContent('#viewer-body')));
+  // Word 按真实样式排版（渲染在 Shadow DOM 里的 A4 页面）
+  const docxText = () => page.evaluate(() => document.querySelector('#viewer-body .docx-view')?.shadowRoot?.querySelector('section.docx')?.textContent || '');
+  await page.waitForFunction(() => /项目周报/.test(document.querySelector('#viewer-body .docx-view')?.shadowRoot?.textContent || ''), null, { timeout: 15000 }).catch(() => {});
+  check('Word 在工作区里按真实样式预览', /项目周报/.test(await docxText()));
   const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 5000 }).catch(() => null), page.click('#btn-v-download')]);
   // 无头 Chromium 会把非 ASCII 的下载文件名替换成 “download”（桌面版 Chrome / Edge 正常保留中文名），所以这里校验内容：docx 是 ZIP，以 PK 开头
   const fs = await import('node:fs');
