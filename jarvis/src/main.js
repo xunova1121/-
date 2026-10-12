@@ -32,6 +32,7 @@ import * as skillPacks from './agent/skillPacks.js';
 import { initSkillsPanel } from './ui/skillsPanel.js';
 import { initPalette } from './ui/palette.js';
 import * as scheduler from './agent/scheduler.js';
+import * as habits from './agent/habits.js';
 import { initSchedulesPanel } from './ui/schedulesPanel.js';
 import { prepareImage, isImageName } from './agent/images.js';
 import * as sessionsApi from './agent/sessions.js';
@@ -628,7 +629,35 @@ async function greetOnReturn({ awayMs, reason = '', force = false }) {
   return text;
 }
 /** 习惯提示（操作习惯学习开启后才有，见 habits.js） */
-let habitHints = async () => [];
+const habitHints = async () => habits.hintFor(await habits.load());
+
+// ---------------------------------------------------------------- 操作习惯学习（桌面版，默认关闭）
+/** 把习惯结论写进记忆（每天最多一次，或手动） */
+async function memorizeHabits({ manual = false } = {}) {
+  const r = habits.insightsFrom(await habits.load());
+  if (!r.ready) { if (manual) toast(`再观察几天：已有 ${r.days} 天的记录，至少要 3 天才总结习惯`); return 0; }
+  const today = new Date().toDateString();
+  let last = '';
+  try { last = localStorage.getItem('jarvis.habitsMemorized') || ''; } catch { /* 隐私模式 */ }
+  if (!manual && last === today) return 0;
+  for (const text of r.insights) await agentMemory.remember(`用户${text}`, 'habit', { importance: 2, source: 'habits' });
+  try { localStorage.setItem('jarvis.habitsMemorized', today); } catch { /* 隐私模式 */ }
+  panels.refreshMind();
+  renderHabits();
+  if (manual) toast(`已把 ${r.insights.length} 条习惯写进记忆`);
+  return r.insights.length;
+}
+async function renderHabits() {
+  const box = $('#habit-insights');
+  if (!box) return;
+  const r = habits.insightsFrom(await habits.load());
+  const lines = r.ready ? r.insights : [`已记录 ${r.days} 天、约 ${r.hours} 小时。至少观察 3 天后开始总结。`];
+  box.replaceChildren(...lines.map((t) => Object.assign(document.createElement('li'), { textContent: t })));
+}
+if (DESKTOP) {
+  DESKTOP.onActivity?.((sample) => { habits.record(sample); });
+  setInterval(() => { habits.flush().then(() => memorizeHabits()).catch(() => {}); }, 60_000);
+}
 
 // 网页版：标签页隐藏 30 分钟以上再回来，也算“回来了”
 let hiddenAt = 0;
@@ -1122,6 +1151,7 @@ function showPanel(name, { toggle = false } = {}) {
   if (name === 'skills') { skillsPanel.refresh(); mcpPanel.refresh(); }
   if (name === 'sessions') sessionsPanel?.refresh();
   if (name === 'system') schedulesPanel?.refresh();
+  if (name === 'settings') renderHabits();
 }
 for (const b of document.querySelectorAll('.rail-btn')) b.addEventListener('click', () => showPanel(b.dataset.panel, { toggle: true }));
 for (const b of document.querySelectorAll('[data-open]')) b.addEventListener('click', () => showPanel(b.dataset.open));
@@ -1281,6 +1311,26 @@ if (DESKTOP) {
       const r = await DESKTOP.invoke('setWallpaper', { on: e.target.checked });
       toast(r.on ? '已开启桌面背景：贾维斯会待在桌面上，干活时跟着变形' : '已关闭桌面背景');
     } catch (err) { toast(err.message); e.target.checked = false; }
+  });
+}
+if (DESKTOP) {
+  $('#row-habits').hidden = false;
+  DESKTOP.invoke('habitTrackingState').then((r) => { $('#set-habits').checked = r.on; }).catch(() => {});
+  renderHabits();
+  $('#set-habits').addEventListener('change', async (e) => {
+    try {
+      const r = await DESKTOP.invoke('setHabitTracking', { on: e.target.checked });
+      toast(r.on ? '开始学习你的使用习惯：只记录前台程序名和时间，数据只在这台电脑上' : '已暂停习惯学习');
+    } catch (err) { toast(err.message); e.target.checked = false; }
+  });
+  $('#btn-habits-memorize').addEventListener('click', async () => { await habits.flush(); await memorizeHabits({ manual: true }); renderHabits(); });
+  $('#btn-habits-clear').addEventListener('click', async (e) => {
+    const b = e.currentTarget;
+    if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = '确认清除'; setTimeout(() => { b.dataset.armed = ''; b.textContent = '清除记录'; }, 3000); return; }
+    await habits.clear();
+    b.dataset.armed = ''; b.textContent = '清除记录';
+    renderHabits();
+    toast('已清除习惯记录（已写进记忆的习惯可在“记忆与进化”里删除）');
   });
 }
 for (const b of document.querySelectorAll('#set-team button')) {
@@ -1495,6 +1545,8 @@ window.__jarvis = {
   get mcp() { return mcpPanel; },
   get localModels() { return localModels; },
   greetOnReturn,
+  habits,
+  memorizeHabits,
   director,
   get callouts() { return callouts; },
   schedulerTick,

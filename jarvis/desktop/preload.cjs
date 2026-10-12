@@ -25,6 +25,10 @@ contextBridge.exposeInMainWorld('jarvisDesktop', {
   onPresence(fn) {
     ipcRenderer.on('jarvis:presence', (_e, info) => fn(info));
   },
+  /** 操作习惯学习：前台程序采样（只有程序名和时间） */
+  onActivity(fn) {
+    ipcRenderer.on('jarvis:activity', (_e, sample) => fn(sample));
+  },
   /** 桌面背景窗口：接收主窗口同步过来的状态 */
   onWallpaper(fn) {
     ipcRenderer.on('jarvis:wallpaper', (_e, payload) => fn(payload));

@@ -75,6 +75,18 @@ describe('造型导演', () => {
     expect(forms).toEqual(['helix', 'lattice', 'core']);
   });
 
+  it('比心时开始干活：工作造型优先', () => {
+    const { d, forms, advance } = setup([0]);
+    advance(2000);
+    d.onEmotion('亲和'); // rand 0 < 0.25 → 比心
+    expect(forms.at(-1)).toBe('heart');
+    d.onUserText('帮我写一个网页');
+    d.setState('processing');
+    d.onToolStart('write_file');
+    advance(1700);
+    expect(forms.at(-1)).toBe('lattice');
+  });
+
   it('出错时竖起尖刺，过后回到光核', () => {
     const { d, forms, advance } = setup([0]);
     d.setState('error');

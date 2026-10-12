@@ -30,7 +30,7 @@
     "productName": "Jarvis",
     "copyright": "Jarvis",
     "directories": { "output": "release", "buildResources": "build" },
-    "files": ["main.mjs", "preload.cjs", "ops.mjs", "input.mjs", "control.mjs", "wallpaper.mjs", "presence.mjs", "package.json", "build/icon.png", "bundle/**/*"],
+    "files": ["main.mjs", "preload.cjs", "ops.mjs", "input.mjs", "control.mjs", "wallpaper.mjs", "presence.mjs", "activity.mjs", "package.json", "build/icon.png", "bundle/**/*"],
     "asar": true,
     "win": {
       "target": [{ "target": "nsis", "arch": ["x64"] }, { "target": "zip", "arch": ["x64"] }],

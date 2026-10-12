@@ -13,6 +13,7 @@ import { createOps, userPaths } from './ops.mjs';
 import { createControl, STOP_HOTKEY } from './control.mjs';
 import { createWallpaper } from './wallpaper.mjs';
 import { createPresence } from './presence.mjs';
+import { createActivity } from './activity.mjs';
 import fs from 'node:fs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -124,7 +125,15 @@ const presence = createPresence({
   powerMonitor,
   onBack: (info) => win?.webContents.send('jarvis:presence', info)
 });
+const activity = createActivity({ powerMonitor, onSample: (sample) => win?.webContents.send('jarvis:activity', sample) });
+function setHabits(on) {
+  writePrefs({ habits: on });
+  if (on) activity.start(); else activity.stop();
+  return { on: activity.on };
+}
 Object.assign(ops, {
+  setHabitTracking: ({ on }) => setHabits(Boolean(on)),
+  habitTrackingState: () => ({ on: activity.on }),
   setWallpaper: ({ on }) => setWallpaper(Boolean(on)),
   wallpaperState: () => ({ on: Boolean(wallpaper?.open), mode: wallpaper?.mode ?? '' }),
   /** 主窗口把粒子体的状态 / 要说的话同步到桌面背景 */
@@ -246,6 +255,7 @@ app.on('before-quit', () => { quitting = true; });
 app.on('will-quit', () => {
   control.close();
   presence.stop();
+  activity.stop();
   wallpaper?.close();
   globalShortcut.unregisterAll();
   mcp?.closeAll();
@@ -272,6 +282,7 @@ app.whenReady().then(async () => {
   createWindow();
   wallpaper = createWallpaper({ BrowserWindow, screen, url: `${origin}/wallpaper.html`, preload: path.join(here, 'preload.cjs'), icon: ICON, onLog: (m) => console.log(m) });
   if (readPrefs().wallpaper) wallpaper.show();
+  if (readPrefs().habits) activity.start();
   presence.start();
   if (!TEST) {
     createTray();

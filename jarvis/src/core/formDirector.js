@@ -66,16 +66,16 @@ export function createFormDirector(target, { now = () => performance.now(), rand
   function want() {
     const t = now();
     if (t < alertUntil) return 'spike';
-    if (affection > t) return 'heart';
     if (tool) return tool;
     if (state === 'processing') return topic ?? 'helix';
+    if (affection > t) return 'heart'; // 比心只在不干活的时候
     if (state === 'voice') return 'rings';
     if (state === 'speaking' || state === 'listening') return 'core';
     return null; // 空闲：保持当前（漫游由 tick 决定）
   }
 
   function go(name) {
-    if (!name || name === current) { pending = null; return; }
+    if (!name || name === current) return; // 排着的造型保留（例如一闪而过的工具造型稍后仍会展示）
     const t = now();
     // 还没停够：先记下。已经排着一个工具 / 语义造型时，不让“回到光核”把它顶掉（它稍后会自然回到光核）
     if (t - since < MIN_HOLD) { if (!(pending && pending !== 'core' && name === 'core')) pending = name; return; }

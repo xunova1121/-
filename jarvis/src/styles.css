@@ -697,3 +697,5 @@ body.wallpaper { background: var(--bg); overflow: hidden; cursor: default; user-
 .wp-say.in { opacity: 1; translate: -50% 8px; }
 .wp-say::before { content: "J.A.R.V.I.S."; display: block; font: 10px var(--font-display); letter-spacing: .3em; color: var(--accent); margin-bottom: 4px; }
 body.wallpaper .thought-log { right: 6vw; bottom: calc(10vh + 70px); width: 320px; }
+
+.habit-insights { margin: 8px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--text); display: grid; gap: 2px; }

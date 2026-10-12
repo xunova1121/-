@@ -28,7 +28,7 @@ const episodes = collection('episodes');
 const kv = collection('kv');
 
 const DAY = 86400000;
-export const CATEGORIES = { profile: '身份', preference: '偏好', fact: '事实', goal: '目标', other: '其他' };
+export const CATEGORIES = { profile: '身份', preference: '偏好', habit: '习惯', fact: '事实', goal: '目标', other: '其他' };
 const CORE_LIMIT = 1200;
 
 // ---------------------------------------------------------------- 可选的大模型与向量服务（由界面按当前配置注入）

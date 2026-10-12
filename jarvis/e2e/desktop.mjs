@@ -134,6 +134,33 @@ await page.screenshot({ path: `${OUT}/desktop-main.png` });
   check('关闭桌面背景', !(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some((w) => /wallpaper/.test(w.webContents.getURL())))));
 }
 
+// —— 操作习惯学习（开关 + 用模拟采样验证总结、写入记忆、用于问候）
+{
+  await page.evaluate(() => window.__jarvis.showPanel('settings'));
+  check('设置里有“学习我的操作习惯”（默认关闭）', await page.isVisible('#row-habits') && !(await page.isChecked('#set-habits')));
+  await page.check('#set-habits');
+  await page.waitForTimeout(300);
+  check('打开后主进程开始采样', (await page.evaluate(() => window.jarvisDesktop.invoke('habitTrackingState'))).on);
+  await page.evaluate(async () => {
+    const day0 = new Date(); day0.setHours(0, 0, 0, 0);
+    for (let d = 1; d <= 4; d++) {
+      const base = day0.getTime() - d * 86400000;
+      for (let m = 9 * 60; m < 11 * 60; m++) await window.__jarvis.habits.record({ app: 'Code.exe', ts: base + m * 60000 });
+    }
+    await window.__jarvis.habits.flush();
+    return window.__jarvis.memorizeHabits({ manual: true });
+  });
+  await page.waitForTimeout(300);
+  const hl = await page.locator('#habit-insights li').allTextContents();
+  check('观察几天后总结出习惯', hl.some((t) => /通常 09:00 左右开始用电脑/.test(t)) && hl.some((t) => /先打开 VS Code/.test(t)), hl.join(' | '));
+  await page.evaluate(() => window.__jarvis.showPanel('mind'));
+  await page.waitForTimeout(300);
+  check('习惯写进记忆（分类“习惯”）', /习惯/.test(await page.textContent('[data-pane="mind"]')) && /VS Code/.test(await page.textContent('[data-pane="mind"]')));
+  await page.uncheck('#set-habits').catch(async () => { await page.evaluate(() => window.__jarvis.showPanel('settings')); await page.uncheck('#set-habits'); });
+  await page.waitForTimeout(300);
+  check('关闭后停止采样', !(await page.evaluate(() => window.jarvisDesktop.invoke('habitTrackingState'))).on);
+}
+
 // —— MCP：在界面里添加本机 stdio 服务 → 智能体调用（先确认）
 await page.evaluate(() => window.__jarvis.showPanel('skills'));
 await page.waitForSelector('#mcp-body:not([hidden])', { timeout: 10000 });

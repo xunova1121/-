@@ -340,6 +340,12 @@
           <label><input type="checkbox" id="set-greet" /> 回到电脑前时主动问好</label>
           <p class="muted">离开 10 分钟以上再回来（桌面版看键盘鼠标；开了人脸跟随时也看摄像头；网页版看标签页），贾维斯会结合时间、今天的定时任务、上次没做完的事打个招呼。40 分钟内最多一次。</p>
         </div>
+        <div class="setting" id="row-habits" hidden>
+          <label><input type="checkbox" id="set-habits" /> 学习我的操作习惯</label>
+          <p class="muted">每 20 秒看一眼你在用哪个程序（只记程序名和时间，不记窗口内容、网址、按键），汇总成习惯写进记忆，问好时会用上。数据只在这台电脑上，随时可以清除。</p>
+          <ul class="habit-insights" id="habit-insights"></ul>
+          <div class="pane-actions"><button class="btn ghost sm" type="button" id="btn-habits-memorize">写进记忆</button><button class="btn ghost sm" type="button" id="btn-habits-clear">清除记录</button></div>
+        </div>
         <div class="setting" id="row-wallpaper" hidden>
           <label><input type="checkbox" id="set-wallpaper" /> 桌面背景模式</label>
           <p class="muted">粒子体铺满桌面、待在所有窗口下面；贾维斯在后台干活、说话时，桌面上的它也跟着变形。按 Ctrl+Shift+J 或托盘图标打开对话。</p>
