@@ -66,10 +66,10 @@ describe('安装与管理', () => {
   });
 
   it('解析各种 GitHub 地址', () => {
-    expect(packs.parseGitHubUrl('https://github.com/anthropics/skills/tree/main/skills/pdf')).toEqual({ owner: 'anthropics', repo: 'skills', ref: 'main', dir: 'skills/pdf' });
-    expect(packs.parseGitHubUrl('github.com/o/r/blob/dev/a/b/SKILL.md')).toEqual({ owner: 'o', repo: 'r', ref: 'dev', dir: 'a/b' });
+    expect(packs.parseGitHubUrl('https://github.com/anthropics/skills/tree/main/skills/pdf')).toMatchObject({ owner: 'anthropics', repo: 'skills', ref: 'main', dir: 'skills/pdf' });
+    expect(packs.parseGitHubUrl('github.com/o/r/blob/dev/a/b/SKILL.md')).toMatchObject({ owner: 'o', repo: 'r', ref: 'dev', dir: 'a/b' });
     expect(packs.parseGitHubUrl('https://raw.githubusercontent.com/o/r/main/x/SKILL.md')).toEqual({ owner: 'o', repo: 'r', ref: 'main', dir: 'x' });
-    expect(packs.parseGitHubUrl('https://github.com/o/r')).toEqual({ owner: 'o', repo: 'r', ref: null, dir: '' });
+    expect(packs.parseGitHubUrl('https://github.com/o/r')).toMatchObject({ owner: 'o', repo: 'r', ref: null, dir: '' });
     expect(() => packs.parseGitHubUrl('https://gitlab.com/o/r')).toThrow(/GitHub/);
   });
 
@@ -93,6 +93,31 @@ describe('安装与管理', () => {
     expect(p).toMatchObject({ name: 'demo', source: 'github.com/o/r/skills/demo', files: { 'ref/guide.md': '指南' } });
     expect(p.skipped).toEqual(['font.ttf']);
     expect(urls.filter((u) => u.includes('api.github.com')).length).toBe(1);
+  });
+
+  it('分支名带斜杠（feature/x）：先按第一段试，找不到再按仓库真实分支确定', async () => {
+    expect(packs.parseGitHubUrl('https://github.com/o/r/tree/feature/x/skills/demo').candidates.map((c) => c.ref)).toEqual(['feature', 'feature/x', 'feature/x/skills', 'feature/x/skills/demo']);
+    expect(packs.pickRef(packs.parseGitHubUrl('github.com/o/r/tree/feature/x/skills/demo').candidates, ['main', 'feature/x'])).toEqual({ ref: 'feature/x', dir: 'skills/demo' });
+    const urls = [];
+    const fetchImpl = async (url) => {
+      urls.push(url);
+      if (url.includes('/git/trees/feature?')) return { ok: false, status: 404 };
+      if (url.endsWith('/branches?per_page=100')) return { ok: true, json: async () => [{ name: 'main' }, { name: 'feature/x' }] };
+      if (url.includes('/git/trees/feature%2Fx?')) return { ok: true, json: async () => ({ tree: [{ type: 'blob', path: 'skills/demo/SKILL.md', size: 100 }] }) };
+      if (url === 'https://raw.githubusercontent.com/o/r/feature/x/skills/demo/SKILL.md') return { ok: true, text: async () => SKILL.replace('weekly-report', 'demo') };
+      return { ok: false, status: 404 };
+    };
+    const p = await packs.installFromGitHub('https://github.com/o/r/tree/feature/x/skills/demo', { fetchImpl });
+    expect(p).toMatchObject({ name: 'demo', source: 'github.com/o/r/skills/demo' });
+  });
+
+  it('分支名带斜杠且 GitHub 接口限流：逐个切分试 SKILL.md', async () => {
+    const fetchImpl = async (url) => url.includes('api.github.com')
+      ? { ok: false, status: 403 }
+      : url === 'https://raw.githubusercontent.com/o/r/feature/x/skills/demo/SKILL.md' ? { ok: true, text: async () => SKILL } : { ok: false, status: 404 };
+    const p = await packs.installFromGitHub('https://github.com/o/r/tree/feature/x/skills/demo', { fetchImpl });
+    expect(p.name).toBe('weekly-report');
+    expect(p.source).toBe('github.com/o/r/tree/feature/x/skills/demo');
   });
 
   it('GitHub 接口不可用时退回只安装 SKILL.md', async () => {

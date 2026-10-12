@@ -95,6 +95,8 @@ export async function runAgent({ adapter, model, history, userText, images = [],
   const byName = new Map(tools.map((t) => [t.name, t]));
   let finalText = '';
   let toolCount = 0;
+  let failCount = 0;
+  let lastToolOk = true;
   let step = 0;
 
   for (; step < maxSteps; step++) {
@@ -154,6 +156,8 @@ export async function runAgent({ adapter, model, history, userText, images = [],
         output = `错误：${e.message || e}`;
       }
       toolCount++;
+      if (!ok) failCount++;
+      lastToolOk = ok;
       emit({ type: 'tool_end', id: c.id, name: c.name, ok, output, ms: Date.now() - t0 });
       convo.push({ role: 'tool', toolCallId: c.id, name: c.name, content: output, isError: !ok, ...(outImages.length && { images: outImages }) });
     }
@@ -163,7 +167,13 @@ export async function runAgent({ adapter, model, history, userText, images = [],
     finalText += note;
     emit({ type: 'text', delta: note });
   }
-  if (toolCount) await memory.noteTask(`完成任务：${userText.slice(0, 40)}（调用工具 ${toolCount} 次）`);
+  // 只有正常收尾、且最后一次工具调用成功，才记为“完成任务”（计入进化等级）；否则记为未完成，便于之后复盘
+  const hitLimit = step >= maxSteps;
+  if (toolCount && !hitLimit && lastToolOk) {
+    await memory.noteTask(`完成任务：${userText.slice(0, 40)}（调用工具 ${toolCount} 次${failCount ? `，其中 ${failCount} 次失败后已改正` : ''}）`);
+  } else if (toolCount) {
+    await memory.noteIssue(`未完成任务：${userText.slice(0, 40)}（${hitLimit ? '达到最大步数' : '最后一步工具调用失败'}；工具 ${toolCount} 次，失败 ${failCount} 次）`);
+  }
   emit({ type: 'state', value: 'done' });
   return { text: finalText.trim(), steps: step + 1, toolCalls: toolCount };
 }

@@ -131,10 +131,18 @@ export function parseGitHubUrl(url) {
     return { owner, repo, ref, dir: dir.join('/') };
   }
   if (!/(^|\.)github\.com$/.test(u.hostname)) throw new Error('目前只支持 GitHub 地址');
-  const [owner, repo, kind, ref, ...rest] = seg;
+  const [owner, repo, kind, ...after] = seg;
   if (!owner || !repo) throw new Error('地址不完整，应为 github.com/用户/仓库/tree/分支/技能文件夹');
-  const dir = kind === 'blob' && /SKILL\.md$/i.test(rest.at(-1) || '') ? rest.slice(0, -1) : rest;
-  return { owner, repo: repo.replace(/\.git$/, ''), ref: kind ? ref : null, dir: dir.join('/') };
+  const parts = kind === 'blob' && /SKILL\.md$/i.test(after.at(-1) || '') ? after.slice(0, -1) : after;
+  // 分支名本身可以带斜杠（feature/x），光看地址分不清分支到哪里结束：列出所有可能的切分，安装时按仓库里真实的分支 / 标签确定
+  const candidates = kind ? parts.map((_, i) => ({ ref: parts.slice(0, i + 1).join('/'), dir: parts.slice(i + 1).join('/') })) : [];
+  return { owner, repo: repo.replace(/\.git$/, ''), ref: candidates[0]?.ref ?? null, dir: candidates[0]?.dir ?? '', candidates };
+}
+
+/** 在仓库的分支 / 标签名里找出地址对应的那个（取最长的匹配，如 feature/x 优先于 feature） */
+export function pickRef(candidates, names) {
+  const set = new Set(names);
+  return [...candidates].sort((a, b) => b.ref.length - a.ref.length).find((c) => set.has(c.ref)) ?? null;
 }
 
 /**
@@ -143,28 +151,46 @@ export function parseGitHubUrl(url) {
  * @param {{ fetchImpl?: typeof fetch, onProgress?: (msg: string) => void }} o
  */
 export async function installFromGitHub(url, { fetchImpl = globalThis.fetch, onProgress } = {}) {
-  const { owner, repo, ref: ref0, dir } = parseGitHubUrl(url);
+  const parsed = parseGitHubUrl(url);
+  const { owner, repo, candidates = [] } = parsed;
+  let { ref: ref0, dir } = parsed;
   const api = (p) => fetchImpl(`https://api.github.com/repos/${owner}/${repo}${p}`, { headers: { accept: 'application/vnd.github+json' } }).then(async (r) => {
     if (r.status === 403 || r.status === 429) throw new Error('GitHub 接口访问太频繁（未登录每小时 60 次），请稍后再试，或下载 zip 后上传安装');
     if (r.status === 404) throw new Error('找不到这个仓库或分支（私有仓库需下载 zip 后上传安装）');
     if (!r.ok) throw new Error(`GitHub 返回 ${r.status}`);
     return r.json();
   });
-  const raw = (ref, path) => fetchImpl(`https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(ref)}/${path.split('/').map(encodeURIComponent).join('/')}`);
+  const enc = (p) => p.split('/').map(encodeURIComponent).join('/');
+  const raw = (ref, path) => fetchImpl(`https://raw.githubusercontent.com/${owner}/${repo}/${enc(ref)}/${enc(path)}`);
   let ref = ref0;
   let tree;
   try {
     ref ||= (await api('')).default_branch || 'main';
     onProgress?.('正在读取文件列表…');
-    tree = await api(`/git/trees/${encodeURIComponent(ref)}?recursive=1`);
+    try {
+      tree = await api(`/git/trees/${encodeURIComponent(ref)}?recursive=1`); // 带斜杠的分支名要整体编码
+    } catch (e) {
+      // 第一段不是分支：分支名本身带斜杠（如 feature/x）。git 里不可能同时有 feature 和 feature/x 两个分支，
+      // 所以先按第一段试，找不到再问仓库有哪些分支 / 标签，取最长的匹配
+      if (!(/找不到/.test(e.message) && candidates.length > 1)) throw e;
+      const hit = pickRef(candidates, (await api('/branches?per_page=100')).map((x) => x.name))
+        ?? pickRef(candidates, (await api('/tags?per_page=100')).map((x) => x.name));
+      if (!hit) throw e;
+      ({ ref, dir } = hit);
+      tree = await api(`/git/trees/${encodeURIComponent(ref)}?recursive=1`);
+    }
   } catch (err) {
     // GitHub 接口用不了（限流、网络策略）：退而只下载 SKILL.md 本身
     if (/找不到/.test(err.message) && ref0) throw err;
-    for (const r of ref ? [ref] : ['main', 'master']) {
-      const res = await raw(r, `${dir ? `${dir.replace(/\/$/, '')}/` : ''}SKILL.md`).catch(() => null);
+    // raw 地址是“分支/路径”拼在一起的，分支名带斜杠时各种切分得到的是同一个地址（由 GitHub 自己解析），试一次即可
+    const tries = candidates.length ? [candidates[0]] : (ref ? [{ ref, dir }] : [{ ref: 'main', dir }, { ref: 'master', dir }]);
+    for (const t of tries) {
+      const res = await raw(t.ref, `${t.dir ? `${t.dir.replace(/\/$/, '')}/` : ''}SKILL.md`).catch(() => null);
       if (res?.ok) {
         onProgress?.('GitHub 接口暂不可用，只安装了 SKILL.md');
-        return installFromFiles({ 'SKILL.md': await res.text() }, { source: `github.com/${owner}/${repo}${dir ? `/${dir}` : ''}`, skipped: ['（附带文件未下载：GitHub 接口暂不可用）'] });
+        // 分支名可能带斜杠，分不清文件夹从哪里开始：来源记原始地址
+        const source = candidates.length > 1 ? String(url).trim().replace(/^https?:\/\//, '') : `github.com/${owner}/${repo}${t.dir ? `/${t.dir}` : ''}`;
+        return installFromFiles({ 'SKILL.md': await res.text() }, { source, skipped: ['（附带文件未下载：GitHub 接口暂不可用）'] });
       }
     }
     throw err;

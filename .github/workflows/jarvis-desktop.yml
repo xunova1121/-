@@ -56,13 +56,16 @@ jobs:
       - name: 版本号
         shell: bash
         # 正式标签 desktop-v1.2.3 → 1.2.3；平时每次构建 1.0.<序号>（自动更新靠版本号判断新旧）
+        working-directory: jarvis/desktop
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/desktop-v* ]]; then echo "VERSION=${GITHUB_REF_NAME#desktop-v}" >> "$GITHUB_ENV"; else echo "VERSION=1.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"; fi
+          if [[ "$GITHUB_REF" == refs/tags/desktop-v* ]]; then VERSION="${GITHUB_REF_NAME#desktop-v}"; else VERSION="1.0.${GITHUB_RUN_NUMBER}"; fi
+          npm pkg set version="$VERSION"
+          echo "打包版本 $VERSION"
       - name: 打包
         working-directory: jarvis/desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npm run dist -- --publish never -c.extraMetadata.version=${{ env.VERSION }}
+        run: npm run dist -- --publish never
       - name: 上传安装包
         uses: actions/upload-artifact@v4
         with:

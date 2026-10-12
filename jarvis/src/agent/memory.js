@@ -336,6 +336,11 @@ export async function noteTask(text) {
   await log('task', text);
 }
 
+/** 没做成的任务：记进进化记录但不算“完成任务”，不加经验 */
+export async function noteIssue(text) {
+  await log('issue', text);
+}
+
 // ---------------------------------------------------------------- 检索
 async function embedOne(text) {
   if (!embedder) return null;
