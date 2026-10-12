@@ -39,6 +39,12 @@ export function plan(messages, tools = []) {
     const failed = results.find((r) => r.isError);
     if (failed) return { emotion: '安抚', text: `执行时遇到问题：${failed.content.slice(0, 120)}。我们换个方式再试一次？` };
     if (used.has('schedule_task') || used.has('list_schedules')) return { emotion: '亲和', text: lastResult.content };
+    if (used.has('deep_research')) {
+      const path = lastResult.content.match(/保存到 (\S+)/)?.[1] ?? '';
+      const summary = lastResult.content.match(/## 结论摘要\n([\s\S]*?)\n\n/)?.[1] ?? '';
+      return { emotion: '专注', text: `调研完成，报告在 ${path}，右侧已打开。要点：\n\n${summary}\n\n需要的话我可以把它转成 Word 或 PDF。` };
+    }
+    if (used.has('web_search')) return { emotion: '专注', text: `搜索结果：\n\n${lastResult.content.slice(0, 600)}` };
     const mcpUsed = [...used].find((n) => n.startsWith('mcp_'));
     if (mcpUsed) return { emotion: '专注', text: `MCP 工具返回：${lastResult.content.slice(0, 400)}` };
     if (lastResult.images?.length) return { emotion: '专注', text: `${lastResult.content}\n\n截图已经交给我了；离线演示模型看不懂图片，接入支持识图的模型后我就能分析屏幕内容。` };
@@ -118,6 +124,11 @@ export function plan(messages, tools = []) {
   if (!/^【这是定时任务/.test(q) && /(每天|每日|每周|星期|工作日|每隔|每\d+分钟|每小时|明天|后天|\d+分钟后|\d+小时后)/.test(q) && /(提醒|帮我|总结|写|检查|汇报|整理|发)/.test(q)) {
     return { emotion: '专注', calls: [call('schedule_task', { title: q.replace(/^.*?(提醒我|帮我)/, '').slice(0, 12) || '定时任务', prompt: q.replace(/^.*?(提醒我|帮我)/, '') || q, when: q })] };
   }
+  // —— 调研：“帮我调研一下……”“深度研究……”
+  const research = q.match(/(?:深度)?(?:调研|研究|调查)(?:一下|下)?[：:，,\s]*(.+)/);
+  if (research && tools.some((t) => t.name === 'deep_research')) return { emotion: '专注', calls: [call('deep_research', { question: research[1].trim(), depth: /深入|全面|详细/.test(q) ? 'deep' : /快速|简单/.test(q) ? 'quick' : 'standard' })] };
+  const ws = q.match(/^(?:搜索|搜一下|查一下)[：:\s]*(.+)/);
+  if (ws && tools.some((t) => t.name === 'web_search')) return { emotion: '专注', calls: [call('web_search', { query: ws[1].trim() })] };
   const skill = q.match(/请使用技能「([^」]+)」/);
   if (skill) return { emotion: '专注', calls: [call('use_skill', { name: skill[1] })] };
   const m = q.match(/记住[：:,，\s]*(.+)/) || q.match(/^(我(?:喜欢|讨厌|叫|是|的|习惯|住在|在).+)/);

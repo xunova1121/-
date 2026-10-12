@@ -17,12 +17,12 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? '✓' : '✗'} ${name}${detail ? ` — ${String(detail).slice(0, 140)}` : ''}`);
 };
 async function ask(page, q) {
-  const before = await page.locator('.msg.agent').count();
+  const before = await page.locator('#transcript .msg.agent').count();
   await page.fill('#prompt', q);
   await page.press('#prompt', 'Enter');
-  await page.waitForFunction((n) => document.querySelectorAll('.msg.agent').length > n && !document.querySelector('.msg.agent.streaming'), before, { timeout: 40000 });
+  await page.waitForFunction((n) => document.querySelectorAll('#transcript .msg.agent').length > n && !document.querySelector('#transcript .msg.agent.streaming'), before, { timeout: 40000 });
   await page.waitForTimeout(150);
-  return page.locator('.msg.agent').last().innerText();
+  return page.locator('#transcript .msg.agent').last().innerText();
 }
 
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });

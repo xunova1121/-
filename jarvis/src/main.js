@@ -433,18 +433,19 @@ function makeSpeech() {
 }
 
 // ---------------------------------------------------------------- 记忆引擎：整理用的大模型 + 语义向量，随配置变化
-function syncMemoryEngine() {
+/** 给记忆整理、深度调研等内部环节用的“单次问答”；内置演示或配置不全时返回 null */
+function helperLlm() {
   const { adapter, model, problem } = createAdapter(llmConfig, { gateway });
-  const real = !problem && providerById(llmConfig.provider)?.kind !== 'mock';
+  if (problem || providerById(llmConfig.provider)?.kind === 'mock') return null;
+  return async ({ system, prompt, signal }) => {
+    let text = '';
+    const r = await adapter.stream({ model, system: [system], messages: [{ role: 'user', content: prompt }], tools: [], signal, onText: (d) => { text += d; } });
+    return r?.text || text;
+  };
+}
+function syncMemoryEngine() {
   const embedder = createEmbedder(llmConfig, { gateway });
-  agentMemory.configureMemory({
-    llm: real ? async ({ system, prompt }) => {
-      let text = '';
-      const r = await adapter.stream({ model, system: [system], messages: [{ role: 'user', content: prompt }], tools: [], onText: (d) => { text += d; } });
-      return r?.text || text;
-    } : null,
-    embedder
-  });
+  agentMemory.configureMemory({ llm: helperLlm(), embedder });
   kb.configureKnowledge({ embedder });
   panels?.refreshKb?.();
 }
@@ -543,6 +544,7 @@ async function buildTools({ background = false } = {}) {
       metrics,
       tavilyKey: llmConfig.tavilyKey,
       fetchViaGateway: fetchViaGateway(),
+      llm: helperLlm(),
       onPreview: background ? () => {} : (path) => { showPanel('workspace'); panels.openFile(path); },
       onFileChanged,
       onSchedulesChanged: () => schedulesPanel?.refresh()
@@ -680,6 +682,9 @@ async function send(text) {
           cards.set(e.id, bubble.toolCard(e.name, e.args));
           usedTools.push(e.name);
           setTask('processing', `${e.name}`);
+        } else if (e.type === 'tool_progress') {
+          cards.get(e.id)?.progress(e.text);
+          setTask('processing', e.text.slice(0, 30));
         } else if (e.type === 'tool_end') {
           cards.get(e.id)?.done(e.ok, e.output, e.ms);
           if (/remember|forget|save_skill/.test(e.name)) panels.refreshMind();
@@ -1040,6 +1045,7 @@ const skillsPanel = initSkillsPanel({
 const QUICK = [
   { icon: '⌘', title: '写一个网页', desc: '写代码并在工作区实时预览', prompt: '帮我写一个网页' },
   { icon: '▤', title: '做汇报 PPT', desc: '结论先行，一页一个观点', prompt: '做一个PPT' },
+  { icon: '⌕', title: '深度调研', desc: '多轮搜索、读网页，写带出处的报告', fill: '深度调研：' },
   { icon: '▦', title: '分析表格', desc: '上传 Excel / CSV，找趋势与异常', upload: true },
   { icon: '◎', title: '导入知识库', desc: 'PDF、Word、PPT 都能读', panel: 'knowledge' },
   { icon: 'ϟ', title: '安装技能', desc: '一键获得新的做事方法', panel: 'skills' },
@@ -1061,6 +1067,7 @@ function renderWelcome() {
     b.querySelector('.quick-desc').textContent = q.desc;
     b.addEventListener('click', () => {
       if (q.prompt) send(q.prompt);
+      else if (q.fill) { $('#prompt').value = q.fill; $('#prompt').focus(); }
       else if (q.panel) showPanel(q.panel);
       else if (q.upload) $('#btn-attach')?.click();
     });
@@ -1094,7 +1101,7 @@ const palette = initPalette({
   commands: () => {
     const toggle = (id, title) => ({ id: `t-${id}`, group: '开关', title: `${$(`#${id}`).checked ? '关闭' : '开启'}${title}`, run: () => $(`#${id}`).click() });
     return [
-      ...QUICK.filter((q) => q.prompt).map((q) => ({ id: `q-${q.title}`, group: '常用任务', title: q.title, hint: q.desc, run: () => send(q.prompt) })),
+      ...QUICK.filter((q) => q.prompt || q.fill).map((q) => ({ id: `q-${q.title}`, group: '常用任务', title: q.title, hint: q.desc, run: () => { if (q.prompt) send(q.prompt); else { $('#prompt').value = q.fill; $('#prompt').focus(); } } })),
       ...skillsPanel.installed.filter((p) => p.enabled).map((p) => ({ id: `s-${p.name}`, group: '技能', title: `/${p.name}`, hint: p.description, run: () => { $('#prompt').value = `/${p.name} `; $('#prompt').focus(); } })),
       ...PANES.map((p, i) => ({ id: `p-${p}`, group: '面板', title: `打开${PANE_TITLE[p]}`, keys: `Alt ${i + 1}`, run: () => showPanel(p) })),
       { id: 'f-orb', group: '形态', title: '切换为光核', keys: 'Alt O', run: () => setStyle('orb') },
@@ -1334,5 +1341,6 @@ window.__jarvis = {
   send,
   interrupt,
   showPanel,
-  get quality() { return quality; }
+  get quality() { return quality; },
+  workspace: ws
 };

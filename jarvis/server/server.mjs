@@ -33,6 +33,12 @@ import { createOllama } from './ollama.mjs';
 
 const CORS_PATHS = /^\/api\/(health|local\/metrics|llm\/.+)$/;
 export const EXTRA_UPSTREAMS = { tavily: 'https://api.tavily.com', elevenlabs: 'https://api.elevenlabs.io' };
+// 读取网页时用常见浏览器的请求头：不少网站（包括搜索引擎）会拒绝或降级陌生的客户端
+const FETCH_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+};
 const FORWARD_HEADERS = ['content-type', 'accept', 'authorization', 'x-api-key', 'anthropic-version', 'anthropic-beta', 'xi-api-key'];
 
 export { isPrivateHost };
@@ -226,8 +232,16 @@ export function createServer({
   async function handleFetch(req, res, target) {
     let url;
     try { url = new URL(target); } catch { return json(res, 400, { error: '地址无效' }); }
-    if (!/^https?:$/.test(url.protocol) || isPrivateHost(url.hostname)) return json(res, 403, { error: '只允许访问公网 http(s) 地址' });
-    const upstream = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Jarvis local agent)' }, redirect: 'follow' });
+    // 每一跳重定向都重新检查，防止公网地址跳转到内网
+    let upstream;
+    for (let hop = 0; ; hop++) {
+      if (!/^https?:$/.test(url.protocol) || isPrivateHost(url.hostname)) return json(res, 403, { error: '只允许访问公网 http(s) 地址' });
+      upstream = await fetch(url, { headers: FETCH_HEADERS, redirect: 'manual', signal: AbortSignal.timeout(20000) });
+      const loc = upstream.headers.get('location');
+      if (!(upstream.status >= 300 && upstream.status < 400 && loc)) break;
+      if (hop >= 5) return json(res, 508, { error: '重定向次数过多' });
+      url = new URL(loc, url);
+    }
     const buf = Buffer.from(await upstream.arrayBuffer());
     res.writeHead(upstream.status, { 'Content-Type': upstream.headers.get('content-type') || 'text/plain', 'Cache-Control': 'no-store' });
     res.end(buf.subarray(0, 5 * 1024 * 1024));

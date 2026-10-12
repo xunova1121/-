@@ -19,12 +19,12 @@ const check = (name, ok, detail = '') => {
 
 /** 发一条消息并等这一轮结束 */
 async function ask(page, q, timeout = 40000) {
-  const before = await page.locator('.msg.agent').count();
+  const before = await page.locator('#transcript .msg.agent').count();
   await page.fill('#prompt', q);
   await page.press('#prompt', 'Enter');
-  await page.waitForFunction((n) => document.querySelectorAll('.msg.agent').length > n && !document.querySelector('.msg.agent.streaming'), before, { timeout });
+  await page.waitForFunction((n) => document.querySelectorAll('#transcript .msg.agent').length > n && !document.querySelector('#transcript .msg.agent.streaming'), before, { timeout });
   await page.waitForTimeout(150);
-  return page.locator('.msg.agent').last().innerText();
+  return page.locator('#transcript .msg.agent').last().innerText();
 }
 
 /** 本地假语音服务（OpenAI 兼容 /audio/speech）：返回一段 0.8 秒的 WAV；fail=true 时返回 500 */
@@ -105,7 +105,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   }
 
   // —— 欢迎页、HUD
-  check('欢迎页与快捷任务', (await page.locator('.welcome .quick').count()) === 6 && /我是贾维斯/.test(await page.textContent('.welcome h1')));
+  check('欢迎页与快捷任务', (await page.locator('.welcome .quick').count()) === 7 && /我是贾维斯/.test(await page.textContent('.welcome h1')));
   check('HUD 时钟与模型', /^\d{2}:\d{2}:\d{2}$/.test(await page.textContent('#hud-time')) && (await page.textContent('#hud-model')).length > 0);
 
   // —— 技能：首次启动预置常用技能；卸载后可从推荐里重装 → “/” 自动补全 → 点名使用
@@ -125,10 +125,10 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.press('#prompt', 'Enter');
   check('回车选中补全项', (await page.inputValue('#prompt')) === '/weekly-report ');
   await page.type('#prompt', '本周完成登录模块');
-  const before = await page.locator('.msg.agent').count();
+  const before = await page.locator('#transcript .msg.agent').count();
   await page.press('#prompt', 'Enter');
-  await page.waitForFunction((n) => document.querySelectorAll('.msg.agent').length > n && !document.querySelector('.msg.agent.streaming'), before, { timeout: 20000 });
-  const skillReply = await page.locator('.msg.agent').last().innerText();
+  await page.waitForFunction((n) => document.querySelectorAll('#transcript .msg.agent').length > n && !document.querySelector('#transcript .msg.agent.streaming'), before, { timeout: 20000 });
+  const skillReply = await page.locator('#transcript .msg.agent').last().innerText();
   check('“/技能名”让智能体先读取技能说明', /使用技能/.test(skillReply) && /已加载技能「weekly-report」/.test(skillReply), skillReply.slice(0, 80));
   check('欢迎页在开始对话后收起', (await page.locator('.welcome').count()) === 0);
   await page.locator('#skill-list .skill', { hasText: '/weekly-report' }).locator('.switch').click();
@@ -152,11 +152,11 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.waitForTimeout(250);
   check('悬停建议：虚线变亮、光核看向它', await page.evaluate(() => document.querySelector('.cl-g.hot') !== null && window.__jarvis.live.glance.yaw > 3));
   await page.mouse.move(5, 500);
-  const nBefore = await page.locator('.msg.agent').count();
+  const nBefore = await page.locator('#transcript .msg.agent').count();
   const target = await page.evaluate(() => window.__jarvis.callouts.items[1].prompt);
   const beforeTitles = await page.evaluate(() => window.__jarvis.callouts.items.map((x) => x.title).join(' / '));
   await page.click('.callout:nth-child(2)');
-  await page.waitForFunction((n) => document.querySelectorAll('.msg.agent').length > n && !document.querySelector('.msg.agent.streaming'), nBefore, { timeout: 20000 });
+  await page.waitForFunction((n) => document.querySelectorAll('#transcript .msg.agent').length > n && !document.querySelector('#transcript .msg.agent.streaming'), nBefore, { timeout: 20000 });
   check('点击建议即发送', (await page.locator('.msg.user').last().innerText()).includes(target), target);
   await page.waitForTimeout(400);
   const after = await page.evaluate(() => window.__jarvis.callouts.items.map((x) => x.title));
@@ -171,7 +171,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.locator('#sched-list .sched').first().getByRole('button', { name: '立即运行' }).click();
   await page.waitForFunction(() => /⏰/.test(document.querySelector('#session-list')?.textContent || '') || document.querySelector('.msg.user')?.textContent.includes('总结工作区'), null, { timeout: 20000 }).catch(() => {});
   await page.waitForTimeout(500);
-  check('立即运行：结果存为“⏰ 任务名”对话并打开', /总结工作区里的文件/.test(await page.textContent('#transcript')) && (await page.locator('.msg.agent').count()) >= 1);
+  check('立即运行：结果存为“⏰ 任务名”对话并打开', /总结工作区里的文件/.test(await page.textContent('#transcript')) && (await page.locator('#transcript .msg.agent').count()) >= 1);
   await page.evaluate(() => window.__jarvis.showPanel('system'));
   await page.click('#sched-add summary');
   await page.fill('#sched-form [name=title]', '喝水提醒');
@@ -187,7 +187,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
 
   // —— 智能体：写网页 → 预览
   let reply = await ask(page, '帮我写一个网页');
-  const tools1 = await page.locator('.msg.agent').last().locator('.tool-card .tn').allTextContents();
+  const tools1 = await page.locator('#transcript .msg.agent').last().locator('.tool-card .tn').allTextContents();
   check('智能体写网页：写入文件 → 打开预览', tools1.join(',') === '写入文件,打开预览', tools1.join(','));
   const frame = page.frameLocator('#viewer-body iframe');
   await page.waitForTimeout(800);
@@ -233,7 +233,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   const hitsText = await page.textContent('#kb-hits');
   check('PDF 文字可检索', /23 percent/.test(hitsText), hitsText);
   reply = await ask(page, '根据知识库，年假有几天？');
-  const sources = await page.locator('.msg.agent').last().locator('.sources').textContent().catch(() => '');
+  const sources = await page.locator('#transcript .msg.agent').last().locator('.sources').textContent().catch(() => '');
   check('回答引用知识库来源', sources.includes('员工手册.txt') && /十天/.test(reply), sources);
 
   // —— 记忆与教训
@@ -244,7 +244,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   // 同一件事的新说法取代旧的：旧版本进入“已归档”
   await ask(page, '记住我住在上海');
   reply = await ask(page, '记住我住在杭州');
-  check('同一属性的新说法自动取代旧记忆', /已更新记忆：「我住在上海」→「我住在杭州」/.test(await page.locator('.msg.agent').last().locator('.tool-card pre').textContent()));
+  check('同一属性的新说法自动取代旧记忆', /已更新记忆：「我住在上海」→「我住在杭州」/.test(await page.locator('#transcript .msg.agent').last().locator('.tool-card pre').textContent()));
   await page.evaluate(() => window.__jarvis.showPanel('mind'));
   await page.click('[data-mtab="archived"]');
   await page.waitForTimeout(250);
@@ -273,7 +273,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   const backup = JSON.parse(await (await import('node:fs')).promises.readFile(await memDl.path(), 'utf8'));
   check('导出记忆备份', backup.format === 'jarvis-memory' && backup.memories.length >= 3 && /老王/.test(backup.core.human), `${backup.memories.length} 条`);
   await ask(page, '今天心情不错');
-  await page.locator('.msg.agent').last().locator('.feedback button').nth(1).click();
+  await page.locator('#transcript .msg.agent').last().locator('.feedback button').nth(1).click();
   await page.fill('.lesson-box input', '回答太长了');
   await page.press('.lesson-box input', 'Enter');
   await page.click('[data-mtab="lessons"]');
@@ -364,7 +364,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.waitForTimeout(400);
   check('唤醒词：没叫名字时不响应', (await userCount()) === n0);
   await page.evaluate(() => window.__jarvis.voice.onFinal('贾维斯，现在几点'));
-  await page.waitForFunction((n) => document.querySelectorAll('.msg.user').length > n && !document.querySelector('.msg.agent.streaming'), n0, { timeout: 20000 });
+  await page.waitForFunction((n) => document.querySelectorAll('.msg.user').length > n && !document.querySelector('#transcript .msg.agent.streaming'), n0, { timeout: 20000 });
   check('唤醒词：叫名字后执行指令（去掉名字）', (await page.locator('.msg.user').last().innerText()).includes('现在几点') && !(await page.locator('.msg.user').last().innerText()).includes('贾维斯'));
   check('唤醒后输入栏发光提示', await page.evaluate(() => new Promise((r) => setTimeout(() => r(document.body.classList.contains('awake')), 400))));
   await page.evaluate(() => window.__jarvis.voice.onFinal('帮我写一个网页'));
@@ -372,7 +372,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('唤醒词：窗口期内不用再叫名字', (await userCount()) === n0 + 2);
   await page.evaluate(() => window.__jarvis.voice.onFinal('退下'));
   check('说“退下”结束唤醒', await page.evaluate(() => new Promise((r) => setTimeout(() => r(!document.body.classList.contains('awake')), 400))));
-  await page.waitForFunction(() => !document.querySelector('.msg.agent.streaming') && !window.__jarvis.speaker.speaking, null, { timeout: 20000 }).catch(() => {});
+  await page.waitForFunction(() => !document.querySelector('#transcript .msg.agent.streaming') && !window.__jarvis.speaker.speaking, null, { timeout: 20000 }).catch(() => {});
   await page.waitForTimeout(500);
   await page.evaluate(() => window.__jarvis.showPanel('settings'));
   await page.uncheck('#set-wake');
@@ -380,10 +380,10 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
 
   // —— 打断、快捷键、画质
   await page.evaluate(() => { window.__barge = window.__jarvis.send('帮我写一个网页'); });
-  await page.waitForFunction(() => document.querySelector('.msg.agent.streaming .body')?.textContent.length > 2, null, { timeout: 10000 });
+  await page.waitForFunction(() => document.querySelector('#transcript .msg.agent.streaming .body')?.textContent.length > 2, null, { timeout: 10000 });
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
-  const barge = await page.evaluate(() => ({ streaming: document.querySelectorAll('.msg.agent.streaming').length, meta: [...document.querySelectorAll('.msg.agent .meta')].at(-1)?.textContent }));
+  const barge = await page.evaluate(() => ({ streaming: document.querySelectorAll('#transcript .msg.agent.streaming').length, meta: [...document.querySelectorAll('#transcript .msg.agent .meta')].at(-1)?.textContent }));
   check('Esc 打断任务', barge.streaming === 0 && /已打断/.test(barge.meta), JSON.stringify(barge));
   await page.keyboard.press('Alt+Digit3');
   check('Alt+3 打开知识库', await page.isVisible('[data-pane="knowledge"]'));
@@ -544,6 +544,37 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
     const r = await ask(page, '你好');
     check('本机模型：经网关对话', /本机模型 qwen3:4b 收到/.test(r), r);
   }
+  await ctx.close();
+}
+
+// ---------- 5c. 深度调研（内置演示 + 免密钥搜索；网页由测试拦截返回） ----------
+{
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  const page = await ctx.newPage();
+  const fetched = [];
+  await page.route('**/api/fetch?url=*', (route) => {
+    const target = new URL(route.request().url()).searchParams.get('url');
+    fetched.push(target);
+    if (/bing\.com\/search/.test(target)) {
+      const q = new URL(target).searchParams.get('q');
+      const items = [1, 2, 3].map((i) => `<li class="b_algo"><h2><a href="https://site${i}.example/${encodeURIComponent(q)}">${q} 资料 ${i}</a></h2><div class="b_caption"><p>${q} 的摘要 ${i}</p></div></li>`).join('');
+      return route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: `<ol id="b_results">${items}</ol>` });
+    }
+    return route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: `<html><body><nav>菜单</nav><article><p>本机大模型可以在自己的电脑上离线运行，数据不出电脑，也不用按调用次数付费，适合处理隐私资料。</p><p>运行本机大模型时，内存和显存决定了能跑多大的模型：8G 内存适合 3B-4B 的模型，16G 内存可以跑 7B-8B 的模型。</p><p>Ollama 是常用的本机大模型运行器，一条命令就能下载模型。</p><p>来源页面：${target}</p></article></body></html>` });
+  });
+  await page.goto(BASE);
+  await page.waitForFunction(() => window.__jarvis?.showPanel);
+  const r = await ask(page, '深度调研：本机大模型', 60000);
+  check('深度调研：完成并给出报告位置', /调研完成，报告在 调研\//.test(r), r.slice(0, 120));
+  check('深度调研：先搜索再阅读网页', fetched.some((u) => /bing\.com/.test(u)) && fetched.some((u) => /site\d\.example/.test(u)), fetched.length);
+  const card = page.locator('.tool-card').filter({ hasText: '深度调研' });
+  check('深度调研：工具卡片显示进度', /搜索：.*\n.*阅读：/s.test(await card.locator('pre').textContent()));
+  const md = await page.evaluate(async () => {
+    const f = (await window.__jarvis.workspace.list()).find((x) => x.path.startsWith('调研/'));
+    return f ? window.__jarvis.workspace.readText(f.path) : '';
+  });
+  check('深度调研：报告带引用与来源列表', /\[1\]/.test(md) && /## 参考来源\n1\. \[/.test(md) && /Ollama 是常用的本机大模型运行器/.test(md), md.slice(0, 80));
+  await page.screenshot({ path: `${OUT}/research.png` });
   await ctx.close();
 }
 

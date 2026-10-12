@@ -36,16 +36,16 @@ await page.waitForFunction(() => window.__jarvis?.stage?.stats.frames > 3, null,
 await page.waitForFunction(() => window.__jarvis.gateway?.mcp, null, { timeout: 10000 }).catch(() => {});
 
 async function ask(q, { approve } = {}) {
-  const before = await page.locator('.msg.agent').count();
+  const before = await page.locator('#transcript .msg.agent').count();
   await page.fill('#prompt', q);
   await page.press('#prompt', 'Enter');
   if (approve) {
     await page.waitForSelector('.confirm-card:not(.answered) button', { timeout: 20000 });
     await page.locator('.confirm-card:not(.answered)').getByRole('button', { name: approve, exact: true }).click();
   }
-  await page.waitForFunction((n) => document.querySelectorAll('.msg.agent').length > n && !document.querySelector('.msg.agent.streaming'), before, { timeout: 30000 });
+  await page.waitForFunction((n) => document.querySelectorAll('#transcript .msg.agent').length > n && !document.querySelector('#transcript .msg.agent.streaming'), before, { timeout: 30000 });
   await page.waitForTimeout(200);
-  return page.locator('.msg.agent').last().innerText();
+  return page.locator('#transcript .msg.agent').last().innerText();
 }
 
 const info = await page.evaluate(() => ({ desktop: Boolean(window.jarvisDesktop), cls: document.body.className, origin: location.origin, badge: document.querySelector('#gw-badge').textContent, mcp: window.__jarvis.gateway?.mcp }));
@@ -68,7 +68,7 @@ check('拒绝后不执行', !fs.existsSync(path.join(HOME, 'Desktop', '不该写
 r = await ask('运行命令 echo jarvis-$((40+2))', { approve: '本次都允许' });
 check('运行命令（确认后执行，返回输出）', /jarvis-42/.test(r), r.slice(-80));
 r = await ask('运行命令 echo again');
-check('选了“本次都允许”后同类操作不再询问', /again/.test(r) && (await page.locator('.msg.agent').last().locator('.confirm-card').count()) === 0);
+check('选了“本次都允许”后同类操作不再询问', /again/.test(r) && (await page.locator('#transcript .msg.agent').last().locator('.confirm-card').count()) === 0);
 
 const prot = await page.evaluate(() => window.jarvisDesktop.invoke('writeFile', { path: '/etc/jarvis-test', text: 'x' }).catch((e) => e.message));
 check('系统目录受保护', /系统目录/.test(prot), prot);

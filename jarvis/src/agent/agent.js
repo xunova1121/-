@@ -8,6 +8,7 @@
  *   { type: 'emotion', value }                 模型声明的表达风格
  *   { type: 'state', value }                   processing / listening（生成中）/ done / error
  *   { type: 'tool_start', id, name, args }
+ *   { type: 'tool_progress', id, name, text }   长任务（如深度调研）的进度
  *   { type: 'tool_end', id, name, ok, output, ms }
  *   { type: 'server_tool', name }              服务端工具（如 Claude 联网搜索）
  *   { type: 'sources', items }                 本轮自动检索到的知识库来源
@@ -131,7 +132,7 @@ export async function runAgent({ adapter, model, history, userText, images = [],
         const ask = tool.approval?.(c.args);
         if (ask && approve && !(await approve(ask, tool))) throw new Error('用户拒绝了这个操作。请换一种方式，或询问用户的意见。');
         // 工具可以返回 { text, images }：图片会交给模型“看”（如截屏、工作区里的图片）
-        const r = await tool.run(c.args);
+        const r = await tool.run(c.args, { signal, progress: (text) => emit({ type: 'tool_progress', id: c.id, name: c.name, text }) });
         if (r && typeof r === 'object' && 'text' in r) { output = String(r.text); outImages = r.images ?? []; } else output = String(r);
       } catch (e) {
         ok = false;

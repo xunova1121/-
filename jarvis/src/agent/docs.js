@@ -96,14 +96,27 @@ async function parsePptx(data) {
 
 const decodeXml = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
 
+/**
+ * 网页 → 正文文字：去掉脚本、样式、导航、页脚、侧栏、表单；页面有 <main> / <article> 时只取正文部分。
+ */
 export function htmlToText(html) {
-  return String(html)
-    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
+  let h = String(html)
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<(head|script|style|noscript|svg|template|iframe|nav|footer|aside|form|button|select)\b[\s\S]*?<\/\1>/gi, '');
+  const main = [...h.matchAll(/<(main|article)\b[^>]*>([\s\S]*?)<\/\1>/gi)].map((m) => m[2]).sort((a, b) => b.length - a.length)[0];
+  if (main && main.replace(/<[^>]+>/g, '').trim().length > 200) h = main;
+  return h
     .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(p|div|li|h\d|tr)>/gi, '\n')
+    .replace(/<\/(p|div|li|ul|ol|h\d|tr|table|section|article|main|header|blockquote|pre|dd|dt|figure|figcaption)>/gi, '\n')
+    .replace(/<\/t[dh]>/gi, '\t')
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/g, ' ')
+    .replace(/&quot;/g, '"').replace(/&#39;|&#x27;|&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
     .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/[ \t]{2,}/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }

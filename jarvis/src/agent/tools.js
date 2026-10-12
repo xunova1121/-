@@ -10,6 +10,8 @@ import { runJavaScript, runPython } from './sandbox.js';
 import * as packs from './skillPacks.js';
 import { isImageName, prepareImage } from './images.js';
 import * as scheduler from './scheduler.js';
+import { createSearch } from './webSearch.js';
+import { deepResearch, DEPTHS } from './research.js';
 
 const S = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const str = (description) => ({ type: 'string', description });
@@ -22,6 +24,7 @@ const clip = (s, n = 20000) => (s.length > n ? `${s.slice(0, n)}\n…（已截�
  * @param {(path: string) => void} [ctx.onFileChanged]
  * @param {(url: string, init?: object) => Promise<Response>} [ctx.fetchViaGateway]  有网关时绕过浏览器跨域限制
  * @param {string} [ctx.tavilyKey]
+ * @param {((p: { system: string, prompt: string, signal?: AbortSignal }) => Promise<string>) | null} [ctx.llm]  深度调研用的大模型（内置演示时为空）
  */
 export function createTools(ctx) {
   const tools = [
@@ -242,18 +245,45 @@ export function createTools(ctx) {
     }
   ];
 
-  if (ctx.tavilyKey) {
+  const engine = createSearch(ctx);
+  const readPage = async (url) => {
+    const res = ctx.fetchViaGateway ? await ctx.fetchViaGateway(url) : await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const type = res.headers.get('content-type') || '';
+    if (!/html|text|json|xml/.test(type)) throw new Error('不是网页');
+    const body = await res.text();
+    return type.includes('html') ? htmlToText(body) : body;
+  };
+  if (engine) {
     tools.push({
       name: 'web_search',
-      description: '联网搜索最新信息（新闻、价格、版本、事件等时效性内容）。回答时注明来源链接。',
+      description: `联网搜索最新信息（新闻、价格、版本、事件等时效性内容；搜索源：${engine.name}）。回答时注明来源链接。需要全面、有出处的研究时改用 deep_research。`,
       input_schema: S({ query: str('搜索词') }, ['query']),
       run: async ({ query }) => {
-        const url = 'https://api.tavily.com/search';
-        const init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: ctx.tavilyKey, query, max_results: 5, include_answer: true }) };
-        const res = ctx.fetchViaGateway ? await ctx.fetchViaGateway(url, init) : await fetch(url, init);
-        if (!res.ok) throw new Error(`搜索服务返回 ${res.status}`);
-        const j = await res.json();
-        return [j.answer && `摘要：${j.answer}`, ...(j.results ?? []).map((r) => `- ${r.title}\n  ${r.url}\n  ${String(r.content || '').slice(0, 300)}`)].filter(Boolean).join('\n');
+        const hits = await engine.search(query, 6);
+        if (!hits.length) return '没有搜索结果，换个搜索词试试';
+        return hits.map((r) => `- ${r.title}\n  ${r.url}\n  ${String(r.snippet || '').slice(0, 300)}`).join('\n');
+      }
+    });
+    tools.push({
+      name: 'deep_research',
+      description: '深度调研：自动多轮搜索、逐篇阅读网页、找缺口补查，最后写成带引用编号的 Markdown 报告保存到工作区并打开预览。适合“帮我调研 / 研究 / 对比 / 写一份关于…的报告”这类需要全面资料的问题；耗时 1-5 分钟。简单的事实查询用 web_search。',
+      input_schema: S({
+        question: str('调研问题，写完整（含范围、时间、关注点）'),
+        depth: { type: 'string', enum: Object.keys(DEPTHS), description: 'quick 快速（约 4 个来源）/ standard 标准（约 8 个）/ deep 深入（约 14 个，多轮补查）' }
+      }, ['question']),
+      run: async ({ question, depth = 'standard' }, { progress, signal } = {}) => {
+        const r = await deepResearch({
+          question, depth, llm: ctx.llm ?? null, signal,
+          search: (q, n) => engine.search(q, n),
+          read: readPage,
+          onProgress: ({ text }) => progress?.(text)
+        });
+        const safe = r.title.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40) || '调研报告';
+        const w = await ws.write(`调研/${safe}.md`, r.markdown);
+        ctx.onFileChanged?.(w.path);
+        ctx.onPreview?.(w.path);
+        return `报告已保存到 ${w.path} 并已打开预览（检索 ${r.queries.length} 次，引用 ${r.sources.length} 个来源）。请用几句话向用户概括结论，不要整篇复述；用户需要时可以用 create_document 转成 Word / PDF。\n\n${clip(r.markdown, 6000)}`;
       }
     });
   }
