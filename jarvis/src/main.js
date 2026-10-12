@@ -56,8 +56,8 @@ import { Dashboard } from './ui/dashboard.js';
 import { Transcript, toolLabel, summarizeArgs } from './ui/transcript.js';
 import { Speaker } from './perception/speaker.js';
 import { VoiceInput, speechRecognitionSupported } from './perception/voiceInput.js';
-import { resolveStt, transcribe } from './perception/stt.js';
-import { STANDALONE, MOBILE } from './config.js';
+import { resolveStt, transcribe, encodeWav, sttEngineById } from './perception/stt.js';
+import { STANDALONE, MOBILE, VAD } from './config.js';
 import { NativeVoice } from './mobile/nativeVoice.js';
 import { initChips } from './ui/chips.js';
 import { initDrawer } from './ui/drawer.js';
@@ -1104,6 +1104,51 @@ async function setDirectVoice(on) {
     endListening();
   }
 }
+
+// “检测语音”：逐项检查麦克风 / 系统识别 / 云端转写 / 语音检测模型，告诉用户卡在哪一步
+async function checkVoice() {
+  const list = $('#voice-check');
+  list.hidden = false;
+  list.replaceChildren();
+  const line = (ok, text) => { const li = document.createElement('li'); li.dataset.ok = ok === null ? 'wait' : ok ? '1' : '0'; li.textContent = text; list.append(li); return li; };
+  await nativeVoiceReady;
+  // 1. 麦克风
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+    s.getTracks().forEach((t) => t.stop());
+    line(true, '麦克风：已允许');
+  } catch (e) {
+    line(false, `麦克风：不能用（${e.name === 'NotAllowedError' ? '权限被拒绝，请在系统设置里允许贾维斯使用麦克风' : e.message || e.name}）`);
+  }
+  // 2. 识别方式
+  if (voice instanceof NativeVoice) { line(true, '识别方式：手机自带的语音识别（免费、不用密钥）'); return; }
+  if (MOBILE) line(false, '手机自带语音识别：这台手机没有可用的识别服务，改用云端转写');
+  const id = sttEngine();
+  if (id === 'browser') { line(true, '识别方式：浏览器自带语音识别'); return; }
+  if (id === 'none') { line(false, '识别方式：没有可用的语音识别。请在“模型 → 声音”填硅基流动或 OpenAI 的 Key'); return; }
+  // 3. 云端转写：发 1 秒静音试一下
+  const li = line(null, `云端转写（${sttEngineById(id)?.name ?? id}）：检测中…`);
+  try {
+    await transcribe(id, llmConfig, encodeWav(new Float32Array(16000)), { gateway, signal: AbortSignal.timeout?.(20000) });
+    li.dataset.ok = '1';
+    li.textContent = `云端转写（${sttEngineById(id)?.name ?? id}）：可用`;
+  } catch (e) {
+    li.dataset.ok = '0';
+    li.textContent = `云端转写：${e.message}`;
+  }
+  // 4. 语音检测模型（云端转写靠它切分句子）
+  const vli = line(null, '语音检测模型：检测中…');
+  try {
+    const r = await fetch(`${VAD.baseAssetPath}silero_vad_v5.onnx`, { method: 'HEAD', signal: AbortSignal.timeout?.(10000) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    vli.dataset.ok = '1';
+    vli.textContent = '语音检测模型：能下载';
+  } catch (e) {
+    vli.dataset.ok = '0';
+    vli.textContent = `语音检测模型：下载不了（${e.message}），说话后无法自动提交`;
+  }
+}
+$('#btn-voice-check').addEventListener('click', () => checkVoice());
 
 const mic = $('#btn-mic');
 if (!browserSR && !window.jarvisDesktop && !MOBILE && sttEngine() === 'none') {

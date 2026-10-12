@@ -66,9 +66,17 @@ jobs:
           echo "打包版本 $VERSION"
       - name: 打包
         working-directory: jarvis/desktop
+        shell: bash
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npm run dist -- --publish never
+        # 下载 Electron 偶尔遇到 GitHub 网络超时（504）：最多重试 3 次
+        run: |
+          for i in 1 2 3; do
+            npm run dist -- --publish never && exit 0
+            echo "::warning::打包失败（第 $i 次），20 秒后重试"
+            sleep 20
+          done
+          exit 1
       - name: 上传安装包
         uses: actions/upload-artifact@v4
         with:

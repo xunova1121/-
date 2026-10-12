@@ -1112,3 +1112,8 @@ body.reduced-motion .drawer { transition: none; }
 .mp-auto { background: var(--chip-bg); margin-bottom: 4px; }
 .mp-auto .mp-name { font-weight: 600; }
 .mp-settings { align-self: flex-start; border: 0; background: none; color: var(--accent); font-size: 13px; padding: 4px 2px; }
+.voice-check { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.voice-check li::before { content: "○ "; color: var(--dim); }
+.voice-check li[data-ok="1"]::before { content: "✓ "; color: var(--ok); }
+.voice-check li[data-ok="0"]::before { content: "✕ "; color: var(--bad); }
+.voice-check li[data-ok="0"] { color: var(--bad); }
