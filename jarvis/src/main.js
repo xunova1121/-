@@ -340,6 +340,17 @@ if ((STANDALONE && !MOBILE) || location.protocol === 'file:') {
   addEventListener('focus', () => { if (!gateway && Date.now() - last > 5000) { last = Date.now(); detectGateway(); } });
 }
 
+/** 常见的服务商错误翻译成人话（已经自动重试过仍失败才会走到这里） */
+function friendlyError(msg) {
+  const code = Number(msg.match(/模型接口返回 (\d{3})/)?.[1]);
+  if (code === 524 || code === 504 || code === 522) return `中转站等模型回复超时（${code}），已自动重试过。可以点“再试一次”，或在输入框里换一个更快的模型`;
+  if (code === 429) return '请求太频繁或额度用完（429），已自动重试过。稍等一会儿再试，或检查中转站余额';
+  if (code === 401 || code === 403) return `API Key 不对或没有权限（${code}）：请在“模型”里检查密钥`;
+  if (code >= 500) return `服务商临时故障（${code}），已自动重试过。稍后再试，或换一个模型`;
+  if (/connection reset|econnreset|socket hang up/i.test(msg)) return '网络连接被断开（已自动重试过）。可以点“再试一次”；手机上可以试试切换 Wi‑Fi / 流量';
+  return msg;
+}
+
 function updateModelLabels() {
   const name = displayName(llmConfig);
   $('#mode-text').textContent = name;
@@ -891,8 +902,8 @@ async function send(text) {
     if (!speaker.speaking) finishTurn();
   } catch (err) {
     if (err.name === 'AbortError' || active !== turn) return;
-    const msg = String(err.message || err);
-    const cors = /Failed to fetch|NetworkError|Load failed|CORS/i.test(msg);
+    const msg = friendlyError(String(err.message || err));
+    const cors = !MOBILE && /Failed to fetch|NetworkError|Load failed|CORS/i.test(msg);
     bubble.append(`\n（出错了：${msg}${cors ? '。多半是该服务商不允许网页直接调用：双击 jarvis 文件夹里的 启动.bat（或 start.sh）并保持窗口开着，本页面会自动连上本机网关，然后重试即可' : ''}）`);
     if (cors && !gateway) detectGateway();
     bubble.done();

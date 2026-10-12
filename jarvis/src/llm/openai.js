@@ -92,9 +92,40 @@ const noToolModels = new Set();
 /** 不认 reasoning_effort 参数的模型 */
 const noEffortModels = new Set();
 
-export function createOpenAIAdapter({ baseURL, apiKey, headers = {} }) {
+/** 中转站 / 服务商的临时故障：网关超时（524 等）、限流、连接被重置——自动重试 */
+const TRANSIENT_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529]);
+export const isTransient = (err) => Boolean(err) && err.name !== 'AbortError' && (TRANSIENT_STATUS.has(err.status) || err.name === 'TypeError' || /connection reset|econnreset|socket hang up|network ?error|failed to fetch|load failed|premature close|terminated|etimedout|unexpected end/i.test(String(err.message)));
+const RETRY_DELAYS = [1500, 4000];
+const sleep = (ms, signal) => new Promise((resolve, reject) => {
+  const t = setTimeout(resolve, ms);
+  signal?.addEventListener('abort', () => { clearTimeout(t); reject(Object.assign(new Error('aborted'), { name: 'AbortError' })); }, { once: true });
+});
+
+export function createOpenAIAdapter({ baseURL, apiKey, headers = {}, retryDelays = RETRY_DELAYS }) {
+  const once = createOnce({ baseURL, apiKey, headers });
   return {
     kind: 'openai',
+    async stream(opts) {
+      const { signal, onText, onRetry } = opts;
+      let emitted = false;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await once.stream({ ...opts, onText: (d) => { emitted = true; onText?.(d); } });
+        } catch (err) {
+          if (signal?.aborted || !isTransient(err) || attempt >= retryDelays.length) throw err;
+          // 已经输出了一部分：告诉用户这段接下来会重新回答
+          if (emitted) onText?.('\n\n（连接中断，正在重试…）\n\n');
+          onRetry?.(attempt + 1, err);
+          emitted = false;
+          await sleep(retryDelays[attempt], signal);
+        }
+      }
+    }
+  };
+}
+
+function createOnce({ baseURL, apiKey, headers = {} }) {
+  return {
     async stream({ model, system, messages, tools, signal, onText, effort }) {
       const send = (withTools, withEffort) => fetch(`${baseURL.replace(/\/$/, '')}/chat/completions`, {
         method: 'POST',
@@ -127,7 +158,7 @@ export function createOpenAIAdapter({ baseURL, apiKey, headers = {} }) {
       if (!res.ok || !res.body) {
         let detail = '';
         try { detail = (await res.text()).slice(0, 300); } catch { /* ignore */ }
-        throw new Error(`模型接口返回 ${res.status}${detail ? `：${detail}` : ''}`);
+        throw Object.assign(new Error(`模型接口返回 ${res.status}${detail ? `：${detail}` : ''}`), { status: res.status });
       }
       const acc = createAccumulator(onText);
       const reader = res.body.getReader();

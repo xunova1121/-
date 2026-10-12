@@ -94,7 +94,22 @@ export function createTools(ctx) {
         const p = await packs.get(name);
         const text = p?.files?.[path.replace(/^\.?\//, '')];
         if (text == null) throw new Error(`技能「${name}」里没有文件 ${path}`);
+        if (packs.isBinaryFile(text)) return `${path} 是二进制文件（${Math.round(text.size / 1024)} KB），不能直接读。用 copy_skill_file 复制到工作区，再用 run_python 处理（例如 python-pptx 打开 .pptx 模板）。`;
         return clip(text, 30000);
+      }
+    },
+    {
+      name: 'copy_skill_file',
+      description: '把技能附带的文件（模板 .pptx / .docx / .xlsx、图片、脚本等）复制到工作区，之后 run_python 可以在 /workspace 下读到它。技能说明里要求“使用模板”时先调用这个。',
+      input_schema: S({ name: str('技能名称'), path: str('文件相对路径（use_skill 的文件列表里）'), to: str('复制到工作区的路径（可选，默认 skills/技能名/原路径）') }, ['name', 'path']),
+      run: async ({ name, path, to }) => {
+        const p = await packs.get(name);
+        const rel = String(path).replace(/^\.?\//, '');
+        const f = p?.files?.[rel];
+        if (f == null) throw new Error(`技能「${name}」里没有文件 ${path}（可用：${Object.keys(p?.files || {}).slice(0, 20).join('、') || '无'}）`);
+        const w = await ws.write(to || `skills/${p.name}/${rel}`, packs.fileBlob(f));
+        ctx.onFileChanged?.(w.path);
+        return `已复制到工作区：${w.path}（${Math.round((packs.isBinaryFile(f) ? f.size : String(f).length) / 1024)} KB）。在 run_python 里的路径是 /workspace/${w.path}`;
       }
     },
     {
@@ -221,10 +236,10 @@ export function createTools(ctx) {
     },
     {
       name: 'run_python',
-      description: '运行 Python（浏览器内的 Pyodide，首次使用需联网加载）。工作目录 /workspace 就是工作区，读写的文件会同步回工作区。可用 numpy、pandas 等常见库（自动加载）。',
+      description: '运行 Python（浏览器内的 Pyodide，首次使用需联网加载）。工作目录 /workspace 就是工作区，读写的文件会同步回工作区。可用 numpy、pandas 等常见库（自动加载）；python-pptx / python-docx / openpyxl 等纯 Python 库在代码开头用 `import micropip; await micropip.install("python-pptx")` 安装。',
       input_schema: S({ code: str('Python 代码') }, ['code']),
       run: async ({ code }) => {
-        const listing = (await ws.list()).filter((f) => f.size < 5e6).slice(0, 60);
+        const listing = (await ws.list()).filter((f) => f.size < 20e6).slice(0, 60); // 模板文件可能好几 MB
         const files = await Promise.all(listing.map(async (f) => ({ path: f.path, bytes: await (await ws.readBlob(f.path)).arrayBuffer() })));
         const r = await runPython(code, { files });
         const saved = [];

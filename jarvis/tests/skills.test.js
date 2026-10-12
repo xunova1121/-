@@ -49,16 +49,18 @@ describe('安装与管理', () => {
     expect(await packs.list()).toEqual([]);
   });
 
-  it('从 zip 安装：SKILL.md 在子文件夹里，附带文本文件，跳过二进制', async () => {
+  it('从 zip 安装：SKILL.md 在子文件夹里，附带文本文件和模板 / 图片（二进制），跳过不认识的文件', async () => {
     const zip = new JSZip();
     zip.file('my-skill/SKILL.md', SKILL);
     zip.file('my-skill/templates/report.md', '# 模板');
     zip.file('my-skill/scripts/count.py', 'print(1)');
     zip.file('my-skill/logo.png', new Uint8Array([137, 80, 78, 71]));
+    zip.file('my-skill/tool.exe', new Uint8Array([77, 90]));
     zip.file('__MACOSX/my-skill/._SKILL.md', 'x');
     const p = await packs.installFromZip(await zip.generateAsync({ type: 'uint8array' }));
-    expect(Object.keys(p.files).sort()).toEqual(['scripts/count.py', 'templates/report.md']);
-    expect(p.skipped).toContain('my-skill/logo.png');
+    expect(Object.keys(p.files).sort()).toEqual(['logo.png', 'scripts/count.py', 'templates/report.md']);
+    expect(packs.isBinaryFile(p.files['logo.png'])).toBe(true);
+    expect(p.skipped).toContain('my-skill/tool.exe');
   });
 
   it('没有 SKILL.md 时给出明确错误', async () => {
@@ -190,5 +192,29 @@ describe('智能体使用技能', () => {
     expect(packs.matchSlash('/Weekly-Report 本周做了 A', ['weekly-report'])).toEqual({ name: 'weekly-report', rest: '本周做了 A' });
     expect(packs.matchSlash('/nope x', ['weekly-report'])).toBeNull();
     expect(packs.matchSlash('不是命令', ['weekly-report'])).toBeNull();
+  });
+});
+
+describe('技能附带的二进制模板', () => {
+  it('从 GitHub 安装时下载 .pptx 模板；copy_skill_file 放进工作区；read_skill_file 提示用法', async () => {
+    const tpl = new Uint8Array([80, 75, 3, 4, 1, 2, 3]);
+    const fetchImpl = async (url) => {
+      if (url.endsWith('/repos/o/r')) return { ok: true, json: async () => ({ default_branch: 'main' }) };
+      if (url.includes('/git/trees/')) return { ok: true, json: async () => ({ tree: [{ type: 'blob', path: 'SKILL.md', size: 50 }, { type: 'blob', path: 'templates/cute/template.pptx', size: tpl.length }, { type: 'blob', path: 'big.pptx', size: 20 * 1024 * 1024 }] }) };
+      if (url.endsWith('SKILL.md')) return { ok: true, text: async () => '---\nname: ppt-maker\ndescription: 做 PPT\n---\n用模板 templates/cute/template.pptx' };
+      return { ok: true, arrayBuffer: async () => tpl.buffer.slice(0) };
+    };
+    const p = await packs.installFromGitHub('github.com/o/r', { fetchImpl });
+    expect(packs.isBinaryFile(p.files['templates/cute/template.pptx'])).toBe(true);
+    expect(p.files['templates/cute/template.pptx'].size).toBe(7);
+    expect(p.skipped).toContain('big.pptx');
+    expect(packs.render(p)).toMatch(/template\.pptx（二进制，0 KB）[\s\S]*|copy_skill_file/);
+    const tools = Object.fromEntries(createTools({ metrics: async () => ({}) }).map((t) => [t.name, t]));
+    expect(await tools.read_skill_file.run({ name: 'ppt-maker', path: 'templates/cute/template.pptx' })).toMatch('copy_skill_file');
+    const out = await tools.copy_skill_file.run({ name: 'ppt-maker', path: 'templates/cute/template.pptx' });
+    expect(out).toMatch('/workspace/skills/ppt-maker/templates/cute/template.pptx');
+    const ws = await import('../src/agent/workspace.js');
+    const blob = await ws.readBlob('skills/ppt-maker/templates/cute/template.pptx');
+    expect([...new Uint8Array(await blob.arrayBuffer())]).toEqual([...tpl]);
   });
 });

@@ -56,6 +56,9 @@ export async function buildContext(userText, { sessionId = null, turns = 0 } = {
     const os = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' }[desktop.platform] ?? desktop.platform;
     parts.push(`运行环境：贾维斯桌面版（${os}）。可以用 computer_* 工具直接操作这台电脑的文件、打开程序、运行命令；还能像人一样用鼠标键盘操作任何软件：computer_look 看屏幕 → computer_click / computer_type / computer_key / computer_scroll / computer_drag 操作（每步之后会返回新截图，确认结果再做下一步；坐标取目标元素的中心）。能用文件、命令工具完成的优先用它们，界面操作更慢；遇到登录、支付、删除等敏感步骤先停下问用户；写入、移动、删除、打开、运行命令时界面会自动请用户确认，你不需要先在文字里征求同意。${desktop.paths ? `用户目录：${desktop.paths.home}；桌面：${desktop.paths.desktop}；文档：${desktop.paths.documents}；下载：${desktop.paths.downloads}` : ''}`);
   }
+  if (typeof document !== 'undefined' && document.body?.classList.contains('compact')) {
+    parts.push('运行环境：贾维斯手机 App（安卓）。屏幕上只有对话，没有“右侧预览区”：生成的文件、网页、PPT 在左上角菜单 →“工作区”里查看，回答时这样告诉用户（不要说“看右侧”）。不能操作电脑。');
+  }
   parts.push(ws.mode() === 'folder' ? `工作区：已连接本地文件夹「${ws.folderName()}」` : '工作区：浏览器内的虚拟工作区（用户可下载文件，或连接本地文件夹）');
   if (ctx.core?.human || ctx.core?.persona) parts.push(`## 核心记忆\n${ctx.core.human ? `【关于用户】${ctx.core.human}\n` : ''}${ctx.core.persona ? `【我的设定】${ctx.core.persona}` : ''}`.trim());
   if (ctx.memories.length) parts.push(`## 相关记忆\n${ctx.memories.map((m) => `- ${m.content}`).join('\n')}`);

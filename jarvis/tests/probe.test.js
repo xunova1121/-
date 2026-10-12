@@ -86,3 +86,27 @@ describe('抽屉里的历史对话分组', () => {
     expect(g.map(([k, v]) => [k, v.map((s) => s.id)])).toEqual([['今天', ['a']], ['昨天', ['b']], ['近 7 天', ['c']], ['更早', ['d']]]);
   });
 });
+
+import { createOpenAIAdapter, isTransient } from '../src/llm/openai.js';
+describe('模型接口临时故障自动重试', () => {
+  const sse = (text) => new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\ndata: [DONE]\n\n`, { status: 200 });
+  it('524 / 连接重置后重试成功', async () => {
+    const replies = [new Response('timeout', { status: 524 }), 'reset', sse('好的')];
+    const orig = globalThis.fetch;
+    globalThis.fetch = async () => { const r = replies.shift(); if (r === 'reset') throw new TypeError('Connection reset'); return r; };
+    try {
+      let text = '';
+      const retries = [];
+      const a = createOpenAIAdapter({ baseURL: 'https://x/v1', apiKey: 'k', retryDelays: [1, 1, 1] });
+      const r = await a.stream({ model: 'm', system: ['', ''], messages: [{ role: 'user', content: 'hi' }], tools: [], onText: (d) => { text += d; }, onRetry: (n) => retries.push(n) });
+      expect(r.text).toBe('好的');
+      expect(text).toBe('好的');
+      expect(retries).toEqual([1, 2]);
+    } finally { globalThis.fetch = orig; }
+  });
+  it('密钥错误等不重试', async () => {
+    expect(isTransient(Object.assign(new Error('x'), { status: 401 }))).toBe(false);
+    expect(isTransient(Object.assign(new Error('x'), { status: 524 }))).toBe(true);
+    expect(isTransient(Object.assign(new Error('aborted'), { name: 'AbortError' }))).toBe(false);
+  });
+});

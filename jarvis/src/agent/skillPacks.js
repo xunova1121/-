@@ -23,6 +23,19 @@ const MAX_FILE = 256 * 1024;
 const MAX_TOTAL = 3 * 1024 * 1024;
 const MAX_FILES = 80;
 const TEXT_EXT = /\.(md|markdown|txt|json|ya?ml|toml|csv|tsv|xml|html?|css|js|mjs|cjs|ts|py|sh|bat|ps1|sql|ini|cfg|conf|tex|rst|svg)$/i;
+// 模板、图片、字体等二进制附件（如 PPT 技能的 template.pptx）：存成 Base64，用 copy_skill_file 放进工作区再用
+const BIN_EXT = /\.(pptx|potx|ppt|docx|dotx|doc|xlsx|xltx|xls|pdf|png|jpe?g|gif|webp|ico|bmp|ttf|otf|woff2?)$/i;
+const MAX_BIN = 15 * 1024 * 1024;
+const MAX_BIN_TOTAL = 40 * 1024 * 1024;
+
+/** 技能附件是不是二进制（{ binary, b64, size }） */
+export const isBinaryFile = (f) => Boolean(f && typeof f === 'object' && f.binary);
+const sizeOf = (f) => (isBinaryFile(f) ? f.size : String(f ?? '').length);
+const b64 = (buf) => { const u8 = new Uint8Array(buf); let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(s); };
+/** ArrayBuffer → 技能里保存的二进制附件 */
+export const binaryFile = (buf) => ({ binary: true, b64: b64(buf), size: buf.byteLength });
+/** 技能附件 → Blob（写进工作区用） */
+export const fileBlob = (f) => (isBinaryFile(f) ? new Blob([Uint8Array.from(atob(f.b64), (c) => c.charCodeAt(0))]) : new Blob([String(f)]));
 
 // ---------------------------------------------------------------- SKILL.md 解析
 
@@ -59,7 +72,7 @@ export function normalizeName(name) {
 
 /**
  * 从一组文件安装（文件夹、zip、GitHub 都归结到这里）。
- * @param {Record<string, string>} files 相对路径 → 文本内容（二进制文件不收）
+ * @param {Record<string, string | { binary: true, b64: string, size: number }>} files 相对路径 → 文本内容或二进制附件
  * @param {{ source?: string, skipped?: string[] }} o
  */
 export async function installFromFiles(files, { source = '本地', skipped = [] } = {}) {
@@ -75,13 +88,16 @@ export async function installFromFiles(files, { source = '本地', skipped = [] 
 
   const own = {};
   let total = 0;
+  let binTotal = 0;
   for (const p of paths) {
     if (p === skillPath || !p.startsWith(base)) continue;
     const rel = p.slice(base.length);
-    const text = files[p];
-    if (Object.keys(own).length >= MAX_FILES || total + text.length > MAX_TOTAL) { skipped.push(rel); continue; }
-    own[rel] = text;
-    total += text.length;
+    const f = files[p];
+    const n = sizeOf(f);
+    const bin = isBinaryFile(f);
+    if (Object.keys(own).length >= MAX_FILES || (bin ? binTotal + n > MAX_BIN_TOTAL : total + n > MAX_TOTAL)) { skipped.push(rel); continue; }
+    own[rel] = f;
+    if (bin) binTotal += n; else total += n;
   }
   const old = await packs.get(name);
   const pack = {
@@ -113,6 +129,12 @@ export async function installFromZip(data, source = 'zip') {
   const skipped = [];
   for (const [p, entry] of Object.entries(zip.files)) {
     if (entry.dir || /(^|\/)(__MACOSX|\.git)\//.test(p) || /(^|\/)\.DS_Store$/.test(p)) continue;
+    if (BIN_EXT.test(p)) {
+      const buf = await entry.async('arraybuffer');
+      if (buf.byteLength > MAX_BIN) { skipped.push(p); continue; }
+      files[p] = binaryFile(buf);
+      continue;
+    }
     if (!TEXT_EXT.test(p) && !/SKILL\.md$/i.test(p)) { skipped.push(p); continue; }
     const text = await entry.async('string');
     if (text.length > MAX_FILE) { skipped.push(p); continue; }
@@ -224,18 +246,19 @@ export async function installFromGitHub(url, { fetchImpl = globalThis.fetch, onP
     let total = 0;
     const wanted = blobs.filter((b) => {
       const rel = b.path.slice(prefix.length);
-      const ok = (TEXT_EXT.test(rel) || rel === 'SKILL.md') && (b.size ?? 0) <= MAX_FILE;
+      const ok = ((TEXT_EXT.test(rel) || rel === 'SKILL.md') && (b.size ?? 0) <= MAX_FILE) || (BIN_EXT.test(rel) && (b.size ?? 0) <= MAX_BIN);
       if (!ok) skipped.push(rel);
       return ok;
     }).slice(0, MAX_FILES + 1);
     let done = 0;
     for (const b of wanted) {
       const rel = b.path.slice(prefix.length);
-      if (total > MAX_TOTAL) { skipped.push(rel); continue; }
+      const bin = BIN_EXT.test(rel);
+      if (bin ? total + (b.size ?? 0) > MAX_BIN_TOTAL + MAX_TOTAL : total > MAX_TOTAL) { skipped.push(rel); continue; }
       const r = await raw(ref, b.path);
       if (!r.ok) { skipped.push(rel); continue; }
-      files[rel] = await r.text();
-      total += files[rel].length;
+      files[rel] = bin ? binaryFile(await r.arrayBuffer()) : await r.text();
+      total += sizeOf(files[rel]);
       onProgress?.(`${dirs.length > 1 ? `第 ${i + 1}/${dirs.length} 个技能：` : ''}正在下载 ${++done}/${wanted.length}`);
     }
     const sub = prefix.replace(/\/$/, '');
@@ -273,7 +296,7 @@ export function render(pack) {
   return [
     `# 技能：${pack.name}`,
     pack.body,
-    files.length ? `\n---\n附带文件（用 read_skill_file 读取；脚本可写入工作区后用 run_python / run_javascript 运行）：\n${files.map((f) => `- ${f}`).join('\n')}` : ''
+    files.length ? `\n---\n附带文件（文本用 read_skill_file 读取；模板等二进制文件用 copy_skill_file 复制到工作区，再用 run_python 处理，如 python-pptx 打开 .pptx 模板；脚本可写入工作区后用 run_python / run_javascript 运行）：\n${files.map((f) => `- ${f}${isBinaryFile(pack.files[f]) ? `（二进制，${Math.round(pack.files[f].size / 1024)} KB）` : ''}`).join('\n')}` : ''
   ].join('\n');
 }
 
