@@ -40,6 +40,7 @@ export function initVoicePanel({ panels, speaker, getGateway }) {
     } else if (!e.browser && !gateway) {
       notes.push(`${e.name} 不允许浏览器直接调用，需要用完整版（本机网关）。`);
     }
+    if (e.note) notes.push(e.note);
     $('#tts-note').hidden = !notes.length;
     $('#tts-note').textContent = notes.join(' ');
 
@@ -68,7 +69,7 @@ export function initVoicePanel({ panels, speaker, getGateway }) {
 
     // 密钥（与模型面板同一服务商共用）
     const keyRow = $('#row-tts-key');
-    keyRow.hidden = e.id === 'browser';
+    keyRow.hidden = e.id === 'browser' || Boolean(e.free);
     if (!keyRow.hidden) {
       $('#tts-key').value = cfg.keys[e.keyFrom] || '';
       $('#tts-key').placeholder = gateway?.keys?.includes(e.keyFrom) ? '已使用网关环境变量里的密钥' : e.custom ? '自建服务可留空' : '';

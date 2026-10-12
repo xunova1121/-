@@ -88,7 +88,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   // 故意返回 500 的假语音服务会产生一条资源加载错误，不计入
-  page.on('console', (m) => { if (m.type() === 'error' && !/fonts\.(googleapis|gstatic)/.test(m.text()) && !(/status of 500/.test(m.text()) && /audio\/speech/.test(m.location().url))) errors.push(m.text()); });
+  page.on('console', (m) => { if (m.type() === 'error' && !/fonts\.(googleapis|gstatic)/.test(m.text()) && !(/status of 500/.test(m.text()) && /audio\/speech/.test(m.location().url)) && !(/status of 502/.test(m.text()) && /\/api\/tts\/edge/.test(m.location().url))) errors.push(m.text()); });
   await page.goto(BASE);
   await page.waitForFunction(() => window.__jarvis?.stage?.stats.frames > 10, null, { timeout: 30000 });
   const stats = await page.evaluate(() => { const s = window.__jarvis.stage.stats; return { form: s.form, particles: s.particles, calls: s.drawCalls, bloom: s.bloom, gl2: s.isWebGL2 }; });
@@ -350,6 +350,8 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.click('#btn-llm-save');
 
   // —— 科幻声线：云端语音（假服务）→ 效果链 → 真实音量驱动光核
+  check('有本机网关、没有付费语音密钥时，自动选免费的 Edge 朗读', /当前使用：Edge 朗读/.test(await page.textContent('#tts-note')) && (await page.locator('#tts-voice option').count()) >= 8, await page.textContent('#tts-note'));
+  await page.selectOption('#tts-engine', 'browser');
   check('默认声线：贾维斯；浏览器声音时效果不可用', await page.evaluate(() => {
     const on = document.querySelector('#tts-fx [aria-checked="true"]');
     return on?.value === 'jarvis' && on.disabled;

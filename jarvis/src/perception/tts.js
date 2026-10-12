@@ -4,11 +4,13 @@
  *   openai       OpenAI gpt-4o-mini-tts：可以用文字“导演”语气，避免播报腔
  *   elevenlabs   ElevenLabs：目前最接近真人的配音
  *   siliconflow  硅基流动 CosyVoice2：中文自然度高
+ *   edge         Edge 在线朗读：免费、免密钥，和 Edge 浏览器“大声朗读”同一套神经网络声音（经本机网关，桌面版 / 完整版）
  *   custom       任意 OpenAI 兼容的 /audio/speech 接口（如自建 CosyVoice / GPT-SoVITS 服务）
  * 云端引擎返回音频，经 voiceFx 效果链后播放。
  */
 
 import { customViaGateway } from '../../shared/providers.js';
+import { EDGE_VOICES } from '../../shared/edgeVoices.js';
 
 /** 给 gpt-4o-mini-tts 的“表演指导”：要像电影里的 AI 管家，而不是导航播报 */
 export const DIRECTION = [
@@ -19,6 +21,10 @@ export const DIRECTION = [
 
 export const TTS_ENGINES = [
   { id: 'browser', name: '浏览器自带（免费）', fx: false },
+  {
+    id: 'edge', name: 'Edge 朗读（免费 · 免密钥）', free: true, browser: false, voices: EDGE_VOICES,
+    note: '和 Edge 浏览器“大声朗读”同一套声音，不用注册。这不是微软正式开放的接口，万一失效会自动改用系统声音'
+  },
   {
     id: 'openai', name: 'OpenAI 语音（可导演语气）', keyFrom: 'openai', model: 'gpt-4o-mini-tts', browser: true, keyUrl: 'https://platform.openai.com/api-keys',
     voices: [['onyx', 'Onyx · 低沉男声'], ['ash', 'Ash · 沉稳男声'], ['echo', 'Echo · 清朗男声'], ['fable', 'Fable · 英式男声'], ['verse', 'Verse · 磁性男声'], ['sage', 'Sage · 知性女声'], ['nova', 'Nova · 明亮女声']]
@@ -67,6 +73,19 @@ export async function synthesize(vc, keys, text, { gateway = null, signal, fetch
   const e = ttsEngineById(vc.engine);
   if (!e || e.id === 'browser') throw new Error('不是云端语音引擎');
   const voice = vc.voices?.[e.id] || e.voices[0]?.[0] || '';
+  if (e.id === 'edge') {
+    if (!gateway) throw new Error('Edge 朗读需要桌面版或完整版（本机网关）');
+    const res = await fetchImpl(`${gateway.origin}/api/tts/edge`, {
+      method: 'POST', signal,
+      headers: { 'content-type': 'application/json', 'x-jarvis-client': '1' },
+      body: JSON.stringify({ text, voice, rate: vc.edgeRate ?? -4, pitch: vc.edgePitch ?? 0 })
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(`语音合成失败：${j.error || res.status}`);
+    }
+    return res.arrayBuffer();
+  }
   const key = keys?.[e.keyFrom] || '';
   const viaGateway = e.custom ? customViaGateway(gateway, vc.customURL) : Boolean(gateway);
   if (!key && !e.custom && !(viaGateway && gateway.keys?.includes(e.keyFrom))) throw new Error(`请先填写 ${e.name} 的 API Key`);

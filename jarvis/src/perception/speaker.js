@@ -163,8 +163,14 @@ export class Speaker {
     for (const item of this.queue.slice(0, PREFETCH)) {
       if (item.p) continue;
       const ctx = this.unlock();
+      // 这个引擎刚失败过：5 分钟内直接用浏览器声音，不再每句都先等它失败
+      if ((this.down?.[vc.engine] ?? 0) > Date.now()) { item.p = Promise.reject(Object.assign(new Error('skip'), { name: 'SkipError' })); item.p.catch(() => {}); continue; }
       item.p = synthesize(vc, this.getKeys(), item.text, { gateway: this.getGateway(), signal: this.ctrl.signal })
-        .then((ab) => ctx.decodeAudioData(ab));
+        .then((ab) => ctx.decodeAudioData(ab))
+        .catch((e) => {
+          if (e?.name !== 'AbortError') (this.down ??= {})[vc.engine] = Date.now() + 5 * 60_000;
+          throw e;
+        });
       item.p.catch(() => {}); // 错误在播放时处理
     }
   }
@@ -180,7 +186,7 @@ export class Speaker {
         buffer = await item.p;
       } catch (e) {
         if (gen !== this.gen) return;
-        if (e?.name !== 'AbortError' && e.message !== this.lastError) {
+        if (e?.name !== 'AbortError' && e?.name !== 'SkipError' && e.message !== this.lastError) {
           this.lastError = e.message;
           this.onError?.(e);
         }

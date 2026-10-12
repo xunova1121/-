@@ -372,7 +372,7 @@ const speaker = new Speaker({
     if (active?.streamDone) finishTurn();
   },
   onBoundary: () => { live.boundaryAt = now(); },
-  onError: (e) => toast(`${e.message}（这句先用浏览器声音朗读）`),
+  onError: (e) => toast(`${e.message}（先用系统自带声音朗读，5 分钟后再试）`),
   getVoiceConfig: () => resolveVoice(llmConfig, gateway),
   getKeys: () => llmConfig.keys,
   getGateway: () => gateway

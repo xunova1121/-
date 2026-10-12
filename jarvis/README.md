@@ -37,8 +37,8 @@ ANTHROPIC_API_KEY=... OPENAI_API_KEY=... DEEPSEEK_API_KEY=... DASHSCOPE_API_KEY=
 
 | 命令 | 作用 |
 |---|---|
-| `npm test` | 单元 + 集成测试（Vitest，255 项） |
-| `npm run e2e` | 完整版浏览器测试（Playwright，115 项；需先 build 并启动 server；本机模型下载那几项要用 `OLLAMA_HOST=127.0.0.1:11999` 启动 server、先运行 `node e2e/fixtures/fake-ollama.mjs`，并设 `JARVIS_FAKE_OLLAMA=1`） |
+| `npm test` | 单元 + 集成测试（Vitest，261 项） |
+| `npm run e2e` | 完整版浏览器测试（Playwright，116 项；需先 build 并启动 server；本机模型下载那几项要用 `OLLAMA_HOST=127.0.0.1:11999` 启动 server、先运行 `node e2e/fixtures/fake-ollama.mjs`，并设 `JARVIS_FAKE_OLLAMA=1`） |
 | `npm run e2e:standalone` | 单文件版测试（file:// 直接打开，含“单文件版 + 本机网关”场景，14 项） |
 | `xvfb-run -a node e2e/desktop.mjs` | 桌面版测试（启动真正的 Electron 应用，33 项；鼠标键盘控制需要 `xdotool`） |
 | `npm run build:standalone` | 生成单文件版 `../jarvis-standalone.html` |
@@ -58,6 +58,10 @@ ANTHROPIC_API_KEY=... OPENAI_API_KEY=... DEEPSEEK_API_KEY=... DASHSCOPE_API_KEY=
 
 - 日常对话给推理模型带 `reasoning_effort: low`（少想一点，首字快很多）；模型不认这个参数时自动去掉重试，并记住。可在模型分工里关掉。
 - 检索用的句子向量：同一句话 5 分钟内复用（以前记忆、知识库各算一次）；向量服务 2.5 秒没回就先不等，这一轮只用关键词检索。
+
+### 免费语音：Edge 在线朗读
+
+“模型 → 声音”里新增 **Edge 朗读（免费 · 免密钥）**：和 Edge 浏览器“大声朗读”同一套神经网络声音（云扬、云希、云健、晓晓……还有英式男声 Ryan），经本机网关合成，能叠加“贾维斯”声线效果。桌面版 / 完整版在没有付费语音密钥时默认使用它。这不是微软正式开放的接口（开源项目 edge-tts 用的同一方式），失效时自动改用系统自带声音，5 分钟后再试。
 
 ### 白天 / 夜间界面
 

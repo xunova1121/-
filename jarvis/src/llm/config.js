@@ -83,7 +83,8 @@ export function resolveVoice(cfg, gateway = null) {
   const v = cfg.voice || DEFAULT_VOICE;
   if (v.engine !== 'auto') return v;
   const has = (id) => Boolean(cfg.keys?.[id]) || Boolean(gateway?.keys?.includes(id));
-  const engine = has('elevenlabs') ? 'elevenlabs' : has('openai') ? 'openai' : gateway && has('siliconflow') ? 'siliconflow' : 'browser';
+  // 有付费语音的密钥就用它；没有时有本机网关就用免费的 Edge 朗读；都没有用浏览器自带
+  const engine = has('elevenlabs') ? 'elevenlabs' : has('openai') ? 'openai' : gateway && has('siliconflow') ? 'siliconflow' : gateway ? 'edge' : 'browser';
   return { ...v, engine };
 }
 

@@ -30,8 +30,9 @@ import { EMOTIONS } from '../shared/emotionTag.js';
 import { upstreamFor, providerById, ENV_KEYS, isPrivateHost } from '../shared/providers.js';
 import { createMcpManager } from './mcp.mjs';
 import { createOllama } from './ollama.mjs';
+import { edgeSpeak } from './edgeTts.mjs';
 
-const CORS_PATHS = /^\/api\/(health|local\/metrics|llm\/.+)$/;
+const CORS_PATHS = /^\/api\/(health|local\/metrics|llm\/.+|tts\/edge)$/;
 export const EXTRA_UPSTREAMS = { tavily: 'https://api.tavily.com', elevenlabs: 'https://api.elevenlabs.io' };
 // 读取网页时用常见浏览器的请求头：不少网站（包括搜索引擎）会拒绝或降级陌生的客户端
 const FETCH_HEADERS = {
@@ -51,7 +52,8 @@ export function createServer({
   internalToken = process.env.JARVIS_INTERNAL_TOKEN || '',
   staticDir = DIST,
   mcp = null, // createMcpManager() 的结果；为 null 时不提供 MCP 接口
-  ollama = createOllama()
+  ollama = createOllama(),
+  edgeTts = edgeSpeak // Edge 在线朗读（测试可替换）
 } = {}) {
   const subscribers = new Set();
   let activeChats = 0;
@@ -116,6 +118,19 @@ export function createServer({
     const m = pathname.match(/^\/api\/ollama\/models\/(.+)$/);
     if (m && req.method === 'DELETE') return json(res, 200, await ollama.remove(decodeURIComponent(m[1])));
     return json(res, 404, { error: 'not found' });
+  }
+
+  /** Edge 在线朗读：POST { text, voice, rate, pitch } → mp3。需要本机贾维斯页面的请求头 */
+  async function handleEdgeTts(req, res, cross) {
+    if (req.headers['x-jarvis-client'] !== '1' || (!cross && !sameOriginOnly(req))) return json(res, 403, { error: '只允许本机贾维斯页面调用' });
+    const { text, voice, rate, pitch } = await readJson(req, 64 * 1024);
+    try {
+      const audio = await edgeTts(String(text || ''), { voice: voice || undefined, rate: Number(rate) || 0, pitch: Number(pitch) || 0 });
+      res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store' });
+      res.end(audio);
+    } catch (e) {
+      json(res, 502, { error: e.message });
+    }
   }
 
   async function readJson(req, limit = 256 * 1024) {
@@ -298,6 +313,7 @@ export function createServer({
       const llm = pathname.match(/^\/api\/llm\/([a-z0-9-]+)\/(.*)$/);
       if (llm) return await handleLlmProxy(req, res, llm[1], llm[2], new URL(req.url, 'http://x').search, cross);
       if (pathname === '/api/mcp' || pathname.startsWith('/api/mcp/')) return await handleMcp(req, res, pathname);
+      if (pathname === '/api/tts/edge' && req.method === 'POST') return await handleEdgeTts(req, res, cross);
       if (pathname.startsWith('/api/ollama/')) return await handleOllama(req, res, pathname);
       if (pathname === '/api/fetch' && req.method === 'GET') return await handleFetch(req, res, new URL(req.url, 'http://x').searchParams.get('url'));
       if (pathname.startsWith('/api/')) return json(res, 404, { error: 'not found' });
