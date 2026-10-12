@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App 背景（淡紫，和网页里的白天配色一致） -->
+    <color name="jarvis_bg">#DDE1FB</color>
+</resources>

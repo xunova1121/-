@@ -32,5 +32,12 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
       App.minimizeApp();
     });
   } catch { /* 没有 App 插件 */ }
+  // 状态栏 / 手势条的图标颜色跟随明暗：浅色界面用深色图标，深色界面用浅色图标
+  try {
+    const { SystemBars } = await import('@capacitor/core');
+    const apply = () => SystemBars?.setStyle?.({ style: document.documentElement.dataset.theme === 'dark' ? 'DARK' : 'LIGHT' }).catch(() => {});
+    apply();
+    new MutationObserver(apply).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  } catch { /* 旧版 Capacitor 没有 SystemBars */ }
   document.documentElement.classList.add('mobile-app');
 }

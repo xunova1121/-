@@ -29,7 +29,9 @@ describe('连接诊断', () => {
   it('超时', async () => {
     const hang = (url, { signal }) => new Promise((_, rej) => signal.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
     const r = await probeEndpoint({ baseURL: 'https://x/v1', fetchImpl: hang, timeoutMs: 20 });
-    expect(r.message).toMatch('没有响应');
+    expect(r.message).toMatch('x 0.02 秒没有响应');
+    const onPhone = await probeEndpoint({ baseURL: 'https://teamorouter.com/v1', fetchImpl: hang, timeoutMs: 20, phone: true });
+    expect(onPhone.message).toMatch('用手机浏览器打开 https://teamorouter.com');
   });
   it('相近型号', () => {
     expect(similarModels(['gpt-6.1-sol', 'gpt-6.1-mini', 'claude-opus'], 'gpt6.1')).toEqual(['gpt-6.1-sol', 'gpt-6.1-mini']);

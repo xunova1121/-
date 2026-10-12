@@ -15,7 +15,7 @@ export function similarModels(ids, model, k = 5) {
  * @param {{ baseURL: string, apiKey?: string, model?: string, headers?: object, fetchImpl?: typeof fetch, timeoutMs?: number }} o
  * @returns {Promise<{ ok: boolean, step: 'network'|'url'|'key'|'model'|'http'|'done', status?: number, message: string, ms: number, models?: string[] }>}
  */
-export async function probeEndpoint({ baseURL, apiKey = '', model = '', headers = {}, fetchImpl = globalThis.fetch, timeoutMs = 15000, now = () => Date.now() }) {
+export async function probeEndpoint({ baseURL, apiKey = '', model = '', headers = {}, fetchImpl = globalThis.fetch, timeoutMs = 25000, now = () => Date.now(), phone = false }) {
   const t0 = now();
   const base = String(baseURL || '').trim().replace(/\/+$/, '');
   const done = (r) => ({ ...r, ms: now() - t0 });
@@ -27,7 +27,10 @@ export async function probeEndpoint({ baseURL, apiKey = '', model = '', headers 
     res = await fetchImpl(`${base}/models`, { headers: { ...headers, ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) }, signal: ctrl.signal });
   } catch (e) {
     const timeout = e?.name === 'AbortError';
-    return done({ ok: false, step: 'network', message: timeout ? `连接接口地址 ${timeoutMs / 1000} 秒没有响应（网络不通，或服务商暂时不可用）` : `连不上接口地址（网络不通或地址写错）：${e?.message || e}` });
+    let host = base;
+    try { host = new URL(base).host; } catch { /* 上面已检查过格式 */ }
+    const hint = phone ? `。请用手机浏览器打开 https://${host} 试试：也打不开，说明手机所在的网络到不了它（电脑能用的话，多半是电脑开了代理 / VPN），需要手机也开同样的代理，或换一个国内能直接访问的服务商` : '';
+    return done({ ok: false, step: 'network', message: `${timeout ? `连接 ${host} ${timeoutMs / 1000} 秒没有响应` : `连不上 ${host}（${e?.message || e}）`}${hint || '（网络不通，或服务商暂时不可用）'}` });
   } finally { clearTimeout(timer); }
   const text = await res.text().catch(() => '');
   if (res.status === 401 || res.status === 403) return done({ ok: false, step: 'key', status: res.status, message: `API Key 不对或没有权限（HTTP ${res.status}）${brief(text)}` });

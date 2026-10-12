@@ -416,7 +416,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     const direct = p.kind === 'openai' && !getGateway();
     if (direct && (p.custom ? c.baseURLs.custom : p.baseURL)) {
       status.textContent = '第 1 步：检查接口地址和密钥…';
-      const r = await probeEndpoint({ baseURL: p.custom ? c.baseURLs.custom : p.baseURL, apiKey: c.keys[p.id] || '', model });
+      const r = await probeEndpoint({ baseURL: p.custom ? c.baseURLs.custom : p.baseURL, apiKey: c.keys[p.id] || '', model, phone: MOBILE });
       if (!r.ok && r.step !== 'model') { status.textContent = `连接失败：${r.message}${via()}`; return; }
       status.textContent = `${r.message}${via()}。第 2 步：让模型回一句话…`;
       if (r.step === 'model') status.textContent = `注意：${r.message}。仍然试一下对话…`;

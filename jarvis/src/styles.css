@@ -780,7 +780,12 @@ body.wallpaper .thought-log { right: 6vw; bottom: calc(10vh + 70px); width: 320p
 .sync-code textarea { width: 100%; font: 12px/1.4 ui-monospace, Consolas, monospace; color: var(--text); background: var(--panel-2, rgba(127, 127, 127, .08)); border: 1px solid var(--line); border-radius: 8px; padding: 8px; resize: vertical; word-break: break-all; }
 
 /* 安卓 App：避开状态栏 / 手势条 */
-.mobile-app body { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+/* Capacitor 8 铺满全屏（状态栏、手势条下面也是 App），并把它们的高度注入成 --safe-area-inset-*（有的 WebView 的 env() 是 0） */
+.mobile-app body { padding-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px)); padding-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)); }
+html.mobile-app { background: #dde1fb; }
+html.mobile-app[data-theme="dark"] { background: #232839; }
+.mobile-app .drawer { padding-top: calc(14px + var(--safe-area-inset-top, env(safe-area-inset-top, 0px))); padding-bottom: calc(14px + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))); }
+.mobile-app .mp-sheet { padding-bottom: calc(14px + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))); }
 
 /* ================================================================
  * 正式排版（覆盖上面的同名规则）

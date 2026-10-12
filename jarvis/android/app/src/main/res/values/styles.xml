@@ -13,6 +13,8 @@
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:background">@null</item>
+        <!-- 状态栏、手势条下面露出的底色：和 App 的淡紫背景一致，不再是白色 -->
+        <item name="android:windowBackground">@color/jarvis_bg</item>
     </style>
 
 
