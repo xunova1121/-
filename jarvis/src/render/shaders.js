@@ -387,3 +387,77 @@ void main() {
   gl_FragColor = vec4(col, 1.0);
 }
 `;
+
+/**
+ * 粒子体：上万个粒子在两种造型（a_from → a_to）之间变形。
+ * 每个粒子有自己的延迟，变形中途向外散开再聚拢；造型带脸时朝向用户（偏航 / 俯仰），否则缓慢自转。
+ * a_rand = (延迟种子, 大小 / 亮度, 相位, 是否眼睛粒子)
+ */
+export const swarmVertex = /* glsl */ `
+uniform float u_time;
+uniform float u_motion;
+uniform float u_mix;
+uniform float u_spin;
+uniform float u_spinAmt;
+uniform float u_yaw;
+uniform float u_pitch;
+uniform float u_breath;
+uniform float u_speak;
+uniform float u_energy;
+uniform float u_audio;
+uniform float u_blink;
+uniform float u_eyeAmt;
+uniform float u_size;
+uniform float u_perspectiveScale;
+attribute vec3 a_from;
+attribute vec3 a_to;
+attribute vec4 a_rand;
+varying float v_bright;
+varying float v_hueShift;
+${common}
+void main() {
+  // 每个粒子错开出发（0.35 的随机延迟），三次缓动
+  float m = clamp((u_mix * 1.35 - a_rand.x * 0.35), 0.0, 1.0);
+  m = m * m * (3.0 - 2.0 * m);
+  vec3 p = mix(a_from, a_to, m);
+  float t = u_time * u_motion;
+  // 变形中途散开，像被重新“打印”出来
+  float mid = sin(3.14159 * m);
+  vec3 n3 = vec3(vnoise(p * 0.08 + t * 0.3), vnoise(p * 0.08 + 17.0 + t * 0.3), vnoise(p * 0.08 + 31.0 + t * 0.3)) - 0.5;
+  p += n3 * (mid * 26.0 + u_energy * 4.0 + 1.2);
+  // 眼睛：眨眼时纵向压扁（只在带脸的造型里）
+  if (a_rand.w > 0.5) {
+    float ey = 2.7;
+    p.y = mix(p.y, ey + (p.y - ey) * u_blink, u_eyeAmt);
+  }
+  // 呼吸、说话时径向脉动、聆听时随麦克风起伏、思考时高频颤动
+  float r = length(p) + 0.0001;
+  float pulse = u_speak * (1.6 + 2.2 * sin(t * 13.0 + a_rand.z * 6.28)) + u_audio * 3.0 * sin(t * 9.0 + r * 0.4);
+  p += (p / r) * (pulse * (1.0 - a_rand.w * u_eyeAmt) + u_breath * 0.5);
+  p += (vec3(hash1(a_rand.z * 91.0 + floor(t * 20.0)), hash1(a_rand.z * 37.0 + floor(t * 20.0)), hash1(a_rand.z * 53.0 + floor(t * 20.0))) - 0.5) * u_energy * 0.8;
+  // 朝向：带脸的造型看向用户，其他造型自转
+  p = rotX(u_pitch) * rotY(u_yaw + u_spin * u_spinAmt) * p;
+  vec4 mv = modelViewMatrix * vec4(p, 1.0);
+  gl_Position = projectionMatrix * mv;
+  float eye = a_rand.w * u_eyeAmt;
+  gl_PointSize = clamp(u_size * (0.5 + a_rand.y * 0.8 + eye * 0.9) * u_perspectiveScale / -mv.z, 1.0, 9.0);
+  v_bright = 0.35 + a_rand.y * 0.5 + eye * 2.6 + u_speak * 0.25 + mid * 0.3;
+  v_hueShift = (a_rand.y - 0.5) * 26.0 + mid * 30.0;
+}
+`;
+
+export const swarmFragment = /* glsl */ `
+uniform float u_hue;
+uniform float u_glow;
+varying float v_bright;
+varying float v_hueShift;
+${common}
+void main() {
+  float r = length(gl_PointCoord - 0.5);
+  if (r > 0.5) discard;
+  float a = pow(smoothstep(0.5, 0.0, r), 1.6);
+  vec3 c = mix(hsl2rgb(u_hue + v_hueShift, 0.85, 0.58), vec3(0.92, 0.97, 1.0), clamp(v_bright - 1.0, 0.0, 1.0) * 0.7);
+  float k = a * v_bright * (0.32 + 0.38 * u_glow);
+  gl_FragColor = vec4(c * k, k);
+}
+`;

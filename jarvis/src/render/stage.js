@@ -1,41 +1,34 @@
 /**
- * Three.js 主视觉：全息胸像。只负责“画”：每帧从调用方给的 frame(state) 回调取参数，写进 uniform。
- * 所有状态推断（情绪、人脸角度、语音包络）都在外面的控制器里完成。
+ * Three.js 主视觉：粒子体。只负责“画”：每帧从调用方给的 frame(state) 回调取参数，写进 uniform。
+ * 所有状态推断（情绪、人脸角度、语音包络、该变成什么造型）都在外面的控制器里完成。
  *
- * 场景：主体（光核 / 全息胸像 / 线框胸像 三选一）· 投影光柱 · 光环与底座线框 · 底座光盘 · 星尘；
- *       胸像样式另有电路线与双眼光点（光核的眼睛画在自己的着色器里）。
- * Draw calls：光核 5、胸像 7；开启泛光再加 4 个全屏 pass，最多 11（预算 ≤ 12）。
+ * 场景：粒子体（上万个粒子，在光核 / 地球 / 星系 / 晶格……之间变形，见 formations.js）· 投影光柱 · 光环与底座线框 · 底座光盘 · 星尘。
+ * Draw calls：5；开启泛光再加 4 个全屏 pass。
  */
 import {
   WebGLRenderer, Scene, PerspectiveCamera, BufferGeometry, BufferAttribute, Points, Mesh, LineSegments,
-  ShaderMaterial, AdditiveBlending, PlaneGeometry, CylinderGeometry, WireframeGeometry, IcosahedronGeometry,
-  Vector2, Vector3, DoubleSide, FrontSide
+  ShaderMaterial, AdditiveBlending, PlaneGeometry, CylinderGeometry, Vector2, Vector3, DoubleSide
 } from 'three';
 import { createBloom } from './bloom.js';
 import {
-  holoVertex, holoFragment, lineVertex, lineFragment, eyeVertex, eyeFragment, coneVertex, coneFragment,
-  orbVertex, orbFragment,
+  coneVertex, coneFragment, swarmVertex, swarmFragment,
   rigVertex, rigFragment, padVertex, padFragment, starVertex, starFragment
 } from './shaders.js';
+import { buildForm, FORMS, EYE_FRACTION } from './formations.js';
 
 const FOV = 38;
 const ORB_RADIUS = 27;
-
-/** 解析 scripts/build-hologram.mjs 输出的网格二进制 */
-export function parseMesh(buffer) {
-  const [V, I] = new Uint32Array(buffer, 0, 2);
-  let off = 8;
-  const positions = new Float32Array(buffer, off, V * 3); off += V * 12;
-  const normals = new Float32Array(buffer, off, V * 3); off += V * 12;
-  const indices = new Uint16Array(buffer, off, I);
-  return { positions, normals, indices };
-}
+const MORPH_MS = 1700;
+const TAU = Math.PI * 2;
+/** 场景布局（原胸像模型的尺寸，光环、底座都按它摆放） */
+export const META = { pedestalY: -66, haloY: 8, haloRadius: 42, cameraY: -8 };
 
 /**
- * @param {{ mesh: ArrayBuffer, meta: object }} figure
+ * @param {HTMLCanvasElement} canvas
+ * @param {{ lowEnd?: boolean, onContextChange?: Function }} [o]
  */
-export function createStage(canvas, { figure, lowEnd = false, onContextChange } = {}) {
-  const meta = figure.meta;
+export function createStage(canvas, { lowEnd = false, onContextChange } = {}) {
+  const meta = META;
   const renderer = new WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setClearColor(0x02060b, 1);
@@ -54,113 +47,74 @@ export function createStage(canvas, { figure, lowEnd = false, onContextChange } 
   const U = {
     u_time: { value: 0 },
     u_motion: { value: 1 },
-    u_yaw: { value: 0 },
-    u_pitch: { value: 0 },
-    u_neckY: { value: meta.neckY ?? -8 },
-    u_breath: { value: 0 },
-    u_glitch: { value: 0 },
     u_hue: { value: 200 },
     u_glow: { value: 0.6 },
-    u_speak: { value: 0 },
-    u_scanSpeed: { value: 0.1 },
-    u_bottom: { value: meta.bottom ?? -62 },
-    u_scanBase: { value: meta.pedestalY },
     u_perspectiveScale: { value: 500 },
     u_rigTime: { value: 0 }
   };
 
-  // —— 胸像几何
-  const { positions, normals, indices } = parseMesh(figure.mesh);
-  const geo = new BufferGeometry();
-  geo.setAttribute('position', new BufferAttribute(positions, 3));
-  geo.setAttribute('normal', new BufferAttribute(normals, 3));
-  geo.setIndex(new BufferAttribute(indices, 1));
-
-  const body = {
-    holo: new Mesh(geo, new ShaderMaterial({ uniforms: U, vertexShader: holoVertex, fragmentShader: holoFragment, side: FrontSide, ...additive })),
-    wire: (() => {
-      // 线框：完整三角网，亮度压低，靠扫描光带与泛光提亮
-      const edges = new WireframeGeometry(geo);
-      edges.setAttribute('a_t', new BufferAttribute(new Float32Array(edges.attributes.position.count), 1));
-      return new LineSegments(edges, new ShaderMaterial({
-        uniforms: { ...U, u_intensity: { value: 0.14 }, u_pulse: { value: 0 } },
-        vertexShader: lineVertex, fragmentShader: lineFragment, ...additive
-      }));
-    })()
+  // —— 粒子体
+  const N = lowEnd ? 6000 : 14000;
+  const formCache = new Map();
+  const form = (name) => {
+    if (!formCache.has(name)) formCache.set(name, buildForm(name, N));
+    return formCache.get(name);
   };
-  for (const o of Object.values(body)) {
-    o.frustumCulled = false;
-    o.visible = false;
-    scene.add(o);
-  }
-
-  // —— 光核：发光能量球 + 着色器里画的眼睛
-  const orbUniforms = {
-    u_time: U.u_time, u_motion: U.u_motion, u_breath: U.u_breath, u_speak: U.u_speak, u_hue: U.u_hue, u_glow: U.u_glow,
-    u_yaw: U.u_yaw, u_pitch: U.u_pitch, u_glitch: U.u_glitch,
-    u_eyeW: { value: 0.12 }, u_eyeH: { value: 0.17 }, u_eyeY: { value: 0.08 },
-    u_happy: { value: 0 }, u_calm: { value: 0 }, u_blink: { value: 1 }
+  const swarmU = {
+    u_time: U.u_time, u_motion: U.u_motion, u_hue: U.u_hue, u_glow: U.u_glow, u_perspectiveScale: U.u_perspectiveScale,
+    u_mix: { value: 1 }, u_spin: { value: 0 }, u_spinAmt: { value: 1 }, u_yaw: { value: 0 }, u_pitch: { value: 0 },
+    u_breath: { value: 0 }, u_speak: { value: 0 }, u_energy: { value: 0 }, u_audio: { value: 0 },
+    u_blink: { value: 1 }, u_eyeAmt: { value: 1 }, u_size: { value: lowEnd ? 2.6 : 2.0 }
   };
-  const orb = new Mesh(new IcosahedronGeometry(ORB_RADIUS, 6), new ShaderMaterial({
-    uniforms: orbUniforms, vertexShader: orbVertex, fragmentShader: orbFragment, side: FrontSide, ...additive
-  }));
-  orb.position.y = meta.haloY;
-  orb.frustumCulled = false;
-  scene.add(orb);
-
-  let style = 'orb';
-
-  // —— 电路线：沿线弧长参数 a_t 驱动“数据流”脉冲
-  const circuit = (() => {
-    const pos = [], tt = [];
-    meta.lines.forEach((line, li) => {
-      let len = 0;
-      const acc = [0];
-      for (let i = 1; i < line.length; i++) acc.push((len += Math.hypot(line[i][0] - line[i - 1][0], line[i][1] - line[i - 1][1], line[i][2] - line[i - 1][2])));
-      for (let i = 0; i < line.length - 1; i++) {
-        pos.push(...line[i], ...line[i + 1]);
-        // 各条线错开相位，脉冲不同时出现
-        tt.push(acc[i] / 60 + li * 0.37, acc[i + 1] / 60 + li * 0.37);
-      }
-    });
+  const swarm = (() => {
     const g = new BufferGeometry();
-    g.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
-    g.setAttribute('a_t', new BufferAttribute(new Float32Array(tt), 1));
-    const l = new LineSegments(g, new ShaderMaterial({
-      uniforms: { ...U, u_intensity: { value: 0.9 }, u_pulse: { value: 1 } },
-      vertexShader: lineVertex, fragmentShader: lineFragment, ...additive
-    }));
-    l.frustumCulled = false;
-    return l;
-  })();
-  scene.add(circuit);
-
-  // —— 双眼
-  const eyeUniforms = { ...U, u_size: { value: 2500 }, u_intensity: { value: 1 }, u_blink: { value: 1 } };
-  const eyes = (() => {
-    const g = new BufferGeometry();
-    g.setAttribute('position', new BufferAttribute(new Float32Array(meta.eyes.flat()), 3));
-    const p = new Points(g, new ShaderMaterial({ uniforms: eyeUniforms, vertexShader: eyeVertex, fragmentShader: eyeFragment, ...additive }));
+    const core = form('core');
+    const from = new Float32Array(core);
+    const to = new Float32Array(core);
+    const rand = new Float32Array(N * 4);
+    let sd = 99;
+    const rnd = () => ((sd = (sd * 1664525 + 1013904223) >>> 0) / 4294967296);
+    const eyeN = Math.floor(N * EYE_FRACTION);
+    for (let i = 0; i < N; i++) rand.set([rnd(), rnd(), rnd(), i < eyeN ? 1 : 0], i * 4);
+    g.setAttribute('position', new BufferAttribute(new Float32Array(core), 3));
+    g.setAttribute('a_from', new BufferAttribute(from, 3));
+    g.setAttribute('a_to', new BufferAttribute(to, 3));
+    g.setAttribute('a_rand', new BufferAttribute(rand, 4));
+    const p = new Points(g, new ShaderMaterial({ uniforms: swarmU, vertexShader: swarmVertex, fragmentShader: swarmFragment, ...additive }));
     p.frustumCulled = false;
+    p.position.y = meta.haloY;
     return p;
   })();
-  scene.add(eyes);
+  scene.add(swarm);
+  const morph = { target: 'core', mix: 1, rot: 0, eyeAmt: 1 };
+  /** 变到另一个造型：从“此刻的样子”出发，不会跳 */
+  function setForm(name) {
+    if (!FORMS[name] || name === morph.target) return false;
+    const g = swarm.geometry;
+    const from = g.attributes.a_from.array, to = g.attributes.a_to.array, rand = g.attributes.a_rand.array;
+    for (let i = 0; i < N; i++) {
+      let m = Math.min(1, Math.max(0, morph.mix * 1.35 - rand[i * 4] * 0.35));
+      m = m * m * (3 - 2 * m);
+      for (let k = 0; k < 3; k++) from[i * 3 + k] += (to[i * 3 + k] - from[i * 3 + k]) * m;
+    }
+    to.set(form(name));
+    g.attributes.a_from.needsUpdate = true;
+    g.attributes.a_to.needsUpdate = true;
+    morph.target = name;
+    morph.mix = 0;
+    stats.form = name;
+    return true;
+  }
 
   // —— 投影光柱：底座 → 胸像底部
   const coneUniforms = { u_time: U.u_time, u_hue: U.u_hue, u_intensity: { value: 1 } };
-  const coneH = (meta.bottom + 8) - meta.pedestalY;
+  const coneH = (meta.haloY - ORB_RADIUS + 6) - meta.pedestalY;
   const cone = new Mesh(new CylinderGeometry(46, 21, coneH, 64, 1, true), new ShaderMaterial({
     uniforms: coneUniforms, vertexShader: coneVertex, fragmentShader: coneFragment, side: DoubleSide, ...additive
   }));
   cone.frustumCulled = false;
   scene.add(cone);
-  /** 光柱顶端对齐当前主体的底部：胸像底部 / 光核下缘 */
-  function fitCone() {
-    const top = style === 'orb' ? meta.haloY - ORB_RADIUS + 6 : meta.bottom + 8;
-    const h = top - meta.pedestalY;
-    cone.scale.y = h / coneH;
-    cone.position.y = meta.pedestalY + h / 2;
-  }
+  cone.position.y = meta.pedestalY + coneH / 2;
 
   // —— 光环与底座线框（一个 LineSegments）
   const rigUniforms = { u_rigTime: U.u_rigTime, u_hue: U.u_hue, u_opacity: { value: 1 } };
@@ -254,7 +208,6 @@ export function createStage(canvas, { figure, lowEnd = false, onContextChange } 
     camera.updateProjectionMatrix();
     const scale = renderer.getDrawingBufferSize(tmpSize).y / (2 * Math.tan((FOV * Math.PI) / 360));
     U.u_perspectiveScale.value = scale;
-    eyeUniforms.u_size.value = scale * 3.6;
     bloom?.setSize();
   }
   const anchorV = new Vector3();
@@ -270,7 +223,7 @@ export function createStage(canvas, { figure, lowEnd = false, onContextChange } 
   let fpsCap = 60;
   let frameFn = null;
   const pausedBy = new Set();
-  const stats = { frames: 0, fps: 0, isWebGL2, vertices: positions.length / 3, drawCalls: 0, bloom: false, style, _acc: 0, _n: 0 };
+  const stats = { frames: 0, fps: 0, isWebGL2, particles: N, drawCalls: 0, bloom: false, form: 'core', _acc: 0, _n: 0 };
 
   function loop(now) {
     raf = requestAnimationFrame(loop);
@@ -301,32 +254,38 @@ export function createStage(canvas, { figure, lowEnd = false, onContextChange } 
   function apply(s, now, dt = 0) {
     U.u_time.value = now / 1000;
     U.u_motion.value = s.motion;
-    U.u_yaw.value = s.yaw;
-    U.u_pitch.value = s.pitch;
-    U.u_breath.value = s.breath;
-    U.u_glitch.value = s.glitch;
     U.u_hue.value = s.hue;
     U.u_glow.value = s.glow;
-    U.u_speak.value = s.speak;
-    U.u_scanSpeed.value = s.scanSpeed;
     // 光环与底座的转速随情绪的角速度变化（平静 0.15 rad/s 为基准）
     U.u_rigTime.value += (dt / 1000) * (s.spin / 0.15) * s.motion;
-    eyeUniforms.u_intensity.value = 0.55 + 0.3 * s.glow + 0.35 * s.speak;
-    eyeUniforms.u_blink.value = s.blink;
-    orbUniforms.u_blink.value = s.blink;
-    orbUniforms.u_eyeW.value = s.eyeW;
-    orbUniforms.u_eyeH.value = s.eyeH;
-    orbUniforms.u_eyeY.value = s.eyeY;
-    orbUniforms.u_happy.value = s.happy;
-    orbUniforms.u_calm.value = s.calm;
-    // 光核缓慢上下漂浮
-    orb.position.y = meta.haloY + Math.sin((now / 1000) * s.motion * 0.8) * 1.6;
+    // 变形进度
+    morph.mix = Math.min(1, morph.mix + dt / MORPH_MS);
+    swarmU.u_mix.value = morph.mix;
+    // 带脸的造型（光核、观察之眼）转回正面看着用户；其他造型缓慢自转，干活时转得快一些
+    const face = Boolean(FORMS[morph.target].eyes || FORMS[morph.target].face);
+    if (face) {
+      const home = Math.round(morph.rot / TAU) * TAU;
+      morph.rot += (home - morph.rot) * Math.min(1, dt / 500);
+    } else morph.rot += (dt / 1000) * (0.22 + activity.energy * 0.5) * s.motion;
+    swarmU.u_spin.value = morph.rot;
+    morph.eyeAmt += ((FORMS[morph.target].eyes ? 1 : 0) - morph.eyeAmt) * Math.min(1, dt / 400);
+    swarmU.u_eyeAmt.value = morph.eyeAmt;
+    swarmU.u_yaw.value = s.yaw * (face ? 1 : 0.35);
+    swarmU.u_pitch.value = s.pitch * (face ? 1 : 0.35);
+    swarmU.u_breath.value = s.breath;
+    swarmU.u_speak.value = s.speak;
+    swarmU.u_blink.value = s.blink;
+    swarmU.u_energy.value += (activity.energy - swarmU.u_energy.value) * Math.min(1, dt / 300);
+    swarmU.u_audio.value += (activity.audio - swarmU.u_audio.value) * Math.min(1, dt / 120);
+    // 缓慢上下漂浮
+    swarm.position.y = meta.haloY + Math.sin((now / 1000) * s.motion * 0.8) * 1.6;
     padUniforms.u_intensity.value = 0.6 + 0.4 * s.glow + s.speak * 0.4;
     coneUniforms.u_intensity.value = 0.7 + 0.5 * s.glow + s.speak * 0.5;
     rigUniforms.u_opacity.value = 0.7 + 0.3 * s.glow;
     if (bloom) bloom.strength = 0.6 + s.glow * 0.8 + s.speak * 0.5;
     stars.rotation.y = (now / 1000) * s.motion * 0.004;
   }
+  const activity = { energy: 0, audio: 0 };
 
   function sync() {
     const run = pausedBy.size === 0;
@@ -355,9 +314,6 @@ export function createStage(canvas, { figure, lowEnd = false, onContextChange } 
     onContextChange?.('restored', performance.now() - lostAt);
   });
 
-  circuit.visible = eyes.visible = false;
-  fitCone();
-
   return {
     renderer,
     stats,
@@ -376,20 +332,18 @@ export function createStage(canvas, { figure, lowEnd = false, onContextChange } 
     anchor() {
       const w = canvas.clientWidth || 1;
       const h = canvas.clientHeight || 1;
-      const y = style === 'orb' ? orb.position.y : meta.haloY;
+      const y = swarm.position.y;
       const c = anchorV.set(0, y, 0).project(camera);
-      const e = anchorE.set(ORB_RADIUS * (style === 'orb' ? 1 : 1.25), y, 0).project(camera);
+      const e = anchorE.set(ORB_RADIUS, y, 0).project(camera);
       return { x: (c.x + 1) / 2 * w, y: (1 - c.y) / 2 * h, r: Math.abs(e.x - c.x) / 2 * w };
     },
-    /** 显示样式：orb 光核 / holo 全息胸像 / wire 线框胸像 */
-    setStyle(next) {
-      if (next !== 'orb' && !body[next]) return;
-      style = next;
-      for (const [k, o] of Object.entries(body)) o.visible = k === next;
-      orb.visible = next === 'orb';
-      circuit.visible = eyes.visible = next !== 'orb';
-      stats.style = next;
-      fitCone();
+    /** 变形到某个造型（见 formations.js 的 FORMS）；返回是否真的开始变形 */
+    setForm,
+    get form() { return morph.target; },
+    /** 工作强度（0–1，思考 / 执行工具时粒子更活跃）与麦克风音量（0–1） */
+    setActivity({ energy, audio } = {}) {
+      if (energy !== undefined) activity.energy = Math.max(0, Math.min(1, energy));
+      if (audio !== undefined) activity.audio = Math.max(0, Math.min(1, audio));
     },
     /** 画质：bloom 泛光开关、星尘开关 */
     setQuality(q) {

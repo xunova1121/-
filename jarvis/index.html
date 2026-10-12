@@ -69,10 +69,8 @@
           <div class="hud-date" id="hud-date"></div>
         </div>
         <div class="hud hud-right">
-          <div class="form-chips" role="radiogroup" aria-label="形态">
-            <button type="button" class="chip" data-style="orb" role="radio" title="光核（Alt+O）">光核</button>
-            <button type="button" class="chip" data-style="holo" role="radio" title="全息胸像（Alt+H）">胸像</button>
-            <button type="button" class="chip" data-style="wire" role="radio" title="线框（Alt+W）">线框</button>
+          <div class="form-readout" title="粒子体会按工作状态和对话内容自己变形">
+            <span class="fr-lbl">FORM</span><b id="hud-form">光核</b>
           </div>
         </div>
       </section>
@@ -322,7 +320,7 @@
         <header class="pane-head"><h2>设置</h2></header>
         <div class="setting">
           <label><input type="checkbox" id="set-face" /> 人脸跟随</label>
-          <p class="muted">人脸检测在本机完成，摄像头画面不会上传至服务器。开启后光核的眼睛会看向你。</p>
+          <p class="muted">人脸检测在本机完成，摄像头画面不会上传至服务器。开启后粒子体的眼睛会看向你。</p>
           <p class="muted" id="face-status" role="status"></p>
         </div>
         <div class="setting" id="row-voice">
@@ -377,7 +375,6 @@
             <dt><kbd>Alt</kbd>+<kbd>1</kbd>–<kbd>8</kbd></dt><dd>对话 / 工作区 / 知识库 / 进化 / 技能 / 模型 / 系统 / 设置</dd>
             <dt><kbd>Alt</kbd>+<kbd>F</kbd></dt><dd>专注视图</dd>
             <dt><kbd>Alt</kbd>+<kbd>V</kbd></dt><dd>直接对话开关</dd>
-            <dt><kbd>Alt</kbd>+<kbd>O</kbd>/<kbd>H</kbd>/<kbd>W</kbd></dt><dd>光核 / 胸像 / 线框</dd>
           </dl>
         </div>
         <p class="muted small">界面中的“表情”是表达风格，由回复内容、模型指令和任务状态决定，不代表模型拥有真实情绪，也不会推断你的情绪。</p>

@@ -91,18 +91,13 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   page.on('console', (m) => { if (m.type() === 'error' && !/fonts\.(googleapis|gstatic)/.test(m.text()) && !(/status of 500/.test(m.text()) && /audio\/speech/.test(m.location().url))) errors.push(m.text()); });
   await page.goto(BASE);
   await page.waitForFunction(() => window.__jarvis?.stage?.stats.frames > 10, null, { timeout: 30000 });
-  const stats = await page.evaluate(() => { const s = window.__jarvis.stage.stats; return { style: s.style, calls: s.drawCalls, bloom: s.bloom, gl2: s.isWebGL2 }; });
-  check('主视觉启动（光核）', stats.style === 'orb', JSON.stringify(stats));
+  const stats = await page.evaluate(() => { const s = window.__jarvis.stage.stats; return { form: s.form, particles: s.particles, calls: s.drawCalls, bloom: s.bloom, gl2: s.isWebGL2 }; });
+  check('主视觉启动（粒子体 · 光核）', stats.form === 'core' && stats.particles >= 6000 && /光核/.test(await page.textContent('#hud-form')), JSON.stringify(stats));
   check('泛光开启时 draw calls ≤ 12', stats.bloom && stats.calls <= 12, String(stats.calls));
   await page.waitForFunction(() => window.__jarvis.gateway, null, { timeout: 5000 }).catch(() => {});
   check('识别到本机网关', await page.evaluate(() => Boolean(window.__jarvis.gateway)), await page.textContent('#gw-badge'));
 
-  for (const s of ['holo', 'wire', 'orb']) {
-    await page.click(`[data-style="${s}"]`);
-    await page.waitForTimeout(300);
-    const cur = await page.evaluate(() => ({ s: window.__jarvis.stage.stats.style, calls: window.__jarvis.stage.stats.drawCalls }));
-    check(`形态切换：${s}`, cur.s === s && cur.calls <= 12, JSON.stringify(cur));
-  }
+  check('没有手动切换形态的按钮', (await page.locator('[data-style]').count()) === 0);
 
   // —— 欢迎页、HUD
   check('欢迎页与快捷任务', (await page.locator('.welcome .quick').count()) === 7 && /我是贾维斯/.test(await page.textContent('.welcome h1')));
@@ -186,7 +181,10 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.click('#btn-new-session');
 
   // —— 智能体：写网页 → 预览
+  const histBefore = await page.evaluate(() => window.__jarvis.director.history.length);
   let reply = await ask(page, '帮我写一个网页');
+  const formsUsed = await page.evaluate((n) => window.__jarvis.director.history.slice(n), histBefore);
+  check('粒子体按任务自动变形（写网页 → 晶格）', formsUsed.includes('lattice'), formsUsed.join(' → '));
   const tools1 = await page.locator('#transcript .msg.agent').last().locator('.tool-card .tn').allTextContents();
   check('智能体写网页：写入文件 → 打开预览', tools1.join(',') === '写入文件,打开预览', tools1.join(','));
   const frame = page.frameLocator('#viewer-body iframe');

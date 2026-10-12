@@ -51,7 +51,9 @@ import { Transcript, toolLabel } from './ui/transcript.js';
 import { Speaker } from './perception/speaker.js';
 import { VoiceInput, speechRecognitionSupported } from './perception/voiceInput.js';
 import { resolveStt, transcribe } from './perception/stt.js';
-import { FIGURE, STANDALONE } from './config.js';
+import { STANDALONE } from './config.js';
+import { createFormDirector } from './core/formDirector.js';
+import { FORMS } from './render/formations.js';
 import { resolveQuality } from './core/quality.js';
 import { loadMemory, clearMemory } from './core/memoryStore.js';
 
@@ -103,36 +105,22 @@ const live = {
 // ---------------------------------------------------------------- 渲染策略
 let stage = null;
 let stageLoading = null;
-let figurePromise = null;
-
-function loadFigure() {
-  // 单文件版：网格以 data URL 内联在页面里，元数据直接打包进脚本
-  if (STANDALONE) {
-    figurePromise ??= Promise.all([
-      import('../public/models/bust-mesh.bin?inline').then((m) => fetch(m.default)).then((r) => r.arrayBuffer()),
-      import('../public/models/bust.json').then((m) => m.default)
-    ]).then(([mesh, meta]) => ({ mesh, meta }));
-    return figurePromise;
-  }
-  figurePromise ??= Promise.all([
-    fetch(FIGURE.mesh).then((r) => {
-      if (!r.ok) throw new Error(`网格加载失败 ${r.status}`);
-      return r.arrayBuffer();
-    }),
-    fetch(FIGURE.meta).then((r) => {
-      if (!r.ok) throw new Error(`元数据加载失败 ${r.status}`);
-      return r.json();
-    })
-  ]).then(([mesh, meta]) => ({ mesh, meta })).catch((err) => {
-    figurePromise = null;
-    throw err;
-  });
-  return figurePromise;
-}
 const DEG = Math.PI / 180;
+
+/** 造型导演：粒子体按工作状态和语义自己变形（没有手动切换） */
+const director = createFormDirector({
+  setForm: (name) => {
+    const el = document.querySelector('#hud-form');
+    if (el) { el.textContent = FORMS[name]?.name ?? name; el.parentElement.classList.remove('flash'); void el.offsetWidth; el.parentElement.classList.add('flash'); }
+    return stage ? stage.setForm(name) !== false || stage.form === name : true;
+  }
+});
+let directorTick = 0;
 
 function frame(dt, t) {
   const p = tween.update(t);
+  if (t - directorTick > 200) { directorTick = t; director.tick(); }
+  stage?.setActivity({ audio: live.voiceListening ? Math.min(1, live.voiceEnergy * 1.5) : 0 });
 
   // 光环转速 / 扫描速度：情绪表的角速度；用户说话时放慢到 0.12（需求 6.3）
   const omega = live.voiceListening ? 0.12 : p.spin;
@@ -207,15 +195,14 @@ async function ensureStage() {
   if (stage || stageLoading) return stageLoading;
   stageLoading = (async () => {
     try {
-      const [{ createStage }, figure] = await Promise.all([import('./render/stage.js'), loadFigure()]);
+      const { createStage } = await import('./render/stage.js');
       if (wantsReducedMotion(settings, reducedMql)) return null; // 加载期间切换成了减少动画
       stage = createStage($('#stage'), {
-        figure,
         lowEnd,
         onContextChange: (s, ms) => console.info(`[stage] WebGL 上下文${s === 'lost' ? '丢失' : `已恢复（${Math.round(ms)}ms）`}`)
       });
       stage.onFrame(frame);
-      stage.setStyle(settings.look);
+      stage.setForm(director.form);
       applyFpsCap();
       stage.setPaused('hidden', document.hidden);
       stage.setPaused('offscreen', !canvasVisible);
@@ -302,7 +289,7 @@ async function detectGateway() {
   probing ??= (async () => {
     try {
       const url = local ? `${LOCAL_GATEWAY}/api/health` : '/api/health';
-      const h = await (await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout?.(1500) })).json();
+      const h = await (await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout?.(5000) })).json(); // 启动时主线程忙（编译着色器），留足时间
       if (!h?.ok) throw new Error('not a gateway');
       const found = !gateway;
       gateway = { origin: local ? LOCAL_GATEWAY : location.origin, keys: h.gatewayKeys ?? [], cors: Boolean(h.cors), mcp: Boolean(h.mcp), ollama: Boolean(h.ollama) };
@@ -395,8 +382,12 @@ function interrupt() {
 $('#btn-stop').addEventListener('click', () => interrupt());
 
 const TASK_LABEL = { idle: '待命', listening: '生成中', processing: '执行中', error: '出错', done: '完成' };
+const DIRECTOR_STATE = { processing: 'processing', listening: 'speaking', done: 'speaking', idle: 'idle', error: 'error' };
+const ENERGY = { processing: 0.85, listening: 0.25 };
 function setTask(state, sub = '') {
   machine.setTaskState(state === 'listening' && !live.voiceListening ? 'listening' : state);
+  if (DIRECTOR_STATE[state]) director.setState(DIRECTOR_STATE[state]);
+  stage?.setActivity({ energy: ENERGY[state] ?? 0 });
   dashboard.setTask(state, sub);
   const label = sub || TASK_LABEL[state] || state;
   $('#hud-task').textContent = label;
@@ -653,6 +644,7 @@ async function send(text) {
   const imgs = files.filter((f) => f.image).map((f) => f.image);
   const thumbs = imgs.map((i) => i.thumb);
   transcript.add('user', userText, Date.now(), { thumbs });
+  director.onUserText(text);
   const llmHistory = history.slice(-20).map(({ role, content }) => ({ role, content }));
   rememberTurn('user', userText, thumbs.length ? { thumbs } : {});
 
@@ -710,9 +702,10 @@ async function send(text) {
           bubble.append(e.delta);
           machine.feedResponseText(e.delta);
           speech.push(e.delta);
-        } else if (e.type === 'emotion') machine.setStreamHint(e.value);
+        } else if (e.type === 'emotion') { machine.setStreamHint(e.value); director.onEmotion(e.value); }
         else if (e.type === 'state' && e.value !== 'done') setTask(e.value, e.value === 'listening' ? '生成回答' : '');
         else if (e.type === 'tool_start') {
+          director.onToolStart(e.name);
           cards.set(e.id, bubble.toolCard(e.name, e.args));
           usedTools.push(e.name);
           setTask('processing', `${e.name}`);
@@ -768,6 +761,12 @@ async function send(text) {
     endControl();
   }
 }
+
+// 用户有动静：空闲漫游中的粒子体回到光核看着他
+let lastPoke = 0;
+const poke = () => { const t = performance.now(); if (t - lastPoke > 1000) { lastPoke = t; director.poke(); } };
+addEventListener('pointermove', poke, { passive: true });
+addEventListener('keydown', poke);
 
 // —— 输入框：Enter 发送，Shift+Enter 换行；随内容自动增高
 const prompt = $('#prompt');
@@ -871,6 +870,7 @@ const voice = new VoiceInput({
   onConfirm: () => {
     if (asleep()) return;
     live.voiceListening = true;
+    if (!active) director.setState('voice');
     if (active) { active.ctrl.abort(); active = null; speaker.cancel(); }
     machine.beginUserTurn();
     dashboard.setTask('listening', '正在听');
@@ -923,6 +923,7 @@ const voice = new VoiceInput({
 function endListening() {
   if (!live.voiceListening) return;
   live.voiceListening = false;
+  if (!active) director.setState('idle');
   live.voiceEnergy = 0;
   transcript.clearInterim();
   $('#vad-meter').classList.remove('on');
@@ -1145,9 +1146,6 @@ const palette = initPalette({
       ...QUICK.filter((q) => q.prompt || q.fill).map((q) => ({ id: `q-${q.title}`, group: '常用任务', title: q.title, hint: q.desc, run: () => { if (q.prompt) send(q.prompt); else { $('#prompt').value = q.fill; $('#prompt').focus(); } } })),
       ...skillsPanel.installed.filter((p) => p.enabled).map((p) => ({ id: `s-${p.name}`, group: '技能', title: `/${p.name}`, hint: p.description, run: () => { $('#prompt').value = `/${p.name} `; $('#prompt').focus(); } })),
       ...PANES.map((p, i) => ({ id: `p-${p}`, group: '面板', title: `打开${PANE_TITLE[p]}`, keys: `Alt ${i + 1}`, run: () => showPanel(p) })),
-      { id: 'f-orb', group: '形态', title: '切换为光核', keys: 'Alt O', run: () => setStyle('orb') },
-      { id: 'f-holo', group: '形态', title: '切换为全息胸像', keys: 'Alt H', run: () => setStyle('holo') },
-      { id: 'f-wire', group: '形态', title: '切换为线框', keys: 'Alt W', run: () => setStyle('wire') },
       toggle('set-tts', '语音朗读'),
       ...(!mic.hidden ? [toggle('set-voice', '直接对话'), toggle('set-wake', '唤醒词')] : []),
       toggle('set-face', '人脸跟随'),
@@ -1182,13 +1180,6 @@ $('#btn-fullscreen').addEventListener('click', () => {
   else document.documentElement.requestFullscreen?.().catch(() => {});
 });
 
-function setStyle(style) {
-  if (!['orb', 'holo', 'wire'].includes(style)) style = 'orb';
-  setSetting('look', style);
-  for (const c of document.querySelectorAll('[data-style]')) c.setAttribute('aria-checked', String(c.dataset.style === style));
-  stage?.setStyle(style);
-}
-for (const c of document.querySelectorAll('[data-style]')) c.addEventListener('click', () => setStyle(c.dataset.style));
 
 $('#set-face').addEventListener('change', (e) => setFaceFollow(e.target.checked));
 $('#set-voice').addEventListener('change', (e) => setDirectVoice(e.target.checked));
@@ -1235,7 +1226,6 @@ $('#set-quality').value = settings.quality;
 dashboard.setTurns(history.filter((m) => m.role === 'user').length);
 $('#set-motion').value = settings.reducedMotion;
 for (const x of document.querySelectorAll('#set-vad button')) x.setAttribute('aria-checked', String(x.dataset.v === settings.vadSensitivity));
-setStyle(settings.look);
 setFocusView(settings.focusView);
 applyEmotionOverride(settings.emotionOverride);
 applyMotionMode();
@@ -1346,9 +1336,6 @@ document.addEventListener('keydown', (e) => {
     if (n) showPanel(PANES[n - 1]);
     else if (k === 'KeyF') setFocusView(!settings.focusView);
     else if (k === 'KeyV' && !mic.hidden) setDirectVoice(voice.mode === 'off');
-    else if (k === 'KeyO') setStyle('orb');
-    else if (k === 'KeyH') setStyle('holo');
-    else if (k === 'KeyW') setStyle('wire');
     else return;
     e.preventDefault();
     return;
@@ -1379,6 +1366,7 @@ window.__jarvis = {
   get palette() { return palette; },
   get mcp() { return mcpPanel; },
   get localModels() { return localModels; },
+  director,
   get callouts() { return callouts; },
   schedulerTick,
   reflectNow,

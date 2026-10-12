@@ -37,7 +37,7 @@ page.on('request', (r) => requests.push(r.url()));
 await page.goto(FILE);
 await page.waitForFunction(() => window.__jarvis?.stage?.stats.frames > 10, null, { timeout: 30000 });
 const stats = await page.evaluate(() => window.__jarvis.stage.stats);
-check('双击打开即渲染（file://，无服务器）', true, `${stats.style} / ${stats.drawCalls} draw calls`);
+check('双击打开即渲染（file://，无服务器）', true, `${stats.form} · ${stats.particles} 粒子 / ${stats.drawCalls} draw calls`);
 check('单文件版标识', (await page.textContent('#gw-badge')) === '单文件版');
 
 let reply = await ask(page, '帮我写一个网页');
