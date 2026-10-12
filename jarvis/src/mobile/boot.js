@@ -39,5 +39,27 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
     apply();
     new MutationObserver(apply).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   } catch { /* 旧版 Capacitor 没有 SystemBars */ }
+  // 下载：WebView 里网页下载不起作用。存到“文档/Jarvis”，再弹出系统分享（用 WPS、微信等打开或发送）
+  globalThis.__jarvisSaveFile = async (blob, name) => {
+    const { Filesystem, Directory } = await import('@capacitor/filesystem');
+    const data = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result).split(',')[1] || '');
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(blob);
+    });
+    let where = '';
+    try {
+      await Filesystem.writeFile({ path: `Jarvis/${name}`, data, directory: Directory.Documents, recursive: true });
+      where = `已保存到手机“文档/Jarvis/${name}”`;
+    } catch { where = ''; }
+    // 分享面板需要 App 自己目录里的文件
+    const { uri } = await Filesystem.writeFile({ path: `share/${name}`, data, directory: Directory.Cache, recursive: true });
+    try {
+      const { Share } = await import('@capacitor/share');
+      await Share.share({ title: name, files: [uri], dialogTitle: '打开或发送' });
+    } catch { /* 用户取消分享 */ }
+    return where || `已准备好 ${name}（可在分享面板里选择保存位置）`;
+  };
   document.documentElement.classList.add('mobile-app');
 }

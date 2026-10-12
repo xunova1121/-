@@ -9,6 +9,7 @@ import { fmtSize } from '../agent/tools.js';
 import { renderBlocks } from './transcript.js';
 import { PROVIDERS, providerById, loadConfig, saveConfig, modelOf, createAdapter } from '../llm/config.js';
 import { probeEndpoint } from '../llm/probe.js';
+import { saveFile } from './saveFile.js';
 import { MOBILE } from '../config.js';
 
 const $ = (s) => document.querySelector(s);
@@ -130,13 +131,8 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   }
 
   async function download(path) {
-    const blob = await ws.readBlob(path);
-    const u = URL.createObjectURL(blob);
-    const a = el('a', { href: u, download: path.split('/').pop() });
-    document.body.append(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(u), 10000);
+    const msg = await saveFile(await ws.readBlob(path), path.split('/').pop());
+    if (MOBILE) toast(msg);
   }
 
   $('#btn-v-download').addEventListener('click', () => current && download(current).catch((e) => toast(e.message)));
@@ -310,10 +306,8 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   $('#btn-reflect').addEventListener('click', async () => { await onReflect?.(); refreshMind(); });
   $('#btn-mem-export').addEventListener('click', async () => {
     const data = await memory.exportAll();
-    const a = el('a', { href: URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })), download: `贾维斯记忆备份-${new Date().toISOString().slice(0, 10)}.json` });
-    document.body.append(a);
-    a.click();
-    a.remove();
+    const msg = await saveFile(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), `贾维斯记忆备份-${new Date().toISOString().slice(0, 10)}.json`);
+    if (MOBILE) toast(msg);
   });
   $('#btn-mem-import').addEventListener('click', () => $('#mem-import-input').click());
   $('#mem-import-input').addEventListener('change', async (e) => {

@@ -2,6 +2,7 @@
  * “对话”面板：历史对话按天分组；搜索标题与内容；打开、重命名、钉住、导出 Markdown、删除。
  */
 import * as sessions from '../agent/sessions.js';
+import { saveFile } from './saveFile.js';
 import { groupByDay } from '../core/memoryStore.js';
 
 const $ = (s) => document.querySelector(s);
@@ -64,12 +65,7 @@ export function initSessionsPanel({ getCurrentId, onOpen, onNew, onDeleted, sett
           input.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') done(); if (e.key === 'Escape') refresh(); });
           input.addEventListener('blur', done);
         }),
-        btn('⇩', '导出为 Markdown', () => {
-          const a = el('a', { href: URL.createObjectURL(new Blob([sessions.toMarkdown(s)], { type: 'text/markdown' })), download: `${s.title.replace(/[\\/:*?"<>|]/g, '_')}.md` });
-          document.body.append(a);
-          a.click();
-          a.remove();
-        }),
+        btn('⇩', '导出为 Markdown', () => saveFile(new Blob([sessions.toMarkdown(s)], { type: 'text/markdown' }), `${s.title}.md`)),
         btn('✕', '删除', async (b) => {
           if (b.dataset.c !== '1') { b.dataset.c = '1'; b.textContent = '确认'; b.classList.add('danger'); setTimeout(() => { b.dataset.c = ''; b.textContent = '✕'; b.classList.remove('danger'); }, 3000); return; }
           await sessions.remove(s.id);
