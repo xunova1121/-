@@ -117,8 +117,11 @@ export function summarizeArgs(name, a = {}) {
 function feedbackButtons(meta, onFeedback) {
   const box = document.createElement('span');
   box.className = 'feedback';
-  const up = Object.assign(document.createElement('button'), { type: 'button', title: '有帮助', textContent: '👍' });
-  const down = Object.assign(document.createElement('button'), { type: 'button', title: '不满意：告诉我哪里不好，我会记住', textContent: '👎' });
+  const thumb = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/></svg>';
+  const up = Object.assign(document.createElement('button'), { type: 'button', title: '有帮助', innerHTML: thumb });
+  const down = Object.assign(document.createElement('button'), { type: 'button', className: 'down', title: '不满意：告诉我哪里不好，我会记住', innerHTML: thumb });
+  up.setAttribute('aria-label', '有帮助');
+  down.setAttribute('aria-label', '不满意');
   up.addEventListener('click', () => {
     up.setAttribute('aria-pressed', 'true');
     down.disabled = true;
