@@ -997,7 +997,7 @@ body.generating .chip-bar { display: none; }
 .compact .composer { box-shadow: none !important; }
 .compact .quick { transition: none; }
 /* 手机：提示放在输入框上方，不挡消息 */
-.compact .toast { top: auto; bottom: calc(150px + env(safe-area-inset-bottom, 0px)); max-width: calc(100vw - 32px); border-radius: 14px; text-align: center; }
+.compact .toast { top: auto; bottom: calc(205px + env(safe-area-inset-bottom, 0px)); max-width: calc(100vw - 32px); border-radius: 14px; text-align: center; }
 
 /* ================================================================
  * 手机左侧抽屉（取代底部菜单栏）
@@ -1043,3 +1043,44 @@ body.reduced-motion .drawer { transition: none; }
 .compact .brand { flex: none; gap: 8px; }
 .compact .status-pill { min-width: 0; flex: 1 1 auto; max-width: none; justify-content: center; }
 .compact .desktop-only, .compact #local-custom { display: none !important; }
+
+/* ================================================================
+ * 手机白天配色：淡紫蓝（参考主流手机助手），白色半透明卡片，蓝紫渐变的用户气泡
+ * ================================================================ */
+:root[data-theme="light"] body.compact {
+  --bg: #e4e6fb; --bg-2: #f1f1fd;
+  --surface: rgba(255, 255, 255, 0.68); --surface-2: #ffffff;
+  --line: rgba(88, 92, 170, 0.12); --line-strong: rgba(98, 92, 190, 0.24);
+  --text: #1c1e33; --muted: #5a5d7d; --dim: #8b8eab;
+  --accent: #6a5cf0; --accent-soft: rgba(106, 92, 240, 0.12);
+  --code-bg: rgba(240, 240, 252, 0.9); --tool-bg: rgba(255, 255, 255, 0.6); --chip-bg: rgba(106, 92, 240, 0.08);
+  --shadow: rgba(80, 80, 160, 0.10);
+  background: linear-gradient(180deg, #dde1fb 0%, #e5e3fb 55%, #ece6fb 100%) !important;
+}
+:root[data-theme="light"] .compact .topbar { background: transparent; border-bottom-color: transparent; }
+:root[data-theme="light"] .compact .status-pill { background: rgba(255, 255, 255, 0.6); border-color: rgba(255, 255, 255, 0.9); }
+:root[data-theme="light"] .compact .msg.user { background: linear-gradient(120deg, #7f8ef8, #8b63f0); color: #fff; border: 0; border-radius: 18px 18px 6px 18px; box-shadow: 0 6px 16px rgba(110, 90, 230, 0.22); }
+:root[data-theme="light"] .compact .msg.user .who { color: rgba(255, 255, 255, 0.78); }
+:root[data-theme="light"] .compact .msg.agent { border-left: 0; padding: 12px 14px; border-radius: 18px; background: rgba(255, 255, 255, 0.62); border: 1px solid rgba(255, 255, 255, 0.9); }
+:root[data-theme="light"] .compact .progress-card { background: rgba(244, 244, 255, 0.9); border-color: rgba(106, 92, 240, 0.14); }
+:root[data-theme="light"] .compact li[data-st="now"] .pc-tx b { color: #6a5cf0; }
+:root[data-theme="light"] .compact li[data-st="now"] .pc-ic { border-color: #6a5cf0; border-top-color: transparent; }
+:root[data-theme="light"] .compact .composer { background: rgba(255, 255, 255, 0.85); border-color: rgba(255, 255, 255, 0.95); border-radius: 26px; }
+:root[data-theme="light"] .compact #btn-send { background: linear-gradient(135deg, #7f8ef8, #8b63f0); color: #fff; border: 0; }
+:root[data-theme="light"] .compact .chip-bar .chip, :root[data-theme="light"] .compact .quick { background: rgba(255, 255, 255, 0.75); border-color: rgba(255, 255, 255, 0.95); }
+:root[data-theme="light"] .compact .drawer { background: linear-gradient(180deg, #e6e8fc, #ece8fb); }
+:root[data-theme="light"] .compact .drawer-card { background: rgba(255, 255, 255, 0.72); border-color: rgba(255, 255, 255, 0.95); }
+:root[data-theme="light"] .compact .drawer-new { background: linear-gradient(90deg, #6f8af6, #8b63f0); }
+:root[data-theme="light"] .compact .welcome-orb { --hue: 245; }
+:root[data-theme="light"] .compact .side, :root[data-theme="light"] .compact .side-back { background: #eceafc; }
+
+/* 手机：当前模型显示在输入框里（点一下切换），顶栏不再显示；输入框分两行：上面打字，下面工具 */
+.compact .status-pill { display: none; }
+.compact .top-actions { margin-left: auto; }
+.compact .composer-row { flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 8px 6px; }
+.compact #prompt { order: -1; flex: 1 0 100%; min-height: 40px; padding: 6px 8px 2px; }
+.compact .model-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 46vw; margin-right: auto; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--chip-bg); color: var(--muted); font-size: 12.5px; }
+.compact .model-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+.compact .model-chip::after { content: "⌄"; font-size: 12px; margin-top: -4px; }
+.compact .model-chip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.compact.generating .model-chip::before { background: #f0c36a; }
