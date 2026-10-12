@@ -666,6 +666,69 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await ctx.close();
 }
 
+// ---------- 7. 多设备同步（两台“设备”= 两个独立的浏览器环境；阿里云 OSS 用内存模拟，经网关的 /api/oss 拦截） ----------
+{
+  const bucket = new Map();
+  const fakeOss = async (route) => {
+    const req = JSON.parse(route.request().postData());
+    const key = new URL(req.url).pathname;
+    const ok = /^OSS AKID:/.test(req.headers.authorization) && req.headers['x-oss-date'];
+    if (!ok) return route.fulfill({ status: 200, headers: { 'x-oss-status': '403' }, body: '' });
+    if (req.method === 'PUT') { bucket.set(key, req.body); return route.fulfill({ status: 200, headers: { 'x-oss-status': '200', 'x-oss-etag': '"e"' }, body: '' }); }
+    if (!bucket.has(key)) return route.fulfill({ status: 200, headers: { 'x-oss-status': '404' }, body: '<Code>NoSuchKey</Code>' });
+    return route.fulfill({ status: 200, headers: { 'x-oss-status': '200' }, body: bucket.get(key) });
+  };
+  const device = async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+    await ctx.route('**/api/oss', fakeOss);
+    const page = await ctx.newPage();
+    await page.goto(BASE);
+    await page.waitForFunction(() => window.__jarvis?.showPanel && window.__jarvis.gateway);
+    await page.evaluate(() => window.__jarvis.showPanel('settings'));
+    return { ctx, page };
+  };
+  const pc = await device();
+  await pc.page.check('#sync-on');
+  await pc.page.click('#btn-sync-now');
+  check('同步：没填完整时提示', /地域/.test(await pc.page.textContent('#sync-status')));
+  await pc.page.fill('#sync-endpoint', 'oss-cn-hangzhou');
+  await pc.page.fill('#sync-bucket', 'my-jarvis');
+  await pc.page.fill('#sync-ak', 'AKID');
+  await pc.page.fill('#sync-sk', 'secret-value');
+  await pc.page.fill('#sync-pass', 'pass123456');
+  await ask(pc.page, '记住我喜欢喝美式咖啡');
+  await pc.page.click('#btn-sync-now');
+  await pc.page.waitForFunction(() => /同步完成|同步失败/.test(document.querySelector('#sync-status').textContent), null, { timeout: 30000 });
+  const st = await pc.page.textContent('#sync-status');
+  check('同步：电脑上传成功', /同步完成/.test(st) && bucket.has('/jarvis-sync/memory.enc') && bucket.has('/jarvis-sync/sessions.enc'), st);
+  check('同步：云端是密文', ![...bucket.values()].some((v) => /美式|secret-value/.test(v) || /美式/.test(Buffer.from(v, 'base64').toString())));
+  await pc.page.click('#btn-sync-code');
+  await pc.page.waitForFunction(() => document.querySelector('#sync-code').value.startsWith('JARVIS-SYNC:'));
+  const code = await pc.page.inputValue('#sync-code');
+
+  const phone = await device();
+  await phone.page.check('#sync-on');
+  await phone.page.click('#btn-sync-paste');
+  await phone.page.fill('#sync-code', code);
+  await phone.page.fill('#sync-pass', 'wrong-pass');
+  await phone.page.click('#btn-sync-code-go');
+  await phone.page.waitForFunction(() => /同步密码不对/.test(document.querySelector('#sync-code-hint').textContent), null, { timeout: 15000 });
+  check('同步码：密码不对时提示', true);
+  await phone.page.fill('#sync-pass', 'pass123456');
+  await phone.page.click('#btn-sync-code-go');
+  await phone.page.waitForFunction(() => /同步完成|同步失败/.test(document.querySelector('#sync-status').textContent), null, { timeout: 30000 });
+  const st2 = await phone.page.textContent('#sync-status');
+  check('同步码：另一台设备自动填好并同步', /同步完成/.test(st2) && /收到/.test(st2) && (await phone.page.inputValue('#sync-bucket')) === 'my-jarvis', st2);
+  await phone.page.evaluate(() => window.__jarvis.showPanel('mind'));
+  await phone.page.waitForTimeout(500);
+  check('同步：另一台设备有了这条记忆', /美式/.test(await phone.page.textContent('[data-pane="mind"]')));
+  await phone.page.evaluate(() => window.__jarvis.showPanel('sessions'));
+  await phone.page.waitForTimeout(300);
+  check('同步：另一台设备有了这段对话', /美式/.test(await phone.page.textContent('[data-pane="sessions"]')));
+  await pc.ctx.close();
+  await phone.ctx.close();
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok).length;
 console.log(`\n${results.length - failed}/${results.length} 通过`);

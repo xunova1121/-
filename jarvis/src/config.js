@@ -4,6 +4,8 @@
  */
 const base = import.meta.env?.BASE_URL ?? '/';
 export const STANDALONE = typeof __STANDALONE__ !== 'undefined' && __STANDALONE__;
+/** 安卓 App（Capacitor 打包）：同单文件版没有自己的服务器 */
+export const MOBILE = typeof __MOBILE__ !== 'undefined' && __MOBILE__;
 const CDN = {
   mediapipe: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.0/wasm',
   vad: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.31/dist/',

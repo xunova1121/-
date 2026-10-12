@@ -770,3 +770,14 @@ body.wallpaper .thought-log { right: 6vw; bottom: calc(10vh + 70px); width: 320p
 .update-pill { height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent); font-size: 12px; white-space: nowrap; }
 .update-pill[data-state="downloading"] { cursor: default; border-style: dashed; }
 .update-pill[data-state="ready"] { background: var(--accent); color: var(--bg); box-shadow: 0 0 16px var(--accent-soft); }
+
+/* ---------------------------------------------------------------- 多设备同步 */
+.sync-form { display: grid; gap: 10px; margin-top: 8px; }
+.setting .sync-form label.field { display: grid; grid-template-columns: 1fr; gap: 6px; align-items: stretch; }
+.sync-form .field input { width: 100%; min-width: 0; }
+.sync-groups { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.sync-code { display: grid; gap: 6px; }
+.sync-code textarea { width: 100%; font: 12px/1.4 ui-monospace, Consolas, monospace; color: var(--text); background: var(--panel-2, rgba(127, 127, 127, .08)); border: 1px solid var(--line); border-radius: 8px; padding: 8px; resize: vertical; word-break: break-all; }
+
+/* 安卓 App：避开状态栏 / 手势条 */
+.mobile-app body { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }

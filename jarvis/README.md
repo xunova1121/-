@@ -10,6 +10,10 @@
 
 Windows / Mac / Linux 安装包在仓库的 **Releases** 页面，能直接操作电脑、连接 MCP 工具、托盘常驻、快捷键呼出。详见 [desktop/README.md](desktop/README.md)。
 
+### 方式零 B：安卓手机 App
+
+Releases 页面下载 `Jarvis-*-android.apk`，用手机浏览器打开后安装（提示“未知来源”时允许）。手机上直接连大模型服务商（系统原生网络，不受网页跨域限制），朗读用系统自带的 TTS 引擎。和电脑的数据同步见下面的“多设备同步”。
+
 ### 方式一：单文件版（下载即用）
 
 下载仓库根目录的 **`jarvis-standalone.html`**（约 5.5 MB），双击用 Chrome / Edge 打开。不用安装、不用联网也能跑（内置离线演示模型）。
@@ -37,11 +41,53 @@ ANTHROPIC_API_KEY=... OPENAI_API_KEY=... DEEPSEEK_API_KEY=... DASHSCOPE_API_KEY=
 
 | 命令 | 作用 |
 |---|---|
-| `npm test` | 单元 + 集成测试（Vitest，261 项） |
-| `npm run e2e` | 完整版浏览器测试（Playwright，116 项；需先 build 并启动 server；本机模型下载那几项要用 `OLLAMA_HOST=127.0.0.1:11999` 启动 server、先运行 `node e2e/fixtures/fake-ollama.mjs`，并设 `JARVIS_FAKE_OLLAMA=1`） |
+| `npm test` | 单元 + 集成测试（Vitest，298 项） |
+| `npm run e2e` | 完整版浏览器测试（Playwright，123 项；需先 build 并启动 server；本机模型下载那几项要用 `OLLAMA_HOST=127.0.0.1:11999` 启动 server、先运行 `node e2e/fixtures/fake-ollama.mjs`，并设 `JARVIS_FAKE_OLLAMA=1`） |
 | `npm run e2e:standalone` | 单文件版测试（file:// 直接打开，含“单文件版 + 本机网关”场景，14 项） |
 | `xvfb-run -a node e2e/desktop.mjs` | 桌面版测试（启动真正的 Electron 应用，33 项；鼠标键盘控制需要 `xdotool`） |
 | `npm run build:standalone` | 生成单文件版 `../jarvis-standalone.html` |
+| `npm run android` | 构建手机版网页并同步到 `android/` 工程（再用 Android Studio 或 `cd android && ./gradlew assembleRelease` 出 APK；CI 自动打包） |
+
+## v5.2：安卓 App · 电脑和手机数据同步
+
+### 多设备同步（阿里云 OSS，端到端加密）
+
+设置 → **多设备同步**。同步的内容可以分别勾选：**记忆、习惯、技能、教训**（含核心记忆、对话摘要、装的技能包）、**对话历史**、**模型设置和 API 密钥**。知识库不同步（文件大，通常只在电脑上用）。
+
+- **加密**：上传前在本机用“同步密码”加密（PBKDF2 31 万次 → AES-256-GCM），阿里云和任何拿到文件的人只看到乱码。同步密码所有设备填一样的；**忘了就解不开云端数据**（本机数据不受影响）。
+- **合并**：按条三方合并——只有一边改了用改了的那边；两边都改了用更新时间新的；一边删了、另一边没动就删。向量、使用次数这些每台设备自己算的字段不同步。
+- **什么时候同步**：打开时、每 5 分钟、切到后台时（手机上），也可以点“保存并同步”。
+- **同步码**：电脑上填好后点“生成同步码”，把这段文字发到手机（如微信文件传输助手），手机 App 里点“用同步码设置”、粘贴、填同一个同步密码，就自动配置好并同步。同步码本身也用同步密码加密。
+- 网页单文件版不能同步（浏览器不让设置签名需要的请求头，OSS 也不允许网页跨域）；桌面版 / 完整版经本机网关转发（网关只转发到 `*.aliyuncs.com`，看不到 AccessKey Secret），手机 App 直接请求。
+
+**阿里云这边要准备的（一次性，约 5 分钟）：**
+
+1. 打开 [OSS 控制台](https://oss.console.aliyun.com/) → 创建 Bucket：名称如 `my-jarvis-sync`，地域选离你近的（如华东 1 杭州 = `oss-cn-hangzhou`），读写权限选**私有**。
+2. 打开 [RAM 访问控制](https://ram.console.aliyun.com/users) → 创建用户，勾选“OpenAPI 调用访问”，记下 AccessKey ID 和 Secret（Secret 只显示一次）。
+3. 给这个用户授权（权限策略 → 创建自定义策略 → 脚本编辑），只允许读写这一个 Bucket：
+
+```json
+{
+  "Version": "1",
+  "Statement": [
+    { "Effect": "Allow", "Action": ["oss:GetObject", "oss:PutObject"], "Resource": ["acs:oss:*:*:my-jarvis-sync/jarvis-sync/*"] },
+    { "Effect": "Allow", "Action": ["oss:ListObjects"], "Resource": ["acs:oss:*:*:my-jarvis-sync"] }
+  ]
+}
+```
+
+4. 贾维斯里填：地域 `oss-cn-hangzhou`、Bucket `my-jarvis-sync`、刚才的 AccessKey、自己定一个同步密码。
+
+数据很小（文字），OSS 存储和流量费用通常每月几分钱。
+
+### 安卓 App
+
+和电脑版同一套界面和能力（记忆、知识库、写文档 / 网页、技能、定时任务、多助手分工），区别：
+
+- 网络：先用 WebView 自己的请求（回答能逐字显示）；服务商不允许跨域时自动改走系统原生网络（这时回答一次性出来）。
+- 朗读：系统 TTS（设置 → 无障碍 → 文字转语音可以换引擎和声音）。语音输入建议用输入法自带的语音键；“直接对话”在手机上需要配置了云端语音识别（如 OpenAI 密钥）才能用。
+- 没有：控制电脑、桌面背景、操作习惯采样、本机模型（Ollama）、MCP 本机工具、Edge 朗读——这些依赖电脑。
+- 签名与升级：CI 优先用 GitHub Secrets 里的固定签名密钥（`ANDROID_KEYSTORE_B64` + `ANDROID_KEYSTORE_PASSWORD`，别名 `jarvis`），这样新版本能直接覆盖安装、保留手机上的数据；没设置时每次用临时密钥，升级前要先卸载旧版（数据可以先同步到云端再拉回来）。
 
 ## v5.1：模型分工 · 提速 · 白天 / 夜间
 
@@ -372,6 +418,7 @@ curl -X POST http://127.0.0.1:8787/api/agent/emotion \
 - **真实语音识别与播报时延**（验收 8、9）：无头浏览器没有麦克风输入和中文语音包。
 - **v5 需要真机确认的**：桌面背景模式在 Linux（Xvfb）上验证了窗口铺满、不抢焦点、和主窗口同步；Windows 挂到桌面图标后面（WorkerW）、Mac 桌面窗口层级只验证了脚本生成，没在真机上跑过。在场检测、习惯采样在 Windows / Mac 上同样未实测（Linux 下用模拟数据测了总结逻辑）。粒子数量和帧率在本环境是软件渲染，真机有显卡会流畅得多。
 - **这一轮新功能里需要真机 / 真密钥确认的**：鼠标键盘控制在 Linux（Xvfb + xdotool）上做了真实点击测试，Windows（PowerShell + user32）和 macOS（CoreGraphics）只验证了生成的命令，没在真机上跑过；免密钥搜索（必应 / DuckDuckGo）的解析器是按页面结构写的，本环境访问不了这两个网站，只用样例页面测过；Ollama 下载用的是模拟服务；语义检索、深度调研、团队模式、跨对话的大模型路径用的是模拟模型。
+- **v5.2 需要真机 / 真账号确认的**：同步的加密、合并、签名（签名结果与阿里云官方 SDK ali-oss 对照一致）在单元测试和两个浏览器环境模拟“电脑 + 手机”的端到端测试里通过，但 OSS 是模拟的，本环境访问不了阿里云；安卓 APK 只在 CI 里构建，没有在真机上安装测试过（手机宽度的界面在浏览器里看过）。
 - **Claude 真实调用**：本环境没有 `ANTHROPIC_API_KEY`，网关的请求构造、事件映射、工具循环和拒绝处理是用本地模拟的 Messages 流式接口测试的（`tests/claudeAgent.test.mjs`）。
 
 ## 署名

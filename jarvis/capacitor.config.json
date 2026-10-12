@@ -1,0 +1,13 @@
+{
+  "appId": "com.xunova.jarvis",
+  "appName": "贾维斯",
+  "webDir": "dist-mobile",
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  },
+  "plugins": {
+    "CapacitorHttp": { "enabled": false }
+  }
+}

@@ -434,6 +434,16 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     importToKb,
     refreshModels: fillModels,
     get config() { return cfg; },
+    /** 配置被同步改了：重新读取并刷新界面 */
+    reloadConfig() {
+      cfg = loadConfig();
+      sel.value = cfg.provider;
+      fillModels();
+      $('#set-websearch').checked = cfg.claudeWebSearch;
+      $('#tavily-key').value = cfg.tavilyKey || '';
+      onConfigChange(cfg);
+      return cfg;
+    },
     /** 其他面板（如语音）修改配置：统一保存并通知 */
     patchConfig(fn) { cfg = fn(cfg); saveConfig(cfg); onConfigChange(cfg); return cfg; },
     /** 切换到指定服务商与型号（如本机模型面板里点“使用”） */

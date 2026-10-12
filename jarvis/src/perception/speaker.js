@@ -9,8 +9,9 @@
 import { buildFx, levelOf, playCue } from './voiceFx.js';
 import { synthesize, ttsEngineById, rankBrowserVoices } from './tts.js';
 
-const synth = globalThis.speechSynthesis;
-export const speechSynthesisSupported = Boolean(synth && globalThis.SpeechSynthesisUtterance);
+// 用时再取：安卓 App 启动时才补上 speechSynthesis（见 src/mobile/speechShim.js）
+const synth = { get getVoices() { return globalThis.speechSynthesis.getVoices.bind(globalThis.speechSynthesis); }, get addEventListener() { return globalThis.speechSynthesis.addEventListener?.bind(globalThis.speechSynthesis); }, cancel: () => globalThis.speechSynthesis.cancel(), speak: (u) => globalThis.speechSynthesis.speak(u) };
+export const speechSynthesisSupported = () => Boolean(globalThis.speechSynthesis && globalThis.SpeechSynthesisUtterance);
 const AudioCtx = globalThis.AudioContext || globalThis.webkitAudioContext;
 const PREFETCH = 3;
 
@@ -39,7 +40,7 @@ export class Speaker {
     this.source = null;
     this.playing = false;
     this.lastError = '';
-    if (speechSynthesisSupported) {
+    if (speechSynthesisSupported()) {
       const pick = () => {
         this.voices = rankBrowserVoices(synth.getVoices());
         this.voice = this.voices[0] ?? null;
@@ -79,7 +80,7 @@ export class Speaker {
   speak(text) {
     if (!this.enabled || !text) return;
     if (!this.usesAudio) {
-      if (!speechSynthesisSupported) return;
+      if (!speechSynthesisSupported()) return;
       this.#begin();
       const gen = this.gen;
       this.#browserSay(text).then(() => { if (gen === this.gen) this.#finish(); });
@@ -110,7 +111,7 @@ export class Speaker {
     if (this.source) { try { this.source.onended = null; this.source.stop(); } catch { /* 已停止 */ } }
     this.source = null;
     this.playing = false;
-    if (speechSynthesisSupported) synth.cancel();
+    if (speechSynthesisSupported()) synth.cancel();
     this.pending = 0;
     if (had) this.onIdle?.();
   }
@@ -138,7 +139,7 @@ export class Speaker {
 
   #browserSay(text) {
     return new Promise((resolve) => {
-      if (!speechSynthesisSupported) return resolve();
+      if (!speechSynthesisSupported()) return resolve();
       const u = new SpeechSynthesisUtterance(text);
       const vc = this.getVoiceConfig();
       const chosen = vc.browserVoice && this.voices.find((v) => v.name === vc.browserVoice);

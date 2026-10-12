@@ -112,7 +112,13 @@ export async function record(sample) {
 export async function flush() {
   if (!dirty || !cache) return;
   dirty = false;
-  await kv.put({ id: KEY, stats: cache });
+  await kv.put({ id: KEY, stats: cache, updatedAt: Date.now() });
+}
+/** 同步后从存储重新读取（同步前先 flush，这里不再写盘，免得盖掉同步来的数据） */
+export async function reload() {
+  cache = null;
+  dirty = false;
+  return load();
 }
 export async function clear() {
   cache = emptyStats();

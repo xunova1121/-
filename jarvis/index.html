@@ -379,6 +379,30 @@
           <div class="pane-actions"><span id="app-version" class="muted"></span><button class="btn ghost sm" type="button" id="btn-update-check">检查更新</button></div>
           <p class="muted" id="update-note"></p>
         </div>
+        <div class="setting" id="row-sync">
+          <label><input type="checkbox" id="sync-on" /> 多设备同步（电脑 ↔ 手机）</label>
+          <p class="muted">把记忆、对话、模型设置放到你自己的阿里云 OSS 存储空间里，电脑和手机自动合并。上传前在本机用“同步密码”加密，阿里云和任何人都看不到内容。建议在阿里云 RAM 里单独建一个只能读写这个 Bucket 的子账号，用它的 AccessKey。</p>
+          <div class="sync-form" id="sync-form">
+            <label class="field" for="sync-endpoint"><span>地域</span><input id="sync-endpoint" placeholder="oss-cn-hangzhou" spellcheck="false" autocomplete="off" /></label>
+            <label class="field" for="sync-bucket"><span>Bucket 名称</span><input id="sync-bucket" placeholder="my-jarvis" spellcheck="false" autocomplete="off" /></label>
+            <label class="field" for="sync-ak"><span>AccessKey ID</span><input id="sync-ak" spellcheck="false" autocomplete="off" /></label>
+            <label class="field" for="sync-sk"><span>AccessKey Secret</span><input type="password" id="sync-sk" autocomplete="off" spellcheck="false" /></label>
+            <label class="field" for="sync-pass"><span>同步密码（所有设备填一样的，至少 6 位；忘了就解不开云端数据）</span><input type="password" id="sync-pass" autocomplete="new-password" spellcheck="false" /></label>
+            <div class="sync-groups" id="sync-groups"></div>
+            <label class="inline-check"><input type="checkbox" id="sync-auto" /> 自动同步（打开时、每 5 分钟、切到后台时）</label>
+            <div class="pane-actions">
+              <button class="btn" type="button" id="btn-sync-now">保存并同步</button>
+              <button class="btn ghost sm" type="button" id="btn-sync-code">生成同步码</button>
+              <button class="btn ghost sm" type="button" id="btn-sync-paste">用同步码设置</button>
+            </div>
+            <div class="sync-code" id="sync-code-box" hidden>
+              <textarea id="sync-code" rows="3" spellcheck="false" aria-label="同步码"></textarea>
+              <p class="muted small" id="sync-code-hint"></p>
+              <div class="pane-actions"><button class="btn ghost sm" type="button" id="btn-sync-code-go">确定</button></div>
+            </div>
+          </div>
+          <p class="muted small" id="sync-status" role="status"></p>
+        </div>
         <div class="setting" id="row-habits" hidden>
           <label><input type="checkbox" id="set-habits" /> 学习我的操作习惯</label>
           <p class="muted">每 20 秒看一眼你在用哪个程序（只记程序名和时间，不记窗口内容、网址、按键），汇总成习惯写进记忆，问好时会用上。数据只在这台电脑上，随时可以清除。</p>

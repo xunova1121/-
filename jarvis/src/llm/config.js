@@ -34,7 +34,9 @@ export function loadConfig() {
   return cfg;
 }
 
-export function saveConfig(cfg) {
+/** 保存；记下修改时间，多设备同步时用来判断哪边更新（同步写回时沿用对方的时间） */
+export function saveConfig(cfg, { fromSync = false } = {}) {
+  if (!fromSync) cfg.updatedAt = Date.now();
   try { store?.setItem(KEY, JSON.stringify(cfg)); } catch { /* 存储不可用：本次会话有效 */ }
 }
 

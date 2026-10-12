@@ -1,4 +1,4 @@
-# 贾维斯桌面版：在 Windows / macOS / Linux 上分别打包安装包，并发布到 Releases 页面。
+# 贾维斯桌面版：在 Windows / macOS / Linux 上分别打包安装包，另打包安卓 App（APK），一起发布到 Releases 页面。
 # 触发：推送了 jarvis/ 下的改动、推送 desktop-v* 标签，或在 Actions 页面手动运行。
 name: 贾维斯桌面版安装包
 
@@ -12,6 +12,9 @@ on:
       - 'jarvis/server/**'
       - 'jarvis/shared/**'
       - 'jarvis/desktop/**'
+      - 'jarvis/android/**'
+      - 'jarvis/capacitor.config.json'
+      - 'jarvis/vite.config.js'
       - 'jarvis/index.html'
       - 'jarvis/package*.json'
       - '.github/workflows/jarvis-desktop.yml'
@@ -79,9 +82,71 @@ jobs:
             jarvis/desktop/release/latest*.yml
             jarvis/desktop/release/*.blockmap
 
+  android:
+    name: 打包安卓 App
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: jarvis/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+          cache-dependency-path: jarvis/android/**/*.gradle*
+      - name: 安装依赖
+        run: npm ci --no-audit --no-fund
+      - name: 构建手机版网页并同步到安卓工程
+        run: npm run android
+      - name: 签名密钥
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        # 有 GitHub Secrets 里的固定密钥就用它（新版本能直接覆盖安装）；
+        # 没有时临时生成一个（能安装，但升级前要先卸载旧版）
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/jarvis.keystore"
+            echo "JARVIS_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "使用固定签名密钥"
+          else
+            PASS=$(openssl rand -hex 16)
+            echo "::add-mask::$PASS"
+            keytool -genkeypair -keystore "$RUNNER_TEMP/jarvis.keystore" -alias jarvis -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$PASS" -keypass "$PASS" -dname "CN=Jarvis" -noprompt
+            echo "JARVIS_KEYSTORE_PASSWORD=$PASS" >> "$GITHUB_ENV"
+            echo "::warning::没有设置 ANDROID_KEYSTORE_B64，这次用临时密钥签名：手机上升级前需要先卸载旧版"
+          fi
+          echo "JARVIS_KEYSTORE=$RUNNER_TEMP/jarvis.keystore" >> "$GITHUB_ENV"
+      - name: 打包 APK
+        working-directory: jarvis/android
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/desktop-v* ]]; then VERSION="${GITHUB_REF_NAME#desktop-v}"; else VERSION="1.0.${GITHUB_RUN_NUMBER}"; fi
+          export JARVIS_VERSION_NAME="$VERSION" JARVIS_VERSION_CODE="$GITHUB_RUN_NUMBER"
+          ./gradlew assembleRelease --no-daemon --stacktrace
+          mkdir -p ../release-android
+          cp app/build/outputs/apk/release/app-release.apk "../release-android/Jarvis-${VERSION}-android.apk"
+          ls -la ../release-android
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-android
+          if-no-files-found: error
+          path: jarvis/release-android/*.apk
+
   release:
     name: 发布到 Releases
-    needs: build
+    needs: [build, android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -105,6 +170,10 @@ jobs:
             - **Mac（M1/M2/M3/M4 芯片）**：`Jarvis-*-mac-arm64.dmg`
             - **Mac（Intel 芯片）**：`Jarvis-*-mac-x64.dmg`
             - **Linux**：`Jarvis-*-linux-x86_64.AppImage`
+            - **安卓手机**：`Jarvis-*-android.apk`（用手机浏览器下载后点开安装；提示“未知来源”时允许安装）
+
+            ## 电脑和手机同步
+            设置 → 多设备同步：填好自己的阿里云 OSS，在电脑上点“生成同步码”，手机 App 里“用同步码设置”即可。数据上传前用同步密码加密。
 
             ## 自动更新
             装好之后不用再来这里下载：有新版本时贾维斯会提示。Windows 安装版 / Linux 在后台只下载改动的部分，点“重启以更新”即可；

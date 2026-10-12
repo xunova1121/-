@@ -10,6 +10,7 @@
  * 情绪通过颜色、眼睛形状、轮廓光强度、光环转速与扫描速度表达。
  * 减少动画：在初始化 WebGL 之前判断，命中则根本不 import three.js、不下载网格。
  */
+import './mobile/boot.js'; // 安卓 App：先装好原生网络 / 朗读（其他版本里是空的）
 import { EmotionMachine } from './core/emotionMachine.js';
 import { EMOTION_PARAMS, EYE_SHAPES } from './core/emotions.js';
 import { ParamTween } from './core/tween.js';
@@ -45,6 +46,8 @@ import { initMcpPanel } from './ui/mcpPanel.js';
 import { initLocalModelsPanel } from './ui/localModelsPanel.js';
 import { initOrbitHud } from './ui/orbitHud.js';
 import { initRoutingPanel } from './ui/routingPanel.js';
+import { createSyncController } from './sync/controller.js';
+import { initSyncPanel, describeResult } from './ui/syncPanel.js';
 import { matchWake, WakeWindow } from './core/wakeWord.js';
 import { playCue } from './perception/voiceFx.js';
 import { MetricsPoller } from './api/metrics.js';
@@ -54,7 +57,7 @@ import { Transcript, toolLabel, summarizeArgs } from './ui/transcript.js';
 import { Speaker } from './perception/speaker.js';
 import { VoiceInput, speechRecognitionSupported } from './perception/voiceInput.js';
 import { resolveStt, transcribe } from './perception/stt.js';
-import { STANDALONE } from './config.js';
+import { STANDALONE, MOBILE } from './config.js';
 import { createFormDirector } from './core/formDirector.js';
 import { composeGreeting, GREET_GAP_MS } from './core/greeting.js';
 import { classifyTask, routeFor, TASKS } from './llm/router.js';
@@ -299,6 +302,7 @@ async function detectGateway() {
   const local = STANDALONE || location.protocol === 'file:';
   probing ??= (async () => {
     try {
+      if (MOBILE) throw new Error('mobile'); // 手机上没有本机网关：直接连服务商（原生网络，不受跨域限制）
       const url = local ? `${LOCAL_GATEWAY}/api/health` : '/api/health';
       const h = await (await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout?.(5000) })).json(); // 启动时主线程忙（编译着色器），留足时间
       if (!h?.ok) throw new Error('not a gateway');
@@ -308,7 +312,7 @@ async function detectGateway() {
     } catch {
       gateway = null;
       // 单文件版：启动时页面忙可能超时，过几秒再试两次
-      if (local && (detectGateway.retries = (detectGateway.retries ?? 0) + 1) <= 2) setTimeout(() => detectGateway(), 3000);
+      if (local && !MOBILE && (detectGateway.retries = (detectGateway.retries ?? 0) + 1) <= 2) setTimeout(() => detectGateway(), 3000);
     }
     panels.refreshModels();
     voicePanel.render();
@@ -320,7 +324,7 @@ async function detectGateway() {
   return probing;
 }
 // 单文件版：回到页面时再找一次网关（用户可能刚双击了 启动.bat）
-if (STANDALONE || location.protocol === 'file:') {
+if ((STANDALONE && !MOBILE) || location.protocol === 'file:') {
   let last = 0;
   addEventListener('focus', () => { if (!gateway && Date.now() - last > 5000) { last = Date.now(); detectGateway(); } });
 }
@@ -1490,6 +1494,37 @@ sessionsPanel = initSessionsPanel({
     toast(on ? '对话会保存在本机，可在“对话”里找回' : '新的对话不再保存（已保存的不受影响）');
   }
 });
+// ---------------------------------------------------------------- 多设备同步（阿里云 OSS，端到端加密）
+const syncController = createSyncController({
+  storage,
+  getGateway: () => gateway,
+  loadConfig,
+  saveConfig,
+  beforeSync: () => habits.flush(),
+  afterSync: async (r) => {
+    if (r.memory?.changedLocal) { await habits.reload(); panels.refreshMind(); }
+    if (r.config?.changedLocal) panels.reloadConfig();
+    if (r.sessions?.changedLocal) {
+      sessionsPanel.refresh();
+      // 当前对话在另一台设备上接着聊过：没在回答时换成合并后的版本
+      const fresh = !active && history.length ? await sessionsApi.get(session.id) : null;
+      if (fresh && fresh.messages.length !== history.length) {
+        session = fresh;
+        history = session.messages;
+        reflectFrom = history.length;
+        replayTranscript();
+      }
+    }
+  },
+  onState: ({ state, result, error, manual }) => {
+    syncPanel?.render();
+    if (state === 'done' && !manual && Object.values(result).some((g) => g.pulled)) toast(`已从其他设备同步：${describeResult(result)}`);
+    if (state === 'error' && !manual) console.warn('[同步]', error);
+  }
+});
+const syncPanel = initSyncPanel({ controller: syncController, toast: (t) => toast(t) });
+syncController.start();
+
 schedulesPanel = initSchedulesPanel({
   toast: (t) => toast(t),
   runNow: async (s) => { if (schedulerBusy) { toast('有任务正在运行，稍后再试'); return; } schedulerBusy = true; try { const sess = await runScheduled(s); await openSession(sess.id); } finally { schedulerBusy = false; } },

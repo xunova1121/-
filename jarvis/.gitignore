@@ -4,3 +4,5 @@ public/vendor/
 public/models/face_landmarker.task
 dist-standalone/
 /*.png
+dist-mobile/
+release-android/
