@@ -60,6 +60,7 @@ import { resolveStt, transcribe } from './perception/stt.js';
 import { STANDALONE, MOBILE } from './config.js';
 import { NativeVoice } from './mobile/nativeVoice.js';
 import { initChips } from './ui/chips.js';
+import { initDrawer } from './ui/drawer.js';
 import { createFormDirector } from './core/formDirector.js';
 import { composeGreeting, GREET_GAP_MS } from './core/greeting.js';
 import { classifyTask, routeFor, TASKS } from './llm/router.js';
@@ -1554,6 +1555,28 @@ const syncController = createSyncController({
 });
 const syncPanel = initSyncPanel({ controller: syncController, toast: (t) => toast(t) });
 syncController.start();
+
+// 手机：底部菜单改成左侧抽屉（新对话 · 功能 · 历史对话）；面板全屏打开，左上角“返回对话”
+let drawer = null;
+if (COMPACT) {
+  const icons = Object.fromEntries([...document.querySelectorAll('.rail-btn')].map((b) => [b.dataset.panel, b.querySelector('svg').outerHTML]));
+  drawer = initDrawer({
+    icons,
+    onNew: () => { newSession(); closeSide(); },
+    onOpenSession: (id) => { openSession(id); closeSide(); },
+    onPanel: (name) => showPanel(name),
+    listSessions: () => sessionsApi.list(),
+    currentId: () => session.id
+  });
+  $('#btn-menu').hidden = false;
+  $('#btn-menu').addEventListener('click', () => drawer.open());
+  $('#btn-side-back').hidden = false;
+  $('#btn-side-back').addEventListener('click', () => closeSide());
+}
+function closeSide() {
+  body.classList.remove('side-open');
+  currentPane = null;
+}
 
 schedulesPanel = initSchedulesPanel({
   toast: (t) => toast(t),

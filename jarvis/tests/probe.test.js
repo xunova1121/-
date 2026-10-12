@@ -70,3 +70,17 @@ describe('手机原生网络上传文件', () => {
     expect((await res.json()).text).toBe('你好');
   });
 });
+
+import { groupSessions } from '../src/ui/drawer.js';
+describe('抽屉里的历史对话分组', () => {
+  it('今天 / 昨天 / 近 7 天 / 更早', () => {
+    const now = new Date('2026-10-12T12:00:00').getTime();
+    const g = groupSessions([
+      { id: 'a', updatedAt: now - 3600e3 },
+      { id: 'b', updatedAt: now - 30 * 3600e3 },
+      { id: 'c', updatedAt: now - 4 * 864e5 },
+      { id: 'd', updatedAt: now - 40 * 864e5 }
+    ], now);
+    expect(g.map(([k, v]) => [k, v.map((s) => s.id)])).toEqual([['今天', ['a']], ['昨天', ['b']], ['近 7 天', ['c']], ['更早', ['d']]]);
+  });
+});

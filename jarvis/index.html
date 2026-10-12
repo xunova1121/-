@@ -25,6 +25,9 @@
   <div class="app">
     <!-- 顶栏 -->
     <header class="topbar">
+      <button class="icon-btn menu-btn" id="btn-menu" type="button" title="菜单" aria-label="打开菜单" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h11" /></svg>
+      </button>
       <div class="brand">
         <span class="brand-mark" aria-hidden="true"></span>
         <span class="brand-name">贾维斯</span>
@@ -120,6 +123,7 @@
 
     <!-- 右侧面板 -->
     <aside class="side" id="panel" aria-label="面板">
+      <button class="side-back" id="btn-side-back" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7" /></svg>返回对话</button>
       <!-- 工作区 -->
       <!-- 对话（多会话） -->
       <section class="pane" data-pane="sessions" hidden>
@@ -287,9 +291,9 @@
           <label class="inline-check"><input type="checkbox" id="fast-chat" /> 日常对话让推理模型少想一点（首字更快；不支持的模型自动忽略）</label>
           <p class="muted small" id="route-status" role="status"></p>
         </div>
-        <h3 class="sub">本机模型（免费 · 离线 · 数据不出电脑）</h3>
-        <div class="local-status" id="local-status" role="status"></div>
-        <ul class="lm-list" id="local-list"></ul>
+        <h3 class="sub desktop-only">本机模型（免费 · 离线 · 数据不出电脑）</h3>
+        <div class="local-status desktop-only" id="local-status" role="status"></div>
+        <ul class="lm-list desktop-only" id="local-list"></ul>
         <form class="lm-custom" id="local-custom" hidden>
           <label class="sr-only" for="local-custom-name">其他模型名</label>
           <input id="local-custom-name" placeholder="其他模型，如 qwen3:30b-a3b" spellcheck="false" />

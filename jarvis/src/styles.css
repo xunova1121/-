@@ -998,3 +998,48 @@ body.generating .chip-bar { display: none; }
 .compact .quick { transition: none; }
 /* 手机：提示放在输入框上方，不挡消息 */
 .compact .toast { top: auto; bottom: calc(150px + env(safe-area-inset-bottom, 0px)); max-width: calc(100vw - 32px); border-radius: 14px; text-align: center; }
+
+/* ================================================================
+ * 手机左侧抽屉（取代底部菜单栏）
+ * ================================================================ */
+.compact .app { grid-template-rows: var(--top-h) minmax(0, 1fr); grid-template-areas: "top" "main"; }
+.compact .rail { display: none; }
+.compact .side { inset: var(--top-h) 0 0 0; }
+.menu-btn { margin-left: -6px; }
+.side-back { display: none; }
+.compact .side-back { display: flex; align-items: center; gap: 4px; position: sticky; top: 0; z-index: 2; width: 100%; padding: 10px 14px; border: 0; border-bottom: 1px solid var(--line); background: var(--bg); color: var(--accent); font-size: 14px; text-align: left; }
+.compact .side-back svg { width: 18px; height: 18px; }
+.drawer-scrim { position: fixed; inset: 0; z-index: 40; background: rgba(10, 10, 24, 0.45); }
+.drawer {
+  position: fixed; inset: 0 auto 0 0; z-index: 41; width: min(84vw, 340px);
+  display: flex; flex-direction: column; gap: 12px; overflow-y: auto;
+  padding: calc(14px + env(safe-area-inset-top, 0px)) 14px calc(14px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(165deg, #2a2e46, #34324f 70%, #3d3a5a);
+  box-shadow: 8px 0 30px rgba(0, 0, 0, 0.35);
+  transform: translateX(-104%); transition: transform 240ms cubic-bezier(.2, .8, .2, 1); visibility: hidden;
+}
+:root[data-theme="light"] .drawer { background: linear-gradient(165deg, #f4f6fb, #eceffa); }
+body.drawer-open .drawer { transform: none; visibility: visible; }
+body.reduced-motion .drawer { transition: none; }
+.drawer-head { display: flex; align-items: center; padding: 4px 2px 0; }
+.drawer-title strong { display: block; font-size: 20px; font-weight: 700; letter-spacing: 0.02em; }
+.drawer-title small { color: var(--dim); font-size: 12px; }
+.drawer-new { display: flex; align-items: center; justify-content: center; gap: 8px; height: 48px; border: 0; border-radius: 14px; font-size: 16px; font-weight: 600; color: #fff; background: linear-gradient(90deg, hsl(215 80% 62%), hsl(255 70% 64%)); }
+.drawer-new svg { width: 20px; height: 20px; stroke: #fff; }
+.drawer-card { border-radius: 16px; background: var(--surface); border: 1px solid var(--line); padding: 12px; }
+.drawer-card h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; }
+.drawer-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 4px; }
+.drawer-feat { display: grid; justify-items: center; gap: 6px; border: 0; background: none; color: var(--text); font-size: 12px; padding: 0; }
+.drawer-feat svg { width: 44px; height: 44px; padding: 11px; border-radius: 14px; background: var(--accent-soft); color: var(--accent); box-sizing: border-box; }
+.drawer-hist { flex: 1; min-height: 160px; }
+.drawer-group { display: flex; align-items: center; gap: 6px; margin: 8px 0 2px; font-size: 12px; color: var(--dim); }
+.drawer-group::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.drawer-item { display: block; width: 100%; padding: 9px 10px; border: 0; border-radius: 10px; background: none; color: var(--text); font-size: 14px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drawer-item.current { background: var(--accent-soft); color: var(--accent); }
+.drawer-empty { margin: 10px 0; color: var(--dim); font-size: 13px; text-align: center; }
+/* 手机顶栏只留：菜单 · 粒子球 + 名字 · 当前模型 · 明暗；其余入口在抽屉里 */
+.compact #btn-focus, .compact #level-chip, .compact #btn-palette, .compact #btn-fullscreen { display: none; }
+.compact .topbar { gap: 10px; padding: 0 12px; }
+.compact .brand { flex: none; gap: 8px; }
+.compact .status-pill { min-width: 0; flex: 1 1 auto; max-width: none; justify-content: center; }
+.compact .desktop-only, .compact #local-custom { display: none !important; }

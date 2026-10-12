@@ -22,5 +22,15 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
     const { TextToSpeech } = await import('@capacitor-community/text-to-speech');
     installSpeechShim(TextToSpeech);
   } catch { /* 没有朗读插件：只显示文字 */ }
+  try {
+    // 返回键：先关抽屉 / 面板，再回到上一层，最后才退到后台（不直接退出）
+    const { App } = await import('@capacitor/app');
+    App.addListener('backButton', () => {
+      const b = document.body;
+      if (b.classList.contains('drawer-open')) return document.querySelector('.drawer-scrim')?.click();
+      if (b.classList.contains('side-open')) return document.getElementById('btn-side-back')?.click();
+      App.minimizeApp();
+    });
+  } catch { /* 没有 App 插件 */ }
   document.documentElement.classList.add('mobile-app');
 }
