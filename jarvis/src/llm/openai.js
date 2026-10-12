@@ -89,31 +89,40 @@ export function createAccumulator(onText) {
 
 /** 已知不支持工具调用的模型（本次运行内记住，避免每轮都先失败一次） */
 const noToolModels = new Set();
+/** 不认 reasoning_effort 参数的模型 */
+const noEffortModels = new Set();
 
 export function createOpenAIAdapter({ baseURL, apiKey, headers = {} }) {
   return {
     kind: 'openai',
-    async stream({ model, system, messages, tools, signal, onText }) {
-      const send = (withTools) => fetch(`${baseURL.replace(/\/$/, '')}/chat/completions`, {
+    async stream({ model, system, messages, tools, signal, onText, effort }) {
+      const send = (withTools, withEffort) => fetch(`${baseURL.replace(/\/$/, '')}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(apiKey && { Authorization: `Bearer ${apiKey}` }), ...headers },
         body: JSON.stringify({
           model,
           stream: true,
           messages: toOpenAIMessages(system, messages),
-          ...(withTools && tools?.length && { tools: toOpenAITools(tools) })
+          ...(withTools && tools?.length && { tools: toOpenAITools(tools) }),
+          // 思考强度：日常对话让推理模型少想一点，首字快很多（不支持的模型会报错，自动去掉重试）
+          ...(withEffort && { reasoning_effort: effort })
         }),
         signal
       });
-      const useTools = !noToolModels.has(model);
-      let res = await send(useTools);
-      // 有些本机模型（如 gemma3、qwen2.5vl）不支持工具调用：去掉工具再试，只聊天
-      if (useTools && tools?.length && res.status === 400) {
+      let useTools = !noToolModels.has(model);
+      let useEffort = Boolean(effort) && !noEffortModels.has(model);
+      let res = await send(useTools, useEffort);
+      for (let retry = 0; retry < 2 && res.status === 400; retry++) {
         const detail = await res.clone().text().catch(() => '');
-        if (/does not support tools|tools? (is|are) not supported/i.test(detail)) {
+        if (useEffort && /reasoning_effort|reasoning effort|unsupported parameter|unknown parameter|unrecognized/i.test(detail)) {
+          noEffortModels.add(model);
+          useEffort = false;
+        } else if (useTools && tools?.length && /does not support tools|tools? (is|are) not supported/i.test(detail)) {
+          // 有些本机模型（如 gemma3、qwen2.5vl）不支持工具调用：去掉工具再试，只聊天
           noToolModels.add(model);
-          res = await send(false);
-        }
+          useTools = false;
+        } else break;
+        res = await send(useTools, useEffort);
       }
       if (!res.ok || !res.body) {
         let detail = '';

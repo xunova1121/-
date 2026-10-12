@@ -44,6 +44,7 @@ import { createDesktopTools } from './agent/desktopTools.js';
 import { initMcpPanel } from './ui/mcpPanel.js';
 import { initLocalModelsPanel } from './ui/localModelsPanel.js';
 import { initOrbitHud } from './ui/orbitHud.js';
+import { initRoutingPanel } from './ui/routingPanel.js';
 import { matchWake, WakeWindow } from './core/wakeWord.js';
 import { playCue } from './perception/voiceFx.js';
 import { MetricsPoller } from './api/metrics.js';
@@ -56,6 +57,8 @@ import { resolveStt, transcribe } from './perception/stt.js';
 import { STANDALONE } from './config.js';
 import { createFormDirector } from './core/formDirector.js';
 import { composeGreeting, GREET_GAP_MS } from './core/greeting.js';
+import { classifyTask, routeFor, TASKS } from './llm/router.js';
+import { resolveTheme, toggled, THEMES } from './core/theme.js';
 import { FORMS } from './render/formations.js';
 import { resolveQuality } from './core/quality.js';
 import { loadMemory, clearMemory } from './core/memoryStore.js';
@@ -435,15 +438,23 @@ function makeSpeech() {
 }
 
 // ---------------------------------------------------------------- 记忆引擎：整理用的大模型 + 语义向量，随配置变化
-/** 给记忆整理、深度调研等内部环节用的“单次问答”；内置演示或配置不全时返回 null */
-function helperLlm() {
-  const { adapter, model, problem } = createAdapter(llmConfig, { gateway });
+/** 给记忆整理、深度调研等内部环节用的“单次问答”；内置演示或配置不全时返回 null。task 决定用哪个分工模型 */
+function helperLlm(task = 'chat') {
+  const { adapter, model, problem } = createAdapter(routeFor(llmConfig, task).cfg, { gateway });
   if (problem || providerById(llmConfig.provider)?.kind === 'mock') return null;
   return async ({ system, prompt, signal }) => {
     let text = '';
     const r = await adapter.stream({ model, system: [system], messages: [{ role: 'user', content: prompt }], tools: [], signal, onText: (d) => { text += d; } });
     return r?.text || text;
   };
+}
+/** 团队模式：按角色挑分工模型 */
+const ROLE_TASK = { coder: 'code', writer: 'write', researcher: 'reason', analyst: 'reason', operator: 'chat', generalist: 'chat' };
+function modelForRole(role) {
+  const r = routeFor(llmConfig, ROLE_TASK[role] ?? 'chat');
+  if (!r.routed) return null;
+  const a = createAdapter(r.cfg, { gateway });
+  return a.problem ? null : { adapter: a.adapter, model: a.model };
 }
 function syncMemoryEngine() {
   const embedder = createEmbedder(llmConfig, { gateway });
@@ -585,7 +596,7 @@ async function buildTools({ background = false } = {}) {
       metrics,
       tavilyKey: llmConfig.tavilyKey,
       fetchViaGateway: fetchViaGateway(),
-      llm: helperLlm(),
+      llm: helperLlm('write'), // 深度调研：用写作模型
       onPreview: background ? () => {} : (path) => { showPanel('workspace'); panels.openFile(path); },
       onFileChanged,
       onSchedulesChanged: () => schedulesPanel?.refresh(),
@@ -752,7 +763,12 @@ async function send(text) {
   active = turn;
   setTask('processing', '思考中');
 
-  const { adapter, model, problem } = createAdapter(llmConfig, { gateway });
+  // 模型分工：按这句话的类型换模型；日常对话让推理模型少想一点（首字更快）
+  const task = shouldTeam(text, settings.teamMode === 'auto' && !helperLlm() ? 'off' : settings.teamMode) ? 'reason' : classifyTask(text, { images: imgs.length });
+  const route = routeFor(llmConfig, task);
+  const { adapter, model, problem } = createAdapter(route.cfg, { gateway });
+  const effort = task === 'chat' && llmConfig.fastChat !== false ? 'low' : undefined;
+  if (route.routed) hud.think(`◇ 模型分工：${TASKS[task].name} → ${route.model}`);
   if (problem) {
     bubble.append(problem);
     bubble.done();
@@ -769,13 +785,16 @@ async function send(text) {
   let serverCard = null;
   const t0 = now();
   const usedTools = [];
+  let ctxMs = null;
   callouts?.retract();
   // 内置演示模式下“自动”不触发（规则拆步效果有限），只认明确的“/团队 …”或“总是”
   const team = shouldTeam(text, settings.teamMode === 'auto' && !helperLlm() ? 'off' : settings.teamMode);
   let teamCard = null;
   try {
     const result = await (team ? runTeam : runAgent)({
-      llm: team ? helperLlm() : undefined,
+      llm: team ? helperLlm('reason') : undefined,
+      pickModel: team ? modelForRole : undefined,
+      effort,
       adapter, model, history: llmHistory, userText: team ? userText : await expandSlash(userText), signal: ctrl.signal,
       sessionId: session.id,
       maxSteps: DESKTOP ? 40 : 16, // 用鼠标键盘操作电脑时步数多
@@ -819,6 +838,7 @@ async function send(text) {
         } else if (e.type === 'server_tool') {
           serverCard = Object.assign(bubble.toolCard('web_search', { query: 'Claude 联网搜索' }), { t0: now() });
         } else if (e.type === 'sources') bubble.sources(e.items);
+        else if (e.type === 'timing') ctxMs = e.contextMs;
         else if (e.type === 'team_plan') { hud.think(`团队分工 · ${e.steps.map((x) => x.roleName).join(' → ')}`); teamCard = bubble.teamCard(e.steps); setTask('processing', `团队分工 · ${e.steps.length} 步`); }
         else if (e.type === 'team_step') {
           teamCard?.step(e.index, e.status, e.note);
@@ -829,7 +849,8 @@ async function send(text) {
     if (active !== turn) return;
     speech.flush();
     const total = now() - t0;
-    bubble.done(`${team ? `团队 ${result.steps} 步 · ` : ''}${firstToken ? `首字 ${Math.round(firstToken - t0)}ms · ` : ''}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}`, {
+    const modelTag = providerById(llmConfig.provider)?.kind === 'mock' ? '' : `${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
+    bubble.done(`${modelTag}${team ? `团队 ${result.steps} 步 · ` : ''}${ctxMs !== null && ctxMs >= 300 ? `准备 ${(ctxMs / 1000).toFixed(1)}s · ` : ''}${firstToken ? `首字 ${((firstToken - t0) / 1000).toFixed(1)}s · ` : ''}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}`, {
       onFeedback: async (kind, comment) => {
         if (kind === 'up') await agentMemory.noteTask(`获得好评：${text.slice(0, 30)}`);
         else {
@@ -1147,7 +1168,7 @@ function showPanel(name, { toggle = false } = {}) {
   if (name === 'workspace') panels.refreshFiles();
   if (name === 'knowledge') panels.refreshKb();
   if (name === 'mind') panels.refreshMind();
-  if (name === 'models') { panels.refreshModels(); voicePanel.render(); localModels.refresh(); }
+  if (name === 'models') { panels.refreshModels(); voicePanel.render(); localModels.refresh(); routingPanel.render(); }
   if (name === 'skills') { skillsPanel.refresh(); mcpPanel.refresh(); }
   if (name === 'sessions') sessionsPanel?.refresh();
   if (name === 'system') schedulesPanel?.refresh();
@@ -1156,16 +1177,24 @@ function showPanel(name, { toggle = false } = {}) {
 for (const b of document.querySelectorAll('.rail-btn')) b.addEventListener('click', () => showPanel(b.dataset.panel, { toggle: true }));
 for (const b of document.querySelectorAll('[data-open]')) b.addEventListener('click', () => showPanel(b.dataset.open));
 
+/** 模型分工面板（下面创建；配置变化时刷新） */
+let routingPanel = null;
 const panels = initPanels({
   toast: (t) => toast(t),
   settings,
   getGateway: () => gateway,
   getHistory: () => history,
-  onConfigChange: (cfg) => { llmConfig = cfg; updateModelLabels(); syncMemoryEngine(); updateOrbitStatus(); },
+  onConfigChange: (cfg) => { llmConfig = cfg; updateModelLabels(); syncMemoryEngine(); updateOrbitStatus(); routingPanel?.render(); },
   onReflect: () => reflectNow({ manual: true }),
   onAutoMemory: (on) => { setSetting('autoMemory', on); if (!on) clearTimeout(reflectTimer); },
 });
 const voicePanel = initVoicePanel({ panels, speaker, getGateway: () => gateway });
+routingPanel = initRoutingPanel({
+  getConfig: () => panels.config,
+  patchConfig: (fn) => panels.patchConfig(fn),
+  getGateway: () => gateway,
+  toast: (t) => toast(t)
+});
 const localModels = initLocalModelsPanel({
   getGateway: () => gateway,
   getConfig: () => panels.config,
@@ -1261,6 +1290,7 @@ const palette = initPalette({
       ...(!mic.hidden ? [toggle('set-voice', '直接对话'), toggle('set-wake', '唤醒词')] : []),
       toggle('set-face', '人脸跟随'),
       { id: 'focus', group: '开关', title: body.classList.contains('focus-view') ? '退出专注视图' : '进入专注视图', keys: 'Alt F', run: () => $('#btn-focus').click() },
+      { id: 'theme', group: '开关', title: document.documentElement.dataset.theme === 'light' ? '切换为夜间界面' : '切换为白天界面', run: () => $('#btn-theme').click() },
       { id: 'team', group: '操作', title: '交给团队完成…', hint: '规划员拆步骤，多个角色分工执行，审核员把关', run: () => { $('#prompt').value = '/团队 '; $('#prompt').focus(); } },
       { id: 'new', group: '操作', title: '新对话', hint: '开始一段新对话（之前的对话保存在“对话”面板里）', keys: 'Ctrl Shift O', run: () => newSession() },
       { id: 'sessions', group: '操作', title: '历史对话', hint: '查看、搜索之前的对话', run: () => showPanel('sessions') },
@@ -1300,6 +1330,24 @@ $('#set-tts').addEventListener('change', (e) => {
   speaker.enabled = e.target.checked;
   if (!e.target.checked) speaker.cancel();
 });
+// 界面明暗
+const lightMql = matchMedia('(prefers-color-scheme: light)');
+function applyTheme() {
+  const t = resolveTheme(settings.theme, { prefersLight: lightMql.matches });
+  document.documentElement.dataset.theme = t;
+  for (const b of document.querySelectorAll('#set-theme button')) b.setAttribute('aria-checked', String(b.dataset.v === settings.theme));
+  $('#btn-theme').title = `${t === 'light' ? '白天' : '夜间'}界面（${THEMES[settings.theme]}）· 点击切换`;
+}
+function setTheme(mode) { setSetting('theme', mode); applyTheme(); }
+applyTheme();
+lightMql.addEventListener?.('change', applyTheme);
+setInterval(() => { if (settings.theme === 'time') applyTheme(); }, 60_000);
+$('#btn-theme').addEventListener('click', () => {
+  setTheme(toggled(document.documentElement.dataset.theme));
+  toast(document.documentElement.dataset.theme === 'light' ? '已切换为白天界面' : '已切换为夜间界面');
+});
+for (const b of document.querySelectorAll('#set-theme button')) b.addEventListener('click', () => setTheme(b.dataset.v));
+
 // 主动问好 / 桌面背景
 $('#set-greet').checked = settings.greetOnReturn !== false;
 $('#set-greet').addEventListener('change', (e) => setSetting('greetOnReturn', e.target.checked));

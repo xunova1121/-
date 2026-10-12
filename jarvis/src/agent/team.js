@@ -61,12 +61,13 @@ export function ruleBasedPlan(task) {
  * @param {object} o  与 runAgent 相同的参数，另加：
  * @param {((p: { system, prompt, signal? }) => Promise<string>) | null} o.llm  规划 / 审核用；null 时用规则
  * @param {Function} [o.run]  执行单步（测试可替换），默认 runAgent
+ * @param {(role: string) => ({ adapter, model } | null)} [o.pickModel]  按角色换模型
  * emit 额外事件：
  *   { type: 'team_plan', steps: [{ id, role, roleName, title, detail }] }
  *   { type: 'team_step', index, status: 'running'|'done'|'fail'|'redo', note? }
  *   { type: 'team_review', pass, issues: string[], skipped? }
  */
-export async function runTeam({ adapter, model, history = [], userText, images = [], tools, emit, signal, approve, llm = null, run = runAgent, maxFix = 1, sessionId = null }) {
+export async function runTeam({ adapter, model, history = [], userText, images = [], tools, emit, signal, approve, llm = null, run = runAgent, maxFix = 1, sessionId = null, pickModel = null }) {
   const task = stripTeamPrefix(userText);
   const roleList = Object.entries(ROLES).map(([id, r]) => `${id}（${r.name}）：${r.duty}`).join('\n');
   emit({ type: 'state', value: 'processing' });
@@ -98,8 +99,10 @@ export async function runTeam({ adapter, model, history = [], userText, images =
   const doStep = async (s, index, extra = '') => {
     emit({ type: 'team_step', index, status: 'running' });
     const prior = results.filter(Boolean).map((r) => `【第 ${r.id} 步 · ${r.roleName}：${r.title}】\n${clip(r.text, 1500)}`).join('\n\n');
+    // 模型分工：工程师用编程模型、撰稿人用写作模型……（没配置时都用同一个模型）
+    const m = pickModel?.(s.role) ?? { adapter, model };
     const r = await run({
-      adapter, model, history, signal, approve, sessionId,
+      adapter: m.adapter, model: m.model, history, signal, approve, sessionId,
       images: index === 0 ? images : [],
       tools: toolsFor(s.role, tools),
       userText: `${s.detail}\n\n——\n【团队分工】你是团队里的「${s.roleName}」（职责：${ROLES[s.role].duty}），负责整个任务的第 ${index + 1}/${steps.length} 步。\n用户的原始需求：${task}\n${prior ? `前面步骤的成果：\n${prior}\n` : ''}${extra}只完成你这一步，完成后用几句话说明产出了什么（文件路径、关键数据、结论）。`,

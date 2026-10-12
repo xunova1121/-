@@ -98,6 +98,19 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('识别到本机网关', await page.evaluate(() => Boolean(window.__jarvis.gateway)), await page.textContent('#gw-badge'));
 
   check('没有手动切换形态的按钮', (await page.locator('[data-style]').count()) === 0);
+  // —— 白天 / 夜间
+  const th0 = await page.evaluate(() => document.documentElement.dataset.theme);
+  await page.click('#btn-theme');
+  const th1 = await page.evaluate(() => ({ t: document.documentElement.dataset.theme, bg: getComputedStyle(document.body).backgroundColor, stage: getComputedStyle(document.querySelector('.stage')).getPropertyValue('--text').trim() }));
+  check('顶栏一键切换白天 / 夜间', th0 && th1.t !== th0, `${th0} → ${th1.t}`);
+  await page.click('#btn-theme');
+  await page.evaluate(() => window.__jarvis.showPanel('settings'));
+  await page.click('#set-theme [data-v="day"]');
+  const day = await page.evaluate(() => ({ t: document.documentElement.dataset.theme, text: getComputedStyle(document.body).color, stageText: getComputedStyle(document.querySelector('.stage')).getPropertyValue('--text').trim() }));
+  check('白天界面：正文深色，舞台仍是深色显示屏（浅色字）', day.t === 'light' && day.text === 'rgb(20, 34, 48)' && day.stageText === '#d9e7f2', JSON.stringify(day));
+  await page.screenshot({ path: `${OUT}/light-theme.png` });
+  await page.click('#set-theme [data-v="night"]');
+  check('夜间界面', await page.evaluate(() => document.documentElement.dataset.theme) === 'dark');
 
   // —— 欢迎页、HUD
   check('欢迎页与快捷任务', (await page.locator('.welcome .quick').count()) === 7 && /我是贾维斯/.test(await page.textContent('.welcome h1')));
@@ -318,6 +331,19 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   const visUser = fake.seen[visIdx]?.messages.filter((m) => m.role === 'user').at(-1);
   check('看图：图片随消息发给模型（image_url）', Array.isArray(visUser?.content) && visUser.content.some((p) => p.type === 'image_url' && /^data:image\/jpeg;base64,/.test(p.image_url.url)), JSON.stringify(visUser?.content)?.slice(0, 100));
   check('对话里显示图片缩略图', (await page.locator('.msg.user').last().locator('.msg-images img').count()) === 1);
+  // —— 模型分工：闲聊用快模型（并让推理模型少想），写代码用编程模型
+  await page.evaluate(() => window.__jarvis.panels.patchConfig((c) => ({ ...c, routing: { enabled: true, provider: 'custom', routes: { chat: 'fast-model', code: 'code-model' } } })));
+  let rIdx = fake.seen.length;
+  const chatReply = await ask(page, '你好呀');
+  check('模型分工：闲聊交给快模型，并带 reasoning_effort=low', fake.seen[rIdx]?.model === 'fast-model' && fake.seen[rIdx]?.reasoning_effort === 'low', `${fake.seen[rIdx]?.model} / ${fake.seen[rIdx]?.reasoning_effort}`);
+  check('回答下方标出用了哪个模型', /fast-model（日常对话）/.test(chatReply), chatReply.slice(-80));
+  rIdx = fake.seen.length;
+  await ask(page, '帮我写个 python 脚本');
+  check('模型分工：写代码交给编程模型（不限制思考）', fake.seen[rIdx]?.model === 'code-model' && fake.seen[rIdx]?.reasoning_effort === undefined, fake.seen[rIdx]?.model);
+  await page.evaluate(() => window.__jarvis.panels.patchConfig((c) => ({ ...c, routing: { ...c.routing, enabled: false } })));
+  rIdx = fake.seen.length;
+  await ask(page, '你好呀');
+  check('关闭模型分工后用默认模型', fake.seen[rIdx]?.model === 'fake-model', fake.seen[rIdx]?.model);
   fake.server.close();
   await page.click('[data-panel="models"]');
   await page.selectOption('#llm-provider', 'mock');

@@ -88,3 +88,29 @@ export function resolveVoice(cfg, gateway = null) {
 }
 
 export { PROVIDERS, providerById };
+
+/**
+ * 读取服务商提供的模型列表（OpenAI 兼容的 GET /models）。失败时返回该服务商预置的几个型号。
+ * @returns {Promise<string[]>}
+ */
+export async function listModels(cfg, { gateway = null } = {}) {
+  const p = providerById(cfg.provider);
+  const fallback = p.models.filter(Boolean);
+  if (p.kind !== 'openai') return fallback;
+  const key = cfg.keys[p.id] || '';
+  const viaGateway = gateway && upstreamFor(p.id);
+  const viaGw = viaGateway || (p.custom && customViaGateway(gateway, cfg.baseURLs.custom));
+  const base = viaGw ? `${gateway.origin}/api/llm/${p.id}` : (p.custom ? cfg.baseURLs.custom : p.baseURL);
+  if (!base) return fallback;
+  const headers = { ...(key || viaGw ? { Authorization: `Bearer ${key || 'use-gateway-key'}` } : {}) };
+  if (viaGw && p.custom) headers['x-jarvis-upstream'] = cfg.baseURLs.custom.trim();
+  try {
+    const r = await fetch(`${base.replace(/\/$/, '')}/models`, { headers, signal: AbortSignal.timeout?.(10000) });
+    if (!r.ok) throw new Error(String(r.status));
+    const j = await r.json();
+    const ids = (j.data ?? j.models ?? []).map((m) => m.id ?? m.name).filter(Boolean);
+    return ids.length ? [...new Set(ids)].sort() : fallback;
+  } catch {
+    return fallback;
+  }
+}

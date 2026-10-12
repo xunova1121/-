@@ -85,9 +85,11 @@ export async function buildContext(userText, { sessionId = null, turns = 0 } = {
  * @param {(req: { title: string, detail?: string, key?: string }, tool: object) => Promise<boolean>} [o.approve]  需要确认的工具调用
  * @returns {Promise<{ text: string, steps: number, toolCalls: number }>}
  */
-export async function runAgent({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null }) {
+export async function runAgent({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort }) {
   emit({ type: 'state', value: 'processing' });
+  const tCtx = Date.now();
   const ctx = context ?? (await buildContext(userText, { sessionId, turns: history.filter((m) => m.role === 'user').length }));
+  emit({ type: 'timing', contextMs: Date.now() - tCtx });
   if (ctx.kbHits?.length) emit({ type: 'sources', items: ctx.kbHits.map((h) => h.name) });
   const convo = [...history, { role: 'user', content: userText, ...(images.length && { images }) }];
   const byName = new Map(tools.map((t) => [t.name, t]));
@@ -102,6 +104,7 @@ export async function runAgent({ adapter, model, history, userText, images = [],
     const stripper = new EmotionTagStripper();
     const r = await adapter.stream({
       model,
+      effort,
       system: [STABLE_PROMPT, ctx.dynamic],
       messages: convo,
       tools,

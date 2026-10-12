@@ -37,11 +37,31 @@ ANTHROPIC_API_KEY=... OPENAI_API_KEY=... DEEPSEEK_API_KEY=... DASHSCOPE_API_KEY=
 
 | 命令 | 作用 |
 |---|---|
-| `npm test` | 单元 + 集成测试（Vitest，249 项） |
-| `npm run e2e` | 完整版浏览器测试（Playwright，108 项；需先 build 并启动 server；本机模型下载那几项要用 `OLLAMA_HOST=127.0.0.1:11999` 启动 server、先运行 `node e2e/fixtures/fake-ollama.mjs`，并设 `JARVIS_FAKE_OLLAMA=1`） |
+| `npm test` | 单元 + 集成测试（Vitest，255 项） |
+| `npm run e2e` | 完整版浏览器测试（Playwright，115 项；需先 build 并启动 server；本机模型下载那几项要用 `OLLAMA_HOST=127.0.0.1:11999` 启动 server、先运行 `node e2e/fixtures/fake-ollama.mjs`，并设 `JARVIS_FAKE_OLLAMA=1`） |
 | `npm run e2e:standalone` | 单文件版测试（file:// 直接打开，含“单文件版 + 本机网关”场景，14 项） |
 | `xvfb-run -a node e2e/desktop.mjs` | 桌面版测试（启动真正的 Electron 应用，33 项；鼠标键盘控制需要 `xdotool`） |
 | `npm run build:standalone` | 生成单文件版 `../jarvis-standalone.html` |
+
+## v5.1：模型分工 · 提速 · 白天 / 夜间
+
+### 模型分工（按对话内容自动切换模型）
+
+“模型”面板 → 模型分工：在当前服务商（比如一个聚合中转平台）里，给 **日常对话 / 编程 / 写作文档 / 深度思考·调研 / 看图** 分别指定模型。每句话先按内容判断类型（规则判断，不额外调用模型，零延迟），再换成对应的模型；没填的沿用默认型号。
+
+- “读取模型列表并推荐”：从服务商的 `/models` 读取可用模型，按名字推荐（闲聊挑 mini / flash / haiku 这类快模型，编程挑 codex / coder / sonnet，写作挑 claude / gpt，推理挑 o3 / r1 / thinking，看图挑 vl / 4o / gemini）。推荐只是参考。
+- “测速”：逐个测首字时间，绿 < 2 秒，黄 < 6 秒，红更慢。
+- 团队模式里各角色也按分工换模型（工程师 → 编程模型，撰稿人 → 写作模型，研究员 → 推理模型）；深度调研用写作模型；记忆整理、主动问候用对话模型。
+- 每条回答下方显示用了哪个模型、首字时间、总耗时；准备阶段（检索记忆和知识库）超过 0.3 秒也会显示。
+
+### 提速
+
+- 日常对话给推理模型带 `reasoning_effort: low`（少想一点，首字快很多）；模型不认这个参数时自动去掉重试，并记住。可在模型分工里关掉。
+- 检索用的句子向量：同一句话 5 分钟内复用（以前记忆、知识库各算一次）；向量服务 2.5 秒没回就先不等，这一轮只用关键词检索。
+
+### 白天 / 夜间界面
+
+顶栏 ☀/☾ 一键切换；设置里可选 **按时间**（7:00–19:00 白天，默认）/ 跟随系统 / 白天 / 夜间。白天界面浅色，中间粒子舞台保持深色显示屏。
 
 ## v5：会变形的粒子体 · 科幻 HUD · 桌面上的贾维斯
 

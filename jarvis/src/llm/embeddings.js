@@ -27,17 +27,33 @@ export function createEmbedder(cfg, { gateway = null, fetchImpl = globalThis.fet
   if (!e) return null;
   const key = e.local ? 'ollama' : cfg.keys?.[e.keyFrom] || '';
   const base = gateway ? `${gateway.origin}/api/llm/${e.id}` : e.base;
+  // 检索时（一次只算一句话）：同一句话 5 分钟内复用结果；向量服务 2.5 秒没回就先不等它（这一轮只用关键词检索）
+  const cache = new Map();
+  const QUERY_TIMEOUT = 2500;
+  const raw = async (texts) => {
+    const res = await fetchImpl(`${base}/embeddings`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${key || 'use-gateway-key'}` },
+      body: JSON.stringify({ model: e.model, input: texts.map((t) => String(t).slice(0, 2000)) })
+    });
+    if (!res.ok) throw new Error(`向量服务返回 ${res.status}`);
+    const j = await res.json();
+    return (j.data || []).sort((a, b) => a.index - b.index).map((d) => d.embedding);
+  };
   return {
     model: `${e.id}:${e.model}`,
     async embed(texts) {
-      const res = await fetchImpl(`${base}/embeddings`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${key || 'use-gateway-key'}` },
-        body: JSON.stringify({ model: e.model, input: texts.map((t) => String(t).slice(0, 2000)) })
-      });
-      if (!res.ok) throw new Error(`向量服务返回 ${res.status}`);
-      const j = await res.json();
-      return (j.data || []).sort((a, b) => a.index - b.index).map((d) => d.embedding);
+      if (texts.length !== 1) return raw(texts);
+      const key = String(texts[0]);
+      const hit = cache.get(key);
+      if (hit && Date.now() - hit.t < 300_000) return [await hit.p];
+      const p = raw([key]).then((v) => v[0]);
+      cache.set(key, { p, t: Date.now() });
+      if (cache.size > 64) cache.delete(cache.keys().next().value);
+      p.catch(() => cache.delete(key));
+      let timer;
+      const timeout = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('向量服务超时')), QUERY_TIMEOUT); });
+      try { return [await Promise.race([p, timeout])]; } finally { clearTimeout(timer); }
     }
   };
 }
