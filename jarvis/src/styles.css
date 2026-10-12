@@ -846,7 +846,7 @@ h3.sub { margin-top: 14px; font: 600 var(--fs-sm)/1.4 var(--font-ui); letter-spa
   .msg.agent .body { font-size: var(--fs-md); line-height: 1.75; }
   /* 手机上舞台矮一点、只留粒子和建议：仪表读数会互相挤 */
   .stage, body.has-convo .stage { height: clamp(170px, 30vh, 250px); }
-  :root:not([data-theme="light"]) .stage { margin: 8px 10px 0; border-radius: 16px; }
+  :root:not([data-theme="light"]) .stage { margin: 12px 14px 0; border-radius: 18px; overflow: hidden; }
   /* 抽屉没打开时底部导航不高亮（正在看的是对话） */
   body:not(.side-open) .rail-btn.active, :root:not([data-theme="light"]) body:not(.side-open) .rail-btn.active { color: var(--muted); background: none; border-color: transparent; }
   .hud-left, .hud-clock, .oh-label, .oh-status, .oh-gauge, .oh-gauge-bg { display: none; }
@@ -903,3 +903,21 @@ h3.sub { margin-top: 14px; font: 600 var(--fs-sm)/1.4 var(--font-ui); letter-spa
 .quick { background: var(--surface); }
 .quick:hover { transform: none; }
 .btn { border-radius: 10px; }
+
+/* ================================================================
+ * 舞台：靛蓝显示屏（白天、夜间相同）
+ *   底色与暮色同色系、比纯黑亮，中心一圈柔光；粒子底色 STAGE_BG（main.js）要和中心颜色一致
+ * ================================================================ */
+.stage, :root[data-theme="light"] .stage {
+  background: radial-gradient(ellipse 60% 75% at 50% 45%, #33386a 0%, #262a50 55%, #1f2242 100%);
+  box-shadow: 0 14px 40px rgba(12, 12, 28, 0.28), inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+}
+.stage, :root[data-theme="light"] .stage, :root:not([data-theme="light"]) .stage {
+  --text: #e3e8f6; --muted: #98a3c0; --dim: #69728f;
+  --line: hsl(var(--hue) 50% 70% / 0.18); --line-strong: hsl(var(--hue) 60% 72% / 0.40);
+}
+.stage::after, body.reduced-motion .stage::after { background: radial-gradient(ellipse 72% 82% at 50% 45%, transparent 62%, rgba(18, 18, 40, 0.30) 100%); }
+.stage .callout { background: rgba(28, 30, 54, 0.58); border-color: rgba(255, 255, 255, 0.13); backdrop-filter: blur(8px); }
+.stage .callout:hover { background: rgba(36, 39, 68, 0.72); }
+/* 窄屏（导航在底部）时舞台也是卡片 */
+@media (max-width: 860px) { .stage, :root[data-theme="light"] .stage { margin: 8px 10px 0; border-radius: 16px; overflow: hidden; } }

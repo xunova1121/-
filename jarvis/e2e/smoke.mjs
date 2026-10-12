@@ -107,7 +107,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.evaluate(() => window.__jarvis.showPanel('settings'));
   await page.click('#set-theme [data-v="day"]');
   const day = await page.evaluate(() => ({ t: document.documentElement.dataset.theme, text: getComputedStyle(document.body).color, stageText: getComputedStyle(document.querySelector('.stage')).getPropertyValue('--text').trim() }));
-  check('白天界面：正文深色，舞台仍是深色显示屏（浅色字）', day.t === 'light' && day.text === 'rgb(20, 34, 48)' && day.stageText === '#d9e7f2', JSON.stringify(day));
+  check('白天界面：正文深色，舞台仍是深色显示屏（浅色字）', day.t === 'light' && day.text === 'rgb(20, 34, 48)' && day.stageText === '#e3e8f6', JSON.stringify(day));
   await page.screenshot({ path: `${OUT}/light-theme.png` });
   await page.click('#set-theme [data-v="night"]');
   check('夜间界面', await page.evaluate(() => document.documentElement.dataset.theme) === 'dark');

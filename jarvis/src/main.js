@@ -113,6 +113,8 @@ const live = {
 };
 
 // ---------------------------------------------------------------- 渲染策略
+/** 舞台底色（与 styles.css 里 .stage 的中心颜色一致，画布边缘渐隐时才接得上） */
+const STAGE_BG = 0x2b2f58;
 let stage = null;
 let stageLoading = null;
 const DEG = Math.PI / 180;
@@ -215,6 +217,7 @@ async function ensureStage() {
         lowEnd,
         onContextChange: (s, ms) => console.info(`[stage] WebGL 上下文${s === 'lost' ? '丢失' : `已恢复（${Math.round(ms)}ms）`}`)
       });
+      stage.setBackground(STAGE_BG); // 靛蓝显示屏：和界面的暮色同色系，粒子在上面最亮
       stage.onFrame(frame);
       stage.setForm(director.form);
       applyFpsCap();
