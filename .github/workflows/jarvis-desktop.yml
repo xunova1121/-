@@ -1,4 +1,4 @@
-# 贾维斯桌面版：在 Windows / macOS / Linux 上分别打包安装包，另打包安卓 App（APK），一起发布到 Releases 页面。
+# 贾维斯：打包 Windows 安装包和安卓 App（APK），一起发布到 Releases 页面。（macOS / Linux 版已停止更新）
 # 触发：推送了 jarvis/ 下的改动、推送 desktop-v* 标签，或在 Actions 页面手动运行。
 name: 贾维斯桌面版安装包
 
@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        os: [windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     defaults:
@@ -50,9 +50,6 @@ jobs:
             jarvis/desktop/package-lock.json
       - name: 安装网页依赖
         run: npm ci --no-audit --no-fund
-      - name: 单元测试
-        if: runner.os == 'Linux'
-        run: npm test
       - name: 安装桌面版依赖
         working-directory: jarvis/desktop
         run: npm ci --no-audit --no-fund
@@ -112,6 +109,8 @@ jobs:
           cache-dependency-path: jarvis/android/**/*.gradle*
       - name: 安装依赖
         run: npm ci --no-audit --no-fund
+      - name: 单元测试
+        run: npm test
       - name: 构建手机版网页并同步到安卓工程
         run: npm run android
       - name: 签名密钥
@@ -175,21 +174,17 @@ jobs:
           body: |
             ## 下载哪个文件
             - **Windows**：`Jarvis-Setup-*.exe`（安装版，推荐）或 `Jarvis-*-win-x64.zip`（免安装，解压后运行 Jarvis.exe）
-            - **Mac（M1/M2/M3/M4 芯片）**：`Jarvis-*-mac-arm64.dmg`
-            - **Mac（Intel 芯片）**：`Jarvis-*-mac-x64.dmg`
-            - **Linux**：`Jarvis-*-linux-x86_64.AppImage`
             - **安卓手机**：`Jarvis-*-android.apk`（用手机浏览器下载后点开安装；提示“未知来源”时允许安装）
 
             ## 电脑和手机同步
             设置 → 多设备同步：填好自己的阿里云 OSS，在电脑上点“生成同步码”，手机 App 里“用同步码设置”即可。数据上传前用同步密码加密。
 
             ## 自动更新
-            装好之后不用再来这里下载：有新版本时贾维斯会提示。Windows 安装版 / Linux 在后台只下载改动的部分，点“重启以更新”即可；
-            免安装版和 Mac 版会提示去下载页。
+            装好之后不用再来这里下载：有新版本时贾维斯会提示。Windows 安装版在后台只下载改动的部分，点“重启以更新”即可；
+            免安装版会提示去下载页。
 
             ## 首次打开
             - 安装包没有购买代码签名证书：Windows 提示“已保护你的电脑”时点 **更多信息 → 仍要运行**；
-              Mac 提示“无法验证开发者”时，在“访达 → 应用程序”里**右键 → 打开**，或在终端运行 `xattr -cr /Applications/Jarvis.app`。
             - 使用 MCP 本机工具需要电脑上装有 Node.js（npx）或 uv（uvx）。
 
             构建自 ${{ github.sha }}
