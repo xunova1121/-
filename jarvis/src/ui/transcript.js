@@ -228,6 +228,57 @@ export class Transcript {
         };
       },
       /**
+       * 团队分工卡片：每一步一行（角色 · 做什么 · 状态），点开看这一步的成果；底部是审核结论。
+       * @param {Array<{ roleName: string, title: string }>} steps
+       */
+      teamCard(steps) {
+        if (role === 'agent' && curRaw) renderBlocks(cur, curRaw);
+        const card = document.createElement('div');
+        card.className = 'team-card';
+        const head = document.createElement('div');
+        head.className = 'team-head';
+        head.textContent = `团队分工 · ${steps.length} 步`;
+        const list = document.createElement('ol');
+        const ST = { pending: '等待', running: '进行中', done: '完成', fail: '失败', redo: '返工中' };
+        const rows = steps.map((s) => {
+          const li = document.createElement('li');
+          li.dataset.st = 'pending';
+          const d = document.createElement('details');
+          const sum = document.createElement('summary');
+          const r = Object.assign(document.createElement('span'), { className: 'team-role', textContent: s.roleName });
+          const t = Object.assign(document.createElement('span'), { className: 'team-title', textContent: s.title });
+          const st = Object.assign(document.createElement('span'), { className: 'team-st', textContent: ST.pending });
+          sum.append(r, t, st);
+          const pre = document.createElement('pre');
+          d.append(sum, pre);
+          li.append(d);
+          list.append(li);
+          return { li, st, pre };
+        });
+        const rev = document.createElement('div');
+        rev.className = 'team-review';
+        rev.hidden = true;
+        card.append(head, list, rev);
+        el.insertBefore(card, cur);
+        self.#scroll();
+        return {
+          step(i, status, note) {
+            const row = rows[i];
+            if (!row) return;
+            row.li.dataset.st = status;
+            row.st.textContent = ST[status] ?? status;
+            if (note) row.pre.textContent = status === 'redo' ? `审核意见：${note}\n\n${row.pre.textContent}` : note;
+            self.#scroll();
+          },
+          review({ pass, issues = [], skipped }) {
+            rev.hidden = false;
+            rev.dataset.pass = pass ? '1' : '0';
+            rev.textContent = skipped ? '审核员：演示模式下跳过审核' : pass ? '审核员：通过 ✓' : `审核员：发现 ${issues.length} 个问题，已交回返工 —— ${issues.join('；')}`;
+            self.#scroll();
+          }
+        };
+      },
+      /**
        * 征求同意：在气泡里显示确认卡片。
        * @returns {Promise<'once'|'session'|'deny'>}
        */

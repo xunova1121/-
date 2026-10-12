@@ -18,6 +18,7 @@ import { SentenceChunker } from './core/sentenceChunker.js';
 import { SILENCE_BY_SENSITIVITY } from './core/vadGate.js';
 import { loadSettings, saveSettings, wantsReducedMotion } from './core/settings.js';
 import { browserMetrics } from './api/browserMetrics.js';
+import { runTeam, shouldTeam } from './agent/team.js';
 import { runAgent } from './agent/agent.js';
 import { createTools } from './agent/tools.js';
 import * as ws from './agent/workspace.js';
@@ -654,9 +655,13 @@ async function send(text) {
   const t0 = now();
   const usedTools = [];
   callouts?.retract();
+  // 内置演示模式下“自动”不触发（规则拆步效果有限），只认明确的“/团队 …”或“总是”
+  const team = shouldTeam(text, settings.teamMode === 'auto' && !helperLlm() ? 'off' : settings.teamMode);
+  let teamCard = null;
   try {
-    const result = await runAgent({
-      adapter, model, history: llmHistory, userText: await expandSlash(userText), signal: ctrl.signal,
+    const result = await (team ? runTeam : runAgent)({
+      llm: team ? helperLlm() : undefined,
+      adapter, model, history: llmHistory, userText: team ? userText : await expandSlash(userText), signal: ctrl.signal,
       images: imgs.map(({ mime, data }) => ({ mime, data })),
       tools: await buildTools(),
       approve: (req) => {
@@ -691,12 +696,17 @@ async function send(text) {
         } else if (e.type === 'server_tool') {
           serverCard = Object.assign(bubble.toolCard('web_search', { query: 'Claude 联网搜索' }), { t0: now() });
         } else if (e.type === 'sources') bubble.sources(e.items);
+        else if (e.type === 'team_plan') { teamCard = bubble.teamCard(e.steps); setTask('processing', `团队分工 · ${e.steps.length} 步`); }
+        else if (e.type === 'team_step') {
+          teamCard?.step(e.index, e.status, e.note);
+          if (e.status === 'running' || e.status === 'redo') setTask('processing', `第 ${e.index + 1} 步${e.status === 'redo' ? ' · 返工' : ''}`);
+        } else if (e.type === 'team_review') { teamCard?.review(e); setTask('processing', e.pass ? '审核通过，汇总中' : '审核发现问题'); }
       }
     });
     if (active !== turn) return;
     speech.flush();
     const total = now() - t0;
-    bubble.done(`${firstToken ? `首字 ${Math.round(firstToken - t0)}ms · ` : ''}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}`, {
+    bubble.done(`${team ? `团队 ${result.steps} 步 · ` : ''}${firstToken ? `首字 ${Math.round(firstToken - t0)}ms · ` : ''}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}`, {
       onFeedback: async (kind, comment) => {
         if (kind === 'up') await agentMemory.noteTask(`获得好评：${text.slice(0, 30)}`);
         else {
@@ -1111,6 +1121,7 @@ const palette = initPalette({
       ...(!mic.hidden ? [toggle('set-voice', '直接对话'), toggle('set-wake', '唤醒词')] : []),
       toggle('set-face', '人脸跟随'),
       { id: 'focus', group: '开关', title: body.classList.contains('focus-view') ? '退出专注视图' : '进入专注视图', keys: 'Alt F', run: () => $('#btn-focus').click() },
+      { id: 'team', group: '操作', title: '交给团队完成…', hint: '规划员拆步骤，多个角色分工执行，审核员把关', run: () => { $('#prompt').value = '/团队 '; $('#prompt').focus(); } },
       { id: 'new', group: '操作', title: '新对话', hint: '开始一段新对话（之前的对话保存在“对话”面板里）', keys: 'Ctrl Shift O', run: () => newSession() },
       { id: 'sessions', group: '操作', title: '历史对话', hint: '查看、搜索之前的对话', run: () => showPanel('sessions') },
       { id: 'stop', group: '操作', title: '打断 / 停止当前任务', keys: 'Esc', run: () => interrupt() },
@@ -1156,6 +1167,13 @@ $('#set-tts').addEventListener('change', (e) => {
   speaker.enabled = e.target.checked;
   if (!e.target.checked) speaker.cancel();
 });
+for (const b of document.querySelectorAll('#set-team button')) {
+  b.setAttribute('aria-checked', String(b.dataset.v === settings.teamMode));
+  b.addEventListener('click', () => {
+    setSetting('teamMode', b.dataset.v);
+    for (const x of document.querySelectorAll('#set-team button')) x.setAttribute('aria-checked', String(x === b));
+  });
+}
 for (const b of document.querySelectorAll('#set-vad button')) {
   b.addEventListener('click', () => {
     setSetting('vadSensitivity', b.dataset.v);

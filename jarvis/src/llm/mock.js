@@ -13,7 +13,8 @@ const safeJson = (s) => { try { return JSON.parse(s); } catch { return null; } }
 const call = (name, args) => ({ id: `mock_${++seq}`, name, args });
 
 function lastUserText(messages) {
-  for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === 'user') return { text: messages[i].content, index: i };
+  // 团队模式给每一步附带的说明（以“——【团队分工】”开头）不算用户指令
+  for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === 'user') return { text: String(messages[i].content).split('\n\n——\n【团队分工】')[0], index: i };
   return { text: '', index: -1 };
 }
 

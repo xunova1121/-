@@ -578,6 +578,23 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await ctx.close();
 }
 
+// ---------- 5d. 多助手分工（/团队，内置演示：规则拆步） ----------
+{
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  const page = await ctx.newPage();
+  await page.goto(BASE);
+  await page.waitForFunction(() => window.__jarvis?.showPanel);
+  const r = await ask(page, '/团队 记住我喜欢简洁的回答，然后帮我写一个网页', 60000);
+  const rows = page.locator('#transcript .team-card li');
+  check('团队模式：分工卡片列出每一步与角色', (await rows.count()) === 2 && /工程师/.test(await rows.nth(1).textContent()), await page.locator('#transcript .team-card').innerText().catch(() => ''));
+  check('团队模式：每一步都完成', (await page.locator('#transcript .team-card li[data-st="done"]').count()) === 2);
+  check('团队模式：各角色用了各自的工具', (await page.locator('#transcript .tool-card .tn').allTextContents()).join(',').match(/记住.*写入文件/) !== null);
+  check('团队模式：汇总各步成果', /团队完成了 2 步/.test(r) && /团队 2 步/.test(r), r.slice(0, 100));
+  await page.locator('#transcript .team-card li').nth(1).locator('summary').click();
+  await page.screenshot({ path: `${OUT}/team.png` });
+  await ctx.close();
+}
+
 // ---------- 6. 不支持语音识别（模拟 Firefox） ----------
 {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });

@@ -586,3 +586,25 @@ body.reduced-motion * { animation: none !important; }
 .lm-custom { display: flex; gap: 8px; margin-top: 8px; }
 .lm-custom input { flex: 1; min-width: 0; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--bg-2); }
 @media (max-width: 520px) { .lm-row { flex-wrap: wrap; } .lm-progress { width: 120px; } }
+
+/* 团队分工 */
+.team-card { margin: 8px 0; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); padding: 8px 10px; }
+.team-head { font: 600 12px var(--font-display); letter-spacing: .08em; color: var(--accent); margin-bottom: 4px; }
+.team-card ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; counter-reset: step; }
+.team-card li { counter-increment: step; }
+.team-card summary { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 3px 0; font-size: 13px; list-style: none; }
+.team-card summary::-webkit-details-marker { display: none; }
+.team-card summary::before { content: counter(step); width: 18px; height: 18px; flex: none; border-radius: 50%; border: 1px solid var(--line-strong); font: 10px/16px var(--font-mono); text-align: center; color: var(--muted); }
+.team-role { font: 11px var(--font-mono); color: var(--accent); border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; flex: none; }
+.team-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-st { font-size: 11px; color: var(--dim); flex: none; }
+.team-card li[data-st="running"] .team-st, .team-card li[data-st="redo"] .team-st { color: var(--warn); }
+.team-card li[data-st="running"] summary::before, .team-card li[data-st="redo"] summary::before { border-color: var(--warn); color: var(--warn); animation: team-blink .9s ease-in-out infinite; }
+.team-card li[data-st="done"] .team-st { color: var(--ok); }
+.team-card li[data-st="done"] summary::before { border-color: var(--ok); color: var(--ok); }
+.team-card li[data-st="fail"] .team-st { color: var(--bad); }
+.team-card pre { margin: 2px 0 6px 26px; white-space: pre-wrap; font-size: 12px; color: var(--muted); max-height: 200px; overflow: auto; }
+.team-review { margin-top: 6px; font-size: 12px; color: var(--muted); border-top: 1px dashed var(--line); padding-top: 6px; }
+.team-review[data-pass="1"] { color: var(--ok); }
+.team-review[data-pass="0"] { color: var(--warn); }
+@keyframes team-blink { 50% { opacity: .35; } }

@@ -336,6 +336,13 @@
         </div>
         <div class="setting"><label><input type="checkbox" id="set-tts" /> 语音朗读回答</label></div>
         <div class="setting">
+          <span class="label">多助手分工</span>
+          <div class="seg" role="radiogroup" aria-label="多助手分工" id="set-team">
+            <button type="button" role="radio" data-v="auto">自动</button><button type="button" role="radio" data-v="on">总是</button><button type="button" role="radio" data-v="off">关闭</button>
+          </div>
+          <p class="muted">复杂任务交给小团队：规划员拆步骤，研究员 / 工程师 / 撰稿人 / 分析师各干各的，审核员检查不合格就返工。“自动”在一句话里有多个先后步骤时启用；随时可以用“/团队 任务”强制分工。会多花一些调用次数。</p>
+        </div>
+        <div class="setting">
           <span class="label">VAD 灵敏度</span>
           <div class="seg" role="radiogroup" aria-label="VAD 灵敏度" id="set-vad">
             <button type="button" role="radio" data-v="低">低</button><button type="button" role="radio" data-v="中">中</button><button type="button" role="radio" data-v="高">高</button>

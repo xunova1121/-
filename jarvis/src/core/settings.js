@@ -14,7 +14,8 @@ export const DEFAULT_SETTINGS = {
   quality: 'auto', // auto | high | standard | eco
   persistMemory: false, // 旧版：单条对话流存 localStorage（启动时迁移成会话）
   saveSessions: true, // 对话历史保存到本机（多会话）
-  autoMemory: true // 对话停下后自动整理记忆（抽取事实、写摘要）
+  autoMemory: true, // 对话停下后自动整理记忆（抽取事实、写摘要）
+  teamMode: 'auto' // 多助手分工：auto 复杂任务自动组团 | on 总是 | off 关闭（任何时候都可用“/团队 …”强制）
 };
 
 const KEY = 'jarvis.settings.v1';
