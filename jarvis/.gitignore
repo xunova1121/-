@@ -6,3 +6,5 @@ dist-standalone/
 /*.png
 dist-mobile/
 release-android/
+research_notes/
+reports/
