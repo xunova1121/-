@@ -59,6 +59,7 @@ import { VoiceInput, speechRecognitionSupported } from './perception/voiceInput.
 import { resolveStt, transcribe, encodeWav, sttEngineById } from './perception/stt.js';
 import { STANDALONE, MOBILE, VAD } from './config.js';
 import { NativeVoice } from './mobile/nativeVoice.js';
+import { nativeWebFetch } from './mobile/nativeFetch.js';
 import { initChips } from './ui/chips.js';
 import { initDrawer } from './ui/drawer.js';
 import { initModelPicker, chipLabel, isAuto, repairChatModel } from './ui/modelPicker.js';
@@ -366,11 +367,12 @@ function updateModelLabels() {
 
 const metrics = () => (gateway ? fetch(`${gateway.origin}/api/local/metrics`).then((r) => r.json()) : browserMetrics());
 // 网页读取只对完整版开放（单文件版跨域连网关时网关不提供 /api/fetch）
+// 安卓 App 没有本机网关，但系统原生网络没有跨域限制：直接用它搜索、读网页
 const fetchViaGateway = () => (gateway && !gateway.cors
   ? (url, init) => (url.startsWith('https://api.tavily.com/')
     ? fetch(`/api/llm/tavily/${url.slice('https://api.tavily.com/'.length)}`, init)
     : fetch(`/api/fetch?url=${encodeURIComponent(url)}`))
-  : null);
+  : globalThis.__jarvisNativeFetch ? nativeWebFetch(globalThis.__jarvisNativeFetch) : null);
 
 // ---------------------------------------------------------------- 对话
 const transcript = new Transcript($('#transcript'), { progress: COMPACT });
@@ -851,7 +853,7 @@ async function send(text) {
       effort,
       adapter, model, history: llmHistory, userText: team ? userText : await expandSlash(userText), signal: ctrl.signal,
       sessionId: session.id,
-      maxSteps: DESKTOP ? 40 : 16, // 用鼠标键盘操作电脑时步数多
+      maxSteps: DESKTOP ? 40 : 28, // 用鼠标键盘操作电脑、逐项联网核实时步数多
       images: imgs.map(({ mime, data }) => ({ mime, data })),
       tools: await buildTools(),
       approve: (req) => {
@@ -1302,6 +1304,7 @@ const panels = initPanels({
   toast: (t) => toast(t),
   settings,
   getGateway: () => gateway,
+  searchFetch: () => fetchViaGateway(),
   getHistory: () => history,
   onConfigChange: (cfg) => { llmConfig = cfg; updateModelLabels(); syncMemoryEngine(); updateOrbitStatus(); routingPanel?.render(); },
   onReflect: () => reflectNow({ manual: true }),

@@ -92,17 +92,19 @@ export function createSearch({ tavilyKey, fetchViaGateway } = {}) {
         [`https://${zh ? 'cn.' : 'www.'}bing.com/search?q=${q}&count=${Math.max(10, n)}${zh ? '&setlang=zh-Hans' : ''}`, parseBing],
         [`https://html.duckduckgo.com/html/?q=${q}`, parseDuckDuckGo]
       ];
+      // 一个来源结果太少（被拦、只有广告）时再查下一个，合并去重
       let lastErr = null;
+      const hits = [];
       for (const [url, parse] of tries) {
         try {
           const res = await fetchViaGateway(url);
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const hits = parse(await res.text());
-          if (hits.length) return hits.slice(0, n);
+          for (const h of parse(await res.text())) if (!hits.some((x) => x.url === h.url)) hits.push(h);
+          if (hits.length >= Math.min(3, n)) break;
         } catch (e) { lastErr = e; }
       }
-      if (lastErr) throw new Error(`搜索失败（${lastErr.message}）。可在“模型”面板填 Tavily Key 获得更稳定的搜索`);
-      return [];
+      if (!hits.length && lastErr) throw new Error(`搜索失败（${lastErr.message}）。可在“模型”面板填 Tavily 搜索 Key（免费申请）获得更稳定的搜索`);
+      return hits.slice(0, n);
     }
   };
 }

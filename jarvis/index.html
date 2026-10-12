@@ -301,7 +301,9 @@
         </form>
         <h3 class="sub">联网获取最新信息</h3>
         <label class="inline-check"><input type="checkbox" id="set-websearch" /> Claude 内置联网搜索（使用 Claude 时生效）</label>
-        <label class="field" for="tavily-key"><span>Tavily 搜索 Key（其他模型联网用，可选）</span><input type="password" id="tavily-key" placeholder="tvly-…" autocomplete="off" /></label>
+        <label class="field" for="tavily-key"><span>Tavily 搜索 Key（推荐：搜索更准、更稳定，电脑和手机都能用）</span><input type="password" id="tavily-key" placeholder="tvly-…" autocomplete="off" /></label>
+        <p class="note">不填也能搜（用必应网页），但新闻、比分这类最新内容常常搜不到。免费申请：打开 <a href="https://app.tavily.com" target="_blank" rel="noopener">app.tavily.com</a> 注册（可用谷歌账号或邮箱），登录后首页就有以 tvly- 开头的 Key，复制粘贴到上面。免费版每月有一定次数，个人使用一般够用。</p>
+        <div class="row-actions"><button type="button" class="btn ghost sm" id="btn-search-test">测试联网搜索</button><span class="muted small" id="search-test-result"></span></div>
         <h3 class="sub">声音</h3>
         <label class="field" for="tts-engine"><span>语音引擎</span><select id="tts-engine"></select></label>
         <p class="note" id="tts-note" hidden></p>

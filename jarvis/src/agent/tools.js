@@ -380,12 +380,19 @@ export function createTools(ctx) {
   if (engine) {
     tools.push({
       name: 'web_search',
-      description: `联网搜索最新信息（新闻、价格、版本、事件等时效性内容；搜索源：${engine.name}）。回答时注明来源链接。需要全面、有出处的研究时改用 deep_research。`,
-      input_schema: S({ query: str('搜索词') }, ['query']),
-      run: async ({ query }) => {
-        const hits = await engine.search(query, 6);
-        if (!hits.length) return '没有搜索结果，换个搜索词试试';
-        return hits.map((r) => `- ${r.title}\n  ${r.url}\n  ${String(r.snippet || '').slice(0, 300)}`).join('\n');
+      description: `联网搜索最新信息（比分赛果、新闻、价格、版本、事件等时效性内容；搜索源：${engine.name}）。外国的队名、人名、公司用原文或英文搜；多个对象（如几场比赛）放进 queries 一次并行搜。结果不够时用 fetch_url 读原文。回答时注明来源链接。需要全面、有出处的研究时改用 deep_research。`,
+      input_schema: S({ query: str('搜索词'), queries: { type: 'array', items: { type: 'string' }, description: '可选：多个搜索词，一次并行搜索（最多 8 个），例如每场比赛一个' } }, []),
+      run: async ({ query, queries }) => {
+        const list = [...new Set([query, ...(Array.isArray(queries) ? queries : [])].map((q) => String(q || '').trim()).filter(Boolean))].slice(0, 8);
+        if (!list.length) throw new Error('请给出搜索词');
+        const one = async (q) => {
+          try {
+            const hits = await engine.search(q, list.length > 1 ? 5 : 6);
+            return hits.length ? hits.map((r) => `- ${r.title}\n  ${r.url}\n  ${String(r.snippet || '').slice(0, 300)}`).join('\n') : '（没有结果：换个说法、换成英文或原文再搜）';
+          } catch (e) { return `（搜索失败：${e.message}）`; }
+        };
+        const outs = await Promise.all(list.map(one));
+        return list.length === 1 ? outs[0] : list.map((q, i) => `### ${q}\n${outs[i]}`).join('\n\n');
       }
     });
     tools.push({

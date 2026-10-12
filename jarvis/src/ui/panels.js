@@ -9,6 +9,7 @@ import { fmtSize } from '../agent/tools.js';
 import { renderBlocks } from './transcript.js';
 import { PROVIDERS, providerById, loadConfig, saveConfig, modelOf, createAdapter } from '../llm/config.js';
 import { probeEndpoint } from '../llm/probe.js';
+import { createSearch } from '../agent/webSearch.js';
 import { saveFile } from './saveFile.js';
 import { renderDocx } from './docxView.js';
 import { MOBILE } from '../config.js';
@@ -20,7 +21,7 @@ const el = (tag, props = {}, ...kids) => {
   return e;
 };
 
-export function initPanels({ toast, getGateway, onConfigChange, getHistory, settings, onReflect, onAutoMemory }) {
+export function initPanels({ toast, getGateway, onConfigChange, getHistory, settings, onReflect, onAutoMemory, searchFetch }) {
   const fresh = new Set();
   let current = null; // 当前预览的文件
   let objectUrls = [];
@@ -445,6 +446,18 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   $('#set-websearch').addEventListener('change', (e) => { cfg = { ...cfg, claudeWebSearch: e.target.checked }; saveConfig(cfg); onConfigChange(cfg); });
   $('#tavily-key').value = cfg.tavilyKey || '';
   $('#tavily-key').addEventListener('change', (e) => { cfg = { ...cfg, tavilyKey: e.target.value.trim() }; saveConfig(cfg); onConfigChange(cfg); });
+  // 测试联网搜索：用现在的设置真搜一次，告诉用户能不能用、用的是哪个搜索源
+  $('#btn-search-test').addEventListener('click', async () => {
+    const out = $('#search-test-result');
+    out.textContent = '正在搜索…';
+    try {
+      const engine = createSearch({ tavilyKey: $('#tavily-key').value.trim(), fetchViaGateway: searchFetch?.() });
+      if (!engine) { out.textContent = '当前环境没有可用的搜索：请填 Tavily Key，或在电脑上运行启动程序'; return; }
+      const t0 = Date.now();
+      const hits = await engine.search('今日新闻', 5);
+      out.textContent = hits.length ? `✓ ${engine.name} 可用：${hits.length} 条结果，${((Date.now() - t0) / 1000).toFixed(1)} 秒（第一条：${hits[0].title.slice(0, 24)}）` : `${engine.name} 没有返回结果，建议填 Tavily Key`;
+    } catch (e) { out.textContent = `✕ ${e.message}`; }
+  });
 
   return {
     refreshFiles,

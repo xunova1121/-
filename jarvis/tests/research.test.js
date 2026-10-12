@@ -122,3 +122,37 @@ describe('深度调研流程', () => {
     await expect(deepResearch({ question: 'x', llm: null, signal: ac.signal, search: async () => [], read: async () => '' })).rejects.toThrow(/已取消/);
   });
 });
+
+import { nativeWebFetch, BROWSER_HEADERS } from '../src/mobile/nativeFetch.js';
+import { createTools } from '../src/agent/tools.js';
+import { STABLE_PROMPT } from '../src/agent/agent.js';
+describe('手机上也能联网搜索', () => {
+  it('原生网络读网页时带上浏览器请求头；POST（Tavily）不加', async () => {
+    const seen = [];
+    const f = nativeWebFetch(async (url, init) => { seen.push(init.headers); return new Response('ok'); });
+    await f('https://cn.bing.com/search?q=x');
+    await f('https://api.tavily.com/search', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    expect(seen[0]['User-Agent']).toBe(BROWSER_HEADERS['User-Agent']);
+    expect(seen[1]).toEqual({ 'Content-Type': 'application/json' });
+  });
+  it('必应结果太少时再查 DuckDuckGo，合并去重', async () => {
+    const one = BING.replace(/<li class="b_algo"><h2><a href="https:\/\/example[\s\S]*?<\/li>/, '');
+    const s = createSearch({ fetchViaGateway: async (url) => new Response(/bing/.test(url) ? one : DDG) });
+    const hits = await s.search('qwen', 6);
+    expect(hits.map((h) => h.url)).toEqual(['https://ollama.com/library/qwen3', 'https://github.com/ollama/ollama']);
+  });
+  it('web_search 一次并行搜多个词，各自给出结果或失败原因', async () => {
+    const tools = Object.fromEntries(createTools({ metrics: async () => ({}), fetchViaGateway: async (url) => {
+      if (/Malm/.test(decodeURIComponent(url))) throw new Error('网络不通');
+      return new Response(/bing/.test(url) ? BING : DDG);
+    } }).map((t) => [t.name, t]));
+    const out = await tools.web_search.run({ queries: ['Atalanta Venezia 2026', 'Malmö FF Kalmar 2026'] });
+    expect(out).toMatch(/### Atalanta Venezia 2026\n- Qwen3/);
+    expect(out).toMatch(/### Malmö FF Kalmar 2026\n（搜索失败/);
+  });
+  it('系统提示教模型：逐个查、用原文搜、核对来源', () => {
+    expect(STABLE_PROMPT).toMatch(/逐个查/);
+    expect(STABLE_PROMPT).toMatch(/Atalanta/);
+    expect(STABLE_PROMPT).toMatch(/核对/);
+  });
+});

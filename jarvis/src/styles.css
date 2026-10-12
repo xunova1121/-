@@ -1137,3 +1137,5 @@ body.reduced-motion .drawer { transition: none; }
 .file-link .fl-go { flex: none; color: var(--accent); font-size: 13px; }
 :root[data-theme="light"] .compact .file-link { background: rgba(255, 255, 255, 0.8); border-color: rgba(106, 92, 240, 0.18); }
 :root[data-theme="light"] .compact .file-link .fl-ext { background: linear-gradient(135deg, #7f8ef8, #8b63f0); }
+.row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 10px; }
+.row-actions .small { min-width: 0; overflow-wrap: anywhere; }

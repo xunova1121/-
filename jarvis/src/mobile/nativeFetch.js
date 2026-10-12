@@ -71,3 +71,13 @@ export function wrapFetch(webFetch, native, selfOrigin, g = globalThis) {
     }
   };
 }
+
+/** 搜索、读网页用：系统原生网络 + 普通手机浏览器的请求头（不带请求头时有的网站会拦截或返回空页） */
+export const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+};
+export function nativeWebFetch(native) {
+  return (url, init = {}) => native(url, { ...init, headers: { ...(init.method && init.method !== 'GET' ? {} : BROWSER_HEADERS), ...(init.headers || {}) } });
+}
