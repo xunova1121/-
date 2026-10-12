@@ -40,13 +40,14 @@
 
     <!-- 左侧导航：切换右侧面板 -->
     <nav class="rail" aria-label="功能">
-      <button class="rail-btn" data-panel="workspace" type="button" title="工作区（Alt+1）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h7l2 2h9v10H3z" /></svg><span>工作区</span></button>
-      <button class="rail-btn" data-panel="knowledge" type="button" title="知识库（Alt+2）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6a2 2 0 0 1 2 2v13a2 2 0 0 0-2-2H4zM20 5h-6a2 2 0 0 0-2 2v13a2 2 0 0 1 2-2h6z" /></svg><span>知识库</span></button>
-      <button class="rail-btn" data-panel="mind" type="button" title="记忆与进化（Alt+3）"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" /></svg><span>进化</span></button>
-      <button class="rail-btn" data-panel="skills" type="button" title="技能（Alt+4）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z" /></svg><span>技能</span></button>
-      <button class="rail-btn" data-panel="models" type="button" title="模型（Alt+5）"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" /><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4" /></svg><span>模型</span></button>
-      <button class="rail-btn" data-panel="system" type="button" title="系统状态（Alt+6）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4" /></svg><span>系统</span></button>
-      <button class="rail-btn" data-panel="settings" type="button" title="设置（Alt+7）"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg><span>设置</span></button>
+      <button class="rail-btn" data-panel="sessions" type="button" title="对话（Alt+1）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z" /><path d="M8 9h8M8 12h5" /></svg><span>对话</span></button>
+      <button class="rail-btn" data-panel="workspace" type="button" title="工作区（Alt+2）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h7l2 2h9v10H3z" /></svg><span>工作区</span></button>
+      <button class="rail-btn" data-panel="knowledge" type="button" title="知识库（Alt+3）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6a2 2 0 0 1 2 2v13a2 2 0 0 0-2-2H4zM20 5h-6a2 2 0 0 0-2 2v13a2 2 0 0 1 2-2h6z" /></svg><span>知识库</span></button>
+      <button class="rail-btn" data-panel="mind" type="button" title="记忆与进化（Alt+4）"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" /></svg><span>进化</span></button>
+      <button class="rail-btn" data-panel="skills" type="button" title="技能（Alt+5）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z" /></svg><span>技能</span></button>
+      <button class="rail-btn" data-panel="models" type="button" title="模型（Alt+6）"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" /><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4" /></svg><span>模型</span></button>
+      <button class="rail-btn" data-panel="system" type="button" title="系统状态（Alt+7）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4" /></svg><span>系统</span></button>
+      <button class="rail-btn" data-panel="settings" type="button" title="设置（Alt+8）"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg><span>设置</span></button>
     </nav>
 
     <!-- 中间：光核 + 对话 + 输入 -->
@@ -105,6 +106,18 @@
     <!-- 右侧面板 -->
     <aside class="side" id="panel" aria-label="面板">
       <!-- 工作区 -->
+      <!-- 对话（多会话） -->
+      <section class="pane" data-pane="sessions" hidden>
+        <header class="pane-head"><h2>对话</h2><span class="badge" id="session-count">0 段</span></header>
+        <div class="pane-actions">
+          <button class="btn" type="button" id="btn-new-session">＋ 新对话</button>
+          <label class="inline-check small"><input type="checkbox" id="set-save-sessions" /> 保存对话历史</label>
+        </div>
+        <input class="session-search" id="session-search" type="search" placeholder="搜索对话标题和内容…" spellcheck="false" />
+        <div class="session-list" id="session-list"></div>
+        <p class="muted small">对话只保存在这台电脑上。切换对话时，上一段会先被整理进记忆。</p>
+      </section>
+
       <section class="pane" data-pane="workspace" hidden>
         <header class="pane-head">
           <h2>工作区</h2>
@@ -172,13 +185,9 @@
           <button role="tab" type="button" data-mtab="lessons" aria-selected="false">教训</button>
           <button role="tab" type="button" data-mtab="events" aria-selected="false">日志</button>
           <button role="tab" type="button" data-mtab="archived" aria-selected="false">已归档</button>
-          <button role="tab" type="button" data-mtab="history" aria-selected="false">对话</button>
+          <button role="tab" type="button" data-mtab="history" aria-selected="false">本段对话</button>
         </div>
         <ul class="mind-list" id="mind-list"></ul>
-        <div class="pane-actions" id="history-actions" hidden>
-          <label class="inline-check"><input type="checkbox" id="set-persist" /> 对话记录跨会话保存</label>
-          <button class="btn ghost sm" id="btn-clear-memory" type="button">清空对话记录</button>
-        </div>
         <div class="pane-actions mem-backup">
           <button class="btn ghost sm" type="button" id="btn-mem-export">导出记忆备份</button>
           <button class="btn ghost sm" type="button" id="btn-mem-import">导入备份</button>
@@ -327,7 +336,7 @@
             <dt><kbd>Enter</kbd></dt><dd>发送（<kbd>Shift</kbd>+<kbd>Enter</kbd> 换行）</dd>
             <dt><kbd>Esc</kbd></dt><dd>打断朗读 / 停止任务</dd>
             <dt><kbd>/</kbd></dt><dd>聚焦输入框</dd>
-            <dt><kbd>Alt</kbd>+<kbd>1</kbd>–<kbd>7</kbd></dt><dd>工作区 / 知识库 / 进化 / 技能 / 模型 / 系统 / 设置</dd>
+            <dt><kbd>Alt</kbd>+<kbd>1</kbd>–<kbd>8</kbd></dt><dd>对话 / 工作区 / 知识库 / 进化 / 技能 / 模型 / 系统 / 设置</dd>
             <dt><kbd>Alt</kbd>+<kbd>F</kbd></dt><dd>专注视图</dd>
             <dt><kbd>Alt</kbd>+<kbd>V</kbd></dt><dd>直接对话开关</dd>
             <dt><kbd>Alt</kbd>+<kbd>O</kbd>/<kbd>H</kbd>/<kbd>W</kbd></dt><dd>光核 / 胸像 / 线框</dd>

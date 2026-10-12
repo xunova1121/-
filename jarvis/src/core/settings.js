@@ -12,7 +12,8 @@ export const DEFAULT_SETTINGS = {
   reducedMotion: 'system', // system | on | off
   look: 'orb', // orb 光核 | holo 全息胸像 | wire 线框胸像
   quality: 'auto', // auto | high | standard | eco
-  persistMemory: false, // 记忆跨会话保存到本机 localStorage
+  persistMemory: false, // 旧版：单条对话流存 localStorage（启动时迁移成会话）
+  saveSessions: true, // 对话历史保存到本机（多会话）
   autoMemory: true // 对话停下后自动整理记忆（抽取事实、写摘要）
 };
 

@@ -352,9 +352,9 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.waitForTimeout(300);
   const barge = await page.evaluate(() => ({ streaming: document.querySelectorAll('.msg.agent.streaming').length, meta: [...document.querySelectorAll('.msg.agent .meta')].at(-1)?.textContent }));
   check('Esc 打断任务', barge.streaming === 0 && /已打断/.test(barge.meta), JSON.stringify(barge));
-  await page.keyboard.press('Alt+Digit2');
-  check('Alt+2 打开知识库', await page.isVisible('[data-pane="knowledge"]'));
-  await page.keyboard.press('Alt+Digit7');
+  await page.keyboard.press('Alt+Digit3');
+  check('Alt+3 打开知识库', await page.isVisible('[data-pane="knowledge"]'));
+  await page.keyboard.press('Alt+Digit8');
   await page.selectOption('#set-quality', 'eco');
   await page.waitForTimeout(400);
   const eco = await page.evaluate(() => ({ bloom: window.__jarvis.stage.stats.bloom, fps: window.__jarvis.quality.fps }));
@@ -393,20 +393,45 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await ctx.close();
 }
 
-// ---------- 2. 对话记录跨会话保存 ----------
+// ---------- 2. 多会话：自动保存、刷新后接着聊、新建 / 切换 / 搜索 / 重命名 / 删除 ----------
 {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   const page = await ctx.newPage();
   await page.goto(BASE);
-  await page.click('[data-panel="mind"]');
-  await page.click('[data-mtab="history"]');
-  await page.check('#set-persist');
+  await page.waitForFunction(() => window.__jarvis?.showPanel);
   await ask(page, '现在几点');
   await page.reload();
-  await page.evaluate(() => window.__jarvis.showPanel('mind'));
-  await page.click('[data-mtab="history"]');
-  await page.waitForFunction(() => /现在几点/.test(document.querySelector('#mind-list').textContent), null, { timeout: 5000 }).catch(() => {});
-  check('对话记录刷新后仍在', /现在几点/.test(await page.textContent('#mind-list')));
+  await page.waitForFunction(() => document.querySelectorAll('.msg.user').length >= 1, null, { timeout: 8000 }).catch(() => {});
+  check('刷新后自动接着最近的对话', /现在几点/.test(await page.textContent('#transcript')));
+  await page.keyboard.press('Control+Shift+O');
+  await page.waitForTimeout(300);
+  check('Ctrl+Shift+O 新对话：对话区清空、显示欢迎页', (await page.locator('.msg').count()) === 0 && (await page.locator('.welcome').count()) === 1);
+  await ask(page, '帮我写一个网页');
+  await page.evaluate(() => window.__jarvis.showPanel('sessions'));
+  await page.waitForFunction(() => document.querySelectorAll('#session-list .session').length >= 2, null, { timeout: 5000 }).catch(() => {});
+  const titles = await page.locator('#session-list .session-title').allTextContents();
+  check('对话列表：两段对话、以第一句话为标题', titles.includes('现在几点') && titles.includes('帮我写一个网页'), titles.join(' / '));
+  await page.locator('#session-list .session', { hasText: '现在几点' }).click();
+  await page.waitForTimeout(400);
+  check('切换到旧对话：重放历史消息', /现在几点/.test(await page.textContent('#transcript')) && !/帮我写一个网页/.test(await page.textContent('#transcript')));
+  await page.fill('#session-search', '网页');
+  await page.waitForTimeout(400);
+  check('搜索对话内容', (await page.locator('#session-list .session').count()) === 1 && /帮我写一个网页/.test(await page.textContent('#session-list')));
+  await page.fill('#session-search', '');
+  await page.waitForTimeout(400);
+  const row = page.locator('#session-list .session', { hasText: '帮我写一个网页' });
+  await row.hover();
+  await row.getByRole('button', { name: '重命名' }).click();
+  await page.fill('#session-list .mem-edit', '时钟网页');
+  await page.press('#session-list .mem-edit', 'Enter');
+  await page.waitForTimeout(300);
+  check('重命名对话', (await page.locator('#session-list .session-title').allTextContents()).includes('时钟网页'));
+  const r2 = page.locator('#session-list .session', { hasText: '时钟网页' });
+  await r2.hover();
+  await r2.getByRole('button', { name: '删除' }).click();
+  await r2.getByRole('button', { name: '删除' }).click();
+  await page.waitForTimeout(300);
+  check('删除对话', (await page.locator('#session-list .session').count()) === 1);
   await ctx.close();
 }
 

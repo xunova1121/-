@@ -29,6 +29,8 @@ import { initVoicePanel } from './ui/voicePanel.js';
 import * as skillPacks from './agent/skillPacks.js';
 import { initSkillsPanel } from './ui/skillsPanel.js';
 import { initPalette } from './ui/palette.js';
+import * as sessionsApi from './agent/sessions.js';
+import { initSessionsPanel } from './ui/sessionsPanel.js';
 import { initCallouts } from './ui/callouts.js';
 import { openingSuggestions, followUpSuggestions } from './core/suggest.js';
 import * as mcp from './agent/mcpClient.js';
@@ -39,13 +41,13 @@ import { playCue } from './perception/voiceFx.js';
 import { MetricsPoller } from './api/metrics.js';
 import { subscribeAgentEvents } from './api/agentEvents.js';
 import { Dashboard } from './ui/dashboard.js';
-import { Transcript } from './ui/transcript.js';
+import { Transcript, toolLabel } from './ui/transcript.js';
 import { Speaker } from './perception/speaker.js';
 import { VoiceInput, speechRecognitionSupported } from './perception/voiceInput.js';
 import { resolveStt, transcribe } from './perception/stt.js';
 import { FIGURE, STANDALONE } from './config.js';
 import { resolveQuality } from './core/quality.js';
-import { loadMemory, saveMemory, clearMemory } from './core/memoryStore.js';
+import { loadMemory, clearMemory } from './core/memoryStore.js';
 
 const $ = (s) => document.querySelector(s);
 const body = document.body;
@@ -335,10 +337,17 @@ const fetchViaGateway = () => (gateway && !gateway.cors
 // ---------------------------------------------------------------- 对话
 const transcript = new Transcript($('#transcript'));
 const storage = (() => { try { return localStorage; } catch { return null; } })();
-const history = settings.persistMemory ? loadMemory(storage) : [];
-function rememberTurn(role, content) {
-  history.push({ role, content, ts: Date.now() });
-  if (settings.persistMemory) saveMemory(history, storage);
+// 当前会话；history 指向它的消息列表（切换会话时一起换掉）
+let session = sessionsApi.create();
+let history = session.messages;
+function rememberTurn(role, content, extra = {}) {
+  history.push({ role, content, ts: Date.now(), ...extra });
+  session.updatedAt = Date.now();
+  persistSession();
+}
+function persistSession() {
+  if (settings.saveSessions === false) return;
+  sessionsApi.save(session).then(() => sessionsPanel?.refresh()).catch(() => {});
 }
 let turns = 0;
 let active = null; // { ctrl, streamDone, bubble }
@@ -453,8 +462,46 @@ async function reflectNow({ manual = false } = {}) {
 }
 addEventListener('pagehide', () => { if (settings.autoMemory) reflectNow(); });
 
+// ---------------------------------------------------------------- 多会话
+/** 把当前会话的消息重新画到对话区 */
+function replayTranscript() {
+  $('#transcript').replaceChildren();
+  if (!history.length) { renderWelcome(); return; }
+  for (const m of history) {
+    if (m.role === 'user') transcript.add('user', m.content, m.ts);
+    else {
+      const b = transcript.add('agent', '', m.ts);
+      b.append(m.content);
+      b.done(m.tools?.length ? `用了：${m.tools.map(toolLabel).join('、')}` : '');
+    }
+  }
+}
+async function switchTo(next) {
+  interrupt();
+  if (settings.autoMemory) await reflectNow();
+  session = next;
+  history = session.messages;
+  reflectFrom = history.length;
+  replayTranscript();
+  dashboard.setTurns(history.filter((m) => m.role === 'user').length);
+  callouts?.set(history.length ? followUpSuggestions({ tools: history.at(-1)?.tools ?? [], userText: [...history].reverse().find((m) => m.role === 'user')?.content ?? '', desktop: Boolean(DESKTOP) }) : openingSuggestions({ desktop: Boolean(DESKTOP), hasSkills: true }));
+  sessionsPanel?.refresh();
+  setTask('idle');
+}
+function newSession() {
+  if (!history.length) { $('#prompt').focus(); return; }
+  switchTo(sessionsApi.create());
+  $('#prompt').focus();
+}
+async function openSession(id) {
+  if (id === session.id) return;
+  const s = await sessionsApi.get(id);
+  if (s) switchTo(s);
+}
+
 /** 光核旁的建议标注（启动末尾创建） */
 let callouts = null;
+let sessionsPanel = null;
 
 // ---------------------------------------------------------------- 桌面版与 MCP
 /** 桌面版（Electron）由 preload 注入；网页版为 undefined */
@@ -586,7 +633,7 @@ async function send(text) {
     });
     dashboard.setLatency(firstToken ? firstToken - t0 : null, total);
     $('#hud-latency').textContent = firstToken ? `${Math.round(firstToken - t0)} ms` : '—';
-    rememberTurn('assistant', result.text || '（完成）');
+    rememberTurn('assistant', result.text || '（完成）', usedTools.length ? { tools: [...new Set(usedTools)] } : {});
     $('#mode-pill').classList.remove('offline');
     turn.streamDone = true;
     callouts?.set(followUpSuggestions({ tools: usedTools, userText: text, desktop: Boolean(DESKTOP) }));
@@ -840,7 +887,7 @@ async function setFaceFollow(on) {
 
 
 // ---------------------------------------------------------------- 右侧面板
-const PANES = ['workspace', 'knowledge', 'mind', 'skills', 'models', 'system', 'settings'];
+const PANES = ['sessions', 'workspace', 'knowledge', 'mind', 'skills', 'models', 'system', 'settings'];
 let currentPane = null;
 const narrow = matchMedia('(max-width: 860px)');
 function showPanel(name, { toggle = false } = {}) {
@@ -861,6 +908,7 @@ function showPanel(name, { toggle = false } = {}) {
   if (name === 'mind') panels.refreshMind();
   if (name === 'models') { panels.refreshModels(); voicePanel.render(); }
   if (name === 'skills') { skillsPanel.refresh(); mcpPanel.refresh(); }
+  if (name === 'sessions') sessionsPanel?.refresh();
 }
 for (const b of document.querySelectorAll('.rail-btn')) b.addEventListener('click', () => showPanel(b.dataset.panel, { toggle: true }));
 for (const b of document.querySelectorAll('[data-open]')) b.addEventListener('click', () => showPanel(b.dataset.open));
@@ -873,13 +921,6 @@ const panels = initPanels({
   onConfigChange: (cfg) => { llmConfig = cfg; updateModelLabels(); syncMemoryEngine(); },
   onReflect: () => reflectNow({ manual: true }),
   onAutoMemory: (on) => { setSetting('autoMemory', on); if (!on) clearTimeout(reflectTimer); },
-  onClearHistory: () => { history.length = 0; clearMemory(storage); toast('对话记录已清空'); },
-  onPersistChange: (on) => {
-    setSetting('persistMemory', on);
-    if (on) saveMemory(history, storage);
-    else clearMemory(storage);
-    toast(on ? '对话记录将保存在本机浏览器中' : '已停止保存，并删除本机保存的对话记录');
-  }
 });
 const voicePanel = initVoicePanel({ panels, speaker, getGateway: () => gateway });
 const mcpPanel = initMcpPanel({
@@ -956,7 +997,7 @@ function tickClock() {
 tickClock();
 setInterval(tickClock, 1000);
 
-const PANE_TITLE = { workspace: '工作区', knowledge: '知识库', mind: '记忆与进化', skills: '技能', models: '模型与声音', system: '系统状态', settings: '设置' };
+const PANE_TITLE = { sessions: '对话', workspace: '工作区', knowledge: '知识库', mind: '记忆与进化', skills: '技能', models: '模型与声音', system: '系统状态', settings: '设置' };
 const palette = initPalette({
   commands: () => {
     const toggle = (id, title) => ({ id: `t-${id}`, group: '开关', title: `${$(`#${id}`).checked ? '关闭' : '开启'}${title}`, run: () => $(`#${id}`).click() });
@@ -971,16 +1012,8 @@ const palette = initPalette({
       ...(!mic.hidden ? [toggle('set-voice', '直接对话'), toggle('set-wake', '唤醒词')] : []),
       toggle('set-face', '人脸跟随'),
       { id: 'focus', group: '开关', title: body.classList.contains('focus-view') ? '退出专注视图' : '进入专注视图', keys: 'Alt F', run: () => $('#btn-focus').click() },
-      { id: 'new', group: '操作', title: '新对话', hint: '清空屏幕与上下文（记忆、知识库、技能保留）', run: async () => {
-        interrupt();
-        await reflectNow();
-        reflectFrom = 0;
-        history.length = 0;
-        if (settings.persistMemory) saveMemory(history, storage);
-        $('#transcript').replaceChildren();
-        renderWelcome();
-        callouts?.set(openingSuggestions({ desktop: Boolean(DESKTOP), hasSkills: skillsPanel.installed.some((x) => x.enabled) }));
-      } },
+      { id: 'new', group: '操作', title: '新对话', hint: '开始一段新对话（之前的对话保存在“对话”面板里）', keys: 'Ctrl Shift O', run: () => newSession() },
+      { id: 'sessions', group: '操作', title: '历史对话', hint: '查看、搜索之前的对话', run: () => showPanel('sessions') },
       { id: 'stop', group: '操作', title: '打断 / 停止当前任务', keys: 'Esc', run: () => interrupt() },
       { id: 'preview-voice', group: '操作', title: '试听当前声音', run: () => speaker.preview() },
       { id: 'fullscreen', group: '操作', title: '全屏', run: () => $('#btn-fullscreen').click() }
@@ -1085,6 +1118,29 @@ if (narrow.matches) body.classList.remove('side-open');
 setTask('idle');
 renderWelcome();
 syncMemoryEngine();
+sessionsPanel = initSessionsPanel({
+  getCurrentId: () => session.id,
+  onOpen: (id) => openSession(id),
+  onNew: () => newSession(),
+  onDeleted: (id) => { if (id === session.id) switchTo(sessionsApi.create()); },
+  settings,
+  onSaveChange: (on) => {
+    setSetting('saveSessions', on);
+    if (on) persistSession();
+    toast(on ? '对话会保存在本机，可在“对话”里找回' : '新的对话不再保存（已保存的不受影响）');
+  }
+});
+// 旧版的单条对话流迁移成会话；最近 6 小时内的对话自动接着聊
+(async () => {
+  if (settings.persistMemory) {
+    await sessionsApi.migrateLegacy(loadMemory(storage)).catch(() => null);
+    clearMemory(storage);
+    setSetting('persistMemory', false);
+  }
+  const [recent] = await sessionsApi.list().catch(() => []);
+  if (recent && Date.now() - recent.updatedAt < 6 * 3600_000 && !history.length) await switchTo(recent);
+  sessionsPanel.refresh();
+})();
 agentMemory.maintain().catch(() => {});
 
 // ---------------------------------------------------------------- 光核旁的建议标注
@@ -1123,9 +1179,14 @@ document.addEventListener('keydown', (e) => {
     if (interrupt()) { e.preventDefault(); toast('已打断'); }
     return;
   }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.code === 'KeyO') {
+    e.preventDefault();
+    newSession();
+    return;
+  }
   if (e.altKey && !e.ctrlKey && !e.metaKey) {
     const k = e.code;
-    const n = /^Digit([1-7])$/.exec(k)?.[1];
+    const n = /^Digit([1-8])$/.exec(k)?.[1];
     if (n) showPanel(PANES[n - 1]);
     else if (k === 'KeyF') setFocusView(!settings.focusView);
     else if (k === 'KeyV' && !mic.hidden) setDirectVoice(voice.mode === 'off');

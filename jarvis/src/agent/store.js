@@ -3,8 +3,8 @@
  * 所有数据只在这台电脑的浏览器里，不上传。
  */
 const DB_NAME = 'jarvis';
-const DB_VERSION = 3; // v2：packs（安装的技能）；v3：episodes（对话摘要）
-export const STORES = ['memories', 'lessons', 'skills', 'packs', 'episodes', 'kbdocs', 'kbchunks', 'files', 'events', 'kv'];
+const DB_VERSION = 4; // v2：packs（安装的技能）；v3：episodes（对话摘要）；v4：sessions（多会话）
+export const STORES = ['memories', 'lessons', 'skills', 'packs', 'episodes', 'sessions', 'kbdocs', 'kbchunks', 'files', 'events', 'kv'];
 
 let dbPromise = null;
 const memoryDb = new Map(STORES.map((s) => [s, new Map()]));

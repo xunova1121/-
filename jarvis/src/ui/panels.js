@@ -16,7 +16,7 @@ const el = (tag, props = {}, ...kids) => {
   return e;
 };
 
-export function initPanels({ toast, getGateway, onConfigChange, getHistory, onClearHistory, onPersistChange, settings, onReflect, onAutoMemory }) {
+export function initPanels({ toast, getGateway, onConfigChange, getHistory, settings, onReflect, onAutoMemory }) {
   const fresh = new Set();
   let current = null; // 当前预览的文件
   let objectUrls = [];
@@ -223,7 +223,6 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, onCl
     $('#mem-engine').textContent = `整理：${eng.llm ? '大模型' : '本地规则'} · 检索：${eng.embeddings ? `关键词 + 语义（${eng.embeddings.split(':').pop()}）` : '关键词（填 OpenAI / 硅基流动密钥可启用语义检索）'}`;
     $('#set-automem').checked = settings.autoMemory !== false;
     const list = $('#mind-list');
-    $('#history-actions').hidden = mindTab !== 'history';
     const del = (kind, id) => {
       const x = el('button', { type: 'button', className: 'x-btn', title: '删除', textContent: '✕' });
       x.addEventListener('click', async () => { await memory.deleteItem(kind, id); refreshMind(); });
@@ -333,8 +332,6 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, onCl
       refreshMind();
     });
   }
-  $('#set-persist').addEventListener('change', (e) => onPersistChange(e.target.checked));
-  $('#btn-clear-memory').addEventListener('click', () => { onClearHistory(); refreshMind(); });
 
   // ================================================================ 模型
   let cfg = loadConfig();
@@ -398,7 +395,6 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, onCl
   $('#set-websearch').addEventListener('change', (e) => { cfg = { ...cfg, claudeWebSearch: e.target.checked }; saveConfig(cfg); onConfigChange(cfg); });
   $('#tavily-key').value = cfg.tavilyKey || '';
   $('#tavily-key').addEventListener('change', (e) => { cfg = { ...cfg, tavilyKey: e.target.value.trim() }; saveConfig(cfg); onConfigChange(cfg); });
-  $('#set-persist').checked = settings.persistMemory;
 
   return {
     refreshFiles,
