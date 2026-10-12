@@ -14,6 +14,7 @@ import { createControl, STOP_HOTKEY } from './control.mjs';
 import { createWallpaper } from './wallpaper.mjs';
 import { createPresence } from './presence.mjs';
 import { createActivity } from './activity.mjs';
+import { createUpdater, RELEASES_URL } from './updater.mjs';
 import fs from 'node:fs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -131,7 +132,13 @@ function setHabits(on) {
   if (on) activity.start(); else activity.stop();
   return { on: activity.on };
 }
+// 自动更新（只在安装好的正式包里检查）
+const updater = await createUpdater({ app, send: (s) => win?.webContents.send('jarvis:update', s), onBeforeInstall: () => { quitting = true; } });
 Object.assign(ops, {
+  updateState: () => ({ ...updater.state, auto: updater.auto, packaged: app.isPackaged }),
+  async updateCheck() { if (!app.isPackaged) return { state: 'dev' }; await updater.check(); return updater.state; },
+  updateInstall: () => ({ ok: updater.install() }),
+  openReleases: () => { shell.openExternal(RELEASES_URL); return { ok: true }; },
   setHabitTracking: ({ on }) => setHabits(Boolean(on)),
   habitTrackingState: () => ({ on: activity.on }),
   setWallpaper: ({ on }) => setWallpaper(Boolean(on)),
@@ -225,6 +232,7 @@ function createTray() {
     { label: '呼出贾维斯', accelerator: HOTKEY, click: summon },
     { type: 'separator' },
     { label: '桌面背景模式', type: 'checkbox', checked: Boolean(wallpaper?.open), click: (i) => setWallpaper(i.checked) },
+    { label: '检查更新', click: () => { updater.check(); summon(); } },
     { label: '开机时自动启动', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin, click: (i) => { app.setLoginItemSettings({ openAtLogin: i.checked, args: ['--hidden'] }); } },
     { label: '打开数据文件夹', click: () => shell.openPath(process.env.JARVIS_HOME) },
     { type: 'separator' },
@@ -256,6 +264,7 @@ app.on('will-quit', () => {
   control.close();
   presence.stop();
   activity.stop();
+  updater.stop();
   wallpaper?.close();
   globalShortcut.unregisterAll();
   mcp?.closeAll();
@@ -284,6 +293,7 @@ app.whenReady().then(async () => {
   if (readPrefs().wallpaper) wallpaper.show();
   if (readPrefs().habits) activity.start();
   presence.start();
+  if (!TEST) updater.start();
   if (!TEST) {
     createTray();
     if (!globalShortcut.register(HOTKEY, summon)) console.warn(`快捷键 ${HOTKEY} 已被其他程序占用`);

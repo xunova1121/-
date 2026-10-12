@@ -53,11 +53,16 @@ jobs:
       - name: 安装桌面版依赖
         working-directory: jarvis/desktop
         run: npm ci --no-audit --no-fund
+      - name: 版本号
+        shell: bash
+        # 正式标签 desktop-v1.2.3 → 1.2.3；平时每次构建 1.0.<序号>（自动更新靠版本号判断新旧）
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/desktop-v* ]]; then echo "VERSION=${GITHUB_REF_NAME#desktop-v}" >> "$GITHUB_ENV"; else echo "VERSION=1.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"; fi
       - name: 打包
         working-directory: jarvis/desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npm run dist -- --publish never
+        run: npm run dist -- --publish never -c.extraMetadata.version=${{ env.VERSION }}
       - name: 上传安装包
         uses: actions/upload-artifact@v4
         with:
@@ -68,6 +73,8 @@ jobs:
             jarvis/desktop/release/*.zip
             jarvis/desktop/release/*.dmg
             jarvis/desktop/release/*.AppImage
+            jarvis/desktop/release/latest*.yml
+            jarvis/desktop/release/*.blockmap
 
   release:
     name: 发布到 Releases
@@ -81,10 +88,13 @@ jobs:
       - name: 发布
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('desktop-build-{0}', github.run_number) }}
+          # 标签里带版本号：自动更新做差量下载时按版本号找到旧版本的 .blockmap
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('desktop-v1.0.{0}', github.run_number) }}
           target_commitish: ${{ github.sha }}
-          name: "贾维斯桌面版 ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('测试版 第{0}次构建', github.run_number) }}"
-          prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          name: "贾维斯桌面版 ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('1.0.{0}', github.run_number) }}"
+          # 正式发布（不是预发布），“最新版本”才会指向它，自动更新才能找到
+          prerelease: false
+          make_latest: true
           files: dist/*
           body: |
             ## 下载哪个文件
@@ -92,6 +102,10 @@ jobs:
             - **Mac（M1/M2/M3/M4 芯片）**：`Jarvis-*-mac-arm64.dmg`
             - **Mac（Intel 芯片）**：`Jarvis-*-mac-x64.dmg`
             - **Linux**：`Jarvis-*-linux-x86_64.AppImage`
+
+            ## 自动更新
+            装好之后不用再来这里下载：有新版本时贾维斯会提示。Windows 安装版 / Linux 在后台只下载改动的部分，点“重启以更新”即可；
+            免安装版和 Mac 版会提示去下载页。
 
             ## 首次打开
             - 安装包没有购买代码签名证书：Windows 提示“已保护你的电脑”时点 **更多信息 → 仍要运行**；

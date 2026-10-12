@@ -1330,6 +1330,36 @@ $('#set-tts').addEventListener('change', (e) => {
   speaker.enabled = e.target.checked;
   if (!e.target.checked) speaker.cancel();
 });
+// 自动更新（桌面版）：顶栏显示下载进度 / “重启更新” / “去下载”
+if (DESKTOP?.onUpdate) {
+  const pill = $('#update-pill');
+  const note = $('#update-note');
+  const show = (u) => {
+    $('#row-version').hidden = false;
+    $('#app-version').textContent = `当前 ${u.current ?? DESKTOP.version}`;
+    pill.hidden = !['downloading', 'ready', 'available'].includes(u.state);
+    pill.dataset.state = u.state;
+    pill.textContent = u.state === 'downloading' ? `新版本下载中 ${u.percent ?? 0}%` : u.state === 'ready' ? `重启以更新到 ${u.version}` : u.state === 'available' ? `新版本 ${u.version} · 去下载` : '';
+    note.textContent = {
+      checking: '正在检查…',
+      latest: '已经是最新版本',
+      downloading: `正在后台下载 ${u.version ?? ''}（只下载改动的部分）`,
+      ready: `${u.version} 已下载好，点顶栏的“重启以更新”或下次启动时自动安装`,
+      available: `有新版本 ${u.version}。${u.manual ? '这个版本（免安装版 / Mac）不能自动安装，请到下载页下载' : ''}`,
+      error: `检查更新失败：${u.error ?? ''}`,
+      dev: '从源码运行，不检查更新'
+    }[u.state] ?? '';
+    if (u.state === 'ready' && !show.toldReady) { show.toldReady = true; toast(`新版本 ${u.version} 已下载好，点顶栏按钮重启即可更新`); }
+  };
+  DESKTOP.onUpdate(show);
+  DESKTOP.invoke('updateState').then((u) => show(u.packaged ? u : { ...u, state: 'dev' })).catch(() => {});
+  pill.addEventListener('click', () => {
+    if (pill.dataset.state === 'ready') DESKTOP.invoke('updateInstall');
+    else if (pill.dataset.state === 'available') DESKTOP.invoke('openReleases');
+  });
+  $('#btn-update-check').addEventListener('click', () => DESKTOP.invoke('updateCheck').then(show).catch((e) => toast(e.message)));
+}
+
 // 界面明暗
 const lightMql = matchMedia('(prefers-color-scheme: light)');
 function applyTheme() {

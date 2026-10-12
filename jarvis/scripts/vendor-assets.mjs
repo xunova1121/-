@@ -22,10 +22,17 @@ function copy(from, to) {
   fs.copyFileSync(from, to);
 }
 
+// 人脸 Worker 以模块方式加载（FilesetResolver.forVisionTasks(base, true)），只会用到 *_module_internal；
+// 另外两套（普通 / 无 SIMD）各 12–13 MB，从来不会被请求，不再复制
 for (const f of fs.readdirSync(nm('@mediapipe/tasks-vision/wasm'))) {
-  copy(nm('@mediapipe/tasks-vision/wasm', f), pub('vendor/mediapipe', f));
+  if (/_module_internal\./.test(f)) copy(nm('@mediapipe/tasks-vision/wasm', f), pub('vendor/mediapipe', f));
 }
-for (const f of ['silero_vad_v5.onnx', 'silero_vad_legacy.onnx', 'vad.worklet.bundle.min.js']) {
+for (const old of fs.existsSync(pub('vendor/mediapipe')) ? fs.readdirSync(pub('vendor/mediapipe')) : []) {
+  if (!/_module_internal\./.test(old)) fs.rmSync(pub('vendor/mediapipe', old));
+}
+// 语音检测只用 v5 模型
+fs.rmSync(pub('vendor/vad/silero_vad_legacy.onnx'), { force: true });
+for (const f of ['silero_vad_v5.onnx', 'vad.worklet.bundle.min.js']) {
   copy(nm('@ricky0123/vad-web/dist', f), pub('vendor/vad', f));
 }
 for (const f of fs.readdirSync(nm('onnxruntime-web/dist'))) {

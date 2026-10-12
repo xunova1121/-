@@ -16,11 +16,6 @@
     "dist:linux": "npm run prepare-app && electron-builder --linux",
     "icon": "node scripts/make-icon.mjs"
   },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.133.0",
-    "@modelcontextprotocol/sdk": "1.30.1",
-    "zod": "^4.1.0"
-  },
   "devDependencies": {
     "electron": "44.4.5",
     "electron-builder": "26.16.1"
@@ -29,11 +24,49 @@
     "appId": "com.jarvis.desktop",
     "productName": "Jarvis",
     "copyright": "Jarvis",
-    "directories": { "output": "release", "buildResources": "build" },
-    "files": ["main.mjs", "preload.cjs", "ops.mjs", "input.mjs", "control.mjs", "wallpaper.mjs", "presence.mjs", "activity.mjs", "package.json", "build/icon.png", "bundle/**/*"],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.mjs",
+      "preload.cjs",
+      "ops.mjs",
+      "input.mjs",
+      "control.mjs",
+      "wallpaper.mjs",
+      "presence.mjs",
+      "activity.mjs",
+      "updater.mjs",
+      "package.json",
+      "build/icon.png",
+      "bundle/**/*"
+    ],
     "asar": true,
+    "compression": "maximum",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "xunova1121",
+        "repo": "-",
+        "releaseType": "release"
+      }
+    ],
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }, { "target": "zip", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "build/icon.png",
       "artifactName": "Jarvis-${version}-win-${arch}.${ext}"
     },
@@ -44,11 +77,22 @@
       "shortcutName": "贾维斯",
       "uninstallDisplayName": "贾维斯",
       "artifactName": "Jarvis-Setup-${version}.${ext}",
-      "installerLanguages": ["zh_CN", "en_US"],
+      "installerLanguages": [
+        "zh_CN",
+        "en_US"
+      ],
       "language": "2052"
     },
     "mac": {
-      "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }],
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
       "icon": "build/icon.png",
       "category": "public.app-category.productivity",
       "identity": "-",
@@ -60,10 +104,15 @@
       }
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "icon": "build/icon.png",
       "category": "Utility",
       "artifactName": "Jarvis-${version}-linux-${arch}.${ext}"
     }
+  },
+  "dependencies": {
+    "electron-updater": "6.8.10"
   }
 }

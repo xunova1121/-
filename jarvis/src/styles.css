@@ -765,3 +765,8 @@ body.wallpaper .thought-log { right: 6vw; bottom: calc(10vh + 70px); width: 320p
 .theme-btn .sun { display: none; }
 :root[data-theme="light"] .theme-btn .sun { display: block; }
 :root[data-theme="light"] .theme-btn .moon { display: none; }
+
+/* 自动更新提示 */
+.update-pill { height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent); font-size: 12px; white-space: nowrap; }
+.update-pill[data-state="downloading"] { cursor: default; border-style: dashed; }
+.update-pill[data-state="ready"] { background: var(--accent); color: var(--bg); box-shadow: 0 0 16px var(--accent-soft); }
