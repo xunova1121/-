@@ -7,7 +7,8 @@
  */
 import {
   WebGLRenderer, Scene, PerspectiveCamera, BufferGeometry, BufferAttribute, Points, Mesh, LineSegments,
-  ShaderMaterial, AdditiveBlending, PlaneGeometry, CylinderGeometry, Vector2, Vector3, DoubleSide
+  ShaderMaterial, AdditiveBlending, PlaneGeometry, CylinderGeometry, Vector2, Vector3, DoubleSide,
+  Color, LinearSRGBColorSpace
 } from 'three';
 import { createBloom } from './bloom.js';
 import {
@@ -31,7 +32,15 @@ export function createStage(canvas, { lowEnd = false, onContextChange } = {}) {
   const meta = META;
   const renderer = new WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setClearColor(0x02060b, 1);
+  // 底色：直接输出到屏幕时由 three.js 做 sRGB 编码；走泛光管线时合成 pass 不做编码，
+  // 所以要把 sRGB 数值原样当线性值写进去，否则任何底色都会被压得发黑
+  const bg = { srgb: new Color(0x02060b), raw: new Color() };
+  function setBg(hex) {
+    bg.srgb.set(hex);
+    const c = new Color(hex);
+    bg.raw.setRGB(...c.clone().convertLinearToSRGB().toArray(), LinearSRGBColorSpace);
+  }
+  setBg(0x02060b);
   // 一帧里有多次 render（泛光各 pass），draw call 统计按帧手动清零
   renderer.info.autoReset = false;
   const isWebGL2 = renderer.capabilities.isWebGL2;
@@ -250,6 +259,7 @@ export function createStage(canvas, { lowEnd = false, onContextChange } = {}) {
 
   function draw() {
     renderer.info.reset();
+    renderer.setClearColor(bloom ? bg.raw : bg.srgb, 1);
     if (bloom) bloom.render(scene, camera);
     else renderer.render(scene, camera);
   }
@@ -347,6 +357,11 @@ export function createStage(canvas, { lowEnd = false, onContextChange } = {}) {
     setActivity({ energy, audio } = {}) {
       if (energy !== undefined) activity.energy = Math.max(0, Math.min(1, energy));
       if (audio !== undefined) activity.audio = Math.max(0, Math.min(1, audio));
+    },
+    /** 舞台底色（随主题变化；画布边缘有渐隐遮罩，底色要和舞台背景接得上） */
+    setBackground(color) {
+      setBg(color);
+      if (!raf) draw();
     },
     /** 画质：bloom 泛光开关、星尘开关 */
     setQuality(q) {
