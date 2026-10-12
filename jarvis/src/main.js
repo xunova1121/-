@@ -61,7 +61,8 @@ import { STANDALONE, MOBILE, VAD } from './config.js';
 import { NativeVoice } from './mobile/nativeVoice.js';
 import { initChips } from './ui/chips.js';
 import { initDrawer } from './ui/drawer.js';
-import { initModelPicker, chipLabel, isAuto } from './ui/modelPicker.js';
+import { initModelPicker, chipLabel, isAuto, repairChatModel } from './ui/modelPicker.js';
+import { generateImage } from './llm/images.js';
 import { createFormDirector } from './core/formDirector.js';
 import { composeGreeting, GREET_GAP_MS } from './core/greeting.js';
 import { classifyTask, routeFor, TASKS } from './llm/router.js';
@@ -347,6 +348,7 @@ function friendlyError(msg) {
   if (code === 429) return '请求太频繁或额度用完（429），已自动重试过。稍等一会儿再试，或检查中转站余额';
   if (code === 401 || code === 403) return `API Key 不对或没有权限（${code}）：请在“模型”里检查密钥`;
   if (code >= 500) return `服务商临时故障（${code}），已自动重试过。稍后再试，或换一个模型`;
+  if (/图片模型|image model|images\/generations/i.test(msg)) return '当前选的是画图模型，不能用来聊天：点输入框里的模型名换一个聊天模型。想画图直接说“画一张…”就行';
   if (/connection reset|econnreset|socket hang up/i.test(msg)) return '网络连接被断开（已自动重试过）。可以点“再试一次”；手机上可以试试切换 Wi‑Fi / 流量';
   return msg;
 }
@@ -569,6 +571,8 @@ async function openSession(id) {
 
 /** 光核旁的建议标注（启动末尾创建） */
 let callouts = null;
+/** 正在回答的气泡（画图工具把图片放进去） */
+let liveBubble = null;
 /** 桌面背景同步：主窗口在做什么，桌面上的粒子体就跟着做（桌面版开了背景模式时） */
 function wp(payload) { if (window.jarvisDesktop) window.jarvisDesktop.invoke('wallpaperEvent', payload).catch(() => {}); }
 const hud = {
@@ -626,9 +630,11 @@ async function buildTools({ background = false } = {}) {
       fetchViaGateway: fetchViaGateway(),
       llm: helperLlm('write'), // 深度调研：用写作模型
       onPreview: background ? () => {} : COMPACT
-        ? (path) => { panels.openFile(path); toast(`已生成 ${path}：点下方“工作区”查看`); } // 手机上不自动盖住对话
+        ? (path) => { panels.openFile(path); toast(`已生成 ${path}：左上角菜单 → 工作区查看`); } // 手机上不自动盖住对话
         : (path) => { showPanel('workspace'); panels.openFile(path); },
       onFileChanged,
+      imageGen: (o) => generateImage(llmConfig, { ...o, gateway }),
+      onImage: (src) => liveBubble?.image?.(src),
       onSchedulesChanged: () => schedulesPanel?.refresh(),
       currentSessionId: () => session?.id
     }),
@@ -788,6 +794,7 @@ async function send(text) {
   if (machine.task !== 'listening') machine.beginUserTurn();
   const ctrl = new AbortController();
   const bubble = transcript.add('agent');
+  liveBubble = bubble;
   bubble.el.classList.add('streaming');
   const turn = { ctrl, streamDone: false, bubble };
   active = turn;
@@ -1290,6 +1297,11 @@ const modelPicker = initModelPicker({
   openSettings: () => showPanel('models')
 });
 $('#model-chip').addEventListener('click', () => modelPicker.open());
+// 聊天模型误选成了画图模型（如 gpt-image-2）：自动挪到“画图用”，聊天换回能对话的模型
+{
+  const fixed = repairChatModel(panels.config);
+  if (fixed) { panels.patchConfig(() => fixed); toast(`“${fixed.imageModel || '该模型'}”不能用来聊天，已改为画图用；聊天用 ${fixed.models[fixed.provider] || '默认模型'}`); }
+}
 const localModels = initLocalModelsPanel({
   getGateway: () => gateway,
   getConfig: () => panels.config,

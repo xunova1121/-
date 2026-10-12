@@ -389,6 +389,12 @@ export class Transcript {
           box.cancel = () => done('deny', '已取消');
         });
       },
+      /** 生成的图片：显示在当前文字段之前 */
+      image(src, alt = '生成的图片') {
+        const img = Object.assign(document.createElement('img'), { src, alt, className: 'gen-image', loading: 'lazy' });
+        el.insertBefore(img, cur);
+        self.#scroll();
+      },
       sources(names) {
         const box = document.createElement('div');
         box.className = 'sources';

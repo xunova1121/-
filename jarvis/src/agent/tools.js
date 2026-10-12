@@ -113,6 +113,21 @@ export function createTools(ctx) {
       }
     },
     {
+      name: 'generate_image',
+      description: '画图 / 生成图片（海报、插画、头像、配图等）：用服务商的画图模型（如 gpt-image）按描述生成一张图片，保存到工作区并显示在对话里。用户说“画一张… / 做个…的图片 / 生成图片”时使用。描述写具体：主体、风格、色调、构图。',
+      input_schema: S({ prompt: str('图片描述（中英文都可以，越具体越好）'), size: str('尺寸：1024x1024（默认）、1536x1024（横图）、1024x1536（竖图）') }, ['prompt']),
+      run: async ({ prompt, size }) => {
+        if (!ctx.imageGen) throw new Error('当前环境不能画图');
+        const r = await ctx.imageGen({ prompt, size: /^\d+x\d+$/.test(size || '') ? size : '1024x1024' });
+        const ext = /jpe?g/.test(r.blob.type) ? 'jpg' : /webp/.test(r.blob.type) ? 'webp' : 'png';
+        const name = String(prompt).replace(/[\\/:*?"<>|\s]+/g, '').slice(0, 16) || 'image';
+        const w = await ws.write(`images/${name}-${Date.now().toString(36)}.${ext}`, r.blob);
+        ctx.onFileChanged?.(w.path);
+        ctx.onImage?.(URL.createObjectURL(r.blob), w.path);
+        return `已生成图片（${r.model}）并显示在对话里，保存在工作区 ${w.path}。${r.revised ? `模型改写后的描述：${r.revised}` : ''}`;
+      }
+    },
+    {
       name: 'schedule_task',
       description: '创建定时任务：到点自动让你执行一段指令，结果保存为一段对话并通知用户。用户说“每天 / 每周 / 工作日 / 明天几点 / 每隔多久 帮我……”或“提醒我……”时使用。',
       input_schema: S({

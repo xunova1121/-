@@ -5,6 +5,7 @@
  */
 import { TASKS, suggestRoutes } from '../llm/router.js';
 import { listModels, modelOf, providerById } from '../llm/config.js';
+import { modelKind, imageModelOf } from '../llm/images.js';
 
 const DAY = 864e5;
 const SHORT = { chat: '对话', code: '编程', write: '写作', reason: '思考', vision: '看图' };
@@ -32,9 +33,24 @@ export function autoRouting(cfg, ids) {
   return { ...cfg, routing: { ...(cfg.routing || {}), enabled: true, provider: cfg.provider, routes } };
 }
 
-/** 选定某个模型：作为默认模型，并关闭自动分配 */
+/** 选定某个模型：聊天模型作为默认模型并关闭自动分配；画图模型只设为“画图用” */
 export function pickModel(cfg, id) {
+  if (modelKind(id) === 'image') return { ...cfg, imageModel: id };
   return { ...cfg, models: { ...cfg.models, [cfg.provider]: id }, routing: { ...(cfg.routing || {}), enabled: false } };
+}
+
+/** 修正：聊天模型被设成了画图 / 语音 / 向量模型（它们不能对话）——挪到对应用途，聊天换回一个能对话的模型 */
+export function repairChatModel(cfg) {
+  const cur = modelOf(cfg);
+  if (!cur || modelKind(cur) === 'chat' || providerById(cfg.provider)?.kind === 'mock') return null;
+  const ids = Object.values(cfg.modelLists || {}).flatMap((l) => l.ids || []).filter((id) => modelKind(id) === 'chat');
+  const routes = cfg.routing?.routes || {};
+  const next = [routes.reason, routes.chat, ...Object.values(routes)].find((m) => m && modelKind(m) === 'chat') || suggestRoutes(ids, '').reason || ids[0] || '';
+  return {
+    ...cfg,
+    ...(modelKind(cur) === 'image' && { imageModel: cur }),
+    models: { ...cfg.models, [cfg.provider]: next }
+  };
 }
 
 /**
@@ -96,8 +112,19 @@ export function initModelPicker({ getConfig, patchConfig, getGateway, toast, ope
       toast(`已开启自动选模型：${Object.entries(next.routing.routes).map(([t, m]) => `${SHORT[t]}用 ${m}`).join('，')}`);
       close();
     });
-    const shown = ids.filter((id) => !q || id.toLowerCase().includes(q));
-    list.replaceChildren(autoRow, ...shown.map((id) => {
+    const match = (id) => !q || id.toLowerCase().includes(q);
+    const shown = ids.filter((id) => modelKind(id) === 'chat' && match(id));
+    const images = ids.filter((id) => modelKind(id) === 'image' && match(id));
+    const curImage = imageModelOf(cfg);
+    const imageRows = images.length ? [
+      el('div', { className: 'mp-section', textContent: '画图模型（说“画一张…”时用，不用来聊天）' }),
+      ...images.map((id) => {
+        const b = el('button', { type: 'button', className: `mp-item${id === curImage ? ' on' : ''}` }, el('span', { className: 'mp-name', textContent: id }), el('span', { className: 'mp-tags', textContent: '画图' }));
+        b.addEventListener('click', () => { patchConfig((c) => pickModel(c, id)); toast(`画图将使用 ${id}（聊天模型不变）`); close(); });
+        return b;
+      })
+    ] : [];
+    list.replaceChildren(autoRow, el('div', { className: 'mp-section', textContent: '聊天模型' }), ...shown.map((id) => {
       const tags = tagsOf(id);
       const b = el('button', { type: 'button', className: `mp-item${!auto && id === cur ? ' on' : ''}` },
         el('span', { className: 'mp-name', textContent: id }),
@@ -108,8 +135,8 @@ export function initModelPicker({ getConfig, patchConfig, getGateway, toast, ope
         close();
       });
       return b;
-    }));
-    if (!shown.length && ids.length) list.append(el('p', { className: 'mp-status', textContent: '没有匹配的模型' }));
+    }), ...imageRows);
+    if (!shown.length && !images.length && ids.length) list.append(el('p', { className: 'mp-status', textContent: '没有匹配的模型' }));
     search.hidden = ids.length < 10;
   }
 
