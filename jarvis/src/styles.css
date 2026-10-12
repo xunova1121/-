@@ -1084,3 +1084,31 @@ body.reduced-motion .drawer { transition: none; }
 .compact .model-chip::after { content: "⌄"; font-size: 12px; margin-top: -4px; }
 .compact .model-chip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .compact.generating .model-chip::before { background: #f0c36a; }
+
+/* ================================================================
+ * 选模型（输入框里的模型名弹出）
+ * ================================================================ */
+.mp-scrim { position: fixed; inset: 0; z-index: 44; background: rgba(10, 10, 24, 0.35); }
+.mp-sheet {
+  position: fixed; z-index: 45; left: 50%; bottom: 0; transform: translateX(-50%);
+  width: min(560px, 100vw); max-height: min(72vh, 640px); display: flex; flex-direction: column; gap: 8px;
+  padding: 14px 14px calc(14px + env(safe-area-inset-bottom, 0px)); border-radius: 20px 20px 0 0;
+  background: var(--surface-2); border: 1px solid var(--line); box-shadow: 0 -12px 40px var(--shadow);
+}
+@media (min-width: 861px) { .mp-sheet { bottom: 96px; border-radius: 18px; } }
+.mp-head { display: flex; align-items: center; gap: 8px; }
+.mp-head strong { font-size: 16px; margin-right: auto; }
+.mp-search { width: 100%; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: var(--bg-2); color: var(--text); }
+.mp-status { margin: 0; font-size: 12.5px; color: var(--muted); }
+.mp-status:empty { display: none; }
+.mp-list { overflow-y: auto; display: grid; gap: 4px; min-height: 0; }
+.mp-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; text-align: left; padding: 10px 12px; border-radius: 12px; border: 1px solid transparent; background: none; color: var(--text); }
+.mp-item:hover { background: var(--chip-bg); }
+.mp-item.on { border-color: var(--line-strong); background: var(--accent-soft); }
+.mp-item.on .mp-name::after { content: "  ✓"; color: var(--accent); }
+.mp-name { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-item small { grid-column: 1 / -1; color: var(--dim); font-size: 11.5px; line-height: 1.5; }
+.mp-tags { font-size: 11px; color: var(--accent); white-space: nowrap; }
+.mp-auto { background: var(--chip-bg); margin-bottom: 4px; }
+.mp-auto .mp-name { font-weight: 600; }
+.mp-settings { align-self: flex-start; border: 0; background: none; color: var(--accent); font-size: 13px; padding: 4px 2px; }

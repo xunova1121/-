@@ -27,7 +27,7 @@ import * as agentMemory from './agent/memory.js';
 import * as kb from './agent/knowledge.js';
 import { createEmbedder } from './llm/embeddings.js';
 import { initPanels } from './ui/panels.js';
-import { loadConfig, saveConfig, createAdapter, displayName, providerById, resolveVoice, modelOf } from './llm/config.js';
+import { loadConfig, saveConfig, createAdapter, displayName, providerById, resolveVoice } from './llm/config.js';
 import { initVoicePanel } from './ui/voicePanel.js';
 import * as skillPacks from './agent/skillPacks.js';
 import { initSkillsPanel } from './ui/skillsPanel.js';
@@ -61,6 +61,7 @@ import { STANDALONE, MOBILE } from './config.js';
 import { NativeVoice } from './mobile/nativeVoice.js';
 import { initChips } from './ui/chips.js';
 import { initDrawer } from './ui/drawer.js';
+import { initModelPicker, chipLabel, isAuto } from './ui/modelPicker.js';
 import { createFormDirector } from './core/formDirector.js';
 import { composeGreeting, GREET_GAP_MS } from './core/greeting.js';
 import { classifyTask, routeFor, TASKS } from './llm/router.js';
@@ -342,8 +343,9 @@ if ((STANDALONE && !MOBILE) || location.protocol === 'file:') {
 function updateModelLabels() {
   const name = displayName(llmConfig);
   $('#mode-text').textContent = name;
-  // 手机上输入框里只显示型号（如 gpt-6.1-sol），更短
-  $('#model-chip-text').textContent = COMPACT && providerById(llmConfig.provider)?.kind !== 'mock' ? modelOf(llmConfig) || name : name;
+  // 输入框里显示型号（或“自动”），点一下弹出模型列表
+  $('#model-chip-text').textContent = chipLabel(llmConfig);
+  if (isAuto(llmConfig)) $('#mode-text').textContent = `${name} · 自动选模型`;
   $('#mode-pill').title = `当前模型：${name}${gateway ? '（经本机网关）' : ''}。点击切换`;
   $('#hud-model').textContent = name.length > 22 ? `${name.slice(0, 21)}…` : name;
 }
@@ -1224,6 +1226,14 @@ routingPanel = initRoutingPanel({
   getGateway: () => gateway,
   toast: (t) => toast(t)
 });
+const modelPicker = initModelPicker({
+  getConfig: () => panels.config,
+  patchConfig: (fn) => panels.patchConfig(fn),
+  getGateway: () => gateway,
+  toast: (t) => toast(t),
+  openSettings: () => showPanel('models')
+});
+$('#model-chip').addEventListener('click', () => modelPicker.open());
 const localModels = initLocalModelsPanel({
   getGateway: () => gateway,
   getConfig: () => panels.config,
