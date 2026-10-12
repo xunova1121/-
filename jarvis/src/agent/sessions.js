@@ -68,6 +68,42 @@ export async function search(query) {
   });
 }
 
+/**
+ * 跨对话检索：在其他对话的原话里找和问题相关的片段（一问一答为一个单位）
+ * @returns {Promise<Array<{ sessionId, title, ts, user, reply, score }>>}
+ */
+export async function searchMessages(query, { exclude = null, k = 3, minScore = 2 } = {}) {
+  const all = (await sessions.all()).filter((s) => s.id !== exclude);
+  const units = [];
+  for (const s of all) {
+    s.messages.forEach((m, i) => {
+      if (m.role !== 'user') return;
+      const reply = s.messages[i + 1]?.role === 'assistant' ? s.messages[i + 1].content : '';
+      units.push({ id: `${s.id}#${i}`, sessionId: s.id, title: s.title, ts: m.ts ?? s.updatedAt, user: m.content, reply });
+    });
+  }
+  if (!units.length || !String(query || '').trim()) return [];
+  const byId = new Map(units.map((u) => [u.id, u]));
+  const hits = buildIndex(units.map((u) => ({ id: u.id, text: `${u.user}\n${u.reply.slice(0, 800)}` })))(query, k * 3);
+  const seen = new Set();
+  const out = [];
+  for (const h of hits) {
+    if (h.score < minScore) continue;
+    const u = byId.get(h.id);
+    if (seen.has(u.sessionId)) continue; // 每段对话最多取一处，覆盖更多对话
+    seen.add(u.sessionId);
+    out.push({ ...u, score: h.score });
+    if (out.length >= k) break;
+  }
+  return out;
+}
+
+/** 最近的几段其他对话 */
+export async function recent({ exclude = null, k = 3 } = {}) {
+  return (await sessions.all()).filter((s) => s.id !== exclude && s.messages.length)
+    .sort((a, b) => b.updatedAt - a.updatedAt).slice(0, k);
+}
+
 /** 导出为 Markdown */
 export function toMarkdown(s) {
   const when = (ts) => new Date(ts).toLocaleString('zh-CN', { hour12: false });

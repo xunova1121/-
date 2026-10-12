@@ -207,11 +207,16 @@ export async function setCore(block, content) {
 }
 
 // ---------------------------------------------------------------- 情景记忆（对话摘要）
-export async function addEpisode({ summary, topics = [], turns = 0 }) {
+export async function addEpisode({ summary, topics = [], turns = 0, session = null, open = [] }) {
   summary = norm(summary);
   if (!summary) return null;
   const vec = await embedOne(summary);
-  const e = { id: uid('ep'), summary, topics, turns, ts: now(), ...(vec ? { embedding: vec, embModel: embedder.model } : {}) };
+  const e = {
+    id: uid('ep'), summary, topics, turns, ts: now(),
+    ...(session?.id && { sessionId: session.id, sessionTitle: session.title }),
+    ...(open.length && { open: open.map(norm).filter(Boolean).slice(0, 5) }),
+    ...(vec ? { embedding: vec, embModel: embedder.model } : {})
+  };
   await episodes.put(e);
   await log('episode', `记下一段对话：${summary.slice(0, 40)}`);
   return e;
@@ -222,14 +227,15 @@ export async function addEpisode({ summary, topics = [], turns = 0 }) {
  * 有大模型时让模型做（更准）；离线时用规则兜底。
  * @param {Array<{role: string, content: string}>} turns 这段对话（user / assistant）
  */
-export async function reflect(turns, { episode = true } = {}) {
+export async function reflect(turns, { episode = true, session = null } = {}) {
   const userLines = turns.filter((t) => t.role === 'user').map((t) => t.content);
   if (!userLines.length) return { memories: [], episode: null };
+  const pending = await openItems({ exclude: session?.id, days: 30, k: 12 });
   if (llm) {
     try {
       const text = await llm({
         system: '你是记忆整理器。只输出 JSON，不要解释。',
-        prompt: `下面是一段用户与助手的对话。\n1. 抽取值得长期记住的“关于用户”的信息（身份、偏好、习惯、目标、重要事实），每条一句第三人称陈述（如“用户住在上海”）；临时性的问题、助手说的话、密码密钥等敏感信息不要记。\n2. 用一两句话概括这段对话做了什么。\n输出格式：{"memories":[{"content":"…","category":"profile|preference|fact|goal","importance":1-5}],"summary":"…","topics":["…"]}\n\n对话：\n${turns.map((t) => `${t.role === 'user' ? '用户' : '助手'}：${String(t.content).slice(0, 600)}`).join('\n').slice(-6000)}`
+        prompt: `下面是一段用户与助手的对话。\n1. 抽取值得长期记住的“关于用户”的信息（身份、偏好、习惯、目标、重要事实），每条一句第三人称陈述（如“用户住在上海”）；临时性的问题、助手说的话、密码密钥等敏感信息不要记。\n2. 用一两句话概括这段对话做了什么。\n3. 列出这段对话里说好以后再做、还没做完的事（open），没有就空。\n4. 下面是之前对话里没做完的事，这段对话里已经完成或用户说不用做了的，原样列在 done 里。\n之前没做完的事：\n${pending.map((o) => `- ${o.text}`).join('\n') || '（无）'}\n\n输出格式：{"memories":[{"content":"…","category":"profile|preference|fact|goal","importance":1-5}],"summary":"…","topics":["…"],"open":["…"],"done":["…"]}\n\n对话：\n${turns.map((t) => `${t.role === 'user' ? '用户' : '助手'}：${String(t.content).slice(0, 600)}`).join('\n').slice(-6000)}`
       });
       const raw = String(text).match(/\{[\s\S]*\}/)?.[0];
       if (!raw) throw new Error('模型没有返回 JSON');
@@ -237,12 +243,51 @@ export async function reflect(turns, { episode = true } = {}) {
       const facts = Array.isArray(j.memories) ? j.memories.filter((m) => m?.content) : [];
       const summary = String(j.summary || '');
       const topics = Array.isArray(j.topics) ? j.topics.slice(0, 5).map(String) : [];
-      return { memories: await saveFacts(facts), episode: episode && summary ? await addEpisode({ summary, topics, turns: turns.length }) : null };
+      const open = Array.isArray(j.open) ? j.open.map(String) : [];
+      if (Array.isArray(j.done)) await resolveOpen(pending.filter((o) => j.done.some((d) => lexicalSim(String(d), o.text) >= 0.6)));
+      return { memories: await saveFacts(facts), episode: episode && summary ? await addEpisode({ summary, topics, turns: turns.length, session, open }) : null };
     } catch { /* 模型输出不合格：退回规则 */ }
   }
   const facts = ruleFacts(userLines.join('\n'));
   const summary = `用户：${userLines.slice(-3).map((l) => l.slice(0, 40)).join('；')}`;
-  return { memories: await saveFacts(facts), episode: episode ? await addEpisode({ summary, turns: turns.length }) : null };
+  const text = userLines.join('\n');
+  await resolveOpen(pending.filter((o) => lexicalSim(text, o.text) >= 0.5 || userLines.some((l) => lexicalSim(l, o.text) >= 0.5)));
+  return { memories: await saveFacts(facts), episode: episode ? await addEpisode({ summary, turns: turns.length, session, open: ruleOpen(userLines) }) : null };
+}
+
+/** 离线规则：用户说“下次 / 明天 / 回头再……”的事记为未完成 */
+export function ruleOpen(userLines) {
+  const out = [];
+  for (const line of userLines) {
+    for (const part of String(line).split(/[。！!？?；;\n]/)) {
+      const m = part.match(/(?:下次|明天|回头|以后|改天|待会儿?|晚点|之后)(?:再|继续|帮我|接着)(.{2,40})/);
+      if (m) out.push(m[0].trim());
+    }
+  }
+  return [...new Set(out)].slice(0, 3);
+}
+
+/**
+ * 之前对话里还没做完的事（最新的在前）
+ * @returns {Promise<Array<{ episodeId, sessionId, sessionTitle, text, ts }>>}
+ */
+export async function openItems({ exclude = null, days = 14, k = 4, at = now() } = {}) {
+  const eps = (await episodes.all()).filter((e) => e.open?.length && e.sessionId !== exclude && at - e.ts <= days * DAY);
+  return eps.sort((a, b) => b.ts - a.ts)
+    .flatMap((e) => e.open.map((text) => ({ episodeId: e.id, sessionId: e.sessionId ?? null, sessionTitle: e.sessionTitle ?? '', text, ts: e.ts })))
+    .slice(0, k);
+}
+
+/** 标记为已完成（从所在的对话摘要里移除） */
+export async function resolveOpen(items) {
+  const byEp = new Map();
+  for (const o of items) byEp.set(o.episodeId, [...(byEp.get(o.episodeId) ?? []), o.text]);
+  for (const [id, texts] of byEp) {
+    const e = await episodes.get(id);
+    if (!e) continue;
+    await episodes.put({ ...e, open: (e.open ?? []).filter((t) => !texts.includes(t)) });
+    await log('episode', `完成了之前没做完的事：${texts.join('；').slice(0, 40)}`);
+  }
 }
 
 async function saveFacts(facts) {

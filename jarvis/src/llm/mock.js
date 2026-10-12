@@ -45,6 +45,7 @@ export function plan(messages, tools = []) {
       const summary = lastResult.content.match(/## 结论摘要\n([\s\S]*?)\n\n/)?.[1] ?? '';
       return { emotion: '专注', text: `调研完成，报告在 ${path}，右侧已打开。要点：\n\n${summary}\n\n需要的话我可以把它转成 Word 或 PDF。` };
     }
+    if (used.has('search_conversations')) return { emotion: '亲和', text: /没有找到/.test(lastResult.content) ? '之前的对话里没找到相关内容，能再说说具体是哪件事吗？' : `在之前的对话里找到了：\n\n${lastResult.content.slice(0, 500)}` };
     if (used.has('web_search')) return { emotion: '专注', text: `搜索结果：\n\n${lastResult.content.slice(0, 600)}` };
     const mcpUsed = [...used].find((n) => n.startsWith('mcp_'));
     if (mcpUsed) return { emotion: '专注', text: `MCP 工具返回：${lastResult.content.slice(0, 400)}` };
@@ -125,6 +126,9 @@ export function plan(messages, tools = []) {
   if (!/^【这是定时任务/.test(q) && /(每天|每日|每周|星期|工作日|每隔|每\d+分钟|每小时|明天|后天|\d+分钟后|\d+小时后)/.test(q) && /(提醒|帮我|总结|写|检查|汇报|整理|发)/.test(q)) {
     return { emotion: '专注', calls: [call('schedule_task', { title: q.replace(/^.*?(提醒我|帮我)/, '').slice(0, 12) || '定时任务', prompt: q.replace(/^.*?(提醒我|帮我)/, '') || q, when: q })] };
   }
+  // —— 跨对话：“上次 / 之前我们聊的……”
+  const past = q.match(/(?:上次|之前|那天|以前)(?:我们|咱们)?(?:聊|说|讨论|提)(?:过|到)?的?(.*)/);
+  if (past && tools.some((t) => t.name === 'search_conversations')) return { emotion: '聆听', calls: [call('search_conversations', { query: past[1].replace(/[是多少什么？?吗呢]+$/g, '').trim() || q })] };
   // —— 调研：“帮我调研一下……”“深度研究……”
   const research = q.match(/(?:深度)?(?:调研|研究|调查)(?:一下|下)?[：:，,\s]*(.+)/);
   if (research && tools.some((t) => t.name === 'deep_research')) return { emotion: '专注', calls: [call('deep_research', { question: research[1].trim(), depth: /深入|全面|详细/.test(q) ? 'deep' : /快速|简单/.test(q) ? 'quick' : 'standard' })] };

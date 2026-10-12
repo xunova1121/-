@@ -6,7 +6,13 @@
  */
 
 /** 开场（还没对话）时的建议 */
-export function openingSuggestions({ desktop = false, hour = new Date().getHours(), hasSkills = false } = {}) {
+export function openingSuggestions({ desktop = false, hour = new Date().getHours(), hasSkills = false, resume = null } = {}) {
+  const base = baseOpening({ desktop, hour, hasSkills });
+  // 跨对话：有没做完的事或上次的对话时，第一条建议就是“接着做”
+  return resume ? [resume, ...base.slice(0, 2)] : base;
+}
+
+function baseOpening({ desktop, hour, hasSkills }) {
   const plan = hour < 11 ? { title: '帮我规划今天的工作', prompt: '帮我把今天要做的事排个优先级，列成清单' }
     : hour < 18 ? { title: '帮我写一份工作周报', prompt: '帮我写一份本周工作周报' }
       : { title: '总结今天，安排明天', prompt: '帮我总结今天做了什么，并列出明天的计划' };

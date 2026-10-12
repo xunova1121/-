@@ -595,6 +595,22 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await ctx.close();
 }
 
+// ---------- 5e. 跨对话：新对话里能接着上次、找到以前说过的内容 ----------
+{
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  const page = await ctx.newPage();
+  await page.goto(BASE);
+  await page.waitForFunction(() => window.__jarvis?.showPanel);
+  await ask(page, '我家装修预算 18 万，客厅想用奶油风');
+  await page.keyboard.press('Control+Shift+O');
+  await page.waitForFunction(() => !document.querySelector('#transcript .msg'));
+  await page.waitForFunction(() => /接着上次/.test(document.querySelector('.callouts, #callouts')?.textContent ?? document.body.textContent), null, { timeout: 5000 }).catch(() => {});
+  check('跨对话：新对话的建议里有“接着上次”', /接着上次：我家装修预算/.test(await page.textContent('body')));
+  const r = await ask(page, '上次我们聊的装修预算是多少');
+  check('跨对话：在新对话里找到以前说过的内容', /18 万/.test(r) && /找到了/.test(r), r.slice(0, 120));
+  await ctx.close();
+}
+
 // ---------- 6. 不支持语音识别（模拟 Firefox） ----------
 {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });

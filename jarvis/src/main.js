@@ -465,7 +465,8 @@ async function reflectNow({ manual = false } = {}) {
   if (!turns.some((t) => t.role === 'user')) { if (manual) toast('没有新的对话需要整理'); return; }
   reflectFrom = history.length;
   try {
-    const r = await agentMemory.reflect(turns);
+    const title = session.titleSet ? session.title : sessionsApi.autoTitle(history.find((m) => m.role === 'user')?.content);
+    const r = await agentMemory.reflect(turns, { session: { id: session.id, title } });
     const n = r.memories.filter((m) => m.action !== 'NOOP').length;
     if (n || manual) toast(`记忆已整理：新增或更新 ${n} 条${r.episode ? '，并记下这段对话的摘要' : ''}`);
     panels.refreshMind();
@@ -487,6 +488,20 @@ function replayTranscript() {
     }
   }
 }
+/** 新对话的开场建议：之前没做完的事 > 上一段对话 */
+async function resumeSuggestion() {
+  try {
+    const [open] = await agentMemory.openItems({ exclude: session.id, k: 1 });
+    if (open) return { title: `继续：${open.text.slice(0, 18)}`, prompt: `接着之前说的：${open.text}` };
+    const [last] = await sessionsApi.recent({ exclude: session.id, k: 1 });
+    if (last && Date.now() - last.updatedAt < 3 * 86400000) return { title: `接着上次：${last.title.slice(0, 16)}`, prompt: `接着上次「${last.title}」的对话继续` };
+  } catch { /* 没有历史 */ }
+  return null;
+}
+async function openingCallouts(hasSkills = true) {
+  callouts?.set(openingSuggestions({ desktop: Boolean(DESKTOP), hasSkills, resume: await resumeSuggestion() }));
+}
+
 async function switchTo(next) {
   interrupt();
   if (settings.autoMemory) await reflectNow();
@@ -495,7 +510,8 @@ async function switchTo(next) {
   reflectFrom = history.length;
   replayTranscript();
   dashboard.setTurns(history.filter((m) => m.role === 'user').length);
-  callouts?.set(history.length ? followUpSuggestions({ tools: history.at(-1)?.tools ?? [], userText: [...history].reverse().find((m) => m.role === 'user')?.content ?? '', desktop: Boolean(DESKTOP) }) : openingSuggestions({ desktop: Boolean(DESKTOP), hasSkills: true }));
+  if (history.length) callouts?.set(followUpSuggestions({ tools: history.at(-1)?.tools ?? [], userText: [...history].reverse().find((m) => m.role === 'user')?.content ?? '', desktop: Boolean(DESKTOP) }));
+  else openingCallouts();
   sessionsPanel?.refresh();
   setTask('idle');
 }
@@ -504,6 +520,7 @@ function newSession() {
   switchTo(sessionsApi.create());
   $('#prompt').focus();
 }
+addEventListener('jarvis:open-session', (e) => { openSession(e.detail).then(() => showPanel('sessions')); });
 async function openSession(id) {
   if (id === session.id) return;
   const s = await sessionsApi.get(id);
@@ -548,7 +565,8 @@ async function buildTools({ background = false } = {}) {
       llm: helperLlm(),
       onPreview: background ? () => {} : (path) => { showPanel('workspace'); panels.openFile(path); },
       onFileChanged,
-      onSchedulesChanged: () => schedulesPanel?.refresh()
+      onSchedulesChanged: () => schedulesPanel?.refresh(),
+      currentSessionId: () => session?.id
     }),
     ...(DESKTOP ? createDesktopTools(DESKTOP, { onFileChanged }) : []),
     ...(await loadMcpTools())
@@ -577,7 +595,7 @@ async function runScheduled(s) {
   if (problem) { ok = false; note = problem; text = problem; } else {
     try {
       const r = await runAgent({
-        adapter, model, history: [],
+        adapter, model, history: [], sessionId: sess.id,
         userText: `【这是定时任务「${s.title}」（${scheduler.describe(s)}）自动发起的，用户此刻可能不在电脑前；直接完成任务并给出结果，不要提问。】\n${s.prompt}`,
         tools: await buildTools({ background: true }),
         emit: (e) => { if (e.type === 'tool_start') usedTools.push(e.name); },
@@ -662,6 +680,7 @@ async function send(text) {
     const result = await (team ? runTeam : runAgent)({
       llm: team ? helperLlm() : undefined,
       adapter, model, history: llmHistory, userText: team ? userText : await expandSlash(userText), signal: ctrl.signal,
+      sessionId: session.id,
       images: imgs.map(({ mime, data }) => ({ mime, data })),
       tools: await buildTools(),
       approve: (req) => {
@@ -1293,6 +1312,7 @@ callouts = initCallouts({
   }
 });
 callouts.set(openingSuggestions({ desktop: Boolean(DESKTOP), hasSkills: false }));
+if (!history.length) openingCallouts(false);
 
 // ---------------------------------------------------------------- 键盘快捷键
 //   Esc 打断   /  聚焦输入框   Alt+1..6 面板   Alt+F 专注视图   Alt+V 直接对话

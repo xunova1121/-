@@ -254,7 +254,18 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
       r.addEventListener('click', async () => { await memory.updateMemory(m.id, { validTo: null, archivedReason: undefined, supersededBy: undefined }); refreshMind(); });
       return r;
     })(), del('memories', m.id)));
-    else if (mindTab === 'episodes') items = all.episodes.map((e) => el('li', {}, el('span', { className: 'fs', textContent: when(e.ts) }), el('span', { className: 'fn wrap', textContent: e.summary, title: (e.topics || []).join('、') }), del('episodes', e.id)));
+    else if (mindTab === 'episodes') {
+      items = all.episodes.map((e) => {
+        const body = el('span', { className: 'fn wrap', title: (e.topics || []).join('、') }, e.summary);
+        if (e.sessionId) {
+          const link = el('button', { type: 'button', className: 'ep-link', textContent: `「${e.sessionTitle || '打开对话'}」`, title: '打开这段对话' });
+          link.addEventListener('click', () => dispatchEvent(new CustomEvent('jarvis:open-session', { detail: e.sessionId })));
+          body.append(' ', link);
+        }
+        for (const o of e.open ?? []) body.append(el('span', { className: 'ep-open', textContent: `待办：${o}` }));
+        return el('li', {}, el('span', { className: 'fs', textContent: when(e.ts) }), body, del('episodes', e.id));
+      });
+    }
     else if (mindTab === 'skills') items = all.skills.map((s) => el('li', {}, el('span', { className: 'tag', textContent: `v${s.version}` }), el('details', {}, el('summary', { textContent: s.name }), el('pre', { textContent: `${s.description ? `${s.description}\n\n` : ''}${s.steps}` })), del('skills', s.id)));
     else if (mindTab === 'lessons') items = all.lessons.map((l) => el('li', {}, el('span', { className: 'fn', textContent: l.content }), el('span', { className: 'fs', textContent: when(l.ts) }), del('lessons', l.id)));
     else if (mindTab === 'events') items = all.events.slice(0, 80).map((e) => el('li', {}, el('span', { className: 'fs', textContent: new Date(e.ts).toLocaleString('zh-CN', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }), el('span', { className: 'fn', textContent: e.text })));

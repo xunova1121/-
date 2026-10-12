@@ -10,6 +10,7 @@ import { runJavaScript, runPython } from './sandbox.js';
 import * as packs from './skillPacks.js';
 import { isImageName, prepareImage } from './images.js';
 import * as scheduler from './scheduler.js';
+import * as sessions from './sessions.js';
 import { createSearch } from './webSearch.js';
 import { deepResearch, DEPTHS } from './research.js';
 
@@ -133,6 +134,33 @@ export function createTools(ctx) {
       run: async ({ query }) => {
         const hits = await kb.search(query, 5, 0.15);
         return hits.length ? hits.map((h) => `【来源：${h.name}】\n${h.text}`).join('\n\n') : '知识库里没有找到相关内容。';
+      }
+    },
+    {
+      name: 'search_conversations',
+      description: '搜索用户和你之前的所有对话（跨对话）。用户提到“上次 / 之前说过 / 那天聊的”、或需要以前对话里的细节（方案、数据、结论、文件名）时使用。返回对话 id、标题、日期和命中的原话。',
+      input_schema: S({ query: str('要找的内容，关键词或一句话') }, ['query']),
+      run: async ({ query }) => {
+        const hits = await sessions.searchMessages(query, { exclude: ctx.currentSessionId?.(), k: 6, minScore: 0.5 });
+        if (!hits.length) return '之前的对话里没有找到相关内容。';
+        return hits.map((h) => `- id: ${h.sessionId}「${h.title}」${new Date(h.ts).toLocaleString('zh-CN', { hour12: false })}\n  用户：${h.user.slice(0, 200)}${h.reply ? `\n  贾维斯：${h.reply.replace(/\s+/g, ' ').slice(0, 300)}` : ''}`).join('\n');
+      }
+    },
+    {
+      name: 'read_conversation',
+      description: '读取之前某段对话的全文（id 来自 search_conversations 或上下文里的“最近的其他对话”）。内容很长时可以给 query，只读相关的部分。',
+      input_schema: S({ id: str('对话 id'), query: str('可选：只看和这个相关的部分') }, ['id']),
+      run: async ({ id, query }) => {
+        const s = await sessions.get(id);
+        if (!s) throw new Error(`找不到对话 ${id}，先用 search_conversations 查 id`);
+        let msgs = s.messages;
+        if (query && msgs.length > 20) {
+          const q = String(query).toLowerCase();
+          const idx = msgs.findIndex((m) => String(m.content).toLowerCase().includes(q));
+          if (idx >= 0) msgs = msgs.slice(Math.max(0, idx - 4), idx + 8);
+        }
+        const text = msgs.map((m) => `【${m.role === 'user' ? '用户' : '贾维斯'} · ${new Date(m.ts ?? s.updatedAt).toLocaleString('zh-CN', { hour12: false })}】\n${m.content}`).join('\n\n');
+        return `对话「${s.title}」（${s.messages.length} 条）\n\n${text.length > 12000 ? `…（前面省略）\n${text.slice(-12000)}` : text}`;
       }
     },
     {
