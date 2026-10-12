@@ -327,6 +327,7 @@ export function validateArgs(tool, args) {
     const p = properties[k];
     if (!p) continue;
     if (p.type === 'string' && typeof v !== 'string') return `参数 ${k} 应为字符串`;
+    if (p.type === 'number' && !Number.isFinite(Number(v))) return `参数 ${k} 应为数字`;
     if (p.enum && !p.enum.includes(v)) return `参数 ${k} 只能是 ${p.enum.join(' / ')}`;
   }
   return null;

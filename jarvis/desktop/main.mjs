@@ -5,11 +5,12 @@
  *   - 通过 preload 给页面提供“操作电脑”的能力（文件、打开程序、运行命令、截屏、剪贴板、通知）
  *   - 托盘常驻、全局快捷键 Ctrl/⌘+Shift+J 随时呼出、开机自启
  */
-import { app, BrowserWindow, ipcMain, shell, clipboard, Notification, desktopCapturer, screen, Tray, Menu, nativeImage, globalShortcut, session } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, clipboard, Notification, desktopCapturer, screen, Tray, Menu, nativeImage, globalShortcut, session, systemPreferences } from 'electron';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createOps, userPaths } from './ops.mjs';
+import { createControl, STOP_HOTKEY } from './control.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const APP_DIR = path.join(here, 'bundle');
@@ -76,6 +77,28 @@ const ops = createOps({
     const [src] = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: size });
     if (!src) throw new Error('无法截屏（macOS 需要在“系统设置 → 隐私与安全性 → 屏幕录制”里允许贾维斯）');
     return { base64: src.thumbnail.toPNG().toString('base64'), ...src.thumbnail.getSize() };
+  }
+});
+
+// ---------------------------------------------------------------- 鼠标键盘控制
+const control = createControl({ screen, desktopCapturer, clipboard, systemPreferences, getWin: () => win });
+function stopControl() {
+  control.stop();
+  control.end();
+  win?.webContents.send('jarvis:stop');
+}
+Object.assign(ops, {
+  async controlBegin() {
+    control.begin();
+    if (!globalShortcut.isRegistered(STOP_HOTKEY)) globalShortcut.register(STOP_HOTKEY, stopControl);
+    return { stopHotkey: process.platform === 'darwin' ? 'Cmd+Option+Q' : 'Ctrl+Alt+Q' };
+  },
+  controlLook: () => control.look(),
+  controlAct: (a) => control.act(a),
+  async controlEnd() {
+    control.end();
+    if (globalShortcut.isRegistered(STOP_HOTKEY)) globalShortcut.unregister(STOP_HOTKEY);
+    return { ok: true };
   }
 });
 
@@ -187,6 +210,7 @@ app.on('second-instance', () => summon());
 app.on('activate', () => summon());
 app.on('before-quit', () => { quitting = true; });
 app.on('will-quit', () => {
+  control.close();
   globalShortcut.unregisterAll();
   mcp?.closeAll();
   server?.close();

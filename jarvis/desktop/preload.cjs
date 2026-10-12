@@ -17,5 +17,9 @@ contextBridge.exposeInMainWorld('jarvisDesktop', {
   onSummon(fn) {
     ipcRenderer.on('jarvis:summon', () => fn());
   },
+  /** 用户按了紧急停止热键（电脑操作中） */
+  onStop(fn) {
+    ipcRenderer.on('jarvis:stop', () => fn());
+  },
   setAlwaysOnTop: (on) => ipcRenderer.invoke('jarvis:window', 'alwaysOnTop', on)
 });

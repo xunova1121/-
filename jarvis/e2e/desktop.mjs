@@ -77,6 +77,38 @@ r = await ask('截屏', { approve: '允许' });
 check('截屏：先确认（截图会发给模型），再保存到工作区并交给模型查看', /已截屏（\d+×\d+），保存到工作区 截图\/屏幕-.*\.png/.test(r) && /截图已经交给我了/.test(r), r.slice(-80));
 await page.screenshot({ path: `${OUT}/desktop-main.png` });
 
+// —— 鼠标键盘控制（Linux 用 xdotool；坐标按截图比例换算成屏幕坐标）
+{
+  const { execFileSync } = await import('node:child_process');
+  const mouse = () => { const m = execFileSync('xdotool', ['getmouselocation']).toString().match(/x:(\d+) y:(\d+)/); return { x: Number(m[1]), y: Number(m[2]) }; };
+  const shot = await page.evaluate(async () => { await window.jarvisDesktop.invoke('controlBegin'); const r = await window.jarvisDesktop.invoke('controlLook'); return { w: r.width, h: r.height, len: r.base64.length }; });
+  check('看屏幕：截取整屏（宽不超过 1440）', shot.w > 0 && shot.w <= 1440 && shot.len > 1000, JSON.stringify(shot));
+  const scr = execFileSync('xdotool', ['getdisplaygeometry']).toString().trim().split(' ').map(Number);
+  await page.evaluate((s) => window.jarvisDesktop.invoke('controlAct', { type: 'move', x: s.w / 4, y: s.h / 2, imgW: s.w, imgH: s.h }), shot);
+  const m1 = mouse();
+  check('截图坐标换算成屏幕坐标并移动鼠标', Math.abs(m1.x - scr[0] / 4) <= 2 && Math.abs(m1.y - scr[1] / 2) <= 2, `${JSON.stringify(m1)} 屏幕 ${scr.join('×')}`);
+  const out = await page.evaluate((s) => window.jarvisDesktop.invoke('controlAct', { type: 'click', x: s.w + 50, y: 10, imgW: s.w, imgH: s.h }).catch((e) => e.message), shot);
+  check('超出截图范围的坐标被拒绝', /超出截图范围/.test(out), out);
+  execFileSync('xdotool', ['mousemove', '0', '0']);
+  const stop = await page.evaluate((s) => window.jarvisDesktop.invoke('controlAct', { type: 'move', x: 100, y: 100, imgW: s.w, imgH: s.h }).catch((e) => e.message), shot);
+  check('鼠标甩到左上角 = 紧急停止', /紧急停止/.test(stop), stop);
+  await page.evaluate(() => window.jarvisDesktop.invoke('controlEnd'));
+
+  // 智能体：看屏幕 → 点击（两次确认：看屏幕、操作鼠标）
+  const before = await page.locator('#transcript .msg.agent').count();
+  await page.fill('#prompt', `点击屏幕 ${Math.round(shot.w / 2)},${Math.round(shot.h / 3)}`);
+  await page.press('#prompt', 'Enter');
+  for (let i = 0; i < 2; i++) {
+    await page.waitForSelector('.confirm-card:not(.answered) button', { timeout: 20000 });
+    await page.locator('.confirm-card:not(.answered)').getByRole('button', { name: '本次都允许', exact: true }).click();
+  }
+  await page.waitForFunction((n) => document.querySelectorAll('#transcript .msg.agent').length > n && !document.querySelector('#transcript .msg.agent.streaming'), before, { timeout: 30000 });
+  const r2 = await page.locator('#transcript .msg.agent').last().innerText();
+  const m2 = mouse();
+  check('智能体：看屏幕后点击指定位置，并拿到操作后的截图', /操作完成。已点击/.test(r2) && /当前屏幕截图/.test(r2) && Math.abs(m2.x - scr[0] / 2) <= 2 && Math.abs(m2.y - scr[1] / 3) <= 2, `${r2.replace(/\n/g, ' ').slice(-120)} ${JSON.stringify(m2)}`);
+  check('电脑操作结束后贾维斯窗口回到前台', await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()));
+}
+
 // —— MCP：在界面里添加本机 stdio 服务 → 智能体调用（先确认）
 await page.evaluate(() => window.__jarvis.showPanel('skills'));
 await page.waitForSelector('#mcp-body:not([hidden])', { timeout: 10000 });

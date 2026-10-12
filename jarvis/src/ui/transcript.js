@@ -93,13 +93,15 @@ const TOOL_LABEL = {
   use_skill: '使用技能', read_skill_file: '读取技能文件', schedule_task: '创建定时任务', list_schedules: '查看定时任务', cancel_schedule: '删除定时任务', core_memory_update: '更新核心记忆',
   computer_list_dir: '查看文件夹', computer_read_file: '读取电脑文件', computer_write_file: '写入电脑文件', computer_save_from_workspace: '保存到电脑',
   computer_move: '移动 / 重命名', computer_copy: '复制文件', computer_trash: '移到回收站', computer_search: '搜索文件', computer_open: '打开',
-  computer_run: '运行命令', computer_screenshot: '截屏', clipboard_read: '读剪贴板', clipboard_write: '写剪贴板', computer_notify: '系统通知'
+  computer_run: '运行命令', computer_screenshot: '截屏', computer_look: '看屏幕', computer_click: '点击', computer_type: '键盘输入', computer_key: '按键', computer_scroll: '滚动', computer_drag: '拖动', clipboard_read: '读剪贴板', clipboard_write: '写剪贴板', computer_notify: '系统通知'
 };
 
 function summarizeArgs(name, a = {}) {
   if (a.path) return a.path;
   if (a.query) return a.query;
   if (a.question) return a.question;
+  if (a.keys) return a.keys;
+  if (typeof a.x === 'number') return `(${a.x}, ${a.y})${a.to_x !== undefined ? ` → (${a.to_x}, ${a.to_y})` : ''}`;
   if (a.url) return a.url;
   if (a.content) return a.content.slice(0, 60);
   if (a.code) return a.code.split('\n')[0].slice(0, 60);

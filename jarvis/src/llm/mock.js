@@ -49,6 +49,10 @@ export function plan(messages, tools = []) {
     if (used.has('web_search')) return { emotion: '专注', text: `搜索结果：\n\n${lastResult.content.slice(0, 600)}` };
     const mcpUsed = [...used].find((n) => n.startsWith('mcp_'));
     if (mcpUsed) return { emotion: '专注', text: `MCP 工具返回：${lastResult.content.slice(0, 400)}` };
+    // 鼠标键盘：先看屏幕，再操作
+    const gui = q.match(/点击屏幕\s*(\d+)\s*[,，\s]\s*(\d+)/);
+    if (gui && used.has('computer_look') && !used.has('computer_click')) return { emotion: '专注', calls: [call('computer_click', { x: Number(gui[1]), y: Number(gui[2]) })] };
+    if (used.has('computer_click') || used.has('computer_type') || used.has('computer_key')) return { emotion: '专注', text: `操作完成。${lastResult.content.split('\n')[0]}` };
     if (lastResult.images?.length) return { emotion: '专注', text: `${lastResult.content}\n\n截图已经交给我了；离线演示模型看不懂图片，接入支持识图的模型后我就能分析屏幕内容。` };
     const pc = [...used].find((n) => n.startsWith('computer_') || n.startsWith('clipboard_'));
     if (pc) return { emotion: '专注', text: `完成了。结果：\n\n${lastResult.content.slice(0, 500)}` };
@@ -112,6 +116,11 @@ export function plan(messages, tools = []) {
   }
   // —— 桌面版：操作电脑
   if (tools.some((t) => t.name === 'computer_run')) {
+    if (/点击屏幕\s*\d+/.test(q)) return { emotion: '专注', calls: [call('computer_look', {})] };
+    const typed = q.match(/^(?:在当前位置)?输入文字[：:\s]*(.+)/);
+    if (typed) return { emotion: '专注', calls: [call('computer_type', { text: typed[1].trim() })] };
+    const key = q.match(/^按键[：:\s]*(.+)/);
+    if (key) return { emotion: '专注', calls: [call('computer_key', { keys: key[1].trim() })] };
     const dir = q.match(/(列出|看看|查看)(桌面|文档|下载)/);
     if (dir) return { emotion: '专注', calls: [call('computer_list_dir', { path: dir[2] })] };
     if (/截屏|截图/.test(q)) return { emotion: '专注', calls: [call('computer_screenshot', {})] };
