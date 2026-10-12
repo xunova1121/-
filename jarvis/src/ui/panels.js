@@ -8,6 +8,8 @@ import { parseFile, htmlDocument } from '../agent/docs.js';
 import { fmtSize } from '../agent/tools.js';
 import { renderBlocks } from './transcript.js';
 import { PROVIDERS, providerById, loadConfig, saveConfig, modelOf, createAdapter } from '../llm/config.js';
+import { probeEndpoint } from '../llm/probe.js';
+import { MOBILE } from '../config.js';
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, props = {}, ...kids) => {
@@ -382,8 +384,8 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
       : [gwKey ? '本机网关已配置该服务商的密钥，这里可以留空。' : p.needsKey === false ? '本机模型无需密钥。' : '', p.keyUrl ? el('a', { href: p.keyUrl, target: '_blank', rel: 'noopener', textContent: ' 获取密钥 →' }) : '']));
     const notes = [];
     const fix = '解决：双击 jarvis 文件夹里的 启动.bat（Mac / Linux 运行 start.sh）并保持窗口开着，这个页面会自动连上本机网关，经它转发就不受限制了。';
-    if (!gw && p.custom) notes.push(`很多中转 / 自建接口不允许网页直接调用（跨域限制），会显示“Failed to fetch”。${fix}`);
-    if (!gw && p.browser === false) notes.push(`该服务商不允许网页直接调用（跨域限制）。${fix}`);
+    if (!gw && !MOBILE && p.custom) notes.push(`很多中转 / 自建接口不允许网页直接调用（跨域限制），会显示“Failed to fetch”。${fix}`);
+    if (!gw && !MOBILE && p.browser === false) notes.push(`该服务商不允许网页直接调用（跨域限制）。${fix}`);
     if (p.note) notes.push(p.note);
     $('#llm-note').hidden = !notes.length;
     $('#llm-note').textContent = notes.join(' ');
@@ -408,16 +410,27 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     const c = collect();
     const { adapter, model, problem } = createAdapter(c, { gateway: getGateway() });
     if (problem) { status.textContent = problem; return; }
-    status.textContent = '正在连接…';
+    const p = providerById(c.provider);
+    const via = () => (MOBILE && globalThis.__jarvisNetVia?.(c.baseURLs.custom || p.baseURL) === 'native' ? '（经手机系统网络）' : '');
+    // 第一步：不经网关直连的 OpenAI 兼容接口，先查 /models，把网络 / 地址 / 密钥 / 型号问题分开说清楚
+    const direct = p.kind === 'openai' && !getGateway();
+    if (direct && (p.custom ? c.baseURLs.custom : p.baseURL)) {
+      status.textContent = '第 1 步：检查接口地址和密钥…';
+      const r = await probeEndpoint({ baseURL: p.custom ? c.baseURLs.custom : p.baseURL, apiKey: c.keys[p.id] || '', model });
+      if (!r.ok && r.step !== 'model') { status.textContent = `连接失败：${r.message}${via()}`; return; }
+      status.textContent = `${r.message}${via()}。第 2 步：让模型回一句话…`;
+      if (r.step === 'model') status.textContent = `注意：${r.message}。仍然试一下对话…`;
+    } else status.textContent = '正在连接…';
     const t0 = performance.now();
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 45000);
+    const timer = setTimeout(() => ctrl.abort(), 60000);
     try {
       let out = '';
       await adapter.stream({ model, system: ['你是连接测试。只回复：连接成功', ''], messages: [{ role: 'user', content: 'ping' }], tools: [], signal: ctrl.signal, onText: (d) => { out += d; } });
-      status.textContent = `连接成功（${Math.round(performance.now() - t0)}ms）：${out.replace(/<emotion>[^<]*<\/emotion>/, '').slice(0, 40)}`;
+      status.textContent = `连接成功（${Math.round(performance.now() - t0)}ms）${via()}：${out.replace(/<emotion>[^<]*<\/emotion>/, '').slice(0, 40)}`;
     } catch (e) {
-      status.textContent = `连接失败：${e.name === 'AbortError' ? '超时' : e.message}${/Failed to fetch|NetworkError|CORS/i.test(e.message) ? '（多半是跨域限制：双击 启动.bat 并保持窗口开着，本页面会自动连上本机网关）' : ''}`;
+      const cors = !MOBILE && /Failed to fetch|NetworkError|CORS/i.test(e.message) ? '（多半是跨域限制：双击 启动.bat 并保持窗口开着，本页面会自动连上本机网关）' : '';
+      status.textContent = `连接失败：${e.name === 'AbortError' ? '模型 60 秒没有回复（接口是通的：可能型号不对，或这个模型太慢）' : e.message}${via()}${cors}`;
     } finally { clearTimeout(timer); }
   });
   $('#set-websearch').checked = cfg.claudeWebSearch;
