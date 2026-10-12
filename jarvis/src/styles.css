@@ -1127,3 +1127,13 @@ body.reduced-motion .drawer { transition: none; }
 .gen-video { width: 100%; background: #000; }
 .gen-image { display: block; max-width: min(100%, 420px); border-radius: 14px; margin: 8px 0; box-shadow: 0 6px 18px var(--shadow); }
 .mp-section { margin: 8px 4px 2px; font-size: 12px; color: var(--dim); }
+
+/* 对话里生成的文件：点一下在工作区打开 */
+.file-links { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 2px; }
+.file-link { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 420px; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-2); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.file-link:hover { border-color: var(--accent); }
+.file-link .fl-ext { flex: none; min-width: 40px; padding: 4px 6px; border-radius: 7px; background: var(--accent); color: #fff; font: 600 11px/1.2 var(--font-mono); text-align: center; text-transform: uppercase; }
+.file-link .fl-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.file-link .fl-go { flex: none; color: var(--accent); font-size: 13px; }
+:root[data-theme="light"] .compact .file-link { background: rgba(255, 255, 255, 0.8); border-color: rgba(106, 92, 240, 0.18); }
+:root[data-theme="light"] .compact .file-link .fl-ext { background: linear-gradient(135deg, #7f8ef8, #8b63f0); }

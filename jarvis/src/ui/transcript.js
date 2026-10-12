@@ -187,6 +187,7 @@ export class Transcript {
     // 文字与工具卡片按时间顺序交替出现：每段文字一个独立的 body
     let cur = body;
     let curRaw = text;
+    let files = null; // 生成的文件按钮
     const self = this;
     // —— “工作进展”卡片（手机）：每次调用工具加一行；整条回答结束后折叠成一行摘要
     let prog = null;
@@ -390,6 +391,19 @@ export class Transcript {
           box.cancel = () => done('deny', '已取消');
         });
       },
+      /** 这一轮生成 / 修改的文件：回答末尾一排按钮，点一下在工作区里打开 */
+      fileLink(path, onOpen) {
+        if (!files) { files = document.createElement('div'); files.className = 'file-links'; el.append(files); }
+        if ([...files.children].some((b) => b.dataset.path === path)) return;
+        const name = path.split('/').pop();
+        const ext = (name.match(/\.([a-z0-9]+)$/i)?.[1] || '').toLowerCase();
+        const b = Object.assign(document.createElement('button'), { type: 'button', className: 'file-link', title: `在工作区打开 ${path}` });
+        b.dataset.path = path;
+        b.append(Object.assign(document.createElement('span'), { className: 'fl-ext', textContent: ext.slice(0, 4) || '文件' }), Object.assign(document.createElement('span'), { className: 'fl-name', textContent: name }), Object.assign(document.createElement('span'), { className: 'fl-go', textContent: '打开 ›' }));
+        b.addEventListener('click', () => onOpen(path));
+        files.append(b);
+        self.#scroll();
+      },
       /** 生成的图片：显示在当前文字段之前 */
       image(src, alt = '生成的图片') {
         const img = Object.assign(document.createElement('img'), { src, alt, className: 'gen-image', loading: 'lazy' });
@@ -412,6 +426,7 @@ export class Transcript {
         finishProgress();
         if (role === 'agent' && curRaw) renderBlocks(cur, curRaw);
         for (const b of el.querySelectorAll('.body')) if (!b.textContent.trim() && !b.children.length) b.remove();
+        if (files) el.append(files); // 文件按钮放在回答最后
         const m = document.createElement('div');
         m.className = 'meta';
         if (meta) m.append(meta);

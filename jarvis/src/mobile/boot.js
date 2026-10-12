@@ -8,6 +8,8 @@
 import { MOBILE } from '../config.js';
 import { wrapFetch, nativeFetcher } from './nativeFetch.js';
 import { installSpeechShim } from './speechShim.js';
+import { createNativeSaver } from './saveNative.js';
+import { topColor } from './topColor.js';
 
 if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
   const { CapacitorHttp } = await import('@capacitor/core');
@@ -34,32 +36,22 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
   } catch { /* 没有 App 插件 */ }
   // 状态栏 / 手势条的图标颜色跟随明暗：浅色界面用深色图标，深色界面用浅色图标
   try {
-    const { SystemBars } = await import('@capacitor/core');
-    const apply = () => SystemBars?.setStyle?.({ style: document.documentElement.dataset.theme === 'dark' ? 'DARK' : 'LIGHT' }).catch(() => {});
+    const { SystemBars, registerPlugin } = await import('@capacitor/core');
+    const WindowColor = registerPlugin('WindowColor');
+    const apply = () => {
+      SystemBars?.setStyle?.({ style: document.documentElement.dataset.theme === 'dark' ? 'DARK' : 'LIGHT' }).catch(() => {});
+      // 状态栏下面的底色和界面顶部一致（旧版系统 WebView 不画到状态栏下面）
+      requestAnimationFrame(() => WindowColor.set({ color: topColor(getComputedStyle(document.body)) }).catch(() => {}));
+    };
     apply();
     new MutationObserver(apply).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    addEventListener('load', () => setTimeout(apply, 300)); // 界面样式都就位后再取一次颜色
   } catch { /* 旧版 Capacitor 没有 SystemBars */ }
   // 下载：WebView 里网页下载不起作用。存到“文档/Jarvis”，再弹出系统分享（用 WPS、微信等打开或发送）
   globalThis.__jarvisSaveFile = async (blob, name) => {
-    const { Filesystem, Directory } = await import('@capacitor/filesystem');
-    const data = await new Promise((resolve, reject) => {
-      const r = new FileReader();
-      r.onload = () => resolve(String(r.result).split(',')[1] || '');
-      r.onerror = () => reject(r.error);
-      r.readAsDataURL(blob);
-    });
-    let where = '';
-    try {
-      await Filesystem.writeFile({ path: `Jarvis/${name}`, data, directory: Directory.Documents, recursive: true });
-      where = `已保存到手机“文档/Jarvis/${name}”`;
-    } catch { where = ''; }
-    // 分享面板需要 App 自己目录里的文件
-    const { uri } = await Filesystem.writeFile({ path: `share/${name}`, data, directory: Directory.Cache, recursive: true });
-    try {
-      const { Share } = await import('@capacitor/share');
-      await Share.share({ title: name, files: [uri], dialogTitle: '打开或发送' });
-    } catch { /* 用户取消分享 */ }
-    return where || `已准备好 ${name}（可在分享面板里选择保存位置）`;
+    const [{ Filesystem, Directory }, { Share }] = await Promise.all([import('@capacitor/filesystem'), import('@capacitor/share')]);
+    return createNativeSaver({ Filesystem, Directory, Share, toast: (t) => globalThis.__jarvisToast?.(t) })(blob, name);
   };
+
   document.documentElement.classList.add('mobile-app');
 }

@@ -527,6 +527,7 @@ function replayTranscript() {
     else {
       const b = transcript.add('agent', '', m.ts);
       b.append(m.content);
+      for (const f of m.files || []) b.fileLink(f, openInWorkspace);
       b.done(m.tools?.length ? `用了：${m.tools.map(toolLabel).join('、')}` : '');
     }
   }
@@ -621,9 +622,20 @@ async function loadMcpTools() {
   return mcp.mcpTools(gateway.origin, mcpState.servers);
 }
 
+/** 对话里点生成的文件：切到工作区并打开它 */
+function openInWorkspace(path) {
+  showPanel('workspace');
+  panels.openFile(path);
+}
+let turnFiles = null; // 这一轮生成的文件（记进对话，重新打开对话时还能点）
+
 /** 智能体可用的全部工具：基础工具 + 桌面版电脑操作 + MCP 工具 */
 async function buildTools({ background = false } = {}) {
-  const onFileChanged = (path) => { panels.markFresh(path); panels.refreshFiles(); };
+  const onFileChanged = (path) => {
+    panels.markFresh(path);
+    panels.refreshFiles();
+    if (!background && !/^skills\//.test(path)) { liveBubble?.fileLink?.(path, openInWorkspace); turnFiles?.add(path); }
+  };
   return [
     ...createTools({
       metrics,
@@ -825,6 +837,7 @@ async function send(text) {
   let serverCard = null;
   const t0 = now();
   const usedTools = [];
+  const madeFiles = turnFiles = new Set();
   let shown = ''; // 这一轮已经显示出来的回答（中断时保留，点“继续”接着写）
   let ctxMs = null;
   callouts?.retract();
@@ -910,7 +923,7 @@ async function send(text) {
     hud.think(`✓ 完成 · ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · ${result.toolCalls} 个工具` : ''}`, 'ok');
     $('#hud-latency').textContent = firstToken ? `${Math.round(firstToken - t0)} ms` : '—';
     if (result.text) wp({ say: result.text.replace(/```[\s\S]*?```/g, '').replace(/[#*>`|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 140) });
-    rememberTurn('assistant', result.text || '（完成）', usedTools.length ? { tools: [...new Set(usedTools)] } : {});
+    rememberTurn('assistant', result.text || '（完成）', { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) });
     $('#mode-pill').classList.remove('offline');
     turn.streamDone = true;
     callouts?.set(followUpSuggestions({ tools: usedTools, userText: text, desktop: Boolean(DESKTOP) }));
@@ -929,7 +942,7 @@ async function send(text) {
     hud.think(`✕ ${msg.slice(0, 40)}`, 'bad');
     // 已经写了一部分或做了几步：记进对话，点“继续”从断开的地方接着做，而不是从头再来
     const resumable = Boolean(shown.trim() || usedTools.length);
-    if (resumable) rememberTurn('assistant', `${shown.trim()}\n\n${INTERRUPTED_MARK}`, usedTools.length ? { tools: [...new Set(usedTools)] } : {});
+    if (resumable) rememberTurn('assistant', `${shown.trim()}\n\n${INTERRUPTED_MARK}`, { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) });
     callouts?.set(followUpSuggestions({ error: true, resumable, userText: text, desktop: Boolean(DESKTOP) }));
   } finally {
     endControl();
@@ -1565,8 +1578,9 @@ function toast(text) {
   el.textContent = text;
   el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, 2600);
+  toastTimer = setTimeout(() => { el.hidden = true; }, Math.max(2600, String(text).length * 110));
 }
+globalThis.__jarvisToast = toast; // 手机原生保存文件时的进度提示
 
 // ---------------------------------------------------------------- 恢复上次的设置
 $('#set-tts').checked = settings.speechOutput;

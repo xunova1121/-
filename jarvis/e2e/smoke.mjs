@@ -217,6 +217,10 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
     const listed = await page.locator('#file-list li', { hasText: `示例.${ext}` }).count();
     check(`生成 ${ext} 并出现在工作区`, listed === 1);
   }
+  // 对话里生成的文件：点一下在工作区打开
+  await page.locator('#transcript .file-link', { hasText: '示例.docx' }).first().click();
+  await page.waitForFunction(() => /示例\.docx/.test(document.querySelector('#viewer-name')?.textContent || ''), null, { timeout: 5000 }).catch(() => {});
+  check('对话里的文件可点击，在工作区打开', /示例\.docx/.test(await page.textContent('#viewer-name')));
   await page.locator('#file-list li', { hasText: '示例.docx' }).click();
   // Word 按真实样式排版（渲染在 Shadow DOM 里的 A4 页面）
   const docxText = () => page.evaluate(() => document.querySelector('#viewer-body .docx-view')?.shadowRoot?.querySelector('section.docx')?.textContent || '');
