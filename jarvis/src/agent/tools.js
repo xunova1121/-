@@ -16,6 +16,29 @@ import { deepResearch, DEPTHS } from './research.js';
 
 const S = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const str = (description) => ({ type: 'string', description });
+/**
+ * run_python 要带进 Python 环境的工作区文件：代码里提到的文件、以及提到的文件夹（如 skills/某技能）里的文件优先，
+ * 其余按新近排，总共不超过 300 个 / 150 MB（技能模板可能很大）。
+ */
+export function pickPythonFiles(list, code, { maxFiles = 300, maxBytes = 150e6 } = {}) {
+  const src = String(code);
+  const mentioned = (path) => {
+    if (src.includes(path)) return 2;
+    const parts = path.split('/');
+    for (let i = parts.length - 1; i > 0; i--) if (src.includes(parts.slice(0, i).join('/'))) return 1;
+    return 0;
+  };
+  const ranked = list.filter((f) => f.size < 30e6).map((f) => ({ f, score: mentioned(f.path) }))
+    .sort((a, b) => b.score - a.score || (b.f.mtime ?? 0) - (a.f.mtime ?? 0));
+  const out = [];
+  let bytes = 0;
+  for (const { f } of ranked) {
+    if (out.length >= maxFiles || bytes + f.size > maxBytes) continue;
+    out.push(f);
+    bytes += f.size;
+  }
+  return out;
+}
 const clip = (s, n = 20000) => (s.length > n ? `${s.slice(0, n)}\n…（已截断，共 ${s.length} 字）` : s);
 
 /**
@@ -88,28 +111,55 @@ export function createTools(ctx) {
     },
     {
       name: 'read_skill_file',
-      description: '读取技能附带的文件（模板、参考资料、脚本），路径来自 use_skill 返回的文件列表。',
+      description: '读取技能附带的文本文件（参考资料、模板说明、脚本），路径来自 use_skill 返回的文件列表。',
       input_schema: S({ name: str('技能名称'), path: str('文件相对路径') }, ['name', 'path']),
       run: async ({ name, path }) => {
         const p = await packs.get(name);
-        const text = p?.files?.[path.replace(/^\.?\//, '')];
-        if (text == null) throw new Error(`技能「${name}」里没有文件 ${path}`);
-        if (packs.isBinaryFile(text)) return `${path} 是二进制文件（${Math.round(text.size / 1024)} KB），不能直接读。用 copy_skill_file 复制到工作区，再用 run_python 处理（例如 python-pptx 打开 .pptx 模板）。`;
-        return clip(text, 30000);
+        const f = p?.files?.[path.replace(/^\.?\//, '')];
+        if (f == null) throw new Error(`技能「${name}」里没有文件 ${path}`);
+        if (packs.isBinaryFile(f)) return `${path} 是二进制文件（${Math.round(f.size / 1024)} KB），不能直接读。用 copy_skill_file 复制到工作区，再用 run_python 处理（例如 python-pptx 打开 .pptx 模板）。`;
+        const text = await packs.fileText(f);
+        return text.length > 30000 ? `${text.slice(0, 30000)}\n…（文件很大，共 ${text.length} 字，只显示了开头。完整内容请 copy_skill_file 到工作区后用 run_python 按需读取，例如 json.load 后只打印需要的部分）` : text;
       }
     },
     {
       name: 'copy_skill_file',
-      description: '把技能附带的文件（模板 .pptx / .docx / .xlsx、图片、脚本等）复制到工作区，之后 run_python 可以在 /workspace 下读到它。技能说明里要求“使用模板”时先调用这个。',
-      input_schema: S({ name: str('技能名称'), path: str('文件相对路径（use_skill 的文件列表里）'), to: str('复制到工作区的路径（可选，默认 skills/技能名/原路径）') }, ['name', 'path']),
-      run: async ({ name, path, to }) => {
+      description: '把技能附带的文件复制到工作区（模板 .pptx / .docx / .xlsx、图片、脚本等），之后 run_python 可以在 /workspace 下读到。path 以 / 结尾时复制整个文件夹（如 "scripts/"、"templates/某模板/"）。在线附件会自动下载。',
+      input_schema: S({ name: str('技能名称'), path: str('文件或文件夹的相对路径（use_skill 的文件列表里）'), to: str('复制到工作区的路径（可选，只对单个文件有效；默认 skills/技能名/原路径）') }, ['name', 'path']),
+      run: async ({ name, path, to }, { progress } = {}) => {
         const p = await packs.get(name);
+        if (!p) throw new Error(`没有名为「${name}」的技能`);
         const rel = String(path).replace(/^\.?\//, '');
-        const f = p?.files?.[rel];
-        if (f == null) throw new Error(`技能「${name}」里没有文件 ${path}（可用：${Object.keys(p?.files || {}).slice(0, 20).join('、') || '无'}）`);
-        const w = await ws.write(to || `skills/${p.name}/${rel}`, packs.fileBlob(f));
-        ctx.onFileChanged?.(w.path);
-        return `已复制到工作区：${w.path}（${Math.round((packs.isBinaryFile(f) ? f.size : String(f).length) / 1024)} KB）。在 run_python 里的路径是 /workspace/${w.path}`;
+        const all = Object.keys(p.files || {});
+        const folder = rel === '' || rel.endsWith('/') ? rel : all.some((k) => k.startsWith(`${rel}/`)) && !p.files[rel] ? `${rel}/` : null;
+        const list = folder !== null ? all.filter((k) => k.startsWith(folder)) : [rel];
+        if (!list.length || (folder === null && p.files[rel] == null)) throw new Error(`技能「${name}」里没有 ${path}（可用：${all.slice(0, 20).join('、') || '无'}）`);
+        if (list.length > 60) throw new Error(`${path} 下有 ${list.length} 个文件，太多了：请复制更具体的子文件夹或单个文件`);
+        const out = [];
+        let bytes = 0;
+        for (const [n, k] of list.entries()) {
+          if (packs.isRemoteFile(p.files[k])) progress?.(`正在下载 ${k}（${n + 1}/${list.length}）`);
+          const blob = await packs.fileBlob(p.files[k]);
+          const w = await ws.write(folder === null && to ? to : `skills/${p.name}/${k}`, blob);
+          ctx.onFileChanged?.(w.path);
+          out.push(w.path);
+          bytes += blob.size;
+        }
+        return out.length === 1
+          ? `已复制到工作区：${out[0]}（${Math.round(bytes / 1024)} KB）。在 run_python 里的路径是 /workspace/${out[0]}`
+          : `已复制 ${out.length} 个文件（${(bytes / 1048576).toFixed(1)} MB）到工作区 skills/${p.name}/${folder}：\n${out.map((x) => `- /workspace/${x}`).join('\n')}`;
+      }
+    },
+    {
+      name: 'show_image',
+      description: '把工作区里的一张图片（png / jpg / webp / gif / svg）显示在对话里给用户看，例如模板预览图、图表。',
+      input_schema: S({ path: str('工作区里的图片路径') }, ['path']),
+      run: async ({ path }) => {
+        if (!(await ws.exists(path))) throw new Error(`找不到文件：${path}`);
+        const blob = await ws.readBlob(path);
+        const type = /\.svg$/i.test(path) ? 'image/svg+xml' : blob.type || 'image/png';
+        ctx.onImage?.(URL.createObjectURL(new Blob([blob], { type })), path);
+        return `已在对话里显示 ${path}`;
       }
     },
     {
@@ -269,7 +319,7 @@ export function createTools(ctx) {
       description: '运行 Python（浏览器内的 Pyodide，首次使用需联网加载）。工作目录 /workspace 就是工作区，读写的文件会同步回工作区。可用 numpy、pandas 等常见库（自动加载）；python-pptx / python-docx / openpyxl 等纯 Python 库在代码开头用 `import micropip; await micropip.install("python-pptx")` 安装。',
       input_schema: S({ code: str('Python 代码') }, ['code']),
       run: async ({ code }) => {
-        const listing = (await ws.list()).filter((f) => f.size < 20e6).slice(0, 60); // 模板文件可能好几 MB
+        const listing = pickPythonFiles(await ws.list(), code);
         const files = await Promise.all(listing.map(async (f) => ({ path: f.path, bytes: await (await ws.readBlob(f.path)).arrayBuffer() })));
         const r = await runPython(code, { files });
         const saved = [];

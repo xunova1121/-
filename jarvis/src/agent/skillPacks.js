@@ -30,6 +30,10 @@ const MAX_BIN_TOTAL = 100 * 1024 * 1024;
 // 仓库里和技能无关的东西
 const IGNORE = /(^|\/)(\.git|\.github|node_modules|__pycache__|\.venv|venv|\.idea|\.vscode|__MACOSX|\.pytest_cache|dist-info)(\/|$)|(^|\/)(\.DS_Store|Thumbs\.db)$|\.(pyc|pyo|exe|dll|so|dylib|msi|dmg|apk)$/i;
 const isText = (p) => TEXT_EXT.test(p) || /(^|\/)(SKILL\.md|LICENSE|README|Makefile|Dockerfile|requirements\.txt)$/i.test(p);
+// 从 GitHub 安装时：小于这些的现在下载，更大的用到时再下载
+const LAZY_TEXT = 256 * 1024;
+const LAZY_BIN = 1024 * 1024;
+const EAGER_TOTAL = 8 * 1024 * 1024;
 const mb = (n) => `${(n / 1048576).toFixed(n < 1048576 ? 2 : 1)} MB`;
 
 /** 技能附件是不是二进制（{ binary, b64, size }） */
@@ -37,22 +41,34 @@ export const isBinaryFile = (f) => Boolean(f && typeof f === 'object' && f.binar
 const sizeOf = (f) => (isBinaryFile(f) ? f.size : String(f ?? '').length);
 const b64 = (buf) => { const u8 = new Uint8Array(buf); let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(s); };
 /** ArrayBuffer → 技能里保存的二进制附件 */
-export const binaryFile = (buf) => ({ binary: true, b64: b64(buf), size: buf.byteLength });
-/** 技能附件 → Blob（写进工作区用） */
-export const fileBlob = (f) => {
-  if (f?.stub) throw new Error('这个附件没有同步到本设备（同步时不传大附件）：请在“技能”里重新安装这个技能，或在原设备上使用');
-  return isBinaryFile(f) ? new Blob([Uint8Array.from(atob(f.b64), (c) => c.charCodeAt(0))]) : new Blob([String(f)]);
-};
+export const binaryFile = (buf, url) => ({ binary: true, b64: b64(buf), size: buf.byteLength, ...(url && { url }) });
+/** 在线附件：安装时只记下载地址，第一次用到时再下载（大模板库动辄上百 MB，手机装不下也没必要全下） */
+export const isRemoteFile = (f) => Boolean(f && typeof f === 'object' && (f.remote || f.stub));
+const remoteFile = (url, size, text) => ({ remote: true, url, size, ...(!text && { binary: true }) });
 
-/** 同步用：二进制附件只传“占位”（名字和大小），不传内容（PPT 模板等动辄几十 MB） */
+/** 技能附件 → Blob（写进工作区用）；在线附件现下载 */
+export async function fileBlob(f, { fetchImpl = globalThis.fetch } = {}) {
+  if (isRemoteFile(f)) {
+    if (!f.url) throw new Error('这个附件没有同步到本设备（同步时不传大附件）：请在“技能”里重新安装这个技能，或在原设备上使用');
+    let r = null;
+    for (let i = 0; i < 2 && !r?.ok; i++) r = await fetchImpl(f.url).catch(() => null);
+    if (!r?.ok) throw new Error(`下载技能附件失败${r ? `（HTTP ${r.status}）` : '（网络不通）'}：${f.url}`);
+    return r.blob();
+  }
+  return isBinaryFile(f) ? new Blob([Uint8Array.from(atob(f.b64), (c) => c.charCodeAt(0))]) : new Blob([String(f)]);
+}
+/** 技能附件 → 文本（在线的现下载） */
+export const fileText = async (f, o) => (typeof f === 'string' ? f : (await fileBlob(f, o)).text());
+
+/** 同步用：二进制附件只传“占位”（名字、大小、下载地址），不传内容（PPT 模板等动辄几十 MB） */
 export const stubForSync = (pack) => ({
   ...pack,
-  files: Object.fromEntries(Object.entries(pack.files || {}).map(([k, f]) => [k, isBinaryFile(f) ? { binary: true, stub: true, size: f.size } : f]))
+  files: Object.fromEntries(Object.entries(pack.files || {}).map(([k, f]) => [k, isBinaryFile(f) && !isRemoteFile(f) ? { binary: true, stub: true, size: f.size, ...(f.url && { url: f.url }) } : f]))
 });
 /** 同步写回：远端传来的占位，本机有同名附件就保留本机的内容 */
 export const keepLocalBinaries = (incoming, local) => ({
   ...incoming,
-  files: Object.fromEntries(Object.entries(incoming.files || {}).map(([k, f]) => [k, f?.stub && isBinaryFile(local?.files?.[k]) && !local.files[k].stub ? local.files[k] : f]))
+  files: Object.fromEntries(Object.entries(incoming.files || {}).map(([k, f]) => [k, f?.stub && isBinaryFile(local?.files?.[k]) && !isRemoteFile(local.files[k]) ? local.files[k] : f]))
 });
 
 // ---------------------------------------------------------------- SKILL.md 解析
@@ -111,7 +127,7 @@ export async function installFromFiles(files, { source = '本地', skipped = [] 
     if (p === skillPath || !p.startsWith(base)) continue;
     const rel = p.slice(base.length);
     const f = files[p];
-    const n = sizeOf(f);
+    const n = isRemoteFile(f) ? 0 : sizeOf(f);
     const bin = isBinaryFile(f);
     if (Object.keys(own).length >= MAX_FILES) { skipped.push(`${rel}（超过 ${MAX_FILES} 个文件）`); continue; }
     if (bin ? binTotal + n > MAX_BIN_TOTAL : total + n > MAX_TOTAL) { skipped.push(`${rel}（技能总大小超过 ${mb(bin ? MAX_BIN_TOTAL : MAX_TOTAL)}）`); continue; }
@@ -208,7 +224,8 @@ export async function installFromGitHub(url, { fetchImpl = globalThis.fetch, onP
     return r.json();
   });
   const enc = (p) => p.split('/').map(encodeURIComponent).join('/');
-  const raw = (ref, path) => fetchImpl(`https://raw.githubusercontent.com/${owner}/${repo}/${enc(ref)}/${enc(path)}`);
+  const rawURL = (ref, path) => `https://raw.githubusercontent.com/${owner}/${repo}/${enc(ref)}/${enc(path)}`;
+  const raw = (ref, path) => fetchImpl(rawURL(ref, path));
   let ref = ref0;
   let tree;
   try {
@@ -268,17 +285,25 @@ export async function installFromGitHub(url, { fetchImpl = globalThis.fetch, onP
       return true;
     });
     for (const b of wanted.slice(MAX_FILES + 1)) skipped.push(`${b.path.slice(prefix.length)}（超过 ${MAX_FILES} 个文件）`);
+    // 说明、脚本、小文件现在下载；大文件（模板 .pptx、大 json、图片）只记地址，用到时再下载
+    let eager = 0;
+    const queue = [];
+    for (const b of wanted.slice(0, MAX_FILES + 1).sort((x, y) => (x.size ?? 0) - (y.size ?? 0))) {
+      const rel = b.path.slice(prefix.length);
+      const size = b.size ?? 0;
+      if (rel === 'SKILL.md' || (size <= (isText(rel) ? LAZY_TEXT : LAZY_BIN) && eager + size <= EAGER_TOTAL)) { queue.push(b); eager += size; } else files[rel] = remoteFile(rawURL(ref, b.path), size, isText(rel));
+    }
     // 同时下载 6 个（raw.githubusercontent.com 没有接口次数限制）
     let done = 0;
-    const queue = wanted.slice(0, MAX_FILES + 1);
+    const count = queue.length;
     const worker = async () => {
       for (let b = queue.shift(); b; b = queue.shift()) {
         const rel = b.path.slice(prefix.length);
         let r = null;
         for (let tryNo = 0; tryNo < 2 && !r?.ok; tryNo++) r = await raw(ref, b.path).catch(() => null);
         if (!r?.ok) { skipped.push(`${rel}（下载失败${r ? `：HTTP ${r.status}` : ''}）`); continue; }
-        files[rel] = isText(rel) ? await r.text() : binaryFile(await r.arrayBuffer());
-        onProgress?.(`${dirs.length > 1 ? `第 ${i + 1}/${dirs.length} 个技能：` : ''}正在下载 ${++done}/${wanted.length}`);
+        files[rel] = isText(rel) ? await r.text() : binaryFile(await r.arrayBuffer(), rawURL(ref, b.path));
+        onProgress?.(`${dirs.length > 1 ? `第 ${i + 1}/${dirs.length} 个技能：` : ''}正在下载 ${++done}/${count}`);
       }
     };
     await Promise.all(Array.from({ length: 6 }, worker));
@@ -311,14 +336,32 @@ export function catalog(list) {
   return `## 已安装的技能\n需要时先调用 use_skill 读取完整说明再照做；用户用“/技能名”点名时必须使用。\n${list.map((p) => `- ${p.name}：${p.description || '（无描述）'}`).join('\n')}`;
 }
 
+/** 技能说明是写给有命令行的电脑的：告诉模型在贾维斯里怎么照做 */
+const RUNTIME_NOTE = (name) => `
+---
+在贾维斯里执行这个技能（技能说明是按电脑命令行写的，按下面的方式照做）：
+- 说明里的 \`bash\` / \`python3 脚本 参数\` 命令：先用 copy_skill_file 把用到的脚本、模板复制到工作区（可以一次复制整个文件夹，如 path 填 "scripts/" 或 "templates/某模板/"），再用 run_python 运行：
+  \`import os, sys, runpy; os.chdir("/workspace/skills/${name}"); sys.argv = ["脚本名.py", 参数...]; runpy.run_path("scripts/脚本名.py", run_name="__main__")\`
+  需要的第三方库先 \`import micropip; await micropip.install("python-pptx")\` 这样安装。
+- 成品文件的输出路径写成 /workspace/文件名（例如 /workspace/季度汇报.pptx），不要放在 skills 文件夹里，这样用户能在对话和工作区里直接点开。
+- 这里没有命令行、git、LibreOffice、pdftoppm：自动更新、检查更新、把 PPT 渲染成图片自检这类步骤直接跳过，不必告诉用户。
+- 说明里要“展示预览图”：copy_skill_file 复制图片后用 show_image 显示在对话里。要“用 AskQuestion 让用户选”：在回答里列出编号选项，请用户回复，然后结束这一轮。
+- 标着“在线”的附件第一次复制时会自动下载，较大的文件需要几秒到几十秒。`;
+
 /** use_skill 的返回内容 */
 export function render(pack) {
   const files = Object.keys(pack.files);
+  const tag = (f) => {
+    const x = pack.files[f];
+    if (isRemoteFile(x)) return `（${x.stub && !x.url ? '本设备上没有，需要重新安装技能' : `在线，${mb(x.size)}，复制时下载`}）`;
+    return isBinaryFile(x) ? `（二进制，${Math.round(x.size / 1024)} KB）` : '';
+  };
   return [
     `# 技能：${pack.name}`,
     pack.body,
     pack.skipped?.length ? `\n（注意：安装时有 ${pack.skipped.length} 个文件没装上：${pack.skipped.slice(0, 10).join('、')}。如果做法依赖它们，告诉用户需要用 zip 上传完整技能）` : '',
-    files.length ? `\n---\n附带文件（文本用 read_skill_file 读取；模板等二进制文件用 copy_skill_file 复制到工作区，再用 run_python 处理，如 python-pptx 打开 .pptx 模板；脚本可写入工作区后用 run_python / run_javascript 运行）：\n${files.map((f) => `- ${f}${isBinaryFile(pack.files[f]) ? `（二进制，${Math.round(pack.files[f].size / 1024)} KB${pack.files[f].stub ? '，本设备上没有，需要重新安装技能' : ''}）` : ''}`).join('\n')}` : ''
+    files.length ? `\n---\n附带文件（文本用 read_skill_file 读取；模板等二进制文件用 copy_skill_file 复制到工作区，再用 run_python 处理）：\n${files.map((f) => `- ${f}${tag(f)}`).join('\n')}` : '',
+    files.length ? RUNTIME_NOTE(pack.name) : ''
   ].join('\n');
 }
 

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import JSZip from 'jszip';
 import * as packs from '../src/agent/skillPacks.js';
 import { BUILTIN_SKILLS, GITHUB_SKILLS } from '../src/agent/skillCatalog.js';
-import { createTools } from '../src/agent/tools.js';
+import { createTools, pickPythonFiles } from '../src/agent/tools.js';
 import { buildContext } from '../src/agent/agent.js';
 
 const SKILL = `---
@@ -244,13 +244,70 @@ describe('大技能（几十上百个文件）', () => {
     expect(p.files['scripts/s3.jsx']).toBe('x');
     expect(peak).toBeGreaterThan(1); // 并发下载
   });
-  it('同步只传附件占位，写回时保留本机已有的附件内容', () => {
+  it('同步只传附件占位，写回时保留本机已有的附件内容', async () => {
     const full = { id: 'k', files: { 'a.md': 'x', 't.pptx': { binary: true, b64: 'QUJD', size: 3 } } };
     const stub = packs.stubForSync(full);
     expect(stub.files['t.pptx']).toEqual({ binary: true, stub: true, size: 3 });
     expect(stub.files['a.md']).toBe('x');
     expect(packs.keepLocalBinaries(stub, full).files['t.pptx'].b64).toBe('QUJD');
     expect(packs.keepLocalBinaries(stub, null).files['t.pptx'].stub).toBe(true);
-    expect(() => packs.fileBlob(stub.files['t.pptx'])).toThrow(/重新安装/);
+    await expect(packs.fileBlob(stub.files['t.pptx'])).rejects.toThrow(/重新安装/);
+  });
+});
+
+
+describe('大模板库：模板用到时再下载', () => {
+  const big = (n) => ({ ok: true, status: 200, text: async () => 'x'.repeat(n), arrayBuffer: async () => new Uint8Array(n).buffer, blob: async () => new Blob(['x'.repeat(n)]) });
+  const tree = [
+    { type: 'blob', path: 'SKILL.md', size: 60 },
+    { type: 'blob', path: 'scripts/build_pptx.py', size: 13000 },
+    { type: 'blob', path: 'templates/INDEX.md', size: 7000 },
+    { type: 'blob', path: 'templates/mck/intro.md', size: 2700 },
+    { type: 'blob', path: 'templates/mck/detail.json', size: 1027947 },
+    { type: 'blob', path: 'templates/mck/preview.png', size: 761958 },
+    { type: 'blob', path: 'templates/mck/template.pptx', size: 14e6 }
+  ];
+  let fetched;
+  const fetchImpl = async (url) => {
+    fetched.push(url);
+    if (url.endsWith('/repos/G/ppt')) return { ok: true, json: async () => ({ default_branch: 'main' }) };
+    if (url.includes('/git/trees/')) return { ok: true, json: async () => ({ tree }) };
+    if (url.endsWith('SKILL.md')) return { ok: true, text: async () => '---\nname: gorden-ppt\ndescription: 做 PPT\n---\n运行 python3 scripts/build_pptx.py' };
+    const t = tree.find((x) => url.endsWith(x.path.split('/').map(encodeURIComponent).join('/')));
+    return big(t ? Math.min(t.size, 2000) : 1);
+  };
+  it('安装时只下说明、脚本和小文件；大模板记下地址，一个都不算“没装上”', async () => {
+    fetched = [];
+    const p = await packs.installFromGitHub('github.com/G/ppt', { fetchImpl });
+    expect(p.skipped).toEqual([]);
+    expect(typeof p.files['scripts/build_pptx.py']).toBe('string');
+    expect(packs.isRemoteFile(p.files['templates/mck/template.pptx'])).toBe(true);
+    expect(packs.isRemoteFile(p.files['templates/mck/detail.json'])).toBe(true);
+    expect(fetched.some((u) => u.endsWith('template.pptx'))).toBe(false);
+    const doc = packs.render(p);
+    expect(doc).toMatch(/template\.pptx（在线，13\.4 MB，复制时下载）/);
+    expect(doc).toMatch(/runpy\.run_path/);
+    expect(doc).toMatch(/直接跳过/);
+  });
+  it('复制整个模板文件夹：在线附件现下载；大 json 用 read_skill_file 只给开头', async () => {
+    fetched = [];
+    await packs.installFromGitHub('github.com/G/ppt', { fetchImpl });
+    const orig = globalThis.fetch;
+    globalThis.fetch = fetchImpl;
+    try {
+      const tools = Object.fromEntries(createTools({ metrics: async () => ({}) }).map((t) => [t.name, t]));
+      const steps = [];
+      const out = await tools.copy_skill_file.run({ name: 'gorden-ppt', path: 'templates/mck' }, { progress: (t) => steps.push(t) });
+      expect(out).toMatch('已复制 4 个文件');
+      expect(out).toMatch('/workspace/skills/gorden-ppt/templates/mck/template.pptx');
+      expect(steps.some((t) => t.includes('template.pptx'))).toBe(true);
+      expect(fetched.some((u) => u.endsWith('template.pptx'))).toBe(true);
+      expect(await tools.read_skill_file.run({ name: 'gorden-ppt', path: 'templates/mck/detail.json' })).toMatch(/^x+$/);
+    } finally { globalThis.fetch = orig; }
+  });
+  it('run_python 优先带上代码里提到的文件夹', () => {
+    const list = [{ path: 'a.txt', size: 10, mtime: 9 }, { path: 'skills/g/t.pptx', size: 100, mtime: 1 }, { path: 'big.bin', size: 2e6, mtime: 5 }];
+    expect(pickPythonFiles(list, 'os.chdir("/workspace/skills/g")', { maxFiles: 1 }).map((f) => f.path)).toEqual(['skills/g/t.pptx']);
+    expect(pickPythonFiles(list, '', { maxBytes: 1000 }).map((f) => f.path)).toEqual(['a.txt', 'skills/g/t.pptx']);
   });
 });
