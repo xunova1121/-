@@ -162,6 +162,29 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   const after = await page.evaluate(() => window.__jarvis.callouts.items.map((x) => x.title));
   check('回答后换成新的跟进建议', after.length === 3 && after.join(' / ') !== beforeTitles, `${beforeTitles} → ${after.join(' / ')}`);
 
+  // —— 定时任务：一句话创建；面板里立即运行，结果存成一段对话
+  let schReply = await ask(page, '每个工作日早上9点帮我总结工作区里的文件');
+  check('一句话创建定时任务', /已创建定时任务.*工作日 09:00/.test(schReply), schReply.slice(-80));
+  await page.evaluate(() => window.__jarvis.showPanel('system'));
+  await page.waitForTimeout(300);
+  check('定时任务面板列出任务与下一次时间', /工作日 09:00/.test(await page.textContent('#sched-list')) && /下一次：\d/.test(await page.textContent('#sched-list')));
+  await page.locator('#sched-list .sched').first().getByRole('button', { name: '立即运行' }).click();
+  await page.waitForFunction(() => /⏰/.test(document.querySelector('#session-list')?.textContent || '') || document.querySelector('.msg.user')?.textContent.includes('总结工作区'), null, { timeout: 20000 }).catch(() => {});
+  await page.waitForTimeout(500);
+  check('立即运行：结果存为“⏰ 任务名”对话并打开', /总结工作区里的文件/.test(await page.textContent('#transcript')) && (await page.locator('.msg.agent').count()) >= 1);
+  await page.evaluate(() => window.__jarvis.showPanel('system'));
+  await page.click('#sched-add summary');
+  await page.fill('#sched-form [name=title]', '喝水提醒');
+  await page.fill('#sched-form [name=prompt]', '提醒我起来活动一下、喝杯水');
+  await page.selectOption('#sched-form [name=kind]', 'interval');
+  await page.fill('#sched-form [name=every]', '45');
+  await page.click('#sched-form button[type=submit]');
+  await page.waitForTimeout(300);
+  check('表单新建定时任务（每隔 45 分钟）', /每 45 分钟/.test(await page.textContent('#sched-list')) && (await page.locator('#sched-list .sched').count()) === 2);
+  await page.evaluate(() => window.__jarvis.showPanel('sessions'));
+  await page.waitForTimeout(200);
+  await page.click('#btn-new-session');
+
   // —— 智能体：写网页 → 预览
   let reply = await ask(page, '帮我写一个网页');
   const tools1 = await page.locator('.msg.agent').last().locator('.tool-card .tn').allTextContents();

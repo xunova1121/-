@@ -9,6 +9,7 @@ import { parseFile, generate, htmlToText } from './docs.js';
 import { runJavaScript, runPython } from './sandbox.js';
 import * as packs from './skillPacks.js';
 import { isImageName, prepareImage } from './images.js';
+import * as scheduler from './scheduler.js';
 
 const S = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const str = (description) => ({ type: 'string', description });
@@ -91,6 +92,36 @@ export function createTools(ctx) {
         if (text == null) throw new Error(`技能「${name}」里没有文件 ${path}`);
         return clip(text, 30000);
       }
+    },
+    {
+      name: 'schedule_task',
+      description: '创建定时任务：到点自动让你执行一段指令，结果保存为一段对话并通知用户。用户说“每天 / 每周 / 工作日 / 明天几点 / 每隔多久 帮我……”或“提醒我……”时使用。',
+      input_schema: S({
+        title: str('任务名称（简短）'),
+        prompt: str('到点时要执行的完整指令，写清楚要做什么、输出什么，例如“总结今天的工作区文件改动，列出待办”'),
+        when: str('时间，如：每天 9:00、工作日 18:30、每周五 17:30、每 30 分钟、明天 8 点、2026-10-20 15:00、10 分钟后'),
+        unattended: { type: 'boolean', description: '是否允许无人值守时执行需要确认的操作（写文件、运行命令等），默认 false' }
+      }, ['title', 'prompt', 'when']),
+      run: async ({ title, prompt, when, unattended }) => {
+        const s = await scheduler.upsert({ title, prompt, unattended, ...scheduler.parseWhen(when) });
+        ctx.onSchedulesChanged?.();
+        return `已创建定时任务「${s.title}」：${scheduler.describe(s)}，下一次在 ${new Date(s.nextRun).toLocaleString('zh-CN', { hour12: false })}。到时会自动执行并通知（应用需要在运行中：桌面版在托盘里也可以）。`;
+      }
+    },
+    {
+      name: 'list_schedules',
+      description: '列出已有的定时任务。',
+      input_schema: S({}),
+      run: async () => {
+        const list = await scheduler.list();
+        return list.length ? list.map((s) => `- [${s.id}] ${s.title}：${scheduler.describe(s)}${s.enabled ? '' : '（已停用）'}，下一次 ${s.nextRun ? new Date(s.nextRun).toLocaleString('zh-CN', { hour12: false }) : '—'}；指令：${s.prompt.slice(0, 60)}`).join('\n') : '还没有定时任务。';
+      }
+    },
+    {
+      name: 'cancel_schedule',
+      description: '删除一个定时任务（先用 list_schedules 找到 id）。',
+      input_schema: S({ id: str('任务 id') }, ['id']),
+      run: async ({ id }) => { await scheduler.remove(id); ctx.onSchedulesChanged?.(); return '已删除。'; }
     },
     {
       name: 'kb_search',

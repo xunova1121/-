@@ -29,6 +29,8 @@ import { initVoicePanel } from './ui/voicePanel.js';
 import * as skillPacks from './agent/skillPacks.js';
 import { initSkillsPanel } from './ui/skillsPanel.js';
 import { initPalette } from './ui/palette.js';
+import * as scheduler from './agent/scheduler.js';
+import { initSchedulesPanel } from './ui/schedulesPanel.js';
 import { prepareImage, isImageName } from './agent/images.js';
 import * as sessionsApi from './agent/sessions.js';
 import { initSessionsPanel } from './ui/sessionsPanel.js';
@@ -503,6 +505,7 @@ async function openSession(id) {
 /** 光核旁的建议标注（启动末尾创建） */
 let callouts = null;
 let sessionsPanel = null;
+let schedulesPanel = null;
 
 // ---------------------------------------------------------------- 桌面版与 MCP
 /** 桌面版（Electron）由 preload 注入；网页版为 undefined */
@@ -524,6 +527,72 @@ async function loadMcpTools() {
   if (!gateway?.mcp) return [];
   await refreshMcp();
   return mcp.mcpTools(gateway.origin, mcpState.servers);
+}
+
+/** 智能体可用的全部工具：基础工具 + 桌面版电脑操作 + MCP 工具 */
+async function buildTools({ background = false } = {}) {
+  const onFileChanged = (path) => { panels.markFresh(path); panels.refreshFiles(); };
+  return [
+    ...createTools({
+      metrics,
+      tavilyKey: llmConfig.tavilyKey,
+      fetchViaGateway: fetchViaGateway(),
+      onPreview: background ? () => {} : (path) => { showPanel('workspace'); panels.openFile(path); },
+      onFileChanged,
+      onSchedulesChanged: () => schedulesPanel?.refresh()
+    }),
+    ...(DESKTOP ? createDesktopTools(DESKTOP, { onFileChanged }) : []),
+    ...(await loadMcpTools())
+  ];
+}
+
+// ---------------------------------------------------------------- 定时任务
+/** 系统通知：桌面版用系统通知；网页版用浏览器通知（需要授权），并总是弹一条提示 */
+function notify(title, body) {
+  toast(`${title}：${body.slice(0, 60)}`);
+  if (DESKTOP) { DESKTOP.invoke('notify', { title, body }).catch(() => {}); return; }
+  try { if (Notification.permission === 'granted') new Notification(title, { body }); } catch { /* 不支持 */ }
+}
+let schedulerBusy = false;
+/** 在后台执行一个定时任务：结果存成一段对话（不打断当前对话），并通知 */
+async function runScheduled(s) {
+  const sess = sessionsApi.create();
+  sess.title = `⏰ ${s.title}`;
+  sess.titleSet = true;
+  sess.messages.push({ role: 'user', content: s.prompt, ts: Date.now() });
+  const usedTools = [];
+  let ok = true;
+  let text = '';
+  let note = '';
+  const { adapter, model, problem } = createAdapter(llmConfig, { gateway });
+  if (problem) { ok = false; note = problem; text = problem; } else {
+    try {
+      const r = await runAgent({
+        adapter, model, history: [],
+        userText: `【这是定时任务「${s.title}」（${scheduler.describe(s)}）自动发起的，用户此刻可能不在电脑前；直接完成任务并给出结果，不要提问。】\n${s.prompt}`,
+        tools: await buildTools({ background: true }),
+        emit: (e) => { if (e.type === 'tool_start') usedTools.push(e.name); },
+        // 无人值守：需要确认的操作默认拒绝，除非这个任务设为“允许无人值守操作”或本次会话已允许
+        approve: async (req) => s.unattended || Boolean(req.key && sessionApprovals.has(req.key))
+      });
+      text = r.text;
+    } catch (e) { ok = false; note = e.message; text = `执行失败：${e.message}`; }
+  }
+  sess.messages.push({ role: 'assistant', content: text || '（完成）', ts: Date.now(), ...(usedTools.length && { tools: [...new Set(usedTools)] }) });
+  sess.updatedAt = Date.now();
+  await sessionsApi.save(sess).catch(() => {});
+  await scheduler.recordRun(s.id, { ok, session: sess.id, note });
+  notify(`⏰ ${s.title}`, ok ? (text || '已完成').replace(/\s+/g, ' ') : `失败：${note}`);
+  sessionsPanel?.refresh();
+  schedulesPanel?.refresh();
+  return sess;
+}
+async function schedulerTick() {
+  if (schedulerBusy || active) return; // 正在对话时先等一等，不抢资源
+  schedulerBusy = true;
+  try {
+    for (const s of await scheduler.due()) await runScheduled(s);
+  } catch (e) { console.warn('[scheduler]', e); } finally { schedulerBusy = false; }
 }
 
 /** “/技能名 内容” → 明确要求模型使用该技能（界面上仍显示用户原话） */
@@ -581,17 +650,7 @@ async function send(text) {
     const result = await runAgent({
       adapter, model, history: llmHistory, userText: await expandSlash(userText), signal: ctrl.signal,
       images: imgs.map(({ mime, data }) => ({ mime, data })),
-      tools: [
-        ...createTools({
-          metrics,
-          tavilyKey: llmConfig.tavilyKey,
-          fetchViaGateway: fetchViaGateway(),
-          onPreview: (path) => { showPanel('workspace'); panels.openFile(path); },
-          onFileChanged: (path) => { panels.markFresh(path); panels.refreshFiles(); }
-        }),
-        ...(DESKTOP ? createDesktopTools(DESKTOP, { onFileChanged: (path) => { panels.markFresh(path); panels.refreshFiles(); } }) : []),
-        ...(await loadMcpTools())
-      ],
+      tools: await buildTools(),
       approve: (req) => {
         if (req.key && sessionApprovals.has(req.key)) return true;
         setTask('processing', '等待你确认');
@@ -928,6 +987,7 @@ function showPanel(name, { toggle = false } = {}) {
   if (name === 'models') { panels.refreshModels(); voicePanel.render(); }
   if (name === 'skills') { skillsPanel.refresh(); mcpPanel.refresh(); }
   if (name === 'sessions') sessionsPanel?.refresh();
+  if (name === 'system') schedulesPanel?.refresh();
 }
 for (const b of document.querySelectorAll('.rail-btn')) b.addEventListener('click', () => showPanel(b.dataset.panel, { toggle: true }));
 for (const b of document.querySelectorAll('[data-open]')) b.addEventListener('click', () => showPanel(b.dataset.open));
@@ -1016,7 +1076,7 @@ function tickClock() {
 tickClock();
 setInterval(tickClock, 1000);
 
-const PANE_TITLE = { sessions: '对话', workspace: '工作区', knowledge: '知识库', mind: '记忆与进化', skills: '技能', models: '模型与声音', system: '系统状态', settings: '设置' };
+const PANE_TITLE = { sessions: '对话', workspace: '工作区', knowledge: '知识库', mind: '记忆与进化', skills: '技能', models: '模型与声音', system: '系统与定时任务', settings: '设置' };
 const palette = initPalette({
   commands: () => {
     const toggle = (id, title) => ({ id: `t-${id}`, group: '开关', title: `${$(`#${id}`).checked ? '关闭' : '开启'}${title}`, run: () => $(`#${id}`).click() });
@@ -1149,6 +1209,13 @@ sessionsPanel = initSessionsPanel({
     toast(on ? '对话会保存在本机，可在“对话”里找回' : '新的对话不再保存（已保存的不受影响）');
   }
 });
+schedulesPanel = initSchedulesPanel({
+  toast: (t) => toast(t),
+  runNow: async (s) => { if (schedulerBusy) { toast('有任务正在运行，稍后再试'); return; } schedulerBusy = true; try { const sess = await runScheduled(s); await openSession(sess.id); } finally { schedulerBusy = false; } },
+  openSession: (id) => openSession(id)
+});
+setInterval(schedulerTick, 30_000);
+setTimeout(schedulerTick, 4000);
 // 旧版的单条对话流迁移成会话；最近 6 小时内的对话自动接着聊
 (async () => {
   if (settings.persistMemory) {
@@ -1242,6 +1309,7 @@ window.__jarvis = {
   get palette() { return palette; },
   get mcp() { return mcpPanel; },
   get callouts() { return callouts; },
+  schedulerTick,
   reflectNow,
   settings,
   live,

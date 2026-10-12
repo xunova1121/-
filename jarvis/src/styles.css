@@ -344,6 +344,16 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 .session-actions .x-btn.danger { color: var(--bad); font-size: 11px; }
 @media (hover: none) { .session-actions { opacity: 1; } }
 
+/* ---- 定时任务 ---- */
+.sched-add summary { cursor: pointer; font-size: 13px; color: var(--accent); }
+.sched-add[open] summary { margin-bottom: 8px; }
+.sched-add form { display: flex; flex-direction: column; gap: 8px; }
+.sched-when { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+.sched-when-tag { margin-left: auto; font: 11px var(--font-mono); color: var(--accent); white-space: nowrap; }
+.sched-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; color: var(--muted); }
+.sched-meta .bad { color: var(--bad); }
+.sched-meta .warn { color: var(--warn); }
+
 /* ---- 记忆面板 ---- */
 .core-mem { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px 10px; background: var(--surface); }
 .core-mem summary { cursor: pointer; font-size: 13px; font-weight: 600; display: flex; gap: 8px; align-items: baseline; }

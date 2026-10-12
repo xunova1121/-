@@ -46,7 +46,7 @@
       <button class="rail-btn" data-panel="mind" type="button" title="记忆与进化（Alt+4）"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" /></svg><span>进化</span></button>
       <button class="rail-btn" data-panel="skills" type="button" title="技能（Alt+5）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z" /></svg><span>技能</span></button>
       <button class="rail-btn" data-panel="models" type="button" title="模型（Alt+6）"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" /><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4" /></svg><span>模型</span></button>
-      <button class="rail-btn" data-panel="system" type="button" title="系统状态（Alt+7）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4" /></svg><span>系统</span></button>
+      <button class="rail-btn" data-panel="system" type="button" title="定时任务与系统状态（Alt+7）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4" /></svg><span>定时</span></button>
       <button class="rail-btn" data-panel="settings" type="button" title="设置（Alt+8）"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg><span>设置</span></button>
     </nav>
 
@@ -282,7 +282,26 @@
 
       <!-- 系统 -->
       <section class="pane" data-pane="system" hidden>
-        <header class="pane-head"><h2>系统状态</h2></header>
+        <header class="pane-head"><h2>定时任务</h2><span class="badge" id="sched-count">0 个</span></header>
+        <p class="muted small">到点让贾维斯自动做事，结果存成一段对话并通知你。也可以直接说“每个工作日 9 点帮我……”。网页版需要页面开着；桌面版关掉窗口后在托盘里也会执行。</p>
+        <ul class="skill-list" id="sched-list"></ul>
+        <details class="mcp-form sched-add" id="sched-add">
+          <summary>＋ 新建定时任务</summary>
+          <form id="sched-form" autocomplete="off">
+            <label class="field"><span>名称</span><input name="title" maxlength="40" placeholder="例如：晨间简报" required /></label>
+            <label class="field"><span>让贾维斯做什么</span><textarea name="prompt" rows="3" required placeholder="例如：列出工作区里昨天以来新增或修改的文件，并总结今天的待办"></textarea></label>
+            <div class="sched-when">
+              <label class="field"><span>频率</span><select name="kind"><option value="daily">每天</option><option value="workdays">工作日</option><option value="weekly">每周</option><option value="once">仅一次</option><option value="interval">每隔一段时间</option></select></label>
+              <label class="field" data-k="daily workdays weekly"><span>时间</span><input name="time" type="time" value="09:00" /></label>
+              <label class="field" data-k="weekly"><span>星期</span><select name="weekday"><option value="1">周一</option><option value="2">周二</option><option value="3">周三</option><option value="4">周四</option><option value="5">周五</option><option value="6">周六</option><option value="0">周日</option></select></label>
+              <label class="field" data-k="once"><span>日期时间</span><input name="at" type="datetime-local" /></label>
+              <label class="field" data-k="interval"><span>间隔（分钟）</span><input name="every" type="number" min="5" value="60" /></label>
+            </div>
+            <label class="inline-check small"><input type="checkbox" name="unattended" /> 允许无人值守时执行需要确认的操作（写文件、运行命令等）</label>
+            <div class="pane-actions"><button class="btn" type="submit">添加</button><span class="muted small" id="sched-status" role="status"></span></div>
+          </form>
+        </details>
+        <h3 class="sub">系统状态</h3>
         <div class="dashboard" id="dashboard"></div>
       </section>
 

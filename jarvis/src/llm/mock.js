@@ -38,6 +38,7 @@ export function plan(messages, tools = []) {
   if (results.length) {
     const failed = results.find((r) => r.isError);
     if (failed) return { emotion: '安抚', text: `执行时遇到问题：${failed.content.slice(0, 120)}。我们换个方式再试一次？` };
+    if (used.has('schedule_task') || used.has('list_schedules')) return { emotion: '亲和', text: lastResult.content };
     const mcpUsed = [...used].find((n) => n.startsWith('mcp_'));
     if (mcpUsed) return { emotion: '专注', text: `MCP 工具返回：${lastResult.content.slice(0, 400)}` };
     if (lastResult.images?.length) return { emotion: '专注', text: `${lastResult.content}\n\n截图已经交给我了；离线演示模型看不懂图片，接入支持识图的模型后我就能分析屏幕内容。` };
@@ -112,6 +113,10 @@ export function plan(messages, tools = []) {
     if (open) return { emotion: '专注', calls: [call('computer_open', { target: open[1].trim() })] };
     const save = q.match(/写.*文件.*?([\w\u4e00-\u9fa5/\\.~-]+\.(txt|md))/);
     if (save) return { emotion: '专注', calls: [call('computer_write_file', { path: save[1], content: '由贾维斯写入的测试文件' })] };
+  }
+  // —— 定时任务：“每个工作日 9 点帮我……”
+  if (!/^【这是定时任务/.test(q) && /(每天|每日|每周|星期|工作日|每隔|每\d+分钟|每小时|明天|后天|\d+分钟后|\d+小时后)/.test(q) && /(提醒|帮我|总结|写|检查|汇报|整理|发)/.test(q)) {
+    return { emotion: '专注', calls: [call('schedule_task', { title: q.replace(/^.*?(提醒我|帮我)/, '').slice(0, 12) || '定时任务', prompt: q.replace(/^.*?(提醒我|帮我)/, '') || q, when: q })] };
   }
   const skill = q.match(/请使用技能「([^」]+)」/);
   if (skill) return { emotion: '专注', calls: [call('use_skill', { name: skill[1] })] };
