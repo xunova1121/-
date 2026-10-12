@@ -22,6 +22,7 @@ import { runAgent } from './agent/agent.js';
 import { createTools } from './agent/tools.js';
 import * as ws from './agent/workspace.js';
 import * as agentMemory from './agent/memory.js';
+import * as kb from './agent/knowledge.js';
 import { createEmbedder } from './llm/embeddings.js';
 import { initPanels } from './ui/panels.js';
 import { loadConfig, saveConfig, createAdapter, displayName, providerById, resolveVoice } from './llm/config.js';
@@ -433,14 +434,17 @@ function makeSpeech() {
 function syncMemoryEngine() {
   const { adapter, model, problem } = createAdapter(llmConfig, { gateway });
   const real = !problem && providerById(llmConfig.provider)?.kind !== 'mock';
+  const embedder = createEmbedder(llmConfig, { gateway });
   agentMemory.configureMemory({
     llm: real ? async ({ system, prompt }) => {
       let text = '';
       const r = await adapter.stream({ model, system: [system], messages: [{ role: 'user', content: prompt }], tools: [], onText: (d) => { text += d; } });
       return r?.text || text;
     } : null,
-    embedder: createEmbedder(llmConfig, { gateway })
+    embedder
   });
+  kb.configureKnowledge({ embedder });
+  panels?.refreshKb?.();
 }
 
 /** 自动整理记忆：对话停下来 90 秒后，把这段对话交给记忆整理（抽取事实、写摘要） */

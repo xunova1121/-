@@ -192,7 +192,25 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
       x.addEventListener('click', async () => { await kb.removeDocument(d.id); refreshKb(); refreshMind(); });
       return el('li', {}, el('span', { className: 'fn', textContent: d.name, title: d.name }), el('span', { className: 'fs', textContent: `${d.chunks} 段 · ${(d.chars / 1000).toFixed(1)}k 字` }), x);
     }) : [el('li', { className: 'empty', textContent: '知识库还是空的。导入你的资料后，回答会引用这些内容并注明出处。' })]));
+    const { embeddings } = kb.knowledgeEngine();
+    const pending = embeddings ? await kb.pendingEmbeddings() : 0;
+    $('#kb-engine-text').textContent = embeddings
+      ? `检索：关键词 + 语义（${embeddings.split(':').pop()}）`
+      : '检索：仅关键词 · 填 OpenAI / 硅基流动密钥后可按意思检索';
+    const btn = $('#btn-kb-reindex');
+    btn.hidden = !pending;
+    btn.textContent = `补算向量（${pending} 段）`;
   }
+  $('#btn-kb-reindex').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      const n = await kb.reindex({ onProgress: (done, total) => { btn.textContent = `补算中 ${done}/${total}`; } });
+      toast(`已为 ${n} 段补算向量，现在可以按意思检索了`);
+    } catch (err) { toast(`补算失败：${err.message}`); }
+    btn.disabled = false;
+    refreshKb();
+  });
   $('#kb-input').addEventListener('change', (e) => { importToKb([...e.target.files]); e.target.value = ''; });
   const drop = $('#kb-drop');
   drop.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); drop.classList.add('over'); });
@@ -201,7 +219,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   $('#kb-query').addEventListener('keydown', async (e) => {
     if (e.key !== 'Enter') return;
     const hits = await kb.search(e.target.value, 5, 0.1);
-    $('#kb-hits').replaceChildren(...(hits.length ? hits.map((h) => el('li', {}, el('b', { textContent: `${h.name} · 相关度 ${h.score.toFixed(1)}` }), el('div', { textContent: h.text.slice(0, 160) }))) : [el('li', { textContent: '没有找到相关内容' })]));
+    $('#kb-hits').replaceChildren(...(hits.length ? hits.map((h) => el('li', {}, el('b', { textContent: `${h.name} · ${h.via?.join(' + ') ?? '关键词'}` }), el('div', { textContent: h.text.slice(0, 160) }))) : [el('li', { textContent: '没有找到相关内容' })]));
   });
 
   // ================================================================ 记忆与进化
