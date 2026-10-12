@@ -73,8 +73,8 @@ check('选了“本次都允许”后同类操作不再询问', /again/.test(r) 
 const prot = await page.evaluate(() => window.jarvisDesktop.invoke('writeFile', { path: '/etc/jarvis-test', text: 'x' }).catch((e) => e.message));
 check('系统目录受保护', /系统目录/.test(prot), prot);
 
-r = await ask('截屏');
-check('截屏保存到工作区', /已截屏（\d+×\d+），保存到工作区 截图\/屏幕-.*\.png/.test(r), r.slice(-80));
+r = await ask('截屏', { approve: '允许' });
+check('截屏：先确认（截图会发给模型），再保存到工作区并交给模型查看', /已截屏（\d+×\d+），保存到工作区 截图\/屏幕-.*\.png/.test(r) && /截图已经交给我了/.test(r), r.slice(-80));
 await page.screenshot({ path: `${OUT}/desktop-main.png` });
 
 // —— MCP：在界面里添加本机 stdio 服务 → 智能体调用（先确认）

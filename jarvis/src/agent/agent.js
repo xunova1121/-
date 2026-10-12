@@ -64,6 +64,7 @@ export async function buildContext(userText) {
  * @param {string} o.model
  * @param {Array} o.history      之前的对话（只含文本：{ role, content }）
  * @param {string} o.userText
+ * @param {Array<{ mime: string, data: string }>} [o.images]  随这条消息发送的图片（base64）
  * @param {Array} o.tools        createTools() 的结果
  * @param {(e: object) => void} o.emit
  * @param {AbortSignal} [o.signal]
@@ -71,11 +72,11 @@ export async function buildContext(userText) {
  * @param {(req: { title: string, detail?: string, key?: string }, tool: object) => Promise<boolean>} [o.approve]  需要确认的工具调用
  * @returns {Promise<{ text: string, steps: number, toolCalls: number }>}
  */
-export async function runAgent({ adapter, model, history, userText, tools, emit, signal, maxSteps = 16, context, approve }) {
+export async function runAgent({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve }) {
   emit({ type: 'state', value: 'processing' });
   const ctx = context ?? (await buildContext(userText));
   if (ctx.kbHits?.length) emit({ type: 'sources', items: ctx.kbHits.map((h) => h.name) });
-  const convo = [...history, { role: 'user', content: userText }];
+  const convo = [...history, { role: 'user', content: userText, ...(images.length && { images }) }];
   const byName = new Map(tools.map((t) => [t.name, t]));
   let finalText = '';
   let toolCount = 0;
@@ -120,6 +121,7 @@ export async function runAgent({ adapter, model, history, userText, tools, emit,
       emit({ type: 'state', value: 'processing' });
       emit({ type: 'tool_start', id: c.id, name: c.name, args: c.args });
       let output;
+      let outImages = [];
       let ok = true;
       try {
         if (!tool) throw new Error(`没有名为 ${c.name} 的工具`);
@@ -128,14 +130,16 @@ export async function runAgent({ adapter, model, history, userText, tools, emit,
         // 有风险的操作（操作电脑、MCP 工具）先征得用户同意
         const ask = tool.approval?.(c.args);
         if (ask && approve && !(await approve(ask, tool))) throw new Error('用户拒绝了这个操作。请换一种方式，或询问用户的意见。');
-        output = String(await tool.run(c.args));
+        // 工具可以返回 { text, images }：图片会交给模型“看”（如截屏、工作区里的图片）
+        const r = await tool.run(c.args);
+        if (r && typeof r === 'object' && 'text' in r) { output = String(r.text); outImages = r.images ?? []; } else output = String(r);
       } catch (e) {
         ok = false;
         output = `错误：${e.message || e}`;
       }
       toolCount++;
       emit({ type: 'tool_end', id: c.id, name: c.name, ok, output, ms: Date.now() - t0 });
-      convo.push({ role: 'tool', toolCallId: c.id, name: c.name, content: output, isError: !ok });
+      convo.push({ role: 'tool', toolCallId: c.id, name: c.name, content: output, isError: !ok, ...(outImages.length && { images: outImages }) });
     }
   }
   if (step >= maxSteps) {

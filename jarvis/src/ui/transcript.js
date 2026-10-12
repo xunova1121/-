@@ -154,7 +154,7 @@ export class Transcript {
    * @param {'user'|'agent'} role
    * @returns 气泡控制对象：append / done / toolCard / sources / feedback
    */
-  add(role, text = '', ts = Date.now()) {
+  add(role, text = '', ts = Date.now(), { thumbs = [] } = {}) {
     this.clearInterim();
     this.root.querySelector('.welcome')?.remove();
     const el = document.createElement('div');
@@ -166,6 +166,12 @@ export class Transcript {
     body.className = 'body';
     body.textContent = text;
     el.append(head, body);
+    if (thumbs?.length) {
+      const row = document.createElement('div');
+      row.className = 'msg-images';
+      for (const src of thumbs) row.append(Object.assign(document.createElement('img'), { src, alt: '附带的图片', loading: 'lazy' }));
+      el.insertBefore(row, body);
+    }
     this.root.append(el);
     this.#scroll();
     let raw = text;

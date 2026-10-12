@@ -40,6 +40,7 @@ export function plan(messages, tools = []) {
     if (failed) return { emotion: '安抚', text: `执行时遇到问题：${failed.content.slice(0, 120)}。我们换个方式再试一次？` };
     const mcpUsed = [...used].find((n) => n.startsWith('mcp_'));
     if (mcpUsed) return { emotion: '专注', text: `MCP 工具返回：${lastResult.content.slice(0, 400)}` };
+    if (lastResult.images?.length) return { emotion: '专注', text: `${lastResult.content}\n\n截图已经交给我了；离线演示模型看不懂图片，接入支持识图的模型后我就能分析屏幕内容。` };
     const pc = [...used].find((n) => n.startsWith('computer_') || n.startsWith('clipboard_'));
     if (pc) return { emotion: '专注', text: `完成了。结果：\n\n${lastResult.content.slice(0, 500)}` };
     if (used.has('use_skill')) {
@@ -82,6 +83,10 @@ export function plan(messages, tools = []) {
   }
 
   // —— 还没调用工具：按意图选择工具
+  const imgs = messages[index]?.images ?? [];
+  if (imgs.length) {
+    return { emotion: '专注', text: `收到 ${imgs.length} 张图片。离线演示模型看不懂图片内容；在“模型”里接入支持识图的模型（如 Claude、GPT、Gemini、通义千问 VL）后，我就能描述图片、识别文字、分析截图里的界面和报错。` };
+  }
   // —— MCP：“用 MCP 的 echo 工具……”
   if (/mcp/i.test(q)) {
     const mcpTools = tools.filter((t) => t.name.startsWith('mcp_'));

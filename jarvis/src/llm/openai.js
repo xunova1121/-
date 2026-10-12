@@ -6,11 +6,22 @@
  *   { role: 'user', content }
  *   { role: 'assistant', content, toolCalls: [{ id, name, args }] }
  *   { role: 'tool', toolCallId, name, content, isError }
+ * user / tool 消息可带 images: [{ mime, data(base64) }]。OpenAI 只允许用户消息带图，
+ * 所以工具返回的图片（如截屏）放在紧随其后的一条用户消息里。
  */
+const imagePart = (img) => ({ type: 'image_url', image_url: { url: `data:${img.mime};base64,${img.data}` } });
+
 export function toOpenAIMessages(system, messages) {
   const out = [{ role: 'system', content: system.map((s) => s.text ?? s).join('\n\n') }];
+  let pending = [];
+  const flush = () => {
+    if (!pending.length) return;
+    out.push({ role: 'user', content: [{ type: 'text', text: '（以上工具返回的图片）' }, ...pending.map(imagePart)] });
+    pending = [];
+  };
   for (const m of messages) {
-    if (m.role === 'user') out.push({ role: 'user', content: m.content });
+    if (m.role !== 'tool') flush();
+    if (m.role === 'user') out.push({ role: 'user', content: m.images?.length ? [{ type: 'text', text: m.content }, ...m.images.map(imagePart)] : m.content });
     else if (m.role === 'assistant') {
       const msg = { role: 'assistant', content: m.content || '' };
       if (m.toolCalls?.length) {
@@ -18,8 +29,12 @@ export function toOpenAIMessages(system, messages) {
         if (!m.content) msg.content = null;
       }
       out.push(msg);
-    } else if (m.role === 'tool') out.push({ role: 'tool', tool_call_id: m.toolCallId, content: m.content });
+    } else if (m.role === 'tool') {
+      out.push({ role: 'tool', tool_call_id: m.toolCallId, content: m.content });
+      if (m.images?.length) pending.push(...m.images);
+    }
   }
+  flush();
   return out;
 }
 

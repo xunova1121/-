@@ -5,6 +5,7 @@
  */
 import * as ws from './workspace.js';
 import { parseFile } from './docs.js';
+import { isImageName, prepareImage } from './images.js';
 
 const S = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const str = (description) => ({ type: 'string', description });
@@ -54,11 +55,15 @@ export function createDesktopTools(desktop, ctx = {}) {
     },
     {
       name: 'computer_read_file',
-      description: `读取电脑上的文件内容（Word、PDF、PPT、Excel 会提取文字；代码与文本原样返回）。${PATH_HINT}。`,
+      description: `读取电脑上的文件内容（Word、PDF、PPT、Excel 会提取文字；代码与文本原样返回；图片会直接给你看）。${PATH_HINT}。`,
       input_schema: S({ path: str('文件路径') }, ['path']),
       run: async ({ path }) => {
         const r = await call('readFile', { path });
         const name = r.path.split(/[\\/]/).pop();
+        if (isImageName(name)) {
+          const img = await prepareImage(new Blob([b64ToBytes(r.base64)]));
+          return { text: `图片 ${r.path}（${img.width}×${img.height}）`, images: [{ mime: img.mime, data: img.data }] };
+        }
         if (DOC.test(name)) return clip((await parseFile(new Blob([b64ToBytes(r.base64)]), name)).text);
         return clip(new TextDecoder().decode(b64ToBytes(r.base64)));
       }
@@ -124,14 +129,19 @@ export function createDesktopTools(desktop, ctx = {}) {
     },
     {
       name: 'computer_screenshot',
-      description: '截取整个屏幕，保存为图片到工作区（截图/）。截图只保存在本机，不会发给模型。',
-      input_schema: S({}),
-      run: async () => {
+      description: '截取整个屏幕，保存到工作区（截图/）。look=true（默认）时截图会发给你看，可以分析屏幕上的界面、报错、表格等；只想存档时设 look=false。',
+      input_schema: S({ look: { type: 'boolean', description: '是否把截图发给模型查看，默认 true' } }),
+      approval: ({ look }) => (look === false ? null : { key: 'screen-look', title: '查看屏幕截图', detail: '截图会发送给当前使用的大模型服务进行分析。' }),
+      run: async ({ look } = {}) => {
         const r = await call('screenshot');
         const path = `截图/屏幕-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.png`;
-        const saved = (await ws.write(path, new Blob([b64ToBytes(r.base64)], { type: 'image/png' })))?.path || path;
+        const blob = new Blob([b64ToBytes(r.base64)], { type: 'image/png' });
+        const saved = (await ws.write(path, blob))?.path || path;
         ctx.onFileChanged?.(saved);
-        return `已截屏（${r.width}×${r.height}），保存到工作区 ${saved}。`;
+        const text = `已截屏（${r.width}×${r.height}），保存到工作区 ${saved}。`;
+        if (look === false) return text;
+        const img = await prepareImage(blob);
+        return { text, images: [{ mime: img.mime, data: img.data }] };
       }
     },
     {

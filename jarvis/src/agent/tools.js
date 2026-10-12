@@ -8,6 +8,7 @@ import * as kb from './knowledge.js';
 import { parseFile, generate, htmlToText } from './docs.js';
 import { runJavaScript, runPython } from './sandbox.js';
 import * as packs from './skillPacks.js';
+import { isImageName, prepareImage } from './images.js';
 
 const S = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const str = (description) => ({ type: 'string', description });
@@ -111,10 +112,14 @@ export function createTools(ctx) {
     },
     {
       name: 'read_file',
-      description: '读取工作区里的文件。Word、PDF、PPT、Excel 会自动转换成文字；代码和文本原样返回。',
+      description: '读取工作区里的文件。Word、PDF、PPT、Excel 会自动转换成文字；代码和文本原样返回；图片（png / jpg / webp）会直接给你看。',
       input_schema: S({ path: str('文件路径') }, ['path']),
       run: async ({ path }) => {
         const blob = await ws.readBlob(path);
+        if (isImageName(path) && typeof document !== 'undefined') {
+          const img = await prepareImage(blob);
+          return { text: `图片 ${path}（${img.width}×${img.height}）`, images: [{ mime: img.mime, data: img.data }] };
+        }
         if (ws.isText(path)) return clip(await blob.text());
         return clip((await parseFile(blob, path)).text);
       }

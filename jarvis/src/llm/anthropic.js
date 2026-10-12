@@ -9,10 +9,12 @@ import Anthropic from '@anthropic-ai/sdk';
 
 const FALLBACK_MODELS = /^(claude-opus-5-5|claude-opus-5|claude-sonnet-5-5|claude-fable-5-1)$/;
 
+const imageBlock = (img) => ({ type: 'image', source: { type: 'base64', media_type: img.mime, data: img.data } });
+
 export function toAnthropicMessages(messages) {
   const out = [];
   for (const m of messages) {
-    if (m.role === 'user') out.push({ role: 'user', content: m.content });
+    if (m.role === 'user') out.push({ role: 'user', content: m.images?.length ? [...m.images.map(imageBlock), { type: 'text', text: m.content }] : m.content });
     else if (m.role === 'assistant') {
       if (m.raw) out.push({ role: 'assistant', content: m.raw });
       else {
@@ -22,7 +24,8 @@ export function toAnthropicMessages(messages) {
         if (content.length) out.push({ role: 'assistant', content });
       }
     } else if (m.role === 'tool') {
-      const block = { type: 'tool_result', tool_use_id: m.toolCallId, content: m.content, ...(m.isError && { is_error: true }) };
+      const content = m.images?.length ? [{ type: 'text', text: m.content }, ...m.images.map(imageBlock)] : m.content;
+      const block = { type: 'tool_result', tool_use_id: m.toolCallId, content, ...(m.isError && { is_error: true }) };
       const last = out.at(-1);
       // 同一轮的多个工具结果必须放在同一条 user 消息里
       if (last?.role === 'user' && Array.isArray(last.content) && last.content.every((b) => b.type === 'tool_result')) last.content.push(block);

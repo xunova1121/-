@@ -29,6 +29,7 @@ import { initVoicePanel } from './ui/voicePanel.js';
 import * as skillPacks from './agent/skillPacks.js';
 import { initSkillsPanel } from './ui/skillsPanel.js';
 import { initPalette } from './ui/palette.js';
+import { prepareImage, isImageName } from './agent/images.js';
 import * as sessionsApi from './agent/sessions.js';
 import { initSessionsPanel } from './ui/sessionsPanel.js';
 import { initCallouts } from './ui/callouts.js';
@@ -468,7 +469,7 @@ function replayTranscript() {
   $('#transcript').replaceChildren();
   if (!history.length) { renderWelcome(); return; }
   for (const m of history) {
-    if (m.role === 'user') transcript.add('user', m.content, m.ts);
+    if (m.role === 'user') transcript.add('user', m.content, m.ts, { thumbs: m.thumbs });
     else {
       const b = transcript.add('agent', '', m.ts);
       b.append(m.content);
@@ -536,16 +537,19 @@ async function expandSlash(text) {
 async function send(text) {
   text = String(text || '').trim();
   if (!text && !attachments.length) return;
+  if (!text && attachments.some((a) => a.image)) text = '请看看这张图片。';
   if (active) { active.ctrl.abort(); active = null; }
   speaker.cancel();
   speaker.unlock(); // 发送多由点击 / 回车触发：顺便启动音频上下文，云端语音才能播放
 
   const files = attachments.splice(0);
   renderAttachments();
-  const userText = files.length ? `${text}\n\n[已上传到工作区：${files.join('、')}]` : text;
-  transcript.add('user', userText);
+  const userText = files.length ? `${text}\n\n[已上传到工作区：${files.map((f) => f.path).join('、')}]` : text;
+  const imgs = files.filter((f) => f.image).map((f) => f.image);
+  const thumbs = imgs.map((i) => i.thumb);
+  transcript.add('user', userText, Date.now(), { thumbs });
   const llmHistory = history.slice(-20).map(({ role, content }) => ({ role, content }));
-  rememberTurn('user', userText);
+  rememberTurn('user', userText, thumbs.length ? { thumbs } : {});
 
   if (machine.task !== 'listening') machine.beginUserTurn();
   const ctrl = new AbortController();
@@ -576,6 +580,7 @@ async function send(text) {
   try {
     const result = await runAgent({
       adapter, model, history: llmHistory, userText: await expandSlash(userText), signal: ctrl.signal,
+      images: imgs.map(({ mime, data }) => ({ mime, data })),
       tools: [
         ...createTools({
           metrics,
@@ -680,7 +685,9 @@ async function addFiles(list) {
   for (const f of list) {
     try {
       const r = await ws.write(`上传/${f.name}`, f);
-      attachments.push(r.path);
+      // 图片同时作为“看图”输入发给模型
+      const image = isImageName(f.name) ? await prepareImage(f).catch(() => null) : null;
+      attachments.push({ path: r.path, image });
       panels.markFresh(r.path);
     } catch (e) { toast(`${f.name}：${e.message}`); }
   }
@@ -691,15 +698,27 @@ async function addFiles(list) {
 function renderAttachments() {
   const box = $('#attach-list');
   box.hidden = !attachments.length;
-  box.replaceChildren(...attachments.map((p, i) => {
+  box.replaceChildren(...attachments.map((a, i) => {
     const x = Object.assign(document.createElement('button'), { type: 'button', textContent: '✕', title: '移除' });
     x.addEventListener('click', () => { attachments.splice(i, 1); renderAttachments(); });
     const s = document.createElement('span');
-    s.append(p.replace(/^上传\//, ''), x);
+    if (a.image) {
+      s.className = 'has-thumb';
+      s.append(Object.assign(document.createElement('img'), { src: a.image.thumb, alt: '' }));
+    }
+    s.append(a.path.replace(/^上传\//, ''), x);
     return s;
   }));
 }
 $('#btn-attach').addEventListener('click', () => $('#file-input').click());
+// 粘贴截图 / 图片
+$('#prompt').addEventListener('paste', (e) => {
+  const imgs = [...(e.clipboardData?.items ?? [])].filter((it) => it.kind === 'file' && it.type.startsWith('image/')).map((it) => it.getAsFile()).filter(Boolean);
+  if (!imgs.length) return;
+  e.preventDefault();
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  addFiles(imgs.map((f, i) => new File([f], `粘贴-${stamp}${i ? `-${i}` : ''}.${(f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`, { type: f.type })));
+});
 $('#file-input').addEventListener('change', (e) => { addFiles([...e.target.files]); e.target.value = ''; });
 let dragDepth = 0;
 window.addEventListener('dragenter', (e) => { if (e.dataTransfer?.types?.includes('Files')) { dragDepth++; $('#drop-overlay').hidden = false; } });

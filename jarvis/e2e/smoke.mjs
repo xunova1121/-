@@ -283,6 +283,16 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('OpenAI 兼容：流式文本到达界面', /已写好/.test(reply), reply.slice(-40));
   await page.click('[data-panel="workspace"]');
   check('假模型写的文件出现在工作区', (await page.locator('#file-list li', { hasText: 'notes/hello.md' }).count()) === 1);
+  // —— 看图：附上图片，作为 image_url 发给 OpenAI 兼容模型
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  await page.setInputFiles('#file-input', { name: '截图.png', mimeType: 'image/png', buffer: png });
+  await page.waitForSelector('#attach-list .has-thumb img', { timeout: 5000 }).catch(() => {});
+  check('图片附件显示缩略图', (await page.locator('#attach-list .has-thumb img').count()) === 1);
+  const visIdx = fake.seen.length;
+  await ask(page, '这张图是什么');
+  const visUser = fake.seen[visIdx]?.messages.filter((m) => m.role === 'user').at(-1);
+  check('看图：图片随消息发给模型（image_url）', Array.isArray(visUser?.content) && visUser.content.some((p) => p.type === 'image_url' && /^data:image\/jpeg;base64,/.test(p.image_url.url)), JSON.stringify(visUser?.content)?.slice(0, 100));
+  check('对话里显示图片缩略图', (await page.locator('.msg.user').last().locator('.msg-images img').count()) === 1);
   fake.server.close();
   await page.click('[data-panel="models"]');
   await page.selectOption('#llm-provider', 'mock');
