@@ -23,6 +23,7 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
   try {
     const { TextToSpeech } = await import('@capacitor-community/text-to-speech');
     installSpeechShim(TextToSpeech);
+    globalThis.__jarvisTTS = TextToSpeech; // 语音自检用
   } catch { /* 没有朗读插件：只显示文字 */ }
   try {
     // 返回键：先关抽屉 / 面板，再回到上一层，最后才退到后台（不直接退出）

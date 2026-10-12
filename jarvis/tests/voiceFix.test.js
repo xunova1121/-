@@ -70,3 +70,13 @@ describe('手机系统语音识别', () => {
     vi.useRealTimers();
   });
 });
+
+import { sttCandidates } from '../src/perception/stt.js';
+describe('用中转站转写：先试模型列表里真有的转写模型', () => {
+  it('whisper-large-v3、SenseVoice 等排在前面，跳过 tts / realtime', () => {
+    const cfg = { modelLists: { k: { ids: ['gpt-6.1-sol', 'whisper-large-v3', 'FunAudioLLM/SenseVoiceSmall', 'gpt-4o-mini-tts', 'gpt-4o-realtime-preview'] } } };
+    expect(sttCandidates(cfg).slice(0, 2)).toEqual(['whisper-large-v3', 'FunAudioLLM/SenseVoiceSmall']);
+    expect(sttCandidates(cfg)).not.toContain('gpt-4o-mini-tts');
+    expect(sttCandidates({})[0]).toBe('gpt-4o-mini-transcribe');
+  });
+});

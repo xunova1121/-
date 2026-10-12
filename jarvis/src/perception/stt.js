@@ -87,6 +87,13 @@ export async function transcribe(engineId, cfg, audio, { gateway = null, signal,
   return cleanTranscript(j.text);
 }
 
+/** 要试的转写模型：服务商模型列表里真有的转写模型优先（名字各家不同，如 whisper-large-v3、SenseVoiceSmall），再试常见名字 */
+export function sttCandidates(cfg) {
+  const listed = [...new Set(Object.values(cfg.modelLists || {}).flatMap((l) => l.ids || []))]
+    .filter((id) => /whisper|transcribe|sensevoice|paraformer|\basr\b|-asr|speech-to-text|stt/i.test(id) && !/tts|realtime/i.test(id));
+  return [...new Set([...listed, ...PROVIDER_STT_MODELS])].slice(0, 5);
+}
+
 /** 用当前模型服务商的 /audio/transcriptions；依次试几个常见转写模型，记住能用的那个 */
 async function transcribeViaProvider(cfg, audio, { gateway, signal, fetchImpl }) {
   const p = providerById(cfg.provider);
@@ -98,7 +105,7 @@ async function transcribeViaProvider(cfg, audio, { gateway, signal, fetchImpl })
   if (key || viaGw) headers.authorization = `Bearer ${key || 'use-gateway-key'}`;
   if (viaGw && p.custom) headers['x-jarvis-upstream'] = cfg.baseURLs.custom.trim();
   const known = workingModel.get(base);
-  const models = known ? [known] : PROVIDER_STT_MODELS;
+  const models = known ? [known] : sttCandidates(cfg);
   let last = '';
   for (const model of models) {
     const form = new FormData();

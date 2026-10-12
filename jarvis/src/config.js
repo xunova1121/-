@@ -23,9 +23,11 @@ export const FACE = {
   maxMisses: 30
 };
 
+// 手机版把语音检测模型打进了 APK（见 vite.config.js），不依赖 CDN
+const vadFromCdn = STANDALONE && !MOBILE;
 export const VAD = {
-  baseAssetPath: STANDALONE ? CDN.vad : `${base}vendor/vad/`,
-  onnxWASMBasePath: STANDALONE ? CDN.ort : `${base}vendor/ort/`,
+  baseAssetPath: vadFromCdn ? CDN.vad : `${base}vendor/vad/`,
+  onnxWASMBasePath: vadFromCdn ? CDN.ort : `${base}vendor/ort/`,
   loadTimeoutMs: 10000
 };
 

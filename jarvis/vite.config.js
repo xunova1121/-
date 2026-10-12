@@ -1,5 +1,18 @@
 import { defineConfig } from 'vite';
 import { viteSingleFile } from 'vite-plugin-singlefile';
+import fs from 'node:fs';
+
+/** 手机版：把语音检测模型和 onnxruntime 打进 APK（国内访问 jsDelivr 常常很慢或连不上，语音对话会卡住） */
+const bundleVoiceAssets = () => ({
+  name: 'jarvis-bundle-voice-assets',
+  closeBundle() {
+    for (const dir of ['vad', 'ort']) {
+      const from = `public/vendor/${dir}`;
+      if (!fs.existsSync(from)) throw new Error(`缺少 ${from}：先运行 npm install（postinstall 会生成）`);
+      fs.cpSync(from, `dist-mobile/vendor/${dir}`, { recursive: true });
+    }
+  }
+});
 
 /**
  * 两种构建：
@@ -7,7 +20,7 @@ import { viteSingleFile } from 'vite-plugin-singlefile';
  *   npm run build:standalone   单文件版：所有代码、样式、胸像网格都内联进一个 HTML，双击即可打开；
  *                              没有网关时对话走浏览器内置智能体（或用户自己填写的 Claude 密钥），
  *                              人脸 / 语音检测的模型改从公共 CDN 加载（只下载，不上传）
- *   npm run build:mobile       安卓 App：dist-mobile/，相对路径、不带自托管模型（同单文件版从 CDN 加载），由 Capacitor 打包成 APK
+ *   npm run build:mobile       安卓 App：dist-mobile/，相对路径；语音检测模型打进 APK，人脸模型从 CDN 加载；由 Capacitor 打包成 APK
  */
 export default defineConfig(({ mode }) => {
   const standalone = mode === 'standalone';
@@ -15,7 +28,7 @@ export default defineConfig(({ mode }) => {
   return {
     base: standalone || mobile ? './' : '/',
     define: { __STANDALONE__: JSON.stringify(standalone || mobile), __MOBILE__: JSON.stringify(mobile) },
-    plugins: standalone ? [viteSingleFile()] : [],
+    plugins: standalone ? [viteSingleFile()] : mobile ? [bundleVoiceAssets()] : [],
     publicDir: standalone || mobile ? false : 'public',
     assetsInclude: ['**/*.bin'],
     server: {

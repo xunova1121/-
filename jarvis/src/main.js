@@ -1165,6 +1165,33 @@ async function checkVoice() {
   } catch (e) {
     line(false, `麦克风：不能用（${e.name === 'NotAllowedError' ? '权限被拒绝，请在系统设置里允许贾维斯使用麦克风' : e.message || e.name}）`);
   }
+  await checkRecognition(line);
+  // 5. 朗读（语音对话时贾维斯开口说话）
+  const tts = globalThis.__jarvisTTS;
+  if (MOBILE && tts) {
+    const tli = line(null, '朗读：检测中…（会说一句“语音测试”）');
+    try {
+      const zh = await tts.isLanguageSupported({ lang: 'zh-CN' }).then((r) => r?.supported).catch(() => null);
+      if (zh === false) {
+        tli.dataset.ok = '0';
+        tli.textContent = '朗读：手机的朗读引擎不支持中文。';
+        const b = Object.assign(document.createElement('button'), { type: 'button', className: 'btn ghost sm', textContent: '去安装中文朗读引擎' });
+        b.addEventListener('click', () => tts.openInstall().catch(() => toast('请在手机“设置 → 无障碍 → 文字转语音”里选择支持中文的引擎')));
+        tli.append(' ', b);
+      } else {
+        await Promise.race([tts.speak({ text: '语音测试', lang: 'zh-CN', rate: 1, pitch: 1, volume: 1, category: 'playback' }), new Promise((_, rej) => setTimeout(() => rej(new Error('8 秒没有声音')), 8000))]);
+        tli.dataset.ok = '1';
+        tli.textContent = '朗读：正常（听到“语音测试”了吗？没听到请调大媒体音量）';
+      }
+    } catch (e) {
+      tli.dataset.ok = '0';
+      tli.textContent = `朗读：不能用（${e.message || e}）。请在手机“设置 → 无障碍 → 文字转语音”里选一个支持中文的引擎`;
+    }
+  }
+}
+
+/** 语音自检里的“识别”部分 */
+async function checkRecognition(line) {
   // 2. 识别方式
   if (voice instanceof NativeVoice) { line(true, '识别方式：手机自带的语音识别（免费、不用密钥）'); return; }
   if (MOBILE) line(false, '手机自带语音识别：这台手机没有可用的识别服务，改用云端转写');
@@ -1184,13 +1211,14 @@ async function checkVoice() {
   // 4. 语音检测模型（云端转写靠它切分句子）
   const vli = line(null, '语音检测模型：检测中…');
   try {
-    const r = await fetch(`${VAD.baseAssetPath}silero_vad_v5.onnx`, { method: 'HEAD', signal: AbortSignal.timeout?.(10000) });
+    // 手机版打在 APK 里（本地服务不一定支持 HEAD，直接读）
+    const r = await fetch(`${VAD.baseAssetPath}silero_vad_v5.onnx`, { method: MOBILE ? 'GET' : 'HEAD', signal: AbortSignal.timeout?.(10000) });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     vli.dataset.ok = '1';
-    vli.textContent = '语音检测模型：能下载';
+    vli.textContent = MOBILE ? '语音检测模型：已内置' : '语音检测模型：能下载';
   } catch (e) {
     vli.dataset.ok = '0';
-    vli.textContent = `语音检测模型：下载不了（${e.message}），说话后无法自动提交`;
+    vli.textContent = `语音检测模型：加载不了（${e.message}），说话后无法自动提交`;
   }
 }
 $('#btn-voice-check').addEventListener('click', () => checkVoice());
