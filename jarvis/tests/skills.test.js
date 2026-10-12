@@ -129,11 +129,45 @@ describe('安装与管理', () => {
     expect(p.skipped[0]).toMatch(/接口暂不可用/);
   });
 
-  it('仓库里有多个技能时提示选一个', async () => {
-    const fetchImpl = async (url) => url.endsWith('/repos/o/r')
-      ? { ok: true, json: async () => ({ default_branch: 'main' }) }
-      : { ok: true, json: async () => ({ tree: [{ type: 'blob', path: 'a/SKILL.md' }, { type: 'blob', path: 'b/SKILL.md' }] }) };
-    await expect(packs.installFromGitHub('github.com/o/r', { fetchImpl })).rejects.toThrow(/2 个技能.*tree\/main\/a/);
+  // 像 github.com/chuspeeism/dashi-ppt-skill 这样：仓库根目录没有 SKILL.md，技能在 skills/<名字>/ 里
+  const repoWith = (paths) => async (url) => {
+    if (url.endsWith('/repos/o/r')) return { ok: true, json: async () => ({ default_branch: 'main' }) };
+    if (url.includes('/git/trees/')) return { ok: true, json: async () => ({ tree: paths.map((path) => ({ type: 'blob', path, size: 10 })) }) };
+    const path = decodeURIComponent(url.split('/main/')[1]);
+    const name = path.split('/').at(-2);
+    return { ok: true, text: async () => (path.endsWith('SKILL.md') ? `---\nname: ${name}\ndescription: ${name} 技能\n---\n做法 ${name}` : `文件 ${path}`) };
+  };
+
+  it('仓库根目录只有一个技能（在子文件夹里）：直接安装', async () => {
+    const progress = [];
+    const p = await packs.installFromGitHub('https://github.com/o/r', { fetchImpl: repoWith(['README.md', 'skills/dashi-ppt/SKILL.md', 'skills/dashi-ppt/template.md']), onProgress: (m) => progress.push(m) });
+    expect(p.name).toBe('dashi-ppt');
+    expect(p.files).toEqual({ 'template.md': '文件 skills/dashi-ppt/template.md' });
+    expect(p.source).toBe('github.com/o/r/skills/dashi-ppt');
+    expect(p.also).toBeUndefined();
+    expect(progress).toContain('找到技能：skills/dashi-ppt');
+  });
+
+  it('仓库里有多个技能：全部安装；技能里嵌套的示例 SKILL.md 不单独算', async () => {
+    const p = await packs.installFromGitHub('github.com/o/r', { fetchImpl: repoWith(['a/SKILL.md', 'b/SKILL.md', 'b/examples/x/SKILL.md']) });
+    expect([p.name, ...p.also.map((x) => x.name)]).toEqual(['a', 'b']);
+    expect(Object.keys((await packs.get('b')).files)).toEqual(['examples/x/SKILL.md']);
+  });
+
+  it('没有技能 / 太多技能时说清楚', async () => {
+    await expect(packs.installFromGitHub('github.com/o/r', { fetchImpl: repoWith(['README.md']) })).rejects.toThrow('没有 SKILL.md');
+    const many = Array.from({ length: 31 }, (_, i) => `s${i}/SKILL.md`);
+    await expect(packs.installFromGitHub('github.com/o/r', { fetchImpl: repoWith(many) })).rejects.toThrow(/31 个技能.*tree\/main\/s0/);
+  });
+
+  it('安装、启停、卸载都会通知界面刷新', async () => {
+    let n = 0;
+    globalThis.dispatchEvent = (e) => { if (e.type === 'jarvis:skills-changed') n++; };
+    await packs.installFromFiles({ 'SKILL.md': SKILL });
+    await packs.setEnabled('weekly-report', false);
+    await packs.remove('weekly-report');
+    delete globalThis.dispatchEvent;
+    expect(n).toBe(3);
   });
 });
 

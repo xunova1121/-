@@ -1502,7 +1502,7 @@ const syncController = createSyncController({
   saveConfig,
   beforeSync: () => habits.flush(),
   afterSync: async (r) => {
-    if (r.memory?.changedLocal) { await habits.reload(); panels.refreshMind(); }
+    if (r.memory?.changedLocal) { await habits.reload(); panels.refreshMind(); skillPacks.changed(); }
     if (r.config?.changedLocal) panels.reloadConfig();
     if (r.sessions?.changedLocal) {
       sessionsPanel.refresh();

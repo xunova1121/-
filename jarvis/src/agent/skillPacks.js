@@ -11,6 +11,12 @@ import { collection } from './store.js';
 import { BUILTIN_SKILLS, MORE_BUILTIN_SKILLS } from './skillCatalog.js';
 
 const packs = collection('packs');
+const MAX_MULTI = 30; // 一个仓库里一次最多装几个技能
+
+/** 技能有变化（安装、卸载、启停、同步）：通知界面刷新列表 */
+export function changed() {
+  try { globalThis.dispatchEvent?.(new Event('jarvis:skills-changed')); } catch { /* 非浏览器环境 */ }
+}
 const kv = collection('kv');
 
 const MAX_FILE = 256 * 1024;
@@ -92,6 +98,7 @@ export async function installFromFiles(files, { source = '本地', skipped = [] 
     updatedFrom: old ? old.installedAt : null
   };
   await packs.put(pack);
+  changed();
   return pack;
 }
 
@@ -195,35 +202,47 @@ export async function installFromGitHub(url, { fetchImpl = globalThis.fetch, onP
     }
     throw err;
   }
-  const prefix = dir ? `${dir.replace(/\/$/, '')}/` : '';
-  const blobs = (tree.tree || []).filter((t) => t.type === 'blob' && t.path.startsWith(prefix));
-  if (!blobs.some((b) => b.path === `${prefix}SKILL.md`)) {
-    // 仓库根目录下有多个技能：提示用户选一个
-    const found = (tree.tree || []).filter((t) => /(^|\/)SKILL\.md$/.test(t.path) && t.path.startsWith(prefix)).map((t) => t.path.replace(/\/?SKILL\.md$/, '') || '(根目录)');
-    throw new Error(found.length
-      ? `这里有 ${found.length} 个技能，请打开其中一个文件夹的地址安装，例如：github.com/${owner}/${repo}/tree/${ref}/${found[0]}`
-      : '这个位置没有 SKILL.md');
+  const all = tree.tree || [];
+  const root = dir ? `${dir.replace(/\/$/, '')}/` : '';
+  // 指定位置没有 SKILL.md 时，在它下面找技能文件夹（很多仓库把技能放在 skills/xxx/ 里）：
+  // 只有一个就直接装；有多个就全部装上（最多 MAX_MULTI 个）
+  let dirs = [root];
+  if (!all.some((b) => b.type === 'blob' && b.path === `${root}SKILL.md`)) {
+    dirs = all.filter((t) => t.type === 'blob' && t.path.startsWith(root) && /(^|\/)SKILL\.md$/.test(t.path))
+      .map((t) => t.path.slice(0, -'SKILL.md'.length))
+      .filter((d, _, arr) => !arr.some((o) => o !== d && d.startsWith(o))) // 技能里嵌套的示例 SKILL.md 不算
+      .sort();
+    if (!dirs.length) throw new Error('这个位置没有 SKILL.md（不是技能仓库，或技能放在别的分支）');
+    if (dirs.length > MAX_MULTI) throw new Error(`这里有 ${dirs.length} 个技能，太多了：请打开其中一个文件夹的地址安装，例如：github.com/${owner}/${repo}/tree/${ref}/${dirs[0].replace(/\/$/, '')}`);
+    onProgress?.(dirs.length === 1 ? `找到技能：${dirs[0].replace(/\/$/, '')}` : `找到 ${dirs.length} 个技能，全部安装`);
   }
-  const files = {};
-  const skipped = [];
-  let total = 0;
-  const wanted = blobs.filter((b) => {
-    const rel = b.path.slice(prefix.length);
-    const ok = (TEXT_EXT.test(rel) || rel === 'SKILL.md') && (b.size ?? 0) <= MAX_FILE;
-    if (!ok) skipped.push(rel);
-    return ok;
-  }).slice(0, MAX_FILES + 1);
-  let done = 0;
-  for (const b of wanted) {
-    const rel = b.path.slice(prefix.length);
-    if (total > MAX_TOTAL) { skipped.push(rel); continue; }
-    const r = await raw(ref, b.path);
-    if (!r.ok) { skipped.push(rel); continue; }
-    files[rel] = await r.text();
-    total += files[rel].length;
-    onProgress?.(`正在下载 ${++done}/${wanted.length}`);
+  const installedPacks = [];
+  for (const [i, prefix] of dirs.entries()) {
+    const blobs = all.filter((t) => t.type === 'blob' && t.path.startsWith(prefix));
+    const files = {};
+    const skipped = [];
+    let total = 0;
+    const wanted = blobs.filter((b) => {
+      const rel = b.path.slice(prefix.length);
+      const ok = (TEXT_EXT.test(rel) || rel === 'SKILL.md') && (b.size ?? 0) <= MAX_FILE;
+      if (!ok) skipped.push(rel);
+      return ok;
+    }).slice(0, MAX_FILES + 1);
+    let done = 0;
+    for (const b of wanted) {
+      const rel = b.path.slice(prefix.length);
+      if (total > MAX_TOTAL) { skipped.push(rel); continue; }
+      const r = await raw(ref, b.path);
+      if (!r.ok) { skipped.push(rel); continue; }
+      files[rel] = await r.text();
+      total += files[rel].length;
+      onProgress?.(`${dirs.length > 1 ? `第 ${i + 1}/${dirs.length} 个技能：` : ''}正在下载 ${++done}/${wanted.length}`);
+    }
+    const sub = prefix.replace(/\/$/, '');
+    installedPacks.push(await installFromFiles(files, { source: `github.com/${owner}/${repo}${sub ? `/${sub}` : ''}`, skipped }));
   }
-  return installFromFiles(files, { source: `github.com/${owner}/${repo}${dir ? `/${dir}` : ''}`, skipped });
+  const [first, ...rest] = installedPacks;
+  return rest.length ? { ...first, also: rest } : first;
 }
 
 // ---------------------------------------------------------------- 管理与使用
@@ -235,8 +254,9 @@ export const get = (name) => packs.get(normalizeName(name));
 export async function setEnabled(name, enabled) {
   const p = await get(name);
   if (p) await packs.put({ ...p, enabled });
+  changed();
 }
-export const remove = (name) => packs.delete(normalizeName(name));
+export const remove = async (name) => { await packs.delete(normalizeName(name)); changed(); };
 export async function enabled() {
   return (await list()).filter((p) => p.enabled);
 }

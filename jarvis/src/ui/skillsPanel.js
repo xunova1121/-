@@ -30,6 +30,10 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
     onChange?.(installed);
   }
 
+  // 任何地方装 / 卸 / 同步了技能（对话里、推荐列表、另一台设备）都自动刷新
+  let pending = 0;
+  addEventListener('jarvis:skills-changed', () => { clearTimeout(pending); pending = setTimeout(refresh, 50); });
+
   function card(p) {
     const toggle = el('input', { type: 'checkbox', checked: p.enabled, title: p.enabled ? '停用' : '启用' });
     toggle.addEventListener('change', async () => { await packs.setEnabled(p.name, toggle.checked); refresh(); });
@@ -109,7 +113,10 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
     status.textContent = '正在连接 GitHub…';
     try {
       const p = await packs.installFromGitHub(url, { onProgress: (m) => { status.textContent = m; } });
-      status.textContent = `已安装「${p.name}」${p.skipped.length ? `（${p.skipped.length} 个文件未安装：二进制或过大）` : ''}`;
+      const names = [p, ...(p.also || [])].map((x) => `「${x.name}」`).join('');
+      const skipped = [p, ...(p.also || [])].reduce((n, x) => n + x.skipped.length, 0);
+      status.textContent = `已安装${names}${skipped ? `（${skipped} 个文件未安装：二进制或过大）` : ''}`;
+      await refresh();
       return p;
     } catch (e) {
       status.textContent = `安装失败：${/Failed to fetch|NetworkError/i.test(e.message) ? '连不上 GitHub，请检查网络' : e.message}`;
@@ -122,9 +129,8 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
     if (!url) { status.textContent = '请先粘贴 GitHub 地址'; return; }
     try {
       const p = await fromGitHub(url);
-      toast(`已安装技能：${p.name}`);
+      toast(p.also?.length ? `已安装 ${p.also.length + 1} 个技能` : `已安装技能：${p.name}`);
       $('#skill-url').value = '';
-      refresh();
     } catch { /* 已在状态行显示 */ }
   });
   $('#skill-url').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btn-skill-url').click(); });
