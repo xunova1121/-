@@ -110,3 +110,49 @@ describe('模型接口临时故障自动重试', () => {
     expect(isTransient(Object.assign(new Error('aborted'), { name: 'AbortError' }))).toBe(false);
   });
 });
+
+describe('中断后接着写，不从头开始', () => {
+  // 先发出一段文字，再断开连接
+  const cut = (text) => {
+    let n = 0;
+    return new Response(new ReadableStream({
+      pull(c) {
+        if (n++ === 0) c.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`));
+        else c.error(new TypeError('Connection reset'));
+      }
+    }), { status: 200 });
+  };
+  it('写了一半断开：带上已写部分让模型续写，结果拼在一起', async () => {
+    const half = cut('第一段，');
+    const sse = (text) => new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\ndata: [DONE]\n\n`, { status: 200 });
+    const replies = [half, sse('第二段。')];
+    const bodies = [];
+    const orig = globalThis.fetch;
+    globalThis.fetch = async (url, init) => { bodies.push(JSON.parse(init.body)); return replies.shift(); };
+    try {
+      let shown = '';
+      const a = createOpenAIAdapter({ baseURL: 'https://x/v1', apiKey: 'k', retryDelays: [1] });
+      const r = await a.stream({ model: 'm', system: ['', ''], messages: [{ role: 'user', content: '写两段' }], tools: [], onText: (d) => { shown += d; } });
+      expect(shown).toBe('第一段，第二段。');
+      expect(r.text).toBe('第一段，第二段。');
+      const msgs = bodies[1].messages;
+      expect(msgs.at(-2)).toMatchObject({ role: 'assistant', content: '第一段，' });
+      expect(msgs.at(-1).content).toBe(CONTINUE_PROMPT);
+    } finally { globalThis.fetch = orig; }
+  });
+  it('重试用完仍失败：错误里带着已写的部分', async () => {
+    const orig = globalThis.fetch;
+    globalThis.fetch = async () => cut('半句');
+    try {
+      const a = createOpenAIAdapter({ baseURL: 'https://x/v1', apiKey: 'k', retryDelays: [1] });
+      const err = await a.stream({ model: 'm', system: ['', ''], messages: [{ role: 'user', content: 'x' }], tools: [] }).catch((e) => e);
+      expect(err.partialText).toBe('半句半句');
+    } finally { globalThis.fetch = orig; }
+  });
+  it('出错时：写了一部分就给“继续”，否则给“再试一次”', () => {
+    expect(followUpSuggestions({ error: true, resumable: true, userText: '写报告' })[0]).toEqual({ title: '继续', prompt: CONTINUE_TEXT });
+    expect(followUpSuggestions({ error: true, userText: '写报告' })[0].title).toBe('再试一次');
+  });
+});
+import { CONTINUE_PROMPT } from '../src/llm/openai.js';
+import { followUpSuggestions, CONTINUE_TEXT } from '../src/core/suggest.js';

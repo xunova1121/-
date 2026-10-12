@@ -106,7 +106,7 @@ export async function runAgent({ adapter, model, history, userText, images = [],
     if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
     let stepText = '';
     // 每一步模型输出都可能以 <emotion> 标签开头，每步用新的剥离器
-    const stripper = new EmotionTagStripper();
+    let stripper = new EmotionTagStripper();
     const r = await adapter.stream({
       model,
       effort,
@@ -114,6 +114,10 @@ export async function runAgent({ adapter, model, history, userText, images = [],
       messages: convo,
       tools,
       signal,
+      onRetry: (attempt) => {
+        stripper = new EmotionTagStripper(); // 续写的开头可能又带情绪标签
+        emit({ type: 'retry', attempt, resume: Boolean(stepText.trim()) });
+      },
       onText: (delta, meta) => {
         if (meta?.serverTool) { emit({ type: 'server_tool', name: meta.serverTool }); return; }
         const { text, hint } = stripper.push(delta);

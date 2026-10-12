@@ -6,6 +6,7 @@
 import { TASKS, suggestRoutes } from '../llm/router.js';
 import { listModels, modelOf, providerById } from '../llm/config.js';
 import { modelKind, imageModelOf } from '../llm/images.js';
+import { videoModelOf } from '../llm/videos.js';
 
 const DAY = 864e5;
 const SHORT = { chat: '对话', code: '编程', write: '写作', reason: '思考', vision: '看图' };
@@ -33,9 +34,10 @@ export function autoRouting(cfg, ids) {
   return { ...cfg, routing: { ...(cfg.routing || {}), enabled: true, provider: cfg.provider, routes } };
 }
 
-/** 选定某个模型：聊天模型作为默认模型并关闭自动分配；画图模型只设为“画图用” */
+/** 选定某个模型：聊天模型作为默认模型并关闭自动分配；画图 / 视频模型只设为“画图用 / 视频用” */
 export function pickModel(cfg, id) {
   if (modelKind(id) === 'image') return { ...cfg, imageModel: id };
+  if (modelKind(id) === 'video') return { ...cfg, videoModel: id };
   return { ...cfg, models: { ...cfg.models, [cfg.provider]: id }, routing: { ...(cfg.routing || {}), enabled: false } };
 }
 
@@ -49,6 +51,7 @@ export function repairChatModel(cfg) {
   return {
     ...cfg,
     ...(modelKind(cur) === 'image' && { imageModel: cur }),
+    ...(modelKind(cur) === 'video' && { videoModel: cur }),
     models: { ...cfg.models, [cfg.provider]: next }
   };
 }
@@ -114,16 +117,20 @@ export function initModelPicker({ getConfig, patchConfig, getGateway, toast, ope
     });
     const match = (id) => !q || id.toLowerCase().includes(q);
     const shown = ids.filter((id) => modelKind(id) === 'chat' && match(id));
-    const images = ids.filter((id) => modelKind(id) === 'image' && match(id));
-    const curImage = imageModelOf(cfg);
-    const imageRows = images.length ? [
-      el('div', { className: 'mp-section', textContent: '画图模型（说“画一张…”时用，不用来聊天）' }),
-      ...images.map((id) => {
-        const b = el('button', { type: 'button', className: `mp-item${id === curImage ? ' on' : ''}` }, el('span', { className: 'mp-name', textContent: id }), el('span', { className: 'mp-tags', textContent: '画图' }));
-        b.addEventListener('click', () => { patchConfig((c) => pickModel(c, id)); toast(`画图将使用 ${id}（聊天模型不变）`); close(); });
-        return b;
-      })
-    ] : [];
+    // 画图 / 视频模型：各选一个，说“画一张… / 生成一段视频…”时自动用，不影响聊天模型
+    const section = (kind, title, tag, cur) => {
+      const found = ids.filter((id) => modelKind(id) === kind && match(id));
+      return found.length ? [
+        el('div', { className: 'mp-section', textContent: title }),
+        ...found.map((id) => {
+          const b = el('button', { type: 'button', className: `mp-item${id === cur ? ' on' : ''}` }, el('span', { className: 'mp-name', textContent: id }), el('span', { className: 'mp-tags', textContent: tag }));
+          b.addEventListener('click', () => { patchConfig((c) => pickModel(c, id)); toast(`${tag}将使用 ${id}（聊天模型不变）`); close(); });
+          return b;
+        })
+      ] : [];
+    };
+    const imageRows = section('image', '画图模型（说“画一张…”时用，不用来聊天）', '画图', imageModelOf(cfg));
+    const videoRows = section('video', '视频模型（说“生成一段视频…”时用，不用来聊天）', '视频', videoModelOf(cfg));
     list.replaceChildren(autoRow, el('div', { className: 'mp-section', textContent: '聊天模型' }), ...shown.map((id) => {
       const tags = tagsOf(id);
       const b = el('button', { type: 'button', className: `mp-item${!auto && id === cur ? ' on' : ''}` },
@@ -135,8 +142,8 @@ export function initModelPicker({ getConfig, patchConfig, getGateway, toast, ope
         close();
       });
       return b;
-    }), ...imageRows);
-    if (!shown.length && !images.length && ids.length) list.append(el('p', { className: 'mp-status', textContent: '没有匹配的模型' }));
+    }), ...imageRows, ...videoRows);
+    if (!shown.length && !imageRows.length && !videoRows.length && ids.length) list.append(el('p', { className: 'mp-status', textContent: '没有匹配的模型' }));
     search.hidden = ids.length < 10;
   }
 

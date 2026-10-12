@@ -128,6 +128,21 @@ export function createTools(ctx) {
       }
     },
     {
+      name: 'generate_video',
+      description: '生成视频（短片、动画、产品展示、风景镜头等）：用服务商的视频模型（如 sora / veo / kling）按描述生成一段几秒的视频，保存到工作区并显示在对话里。用户说“生成一段视频 / 做个…的视频 / 拍一段…”时使用。需要一到几分钟。描述写具体：画面主体、动作、镜头运动、风格、光线。',
+      input_schema: S({ prompt: str('视频描述（中英文都可以，越具体越好）'), seconds: { type: 'number', description: '时长（秒），默认由模型决定，常见 4 / 5 / 8 / 10' }, size: str('分辨率，如 1280x720（横屏，默认）、720x1280（竖屏）') }, ['prompt']),
+      run: async ({ prompt, seconds, size }, { progress, signal } = {}) => {
+        if (!ctx.videoGen) throw new Error('当前环境不能生成视频');
+        const r = await ctx.videoGen({ prompt, seconds: Number(seconds) > 0 ? Number(seconds) : undefined, size: /^\d+x\d+$/.test(size || '') ? size : undefined, signal, onProgress: (t) => progress?.(t) });
+        const ext = /webm/.test(r.blob.type) ? 'webm' : /quicktime/.test(r.blob.type) ? 'mov' : 'mp4';
+        const name = String(prompt).replace(/[\\/:*?"<>|\s]+/g, '').slice(0, 16) || 'video';
+        const w = await ws.write(`videos/${name}-${Date.now().toString(36)}.${ext}`, r.blob);
+        ctx.onFileChanged?.(w.path);
+        ctx.onVideo?.(URL.createObjectURL(r.blob), w.path);
+        return `已生成视频（${r.model}）并显示在对话里，保存在工作区 ${w.path}。`;
+      }
+    },
+    {
       name: 'schedule_task',
       description: '创建定时任务：到点自动让你执行一段指令，结果保存为一段对话并通知用户。用户说“每天 / 每周 / 工作日 / 明天几点 / 每隔多久 帮我……”或“提醒我……”时使用。',
       input_schema: S({

@@ -27,7 +27,7 @@ import * as agentMemory from './agent/memory.js';
 import * as kb from './agent/knowledge.js';
 import { createEmbedder } from './llm/embeddings.js';
 import { initPanels } from './ui/panels.js';
-import { loadConfig, saveConfig, createAdapter, displayName, providerById, resolveVoice } from './llm/config.js';
+import { loadConfig, saveConfig, createAdapter, displayName, providerById, resolveVoice, modelOf } from './llm/config.js';
 import { initVoicePanel } from './ui/voicePanel.js';
 import * as skillPacks from './agent/skillPacks.js';
 import { initSkillsPanel } from './ui/skillsPanel.js';
@@ -39,7 +39,7 @@ import { prepareImage, isImageName } from './agent/images.js';
 import * as sessionsApi from './agent/sessions.js';
 import { initSessionsPanel } from './ui/sessionsPanel.js';
 import { initCallouts } from './ui/callouts.js';
-import { openingSuggestions, followUpSuggestions } from './core/suggest.js';
+import { openingSuggestions, followUpSuggestions, INTERRUPTED_MARK } from './core/suggest.js';
 import * as mcp from './agent/mcpClient.js';
 import { createDesktopTools } from './agent/desktopTools.js';
 import { initMcpPanel } from './ui/mcpPanel.js';
@@ -63,6 +63,7 @@ import { initChips } from './ui/chips.js';
 import { initDrawer } from './ui/drawer.js';
 import { initModelPicker, chipLabel, isAuto, repairChatModel } from './ui/modelPicker.js';
 import { generateImage } from './llm/images.js';
+import { generateVideo } from './llm/videos.js';
 import { createFormDirector } from './core/formDirector.js';
 import { composeGreeting, GREET_GAP_MS } from './core/greeting.js';
 import { classifyTask, routeFor, TASKS } from './llm/router.js';
@@ -344,12 +345,12 @@ if ((STANDALONE && !MOBILE) || location.protocol === 'file:') {
 /** 常见的服务商错误翻译成人话（已经自动重试过仍失败才会走到这里） */
 function friendlyError(msg) {
   const code = Number(msg.match(/模型接口返回 (\d{3})/)?.[1]);
-  if (code === 524 || code === 504 || code === 522) return `中转站等模型回复超时（${code}），已自动重试过。可以点“再试一次”，或在输入框里换一个更快的模型`;
+  if (code === 524 || code === 504 || code === 522) return `中转站等模型回复超时（${code}），已自动重试过。可以点“继续”从断开的地方接着写，或在输入框里换一个更快的模型`;
   if (code === 429) return '请求太频繁或额度用完（429），已自动重试过。稍等一会儿再试，或检查中转站余额';
   if (code === 401 || code === 403) return `API Key 不对或没有权限（${code}）：请在“模型”里检查密钥`;
   if (code >= 500) return `服务商临时故障（${code}），已自动重试过。稍后再试，或换一个模型`;
   if (/图片模型|image model|images\/generations/i.test(msg)) return '当前选的是画图模型，不能用来聊天：点输入框里的模型名换一个聊天模型。想画图直接说“画一张…”就行';
-  if (/connection reset|econnreset|socket hang up/i.test(msg)) return '网络连接被断开（已自动重试过）。可以点“再试一次”；手机上可以试试切换 Wi‑Fi / 流量';
+  if (/connection reset|econnreset|socket hang up/i.test(msg)) return '网络连接被断开（已自动重试过）。可以点“继续”从断开的地方接着写；手机上可以试试切换 Wi‑Fi / 流量';
   return msg;
 }
 
@@ -635,6 +636,8 @@ async function buildTools({ background = false } = {}) {
       onFileChanged,
       imageGen: (o) => generateImage(llmConfig, { ...o, gateway }),
       onImage: (src) => liveBubble?.image?.(src),
+      videoGen: (o) => generateVideo(llmConfig, { ...o, gateway }),
+      onVideo: (src) => liveBubble?.video?.(src),
       onSchedulesChanged: () => schedulesPanel?.refresh(),
       currentSessionId: () => session?.id
     }),
@@ -822,6 +825,7 @@ async function send(text) {
   let serverCard = null;
   const t0 = now();
   const usedTools = [];
+  let shown = ''; // 这一轮已经显示出来的回答（中断时保留，点“继续”接着写）
   let ctxMs = null;
   callouts?.retract();
   // 内置演示模式下“自动”不触发（规则拆步效果有限），只认明确的“/团队 …”或“总是”
@@ -852,8 +856,13 @@ async function send(text) {
           if (!firstToken) { firstToken = now(); hud.think('生成回答'); }
           if (serverCard) { serverCard.done(true, '由 Claude 服务端完成', Math.round(now() - serverCard.t0)); serverCard = null; }
           bubble.append(e.delta);
+          shown += e.delta;
           machine.feedResponseText(e.delta);
           speech.push(e.delta);
+        } else if (e.type === 'retry') {
+          const note = e.resume ? `网络中断，第 ${e.attempt} 次重连，接着刚才的地方写` : `连接出错，第 ${e.attempt} 次自动重试`;
+          hud.think(`↻ ${note}`, 'sub');
+          setTask('processing', note.slice(0, 30));
         } else if (e.type === 'emotion') { machine.setStreamHint(e.value); director.onEmotion(e.value); }
         else if (e.type === 'state' && e.value !== 'done') setTask(e.value, e.value === 'listening' ? '生成回答' : '');
         else if (e.type === 'tool_start') {
@@ -918,7 +927,10 @@ async function send(text) {
     active = null;
     setTask('error', '请求失败');
     hud.think(`✕ ${msg.slice(0, 40)}`, 'bad');
-    callouts?.set(followUpSuggestions({ error: true, userText: text, desktop: Boolean(DESKTOP) }));
+    // 已经写了一部分或做了几步：记进对话，点“继续”从断开的地方接着做，而不是从头再来
+    const resumable = Boolean(shown.trim() || usedTools.length);
+    if (resumable) rememberTurn('assistant', `${shown.trim()}\n\n${INTERRUPTED_MARK}`, usedTools.length ? { tools: [...new Set(usedTools)] } : {});
+    callouts?.set(followUpSuggestions({ error: true, resumable, userText: text, desktop: Boolean(DESKTOP) }));
   } finally {
     endControl();
   }
@@ -1299,8 +1311,9 @@ const modelPicker = initModelPicker({
 $('#model-chip').addEventListener('click', () => modelPicker.open());
 // 聊天模型误选成了画图模型（如 gpt-image-2）：自动挪到“画图用”，聊天换回能对话的模型
 {
+  const was = modelOf(panels.config);
   const fixed = repairChatModel(panels.config);
-  if (fixed) { panels.patchConfig(() => fixed); toast(`“${fixed.imageModel || '该模型'}”不能用来聊天，已改为画图用；聊天用 ${fixed.models[fixed.provider] || '默认模型'}`); }
+  if (fixed) { panels.patchConfig(() => fixed); toast(`“${was}”不能用来聊天${fixed.imageModel === was ? '，已改为画图用' : fixed.videoModel === was ? '，已改为视频用' : ''}；聊天用 ${fixed.models[fixed.provider] || '默认模型'}`); }
 }
 const localModels = initLocalModelsPanel({
   getGateway: () => gateway,

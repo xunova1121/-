@@ -17,7 +17,7 @@ export function modelKind(id) {
 /** 当前服务商的接口地址和请求头（有本机网关时经网关转发） */
 export function providerEndpoint(cfg, gateway = null) {
   const p = providerById(cfg.provider);
-  if (!p || p.kind !== 'openai') throw new Error('画图需要 OpenAI 兼容的服务商（如中转平台）');
+  if (!p || p.kind !== 'openai') throw new Error('画图和生成视频需要 OpenAI 兼容的服务商（如中转平台）');
   const key = cfg.keys?.[p.id] || '';
   const viaGw = p.custom ? customViaGateway(gateway, cfg.baseURLs?.custom) : Boolean(gateway && upstreamFor(p.id));
   const base = viaGw ? `${gateway.origin}/api/llm/${p.id}` : String(p.custom ? cfg.baseURLs?.custom || '' : p.baseURL).replace(/\/$/, '');

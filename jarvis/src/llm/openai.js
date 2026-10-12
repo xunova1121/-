@@ -95,11 +95,14 @@ const noEffortModels = new Set();
 /** 中转站 / 服务商的临时故障：网关超时（524 等）、限流、连接被重置——自动重试 */
 const TRANSIENT_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529]);
 export const isTransient = (err) => Boolean(err) && err.name !== 'AbortError' && (TRANSIENT_STATUS.has(err.status) || err.name === 'TypeError' || /connection reset|econnreset|socket hang up|network ?error|failed to fetch|load failed|premature close|terminated|etimedout|unexpected end/i.test(String(err.message)));
-const RETRY_DELAYS = [1500, 4000];
+const RETRY_DELAYS = [1500, 4000, 8000];
 const sleep = (ms, signal) => new Promise((resolve, reject) => {
   const t = setTimeout(resolve, ms);
   signal?.addEventListener('abort', () => { clearTimeout(t); reject(Object.assign(new Error('aborted'), { name: 'AbortError' })); }, { once: true });
 });
+
+/** 续写时发给模型的话：接着刚才断开的地方写，不要重复 */
+export const CONTINUE_PROMPT = '（网络中断了，你上一条回答只发出了上面这一部分。）请从中断的地方直接接着往下写，不要重复已经写过的内容，也不要提到中断。';
 
 export function createOpenAIAdapter({ baseURL, apiKey, headers = {}, retryDelays = RETRY_DELAYS }) {
   const once = createOnce({ baseURL, apiKey, headers });
@@ -107,16 +110,20 @@ export function createOpenAIAdapter({ baseURL, apiKey, headers = {}, retryDelays
     kind: 'openai',
     async stream(opts) {
       const { signal, onText, onRetry } = opts;
-      let emitted = false;
+      let partial = ''; // 已经显示给用户的文字（跨重试累计）
+      let messages = opts.messages;
       for (let attempt = 0; ; attempt++) {
+        let got = '';
         try {
-          return await once.stream({ ...opts, onText: (d) => { emitted = true; onText?.(d); } });
+          const r = await once.stream({ ...opts, messages, onText: (d) => { got += d; onText?.(d); } });
+          // 续写的结果拼在已显示的部分后面
+          return partial ? { ...r, text: partial + r.text } : r;
         } catch (err) {
-          if (signal?.aborted || !isTransient(err) || attempt >= retryDelays.length) throw err;
-          // 已经输出了一部分：告诉用户这段接下来会重新回答
-          if (emitted) onText?.('\n\n（连接中断，正在重试…）\n\n');
+          partial += got;
+          if (signal?.aborted || !isTransient(err) || attempt >= retryDelays.length) throw Object.assign(err, { partialText: partial });
           onRetry?.(attempt + 1, err);
-          emitted = false;
+          // 已经写了一部分：带上这部分让模型接着写，而不是从头再来
+          if (partial.trim()) messages = [...opts.messages, { role: 'assistant', content: partial }, { role: 'user', content: CONTINUE_PROMPT }];
           await sleep(retryDelays[attempt], signal);
         }
       }

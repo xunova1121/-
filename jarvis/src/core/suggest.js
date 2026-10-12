@@ -5,6 +5,10 @@
  * @typedef {{ title: string, prompt?: string, panel?: string }} Suggestion
  */
 
+/** 回答被网络中断时记在对话里的标记，以及“继续”按钮发出的话 */
+export const INTERRUPTED_MARK = '（回答因网络中断停在这里，还没完成）';
+export const CONTINUE_TEXT = '继续：从刚才中断的地方接着做，已经写好、做好的部分不要重复';
+
 /** 开场（还没对话）时的建议 */
 export function openingSuggestions({ desktop = false, hour = new Date().getHours(), hasSkills = false, resume = null } = {}) {
   const base = baseOpening({ desktop, hour, hasSkills });
@@ -32,10 +36,17 @@ function baseOpening({ desktop, hour, hasSkills }) {
 
 /**
  * 一轮对话结束后的建议
- * @param {{ tools: string[], userText: string, error?: boolean, desktop?: boolean }} o
+ * @param {{ tools: string[], userText: string, error?: boolean, resumable?: boolean, desktop?: boolean }} o
  * @returns {Suggestion[]}
  */
-export function followUpSuggestions({ tools = [], userText = '', error = false, desktop = false }) {
+export function followUpSuggestions({ tools = [], userText = '', error = false, resumable = false, desktop = false }) {
+  if (error && resumable) {
+    return [
+      { title: '继续', prompt: CONTINUE_TEXT },
+      { title: '从头再试一次', prompt: userText || '再试一次' },
+      { title: '检查模型设置', panel: 'models' }
+    ];
+  }
   if (error) {
     return [
       { title: '再试一次', prompt: userText || '再试一次' },

@@ -69,3 +69,46 @@ describe('画图模型', () => {
     expect(imageModelOf({ ...base, modelLists: { k: { ids: ['gpt-6.1', 'dall-e-3', 'gpt-image-2'] } } })).toBe('gpt-image-2');
   });
 });
+
+import { generateVideo, videoModelOf, readTask } from '../src/llm/videos.js';
+describe('生成视频', () => {
+  it('选视频模型不改聊天模型；默认挑 sora', () => {
+    expect(pickModel(base, 'sora-2')).toMatchObject({ videoModel: 'sora-2', models: { custom: 'gpt-6.1-sol' } });
+    expect(videoModelOf({ ...base, modelLists: { k: { ids: ['kling-v2', 'sora-2', 'gpt-6.1'] } } })).toBe('sora-2');
+    expect(videoModelOf(base)).toBe('');
+  });
+  it('OpenAI 格式：提交 /videos → 轮询 → 下载 /content', async () => {
+    const calls = [];
+    const states = [{ id: 'v1', status: 'queued' }, { id: 'v1', status: 'in_progress', progress: 40 }, { id: 'v1', status: 'completed' }];
+    const fetchImpl = async (url, init = {}) => {
+      calls.push(`${init.method || 'GET'} ${url.replace('https://teamorouter.com/v1', '')}`);
+      if (url.endsWith('/content')) return new Response('MP4', { headers: { 'content-type': 'video/mp4' } });
+      return new Response(JSON.stringify(states.shift()));
+    };
+    const progress = [];
+    const r = await generateVideo({ ...base, videoModel: 'sora-2' }, { prompt: '海浪', seconds: 4, fetchImpl, pollMs: 1, onProgress: (t) => progress.push(t) });
+    expect(await r.blob.text()).toBe('MP4');
+    expect(r.blob.type).toBe('video/mp4');
+    expect(calls).toEqual(['POST /videos', 'GET /videos/v1', 'GET /videos/v1', 'GET /videos/v1/content']);
+    expect(progress.some((t) => t.includes('40%'))).toBe(true);
+  });
+  it('中转站格式：/videos 不存在时改用 /video/generations，成片给的是地址', async () => {
+    const calls = [];
+    const fetchImpl = async (url, init = {}) => {
+      calls.push(`${init.method || 'GET'} ${url.replace('https://teamorouter.com/v1', '')}`);
+      if (url.endsWith('/videos')) return new Response('not found', { status: 404 });
+      if (url.endsWith('/video/generations')) return new Response(JSON.stringify({ task_id: 't9', status: 'submitted' }));
+      if (url.includes('/video/generations/t9')) return new Response(JSON.stringify({ data: { status: 'SUCCESS', url: 'https://cdn/v.mp4' } }));
+      return new Response('MP4');
+    };
+    const r = await generateVideo({ ...base, videoModel: 'kling-v2' }, { prompt: 'a', fetchImpl, pollMs: 1 });
+    expect(await r.blob.text()).toBe('MP4');
+    expect(calls).toEqual(['POST /videos', 'POST /video/generations', 'GET /video/generations/t9', 'GET https://cdn/v.mp4']);
+  });
+  it('失败、没有视频模型时说清楚', async () => {
+    await expect(generateVideo(base, { prompt: 'a', fetchImpl: async () => new Response('{}') })).rejects.toThrow('视频模型');
+    const failing = async (url) => new Response(JSON.stringify(url.endsWith('/videos') ? { id: 'v', status: 'queued' } : { id: 'v', status: 'failed', error: { message: '内容不合规' } }));
+    await expect(generateVideo({ ...base, videoModel: 'sora-2' }, { prompt: 'a', fetchImpl: failing, pollMs: 1 })).rejects.toThrow('内容不合规');
+    expect(readTask({ data: { task_status: 'succeed', result: { video_url: 'u' } } })).toMatchObject({ done: true, url: 'u' });
+  });
+});
