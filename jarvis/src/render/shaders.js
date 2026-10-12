@@ -423,7 +423,9 @@ void main() {
   float t = u_time * u_motion;
   // 变形中途散开，像被重新“打印”出来
   float mid = sin(3.14159 * m);
-  vec3 n3 = vec3(vnoise(p * 0.08 + t * 0.3), vnoise(p * 0.08 + 17.0 + t * 0.3), vnoise(p * 0.08 + 31.0 + t * 0.3)) - 0.5;
+  // 便宜的平滑漂移（三角函数，代替逐粒子的噪声采样：低端显卡 / 软件渲染也跑得动）
+  vec3 ph = a_rand.zxy * 6.2832;
+  vec3 n3 = 0.5 * sin(p.yzx * 0.09 + t * vec3(0.31, 0.27, 0.23) + ph);
   p += n3 * (mid * 26.0 + u_energy * 4.0 + 1.2);
   // 眼睛：眨眼时纵向压扁（只在带脸的造型里）
   if (a_rand.w > 0.5) {
@@ -434,7 +436,7 @@ void main() {
   float r = length(p) + 0.0001;
   float pulse = u_speak * (1.6 + 2.2 * sin(t * 13.0 + a_rand.z * 6.28)) + u_audio * 3.0 * sin(t * 9.0 + r * 0.4);
   p += (p / r) * (pulse * (1.0 - a_rand.w * u_eyeAmt) + u_breath * 0.5);
-  p += (vec3(hash1(a_rand.z * 91.0 + floor(t * 20.0)), hash1(a_rand.z * 37.0 + floor(t * 20.0)), hash1(a_rand.z * 53.0 + floor(t * 20.0))) - 0.5) * u_energy * 0.8;
+  p += sin(vec3(t * 23.0, t * 29.0, t * 31.0) + ph * 7.0) * u_energy * 0.4;
   // 朝向：带脸的造型看向用户，其他造型自转
   p = rotX(u_pitch) * rotY(u_yaw + u_spin * u_spinAmt) * p;
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
