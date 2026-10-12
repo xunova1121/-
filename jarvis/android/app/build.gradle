@@ -8,7 +8,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // CI 传入递增的版本号（安卓只能覆盖安装 versionCode 更大的版本）
-        versionCode (System.getenv("JARVIS_VERSION_CODE") ?: "1").toInteger()
+        versionCode Integer.parseInt(System.getenv("JARVIS_VERSION_CODE") ?: "1")
         versionName System.getenv("JARVIS_VERSION_NAME") ?: "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
