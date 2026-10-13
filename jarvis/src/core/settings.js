@@ -9,9 +9,7 @@ export const DEFAULT_SETTINGS = {
   vadSensitivity: '中',
   emotionOverride: 'auto',
   focusView: false,
-  stageOpen: false,
-  navCollapsed: false, // 电脑版左侧导航栏收起成一列图标
-  navExpanded: false, // 电脑版左侧导航栏显示全部功能 // 桌面版：有对话时也保持大舞台（默认收成迷你状态条）
+  stageOpen: false, // 桌面版：有对话时也保持大舞台（默认收成迷你状态条）
   reducedMotion: 'system', // system | on | off
   look: 'orb', // orb 光核 | holo 全息胸像 | wire 线框胸像
   quality: 'auto', // auto | high | standard | eco

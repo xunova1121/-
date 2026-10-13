@@ -48,7 +48,7 @@ check('生成 PPT', /示例\.pptx/.test(reply), reply.slice(-60));
 reply = await ask(page, '运行一段代码');
 check('运行代码（沙箱 Worker）', /返回值：55/.test(reply));
 
-await page.evaluate((n) => window.__jarvis.showPanel(n), 'knowledge');
+await page.click('[data-panel="knowledge"]');
 const pdfPage = await ctx.newPage();
 await pdfPage.setContent('<p>出差补贴标准：一线城市每天 300 元，其他城市每天 200 元。</p>');
 const pdf = await pdfPage.pdf({ format: 'A4' });
@@ -60,12 +60,12 @@ reply = await ask(page, '根据知识库，出差补贴标准是多少？');
 check('依据知识库回答', /300/.test(reply), reply.slice(0, 80));
 
 await ask(page, '记住我在上海工作');
-await page.evaluate((n) => window.__jarvis.showPanel(n), 'mind');
+await page.click('[data-panel="mind"]');
 await page.waitForTimeout(300);
 check('记住信息', /我在上海工作/.test(await page.textContent('#mind-list')));
 await page.screenshot({ path: `${OUT}/standalone.png` });
 
-await page.evaluate((n) => window.__jarvis.showPanel(n), 'models');
+await page.click('[data-panel="models"]');
 await page.selectOption('#llm-provider', 'qwen');
 check('不允许浏览器直连的服务商有提示', /启动\.bat/.test(await page.textContent('#llm-note')));
 

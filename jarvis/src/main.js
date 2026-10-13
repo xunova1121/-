@@ -62,7 +62,6 @@ import { NativeVoice } from './mobile/nativeVoice.js';
 import { nativeWebFetch } from './mobile/nativeFetch.js';
 import { initChips } from './ui/chips.js';
 import { initDrawer } from './ui/drawer.js';
-import { initSidenav } from './ui/sidenav.js';
 import { initModelPicker, chipLabel, isAuto, repairChatModel } from './ui/modelPicker.js';
 import { generateImage } from './llm/images.js';
 import { generateVideo } from './llm/videos.js';
@@ -126,15 +125,6 @@ const COMPACT = MOBILE;
 document.body.classList.toggle('compact', COMPACT);
 /** 舞台底色（与 styles.css 里 .stage 的中心颜色一致，画布边缘渐隐时才接得上） */
 const STAGE_BG = 0x2b2f58;
-/**
- * 粒子舞台的底色。电脑版要“融进背景”：
- *   都画在纯黑上：夜间用 screen 混合（黑色消失，只剩光）；白天反色 + 色相回转后用 multiply 混合（白色消失，亮粒子变成同色系的“墨色”粒子）
- * 手机版 / 旧布局：靛蓝显示屏
- */
-function stageBg() {
-  return COMPACT ? STAGE_BG : 0x000000; // 电脑版：纯黑底，靠 CSS 混合模式去掉（夜间 screen、白天反色后 multiply）
-}
-new MutationObserver(() => stage?.setBackground(stageBg())).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 let stage = null;
 let stageLoading = null;
 const DEG = Math.PI / 180;
@@ -238,7 +228,7 @@ async function ensureStage() {
         lowEnd,
         onContextChange: (s, ms) => console.info(`[stage] WebGL 上下文${s === 'lost' ? '丢失' : `已恢复（${Math.round(ms)}ms）`}`)
       });
-      stage.setBackground(stageBg());
+      stage.setBackground(STAGE_BG); // 靛蓝显示屏：和界面的暮色同色系，粒子在上面最亮
       stage.onFrame(frame);
       stage.setForm(director.form);
       applyFpsCap();
@@ -587,7 +577,6 @@ async function openSession(id) {
 
 /** 光核旁的建议标注（启动末尾创建） */
 let callouts = null;
-let sidenav = null; // 电脑版左侧导航栏（下面创建；面板开关时会用到）
 /** 正在回答的气泡（画图工具把图片放进去） */
 let liveBubble = null;
 /** 桌面背景同步：主窗口在做什么，桌面上的粒子体就跟着做（桌面版开了背景模式时） */
@@ -946,7 +935,6 @@ async function send(text) {
     hud.think(`✓ 完成 · ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · ${result.toolCalls} 个工具` : ''}`, 'ok');
     $('#hud-latency').textContent = firstToken ? `${Math.round(firstToken - t0)} ms` : '—';
     if (result.text) wp({ say: result.text.replace(/```[\s\S]*?```/g, '').replace(/[#*>`|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 140) });
-    if (currentPane === 'info') queueMicrotask(renderInfo);
     rememberTurn('assistant', result.text || '（完成）', { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) });
     $('#mode-pill').classList.remove('offline');
     turn.streamDone = true;
@@ -1059,7 +1047,7 @@ const asleep = () => settings.wakeWord && !wake.awake;
 const DISMISS = /^(退下|没事了|休息吧|再见|就这样)[。.！!]*$/;
 // 窄屏用短提示语，避免输入框被撑成好几行
 const narrowPrompt = matchMedia('(max-width: 860px)');
-const setPlaceholder = () => { $('#prompt').placeholder = narrowPrompt.matches ? '交给我一个任务……' : COMPACT ? '交给我一个任务：写代码、做 PPT、分析文件、查资料……（Enter 发送，Shift+Enter 换行）' : '可以描述任务或提问任何问题（Enter 发送，Shift+Enter 换行）'; };
+const setPlaceholder = () => { $('#prompt').placeholder = narrowPrompt.matches ? '交给我一个任务……' : '交给我一个任务：写代码、做 PPT、分析文件、查资料……（Enter 发送，Shift+Enter 换行）'; };
 narrowPrompt.addEventListener?.('change', setPlaceholder);
 setPlaceholder();
 setInterval(() => document.body.classList.toggle('awake', settings.wakeWord && wake.awake), 250);
@@ -1320,7 +1308,7 @@ async function setFaceFollow(on) {
 
 
 // ---------------------------------------------------------------- 右侧面板
-const PANES = ['sessions', 'workspace', 'knowledge', 'mind', 'skills', 'models', 'system', 'settings', 'info']; // 前 8 个对应 Alt+1..8
+const PANES = ['sessions', 'workspace', 'knowledge', 'mind', 'skills', 'models', 'system', 'settings'];
 let currentPane = null;
 const narrow = matchMedia('(max-width: 860px)');
 function showPanel(name, { toggle = false } = {}) {
@@ -1328,12 +1316,9 @@ function showPanel(name, { toggle = false } = {}) {
     body.classList.add('side-closed');
     body.classList.remove('side-open');
     currentPane = null;
-    sidenav?.setActive(null);
-    syncTabs();
     return;
   }
   currentPane = name;
-  sidenav?.setActive(name);
   body.classList.remove('side-closed');
   body.classList.add('side-open');
   for (const p of document.querySelectorAll('[data-pane]')) p.hidden = p.dataset.pane !== name;
@@ -1347,52 +1332,7 @@ function showPanel(name, { toggle = false } = {}) {
   if (name === 'sessions') sessionsPanel?.refresh();
   if (name === 'system') schedulesPanel?.refresh();
   if (name === 'settings') renderHabits();
-  if (name === 'info') renderInfo();
-  syncTabs();
 }
-
-/** 对话信息：这段对话里生成 / 修改过的文件，和用到的能力 */
-const FILE_BADGE = { docx: ['DOC', '#2f6bed'], doc: ['DOC', '#2f6bed'], pptx: ['PPT', '#e0612f'], xlsx: ['XLS', '#1f9d55'], csv: ['CSV', '#1f9d55'], pdf: ['PDF', '#d64040'], md: ['MD', '#6f62c4'], html: ['WEB', '#e08a1e'], py: ['PY', '#2b2f3b'], js: ['JS', '#c9a400'], png: ['IMG', '#8a5cf0'], jpg: ['IMG', '#8a5cf0'], mp4: ['VID', '#d0457b'] };
-function renderInfo() {
-  const files = [...new Set(history.flatMap((m) => m.files || []))].reverse();
-  const tools = [...new Set(history.flatMap((m) => m.tools || []))];
-  $('#info-count').textContent = `${files.length} 个文件`;
-  $('#info-files').replaceChildren(...(files.length ? files.map((path) => {
-    const ext = (path.match(/\.([a-z0-9]+)$/i)?.[1] || '').toLowerCase();
-    const [label, color] = FILE_BADGE[ext] || [ext.slice(0, 3).toUpperCase() || '文件', '#7a7f90'];
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'info-file';
-    b.title = path;
-    const badge = document.createElement('span');
-    badge.className = 'info-badge';
-    badge.style.background = color;
-    badge.textContent = label;
-    const name = document.createElement('span');
-    name.className = 'info-name';
-    name.textContent = path.split('/').pop();
-    b.append(badge, name);
-    b.addEventListener('click', () => openInWorkspace(path));
-    return b;
-  }) : [Object.assign(document.createElement('p'), { className: 'muted small', textContent: '这段对话还没有生成文件。' })]));
-  $('#info-tools').replaceChildren(...(tools.length ? tools.map((t) => Object.assign(document.createElement('span'), { className: 'info-tool', textContent: toolLabel(t) })) : [Object.assign(document.createElement('p'), { className: 'muted small', textContent: '还没有用到工具。' })]));
-}
-
-// 右上角：打开 / 关闭侧边栏（关着时打开“对话信息”，或上次看的面板）
-let lastPane = 'info';
-function setSideOpen(open) {
-  if (open) showPanel(currentPane || lastPane);
-  else { if (currentPane) lastPane = currentPane; body.classList.add('side-closed'); body.classList.remove('side-open'); currentPane = null; sidenav?.setActive(null); syncTabs(); }
-  syncSideToggle();
-}
-function syncSideToggle() {
-  const open = !body.classList.contains('side-closed') && Boolean(currentPane);
-  const b = $('#btn-side-toggle');
-  if (!b) return;
-  b.title = open ? '关闭侧边栏' : '打开侧边栏（对话信息）';
-  b.setAttribute('aria-pressed', String(open));
-}
-$('#btn-side-toggle').addEventListener('click', () => setSideOpen(body.classList.contains('side-closed') || !currentPane));
 for (const b of document.querySelectorAll('.rail-btn')) b.addEventListener('click', () => showPanel(b.dataset.panel, { toggle: true }));
 for (const b of document.querySelectorAll('[data-open]')) b.addEventListener('click', () => showPanel(b.dataset.open));
 
@@ -1471,20 +1411,8 @@ function greeting() {
   const h = new Date().getHours();
   return h < 5 ? '夜深了' : h < 11 ? '早上好' : h < 13 ? '中午好' : h < 18 ? '下午好' : '晚上好';
 }
-/** 电脑版欢迎页的四张大卡片（右侧配插画） */
-const FEATURED = [
-  { title: '写一个网页', desc: '帮我写一个实时时钟网页', prompt: '帮我写一个网页', tone: 'peach',
-    art: '<svg viewBox="0 0 120 90"><rect x="14" y="14" width="92" height="64" rx="10" fill="#fff" stroke="#f0b48a" stroke-width="2"/><path d="M14 30h92" stroke="#f0b48a" stroke-width="2"/><circle cx="24" cy="22" r="3" fill="#f28b5b"/><circle cx="33" cy="22" r="3" fill="#f6c25b"/><circle cx="42" cy="22" r="3" fill="#7cc47f"/><path d="m40 45-10 9 10 9M80 45l10 9-10 9M66 41l-12 27" stroke="#e8743b" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
-  { title: '做汇报 PPT', desc: '帮我做一份工作汇报', prompt: '做一个PPT', tone: 'mint',
-    art: '<svg viewBox="0 0 120 90"><rect x="18" y="12" width="84" height="56" rx="8" fill="#fff" stroke="#8fd3b4" stroke-width="2"/><rect x="28" y="24" width="34" height="6" rx="3" fill="#3fae7f"/><rect x="28" y="36" width="50" height="4" rx="2" fill="#b9e5d0"/><rect x="28" y="45" width="42" height="4" rx="2" fill="#b9e5d0"/><circle cx="84" cy="44" r="10" fill="none" stroke="#3fae7f" stroke-width="5" stroke-dasharray="40 63"/><path d="M60 68v12M48 80h24" stroke="#8fd3b4" stroke-width="3" stroke-linecap="round"/></svg>' },
-  { title: '深度调研', desc: '帮我调研并写一份报告', fill: '深度调研：', tone: 'lavender',
-    art: '<svg viewBox="0 0 120 90"><rect x="16" y="14" width="66" height="62" rx="8" fill="#fff" stroke="#b9aef2" stroke-width="2"/><rect x="26" y="26" width="40" height="5" rx="2.5" fill="#8b7cf0"/><rect x="26" y="37" width="46" height="4" rx="2" fill="#dcd6fb"/><rect x="26" y="46" width="36" height="4" rx="2" fill="#dcd6fb"/><circle cx="82" cy="52" r="16" fill="#f4f1ff" stroke="#8b7cf0" stroke-width="5"/><path d="m94 64 12 12" stroke="#8b7cf0" stroke-width="6" stroke-linecap="round"/></svg>' },
-  { title: '数据分析', desc: '帮我分析表格里的数据', upload: true, tone: 'sky',
-    art: '<svg viewBox="0 0 120 90"><rect x="22" y="48" width="14" height="28" rx="4" fill="#9cc8f7"/><rect x="44" y="36" width="14" height="40" rx="4" fill="#6aaef2"/><rect x="66" y="26" width="14" height="50" rx="4" fill="#3d8de8"/><rect x="88" y="40" width="14" height="36" rx="4" fill="#9cc8f7"/><path d="m24 38 22-14 20 8 30-20" stroke="#f08a4b" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="96" cy="12" r="4" fill="#f08a4b"/></svg>' }
-];
 function renderWelcome() {
   if (document.querySelector('#transcript .msg')) return;
-  if (!COMPACT) { renderDesktopWelcome(); return; }
   const cards = QUICK.map((q) => {
     const b = document.createElement('button');
     b.type = 'button';
@@ -1521,36 +1449,6 @@ function renderWelcome() {
   $('#transcript').prepend(w);
 }
 
-function renderDesktopWelcome() {
-  const w = document.createElement('div');
-  w.className = 'welcome qc-welcome';
-  const tag = document.createElement('div');
-  tag.className = 'qc-tag';
-  tag.textContent = '✦ 你的 AI 工作伙伴';
-  const h = document.createElement('h1');
-  h.innerHTML = 'Hi，我是<b>贾维斯</b>';
-  const p = document.createElement('p');
-  p.textContent = '随时随地，帮你高效干活';
-  const grid = document.createElement('div');
-  grid.className = 'qc-cards';
-  for (const q of FEATURED) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = `qc-card tone-${q.tone}`;
-    b.innerHTML = `<span class="qc-text"><strong></strong><small></small></span><span class="qc-art" aria-hidden="true">${q.art}</span>`;
-    b.querySelector('strong').textContent = q.title;
-    b.querySelector('small').textContent = q.desc;
-    b.addEventListener('click', () => {
-      if (q.prompt) send(q.prompt);
-      else if (q.fill) { $('#prompt').value = q.fill; $('#prompt').focus(); }
-      else if (q.upload) $('#btn-attach')?.click();
-    });
-    grid.append(b);
-  }
-  w.append(tag, h, p, grid);
-  $('#transcript').prepend(w);
-}
-
 const WEEK = '日一二三四五六';
 function tickClock() {
   const d = new Date();
@@ -1561,14 +1459,14 @@ function tickClock() {
 tickClock();
 setInterval(tickClock, 1000);
 
-const PANE_TITLE = { sessions: '对话', workspace: '工作区', knowledge: '知识库', mind: '记忆与进化', skills: '技能', models: '模型与声音', system: '系统与定时任务', settings: '设置', info: '对话信息' };
+const PANE_TITLE = { sessions: '对话', workspace: '工作区', knowledge: '知识库', mind: '记忆与进化', skills: '技能', models: '模型与声音', system: '系统与定时任务', settings: '设置' };
 const palette = initPalette({
   commands: () => {
     const toggle = (id, title) => ({ id: `t-${id}`, group: '开关', title: `${$(`#${id}`).checked ? '关闭' : '开启'}${title}`, run: () => $(`#${id}`).click() });
     return [
       ...QUICK.filter((q) => q.prompt || q.fill).map((q) => ({ id: `q-${q.title}`, group: '常用任务', title: q.title, hint: q.desc, run: () => { if (q.prompt) send(q.prompt); else { $('#prompt').value = q.fill; $('#prompt').focus(); } } })),
       ...skillsPanel.installed.filter((p) => p.enabled).map((p) => ({ id: `s-${p.name}`, group: '技能', title: `/${p.name}`, hint: p.description, run: () => { $('#prompt').value = `/${p.name} `; $('#prompt').focus(); } })),
-      ...PANES.map((p, i) => ({ id: `p-${p}`, group: '面板', title: `打开${PANE_TITLE[p]}`, ...(i < 8 && { keys: `Alt ${i + 1}` }), run: () => showPanel(p) })),
+      ...PANES.map((p, i) => ({ id: `p-${p}`, group: '面板', title: `打开${PANE_TITLE[p]}`, keys: `Alt ${i + 1}`, run: () => showPanel(p) })),
       toggle('set-tts', '语音朗读'),
       ...(!mic.hidden ? [toggle('set-voice', '直接对话'), toggle('set-wake', '唤醒词')] : []),
       toggle('set-face', '人脸跟随'),
@@ -1774,8 +1672,6 @@ try { startPane = localStorage.getItem('jarvis.pane') || startPane; } catch { /*
 if (narrow.matches) body.classList.add('side-closed');
 showPanel(PANES.includes(startPane) ? startPane : 'workspace');
 if (narrow.matches) body.classList.remove('side-open');
-// 电脑版：启动时右侧面板收起，界面干净；点左侧功能再打开
-if (!COMPACT && !narrow.matches) { body.classList.add('side-closed'); body.classList.remove('side-open'); currentPane = null; }
 setTask('idle');
 renderWelcome();
 syncMemoryEngine();
@@ -1838,64 +1734,6 @@ if (COMPACT) {
   $('#btn-menu').addEventListener('click', () => drawer.open());
   $('#btn-side-back').hidden = false;
   $('#btn-side-back').addEventListener('click', () => closeSide());
-}
-// 电脑版：左侧导航栏（新建对话 · 功能 · 对话历史），主区顶部“对话 / 工作区”切换
-if (!COMPACT) {
-  body.classList.add('qc');
-  sidenav = initSidenav({
-    onNew: () => newSession(),
-    onOpenSession: (id) => openSession(id),
-    onPanel: (name) => showPanel(name, { toggle: true }),
-    onSearch: () => palette.open(),
-    listSessions: () => sessionsApi.list(),
-    currentId: () => session.id,
-    settings,
-    setSetting,
-    footer: [profileCard(), $('#btn-theme')]
-  });
-  const tabs = document.createElement('div');
-  tabs.className = 'main-tabs';
-  tabs.setAttribute('role', 'tablist');
-  for (const [id, label] of [['chat', '对话'], ['workspace', '工作区']]) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.dataset.tab = id;
-    b.textContent = label;
-    b.addEventListener('click', () => {
-      if (id === 'workspace') showPanel('workspace');
-      else { body.classList.add('side-closed'); body.classList.remove('side-open'); currentPane = null; sidenav.setActive(null); syncTabs(); }
-    });
-    tabs.append(b);
-  }
-  $('.topbar').prepend(tabs);
-  syncTabs();
-  const note = document.createElement('p');
-  note.className = 'ai-note';
-  note.textContent = '内容由 AI 生成，请仔细甄别';
-  $('#inputbar').after(note);
-  const refreshSessions = sessionsPanel.refresh.bind(sessionsPanel);
-  sessionsPanel.refresh = (...a) => { sidenav.refresh(); return refreshSessions(...a); };
-}
-/** 左下角：头像 + “我的贾维斯” + 进化等级（点开记忆与进化） */
-function profileCard() {
-  const card = document.createElement('div');
-  card.className = 'sn-profile';
-  const avatar = document.createElement('span');
-  avatar.className = 'sn-avatar';
-  avatar.textContent = '我';
-  const text = document.createElement('div');
-  text.className = 'sn-profile-text';
-  const name = document.createElement('strong');
-  name.textContent = '我的贾维斯';
-  text.append(name, $('#level-chip'));
-  card.append(avatar, text);
-  return card;
-}
-/** 顶部“对话 / 工作区”切换的高亮 */
-function syncTabs() {
-  syncSideToggle();
-  const ws = currentPane === 'workspace' && !body.classList.contains('side-closed');
-  for (const b of document.querySelectorAll('.main-tabs button')) b.classList.toggle('on', (b.dataset.tab === 'workspace') === ws);
 }
 function closeSide() {
   body.classList.remove('side-open');
