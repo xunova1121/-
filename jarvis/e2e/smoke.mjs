@@ -337,6 +337,11 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   const visUser = fake.seen[visIdx]?.messages.filter((m) => m.role === 'user').at(-1);
   check('看图：图片随消息发给模型（image_url）', Array.isArray(visUser?.content) && visUser.content.some((p) => p.type === 'image_url' && /^data:image\/jpeg;base64,/.test(p.image_url.url)), JSON.stringify(visUser?.content)?.slice(0, 100));
   check('对话里显示图片缩略图', (await page.locator('.msg.user').last().locator('.msg-images img').count()) === 1);
+  // 追问时提到图片：之前的图片再带给模型；不提图片的闲聊不带
+  const followIdx = fake.seen.length;
+  await ask(page, '再看看上面那张图片');
+  const followMsgs = fake.seen[followIdx]?.messages.filter((m) => m.role === 'user') ?? [];
+  check('追问图片：之前发的图片重新带给模型', followMsgs.some((m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url')), followMsgs.length);
   // —— 模型分工：闲聊用快模型（并让推理模型少想），写代码用编程模型
   await page.evaluate(() => window.__jarvis.panels.patchConfig((c) => ({ ...c, routing: { enabled: true, provider: 'custom', routes: { chat: 'fast-model', code: 'code-model' } } })));
   let rIdx = fake.seen.length;

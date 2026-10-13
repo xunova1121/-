@@ -134,19 +134,40 @@ export function searchPlan(query, region) {
  * @returns {{ name: string, search: (query: string, n?: number) => Promise<Array<{title,url,snippet}>> } | null}
  */
 export function createSearch({ tavilyKey, fetchViaGateway, searchRegion = 'auto' } = {}) {
-  if (tavilyKey) {
+  const keyless = keylessSearch(fetchViaGateway, searchRegion);
+  const tavily = tavilyKey ? tavilySearch(tavilyKey, fetchViaGateway) : null;
+  if (tavily && keyless) {
+    // 国内用户：中文搜索词走国内网站（Tavily 的中文结果多是港台和海外网站），其余走 Tavily；一边没结果再试另一边
     return {
-      name: 'Tavily',
-      async search(query, n = 6) {
-        const url = 'https://api.tavily.com/search';
-        const init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: tavilyKey, query, max_results: n, include_answer: false }) };
-        const res = fetchViaGateway ? await fetchViaGateway(url, init) : await fetch(url, init);
-        if (!res.ok) throw new Error(`搜索服务返回 ${res.status}`);
-        const j = await res.json();
-        return (j.results ?? []).map((r) => ({ title: r.title, url: r.url, snippet: String(r.content || '').slice(0, 400) }));
+      get name() { return `Tavily + ${keyless.name}`; },
+      regionNow: keyless.regionNow,
+      async search(query, n = 6, opts = {}) {
+        const domestic = /[\u4e00-\u9fff]/.test(query) && (await keyless.regionNow()) === 'cn';
+        const [first, second] = domestic ? [keyless, tavily] : [tavily, keyless];
+        const hits = await first.search(query, n, opts).catch(() => []);
+        return hits.length >= Math.min(3, n) ? hits : [...hits, ...(await second.search(query, n, opts).catch(() => []))].filter((h, i, a) => a.findIndex((x) => x.url === h.url) === i).slice(0, n);
       }
     };
   }
+  return tavily || keyless;
+}
+
+function tavilySearch(tavilyKey, fetchViaGateway) {
+  return {
+    name: 'Tavily',
+    // deep：顺带要回网页正文（查证时不用再逐篇打开，手机上也不受跨域限制；仍是基础档，每次 1 个额度）
+    async search(query, n = 6, { deep = false } = {}) {
+      const url = 'https://api.tavily.com/search';
+      const init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: tavilyKey, query, max_results: n, include_answer: false, ...(deep && { include_raw_content: true }) }) };
+      const res = fetchViaGateway ? await fetchViaGateway(url, init) : await fetch(url, init);
+      if (!res.ok) throw new Error(`搜索服务返回 ${res.status}`);
+      const j = await res.json();
+      return (j.results ?? []).map((r) => ({ title: r.title, url: r.url, snippet: String(r.content || '').slice(0, 400), ...(r.raw_content && { raw: String(r.raw_content) }) }));
+    }
+  };
+}
+
+function keylessSearch(fetchViaGateway, searchRegion) {
   if (!fetchViaGateway) return null;
   // 地区：用户指定的，或自动判断（结果记 30 分钟：开关代理后会重新判断）
   let region = searchRegion === 'cn' || searchRegion === 'global' ? searchRegion : null;

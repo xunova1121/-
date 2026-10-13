@@ -197,3 +197,26 @@ describe('国内搜索源', () => {
     expect(s.name).toMatch(/百度/);
   });
 });
+
+describe('国内用户：Tavily 和国内网站一起用', () => {
+  it('中文搜索词走国内网站，外文走 Tavily；一边结果不够再补另一边', async () => {
+    const asked = [];
+    const s = createSearch({ tavilyKey: 'k', searchRegion: 'cn', fetchViaGateway: async (url, init) => {
+      asked.push(new URL(url).host);
+      if (/tavily/.test(url)) return new Response(JSON.stringify({ results: [{ title: 'ANSA', url: 'https://ansa.it/a', content: 'Atalanta 3-1', raw_content: '全文' }] }));
+      return new Response(/baidu/.test(url) ? BAIDU : /so\.com/.test(url) ? SO : '<html></html>');
+    } });
+    expect(s.name).toMatch(/Tavily \+ 必应中国/);
+    const zh = await s.search('竞彩 赛果 周一001', 6);
+    expect(asked[0]).toBe('cn.bing.com');
+    expect(zh.some((h) => /sina/.test(h.url))).toBe(true);
+    asked.length = 0;
+    const en = await s.search('Atalanta Venezia', 6, { deep: true });
+    expect(asked[0]).toBe('api.tavily.com');
+    expect(en[0]).toMatchObject({ url: 'https://ansa.it/a', raw: '全文' });
+  });
+  it('提示词：时差按事件当地时间换算，体彩“周一”是销售日', () => {
+    expect(STABLE_PROMPT).toMatch(/时差/);
+    expect(STABLE_PROMPT).toMatch(/销售日/);
+  });
+});

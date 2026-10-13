@@ -13,6 +13,7 @@ import * as scheduler from './scheduler.js';
 import * as sessions from './sessions.js';
 import { createSearch } from './webSearch.js';
 import { deepResearch, DEPTHS } from './research.js';
+import { factCheck, formatReport } from './factCheck.js';
 
 const S = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const str = (description) => ({ type: 'string', description });
@@ -393,6 +394,26 @@ export function createTools(ctx) {
         };
         const outs = await Promise.all(list.map(one));
         return list.length === 1 ? outs[0] : list.map((q, i) => `### ${q}\n${outs[i]}`).join('\n\n');
+      }
+    });
+    tools.push({
+      name: 'fact_check',
+      description: '逐项联网查证：要查的对象有好几个（截图里的多场比赛、多只股票、多个产品的价格、清单里的多个事件），或者答案必须准确时使用。程序会对每一项：还原原文名、多语言搜索、读原文、让模型摘答案并给原文引用、核对引用确实在原文里、两个网站一致才算已核实，不够就换搜索词再查。比自己用 web_search 拼凑准确得多。调用前先把图片 / 文字里的每一项原样列进 items（编号、名称、时间、相关选项都写进 label / details），不要漏项、不要改名。',
+      input_schema: S({
+        question: str('每一项要查什么，写具体，如“这场比赛的全场比分（和半场比分）”“今天收盘价和涨跌幅”'),
+        items: { type: 'array', description: '要查证的对象，逐项列出（最多 20 项）', items: { type: 'object', properties: { label: str('对象名称，原样照抄，如“迪拜连接 VS 吉达国民”'), details: str('补充信息：编号、联赛、开赛时间、日期等，如“周一001，开赛 10-12 23:00”') }, required: ['label'], additionalProperties: false } },
+        date: str('事件发生的日期或时间范围，如 2026-10-12（不知道就留空）'),
+        context: str('背景，如“中国体育彩票竞彩足球，第 2610121 期”')
+      }, ['question', 'items']),
+      run: async ({ question, items, date, context }, { progress, signal } = {}) => {
+        const r = await factCheck({
+          question, items, date, context, signal,
+          llm: ctx.reasonLlm ?? ctx.llm ?? null,
+          search: (q, n, o) => engine.search(q, n, o),
+          read: readPage,
+          onProgress: (t) => progress?.(t)
+        });
+        return formatReport(r);
       }
     });
     tools.push({

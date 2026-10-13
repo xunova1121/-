@@ -390,6 +390,8 @@ function persistSession() {
   sessionsApi.save(session).then(() => sessionsPanel?.refresh()).catch(() => {});
 }
 let turns = 0;
+const NEEDS_THOUGHT = /查|搜|核实|验证|结果|赛果|比分|中没中|中奖|最新|价格|行情|新闻|分析|计算|算一下|对比|图片|截图|图里/;
+const recentImages = new Map(); // 消息时间 → 这条消息带的图片（只在内存里，不存盘）
 let active = null; // { ctrl, streamDone, bubble }
 const attachments = [];
 
@@ -645,6 +647,7 @@ async function buildTools({ background = false } = {}) {
       searchRegion: llmConfig.searchRegion || 'auto',
       fetchViaGateway: fetchViaGateway(),
       llm: helperLlm('write'), // 深度调研：用写作模型
+      reasonLlm: helperLlm('reason'), // 逐项查证：用推理模型摘答案
       onPreview: background ? () => {} : COMPACT
         ? (path) => { panels.openFile(path); toast(`已生成 ${path}：左上角菜单 → 工作区查看`); } // 手机上不自动盖住对话
         : (path) => { showPanel('workspace'); panels.openFile(path); },
@@ -806,8 +809,13 @@ async function send(text) {
   director.onUserText(text);
   hud.newTurn();
   hud.think(`◂ 收到：${text.slice(0, 30)}`);
-  const llmHistory = history.slice(-20).map(({ role, content }) => ({ role, content }));
+  // 之前发过的图片（最近两条带图的消息）继续带给模型：追问“第二张图里……”时模型还看得到
+  // 只在这句话提到图片时才带（不然后面每句闲聊都会被当成看图任务、多花流量）
+  const refersToImage = !imgs.length && /图|截图|照片|相片|图片|表格|这张|那张|第.张|上面|刚才发的|picture|image|screenshot/i.test(text);
+  const withImages = new Set(refersToImage ? history.slice(-20).filter((m) => m.role === 'user' && recentImages.has(m.ts)).slice(-2).map((m) => m.ts) : []);
+  const llmHistory = history.slice(-20).map(({ role, content, ts }) => ({ role, content, ...(withImages.has(ts) && { images: recentImages.get(ts) }) }));
   rememberTurn('user', userText, thumbs.length ? { thumbs } : {});
+  if (imgs.length) recentImages.set(history.at(-1).ts, imgs.map(({ mime, data }) => ({ mime, data })));
 
   if (machine.task !== 'listening') machine.beginUserTurn();
   const ctrl = new AbortController();
@@ -819,10 +827,11 @@ async function send(text) {
   setTask('processing', '思考中');
 
   // 模型分工：按这句话的类型换模型；日常对话让推理模型少想一点（首字更快）
-  const task = shouldTeam(text, settings.teamMode === 'auto' && !helperLlm() ? 'off' : settings.teamMode) ? 'reason' : classifyTask(text, { images: imgs.length });
+  const task = shouldTeam(text, settings.teamMode === 'auto' && !helperLlm() ? 'off' : settings.teamMode) ? 'reason' : classifyTask(text, { images: imgs.length + withImages.size });
   const route = routeFor(llmConfig, task);
   const { adapter, model, problem } = createAdapter(route.cfg, { gateway });
-  const effort = task === 'chat' && llmConfig.fastChat !== false ? 'low' : undefined;
+  // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省
+  const effort = task === 'chat' && llmConfig.fastChat !== false && !NEEDS_THOUGHT.test(text) ? 'low' : undefined;
   if (route.routed) hud.think(`◇ 模型分工：${TASKS[task].name} → ${route.model}`);
   if (problem) {
     bubble.append(problem);
