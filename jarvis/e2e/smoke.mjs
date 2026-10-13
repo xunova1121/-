@@ -17,6 +17,13 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? '✓' : '✗'} ${name}${detail ? ` — ${String(detail).slice(0, 160)}` : ''}`);
 };
 
+/** 点左侧导航打开面板（折叠在“更多”里的先展开） */
+async function openPanel(page, name) {
+  const item = page.locator(`.sidenav [data-panel="${name}"]`);
+  if (!(await item.isVisible())) await page.click('.sidenav .sn-more');
+  await item.click();
+}
+
 /** 发一条消息并等这一轮结束 */
 async function ask(page, q, timeout = 40000) {
   const before = await page.locator('#transcript .msg.agent').count();
@@ -106,14 +113,17 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.click('#btn-theme');
   await page.evaluate(() => window.__jarvis.showPanel('settings'));
   await page.click('#set-theme [data-v="day"]');
-  const day = await page.evaluate(() => ({ t: document.documentElement.dataset.theme, text: getComputedStyle(document.body).color, stageText: getComputedStyle(document.querySelector('.stage')).getPropertyValue('--text').trim() }));
-  check('白天界面：正文深色，舞台仍是深色显示屏（浅色字）', day.t === 'light' && day.text === 'rgb(20, 34, 48)' && day.stageText === '#e3e8f6', JSON.stringify(day));
+  const day = await page.evaluate(() => ({ t: document.documentElement.dataset.theme, text: getComputedStyle(document.body).color, stageBg: getComputedStyle(document.querySelector('.stage')).backgroundColor, filter: getComputedStyle(document.querySelector('#stage')).filter }));
+  check('白天界面：正文深色，粒子融进白底（舞台无深色卡片，画布反色）', day.t === 'light' && day.text === 'rgb(20, 34, 48)' && day.stageBg === 'rgba(0, 0, 0, 0)' && /invert/.test(day.filter), JSON.stringify(day));
   await page.screenshot({ path: `${OUT}/light-theme.png` });
   await page.click('#set-theme [data-v="night"]');
   check('夜间界面', await page.evaluate(() => document.documentElement.dataset.theme) === 'dark');
 
   // —— 欢迎页、HUD
-  check('欢迎页与快捷任务', (await page.locator('.welcome .quick').count()) === 7 && /我是贾维斯/.test(await page.textContent('.welcome h1')));
+  check('欢迎页：大标题 + 四张任务卡片', (await page.locator('.welcome .qc-card').count()) === 4 && /我是贾维斯/.test(await page.textContent('.welcome h1')));
+  check('电脑版左侧导航栏：新建对话、功能、对话历史', await page.isVisible('.sidenav .sn-new') && (await page.locator('.sidenav .sn-item[data-panel]:visible').count()) >= 4);
+  await page.click('.sidenav .sn-more'); // 展开全部功能（后面要用到模型、设置等）
+  check('“更多”展开全部功能', (await page.locator('.sidenav .sn-item[data-panel]:visible').count()) === 7);
   check('HUD 时钟与模型', /^\d{2}:\d{2}:\d{2}$/.test(await page.textContent('#hud-time')) && (await page.textContent('#hud-model')).length > 0);
 
   // —— 技能：首次启动预置常用技能；卸载后可从推荐里重装 → “/” 自动补全 → 点名使用
@@ -246,7 +256,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('沙箱运行 JavaScript', /1\.\.10 的平方/.test(reply) && /返回值：55/.test(reply), reply.slice(0, 100));
 
   // —— 知识库：TXT 与真实 PDF
-  await page.click('[data-panel="knowledge"]');
+  await openPanel(page, 'knowledge');
   await page.setInputFiles('#kb-input', { name: '员工手册.txt', mimeType: 'text/plain', buffer: Buffer.from('第三章 假期\n\n年假规定：入职满一年的员工每年享有带薪年假十天。\n\n病假需提供医院证明。') });
   await page.waitForFunction(() => document.querySelectorAll('#kb-list li:not(.empty)').length >= 1, null, { timeout: 10000 });
   const pdfPage = await ctx.newPage();
@@ -268,7 +278,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
 
   // —— 记忆与教训
   await ask(page, '记住我喜欢简洁的回答');
-  await page.click('[data-panel="mind"]');
+  await openPanel(page, 'mind');
   await page.waitForTimeout(300);
   check('记忆写入并显示', /我喜欢简洁的回答/.test(await page.textContent('#mind-list')));
   // 同一件事的新说法取代旧的：旧版本进入“已归档”
@@ -314,7 +324,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.screenshot({ path: `${OUT}/e2e-02-mind.png` });
 
   // —— 缺少密钥时引导到模型面板
-  await page.click('[data-panel="models"]');
+  await openPanel(page, 'models');
   await page.selectOption('#llm-provider', 'deepseek');
   await page.fill('#llm-key', '');
   await page.click('#btn-llm-save');
@@ -334,7 +344,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('OpenAI 兼容：请求带工具定义与系统提示', req?.stream === true && req.tools?.some((t) => t.function.name === 'write_file') && req.messages[0].role === 'system', `${req?.tools?.length} 个工具`);
   check('OpenAI 兼容：第二轮回传 tool 结果', fake.seen[1]?.messages.some((m) => m.role === 'tool' && /已写入 notes\/hello.md/.test(m.content)));
   check('OpenAI 兼容：流式文本到达界面', /已写好/.test(reply), reply.slice(-40));
-  await page.click('[data-panel="workspace"]');
+  await openPanel(page, 'workspace');
   check('假模型写的文件出现在工作区', (await page.locator('#file-list li', { hasText: 'notes/hello.md' }).count()) === 1);
   // —— 看图：附上图片，作为 image_url 发给 OpenAI 兼容模型
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
@@ -365,7 +375,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await ask(page, '你好呀');
   check('关闭模型分工后用默认模型', fake.seen[rIdx]?.model === 'fake-model', fake.seen[rIdx]?.model);
   fake.server.close();
-  await page.click('[data-panel="models"]');
+  await openPanel(page, 'models');
   await page.selectOption('#llm-provider', 'mock');
   await page.click('#btn-llm-save');
 
@@ -540,7 +550,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.goto(BASE);
   await page.waitForTimeout(2500);
   check('手机宽度无横向溢出', !(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)));
-  await page.click('[data-panel="workspace"]');
+  await openPanel(page, 'workspace');
   check('手机上面板以全屏抽屉打开', await page.isVisible('[data-pane="workspace"]'));
   await page.screenshot({ path: `${OUT}/e2e-03-mobile.png` });
   await ctx.close();
@@ -555,7 +565,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.goto(BASE);
   await page.waitForTimeout(1500);
   page.on('request', (r) => { if (r.method() !== 'GET' || !r.url().startsWith(BASE)) outbound.push(`${r.method()} ${r.url().slice(0, 80)}`); });
-  await page.click('[data-panel="settings"]');
+  await openPanel(page, 'settings');
   await page.check('#set-face');
   await page.waitForFunction(() => /跟随中|未检测到|降至/.test(document.querySelector('#face-status').textContent), null, { timeout: 30000 });
   check('人脸跟随启动（本地模型）', true, await page.textContent('#face-status'));
