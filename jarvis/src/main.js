@@ -578,6 +578,7 @@ async function openSession(id) {
 
 /** 光核旁的建议标注（启动末尾创建） */
 let callouts = null;
+let stageMiniWas = false; // 舞台上一次是不是迷你状态（updateStageMode 用）
 /** 正在回答的气泡（画图工具把图片放进去） */
 let liveBubble = null;
 /** 桌面背景同步：主窗口在做什么，桌面上的粒子体就跟着做（桌面版开了背景模式时） */
@@ -1798,8 +1799,9 @@ function updateStageMode() {
   const mini = !COMPACT && body.classList.contains('has-convo') && !settings.stageOpen && !body.classList.contains('focus-view') && !body.classList.contains('wb-studio');
   const label = $('#btn-stage-toggle span');
   if (label) label.textContent = settings.stageOpen ? '收起' : '展开';
-  if (mini === body.classList.contains('stage-mini')) return;
-  body.classList.toggle('stage-mini', mini);
+  body.classList.toggle('stage-mini', mini); // 工作台切到“工作室”时会自己去掉这个类，所以用变量记上一次的状态
+  if (mini === stageMiniWas) return;
+  stageMiniWas = mini;
   callouts?.relocate?.();
 }
 function setStageOpen(open) { setSetting('stageOpen', open); updateStageMode(); }

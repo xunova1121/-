@@ -83,7 +83,8 @@ export function initOrbitHud({ root, getAnchor, reducedMotion = () => false }) {
     const a = getAnchor();
     const w = root.clientWidth, h = root.clientHeight;
     svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
-    if (!a || !a.r) { svg.style.opacity = '0'; return; }
+    // 舞台被隐藏（如工作台的“对话”视图）时尺寸为 0，光核半径可能算成负数：不画
+    if (!a || !(a.r > 4) || !w || !h) { svg.style.opacity = '0'; return; }
     svg.style.opacity = '';
     const { x, y } = a;
     const R = a.r * 1.9;

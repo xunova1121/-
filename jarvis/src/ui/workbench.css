@@ -25,3 +25,5 @@ body.workbench{background:#fff;color:#24272e;font-family:'Microsoft YaHei','Sego
 @media(min-width:1101px){.workbench.wb-info-open .top-actions{margin-right:0}.workbench:not(.wb-info-open) .wb-info-toggle{margin-right:105px}.workbench:not(.wb-info-open) .top-actions{margin-right:0}.wb-info-open .wb-card-art{display:none}.wb-info-open .wb-landing{padding-left:0;padding-right:0}}
 @media(max-width:1100px){.wb-info{position:fixed;z-index:50;top:40px;right:0;bottom:0;width:min(320px,85vw);padding-top:0;box-shadow:-15px 0 50px #35303f12}.workbench.wb-info-open .app{grid-template-columns:248px minmax(0,1fr);grid-template-areas:'rail top' 'rail main'}.workbench .top-actions{margin-right:0}.workbench .wb-info-toggle{margin-right:100px}}
 @media(max-width:1050px){.workbench.wb-info-open .app{grid-template-columns:205px minmax(0,1fr)}}
+/* 提示气泡在整页功能面板（z-index 60）之上，不被页面标题挡住 */
+.workbench .toast{z-index:80;max-width:min(720px,calc(100vw - 32px));text-align:center}

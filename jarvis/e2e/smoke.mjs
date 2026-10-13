@@ -17,11 +17,22 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? '✓' : '✗'} ${name}${detail ? ` — ${String(detail).slice(0, 160)}` : ''}`);
 };
 
+/** 工作台：功能页是整页打开的（对话区隐藏），用测试接口直接打开 / 关闭 */
+const openPanel = (page, name) => page.evaluate((n) => window.__jarvis.showPanel(n), name);
+const closeSide = (page) => page.evaluate(() => { document.body.classList.add('side-closed'); document.body.classList.remove('side-open'); });
+/** 工作台的“对话 / 工作室”切换：粒子舞台只在工作室里显示 */
+const studio = async (page, on) => { await closeSide(page); await page.click(`.wb-tabs button:nth-child(${on ? 2 : 1})`); await page.waitForTimeout(300); };
+
 /** 发一条消息并等这一轮结束 */
 async function ask(page, q, timeout = 40000) {
   const before = await page.locator('#transcript .msg.agent').count();
-  await page.fill('#prompt', q);
-  await page.press('#prompt', 'Enter');
+  if (await page.isVisible('#prompt')) {
+    await page.fill('#prompt', q);
+    await page.press('#prompt', 'Enter');
+  } else {
+    // 功能页整页打开时输入框被隐藏：直接提交，功能页保持打开（后面的检查要读面板内容）
+    await page.evaluate((text) => { const p = document.querySelector('#prompt'); p.value = text; p.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('#inputbar').requestSubmit(); }, q);
+  }
   await page.waitForFunction((n) => document.querySelectorAll('#transcript .msg.agent').length > n && !document.querySelector('#transcript .msg.agent.streaming'), before, { timeout });
   await page.waitForTimeout(150);
   return page.locator('#transcript .msg.agent').last().innerText();
@@ -90,6 +101,8 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   // 故意返回 500 的假语音服务会产生一条资源加载错误，不计入
   page.on('console', (m) => { if (m.type() === 'error' && !/fonts\.(googleapis|gstatic)/.test(m.text()) && !(/status of 500/.test(m.text()) && /audio\/speech/.test(m.location().url)) && !(/status of 502/.test(m.text()) && /\/api\/tts\/edge/.test(m.location().url))) errors.push(m.text()); });
   await page.goto(BASE);
+  check('工作台：左侧导航、对话 / 工作室切换', await page.isVisible('.rail .wb-nav .wb-new') && (await page.locator('.wb-tabs button').count()) === 2);
+  await studio(page, true);
   await page.waitForFunction(() => window.__jarvis?.stage?.stats.frames > 10, null, { timeout: 30000 });
   const stats = await page.evaluate(() => { const s = window.__jarvis.stage.stats; return { form: s.form, particles: s.particles, calls: s.drawCalls, bloom: s.bloom, gl2: s.isWebGL2 }; });
   check('主视觉启动（粒子体 · 光核）', stats.form === 'core' && stats.particles >= 6000 && /光核/.test(await page.textContent('#hud-form')), JSON.stringify(stats));
@@ -98,23 +111,19 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('识别到本机网关', await page.evaluate(() => Boolean(window.__jarvis.gateway)), await page.textContent('#gw-badge'));
 
   check('没有手动切换形态的按钮', (await page.locator('[data-style]').count()) === 0);
-  // —— 白天 / 夜间
-  const th0 = await page.evaluate(() => document.documentElement.dataset.theme);
-  await page.click('#btn-theme');
-  const th1 = await page.evaluate(() => ({ t: document.documentElement.dataset.theme, bg: getComputedStyle(document.body).backgroundColor, stage: getComputedStyle(document.querySelector('.stage')).getPropertyValue('--text').trim() }));
-  check('顶栏一键切换白天 / 夜间', th0 && th1.t !== th0, `${th0} → ${th1.t}`);
-  await page.click('#btn-theme');
-  await page.evaluate(() => window.__jarvis.showPanel('settings'));
-  await page.click('#set-theme [data-v="day"]');
-  const day = await page.evaluate(() => ({ t: document.documentElement.dataset.theme, text: getComputedStyle(document.body).color, stageText: getComputedStyle(document.querySelector('.stage')).getPropertyValue('--text').trim() }));
-  check('白天界面：正文深色，舞台仍是深色显示屏（浅色字）', day.t === 'light' && day.text === 'rgb(20, 34, 48)' && day.stageText === '#e3e8f6', JSON.stringify(day));
-  await page.screenshot({ path: `${OUT}/light-theme.png` });
-  await page.click('#set-theme [data-v="night"]');
-  check('夜间界面', await page.evaluate(() => document.documentElement.dataset.theme) === 'dark');
+  // —— 工作台固定浅色；工作室里的粒子舞台仍是深色显示屏
+  const day = await page.evaluate(() => ({ t: document.documentElement.dataset.theme, bg: getComputedStyle(document.body).backgroundColor, stageBg: getComputedStyle(document.querySelector('#stage-wrap')).backgroundColor }));
+  check('工作台浅色界面，工作室舞台是深色显示屏', day.bg === 'rgb(255, 255, 255)' && day.stageBg === 'rgb(7, 18, 30)', JSON.stringify(day));
+  await page.screenshot({ path: `${OUT}/workbench-studio.png` });
 
   // —— 欢迎页、HUD
-  check('欢迎页与快捷任务', (await page.locator('.welcome .quick').count()) === 7 && /我是贾维斯/.test(await page.textContent('.welcome h1')));
   check('HUD 时钟与模型', /^\d{2}:\d{2}:\d{2}$/.test(await page.textContent('#hud-time')) && (await page.textContent('#hud-model')).length > 0);
+  await studio(page, false);
+  check('首页：大标题 + 四张建议卡片', (await page.locator('.wb-landing .wb-card').count()) === 4 && /我是贾维斯/.test(await page.textContent('.wb-landing h1')));
+  await page.click('.wb-card:nth-child(1)');
+  check('点建议卡片只填进输入框，不直接发送', (await page.inputValue('#prompt')).length > 5 && (await page.locator('.msg').count()) === 0);
+  await page.fill('#prompt', '');
+  await page.screenshot({ path: `${OUT}/workbench-home.png` });
 
   // —— 技能：首次启动预置常用技能；卸载后可从推荐里重装 → “/” 自动补全 → 点名使用
   await page.evaluate(() => window.__jarvis.showPanel('skills'));
@@ -124,9 +133,12 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await wr.getByRole('button', { name: '卸载' }).click();
   await wr.getByRole('button', { name: '确认卸载' }).click();
   await page.waitForTimeout(200);
+  await page.click('.wb-library-tabs button:nth-child(2)'); // “发现技能”
   await page.locator('.skill-tile', { hasText: '/weekly-report' }).locator('button').click();
+  await page.click('.wb-library-tabs button:nth-child(1)'); // 回到“我的技能”
   await page.waitForFunction(() => document.querySelectorAll('#skill-list .skill').length === 16, null, { timeout: 5000 }).catch(() => {});
   check('卸载后可从推荐里重新安装', (await page.locator('#skill-list .skill', { hasText: '/weekly-report' }).count()) === 1);
+  await closeSide(page);
   await page.fill('#prompt', '/wee');
   await page.waitForTimeout(150);
   check('输入 / 弹出技能补全', await page.isVisible('#slash-menu') && /weekly-report/.test(await page.textContent('#slash-menu')));
@@ -138,7 +150,8 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.waitForFunction((n) => document.querySelectorAll('#transcript .msg.agent').length > n && !document.querySelector('#transcript .msg.agent.streaming'), before, { timeout: 20000 });
   const skillReply = await page.locator('#transcript .msg.agent').last().innerText();
   check('“/技能名”让智能体先读取技能说明', /使用技能/.test(skillReply) && /已加载技能「weekly-report」/.test(skillReply), skillReply.slice(0, 80));
-  check('欢迎页在开始对话后收起', (await page.locator('.welcome').count()) === 0);
+  check('首页在开始对话后收起', await page.evaluate(() => document.querySelector('.wb-landing').hidden));
+  await openPanel(page, 'skills');
   await page.locator('#skill-list .skill', { hasText: '/weekly-report' }).locator('.switch').click();
   await page.waitForTimeout(200);
   check('停用技能', /15 \/ 16 个启用/.test(await page.textContent('#skill-count')));
@@ -156,10 +169,10 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   // 有对话后：舞台收成迷你状态条（光核还在），建议改到输入框上方；点“展开”恢复大舞台
   await page.waitForTimeout(300);
   const mini = await page.evaluate(() => ({ mini: document.body.classList.contains('stage-mini'), h: document.querySelector('#stage-wrap').getBoundingClientRect().height, chips: document.querySelectorAll('.chip-bar:not([hidden]) .chip').length }));
-  check('有对话后舞台收成迷你状态条，建议在输入框上方', mini.mini && mini.h <= 110 && mini.chips === 3, JSON.stringify(mini));
-  await page.click('#btn-stage-toggle');
-  await page.waitForTimeout(500);
-  check('点“展开”恢复大舞台，建议回到光核旁', await page.evaluate(() => !document.body.classList.contains('stage-mini') && document.querySelector('.chip-bar').hidden));
+  check('对话视图：不显示舞台，建议在输入框上方', mini.mini && mini.h === 0 && mini.chips === 3, JSON.stringify(mini));
+  await studio(page, true);
+  await page.waitForTimeout(300);
+  check('切到工作室：大舞台，建议回到光核旁', await page.evaluate(() => !document.body.classList.contains('stage-mini') && document.querySelector('.chip-bar').hidden));
   await page.waitForFunction(() => window.__jarvis.callouts.visible, null, { timeout: 5000 }).catch(() => {});
   const cl = await page.evaluate(() => ({ n: document.querySelectorAll('.callout:not([hidden])').length, d: [...document.querySelectorAll('.cl-line')].map((x) => x.getAttribute('d')) }));
   check('光核旁有 3 条建议，各自有虚线连到光核', cl.n === 3 && cl.d.every((d) => /^M[\d.]+,[\d.]+ L/.test(d || '')), JSON.stringify(cl.d[0]));
@@ -176,7 +189,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.waitForTimeout(400);
   const after = await page.evaluate(() => window.__jarvis.callouts.items.map((x) => x.title));
   check('回答后换成新的跟进建议', after.length === 3 && after.join(' / ') !== beforeTitles, `${beforeTitles} → ${after.join(' / ')}`);
-  await page.click('#btn-stage-toggle'); // 收回迷你状态条
+  await studio(page, false); // 回到对话视图
   await page.waitForTimeout(300);
 
   // —— 定时任务：一句话创建；面板里立即运行，结果存成一段对话
@@ -207,7 +220,10 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   let reply = await ask(page, '帮我写一个网页');
   const formsUsed = await page.evaluate((n) => window.__jarvis.director.history.slice(n), histBefore);
   check('粒子体按任务自动变形（写网页 → 晶格）', formsUsed.includes('lattice'), formsUsed.join(' → '));
+  await studio(page, true); // 轨道 HUD 只在工作室的舞台上画
+  await page.waitForTimeout(200);
   const sats = await page.evaluate(() => [...document.querySelectorAll('.oh-sat text')].map((t) => t.textContent));
+  await studio(page, false);
   check('轨道 HUD：这一轮用到的工具显示为卫星节点', sats.includes('写入文件'), sats.join('、'));
   const thoughts = await page.locator('.thought-log li').allTextContents();
   check('思考流记录每一步', thoughts.some((t) => /写入文件/.test(t)) && thoughts.some((t) => /完成/.test(t)), thoughts.join(' | '));
@@ -227,6 +243,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
     check(`生成 ${ext} 并出现在工作区`, listed === 1);
   }
   // 对话里生成的文件：点一下在工作区打开
+  await closeSide(page);
   await page.locator('#transcript .file-link', { hasText: '示例.docx' }).first().click();
   await page.waitForFunction(() => /示例\.docx/.test(document.querySelector('#viewer-name')?.textContent || ''), null, { timeout: 5000 }).catch(() => {});
   check('对话里的文件可点击，在工作区打开', /示例\.docx/.test(await page.textContent('#viewer-name')));
@@ -246,7 +263,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('沙箱运行 JavaScript', /1\.\.10 的平方/.test(reply) && /返回值：55/.test(reply), reply.slice(0, 100));
 
   // —— 知识库：TXT 与真实 PDF
-  await page.click('[data-panel="knowledge"]');
+  await openPanel(page, 'knowledge');
   await page.setInputFiles('#kb-input', { name: '员工手册.txt', mimeType: 'text/plain', buffer: Buffer.from('第三章 假期\n\n年假规定：入职满一年的员工每年享有带薪年假十天。\n\n病假需提供医院证明。') });
   await page.waitForFunction(() => document.querySelectorAll('#kb-list li:not(.empty)').length >= 1, null, { timeout: 10000 });
   const pdfPage = await ctx.newPage();
@@ -268,7 +285,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
 
   // —— 记忆与教训
   await ask(page, '记住我喜欢简洁的回答');
-  await page.click('[data-panel="mind"]');
+  await openPanel(page, 'mind');
   await page.waitForTimeout(300);
   check('记忆写入并显示', /我喜欢简洁的回答/.test(await page.textContent('#mind-list')));
   // 同一件事的新说法取代旧的：旧版本进入“已归档”
@@ -303,9 +320,11 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   const backup = JSON.parse(await (await import('node:fs')).promises.readFile(await memDl.path(), 'utf8'));
   check('导出记忆备份', backup.format === 'jarvis-memory' && backup.memories.length >= 3 && /老王/.test(backup.core.human), `${backup.memories.length} 条`);
   await ask(page, '今天心情不错');
+  await closeSide(page);
   await page.locator('#transcript .msg.agent').last().locator('.feedback button').nth(1).click();
   await page.fill('.lesson-box input', '回答太长了');
   await page.press('.lesson-box input', 'Enter');
+  await openPanel(page, 'mind');
   await page.click('[data-mtab="lessons"]');
   await page.waitForTimeout(300);
   check('👎 反馈记为教训', /回答太长了/.test(await page.textContent('#mind-list')));
@@ -314,7 +333,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.screenshot({ path: `${OUT}/e2e-02-mind.png` });
 
   // —— 缺少密钥时引导到模型面板
-  await page.click('[data-panel="models"]');
+  await openPanel(page, 'models');
   await page.selectOption('#llm-provider', 'deepseek');
   await page.fill('#llm-key', '');
   await page.click('#btn-llm-save');
@@ -334,7 +353,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('OpenAI 兼容：请求带工具定义与系统提示', req?.stream === true && req.tools?.some((t) => t.function.name === 'write_file') && req.messages[0].role === 'system', `${req?.tools?.length} 个工具`);
   check('OpenAI 兼容：第二轮回传 tool 结果', fake.seen[1]?.messages.some((m) => m.role === 'tool' && /已写入 notes\/hello.md/.test(m.content)));
   check('OpenAI 兼容：流式文本到达界面', /已写好/.test(reply), reply.slice(-40));
-  await page.click('[data-panel="workspace"]');
+  await openPanel(page, 'workspace');
   check('假模型写的文件出现在工作区', (await page.locator('#file-list li', { hasText: 'notes/hello.md' }).count()) === 1);
   // —— 看图：附上图片，作为 image_url 发给 OpenAI 兼容模型
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
@@ -365,7 +384,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await ask(page, '你好呀');
   check('关闭模型分工后用默认模型', fake.seen[rIdx]?.model === 'fake-model', fake.seen[rIdx]?.model);
   fake.server.close();
-  await page.click('[data-panel="models"]');
+  await openPanel(page, 'models');
   await page.selectOption('#llm-provider', 'mock');
   await page.click('#btn-llm-save');
 
@@ -443,13 +462,15 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   const eco = await page.evaluate(() => ({ bloom: window.__jarvis.stage.stats.bloom, fps: window.__jarvis.quality.fps }));
   check('省电档：关泛光、24fps', !eco.bloom && eco.fps === 24, JSON.stringify(eco));
   await page.selectOption('#set-quality', 'auto');
+  await closeSide(page);
   await page.click('#prompt');
   await page.keyboard.press('Escape');
   await page.evaluate(() => document.activeElement.blur());
   await page.keyboard.press('/');
   check('/ 聚焦输入框', await page.evaluate(() => document.activeElement.id === 'prompt'));
 
-  // —— 后台暂停与恢复
+  // —— 后台暂停与恢复（粒子舞台在“工作室”里）
+  await studio(page, true);
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); });
   const f1 = await page.evaluate(() => window.__jarvis.stage.stats.frames);
   await page.waitForTimeout(1500);
@@ -488,7 +509,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('刷新后自动接着最近的对话', /现在几点/.test(await page.textContent('#transcript')));
   await page.keyboard.press('Control+Shift+O');
   await page.waitForTimeout(300);
-  check('Ctrl+Shift+O 新对话：对话区清空、显示欢迎页', (await page.locator('.msg').count()) === 0 && (await page.locator('.welcome').count()) === 1);
+  check('Ctrl+Shift+O 新对话：对话区清空、显示欢迎页', (await page.locator('.msg').count()) === 0 && await page.evaluate(() => !document.querySelector('.wb-landing').hidden));
   await ask(page, '帮我写一个网页');
   await page.evaluate(() => window.__jarvis.showPanel('sessions'));
   await page.waitForFunction(() => document.querySelectorAll('#session-list .session').length >= 2, null, { timeout: 5000 }).catch(() => {});
@@ -540,7 +561,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.goto(BASE);
   await page.waitForTimeout(2500);
   check('手机宽度无横向溢出', !(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)));
-  await page.click('[data-panel="workspace"]');
+  await openPanel(page, 'workspace');
   check('手机上面板以全屏抽屉打开', await page.isVisible('[data-pane="workspace"]'));
   await page.screenshot({ path: `${OUT}/e2e-03-mobile.png` });
   await ctx.close();
@@ -555,7 +576,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.goto(BASE);
   await page.waitForTimeout(1500);
   page.on('request', (r) => { if (r.method() !== 'GET' || !r.url().startsWith(BASE)) outbound.push(`${r.method()} ${r.url().slice(0, 80)}`); });
-  await page.click('[data-panel="settings"]');
+  await openPanel(page, 'settings');
   await page.check('#set-face');
   await page.waitForFunction(() => /跟随中|未检测到|降至/.test(document.querySelector('#face-status').textContent), null, { timeout: 30000 });
   check('人脸跟随启动（本地模型）', true, await page.textContent('#face-status'));
@@ -640,6 +661,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('团队模式：每一步都完成', (await page.locator('#transcript .team-card li[data-st="done"]').count()) === 2);
   check('团队模式：各角色用了各自的工具', (await page.locator('#transcript .tool-card .tn').allTextContents()).join(',').match(/记住.*写入文件/) !== null);
   check('团队模式：汇总各步成果', /团队完成了 2 步/.test(r) && /团队 2 步/.test(r), r.slice(0, 100));
+  await closeSide(page);
   await page.locator('#transcript .team-card li').nth(1).locator('summary').click();
   await page.screenshot({ path: `${OUT}/team.png` });
   await ctx.close();
