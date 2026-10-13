@@ -45,8 +45,8 @@ async function log(kind, text) {
 }
 
 const now = () => Date.now();
-const current = (m) => !m.validTo;
-const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+const current = (m) => !m.validTo && !m.pending;
+const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().replace(/[。.!！]+$/, '');
 
 /** 旧记录补齐字段（v1 只有 content / category / ts / uses） */
 function upgrade(m) {
@@ -109,14 +109,15 @@ export async function decide(content, category, existing, vec = null) {
     const sim = Math.max(lex, sem * 0.98);
     if (sim > bestSim) { bestSim = sim; best = m; }
   }
-  if (best && (norm(best.content) === norm(content) || bestSim >= 0.88)) return { action: 'NOOP', target: best };
+  if (best && norm(best.content) === norm(content)) return { action: 'NOOP', target: best };
   // 同一单值属性（如“住在哪”）的新说法 → 取代旧值
   const attr = attributeOf(content);
   if (attr) {
-    const same = cur.find((m) => attributeOf(m.content) === attr);
+    const subject = /^(用户|我)(?!的)/.test(content) ? 'user' : null;
+    const same = subject && cur.find((m) => /^(用户|我)(?!的)/.test(m.content) && attributeOf(m.content) === attr && !/(不|没|否|未)/.test(content+m.content));
     if (same) return { action: 'UPDATE', target: same };
   }
-  if (best && bestSim >= 0.72 && best.category === category) return { action: 'UPDATE', target: best };
+  // Similarity only ranks retrieval; ambiguous facts stay separate for review.
   return { action: 'ADD' };
 }
 
@@ -126,14 +127,16 @@ export async function decide(content, category, existing, vec = null) {
  * @param {{ importance?: number, source?: string }} [o]
  * @returns {Promise<object>} 记忆，带 action 字段说明发生了什么
  */
-export async function remember(content, category = 'fact', { importance = 3, source = 'tool' } = {}) {
+export async function remember(content, category = 'fact', { importance = 3, source = 'tool', evidence = '' } = {}) {
   content = norm(content);
   if (!content) throw new Error('记忆内容为空');
   if (!CATEGORIES[category]) category = 'other';
   importance = Math.max(1, Math.min(5, Math.round(Number(importance) || 3)));
   const all = (await memories.all()).map(upgrade);
   const vec = await embedOne(content);
-  const { action, target } = await decide(content, category, all, vec);
+  const pending = source.includes('待核实');
+  const duplicate = all.find(m=>!m.validTo && norm(m.content)===content);
+  const { action, target } = pending ? (duplicate ? {action:'NOOP',target:duplicate} : {action:'ADD'}) : await decide(content, category, all, vec);
   const t = now();
   if (action === 'NOOP') {
     Object.assign(target, { updatedAt: t, lastUsed: t, importance: Math.max(target.importance, importance) });
@@ -154,7 +157,7 @@ export async function remember(content, category = 'fact', { importance = 3, sou
       history: [...(target.history || []), { content: target.content, until: t }].slice(-10),
       embedding: vec ?? undefined,
       embModel: vec ? embedder.model : undefined,
-      source
+      source, evidence, pending
     };
     await memories.put({ ...target, validTo: t, supersededBy: next.id });
     await memories.put(next);
@@ -163,7 +166,7 @@ export async function remember(content, category = 'fact', { importance = 3, sou
   }
   const m = {
     id: uid('m'), content, category, importance, ts: t, updatedAt: t, lastUsed: t, validFrom: t, validTo: null,
-    uses: 0, history: [], source, pinned: false,
+    uses: 0, history: [], source, evidence, pending, pinned: false,
     ...(vec ? { embedding: vec, embModel: embedder.model } : {})
   };
   await memories.put(m);
@@ -245,14 +248,14 @@ export async function reflect(turns, { episode = true, session = null } = {}) {
       const topics = Array.isArray(j.topics) ? j.topics.slice(0, 5).map(String) : [];
       const open = Array.isArray(j.open) ? j.open.map(String) : [];
       if (Array.isArray(j.done)) await resolveOpen(pending.filter((o) => j.done.some((d) => lexicalSim(String(d), o.text) >= 0.6)));
-      return { memories: await saveFacts(facts), episode: episode && summary ? await addEpisode({ summary, topics, turns: turns.length, session, open }) : null };
+      return { memories: await saveFacts(facts, userLines, session), episode: episode && summary ? await addEpisode({ summary, topics, turns: turns.length, session, open }) : null };
     } catch { /* 模型输出不合格：退回规则 */ }
   }
   const facts = ruleFacts(userLines.join('\n'));
   const summary = `用户：${userLines.slice(-3).map((l) => l.slice(0, 40)).join('；')}`;
   const text = userLines.join('\n');
   await resolveOpen(pending.filter((o) => lexicalSim(text, o.text) >= 0.5 || userLines.some((l) => lexicalSim(l, o.text) >= 0.5)));
-  return { memories: await saveFacts(facts), episode: episode ? await addEpisode({ summary, turns: turns.length, session, open: ruleOpen(userLines) }) : null };
+  return { memories: await saveFacts(facts, userLines, session), episode: episode ? await addEpisode({ summary, turns: turns.length, session, open: ruleOpen(userLines) }) : null };
 }
 
 /** 离线规则：用户说“下次 / 明天 / 回头再……”的事记为未完成 */
@@ -290,10 +293,10 @@ export async function resolveOpen(items) {
   }
 }
 
-async function saveFacts(facts) {
+async function saveFacts(facts, userLines=[], session=null) {
   const out = [];
   for (const f of facts.slice(0, 8)) {
-    try { out.push(await remember(f.content, f.category || 'fact', { importance: f.importance ?? 3, source: 'auto' })); } catch { /* 跳过 */ }
+    try { out.push(await remember(f.content, f.category || 'fact', { importance: f.importance ?? 3, source: '会话 '+(session?.id || '未记录')+' · 自动提炼，待核实', evidence: userLines.join('\n').slice(-4000) })); } catch { /* 跳过 */ }
   }
   return out;
 }
@@ -440,8 +443,8 @@ export async function listAll() {
   const all = ms.map(upgrade);
   return {
     core,
-    memories: all.filter(current).sort((a, b) => (b.pinned - a.pinned) || by(a, b)),
-    archived: all.filter((m) => !current(m)).sort(by),
+    memories: all.filter(m=>!m.validTo).sort((a, b) => Number(b.pending)-Number(a.pending) || (b.pinned - a.pinned) || by(a, b)),
+    archived: all.filter((m) => m.validTo).sort(by),
     lessons: ls.sort(by),
     skills: ss.sort(by),
     events: es.sort(by),
@@ -452,6 +455,14 @@ export async function listAll() {
 export async function deleteItem(kind, id) {
   const c = { memories, lessons, skills, episodes }[kind];
   if (c) await c.delete(id);
+}
+
+export async function confirmCandidate(id) {
+ const m=await memories.get(id);
+ if(!m || !m.pending || m.validTo)throw new Error('没有可确认的候选');
+ const result=await remember(m.content,m.category,{importance:m.importance,source:m.source.replace('待核实','用户已核实'),evidence:m.evidence});
+ await memories.delete(id);
+ await memories.put({...result,pending:false,confirmedAt:now()});
 }
 
 /** 备份：导出全部记忆数据（不含向量，导入后会重新计算） */

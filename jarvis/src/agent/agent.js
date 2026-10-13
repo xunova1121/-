@@ -75,7 +75,7 @@ export async function buildContext(userText, { sessionId = null, turns = 0 } = {
   }
   parts.push(ws.mode() === 'folder' ? `工作区：已连接本地文件夹「${ws.folderName()}」` : '工作区：浏览器内的虚拟工作区（用户可下载文件，或连接本地文件夹）');
   if (ctx.core?.human || ctx.core?.persona) parts.push(`## 核心记忆\n${ctx.core.human ? `【关于用户】${ctx.core.human}\n` : ''}${ctx.core.persona ? `【我的设定】${ctx.core.persona}` : ''}`.trim());
-  if (ctx.memories.length) parts.push(`## 相关记忆\n${ctx.memories.map((m) => `- ${m.content}`).join('\n')}`);
+  if (ctx.memories.length) parts.push(`## 相关记忆\n${ctx.memories.map((m) => `- [来源:${m.source || '未记录'}; 时间:${new Date(m.updatedAt || m.ts).toISOString()}; 版本:${(m.history?.length || 0)+1}] ${m.content}`).join('\n')}`);
   const day = (ts) => new Date(ts).toLocaleDateString('zh-CN');
   if (ctx.episodes?.length) parts.push(`## 相关的过往对话\n${ctx.episodes.map((e) => `- ${day(e.ts)}${e.sessionTitle ? `「${e.sessionTitle}」` : ''}：${e.summary}`).join('\n')}`);
   if (past.length) parts.push(`## 过往对话里的相关原话（需要更多细节时用 read_conversation 读全文）\n${past.map((p) => `- ${day(p.ts)}「${p.title}」（id: ${p.sessionId}）\n  用户：${p.user.slice(0, 160)}${p.reply ? `\n  贾维斯：${p.reply.replace(/\s+/g, ' ').slice(0, 240)}` : ''}`).join('\n')}`);
@@ -190,10 +190,10 @@ export async function runAgent({ adapter, model, history, userText, images = [],
   }
   // 只有正常收尾、且最后一次工具调用成功，才记为“完成任务”（计入进化等级）；否则记为未完成，便于之后复盘
   const hitLimit = step >= maxSteps;
-  if (toolCount && !hitLimit && lastToolOk) {
+  if (toolCount && !hitLimit && lastToolOk && failCount === 0) {
     await memory.noteTask(`完成任务：${userText.slice(0, 40)}（调用工具 ${toolCount} 次${failCount ? `，其中 ${failCount} 次失败后已改正` : ''}）`);
   } else if (toolCount) {
-    await memory.noteIssue(`未完成任务：${userText.slice(0, 40)}（${hitLimit ? '达到最大步数' : '最后一步工具调用失败'}；工具 ${toolCount} 次，失败 ${failCount} 次）`);
+    await memory.noteIssue(`未完成任务：${userText.slice(0, 40)}（${hitLimit ? '达到最大步数' : '存在失败步骤，需要核实结果'}；工具 ${toolCount} 次，失败 ${failCount} 次）`);
   }
   emit({ type: 'state', value: 'done' });
   return { text: finalText.trim(), steps: step + 1, toolCalls: toolCount };

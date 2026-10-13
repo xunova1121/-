@@ -35,6 +35,7 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
   addEventListener('jarvis:skills-changed', () => { clearTimeout(pending); pending = setTimeout(refresh, 50); });
 
   function card(p) {
+    const builtinTitle = [...BUILTIN_SKILLS, ...MORE_BUILTIN_SKILLS].find(s => parseFrontmatter(s.text).meta.name === p.name)?.title;
     const toggle = el('input', { type: 'checkbox', checked: p.enabled, title: p.enabled ? '停用' : '启用' });
     toggle.addEventListener('change', async () => { await packs.setEnabled(p.name, toggle.checked); refresh(); });
     const view = el('button', { type: 'button', className: 'btn ghost sm', textContent: '查看' });
@@ -51,6 +52,7 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
     });
     const files = Object.keys(p.files || {}).length;
     return el('li', { className: `skill${p.enabled ? '' : ' off'}` },
+      el('strong', { className: 'wb-skill-title', textContent: builtinTitle || p.name }),
       el('div', { className: 'skill-top' },
         el('label', { className: 'switch', title: '启用 / 停用' }, toggle, el('span')),
         el('code', { className: 'skill-name', textContent: `/${p.name}` }),

@@ -4,14 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="color-scheme" content="dark" />
-  <title>贾维斯 J.A.R.V.I.S.</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" />
+  <title>贾维斯 · 智能工作台</title>
   <link rel="stylesheet" href="/src/styles.css" />
   <script>
     // 首帧前就决定明暗，避免先黑后白的闪烁（逻辑与 src/core/theme.js 一致）
     try {
-      var t = (JSON.parse(localStorage.getItem('jarvis.settings.v1') || '{}').theme) || (window.Capacitor ? 'day' : 'time'); // 手机 App 默认白天
+      var t = (JSON.parse(localStorage.getItem('jarvis.settings.v1') || '{}').theme) || 'day'; // 手机 App 默认白天
       var h = new Date().getHours();
       var light = t === 'day' || (t === 'time' && h >= 7 && h < 19) || (t === 'system' && matchMedia('(prefers-color-scheme: light)').matches);
       document.documentElement.dataset.theme = light ? 'light' : 'dark';

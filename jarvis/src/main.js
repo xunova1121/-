@@ -10,6 +10,7 @@
  * 情绪通过颜色、眼睛形状、轮廓光强度、光环转速与扫描速度表达。
  * 减少动画：在初始化 WebGL 之前判断，命中则根本不 import three.js、不下载网格。
  */
+import { initWorkbench } from './ui/workbench.js';
 import './mobile/boot.js'; // 安卓 App：先装好原生网络 / 朗读（其他版本里是空的）
 import { EmotionMachine } from './core/emotionMachine.js';
 import { EMOTION_PARAMS, EYE_SHAPES } from './core/emotions.js';
@@ -1319,6 +1320,7 @@ function showPanel(name, { toggle = false } = {}) {
     return;
   }
   currentPane = name;
+  body.classList.remove('wb-connections');
   body.classList.remove('side-closed');
   body.classList.add('side-open');
   for (const p of document.querySelectorAll('[data-pane]')) p.hidden = p.dataset.pane !== name;
@@ -1388,6 +1390,7 @@ const skillsPanel = initSkillsPanel({
   toast: (t) => toast(t),
   onUse: (name) => {
     $('#prompt').value = `/${name} `;
+    if (body.classList.contains('workbench')) body.classList.add('side-closed');
     if (narrow.matches) body.classList.remove('side-open');
     $('#prompt').focus();
   },
@@ -1558,8 +1561,8 @@ function syncTitleBar() {
     const css = getComputedStyle(document.body);
     const color = css.getPropertyValue('--titlebar').trim();
     const symbolColor = css.getPropertyValue('--titlebar-symbol').trim();
-    const height = $('.topbar')?.offsetHeight || 56;
-    if (color) DESKTOP.setTitleBar({ color, symbolColor, height }).catch(() => {});
+    const height = 32;
+    DESKTOP.setTitleBar({ color: '#ffffff', symbolColor: '#72727d', height }).catch(() => {});
   });
 }
 new MutationObserver(syncTitleBar).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
@@ -1791,7 +1794,8 @@ agentMemory.maintain().catch(() => {});
 
 // 有对话时舞台收成迷你状态条（桌面版），给对话留空间；点一下展开 / 收起
 function updateStageMode() {
-  const mini = !COMPACT && body.classList.contains('has-convo') && !settings.stageOpen && !body.classList.contains('focus-view');
+  // 工作台的“工作室”视图要大舞台；“对话”视图里舞台隐藏，迷你模式只为把建议放到输入框上方
+  const mini = !COMPACT && body.classList.contains('has-convo') && !settings.stageOpen && !body.classList.contains('focus-view') && !body.classList.contains('wb-studio');
   const label = $('#btn-stage-toggle span');
   if (label) label.textContent = settings.stageOpen ? '收起' : '展开';
   if (mini === body.classList.contains('stage-mini')) return;
@@ -1799,6 +1803,7 @@ function updateStageMode() {
   callouts?.relocate?.();
 }
 function setStageOpen(open) { setSetting('stageOpen', open); updateStageMode(); }
+addEventListener('resize', () => updateStageMode()); // 工作台切换“对话 / 工作室”时会发 resize
 new MutationObserver(() => {
   body.classList.toggle('has-convo', Boolean(document.querySelector('#transcript .msg')));
   updateStageMode();
@@ -1928,3 +1933,5 @@ window.__jarvis = {
   get quality() { return quality; },
   workspace: ws
 };
+
+initWorkbench({showPanel,newSession,openSession,getSession:()=>session,openFile:openInWorkspace});

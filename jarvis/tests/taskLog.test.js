@@ -22,15 +22,15 @@ describe('任务日志', () => {
     await run(scripted([{ calls: ['ok_tool'] }, { text: '完成' }]));
     expect(await kinds()).toEqual([['task', '完成任务：做件事（调用工具 1 次）']]);
   });
-  it('失败后改正成功：仍算完成，并注明失败次数', async () => {
+  it('末尾工具成功不能证明先前失败已改正', async () => {
     await run(scripted([{ calls: ['bad_tool'] }, { calls: ['ok_tool'] }, { text: '完成' }]));
-    expect(await kinds()).toEqual([['task', '完成任务：做件事（调用工具 2 次，其中 1 次失败后已改正）']]);
+    expect(await kinds()).toEqual([['issue', '未完成任务：做件事（存在失败步骤，需要核实结果；工具 2 次，失败 1 次）']]);
   });
   it('最后一步工具失败：不记“完成任务”', async () => {
     await run(scripted([{ calls: ['bad_tool'] }, { text: '抱歉没做成' }]));
     const k = await kinds();
     expect(k.some(([kind]) => kind === 'task')).toBe(false);
-    expect(k[0]).toEqual(['issue', '未完成任务：做件事（最后一步工具调用失败；工具 1 次，失败 1 次）']);
+    expect(k[0]).toEqual(['issue', '未完成任务：做件事（存在失败步骤，需要核实结果；工具 1 次，失败 1 次）']);
   });
   it('达到最大步数：不记“完成任务”', async () => {
     await run(scripted([{ calls: ['ok_tool'] }]), 3);

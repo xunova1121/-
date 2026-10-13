@@ -121,7 +121,11 @@ describe('自动整理', () => {
       }
     });
     const r = await memory.reflect([{ role: 'user', content: '我搬到北京了' }]);
-    expect(r.memories[0]).toMatchObject({ action: 'UPDATE', content: '用户住在北京' });
+    expect(r.memories[0]).toMatchObject({ action: 'ADD', content: '用户住在北京',pending:true });
+    expect((await memory.contextFor('住在哪里')).memories.map(m=>m.content)).not.toContain('用户住在北京');
+    await memory.confirmCandidate(r.memories[0].id);
+    expect((await memory.contextFor('住在哪里')).memories.map(m=>m.content)).toContain('用户住在北京');
+    expect((await memory.listAll()).archived.some(m=>m.content==='用户住在上海')).toBe(true);
     expect(r.episode).toMatchObject({ summary: '用户说搬家到北京，助手更新了地址', topics: ['搬家'] });
   });
 

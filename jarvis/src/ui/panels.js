@@ -302,13 +302,15 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') refreshMind(); });
       input.addEventListener('blur', save);
     });
-    const meta = [m.uses ? `用过 ${m.uses} 次` : '', m.history?.length ? `更新 ${m.history.length} 次` : '', m.source === 'auto' ? '自动' : ''].filter(Boolean).join(' · ');
+    const meta = [m.pending?'待核实 · 不参与回答':'已生效',m.source||'来源未记录',new Date(m.updatedAt||m.ts).toLocaleString('zh-CN'),`版本 ${(m.history?.length||0)+1}`].join(' · ');
+    const confirm = el('button',{type:'button',className:'btn sm',textContent:'核实并启用'});
+    confirm.onclick=async()=>{await memory.confirmCandidate(m.id);refreshMind();};
     const x = el('button', { type: 'button', className: 'x-btn', title: '删除', textContent: '✕' });
     x.addEventListener('click', async () => { await memory.deleteItem('memories', m.id); refreshMind(); });
     return el('li', { className: `mem${m.pinned ? ' pinned' : ''}` },
       el('span', { className: 'tag', textContent: memory.CATEGORIES[m.category] ?? '其他' }),
-      el('div', { className: 'mem-main' }, text, el('div', { className: 'mem-meta' }, stars, meta ? el('span', { textContent: meta }) : null)),
-      pin, edit, x);
+      el('div', { className: 'mem-main' }, text, el('div', { className: 'mem-meta' }, stars, meta ? el('span', { textContent: meta }) : null),m.evidence?el('details',{},el('summary',{textContent:'查看来源原话'}),el('p',{textContent:m.evidence})):null),
+      m.pending?confirm:pin, edit, x);
   }
 
   $('#btn-core-save').addEventListener('click', async () => {

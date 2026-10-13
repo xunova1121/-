@@ -30,6 +30,9 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
     const { App } = await import('@capacitor/app');
     App.addListener('backButton', () => {
       const b = document.body;
+      if (b.classList.contains('workbench') && (b.classList.contains('weiyang-menu-open') || !b.classList.contains('side-closed') || b.classList.contains('wb-info-open'))) {
+        window.dispatchEvent(new Event('weiyang:back')); return;
+      }
       if (b.classList.contains('drawer-open')) return document.querySelector('.drawer-scrim')?.click();
       if (b.classList.contains('side-open')) return document.getElementById('btn-side-back')?.click();
       App.minimizeApp();

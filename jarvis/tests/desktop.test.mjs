@@ -59,7 +59,7 @@ describe('桌面版：文件操作（临时目录）', () => {
     await expect(ops.move({ from: path.join(dir, 'a.md'), to: path.join(dir, 'moved/a3.md') })).rejects.toThrow(/已存在/);
     await ops.trash({ path: path.join(dir, 'moved/a3.md') });
     expect(trashed).toEqual([path.join(dir, 'moved/a3.md')]);
-    await expect(ops.writeFile({ path: '/etc/jarvis', text: 'x' })).rejects.toThrow(/系统目录/);
+    await expect(ops.writeFile({ path: process.platform==='win32'?path.join(process.env.SystemRoot||'C:/Windows','jarvis-test'):'/etc/jarvis', text: 'x' })).rejects.toThrow(/系统目录/);
     expect(await ops.clipboardRead()).toEqual({ text: '剪贴板' });
   });
 
