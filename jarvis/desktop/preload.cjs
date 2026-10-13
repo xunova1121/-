@@ -37,5 +37,7 @@ contextBridge.exposeInMainWorld('jarvisDesktop', {
   onWallpaper(fn) {
     ipcRenderer.on('jarvis:wallpaper', (_e, payload) => fn(payload));
   },
-  setAlwaysOnTop: (on) => ipcRenderer.invoke('jarvis:window', 'alwaysOnTop', on)
+  setAlwaysOnTop: (on) => ipcRenderer.invoke('jarvis:window', 'alwaysOnTop', on),
+  /** 右上角系统按钮的底色 / 图标颜色 / 高度（跟随明暗主题） */
+  setTitleBar: (o) => ipcRenderer.invoke('jarvis:window', 'titleBar', o)
 });

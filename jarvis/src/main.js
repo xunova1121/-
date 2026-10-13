@@ -1495,6 +1495,7 @@ function setFocusView(on) {
   $('#set-focus').checked = on;
   $('#btn-focus').setAttribute('aria-pressed', String(on));
   applyFpsCap();
+  updateStageMode();
 }
 $('#btn-focus').addEventListener('click', () => setFocusView(!settings.focusView));
 $('#btn-fullscreen').addEventListener('click', () => {
@@ -1550,7 +1551,21 @@ function applyTheme() {
   $('#btn-theme').title = `${t === 'light' ? '白天' : '夜间'}界面（${THEMES[settings.theme]}）· 点击切换`;
 }
 function setTheme(mode) { setSetting('theme', mode); applyTheme(); }
+// 桌面版：右上角系统按钮的底色 / 图标色 / 高度跟随顶栏
+function syncTitleBar() {
+  if (!DESKTOP?.setTitleBar) return;
+  requestAnimationFrame(() => {
+    const css = getComputedStyle(document.body);
+    const color = css.getPropertyValue('--titlebar').trim();
+    const symbolColor = css.getPropertyValue('--titlebar-symbol').trim();
+    const height = $('.topbar')?.offsetHeight || 56;
+    if (color) DESKTOP.setTitleBar({ color, symbolColor, height }).catch(() => {});
+  });
+}
+new MutationObserver(syncTitleBar).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+addEventListener('load', syncTitleBar);
 applyTheme();
+syncTitleBar();
 lightMql.addEventListener?.('change', applyTheme);
 setInterval(() => { if (settings.theme === 'time') applyTheme(); }, 60_000);
 $('#btn-theme').addEventListener('click', () => {
@@ -1774,13 +1789,48 @@ agentMemory.maintain().catch(() => {});
   setTimeout(() => boot.remove(), 2500);
 })();
 
-// 有对话时舞台稍微收矮，给对话留空间
-new MutationObserver(() => body.classList.toggle('has-convo', Boolean(document.querySelector('#transcript .msg')))).observe($('#transcript'), { childList: true });
+// 有对话时舞台收成迷你状态条（桌面版），给对话留空间；点一下展开 / 收起
+function updateStageMode() {
+  const mini = !COMPACT && body.classList.contains('has-convo') && !settings.stageOpen && !body.classList.contains('focus-view');
+  const label = $('#btn-stage-toggle span');
+  if (label) label.textContent = settings.stageOpen ? '收起' : '展开';
+  if (mini === body.classList.contains('stage-mini')) return;
+  body.classList.toggle('stage-mini', mini);
+  callouts?.relocate?.();
+}
+function setStageOpen(open) { setSetting('stageOpen', open); updateStageMode(); }
+new MutationObserver(() => {
+  body.classList.toggle('has-convo', Boolean(document.querySelector('#transcript .msg')));
+  updateStageMode();
+}).observe($('#transcript'), { childList: true });
+$('#btn-stage-toggle').addEventListener('click', (e) => { e.stopPropagation(); setStageOpen(!settings.stageOpen); });
+$('#stage-wrap').addEventListener('click', (e) => { if (body.classList.contains('stage-mini') && !e.target.closest('button, a, .callout')) setStageOpen(true); });
 
 orbit = COMPACT ? null : initOrbitHud({ root: $('#stage-wrap'), getAnchor: () => stage?.anchor?.() ?? null, reducedMotion: () => body.classList.contains('reduced-motion') });
 updateOrbitStatus();
 orbit?.think('系统就绪 · 粒子核心在线');
-callouts = (COMPACT ? initChips : initCallouts)({
+/** 桌面版：大舞台时建议在光核旁边，迷你状态条时改到输入框上方；两边接口一样，这里按当前模式转发 */
+function dualSuggestions(full, chips, useChips) {
+  let items = [];
+  const cur = () => (useChips() ? chips : full);
+  return {
+    set(next) { items = next || []; (useChips() ? full : chips).retract(); cur().set(items); },
+    show: () => cur().show(),
+    retract() { full.retract(); chips.retract(); },
+    get items() { return cur().items; },
+    get visible() { return cur().visible; },
+    pick: (i) => cur().pick(i),
+    relocate() {
+      const wasVisible = full.visible || chips.visible;
+      full.retract();
+      chips.retract();
+      if (!items.length) return;
+      cur().set(items);
+      if (!wasVisible) cur().retract();
+    }
+  };
+}
+const suggestionOpts = {
   root: $('#stage-wrap'),
   getAnchor: () => stage?.anchor?.() ?? null,
   reducedMotion: () => body.classList.contains('reduced-motion'),
@@ -1803,7 +1853,9 @@ callouts = (COMPACT ? initChips : initCallouts)({
     if (item.panel) { showPanel(item.panel); callouts?.show(); return; }
     setTimeout(() => send(item.prompt), 160);
   }
-});
+};
+callouts = COMPACT ? initChips(suggestionOpts) : dualSuggestions(initCallouts(suggestionOpts), initChips(suggestionOpts), () => body.classList.contains('stage-mini'));
+updateStageMode();
 callouts.set(openingSuggestions({ desktop: Boolean(DESKTOP), hasSkills: false }));
 if (!history.length) openingCallouts(false);
 

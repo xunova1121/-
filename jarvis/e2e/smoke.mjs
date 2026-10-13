@@ -153,6 +153,13 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
 
   // —— 光核旁的建议标注：虚线连到光核；悬停时光核看向它；点击即执行，回答后换一组
   await page.evaluate(() => window.__jarvis.interrupt());
+  // 有对话后：舞台收成迷你状态条（光核还在），建议改到输入框上方；点“展开”恢复大舞台
+  await page.waitForTimeout(300);
+  const mini = await page.evaluate(() => ({ mini: document.body.classList.contains('stage-mini'), h: document.querySelector('#stage-wrap').getBoundingClientRect().height, chips: document.querySelectorAll('.chip-bar:not([hidden]) .chip').length }));
+  check('有对话后舞台收成迷你状态条，建议在输入框上方', mini.mini && mini.h <= 110 && mini.chips === 3, JSON.stringify(mini));
+  await page.click('#btn-stage-toggle');
+  await page.waitForTimeout(500);
+  check('点“展开”恢复大舞台，建议回到光核旁', await page.evaluate(() => !document.body.classList.contains('stage-mini') && document.querySelector('.chip-bar').hidden));
   await page.waitForFunction(() => window.__jarvis.callouts.visible, null, { timeout: 5000 }).catch(() => {});
   const cl = await page.evaluate(() => ({ n: document.querySelectorAll('.callout:not([hidden])').length, d: [...document.querySelectorAll('.cl-line')].map((x) => x.getAttribute('d')) }));
   check('光核旁有 3 条建议，各自有虚线连到光核', cl.n === 3 && cl.d.every((d) => /^M[\d.]+,[\d.]+ L/.test(d || '')), JSON.stringify(cl.d[0]));
@@ -169,6 +176,8 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.waitForTimeout(400);
   const after = await page.evaluate(() => window.__jarvis.callouts.items.map((x) => x.title));
   check('回答后换成新的跟进建议', after.length === 3 && after.join(' / ') !== beforeTitles, `${beforeTitles} → ${after.join(' / ')}`);
+  await page.click('#btn-stage-toggle'); // 收回迷你状态条
+  await page.waitForTimeout(300);
 
   // —— 定时任务：一句话创建；面板里立即运行，结果存成一段对话
   let schReply = await ask(page, '每个工作日早上9点帮我总结工作区里的文件');

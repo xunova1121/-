@@ -163,6 +163,15 @@ ipcMain.handle('jarvis:window', (e, action, value) => {
   if (!fromOurPage(e) || !win) return false;
   if (action === 'alwaysOnTop') win.setAlwaysOnTop(Boolean(value), 'floating');
   if (action === 'hide') win.hide();
+  // 右上角系统按钮（最小化 / 最大化 / 关闭）的底色和高度跟随页面顶栏（明暗主题切换时页面会发过来）
+  if (action === 'titleBar' && process.platform !== 'darwin' && value && typeof win.setTitleBarOverlay === 'function') {
+    const hex = (c) => (/^#[0-9a-f]{6}$/i.test(String(c)) ? c : null);
+    const color = hex(value.color);
+    const symbolColor = hex(value.symbolColor);
+    const height = Math.round(Number(value.height));
+    if (color && symbolColor) win.setTitleBarOverlay({ color, symbolColor, ...(height >= 28 && height <= 120 && { height }) });
+    if (color) win.setBackgroundColor(color);
+  }
   return true;
 });
 

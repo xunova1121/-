@@ -1139,3 +1139,36 @@ body.reduced-motion .drawer { transition: none; }
 :root[data-theme="light"] .compact .file-link .fl-ext { background: linear-gradient(135deg, #7f8ef8, #8b63f0); }
 .row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 10px; }
 .row-actions .small { min-width: 0; overflow-wrap: anywhere; }
+
+/* 桌面版顶栏用实色：右上角系统按钮（最小化 / 最大化 / 关闭）的底色取同一个颜色，明暗切换时一起变，不再是一块黑 */
+body.desktop { --titlebar: #fafbfd; --titlebar-symbol: #4a4f63; }
+:root:not([data-theme="light"]) body.desktop { --titlebar: #2a2d41; --titlebar-symbol: #d6d4e6; }
+body.desktop .topbar { background: var(--titlebar) !important; backdrop-filter: none !important; }
+
+/* ================================================================
+ * 桌面版“迷你舞台”：开始对话后，舞台收成一条 104px 的状态条——
+ * 左边是同一个粒子光核（缩小，不换特效），中间一行状态，右边最近几步工作进展；
+ * 建议改到输入框上方（同手机版）。点一下状态条或“展开”恢复大舞台；欢迎页仍是大舞台。
+ * ================================================================ */
+.stage-toggle { display: none; }
+body.has-convo:not(.compact) .stage-toggle {
+  display: inline-flex; position: absolute; right: 12px; bottom: 10px; z-index: 4; align-items: center; gap: 4px;
+  padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: rgba(4, 10, 18, 0.55);
+  color: var(--muted); font: 11px var(--font-display); letter-spacing: .1em; cursor: pointer;
+}
+body.has-convo:not(.compact) .stage-toggle:hover { color: var(--text); border-color: var(--accent); }
+body.stage-mini .stage { height: 104px; cursor: pointer; }
+body.stage-mini #stage, body.stage-mini #fallback-bg { width: 200px; right: auto; }
+body.stage-mini #stage { -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 42%, transparent 70%); mask-image: radial-gradient(circle at 50% 50%, #000 42%, transparent 70%); }
+body.stage-mini .hud-frame, body.stage-mini .hud-clock, body.stage-mini .orbit-hud, body.stage-mini .callouts, body.stage-mini .callout-lines, body.stage-mini .hud-right { display: none; }
+body.stage-mini .hud-left { left: 196px; top: 50%; transform: translateY(-50%); grid-template-columns: none; grid-template-rows: auto auto; grid-auto-flow: column; gap: 4px 26px; font-size: 11.5px; }
+body.stage-mini .hud-left > :nth-child(n+7) { display: none; } /* 只留 表达 / 任务 / 模型 */
+body.stage-mini .hud-left .hud-v { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body.stage-mini .thought-log { top: 14px; bottom: auto; right: 104px; width: min(360px, 34%); }
+body.stage-mini .thought-log li:not(:nth-last-child(-n+3)) { display: none; }
+body.stage-mini .stage .thought-log, body.stage-mini .stage[data-cl-mode] .thought-log { display: block; }
+body.stage-mini .thought-log .tl-head { display: none; }
+body.stage-mini .stage::after { display: none; }
+@media (max-width: 1180px) { body.stage-mini .stage .thought-log, body.stage-mini .stage[data-cl-mode] .thought-log { display: none; } }
+/* 桌面版的建议条和对话同宽居中 */
+body:not(.compact) .chip-bar { padding: 0 max(16px, calc((100% - 860px) / 2)) 8px; }

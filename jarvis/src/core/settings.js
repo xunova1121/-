@@ -9,6 +9,7 @@ export const DEFAULT_SETTINGS = {
   vadSensitivity: '中',
   emotionOverride: 'auto',
   focusView: false,
+  stageOpen: false, // 桌面版：有对话时也保持大舞台（默认收成迷你状态条）
   reducedMotion: 'system', // system | on | off
   look: 'orb', // orb 光核 | holo 全息胸像 | wire 线框胸像
   quality: 'auto', // auto | high | standard | eco
