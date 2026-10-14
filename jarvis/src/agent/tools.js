@@ -5,13 +5,14 @@
 import * as ws from './workspace.js';
 import * as memory from './memory.js';
 import * as kb from './knowledge.js';
-import { parseFile, generate, htmlToText } from './docs.js';
+import { parseFile, generate } from './docs.js';
 import { runJavaScript, runPython } from './sandbox.js';
 import * as packs from './skillPacks.js';
 import { isImageName, prepareImage } from './images.js';
 import * as scheduler from './scheduler.js';
 import * as sessions from './sessions.js';
 import { createSearch } from './webSearch.js';
+import { createPageReader } from './pageReader.js';
 import { deepResearch, DEPTHS } from './research.js';
 import { factCheck, formatReport } from './factCheck.js';
 
@@ -52,6 +53,7 @@ const clip = (s, n = 20000) => (s.length > n ? `${s.slice(0, n)}\n…（已截�
  * @param {((p: { system: string, prompt: string, signal?: AbortSignal }) => Promise<string>) | null} [ctx.llm]  深度调研用的大模型（内置演示时为空）
  */
 export function createTools(ctx) {
+  const readPage = createPageReader(ctx); // 直接打不开或没读到正文时，有 Tavily Key 就让 Tavily 代读
   const tools = [
     {
       name: 'remember',
@@ -348,11 +350,7 @@ export function createTools(ctx) {
       input_schema: S({ url: str('http(s) 地址') }, ['url']),
       run: async ({ url }) => {
         if (!/^https?:\/\//i.test(url)) throw new Error('只支持 http(s) 地址');
-        const res = ctx.fetchViaGateway ? await ctx.fetchViaGateway(url) : await fetch(url).catch(() => { throw new Error('浏览器无法直接读取该网站（跨域限制）。请使用完整版网关，或让我用联网搜索。'); });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const type = res.headers.get('content-type') || '';
-        const body = await res.text();
-        return clip(type.includes('html') ? htmlToText(body) : body, 15000);
+        return clip(await readPage(url), 15000);
       }
     },
     {
@@ -370,25 +368,21 @@ export function createTools(ctx) {
   ];
 
   const engine = createSearch(ctx);
-  const readPage = async (url) => {
-    const res = ctx.fetchViaGateway ? await ctx.fetchViaGateway(url) : await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const type = res.headers.get('content-type') || '';
-    if (!/html|text|json|xml/.test(type)) throw new Error('不是网页');
-    const body = await res.text();
-    return type.includes('html') ? htmlToText(body) : body;
-  };
   if (engine) {
     tools.push({
       name: 'web_search',
       description: `联网搜索最新信息（比分赛果、新闻、价格、版本、事件等时效性内容；搜索源：${engine.name}）。外国的队名、人名、公司用原文或英文搜；多个对象（如几场比赛）放进 queries 一次并行搜。结果不够时用 fetch_url 读原文。回答时注明来源链接。需要全面、有出处的研究时改用 deep_research。`,
-      input_schema: S({ query: str('搜索词'), queries: { type: 'array', items: { type: 'string' }, description: '可选：多个搜索词，一次并行搜索（最多 8 个），例如每场比赛一个' } }, []),
-      run: async ({ query, queries }) => {
+      input_schema: S({
+        query: str('搜索词'),
+        queries: { type: 'array', items: { type: 'string' }, description: '可选：多个搜索词，一次并行搜索（最多 8 个），例如每场比赛一个' },
+        freshness: { type: 'string', enum: ['day', 'week', 'month', 'year'], description: '可选：只要最近一天 / 一周 / 一个月 / 一年内的结果（新闻、刚结束的比赛、最新价格时用）' }
+      }, []),
+      run: async ({ query, queries, freshness }) => {
         const list = [...new Set([query, ...(Array.isArray(queries) ? queries : [])].map((q) => String(q || '').trim()).filter(Boolean))].slice(0, 8);
         if (!list.length) throw new Error('请给出搜索词');
         const one = async (q) => {
           try {
-            const hits = await engine.search(q, list.length > 1 ? 5 : 6);
+            const hits = await engine.search(q, list.length > 1 ? 5 : 6, { freshness });
             return hits.length ? hits.map((r) => `- ${r.title}\n  ${r.url}\n  ${String(r.snippet || '').slice(0, 300)}`).join('\n') : '（没有结果：换个说法、换成英文或原文再搜）';
           } catch (e) { return `（搜索失败：${e.message}）`; }
         };

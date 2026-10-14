@@ -6,19 +6,22 @@
  *
  * 配置保存在 JSON 文件里（完整版：~/.jarvis/mcp.json；桌面版：应用数据目录），密钥只在这台电脑上。
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { readJsonSafe, writeJsonAtomic } from './safeJson.mjs';
 
 export const defaultConfigPath = () => path.join(process.env.JARVIS_HOME || path.join(os.homedir(), '.jarvis'), 'mcp.json');
 
 const CONNECT_TIMEOUT = 60_000; // npx 首次运行要下载包，给足时间
 const CALL_TIMEOUT = 120_000;
 const MAX_RESULT = 100_000;
+// 连接意外断开后自动重连：依次等这么久；连续失败这么多次就停下（熔断），等用户点“重连”
+export const RECONNECT_DELAYS = [2_000, 5_000, 15_000];
+const STABLE_MS = 60_000; // 连上后稳定这么久，失败计数清零
 
 /** 服务 id：小写字母数字和连字符 */
 export const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'server';
@@ -63,21 +66,50 @@ function validate(s) {
 /**
  * @param {{ configPath?: string, log?: (msg: string) => void, extraPath?: string }} o
  */
-export function createMcpManager({ configPath = defaultConfigPath(), log = () => {}, extraPath = '' } = {}) {
+export function createMcpManager({ configPath = defaultConfigPath(), log = () => {}, extraPath = '', reconnectDelays = RECONNECT_DELAYS, stableMs = STABLE_MS } = {}) {
   /** @type {Map<string, { client?: Client, transport?: any, status: string, error?: string, tools: any[], stderr: string[] }>} */
   const conns = new Map();
+  /** 自动重连状态：连续失败次数、等待中的定时器 */
+  const retry = new Map();
   let servers = [];
 
   function load() {
-    try { servers = (JSON.parse(fs.readFileSync(configPath, 'utf8')).servers || []).map((s) => { try { return validate(s); } catch { return null; } }).filter(Boolean); } catch { servers = []; }
+    const { data, restored, broken } = readJsonSafe(configPath, { servers: [] });
+    if (broken) log(restored ? `MCP 配置文件损坏，已从上次的备份恢复（坏文件留在 ${path.basename(broken)}）` : `MCP 配置文件损坏且没有备份，坏文件已改名为 ${path.basename(broken)}`);
+    servers = (Array.isArray(data?.servers) ? data.servers : []).map((s) => { try { return validate(s); } catch { return null; } }).filter(Boolean);
   }
   function save() {
-    fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    fs.writeFileSync(configPath, JSON.stringify({ servers }, null, 2), { mode: 0o600 });
+    writeJsonAtomic(configPath, { servers }, { mode: 0o600 });
   }
 
-  async function connect(s) {
-    await disconnect(s.id);
+  const clearRetry = (id) => { clearTimeout(retry.get(id)?.timer); retry.delete(id); };
+
+  /** 意外断开 / 自动重连失败：按间隔再试，连续失败太多次就停 */
+  function scheduleReconnect(s, conn) {
+    const r = retry.get(s.id) || { fails: 0 };
+    clearTimeout(r.timer);
+    if (r.fails >= reconnectDelays.length) {
+      Object.assign(conn, { status: 'error', error: `${conn.error || '连接已断开'}（自动重连 ${r.fails} 次都失败，已暂停；检查后点“重连”）` });
+      log(`MCP「${s.name}」自动重连连续失败，已暂停`);
+      retry.set(s.id, r);
+      return;
+    }
+    const wait = reconnectDelays[r.fails];
+    r.fails += 1;
+    Object.assign(conn, { status: 'error', error: `${conn.error || '连接已断开'}，${Math.round(wait / 1000)} 秒后自动重连（第 ${r.fails} 次）` });
+    r.timer = setTimeout(() => {
+      if (conns.get(s.id) !== conn) return; // 期间被用户修改 / 删除 / 手动重连
+      const cur = servers.find((x) => x.id === s.id);
+      if (cur?.enabled) connect(cur, { auto: true }).catch(() => {});
+    }, wait);
+    r.timer.unref?.();
+    retry.set(s.id, r);
+  }
+
+  async function connect(s, { auto = false } = {}) {
+    if (!auto) clearRetry(s.id); // 用户操作：重新开始计数
+    else clearTimeout(retry.get(s.id)?.timer);
+    await disconnect(s.id, { keepRetry: auto });
     const conn = { status: 'connecting', tools: [], stderr: [] };
     conns.set(s.id, conn);
     let client = new Client({ name: 'jarvis', version: '1.0.0' });
@@ -114,20 +146,32 @@ export function createMcpManager({ configPath = defaultConfigPath(), log = () =>
         cursor = page.nextCursor;
       } while (cursor && tools.length < 500);
       Object.assign(conn, { client, transport, status: 'ready', tools, error: undefined });
-      client.onclose = () => { if (conns.get(s.id) === conn && conn.status === 'ready') Object.assign(conn, { status: 'error', error: '连接已断开' }); };
+      client.onclose = () => {
+        if (conns.get(s.id) !== conn || conn.status !== 'ready') return; // 我们自己断开的不算
+        clearTimeout(conn.stableTimer);
+        Object.assign(conn, { status: 'error', error: '连接已断开' });
+        log(`MCP「${s.name}」连接意外断开`);
+        scheduleReconnect(s, conn);
+      };
+      // 稳定运行一段时间后失败计数清零
+      conn.stableTimer = setTimeout(() => { if (conns.get(s.id) === conn && conn.status === 'ready') clearRetry(s.id); }, stableMs);
+      conn.stableTimer.unref?.();
       log(`MCP「${s.name}」已连接，${tools.length} 个工具`);
     } catch (err) {
       const tail = conn.stderr.join('').trim().split('\n').slice(-3).join(' ').slice(0, 300);
       Object.assign(conn, { status: 'error', error: `${err.message}${tail ? `｜${tail}` : ''}` });
       try { await client.close(); } catch { /* ignore */ }
       log(`MCP「${s.name}」连接失败：${conn.error}`);
+      if (auto && conns.get(s.id) === conn) scheduleReconnect(s, conn);
     }
     return conn;
   }
 
-  async function disconnect(id) {
+  async function disconnect(id, { keepRetry = false } = {}) {
     const c = conns.get(id);
     conns.delete(id);
+    if (!keepRetry) clearRetry(id);
+    if (c) clearTimeout(c.stableTimer);
     if (c?.client) { try { await c.client.close(); } catch { /* ignore */ } }
   }
 

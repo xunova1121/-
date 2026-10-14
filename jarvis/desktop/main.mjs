@@ -109,10 +109,20 @@ Object.assign(ops, {
 
 // ---------------------------------------------------------------- 桌面背景 + 在场检测
 const prefsFile = () => path.join(process.env.JARVIS_HOME, 'desktop.json');
-function readPrefs() { try { return JSON.parse(fs.readFileSync(prefsFile(), 'utf8')); } catch { return {}; } }
+function readPrefs() {
+  for (const f of [prefsFile(), `${prefsFile()}.bak`]) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { /* 没有或损坏：试备份 */ } }
+  return {};
+}
 function writePrefs(patch) {
   const next = { ...readPrefs(), ...patch };
-  try { fs.mkdirSync(path.dirname(prefsFile()), { recursive: true }); fs.writeFileSync(prefsFile(), JSON.stringify(next, null, 2)); } catch (e) { console.warn(e); }
+  // 先写临时文件再替换，替换前留一份能用的备份：写到一半断电不会把设置弄坏
+  try {
+    const f = prefsFile(), tmp = `${f}.tmp`;
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(tmp, JSON.stringify(next, null, 2));
+    try { JSON.parse(fs.readFileSync(f, 'utf8')); fs.copyFileSync(f, `${f}.bak`); } catch { /* 还没有或已损坏 */ }
+    fs.renameSync(tmp, f);
+  } catch (e) { console.warn(e); }
   return next;
 }
 let wallpaper = null;

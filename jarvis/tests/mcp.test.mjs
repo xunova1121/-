@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createMcpManager, resultToText, slug } from '../server/mcp.mjs';
 import { createServer } from '../server/server.mjs';
 import { MockAgent } from '../server/agents.mjs';
@@ -94,4 +95,86 @@ describe('网关 MCP 接口只允许本机页面调用', () => {
     expect(r.status).toBe(404);
     s2.close();
   });
+});
+
+describe('MCP 配置文件损坏时恢复', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-mcp-cfg-'));
+  const file = path.join(d, 'mcp.json');
+  const off = (name) => ({ name, type: 'stdio', command: 'x', enabled: false });
+
+  it('保存时留备份；文件坏了从备份恢复，坏文件改名留底，不会被空配置覆盖', async () => {
+    const logs = [];
+    const m = createMcpManager({ configPath: file });
+    await m.upsert(off('甲'));
+    await m.upsert(off('乙')); // 第二次保存时，第一次的内容成为备份
+    expect(fs.existsSync(`${file}.bak`)).toBe(true);
+    fs.writeFileSync(file, '{"servers": [ {"name": "甲"'); // 写到一半断电
+    const m2 = createMcpManager({ configPath: file, log: (t) => logs.push(t) });
+    expect(m2.list().map((s) => s.name)).toEqual(['甲']);
+    expect(logs.join()).toMatch(/已从上次的备份恢复/);
+    expect(fs.readdirSync(d).some((f) => f.startsWith('mcp.json.broken-'))).toBe(true);
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).servers.map((s) => s.name)).toEqual(['甲']);
+  });
+
+  it('没有备份时当作空配置，但坏文件保留', () => {
+    const f2 = path.join(d, 'other.json');
+    fs.writeFileSync(f2, 'not json');
+    const m = createMcpManager({ configPath: f2 });
+    expect(m.list()).toEqual([]);
+    expect(fs.readdirSync(d).some((f) => f.startsWith('other.json.broken-'))).toBe(true);
+  });
+});
+
+describe('MCP 意外断开后自动重连', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-mcp-flaky-'));
+  /** 一个会崩的服务：前 crashTimes 次启动后 300ms 自己退出 */
+  function flaky(name, crashTimes) {
+    const counter = path.join(d, `${name}.count`);
+    const script = path.join(d, `${name}.mjs`);
+    fs.writeFileSync(script, `import fs from 'node:fs';
+const n = (Number(fs.existsSync(${JSON.stringify(counter)}) ? fs.readFileSync(${JSON.stringify(counter)}, 'utf8') : 0) || 0) + 1;
+fs.writeFileSync(${JSON.stringify(counter)}, String(n));
+if (n <= ${crashTimes}) setTimeout(() => process.exit(1), 300);
+await import(${JSON.stringify(pathToFileURL(FIXTURE).href)});
+`);
+    return { name, type: 'stdio', command: process.execPath, args: [script], starts: () => Number(fs.readFileSync(counter, 'utf8')) };
+  }
+  const until = async (fn, ms = 10000) => { const t = Date.now(); while (!fn()) { if (Date.now() - t > ms) throw new Error('timeout'); await new Promise((r) => setTimeout(r, 50)); } };
+
+  it('进程崩了自动重连，工具恢复可用', async () => {
+    const s = flaky('once', 1);
+    const m = createMcpManager({ configPath: path.join(d, 'a.json'), reconnectDelays: [100, 100, 100] });
+    await m.upsert(s);
+    await until(() => s.starts() >= 2 && m.list()[0].status === 'ready');
+    expect(await m.call('once', 'echo', { message: '回来了' })).toEqual({ isError: false, text: '回显：回来了' });
+    await m.closeAll();
+  }, 20000);
+
+  it('一直崩：重连几次后停下（不死循环），手动重连重新计数', async () => {
+    const s = flaky('always', 99);
+    const m = createMcpManager({ configPath: path.join(d, 'b.json'), reconnectDelays: [50, 50] });
+    await m.upsert(s);
+    await until(() => /已暂停/.test(m.list()[0].error || ''));
+    const n = s.starts();
+    expect(n).toBe(3); // 第一次 + 自动重连 2 次
+    await new Promise((r) => setTimeout(r, 800));
+    expect(s.starts()).toBe(n); // 停下后不再启动
+    await m.restart('always');
+    expect(m.list()[0].status).toBe('ready');
+    await until(() => /已暂停/.test(m.list()[0].error || ''));
+    expect(s.starts()).toBe(n + 3);
+    await m.closeAll();
+  }, 20000);
+
+  it('用户停用或删除后不再重连', async () => {
+    const s = flaky('removed', 99);
+    const m = createMcpManager({ configPath: path.join(d, 'c.json'), reconnectDelays: [400, 400] });
+    await m.upsert(s);
+    await until(() => /秒后自动重连/.test(m.list()[0].error || ''));
+    await m.remove('removed');
+    const n = s.starts();
+    await new Promise((r) => setTimeout(r, 1000));
+    expect(s.starts()).toBe(n);
+    await m.closeAll();
+  }, 20000);
 });

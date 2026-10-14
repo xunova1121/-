@@ -117,16 +117,36 @@ export async function detectRegion(fetchImpl, { timeZone = Intl.DateTimeFormat()
   return CN_TZ.test(timeZone || '') ? 'cn' : 'global';
 }
 
-/** 各地区用哪些搜索源 */
-export function searchPlan(query, region) {
+const FRESH_DAYS = { day: 1, week: 7, month: 30, year: 365 };
+
+/** 只要最近一段时间的结果：各搜索源自己的时间筛选参数（不认识的参数各家会忽略） */
+function freshParams(freshness, now) {
+  const days = FRESH_DAYS[freshness];
+  if (!days) return { bing: '', baidu: '', so: '', ddg: '' };
+  const to = Math.floor(now / 1000), from = to - days * 86400;
+  const d = (t) => Math.floor(t / 86400); // 必应自定义范围用“距 1970 年的天数”
+  const bingCode = { day: 'ez1', week: 'ez2', month: 'ez3' }[freshness] || `ez5_${d(from)}_${d(to)}`;
+  return {
+    bing: `&filters=${encodeURIComponent(`ex1:"${bingCode}"`)}`,
+    baidu: `&gpc=${encodeURIComponent(`stf=${from},${to}|stftype=1`)}`,
+    so: `&adv_t=${freshness[0]}`,
+    ddg: `&df=${freshness[0]}`
+  };
+}
+
+/** 各地区用哪些搜索源；freshness：day / week / month / year 只要这段时间内的 */
+export function searchPlan(query, region, freshness = '', now = Date.now()) {
   const q = encodeURIComponent(query);
   const zh = /[\u4e00-\u9fff]/.test(query);
+  const f = freshParams(freshness, now);
   if (region === 'cn') {
+    const baidu = ['百度', `https://www.baidu.com/s?wd=${q}&rn=10${f.baidu}`, parseBaidu];
+    const so = ['360', `https://www.so.com/s?q=${q}${f.so}`, parseSo360];
     return zh
-      ? [['必应中国', `https://cn.bing.com/search?q=${q}&count=10&setlang=zh-Hans`, parseBing], ['百度', `https://www.baidu.com/s?wd=${q}&rn=10`, parseBaidu], ['360', `https://www.so.com/s?q=${q}`, parseSo360]]
-      : [['必应中国（国际版）', `https://cn.bing.com/search?q=${q}&count=10&ensearch=1`, parseBing], ['百度', `https://www.baidu.com/s?wd=${q}&rn=10`, parseBaidu], ['360', `https://www.so.com/s?q=${q}`, parseSo360]];
+      ? [['必应中国', `https://cn.bing.com/search?q=${q}&count=10&setlang=zh-Hans${f.bing}`, parseBing], baidu, so]
+      : [['必应中国（国际版）', `https://cn.bing.com/search?q=${q}&count=10&ensearch=1${f.bing}`, parseBing], baidu, so];
   }
-  return [[zh ? '必应中国' : '必应', `https://${zh ? 'cn.' : 'www.'}bing.com/search?q=${q}&count=10${zh ? '&setlang=zh-Hans' : ''}`, parseBing], ['DuckDuckGo', `https://html.duckduckgo.com/html/?q=${q}`, parseDuckDuckGo]];
+  return [[zh ? '必应中国' : '必应', `https://${zh ? 'cn.' : 'www.'}bing.com/search?q=${q}&count=10${zh ? '&setlang=zh-Hans' : ''}${f.bing}`, parseBing], ['DuckDuckGo', `https://html.duckduckgo.com/html/?q=${q}${f.ddg}`, parseDuckDuckGo]];
 }
 
 /**
@@ -156,9 +176,9 @@ function tavilySearch(tavilyKey, fetchViaGateway) {
   return {
     name: 'Tavily',
     // deep：顺带要回网页正文（查证时不用再逐篇打开，手机上也不受跨域限制；仍是基础档，每次 1 个额度）
-    async search(query, n = 6, { deep = false } = {}) {
+    async search(query, n = 6, { deep = false, freshness = '' } = {}) {
       const url = 'https://api.tavily.com/search';
-      const init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: tavilyKey, query, max_results: n, include_answer: false, ...(deep && { include_raw_content: true }) }) };
+      const init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: tavilyKey, query, max_results: n, include_answer: false, ...(deep && { include_raw_content: true }), ...(FRESH_DAYS[freshness] && { time_range: freshness }) }) };
       const res = fetchViaGateway ? await fetchViaGateway(url, init) : await fetch(url, init);
       if (!res.ok) throw new Error(`搜索服务返回 ${res.status}`);
       const j = await res.json();
@@ -180,8 +200,8 @@ function keylessSearch(fetchViaGateway, searchRegion) {
   return {
     get name() { return region === 'cn' ? '必应中国、百度、360（国内）' : region === 'global' ? '必应、DuckDuckGo' : '按网络自动选择（国内：必应中国、百度、360；国外：必应、DuckDuckGo）'; },
     regionNow,
-    async search(query, n = 6) {
-      const plan = searchPlan(query, await regionNow());
+    async search(query, n = 6, { freshness = '' } = {}) {
+      const plan = searchPlan(query, await regionNow(), freshness);
       // 一个来源结果太少（被拦、只有广告）时再查下一个，合并去重
       let lastErr = null;
       const hits = [];
