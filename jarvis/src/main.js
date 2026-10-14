@@ -36,6 +36,7 @@ import { initPalette } from './ui/palette.js';
 import * as scheduler from './agent/scheduler.js';
 import { executeScheduled, scheduledPrompt, notificationFor } from './agent/scheduledRun.js';
 import { preApproved } from './agent/commandSafety.js';
+import * as compress from './agent/compress.js';
 import * as habits from './agent/habits.js';
 import { initSchedulesPanel } from './ui/schedulesPanel.js';
 import { prepareImage, isImageName } from './agent/images.js';
@@ -524,6 +525,22 @@ async function reflectNow({ manual = false } = {}) {
 }
 addEventListener('pagehide', () => { if (settings.autoMemory) reflectNow(); });
 
+/** 长对话压缩：回答完后在后台把较早的消息并进“前情提要”（见 compress.js），不影响当前对话 */
+let compressing = false;
+async function compressHistory() {
+  const s = session;
+  if (compressing || !compress.dueForCompression(s.messages, s.summary).length) return;
+  compressing = true;
+  try {
+    const next = await compress.updateSummary(s.messages, s.summary, { llm: helperLlm() });
+    if (next && next !== s.summary) {
+      s.summary = next;
+      if (settings.saveSessions !== false) sessionsApi.save(s).catch(() => {});
+      hud.think(`◆ 较早的对话已压缩成摘要${next.by === 'rule' ? '（本地规则）' : ''}`);
+    }
+  } catch (e) { console.warn('[compress]', e); } finally { compressing = false; }
+}
+
 // ---------------------------------------------------------------- 多会话
 /** 把当前会话的消息重新画到对话区 */
 function replayTranscript() {
@@ -813,8 +830,10 @@ async function send(text) {
   // 之前发过的图片（最近两条带图的消息）继续带给模型：追问“第二张图里……”时模型还看得到
   // 只在这句话提到图片时才带（不然后面每句闲聊都会被当成看图任务、多花流量）
   const refersToImage = !imgs.length && /图|截图|照片|相片|图片|表格|这张|那张|第.张|上面|刚才发的|picture|image|screenshot/i.test(text);
-  const withImages = new Set(refersToImage ? history.slice(-20).filter((m) => m.role === 'user' && recentImages.has(m.ts)).slice(-2).map((m) => m.ts) : []);
-  const llmHistory = history.slice(-20).map(({ role, content, ts }) => ({ role, content, ...(withImages.has(ts) && { images: recentImages.get(ts) }) }));
+  // 长对话：已压缩进摘要的消息不再原样发送，其余（至少最近 20 条）原样发送，见 compress.js
+  const recent = compress.unsummarized(history, session.summary);
+  const withImages = new Set(refersToImage ? recent.filter((m) => m.role === 'user' && recentImages.has(m.ts)).slice(-2).map((m) => m.ts) : []);
+  const llmHistory = recent.map(({ role, content, ts }) => ({ role, content, ...(withImages.has(ts) && { images: recentImages.get(ts) }) }));
   rememberTurn('user', userText, thumbs.length ? { thumbs } : {});
   if (imgs.length) recentImages.set(history.at(-1).ts, imgs.map(({ mime, data }) => ({ mime, data })));
 
@@ -864,6 +883,7 @@ async function send(text) {
       effort,
       adapter, model, history: llmHistory, userText: team ? userText : await expandSlash(userText), signal: ctrl.signal,
       sessionId: session.id,
+      summary: session.summary ?? null,
       maxSteps: DESKTOP ? 40 : 28, // 用鼠标键盘操作电脑、逐项联网核实时步数多
       images: imgs.map(({ mime, data }) => ({ mime, data })),
       tools: await buildTools(),
@@ -941,6 +961,7 @@ async function send(text) {
     turn.streamDone = true;
     callouts?.set(followUpSuggestions({ tools: usedTools, userText: text, desktop: Boolean(DESKTOP) }));
     scheduleReflect();
+    compressHistory();
     if (!speaker.speaking) finishTurn();
   } catch (err) {
     if (err.name === 'AbortError' || active !== turn) return;

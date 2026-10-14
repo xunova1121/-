@@ -67,7 +67,7 @@ export function ruleBasedPlan(task) {
  *   { type: 'team_step', index, status: 'running'|'done'|'fail'|'redo', note? }
  *   { type: 'team_review', pass, issues: string[], skipped? }
  */
-export async function runTeam({ adapter, model, history = [], userText, images = [], tools, emit, signal, approve, llm = null, run = runAgent, maxFix = 1, sessionId = null, pickModel = null }) {
+export async function runTeam({ adapter, model, history = [], userText, images = [], tools, emit, signal, approve, llm = null, run = runAgent, maxFix = 1, sessionId = null, pickModel = null, summary: earlier = null }) {
   const task = stripTeamPrefix(userText);
   const roleList = Object.entries(ROLES).map(([id, r]) => `${id}（${r.name}）：${r.duty}`).join('\n');
   emit({ type: 'state', value: 'processing' });
@@ -102,7 +102,7 @@ export async function runTeam({ adapter, model, history = [], userText, images =
     // 模型分工：工程师用编程模型、撰稿人用写作模型……（没配置时都用同一个模型）
     const m = pickModel?.(s.role) ?? { adapter, model };
     const r = await run({
-      adapter: m.adapter, model: m.model, history, signal, approve, sessionId,
+      adapter: m.adapter, model: m.model, history, signal, approve, sessionId, summary: earlier, // 长对话的前情提要
       images: index === 0 ? images : [],
       tools: toolsFor(s.role, tools),
       userText: `${s.detail}\n\n——\n【团队分工】你是团队里的「${s.roleName}」（职责：${ROLES[s.role].duty}），负责整个任务的第 ${index + 1}/${steps.length} 步。\n用户的原始需求：${task}\n${prior ? `前面步骤的成果：\n${prior}\n` : ''}${extra}只完成你这一步，完成后用几句话说明产出了什么（文件路径、关键数据、结论）。`,

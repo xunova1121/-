@@ -20,6 +20,7 @@ import * as memory from './memory.js';
 import * as kb from './knowledge.js';
 import * as ws from './workspace.js';
 import * as packs from './skillPacks.js';
+import { summaryBlock } from './compress.js';
 
 export const STABLE_PROMPT = `你是“贾维斯”，运行在用户电脑上的个人智能体。界面是一个会做表情的发光光核。
 
@@ -56,7 +57,7 @@ export const STABLE_PROMPT = `你是“贾维斯”，运行在用户电脑上�
 ## 表达标签
 回复的第一个字符必须是 <emotion>X</emotion>，X 只能是 平静、专注、聆听、亲和、安抚、愉悦、警觉 之一，表示界面此刻的表达风格（用户沮丧时“安抚”，出错或有风险时“警觉”，执行任务时“专注”）。这只是界面风格，不代表你有情绪；不要在正文里提到它。`;
 
-export async function buildContext(userText, { sessionId = null, turns = 0 } = {}) {
+export async function buildContext(userText, { sessionId = null, turns = 0, summary = null } = {}) {
   const fresh = turns <= 2; // 新对话（或刚开始）：带上最近的对话和没做完的事，方便“接着上次的”
   const [ctx, kbHits, installed, past, recentS, open] = await Promise.all([
     memory.contextFor(userText), kb.search(userText, 4), packs.enabled().catch(() => []),
@@ -73,6 +74,9 @@ export async function buildContext(userText, { sessionId = null, turns = 0 } = {
   if (typeof document !== 'undefined' && document.body?.classList.contains('compact')) {
     parts.push('运行环境：贾维斯手机 App（安卓）。屏幕上只有对话，没有“右侧预览区”：生成的文件、网页、PPT 在左上角菜单 →“工作区”里查看，回答时这样告诉用户（不要说“看右侧”）。不能操作电脑。');
   }
+  // 长对话：较早的消息已压缩成摘要（见 compress.js）
+  const earlier = summaryBlock(summary, sessionId);
+  if (earlier) parts.push(earlier);
   parts.push(ws.mode() === 'folder' ? `工作区：已连接本地文件夹「${ws.folderName()}」` : '工作区：浏览器内的虚拟工作区（用户可下载文件，或连接本地文件夹）');
   if (ctx.core?.human || ctx.core?.persona) parts.push(`## 核心记忆\n${ctx.core.human ? `【关于用户】${ctx.core.human}\n` : ''}${ctx.core.persona ? `【我的设定】${ctx.core.persona}` : ''}`.trim());
   if (ctx.memories.length) parts.push(`## 相关记忆\n${ctx.memories.map((m) => `- [来源:${m.source || '未记录'}; 时间:${new Date(m.updatedAt || m.ts).toISOString()}; 版本:${(m.history?.length || 0)+1}] ${m.content}`).join('\n')}`);
@@ -99,13 +103,14 @@ export async function buildContext(userText, { sessionId = null, turns = 0 } = {
  * @param {(e: object) => void} o.emit
  * @param {AbortSignal} [o.signal]
  * @param {number} [o.maxSteps]
- * @param {(req: { title: string, detail?: string, key?: string }, tool: object) => Promise<boolean>} [o.approve]  需要确认的工具调用
+ * @param {(req: { title: string, detail?: string, key?: string, danger?: boolean }, tool: object) => Promise<boolean>} [o.approve]  需要确认的工具调用
+ * @param {{ text: string } | null} [o.summary]  本段对话较早内容的摘要（长对话压缩，见 compress.js）
  * @returns {Promise<{ text: string, steps: number, toolCalls: number }>}
  */
-export async function runAgent({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort }) {
+export async function runAgent({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null }) {
   emit({ type: 'state', value: 'processing' });
   const tCtx = Date.now();
-  const ctx = context ?? (await buildContext(userText, { sessionId, turns: history.filter((m) => m.role === 'user').length }));
+  const ctx = context ?? (await buildContext(userText, { sessionId, turns: history.filter((m) => m.role === 'user').length, summary }));
   emit({ type: 'timing', contextMs: Date.now() - tCtx });
   if (ctx.kbHits?.length) emit({ type: 'sources', items: ctx.kbHits.map((h) => h.name) });
   const convo = [...history, { role: 'user', content: userText, ...(images.length && { images }) }];
