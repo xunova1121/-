@@ -301,7 +301,6 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
     creator: '贾维斯',
     title: docTitle,
     description: subtitle || undefined,
-    ...(template && { externalStyles: await templateStyles(template) }),
     styles: {
       default: {
         document: { run: { font: bodyFont, size: PT(bodySize), color: C.ink }, paragraph: { spacing: { ...lineSpacing, after: official ? 0 : 120 } } },
@@ -314,18 +313,61 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
     features: { updateFields: wantToc },
     sections
   });
-  const blob = await Packer.toBlob(doc);
-  return { blob, info: { toc: wantToc, images: imageCount, missingImages, headings: hs.length } };
+  let blob = await Packer.toBlob(doc);
+  let templateInfo = null;
+  if (template) ({ blob, info: templateInfo } = await applyTemplate(blob, template));
+  return { blob, info: { toc: wantToc, images: imageCount, missingImages, headings: hs.length, template: templateInfo } };
 }
 
-/** 用户模板的样式定义（word/styles.xml） */
-async function templateStyles(template) {
+/**
+ * 沿用用户模板的样式：用模板的 styles.xml（字体、字号、标题和正文样式、默认段落），
+ * 按样式名称（heading 1、Title……）对上模板里的样式 id —— 中文版 Word 的模板里标题样式的 id 常常是“1”“2”而不是 Heading1；
+ * 模板里没有的样式（比如没定义标题 4）用贾维斯自己的补上。
+ * @returns {Promise<{ blob: Blob, info: { matched: string[], added: string[] } }>}
+ */
+export async function applyTemplate(blob, template) {
   const JSZip = (await import('jszip')).default;
-  const zip = await JSZip.loadAsync(template);
-  const f = zip.file('word/styles.xml');
-  if (!f) throw new Error('模板里没有样式定义（word/styles.xml），不是有效的 Word 文件');
-  return f.async('string');
+  let tpl;
+  try { tpl = await JSZip.loadAsync(template); } catch { throw new Error('模板打不开，不是有效的 Word 文件（.docx）'); }
+  const tplStyles = await tpl.file('word/styles.xml')?.async('string');
+  if (!tplStyles) throw new Error('模板里没有样式定义（word/styles.xml），不是有效的 Word 文件');
+  const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+  const ours = await zip.file('word/styles.xml').async('string');
+  const styleRe = /<w:style\b[^>]*>[\s\S]*?<\/w:style>/g;
+  const info = (xml) => [...xml.matchAll(styleRe)].map((m) => ({
+    xml: m[0],
+    id: m[0].match(/w:styleId="([^"]+)"/)?.[1],
+    type: m[0].match(/w:type="([^"]+)"/)?.[1],
+    name: (m[0].match(/<w:name w:val="([^"]+)"/)?.[1] ?? '').toLowerCase()
+  }));
+  const tplList = info(tplStyles);
+  const ourList = info(ours);
+  const map = {};
+  const matched = [];
+  const added = [];
+  let extra = '';
+  for (const id of ['Title', 'Heading1', 'Heading2', 'Heading3', 'Heading4', 'Heading5', 'Heading6', 'Hyperlink']) {
+    const mine = ourList.find((s) => s.id === id);
+    if (!mine) continue;
+    const theirs = tplList.find((s) => s.type === mine.type && s.name === mine.name);
+    if (theirs) { map[id] = theirs.id; matched.push(mine.name); continue; }
+    // 模板里没有：用自己的，id 撞了就换一个
+    const newId = tplList.some((s) => s.id === id) ? `Jarvis${id}` : id;
+    map[id] = newId;
+    extra += mine.xml.replace(`w:styleId="${id}"`, `w:styleId="${newId}"`);
+    added.push(mine.name);
+  }
+  zip.file('word/styles.xml', tplStyles.replace('</w:styles>', `${extra}</w:styles>`));
+  for (const f of Object.keys(zip.files).filter((x) => /^word\/(document|header\d*|footer\d*)\.xml$/.test(x))) {
+    const xml = await zip.file(f).async('string');
+    zip.file(f, xml.replace(/<w:(pStyle|rStyle) w:val="([^"]+)"\/>/g, (m, k, v) => (map[v] ? `<w:${k} w:val="${map[v]}"/>` : m)));
+  }
+  const out = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+  return { blob: new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }), info: { matched, added } };
 }
+
+/** 工作区里像模板的 Word 文件：放在“模板 / templates”文件夹里，或文件名里有“模板 / template” */
+export const TEMPLATE_PATH = /(^|\/)(模板|templates?)\/[^/]+\.docx$|(^|\/)[^/]*(模板|template)[^/]*\.docx$/i;
 
 function today() {
   const d = new Date(Date.now() + 8 * 3600_000); // 北京时间

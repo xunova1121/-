@@ -9,6 +9,10 @@ import { parseFile, generate } from './docs.js';
 import { THEME_IDS, themeList } from './themes.js';
 import { writeLongDocument, outlineMarkdown } from './longDoc.js';
 import { withBom } from './xlsxWriter.js';
+import { applyEdits } from './textEdit.js';
+import { editOffice } from './officeEdit.js';
+import { TEMPLATE_PATH } from './docxWriter.js';
+import { selfCheck, lint } from './selfCheck.js';
 import { runJavaScript, runPython } from './sandbox.js';
 import * as packs from './skillPacks.js';
 import { isImageName, prepareImage } from './images.js';
@@ -58,6 +62,15 @@ const clip = (s, n = 20000) => (s.length > n ? `${s.slice(0, n)}\n…（已截�
  */
 export function createTools(ctx) {
   const readPage = createPageReader(ctx); // 直接打不开或没读到正文时，有 Tavily Key 就让 Tavily 代读
+  /** Word 模板：指定了就用指定的；没指定就找工作区里最近改过的模板文件；"none" 不用 */
+  const findTemplate = async (format, template) => {
+    if (format !== 'docx' || template === 'none') return { tpl: null };
+    let tplPath = template || '';
+    const auto = !tplPath;
+    if (auto) tplPath = (await ws.list().catch(() => [])).filter((f) => TEMPLATE_PATH.test(f.path)).sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0))[0]?.path ?? '';
+    if (!tplPath) return { tpl: null };
+    try { return { tpl: new Uint8Array(await (await ws.readBlob(tplPath)).arrayBuffer()), tplPath, auto }; } catch { throw new Error(`找不到模板文件：${tplPath}`); }
+  };
   const tools = [
     {
       name: 'remember',
@@ -301,6 +314,50 @@ export function createTools(ctx) {
       }
     },
     {
+      name: 'edit_file',
+      description: '按片段修改工作区里的文本文件（代码、网页、Markdown、CSV 等）：给出原文里一字不差的一段 old_text 和替换后的 new_text，只改这一段，其余不动。改大文件的一小部分时用它，比 write_file 整个重写省事、也不容易改坏。可以一次给多处修改。原文出现多次时多带几行上下文，或设 replace_all。Word / PPT 用 edit_office_document。',
+      input_schema: S({
+        path: str('文件路径'),
+        edits: {
+          type: 'array', description: '一处或多处修改，按顺序执行',
+          items: { type: 'object', properties: { old_text: str('原文片段（一字不差）'), new_text: str('替换成'), replace_all: { type: 'boolean', description: '替换所有出现的地方' } }, required: ['old_text', 'new_text'], additionalProperties: false }
+        }
+      }, ['path', 'edits']),
+      run: async ({ path, edits }) => {
+        if (!ws.isText(path)) throw new Error(`${path} 不是文本文件。Word / PPT 请用 edit_office_document`);
+        const before = await ws.readText(path);
+        const r = applyEdits(before, Array.isArray(edits) ? edits : []);
+        const w = await ws.write(path, r.text);
+        ctx.onFileChanged?.(w.path);
+        return `已修改 ${w.path}：替换 ${r.count} 处${w.renamed ? '（本地文件夹里不覆盖同名文件，另存为此名）' : ''}${w.backup === 'saved' ? '；原来的内容已自动备份，可在“工作区 → 改动记录”里恢复' : ''}`;
+      }
+    },
+    {
+      name: 'edit_office_document',
+      description: '修改工作区里已有的 Word（.docx）或 PPT（.pptx），保留原来的排版和格式：替换文字（正文、表格、页眉页脚、每页幻灯片和备注都会找），Word 还可以在末尾追加段落（格式照抄最后一段）。适合“把文档里的 2025 改成 2026”“在合同里把甲方名称换掉”“在报告最后加一段说明”。要大改结构时用 create_document 重新生成。',
+      input_schema: S({
+        path: str('文件路径（.docx / .pptx）'),
+        replacements: { type: 'array', description: '要替换的文字', items: { type: 'object', properties: { find: str('原文（一字不差）'), replace: str('替换成') }, required: ['find', 'replace'], additionalProperties: false } },
+        append: { type: 'array', items: { type: 'string' }, description: '追加到 Word 末尾的段落（每项一段，可选）' },
+        save_as: str('另存为（可选，不填就改原文件；原文件会自动备份）')
+      }, ['path']),
+      run: async ({ path, replacements = [], append = [], save_as: saveAs }) => {
+        const kind = ws.ext(path);
+        if (!['docx', 'pptx'].includes(kind)) throw new Error('只能修改 .docx 或 .pptx 文件；文本文件用 edit_file');
+        const r = await editOffice(await ws.readBlob(path), kind, { replacements: Array.isArray(replacements) ? replacements : [], append: Array.isArray(append) ? append : [] });
+        const hit = r.replaced.filter((x) => x.count);
+        const miss = r.replaced.filter((x) => !x.count);
+        if (!hit.length && !r.appended) throw new Error(`文件里没有找到要替换的文字：${miss.map((x) => `“${x.find}”`).join('、') || '（没有给出修改）'}。先用 read_file 看准原文`);
+        const target = saveAs ? saveAs.replace(/\.[a-z0-9]+$/i, '') + `.${kind}` : path;
+        const w = await ws.write(target, r.blob);
+        ctx.onFileChanged?.(w.path);
+        const parts = hit.map((x) => `“${x.find}”替换了 ${x.count} 处`);
+        if (r.appended) parts.push(`追加了 ${r.appended} 段`);
+        if (miss.length) parts.push(`没找到：${miss.map((x) => `“${x.find}”`).join('、')}`);
+        return `已保存 ${w.path}（格式保留）：${parts.join('；')}${w.backup === 'saved' ? '。原文件已自动备份，可在“工作区 → 改动记录”里恢复' : ''}`;
+      }
+    },
+    {
       name: 'create_document',
       description: `生成 Office / 文档文件并保存到工作区，排版自动完成（A4、标题样式、编号列表、带表头底色的表格、页码；Word / PDF 的二级标题有 3 个以上时自动加目录）。
 content 用 Markdown：
@@ -319,28 +376,30 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         subtitle: str('副标题（可选）'),
         author: str('署名，如单位或部门（可选，用在封面）'),
         toc: { type: 'string', enum: ['auto', 'yes', 'no'], description: '目录：auto（默认，二级标题 3 个以上时加）/ yes / no' },
-        template: str('Word 模板路径（工作区里的 .docx，可选）：沿用模板的字体、标题和正文样式')
+        template: str('Word 模板路径（工作区里的 .docx，可选）：沿用模板的字体、标题和正文样式。不填时，工作区“模板 / templates”文件夹里或文件名带“模板”的 .docx 会自动使用；传 "none" 不用模板'),
+        requirements: str('用户对这份文档的原始要求（尽量用原话：主题、必须包含的内容、字数页数、格式）。填了会在生成前对照检查有没有漏项，并自动改一轮')
       }, ['format', 'path', 'content']),
-      run: async ({ format, path, title, content, theme, cover, subtitle, author, toc, template }) => {
+      run: async ({ format, path, title, content, theme, cover, subtitle, author, toc, template, requirements }, { progress, signal } = {}) => {
         const loadImage = async (src) => {
           if (/^(https?:|data:)/i.test(src)) return null;
           try { return new Uint8Array(await (await ws.readBlob(src)).arrayBuffer()); } catch { return null; }
         };
-        let tpl = null;
-        if (template && format === 'docx') {
-          try { tpl = new Uint8Array(await (await ws.readBlob(template)).arrayBuffer()); } catch { throw new Error(`找不到模板文件：${template}`); }
-        }
+        const { tpl, tplPath, auto } = await findTemplate(format, template);
+        // 生成前自查：规则检查；有原始要求或硬伤时请模型对照检查并改一轮
+        const check = await selfCheck({ format, content, requirements, llm: ctx.reasonLlm ?? ctx.llm ?? null, signal, onProgress: (t) => progress?.(t) });
         const out = await generate(format, {
-          title: title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, ''), content, theme, cover: Boolean(cover), subtitle, author,
+          title: title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, ''), content: check.content, theme, cover: Boolean(cover), subtitle, author,
           toc: toc === 'yes' ? true : toc === 'no' ? false : 'auto', loadImage, toPdf: ctx.toPdf ?? null, template: tpl
         });
         const target = path.replace(/\.[a-z0-9]+$/i, '') + `.${out.ext}`;
         const r = await ws.write(target, out.blob);
         ctx.onFileChanged?.(r.path);
         const notes = [`主题：${out.theme.name}`];
+        if (check.checked) notes.push(check.changed ? `生成前对照要求自查，修正了 ${check.changed} 处${check.problems.length ? `（${check.problems.slice(0, 4).join('；')}）` : ''}` : '生成前对照要求自查，没发现问题');
+        if (check.issues.length) notes.push(`还需要注意：${check.issues.map((x) => x.text).join('；')}`);
         if (out.info?.toc) notes.push('已加目录（Word 打开时如提示更新域，点“是”即可填上页码；WPS 里右键目录 →“更新目录”）');
         if (out.info?.missingImages?.length) notes.push(`这些图片没找到，用占位文字代替了：${out.info.missingImages.join('、')}`);
-        if (tpl) notes.push(`沿用了模板 ${template} 的样式`);
+        if (tpl) notes.push(`${auto ? '自动' : ''}沿用了模板 ${tplPath} 的样式${auto ? '（不想用模板就传 template: "none"）' : ''}`);
         if (out.note) notes.push(out.note);
         return `${r.path}（${fmtSize(out.blob.size)}）。${notes.join('；')}`;
       }
@@ -372,16 +431,20 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         if (outlineOnly) {
           return `大纲如下（还没有写正文）。把大纲给用户看，问是否需要调整；用户确认后，把最终大纲放进 outline 参数，再调用一次 write_long_document（其他参数照旧）。\n\n${outlineMarkdown(r.title, r.outline)}`;
         }
+        const { tpl, tplPath } = await findTemplate(format);
         const out = await generate(format, {
           title: r.title, content: r.markdown, theme, cover: Boolean(cover), subtitle, author,
           loadImage: async (src) => { try { return new Uint8Array(await (await ws.readBlob(src)).arrayBuffer()); } catch { return null; } },
-          toPdf: ctx.toPdf ?? null
+          toPdf: ctx.toPdf ?? null, template: tpl
         });
         const target = path.replace(/\.[a-z0-9]+$/i, '') + `.${out.ext}`;
         const w = await ws.write(target, out.blob);
         ctx.onFileChanged?.(w.path);
         const chars = r.markdown.replace(/[\s#|*\-`>]/g, '').length;
         const lines = [`已生成 ${w.path}（${fmtSize(out.blob.size)}，${r.outline.length} 节，约 ${chars} 字，主题：${out.theme.name}）`];
+        if (tpl) lines.push(`沿用了工作区里的模板 ${tplPath}`);
+        const left = lint(format, r.markdown);
+        if (left.length) lines.push(`自查还需要注意：${left.map((x) => x.text).join('；')}`);
         if (r.edits) lines.push(`通读后统一修改了 ${r.edits} 处术语 / 衔接`);
         if (r.review?.issues?.length) {
           lines.push(`读者试读发现 ${r.review.issues.length} 个问题，已修改的节：${r.review.revised.join('、') || '无（改动没通过检查，保留原文）'}`);

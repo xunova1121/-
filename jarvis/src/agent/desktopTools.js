@@ -7,6 +7,8 @@ import * as ws from './workspace.js';
 import { parseFile } from './docs.js';
 import { isImageName, prepareImage } from './images.js';
 import { checkCommand } from './commandSafety.js';
+import { applyEdits } from './textEdit.js';
+import { editOffice } from './officeEdit.js';
 
 const S = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const str = (description) => ({ type: 'string', description });
@@ -85,6 +87,46 @@ export function createDesktopTools(desktop, ctx = {}) {
         // CSV 加 UTF-8 BOM：Excel 双击打开时中文不乱码
         const r = await call('writeFile', { path, text: /\.csv$/i.test(path) && !content.startsWith('﻿') ? `﻿${content}` : content });
         return `已写入 ${r.path}（${fmt(r.size)}）${backupNote(r)}。`;
+      }
+    },
+    {
+      name: 'computer_edit_file',
+      description: `按片段修改电脑上的文本文件：给出原文里一字不差的一段 old_text 和替换后的 new_text，只改这一段，其余不动（改之前自动备份）。${PATH_HINT}。`,
+      input_schema: S({
+        path: str('文件路径'),
+        edits: {
+          type: 'array', description: '一处或多处修改，按顺序执行',
+          items: { type: 'object', properties: { old_text: str('原文片段（一字不差）'), new_text: str('替换成'), replace_all: { type: 'boolean' } }, required: ['old_text', 'new_text'], additionalProperties: false }
+        }
+      }, ['path', 'edits']),
+      approval: ({ path, edits }) => ({ key: 'fs-write', title: `修改文件：${path}`, detail: (Array.isArray(edits) ? edits : []).map((e) => `- ${String(e.old_text).slice(0, 120)}\n+ ${String(e.new_text).slice(0, 120)}`).join('\n\n').slice(0, 1200) }),
+      run: async ({ path, edits }) => {
+        const cur = await call('readFile', { path });
+        const r = applyEdits(new TextDecoder().decode(b64ToBytes(cur.base64)), Array.isArray(edits) ? edits : []);
+        const w = await call('writeFile', { path: cur.path, text: r.text });
+        return `已修改 ${w.path}：替换 ${r.count} 处${backupNote(w)}。`;
+      }
+    },
+    {
+      name: 'computer_edit_office_document',
+      description: `修改电脑上已有的 Word（.docx）或 PPT（.pptx），保留原来的排版：替换文字（正文、表格、页眉页脚、幻灯片、备注），Word 还可以在末尾追加段落（改之前自动备份）。${PATH_HINT}。`,
+      input_schema: S({
+        path: str('文件路径'),
+        replacements: { type: 'array', items: { type: 'object', properties: { find: str('原文（一字不差）'), replace: str('替换成') }, required: ['find', 'replace'], additionalProperties: false } },
+        append: { type: 'array', items: { type: 'string' }, description: '追加到 Word 末尾的段落（可选）' }
+      }, ['path']),
+      approval: ({ path, replacements = [], append = [] }) => ({ key: 'fs-write', title: `修改文档：${path}`, detail: [...(Array.isArray(replacements) ? replacements : []).map((r) => `“${r.find}” → “${r.replace}”`), ...(Array.isArray(append) ? append : []).map((t) => `追加：${String(t).slice(0, 80)}`)].join('\n').slice(0, 1200) }),
+      run: async ({ path, replacements = [], append = [] }) => {
+        const kind = (String(path).match(/\.(docx|pptx)$/i)?.[1] ?? '').toLowerCase();
+        if (!kind) throw new Error('只能修改 .docx 或 .pptx 文件；文本文件用 computer_edit_file');
+        const cur = await call('readFile', { path });
+        const r = await editOffice(b64ToBytes(cur.base64), kind, { replacements: Array.isArray(replacements) ? replacements : [], append: Array.isArray(append) ? append : [] });
+        const hit = r.replaced.filter((x) => x.count);
+        const miss = r.replaced.filter((x) => !x.count);
+        if (!hit.length && !r.appended) throw new Error(`文件里没有找到要替换的文字：${miss.map((x) => `“${x.find}”`).join('、') || '（没有给出修改）'}`);
+        const w = await call('writeFile', { path: cur.path, base64: await blobToB64(r.blob) });
+        const parts = [...hit.map((x) => `“${x.find}”替换了 ${x.count} 处`), ...(r.appended ? [`追加了 ${r.appended} 段`] : []), ...(miss.length ? [`没找到：${miss.map((x) => `“${x.find}”`).join('、')}`] : [])];
+        return `已保存 ${w.path}（格式保留）：${parts.join('；')}${backupNote(w)}。`;
       }
     },
     {

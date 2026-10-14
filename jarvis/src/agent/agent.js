@@ -21,6 +21,7 @@ import * as kb from './knowledge.js';
 import * as ws from './workspace.js';
 import * as packs from './skillPacks.js';
 import { summaryBlock } from './compress.js';
+import { createToolLoader } from './toolLoader.js';
 
 export const STABLE_PROMPT = `你是“贾维斯”，运行在用户电脑上的个人智能体。界面是一个会做表情的发光光核。
 
@@ -48,7 +49,10 @@ export const STABLE_PROMPT = `你是“贾维斯”，运行在用户电脑上�
 - 篇幅按用途：通知、函几百字；工作总结、方案一般 2000–5000 字；用户指定了字数就照办。
 - 常见文种的结构：工作总结 = 基本情况 / 主要成绩（带数据）/ 存在问题 / 下一步计划；项目方案 = 背景与目标 / 现状分析 / 方案内容 / 实施计划（表格：阶段、时间、负责人、产出）/ 预算 / 风险与对策；公文按“标题 / 主送机关 / 正文（一、（一）、1. 层次）/ 落款 / 日期”，theme 用 gongwen。
 - 正式报告、方案、标书加 cover（封面）；需要配图时先生成或找到图片放进工作区，再用 ![图注](路径) 插入。
-- 生成后用一两句话告诉用户文件在哪、包含哪些部分，不要把全文再念一遍。
+- 调用 create_document 时把用户的原始要求（尽量原话）放进 requirements，工具会对照检查漏项并自动修正一轮。
+- 改已有的 Word / PPT 用 edit_office_document（桌面版电脑上的文件用 computer_edit_office_document），保留原格式；改代码、网页等文本文件的一部分用 edit_file，不要整个重写。
+- 工作区“模板”文件夹里或文件名带“模板”的 Word 会被自动当作模板，生成的文档沿用它的字体和标题样式。
+- 生成后用一两句话告诉用户文件在哪、包含哪些部分，不要把全文再念一遍；工具结果里“还需要注意”的问题要转告用户。
 
 ## 看图
 - 用户发来的图片按顺序是“第一张、第二张……”。先把图里和任务有关的信息逐项原样抄出来（编号、名称、时间、选项、数字），再做后面的事；看不清的写“看不清”，不要猜。
@@ -124,7 +128,9 @@ export async function runAgent({ adapter, model, history, userText, images = [],
   emit({ type: 'timing', contextMs: Date.now() - tCtx });
   if (ctx.kbHits?.length) emit({ type: 'sources', items: ctx.kbHits.map((h) => h.name) });
   const convo = [...history, { role: 'user', content: userText, ...(images.length && { images }) }];
-  const byName = new Map(tools.map((t) => [t.name, t]));
+  // 工具按需加载：工具多时只带常用的完整说明，其余列名字、用 tool_search 加载（见 toolLoader.js）
+  const loader = createToolLoader(tools);
+  const toolHint = loader.hint();
   let finalText = '';
   let toolCount = 0;
   let failCount = 0;
@@ -139,9 +145,9 @@ export async function runAgent({ adapter, model, history, userText, images = [],
     const r = await adapter.stream({
       model,
       effort,
-      system: [STABLE_PROMPT, ctx.dynamic],
+      system: [STABLE_PROMPT, toolHint ? `${ctx.dynamic}\n\n${toolHint}` : ctx.dynamic],
       messages: convo,
-      tools,
+      tools: loader.list(),
       signal,
       onRetry: (attempt) => {
         stripper = new EmotionTagStripper(); // 续写的开头可能又带情绪标签
@@ -170,7 +176,7 @@ export async function runAgent({ adapter, model, history, userText, images = [],
 
     if (stepText && !/\n$/.test(stepText)) { emit({ type: 'text', delta: '\n\n' }); finalText += '\n\n'; }
     for (const c of r.toolCalls) {
-      const tool = byName.get(c.name);
+      const tool = loader.get(c.name);
       const t0 = Date.now();
       emit({ type: 'state', value: 'processing' });
       emit({ type: 'tool_start', id: c.id, name: c.name, args: c.args });
