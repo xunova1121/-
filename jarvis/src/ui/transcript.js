@@ -359,9 +359,9 @@ export class Transcript {
        * 征求同意：在气泡里显示确认卡片。
        * @returns {Promise<'once'|'session'|'deny'>}
        */
-      confirm({ title, detail }) {
+      confirm({ title, detail, danger = false }) {
         const box = document.createElement('div');
-        box.className = 'confirm-card';
+        box.className = `confirm-card${danger ? ' danger' : ''}`;
         const h = document.createElement('div');
         h.className = 'confirm-title';
         h.textContent = title;
@@ -382,7 +382,9 @@ export class Transcript {
             box.classList.add('answered');
             resolve(v);
           };
-          for (const [v, label, cls, result] of [['once', '允许', 'btn sm', '已允许'], ['session', '本次都允许', 'btn ghost sm', '已允许（本次会话不再询问）'], ['deny', '拒绝', 'btn ghost sm danger', '已拒绝']]) {
+          // 危险命令不提供“本次都允许”：每次都要单独确认
+          const choices = [['once', '允许', 'btn sm', '已允许'], ...(danger ? [] : [['session', '本次都允许', 'btn ghost sm', '已允许（本次会话不再询问）']]), ['deny', '拒绝', 'btn ghost sm danger', '已拒绝']];
+          for (const [v, label, cls, result] of choices) {
             const b = Object.assign(document.createElement('button'), { type: 'button', className: cls, textContent: label });
             b.addEventListener('click', () => done(v, result));
             row.append(b);

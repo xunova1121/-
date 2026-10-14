@@ -6,6 +6,7 @@
 import * as ws from './workspace.js';
 import { parseFile } from './docs.js';
 import { isImageName, prepareImage } from './images.js';
+import { checkCommand } from './commandSafety.js';
 
 const S = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const str = (description) => ({ type: 'string', description });
@@ -121,8 +122,17 @@ export function createDesktopTools(desktop, ctx = {}) {
       name: 'computer_run',
       description: `在这台电脑上运行一条命令（${desktop.platform === 'win32' ? 'Windows PowerShell' : 'bash / zsh'}），返回输出。用于查看系统信息、批量处理文件、调用已安装的命令行工具等。不要运行会删除数据或修改系统设置的命令。`,
       input_schema: S({ command: str('要运行的命令'), cwd: str('工作目录（可选）') }, ['command']),
-      approval: ({ command, cwd }) => ({ key: 'run', title: '运行命令', detail: `${cwd ? `[${cwd}] ` : ''}${command}` }),
+      approval: ({ command, cwd }) => {
+        const c = checkCommand(command);
+        if (c.level === 'block') return null; // run() 直接拒绝，不必问
+        const detail = `${cwd ? `[${cwd}] ` : ''}${command}`;
+        // 危险命令：没有 key，不能“本次都允许”，每次单独确认
+        if (c.level === 'danger') return { danger: true, title: `⚠ 危险命令：${c.why}`, detail: `${detail}\n\n这类命令每次都要单独确认；无人值守的定时任务不会执行。` };
+        return { key: 'run', title: '运行命令', detail };
+      },
       run: async ({ command, cwd }) => {
+        const c = checkCommand(command);
+        if (c.level === 'block') throw new Error(`已拦截（${c.why}）：这类命令贾维斯不会执行。如果确实需要，请让用户自己在终端里操作`);
         const r = await call('run', { command, cwd });
         return clip([`退出码：${r.code}${r.timedOut ? '（超时被终止）' : ''}`, r.stdout && `输出：\n${r.stdout}`, r.stderr && `错误输出：\n${r.stderr}`].filter(Boolean).join('\n'), 12000);
       }

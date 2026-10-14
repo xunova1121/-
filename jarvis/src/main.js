@@ -35,6 +35,7 @@ import { initSkillsPanel } from './ui/skillsPanel.js';
 import { initPalette } from './ui/palette.js';
 import * as scheduler from './agent/scheduler.js';
 import { executeScheduled, scheduledPrompt, notificationFor } from './agent/scheduledRun.js';
+import { preApproved } from './agent/commandSafety.js';
 import * as habits from './agent/habits.js';
 import { initSchedulesPanel } from './ui/schedulesPanel.js';
 import { prepareImage, isImageName } from './agent/images.js';
@@ -759,8 +760,8 @@ async function runScheduled(s) {
     adapter, model, history: [], sessionId: sess.id, signal, emit,
     userText: scheduledPrompt(s, scheduler.describe(s)),
     tools: await buildTools({ background: true }),
-    // 无人值守：需要确认的操作默认拒绝，除非这个任务设为“允许无人值守操作”或本次会话已允许
-    approve: async (req) => s.unattended || Boolean(req.key && sessionApprovals.has(req.key))
+    // 无人值守：需要确认的操作默认拒绝，除非这个任务设为“允许无人值守操作”或本次会话已允许；危险命令一律拒绝
+    approve: async (req) => preApproved(req, { sessionKeys: sessionApprovals, unattended: s.unattended })
   }), { onEvent: (e) => { if (e.type === 'tool_start') usedTools.push(e.name); } });
   const content = res.ok ? res.text || '（已检查，无需通知）' : `执行失败：${res.note}`;
   sess.messages.push({ role: 'assistant', content, ts: Date.now(), ...(usedTools.length && { tools: [...new Set(usedTools)] }) });
@@ -867,7 +868,7 @@ async function send(text) {
       images: imgs.map(({ mime, data }) => ({ mime, data })),
       tools: await buildTools(),
       approve: (req) => {
-        if (req.key && sessionApprovals.has(req.key)) return true;
+        if (preApproved(req, { sessionKeys: sessionApprovals })) return true; // 危险命令每次都问
         setTask('processing', '等待你确认');
         const aborted = new Promise((r) => ctrl.signal.addEventListener('abort', () => r('deny'), { once: true }));
         return Promise.race([bubble.confirm(req), aborted]).then((v) => {
