@@ -7,6 +7,7 @@ import * as memory from './memory.js';
 import * as kb from './knowledge.js';
 import { parseFile, generate } from './docs.js';
 import { THEME_IDS, themeList } from './themes.js';
+import { writeLongDocument, outlineMarkdown } from './longDoc.js';
 import { runJavaScript, runPython } from './sandbox.js';
 import * as packs from './skillPacks.js';
 import { isImageName, prepareImage } from './images.js';
@@ -339,6 +340,53 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         if (tpl) notes.push(`沿用了模板 ${template} 的样式`);
         if (out.note) notes.push(out.note);
         return `${r.path}（${fmtSize(out.blob.size)}）。${notes.join('；')}`;
+      }
+    },
+    {
+      name: 'write_long_document',
+      description: `写长文档（约 3000 字以上的报告、方案、总结、标书、调研分析等）：先列大纲，再逐节写（每节都带着大纲和前文摘要，前后连贯），通读统一术语和衔接，然后请一位不了解背景的“读者”试读，按读者意见把有问题的节改一轮，最后生成文件。耗时 1–5 分钟。
+用户说“先看大纲 / 先给我大纲”时 outline_only=true，只返回大纲给用户确认；用户确认或修改后，把定下来的大纲放进 outline 再调用一次。短文档（通知、函、几百字的说明）直接用 create_document。`,
+      input_schema: S({
+        task: str('写作要求，写完整：写什么、给谁看、用途、重点、风格、特殊要求'),
+        format: { type: 'string', enum: ['docx', 'pdf', 'html', 'md'], description: '输出格式，默认 docx' },
+        path: str('保存路径（扩展名会自动修正）'),
+        title: str('文档标题（可选，不填由模型拟定）'),
+        material: str('用户提供的材料、数据、要点（原样放进来，写作时必须用上）'),
+        words: { type: 'number', description: '目标字数（可选）' },
+        outline_only: { type: 'boolean', description: '只出大纲，等用户确认' },
+        outline: { type: 'array', description: '已确认的大纲（跳过列大纲）', items: { type: 'object', properties: { heading: str('一级标题'), points: { type: 'array', items: { type: 'string' } }, words: { type: 'number' } }, required: ['heading'], additionalProperties: false } },
+        review: { type: 'boolean', description: '读者试读并修改（默认 true）' },
+        theme: { type: 'string', enum: THEME_IDS, description: '配色主题，不填自动选' },
+        cover: { type: 'boolean', description: '加封面' },
+        subtitle: str('副标题（可选）'),
+        author: str('署名（可选）')
+      }, ['task', 'path']),
+      run: async ({ task, format = 'docx', path, title, material, words, outline_only: outlineOnly, outline, review = true, theme, cover, subtitle, author }, { progress, signal } = {}) => {
+        const r = await writeLongDocument({
+          task, title, material, words: Number(words) || 0, outline: Array.isArray(outline) ? outline : null, outlineOnly: Boolean(outlineOnly),
+          review: review !== false, llm: ctx.llm ?? null, readerLlm: ctx.reasonLlm ?? null, onProgress: (t) => progress?.(t), signal
+        });
+        if (outlineOnly) {
+          return `大纲如下（还没有写正文）。把大纲给用户看，问是否需要调整；用户确认后，把最终大纲放进 outline 参数，再调用一次 write_long_document（其他参数照旧）。\n\n${outlineMarkdown(r.title, r.outline)}`;
+        }
+        const out = await generate(format, {
+          title: r.title, content: r.markdown, theme, cover: Boolean(cover), subtitle, author,
+          loadImage: async (src) => { try { return new Uint8Array(await (await ws.readBlob(src)).arrayBuffer()); } catch { return null; } },
+          toPdf: ctx.toPdf ?? null
+        });
+        const target = path.replace(/\.[a-z0-9]+$/i, '') + `.${out.ext}`;
+        const w = await ws.write(target, out.blob);
+        ctx.onFileChanged?.(w.path);
+        const chars = r.markdown.replace(/[\s#|*\-`>]/g, '').length;
+        const lines = [`已生成 ${w.path}（${fmtSize(out.blob.size)}，${r.outline.length} 节，约 ${chars} 字，主题：${out.theme.name}）`];
+        if (r.edits) lines.push(`通读后统一修改了 ${r.edits} 处术语 / 衔接`);
+        if (r.review?.issues?.length) {
+          lines.push(`读者试读发现 ${r.review.issues.length} 个问题，已修改的节：${r.review.revised.join('、') || '无（改动没通过检查，保留原文）'}`);
+          lines.push(...r.review.issues.map((x) => `- 【${x.type}】${x.section ? `${x.section}：` : ''}${x.problem}`));
+        } else if (r.review) lines.push(r.review.failed ? '读者试读没有完成（模型出错），未修改' : '读者试读没有发现明显问题');
+        if (out.note) lines.push(out.note);
+        lines.push('请用几句话告诉用户文件位置、结构和需要用户确认的地方（如“待确认”的数据），不要复述全文。');
+        return lines.join('\n');
       }
     },
     {
