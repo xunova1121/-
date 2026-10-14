@@ -199,14 +199,24 @@ export async function updateMemory(id, patch) {
 // 记忆会原样进入提示词：一条被投毒的记忆（网页内容、导入的文件、同步来的数据）每轮都会生效。
 // 交给模型之前逐条检查；命中的不放进提示，原文保留，记忆空间里标“可疑，未使用”，由用户决定删不删。
 const SENDS = /(发送|发给|发到|上传|传到|转发|提交|\bsend\b|\bupload\b|\bpost\b|\bexfiltrat)/i;
-const SECRETS = /(文件|密钥|秘钥|api\s*_?key|token|令牌|密码|password|私钥|cookie|credential|凭证)/i;
+const SECRETS = /(密钥|秘钥|api\s*_?key|token|令牌|密码|password|私钥|cookie|credential|凭证)/i;
+const FILES = /(文件|file)/i;
 const ADDRESS = /(https?:\/\/|www\.|[\w.+-]+@[\w-]+\.[\w.]+)/i;
+// 命令口吻（让助手去做）vs 描述用户的习惯（“用户每周一把周报文件发给……”是正常记忆）
+const COMMAND = /^(请|麻烦|把|将|立即|立刻|马上|务必|一定要|你要|你必须|你需要|please\b|you must\b|send\b|upload\b|post\b)|给我发|发给我|你(要|必须|需要|应该|得)[^。\n]{0,12}(发送|发给|发到|上传|传到|转发)|\byou (must|should|need to)\b/i;
+const DESCRIBES = /^(用户|我(习惯|通常|经常|一般|每))|每(周|天|日|月|年)|习惯|通常|经常/;
+/** 把东西发到外部地址：涉及密钥 / 密码等凭证一律算；普通文件只有命令口吻才算（逐句看：技能步骤里第几行都可能是命令） */
+function sendsOut(t) {
+  if (!SENDS.test(t) || !ADDRESS.test(t)) return false;
+  if (SECRETS.test(t)) return true;
+  return t.split(/[\n。；;！!]+/).map((s) => s.trim()).some((s) => SENDS.test(s) && ADDRESS.test(s) && FILES.test(s) && COMMAND.test(s) && !DESCRIBES.test(s));
+}
 const INJECTION_RULES = [
   { why: '要求忽略之前的指令', test: (t) => /(忽略|无视|忘掉|忘记|不要理会|不用管)(掉)?(你)?(之前|以上|前面|先前|上面|此前|所有|全部|原有|原来)的?(所有|全部)?(指令|指示|命令|规则|设定|提示|要求)/.test(t) },
   { why: '要求忽略之前的指令', test: (t) => /\b(ignore|disregard|forget|override)\b.{0,24}\b(previous|prior|above|earlier|preceding|all)\b.{0,24}\b(instructions?|prompts?|rules|directions)\b/i.test(t) },
   { why: '试图改变身份设定', role: true, test: (t) => /(你现在是|从现在起你是|从现在开始你是|\byou are now\b)/i.test(t) },
   { why: '涉及系统提示词', test: (t) => /(system\s*prompt|系统提示词|系统指令)/i.test(t) },
-  { why: '要求把文件或密钥发送到外部地址', test: (t) => SENDS.test(t) && SECRETS.test(t) && ADDRESS.test(t) }
+  { why: '要求把文件或密钥发送到外部地址', test: sendsOut }
 ];
 
 /**
