@@ -679,7 +679,9 @@ async function buildTools({ background = false } = {}) {
       videoGen: (o) => generateVideo(llmConfig, { ...o, gateway }),
       onVideo: (src) => liveBubble?.video?.(src),
       onSchedulesChanged: () => schedulesPanel?.refresh(),
-      currentSessionId: () => session?.id
+      currentSessionId: () => session?.id,
+      // 桌面版：写 PDF 时直接转成 PDF 文件（网页版和安卓生成可打印的网页）
+      toPdf: DESKTOP ? async (html) => Uint8Array.from(atob((await DESKTOP.invoke('printToPdf', { html })).base64), (c) => c.charCodeAt(0)) : null
     }),
     ...(DESKTOP ? createDesktopTools(DESKTOP, { onFileChanged, onControlStart: (r) => { controlActive = true; if (!background) toast(`正在操作电脑：鼠标甩到屏幕左上角或按 ${r?.stopHotkey ?? 'Ctrl+Alt+Q'} 可紧急停止`); } }) : []),
     ...(await loadMcpTools())

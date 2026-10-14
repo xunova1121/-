@@ -161,7 +161,24 @@ Object.assign(ops, {
   /** 主窗口把粒子体的状态 / 要说的话同步到桌面背景 */
   async wallpaperEvent(payload) { wallpaper?.send(payload); return { ok: true }; },
   /** 测试用：模拟“离开一段时间后回来” */
-  async presenceTest({ awayMs = 3600000 } = {}) { if (!TEST) throw new Error('仅测试模式可用'); win?.webContents.send('jarvis:presence', { awayMs, reason: 'test' }); return { ok: true }; }
+  async presenceTest({ awayMs = 3600000 } = {}) { if (!TEST) throw new Error('仅测试模式可用'); win?.webContents.send('jarvis:presence', { awayMs, reason: 'test' }); return { ok: true }; },
+  /**
+   * 写文档：排好版的 HTML 直接转成 PDF（A4，页边距和页码按页面里的 @page 设置）。
+   * 在隐藏窗口里打开临时文件，禁用脚本，转完删除。返回 base64
+   */
+  async printToPdf({ html }) {
+    const tmp = path.join(app.getPath('temp'), `jarvis-pdf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`);
+    fs.writeFileSync(tmp, String(html ?? ''), 'utf8');
+    const w = new BrowserWindow({ show: false, width: 900, height: 1200, webPreferences: { javascript: false, sandbox: true, contextIsolation: true, nodeIntegration: false } });
+    try {
+      await w.loadFile(tmp);
+      const pdf = await w.webContents.printToPDF({ pageSize: 'A4', printBackground: true, preferCSSPageSize: true });
+      return { base64: Buffer.from(pdf).toString('base64') };
+    } finally {
+      w.destroy();
+      fs.rmSync(tmp, { force: true });
+    }
+  }
 });
 
 const fromOurPage = (e) => Boolean(origin) && String(e.senderFrame?.url || '').startsWith(`${origin}/`);

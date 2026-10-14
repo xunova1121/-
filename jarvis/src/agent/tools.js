@@ -6,6 +6,7 @@ import * as ws from './workspace.js';
 import * as memory from './memory.js';
 import * as kb from './knowledge.js';
 import { parseFile, generate } from './docs.js';
+import { THEME_IDS, themeList } from './themes.js';
 import { runJavaScript, runPython } from './sandbox.js';
 import * as packs from './skillPacks.js';
 import { isImageName, prepareImage } from './images.js';
@@ -51,6 +52,7 @@ const clip = (s, n = 20000) => (s.length > n ? `${s.slice(0, n)}\n…（已截�
  * @param {(url: string, init?: object) => Promise<Response>} [ctx.fetchViaGateway]  有网关时绕过浏览器跨域限制
  * @param {string} [ctx.tavilyKey]
  * @param {((p: { system: string, prompt: string, signal?: AbortSignal }) => Promise<string>) | null} [ctx.llm]  深度调研用的大模型（内置演示时为空）
+ * @param {(html: string) => Promise<Uint8Array>} [ctx.toPdf]  桌面版：排好版的 HTML 直接转 PDF
  */
 export function createTools(ctx) {
   const readPage = createPageReader(ctx); // 直接打不开或没读到正文时，有 Tavily Key 就让 Tavily 代读
@@ -297,19 +299,46 @@ export function createTools(ctx) {
     },
     {
       name: 'create_document',
-      description: '生成 Office / 文档文件并保存到工作区。content 用 Markdown：docx/pdf/html/md 支持 # 标题、列表、| 表格 |、**粗体**；pptx 用“# 标题”分页、列表作为要点；xlsx 用 CSV 或 Markdown 表格，“## 名称”分出多个工作表。',
+      description: `生成 Office / 文档文件并保存到工作区，排版自动完成（A4、标题样式、编号列表、带表头底色的表格、页码；Word / PDF 的二级标题有 3 个以上时自动加目录）。
+content 用 Markdown：
+- docx / pdf / html：开头一个“# 文档标题”，正文用 ## 一级标题、### 二级标题、#### 三级标题；支持多级列表（缩进两个空格）、| 表格 |（:--: 居中、--: 右对齐）、**粗体**、*斜体*、~~删除线~~、[链接](https://…)、> 引用、代码块、--- 分隔线、单独一行 [分页]、![图注](工作区里的图片路径)
+- pptx：“# 标题”分页，列表作为要点
+- xlsx：CSV 或 Markdown 表格，“## 名称”分出多个工作表
+theme 可选：${themeList()}。不填按内容自动选；公文（通知、请示、报告、函等）用 gongwen。`,
       input_schema: S({
         format: { type: 'string', enum: ['docx', 'pptx', 'xlsx', 'pdf', 'html', 'md', 'txt'] },
         path: str('保存路径（扩展名会自动修正）'),
         title: str('文档标题'),
-        content: str('Markdown 内容')
+        content: str('Markdown 内容'),
+        theme: { type: 'string', enum: THEME_IDS, description: '配色主题，不填自动选' },
+        cover: { type: 'boolean', description: 'Word / PDF 加封面（正式报告、方案、标书类建议加）' },
+        subtitle: str('副标题（可选）'),
+        author: str('署名，如单位或部门（可选，用在封面）'),
+        toc: { type: 'string', enum: ['auto', 'yes', 'no'], description: '目录：auto（默认，二级标题 3 个以上时加）/ yes / no' },
+        template: str('Word 模板路径（工作区里的 .docx，可选）：沿用模板的字体、标题和正文样式')
       }, ['format', 'path', 'content']),
-      run: async ({ format, path, title, content }) => {
-        const out = await generate(format, { title: title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, ''), content });
+      run: async ({ format, path, title, content, theme, cover, subtitle, author, toc, template }) => {
+        const loadImage = async (src) => {
+          if (/^(https?:|data:)/i.test(src)) return null;
+          try { return new Uint8Array(await (await ws.readBlob(src)).arrayBuffer()); } catch { return null; }
+        };
+        let tpl = null;
+        if (template && format === 'docx') {
+          try { tpl = new Uint8Array(await (await ws.readBlob(template)).arrayBuffer()); } catch { throw new Error(`找不到模板文件：${template}`); }
+        }
+        const out = await generate(format, {
+          title: title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, ''), content, theme, cover: Boolean(cover), subtitle, author,
+          toc: toc === 'yes' ? true : toc === 'no' ? false : 'auto', loadImage, toPdf: ctx.toPdf ?? null, template: tpl
+        });
         const target = path.replace(/\.[a-z0-9]+$/i, '') + `.${out.ext}`;
         const r = await ws.write(target, out.blob);
         ctx.onFileChanged?.(r.path);
-        return `${r.path}（${fmtSize(out.blob.size)}）${out.note ? `。${out.note}` : ''}`;
+        const notes = [`主题：${out.theme.name}`];
+        if (out.info?.toc) notes.push('已加目录（Word 打开时如提示更新域，点“是”即可填上页码；WPS 里右键目录 →“更新目录”）');
+        if (out.info?.missingImages?.length) notes.push(`这些图片没找到，用占位文字代替了：${out.info.missingImages.join('、')}`);
+        if (tpl) notes.push(`沿用了模板 ${template} 的样式`);
+        if (out.note) notes.push(out.note);
+        return `${r.path}（${fmtSize(out.blob.size)}）。${notes.join('；')}`;
       }
     },
     {

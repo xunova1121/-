@@ -1,13 +1,18 @@
 /**
  * 文档读写（全部在浏览器本地完成，不上传）：
  *   读：docx（mammoth）· pdf（pdf.js）· pptx（JSZip 解析幻灯片 XML）· xlsx / xls / csv（SheetJS）· 纯文本类
- *   写：docx（docx）· pptx（PptxGenJS）· xlsx（SheetJS）· html / md / txt；
- *       pdf：生成排版好的可打印 HTML，由用户在工作区点“导出 PDF”用浏览器打印保存
+ *   写：docx（docxWriter.js）· pptx（PptxGenJS）· xlsx（SheetJS）· html / md / txt；Markdown 先解析成文档结构（docModel.js），
+ *       配色字体统一用主题（themes.js）
+ *       pdf：桌面版由 Electron 直接转成 PDF；网页版和安卓生成排版好的可打印 HTML，用户在工作区点“导出 PDF”
  *       （浏览器内生成带中文的 PDF 需要内嵌几 MB 的中文字体，打印方式更清晰也更小）
  * 重型库全部按需动态加载。
  */
-import { parseMarkdown } from '../core/markdown.js';
 import { ext, isText } from './workspace.js';
+import { parseDoc, images } from './docModel.js';
+import { htmlDocument } from './htmlWriter.js';
+import { makeDocx } from './docxWriter.js';
+import { resolveTheme } from './themes.js';
+import { imageInfo } from './imageInfo.js';
 
 const MAX_CHARS = 60000;
 
@@ -122,79 +127,70 @@ export function htmlToText(html) {
 }
 
 // ---------------------------------------------------------------- 生成
-const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const spansHtml = (spans) => spans.map((s) => (s.code ? `<code>${esc(s.text)}</code>` : s.bold ? `<strong>${esc(s.text)}</strong>` : esc(s.text))).join('');
+export { markdownToHtml, htmlDocument } from './htmlWriter.js';
 
-export function markdownToHtml(md) {
-  return parseMarkdown(md).map((b) => {
-    if (b.type === 'heading') return `<h${b.level}>${spansHtml(b.spans)}</h${b.level}>`;
-    if (b.type === 'code') return `<pre><code>${esc(b.text)}</code></pre>`;
-    if (b.type === 'list') return `<${b.ordered ? 'ol' : 'ul'}>${b.items.map((i) => `<li>${spansHtml(i)}</li>`).join('')}</${b.ordered ? 'ol' : 'ul'}>`;
-    if (b.type === 'table') return `<table>${b.rows.map((r, i) => `<tr>${r.map((c) => (i ? `<td>${esc(c)}</td>` : `<th>${esc(c)}</th>`)).join('')}</tr>`).join('')}</table>`;
-    return `<p>${spansHtml(b.spans)}</p>`;
-  }).join('\n');
+const MIME_OF = { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', bmp: 'image/bmp' };
+
+/** 文档里用到的图片 → data: 地址（网页 / PDF 用） */
+async function imageMap(content, loadImage) {
+  const map = new Map();
+  if (!loadImage) return map;
+  for (const src of images(parseDoc(content))) {
+    if (map.has(src)) continue;
+    try {
+      const bytes = await loadImage(src);
+      const info = bytes && imageInfo(bytes);
+      if (info) map.set(src, `data:${MIME_OF[info.type]};base64,${toBase64(bytes)}`);
+    } catch { /* 读不到就显示占位 */ }
+  }
+  return map;
 }
-
-export function htmlDocument(title, md, { printable = false } = {}) {
-  return `<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)}</title>
-<style>
-body{font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif;max-width:760px;margin:40px auto;padding:0 20px;line-height:1.75;color:#1a2230}
-h1{font-size:28px;border-bottom:2px solid #1a6fb0;padding-bottom:8px}h2{font-size:21px;margin-top:28px}h3{font-size:17px}
-table{border-collapse:collapse;width:100%;margin:12px 0}th,td{border:1px solid #c9d3df;padding:6px 10px;text-align:left}th{background:#eef3f8}
-code{background:#f0f3f7;padding:1px 5px;border-radius:4px}pre{background:#f0f3f7;padding:12px;border-radius:6px;overflow:auto}
-${printable ? '@page{size:A4;margin:18mm}@media print{body{margin:0;max-width:none}}' : ''}
-</style></head><body>
-${md.trim().startsWith('#') ? '' : `<h1>${esc(title)}</h1>`}
-${markdownToHtml(md)}
-</body></html>`;
+function toBase64(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
 }
 
 /**
  * @param {'docx'|'pptx'|'xlsx'|'html'|'md'|'txt'|'pdf'} format
- * @returns {Promise<{blob: Blob, ext: string, note?: string}>}
+ * @param {object} o
+ * @param {string} [o.theme]  主题 id 或中文名；不填按内容自动选（themes.js）
+ * @param {boolean} [o.cover]  Word / 网页 / PDF 加封面
+ * @param {'auto'|boolean} [o.toc]  目录：auto = 二级标题（##）有 3 个以上时加
+ * @param {(src: string) => Promise<Uint8Array|null>} [o.loadImage]  读工作区里的图片
+ * @param {(html: string, o: { title: string, official: boolean }) => Promise<Uint8Array>} [o.toPdf]  桌面版：HTML 直接转 PDF
+ * @param {Uint8Array|ArrayBuffer} [o.template]  Word 模板（沿用它的样式）
+ * @returns {Promise<{blob: Blob, ext: string, note?: string, theme: object, info?: object}>}
  */
-export async function generate(format, { title = '未命名', content = '' }) {
+export async function generate(format, { title = '未命名', content = '', theme: themeName = '', cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, toPdf = null, template = null } = {}) {
+  const theme = resolveTheme(themeName, `${title}\n${content}`);
+  const page = { theme, cover, subtitle, author, date, toc };
   switch (format) {
     case 'md': case 'txt':
-      return { blob: new Blob([content], { type: 'text/plain' }), ext: format };
+      return { blob: new Blob([content], { type: 'text/plain' }), ext: format, theme };
     case 'html':
-      return { blob: new Blob([htmlDocument(title, content)], { type: 'text/html' }), ext: 'html' };
-    case 'pdf':
+      return { blob: new Blob([htmlDocument(title, content, { ...page, images: await imageMap(content, loadImage) })], { type: 'text/html' }), ext: 'html', theme };
+    case 'pdf': {
+      const html = htmlDocument(title, content, { ...page, printable: true, images: await imageMap(content, loadImage) });
+      if (toPdf) {
+        const bytes = await toPdf(html, { title, official: Boolean(theme.official) });
+        return { blob: new Blob([bytes], { type: 'application/pdf' }), ext: 'pdf', theme };
+      }
       return {
-        blob: new Blob([htmlDocument(title, content, { printable: true })], { type: 'text/html' }),
+        blob: new Blob([html], { type: 'text/html' }),
         ext: 'html',
+        theme,
         note: '已生成 A4 排版的可打印文件。在工作区打开它，点“导出 PDF”即可另存为 PDF。'
       };
-    case 'docx': return { blob: await makeDocx(title, content), ext: 'docx' };
-    case 'pptx': return { blob: await makePptx(title, content), ext: 'pptx' };
-    case 'xlsx': return { blob: await makeXlsx(content), ext: 'xlsx' };
+    }
+    case 'docx': {
+      const r = await makeDocx({ title, content, ...page, loadImage, template });
+      return { blob: r.blob, ext: 'docx', theme, info: r.info };
+    }
+    case 'pptx': return { blob: await makePptx(title, content), ext: 'pptx', theme };
+    case 'xlsx': return { blob: await makeXlsx(content), ext: 'xlsx', theme };
     default: throw new Error(`不支持生成 ${format} 格式`);
   }
-}
-
-async function makeDocx(title, md) {
-  const d = await import('docx');
-  const { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } = d;
-  const runs = (spans, extra = {}) => spans.map((s) => new TextRun({ text: s.text, bold: s.bold, font: s.code ? 'Consolas' : undefined, ...extra }));
-  const children = [];
-  const blocks = parseMarkdown(md);
-  if (!blocks.length || blocks[0].type !== 'heading') children.push(new Paragraph({ heading: HeadingLevel.TITLE, children: [new TextRun(title)] }));
-  for (const b of blocks) {
-    if (b.type === 'heading') children.push(new Paragraph({ heading: [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3][b.level - 1], children: runs(b.spans) }));
-    else if (b.type === 'list') b.items.forEach((it, i) => children.push(new Paragraph({ children: [new TextRun(b.ordered ? `${i + 1}. ` : '• '), ...runs(it)], indent: { left: 360 } })));
-    else if (b.type === 'code') for (const line of b.text.split('\n')) children.push(new Paragraph({ children: [new TextRun({ text: line, font: 'Consolas', size: 20 })] }));
-    else if (b.type === 'table') {
-      children.push(new Table({
-        width: { size: 100, type: WidthType.PERCENTAGE },
-        rows: b.rows.map((r, ri) => new TableRow({ children: r.map((c) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: c, bold: ri === 0 })] })] })) }))
-      }));
-      children.push(new Paragraph(''));
-    } else children.push(new Paragraph({ children: runs(b.spans), spacing: { after: 120 } }));
-  }
-  const doc = new Document({ creator: '贾维斯', title, styles: { default: { document: { run: { font: 'Microsoft YaHei', size: 22 } } } }, sections: [{ children }] });
-  return Packer.toBlob(doc);
 }
 
 /** 幻灯片：每个 “# 标题” 开始一页（或用 --- 分页）；页内的列表 / 段落成为要点 */
