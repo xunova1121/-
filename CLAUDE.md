@@ -28,6 +28,9 @@
 
 ## 提交与发布
 - 开发分支：`claude/jolly-darwin-tijh97`。
-- 推送到这个分支会触发 GitHub Actions 自动打包并发布新版本（用户电脑会自动更新）。
+- 推送到这个分支、且改动了 `jarvis/` 下的源码（src、server、desktop、android、package.json 等，
+  见 `.github/workflows/jarvis-desktop.yml` 的 paths）时，GitHub Actions 会自动打包并发布新版本（用户电脑会自动更新）。
   所以：测试全部通过、用户同意后再推送；只想保存进度不发版时，提交信息里加 `[skip ci]`。
+- 注意：只看最后一次推送。之前的提交都带 `[skip ci]`、最后一个提交又只改了 `jarvis/` 以外的文件（如根目录的
+  `jarvis-standalone.html`、`CLAUDE.md`）时，不会打包。这时到 GitHub 的 Actions 页面对这个工作流点“Run workflow”手动发版。
 - 版本号由 CI 自动生成（`desktop-v1.0.<序号>`），不要手动改。
