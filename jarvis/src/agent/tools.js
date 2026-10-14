@@ -8,6 +8,7 @@ import * as kb from './knowledge.js';
 import { parseFile, generate } from './docs.js';
 import { THEME_IDS, themeList } from './themes.js';
 import { writeLongDocument, outlineMarkdown } from './longDoc.js';
+import { withBom } from './xlsxWriter.js';
 import { runJavaScript, runPython } from './sandbox.js';
 import * as packs from './skillPacks.js';
 import { isImageName, prepareImage } from './images.js';
@@ -292,7 +293,8 @@ export function createTools(ctx) {
       description: '在工作区写入文本文件（代码、网页、Markdown、CSV、JSON 等）。编写程序时把每个文件分别写入。',
       input_schema: S({ path: str('文件路径，如 app/index.html'), content: str('完整文件内容') }, ['path', 'content']),
       run: async ({ path, content }) => {
-        const r = await ws.write(path, content);
+        // CSV 加 UTF-8 BOM：Excel 双击打开时中文不乱码
+        const r = await ws.write(path, /\.csv$/i.test(path) ? withBom(content) : content);
         ctx.onFileChanged?.(r.path);
         const kept = { saved: '，覆盖了同名文件，原来的内容已自动备份，可在“工作区 → 改动记录”里恢复', 'too-big': '，覆盖了同名文件，原文件太大没有自动备份' }[r.backup] ?? '';
         return `已写入 ${r.path}（${fmtSize(new Blob([content]).size)}）${r.renamed ? '，本地已有同名文件，未覆盖，另存为此名' : ''}${kept}`;
@@ -304,10 +306,11 @@ export function createTools(ctx) {
 content 用 Markdown：
 - docx / pdf / html：开头一个“# 文档标题”，正文用 ## 一级标题、### 二级标题、#### 三级标题；支持多级列表（缩进两个空格）、| 表格 |（:--: 居中、--: 右对齐）、**粗体**、*斜体*、~~删除线~~、[链接](https://…)、> 引用、代码块、--- 分隔线、单独一行 [分页]、![图注](工作区里的图片路径)
 - pptx：“# 标题”分页，列表作为要点
-- xlsx：CSV 或 Markdown 表格，“## 名称”分出多个工作表
+- xlsx：CSV 或 Markdown 表格，“## 名称”分出多个工作表；表头放第一行；“合计”行和“增长率 / 同比 / 完成率”列会自动写成 Excel 公式，也可以直接写“=SUM(B2:B5)”；1,200、18%、¥300、2026-10-14 会自动设成对应的数字格式
+- csv：单个表格，自动加 BOM（Excel 打开中文不乱码）
 theme 可选：${themeList()}。不填按内容自动选；公文（通知、请示、报告、函等）用 gongwen。`,
       input_schema: S({
-        format: { type: 'string', enum: ['docx', 'pptx', 'xlsx', 'pdf', 'html', 'md', 'txt'] },
+        format: { type: 'string', enum: ['docx', 'pptx', 'xlsx', 'pdf', 'html', 'md', 'txt', 'csv'] },
         path: str('保存路径（扩展名会自动修正）'),
         title: str('文档标题'),
         content: str('Markdown 内容'),

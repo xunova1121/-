@@ -10,7 +10,7 @@
  *   页脚    “第 X 页 / 共 Y 页”（公文“— X —”）；正文二级标题（##）有 3 个以上时自动加目录；可选封面
  *   模板    传入 template（用户的 .docx）时沿用它的样式定义（styles.xml）
  */
-import { parseDoc, plain, headings } from './docModel.js';
+import { parseDoc, plain, headings, markSalutationAndSignature } from './docModel.js';
 import { FONTS } from './themes.js';
 import { imageInfo } from './imageInfo.js';
 
@@ -66,7 +66,9 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
   } else if (!h1s.length) shift = 1; // 没有 #：## 就是一级标题
   const level = (l) => Math.max(1, l - shift);
   const hs = headings(blocks).map((h) => ({ ...h, level: level(h.level) }));
-  const wantToc = toc === true || (toc === 'auto' && hs.filter((h) => h.level === 1).length >= 3);
+  // 公文不加目录（除非明确要求）
+  const wantToc = toc === true || (toc === 'auto' && !official && hs.filter((h) => h.level === 1).length >= 3);
+  markSalutationAndSignature(blocks);
 
   // ---------- 行内
   let numberingInstance = 0;
@@ -102,7 +104,8 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
   const body = (ins, opts = {}) => new Paragraph({
     children: runs(ins),
     alignment: official ? AlignmentType.JUSTIFIED : AlignmentType.JUSTIFIED,
-    indent: opts.noIndent ? undefined : { firstLineChars: 200 },
+    // 首行缩进 2 字：同时写字符数和绝对值，不认 firstLineChars 的软件也能缩进
+    indent: opts.noIndent ? undefined : { firstLineChars: 200, firstLine: bodySize * 2 * 20 },
     ...opts.paragraph
   });
 
@@ -143,14 +146,22 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
     const borders = { top: border, bottom: border, left: border, right: border };
     const cell = (ins, i, { head = false, zebra = false } = {}) => new TableCell({
       borders,
+      width: { size: widths[i], type: WidthType.DXA },
       verticalAlign: VerticalAlign.CENTER,
       margins: { top: 60, bottom: 60, left: 100, right: 100 },
       shading: head ? { type: ShadingType.CLEAR, fill: official ? 'F2F2F2' : C.accent, color: 'auto' } : zebra ? { type: ShadingType.CLEAR, fill: C.soft, color: 'auto' } : undefined,
       children: [new Paragraph({ alignment: head ? AlignmentType.CENTER : align(i), spacing: { before: 0, after: 0, line: 300, lineRule: LineRuleType.AUTO }, children: runs(ins ?? [], head ? { bold: true, color: official ? '000000' : 'FFFFFF' } : {}) })]
     });
     const pad = (r) => Array.from({ length: cols }, (_, i) => r[i] ?? []);
+    // 列宽按内容分：每列取最长的单元格（中文算 2、西文算 1），限制在 4–40 之间，按比例分版心宽度
+    const textW = 11906 - page.left - page.right;
+    const len = (ins) => [...plain(ins ?? [])].reduce((n, ch) => n + (/[⺀-￿]/.test(ch) ? 2 : 1), 0);
+    const weights = Array.from({ length: cols }, (_, i) => Math.min(40, Math.max(4, len(b.header[i]) + 2, ...b.rows.map((r) => len(r[i])))));
+    const sum = weights.reduce((a, x) => a + x, 0);
+    const widths = weights.map((w) => Math.round((w / sum) * textW));
     return new Table({
-      width: { size: 100, type: WidthType.PERCENTAGE },
+      width: { size: textW, type: WidthType.DXA },
+      columnWidths: widths,
       rows: [
         new TableRow({ tableHeader: true, cantSplit: true, children: pad(b.header).map((c, i) => cell(c, i, { head: true })) }),
         ...b.rows.map((r, ri) => new TableRow({ cantSplit: true, children: pad(r).map((c, i) => cell(c, i, { zebra: !official && ri % 2 === 1 })) }))
@@ -167,6 +178,11 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
           break;
         }
         case 'paragraph':
+          if (b.salutation) { out.push(body(b.inlines, { noIndent: true })); break; }
+          if (b.signature) {
+            out.push(new Paragraph({ alignment: AlignmentType.RIGHT, indent: { right: official ? bodySize * 4 * 20 : 0 }, spacing: { before: official ? 579 : 360 }, children: runs(b.inlines) }));
+            break;
+          }
           out.push(inQuote
             ? new Paragraph({ children: runs(b.inlines, { color: '404040' }), indent: { left: 360 }, border: { left: { style: BorderStyle.SINGLE, size: 18, color: official ? '808080' : C.accent, space: 8 } }, shading: { type: ShadingType.CLEAR, fill: official ? 'FFFFFF' : C.soft, color: 'auto' }, spacing: { before: 60, after: 60 } })
             : body(b.inlines));
@@ -207,9 +223,10 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
       new Paragraph({ children: [new PageBreak()] })
     );
   } else {
-    // 没有封面：正文前面一个居中的大标题
-    children.push(new Paragraph({ heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER, children: [new TextRun(docTitle)] }));
-    if (subtitle) children.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 240 }, children: [new TextRun({ text: subtitle, color: official ? '000000' : C.accent, size: PT(bodySize + 1), font: headFont })] }));
+    // 没有封面：居中的大标题。有目录时放在目录页最上面（标题 → 目录 → 正文），没有目录时在正文开头
+    const titleBlock = [new Paragraph({ heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER, children: [new TextRun(docTitle)] })];
+    if (subtitle) titleBlock.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 240 }, children: [new TextRun({ text: subtitle, color: official ? '000000' : C.accent, size: PT(bodySize + 1), font: headFont })] }));
+    (wantToc ? front : children).push(...titleBlock);
   }
   if (wantToc) {
     front.push(
@@ -245,11 +262,13 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
     [LevelFormat.LOWER_LETTER, '%4.'], [LevelFormat.LOWER_ROMAN, '%5.'], [LevelFormat.DECIMAL, '%6.'],
     [LevelFormat.DECIMAL, '%7.'], [LevelFormat.DECIMAL, '%8.'], [LevelFormat.DECIMAL, '%9.']
   ];
-  const indent = (lvl) => ({ left: 420 * (lvl + 1), hanging: 420 });
+  // 公文的“1.”和正文一样首行缩进 2 字、编号紧跟文字；其他文档用悬挂缩进
+  const indent = (lvl) => (official ? { left: 0, firstLine: bodySize * 2 * 20 * (lvl + 1) } : { left: 420 * (lvl + 1), hanging: 420 });
+  const suffix = official ? LevelSuffix.NOTHING : LevelSuffix.TAB;
   const numbering = {
     config: [
-      { reference: 'jarvis-bullets', levels: Array.from({ length: 9 }, (_, l) => ({ level: l, format: LevelFormat.BULLET, text: bulletChars[l % 3], alignment: AlignmentType.LEFT, suffix: LevelSuffix.TAB, style: { paragraph: { indent: indent(l) }, run: { font: { ascii: 'Arial', hAnsi: 'Arial', eastAsia: '宋体' }, size: PT(bodySize * (l % 3 === 0 ? 0.7 : 0.8)), color: official ? '000000' : C.accent } } })) },
-      { reference: 'jarvis-ordered', levels: orderedLevels.map(([format, text], l) => ({ level: l, format, text, start: 1, alignment: AlignmentType.LEFT, suffix: LevelSuffix.TAB, style: { paragraph: { indent: indent(l) } } })) }
+      { reference: 'jarvis-bullets', levels: Array.from({ length: 9 }, (_, l) => ({ level: l, format: LevelFormat.BULLET, text: bulletChars[l % 3], alignment: AlignmentType.LEFT, suffix, style: { paragraph: { indent: indent(l) }, run: { font: { ascii: 'Arial', hAnsi: 'Arial', eastAsia: '宋体' }, size: PT(bodySize * (l % 3 === 0 ? 0.7 : 0.8)), color: official ? '000000' : C.accent } } })) },
+      { reference: 'jarvis-ordered', levels: orderedLevels.map(([format, text], l) => ({ level: l, format, text, start: 1, alignment: AlignmentType.LEFT, suffix, style: { paragraph: { indent: indent(l) } } })) }
     ]
   };
 

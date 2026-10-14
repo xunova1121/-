@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { generate, parseFile, splitSlides, parseSheets, markdownToHtml, htmlToText } from '../src/agent/docs.js';
+
+// ExcelJS / SheetJS 体积大，几个测试文件同时跑时第一次加载可能要好几秒：先加载好，不占用例的时间
+beforeAll(() => Promise.all([import('exceljs'), import('xlsx'), import('pptxgenjs')]), 60_000);
 
 const MD = '# 季度报告\n\n本季度**收入**增长。\n\n## 明细\n\n| 项目 | 金额 |\n| --- | --- |\n| 产品 | 120 |\n| 服务 | 80 |\n\n- 要点一\n- 要点二';
 

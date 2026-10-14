@@ -3,7 +3,7 @@
  * 打印版：A4、页边距、[分页]、页码（浏览器支持 @page 页边框时；桌面版导出 PDF 时由 Electron 加页脚）。
  * 所有文字都转义；链接只允许 http(s) / mailto；图片只用预先读好的 data: 地址。
  */
-import { parseDoc, plain, headings } from './docModel.js';
+import { parseDoc, plain, headings, markSalutationAndSignature } from './docModel.js';
 import { FONTS, THEMES } from './themes.js';
 
 export const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -41,7 +41,7 @@ export function blocksToHtml(blocks, { images = new Map(), shift = 0, ids = [] }
         const id = ids[h++] ?? '';
         return `<h${l}${id ? ` id="${id}"` : ''}>${inlineHtml(b.inlines)}</h${l}>`;
       }
-      case 'paragraph': return `<p>${inlineHtml(b.inlines)}</p>`;
+      case 'paragraph': return `<p${b.salutation ? ' class="salutation"' : b.signature ? ' class="signature"' : ''}>${inlineHtml(b.inlines)}</p>`;
       case 'list': {
         const tag = b.ordered ? 'ol' : 'ul';
         return `<${tag}${b.ordered && b.start !== 1 ? ` start="${b.start}"` : ''}>${b.items.map((it) => `<li>${inlineHtml(it.inlines)}${walk(it.children)}</li>`).join('')}</${tag}>`;
@@ -85,7 +85,8 @@ export function htmlDocument(title, md, { printable = false, theme = THEMES.busi
   let shift = 0;
   if (h1.length === 1 && blocks[0] === h1[0]) { docTitle = plain(blocks.shift().inlines) || title; shift = 1; } else if (!h1.length) shift = 1;
   const hs = headings(blocks).map((x, i) => ({ ...x, level: Math.max(1, x.level - shift), id: `s${i + 1}` }));
-  const wantToc = toc === true || (toc === 'auto' && hs.filter((x) => x.level === 1).length >= 3);
+  const wantToc = toc === true || (toc === 'auto' && !official && hs.filter((x) => x.level === 1).length >= 3);
+  markSalutationAndSignature(blocks);
   const tocHtml = wantToc
     ? `<nav class="toc"><h2 class="toc-title">目　录</h2><ol>${hs.filter((x) => x.level <= 3).map((x) => `<li class="l${x.level}"><a href="#${x.id}">${esc(x.text)}</a></li>`).join('')}</ol></nav>${printable ? '<div class="page-break"></div>' : ''}`
     : '';
@@ -105,7 +106,8 @@ h1{font-size:${official ? '16pt' : '22px'};margin:32px 0 12px;${official ? '' : 
 h2{font-size:${official ? '16pt' : '18px'};margin:24px 0 10px${official ? `;font-family:${fontStack(theme.fonts.h2)};font-weight:normal` : ''}}
 h3{font-size:${official ? '16pt' : '16px'};margin:18px 0 8px;color:${official ? 'var(--ink)' : 'var(--accent)'}${official ? `;font-family:${fontStack(theme.fonts.h3)}` : ''}}
 p{margin:0 0 10px;text-indent:2em;text-align:justify}
-li>p,blockquote p,figcaption,.sub,.meta,.missing{text-indent:0}
+li>p,blockquote p,figcaption,.sub,.meta,.missing,.salutation{text-indent:0}
+.signature{text-indent:0;text-align:right;margin-top:1.5em${official ? ';padding-right:4em' : ''}}
 ul,ol{margin:0 0 10px;padding-left:2em}li{margin:3px 0}
 ul li::marker{color:var(--accent)}
 a{color:#0563c1}

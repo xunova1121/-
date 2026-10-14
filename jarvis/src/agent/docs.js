@@ -1,7 +1,7 @@
 /**
  * 文档读写（全部在浏览器本地完成，不上传）：
  *   读：docx（mammoth）· pdf（pdf.js）· pptx（JSZip 解析幻灯片 XML）· xlsx / xls / csv（SheetJS）· 纯文本类
- *   写：docx（docxWriter.js）· pptx（PptxGenJS）· xlsx（SheetJS）· html / md / txt；Markdown 先解析成文档结构（docModel.js），
+ *   写：docx（docxWriter.js）· pptx（pptxWriter.js）· xlsx（xlsxWriter.js，ExcelJS）· csv（带 BOM）· html / md / txt；Markdown 先解析成文档结构（docModel.js），
  *       配色字体统一用主题（themes.js）
  *       pdf：桌面版由 Electron 直接转成 PDF；网页版和安卓生成排版好的可打印 HTML，用户在工作区点“导出 PDF”
  *       （浏览器内生成带中文的 PDF 需要内嵌几 MB 的中文字体，打印方式更清晰也更小）
@@ -13,6 +13,8 @@ import { htmlDocument } from './htmlWriter.js';
 import { makeDocx } from './docxWriter.js';
 import { resolveTheme } from './themes.js';
 import { imageInfo } from './imageInfo.js';
+import { makeXlsx, makeCsv } from './xlsxWriter.js';
+import { makePptx } from './pptxWriter.js';
 
 const MAX_CHARS = 60000;
 
@@ -187,92 +189,21 @@ export async function generate(format, { title = '未命名', content = '', them
       const r = await makeDocx({ title, content, ...page, loadImage, template });
       return { blob: r.blob, ext: 'docx', theme, info: r.info };
     }
-    case 'pptx': return { blob: await makePptx(title, content), ext: 'pptx', theme };
-    case 'xlsx': return { blob: await makeXlsx(content), ext: 'xlsx', theme };
+    case 'pptx': {
+      const r = await makePptx({ title, content, theme, subtitle, author, date, loadImage });
+      return { blob: r.blob, ext: 'pptx', theme, info: r.info };
+    }
+    case 'xlsx': {
+      const r = await makeXlsx(content, { theme });
+      return { blob: r.blob, ext: 'xlsx', theme, info: r.info };
+    }
+    case 'csv': return { blob: makeCsv(content), ext: 'csv', theme };
     default: throw new Error(`不支持生成 ${format} 格式`);
   }
 }
 
-/** 幻灯片：每个 “# 标题” 开始一页（或用 --- 分页）；页内的列表 / 段落成为要点 */
-export function splitSlides(title, md) {
-  const slides = [];
-  let cur = null;
-  for (const line of String(md).split('\n')) {
-    const h = line.match(/^#{1,2}\s+(.*)$/);
-    if (h) { cur = { title: h[1].trim(), lines: [] }; slides.push(cur); continue; }
-    if (/^\s*---+\s*$/.test(line)) { cur = null; continue; }
-    if (!line.trim()) continue;
-    if (!cur) { cur = { title: slides.length ? '' : title, lines: [] }; slides.push(cur); }
-    cur.lines.push(line.replace(/^\s*(?:[-*•]|\d+[.、)])\s+/, '').replace(/\*\*/g, '').trim());
-  }
-  return slides;
-}
+/** 幻灯片：每个 “# 标题” 开始一页（或用 --- 分页）；版式按内容自动选（见 pptxWriter.js） */
+export { splitSlides } from './pptxWriter.js';
 
-async function makePptx(title, md) {
-  const PptxGenJS = (await import('pptxgenjs')).default;
-  const pptx = new PptxGenJS();
-  pptx.layout = 'LAYOUT_WIDE';
-  pptx.title = title;
-  const BG = '07111F', ACCENT = '38BDF8', TEXT = 'E6F1FA', MUTED = '8AA4B8';
-  const cover = pptx.addSlide();
-  cover.background = { color: BG };
-  cover.addShape(pptx.ShapeType.rect, { x: 0.6, y: 3.55, w: 1.2, h: 0.06, fill: { color: ACCENT } });
-  cover.addText(title, { x: 0.6, y: 2.2, w: 12, h: 1.2, fontSize: 40, bold: true, color: TEXT, fontFace: 'Microsoft YaHei' });
-  cover.addText(`由贾维斯生成 · ${new Date().toLocaleDateString('zh-CN')}`, { x: 0.6, y: 3.8, w: 12, h: 0.5, fontSize: 14, color: MUTED, fontFace: 'Microsoft YaHei' });
-  for (const [i, s] of splitSlides(title, md).entries()) {
-    const sl = pptx.addSlide();
-    sl.background = { color: BG };
-    sl.addText(s.title || title, { x: 0.6, y: 0.4, w: 12, h: 0.9, fontSize: 28, bold: true, color: TEXT, fontFace: 'Microsoft YaHei' });
-    sl.addShape(pptx.ShapeType.rect, { x: 0.6, y: 1.3, w: 0.8, h: 0.05, fill: { color: ACCENT } });
-    if (s.lines.length) {
-      sl.addText(s.lines.map((t) => ({ text: t, options: { bullet: { code: '25A0' }, paraSpaceAfter: 10 } })), {
-        x: 0.8, y: 1.7, w: 11.6, h: 5, fontSize: 20, color: TEXT, fontFace: 'Microsoft YaHei', valign: 'top'
-      });
-    }
-    sl.addText(String(i + 2), { x: 12.3, y: 7, w: 0.6, h: 0.3, fontSize: 10, color: MUTED, align: 'right' });
-  }
-  return pptx.write({ outputType: 'blob' });
-}
-
-/** 表格：内容可以是 CSV 或 Markdown 表格；用 “## 工作表名” 分成多个工作表 */
-export function parseSheets(content) {
-  const sheets = [];
-  let cur = null;
-  for (const line of String(content).split('\n')) {
-    const h = line.match(/^#{1,3}\s+(?:工作表[:：]?\s*)?(.*)$/);
-    if (h) { cur = { name: h[1].trim().slice(0, 31) || `Sheet${sheets.length + 1}`, rows: [] }; sheets.push(cur); continue; }
-    if (!line.trim()) continue;
-    if (!cur) { cur = { name: 'Sheet1', rows: [] }; sheets.push(cur); }
-    if (/^\s*\|.*\|\s*$/.test(line)) {
-      const cells = line.trim().slice(1, -1).split('|').map((c) => c.trim());
-      if (cells.every((c) => /^:?-+:?$/.test(c))) continue;
-      cur.rows.push(cells);
-    } else cur.rows.push(parseCsvLine(line));
-  }
-  // 数字字符串转为数字，Excel 里可以直接计算
-  for (const s of sheets) s.rows = s.rows.map((r) => r.map((c) => (/^-?\d+(\.\d+)?$/.test(c) ? Number(c) : c)));
-  return sheets;
-}
-
-function parseCsvLine(line) {
-  const out = [];
-  let cur = '', q = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (q) {
-      if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; } else if (ch === '"') q = false; else cur += ch;
-    } else if (ch === '"') q = true;
-    else if (ch === ',' || ch === '\t') { out.push(cur.trim()); cur = ''; } else cur += ch;
-  }
-  out.push(cur.trim());
-  return out;
-}
-
-async function makeXlsx(content) {
-  const XLSX = await import('xlsx');
-  const wb = XLSX.utils.book_new();
-  for (const s of parseSheets(content)) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(s.rows), s.name);
-  if (!wb.SheetNames.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([[]]), 'Sheet1');
-  const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-  return new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-}
+/** 表格：内容可以是 CSV 或 Markdown 表格；用 “## 工作表名” 分成多个工作表（见 sheetParse.js） */
+export { parseSheets } from './sheetParse.js';

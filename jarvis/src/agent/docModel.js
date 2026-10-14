@@ -65,18 +65,28 @@ function blocks(tokens = []) {
         break;
       }
       case 'text': out.push({ type: 'paragraph', inlines: inlines(t.tokens ?? [{ type: 'text', text: t.text }]) }); break;
-      case 'list':
+      case 'list': {
+        // 紧跟在列表项后面的图片会被 Markdown 并进那一项：拿出来，放在列表后面单独成块
+        const pics = [];
         out.push({
           type: 'list', ordered: t.ordered, start: Number(t.start) || 1,
           items: t.items.map((it) => {
             const sub = blocks(it.tokens);
             const first = sub[0]?.type === 'paragraph' ? sub.shift() : null;
-            const text = first?.inlines ?? [];
+            const text = (first?.inlines ?? []).filter((s) => {
+              if (!s.image) return true;
+              pics.push({ type: 'image', src: s.image, alt: s.text });
+              return false;
+            });
+            if (text.length) text[text.length - 1] = { ...text.at(-1), text: text.at(-1).text.replace(/\s+$/, '') };
+            for (let k = sub.length - 1; k >= 0; k--) if (sub[k].type === 'image') pics.push(...sub.splice(k, 1));
             if (it.task) text.unshift({ text: it.checked ? '☑ ' : '☐ ' });
             return { inlines: text, children: sub };
           })
         });
+        out.push(...pics);
         break;
+      }
       case 'table':
         out.push({ type: 'table', header: t.header.map((c) => inlines(c.tokens)), align: t.align ?? [], rows: t.rows.map((r) => r.map((c) => inlines(c.tokens))) });
         break;
@@ -97,7 +107,9 @@ function blocks(tokens = []) {
 
 /** @returns {Array<object>} 文档块 */
 export function parseDoc(md) {
-  return blocks(marked.lexer(String(md ?? '').replace(/\r\n/g, '\n'), { gfm: true }));
+  // 单独一行的 --- 一律当分隔线（Markdown 里“文字\n---”会被当成二级标题，写文档时没人这么用）
+  const text = String(md ?? '').replace(/\r\n/g, '\n').replace(/\n[ \t]*(-{3,}|\*{3,}|_{3,})[ \t]*(?=\n|$)/g, '\n\n$1\n');
+  return blocks(marked.lexer(text, { gfm: true }));
 }
 
 /** 行内 → 纯文字 */
@@ -106,6 +118,18 @@ export const plain = (ins = []) => ins.map((s) => s.text).join('');
 /** 文档里的各级标题（目录用） */
 export function headings(doc) {
   return doc.filter((b) => b.type === 'heading').map((b) => ({ level: b.level, text: plain(b.inlines) }));
+}
+
+/** 落款里的日期：2026 年 10 月 14 日 / 2026-10-14 / 二〇二六年十月十四日 */
+const SIGN_DATE = /(\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日|\d{4}[-./]\d{1,2}[-./]\d{1,2}|[〇零一二三四五六七八九十]{4}年[一二三四五六七八九十]{1,3}月[一二三四五六七八九十]{1,3}日)$/;
+
+/** 称呼（开头单独一段、以冒号结尾，如“各部门：”）标 salutation，顶格；落款（结尾的单位 + 日期）标 signature，右对齐 */
+export function markSalutationAndSignature(doc) {
+  const first = doc.find((b) => b.type !== 'heading');
+  if (first?.type === 'paragraph' && /[:：]$/.test(plain(first.inlines).trim()) && plain(first.inlines).length <= 40) first.salutation = true;
+  const last = doc.at(-1);
+  if (last?.type === 'paragraph' && SIGN_DATE.test(plain(last.inlines).trim()) && plain(last.inlines).length <= 60) last.signature = true;
+  return doc;
 }
 
 /** 文档里的图片路径 */

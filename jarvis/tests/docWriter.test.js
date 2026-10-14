@@ -154,6 +154,36 @@ describe('Word 排版', () => {
   });
 });
 
+describe('排版细节（看过渲染效果后补的）', () => {
+  const NOTICE = '# 关于开展安全检查的通知\n\n各部门：\n\n## 一、范围\n\n正文\n\n## 二、内容\n\n正文\n\n## 三、要求\n\n1. 自查\n\n公司办公室\n2026 年 10 月 14 日';
+  it('公文：不自动加目录；称呼顶格；落款右对齐；编号像正文一样缩进', async () => {
+    const x = await unzip((await generate('docx', { title: 'x', content: NOTICE })).blob);
+    expect(x.doc).not.toMatch(/TOC \\h/);
+    const salutation = x.doc.match(/<w:p>(?:(?!<\/w:p>).)*各部门：/s)[0];
+    expect(salutation).not.toMatch(/firstLine/);
+    const sign = x.doc.match(/<w:p>(?:(?!<w:p>).)*2026 年 10 月 14 日/s)[0];
+    expect(sign).toMatch(/<w:jc w:val="right"\/>/);
+    expect(x.numbering).toMatch(/<w:suff w:val="nothing"\/>/);
+    const html = htmlDocument('x', NOTICE, { theme: THEMES.gongwen });
+    expect(html).not.toContain('<nav class="toc">');
+    expect(html).toContain('<p class="salutation">各部门：</p>');
+    expect(html).toMatch(/<p class="signature">公司办公室<br>2026 年 10 月 14 日<\/p>/);
+  });
+
+  it('有目录时顺序是：标题 → 目录 → 正文；正文首行缩进同时写字符数和绝对值', async () => {
+    const x = await unzip((await generate('docx', { title: 'x', content: REPORT })).blob);
+    expect(x.doc.indexOf('2026 年第三季度工作总结')).toBeLessThan(x.doc.indexOf('目　录'));
+    expect(x.doc).toMatch(/w:firstLine="480" w:firstLineChars="200"|w:firstLineChars="200" w:firstLine="480"/);
+  });
+
+  it('表格列宽按内容分：短的数字列窄、长的文字列宽', async () => {
+    const md = '| 编号 | 说明 |\n|--|--|\n| 1 | 这是一段比较长的说明文字，用来测试列宽分配是否合理 |';
+    const x = await unzip((await generate('docx', { title: 'x', content: md })).blob);
+    const [a, b] = [...x.doc.matchAll(/<w:gridCol w:w="(\d+)"\/>/g)].map((m) => Number(m[1]));
+    expect(b).toBeGreaterThan(a * 3);
+  });
+});
+
 describe('主题', () => {
   it('10 套 theme-factory 主题 + 商务蓝 + 公文；按 id 或中文名找', () => {
     expect(THEME_IDS).toHaveLength(12);

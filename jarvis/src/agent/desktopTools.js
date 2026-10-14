@@ -82,7 +82,8 @@ export function createDesktopTools(desktop, ctx = {}) {
       input_schema: S({ path: str('目标文件路径'), content: str('文件内容') }, ['path', 'content']),
       approval: ({ path, content }) => ({ key: 'fs-write', title: `写入文件：${path}`, detail: content.slice(0, 600) }),
       run: async ({ path, content }) => {
-        const r = await call('writeFile', { path, text: content });
+        // CSV 加 UTF-8 BOM：Excel 双击打开时中文不乱码
+        const r = await call('writeFile', { path, text: /\.csv$/i.test(path) && !content.startsWith('﻿') ? `﻿${content}` : content });
         return `已写入 ${r.path}（${fmt(r.size)}）${backupNote(r)}。`;
       }
     },
