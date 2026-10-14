@@ -146,7 +146,15 @@
           <button class="btn ghost" type="button" id="btn-upload">上传文件</button>
         </div>
         <p class="muted small" id="ws-hint">智能体写的代码、生成的文档都在这里。连接本地文件夹后，它就能直接读写那个文件夹（不会删除文件，也不会覆盖同名文件）。</p>
+        <div class="tabs" role="tablist">
+          <button role="tab" type="button" data-wtab="files" aria-selected="true">文件</button>
+          <button role="tab" type="button" data-wtab="changes" aria-selected="false">改动记录</button>
+        </div>
         <ul class="file-list" id="file-list"></ul>
+        <div class="change-box" id="change-box" hidden>
+          <p class="muted small" id="change-hint">贾维斯覆盖、删除文件之前会自动留一份，在这里可以恢复。保留 30 天。</p>
+          <ul class="file-list change-list" id="change-list"></ul>
+        </div>
         <div class="viewer" id="viewer" hidden>
           <div class="viewer-bar">
             <span class="viewer-name" id="viewer-name"></span>

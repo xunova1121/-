@@ -21,6 +21,7 @@
   "devDependencies": {
     "@capacitor/android": "8.5.2",
     "@capacitor/cli": "8.5.2",
+    "fake-indexeddb": "6.2.5",
     "playwright": "1.56.1",
     "vite": "^5.4.21",
     "vite-plugin-singlefile": "^2.3.3",

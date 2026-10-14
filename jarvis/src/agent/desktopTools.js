@@ -26,6 +26,13 @@ async function blobToB64(blob) {
   return btoa(bin);
 }
 const fmt = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
+/** 改文件前的自动备份（desktop/backups.mjs）：告诉模型，需要时转告用户 */
+const BACKUP_NOTE = {
+  saved: '原来的内容已自动备份，可在“工作区 → 改动记录”里恢复',
+  recorded: '已记入“工作区 → 改动记录”，可以撤销',
+  'too-big': '文件太大，没有自动备份'
+};
+const backupNote = (r) => (BACKUP_NOTE[r?.backup] ? `（${BACKUP_NOTE[r.backup]}）` : '');
 
 /**
  * @param {{ invoke: (op: string, args?: object) => Promise<any>, platform: string }} desktop
@@ -76,7 +83,7 @@ export function createDesktopTools(desktop, ctx = {}) {
       approval: ({ path, content }) => ({ key: 'fs-write', title: `写入文件：${path}`, detail: content.slice(0, 600) }),
       run: async ({ path, content }) => {
         const r = await call('writeFile', { path, text: content });
-        return `已写入 ${r.path}（${fmt(r.size)}）。`;
+        return `已写入 ${r.path}（${fmt(r.size)}）${backupNote(r)}。`;
       }
     },
     {
@@ -87,7 +94,7 @@ export function createDesktopTools(desktop, ctx = {}) {
       run: async ({ workspace_path: from, dest_path: to }) => {
         const blob = await ws.readBlob(from);
         const r = await call('writeFile', { path: to, base64: await blobToB64(blob) });
-        return `已保存到 ${r.path}（${fmt(r.size)}）。`;
+        return `已保存到 ${r.path}（${fmt(r.size)}）${backupNote(r)}。`;
       }
     },
     {
@@ -95,21 +102,21 @@ export function createDesktopTools(desktop, ctx = {}) {
       description: '移动或重命名电脑上的文件 / 文件夹。',
       input_schema: S({ from: str('原路径'), to: str('新路径（含新名称）') }, ['from', 'to']),
       approval: ({ from, to }) => ({ key: 'fs-move', title: '移动 / 重命名', detail: `${from}\n→ ${to}` }),
-      run: async ({ from, to }) => { const r = await call('move', { from, to }); return `已移动到 ${r.path}。`; }
+      run: async ({ from, to }) => { const r = await call('move', { from, to }); return `已移动到 ${r.path}${backupNote(r)}。`; }
     },
     {
       name: 'computer_copy',
       description: '复制电脑上的文件 / 文件夹。',
       input_schema: S({ from: str('原路径'), to: str('复制到的路径（含名称）') }, ['from', 'to']),
       approval: ({ from, to }) => ({ key: 'fs-write', title: '复制', detail: `${from}\n→ ${to}` }),
-      run: async ({ from, to }) => { const r = await call('copy', { from, to }); return `已复制到 ${r.path}。`; }
+      run: async ({ from, to }) => { const r = await call('copy', { from, to }); return `已复制到 ${r.path}${backupNote(r)}。`; }
     },
     {
       name: 'computer_trash',
       description: '把电脑上的文件 / 文件夹移到回收站（可以从回收站恢复）。',
       input_schema: S({ path: str('路径') }, ['path']),
       approval: ({ path }) => ({ key: 'fs-trash', title: `移到回收站：${path}` }),
-      run: async ({ path }) => { const r = await call('trash', { path }); return `已把 ${r.path} 移到回收站。`; }
+      run: async ({ path }) => { const r = await call('trash', { path }); return `已把 ${r.path} 移到回收站${backupNote(r)}。`; }
     },
     {
       name: 'computer_open',

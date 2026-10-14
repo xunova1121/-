@@ -13,6 +13,7 @@ import { createSearch } from '../agent/webSearch.js';
 import { saveFile } from './saveFile.js';
 import { renderDocx } from './docxView.js';
 import { MOBILE } from '../config.js';
+import { initChangesPanel } from './changesPanel.js';
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, props = {}, ...kids) => {
@@ -27,7 +28,21 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   let objectUrls = [];
 
   // ================================================================ 工作区
+  // 两个标签页：文件 / 改动记录（改文件前的自动备份，可一键恢复）
+  let wsTab = 'files';
+  const changes = initChangesPanel({ toast, desktop: globalThis.window?.jarvisDesktop ?? null, onRestored: () => refreshFiles() });
+  for (const b of document.querySelectorAll('[data-wtab]')) {
+    b.addEventListener('click', () => {
+      wsTab = b.dataset.wtab;
+      for (const x of document.querySelectorAll('[data-wtab]')) x.setAttribute('aria-selected', String(x === b));
+      $('#file-list').hidden = wsTab !== 'files';
+      $('#change-box').hidden = wsTab !== 'changes';
+      if (wsTab === 'changes') changes.refresh();
+    });
+  }
+
   async function refreshFiles() {
+    if (wsTab === 'changes') changes.refresh();
     const list = $('#file-list');
     const mode = ws.mode();
     $('#ws-mode').textContent = mode === 'folder' ? `本地：${ws.folderName()}` : '浏览器内';

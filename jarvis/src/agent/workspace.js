@@ -6,8 +6,10 @@
  *
  * 安全约定：智能体不能删除文件；在本地文件夹里写文件时，同名文件不会被覆盖，
  * 而是另存为“名称 (2).扩展名”，并在结果里说明。
+ * 虚拟工作区里覆盖、删除之前自动留一份旧版本，可在“改动记录”里恢复（见 fileHistory.js）。
  */
 import { collection } from './store.js';
+import * as history from './fileHistory.js';
 
 const files = collection('files');
 const kv = collection('kv');
@@ -112,7 +114,8 @@ export async function exists(path) {
 
 /**
  * 写文件。data 可以是字符串、Blob 或 ArrayBuffer。
- * @returns {Promise<{path: string, renamed: boolean}>}
+ * backup：虚拟工作区里 saved 已备份旧内容 / recorded 新建，记了一笔 / too-big 太大没备份；本地文件夹不覆盖，为 null
+ * @returns {Promise<{path: string, renamed: boolean, backup: string|null}>}
  */
 export async function write(path, data) {
   path = normalize(path);
@@ -124,13 +127,57 @@ export async function write(path, data) {
     const w = await h.createWritable();
     await w.write(blob);
     await w.close();
-    return { path: target, renamed: target !== path };
+    return { path: target, renamed: target !== path, backup: null };
   }
-  await files.put({ id: path, data: blob, size: blob.size, mtime: Date.now() });
-  return { path, renamed: false };
+  const e = await writeVirtual(path, blob);
+  return { path, renamed: false, backup: e.op === 'create' ? 'recorded' : e.stored ? 'saved' : 'too-big' };
 }
 
-/** 只用于虚拟工作区（用户手动删除）；智能体工具不暴露删除 */
-export async function removeVirtual(path) {
-  await files.delete(normalize(path));
+const asBlob = (f, path) => (f.data instanceof Blob ? f.data : new Blob([f.data], { type: MIME[ext(path)] || 'text/plain' }));
+
+/** 写进虚拟工作区：同名文件先留一份旧版本 */
+async function writeVirtual(path, blob, note = '') {
+  const old = await files.get(path);
+  const e = await history.record({ path, op: old ? 'overwrite' : 'create', blob: old ? asBlob(old, path) : null, note });
+  const mtime = Date.now();
+  await files.put({ id: path, data: blob, size: blob.size, mtime });
+  await history.markWritten(e.id, mtime);
+  return e;
+}
+
+/** 只用于虚拟工作区（用户手动删除）；智能体工具不暴露删除。删除前留一份，可在“改动记录”里恢复 */
+export async function removeVirtual(path, note = '') {
+  path = normalize(path);
+  const old = await files.get(path);
+  if (old) await history.record({ path, op: 'delete', blob: asBlob(old, path), note });
+  await files.delete(path);
+}
+
+/**
+ * 恢复前检查（虚拟工作区的改动记录）
+ * @returns {Promise<{ ok: boolean, problem?: string, warning?: string }>}
+ */
+export async function checkVersion(id) {
+  const e = await history.get(id);
+  if (!e) return { ok: false, problem: '找不到这条记录，可能已经过期被清理' };
+  const cur = await files.get(e.path);
+  const changed = cur && e.mtimeAfter && cur.mtime !== e.mtimeAfter;
+  if (e.op === 'create') {
+    if (!cur) return { ok: false, problem: `文件已经不在了，不需要撤销：${e.path}` };
+    return { ok: true, warning: changed ? '这个文件建好之后又被改过，撤销会删掉它（当前内容会先备份）' : '' };
+  }
+  if (!e.stored) return { ok: false, problem: `当时文件太大（超过 ${LIMIT_MB} MB），没有备份：${e.path}` };
+  return { ok: true, warning: changed ? '这个文件在那之后又被改过，恢复会覆盖这些改动（当前内容会先备份）' : '' };
+}
+const LIMIT_MB = history.LIMITS.maxFile / 1048576;
+
+/** 恢复一条改动记录。恢复前当前内容也会留一份，所以恢复本身也能撤销 */
+export async function restoreVersion(id) {
+  const check = await checkVersion(id);
+  if (!check.ok) throw new Error(check.problem);
+  const e = await history.get(id);
+  if (e.op === 'create') await removeVirtual(e.path, '撤销新建前的内容');
+  else await writeVirtual(e.path, e.data instanceof Blob ? e.data : new Blob([e.data]), '恢复前的内容');
+  await history.markRestored(id);
+  return { path: e.path, op: e.op };
 }

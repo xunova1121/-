@@ -10,6 +10,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createOps, userPaths } from './ops.mjs';
+import { createBackups } from './backups.mjs';
 import { createControl, STOP_HOTKEY } from './control.mjs';
 import { createWallpaper } from './wallpaper.mjs';
 import { createPresence } from './presence.mjs';
@@ -72,7 +73,11 @@ async function startGateway() {
 const pathToUrl = (p) => pathToFileURL(p).href;
 
 // ---------------------------------------------------------------- 电脑操作
+// 改文件前自动备份：存在数据文件夹的 backups 里，30 天 / 500 MB 以内（见 backups.mjs）
+const backups = createBackups({ dir: path.join(process.env.JARVIS_HOME, 'backups'), trash: (p) => shell.trashItem(p) });
+backups.prune().catch(() => {});
 const ops = createOps({
+  backups,
   shell,
   clipboard,
   notify: (title, body) => new Notification({ title, body, icon: ICON }).show(),

@@ -330,6 +330,20 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 .mind-list .fn { white-space: normal; }
 .file-list .fs, .doc-list .fs, .mind-list .fs { font: 11px var(--font-mono); color: var(--dim); white-space: nowrap; }
 .file-list li.fresh .fn::after { content: " · 新"; color: var(--accent); }
+/* 工作区 → 改动记录 */
+.change-box { display: flex; flex-direction: column; gap: 8px; }
+.change-list li.change { flex-direction: column; align-items: stretch; gap: 6px; cursor: default; }
+.change-list li.change:hover { border-color: var(--line); background: none; }
+.change-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.change-head .fn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.change-head .tag { flex: none; font-size: 11px; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); }
+.change-head .tag.op-overwrite, .change-head .tag.op-delete { color: var(--warn); border-color: var(--warn); }
+.change-head .fs.done { color: var(--accent); }
+.change-note { padding-left: 2px; }
+.change-confirm { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 8px; font-size: 12.5px; }
+.change-confirm.warn { border-color: var(--warn); }
+.change-warning { color: var(--warn); }
+.change-actions { display: flex; gap: 6px; }
 .x-btn { border: 0; background: none; color: var(--dim); padding: 2px 4px; }
 .x-btn:hover { color: var(--bad); }
 .empty { color: var(--dim); font-size: 13px; padding: 10px; border: 1px dashed var(--line); border-radius: 8px; text-align: center; }

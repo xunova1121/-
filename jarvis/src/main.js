@@ -37,6 +37,7 @@ import * as scheduler from './agent/scheduler.js';
 import { executeScheduled, scheduledPrompt, notificationFor } from './agent/scheduledRun.js';
 import { preApproved } from './agent/commandSafety.js';
 import * as compress from './agent/compress.js';
+import { storageProblem } from './agent/store.js';
 import * as habits from './agent/habits.js';
 import { initSchedulesPanel } from './ui/schedulesPanel.js';
 import { prepareImage, isImageName } from './agent/images.js';
@@ -1773,6 +1774,9 @@ setInterval(schedulerTick, 30_000);
 setTimeout(schedulerTick, 4000);
 // 旧版的单条对话流迁移成会话；最近 6 小时内的对话自动接着聊
 (async () => {
+  // 本地数据库打不开（比如另一个标签页还开着旧版、挡住了升级）：告诉用户，并且不做迁移，免得旧数据迁到临时存储里丢掉
+  const problem = await storageProblem().catch(() => '');
+  if (problem) { toast(problem); return; }
   if (settings.persistMemory) {
     await sessionsApi.migrateLegacy(loadMemory(storage)).catch(() => null);
     clearMemory(storage);

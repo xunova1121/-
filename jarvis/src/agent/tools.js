@@ -291,7 +291,8 @@ export function createTools(ctx) {
       run: async ({ path, content }) => {
         const r = await ws.write(path, content);
         ctx.onFileChanged?.(r.path);
-        return `已写入 ${r.path}（${fmtSize(new Blob([content]).size)}）${r.renamed ? '，本地已有同名文件，未覆盖，另存为此名' : ''}`;
+        const kept = { saved: '，覆盖了同名文件，原来的内容已自动备份，可在“工作区 → 改动记录”里恢复', 'too-big': '，覆盖了同名文件，原文件太大没有自动备份' }[r.backup] ?? '';
+        return `已写入 ${r.path}（${fmtSize(new Blob([content]).size)}）${r.renamed ? '，本地已有同名文件，未覆盖，另存为此名' : ''}${kept}`;
       }
     },
     {

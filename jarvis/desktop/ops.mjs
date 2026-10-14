@@ -56,11 +56,15 @@ async function exists(p) {
  * @param {() => Promise<{ base64: string, width: number, height: number }>} [deps.screenshot]
  * @param {(title: string, body?: string) => void} [deps.notify]
  * @param {string} [deps.platform]
+ * @param {ReturnType<import('./backups.mjs').createBackups>} [deps.backups]  改文件前自动备份（见 backups.mjs）；不传就不备份
  */
 export function createOps(deps = {}) {
   const paths = userPaths();
   const platform = deps.platform ?? process.platform;
   const R = (p) => resolvePath(p, paths);
+  const bk = deps.backups ?? null;
+  /** 这次有没有留备份：saved 已备份旧内容 / recorded 记下了改动（新建、移动、复制）/ too-big 太大没备份 */
+  const note = (e) => (!e ? null : e.op === 'create' || e.op === 'move' || e.op === 'copy' ? 'recorded' : e.stored ? 'saved' : 'too-big');
 
   return {
     paths: async () => paths,
@@ -121,9 +125,15 @@ export function createOps(deps = {}) {
       guardWrite(f);
       const data = base64 != null ? Buffer.from(base64, 'base64') : Buffer.from(String(text ?? ''), 'utf8');
       if (data.length > MAX_WRITE) throw new Error('内容太大');
+      // 先备份旧文件；备份失败（比如磁盘满了）就不写，免得旧内容找不回来
+      let e = null;
+      if (bk) {
+        try { e = await bk.beforeWrite(f); } catch (err) { throw new Error(`备份旧文件失败，没有写入：${err.message}`); }
+      }
       await fs.mkdir(path.dirname(f), { recursive: true });
       await fs.writeFile(f, data);
-      return { path: f, size: data.length };
+      if (e) await bk.afterWrite(e, f).catch(() => {});
+      return { path: f, size: data.length, backup: note(e) };
     },
 
     async mkdir({ path: p }) {
@@ -144,7 +154,8 @@ export function createOps(deps = {}) {
         await fs.cp(a, b, { recursive: true });
         await fs.rm(a, { recursive: true });
       }
-      return { path: b };
+      const e = await bk?.recordMove(a, b).catch(() => null);
+      return { path: b, backup: note(e) };
     },
 
     async copy({ from, to }) {
@@ -154,15 +165,20 @@ export function createOps(deps = {}) {
       if (await exists(b)) throw new Error(`目标已存在：${b}（为避免覆盖，请换个名字）`);
       await fs.mkdir(path.dirname(b), { recursive: true });
       await fs.cp(a, b, { recursive: true, errorOnExist: true });
-      return { path: b };
+      const e = await bk?.recordCopy(b).catch(() => null);
+      return { path: b, backup: note(e) };
     },
 
     async trash({ path: p }) {
       const f = R(p);
       guardWrite(f);
       if (!(await exists(f))) throw new Error(`不存在：${f}`);
+      let e = null;
+      if (bk) {
+        try { e = await bk.beforeTrash(f); } catch (err) { throw new Error(`备份失败，没有删除：${err.message}`); }
+      }
       await deps.shell.trashItem(f);
-      return { path: f };
+      return { path: f, backup: note(e) };
     },
 
     async open({ target }) {
@@ -188,7 +204,12 @@ export function createOps(deps = {}) {
     async screenshot() { return deps.screenshot(); },
     async clipboardRead() { return { text: deps.clipboard.readText() }; },
     async clipboardWrite({ text }) { deps.clipboard.writeText(String(text ?? '')); return { ok: true }; },
-    async notify({ title, body }) { deps.notify(String(title ?? '贾维斯'), String(body ?? '')); return { ok: true }; }
+    async notify({ title, body }) { deps.notify(String(title ?? '贾维斯'), String(body ?? '')); return { ok: true }; },
+
+    // 改动记录（工作区面板）：列出、恢复前检查、恢复
+    async backupList() { return bk ? bk.list() : []; },
+    async backupCheck({ id }) { if (!bk) throw new Error('没有开启备份'); return bk.check({ id }); },
+    async backupRestore({ id }) { if (!bk) throw new Error('没有开启备份'); return bk.restore({ id }); }
   };
 }
 
