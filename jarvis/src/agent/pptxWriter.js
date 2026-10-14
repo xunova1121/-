@@ -131,9 +131,9 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   const bulletRuns = (items, size) => items.flatMap((it, i) => {
     const run = (s) => ({ text: s.text, options: { bold: s.bold, italic: s.italic, color: s.link ? '0563C1' : undefined } });
     const head = it.inlines.map(run);
-    head[0] = { ...head[0], options: { ...head[0]?.options, bullet: { code: '25A0', indent: 18 }, paraSpaceBefore: i ? 8 : 0 } };
+    head[0] = { ...head[0], options: { ...head[0]?.options, bullet: { code: '25A0', indent: 26 }, paraSpaceBefore: i ? Math.round(size * 0.6) : 0 } };
     head[head.length - 1].options.breakLine = true;
-    const subs = it.children.filter((c) => c.type === 'list').flatMap((c) => c.items.map((sub) => ({ text: plain(sub.inlines), options: { bullet: { indent: 18 }, indentLevel: 1, fontSize: size - 4, color: '595959', breakLine: true } })));
+    const subs = it.children.filter((c) => c.type === 'list').flatMap((c) => c.items.map((sub) => ({ text: plain(sub.inlines), options: { bullet: { indent: 26 }, indentLevel: 1, fontSize: size - 4, color: '595959', breakLine: true } })));
     return [...head, ...subs];
   });
   const textOf = (bs) => bs.flatMap((b) => (b.type === 'list' ? [b] : b.type === 'paragraph' ? [{ type: 'list', items: [{ inlines: b.inlines, children: [] }] }] : []));
@@ -191,7 +191,9 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
           sl.addShape(pptx.ShapeType.rect, { x, y: 1.65, w, h: 0.6, fill: { color }, line: { color } });
           sl.addText(g.title, { x, y: 1.65, w, h: 0.6, fontSize: 20, bold: true, color: 'FFFFFF', align: 'center', valign: 'middle', fontFace: FONT });
           const items = textOf(g.blocks).flatMap((b) => b.items);
-          if (items.length) sl.addText(bulletRuns(items, 18), { x, y: 2.4, w, h: 4.4, fontSize: 18, color: C.ink, fontFace: FONT, valign: 'top', fill: { color: C.soft }, margin: 12 });
+          // 框的高度跟着内容走：要点少时不留一大片空底色
+          const rows = items.reduce((a, it) => a + Math.ceil(plain(it.inlines).length / 22) + it.children.length, 0);
+          if (items.length) sl.addText(bulletRuns(items, 20), { x, y: 2.4, w, h: Math.min(4.4, Math.max(1.6, 0.5 + rows * 0.62)), fontSize: 20, color: C.ink, fontFace: FONT, valign: 'top', fill: { color: C.soft }, margin: 14 });
         });
         pageNo(sl, n);
         break;
@@ -218,10 +220,11 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
       case 'table': {
         titleBar(sl, s.title);
         const t = s.blocks.find((b) => b.type === 'table');
-        const fs = t.rows.length > 10 ? 11 : t.rows.length > 6 ? 13 : 15;
+        const fs = t.rows.length > 10 ? 11 : t.rows.length > 6 ? 13 : 16;
+        const rowH = t.rows.length > 10 ? undefined : Math.min(0.62, 5.0 / (t.rows.length + 1)); // 行少时加高，不挤在页面顶上
         const head = t.header.map((c) => ({ text: plain(c), options: { bold: true, color: 'FFFFFF', fill: { color: C.accent }, align: 'center' } }));
         const body = t.rows.map((r, ri) => t.header.map((_, ci) => ({ text: plain(r[ci] ?? []), options: { fill: { color: ri % 2 ? C.soft : 'FFFFFF' }, align: t.align[ci] ?? (num(plain(r[ci] ?? [])) !== null ? 'right' : 'left') } })));
-        sl.addTable([head, ...body], { x: 0.6, y: 1.6, w: W - 1.2, fontSize: fs, fontFace: FONT, color: C.ink, border: { type: 'solid', pt: 0.75, color: 'BFC7D1' }, valign: 'middle', autoPage: true, autoPageRepeatHeader: true });
+        sl.addTable([head, ...body], { x: 0.6, y: 1.6, w: W - 1.2, fontSize: fs, fontFace: FONT, color: C.ink, border: { type: 'solid', pt: 0.75, color: 'BFC7D1' }, valign: 'middle', ...(rowH && { rowH }), autoPage: true, autoPageRepeatHeader: true });
         pageNo(sl, n);
         break;
       }
@@ -254,7 +257,18 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
         const items = textOf(s.blocks.filter((b) => b.type === 'list' || b.type === 'paragraph')).flatMap((b) => b.items);
         const extra = s.blocks.filter((b) => !['list', 'paragraph'].includes(b.type)).flatMap(blockLines).filter(Boolean);
         for (const t of extra) items.push({ inlines: [{ text: t }], children: [] });
-        if (items.length) {
+        const short = items.length >= 2 && items.length <= 4 && items.every((it) => !it.children.some((c) => c.type === 'list') && plain(it.inlines).length <= 46);
+        if (short) {
+          // 要点少而短：做成一行一张卡片，带序号，铺满页面，不让三行字挤在左上角
+          const gap = 0.22, top = 1.75, h = Math.min(1.25, (5.1 - gap * (items.length - 1)) / items.length);
+          items.forEach((it, k) => {
+            const y = top + k * (h + gap);
+            sl.addShape(pptx.ShapeType.roundRect, { x: 0.8, y, w: W - 1.6, h, fill: { color: C.soft }, line: { color: C.soft }, rectRadius: 0.06 });
+            sl.addShape(pptx.ShapeType.ellipse, { x: 1.05, y: y + h / 2 - 0.3, w: 0.6, h: 0.6, fill: { color: C.accent }, line: { color: C.accent } });
+            sl.addText(String(k + 1), { x: 1.05, y: y + h / 2 - 0.3, w: 0.6, h: 0.6, fontSize: 18, bold: true, color: 'FFFFFF', align: 'center', valign: 'middle', fontFace: FONT });
+            sl.addText(it.inlines.map((r) => ({ text: r.text, options: { bold: r.bold, italic: r.italic } })), { x: 1.95, y, w: W - 3.0, h, fontSize: 22, color: C.ink, fontFace: FONT, valign: 'middle', fit: 'shrink' });
+          });
+        } else if (items.length) {
           const size = fontFor(items.length, lines.join('').length);
           sl.addText(bulletRuns(items, size), { x: 0.8, y: 1.6, w: W - 1.6, h: 5.3, fontSize: size, color: C.ink, fontFace: FONT, valign: 'top', lineSpacingMultiple: 1.15, fit: 'shrink' });
         }

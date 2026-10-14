@@ -213,13 +213,12 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
   const front = [];
   if (cover) {
     front.push(
-      ...Array.from({ length: 8 }, () => new Paragraph({ children: [] })),
-      new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 360 }, children: [new TextRun({ text: docTitle, bold: true, size: PT(official ? 22 : 28), font: font(theme.fonts.title ?? theme.fonts.heading), color: official ? '000000' : C.primary })] }),
+      // 用段前距留白，不用空段落：空段落会继承正文的 1.5 倍行距和段后距，封面会被挤到第二页
+      new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 3400, after: 360, line: 360 }, children: [new TextRun({ text: docTitle, bold: true, size: PT(official ? 22 : 28), font: font(theme.fonts.title ?? theme.fonts.heading), color: official ? '000000' : C.primary })] }),
       ...(subtitle ? [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 240 }, children: [new TextRun({ text: subtitle, size: PT(16), color: official ? '000000' : C.accent, font: headFont })] })] : []),
       ...(official ? [] : [new Paragraph({ alignment: AlignmentType.CENTER, border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: C.accent, space: 1 } }, indent: { left: 3000, right: 3000 }, children: [] })]),
-      ...Array.from({ length: 10 }, () => new Paragraph({ children: [] })),
-      ...(author ? [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 120 }, children: [new TextRun({ text: author, size: PT(14), font: bodyFont })] })] : []),
-      new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: date || today(), size: PT(14), font: bodyFont })] }),
+      ...(author ? [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 4200, after: 120, line: 360 }, indent: { firstLine: 0 }, children: [new TextRun({ text: author, size: PT(14), font: bodyFont })] })] : []),
+      new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: author ? 0 : 4200, after: 0, line: 360 }, indent: { firstLine: 0 }, children: [new TextRun({ text: date || today(), size: PT(14), font: bodyFont })] }),
       new Paragraph({ children: [new PageBreak()] })
     );
   } else {

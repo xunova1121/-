@@ -261,3 +261,22 @@ describe('工具接入工作区', () => {
     expect((await parseFile(await ws.readBlob('通知.docx'), 'a.docx')).text).toContain('新标题内容');
   });
 });
+
+describe('按需加载：用户连的 MCP 工具', () => {
+  const t = (name) => ({ name, description: `${name} 的说明。` });
+  const base = Array.from({ length: 30 }, (_, i) => t(`extra_tool_${i}`));
+  it('MCP 工具不多时常驻，模型直接能看到', () => {
+    const loader = createToolLoader([...base, t('mcp_echo__echo'), t('mcp_echo__add')]);
+    expect(loader.deferredMode).toBe(true);
+    const names = loader.list().map((x) => x.name);
+    expect(names).toContain('mcp_echo__echo');
+    expect(names).toContain('mcp_echo__add');
+    expect(names).not.toContain('extra_tool_0');
+  });
+  it('MCP 工具太多时照常按需加载', () => {
+    const mcp = Array.from({ length: 20 }, (_, i) => t(`mcp_big__tool${i}`));
+    const loader = createToolLoader([...base, ...mcp]);
+    expect(loader.list().some((x) => x.name.startsWith('mcp_'))).toBe(false);
+    expect(loader.hint()).toMatch(/mcp_big__tool0/);
+  });
+});

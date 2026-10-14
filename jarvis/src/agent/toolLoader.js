@@ -5,9 +5,12 @@
  *   按需    其余工具只在系统提示里列出名字和一句话用途；模型用 tool_search 按关键词或名字加载完整说明后再调用
  *   宽松    模型直接调用了没加载的工具（名字在列表里）也照常执行，参数不对会按校验结果提示它
  *   不变    工具总数不超过 LIMIT 时全部常驻，和以前一样
+ *   MCP     用户自己连的 MCP 工具不多时也常驻（特意连上的，多半要用）
  */
 
 export const LIMIT = 24;
+/** MCP 工具总数不超过这么多时全部常驻 */
+export const MCP_CORE = 12;
 
 /** 常驻工具：系统提示里点名的、几乎每天都用的 */
 export const CORE = new Set([
@@ -46,7 +49,10 @@ function score(tool, query) {
 export function createToolLoader(tools, { limit = LIMIT } = {}) {
   const all = new Map(tools.map((t) => [t.name, t]));
   const deferredMode = tools.length > limit;
-  const active = new Set(deferredMode ? tools.filter((t) => CORE.has(t.name)).map((t) => t.name) : tools.map((t) => t.name));
+  // 用户自己连的 MCP 服务是特意要用的：工具不多（≤ MCP_CORE 个）时也常驻
+  const mcp = tools.filter((t) => t.name.startsWith('mcp_'));
+  const keep = (t) => CORE.has(t.name) || (mcp.length <= MCP_CORE && t.name.startsWith('mcp_'));
+  const active = new Set(deferredMode ? tools.filter(keep).map((t) => t.name) : tools.map((t) => t.name));
   const deferred = () => tools.filter((t) => !active.has(t.name));
 
   const searchTool = {
