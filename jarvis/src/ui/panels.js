@@ -172,12 +172,22 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     if (/\.html?$/i.test(current)) blob = new Blob([await inlineAssets(current, await blob.text())], { type: 'text/html' });
     window.open(URL.createObjectURL(blob), '_blank', 'noopener');
   });
-  // 导出 PDF：在无脚本的隐藏 iframe 里排版后调用浏览器打印（选“另存为 PDF”）
+  // 导出 PDF：桌面版直接转成 PDF 文件存进工作区；网页版和安卓在无脚本的隐藏 iframe 里排版后调用浏览器打印（选“另存为 PDF”）
   $('#btn-v-pdf').addEventListener('click', async () => {
     if (!current) return;
     let html = await ws.readText(current);
     if (/\.md$/i.test(current)) html = htmlDocument(current.replace(/^.*\/|\.md$/g, ''), html, { printable: true });
     html = html.replace(/<script[\s\S]*?<\/script>/gi, '');
+    const desktop = globalThis.window?.jarvisDesktop;
+    if (desktop) {
+      try {
+        const { base64 } = await desktop.invoke('printToPdf', { html: await inlineAssets(current, html) });
+        const w = await ws.write(current.replace(/\.(html?|md)$/i, '') + '.pdf', new Blob([Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))], { type: 'application/pdf' }));
+        toast(`已导出 ${w.path}`);
+        refreshFiles();
+      } catch (e) { toast(`导出 PDF 失败：${e.message}`); }
+      return;
+    }
     const frame = el('iframe', { sandbox: 'allow-modals allow-same-origin', srcdoc: html, style: 'position:fixed;width:0;height:0;border:0;opacity:0' });
     frame.addEventListener('load', () => {
       try { frame.contentWindow.print(); } catch { toast('浏览器阻止了打印，请用“新窗口打开”后按 Ctrl+P'); }
