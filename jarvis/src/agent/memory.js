@@ -195,6 +195,46 @@ export async function updateMemory(id, patch) {
   return next;
 }
 
+// ---------------------------------------------------------------- 注入检查（参考 Hermes Agent 的记忆扫描）
+// 记忆会原样进入提示词：一条被投毒的记忆（网页内容、导入的文件、同步来的数据）每轮都会生效。
+// 交给模型之前逐条检查；命中的不放进提示，原文保留，记忆空间里标“可疑，未使用”，由用户决定删不删。
+const SENDS = /(发送|发给|发到|上传|传到|转发|提交|\bsend\b|\bupload\b|\bpost\b|\bexfiltrat)/i;
+const SECRETS = /(文件|密钥|秘钥|api\s*_?key|token|令牌|密码|password|私钥|cookie|credential|凭证)/i;
+const ADDRESS = /(https?:\/\/|www\.|[\w.+-]+@[\w-]+\.[\w.]+)/i;
+const INJECTION_RULES = [
+  { why: '要求忽略之前的指令', test: (t) => /(忽略|无视|忘掉|忘记|不要理会|不用管)(掉)?(你)?(之前|以上|前面|先前|上面|此前|所有|全部|原有|原来)的?(所有|全部)?(指令|指示|命令|规则|设定|提示|要求)/.test(t) },
+  { why: '要求忽略之前的指令', test: (t) => /\b(ignore|disregard|forget|override)\b.{0,24}\b(previous|prior|above|earlier|preceding|all)\b.{0,24}\b(instructions?|prompts?|rules|directions)\b/i.test(t) },
+  { why: '试图改变身份设定', role: true, test: (t) => /(你现在是|从现在起你是|从现在开始你是|\byou are now\b)/i.test(t) },
+  { why: '涉及系统提示词', test: (t) => /(system\s*prompt|系统提示词|系统指令)/i.test(t) },
+  { why: '要求把文件或密钥发送到外部地址', test: (t) => SENDS.test(t) && SECRETS.test(t) && ADDRESS.test(t) }
+];
+
+/**
+ * 看起来像注入指令就返回原因，否则 null。
+ * 核心记忆（core: true）不套用“你现在是……”这条：那是正常的角色设定。
+ */
+export function injectionReason(text, { core = false } = {}) {
+  const t = String(text ?? '');
+  return INJECTION_RULES.find((r) => !(core && r.role) && r.test(t))?.why ?? null;
+}
+
+/** 核心记忆逐行检查：命中的行去掉，其余照常使用 */
+export function coreFlags(core) {
+  const flags = [];
+  for (const block of ['human', 'persona']) {
+    for (const line of String(core?.[block] ?? '').split('\n')) {
+      const why = injectionReason(line, { core: true });
+      if (why) flags.push({ block, line: line.trim(), why });
+    }
+  }
+  return flags;
+}
+export function cleanCore(core) {
+  const keep = (text) => String(text ?? '').split('\n').filter((line) => !injectionReason(line, { core: true })).join('\n').trim();
+  return { ...core, human: keep(core.human), persona: keep(core.persona) };
+}
+const safe = (text) => (x) => !injectionReason(text(x));
+
 // ---------------------------------------------------------------- 核心记忆
 export async function getCore() {
   const c = await kv.get('core');
@@ -275,9 +315,9 @@ export function ruleOpen(userLines) {
  * @returns {Promise<Array<{ episodeId, sessionId, sessionTitle, text, ts }>>}
  */
 export async function openItems({ exclude = null, days = 14, k = 4, at = now() } = {}) {
-  const eps = (await episodes.all()).filter((e) => e.open?.length && e.sessionId !== exclude && at - e.ts <= days * DAY);
+  const eps = (await episodes.all()).filter((e) => e.open?.length && e.sessionId !== exclude && at - e.ts <= days * DAY).filter(safe((e) => e.summary));
   return eps.sort((a, b) => b.ts - a.ts)
-    .flatMap((e) => e.open.map((text) => ({ episodeId: e.id, sessionId: e.sessionId ?? null, sessionTitle: e.sessionTitle ?? '', text, ts: e.ts })))
+    .flatMap((e) => e.open.filter((text) => !injectionReason(text)).map((text) => ({ episodeId: e.id, sessionId: e.sessionId ?? null, sessionTitle: e.sessionTitle ?? '', text, ts: e.ts })))
     .slice(0, k);
 }
 
@@ -392,7 +432,8 @@ async function reinforce(list) {
 export async function contextFor(query) {
   const [ms, ls, ss, eps, core] = await Promise.all([memories.all(), lessons.all(), skills.all(), episodes.all(), getCore()]);
   const vec = await embedOne(query);
-  const cur = ms.map(upgrade).filter(current);
+  // 像注入指令的条目不交给模型（原文保留在库里，面板上标“可疑，未使用”）
+  const cur = ms.map(upgrade).filter(current).filter(safe((m) => m.content));
   const relevant = score(cur, query, (m) => m.content, { k: 6, vec });
   // 身份与重要偏好：即使和问题不相关也带上几条，保证“认识用户”
   const profile = cur.filter((m) => m.pinned || ((m.category === 'profile' || m.category === 'preference') && m.importance >= 3))
@@ -400,20 +441,21 @@ export async function contextFor(query) {
   const mem = [...new Map([...profile, ...relevant].map((m) => [m.id, m])).values()].slice(0, 9);
   reinforce(relevant).catch(() => {});
   return {
-    core,
+    core: cleanCore(core),
     memories: mem,
-    episodes: score(eps, query, (e) => `${e.summary} ${(e.topics || []).join(' ')}`, { k: 2, vec, weights: false }).filter((e) => e.relevance >= 0.2),
-    lessons: score(ls, query, (l) => `${l.content} ${l.context}`, { k: 3, weights: false }),
-    skills: score(ss, query, (s) => `${s.name} ${s.description}`, { k: 3, weights: false })
+    episodes: score(eps.filter(safe((e) => e.summary)), query, (e) => `${e.summary} ${(e.topics || []).join(' ')}`, { k: 2, vec, weights: false }).filter((e) => e.relevance >= 0.2),
+    lessons: score(ls.filter(safe((l) => `${l.content}\n${l.context ?? ''}`)), query, (l) => `${l.content} ${l.context}`, { k: 3, weights: false }),
+    skills: score(ss.filter(safe(skillText)), query, (s) => `${s.name} ${s.description}`, { k: 3, weights: false })
   };
 }
+const skillText = (s) => `${s.name}\n${s.description ?? ''}\n${s.steps ?? ''}`;
 
 export async function recall(query, { includeArchived = false } = {}) {
-  const all = (await memories.all()).map(upgrade);
+  const all = (await memories.all()).map(upgrade).filter(safe((m) => m.content));
   const pool = includeArchived ? all : all.filter(current);
   const vec = await embedOne(query);
   const hits = score(pool, query, (m) => m.content, { k: 8, vec });
-  const eps = score(await episodes.all(), query, (e) => e.summary, { k: 3, vec, weights: false });
+  const eps = score((await episodes.all()).filter(safe((e) => e.summary)), query, (e) => e.summary, { k: 3, vec, weights: false });
   return { memories: hits, episodes: eps.filter((e) => e.relevance >= 0.2) };
 }
 
@@ -440,15 +482,18 @@ export async function maintain({ at = now() } = {}) {
 export async function listAll() {
   const [ms, ls, ss, es, eps, core] = await Promise.all([memories.all(), lessons.all(), skills.all(), events.all(), episodes.all(), getCore()]);
   const by = (a, b) => (b.updatedAt ?? b.ts) - (a.updatedAt ?? a.ts);
-  const all = ms.map(upgrade);
+  // 标出像注入指令、不会交给模型的条目（suspicious = 原因）
+  const flag = (text) => (x) => { const why = injectionReason(text(x)); return why ? { ...x, suspicious: why } : x; };
+  const all = ms.map(upgrade).map(flag((m) => m.content));
   return {
     core,
+    coreFlags: coreFlags(core),
     memories: all.filter(m=>!m.validTo).sort((a, b) => Number(b.pending)-Number(a.pending) || (b.pinned - a.pinned) || by(a, b)),
     archived: all.filter((m) => m.validTo).sort(by),
-    lessons: ls.sort(by),
-    skills: ss.sort(by),
+    lessons: ls.map(flag((l) => `${l.content}\n${l.context ?? ''}`)).sort(by),
+    skills: ss.map(flag(skillText)).sort(by),
     events: es.sort(by),
-    episodes: eps.sort(by)
+    episodes: eps.map(flag((e) => e.summary)).sort(by)
   };
 }
 

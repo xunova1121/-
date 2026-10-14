@@ -34,6 +34,7 @@ import * as skillPacks from './agent/skillPacks.js';
 import { initSkillsPanel } from './ui/skillsPanel.js';
 import { initPalette } from './ui/palette.js';
 import * as scheduler from './agent/scheduler.js';
+import { executeScheduled, scheduledPrompt, notificationFor } from './agent/scheduledRun.js';
 import * as habits from './agent/habits.js';
 import { initSchedulesPanel } from './ui/schedulesPanel.js';
 import { prepareImage, isImageName } from './agent/images.js';
@@ -677,7 +678,7 @@ async function greetOnReturn({ awayMs, reason = '', force = false }) {
   lastGreetAt = Date.now();
   try { localStorage.setItem('jarvis.lastGreet', String(lastGreetAt)); } catch { /* 隐私模式 */ }
   const [core, schedules, open, habitTips] = await Promise.all([
-    agentMemory.getCore().catch(() => ({})),
+    agentMemory.getCore().then(agentMemory.cleanCore).catch(() => ({})), // 去掉像注入指令的行
     scheduler.list().catch(() => []),
     agentMemory.openItems({ k: 2 }).catch(() => []),
     habitHints().catch(() => [])
@@ -752,28 +753,22 @@ async function runScheduled(s) {
   sess.titleSet = true;
   sess.messages.push({ role: 'user', content: s.prompt, ts: Date.now() });
   const usedTools = [];
-  let ok = true;
-  let text = '';
-  let note = '';
   const { adapter, model, problem } = createAdapter(llmConfig, { gateway });
-  if (problem) { ok = false; note = problem; text = problem; } else {
-    try {
-      const r = await runAgent({
-        adapter, model, history: [], sessionId: sess.id,
-        userText: `【这是定时任务「${s.title}」（${scheduler.describe(s)}）自动发起的，用户此刻可能不在电脑前；直接完成任务并给出结果，不要提问。】\n${s.prompt}`,
-        tools: await buildTools({ background: true }),
-        emit: (e) => { if (e.type === 'tool_start') usedTools.push(e.name); },
-        // 无人值守：需要确认的操作默认拒绝，除非这个任务设为“允许无人值守操作”或本次会话已允许
-        approve: async (req) => s.unattended || Boolean(req.key && sessionApprovals.has(req.key))
-      });
-      text = r.text;
-    } catch (e) { ok = false; note = e.message; text = `执行失败：${e.message}`; }
-  }
-  sess.messages.push({ role: 'assistant', content: text || '（完成）', ts: Date.now(), ...(usedTools.length && { tools: [...new Set(usedTools)] }) });
+  // 卡住保护、空回复、【无需通知】见 scheduledRun.js
+  const res = problem ? { ok: false, quiet: false, text: '', note: problem } : await executeScheduled(async ({ signal, emit }) => runAgent({
+    adapter, model, history: [], sessionId: sess.id, signal, emit,
+    userText: scheduledPrompt(s, scheduler.describe(s)),
+    tools: await buildTools({ background: true }),
+    // 无人值守：需要确认的操作默认拒绝，除非这个任务设为“允许无人值守操作”或本次会话已允许
+    approve: async (req) => s.unattended || Boolean(req.key && sessionApprovals.has(req.key))
+  }), { onEvent: (e) => { if (e.type === 'tool_start') usedTools.push(e.name); } });
+  const content = res.ok ? res.text || '（已检查，无需通知）' : `执行失败：${res.note}`;
+  sess.messages.push({ role: 'assistant', content, ts: Date.now(), ...(usedTools.length && { tools: [...new Set(usedTools)] }) });
   sess.updatedAt = Date.now();
   await sessionsApi.save(sess).catch(() => {});
-  await scheduler.recordRun(s.id, { ok, session: sess.id, note });
-  notify(`⏰ ${s.title}`, ok ? (text || '已完成').replace(/\s+/g, ' ') : `失败：${note}`);
+  const rec = await scheduler.recordRun(s.id, { ok: res.ok, quiet: res.quiet, session: sess.id, note: res.note });
+  const n = notificationFor(s, res, rec); // 【无需通知】时为 null
+  if (n) notify(n.title, n.body);
   sessionsPanel?.refresh();
   schedulesPanel?.refresh();
   return sess;
@@ -782,7 +777,10 @@ async function schedulerTick() {
   if (schedulerBusy || active) return; // 正在对话时先等一等，不抢资源
   schedulerBusy = true;
   try {
-    for (const s of await scheduler.due()) await runScheduled(s);
+    for (const s of await scheduler.due()) {
+      await scheduler.claim(s.id); // 先排好下一次再执行：中途崩溃重启后不会重复执行
+      await runScheduled(s);
+    }
   } catch (e) { console.warn('[scheduler]', e); } finally { schedulerBusy = false; }
 }
 

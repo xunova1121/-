@@ -377,6 +377,9 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 .mem-stars { border: 0; background: none; padding: 0; color: var(--warn); font-size: 11px; letter-spacing: 1px; cursor: pointer; }
 .mem-pin { border: 0; background: none; padding: 2px 4px; font-size: 12px; opacity: .25; filter: grayscale(1); cursor: pointer; }
 .mem-pin.on, .mem-pin:hover { opacity: 1; filter: none; }
+/* 像注入指令、不会交给模型的记忆 */
+.mind-list li.suspicious .mem-meta span, .core-flags { color: var(--warn); }
+.mind-list .tag.sus { color: var(--warn); border-color: var(--warn); }
 .mind-list li.pinned { border-color: var(--line-strong); background: var(--accent-soft); }
 .mind-list li.archived .fn { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--dim); }
 .mem-edit { flex: 1; min-width: 0; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--accent); background: var(--bg-2); color: var(--text); font-size: 13px; }

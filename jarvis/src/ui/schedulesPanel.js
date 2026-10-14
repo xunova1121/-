@@ -28,7 +28,8 @@ export function initSchedulesPanel({ toast, runNow, openSession }) {
     const toggle = el('input', { type: 'checkbox', checked: s.enabled, title: s.enabled ? '停用' : '启用' });
     toggle.addEventListener('change', async () => { await scheduler.setEnabled(s.id, toggle.checked); refresh(); });
     const btn = (text, fn, cls = '') => { const b = el('button', { type: 'button', className: `btn ghost sm ${cls}`, textContent: text }); b.addEventListener('click', () => fn(b)); return b; };
-    const status = s.lastStatus === 'ok' ? '上次成功' : s.lastStatus ? s.lastStatus : '还没运行过';
+    const status = s.lastStatus === 'ok' ? '上次成功' : s.lastStatus === 'quiet' ? '已检查，无需通知' : s.lastStatus ? s.lastStatus : '还没运行过';
+    const bad = s.lastStatus && s.lastStatus !== 'ok' && s.lastStatus !== 'quiet';
     return el('li', { className: `skill sched${s.enabled ? '' : ' off'}` },
       el('div', { className: 'skill-top' },
         el('label', { className: 'switch', title: '启用 / 停用' }, toggle, el('span')),
@@ -37,7 +38,7 @@ export function initSchedulesPanel({ toast, runNow, openSession }) {
       el('p', { className: 'skill-desc', textContent: s.prompt }),
       el('div', { className: 'sched-meta' },
         el('span', { textContent: `下一次：${s.enabled ? fmt(s.nextRun) : '—'}` }),
-        el('span', { className: s.lastStatus && s.lastStatus !== 'ok' ? 'bad' : '', textContent: `${status}${s.lastRun ? `（${fmt(s.lastRun)}）` : ''} · 共 ${s.runs ?? 0} 次` }),
+        el('span', { className: bad ? 'bad' : '', textContent: `${status}${s.lastRun ? `（${fmt(s.lastRun)}）` : ''} · 共 ${s.runs ?? 0} 次` }),
         s.unattended ? el('span', { className: 'warn', textContent: '允许无人值守操作' }) : null),
       el('div', { className: 'skill-actions' },
         el('span', { className: 'muted small' }),

@@ -250,6 +250,10 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     drawRing(lv);
     // 核心记忆（正在编辑时不覆盖）
     for (const [id, key] of [['#core-human', 'human'], ['#core-persona', 'persona']]) if (document.activeElement !== $(id)) $(id).value = all.core[key];
+    // 核心记忆里像注入指令的行：不放进提示，告诉用户是哪一行、为什么
+    const flags = all.coreFlags ?? [];
+    $('#core-flags').hidden = !flags.length;
+    $('#core-flags').replaceChildren(...flags.map((f) => el('div', { textContent: `可疑，未使用（${f.why}）·${f.block === 'human' ? '关于你' : '贾维斯的设定'}：“${f.line}”` })));
     const eng = memory.memoryEngine();
     $('#mem-engine').textContent = `整理：${eng.llm ? '大模型' : '本地规则'} · 检索：${eng.embeddings ? `关键词 + 语义（${eng.embeddings.split(':').pop()}）` : '关键词（填 OpenAI / 硅基流动密钥可启用语义检索）'}`;
     $('#set-automem').checked = settings.autoMemory !== false;
@@ -260,6 +264,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
       return x;
     };
     const when = (ts) => new Date(ts).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
+    const sus = (x) => (x.suspicious ? el('span', { className: 'tag sus', textContent: '可疑，未使用', title: `${x.suspicious}：不会交给模型，确认无害可忽略，否则请删除` }) : null);
     let items = [];
     if (mindTab === 'memories') items = all.memories.map(memoryRow);
     else if (mindTab === 'archived') items = all.archived.map((m) => el('li', { className: 'mem archived' }, el('span', { className: 'tag', textContent: memory.CATEGORIES[m.category] ?? '其他' }), el('span', { className: 'fn', textContent: m.content, title: m.archivedReason || (m.supersededBy ? '已被新版本取代' : '') }), el('span', { className: 'fs', textContent: m.supersededBy ? '已更新' : (m.archivedReason || '已归档') }), (() => {
@@ -276,11 +281,11 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
           body.append(' ', link);
         }
         for (const o of e.open ?? []) body.append(el('span', { className: 'ep-open', textContent: `待办：${o}` }));
-        return el('li', {}, el('span', { className: 'fs', textContent: when(e.ts) }), body, del('episodes', e.id));
+        return el('li', {}, el('span', { className: 'fs', textContent: when(e.ts) }), sus(e), body, del('episodes', e.id));
       });
     }
-    else if (mindTab === 'skills') items = all.skills.map((s) => el('li', {}, el('span', { className: 'tag', textContent: `v${s.version}` }), el('details', {}, el('summary', { textContent: s.name }), el('pre', { textContent: `${s.description ? `${s.description}\n\n` : ''}${s.steps}` })), del('skills', s.id)));
-    else if (mindTab === 'lessons') items = all.lessons.map((l) => el('li', {}, el('span', { className: 'fn', textContent: l.content }), el('span', { className: 'fs', textContent: when(l.ts) }), del('lessons', l.id)));
+    else if (mindTab === 'skills') items = all.skills.map((s) => el('li', {}, el('span', { className: 'tag', textContent: `v${s.version}` }), sus(s), el('details', {}, el('summary', { textContent: s.name }), el('pre', { textContent: `${s.description ? `${s.description}\n\n` : ''}${s.steps}` })), del('skills', s.id)));
+    else if (mindTab === 'lessons') items = all.lessons.map((l) => el('li', {}, sus(l), el('span', { className: 'fn', textContent: l.content }), el('span', { className: 'fs', textContent: when(l.ts) }), del('lessons', l.id)));
     else if (mindTab === 'events') items = all.events.slice(0, 80).map((e) => el('li', {}, el('span', { className: 'fs', textContent: new Date(e.ts).toLocaleString('zh-CN', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }), el('span', { className: 'fn', textContent: e.text })));
     else if (mindTab === 'history') items = getHistory().slice(-40).reverse().map((m) => el('li', {}, el('span', { className: 'tag', textContent: m.role === 'user' ? '你' : '贾维斯' }), el('span', { className: 'fn', textContent: m.content.slice(0, 120) })));
     const emptyText = { archived: '没有归档的记忆。被新说法取代、被要求忘记、或长期不用的记忆会出现在这里。', episodes: '还没有对话片段。每段对话停下来之后，我会写一段摘要，以后能想起“上次聊到哪”。', memories: '还没有记忆。告诉我“记住我喜欢……”，或者在对话中透露你的偏好。', skills: '还没有技能。完成多步任务后，我会把可复用的做法存成技能。', lessons: '还没有教训。对不满意的回答点 👎 并说明原因，我会记住。', events: '还没有进化记录。', history: '还没有对话。' }[mindTab];
@@ -302,12 +307,12 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') refreshMind(); });
       input.addEventListener('blur', save);
     });
-    const meta = [m.pending?'待核实 · 不参与回答':'已生效',m.source||'来源未记录',new Date(m.updatedAt||m.ts).toLocaleString('zh-CN'),`版本 ${(m.history?.length||0)+1}`].join(' · ');
+    const meta = [m.suspicious?`可疑，未使用（${m.suspicious}）`:m.pending?'待核实 · 不参与回答':'已生效',m.source||'来源未记录',new Date(m.updatedAt||m.ts).toLocaleString('zh-CN'),`版本 ${(m.history?.length||0)+1}`].join(' · ');
     const confirm = el('button',{type:'button',className:'btn sm',textContent:'核实并启用'});
     confirm.onclick=async()=>{await memory.confirmCandidate(m.id);refreshMind();};
     const x = el('button', { type: 'button', className: 'x-btn', title: '删除', textContent: '✕' });
     x.addEventListener('click', async () => { await memory.deleteItem('memories', m.id); refreshMind(); });
-    return el('li', { className: `mem${m.pinned ? ' pinned' : ''}` },
+    return el('li', { className: `mem${m.pinned ? ' pinned' : ''}${m.suspicious ? ' suspicious' : ''}` },
       el('span', { className: 'tag', textContent: memory.CATEGORIES[m.category] ?? '其他' }),
       el('div', { className: 'mem-main' }, text, el('div', { className: 'mem-meta' }, stars, meta ? el('span', { textContent: meta }) : null),m.evidence?el('details',{},el('summary',{textContent:'查看来源原话'}),el('p',{textContent:m.evidence})):null),
       m.pending?confirm:pin, edit, x);
@@ -316,6 +321,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   $('#btn-core-save').addEventListener('click', async () => {
     await memory.setCore('human', $('#core-human').value);
     await memory.setCore('persona', $('#core-persona').value);
+    refreshMind(); // 更新可疑行提示
     $('#core-status').textContent = '已保存';
     setTimeout(() => { $('#core-status').textContent = ''; }, 2000);
   });

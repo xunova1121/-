@@ -3,8 +3,10 @@
  *
  *   - 在应用运行时执行：桌面版关窗后在托盘里继续运行；网页版需要页面开着
  *   - 错过的（电脑关机、应用没开）：12 小时内的补跑一次，更早的直接排到下一次
- *   - 每次运行的结果保存为一段对话（“⏰ 任务名”），并发通知
+ *   - 每次运行的结果保存为一段对话（“⏰ 任务名”），并发通知（模型判断“这次无需通知”时不发）
  *   - 无人值守时，需要确认的操作（写文件、运行命令……）默认拒绝；任务可以单独设为“允许无人值守操作”
+ *   - 开始执行前先排好下一次（claim）：中途崩溃重启后不会把同一次再跑一遍；一次性任务允许崩溃后重试一次
+ *   - 连续失败 3 次自动停用，等用户检查后重新启用
  */
 import { collection, uid } from './store.js';
 
@@ -12,6 +14,9 @@ const kv = collection('kv');
 const KEY = 'schedules';
 const MIN = 60_000;
 const CATCH_UP = 12 * 3600_000;
+export const MAX_FAILS = 3;
+const MAX_ONCE_ATTEMPTS = 2; // 一次性任务：第一次中途崩溃后允许再试一次
+export const PAUSED_STATUS = `连续失败 ${MAX_FAILS} 次，已暂停，请检查后重新启用`;
 export const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
 /**
@@ -118,7 +123,10 @@ export async function upsert(input) {
     lastRun: old?.lastRun ?? null,
     lastStatus: old?.lastStatus ?? null,
     lastSession: old?.lastSession ?? null,
-    runs: old?.runs ?? 0
+    runs: old?.runs ?? 0,
+    // 从停用改回启用：连续失败重新计数
+    fails: old && !old.enabled && input.enabled !== false ? 0 : old?.fails ?? 0,
+    attempts: 0
   };
   if (!s.prompt) throw new Error('请写明要让贾维斯做什么');
   if (!['daily', 'workdays', 'weekly', 'once', 'interval'].includes(s.kind)) throw new Error('时间类型不对');
@@ -137,20 +145,51 @@ export async function setEnabled(id, enabled) {
   const s = items.find((x) => x.id === id);
   if (!s) return;
   s.enabled = enabled;
+  if (enabled) Object.assign(s, { fails: 0, attempts: 0 }); // 用户重新启用：连续失败重新计数
   s.nextRun = enabled ? nextRun({ ...s, lastRun: s.kind === 'interval' ? Date.now() : s.lastRun }) : null;
   await saveAll(items);
 }
 
-/** 记录一次运行的结果并排下一次 */
-export async function recordRun(id, { ok, session, at = Date.now(), note = '' }) {
+/**
+ * 开始执行前调用：周期任务先把下一次排好并保存，这样中途崩溃重启后不会把同一次再跑一遍；
+ * 一次性任务的时间不动，只记尝试次数（崩溃后允许再试一次，见 due()）
+ */
+export async function claim(id, at = Date.now()) {
   const items = await list();
   const s = items.find((x) => x.id === id);
   if (!s) return null;
-  Object.assign(s, { lastRun: at, lastStatus: ok ? 'ok' : `失败：${note}`.slice(0, 120), lastSession: session ?? s.lastSession, runs: (s.runs ?? 0) + 1 });
-  s.nextRun = nextRun(s, at);
-  if (s.kind === 'once') s.enabled = false;
+  if (s.kind === 'once') s.attempts = (s.attempts ?? 0) + 1;
+  else s.nextRun = nextRun({ ...s, lastRun: s.kind === 'interval' ? at : s.lastRun }, at);
   await saveAll(items);
   return s;
+}
+
+/**
+ * 记录一次运行的结果并排下一次。
+ * quiet：模型判断这次按任务要求无需通知用户（算成功）。
+ * 连续失败 MAX_FAILS 次自动停用，返回值带 paused: true，由调用方通知用户。
+ */
+export async function recordRun(id, { ok, quiet = false, session, at = Date.now(), note = '' }) {
+  const items = await list();
+  const s = items.find((x) => x.id === id);
+  if (!s) return null;
+  Object.assign(s, {
+    lastRun: at,
+    lastStatus: !ok ? `失败：${note}`.slice(0, 120) : quiet ? 'quiet' : 'ok',
+    lastSession: session ?? s.lastSession,
+    runs: (s.runs ?? 0) + 1,
+    fails: ok ? 0 : (s.fails ?? 0) + 1,
+    attempts: 0
+  });
+  s.nextRun = nextRun(s, at);
+  if (s.kind === 'once') s.enabled = false;
+  let paused = false;
+  if (!ok && s.enabled && s.fails >= MAX_FAILS) {
+    Object.assign(s, { enabled: false, nextRun: null, lastStatus: PAUSED_STATUS });
+    paused = true;
+  }
+  await saveAll(items);
+  return { ...s, paused };
 }
 
 /**
@@ -163,6 +202,12 @@ export async function due(at = Date.now()) {
   let changed = false;
   for (const s of items) {
     if (!s.enabled || !s.nextRun || s.nextRun > at) continue;
+    // 一次性任务已经两次开始了都没跑完（中途崩溃 / 关闭）：不再重试
+    if (s.kind === 'once' && (s.attempts ?? 0) >= MAX_ONCE_ATTEMPTS) {
+      Object.assign(s, { enabled: false, nextRun: null, lastStatus: '失败：中途中断两次，已停用' });
+      changed = true;
+      continue;
+    }
     if (at - s.nextRun > CATCH_UP) {
       s.nextRun = nextRun(s, at);
       if (s.kind === 'once') { s.enabled = false; s.lastStatus = '错过（应用当时没有运行）'; }
