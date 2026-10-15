@@ -17,3 +17,8 @@ it('工作台调用真实功能入口，原模块和工具全部保留',()=>{
  for(const name of ['skills','system','workspace','mind','knowledge','settings'])expect(ui).toContain(name);
  for(const file of ['src/agent/scheduler.js','src/agent/team.js','src/agent/knowledge.js','src/agent/mcpClient.js','src/agent/desktopTools.js','src/agent/skillPacks.js'])expect(fs.existsSync(file)).toBe(true);
 });
+
+it('手机 App 保留自己的界面：工作台只在电脑上启动', () => {
+  const src = fs.readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  expect(src).toMatch(/if \(!COMPACT\) initWorkbench\(/);
+});

@@ -1962,4 +1962,5 @@ window.__jarvis = {
   workspace: ws
 };
 
-initWorkbench({showPanel,newSession,openSession,getSession:()=>session,openFile:openInWorkspace});
+// 工作台界面只用在电脑上；手机 App 保留自己的界面（底部输入、左侧抽屉菜单、整页面板）
+if (!COMPACT) initWorkbench({showPanel,newSession,openSession,getSession:()=>session,openFile:openInWorkspace});
