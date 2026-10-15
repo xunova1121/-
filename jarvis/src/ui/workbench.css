@@ -4,7 +4,7 @@ body.workbench{background:#fff;color:#24272e;font-family:'Microsoft YaHei','Sego
 .workbench .app,.workbench.side-closed .app{grid-template-columns:248px minmax(0,1fr);grid-template-rows:82px minmax(0,1fr);grid-template-areas:'rail top' 'rail main';background:#fff}
 .workbench .topbar{background:#fff;border:0;padding:15px 28px;position:relative;gap:12px;-webkit-app-region:drag}
 .workbench .topbar button,.workbench .wb-tabs{-webkit-app-region:no-drag}
-.workbench .topbar>.brand,.workbench .topbar>.status-pill,.workbench #level-chip,.workbench #btn-focus,.workbench #btn-theme,.workbench #btn-fullscreen,.workbench #update-pill{display:none!important}
+.workbench .topbar>.brand,.workbench .topbar>.status-pill,.workbench #level-chip,.workbench #btn-focus,.workbench #btn-theme,.workbench #btn-fullscreen{display:none!important}
 .workbench .top-actions{margin-left:auto;margin-right:110px}.workbench .cmd-btn{border:0;background:#f7f7f9;color:#737780}.workbench .cmd-btn span,.workbench .cmd-btn kbd{display:none}
 .workbench .rail{width:248px;padding:27px 16px 16px;background:#f7f7f8;border:0;gap:0;overflow:auto;min-height:0;transform:none!important;position:relative;inset:auto;display:flex}
 .wb-brand{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:2px 12px 24px}.wb-brand b{font-size:23px;letter-spacing:1px;font-weight:600}.wb-mark{font-size:29px;color:#6d5be4}.wb-brand small{font-size:10px;color:#90939d;flex-basis:100%;padding-left:35px;letter-spacing:2px}
@@ -60,3 +60,8 @@ body.workbench{background:#fff;color:#24272e;font-family:'Microsoft YaHei','Sego
 .wb-recent>div:last-child .wb-chat{padding:9px 8px}
 .wb-recent .wb-chat.current{background:#ececf0;color:#2f2a45}
 .wb-brand img.wb-mark{width:34px;height:31px;object-fit:contain}.wb-intro img.wb-hero-mark{width:84px;height:77px;object-fit:contain;margin:0 auto 6px;display:block}
+/* 顶栏的更新按钮：下载中显示进度条，下载好后变成实心的“重启以更新” */
+.workbench #update-pill{-webkit-app-region:no-drag;height:32px;padding:0 14px;border:1px solid #d9d2f5;border-radius:16px;color:#5b4bc4;font-size:12px;font-weight:500;background:linear-gradient(90deg,#e6e0fb var(--p,0%),#faf9fe var(--p,0%))}
+.workbench #update-pill[data-state="downloading"]{border-style:solid;font-variant-numeric:tabular-nums}
+.workbench #update-pill[data-state="ready"]{background:#6556da;border-color:#6556da;color:#fff;box-shadow:0 2px 10px #6556da40;cursor:pointer}
+.workbench #update-pill[data-state="available"]{cursor:pointer}

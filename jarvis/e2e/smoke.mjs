@@ -104,6 +104,8 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   // 故意返回 500 的假语音服务会产生一条资源加载错误，不计入
   page.on('console', (m) => { if (m.type() === 'error' && !/fonts\.(googleapis|gstatic)/.test(m.text()) && !(/status of 500/.test(m.text()) && /audio\/speech/.test(m.location().url)) && !(/status of 502/.test(m.text()) && /\/api\/tts\/edge/.test(m.location().url))) errors.push(m.text()); });
   await page.goto(BASE);
+  // 电脑版的更新按钮（重启以更新 / 下载进度）在工作台顶栏里要能显示出来
+  check('工作台：顶栏的更新按钮能显示', await page.evaluate(() => { const p = document.querySelector('#update-pill'); p.hidden = false; p.dataset.state = 'ready'; p.textContent = '重启以更新到 1.0.99'; const r = p.getBoundingClientRect(); const ok = getComputedStyle(p).display !== 'none' && r.width > 40 && r.top < 80; p.hidden = true; return ok; }));
   check('工作台：左侧导航、对话 / 工作室切换', await page.isVisible('.rail .wb-nav .wb-new') && (await page.locator('.wb-tabs button').count()) === 2);
   await studio(page, true);
   await page.waitForFunction(() => window.__jarvis?.stage?.stats.frames > 10, null, { timeout: 30000 });

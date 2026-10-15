@@ -1553,6 +1553,7 @@ if (DESKTOP?.onUpdate || APP_UPDATER) {
     $('#app-version').textContent = `当前 ${u.current ?? DESKTOP?.version ?? ''}`;
     pill.hidden = !['downloading', 'ready', 'available'].includes(u.state);
     pill.dataset.state = u.state;
+    pill.style.setProperty('--p', `${u.state === 'downloading' ? u.percent ?? 0 : 0}%`); // 下载进度条
     pill.textContent = u.state === 'downloading' ? `新版本下载中 ${u.percent ?? 0}%` : u.state === 'ready' ? (u.mobile ? `安装新版本 ${u.version}` : `重启以更新到 ${u.version}`) : u.state === 'available' ? (u.mobile ? `新版本 ${u.version} · 下载` : `新版本 ${u.version} · 去下载`) : '';
     note.textContent = u.hint || ({
       checking: '正在检查…',
