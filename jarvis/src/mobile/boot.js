@@ -67,6 +67,13 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
       getText: async (url) => { const r = await native(url); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); },
       metered: () => navigator.connection?.type === 'cellular'
     });
+    // 从后台切回 App 时也查一次（最多 30 分钟一次）：App 常驻后台时，不用等 6 小时的定时检查
+    let lastResume = Date.now();
+    App.addListener('resume', () => {
+      if (Date.now() - lastResume < 30 * 60_000) return;
+      lastResume = Date.now();
+      globalThis.__jarvisAppUpdater.check({ auto: true }).catch(() => {});
+    });
   } catch { /* 旧版 App 没有更新插件 */ }
 
   document.documentElement.classList.add('mobile-app');
