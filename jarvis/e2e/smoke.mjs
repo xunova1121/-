@@ -109,9 +109,15 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('工作台：左侧导航、对话 / 工作室切换', await page.isVisible('.rail .wb-nav .wb-new') && (await page.locator('.wb-tabs button').count()) === 2);
   await studio(page, true);
   await page.waitForFunction(() => window.__jarvis?.stage?.stats.frames > 10, null, { timeout: 30000 });
+  // 显式高画质仍需覆盖泛光渲染；自动档在软件渲染器上应降至标准。
+  await page.evaluate(() => { const s = document.querySelector('#set-quality'); s.value = 'high'; s.dispatchEvent(new Event('change', { bubbles: true })); });
+  await page.waitForFunction(() => window.__jarvis.stage.stats.bloom, null, { timeout: 10000 });
+  await page.waitForTimeout(100);
   const stats = await page.evaluate(() => { const s = window.__jarvis.stage.stats; return { form: s.form, particles: s.particles, calls: s.drawCalls, bloom: s.bloom, gl2: s.isWebGL2 }; });
   check('主视觉启动（粒子体 · 光核）', stats.form === 'core' && stats.particles >= 6000 && /光核/.test(await page.textContent('#hud-form')), JSON.stringify(stats));
   check('泛光开启时 draw calls ≤ 12', stats.bloom && stats.calls <= 12, String(stats.calls));
+  await page.evaluate(() => { const s = document.querySelector('#set-quality'); s.value = 'auto'; s.dispatchEvent(new Event('change', { bubbles: true })); });
+  check('自动画质适配软件渲染器', await page.evaluate(() => { const j = window.__jarvis; return j.stage.stats.softwareRenderer ? j.quality.tier === 'standard' && !j.quality.bloom : j.quality.tier === 'high'; }));
   await page.waitForFunction(() => window.__jarvis.gateway, null, { timeout: 5000 }).catch(() => {});
   check('识别到本机网关', await page.evaluate(() => Boolean(window.__jarvis.gateway)), await page.textContent('#gw-badge'));
 

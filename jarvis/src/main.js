@@ -271,7 +271,7 @@ function disposeStage() {
 
 let quality = resolveQuality(settings.quality, { lowEnd, isMobile, focusView: settings.focusView });
 function applyFpsCap() {
-  quality = resolveQuality(settings.quality, { lowEnd, isMobile, focusView: settings.focusView });
+  quality = resolveQuality(settings.quality, { lowEnd, isMobile, focusView: settings.focusView, softwareRenderer: Boolean(stage?.stats.softwareRenderer) });
   stage?.setFpsCap(quality.fps);
   stage?.setQuality({ bloom: quality.bloom, stars: quality.stars });
   body.classList.toggle('eco', quality.tier === 'eco');

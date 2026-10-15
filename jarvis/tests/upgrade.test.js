@@ -9,6 +9,10 @@ describe('画质档位', () => {
     expect(resolveQuality('auto', { lowEnd: true })).toMatchObject({ tier: 'standard', bloom: false });
     expect(resolveQuality('auto', { isMobile: true })).toMatchObject({ tier: 'standard', fps: 30 });
   });
+  it('软件渲染自动使用标准档，同时保留手动高画质', () => {
+    expect(resolveQuality('auto', { softwareRenderer: true })).toMatchObject({ tier: 'standard', bloom: false, fps: 60 });
+    expect(resolveQuality('high', { softwareRenderer: true })).toMatchObject({ tier: 'high', bloom: true, fps: 60 });
+  });
   it('省电档：无泛光、无星尘、24fps', () => {
     expect(resolveQuality('eco')).toMatchObject({ bloom: false, stars: false, fps: 24 });
   });

@@ -235,7 +235,7 @@ export function createStage(canvas, { lowEnd = false, onContextChange } = {}) {
   let fpsCap = 60;
   let frameFn = null;
   const pausedBy = new Set();
-  const stats = { frames: 0, fps: 0, isWebGL2, particles: N, drawCalls: 0, bloom: false, form: 'core', _acc: 0, _n: 0 };
+  const stats = { frames: 0, fps: 0, isWebGL2, softwareRenderer: softGL, particles: N, drawCalls: 0, bloom: false, form: 'core', _acc: 0, _n: 0 };
 
   function loop(now) {
     raf = requestAnimationFrame(loop);
