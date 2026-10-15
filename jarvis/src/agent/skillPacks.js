@@ -29,7 +29,8 @@ const MAX_BIN = 30 * 1024 * 1024;
 const MAX_BIN_TOTAL = 100 * 1024 * 1024;
 // 仓库里和技能无关的东西
 const IGNORE = /(^|\/)(\.git|\.github|node_modules|__pycache__|\.venv|venv|\.idea|\.vscode|__MACOSX|\.pytest_cache|dist-info)(\/|$)|(^|\/)(\.DS_Store|Thumbs\.db)$|\.(pyc|pyo|exe|dll|so|dylib|msi|dmg|apk)$/i;
-const isText = (p) => TEXT_EXT.test(p) || /(^|\/)(SKILL\.md|LICENSE|README|Makefile|Dockerfile|requirements\.txt)$/i.test(p);
+/** 技能里的这个文件按文本存（其余按二进制附件） */
+export const isText = (p) => TEXT_EXT.test(p) || /(^|\/)(SKILL\.md|LICENSE|README|Makefile|Dockerfile|requirements\.txt)$/i.test(p);
 // 从 GitHub 安装时：小于这些的现在下载，更大的用到时再下载
 const LAZY_TEXT = 256 * 1024;
 const LAZY_BIN = 1024 * 1024;
@@ -375,15 +376,21 @@ export function matchSlash(text, names) {
 
 /**
  * 预置常用技能：首次启动时自动安装全部内置技能；以后新增的内置技能也会自动装上。
- * 用户卸载过的不会再被装回来（记录在 kv 里）。
+ * 用户卸载过的不会再被装回来（记录在 kv 里）；装着的内置技能说明有更新时自动升级。
  * @returns {Promise<string[]>} 这次新装的技能名
  */
 export async function seedBuiltins() {
   const seen = new Set((await kv.get('packs-seeded'))?.names ?? []);
   const added = [];
   for (const s of [...BUILTIN_SKILLS, ...MORE_BUILTIN_SKILLS]) {
-    const name = parseFrontmatter(s.text).meta.name;
-    if (seen.has(name)) continue;
+    const { meta, body } = parseFrontmatter(s.text);
+    const name = meta.name;
+    if (seen.has(name)) {
+      // 内置技能随版本更新了说明：还是内置来源的就跟着升级（启用状态不变）；用户自己装的同名技能不动
+      const old = await packs.get(name);
+      if (old?.source === '内置' && (old.body !== body || old.description !== String(meta.description || '').slice(0, 1024))) await installFromText(s.text, '内置');
+      continue;
+    }
     seen.add(name);
     if (!(await packs.get(name))) {
       await installFromText(s.text, '内置');

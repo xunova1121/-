@@ -8,6 +8,9 @@
  */
 import { chromium } from 'playwright';
 import http from 'node:http';
+import { BUILTIN_SKILLS, MORE_BUILTIN_SKILLS } from '../src/agent/skillCatalog.js';
+
+const SKILLS = BUILTIN_SKILLS.length + MORE_BUILTIN_SKILLS.length; // 首次启动预置的内置技能数
 
 const BASE = process.env.JARVIS_URL || 'http://127.0.0.1:8787';
 const OUT = process.argv[2] || '.';
@@ -127,8 +130,8 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
 
   // —— 技能：首次启动预置常用技能；卸载后可从推荐里重装 → “/” 自动补全 → 点名使用
   await page.evaluate(() => window.__jarvis.showPanel('skills'));
-  await page.waitForFunction(() => document.querySelectorAll('#skill-list .skill').length >= 16, null, { timeout: 5000 }).catch(() => {});
-  check('首次启动预置 16 个常用技能', (await page.locator('#skill-list .skill').count()) === 16 && /16 \/ 16 个启用/.test(await page.textContent('#skill-count')), await page.textContent('#skill-count'));
+  await page.waitForFunction((n) => document.querySelectorAll('#skill-list .skill').length >= n, SKILLS, { timeout: 5000 }).catch(() => {});
+  check(`首次启动预置 ${SKILLS} 个常用技能`, (await page.locator('#skill-list .skill').count()) === SKILLS && (await page.textContent('#skill-count')).includes(`${SKILLS} / ${SKILLS} 个启用`), await page.textContent('#skill-count'));
   const wr = page.locator('#skill-list .skill', { hasText: '/weekly-report' });
   await wr.getByRole('button', { name: '卸载' }).click();
   await wr.getByRole('button', { name: '确认卸载' }).click();
@@ -136,7 +139,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.click('.wb-library-tabs button:nth-child(2)'); // “发现技能”
   await page.locator('.skill-tile', { hasText: '/weekly-report' }).locator('button').click();
   await page.click('.wb-library-tabs button:nth-child(1)'); // 回到“我的技能”
-  await page.waitForFunction(() => document.querySelectorAll('#skill-list .skill').length === 16, null, { timeout: 5000 }).catch(() => {});
+  await page.waitForFunction((n) => document.querySelectorAll('#skill-list .skill').length === n, SKILLS, { timeout: 5000 }).catch(() => {});
   check('卸载后可从推荐里重新安装', (await page.locator('#skill-list .skill', { hasText: '/weekly-report' }).count()) === 1);
   await closeSide(page);
   await page.fill('#prompt', '/wee');
@@ -154,7 +157,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await openPanel(page, 'skills');
   await page.locator('#skill-list .skill', { hasText: '/weekly-report' }).locator('.switch').click();
   await page.waitForTimeout(200);
-  check('停用技能', /15 \/ 16 个启用/.test(await page.textContent('#skill-count')));
+  check('停用技能', (await page.textContent('#skill-count')).includes(`${SKILLS - 1} / ${SKILLS} 个启用`));
 
   // —— 命令面板
   await page.keyboard.press('Control+k');

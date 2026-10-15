@@ -171,6 +171,31 @@ export function createTools(ctx) {
       }
     },
     {
+      name: 'install_skill',
+      description: '安装技能：path 填工作区里的技能文件夹（里面有 SKILL.md，如 "skills-draft/sales-report"），或 GitHub 上的技能文件夹地址（https://github.com/…/tree/main/skills/xxx）。同名技能会覆盖升级。用户同意后才调用；界面会再请用户确认一次。',
+      input_schema: S({ path: str('工作区文件夹路径，或 GitHub 地址') }, ['path']),
+      approval: ({ path }) => ({ key: 'skill-install', title: `安装技能：${path}`, detail: '技能里的说明会在以后的对话中被读取并照做，请确认来源可信。' }),
+      run: async ({ path }, { progress } = {}) => {
+        const src = String(path).trim();
+        let pack;
+        if (/^https?:\/\//i.test(src)) pack = await packs.installFromGitHub(src, { onProgress: progress });
+        else {
+          const dir = src.replace(/^\/?workspace\//, '').replace(/^\.?\//, '').replace(/\/?SKILL\.md$/i, '').replace(/\/$/, '');
+          if (!dir) throw new Error('请填技能所在的文件夹（如 skills-draft/sales-report），不能是整个工作区');
+          const listing = await ws.list(dir);
+          if (!listing.some((f) => /(^|\/)SKILL\.md$/i.test(f.path))) throw new Error(`工作区 ${dir || '根目录'} 里没有 SKILL.md`);
+          const files = {};
+          for (const f of listing) {
+            const blob = await ws.readBlob(f.path);
+            files[f.path] = packs.isText(f.path) ? await blob.text() : packs.binaryFile(await blob.arrayBuffer());
+          }
+          pack = await packs.installFromFiles(files, { source: '工作区' });
+        }
+        const n = Object.keys(pack.files || {}).length;
+        return `已安装技能「${pack.name}」${n ? `（带 ${n} 个附件）` : ''}${pack.also?.length ? `，另外还装了：${pack.also.map((p) => p.name).join('、')}` : ''}。用户以后输入“/${pack.name} 具体要求”就能点名使用；现在可以用 use_skill 读取它试一次。`;
+      }
+    },
+    {
       name: 'show_image',
       description: '把工作区里的一张图片（png / jpg / webp / gif / svg）显示在对话里给用户看，例如模板预览图、图表。',
       input_schema: S({ path: str('工作区里的图片路径') }, ['path']),

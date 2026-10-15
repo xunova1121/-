@@ -102,6 +102,26 @@
 
 插件目录里另有几组技能：企业微信 15 个、微信支付 4 个、QQ 机器人 4 个、钉钉 3 个，都是各自平台的接入说明，与写文档无关，不能用。
 
+**补充（2026-10-15）：上表没列、但在默认启用名单里的技能。** 它们不在安装目录，而是首次启动时装进 `~/.qclaw/skills`：
+
+| 技能 | 做什么 | 许可 | 依赖 |
+|---|---|---|---|
+| another_them（另一个TA） | 把一个人的思维方式和说话风格蒸馏成 Agent 人设 | MIT（Huashu 花叔） | 联网搜索（QClaw 的 ProSearch）、python3 |
+| persona-switch | 切换 / 恢复预设人设（赛博朋友、温柔伴侣等） | 无 | 无 |
+| qclaw-generate-image | 文生图、图生图 | 无 | QClaw 自己的生图服务 |
+| tencentmap-jsapi-gl-skill | 用腾讯地图 JSAPI GL 生成地图网页 | MIT-0（腾讯） | 腾讯地图开发者密钥 |
+| qclaw-migrator | 迁移 QClaw 数据（Hermes 用） | 无（私有） | QClaw |
+
+### 2.4 默认启用的是哪些
+
+依据：`~/.qclaw/openclaw.json` 及 `~/.qclaw/backups` 里的历次配置备份。
+- 9 月 11 日刚安装时，主智能体没有启用名单，按 OpenClaw 的规则，所有装着的技能都可用。只有 `skill-creator` 被设为停用，换成 `qclaw-skill-creator`。
+- 9 月 12 日起，配置里出现主智能体的启用名单，共 16 个。10 月 12 日又加了 `qclaw-migrator`，变成 17 个：
+  find-skills、qclaw-cron-skill、qclaw-env、qclaw-rules、qclaw-skill-creator、xbrowser、another_them、persona-switch、qclaw-generate-image、tencentmap-jsapi-gl-skill、cloud-upload-backup、docx、email-skill、mcporter、pdf、xlsx、qclaw-migrator。
+- **这份名单是程序写的、还是用户在界面里勾选的**，不能百分之百确定：程序写配置的逻辑在 app.asar 的字节码里，没有去反编译。从名单的样子看，像是程序在第二次启动时写入的：QClaw 自己的系统技能排在最前面，后面是首次启动时装进 `~/.qclaw/skills` 的那批。所以暂时把它当作新用户的默认值，这一点没有核实。
+
+贾维斯怎么处理这 17 个，见 `docs/skills-from-qclaw.md`。
+
 ### 2.2 OpenClaw 自带技能（`openclaw/skills`，57 个，**MIT**）
 
 1password、apple-notes、apple-reminders、bear-notes、blogwatcher、blucli、camsnap、canvas、clawhub、coding-agent、diagram-maker、discord、eightctl、gemini、gh-issues、gifgrep、github、gog、goplaces、healthcheck、himalaya、imsg、mcporter、meme-maker、model-usage、nano-pdf、node-connect、node-inspect-debugger、notion、obsidian、openai-whisper、openai-whisper-api、openhue、oracle、ordercli、peekaboo、python-debugpy、sag、session-logs、sherpa-onnx-tts、skill-creator、slack、songsee、sonoscli、spike、spotify-player、summarize、taskflow、taskflow-inbox-triage、things-mac、tmux、trello、video-frames、voice-call、wacli、weather、xurl。

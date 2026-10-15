@@ -94,7 +94,7 @@ describe('智能体循环（离线演示模型）', () => {
       expect(end.output).toContain(`.${f}`);
       expect(await ws.exists(`文档/示例.${f}`)).toBe(true);
     }
-  });
+  }, 20_000); // 真的生成三份 Office 文件：单独跑 2–3 秒，全部测试并行时机器忙，默认 5 秒会偶尔超时
 
   it('记住偏好，下次上下文里能取到', async () => {
     await run('记住我喜欢简洁的回答');
