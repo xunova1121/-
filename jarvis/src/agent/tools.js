@@ -413,7 +413,8 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         format: { type: 'string', enum: ['docx', 'pdf', 'html', 'md'], description: '输出格式，默认 docx' },
         path: str('保存路径（扩展名会自动修正）'),
         title: str('文档标题（可选，不填由模型拟定）'),
-        material: str('用户提供的材料、数据、要点（原样放进来，写作时必须用上）'),
+        material: str('用户在对话里直接给的材料、数据、要点（原样放进来，不要概括）'),
+        material_files: { type: 'array', items: { type: 'string' }, description: '用户给的参考文件（工作区路径，Word/PDF/PPT/Excel/文本都行）。有文件时一定放这里，程序会读取全文，不要自己读了再概括进 material' },
         words: { type: 'number', description: '目标字数（可选）' },
         outline_only: { type: 'boolean', description: '只出大纲，等用户确认' },
         outline: { type: 'array', description: '已确认的大纲（跳过列大纲）', items: { type: 'object', properties: { heading: str('一级标题'), points: { type: 'array', items: { type: 'string' } }, words: { type: 'number' } }, required: ['heading'], additionalProperties: false } },
@@ -423,7 +424,16 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         subtitle: str('副标题（可选）'),
         author: str('署名（可选）')
       }, ['task', 'path']),
-      run: async ({ task, format = 'docx', path, title, material, words, outline_only: outlineOnly, outline, review = true, theme, cover, subtitle, author }, { progress, signal } = {}) => {
+      run: async ({ task, format = 'docx', path, title, material, material_files: materialFiles, words, outline_only: outlineOnly, outline, review = true, theme, cover, subtitle, author }, { progress, signal } = {}) => {
+        // 参考文件由程序读全文，不经模型转述（模型转述时会压缩，长材料还会被截断）
+        const files = [];
+        for (const f of Array.isArray(materialFiles) ? materialFiles.slice(0, 8) : []) {
+          try {
+            const blob = await ws.readBlob(f);
+            files.push(`【参考文件：${f}】\n${ws.isText(f) ? await blob.text() : (await parseFile(blob, f)).text}`);
+          } catch (e) { throw new Error(`读不到参考文件 ${f}：${e.message}`); }
+        }
+        if (files.length) material = [material, ...files].filter(Boolean).join('\n\n');
         const r = await writeLongDocument({
           task, title, material, words: Number(words) || 0, outline: Array.isArray(outline) ? outline : null, outlineOnly: Boolean(outlineOnly),
           review: review !== false, llm: ctx.llm ?? null, readerLlm: ctx.reasonLlm ?? null, onProgress: (t) => progress?.(t), signal

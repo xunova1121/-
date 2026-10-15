@@ -15,7 +15,20 @@
  *   { type: 'pagebreak' }           单独一行写 [分页] 或 <!-- 分页 -->
  * 行内：{ text, bold?, italic?, code?, strike?, link? }
  */
-import { marked } from 'marked';
+import { Marked } from 'marked';
+
+// 中文的粗体：“**编制单位：**江苏省……”按 CommonMark 规则不算粗体（结束的 ** 前面是标点、后面紧跟汉字），
+// 模型却经常这样写，结果文档里露出星号。这里先按“同一行里成对的 **”认粗体
+const cjkStrong = {
+  name: 'cjkStrong',
+  level: 'inline',
+  start(src) { const i = src.indexOf('**'); return i < 0 ? undefined : i; },
+  tokenizer(src) {
+    const m = /^\*\*(?![\s*])([^\n]*?[^\s*])\*\*(?!\*)/.exec(src);
+    if (m) return { type: 'strong', raw: m[0], text: m[1], tokens: this.lexer.inlineTokens(m[1]) };
+  }
+};
+const markedCjk = new Marked({ gfm: true, extensions: [cjkStrong] });
 
 const PAGEBREAK = /^\s*(\[分页\]|<!--\s*(分页|pagebreak)\s*-->|\\newpage|\\pagebreak)\s*$/i;
 
@@ -109,7 +122,7 @@ function blocks(tokens = []) {
 export function parseDoc(md) {
   // 单独一行的 --- 一律当分隔线（Markdown 里“文字\n---”会被当成二级标题，写文档时没人这么用）
   const text = String(md ?? '').replace(/\r\n/g, '\n').replace(/\n[ \t]*(-{3,}|\*{3,}|_{3,})[ \t]*(?=\n|$)/g, '\n\n$1\n');
-  return blocks(marked.lexer(text, { gfm: true }));
+  return blocks(markedCjk.lexer(text));
 }
 
 /** 行内 → 纯文字 */

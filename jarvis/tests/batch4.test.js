@@ -280,3 +280,22 @@ describe('按需加载：用户连的 MCP 工具', () => {
     expect(loader.hint()).toMatch(/mcp_big__tool0/);
   });
 });
+
+describe('长文档：长材料不截断、按节取相关段落', async () => {
+  const { skeleton, relevantMaterial } = await import('../src/agent/longDoc.js');
+  const long = ['一、项目概述', '项目名称是长江禁捕执法智能化扩展。'.repeat(30), '二、必要性', '落实国务院人工智能+行动意见，国发〔2025〕11号。'.repeat(40), '三、投资估算', '总投资67万元，全部为软件开发费用。'.repeat(40)].join('\n\n').repeat(20);
+  it('材料的标题结构能取出来', () => {
+    expect(skeleton('一、项目概述\n正文很长很长\n（二）必要性\n1. 法律法规\n普通一句话')).toBe('一、项目概述\n（二）必要性\n1. 法律法规');
+  });
+  it('每节拿到和自己相关的段落，不是只拿开头', () => {
+    expect(long.length).toBeGreaterThan(24000);
+    const part = relevantMaterial(long, '投资估算 总投资 资金来源');
+    expect(part.length).toBeLessThanOrEqual(24000);
+    expect(part).toMatch(/总投资67万元/);
+    const part2 = relevantMaterial(long, '必要性 国务院 人工智能');
+    expect(part2).toMatch(/国发〔2025〕11号/);
+  });
+  it('短材料原样返回', () => {
+    expect(relevantMaterial('短材料', '任意')).toBe('短材料');
+  });
+});

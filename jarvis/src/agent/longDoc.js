@@ -14,6 +14,29 @@ import { parseJson } from './research.js';
 const clip = (s, n) => (String(s).length > n ? `${String(s).slice(0, n)}…` : String(s));
 const SUMMARY_MARK = '<<<本节摘要>>>';
 const MAX_SECTIONS = 12;
+const MAT_LIMIT = 24000; // 材料超过这么长时不整篇塞进提示
+
+/** 材料里像标题的行（一、（一）、1. 、# 开头的短行），列大纲时让模型看到材料的完整结构 */
+export function skeleton(text) {
+  return String(text).split('\n').map((l) => l.trim()).filter((l) => l.length <= 40 && /^(#{1,4}\s|[一二三四五六七八九十]+、|（[一二三四五六七八九十]+）|\d+(\.\d+)*[.、]\s?\S)/.test(l)).join('\n');
+}
+
+/** 长材料里和这一节最相关的段落（按原文顺序），短材料原样返回 */
+export function relevantMaterial(text, query, limit = MAT_LIMIT) {
+  const t = String(text);
+  if (t.length <= limit) return t;
+  const paras = t.split(/\n{2,}|\n(?=[一二三四五六七八九十]+、|（[一二三四五六七八九十]+）|#)/).filter((p) => p.trim());
+  const grams = (s) => { const g = new Set(); const x = s.replace(/\s/g, ''); for (let i = 0; i < x.length - 1; i++) g.add(x.slice(i, i + 2)); return g; };
+  const q = grams(query);
+  const scored = paras.map((p, i) => { let hit = 0; for (const g of grams(p)) if (q.has(g)) hit++; return { i, p, s: hit / Math.sqrt(p.length + 20) }; });
+  const keep = new Set();
+  let used = 0;
+  for (const x of [...scored].sort((a, b) => b.s - a.s)) {
+    if (used + x.p.length > limit) continue;
+    keep.add(x.i); used += x.p.length;
+  }
+  return scored.filter((x) => keep.has(x.i)).map((x) => x.p).join('\n\n');
+}
 
 /**
  * @param {object} o
@@ -33,7 +56,10 @@ const MAX_SECTIONS = 12;
 export async function writeLongDocument({ task, title = '', material = '', words = 0, outline = null, outlineOnly = false, review = true, llm, readerLlm = null, onProgress, signal }) {
   if (!llm) throw new Error('长文档分节写作需要配置大模型（内置演示不支持）。可以直接用 create_document 一次写完');
   const say = (t) => onProgress?.(t);
-  const mat = material ? `\n\n用户提供的材料（必须用上，不要编造材料以外的数据）：\n${clip(material, 12000)}` : '';
+  // 材料长时：列大纲给开头一段加材料里的标题结构；逐节写时给和这一节最相关的段落（见 relevantMaterial）
+  const mat = material ? `\n\n用户提供的材料（必须用上，不要编造材料以外的数据）：\n${material.length > MAT_LIMIT ? `${clip(material, MAT_LIMIT - 3000)}\n\n【材料里的标题结构】\n${clip(skeleton(material), 3000)}` : material}` : '';
+  // 给了长材料又没说字数：按材料篇幅定，不要比材料还短
+  if (!words && material.length > 6000) words = Math.min(40000, Math.round(material.replace(/\s/g, '').length * 1.1));
 
   // ---------- 1. 大纲
   let plan = outline?.length ? { title, sections: outline } : null;
@@ -62,7 +88,8 @@ export async function writeLongDocument({ task, title = '', material = '', words
   for (const [i, s] of plan.sections.entries()) {
     if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
     say(`写第 ${i + 1}/${plan.sections.length} 节：${s.heading}`);
-    parts.push(await writeSection({ i, s, plan, outlineText, summaries, task, mat, llm, signal }));
+    const secMat = material ? `\n\n用户提供的材料（和这一节相关的部分，必须用上，不要编造材料以外的数据）：\n${relevantMaterial(material, `${s.heading} ${s.points.join(' ')}`)}` : '';
+    parts.push(await writeSection({ i, s, plan, outlineText, summaries, task, mat: secMat, llm, signal }));
     summaries.push(parts[i].summary);
   }
   let body = parts.map((p) => p.text).join('\n\n');
@@ -130,7 +157,11 @@ ${mat}
 
 现在只写第 ${i + 1} 节「${s.heading}」${s.words ? `，约 ${s.words} 字` : ''}。要点：${s.points.join('；') || '按大纲'}。
 格式：第一行是“## ${s.heading}”；节内小标题用 ###、####；数据对比和计划安排用 Markdown 表格；并列要点用列表。
-要求：内容具体（数字、时间、责任人、依据），不重复前面各节已经写过的内容，不写本节以外的内容，不写空话套话；材料里没有的数据写“待确认”，不要编造。
+要求：
+- 每个要点都要展开写，不要压成一句话：先写观点，再写依据（政策文件全称和文号、具体条款、数据、事实），再说明对本项目意味着什么；需要时用一个通俗的比方帮读者理解。
+- 材料里有的细节（数字、文件名称和文号、系统和模块名称、流程步骤、表格）尽量完整保留并用上；材料里的表格照样做成表格。
+- 字数宁多勿少，至少写到上面要求的字数。
+- 不重复前面各节已经写过的内容，不写本节以外的内容，不写空话套话；材料里没有的数据写“待确认”，不要编造。
 写完后另起一行写 ${SUMMARY_MARK}，后面用一两句话概括这一节写了什么（给后面的节参考，不会出现在文档里）。`
   }));
   const [text, summary = ''] = raw.split(SUMMARY_MARK);

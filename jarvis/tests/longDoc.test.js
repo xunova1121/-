@@ -123,6 +123,17 @@ describe('write_long_document 工具', () => {
     expect(progress).toEqual(expect.arrayContaining(['列大纲…', '写第 2/3 节：二、建设内容', '请一位“读者”通读挑问题…']));
   });
 
+  it('参考文件由程序读全文交给写作，不靠模型转述', async () => {
+    const { llm, calls } = fakeLlm();
+    tools = (await import('../src/agent/tools.js')).createTools({ llm });
+    await ws.write('资料/原方案.md', '# 原方案\n\n独有细节：雷达覆盖半径 12 公里，国发〔2025〕11号。');
+    const r = await tool().run({ task: '在原方案基础上补充', path: '方案/补充版', material_files: ['资料/原方案.md'] });
+    expect(r).toMatch(/已生成/);
+    expect(calls.some((c) => c.prompt.includes('列出文档大纲') && c.prompt.includes('雷达覆盖半径 12 公里'))).toBe(true);
+    expect(calls.filter((c) => c.prompt.includes('现在只写第')).every((c) => c.prompt.includes('国发〔2025〕11号'))).toBe(true);
+    await expect(tool().run({ task: 'x', path: 'y', material_files: ['没有这个.docx'] })).rejects.toThrow(/读不到参考文件/);
+  });
+
   it('先看大纲：只返回大纲，提示确认后带 outline 再调用', async () => {
     const r = await tool().run({ task: '方案', path: 'x', outline_only: true });
     expect(r).toContain('## 二、建设内容');
