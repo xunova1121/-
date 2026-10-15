@@ -1232,3 +1232,10 @@ html[data-mode="mobile"] #app-splash {
 @keyframes as-up { from { transform: translateY(8px); opacity: 0; } }
 @keyframes as-dot { 0%, 100% { transform: translateY(0); opacity: .45; } 40% { transform: translateY(-6px); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { #app-splash * { animation-duration: 0s !important; animation-iteration-count: 1 !important; } }
+
+/* 手机“工作进展”：执行中只占几行高，步骤在卡片里滚动（停在最新一步），不把回答往下推；
+   结束后收成一行“用了 N 步 · 点开查看”，点开后最多半屏高 */
+.progress-card .pc-steps { overflow-y: auto; overscroll-behavior: contain; scroll-behavior: smooth; }
+.progress-card.working .pc-steps { max-height: 7.6em; }
+.progress-card:not(.working) .pc-steps { max-height: 50vh; }
+.progress-card.working .pc-steps pre { display: none; }

@@ -13,7 +13,7 @@
  *   { type: 'server_tool', name }              服务端工具（如 Claude 联网搜索）
  *   { type: 'sources', items }                 本轮自动检索到的知识库来源
  */
-import { EmotionTagStripper } from '../../shared/emotionTag.js';
+import { EmotionTagStripper, stripEmotionTags } from '../../shared/emotionTag.js';
 import { validateArgs } from './tools.js';
 import * as sessions from './sessions.js';
 import * as memory from './memory.js';
@@ -40,8 +40,15 @@ export const STABLE_PROMPT = `你是“未央”，运行在用户电脑上的�
 - 工具失败时读错误信息、换方法重试，不要编造结果。同样的操作失败两次就换思路，不要反复试同一类办法。
 - 中途不要停下来问“要不要继续”：用户交代的事就一直做到完成；只有缺少必要信息、或要做有风险的操作时才问。
 - 在电脑上找文件、找程序时先缩小范围（具体目录、常见安装位置），不要在整个用户目录或整块磁盘上递归搜索（一次要几十秒）。
-- 用简体中文回答，语气自然、简洁。聊天回复面向朗读，少用复杂排版；写文档（create_document 的内容）不受这条限制，见下方“写文档”。
+- 用简体中文回答，语气自然。聊天回答按下面“回答的样子”来写；写文档（create_document 的内容）不受这条限制，见下方“写文档”。
 - 下方“核心记忆 / 相关记忆 / 过往对话 / 经验教训 / 已掌握的技能”是你在这台电脑上积累的，请参考执行；经验教训优先于默认做法；记忆与用户当前说法冲突时以当前说法为准，并更新记忆。
+
+## 回答的样子（所有聊天回答都这样，不只是某一类问题）
+- 结论放第一行：直接给用户要的答案，用 **加粗** 或一个短标题（如“**南京 · 后天（10月17日 周六）**”），不要先铺垫、不要复述问题。
+- 再用 2–5 条短要点补充，每条一行、一个意思；数字、日期、名称写准。多项对比、多天、多个对象用表格。
+- 简练：简单问题 3–8 行说完；不解释你用了什么方法、调了什么工具；来源只在最后一行写一句（如“来源：中国天气网”）；拿不准的标“待核实”。
+- 最后需要时问一个最可能的下一步（一句话），不要连问几个。
+- 执行过程中少说话：调用工具前最多一句话说在做什么，不要每一步都写一段解释；做完只说结果。
 
 ## 写文档（Word / PDF / PPT / 报告 / 方案 / 公文）
 - 要的是文件就生成文件，不要只在聊天里贴正文。排版（字体、行距、编号、表格样式、页码、目录）由工具完成，你只管写好 Markdown 结构。
@@ -248,4 +255,4 @@ export async function runAgent({ adapter, model, history, userText, images = [],
 /** 步数上限最多自动放宽到 maxSteps 的几倍 */
 export const HARD_CAP = 4;
 
-const stripTag = (s) => String(s || '').replace(/^\s*<emotion>[^<]*<\/emotion>\s*/, '');
+const stripTag = (s) => stripEmotionTags(String(s || '').replace(/^\s*<emotion>[^<]*<\/emotion>\s*/, ''));

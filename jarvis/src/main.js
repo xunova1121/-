@@ -926,7 +926,7 @@ async function send(text) {
           const note = e.resume ? `网络中断，第 ${e.attempt} 次重连，接着刚才的地方写` : `连接出错，第 ${e.attempt} 次自动重试`;
           hud.think(`↻ ${note}`, 'sub');
           setTask('processing', note.slice(0, 30));
-        } else if (e.type === 'emotion') { machine.setStreamHint(e.value); director.onEmotion(e.value); }
+        } else if (e.type === 'emotion') { machine.setStreamHint(e.value); director.onEmotion(e.value); bubble.mood?.(e.value); }
         else if (e.type === 'state' && e.value !== 'done') setTask(e.value, e.value === 'listening' ? '生成回答' : '');
         else if (e.type === 'tool_start') {
           director.onToolStart(e.name);

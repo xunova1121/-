@@ -24,7 +24,8 @@ export class EmotionTagStripper {
     if (!'<emotion>'.startsWith(trimmed.slice(0, 9))) {
       return this.#release(null, this.buf);
     }
-    const m = trimmed.match(/^<emotion>\s*([^<\s]*)\s*<\/emotion>\s*/);
+    // 标准写法 <emotion>平静</emotion>；模型偶尔写错结尾（<emotion>平静>、<emotion>平静<emotion>、<emotion>平静 换行），也一并去掉
+    const m = trimmed.match(/^<emotion>\s*([^<>\s]{0,8})\s*(?:<\s*\/\s*emotion\s*>|<\s*emotion\s*>|>|\n)\s*/i);
     if (m) {
       const hint = EMOTIONS.includes(m[1]) ? m[1] : null;
       return this.#release(hint, trimmed.slice(m[0].length));
@@ -45,3 +46,11 @@ export class EmotionTagStripper {
     return { text, hint };
   }
 }
+
+/** 正文里残留的情绪标签（任何位置、各种写错的形式）一律去掉 */
+export function stripEmotionTags(s) {
+  return String(s ?? '').replace(/<\s*\/?\s*emotion\s*>\s*(?:[^<>\s]{0,8}\s*(?:<\s*\/\s*emotion\s*>|>))?/gi, '');
+}
+
+/** 表情对应的小图标（显示在“未央 · 时间”旁边） */
+export const EMOTION_ICON = { 平静: '🙂', 专注: '🧐', 聆听: '👂', 亲和: '😊', 安抚: '🤗', 愉悦: '😄', 警觉: '⚠️' };

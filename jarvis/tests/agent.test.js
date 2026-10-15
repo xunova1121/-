@@ -217,3 +217,18 @@ describe('中转站的工具调用格式', () => {
     expect(validateArgs(read, {})).toMatch(/这次收到的参数是空的/);
   });
 });
+
+describe('情绪标签写错了也不漏到正文里', () => {
+  it('<emotion>平静> 这类写法照样去掉，并拿到表情', async () => {
+    const { EmotionTagStripper, stripEmotionTags, EMOTION_ICON } = await import('../shared/emotionTag.js');
+    for (const [input, want, hint] of [['<emotion>平静</emotion>南京', '南京', '平静'], ['<emotion>平静>南京后天', '南京后天', '平静'], ['<emotion>专注<emotion>好的', '好的', '专注'], ['普通文字', '普通文字', null]]) {
+      const s = new EmotionTagStripper();
+      let out = '', h = null;
+      for (const ch of input) { const r = s.push(ch); out += r.text; h ||= r.hint; }
+      out += s.flush().text;
+      expect([out, h]).toEqual([want, hint]);
+    }
+    expect(stripEmotionTags('前面<emotion>平静>后面')).toBe('前面后面');
+    expect(EMOTION_ICON.平静).toBeTruthy();
+  });
+});

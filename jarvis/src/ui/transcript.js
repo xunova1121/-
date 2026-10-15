@@ -3,10 +3,12 @@
  * 全程只用 createElement + textContent，从不把模型输出当 HTML 插入。
  */
 import { parseMarkdown } from '../core/markdown.js';
+import { EMOTION_ICON, stripEmotionTags } from '../../shared/emotionTag.js';
 
 const LABEL = { user: '你', agent: '未央' };
 
 export function renderBlocks(container, text) {
+  text = stripEmotionTags(text); // 旧对话里可能存着写错的情绪标签
   container.replaceChildren(...parseMarkdown(text).map((b) => {
     if (b.type === 'code') {
       // 代码块：语言标签 + 复制按钮
@@ -89,7 +91,7 @@ const TOOL_LABEL = {
   remember: '记住', recall: '回忆', forget: '遗忘', save_skill: '习得技能', kb_search: '检索知识库',
   list_files: '列出文件', read_file: '读取文件', write_file: '写入文件', create_document: '生成文档',
   run_javascript: '运行 JS', run_python: '运行 Python', preview: '打开预览', fetch_url: '读取网页',
-  web_search: '联网搜索', deep_research: '深度调研', get_current_time: '读取时间', get_local_metrics: '读取系统状态',
+  web_search: '联网搜索', deep_research: '深度调研', get_current_time: '读取时间', get_weather: '查天气', get_local_metrics: '读取系统状态',
   generate_image: '画图', generate_video: '生成视频', copy_skill_file: '复制技能文件', show_image: '显示图片',
   use_skill: '使用技能', read_skill_file: '读取技能文件', schedule_task: '创建定时任务', list_schedules: '查看定时任务', cancel_schedule: '删除定时任务', core_memory_update: '更新核心记忆',
   computer_list_dir: '查看文件夹', computer_read_file: '读取电脑文件', computer_write_file: '写入电脑文件', computer_save_from_workspace: '保存到电脑',
@@ -98,6 +100,7 @@ const TOOL_LABEL = {
 };
 
 export function summarizeArgs(name, a = {}) {
+  if (a.place) return `${a.place}${a.days ? ` · ${a.days} 天` : ''}`;
   if (a.path) return a.path;
   if (a.query) return a.query;
   if (a.question) return a.question;
@@ -257,6 +260,7 @@ export class Transcript {
       d.append(sm, pre);
       li.append(d);
       p.list.append(li);
+      p.list.scrollTop = p.list.scrollHeight; // 执行中卡片高度固定，步骤在里面滚动，停在最新一步
       const t1 = Date.now();
       self.#scroll();
       let log = '';
@@ -271,6 +275,7 @@ export class Transcript {
           tm.textContent = fmt(ms ?? Date.now() - t1);
           pre.textContent = log ? `${log}\n\n${output}` : output;
           p.done++;
+          p.list.scrollTop = p.list.scrollHeight;
           self.#scroll();
         }
       };
@@ -280,17 +285,26 @@ export class Transcript {
       clearInterval(prog.timer);
       prog.box.classList.remove('working');
       for (const li of prog.list.querySelectorAll('li[data-st="now"]')) li.dataset.st = 'stop';
-      prog.count.textContent = `用了 ${prog.n} 步`;
+      prog.count.textContent = `用了 ${prog.n} 步 · 点开查看`;
       prog.time.textContent = fmt(Date.now() - t0);
       prog.box.open = false;
     }
     return {
       el,
       get text() { return raw; },
+      /** 表情：在“未央 · 时间”旁边放一个小图标（不显示英文标签） */
+      mood(v) {
+        const icon = EMOTION_ICON[v];
+        if (!icon) return;
+        let m = head.querySelector('.who-mood');
+        if (!m) { m = Object.assign(document.createElement('span'), { className: 'who-mood' }); head.append(m); }
+        m.textContent = ` ${icon}`;
+        m.title = v;
+      },
       append(d) {
         raw += d;
         curRaw += d;
-        cur.textContent = curRaw;
+        cur.textContent = stripEmotionTags(curRaw);
         self.#scroll();
       },
       /** 工具执行卡片：执行中显示动画，结束后可展开查看输出 */
