@@ -35,7 +35,7 @@ export function keyedProviders(cfg) {
     const p = providerById(id);
     if (!p || p.kind === 'mock') return false;
     if (id === cfg.provider) return true;
-    if (p.custom) return Boolean(cfg.baseURLs?.custom?.trim() && cfg.keys?.[id]?.trim());
+    if (p.custom) return Boolean(cfg.baseURLs?.[id]?.trim() && cfg.keys?.[id]?.trim());
     return p.needsKey === false ? false : Boolean(cfg.keys?.[id]?.trim());
   };
   return [cfg.provider, ...Object.keys(cfg.keys || {})].filter((id, i, a) => a.indexOf(id) === i && ok(id));

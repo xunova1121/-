@@ -17,7 +17,7 @@ const el = (tag, props = {}, ...kids) => {
 };
 
 /** 缓存用的键：同一个服务商换了地址也要重新拉 */
-export const listKey = (cfg) => `${cfg.provider}|${providerById(cfg.provider)?.custom ? cfg.baseURLs?.custom || '' : ''}`;
+export const listKey = (cfg) => `${cfg.provider}|${providerById(cfg.provider)?.custom ? cfg.baseURLs?.[cfg.provider] || '' : ''}`;
 
 /** 当前是不是“自动”模式 */
 export const isAuto = (cfg) => Boolean(cfg.routing?.enabled && (cfg.routing.provider === cfg.provider || cfg.routing.multi));

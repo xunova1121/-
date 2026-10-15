@@ -418,7 +418,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     $('#llm-model').value = cfg.models[p.id] || p.models[0] || '';
     $('#llm-models').replaceChildren(...p.models.filter(Boolean).map((m) => el('option', { value: m })));
     $('#row-base').hidden = !p.custom;
-    $('#llm-base').value = cfg.baseURLs.custom || '';
+    $('#llm-base').value = cfg.baseURLs[cfg.provider] || '';
     $('#row-key').hidden = p.kind === 'mock';
     $('#llm-key').value = cfg.keys[p.id] || '';
     const gwKey = gw?.keys?.includes(p.id);
@@ -439,7 +439,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   function collect() {
     const id = sel.value;
     cfg = { ...cfg, provider: id, models: { ...cfg.models, [id]: $('#llm-model').value.trim() }, keys: { ...cfg.keys, [id]: $('#llm-key').value.trim() } };
-    if (providerById(id).custom) cfg.baseURLs = { ...cfg.baseURLs, custom: $('#llm-base').value.trim() };
+    if (providerById(id).custom) cfg.baseURLs = { ...cfg.baseURLs, [id]: $('#llm-base').value.trim() };
     return cfg;
   }
   $('#btn-llm-save').addEventListener('click', () => {
@@ -453,12 +453,12 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     const { adapter, model, problem } = createAdapter(c, { gateway: getGateway() });
     if (problem) { status.textContent = problem; return; }
     const p = providerById(c.provider);
-    const via = () => (MOBILE && globalThis.__jarvisNetVia?.(c.baseURLs.custom || p.baseURL) === 'native' ? '（经手机系统网络）' : '');
+    const via = () => (MOBILE && globalThis.__jarvisNetVia?.(c.baseURLs[p.id] || p.baseURL) === 'native' ? '（经手机系统网络）' : '');
     // 第一步：不经网关直连的 OpenAI 兼容接口，先查 /models，把网络 / 地址 / 密钥 / 型号问题分开说清楚
     const direct = p.kind === 'openai' && !getGateway();
-    if (direct && (p.custom ? c.baseURLs.custom : p.baseURL)) {
+    if (direct && p.kind === 'openai' && (p.custom ? c.baseURLs[p.id] : p.baseURL)) {
       status.textContent = '第 1 步：检查接口地址和密钥…';
-      const r = await probeEndpoint({ baseURL: p.custom ? c.baseURLs.custom : p.baseURL, apiKey: c.keys[p.id] || '', model, phone: MOBILE });
+      const r = await probeEndpoint({ baseURL: p.custom ? c.baseURLs[p.id] : p.baseURL, apiKey: c.keys[p.id] || '', model, phone: MOBILE });
       if (!r.ok && r.step !== 'model') { status.textContent = `连接失败：${r.message}${via()}`; return; }
       status.textContent = `${r.message}${via()}。第 2 步：让模型回一句话…`;
       if (r.step === 'model') status.textContent = `注意：${r.message}。仍然试一下对话…`;

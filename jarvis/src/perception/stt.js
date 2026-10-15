@@ -31,7 +31,7 @@ export function resolveStt(cfg, { gateway = null, browserSupported }) {
   if (has('siliconflow')) return 'siliconflow';
   // 都没有：试试当前的模型服务商（中转平台大多也提供 OpenAI 兼容的语音转写）
   const p = providerById(cfg.provider);
-  if (p?.kind === 'openai' && (has(p.id) || p.needsKey === false) && (!p.custom || cfg.baseURLs?.custom)) return 'provider';
+  if (p?.kind === 'openai' && (has(p.id) || p.needsKey === false) && (!p.custom || cfg.baseURLs?.[p.id])) return 'provider';
   return 'none';
 }
 
@@ -99,11 +99,11 @@ async function transcribeViaProvider(cfg, audio, { gateway, signal, fetchImpl })
   const p = providerById(cfg.provider);
   if (p?.kind !== 'openai') throw new Error('语音识别：当前服务商不支持语音转写，请在“模型 → 声音”里选择云端语音识别');
   const key = cfg.keys?.[p.id] || '';
-  const viaGw = p.custom ? customViaGateway(gateway, cfg.baseURLs?.custom) : Boolean(gateway && upstreamFor(p.id));
-  const base = viaGw ? `${gateway.origin}/api/llm/${p.id}` : (p.custom ? cfg.baseURLs.custom : p.baseURL).replace(/\/$/, '');
+  const viaGw = p.custom ? customViaGateway(gateway, cfg.baseURLs?.[p.id]) : Boolean(gateway && upstreamFor(p.id));
+  const base = viaGw ? `${gateway.origin}/api/llm/${p.id}` : (p.custom ? cfg.baseURLs[p.id] : p.baseURL).replace(/\/$/, '');
   const headers = {};
   if (key || viaGw) headers.authorization = `Bearer ${key || 'use-gateway-key'}`;
-  if (viaGw && p.custom) headers['x-jarvis-upstream'] = cfg.baseURLs.custom.trim();
+  if (viaGw && p.custom) headers['x-jarvis-upstream'] = cfg.baseURLs[p.id].trim();
   const known = workingModel.get(base);
   const models = known ? [known] : sttCandidates(cfg);
   let last = '';

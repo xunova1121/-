@@ -35,48 +35,72 @@ export function toAnthropicMessages(messages) {
   return out;
 }
 
-export function createAnthropicAdapter({ apiKey, baseURL, browser = true, webSearch = false }) {
-  const client = new Anthropic({ apiKey: apiKey || 'use-gateway-key', ...(baseURL && { baseURL }), dangerouslyAllowBrowser: browser });
+/**
+ * compat：经中转站时，中转站可能不认新参数（推理档位、快速工具参数、模型兜底、联网搜索）。
+ * 被拒（400 / 404 / 422）且还没输出文字时，按顺序降级重试：先去掉新参数，最后才去掉联网搜索；记住能用的档位。
+ */
+export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = true, webSearch = false, compat = false, client: injected }) {
+  const client = injected ?? new Anthropic({ apiKey: apiKey || 'use-gateway-key', ...(baseURL && { baseURL }), ...(headers && { defaultHeaders: headers }), dangerouslyAllowBrowser: browser });
+  let level = 0; // 0 全部参数；1 去掉新参数；2 再去掉联网搜索（只在 compat 时降级）
+  const maxLevel = !compat ? 0 : webSearch ? 2 : 1;
+
+  async function once({ model, system, messages, tools, signal, onText }, lvl, state) {
+    const search = webSearch && lvl < 2;
+    const [stable, dynamic] = system;
+    const params = {
+      model,
+      max_tokens: 32000,
+      system: [
+        { type: 'text', text: stable, cache_control: { type: 'ephemeral' } },
+        ...(dynamic ? [{ type: 'text', text: dynamic }] : [])
+      ],
+      messages: toAnthropicMessages(messages),
+      tools: [
+        ...tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema, ...(lvl === 0 && { eager_input_streaming: true }) })),
+        ...(search ? [{ type: 'web_search_20260209', name: 'web_search', max_uses: 5 }] : [])
+      ],
+      ...(lvl === 0 && { output_config: { effort: 'medium' } })
+    };
+    if (lvl === 0 && FALLBACK_MODELS.test(model)) {
+      params.betas = ['server-side-fallback-2026-07-01'];
+      params.fallbacks = 'default';
+    }
+    const stream = client.beta.messages.stream(params, { signal });
+    let text = '';
+    for await (const ev of stream) {
+      if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') {
+        text += ev.delta.text;
+        state.started = true;
+        onText?.(ev.delta.text);
+      } else if (ev.type === 'content_block_start' && ev.content_block.type === 'server_tool_use') {
+        onText?.('', { serverTool: ev.content_block.name });
+      }
+    }
+    const msg = await stream.finalMessage();
+    if (msg.stop_reason === 'refusal') {
+      const note = '抱歉，这个请求我没办法协助。';
+      onText?.(note);
+      return { text: text + note, toolCalls: [], raw: null, stop: 'end_turn' };
+    }
+    const toolCalls = msg.content.filter((b) => b.type === 'tool_use').map((b) => ({ id: b.id, name: b.name, args: b.input ?? {} }));
+    return { text, toolCalls, raw: msg.content, stop: msg.stop_reason };
+  }
+
   return {
     kind: 'anthropic',
-    async stream({ model, system, messages, tools, signal, onText }) {
-      const [stable, dynamic] = system;
-      const params = {
-        model,
-        max_tokens: 32000,
-        system: [
-          { type: 'text', text: stable, cache_control: { type: 'ephemeral' } },
-          ...(dynamic ? [{ type: 'text', text: dynamic }] : [])
-        ],
-        messages: toAnthropicMessages(messages),
-        tools: [
-          ...tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema, eager_input_streaming: true })),
-          ...(webSearch ? [{ type: 'web_search_20260209', name: 'web_search', max_uses: 5 }] : [])
-        ],
-        output_config: { effort: 'medium' }
-      };
-      if (FALLBACK_MODELS.test(model)) {
-        params.betas = ['server-side-fallback-2026-07-01'];
-        params.fallbacks = 'default';
-      }
-      const stream = client.beta.messages.stream(params, { signal });
-      let text = '';
-      for await (const ev of stream) {
-        if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') {
-          text += ev.delta.text;
-          onText?.(ev.delta.text);
-        } else if (ev.type === 'content_block_start' && ev.content_block.type === 'server_tool_use') {
-          onText?.('', { serverTool: ev.content_block.name });
+    /** 联网搜索现在是否还开着（中转站不支持时会被降级关掉） */
+    get webSearchOn() { return webSearch && level < 2; },
+    async stream(req) {
+      const state = { started: false };
+      for (;;) {
+        try {
+          return await once(req, level, state);
+        } catch (e) {
+          const rejected = [400, 404, 422].includes(e?.status) && !state.started && !req.signal?.aborted;
+          if (!rejected || level >= maxLevel) throw e;
+          level++;
         }
       }
-      const msg = await stream.finalMessage();
-      if (msg.stop_reason === 'refusal') {
-        const note = '抱歉，这个请求我没办法协助。';
-        onText?.(note);
-        return { text: text + note, toolCalls: [], raw: null, stop: 'end_turn' };
-      }
-      const toolCalls = msg.content.filter((b) => b.type === 'tool_use').map((b) => ({ id: b.id, name: b.name, args: b.input ?? {} }));
-      return { text, toolCalls, raw: msg.content, stop: msg.stop_reason };
     }
   };
 }

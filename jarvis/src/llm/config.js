@@ -61,22 +61,28 @@ export function createAdapter(cfg, { gateway = null } = {}) {
   const gatewayHasKey = gateway?.keys?.includes(p.id);
   if (p.needsKey !== false && !key && !gatewayHasKey) return { problem: `请先在“模型”面板填写 ${p.name} 的 API Key` };
   if (!model) return { problem: '请填写模型型号' };
+  if (p.custom && !cfg.baseURLs?.[p.id]?.trim()) return { problem: '请填写接口地址' };
   if (p.kind === 'anthropic') {
+    // 中转站：地址写成 https://xxx.com 或 https://xxx.com/v1 都行（SDK 自己会加 /v1/messages）
+    const relay = p.custom ? cfg.baseURLs[p.id].trim().replace(/\/+$/, '').replace(/\/v1$/, '') : '';
+    const relayViaGw = p.custom && customViaGateway(gateway, relay);
     return {
       model,
       adapter: createAnthropicAdapter({
         apiKey: key,
-        baseURL: viaGateway ? `${gateway.origin}/api/llm/anthropic` : undefined,
-        webSearch: cfg.claudeWebSearch
+        baseURL: viaGateway ? `${gateway.origin}/api/llm/anthropic` : relayViaGw ? `${gateway.origin}/api/llm/${p.id}` : relay || undefined,
+        // 中转站有的认 x-api-key，有的认 Authorization：两个都带上
+        headers: p.custom ? { ...(relayViaGw && { 'x-jarvis-upstream': relay }), ...(key && { Authorization: `Bearer ${key}` }) } : undefined,
+        webSearch: cfg.claudeWebSearch,
+        compat: p.custom
       })
     };
   }
-  if (p.custom && !cfg.baseURLs.custom) return { problem: '请填写接口地址' };
   // 自定义接口在完整版里也经网关转发（绕开跨域限制），目标地址放在请求头里
-  const viaGw = viaGateway || (p.custom && customViaGateway(gateway, cfg.baseURLs.custom));
-  const baseURL = viaGw ? `${gateway.origin}/api/llm/${p.id}` : (p.custom ? cfg.baseURLs.custom : p.baseURL);
+  const viaGw = viaGateway || (p.custom && customViaGateway(gateway, cfg.baseURLs[p.id]));
+  const baseURL = viaGw ? `${gateway.origin}/api/llm/${p.id}` : (p.custom ? cfg.baseURLs[p.id] : p.baseURL);
   const headers = p.id === 'openrouter' ? { 'HTTP-Referer': 'https://jarvis.local', 'X-Title': 'Jarvis' } : {};
-  if (viaGw && p.custom) headers['x-jarvis-upstream'] = cfg.baseURLs.custom.trim();
+  if (viaGw && p.custom) headers['x-jarvis-upstream'] = cfg.baseURLs[p.id].trim();
   return { model, adapter: createOpenAIAdapter({ baseURL, apiKey: key || (viaGw ? 'use-gateway-key' : ''), headers }) };
 }
 
@@ -102,11 +108,11 @@ export async function listModels(cfg, { gateway = null } = {}) {
   if (p.kind !== 'openai') return fallback;
   const key = cfg.keys[p.id] || '';
   const viaGateway = gateway && upstreamFor(p.id);
-  const viaGw = viaGateway || (p.custom && customViaGateway(gateway, cfg.baseURLs.custom));
-  const base = viaGw ? `${gateway.origin}/api/llm/${p.id}` : (p.custom ? cfg.baseURLs.custom : p.baseURL);
+  const viaGw = viaGateway || (p.custom && customViaGateway(gateway, cfg.baseURLs[p.id]));
+  const base = viaGw ? `${gateway.origin}/api/llm/${p.id}` : (p.custom ? cfg.baseURLs[p.id] : p.baseURL);
   if (!base) return fallback;
   const headers = { ...(key || viaGw ? { Authorization: `Bearer ${key || 'use-gateway-key'}` } : {}) };
-  if (viaGw && p.custom) headers['x-jarvis-upstream'] = cfg.baseURLs.custom.trim();
+  if (viaGw && p.custom) headers['x-jarvis-upstream'] = cfg.baseURLs[p.id].trim();
   try {
     const r = await fetch(`${base.replace(/\/$/, '')}/models`, { headers, signal: AbortSignal.timeout?.(10000) });
     if (!r.ok) throw new Error(String(r.status));

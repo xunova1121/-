@@ -19,11 +19,11 @@ export function providerEndpoint(cfg, gateway = null) {
   const p = providerById(cfg.provider);
   if (!p || p.kind !== 'openai') throw new Error('画图和生成视频需要 OpenAI 兼容的服务商（如中转平台）');
   const key = cfg.keys?.[p.id] || '';
-  const viaGw = p.custom ? customViaGateway(gateway, cfg.baseURLs?.custom) : Boolean(gateway && upstreamFor(p.id));
-  const base = viaGw ? `${gateway.origin}/api/llm/${p.id}` : String(p.custom ? cfg.baseURLs?.custom || '' : p.baseURL).replace(/\/$/, '');
+  const viaGw = p.custom ? customViaGateway(gateway, cfg.baseURLs?.[p.id]) : Boolean(gateway && upstreamFor(p.id));
+  const base = viaGw ? `${gateway.origin}/api/llm/${p.id}` : String(p.custom ? cfg.baseURLs?.[p.id] || '' : p.baseURL).replace(/\/$/, '');
   const headers = {};
   if (key || viaGw) headers.Authorization = `Bearer ${key || 'use-gateway-key'}`;
-  if (viaGw && p.custom) headers['x-jarvis-upstream'] = cfg.baseURLs.custom.trim();
+  if (viaGw && p.custom) headers['x-jarvis-upstream'] = cfg.baseURLs[p.id].trim();
   return { base, headers };
 }
 

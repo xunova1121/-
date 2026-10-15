@@ -224,7 +224,7 @@ export function createServer({
 
   async function handleLlmProxy(req, res, id, rest, search, cross = false) {
     let base = id === 'ollama' ? `${ollama.host}/v1` : (upstreamFor(id) ?? EXTRA_UPSTREAMS[id]);
-    if (id === 'custom') {
+    if (id === 'custom' || id === 'claude-relay') {
       // 自定义（OpenAI 兼容）接口：地址由前端在请求头里给出；允许内网地址（本机 / 局域网自建模型很常见）
       try {
         const u = new URL(String(req.headers['x-jarvis-upstream'] || ''));
@@ -242,7 +242,7 @@ export function createServer({
       if (!headers['xi-api-key'] || headers['xi-api-key'] === 'use-gateway-key') {
         if (envKey) headers['xi-api-key'] = envKey; else delete headers['xi-api-key'];
       }
-    } else if (id === 'anthropic') {
+    } else if (id === 'anthropic' || id === 'claude-relay') {
       if (!headers['x-api-key'] || headers['x-api-key'] === 'use-gateway-key') {
         if (envKey) headers['x-api-key'] = envKey; else delete headers['x-api-key'];
       }
