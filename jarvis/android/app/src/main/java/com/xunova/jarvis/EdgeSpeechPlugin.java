@@ -15,9 +15,9 @@ import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.Instant;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.TimeZone;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.UUID;
@@ -39,7 +39,7 @@ public class EdgeSpeechPlugin extends Plugin {
         if (text.isEmpty() || text.length() > 1500 || !voice.matches("[a-z]{2}-[A-Z]{2}-[A-Za-z]+Neural")) { call.reject("朗读文字或音色不正确"); return; }
         if (sockets.size() >= 3) { call.reject("朗读请求过多，请稍后再试"); return; }
         try {
-            long ticks = Instant.now().getEpochSecond() + 11644473600L; ticks -= ticks % 300;
+            long ticks = System.currentTimeMillis() / 1000 + 11644473600L; ticks -= ticks % 300;
             String gec = hex(MessageDigest.getInstance("SHA-256").digest(((ticks * 10000000L) + TOKEN).getBytes(StandardCharsets.US_ASCII)));
             String connectionId = UUID.randomUUID().toString().replace("-", "");
             URI uri = URI.create("wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=" + TOKEN + "&ConnectionId=" + connectionId + "&Sec-MS-GEC=" + gec + "&Sec-MS-GEC-Version=1-130.0.2849.68");
@@ -59,7 +59,9 @@ public class EdgeSpeechPlugin extends Plugin {
                     else { JSObject r = new JSObject(); r.put("audio", Base64.encodeToString(audio.toByteArray(), Base64.NO_WRAP)); call.resolve(r); }
                 }
                 @Override public void onOpen(ServerHandshake handshake) {
-                    String stamp = DateTimeFormatter.ofPattern("EEE MMM dd yyyy HH:mm:ss 'GMT+0000 (Coordinated Universal Time)'", Locale.US).withZone(ZoneOffset.UTC).format(Instant.now());
+                    SimpleDateFormat format = new SimpleDateFormat("EEE MMM dd yyyy HH:mm:ss 'GMT+0000 (Coordinated Universal Time)'", Locale.US);
+                    format.setTimeZone(TimeZone.getTimeZone("UTC"));
+                    String stamp = format.format(new Date());
                     send("X-Timestamp:" + stamp + "\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n{\"context\":{\"synthesis\":{\"audio\":{\"metadataoptions\":{\"sentenceBoundaryEnabled\":\"false\",\"wordBoundaryEnabled\":\"false\"},\"outputFormat\":\"audio-24khz-48kbitrate-mono-mp3\"}}}}\r\n");
                     int pitch = Math.max(-20, Math.min(20, call.getInt("pitch", 8)));
                     String ssml = "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='zh-CN'><voice name='" + voice + "'><prosody pitch='" + (pitch >= 0 ? "+" : "") + pitch + "Hz' rate='-6%' volume='+0%'>" + escape(text) + "</prosody></voice></speak>";
@@ -68,7 +70,7 @@ public class EdgeSpeechPlugin extends Plugin {
                 @Override public void onMessage(String message) { if (message.contains("Path:turn.end")) finish(null); }
                 @Override public void onMessage(ByteBuffer message) {
                     if (done.get() || message.remaining() < 2) return;
-                    int size = Short.toUnsignedInt(message.getShort());
+                    int size = (message.getShort() & 0xffff);
                     if (size > message.remaining()) { finish("朗读数据格式错误"); return; }
                     byte[] header = new byte[size]; message.get(header);
                     if (!new String(header, StandardCharsets.UTF_8).contains("Path:audio")) return;
