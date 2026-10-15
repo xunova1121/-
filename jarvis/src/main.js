@@ -1263,7 +1263,7 @@ async function setVoiceCall(on) {
   }
   callStarting = true;
   callActive = true;
-  callRestore = { speechOutput: settings.speechOutput, wakeWord: settings.wakeWord };
+  callRestore = { speechOutput: settings.speechOutput, wakeWord: settings.wakeWord, directVoice: settings.directVoice };
   settings.speechOutput = true;
   settings.wakeWord = false;
   speaker.enabled = true;

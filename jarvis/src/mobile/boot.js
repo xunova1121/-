@@ -30,6 +30,8 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
     // 返回键：先关抽屉 / 面板，再回到上一层，最后才退到后台（不直接退出）
     const { App } = await import('@capacitor/app');
     App.addListener('backButton', () => {
+      const companion = document.querySelector('.wy-companion[open]');
+      if (companion) { companion.close(); return; }
       const b = document.body;
       if (b.classList.contains('workbench') && (b.classList.contains('weiyang-menu-open') || !b.classList.contains('side-closed') || b.classList.contains('wb-info-open'))) {
         window.dispatchEvent(new Event('weiyang:back')); return;

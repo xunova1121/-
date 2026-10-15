@@ -127,6 +127,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.locator('#btn-call').click();
   await page.waitForFunction(() => document.querySelector('#btn-call').getAttribute('aria-pressed') === 'true');
   check('语音按钮点击后展示通话反馈', await page.locator('#voice-call-panel').isVisible());
+  check('临时语音通话不写入开机自动录音设置', await page.evaluate(() => JSON.parse(localStorage.getItem('jarvis.settings.v1')).directVoice === false));
   await page.locator('#btn-call-end').click();
   await page.waitForFunction(() => document.querySelector('#btn-call').getAttribute('aria-pressed') === 'false');
   check('结束语音后通话面板关闭', !await page.locator('#voice-call-panel').isVisible());
