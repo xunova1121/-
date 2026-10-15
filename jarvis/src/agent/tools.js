@@ -19,6 +19,7 @@ import { isImageName, prepareImage } from './images.js';
 import * as scheduler from './scheduler.js';
 import * as sessions from './sessions.js';
 import { createSearch } from './webSearch.js';
+import { getWeather } from './weather.js';
 import { createPageReader } from './pageReader.js';
 import { deepResearch, DEPTHS } from './research.js';
 import { factCheck, formatReport } from './factCheck.js';
@@ -543,6 +544,12 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       description: '读取当前日期和时间（含时区）。',
       input_schema: S({}),
       run: async () => JSON.stringify({ local: new Date().toLocaleString('zh-CN', { hour12: false }), iso: new Date().toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone })
+    },
+    {
+      name: 'get_weather',
+      description: '查天气：某个城市的实况和未来几天预报（温度、天气、降水概率、风）。问天气一律用这个，不要用 web_search 搜天气。',
+      input_schema: S({ place: str('城市或地区名，如“南京”“上海浦东”“Tokyo”'), days: { type: 'number', description: '要几天预报，默认 3，最多 7' } }, ['place']),
+      run: async ({ place, days }) => getWeather(place, { get: ctx.fetchViaGateway || ((u) => fetch(u)), days: Math.min(7, Math.max(1, Number(days) || 3)) })
     },
     {
       name: 'get_local_metrics',

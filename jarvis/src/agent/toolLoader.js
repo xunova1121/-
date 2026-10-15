@@ -14,7 +14,7 @@ export const MCP_CORE = 12;
 
 /** 常驻工具：系统提示里点名的、几乎每天都用的 */
 export const CORE = new Set([
-  'get_current_time', 'remember', 'recall', 'core_memory_update', 'save_skill', 'use_skill',
+  'get_current_time', 'get_weather', 'remember', 'recall', 'core_memory_update', 'save_skill', 'use_skill',
   'web_search', 'fetch_url', 'fact_check', 'deep_research', 'kb_search', 'search_conversations', 'read_conversation',
   'generate_image', 'schedule_task',
   'list_files', 'read_file', 'write_file', 'edit_file', 'create_document', 'write_long_document', 'edit_office_document',

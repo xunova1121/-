@@ -119,6 +119,16 @@ export async function detectRegion(fetchImpl, { timeZone = Intl.DateTimeFormat()
 
 const FRESH_DAYS = { day: 1, week: 7, month: 30, year: 365 };
 
+/**
+ * 读搜索结果页时用电脑浏览器的请求头。手机 App 默认带手机浏览器的请求头，
+ * 必应、百度、360 会返回手机版页面（结构完全不同），解析不出结果，表现为“什么都搜不到”。
+ */
+export const DESKTOP_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
+  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+};
+
 /** 只要最近一段时间的结果：各搜索源自己的时间筛选参数（不认识的参数各家会忽略） */
 function freshParams(freshness, now) {
   const days = FRESH_DAYS[freshness];
@@ -207,7 +217,7 @@ function keylessSearch(fetchViaGateway, searchRegion) {
       const hits = [];
       for (const [, url, parse] of plan) {
         try {
-          const res = await fetchViaGateway(url);
+          const res = await fetchViaGateway(url, { headers: DESKTOP_HEADERS });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           for (const h of parse(await res.text())) if (!hits.some((x) => x.url === h.url)) hits.push(h);
           if (hits.length >= Math.min(4, n)) break;
