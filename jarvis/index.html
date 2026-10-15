@@ -289,11 +289,11 @@
         <div id="route-section">
           <h3 class="sub">模型分工（按对话内容自动切换）</h3>
           <label class="inline-check"><input type="checkbox" id="route-on" /> 根据每句话的内容自动选模型</label>
-          <p class="muted small">在当前服务商里给不同的事指定擅长的模型：闲聊用快模型秒回，写代码、写文档、深度分析用强模型。没填的沿用上面的默认型号。</p>
+          <p class="muted small">给不同的事指定擅长的模型：闲聊用快模型秒回，写代码、写文档、深度分析用强模型。可以跨服务商：填过密钥的服务商都会参与推荐，写成“服务商::模型”（如 deepseek::deepseek-chat）就用那家的密钥。没填的沿用上面的默认型号。</p>
           <div class="route-grid" id="route-grid"></div>
           <datalist id="route-models"></datalist>
           <div class="pane-actions">
-            <button class="btn" type="button" id="btn-route-suggest">读取模型列表并推荐</button>
+            <button class="btn" type="button" id="btn-route-suggest">读取所有已填密钥的服务商并推荐</button>
             <button class="btn ghost" type="button" id="btn-route-test">测速</button>
           </div>
           <label class="inline-check"><input type="checkbox" id="fast-chat" /> 日常对话让推理模型少想一点（首字更快；不支持的模型自动忽略）</label>

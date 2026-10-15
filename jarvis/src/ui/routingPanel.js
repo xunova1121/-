@@ -2,8 +2,9 @@
  * “模型”面板里的模型分工：给日常对话 / 编程 / 写作 / 深度思考 / 看图分别指定模型，
  * 一键读取服务商的模型列表并按名字推荐，测速看每个模型的首字快慢。
  */
-import { TASKS, suggestRoutes, routeFor } from '../llm/router.js';
-import { listModels, createAdapter, modelOf, providerById } from '../llm/config.js';
+import { TASKS, suggestRoutes, routeFor, parseRoute, routeLabel } from '../llm/router.js';
+import { createAdapter, modelOf, providerById } from '../llm/config.js';
+import { gatherModelRefs } from './modelPicker.js';
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, props = {}, ...kids) => {
@@ -47,7 +48,7 @@ export function initRoutingPanel({ getConfig, patchConfig, getGateway, toast }) 
   function render() {
     const cfg = getConfig();
     const r = cfg.routing ?? {};
-    const same = r.provider === cfg.provider;
+    const same = r.provider === cfg.provider || Boolean(r.multi);
     $('#route-on').checked = Boolean(r.enabled && same);
     for (const id of Object.keys(TASKS)) inputs[id].value = same ? r.routes?.[id] ?? '' : '';
     $('#fast-chat').checked = cfg.fastChat !== false;
@@ -59,7 +60,7 @@ export function initRoutingPanel({ getConfig, patchConfig, getGateway, toast }) 
   function collect(enabled = $('#route-on').checked) {
     const cfg = getConfig();
     const routes = Object.fromEntries(Object.keys(TASKS).map((id) => [id, inputs[id].value.trim()]));
-    return { enabled, provider: cfg.provider, routes };
+    return { enabled, provider: cfg.provider, multi: Object.values(routes).some((v) => parseRoute(v).provider), routes };
   }
   const save = (quiet) => {
     patchConfig((c) => ({ ...c, routing: collect(), fastChat: $('#fast-chat').checked }));
@@ -73,16 +74,16 @@ export function initRoutingPanel({ getConfig, patchConfig, getGateway, toast }) 
   $('#btn-route-suggest').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
     btn.disabled = true;
-    status.textContent = '正在读取服务商的模型列表…';
+    status.textContent = '正在读取所有已填密钥的服务商的模型列表…';
     try {
       const cfg = getConfig();
-      const ids = await listModels(cfg, { gateway: getGateway() });
-      $('#route-models').replaceChildren(...ids.map((m) => el('option', { value: m })));
+      const { refs: ids, notes } = await gatherModelRefs(cfg, { gateway: getGateway(), patchConfig, force: true });
+      $('#route-models').replaceChildren(...ids.map((m) => el('option', { value: m, label: routeLabel(m, cfg.provider) })));
       const s = suggestRoutes(ids, modelOf(cfg));
       for (const id of Object.keys(TASKS)) inputs[id].value = s[id] === modelOf(cfg) ? '' : s[id];
       $('#route-on').checked = true;
       save(true);
-      status.textContent = `读到 ${ids.length} 个模型，已按名字推荐（推荐只是参考：可以点“测速”看快慢，再按需要改）`;
+      status.textContent = `读到 ${ids.length} 个模型（${notes.join('；')}），已按名字推荐（只是参考：可以点“测速”看快慢，再按需要改）`;
     } catch (err) { status.textContent = `读取失败：${err.message}`; }
     btn.disabled = false;
   });

@@ -7,8 +7,39 @@
  *   看图     → 支持图片的模型
  *
  * 每句话先按内容判断属于哪类（规则判断，不额外调用模型，零延迟），再换成对应的模型；
- * 没配置的类别沿用默认模型。只在同一个服务商（同一个密钥 / 接口地址）里切换。
+ * 没配置的类别沿用默认模型。
+ * 可以跨服务商：分工里写“服务商::模型”（如 deepseek::deepseek-chat）就用那个服务商的密钥和地址；
+ * 只写模型名的，用当前服务商。那个服务商没填密钥时，退回默认模型。
  */
+import { providerById } from '../../shared/providers.js';
+
+/** 跨服务商的模型写法：“服务商::模型” */
+export const SEP = '::';
+export const routeRef = (provider, model) => `${provider}${SEP}${model}`;
+/** “服务商::模型” → { provider, model }；只有模型名时 provider 为空（用当前服务商） */
+export function parseRoute(v) {
+  const s = String(v ?? '').trim();
+  const i = s.indexOf(SEP);
+  if (i > 0 && providerById(s.slice(0, i))) return { provider: s.slice(0, i), model: s.slice(i + SEP.length).trim() };
+  return { provider: '', model: s };
+}
+/** 显示用：“模型（服务商）” */
+export function routeLabel(v, current = '') {
+  const { provider, model } = parseRoute(v);
+  return provider && provider !== current ? `${model}（${providerById(provider)?.name ?? provider}）` : model;
+}
+
+/** 填了密钥、能用的服务商（当前服务商总算一个；本机 Ollama 只在正用着时算） */
+export function keyedProviders(cfg) {
+  const ok = (id) => {
+    const p = providerById(id);
+    if (!p || p.kind === 'mock') return false;
+    if (id === cfg.provider) return true;
+    if (p.custom) return Boolean(cfg.baseURLs?.custom?.trim() && cfg.keys?.[id]?.trim());
+    return p.needsKey === false ? false : Boolean(cfg.keys?.[id]?.trim());
+  };
+  return [cfg.provider, ...Object.keys(cfg.keys || {})].filter((id, i, a) => a.indexOf(id) === i && ok(id));
+}
 export const TASKS = {
   chat: { name: '日常对话', hint: '选一个快的小模型，回答秒出' },
   code: { name: '编程', hint: '写代码、改 bug、做网页' },
@@ -51,15 +82,17 @@ const NOT_CHAT = /embed|tts|whisper|audio|image|dall|moderation|rerank|transcrib
  * @returns {Record<string, string>}
  */
 export function suggestRoutes(ids, fallback = '') {
-  const pool = [...new Set(ids.map(String).filter((id) => id && !NOT_CHAT.test(id)))];
+  // ids 可以混着“服务商::模型”（多家服务商一起推荐）：按模型名判断
+  const name = (id) => parseRoute(id).model;
+  const pool = [...new Set(ids.map(String).filter((id) => name(id) && !NOT_CHAT.test(name(id))))];
   const out = {};
   for (const task of Object.keys(TASKS)) {
     let pick = '';
     for (const re of PREFER[task]) {
-      const hits = pool.filter((id) => re.test(id));
+      const hits = pool.filter((id) => re.test(name(id)));
       if (hits.length) {
-        // 同类里挑名字里版本号最高的（如 gpt-5.1 优于 gpt-5）
-        pick = hits.sort((a, b) => versionOf(b) - versionOf(a) || a.length - b.length)[0];
+        // 同类里挑名字里版本号最高的（如 gpt-5.1 优于 gpt-5）；同名的排在前面的服务商优先
+        pick = hits.sort((a, b) => versionOf(name(b)) - versionOf(name(a)) || name(a).length - name(b).length || pool.indexOf(a) - pool.indexOf(b))[0];
         break;
       }
     }
@@ -79,7 +112,11 @@ function versionOf(id) {
  */
 export function routeFor(cfg, task) {
   const r = cfg.routing;
-  const model = r?.enabled && r.provider === cfg.provider ? String(r.routes?.[task] || '').trim() : '';
-  if (!model) return { cfg, task, model: cfg.models?.[cfg.provider] ?? '', routed: false };
-  return { cfg: { ...cfg, models: { ...cfg.models, [cfg.provider]: model } }, task, model, routed: true };
+  const on = r?.enabled && (r.provider === cfg.provider || r.multi);
+  let { provider, model } = on ? parseRoute(r.routes?.[task]) : { provider: '', model: '' };
+  // 只写模型名：是分工设定时那个服务商的（multi 时可能已经换了当前服务商）
+  if (model && !provider) provider = r.provider || cfg.provider;
+  if (model && provider !== cfg.provider && !keyedProviders(cfg).includes(provider)) model = ''; // 那家没填密钥：用默认模型
+  if (!model) return { cfg, task, model: cfg.models?.[cfg.provider] ?? '', provider: cfg.provider, routed: false };
+  return { cfg: { ...cfg, provider, models: { ...cfg.models, [provider]: model } }, task, model, provider, routed: true };
 }

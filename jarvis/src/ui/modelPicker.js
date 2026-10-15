@@ -3,7 +3,7 @@
  * 最上面是“自动”：每句话按任务类型（对话 / 编程 / 写作 / 深度思考 / 看图）自动挑最合适的模型。
  * 模型列表缓存一天（按服务商 + 地址），可以手动刷新。服务商地址和密钥只在第一次设置时需要。
  */
-import { TASKS, suggestRoutes } from '../llm/router.js';
+import { TASKS, suggestRoutes, keyedProviders, routeRef, parseRoute, routeLabel } from '../llm/router.js';
 import { listModels, modelOf, providerById } from '../llm/config.js';
 import { modelKind, imageModelOf } from '../llm/images.js';
 import { videoModelOf } from '../llm/videos.js';
@@ -20,7 +20,37 @@ const el = (tag, props = {}, ...kids) => {
 export const listKey = (cfg) => `${cfg.provider}|${providerById(cfg.provider)?.custom ? cfg.baseURLs?.custom || '' : ''}`;
 
 /** 当前是不是“自动”模式 */
-export const isAuto = (cfg) => Boolean(cfg.routing?.enabled && cfg.routing.provider === cfg.provider);
+export const isAuto = (cfg) => Boolean(cfg.routing?.enabled && (cfg.routing.provider === cfg.provider || cfg.routing.multi));
+
+/**
+ * 所有填了密钥的服务商的模型（当前服务商在前，只写模型名；其他写成“服务商::模型”）。
+ * 列表缓存一天；读不到的服务商用它的默认型号，并记下原因。
+ */
+export async function gatherModelRefs(cfg, { gateway = null, patchConfig = null, force = false, list = listModels } = {}) {
+  const refs = [];
+  const notes = [];
+  const lists = {};
+  for (const id of keyedProviders(cfg)) {
+    const pcfg = { ...cfg, provider: id };
+    const key = listKey(pcfg);
+    const cached = cfg.modelLists?.[key];
+    let ids = !force && cached?.ids?.length && Date.now() - cached.at < DAY ? cached.ids : null;
+    if (!ids) {
+      try {
+        ids = [...new Set(await list(pcfg, { gateway }))];
+        lists[key] = { ids, at: Date.now() };
+      } catch (e) {
+        ids = providerById(id)?.models?.filter(Boolean) ?? [];
+        notes.push(`${providerById(id)?.name ?? id}：${e.message}`);
+      }
+    }
+    const chat = ids.filter((m) => modelKind(m) === 'chat');
+    notes.unshift(`${providerById(id)?.name ?? id} ${chat.length} 个`);
+    refs.push(...chat.map((m) => (id === cfg.provider ? m : routeRef(id, m))));
+  }
+  if (patchConfig && Object.keys(lists).length) patchConfig((c) => ({ ...c, modelLists: { ...(c.modelLists || {}), ...lists } }));
+  return { refs, notes };
+}
 
 /** 输入框里显示的名字 */
 export function chipLabel(cfg) {
@@ -31,7 +61,8 @@ export function chipLabel(cfg) {
 /** 切到“自动”：按模型名推荐每类任务的模型；默认模型保持不变（没被分配到的任务用它） */
 export function autoRouting(cfg, ids) {
   const routes = suggestRoutes(ids, modelOf(cfg));
-  return { ...cfg, routing: { ...(cfg.routing || {}), enabled: true, provider: cfg.provider, routes } };
+  const multi = Object.values(routes).some((v) => parseRoute(v).provider);
+  return { ...cfg, routing: { ...(cfg.routing || {}), enabled: true, provider: cfg.provider, multi, routes } };
 }
 
 /** 选定某个模型：聊天模型作为默认模型并关闭自动分配；画图 / 视频模型只设为“画图用 / 视频用” */
@@ -108,11 +139,17 @@ export function initModelPicker({ getConfig, patchConfig, getGateway, toast, ope
     const tagsOf = (id) => Object.entries(routes).filter(([, m]) => m === id).map(([t]) => SHORT[t]);
     const autoRow = el('button', { type: 'button', className: `mp-item mp-auto${auto ? ' on' : ''}` },
       el('span', { className: 'mp-name' }, '自动 · 按任务选最合适的模型'),
-      el('small', { textContent: Object.keys(TASKS).map((t) => `${SHORT[t]} ${routes[t] || cur}`).join(' · ') }));
-    autoRow.addEventListener('click', () => {
+      el('small', { textContent: Object.keys(TASKS).map((t) => `${SHORT[t]} ${routeLabel(routes[t] || cur, cfg.provider)}`).join(' · ') }));
+    autoRow.addEventListener('click', async () => {
       if (!ids.length) { status.textContent = '还没读到模型列表：点“刷新列表”'; return; }
-      const next = patchConfig((c) => autoRouting(c, ids));
-      toast(`已开启自动选模型：${Object.entries(next.routing.routes).map(([t, m]) => `${SHORT[t]}用 ${m}`).join('，')}`);
+      // 填过密钥的服务商都参与：每类任务从所有服务商的模型里挑
+      let pool = ids;
+      if (keyedProviders(cfg).length > 1) {
+        status.textContent = '正在读取各服务商的模型列表…';
+        pool = (await gatherModelRefs(getConfig(), { gateway: getGateway(), patchConfig })).refs;
+      }
+      const next = patchConfig((c) => autoRouting(c, pool));
+      toast(`已开启自动选模型：${Object.entries(next.routing.routes).map(([t, m]) => `${SHORT[t]}用 ${routeLabel(m, next.provider)}`).join('，')}`);
       close();
     });
     const match = (id) => !q || id.toLowerCase().includes(q);
