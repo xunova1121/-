@@ -60,11 +60,13 @@ public class MobileSpeechPlugin extends Plugin {
                     public void onEndOfSpeech() { }
                     public void onEvent(int type, Bundle b) { }
                     public void onPartialResults(Bundle b) {
+                        if (pending != call) return;
                         ArrayList<String> m = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                         if (m != null && !m.isEmpty()) { JSObject r = new JSObject(); r.put("text", m.get(0)); notifyListeners("interim", r); }
                     }
-                    public void onResults(Bundle b) { finish(b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION), null); }
+                    public void onResults(Bundle b) { if (pending == call) finish(b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION), null); }
                     public void onError(int code) {
+                        if (pending != call) return;
                         String error = code == SpeechRecognizer.ERROR_NO_MATCH ? "No match" : code == SpeechRecognizer.ERROR_SPEECH_TIMEOUT ? "No speech" : code == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ? "麦克风权限被拒绝" : "系统语音识别失败（错误 " + code + "），请检查系统语音服务与网络";
                         finish(null, error);
                     }

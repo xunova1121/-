@@ -29,6 +29,7 @@ export function initCompanion({ send, startVoice, stopVoice, speak }) {
   const say = dialog.querySelector('.wy-companion-say');
   let timer, previousFocus, ownsVoice = false, voiceStarting = false, generation = 0;
   const observer = new MutationObserver(() => {
+    if (ownsVoice) setMascotState(mascot, document.body.classList.contains('speaking') ? 'happy' : document.body.classList.contains('generating') ? 'think' : 'listen');
     const replies = document.querySelectorAll('#transcript .msg.agent');
     const last = replies[replies.length - 1];
     if (last) say.textContent = (last.querySelector('.msg-text') || last).textContent.slice(-600);
@@ -42,6 +43,7 @@ export function initCompanion({ send, startVoice, stopVoice, speak }) {
     previousFocus = document.activeElement;
     dialog.showModal(); pose('wave', '我在呢。你想和我说什么？');
     observer.observe(document.querySelector('#transcript'), { childList: true, characterData: true, subtree: true });
+    observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
   }
   function perform(text) {
     const a = actionFromText(text); if (!a) return false;

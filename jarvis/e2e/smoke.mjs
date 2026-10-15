@@ -118,6 +118,20 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.getByRole('button', { name: '关闭未央', exact: true }).click();
   check('互动面板可关闭，返回原对话', !await page.locator('.wy-companion').evaluate(d => d.open));
   await page.evaluate(enabled => { window.__jarvis.speaker.enabled = enabled; }, interactionSpeech);
+  await page.evaluate(() => {
+    const v = window.__jarvis.voice;
+    window.__testVoiceMethods = { enable: v.enable, disable: v.disable };
+    v.enable = async () => { v.mode = 'vad'; v.onMode?.('vad'); return 'vad'; };
+    v.disable = () => { v.mode = 'off'; v.onMode?.('off'); };
+  });
+  await page.locator('#btn-call').click();
+  await page.waitForFunction(() => document.querySelector('#btn-call').getAttribute('aria-pressed') === 'true');
+  check('语音按钮点击后展示通话反馈', await page.locator('#voice-call-panel').isVisible());
+  await page.locator('#btn-call-end').click();
+  await page.waitForFunction(() => document.querySelector('#btn-call').getAttribute('aria-pressed') === 'false');
+  check('结束语音后通话面板关闭', !await page.locator('#voice-call-panel').isVisible());
+  await page.evaluate(() => { Object.assign(window.__jarvis.voice, window.__testVoiceMethods); delete window.__testVoiceMethods; });
+
   await studio(page, true);
   await page.waitForFunction(() => window.__jarvis?.stage?.stats.frames > 10, null, { timeout: 30000 });
   // 显式高画质仍需覆盖泛光渲染；自动档在软件渲染器上应降至标准。

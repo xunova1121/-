@@ -1213,7 +1213,15 @@ function endListening() {
 }
 
 async function setDirectVoice(on) {
-  await nativeVoiceReady; // 手机上先确定用不用系统识别
+  const nativeAvailable = await nativeVoiceReady; // 手机上先确定用不用系统识别
+  if (MOBILE && on) {
+    const useNative = nativeAvailable && (llmConfig.stt?.engine || 'auto') === 'auto';
+    if (useNative && !(voice instanceof NativeVoice)) { voice.disable(); voice = new NativeVoice({ plugin: globalThis.__jarvisSpeech, ...voiceHandlers }); }
+    if (!useNative && voice instanceof NativeVoice) {
+      voice.disable();
+      voice = new RecordedVoice({ getTranscriber: () => { const id = sttEngine(); return id === 'none' || id === 'browser' ? null : (wav, signal) => transcribe(id, llmConfig, wav, { gateway, signal }); }, ...voiceHandlers });
+    }
+  }
   setSetting('directVoice', on);
   $('#set-voice').checked = on;
   if (on) {
@@ -1339,7 +1347,8 @@ async function checkRecognition(line) {
     li.dataset.ok = '0';
     li.textContent = `云端转写：${e.message}`;
   }
-  // 4. 语音检测模型（云端转写靠它切分句子）
+  if (MOBILE) { line(true, '语音切句：轻量录音模式，不需要下载语音检测模型'); return; }
+  // 4. 语音检测模型（网页版云端转写靠它切分句子）
   const vli = line(null, '语音检测模型：检测中…');
   try {
     // 手机版打在 APK 里（本地服务不一定支持 HEAD，直接读）

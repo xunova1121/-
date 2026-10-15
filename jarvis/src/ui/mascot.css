@@ -77,3 +77,6 @@ body.reduced-motion .wy-companion[open]{animation:none}
 .mobile-app .wy-mascot{animation-duration:4s;animation-iteration-count:3}
 .mobile-app .wy-companion .wy-mascot{animation-iteration-count:infinite}
 .mobile-app.wy-paused .wy-mascot,.mobile-app.wy-paused .welcome-hero *{animation-play-state:paused!important}
+/* 点击区域保持稳定，光感变化交给透明度；避免图标一直移动影响点击。 */
+.wb-mark,.wb-hero-mark{animation:wy-logo-glow 3.6s ease-in-out infinite;cursor:pointer}
+@keyframes wy-logo-glow{50%{opacity:.78}}
