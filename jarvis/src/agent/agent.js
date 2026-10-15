@@ -37,7 +37,9 @@ export const STABLE_PROMPT = `你是“贾维斯”，运行在用户电脑上�
 
 ## 工作方式
 - 先想清楚再动手；多步任务按步骤调用工具，不要只描述“我会怎么做”。
-- 工具失败时读错误信息、换方法重试，不要编造结果。
+- 工具失败时读错误信息、换方法重试，不要编造结果。同样的操作失败两次就换思路，不要反复试同一类办法。
+- 中途不要停下来问“要不要继续”：用户交代的事就一直做到完成；只有缺少必要信息、或要做有风险的操作时才问。
+- 在电脑上找文件、找程序时先缩小范围（具体目录、常见安装位置），不要在整个用户目录或整块磁盘上递归搜索（一次要几十秒）。
 - 用简体中文回答，语气自然、简洁。聊天回复面向朗读，少用复杂排版；写文档（create_document 的内容）不受这条限制，见下方“写文档”。
 - 下方“核心记忆 / 相关记忆 / 过往对话 / 经验教训 / 已掌握的技能”是你在这台电脑上积累的，请参考执行；经验教训优先于默认做法；记忆与用户当前说法冲突时以当前说法为准，并更新记忆。
 
@@ -138,8 +140,15 @@ export async function runAgent({ adapter, model, history, userText, images = [],
   let failCount = 0;
   let lastToolOk = true;
   let step = 0;
+  // 步数上限：到了 maxSteps 时，只要还在推进（最近没有大量失败）就自动接着做，不停下来问用户；
+  // 最多做到 HARD_CAP 倍，防止原地打转一直消耗额度
+  let limit = maxSteps;
+  const hardCap = maxSteps * HARD_CAP;
+  const recent = []; // 最近工具调用的成败
+  const seen = new Map(); // 同样的调用（工具 + 参数）做过几次
+  let stuck = false;
 
-  for (; step < maxSteps; step++) {
+  for (; step < limit; step++) {
     if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
     let stepText = '';
     // 每一步模型输出都可能以 <emotion> 标签开头，每步用新的剥离器
@@ -185,8 +194,13 @@ export async function runAgent({ adapter, model, history, userText, images = [],
       let output;
       let outImages = [];
       let ok = true;
+      const sig = `${c.name}:${JSON.stringify(c.args ?? {})}`;
+      const times = (seen.get(sig) ?? 0) + 1;
+      seen.set(sig, times);
       try {
         if (!tool) throw new Error(`没有名为 ${c.name} 的工具`);
+        // 一模一样的调用已经做过两次：结果不会变，不再执行，让模型换思路
+        if (times >= 3) throw new Error(`这个操作（同样的参数）已经做过 ${times - 1} 次了，结果不会变。请换一种方法，或者直接根据已有结果继续。`);
         const bad = c.parseError || validateArgs(tool, c.args);
         if (bad) throw new Error(`${bad}。请检查参数后重新调用。`);
         // 有风险的操作（操作电脑、MCP 工具）先征得用户同意
@@ -202,17 +216,26 @@ export async function runAgent({ adapter, model, history, userText, images = [],
       toolCount++;
       if (!ok) failCount++;
       lastToolOk = ok;
+      recent.push(ok);
+      if (recent.length > 12) recent.shift();
       emit({ type: 'tool_end', id: c.id, name: c.name, ok, output, ms: Date.now() - t0 });
       convo.push({ role: 'tool', toolCallId: c.id, name: c.name, content: output, isError: !ok, ...(outImages.length && { images: outImages }) });
     }
+    // 快到步数上限：最近的步骤大多成功就自动放宽，接着做；大多失败说明卡住了，停下
+    if (step + 1 >= limit) {
+      stuck = recent.length >= 8 && recent.filter((x) => !x).length >= recent.length * 0.7;
+      if (!stuck && limit < hardCap) limit = Math.min(hardCap, limit + maxSteps);
+    }
   }
-  if (step >= maxSteps) {
-    const note = '\n\n（已达到单次任务的最大步数，先停在这里。可以让我继续。）';
+  if (step >= limit) {
+    const note = stuck
+      ? `\n\n（最近的步骤大多失败，看起来卡住了，先停在这里。上面是目前的进展；换个说法或给我更多信息，我再接着做。）`
+      : `\n\n（这个任务已经连续做了 ${step} 步，先停在这里，上面是目前的进展。）`;
     finalText += note;
     emit({ type: 'text', delta: note });
   }
   // 只有正常收尾、且最后一次工具调用成功，才记为“完成任务”（计入进化等级）；否则记为未完成，便于之后复盘
-  const hitLimit = step >= maxSteps;
+  const hitLimit = step >= limit;
   if (toolCount && !hitLimit && lastToolOk && failCount === 0) {
     await memory.noteTask(`完成任务：${userText.slice(0, 40)}（调用工具 ${toolCount} 次${failCount ? `，其中 ${failCount} 次失败后已改正` : ''}）`);
   } else if (toolCount) {
@@ -221,5 +244,8 @@ export async function runAgent({ adapter, model, history, userText, images = [],
   emit({ type: 'state', value: 'done' });
   return { text: finalText.trim(), steps: step + 1, toolCalls: toolCount };
 }
+
+/** 步数上限最多自动放宽到 maxSteps 的几倍 */
+export const HARD_CAP = 4;
 
 const stripTag = (s) => String(s || '').replace(/^\s*<emotion>[^<]*<\/emotion>\s*/, '');

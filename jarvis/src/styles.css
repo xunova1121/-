@@ -256,6 +256,17 @@ body.reduced-motion .cl-mask, body.reduced-motion .callout, body.reduced-motion 
 .sources span { padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); }
 
 /* 工具执行卡片 */
+.tool-group { margin: 6px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--tool-bg); }
+.tool-group > summary { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; cursor: pointer; list-style: none; font-size: 13px; color: var(--muted); min-width: 0; }
+.tool-group > summary::-webkit-details-marker { display: none; }
+.tool-group > summary::after { content: "⌄"; margin-left: auto; color: var(--dim); transition: transform 160ms; }
+.tool-group[open] > summary::after { transform: rotate(180deg); }
+.tool-group .tg-title { color: var(--text); font-weight: 600; flex: none; }
+.tool-group .tg-count { color: var(--accent); flex: none; font-variant-numeric: tabular-nums; }
+.tool-group .tg-last { color: var(--dim); font: 12px/1.5 var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+/* 步骤多时只占约 6 行高，在分组里面滚动，不把整个对话撑长 */
+.tool-group .tg-list { max-height: 252px; overflow-y: auto; padding: 0 8px 6px; overscroll-behavior: contain; }
+.tool-group .tool-card { margin: 4px 0; }
 .tool-card { margin: 6px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--tool-bg); font: 12px/1.5 var(--font-mono); overflow: hidden; }
 .tool-card summary { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; list-style: none; }
 .tool-card summary::-webkit-details-marker { display: none; }

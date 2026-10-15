@@ -128,12 +128,34 @@ describe('智能体循环（离线演示模型）', () => {
     expect(text).toContain('缺少必填参数 content');
   });
 
-  it('最大步数保护', async () => {
+  const TICK = { name: 'tick', description: '测试用：总是成功', input_schema: { type: 'object', properties: { n: { type: 'number' } } }, run: async ({ n }) => `ok ${n}` };
+  it('步数到了上限但还在推进：自动接着做完，不停下来问', async () => {
+    let n = 0;
+    const adapter = { async stream({ onText }) {
+      n++;
+      if (n <= 7) return { text: '', toolCalls: [{ id: String(n), name: 'tick', args: { n } }], stop: 'tool_use' };
+      onText('做完了'); return { text: '做完了', toolCalls: [], stop: 'end_turn' };
+    } };
+    const r = await runAgent({ adapter, model: 'x', history: [], userText: 'go', tools: [TICK], emit: () => {}, maxSteps: 3 });
+    expect(r.toolCalls).toBe(7);
+    expect(r.text).toBe('做完了');
+  });
+
+  it('原地打转（同样的调用反复做、大多失败）：拦下重复调用，卡住就停', async () => {
     const adapter = { async stream() { return { text: '', toolCalls: [{ id: String(Math.random()), name: 'get_current_time', args: {} }], stop: 'tool_use' }; } };
     const events = [];
     const r = await runAgent({ adapter, model: 'x', history: [], userText: 'loop', tools: createTools(ctx), emit: (e) => events.push(e), maxSteps: 3 });
-    expect(r.toolCalls).toBe(3);
-    expect(r.text).toContain('最大步数');
+    expect(events.filter((e) => e.type === 'tool_end' && !e.ok)[0].output).toMatch(/已经做过 2 次/);
+    expect(r.toolCalls).toBeLessThan(12);
+    expect(r.text).toContain('卡住');
+  });
+
+  it('一直在做但停不下来：最多做到上限的 4 倍', async () => {
+    let n = 0;
+    const adapter = { async stream() { n++; return { text: '', toolCalls: [{ id: String(n), name: 'tick', args: { n } }], stop: 'tool_use' }; } };
+    const r = await runAgent({ adapter, model: 'x', history: [], userText: 'go', tools: [TICK], emit: () => {}, maxSteps: 3 });
+    expect(r.toolCalls).toBe(12);
+    expect(r.text).toContain('连续做了 12 步');
   });
 
   it('演示模型的意图识别', () => {

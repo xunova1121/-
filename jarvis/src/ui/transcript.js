@@ -189,6 +189,33 @@ export class Transcript {
     let curRaw = text;
     let files = null; // 生成的文件按钮
     const self = this;
+    // —— 连续的工具步骤收进一个分组（电脑）：执行中只占几行高、自动滚到最新一步；结束后折叠成“执行了 N 步”
+    let group = null;
+    function toolGroup() {
+      const box = document.createElement('details');
+      box.className = 'tool-group working';
+      box.open = true;
+      const sum = document.createElement('summary');
+      const title = Object.assign(document.createElement('span'), { className: 'tg-title', textContent: '执行步骤' });
+      const count = Object.assign(document.createElement('span'), { className: 'tg-count' });
+      const last = Object.assign(document.createElement('span'), { className: 'tg-last' });
+      sum.append(title, count, last);
+      const list = Object.assign(document.createElement('div'), { className: 'tg-list' });
+      box.append(sum, list);
+      el.append(box);
+      return { box, list, count, last, n: 0 };
+    }
+    function closeGroups() {
+      for (const g of el.querySelectorAll('.tool-group')) {
+        g.classList.remove('working');
+        const n = g.querySelectorAll('.tool-card').length;
+        const fail = g.querySelectorAll('.tool-card.fail').length;
+        g.querySelector('.tg-title').textContent = `执行了 ${n} 步${fail ? `（${fail} 步出错）` : ''}`;
+        g.querySelector('.tg-count').textContent = '';
+        g.querySelector('.tg-last').textContent = '';
+        if (n > 2) g.open = false;
+      }
+    }
     // —— “工作进展”卡片（手机）：每次调用工具加一行；整条回答结束后折叠成一行摘要
     let prog = null;
     const t0 = Date.now();
@@ -279,12 +306,21 @@ export class Transcript {
         sum.append(st, tn, ta, tm);
         const pre = document.createElement('pre');
         card.append(sum, pre);
-        el.append(card);
-        const next = document.createElement('div');
-        next.className = 'body';
-        el.append(next);
-        cur = next;
-        curRaw = '';
+        // 中间没有说话的连续工具调用放进同一个分组；有文字隔开就开新分组
+        if (!group || curRaw.trim()) {
+          group = toolGroup();
+          const next = document.createElement('div');
+          next.className = 'body';
+          el.append(next);
+          cur = next;
+          curRaw = '';
+        }
+        const g = group;
+        g.list.append(card);
+        g.n++;
+        g.count.textContent = `第 ${g.n} 步`;
+        g.last.textContent = `${toolLabel(name)} ${summarizeArgs(name, args)}`;
+        g.list.scrollTop = g.list.scrollHeight;
         self.#scroll();
         let log = '';
         return {
@@ -426,6 +462,7 @@ export class Transcript {
       done(meta, { onFeedback } = {}) {
         el.classList.remove('streaming');
         finishProgress();
+        closeGroups();
         if (role === 'agent' && curRaw) renderBlocks(cur, curRaw);
         for (const b of el.querySelectorAll('.body')) if (!b.textContent.trim() && !b.children.length) b.remove();
         if (files) el.append(files); // 文件按钮放在回答最后
