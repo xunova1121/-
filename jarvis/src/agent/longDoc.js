@@ -13,6 +13,8 @@ import { parseJson } from './research.js';
 
 const clip = (s, n) => (String(s).length > n ? `${String(s).slice(0, n)}…` : String(s));
 const SUMMARY_MARK = '<<<本节摘要>>>';
+import { METHOD, CHECKLIST, detectGenre, genreHint } from './writingGuide.js';
+
 const MAX_SECTIONS = 12;
 const MAT_LIMIT = 24000; // 材料超过这么长时不整篇塞进提示
 
@@ -61,6 +63,8 @@ export async function writeLongDocument({ task, title = '', material = '', words
   // 给了长材料又没说字数：按材料篇幅定，不要比材料还短
   if (!words && material.length > 6000) words = Math.min(40000, Math.round(material.replace(/\s/g, '').length * 1.1));
 
+  const genre = detectGenre(task, title);
+
   // ---------- 1. 大纲
   let plan = outline?.length ? { title, sections: outline } : null;
   if (!plan) {
@@ -71,7 +75,7 @@ export async function writeLongDocument({ task, title = '', material = '', words
       prompt: `写作任务：${task}${title ? `\n标题：${title}` : ''}${words ? `\n目标字数：约 ${words} 字` : ''}${mat}
 
 列出文档大纲。输出 JSON：{"title":"文档标题","sections":[{"heading":"一级标题（带序号，如“一、背景与目标”）","points":["这一节要写的 2-5 个要点，写具体"],"words":这一节的字数}]}
-要求：3-${MAX_SECTIONS} 节；按这类文档的惯常结构（如总结：基本情况、成绩、问题、计划；方案：背景目标、现状、方案、实施计划、预算、风险）；各节字数加起来接近目标字数。`
+要求：3-${MAX_SECTIONS} 节；按这类文档的惯常结构（如总结：基本情况、成绩、问题、计划；方案：背景目标、现状、方案、实施计划、预算、风险）；各节字数加起来接近目标字数；论证性的章节（背景、必要性、需求、方案、效益）字数给足，不要平均分配。用户提供的材料里有的章节，大纲里都要有。${genreHint(genre)}`
     }));
     const sections = Array.isArray(j?.sections) ? j.sections.filter((s) => s?.heading).slice(0, MAX_SECTIONS) : [];
     if (!sections.length) throw new Error('没能生成大纲，请把要求写得更具体一些再试');
@@ -129,7 +133,7 @@ ${clip(body, 30000)}`
         if (k >= 0) (bySection[k].issues ??= []).push(issue);
       }
       for (const [k, sec] of bySection.entries()) {
-        if (!sec.issues?.length || touched.size >= 4) continue;
+        if (!sec.issues?.length || touched.size >= 6) continue;
         say(`按读者意见修改：${sec.heading}`);
         const fixed = await reviseSection({ sec, plan, outlineText, task, mat, llm, signal });
         if (fixed) { bySection[k].text = fixed; touched.add(sec.heading); }
@@ -157,6 +161,8 @@ ${mat}
 
 现在只写第 ${i + 1} 节「${s.heading}」${s.words ? `，约 ${s.words} 字` : ''}。要点：${s.points.join('；') || '按大纲'}。
 格式：第一行是“## ${s.heading}”；节内小标题用 ###、####；数据对比和计划安排用 Markdown 表格；并列要点用列表。
+${METHOD}
+
 要求：
 - 每个要点都要展开写，不要压成一句话：先写观点，再写依据（政策文件全称和文号、具体条款、数据、事实），再说明对本项目意味着什么；需要时用一个通俗的比方帮读者理解。
 - 材料里有的细节（数字、文件名称和文号、系统和模块名称、流程步骤、表格）尽量完整保留并用上；材料里的表格照样做成表格。
@@ -186,7 +192,9 @@ ${clip(body, 30000)}
 - 缺依据：结论、数字没有来源或推导
 - 前后矛盾：数字、说法、时间前后不一致
 - 缺内容：读者最关心的问题没回答（比如方案没写预算、计划没写负责人）
-输出 JSON：{"issues":[{"type":"看不懂|缺依据|前后矛盾|缺内容","section":"所在的一级标题","quote":"原文里一字不差的片段（10-60 字，没有就留空）","problem":"问题是什么","suggestion":"怎么改"}]}`
+- 太单薄：只有一句话的要点、只有观点没有依据和分析的段落
+${CHECKLIST}
+输出 JSON：{"issues":[{"type":"看不懂|缺依据|前后矛盾|缺内容|太单薄","section":"所在的一级标题","quote":"原文里一字不差的片段（10-60 字，没有就留空）","problem":"问题是什么","suggestion":"怎么改"}]}`
     }));
     const issues = (Array.isArray(j?.issues) ? j.issues : []).slice(0, 8).map((x) => ({
       type: String(x?.type ?? ''), section: String(x?.section ?? ''), quote: String(x?.quote ?? ''), problem: String(x?.problem ?? ''), suggestion: String(x?.suggestion ?? '')
@@ -207,6 +215,8 @@ async function reviseSection({ sec, plan, outlineText, task, mat, llm, signal })
 文档：《${plan.title}》，大纲：
 ${outlineText}
 ${mat}
+
+${METHOD}
 
 读者试读后对「${sec.heading}」这一节提了意见：
 ${sec.issues.map((x, i) => `${i + 1}. 【${x.type}】${x.problem}${x.quote ? `（原文：“${x.quote}”）` : ''}${x.suggestion ? ` 建议：${x.suggestion}` : ''}`).join('\n')}

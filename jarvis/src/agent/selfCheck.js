@@ -6,6 +6,7 @@
  *      和正文交给模型，对照原始要求找漏项、溢出、错乱；模型只给具体修改（按原文片段替换 / 在某个标题后补内容），
  *      程序改好后重新生成一次。只改一轮。
  */
+import { CHECKLIST } from './writingGuide.js';
 import { parseDoc, plain } from './docModel.js';
 import { parseSlides } from './pptxWriter.js';
 import { parseSheets } from './sheetParse.js';
@@ -134,7 +135,8 @@ ${issues.map((x) => `- ${x.text}`).join('\n') || '（无）'}
 文档原文（Markdown）：
 ${String(content).slice(0, 24000)}
 
-检查：有没有漏掉用户要求的内容、字数或页数明显不符、空页空节、表格错乱、${format === 'pptx' ? '某页字太多溢出、' : ''}占位文字没填、前后矛盾。
+检查：有没有漏掉用户要求的内容、字数或页数明显不符、空页空节、表格错乱、${format === 'pptx' ? '某页字太多溢出、' : ''}占位文字没填、前后矛盾${format === 'pptx' ? '' : '、只有一句话没有展开的要点（用 append_after 补上依据和分析）'}。
+${format === 'pptx' ? '' : CHECKLIST}
 输出 JSON：{"problems":["问题，没有就空数组"],"edits":[{"find":"原文里一字不差的片段（10-80 字）","replace":"改成"}],"append_after":[{"heading":"已有的标题原文（不带 #）","markdown":"要补在这一节末尾的 Markdown"}]}
 修改只针对上面的问题；数据材料里没有的写“待确认”，不要编造。没有问题就都给空数组。`
   }));

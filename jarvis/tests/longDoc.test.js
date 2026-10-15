@@ -148,3 +148,23 @@ describe('说明书', () => {
     expect(STABLE_PROMPT).toMatch(/先看大纲.*outline_only/);
   });
 });
+
+describe('写作规范', async () => {
+  const { detectGenre, METHOD, CHECKLIST } = await import('../src/agent/writingGuide.js');
+  it('按任务判断文种', () => {
+    expect(detectGenre('写一份长江禁捕执法智能化项目建议书')?.id).toBe('proposal');
+    expect(detectGenre('关于召开年度安全会议的通知')?.id).toBe('official');
+    expect(detectGenre('写一份新能源市场调研报告')?.id).toBe('research');
+    expect(detectGenre('2026 年第三季度工作总结')?.id).toBe('summary');
+    expect(detectGenre('智慧园区建设方案（征求意见稿）')?.id).toBe('plan');
+    expect(detectGenre('随便写点东西')).toBe(null);
+  });
+  it('列大纲带上文种结构，逐节写带上写法，读者带上检查清单', async () => {
+    const { llm, calls } = fakeLlm();
+    const { writeLongDocument } = await import('../src/agent/longDoc.js');
+    await writeLongDocument({ task: '写一份项目建议书', llm });
+    expect(calls.find((c) => c.prompt.includes('列出文档大纲')).prompt).toContain('项目建议书 / 可行性研究报告');
+    expect(calls.find((c) => c.prompt.includes('现在只写第')).prompt).toContain(METHOD.slice(0, 20));
+    expect(calls.find((c) => c.system.includes('目标读者')).prompt).toContain(CHECKLIST.slice(0, 10));
+  });
+});
