@@ -118,9 +118,17 @@ jobs:
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-        # 有 GitHub Secrets 里的固定密钥就用它（新版本能直接覆盖安装）；
+          # 也可以只设一个 ANDROID_SIGNING，值是“密码.密钥文件的base64”（一次粘贴就好）
+          SIGNING: ${{ secrets.ANDROID_SIGNING }}
+        # 有 GitHub Secrets 里的固定密钥就用它（新版本能直接覆盖安装、手机能自动更新）；
         # 没有时临时生成一个（能安装，但升级前要先卸载旧版）
         run: |
+          if [ -z "$KEYSTORE_B64" ] && [ -n "$SIGNING" ]; then
+            SIGNING="$(printf '%s' "$SIGNING" | tr -d ' \r\n')"
+            KEYSTORE_PASSWORD="${SIGNING%%.*}"
+            KEYSTORE_B64="${SIGNING#*.}"
+            echo "::add-mask::$KEYSTORE_PASSWORD"
+          fi
           if [ -n "$KEYSTORE_B64" ]; then
             echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/jarvis.keystore"
             echo "JARVIS_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
@@ -131,7 +139,7 @@ jobs:
             keytool -genkeypair -keystore "$RUNNER_TEMP/jarvis.keystore" -alias jarvis -keyalg RSA -keysize 2048 -validity 10000 \
               -storepass "$PASS" -keypass "$PASS" -dname "CN=Jarvis" -noprompt
             echo "JARVIS_KEYSTORE_PASSWORD=$PASS" >> "$GITHUB_ENV"
-            echo "::warning::没有设置 ANDROID_KEYSTORE_B64，这次用临时密钥签名：手机上升级前需要先卸载旧版"
+            echo "::warning::没有设置 ANDROID_SIGNING（或 ANDROID_KEYSTORE_B64），这次用临时密钥签名：手机上升级前需要先卸载旧版"
           fi
           echo "JARVIS_KEYSTORE=$RUNNER_TEMP/jarvis.keystore" >> "$GITHUB_ENV"
       - name: 打包 APK
@@ -182,7 +190,7 @@ jobs:
             ## 自动更新
             装好之后不用再来这里下载：有新版本时未央会提示。Windows 安装版在后台只下载改动的部分，点“重启以更新”即可；
             免安装版会提示去下载页。安卓 App 连着 Wi-Fi 时在后台下载新版，顶栏点“安装新版本”、在系统界面点“安装”即可
-            （需要仓库设置了固定签名密钥 ANDROID_KEYSTORE_B64，否则新版装不上，要先卸载旧版）。
+            （需要仓库设置了固定签名密钥 ANDROID_SIGNING，否则新版装不上，要先卸载旧版）。
 
             ## 首次打开
             - 安装包没有购买代码签名证书：Windows 提示“已保护你的电脑”时点 **更多信息 → 仍要运行**；

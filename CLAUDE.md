@@ -34,4 +34,4 @@
 - 注意：只看最后一次推送。之前的提交都带 `[skip ci]`、最后一个提交又只改了 `jarvis/` 以外的文件（如根目录的
   `jarvis-standalone.html`、`CLAUDE.md`）时，不会打包。这时到 GitHub 的 Actions 页面对这个工作流点“Run workflow”手动发版。
 - 版本号由 CI 自动生成（`desktop-v1.0.<序号>`），不要手动改。
-- 手机自动更新要求每次用同一个签名密钥：仓库 Secrets 里要有 `ANDROID_KEYSTORE_B64` 和 `ANDROID_KEYSTORE_PASSWORD`，否则 CI 每次临时生成密钥，新版装不上。
+- 手机自动更新要求每次用同一个签名密钥：仓库 Secrets 里要有 `ANDROID_SIGNING`（值为“密码.keystore 的 base64”；或旧的 `ANDROID_KEYSTORE_B64` + `ANDROID_KEYSTORE_PASSWORD`），否则 CI 每次临时生成密钥，新版装不上。
