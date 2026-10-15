@@ -237,3 +237,70 @@ describe('PPT 版式：卡片、步骤、流程、图表单位、封面信息', 
     expect(out.info.layouts).toEqual(['cover', 'bullets']);
   });
 });
+
+describe('Excel 报表排版', () => {
+  const REPORT = `## 总览
+（项目建议书 V1.0，2026年10月）
+### 一、项目基本信息
+| 项目名称 | 禁捕执法AI能力扩展 | 编号 | G2025-0529 |
+| 编制单位 | 江苏省渔业执法监督中心 | 版本号 | V1.0 |
+
+### 二、投资结构
+| 序号 | 建设内容 | 人天 | 金额（万元） | 占比 |
+|---|---|---|---|---|
+| 一 | 预警研判智能体 | 75 | 15 |  |
+| 二 | 智能体运行底座 | 110 | 22 |  |
+| 合计 | 总计 | 335 | 37 |  |
+
+说明：本阶段为项目建议书阶段，投资估算允许误差 ±10%。
+
+## 明细
+| 序号 | 名称 |
+|---|---|
+| 1 | 甲 |
+`;
+  it('标题、副标题、小节、信息表、多张表、说明；占比和合计自动写公式', async () => {
+    const wb = await readBook((await makeXlsx(REPORT, { theme: THEMES.business })).blob);
+    const ws = wb.getWorksheet('总览');
+    expect(ws.getCell('A1').value).toBe('总览');
+    expect(ws.getCell('A1').font.bold).toBe(true);
+    expect(ws.getCell('A1').isMerged).toBe(true); // 标题横跨整个表宽
+    expect(ws.getCell('A2').value).toContain('项目建议书');
+    const find = (text) => { let at = null; ws.eachRow((row, r) => { if (row.getCell(1).value === text) at = r; }); return at; };
+    const sec = find('一、项目基本信息');
+    expect(ws.getRow(sec).getCell(1).fill.fgColor.argb).toBe('FFE8F0F8');
+    // 信息表：没有表头，左边的名目加粗
+    const info = sec + 1;
+    expect(ws.getRow(info).getCell(1).value).toBe('项目名称');
+    expect(ws.getRow(info).getCell(1).font.bold).toBe(true);
+    expect(ws.getRow(info).getCell(3).font.bold).toBe(true);
+    expect(ws.getRow(info).getCell(2).font.bold).toBeFalsy();
+    // 投资表：表头、合计公式、占比公式（按金额列）
+    const head = find('序号');
+    expect(ws.getRow(head).getCell(1).fill.fgColor.argb).toBe('FF2E6DA4');
+    const total = head + 3;
+    expect(ws.getRow(total).getCell(4).value.formula).toBe(`SUM(D${head + 1}:D${head + 2})`);
+    expect(ws.getRow(head + 1).getCell(5).value.formula).toBe(`IFERROR(D${head + 1}/D$${total},"")`);
+    expect(ws.getRow(head + 1).getCell(5).value.result).toBeCloseTo(15 / 37);
+    expect(ws.getRow(head + 1).getCell(5).numFmt).toBe('0.0%');
+    expect(ws.getRow(total).getCell(5).value.result).toBeCloseTo(1);
+    expect(ws.getRow(head + 1).getCell(1).alignment.horizontal).toBe('center'); // 序号居中
+    // 说明整行合并；冻结到表头；报表不加筛选、不显示网格线
+    const note = find('说明：本阶段为项目建议书阶段，投资估算允许误差 ±10%。');
+    expect(ws.getRow(note).getCell(1).isMerged).toBe(true);
+    expect(ws.views[0]).toMatchObject({ state: 'frozen', showGridLines: false });
+    expect(ws.autoFilter).toBeFalsy();
+    // 只有一张表的工作表仍是普通数据表：表头在第一行、带筛选
+    const plain = wb.getWorksheet('明细');
+    expect(plain.getCell('A1').value).toBe('序号');
+    expect(plain.autoFilter).toBeTruthy();
+  });
+
+  it('长文字按列宽估算行高（不会被截掉）', async () => {
+    const long = '对接一期智能预警子系统，实时接入光电视频抓拍、雷达航迹、AIS报文、电子围栏越界告警等多种事件，建立统一的事件模型'.repeat(2);
+    const wb = await readBook((await makeXlsx(`| 序号 | 名称 | 内容 |\n|---|---|---|\n| 1 | 甲 | ${long} |`, { theme: THEMES.business })).blob);
+    const ws = wb.worksheets[0];
+    expect(ws.getColumn(3).width).toBe(50);
+    expect(ws.getRow(2).height).toBeGreaterThan(60);
+  });
+});

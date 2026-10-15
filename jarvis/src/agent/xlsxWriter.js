@@ -9,7 +9,7 @@
  *             完成率 / 达成率 列：=实际/目标
  *           公式同时写入算好的结果，不重新计算的软件（和未央自己读回时）也能看到数值
  */
-import { parseSheets } from './sheetParse.js';
+import { parseSheets, parseBlocks } from './sheetParse.js';
 
 const CJK = /[⺀-￿]/;
 const width = (v) => [...String(v ?? '')].reduce((n, ch) => n + (CJK.test(ch) ? 2 : 1), 0);
@@ -52,8 +52,81 @@ function pickPair(headers, numericCols, re1, re2) {
   return null;
 }
 
+const SHARE = /占比|比重|构成比|所占比例|占总/;
+const MONEY = /金额|投资|费用|预算|万元|元|成本|收入|销售额/;
+const isTotalRow = (row) => [0, 1].some((ci) => TOTAL.test(String(row[ci]?.value ?? '').trim()));
+
 /**
- * @param {string} content  CSV / Markdown 表格，“## 名称”分工作表
+ * 一张表：文字 → 带类型的单元格，补上合计、增长率 / 完成率、占比公式
+ * @param {string[][]} rows 第一行是表头
+ * @param {number} r0 表头在 Excel 里的行号（公式要用真实行号）
+ */
+function buildTable(rows, r0, header = true) {
+  const headers = header ? rows[0].map((h) => String(h ?? '')) : [];
+  const cols = Math.max(...rows.map((r) => r.length));
+  const grid = rows.map((r, ri) => Array.from({ length: cols }, (_, ci) => (header && ri === 0 ? { value: r[ci] ?? '' } : typed(r[ci]))));
+  const bodyRows = grid.slice(header ? 1 : 0).map((row, k) => ({ row, r: r0 + (header ? 1 : 0) + k }));
+  const dataRows = bodyRows.filter(({ row }) => !isTotalRow(row));
+  const numericCols = [...Array(cols).keys()].filter((ci) => dataRows.some(({ row }) => typeof row[ci]?.value === 'number'));
+  const shareCols = new Set([...Array(cols).keys()].filter((ci) => SHARE.test(headers[ci] ?? '')));
+  const growthCols = new Set([...Array(cols).keys()].filter((ci) => !shareCols.has(ci) && (GROWTH.test(headers[ci] ?? '') || DONE.test(headers[ci] ?? ''))));
+  let formulas = 0;
+  // 合计行：数字列 = SUM(上面的数据行)（先算合计，后面的增长率、占比才能用上合计的数）
+  for (const { row, r } of bodyRows) {
+    if (!isTotalRow(row)) continue;
+    const above = dataRows.filter((d) => d.r < r);
+    if (!above.length) continue;
+    for (const ci of numericCols) {
+      if (ci === 0 || growthCols.has(ci) || shareCols.has(ci) || row[ci]?.formula) continue;
+      const from = above[0].r; const to = above.at(-1).r;
+      const sum = above.reduce((n, d) => n + (typeof d.row[ci]?.value === 'number' ? d.row[ci].value : 0), 0);
+      const fmt = above.find((d) => d.row[ci]?.numFmt)?.row[ci].numFmt ?? '#,##0';
+      if (fmt.includes('%')) continue; // 百分比列加总没有意义
+      row[ci] = { formula: `SUM(${colName(ci)}${from}:${colName(ci)}${to})`, result: Math.round(sum * 1e6) / 1e6, numFmt: fmt };
+    }
+  }
+  const numOf = (c) => (typeof c?.value === 'number' ? c.value : typeof c?.result === 'number' ? c.result : null);
+  // 增长率 / 完成率列：自动公式
+  for (const ci of growthCols) {
+    const h = headers[ci];
+    const others = numericCols.filter((i) => i !== ci && !growthCols.has(i) && !shareCols.has(i));
+    const growth = GROWTH.test(h);
+    const pair = growth ? pickPair(headers, others, CUR, PREV) : pickPair(headers, others, CUR, PLAN);
+    if (!pair) continue;
+    const [a, b] = pair;
+    for (const { row, r } of bodyRows) {
+      if (row[ci]?.formula) continue;
+      const va = numOf(row[a]); const vb = numOf(row[b]);
+      const A = `${colName(a)}${r}`; const B = `${colName(b)}${r}`;
+      const result = va !== null && vb !== null && vb !== 0 ? (growth ? (va - vb) / vb : va / vb) : '';
+      row[ci] = { formula: growth ? `IFERROR((${A}-${B})/${B},"")` : `IFERROR(${A}/${B},"")`, result, numFmt: '0.0%' };
+    }
+  }
+  // 占比 / 比重列：= 本行 ÷ 合计（没有合计行时 ÷ 各行之和）；按左边最近的金额列算，没有金额列就用最近的数字列
+  for (const ci of shareCols) {
+    const cands = numericCols.filter((i) => i !== ci && !shareCols.has(i) && !growthCols.has(i) && !String(numOf(dataRows[0]?.row[i]) ?? '').includes('%') && !(dataRows[0]?.row[i]?.numFmt ?? '').includes('%'));
+    const left = cands.filter((i) => i < ci);
+    const base = [...left].reverse().find((i) => MONEY.test(headers[i])) ?? left.at(-1) ?? cands.find((i) => MONEY.test(headers[i])) ?? cands[0];
+    if (base == null || !dataRows.length) continue;
+    const L = colName(base);
+    const totalRow = bodyRows.find(({ row }) => isTotalRow(row) && numOf(row[base]) !== null);
+    const denom = totalRow ? `${L}$${totalRow.r}` : `SUM(${L}$${dataRows[0].r}:${L}$${dataRows.at(-1).r})`;
+    const total = totalRow ? numOf(totalRow.row[base]) : dataRows.reduce((n, d) => n + (numOf(d.row[base]) ?? 0), 0);
+    for (const { row, r } of bodyRows) {
+      const v = numOf(row[base]);
+      if (v === null) continue;
+      row[ci] = { formula: `IFERROR(${L}${r}/${denom},"")`, result: total ? v / total : '', numFmt: '0.0%' };
+    }
+  }
+  for (const row of grid) for (const c of row) if (c.formula) formulas++;
+  return { grid, cols, formulas };
+}
+
+/** 估算一格文字要几行（Excel 不会替我们按换行算行高） */
+const linesFor = (text, colWidth) => String(text ?? '').split('\n').reduce((n, part) => n + Math.max(1, Math.ceil(width(part) / Math.max(4, colWidth - 1.5))), 0);
+
+/**
+ * @param {string} content  CSV / Markdown 表格。“## 名称”分工作表；工作表里还可以有“### 小节”、多张表格和普通文字（说明 / 备注）
  * @param {{ theme: object }} o
  * @returns {Promise<{ blob: Blob, info: { sheets: number, formulas: number } }>}
  */
@@ -69,90 +142,113 @@ export async function makeXlsx(content, { theme }) {
   const headFill = official ? 'FFD9D9D9' : `FF${C.accent}`;
   const headFont = official ? 'FF000000' : 'FFFFFFFF';
   const zebra = `FF${official ? 'FFFFFF' : C.soft}`;
+  const titleFill = official ? 'FFFFFFFF' : `FF${C.primary}`;
+  const titleFont = official ? 'FF000000' : 'FFFFFFFF';
   const border = { style: 'thin', color: { argb: 'FFBFC7D1' } };
   const borders = { top: border, left: border, bottom: border, right: border };
+  const FONT = '微软雅黑';
   let formulas = 0;
 
-  const sheets = parseSheets(content, { raw: true });
-  if (!sheets.length) sheets.push({ name: 'Sheet1', rows: [] });
+  const sheets = parseBlocks(content);
+  if (!sheets.length) sheets.push({ name: 'Sheet1', blocks: [] });
   const used = new Set();
   for (const s of sheets) {
     let name = s.name.replace(/[\\/?*[\]:]/g, ' ').slice(0, 31) || 'Sheet';
     for (let k = 2; used.has(name); k++) name = `${s.name.slice(0, 28)}(${k})`;
     used.add(name);
-    const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: s.rows.length > 1 ? 1 : 0 }] });
-    const rows = s.rows;
-    if (!rows.length) continue;
-    const headers = rows[0].map(String);
-    const cols = Math.max(...rows.map((r) => r.length));
-    // 先把所有单元格转成带类型的值
-    const grid = rows.map((r, ri) => Array.from({ length: cols }, (_, ci) => (ri === 0 ? { value: r[ci] ?? '' } : typed(r[ci]))));
-    const bodyRows = grid.slice(1).map((row, k) => ({ row, r: k + 2 }));
-    const isTotal = (row) => TOTAL.test(String(row[0]?.value ?? '').trim());
-    const dataRows = bodyRows.filter(({ row }) => !isTotal(row));
-    const numericCols = [...Array(cols).keys()].filter((ci) => dataRows.some(({ row }) => typeof row[ci]?.value === 'number'));
+    const tables = s.blocks.filter((b) => b.kind === 'table' && b.rows.length);
+    // 只有一张表、没有说明和小节：数据表，表头就在第一行（方便筛选、透视）；否则按报表排：大标题、小节、说明
+    const report = s.blocks.some((b) => b.kind !== 'table') || tables.length > 1;
+    const W = Math.max(1, ...tables.map((t) => Math.max(...t.rows.map((r) => r.length))));
+    const ws = wb.addWorksheet(name, { views: [{ showGridLines: !report }] });
+    if (!tables.length && !s.blocks.length) continue;
 
-    const growthCols = new Set([...Array(cols).keys()].filter((ci) => GROWTH.test(headers[ci] ?? '') || DONE.test(headers[ci] ?? '')));
-    // 合计行：数字列 = SUM(上面的数据行)（先算合计，后面的增长率才能用上合计的数）
-    for (const { row, r } of bodyRows) {
-      if (!isTotal(row)) continue;
-      const above = dataRows.filter((d) => d.r < r);
-      if (!above.length) continue;
-      for (const ci of numericCols) {
-        if (ci === 0 || growthCols.has(ci) || row[ci]?.formula) continue;
-        const from = above[0].r; const to = above.at(-1).r;
-        const sum = above.reduce((n, d) => n + (typeof d.row[ci]?.value === 'number' ? d.row[ci].value : 0), 0);
-        const fmt = above.find((d) => d.row[ci]?.numFmt)?.row[ci].numFmt ?? '#,##0';
-        if (fmt.includes('%')) continue; // 百分比列加总没有意义
-        row[ci] = { formula: `SUM(${colName(ci)}${from}:${colName(ci)}${to})`, result: Math.round(sum * 1e6) / 1e6, numFmt: fmt };
-      }
-    }
-    // 增长率 / 完成率列：自动公式
-    const numOf = (c) => (typeof c?.value === 'number' ? c.value : typeof c?.result === 'number' ? c.result : null);
-    for (const ci of growthCols) {
-      const h = headers[ci];
-      const others = numericCols.filter((i) => i !== ci && !growthCols.has(i));
-      const growth = GROWTH.test(h);
-      const pair = growth ? pickPair(headers, others, CUR, PREV) : pickPair(headers, others, CUR, PLAN);
-      if (!pair) continue;
-      const [a, b] = pair;
-      for (const { row, r } of bodyRows) {
-        if (row[ci]?.formula) continue;
-        const va = numOf(row[a]); const vb = numOf(row[b]);
-        const A = `${colName(a)}${r}`; const B = `${colName(b)}${r}`;
-        const result = va !== null && vb !== null && vb !== 0 ? (growth ? (va - vb) / vb : va / vb) : '';
-        row[ci] = { formula: growth ? `IFERROR((${A}-${B})/${B},"")` : `IFERROR(${A}/${B},"")`, result, numFmt: '0.0%' };
-      }
-    }
-
-    // 写入
-    grid.forEach((row, ri) => {
-      const xr = ws.getRow(ri + 1);
-      row.forEach((c, ci) => {
-        const cell = xr.getCell(ci + 1);
-        if (c.formula) { cell.value = { formula: c.formula, ...(c.result !== undefined && { result: c.result }) }; formulas++; } else cell.value = c.value ?? null;
-        if (c.numFmt) cell.numFmt = c.numFmt;
-        cell.border = borders;
-        cell.font = { name: '微软雅黑', size: 10.5 };
-        cell.alignment = { vertical: 'middle', wrapText: true, horizontal: typeof c.value === 'number' || c.formula ? 'right' : undefined };
-        if (ri === 0) {
-          cell.font = { name: '微软雅黑', size: 10.5, bold: true, color: { argb: headFont } };
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headFill } };
-          cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-        } else if (TOTAL.test(String(row[0]?.value ?? '').trim())) {
-          cell.font = { name: '微软雅黑', size: 10.5, bold: true };
-        } else if (ri % 2 === 0) {
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: zebra } };
-        }
-      });
-      xr.height = ri === 0 ? 24 : 20;
+    // 列宽：只按表格里的字算（说明是整行合并的，不撑宽列）
+    const colW = Array.from({ length: W }, (_, ci) => {
+      const w = Math.max(4, ...tables.flatMap((t) => t.rows.map((r) => width(r[ci]))));
+      return tables.length ? Math.min(50, Math.max(report ? 10 : 8, w + 3)) : 100;
     });
-    // 列宽、筛选
-    for (let ci = 0; ci < cols; ci++) {
-      const w = Math.max(...rows.map((r) => width(r[ci])), 4);
-      ws.getColumn(ci + 1).width = Math.min(50, Math.max(8, w + 3));
+    colW.forEach((w, ci) => { ws.getColumn(ci + 1).width = w; });
+    const fullW = colW.reduce((a, b) => a + b, 0);
+
+    let r = 1;
+    let firstHeader = 0;
+    const band = (text, { font, fill, height, align = 'left', indent = 0 }) => {
+      const row = ws.getRow(r);
+      if (W > 1) ws.mergeCells(r, 1, r, W);
+      const cell = row.getCell(1);
+      cell.value = text;
+      cell.font = { name: FONT, ...font };
+      if (fill) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } };
+      cell.alignment = { vertical: 'middle', horizontal: align, wrapText: true, indent };
+      row.height = Math.max(height, linesFor(text, fullW) * (font.size + 5) + 6);
+      r++;
+    };
+    if (report) {
+      band(name, { font: { size: 15, bold: true, color: { argb: titleFont } }, fill: titleFill, height: 32, align: 'center' });
+      // 紧跟在工作表名下面、第一张表 / 小节之前的文字是副标题
+      while (s.blocks[0]?.kind === 'text') band(s.blocks.shift().text, { font: { size: 10, italic: true, color: { argb: 'FF595959' } }, height: 20, align: 'center' });
+      r++; // 空一行
     }
-    if (rows.length > 1) ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols } };
+    s.blocks.forEach((b, bi) => {
+      if (b.kind === 'section') {
+        if (bi > 0 && r > 3) r++;
+        band(b.text, { font: { size: 11.5, bold: true, color: { argb: official ? 'FF000000' : `FF${C.primary}` } }, fill: official ? undefined : `FF${C.soft}`, height: 24, indent: 0 });
+        ws.getRow(r - 1).getCell(1).border = { left: { style: 'thick', color: { argb: official ? 'FF000000' : `FF${C.accent}` } } };
+        return;
+      }
+      if (b.kind === 'text') {
+        band(b.text, { font: { size: 10, color: { argb: 'FF404040' } }, height: 18 });
+        return;
+      }
+      if (!b.rows.length) return;
+      const header = b.header !== false;
+      const t = buildTable(b.rows, r, header);
+      formulas += t.formulas;
+      if (!firstHeader && header) firstHeader = r;
+      // 信息表（没有表头）：名目列是第 1 列；四列的是“名目 | 值 | 名目 | 值”
+      const labelCol = (ci) => !header && (ci === 0 || (t.cols >= 4 && t.cols % 2 === 0 && ci % 2 === 0));
+      const seqCol = (ci) => header && /^(序号|编号|No\.?|#)$/i.test(String(b.rows[0][ci] ?? '').trim());
+      t.grid.forEach((row, ri) => {
+        const xr = ws.getRow(r);
+        const total = (ri > 0 || !header) && isTotalRow(row);
+        let lines = 1;
+        row.forEach((c, ci) => {
+          const cell = xr.getCell(ci + 1);
+          if (c.formula) cell.value = { formula: c.formula, ...(c.result !== undefined && { result: c.result }) };
+          else cell.value = c.value ?? null;
+          if (c.numFmt) cell.numFmt = c.numFmt;
+          cell.border = borders;
+          cell.font = { name: FONT, size: 10.5 };
+          cell.alignment = { vertical: 'middle', wrapText: true, horizontal: seqCol(ci) ? 'center' : typeof c.value === 'number' || c.formula ? 'right' : undefined };
+          if (labelCol(ci)) {
+            cell.font = { name: FONT, size: 10.5, bold: true, color: { argb: official ? 'FF000000' : `FF${C.primary}` } };
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: official ? 'FFF2F2F2' : `FF${C.soft}` } };
+          } else if (header && ri === 0) {
+            cell.font = { name: FONT, size: 10.5, bold: true, color: { argb: headFont } };
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headFill } };
+            cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+          } else if (total) {
+            cell.font = { name: FONT, size: 10.5, bold: true };
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: official ? 'FFF2F2F2' : `FF${C.soft}` } };
+          } else if (header && ri % 2 === 0) {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: zebra } };
+          }
+          if (typeof c.value === 'string') lines = Math.max(lines, linesFor(c.value, colW[ci] ?? 10));
+        });
+        xr.height = Math.max(header && ri === 0 ? 24 : 20, lines * 15 + 6);
+        r++;
+      });
+      r++; // 表格之后空一行
+    });
+    // 冻结到第一张表的表头；只有一张表时加筛选
+    if (firstHeader) ws.views = [{ state: 'frozen', ySplit: firstHeader, showGridLines: !report }];
+    if (tables.length === 1 && tables[0].header !== false && tables[0].rows.length > 1 && firstHeader) {
+      ws.autoFilter = { from: { row: firstHeader, column: 1 }, to: { row: firstHeader, column: Math.max(...tables[0].rows.map((x) => x.length)) } };
+    }
+    // 打印：宽表横向；所有列缩到一页宽
+    ws.pageSetup = { orientation: fullW > 110 ? 'landscape' : 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 } };
+    if (firstHeader) ws.pageSetup.printTitlesRow = `${firstHeader}:${firstHeader}`;
   }
   const buf = await wb.xlsx.writeBuffer();
   return { blob: new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), info: { sheets: sheets.length, formulas } };
