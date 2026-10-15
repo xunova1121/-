@@ -91,3 +91,13 @@ describe('回答里的网址做成可以点的链接', () => {
     expect(mdInline('[a.com](https://a.com))右').at(-1)).toEqual({ text: ')右' });
   });
 });
+
+import { shortTime, groupSessions } from '../src/ui/drawer.js';
+describe('手机左边栏的历史对话', () => {
+  it('今天的显示几点，更早的显示月/日', () => {
+    const now = new Date(2026, 9, 15, 19, 40).getTime();
+    expect(shortTime(new Date(2026, 9, 15, 9, 5).getTime(), now)).toBe('09:05');
+    expect(shortTime(new Date(2026, 9, 3, 9, 5).getTime(), now)).toBe('10/3');
+    expect(groupSessions([{ updatedAt: now }, { updatedAt: now - 30 * 864e5 }], now).map(([g]) => g)).toEqual(['今天', '更早']);
+  });
+});

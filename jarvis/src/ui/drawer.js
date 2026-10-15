@@ -2,10 +2,18 @@
  * 手机左侧抽屉（取代底部菜单栏）：标题 → 开启新对话 → 功能宫格（原底部菜单） → 历史对话（按今天 / 昨天 / 更早分组）。
  * 点左上角菜单按钮或从屏幕左边缘向右滑打开；点遮罩、向左滑或选了某一项后关闭。
  */
+// [面板, 名字, 图标色相]：每个功能一种颜色，一眼能分开
 const FEATURES = [
-  ['workspace', '工作区'], ['knowledge', '知识库'], ['mind', '记忆进化'], ['skills', '技能'],
-  ['models', '模型'], ['system', '定时任务'], ['settings', '设置'], ['sessions', '全部对话']
+  ['workspace', '工作区', 210], ['knowledge', '知识库', 165], ['mind', '记忆进化', 280], ['skills', '技能', 38],
+  ['models', '模型', 245], ['system', '定时任务', 15], ['settings', '设置', 225], ['sessions', '全部对话', 320]
 ];
+const GROUP_HUE = { 今天: 255, 昨天: 200, '近 7 天': 165, 更早: 220 };
+const pad = (n) => String(n).padStart(2, '0');
+/** 历史对话右侧的时间：今天显示几点，其他显示月/日 */
+export function shortTime(t, now = Date.now()) {
+  const d = new Date(t);
+  return new Date(now).toDateString() === d.toDateString() ? `${pad(d.getHours())}:${pad(d.getMinutes())}` : `${d.getMonth() + 1}/${d.getDate()}`;
+}
 
 const el = (tag, props = {}, ...kids) => {
   const e = Object.assign(document.createElement(tag), props);
@@ -32,8 +40,9 @@ export function groupSessions(list, now = Date.now()) {
 export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, currentId, icons = {} }) {
   const scrim = el('div', { className: 'drawer-scrim', hidden: true });
   const history = el('div', { className: 'drawer-history' });
-  const grid = el('div', { className: 'drawer-grid' }, ...FEATURES.map(([id, label]) => {
+  const grid = el('div', { className: 'drawer-grid' }, ...FEATURES.map(([id, label, hue]) => {
     const b = el('button', { type: 'button', className: 'drawer-feat' });
+    b.style.setProperty('--h', hue);
     b.innerHTML = icons[id] || '';
     b.append(el('span', { textContent: label }));
     b.addEventListener('click', () => { close(); onPanel(id); });
@@ -43,11 +52,21 @@ export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, curren
   newBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h11M4 5v11h4v4l4-4h8V11"/><path d="M19 3v6M16 6h6"/></svg>';
   newBtn.append('开启新对话');
   newBtn.addEventListener('click', () => { close(); onNew(); });
+  const settingsBtn = el('button', { type: 'button', className: 'drawer-gear', title: '设置', ariaLabel: '设置' });
+  settingsBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7.8 4.5v9L12 21l-7.8-4.5v-9z"/><circle cx="12" cy="12" r="3"/></svg>';
+  settingsBtn.addEventListener('click', () => { close(); onPanel('settings'); });
+  const memBtn = el('button', { type: 'button', className: 'drawer-me' },
+    el('span', { className: 'drawer-avatar', textContent: '我' }),
+    el('span', {}, el('b', { textContent: '我的未央' }), el('small', { textContent: '记忆与进化' })));
+  memBtn.addEventListener('click', () => { close(); onPanel('mind'); });
   const drawer = el('aside', { className: 'drawer', id: 'drawer', ariaLabel: '菜单' },
-    el('div', { className: 'drawer-head' }, el('div', { className: 'drawer-title' }, el('strong', { textContent: '未央' }), el('small', { textContent: '个人智能助手' }))),
+    el('div', { className: 'drawer-head' },
+      el('span', { className: 'drawer-logo', ariaHidden: 'true' }),
+      el('div', { className: 'drawer-title' }, el('strong', { textContent: '未央' }), el('small', { textContent: 'WEIYANG AI · 个人智能助手' }))),
     newBtn,
     el('section', { className: 'drawer-card' }, el('h3', { textContent: '功能' }), grid),
-    el('section', { className: 'drawer-card drawer-hist' }, el('h3', { textContent: '历史对话' }), history)
+    el('section', { className: 'drawer-hist' }, el('h3', { textContent: '历史对话' }), history),
+    el('footer', { className: 'drawer-foot' }, memBtn, settingsBtn)
   );
   drawer.setAttribute('aria-hidden', 'true');
   document.body.append(scrim, drawer);
@@ -56,14 +75,19 @@ export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, curren
     const list = await listSessions().catch(() => []);
     const cur = currentId();
     if (!list.length) { history.replaceChildren(el('p', { className: 'drawer-empty', textContent: '还没有对话。说点什么开始吧～' })); return; }
-    history.replaceChildren(...groupSessions(list.slice(0, 60)).flatMap(([name, items]) => [
-      el('div', { className: 'drawer-group', textContent: name }),
-      ...items.map((s) => {
-        const b = el('button', { type: 'button', className: `drawer-item${s.id === cur ? ' current' : ''}`, textContent: s.title || '新对话' });
+    const groups = groupSessions(list.slice(0, 60)).flatMap(([name, items]) => {
+      const g = el('div', { className: 'drawer-group', textContent: name });
+      g.style.setProperty('--h', GROUP_HUE[name] ?? 250);
+      return [g, ...items.map((s) => {
+        const b = el('button', { type: 'button', className: `drawer-item${s.id === cur ? ' current' : ''}` },
+          el('span', { className: 'drawer-item-icon', ariaHidden: 'true' }),
+          el('span', { className: 'drawer-item-t', textContent: s.title || '新对话' }),
+          el('time', { textContent: shortTime(s.updatedAt ?? s.createdAt ?? Date.now()) }));
         b.addEventListener('click', () => { close(); onOpenSession(s.id); });
         return b;
-      })
-    ]));
+      })];
+    });
+    history.replaceChildren(...groups, el('p', { className: 'drawer-end', textContent: list.length > 60 ? '更早的对话在“全部对话”里' : '没有更多对话了～' }));
   }
 
   function open() {

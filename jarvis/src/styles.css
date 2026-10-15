@@ -1267,3 +1267,69 @@ html[data-mode="mobile"] #app-splash {
 .msg a.md-link { color: var(--accent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent); text-underline-offset: 3px; }
 .msg a.md-link::after { content: "↗"; margin-left: 1px; font-size: .75em; vertical-align: 2px; }
 .msg td a.src-chip { margin: 2px 0 0; }
+
+/* —— 手机首页：云朵 + 光环、问候、日期胶囊、“未央为你准备了”三条可换一换 —— */
+.compact .welcome { gap: 12px; padding-top: 4px; }
+.compact .welcome h1 { font-size: 22px; font-weight: 650; }
+.welcome-hero { position: relative; width: 168px; height: 150px; margin: 4px auto 0; display: grid; place-items: center; }
+.welcome-hero .cloud { position: relative; z-index: 1; width: 132px; aspect-ratio: 510 / 478; background: url(./ui/splash-cloud.webp) center / contain no-repeat; animation: hero-float 4s ease-in-out infinite; filter: drop-shadow(0 10px 18px hsl(200 80% 55% / .22)); }
+.welcome-hero .halo { position: absolute; inset: 0; margin: auto; width: 168px; height: 168px; border-radius: 50%; border: 1px solid hsl(var(--hue, 245) 80% 70% / .28); background: radial-gradient(circle, hsl(185 80% 75% / .28), transparent 62%); animation: hero-halo 4s ease-in-out infinite; }
+.welcome-hero .halo.b { width: 230px; height: 230px; background: none; border-color: hsl(var(--hue, 245) 80% 70% / .16); animation-delay: -2s; }
+@keyframes hero-float { 50% { transform: translateY(-7px); } }
+@keyframes hero-halo { 50% { transform: scale(1.06); opacity: .55; } }
+.welcome-pill { align-self: center; padding: 7px 16px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent); background: color-mix(in srgb, var(--surface) 75%, transparent); color: var(--accent); font-size: 13px; box-shadow: 0 4px 14px hsl(var(--hue, 245) 60% 50% / .08); }
+.picks { margin-top: 14px; text-align: left; }
+.picks-head { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 10px; }
+.picks-head b { display: flex; align-items: center; gap: 7px; font-size: 16px; font-weight: 600; color: var(--text); }
+.picks-head b svg { width: 18px; height: 18px; fill: hsl(255 80% 66%); }
+.picks-more { display: flex; align-items: center; gap: 5px; border: 0; background: none; color: var(--muted); font-size: 13px; padding: 4px; }
+.picks-more svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: transform .4s ease; }
+.picks-more:active svg { transform: rotate(180deg); }
+.picks-list { display: flex; flex-direction: column; border-radius: 18px; background: color-mix(in srgb, var(--surface) 82%, transparent); border: 1px solid color-mix(in srgb, var(--line) 70%, transparent); box-shadow: 0 6px 24px hsl(var(--hue, 245) 50% 40% / .06); overflow: hidden; }
+.picks-list.swap .pick { animation: pick-in .35s ease both; }
+.picks-list.swap .pick:nth-child(2) { animation-delay: .05s; }
+.picks-list.swap .pick:nth-child(3) { animation-delay: .1s; }
+@keyframes pick-in { from { opacity: 0; transform: translateY(6px); } }
+.pick { display: flex; align-items: center; gap: 12px; padding: 13px 14px; border: 0; background: none; color: var(--text); font-size: 15px; text-align: left; -webkit-tap-highlight-color: transparent; }
+.pick + .pick { border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+.pick:active { background: var(--accent-soft); }
+.pick-icon { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; background: linear-gradient(135deg, hsl(var(--h) 90% 95%), hsl(var(--h) 80% 88%)); }
+.pick-icon svg { width: 20px; height: 20px; fill: none; stroke: hsl(var(--h) 65% 48%); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.pick-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick-go { flex: none; width: 16px; height: 16px; fill: none; stroke: var(--dim); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.compact:has(#transcript .welcome) .chip-bar { display: none; }
+body.reduced-motion .welcome-hero * { animation: none !important; }
+
+/* —— 手机左边栏：logo 标题、彩色功能图标、带图标和时间的历史对话、底部“我的未央 + 设置” —— */
+.drawer-head { gap: 10px; }
+.drawer-logo { width: 40px; height: 38px; flex: none; background: url(./ui/splash-cloud.webp) center / contain no-repeat; }
+.drawer-title small { letter-spacing: .04em; }
+.drawer-new { box-shadow: 0 8px 20px hsl(250 70% 60% / .28); }
+.drawer-new:active { transform: scale(.98); }
+.drawer-card { border-radius: 20px; padding: 14px 12px; box-shadow: 0 4px 18px hsl(var(--hue, 245) 50% 40% / .05); }
+.drawer-grid { gap: 14px 4px; }
+.drawer-feat svg { width: 46px; height: 46px; padding: 12px; border-radius: 16px; background: linear-gradient(135deg, hsl(var(--h) 90% 96%), hsl(var(--h) 80% 89%)); color: hsl(var(--h) 65% 48%); box-shadow: inset 0 0 0 1px hsl(var(--h) 70% 85% / .7); }
+.drawer-feat:active svg { transform: scale(.94); }
+.drawer-feat span { font-size: 12px; color: var(--text); }
+.drawer-hist { flex: 1; min-height: 120px; overflow: auto; padding: 4px 2px; }
+.drawer-hist h3 { margin: 4px 6px 6px; font-size: 14px; font-weight: 600; }
+.drawer-group { margin: 12px 6px 4px; font-size: 13px; color: var(--muted); }
+.drawer-group::before { width: 7px; height: 7px; background: hsl(var(--h, 250) 75% 62%); }
+.drawer-item { display: flex; align-items: center; gap: 10px; padding: 9px 8px; border-radius: 12px; }
+.drawer-item-icon { flex: none; width: 30px; height: 30px; border-radius: 50%; background: url(./ui/splash-cloud.webp) center / 76% no-repeat, linear-gradient(135deg, hsl(200 90% 95%), hsl(250 80% 92%)); }
+.drawer-item-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drawer-item time { flex: none; color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+.drawer-item.current .drawer-item-icon { box-shadow: 0 0 0 2px hsl(255 80% 66% / .5); }
+.drawer-end { margin: 14px 0 6px; text-align: center; color: var(--dim); font-size: 12px; }
+.drawer-foot { display: flex; align-items: center; gap: 8px; padding: 10px 4px 0; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+.drawer-me { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; border: 0; background: none; color: var(--text); text-align: left; padding: 2px; }
+.drawer-me b { display: block; font-size: 15px; }
+.drawer-me small { color: var(--dim); font-size: 11px; }
+.drawer-avatar { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; color: #fff; font-weight: 700; background: linear-gradient(135deg, hsl(200 80% 62%), hsl(255 70% 64%)); box-shadow: 0 4px 10px hsl(240 70% 60% / .3); }
+.drawer-gear { display: grid; place-items: center; width: 40px; height: 40px; border: 0; border-radius: 12px; background: none; color: var(--text); }
+.drawer-gear svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; }
+.drawer-gear:active { background: var(--accent-soft); }
+/* 夜间：图标底色改成半透明，不刺眼（白天用上面的浅色渐变） */
+:root:not([data-theme="light"]) .drawer-feat svg, :root:not([data-theme="light"]) .pick-icon { background: linear-gradient(135deg, hsl(var(--h) 70% 60% / .22), hsl(var(--h) 70% 50% / .12)); box-shadow: inset 0 0 0 1px hsl(var(--h) 70% 70% / .18); color: hsl(var(--h) 85% 74%); }
+:root:not([data-theme="light"]) .pick-icon svg { stroke: hsl(var(--h) 85% 74%); }
+:root:not([data-theme="light"]) .drawer-item-icon { background: url(./ui/splash-cloud.webp) center / 76% no-repeat, hsl(230 30% 30%); }

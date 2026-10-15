@@ -1484,14 +1484,76 @@ function renderWelcome() {
   grid.className = 'quick-grid';
   grid.append(...cards);
   if (COMPACT) {
-    const orb = document.createElement('div');
-    orb.className = 'welcome-orb';
-    orb.setAttribute('aria-hidden', 'true');
-    orb.innerHTML = '<i></i><i></i>';
-    w.append(orb);
-  }
-  w.append(h, p, grid);
+    // 手机首页：会浮动的云朵 + 问候 + 日期，下面是“未央为你准备了”三条，可以换一换
+    const hero = document.createElement('div');
+    hero.className = 'welcome-hero';
+    hero.setAttribute('aria-hidden', 'true');
+    hero.innerHTML = '<i class="halo"></i><i class="halo b"></i><i class="cloud"></i>';
+    const d = new Date();
+    const pill = document.createElement('div');
+    pill.className = 'welcome-pill';
+    pill.textContent = `${d.getMonth() + 1}月${d.getDate()}日 星期${'日一二三四五六'[d.getDay()]} · 有事交给我`;
+    w.append(hero, h, pill, picksCard());
+  } else w.append(h, p, grid);
   $('#transcript').prepend(w);
+}
+
+// 手机首页的推荐：每次显示 3 条，点“换一换”轮换
+const PICKS = [
+  { t: '今天有哪些重点新闻', k: 'news', h: 210, prompt: '今天的重点新闻' },
+  { t: '明天天气怎么样，要不要带伞', k: 'sun', h: 35, prompt: '明天天气怎么样，要带伞吗' },
+  { t: '帮我写一份本周工作周报', k: 'doc', h: 255, fill: '帮我写一份本周工作周报，本周做了：' },
+  { t: '做一个汇报 PPT', k: 'ppt', h: 15, prompt: '做一个PPT' },
+  { t: '深度调研一个话题，带出处', k: 'search', h: 190, fill: '深度调研：' },
+  { t: '分析一个 Excel 表格', k: 'table', h: 150, upload: true },
+  { t: '写一个实时时钟网页', k: 'code', h: 280, prompt: '写一个实时时钟网页' },
+  { t: '把一段话翻译成地道的英文', k: 'chat', h: 320, fill: '把这段话翻译成地道的英文：' },
+  { t: '给我装一个新技能', k: 'spark', h: 45, panel: 'skills' },
+  { t: '导入资料做成知识库', k: 'book', h: 170, panel: 'knowledge' }
+];
+const PICK_ICON = {
+  news: '<path d="M5 5h11v14H6a1 1 0 0 1-1-1z"/><path d="M16 9h3v9a1 1 0 0 1-1 1h-2M8 9h5M8 12h5M8 15h3"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>',
+  doc: '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 15h5M10 18h3"/>',
+  ppt: '<rect x="3" y="5" width="18" height="12" rx="2"/><path d="M12 17v3M8 20h8M8 13l3-3 2 2 3-3"/>',
+  search: '<circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/>',
+  table: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M4 15h16M10 4v16"/>',
+  code: '<path d="m9 8-4 4 4 4M15 8l4 4-4 4M13 6l-2 12"/>',
+  chat: '<path d="M5 6h14v9H10l-4 3v-3H5z"/><path d="M9 10h6"/>',
+  spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M12 8l1.5 2.5L16 12l-2.5 1.5L12 16l-1.5-2.5L8 12l2.5-1.5z"/>',
+  book: '<path d="M4 5c3-1 6-1 8 1v14c-2-2-5-2-8-1zM20 5c-3-1-6-1-8 1v14c2-2 5-2 8-1z"/>'
+};
+let pickAt = 0;
+function picksCard() {
+  const card = document.createElement('section');
+  card.className = 'picks';
+  card.innerHTML = '<div class="picks-head"><b><svg viewBox="0 0 24 24"><path d="M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/></svg>未央为你准备了</b><button type="button" class="picks-more"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.5-4M4 13a8 8 0 0 0 14.5 4M5 3v4h4M19 21v-4h-4"/></svg>换一换</button></div><div class="picks-list"></div>';
+  const list = card.querySelector('.picks-list');
+  const fill = () => {
+    list.replaceChildren(...[0, 1, 2].map((i) => {
+      const q = PICKS[(pickAt + i) % PICKS.length];
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'pick';
+      b.style.setProperty('--h', q.h);
+      b.innerHTML = `<span class="pick-icon"><svg viewBox="0 0 24 24">${PICK_ICON[q.k]}</svg></span><span class="pick-t"></span><svg class="pick-go" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>`;
+      b.querySelector('.pick-t').textContent = q.t;
+      b.addEventListener('click', () => {
+        if (q.prompt) send(q.prompt);
+        else if (q.fill) { $('#prompt').value = q.fill; $('#prompt').focus(); }
+        else if (q.panel) showPanel(q.panel);
+        else if (q.upload) $('#btn-attach')?.click();
+      });
+      return b;
+    }));
+  };
+  card.querySelector('.picks-more').addEventListener('click', () => {
+    pickAt = (pickAt + 3) % PICKS.length;
+    list.classList.remove('swap'); void list.offsetWidth; list.classList.add('swap');
+    fill();
+  });
+  fill();
+  return card;
 }
 
 const WEEK = '日一二三四五六';
