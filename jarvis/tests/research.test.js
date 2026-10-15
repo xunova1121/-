@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseBing, parseDuckDuckGo, unwrapBing, createSearch, parseBingRss, bingRssUrl } from '../src/agent/webSearch.js';
+import { parseBing, parseDuckDuckGo, unwrapBing, createSearch, parseBingRss, bingRssUrl, searchEngines } from '../src/agent/webSearch.js';
 import { deepResearch, parseJson, extractive } from '../src/agent/research.js';
 
 const b64 = (s) => Buffer.from(s).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -277,5 +277,23 @@ describe('博查搜索', () => {
   it('都失败时报出各自的原因', async () => {
     const s = createSearch({ bochaKey: 'sk', searchRegion: 'cn', fetchViaGateway: async (url) => (/bochaai/.test(url) ? new Response(JSON.stringify({ code: 401, msg: 'Invalid API KEY' }), { status: 401 }) : new Response('')) });
     await expect(s.search('南京')).rejects.toThrow(/博查返回 401：Invalid API KEY[\s\S]*必应 RSS：0 条/);
+  });
+});
+
+describe('Tavily', () => {
+  it('密钥同时放请求头和请求体；出错时说清楚原因', async () => {
+    const seen = [];
+    const ok = createSearch({ tavilyKey: 'tvly-abc', fetchViaGateway: async (url, init) => { seen.push(init); return new Response(JSON.stringify({ results: [{ title: 't', url: 'https://a.example', content: 'c' }] })); } });
+    expect(ok.name).toMatch(/Tavily/);
+    const only = searchEngines({ tavilyKey: 'tvly-abc', fetchViaGateway: async (url, init) => { seen.push(init); return new Response(JSON.stringify({ results: [{ title: 't', url: 'https://a.example', content: 'c' }] })); } })[0];
+    expect((await only.search('x'))[0].url).toBe('https://a.example');
+    expect(seen[0].headers.Authorization).toBe('Bearer tvly-abc');
+    expect(JSON.parse(seen[0].body).api_key).toBe('tvly-abc');
+    const bad = searchEngines({ tavilyKey: 'tvly-x', fetchViaGateway: async () => new Response('{"detail":{"error":"Unauthorized: missing or invalid API key."}}', { status: 401 }) })[0];
+    await expect(bad.search('x')).rejects.toThrow(/Tavily 返回 401：Key 无效或没生效.*（Unauthorized: missing or invalid API key.）/);
+    const quota = searchEngines({ tavilyKey: 'tvly-x', fetchViaGateway: async () => new Response('{}', { status: 432 }) })[0];
+    await expect(quota.search('x')).rejects.toThrow(/额度用完/);
+    const down = searchEngines({ tavilyKey: 'tvly-x', fetchViaGateway: async () => { throw new TypeError('Failed to fetch'); } })[0];
+    await expect(down.search('x')).rejects.toThrow(/连不上 Tavily/);
   });
 });

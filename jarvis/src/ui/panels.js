@@ -9,7 +9,7 @@ import { fmtSize } from '../agent/tools.js';
 import { renderBlocks } from './transcript.js';
 import { PROVIDERS, providerById, loadConfig, saveConfig, modelOf, createAdapter } from '../llm/config.js';
 import { probeEndpoint } from '../llm/probe.js';
-import { createSearch } from '../agent/webSearch.js';
+import { createSearch, searchEngines } from '../agent/webSearch.js';
 import { saveFile } from './saveFile.js';
 import { renderDocx } from './docxView.js';
 import { MOBILE } from '../config.js';
@@ -483,19 +483,25 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   $('#search-region').value = cfg.searchRegion || 'auto';
   $('#search-region').addEventListener('change', (e) => { cfg = { ...cfg, searchRegion: e.target.value }; saveConfig(cfg); onConfigChange(cfg); });
   $('#tavily-key').addEventListener('change', (e) => { cfg = { ...cfg, tavilyKey: e.target.value.trim() }; saveConfig(cfg); onConfigChange(cfg); });
-  // 测试联网搜索：用现在的设置真搜一次，告诉用户能不能用、用的是哪个搜索源
+  // 测试联网搜索：每个搜索源各搜一次，逐行说明能不能用、为什么不能用（截图就能看出问题在哪）
   $('#btn-search-test').addEventListener('click', async () => {
     const out = $('#search-test-result');
-    out.textContent = '正在搜索…';
-    try {
-      const engine = createSearch({ bochaKey: $('#bocha-key').value.trim(), tavilyKey: $('#tavily-key').value.trim(), fetchViaGateway: searchFetch?.(), searchRegion: $('#search-region').value });
-      if (!engine) { out.textContent = '当前环境没有可用的搜索：请填博查或 Tavily Key，或在电脑上运行启动程序'; return; }
+    out.style.whiteSpace = 'pre-line';
+    out.textContent = '正在逐个测试搜索源…';
+    const opts = { bochaKey: $('#bocha-key').value.trim(), tavilyKey: $('#tavily-key').value.trim(), fetchViaGateway: searchFetch?.(), searchRegion: $('#search-region').value };
+    const engines = searchEngines(opts);
+    if (!engines.length) { out.textContent = '当前环境没有可用的搜索：请填博查或 Tavily Key，或在电脑上运行启动程序'; return; }
+    const region = await engines.at(-1).regionNow?.().catch(() => null);
+    const lines = await Promise.all(engines.map(async (e) => {
       const t0 = Date.now();
-      const region = await engine.regionNow?.();
-      const hits = await engine.search('今日新闻', 5);
-      const where = region ? `（${region === 'cn' ? '国内网络' : '国外网络'}）` : '';
-      out.textContent = hits.length ? `✓ ${engine.name}${where} 可用：${hits.length} 条结果，${((Date.now() - t0) / 1000).toFixed(1)} 秒（第一条：${hits[0].title.slice(0, 24)}）` : `${engine.name}${where} 没有返回结果，建议填博查或 Tavily Key`;
-    } catch (e) { out.textContent = `✕ ${e.message}`; }
+      try {
+        const hits = await e.search('今日新闻', 5);
+        const sec = ((Date.now() - t0) / 1000).toFixed(1);
+        return hits.length ? `✓ ${e.name}：${hits.length} 条，${sec} 秒（第一条：${hits[0].title.slice(0, 20)}）` : `✕ ${e.name}：没有结果（${sec} 秒）`;
+      } catch (err) { return `✕ ${e.name}：${err.message}`; }
+    }));
+    const version = globalThis.__jarvisAppUpdater?.state?.current ?? globalThis.jarvisDesktop?.version ?? '';
+    out.textContent = [`${region ? `网络：${region === 'cn' ? '国内' : '国外'}` : ''}${version ? `　版本：${version}` : ''}`.trim(), ...lines].filter(Boolean).join('\n');
   });
 
   return {

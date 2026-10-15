@@ -197,6 +197,11 @@ export function searchPlan(query, region, freshness = '', now = Date.now()) {
  * @param {{ bochaKey?: string, tavilyKey?: string, fetchViaGateway?: (url: string, init?: object) => Promise<Response>, searchRegion?: string }} ctx
  * @returns {{ name: string, search: (query: string, n?: number) => Promise<Array<{title,url,snippet}>> } | null}
  */
+/** 各个搜索源（设置里“测试联网搜索”逐个测） */
+export function searchEngines({ bochaKey, tavilyKey, fetchViaGateway, searchRegion = 'auto' } = {}) {
+  return [bochaKey && bochaSearch(bochaKey, fetchViaGateway), tavilyKey && tavilySearch(tavilyKey, fetchViaGateway), keylessSearch(fetchViaGateway, searchRegion)].filter(Boolean);
+}
+
 export function createSearch({ bochaKey, tavilyKey, fetchViaGateway, searchRegion = 'auto' } = {}) {
   const keyless = keylessSearch(fetchViaGateway, searchRegion);
   const bocha = bochaKey ? bochaSearch(bochaKey, fetchViaGateway) : null;
@@ -242,15 +247,25 @@ function bochaSearch(key, fetchViaGateway) {
   };
 }
 
+/** Tavily 出错时说人话 */
+export function tavilyError(status, body = '') {
+  const detail = String(body).match(/"(?:detail|error|message)"\s*:\s*(?:\{[^}]*"error"\s*:\s*)?"([^"]{1,120})"/)?.[1] ?? '';
+  const why = status === 401 || status === 403 ? 'Key 无效或没生效（检查是否完整复制了 tvly- 开头的 Key）'
+    : status === 432 || status === 433 || status === 429 ? '额度用完或请求太频繁（免费版每月有次数限制）'
+      : status >= 500 ? 'Tavily 服务暂时出错' : '';
+  return `Tavily 返回 ${status}${why ? `：${why}` : ''}${detail ? `（${detail}）` : ''}`;
+}
+
 function tavilySearch(tavilyKey, fetchViaGateway) {
   return {
     name: 'Tavily',
     // deep：顺带要回网页正文（查证时不用再逐篇打开，手机上也不受跨域限制；仍是基础档，每次 1 个额度）
     async search(query, n = 6, { deep = false, freshness = '' } = {}) {
       const url = 'https://api.tavily.com/search';
-      const init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: tavilyKey, query, max_results: n, include_answer: false, ...(deep && { include_raw_content: true }), ...(FRESH_DAYS[freshness] && { time_range: freshness }) }) };
-      const res = fetchViaGateway ? await fetchViaGateway(url, init) : await fetch(url, init);
-      if (!res.ok) throw new Error(`搜索服务返回 ${res.status}`);
+      // 密钥放请求头（Tavily 现在的写法），请求体里也带一份（兼容旧接口）
+      const init = { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tavilyKey}` }, body: JSON.stringify({ api_key: tavilyKey, query, max_results: n, include_answer: false, ...(deep && { include_raw_content: true }), ...(FRESH_DAYS[freshness] && { time_range: freshness }) }) };
+      const res = await (fetchViaGateway ? fetchViaGateway(url, init) : fetch(url, init)).catch((e) => { throw new Error(`连不上 Tavily（${e.message}；国内网络可能访问不了 api.tavily.com）`); });
+      if (!res.ok) throw new Error(tavilyError(res.status, await res.text().catch(() => '')));
       const j = await res.json();
       return (j.results ?? []).map((r) => ({ title: r.title, url: r.url, snippet: String(r.content || '').slice(0, 400), ...(r.raw_content && { raw: String(r.raw_content) }) }));
     }

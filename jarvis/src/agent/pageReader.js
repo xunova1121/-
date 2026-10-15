@@ -31,7 +31,7 @@ export function createPageReader({ tavilyKey, fetchViaGateway, fetchImpl = (...a
   }
 
   async function extract(url) {
-    const init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: tavilyKey, urls: [url], extract_depth: 'basic', include_images: false }) };
+    const init = { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tavilyKey}` }, body: JSON.stringify({ api_key: tavilyKey, urls: [url], extract_depth: 'basic', include_images: false }) };
     const res = await get('https://api.tavily.com/extract', init);
     if (!res.ok) throw new Error(`Tavily 返回 ${res.status}`);
     const j = await res.json();
