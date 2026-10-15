@@ -34,6 +34,7 @@ export function loadConfig() {
   const oldVoice = cfg.voice || {};
   const wasDefault = !oldVoice.profile && !oldVoice.browserVoice && !Object.keys(oldVoice.voices || {}).length;
   cfg.voice = { ...DEFAULT_VOICE, ...oldVoice, ...(wasDefault && oldVoice.fx === 'jarvis' ? { fx: 'gentle' } : {}), voices: { ...GENTLE_VOICES, ...(oldVoice.voices || {}) } };
+  if (oldVoice.profile === 'gentle-child' && oldVoice.voices?.edge === 'zh-CN-YunxiaNeural') cfg.voice.voices.edge = GENTLE_VOICES.edge;
   cfg.stt = { ...DEFAULT_STT, ...(cfg.stt || {}) };
   return cfg;
 }
@@ -119,7 +120,7 @@ export function resolveVoice(cfg, gateway = null) {
   if (v.engine !== 'auto') return v;
   const has = (id) => Boolean(cfg.keys?.[id]) || Boolean(gateway?.keys?.includes(id));
   // 有付费语音的密钥就用它；没有时有本机网关就用免费的 Edge 朗读；都没有用浏览器自带
-  const engine = has('elevenlabs') ? 'elevenlabs' : has('openai') ? 'openai' : gateway && has('siliconflow') ? 'siliconflow' : gateway ? 'edge' : 'browser';
+  const engine = globalThis.__jarvisEdgeSpeech ? 'edge' : has('elevenlabs') ? 'elevenlabs' : has('openai') ? 'openai' : gateway && has('siliconflow') ? 'siliconflow' : gateway ? 'edge' : 'browser';
   return { ...v, engine };
 }
 

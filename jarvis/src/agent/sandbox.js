@@ -1,3 +1,4 @@
+import { MOBILE } from '../config.js';
 /**
  * 代码运行沙箱（智能体“独立编程”的执行环境）：
  *   JavaScript：一次性 Web Worker，捕获 console 输出与返回值，超时强制终止；
@@ -89,14 +90,17 @@ let pyBusy = Promise.resolve();
  */
 export function runPython(code, { files = [], timeout = 120000 } = {}) {
   const job = pyBusy.then(() => new Promise((resolve) => {
-    if (!pyWorker) pyWorker = new Worker(URL.createObjectURL(new Blob([pyWorkerSource], { type: 'text/javascript' })));
+    if (!pyWorker) {
+      const url = URL.createObjectURL(new Blob([pyWorkerSource], { type: 'text/javascript' }));
+      pyWorker = new Worker(url); URL.revokeObjectURL(url);
+    }
     const w = pyWorker;
     const t = setTimeout(() => {
       w.terminate();
       pyWorker = null;
       resolve({ ok: false, logs: [], error: `运行超过 ${timeout / 1000} 秒，已终止` });
     }, timeout);
-    w.onmessage = ({ data }) => { clearTimeout(t); resolve(data); };
+    w.onmessage = ({ data }) => { clearTimeout(t); if (MOBILE) { w.terminate(); pyWorker = null; } resolve(data); };
     w.onerror = (e) => {
       clearTimeout(t);
       w.terminate();

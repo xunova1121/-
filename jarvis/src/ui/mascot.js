@@ -2,7 +2,7 @@ import './mascot.css';
 
 export const MASCOT_LABELS = {
   idle: '陪伴', wink: '眨眼', rub: '搓手期待', think: '思考',
-  sleep: '睡觉', run: '忙碌查找', happy: '高兴', spin: '转圈', listen: '正在听'
+  wave: '挥手', shy: '害羞', love: '比心', dance: '跳舞', sleep: '睡觉', run: '忙碌查找', happy: '高兴', spin: '转圈', listen: '正在听'
 };
 
 export function poseForEmotion(value) {
@@ -38,9 +38,10 @@ export function createMascot(state = 'idle') {
 
 /** 只更新工作状态，不启动 WebGL；手机上的小图标由 CSS 动画驱动。 */
 export function initMascots() {
-  const marks = [...document.querySelectorAll('.brand-mark, .as-logo, .welcome-hero .cloud, .drawer-logo')];
-  for (const mark of marks) {
+  const marks = () => [...document.querySelectorAll('.brand-mark, .as-logo, .welcome-hero .cloud, .drawer-logo')];
+  for (const mark of marks()) {
     mark.classList.add('wy-brand');
+    if (mark.matches('.brand-mark, .welcome-hero .cloud')) { mark.setAttribute('role', 'button'); mark.tabIndex = 0; mark.setAttribute('aria-label', '打开未央，和我说话'); mark.closest('.welcome-hero')?.removeAttribute('aria-hidden'); }
     mark.replaceChildren(createMascot(mark.matches('.as-logo') ? 'spin' : 'idle'));
   }
   let task = 'idle';
@@ -48,9 +49,10 @@ export function initMascots() {
   let timer;
   const refresh = () => {
     const state = sleeping && task === 'idle' ? 'sleep' : document.body.classList.contains('speaking') ? 'happy' : document.body.classList.contains('voice-on') && task === 'idle' ? 'listen' : task;
-    for (const mark of marks) {
+    for (const mark of marks()) {
       if (mark.matches('.as-logo')) continue;
-      setMascotState(mark.firstElementChild, state);
+      if (!mark.querySelector('.wy-mascot')) { mark.classList.add('wy-brand'); mark.replaceChildren(createMascot()); }
+      if (mark.firstElementChild.dataset.state !== state) setMascotState(mark.firstElementChild, state);
     }
   };
   const wake = () => {
@@ -66,6 +68,15 @@ export function initMascots() {
     document.body.classList.toggle('wy-paused', document.hidden);
     if (!document.hidden) wake();
   });
+  const mount = () => {
+    for (const mark of marks()) {
+      if (!mark.querySelector('.wy-mascot')) {
+        mark.classList.add('wy-brand'); mark.replaceChildren(createMascot());
+        if (mark.matches('.welcome-hero .cloud')) { mark.setAttribute('role', 'button'); mark.tabIndex = 0; mark.setAttribute('aria-label', '打开未央，和我说话'); mark.closest('.welcome-hero')?.removeAttribute('aria-hidden'); }
+      }
+    }
+  };
+  new MutationObserver(mount).observe(document.querySelector('#transcript'), { childList: true });
   wake();
   return { task(state, detail) { task = poseForTask(state, detail); sleeping = false; refresh(); } };
 }

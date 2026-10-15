@@ -14,7 +14,7 @@ import { EDGE_VOICES } from '../../shared/edgeVoices.js';
 
 /** 给 gpt-4o-mini-tts 的“表演指导”：要像电影里的 AI 管家，而不是导航播报 */
 export const DIRECTION = [
-  'Voice: a gentle, youthful, childlike AI companion with a soft, bright and comforting tone.',
+  'Voice: a gentle young girl AI companion with a feminine, youthful, childlike voice with a soft, bright and comforting tone.',
   'Delivery: natural and human, kind and patient; never robotic, never shrill, never sing-song, no announcer tone. Do not imitate any real person.',
   'Pacing: unhurried, with natural pauses between clauses. Speak Chinese with standard Mandarin pronunciation.'
 ].join(' ');
@@ -53,8 +53,8 @@ export function rankBrowserVoices(voices) {
     let s = 0;
     if (/^zh-CN/i.test(lang)) s += 100; else if (/^zh/i.test(lang)) s += 80; else if (/^en/i.test(lang)) s += 5; else s -= 100;
     if (/Natural|Neural|Online/i.test(n)) s += 30;
-    if (/Yunxia|Xiaoshuang|Xiaoyou|童声|child|kid/i.test(n)) s += 50;
-    else if (/Xiaoxiao|Xiaoyi|Xiaomeng|Xiaohan|温柔|女声|female/i.test(n)) s += 14;
+    if (/Xiaoshuang|Xiaoyou|女童|女孩童声|child|kid/i.test(n)) s += 60;
+    else if (/Xiaoxiao|Xiaoyi|Xiaomeng|Xiaohan|温柔|女声|female/i.test(n)) s += 40;
     if (/Google/i.test(n)) s += 6;
     if (/Huihui|compact|eSpeak/i.test(n)) s -= 8;
     return s;
@@ -74,7 +74,19 @@ export async function synthesize(vc, keys, text, { gateway = null, signal, fetch
   if (!e || e.id === 'browser') throw new Error('不是云端语音引擎');
   const voice = vc.voices?.[e.id] || e.voices[0]?.[0] || '';
   if (e.id === 'edge') {
-    if (!gateway) throw new Error('Edge 朗读需要桌面版或完整版（本机网关）');
+    if (!gateway && globalThis.__jarvisEdgeSpeech) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      const id = crypto.randomUUID();
+      const plugin = globalThis.__jarvisEdgeSpeech;
+      const abort = () => { plugin.cancel({ id }).catch(() => {}); };
+      signal?.addEventListener('abort', abort, { once: true });
+      try {
+        const { audio } = await plugin.synthesize({ id, text, voice, pitch: vc.edgePitch ?? 8 });
+        if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+        return Uint8Array.from(atob(audio), c => c.charCodeAt(0)).buffer;
+      } finally { signal?.removeEventListener('abort', abort); }
+    }
+    if (!gateway) throw new Error('Edge 朗读需要安卓 App 或电脑本机网关');
     const res = await fetchImpl(`${gateway.origin}/api/tts/edge`, {
       method: 'POST', signal,
       headers: { 'content-type': 'application/json', 'x-jarvis-client': '1' },

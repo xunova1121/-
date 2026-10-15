@@ -60,6 +60,7 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
+        <intent><action android:name="android.speech.action.RECOGNIZE_SPEECH" /></intent>
         <!-- 直接对话：系统语音识别服务 -->
         <intent>
             <action android:name="android.speech.RecognitionService" />

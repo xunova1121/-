@@ -73,7 +73,7 @@ export const cases = [
     });
   }],
   ['中文童声优先；没有童声时温柔中文声优先于英文童声', () => {
-    const zh = { name: 'Xiaoxiao Natural', lang: 'zh-CN' }, child = { name: 'Yunxia Neural', lang: 'zh-CN' }, en = { name: 'Child Natural', lang: 'en-US' };
+    const zh = { name: 'Xiaoxiao Natural', lang: 'zh-CN' }, child = { name: 'Xiaoshuang Neural', lang: 'zh-CN' }, en = { name: 'Child Natural', lang: 'en-US' };
     assert.deepEqual(rankBrowserVoices([en, zh, child]), [child, zh, en]);
   }],
   ['真实童声只轻微调音，显式非童声风格保留原音调', () => {
@@ -81,12 +81,12 @@ export const cases = [
     assert.equal(browserDelivery(null, { profile: 'original', pitch: .9 }).pitch, .9);
     assert.match(DIRECTION, /gentle/);
   }],
-  ['Edge 默认请求使用少年童声音色，显式选择仍然有效', async () => {
+  ['Edge 默认请求使用轻柔女孩音色，显式选择仍然有效', async () => {
     const calls = [];
     const fetchImpl = async (_url, init) => { calls.push(JSON.parse(init.body)); return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) }; };
     await synthesize({ engine: 'edge', voices: {} }, {}, '你好呀', { gateway: { origin: 'http://localhost' }, fetchImpl });
     await synthesize({ engine: 'edge', voices: { edge: 'zh-CN-YunxiNeural' } }, {}, '你好', { gateway: { origin: 'http://localhost' }, fetchImpl });
-    assert.equal(calls[0].voice, 'zh-CN-YunxiaNeural');
+    assert.equal(calls[0].voice, 'zh-CN-XiaoyiNeural');
     assert.equal(calls[1].voice, 'zh-CN-YunxiNeural');
   }],
   ['安卓系统音色列表异步刷新，并把选中的真实索引交给插件', async () => {

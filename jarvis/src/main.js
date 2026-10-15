@@ -13,6 +13,8 @@
 import { initWorkbench } from './ui/workbench.js';
 import logoUrl from './ui/logo.svg';
 import { initMascots } from './ui/mascot.js';
+import { initCompanion } from './ui/companion.js';
+let companion = null;
 import { initCamera } from './ui/composerMedia.js';
 let mascots = null;
 let callActive = false;
@@ -75,6 +77,7 @@ import { VoiceInput, speechRecognitionSupported } from './perception/voiceInput.
 import { resolveStt, transcribe, encodeWav, sttEngineById } from './perception/stt.js';
 import { STANDALONE, MOBILE, VAD } from './config.js';
 import { NativeVoice } from './mobile/nativeVoice.js';
+import { RecordedVoice } from './mobile/recordedVoice.js';
 import { nativeWebFetch } from './mobile/nativeFetch.js';
 import { initChips } from './ui/chips.js';
 import { initDrawer } from './ui/drawer.js';
@@ -842,6 +845,7 @@ async function expandSlash(text) {
 async function send(text) {
   text = String(text || '').trim();
   if (!text && !attachments.length) return;
+  if (!attachments.length && companion?.perform(text)) return;
   if (!text && attachments.some((a) => a.image)) text = '请看看这张图片。';
   if (active) { active.ctrl.abort(); active = null; }
   speaker.cancel();
@@ -864,7 +868,10 @@ async function send(text) {
   const withImages = new Set(refersToImage ? recent.filter((m) => m.role === 'user' && recentImages.has(m.ts)).slice(-2).map((m) => m.ts) : []);
   const llmHistory = recent.map(({ role, content, ts }) => ({ role, content, ...(withImages.has(ts) && { images: recentImages.get(ts) }) }));
   rememberTurn('user', userText, thumbs.length ? { thumbs } : {});
-  if (imgs.length) recentImages.set(history.at(-1).ts, imgs.map(({ mime, data }) => ({ mime, data })));
+  if (imgs.length) {
+    recentImages.set(history.at(-1).ts, imgs.map(({ mime, data }) => ({ mime, data })));
+    while (recentImages.size > 2) recentImages.delete(recentImages.keys().next().value);
+  }
 
   if (machine.task !== 'listening') machine.beginUserTurn();
   const ctrl = new AbortController();
@@ -1174,14 +1181,15 @@ const voiceHandlers = {
     $('#btn-mic').setAttribute('aria-label', m === 'ptt' ? '按住说话，松开提交' : '直接对话');
   },
   onError: (code) => {
+    if (callActive) callStatus(String(code));
     toast(code === 'not-allowed' ? '麦克风权限被拒绝' : /^语音识别/.test(code) ? code : `语音识别出错：${code}`);
   }
 };
-let voice = new VoiceInput({
+let voice = new (MOBILE ? RecordedVoice : VoiceInput)({
   allowBrowserSR: browserSR,
   getTranscriber: () => {
     const id = sttEngine();
-    return id === 'browser' || id === 'none' ? null : (wav) => transcribe(id, llmConfig, wav, { gateway });
+    return id === 'browser' || id === 'none' ? null : (wav, signal) => transcribe(id, llmConfig, wav, { gateway, signal });
   },
   ...voiceHandlers
 });
@@ -1262,10 +1270,16 @@ async function setVoiceCall(on) {
     if (gen !== callGeneration) { await setDirectVoice(false); return; }
     if (!ok) await setVoiceCall(false);
     else callStatus(voice.mode === 'ptt' ? '按住麦克风说话，松开后回复' : '直接说话，未央在听');
+  } catch (e) {
+    toast(`语音无法启动：${e.message || e}`);
+    if (gen === callGeneration) await setVoiceCall(false);
   } finally { callStarting = false; }
 }
 $('#btn-call').addEventListener('click', () => setVoiceCall(!callActive));
 $('#btn-call-end').addEventListener('click', () => setVoiceCall(false));
+document.addEventListener('visibilitychange', () => {
+  if (MOBILE && document.hidden && callActive && !callStarting) { companion?.close(); setVoiceCall(false); }
+});
 
 // “检测语音”：逐项检查麦克风 / 系统识别 / 云端转写 / 语音检测模型，告诉用户卡在哪一步
 async function checkVoice() {
@@ -2128,6 +2142,7 @@ window.__jarvis = {
 // 工作台界面只用在电脑上；手机 App 保留自己的界面（底部输入、左侧抽屉菜单、整页面板）
 if (!COMPACT) initWorkbench({showPanel,newSession,openSession,getSession:()=>session,getRunning:()=>active?session.id:null,openFile:openInWorkspace});
 mascots = initMascots();
+companion = initCompanion({ send, startVoice: async () => { await setVoiceCall(true); return callActive; }, stopVoice: () => setVoiceCall(false), speak: text => { speaker.unlock(); speaker.speak(text); } });
 
 // 手机启动页：界面准备好、并且至少显示了 2 秒后淡出（太快一闪而过不像 App）
 {

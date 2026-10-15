@@ -17,8 +17,9 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
   globalThis.__jarvisNativeFetch = native;
   globalThis.fetch = wrapFetch(globalThis.fetch.bind(globalThis), native, location.origin);
   try {
-    const { SpeechRecognition } = await import('@capacitor-community/speech-recognition');
-    globalThis.__jarvisSpeech = SpeechRecognition; // 直接对话用系统语音识别（见 nativeVoice.js）
+    const { registerPlugin } = await import('@capacitor/core');
+    globalThis.__jarvisSpeech = registerPlugin('MobileSpeech');
+    globalThis.__jarvisEdgeSpeech = registerPlugin('EdgeSpeech'); // 直接对话用系统语音识别（见 nativeVoice.js）
   } catch { /* 没有识别插件：走云端转写 */ }
   try {
     const { TextToSpeech } = await import('@capacitor-community/text-to-speech');

@@ -22,7 +22,8 @@ export class NativeVoice {
 
   /** 这台手机有没有可用的系统语音识别 */
   static async available(plugin) {
-    try { return Boolean((await plugin.available())?.available); } catch { return false; }
+    let timer;
+    try { return Boolean((await Promise.race([plugin.available(), new Promise(resolve => { timer = setTimeout(() => resolve({ available: false }), 4000); })]))?.available); } catch { return false; } finally { clearTimeout(timer); }
   }
 
   async enable() {
@@ -31,6 +32,7 @@ export class NativeVoice {
       const r = await this.plugin.requestPermissions().catch(() => null);
       if (r?.speechRecognition !== 'granted') throw new Error('麦克风权限被拒绝：请在手机设置里允许未央使用麦克风');
     }
+    this.errors = 0;
     this.#setMode('vad');
     this.#schedule(0);
     return this.mode;
@@ -76,9 +78,13 @@ export class NativeVoice {
     try {
       const r = await this.plugin.start({ language: 'zh-CN', maxResults: 1, partialResults: false, popup: false });
       text = String(r?.matches?.[0] || '').trim();
+      this.errors = 0;
     } catch (e) {
       const msg = String(e?.message || e);
-      if (gen === this.gen && !QUIET_ERRORS.test(msg)) this.onError?.(`语音识别：${msg}`);
+      if (gen === this.gen && !QUIET_ERRORS.test(msg)) {
+        this.onError?.(`语音识别：${msg}`);
+        if (++this.errors >= 3 || /权限|没有可用/.test(msg)) { this.disable(); return; }
+      }
     } finally {
       if (gen === this.gen) this.running = false;
     }
@@ -87,6 +93,6 @@ export class NativeVoice {
       this.onConfirm?.();
       this.onFinal?.(text);
     }
-    this.#schedule(RESTART_MS);
+    this.#schedule(this.errors ? 1500 : RESTART_MS);
   }
 }
