@@ -215,3 +215,25 @@ describe('写 CSV 文件自动加 BOM', () => {
     expect([...new Uint8Array(await (await ws.readBlob('a.txt')).arrayBuffer()).slice(0, 3)]).not.toEqual([0xef, 0xbb, 0xbf]);
   });
 });
+
+describe('PPT 版式：卡片、步骤、流程、图表单位、封面信息', () => {
+  const L = (md, o) => layoutOf(parseSlides('t', md)[0], o);
+  it('3–6 条“标签：说明”做成卡片；标题像流程时做成步骤；可以多带一句总结', () => {
+    expect(L('## 建设定位\n- 预警研判：多源汇聚\n- 法规知识：条款核验\n- 调度派单：力量推荐\n- 复用已有平台能力')).toBe('cards');
+    expect(L('## 业务场景：处置闭环\n- 发现：融合告警\n- 取证：调取视频\n- 研判：关联档案\n- 调度：推荐力量')).toBe('steps');
+    expect(L('## 普通要点\n- 第一条很普通\n- 第二条也普通\n- 第三条')).toBe('bullets');
+  });
+  it('有“A→B→C”的链路画成流程', () => {
+    expect(L('## 必要性\n- 当前链路：雷达告警→看视频→查档案→派工单\n- 多系统切换耗时')).toBe('flow');
+  });
+  it('单位不同的数字列不放进同一张图，合计行不画柱子', () => {
+    const md = '## 投资\n| 内容 | 人天 | 投资（万元） |\n|---|---|---|\n| 甲 | 75 | 15 |\n| 乙 | 110 | 22 |\n| 合计 | 185 | 37 |';
+    expect(L(md)).toBe('chart');
+  });
+  it('第二页是封面信息时挪回封面，生成出来少一页', async () => {
+    const md = '# 某项目\n\n## 能力扩展\n- 项目建议汇报\n- 江苏省渔业执法监督中心\n- 2026年10月\n\n## 正文\n- 一条\n- 两条\n- 三条';
+    const { generate } = await import('../src/agent/docs.js');
+    const out = await generate('pptx', { title: '某项目', content: md });
+    expect(out.info.layouts).toEqual(['cover', 'bullets']);
+  });
+});
