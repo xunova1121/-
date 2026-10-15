@@ -1,0 +1,37 @@
+.wy-mascot{display:inline-block;flex:none;width:calc(var(--mascot-size,40px)*.75);height:var(--mascot-size,40px);vertical-align:middle;background:url('./mascot-states.png') 0 0/400% 200% no-repeat;transform-origin:50% 75%;animation:wy-float 3.6s ease-in-out infinite}
+.wy-mascot[data-state=idle]{animation:wy-float 3.6s ease-in-out infinite,wy-blink 5.5s steps(1,end) infinite}
+.wy-mascot[data-state=wink]{background-position:33.333333% 0}
+.wy-mascot[data-state=rub]{background-position:66.666667% 0;animation:wy-rub .65s ease-in-out infinite}
+.wy-mascot[data-state=think],.wy-mascot[data-state=listen]{background-position:100% 0;animation:wy-think 2.5s ease-in-out infinite}
+.wy-mascot[data-state=sleep]{background-position:0 100%;animation:wy-breathe 3.6s ease-in-out infinite}
+.wy-mascot[data-state=run]{background-position:33.333333% 100%;animation:wy-run .32s ease-in-out infinite}
+.wy-mascot[data-state=happy]{background-position:66.666667% 100%;animation:wy-happy 1.5s ease-in-out infinite}
+.wy-mascot[data-state=spin]{background-position:100% 100%;animation:wy-spin 3s ease-in-out infinite}
+.who-mood.wy-mascot{--mascot-size:36px;margin:-9px 0 -8px 6px;position:relative}
+.transcript .msg.agent:not(:last-child) .wy-mascot{animation:none}
+.wy-brand{display:inline-grid!important;place-items:center;position:relative;background:none!important;border:0!important;box-shadow:none!important;animation:none!important;overflow:visible}
+.wy-brand::before{display:none!important}
+.wy-brand::after{content:'';display:block!important;position:absolute;inset:10%;border:1px solid #edce7d88;border-radius:50%;pointer-events:none;animation:wy-orbit 5s linear infinite}
+.wy-brand .wy-mascot{--mascot-size:48px}
+.brand-mark.wy-brand{width:42px!important;height:44px!important}
+.as-logo.wy-brand{width:170px!important;height:195px!important;aspect-ratio:auto!important}
+.as-logo.wy-brand .wy-mascot{--mascot-size:195px}
+.welcome-hero .cloud.wy-brand{width:144px;aspect-ratio:3/4}
+.welcome-hero .cloud.wy-brand .wy-mascot{--mascot-size:176px}
+.drawer-logo.wy-brand .wy-mascot{--mascot-size:48px}
+.drawer-item-icon{background-image:url('./logo.svg')!important}
+.wb-mark,.wb-hero-mark{filter:drop-shadow(0 3px 8px #87ddec55);animation:wy-float 3.6s ease-in-out infinite}
+#app-splash .as-glow{background:radial-gradient(circle,#a3e8fa70,#fff0b138 55%,transparent 72%)}
+#app-splash .as-sub{color:#597eaf}#app-splash .as-dots i{background:#83cfee}#app-splash .as-dots i:nth-child(2){background:#f0d782}
+@keyframes wy-float{50%{transform:translateY(-3px)}}
+@keyframes wy-blink{0%,94%,100%{background-position:0 0}95%,98%{background-position:33.333333% 0}}
+@keyframes wy-rub{50%{transform:translateY(-1px) rotate(3deg) scale(1.04)}}
+@keyframes wy-think{50%{transform:rotate(-8deg) translateY(-2px)}}
+@keyframes wy-breathe{50%{transform:scale(1.035,.975)}}
+@keyframes wy-run{0%,100%{transform:translateX(-2px) rotate(-4deg)}50%{transform:translate(2px,-4px) rotate(4deg)}}
+@keyframes wy-happy{0%,25%,100%{transform:translateY(0)}12%,38%{transform:translateY(-5px) rotate(5deg)}}
+@keyframes wy-spin{0%,35%,100%{transform:rotateY(0)}75%{transform:rotateY(360deg)}}
+@keyframes wy-orbit{0%{transform:rotate(-25deg) scaleX(1.2) scaleY(.65);opacity:.3}50%{opacity:.85}100%{transform:rotate(335deg) scaleX(1.2) scaleY(.65);opacity:.3}}
+@media(prefers-reduced-motion:reduce){.wy-mascot,.wy-brand::after,.wb-mark,.wb-hero-mark{animation:none!important}}
+body.reduced-motion .wy-mascot,body.reduced-motion .wy-brand::after,body.reduced-motion .wb-mark,body.reduced-motion .wb-hero-mark{animation:none!important}
+body.wy-paused .wy-mascot,body.wy-paused .wy-brand::after{animation-play-state:paused}

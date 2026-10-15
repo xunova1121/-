@@ -102,12 +102,20 @@
       <section class="transcript" id="transcript" aria-live="polite" aria-label="对话"></section>
 
       <form class="composer" id="inputbar" autocomplete="off">
+        <div class="voice-call-panel" id="voice-call-panel" hidden>
+          <span class="voice-call-dot" aria-hidden="true"></span><span id="voice-call-status" role="status">正在连接语音…</span>
+          <button type="button" id="btn-call-end">结束对话</button>
+        </div>
         <div class="attach-list" id="attach-list" hidden></div>
         <div class="composer-row">
           <button type="button" class="icon-btn" id="btn-attach" title="添加文件（Word / PDF / PPT / Excel / 图片 / 代码）" aria-label="添加文件">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5 12.6 20a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8" /></svg>
           </button>
           <input type="file" id="file-input" multiple hidden />
+          <button type="button" class="icon-btn" id="btn-camera" title="拍照" aria-label="拍照添加图片">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5 10 3h4l2 2h4v15H4V5z"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <input type="file" id="camera-input" accept="image/*" capture="environment" hidden />
           <span class="vad-meter" id="vad-meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
           <label class="sr-only" for="prompt">输入消息</label>
           <textarea id="prompt" rows="1" placeholder="交给我一个任务：写代码、做 PPT、分析文件、查资料……（Enter 发送，Shift+Enter 换行）"></textarea>
@@ -117,6 +125,9 @@
           </button>
           <button type="button" class="mic" id="btn-mic" aria-pressed="false" aria-label="直接对话" title="直接对话（Alt+V）">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
+          </button>
+          <button type="button" class="voice-call" id="btn-call" aria-pressed="false" aria-label="开始语音对话" title="语音对话">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h4l2 5-3 2a15 15 0 0 0 6 6l2-3 5 2v4a2 2 0 0 1-2 2C10 21 3 14 3 5a2 2 0 0 1 2-2z"/></svg><span>语音</span>
           </button>
           <button type="submit" class="send" id="btn-send" aria-label="发送" title="发送">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6" /></svg>

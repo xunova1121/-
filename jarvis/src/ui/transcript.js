@@ -3,7 +3,8 @@
  * 全程只用 createElement + textContent，从不把模型输出当 HTML 插入。
  */
 import { parseMarkdown, inline } from '../core/markdown.js';
-import { EMOTION_ICON, stripEmotionTags } from '../../shared/emotionTag.js';
+import { stripEmotionTags } from '../../shared/emotionTag.js';
+import { createMascot, setMascotState, poseForEmotion, poseForTask } from './mascot.js';
 
 const LABEL = { user: '你', agent: '未央' };
 
@@ -230,6 +231,9 @@ export class Transcript {
     head.className = 'who';
     // 名字和时间分开放，方便桌面版把名字做成标题、时间淡一些（文字内容不变）
     head.append(Object.assign(document.createElement('span'), { className: 'who-name', textContent: LABEL[role] ?? role }), Object.assign(document.createElement('span'), { className: 'who-time', textContent: ` · ${hhmm(ts)}` }));
+    const mascot = role === 'agent' ? createMascot(text ? 'idle' : 'think') : null;
+    if (mascot) { mascot.classList.add('who-mood'); head.append(mascot); }
+    let moodState = null;
     const body = document.createElement('div');
     body.className = 'body';
     body.textContent = text;
@@ -359,13 +363,11 @@ export class Transcript {
       get text() { return raw; },
       /** 表情：在“未央 · 时间”旁边放一个小图标（不显示英文标签） */
       mood(v) {
-        const icon = EMOTION_ICON[v];
-        if (!icon) return;
-        let m = head.querySelector('.who-mood');
-        if (!m) { m = Object.assign(document.createElement('span'), { className: 'who-mood' }); head.append(m); }
-        m.textContent = ` ${icon}`;
-        m.title = v;
+        if (!mascot) return;
+        moodState = poseForEmotion(v);
+        setMascotState(mascot, moodState);
       },
+      activity(state, detail = '') { if (mascot) setMascotState(mascot, poseForTask(state, detail)); },
       append(d) {
         raw += d;
         curRaw += d;
@@ -374,6 +376,7 @@ export class Transcript {
       },
       /** 工具执行卡片：执行中显示动画，结束后可展开查看输出 */
       toolCard(name, args) {
+        if (mascot) setMascotState(mascot, 'run');
         stopPaint();
         if (role === 'agent' && curRaw) renderBlocks(cur, curRaw);
         if (self.progress) return progressStep(name, args);
@@ -542,6 +545,7 @@ export class Transcript {
         el.insertBefore(box, el.children[1]);
       },
       done(meta, { onFeedback } = {}) {
+        if (mascot) setMascotState(mascot, moodState || 'happy');
         el.classList.remove('streaming');
         finishProgress();
         closeGroups();
@@ -579,3 +583,4 @@ export class Transcript {
     this.root.scrollTop = this.root.scrollHeight;
   }
 }
+

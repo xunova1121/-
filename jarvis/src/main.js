@@ -12,6 +12,13 @@
  */
 import { initWorkbench } from './ui/workbench.js';
 import logoUrl from './ui/logo.svg';
+import { initMascots } from './ui/mascot.js';
+import { initCamera } from './ui/composerMedia.js';
+let mascots = null;
+let callActive = false;
+let callStarting = false;
+let callGeneration = 0;
+let callRestore = null;
 
 // 浏览器标签页图标：未央 logo（小图直接内联，单文件版也能显示）
 document.head.append(Object.assign(document.createElement('link'), { rel: 'icon', type: 'image/svg+xml', href: logoUrl }));
@@ -90,7 +97,8 @@ const now = () => performance.now();
 const settings = loadSettings();
 function setSetting(key, value) {
   settings[key] = value;
-  saveSettings(settings);
+  // 通话临时启用的朗读 / 唤醒词不覆盖用户保存的偏好。
+  saveSettings(callRestore ? { ...settings, ...callRestore } : settings);
 }
 
 // ---------------------------------------------------------------- 设备分级
@@ -408,10 +416,12 @@ const attachments = [];
 
 const speaker = new Speaker({
   onStart: () => {
+    if (callActive) callStatus('未央正在说话…');
     voice.setSuppressed(true);
     body.classList.add('speaking');
   },
   onIdle: () => {
+    if (callActive) callStatus('直接说话，未央在听');
     if (wake.awake) wake.wake(); // 回答说完后重新计时，方便接着问
     voice.setSuppressed(false);
     body.classList.remove('speaking');
@@ -444,6 +454,8 @@ const TASK_LABEL = { idle: '待命', listening: '生成中', processing: '执行
 const DIRECTOR_STATE = { processing: 'processing', listening: 'speaking', done: 'speaking', idle: 'idle', error: 'error' };
 const ENERGY = { processing: 0.85, listening: 0.25 };
 function setTask(state, sub = '') {
+  mascots?.task(state, sub);
+  active?.bubble?.activity(state, sub);
   machine.setTaskState(state === 'listening' && !live.voiceListening ? 'listening' : state);
   if (DIRECTOR_STATE[state]) director.setState(DIRECTOR_STATE[state]);
   stage?.setActivity({ energy: ENERGY[state] ?? 0 });
@@ -1063,6 +1075,7 @@ function renderAttachments() {
   }));
 }
 $('#btn-attach').addEventListener('click', () => $('#file-input').click());
+initCamera({ button: $('#btn-camera'), input: $('#camera-input'), native: MOBILE || /Android|iPhone|iPad/i.test(navigator.userAgent), onFiles: addFiles, onError: e => toast(e.message) });
 // 粘贴截图 / 图片
 $('#prompt').addEventListener('paste', (e) => {
   const imgs = [...(e.clipboardData?.items ?? [])].filter((it) => it.kind === 'file' && it.type.startsWith('image/')).map((it) => it.getAsFile()).filter(Boolean);
@@ -1103,9 +1116,11 @@ function onWake() {
 
 // 语音识别：网页版优先用浏览器自带识别；桌面版（Electron 没有浏览器识别）或用户指定时走云端转写
 const browserSR = speechRecognitionSupported && !window.jarvisDesktop && !MOBILE; // 桌面版、手机 App 里的浏览器识别都用不了
+const callStatus = text => { $('#voice-call-status').textContent = text; };
 const sttEngine = () => resolveStt(llmConfig, { gateway, browserSupported: browserSR });
 const voiceHandlers = {
   onConfirm: () => {
+    if (callActive) callStatus('正在听你说话…');
     if (asleep()) return;
     live.voiceListening = true;
     if (!active) director.setState('voice');
@@ -1117,6 +1132,7 @@ const voiceHandlers = {
   onCancel: () => endListening(),
   onInterim: (t) => { if (!asleep() || matchWake(t).woke) transcript.interim(t); },
   onFinal: (t) => {
+    if (callActive) callStatus('未央正在思考…');
     endListening();
     transcript.clearInterim();
     if (!settings.wakeWord) return send(t);
@@ -1143,6 +1159,8 @@ const voiceHandlers = {
     $('#inputbar').style.setProperty('--e', e.toFixed(2));
   },
   onMode: (m) => {
+    if (m === 'off' && callActive && !callStarting) queueMicrotask(() => setVoiceCall(false));
+    if (callActive) callStatus(m === 'off' ? '语音已停止' : m === 'loading' ? '正在准备语音…' : m === 'ptt' ? '按住麦克风说话，松开后回复' : '直接说话，未央在听');
     $('#voice-status').textContent = {
       off: '',
       loading: '正在加载本地语音活动检测模型…',
@@ -1151,7 +1169,9 @@ const voiceHandlers = {
     }[m];
     $('#btn-mic').setAttribute('aria-pressed', String(m !== 'off'));
     body.classList.toggle('voice-on', m !== 'off');
+    body.classList.toggle('voice-ptt', m === 'ptt');
     $('#btn-mic').title = m === 'ptt' ? '按住说话' : '直接对话';
+    $('#btn-mic').setAttribute('aria-label', m === 'ptt' ? '按住说话，松开提交' : '直接对话');
   },
   onError: (code) => {
     toast(code === 'not-allowed' ? '麦克风权限被拒绝' : /^语音识别/.test(code) ? code : `语音识别出错：${code}`);
@@ -1196,12 +1216,56 @@ async function setDirectVoice(on) {
       if (/云端语音识别/.test(err.message)) showPanel('models');
       setSetting('directVoice', false);
       $('#set-voice').checked = false;
+      return false;
     }
   } else {
     voice.disable();
     endListening();
   }
+  return true;
 }
+
+/** 语音通话临时开启朗读并关闭唤醒词，结束后恢复原来的偏好。 */
+async function setVoiceCall(on) {
+  if (on && (callStarting || callActive)) return;
+  const gen = ++callGeneration;
+  if (!on) {
+    callActive = false;
+    $('#voice-call-panel').hidden = true;
+    $('#btn-call').setAttribute('aria-pressed', 'false');
+    $('#btn-call').setAttribute('aria-label', '开始语音对话');
+    speaker.cancel();
+    if (callRestore) {
+      settings.speechOutput = callRestore.speechOutput;
+      settings.wakeWord = callRestore.wakeWord;
+      speaker.enabled = settings.speechOutput;
+      $('#set-tts').checked = settings.speechOutput;
+      callRestore = null;
+    }
+    await setDirectVoice(false);
+    return;
+  }
+  callStarting = true;
+  callActive = true;
+  callRestore = { speechOutput: settings.speechOutput, wakeWord: settings.wakeWord };
+  settings.speechOutput = true;
+  settings.wakeWord = false;
+  speaker.enabled = true;
+  speaker.unlock();
+  $('#set-tts').checked = true;
+  $('#voice-call-panel').hidden = false;
+  $('#btn-call').setAttribute('aria-pressed', 'true');
+  $('#btn-call').setAttribute('aria-label', '结束语音对话');
+  callStatus('正在连接语音…');
+  try {
+    const ok = await setDirectVoice(true);
+    if (gen !== callGeneration) { await setDirectVoice(false); return; }
+    if (!ok) await setVoiceCall(false);
+    else callStatus(voice.mode === 'ptt' ? '按住麦克风说话，松开后回复' : '直接说话，未央在听');
+  } finally { callStarting = false; }
+}
+$('#btn-call').addEventListener('click', () => setVoiceCall(!callActive));
+$('#btn-call-end').addEventListener('click', () => setVoiceCall(false));
 
 // “检测语音”：逐项检查麦克风 / 系统识别 / 云端转写 / 语音检测模型，告诉用户卡在哪一步
 async function checkVoice() {
@@ -1284,6 +1348,7 @@ if (!browserSR && !window.jarvisDesktop && !MOBILE && sttEngine() === 'none') {
   setSetting('directVoice', false);
 }
 mic.addEventListener('click', () => {
+  if (callActive) { setVoiceCall(false); return; }
   if (voice.mode === 'ptt') return;
   setDirectVoice(voice.mode === 'off');
 });
@@ -1612,7 +1677,7 @@ $('#btn-fullscreen').addEventListener('click', () => {
 
 
 $('#set-face').addEventListener('change', (e) => setFaceFollow(e.target.checked));
-$('#set-voice').addEventListener('change', (e) => setDirectVoice(e.target.checked));
+$('#set-voice').addEventListener('change', (e) => callActive && !e.target.checked ? setVoiceCall(false) : setDirectVoice(e.target.checked));
 $('#set-wake').addEventListener('change', (e) => { setSetting('wakeWord', e.target.checked); wake.sleep(); });
 $('#set-tts').addEventListener('change', (e) => {
   setSetting('speechOutput', e.target.checked);
@@ -2062,6 +2127,7 @@ window.__jarvis = {
 
 // 工作台界面只用在电脑上；手机 App 保留自己的界面（底部输入、左侧抽屉菜单、整页面板）
 if (!COMPACT) initWorkbench({showPanel,newSession,openSession,getSession:()=>session,getRunning:()=>active?session.id:null,openFile:openInWorkspace});
+mascots = initMascots();
 
 // 手机启动页：界面准备好、并且至少显示了 2 秒后淡出（太快一闪而过不像 App）
 {

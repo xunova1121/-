@@ -36,7 +36,7 @@ export function initVoicePanel({ panels, speaker, getGateway }) {
     const notes = [];
     if (v.engine === 'auto') notes.push(`当前使用：${e.name}`);
     if (e.id === 'browser') {
-      notes.push('浏览器自带声音拿不到音频流，无法加声线效果；Edge 浏览器的“Yunjian / Yunxi (Natural)”是免费声音里最自然的。要电影感的声线，请选云端语音。');
+      notes.push('默认优先选择中文童声，其次是温柔中文声音。手机实际音色取决于已安装的系统朗读引擎；没有童声时会轻微调高音调，不能保证与云端音色相同。');
     } else if (!e.browser && !gateway) {
       notes.push(`${e.name} 不允许浏览器直接调用，需要用完整版（本机网关）。`);
     }

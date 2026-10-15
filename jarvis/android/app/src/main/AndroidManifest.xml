@@ -53,6 +53,10 @@
 
     <!-- 朗读：Android 11+ 需要声明才能找到系统的 TTS 引擎 -->
     <queries>
+        <!-- Android 11+：拍照附件需要能找到系统相机。 -->
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>

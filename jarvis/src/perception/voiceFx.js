@@ -11,6 +11,10 @@
 
 /** 声线预设：数值都是“轻微”的——要的是电影里那种有质感的人声，不是机器人怪声 */
 export const FX_PRESETS = {
+  gentle: {
+    name: '未央 · 温柔童声', desc: '优先使用童声音色，轻柔明亮，减少低频和机械回声',
+    detune: 50, highpass: 100, lowpass: 16000, lowGain: -1, presence: .8, chorus: 0, ring: 0, ringHz: 0, reverb: .025, decay: .35, stereo: 0
+  },
   jarvis: {
     name: '未央 · 管家', desc: '沉稳、略低沉，带一点点空间与双声部光泽',
     detune: -70, highpass: 90, lowpass: 12000, lowGain: 2.5, presence: 3, chorus: 0.16, ring: 0, ringHz: 0, reverb: 0.1, decay: 0.7, stereo: 0.25

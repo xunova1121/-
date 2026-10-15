@@ -400,9 +400,9 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   // —— 科幻声线：云端语音（假服务）→ 效果链 → 真实音量驱动光核
   check('有本机网关、没有付费语音密钥时，自动选免费的 Edge 朗读', /当前使用：Edge 朗读/.test(await page.textContent('#tts-note')) && (await page.locator('#tts-voice option').count()) >= 8, await page.textContent('#tts-note'));
   await page.selectOption('#tts-engine', 'browser');
-  check('默认声线：未央；浏览器声音时效果不可用', await page.evaluate(() => {
+  check('默认声线：温柔童声；浏览器声音时效果不可用', await page.evaluate(() => {
     const on = document.querySelector('#tts-fx [aria-checked="true"]');
-    return on?.value === 'jarvis' && on.disabled;
+    return on?.value === 'gentle' && on.disabled;
   }));
   const tts = await fakeTTS();
   await page.selectOption('#tts-engine', 'custom');

@@ -1,5 +1,6 @@
 /** Edge 在线朗读里适合未央的声音（中文为主，带两个英式男声）。前端与网关共用 */
 export const EDGE_VOICES = [
+  ['zh-CN-YunxiaNeural', '云夏 · 温柔少年童声（默认）'],
   ['zh-CN-YunyangNeural', '云扬 · 沉稳播音男声'],
   ['zh-CN-YunxiNeural', '云希 · 年轻男声'],
   ['zh-CN-YunjianNeural', '云健 · 浑厚男声'],

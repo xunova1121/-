@@ -7,12 +7,13 @@ import { createOpenAIAdapter } from './openai.js';
 import { createAnthropicAdapter } from './anthropic.js';
 import { createResponsesAdapter } from './responses.js';
 import { createMockAdapter } from './mock.js';
+import { GENTLE_VOICES } from '../perception/voiceProfile.js';
 
 const KEY = 'jarvis.llm.v1';
 const store = (() => { try { return globalThis.localStorage ?? null; } catch { return null; } })();
 
 /** 语音：engine 为 auto 时按已有密钥自动挑最自然的云端声音，都没有就用浏览器自带 */
-export const DEFAULT_VOICE = { engine: 'auto', voices: {}, fx: 'jarvis', cues: true, browserVoice: '', customURL: '', customModel: '', customVoice: '' };
+export const DEFAULT_VOICE = { engine: 'auto', voices: GENTLE_VOICES, profile: 'gentle-child', fx: 'gentle', cues: true, browserVoice: '', customURL: '', customModel: '', customVoice: '' };
 export const DEFAULT_STT = { engine: 'auto', customURL: '', customModel: '' };
 export const DEFAULT_CONFIG = { provider: 'mock', models: {}, keys: {}, baseURLs: {}, claudeWebSearch: true, tavilyKey: '', bochaKey: '', voice: DEFAULT_VOICE, stt: DEFAULT_STT };
 
@@ -30,7 +31,9 @@ export function loadConfig() {
     }
   } catch { /* ignore */ }
   if (!providerById(cfg.provider)) cfg.provider = 'mock';
-  cfg.voice = { ...DEFAULT_VOICE, ...(cfg.voice || {}), voices: { ...(cfg.voice?.voices || {}) } };
+  const oldVoice = cfg.voice || {};
+  const wasDefault = !oldVoice.profile && !oldVoice.browserVoice && !Object.keys(oldVoice.voices || {}).length;
+  cfg.voice = { ...DEFAULT_VOICE, ...oldVoice, ...(wasDefault && oldVoice.fx === 'jarvis' ? { fx: 'gentle' } : {}), voices: { ...GENTLE_VOICES, ...(oldVoice.voices || {}) } };
   cfg.stt = { ...DEFAULT_STT, ...(cfg.stt || {}) };
   return cfg;
 }

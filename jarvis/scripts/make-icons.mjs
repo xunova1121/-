@@ -31,7 +31,7 @@ for (const [d, k] of Object.entries(dpi)) {
   jobs.push([path.join(dir, 'ic_launcher_foreground.png'), 108 * k, 108 * k, { shape: 'none', scale: 0.56 }]); // 自适应图标只保证中间 66/108 可见
 }
 
-const browser = await chromium.launch();
+const browser = await chromium.launch({ ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } : {}) });
 const page = await browser.newPage();
 for (const [file, w, h, opt] of jobs) {
   await page.setViewportSize({ width: w, height: h });

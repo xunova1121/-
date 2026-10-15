@@ -8,6 +8,7 @@
  */
 import { buildFx, levelOf, playCue } from './voiceFx.js';
 import { synthesize, ttsEngineById, rankBrowserVoices } from './tts.js';
+import { browserDelivery } from './voiceProfile.js';
 
 // 用时再取：安卓 App 启动时才补上 speechSynthesis（见 src/mobile/speechShim.js）
 const synth = { get getVoices() { return globalThis.speechSynthesis.getVoices.bind(globalThis.speechSynthesis); }, get addEventListener() { return globalThis.speechSynthesis.addEventListener?.bind(globalThis.speechSynthesis); }, cancel: () => globalThis.speechSynthesis.cancel(), speak: (u) => globalThis.speechSynthesis.speak(u) };
@@ -93,7 +94,7 @@ export class Speaker {
   }
 
   /** 试听：用当前配置读一句 */
-  preview(text = '您好，我是未央。所有系统运行正常，随时为您效劳。') {
+  preview(text = '你好呀，我是未央。慢慢说，我在听呢。') {
     this.cancel();
     this.unlock();
     const was = this.enabled;
@@ -145,9 +146,9 @@ export class Speaker {
       const chosen = vc.browserVoice && this.voices.find((v) => v.name === vc.browserVoice);
       const voice = chosen || this.voice;
       u.lang = voice?.lang || this.lang;
-      // 默认声音略压低、放慢一点，减少“播报腔”
-      u.rate = this.rate;
-      u.pitch = this.pitch * 0.92;
+      const delivery = browserDelivery(voice, { rate: this.rate, pitch: this.pitch, profile: vc.profile });
+      u.rate = delivery.rate;
+      u.pitch = delivery.pitch;
       if (voice) u.voice = voice;
       let done = false;
       const end = () => { if (!done) { done = true; resolve(); } };

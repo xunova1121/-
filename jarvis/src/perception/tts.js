@@ -14,8 +14,8 @@ import { EDGE_VOICES } from '../../shared/edgeVoices.js';
 
 /** 给 gpt-4o-mini-tts 的“表演指导”：要像电影里的 AI 管家，而不是导航播报 */
 export const DIRECTION = [
-  'Voice: a calm, precise, quietly confident AI butler from a science-fiction film.',
-  'Delivery: natural and human, warm but composed; subtle dry wit; never robotic, never sing-song, no announcer tone.',
+  'Voice: a gentle, youthful, childlike AI companion with a soft, bright and comforting tone.',
+  'Delivery: natural and human, kind and patient; never robotic, never shrill, never sing-song, no announcer tone. Do not imitate any real person.',
   'Pacing: unhurried, with natural pauses between clauses. Speak Chinese with standard Mandarin pronunciation.'
 ].join(' ');
 
@@ -27,7 +27,7 @@ export const TTS_ENGINES = [
   },
   {
     id: 'openai', name: 'OpenAI 语音（可导演语气）', keyFrom: 'openai', model: 'gpt-4o-mini-tts', browser: true, keyUrl: 'https://platform.openai.com/api-keys',
-    voices: [['onyx', 'Onyx · 低沉男声'], ['ash', 'Ash · 沉稳男声'], ['echo', 'Echo · 清朗男声'], ['fable', 'Fable · 英式男声'], ['verse', 'Verse · 磁性男声'], ['sage', 'Sage · 知性女声'], ['nova', 'Nova · 明亮女声']]
+    voices: [['nova', 'Nova · 温柔明亮（默认）'], ['onyx', 'Onyx · 低沉男声'], ['ash', 'Ash · 沉稳男声'], ['echo', 'Echo · 清朗男声'], ['fable', 'Fable · 英式男声'], ['verse', 'Verse · 磁性男声'], ['sage', 'Sage · 知性女声']]
   },
   {
     id: 'elevenlabs', name: 'ElevenLabs（最接近真人）', keyFrom: 'elevenlabs', model: 'eleven_multilingual_v2', browser: true, keyUrl: 'https://elevenlabs.io/app/settings/api-keys',
@@ -44,17 +44,17 @@ export const TTS_ENGINES = [
 export const ttsEngineById = (id) => TTS_ENGINES.find((e) => e.id === id);
 
 /**
- * 浏览器自带声音排序：神经网络（Natural / Neural / Online）> 男声（更像未央）> 中文 > 其他。
- * Edge 浏览器的“Yunjian / Yunxi (Natural)”是免费声音里最自然的。
+ * 浏览器自带声音排序：中文童声 > 自然的温柔中文声音 > 其他中文声音。
  */
 export function rankBrowserVoices(voices) {
   const score = (v) => {
     const n = v.name;
     const lang = (v.lang || '').replace('_', '-');
     let s = 0;
-    if (/^zh-CN/i.test(lang)) s += 40; else if (/^zh/i.test(lang)) s += 25; else if (/^en/i.test(lang)) s += 5; else s -= 100;
+    if (/^zh-CN/i.test(lang)) s += 100; else if (/^zh/i.test(lang)) s += 80; else if (/^en/i.test(lang)) s += 5; else s -= 100;
     if (/Natural|Neural|Online/i.test(n)) s += 30;
-    if (/Yunjian|Yunxi|Yunyang|Yunze|Yunfeng|Yunhao|Kangkang|Daniel|Guy|Ryan|Christopher/i.test(n)) s += 12;
+    if (/Yunxia|Xiaoshuang|Xiaoyou|童声|child|kid/i.test(n)) s += 50;
+    else if (/Xiaoxiao|Xiaoyi|Xiaomeng|Xiaohan|温柔|女声|female/i.test(n)) s += 14;
     if (/Google/i.test(n)) s += 6;
     if (/Huihui|compact|eSpeak/i.test(n)) s -= 8;
     return s;

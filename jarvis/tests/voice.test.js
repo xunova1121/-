@@ -86,7 +86,7 @@ describe('语音引擎选择', () => {
   it('手动选择优先', () => {
     expect(resolveVoice(cfg({ openai: 'k' }, 'browser')).engine).toBe('browser');
   });
-  it('浏览器声音：神经网络声音、中文男声排前面', () => {
+  it('浏览器声音：优先温柔中文声音，不选不支持的语言', () => {
     const vs = [
       { name: 'Microsoft Huihui - Chinese (Simplified, PRC)', lang: 'zh-CN' },
       { name: 'Google 普通话（中国大陆）', lang: 'zh-CN' },
@@ -95,8 +95,8 @@ describe('语音引擎选择', () => {
       { name: 'Thomas', lang: 'fr-FR' }
     ];
     const r = rankBrowserVoices(vs).map((v) => v.name);
-    expect(r[0]).toMatch(/Yunjian/);
-    expect(r[1]).toMatch(/Xiaoxiao/);
+    expect(r[0]).toMatch(/Xiaoxiao/);
+    expect(r[1]).toMatch(/Yunjian/);
     expect(r).not.toContain('Thomas');
   });
 });

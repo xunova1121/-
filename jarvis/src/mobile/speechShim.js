@@ -8,12 +8,14 @@ export function installSpeechShim(tts, g = globalThis) {
     constructor(text = '') { Object.assign(this, { text, lang: 'zh-CN', rate: 1, pitch: 1, volume: 1, voice: null, onstart: null, onend: null, onerror: null, onboundary: null }); }
   }
   let current = null;
+  let voices = [];
+  const listeners = new Set();
   const synth = {
     speaking: false,
     pending: false,
-    getVoices: () => [],
-    addEventListener() {},
-    removeEventListener() {},
+    getVoices: () => voices,
+    addEventListener(type, fn) { if (type === 'voiceschanged') listeners.add(fn); },
+    removeEventListener(type, fn) { if (type === 'voiceschanged') listeners.delete(fn); },
     speak(u) {
       const prev = current;
       current = u;
@@ -23,7 +25,8 @@ export function installSpeechShim(tts, g = globalThis) {
         if (current !== u) return u.onend?.({});
         u.onstart?.({});
         try {
-          await tts.speak({ text: u.text, lang: u.lang || 'zh-CN', rate: u.rate ?? 1, pitch: u.pitch ?? 1, volume: u.volume ?? 1, category: 'playback' });
+          const selected = Number.isInteger(u.voice?.nativeIndex) ? { voice: u.voice.nativeIndex } : {};
+          await tts.speak({ text: u.text, lang: u.lang || 'zh-CN', rate: u.rate ?? 1, pitch: u.pitch ?? 1, volume: u.volume ?? 1, category: 'playback', ...selected });
           u.onend?.({});
         } catch (e) {
           u.onerror?.({ error: String(e?.message || e) });
@@ -45,5 +48,11 @@ export function installSpeechShim(tts, g = globalThis) {
   };
   g.SpeechSynthesisUtterance = Utterance;
   g.speechSynthesis = synth;
+  if (typeof tts.getSupportedVoices === 'function') {
+    Promise.resolve().then(() => tts.getSupportedVoices()).then(result => {
+      voices = (result?.voices || []).map((v, nativeIndex) => ({ ...v, nativeIndex }));
+      for (const fn of listeners) fn();
+    }).catch(() => {}); // 没有声音目录时仍然能调用系统默认朗读
+  }
   return true;
 }
