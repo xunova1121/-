@@ -40,7 +40,7 @@ describe('搜索用电脑版页面', () => {
   it('读搜索结果页带电脑浏览器的请求头（手机请求头会拿到手机版页面，解析不出结果）', async () => {
     const inits = [];
     const s = createSearch({ searchRegion: 'cn', fetchViaGateway: async (url, init) => { inits.push(init); return new Response('<html></html>'); } });
-    await s.search('南京 天气');
+    await s.search('南京 天气').catch(() => {}); // 空页面：都没结果，会报原因
     expect(inits.length).toBeGreaterThan(0);
     for (const i of inits) expect(i.headers['User-Agent']).toMatch(/Windows NT/);
     expect(DESKTOP_HEADERS['User-Agent']).not.toMatch(/Mobile|Android/);

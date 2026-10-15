@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseBing, parseDuckDuckGo, unwrapBing, createSearch } from '../src/agent/webSearch.js';
+import { parseBing, parseDuckDuckGo, unwrapBing, createSearch, parseBingRss, bingRssUrl } from '../src/agent/webSearch.js';
 import { deepResearch, parseJson, extractive } from '../src/agent/research.js';
 
 const b64 = (s) => Buffer.from(s).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -34,8 +34,9 @@ describe('免密钥搜索结果解析', () => {
     const asked = [];
     const s = createSearch({ searchRegion: 'global', fetchViaGateway: async (url) => { asked.push(url); return new Response(/bing/.test(url) ? '<html>验证</html>' : DDG); } });
     const hits = await s.search('ollama 本机模型');
-    expect(asked[0]).toMatch(/^https:\/\/cn\.bing\.com\/search\?q=ollama/);
-    expect(asked[1]).toMatch(/duckduckgo/);
+    expect(asked[0]).toMatch(/^https:\/\/cn\.bing\.com\/search\?format=rss&q=ollama/); // 先用必应 RSS
+    expect(asked[1]).toMatch(/^https:\/\/cn\.bing\.com\/search\?q=ollama/);
+    expect(asked[2]).toMatch(/duckduckgo/);
     expect(hits[0].url).toBe('https://github.com/ollama/ollama');
   });
 });
@@ -192,7 +193,7 @@ describe('国内搜索源', () => {
     const asked = [];
     const s = createSearch({ searchRegion: 'cn', fetchViaGateway: async (url) => { asked.push(new URL(url).host); return new Response(/baidu/.test(url) ? BAIDU : /so\.com/.test(url) ? SO : '<html>验证</html>'); } });
     const hits = await s.search('竞彩 赛果 周一', 6);
-    expect(asked).toEqual(['cn.bing.com', 'www.baidu.com', 'www.so.com']);
+    expect(asked).toEqual(['cn.bing.com', 'cn.bing.com', 'www.baidu.com', 'www.so.com']); // 必应 RSS、必应网页、百度、360
     expect(hits.map((h) => new URL(h.url).host)).toEqual(['sports.sina.com.cn', 'www.baidu.com', 'www.dongqiudi.com']);
     expect(s.name).toMatch(/百度/);
   });
@@ -218,5 +219,63 @@ describe('国内用户：Tavily 和国内网站一起用', () => {
   it('提示词：时差按事件当地时间换算，体彩“周一”是销售日', () => {
     expect(STABLE_PROMPT).toMatch(/时差/);
     expect(STABLE_PROMPT).toMatch(/销售日/);
+  });
+});
+
+describe('必应 RSS 和搜不到时的原因', () => {
+  const RSS = `<?xml version="1.0"?><rss><channel><title>Bing: 南京</title><item><title>南京市 - 百科</title><link>https://baike.example.com/nanjing</link><description>南京，简称“宁”，江苏省省会。</description></item><item><title>坏链接</title><link>javascript:void(0)</link></item></channel></rss>`;
+  it('解析必应 RSS', () => {
+    expect(parseBingRss(RSS)).toEqual([{ title: '南京市 - 百科', url: 'https://baike.example.com/nanjing', snippet: '南京，简称“宁”，江苏省省会。' }]);
+    expect(bingRssUrl('南京', 'cn')).toBe('https://cn.bing.com/search?format=rss&q=%E5%8D%97%E4%BA%AC&count=10&setlang=zh-Hans');
+  });
+  it('RSS 有结果就不用再读网页', async () => {
+    const asked = [];
+    const s = createSearch({ searchRegion: 'cn', fetchViaGateway: async (url) => { asked.push(url); return new Response(RSS.replace('</channel>', RSS.match(/<item>[\s\S]*?<\/item>/)[0].replace(/nanjing/g, 'a') + RSS.match(/<item>[\s\S]*?<\/item>/)[0].replace(/nanjing/g, 'b') + RSS.match(/<item>[\s\S]*?<\/item>/)[0].replace(/nanjing/g, 'c') + '</channel>')); } });
+    const hits = await s.search('南京');
+    expect(asked).toHaveLength(1);
+    expect(hits).toHaveLength(4);
+  });
+  it('都没结果时逐个说明原因（被拦 / 出错 / 连不上）', async () => {
+    const s = createSearch({ searchRegion: 'cn', fetchViaGateway: async (url) => {
+      if (/format=rss/.test(url)) return new Response('<rss><channel></channel></rss>');
+      if (/bing/.test(url)) return new Response('<html><title>必应</title></html>');
+      if (/baidu/.test(url)) return new Response('<html><title>百度安全验证</title>请完成安全验证</html>');
+      throw new Error('timeout');
+    } });
+    const err = await s.search('南京 新闻').catch((e) => e.message);
+    expect(err).toMatch(/必应 RSS：0 条/);
+    expect(err).toMatch(/必应中国：0 条（HTTP 200，1KB，页面标题“必应”）/);
+    expect(err).toMatch(/百度：被拦截（出现验证页“百度安全验证”）/);
+    expect(err).toMatch(/360：连不上（timeout）/);
+    expect(err).toMatch(/博查/);
+  });
+});
+
+
+describe('博查搜索', () => {
+  const BOCHA = { code: 200, data: { webPages: { value: [{ name: '南京新闻', url: 'https://news.example.cn/1', snippet: '短摘要', summary: '更长的摘要' }] } } };
+  it('请求格式、结果解析；中文先走博查，不够再用国内网站补', async () => {
+    const asked = [];
+    const s = createSearch({ bochaKey: 'sk-test', searchRegion: 'cn', fetchViaGateway: async (url, init) => {
+      asked.push([new URL(url).host, init]);
+      return new Response(/bochaai/.test(url) ? JSON.stringify(BOCHA) : '<rss><channel></channel></rss>');
+    } });
+    const hits = await s.search('南京 新闻', 6, { freshness: 'week' });
+    const [host, init] = asked[0];
+    expect(host).toBe('api.bochaai.com');
+    expect(init.headers.Authorization).toBe('Bearer sk-test');
+    expect(JSON.parse(init.body)).toMatchObject({ query: '南京 新闻', summary: true, freshness: 'oneWeek' });
+    expect(hits[0]).toEqual({ title: '南京新闻', url: 'https://news.example.cn/1', snippet: '更长的摘要' });
+    expect(asked.length).toBeGreaterThan(1); // 只有 1 条，不够 3 条，再用免密钥补
+    expect(s.name).toMatch(/^博查 \+ /);
+  });
+  it('博查出错（余额不足等）时用免密钥的结果，并且不会整个报错', async () => {
+    const RSS = `<rss><channel>${[1, 2, 3].map((i) => `<item><title>t${i}</title><link>https://x.example/${i}</link><description>d</description></item>`).join('')}</channel></rss>`;
+    const s = createSearch({ bochaKey: 'sk', searchRegion: 'cn', fetchViaGateway: async (url) => (/bochaai/.test(url) ? new Response(JSON.stringify({ code: 403, msg: '余额不足' }), { status: 403 }) : new Response(RSS)) });
+    expect((await s.search('南京')).map((h) => h.title)).toEqual(['t1', 't2', 't3']);
+  });
+  it('都失败时报出各自的原因', async () => {
+    const s = createSearch({ bochaKey: 'sk', searchRegion: 'cn', fetchViaGateway: async (url) => (/bochaai/.test(url) ? new Response(JSON.stringify({ code: 401, msg: 'Invalid API KEY' }), { status: 401 }) : new Response('')) });
+    await expect(s.search('南京')).rejects.toThrow(/博查返回 401：Invalid API KEY[\s\S]*必应 RSS：0 条/);
   });
 });

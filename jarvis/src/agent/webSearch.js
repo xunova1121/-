@@ -1,8 +1,11 @@
 /**
  * 联网搜索：
- *   - 填了 Tavily Key：用 Tavily（结果质量最好，带摘要）
+ *   - 填了博查 Key：用博查（国内的 AI 搜索接口，中文结果好、稳定）
+ *   - 填了 Tavily Key：用 Tavily（国外，英文结果好，带摘要）
  *   - 没填但能直接上网（桌面版经本机网关、手机 App 用系统网络）：读取搜索结果页，免密钥。
+ *     先用必应的 RSS 结果（固定的 XML 格式，不受网页改版影响），不够再读网页：
  *     按网络判断地区：在国内（访问不了谷歌，或时区在中国）用必应中国、百度、360，在国外用必应、DuckDuckGo
+ *     一条都没拿到时，报告每个来源的情况（HTTP 状态、是否验证页），方便查原因
  *   - 都没有：不提供搜索
  * 结果统一为 [{ title, url, snippet }]
  */
@@ -45,6 +48,37 @@ export function parseBing(html) {
     out.push({ title: decode(a[2]), url, snippet: decode(p?.[1] ?? '').replace(/^(\d{4}年\d{1,2}月\d{1,2}日|[A-Z][a-z]{2} \d{1,2}, \d{4})\s*[·\-–]\s*/, '') });
   }
   return out;
+}
+
+/** 必应 RSS（format=rss）：<item><title/><link/><description/></item> */
+export function parseBingRss(xml) {
+  const out = [];
+  for (const m of String(xml).matchAll(/<item>([\s\S]*?)<\/item>/g)) {
+    const tag = (n) => decode((m[1].match(new RegExp(`<${n}>([\\s\\S]*?)<\/${n}>`))?.[1] ?? '').replace(/^<!\[CDATA\[|\]\]>$/g, ''));
+    const url = tag('link');
+    if (!/^https?:/.test(url)) continue;
+    out.push({ title: tag('title'), url, snippet: tag('description').slice(0, 300) });
+  }
+  return out;
+}
+
+/** 必应 RSS 地址（地区、语言、时间筛选和网页版一样） */
+export function bingRssUrl(query, region, freshness = '', now = Date.now()) {
+  const q = encodeURIComponent(query);
+  const zh = /[\u4e00-\u9fff]/.test(query);
+  const host = region === 'cn' || zh ? 'cn.bing.com' : 'www.bing.com';
+  const lang = zh ? '&setlang=zh-Hans' : region === 'cn' ? '&ensearch=1' : '';
+  return `https://${host}/search?format=rss&q=${q}&count=10${lang}${freshParams(freshness, now).bing}`;
+}
+
+/** 搜不到时说清楚每个来源怎么了：被拦（验证页）、出错，还是页面里没认出结果 */
+export function describeSource(name, status, body, hits) {
+  const text = String(body ?? '');
+  const kb = `${Math.max(1, Math.round(text.length / 1024))}KB`;
+  const title = decode(text.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? '').slice(0, 30);
+  if (/安全验证|验证码|人机验证|captcha|unusual traffic|异常访问|访问过于频繁/i.test(text)) return `${name}：被拦截（出现验证页${title ? `“${title}”` : ''}）`;
+  if (status && status >= 400) return `${name}：HTTP ${status}`;
+  return `${name}：${hits} 条（HTTP ${status || 200}，${kb}${title ? `，页面标题“${title}”` : ''}）`;
 }
 
 export function parseDuckDuckGo(html) {
@@ -160,26 +194,52 @@ export function searchPlan(query, region, freshness = '', now = Date.now()) {
 }
 
 /**
- * @param {{ tavilyKey?: string, fetchViaGateway?: (url: string, init?: object) => Promise<Response> }} ctx
+ * @param {{ bochaKey?: string, tavilyKey?: string, fetchViaGateway?: (url: string, init?: object) => Promise<Response>, searchRegion?: string }} ctx
  * @returns {{ name: string, search: (query: string, n?: number) => Promise<Array<{title,url,snippet}>> } | null}
  */
-export function createSearch({ tavilyKey, fetchViaGateway, searchRegion = 'auto' } = {}) {
+export function createSearch({ bochaKey, tavilyKey, fetchViaGateway, searchRegion = 'auto' } = {}) {
   const keyless = keylessSearch(fetchViaGateway, searchRegion);
+  const bocha = bochaKey ? bochaSearch(bochaKey, fetchViaGateway) : null;
   const tavily = tavilyKey ? tavilySearch(tavilyKey, fetchViaGateway) : null;
-  if (tavily && keyless) {
-    // 国内用户：中文搜索词走国内网站（Tavily 的中文结果多是港台和海外网站），其余走 Tavily；一边没结果再试另一边
-    return {
-      get name() { return `Tavily + ${keyless.name}`; },
-      regionNow: keyless.regionNow,
-      async search(query, n = 6, opts = {}) {
-        const domestic = /[\u4e00-\u9fff]/.test(query) && (await keyless.regionNow()) === 'cn';
-        const [first, second] = domestic ? [keyless, tavily] : [tavily, keyless];
-        const hits = await first.search(query, n, opts).catch(() => []);
-        return hits.length >= Math.min(3, n) ? hits : [...hits, ...(await second.search(query, n, opts).catch(() => []))].filter((h, i, a) => a.findIndex((x) => x.url === h.url) === i).slice(0, n);
+  const all = [bocha, tavily, keyless].filter(Boolean);
+  if (all.length <= 1) return all[0] ?? null;
+  // 中文搜索词（国内用户）：博查 → 国内网站 → Tavily（Tavily 的中文结果多是港台和海外网站）；
+  // 其他：Tavily → 博查 → 免密钥。前一个结果不够或出错时用后一个补上
+  return {
+    get name() { return all.map((e) => e.name).join(' + '); },
+    regionNow: keyless?.regionNow,
+    async search(query, n = 6, opts = {}) {
+      const zh = /[\u4e00-\u9fff]/.test(query);
+      const domestic = zh && (!keyless || (await keyless.regionNow()) === 'cn');
+      const order = (domestic ? [bocha, keyless, tavily] : [tavily, bocha, keyless]).filter(Boolean);
+      const hits = [];
+      const errors = [];
+      for (const e of order) {
+        try {
+          for (const h of await e.search(query, n, opts)) if (!hits.some((x) => x.url === h.url)) hits.push(h);
+        } catch (err) { errors.push(`${e.name}：${err.message}`); }
+        if (hits.length >= Math.min(3, n)) break;
       }
-    };
-  }
-  return tavily || keyless;
+      if (!hits.length && errors.length) throw new Error(errors.join('；'));
+      return hits.slice(0, n);
+    }
+  };
+}
+
+/** 博查（bochaai.com）：国内的网页搜索接口，按次计费，需要 Key */
+const BOCHA_FRESH = { day: 'oneDay', week: 'oneWeek', month: 'oneMonth', year: 'oneYear' };
+function bochaSearch(key, fetchViaGateway) {
+  return {
+    name: '博查',
+    async search(query, n = 6, { freshness = '' } = {}) {
+      const url = 'https://api.bochaai.com/v1/web-search';
+      const init = { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body: JSON.stringify({ query, count: Math.min(10, Math.max(n, 5)), summary: true, freshness: BOCHA_FRESH[freshness] ?? 'noLimit' }) };
+      const res = fetchViaGateway ? await fetchViaGateway(url, init) : await fetch(url, init);
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || (j.code && j.code !== 200)) throw new Error(`博查返回 ${j.code || res.status}${j.msg ? `：${j.msg}` : ''}`);
+      return (j.data?.webPages?.value ?? []).map((r) => ({ title: r.name, url: r.url, snippet: String(r.summary || r.snippet || '').slice(0, 400) })).slice(0, n);
+    }
+  };
 }
 
 function tavilySearch(tavilyKey, fetchViaGateway) {
@@ -211,19 +271,23 @@ function keylessSearch(fetchViaGateway, searchRegion) {
     get name() { return region === 'cn' ? '必应中国、百度、360（国内）' : region === 'global' ? '必应、DuckDuckGo' : '按网络自动选择（国内：必应中国、百度、360；国外：必应、DuckDuckGo）'; },
     regionNow,
     async search(query, n = 6, { freshness = '' } = {}) {
-      const plan = searchPlan(query, await regionNow(), freshness);
+      const region = await regionNow();
+      const plan = [['必应 RSS', bingRssUrl(query, region, freshness), parseBingRss], ...searchPlan(query, region, freshness)];
       // 一个来源结果太少（被拦、只有广告）时再查下一个，合并去重
-      let lastErr = null;
+      const notes = [];
       const hits = [];
-      for (const [, url, parse] of plan) {
+      for (const [name, url, parse] of plan) {
+        let status = 0, body = '', got = 0;
         try {
           const res = await fetchViaGateway(url, { headers: DESKTOP_HEADERS });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          for (const h of parse(await res.text())) if (!hits.some((x) => x.url === h.url)) hits.push(h);
-          if (hits.length >= Math.min(4, n)) break;
-        } catch (e) { lastErr = e; }
+          status = res.status;
+          body = await res.text();
+          if (res.ok) for (const h of parse(body)) if (!hits.some((x) => x.url === h.url)) { hits.push(h); got++; }
+          notes.push(describeSource(name, status, body, got));
+        } catch (e) { notes.push(`${name}：连不上（${e.message}）`); }
+        if (hits.length >= Math.min(4, n)) break;
       }
-      if (!hits.length && lastErr) throw new Error(`搜索失败（${lastErr.message}）。可在“模型”面板填 Tavily 搜索 Key（免费申请）获得更稳定的搜索`);
+      if (!hits.length) throw new Error(`各搜索源都没拿到结果——${notes.join('；')}。可在设置 → 模型里填博查或 Tavily 搜索 Key，搜索更稳定`);
       return hits.slice(0, n);
     }
   };

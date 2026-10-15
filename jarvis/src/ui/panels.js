@@ -478,6 +478,8 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   $('#set-websearch').checked = cfg.claudeWebSearch;
   $('#set-websearch').addEventListener('change', (e) => { cfg = { ...cfg, claudeWebSearch: e.target.checked }; saveConfig(cfg); onConfigChange(cfg); });
   $('#tavily-key').value = cfg.tavilyKey || '';
+  $('#bocha-key').value = cfg.bochaKey || '';
+  $('#bocha-key').addEventListener('change', (e) => { cfg = { ...cfg, bochaKey: e.target.value.trim() }; saveConfig(cfg); onConfigChange(cfg); });
   $('#search-region').value = cfg.searchRegion || 'auto';
   $('#search-region').addEventListener('change', (e) => { cfg = { ...cfg, searchRegion: e.target.value }; saveConfig(cfg); onConfigChange(cfg); });
   $('#tavily-key').addEventListener('change', (e) => { cfg = { ...cfg, tavilyKey: e.target.value.trim() }; saveConfig(cfg); onConfigChange(cfg); });
@@ -486,13 +488,13 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     const out = $('#search-test-result');
     out.textContent = '正在搜索…';
     try {
-      const engine = createSearch({ tavilyKey: $('#tavily-key').value.trim(), fetchViaGateway: searchFetch?.(), searchRegion: $('#search-region').value });
-      if (!engine) { out.textContent = '当前环境没有可用的搜索：请填 Tavily Key，或在电脑上运行启动程序'; return; }
+      const engine = createSearch({ bochaKey: $('#bocha-key').value.trim(), tavilyKey: $('#tavily-key').value.trim(), fetchViaGateway: searchFetch?.(), searchRegion: $('#search-region').value });
+      if (!engine) { out.textContent = '当前环境没有可用的搜索：请填博查或 Tavily Key，或在电脑上运行启动程序'; return; }
       const t0 = Date.now();
       const region = await engine.regionNow?.();
       const hits = await engine.search('今日新闻', 5);
       const where = region ? `（${region === 'cn' ? '国内网络' : '国外网络'}）` : '';
-      out.textContent = hits.length ? `✓ ${engine.name}${where} 可用：${hits.length} 条结果，${((Date.now() - t0) / 1000).toFixed(1)} 秒（第一条：${hits[0].title.slice(0, 24)}）` : `${engine.name}${where} 没有返回结果，建议填 Tavily Key`;
+      out.textContent = hits.length ? `✓ ${engine.name}${where} 可用：${hits.length} 条结果，${((Date.now() - t0) / 1000).toFixed(1)} 秒（第一条：${hits[0].title.slice(0, 24)}）` : `${engine.name}${where} 没有返回结果，建议填博查或 Tavily Key`;
     } catch (e) { out.textContent = `✕ ${e.message}`; }
   });
 
@@ -512,6 +514,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
       fillModels();
       $('#set-websearch').checked = cfg.claudeWebSearch;
       $('#tavily-key').value = cfg.tavilyKey || '';
+      $('#bocha-key').value = cfg.bochaKey || '';
       onConfigChange(cfg);
       return cfg;
     },

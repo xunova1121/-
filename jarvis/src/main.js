@@ -380,7 +380,9 @@ const metrics = () => (gateway ? fetch(`${gateway.origin}/api/local/metrics`).th
 const fetchViaGateway = () => (gateway && !gateway.cors
   ? (url, init) => (url.startsWith('https://api.tavily.com/')
     ? fetch(`/api/llm/tavily/${url.slice('https://api.tavily.com/'.length)}`, init)
-    : fetch(`/api/fetch?url=${encodeURIComponent(url)}`))
+    : url.startsWith('https://api.bochaai.com/')
+      ? fetch(`/api/llm/bocha/${url.slice('https://api.bochaai.com/'.length)}`, init)
+      : fetch(`/api/fetch?url=${encodeURIComponent(url)}`))
   : globalThis.__jarvisNativeFetch ? nativeWebFetch(globalThis.__jarvisNativeFetch) : null);
 
 // ---------------------------------------------------------------- 对话
@@ -670,6 +672,7 @@ async function buildTools({ background = false } = {}) {
     ...createTools({
       metrics,
       tavilyKey: llmConfig.tavilyKey,
+      bochaKey: llmConfig.bochaKey,
       searchRegion: llmConfig.searchRegion || 'auto',
       fetchViaGateway: fetchViaGateway(),
       llm: helperLlm('write'), // 深度调研：用写作模型
