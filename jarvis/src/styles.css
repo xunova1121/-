@@ -743,7 +743,7 @@ body.wallpaper .thought-log { right: 6vw; bottom: calc(10vh + 70px); width: 320p
 .route-row { display: grid; grid-template-columns: minmax(0, 9em) minmax(0, 1fr); gap: 4px 10px; align-items: center; }
 .route-name { display: grid; line-height: 1.3; }
 .route-name small { font-size: 11px; color: var(--dim); }
-.route-row input { min-width: 0; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--bg-2); font: 12.5px var(--font-mono); }
+.route-row input, .route-row select { min-width: 0; width: 100%; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--bg-2); font: 12.5px var(--font-mono); }
 .route-speed { grid-column: 2; font: 11px var(--font-mono); color: var(--muted); }
 .route-speed:empty { display: none; }
 .route-speed.fast { color: var(--ok); }

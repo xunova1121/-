@@ -22,6 +22,14 @@ export const listKey = (cfg) => `${cfg.provider}|${providerById(cfg.provider)?.c
 /** 当前是不是“自动”模式 */
 export const isAuto = (cfg) => Boolean(cfg.routing?.enabled && (cfg.routing.provider === cfg.provider || cfg.routing.multi));
 
+/** 已经读过（缓存里有）的各服务商模型，不发请求：设置面板打开时先用它填下拉框 */
+export function cachedModelRefs(cfg) {
+  return keyedProviders(cfg).flatMap((id) => {
+    const ids = cfg.modelLists?.[listKey({ ...cfg, provider: id })]?.ids ?? providerById(id)?.models?.filter(Boolean) ?? [];
+    return ids.filter((m) => modelKind(m) === 'chat').map((m) => (id === cfg.provider ? m : routeRef(id, m)));
+  });
+}
+
 /**
  * 所有填了密钥的服务商的模型（当前服务商在前，只写模型名；其他写成“服务商::模型”）。
  * 列表缓存一天；读不到的服务商用它的默认型号，并记下原因。

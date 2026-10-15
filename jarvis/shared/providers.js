@@ -21,6 +21,9 @@ export const PROVIDERS = [
   { id: 'siliconflow', name: '硅基流动 SiliconFlow', kind: 'openai', baseURL: 'https://api.siliconflow.cn/v1', models: ['deepseek-ai/DeepSeek-V3', 'Qwen/Qwen2.5-72B-Instruct'], keyUrl: 'https://cloud.siliconflow.cn/account/ak', browser: false },
   { id: 'openrouter', name: 'OpenRouter（聚合）', kind: 'openai', baseURL: 'https://openrouter.ai/api/v1', models: ['openai/gpt-5', 'google/gemini-2.5-pro', 'deepseek/deepseek-chat'], keyUrl: 'https://openrouter.ai/keys', browser: true },
   { id: 'ollama', name: 'Ollama（本机模型）', kind: 'openai', baseURL: 'http://127.0.0.1:11434/v1', models: ['qwen3:8b', 'qwen3:4b'], needsKey: false, browser: true, note: '浏览器直连需以 OLLAMA_ORIGINS=* 启动 Ollama；用完整版网关则不需要' },
+  // 多协议中转（如 TeamoRouter）：一个地址一个密钥，按模型名自动用原生格式——
+  // Claude → /v1/messages、GPT → /v1/responses（都能开模型自带的联网搜索），其他 → /v1/chat/completions
+  { id: 'relay-multi', name: '多协议中转（按模型用原生格式，如 TeamoRouter）', kind: 'multi', baseURL: '', models: ['gpt-6.1-sol', 'claude-fable-5-1', 'gemini-3.5-flash'], browser: true, custom: true, webSearch: true },
   // 中转站的 Anthropic 原生接口（/v1/messages）：能用 Claude 和它的内置联网搜索（要看中转站是否支持）
   { id: 'claude-relay', name: 'Claude 中转（Anthropic 原生格式）', kind: 'anthropic', baseURL: '', models: ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'], browser: true, custom: true, webSearch: true },
   { id: 'custom', name: '自定义（OpenAI 兼容）', kind: 'openai', baseURL: '', models: [''], browser: true, custom: true }

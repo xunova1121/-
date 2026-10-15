@@ -4,7 +4,7 @@
  */
 import { TASKS, suggestRoutes, routeFor, parseRoute, routeLabel } from '../llm/router.js';
 import { createAdapter, modelOf, providerById } from '../llm/config.js';
-import { gatherModelRefs } from './modelPicker.js';
+import { gatherModelRefs, cachedModelRefs } from './modelPicker.js';
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, props = {}, ...kids) => {
@@ -35,9 +35,9 @@ export function initRoutingPanel({ getConfig, patchConfig, getGateway, toast }) 
   const grid = $('#route-grid');
   const inputs = {};
   const speeds = {};
+  // 每类任务一个下拉框：所有填了密钥的服务商的模型（按服务商分组），推荐的会先选好，也可以自己改
   for (const [id, t] of Object.entries(TASKS)) {
-    inputs[id] = el('input', { id: `route-${id}`, spellcheck: false, placeholder: '沿用默认型号' });
-    inputs[id].setAttribute('list', 'route-models');
+    inputs[id] = el('select', { id: `route-${id}` });
     speeds[id] = el('span', { className: 'route-speed' });
     grid.append(el('label', { className: 'route-row', htmlFor: `route-${id}` },
       el('span', { className: 'route-name' }, el('b', { textContent: t.name }), el('small', { textContent: t.hint })),
@@ -45,12 +45,39 @@ export function initRoutingPanel({ getConfig, patchConfig, getGateway, toast }) 
   }
   const status = $('#route-status');
 
+  /** 下拉框选项：沿用默认 + 按服务商分组的模型；当前值不在列表里也保留 */
+  function fillOptions(refs, cfg) {
+    const groups = new Map();
+    for (const r of refs) {
+      const { provider } = parseRoute(r);
+      const pid = provider || cfg.provider;
+      if (!groups.has(pid)) groups.set(pid, []);
+      groups.get(pid).push(r);
+    }
+    for (const sel of Object.values(inputs)) {
+      const keep = sel.value;
+      sel.replaceChildren(el('option', { value: '', textContent: `沿用默认型号（${modelOf(cfg) || '未设置'}）` }),
+        ...[...groups].map(([pid, list]) => {
+          const g = el('optgroup', { label: providerById(pid)?.name ?? pid });
+          g.append(...list.map((r) => el('option', { value: r, textContent: routeLabel(r, cfg.provider) })));
+          return g;
+        }));
+      if (keep && ![...sel.options].some((o) => o.value === keep)) sel.append(el('option', { value: keep, textContent: routeLabel(keep, cfg.provider) }));
+      sel.value = keep;
+    }
+  }
+
   function render() {
     const cfg = getConfig();
     const r = cfg.routing ?? {};
     const same = r.provider === cfg.provider || Boolean(r.multi);
     $('#route-on').checked = Boolean(r.enabled && same);
-    for (const id of Object.keys(TASKS)) inputs[id].value = same ? r.routes?.[id] ?? '' : '';
+    fillOptions(cachedModelRefs(cfg), cfg);
+    for (const id of Object.keys(TASKS)) {
+      const v = same ? r.routes?.[id] ?? '' : '';
+      if (v && ![...inputs[id].options].some((o) => o.value === v)) inputs[id].append(el('option', { value: v, textContent: routeLabel(v, cfg.provider) }));
+      inputs[id].value = v;
+    }
     $('#fast-chat').checked = cfg.fastChat !== false;
     const p = providerById(cfg.provider);
     $('#route-section').hidden = p.kind === 'mock';
@@ -78,12 +105,12 @@ export function initRoutingPanel({ getConfig, patchConfig, getGateway, toast }) 
     try {
       const cfg = getConfig();
       const { refs: ids, notes } = await gatherModelRefs(cfg, { gateway: getGateway(), patchConfig, force: true });
-      $('#route-models').replaceChildren(...ids.map((m) => el('option', { value: m, label: routeLabel(m, cfg.provider) })));
+      fillOptions(ids, cfg);
       const s = suggestRoutes(ids, modelOf(cfg));
       for (const id of Object.keys(TASKS)) inputs[id].value = s[id] === modelOf(cfg) ? '' : s[id];
       $('#route-on').checked = true;
       save(true);
-      status.textContent = `读到 ${ids.length} 个模型（${notes.join('；')}），已按名字推荐（只是参考：可以点“测速”看快慢，再按需要改）`;
+      status.textContent = `读到 ${ids.length} 个模型（${notes.join('；')}），已按名字推荐并选好；每一项都可以在下拉框里自己改，改完自动保存`;
     } catch (err) { status.textContent = `读取失败：${err.message}`; }
     btn.disabled = false;
   });

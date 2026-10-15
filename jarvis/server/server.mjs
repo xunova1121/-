@@ -224,7 +224,7 @@ export function createServer({
 
   async function handleLlmProxy(req, res, id, rest, search, cross = false) {
     let base = id === 'ollama' ? `${ollama.host}/v1` : (upstreamFor(id) ?? EXTRA_UPSTREAMS[id]);
-    if (id === 'custom' || id === 'claude-relay') {
+    if (id === 'custom' || id === 'claude-relay' || id === 'relay-multi') {
       // 自定义（OpenAI 兼容）接口：地址由前端在请求头里给出；允许内网地址（本机 / 局域网自建模型很常见）
       try {
         const u = new URL(String(req.headers['x-jarvis-upstream'] || ''));

@@ -289,9 +289,8 @@
         <div id="route-section">
           <h3 class="sub">模型分工（按对话内容自动切换）</h3>
           <label class="inline-check"><input type="checkbox" id="route-on" /> 根据每句话的内容自动选模型</label>
-          <p class="muted small">给不同的事指定擅长的模型：闲聊用快模型秒回，写代码、写文档、深度分析用强模型。可以跨服务商：填过密钥的服务商都会参与推荐，写成“服务商::模型”（如 deepseek::deepseek-chat）就用那家的密钥。没填的沿用上面的默认型号。</p>
+          <p class="muted small">给不同的事指定擅长的模型：闲聊用快模型秒回，写代码、写文档、深度分析用强模型。可以跨服务商：填过密钥的服务商都会参与推荐，每一项都能在下拉框里自己改（别家的模型后面写着服务商名），改完自动保存。选“沿用默认型号”的用上面的默认型号。</p>
           <div class="route-grid" id="route-grid"></div>
-          <datalist id="route-models"></datalist>
           <div class="pane-actions">
             <button class="btn" type="button" id="btn-route-suggest">读取所有已填密钥的服务商并推荐</button>
             <button class="btn ghost" type="button" id="btn-route-test">测速</button>
@@ -308,7 +307,7 @@
           <button class="btn ghost sm" type="submit">下载</button>
         </form>
         <h3 class="sub">联网获取最新信息</h3>
-        <label class="inline-check"><input type="checkbox" id="set-websearch" /> Claude 内置联网搜索（使用 Claude 时生效）</label>
+        <label class="inline-check"><input type="checkbox" id="set-websearch" /> 模型自带的联网搜索（Claude，以及“多协议中转”里的 GPT 生效；中转站不支持时自动关掉）</label>
         <label class="field" for="bocha-key"><span>博查搜索 Key（国内推荐：中文结果好、手机和电脑都稳定）</span><input type="password" id="bocha-key" placeholder="sk-…" autocomplete="off" /></label>
         <p class="note">博查是国内的 AI 搜索接口，按次计费（价格以官网为准）。申请：打开 <a href="https://open.bochaai.com" target="_blank" rel="noopener">open.bochaai.com</a> 注册、充值后在“API KEY 管理”里创建，复制粘贴到上面。填了以后中文搜索先走博查。</p>
         <label class="field" for="tavily-key"><span>Tavily 搜索 Key（国外搜索好，英文资料多时推荐）</span><input type="password" id="tavily-key" placeholder="tvly-…" autocomplete="off" /></label>

@@ -5,6 +5,7 @@
 import { PROVIDERS, providerById, upstreamFor, customViaGateway } from '../../shared/providers.js';
 import { createOpenAIAdapter } from './openai.js';
 import { createAnthropicAdapter } from './anthropic.js';
+import { createResponsesAdapter } from './responses.js';
 import { createMockAdapter } from './mock.js';
 
 const KEY = 'jarvis.llm.v1';
@@ -62,6 +63,7 @@ export function createAdapter(cfg, { gateway = null } = {}) {
   if (p.needsKey !== false && !key && !gatewayHasKey) return { problem: `请先在“模型”面板填写 ${p.name} 的 API Key` };
   if (!model) return { problem: '请填写模型型号' };
   if (p.custom && !cfg.baseURLs?.[p.id]?.trim()) return { problem: '请填写接口地址' };
+  if (p.kind === 'multi') return { model, adapter: multiAdapter(p, cfg, model, key, gateway) };
   if (p.kind === 'anthropic') {
     // 中转站：地址写成 https://xxx.com 或 https://xxx.com/v1 都行（SDK 自己会加 /v1/messages）
     const relay = p.custom ? cfg.baseURLs[p.id].trim().replace(/\/+$/, '').replace(/\/v1$/, '') : '';
@@ -86,6 +88,28 @@ export function createAdapter(cfg, { gateway = null } = {}) {
   return { model, adapter: createOpenAIAdapter({ baseURL, apiKey: key || (viaGw ? 'use-gateway-key' : ''), headers }) };
 }
 
+/** 中转地址的根（去掉结尾的 / 和 /v1） */
+const rootOf = (url) => String(url || '').trim().replace(/\/+$/, '').replace(/\/v1$/, '');
+
+/** 按模型名选协议：Claude 用 Anthropic 原生、GPT 用 Responses（都带模型自带的联网搜索），其他用 Chat Completions */
+export function protocolFor(model) {
+  if (/claude/i.test(model)) return 'anthropic';
+  if (/^(openai\/)?(gpt|o\d|chatgpt|codex)/i.test(model)) return 'responses';
+  return 'chat';
+}
+
+function multiAdapter(p, cfg, model, key, gateway) {
+  const root = rootOf(cfg.baseURLs[p.id]);
+  const viaGw = customViaGateway(gateway, root);
+  const base = viaGw ? `${gateway.origin}/api/llm/${p.id}` : root;
+  const up = viaGw ? { 'x-jarvis-upstream': root } : {};
+  const search = cfg.claudeWebSearch !== false;
+  const proto = protocolFor(model);
+  if (proto === 'anthropic') return createAnthropicAdapter({ apiKey: key, baseURL: base, headers: { ...up, ...(key && { Authorization: `Bearer ${key}` }) }, webSearch: search, compat: true });
+  if (proto === 'responses') return createResponsesAdapter({ baseURL: `${base}/v1`, apiKey: key, headers: up, webSearch: search });
+  return createOpenAIAdapter({ baseURL: `${base}/v1`, apiKey: key, headers: up });
+}
+
 /** 实际使用的语音引擎（解析 auto） */
 export function resolveVoice(cfg, gateway = null) {
   const v = cfg.voice || DEFAULT_VOICE;
@@ -105,14 +129,17 @@ export { PROVIDERS, providerById };
 export async function listModels(cfg, { gateway = null } = {}) {
   const p = providerById(cfg.provider);
   const fallback = p.models.filter(Boolean);
-  if (p.kind !== 'openai') return fallback;
+  if (p.kind !== 'openai' && p.kind !== 'multi') return fallback;
   const key = cfg.keys[p.id] || '';
+  const multi = p.kind === 'multi';
+  const own = multi ? rootOf(cfg.baseURLs[p.id]) : cfg.baseURLs[p.id];
   const viaGateway = gateway && upstreamFor(p.id);
-  const viaGw = viaGateway || (p.custom && customViaGateway(gateway, cfg.baseURLs[p.id]));
-  const base = viaGw ? `${gateway.origin}/api/llm/${p.id}` : (p.custom ? cfg.baseURLs[p.id] : p.baseURL);
+  const viaGw = viaGateway || (p.custom && customViaGateway(gateway, own));
+  let base = viaGw ? `${gateway.origin}/api/llm/${p.id}` : (p.custom ? own : p.baseURL);
   if (!base) return fallback;
+  if (multi) base = `${base.replace(/\/$/, '')}/v1`;
   const headers = { ...(key || viaGw ? { Authorization: `Bearer ${key || 'use-gateway-key'}` } : {}) };
-  if (viaGw && p.custom) headers['x-jarvis-upstream'] = cfg.baseURLs[p.id].trim();
+  if (viaGw && p.custom) headers['x-jarvis-upstream'] = String(own).trim();
   try {
     const r = await fetch(`${base.replace(/\/$/, '')}/models`, { headers, signal: AbortSignal.timeout?.(10000) });
     if (!r.ok) throw new Error(String(r.status));
