@@ -883,6 +883,7 @@ async function send(text) {
   const speech = makeSpeech();
   const cards = new Map();
   let firstToken = 0;
+  let outMarked = false; // 崩溃记录：这一段在输出文字
   let serverCard = null;
   const t0 = now();
   const usedTools = [];
@@ -917,7 +918,8 @@ async function send(text) {
         if (active !== turn) return;
         if (e.type === 'text') {
           if (!firstToken) { firstToken = now(); hud.think('生成回答'); }
-          if (serverCard) { serverCard.done(true, '由 Claude 服务端完成', Math.round(now() - serverCard.t0)); serverCard = null; }
+          if (!outMarked) { outMarked = true; markActivity(`正在输出回答${shown.length ? `（已 ${shown.length} 字）` : ''}`); }
+          if (serverCard) { serverCard.done(true, '由模型服务端完成', Math.round(now() - serverCard.t0)); serverCard = null; }
           bubble.append(e.delta);
           shown += e.delta;
           machine.feedResponseText(e.delta);
@@ -936,6 +938,7 @@ async function send(text) {
           usedTools.push(e.name);
           setTask('processing', toolLabel(e.name));
           markActivity(`${toolLabel(e.name)} ${summarizeArgs(e.name, e.args)}`.slice(0, 80));
+          outMarked = false;
         } else if (e.type === 'tool_progress') {
           cards.get(e.id)?.progress(e.text);
           hud.think(`  ${e.text}`, 'sub');

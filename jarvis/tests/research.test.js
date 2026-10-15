@@ -297,3 +297,18 @@ describe('Tavily', () => {
     await expect(down.search('x')).rejects.toThrow(/连不上 Tavily/);
   });
 });
+
+describe('手机原生网络读网页：拿原始字节', () => {
+  it('GET 读网页要 arraybuffer，Base64 正文还原成字节；POST 接口仍是文字', async () => {
+    const { nativeFetcher } = await import('../src/mobile/nativeFetch.js');
+    const reqs = [];
+    const http = { request: async (o) => { reqs.push(o); return o.method === 'GET' ? { status: 200, data: btoa(String.fromCharCode(0xd6, 0xf7)), headers: { 'Content-Type': 'text/html; charset=gbk' } } : { status: 200, data: '{"ok":1}', headers: {} }; } };
+    const f = nativeWebFetch(nativeFetcher(http));
+    const res = await f('https://cp.example.cn/');
+    expect(reqs[0].responseType).toBe('arraybuffer');
+    expect(reqs[0].readTimeout).toBe(30000);
+    expect([...new Uint8Array(await res.arrayBuffer())]).toEqual([0xd6, 0xf7]);
+    await f('https://api.example.com/x', { method: 'POST', body: '{}' });
+    expect(reqs[1].responseType).toBe('text');
+  });
+});

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createPageReader } from '../src/agent/pageReader.js';
+import { createPageReader, decodeBody } from '../src/agent/pageReader.js';
 import { searchPlan } from '../src/agent/webSearch.js';
 
 const html = (body) => new Response(`<html><body><main>${body}</main></body></html>`, { headers: { 'content-type': 'text/html; charset=utf-8' } });
@@ -74,5 +74,26 @@ describe('搜索时间范围', () => {
   });
   it('不限时间时 URL 不变', () => {
     expect(searchPlan('比分', 'cn')[0][1]).toBe('https://cn.bing.com/search?q=%E6%AF%94%E5%88%86&count=10&setlang=zh-Hans');
+  });
+});
+
+describe('读网页：GBK 编码的中文站不再乱码', () => {
+  // “主队胜”的 GBK 编码
+  const gbk = new Uint8Array([0xd6, 0xf7, 0xb6, 0xd3, 0xca, 0xa4]);
+  it('响应头写了 charset=gbk', () => {
+    expect(decodeBody(gbk, 'text/html; charset=GBK')).toBe('主队胜');
+  });
+  it('只在网页 <meta charset="gb2312"> 里声明', () => {
+    const head = new TextEncoder().encode('<html><head><meta charset="gb2312"></head><body>');
+    const all = new Uint8Array([...head, ...gbk]);
+    expect(decodeBody(all, 'text/html')).toContain('主队胜');
+  });
+  it('没声明就按 UTF-8', () => {
+    expect(decodeBody(new TextEncoder().encode('比分 2:1'), 'text/html')).toBe('比分 2:1');
+  });
+  it('整个读取流程：GBK 网页读成正常中文', async () => {
+    const page = new Uint8Array([...new TextEncoder().encode('<html><head><meta http-equiv="Content-Type" content="text/html; charset=gbk"></head><body><main>'), ...gbk, ...new TextEncoder().encode('</main></body></html>')]);
+    const read = createPageReader({ fetchViaGateway: async () => new Response(page, { headers: { 'content-type': 'text/html' } }) });
+    expect(await read('https://cp.example.cn/a')).toContain('主队胜');
   });
 });

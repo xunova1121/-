@@ -14,6 +14,7 @@ export function safeHeaders(h = {}) {
   return out;
 }
 
+const b64ToBytes = (b64) => { const bin = atob(b64.replace(/\s+/g, '')); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return u8; };
 const toB64 = (buf) => { const u8 = new Uint8Array(buf); let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(s); };
 
 /** FormData → CapacitorHttp 的 formData 格式 */
@@ -42,9 +43,13 @@ export function nativeFetcher(http) {
     } else if (data instanceof Blob || data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
       data = await new Response(data).text();
     }
-    const req = http.request({ url, method: init.method || 'GET', headers, data, dataType, responseType: 'text', connectTimeout: 20000, readTimeout: 180000 });
+    // binary：读网页时要原始字节（GBK 等编码的中文站由调用方按网页声明的编码解码；原生按 UTF-8 读会把字读坏）
+    const binary = Boolean(init.binary);
+    const req = http.request({ url, method: init.method || 'GET', headers, data, dataType, responseType: binary ? 'arraybuffer' : 'text', connectTimeout: 20000, readTimeout: init.readTimeout || 180000 });
     const res = await (signal ? Promise.race([req, new Promise((_, rej) => signal.addEventListener('abort', () => rej(new DOMException('Aborted', 'AbortError')), { once: true }))]) : req);
-    const body = typeof res.data === 'string' ? res.data : res.data == null ? '' : JSON.stringify(res.data);
+    // 原生插件：arraybuffer 时正文是 Base64；出错（4xx/5xx）或 JSON 时仍是文字 / 对象
+    const body = binary && typeof res.data === 'string' && res.status < 400 ? b64ToBytes(res.data)
+      : typeof res.data === 'string' ? res.data : res.data == null ? '' : JSON.stringify(res.data);
     return new Response([204, 205, 304].includes(res.status) ? null : body, { status: res.status || 200, headers: safeHeaders(res.headers) });
   };
 }
@@ -79,5 +84,9 @@ export const BROWSER_HEADERS = {
   'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
 };
 export function nativeWebFetch(native) {
-  return (url, init = {}) => native(url, { ...init, headers: { ...(init.method && init.method !== 'GET' ? {} : BROWSER_HEADERS), ...(init.headers || {}) } });
+  return (url, init = {}) => {
+    const get = !init.method || init.method === 'GET';
+    // GET 是读网页 / 搜索结果页：要原始字节（编码由读取方判断），30 秒读不完就算打不开
+    return native(url, { ...init, ...(get && { binary: true, readTimeout: 30000 }), headers: { ...(get ? BROWSER_HEADERS : {}), ...(init.headers || {}) } });
+  };
 }

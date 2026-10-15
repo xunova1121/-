@@ -7,6 +7,9 @@ import { EMOTION_ICON, stripEmotionTags } from '../../shared/emotionTag.js';
 
 const LABEL = { user: '你', agent: '未央' };
 
+const nextFrame = (f) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(f) : setTimeout(f, 16));
+const cancelFrame = (id) => (typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame(id) : clearTimeout(id));
+
 export function renderBlocks(container, text) {
   text = stripEmotionTags(text); // 旧对话里可能存着写错的情绪标签
   container.replaceChildren(...parseMarkdown(text).map((b) => {
@@ -209,6 +212,16 @@ export class Transcript {
     // 文字与工具卡片按时间顺序交替出现：每段文字一个独立的 body
     let cur = body;
     let curRaw = text;
+    let frame = 0;
+    let tail = null; // 正在输出的那段文字的文本节点
+    const paint = () => {
+      frame = 0;
+      const s = stripEmotionTags(curRaw);
+      if (tail && tail.parentNode === cur && s.startsWith(tail.data)) tail.appendData(s.slice(tail.data.length));
+      else { cur.textContent = s; tail = cur.firstChild; }
+      self.#scroll();
+    };
+    const stopPaint = () => { if (frame) { cancelFrame(frame); paint(); } tail = null; }; // 还没刷出来的字先刷上，再交给排版
     let files = null; // 生成的文件按钮
     const self = this;
     // —— 连续的工具步骤收进一个分组（电脑）：执行中只占几行高、自动滚到最新一步；结束后折叠成“执行了 N 步”
@@ -322,11 +335,12 @@ export class Transcript {
       append(d) {
         raw += d;
         curRaw += d;
-        cur.textContent = stripEmotionTags(curRaw);
-        self.#scroll();
+        // 每一帧最多刷新一次，只把新增的字接在后面：逐字重排整段回答在手机上很慢，回答越长越卡
+        frame ||= nextFrame(paint);
       },
       /** 工具执行卡片：执行中显示动画，结束后可展开查看输出 */
       toolCard(name, args) {
+        stopPaint();
         if (role === 'agent' && curRaw) renderBlocks(cur, curRaw);
         if (self.progress) return progressStep(name, args);
         const card = document.createElement('details');
@@ -378,6 +392,7 @@ export class Transcript {
        * @param {Array<{ roleName: string, title: string }>} steps
        */
       teamCard(steps) {
+        stopPaint();
         if (role === 'agent' && curRaw) renderBlocks(cur, curRaw);
         const card = document.createElement('div');
         card.className = 'team-card';
@@ -496,6 +511,7 @@ export class Transcript {
         el.classList.remove('streaming');
         finishProgress();
         closeGroups();
+        stopPaint();
         if (role === 'agent' && curRaw) renderBlocks(cur, curRaw);
         for (const b of el.querySelectorAll('.body')) if (!b.textContent.trim() && !b.children.length) b.remove();
         if (files) el.append(files); // 文件按钮放在回答最后

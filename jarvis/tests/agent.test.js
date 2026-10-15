@@ -141,6 +141,32 @@ describe('智能体循环（离线演示模型）', () => {
     expect(r.text).toBe('做完了');
   });
 
+  it('查资料超过用时上限：提示模型用已有信息收尾，不理会就停下', async () => {
+    const WEB = { name: 'web_search', description: '测试用', input_schema: { type: 'object', properties: { q: { type: 'string' } } }, run: async ({ q }) => `结果 ${q}` };
+    let t = 0;
+    const seen = [];
+    const adapter = { async stream({ messages }) {
+      seen.push(messages.at(-1).content);
+      return { text: '', toolCalls: [{ id: String(t), name: 'web_search', args: { q: `第${t}次` } }], stop: 'tool_use' };
+    } };
+    const r = await runAgent({ adapter, model: 'x', history: [], userText: '查比分', tools: [WEB], emit: () => {}, maxSteps: 40, timeBudgetMs: 60e3, now: () => (t++) * 20e3 });
+    expect(seen.some((c) => /不要再调用工具/.test(c))).toBe(true);
+    expect(r.toolCalls).toBeLessThan(12);
+    expect(r.text).toMatch(/还没有确切结果/);
+  });
+
+  it('不是查资料（写代码等）：不按用时收尾', async () => {
+    let n = 0;
+    let t = 0;
+    const adapter = { async stream({ onText }) {
+      n++;
+      if (n <= 6) return { text: '', toolCalls: [{ id: String(n), name: 'tick', args: { n } }], stop: 'tool_use' };
+      onText('做完了'); return { text: '做完了', toolCalls: [], stop: 'end_turn' };
+    } };
+    const r = await runAgent({ adapter, model: 'x', history: [], userText: 'go', tools: [TICK], emit: () => {}, timeBudgetMs: 1000, now: () => (t++) * 60e3 });
+    expect(r.text).toBe('做完了');
+  });
+
   it('原地打转（同样的调用反复做、大多失败）：拦下重复调用，卡住就停', async () => {
     const adapter = { async stream() { return { text: '', toolCalls: [{ id: String(Math.random()), name: 'get_current_time', args: {} }], stop: 'tool_use' }; } };
     const events = [];

@@ -11,6 +11,21 @@ const CACHE_MS = 15 * 60e3;
 const THIN = 300; // 正文少于这么多字（去掉空白）就当没读到
 
 /**
+ * 按网页声明的编码解码：不少中文站（彩票、论坛、老新闻站）还是 GBK / GB2312，
+ * 一律按 UTF-8 读会变成乱码。先看响应头，再看网页开头的 <meta charset>，都没有就按 UTF-8
+ */
+export function decodeBody(bytes, contentType = '') {
+  let cs = /charset=["']?([\w-]+)/i.exec(contentType)?.[1];
+  if (!cs) {
+    const head = new TextDecoder('latin1').decode(bytes.subarray(0, 4096));
+    cs = /<meta[^>]+charset=["']?([\w-]+)/i.exec(head)?.[1] || /^<\?xml[^>]+encoding=["']([\w-]+)/i.exec(head)?.[1];
+  }
+  cs = String(cs || 'utf-8').toLowerCase();
+  if (/^(gb2312|gbk|x-gbk|gb_2312-80)$/.test(cs)) cs = 'gb18030'; // GB18030 兼容前两者，且能解出更多字
+  try { return new TextDecoder(cs).decode(bytes); } catch { return new TextDecoder().decode(bytes); }
+}
+
+/**
  * @param {{ tavilyKey?: string, fetchViaGateway?: (url: string, init?: object) => Promise<Response>, fetchImpl?: typeof fetch, now?: () => number }} o
  * @returns {(url: string) => Promise<string>}
  */
@@ -26,7 +41,7 @@ export function createPageReader({ tavilyKey, fetchViaGateway, fetchImpl = (...a
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const type = res.headers.get('content-type') || '';
     if (type && !/html|text|json|xml/.test(type)) throw new Error('不是网页');
-    const body = await res.text();
+    const body = decodeBody(new Uint8Array(await res.arrayBuffer()), type);
     return /html/.test(type) || (!type && /<html|<body/i.test(body)) ? htmlToText(body) : body;
   }
 

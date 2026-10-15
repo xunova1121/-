@@ -39,6 +39,8 @@ export const STABLE_PROMPT = `你是“未央”，运行在用户电脑上的�
 - 先想清楚再动手；多步任务按步骤调用工具，不要只描述“我会怎么做”。
 - 工具失败时读错误信息、换方法重试，不要编造结果。同样的操作失败两次就换思路，不要反复试同一类办法。
 - 中途不要停下来问“要不要继续”：用户交代的事就一直做到完成；只有缺少必要信息、或要做有风险的操作时才问。
+- 查资料只用 web_search / fetch_url / fact_check（或模型自带的联网搜索）；不要写代码（run_javascript / run_python）去抓网页，代码运行环境不能联网。网页读出来是乱码或打不开，就换一个网站，不要在同一个网站上反复想办法。
+- 查资料有时间限制：查了几轮还没有确切结果，就用已拿到的信息先给结论，说清哪些没查到、建议去哪里看，不要一直查下去。
 - 在电脑上找文件、找程序时先缩小范围（具体目录、常见安装位置），不要在整个用户目录或整块磁盘上递归搜索（一次要几十秒）。
 - 用简体中文回答，语气自然。聊天回答按下面“回答的样子”来写；写文档（create_document 的内容）不受这条限制，见下方“写文档”。
 - 下方“核心记忆 / 相关记忆 / 过往对话 / 经验教训 / 已掌握的技能”是你在这台电脑上积累的，请参考执行；经验教训优先于默认做法；记忆与用户当前说法冲突时以当前说法为准，并更新记忆。
@@ -128,11 +130,15 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
  * @param {(e: object) => void} o.emit
  * @param {AbortSignal} [o.signal]
  * @param {number} [o.maxSteps]
+ * @param {number} [o.timeBudgetMs]  查资料的用时上限：主要在查网页且超过这个时间，就让模型用已有结果收尾（默认 8 分钟）
  * @param {(req: { title: string, detail?: string, key?: string, danger?: boolean }, tool: object) => Promise<boolean>} [o.approve]  需要确认的工具调用
  * @param {{ text: string } | null} [o.summary]  本段对话较早内容的摘要（长对话压缩，见 compress.js）
  * @returns {Promise<{ text: string, steps: number, toolCalls: number }>}
  */
-export async function runAgent({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null }) {
+export async function runAgent({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, timeBudgetMs = TIME_BUDGET_MS, now = Date.now }) {
+  const startedAt = now();
+  let overtime = 0; // 超时后又给了几次收尾机会
+  let webCalls = 0; // 这一轮查网页的次数（只有主要在查资料时才按用时收尾，写代码、写长文档不受影响）
   emit({ type: 'state', value: 'processing' });
   const tCtx = Date.now();
   const ctx = context ?? (await buildContext(userText, { sessionId, turns: history.filter((m) => m.role === 'user').length, summary }));
@@ -221,12 +227,20 @@ export async function runAgent({ adapter, model, history, userText, images = [],
         output = `错误：${e.message || e}`;
       }
       toolCount++;
+      if (WEB_TOOLS.has(c.name)) webCalls++;
       if (!ok) failCount++;
       lastToolOk = ok;
       recent.push(ok);
       if (recent.length > 12) recent.shift();
       emit({ type: 'tool_end', id: c.id, name: c.name, ok, output, ms: Date.now() - t0 });
       convo.push({ role: 'tool', toolCallId: c.id, name: c.name, content: output, isError: !ok, ...(outImages.length && { images: outImages }) });
+    }
+    // 用时到了：不再接着查，让模型用已拿到的信息直接给结论（给两次机会，还要调用工具就停下）
+    if (timeBudgetMs && webCalls >= 3 && webCalls * 2 >= toolCount && now() - startedAt > timeBudgetMs) {
+      if (++overtime > 2) { limit = step; break; }
+      // 附在最后一条工具结果后面（各家接口都接受，不会出现连续两条用户消息）
+      const last = convo.at(-1);
+      last.content = `${last.content}\n\n（系统提示：查资料已经用了 ${Math.round((now() - startedAt) / 60e3)} 分钟。请不要再调用工具，直接用已经拿到的信息给出结论；没查到的部分如实说明，并告诉用户可以去哪里看。）`;
     }
     // 快到步数上限：最近的步骤大多成功就自动放宽，接着做；大多失败说明卡住了，停下
     if (step + 1 >= limit) {
@@ -235,7 +249,9 @@ export async function runAgent({ adapter, model, history, userText, images = [],
     }
   }
   if (step >= limit) {
-    const note = stuck
+    const note = overtime > 2
+      ? `\n\n（查了 ${Math.round((now() - startedAt) / 60e3)} 分钟还没有确切结果，先停在这里，上面是目前的进展。可以换个问法，或换一个带联网搜索的模型再试。）`
+      : stuck
       ? `\n\n（最近的步骤大多失败，看起来卡住了，先停在这里。上面是目前的进展；换个说法或给我更多信息，我再接着做。）`
       : `\n\n（这个任务已经连续做了 ${step} 步，先停在这里，上面是目前的进展。）`;
     finalText += note;
@@ -251,6 +267,10 @@ export async function runAgent({ adapter, model, history, userText, images = [],
   emit({ type: 'state', value: 'done' });
   return { text: finalText.trim(), steps: step + 1, toolCalls: toolCount };
 }
+
+/** 一轮任务的默认用时上限（毫秒）：查资料超过这个时间还没结果，就先用已有信息收尾 */
+export const TIME_BUDGET_MS = 8 * 60e3;
+const WEB_TOOLS = new Set(['web_search', 'fetch_url', 'fact_check', 'deep_research']);
 
 /** 步数上限最多自动放宽到 maxSteps 的几倍 */
 export const HARD_CAP = 4;
