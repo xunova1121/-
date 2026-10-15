@@ -54,17 +54,38 @@ export function parseMarkdown(text) {
   return blocks;
 }
 
+// 行内：**粗体**、`代码`、[文字](网址)、裸网址。网址外面包着的括号“([来源](…))”一起去掉，显示成来源标签
+const STOP = `\\s<>()（）[\\]，。；、"'“”`;
+const INLINE = new RegExp(
+  '\\*\\*(?<bold>[^*]+)\\*\\*|`(?<code>[^`]+)`' +
+  '|(?<open>[(（])?\\[(?<label>[^\\]\\n]+)\\]\\((?<href>https?:\\/\\/[^\\s)]+)\\)(?<close>[)）])?' +
+  `|(?<bare>https?:\\/\\/[^${STOP}]*[^${STOP}.,;:!?])`, 'g');
+
 export function inline(text) {
   const spans = [];
-  const re = /(\*\*([^*]+)\*\*|`([^`]+)`)/g;
   let last = 0;
-  let m;
-  while ((m = re.exec(text))) {
-    if (m.index > last) spans.push({ text: text.slice(last, m.index) });
-    if (m[2] != null) spans.push({ text: m[2], bold: true });
-    else spans.push({ text: m[3], code: true });
-    last = m.index + m[0].length;
+  for (const m of text.matchAll(INLINE)) {
+    const g = m.groups;
+    let start = m.index;
+    let end = m.index + m[0].length;
+    // 括号只有左右都在时才一起去掉，否则还给正文
+    if (g.label != null && Boolean(g.open) !== Boolean(g.close)) { if (g.open) start++; else end--; }
+    if (start > last) spans.push({ text: text.slice(last, start) });
+    if (g.bold != null) spans.push({ text: g.bold, bold: true });
+    else if (g.code != null) spans.push({ text: g.code, code: true });
+    else if (g.label != null) spans.push({ text: g.label.trim(), link: cleanUrl(g.href) });
+    else spans.push({ text: g.bare, link: cleanUrl(g.bare) });
+    last = end;
   }
   if (last < text.length) spans.push({ text: text.slice(last) });
   return spans;
+}
+
+/** 去掉搜索带出来的跟踪参数（utm_source=openai 之类） */
+export function cleanUrl(url) {
+  try {
+    const u = new URL(url);
+    for (const k of [...u.searchParams.keys()]) if (/^utm_/i.test(k)) u.searchParams.delete(k);
+    return u.href.replace(/\?$/, '');
+  } catch { return url; }
 }

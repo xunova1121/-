@@ -2,7 +2,7 @@
  * 对话记录 DOM。流式阶段用 textContent 追加纯文本；回复完成后按极简 Markdown 重排，
  * 全程只用 createElement + textContent，从不把模型输出当 HTML 插入。
  */
-import { parseMarkdown } from '../core/markdown.js';
+import { parseMarkdown, inline } from '../core/markdown.js';
 import { EMOTION_ICON, stripEmotionTags } from '../../shared/emotionTag.js';
 
 const LABEL = { user: '你', agent: '未央' };
@@ -54,7 +54,7 @@ export function renderBlocks(container, text) {
         const tr = document.createElement('tr');
         for (const c of r) {
           const cell = document.createElement(i === 0 ? 'th' : 'td');
-          cell.textContent = c;
+          cell.append(...inline(c).map(span));
           tr.append(cell);
         }
         table.append(tr);
@@ -78,10 +78,44 @@ export function renderBlocks(container, text) {
 }
 
 function span(s) {
+  if (s.link) return linkEl(s.text, s.link);
   if (!s.bold && !s.code) return document.createTextNode(s.text);
   const el = document.createElement(s.code ? 'code' : 'strong');
   el.textContent = s.text;
   return el;
+}
+
+/**
+ * 链接：来源网址（文字就是域名或网址）显示成“首字母圆点 + 域名”的小标签；
+ * 其它文字链接加下划线和 ↗。点一下用系统浏览器打开（电脑用默认浏览器，手机交给系统）
+ */
+export function linkEl(text, href) {
+  let host = '';
+  try { host = new URL(href).hostname.replace(/^www\./, ''); } catch { return document.createTextNode(text); }
+  const a = document.createElement('a');
+  a.href = href;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.title = href;
+  const t = text.trim();
+  if (/^https?:\/\//i.test(t) || (!/[\u4e00-\u9fff]/.test(t) && /^[\w.-]+\.[a-z]{2,}(\/\S*)?$/i.test(t))) {
+    a.className = 'src-chip';
+    const dot = document.createElement('i');
+    // 主域名的首字母：top.baidu.com → B，news.cn → N，xinhua.com.cn → X
+    const parts = host.split('.');
+    const main = parts.length > 2 && /^(com|net|org|gov|edu|co)$/.test(parts.at(-2)) ? parts.at(-3) : parts.at(-2) || host;
+    dot.textContent = main[0]?.toUpperCase() || '·';
+    let h = 0;
+    for (const ch of host) h = (h * 31 + ch.charCodeAt(0)) % 360;
+    dot.style.setProperty('--h', h);
+    const name = document.createElement('span');
+    name.textContent = host;
+    a.append(dot, name);
+  } else {
+    a.className = 'md-link';
+    a.textContent = t;
+  }
+  return a;
 }
 
 // 模型自带联网搜索时，步骤卡上写的是哪家模型在搜

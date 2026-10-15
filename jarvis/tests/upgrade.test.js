@@ -76,3 +76,18 @@ describe('Markdown 标题与表格', () => {
     expect(b[1].type).toBe('p');
   });
 });
+
+import { inline as mdInline } from '../src/core/markdown.js';
+describe('回答里的网址做成可以点的链接', () => {
+  it('“([域名](网址))”变成来源链接，去掉外面的括号和 utm 跟踪参数', () => {
+    expect(mdInline('支持。([cuobiezi.net](https://www.cuobiezi.net/day/2026-10-13?utm_source=openai))')).toEqual([
+      { text: '支持。' }, { text: 'cuobiezi.net', link: 'https://www.cuobiezi.net/day/2026-10-13' }
+    ]);
+  });
+  it('裸网址也能点，句号不算进网址；只有一边括号时括号留在正文', () => {
+    expect(mdInline('见 https://top.baidu.com/board?tab=realtime。')).toEqual([
+      { text: '见 ' }, { text: 'https://top.baidu.com/board?tab=realtime', link: 'https://top.baidu.com/board?tab=realtime' }, { text: '。' }
+    ]);
+    expect(mdInline('[a.com](https://a.com))右').at(-1)).toEqual({ text: ')右' });
+  });
+});

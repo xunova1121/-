@@ -1257,3 +1257,13 @@ html[data-mode="mobile"] #app-splash {
 .progress-card.working .pc-steps { max-height: 7.6em; }
 .progress-card:not(.working) .pc-steps { max-height: 50vh; }
 .progress-card.working .pc-steps pre { display: none; }
+
+/* 回答里的链接：来源网址是“首字母圆点 + 域名”的小标签，点开在浏览器里看原文；文字链接带下划线和 ↗ */
+.msg a.src-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 13em; margin: 0 3px; padding: 1px 9px 1px 2px; vertical-align: 1px; border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: .76em; font-weight: 500; line-height: 1.7; text-decoration: none; white-space: nowrap; transition: transform .12s ease, background .15s ease; -webkit-tap-highlight-color: transparent; }
+.msg a.src-chip span { overflow: hidden; text-overflow: ellipsis; }
+.msg a.src-chip i { flex: none; display: grid; place-items: center; width: 1.6em; height: 1.6em; border-radius: 50%; background: linear-gradient(135deg, hsl(var(--h, 250) 70% 60%), hsl(calc(var(--h, 250) + 40) 70% 48%)); color: #fff; font-size: .78em; font-style: normal; font-weight: 700; }
+.msg a.src-chip:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.msg a.src-chip:active { transform: scale(.95); }
+.msg a.md-link { color: var(--accent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent); text-underline-offset: 3px; }
+.msg a.md-link::after { content: "↗"; margin-left: 1px; font-size: .75em; vertical-align: 2px; }
+.msg td a.src-chip { margin: 2px 0 0; }
