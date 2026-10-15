@@ -1218,19 +1218,37 @@ html[data-mode="mobile"] #app-splash {
 }
 #app-splash.out { opacity: 0; transform: scale(1.03); pointer-events: none; }
 #app-splash .as-inner { position: relative; display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: -6vh; }
-#app-splash .as-logo { width: 116px; height: 106px; background: url(./ui/logo.svg) center / contain no-repeat; animation: as-float 2.4s ease-in-out infinite, as-in .6s cubic-bezier(.2,.8,.3,1.2) both; }
-#app-splash .as-glow { position: absolute; top: 4px; width: 132px; height: 132px; border-radius: 50%; background: radial-gradient(circle, #8fe3e6aa, #b9f0a033 55%, transparent 70%); animation: as-glow 2.4s ease-in-out infinite; }
-#app-splash .as-name { font: 700 30px/1.2 'Noto Sans CJK SC', 'PingFang SC', sans-serif; color: #0b4f73; letter-spacing: .12em; animation: as-up .6s .15s ease both; }
-#app-splash .as-sub { font: 600 12px/1 sans-serif; color: #22b8b0; letter-spacing: .32em; animation: as-up .6s .25s ease both; }
+/* 启动 logo：用户给的“未央”云朵原图（已抠掉白底）；眨眼、星星闪、电路灯亮、扫光 */
+#app-splash .as-logo { position: relative; width: 150px; aspect-ratio: 510 / 478; background: url(./ui/splash-cloud.webp) center / contain no-repeat; animation: as-in .7s cubic-bezier(.2,.8,.3,1.25) both, as-float 2.8s .7s ease-in-out infinite; }
+#app-splash .as-logo i { position: absolute; display: block; }
+#app-splash .as-lid { top: 38.5%; width: 10.5%; height: 13.5%; border-radius: 50%; transform: scaleY(0); transform-origin: top; animation: as-blink 3.2s 1s ease-in-out infinite; }
+#app-splash .as-lid.l { left: 39.6%; background: linear-gradient(90deg, #67e3ce, #93f4a6); }
+#app-splash .as-lid.r { left: 60.2%; background: linear-gradient(90deg, #aaf797, #c1fc9d); }
+#app-splash .as-spark { left: 30.4%; top: 57.1%; width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%; background: radial-gradient(circle, #fff 0 18%, #b9f6ff99 40%, transparent 70%); animation: as-spark 1.6s .6s ease-in-out infinite; }
+#app-splash .as-star { width: 12%; aspect-ratio: 1; margin: -6% 0 0 -6%; background: radial-gradient(circle, #fff8b0 0 12%, transparent 55%); animation: as-twinkle 1.8s ease-in-out infinite; }
+#app-splash .as-star.a { left: 21%; top: 14.6%; }
+#app-splash .as-star.b { left: 88%; top: 13.6%; animation-delay: .9s; }
+#app-splash .as-shine { inset: 0; background: linear-gradient(105deg, transparent 35%, #ffffffcc 50%, transparent 65%) -150% 0 / 250% 100% no-repeat; -webkit-mask: url(./ui/splash-cloud.webp) center / contain no-repeat; mix-blend-mode: screen; opacity: .8; animation: as-shine 2.8s 1.1s ease-in-out infinite; }
+#app-splash .as-glow { position: absolute; top: -24px; width: 190px; height: 190px; border-radius: 50%; background: radial-gradient(circle, #8fe3e688, #b9f0a033 55%, transparent 70%); animation: as-glow 2.8s ease-in-out infinite; }
+#app-splash .as-name { display: flex; gap: .1em; font: 700 32px/1.2 'Noto Sans CJK SC', 'PingFang SC', sans-serif; color: #0b5a80; letter-spacing: .12em; }
+#app-splash .as-name span { animation: as-up .6s ease both; }
+#app-splash .as-name span:first-child { animation-delay: .35s; }
+#app-splash .as-name span:last-child { animation-delay: .5s; }
+#app-splash .as-sub { font: 600 12px/1 sans-serif; color: #1fbfb3; letter-spacing: .34em; animation: as-track .8s .65s ease both; }
 #app-splash .as-dots { display: flex; gap: 7px; margin-top: 18px; }
 #app-splash .as-dots i { width: 7px; height: 7px; border-radius: 50%; background: #5fdcd8; animation: as-dot 1.2s ease-in-out infinite; }
 #app-splash .as-dots i:nth-child(2) { animation-delay: .15s; background: #a6ec7a; }
 #app-splash .as-dots i:nth-child(3) { animation-delay: .3s; background: #1fa6e0; }
-@keyframes as-float { 50% { transform: translateY(-8px) rotate(-2deg); } }
+@keyframes as-float { 50% { transform: translateY(-8px) rotate(-1.5deg); } }
 @keyframes as-glow { 50% { transform: scale(1.12); opacity: .6; } }
-@keyframes as-in { from { transform: scale(.6); opacity: 0; } }
-@keyframes as-up { from { transform: translateY(8px); opacity: 0; } }
+@keyframes as-in { from { transform: scale(.5) translateY(20px); opacity: 0; } }
+@keyframes as-up { from { transform: translateY(10px); opacity: 0; } }
+@keyframes as-track { from { letter-spacing: .05em; opacity: 0; } }
 @keyframes as-dot { 0%, 100% { transform: translateY(0); opacity: .45; } 40% { transform: translateY(-6px); opacity: 1; } }
+@keyframes as-blink { 0%, 88%, 100% { transform: scaleY(0); } 92%, 94% { transform: scaleY(1); } }
+@keyframes as-spark { 0%, 100% { transform: scale(.7); opacity: .5; } 50% { transform: scale(1.5); opacity: 1; } }
+@keyframes as-twinkle { 0%, 100% { transform: scale(.6) rotate(0); opacity: .2; } 50% { transform: scale(1.3) rotate(20deg); opacity: 1; } }
+@keyframes as-shine { 0% { background-position: -150% 0; } 45%, 100% { background-position: 250% 0; } }
 @media (prefers-reduced-motion: reduce) { #app-splash * { animation-duration: 0s !important; animation-iteration-count: 1 !important; } }
 
 /* 手机“工作进展”：执行中只占几行高，步骤在卡片里滚动（停在最新一步），不把回答往下推；

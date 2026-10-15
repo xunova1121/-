@@ -2,7 +2,6 @@
  * 用 src/ui/logo.svg 生成各端图标（改了 logo 后运行一次：node scripts/make-icons.mjs）
  *   desktop/build/icon.png                     电脑版安装包和窗口图标（1024×1024，白色圆角底）
  *   android/.../mipmap-*\/ic_launcher*.png     安卓桌面图标（普通、圆形、自适应前景）
- *   android/.../drawable*\/splash.png          安卓开屏图（白底，logo + 名字）
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -30,12 +29,6 @@ for (const [d, k] of Object.entries(dpi)) {
   jobs.push([path.join(dir, 'ic_launcher.png'), 48 * k, 48 * k, { scale: 0.76 }]);
   jobs.push([path.join(dir, 'ic_launcher_round.png'), 48 * k, 48 * k, { shape: 'circle', scale: 0.7 }]);
   jobs.push([path.join(dir, 'ic_launcher_foreground.png'), 108 * k, 108 * k, { shape: 'none', scale: 0.56 }]); // 自适应图标只保证中间 66/108 可见
-}
-for (const f of fs.readdirSync(res).filter((f) => f.startsWith('drawable'))) {
-  const file = path.join(res, f, 'splash.png');
-  if (!fs.existsSync(file)) continue;
-  const b = fs.readFileSync(file);
-  jobs.push([file, b.readUInt32BE(16), b.readUInt32BE(20), { shape: 'flat', scale: 0.32, title: true }]);
 }
 
 const browser = await chromium.launch();

@@ -62,7 +62,7 @@ import { playCue } from './perception/voiceFx.js';
 import { MetricsPoller } from './api/metrics.js';
 import { subscribeAgentEvents } from './api/agentEvents.js';
 import { Dashboard } from './ui/dashboard.js';
-import { Transcript, toolLabel, summarizeArgs } from './ui/transcript.js';
+import { Transcript, toolLabel, summarizeArgs, searchBrand } from './ui/transcript.js';
 import { Speaker } from './perception/speaker.js';
 import { VoiceInput, speechRecognitionSupported } from './perception/voiceInput.js';
 import { resolveStt, transcribe, encodeWav, sttEngineById } from './perception/stt.js';
@@ -946,7 +946,7 @@ async function send(text) {
           if (!e.ok) hud.think(`✕ ${toolLabel(e.name)} 失败`, 'bad');
           if (/remember|forget|save_skill/.test(e.name)) panels.refreshMind();
         } else if (e.type === 'server_tool') {
-          serverCard = Object.assign(bubble.toolCard('web_search', { query: 'Claude 联网搜索' }), { t0: now() });
+          serverCard = Object.assign(bubble.toolCard('web_search', { query: `${searchBrand(model)}自带联网搜索` }), { t0: now() });
         } else if (e.type === 'sources') bubble.sources(e.items);
         else if (e.type === 'timing') ctxMs = e.contextMs;
         else if (e.type === 'team_plan') { hud.think(`团队分工 · ${e.steps.map((x) => x.roleName).join(' → ')}`); teamCard = bubble.teamCard(e.steps); setTask('processing', `团队分工 · ${e.steps.length} 步`); }
@@ -1998,11 +1998,11 @@ window.__jarvis = {
 // 工作台界面只用在电脑上；手机 App 保留自己的界面（底部输入、左侧抽屉菜单、整页面板）
 if (!COMPACT) initWorkbench({showPanel,newSession,openSession,getSession:()=>session,getRunning:()=>active?session.id:null,openFile:openInWorkspace});
 
-// 手机启动页：界面准备好、并且至少显示了 1.5 秒后淡出（太快一闪而过不像 App）
+// 手机启动页：界面准备好、并且至少显示了 2 秒后淡出（太快一闪而过不像 App）
 {
   const splash = document.getElementById('app-splash');
   if (splash) {
-    const wait = MOBILE ? Math.max(0, 1500 - performance.now()) : 0;
+    const wait = MOBILE ? Math.max(0, 2000 - performance.now()) : 0;
     setTimeout(() => { splash.classList.add('out'); setTimeout(() => splash.remove(), 420); }, wait);
   }
 }

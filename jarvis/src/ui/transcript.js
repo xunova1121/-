@@ -81,6 +81,15 @@ function span(s) {
   return el;
 }
 
+// 模型自带联网搜索时，步骤卡上写的是哪家模型在搜
+export function searchBrand(model = '') {
+  const m = String(model).toLowerCase();
+  if (/claude/.test(m)) return 'Claude ';
+  if (/gpt|(^|[:/])o\d|codex/.test(m)) return 'GPT ';
+  if (/gemini/.test(m)) return 'Gemini ';
+  return '模型';
+}
+
 export function toolLabel(name) {
   if (TOOL_LABEL[name]) return TOOL_LABEL[name];
   if (name.startsWith('mcp_')) return `MCP · ${name.split('__').pop()}`;
@@ -160,6 +169,15 @@ export class Transcript {
     this.root = root;
     this.interimEl = null;
     this.progress = progress;
+    // 区域变矮（手机弹出键盘、输入框变高）时保持底部对齐：已输出的内容往上推，而不是被输入框盖住
+    if (typeof ResizeObserver === 'function') {
+      let lastH = root.clientHeight;
+      new ResizeObserver(() => {
+        const h = root.clientHeight;
+        if (h < lastH) root.scrollTop += lastH - h;
+        lastH = h;
+      }).observe(root);
+    }
   }
 
   /**

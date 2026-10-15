@@ -18,7 +18,11 @@
     </style>
 
 
+    <!-- 系统启动页只铺一层白底、不放图标：动画启动页在网页里（用户给的未央 logo），这样打开时只看到一个启动页 -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-        <item name="android:background">@drawable/splash</item>
+        <item name="windowSplashScreenBackground">@color/splash_bg</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_blank</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
+        <item name="android:background">@color/splash_bg</item>
     </style>
 </resources>

@@ -2,9 +2,9 @@
   "appId": "com.xunova.jarvis",
   "appName": "未央",
   "webDir": "dist-mobile",
+  "backgroundColor": "#ffffff",
   "android": {
     "allowMixedContent": false,
-    "captureInput": true,
     "webContentsDebuggingEnabled": false
   },
   "plugins": {
