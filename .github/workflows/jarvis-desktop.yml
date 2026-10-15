@@ -1,6 +1,6 @@
-# 贾维斯：打包 Windows 安装包和安卓 App（APK），一起发布到 Releases 页面。（macOS / Linux 版已停止更新）
+# 未央（原名贾维斯）：打包 Windows 安装包和安卓 App（APK），一起发布到 Releases 页面。（macOS / Linux 版已停止更新）
 # 触发：推送了 jarvis/ 下的改动、推送 desktop-v* 标签，或在 Actions 页面手动运行。
-name: 贾维斯桌面版安装包
+name: 未央安装包
 
 on:
   push:
@@ -166,7 +166,7 @@ jobs:
           # 标签里带版本号：自动更新做差量下载时按版本号找到旧版本的 .blockmap
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('desktop-v1.0.{0}', github.run_number) }}
           target_commitish: ${{ github.sha }}
-          name: "贾维斯桌面版 ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('1.0.{0}', github.run_number) }}"
+          name: "未央 ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('1.0.{0}', github.run_number) }}"
           # 正式发布（不是预发布），“最新版本”才会指向它，自动更新才能找到
           prerelease: false
           make_latest: true
@@ -180,8 +180,9 @@ jobs:
             设置 → 多设备同步：填好自己的阿里云 OSS，在电脑上点“生成同步码”，手机 App 里“用同步码设置”即可。数据上传前用同步密码加密。
 
             ## 自动更新
-            装好之后不用再来这里下载：有新版本时贾维斯会提示。Windows 安装版在后台只下载改动的部分，点“重启以更新”即可；
-            免安装版会提示去下载页。
+            装好之后不用再来这里下载：有新版本时未央会提示。Windows 安装版在后台只下载改动的部分，点“重启以更新”即可；
+            免安装版会提示去下载页。安卓 App 连着 Wi-Fi 时在后台下载新版，顶栏点“安装新版本”、在系统界面点“安装”即可
+            （需要仓库设置了固定签名密钥 ANDROID_KEYSTORE_B64，否则新版装不上，要先卸载旧版）。
 
             ## 首次打开
             - 安装包没有购买代码签名证书：Windows 提示“已保护你的电脑”时点 **更多信息 → 仍要运行**；

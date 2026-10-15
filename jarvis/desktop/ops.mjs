@@ -204,7 +204,7 @@ export function createOps(deps = {}) {
     async screenshot() { return deps.screenshot(); },
     async clipboardRead() { return { text: deps.clipboard.readText() }; },
     async clipboardWrite({ text }) { deps.clipboard.writeText(String(text ?? '')); return { ok: true }; },
-    async notify({ title, body }) { deps.notify(String(title ?? '贾维斯'), String(body ?? '')); return { ok: true }; },
+    async notify({ title, body }) { deps.notify(String(title ?? '未央'), String(body ?? '')); return { ok: true }; },
 
     // 改动记录（工作区面板）：列出、恢复前检查、恢复
     async backupList() { return bk ? bk.list() : []; },

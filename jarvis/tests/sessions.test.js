@@ -40,7 +40,7 @@ describe('多会话', () => {
     const r = await sessions.search('大熊猫');
     expect(r).toHaveLength(1);
     expect(r[0].snippet).toContain('大熊猫');
-    expect(sessions.toMarkdown(s)).toMatch(/^# 帮我规划去成都的旅行[\s\S]*### 贾维斯[\s\S]*大熊猫/);
+    expect(sessions.toMarkdown(s)).toMatch(/^# 帮我规划去成都的旅行[\s\S]*### 未央[\s\S]*大熊猫/);
     await sessions.remove(s.id);
     expect((await sessions.list()).map((x) => x.id)).toEqual([other.id]);
   });

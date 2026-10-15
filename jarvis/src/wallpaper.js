@@ -1,7 +1,7 @@
 /**
  * 桌面背景页（桌面版）：只有粒子体、时钟和轨道 HUD。
  * 自己不跑智能体：主窗口把“在做什么”（造型、表达色、要说的话）同步过来，这里照着显示——
- * 贾维斯在后台干活时，桌面上的粒子体也跟着变形。
+ * 未央在后台干活时，桌面上的粒子体也跟着变形。
  */
 import { createStage } from './render/stage.js';
 import { FORMS } from './render/formations.js';

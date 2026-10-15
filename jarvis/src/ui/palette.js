@@ -62,7 +62,7 @@ export function initPalette({ commands }) {
       li.addEventListener('click', () => run(i));
       rows.push(li);
     });
-    if (!shown.length) rows.push(el('li', { className: 'palette-empty', textContent: '没有匹配的命令。按 Enter 把这句话直接发给贾维斯。' }));
+    if (!shown.length) rows.push(el('li', { className: 'palette-empty', textContent: '没有匹配的命令。按 Enter 把这句话直接发给未央。' }));
     list.replaceChildren(...rows);
     list.querySelector('.on')?.scrollIntoView({ block: 'nearest' });
   }
@@ -114,7 +114,7 @@ export function initPalette({ commands }) {
     open,
     close,
     get isOpen() { return !overlay.hidden; },
-    /** 没有匹配的命令时，把输入当作一句话发给贾维斯 */
+    /** 没有匹配的命令时，把输入当作一句话发给未央 */
     set onFallback(fn) { onFallback = fn; }
   };
 }

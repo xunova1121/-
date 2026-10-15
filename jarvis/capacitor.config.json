@@ -1,6 +1,6 @@
 {
   "appId": "com.xunova.jarvis",
-  "appName": "贾维斯",
+  "appName": "未央",
   "webDir": "dist-mobile",
   "android": {
     "allowMixedContent": false,

@@ -1,5 +1,5 @@
 /**
- * 你回到电脑前时，贾维斯主动打招呼。
+ * 你回到电脑前时，未央主动打招呼。
  * 内容来自本机已有的信息：时间、你的称呼（核心记忆）、今天还没到点的定时任务、上次说好以后再做的事、你的使用习惯。
  * 接了大模型时让模型把这些揉成一两句自然的话；没有时用模板。
  */
@@ -40,7 +40,7 @@ export async function composeGreeting({ now = new Date(), awayMs, coreHuman = ''
   if (llm) {
     try {
       const text = String(await llm({
-        system: '你是“贾维斯”，用户电脑上的私人管家式智能体。用户刚回到电脑前。用中文说一到两句话打招呼：自然、简短、像熟悉的管家，可以顺带提一件最值得提的事并主动提出帮忙。不要编造下面没给出的信息。不要输出任何标签或引号。',
+        system: '你是“未央”，用户电脑上的私人管家式智能体。用户刚回到电脑前。用中文说一到两句话打招呼：自然、简短、像熟悉的管家，可以顺带提一件最值得提的事并主动提出帮忙。不要编造下面没给出的信息。不要输出任何标签或引号。',
         prompt: `现在：${now.toLocaleString('zh-CN', { hour12: false })}（${hello}）\n用户离开了约 ${fmtAway(awayMs)}\n关于用户：${coreHuman || '（未知）'}\n可以提的事：\n${facts.map((f) => `- ${f}`).join('\n') || '（没有）'}`
       })).replace(/<[^>]+>/g, '').replace(/^["“「]|["”」]$/g, '').trim();
       if (text && text.length <= 160) return { text, facts };

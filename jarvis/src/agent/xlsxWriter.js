@@ -7,7 +7,7 @@
  *             合计 / 总计 / 小计 行：数字列 = SUM(上面各行)
  *             增长率 / 同比 / 环比 / 增幅 列：=(本期-上期)/上期（按表头认出本期和上期）
  *             完成率 / 达成率 列：=实际/目标
- *           公式同时写入算好的结果，不重新计算的软件（和贾维斯自己读回时）也能看到数值
+ *           公式同时写入算好的结果，不重新计算的软件（和未央自己读回时）也能看到数值
  */
 import { parseSheets } from './sheetParse.js';
 
@@ -61,7 +61,7 @@ export async function makeXlsx(content, { theme }) {
   const mod = await import('exceljs');
   const ExcelJS = mod.default ?? mod;
   const wb = new ExcelJS.Workbook();
-  wb.creator = '贾维斯';
+  wb.creator = '未央';
   wb.created = new Date();
   wb.calcProperties.fullCalcOnLoad = true; // Excel / WPS 打开时重新计算全部公式
   const C = theme.colors;

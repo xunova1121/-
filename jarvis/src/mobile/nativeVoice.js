@@ -1,7 +1,7 @@
 /**
  * 安卓 App 的“直接对话”：用手机系统自带的语音识别（免费、不需要密钥，中文由手机厂商的识别服务提供）。
  * 系统识别器自己判断一句话什么时候说完，所以不需要网页里的语音活动检测模型。
- * 循环：开始听 → 说完拿到文字 → 交给对话 → 贾维斯朗读期间暂停（免得听到自己）→ 接着听。
+ * 循环：开始听 → 说完拿到文字 → 交给对话 → 未央朗读期间暂停（免得听到自己）→ 接着听。
  * 和 VoiceInput 的接口一致，main.js 不用区分。
  */
 const RESTART_MS = 350;
@@ -29,7 +29,7 @@ export class NativeVoice {
     const perm = await this.plugin.checkPermissions().catch(() => null);
     if (perm?.speechRecognition !== 'granted') {
       const r = await this.plugin.requestPermissions().catch(() => null);
-      if (r?.speechRecognition !== 'granted') throw new Error('麦克风权限被拒绝：请在手机设置里允许贾维斯使用麦克风');
+      if (r?.speechRecognition !== 'granted') throw new Error('麦克风权限被拒绝：请在手机设置里允许未央使用麦克风');
     }
     this.#setMode('vad');
     this.#schedule(0);

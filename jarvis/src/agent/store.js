@@ -31,15 +31,15 @@ function openDb() {
       };
       req.onsuccess = () => ready(req.result);
       req.onerror = () => {
-        // 数据库已经被更新的贾维斯升级过（比如另一个标签页是新版）：按现有版本打开，表只多不少
+        // 数据库已经被更新的未央升级过（比如另一个标签页是新版）：按现有版本打开，表只多不少
         if (req.error?.name !== 'VersionError') return resolve(null);
         const again = indexedDB.open(DB_NAME);
         again.onsuccess = () => ready(again.result);
         again.onerror = () => resolve(null);
       };
       req.onblocked = () => {
-        // 另一个标签页还开着旧版贾维斯，升级要等它关掉。数据都还在，只是这个页面暂时读不到
-        problem = '另一个贾维斯页面还开着旧版本，请关掉它后刷新本页。在那之前，这里看不到之前的对话和记忆，新的改动也不会保存。';
+        // 另一个标签页还开着旧版未央，升级要等它关掉。数据都还在，只是这个页面暂时读不到
+        problem = '另一个未央页面还开着旧版本，请关掉它后刷新本页。在那之前，这里看不到之前的对话和记忆，新的改动也不会保存。';
         resolve(null);
       };
     } catch {

@@ -57,5 +57,17 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
     return createNativeSaver({ Filesystem, Directory, Share, toast: (t) => globalThis.__jarvisToast?.(t) })(blob, name);
   };
 
+  // 自动更新：后台下载新版安装包，顶栏点“安装新版本”（见 appUpdate.js；界面在 main.js 里和电脑版共用）
+  try {
+    const [{ App }, { registerPlugin }, { createAppUpdater }] = await Promise.all([import('@capacitor/app'), import('@capacitor/core'), import('./appUpdate.js')]);
+    const info = await App.getInfo();
+    globalThis.__jarvisAppUpdater = createAppUpdater({
+      current: info.version,
+      plugin: registerPlugin('AppUpdate'),
+      getText: async (url) => { const r = await native(url); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); },
+      metered: () => navigator.connection?.type === 'cellular'
+    });
+  } catch { /* 旧版 App 没有更新插件 */ }
+
   document.documentElement.classList.add('mobile-app');
 }

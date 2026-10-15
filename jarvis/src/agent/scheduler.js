@@ -1,5 +1,5 @@
 /**
- * 定时任务：到点让贾维斯自动做一件事（“每个工作日 9 点总结今天的日程”“每周五 17:30 写周报”）。
+ * 定时任务：到点让未央自动做一件事（“每个工作日 9 点总结今天的日程”“每周五 17:30 写周报”）。
  *
  *   - 在应用运行时执行：桌面版关窗后在托盘里继续运行；网页版需要页面开着
  *   - 错过的（电脑关机、应用没开）：12 小时内的补跑一次，更早的直接排到下一次
@@ -128,7 +128,7 @@ export async function upsert(input) {
     fails: old && !old.enabled && input.enabled !== false ? 0 : old?.fails ?? 0,
     attempts: 0
   };
-  if (!s.prompt) throw new Error('请写明要让贾维斯做什么');
+  if (!s.prompt) throw new Error('请写明要让未央做什么');
   if (!['daily', 'workdays', 'weekly', 'once', 'interval'].includes(s.kind)) throw new Error('时间类型不对');
   s.nextRun = nextRun(s);
   if (s.kind === 'once' && !s.nextRun && !old) throw new Error('这个时间已经过去了');

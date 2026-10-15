@@ -23,7 +23,7 @@ import * as packs from './skillPacks.js';
 import { summaryBlock } from './compress.js';
 import { createToolLoader } from './toolLoader.js';
 
-export const STABLE_PROMPT = `你是“贾维斯”，运行在用户电脑上的个人智能体。界面是一个会做表情的发光光核。
+export const STABLE_PROMPT = `你是“未央”，运行在用户电脑上的个人智能体。界面是一个会做表情的发光光核。
 
 ## 你能做的事
 - 对话、写作、分析、翻译、规划。
@@ -87,10 +87,10 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
   const desktop = typeof window !== 'undefined' ? window.jarvisDesktop : null;
   if (desktop) {
     const os = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' }[desktop.platform] ?? desktop.platform;
-    parts.push(`运行环境：贾维斯桌面版（${os}）。可以用 computer_* 工具直接操作这台电脑的文件、打开程序、运行命令；还能像人一样用鼠标键盘操作任何软件：computer_look 看屏幕 → computer_click / computer_type / computer_key / computer_scroll / computer_drag 操作（每步之后会返回新截图，确认结果再做下一步；坐标取目标元素的中心）。能用文件、命令工具完成的优先用它们，界面操作更慢；遇到登录、支付、删除等敏感步骤先停下问用户；写入、移动、删除、打开、运行命令时界面会自动请用户确认，你不需要先在文字里征求同意。${desktop.paths ? `用户目录：${desktop.paths.home}；桌面：${desktop.paths.desktop}；文档：${desktop.paths.documents}；下载：${desktop.paths.downloads}` : ''}`);
+    parts.push(`运行环境：未央桌面版（${os}）。可以用 computer_* 工具直接操作这台电脑的文件、打开程序、运行命令；还能像人一样用鼠标键盘操作任何软件：computer_look 看屏幕 → computer_click / computer_type / computer_key / computer_scroll / computer_drag 操作（每步之后会返回新截图，确认结果再做下一步；坐标取目标元素的中心）。能用文件、命令工具完成的优先用它们，界面操作更慢；遇到登录、支付、删除等敏感步骤先停下问用户；写入、移动、删除、打开、运行命令时界面会自动请用户确认，你不需要先在文字里征求同意。${desktop.paths ? `用户目录：${desktop.paths.home}；桌面：${desktop.paths.desktop}；文档：${desktop.paths.documents}；下载：${desktop.paths.downloads}` : ''}`);
   }
   if (typeof document !== 'undefined' && document.body?.classList.contains('compact')) {
-    parts.push('运行环境：贾维斯手机 App（安卓）。屏幕上只有对话，没有“右侧预览区”：生成的文件、网页、PPT 在左上角菜单 →“工作区”里查看，回答时这样告诉用户（不要说“看右侧”）。不能操作电脑。');
+    parts.push('运行环境：未央手机 App（安卓）。屏幕上只有对话，没有“右侧预览区”：生成的文件、网页、PPT 在左上角菜单 →“工作区”里查看，回答时这样告诉用户（不要说“看右侧”）。不能操作电脑。');
   }
   // 长对话：较早的消息已压缩成摘要（见 compress.js）
   const earlier = summaryBlock(summary, sessionId);
@@ -100,7 +100,7 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
   if (ctx.memories.length) parts.push(`## 相关记忆\n${ctx.memories.map((m) => `- [来源:${m.source || '未记录'}; 时间:${new Date(m.updatedAt || m.ts).toISOString()}; 版本:${(m.history?.length || 0)+1}] ${m.content}`).join('\n')}`);
   const day = (ts) => new Date(ts).toLocaleDateString('zh-CN');
   if (ctx.episodes?.length) parts.push(`## 相关的过往对话\n${ctx.episodes.map((e) => `- ${day(e.ts)}${e.sessionTitle ? `「${e.sessionTitle}」` : ''}：${e.summary}`).join('\n')}`);
-  if (past.length) parts.push(`## 过往对话里的相关原话（需要更多细节时用 read_conversation 读全文）\n${past.map((p) => `- ${day(p.ts)}「${p.title}」（id: ${p.sessionId}）\n  用户：${p.user.slice(0, 160)}${p.reply ? `\n  贾维斯：${p.reply.replace(/\s+/g, ' ').slice(0, 240)}` : ''}`).join('\n')}`);
+  if (past.length) parts.push(`## 过往对话里的相关原话（需要更多细节时用 read_conversation 读全文）\n${past.map((p) => `- ${day(p.ts)}「${p.title}」（id: ${p.sessionId}）\n  用户：${p.user.slice(0, 160)}${p.reply ? `\n  未央：${p.reply.replace(/\s+/g, ' ').slice(0, 240)}` : ''}`).join('\n')}`);
   if (recentS.length) parts.push(`## 最近的其他对话（用户说“接着上次 / 刚才那个”时参考）\n${recentS.map((s) => `- ${day(s.updatedAt)}「${s.title}」（id: ${s.id}，${s.messages.length} 条）最后：${String([...s.messages].reverse().find((m) => m.role === 'user')?.content ?? '').slice(0, 60)}`).join('\n')}`);
   if (open.length) parts.push(`## 之前对话里说好以后再做的事（合适时主动提一句，用户说不用了就不再提）\n${open.map((o) => `- ${o.text}${o.sessionTitle ? `（来自「${o.sessionTitle}」，${day(o.ts)}）` : ''}`).join('\n')}`);
   if (ctx.lessons.length) parts.push(`## 经验教训（来自用户反馈）\n${ctx.lessons.map((l) => `- ${l.content}`).join('\n')}`);

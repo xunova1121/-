@@ -44,7 +44,7 @@ export const TTS_ENGINES = [
 export const ttsEngineById = (id) => TTS_ENGINES.find((e) => e.id === id);
 
 /**
- * 浏览器自带声音排序：神经网络（Natural / Neural / Online）> 男声（更像贾维斯）> 中文 > 其他。
+ * 浏览器自带声音排序：神经网络（Natural / Neural / Online）> 男声（更像未央）> 中文 > 其他。
  * Edge 浏览器的“Yunjian / Yunxi (Natural)”是免费声音里最自然的。
  */
 export function rankBrowserVoices(voices) {

@@ -23,7 +23,7 @@ const DEMO_PAGE = `<!doctype html>
 <style>html,body{margin:0;height:100%;background:#050b14;color:#cfe8ff;font-family:system-ui;display:grid;place-items:center}
 #t{font:600 64px ui-monospace,monospace;letter-spacing:.08em;text-shadow:0 0 18px #38bdf8}
 p{opacity:.6}</style></head>
-<body><div><div id="t"></div><p>由贾维斯在工作区里编写并运行</p></div>
+<body><div><div id="t"></div><p>由未央在工作区里编写并运行</p></div>
 <script>const t=document.getElementById('t');setInterval(()=>t.textContent=new Date().toLocaleTimeString('zh-CN',{hour12:false}),250);</script>
 </body></html>`;
 
@@ -129,7 +129,7 @@ export function plan(messages, tools = []) {
     const open = q.match(/^打开\s*(.+)/);
     if (open) return { emotion: '专注', calls: [call('computer_open', { target: open[1].trim() })] };
     const save = q.match(/写.*文件.*?([\w\u4e00-\u9fa5/\\.~-]+\.(txt|md))/);
-    if (save) return { emotion: '专注', calls: [call('computer_write_file', { path: save[1], content: '由贾维斯写入的测试文件' })] };
+    if (save) return { emotion: '专注', calls: [call('computer_write_file', { path: save[1], content: '由未央写入的测试文件' })] };
   }
   // —— 定时任务：“每个工作日 9 点帮我……”
   if (!/^【这是定时任务/.test(q) && /(每天|每日|每周|星期|工作日|每隔|每\d+分钟|每小时|明天|后天|\d+分钟后|\d+小时后)/.test(q) && /(提醒|帮我|总结|写|检查|汇报|整理|发)/.test(q)) {
@@ -174,7 +174,7 @@ export function plan(messages, tools = []) {
   if (/成功|通过|完成|好消息|升职|录取/.test(q)) return { emotion: '愉悦', text: '太好了，恭喜你！这份努力很值得。要不要我帮你把下一步计划列一下？' };
   return {
     emotion: '亲和',
-    text: '你好，我是贾维斯。现在是离线演示模式，你可以试试：\n- “帮我写一个网页”\n- “生成一份 Word 周报” / “做一个 PPT” / “做一个 Excel 表格”\n- “记住我喜欢简洁的回答”\n- “根据知识库回答……”（先把文档拖进来）\n- “运行一段代码”\n\n在左侧“模型”里填上任意一家大模型的密钥，我就能真正理解并完成各种任务。'
+    text: '你好，我是未央。现在是离线演示模式，你可以试试：\n- “帮我写一个网页”\n- “生成一份 Word 周报” / “做一个 PPT” / “做一个 Excel 表格”\n- “记住我喜欢简洁的回答”\n- “根据知识库回答……”（先把文档拖进来）\n- “运行一段代码”\n\n在左侧“模型”里填上任意一家大模型的密钥，我就能真正理解并完成各种任务。'
   };
 }
 

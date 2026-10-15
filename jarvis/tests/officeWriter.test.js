@@ -99,7 +99,7 @@ describe('Excel：样式和公式', () => {
     expect(wb.worksheets[0].getCell('D2').value.formula).toBe('IFERROR((C2-B2)/B2,"")');
   });
 
-  it('贾维斯读回：看到的是算好的数（原来的读取功能不受影响）', async () => {
+  it('未央读回：看到的是算好的数（原来的读取功能不受影响）', async () => {
     const { blob } = await generate('xlsx', { content: SALES });
     const { text } = await parseFile(blob, 's.xlsx');
     expect(text).toContain('工作表：季度销售');

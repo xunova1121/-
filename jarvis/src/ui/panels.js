@@ -278,7 +278,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     // 核心记忆里像注入指令的行：不放进提示，告诉用户是哪一行、为什么
     const flags = all.coreFlags ?? [];
     $('#core-flags').hidden = !flags.length;
-    $('#core-flags').replaceChildren(...flags.map((f) => el('div', { textContent: `可疑，未使用（${f.why}）·${f.block === 'human' ? '关于你' : '贾维斯的设定'}：“${f.line}”` })));
+    $('#core-flags').replaceChildren(...flags.map((f) => el('div', { textContent: `可疑，未使用（${f.why}）·${f.block === 'human' ? '关于你' : '未央的设定'}：“${f.line}”` })));
     const eng = memory.memoryEngine();
     $('#mem-engine').textContent = `整理：${eng.llm ? '大模型' : '本地规则'} · 检索：${eng.embeddings ? `关键词 + 语义（${eng.embeddings.split(':').pop()}）` : '关键词（填 OpenAI / 硅基流动密钥可启用语义检索）'}`;
     $('#set-automem').checked = settings.autoMemory !== false;
@@ -312,7 +312,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     else if (mindTab === 'skills') items = all.skills.map((s) => el('li', {}, el('span', { className: 'tag', textContent: `v${s.version}` }), sus(s), el('details', {}, el('summary', { textContent: s.name }), el('pre', { textContent: `${s.description ? `${s.description}\n\n` : ''}${s.steps}` })), del('skills', s.id)));
     else if (mindTab === 'lessons') items = all.lessons.map((l) => el('li', {}, sus(l), el('span', { className: 'fn', textContent: l.content }), el('span', { className: 'fs', textContent: when(l.ts) }), del('lessons', l.id)));
     else if (mindTab === 'events') items = all.events.slice(0, 80).map((e) => el('li', {}, el('span', { className: 'fs', textContent: new Date(e.ts).toLocaleString('zh-CN', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }), el('span', { className: 'fn', textContent: e.text })));
-    else if (mindTab === 'history') items = getHistory().slice(-40).reverse().map((m) => el('li', {}, el('span', { className: 'tag', textContent: m.role === 'user' ? '你' : '贾维斯' }), el('span', { className: 'fn', textContent: m.content.slice(0, 120) })));
+    else if (mindTab === 'history') items = getHistory().slice(-40).reverse().map((m) => el('li', {}, el('span', { className: 'tag', textContent: m.role === 'user' ? '你' : '未央' }), el('span', { className: 'fn', textContent: m.content.slice(0, 120) })));
     const emptyText = { archived: '没有归档的记忆。被新说法取代、被要求忘记、或长期不用的记忆会出现在这里。', episodes: '还没有对话片段。每段对话停下来之后，我会写一段摘要，以后能想起“上次聊到哪”。', memories: '还没有记忆。告诉我“记住我喜欢……”，或者在对话中透露你的偏好。', skills: '还没有技能。完成多步任务后，我会把可复用的做法存成技能。', lessons: '还没有教训。对不满意的回答点 👎 并说明原因，我会记住。', events: '还没有进化记录。', history: '还没有对话。' }[mindTab];
     list.replaceChildren(...(items.length ? items : [el('li', { className: 'empty', textContent: emptyText })]));
   }
@@ -354,7 +354,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   $('#btn-reflect').addEventListener('click', async () => { await onReflect?.(); refreshMind(); });
   $('#btn-mem-export').addEventListener('click', async () => {
     const data = await memory.exportAll();
-    const msg = await saveFile(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), `贾维斯记忆备份-${new Date().toISOString().slice(0, 10)}.json`);
+    const msg = await saveFile(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), `未央记忆备份-${new Date().toISOString().slice(0, 10)}.json`);
     if (MOBILE) toast(msg);
   });
   $('#btn-mem-import').addEventListener('click', () => $('#mem-import-input').click());

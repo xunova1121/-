@@ -1,7 +1,7 @@
 /**
  * 改文件前自动备份（桌面版，电脑上的文件）。思路参考开源的 Hermes Agent（tools/checkpoint_manager.py，MIT 许可）：
  * 改之前自动留一份、可以回滚、定期清理旧的。它用隐藏的 git 仓库给整个文件夹拍快照；
- * 贾维斯的用户电脑上不一定有 git，所以按单个文件备份，只用 Node 自带的功能。
+ * 未央的用户电脑上不一定有 git，所以按单个文件备份，只用 Node 自带的功能。
  *
  *   overwrite  覆盖写文件：旧文件复制进备份 → 恢复时写回
  *   create     新建文件：只记一笔 → 恢复时移到回收站
@@ -207,7 +207,7 @@ export function createBackups({ dir, limits = {}, now: clock = Date.now, trash =
   async function inspect(e) {
     const cur = await stat(e.path);
     const changed = cur && e.mtimeAfter && Math.abs(cur.mtimeMs - e.mtimeAfter) > 1;
-    const warnChanged = changed ? '这个文件在贾维斯改过之后又被改过，恢复会覆盖这些改动（当前内容会先备份）' : '';
+    const warnChanged = changed ? '这个文件在未央改过之后又被改过，恢复会覆盖这些改动（当前内容会先备份）' : '';
     switch (e.op) {
       case 'overwrite':
       case 'delete':
@@ -218,7 +218,7 @@ export function createBackups({ dir, limits = {}, now: clock = Date.now, trash =
       case 'create':
       case 'copy':
         if (!cur) return { ok: false, problem: `文件已经不在了，不需要撤销：${e.path}` };
-        return { ok: true, warning: changed ? '这个文件在贾维斯建好之后又被改过，撤销会把它移到回收站（当前内容会先备份）' : '' };
+        return { ok: true, warning: changed ? '这个文件在未央建好之后又被改过，撤销会把它移到回收站（当前内容会先备份）' : '' };
       case 'move':
         if (cur) return { ok: false, problem: `原位置已经有同名文件，为避免覆盖没有移回：${e.path}` };
         if (!(await stat(e.to))) return { ok: false, problem: `找不到 ${e.to}，可能已经被移走或删除` };

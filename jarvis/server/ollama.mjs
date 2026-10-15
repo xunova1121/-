@@ -1,7 +1,7 @@
 /**
  * 本机模型（Ollama）管理：检测、启动、下载（带进度）、删除。
  *
- *   网关接口（只允许本机贾维斯页面调用，和 MCP 一样的同源校验）：
+ *   网关接口（只允许本机未央页面调用，和 MCP 一样的同源校验）：
  *     GET    /api/ollama/status          { running, version, host, models, binary, ram, platform }
  *     POST   /api/ollama/start           找到 ollama 程序并在后台启动 `ollama serve`
  *     POST   /api/ollama/pull  {model}   逐行回传下载进度（NDJSON：{ status, total, completed }）

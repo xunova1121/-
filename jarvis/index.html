@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="color-scheme" content="dark" />
-  <title>贾维斯 · 智能工作台</title>
+  <title>未央 · 智能工作台</title>
   <link rel="stylesheet" href="/src/styles.css" />
   <script>
     // 首帧前就决定明暗，避免先黑后白的闪烁（逻辑与 src/core/theme.js 一致）
@@ -18,7 +18,7 @@
 </head>
 <body>
   <div class="boot" id="boot" aria-hidden="true">
-    <div class="boot-inner"><div class="boot-mark"></div><div class="boot-title">J.A.R.V.I.S.</div><div class="boot-lines" id="boot-lines"></div></div>
+    <div class="boot-inner"><div class="boot-mark"></div><div class="boot-title">WEIYANG</div><div class="boot-lines" id="boot-lines"></div></div>
   </div>
   <div class="app">
     <!-- 顶栏 -->
@@ -28,7 +28,7 @@
       </button>
       <div class="brand">
         <span class="brand-mark" aria-hidden="true"></span>
-        <span class="brand-name">贾维斯</span>
+        <span class="brand-name">未央</span>
         <span class="brand-sub">个人智能助手</span>
       </div>
       <button class="status-pill" id="mode-pill" type="button" title="当前模型" data-open="models">
@@ -70,7 +70,7 @@
 
     <!-- 中间：光核 + 对话 + 输入 -->
     <main class="main" id="main">
-      <section class="stage" id="stage-wrap" aria-label="贾维斯">
+      <section class="stage" id="stage-wrap" aria-label="未央">
         <div id="fallback-bg"></div>
         <canvas id="stage"></canvas>
         <div class="hud-frame" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
@@ -152,7 +152,7 @@
         </div>
         <ul class="file-list" id="file-list"></ul>
         <div class="change-box" id="change-box" hidden>
-          <p class="muted small" id="change-hint">贾维斯覆盖、删除文件之前会自动留一份，在这里可以恢复。保留 30 天。</p>
+          <p class="muted small" id="change-hint">未央覆盖、删除文件之前会自动留一份，在这里可以恢复。保留 30 天。</p>
           <ul class="file-list change-list" id="change-list"></ul>
         </div>
         <div class="viewer" id="viewer" hidden>
@@ -198,9 +198,9 @@
         </div>
         <p class="muted small">学习发生在这台电脑上：记住你的偏好与身份，同一件事的新说法会自动取代旧的（旧版本留作历史），每段对话结束后自动整理要点；从 👎 反馈里总结教训，把做成功的任务沉淀为技能。大模型本身的参数不会改变。</p>
         <details class="core-mem" id="core-mem" open>
-          <summary>核心记忆 <span class="muted small">每轮对话都会带上，贾维斯也会自己更新</span></summary>
+          <summary>核心记忆 <span class="muted small">每轮对话都会带上，未央也会自己更新</span></summary>
           <label class="field"><span>关于你</span><textarea id="core-human" rows="3" maxlength="1200" placeholder="例如：称呼我老王；产品经理；回答尽量简洁，先给结论"></textarea></label>
-          <label class="field"><span>贾维斯的设定</span><textarea id="core-persona" rows="2" maxlength="1200" placeholder="例如：用“您”称呼我；语气沉稳干练，偶尔幽默"></textarea></label>
+          <label class="field"><span>未央的设定</span><textarea id="core-persona" rows="2" maxlength="1200" placeholder="例如：用“您”称呼我；语气沉稳干练，偶尔幽默"></textarea></label>
           <div class="pane-actions"><button class="btn sm" type="button" id="btn-core-save">保存核心记忆</button><span class="muted small" id="core-status" role="status"></span></div>
           <div class="small core-flags" id="core-flags" hidden></div>
         </details>
@@ -230,7 +230,7 @@
       <!-- 技能 -->
       <section class="pane" data-pane="skills" hidden>
         <header class="pane-head"><h2>技能与工具</h2><span class="badge" id="skill-count">0 个</span></header>
-        <p class="muted small">技能是一份“做法说明书”（SKILL.md，可附带模板与脚本），与开源 Agent Skills 格式通用。安装后贾维斯会在合适的时候自动使用；也可以在输入框输入 <kbd>/</kbd> 点名使用。技能内容会交给大模型执行，只安装你信任的来源。</p>
+        <p class="muted small">技能是一份“做法说明书”（SKILL.md，可附带模板与脚本），与开源 Agent Skills 格式通用。安装后未央会在合适的时候自动使用；也可以在输入框输入 <kbd>/</kbd> 点名使用。技能内容会交给大模型执行，只安装你信任的来源。</p>
         <div class="skill-install">
           <input id="skill-url" spellcheck="false" placeholder="GitHub 技能地址：github.com/用户/仓库/tree/分支/技能文件夹" />
           <div class="pane-actions">
@@ -246,7 +246,7 @@
 
         <section id="mcp-section" class="mcp-section">
           <h3 class="sub">MCP 工具连接 <span class="badge" id="mcp-count"></span></h3>
-          <p class="muted small">MCP 是大模型连接外部工具的通用标准：接上浏览器自动化、地图、GitHub、数据库、各类办公软件的 MCP 服务后，贾维斯就能直接使用它们。技能教它“怎么做”，MCP 让它“能接触到”。</p>
+          <p class="muted small">MCP 是大模型连接外部工具的通用标准：接上浏览器自动化、地图、GitHub、数据库、各类办公软件的 MCP 服务后，未央就能直接使用它们。技能教它“怎么做”，MCP 让它“能接触到”。</p>
           <p class="note" id="mcp-unavailable">MCP 服务要在本机启动程序，单文件版用不了。请使用<b>桌面版</b>，或双击 jarvis 文件夹里的 启动.bat 打开完整版。</p>
           <div id="mcp-body" hidden>
             <ul class="skill-list" id="mcp-list"></ul>
@@ -338,13 +338,13 @@
       <!-- 系统 -->
       <section class="pane" data-pane="system" hidden>
         <header class="pane-head"><h2>定时任务</h2><span class="badge" id="sched-count">0 个</span></header>
-        <p class="muted small">到点让贾维斯自动做事，结果存成一段对话并通知你。也可以直接说“每个工作日 9 点帮我……”。网页版需要页面开着；桌面版关掉窗口后在托盘里也会执行。</p>
+        <p class="muted small">到点让未央自动做事，结果存成一段对话并通知你。也可以直接说“每个工作日 9 点帮我……”。网页版需要页面开着；桌面版关掉窗口后在托盘里也会执行。</p>
         <ul class="skill-list" id="sched-list"></ul>
         <details class="mcp-form sched-add" id="sched-add">
           <summary>＋ 新建定时任务</summary>
           <form id="sched-form" autocomplete="off">
             <label class="field"><span>名称</span><input name="title" maxlength="40" placeholder="例如：晨间简报" required /></label>
-            <label class="field"><span>让贾维斯做什么</span><textarea name="prompt" rows="3" required placeholder="例如：列出工作区里昨天以来新增或修改的文件，并总结今天的待办"></textarea></label>
+            <label class="field"><span>让未央做什么</span><textarea name="prompt" rows="3" required placeholder="例如：列出工作区里昨天以来新增或修改的文件，并总结今天的待办"></textarea></label>
             <div class="sched-when">
               <label class="field"><span>频率</span><select name="kind"><option value="daily">每天</option><option value="workdays">工作日</option><option value="weekly">每周</option><option value="once">仅一次</option><option value="interval">每隔一段时间</option></select></label>
               <label class="field" data-k="daily workdays weekly"><span>时间</span><input name="time" type="time" value="09:00" /></label>
@@ -376,8 +376,8 @@
           <ul class="voice-check" id="voice-check" hidden></ul>
         </div>
         <div class="setting">
-          <label><input type="checkbox" id="set-wake" /> 唤醒词“贾维斯”</label>
-          <p class="muted">开启后，直接对话只响应以“贾维斯”（或“嘿，贾维斯”）开头的话；唤醒后 20 秒内可以接着说，不用再喊名字。说“退下”结束。旁边有人聊天也不会被打断。</p>
+          <label><input type="checkbox" id="set-wake" /> 唤醒词“未央”</label>
+          <p class="muted">开启后，直接对话只响应以“未央”（或“嘿，未央”）开头的话；唤醒后 20 秒内可以接着说，不用再喊名字。说“退下”结束。旁边有人聊天也不会被打断。</p>
         </div>
         <div class="setting"><label><input type="checkbox" id="set-tts" /> 语音朗读回答</label></div>
         <div class="setting">
@@ -389,7 +389,7 @@
         </div>
         <div class="setting">
           <label><input type="checkbox" id="set-greet" /> 回到电脑前时主动问好</label>
-          <p class="muted">离开 10 分钟以上再回来（桌面版看键盘鼠标；开了人脸跟随时也看摄像头；网页版看标签页），贾维斯会结合时间、今天的定时任务、上次没做完的事打个招呼。40 分钟内最多一次。</p>
+          <p class="muted">离开 10 分钟以上再回来（桌面版看键盘鼠标；开了人脸跟随时也看摄像头；网页版看标签页），未央会结合时间、今天的定时任务、上次没做完的事打个招呼。40 分钟内最多一次。</p>
         </div>
         <div class="setting" id="row-version" hidden>
           <span class="label">版本</span>
@@ -428,7 +428,7 @@
         </div>
         <div class="setting" id="row-wallpaper" hidden>
           <label><input type="checkbox" id="set-wallpaper" /> 桌面背景模式</label>
-          <p class="muted">粒子体铺满桌面、待在所有窗口下面；贾维斯在后台干活、说话时，桌面上的它也跟着变形。按 Ctrl+Shift+J 或托盘图标打开对话。</p>
+          <p class="muted">粒子体铺满桌面、待在所有窗口下面；未央在后台干活、说话时，桌面上的它也跟着变形。按 Ctrl+Shift+J 或托盘图标打开对话。</p>
         </div>
         <div class="setting">
           <span class="label">多助手分工</span>

@@ -3,7 +3,7 @@
  *
  * 10 套配色来自 Anthropic 的开源技能 theme-factory（Copyright Anthropic, PBC，Apache License 2.0，
  * 许可原文见 jarvis/licenses/theme-factory-LICENSE.txt）。这里只取了配色和字体风格，
- * 按贾维斯的用法分配了角色（标题色、强调色、浅底色），字体换成中文常用字体，另加“公文”和默认样式。
+ * 按未央的用法分配了角色（标题色、强调色、浅底色），字体换成中文常用字体，另加“公文”和默认样式。
  *
  *   primary  深色：标题、PPT 深色背景
  *   accent   强调色：表头、分隔线、要点符号

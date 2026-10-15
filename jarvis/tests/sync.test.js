@@ -116,7 +116,7 @@ describe('OSS', () => {
     expect(sent.init.headers['x-jarvis-client']).toBe('1');
     expect(JSON.parse(sent.init.body)).toMatchObject({ method: 'PUT', body: 'QUJD' });
     expect(r).toEqual({ status: 200, headers: { etag: '"e"' }, text: 'QUJD' });
-    const denied = async () => new Response('{"error":"只允许本机贾维斯页面调用"}', { status: 403 });
+    const denied = async () => new Response('{"error":"只允许本机未央页面调用"}', { status: 403 });
     await expect(gatewayTransport('', denied)({ method: 'GET', url: 'x', headers: {} })).rejects.toThrow('本机网关拒绝');
   });
 

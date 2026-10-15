@@ -1,4 +1,4 @@
-// 贾维斯桌面版 preload：只向页面暴露有限的接口，页面拿不到 Node / Electron 本身
+// 未央桌面版 preload：只向页面暴露有限的接口，页面拿不到 Node / Electron 本身
 const { contextBridge, ipcRenderer } = require('electron');
 
 const info = ipcRenderer.sendSync('jarvis:info');

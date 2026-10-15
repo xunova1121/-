@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">贾维斯</string>
-    <string name="title_activity_main">贾维斯</string>
+    <string name="app_name">未央</string>
+    <string name="title_activity_main">未央</string>
     <string name="package_name">com.xunova.jarvis</string>
     <string name="custom_url_scheme">com.xunova.jarvis</string>
 </resources>

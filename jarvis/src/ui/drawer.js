@@ -44,7 +44,7 @@ export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, curren
   newBtn.append('开启新对话');
   newBtn.addEventListener('click', () => { close(); onNew(); });
   const drawer = el('aside', { className: 'drawer', id: 'drawer', ariaLabel: '菜单' },
-    el('div', { className: 'drawer-head' }, el('div', { className: 'drawer-title' }, el('strong', { textContent: '贾维斯' }), el('small', { textContent: '个人智能助手' }))),
+    el('div', { className: 'drawer-head' }, el('div', { className: 'drawer-title' }, el('strong', { textContent: '未央' }), el('small', { textContent: '个人智能助手' }))),
     newBtn,
     el('section', { className: 'drawer-card' }, el('h3', { textContent: '功能' }), grid),
     el('section', { className: 'drawer-card drawer-hist' }, el('h3', { textContent: '历史对话' }), history)

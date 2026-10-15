@@ -1,5 +1,5 @@
 /**
- * 命令安全检查（思路参考开源的 Hermes Agent：tools/approval_detection.py，MIT 许可；规则按贾维斯的场景重写）。
+ * 命令安全检查（思路参考开源的 Hermes Agent：tools/approval_detection.py，MIT 许可；规则按未央的场景重写）。
  *
  *   block   禁止执行：抹掉整个系统盘 / 用户目录、格式化磁盘、删除系统还原点……直接拦下，不问用户
  *   danger  危险命令：删除文件、关机、改注册表、结束进程、下载脚本直接执行、提权……

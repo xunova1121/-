@@ -105,8 +105,8 @@ describe('电脑操作控制器', () => {
   it('输入文字：粘贴后恢复原来的剪贴板', async () => {
     const f = fakeElectron();
     const c = createControl(f.deps);
-    await c.act({ type: 'type', text: '你好，贾维斯', enter: true });
-    expect(f.actions).toEqual(['clipboard:你好，贾维斯', { type: 'key', keys: 'ctrl+v' }, 'clipboard:用户原来的剪贴板', { type: 'key', keys: 'enter' }]);
+    await c.act({ type: 'type', text: '你好，未央', enter: true });
+    expect(f.actions).toEqual(['clipboard:你好，未央', { type: 'key', keys: 'ctrl+v' }, 'clipboard:用户原来的剪贴板', { type: 'key', keys: 'enter' }]);
   });
 
   it('紧急停止：鼠标被用户甩到左上角；自己点左上角不算；begin 后恢复', async () => {

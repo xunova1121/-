@@ -63,9 +63,9 @@ check('未知操作被主进程拒绝', /未知操作/.test(await page.evaluate(
 let r = await ask('列出桌面');
 check('查看桌面文件夹（无需确认）', /项目计划\.md/.test(r), r.slice(0, 120));
 
-r = await ask('帮我写一个文件 桌面/贾维斯测试.txt', { approve: '允许' });
-const written = path.join(HOME, 'Desktop', '贾维斯测试.txt');
-check('写文件前在对话里征求同意，允许后写入磁盘', fs.existsSync(written) && /由贾维斯写入/.test(fs.readFileSync(written, 'utf8')), r.slice(-80));
+r = await ask('帮我写一个文件 桌面/未央测试.txt', { approve: '允许' });
+const written = path.join(HOME, 'Desktop', '未央测试.txt');
+check('写文件前在对话里征求同意，允许后写入磁盘', fs.existsSync(written) && /由未央写入/.test(fs.readFileSync(written, 'utf8')), r.slice(-80));
 
 r = await ask('帮我写一个文件 桌面/不该写入.txt', { approve: '拒绝' });
 check('拒绝后不执行', !fs.existsSync(path.join(HOME, 'Desktop', '不该写入.txt')) && /拒绝/.test(r), r.slice(-80));
@@ -111,7 +111,7 @@ await page.screenshot({ path: `${OUT}/desktop-main.png` });
   const r2 = await page.locator('#transcript .msg.agent').last().innerText();
   const m2 = mouse();
   check('智能体：看屏幕后点击指定位置，并拿到操作后的截图', /操作完成。已点击/.test(r2) && /当前屏幕截图/.test(r2) && Math.abs(m2.x - scr[0] / 2) <= 2 && Math.abs(m2.y - scr[1] / 3) <= 2, `${r2.replace(/\n/g, ' ').slice(-120)} ${JSON.stringify(m2)}`);
-  check('电脑操作结束后贾维斯窗口回到前台', await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()));
+  check('电脑操作结束后未央窗口回到前台', await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()));
 }
 
 // —— 桌面背景 + 主动问好
@@ -179,8 +179,8 @@ check('界面添加 MCP 服务并连接', /已连接/.test(await page.textConten
 check('MCP 配置保存到应用数据目录', fs.existsSync(path.join(HOME, '.jarvis', 'mcp.json')));
 await page.screenshot({ path: `${OUT}/desktop-mcp.png` });
 
-r = await ask('用 MCP 的 echo 工具 你好贾维斯', { approve: '允许' });
-check('智能体调用 MCP 工具（确认后）', /MCP 工具返回：回显：你好贾维斯/.test(r), r.replace(/\n/g, ' ').slice(-300));
+r = await ask('用 MCP 的 echo 工具 你好未央', { approve: '允许' });
+check('智能体调用 MCP 工具（确认后）', /MCP 工具返回：回显：你好未央/.test(r), r.replace(/\n/g, ' ').slice(-300));
 r = await ask('用 MCP 的 add 工具 算 2 加 40', { approve: '允许' });
 check('未设“自动允许”的 MCP 服务每次都先确认，然后返回结果', /MCP 工具返回：42/.test(r), r.slice(-60));
 

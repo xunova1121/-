@@ -1,5 +1,5 @@
 /**
- * 贾维斯前端入口：状态管理层 + 渲染策略控制器。
+ * 未央前端入口：状态管理层 + 渲染策略控制器。
  *
  *   感知（人脸 / VAD / 识别） ─┐
  *   智能体事件（agent.js）     ─┼─▶ EmotionMachine ─▶ ParamTween(400ms) ─┐
@@ -11,6 +11,10 @@
  * 减少动画：在初始化 WebGL 之前判断，命中则根本不 import three.js、不下载网格。
  */
 import { initWorkbench } from './ui/workbench.js';
+import logoUrl from './ui/logo.svg';
+
+// 浏览器标签页图标：未央 logo（小图直接内联，单文件版也能显示）
+document.head.append(Object.assign(document.createElement('link'), { rel: 'icon', type: 'image/svg+xml', href: logoUrl }));
 import './mobile/boot.js'; // 安卓 App：先装好原生网络 / 朗读（其他版本里是空的）
 import { EmotionMachine } from './core/emotionMachine.js';
 import { EMOTION_PARAMS, EYE_SHAPES } from './core/emotions.js';
@@ -620,7 +624,7 @@ let schedulesPanel = null;
 const DESKTOP = window.jarvisDesktop;
 /** 本次会话里用户选了“本次都允许”的操作类别 */
 const sessionApprovals = new Set();
-/** 电脑操作（鼠标键盘）进行中：一轮结束或被打断时把贾维斯窗口放回来 */
+/** 电脑操作（鼠标键盘）进行中：一轮结束或被打断时把未央窗口放回来 */
 let controlActive = false;
 function endControl() {
   if (!controlActive) return;
@@ -716,7 +720,7 @@ async function greetOnReturn({ awayMs, reason = '', force = false }) {
   wp({ say: text, emotion: '亲和' });
   hud.think(`◆ 主动问候（离开 ${Math.round(awayMs / 60000)} 分钟）`);
   if (settings.speechOutput) speaker.speak(text);
-  if (document.hidden && DESKTOP && !settings.speechOutput) DESKTOP.invoke('notify', { title: '贾维斯', body: text }).catch(() => {});
+  if (document.hidden && DESKTOP && !settings.speechOutput) DESKTOP.invoke('notify', { title: '未央', body: text }).catch(() => {});
   openingCallouts();
   return text;
 }
@@ -1198,10 +1202,10 @@ async function checkVoice() {
     s.getTracks().forEach((t) => t.stop());
     line(true, '麦克风：已允许');
   } catch (e) {
-    line(false, `麦克风：不能用（${e.name === 'NotAllowedError' ? '权限被拒绝，请在系统设置里允许贾维斯使用麦克风' : e.message || e.name}）`);
+    line(false, `麦克风：不能用（${e.name === 'NotAllowedError' ? '权限被拒绝，请在系统设置里允许未央使用麦克风' : e.message || e.name}）`);
   }
   await checkRecognition(line);
-  // 5. 朗读（语音对话时贾维斯开口说话）
+  // 5. 朗读（语音对话时未央开口说话）
   const tts = globalThis.__jarvisTTS;
   if (MOBILE && tts) {
     const tli = line(null, '朗读：检测中…（会说一句“语音测试”）');
@@ -1459,7 +1463,7 @@ function renderWelcome() {
   const w = document.createElement('div');
   w.className = 'welcome';
   const h = document.createElement('h1');
-  h.textContent = `${greeting()}，我是贾维斯`;
+  h.textContent = `${greeting()}，我是未央`;
   const p = document.createElement('p');
   p.textContent = narrow.matches ? '交给我一个任务，或者试试下面这些。输入 / 可以点名技能。' : '交给我一个任务，或者试试下面这些。输入 / 可以点名技能，Ctrl + K 搜索任何操作。';
   const grid = document.createElement('div');
@@ -1539,34 +1543,43 @@ $('#set-tts').addEventListener('change', (e) => {
   speaker.enabled = e.target.checked;
   if (!e.target.checked) speaker.cancel();
 });
-// 自动更新（桌面版）：顶栏显示下载进度 / “重启更新” / “去下载”
-if (DESKTOP?.onUpdate) {
+// 自动更新：顶栏显示下载进度 / “重启更新”（电脑）/ “安装新版本”（手机）/ “去下载”
+const APP_UPDATER = globalThis.__jarvisAppUpdater; // 手机 App（mobile/appUpdate.js）
+if (DESKTOP?.onUpdate || APP_UPDATER) {
   const pill = $('#update-pill');
   const note = $('#update-note');
   const show = (u) => {
     $('#row-version').hidden = false;
-    $('#app-version').textContent = `当前 ${u.current ?? DESKTOP.version}`;
+    $('#app-version').textContent = `当前 ${u.current ?? DESKTOP?.version ?? ''}`;
     pill.hidden = !['downloading', 'ready', 'available'].includes(u.state);
     pill.dataset.state = u.state;
-    pill.textContent = u.state === 'downloading' ? `新版本下载中 ${u.percent ?? 0}%` : u.state === 'ready' ? `重启以更新到 ${u.version}` : u.state === 'available' ? `新版本 ${u.version} · 去下载` : '';
-    note.textContent = {
+    pill.textContent = u.state === 'downloading' ? `新版本下载中 ${u.percent ?? 0}%` : u.state === 'ready' ? (u.mobile ? `安装新版本 ${u.version}` : `重启以更新到 ${u.version}`) : u.state === 'available' ? (u.mobile ? `新版本 ${u.version} · 下载` : `新版本 ${u.version} · 去下载`) : '';
+    note.textContent = u.hint || ({
       checking: '正在检查…',
       latest: '已经是最新版本',
-      downloading: `正在后台下载 ${u.version ?? ''}（只下载改动的部分）`,
-      ready: `${u.version} 已下载好，点顶栏的“重启以更新”或下次启动时自动安装`,
-      available: `有新版本 ${u.version}。${u.manual ? '这个版本（免安装版 / Mac）不能自动安装，请到下载页下载' : ''}`,
+      downloading: u.mobile ? `正在后台下载 ${u.version ?? ''}（约 11 MB）` : `正在后台下载 ${u.version ?? ''}（只下载改动的部分）`,
+      ready: u.mobile ? `${u.version} 已下载好，点顶栏的“安装新版本”，在系统界面点“安装”即可（对话和设置都保留）` : `${u.version} 已下载好，点顶栏的“重启以更新”或下次启动时自动安装`,
+      available: u.mobile ? `有新版本 ${u.version}。正在用流量，点顶栏按钮下载（约 11 MB）` : `有新版本 ${u.version}。${u.manual ? '这个版本（免安装版 / Mac）不能自动安装，请到下载页下载' : ''}`,
       error: `检查更新失败：${u.error ?? ''}`,
-      dev: '从源码运行，不检查更新'
-    }[u.state] ?? '';
-    if (u.state === 'ready' && !show.toldReady) { show.toldReady = true; toast(`新版本 ${u.version} 已下载好，点顶栏按钮重启即可更新`); }
+      dev: u.mobile ? '调试版，不检查更新' : '从源码运行，不检查更新'
+    }[u.state] ?? '');
+    if (u.state === 'ready' && !show.toldReady) { show.toldReady = true; toast(u.mobile ? `新版本 ${u.version} 已下载好，点顶栏“安装新版本”即可更新` : `新版本 ${u.version} 已下载好，点顶栏按钮重启即可更新`); }
   };
-  DESKTOP.onUpdate(show);
-  DESKTOP.invoke('updateState').then((u) => show(u.packaged ? u : { ...u, state: 'dev' })).catch(() => {});
-  pill.addEventListener('click', () => {
-    if (pill.dataset.state === 'ready') DESKTOP.invoke('updateInstall');
-    else if (pill.dataset.state === 'available') DESKTOP.invoke('openReleases');
-  });
-  $('#btn-update-check').addEventListener('click', () => DESKTOP.invoke('updateCheck').then(show).catch((e) => toast(e.message)));
+  if (APP_UPDATER) {
+    APP_UPDATER.onUpdate(show);
+    show(APP_UPDATER.state);
+    APP_UPDATER.start();
+    pill.addEventListener('click', () => APP_UPDATER.act().catch((e) => toast(e.message)));
+    $('#btn-update-check').addEventListener('click', () => APP_UPDATER.check().catch((e) => toast(e.message)));
+  } else {
+    DESKTOP.onUpdate(show);
+    DESKTOP.invoke('updateState').then((u) => show(u.packaged ? u : { ...u, state: 'dev' })).catch(() => {});
+    pill.addEventListener('click', () => {
+      if (pill.dataset.state === 'ready') DESKTOP.invoke('updateInstall');
+      else if (pill.dataset.state === 'available') DESKTOP.invoke('openReleases');
+    });
+    $('#btn-update-check').addEventListener('click', () => DESKTOP.invoke('updateCheck').then(show).catch((e) => toast(e.message)));
+  }
 }
 
 // 界面明暗
@@ -1610,7 +1623,7 @@ if (DESKTOP) {
   $('#set-wallpaper').addEventListener('change', async (e) => {
     try {
       const r = await DESKTOP.invoke('setWallpaper', { on: e.target.checked });
-      toast(r.on ? '已开启桌面背景：贾维斯会待在桌面上，干活时跟着变形' : '已关闭桌面背景');
+      toast(r.on ? '已开启桌面背景：未央会待在桌面上，干活时跟着变形' : '已关闭桌面背景');
     } catch (err) { toast(err.message); e.target.checked = false; }
   });
 }

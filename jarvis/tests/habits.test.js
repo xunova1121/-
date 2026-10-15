@@ -15,7 +15,7 @@ function week(n = 5) {
 }
 
 describe('操作习惯', () => {
-  it('程序名规范化，贾维斯自己不算', () => {
+  it('程序名规范化，未央自己不算', () => {
     expect(normalizeApp('Code.exe')).toBe('VS Code');
     expect(normalizeApp('WeChat')).toBe('微信');
     expect(normalizeApp('Jarvis')).toBe('');

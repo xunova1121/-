@@ -1,5 +1,5 @@
 /**
- * 工作区 →“改动记录”：贾维斯改过的文件，按时间列出，每条可以一键恢复。
+ * 工作区 →“改动记录”：未央改过的文件，按时间列出，每条可以一键恢复。
  *   工作区（浏览器内）：src/agent/fileHistory.js
  *   电脑上的文件（只有桌面版）：desktop/backups.mjs，通过 jarvisDesktop.invoke 调用
  * 恢复前先检查；有要提醒的（比如之后又被改过）就在这一行里展开确认，不用系统弹窗。
@@ -35,10 +35,10 @@ export function initChangesPanel({ toast, desktop = null, onRestored = () => {} 
   async function refresh() {
     const list = $('#change-list');
     $('#change-hint').textContent = desktop
-      ? '贾维斯覆盖、移动、删除文件之前会自动留一份，在这里可以恢复。保留 30 天；电脑上的文件最多占 500 MB，工作区最多 100 MB。'
-      : `贾维斯覆盖同名文件、你手动删除文件之前会自动留一份，在这里可以恢复。保留 30 天，最多占 100 MB。${ws.mode() === 'folder' ? '下面是浏览器内工作区的记录；连接的本地文件夹里，贾维斯不会覆盖或删除文件。' : ''}`;
+      ? '未央覆盖、移动、删除文件之前会自动留一份，在这里可以恢复。保留 30 天；电脑上的文件最多占 500 MB，工作区最多 100 MB。'
+      : `未央覆盖同名文件、你手动删除文件之前会自动留一份，在这里可以恢复。保留 30 天，最多占 100 MB。${ws.mode() === 'folder' ? '下面是浏览器内工作区的记录；连接的本地文件夹里，未央不会覆盖或删除文件。' : ''}`;
     const items = await loadChanges(desktop);
-    list.replaceChildren(...(items.length ? items.map(row) : [el('li', { className: 'empty', textContent: '还没有改动记录。贾维斯覆盖、删除文件后，会在这里留下可以恢复的版本。' })]));
+    list.replaceChildren(...(items.length ? items.map(row) : [el('li', { className: 'empty', textContent: '还没有改动记录。未央覆盖、删除文件后，会在这里留下可以恢复的版本。' })]));
   }
 
   function row(e) {
@@ -64,7 +64,7 @@ export function initChangesPanel({ toast, desktop = null, onRestored = () => {} 
         const c = await check(e);
         if (!c.ok) { toast(c.problem); btn.disabled = false; return; }
         // 在这一行里展开确认
-        const what = { overwrite: `把 ${e.path} 恢复成 ${when(e.ts)} 被覆盖之前的内容`, delete: `把 ${e.path} 恢复到原位置`, create: `删掉贾维斯新建的 ${e.path}`, copy: `删掉复制出来的 ${e.path}`, move: `把 ${e.to} 移回 ${e.path}` }[e.op];
+        const what = { overwrite: `把 ${e.path} 恢复成 ${when(e.ts)} 被覆盖之前的内容`, delete: `把 ${e.path} 恢复到原位置`, create: `删掉未央新建的 ${e.path}`, copy: `删掉复制出来的 ${e.path}`, move: `把 ${e.to} 移回 ${e.path}` }[e.op];
         const extra = e.where === 'computer' && (e.op === 'create' || e.op === 'copy') ? '（移到回收站）' : '';
         const yes = el('button', { type: 'button', className: 'btn sm', textContent: `确认${ACTION[e.op] ?? '恢复'}` });
         const no = el('button', { type: 'button', className: 'btn ghost sm', textContent: '取消' });

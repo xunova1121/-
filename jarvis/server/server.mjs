@@ -1,5 +1,5 @@
 /**
- * 贾维斯 API 网关 + 静态资源服务（Node 18+，除 Anthropic SDK 外零依赖）。
+ * 未央 API 网关 + 静态资源服务（Node 18+，除 Anthropic SDK 外零依赖）。
  *
  *   POST /api/chat              对话流（SSE）：{ delta, emotion_hint, task_state, tool? }
  *   GET  /api/local/metrics     本机指标
@@ -84,7 +84,7 @@ export function createServer({
   }
 
   async function handleMcp(req, res, pathname) {
-    if (!sameOriginOnly(req)) return json(res, 403, { error: '只允许本机贾维斯页面调用' });
+    if (!sameOriginOnly(req)) return json(res, 403, { error: '只允许本机未央页面调用' });
     if (!mcp) return json(res, 404, { error: '当前网关没有启用 MCP', available: false });
     if (pathname === '/api/mcp' && req.method === 'GET') return json(res, 200, { available: true, configPath: mcp.configPath, servers: mcp.list() });
     if (pathname === '/api/mcp/call' && req.method === 'POST') {
@@ -102,7 +102,7 @@ export function createServer({
   }
 
   async function handleOllama(req, res, pathname) {
-    if (!sameOriginOnly(req)) return json(res, 403, { error: '只允许本机贾维斯页面调用' });
+    if (!sameOriginOnly(req)) return json(res, 403, { error: '只允许本机未央页面调用' });
     if (pathname === '/api/ollama/status' && req.method === 'GET') return json(res, 200, await ollama.status());
     if (pathname === '/api/ollama/start' && req.method === 'POST') return json(res, 200, await ollama.start());
     if (pathname === '/api/ollama/pull' && req.method === 'POST') {
@@ -121,9 +121,9 @@ export function createServer({
     return json(res, 404, { error: 'not found' });
   }
 
-  /** Edge 在线朗读：POST { text, voice, rate, pitch } → mp3。需要本机贾维斯页面的请求头 */
+  /** Edge 在线朗读：POST { text, voice, rate, pitch } → mp3。需要本机未央页面的请求头 */
   async function handleEdgeTts(req, res, cross) {
-    if (req.headers['x-jarvis-client'] !== '1' || (!cross && !sameOriginOnly(req))) return json(res, 403, { error: '只允许本机贾维斯页面调用' });
+    if (req.headers['x-jarvis-client'] !== '1' || (!cross && !sameOriginOnly(req))) return json(res, 403, { error: '只允许本机未央页面调用' });
     const { text, voice, rate, pitch } = await readJson(req, 64 * 1024);
     try {
       const audio = await edgeTts(String(text || ''), { voice: voice || undefined, rate: Number(rate) || 0, pitch: Number(pitch) || 0 });
@@ -139,7 +139,7 @@ export function createServer({
    * 只转发到 <bucket>.oss-<地域>.aliyuncs.com；签名在页面里算好，网关看不到 AccessKey Secret。
    */
   async function handleOss(req, res) {
-    if (!sameOriginOnly(req)) return json(res, 403, { error: '只允许本机贾维斯页面调用' });
+    if (!sameOriginOnly(req)) return json(res, 403, { error: '只允许本机未央页面调用' });
     const { method, url, headers = {}, body } = await readJson(req, 64 * 1024 * 1024);
     let u;
     try { u = new URL(String(url)); } catch { return json(res, 400, { error: '地址无效' }); }
@@ -364,7 +364,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
   server.listen(port, host, () => {
-    console.log(`贾维斯网关已启动: http://127.0.0.1:${port}`);
+    console.log(`未央网关已启动: http://127.0.0.1:${port}`);
     const keys = Object.entries(ENV_KEYS).filter(([, env]) => process.env[env]).map(([id]) => providerById(id)?.name ?? id);
     if (keys.length) console.log(`网关已配置密钥：${keys.join('、')}`);
     console.log(process.env.ANTHROPIC_API_KEY ? `对话后端: Claude (${process.env.JARVIS_MODEL || 'claude-opus-5-5'})` : '对话后端: 本地演示智能体（设置 ANTHROPIC_API_KEY 以接入 Claude）');

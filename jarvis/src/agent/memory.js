@@ -527,7 +527,7 @@ export async function exportAll() {
   return { format: 'jarvis-memory', version: 2, exportedAt: new Date().toISOString(), core, memories: ms.map(strip), lessons: ls, skills: ss, episodes: eps.map(strip) };
 }
 export async function importAll(data) {
-  if (data?.format !== 'jarvis-memory') throw new Error('不是贾维斯的记忆备份文件');
+  if (data?.format !== 'jarvis-memory') throw new Error('不是未央的记忆备份文件');
   const put = async (c, list) => { for (const x of list || []) if (x?.id) await c.put(x); };
   await put(memories, data.memories);
   await put(lessons, data.lessons);

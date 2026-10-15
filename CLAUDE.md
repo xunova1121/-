@@ -1,6 +1,6 @@
-# 贾维斯（J.A.R.V.I.S.）开发约定
+# 未央（WEIYANG AI，原名贾维斯）开发约定
 
-个人 AI 智能体。代码在 `jarvis/`：网页界面（Vite）、本机网关（`server/`）、Windows 桌面版（`desktop/`，Electron）、安卓 App（`android/`，Capacitor）。
+个人 AI 智能体。界面上的名字叫“未央”；代码、数据目录、环境变量（JARVIS_*）、安装包文件名里的 jarvis / Jarvis 保持不变（改了会丢用户数据、断自动更新）。logo 在 `src/ui/logo.svg`，改完运行 `node scripts/make-icons.mjs` 重新生成电脑和安卓图标。代码在 `jarvis/`：网页界面（Vite）、本机网关（`server/`）、Windows 桌面版（`desktop/`，Electron）、安卓 App（`android/`，Capacitor）。
 
 ## 和用户沟通
 - 用中文回复，说人话，少用术语。
@@ -34,3 +34,4 @@
 - 注意：只看最后一次推送。之前的提交都带 `[skip ci]`、最后一个提交又只改了 `jarvis/` 以外的文件（如根目录的
   `jarvis-standalone.html`、`CLAUDE.md`）时，不会打包。这时到 GitHub 的 Actions 页面对这个工作流点“Run workflow”手动发版。
 - 版本号由 CI 自动生成（`desktop-v1.0.<序号>`），不要手动改。
+- 手机自动更新要求每次用同一个签名密钥：仓库 Secrets 里要有 `ANDROID_KEYSTORE_B64` 和 `ANDROID_KEYSTORE_PASSWORD`，否则 CI 每次临时生成密钥，新版装不上。

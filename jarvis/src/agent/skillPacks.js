@@ -337,10 +337,10 @@ export function catalog(list) {
   return `## 已安装的技能\n需要时先调用 use_skill 读取完整说明再照做；用户用“/技能名”点名时必须使用。\n${list.map((p) => `- ${p.name}：${p.description || '（无描述）'}`).join('\n')}`;
 }
 
-/** 技能说明是写给有命令行的电脑的：告诉模型在贾维斯里怎么照做 */
+/** 技能说明是写给有命令行的电脑的：告诉模型在未央里怎么照做 */
 const RUNTIME_NOTE = (name) => `
 ---
-在贾维斯里执行这个技能（技能说明是按电脑命令行写的，按下面的方式照做）：
+在未央里执行这个技能（技能说明是按电脑命令行写的，按下面的方式照做）：
 - 说明里的 \`bash\` / \`python3 脚本 参数\` 命令：先用 copy_skill_file 把用到的脚本、模板复制到工作区（可以一次复制整个文件夹，如 path 填 "scripts/" 或 "templates/某模板/"），再用 run_python 运行：
   \`import os, sys, runpy; os.chdir("/workspace/skills/${name}"); sys.argv = ["脚本名.py", 参数...]; runpy.run_path("scripts/脚本名.py", run_name="__main__")\`
   需要的第三方库先 \`import micropip; await micropip.install("python-pptx")\` 这样安装。

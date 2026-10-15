@@ -1,9 +1,9 @@
 /**
- * 桌面背景模式：贾维斯的粒子体铺满桌面，待在所有窗口下面。
+ * 桌面背景模式：未央的粒子体铺满桌面，待在所有窗口下面。
  *   Windows  把窗口挂到桌面图标后面那一层（WorkerW，和动态壁纸软件同样的做法）；失败时退回“置底窗口”
  *   macOS    窗口类型 desktop（桌面层级，所有桌面空间可见）
  *   Linux    窗口类型 desktop（_NET_WM_WINDOW_TYPE_DESKTOP，多数桌面环境支持）
- * 壁纸窗口只负责显示，不接收点击；和贾维斯说话用快捷键、托盘或唤醒词。
+ * 壁纸窗口只负责显示，不接收点击；和未央说话用快捷键、托盘或唤醒词。
  */
 import { execFile } from 'node:child_process';
 
@@ -80,7 +80,7 @@ export function createWallpaper(d) {
         x: b.x, y: b.y, width: b.width, height: b.height,
         frame: false, resizable: false, movable: false, minimizable: false, maximizable: false, fullscreenable: false,
         skipTaskbar: true, focusable: false, show: false, hasShadow: false,
-        backgroundColor: '#03070d', title: '贾维斯 · 桌面',
+        backgroundColor: '#03070d', title: '未央 · 桌面',
         ...(platform !== 'win32' && { type: 'desktop' }),
         ...(d.icon && { icon: d.icon }),
         webPreferences: { preload: d.preload, contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false }

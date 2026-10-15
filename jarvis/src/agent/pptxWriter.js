@@ -114,7 +114,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
   pptx.title = title;
-  pptx.author = '贾维斯';
+  pptx.author = '未央';
   const C = theme.colors;
   const dark = C.primary;
   const light = theme.official ? 'FFFFFF' : C.bg;

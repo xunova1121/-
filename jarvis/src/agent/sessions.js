@@ -1,6 +1,6 @@
 /**
  * 多会话：每段对话单独保存（本机 IndexedDB），可以新建、切换、搜索、重命名、导出、删除。
- * 消息只存文本（用户原话与贾维斯的回答），工具调用记录只存名字，用于回看时显示“用了哪些工具”。
+ * 消息只存文本（用户原话与未央的回答），工具调用记录只存名字，用于回看时显示“用了哪些工具”。
  */
 import { collection, uid } from './store.js';
 import { buildIndex } from './search.js';
@@ -108,7 +108,7 @@ export async function recent({ exclude = null, k = 3 } = {}) {
 export function toMarkdown(s) {
   const when = (ts) => new Date(ts).toLocaleString('zh-CN', { hour12: false });
   return [`# ${s.title}`, '', `> ${when(s.createdAt)} · ${s.messages.length} 条消息`, '',
-    ...s.messages.flatMap((m) => [`### ${m.role === 'user' ? '你' : '贾维斯'} · ${when(m.ts)}`, '', m.content, ''])].join('\n');
+    ...s.messages.flatMap((m) => [`### ${m.role === 'user' ? '你' : '未央'} · ${when(m.ts)}`, '', m.content, ''])].join('\n');
 }
 
 /** 旧版只保存一条对话流（localStorage）：迁移成一个会话 */

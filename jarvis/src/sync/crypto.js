@@ -33,7 +33,7 @@ export async function seal(key, obj) {
 /** 加密字节 → 对象；密码不对时抛“同步密码不对” */
 export async function open(key, bytes) {
   const b = new Uint8Array(bytes);
-  if (b.length < 3 + 12 + 16 || MAGIC.some((v, i) => b[i] !== v)) throw new Error('同步数据格式不对（不是贾维斯的同步文件）');
+  if (b.length < 3 + 12 + 16 || MAGIC.some((v, i) => b[i] !== v)) throw new Error('同步数据格式不对（不是未央的同步文件）');
   try {
     const pt = await subtle().decrypt({ name: 'AES-GCM', iv: b.subarray(3, 15) }, key, b.subarray(15));
     return JSON.parse(new TextDecoder().decode(pt));

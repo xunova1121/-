@@ -21,7 +21,7 @@ export function initSchedulesPanel({ toast, runNow, openSession }) {
   async function refresh() {
     const list = await scheduler.list().catch(() => []);
     $('#sched-count').textContent = `${list.filter((s) => s.enabled).length} 个启用`;
-    $('#sched-list').replaceChildren(...(list.length ? list.map(card) : [el('li', { className: 'empty', textContent: '还没有定时任务。可以在下面新建，或者直接对贾维斯说“每个工作日早上 9 点帮我……”。' })]));
+    $('#sched-list').replaceChildren(...(list.length ? list.map(card) : [el('li', { className: 'empty', textContent: '还没有定时任务。可以在下面新建，或者直接对未央说“每个工作日早上 9 点帮我……”。' })]));
   }
 
   function card(s) {

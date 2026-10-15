@@ -14,7 +14,7 @@ import { collection } from './store.js';
 const kv = collection('kv');
 const KEY = 'habits';
 const SAMPLE_MIN = 20 / 60; // 每次采样代表约 20 秒
-const SELF = /^(jarvis|贾维斯|electron)$/i;
+const SELF = /^(jarvis|未央|electron)$/i;
 
 /** 进程名 → 好认的名字 */
 const FRIENDLY = {

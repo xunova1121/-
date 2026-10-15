@@ -1,5 +1,5 @@
 /**
- * 生成示例文档到仓库的 docs/samples/（用贾维斯自己的生成代码，内容是虚构的示例）：
+ * 生成示例文档到仓库的 docs/samples/（用未央自己的生成代码，内容是虚构的示例）：
  *   node scripts/make-samples.mjs
  */
 import fs from 'node:fs';

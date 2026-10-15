@@ -58,7 +58,7 @@ describe('SentenceChunker', () => {
   it('凑够一句就吐出，跨 delta 拼接', () => {
     const c = new SentenceChunker();
     expect(c.push('你好，我')).toEqual([]);
-    expect(c.push('是贾维斯。今天')).toEqual(['你好，我是贾维斯。']);
+    expect(c.push('是未央。今天')).toEqual(['你好，我是未央。']);
     expect(c.push('天气不错！要出门吗？')).toEqual(['今天天气不错！', '要出门吗？']);
     expect(c.flush()).toEqual([]);
   });

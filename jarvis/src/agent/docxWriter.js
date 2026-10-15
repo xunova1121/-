@@ -297,7 +297,7 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
   });
 
   const doc = new Document({
-    creator: '贾维斯',
+    creator: '未央',
     title: docTitle,
     description: subtitle || undefined,
     styles: {
@@ -321,7 +321,7 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
 /**
  * 沿用用户模板的样式：用模板的 styles.xml（字体、字号、标题和正文样式、默认段落），
  * 按样式名称（heading 1、Title……）对上模板里的样式 id —— 中文版 Word 的模板里标题样式的 id 常常是“1”“2”而不是 Heading1；
- * 模板里没有的样式（比如没定义标题 4）用贾维斯自己的补上。
+ * 模板里没有的样式（比如没定义标题 4）用未央自己的补上。
  * @returns {Promise<{ blob: Blob, info: { matched: string[], added: string[] } }>}
  */
 export async function applyTemplate(blob, template) {

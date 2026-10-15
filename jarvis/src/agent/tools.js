@@ -283,7 +283,7 @@ export function createTools(ctx) {
       run: async ({ query }) => {
         const hits = await sessions.searchMessages(query, { exclude: ctx.currentSessionId?.(), k: 6, minScore: 0.5 });
         if (!hits.length) return '之前的对话里没有找到相关内容。';
-        return hits.map((h) => `- id: ${h.sessionId}「${h.title}」${new Date(h.ts).toLocaleString('zh-CN', { hour12: false })}\n  用户：${h.user.slice(0, 200)}${h.reply ? `\n  贾维斯：${h.reply.replace(/\s+/g, ' ').slice(0, 300)}` : ''}`).join('\n');
+        return hits.map((h) => `- id: ${h.sessionId}「${h.title}」${new Date(h.ts).toLocaleString('zh-CN', { hour12: false })}\n  用户：${h.user.slice(0, 200)}${h.reply ? `\n  未央：${h.reply.replace(/\s+/g, ' ').slice(0, 300)}` : ''}`).join('\n');
       }
     },
     {
@@ -299,7 +299,7 @@ export function createTools(ctx) {
           const idx = msgs.findIndex((m) => String(m.content).toLowerCase().includes(q));
           if (idx >= 0) msgs = msgs.slice(Math.max(0, idx - 4), idx + 8);
         }
-        const text = msgs.map((m) => `【${m.role === 'user' ? '用户' : '贾维斯'} · ${new Date(m.ts ?? s.updatedAt).toLocaleString('zh-CN', { hour12: false })}】\n${m.content}`).join('\n\n');
+        const text = msgs.map((m) => `【${m.role === 'user' ? '用户' : '未央'} · ${new Date(m.ts ?? s.updatedAt).toLocaleString('zh-CN', { hour12: false })}】\n${m.content}`).join('\n\n');
         return `对话「${s.title}」（${s.messages.length} 条）\n\n${text.length > 12000 ? `…（前面省略）\n${text.slice(-12000)}` : text}`;
       }
     },

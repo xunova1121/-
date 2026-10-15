@@ -93,7 +93,7 @@ export class Speaker {
   }
 
   /** 试听：用当前配置读一句 */
-  preview(text = '您好，我是贾维斯。所有系统运行正常，随时为您效劳。') {
+  preview(text = '您好，我是未央。所有系统运行正常，随时为您效劳。') {
     this.cancel();
     this.unlock();
     const was = this.enabled;

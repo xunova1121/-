@@ -44,11 +44,11 @@ describe('手机系统语音识别', () => {
     vi.useFakeTimers();
     const finals = [];
     const errors = [];
-    const p = plugin(['你好贾维斯', new Error('No match'), '帮我写周报']);
+    const p = plugin(['你好未央', new Error('No match'), '帮我写周报']);
     const v = new NativeVoice({ plugin: p, onFinal: (t) => finals.push(t), onError: (e) => errors.push(e), onMode: () => {} });
     await v.enable();
     await vi.advanceTimersByTimeAsync(2000);
-    expect(finals).toEqual(['你好贾维斯', '帮我写周报']);
+    expect(finals).toEqual(['你好未央', '帮我写周报']);
     expect(errors).toEqual([]);
     v.setSuppressed(true);
     const n = p.start.mock.calls.length;

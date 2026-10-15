@@ -23,7 +23,7 @@ describe('EmotionTagStripper', () => {
   });
 
   it('没有标签时原样透传', () => {
-    expect(run(['你好', '，我是贾维斯'])).toEqual({ text: '你好，我是贾维斯', hint: null });
+    expect(run(['你好', '，我是未央'])).toEqual({ text: '你好，我是未央', hint: null });
   });
 
   it('未知情绪丢弃 hint 但仍剥离标签', () => {

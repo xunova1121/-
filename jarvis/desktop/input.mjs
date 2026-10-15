@@ -2,7 +2,7 @@
  * 鼠标键盘控制（不依赖原生模块，三个系统各用自带的能力）：
  *   Windows  常驻一个 PowerShell 进程，调用 user32（SetCursorPos / mouse_event / keybd_event），开启 DPI 感知后按物理像素定位
  *   macOS    osascript（JavaScript for Automation）调用 CoreGraphics 发送鼠标键盘事件，坐标单位是“点”；需要在
- *            “系统设置 → 隐私与安全性 → 辅助功能”里允许贾维斯
+ *            “系统设置 → 隐私与安全性 → 辅助功能”里允许未央
  *   Linux    xdotool（需要 X11；Wayland 下多数桌面不允许模拟输入）
  *
  * 所有坐标都是“屏幕坐标”：Windows / Linux 为物理像素，macOS 为点（调用方负责从截图坐标换算）。

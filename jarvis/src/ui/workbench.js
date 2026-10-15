@@ -3,12 +3,13 @@ import * as sessions from '../agent/sessions.js';
 import { initWorkspaceNavigation } from './workbenchNavigation.js';
 import { toolLabel } from './transcript.js';
 import { initWeiyangShell } from './weiyangShell.js';
+import logo from './logo.svg';
 
 const node=(tag,text,cls)=>{const e=document.createElement(tag);if(text)e.textContent=text;if(cls)e.className=cls;return e;};
 export function initWorkbench({showPanel,newSession,openSession,getSession,getRunning,openFile}){
  document.body.classList.add('workbench','side-closed');document.body.classList.remove('side-open');
  const rail=document.querySelector('.rail'),main=document.querySelector('.main'),top=document.querySelector('.topbar');
- const home=node('div',null,'wb-brand');home.append(node('span','✳','wb-mark'),node('b','JARVIS'),node('small','贾维斯 · 私人智能工作台'));rail.prepend(home);
+ const home=node('div',null,'wb-brand');const mark=node('img',null,'wb-mark');mark.src=logo;mark.alt='';home.append(mark,node('b','未央'),node('small','WEIYANG AI · 私人智能工作台'));rail.prepend(home);
  const original=[...rail.querySelectorAll('.rail-btn')];original.forEach(b=>b.hidden=true);
  const nav=node('div',null,'wb-nav');home.after(nav);
  const closePanel=()=>{document.body.classList.add('side-closed');document.body.classList.remove('side-open');};
@@ -20,7 +21,7 @@ export function initWorkbench({showPanel,newSession,openSession,getSession,getRu
  const bottom=node('button','⚙  设置与模型','wb-bottom');bottom.onclick=()=>showPanel('models');rail.append(bottom);
  const tabs=node('nav',null,'wb-tabs'),chat=node('button','对话'),studio=node('button','工作室');tabs.setAttribute('aria-label','工作视图');tabs.append(chat,studio);top.append(tabs);chat.onclick=()=>setView(false);studio.onclick=()=>setView(true);
  function setView(on){closePanel();document.body.classList.toggle('wb-studio',on);if(on)document.body.classList.remove('stage-mini');chat.classList.toggle('selected',!on);studio.classList.toggle('selected',on);chat.setAttribute('aria-pressed',String(!on));studio.setAttribute('aria-pressed',String(on));window.dispatchEvent(new Event('resize'));}setView(false);
- const landing=node('section',null,'wb-landing'),intro=node('div',null,'wb-intro');intro.append(node('div','✳','wb-hero-mark'),node('h1','你好，我是贾维斯'),node('p','从一个想法开始，把事情交给我。'));const cards=node('div',null,'wb-cards');
+ const landing=node('section',null,'wb-landing'),intro=node('div',null,'wb-intro');const hero=node('img',null,'wb-hero-mark');hero.src=logo;hero.alt='';intro.append(hero,node('h1','你好，我是未央'),node('p','从一个想法开始，把事情交给我。'));const cards=node('div',null,'wb-cards');
  const suggestions=[['整理工作，轻松开始','拆解目标，安排今天的计划','plan','请帮我梳理今天的工作计划，先问我当前的目标和时间安排。','✓'],['你的专属专家','办公、编程、研究，按需协作','expert','请列出已经安装的技能，并说明哪些适合我现在的工作。','✦'],['文件处理','读文档、写方案、制作演示稿','document','我需要整理一份文档，请先让我提供文件和具体要求。','▤'],['数据分析','读懂表格，发现数据里的线索','data','我想分析一份表格，请先确认文件、分析目标和数据口径。','▥']];
  for(const [title,sub,cls,prompt,art]of suggestions){const b=node('button',null,'wb-card '+cls),copy=node('span');copy.append(node('b',title),node('small',sub));b.append(copy,node('i',art,'wb-card-art'));b.onclick=()=>{const input=document.querySelector('#prompt');input.value=prompt;input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();};cards.append(b);}landing.append(intro,cards);main.prepend(landing);
  const transcript=document.querySelector('#transcript');function update(){landing.hidden=!!transcript.querySelector('.msg');}

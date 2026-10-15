@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 
-// v4 的表（升级前的贾维斯）
+// v4 的表（升级前的未央）
 const V4_STORES = ['memories', 'lessons', 'skills', 'packs', 'episodes', 'sessions', 'kbdocs', 'kbchunks', 'files', 'events', 'kv'];
 
 const req = (r) => new Promise((resolve, reject) => { r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
@@ -94,7 +94,7 @@ describe('本地数据库从 v4 升级到 v5', () => {
   it('另一个标签页还开着旧版、挡住了升级：不迁移、不丢数据，提示用户关掉旧页面', async () => {
     const old = await makeOldDb(4, OLD_DATA, { keepOpen: true }); // 旧版代码不会主动让路
     const store = await import('../src/agent/store.js');
-    expect(await store.storageProblem()).toMatch(/另一个贾维斯页面还开着旧版本/);
+    expect(await store.storageProblem()).toMatch(/另一个未央页面还开着旧版本/);
     // 旧页面关掉后，刷新：正常升级，数据都在
     old.close();
     vi.resetModules();

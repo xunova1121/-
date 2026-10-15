@@ -88,9 +88,9 @@ describe('云端语音识别', () => {
   });
   it('请求格式：multipart、模型、经网关', async () => {
     const calls = [];
-    const fetchImpl = async (url, init) => { calls.push({ url, init }); return { ok: true, json: async () => ({ text: '<|zh|><|NEUTRAL|>你好 贾维斯' }) }; };
+    const fetchImpl = async (url, init) => { calls.push({ url, init }); return { ok: true, json: async () => ({ text: '<|zh|><|NEUTRAL|>你好 未央' }) }; };
     const text = await transcribe('siliconflow', { keys: { siliconflow: 'k' } }, new Blob(['x']), { fetchImpl, gateway: { origin: 'http://127.0.0.1:18787', keys: [] } });
-    expect(text).toBe('你好 贾维斯');
+    expect(text).toBe('你好 未央');
     expect(calls[0].url).toBe('http://127.0.0.1:18787/api/llm/siliconflow/audio/transcriptions');
     expect(calls[0].init.body.get('model')).toBe('FunAudioLLM/SenseVoiceSmall');
     expect(calls[0].init.headers.authorization).toBe('Bearer k');

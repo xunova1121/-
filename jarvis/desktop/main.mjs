@@ -1,5 +1,5 @@
 /**
- * 贾维斯桌面版（Electron 主进程）
+ * 未央桌面版（Electron 主进程）
  *
  *   - 在进程内启动本机网关（模型转发、MCP、系统指标），窗口加载 http://127.0.0.1:18787
  *   - 通过 preload 给页面提供“操作电脑”的能力（文件、打开程序、运行命令、截屏、剪贴板、通知）
@@ -85,7 +85,7 @@ const ops = createOps({
     const d = screen.getPrimaryDisplay();
     const size = { width: Math.round(d.size.width * d.scaleFactor), height: Math.round(d.size.height * d.scaleFactor) };
     const [src] = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: size });
-    if (!src) throw new Error('无法截屏（macOS 需要在“系统设置 → 隐私与安全性 → 屏幕录制”里允许贾维斯）');
+    if (!src) throw new Error('无法截屏（macOS 需要在“系统设置 → 隐私与安全性 → 屏幕录制”里允许未央）');
     return { base64: src.thumbnail.toPNG().toString('base64'), ...src.thumbnail.getSize() };
   }
 });
@@ -183,7 +183,7 @@ Object.assign(ops, {
 
 const fromOurPage = (e) => Boolean(origin) && String(e.senderFrame?.url || '').startsWith(`${origin}/`);
 ipcMain.handle('jarvis:desktop', async (e, op, args) => {
-  if (!fromOurPage(e)) return { ok: false, error: '拒绝：调用来源不是贾维斯页面' };
+  if (!fromOurPage(e)) return { ok: false, error: '拒绝：调用来源不是未央页面' };
   const fn = Object.hasOwn(ops, op) ? ops[op] : null;
   if (!fn) return { ok: false, error: `未知操作：${op}` };
   try { return { ok: true, value: await fn(args ?? {}) }; } catch (err) { return { ok: false, error: err.message || String(err) }; }
@@ -216,7 +216,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     show: false,
-    title: '贾维斯',
+    title: '未央',
     icon: ICON,
     backgroundColor: '#03070d',
     titleBarStyle: mac ? 'hiddenInset' : 'hidden',
@@ -250,7 +250,7 @@ function createWindow() {
     win.hide();
     if (!hintShown && Notification.isSupported()) {
       hintShown = true;
-      new Notification({ title: '贾维斯仍在后台运行', body: `按 ${process.platform === 'darwin' ? '⌘' : 'Ctrl'}+Shift+J 随时呼出，或点托盘图标。`, icon: ICON }).show();
+      new Notification({ title: '未央仍在后台运行', body: `按 ${process.platform === 'darwin' ? '⌘' : 'Ctrl'}+Shift+J 随时呼出，或点托盘图标。`, icon: ICON }).show();
     }
   });
 }
@@ -268,9 +268,9 @@ let trayMenu = null;
 function createTray() {
   const img = nativeImage.createFromPath(ICON).resize({ width: process.platform === 'darwin' ? 18 : 16, height: process.platform === 'darwin' ? 18 : 16 });
   tray = new Tray(img);
-  tray.setToolTip('贾维斯');
+  tray.setToolTip('未央');
   const menu = () => Menu.buildFromTemplate([
-    { label: '呼出贾维斯', accelerator: HOTKEY, click: summon },
+    { label: '呼出未央', accelerator: HOTKEY, click: summon },
     { type: 'separator' },
     { label: '桌面背景模式', type: 'checkbox', checked: Boolean(wallpaper?.open), click: (i) => setWallpaper(i.checked) },
     { label: '检查更新', click: () => { updater.check(); summon(); } },
@@ -288,7 +288,7 @@ function setMenu() {
   if (process.platform === 'darwin') {
     // macOS 需要应用菜单，复制 / 粘贴等快捷键才能用
     Menu.setApplicationMenu(Menu.buildFromTemplate([
-      { label: '贾维斯', submenu: [{ role: 'about', label: '关于贾维斯' }, { type: 'separator' }, { role: 'hide', label: '隐藏' }, { type: 'separator' }, { label: '退出', accelerator: 'Cmd+Q', click: () => { quitting = true; app.quit(); } }] },
+      { label: '未央', submenu: [{ role: 'about', label: '关于未央' }, { type: 'separator' }, { role: 'hide', label: '隐藏' }, { type: 'separator' }, { label: '退出', accelerator: 'Cmd+Q', click: () => { quitting = true; app.quit(); } }] },
       { label: '编辑', submenu: [{ role: 'undo', label: '撤销' }, { role: 'redo', label: '重做' }, { type: 'separator' }, { role: 'cut', label: '剪切' }, { role: 'copy', label: '复制' }, { role: 'paste', label: '粘贴' }, { role: 'selectAll', label: '全选' }] },
       { label: '视图', submenu: [{ role: 'reload', label: '重新加载' }, { role: 'toggleDevTools', label: '开发者工具' }, { type: 'separator' }, { role: 'togglefullscreen', label: '全屏' }] },
       { label: '窗口', submenu: [{ role: 'minimize', label: '最小化' }, { role: 'close', label: '关闭' }] }
@@ -324,7 +324,7 @@ app.whenReady().then(async () => {
     await startGateway();
   } catch (e) {
     const { dialog } = await import('electron');
-    dialog.showErrorBox('贾维斯启动失败', e.message);
+    dialog.showErrorBox('未央启动失败', e.message);
     app.exit(1);
     return;
   }

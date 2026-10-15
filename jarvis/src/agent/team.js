@@ -79,7 +79,7 @@ export async function runTeam({ adapter, model, history = [], userText, images =
       const j = parseJson(await llm({
         signal,
         system: '你是团队的规划员，把用户的任务拆成按顺序执行的步骤，分配给合适的角色。只输出 JSON。',
-        prompt: `可用角色：\n${roleList}\n\n最近的对话：\n${history.slice(-4).map((m) => `${m.role === 'user' ? '用户' : '贾维斯'}：${clip(m.content, 200)}`).join('\n') || '（无）'}\n\n任务：${task}\n\n输出 JSON：{"steps":[{"role":"角色 id","title":"这一步做什么（不超过 16 字）","detail":"给执行者的具体要求：要产出什么、存到哪里、注意什么"}]}。2-6 步；能一步完成的不要硬拆；最后一步的产出就是用户要的成品。`
+        prompt: `可用角色：\n${roleList}\n\n最近的对话：\n${history.slice(-4).map((m) => `${m.role === 'user' ? '用户' : '未央'}：${clip(m.content, 200)}`).join('\n') || '（无）'}\n\n任务：${task}\n\n输出 JSON：{"steps":[{"role":"角色 id","title":"这一步做什么（不超过 16 字）","detail":"给执行者的具体要求：要产出什么、存到哪里、注意什么"}]}。2-6 步；能一步完成的不要硬拆；最后一步的产出就是用户要的成品。`
       }));
       if (Array.isArray(j?.steps) && j.steps.length) {
         steps = j.steps.slice(0, 6).map((s, i) => ({ id: i + 1, role: ROLES[s.role] ? s.role : 'generalist', title: clip(s.title || s.detail || `步骤 ${i + 1}`, 24), detail: String(s.detail || s.title || task) }));
@@ -165,7 +165,7 @@ export async function runTeam({ adapter, model, history = [], userText, images =
     try {
       const r = await adapter.stream({
         model, signal, tools: [],
-        system: ['你是“贾维斯”，刚带领一个小团队完成了用户的任务。用中文直接给用户最终答复：先给结论或成品位置（文件路径），再简要说明每一步做了什么、需要用户注意或确认的地方。不要编造各步成果里没有的内容。不要输出 <emotion> 标签。', ''],
+        system: ['你是“未央”，刚带领一个小团队完成了用户的任务。用中文直接给用户最终答复：先给结论或成品位置（文件路径），再简要说明每一步做了什么、需要用户注意或确认的地方。不要编造各步成果里没有的内容。不要输出 <emotion> 标签。', ''],
         messages: [{ role: 'user', content: `用户需求：${task}\n\n团队各步成果：\n${summary()}` }],
         onText: (d) => { streamed += d; emit({ type: 'text', delta: d }); }
       });

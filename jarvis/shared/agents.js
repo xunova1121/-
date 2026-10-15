@@ -10,7 +10,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { EmotionTagStripper } from './emotionTag.js';
 
-const SYSTEM_PROMPT = `你是“贾维斯”，运行在用户本机的语音助手，界面是一个会做表情的发光光核。
+const SYSTEM_PROMPT = `你是“未央”，运行在用户本机的语音助手，界面是一个会做表情的发光光核。
 
 回复要求：
 - 用简体中文，口语化，适合直接朗读：短句、少列表、不用 Markdown 表格和代码块（除非用户明确要代码）。
@@ -187,7 +187,7 @@ export class MockAgent {
       hint = '专注';
       text = '分析中。我会先拆解问题，再逐项检索相关信息，最后给你一个结论和依据。';
     } else {
-      text = `你好，我是贾维斯。当前运行在本地演示模式（在设置里填写 Claude API Key 即可接入真正的大模型），可以试试问我“电脑现在状态怎么样”或“现在几点”。你刚才说的是：“${q.slice(0, 40)}”。`;
+      text = `你好，我是未央。当前运行在本地演示模式（在设置里填写 Claude API Key 即可接入真正的大模型），可以试试问我“电脑现在状态怎么样”或“现在几点”。你刚才说的是：“${q.slice(0, 40)}”。`;
     }
 
     yield { delta: '', emotion_hint: hint, task_state: 'listening' };

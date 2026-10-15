@@ -4,7 +4,7 @@
  */
 import { parseMarkdown } from '../core/markdown.js';
 
-const LABEL = { user: '你', agent: '贾维斯' };
+const LABEL = { user: '你', agent: '未央' };
 
 export function renderBlocks(container, text) {
   container.replaceChildren(...parseMarkdown(text).map((b) => {

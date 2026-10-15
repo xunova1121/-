@@ -122,7 +122,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   // —— 欢迎页、HUD
   check('HUD 时钟与模型', /^\d{2}:\d{2}:\d{2}$/.test(await page.textContent('#hud-time')) && (await page.textContent('#hud-model')).length > 0);
   await studio(page, false);
-  check('首页：大标题 + 四张建议卡片', (await page.locator('.wb-landing .wb-card').count()) === 4 && /我是贾维斯/.test(await page.textContent('.wb-landing h1')));
+  check('首页：大标题 + 四张建议卡片', (await page.locator('.wb-landing .wb-card').count()) === 4 && /我是未央/.test(await page.textContent('.wb-landing h1')));
   await page.click('.wb-card:nth-child(1)');
   check('点建议卡片只填进输入框，不直接发送', (await page.inputValue('#prompt')).length > 5 && (await page.locator('.msg').count()) === 0);
   await page.fill('#prompt', '');
@@ -154,7 +154,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.waitForFunction((n) => document.querySelectorAll('#transcript .msg.agent').length > n && !document.querySelector('#transcript .msg.agent.streaming'), before, { timeout: 20000 });
   await page.waitForTimeout(600);
   check('最近对话：回答中的那条转圈，答完停下', spun && (await page.locator('.wb-recent .wb-chat.running').count()) === 0);
-  check('回答没有左侧竖线，用头像标题', await page.evaluate(() => { const m = [...document.querySelectorAll('#transcript .msg.agent')].at(-1); return getComputedStyle(m).borderLeftWidth === '0px' && getComputedStyle(m.querySelector('.who'), '::before').content.includes('✳'); }));
+  check('回答没有左侧竖线，用头像标题', await page.evaluate(() => { const m = [...document.querySelectorAll('#transcript .msg.agent')].at(-1); return getComputedStyle(m).borderLeftWidth === '0px' && /svg/.test(getComputedStyle(m.querySelector('.who'), '::before').backgroundImage); }));
   const skillReply = await page.locator('#transcript .msg.agent').last().innerText();
   check('“/技能名”让智能体先读取技能说明', /使用技能/.test(skillReply) && /已加载技能「weekly-report」/.test(skillReply), skillReply.slice(0, 80));
   check('首页在开始对话后收起', await page.evaluate(() => document.querySelector('.wb-landing').hidden));
@@ -398,7 +398,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   // —— 科幻声线：云端语音（假服务）→ 效果链 → 真实音量驱动光核
   check('有本机网关、没有付费语音密钥时，自动选免费的 Edge 朗读', /当前使用：Edge 朗读/.test(await page.textContent('#tts-note')) && (await page.locator('#tts-voice option').count()) >= 8, await page.textContent('#tts-note'));
   await page.selectOption('#tts-engine', 'browser');
-  check('默认声线：贾维斯；浏览器声音时效果不可用', await page.evaluate(() => {
+  check('默认声线：未央；浏览器声音时效果不可用', await page.evaluate(() => {
     const on = document.querySelector('#tts-fx [aria-checked="true"]');
     return on?.value === 'jarvis' && on.disabled;
   }));
@@ -439,9 +439,9 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.evaluate(() => window.__jarvis.voice.onFinal('今天中午吃什么'));
   await page.waitForTimeout(400);
   check('唤醒词：没叫名字时不响应', (await userCount()) === n0);
-  await page.evaluate(() => window.__jarvis.voice.onFinal('贾维斯，现在几点'));
+  await page.evaluate(() => window.__jarvis.voice.onFinal('未央，现在几点'));
   await page.waitForFunction((n) => document.querySelectorAll('.msg.user').length > n && !document.querySelector('#transcript .msg.agent.streaming'), n0, { timeout: 20000 });
-  check('唤醒词：叫名字后执行指令（去掉名字）', (await page.locator('.msg.user').last().innerText()).includes('现在几点') && !(await page.locator('.msg.user').last().innerText()).includes('贾维斯'));
+  check('唤醒词：叫名字后执行指令（去掉名字）', (await page.locator('.msg.user').last().innerText()).includes('现在几点') && !(await page.locator('.msg.user').last().innerText()).includes('未央'));
   check('唤醒后输入栏发光提示', await page.evaluate(() => new Promise((r) => setTimeout(() => r(document.body.classList.contains('awake')), 400))));
   await page.evaluate(() => window.__jarvis.voice.onFinal('帮我写一个网页'));
   await page.waitForFunction((n) => document.querySelectorAll('.msg.user').length > n + 1, n0, { timeout: 20000 }).catch(() => {});

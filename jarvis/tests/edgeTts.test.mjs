@@ -70,12 +70,12 @@ describe('Edge 在线朗读', () => {
   it('完整流程：握手 → 配置 → SSML → 拼接音频', async () => {
     const f = await fakeEdge();
     servers.push(f.server);
-    const audio = await edgeSpeak('你好，我是贾维斯', { voice: 'zh-CN-YunyangNeural', connect: f.connect });
+    const audio = await edgeSpeak('你好，我是未央', { voice: 'zh-CN-YunyangNeural', connect: f.connect });
     expect([...audio]).toEqual([1, 2, 3, 4, 5]);
     expect(f.seen.url).toMatch(/TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4&ConnectionId=[0-9a-f]{32}&Sec-MS-GEC=[0-9A-F]{64}&Sec-MS-GEC-Version=1-/);
     expect(f.seen.headers.origin).toBe('chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold');
     expect(f.seen.messages[0]).toMatch(/Path:speech\.config[\s\S]*audio-24khz-48kbitrate-mono-mp3/);
-    expect(f.seen.messages[1]).toMatch(/Path:ssml[\s\S]*zh-CN-YunyangNeural[\s\S]*你好，我是贾维斯/);
+    expect(f.seen.messages[1]).toMatch(/Path:ssml[\s\S]*zh-CN-YunyangNeural[\s\S]*你好，我是未央/);
   });
 
   it('服务拒绝 / 声音名不对时给出明确错误', async () => {
