@@ -79,10 +79,15 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
   // 上次闪退的原因（原生层记下的）：存起来，设置里显示，打开后也提示一下
   try {
     const { registerPlugin } = await import('@capacitor/core');
-    const { text } = await registerPlugin('CrashLog').take();
+    let { text } = await registerPlugin('CrashLog').take();
     if (text) {
+      // 崩溃前在做什么（main.js 在执行每一步时记下的；正常结束会清空）
+      let doing = '';
+      try { doing = localStorage.getItem('jarvis.lastActivity') || ''; localStorage.removeItem('jarvis.lastActivity'); } catch { /* 读不到就不写 */ }
+      if (doing) text = `${text.trim()}\n崩溃前正在：${doing}`;
       try { localStorage.setItem('jarvis.lastCrash', text.trim()); } catch { /* 存不了就只提示 */ }
-      setTimeout(() => globalThis.__jarvisToast?.(`上次异常退出：${text.trim().split('\n').at(-1).slice(15, 80)}（设置 → 模型 → 版本那一栏可以看详情）`), 4000);
+      const last = text.trim().split('\n').filter((l) => !l.startsWith('崩溃前')).at(-1) ?? '';
+      setTimeout(() => globalThis.__jarvisToast?.(`上次异常退出：${last.slice(15, 60)}（设置 → 模型 → 版本那一栏可以看详情）`), 4000);
     }
   } catch { /* 旧版 App 没有这个插件 */ }
 

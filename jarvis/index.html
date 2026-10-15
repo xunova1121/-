@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-mode="%MODE%">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -17,6 +17,11 @@
   </script>
 </head>
 <body>
+  <!-- 手机 App 的启动页：logo 动效，至少显示一会儿再进界面（main.js 加载完后淡出；万一脚本出错 8 秒后也会消失） -->
+  <div id="app-splash" aria-hidden="true">
+    <div class="as-inner"><div class="as-glow"></div><div class="as-logo"></div><div class="as-name">未央</div><div class="as-sub">WEIYANG AI</div><div class="as-dots"><i></i><i></i><i></i></div></div>
+  </div>
+  <script>setTimeout(function () { var s = document.getElementById('app-splash'); if (s) s.remove(); }, 8000);</script>
   <div class="boot" id="boot" aria-hidden="true">
     <div class="boot-inner"><div class="boot-mark"></div><div class="boot-title">WEIYANG</div><div class="boot-lines" id="boot-lines"></div></div>
   </div>

@@ -455,7 +455,14 @@ function setTask(state, sub = '') {
   $('#mode-pill').classList.toggle('busy', Boolean(active) && state !== 'done');
 }
 
+/** 手机：记下“正在做什么”（界面崩溃时下次打开能看到崩溃前在做什么） */
+function markActivity(what) {
+  if (!MOBILE) return;
+  try { localStorage.setItem('jarvis.lastActivity', what ? `${new Date().toLocaleTimeString('zh-CN', { hour12: false })} ${what}` : ''); } catch { /* 存不了就算了 */ }
+}
+
 function finishTurn() {
+  markActivity('');
   if (!active) return;
   active = null;
   turns++;
@@ -928,6 +935,7 @@ async function send(text) {
           cards.set(e.id, bubble.toolCard(e.name, e.args));
           usedTools.push(e.name);
           setTask('processing', toolLabel(e.name));
+          markActivity(`${toolLabel(e.name)} ${summarizeArgs(e.name, e.args)}`.slice(0, 80));
         } else if (e.type === 'tool_progress') {
           cards.get(e.id)?.progress(e.text);
           hud.think(`  ${e.text}`, 'sub');
@@ -1989,3 +1997,12 @@ window.__jarvis = {
 
 // 工作台界面只用在电脑上；手机 App 保留自己的界面（底部输入、左侧抽屉菜单、整页面板）
 if (!COMPACT) initWorkbench({showPanel,newSession,openSession,getSession:()=>session,getRunning:()=>active?session.id:null,openFile:openInWorkspace});
+
+// 手机启动页：界面准备好、并且至少显示了 1.5 秒后淡出（太快一闪而过不像 App）
+{
+  const splash = document.getElementById('app-splash');
+  if (splash) {
+    const wait = MOBILE ? Math.max(0, 1500 - performance.now()) : 0;
+    setTimeout(() => { splash.classList.add('out'); setTimeout(() => splash.remove(), 420); }, wait);
+  }
+}

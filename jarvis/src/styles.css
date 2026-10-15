@@ -1209,3 +1209,26 @@ body:not(.compact) .chip-bar { padding: 0 max(16px, calc((100% - 860px) / 2)) 8p
 .compact.generating .brand-mark { animation: logo-work 1.1s ease-in-out infinite; }
 @keyframes logo-work { 0%, 100% { transform: translateY(0) rotate(0); } 30% { transform: translateY(-2px) rotate(-6deg); } 70% { transform: translateY(-1px) rotate(6deg); } }
 .brand-mark { background: url(./ui/logo.svg) center / contain no-repeat; border: 0; border-radius: 0; box-shadow: none; }
+
+/* 手机 App 启动页（只在手机版里显示：index.html 的 data-mode 是构建模式） */
+#app-splash { display: none; }
+html[data-mode="mobile"] #app-splash {
+  position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center;
+  background: #fff; transition: opacity .38s ease, transform .38s ease;
+}
+#app-splash.out { opacity: 0; transform: scale(1.03); pointer-events: none; }
+#app-splash .as-inner { position: relative; display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: -6vh; }
+#app-splash .as-logo { width: 116px; height: 106px; background: url(./ui/logo.svg) center / contain no-repeat; animation: as-float 2.4s ease-in-out infinite, as-in .6s cubic-bezier(.2,.8,.3,1.2) both; }
+#app-splash .as-glow { position: absolute; top: 4px; width: 132px; height: 132px; border-radius: 50%; background: radial-gradient(circle, #8fe3e6aa, #b9f0a033 55%, transparent 70%); animation: as-glow 2.4s ease-in-out infinite; }
+#app-splash .as-name { font: 700 30px/1.2 'Noto Sans CJK SC', 'PingFang SC', sans-serif; color: #0b4f73; letter-spacing: .12em; animation: as-up .6s .15s ease both; }
+#app-splash .as-sub { font: 600 12px/1 sans-serif; color: #22b8b0; letter-spacing: .32em; animation: as-up .6s .25s ease both; }
+#app-splash .as-dots { display: flex; gap: 7px; margin-top: 18px; }
+#app-splash .as-dots i { width: 7px; height: 7px; border-radius: 50%; background: #5fdcd8; animation: as-dot 1.2s ease-in-out infinite; }
+#app-splash .as-dots i:nth-child(2) { animation-delay: .15s; background: #a6ec7a; }
+#app-splash .as-dots i:nth-child(3) { animation-delay: .3s; background: #1fa6e0; }
+@keyframes as-float { 50% { transform: translateY(-8px) rotate(-2deg); } }
+@keyframes as-glow { 50% { transform: scale(1.12); opacity: .6; } }
+@keyframes as-in { from { transform: scale(.6); opacity: 0; } }
+@keyframes as-up { from { transform: translateY(8px); opacity: 0; } }
+@keyframes as-dot { 0%, 100% { transform: translateY(0); opacity: .45; } 40% { transform: translateY(-6px); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { #app-splash * { animation-duration: 0s !important; animation-iteration-count: 1 !important; } }
