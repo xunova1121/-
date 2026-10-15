@@ -1570,6 +1570,14 @@ if (DESKTOP?.onUpdate || APP_UPDATER) {
     if (u.state === 'ready' && !show.toldReady) { show.toldReady = true; toast(u.mobile ? `新版本 ${u.version} 已下载好，点顶栏“安装新版本”即可更新` : `新版本 ${u.version} 已下载好，点顶栏按钮重启即可更新`); }
   };
   if (APP_UPDATER) {
+    // 上次闪退的记录（mobile/boot.js 存的）：显示在版本这一栏，方便截图
+    let crash = '';
+    try { crash = localStorage.getItem('jarvis.lastCrash') || ''; } catch { /* 读不到就不显示 */ }
+    if (crash) {
+      const p = Object.assign(document.createElement('p'), { className: 'muted small', textContent: `最近一次异常退出：\n${crash.slice(-800)}` });
+      p.style.whiteSpace = 'pre-line';
+      $('#row-version').append(p);
+    }
     APP_UPDATER.onUpdate(show);
     show(APP_UPDATER.state);
     APP_UPDATER.start();

@@ -76,5 +76,15 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
     });
   } catch { /* 旧版 App 没有更新插件 */ }
 
+  // 上次闪退的原因（原生层记下的）：存起来，设置里显示，打开后也提示一下
+  try {
+    const { registerPlugin } = await import('@capacitor/core');
+    const { text } = await registerPlugin('CrashLog').take();
+    if (text) {
+      try { localStorage.setItem('jarvis.lastCrash', text.trim()); } catch { /* 存不了就只提示 */ }
+      setTimeout(() => globalThis.__jarvisToast?.(`上次异常退出：${text.trim().split('\n').at(-1).slice(15, 80)}（设置 → 模型 → 版本那一栏可以看详情）`), 4000);
+    }
+  } catch { /* 旧版 App 没有这个插件 */ }
+
   document.documentElement.classList.add('mobile-app');
 }
