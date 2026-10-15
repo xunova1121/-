@@ -111,7 +111,7 @@ describe('智能体循环（离线演示模型）', () => {
 
   it('工具参数缺失时返回错误让模型修正，而不是崩溃', async () => {
     const tools = createTools(ctx);
-    expect(validateArgs(tools.find((t) => t.name === 'write_file'), { path: 'a' })).toBe('缺少必填参数 content');
+    expect(validateArgs(tools.find((t) => t.name === 'write_file'), { path: 'a' })).toMatch(/^缺少必填参数 content（这次收到的参数：\{"path":"a"\}）/);
     expect(validateArgs(tools.find((t) => t.name === 'create_document'), { format: 'exe', path: 'a', content: 'x' })).toMatch('只能是');
     let n = 0;
     const adapter = {
@@ -185,5 +185,35 @@ describe('多步输出的表达标签', () => {
     const { text, events } = await run('帮我写一个网页');
     expect(text).not.toContain('<emotion>');
     expect(events.filter((e) => e.type === 'emotion').map((e) => e.value)).toEqual(['专注', '愉悦']);
+  });
+});
+
+describe('中转站的工具调用格式', () => {
+  const run = (chunks) => { const acc = createAccumulator(); for (const c of chunks) acc.push({ choices: [c] }); return acc.result().toolCalls; };
+  const tc = (o) => ({ delta: { tool_calls: [o] } });
+  it('不带 index：参数接到上一个调用后面', () => {
+    const r = run([tc({ id: 'c1', function: { name: 'read_file', arguments: '' } }), tc({ function: { arguments: '{"path":' } }), tc({ function: { arguments: '"a.docx"}' } })]);
+    expect(r).toEqual([{ id: 'c1', name: 'read_file', args: { path: 'a.docx' }, parseError: null }]);
+  });
+  it('给错 index（名字和参数分在两个 index）：并回去', () => {
+    const r = run([tc({ index: 0, id: 'c1', function: { name: 'read_file' } }), tc({ index: 1, function: { arguments: '{"path":"a.docx"}' } })]);
+    expect(r).toHaveLength(1);
+    expect(r[0].args).toEqual({ path: 'a.docx' });
+  });
+  it('参数是对象；每次发全文；最后一块用 message', () => {
+    expect(run([tc({ index: 0, id: 'c', function: { name: 'f', arguments: { path: 'x' } } })])[0].args).toEqual({ path: 'x' });
+    expect(run([tc({ index: 0, id: 'c', function: { name: 'f', arguments: '{"pa' } }), tc({ index: 0, function: { arguments: '{"path":"x"}' } })])[0].args).toEqual({ path: 'x' });
+    expect(run([{ message: { tool_calls: [{ id: 'c', function: { name: 'f', arguments: '{"path":"y"}' } }] }, finish_reason: 'tool_calls' }])[0]).toMatchObject({ name: 'f', args: { path: 'y' } });
+  });
+  it('并行的多个调用照常分开', () => {
+    const r = run([tc({ index: 0, id: 'a', function: { name: 'f', arguments: '{"path":"1"}' } }), tc({ index: 1, id: 'b', function: { name: 'g', arguments: '{"path":"2"}' } })]);
+    expect(r.map((c) => [c.name, c.args.path])).toEqual([['f', '1'], ['g', '2']]);
+  });
+  it('参数名写成别的样子（file_path、filename）时认出来', () => {
+    const read = createTools(ctx).find((t) => t.name === 'read_file');
+    const args = { file_path: '文档/a.docx' };
+    expect(validateArgs(read, args)).toBeNull();
+    expect(args).toEqual({ path: '文档/a.docx' });
+    expect(validateArgs(read, {})).toMatch(/这次收到的参数是空的/);
   });
 });

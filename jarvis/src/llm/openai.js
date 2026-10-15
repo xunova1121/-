@@ -66,17 +66,36 @@ export function createAccumulator(onText) {
       if (!choice) return;
       const d = choice.delta ?? {};
       if (typeof d.content === 'string' && d.content) { text += d.content; onText?.(d.content); }
-      for (const tc of d.tool_calls ?? []) {
-        const i = tc.index ?? calls.length;
+      // 中转站的工具调用格式五花八门，这里尽量都接住：
+      //   不带 index：有 id / 名字的是新调用，只有参数的接到上一个调用后面
+      //   参数是对象而不是文字；每次发“到目前为止的全文”而不是新增的部分；
+      //   最后一块用 message 而不是 delta 给出完整调用
+      const list = d.tool_calls ?? (calls.length ? [] : choice.message?.tool_calls) ?? [];
+      for (const tc of list) {
+        let i = tc.index;
+        if (i == null) {
+          const byId = tc.id ? calls.findIndex((c) => c?.id === tc.id) : -1;
+          i = byId >= 0 ? byId : tc.id || tc.function?.name || !calls.length ? calls.length : calls.length - 1;
+        }
         calls[i] ??= { id: '', name: '', argText: '' };
-        if (tc.id) calls[i].id = tc.id;
-        if (tc.function?.name) calls[i].name += tc.function.name;
-        if (tc.function?.arguments) calls[i].argText += tc.function.arguments;
+        const c = calls[i];
+        if (tc.id) c.id = tc.id;
+        const name = tc.function?.name;
+        if (name && !c.name.endsWith(name)) c.name = c.name && name.startsWith(c.name) ? name : c.name + name;
+        let a = tc.function?.arguments;
+        if (a != null && typeof a !== 'string') a = JSON.stringify(a);
+        if (a) c.argText = c.argText.length >= 2 && a.startsWith(c.argText) ? a : c.argText + a;
       }
       if (choice.finish_reason) finish = choice.finish_reason;
     },
     result() {
-      const toolCalls = calls.filter(Boolean).map((c, i) => {
+      // 没有名字的“调用”其实是上一个调用的参数（中转站给错了 index）：并回去
+      const merged = [];
+      for (const c of calls.filter(Boolean)) {
+        const prev = merged.at(-1);
+        if (!c.name && prev) { prev.argText += c.argText; if (!prev.id) prev.id = c.id; } else merged.push({ ...c });
+      }
+      const toolCalls = merged.map((c, i) => {
         let args = {};
         let parseError = null;
         try { args = c.argText ? JSON.parse(c.argText) : {}; } catch (e) { parseError = `参数不是合法 JSON：${e.message}`; }

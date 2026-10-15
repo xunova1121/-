@@ -630,10 +630,34 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
 }
 
 /** 校验参数：必填项存在、类型正确、枚举值合法 */
+/** 模型常把参数名写成别的样子：认得出来的改回正确的名字（改的是传进来的对象） */
+const ALIASES = {
+  path: ['file_path', 'filepath', 'file', 'filename', 'file_name', 'fileName', 'filePath', 'paths'],
+  content: ['text', 'body', 'data'],
+  query: ['q', 'keyword', 'keywords', 'search', 'question'],
+  url: ['link', 'href', 'uri']
+};
+export function normalizeArgs(tool, args) {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return args;
+  const { properties = {} } = tool.input_schema ?? {};
+  for (const [k, names] of Object.entries(ALIASES)) {
+    if (!properties[k] || (args[k] !== undefined && args[k] !== '')) continue;
+    const alt = names.find((n) => !properties[n] && args[n] !== undefined && args[n] !== '');
+    if (alt === undefined) continue;
+    let v = args[alt];
+    if (Array.isArray(v) && properties[k].type === 'string') v = v[0];
+    args[k] = v;
+    delete args[alt];
+  }
+  return args;
+}
+
 export function validateArgs(tool, args) {
   if (!args || typeof args !== 'object' || Array.isArray(args)) return '参数必须是对象';
+  normalizeArgs(tool, args);
   const { properties = {}, required = [] } = tool.input_schema;
-  for (const k of required) if (args[k] === undefined || args[k] === null || args[k] === '') return `缺少必填参数 ${k}`;
+  const got = () => { const s = JSON.stringify(args); return s === '{}' ? '（这次收到的参数是空的）' : `（这次收到的参数：${s.slice(0, 120)}）`; };
+  for (const k of required) if (args[k] === undefined || args[k] === null || args[k] === '') return `缺少必填参数 ${k}${got()}`;
   for (const [k, v] of Object.entries(args)) {
     const p = properties[k];
     if (!p) continue;
