@@ -150,7 +150,11 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.type('#prompt', '本周完成登录模块');
   const before = await page.locator('#transcript .msg.agent').count();
   await page.press('#prompt', 'Enter');
+  const spun = await page.waitForSelector('.wb-recent .wb-chat.running .wb-run', { timeout: 8000 }).then(() => true, () => false);
   await page.waitForFunction((n) => document.querySelectorAll('#transcript .msg.agent').length > n && !document.querySelector('#transcript .msg.agent.streaming'), before, { timeout: 20000 });
+  await page.waitForTimeout(600);
+  check('最近对话：回答中的那条转圈，答完停下', spun && (await page.locator('.wb-recent .wb-chat.running').count()) === 0);
+  check('回答没有左侧竖线，用头像标题', await page.evaluate(() => { const m = [...document.querySelectorAll('#transcript .msg.agent')].at(-1); return getComputedStyle(m).borderLeftWidth === '0px' && getComputedStyle(m.querySelector('.who'), '::before').content.includes('✳'); }));
   const skillReply = await page.locator('#transcript .msg.agent').last().innerText();
   check('“/技能名”让智能体先读取技能说明', /使用技能/.test(skillReply) && /已加载技能「weekly-report」/.test(skillReply), skillReply.slice(0, 80));
   check('首页在开始对话后收起', await page.evaluate(() => document.querySelector('.wb-landing').hidden));

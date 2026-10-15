@@ -27,3 +27,34 @@ body.workbench{background:#fff;color:#24272e;font-family:'Microsoft YaHei','Sego
 @media(max-width:1050px){.workbench.wb-info-open .app{grid-template-columns:205px minmax(0,1fr)}}
 /* 提示气泡在整页功能面板（z-index 60）之上，不被页面标题挡住 */
 .workbench .toast{z-index:80;max-width:min(720px,calc(100vw - 32px));text-align:center}
+/* 对话版式（桌面）：回答去掉左侧竖线，改成“头像 + 名字”的标题行；提问是右侧的淡紫色气泡；执行步骤是浅色卡片 */
+.workbench .transcript{gap:30px;padding-top:28px;padding-bottom:28px}
+.workbench .msg.agent{border-left:0;padding:0 0 0 42px;position:relative;color:#2b2d35}
+.workbench .msg.agent>.who{display:flex;align-items:center;gap:2px;height:28px;margin:0 0 4px;font:600 13.5px var(--font-ui);letter-spacing:0;color:#2f2a45}
+.workbench .msg.agent>.who::before{content:"✳";position:absolute;left:0;top:0;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(140deg,#8f7cf0,#6352d4);color:#fff;font-size:14px;box-shadow:0 2px 8px #6352d42e}
+.workbench .msg.agent.streaming>.who::before{animation:wb-spin 2.4s linear infinite}
+.workbench .msg .who-time{font-weight:400;font-size:12px;color:#a3a5ae}
+.workbench .msg.agent.streaming .who-time{visibility:hidden}
+.workbench .msg.agent .body h3,.workbench .msg.agent .body h4,.workbench .msg.agent .body h5{color:#2f2a45;font-size:15.5px;margin:16px 0 6px}
+.workbench .msg.agent .body .table-wrap{border-radius:10px}
+:root .workbench .transcript .msg.user{position:relative;max-width:min(72%,640px);padding:11px 17px;border:0;border-radius:20px 20px 6px 20px;background:#f1edfb;color:#2c2840}
+.workbench .msg.user>.who{position:absolute;right:calc(100% + 10px);bottom:6px;margin:0;white-space:nowrap;opacity:0;transition:opacity .15s}
+.workbench .msg.user>.who .who-name{display:none}.workbench .msg.user>.who .who-time{font-size:11px}
+.workbench .msg.user:hover>.who{opacity:1}
+.workbench .tool-group{margin:10px 0;border:1px solid #ebe8f3;border-radius:14px;background:#faf9fd}
+.workbench .tool-group>summary{padding:9px 14px;align-items:center}
+.workbench .tool-group .tg-title{display:inline-flex;align-items:center;gap:8px;font-weight:500;color:#4b4560}
+.workbench .tool-group .tg-title::before{content:"";width:8px;height:8px;border-radius:50%;background:#3fa37c}
+.workbench .tool-group.working .tg-title::before{width:12px;height:12px;background:none;border:2px solid #d9d3f3;border-top-color:#6556da;animation:wb-spin .8s linear infinite}
+.workbench .tool-group .tg-count{color:#7a6bd8}
+.workbench .tool-group .tg-list{padding:0 10px 8px}
+/* 最近对话：正在回答的那条转圈、高亮 */
+.wb-recent .wb-chat{display:flex;align-items:center;gap:8px}
+.wb-recent .wb-chat>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.wb-recent .wb-run{flex:none;width:6px;height:6px;border-radius:50%;background:#c9cad2}
+.wb-recent .wb-chat.running{background:#efecfb!important;color:#4a3fa8!important;font-weight:600}
+.wb-recent .wb-chat.running .wb-run{width:12px;height:12px;background:none;border:2px solid #d6d0f2;border-top-color:#6556da;animation:wb-spin .8s linear infinite}
+@keyframes wb-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.workbench .msg.agent.streaming>.who::before,.wb-recent .wb-chat.running .wb-run,.workbench .tool-group.working .tg-title::before{animation-duration:3s}}
+.wb-recent>div:last-child .wb-chat{padding:9px 8px}
+.wb-recent .wb-chat.current{background:#ececf0;color:#2f2a45}

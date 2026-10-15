@@ -5,7 +5,7 @@ import { toolLabel } from './transcript.js';
 import { initWeiyangShell } from './weiyangShell.js';
 
 const node=(tag,text,cls)=>{const e=document.createElement(tag);if(text)e.textContent=text;if(cls)e.className=cls;return e;};
-export function initWorkbench({showPanel,newSession,openSession,getSession,openFile}){
+export function initWorkbench({showPanel,newSession,openSession,getSession,getRunning,openFile}){
  document.body.classList.add('workbench','side-closed');document.body.classList.remove('side-open');
  const rail=document.querySelector('.rail'),main=document.querySelector('.main'),top=document.querySelector('.topbar');
  const home=node('div',null,'wb-brand');home.append(node('span','✳','wb-mark'),node('b','JARVIS'),node('small','贾维斯 · 私人智能工作台'));rail.prepend(home);
@@ -54,5 +54,9 @@ export function initWorkbench({showPanel,newSession,openSession,getSession,openF
  document.addEventListener('keydown',e=>{if(e.key==='Escape')closePanel();});
  initWorkspaceNavigation({showPanel,closePanel});
  initWeiyangShell({closePanel});
- let last='';async function refresh(){if(document.hidden)return;const rows=await sessions.list();const signature=JSON.stringify(rows.map(s=>[s.id,s.title,s.updatedAt]));if(signature===last)return;last=signature;history.replaceChildren();for(const s of rows.slice(0,12)){const b=node('button',s.title||'未命名对话');b.title=s.title;b.onclick=()=>{openSession(s.id);closePanel();setView(false);};history.append(b);}if(!rows.length)history.append(node('p','开始对话后，记录会保存在这里。'));}refresh();const timer=setInterval(()=>refresh().catch(()=>{}),3000);window.addEventListener('pagehide',()=>clearInterval(timer));
+ // 正在回答的对话在“最近对话”里转圈
+ let running='';function paint(){const cur=getSession?.()?.id;for(const b of history.querySelectorAll('.wb-chat')){b.classList.toggle('current',b.dataset.id===cur);const on=!!running&&b.dataset.id===running;b.classList.toggle('running',on);if(on)b.setAttribute('aria-busy','true');else b.removeAttribute('aria-busy');}}
+ let shown='';function markRunning(){const id=getRunning?.()||'',cur=getSession?.()?.id||'';if(cur!==shown){shown=cur;paint();}if(id===running)return;running=id;paint();if(id&&![...history.querySelectorAll('.wb-chat')].some(b=>b.dataset.id===id)){last='';refresh().catch(()=>{});}}// 新对话还没出现在列表里：重新读一次列表
+ let last='';async function refresh(){if(document.hidden)return;const rows=await sessions.list();const signature=JSON.stringify(rows.map(s=>[s.id,s.title,s.updatedAt]));if(signature===last)return;last=signature;history.replaceChildren();for(const s of rows.slice(0,12)){const b=node('button',null,'wb-chat');b.dataset.id=s.id;b.append(node('i',null,'wb-run'),node('span',s.title||'未命名对话'));b.title=s.title;b.onclick=()=>{openSession(s.id);closePanel();setView(false);};history.append(b);}if(!rows.length)history.append(node('p','开始对话后，记录会保存在这里。'));paint();}refresh();const timer=setInterval(()=>refresh().catch(()=>{}),3000);window.addEventListener('pagehide',()=>clearInterval(timer));
+ const runTimer=setInterval(markRunning,400);window.addEventListener('pagehide',()=>clearInterval(runTimer));
 }

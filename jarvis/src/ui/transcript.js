@@ -170,7 +170,8 @@ export class Transcript {
     el.className = `msg ${role}`;
     const head = document.createElement('span');
     head.className = 'who';
-    head.textContent = `${LABEL[role] ?? role} · ${hhmm(ts)}`;
+    // 名字和时间分开放，方便桌面版把名字做成标题、时间淡一些（文字内容不变）
+    head.append(Object.assign(document.createElement('span'), { className: 'who-name', textContent: LABEL[role] ?? role }), Object.assign(document.createElement('span'), { className: 'who-time', textContent: ` · ${hhmm(ts)}` }));
     const body = document.createElement('div');
     body.className = 'body';
     body.textContent = text;
