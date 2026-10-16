@@ -13,11 +13,14 @@ export function initWorkbench({showPanel,newSession,openSession,getSession,getRu
  const original=[...rail.querySelectorAll('.rail-btn')];original.forEach(b=>b.hidden=true);
  const nav=node('div',null,'wb-nav');home.after(nav);
  const closePanel=()=>{document.body.classList.add('side-closed');document.body.classList.remove('side-open');};
- function button(label,icon,fn){const b=node('button');b.type='button';b.title=label;b.setAttribute('aria-label',label);b.append(node('span',icon,'wb-nav-icon'),node('span',label));b.onclick=fn;nav.append(b);return b;}
+ function button(label,icon,fn,parent=nav){const b=node('button');b.type='button';b.title=label;b.setAttribute('aria-label',label);b.append(node('span',icon,'wb-nav-icon'),node('span',label));b.onclick=fn;parent.append(b);return b;}
  const fresh=button('新建对话','＋',()=>{newSession();setView(false);closePanel();});fresh.className='wb-new';
- const links=[['专家与技能','◇','skills'],['定时任务','◷','system'],['文件空间','▱','workspace'],['连接应用','⌘','skills'],['记忆空间','♧','mind'],['知识库','▤','knowledge'],['实验室','⚗','settings']];
- for(const [label,icon,panel]of links){const b=button(label,icon,()=>{showPanel(panel);document.body.classList.toggle('wb-connections',label==='连接应用');});b.dataset.destination=label==='连接应用'?'connections':panel;}
- const recent=node('section',null,'wb-recent'),recentHead=node('div',null,'wb-recent-head'),search=node('button','⌕');search.title='搜索全部对话';search.onclick=()=>showPanel('sessions');recentHead.append(node('span','最近对话'),search);const history=node('div');recent.append(recentHead,history);rail.append(recent);
+ const primaryLinks=[['文件空间','▱','workspace'],['专家与技能','◇','skills'],['定时任务','◷','system']];
+ const secondaryLinks=[['连接应用','⌘','skills'],['记忆空间','♧','mind'],['知识库','▤','knowledge'],['实验室','⚗','settings']];
+ function link([label,icon,panel],parent){const b=button(label,icon,()=>{showPanel(panel);document.body.classList.toggle('wb-connections',label==='连接应用');},parent);b.dataset.destination=label==='连接应用'?'connections':panel;}
+ primaryLinks.forEach(item=>link(item,nav));
+ const secondary=node('div',null,'wb-nav-secondary');secondary.setAttribute('aria-label','资料与工具');nav.append(secondary);secondaryLinks.forEach(item=>link(item,secondary));
+ const recent=node('section',null,'wb-recent'),recentHead=node('div',null,'wb-recent-head'),search=node('button','⌕');search.title='搜索全部对话';search.onclick=()=>showPanel('sessions');recentHead.append(node('span','最近对话'),search);const history=node('div',null,'wb-history-list');history.tabIndex=0;history.setAttribute('aria-label','最近对话列表');recent.append(recentHead,history);rail.append(recent);
  const bottom=node('button','⚙  设置与模型','wb-bottom');bottom.onclick=()=>showPanel('models');rail.append(bottom);
  const tabs=node('nav',null,'wb-tabs'),chat=node('button','对话'),studio=node('button','工作室');tabs.setAttribute('aria-label','工作视图');tabs.append(chat,studio);top.append(tabs);chat.onclick=()=>setView(false);studio.onclick=()=>setView(true);
  function setView(on){closePanel();document.body.classList.toggle('wb-studio',on);if(on)document.body.classList.remove('stage-mini');chat.classList.toggle('selected',!on);studio.classList.toggle('selected',on);chat.setAttribute('aria-pressed',String(!on));studio.setAttribute('aria-pressed',String(on));window.dispatchEvent(new Event('resize'));}setView(false);

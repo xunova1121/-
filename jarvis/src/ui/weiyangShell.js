@@ -1,8 +1,9 @@
 import './weiyangShell.css';
+import { initNativeTitleBar } from './nativeTitleBar.js';
 export function initWeiyangShell({closePanel}) {
  const body=document.body;
  document.title='未央 · 智能工作台';
- if(globalThis.jarvisDesktop){body.classList.add('weiyang-desktop');const bar=document.createElement('div');bar.className='weiyang-titlebar';bar.textContent='未央';body.prepend(bar);globalThis.jarvisDesktop.setTitleBar({color:'#ffffff',symbolColor:'#72727d',height:32}).catch(()=>{});}
+ if(globalThis.jarvisDesktop){body.classList.add('weiyang-desktop');const bar=document.createElement('div');bar.className='weiyang-titlebar';bar.textContent='未央';body.prepend(bar);const stopTitleBarSync=initNativeTitleBar();addEventListener('pagehide',stopTitleBarSync,{once:true});}
  const mobile=matchMedia('(max-width:700px)'),toggle=document.querySelector('.wb-rail-toggle');
  const shade=document.createElement('button');shade.className='weiyang-menu-shade';shade.setAttribute('aria-label','关闭导航');shade.hidden=true;body.append(shade);
  function closeMenu(){body.classList.remove('weiyang-menu-open');shade.hidden=true;if(mobile.matches){toggle.setAttribute('aria-expanded','false');toggle.setAttribute('aria-label','打开导航');}}

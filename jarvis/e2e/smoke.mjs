@@ -107,9 +107,14 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   // 电脑版的更新按钮（重启以更新 / 下载进度）在工作台顶栏里要能显示出来
   check('工作台：顶栏的更新按钮能显示', await page.evaluate(() => { const p = document.querySelector('#update-pill'); p.hidden = false; p.dataset.state = 'ready'; p.textContent = '重启以更新到 1.0.99'; const r = p.getBoundingClientRect(); const ok = getComputedStyle(p).display !== 'none' && r.width > 40 && r.top < 80; p.hidden = true; return ok; }));
   check('工作台：左侧导航、对话 / 工作室切换', await page.isVisible('.rail .wb-nav .wb-new') && (await page.locator('.wb-tabs button').count()) === 2);
+  check('工作台：导航分组，最近对话保留独立区域',await page.evaluate(()=>{const rail=document.querySelector('.rail'),recent=document.querySelector('.wb-recent').getBoundingClientRect(),foot=document.querySelector('.wb-bottom').getBoundingClientRect();return document.querySelectorAll('.wb-nav-secondary button').length===4&&recent.height>=200&&foot.bottom<=innerHeight&&getComputedStyle(rail).overflowY==='hidden'&&getComputedStyle(document.querySelector('.wb-history-list')).overflowY==='auto';}));
   const interactionSpeech = await page.evaluate(() => { const s = window.__jarvis.speaker, enabled = s.enabled; s.enabled = false; return enabled; });
   await page.locator('.wb-mark').click();
   check('点击左上角未央，居中打开互动面板', await page.locator('.wy-companion').evaluate(d => d.open));
+  const initialPanelHeight=await page.locator('.wy-companion').evaluate(d=>d.getBoundingClientRect().height);
+  await page.getByRole('button',{name:'更多表情',exact:true}).click();
+  check('PC 更多表情分页展示，不拉长弹窗或出现粗滚动条',await page.locator('.wy-companion').evaluate((d,height)=>{const r=d.getBoundingClientRect(),close=d.querySelector('.wy-close').getBoundingClientRect();return !d.querySelector('.wy-extra-actions').hidden&&d.querySelector('.wy-primary-actions').hidden&&Math.abs(r.height-height)<4&&d.scrollHeight<=d.clientHeight+1&&r.top>=20&&r.bottom<=innerHeight-20&&close.top>=r.top;},initialPanelHeight));
+  await page.getByRole('button',{name:'常用表情',exact:true}).click();
   await page.getByRole('button', { name: '比个心', exact: true }).click();
   check('互动面板执行可爱动作', await page.locator('.wy-companion .wy-mascot').getAttribute('data-state') === 'love');
   await page.getByRole('button',{name:'切换文字输入',exact:true}).click();
@@ -118,6 +123,15 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('文字动作指令能执行', await page.locator('.wy-companion .wy-mascot').getAttribute('data-state') === 'spin');
   await page.getByRole('button', { name: '关闭未央', exact: true }).click();
   check('互动面板可关闭，返回原对话', !await page.locator('.wy-companion').evaluate(d => d.open));
+  for(const size of [{width:1366,height:768},{width:1024,height:600}]){
+    await page.setViewportSize(size);
+    check(`PC ${size.height}px 高度下最近对话不被菜单挤掉`,await page.evaluate(()=>{const recent=document.querySelector('.wb-recent').getBoundingClientRect(),foot=document.querySelector('.wb-bottom').getBoundingClientRect(),nav=document.querySelector('.wb-nav').getBoundingClientRect();return recent.height>=150&&recent.top>=nav.bottom&&foot.bottom<=innerHeight;}));
+    await page.locator('.wb-mark').click();await page.getByRole('button',{name:'更多表情',exact:true}).click();
+    check(`PC ${size.height}px 高度下陪伴面板操作完整可见`,await page.locator('.wy-companion').evaluate(d=>{const r=d.getBoundingClientRect(),end=d.querySelector('.wy-companion-end').getBoundingClientRect();return r.top>=20&&r.bottom<=innerHeight-20&&d.scrollHeight<=d.clientHeight+1&&end.bottom<=r.bottom-8;}));
+    await page.screenshot({path:`${OUT}/pc-layout-${size.height}.png`});
+    await page.getByRole('button',{name:'常用表情',exact:true}).click();await page.getByRole('button',{name:'关闭未央',exact:true}).click();
+  }
+  await page.setViewportSize({width:1600,height:960});
   await page.evaluate(enabled => { window.__jarvis.speaker.enabled = enabled; }, interactionSpeech);
   await page.evaluate(() => {
     const v = window.__jarvis.voice;

@@ -931,6 +931,7 @@ async function send(text) {
   const task = shouldTeam(text, settings.teamMode === 'auto' && !helperLlm() ? 'off' : settings.teamMode) ? 'reason' : classifyTask(text, { images: imgs.length + withImages.size });
   const route = routeFor(llmConfig, task);
   const { adapter, model, problem } = createAdapter(route.cfg, { gateway });
+  if (COMPACT && isAuto(llmConfig) && model) $('#model-chip-text').textContent = `自动 · ${model}`;
   // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省
   const effort = task === 'chat' && llmConfig.fastChat !== false && !NEEDS_THOUGHT.test(text) ? 'low' : undefined;
   if (route.routed) hud.think(`◇ 模型分工：${TASKS[task].name} → ${route.model}`);
@@ -1837,6 +1838,7 @@ function setTheme(mode) { setSetting('theme', mode); applyTheme(); }
 function syncTitleBar() {
   if (!DESKTOP?.setTitleBar) return;
   requestAnimationFrame(() => {
+    if (document.body.classList.contains('workbench')) { dispatchEvent(new Event('jarvis:sync-titlebar')); return; }
     const css = getComputedStyle(document.body);
     const color = css.getPropertyValue('--titlebar').trim();
     const symbolColor = css.getPropertyValue('--titlebar-symbol').trim();
