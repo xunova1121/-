@@ -111,9 +111,10 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   const interactionSpeech = await page.evaluate(() => { const s = window.__jarvis.speaker, enabled = s.enabled; s.enabled = false; return enabled; });
   await page.locator('.wb-mark').click();
   check('点击左上角未央，居中打开互动面板', await page.locator('.wy-companion').evaluate(d => d.open));
+  await page.locator('.wy-companion').evaluate(d=>Promise.all(d.getAnimations().map(a=>a.finished.catch(()=>{}))));
   const initialPanelHeight=await page.locator('.wy-companion').evaluate(d=>d.getBoundingClientRect().height);
   await page.getByRole('button',{name:'更多表情',exact:true}).click();
-  check('PC 更多表情分页展示，不拉长弹窗或出现粗滚动条',await page.locator('.wy-companion').evaluate((d,height)=>{const r=d.getBoundingClientRect(),close=d.querySelector('.wy-close').getBoundingClientRect();return !d.querySelector('.wy-extra-actions').hidden&&d.querySelector('.wy-primary-actions').hidden&&Math.abs(r.height-height)<4&&d.scrollHeight<=d.clientHeight+1&&r.top>=20&&r.bottom<=innerHeight-20&&close.top>=r.top;},initialPanelHeight));
+  check('PC 更多表情分页展示，不拉长弹窗或出现粗滚动条',await page.locator('.wy-companion').evaluate((d,height)=>{const r=d.getBoundingClientRect(),close=d.querySelector('.wy-close').getBoundingClientRect();return !d.querySelector('.wy-extra-actions').hidden&&d.querySelector('.wy-primary-actions').hidden&&Math.abs(r.height-height)<4&&d.scrollHeight<=d.clientHeight+1&&r.top>=20&&r.bottom<=innerHeight-20&&close.top>=r.top;},initialPanelHeight),JSON.stringify(await page.locator('.wy-companion').evaluate((d,height)=>({before:height,after:d.getBoundingClientRect().height,scroll:d.scrollHeight,client:d.clientHeight,top:d.getBoundingClientRect().top,bottom:d.getBoundingClientRect().bottom}),initialPanelHeight)));
   await page.getByRole('button',{name:'常用表情',exact:true}).click();
   await page.getByRole('button', { name: '比个心', exact: true }).click();
   check('互动面板执行可爱动作', await page.locator('.wy-companion .wy-mascot').getAttribute('data-state') === 'love');

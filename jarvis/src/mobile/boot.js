@@ -69,7 +69,8 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
         const color=topColor(getComputedStyle(header||document.body),topColor(getComputedStyle(document.body),fallback));
         const key=color+light;
         if(key===last)return;
-        WindowColor.set({color,light}).then(()=>{last=key;}).catch(()=>{});
+        last=key;
+        WindowColor.set({color,light}).catch(()=>{if(last===key)last='';});
       });
     };
     apply();
