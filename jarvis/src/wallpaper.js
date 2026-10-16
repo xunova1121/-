@@ -26,9 +26,9 @@ if(widget){
   const tick=()=>{const now=new Date();document.getElementById('wp-time').textContent=now.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});document.getElementById('wp-date').textContent=now.toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'});};tick();setInterval(tick,10000);
 }
 function show(payload){
-  if(payload.form)forms.push(payload.form);
+  if(payload.form){forms.push(payload.form);if(forms.length>128)forms.shift();}
   if(payload.scale&&scene)scene.root.style.setProperty('--holo-widget-scale',String(Math.max(.7,Math.min(1.2,payload.scale))));
-  if(payload.newTurn)scene?.update({busy:true,state:'think'});
+  if(payload.newTurn){scene?.newTurn();scene?.update({busy:true,state:'think'});}
   if(payload.tool)scene?.pose('rub','正在认真帮你处理…');
   if(payload.say){
     scene?.update({text:payload.say,busy:false,state:payload.error?'think':'happy'});

@@ -32,3 +32,5 @@
 @media(prefers-reduced-motion:reduce){.wy-hologram .wy-mascot,.wy-hologram .holo-ripple{animation:none!important}}
 
 .wy-keyboard-open .holo-dialog .holo-editing .holo-pet .wy-mascot{--mascot-size:52px}
+
+.holo-form:focus-within{border-color:#a9eeff;box-shadow:0 0 0 2px #78dcff22}.holo-form input:focus-visible{outline:none}

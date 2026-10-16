@@ -29,13 +29,13 @@ export function createHologramScene({ send, close, openFull, wallpaper, settings
 }
 
 /** 应用内全屏入口，回复沿用主对话；关闭不会中断已经开始的任务。 */
-export function initHologramCompanion({send,wallpaper}={}){
+export function initHologramCompanion({send,wallpaper,onFull}={}){
   const dialog=document.createElement('dialog');dialog.className='holo-dialog';dialog.setAttribute('aria-label','未央全息陪伴');
   let previousFocus,observer,scene,lastReply,lastText='',queued=false;
-  const sync=()=>{queued=false;if(!dialog.open)return;const reply=[...document.querySelectorAll('#transcript .msg.agent')].at(-1);if(reply!==lastReply){lastReply=reply;scene.newTurn();}const text=[...(reply?.querySelectorAll('.body')||[])].map(el=>el.textContent).join('\n');if(text!==lastText){lastText=text;scene.update({text,busy:!!reply?.classList.contains('streaming')});}};
+  const sync=()=>{queued=false;if(!dialog.open)return;const reply=[...document.querySelectorAll('#transcript .msg.agent')].at(-1);if(reply!==lastReply){lastReply=reply;scene.newTurn();}const text=[...(reply?.querySelectorAll('.body')||[])].map(el=>el.textContent).join('\n');scene.update({...(text!==lastText?{text}:{}),busy:!!reply?.classList.contains('streaming'),state:reply?reply.classList.contains('streaming')?'think':'happy':'idle'});lastText=text;};
   const schedule=()=>{if(!queued){queued=true;requestAnimationFrame(sync);}};
   const close=()=>dialog.close();
-  scene=createHologramScene({send,close,openFull:close,wallpaper});dialog.append(scene.root);document.body.append(dialog);
+  scene=createHologramScene({send,close,openFull:()=>{close();onFull?.();},wallpaper});dialog.append(scene.root);document.body.append(dialog);
   function open(){if(dialog.open)return;previousFocus=document.activeElement;dialog.showModal();scene.pause(false);scene.pose('wave','你一叫，我就在呀');lastReply=null;lastText='';sync();observer=new MutationObserver(schedule);observer.observe(document.querySelector('#transcript'),{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['class']});document.body.classList.add('holo-open');dispatchEvent(new Event('jarvis:chrome-ready'));}
   dialog.addEventListener('close',()=>{observer?.disconnect();scene.pause(true);document.body.classList.remove('holo-open');previousFocus?.focus();dispatchEvent(new Event('jarvis:chrome-ready'));});
   const visibility=()=>scene.pause(document.hidden||!dialog.open);document.addEventListener('visibilitychange',visibility);

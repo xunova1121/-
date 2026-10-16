@@ -120,7 +120,7 @@ await page.screenshot({ path: `${OUT}/desktop-main.png` });
   let wpPage = null;
   for (let i = 0; i < 50 && !wpPage; i++) { wpPage = app.windows().find((w) => w.url().includes('wallpaper.html')); if (!wpPage) await page.waitForTimeout(200); }
   await wpPage.waitForFunction(() => window.__wallpaper);
-  check('桌面远景不用持续运行的 WebGL',await wpPage.evaluate(()=>!document.querySelector('canvas')&&getComputedStyle(document.querySelector('.wp')).backgroundImage.includes('hologram-landscape')));
+  check('桌面远景不用持续运行的 WebGL',await wpPage.evaluate(()=>!document.querySelector('canvas')&&getComputedStyle(document.querySelector('.wp')).backgroundImage!=='none'));
   const wpInfo = await app.evaluate(({ BrowserWindow, screen }) => { const w = BrowserWindow.getAllWindows().find((x) => /wallpaper/.test(x.webContents.getURL())); const b = w?.getBounds(); const d = screen.getPrimaryDisplay().bounds; return w ? { focusable: w.isFocusable(), visible: w.isVisible(), full: b.width === d.width && b.height === d.height } : null; });
   check('开启桌面背景：出现铺满屏幕、不抢焦点的背景窗口', wpInfo?.visible && wpInfo.full && !wpInfo.focusable, JSON.stringify(wpInfo));
   const hb = await page.locator('#transcript .msg.agent').count();

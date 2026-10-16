@@ -2224,7 +2224,7 @@ window.__jarvis = {
 if (!COMPACT) initWorkbench({showPanel,newSession,openSession,getSession:()=>session,getRunning:()=>active && !active.streamDone ? session.id : null,openFile:openInWorkspace});
 mascots = initMascots();
 companion = initCompanion({ send, startVoice: async () => { await setVoiceCall(true); return callActive; }, stopVoice: () => setVoiceCall(false), speak: text => { speaker.unlock(); speaker.speak(text); } });
-const hologram = initHologramCompanion({send:async text=>{if(active)throw new Error('当前任务还在进行，请稍等完成后再发送。');await send(text);},wallpaper:MOBILE?async()=>{const {registerPlugin}=await import('@capacitor/core');await registerPlugin('CompanionWallpaper').open();}:null});
+const hologram = initHologramCompanion({send:async text=>{if(active)throw new Error('当前任务还在进行，请稍等完成后再发送。');await send(text);},onFull:()=>{body.classList.add('side-closed');body.classList.remove('side-open');document.querySelector('.wb-tabs button')?.click();},wallpaper:MOBILE?async()=>{const {registerPlugin}=await import('@capacitor/core');await registerPlugin('CompanionWallpaper').open();}:null});
 const holoEntry=Object.assign(document.createElement('button'),{type:'button',className:'wy-hologram-entry',textContent:'✧ 全息陪伴'});
 holoEntry.onclick=()=>{companion.close();hologram.open();};document.querySelector('.wy-companion-head span').after(holoEntry);
 if(DESKTOP?.onWallpaperRequest)DESKTOP.onWallpaperRequest(async request=>{
