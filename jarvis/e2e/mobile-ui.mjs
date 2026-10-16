@@ -55,7 +55,9 @@ try{
   check('390屏幕首屏显示文件空间，角色不贴屏幕右边',await page.evaluate(()=>{const files=document.querySelector('.home-files').getBoundingClientRect(),composer=document.querySelector('#inputbar').getBoundingClientRect(),mascot=document.querySelector('.home-pet .wy-mascot').getBoundingClientRect();return files.bottom<=composer.top-2&&mascot.right<=innerWidth-8;}));
   await page.locator('.toast').evaluateAll(nodes=>nodes.forEach(n=>{n.hidden=true;}));
   await page.screenshot({path:path.join(OUT,'mobile-weather-home.png')});
+  check('未央用对白气泡主动招呼，角色自带轻浮动与眨眼',await page.evaluate(()=>{const b=document.querySelector('.home-pet-hint'),m=document.querySelector('.home-pet .wy-mascot');return b.getAttribute('role')==='status'&&b.textContent.includes('我的头')&&getComputedStyle(b,'::before').content!=='none'&&getComputedStyle(m).animationName.includes('home-float')&&getComputedStyle(m).animationName.includes('home-wink');}));
   await page.click('.home-pet');check('摸头切换角色表情',await page.locator('.home-pet .wy-mascot').getAttribute('data-state')==='pet');
+  check('摸头后气泡变成未央本人的回应',await page.locator('.home-pet-hint').textContent().then(t=>t.includes('温柔')));
   await page.click('.home-weather-details');await page.waitForSelector('.weather-dialog[open]');
   check('天气详情提供三日预报与降雨概率',await page.locator('.weather-day').count()===3&&(await page.locator('.weather-days').textContent()).includes('80%'));
   await page.screenshot({path:path.join(OUT,'mobile-weather-detail.png')});

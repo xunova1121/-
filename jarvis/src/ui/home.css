@@ -33,3 +33,22 @@
 .home-task-icon{width:40px;height:48px;border:0;border-radius:10px;background:url('./home-concept.png') -27.2px -492.8px/345.2px 729.2px no-repeat;box-shadow:none;transform:none;color:transparent;font-size:0;mask-image:linear-gradient(transparent,#000 10% 88%,transparent)}
 .home-suggestion:nth-child(2) .home-task-icon{width:40px;height:48px;border:0;background:url('./home-concept.png') -185.6px -492.8px/345.2px 729.2px no-repeat;box-shadow:none;transform:none;color:transparent}
 @media(max-width:360px){.home-paper{right:1px;transform:scale(.85);transform-origin:right center}.home-task-icon,.home-suggestion:nth-child(2) .home-task-icon{width:30px;height:40px;background-size:276.16px 583.36px;background-position:-21.76px -394.24px}.home-suggestion:nth-child(2) .home-task-icon{background-position:-148.48px -394.24px}}
+
+/* 未央主动招呼的对白气泡；只使用轻量 CSS，保留点击时的表情。 */
+.home-pet-hint{right:0;bottom:0;z-index:3;max-width:185px;padding:7px 11px;border:1px solid #c7cef6;border-radius:15px 15px 5px 15px;background:#fffffff0;box-shadow:0 4px 14px #8fadd425;font-size:11px;line-height:1.5;color:#6d61a2;white-space:nowrap}
+.home-pet-hint::before{content:'';position:absolute;top:-5px;right:31px;width:8px;height:8px;background:#fff;border-top:1px solid #c7cef6;border-left:1px solid #c7cef6;transform:rotate(45deg)}
+.home-pet.petted .home-pet-hint{animation:home-bubble .28s ease-out}
+.home-pet .wy-mascot[data-state=wave]{animation:home-float 4.2s ease-in-out infinite,home-wink 7.5s steps(1,end) infinite}
+@keyframes home-float{0%,100%{transform:translateY(0)}30%{transform:translateY(-4px) rotate(-1deg)}65%{transform:translateY(-1px) rotate(1deg)}}
+@keyframes home-wink{0%,93%,100%{background-position:0 50%}94%,97%{background-position:33.333333% 0}}
+@keyframes home-bubble{from{opacity:.5;transform:translateY(3px) scale(.96)}to{opacity:1;transform:none}}
+:root:not([data-theme=light]) body .home-pet-hint,:root:not([data-theme=light]) body .home-pet-hint::before{background:#302b43;border-color:#645585;color:#d3c6f6}
+@media(max-width:360px){.home-pet-hint{font-size:10px;padding:6px 9px;bottom:3px}}
+@media(prefers-reduced-motion:reduce){.home-pet .wy-mascot[data-state=wave],.home-pet.petted .home-pet-hint{animation:none}}
+/* WebView 114 同样支持遮罩，原稿插画四边柔和融入卡片。 */
+.home-paper{-webkit-mask-image:linear-gradient(to right,transparent,#000 12% 90%,transparent),linear-gradient(transparent,#000 6% 92%,transparent);-webkit-mask-composite:source-in;mask-image:linear-gradient(to right,transparent,#000 12% 90%,transparent),linear-gradient(transparent,#000 6% 92%,transparent);mask-composite:intersect}
+.home-task-icon{-webkit-mask-image:linear-gradient(transparent,#000 10% 88%,transparent)}
+.home-pet::before{animation:home-orbit-glow 5s ease-in-out infinite}
+@keyframes home-orbit-glow{0%,100%{opacity:.35}50%{opacity:.8}}
+@media(prefers-reduced-motion:reduce){.home-pet::before{animation:none}}
+.reduced-motion .home-pet::before{animation:none}.wy-paused .home-pet::before{animation-play-state:paused}
