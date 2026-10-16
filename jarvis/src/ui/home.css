@@ -25,3 +25,5 @@
 .compact.companion-edition .home-footer{font-size:9px;line-height:14px;margin:6px 0 8px}
 .compact.companion-edition .transcript:has(>.wy-home){overflow-x:hidden}
 @media(max-width:360px){.compact.companion-edition .wy-home .home-hero{height:185px}.home-pet .wy-mascot{right:0;top:-5px}}
+/* 首页大角色轻浮动，避免通用挥手旋转让头部越过屏幕边缘。点击后的表情动画保留。 */
+.home-pet .wy-mascot[data-state=wave]{animation:wy-float 3.6s ease-in-out infinite}
