@@ -219,7 +219,7 @@ export class Transcript {
       let lastH = root.clientHeight;
       new ResizeObserver(() => {
         const h = root.clientHeight;
-        if (h < lastH && this.follow) root.scrollTop += lastH - h;
+        if (h < lastH && this.follow && !root.querySelector('.welcome')) root.scrollTop += lastH - h;
         lastH = h;
       }).observe(root);
     }

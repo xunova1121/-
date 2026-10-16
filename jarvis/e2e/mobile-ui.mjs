@@ -50,6 +50,7 @@ try{
   await page.waitForFunction(()=>document.querySelector('.home-city b')?.textContent.includes('23°'));
   check('首页自动定位城市、真实数据渲染，不需要手动选择',await page.evaluate(()=>window.__weatherLocations===1&&document.querySelector('.home-city b').textContent.includes('上海')));
   check('首页问候与未央不重叠，卡片不横向溢出',await page.evaluate(()=>{const h=document.querySelector('.home-hero-copy').getBoundingClientRect(),p=document.querySelector('.home-pet').getBoundingClientRect();return h.right<=p.left+1&&document.documentElement.scrollWidth<=innerWidth;}));
+  check('首次首页从日期天气开始，顶部不会被自动滚动裁掉',await page.evaluate(()=>{const weather=document.querySelector('.home-weather').getBoundingClientRect(),header=document.querySelector('.topbar').getBoundingClientRect();return weather.top>=header.bottom-1&&document.querySelector('#transcript').scrollTop===0;}));
   await page.screenshot({path:path.join(OUT,'mobile-weather-home.png')});
   await page.click('.home-pet');check('摸头切换角色表情',await page.locator('.home-pet .wy-mascot').getAttribute('data-state')==='pet');
   await page.click('.home-weather-details');await page.waitForSelector('.weather-dialog[open]');
@@ -58,7 +59,7 @@ try{
   weatherOffline=true;await page.click('.weather-refresh');await page.waitForFunction(()=>document.querySelector('.home-weather-summary').textContent.includes('缓存'));
   check('断网保留天气并明确标记缓存',await page.locator('.weather-updated').textContent().then(t=>t.includes('缓存')));weatherOffline=false;
   await page.click('.weather-change');await page.click('.weather-city-result:has-text("杭州")');await page.waitForFunction(()=>document.querySelector('.home-city b').textContent.includes('杭州'));
-  check('定位失败时的手动城市入口仍可用',await page.locator('.home-city b').textContent().then(t=>t.includes('杭州')));
+  check('手动城市备用入口仍可用',await page.locator('.home-city b').textContent().then(t=>t.includes('杭州')));
   await page.setViewportSize({width:320,height:640});check('320窄屏首页不横向溢出',await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:path.join(OUT,'mobile-weather-home-narrow.png')});await page.setViewportSize({width:390,height:844});
   await page.click('.home-suggestions-head button');check('推荐可轮换而不重复天气入口',await page.locator('.home-suggestions').textContent().then(t=>t.includes('创作灵感')));
   await page.click('.home-start');check('创作卡片填写任务，继续复用原发送入口',await page.inputValue('#prompt').then(t=>t.includes('目标')));await page.fill('#prompt','');await page.locator('#prompt').blur();

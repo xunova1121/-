@@ -1624,7 +1624,7 @@ function renderWelcome() {
   if(COMPACT){
     homeView?.destroy();document.querySelector('#transcript .wy-home')?.remove();
     homeView=createHome({weather:homeWeather,send,fill:text=>{$('#prompt').value=text;$('#prompt').focus();},openPanel:showPanel});
-    $('#transcript').prepend(homeView.root);return;
+    $('#transcript').prepend(homeView.root);$('#transcript').scrollTop=0;return;
   }
   const cards = QUICK.map((q) => {
     const b = document.createElement('button');
