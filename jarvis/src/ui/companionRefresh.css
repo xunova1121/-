@@ -113,7 +113,7 @@
   .companion-edition .wy-companion-stage .wy-mascot{--mascot-size:min(32vh,260px)}
   .companion-edition .wy-companion-title{font-size:23px}
   .companion-edition .wy-companion-controls{gap:24px}
-  .companion-edition.wy-keyboard-open .wy-companion-stage{height:80px}
+  .companion-edition.wy-keyboard-open .wy-companion-stage{height:96px}
   .companion-edition.wy-keyboard-open .wy-companion-stage .wy-mascot{--mascot-size:105px}
 }
 @media(max-height:640px){.companion-edition .wy-companion-stage{height:110px}.companion-edition .wy-companion-stage .wy-mascot{--mascot-size:145px}.companion-edition .wy-companion-title{font-size:20px}.companion-edition .wy-companion-say{margin-bottom:10px}.companion-edition .wy-actions button{min-height:40px}}
@@ -134,3 +134,6 @@
 :root.safe-render .wy-mascot{transform:none!important}
 
 .mobile-app .companion-edition.wy-paused .wy-mascot{animation-play-state:paused!important}
+
+/* dialog 默认按布局视口居中；键盘出现时改为贴合实际可见区域。 */
+.compact.companion-edition.wy-keyboard-open .wy-companion{position:fixed;top:calc(var(--wy-viewport-top,0px) + 12px);bottom:auto;left:0;right:0;margin:0 auto}

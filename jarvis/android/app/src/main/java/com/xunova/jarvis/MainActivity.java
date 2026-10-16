@@ -17,9 +17,6 @@ import android.view.Gravity;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import androidx.webkit.WebViewCompat;
-import androidx.webkit.WebViewFeature;
-import java.util.Collections;
 
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.WebViewListener;
@@ -45,7 +42,6 @@ public class MainActivity extends BridgeActivity {
         // 保持平台默认绘图路径；不再因为一次异常强制软件绘制 24 小时。
         final String script="window.__jarvisRenderSafe="+safeDisplay(this)+";";
         try {
-            if(WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT))WebViewCompat.addDocumentStartJavaScript(web,script,Collections.singleton("*"));
             web.evaluateJavascript(script,null);
         }catch(Exception e){CrashLog.write(this,"轻量界面预置："+e.getMessage());}
         getBridge().addWebViewListener(new WebViewListener(){
@@ -56,7 +52,8 @@ public class MainActivity extends BridgeActivity {
                 prefs.edit().putLong("lastCrash",now).putInt("consecutive",count).putBoolean("safeDisplay",true).commit();
                 ActivityManager.MemoryInfo memory=new ActivityManager.MemoryInfo();((ActivityManager)getSystemService(ACTIVITY_SERVICE)).getMemoryInfo(memory);
                 Runtime runtime=Runtime.getRuntime();
-                String version=WebViewCompat.getCurrentWebViewPackage(MainActivity.this)==null?"unknown":WebViewCompat.getCurrentWebViewPackage(MainActivity.this).versionName;
+                android.content.pm.PackageInfo provider=WebView.getCurrentWebViewPackage();
+                String version=provider==null?"unknown":provider.versionName;
                 CrashLog.write(MainActivity.this,"WebView="+version+"，didCrash="+(detail!=null&&detail.didCrash())+"，priority="+(detail==null?-1:detail.rendererPriorityAtExit())+"，可用内存="+memory.availMem/1048576+"MB，lowMemory="+memory.lowMemory+"，JavaHeap="+(runtime.totalMemory()-runtime.freeMemory())/1048576+"/"+runtime.maxMemory()/1048576+"MB，连续="+count+"，"+Build.MANUFACTURER+" "+Build.MODEL);
                 CrashLog.write(MainActivity.this,RenderRecovery.autoRestart(count)?"界面进程异常，开启兼容显示后恢复一次":"界面连续异常，已停止自动重启，等待手动恢复");
                 stopService(new Intent(MainActivity.this,TaskService.class));

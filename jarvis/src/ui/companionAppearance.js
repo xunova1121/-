@@ -15,6 +15,7 @@ export function initCompanionAppearance({ showPanel } = {}) {
     keyboardOpen = fullHeight - height > 120 && (editing() || keyboardOpen);
     body.classList.toggle('wy-keyboard-open',keyboardOpen);
     body.style.setProperty('--wy-viewport-height',`${Math.round(height)}px`);
+    body.style.setProperty('--wy-viewport-top',`${Math.round(viewport?.offsetTop || 0)}px`);
   };
   viewport?.addEventListener('resize',resize);
   addEventListener('resize',resize);
