@@ -7,6 +7,12 @@
   <title>未央 · 智能工作台</title>
   <link rel="stylesheet" href="/src/styles.css" />
   <script>
+    try {
+      if (document.documentElement.dataset.mode === 'mobile') {
+        var savedDisplay = localStorage.getItem('jarvis.renderSafe');
+        if (window.__jarvisRenderSafe === true || savedDisplay === 'true' || (savedDisplay === null && /渲染进程/.test(localStorage.getItem('jarvis.lastCrash') || ''))) document.documentElement.classList.add('safe-render');
+      }
+    } catch (e) {}
     // 首帧前就决定明暗，避免先黑后白的闪烁（逻辑与 src/core/theme.js 一致）
     try {
       var t = (JSON.parse(localStorage.getItem('jarvis.settings.v1') || '{}').theme) || 'day'; // 手机 App 默认白天
@@ -413,6 +419,10 @@
           <span class="label">版本</span>
           <div class="pane-actions"><span id="app-version" class="muted"></span><button class="btn ghost sm" type="button" id="btn-update-check">检查更新</button></div>
           <p class="muted" id="update-note"></p>
+        </div>
+        <div class="setting" id="row-render-health" hidden>
+          <label><input type="checkbox" id="set-safe-render" /> 兼容显示（减少动效，优先稳定）</label>
+          <p class="muted">减少动画和光效，每页显示最近 12 条消息；更早的对话可翻页查看。不会删除记录或中断正在执行的任务。</p>
         </div>
         <div class="setting" id="row-sync">
           <label><input type="checkbox" id="sync-on" /> 多设备同步（电脑 ↔ 手机）</label>

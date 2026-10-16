@@ -13,6 +13,14 @@ public class CrashLogPlugin extends Plugin {
     public void take(PluginCall call) {
         JSObject r = new JSObject();
         r.put("text", CrashLog.take(getContext()));
+        r.put("safeDisplay",MainActivity.safeDisplay(getContext()));
+        r.put("consecutive",getContext().getSharedPreferences("render-health",android.content.Context.MODE_PRIVATE).getInt("consecutive",0));
         call.resolve(r);
+    }
+    @PluginMethod public void setDisplayMode(PluginCall call) {
+        boolean safe=call.getBoolean("safe",true);
+        android.content.SharedPreferences.Editor edit=getContext().getSharedPreferences("render-health",android.content.Context.MODE_PRIVATE).edit().putBoolean("safeDisplay",safe);
+        if(!safe)edit.putLong("lastCrash",0).putInt("consecutive",0);
+        edit.apply();call.resolve();
     }
 }

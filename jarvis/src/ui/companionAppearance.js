@@ -5,12 +5,15 @@ export function initCompanionAppearance({ showPanel } = {}) {
   const body = document.body, viewport = window.visualViewport;
   body.classList.add('companion-edition');
   let fullHeight = viewport?.height || innerHeight;
+  let keyboardOpen = false;
   const editing = () => /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || '');
   const resize = () => {
     const height = viewport?.height || innerHeight;
-    if (!editing()) fullHeight = height;
-    const keyboard = editing() && fullHeight - height > 120;
-    body.classList.toggle('wy-keyboard-open',keyboard);
+    // 点击发送会先让输入框失焦，键盘却尚未收回；此时不能提前展开角色，
+    // 否则按钮会在 pointerdown 与 pointerup 之间移位，导致点击丢失。
+    if (!keyboardOpen && !editing()) fullHeight = height;
+    keyboardOpen = fullHeight - height > 120 && (editing() || keyboardOpen);
+    body.classList.toggle('wy-keyboard-open',keyboardOpen);
     body.style.setProperty('--wy-viewport-height',`${Math.round(height)}px`);
   };
   viewport?.addEventListener('resize',resize);

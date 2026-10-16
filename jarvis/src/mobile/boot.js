@@ -9,6 +9,7 @@ import { MOBILE } from '../config.js';
 import { wrapFetch, nativeFetcher } from './nativeFetch.js';
 import { installSpeechShim } from './speechShim.js';
 import { createNativeSaver } from './saveNative.js';
+import { applyDisplayMode } from './renderHealth.js';
 import { topColor } from './topColor.js';
 
 if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
@@ -92,7 +93,10 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
   // 上次闪退的原因（原生层记下的）：存起来，设置里显示，打开后也提示一下
   try {
     const { registerPlugin } = await import('@capacitor/core');
-    let { text } = await registerPlugin('CrashLog').take();
+    const crashLog = registerPlugin('CrashLog');
+    globalThis.__jarvisRenderHealthPlugin = crashLog;
+    let { text, safeDisplay } = await crashLog.take();
+    if (typeof safeDisplay === 'boolean') applyDisplayMode(safeDisplay);
     if (text) {
       // 崩溃前在做什么（main.js 在执行每一步时记下的；正常结束会清空）
       let doing = '';

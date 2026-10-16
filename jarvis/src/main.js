@@ -14,6 +14,8 @@ import { initWorkbench } from './ui/workbench.js';
 import logoUrl from './ui/logo.svg';
 import { initMascots } from './ui/mascot.js';
 import { initCompanion } from './ui/companion.js';
+import { transcriptWindow } from './mobile/transcriptWindow.js';
+import { initRenderHealthPanel } from './mobile/renderHealth.js';
 import { initCompanionAppearance } from './ui/companionAppearance.js';
 let companion = null;
 import { imageButton, previewWorkspaceImage } from './ui/imagePreview.js';
@@ -582,18 +584,46 @@ async function compressHistory() {
 
 // ---------------------------------------------------------------- 多会话
 /** 把当前会话的消息重新画到对话区 */
-function replayTranscript() {
-  $('#transcript').replaceChildren();
+let historyViewEnd = null;
+function visibleHistory(end = history.length) {
+  return transcriptWindow(history.length, { mobile: MOBILE, safe: document.documentElement.classList.contains('safe-render'), end });
+}
+function replayTranscript(end = history.length) {
+  const root = $('#transcript'), range = visibleHistory(end);
+  historyViewEnd = range.newer ? range.end : null;
+  root.replaceChildren();
+  transcript.follow = true;
+  document.body.classList.remove('wy-reading-history');
   if (!history.length) { renderWelcome(); return; }
-  for (const m of history) {
-    if (m.role === 'user') transcript.add('user', m.content, m.ts, { thumbs: m.thumbs });
-    else {
-      const b = transcript.add('agent', '', m.ts);
-      b.append(m.content);
-      for (const f of m.files || []) b.fileLink(f, openInWorkspace);
-      b.done(m.tools?.length ? `用了：${m.tools.map(toolLabel).join('、')}` : '');
+  transcript.batch(() => {
+    if (range.older || range.newer) {
+      const nav = Object.assign(document.createElement('nav'), { className: 'wy-history-pages' });
+      nav.setAttribute('aria-label', '对话翻页');
+      const pageButton = (label, target) => {
+        const button = Object.assign(document.createElement('button'), { type: 'button', textContent: label });
+        button.onclick = () => {
+          if (active) { toast('当前回复完成后，可以翻看更早的对话'); return; }
+          replayTranscript(target);
+        };
+        nav.append(button);
+      };
+      if (range.older) pageButton(`查看更早的对话（还有 ${range.older} 条）`, range.start);
+      if (range.newer) {
+        pageButton('下一页', Math.min(history.length, range.end + range.limit));
+        pageButton('回到最近对话', history.length);
+      }
+      root.append(nav);
     }
-  }
+    for (const m of history.slice(range.start, range.end)) {
+      if (m.role === 'user') transcript.add('user', m.content, m.ts, { thumbs: m.thumbs });
+      else {
+        const b = transcript.add('agent', '', m.ts);
+        b.append(m.content);
+        for (const f of m.files || []) b.fileLink(f, openInWorkspace);
+        b.done(m.tools?.length ? `用了：${m.tools.map(toolLabel).join('、')}` : '');
+      }
+    }
+  });
 }
 /** 新对话的开场建议：之前没做完的事 > 上一段对话 */
 async function resumeSuggestion() {
@@ -864,6 +894,8 @@ async function send(text) {
   speaker.cancel();
   speaker.unlock(); // 发送多由点击 / 回车触发：顺便启动音频上下文，云端语音才能播放
 
+  // 持续聊天也保持有界；先重画已完成的历史，再追加本轮，避免重复消息。
+  if (MOBILE && (historyViewEnd !== null || $('#transcript').querySelectorAll('.msg').length >= visibleHistory().limit)) replayTranscript();
   const files = attachments.splice(0);
   renderAttachments();
   const userText = files.length ? `${text}\n\n[已上传到工作区：${files.map((f) => f.path).join('、')}]` : text;
@@ -2190,6 +2222,7 @@ if (!COMPACT) initWorkbench({showPanel,newSession,openSession,getSession:()=>ses
 mascots = initMascots();
 companion = initCompanion({ send, startVoice: async () => { await setVoiceCall(true); return callActive; }, stopVoice: () => setVoiceCall(false), speak: text => { speaker.unlock(); speaker.speak(text); } });
 initCompanionAppearance({ showPanel });
+initRenderHealthPanel({ mobile: MOBILE, toast, onChange: () => { if (!active) replayTranscript(); } });
 
 // 手机启动页：界面准备好、并且至少显示了 2 秒后淡出（太快一闪而过不像 App）
 {

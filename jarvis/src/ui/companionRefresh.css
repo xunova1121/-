@@ -37,7 +37,7 @@
 .companion-edition .wy-companion .wy-close{width:44px;height:44px;padding:8px;font-size:26px}
 .companion-edition .wy-companion-stage{height:240px;position:relative;background:radial-gradient(ellipse at 50% 80%,#e2f2fd88,transparent 66%)}
 .companion-edition .wy-companion-stage:before{content:'';position:absolute;width:68%;height:52%;border:1px solid #ecd38e88;border-radius:50%;transform:rotate(-20deg);pointer-events:none}
-.companion-edition .wy-companion-stage .wy-mascot{--mascot-size:310px}
+.companion-edition .wy-companion-stage .wy-mascot{--mascot-size:280px}
 .companion-edition .wy-companion-title{text-align:center;margin:6px 0 10px;font-size:25px;font-weight:650;color:#252944;letter-spacing:.02em}
 .companion-edition .wy-companion-say{font-size:14px;color:#716a90;line-height:1.65;min-height:22px;max-height:90px;margin:0 auto 16px;max-width:94%}
 .companion-edition .wy-companion-say.voice-active{border-radius:20px;padding:7px 14px;background:#f0eaff;color:#7761cf;max-width:fit-content}
@@ -109,8 +109,8 @@
   .companion-edition .msg.agent:not(:last-child)>.who .who-mood,.companion-edition .msg.agent.wy-long-reply>.who .who-mood,.companion-edition.wy-keyboard-open .msg.agent>.who .who-mood,.companion-edition.wy-reading-history .msg.agent>.who .who-mood{--mascot-size:52px!important;margin:-6px 3px -6px -4px!important}
   .companion-edition .msg.agent:not(:last-child)>.who .wy-reply-greeting,.companion-edition .msg.agent.wy-long-reply>.who .wy-reply-greeting,.companion-edition.wy-keyboard-open .msg.agent>.who .wy-reply-greeting,.companion-edition.wy-reading-history .msg.agent>.who .wy-reply-greeting{display:none}
   .companion-edition .wy-companion{padding:12px 16px;border-radius:26px}
-  .companion-edition .wy-companion-stage{height:min(28vh,220px)}
-  .companion-edition .wy-companion-stage .wy-mascot{--mascot-size:min(38vh,290px)}
+  .companion-edition .wy-companion-stage{height:min(28vh,240px)}
+  .companion-edition .wy-companion-stage .wy-mascot{--mascot-size:min(32vh,260px)}
   .companion-edition .wy-companion-title{font-size:23px}
   .companion-edition .wy-companion-controls{gap:24px}
   .companion-edition.wy-keyboard-open .wy-companion-stage{height:80px}
@@ -121,6 +121,16 @@
 @media(prefers-reduced-motion:reduce){.companion-edition .wy-mascot{animation:none!important}.companion-edition *{scroll-behavior:auto!important}}
 .companion-edition.reduced-motion .wy-mascot{animation:none!important}
 .companion-edition.wy-paused .wy-mascot{animation-play-state:paused!important}
-.companion-edition.mobile-app .wy-mascot[data-state=run]{animation-duration:.5s;animation-iteration-count:8}
-.companion-edition.mobile-app .wy-mascot[data-state=rub]{animation-duration:.8s;animation-iteration-count:5}
-.companion-edition.mobile-app .wy-mascot[data-state=happy]{animation-duration:1.5s;animation-iteration-count:3}
+.mobile-app .companion-edition .wy-mascot[data-state=run]{animation-duration:.5s;animation-iteration-count:8}
+.mobile-app .companion-edition .wy-mascot[data-state=rub]{animation-duration:.8s;animation-iteration-count:5}
+.mobile-app .companion-edition .wy-mascot[data-state=happy]{animation-duration:1.5s;animation-iteration-count:3}
+
+/* 旧消息不保留入场动画的合成层。角色动作仍由最新消息/陪伴面板承载。 */
+.compact.companion-edition .msg{animation:none!important}
+.wy-history-pages{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;padding:14px 4px}
+.wy-history-pages button{border:1px solid #ddd7ed;border-radius:20px;padding:9px 14px;background:var(--surface,#faf8ff);color:var(--muted,#786b99);font:inherit;font-size:13px}
+/* 渲染进程异常后自动开启，设置里也可手动切换；保留布局所需的 transform。 */
+:root.safe-render *,:root.safe-render *::before,:root.safe-render *::after{animation:none!important;transition:none!important;filter:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;will-change:auto!important;mix-blend-mode:normal!important;box-shadow:none!important}
+:root.safe-render .wy-mascot{transform:none!important}
+
+.mobile-app .companion-edition.wy-paused .wy-mascot{animation-play-state:paused!important}

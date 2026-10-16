@@ -609,8 +609,14 @@ export class Transcript {
     this.interimEl = null;
   }
 
+  /** 重放历史时只在末尾读取一次布局，避免每条消息都强制重排。 */
+  batch(render) {
+    this.batching = true;
+    try { return render(); } finally { this.batching = false; this.#scroll(); }
+  }
+
   #scroll() {
-    if (this.follow) this.root.scrollTop = this.root.scrollHeight;
+    if (!this.batching && this.follow) this.root.scrollTop = this.root.scrollHeight;
   }
 }
 
