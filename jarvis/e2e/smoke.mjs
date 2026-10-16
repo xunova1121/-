@@ -168,6 +168,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('泛光开启时 draw calls ≤ 12', stats.bloom && stats.calls <= 12, String(stats.calls));
   await page.evaluate(() => { const s = document.querySelector('#set-quality'); s.value = 'auto'; s.dispatchEvent(new Event('change', { bubbles: true })); });
   check('自动画质适配软件渲染器', await page.evaluate(() => { const j = window.__jarvis; return j.stage.stats.softwareRenderer ? j.quality.tier === 'standard' && !j.quality.bloom : j.quality.tier === 'high'; }));
+  check('软件渲染标准档保留主体，减少装饰程序重建',await page.evaluate(()=>{const s=window.__jarvis.stage.stats;return !s.softwareRenderer||s.simpleScene===true&&s.particles>=6000;}));
   check('软件渲染限制实际像素以减少恢复负担', await page.evaluate(()=>{const s=window.__jarvis.stage,gl=s.renderer.getContext();return !s.stats.softwareRenderer || Math.max(gl.drawingBufferWidth,gl.drawingBufferHeight)<=540;}));
   await page.waitForFunction(() => window.__jarvis.gateway, null, { timeout: 5000 }).catch(() => {});
   check('识别到本机网关', await page.evaluate(() => Boolean(window.__jarvis.gateway)), await page.textContent('#gw-badge'));
@@ -578,7 +579,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
     while (window.__jarvis.stage.stats.frames <= before + 2 && performance.now() - t0 < 3000) await new Promise((r) => setTimeout(r, 10));
     return Math.round(performance.now() - t0);
   });
-  const recovery = await page.evaluate(()=>({parallel:window.__jarvis.stage.stats.parallelCompile,compile:window.__jarvis.stage.stats.restoreCompileMs,aa:window.__jarvis.stage.renderer.getContext().getContextAttributes()?.antialias}));
+  const recovery = await page.evaluate(()=>({parallel:window.__jarvis.stage.stats.parallelCompile,compile:window.__jarvis.stage.stats.restoreCompileMs,event:window.__jarvis.stage.stats.restoreEventMs,draws:window.__jarvis.stage.stats.restoreDrawMs,simple:window.__jarvis.stage.stats.simpleScene,aa:window.__jarvis.stage.renderer.getContext().getContextAttributes()?.antialias}));
   check('WebGL 上下文丢失后恢复 ≤ 500ms', typeof restored === 'number' && restored <= 500, `${restored}ms · ${JSON.stringify(recovery)}`);
   check('无页面错误', errors.length === 0, errors.join(' | '));
   await ctx.close();

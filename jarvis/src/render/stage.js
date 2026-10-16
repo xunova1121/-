@@ -220,6 +220,9 @@ export function createStage(canvas, { lowEnd = false, onContextChange } = {}) {
     return p;
   })();
   scene.add(stars);
+  // 无显卡的标准档优先保留主体和底座；透明光柱、线圈和星尘会额外重建三组程序。
+  // 手动开启高画质时仍可显示全部装饰，硬件渲染不降级。
+  if(softGL){cone.visible=false;rig.visible=false;stars.visible=false;}
 
   // —— 尺寸
   const tmpSize = new Vector2();
@@ -263,7 +266,9 @@ export function createStage(canvas, { lowEnd = false, onContextChange } = {}) {
     lastDrawn = now;
     const s = frameFn?.(dt, now);
     if (s) apply(s, now, dt);
+    const drawStart=performance.now();
     draw();
+    if(stats.restoreDrawMs&&stats.restoreDrawMs.length<3)stats.restoreDrawMs.push(Math.round(performance.now()-drawStart));
     stats.frames++;
     stats.drawCalls = renderer.info.render.calls;
     stats._acc += dt;
@@ -336,12 +341,14 @@ export function createStage(canvas, { lowEnd = false, onContextChange } = {}) {
     e.preventDefault();
     contextGeneration++;
     lostAt = performance.now();
+    stats.restoreDrawMs=[];
     pausedBy.add('context');
     sync();
     onContextChange?.('lost');
   });
   canvas.addEventListener('webglcontextrestored', () => {
     const gen = contextGeneration, started = performance.now();
+    stats.restoreEventMs=Math.round(started-lostAt);
     resize();
     // 首帧逐个链接 shader 会阻塞恢复。支持并行编译时先同时准备全部程序，
     // 真正可用后再恢复绘制；不靠空帧或放宽恢复标准隐藏等待。
@@ -402,7 +409,9 @@ export function createStage(canvas, { lowEnd = false, onContextChange } = {}) {
         bloom = null;
         renderer.setRenderTarget(null);
       }
-      stars.visible = quality.stars;
+      const simple=softGL&&!quality.bloom;
+      cone.visible=!simple;rig.visible=!simple;stars.visible=quality.stars&&!simple;
+      stats.simpleScene=simple;
       stats.bloom = Boolean(bloom);
     },
     renderOnce(now = performance.now()) {
