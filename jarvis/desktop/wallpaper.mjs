@@ -70,7 +70,8 @@ export function createWallpaper(d) {
     widget.once('ready-to-show',()=>{widget?.showInactive();if(lastPayload)widget?.webContents.send('jarvis:wallpaper',lastPayload);});
     widget.on('closed',()=>{widget=null;clearInterval(hitTimer);hitTimer=null;});
     let ignored=true;
-    hitTimer=setInterval(()=>{if(!widget||widget.isDestroyed()||!widget.isVisible())return;const hit=widget.isFocused()||hitsCompanion(d.screen.getCursorScreenPoint(),widget.getBounds(),regions);if(ignored===!hit)return;ignored=!hit;widget.setIgnoreMouseEvents(ignored,{forward:true});},100);
+    // 忽略鼠标不影响已聚焦输入框接收键盘；不能因正在打字就挡住整个透明矩形。
+    hitTimer=setInterval(()=>{if(!widget||widget.isDestroyed()||!widget.isVisible())return;const hit=hitsCompanion(d.screen.getCursorScreenPoint(),widget.getBounds(),regions);if(ignored===!hit)return;ignored=!hit;widget.setIgnoreMouseEvents(ignored,{forward:true});},100);
   }
 
   function pin() {

@@ -189,6 +189,7 @@ jobs:
       - name: 验证 Electron 全息桌面互动
         run: |
           npm ci --prefix desktop --no-audit --no-fund
+          node desktop/node_modules/electron/install.js
           npm --prefix desktop run prepare-app
           xvfb-run -a node e2e/hologram-desktop.mjs "$RUNNER_TEMP/jarvis-e2e"
       - name: 网页版和单文件版端到端测试

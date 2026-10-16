@@ -19,7 +19,7 @@ if(widget){
   document.body.append(scene.root);
   document.querySelector('.wp').remove();
   let scheduled=false;
-  const regions=()=>{scheduled=false;if(!desktop)return;const rows=[...document.querySelectorAll('.holo-pet,.holo-chat,.holo-head,.holo-actions,.holo-collapse,.holo-options,.wp-size-options')].filter(el=>el.getClientRects().length).map(el=>{const r=el.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height};});desktop.invoke('wallpaperRegions',{regions:rows}).catch(()=>{});};
+  const regions=()=>{scheduled=false;if(!desktop)return;const rows=[...document.querySelectorAll('.holo-pet .wy-mascot,.holo-chat,.holo-head,.holo-actions,.holo-collapse,.holo-options,.wp-size-options')].filter(el=>el.getClientRects().length).map(el=>{const r=el.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height};});desktop.invoke('wallpaperRegions',{regions:rows}).catch(()=>{});};
   const schedule=()=>{if(!scheduled){scheduled=true;requestAnimationFrame(regions);}};
   new ResizeObserver(schedule).observe(scene.root);new MutationObserver(schedule).observe(scene.root,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style']});schedule();
 }else{
