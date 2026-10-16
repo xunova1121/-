@@ -546,13 +546,14 @@ function syncMemoryEngine() {
   panels?.refreshKb?.();
 }
 
-/** 自动整理记忆：对话停下来 90 秒后，把这段对话交给记忆整理（抽取事实、写摘要） */
+/** 自动整理记忆：对话停下来 30 秒后、切到别的对话或 App 退到后台时，把这段对话交给记忆整理（抽取事实、写摘要）。
+ *  不能等太久：用户常常说完就开新对话，或者手机直接切走 */
 let reflectFrom = history.length;
 let reflectTimer = 0;
 function scheduleReflect() {
   clearTimeout(reflectTimer);
   if (!settings.autoMemory) return;
-  reflectTimer = setTimeout(reflectNow, 90_000);
+  reflectTimer = setTimeout(reflectNow, 30_000);
 }
 async function reflectNow({ manual = false } = {}) {
   clearTimeout(reflectTimer);
@@ -568,6 +569,8 @@ async function reflectNow({ manual = false } = {}) {
   } catch (e) { console.warn('[memory] 整理失败', e); }
 }
 addEventListener('pagehide', () => { if (settings.autoMemory) reflectNow(); });
+// 手机切到后台时不一定有 pagehide（之后可能被系统直接杀掉）：页面一隐藏就整理
+document.addEventListener('visibilitychange', () => { if (document.hidden && settings.autoMemory && !active) reflectNow(); });
 
 /** 长对话压缩：回答完后在后台把较早的消息并进“前情提要”（见 compress.js），不影响当前对话 */
 let compressing = false;

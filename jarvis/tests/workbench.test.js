@@ -6,11 +6,11 @@ it('不同主体与否定陈述不能靠相似度替换',async()=>{
  expect((await decide('用户的朋友住在北京','profile',old)).action).toBe('ADD');
  expect((await decide('用户不住在上海','profile',old)).action).toBe('ADD');
 });
-it('自动提炼候选有来源，在确认前不进入上下文',async()=>{
+it('自动提炼的记忆有来源和原话依据，标着“自动记下”直接参与回答（换个对话也记得）',async()=>{
  configureMemory({});
  const m=await remember('用户偏好紫色工作台','preference',{source:'会话 test · 待核实',evidence:'我喜欢紫色工作台'});
  expect(m.pending).toBe(true);expect(m.evidence).toContain('紫色');
- expect((await contextFor('紫色工作台')).memories.some(x=>x.id===m.id)).toBe(false);
+ expect((await contextFor('紫色工作台')).memories.find(x=>x.id===m.id)?.pending).toBe(true);
 });
 it('工作台调用真实功能入口，原模块和工具全部保留',()=>{
  const ui=fs.readFileSync('src/ui/workbench.js','utf8');

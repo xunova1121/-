@@ -359,7 +359,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') refreshMind(); });
       input.addEventListener('blur', save);
     });
-    const meta = [m.suspicious?`可疑，未使用（${m.suspicious}）`:m.pending?'待核实 · 不参与回答':'已生效',m.source||'来源未记录',new Date(m.updatedAt||m.ts).toLocaleString('zh-CN'),`版本 ${(m.history?.length||0)+1}`].join(' · ');
+    const meta = [m.suspicious?`可疑，未使用（${m.suspicious}）`:m.pending?'自动记下 · 已参与回答，可确认或删除':'已生效',m.source||'来源未记录',new Date(m.updatedAt||m.ts).toLocaleString('zh-CN'),`版本 ${(m.history?.length||0)+1}`].join(' · ');
     const confirm = el('button',{type:'button',className:'btn sm',textContent:'核实并启用'});
     confirm.onclick=async()=>{await memory.confirmCandidate(m.id);refreshMind();};
     const x = el('button', { type: 'button', className: 'x-btn', title: '删除', textContent: '✕' });

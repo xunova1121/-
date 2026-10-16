@@ -45,7 +45,8 @@ async function log(kind, text) {
 }
 
 const now = () => Date.now();
-const current = (m) => !m.validTo && !m.pending;
+// 还有效的记忆。自动提炼的（pending：用户没确认过）也算，参与回答时会标明“自动记下”，面板里可以确认或删除
+const current = (m) => !m.validTo;
 const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().replace(/[。.!！]+$/, '');
 
 /** 旧记录补齐字段（v1 只有 content / category / ts / uses） */
@@ -136,10 +137,11 @@ export async function remember(content, category = 'fact', { importance = 3, sou
   const vec = await embedOne(content);
   const pending = source.includes('待核实');
   const duplicate = all.find(m=>!m.validTo && norm(m.content)===content);
-  const { action, target } = pending ? (duplicate ? {action:'NOOP',target:duplicate} : {action:'ADD'}) : await decide(content, category, all, vec);
+  // 自动提炼的也走正常合并：同一件事的新说法（如搬家后的住址）取代旧的，不会新旧两条同时存在
+  const { action, target } = duplicate ? { action: 'NOOP', target: duplicate } : await decide(content, category, all, vec);
   const t = now();
   if (action === 'NOOP') {
-    Object.assign(target, { updatedAt: t, lastUsed: t, importance: Math.max(target.importance, importance) });
+    Object.assign(target, { updatedAt: t, lastUsed: t, importance: Math.max(target.importance, importance) }, pending ? {} : { pending: false }); // 用户亲口要记的，自动记下的那条就算确认了
     await memories.put(target);
     return { ...target, action };
   }
