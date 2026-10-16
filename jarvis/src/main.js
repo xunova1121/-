@@ -955,6 +955,7 @@ async function send(text) {
   const cards = new Map();
   let firstToken = 0;
   let outMarked = false; // 崩溃记录：这一段在输出文字
+  let textChunks = 0; // 回答分几次收到：1 次说明是整段一次性到的（中转站或网络没有边生成边给）
   let serverCard = null;
   const t0 = now();
   const usedTools = [];
@@ -994,6 +995,7 @@ async function send(text) {
           if (serverCard) { serverCard.done(true, '由模型服务端完成', Math.round(now() - serverCard.t0)); serverCard = null; }
           bubble.append(e.delta);
           shown += e.delta;
+          textChunks++;
           machine.feedResponseText(e.delta);
           speech.push(e.delta);
         } else if (e.type === 'retry') {
@@ -1037,7 +1039,7 @@ async function send(text) {
     speech.flush();
     const total = now() - t0;
     const modelTag = providerById(llmConfig.provider)?.kind === 'mock' ? '' : `${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
-    bubble.done(`${modelTag}${team ? `团队 ${result.steps} 步 · ` : ''}${ctxMs !== null && ctxMs >= 300 ? `准备 ${(ctxMs / 1000).toFixed(1)}s · ` : ''}${firstToken ? `首字 ${((firstToken - t0) / 1000).toFixed(1)}s · ` : ''}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}`, {
+    bubble.done(`${modelTag}${team ? `团队 ${result.steps} 步 · ` : ''}${ctxMs !== null && ctxMs >= 300 ? `准备 ${(ctxMs / 1000).toFixed(1)}s · ` : ''}${firstToken ? `首字 ${((firstToken - t0) / 1000).toFixed(1)}s · ` : ''}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}${MOBILE && textChunks ? ` · 分 ${textChunks} 次收到${globalThis.__jarvisNetVia?.(llmConfig.baseURLs?.[llmConfig.provider] || '') === 'native' ? '（原生网络）' : ''}` : ''}`, {
       onFeedback: async (kind, comment) => {
         if (kind === 'up') await agentMemory.noteTask(`获得好评：${text.slice(0, 30)}`);
         else {

@@ -73,7 +73,7 @@ export const cases = [
   }],
   ['Azure 使用真实女童音色、对应区域与二进制响应', async () => {
     const calls=[];await synthesize({engine:'azure',azureRegion:'chinaeast2'},{'azure-speech':'key'},'<你好>',{fetchImpl:async(url,init)=>{calls.push({url,init});return{ok:true,arrayBuffer:async()=>new ArrayBuffer(1)}}});
-    assert.equal(calls[0].url,'https://chinaeast2.tts.speech.azure.cn/cognitiveservices/v1');assert.equal(calls[0].init.binary,true);assert.ok(calls[0].init.body.includes('zh-CN-XiaoshuangNeural'));assert.ok(calls[0].init.body.includes('&lt;你好&gt;'));
+    assert.equal(calls[0].url,'https://chinaeast2.tts.speech.azure.cn/cognitiveservices/v1');assert.equal(calls[0].init.binary,true);assert.ok(calls[0].init.body.includes('zh-CN-XiaoyiNeural')); // 默认晓伊：和原来免费在线女声同一个声音assert.ok(calls[0].init.body.includes('&lt;你好&gt;'));
   }],
   ['女童声音缺少配置时明确报错，不把默认系统声音当作成功', async () => {
     await assert.rejects(synthesize({engine:'azure'},{},'你好'),/区域/);

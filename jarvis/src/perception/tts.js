@@ -21,7 +21,7 @@ export const DIRECTION = [
 ].join(' ');
 
 export const TTS_ENGINES = [
-  { id:'azure', name:'Azure 女童声（晓双）', keyFrom:'azure-speech', browser:true, voices:[['zh-CN-XiaoshuangNeural','晓双 · 普通话女童'],['zh-CN-XiaoyouNeural','晓悠 · 普通话女童']], note:'真实女童音色，需要自己的 Azure Speech 密钥和区域；不会把系统声称为女童声。' },
+  { id:'azure', name:'Azure 女孩 / 女童声（晓伊、晓双，官方接口更稳）', keyFrom:'azure-speech', browser:true, voices:[['zh-CN-XiaoyiNeural','晓伊 · 活泼女孩（和免费在线女声同一个声音）'],['zh-CN-XiaoshuangNeural','晓双 · 普通话女童'],['zh-CN-XiaoyouNeural','晓悠 · 普通话女童']], note:'真实女童音色，需要自己的 Azure Speech 密钥和区域；不会把系统声称为女童声。' },
   { id:'provider', name:'当前模型服务商的女孩声', fromProvider:true, browser:true, voices:[['shimmer','Shimmer · 甜美明亮女声'],['nova','Nova · 温柔女声']], note:'复用模型服务商密钥，需服务商支持 /audio/speech。年轻女声不等于真实女童音色。' },
   { id: 'browser', name: '浏览器自带（免费）', fx: false },
   {
@@ -79,7 +79,7 @@ export async function synthesize(vc, keys, text, { gateway = null, config = {}, 
   if (e.id === 'azure') {
     const region = String(vc.azureRegion || '').trim();
     if (!/^[a-z0-9-]+$/.test(region)) throw new Error('请在声音设置填写 Azure Speech 区域');
-    if (!keys?.['azure-speech']) throw new Error('晓双女童声需要 Azure Speech 密钥，请在声音设置填写');
+    if (!keys?.['azure-speech']) throw new Error('Azure 女孩声需要 Azure Speech 密钥，请在声音设置填写');
     const escape = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&apos;').replace(/"/g,'&quot;');
     const host = `${region}.tts.speech.${region.startsWith('china') ? 'azure.cn' : 'microsoft.com'}`;
     const res = await fetchImpl(`https://${host}/cognitiveservices/v1`, { method:'POST', binary:true, signal, headers:{ 'Ocp-Apim-Subscription-Key':keys['azure-speech'], 'Content-Type':'application/ssml+xml', 'X-Microsoft-OutputFormat':'audio-24khz-48kbitrate-mono-mp3' }, body:`<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='zh-CN'><voice name='${escape(voice)}'><prosody rate='-5%'>${escape(text)}</prosody></voice></speak>` });
