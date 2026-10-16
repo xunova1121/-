@@ -5,6 +5,7 @@
  * 和 VoiceInput 的接口一致，main.js 不用区分。
  */
 const RESTART_MS = 350;
+const capabilities = new WeakMap();
 // 没听到 / 没听清：安静地接着听；网络、权限等问题才提示
 const QUIET_ERRORS = /no match|didn't understand|no speech|busy|client side/i;
 
@@ -17,13 +18,14 @@ export class NativeVoice {
     this.suppressed = false;
     this.running = false; // 识别器正在听
     this.timer = 0;
-    this.gen = 0; // 关掉后作废进行中的识别
+    this.gen = 0;
+    this.listeners = []; this.popup = capabilities.get(plugin)?.service === false; // 关掉后作废进行中的识别
   }
 
   /** 这台手机有没有可用的系统语音识别 */
   static async available(plugin) {
     let timer;
-    try { return Boolean((await Promise.race([plugin.available(), new Promise(resolve => { timer = setTimeout(() => resolve({ available: false }), 4000); })]))?.available); } catch { return false; } finally { clearTimeout(timer); }
+    try { const result = await Promise.race([plugin.available(), new Promise(resolve => { timer = setTimeout(() => resolve({ available: false }), 4000); })]); capabilities.set(plugin,result || {}); return Boolean(result?.available); } catch { return false; } finally { clearTimeout(timer); }
   }
 
   async enable() {
@@ -33,6 +35,10 @@ export class NativeVoice {
       if (r?.speechRecognition !== 'granted') throw new Error('麦克风权限被拒绝：请在手机设置里允许未央使用麦克风');
     }
     this.errors = 0;
+    if (this.plugin.addListener) {
+      const entries = [['interim', e => this.onInterim?.(e.text || '')], ['energy', e => this.onEnergy?.(e.energy || 0)], ['state', e => this.onStatus?.(e.phase)]];
+      for (const [name, fn] of entries) this.listeners.push(await this.plugin.addListener(name,e => { if (this.mode !== 'off' && !this.suppressed) fn(e); }));
+    }
     this.#setMode('vad');
     this.#schedule(0);
     return this.mode;
@@ -40,6 +46,7 @@ export class NativeVoice {
 
   disable() {
     this.gen++;
+    for (const listener of this.listeners.splice(0)) listener.remove?.();
     clearTimeout(this.timer);
     this.#setMode('off');
     if (this.running) this.plugin.stop().catch(() => {});
@@ -76,16 +83,20 @@ export class NativeVoice {
     this.running = true;
     let text = '';
     try {
-      const r = await this.plugin.start({ language: 'zh-CN', maxResults: 1, partialResults: false, popup: false });
+      if (this.popup) globalThis.__jarvisSystemSpeechDialog = true;
+      const r = await this.plugin.start({ language: 'zh-CN', maxResults: 1, partialResults: false, popup: this.popup });
       text = String(r?.matches?.[0] || '').trim();
       this.errors = 0;
     } catch (e) {
       const msg = String(e?.message || e);
+      if (this.popup && QUIET_ERRORS.test(msg)) { this.disable(); return; }
       if (gen === this.gen && !QUIET_ERRORS.test(msg)) {
         this.onError?.(`语音识别：${msg}`);
-        if (++this.errors >= 3 || /权限|没有可用/.test(msg)) { this.disable(); return; }
+        if (!this.popup && !/权限|permission|denied/i.test(msg)) { this.popup = true; this.onStatus?.('popup'); this.#schedule(600); return; }
+        if (++this.errors >= 3 || /权限|没有可用/.test(msg)) { this.disable(); this.onUnavailable?.(msg); return; }
       }
     } finally {
+      if (this.popup) globalThis.__jarvisSystemSpeechDialog = false;
       if (gen === this.gen) this.running = false;
     }
     if (gen !== this.gen || this.mode === 'off') return;
@@ -93,6 +104,7 @@ export class NativeVoice {
       this.onConfirm?.();
       this.onFinal?.(text);
     }
+    if (this.popup && text) return; // 读完回复后再开启下一句，避免反复弹系统窗口
     this.#schedule(this.errors ? 1500 : RESTART_MS);
   }
 }

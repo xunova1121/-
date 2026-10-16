@@ -2,6 +2,9 @@
  * “技能”面板：安装（GitHub / zip / SKILL.md / 推荐列表）、启用停用、查看、卸载；
  * 以及输入框里的“/技能名”自动补全。
  */
+import { MOBILE } from '../config.js';
+import './mobileImprovements.css';
+import { skillCompatibility } from '../agent/skillCompatibility.js';
 import * as packs from '../agent/skillPacks.js';
 import { BUILTIN_SKILLS, MORE_BUILTIN_SKILLS, GITHUB_SKILLS } from '../agent/skillCatalog.js';
 import { parseFrontmatter } from '../agent/skillPacks.js';
@@ -35,12 +38,13 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
   addEventListener('jarvis:skills-changed', () => { clearTimeout(pending); pending = setTimeout(refresh, 50); });
 
   function card(p) {
+    const compatibility = skillCompatibility(p, { mobile: MOBILE });
     const builtinTitle = [...BUILTIN_SKILLS, ...MORE_BUILTIN_SKILLS].find(s => parseFrontmatter(s.text).meta.name === p.name)?.title;
     const toggle = el('input', { type: 'checkbox', checked: p.enabled, title: p.enabled ? '停用' : '启用' });
     toggle.addEventListener('change', async () => { await packs.setEnabled(p.name, toggle.checked); refresh(); });
     const view = el('button', { type: 'button', className: 'btn ghost sm', textContent: '查看' });
     view.addEventListener('click', () => show(p));
-    const use = el('button', { type: 'button', className: 'btn ghost sm', textContent: '使用', disabled: !p.enabled });
+    const use = el('button', { type: 'button', className: 'btn ghost sm', textContent: '使用', disabled: !p.enabled || compatibility.status === 'blocked' });
     use.addEventListener('click', () => onUse(p.name));
     const del = el('button', { type: 'button', className: 'btn ghost sm danger', textContent: '卸载' });
     del.addEventListener('click', async () => {
@@ -58,6 +62,7 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
         el('code', { className: 'skill-name', textContent: `/${p.name}` }),
         el('span', { className: 'skill-src', textContent: p.source, title: p.source })),
       el('p', { className: 'skill-desc', textContent: p.description || '（没有描述）' }),
+      MOBILE ? badge(compatibility) : null,
       el('div', { className: 'skill-actions' },
         el('span', { className: 'muted small', textContent: files ? `附带 ${files} 个文件` : '' }), view, use, del));
   }
@@ -82,24 +87,26 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
     v.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
 
+  function badge(c) { const b = el('span', { className: 'skill-compat', textContent: `${c.label} · ${c.reason}` }); b.dataset.status = c.status; return b; }
   function renderRecommend() {
     const have = new Set(installed.map((p) => p.name));
     const builtin = [...BUILTIN_SKILLS, ...MORE_BUILTIN_SKILLS].map((s) => {
       const { meta } = parseFrontmatter(s.text);
-      return tile({ title: s.title, name: meta.name, desc: meta.description.replace(/。.*$/, '。'), tag: '内置', installed: have.has(meta.name), install: () => packs.installFromText(s.text, '内置') });
+      return tile({ title: s.title, name: meta.name, desc: meta.description.replace(/。.*$/, '。'), pack: { meta, body: parseFrontmatter(s.text).body }, tag: '内置', installed: have.has(meta.name), install: () => packs.installFromText(s.text, '内置') });
     });
-    const gh = GITHUB_SKILLS.map((s) => tile({ title: s.title, name: s.name, desc: s.desc, tag: 'GitHub', installed: have.has(s.name), install: () => fromGitHub(s.url) }));
+    const gh = GITHUB_SKILLS.map((s) => tile({ title: s.title, name: s.name, desc: s.desc, pack: { unverified:true, name: s.name, description: s.desc, body: s.desc }, tag: 'GitHub', installed: have.has(s.name), install: () => fromGitHub(s.url) }));
     $('#skill-recommend').replaceChildren(...builtin, ...gh);
   }
 
-  function tile({ title, name, desc, tag, installed: on, install }) {
-    const btn = el('button', { type: 'button', className: `btn sm${on ? ' ghost' : ''}`, textContent: on ? '已安装' : '安装', disabled: on });
+  function tile({ title, name, desc, tag, pack, installed: on, install }) {
+    const c = skillCompatibility(pack, { mobile: MOBILE });
+    const btn = el('button', { type: 'button', className: `btn sm${on ? ' ghost' : ''}`, textContent: on ? '已安装' : MOBILE && c.status === 'blocked' ? '手机用不了' : '安装', disabled: on || MOBILE && c.status === 'blocked' });
     btn.addEventListener('click', async () => {
       btn.disabled = true;
       btn.textContent = '安装中…';
       try {
         const p = await install();
-        if (p) { toast(`已安装技能：${p.name}`); await refresh(); }
+        if (p) { toast(`已安装技能：${p.name}${MOBILE ? `（${skillCompatibility(p, { mobile: true }).label}）` : ''}`); await refresh(); }
       } catch (e) {
         status.textContent = `安装失败：${e.message}`;
         btn.disabled = false;
@@ -110,7 +117,7 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
       el('div', { className: 'skill-tile-head' }, el('strong', { textContent: title }), el('span', { className: `tag${tag === 'GitHub' ? ' gh' : ''}`, textContent: tag })),
       el('code', { className: 'skill-name', textContent: `/${name}` }),
       el('p', { textContent: desc }),
-      btn);
+      MOBILE ? badge(c) : null, btn);
   }
 
   async function fromGitHub(url) {
@@ -150,7 +157,7 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
     try {
       const p = /\.zip$/i.test(f.name) ? await packs.installFromZip(await f.arrayBuffer(), f.name) : await packs.installFromText(await f.text(), f.name);
       status.textContent = `已安装「${p.name}」${p.skipped.length ? `（${p.skipped.length} 个文件没装上：${p.skipped.slice(0, 5).join('、')}${p.skipped.length > 5 ? ' …' : ''}）` : ''}`;
-      toast(`已安装技能：${p.name}`);
+      toast(`已安装技能：${p.name}${MOBILE ? `（${skillCompatibility(p, { mobile: true }).label}）` : ''}`);
       await refresh();
       return p;
     } catch (err) {
@@ -167,7 +174,7 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
   let sel = 0;
   function updateMenu() {
     const m = prompt.value.match(/^\/([^\s/]*)$/);
-    const on = installed.filter((p) => p.enabled);
+    const on = installed.filter((p) => p.enabled && skillCompatibility(p, { mobile: MOBILE }).status !== 'blocked');
     items = m ? on.filter((p) => p.name.toLowerCase().includes(m[1].toLowerCase())).slice(0, 8) : [];
     menu.hidden = !items.length;
     if (!items.length) return;

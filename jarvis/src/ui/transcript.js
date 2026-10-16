@@ -2,6 +2,8 @@
  * 对话记录 DOM。流式阶段用 textContent 追加纯文本；回复完成后按极简 Markdown 重排，
  * 全程只用 createElement + textContent，从不把模型输出当 HTML 插入。
  */
+import { imageButton, previewWorkspaceImage, showImagePreview } from './imagePreview.js';
+import './mobileImprovements.css';
 import { parseMarkdown, inline } from '../core/markdown.js';
 import { stripEmotionTags } from '../../shared/emotionTag.js';
 import { createMascot, setMascotState, poseForEmotion, poseForTask } from './mascot.js';
@@ -236,13 +238,18 @@ export class Transcript {
     let moodState = null;
     const body = document.createElement('div');
     body.className = 'body';
-    body.textContent = text;
+    const upload = role === 'user' ? text.match(/\n*\[已上传到工作区：([^\]]+)\]$/) : null;
+    body.textContent = upload ? text.slice(0,upload.index).trim() : text;
     el.append(head, body);
     if (thumbs?.length) {
       const row = document.createElement('div');
       row.className = 'msg-images';
-      for (const src of thumbs) row.append(Object.assign(document.createElement('img'), { src, alt: '附带的图片', loading: 'lazy' }));
+      for (const item of thumbs) { const src = typeof item === 'string' ? item : item.src; row.append(imageButton(src, () => item.path ? previewWorkspaceImage(item.path, src) : showImagePreview(src, { title:'上传图片预览' }))); }
       el.insertBefore(row, body);
+    }
+    if (upload) {
+      const receipt = Object.assign(document.createElement('button'), { type:'button', className:'upload-receipt', textContent:'已上传工作区' });
+      receipt.onclick = () => globalThis.dispatchEvent(new CustomEvent('jarvis:open-upload', { detail: { path: upload[1].split('、')[0] } })); el.append(receipt);
     }
     this.root.append(el);
     this.#scroll();

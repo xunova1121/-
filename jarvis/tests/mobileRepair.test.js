@@ -32,12 +32,12 @@ describe('安卓语音修复', () => {
     await vi.advanceTimersByTimeAsync(4000);
     expect(await pending).toBe(false);
   });
-  it('真正的识别错误连续三次后释放麦克风并停止重试', async () => {
+  it('先尝试系统窗口，仍连续失败三次后停止重试', async () => {
     vi.useFakeTimers();
     const p = { checkPermissions: async () => ({ speechRecognition: 'granted' }), start: vi.fn(async () => { throw new Error('network'); }), stop: vi.fn(async () => {}) };
     const v = new NativeVoice({ plugin: p });
     await v.enable(); await vi.advanceTimersByTimeAsync(5000);
-    expect(p.start).toHaveBeenCalledTimes(3); expect(v.mode).toBe('off');
+    expect(p.start).toHaveBeenCalledTimes(4); expect(p.start.mock.calls[1][0].popup).toBe(true); expect(v.mode).toBe('off');
   });
   it('轻量录音关闭时停止所有音轨和音频上下文', async () => {
     const track = { stop: vi.fn() }, processor = { connect: vi.fn(), disconnect: vi.fn() }, source = { connect: vi.fn(), disconnect: vi.fn() };
@@ -47,6 +47,25 @@ describe('安卓语音修复', () => {
     const v = new RecordedVoice({ getTranscriber: () => async () => '' });
     await v.enable(); expect(v.mode).toBe('vad'); v.disable();
     expect(track.stop).toHaveBeenCalledTimes(1); expect(processor.onaudioprocess).toBeNull(); expect(context.close).toHaveBeenCalledTimes(1);
+  });
+  it('只有系统窗口可用时预先保护弹窗，成功后等待回复而不重复打开', async () => {
+    vi.useFakeTimers();
+    let finish;
+    const final = vi.fn();
+    const p = { available:async()=>({available:true,service:false}), checkPermissions:async()=>({speechRecognition:'granted'}), start:vi.fn(()=>new Promise(r=>{finish=r;})), stop:vi.fn(async()=>{}) };
+    expect(await NativeVoice.available(p)).toBe(true);
+    const v=new NativeVoice({plugin:p,onFinal:final}); await v.enable(); await vi.advanceTimersByTimeAsync(1);
+    expect(p.start.mock.calls[0][0].popup).toBe(true); expect(globalThis.__jarvisSystemSpeechDialog).toBe(true);
+    finish({matches:['你好']}); await vi.advanceTimersByTimeAsync(2000);
+    expect(final).toHaveBeenCalledWith('你好'); expect(p.start).toHaveBeenCalledTimes(1); expect(globalThis.__jarvisSystemSpeechDialog).toBe(false);
+    v.setSuppressed(false); await vi.advanceTimersByTimeAsync(350); expect(p.start).toHaveBeenCalledTimes(2); v.disable(); finish({matches:[]}); await vi.advanceTimersByTimeAsync(1);
+    delete globalThis.__jarvisSystemSpeechDialog;
+  });
+  it('取消系统识别窗口不循环弹出窗口', async () => {
+    vi.useFakeTimers();
+    const p={available:async()=>({available:true,service:false}),checkPermissions:async()=>({speechRecognition:'granted'}),start:vi.fn(async()=>{throw new Error('No speech');}),stop:vi.fn(async()=>{})};
+    await NativeVoice.available(p); const v=new NativeVoice({plugin:p}); await v.enable(); await vi.advanceTimersByTimeAsync(5000);
+    expect(p.start).toHaveBeenCalledTimes(1); expect(v.mode).toBe('off'); expect(globalThis.__jarvisSystemSpeechDialog).toBe(false); delete globalThis.__jarvisSystemSpeechDialog;
   });
   it('安卓默认女声直接通过原生朗读，无需本机网关', async () => {
     const plugin = { synthesize: vi.fn(async () => ({ audio: btoa('mp3') })), cancel: vi.fn(async () => {}) };

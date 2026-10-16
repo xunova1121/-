@@ -14,7 +14,6 @@ import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.TimeZone;
@@ -30,7 +29,6 @@ public class EdgeSpeechPlugin extends Plugin {
     private static final String TOKEN = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
     private final ConcurrentHashMap<String, WebSocketClient> sockets = new ConcurrentHashMap<>();
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private static String hex(byte[] bytes) { StringBuilder s = new StringBuilder(); for (byte b : bytes) s.append(String.format(Locale.US, "%02X", b)); return s.toString(); }
     private static String escape(String s) { return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&apos;"); }
     @PluginMethod public void synthesize(PluginCall call) {
         String text = call.getString("text", "").trim();
@@ -39,13 +37,13 @@ public class EdgeSpeechPlugin extends Plugin {
         if (text.isEmpty() || text.length() > 1500 || !voice.matches("[a-z]{2}-[A-Z]{2}-[A-Za-z]+Neural")) { call.reject("朗读文字或音色不正确"); return; }
         if (sockets.size() >= 3) { call.reject("朗读请求过多，请稍后再试"); return; }
         try {
-            long ticks = System.currentTimeMillis() / 1000 + 11644473600L; ticks -= ticks % 300;
-            String gec = hex(MessageDigest.getInstance("SHA-256").digest(((ticks * 10000000L) + TOKEN).getBytes(StandardCharsets.US_ASCII)));
+            String gec = call.getString("gec", "");
+            if (!gec.matches("[0-9A-F]{16}-[0-9A-F]{64}")) { call.reject("朗读连接签名不正确，请更新应用"); return; }
             String connectionId = UUID.randomUUID().toString().replace("-", "");
-            URI uri = URI.create("wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=" + TOKEN + "&ConnectionId=" + connectionId + "&Sec-MS-GEC=" + gec + "&Sec-MS-GEC-Version=1-130.0.2849.68");
+            URI uri = URI.create("wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=" + TOKEN + "&ConnectionId=" + connectionId + "&Sec-MS-GEC=" + gec + "&Sec-MS-GEC-Version=2-143.0.3650.75");
             HashMap<String, String> headers = new HashMap<>();
             headers.put("Origin", "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold");
-            headers.put("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0");
+            headers.put("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0");
             headers.put("Cookie", "muid=" + UUID.randomUUID().toString().replace("-", "").toUpperCase(Locale.US) + ";");
             final AtomicBoolean done = new AtomicBoolean();
             final ByteArrayOutputStream audio = new ByteArrayOutputStream();

@@ -7,13 +7,14 @@ import { createOpenAIAdapter } from './openai.js';
 import { createAnthropicAdapter } from './anthropic.js';
 import { createResponsesAdapter } from './responses.js';
 import { createMockAdapter } from './mock.js';
+import { selectVoiceEngine } from '../perception/voiceSelection.js';
 import { GENTLE_VOICES } from '../perception/voiceProfile.js';
 
 const KEY = 'jarvis.llm.v1';
 const store = (() => { try { return globalThis.localStorage ?? null; } catch { return null; } })();
 
 /** 语音：engine 为 auto 时按已有密钥自动挑最自然的云端声音，都没有就用浏览器自带 */
-export const DEFAULT_VOICE = { engine: 'auto', voices: GENTLE_VOICES, profile: 'gentle-child', fx: 'gentle', cues: true, browserVoice: '', customURL: '', customModel: '', customVoice: '' };
+export const DEFAULT_VOICE = { engine: 'auto', voices: GENTLE_VOICES, profile: 'gentle-child', fx: 'gentle', cues: true, browserVoice: '', customURL: '', customModel: '', customVoice: '', azureRegion: '', providerModel: 'gpt-4o-mini-tts' };
 export const DEFAULT_STT = { engine: 'auto', customURL: '', customModel: '' };
 export const DEFAULT_CONFIG = { provider: 'mock', models: {}, keys: {}, baseURLs: {}, claudeWebSearch: true, tavilyKey: '', bochaKey: '', voice: DEFAULT_VOICE, stt: DEFAULT_STT };
 
@@ -34,6 +35,7 @@ export function loadConfig() {
   const oldVoice = cfg.voice || {};
   const wasDefault = !oldVoice.profile && !oldVoice.browserVoice && !Object.keys(oldVoice.voices || {}).length;
   cfg.voice = { ...DEFAULT_VOICE, ...oldVoice, ...(wasDefault && oldVoice.fx === 'jarvis' ? { fx: 'gentle' } : {}), voices: { ...GENTLE_VOICES, ...(oldVoice.voices || {}) } };
+  if (oldVoice.profile === 'gentle-child' && oldVoice.voices?.openai === 'nova') cfg.voice.voices.openai = GENTLE_VOICES.openai;
   if (oldVoice.profile === 'gentle-child' && oldVoice.voices?.edge === 'zh-CN-YunxiaNeural') cfg.voice.voices.edge = GENTLE_VOICES.edge;
   cfg.stt = { ...DEFAULT_STT, ...(cfg.stt || {}) };
   return cfg;
@@ -117,11 +119,7 @@ function multiAdapter(p, cfg, model, key, gateway) {
 /** 实际使用的语音引擎（解析 auto） */
 export function resolveVoice(cfg, gateway = null) {
   const v = cfg.voice || DEFAULT_VOICE;
-  if (v.engine !== 'auto') return v;
-  const has = (id) => Boolean(cfg.keys?.[id]) || Boolean(gateway?.keys?.includes(id));
-  // 有付费语音的密钥就用它；没有时有本机网关就用免费的 Edge 朗读；都没有用浏览器自带
-  const engine = globalThis.__jarvisEdgeSpeech ? 'edge' : has('elevenlabs') ? 'elevenlabs' : has('openai') ? 'openai' : gateway && has('siliconflow') ? 'siliconflow' : gateway ? 'edge' : 'browser';
-  return { ...v, engine };
+  return { ...v, engine:selectVoiceEngine({...cfg,voice:v},gateway) };
 }
 
 export { PROVIDERS, providerById };

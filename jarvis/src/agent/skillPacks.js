@@ -7,6 +7,8 @@
  *
  * 与“学会的技能”（memory.saveSkill，模型自己总结的做法）不同，这里是用户安装的、可启用 / 停用 / 卸载的技能包。
  */
+import { MOBILE } from '../config.js';
+import { skillCompatibility } from './skillCompatibility.js';
 import { collection } from './store.js';
 import { BUILTIN_SKILLS, MORE_BUILTIN_SKILLS } from './skillCatalog.js';
 
@@ -121,6 +123,8 @@ export async function installFromFiles(files, { source = '本地', skipped = [] 
   if (!name) throw new Error('SKILL.md 缺少 name');
   if (!body) throw new Error('SKILL.md 正文为空');
 
+  const compatibility = skillCompatibility({ meta, body, files }, { mobile: MOBILE });
+  if (compatibility.status === 'blocked') throw new Error(`${compatibility.label}：${compatibility.reason}`);
   const own = {};
   let total = 0;
   let binTotal = 0;
@@ -328,7 +332,7 @@ export async function setEnabled(name, enabled) {
 }
 export const remove = async (name) => { await packs.delete(normalizeName(name)); changed(); };
 export async function enabled() {
-  return (await list()).filter((p) => p.enabled);
+  return (await list()).filter((p) => p.enabled && skillCompatibility(p, { mobile: MOBILE }).status !== 'blocked');
 }
 
 /** 系统提示里的技能目录（只列名字和描述） */

@@ -19,7 +19,9 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
   try {
     const { registerPlugin } = await import('@capacitor/core');
     globalThis.__jarvisSpeech = registerPlugin('MobileSpeech');
-    globalThis.__jarvisEdgeSpeech = registerPlugin('EdgeSpeech'); // 直接对话用系统语音识别（见 nativeVoice.js）
+    globalThis.__jarvisEdgeSpeech = registerPlugin('EdgeSpeech');
+    globalThis.__jarvisBackgroundTask = registerPlugin('BackgroundTask');
+    globalThis.__jarvisSpeech.addListener('dialog', ({ active }) => { globalThis.__jarvisSystemSpeechDialog = active; }); // 直接对话用系统语音识别（见 nativeVoice.js）
   } catch { /* 没有识别插件：走云端转写 */ }
   try {
     const { TextToSpeech } = await import('@capacitor-community/text-to-speech');
@@ -29,7 +31,15 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
   try {
     // 返回键：先关抽屉 / 面板，再回到上一层，最后才退到后台（不直接退出）
     const { App } = await import('@capacitor/app');
+    globalThis.__jarvisForeground = true;
+    App.addListener('appStateChange', ({ isActive }) => {
+      globalThis.__jarvisForeground = isActive;
+      dispatchEvent(new CustomEvent('jarvis:foreground', { detail: { active:isActive } }));
+      if (!isActive) globalThis.__jarvisTTS?.stop().catch(() => {});
+    });
     App.addListener('backButton', () => {
+      const image = document.querySelector('.image-preview[open]');
+      if (image) { image.close(); return; }
       const companion = document.querySelector('.wy-companion[open]');
       if (companion) { companion.close(); return; }
       const b = document.body;

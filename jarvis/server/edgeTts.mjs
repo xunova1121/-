@@ -11,19 +11,13 @@ import crypto from 'node:crypto';
 const TOKEN = '6A5AA1D4EAFF4E9FB37E23D68491D6F4';
 const HOST = 'speech.platform.bing.com';
 const PATH = '/consumer/speech/synthesize/readaloud/edge/v1';
-const CHROMIUM = '130.0.2849.68';
-const WIN_EPOCH = 11644473600;
+const CHROMIUM = '143.0.3650.75';
+import { secMsGec, EDGE_GEC_VERSION } from '../shared/edgeGec.js';
+export { secMsGec } from '../shared/edgeGec.js';
 
 export { EDGE_VOICES } from '../shared/edgeVoices.js';
 import { EDGE_VOICES } from '../shared/edgeVoices.js';
 const VOICE_OK = /^[a-z]{2}-[A-Z]{2}-[A-Za-z]+Neural$/;
-
-/** 防滥用签名：Windows 文件时间（100 纳秒）按 5 分钟取整，拼上令牌后 SHA-256 */
-export function secMsGec(nowMs = Date.now()) {
-  let ticks = Math.floor(nowMs / 1000) + WIN_EPOCH;
-  ticks -= ticks % 300;
-  return crypto.createHash('sha256').update(`${BigInt(ticks) * 10000000n}${TOKEN}`, 'ascii').digest('hex').toUpperCase();
-}
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 const pct = (n) => `${n >= 0 ? '+' : ''}${Math.round(n)}%`;
@@ -89,7 +83,7 @@ export function edgeSpeak(text, { voice = EDGE_VOICES[0][0], rate = 0, pitch = 0
   if (!VOICE_OK.test(voice)) return Promise.reject(new Error('声音名称不对'));
   const connId = crypto.randomUUID().replace(/-/g, '');
   const key = crypto.randomBytes(16).toString('base64');
-  const path = `${PATH}?TrustedClientToken=${TOKEN}&ConnectionId=${connId}&Sec-MS-GEC=${secMsGec()}&Sec-MS-GEC-Version=1-${CHROMIUM}`;
+  const path = `${PATH}?TrustedClientToken=${TOKEN}&ConnectionId=${connId}&Sec-MS-GEC=${secMsGec()}&Sec-MS-GEC-Version=${EDGE_GEC_VERSION}`;
   const headers = {
     Host: HOST,
     Connection: 'Upgrade',

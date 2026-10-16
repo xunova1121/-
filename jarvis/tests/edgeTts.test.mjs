@@ -43,7 +43,8 @@ describe('Edge 在线朗读', () => {
   afterAll(() => servers.forEach((s) => s.close()));
 
   it('签名：按 5 分钟取整，同一时间段内不变', () => {
-    expect(secMsGec(1760000000000)).toMatch(/^[0-9A-F]{64}$/);
+    expect(secMsGec(1760000000000)).toMatch(/^[0-9A-F]{16}-[0-9A-F]{64}$/);
+    expect(secMsGec(1760000000000)).toBe('6D50DDDB91812C33-DD68EFB01898B0750C9797D51A5FF93471DFDAE6888A1039D532CBDCCE54545D');
     expect(secMsGec(1760000000000)).toBe(secMsGec(1760000000000 + 60_000));
   });
 
@@ -72,7 +73,7 @@ describe('Edge 在线朗读', () => {
     servers.push(f.server);
     const audio = await edgeSpeak('你好，我是未央', { voice: 'zh-CN-YunyangNeural', connect: f.connect });
     expect([...audio]).toEqual([1, 2, 3, 4, 5]);
-    expect(f.seen.url).toMatch(/TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4&ConnectionId=[0-9a-f]{32}&Sec-MS-GEC=[0-9A-F]{64}&Sec-MS-GEC-Version=1-/);
+    expect(f.seen.url).toMatch(/TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4&ConnectionId=[0-9a-f]{32}&Sec-MS-GEC=[0-9A-F]{16}-[0-9A-F]{64}&Sec-MS-GEC-Version=2-143/);
     expect(f.seen.headers.origin).toBe('chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold');
     expect(f.seen.messages[0]).toMatch(/Path:speech\.config[\s\S]*audio-24khz-48kbitrate-mono-mp3/);
     expect(f.seen.messages[1]).toMatch(/Path:ssml[\s\S]*zh-CN-YunyangNeural[\s\S]*你好，我是未央/);

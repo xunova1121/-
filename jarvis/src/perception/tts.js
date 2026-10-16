@@ -1,3 +1,4 @@
+import { secMsGec } from '../../shared/edgeGec.js';
 /**
  * 语音合成引擎目录与请求。
  *   browser      浏览器自带（免费；音色取决于系统，无法加声线效果）
@@ -9,17 +10,19 @@
  * 云端引擎返回音频，经 voiceFx 效果链后播放。
  */
 
-import { customViaGateway } from '../../shared/providers.js';
+import { customViaGateway, providerById } from '../../shared/providers.js';
 import { EDGE_VOICES } from '../../shared/edgeVoices.js';
 
 /** 给 gpt-4o-mini-tts 的“表演指导”：要像电影里的 AI 管家，而不是导航播报 */
 export const DIRECTION = [
-  'Voice: a gentle young girl AI companion with a feminine, youthful, childlike voice with a soft, bright and comforting tone.',
+  'Voice: a sweet, youthful girl AI companion with a gentle, soft feminine voice, light and clear Mandarin with a soft, bright and comforting tone.',
   'Delivery: natural and human, kind and patient; never robotic, never shrill, never sing-song, no announcer tone. Do not imitate any real person.',
   'Pacing: unhurried, with natural pauses between clauses. Speak Chinese with standard Mandarin pronunciation.'
 ].join(' ');
 
 export const TTS_ENGINES = [
+  { id:'azure', name:'Azure 女童声（晓双）', keyFrom:'azure-speech', browser:true, voices:[['zh-CN-XiaoshuangNeural','晓双 · 普通话女童'],['zh-CN-XiaoyouNeural','晓悠 · 普通话女童']], note:'真实女童音色，需要自己的 Azure Speech 密钥和区域；不会把系统声称为女童声。' },
+  { id:'provider', name:'当前模型服务商的女孩声', fromProvider:true, browser:true, voices:[['shimmer','Shimmer · 甜美明亮女声'],['nova','Nova · 温柔女声']], note:'复用模型服务商密钥，需服务商支持 /audio/speech。年轻女声不等于真实女童音色。' },
   { id: 'browser', name: '浏览器自带（免费）', fx: false },
   {
     id: 'edge', name: 'Edge 朗读（免费 · 免密钥）', free: true, browser: false, voices: EDGE_VOICES,
@@ -27,7 +30,7 @@ export const TTS_ENGINES = [
   },
   {
     id: 'openai', name: 'OpenAI 语音（可导演语气）', keyFrom: 'openai', model: 'gpt-4o-mini-tts', browser: true, keyUrl: 'https://platform.openai.com/api-keys',
-    voices: [['nova', 'Nova · 温柔明亮（默认）'], ['onyx', 'Onyx · 低沉男声'], ['ash', 'Ash · 沉稳男声'], ['echo', 'Echo · 清朗男声'], ['fable', 'Fable · 英式男声'], ['verse', 'Verse · 磁性男声'], ['sage', 'Sage · 知性女声']]
+    voices: [['shimmer', 'Shimmer · 甜美明亮女孩（默认）'], ['nova', 'Nova · 温柔明亮'], ['onyx', 'Onyx · 低沉男声'], ['ash', 'Ash · 沉稳男声'], ['echo', 'Echo · 清朗男声'], ['fable', 'Fable · 英式男声'], ['verse', 'Verse · 磁性男声'], ['sage', 'Sage · 知性女声']]
   },
   {
     id: 'elevenlabs', name: 'ElevenLabs（最接近真人）', keyFrom: 'elevenlabs', model: 'eleven_multilingual_v2', browser: true, keyUrl: 'https://elevenlabs.io/app/settings/api-keys',
@@ -69,10 +72,30 @@ export function rankBrowserVoices(voices) {
  * @param {string} text
  * @param {{ gateway?: {origin:string, keys:string[]}|null, signal?: AbortSignal, fetchImpl?: typeof fetch }} opts
  */
-export async function synthesize(vc, keys, text, { gateway = null, signal, fetchImpl = globalThis.fetch } = {}) {
+export async function synthesize(vc, keys, text, { gateway = null, config = {}, signal, fetchImpl = globalThis.fetch } = {}) {
   const e = ttsEngineById(vc.engine);
   if (!e || e.id === 'browser') throw new Error('不是云端语音引擎');
   const voice = vc.voices?.[e.id] || e.voices[0]?.[0] || '';
+  if (e.id === 'azure') {
+    const region = String(vc.azureRegion || '').trim();
+    if (!/^[a-z0-9-]+$/.test(region)) throw new Error('请在声音设置填写 Azure Speech 区域');
+    if (!keys?.['azure-speech']) throw new Error('晓双女童声需要 Azure Speech 密钥，请在声音设置填写');
+    const escape = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&apos;').replace(/"/g,'&quot;');
+    const host = `${region}.tts.speech.${region.startsWith('china') ? 'azure.cn' : 'microsoft.com'}`;
+    const res = await fetchImpl(`https://${host}/cognitiveservices/v1`, { method:'POST', binary:true, signal, headers:{ 'Ocp-Apim-Subscription-Key':keys['azure-speech'], 'Content-Type':'application/ssml+xml', 'X-Microsoft-OutputFormat':'audio-24khz-48kbitrate-mono-mp3' }, body:`<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='zh-CN'><voice name='${escape(voice)}'><prosody rate='-5%'>${escape(text)}</prosody></voice></speak>` });
+    if (!res.ok) throw new Error(`女童语音服务请求失败（${res.status}），请检查密钥、区域及音色支持`);
+    return res.arrayBuffer();
+  }
+  if (e.fromProvider) {
+    const p = providerById(config.provider);
+    const base = (p?.custom ? config.baseURLs?.[p.id] : p?.baseURL)?.replace(/\/$/,'');
+    const key = config.keys?.[p?.id];
+    if (!base || !key || !['openai','multi'].includes(p?.kind)) throw new Error('当前模型服务商没有可用的语音接口配置，请选择 Azure 女童声或配置语音服务');
+    const res = await fetchImpl(`${base}/audio/speech`, { method:'POST', binary:true, signal, headers:{ 'Content-Type':'application/json', authorization:`Bearer ${key}` }, body:JSON.stringify({ model:vc.providerModel || 'gpt-4o-mini-tts', input:text, voice, instructions:DIRECTION, response_format:'mp3' }) });
+    if (!res.ok) throw new Error(`模型服务商的女孩声请求失败（${res.status}）：聊天密钥不代表服务商已提供语音合成，请检测或配置专用声音服务`);
+    return res.arrayBuffer();
+  }
+
   if (e.id === 'edge') {
     if (!gateway && globalThis.__jarvisEdgeSpeech) {
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
@@ -81,14 +104,14 @@ export async function synthesize(vc, keys, text, { gateway = null, signal, fetch
       const abort = () => { plugin.cancel({ id }).catch(() => {}); };
       signal?.addEventListener('abort', abort, { once: true });
       try {
-        const { audio } = await plugin.synthesize({ id, text, voice, pitch: vc.edgePitch ?? 8 });
+        const { audio } = await plugin.synthesize({ id, text, voice, pitch: vc.edgePitch ?? 8, gec:secMsGec() });
         if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
         return Uint8Array.from(atob(audio), c => c.charCodeAt(0)).buffer;
       } finally { signal?.removeEventListener('abort', abort); }
     }
     if (!gateway) throw new Error('Edge 朗读需要安卓 App 或电脑本机网关');
     const res = await fetchImpl(`${gateway.origin}/api/tts/edge`, {
-      method: 'POST', signal,
+      method: 'POST', binary:true, signal,
       headers: { 'content-type': 'application/json', 'x-jarvis-client': '1' },
       body: JSON.stringify({ text, voice, rate: vc.edgeRate ?? -4, pitch: vc.edgePitch ?? 0 })
     });
@@ -123,7 +146,7 @@ export async function synthesize(vc, keys, text, { gateway = null, signal, fetch
     if (key || viaGateway) headers.authorization = `Bearer ${key || 'use-gateway-key'}`;
     init = { headers, body: JSON.stringify(body) };
   }
-  const res = await fetchImpl(url, { method: 'POST', ...init, signal });
+  const res = await fetchImpl(url, { method: 'POST', ...init, binary:true, signal });
   if (!res.ok) {
     let msg = `${res.status}`;
     try { const j = await res.json(); msg += ` ${j.error?.message || j.detail?.message || j.message || JSON.stringify(j).slice(0, 120)}`; } catch { /* 非 JSON */ }

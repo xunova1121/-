@@ -1,6 +1,8 @@
 /**
  * 右侧面板：工作区 / 知识库 / 记忆与进化 / 模型。
  */
+import { FILE_CATEGORIES, organizeFiles } from './fileOrganization.js';
+import './mobileImprovements.css';
 import * as ws from '../agent/workspace.js';
 import * as kb from '../agent/knowledge.js';
 import * as memory from '../agent/memory.js';
@@ -30,18 +32,36 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   // ================================================================ 工作区
   // 两个标签页：文件 / 改动记录（改文件前的自动备份，可一键恢复）
   let wsTab = 'files';
+  let fileCategory = 'all', fileQuery = '', fileListHidden = false, fileRefresh = 0;
+  try { fileListHidden = localStorage.getItem('jarvis.files.hidden') === 'true'; } catch {}
+  const controls = el('div', { className: 'ws-controls' });
+  const search = el('input', { type: 'search', placeholder: '搜索文件名' }); search.setAttribute('aria-label','搜索文件名');
+  const categories = el('div', { className: 'ws-categories' }); categories.setAttribute('aria-label','文件分类');
+  for (const [value,label] of FILE_CATEGORIES) {
+    const b = el('button', { type:'button', textContent:label }); b.dataset.category = value; b.setAttribute('aria-pressed',String(value === fileCategory));
+    b.onclick = () => { fileCategory = value; for (const item of categories.children) item.setAttribute('aria-pressed',String(item === b)); refreshFiles(); }; categories.append(b);
+  }
+  const counter = el('span', { textContent:'最新更新优先' });
+  const hideFiles = el('button', { type:'button', className:'ws-list-toggle' });
+  function syncListVisibility() { $('#file-list').hidden = wsTab !== 'files' || fileListHidden; controls.hidden = wsTab !== 'files'; hideFiles.textContent = fileListHidden ? '展开文件列表' : '隐藏文件列表'; hideFiles.setAttribute('aria-expanded',String(!fileListHidden)); }
+  hideFiles.onclick = () => { fileListHidden = !fileListHidden; try { localStorage.setItem('jarvis.files.hidden',String(fileListHidden)); } catch {} syncListVisibility(); };
+  search.oninput = () => { fileQuery = search.value; refreshFiles(); };
+  controls.append(search,categories,el('div',{className:'ws-sort-note'},counter,hideFiles)); $('#file-list').before(controls);
+  syncListVisibility();
+
   const changes = initChangesPanel({ toast, desktop: globalThis.window?.jarvisDesktop ?? null, onRestored: () => refreshFiles() });
   for (const b of document.querySelectorAll('[data-wtab]')) {
     b.addEventListener('click', () => {
       wsTab = b.dataset.wtab;
       for (const x of document.querySelectorAll('[data-wtab]')) x.setAttribute('aria-selected', String(x === b));
-      $('#file-list').hidden = wsTab !== 'files';
+      syncListVisibility();
       $('#change-box').hidden = wsTab !== 'changes';
       if (wsTab === 'changes') changes.refresh();
     });
   }
 
   async function refreshFiles() {
+    const generation = ++fileRefresh;
     if (wsTab === 'changes') changes.refresh();
     const list = $('#file-list');
     const mode = ws.mode();
@@ -54,11 +74,18 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     btn.dataset.pending = restore?.pending ? '1' : '';
     let files;
     try { files = await ws.list(); } catch (e) { files = []; toast(`读取工作区失败：${e.message}`); }
+    if (generation !== fileRefresh) return;
+    const total = files.length; files = organizeFiles(files, { category: fileCategory, query: fileQuery });
+    counter.textContent = `最新更新优先 · ${files.length} / ${total} 个文件`;
+    syncListVisibility();
     list.replaceChildren(...(files.length ? files.map((f) => {
       const li = el('li', { title: f.path },
         el('span', { className: 'fx', textContent: ws.ext(f.path) || '—' }),
         el('span', { className: 'fn', textContent: f.path }),
         el('span', { className: 'fs', textContent: fmtSize(f.size) }));
+      li.dataset.path = f.path; li.tabIndex = 0; li.setAttribute('role','button');
+      li.append(el('span', { className:'file-time', textContent:f.mtime ? new Date(f.mtime).toLocaleDateString('zh-CN',{month:'numeric',day:'numeric'}) : '' }));
+      li.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFile(f.path); } });
       if (fresh.has(f.path)) li.classList.add('fresh');
       if (current === f.path) li.classList.add('active');
       li.addEventListener('click', () => openFile(f.path));
@@ -73,7 +100,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
         li.append(x);
       }
       return li;
-    }) : [el('li', { className: 'empty', textContent: '还没有文件。让我“写一个网页”或“生成一份 PPT”，或者上传文件。' })]));
+    }) : [el('li', { className: 'empty', textContent: total ? '没有匹配的文件，试试其他分类或关键词。' : '还没有文件。让我“写一个网页”或“生成一份 PPT”，或者上传文件。' })]));
   }
 
   $('#btn-folder').addEventListener('click', async () => {

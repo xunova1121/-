@@ -15,12 +15,14 @@ import logoUrl from './ui/logo.svg';
 import { initMascots } from './ui/mascot.js';
 import { initCompanion } from './ui/companion.js';
 let companion = null;
+import { imageButton, previewWorkspaceImage } from './ui/imagePreview.js';
 import { initCamera } from './ui/composerMedia.js';
 let mascots = null;
 let callActive = false;
 let callStarting = false;
 let callGeneration = 0;
 let callRestore = null;
+let voiceSwitching = false, callCloudFallback = false;
 
 // 浏览器标签页图标：未央 logo（小图直接内联，单文件版也能显示）
 document.head.append(Object.assign(document.createElement('link'), { rel: 'icon', type: 'image/svg+xml', href: logoUrl }));
@@ -77,6 +79,9 @@ import { VoiceInput, speechRecognitionSupported } from './perception/voiceInput.
 import { resolveStt, transcribe, encodeWav, sttEngineById } from './perception/stt.js';
 import { STANDALONE, MOBILE, VAD } from './config.js';
 import { NativeVoice } from './mobile/nativeVoice.js';
+import { createVoiceLifecycle } from './mobile/voiceLifecycle.js';
+import { recordVoiceEvent, readVoiceEvents } from './mobile/voiceDiagnostics.js';
+import { createTaskKeeper } from './mobile/backgroundTasks.js';
 import { RecordedVoice } from './mobile/recordedVoice.js';
 import { nativeWebFetch } from './mobile/nativeFetch.js';
 import { initChips } from './ui/chips.js';
@@ -409,11 +414,12 @@ function rememberTurn(role, content, extra = {}) {
 }
 function persistSession() {
   if (settings.saveSessions === false) return;
-  sessionsApi.save(session).then(() => sessionsPanel?.refresh()).catch(() => {});
+  return sessionsApi.save(session).then(() => sessionsPanel?.refresh()).catch(() => {});
 }
 let turns = 0;
 const NEEDS_THOUGHT = /查|搜|核实|验证|结果|赛果|比分|中没中|中奖|最新|价格|行情|新闻|分析|计算|算一下|对比|图片|截图|图里/;
 const recentImages = new Map(); // 消息时间 → 这条消息带的图片（只在内存里，不存盘）
+const taskKeeper = createTaskKeeper(globalThis.__jarvisBackgroundTask, e => toast(e.message));
 let active = null; // { ctrl, streamDone, bubble }
 const attachments = [];
 
@@ -434,6 +440,8 @@ const speaker = new Speaker({
   onError: (e) => toast(`${e.message}（先用系统自带声音朗读，5 分钟后再试）`),
   getVoiceConfig: () => resolveVoice(llmConfig, gateway),
   getKeys: () => llmConfig.keys,
+  getConfig: () => llmConfig,
+  onEngine: (engine,fallback) => { const el = document.querySelector("#tts-status"); if (el) el.textContent = fallback ? "当前已回退系统声音（不是目标女孩童声），请检测语音服务" : `实际播放引擎：${engine}`; if (fallback && callActive) callStatus("在线声音失败，当前为系统声；请检测声音服务"); },
   getGateway: () => gateway
 });
 speaker.enabled = settings.speechOutput;
@@ -489,19 +497,20 @@ function finishTurn() {
 
 /** 朗读只读正文：代码块（``` 包围的部分，包括还没闭合的）不读 */
 function makeSpeech() {
-  const chunker = new SentenceChunker();
+  let chunker = new SentenceChunker();
   let full = '';
-  let fed = 0;
+  let fed = 0, speechGeneration = speaker.gen;
   return {
     push(delta) {
       full += delta;
       const spoken = full.replace(/```[\s\S]*?```/g, '\n').replace(/```[\s\S]*$/, '');
+      if (!speaker.foreground || speechGeneration !== speaker.gen) { chunker = new SentenceChunker(); speechGeneration = speaker.gen; if (!speaker.foreground) { fed = spoken.length; return; } }
       if (spoken.length > fed) {
         for (const s of chunker.push(spoken.slice(fed))) speaker.speak(s);
         fed = spoken.length;
       }
     },
-    flush() { for (const s of chunker.flush()) speaker.speak(s); }
+    flush() { if (!speaker.foreground || speechGeneration !== speaker.gen) return; for (const s of chunker.flush()) speaker.speak(s); }
   };
 }
 
@@ -798,6 +807,8 @@ function notify(title, body) {
 let schedulerBusy = false;
 /** 在后台执行一个定时任务：结果存成一段对话（不打断当前对话），并通知 */
 async function runScheduled(s) {
+  const releaseTask = taskKeeper.begin();
+  try {
   const sess = sessionsApi.create();
   sess.title = `⏰ ${s.title}`;
   sess.titleSet = true;
@@ -822,6 +833,7 @@ async function runScheduled(s) {
   sessionsPanel?.refresh();
   schedulesPanel?.refresh();
   return sess;
+  } finally { releaseTask(); }
 }
 async function schedulerTick() {
   if (schedulerBusy || active) return; // 正在对话时先等一等，不抢资源
@@ -855,7 +867,7 @@ async function send(text) {
   renderAttachments();
   const userText = files.length ? `${text}\n\n[已上传到工作区：${files.map((f) => f.path).join('、')}]` : text;
   const imgs = files.filter((f) => f.image).map((f) => f.image);
-  const thumbs = imgs.map((i) => i.thumb);
+  const thumbs = files.filter(f => f.image).map(f => ({ src:f.image.thumb, path:f.path }));
   transcript.add('user', userText, Date.now(), { thumbs });
   director.onUserText(text);
   hud.newTurn();
@@ -913,6 +925,7 @@ async function send(text) {
   // 内置演示模式下“自动”不触发（规则拆步效果有限），只认明确的“/团队 …”或“总是”
   const team = shouldTeam(text, settings.teamMode === 'auto' && !helperLlm() ? 'off' : settings.teamMode);
   let teamCard = null;
+  const releaseTask = taskKeeper.begin();
   try {
     const result = await (team ? runTeam : runAgent)({
       llm: team ? helperLlm('reason') : undefined,
@@ -1019,6 +1032,8 @@ async function send(text) {
     if (resumable) rememberTurn('assistant', `${shown.trim()}\n\n${INTERRUPTED_MARK}`, { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) });
     callouts?.set(followUpSuggestions({ error: true, resumable, userText: text, desktop: Boolean(DESKTOP) }));
   } finally {
+    await persistSession();
+    releaseTask();
     endControl();
   }
 }
@@ -1075,14 +1090,16 @@ function renderAttachments() {
     const s = document.createElement('span');
     if (a.image) {
       s.className = 'has-thumb';
-      s.append(Object.assign(document.createElement('img'), { src: a.image.thumb, alt: '' }));
+      s.append(imageButton(a.image.thumb, () => previewWorkspaceImage(a.path,a.image.thumb).catch(e => toast(e.message))));
     }
-    s.append(a.path.replace(/^上传\//, ''), x);
+    const label = Object.assign(document.createElement('span'), { className:'attach-name', textContent:a.image ? '图片 · 已上传工作区' : a.path.split('/').pop(), title:a.path });
+    s.append(label, x);
     return s;
   }));
 }
 $('#btn-attach').addEventListener('click', () => $('#file-input').click());
 initCamera({ button: $('#btn-camera'), input: $('#camera-input'), native: MOBILE || /Android|iPhone|iPad/i.test(navigator.userAgent), onFiles: addFiles, onError: e => toast(e.message) });
+addEventListener('jarvis:open-upload', e => { showPanel('workspace'); if (e.detail?.path) panels.openFile(e.detail.path); });
 // 粘贴截图 / 图片
 $('#prompt').addEventListener('paste', (e) => {
   const imgs = [...(e.clipboardData?.items ?? [])].filter((it) => it.kind === 'file' && it.type.startsWith('image/')).map((it) => it.getAsFile()).filter(Boolean);
@@ -1125,7 +1142,24 @@ function onWake() {
 const browserSR = speechRecognitionSupported && !window.jarvisDesktop && !MOBILE; // 桌面版、手机 App 里的浏览器识别都用不了
 const callStatus = text => { $('#voice-call-status').textContent = text; };
 const sttEngine = () => resolveStt(llmConfig, { gateway, browserSupported: browserSR });
+function recordedVoice() {
+  return new RecordedVoice({ getTranscriber: () => { const id = sttEngine(); return id === 'none' || id === 'browser' ? null : (wav, signal) => transcribe(id,llmConfig,wav,{gateway,signal}); }, ...voiceHandlers });
+}
 const voiceHandlers = {
+  onStatus: phase => { recordVoiceEvent('识别阶段',phase); if (callActive) callStatus({ ready:'麦克风已开启，请说话', speech:'正在听你说话…', processing:'正在识别这句话…', popup:'尝试手机系统的语音窗口…' }[phase] || phase); },
+  onUnavailable: async message => {
+    recordVoiceEvent('系统识别不可用',message);
+    if (!MOBILE || !callActive || callCloudFallback || /权限|permission/i.test(message) || sttEngine() === 'none') return;
+    const gen = callGeneration; voiceSwitching = true; callCloudFallback = true;
+    try {
+      voice.disable(); await globalThis.__jarvisSpeech?.stop();
+      if (!callActive || gen !== callGeneration) return;
+      voice = recordedVoice(); callStatus('系统识别暂不可用，正在启用服务商转写…');
+      await voice.enable({ silenceMs:SILENCE_BY_SENSITIVITY[settings.vadSensitivity] });
+      if (gen !== callGeneration) voice.disable();
+    } catch (e) { toast(`语音转写无法启动：${e.message}`); if (gen === callGeneration) await setVoiceCall(false); }
+    finally { voiceSwitching = false; }
+  },
   onConfirm: () => {
     if (callActive) callStatus('正在听你说话…');
     if (asleep()) return;
@@ -1166,7 +1200,7 @@ const voiceHandlers = {
     $('#inputbar').style.setProperty('--e', e.toFixed(2));
   },
   onMode: (m) => {
-    if (m === 'off' && callActive && !callStarting) queueMicrotask(() => setVoiceCall(false));
+    if (m === 'off' && callActive && !callStarting && !voiceSwitching) queueMicrotask(() => { if (!voiceSwitching && callActive) setVoiceCall(false); });
     if (callActive) callStatus(m === 'off' ? '语音已停止' : m === 'loading' ? '正在准备语音…' : m === 'ptt' ? '按住麦克风说话，松开后回复' : '直接说话，未央在听');
     $('#voice-status').textContent = {
       off: '',
@@ -1181,6 +1215,7 @@ const voiceHandlers = {
     $('#btn-mic').setAttribute('aria-label', m === 'ptt' ? '按住说话，松开提交' : '直接对话');
   },
   onError: (code) => {
+    recordVoiceEvent('识别错误',code);
     if (callActive) callStatus(String(code));
     toast(code === 'not-allowed' ? '麦克风权限被拒绝' : /^语音识别/.test(code) ? code : `语音识别出错：${code}`);
   }
@@ -1196,6 +1231,7 @@ let voice = new (MOBILE ? RecordedVoice : VoiceInput)({
 // 安卓 App：有系统语音识别就用它（免费、不用密钥、自己判断说完）；没有再走云端转写
 const nativeVoiceReady = MOBILE && globalThis.__jarvisSpeech
   ? NativeVoice.available(globalThis.__jarvisSpeech).then((ok) => {
+    globalThis.__jarvisNativeSpeechAvailable = ok; recordVoiceEvent('系统服务检测',String(ok));
     if (ok) voice = new NativeVoice({ plugin: globalThis.__jarvisSpeech, ...voiceHandlers });
     return ok;
   })
@@ -1228,7 +1264,7 @@ async function setDirectVoice(on) {
     try {
       await voice.enable({ silenceMs: SILENCE_BY_SENSITIVITY[settings.vadSensitivity] });
     } catch (err) {
-      toast(err.message);
+      recordVoiceEvent('启动失败',err.message); toast(err.message);
       if (/云端语音识别/.test(err.message)) showPanel('models');
       setSetting('directVoice', false);
       $('#set-voice').checked = false;
@@ -1262,6 +1298,7 @@ async function setVoiceCall(on) {
     return;
   }
   callStarting = true;
+  callCloudFallback = false;
   callActive = true;
   callRestore = { speechOutput: settings.speechOutput, wakeWord: settings.wakeWord, directVoice: settings.directVoice };
   settings.speechOutput = true;
@@ -1272,6 +1309,7 @@ async function setVoiceCall(on) {
   $('#voice-call-panel').hidden = false;
   $('#btn-call').setAttribute('aria-pressed', 'true');
   $('#btn-call').setAttribute('aria-label', '结束语音对话');
+  recordVoiceEvent('通话','开始连接');
   callStatus('正在连接语音…');
   try {
     const ok = await setDirectVoice(true);
@@ -1285,9 +1323,17 @@ async function setVoiceCall(on) {
 }
 $('#btn-call').addEventListener('click', () => setVoiceCall(!callActive));
 $('#btn-call-end').addEventListener('click', () => setVoiceCall(false));
-document.addEventListener('visibilitychange', () => {
-  if (MOBILE && document.hidden && callActive && !callStarting) { companion?.close(); setVoiceCall(false); }
+const voiceCheckButton = Object.assign(document.createElement('button'),{type:'button',className:'voice-diagnose',textContent:'检测语音'});
+voiceCheckButton.onclick = async () => { await setVoiceCall(false); showPanel('settings'); await checkVoice(); };
+$('#voice-call-panel').append(voiceCheckButton);
+const voiceLifecycle = createVoiceLifecycle({
+  getState: () => ({ hidden:document.hidden, nativeActive:globalThis.__jarvisForeground !== false, starting:callStarting, systemDialog:Boolean(globalThis.__jarvisSystemSpeechDialog) }),
+  onAudio: foreground => speaker.setForeground(foreground),
+  onLeave: () => { if (!MOBILE) return; if (callActive) { companion?.close(); setVoiceCall(false); } else if (voice.mode !== 'off') setDirectVoice(false); }
 });
+document.addEventListener('visibilitychange', () => voiceLifecycle.update());
+addEventListener('jarvis:foreground', () => voiceLifecycle.update());
+voiceLifecycle.update();
 
 // “检测语音”：逐项检查麦克风 / 系统识别 / 云端转写 / 语音检测模型，告诉用户卡在哪一步
 async function checkVoice() {
@@ -1305,34 +1351,23 @@ async function checkVoice() {
     line(false, `麦克风：不能用（${e.name === 'NotAllowedError' ? '权限被拒绝，请在系统设置里允许未央使用麦克风' : e.message || e.name}）`);
   }
   await checkRecognition(line);
-  // 5. 朗读（语音对话时未央开口说话）
-  const tts = globalThis.__jarvisTTS;
-  if (MOBILE && tts) {
-    const tli = line(null, '朗读：检测中…（会说一句“语音测试”）');
-    try {
-      const zh = await tts.isLanguageSupported({ lang: 'zh-CN' }).then((r) => r?.supported).catch(() => null);
-      if (zh === false) {
-        tli.dataset.ok = '0';
-        tli.textContent = '朗读：手机的朗读引擎不支持中文。';
-        const b = Object.assign(document.createElement('button'), { type: 'button', className: 'btn ghost sm', textContent: '去安装中文朗读引擎' });
-        b.addEventListener('click', () => tts.openInstall().catch(() => toast('请在手机“设置 → 无障碍 → 文字转语音”里选择支持中文的引擎')));
-        tli.append(' ', b);
-      } else {
-        await Promise.race([tts.speak({ text: '语音测试', lang: 'zh-CN', rate: 1, pitch: 1, volume: 1, category: 'playback' }), new Promise((_, rej) => setTimeout(() => rej(new Error('8 秒没有声音')), 8000))]);
-        tli.dataset.ok = '1';
-        tli.textContent = '朗读：正常（听到“语音测试”了吗？没听到请调大媒体音量）';
-      }
-    } catch (e) {
-      tli.dataset.ok = '0';
-      tli.textContent = `朗读：不能用（${e.message || e}）。请在手机“设置 → 无障碍 → 文字转语音”里选一个支持中文的引擎`;
-    }
+  // 检测真正配置的声音，不能只检测手机系统朗读后声称云端女声正常。
+  const tli = line(null,'实际声音服务：正在合成并试听…');
+  try {
+    const result = await speaker.test();
+    tli.dataset.ok = '1'; tli.textContent = `实际声音：${result.engine} · ${result.voice || '服务默认'}（已解码并播放；请确认听感）`;
+    recordVoiceEvent('声音检测成功',`${result.engine} ${result.voice}`);
+  } catch (e) {
+    tli.dataset.ok = '0'; tli.textContent = `实际声音服务不可用：${e.message}`; recordVoiceEvent('声音检测失败',e.message);
   }
+  for (const event of readVoiceEvents().slice(-6)) line(null,`${new Date(event.time).toLocaleTimeString('zh-CN')} · ${event.stage}：${event.detail}`);
+
 }
 
 /** 语音自检里的“识别”部分 */
 async function checkRecognition(line) {
   // 2. 识别方式
-  if (voice instanceof NativeVoice) { line(true, '识别方式：手机自带的语音识别（免费、不用密钥）'); return; }
+  if (voice instanceof NativeVoice) { line(true, '系统语音服务可发现；需实际说话验证，失败后尝试系统窗口或云端转写'); return; }
   if (MOBILE) line(false, '手机自带语音识别：这台手机没有可用的识别服务，改用云端转写');
   const id = sttEngine();
   if (id === 'browser') { line(true, '识别方式：浏览器自带语音识别'); return; }
@@ -1342,7 +1377,7 @@ async function checkRecognition(line) {
   try {
     await transcribe(id, llmConfig, encodeWav(new Float32Array(16000)), { gateway, signal: AbortSignal.timeout?.(20000) });
     li.dataset.ok = '1';
-    li.textContent = `云端转写（${sttEngineById(id)?.name ?? id}）：可用`;
+    li.textContent = `云端转写（${sttEngineById(id)?.name ?? id}）：接口连通（静音检测不代表实际识别准确）`;
   } catch (e) {
     li.dataset.ok = '0';
     li.textContent = `云端转写：${e.message}`;

@@ -23,12 +23,15 @@ export class Speaker {
    * @param {() => object} [o.getKeys] 密钥表
    * @param {() => object|null} [o.getGateway]
    */
-  constructor({ lang = 'zh-CN', rate = 0.95, pitch = 1.0, onStart, onIdle, onBoundary, onError, getVoiceConfig, getKeys, getGateway } = {}) {
+  constructor({ lang = 'zh-CN', rate = 0.95, pitch = 1.0, onStart, onIdle, onBoundary, onError, onEngine, getVoiceConfig, getKeys, getGateway, getConfig } = {}) {
     Object.assign(this, { lang, rate, pitch, onStart, onIdle, onBoundary, onError });
     this.getVoiceConfig = getVoiceConfig ?? (() => ({ engine: 'browser' }));
+    this.getConfig = getConfig || (() => ({}));
+    this.onEngine = onEngine;
     this.getKeys = getKeys ?? (() => ({}));
     this.getGateway = getGateway ?? (() => null);
     this.enabled = true;
+    this.foreground = true;
     this.pending = 0;
     this.voice = null;
     this.voices = [];
@@ -78,8 +81,10 @@ export class Speaker {
     return levelOf(this.fx.analyser, this.levelBuf);
   }
 
+  setForeground(active) { this.foreground = active; if (!active) this.cancel(); }
+
   speak(text) {
-    if (!this.enabled || !text) return;
+    if (!this.foreground || !this.enabled || !text) return;
     if (!this.usesAudio) {
       if (!speechSynthesisSupported()) return;
       this.#begin();
@@ -103,6 +108,23 @@ export class Speaker {
     this.enabled = was;
   }
 
+  /** 检测实际选中的声音服务，失败就报告，不把系统回退当成目标音色成功。 */
+  async test(text = '你好呀，我是未央。很高兴陪着你。') {
+    if (!this.foreground) throw new Error('请回到未央界面后试听');
+    this.cancel(); const gen = this.gen, vc = this.getVoiceConfig(); this.#begin();
+    try {
+      if (vc.engine === 'browser') { await this.#browserSay(text); return { engine:'browser', voice:this.voice?.name || '系统默认' }; }
+      const ctx = this.unlock(); if (!ctx) throw new Error('当前 WebView 没有可用的音频播放环境');
+      this.ctrl = new AbortController();
+      const ab = await synthesize(vc,this.getKeys(),text,{gateway:this.getGateway(),config:this.getConfig(),signal:this.ctrl.signal});
+      if (gen !== this.gen || !this.foreground) throw new DOMException('Aborted','AbortError');
+      const buffer = await ctx.decodeAudioData(ab);
+      if (gen !== this.gen || !this.foreground) throw new DOMException('Aborted','AbortError');
+      this.onEngine?.(vc.engine,false); await this.#playBuffer(buffer,gen);
+      return { engine:vc.engine, voice:vc.voices?.[vc.engine] || '', duration:buffer.duration };
+    } finally { if (gen === this.gen) this.#finish(); }
+  }
+
   cancel() {
     const had = this.pending > 0;
     this.gen++;
@@ -111,6 +133,8 @@ export class Speaker {
     this.queue = [];
     if (this.source) { try { this.source.onended = null; this.source.stop(); } catch { /* 已停止 */ } }
     this.source = null;
+    this.playbackDone?.(); this.playbackDone = null;
+    this.browserDone?.(); this.browserDone = null;
     this.playing = false;
     if (speechSynthesisSupported()) synth.cancel();
     this.pending = 0;
@@ -151,7 +175,8 @@ export class Speaker {
       u.pitch = delivery.pitch;
       if (voice) u.voice = voice;
       let done = false;
-      const end = () => { if (!done) { done = true; resolve(); } };
+      const end = () => { if (!done) { done = true; if (this.browserDone === end) this.browserDone = null; resolve(); } };
+      this.browserDone = end;
       u.onboundary = () => this.onBoundary?.();
       u.onend = end;
       u.onerror = end;
@@ -167,7 +192,7 @@ export class Speaker {
       const ctx = this.unlock();
       // 这个引擎刚失败过：5 分钟内直接用浏览器声音，不再每句都先等它失败
       if ((this.down?.[vc.engine] ?? 0) > Date.now()) { item.p = Promise.reject(Object.assign(new Error('skip'), { name: 'SkipError' })); item.p.catch(() => {}); continue; }
-      item.p = synthesize(vc, this.getKeys(), item.text, { gateway: this.getGateway(), signal: this.ctrl.signal })
+      item.p = synthesize(vc, this.getKeys(), item.text, { gateway: this.getGateway(), signal: this.ctrl.signal, config:this.getConfig() })
         .then((ab) => ctx.decodeAudioData(ab))
         .catch((e) => {
           if (e?.name !== 'AbortError') (this.down ??= {})[vc.engine] = Date.now() + 5 * 60_000;
@@ -194,8 +219,8 @@ export class Speaker {
         }
       }
       if (gen !== this.gen) return;
-      if (buffer) await this.#playBuffer(buffer, gen);
-      else await this.#browserSay(item.text); // 这一句合成失败：用浏览器声音补上
+      if (buffer) { this.onEngine?.(this.getVoiceConfig().engine,false); await this.#playBuffer(buffer, gen); }
+      else { this.onEngine?.('browser',true); await this.#browserSay(item.text); } // 这一句合成失败：用浏览器声音补上
       if (gen !== this.gen) return;
       this.queue.shift();
       this.#prefetch();
@@ -217,11 +242,13 @@ export class Speaker {
       src.buffer = buffer;
       src.detune.value = this.fx.detune;
       src.connect(this.fx.input);
-      src.onended = () => {
+      const finish = () => {
         if (this.source === src) this.source = null;
         try { src.disconnect(); } catch { /* ignore */ }
+        if (this.playbackDone === finish) this.playbackDone = null;
         resolve();
       };
+      src.onended = finish; this.playbackDone = finish;
       if (gen !== this.gen) return resolve();
       this.source = src;
       src.start();

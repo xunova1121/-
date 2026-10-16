@@ -1,3 +1,5 @@
+import { skillCompatibility } from './skillCompatibility.js';
+import { MOBILE } from '../config.js';
 /**
  * 智能体工具。每个工具：name / description / input_schema（JSON Schema）/ run(args) → 字符串结果。
  * 参数在执行前统一校验（流式工具参数可能被截断，模型偶尔也会漏参数），不合格就返回明确的错误让模型自行修正。
@@ -126,6 +128,8 @@ export function createTools(ctx) {
       run: async ({ name }) => {
         const p = await packs.get(name);
         if (!p) return `没有名为「${name}」的技能。已安装：${(await packs.enabled()).map((x) => x.name).join('、') || '无'}`;
+        const compatibility = skillCompatibility(p, { mobile: MOBILE });
+        if (compatibility.status === 'blocked') return `${compatibility.label}：${compatibility.reason}`;
         if (!p.enabled) return `技能「${name}」已被用户停用。`;
         return clip(packs.render(p), 30000);
       }

@@ -1,6 +1,7 @@
 /**
  * “模型”面板里的声音设置：语音引擎、声音、声线效果、提示音、试听。
  */
+import { MOBILE } from '../config.js';
 import { TTS_ENGINES, ttsEngineById } from '../perception/tts.js';
 import { FX_PRESETS } from '../perception/voiceFx.js';
 import { resolveVoice } from '../llm/config.js';
@@ -21,6 +22,7 @@ export function initVoicePanel({ panels, speaker, getGateway }) {
   const engineSel = $('#tts-engine');
   engineSel.replaceChildren(opt('auto', '自动（有密钥就用最自然的云端声音）'), ...TTS_ENGINES.map((e) => opt(e.id, e.name)));
 
+  $('#tts-azure-region').addEventListener('change', e => patchVoice({ azureRegion:e.target.value.trim() }));
   const fxSeg = $('#tts-fx');
   fxSeg.replaceChildren(...Object.entries(FX_PRESETS).map(([id, p]) => Object.assign(document.createElement('button'), { type: 'button', role: 'radio', textContent: p.name.replace(/ · .*/, ''), title: p.desc, value: id })));
 
@@ -31,6 +33,7 @@ export function initVoicePanel({ panels, speaker, getGateway }) {
     const effective = resolveVoice(cfg, gateway);
     const e = ttsEngineById(effective.engine);
     engineSel.value = v.engine;
+    $('#row-tts-azure-region').hidden = e.id !== 'azure'; $('#tts-azure-region').value = v.azureRegion || '';
 
     // 引擎说明
     const notes = [];
@@ -41,6 +44,7 @@ export function initVoicePanel({ panels, speaker, getGateway }) {
       notes.push(`${e.name} 不允许浏览器直接调用，需要用完整版（本机网关）。`);
     }
     if (e.note) notes.push(e.note);
+    if (v.profile === 'gentle-child' && !['azure','browser'].includes(e.id)) notes.push('当前为年轻女声；固定女童声请选择 Azure 晓双并填写密钥与区域。');
     $('#tts-note').hidden = !notes.length;
     $('#tts-note').textContent = notes.join(' ');
 
@@ -69,7 +73,7 @@ export function initVoicePanel({ panels, speaker, getGateway }) {
 
     // 密钥（与模型面板同一服务商共用）
     const keyRow = $('#row-tts-key');
-    keyRow.hidden = e.id === 'browser' || Boolean(e.free);
+    keyRow.hidden = e.id === 'browser' || Boolean(e.free) || e.fromProvider;
     if (!keyRow.hidden) {
       $('#tts-key').value = cfg.keys[e.keyFrom] || '';
       $('#tts-key').placeholder = gateway?.keys?.includes(e.keyFrom) ? '已使用网关环境变量里的密钥' : e.custom ? '自建服务可留空' : '';
@@ -117,15 +121,14 @@ export function initVoicePanel({ panels, speaker, getGateway }) {
     speaker.preview('声线已切换。');
   });
   $('#tts-cues').addEventListener('change', (ev) => patchVoice({ cues: ev.target.checked }));
-  $('#btn-tts-preview').addEventListener('click', () => {
-    const e = ttsEngineById(resolveVoice(panels.config, getGateway()).engine);
-    $('#tts-status').textContent = `正在用「${e.name}」试听…`;
-    speaker.preview();
-    clearTimeout(render.t);
-    render.t = setTimeout(() => { $('#tts-status').textContent = ''; }, 5000);
+  $('#btn-tts-preview').addEventListener('click', async () => {
+    $('#tts-status').textContent = '正在检测实际音色服务…';
+    try { const r = await speaker.test(); $('#tts-status').textContent = `已试听：${r.engine} · ${r.voice || '默认音色'}`; }
+    catch (e) { $('#tts-status').textContent = `试听失败：${e.message}。没有将系统声音当作所选音色。`; }
   });
+
   // ------------------------------------------------------------ 语音识别
-  const browserSR = speechRecognitionSupported && !window.jarvisDesktop;
+  const browserSR = speechRecognitionSupported && !window.jarvisDesktop && !MOBILE;
   const sttSel = $('#stt-engine');
   sttSel.replaceChildren(opt('auto', '自动'), ...STT_ENGINES.filter((e) => e.id !== 'browser' || browserSR).map((e) => opt(e.id, e.name)));
   function renderStt() {

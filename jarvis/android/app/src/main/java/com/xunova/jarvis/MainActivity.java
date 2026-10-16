@@ -12,6 +12,12 @@ import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.WebViewListener;
 
 public class MainActivity extends BridgeActivity {
+    private boolean rendererGone = false;
+    @Override protected void onPause() {
+        super.onPause();
+        // 保留网络任务的 JS 执行；音频、录音由前端生命周期独立停止。
+        if (TaskService.running && !rendererGone && getBridge() != null) getBridge().getWebView().onResume();
+    }
     @Override
     public void onCreate(Bundle savedInstanceState) {
         CrashLog.install(this);
@@ -20,6 +26,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(CrashLogPlugin.class);
         registerPlugin(MobileSpeechPlugin.class);
         registerPlugin(EdgeSpeechPlugin.class);
+        registerPlugin(BackgroundTaskPlugin.class);
         super.onCreate(savedInstanceState);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             getBridge().getWebView().setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true);
@@ -33,6 +40,7 @@ public class MainActivity extends BridgeActivity {
         getBridge().addWebViewListener(new WebViewListener() {
             @Override
             public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                rendererGone = true;
                 boolean crashed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && detail != null && detail.didCrash();
                 ActivityManager.MemoryInfo memory = new ActivityManager.MemoryInfo();
                 ((ActivityManager) getSystemService(Context.ACTIVITY_SERVICE)).getMemoryInfo(memory);

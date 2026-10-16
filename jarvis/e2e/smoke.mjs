@@ -284,6 +284,14 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
     check(`生成 ${ext} 并出现在工作区`, listed === 1);
   }
   // 对话里生成的文件：点一下在工作区打开
+  await page.locator('[data-category="sheet"]').click();
+  await page.waitForFunction(()=>document.querySelectorAll('#file-list li').length===1 && /示例.xlsx/.test(document.querySelector('#file-list').textContent));
+  check('工作区按表格分类', (await page.locator('#file-list li').count()) === 1 && /示例.xlsx/.test(await page.textContent('#file-list')));
+  await page.click('.ws-list-toggle');
+  check('工作区文件列表可以收起', await page.locator('#file-list').evaluate(el=>el.hidden));
+  await page.click('.ws-list-toggle');
+  await page.locator('[data-category="all"]').click();
+  await page.waitForFunction(()=>/示例.docx/.test(document.querySelector('#file-list').textContent));
   await closeSide(page);
   await page.locator('#transcript .file-link', { hasText: '示例.docx' }).first().click();
   await page.waitForFunction(() => /示例\.docx/.test(document.querySelector('#viewer-name')?.textContent || ''), null, { timeout: 5000 }).catch(() => {});
@@ -401,11 +409,19 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.setInputFiles('#file-input', { name: '截图.png', mimeType: 'image/png', buffer: png });
   await page.waitForSelector('#attach-list .has-thumb img', { timeout: 5000 }).catch(() => {});
   check('图片附件显示缩略图', (await page.locator('#attach-list .has-thumb img').count()) === 1);
+  await closeSide(page);
+  await page.locator('#attach-list .image-open').click();
+  check('发送前点击附件查看图片', await page.locator('dialog.image-preview').isVisible());
+  await page.getByRole('button',{name:'关闭图片预览',exact:true}).click();
   const visIdx = fake.seen.length;
   await ask(page, '这张图是什么');
   const visUser = fake.seen[visIdx]?.messages.filter((m) => m.role === 'user').at(-1);
   check('看图：图片随消息发给模型（image_url）', Array.isArray(visUser?.content) && visUser.content.some((p) => p.type === 'image_url' && /^data:image\/jpeg;base64,/.test(p.image_url.url)), JSON.stringify(visUser?.content)?.slice(0, 100));
   check('对话里显示图片缩略图', (await page.locator('.msg.user').last().locator('.msg-images img').count()) === 1);
+  check('上传消息使用简短工作区回执', /已上传工作区/.test(await page.locator('.msg.user').last().textContent()) && !/已上传到工作区：/.test(await page.locator('.msg.user').last().textContent()));
+  await page.locator('.msg.user').last().locator('.msg-images .image-open').click();
+  check('历史上传图片可以点开查看', await page.locator('dialog.image-preview').isVisible());
+  await page.getByRole('button',{name:'关闭图片预览',exact:true}).click();
   // 追问时提到图片：之前的图片再带给模型；不提图片的闲聊不带
   const followIdx = fake.seen.length;
   await ask(page, '再看看上面那张图片');
