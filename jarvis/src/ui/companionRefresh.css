@@ -147,6 +147,9 @@ body.compact.companion-edition{--top-h:64px;--wy-reading-inset:20px;font-family:
 /* 渲染进程异常后自动开启，设置里也可手动切换；保留布局所需的 transform。 */
 :root.safe-render *,:root.safe-render *::before,:root.safe-render *::after{animation:none!important;transition:none!important;filter:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;will-change:auto!important;mix-blend-mode:normal!important;box-shadow:none!important}
 :root.safe-render .wy-mascot{transform:none!important}
+/* 兼容显示：图片遮罩（启动页扫光、首页插画边缘淡出）在部分厂商内核上绘制出错，一并关掉 */
+:root.safe-render #app-splash .as-shine{display:none!important}
+:root.safe-render .home-paper,:root.safe-render .home-task-icon{-webkit-mask:none!important;mask:none!important}
 
 .mobile-app .companion-edition.wy-paused .wy-mascot{animation-play-state:paused!important}
 

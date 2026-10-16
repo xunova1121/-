@@ -152,6 +152,7 @@ try{
   await safePage.getByRole('button',{name:'回到最近对话',exact:true}).click();
   await safePage.evaluate(()=>window.__jarvis.showPanel('settings'));
   check('手机可复制包含运行规模的异常诊断',await safePage.isVisible('#btn-copy-render-diagnostics'));
+  check('兼容模式关掉图片遮罩（启动页扫光、首页插画淡出）',await safePage.evaluate(()=>{const el=document.createElement('i');el.className='home-task-icon';document.body.append(el);const m=getComputedStyle(el);const off=(m.maskImage||m.webkitMaskImage||'none')==='none';el.remove();return off;}));
   check('手机提供可切换的兼容显示设置',await safePage.isVisible('#set-safe-render')&&await safePage.isChecked('#set-safe-render'));
   await safePage.uncheck('#set-safe-render');await safePage.waitForFunction(()=>!document.documentElement.classList.contains('safe-render')&&document.querySelectorAll('.msg').length===24);
   check('关闭兼容显示恢复标准分页，不重新加载页面',await safePage.evaluate(()=>document.querySelector('.msg.user .body').textContent.includes('历史消息 37')));

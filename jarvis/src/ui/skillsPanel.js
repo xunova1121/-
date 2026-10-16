@@ -212,6 +212,7 @@ export function initSkillsPanel({ toast, onUse, onChange }) {
   }, true);
 
   // 首次启动：预置常用技能
-  packs.seedBuiltins().then((added) => { if (added.length) toast(`已预置 ${added.length} 个常用技能，输入 / 可以点名使用`); }).catch(() => {}).finally(refresh);
+  // 手机首屏小，这条提示会正好盖住首页的任务卡；手机上不弹（技能在左边栏“技能”里能看到，输入 / 也会列出来）
+  packs.seedBuiltins().then((added) => { if (added.length && !MOBILE) toast(`已预置 ${added.length} 个常用技能，输入 / 可以点名使用`); }).catch(() => {}).finally(refresh);
   return { refresh, installFile, get installed() { return installed; } };
 }
