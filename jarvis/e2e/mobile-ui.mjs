@@ -83,7 +83,7 @@ try{
   async function ask(text){const before=await page.locator('.msg.agent').count();await page.fill('#prompt',text);await page.press('#prompt','Enter');await page.waitForFunction(n=>document.querySelectorAll('.msg.agent').length>n&&!document.querySelector('.msg.agent.streaming'),before,{timeout:30000});await page.waitForTimeout(120);}
   await ask('你好');
   check('对话正文两侧保留至少 20px 阅读留白',await page.locator('.msg.agent').last().evaluate(el=>{const r=el.getBoundingClientRect();return r.left>=20&&r.right<=innerWidth-20;}));
-  check('手机短回复有较大的单个表情角色和短回应',await page.locator('.msg.agent').last().evaluate(el=>{const who=el.querySelector('.who');return who.querySelectorAll('.wy-mascot').length===1&&who.querySelector('.wy-mascot').getBoundingClientRect().height>=100&&getComputedStyle(who.querySelector('.wy-reply-greeting')).display!=='none';}));
+  check('手机短回复有较大的单个表情角色，答完不留固定的话',await page.locator('.msg.agent').last().evaluate(el=>{const who=el.querySelector('.who');return who.querySelectorAll('.wy-mascot').length===1&&who.querySelector('.wy-mascot').getBoundingClientRect().height>=100&&!who.querySelector('.wy-reply-greeting');}));
   await page.focus('#prompt');await page.evaluate(()=>window.__resizeKeyboard(444));await page.waitForTimeout(80);
   check('键盘弹出时角色缩小且发送按钮保持可见',await page.evaluate(()=>{const r=document.querySelector('.msg.agent:last-child .who .wy-mascot').getBoundingClientRect(),send=document.getElementById('btn-send').getBoundingClientRect();return document.body.classList.contains('wy-keyboard-open')&&r.height<=60&&send.bottom<=445&&send.top>=0;}));
   await page.evaluate(()=>document.activeElement.blur());await page.waitForTimeout(50);

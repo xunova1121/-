@@ -19,7 +19,7 @@ public class CompanionWallpaperService extends WallpaperService {
         Bitmap atlas;boolean visible=false,surface=false,destroyed=false;
         long touched=0,lastAction=SystemClock.uptimeMillis();int taps=0;
         float width=1,height=1,cx,cy,size,downX,downY;String caption="你一叫，我就在呀";
-        @Override public void onCreate(SurfaceHolder holder){super.onCreate(holder);setTouchEventsEnabled(true);try(java.io.InputStream stream=getAssets().open("companion-atlas.png")){atlas=BitmapFactory.decodeStream(stream);}catch(Exception error){CrashLog.write(CompanionWallpaperService.this,"陪伴壁纸素材："+error.getMessage());}}
+        @Override public void onCreate(SurfaceHolder holder){super.onCreate(holder);setTouchEventsEnabled(true);try(java.io.InputStream stream=getAssets().open("companion-atlas.webp")){atlas=BitmapFactory.decodeStream(stream);}catch(Exception error){CrashLog.write(CompanionWallpaperService.this,"陪伴壁纸素材："+error.getMessage());}}
         @Override public void onSurfaceChanged(SurfaceHolder holder,int format,int w,int h){super.onSurfaceChanged(holder,format,w,h);width=w;height=h;cx=w*.56f;cy=h*.44f;size=Math.min(w*.72f,h*.35f);surface=true;schedule();}
         @Override public void onSurfaceDestroyed(SurfaceHolder holder){surface=false;handler.removeCallbacks(draw);super.onSurfaceDestroyed(holder);}
         @Override public void onVisibilityChanged(boolean on){visible=on;schedule();}

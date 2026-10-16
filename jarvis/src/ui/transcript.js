@@ -241,7 +241,8 @@ export class Transcript {
     head.append(Object.assign(document.createElement('span'), { className: 'who-name', textContent: LABEL[role] ?? role }), Object.assign(document.createElement('span'), { className: 'who-time', textContent: ` · ${hhmm(ts)}` }));
     const mascot = role === 'agent' ? createMascot(text ? 'idle' : 'think') : null;
     if (mascot) { mascot.classList.add('who-mood'); head.prepend(mascot); }
-    const greeting = role === 'agent' ? Object.assign(document.createElement('span'), { className:'wy-reply-greeting', textContent:text ? '我在这里，陪你慢慢来。' : '我在想，稍等一下哦…' }) : null;
+    // 小精灵旁的气泡只在回答过程中显示状态（想 / 查资料 / 搓手）；答完就收起，不在每条回答前留一句固定的话
+    const greeting = role === 'agent' && !text ? Object.assign(document.createElement('span'), { className:'wy-reply-greeting', textContent:'我在想，稍等一下哦…' }) : null;
     if (greeting) head.append(greeting);
     const present = (state, detail = '') => {
       if (!mascot) return;
@@ -573,7 +574,8 @@ export class Transcript {
       done(meta, { onFeedback } = {}) {
         if (mascot) {
           const paused = /已打断|中断/.test(meta || '');
-          present(paused ? 'think' : moodState || 'happy', paused ? '先停一下，需要时可以继续。' : prog?.n || el.querySelector('.tool-card') ? '做好啦，一起看看。' : '我在呀，慢慢说。');
+          present(paused ? 'think' : moodState || 'happy');
+          greeting?.remove();
           sizeReply(raw);
         }
         el.classList.remove('streaming');

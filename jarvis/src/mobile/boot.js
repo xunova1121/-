@@ -10,6 +10,7 @@ import { wrapFetch, nativeFetcher } from './nativeFetch.js';
 import { installSpeechShim } from './speechShim.js';
 import { createNativeSaver } from './saveNative.js';
 import { applyDisplayMode } from './renderHealth.js';
+import { startScreenTrail } from './renderDiagnostics.js';
 import { topColor } from './topColor.js';
 
 if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
@@ -112,6 +113,7 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
     const { registerPlugin } = await import('@capacitor/core');
     const crashLog = registerPlugin('CrashLog');
     globalThis.__jarvisRenderHealthPlugin = crashLog;
+    const prevScreen = startScreenTrail(); // 上一次运行最后停在哪个界面；从现在起记这一次的
     let { text, safeDisplay } = await crashLog.take();
     if (typeof safeDisplay === 'boolean') applyDisplayMode(safeDisplay);
     if (text) {
@@ -119,6 +121,7 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
       let doing = '';
       try { doing = localStorage.getItem('jarvis.lastActivity') || ''; localStorage.removeItem('jarvis.lastActivity'); } catch { /* 读不到就不写 */ }
       if (doing) text = `${text.trim()}\n崩溃前正在：${doing}`;
+      if (prevScreen) text = `${text.trim()}\n崩溃前界面：${prevScreen}`;
       try { localStorage.setItem('jarvis.lastCrash', text.trim()); } catch { /* 存不了就只提示 */ }
       const last = text.trim().split('\n').filter((l) => !l.startsWith('崩溃前')).at(-1) ?? '';
       setTimeout(() => globalThis.__jarvisToast?.(`上次异常退出：${last.slice(15, 60)}（设置 → 模型 → 版本那一栏可以看详情）`), 4000);

@@ -28,10 +28,10 @@
 /* 首页大角色轻浮动，避免通用挥手旋转让头部越过屏幕边缘。点击后的表情动画保留。 */
 .home-pet .wy-mascot[data-state=wave]{animation:wy-float 3.6s ease-in-out infinite}
 /* 复用用户确认稿中的原插画；CSS 精确取文档/热点/日程区域，不绘制稿中的文字与示意数据。 */
-.home-paper{width:128px;height:136px;right:0;top:8px;transform:none;background:url('./home-concept.png') -225px -342px/388.35px 820.35px no-repeat;mask-image:linear-gradient(transparent,#000 6% 92%,transparent)}
+.home-paper{width:128px;height:136px;right:0;top:8px;transform:none;background:url('./home-concept.webp') -225px -342px/388.35px 820.35px no-repeat;mask-image:linear-gradient(transparent,#000 6% 92%,transparent)}
 .home-paper i,.home-paper b,.home-paper::after{display:none}
-.home-task-icon{width:40px;height:48px;border:0;border-radius:10px;background:url('./home-concept.png') -27.2px -492.8px/345.2px 729.2px no-repeat;box-shadow:none;transform:none;color:transparent;font-size:0;mask-image:linear-gradient(transparent,#000 10% 88%,transparent)}
-.home-suggestion:nth-child(2) .home-task-icon{width:40px;height:48px;border:0;background:url('./home-concept.png') -185.6px -492.8px/345.2px 729.2px no-repeat;box-shadow:none;transform:none;color:transparent}
+.home-task-icon{width:40px;height:48px;border:0;border-radius:10px;background:url('./home-concept.webp') -27.2px -492.8px/345.2px 729.2px no-repeat;box-shadow:none;transform:none;color:transparent;font-size:0;mask-image:linear-gradient(transparent,#000 10% 88%,transparent)}
+.home-suggestion:nth-child(2) .home-task-icon{width:40px;height:48px;border:0;background:url('./home-concept.webp') -185.6px -492.8px/345.2px 729.2px no-repeat;box-shadow:none;transform:none;color:transparent}
 @media(max-width:360px){.home-paper{right:1px;transform:scale(.85);transform-origin:right center}.home-task-icon,.home-suggestion:nth-child(2) .home-task-icon{width:30px;height:40px;background-size:276.16px 583.36px;background-position:-21.76px -394.24px}.home-suggestion:nth-child(2) .home-task-icon{background-position:-148.48px -394.24px}}
 
 /* 未央主动招呼的对白气泡；只使用轻量 CSS，保留点击时的表情。 */

@@ -2,7 +2,7 @@
 .holo-dialog{position:fixed;inset:0;width:100%;height:100%;max-width:none;max-height:none;padding:0;margin:0;border:0;background:#071426;color:#edf7ff;overflow:hidden;box-sizing:border-box}
 .holo-dialog::backdrop{background:#071426}
 .holo-dialog:not([open]){display:none}
-.wy-hologram .wy-mascot{background-image:url('./mascot-companion.png');background-size:400% 300%}
+.wy-hologram .wy-mascot{background-image:url('./mascot-companion.webp');background-size:400% 300%}
 .wy-hologram .wy-mascot[data-state=wave]{background-position:0 50%}
 .wy-hologram .wy-mascot[data-state=love]{background-position:33.333333% 50%}
 .wy-hologram .wy-mascot[data-state=happy],.wy-hologram .wy-mascot[data-state=pet]{background-position:66.666667% 50%}

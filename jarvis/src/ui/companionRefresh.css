@@ -1,5 +1,5 @@
 /* 陪伴感加强版：手机突出角色，PC 每条回答只保留左侧一个头像。 */
-.companion-edition .wy-mascot{background-image:url('./mascot-companion.png');background-size:400% 300%}
+.companion-edition .wy-mascot{background-image:url('./mascot-companion.webp');background-size:400% 300%}
 .companion-edition .wy-mascot[data-state=wave]{background-position:0 50%}
 .companion-edition .wy-mascot[data-state=love]{background-position:33.333333% 50%}
 .companion-edition .wy-mascot[data-state=happy],.companion-edition .wy-mascot[data-state=pet]{background-position:66.666667% 50%}

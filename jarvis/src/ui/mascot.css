@@ -1,4 +1,4 @@
-.wy-mascot{position:relative;display:inline-block;flex:none;width:calc(var(--mascot-size,40px)*.75);height:var(--mascot-size,40px);vertical-align:middle;background:url('./mascot-states.png') 0 0/400% 200% no-repeat;transform-origin:50% 75%;animation:wy-float 3.6s ease-in-out infinite}
+.wy-mascot{position:relative;display:inline-block;flex:none;width:calc(var(--mascot-size,40px)*.75);height:var(--mascot-size,40px);vertical-align:middle;background:url('./mascot-states.webp') 0 0/400% 200% no-repeat;transform-origin:50% 75%;animation:wy-float 3.6s ease-in-out infinite}
 .wy-mascot[data-state=idle]{animation:wy-float 3.6s ease-in-out infinite,wy-blink 5.5s steps(1,end) infinite}
 .wy-mascot[data-state=wink]{background-position:33.333333% 0}
 .wy-mascot[data-state=rub]{background-position:66.666667% 0;animation:wy-rub .65s ease-in-out infinite}
