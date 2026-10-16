@@ -107,7 +107,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   // 电脑版的更新按钮（重启以更新 / 下载进度）在工作台顶栏里要能显示出来
   check('工作台：顶栏的更新按钮能显示', await page.evaluate(() => { const p = document.querySelector('#update-pill'); p.hidden = false; p.dataset.state = 'ready'; p.textContent = '重启以更新到 1.0.99'; const r = p.getBoundingClientRect(); const ok = getComputedStyle(p).display !== 'none' && r.width > 40 && r.top < 80; p.hidden = true; return ok; }));
   check('工作台：左侧导航、对话 / 工作室切换', await page.isVisible('.rail .wb-nav .wb-new') && (await page.locator('.wb-tabs button').count()) === 2);
-  check('工作台：导航分组，最近对话保留独立区域',await page.evaluate(()=>{const rail=document.querySelector('.rail'),recent=document.querySelector('.wb-recent').getBoundingClientRect(),foot=document.querySelector('.wb-bottom').getBoundingClientRect();return document.querySelectorAll('.wb-nav-secondary button').length===4&&recent.height>=200&&foot.bottom<=innerHeight&&getComputedStyle(rail).overflowY==='hidden'&&getComputedStyle(document.querySelector('.wb-history-list')).overflowY==='auto';}));
+  check('工作台：导航分组，最近对话保留独立区域',await page.evaluate(()=>{const rail=document.querySelector('.rail'),recent=document.querySelector('.wb-recent').getBoundingClientRect(),foot=document.querySelector('.wb-bottom').getBoundingClientRect();return document.querySelectorAll('.wb-nav-secondary button').length===4&&recent.height>=200&&foot.bottom<=innerHeight&&getComputedStyle(rail).overflowY==='hidden'&&getComputedStyle(document.querySelector('.wb-history-list')).overflowY==='visible';}));
   const interactionSpeech = await page.evaluate(() => { const s = window.__jarvis.speaker, enabled = s.enabled; s.enabled = false; return enabled; });
   await page.locator('.wb-mark').click();
   check('点击左上角未央，居中打开互动面板', await page.locator('.wy-companion').evaluate(d => d.open));
@@ -574,6 +574,34 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('WebGL 上下文丢失后恢复 ≤ 500ms', typeof restored === 'number' && restored <= 500, `${restored}ms · ${JSON.stringify(recovery)}`);
   check('无页面错误', errors.length === 0, errors.join(' | '));
   await ctx.close();
+}
+
+// ---------- 滚动条完全隐藏、四条最近对话与查看更多 ----------
+{
+  const ctx=await browser.newContext({viewport:{width:1024,height:600},reducedMotion:'reduce'}),page=await ctx.newPage();
+  await page.goto(BASE);await page.waitForFunction(()=>window.__jarvis);
+  await page.evaluate(async()=>{
+    const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('jarvis');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+    const now=Date.now(),long=Array.from({length:24},(_,i)=>`第 ${i+1} 段：这里是一段用于检查滚动的完整回复，所有内容都应可以用滚轮阅读。`).join('\n\n');
+    await new Promise((resolve,reject)=>{const t=db.transaction('sessions','readwrite'),store=t.objectStore('sessions');for(let i=0;i<7;i++)store.put({id:'scroll-check-'+i,title:'最近对话检查 '+i,titleSet:true,createdAt:now-1000,updatedAt:now-i,pinned:false,messages:[{role:'user',content:'滚动检查 '+i,ts:now-1000},{role:'assistant',content:long,ts:now-900}]});t.oncomplete=resolve;t.onerror=()=>reject(t.error);});db.close();
+  });
+  await page.reload();await page.waitForFunction(()=>document.querySelectorAll('.wb-history-list .wb-chat').length===4&&document.querySelectorAll('#transcript .msg').length===2);
+  check('最近对话只显示最新四条，其余显示查看更多',await page.evaluate(()=>{const rows=[...document.querySelectorAll('.wb-history-list .wb-chat')];return rows.length===4&&rows.every((b,i)=>b.dataset.id==='scroll-check-'+i)&&!document.querySelector('.wb-recent-more').hidden&&getComputedStyle(document.querySelector('.wb-history-list')).overflowY==='visible';}));
+  check('四条记录与查看更多都在侧栏内可见',await page.evaluate(()=>{const rows=[...document.querySelectorAll('.wb-history-list .wb-chat')],more=document.querySelector('.wb-recent-more').getBoundingClientRect(),footer=document.querySelector('.wb-bottom').getBoundingClientRect();return rows.at(-1).getBoundingClientRect().bottom<=more.top&&more.bottom<=footer.top;}));
+  await page.locator('#transcript').hover();
+  check('对话区悬停时也完全隐藏滚动条',await page.locator('#transcript').evaluate(el=>getComputedStyle(el).scrollbarWidth==='none'&&getComputedStyle(el,'::-webkit-scrollbar').display==='none'));
+  await page.evaluate(()=>{const el=document.getElementById('transcript');el.scrollTop=0;el.dispatchEvent(new Event('scroll'));});await page.mouse.wheel(0,400);await page.waitForFunction(()=>document.getElementById('transcript').scrollTop>100);
+  check('隐藏滚动条后仍可使用鼠标滚轮向下阅读',await page.locator('#transcript').evaluate(el=>el.scrollTop>100));
+  await page.mouse.wheel(0,-400);await page.waitForFunction(()=>document.getElementById('transcript').scrollTop<100);
+  check('对话也可用鼠标滚轮向上阅读',await page.locator('#transcript').evaluate(el=>el.scrollTop<100));
+  await page.locator('.wb-recent-more').click();await page.waitForFunction(()=>document.querySelectorAll('#session-list .session').length===7);
+  check('查看更多打开全部七条对话，没有丢弃历史',await page.isVisible('[data-pane=sessions]')&&await page.locator('#session-list .session').count()===7);
+  await page.locator('.wb-new').click();await page.waitForFunction(()=>!document.querySelector('.wb-landing').hidden);
+  await page.locator('.wb-landing').hover();
+  check('新建会话页悬停后也不显示滚动条',await page.locator('.wb-landing').evaluate(el=>getComputedStyle(el).scrollbarWidth==='none'&&getComputedStyle(el,'::-webkit-scrollbar').display==='none'));
+  await page.mouse.wheel(0,300);await page.waitForFunction(()=>document.querySelector('.wb-landing').scrollTop>0);
+  check('新建会话页溢出时仍能滚动查看完整内容',await page.locator('.wb-landing').evaluate(el=>el.scrollTop>0));
+  await page.screenshot({path:`${OUT}/pc-no-scrollbars.png`});await ctx.close();
 }
 
 // ---------- 2. 多会话：自动保存、刷新后接着聊、新建 / 切换 / 搜索 / 重命名 / 删除 ----------

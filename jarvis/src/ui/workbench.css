@@ -9,7 +9,7 @@ body.workbench{background:#fff;color:#24272e;font-family:'Microsoft YaHei','Sego
 .workbench .rail{width:248px;padding:27px 16px 16px;background:#f7f7f8;border:0;gap:0;overflow:auto;min-height:0;transform:none!important;position:relative;inset:auto;display:flex}
 .wb-brand{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:2px 12px 24px}.wb-brand b{font-size:23px;letter-spacing:1px;font-weight:600}.wb-mark{font-size:29px;color:#6d5be4}.wb-brand small{font-size:10px;color:#90939d;flex-basis:100%;padding-left:35px;letter-spacing:2px}
 .wb-nav{display:grid;gap:3px}.wb-nav button{display:flex;align-items:center;gap:16px;text-align:left;min-height:45px;padding:10px 14px;border:0;border-radius:12px;background:transparent;font-size:14px;color:#4c4e56}.wb-nav button:hover{background:#ececf0;color:#302940}.wb-nav .wb-new{background:#eaeaec;margin-bottom:10px;color:#25262a;font-weight:600}.wb-nav-icon{font-size:22px;line-height:1;width:22px;color:#777884;text-align:center}
-.wb-recent{margin:30px 10px 20px;flex:1;min-height:100px;overflow:auto}.wb-recent-head{display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#9699a3;margin-bottom:14px}.wb-recent-head button{border:0;background:none;font-size:23px;color:#989ba4}.wb-recent>div:last-child{display:grid;gap:5px}.wb-recent>div:last-child button{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:0;background:transparent;text-align:left;padding:10px 4px;font-size:12px;color:#555963;border-radius:7px}.wb-recent>div:last-child button:hover{background:#ececf0}.wb-recent p{font-size:11px;color:#9b9da7;line-height:1.9}.wb-bottom{border:0;background:transparent;text-align:left;padding:13px;color:#747782;font-size:12px}
+.wb-recent{margin:30px 10px 20px;flex:1;min-height:100px;overflow:auto}.wb-recent-head{display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#9699a3;margin-bottom:14px}.wb-recent-head button{border:0;background:none;font-size:23px;color:#989ba4}.wb-recent>.wb-history-list{display:grid;gap:5px}.wb-recent>.wb-history-list button{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:0;background:transparent;text-align:left;padding:10px 4px;font-size:12px;color:#555963;border-radius:7px}.wb-recent>.wb-history-list button:hover{background:#ececf0}.wb-recent p{font-size:11px;color:#9b9da7;line-height:1.9}.wb-bottom{border:0;background:transparent;text-align:left;padding:13px;color:#747782;font-size:12px}
 .wb-tabs{order:-1;display:flex;border-radius:24px;background:#f5f5f7;padding:4px}.wb-tabs button{border:0;padding:8px 22px;font-size:13px;background:transparent;border-radius:20px;color:#979aa2}.wb-tabs .selected{background:#fff;color:#282b32;font-weight:600;box-shadow:0 1px 4px #00000007}
 .workbench .main{overflow:hidden;padding:0 32px 18px;background:white}.workbench:not(.wb-studio) #stage-wrap{display:none!important}.workbench .main>.transcript:has(.welcome){display:none}.workbench .welcome{display:none!important}
 .wb-landing{width:min(900px,100%);margin:auto;flex:1;display:flex;flex-direction:column;justify-content:center;gap:42px;padding:25px 20px 45px;min-height:0;overflow:auto}.wb-intro{text-align:center}.wb-hero-mark{font-size:34px;line-height:1;color:#8e80e8;margin-bottom:19px}.wb-intro h1{margin:0;font-size:clamp(27px,3vw,43px);font-weight:650;letter-spacing:1px}.wb-intro p{font-size:17px;color:#9a9ba3;margin:16px 0 0}.wb-cards{display:grid;grid-template-columns:1fr 1fr;gap:14px}.wb-card{position:relative;display:flex;align-items:center;justify-content:space-between;overflow:hidden;min-height:106px;border:1px solid #eeedf1;border-radius:17px;background:#faf9f6;padding:22px;text-align:left;transition:transform .18s,box-shadow .18s}.wb-card:hover{transform:translateY(-3px);box-shadow:0 8px 28px #3630580c}.wb-card b{display:block;font-size:15px;font-weight:600;color:#37353e}.wb-card small{display:block;color:#9c9ba3;margin-top:11px;font-size:12px}.wb-card.expert{background:#faf8fa}.wb-card.document{background:#f8f7fc}.wb-card.data{background:#f5fafc}.wb-card-art{font:normal 42px/1 'Segoe UI',sans-serif;display:grid;place-items:center;flex-shrink:0;width:70px;height:66px;margin-left:10px;color:#ba9653;background:linear-gradient(140deg,#f2ead5,#fff7);border-radius:19px;transform:rotate(-10deg);box-shadow:6px 7px 0 #d9caaa20}.expert .wb-card-art{color:#b687b3;background:linear-gradient(140deg,#f0ddec,#fff)}.document .wb-card-art{color:#9780d3;background:linear-gradient(140deg,#e8dffb,#fff)}.data .wb-card-art{color:#6eacd8;background:linear-gradient(140deg,#dceffb,#fff)}
@@ -57,7 +57,7 @@ body.workbench{background:#fff;color:#24272e;font-family:'Microsoft YaHei','Sego
 .wb-recent .wb-chat.running .wb-run{width:12px;height:12px;background:none;border:2px solid #d6d0f2;border-top-color:#6556da;animation:wb-spin .8s linear infinite}
 @keyframes wb-spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.workbench .msg.agent.streaming>.who::before{animation:none}.wb-recent .wb-chat.running .wb-run,.workbench .tool-group.working .tg-title::before{animation-duration:3s}}
-.wb-recent>div:last-child .wb-chat{padding:9px 8px}
+.wb-recent>.wb-history-list .wb-chat{padding:9px 8px}
 .wb-recent .wb-chat.current{background:#ececf0;color:#2f2a45}
 .wb-brand img.wb-mark{width:34px;height:31px;object-fit:contain}.wb-intro img.wb-hero-mark{width:84px;height:77px;object-fit:contain;margin:0 auto 6px;display:block}
 /* 顶栏的更新按钮：下载中显示进度条，下载好后变成实心的“重启以更新” */
@@ -66,7 +66,7 @@ body.workbench{background:#fff;color:#24272e;font-family:'Microsoft YaHei','Sego
 .workbench #update-pill[data-state="ready"]{background:#6556da;border-color:#6556da;color:#fff;box-shadow:0 2px 10px #6556da40;cursor:pointer}
 .workbench #update-pill[data-state="available"]{cursor:pointer}
 
-/* 导航与最近对话各占固定区域，只让记录列表滚动。 */
+/* 导航与最近对话各占固定区域，四条记录直接展示。 */
 @media(min-width:701px){
  .workbench .rail{height:100%;padding:18px 14px 12px;flex-direction:column;overflow:hidden}
  .companion-edition.workbench .wb-brand{padding-bottom:12px;flex-shrink:0}
@@ -76,10 +76,10 @@ body.workbench{background:#fff;color:#24272e;font-family:'Microsoft YaHei','Sego
  .workbench .wb-nav-secondary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin-top:8px;padding-top:8px;border-top:1px solid #e7e5ec}
  .workbench .wb-nav-secondary button{min-height:34px;padding:7px 6px;gap:5px;font-size:11px}
  .workbench .wb-nav-secondary .wb-nav-icon{font-size:17px;width:18px}
- .workbench .wb-recent{display:flex;flex-direction:column;flex:1;min-height:180px;margin:18px 0 8px;overflow:hidden}
- .workbench .wb-recent-head{flex:none;margin-bottom:8px;padding:0 8px}
- .workbench .wb-recent>.wb-history-list{display:flex;flex-direction:column;gap:4px;flex:1;min-height:0;overflow:auto;padding:0 3px}
- .workbench .wb-recent>.wb-history-list .wb-chat{flex-shrink:0;padding:9px 8px}
+ .workbench .wb-recent{display:flex;flex-direction:column;flex:1;min-height:210px;margin:18px 0 8px;overflow:hidden}
+ .workbench .wb-recent-head{flex:none;margin-bottom:8px;padding:0 8px;min-height:24px}
+ .workbench .wb-recent>.wb-history-list{display:flex;flex-direction:column;gap:3px;flex:none;min-height:0;overflow:visible;padding:0 3px}
+ .workbench .wb-recent>.wb-history-list .wb-chat{flex-shrink:0;min-height:32px;padding:7px 8px;line-height:18px}
  .workbench .wb-bottom{flex:none;padding:10px 8px;min-height:36px}
  .workbench.wb-rail-folded .wb-nav-secondary{grid-template-columns:1fr}
  .workbench.wb-rail-folded .wb-recent{display:none}
@@ -95,14 +95,13 @@ body.workbench{background:#fff;color:#24272e;font-family:'Microsoft YaHei','Sego
  .workbench .wb-nav .wb-new{min-height:38px;margin-bottom:2px}
  .workbench .wb-nav-secondary{margin-top:5px;padding-top:5px}
  .workbench .wb-nav-secondary button{min-height:30px;padding:5px 4px}
- .workbench .wb-recent{min-height:150px;margin-top:12px}
+ .workbench .wb-recent{min-height:210px;margin-top:12px}
  .workbench .wb-bottom{padding:7px 8px;min-height:32px}
 }
-/* Windows 与浏览器都不用原生粗轨道和上下箭头；滚动能力仍保留。 */
-.workbench *{scrollbar-width:thin;scrollbar-color:transparent transparent}
-.workbench *:hover,.workbench *:focus-within{scrollbar-color:#c7c0d1 transparent}
-.workbench *::-webkit-scrollbar{width:6px;height:6px}
-.workbench *::-webkit-scrollbar-track{background:transparent}
-.workbench *::-webkit-scrollbar-thumb{background:transparent;border-radius:10px}
-.workbench *:hover::-webkit-scrollbar-thumb,.workbench *:focus-within::-webkit-scrollbar-thumb{background:#c7c0d1}
-.workbench *::-webkit-scrollbar-button{display:none;width:0;height:0}
+/* 完全隐藏滚动条，包括悬停状态；滚轮、触控板和键盘滚动保持可用。 */
+.workbench,.workbench *{scrollbar-width:none!important;-ms-overflow-style:none!important}
+.workbench::-webkit-scrollbar,.workbench *::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}
+.workbench .wb-landing{justify-content:safe center}
+.workbench .wb-recent-head button{width:24px;height:24px;padding:0;line-height:1;font-size:20px}
+.workbench .wb-recent-more{flex:none;align-self:flex-start;min-height:28px;margin:6px 8px 0;padding:4px 7px;border:0;background:transparent;color:#82758f;font:12px var(--font-ui);cursor:pointer}
+.workbench .wb-recent-more:hover{color:#6556da;background:#efebf7;border-radius:7px}
