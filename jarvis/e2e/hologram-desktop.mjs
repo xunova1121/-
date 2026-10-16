@@ -17,6 +17,7 @@ try{
   await background.waitForFunction(()=>window.__wallpaper);await widget.waitForSelector('.holo-pet');widget.on('pageerror',e=>errors.push(e.message));
   check('静态桌面背景与透明互动窗口分别创建',!!background&&!!widget);
   check('背景不抢焦点、角色不强制置顶',await app.evaluate(({BrowserWindow})=>{const rows=BrowserWindow.getAllWindows();const bg=rows.find(w=>/wallpaper.html$/.test(w.webContents.getURL())),pet=rows.find(w=>w.webContents.getURL().includes('widget=1'));return !bg.isFocusable()&&!pet.isAlwaysOnTop();}));
+  check('透明窗口的网页根节点也透明，不出现整块深色矩形',await widget.evaluate(()=>[document.documentElement,document.body,document.querySelector('.wy-hologram')].every(el=>getComputedStyle(el).backgroundColor==='rgba(0, 0, 0, 0)')));
   check('陪伴页面拿不到 Node，背景不启动 WebGL',await widget.evaluate(()=>typeof require==='undefined'&&typeof process==='undefined')&&await background.evaluate(()=>!document.querySelector('canvas')));
   check('主窗口不能伪造角色点击区域',await main.evaluate(()=>window.jarvisDesktop.invoke('wallpaperRegions',{regions:[]}).then(()=>false,e=>/仅陪伴/.test(e.message))));
   await widget.locator('.holo-pet').click();await widget.locator('.holo-pet').click();await widget.locator('.holo-pet').click();
