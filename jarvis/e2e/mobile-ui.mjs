@@ -51,6 +51,8 @@ try{
   check('首页自动定位城市、真实数据渲染，不需要手动选择',await page.evaluate(()=>window.__weatherLocations===1&&document.querySelector('.home-city b').textContent.includes('上海')));
   check('首页问候与未央不重叠，卡片不横向溢出',await page.evaluate(()=>{const h=document.querySelector('.home-hero-copy').getBoundingClientRect(),p=document.querySelector('.home-pet').getBoundingClientRect();return h.right<=p.left+1&&document.documentElement.scrollWidth<=innerWidth;}));
   check('首次首页从日期天气开始，顶部不会被自动滚动裁掉',await page.evaluate(()=>{const weather=document.querySelector('.home-weather').getBoundingClientRect(),header=document.querySelector('.topbar').getBoundingClientRect();return weather.top>=header.bottom-1&&document.querySelector('#transcript').scrollTop===0;}));
+  check('确认稿主视觉比例、渐变按钮和陪伴页脚完整呈现',await page.evaluate(()=>{const mascot=document.querySelector('.home-pet .wy-mascot').getBoundingClientRect(),greeting=document.querySelector('.home-hero h1 span');return mascot.width>=170&&mascot.height>=220&&parseFloat(getComputedStyle(greeting).fontSize)>=32&&getComputedStyle(document.querySelector('.home-start')).backgroundImage.includes('gradient')&&document.querySelector('.home-footer')?.textContent.includes('更从容');}));
+  await page.locator('.toast').evaluateAll(nodes=>nodes.forEach(n=>{n.hidden=true;}));
   await page.screenshot({path:path.join(OUT,'mobile-weather-home.png')});
   await page.click('.home-pet');check('摸头切换角色表情',await page.locator('.home-pet .wy-mascot').getAttribute('data-state')==='pet');
   await page.click('.home-weather-details');await page.waitForSelector('.weather-dialog[open]');
