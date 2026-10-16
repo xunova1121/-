@@ -41,6 +41,8 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
     App.addListener('backButton', () => {
       const picker=document.querySelector('.mp-sheet:not([hidden]) .x-btn');
       if(picker){picker.click();return;}
+      const weather=document.querySelector('.weather-dialog[open]');
+      if(weather){weather.close();return;}
       const image = document.querySelector('.image-preview[open]');
       if (image) { image.close(); return; }
       const companion = document.querySelector('.wy-companion[open]');

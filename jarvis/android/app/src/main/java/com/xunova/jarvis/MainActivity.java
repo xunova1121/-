@@ -36,7 +36,7 @@ public class MainActivity extends BridgeActivity {
     }
     @Override public void onCreate(Bundle state) {
         CrashLog.install(this);
-        registerPlugin(CompanionWallpaperPlugin.class);registerPlugin(WindowColorPlugin.class);registerPlugin(AppUpdatePlugin.class);registerPlugin(CrashLogPlugin.class);
+        registerPlugin(WeatherLocationPlugin.class);registerPlugin(CompanionWallpaperPlugin.class);registerPlugin(WindowColorPlugin.class);registerPlugin(AppUpdatePlugin.class);registerPlugin(CrashLogPlugin.class);
         registerPlugin(MobileSpeechPlugin.class);registerPlugin(EdgeSpeechPlugin.class);registerPlugin(BackgroundTaskPlugin.class);
         super.onCreate(state);
         WebView web=getBridge().getWebView();

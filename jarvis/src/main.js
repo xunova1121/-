@@ -1,3 +1,5 @@
+import {createHome} from './ui/home.js';
+import {createWeatherClient} from './core/weather.js';
 /**
  * 未央前端入口：状态管理层 + 渲染策略控制器。
  *
@@ -1615,8 +1617,15 @@ function greeting() {
   const h = new Date().getHours();
   return h < 5 ? '夜深了' : h < 11 ? '早上好' : h < 13 ? '中午好' : h < 18 ? '下午好' : '晚上好';
 }
+let homeView;
+const homeWeather=createWeatherClient({direct:MOBILE||STANDALONE});
 function renderWelcome() {
   if (document.querySelector('#transcript .msg')) return;
+  if(COMPACT){
+    homeView?.destroy();document.querySelector('#transcript .wy-home')?.remove();
+    homeView=createHome({weather:homeWeather,send,fill:text=>{$('#prompt').value=text;$('#prompt').focus();},openPanel:showPanel});
+    $('#transcript').prepend(homeView.root);return;
+  }
   const cards = QUICK.map((q) => {
     const b = document.createElement('button');
     b.type = 'button';

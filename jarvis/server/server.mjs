@@ -31,6 +31,7 @@ import { upstreamFor, providerById, ENV_KEYS, isPrivateHost } from '../shared/pr
 import { createMcpManager } from './mcp.mjs';
 import { createOllama } from './ollama.mjs';
 import { edgeSpeak } from './edgeTts.mjs';
+import { createWeatherProxy } from './weather.mjs';
 
 const CORS_PATHS = /^\/api\/(health|local\/metrics|llm\/.+|tts\/edge)$/;
 export const EXTRA_UPSTREAMS = { tavily: 'https://api.tavily.com', bocha: 'https://api.bochaai.com', elevenlabs: 'https://api.elevenlabs.io' };
@@ -57,6 +58,7 @@ export function createServer({
   ossFetch = (...a) => fetch(...a) // 转发到阿里云 OSS（测试可替换）
 } = {}) {
   const subscribers = new Set();
+  const weather=createWeatherProxy();
   let activeChats = 0;
 
   function broadcast(event, data) {
@@ -337,6 +339,7 @@ export function createServer({
       if (pathname === '/api/tts/edge' && req.method === 'POST') return await handleEdgeTts(req, res, cross);
       if (pathname.startsWith('/api/ollama/')) return await handleOllama(req, res, pathname);
       if (pathname === '/api/fetch' && req.method === 'GET') return await handleFetch(req, res, new URL(req.url, 'http://x').searchParams.get('url'));
+      if ((pathname === '/api/weather'||pathname === '/api/weather/cities')&&req.method==='GET') return json(res,200,await weather(pathname,new URL(req.url,'http://x').searchParams));
       if (pathname.startsWith('/api/')) return json(res, 404, { error: 'not found' });
       if (req.method !== 'GET' && req.method !== 'HEAD') return json(res, 405, { error: 'method not allowed' });
       return serveStatic(req, res);
