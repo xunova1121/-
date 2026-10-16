@@ -14,7 +14,8 @@ import { withBom } from './xlsxWriter.js';
 import { applyEdits } from './textEdit.js';
 import { editOffice } from './officeEdit.js';
 import { TEMPLATE_PATH } from './docxWriter.js';
-import { selfCheck, lint } from './selfCheck.js';
+import { selfCheck, lint, fixAfterBuild, reviewSlidesByImage } from './selfCheck.js';
+import { pickSheets, sheetSvg, rasterize } from './slidePreview.js';
 import { runJavaScript, runPython } from './sandbox.js';
 import * as packs from './skillPacks.js';
 import { isImageName, prepareImage } from './images.js';
@@ -465,16 +466,53 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         const { tpl, tplPath, auto } = await findTemplate(format, template);
         // 生成前自查：规则检查；有原始要求或硬伤时请模型对照检查并改一轮
         const check = await selfCheck({ format, content, requirements, llm: ctx.reasonLlm ?? ctx.llm ?? null, signal, onProgress: (t) => progress?.(t) });
-        const out = await generate(format, {
-          title: title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, ''), content: check.content, theme, cover: Boolean(cover), subtitle, author,
+        const build = (text) => generate(format, {
+          title: title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, ''), content: text, theme, cover: Boolean(cover), subtitle, author,
           toc: toc === 'yes' ? true : toc === 'no' ? false : 'auto', loadImage, toPdf: ctx.toPdf ?? null, template: tpl
         });
+        let out = await build(check.content);
+        // 生成后才查得出的问题：Excel 公式错、PPT 字放不下 / 互相压住；有硬伤请模型改一轮再生成
+        const built = (o) => [...(o.info?.formulaIssues ?? []), ...(o.info?.layoutIssues ?? [])];
+        let post = null;
+        if (built(out).length) {
+          post = await fixAfterBuild({
+            format, content: check.content, issues: built(out), layout: out.info?.layout, requirements, llm: ctx.reasonLlm ?? ctx.llm ?? null, signal,
+            rebuild: async (text) => { const o = await build(text); return { out: o, issues: built(o) }; },
+            onProgress: (t) => progress?.(t), label: format === 'xlsx' ? '检查公式…' : '检查排版…'
+          });
+          if (post.result) out = post.result.out;
+        }
+        // PPT：画出每页的样子，交给能看图的模型检查一轮（没配能看图的模型、或者画不出图时跳过）
+        let looked = null;
+        if (format === 'pptx' && ctx.visionLlm && out.info?.preview?.length) {
+          try {
+            const errors = (o) => built(o).filter((x) => x.level === 'error').length;
+            const sheets = pickSheets(out.info.preview, built(out));
+            const images = [];
+            for (const g of sheets) { const img = await (ctx.rasterize ?? rasterize)(sheetSvg(g)); if (img) images.push(img); }
+            if (images.length) {
+              progress?.('看图检查排版…');
+              const pages = sheets.flat().map((x) => x.n);
+              const current = post?.result ? post.content : check.content;
+              const v = await reviewSlidesByImage({ images, pages, content: current, requirements, llm: ctx.visionLlm, signal });
+              looked = { pages: pages.length, problems: v.problems, changed: 0 };
+              if (v.changed) {
+                const o = await build(v.content);
+                if (errors(o) <= errors(out)) { out = o; looked.changed = v.changed; }
+              }
+            }
+          } catch (e) { if (e.name === 'AbortError') throw e; }
+        }
         const target = path.replace(/\.[a-z0-9]+$/i, '') + `.${out.ext}`;
         const r = await ws.write(target, out.blob);
         ctx.onFileChanged?.(r.path);
         const notes = [`主题：${out.theme.name}`];
         if (check.checked) notes.push(check.changed ? `生成前对照要求自查，修正了 ${check.changed} 处${check.problems.length ? `（${check.problems.slice(0, 4).join('；')}）` : ''}` : '生成前对照要求自查，没发现问题');
-        if (check.issues.length) notes.push(`还需要注意：${check.issues.map((x) => x.text).join('；')}`);
+        const what = format === 'xlsx' ? '公式' : '排版';
+        if (post?.fixed) notes.push(`生成后检查${what}，自动修正了 ${post.fixed} 处`);
+        if (looked) notes.push(looked.changed ? `看图检查了 ${looked.pages} 页，修正了 ${looked.changed} 处${looked.problems.length ? `（${looked.problems.slice(0, 3).join('；')}）` : ''}` : `看图检查了 ${looked.pages} 页${looked.problems.length ? `，发现的问题没能自动改：${looked.problems.slice(0, 3).join('；')}` : '，没发现明显问题'}`);
+        const left = [...check.issues, ...built(out)];
+        if (left.length) notes.push(`还需要注意：${left.map((x) => x.text).join('；')}`);
         if (out.info?.toc) notes.push('已加目录（Word 打开时如提示更新域，点“是”即可填上页码；WPS 里右键目录 →“更新目录”）');
         if (out.info?.missingImages?.length) notes.push(`这些图片没找到，用占位文字代替了：${out.info.missingImages.join('、')}`);
         if (tpl) notes.push(`${auto ? '自动' : ''}沿用了模板 ${tplPath} 的样式${auto ? '（不想用模板就传 template: "none"）' : ''}`);

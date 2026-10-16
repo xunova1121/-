@@ -17,6 +17,7 @@
  */
 import { parseDoc, plain } from './docModel.js';
 import { imageInfo } from './imageInfo.js';
+import { recordSlide, layoutIssues, fitText } from './slidePreview.js';
 
 const W = 13.333;
 const H = 7.5;
@@ -107,7 +108,7 @@ function chartColumns(table) {
 
 /**
  * @param {{ title: string, content: string, theme: object, subtitle?: string, author?: string, date?: string, loadImage?: (src: string) => Promise<Uint8Array|null> }} o
- * @returns {Promise<{ blob: Blob, info: { slides: number, layouts: string[], missingImages: string[] } }>}
+ * @returns {Promise<{ blob: Blob, info: { slides: number, layouts: string[], missingImages: string[], preview: object[], layoutIssues: object[] } }>}
  */
 export async function makePptx({ title, content, theme, subtitle = '', author = '', date = '', loadImage = null }) {
   const PptxGenJS = (await import('pptxgenjs')).default;
@@ -121,6 +122,9 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   const muted = '7F8C99';
   const missingImages = [];
   const layouts = [];
+  // 每页放了什么都记下来：生成后估算字放不放得下、画预览图给模型看（slidePreview.js）
+  const records = [];
+  const addSlide = (title) => { const r = recordSlide(pptx.addSlide()); records.push({ n: records.length + 1, title, items: r.items, slide: r.slide }); return r.slide; };
 
   let slides = parseSlides(title, content);
   // 第一页如果就是文档标题（# 标题后面没有内容），当作封面
@@ -199,6 +203,13 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     const gap = 0.25;
     const w = (W - 1.2 - gap * (cols - 1)) / cols;
     const h = (bottom - top - gap * (rows - 1)) / rows;
+    // 说明文字按卡片大小和字数定字号，尽量把卡片填满；同一页的卡片用同一个字号（取放得下的最小值），不要一张大一张小
+    const room = (w - 0.5) * Math.max(0.6, h - 1.45);
+    const descSize = Math.min(...items.map((it) => {
+      const { text } = labelOf(it);
+      const guess = Math.max(13, Math.min(20, Math.floor(Math.sqrt((room * 5200) / Math.max(20, text.length * 1.3)))));
+      return fitText(text, { w: w - 0.5, h: Math.max(0.6, h - 1.45), fontSize: guess, lineSpacingMultiple: 1.25 }).o.fontSize;
+    }));
     items.forEach((it, k) => {
       const x = 0.6 + (k % cols) * (w + gap);
       const y = top + Math.floor(k / cols) * (h + gap);
@@ -207,10 +218,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
       sl.addShape(pptx.ShapeType.rect, { x, y, w, h: 0.08, fill: { color: k % 2 ? C.extra : C.accent }, line: { color: k % 2 ? C.extra : C.accent } });
       sl.addText(String(k + 1).padStart(2, '0'), { x: x + 0.25, y: y + 0.22, w: 0.8, h: 0.5, fontSize: 20, bold: true, color: C.accent, fontFace: FONT });
       sl.addText(label || text, { x: x + 0.25, y: y + 0.7, w: w - 0.5, h: 0.6, fontSize: rows > 1 ? 20 : 22, bold: true, color: dark, fontFace: FONT, valign: 'top', fit: 'shrink' });
-      // 说明文字按卡片大小和字数定字号，尽量把卡片填满
-      const room = (w - 0.5) * Math.max(0.6, h - 1.45);
-      const fsz = Math.max(13, Math.min(20, Math.floor(Math.sqrt((room * 5200) / Math.max(20, text.length * 1.3)))));
-      if (label) sl.addText(text, { x: x + 0.25, y: y + 1.3, w: w - 0.5, h: Math.max(0.6, h - 1.45), fontSize: fsz, color: C.ink, fontFace: FONT, valign: 'top', lineSpacingMultiple: 1.25, fit: 'shrink' });
+      if (label) sl.addText(text, { x: x + 0.25, y: y + 1.3, w: w - 0.5, h: Math.max(0.6, h - 1.45), fontSize: descSize, color: C.ink, fontFace: FONT, valign: 'top', lineSpacingMultiple: 1.25, fit: 'shrink' });
     });
   };
   /** 一排箭头：流程链或步骤 */
@@ -226,7 +234,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   };
 
   // ---------- 封面
-  const cover = pptx.addSlide();
+  const cover = addSlide(title);
   cover.background = { color: dark };
   cover.addShape(pptx.ShapeType.rect, { x: 0.8, y: 3.75, w: 1.4, h: 0.07, fill: { color: C.accent }, line: { color: C.accent } });
   cover.addText(title, { x: 0.8, y: 2.0, w: W - 1.6, h: 1.6, fontSize: 40, bold: true, color: 'FFFFFF', fontFace: FONT, valign: 'bottom', fit: 'shrink' });
@@ -238,7 +246,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   for (const [i, s] of slides.entries()) {
     const kind = layoutOf(s, { last: i === slides.length - 1 });
     layouts.push(kind);
-    const sl = pptx.addSlide();
+    const sl = addSlide(s.title);
     const n = i + 2;
     const lines = s.blocks.flatMap(blockLines).filter(Boolean);
     switch (kind) {
@@ -413,7 +421,8 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     if (s.notes.length) sl.addNotes(s.notes.join('\n'));
   }
   const blob = await pptx.write({ outputType: 'blob' });
-  return { blob, info: { slides: slides.length + 1, layouts, missingImages } };
+  const preview = records.map(({ n, title: t, items, slide }) => ({ n, title: t, items, background: slide.background?.color }));
+  return { blob, info: { slides: slides.length + 1, layouts, missingImages, preview, layoutIssues: layoutIssues(preview) } };
 }
 
 function today() {

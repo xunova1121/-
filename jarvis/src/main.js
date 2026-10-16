@@ -97,7 +97,7 @@ import { generateImage } from './llm/images.js';
 import { generateVideo } from './llm/videos.js';
 import { createFormDirector } from './core/formDirector.js';
 import { composeGreeting, GREET_GAP_MS } from './core/greeting.js';
-import { classifyTask, routeFor, TASKS } from './llm/router.js';
+import { classifyTask, routeFor, TASKS, seesImages } from './llm/router.js';
 import { resolveTheme, toggled, THEMES } from './core/theme.js';
 import { FORMS } from './render/formations.js';
 import { resolveQuality } from './core/quality.js';
@@ -525,11 +525,16 @@ function makeSpeech() {
 function helperLlm(task = 'chat') {
   const { adapter, model, problem } = createAdapter(routeFor(llmConfig, task).cfg, { gateway });
   if (problem || providerById(llmConfig.provider)?.kind === 'mock') return null;
-  return async ({ system, prompt, signal }) => {
+  return async ({ system, prompt, signal, images }) => {
     let text = '';
-    const r = await adapter.stream({ model, system: [system], messages: [{ role: 'user', content: prompt }], tools: [], signal, onText: (d) => { text += d; } });
+    const r = await adapter.stream({ model, system: [system], messages: [{ role: 'user', content: prompt, ...(images?.length && { images }) }], tools: [], signal, onText: (d) => { text += d; } });
     return r?.text || text;
   };
+}
+/** 能看图的辅助模型（PPT 生成后看预览图检查排版）：分工里设了“看图”模型就用它，否则默认模型能看图才用 */
+function visionHelperLlm() {
+  const r = routeFor(llmConfig, 'vision');
+  return r.routed || seesImages(r.model) ? helperLlm('vision') : null;
 }
 /** 团队模式：按角色挑分工模型 */
 const ROLE_TASK = { coder: 'code', writer: 'write', researcher: 'reason', analyst: 'reason', operator: 'chat', generalist: 'chat' };
@@ -745,6 +750,7 @@ async function buildTools({ background = false } = {}) {
       fetchViaGateway: fetchViaGateway(),
       llm: helperLlm('write'), // 深度调研：用写作模型
       reasonLlm: helperLlm('reason'), // 逐项查证：用推理模型摘答案
+      visionLlm: visionHelperLlm(), // PPT 生成后看预览图检查排版
       onPreview: background ? () => {} : COMPACT
         ? (path) => { panels.openFile(path); toast(`已生成 ${path}：左上角菜单 → 工作区查看`); } // 手机上不自动盖住对话
         : (path) => { showPanel('workspace'); panels.openFile(path); },

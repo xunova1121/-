@@ -120,14 +120,15 @@ export function layoutSummary(format, content) {
  * 模型对照要求检查，返回修改
  * @returns {Promise<{ problems: string[], content: string, changed: number }>}
  */
-export async function reviewWithModel({ format, content, requirements = '', issues = [], llm, signal }) {
+export async function reviewWithModel({ format, content, requirements = '', issues = [], llm, signal, layout = '' }) {
+  const sheet = format === 'xlsx';
   const j = parseJson(await llm({
     signal,
     system: '你是严格的文档审校。对照用户的原始要求检查刚生成的文档，只找真正的问题，并给出能直接执行的修改。只输出 JSON。',
     prompt: `文档格式：${format}
 ${requirements ? `用户的原始要求：\n${String(requirements).slice(0, 2000)}\n` : ''}
-排版后的结构：
-${layoutSummary(format, content).slice(0, 4000)}
+${sheet ? '生成后每个单元格在 Excel 里的位置（公式里的行号以这里为准，和原文的行不一样）' : '排版后的结构'}：
+${(layout || layoutSummary(format, content)).slice(0, sheet ? 8000 : 4000)}
 
 程序检查发现的问题：
 ${issues.map((x) => `- ${x.text}`).join('\n') || '（无）'}
@@ -135,11 +136,16 @@ ${issues.map((x) => `- ${x.text}`).join('\n') || '（无）'}
 文档原文（Markdown）：
 ${String(content).slice(0, 24000)}
 
-检查：有没有漏掉用户要求的内容、字数或页数明显不符、空页空节、表格错乱、${format === 'pptx' ? '某页字太多溢出、' : ''}占位文字没填、前后矛盾${format === 'pptx' ? '' : '、只有一句话没有展开的要点（用 append_after 补上依据和分析）'}。
-${format === 'pptx' ? '' : CHECKLIST}
+${sheet ? `检查：程序查出的每个公式问题都要改掉——对照上面的单元格位置改成正确的引用（如 =SUM(B2:B9) 改成 =SUM(B4:B11)），函数名拼错的改对，除数可能是 0 或空的用 IFERROR(…,"") 包住；在原文里找到那个公式原样替换。也看看有没有漏掉用户要求的内容。` : `检查：有没有漏掉用户要求的内容、字数或页数明显不符、空页空节、表格错乱、${format === 'pptx' ? '某页字太多溢出、' : ''}占位文字没填、前后矛盾${format === 'pptx' ? '' : '、只有一句话没有展开的要点（用 append_after 补上依据和分析）'}。`}
+${format === 'pptx' || sheet ? '' : CHECKLIST}
 输出 JSON：{"problems":["问题，没有就空数组"],"edits":[{"find":"原文里一字不差的片段（10-80 字）","replace":"改成"}],"append_after":[{"heading":"已有的标题原文（不带 #）","markdown":"要补在这一节末尾的 Markdown"}]}
 修改只针对上面的问题；数据材料里没有的写“待确认”，不要编造。没有问题就都给空数组。`
   }));
+  return applyEdits(content, j);
+}
+
+/** 按模型给的 JSON 改原文：edits（原文片段替换）、append_after（补在某个标题那一节末尾） */
+export function applyEdits(content, j) {
   let text = String(content);
   let changed = 0;
   for (const e of Array.isArray(j?.edits) ? j.edits.slice(0, 12) : []) {
@@ -181,4 +187,54 @@ export async function selfCheck({ format, content, requirements = '', llm = null
     if (e.name === 'AbortError') throw e;
     return { content, issues, problems: [], changed: 0, checked: false };
   }
+}
+
+/**
+ * 生成之后才查得出的问题（Excel 公式、PPT 排出来放不下 / 重叠）：请模型按问题改原文，改了就重新生成一次。只改一轮。
+ * @param {{ format: string, content: string, issues: object[], layout?: string, requirements?: string, llm: Function|null, signal?: AbortSignal,
+ *           rebuild: (content: string) => Promise<{ issues: object[] }>, onProgress?: (t: string) => void, label?: string }} o
+ * @returns {Promise<{ content: string, fixed: number, left: object[], result: object|null, problems: string[] }>}
+ */
+export async function fixAfterBuild({ format, content, issues, layout = '', requirements = '', llm, signal, rebuild, onProgress, label = '检查生成结果…' }) {
+  const hard = issues.filter((x) => x.level === 'error');
+  if (!llm || !hard.length) return { content, fixed: 0, left: issues, result: null, problems: [] };
+  onProgress?.(label);
+  try {
+    const r = await reviewWithModel({ format, content, requirements, issues: hard, llm, signal, layout });
+    if (!r.changed) return { content, fixed: 0, left: issues, result: null, problems: r.problems };
+    const result = await rebuild(r.content);
+    const before = hard.length;
+    const after = result.issues.filter((x) => x.level === 'error').length;
+    // 改完反而更糟：用原来的
+    if (after > before) return { content, fixed: 0, left: issues, result: null, problems: r.problems };
+    return { content: r.content, fixed: before - after, left: result.issues, result, problems: r.problems };
+  } catch (e) {
+    if (e.name === 'AbortError') throw e;
+    return { content, fixed: 0, left: issues, result: null, problems: [] };
+  }
+}
+
+/**
+ * 看图检查 PPT：把每页画出来的样子交给能看图的模型，找“看得见”的问题（字溢出、压住、太挤、太空、对不齐、配色看不清），
+ * 给出按原文片段替换的修改。只改一轮。
+ * @param {{ images: Array<{ mime: string, data: string }>, pages: number[], content: string, requirements?: string, llm: Function, signal?: AbortSignal }} o
+ * @returns {Promise<{ problems: string[], content: string, changed: number }>}
+ */
+export async function reviewSlidesByImage({ images, pages, content, requirements = '', llm, signal }) {
+  const j = parseJson(await llm({
+    signal,
+    images,
+    system: '你是严格的演示文稿审校。看每页幻灯片排出来的样子，只找看得见的真问题，并给出能直接执行的修改。只输出 JSON。',
+    prompt: `下面的图片是刚生成的 PPT（每张图拼了几页，左上角标着第几页），共看 ${pages.length} 页：第 ${pages.join('、')} 页。
+${requirements ? `用户的原始要求：\n${String(requirements).slice(0, 1500)}\n` : ''}
+每页对应的原文（Markdown，“## 标题”开始一页，第 1 页是封面）：
+${String(content).slice(0, 16000)}
+
+逐页看：文字有没有溢出框、超出页面、压在别的字或图上；有没有一页字太多太挤（应删减或拆成两页）、或者大片空白只有一两行字；标题是不是太长折成两行；表格、图表是否看得清。
+排版是程序按原文自动做的，你只能改原文：删减啰嗦的字、把一条长要点拆成两条、一页太多就在中间插入新的“## 标题（续）”拆页。
+输出 JSON：{"problems":["第 N 页：问题，没有就空数组"],"edits":[{"find":"原文里一字不差的片段（10-80 字）","replace":"改成"}]}
+没有明显问题就都给空数组；不要为了改而改，不要改数字和事实。`
+  }));
+  const r = applyEdits(content, j);
+  return { problems: (Array.isArray(j?.problems) ? j.problems : []).map(String).filter(Boolean), content: r.content, changed: r.changed };
 }

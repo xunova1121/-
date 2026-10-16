@@ -10,10 +10,10 @@
  *           公式同时写入算好的结果，不重新计算的软件（和未央自己读回时）也能看到数值
  */
 import { parseSheets, parseBlocks } from './sheetParse.js';
+import { checkFormulas, sheetLayout, colName } from './formulaCheck.js';
 
 const CJK = /[⺀-￿]/;
 const width = (v) => [...String(v ?? '')].reduce((n, ch) => n + (CJK.test(ch) ? 2 : 1), 0);
-const colName = (i) => { let s = ''; for (let n = i + 1; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s; return s; };
 
 /** 文字 → { value, numFmt }：识别千分位数字、百分数、金额、日期 */
 export function typed(raw) {
@@ -128,7 +128,7 @@ const linesFor = (text, colWidth) => String(text ?? '').split('\n').reduce((n, p
 /**
  * @param {string} content  CSV / Markdown 表格。“## 名称”分工作表；工作表里还可以有“### 小节”、多张表格和普通文字（说明 / 备注）
  * @param {{ theme: object }} o
- * @returns {Promise<{ blob: Blob, info: { sheets: number, formulas: number } }>}
+ * @returns {Promise<{ blob: Blob, info: { sheets: number, formulas: number, formulaIssues: object[], layout: string } }>}
  */
 export async function makeXlsx(content, { theme }) {
   const mod = await import('exceljs');
@@ -148,6 +148,7 @@ export async function makeXlsx(content, { theme }) {
   const borders = { top: border, left: border, bottom: border, right: border };
   const FONT = '微软雅黑';
   let formulas = 0;
+  const checked = []; // 每个工作表每格写了什么（公式检查用，行号是 Excel 里真实的行号）
 
   const sheets = parseBlocks(content);
   if (!sheets.length) sheets.push({ name: 'Sheet1', blocks: [] });
@@ -161,6 +162,8 @@ export async function makeXlsx(content, { theme }) {
     const report = s.blocks.some((b) => b.kind !== 'table') || tables.length > 1;
     const W = Math.max(1, ...tables.map((t) => Math.max(...t.rows.map((r) => r.length))));
     const ws = wb.addWorksheet(name, { views: [{ showGridLines: !report }] });
+    const cells = new Map();
+    checked.push({ name, cells, rows: 0, cols: W });
     if (!tables.length && !s.blocks.length) continue;
 
     // 列宽：只按表格里的字算（说明是整行合并的，不撑宽列）
@@ -178,6 +181,7 @@ export async function makeXlsx(content, { theme }) {
       if (W > 1) ws.mergeCells(r, 1, r, W);
       const cell = row.getCell(1);
       cell.value = text;
+      cells.set(`A${r}`, { value: text });
       cell.font = { name: FONT, ...font };
       if (fill) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } };
       cell.alignment = { vertical: 'middle', horizontal: align, wrapText: true, indent };
@@ -217,6 +221,7 @@ export async function makeXlsx(content, { theme }) {
           const cell = xr.getCell(ci + 1);
           if (c.formula) cell.value = { formula: c.formula, ...(c.result !== undefined && { result: c.result }) };
           else cell.value = c.value ?? null;
+          cells.set(`${colName(ci)}${r}`, c.formula ? { formula: c.formula } : { value: c.value ?? null });
           if (c.numFmt) cell.numFmt = c.numFmt;
           cell.border = borders;
           cell.font = { name: FONT, size: 10.5 };
@@ -249,9 +254,10 @@ export async function makeXlsx(content, { theme }) {
     // 打印：宽表横向；所有列缩到一页宽
     ws.pageSetup = { orientation: fullW > 110 ? 'landscape' : 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 } };
     if (firstHeader) ws.pageSetup.printTitlesRow = `${firstHeader}:${firstHeader}`;
+    checked.at(-1).rows = Math.max(0, ...[...cells.keys()].map((a) => Number(a.match(/\d+$/)[0])));
   }
   const buf = await wb.xlsx.writeBuffer();
-  return { blob: new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), info: { sheets: sheets.length, formulas } };
+  return { blob: new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), info: { sheets: sheets.length, formulas, formulaIssues: checkFormulas(checked), layout: sheetLayout(checked) } };
 }
 
 /** CSV：带 UTF-8 BOM，Excel 双击打开中文不乱码 */

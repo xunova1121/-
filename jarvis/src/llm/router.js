@@ -74,6 +74,11 @@ const PREFER = {
   reason: [/\bo[134](-pro)?\b|o3|o4|r1|reasoner|thinking|think/i, /gpt-?[5-9](\.\d)?(?!.*mini)|opus|gemini-?[23](\.\d)?-pro/i],
   vision: [/\bvl\b|-vl|vision/i, /gpt-?4o|gpt-?4\.1|gpt-?[5-9]|gemini|claude|sonnet|opus/i]
 };
+/** 这个模型能不能看图（按模型名判断，聚合平台上的名字五花八门，判断不了的当不能看） */
+export function seesImages(model) {
+  const m = String(model || '');
+  return PREFER.vision.some((re) => re.test(m)) || /qwen.*vl|glm-4v|doubao.*vision|llava|gemma-?3/i.test(m);
+}
 const NOT_CHAT = /embed|tts|whisper|audio|image|dall|moderation|rerank|transcribe|realtime|search-preview|flux|midjourney|stable-?diffusion|sdxl|seedream|imagen|cogview|kolors|sora|veo|kling|video/i;
 
 /**
