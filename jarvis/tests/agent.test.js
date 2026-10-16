@@ -210,7 +210,10 @@ describe('多步输出的表达标签', () => {
   it('每一步开头的 <emotion> 标签都会被剥离', async () => {
     const { text, events } = await run('帮我写一个网页');
     expect(text).not.toContain('<emotion>');
-    expect(events.filter((e) => e.type === 'emotion').map((e) => e.value)).toEqual(['专注', '愉悦']);
+    // 工作区里已有同名文件时会多一步“先读再写”，所以只看开头和结尾
+    const moods = events.filter((e) => e.type === 'emotion').map((e) => e.value);
+    expect(moods[0]).toBe('专注');
+    expect(moods.at(-1)).toBe('愉悦');
   });
 });
 

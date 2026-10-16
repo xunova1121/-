@@ -37,7 +37,12 @@ export function plan(messages, tools = []) {
 
   // —— 已经有工具结果：总结并结束
   if (results.length) {
-    const failed = results.find((r) => r.isError);
+    // 覆盖已有文件前被要求先读：照做（先读一遍，再按原来的内容写）
+    if (lastResult.isError && /已经存在，你还没读过/.test(lastResult.content)) {
+      const prev = [...after].reverse().flatMap((m) => m.toolCalls ?? []).find((c) => c.name === 'write_file');
+      if (prev) return { emotion: '专注', calls: [call('read_file', { path: prev.args.path }), call('write_file', prev.args)] };
+    }
+    const failed = results.filter((r) => r !== lastResult || !used.has('read_file')).find((r) => r.isError && !/已经存在，你还没读过/.test(r.content));
     if (failed) return { emotion: '安抚', text: `执行时遇到问题：${failed.content.slice(0, 120)}。我们换个方式再试一次？` };
     if (used.has('schedule_task') || used.has('list_schedules')) return { emotion: '亲和', text: lastResult.content };
     if (used.has('deep_research')) {

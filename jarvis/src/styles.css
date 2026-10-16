@@ -1333,3 +1333,16 @@ body.reduced-motion .welcome-hero * { animation: none !important; }
 :root:not([data-theme="light"]) .drawer-feat svg, :root:not([data-theme="light"]) .pick-icon { background: linear-gradient(135deg, hsl(var(--h) 70% 60% / .22), hsl(var(--h) 70% 50% / .12)); box-shadow: inset 0 0 0 1px hsl(var(--h) 70% 70% / .18); color: hsl(var(--h) 85% 74%); }
 :root:not([data-theme="light"]) .pick-icon svg { stroke: hsl(var(--h) 85% 74%); }
 :root:not([data-theme="light"]) .drawer-item-icon { background: url(./ui/splash-cloud.webp) center / 76% no-repeat, hsl(230 30% 30%); }
+
+/* 任务清单（update_plan）：回答最前面一张小卡片，实时打勾 */
+.plan-card { margin: 6px 0 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--tool-bg, var(--surface)); font-size: 13px; }
+.plan-head { font-weight: 600; margin-bottom: 6px; color: var(--text); }
+.plan-card ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.plan-card li { display: flex; gap: 8px; align-items: baseline; color: var(--muted); line-height: 1.5; }
+.plan-card li::before { content: "○"; flex: none; width: 1em; text-align: center; color: var(--dim); }
+.plan-card li[data-st="doing"] { color: var(--text); font-weight: 600; }
+.plan-card li[data-st="doing"]::before { content: "◐"; color: var(--accent); }
+.plan-card li[data-st="done"] { color: var(--dim); }
+.plan-card li[data-st="done"] span { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--dim) 50%, transparent); }
+.plan-card li[data-st="done"]::before { content: "✓"; color: hsl(150 55% 45%); }
+.plan-card li[data-st="skip"]::before { content: "–"; }

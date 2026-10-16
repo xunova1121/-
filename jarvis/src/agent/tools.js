@@ -23,6 +23,7 @@ import * as sessions from './sessions.js';
 import { createSearch } from './webSearch.js';
 import { getWeather } from './weather.js';
 import { createPageReader } from './pageReader.js';
+import { matchFiles, searchLines } from './fileSearch.js';
 import { deepResearch, DEPTHS } from './research.js';
 import { factCheck, formatReport } from './factCheck.js';
 
@@ -65,6 +66,8 @@ const clip = (s, n = 20000) => (s.length > n ? `${s.slice(0, n)}\n…（已截�
  */
 export function createTools(ctx) {
   const readPage = createPageReader(ctx); // 直接打不开或没读到正文时，有 Tavily Key 就让 Tavily 代读
+  const seenFiles = new Set(); // 这次读过或写过的工作区文件（覆盖没读过的文件前先拦一下）
+  const overwriteWarned = new Set();
   /** Word 模板：指定了就用指定的；没指定就找工作区里最近改过的模板文件；"none" 不用 */
   const findTemplate = async (format, template) => {
     if (format !== 'docx' || template === 'none') return { tpl: null };
@@ -318,11 +321,37 @@ export function createTools(ctx) {
       }
     },
     {
+      name: 'find_files',
+      description: '按文件名找工作区里的文件：支持 * 和 **（如 “*.docx”“报告*”“src/**/*.js”），也可以只给名字里的几个字。比 list_files 列全部再找快。',
+      input_schema: S({ pattern: str('文件名或通配符，如 *.xlsx、周报、site/**/*.html') }, ['pattern']),
+      run: async ({ pattern }) => {
+        const hits = matchFiles(await ws.list(''), pattern).slice(0, 80);
+        return hits.length ? hits.map((f) => `${f.path}  (${fmtSize(f.size)})`).join('\n') : `没有找到和“${pattern}”匹配的文件。可以换个关键词，或用 list_files 看全部文件`;
+      }
+    },
+    {
+      name: 'search_in_files',
+      description: '在工作区的文本文件（代码、网页、Markdown、CSV、TXT 等）里搜内容，返回文件名、行号和那一行。改代码、找某段话在哪个文件时先用它定位，再 read_file 读。',
+      input_schema: S({ query: str('要找的文字（不区分大小写）'), path: str('可选：只在这个目录或文件里找'), regex: { type: 'boolean', description: 'query 当正则表达式用' } }, ['query']),
+      run: async ({ query, path = '', regex = false }) => {
+        const out = [];
+        let scanned = 0;
+        for (const f of (await ws.list('')).filter((f) => ws.isText(f.path) && (!path || f.path.startsWith(ws.normalize(path))) && (f.size ?? 0) <= 2e6)) {
+          if (out.length >= 60) break;
+          scanned++;
+          const text = await ws.readText(f.path).catch(() => '');
+          out.push(...searchLines(text, query, { regex }).slice(0, 8).map((h) => `${f.path}:${h.line}: ${h.text}`));
+        }
+        return out.length ? `${out.slice(0, 60).join('\n')}${out.length >= 60 ? '\n（结果太多，只列前 60 条：缩小目录或换更具体的词）' : ''}` : `在 ${scanned} 个文本文件里没有找到“${query}”`;
+      }
+    },
+    {
       name: 'read_file',
       description: '读取工作区里的文件。Word、PDF、PPT、Excel 会自动转换成文字；代码和文本原样返回；图片（png / jpg / webp）会直接给你看。',
       input_schema: S({ path: str('文件路径') }, ['path']),
       run: async ({ path }) => {
         const blob = await ws.readBlob(path);
+        seenFiles.add(ws.normalize(path));
         if (isImageName(path) && typeof document !== 'undefined') {
           const img = await prepareImage(blob);
           return { text: `图片 ${path}（${img.width}×${img.height}）`, images: [{ mime: img.mime, data: img.data }] };
@@ -336,6 +365,13 @@ export function createTools(ctx) {
       description: '在工作区写入文本文件（代码、网页、Markdown、CSV、JSON 等）。编写程序时把每个文件分别写入。',
       input_schema: S({ path: str('文件路径，如 app/index.html'), content: str('完整文件内容') }, ['path', 'content']),
       run: async ({ path, content }) => {
+        // 先读后改：已经存在、这次还没读过也没写过的文件，第一次要整个覆盖时先拦一下（坚持再写一次就放行）
+        const key = ws.normalize(path);
+        if (ws.mode() !== 'folder' && !seenFiles.has(key) && !overwriteWarned.has(key) && await ws.exists(path).catch(() => false)) { // 本地文件夹里本来就不覆盖同名文件（会另存）
+          overwriteWarned.add(key);
+          throw new Error(`${path} 已经存在，你还没读过它。先用 read_file 看看现在的内容；只改一部分用 edit_file；确认要整个覆盖就再调用一次 write_file`);
+        }
+        seenFiles.add(key);
         // CSV 加 UTF-8 BOM：Excel 双击打开时中文不乱码
         const r = await ws.write(path, /\.csv$/i.test(path) ? withBom(content) : content);
         ctx.onFileChanged?.(r.path);
@@ -356,7 +392,11 @@ export function createTools(ctx) {
       run: async ({ path, edits }) => {
         if (!ws.isText(path)) throw new Error(`${path} 不是文本文件。Word / PPT 请用 edit_office_document`);
         const before = await ws.readText(path);
-        const r = applyEdits(before, Array.isArray(edits) ? edits : []);
+        let r;
+        try { r = applyEdits(before, Array.isArray(edits) ? edits : []); } catch (e) {
+          throw seenFiles.has(ws.normalize(path)) ? e : new Error(`${e.message}。你还没读过这个文件：先用 read_file 看准原文再改`);
+        }
+        seenFiles.add(ws.normalize(path));
         const w = await ws.write(path, r.text);
         ctx.onFileChanged?.(w.path);
         return `已修改 ${w.path}：替换 ${r.count} 处${w.renamed ? '（本地文件夹里不覆盖同名文件，另存为此名）' : ''}${w.backup === 'saved' ? '；原来的内容已自动备份，可在“工作区 → 改动记录”里恢复' : ''}`;

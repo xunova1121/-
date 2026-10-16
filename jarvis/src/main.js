@@ -1002,6 +1002,8 @@ async function send(text) {
           setTask('processing', note.slice(0, 30));
         } else if (e.type === 'emotion') { machine.setStreamHint(e.value); director.onEmotion(e.value); bubble.mood?.(e.value); }
         else if (e.type === 'state' && e.value !== 'done') setTask(e.value, e.value === 'listening' ? '生成回答' : '');
+        else if (e.type === 'plan') bubble.plan?.(e.steps); // 任务清单：卡片里实时打勾
+        else if ((e.type === 'tool_start' || e.type === 'tool_end') && e.name === 'update_plan') { /* 更新清单本身不单独占一张工具卡片 */ }
         else if (e.type === 'tool_start') {
           director.onToolStart(e.name);
           hud.toolStart(e.id, toolLabel(e.name));
