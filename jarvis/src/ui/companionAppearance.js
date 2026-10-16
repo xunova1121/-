@@ -1,9 +1,10 @@
 import './companionRefresh.css';
 
 /** 只管理布局：键盘出现时让角色退让，阅读旧消息时保留阅读位置。 */
-export function initCompanionAppearance({ showPanel } = {}) {
+export function initCompanionAppearance() {
   const body = document.body, viewport = window.visualViewport;
   body.classList.add('companion-edition');
+  dispatchEvent(new Event('jarvis:chrome-ready'));
   let fullHeight = viewport?.height || innerHeight;
   let keyboardOpen = false;
   const editing = () => /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || '');
@@ -24,16 +25,6 @@ export function initCompanionAppearance({ showPanel } = {}) {
   document.addEventListener('focusout',()=>requestAnimationFrame(resize));
   resize();
   if (!body.classList.contains('compact')) return;
-  const options = document.createElement('details'); options.className='wy-composer-options';
-  const summary=Object.assign(document.createElement('summary'),{textContent:'···'});summary.setAttribute('aria-label','更多选项');
-  const menu=document.createElement('div');
-  for(const [name,panel] of [['选择模型与声音','models'],['专家与技能','skills']]) {
-    const button=Object.assign(document.createElement('button'),{type:'button',textContent:name});
-    button.onclick=()=>{options.open=false;showPanel?.(panel);};menu.append(button);
-  }
-  options.append(summary,menu);document.querySelector('#btn-camera')?.after(options);
-  document.addEventListener('click',e=>{if(!options.contains(e.target))options.open=false;});
-  document.addEventListener('keydown',e=>{if(e.key==='Escape')options.open=false;});
   const root = document.querySelector('#transcript');
   const jump = Object.assign(document.createElement('button'),{type:'button',className:'wy-jump-latest',textContent:'↓ 回到最新回复',hidden:true});
   root.after(jump);

@@ -23,6 +23,7 @@ import com.getcapacitor.WebViewListener;
 
 public class MainActivity extends BridgeActivity {
     private boolean rendererGone = false;
+    public boolean isRendererGone(){return rendererGone;}
     private SharedPreferences health() { return getSharedPreferences("render-health",MODE_PRIVATE); }
     static boolean safeDisplay(Context context) {
         SharedPreferences prefs=context.getSharedPreferences("render-health",MODE_PRIVATE);
@@ -54,7 +55,9 @@ public class MainActivity extends BridgeActivity {
                 Runtime runtime=Runtime.getRuntime();
                 android.content.pm.PackageInfo provider=WebView.getCurrentWebViewPackage();
                 String version=provider==null?"unknown":provider.versionName;
-                CrashLog.write(MainActivity.this,"WebView="+version+"，didCrash="+(detail!=null&&detail.didCrash())+"，priority="+(detail==null?-1:detail.rendererPriorityAtExit())+"，可用内存="+memory.availMem/1048576+"MB，lowMemory="+memory.lowMemory+"，JavaHeap="+(runtime.totalMemory()-runtime.freeMemory())/1048576+"/"+runtime.maxMemory()/1048576+"MB，连续="+count+"，"+Build.MANUFACTURER+" "+Build.MODEL);
+                String report="App="+CrashLog.appVersion(MainActivity.this)+"，WebView="+version+"，didCrash="+(detail!=null&&detail.didCrash())+"，priority="+(detail==null?-1:detail.rendererPriorityAtExit())+"，可用内存="+memory.availMem/1048576+"MB，lowMemory="+memory.lowMemory+"，JavaHeap="+(runtime.totalMemory()-runtime.freeMemory())/1048576+"/"+runtime.maxMemory()/1048576+"MB，连续="+count+"，"+Build.MANUFACTURER+" "+Build.MODEL;
+                prefs.edit().putString("lastRenderer",new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss",java.util.Locale.CHINA).format(new java.util.Date(now))+" "+report).apply();
+                CrashLog.write(MainActivity.this,report);
                 CrashLog.write(MainActivity.this,RenderRecovery.autoRestart(count)?"界面进程异常，开启兼容显示后恢复一次":"界面连续异常，已停止自动重启，等待手动恢复");
                 stopService(new Intent(MainActivity.this,TaskService.class));
                 runOnUiThread(()->{
@@ -64,6 +67,15 @@ public class MainActivity extends BridgeActivity {
             }
         });
     }
+    @Override public void onTrimMemory(int level){
+        super.onTrimMemory(level);
+        if(!RenderRecovery.shouldReduceDisplay(level))return;
+        CrashLog.write(this,"系统内存压力 level="+level);
+        health().edit().putBoolean("safeDisplay",true).apply();
+        if(!rendererGone && !isFinishing() && !isDestroyed() && getBridge()!=null){
+            getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('jarvis:memory-pressure'));",null);
+        }
+    }
     private void recoveryScreen(){
         LinearLayout layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);layout.setGravity(Gravity.CENTER_VERTICAL);layout.setPadding(dp(26),dp(30),dp(26),dp(30));layout.setBackgroundColor(Color.rgb(252,251,255));
         TextView title=new TextView(this);title.setText("先稳住，再继续");title.setTextSize(24);title.setTypeface(null,Typeface.BOLD);title.setTextColor(Color.rgb(45,42,66));layout.addView(title);
@@ -71,7 +83,7 @@ public class MainActivity extends BridgeActivity {
         Button retry=new Button(this);retry.setText("用兼容显示重新打开");retry.setOnClickListener(v->{health().edit().putInt("consecutive",0).putLong("lastCrash",0).putBoolean("safeDisplay",true).commit();recreate();});layout.addView(retry);
         Button copy=new Button(this);copy.setText("复制诊断信息");copy.setOnClickListener(v->{((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("未央异常诊断",CrashLog.peek(this)));copy.setText("诊断已复制");});layout.addView(copy);
         Button later=new Button(this);later.setText("稍后再试");later.setOnClickListener(v->moveTaskToBack(true));layout.addView(later);
-        setContentView(layout);
+        android.widget.ScrollView scroll=new android.widget.ScrollView(this);scroll.setFillViewport(true);scroll.addView(layout);setContentView(scroll);
     }
     private int dp(int value){return Math.round(value*getResources().getDisplayMetrics().density);}
 }

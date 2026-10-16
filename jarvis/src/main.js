@@ -387,7 +387,7 @@ function updateModelLabels() {
   const name = displayName(llmConfig);
   $('#mode-text').textContent = name;
   // 输入框里显示型号（或“自动”），点一下弹出模型列表
-  $('#model-chip-text').textContent = chipLabel(llmConfig);
+  $('#model-chip-text').textContent = COMPACT && isAuto(llmConfig) ? `自动 · ${modelOf(llmConfig) || '选择模型'}` : chipLabel(llmConfig);
   if (isAuto(llmConfig)) $('#mode-text').textContent = `${name} · 自动选模型`;
   $('#mode-pill').title = `当前模型：${name}${gateway ? '（经本机网关）' : ''}。点击切换`;
   $('#hud-model').textContent = name.length > 22 ? `${name.slice(0, 21)}…` : name;
@@ -2221,7 +2221,7 @@ window.__jarvis = {
 if (!COMPACT) initWorkbench({showPanel,newSession,openSession,getSession:()=>session,getRunning:()=>active && !active.streamDone ? session.id : null,openFile:openInWorkspace});
 mascots = initMascots();
 companion = initCompanion({ send, startVoice: async () => { await setVoiceCall(true); return callActive; }, stopVoice: () => setVoiceCall(false), speak: text => { speaker.unlock(); speaker.speak(text); } });
-initCompanionAppearance({ showPanel });
+initCompanionAppearance();
 initRenderHealthPanel({ mobile: MOBILE, toast, onChange: () => { if (!active) replayTranscript(); } });
 
 // 手机启动页：界面准备好、并且至少显示了 2 秒后淡出（太快一闪而过不像 App）

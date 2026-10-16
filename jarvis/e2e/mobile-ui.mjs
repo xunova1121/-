@@ -42,13 +42,24 @@ try{
   });
   const page=await ctx.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(BASE);await page.waitForSelector('body.compact.companion-edition');
+  await page.evaluate(()=>document.documentElement.classList.add('mobile-app'));
   await page.waitForFunction(()=>window.__jarvis&&document.querySelector('#app-splash')?.hidden!==false);await page.waitForTimeout(400);
   check('手机版实际产物启用陪伴感布局',await page.evaluate(()=>document.body.classList.contains('compact')&&!document.body.classList.contains('workbench')&&window.__jarvis.stage===null));
   check('手机近白底色，保留清楚的未央图标',await page.evaluate(()=>{const r=document.querySelector('.brand-mark').getBoundingClientRect();return r.width>=44&&r.height>=44&&getComputedStyle(document.body).backgroundColor==='rgb(252, 251, 255)';}));
   check('手机输入区保留附件、拍照、语音、发送',await page.evaluate(()=>['btn-attach','btn-camera','btn-call','btn-send'].every(id=>{const r=document.getElementById(id).getBoundingClientRect();return r.width>=32&&r.height>=36;})));
+  check('顶栏图标完整位于栏内，与文字保持间距',await page.evaluate(()=>{const header=document.querySelector('.topbar').getBoundingClientRect(),logo=document.querySelector('.brand-mark .wy-mascot').getBoundingClientRect(),name=document.querySelector('.brand-name').getBoundingClientRect();return logo.top>=header.top&&logo.bottom<=header.bottom&&logo.right+6<=name.left&&Math.abs((logo.top+logo.bottom)/2-(name.top+name.bottom)/2)<8;}));
+  check('顶栏与页面使用同一底色',await page.evaluate(()=>getComputedStyle(document.querySelector('.topbar')).backgroundColor===getComputedStyle(document.body).backgroundColor));
+  await page.evaluate(()=>window.__jarvis.showPanel('mind'));
+  check('记忆面板不残留旧紫色背景',await page.evaluate(()=>getComputedStyle(document.querySelector('.side')).backgroundColor===getComputedStyle(document.body).backgroundColor&&getComputedStyle(document.querySelector('.side-back')).backgroundColor===getComputedStyle(document.body).backgroundColor));
+  await page.click('#btn-theme');
+  await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
+  check('夜间顶栏和面板同步切换，不出现白色顶栏',await page.evaluate(()=>getComputedStyle(document.querySelector('.topbar')).backgroundColor==='rgb(25, 25, 35)'&&getComputedStyle(document.querySelector('.side')).backgroundColor==='rgb(25, 25, 35)'));
+  await page.screenshot({path:path.join(OUT,'mobile-unified-dark-panel.png')});
+  await page.click('#btn-theme');await page.waitForFunction(()=>document.documentElement.dataset.theme==='light');await page.click('#btn-side-back');
   async function ask(text){const before=await page.locator('.msg.agent').count();await page.fill('#prompt',text);await page.press('#prompt','Enter');await page.waitForFunction(n=>document.querySelectorAll('.msg.agent').length>n&&!document.querySelector('.msg.agent.streaming'),before,{timeout:30000});await page.waitForTimeout(120);}
   await ask('你好');
-  check('手机短回复有较大的单个表情角色和短回应',await page.locator('.msg.agent').last().evaluate(el=>{const who=el.querySelector('.who');return who.querySelectorAll('.wy-mascot').length===1&&who.querySelector('.wy-mascot').getBoundingClientRect().height>=120&&getComputedStyle(who.querySelector('.wy-reply-greeting')).display!=='none';}));
+  check('对话正文两侧保留至少 20px 阅读留白',await page.locator('.msg.agent').last().evaluate(el=>{const r=el.getBoundingClientRect();return r.left>=20&&r.right<=innerWidth-20;}));
+  check('手机短回复有较大的单个表情角色和短回应',await page.locator('.msg.agent').last().evaluate(el=>{const who=el.querySelector('.who');return who.querySelectorAll('.wy-mascot').length===1&&who.querySelector('.wy-mascot').getBoundingClientRect().height>=100&&getComputedStyle(who.querySelector('.wy-reply-greeting')).display!=='none';}));
   await page.focus('#prompt');await page.evaluate(()=>window.__resizeKeyboard(444));await page.waitForTimeout(80);
   check('键盘弹出时角色缩小且发送按钮保持可见',await page.evaluate(()=>{const r=document.querySelector('.msg.agent:last-child .who .wy-mascot').getBoundingClientRect(),send=document.getElementById('btn-send').getBoundingClientRect();return document.body.classList.contains('wy-keyboard-open')&&r.height<=60&&send.bottom<=445&&send.top>=0;}));
   await page.evaluate(()=>document.activeElement.blur());await page.waitForTimeout(50);
@@ -59,7 +70,8 @@ try{
   await page.screenshot({path:path.join(OUT,'companion-mobile-chat.png')});
   await page.locator('.brand-mark').click();
   await page.getByRole('button',{name:'比个心',exact:true}).click();
-  check('陪伴面板使用比心表情并放大角色',await page.locator('.wy-companion-stage .wy-mascot').evaluate(el=>el.dataset.state==='love'&&el.getBoundingClientRect().height>=250));
+  check('陪伴面板使用比心表情并放大角色',await page.locator('.wy-companion-stage .wy-mascot').evaluate(el=>el.dataset.state==='love'&&el.getBoundingClientRect().height>=170&&el.getBoundingClientRect().bottom<=document.querySelector('.wy-companion-title').getBoundingClientRect().top-8));
+  check('陪伴角色不遮挡标题文字',await page.locator('.wy-companion-stage .wy-mascot').evaluate(el=>{const r=el.getBoundingClientRect(),title=document.querySelector('.wy-companion-title').getBoundingClientRect(),stage=el.parentElement.getBoundingClientRect();return r.bottom<=title.top-8&&r.top>=stage.top-4&&r.height<=stage.height;}));
   await page.getByRole('button',{name:'摸摸头',exact:true}).click();
   check('点击摸头会回应，保持可爱的表情',await page.locator('.wy-companion-stage .wy-mascot').getAttribute('data-state')==='pet'&&/温柔/.test(await page.textContent('.wy-companion-say')));
   await page.screenshot({path:path.join(OUT,'companion-mobile-panel.png')});
@@ -69,10 +81,12 @@ try{
   await page.fill('.wy-companion input','眨眨眼');await page.locator('.wy-companion form button').click();
   check('陪伴面板文字动作指令正常执行',await page.locator('.wy-companion-stage .wy-mascot').getAttribute('data-state')==='wink',await page.locator('.wy-companion-stage .wy-mascot').getAttribute('data-state'));
   await page.getByRole('button',{name:'关闭未央',exact:true}).click();await page.evaluate(()=>window.__resizeKeyboard(844));
-  await page.locator('.wy-composer-options>summary').click();await page.getByRole('button',{name:'选择模型与声音',exact:true}).click();
-  check('更多选项仍可进入模型与声音设置',await page.isVisible('#llm-provider'));
-  await page.click('#btn-side-back');
-  await page.evaluate(base=>window.__jarvis.panels.patchConfig(c=>({...c,provider:'custom',models:{...c.models,custom:'ui-test'},keys:{...c.keys,custom:'sk-test'},baseURLs:{...c.baseURLs,custom:base+'/v1'},routing:{...c.routing,enabled:false}})),BASE);
+  check('移除底部声音跳转入口，显示当前模型',await page.isVisible('#model-chip')&&await page.locator('.wy-composer-options').count()===0);
+  await page.evaluate(base=>window.__jarvis.panels.patchConfig(c=>({...c,provider:'custom',models:{...c.models,custom:'ui-test-a'},keys:{...c.keys,custom:'sk-test'},baseURLs:{...c.baseURLs,custom:base+'/v1'},modelLists:{...c.modelLists,['custom|'+base+'/v1']:{ids:['ui-test-a','ui-test-b'],at:Date.now()}},routing:{...c.routing,enabled:false}})),BASE);
+  await page.click('#model-chip');
+  check('当前模型直接展开锚定列表，无页面跳转',await page.evaluate(()=>{const sheet=document.querySelector('.mp-sheet'),r=sheet.getBoundingClientRect(),chip=document.getElementById('model-chip').getBoundingClientRect();return !sheet.hidden&&sheet.classList.contains('mp-anchored')&&r.left>=15&&r.right<=innerWidth-15&&r.bottom<=chip.top&&!document.body.classList.contains('side-open');}));
+  await page.locator('.mp-item').filter({has:page.getByText('ui-test-b',{exact:true})}).click();
+  check('点选后直接换模型并更新输入框标签',await page.evaluate(()=>window.__jarvis.config.models.custom==='ui-test-b'&&document.getElementById('model-chip-text').textContent==='ui-test-b'&&document.querySelector('.mp-sheet').hidden&&!document.body.classList.contains('side-open')));
   const before=await page.locator('.msg.agent').count();await page.fill('#prompt','请写一段较长的计划');await page.press('#prompt','Enter');
   await page.waitForFunction(n=>document.querySelectorAll('.msg.agent').length>n&&document.querySelector('.msg.agent:last-child .body')?.textContent.length>200,before);
   await page.evaluate(()=>{const root=document.getElementById('transcript');root.scrollTop=0;root.dispatchEvent(new Event('scroll'));});
@@ -98,6 +112,7 @@ try{
   check('向前翻页仍限制消息数量，可以读取较早内容',await safePage.evaluate(()=>document.querySelectorAll('.msg').length===12&&document.querySelector('.msg.user .body').textContent.includes('历史消息 37')));
   await safePage.getByRole('button',{name:'回到最近对话',exact:true}).click();
   await safePage.evaluate(()=>window.__jarvis.showPanel('settings'));
+  check('手机可复制包含运行规模的异常诊断',await safePage.isVisible('#btn-copy-render-diagnostics'));
   check('手机提供可切换的兼容显示设置',await safePage.isVisible('#set-safe-render')&&await safePage.isChecked('#set-safe-render'));
   await safePage.uncheck('#set-safe-render');await safePage.waitForFunction(()=>!document.documentElement.classList.contains('safe-render')&&document.querySelectorAll('.msg').length===24);
   check('关闭兼容显示恢复标准分页，不重新加载页面',await safePage.evaluate(()=>document.querySelector('.msg.user .body').textContent.includes('历史消息 37')));
@@ -112,5 +127,11 @@ try{
   await safePage.screenshot({path:path.join(OUT,'companion-mobile-safe-history.png')});
   check('兼容显示与历史翻页没有页面异常',safeErrors.length===0,safeErrors.join(' | '));
   await safeContext.close();
+  for(const width of [320,412]){
+    const narrow=await browser.newPage({viewport:{width,height:780}});await narrow.goto(BASE);await narrow.waitForSelector('body.companion-edition');
+    await narrow.evaluate(()=>{document.documentElement.style.fontSize='18px';});
+    check(`${width}px 手机宽度下头像、模型和输入操作不溢出`,await narrow.evaluate(()=>{const header=document.querySelector('.topbar').getBoundingClientRect(),logo=document.querySelector('.brand-mark .wy-mascot').getBoundingClientRect(),row=document.querySelector('.composer-row').getBoundingClientRect(),model=document.getElementById('model-chip').getBoundingClientRect(),camera=document.getElementById('btn-camera').getBoundingClientRect(),call=document.getElementById('btn-call').getBoundingClientRect();return document.documentElement.scrollWidth<=innerWidth&&logo.bottom<=header.bottom&&model.width>=50&&model.left>=camera.right&&model.right<=call.left&&call.bottom<=row.bottom;}));
+    await narrow.screenshot({path:path.join(OUT,`mobile-unified-${width}.png`)});await narrow.close();
+  }
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
 console.log(`\n手机版陪伴界面 ${results.filter(Boolean).length}/${results.length} 通过`);if(results.some(x=>!x))process.exitCode=1;

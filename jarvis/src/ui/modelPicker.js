@@ -110,24 +110,44 @@ export function initModelPicker({ getConfig, patchConfig, getGateway, toast, ope
     el('div', { className: 'mp-head' }, el('strong', { textContent: '选择模型' }), refreshBtn, closeBtn),
     search, status, list, setBtn);
   document.body.append(scrim, sheet);
-  let ids = [];
+  let ids = [], loadGeneration = 0;
+  const anchor = document.getElementById('model-chip');
+  anchor?.setAttribute('aria-haspopup','dialog');
+  anchor?.setAttribute('aria-expanded','false');
+  function position() {
+    if (!document.body.classList.contains('compact') || sheet.hidden || !anchor) return;
+    sheet.classList.add('mp-anchored');
+    const rect=anchor.getBoundingClientRect(), viewport=window.visualViewport;
+    const width=Math.min(360,innerWidth-32), left=Math.max(16,Math.min(rect.left,innerWidth-width-16));
+    sheet.style.setProperty('--mp-left',`${left}px`);
+    sheet.style.setProperty('--mp-width',`${width}px`);
+    sheet.style.setProperty('--mp-bottom',`${Math.max(12,innerHeight-rect.top+8)}px`);
+    sheet.style.setProperty('--mp-height',`${Math.max(130,Math.min(380,rect.top-(viewport?.offsetTop||0)-20))}px`);
+  }
+  addEventListener('resize',position);
+  window.visualViewport?.addEventListener('resize',position);
 
   async function load(force = false) {
+    const generation=++loadGeneration;
+    status.textContent='';
     const cfg = getConfig();
+    setBtn.hidden=document.body.classList.contains('compact') && providerById(cfg.provider)?.kind!=='mock';
     if (providerById(cfg.provider)?.kind === 'mock') { ids = []; render(); return; }
     const key = listKey(cfg);
     const cached = cfg.modelLists?.[key];
     if (!force && cached?.ids?.length && Date.now() - cached.at < DAY) { ids = cached.ids; render(); return; }
     status.textContent = '正在读取服务商的模型列表…';
-    ids = cached?.ids || [];
+    ids = cached?.ids || [...new Set([modelOf(cfg),...(providerById(cfg.provider)?.models||[])].filter(Boolean))];
     render();
     try {
       const got = await listModels(cfg, { gateway: getGateway() });
-      ids = [...new Set(got)].sort((a, b) => a.localeCompare(b));
+      if (generation!==loadGeneration) return;
+      ids = [...new Set([modelOf(cfg),...got].filter(Boolean))].sort((a, b) => a.localeCompare(b));
       patchConfig((c) => ({ ...c, modelLists: { ...(c.modelLists || {}), [key]: { ids, at: Date.now() } } }));
       status.textContent = '';
     } catch (e) {
-      status.textContent = `读取失败：${e.message}`;
+      if (generation!==loadGeneration) return;
+      status.textContent = `列表暂不可用，可先选择已知模型：${e.message}`;
     }
     render();
   }
@@ -193,14 +213,19 @@ export function initModelPicker({ getConfig, patchConfig, getGateway, toast, ope
   }
 
   function open() {
+    document.activeElement?.blur?.();
     sheet.hidden = false;
     scrim.hidden = false;
     document.body.classList.add('mp-open');
     search.value = '';
+    anchor?.setAttribute('aria-expanded','true');
+    position();
     load();
   }
   function close() {
+    ++loadGeneration;
     sheet.hidden = true;
+    anchor?.setAttribute('aria-expanded','false');
     scrim.hidden = true;
     document.body.classList.remove('mp-open');
   }

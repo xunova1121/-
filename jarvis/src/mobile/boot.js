@@ -39,6 +39,8 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
       if (!isActive) globalThis.__jarvisTTS?.stop().catch(() => {});
     });
     App.addListener('backButton', () => {
+      const picker=document.querySelector('.mp-sheet:not([hidden]) .x-btn');
+      if(picker){picker.click();return;}
       const image = document.querySelector('.image-preview[open]');
       if (image) { image.close(); return; }
       const companion = document.querySelector('.wy-companion[open]');
@@ -54,16 +56,27 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
   } catch { /* 没有 App 插件 */ }
   // 状态栏 / 手势条的图标颜色跟随明暗：浅色界面用深色图标，深色界面用浅色图标
   try {
-    const { SystemBars, registerPlugin } = await import('@capacitor/core');
+    const { registerPlugin } = await import('@capacitor/core');
     const WindowColor = registerPlugin('WindowColor');
+    let pending=0,last='';
     const apply = () => {
-      SystemBars?.setStyle?.({ style: document.documentElement.dataset.theme === 'dark' ? 'DARK' : 'LIGHT' }).catch(() => {});
-      // 状态栏下面的底色和界面顶部一致（旧版系统 WebView 不画到状态栏下面）
-      requestAnimationFrame(() => WindowColor.set({ color: topColor(getComputedStyle(document.body)) }).catch(() => {}));
+      if(pending)return;
+      pending=requestAnimationFrame(()=>{
+        pending=0;
+        const light=document.documentElement.dataset.theme!=='dark';
+        const fallback=light?'#FCFBFF':'#191923';
+        const header=document.querySelector('.topbar');
+        const color=topColor(getComputedStyle(header||document.body),topColor(getComputedStyle(document.body),fallback));
+        const key=color+light;
+        if(key===last)return;
+        WindowColor.set({color,light}).then(()=>{last=key;}).catch(()=>{});
+      });
     };
     apply();
-    new MutationObserver(apply).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-    addEventListener('load', () => setTimeout(apply, 300)); // 界面样式都就位后再取一次颜色
+    new MutationObserver(apply).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+    addEventListener('jarvis:chrome-ready',apply);
+    addEventListener('load',apply);
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden){last='';apply();}});
   } catch { /* 旧版 Capacitor 没有 SystemBars */ }
   // 下载：WebView 里网页下载不起作用。存到“文档/Jarvis”，再弹出系统分享（用 WPS、微信等打开或发送）
   globalThis.__jarvisSaveFile = async (blob, name) => {

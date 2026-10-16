@@ -23,4 +23,29 @@ public class CrashLogPlugin extends Plugin {
         if(!safe)edit.putLong("lastCrash",0).putInt("consecutive",0);
         edit.apply();call.resolve();
     }
+    @PluginMethod public void diagnostics(PluginCall call){
+        JSObject result=new JSObject();
+        result.put("app",CrashLog.appVersion(getContext()));result.put("sdk",android.os.Build.VERSION.SDK_INT);
+        result.put("device",android.os.Build.MANUFACTURER+" "+android.os.Build.MODEL);
+        result.put("safeDisplay",MainActivity.safeDisplay(getContext()));
+        result.put("lastRenderer",getContext().getSharedPreferences("render-health",android.content.Context.MODE_PRIVATE).getString("lastRenderer",""));
+        if(android.os.Build.VERSION.SDK_INT>=26){android.content.pm.PackageInfo web=android.webkit.WebView.getCurrentWebViewPackage();result.put("webview",web==null?"unknown":web.versionName);}
+        if(android.os.Build.VERSION.SDK_INT>=30){
+            org.json.JSONArray exits=new org.json.JSONArray();
+            try{
+                android.app.ActivityManager manager=(android.app.ActivityManager)getContext().getSystemService(android.content.Context.ACTIVITY_SERVICE);
+                for(android.app.ApplicationExitInfo info:manager.getHistoricalProcessExitReasons(getContext().getPackageName(),0,5)){
+                    JSObject row=new JSObject();row.put("time",info.getTimestamp());row.put("reason",info.getReason());row.put("status",info.getStatus());row.put("importance",info.getImportance());row.put("pssKB",info.getPss());row.put("rssKB",info.getRss());exits.put(row);
+                }
+            }catch(Exception ignored){ }
+            result.put("exits",exits);
+        }
+        call.resolve(result);
+    }
+    @PluginMethod public void copyDiagnostics(PluginCall call){
+        String text=call.getString("text","");
+        if(text.length()>16000)text=text.substring(0,16000);
+        ((android.content.ClipboardManager)getContext().getSystemService(android.content.Context.CLIPBOARD_SERVICE)).setPrimaryClip(android.content.ClipData.newPlainText("未央异常诊断",text));
+        call.resolve();
+    }
 }

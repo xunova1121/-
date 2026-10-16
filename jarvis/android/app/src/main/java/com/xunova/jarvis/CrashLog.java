@@ -14,6 +14,7 @@ import java.util.Locale;
 public final class CrashLog {
     private static boolean installed=false;
     private CrashLog() { }
+    static String appVersion(Context ctx){try{return ctx.getPackageManager().getPackageInfo(ctx.getPackageName(),0).versionName;}catch(Exception e){return "unknown";}}
     static File file(Context ctx){return new File(ctx.getFilesDir(),"crash.txt");}
     static String tailFile(File file,int maxBytes) throws Exception {
         if(!file.exists())return "";
@@ -30,7 +31,7 @@ public final class CrashLog {
             if(f.length()>64*1024){byte[] keep=tailFile(f,8192).getBytes(StandardCharsets.UTF_8);try(FileOutputStream out=new FileOutputStream(f)){out.write(keep);}}
             try(FileOutputStream out=new FileOutputStream(f,true)){
                 String time=new SimpleDateFormat("MM-dd HH:mm:ss",Locale.CHINA).format(new Date());
-                out.write((time+" "+text.substring(0,Math.min(text.length(),4000))+"\n").getBytes(StandardCharsets.UTF_8));
+                out.write((time+" App="+appVersion(ctx)+" "+text.substring(0,Math.min(text.length(),4000))+"\n").getBytes(StandardCharsets.UTF_8));
             }
         }catch(Exception ignored){ }
     }
