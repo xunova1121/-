@@ -144,6 +144,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('泛光开启时 draw calls ≤ 12', stats.bloom && stats.calls <= 12, String(stats.calls));
   await page.evaluate(() => { const s = document.querySelector('#set-quality'); s.value = 'auto'; s.dispatchEvent(new Event('change', { bubbles: true })); });
   check('自动画质适配软件渲染器', await page.evaluate(() => { const j = window.__jarvis; return j.stage.stats.softwareRenderer ? j.quality.tier === 'standard' && !j.quality.bloom : j.quality.tier === 'high'; }));
+  check('软件渲染限制实际像素以减少恢复负担', await page.evaluate(()=>{const s=window.__jarvis.stage,gl=s.renderer.getContext();return !s.stats.softwareRenderer || Math.max(gl.drawingBufferWidth,gl.drawingBufferHeight)<=720;}));
   await page.waitForFunction(() => window.__jarvis.gateway, null, { timeout: 5000 }).catch(() => {});
   check('识别到本机网关', await page.evaluate(() => Boolean(window.__jarvis.gateway)), await page.textContent('#gw-badge'));
 
@@ -412,6 +413,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('图片附件显示缩略图', (await page.locator('#attach-list .has-thumb img').count()) === 1);
   await closeSide(page);
   await page.locator('#attach-list .image-open').click();
+  await page.locator('dialog.image-preview').waitFor({state:'visible'});
   check('发送前点击附件查看图片', await page.locator('dialog.image-preview').isVisible());
   await page.getByRole('button',{name:'关闭图片预览',exact:true}).click();
   const visIdx = fake.seen.length;
@@ -421,6 +423,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('对话里显示图片缩略图', (await page.locator('.msg.user').last().locator('.msg-images img').count()) === 1);
   check('上传消息使用简短工作区回执', /已上传工作区/.test(await page.locator('.msg.user').last().textContent()) && !/已上传到工作区：/.test(await page.locator('.msg.user').last().textContent()));
   await page.locator('.msg.user').last().locator('.msg-images .image-open').click();
+  await page.locator('dialog.image-preview').waitFor({state:'visible'});
   check('历史上传图片可以点开查看', await page.locator('dialog.image-preview').isVisible());
   await page.getByRole('button',{name:'关闭图片预览',exact:true}).click();
   // 追问时提到图片：之前的图片再带给模型；不提图片的闲聊不带

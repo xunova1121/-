@@ -214,6 +214,10 @@ export function createStage(canvas, { lowEnd = false, onContextChange } = {}) {
   function resize() {
     const w = canvas.clientWidth || 1;
     const h = canvas.clientHeight || 1;
+    // 软件渲染没有 GPU：限制实际绘图像素，避免大窗口的填充与上下文重建拖住界面。
+    // CSS 尺寸、相机比例和粒子数量保持一致；硬件渲染仍按设备像素比输出。
+    const ratio = Math.min(window.devicePixelRatio || 1, softGL ? 720 / Math.max(w,h) : 2);
+    if (renderer.getPixelRatio() !== ratio) renderer.setPixelRatio(ratio);
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.position.z = w / h < 1 ? 250 / Math.max(0.55, w / h) : 250;
