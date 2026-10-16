@@ -2,7 +2,7 @@ import './mascot.css';
 
 export const MASCOT_LABELS = {
   idle: '陪伴', wink: '眨眼', rub: '搓手期待', think: '思考',
-  wave: '挥手', shy: '害羞', love: '比心', dance: '跳舞', sleep: '睡觉', run: '忙碌查找', happy: '高兴', spin: '转圈', listen: '正在听'
+  wave: '挥手', shy: '害羞', love: '比心', dance: '跳舞', pet: '摸摸头', sleep: '睡觉', run: '忙碌查找', happy: '高兴', spin: '转圈', listen: '正在听'
 };
 
 export function poseForEmotion(value) {
@@ -38,10 +38,10 @@ export function createMascot(state = 'idle') {
 
 /** 只更新工作状态，不启动 WebGL；手机上的小图标由 CSS 动画驱动。 */
 export function initMascots() {
-  const marks = () => [...document.querySelectorAll('.brand-mark, .as-logo, .welcome-hero .cloud, .drawer-logo')];
+  const marks = () => [...document.querySelectorAll('.brand-mark, .as-logo, .welcome-hero .cloud, .drawer-logo, .wb-mark, .wb-hero-mark')];
   for (const mark of marks()) {
     mark.classList.add('wy-brand');
-    if (mark.matches('.brand-mark, .welcome-hero .cloud')) { mark.setAttribute('role', 'button'); mark.tabIndex = 0; mark.setAttribute('aria-label', '打开未央，和我说话'); mark.closest('.welcome-hero')?.removeAttribute('aria-hidden'); }
+    if (mark.matches('.brand-mark, .welcome-hero .cloud, .wb-mark, .wb-hero-mark')) { mark.removeAttribute('aria-hidden'); mark.setAttribute('role', 'button'); mark.tabIndex = 0; mark.setAttribute('aria-label', '打开未央，和我说话'); mark.closest('.welcome-hero')?.removeAttribute('aria-hidden'); }
     mark.replaceChildren(createMascot(mark.matches('.as-logo') ? 'spin' : 'idle'));
   }
   let task = 'idle';

@@ -112,6 +112,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('点击左上角未央，居中打开互动面板', await page.locator('.wy-companion').evaluate(d => d.open));
   await page.getByRole('button', { name: '比个心', exact: true }).click();
   check('互动面板执行可爱动作', await page.locator('.wy-companion .wy-mascot').getAttribute('data-state') === 'love');
+  await page.getByRole('button',{name:'切换文字输入',exact:true}).click();
   await page.locator('.wy-companion input').fill('转个圈');
   await page.locator('.wy-companion form button').click();
   check('文字动作指令能执行', await page.locator('.wy-companion .wy-mascot').getAttribute('data-state') === 'spin');
@@ -189,7 +190,8 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.waitForFunction((n) => document.querySelectorAll('#transcript .msg.agent').length > n && !document.querySelector('#transcript .msg.agent.streaming'), before, { timeout: 20000 });
   await page.waitForTimeout(600);
   check('最近对话：回答中的那条转圈，答完停下', spun && (await page.locator('.wb-recent .wb-chat.running').count()) === 0);
-  check('回答没有左侧竖线，用头像标题', await page.evaluate(() => { const m = [...document.querySelectorAll('#transcript .msg.agent')].at(-1); return getComputedStyle(m).borderLeftWidth === '0px' && /svg/.test(getComputedStyle(m.querySelector('.who'), '::before').backgroundImage); }));
+  check('PC 回答只保留左侧一个表情头像，没有重复图标', await page.evaluate(() => { const m=[...document.querySelectorAll('#transcript .msg.agent')].at(-1), who=m.querySelector('.who'), avatar=who.querySelector('.wy-mascot'), name=who.querySelector('.who-name'); return getComputedStyle(m).borderLeftWidth==='0px' && m.querySelectorAll('.wy-mascot').length===1 && getComputedStyle(who,'::before').content==='none' && avatar.getBoundingClientRect().right<=name.getBoundingClientRect().left+2 && getComputedStyle(who.querySelector('.wy-reply-greeting')).display==='none'; }));
+  check('PC 左上角未央图标放大', await page.locator('.wb-brand .wb-mark').evaluate(el=>{const r=el.getBoundingClientRect();return r.width>=60 && r.height>=64;}));
   const skillReply = await page.locator('#transcript .msg.agent').last().innerText();
   check('“/技能名”让智能体先读取技能说明', /使用技能/.test(skillReply) && /已加载技能「weekly-report」/.test(skillReply), skillReply.slice(0, 80));
   check('首页在开始对话后收起', await page.evaluate(() => document.querySelector('.wb-landing').hidden));
@@ -553,7 +555,8 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
     while (window.__jarvis.stage.stats.frames <= before + 2 && performance.now() - t0 < 3000) await new Promise((r) => setTimeout(r, 10));
     return Math.round(performance.now() - t0);
   });
-  check('WebGL 上下文丢失后恢复 ≤ 500ms', typeof restored === 'number' && restored <= 500, `${restored}ms`);
+  const recovery = await page.evaluate(()=>({parallel:window.__jarvis.stage.stats.parallelCompile,compile:window.__jarvis.stage.stats.restoreCompileMs,aa:window.__jarvis.stage.renderer.getContext().getContextAttributes()?.antialias}));
+  check('WebGL 上下文丢失后恢复 ≤ 500ms', typeof restored === 'number' && restored <= 500, `${restored}ms · ${JSON.stringify(recovery)}`);
   check('无页面错误', errors.length === 0, errors.join(' | '));
   await ctx.close();
 }

@@ -181,6 +181,11 @@ jobs:
         run: npm test
       - name: 构建网页版
         run: npm run build
+      - name: 构建并验证手机版界面
+        run: |
+          npm run build:mobile
+          mkdir -p "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/mobile-ui.mjs "$RUNNER_TEMP/jarvis-e2e"
       - name: 网页版和单文件版端到端测试
         shell: bash
         run: |

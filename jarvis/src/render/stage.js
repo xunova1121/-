@@ -21,6 +21,20 @@ const FOV = 38;
 const ORB_RADIUS = 27;
 const MORPH_MS = 1700;
 const TAU = Math.PI * 2;
+const isSoftwareGL = gl => {
+  const debug = gl?.getExtension('WEBGL_debug_renderer_info');
+  return /swiftshader|llvmpipe|software|basic render/i.test(debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : '');
+};
+// 必须在主画布创建前决定 MSAA；软件渲染的多重采样会增加重建与填充负担。
+function softwareHint() {
+  let context;
+  try {
+    const probe = document.createElement('canvas');
+    context = probe.getContext('webgl2',{antialias:false,powerPreference:'high-performance'}) || probe.getContext('webgl',{antialias:false});
+    return isSoftwareGL(context);
+  } catch { return false; }
+  finally { context?.getExtension('WEBGL_lose_context')?.loseContext(); }
+}
 /** 场景布局（原胸像模型的尺寸，光环、底座都按它摆放） */
 export const META = { pedestalY: -66, haloY: 8, haloRadius: 42, cameraY: -8 };
 
@@ -30,7 +44,8 @@ export const META = { pedestalY: -66, haloY: 8, haloRadius: 42, cameraY: -8 };
  */
 export function createStage(canvas, { lowEnd = false, onContextChange } = {}) {
   const meta = META;
-  const renderer = new WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
+  const software = softwareHint();
+  const renderer = new WebGLRenderer({ canvas, antialias: !software, alpha: false, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   // 底色：直接输出到屏幕时由 three.js 做 sRGB 编码；走泛光管线时合成 pass 不做编码，
   // 所以要把 sRGB 数值原样当线性值写进去，否则任何底色都会被压得发黑
@@ -64,8 +79,7 @@ export function createStage(canvas, { lowEnd = false, onContextChange } = {}) {
 
   // —— 粒子体：没有显卡（软件渲染）时也用轻量粒子数
   const gl = renderer.getContext();
-  const dbg = gl.getExtension('WEBGL_debug_renderer_info');
-  const softGL = /swiftshader|llvmpipe|software|basic render/i.test(dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '');
+  const softGL = software || isSoftwareGL(gl);
   const N = lowEnd || softGL ? 6000 : 14000;
   const formCache = new Map();
   const form = (name) => {
@@ -317,18 +331,28 @@ export function createStage(canvas, { lowEnd = false, onContextChange } = {}) {
 
   // —— WebGL 上下文丢失与恢复（three.js 在 restored 时重建 GL 状态并重新上传缓冲）
   let lostAt = 0;
+  let contextGeneration = 0;
   canvas.addEventListener('webglcontextlost', (e) => {
     e.preventDefault();
+    contextGeneration++;
     lostAt = performance.now();
     pausedBy.add('context');
     sync();
     onContextChange?.('lost');
   });
   canvas.addEventListener('webglcontextrestored', () => {
-    pausedBy.delete('context');
+    const gen = contextGeneration, started = performance.now();
     resize();
-    sync();
-    onContextChange?.('restored', performance.now() - lostAt);
+    // 首帧逐个链接 shader 会阻塞恢复。支持并行编译时先同时准备全部程序，
+    // 真正可用后再恢复绘制；不靠空帧或放宽恢复标准隐藏等待。
+    stats.parallelCompile = renderer.extensions.has('KHR_parallel_shader_compile');
+    const ready = stats.parallelCompile ? renderer.compileAsync(scene,camera) : Promise.resolve();
+    ready.catch(error => console.warn('预编译未完成，将按需重建',error)).then(() => {
+      if (gen !== contextGeneration) return;
+      stats.restoreCompileMs = Math.round(performance.now()-started);
+      pausedBy.delete('context'); sync();
+      onContextChange?.('restored', performance.now() - lostAt);
+    });
   });
 
   return {
@@ -387,6 +411,7 @@ export function createStage(canvas, { lowEnd = false, onContextChange } = {}) {
       draw();
     },
     dispose() {
+      contextGeneration++;
       cancelAnimationFrame(raf);
       raf = 0;
       ro.disconnect();

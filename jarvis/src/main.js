@@ -14,6 +14,7 @@ import { initWorkbench } from './ui/workbench.js';
 import logoUrl from './ui/logo.svg';
 import { initMascots } from './ui/mascot.js';
 import { initCompanion } from './ui/companion.js';
+import { initCompanionAppearance } from './ui/companionAppearance.js';
 let companion = null;
 import { imageButton, previewWorkspaceImage } from './ui/imagePreview.js';
 import { initCamera } from './ui/composerMedia.js';
@@ -1023,6 +1024,7 @@ async function send(text) {
     bubble.append(`\n（出错了：${msg}${cors ? '。多半是该服务商不允许网页直接调用：双击 jarvis 文件夹里的 启动.bat（或 start.sh）并保持窗口开着，本页面会自动连上本机网关，然后重试即可' : ''}）`);
     if (cors && !gateway) detectGateway();
     bubble.done();
+    bubble.activity('error');
     $('#mode-pill').classList.add('offline');
     active = null;
     setTask('error', '请求失败');
@@ -2187,6 +2189,7 @@ window.__jarvis = {
 if (!COMPACT) initWorkbench({showPanel,newSession,openSession,getSession:()=>session,getRunning:()=>active && !active.streamDone ? session.id : null,openFile:openInWorkspace});
 mascots = initMascots();
 companion = initCompanion({ send, startVoice: async () => { await setVoiceCall(true); return callActive; }, stopVoice: () => setVoiceCall(false), speak: text => { speaker.unlock(); speaker.speak(text); } });
+initCompanionAppearance({ showPanel });
 
 // 手机启动页：界面准备好、并且至少显示了 2 秒后淡出（太快一闪而过不像 App）
 {

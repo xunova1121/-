@@ -11,6 +11,8 @@ afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe('未央居中互动', () => {
   it('识别十种动作，同时把复杂任务留给模型', () => {
     expect(['挥挥手','未央眨眼睛','搓搓手','请转个圈','狂奔','笑一个','睡觉','害羞','给我比个心','跳个舞'].map(t => actionFromText(t)?.[0])).toEqual(['wave','wink','rub','spin','run','happy','sleep','shy','love','dance']);
+    expect(actionFromText('摸摸头')?.[0]).toBe('pet');
+    expect(actionFromText('摸摸头然后查天气')).toBeNull();
     expect(actionFromText('帮我查今天的天气')).toBeNull();
     expect(actionFromText('睡眠报告')).toBeNull();
     expect(actionFromText('转圈后查天气')).toBeNull();

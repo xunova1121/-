@@ -209,12 +209,17 @@ export class Transcript {
     this.root = root;
     this.interimEl = null;
     this.progress = progress;
+    this.follow = true;
+    root.addEventListener('scroll', () => {
+      this.follow = root.scrollHeight - root.scrollTop - root.clientHeight < 140;
+      document.body.classList.toggle('wy-reading-history', !this.follow);
+    }, { passive:true });
     // 区域变矮（手机弹出键盘、输入框变高）时保持底部对齐：已输出的内容往上推，而不是被输入框盖住
     if (typeof ResizeObserver === 'function') {
       let lastH = root.clientHeight;
       new ResizeObserver(() => {
         const h = root.clientHeight;
-        if (h < lastH) root.scrollTop += lastH - h;
+        if (h < lastH && this.follow) root.scrollTop += lastH - h;
         lastH = h;
       }).observe(root);
     }
@@ -226,6 +231,7 @@ export class Transcript {
    */
   add(role, text = '', ts = Date.now(), { thumbs = [] } = {}) {
     this.clearInterim();
+    if (role === 'user') { this.follow = true; document.body.classList.remove('wy-reading-history'); }
     this.root.querySelector('.welcome')?.remove();
     const el = document.createElement('div');
     el.className = `msg ${role}`;
@@ -234,7 +240,16 @@ export class Transcript {
     // 名字和时间分开放，方便桌面版把名字做成标题、时间淡一些（文字内容不变）
     head.append(Object.assign(document.createElement('span'), { className: 'who-name', textContent: LABEL[role] ?? role }), Object.assign(document.createElement('span'), { className: 'who-time', textContent: ` · ${hhmm(ts)}` }));
     const mascot = role === 'agent' ? createMascot(text ? 'idle' : 'think') : null;
-    if (mascot) { mascot.classList.add('who-mood'); head.append(mascot); }
+    if (mascot) { mascot.classList.add('who-mood'); head.prepend(mascot); }
+    const greeting = role === 'agent' ? Object.assign(document.createElement('span'), { className:'wy-reply-greeting', textContent:text ? '我在这里，陪你慢慢来。' : '我在想，稍等一下哦…' }) : null;
+    if (greeting) head.append(greeting);
+    const present = (state, detail = '') => {
+      if (!mascot) return;
+      setMascotState(mascot, state);
+      if (greeting) greeting.textContent = detail || ({think:'我在想，稍等一下哦…',rub:'搓搓手，交给我吧。',run:'正在帮你找资料…',happy:'整理好啦，一起看看。',listen:'我在听，慢慢说。',wink:'我在呀，慢慢来。',sleep:'休息一下，有事叫我。',love:'送你一颗小小的心。'}[state] || '我在这里，陪着你。');
+    };
+    const sizeReply = value => el.classList.toggle('wy-long-reply', value.length > 480 || value.split('\n').length > 10);
+    if (role === 'agent') sizeReply(text);
     let moodState = null;
     const body = document.createElement('div');
     body.className = 'body';
@@ -262,6 +277,7 @@ export class Transcript {
     const paint = () => {
       frame = 0;
       const s = stripEmotionTags(curRaw);
+      if (role === 'agent') sizeReply(raw);
       if (tail && tail.parentNode === cur && s.startsWith(tail.data)) tail.appendData(s.slice(tail.data.length));
       else { cur.textContent = s; tail = cur.firstChild; }
       self.#scroll();
@@ -304,23 +320,25 @@ export class Transcript {
       if (prog) return prog;
       const box = document.createElement('details');
       box.className = 'progress-card working';
-      box.open = true;
+      box.open = false;
       const sum = document.createElement('summary');
       const title = Object.assign(document.createElement('strong'), { textContent: '工作进展' });
       const count = Object.assign(document.createElement('span'), { className: 'pc-count' });
       const time = Object.assign(document.createElement('span'), { className: 'pc-time' });
-      sum.append(title, count, time);
+      const action = createMascot('rub'); action.classList.add('pc-mascot');
+      sum.append(action, title, count, time);
       const bar = Object.assign(document.createElement('div'), { className: 'pc-bar' });
       const list = Object.assign(document.createElement('ol'), { className: 'pc-steps' });
       box.append(sum, bar, list);
       el.insertBefore(box, el.querySelector('.body'));
       const timer = setInterval(() => { time.textContent = fmt(Date.now() - t0); }, 1000);
-      prog = { box, list, count, time, timer, n: 0, done: 0 };
+      prog = { box, list, count, time, timer, action, n: 0, done: 0 };
       return prog;
     }
     function progressStep(name, args) {
       const p = progressPanel();
       p.n++;
+      setMascotState(p.action, poseForTask('processing',toolLabel(name)));
       p.count.textContent = `第 ${p.n} 步`;
       const li = document.createElement('li');
       li.dataset.st = 'now';
@@ -360,6 +378,7 @@ export class Transcript {
       if (!prog) return;
       clearInterval(prog.timer);
       prog.box.classList.remove('working');
+      setMascotState(prog.action, prog.list.querySelector('li[data-st=fail]') ? 'think' : 'happy');
       for (const li of prog.list.querySelectorAll('li[data-st="now"]')) li.dataset.st = 'stop';
       prog.count.textContent = `用了 ${prog.n} 步 · 点开查看`;
       prog.time.textContent = fmt(Date.now() - t0);
@@ -372,9 +391,9 @@ export class Transcript {
       mood(v) {
         if (!mascot) return;
         moodState = poseForEmotion(v);
-        setMascotState(mascot, moodState);
+        present(moodState);
       },
-      activity(state, detail = '') { if (mascot) setMascotState(mascot, poseForTask(state, detail)); },
+      activity(state, detail = '') { present(poseForTask(state, detail), state==='error' ? '这次没有完成，我们再试一次。' : ''); },
       append(d) {
         raw += d;
         curRaw += d;
@@ -383,7 +402,7 @@ export class Transcript {
       },
       /** 工具执行卡片：执行中显示动画，结束后可展开查看输出 */
       toolCard(name, args) {
-        if (mascot) setMascotState(mascot, 'run');
+        present(poseForTask('processing',toolLabel(name)));
         stopPaint();
         if (role === 'agent' && curRaw) renderBlocks(cur, curRaw);
         if (self.progress) return progressStep(name, args);
@@ -552,7 +571,11 @@ export class Transcript {
         el.insertBefore(box, el.children[1]);
       },
       done(meta, { onFeedback } = {}) {
-        if (mascot) setMascotState(mascot, moodState || 'happy');
+        if (mascot) {
+          const paused = /已打断|中断/.test(meta || '');
+          present(paused ? 'think' : moodState || 'happy', paused ? '先停一下，需要时可以继续。' : prog?.n || el.querySelector('.tool-card') ? '做好啦，一起看看。' : '我在呀，慢慢说。');
+          sizeReply(raw);
+        }
         el.classList.remove('streaming');
         finishProgress();
         closeGroups();
@@ -587,7 +610,7 @@ export class Transcript {
   }
 
   #scroll() {
-    this.root.scrollTop = this.root.scrollHeight;
+    if (this.follow) this.root.scrollTop = this.root.scrollHeight;
   }
 }
 
