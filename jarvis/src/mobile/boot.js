@@ -63,10 +63,11 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
       if(pending)return;
       pending=requestAnimationFrame(()=>{
         pending=0;
-        const light=document.documentElement.dataset.theme!=='dark';
+        const holo=document.body.classList.contains('holo-open');
+        const light=!holo&&document.documentElement.dataset.theme!=='dark';
         const fallback=light?'#FCFBFF':'#191923';
         const header=document.querySelector('.topbar');
-        const color=topColor(getComputedStyle(header||document.body),topColor(getComputedStyle(document.body),fallback));
+        const color=holo?'#071426':topColor(getComputedStyle(header||document.body),topColor(getComputedStyle(document.body),fallback));
         const key=color+light;
         if(key===last)return;
         last=key;

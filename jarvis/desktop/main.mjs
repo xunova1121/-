@@ -160,6 +160,9 @@ Object.assign(ops, {
   wallpaperState: () => ({ on: Boolean(wallpaper?.open), mode: wallpaper?.mode ?? '' }),
   /** 主窗口把粒子体的状态 / 要说的话同步到桌面背景 */
   async wallpaperEvent(payload) { wallpaper?.send(payload); return { ok: true }; },
+  wallpaperChat({text,id}) {text=String(text||'').trim();if(!text||text.length>2000)throw new Error('请输入 1–2000 字');if(!win||win.isDestroyed())throw new Error('请先打开未央主窗口');win.webContents.send('jarvis:wallpaper-request',{text,id:String(id||'').slice(0,80)});return{queued:true};},
+  wallpaperOpen() {if(win){win.show();win.focus();win.webContents.send('jarvis:wallpaper-request',{open:true});}return{ok:true};},
+  wallpaperScale:({scale})=>wallpaper?.setScale(scale),
   /** 测试用：模拟“离开一段时间后回来” */
   async presenceTest({ awayMs = 3600000 } = {}) { if (!TEST) throw new Error('仅测试模式可用'); win?.webContents.send('jarvis:presence', { awayMs, reason: 'test' }); return { ok: true }; },
   /**
@@ -184,6 +187,7 @@ Object.assign(ops, {
 const fromOurPage = (e) => Boolean(origin) && String(e.senderFrame?.url || '').startsWith(`${origin}/`);
 ipcMain.handle('jarvis:desktop', async (e, op, args) => {
   if (!fromOurPage(e)) return { ok: false, error: '拒绝：调用来源不是未央页面' };
+  if(op==='wallpaperRegions') {if(e.sender!==wallpaper?.widget?.webContents)return{ok:false,error:'仅陪伴窗口可设置点击区域'};wallpaper.setRegions(args?.regions);return{ok:true,value:{ok:true}};}
   const fn = Object.hasOwn(ops, op) ? ops[op] : null;
   if (!fn) return { ok: false, error: `未知操作：${op}` };
   try { return { ok: true, value: await fn(args ?? {}) }; } catch (err) { return { ok: false, error: err.message || String(err) }; }
@@ -331,6 +335,8 @@ app.whenReady().then(async () => {
   setMenu();
   createWindow();
   wallpaper = createWallpaper({ BrowserWindow, screen, url: `${origin}/wallpaper.html`, preload: path.join(here, 'preload.cjs'), icon: ICON, onLog: (m) => console.log(m) });
+  powerMonitor.on('lock-screen',()=>wallpaper?.pause(true));powerMonitor.on('unlock-screen',()=>wallpaper?.pause(false));
+  powerMonitor.on('suspend',()=>wallpaper?.pause(true));powerMonitor.on('resume',()=>wallpaper?.pause(false));
   if (readPrefs().wallpaper) wallpaper.show();
   if (readPrefs().habits) activity.start();
   presence.start();

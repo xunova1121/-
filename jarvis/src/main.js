@@ -14,6 +14,7 @@ import { initWorkbench } from './ui/workbench.js';
 import logoUrl from './ui/logo.svg';
 import { initMascots } from './ui/mascot.js';
 import { initCompanion } from './ui/companion.js';
+import { initHologramCompanion } from './ui/hologramScene.js';
 import { transcriptWindow } from './mobile/transcriptWindow.js';
 import { initRenderHealthPanel } from './mobile/renderHealth.js';
 import { initCompanionAppearance } from './ui/companionAppearance.js';
@@ -1042,7 +1043,7 @@ async function send(text) {
     dashboard.setLatency(firstToken ? firstToken - t0 : null, total);
     hud.think(`✓ 完成 · ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · ${result.toolCalls} 个工具` : ''}`, 'ok');
     $('#hud-latency').textContent = firstToken ? `${Math.round(firstToken - t0)} ms` : '—';
-    if (result.text) wp({ say: result.text.replace(/```[\s\S]*?```/g, '').replace(/[#*>`|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 140) });
+    if (result.text) wp({ say: result.text.replace(/```[\s\S]*?```/g, '').replace(/[#*>`|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 4000) });
     rememberTurn('assistant', result.text || '（完成）', { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) });
     $('#mode-pill').classList.remove('offline');
     turn.streamDone = true;
@@ -1867,7 +1868,7 @@ if (DESKTOP) {
   $('#set-wallpaper').addEventListener('change', async (e) => {
     try {
       const r = await DESKTOP.invoke('setWallpaper', { on: e.target.checked });
-      toast(r.on ? '已开启桌面背景：未央会待在桌面上，干活时跟着变形' : '已关闭桌面背景');
+      toast(r.on ? '已开启全息陪伴桌面：可以摸摸未央，或直接打字聊天' : '已关闭桌面背景');
     } catch (err) { toast(err.message); e.target.checked = false; }
   });
 }
@@ -2223,6 +2224,16 @@ window.__jarvis = {
 if (!COMPACT) initWorkbench({showPanel,newSession,openSession,getSession:()=>session,getRunning:()=>active && !active.streamDone ? session.id : null,openFile:openInWorkspace});
 mascots = initMascots();
 companion = initCompanion({ send, startVoice: async () => { await setVoiceCall(true); return callActive; }, stopVoice: () => setVoiceCall(false), speak: text => { speaker.unlock(); speaker.speak(text); } });
+const hologram = initHologramCompanion({send:async text=>{if(active)throw new Error('当前任务还在进行，请稍等完成后再发送。');await send(text);},wallpaper:MOBILE?async()=>{const {registerPlugin}=await import('@capacitor/core');await registerPlugin('CompanionWallpaper').open();}:null});
+const holoEntry=Object.assign(document.createElement('button'),{type:'button',className:'wy-hologram-entry',textContent:'✧ 全息陪伴'});
+holoEntry.onclick=()=>{companion.close();hologram.open();};document.querySelector('.wy-companion-head span').after(holoEntry);
+if(DESKTOP?.onWallpaperRequest)DESKTOP.onWallpaperRequest(async request=>{
+  if(request.open){hologram.open();return;}
+  if(!request.text)return;
+  try{if(active)throw new Error('当前任务还在进行，请稍等完成后再发送。');await send(request.text);const reply=[...document.querySelectorAll('#transcript .msg.agent')].at(-1);const text=[...(reply?.querySelectorAll('.body')||[])].map(el=>el.textContent).join('\n');wp({say:text||'本轮已结束，可以打开完整对话查看结果。',requestId:request.id});}
+  catch(error){wp({say:`这次没有完成：${error.message||error}`,requestId:request.id,error:true});}
+});
+if(MOBILE){import('@capacitor/core').then(({registerPlugin})=>{const plugin=registerPlugin('CompanionWallpaper');const check=async()=>{try{const r=await plugin.consumeOpen();if(r.open)hologram.open();}catch{}};check();document.addEventListener('visibilitychange',()=>{if(!document.hidden)check();});}).catch(()=>{});}
 initCompanionAppearance();
 initRenderHealthPanel({ mobile: MOBILE, toast, onChange: () => { if (!active) replayTranscript(); } });
 

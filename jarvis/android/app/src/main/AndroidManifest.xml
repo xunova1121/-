@@ -35,6 +35,10 @@
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
         <service android:name=".TaskService" android:exported="false" android:foregroundServiceType="dataSync" />
+        <service android:name=".CompanionWallpaperService" android:label="未央 · 全息陪伴" android:permission="android.permission.BIND_WALLPAPER" android:exported="true">
+            <intent-filter><action android:name="android.service.wallpaper.WallpaperService" /></intent-filter>
+            <meta-data android:name="android.service.wallpaper" android:resource="@xml/companion_wallpaper" />
+        </service>
     </application>
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -54,6 +58,7 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.software.live_wallpaper" android:required="false" />
 
     <!-- 朗读：Android 11+ 需要声明才能找到系统的 TTS 引擎 -->
     <queries>

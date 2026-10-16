@@ -4,16 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="dark" />
-  <title>未央 · 桌面</title>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" />
-  <link rel="stylesheet" href="/src/styles.css" />
+  <title>未央 · 全息陪伴</title>
 </head>
 <body class="wallpaper">
-  <main class="wp" id="stage-wrap">
-    <canvas id="stage"></canvas>
-    <div class="wp-clock" aria-hidden="true"><div class="wp-time" id="wp-time">00:00</div><div class="wp-date" id="wp-date"></div></div>
-    <div class="wp-say" id="wp-say" hidden></div>
-    <div class="wp-form" aria-hidden="true"><span class="fr-lbl">J.A.R.V.I.S.</span><b id="wp-form">光核</b></div>
+  <main class="wp">
+    <div class="wp-brand">未央 <span>· 全息陪伴</span><small>在每一个日常里，都有光陪着你。</small></div>
+    <div class="wp-clock"><div id="wp-time">00:00</div><div id="wp-date"></div></div>
+    <div id="wp-say" hidden></div>
   </main>
   <script type="module" src="/src/wallpaper.js"></script>
 </body>

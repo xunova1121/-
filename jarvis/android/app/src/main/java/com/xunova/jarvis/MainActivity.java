@@ -24,6 +24,7 @@ import com.getcapacitor.WebViewListener;
 public class MainActivity extends BridgeActivity {
     private boolean rendererGone = false;
     public boolean isRendererGone(){return rendererGone;}
+    @Override public void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);}
     private SharedPreferences health() { return getSharedPreferences("render-health",MODE_PRIVATE); }
     static boolean safeDisplay(Context context) {
         SharedPreferences prefs=context.getSharedPreferences("render-health",MODE_PRIVATE);
@@ -35,7 +36,7 @@ public class MainActivity extends BridgeActivity {
     }
     @Override public void onCreate(Bundle state) {
         CrashLog.install(this);
-        registerPlugin(WindowColorPlugin.class);registerPlugin(AppUpdatePlugin.class);registerPlugin(CrashLogPlugin.class);
+        registerPlugin(CompanionWallpaperPlugin.class);registerPlugin(WindowColorPlugin.class);registerPlugin(AppUpdatePlugin.class);registerPlugin(CrashLogPlugin.class);
         registerPlugin(MobileSpeechPlugin.class);registerPlugin(EdgeSpeechPlugin.class);registerPlugin(BackgroundTaskPlugin.class);
         super.onCreate(state);
         WebView web=getBridge().getWebView();

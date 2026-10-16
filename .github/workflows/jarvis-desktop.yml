@@ -204,6 +204,11 @@ jobs:
           trap - EXIT
           npm run build:standalone
           node e2e/standalone.mjs "$RUNNER_TEMP/jarvis-e2e"
+      - name: 验证 Electron 全息桌面互动
+        run: |
+          npm ci --prefix desktop --no-audit --no-fund
+          npm --prefix desktop run prepare-app
+          xvfb-run -a node e2e/hologram-desktop.mjs "$RUNNER_TEMP/jarvis-e2e"
       - name: 保存验证截图和日志
         if: always()
         uses: actions/upload-artifact@v4

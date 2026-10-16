@@ -1,83 +1,42 @@
-/**
- * 桌面背景页（桌面版）：只有粒子体、时钟和轨道 HUD。
- * 自己不跑智能体：主窗口把“在做什么”（造型、表达色、要说的话）同步过来，这里照着显示——
- * 未央在后台干活时，桌面上的粒子体也跟着变形。
- */
-import { createStage } from './render/stage.js';
-import { FORMS } from './render/formations.js';
-import { initOrbitHud } from './ui/orbitHud.js';
-import { EMOTION_PARAMS } from './core/emotions.js';
-
-const $ = (s) => document.querySelector(s);
-const desktop = window.jarvisDesktop;
-const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-let hue = 200;
-let hueTarget = 200;
-let speak = 0;
-let speakUntil = 0;
-let blinkAt = performance.now() + 3000;
-
-const stage = (() => {
-  try { return createStage($('#stage'), { lowEnd: (navigator.hardwareConcurrency || 8) <= 4 }); } catch (e) { console.warn('[wallpaper] WebGL 不可用', e); return null; }
-})();
-const orbit = initOrbitHud({ root: $('#stage-wrap'), getAnchor: () => stage?.anchor?.() ?? null, reducedMotion: () => reduced });
-orbit.setStatus('STANDBY · DESKTOP');
-
-if (stage) {
-  stage.setFpsCap(reduced ? 15 : 30); // 当背景用，30fps 足够，省电
-  stage.setQuality({ bloom: true, stars: true });
-  stage.onFrame((dt, t) => {
-    hue += (hueTarget - hue) * Math.min(1, dt / 400);
-    speak += ((t < speakUntil ? 0.45 + 0.3 * Math.sin(t / 90) : 0) - speak) * 0.2;
-    let blink = 1;
-    if (t > blinkAt) {
-      blink = Math.abs(t - blinkAt - 75) / 75;
-      if (t - blinkAt > 150) { blink = 1; blinkAt = t + 3000 + Math.random() * 3000; }
-    }
-    return { hue, glow: 0.55, spin: 0.15, scanSpeed: 0.1, glitch: 0, blink, yaw: Math.sin(t / 4100) * 0.12, pitch: Math.sin(t / 5300) * 0.05, breath: 0.4 + 0.4 * Math.sin(t / 1600), speak, motion: reduced ? 0.2 : 1 };
-  });
-  stage.setPaused('hidden', document.hidden); // 启动渲染循环
-  document.addEventListener('visibilitychange', () => stage.setPaused('hidden', document.hidden));
+/** 桌面背景只绘制静态远景；透明角色窗口负责互动，回复由主窗口同步。 */
+import { createHologramScene } from './ui/hologramScene.js';
+import './ui/wallpaper.css';
+const desktop=window.jarvisDesktop,widget=new URLSearchParams(location.search).has('widget');
+const forms=[];let scene=null,pending=null,requestSequence=0,timeout;
+if(widget){
+  document.body.classList.add('wallpaper-widget');
+  scene=createHologramScene({compact:true,send:text=>new Promise((resolve,reject)=>{
+    if(pending){reject(new Error('请等待当前回复完成'));return;}
+    const id=`wp-${Date.now()}-${++requestSequence}`;pending={id,resolve,reject};scene.newTurn();
+    if(!desktop){pending=null;reject(new Error('请在未央桌面版中使用'));return;}
+    desktop.invoke('wallpaperChat',{text,id}).catch(error=>{clearTimeout(timeout);pending=null;reject(error);});
+    timeout=setTimeout(()=>{if(pending?.id===id){pending=null;reject(new Error('回复尚未完成，可打开完整对话查看任务进度'));}},9*60*1000);
+  }),openFull:()=>desktop?.invoke('wallpaperOpen').catch(()=>{}),settings:()=>{
+    let options=document.querySelector('.wp-size-options');if(options){options.remove();return;}
+    options=document.createElement('div');options.className='wp-size-options';options.innerHTML='<span>拖动顶部可调整位置</span>';
+    for(const[label,scale]of[['小',.75],['标准',1],['大',1.15]]){const b=document.createElement('button');b.textContent=label;b.onclick=()=>{desktop?.invoke('wallpaperScale',{scale}).catch(()=>{});options.remove();};options.append(b);}scene.root.append(options);
+  }});
+  document.body.append(scene.root);
+  document.querySelector('.wp').remove();
+  let scheduled=false;
+  const regions=()=>{scheduled=false;if(!desktop)return;const rows=[...document.querySelectorAll('.holo-pet,.holo-chat,.holo-head,.holo-actions,.holo-collapse,.holo-options,.wp-size-options')].filter(el=>el.getClientRects().length).map(el=>{const r=el.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height};});desktop.invoke('wallpaperRegions',{regions:rows}).catch(()=>{});};
+  const schedule=()=>{if(!scheduled){scheduled=true;requestAnimationFrame(regions);}};
+  new ResizeObserver(schedule).observe(scene.root);new MutationObserver(schedule).observe(scene.root,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style']});schedule();
+}else{
+  const tick=()=>{const now=new Date();document.getElementById('wp-time').textContent=now.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});document.getElementById('wp-date').textContent=now.toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'});};tick();setInterval(tick,10000);
 }
-
-// 时钟
-const WEEK = '日一二三四五六';
-function tick() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
-  $('#wp-time').textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  $('#wp-date').textContent = `${d.getMonth() + 1} 月 ${d.getDate()} 日 · 星期${WEEK[d.getDay()]}`;
-}
-tick();
-setInterval(tick, 10000);
-
-let sayTimer = 0;
-const forms = [];
-function show(payload) {
-  if (payload.form && FORMS[payload.form]) {
-    stage?.setForm(payload.form);
-    forms.push(payload.form);
-    $('#wp-form').textContent = FORMS[payload.form].name;
-    orbit.setStatus(`${payload.form.toUpperCase()} · ${payload.task || 'STANDBY'}`);
-  }
-  if (payload.emotion && EMOTION_PARAMS[payload.emotion]) hueTarget = EMOTION_PARAMS[payload.emotion].hue;
-  if (payload.energy !== undefined) stage?.setActivity({ energy: payload.energy });
-  if (payload.tool) { orbit.toolStart(payload.tool.id, payload.tool.label); }
-  if (payload.toolDone) orbit.toolEnd(payload.toolDone.id, payload.toolDone.ok);
-  if (payload.newTurn) orbit.newTurn();
-  if (payload.think) orbit.think(payload.think);
-  if (payload.say) {
-    const el = $('#wp-say');
-    el.textContent = payload.say;
-    el.hidden = false;
-    el.classList.remove('in');
-    void el.offsetWidth;
-    el.classList.add('in');
-    speakUntil = performance.now() + Math.min(9000, 1500 + payload.say.length * 180);
-    clearTimeout(sayTimer);
-    sayTimer = setTimeout(() => { el.classList.remove('in'); setTimeout(() => { el.hidden = true; }, 600); }, 14000);
+function show(payload){
+  if(payload.form)forms.push(payload.form);
+  if(payload.scale&&scene)scene.root.style.setProperty('--holo-widget-scale',String(Math.max(.7,Math.min(1.2,payload.scale))));
+  if(payload.newTurn)scene?.update({busy:true,state:'think'});
+  if(payload.tool)scene?.pose('rub','正在认真帮你处理…');
+  if(payload.say){
+    scene?.update({text:payload.say,busy:false,state:payload.error?'think':'happy'});
+    const say=document.getElementById('wp-say');if(say){say.textContent=String(payload.say).slice(-180);say.hidden=false;}
+    if(pending&&payload.requestId===pending.id){clearTimeout(timeout);const p=pending;pending=null;payload.error?p.reject(new Error(payload.say)):p.resolve();}
   }
 }
 desktop?.onWallpaper?.(show);
-window.__wallpaper = { show, forms, get stage() { return stage; } };
+document.addEventListener('visibilitychange',()=>scene?.pause(document.hidden));
+window.addEventListener('pagehide',()=>{clearTimeout(timeout);scene?.destroy();});
+window.__wallpaper={show,forms,get scene(){return scene;},widget};

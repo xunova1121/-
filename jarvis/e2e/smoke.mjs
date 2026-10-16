@@ -133,6 +133,14 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
     await page.getByRole('button',{name:'常用表情',exact:true}).click();await page.getByRole('button',{name:'关闭未央',exact:true}).click();
   }
   await page.setViewportSize({width:1600,height:960});
+  await page.locator('.wb-mark').click();await page.locator('.wy-hologram-entry').click();
+  check('PC 可进入全息陪伴，原有动作面板正常收起',await page.locator('.holo-dialog').evaluate(d=>d.open)&&!await page.locator('.wy-companion').evaluate(d=>d.open));
+  await page.locator('.holo-pet').click();await page.locator('.holo-pet').click();await page.locator('.holo-pet').click();
+  check('连续摸头会害羞并有短时触碰反馈',await page.locator('.holo-pet .wy-mascot').getAttribute('data-state')==='shy'&&await page.locator('.wy-hologram').evaluate(el=>el.classList.contains('holo-touched')));
+  await page.locator('.holo-form input').fill('转个圈');await page.locator('.holo-form button').click();
+  check('全息场景的文字动作指令直接响应',await page.locator('.holo-pet .wy-mascot').getAttribute('data-state')==='spin'&&await page.locator('.holo-message.user').last().textContent()==='转个圈');
+  await page.locator('.holo-collapse').click();
+  check('收起全息陪伴后回到原会话',!await page.locator('.holo-dialog').evaluate(d=>d.open)&&await page.locator('#prompt').isVisible());
   await page.evaluate(enabled => { window.__jarvis.speaker.enabled = enabled; }, interactionSpeech);
   await page.evaluate(() => {
     const v = window.__jarvis.voice;
