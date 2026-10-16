@@ -46,11 +46,17 @@ export const SCREEN_KEY = 'jarvis.lastScreen';
 export const SCREEN_STARTING = '刚打开（不到 5 秒，界面可能还没显示出来）';
 
 /** 每 5 秒、切到后台 / 回到前台时记一次当前界面；返回上一次运行最后记下的那行 */
-export function startScreenTrail({ storage = globalThis.localStorage, doc = document, now = Date.now, every = 5000, timer = setInterval } = {}) {
+export function startScreenTrail({ storage = globalThis.localStorage, doc = document, now = Date.now, every = 5000, timer = setInterval, note = (screen) => globalThis.__jarvisRenderHealthPlugin?.note?.({ screen })?.catch?.(() => {}) } = {}) {
   let prev = '';
   try { prev = storage.getItem(SCREEN_KEY) || ''; storage.setItem(SCREEN_KEY, SCREEN_STARTING); } catch { /* 存不了就不记 */ }
+  // 同时报给原生层：渲染进程崩了、界面打不开时，原生的异常记录里也有“崩溃前界面”
+  try { note(SCREEN_STARTING); } catch { /* 旧安装包没有这个方法 */ }
   const startedAt = now();
-  const tick = () => { try { storage.setItem(SCREEN_KEY, describeScreen({ doc, startedAt, now: now() })); } catch { /* 存不了就不记 */ } };
+  const tick = () => {
+    const screen = describeScreen({ doc, startedAt, now: now() });
+    try { storage.setItem(SCREEN_KEY, screen); } catch { /* 存不了就不记 */ }
+    try { note(screen); } catch { /* 旧安装包没有这个方法 */ }
+  };
   timer(tick, every);
   doc.addEventListener?.('visibilitychange', tick);
   return prev;

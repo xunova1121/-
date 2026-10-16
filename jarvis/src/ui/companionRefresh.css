@@ -148,7 +148,7 @@ body.compact.companion-edition{--top-h:64px;--wy-reading-inset:20px;font-family:
 :root.safe-render *,:root.safe-render *::before,:root.safe-render *::after{animation:none!important;transition:none!important;filter:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;will-change:auto!important;mix-blend-mode:normal!important;box-shadow:none!important}
 :root.safe-render .wy-mascot{transform:none!important}
 /* 兼容显示：图片遮罩（启动页扫光、首页插画边缘淡出）在部分厂商内核上绘制出错，一并关掉 */
-:root.safe-render #app-splash .as-shine{display:none!important}
+:root.safe-render #app-splash{display:none!important} /* 兼容显示：不放启动动画，直接进界面 */
 :root.safe-render .home-paper,:root.safe-render .home-task-icon{-webkit-mask:none!important;mask:none!important}
 
 .mobile-app .companion-edition.wy-paused .wy-mascot{animation-play-state:paused!important}
@@ -187,3 +187,8 @@ body.compact.companion-edition{--top-h:64px;--wy-reading-inset:20px;font-family:
  .workbench.companion-edition .wy-actions button{min-height:34px;padding:5px}
  .workbench.companion-edition .wy-companion .wy-companion-voice{width:48px;height:48px}
 }
+/* 回答进行中：“停止”占“发送”的位置（这时候也发不了），一排放得下，不会挤到下一行；模型名太长显示省略号 */
+.compact.companion-edition.generating #btn-send{display:none!important}
+.compact.companion-edition.generating #btn-stop{order:5;margin-left:0}
+.compact.companion-edition .composer-row>*:not(#prompt){flex-shrink:0}
+.compact.companion-edition .composer-row>#model-chip{flex-shrink:1;min-width:0;max-width:min(34vw,150px)}

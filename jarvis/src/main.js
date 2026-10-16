@@ -1959,7 +1959,8 @@ async function restoreDevice(permission, key, enable) {
   else setSetting(key, false);
 }
 restoreDevice('camera', 'faceFollow', setFaceFollow);
-if (!mic.hidden) restoreDevice('microphone', 'directVoice', setDirectVoice);
+// 兼容显示（上次界面崩过）时不自动开麦克风：先让界面稳稳打开，需要时再手动开
+if (!mic.hidden && !(MOBILE && document.documentElement.classList.contains('safe-render'))) restoreDevice('microphone', 'directVoice', setDirectVoice);
 
 
 // ---------------------------------------------------------------- 启动

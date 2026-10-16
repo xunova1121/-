@@ -30,8 +30,9 @@ export const cases=[
   ['启动时取出上一次运行最后的界面，再从“刚打开”开始记这一次',()=>{
     const data=new Map([['jarvis.lastScreen','首页 · 已打开 40 秒']]),storage={getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,v)};
     let tick;const doc={documentElement:{classList:{contains:()=>false}},body:{classList:{contains:()=>false}},getElementById:()=>null,querySelector:()=>null,querySelectorAll:()=>[],getElementsByTagName:()=>({length:10}),hidden:false,addEventListener(){}};
-    const prev=startScreenTrail({storage,doc,now:()=>0,timer:f=>{tick=f;}});
+    const notes=[];const prev=startScreenTrail({storage,doc,now:()=>0,timer:f=>{tick=f;},note:x=>notes.push(x)});
     assert.equal(prev,'首页 · 已打开 40 秒');assert.equal(data.get('jarvis.lastScreen'),SCREEN_STARTING);
     tick();assert.match(data.get('jarvis.lastScreen'),/^首页 · 已打开 0 秒/);
+    assert.equal(notes[0],SCREEN_STARTING);assert.match(notes[1],/^首页/); // 也报给原生层，界面打不开时原生记录里也有
   }],
 ];

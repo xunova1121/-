@@ -20,14 +20,22 @@ public class CrashLogPlugin extends Plugin {
     @PluginMethod public void setDisplayMode(PluginCall call) {
         boolean safe=call.getBoolean("safe",true);
         android.content.SharedPreferences.Editor edit=getContext().getSharedPreferences("render-health",android.content.Context.MODE_PRIVATE).edit().putBoolean("safeDisplay",safe);
-        if(!safe)edit.putLong("lastCrash",0).putInt("consecutive",0);
+        if(!safe)edit.putLong("lastCrash",0).putInt("consecutive",0).putBoolean("softwareLayer",false);
         edit.apply();call.resolve();
+    }
+    /** 网页每隔几秒报一次当前界面（只是界面名和规模），渲染进程崩溃时写进异常记录 */
+    @PluginMethod public void note(PluginCall call){
+        String screen=call.getString("screen","");
+        getContext().getSharedPreferences("render-health",android.content.Context.MODE_PRIVATE).edit().putString("lastScreen",screen.length()>200?screen.substring(0,200):screen).apply();
+        call.resolve();
     }
     @PluginMethod public void diagnostics(PluginCall call){
         JSObject result=new JSObject();
         result.put("app",CrashLog.appVersion(getContext()));result.put("sdk",android.os.Build.VERSION.SDK_INT);
         result.put("device",android.os.Build.MANUFACTURER+" "+android.os.Build.MODEL);
         result.put("safeDisplay",MainActivity.safeDisplay(getContext()));
+        result.put("softwareLayer",getContext().getSharedPreferences("render-health",android.content.Context.MODE_PRIVATE).getBoolean("softwareLayer",false));
+        result.put("exitDetails",ExitReasons.since(getContext(),0));
         result.put("lastRenderer",getContext().getSharedPreferences("render-health",android.content.Context.MODE_PRIVATE).getString("lastRenderer",""));
         if(android.os.Build.VERSION.SDK_INT>=26){android.content.pm.PackageInfo web=android.webkit.WebView.getCurrentWebViewPackage();result.put("webview",web==null?"unknown":web.versionName);}
         if(android.os.Build.VERSION.SDK_INT>=30){

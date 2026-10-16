@@ -56,7 +56,7 @@ public class MainActivity extends BridgeActivity {
                 Runtime runtime=Runtime.getRuntime();
                 android.content.pm.PackageInfo provider=WebView.getCurrentWebViewPackage();
                 String version=provider==null?"unknown":provider.versionName;
-                String report="App="+CrashLog.appVersion(MainActivity.this)+"，WebView="+version+"，didCrash="+(detail!=null&&detail.didCrash())+"，priority="+(detail==null?-1:detail.rendererPriorityAtExit())+"，可用内存="+memory.availMem/1048576+"MB，lowMemory="+memory.lowMemory+"，JavaHeap="+(runtime.totalMemory()-runtime.freeMemory())/1048576+"/"+runtime.maxMemory()/1048576+"MB，连续="+count+"，"+Build.MANUFACTURER+" "+Build.MODEL;
+                String report="App="+CrashLog.appVersion(MainActivity.this)+"，WebView="+version+"，didCrash="+(detail!=null&&detail.didCrash())+"，priority="+(detail==null?-1:detail.rendererPriorityAtExit())+"，可用内存="+memory.availMem/1048576+"MB，lowMemory="+memory.lowMemory+"，JavaHeap="+(runtime.totalMemory()-runtime.freeMemory())/1048576+"/"+runtime.maxMemory()/1048576+"MB，连续="+count+"，软件绘制="+prefs.getBoolean("softwareLayer",false)+"，"+Build.MANUFACTURER+" "+Build.MODEL+"，崩溃前界面="+prefs.getString("lastScreen","未知");
                 prefs.edit().putString("lastRenderer",new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss",java.util.Locale.CHINA).format(new java.util.Date(now))+" "+report).apply();
                 CrashLog.write(MainActivity.this,report);
                 CrashLog.write(MainActivity.this,RenderRecovery.autoRestart(count)?"界面进程异常，开启兼容显示后恢复一次":"界面连续异常，已停止自动重启，等待手动恢复");
@@ -80,8 +80,10 @@ public class MainActivity extends BridgeActivity {
     private void recoveryScreen(){
         LinearLayout layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);layout.setGravity(Gravity.CENTER_VERTICAL);layout.setPadding(dp(26),dp(30),dp(26),dp(30));layout.setBackgroundColor(Color.rgb(252,251,255));
         TextView title=new TextView(this);title.setText("先稳住，再继续");title.setTextSize(24);title.setTypeface(null,Typeface.BOLD);title.setTextColor(Color.rgb(45,42,66));layout.addView(title);
-        TextView message=new TextView(this);message.setText("界面连续异常，已停止自动重启。\n\n可以用兼容显示重新打开。已保存的对话、文件和设置仍在本机；正在执行但尚未保存的内容需要检查后继续。");message.setTextSize(16);message.setTextColor(Color.rgb(93,87,113));message.setLineSpacing(dp(5),1);message.setPadding(0,dp(20),0,dp(24));layout.addView(message);
+        TextView message=new TextView(this);message.setText("界面连续异常，已停止自动重启。\n\n可以用兼容显示重新打开；还是不行就试试软件绘制。已保存的对话、文件和设置仍在本机；正在执行但尚未保存的内容需要检查后继续。");message.setTextSize(16);message.setTextColor(Color.rgb(93,87,113));message.setLineSpacing(dp(5),1);message.setPadding(0,dp(20),0,dp(24));layout.addView(message);
         Button retry=new Button(this);retry.setText("用兼容显示重新打开");retry.setOnClickListener(v->{health().edit().putInt("consecutive",0).putLong("lastCrash",0).putBoolean("safeDisplay",true).commit();recreate();});layout.addView(retry);
+        // 兼容显示还是会崩时试这个：整个界面改用软件绘制，绕开手机图形驱动；以后在设置里关掉兼容显示就恢复正常绘制
+        Button software=new Button(this);software.setText("用软件绘制重新打开（更稳，会慢一些）");software.setOnClickListener(v->{health().edit().putInt("consecutive",0).putLong("lastCrash",0).putBoolean("safeDisplay",true).putBoolean("softwareLayer",true).commit();CrashLog.write(this,"用户选择软件绘制重新打开");recreate();});layout.addView(software);
         Button copy=new Button(this);copy.setText("复制诊断信息");copy.setOnClickListener(v->{((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("未央异常诊断",CrashLog.peek(this)));copy.setText("诊断已复制");});layout.addView(copy);
         Button later=new Button(this);later.setText("稍后再试");later.setOnClickListener(v->moveTaskToBack(true));layout.addView(later);
         android.widget.ScrollView scroll=new android.widget.ScrollView(this);scroll.setFillViewport(true);scroll.addView(layout);setContentView(scroll);
