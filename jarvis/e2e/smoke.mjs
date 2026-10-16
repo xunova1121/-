@@ -284,6 +284,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
     check(`生成 ${ext} 并出现在工作区`, listed === 1);
   }
   // 对话里生成的文件：点一下在工作区打开
+  await openPanel(page, 'workspace');
   await page.locator('[data-category="sheet"]').click();
   await page.waitForFunction(()=>document.querySelectorAll('#file-list li').length===1 && /示例.xlsx/.test(document.querySelector('#file-list').textContent));
   check('工作区按表格分类', (await page.locator('#file-list li').count()) === 1 && /示例.xlsx/.test(await page.textContent('#file-list')));

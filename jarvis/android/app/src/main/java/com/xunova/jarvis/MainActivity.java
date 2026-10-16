@@ -13,7 +13,7 @@ import com.getcapacitor.WebViewListener;
 
 public class MainActivity extends BridgeActivity {
     private boolean rendererGone = false;
-    @Override protected void onPause() {
+    @Override public void onPause() {
         super.onPause();
         // 保留网络任务的 JS 执行；音频、录音由前端生命周期独立停止。
         if (TaskService.running && !rendererGone && getBridge() != null) getBridge().getWebView().onResume();
