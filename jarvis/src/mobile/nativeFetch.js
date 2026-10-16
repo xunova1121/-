@@ -90,3 +90,62 @@ export function nativeWebFetch(native) {
     return native(url, { ...init, ...(get && { binary: true, readTimeout: 30000 }), headers: { ...(get ? BROWSER_HEADERS : {}), ...(init.headers || {}) } });
   };
 }
+
+/** 要边收边显示的请求：大模型的流式回答（请求里 stream: true，或要求 text/event-stream） */
+export function wantsStream(init = {}) {
+  if (typeof init.body !== 'string') return false;
+  const accept = new Headers(init.headers || {}).get('accept') || '';
+  return /text\/event-stream/i.test(accept) || /"stream"\s*:\s*true/.test(init.body);
+}
+
+/**
+ * 边收边给的原生请求（NativeStream 插件）→ 标准 Response，body 是一边到一边读的流。
+ * 插件事件：head（状态、响应头）→ data（Base64 片段）… → end / error
+ */
+export function nativeStreamFetcher(plugin) {
+  let seq = 0;
+  return async (input, init = {}) => {
+    const url = typeof input === 'string' ? input : input.url;
+    const id = `s${Date.now().toString(36)}${(seq++).toString(36)}`;
+    const headers = Object.fromEntries(new Headers(init.headers || {}).entries());
+    if (init.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    let controller;
+    let settled = false;
+    const stream = new ReadableStream({ start(c) { controller = c; }, cancel() { plugin.cancel({ id }).catch(() => {}); off(); } });
+    const subs = [];
+    const off = () => { for (const s of subs) Promise.resolve(s).then((h) => h?.remove?.()).catch(() => {}); };
+    return new Promise((resolve, reject) => {
+      const fail = (err) => { if (!settled) { settled = true; reject(err); } try { controller.error(err); } catch { /* 已经关了 */ } off(); };
+      const on = (name, fn) => subs.push(plugin.addListener(name, (e) => { if (e?.id === id) fn(e); }));
+      on('head', (e) => {
+        settled = true;
+        resolve(new Response([204, 205, 304].includes(e.status) ? null : stream, { status: e.status || 200, headers: safeHeaders(e.headers) }));
+      });
+      on('data', (e) => { try { controller.enqueue(b64ToBytes(e.data || '')); } catch { /* 读的一方已经取消 */ } });
+      on('end', () => { try { controller.close(); } catch { /* 已经关了 */ } off(); });
+      on('error', (e) => fail(new TypeError(e.message || '网络请求失败')));
+      init.signal?.addEventListener('abort', () => { plugin.cancel({ id }).catch(() => {}); fail(new DOMException('Aborted', 'AbortError')); }, { once: true });
+      // 先把监听都挂好再发请求，免得最前面的事件漏掉
+      Promise.all(subs)
+        .then(() => plugin.start({ id, url, method: init.method || 'GET', headers, body: init.body }))
+        .catch((e) => fail(e));
+    });
+  };
+}
+
+/**
+ * 原生网络：流式回答走 NativeStream（边收边显示），其余（读网页、上传文件、普通接口）走原来的一次性请求。
+ * 旧安装包没有 NativeStream 插件时，自动退回一次性请求。
+ */
+export function nativeRouter(native, stream) {
+  let streamOk = Boolean(stream);
+  return async (url, init = {}) => {
+    if (!streamOk || !wantsStream(init)) return native(url, init);
+    try {
+      return await stream(url, init);
+    } catch (e) {
+      if (/not implemented|UNIMPLEMENTED|is not available/i.test(String(e?.message || e?.code || ''))) { streamOk = false; return native(url, init); }
+      throw e;
+    }
+  };
+}

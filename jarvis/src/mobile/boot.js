@@ -6,7 +6,7 @@
  *   同步：阿里云 OSS 请求走原生网络（可以设置 Date 头、没有跨域限制）
  */
 import { MOBILE } from '../config.js';
-import { wrapFetch, nativeFetcher } from './nativeFetch.js';
+import { wrapFetch, nativeFetcher, nativeStreamFetcher, nativeRouter } from './nativeFetch.js';
 import { installSpeechShim } from './speechShim.js';
 import { createNativeSaver } from './saveNative.js';
 import { applyDisplayMode } from './renderHealth.js';
@@ -14,8 +14,9 @@ import { startScreenTrail } from './renderDiagnostics.js';
 import { topColor } from './topColor.js';
 
 if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
-  const { CapacitorHttp } = await import('@capacitor/core');
-  const native = nativeFetcher(CapacitorHttp);
+  const { CapacitorHttp, registerPlugin: register } = await import('@capacitor/core');
+  // 原生网络：大模型的流式回答边收边显示（NativeStream），其余一次性请求
+  const native = nativeRouter(nativeFetcher(CapacitorHttp), nativeStreamFetcher(register('NativeStream')));
   globalThis.__jarvisNativeFetch = native;
   globalThis.fetch = wrapFetch(globalThis.fetch.bind(globalThis), native, location.origin);
   try {
