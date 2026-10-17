@@ -34,6 +34,14 @@ export function parseSse(buf) {
   return { events, rest };
 }
 
+/** Blob → Base64（分段转换，大文件也不会超出调用栈） */
+export async function toBase64(blob) {
+  const u8 = new Uint8Array(await blob.arrayBuffer());
+  let s = '';
+  for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
 const sleep = (ms, signal) => new Promise((resolve, reject) => {
   const t = setTimeout(resolve, ms);
   signal?.addEventListener('abort', () => { clearTimeout(t); reject(Object.assign(new Error('aborted'), { name: 'AbortError' })); }, { once: true });
@@ -44,9 +52,11 @@ const sleep = (ms, signal) => new Promise((resolve, reject) => {
  */
 export function createServerClient({ base, token = '', fetchImpl = (...a) => globalThis.fetch(...a) }) {
   const root = normalizeUrl(base);
-  async function req(path, { method = 'GET', body, raw = false, signal, headers = {} } = {}) {
+  async function req(path, { method = 'GET', body, raw = false, signal, headers = {}, binary = false } = {}) {
     const res = await fetchImpl(`${root}${path}`, {
       method, signal,
+      // 手机 App 退到原生网络时：binary 让它按原始字节读（不然 Word、图片这类文件会被当成文字读坏）
+      ...(binary && { binary: true }),
       headers: { ...(token && { Authorization: `Bearer ${token}` }), ...(body !== undefined && !(body instanceof Blob) && { 'Content-Type': 'application/json' }), ...headers },
       ...(body !== undefined && { body: body instanceof Blob ? body : JSON.stringify(body) })
     });
@@ -75,11 +85,12 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     importSession: (session) => req('/api/sessions/import', { method: 'POST', body: session }),
     listFiles: () => req('/api/files'),
     async download(path) {
-      const res = await req(`/api/files/raw?path=${encodeURIComponent(path)}`, { raw: true });
+      const res = await req(`/api/files/raw?path=${encodeURIComponent(path)}`, { raw: true, binary: true });
       if (!res.ok) throw new Error(`下载 ${path} 失败（${res.status}）`);
       return res.blob();
     },
-    upload: (path, blob) => req(`/api/files/raw?path=${encodeURIComponent(path)}`, { method: 'PUT', body: blob })
+    // 上传用 Base64 包在 JSON 里：手机 App 退到原生网络时，原始字节会被当成文字传坏
+    upload: async (path, blob) => req(`/api/files/raw?path=${encodeURIComponent(path)}&encoding=base64`, { method: 'PUT', body: { data: await toBase64(blob) } })
   };
 }
 

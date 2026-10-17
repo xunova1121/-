@@ -187,7 +187,14 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
         res.end(Buffer.from(await blob.arrayBuffer()));
         return true;
       }
-      if (req.method === 'PUT') { const r = await ws.write(p, new Blob([await readBody(req, UPLOAD_LIMIT)], { type: ws.MIME[ws.ext(p)] || 'application/octet-stream' })); json(res, 200, r); return true; }
+      if (req.method === 'PUT') {
+        // encoding=base64：内容是 { data: Base64 }（手机 App 原生网络传不了原始字节）
+        const raw = await readBody(req, url.searchParams.get('encoding') === 'base64' ? Math.ceil(UPLOAD_LIMIT * 1.4) : UPLOAD_LIMIT);
+        const bytes = url.searchParams.get('encoding') === 'base64' ? Buffer.from(JSON.parse(raw.toString('utf8') || '{}').data || '', 'base64') : raw;
+        const r = await ws.write(p, new Blob([bytes], { type: ws.MIME[ws.ext(p)] || 'application/octet-stream' }));
+        json(res, 200, r);
+        return true;
+      }
     }
     return false;
   }

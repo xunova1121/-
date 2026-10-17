@@ -109,3 +109,16 @@ describe('服务器模式：把本机的对话传上去', () => {
     expect((await api('/api/sessions/import', { method: 'POST', body: JSON.stringify({ id: '../x', messages: [] }) })).status).toBe(400);
   });
 });
+
+describe('服务器模式：手机原生网络传文件', () => {
+  it('Base64 上传、原样下载，Word 这类二进制文件不坏', async () => {
+    const { createServerClient } = await import('../src/core/serverClient.js');
+    const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0xff, 0x00, 0x80, 0x7f]); // zip 文件头 + 非文字字节
+    const seen = [];
+    const c = createServerClient({ base, token: tokenFor(PASS), fetchImpl: (u, init) => { seen.push(init); return fetch(u, init); } });
+    await c.upload('报告/测试.docx', new Blob([bytes]));
+    const back = new Uint8Array(await (await c.download('报告/测试.docx')).arrayBuffer());
+    expect([...back]).toEqual([...bytes]);
+    expect(seen.at(-1).binary).toBe(true); // 下载时告诉原生网络按字节读
+  });
+});

@@ -72,6 +72,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
   async function execute(task) {
     task.status = 'running';
     task.startedAt = now();
+    console.log(`[任务] ${task.id} 开始：${task.text.slice(0, 40).replace(/\s+/g, ' ')}`);
     record(task, { type: 'task_state', status: 'running' });
     const session = await sessions.get(task.sessionId);
     const cfg = await getConfig();
@@ -128,7 +129,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       if (!error && !stopped) fresh.messages.push({ role: 'assistant', content: text || '（完成）', ts: now(), ...extra });
       else if (shown.trim() || usedTools.length) fresh.messages.push({ role: 'assistant', content: `${shown.trim()}\n\n${stopped ? '（已打断）' : INTERRUPTED_MARK}`, ts: now(), ...extra });
       fresh.updatedAt = now();
-      await sessions.save(fresh).catch(() => {});
+      await sessions.save(fresh).catch((e) => console.error(`[任务] ${task.id} 回答没存上：${e?.stack || e}`));
     }
     task.status = stopped ? 'stopped' : error ? 'error' : 'done';
     task.endedAt = now();
