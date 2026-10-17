@@ -5,6 +5,18 @@ import { collectRequirements } from '../src/agent/taskRequirements.js';
 describe('需求记录贯穿实际智能体入口', () => {
   beforeEach(() => { vi.resetModules(); globalThis.indexedDB = new IDBFactory(); });
 
+  it('团队斜杠命令不在规划、审核和汇总中被误判为缺失原话', async () => {
+    const { runTeam } = await import('../src/agent/team.js');
+    const userText = '/团队 制作预算PPT';
+    const requirements = collectRequirements([{ role: 'user', content: userText, ts: 1 }]);
+    const prompts = [];
+    const llm = async ({ system }) => { prompts.push(system); return system.includes('规划员') ? JSON.stringify({ steps: [{ role: 'writer', title: '制作文件', detail: '制作文件' }] }) : JSON.stringify({ pass: true, issues: [] }); };
+    const adapter = { async stream({ system }) { prompts.push(system.join('\n')); return { text: '完成' }; } };
+    await runTeam({ adapter, model: 'test', userText, requirements, tools: [], emit: () => {}, llm, run: async () => ({ text: '完成', toolCalls: 0 }) });
+    expect(prompts).toHaveLength(3);
+    for (const prompt of prompts) expect(prompt).not.toContain('## 本会话需求原文索引');
+  });
+
   it('可见原话在每个工具步骤都只通过history发送，不重复塞系统提示', async () => {
     const { runAgent } = await import('../src/agent/agent.js');
     const history = [{ role: 'user', content: 'PPT预算67万元，15页', ts: 1 }];

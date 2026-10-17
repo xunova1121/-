@@ -71,7 +71,7 @@ export function ruleBasedPlan(task) {
 export async function runTeam({ adapter, model, history = [], userText, images = [], tools, emit, signal, approve, llm = null, run = runAgent, maxFix = 1, sessionId = null, pickModel = null, summary: earlier = null, requirements = null, requirementText = userText }) {
   const task = stripTeamPrefix(userText);
   const record = requirements ?? collectRequirements([...history, { role: 'user', content: task }]);
-  const requirementContext = requirementsBlock(record, task);
+  const requirementContext = requirementsBlock(record, task, { currentText: requirementText });
   const planningContext = requirementsBlock(record, task, { history: history.slice(-4).map((m) => ({ ...m, content: clip(m.content, 200), requirementExcerptOf: m.content })), currentText: requirementText });
   const roleList = Object.entries(ROLES).map(([id, r]) => `${id}（${r.name}）：${r.duty}`).join('\n');
   emit({ type: 'state', value: 'processing' });
