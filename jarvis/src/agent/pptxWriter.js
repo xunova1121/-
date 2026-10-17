@@ -96,7 +96,7 @@ export function parseSlides(title, md) {
   const slides = [];
   let cur = null;
   const start = (t) => { cur = { title: t, blocks: [], notes: [] }; slides.push(cur); };
-  for (const b of blocks) {
+  for (let b of blocks) {
     if (b.type === 'heading' && b.level <= 2) { start(plain(b.inlines)); continue; }
     if (b.type === 'hr') { cur = null; continue; }
     if (!cur) start(slides.length ? '' : title);
