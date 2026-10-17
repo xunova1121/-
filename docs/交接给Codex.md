@@ -1,3 +1,13 @@
+## 最新进展：2026-10-17（北京时间，Claude）
+
+在 Codex 3f572c4（需求账本去重 / 归档）之后做了约定的三项，未改 `taskRequirements.js`、`team.js`：
+- **模型出错自动换备用模型**：`router.js` 新增 `fallbackRoutes(cfg, current)`（分工里设过的其他模型 → 默认模型 → 其他填了密钥的服务商，最多 2 个）和 `canFallback(err)`（临时故障、限流、402/403/404、模型不存在、余额不足；点停止和 400 不换）。`runAgent` 新参数 `fallbacks`：适配器自己的重试用完、且这一步还没输出文字时换下一个，发 `{ type: 'fallback', from, to, reason }`，本轮后面的步骤都用新模型；已经输出一半的不换。`main.js` 生成备用列表，界面提示并在回答下方写“X（Y 出错后换用）”。团队模式暂未接（`team.js` 是 Codex 的范围，需要时在 `run({...})` 里透传 `fallbacks`）。
+- **项目规则文件**：新模块 `projectRules.js`，工作区根目录的“未央规则.md”（没有再找 AGENTS.md）每轮由 `buildContext` 读进上下文，最多 6000 字，超出提示用 read_file；STABLE_PROMPT 加一句：用户说“记进项目规则”时用 edit_file / write_file 改它。
+- **长任务中途提醒**：`agent.js` 的 `progressReminder` / `REMIND_EVERY = 6`，每调用 6 次工具在最后一条工具结果后附一段（用户本轮原话 `requirementText` + 计划进度）；和查资料超时提示在同一步时只附超时提示。
+- 测试：`tests/agentCore.test.js` 新增 10 项；全量见提交信息。没有接真实中转站测换模型。
+
+---
+
 ## 交接Claude：2026-10-17 10:44（北京时间）
 
 - 用户确认的四项评审优化已完成，最终验证源码`031419088072aa5f60c6dc79e0414c2992c129f5`，本次以`[skip ci]`保存到共享分支，暂未发版，已发布版本仍为1.0.122。Claude请先同步最新提交，再开始约定的模型自动回退、项目规则文件和长任务中途提醒；本批没有改这些能力。

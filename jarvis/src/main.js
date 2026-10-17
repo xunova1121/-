@@ -98,7 +98,7 @@ import { generateImage } from './llm/images.js';
 import { generateVideo } from './llm/videos.js';
 import { createFormDirector } from './core/formDirector.js';
 import { composeGreeting, GREET_GAP_MS } from './core/greeting.js';
-import { classifyTask, routeFor, TASKS, seesImages } from './llm/router.js';
+import { classifyTask, routeFor, TASKS, seesImages, fallbackRoutes } from './llm/router.js';
 import { resolveTheme, toggled, THEMES } from './core/theme.js';
 import { FORMS } from './render/formations.js';
 import { resolveQuality } from './core/quality.js';
@@ -958,6 +958,10 @@ async function send(text) {
     return;
   }
 
+  // 备用模型：当前模型出错（重试后还不行）时自动换着用
+  const fallbacks = fallbackRoutes(llmConfig, { provider: route.cfg.provider, model }).map((f) => ({ ...createAdapter(f.cfg, { gateway }), label: f.model })).filter((f) => !f.problem && f.adapter && f.model);
+  let usedModel = model; // 换过备用模型时，回答下面写实际用的那个
+
   const speech = makeSpeech();
   const cards = new Map();
   let firstToken = 0;
@@ -984,6 +988,7 @@ async function send(text) {
       summary: session.summary ?? null,
       requirements: collectRequirements(history, session.requirements),
       requirementText: userText, // 保留斜杠命令展开前的原话，避免当成缺失历史重复注入
+      fallbacks: team ? [] : fallbacks,
       maxSteps: DESKTOP ? 40 : 28, // 用鼠标键盘操作电脑、逐项联网核实时步数多
       images: imgs.map(({ mime, data }) => ({ mime, data })),
       tools: await buildTools(),
@@ -1007,6 +1012,12 @@ async function send(text) {
           textChunks++;
           machine.feedResponseText(e.delta);
           speech.push(e.delta);
+        } else if (e.type === 'fallback') {
+          usedModel = e.to;
+          const note = `${e.from} 出错（${e.reason}），已换成 ${e.to} 接着做`;
+          hud.think(`⇄ ${note}`, 'sub');
+          toast(note);
+          setTask('processing', `已换成 ${e.to}`.slice(0, 30));
         } else if (e.type === 'retry') {
           const note = e.resume ? `网络中断，第 ${e.attempt} 次重连，接着刚才的地方写` : `连接出错，第 ${e.attempt} 次自动重试`;
           hud.think(`↻ ${note}`, 'sub');
@@ -1047,7 +1058,7 @@ async function send(text) {
     if (active !== turn) return;
     speech.flush();
     const total = now() - t0;
-    const modelTag = providerById(llmConfig.provider)?.kind === 'mock' ? '' : `${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
+    const modelTag = providerById(llmConfig.provider)?.kind === 'mock' ? '' : usedModel !== model ? `${usedModel}（${model} 出错后换用） · ` : `${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
     bubble.done(`${modelTag}${team ? `团队 ${result.steps} 步 · ` : ''}${ctxMs !== null && ctxMs >= 300 ? `准备 ${(ctxMs / 1000).toFixed(1)}s · ` : ''}${firstToken ? `首字 ${((firstToken - t0) / 1000).toFixed(1)}s · ` : ''}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}${MOBILE && textChunks ? ` · 分 ${textChunks} 次收到${globalThis.__jarvisNetVia?.(llmConfig.baseURLs?.[llmConfig.provider] || '') === 'native' ? '（原生网络）' : ''}` : ''}`, {
       onFeedback: async (kind, comment) => {
         if (kind === 'up') await agentMemory.noteTask(`获得好评：${text.slice(0, 30)}`);

@@ -125,3 +125,36 @@ export function routeFor(cfg, task) {
   if (!model) return { cfg, task, model: cfg.models?.[cfg.provider] ?? '', provider: cfg.provider, routed: false };
   return { cfg: { ...cfg, provider, models: { ...cfg.models, [provider]: model } }, task, model, provider, routed: true };
 }
+
+/**
+ * 备用模型：当前模型出错（中转站超时、限流、模型下线、余额不足）时按顺序换着用。
+ * 先取分工里设过的其他模型（同一家换个模型常常就能用），再取填了密钥的其他服务商的默认模型；最多 max 个。
+ * @returns {Array<{ cfg: object, provider: string, model: string }>}
+ */
+export function fallbackRoutes(cfg, current = {}, max = 2) {
+  const out = [];
+  const keyed = keyedProviders(cfg);
+  const add = (provider, model) => {
+    if (!provider || !model || out.length >= max || !keyed.includes(provider)) return;
+    if (provider === current.provider && model === current.model) return;
+    if (out.some((x) => x.provider === provider && x.model === model)) return;
+    out.push({ cfg: { ...cfg, provider, models: { ...cfg.models, [provider]: model } }, provider, model });
+  };
+  const r = cfg.routing;
+  if (r?.enabled) {
+    for (const v of Object.values(r.routes || {})) {
+      const p = parseRoute(v);
+      add(p.provider || r.provider || cfg.provider, p.model);
+    }
+  }
+  add(cfg.provider, cfg.models?.[cfg.provider]);
+  for (const id of keyed) add(id, cfg.models?.[id]);
+  return out;
+}
+
+/** 这个错误换个模型可能就好了（临时故障、限流、模型不存在、余额或额度不够）；用户点停止、参数写错这类不换 */
+export function canFallback(err) {
+  if (!err || err.name === 'AbortError') return false;
+  if ([402, 403, 404, 408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529].includes(err.status)) return true;
+  return err.name === 'TypeError' || /connection reset|econnreset|socket hang up|network ?error|failed to fetch|load failed|timeout|超时|overloaded|余额|额度|quota|insufficient|无可用渠道|no available channel|model.{0,20}(not.{0,10}(found|exist|available|supported))|模型.{0,6}(不存在|不可用|下线)/i.test(String(err.message));
+}
