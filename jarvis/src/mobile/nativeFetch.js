@@ -93,9 +93,9 @@ export function nativeWebFetch(native) {
 
 /** 要边收边显示的请求：大模型的流式回答（请求里 stream: true，或要求 text/event-stream） */
 export function wantsStream(init = {}) {
-  if (typeof init.body !== 'string') return false;
   const accept = new Headers(init.headers || {}).get('accept') || '';
-  return /text\/event-stream/i.test(accept) || /"stream"\s*:\s*true/.test(init.body);
+  if (/text\/event-stream/i.test(accept)) return true; // 要求事件流的（比如服务器模式的任务进度，GET 没有请求体）
+  return typeof init.body === 'string' && /"stream"\s*:\s*true/.test(init.body);
 }
 
 /**

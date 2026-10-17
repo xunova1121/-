@@ -56,6 +56,26 @@ describe('服务器模式客户端', () => {
     expect(files).toEqual(['汇报.docx']);
     expect(c.calls[0]).toEqual(['start', { sessionId: 'c1', text: '做个汇报' }]);
   });
+  it('中间网络卡住了最后的“完成”：问一下服务器，做完了就重连拿到结果', async () => {
+    let n = 0;
+    const c = {
+      async getTask() { return { status: 'done', seq: 6 }; },
+      async events(id, after) {
+        n++;
+        const enc = new TextEncoder();
+        if (n === 1) return new Response(new ReadableStream({ start(ctl) { for (const e of EVENTS.slice(0, 5)) ctl.enqueue(enc.encode(frame(e))); } }), { status: 200 }); // 发到一半就不动了
+        return new Response(EVENTS.filter((e) => e.seq > after).map(frame).join(''), { status: 200 });
+      }
+    };
+    const end = await followTask(c, 't1', { checkMs: 30, retryMs: [1] });
+    expect(end).toMatchObject({ status: 'done', text: '第一段，做好了。' });
+    expect(n).toBe(2);
+  });
+  it('手机原生网络：要求事件流的 GET 也边收边显示', async () => {
+    const { wantsStream } = await import('../src/mobile/nativeFetch.js');
+    expect(wantsStream({ headers: { Accept: 'text/event-stream' } })).toBe(true);
+    expect(wantsStream({})).toBe(false);
+  });
   it('用户叫停：服务器上的任务也停下', async () => {
     const c = fakeClient(EVENTS, { dropAfter: 1 });
     c.events = async () => new Response(new ReadableStream({ start() {} }), { status: 200 }); // 一直不来新数据

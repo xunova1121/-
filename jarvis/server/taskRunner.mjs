@@ -107,7 +107,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         approve: async () => false,
         emit: (e) => {
           arm();
-          if (e.type === 'text') shown += e.delta;
+          if (e.type === 'text') { if (!task.firstTextAt) task.firstTextAt = now(); shown += e.delta; }
           if (e.type === 'tool_start' && e.name !== 'update_plan') usedTools.push(e.name);
           record(task, e);
         }
@@ -132,6 +132,9 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     }
     task.status = stopped ? 'stopped' : error ? 'error' : 'done';
     task.endedAt = now();
+    // 记一笔用时，方便查“为什么慢”：journalctl -u jarvis 能看到
+    const sec = (t) => (t && task.startedAt ? `${((t - task.startedAt) / 1000).toFixed(1)}s` : '—');
+    console.log(`[任务] ${task.id} ${task.status}：排队 ${task.startedAt ? ((task.startedAt - task.createdAt) / 1000).toFixed(1) : '—'}s，首字 ${sec(task.firstTextAt)}，共 ${sec(task.endedAt)}，工具 ${usedTools.length} 次${error ? `，出错：${error.slice(0, 120)}` : ''}`);
     task.error = error;
     record(task, { type: 'task_state', status: task.status, ...(error && { error }), ...(task.status === 'done' && { text, toolCalls }), files: [...task.files] });
     task.listeners.clear();

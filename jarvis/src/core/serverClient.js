@@ -66,7 +66,8 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     startTask: (o) => req('/api/tasks', { method: 'POST', body: o }),
     getTask: (id) => req(`/api/tasks/${id}`),
     stopTask: (id) => req(`/api/tasks/${id}/stop`, { method: 'POST' }),
-    events: (id, after, signal) => req(`/api/tasks/${id}/events?after=${after}`, { raw: true, signal }),
+    // 要求事件流：手机 App 退到原生网络时也边收边显示（见 mobile/nativeFetch.js 的 wantsStream）
+    events: (id, after, signal) => req(`/api/tasks/${id}/events?after=${after}`, { raw: true, signal, headers: { Accept: 'text/event-stream' } }),
     listSessions: () => req('/api/sessions'),
     getSession: (id) => req(`/api/sessions/${encodeURIComponent(id)}`).catch((e) => { if (e.status === 404) return null; throw e; }),
     patchSession: (id, patch) => req(`/api/sessions/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch }),
@@ -85,84 +86,100 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
  * 收一个任务的进度：断线自动重连（从收到的最后一个序号接着收），直到任务结束
  * @returns {Promise<object>} 结束时的 task_state 事件
  */
-export async function followTask(client, id, { onEvent, signal, after = 0, retryMs = [1000, 2000, 4000, 8000] } = {}) {
+export async function followTask(client, id, { onEvent, signal, after = 0, retryMs = [1000, 2000, 4000, 8000], checkMs = 10000 } = {}) {
   let last = after;
   let failures = 0;
-  for (;;) {
+  let reader = null;
+  // 保底：每隔一会儿问一下服务器任务做完没有。做完了却还没收到“完成”（中间的网络把最后一段卡住了）
+  // 就断开重连，服务器会把漏掉的进度连同“完成”一起补发
+  const watch = setInterval(async () => {
     try {
-      const res = await client.events(id, last, signal);
-      if (res.status === 404) throw Object.assign(new Error('服务器上找不到这个任务了（可能服务器重启过），结果请看对话记录'), { final: true });
-      if (!res.ok || !res.body) throw new Error(`服务器返回 ${res.status}`);
-      const reader = res.body.getReader();
-      // 叫停时立刻结束等待（服务器那边一直没新数据时，读取会一直挂着）
-      const cancel = () => reader.cancel().catch(() => {});
-      signal?.addEventListener('abort', cancel, { once: true });
-      const dec = new TextDecoder();
-      let buf = '';
-      for (;;) {
-        const { value, done } = await reader.read().finally(() => { if (signal?.aborted) signal.removeEventListener('abort', cancel); });
-        if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
-        if (done) break;
-        failures = 0;
-        const { events, rest } = parseSse(buf + dec.decode(value, { stream: true }));
-        buf = rest;
-        for (const ev of events) {
-          if (ev.seq <= last) continue;
-          last = ev.seq;
-          onEvent?.(ev);
-          if (ev.type === 'task_state' && ['done', 'error', 'stopped'].includes(ev.status)) return ev;
-        }
-      }
-    } catch (e) {
-      if (signal?.aborted || e?.name === 'AbortError') throw Object.assign(new Error('aborted'), { name: 'AbortError' });
-      if (e.final || e.status === 401) throw e;
-    }
-    // 连接断了（手机切网络、锁屏）：等一下再连，从断开的地方接着收；任务本身在服务器上照常做
-    await sleep(retryMs[Math.min(failures++, retryMs.length - 1)], signal);
-  }
-}
-
-/**
- * 和 runAgent 一样的用法：服务器做，进度事件原样交给 emit（文字、工具卡片、任务清单都和本机一样显示）
- * @param {object} client  createServerClient 的结果
- * @param {{ sessionId: string, userText: string, emit: (e: object) => void, signal?: AbortSignal, onFile?: (path: string) => void, onStarted?: (task: { id: string }) => void, taskId?: string }} o
- * @returns {Promise<{ text: string, toolCalls: number, steps: number }>}
- */
-export async function runRemote(client, { sessionId, userText, emit, signal, onFile, onStarted, taskId = null }) {
-  const task = taskId ? { id: taskId } : await client.startTask({ sessionId, text: userText });
-  onStarted?.(task);
-  const stop = () => client.stopTask(task.id).catch(() => {});
-  signal?.addEventListener('abort', stop, { once: true });
+      const t = await client.getTask(id);
+      if (['done', 'error', 'stopped'].includes(t?.status) && t.seq > last) reader?.cancel().catch(() => {});
+    } catch { /* 问不到就下次再问 */ }
+  }, checkMs);
   try {
-    const end = await followTask(client, task.id, {
-      signal,
-      onEvent: (ev) => {
-        if (ev.type === 'file') onFile?.(ev.path);
-        else if (ev.type === 'task_state') { if (ev.status === 'queued' && ev.position) emit({ type: 'tool_progress', id: 'queue', text: `排队中，前面还有 ${ev.position} 个任务` }); }
-        else if (ev.type !== 'user_note') emit(ev);
-      }
-    });
-    if (end.status === 'error') throw new Error(end.error || '服务器上的任务出错了');
-    if (end.status === 'stopped') throw Object.assign(new Error('aborted'), { name: 'AbortError' });
-    return { text: end.text ?? '', toolCalls: end.toolCalls ?? 0, steps: 1 };
+    return await follow();
   } finally {
-    signal?.removeEventListener('abort', stop);
+    clearInterval(watch);
+  }
+  async function follow() {
+    for (;;) {
+      try {
+        const res = await client.events(id, last, signal);
+        if (res.status === 404) throw Object.assign(new Error('服务器上找不到这个任务了（可能服务器重启过），结果请看对话记录'), { final: true });
+        if (!res.ok || !res.body) throw new Error(`服务器返回 ${res.status}`);
+        reader = res.body.getReader();
+        // 叫停时立刻结束等待（服务器那边一直没新数据时，读取会一直挂着）
+        const cancel = () => reader.cancel().catch(() => {});
+        signal?.addEventListener('abort', cancel, { once: true });
+        const dec = new TextDecoder();
+        let buf = '';
+        for (;;) {
+          const { value, done } = await reader.read().finally(() => { if (signal?.aborted) signal.removeEventListener('abort', cancel); });
+          if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+          if (done) break;
+          failures = 0;
+          const { events, rest } = parseSse(buf + dec.decode(value, { stream: true }));
+          buf = rest;
+          for (const ev of events) {
+            if (ev.seq <= last) continue;
+            last = ev.seq;
+            onEvent?.(ev);
+            if (ev.type === 'task_state' && ['done', 'error', 'stopped'].includes(ev.status)) return ev;
+          }
+        }
+      } catch (e) {
+        if (signal?.aborted || e?.name === 'AbortError') throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+        if (e.final || e.status === 401) throw e;
+      }
+      // 连接断了（手机切网络、锁屏）：等一下再连，从断开的地方接着收；任务本身在服务器上照常做
+      await sleep(retryMs[Math.min(failures++, retryMs.length - 1)], signal);
+    }
   }
 }
 
-/** 对话的读写交给服务器：标题、钉住、删除改服务器上的；消息由服务器自己记，这里保存是空操作 */
-export function remoteSessions(client) {
-  return {
-    list: () => client.listSessions().then((rows) => rows.map((s) => ({ ...s, messages: [] }))),
-    get: (id) => client.getSession(id),
-    save: async (s) => s,
-    rename: (id, title) => client.patchSession(id, { title }),
-    setPinned: (id, pinned) => client.patchSession(id, { pinned }),
-    remove: (id) => client.deleteSession(id),
-    async search(query) {
-      const q = String(query || '').trim().toLowerCase();
-      const all = await this.list();
-      return q ? all.filter((s) => String(s.title).toLowerCase().includes(q)) : all;
+  /**
+   * 和 runAgent 一样的用法：服务器做，进度事件原样交给 emit（文字、工具卡片、任务清单都和本机一样显示）
+   * @param {object} client  createServerClient 的结果
+   * @param {{ sessionId: string, userText: string, emit: (e: object) => void, signal?: AbortSignal, onFile?: (path: string) => void, onStarted?: (task: { id: string }) => void, taskId?: string }} o
+   * @returns {Promise<{ text: string, toolCalls: number, steps: number }>}
+   */
+  export async function runRemote(client, { sessionId, userText, emit, signal, onFile, onStarted, taskId = null }) {
+    const task = taskId ? { id: taskId } : await client.startTask({ sessionId, text: userText });
+    onStarted?.(task);
+    const stop = () => client.stopTask(task.id).catch(() => {});
+    signal?.addEventListener('abort', stop, { once: true });
+    try {
+      const end = await followTask(client, task.id, {
+        signal,
+        onEvent: (ev) => {
+          if (ev.type === 'file') onFile?.(ev.path);
+          else if (ev.type === 'task_state') { if (ev.status === 'queued' && ev.position) emit({ type: 'tool_progress', id: 'queue', text: `排队中，前面还有 ${ev.position} 个任务` }); }
+          else if (ev.type !== 'user_note') emit(ev);
+        }
+      });
+      if (end.status === 'error') throw new Error(end.error || '服务器上的任务出错了');
+      if (end.status === 'stopped') throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+      return { text: end.text ?? '', toolCalls: end.toolCalls ?? 0, steps: 1 };
+    } finally {
+      signal?.removeEventListener('abort', stop);
     }
+  }
+
+  /** 对话的读写交给服务器：标题、钉住、删除改服务器上的；消息由服务器自己记，这里保存是空操作 */
+  export function remoteSessions(client) {
+    return {
+      list: () => client.listSessions().then((rows) => rows.map((s) => ({ ...s, messages: [] }))),
+      get: (id) => client.getSession(id),
+      save: async (s) => s,
+      rename: (id, title) => client.patchSession(id, { title }),
+      setPinned: (id, pinned) => client.patchSession(id, { pinned }),
+      remove: (id) => client.deleteSession(id),
+      async search(query) {
+        const q = String(query || '').trim().toLowerCase();
+        const all = await this.list();
+        return q ? all.filter((s) => String(s.title).toLowerCase().includes(q)) : all;
+      }
   };
 }
