@@ -126,3 +126,14 @@ describe('服务器中途重启：写了一半的回答不丢', () => {
     expect(got.content).not.toContain(DRAFT_MARK);
   });
 });
+
+describe('服务器上画图', () => {
+  it('generate_image 工具接上了服务器的模型设置（不再报“当前环境不能画图”）', async () => {
+    let ctxSeen;
+    const runner = createTaskRunner({ getConfig: mockCfg, makeAdapter: () => ({ adapter: scripted([{ text: '好' }]), model: 'm' }), makeTools: (ctx) => { ctxSeen = ctx; return []; } });
+    const { id } = await runner.start({ text: '画一只猫' });
+    await until(() => runner.get(id).status === 'done');
+    expect(typeof ctxSeen.imageGen).toBe('function');
+    expect(typeof ctxSeen.videoGen).toBe('function');
+  });
+});

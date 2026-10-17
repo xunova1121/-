@@ -838,11 +838,18 @@ async function followServerTask(s) {
 
 /** 服务器模式：服务器上生成了文件，下载到本机工作区，照常预览、保存 */
 async function pullServerFile(path, turn) {
+  if (turn?.files.has(path)) return; // 同一轮里同一个文件只取一次（画图会同时报“新文件”和“显示图片”）
+  turn?.files.add(path);
   try {
-    await ws.write(path, await server.download(path));
+    const blob = await server.download(path);
+    await ws.write(path, blob);
     panels.markFresh(path);
     panels.refreshFiles();
-    if (!/^skills\//.test(path)) { (turn?.bubble ?? liveBubble)?.fileLink?.(path, openInWorkspace); turn?.files.add(path); }
+    const out = turn?.bubble ?? liveBubble;
+    // 服务器画的图、做的视频：和本机一样直接显示在回答里
+    if (/^images\/.+\.(png|jpe?g|webp|gif)$/i.test(path)) out?.image?.(URL.createObjectURL(blob));
+    else if (/^videos\/.+\.(mp4|webm|mov)$/i.test(path)) out?.video?.(URL.createObjectURL(blob));
+    if (!/^skills\//.test(path)) { out?.fileLink?.(path, openInWorkspace); turn?.files.add(path); }
   } catch (e) { toast(e.message); }
 }
 
