@@ -5,7 +5,7 @@
  * 中转站可能不认联网搜索或推理参数：被拒（400 / 404 / 422）且还没输出文字时，按顺序降级重试并记住：
  *   0 全部（联网搜索 + 推理强度）→ 1 去掉推理强度 → 2 再去掉联网搜索
  */
-import { sseLines, isTransient } from './openai.js';
+import { sseLines, isTransient, stallGuard } from './openai.js';
 
 const imagePart = (img) => ({ type: 'input_image', image_url: `data:${img.mime};base64,${img.data}` });
 
@@ -88,35 +88,40 @@ export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearc
       ...(lvl === 0 && effort && { reasoning: { effort } })
     };
     if (!body.tools.length) delete body.tools;
-    const res = await fetchImpl(`${baseURL.replace(/\/$/, '')}/responses`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(apiKey && { Authorization: `Bearer ${apiKey}` }), ...headers },
-      body: JSON.stringify(body),
-      signal
-    });
-    if (!res.ok || !res.body) {
-      let detail = '';
-      try { detail = (await res.text()).slice(0, 300); } catch { /* ignore */ }
-      throw Object.assign(new Error(`模型接口返回 ${res.status}${detail ? `：${detail}` : ''}`), { status: res.status });
-    }
-    const acc = createResponsesAccumulator((d, extra) => { if (d) state.started = true; onText?.(d, extra); });
-    const reader = res.body.getReader();
-    const dec = new TextDecoder();
-    let buf = '';
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      const { events, rest } = sseLines(buf);
-      buf = rest;
-      for (const e of events) {
-        if (e === '[DONE]') continue;
-        let ev;
-        try { ev = JSON.parse(e); } catch { continue; } // 心跳等非 JSON 行
-        acc.push(ev);
+    const guard = stallGuard(signal);
+    try {
+      const res = await guard.race(fetchImpl(`${baseURL.replace(/\/$/, '')}/responses`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(apiKey && { Authorization: `Bearer ${apiKey}` }), ...headers },
+        body: JSON.stringify(body),
+        signal: guard.signal
+      }));
+      guard.touch();
+      if (!res.ok || !res.body) {
+        let detail = '';
+        try { detail = (await res.text()).slice(0, 300); } catch { /* ignore */ }
+        throw Object.assign(new Error(`模型接口返回 ${res.status}${detail ? `：${detail}` : ''}`), { status: res.status });
       }
-    }
-    return acc.result();
+      const acc = createResponsesAccumulator((d, extra) => { if (d) state.started = true; onText?.(d, extra); });
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { value, done } = await guard.race(reader.read());
+        if (done) break;
+        guard.touch();
+        buf += dec.decode(value, { stream: true });
+        const { events, rest } = sseLines(buf);
+        buf = rest;
+        for (const e of events) {
+          if (e === '[DONE]') continue;
+          let ev;
+          try { ev = JSON.parse(e); } catch { continue; } // 心跳等非 JSON 行
+          acc.push(ev);
+        }
+      }
+      return acc.result();
+    } catch (e) { throw guard.error(e); } finally { guard.done(); }
   }
   return {
     kind: 'openai-responses',

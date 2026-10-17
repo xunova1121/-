@@ -113,8 +113,41 @@ const noEffortModels = new Set();
 
 /** 中转站 / 服务商的临时故障：网关超时（524 等）、限流、连接被重置——自动重试 */
 const TRANSIENT_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529]);
-export const isTransient = (err) => Boolean(err) && err.name !== 'AbortError' && (TRANSIENT_STATUS.has(err.status) || err.name === 'TypeError' || /connection reset|econnreset|socket hang up|network ?error|failed to fetch|load failed|premature close|terminated|etimedout|unexpected end/i.test(String(err.message)));
+export const isTransient = (err) => Boolean(err) && err.name !== 'AbortError' && (err.stalled || TRANSIENT_STATUS.has(err.status) || err.name === 'TypeError' || /connection reset|connection error|econnreset|socket hang up|network ?error|failed to fetch|load failed|premature close|terminated|etimedout|unexpected end/i.test(String(err.message)));
 const RETRY_DELAYS = [1500, 4000, 8000];
+
+/** 连接卡住的判定：发出请求后这么久收不到第一段数据，或两段数据之间这么久没动静，就断开重试（中转站偶尔会挂住不回） */
+export const STALL_MS = { first: 120_000, between: 90_000 };
+/**
+ * 给一次流式请求加“卡住检测”：用 guard.signal 发请求，每收到数据调 touch()，读数据用 race() 包一下（卡住时立刻结束等待）
+ * 卡住时抛出带 stalled 的错误，按临时故障自动重试；用户自己点停止时照常是 AbortError
+ */
+export function stallGuard(outer, { first = STALL_MS.first, between = STALL_MS.between } = {}) {
+  const ctrl = new AbortController();
+  let timer = null, stalledMs = 0;
+  let fail;
+  const stalled = new Promise((_, rej) => { fail = rej; });
+  stalled.catch(() => {});
+  const arm = (ms) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      stalledMs = ms;
+      ctrl.abort();
+      fail(Object.assign(new Error(`模型 ${Math.round(ms / 1000)} 秒没有任何输出，连接卡住了`), { stalled: true }));
+    }, ms);
+  };
+  const onAbort = () => { clearTimeout(timer); ctrl.abort(); fail(Object.assign(new Error('aborted'), { name: 'AbortError' })); };
+  if (outer?.aborted) onAbort(); else outer?.addEventListener('abort', onAbort, { once: true });
+  arm(first);
+  return {
+    signal: ctrl.signal,
+    touch: () => arm(between),
+    race: (p) => Promise.race([p, stalled]),
+    /** 把底层报的 AbortError 换成“卡住了”（只在是卡住检测断开的时候） */
+    error: (err) => stalledMs && !outer?.aborted ? Object.assign(new Error(`模型 ${Math.round(stalledMs / 1000)} 秒没有任何输出，连接卡住了`), { stalled: true }) : err,
+    done: () => { clearTimeout(timer); outer?.removeEventListener('abort', onAbort); }
+  };
+}
 const sleep = (ms, signal) => new Promise((resolve, reject) => {
   const t = setTimeout(resolve, ms);
   signal?.addEventListener('abort', () => { clearTimeout(t); reject(Object.assign(new Error('aborted'), { name: 'AbortError' })); }, { once: true });
@@ -152,57 +185,63 @@ export function createOpenAIAdapter({ baseURL, apiKey, headers = {}, retryDelays
 
 function createOnce({ baseURL, apiKey, headers = {} }) {
   return {
-    async stream({ model, system, messages, tools, signal, onText, effort }) {
-      const send = (withTools, withEffort) => fetch(`${baseURL.replace(/\/$/, '')}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(apiKey && { Authorization: `Bearer ${apiKey}` }), ...headers },
-        body: JSON.stringify({
-          model,
-          stream: true,
-          messages: toOpenAIMessages(system, messages),
-          ...(withTools && tools?.length && { tools: toOpenAITools(tools) }),
-          // 思考强度：日常对话让推理模型少想一点，首字快很多（不支持的模型会报错，自动去掉重试）
-          ...(withEffort && { reasoning_effort: effort })
-        }),
-        signal
-      });
-      let useTools = !noToolModels.has(model);
-      let useEffort = Boolean(effort) && !noEffortModels.has(model);
-      let res = await send(useTools, useEffort);
-      for (let retry = 0; retry < 2 && res.status === 400; retry++) {
-        const detail = await res.clone().text().catch(() => '');
-        if (useEffort && /reasoning_effort|reasoning effort|unsupported parameter|unknown parameter|unrecognized/i.test(detail)) {
-          noEffortModels.add(model);
-          useEffort = false;
-        } else if (useTools && tools?.length && /does not support tools|tools? (is|are) not supported/i.test(detail)) {
-          // 有些本机模型（如 gemma3、qwen2.5vl）不支持工具调用：去掉工具再试，只聊天
-          noToolModels.add(model);
-          useTools = false;
-        } else break;
-        res = await send(useTools, useEffort);
-      }
-      if (!res.ok || !res.body) {
-        let detail = '';
-        try { detail = (await res.text()).slice(0, 300); } catch { /* ignore */ }
-        throw Object.assign(new Error(`模型接口返回 ${res.status}${detail ? `：${detail}` : ''}`), { status: res.status });
-      }
-      const acc = createAccumulator(onText);
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = '';
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const { events, rest } = sseLines(buf);
-        buf = rest;
-        for (const e of events) {
-          if (e === '[DONE]') continue;
-          try { acc.push(JSON.parse(e)); } catch { /* 忽略心跳等非 JSON 行 */ }
-        }
-      }
-      const r = acc.result();
-      return { ...r, stop: r.toolCalls.length ? 'tool_use' : r.stop };
+    async stream({ signal: outer, ...req }) {
+      const guard = stallGuard(outer);
+      try { return await streamOnce({ ...req, signal: guard.signal }, guard); } catch (e) { throw guard.error(e); } finally { guard.done(); }
     }
   };
+  async function streamOnce({ model, system, messages, tools, signal, onText, effort }, guard) {
+    const send = (withTools, withEffort) => fetch(`${baseURL.replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(apiKey && { Authorization: `Bearer ${apiKey}` }), ...headers },
+      body: JSON.stringify({
+        model,
+        stream: true,
+        messages: toOpenAIMessages(system, messages),
+        ...(withTools && tools?.length && { tools: toOpenAITools(tools) }),
+        // 思考强度：日常对话让推理模型少想一点，首字快很多（不支持的模型会报错，自动去掉重试）
+        ...(withEffort && { reasoning_effort: effort })
+      }),
+      signal
+    });
+    let useTools = !noToolModels.has(model);
+    let useEffort = Boolean(effort) && !noEffortModels.has(model);
+    let res = await guard.race(send(useTools, useEffort));
+    for (let retry = 0; retry < 2 && res.status === 400; retry++) {
+      const detail = await res.clone().text().catch(() => '');
+      if (useEffort && /reasoning_effort|reasoning effort|unsupported parameter|unknown parameter|unrecognized/i.test(detail)) {
+        noEffortModels.add(model);
+        useEffort = false;
+      } else if (useTools && tools?.length && /does not support tools|tools? (is|are) not supported/i.test(detail)) {
+        // 有些本机模型（如 gemma3、qwen2.5vl）不支持工具调用：去掉工具再试，只聊天
+        noToolModels.add(model);
+        useTools = false;
+      } else break;
+      res = await guard.race(send(useTools, useEffort));
+    }
+    guard.touch();
+    if (!res.ok || !res.body) {
+      let detail = '';
+      try { detail = (await res.text()).slice(0, 300); } catch { /* ignore */ }
+      throw Object.assign(new Error(`模型接口返回 ${res.status}${detail ? `：${detail}` : ''}`), { status: res.status });
+    }
+    const acc = createAccumulator(onText);
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await guard.race(reader.read());
+      if (done) break;
+      guard.touch();
+      buf += dec.decode(value, { stream: true });
+      const { events, rest } = sseLines(buf);
+      buf = rest;
+      for (const e of events) {
+        if (e === '[DONE]') continue;
+        try { acc.push(JSON.parse(e)); } catch { /* 忽略心跳等非 JSON 行 */ }
+      }
+    }
+    const r = acc.result();
+    return { ...r, stop: r.toolCalls.length ? 'tool_use' : r.stop };
+  }
 }

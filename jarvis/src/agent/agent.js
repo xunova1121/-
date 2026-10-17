@@ -263,7 +263,7 @@ export async function runAgent({ adapter, model, history, userText, images = [],
         if (finalText && !/\n$/.test(finalText)) { emit({ type: 'text', delta: '\n\n' }); finalText += '\n\n'; }
         continue;
       }
-      const note = checks < 2 ? finishCheck({ steps: plan.steps, wroteCode, ranCode }) : '';
+      const note = checks < 2 ? finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }) : '';
       if (!note) break;
       checks++;
       convo.push({ role: 'user', content: note });
@@ -368,11 +368,18 @@ const WEB_TOOLS = new Set(['web_search', 'fetch_url', 'fact_check', 'deep_resear
 /** 可以同时执行的只读工具（不改文件、不操作电脑、不需要用户确认） */
 export const PARALLEL_SAFE = new Set(['web_search', 'fetch_url', 'read_file', 'list_files', 'find_files', 'search_in_files', 'kb_search', 'recall', 'search_conversations', 'read_conversation', 'get_weather', 'get_current_time', 'read_skill_file', 'computer_read_file', 'computer_list_dir']);
 const CODE_FILE = /\.(m?js|ts|py|html?)$/i;
+/** 回答结尾是“我现在开始 / 接下来生成 / 马上做 / 稍等”这类预告（说了要做但还没做） */
+/** “需要的话我可以接着做 PPT”这类询问不算（那是在问用户） */
+const OFFER = /需要|如果|要不要|的话|可以|是否|吗[？?]?\s*$/;
+const ANNOUNCE = /(现在|马上|这就|立刻|接下来|下面|稍等|开始)[^。！？\n]{0,24}(做|生成|制作|写|整理|补上|动手|开始)[^。！？\n]{0,30}[。！…：:]?\s*$|(请稍等|稍等片刻|马上就好)[。！…]?\s*$/;
 
 /** 收尾核对：该结束时，清单没勾完 / 写了代码没运行过，就给模型一句提醒；都没问题返回空 */
-export function finishCheck({ steps = [], wroteCode = false, ranCode = false } = {}) {
+export function finishCheck({ steps = [], wroteCode = false, ranCode = false, lastText = '' } = {}) {
   const left = unfinished(steps);
   const lines = [];
+  // 只说了“现在开始做 / 马上生成”就结束了，没真正调用工具：提醒它直接去做
+  const tail = String(lastText).trim().split(/(?<=[。！？\n])/).filter((x) => x.trim()).at(-1) ?? '';
+  if (ANNOUNCE.test(tail) && !OFFER.test(tail)) lines.push('你刚才说要去做，但这一步没有调用任何工具，事情还没做。现在直接调用工具把它做完，不要只说不做，也不用再解释一遍要做什么。');
   if (left.length) lines.push(`任务清单里还有 ${left.length} 步没标完成：${left.map((s) => `“${s.text}”`).join('、')}。已经做完的用 update_plan 标成 done；没做的接着做；确实做不了或不用做的标成 skip，并在回答里说明原因。`);
   if (wroteCode && !ranCode) lines.push('你写了代码，但还没有运行或预览过。先用 run_javascript / run_python 运行，或用 preview 打开看一眼，确认能用再交给用户；确实没法运行的，在回答里说明没有验证过。');
   return lines.length ? `（系统提示：结束前核对一下。${lines.join('')}核对完再给出最终回答，不要重复前面已经说过的内容。）` : '';

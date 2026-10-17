@@ -6,6 +6,7 @@
  *   - 工具轮内原样回传本轮 content（含思考块），跨轮只保留文本。
  */
 import Anthropic from '@anthropic-ai/sdk';
+import { stallGuard, isTransient } from './openai.js';
 
 const FALLBACK_MODELS = /^(claude-opus-5-5|claude-opus-5|claude-sonnet-5-5|claude-fable-5-1)$/;
 
@@ -40,7 +41,7 @@ export function toAnthropicMessages(messages) {
  * 被拒（400 / 404 / 422）且还没输出文字时，按顺序降级重试：先去掉新参数，最后才去掉联网搜索；记住能用的档位。
  */
 export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = true, webSearch = false, compat = false, client: injected }) {
-  const client = injected ?? new Anthropic({ apiKey: apiKey || 'use-gateway-key', ...(baseURL && { baseURL }), ...(headers && { defaultHeaders: headers }), dangerouslyAllowBrowser: browser });
+  const client = injected ?? new Anthropic({ maxRetries: 0, apiKey: apiKey || 'use-gateway-key', ...(baseURL && { baseURL }), ...(headers && { defaultHeaders: headers }), dangerouslyAllowBrowser: browser });
   let level = 0; // 0 全部参数；1 去掉新参数；2 再去掉联网搜索（只在 compat 时降级）
   const maxLevel = !compat ? 0 : webSearch ? 2 : 1;
 
@@ -65,25 +66,33 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
       params.betas = ['server-side-fallback-2026-07-01'];
       params.fallbacks = 'default';
     }
-    const stream = client.beta.messages.stream(params, { signal });
-    let text = '';
-    for await (const ev of stream) {
-      if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') {
-        text += ev.delta.text;
-        state.started = true;
-        onText?.(ev.delta.text);
-      } else if (ev.type === 'content_block_start' && ev.content_block.type === 'server_tool_use') {
-        onText?.('', { serverTool: ev.content_block.name });
+    // 卡住检测：中转站挂住不回时断开，交给上层换备用模型或重试
+    const guard = stallGuard(signal);
+    try {
+      const stream = client.beta.messages.stream(params, { signal: guard.signal });
+      const events = stream[Symbol.asyncIterator]();
+      let text = '';
+      for (;;) {
+        const { value: ev, done } = await guard.race(events.next());
+        if (done) break;
+        guard.touch();
+        if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') {
+          text += ev.delta.text;
+          state.started = true;
+          onText?.(ev.delta.text);
+        } else if (ev.type === 'content_block_start' && ev.content_block.type === 'server_tool_use') {
+          onText?.('', { serverTool: ev.content_block.name });
+        }
       }
-    }
-    const msg = await stream.finalMessage();
-    if (msg.stop_reason === 'refusal') {
-      const note = '抱歉，这个请求我没办法协助。';
-      onText?.(note);
-      return { text: text + note, toolCalls: [], raw: null, stop: 'end_turn' };
-    }
-    const toolCalls = msg.content.filter((b) => b.type === 'tool_use').map((b) => ({ id: b.id, name: b.name, args: b.input ?? {} }));
-    return { text, toolCalls, raw: msg.content, stop: msg.stop_reason };
+      const msg = await guard.race(stream.finalMessage());
+      if (msg.stop_reason === 'refusal') {
+        const note = '抱歉，这个请求我没办法协助。';
+        onText?.(note);
+        return { text: text + note, toolCalls: [], raw: null, stop: 'end_turn' };
+      }
+      const toolCalls = msg.content.filter((b) => b.type === 'tool_use').map((b) => ({ id: b.id, name: b.name, args: b.input ?? {} }));
+      return { text, toolCalls, raw: msg.content, stop: msg.stop_reason };
+    } catch (e) { throw guard.error(e); } finally { guard.done(); }
   }
 
   return {
@@ -92,11 +101,14 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
     get webSearchOn() { return webSearch && level < 2; },
     async stream(req) {
       const state = { started: false };
-      for (;;) {
+      for (let transient = 0; ; ) {
         try {
           return await once(req, level, state);
         } catch (e) {
-          const rejected = [400, 404, 422].includes(e?.status) && !state.started && !req.signal?.aborted;
+          if (req.signal?.aborted) throw e;
+          // 连接卡住 / 连接出错，而且还没输出文字：等一下重试（最多两次），再不行交给上层换备用模型
+          if (!state.started && isTransient(e) && transient++ < 2) { await new Promise((r) => setTimeout(r, 1500 * transient)); continue; }
+          const rejected = [400, 404, 422].includes(e?.status) && !state.started;
           if (!rejected || level >= maxLevel) throw e;
           level++;
         }

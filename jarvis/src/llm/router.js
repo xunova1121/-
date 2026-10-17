@@ -156,5 +156,5 @@ export function fallbackRoutes(cfg, current = {}, max = 2) {
 export function canFallback(err) {
   if (!err || err.name === 'AbortError') return false;
   if ([402, 403, 404, 408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529].includes(err.status)) return true;
-  return err.name === 'TypeError' || /connection reset|econnreset|socket hang up|network ?error|failed to fetch|load failed|timeout|超时|overloaded|余额|额度|quota|insufficient|无可用渠道|no available channel|model.{0,20}(not.{0,10}(found|exist|available|supported))|模型.{0,6}(不存在|不可用|下线)/i.test(String(err.message));
+  return err.name === 'TypeError' || Boolean(err.stalled) || /connection reset|connection error|econnreset|socket hang up|network ?error|failed to fetch|load failed|timeout|超时|overloaded|余额|额度|quota|insufficient|无可用渠道|no available channel|model.{0,20}(not.{0,10}(found|exist|available|supported))|模型.{0,6}(不存在|不可用|下线)/i.test(String(err.message));
 }
