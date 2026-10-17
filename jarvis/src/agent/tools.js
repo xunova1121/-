@@ -454,11 +454,13 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         cover: { type: 'boolean', description: 'Word / PDF 加封面（正式报告、方案、标书类建议加）' },
         subtitle: str('副标题（可选）'),
         author: str('署名，如单位或部门（可选，用在封面）'),
+        issuer: str('公文发文单位（可选，如“××县人民政府办公室”）：正式公文（通知、请示、函）填了会加红头“××文件”；不填时从文末落款单位取'),
+        docNo: str('公文文号（可选，如“×政办发〔2026〕12号”），显示在红头下面'),
         toc: { type: 'string', enum: ['auto', 'yes', 'no'], description: '目录：auto（默认，二级标题 3 个以上时加）/ yes / no' },
         template: str('Word 模板路径（工作区里的 .docx，可选）：沿用模板的字体、标题和正文样式。不填时，工作区“模板 / templates”文件夹里或文件名带“模板”的 .docx 会自动使用；传 "none" 不用模板'),
         requirements: str('用户对这份文档的原始要求（尽量用原话：主题、必须包含的内容、字数页数、格式）。填了会在生成前对照检查有没有漏项，并自动改一轮')
       }, ['format', 'path', 'content']),
-      run: async ({ format, path, title, content, theme, cover, subtitle, author, toc, template, requirements }, { progress, signal } = {}) => {
+      run: async ({ format, path, title, content, theme, cover, subtitle, author, issuer, docNo, toc, template, requirements }, { progress, signal } = {}) => {
         const loadImage = async (src) => {
           if (/^(https?:|data:)/i.test(src)) return null;
           try { return new Uint8Array(await (await ws.readBlob(src)).arrayBuffer()); } catch { return null; }
@@ -467,7 +469,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         // 生成前自查：规则检查；有原始要求或硬伤时请模型对照检查并改一轮
         const check = await selfCheck({ format, content, requirements, llm: ctx.reasonLlm ?? ctx.llm ?? null, signal, onProgress: (t) => progress?.(t) });
         const build = (text) => generate(format, {
-          title: title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, ''), content: text, theme, cover: Boolean(cover), subtitle, author,
+          title: title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, ''), content: text, theme, cover: Boolean(cover), subtitle, author, issuer, docNo,
           toc: toc === 'yes' ? true : toc === 'no' ? false : 'auto', loadImage, toPdf: ctx.toPdf ?? null, template: tpl
         });
         let out = await build(check.content);

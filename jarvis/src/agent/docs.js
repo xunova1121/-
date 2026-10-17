@@ -180,7 +180,7 @@ function toBase64(bytes) {
  * @param {Uint8Array|ArrayBuffer} [o.template]  Word 模板（沿用它的样式）
  * @returns {Promise<{blob: Blob, ext: string, note?: string, theme: object, info?: object}>}
  */
-export async function generate(format, { title = '未命名', content = '', theme: themeName = '', cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, toPdf = null, template = null } = {}) {
+export async function generate(format, { title = '未命名', content = '', theme: themeName = '', cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, toPdf = null, template = null, issuer = '', docNo = '' } = {}) {
   const theme = resolveTheme(themeName, `${title}\n${content}`);
   const page = { theme, cover, subtitle, author, date, toc };
   switch (format) {
@@ -202,7 +202,7 @@ export async function generate(format, { title = '未命名', content = '', them
       };
     }
     case 'docx': {
-      const r = await makeDocx({ title, content, ...page, loadImage, template });
+      const r = await makeDocx({ title, content, ...page, loadImage, template, issuer, docNo });
       return { blob: r.blob, ext: 'docx', theme, info: r.info };
     }
     case 'pptx': {

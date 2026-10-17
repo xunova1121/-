@@ -152,6 +152,20 @@ describe('Word 排版', () => {
     expect(x.styles).toMatch(/<w:sz w:val="32"\/>/); // 三号
     expect(x.footers).toContain('— ');
   });
+
+  it('红头公文：发文单位 + 文号 + 红线；没给单位时取落款单位；设计样式不加红头', async () => {
+    const notice = '# 关于开展安全检查的通知\n\n各部门：\n\n正文。\n\n县应急管理局\n\n2026 年 10 月 17 日';
+    const a = await unzip((await generate('docx', { title: 'x', content: notice, issuer: '某某县人民政府办公室', docNo: '某政办发〔2026〕12号' })).blob);
+    expect(a.doc).toContain('某某县人民政府办公室文件');
+    expect(a.doc).toContain('某政办发〔2026〕12号');
+    expect(a.doc).toMatch(/w:color="C00000"/);
+    const b = await unzip((await generate('docx', { title: 'x', content: notice })).blob);
+    expect(b.doc).toContain('县应急管理局文件');
+    const c = await unzip((await generate('docx', { title: 'x', content: '# 2026 年第三季度工作总结\n\n## 一、概况\n\n正文。\n\n| 项目 | 金额 |\n|---|--:|\n| 甲 | 1 |' })).blob);
+    expect(c.doc).not.toContain('文件</w:t>');
+    expect(c.doc).not.toMatch(/C00000/);
+    expect(c.doc).toMatch(/w:fill="[0-9A-F]{6}"/); // 设计样式：标题色块 / 表头底色
+  });
 });
 
 describe('排版细节（看过渲染效果后补的）', () => {
