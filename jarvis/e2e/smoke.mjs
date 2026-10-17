@@ -893,6 +893,39 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await phone.ctx.close();
 }
 
+// —— 干活时插话不打断、切换对话后任务在后台做完、回答中显示转圈和在做什么
+{
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+  const p = await ctx.newPage();
+  await p.goto(BASE);
+  await p.waitForFunction(() => window.__jarvis?.send);
+  await p.evaluate(() => { window.__jarvis.send('做一个 PPT'); });
+  await p.waitForSelector('#transcript .msg.agent.streaming');
+  const st = await p.$eval('#transcript .msg.agent.streaming', (el) => ({ s: el.dataset.status, bg: getComputedStyle(el, '::after').backgroundImage }));
+  check('回答中末尾是转圈加“在做什么”，不是闪烁的竖线', Boolean(st.s) && /svg/.test(st.bg), st.s);
+  await p.evaluate(() => { window.__jarvis.send('好了吗'); });
+  await p.waitForFunction(() => [...document.querySelectorAll('#transcript .msg.agent')].some((m) => /还在做，已经/.test(m.innerText)), null, { timeout: 5000 });
+  check('干活时问“好了吗”：马上回进度，正在做的任务不停', await p.locator('#transcript .msg.agent.streaming').count() === 1);
+  await p.waitForFunction(() => !document.querySelector('#transcript .msg.agent.streaming'), null, { timeout: 40000 });
+  const all = await p.locator('#transcript').innerText();
+  check('问完进度，任务照常做完、文件照常给出（没有“已打断”）', !all.includes('已打断') && await p.locator('#transcript .file-link').count() >= 1);
+
+  await p.evaluate(() => { window.__jarvis.send('做一个 Excel 表格'); });
+  await p.waitForSelector('#transcript .msg.agent.streaming');
+  const sid = await p.evaluate(() => window.__jarvis.sessionId);
+  await p.evaluate(() => window.__jarvis.newSession());
+  await p.waitForFunction((old) => window.__jarvis.sessionId !== old, sid, { timeout: 10000 }); // 切换时先整理旧对话的记忆，再换界面
+  await p.waitForTimeout(300);
+  check('切到新对话：新对话里没有别的对话正在写的回答', await p.locator('#transcript .msg.agent.streaming').count() === 0);
+  await p.waitForFunction(async (id) => (await window.__jarvis.sessionGet(id))?.messages.some((m) => m.role === 'assistant' && m.files?.some((f) => /\.xlsx$/.test(f))), sid, { timeout: 40000 });
+  check('原来的任务在后台做完，回答和 Excel 文件记回原来的对话', true);
+  check('文件卡片没有跑到新对话里', await p.locator('#transcript .file-link').count() === 0);
+  await p.evaluate((id) => window.__jarvis.openSession(id), sid);
+  await p.waitForTimeout(400);
+  check('切回原来的对话能看到做好的 Excel', /\.xlsx/.test(await p.locator('#transcript').innerText()));
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok).length;
 console.log(`\n${results.length - failed}/${results.length} 通过`);

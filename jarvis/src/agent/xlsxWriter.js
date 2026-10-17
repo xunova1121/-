@@ -11,6 +11,7 @@
  */
 import { parseSheets, parseBlocks } from './sheetParse.js';
 import { checkFormulas, sheetLayout, colName } from './formulaCheck.js';
+import { evaluateWorkbook } from './formulaEval.js';
 
 const CJK = /[⺀-￿]/;
 const width = (v) => [...String(v ?? '')].reduce((n, ch) => n + (CJK.test(ch) ? 2 : 1), 0);
@@ -53,6 +54,12 @@ function pickPair(headers, numericCols, re1, re2) {
 }
 
 const SHARE = /占比|比重|构成比|所占比例|占总/;
+/** 表头像比率：设百分比格式；带金额 / 数量单位的（“同比增减（万元）”）不算 */
+const PCT_HEAD = /率|占比|比重|比例|同比|环比|增幅|增速/;
+const AMOUNT_HEAD = /万元|元|金额|数量|人数|增减|个数|（[^）]*[元个人台套吨]）|\([^)]*[元个人台套吨]\)/;
+/** 没写分隔行、但第一行全是“项目 / 数值 / 指标 / 说明”这类表头词：当作带表头的表 */
+const HEAD_WORD = /^(项目|指标|名称|内容|数值|数据|说明|类别|区域|序号|编号|备注|单位|时间|日期|金额|数量|完成情况|目标|实际|负责人|事项)$/;
+const looksLikeHeader = (rows) => rows.length > 2 && rows[0].length >= 2 && rows[0].every((c) => HEAD_WORD.test(String(c ?? '').trim()));
 const MONEY = /金额|投资|费用|预算|万元|元|成本|收入|销售额/;
 const isTotalRow = (row) => [0, 1].some((ci) => TOTAL.test(String(row[ci]?.value ?? '').trim()));
 
@@ -114,10 +121,18 @@ function buildTable(rows, r0, header = true) {
     const total = totalRow ? numOf(totalRow.row[base]) : dataRows.reduce((n, d) => n + (numOf(d.row[base]) ?? 0), 0);
     for (const { row, r } of bodyRows) {
       const v = numOf(row[base]);
-      if (v === null) continue;
+      if (v === null || row[ci]?.formula) continue; // 已经写了公式（模型自己写的）就照用，不覆盖
       row[ci] = { formula: `IFERROR(${L}${r}/${denom},"")`, result: total ? v / total : '', numFmt: '0.0%' };
     }
   }
+  // 比率类的列（同比、增长率、占比、完成率……）：模型自己写的公式也设成百分比格式，不显示成 0.2058… 这样的长小数
+  const pctCols = [...Array(cols).keys()].filter((ci) => PCT_HEAD.test(headers[ci] ?? '') && !AMOUNT_HEAD.test(headers[ci] ?? ''));
+  for (const ci of pctCols) for (const { row } of bodyRows) if (row[ci]?.formula && !row[ci].numFmt) row[ci].numFmt = '0.0%';
+  // 信息表（左边名目、右边值）：名目是“增长率”“占比”之类的，右边的公式也设成百分比
+  const pctLabel = (v) => PCT_HEAD.test(String(v ?? '')) && !AMOUNT_HEAD.test(String(v ?? ''));
+  if (!header) for (const row of grid) row.forEach((c, ci) => { if (ci > 0 && c.formula && !c.numFmt && pctLabel(row[ci - 1]?.value)) c.numFmt = '0.0%'; });
+  // 带表头的“项目 | 数值”表：这一行的名目是比率，这一行的公式也设成百分比
+  else for (const { row } of bodyRows) if (pctLabel(row[0]?.value)) row.forEach((c, ci) => { if (ci > 0 && c.formula && !c.numFmt) c.numFmt = '0.0%'; });
   for (const row of grid) for (const c of row) if (c.formula) formulas++;
   return { grid, cols, formulas };
 }
@@ -206,7 +221,7 @@ export async function makeXlsx(content, { theme }) {
         return;
       }
       if (!b.rows.length) return;
-      const header = b.header !== false;
+      const header = b.header !== false || looksLikeHeader(b.rows);
       const t = buildTable(b.rows, r, header);
       formulas += t.formulas;
       if (!firstHeader && header) firstHeader = r;
@@ -221,7 +236,7 @@ export async function makeXlsx(content, { theme }) {
           const cell = xr.getCell(ci + 1);
           if (c.formula) cell.value = { formula: c.formula, ...(c.result !== undefined && { result: c.result }) };
           else cell.value = c.value ?? null;
-          cells.set(`${colName(ci)}${r}`, c.formula ? { formula: c.formula } : { value: c.value ?? null });
+          cells.set(`${colName(ci)}${r}`, c.formula ? { formula: c.formula, result: c.result, xl: cell } : { value: c.value ?? null });
           if (c.numFmt) cell.numFmt = c.numFmt;
           cell.border = borders;
           cell.font = { name: FONT, size: 10.5 };
@@ -255,6 +270,17 @@ export async function makeXlsx(content, { theme }) {
     ws.pageSetup = { orientation: fullW > 110 ? 'landscape' : 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 } };
     if (firstHeader) ws.pageSetup.printTitlesRow = `${firstHeader}:${firstHeader}`;
     checked.at(-1).rows = Math.max(0, ...[...cells.keys()].map((a) => Number(a.match(/\d+$/)[0])));
+  }
+  // 模型自己写的公式：先算一遍把结果存进去（Excel 打开时照样重算），未央读回、工作区预览时也能看到数
+  const computed = evaluateWorkbook(checked);
+  for (const sh of checked) {
+    for (const [addr, c] of sh.cells) {
+      if (!c.formula || c.result !== undefined || !computed.has(`${sh.name}!${addr}`)) continue;
+      const v = computed.get(`${sh.name}!${addr}`);
+      if (v === null || v === undefined || typeof v === 'object') continue;
+      c.result = v;
+      c.xl.value = { formula: c.formula, result: v };
+    }
   }
   const buf = await wb.xlsx.writeBuffer();
   return { blob: new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), info: { sheets: sheets.length, formulas, formulaIssues: checkFormulas(checked), layout: sheetLayout(checked) } };

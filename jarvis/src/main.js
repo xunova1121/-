@@ -43,6 +43,7 @@ import { loadSettings, saveSettings, wantsReducedMotion } from './core/settings.
 import { browserMetrics } from './api/browserMetrics.js';
 import { runTeam, shouldTeam } from './agent/team.js';
 import { runAgent } from './agent/agent.js';
+import { STATUS_ASK, STOP_ASK, turnStatus } from './core/interject.js';
 import { collectRequirements } from './agent/taskRequirements.js';
 import { createTools } from './agent/tools.js';
 import * as ws from './agent/workspace.js';
@@ -414,14 +415,15 @@ const storage = (() => { try { return localStorage; } catch { return null; } })(
 // 当前会话；history 指向它的消息列表（切换会话时一起换掉）
 let session = sessionsApi.create();
 let history = session.messages;
-function rememberTurn(role, content, extra = {}) {
-  history.push({ role, content, ts: Date.now(), ...extra });
-  session.updatedAt = Date.now();
-  persistSession();
+/** 记一条消息：默认记进当前会话；后台任务记进它自己的会话（切到别的对话后仍然记对地方） */
+function rememberTurn(role, content, extra = {}, target = session) {
+  target.messages.push({ role, content, ts: Date.now(), ...extra });
+  target.updatedAt = Date.now();
+  persistSession(target);
 }
-function persistSession() {
+function persistSession(target = session) {
   if (settings.saveSessions === false) return;
-  return sessionsApi.save(session).then(() => sessionsPanel?.refresh()).catch(() => {});
+  return sessionsApi.save(target).then(() => sessionsPanel?.refresh()).catch(() => {});
 }
 let turns = 0;
 const NEEDS_THOUGHT = /查|搜|核实|验证|结果|赛果|比分|中没中|中奖|最新|价格|行情|新闻|分析|计算|算一下|对比|图片|截图|图里/;
@@ -652,12 +654,16 @@ async function openingCallouts(hasSkills = true) {
 }
 
 async function switchTo(next) {
-  interrupt();
+  // 正在干活：不停下，转到后台接着做（做完记回原来的对话）；只是在朗读就停掉
+  if (active && !active.streamDone) toBackground(active); else interrupt();
   if (settings.autoMemory) await reflectNow();
   session = next;
   history = session.messages;
   reflectFrom = history.length;
   replayTranscript();
+  // 切回一个还在后台干活的对话：把正在写的那条回答接回来
+  const bg = [...backgroundTurns].find((t) => t.session.id === session.id);
+  if (bg) { backgroundTurns.delete(bg); bg.background = false; active = bg; liveBubble = bg.bubble; transcript.root.append(bg.bubble.el); setTask('processing', bg.status || '思考中'); }
   dashboard.setTurns(history.filter((m) => m.role === 'user').length);
   if (history.length) callouts?.set(followUpSuggestions({ tools: history.at(-1)?.tools ?? [], userText: [...history].reverse().find((m) => m.role === 'user')?.content ?? '', desktop: Boolean(DESKTOP) }));
   else openingCallouts();
@@ -733,14 +739,15 @@ function openInWorkspace(path) {
   showPanel('workspace');
   panels.openFile(path);
 }
-let turnFiles = null; // 这一轮生成的文件（记进对话，重新打开对话时还能点）
 
 /** 智能体可用的全部工具：基础工具 + 桌面版电脑操作 + MCP 工具 */
-async function buildTools({ background = false } = {}) {
+async function buildTools({ background = false, turn = null } = {}) {
+  // 生成的文件、图片只挂到产生它的那一轮（turn）：中途切到别的对话，也不会跑到别的对话里
+  const out = () => turn?.bubble ?? liveBubble;
   const onFileChanged = (path) => {
     panels.markFresh(path);
     panels.refreshFiles();
-    if (!background && !/^skills\//.test(path)) { liveBubble?.fileLink?.(path, openInWorkspace); turnFiles?.add(path); }
+    if (!background && !/^skills\//.test(path)) { out()?.fileLink?.(path, openInWorkspace); turn?.files.add(path); }
   };
   return [
     ...createTools({
@@ -757,9 +764,9 @@ async function buildTools({ background = false } = {}) {
         : (path) => { showPanel('workspace'); panels.openFile(path); },
       onFileChanged,
       imageGen: (o) => generateImage(llmConfig, { ...o, gateway }),
-      onImage: (src) => liveBubble?.image?.(src),
+      onImage: (src) => out()?.image?.(src),
       videoGen: (o) => generateVideo(llmConfig, { ...o, gateway }),
-      onVideo: (src) => liveBubble?.video?.(src),
+      onVideo: (src) => out()?.video?.(src),
       onSchedulesChanged: () => schedulesPanel?.refresh(),
       currentSessionId: () => session?.id,
       // 桌面版：写 PDF 时直接转成 PDF 文件（网页版和安卓生成可打印的网页）
@@ -898,11 +905,51 @@ async function expandSlash(text) {
   return m ? `请使用技能「${m.name}」完成：${m.rest || '（用户没有补充内容，先说明这个技能能做什么并询问需要的材料）'}` : text;
 }
 
-async function send(text) {
+// —— 干活时插话、切换对话后台继续
+const backgroundTurns = new Set();
+/** 干活时又发来一句：问进度直接答；说停就停；其他的交给正在干的未央（下一步开始前看到），不打断 */
+function interject(text) {
+  const turn = active;
+  transcript.add('user', text, Date.now());
+  const reply = (words) => { const b = transcript.add('agent', words); b.done(); };
+  if (STOP_ASK.test(text)) { interrupt(); reply('好的，已经停下。上面是停下前做到的地方，要接着做跟我说一声。'); return; }
+  if (STATUS_ASK.test(text)) { reply(`${turnStatus(turn, now())}。做完会直接给你结果；想停的话点右下角的方块，或者说“停”。`); return; }
+  rememberTurn('user', text, {}, turn.session);
+  turn.inbox.push(text);
+  reply(`收到，做完手上这一步就看这句话（${turnStatus(turn, now())}）。`);
+}
+/** 切到别的对话：正在干的任务转到后台接着做 */
+function toBackground(turn) {
+  turn.background = true;
+  backgroundTurns.add(turn);
+  active = null;
+  speaker.cancel();
+  setTask('idle');
+  toast('刚才的任务在后台接着做，做完会提醒你');
+}
+/** 后台任务做完（或出错）：记回原来的对话，提醒用户 */
+function finishBackground(turn, { text = '', error = '', shown = '', usedTools = [], files = new Set() }) {
+  backgroundTurns.delete(turn);
+  const extra = { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(files.size && { files: [...files].slice(-12) }) };
+  const title = turn.session.title || '另一个对话';
+  if (error) {
+    if (shown.trim() || usedTools.length) rememberTurn('assistant', `${shown.trim()}\n\n${INTERRUPTED_MARK}`, extra, turn.session);
+    toast(`「${title}」里的任务没做完：${error.slice(0, 40)}`);
+  } else {
+    rememberTurn('assistant', text || '（完成）', extra, turn.session);
+    toast(`「${title}」里的任务做完了，切回去就能看到`);
+  }
+  turn.bubble.done();
+  sessionsPanel?.refresh();
+}
+
+async function send(text, { echo = true } = {}) {
   text = String(text || '').trim();
   if (!text && !attachments.length) return;
   if (!attachments.length && companion?.perform(text)) return;
   if (!text && attachments.some((a) => a.image)) text = '请看看这张图片。';
+  // 正在干活时又发了一句：不打断，问进度就直接答，别的话交给正在干的未央；说“停”才停
+  if (echo && active && !active.streamDone && !attachments.length) return interject(text);
   if (active) { active.ctrl.abort(); active = null; }
   speaker.cancel();
   speaker.unlock(); // 发送多由点击 / 回车触发：顺便启动音频上下文，云端语音才能播放
@@ -914,7 +961,7 @@ async function send(text) {
   const userText = files.length ? `${text}\n\n[已上传到工作区：${files.map((f) => f.path).join('、')}]` : text;
   const imgs = files.filter((f) => f.image).map((f) => f.image);
   const thumbs = files.filter(f => f.image).map(f => ({ src:f.image.thumb, path:f.path }));
-  transcript.add('user', userText, Date.now(), { thumbs });
+  if (echo) transcript.add('user', userText, Date.now(), { thumbs }); // echo=false：这句话之前已经显示并记下了
   director.onUserText(text);
   hud.newTurn();
   hud.think(`◂ 收到：${text.slice(0, 30)}`);
@@ -925,7 +972,7 @@ async function send(text) {
   const recent = compress.unsummarized(history, session.summary);
   const withImages = new Set(refersToImage ? recent.filter((m) => m.role === 'user' && recentImages.has(m.ts)).slice(-2).map((m) => m.ts) : []);
   const llmHistory = recent.map(({ role, content, ts }) => ({ role, content, ...(withImages.has(ts) && { images: recentImages.get(ts) }) }));
-  rememberTurn('user', userText, thumbs.length ? { thumbs } : {});
+  if (echo) rememberTurn('user', userText, thumbs.length ? { thumbs } : {});
   if (imgs.length) {
     recentImages.set(history.at(-1).ts, imgs.map(({ mime, data }) => ({ mime, data })));
     while (recentImages.size > 2) recentImages.delete(recentImages.keys().next().value);
@@ -936,7 +983,8 @@ async function send(text) {
   const bubble = transcript.add('agent');
   liveBubble = bubble;
   bubble.el.classList.add('streaming');
-  const turn = { ctrl, streamDone: false, bubble };
+  // 这一轮属于哪个会话：切到别的对话后在后台接着做，结果、文件都记回这个会话
+  const turn = { ctrl, streamDone: false, bubble, session, files: new Set(), inbox: [], t0: now(), steps: 0, status: '', background: false };
   active = turn;
   setTask('processing', '思考中');
 
@@ -970,7 +1018,7 @@ async function send(text) {
   let serverCard = null;
   const t0 = now();
   const usedTools = [];
-  const madeFiles = turnFiles = new Set();
+  const madeFiles = turn.files;
   let shown = ''; // 这一轮已经显示出来的回答（中断时保留，点“继续”接着写）
   let ctxMs = null;
   callouts?.retract();
@@ -989,9 +1037,10 @@ async function send(text) {
       requirements: collectRequirements(history, session.requirements),
       requirementText: userText, // 保留斜杠命令展开前的原话，避免当成缺失历史重复注入
       fallbacks: team ? [] : fallbacks,
+      inbox: team ? null : turn.inbox,
       maxSteps: DESKTOP ? 40 : 28, // 用鼠标键盘操作电脑、逐项联网核实时步数多
       images: imgs.map(({ mime, data }) => ({ mime, data })),
-      tools: await buildTools(),
+      tools: await buildTools({ turn }),
       approve: (req) => {
         if (preApproved(req, { sessionKeys: sessionApprovals })) return true; // 危险命令每次都问
         setTask('processing', '等待你确认');
@@ -1002,6 +1051,18 @@ async function send(text) {
         });
       },
       emit: (e) => {
+        if (e.type === 'tool_start' && e.name !== 'update_plan') { turn.steps++; turn.status = toolLabel(e.name); }
+        else if (e.type === 'tool_progress') turn.status = e.text;
+        else if (e.type === 'text') turn.status = '写回答';
+        if (turn.background) {
+          // 切到别的对话了：只把内容记在这一轮的气泡里（切回来时接上），不朗读、不改界面状态
+          if (e.type === 'text') { bubble.append(e.delta); shown += e.delta; }
+          else if (e.type === 'tool_start' && e.name !== 'update_plan') { cards.set(e.id, bubble.toolCard(e.name, e.args)); usedTools.push(e.name); }
+          else if (e.type === 'tool_progress') cards.get(e.id)?.progress(e.text);
+          else if (e.type === 'tool_end') cards.get(e.id)?.done(e.ok, e.output, e.ms);
+          else if (e.type === 'plan') bubble.plan?.(e.steps);
+          return;
+        }
         if (active !== turn) return;
         if (e.type === 'text') {
           if (!firstToken) { firstToken = now(); hud.think('生成回答'); }
@@ -1032,6 +1093,7 @@ async function send(text) {
           hud.think(`▸ ${toolLabel(e.name)}  ${summarizeArgs(e.name, e.args)}`);
           cards.set(e.id, bubble.toolCard(e.name, e.args));
           usedTools.push(e.name);
+          bubble.status?.(`正在${toolLabel(e.name)}…`);
           setTask('processing', toolLabel(e.name));
           markActivity(`${toolLabel(e.name)} ${summarizeArgs(e.name, e.args)}`.slice(0, 80));
           outMarked = false;
@@ -1055,6 +1117,7 @@ async function send(text) {
         } else if (e.type === 'team_review') { teamCard?.review(e); setTask('processing', e.pass ? '审核通过，汇总中' : '审核发现问题'); }
       }
     });
+    if (turn.background) { finishBackground(turn, { text: result.text, shown, usedTools, files: madeFiles }); return; }
     if (active !== turn) return;
     speech.flush();
     const total = now() - t0;
@@ -1073,7 +1136,7 @@ async function send(text) {
     hud.think(`✓ 完成 · ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · ${result.toolCalls} 个工具` : ''}`, 'ok');
     $('#hud-latency').textContent = firstToken ? `${Math.round(firstToken - t0)} ms` : '—';
     if (result.text) wp({ say: result.text.replace(/```[\s\S]*?```/g, '').replace(/[#*>`|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 4000) });
-    rememberTurn('assistant', result.text || '（完成）', { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) });
+    rememberTurn('assistant', result.text || '（完成）', { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) }, turn.session);
     $('#mode-pill').classList.remove('offline');
     turn.streamDone = true;
     callouts?.set(followUpSuggestions({ tools: usedTools, userText: text, desktop: Boolean(DESKTOP) }));
@@ -1081,7 +1144,9 @@ async function send(text) {
     compressHistory();
     if (!speaker.speaking) finishTurn();
   } catch (err) {
-    if (err.name === 'AbortError' || active !== turn) return;
+    if (err.name === 'AbortError') return;
+    if (turn.background) { finishBackground(turn, { error: friendlyError(String(err.message || err)), shown, usedTools, files: madeFiles }); return; }
+    if (active !== turn) return;
     const msg = friendlyError(String(err.message || err));
     const cors = !MOBILE && /Failed to fetch|NetworkError|Load failed|CORS/i.test(msg);
     bubble.append(`\n（出错了：${msg}${cors ? '。多半是该服务商不允许网页直接调用：双击 jarvis 文件夹里的 启动.bat（或 start.sh）并保持窗口开着，本页面会自动连上本机网关，然后重试即可' : ''}）`);
@@ -1094,12 +1159,15 @@ async function send(text) {
     hud.think(`✕ ${msg.slice(0, 40)}`, 'bad');
     // 已经写了一部分或做了几步：记进对话，点“继续”从断开的地方接着做，而不是从头再来
     const resumable = Boolean(shown.trim() || usedTools.length);
-    if (resumable) rememberTurn('assistant', `${shown.trim()}\n\n${INTERRUPTED_MARK}`, { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) });
+    if (resumable) rememberTurn('assistant', `${shown.trim()}\n\n${INTERRUPTED_MARK}`, { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) }, turn.session);
     callouts?.set(followUpSuggestions({ error: true, resumable, userText: text, desktop: Boolean(DESKTOP) }));
   } finally {
-    await persistSession();
+    await persistSession(turn.session);
     releaseTask();
     endControl();
+    // 回答写完的一瞬间又收到的话（没来得及交给模型）：接着当一句新话处理
+    const left = turn.inbox.splice(0);
+    if (left.length && !ctrl.signal.aborted && !turn.background && session === turn.session) setTimeout(() => send(left.join('\n'), { echo: false }), 0);
   }
 }
 
@@ -2253,6 +2321,10 @@ window.__jarvis = {
   send,
   interrupt,
   showPanel,
+  newSession,
+  openSession,
+  get sessionId() { return session.id; },
+  sessionGet: (id) => sessionsApi.get(id),
   get quality() { return quality; },
   workspace: ws
 };

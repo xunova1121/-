@@ -250,8 +250,11 @@ export class Transcript {
     const present = (state, detail = '') => {
       if (!mascot) return;
       setMascotState(mascot, state);
-      if (greeting) greeting.textContent = detail || ({think:'我在想，稍等一下哦…',rub:'搓搓手，交给我吧。',run:'正在帮你找资料…',happy:'整理好啦，一起看看。',listen:'我在听，慢慢说。',wink:'我在呀，慢慢来。',sleep:'休息一下，有事叫我。',love:'送你一颗小小的心。'}[state] || '我在这里，陪着你。');
+      const words = detail || ({think:'我在想，稍等一下哦…',rub:'搓搓手，交给我吧。',run:'正在帮你找资料…',happy:'整理好啦，一起看看。',listen:'我在听，慢慢说。',wink:'我在呀，慢慢来。',sleep:'休息一下，有事叫我。',love:'送你一颗小小的心。'}[state] || '我在这里，陪着你。');
+      if (greeting) greeting.textContent = words;
+      if (el.classList.contains('streaming') || !text) el.dataset.status = words; // 回答末尾的转圈旁边也显示在做什么
     };
+    if (role === 'agent' && !text) el.dataset.status = '我在想，稍等一下哦…';
     const sizeReply = value => el.classList.toggle('wy-long-reply', value.length > 480 || value.split('\n').length > 10);
     if (role === 'agent') sizeReply(text);
     let moodState = null;
@@ -412,6 +415,8 @@ export class Transcript {
         self.#scroll();
       },
       /** 表情：在“未央 · 时间”旁边放一个小图标（不显示英文标签） */
+      /** 回答末尾转圈旁的状态字（正在查资料、正在生成 PPT…） */
+      status(text) { el.dataset.status = text; if (greeting) greeting.textContent = text; },
       mood(v) {
         if (!mascot) return;
         moodState = poseForEmotion(v);
@@ -419,6 +424,7 @@ export class Transcript {
       },
       activity(state, detail = '') { present(poseForTask(state, detail), state==='error' ? '这次没有完成，我们再试一次。' : ''); },
       append(d) {
+        if (el.dataset.status !== '正在写回答…') el.dataset.status = '正在写回答…';
         raw += d;
         curRaw += d;
         // 每一帧最多刷新一次，只把新增的字接在后面：逐字重排整段回答在手机上很慢，回答越长越卡

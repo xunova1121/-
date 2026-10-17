@@ -35,8 +35,8 @@ export async function parseFile(blob, name) {
     text = await parsePptx(await buf());
   } else if (['xlsx', 'xls', 'ods'].includes(e)) {
     const XLSX = await import('xlsx');
-    const wb = XLSX.read(new Uint8Array(await buf()), { type: 'array' });
-    text = wb.SheetNames.map((n) => `## 工作表：${n}\n${XLSX.utils.sheet_to_csv(wb.Sheets[n])}`).join('\n\n');
+    const wb = XLSX.read(new Uint8Array(await buf()), { type: 'array', cellFormula: true, sheetStubs: true }); // sheetStubs：没存结果的公式格子也要读出来
+    text = wb.SheetNames.map((n) => sheetText(XLSX, wb.Sheets[n], n)).join('\n\n');
   } else if (e === 'html' || e === 'htm') {
     text = htmlToText(await blob.text());
   } else if (isText(name)) {
@@ -46,6 +46,22 @@ export async function parseFile(blob, name) {
   }
   text = text.replace(/\u0000/g, '').trim();
   return { text: text.length > MAX_CHARS ? `${text.slice(0, MAX_CHARS)}\n…（内容过长，已截断，共 ${text.length} 字）` : text, chars: text.length };
+}
+
+/**
+ * 一个工作表 → 文字：表格内容（CSV）+ 公式清单。
+ * 公式格子没有存结果时（有的软件生成的文件就是这样），CSV 里显示公式本身，不显示成空格子——
+ * 不然读的人（包括未央自己）会以为公式没写进去。
+ */
+function sheetText(XLSX, sheet, name) {
+  const formulas = [];
+  for (const [addr, cell] of Object.entries(sheet)) {
+    if (addr.startsWith('!') || !cell?.f) continue;
+    formulas.push(`${addr} =${cell.f}`);
+    if (cell.t === 'z' || cell.v === undefined || cell.v === '') { cell.t = 's'; cell.v = `=${cell.f}`; cell.w = `=${cell.f}`; }
+  }
+  const list = formulas.length ? `\n【公式】共 ${formulas.length} 个：${formulas.slice(0, 40).join('；')}${formulas.length > 40 ? '……' : ''}` : '';
+  return `## 工作表：${name}\n${XLSX.utils.sheet_to_csv(sheet)}${list}`;
 }
 
 async function parsePdf(data) {

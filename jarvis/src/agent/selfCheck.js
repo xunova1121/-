@@ -13,6 +13,8 @@ import { parseSheets } from './sheetParse.js';
 import { parseJson } from './research.js';
 
 const PLACEHOLDER = /X{3,}|×{3,}|待补充|待完善|此处填写|【此处|\[此处|TODO|TBD|lorem ipsum|某某某/i;
+/** 汇报里的空话套话：查出来提醒换成具体的动作和数字 */
+const CLICHE = /赋能|抓手|闭环|全方位|深度融合|高度重视|积极推进|持续发力/g;
 const DOC_FORMATS = ['docx', 'pdf', 'html', 'md'];
 
 /**
@@ -39,6 +41,8 @@ export function lint(format, content) {
   }
 
   if (format === 'pptx') {
+    const cliches = [...new Set(md.match(CLICHE) ?? [])];
+    if (cliches.length) add('warn', `用了套话“${cliches.join('、')}”，换成具体的动作和数字`);
     for (const [i, s] of parseSlides('', md).entries()) {
       const chars = s.blocks.map((b) => blockText(b)).join('').length;
       const label = `第 ${i + 2} 页「${s.title || '无标题'}」`;

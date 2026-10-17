@@ -1,3 +1,16 @@
+## 最新进展：2026-10-17 中午（北京时间，Claude）
+
+用户测了 5 道题里的前 3 道，按反馈改了 10 项（一起发版）：
+- **干活时插话不打断**（`main.js` 的 `interject`，规则在 `src/core/interject.js`）：问“好了吗”之类马上回进度（第几步、在做什么、用了多久），不打扰模型；说“停”才停；其他的话放进这一轮的 `turn.inbox`，`runAgent` 每一步开始前取出来附给模型（`agent.js` 的 `interjection`），模型正要结束时收到也会接着处理。
+- **切换对话不停任务**：`switchTo` 把正在做的轮次转到后台（`toBackground`），结果和文件记回原会话（`rememberTurn` / `persistSession` 现在带目标会话参数），做完弹提示；切回去把正在写的气泡接回来。
+- **文件只归生成它的那一轮**：`buildTools({ turn })`，不再用全局的 `turnFiles`。
+- **回答中末尾转圈 + 在做什么**：取代闪烁竖线（`styles.css` 的 `.msg.agent.streaming::after`，文字来自 `data-status`）。
+- **Excel**：模型自己写的公式生成时先算好结果存进去（新模块 `formulaEval.js`）；读回 Excel 时附公式清单，没存结果的公式显示公式本身（`docs.js` 的 `sheetText`）；比率列 / 比率行设百分比格式，带金额单位的不设；“项目 | 数值”这类没分隔行的表也认作表头；模型写的占比公式不再被替换。
+- **PPT 新样式**（用户确认过样稿）：白底卡片 + 圆形图标（Lucide，ISC，`pptIcons.js` 由 `scripts/make-ppt-icons.mjs` 生成）、左右分栏封面、提纲页、章节标签和页脚；PPT 技能和自查加了套话提醒。
+- 浏览器测试加了 6 项（`e2e/smoke.mjs` 末尾）。
+
+---
+
 ## 最新进展：2026-10-17（北京时间，Claude）
 
 在 Codex 3f572c4（需求账本去重 / 归档）之后做了约定的三项，未改 `taskRequirements.js`、`team.js`：

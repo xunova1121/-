@@ -130,3 +130,47 @@ describe('项目规则文件', () => {
     expect(agent.STABLE_PROMPT).toMatch(/记进项目规则/);
   });
 });
+
+describe('干活时插话不打断', () => {
+  it('认出问进度和要停下的话；别的话不算', async () => {
+    const { STATUS_ASK, STOP_ASK, turnStatus } = await import('../src/core/interject.js');
+    for (const t of ['好了吗', '好了吗？', '进度呢', '还要多久', '做完了吗？？', '在吗']) expect(STATUS_ASK.test(t), t).toBe(true);
+    for (const t of ['好了吗，顺便把字调大', '查一下最近的新闻', '把第二页改一下']) expect(STATUS_ASK.test(t), t).toBe(false);
+    for (const t of ['停', '先别做了', '取消！', 'stop']) expect(STOP_ASK.test(t), t).toBe(true);
+    expect(STOP_ASK.test('停车场在哪')).toBe(false);
+    expect(turnStatus({ t0: 0, steps: 5, status: '生成 PPT…' }, 125_000)).toBe('还在做，已经 2 分 5 秒、第 5 步，现在在生成 PPT');
+    expect(turnStatus({ t0: 0, steps: 0, status: '' }, 8_000)).toBe('还在做，已经 8 秒');
+  });
+
+  it('干活中途收到的话：下一步开始前交给模型（附在工具结果后面），任务接着做，不重新开始', async () => {
+    const inbox = [];
+    const seen = [];
+    let n = 0;
+    const tools = [{ name: 'noop', description: 'x', input_schema: { type: 'object', properties: { n: { type: 'number' } } }, run: async () => { if (n === 1) inbox.push('字再大一点'); return 'ok'; } }];
+    const adapter = { async stream({ messages, onText }) {
+      seen.push(messages.at(-1).content);
+      if (++n <= 2) return { text: '', toolCalls: [call(String(n), 'noop', { n })], stop: 'tool_use' };
+      onText('做好了，字也调大了'); return { text: '做好了，字也调大了', toolCalls: [], stop: 'end_turn' };
+    } };
+    const r = await agent.runAgent({ adapter, model: 'm', history: [], userText: '做个 PPT', tools, context: ctx, emit: () => {}, inbox });
+    expect(r.text).toBe('做好了，字也调大了');
+    expect(seen[1]).toMatch(/^ok\n\n（用户在你干活时发来：“字再大一点”。是补充或修改这件事就照着调整/);
+    expect(seen.filter((c) => String(c).includes('字再大一点'))).toHaveLength(1); // 只交一次（之后留在前面的对话里，不重复附）
+    expect(inbox).toEqual([]);
+  });
+
+  it('模型正要结束时又收到话：接着处理，不结束', async () => {
+    const inbox = [];
+    let n = 0;
+    const adapter = { async stream({ messages, onText }) {
+      n++;
+      if (n === 1) { onText('PPT 做好了。'); inbox.push('再加一页总结'); return { text: 'PPT 做好了。', toolCalls: [], stop: 'end_turn' }; }
+      expect(messages.at(-1)).toMatchObject({ role: 'user' });
+      expect(messages.at(-1).content).toMatch(/“再加一页总结”/);
+      onText('总结页也加上了。'); return { text: '总结页也加上了。', toolCalls: [], stop: 'end_turn' };
+    } };
+    const r = await agent.runAgent({ adapter, model: 'm', history: [], userText: '做个 PPT', tools: [], context: ctx, emit: () => {}, inbox });
+    expect(n).toBe(2);
+    expect(r.text).toMatch(/PPT 做好了。[\s\S]*总结页也加上了。/);
+  });
+});

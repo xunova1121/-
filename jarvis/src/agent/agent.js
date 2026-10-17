@@ -152,7 +152,7 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
  * @param {{ text: string } | null} [o.summary]  本段对话较早内容的摘要（长对话压缩，见 compress.js）
  * @returns {Promise<{ text: string, steps: number, toolCalls: number }>}
  */
-export async function runAgent({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs = TIME_BUDGET_MS, now = Date.now, depth = 0, quiet = false, fallbacks = [] }) {
+export async function runAgent({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs = TIME_BUDGET_MS, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null }) {
   const startedAt = now();
   let overtime = 0; // 超时后又给了几次收尾机会
   let webCalls = 0; // 这一轮查网页的次数（只有主要在查资料时才按用时收尾，写代码、写长文档不受影响）
@@ -192,8 +192,20 @@ export async function runAgent({ adapter, model, history, userText, images = [],
   const backups = [...fallbacks];
   let reminded = 0; // 上次中途提醒时调用了几次工具
 
+  // 用户在干活时插的话（inbox，界面往里放）：每一步开始前取出来交给模型，不打断手上的事
+  const takeInbox = () => {
+    const said = inbox?.splice(0) ?? [];
+    if (!said.length) return false;
+    const note = interjection(said);
+    const last = convo.at(-1);
+    if (last?.role === 'tool' || last?.role === 'user') last.content = `${last.content}\n\n${note}`;
+    else convo.push({ role: 'user', content: note });
+    return true;
+  };
+
   for (; step < limit; step++) {
     if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+    takeInbox();
     compactToolResults(convo, { archive }); // 先保存有界原文，再缩短工作副本
     let stepText = '';
     // 每一步模型输出都可能以 <emotion> 标签开头，每步用新的剥离器
@@ -243,6 +255,11 @@ export async function runAgent({ adapter, model, history, userText, images = [],
     if (r.stop === 'pause_turn') continue; // 服务端工具（联网搜索）还没跑完，原样继续
     if (!r.toolCalls.length) {
       // 收尾核对：清单没勾完、写了代码没运行过，提醒一次（最多两次）再结束；用户看到的回答会接着往下写
+      // 回答写完时用户又说了话：接着处理，不当作结束
+      if (inbox?.length) {
+        if (finalText && !/\n$/.test(finalText)) { emit({ type: 'text', delta: '\n\n' }); finalText += '\n\n'; }
+        continue;
+      }
       const note = checks < 2 ? finishCheck({ steps: plan.steps, wroteCode, ranCode }) : '';
       if (!note) break;
       checks++;
@@ -391,6 +408,12 @@ PARALLEL_SAFE.add('delegate_task'); // 分身彼此独立，几个可以一起�
 
 /** 步数上限最多自动放宽到 maxSteps 的几倍 */
 export const HARD_CAP = 4;
+/** 用户插话：交给模型时的说明 */
+export function interjection(said) {
+  const q = said.map((t) => `“${String(t).trim()}”`).join('、');
+  return `（用户在你干活时发来：${q}。是补充或修改这件事就照着调整；问进度的在最后回答里顺带说明；是另一件事的，先把手上这件做完，再接着处理它，不要丢下；要你停下就停下并说明做到哪了。）`;
+}
+
 /** 每调用几次工具提醒一次进度 */
 export const REMIND_EVERY = 6;
 

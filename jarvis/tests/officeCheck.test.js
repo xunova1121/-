@@ -255,3 +255,84 @@ describe('PPT 新样式：白底卡片、图标、提纲页、页脚', async () 
     expect((await coverTexts('经营分析部')).some((t) => /^\d{4} 年 \d+ 月 \d+ 日$/.test(t))).toBe(true);
   });
 });
+
+describe('Excel：模型自己写的公式先算好结果、读回能看到公式、百分比格式、表头', async () => {
+  const { evaluateWorkbook } = await import('../src/agent/formulaEval.js');
+  const { parseFile } = await import('../src/agent/docs.js');
+  const OVERVIEW = `## 总览
+| 项目 | 数值 |
+| 2026年三季度总营收（万元） | ='区域数据'!C5 |
+| 整体同比增长率 | =('区域数据'!C5-'区域数据'!B5)/'区域数据'!B5 |
+| 增长最快的区域 | =INDEX('区域数据'!A2:A4,MATCH(MAX('区域数据'!D2:D4),'区域数据'!D2:D4,0)) |
+
+## 区域数据
+| 区域 | 2025年三季度（万元） | 2026年三季度（万元） | 同比 | 2026年占比 | 同比增减（万元） |
+|--|--|--|--|--|--|
+| 华东 | 680 | 820 | =(C2-B2)/B2 | =C2/$C$5 | =C2-B2 |
+| 华南 | 470 | 560 | =(C3-B3)/B3 | =C3/$C$5 | =C3-B3 |
+| 华北 | 466 | 480 | =(C4-B4)/B4 | =C4/$C$5 | =C4-B4 |
+| 合计 | =SUM(B2:B4) | =SUM(C2:C4) | =(C5-B5)/B5 | =SUM(E2:E4) | =SUM(F2:F4) |`;
+
+  it('公式计算：四则运算、跨表引用、SUM / MAX / INDEX / MATCH / IF / IFERROR / ROUND / SUMIF，除以 0 得到 #DIV/0!，不认识的函数不算', () => {
+    const sheet = (name, rows) => ({ name, cells: new Map(Object.entries(rows).map(([k, v]) => [k, typeof v === 'string' && v.startsWith('=') ? { formula: v.slice(1) } : { value: v }])) });
+    const r = evaluateWorkbook([
+      sheet('数据', { A1: '甲', A2: '乙', B1: 10, B2: 30, C1: 0, D1: '=SUM(B1:B2)*2', D2: '=B2/C1', D3: '=IFERROR(B2/C1,"无")', D4: '=IF(B2>B1,"乙多","甲多")', D5: '=ROUND(B1/3,2)', D6: '=INDEX(A1:A2,MATCH(MAX(B1:B2),B1:B2,0))', D7: '=SUMIF(A1:A2,"乙",B1:B2)', D8: '=FOO(B1)', D9: '=50%*B1' }),
+      sheet('汇总', { A1: '=数据!D1+1' })
+    ]);
+    expect(r.get('数据!D1')).toBe(80);
+    expect(r.get('数据!D2')).toBe('#DIV/0!');
+    expect(r.get('数据!D3')).toBe('无');
+    expect(r.get('数据!D4')).toBe('乙多');
+    expect(r.get('数据!D5')).toBe(3.33);
+    expect(r.get('数据!D6')).toBe('乙');
+    expect(r.get('数据!D7')).toBe(30);
+    expect(r.has('数据!D8')).toBe(false);
+    expect(r.get('数据!D9')).toBe(5);
+    expect(r.get('汇总!A1')).toBe(81);
+  });
+
+  it('生成时把结果存进文件；比率列、比率行设百分比格式，金额列不设；“项目 | 数值”当作表头；模型写的占比公式不被替换', async () => {
+    const r = await makeXlsx(OVERVIEW, { theme: THEMES.business });
+    expect(r.info.formulaIssues).toEqual([]);
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await r.blob.arrayBuffer());
+    const data = wb.getWorksheet('区域数据');
+    expect(data.getCell('B5').value).toEqual({ formula: 'SUM(B2:B4)', result: 1616 });
+    expect(data.getCell('D2').value.result).toBeCloseTo(0.2059, 4);
+    expect(data.getCell('D2').numFmt).toBe('0.0%');
+    expect(data.getCell('E2').value.formula).toBe('C2/$C$5');
+    expect(data.getCell('E2').numFmt).toBe('0.0%');
+    expect(data.getCell('F2').numFmt).not.toBe('0.0%'); // “同比增减（万元）”是金额
+    const sum = wb.getWorksheet('总览');
+    const cellOf = (label) => { let hit; sum.eachRow((row) => row.eachCell((c) => { if (c.value === label) hit = row.getCell(c.col + 1); })); return hit; };
+    expect(cellOf('整体同比增长率').numFmt).toBe('0.0%');
+    expect(cellOf('整体同比增长率').value.result).toBeCloseTo(0.151, 3);
+    expect(cellOf('增长最快的区域').value.result).toBe('华东');
+    let headFill;
+    sum.eachRow((row) => row.eachCell((c) => { if (c.value === '项目') headFill = c.fill?.fgColor?.argb; }));
+    expect(headFill).toBe(`FF${THEMES.business.colors.accent}`);
+  });
+
+  it('读回 Excel：看得到算好的数和公式清单；没存结果的公式显示公式本身，不显示成空格子', async () => {
+    const r = await makeXlsx(OVERVIEW, { theme: THEMES.business });
+    const text = (await parseFile(r.blob, 'a.xlsx')).text;
+    expect(text).toMatch(/华东,680,820,20\.6%,44\.1%/);
+    expect(text).toMatch(/【公式】共 \d+ 个：.*B5 =SUM\(B2:B4\)/);
+    // 别的软件生成、没存结果的公式
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('S');
+    ws.getCell('A1').value = 1; ws.getCell('A2').value = 2; ws.getCell('A3').value = { formula: 'SUM(A1:A2)' };
+    const blank = await parseFile(new Blob([await wb.xlsx.writeBuffer()]), 'b.xlsx');
+    expect(blank.text).toMatch(/^## 工作表：S\n1\n2\n=SUM\(A1:A2\)/);
+  });
+});
+
+describe('PPT：套话提醒', () => {
+  it('汇报里用了“赋能 / 抓手”这类词：自查提醒换成具体的动作和数字', async () => {
+    const { lint } = await import('../src/agent/selfCheck.js');
+    expect(lint('pptx', '## 计划\n- 以新客户为抓手，全方位赋能销售\n- 回款压到 60 天').map((x) => x.text)).toContain('用了套话“抓手、全方位、赋能”，换成具体的动作和数字');
+    expect(lint('pptx', '## 计划\n- 重点跟进 42 家新签客户\n- 回款压到 60 天').some((x) => /套话/.test(x.text))).toBe(false);
+  });
+});
