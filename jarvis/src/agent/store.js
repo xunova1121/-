@@ -60,31 +60,43 @@ function tx(db, store, mode, fn) {
   });
 }
 
+let backend = null;
+/**
+ * 换一种存储（服务器版用 server/fileStore.mjs 存到硬盘）；浏览器里不用。
+ * backend 提供 all / get / put / delete / clear(集合名, …)
+ */
+export function useBackend(b) { backend = b; }
+
 /** 某个集合的增删查 */
 export function collection(name) {
   return {
     async all() {
+      if (backend) return backend.all(name);
       const db = await openDb();
       if (!db) return [...memoryDb.get(name).values()];
       return tx(db, name, 'readonly', (s) => s.getAll());
     },
     async get(id) {
+      if (backend) return backend.get(name, id);
       const db = await openDb();
       if (!db) return memoryDb.get(name).get(id);
       return tx(db, name, 'readonly', (s) => s.get(id));
     },
     async put(obj) {
+      if (backend) { await backend.put(name, obj); return obj; }
       const db = await openDb();
       if (!db) { memoryDb.get(name).set(obj.id, obj); return obj; }
       await tx(db, name, 'readwrite', (s) => s.put(obj));
       return obj;
     },
     async delete(id) {
+      if (backend) return backend.delete(name, id);
       const db = await openDb();
       if (!db) { memoryDb.get(name).delete(id); return; }
       await tx(db, name, 'readwrite', (s) => s.delete(id));
     },
     async clear() {
+      if (backend) return backend.clear(name);
       const db = await openDb();
       if (!db) { memoryDb.get(name).clear(); return; }
       await tx(db, name, 'readwrite', (s) => s.clear());

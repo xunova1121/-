@@ -9,6 +9,7 @@
  *   ANY  /api/llm/<服务商>/...   大模型接口代理：绕过浏览器跨域限制；浏览器没带密钥时注入环境变量里的密钥
  *   GET  /api/fetch?url=         读取网页（智能体的 fetch_url 工具用；拒绝内网地址）
  *   /api/ollama/...             本机模型：检测 / 启动 / 下载 / 删除（见 ollama.mjs；仅本机页面可调用）
+ *   /api/server/… /api/tasks/… /api/sessions/… /api/files/…  服务器模式（见 serverMode.mjs）
  *   其它                         dist/ 下的静态文件（先 npm run build）
  *
  * 环境变量：
@@ -17,6 +18,9 @@
  *   JARVIS_MODEL            默认 claude-opus-5-5
  *   JARVIS_INTERNAL_TOKEN   情绪注入端点的令牌
  *   HOST                    默认 127.0.0.1（只允许本机访问；设为 0.0.0.0 才对局域网开放）
+ *   JARVIS_DATA             服务器模式的数据目录（设置了就开启服务器模式）
+ *   JARVIS_PASSWORD         服务器模式的访问密码（至少 8 位）
+ *   JARVIS_MAX_TASKS        服务器模式同时最多做几个任务（默认 1）
  *   OPENAI_API_KEY / DEEPSEEK_API_KEY / DASHSCOPE_API_KEY / …  各服务商密钥（见 shared/providers.js 的 ENV_KEYS）
  */
 import http from 'node:http';
@@ -55,7 +59,8 @@ export function createServer({
   mcp = null, // createMcpManager() 的结果；为 null 时不提供 MCP 接口
   ollama = createOllama(),
   edgeTts = edgeSpeak, // Edge 在线朗读（测试可替换）
-  ossFetch = (...a) => fetch(...a) // 转发到阿里云 OSS（测试可替换）
+  ossFetch = (...a) => fetch(...a), // 转发到阿里云 OSS（测试可替换）
+  serverMode = null // createServerMode() 的结果：部署在云服务器上、任务交给服务器做（见 serverMode.mjs）
 } = {}) {
   const subscribers = new Set();
   const weather=createWeatherProxy();
@@ -317,6 +322,11 @@ export function createServer({
       }
     }
     try {
+      // 服务器模式：除了健康检查和登录，所有接口都要先登录（别人拿不到你的模型额度、看不到你的对话）
+      if (serverMode && pathname.startsWith('/api/')) {
+        if (pathname !== '/api/health' && pathname !== '/api/server/login' && !serverMode.authorized(req)) return json(res, 401, { error: '请先登录', login: true });
+        if (await serverMode.handle(req, res, pathname)) return;
+      }
       if (pathname === '/api/chat' && req.method === 'POST') return await handleChat(req, res);
       if (pathname === '/api/local/metrics' && req.method === 'GET') return json(res, 200, await collectMetrics({ tasks: { active: activeChats } }));
       if (pathname === '/api/agent/events' && req.method === 'GET') return handleEvents(req, res);
@@ -329,6 +339,7 @@ export function createServer({
           cors: cross,
           mcp: Boolean(mcp) && !cross,
           ollama: !cross,
+          serverMode: Boolean(serverMode),
           gatewayKeys: cross ? [] : Object.entries(ENV_KEYS).filter(([, env]) => process.env[env]).map(([id]) => id)
         });
       }
@@ -360,14 +371,18 @@ const MIME = {
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const port = Number(process.env.PORT || 8787);
   const host = process.env.HOST || '127.0.0.1';
-  const mcp = process.env.JARVIS_NO_MCP ? null : createMcpManager({ log: (m) => console.log(m) });
-  const server = createServer({ mcp });
+  // 服务器模式：设置了数据目录就开启（必须同时设置访问密码）；云服务器上不启动 MCP（会运行本机程序）
+  // 按需加载：桌面版、本机网关用不到服务器模式，不加载智能体那一大套代码
+  const serverMode = process.env.JARVIS_DATA ? (await import('./serverMode.mjs')).createServerMode({ dataDir: path.resolve(process.env.JARVIS_DATA), password: process.env.JARVIS_PASSWORD, maxRunning: Number(process.env.JARVIS_MAX_TASKS || 1) }) : null;
+  const mcp = process.env.JARVIS_NO_MCP || serverMode ? null : createMcpManager({ log: (m) => console.log(m) });
+  const server = createServer({ mcp, serverMode });
   mcp?.startAll();
   const shutdown = async () => { await mcp?.closeAll(); process.exit(0); };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
   server.listen(port, host, () => {
     console.log(`未央网关已启动: http://127.0.0.1:${port}`);
+    if (serverMode) console.log(`服务器模式已开启：数据目录 ${path.resolve(process.env.JARVIS_DATA)}，同时最多做 ${process.env.JARVIS_MAX_TASKS || 1} 个任务`);
     const keys = Object.entries(ENV_KEYS).filter(([, env]) => process.env[env]).map(([id]) => providerById(id)?.name ?? id);
     if (keys.length) console.log(`网关已配置密钥：${keys.join('、')}`);
     console.log(process.env.ANTHROPIC_API_KEY ? `对话后端: Claude (${process.env.JARVIS_MODEL || 'claude-opus-5-5'})` : '对话后端: 本地演示智能体（设置 ANTHROPIC_API_KEY 以接入 Claude）');
