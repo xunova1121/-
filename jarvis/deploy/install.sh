@@ -50,6 +50,12 @@ if [[ ! -f "$ENVF" ]]; then
 fi
 chmod 600 "$ENVF"
 chown -R jarvis:jarvis "$BASE/data"
+# Node 装在 jarvis 账号进不去的地方（比如 /root/.nvm）：复制一份到 /usr/local/bin/node-jarvis 给未央用
+if ! su -s /bin/sh jarvis -c "\"$NODE\" -v" >/dev/null 2>&1; then
+  install -m 755 "$NODE" /usr/local/bin/node-jarvis
+  NODE=/usr/local/bin/node-jarvis
+  echo "== Node 在 jarvis 账号读不到的目录里，已复制一份到 $NODE"
+fi
 chown -R root:root "$APP"
 ln -sfn "$APP" "$BASE/current"
 
@@ -80,7 +86,8 @@ UNIT
 systemctl daemon-reload
 systemctl enable jarvis >/dev/null 2>&1
 systemctl restart jarvis
-sleep 3
+# 等它启动（最多 20 秒）
+for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8787/api/health 2>/dev/null | grep -q '"serverMode":true' && break; sleep 1; done
 if curl -fsS http://127.0.0.1:8787/api/health | grep -q '"serverMode":true'; then
   echo "== 好了：未央 $VER 已在运行（本机 127.0.0.1:8787）"
 else
