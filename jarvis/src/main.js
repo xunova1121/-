@@ -43,6 +43,7 @@ import { loadSettings, saveSettings, wantsReducedMotion } from './core/settings.
 import { browserMetrics } from './api/browserMetrics.js';
 import { runTeam, shouldTeam } from './agent/team.js';
 import { runAgent } from './agent/agent.js';
+import { collectRequirements } from './agent/taskRequirements.js';
 import { createTools } from './agent/tools.js';
 import * as ws from './agent/workspace.js';
 import * as agentMemory from './agent/memory.js';
@@ -415,6 +416,7 @@ let session = sessionsApi.create();
 let history = session.messages;
 function rememberTurn(role, content, extra = {}) {
   history.push({ role, content, ts: Date.now(), ...extra });
+  if (role === 'user') session.requirements = collectRequirements(history, session.requirements);
   session.updatedAt = Date.now();
   persistSession();
 }
@@ -981,6 +983,7 @@ async function send(text) {
       adapter, model, history: llmHistory, userText: team ? userText : await expandSlash(userText), signal: ctrl.signal,
       sessionId: session.id,
       summary: session.summary ?? null,
+      requirements: session.requirements ?? null,
       maxSteps: DESKTOP ? 40 : 28, // 用鼠标键盘操作电脑、逐项联网核实时步数多
       images: imgs.map(({ mime, data }) => ({ mime, data })),
       tools: await buildTools(),
@@ -2268,3 +2271,4 @@ initRenderHealthPanel({ mobile: MOBILE, toast, onChange: () => { if (!active) re
     setTimeout(() => { splash.classList.add('out'); setTimeout(() => splash.remove(), 420); }, wait);
   }
 }
+

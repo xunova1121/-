@@ -11,6 +11,7 @@
  */
 import { runAgent } from './agent.js';
 import { parseJson } from './research.js';
+import { collectRequirements, requirementsBlock } from './taskRequirements.js';
 
 export const ROLES = {
   researcher: { name: '研究员', duty: '查资料：联网搜索、深度调研、读网页和知识库，给出有出处的事实与数据，不负责写最终成品', tools: /^(web_search|deep_research|fetch_url|kb_search|recall|read_file|list_files|mcp_)/ },
@@ -67,8 +68,10 @@ export function ruleBasedPlan(task) {
  *   { type: 'team_step', index, status: 'running'|'done'|'fail'|'redo', note? }
  *   { type: 'team_review', pass, issues: string[], skipped? }
  */
-export async function runTeam({ adapter, model, history = [], userText, images = [], tools, emit, signal, approve, llm = null, run = runAgent, maxFix = 1, sessionId = null, pickModel = null, summary: earlier = null }) {
+export async function runTeam({ adapter, model, history = [], userText, images = [], tools, emit, signal, approve, llm = null, run = runAgent, maxFix = 1, sessionId = null, pickModel = null, summary: earlier = null, requirements = null }) {
   const task = stripTeamPrefix(userText);
+  const record = requirements ?? collectRequirements([...history, { role: 'user', content: task }]);
+  const requirementContext = requirementsBlock(record, task);
   const roleList = Object.entries(ROLES).map(([id, r]) => `${id}（${r.name}）：${r.duty}`).join('\n');
   emit({ type: 'state', value: 'processing' });
 
@@ -78,7 +81,7 @@ export async function runTeam({ adapter, model, history = [], userText, images =
     try {
       const j = parseJson(await llm({
         signal,
-        system: '你是团队的规划员，把用户的任务拆成按顺序执行的步骤，分配给合适的角色。只输出 JSON。',
+        system: `你是团队的规划员，把用户的任务拆成按顺序执行的步骤，分配给合适的角色。保留相关原始要求及最新修正。只输出 JSON。\n\n${requirementContext}`,
         prompt: `可用角色：\n${roleList}\n\n最近的对话：\n${history.slice(-4).map((m) => `${m.role === 'user' ? '用户' : '未央'}：${clip(m.content, 200)}`).join('\n') || '（无）'}\n\n任务：${task}\n\n输出 JSON：{"steps":[{"role":"角色 id","title":"这一步做什么（不超过 16 字）","detail":"给执行者的具体要求：要产出什么、存到哪里、注意什么"}]}。2-6 步；能一步完成的不要硬拆；最后一步的产出就是用户要的成品。`
       }));
       if (Array.isArray(j?.steps) && j.steps.length) {
@@ -102,7 +105,7 @@ export async function runTeam({ adapter, model, history = [], userText, images =
     // 模型分工：工程师用编程模型、撰稿人用写作模型……（没配置时都用同一个模型）
     const m = pickModel?.(s.role) ?? { adapter, model };
     const r = await run({
-      adapter: m.adapter, model: m.model, history, signal, approve, sessionId, summary: earlier, // 长对话的前情提要
+      adapter: m.adapter, model: m.model, history, signal, approve, sessionId, summary: earlier, requirements: record, // 原话不被团队生成的步骤覆盖
       images: index === 0 ? images : [],
       tools: toolsFor(s.role, tools),
       userText: `${s.detail}\n\n——\n【团队分工】你是团队里的「${s.roleName}」（职责：${ROLES[s.role].duty}），负责整个任务的第 ${index + 1}/${steps.length} 步。\n用户的原始需求：${task}\n${prior ? `前面步骤的成果：\n${prior}\n` : ''}${extra}只完成你这一步，完成后用几句话说明产出了什么（文件路径、关键数据、结论）。`,
@@ -132,7 +135,7 @@ export async function runTeam({ adapter, model, history = [], userText, images =
       try {
         review = parseJson(await llm({
           signal,
-          system: '你是团队的审核员，严格对照用户的原始需求检查成果：有没有漏做、做错、编造、没验证。只输出 JSON。',
+          system: `你是团队的审核员，严格对照用户的原始需求检查成果：有没有漏做、做错、编造、没验证。原文摘录不完整时不能声称已核对全部要求，指出需要回读的编号。只输出 JSON。\n\n${requirementContext}`,
           prompt: `用户需求：${task}\n\n各步成果：\n${summary()}\n\n输出 JSON：{"pass":true/false,"issues":["具体问题，没有则为空"],"fix_step":需要返工的步骤编号（从 1 开始；pass 为 true 时为 0）}`
         }));
       } catch (e) {
@@ -165,7 +168,7 @@ export async function runTeam({ adapter, model, history = [], userText, images =
     try {
       const r = await adapter.stream({
         model, signal, tools: [],
-        system: ['你是“未央”，刚带领一个小团队完成了用户的任务。用中文直接给用户最终答复：先给结论或成品位置（文件路径），再简要说明每一步做了什么、需要用户注意或确认的地方。不要编造各步成果里没有的内容。不要输出 <emotion> 标签。', ''],
+        system: ['你是“未央”，刚带领一个小团队完成了用户的任务。用中文直接给用户最终答复：先给结论或成品位置（文件路径），再简要说明每一步做了什么、需要用户注意或确认的地方。不要编造各步成果里没有的内容。不要输出 <emotion> 标签。', requirementContext],
         messages: [{ role: 'user', content: `用户需求：${task}\n\n团队各步成果：\n${summary()}` }],
         onText: (d) => { streamed += d; emit({ type: 'text', delta: d }); }
       });

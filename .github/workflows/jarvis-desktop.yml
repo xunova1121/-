@@ -222,6 +222,8 @@ jobs:
 
   release:
     name: 发布到 Releases
+    # 验证分支只构建/测试；只有正式开发分支或明确的版本标签可以更新用户安装包。
+    if: github.ref == 'refs/heads/claude/jolly-darwin-tijh97' || startsWith(github.ref, 'refs/tags/desktop-v')
     needs: [build, android, verify]
     runs-on: ubuntu-latest
     steps:
