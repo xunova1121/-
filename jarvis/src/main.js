@@ -69,6 +69,8 @@ import { initSessionsPanel } from './ui/sessionsPanel.js';
 import { initCallouts } from './ui/callouts.js';
 import { openingSuggestions, followUpSuggestions, INTERRUPTED_MARK } from './core/suggest.js';
 import { savePending, clearPending, takePending, resumeText } from './core/pendingTask.js';
+import { loadServerSettings, createServerClient, runRemote, remoteSessions, normalizeUrl } from './core/serverClient.js';
+import { initServerPanel } from './ui/serverPanel.js';
 import * as mcp from './agent/mcpClient.js';
 import { createDesktopTools } from './agent/desktopTools.js';
 import { initMcpPanel } from './ui/mcpPanel.js';
@@ -354,6 +356,8 @@ async function detectGateway() {
       const url = local ? `${LOCAL_GATEWAY}/api/health` : '/api/health';
       const h = await (await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout?.(5000) })).json(); // 启动时主线程忙（编译着色器），留足时间
       if (!h?.ok) throw new Error('not a gateway');
+      // 这个网址是开了服务器模式的未央服务器，但还没登录：提示去登录（不登录用不了它的任何功能）
+      if (h.serverMode && !serverCfg.token) setTimeout(() => { showPanel('settings'); const u = $('#server-url'); if (u && !u.value) u.value = location.origin; toast('这是你的未央服务器：请先在“服务器模式”里输入访问密码登录'); }, 800);
       const found = !gateway;
       gateway = { origin: local ? LOCAL_GATEWAY : location.origin, keys: h.gatewayKeys ?? [], cors: Boolean(h.cors), mcp: Boolean(h.mcp), ollama: Boolean(h.ollama) };
       if (local && found) toast('已连接本机网关：所有服务商和自定义接口都可以用了');
@@ -394,6 +398,7 @@ function updateModelLabels() {
   $('#mode-text').textContent = name;
   // 输入框里显示型号（或“自动”），点一下弹出模型列表
   $('#model-chip-text').textContent = COMPACT && isAuto(llmConfig) ? `自动 · ${modelOf(llmConfig) || '选择模型'}` : chipLabel(llmConfig);
+  if (globalThis.__jarvisServerMode) $('#model-chip-text').textContent = '服务器'; // 服务器模式：用服务器上的模型设置
   if (isAuto(llmConfig)) $('#mode-text').textContent = `${name} · 自动选模型`;
   $('#mode-pill').title = `当前模型：${name}${gateway ? '（经本机网关）' : ''}。点击切换`;
   $('#hud-model').textContent = name.length > 22 ? `${name.slice(0, 21)}…` : name;
@@ -413,6 +418,21 @@ const fetchViaGateway = () => (gateway && !gateway.cors
 // ---------------------------------------------------------------- 对话
 const transcript = new Transcript($('#transcript'), { progress: COMPACT });
 const storage = (() => { try { return localStorage; } catch { return null; } })();
+// 服务器模式（设置 → 服务器模式）：任务交给自己的云服务器做，对话也存在服务器上
+const serverCfg = loadServerSettings(storage);
+const server = serverCfg.enabled && serverCfg.url && serverCfg.token ? createServerClient({ base: serverCfg.url, token: serverCfg.token }) : null;
+if (server) { sessionsApi.useRemote(remoteSessions(server)); globalThis.__jarvisServerMode = true; updateModelLabels(); }
+// 页面就是从自己的服务器打开的：发给它的请求（模型转发、读网页等）都带上登录令牌
+if (serverCfg.token && typeof location !== 'undefined' && normalizeUrl(serverCfg.url) === location.origin) {
+  const plain = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = (input, init = {}) => {
+    const url = typeof input === 'string' ? input : input?.url ?? '';
+    if (!/^\/api\//.test(url) && !url.startsWith(`${location.origin}/api/`)) return plain(input, init);
+    const headers = new Headers(init.headers || (typeof input === 'object' ? input.headers : undefined));
+    if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${serverCfg.token}`);
+    return plain(input, { ...init, headers });
+  };
+}
 // 当前会话；history 指向它的消息列表（切换会话时一起换掉）
 let session = sessionsApi.create();
 let history = session.messages;
@@ -560,6 +580,7 @@ function syncMemoryEngine() {
 let reflectFrom = history.length;
 let reflectTimer = 0;
 function scheduleReflect() {
+  if (server) return; // 服务器模式：记忆在服务器上，本机不整理
   clearTimeout(reflectTimer);
   if (!settings.autoMemory) return;
   reflectTimer = setTimeout(reflectNow, 30_000);
@@ -584,6 +605,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden && set
 /** 长对话压缩：回答完后在后台把较早的消息并进“前情提要”（见 compress.js），不影响当前对话 */
 let compressing = false;
 async function compressHistory() {
+  if (server) return;
   const s = session;
   if (compressing || !compress.dueForCompression(s.messages, s.summary).length) return;
   compressing = true;
@@ -665,6 +687,7 @@ async function switchTo(next) {
   // 切回一个还在后台干活的对话：把正在写的那条回答接回来
   const bg = [...backgroundTurns].find((t) => t.session.id === session.id);
   if (bg) { backgroundTurns.delete(bg); bg.background = false; active = bg; liveBubble = bg.bubble; transcript.root.append(bg.bubble.el); setTask('processing', bg.status || '思考中'); }
+  else if (server && next.taskId) followServerTask(next); // 服务器上这个对话还在干活（比如 App 重新打开）：接上它的进度
   dashboard.setTurns(history.filter((m) => m.role === 'user').length);
   if (history.length) callouts?.set(followUpSuggestions({ tools: history.at(-1)?.tools ?? [], userText: [...history].reverse().find((m) => m.role === 'user')?.content ?? '', desktop: Boolean(DESKTOP) }));
   else openingCallouts();
@@ -776,6 +799,47 @@ async function buildTools({ background = false, turn = null } = {}) {
     ...(DESKTOP ? createDesktopTools(DESKTOP, { onFileChanged, onControlStart: (r) => { controlActive = true; if (!background) toast(`正在操作电脑：鼠标甩到屏幕左上角或按 ${r?.stopHotkey ?? 'Ctrl+Alt+Q'} 可紧急停止`); } }) : []),
     ...(await loadMcpTools())
   ];
+}
+
+/** 服务器模式：打开一个服务器上还在干活的对话，从头补上它的进度，做完后换成服务器记下的完整对话 */
+async function followServerTask(s) {
+  const ctrl = new AbortController();
+  const bubble = transcript.add('agent');
+  bubble.el.classList.add('streaming');
+  const turn = { ctrl, streamDone: false, bubble, session: s, files: new Set(), inbox: [], t0: now(), steps: 0, status: '', background: false };
+  active = turn;
+  liveBubble = bubble;
+  setTask('processing', '服务器上正在做');
+  const cards = new Map();
+  try {
+    await runRemote(server, {
+      taskId: s.taskId, signal: ctrl.signal, onFile: (p) => pullServerFile(p, turn),
+      emit: (e) => {
+        if (active !== turn) return;
+        if (e.type === 'text') bubble.append(e.delta);
+        else if (e.type === 'plan') bubble.plan?.(e.steps);
+        else if (e.type === 'tool_start' && e.name !== 'update_plan') { cards.set(e.id, bubble.toolCard(e.name, e.args)); turn.steps++; setTask('processing', toolLabel(e.name)); }
+        else if (e.type === 'tool_progress') cards.get(e.id)?.progress(e.text);
+        else if (e.type === 'tool_end') cards.get(e.id)?.done(e.ok, e.output, e.ms);
+      }
+    });
+  } catch (e) {
+    if (e.name !== 'AbortError' && active === turn) toast(e.message);
+  }
+  if (active === turn) { active = null; setTask('idle'); }
+  // 换成服务器上记下的完整对话（回答、用到的工具、生成的文件）
+  const fresh = await sessionsApi.get(s.id).catch(() => null);
+  if (fresh && session.id === s.id && !active) { session = fresh; history = fresh.messages; replayTranscript(); }
+}
+
+/** 服务器模式：服务器上生成了文件，下载到本机工作区，照常预览、保存 */
+async function pullServerFile(path, turn) {
+  try {
+    await ws.write(path, await server.download(path));
+    panels.markFresh(path);
+    panels.refreshFiles();
+    if (!/^skills\//.test(path)) { (turn?.bubble ?? liveBubble)?.fileLink?.(path, openInWorkspace); turn?.files.add(path); }
+  } catch (e) { toast(e.message); }
 }
 
 // ---------------------------------------------------------------- 主动问好：你回到电脑前时
@@ -917,6 +981,7 @@ function interject(text) {
   if (STATUS_ASK.test(text)) { reply(`${turnStatus(turn, now())}。做完会直接给你结果；想停的话点右下角的方块，或者说“停”。`); return; }
   rememberTurn('user', text, {}, turn.session);
   turn.inbox.push(text);
+  if (server) server.startTask({ sessionId: turn.session.id, text }).catch((e) => toast(e.message)); // 服务器模式：交给服务器上正在干的那个任务
   reply(`收到，做完手上这一步就看这句话（${turnStatus(turn, now())}）。`);
 }
 /** 切到别的对话：正在干的任务转到后台接着做 */
@@ -990,7 +1055,7 @@ async function send(text, { echo = true } = {}) {
   setTask('processing', '思考中');
   // 手机：记下正在做的任务（App 被划掉时，下次打开接着做）
   const doneSteps = [];
-  if (MOBILE) savePending(storage, session.id, { turnId: turn.t0, text, title: session.title || '', ts: Date.now(), steps: [], files: [] });
+  if (MOBILE && !server) savePending(storage, session.id, { turnId: turn.t0, text, title: session.title || '', ts: Date.now(), steps: [], files: [] });
 
   // 模型分工：按这句话的类型换模型；日常对话让推理模型少想一点（首字更快）
   const task = shouldTeam(text, settings.teamMode === 'auto' && !helperLlm() ? 'off' : settings.teamMode) ? 'reason' : classifyTask(text, { images: imgs.length + withImages.size });
@@ -1000,7 +1065,7 @@ async function send(text, { echo = true } = {}) {
   // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省
   const effort = task === 'chat' && llmConfig.fastChat !== false && !NEEDS_THOUGHT.test(text) ? 'low' : undefined;
   if (route.routed) hud.think(`◇ 模型分工：${TASKS[task].name} → ${route.model}`);
-  if (problem) {
+  if (problem && !server) { // 服务器模式：用服务器上的模型设置
     bubble.append(problem);
     bubble.done();
     callouts?.set(followUpSuggestions({ error: true, userText: text }));
@@ -1027,11 +1092,16 @@ async function send(text, { echo = true } = {}) {
   let ctxMs = null;
   callouts?.retract();
   // 内置演示模式下“自动”不触发（规则拆步效果有限），只认明确的“/团队 …”或“总是”
-  const team = shouldTeam(text, settings.teamMode === 'auto' && !helperLlm() ? 'off' : settings.teamMode);
+  const team = !server && shouldTeam(text, settings.teamMode === 'auto' && !helperLlm() ? 'off' : settings.teamMode);
   let teamCard = null;
   const releaseTask = taskKeeper.begin();
   try {
-    const result = await (team ? runTeam : runAgent)({
+    // 服务器模式：服务器做，进度事件和本机一样显示（runRemote 的用法和 runAgent 一样）
+    const serverRun = async (o) => {
+      for (const f of files) await server.upload(f.path, await ws.readBlob(f.path)); // 发来的附件先传到服务器的工作区
+      return runRemote(server, { sessionId: o.sessionId, userText: o.userText, emit: o.emit, signal: o.signal, onFile: (p) => pullServerFile(p, turn) });
+    };
+    const result = await (server ? serverRun : team ? runTeam : runAgent)({
       llm: team ? helperLlm('reason') : undefined,
       pickModel: team ? modelForRole : undefined,
       effort,
@@ -1044,7 +1114,7 @@ async function send(text, { echo = true } = {}) {
       inbox: team ? null : turn.inbox,
       maxSteps: DESKTOP ? 40 : 28, // 用鼠标键盘操作电脑、逐项联网核实时步数多
       images: imgs.map(({ mime, data }) => ({ mime, data })),
-      tools: await buildTools({ turn }),
+      tools: server ? [] : await buildTools({ turn }),
       approve: (req) => {
         if (preApproved(req, { sessionKeys: sessionApprovals })) return true; // 危险命令每次都问
         setTask('processing', '等待你确认');
@@ -1126,7 +1196,7 @@ async function send(text, { echo = true } = {}) {
     if (active !== turn) return;
     speech.flush();
     const total = now() - t0;
-    const modelTag = providerById(llmConfig.provider)?.kind === 'mock' ? '' : usedModel !== model ? `${usedModel}（${model} 出错后换用） · ` : `${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
+    const modelTag = server ? '服务器 · ' : providerById(llmConfig.provider)?.kind === 'mock' ? '' : usedModel !== model ? `${usedModel}（${model} 出错后换用） · ` : `${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
     bubble.done(`${modelTag}${team ? `团队 ${result.steps} 步 · ` : ''}${ctxMs !== null && ctxMs >= 300 ? `准备 ${(ctxMs / 1000).toFixed(1)}s · ` : ''}${firstToken ? `首字 ${((firstToken - t0) / 1000).toFixed(1)}s · ` : ''}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}${MOBILE && textChunks ? ` · 分 ${textChunks} 次收到${globalThis.__jarvisNetVia?.(llmConfig.baseURLs?.[llmConfig.provider] || '') === 'native' ? '（原生网络）' : ''}` : ''}`, {
       onFeedback: async (kind, comment) => {
         if (kind === 'up') await agentMemory.noteTask(`获得好评：${text.slice(0, 30)}`);
@@ -2112,6 +2182,7 @@ const syncController = createSyncController({
   }
 });
 const syncPanel = initSyncPanel({ controller: syncController, toast: (t) => toast(t) });
+initServerPanel({ getLlmConfig: () => llmConfig, toast: (t) => toast(t) });
 syncController.start();
 
 // 手机：底部菜单改成左侧抽屉（新对话 · 功能 · 历史对话）；面板全屏打开，左上角“返回对话”
@@ -2166,7 +2237,7 @@ setTimeout(schedulerTick, 4000);
   }
   // 手机：只有刷新页面、或界面崩溃后自动重开时才接回刚才的对话；从后台关掉再打开就停在首页
   const reopened = performance.getEntriesByType?.('navigation')?.[0]?.type === 'reload' || globalThis.__jarvisRecentCrash === true;
-  if ((!COMPACT || reopened) && recent && Date.now() - recent.updatedAt < 6 * 3600_000 && !history.length) await switchTo(recent);
+  if ((!COMPACT || reopened) && recent && Date.now() - recent.updatedAt < 6 * 3600_000 && !history.length) await switchTo(server ? (await sessionsApi.get(recent.id).catch(() => null)) ?? recent : recent); // 服务器的列表不带消息，要单独取完整的
   sessionsPanel.refresh();
 })();
 agentMemory.maintain().catch(() => {});

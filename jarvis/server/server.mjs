@@ -38,6 +38,8 @@ import { edgeSpeak } from './edgeTts.mjs';
 import { createWeatherProxy } from './weather.mjs';
 
 const CORS_PATHS = /^\/api\/(health|local\/metrics|llm\/.+|tts\/edge)$/;
+/** 服务器模式里允许跨域调用的接口（手机 App、电脑版连自己的服务器） */
+const SERVER_CORS = /^\/api\/(health|server\/.+|tasks(\/.*)?|sessions(\/.*)?|files(\/raw)?)$/;
 export const EXTRA_UPSTREAMS = { tavily: 'https://api.tavily.com', bocha: 'https://api.bochaai.com', elevenlabs: 'https://api.elevenlabs.io' };
 // 读取网页时用常见浏览器的请求头：不少网站（包括搜索引擎）会拒绝或降级陌生的客户端
 const FETCH_HEADERS = {
@@ -324,6 +326,14 @@ export function createServer({
     try {
       // 服务器模式：除了健康检查和登录，所有接口都要先登录（别人拿不到你的模型额度、看不到你的对话）
       if (serverMode && pathname.startsWith('/api/')) {
+        // 手机 App、电脑版的页面不是从这个网址打开的：允许跨域调用服务器模式的接口（凭令牌，不用 Cookie，所以对所有来源开放是安全的）
+        if (req.headers.origin && SERVER_CORS.test(pathname)) {
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          if (req.method === 'OPTIONS') {
+            res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE', 'Access-Control-Allow-Headers': 'authorization, content-type, last-event-id', 'Access-Control-Max-Age': '600' });
+            return res.end();
+          }
+        }
         if (pathname !== '/api/health' && pathname !== '/api/server/login' && !serverMode.authorized(req)) return json(res, 401, { error: '请先登录', login: true });
         if (await serverMode.handle(req, res, pathname)) return;
       }

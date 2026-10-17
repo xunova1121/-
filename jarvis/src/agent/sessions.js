@@ -8,6 +8,9 @@ import { archiveRequirements } from './taskRequirements.js';
 
 const sessions = collection('sessions');
 const TITLE_MAX = 24;
+/** 服务器模式：对话存在自己的服务器上（见 core/serverClient.js 的 remoteSessions），读写都交给它 */
+let remote = null;
+export function useRemote(r) { remote = r; }
 
 /** 用第一句话做标题 */
 export function autoTitle(text) {
@@ -22,6 +25,7 @@ export function create({ title = '新对话', messages = [] } = {}) {
 }
 
 export async function save(session) {
+  if (remote) return remote.save(session);
   if (!session.messages.length) return session; // 空对话不落盘
   // 必须先保全原话，再裁剪消息；随会话导入/备份/删除，不另建隐蔽的长期记忆库。
   const archived = archiveRequirements(session.messages, session.requirements);
@@ -34,13 +38,15 @@ export async function save(session) {
   return session;
 }
 
-export const get = (id) => sessions.get(id);
+export const get = (id) => (remote ? remote.get(id) : sessions.get(id));
 
 export async function list() {
+  if (remote) return remote.list();
   return (await sessions.all()).sort((a, b) => (b.pinned - a.pinned) || (b.updatedAt - a.updatedAt));
 }
 
 export async function rename(id, title) {
+  if (remote) return remote.rename(id, title);
   const s = await sessions.get(id);
   if (!s) return null;
   const next = { ...s, title: String(title).trim().slice(0, 60) || s.title, titleSet: true };
@@ -49,14 +55,16 @@ export async function rename(id, title) {
 }
 
 export async function setPinned(id, pinned) {
+  if (remote) return remote.setPinned(id, pinned);
   const s = await sessions.get(id);
   if (s) await sessions.put({ ...s, pinned });
 }
 
-export const remove = (id) => sessions.delete(id);
+export const remove = (id) => (remote ? remote.remove(id) : sessions.delete(id));
 
 /** 按标题和内容搜索；返回带命中片段的会话 */
 export async function search(query) {
+  if (remote) return remote.search(query);
   const all = await list();
   const q = String(query || '').trim();
   if (!q) return all;

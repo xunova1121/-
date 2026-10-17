@@ -424,6 +424,19 @@
           <label><input type="checkbox" id="set-safe-render" /> 兼容显示（减少动效，优先稳定）</label>
           <p class="muted">减少动画和光效，每页显示最近 12 条消息；更早的对话可翻页查看。不会删除记录或中断正在执行的任务。</p>
         </div>
+        <div class="setting" id="row-server">
+          <label><input type="checkbox" id="server-on" disabled /> 服务器模式（任务交给自己的云服务器做）</label>
+          <p class="muted">开启后，任务在你的服务器上从头做到尾，手机锁屏、关掉 App 都不影响，打开时能看到进度和结果。对话和生成的文件存在服务器上。服务器上不能控制电脑、运行代码。</p>
+          <div class="sync-form" id="server-form">
+            <label class="field" for="server-url"><span>服务器网址</span><input id="server-url" placeholder="https://d.leing.top" spellcheck="false" autocomplete="off" inputmode="url" /></label>
+            <label class="field" for="server-pass"><span>访问密码（部署时在服务器上设置的）</span><input type="password" id="server-pass" autocomplete="current-password" spellcheck="false" /></label>
+            <div class="pane-actions">
+              <button class="btn" type="button" id="btn-server-login">登录并开启</button>
+              <button class="btn ghost sm" type="button" id="btn-server-config">把本机的模型设置传到服务器</button>
+            </div>
+          </div>
+          <p class="muted small" id="server-status" role="status"></p>
+        </div>
         <div class="setting" id="row-sync">
           <label><input type="checkbox" id="sync-on" /> 多设备同步（电脑 ↔ 手机）</label>
           <p class="muted">把记忆、对话、模型设置放到你自己的阿里云 OSS 存储空间里，电脑和手机自动合并。上传前在本机用“同步密码”加密，阿里云和任何人都看不到内容。建议在阿里云 RAM 里单独建一个只能读写这个 Bucket 的子账号，用它的 AccessKey。</p>

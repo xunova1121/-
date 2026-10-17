@@ -80,3 +80,16 @@ describe('服务器模式接口', () => {
     expect(() => createServerMode({ dataDir: dir, password: '123' })).toThrow(/至少 8 位/);
   });
 });
+
+describe('服务器模式：手机 App 跨域调用', () => {
+  it('预检请求放行；带令牌的跨域请求能拿到结果；本机网关的其他接口不开放跨域', async () => {
+    const pre = await fetch(`${base}/api/tasks`, { method: 'OPTIONS', headers: { Origin: 'https://localhost', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'authorization,content-type' } });
+    expect(pre.status).toBe(204);
+    expect(pre.headers.get('access-control-allow-headers')).toContain('authorization');
+    const r = await fetch(`${base}/api/sessions`, { headers: { Origin: 'https://localhost', ...auth } });
+    expect(r.status).toBe(200);
+    expect(r.headers.get('access-control-allow-origin')).toBe('*');
+    const other = await fetch(`${base}/api/fetch?url=https://example.com`, { headers: { Origin: 'https://evil.example', ...auth } });
+    expect(other.headers.get('access-control-allow-origin')).toBeNull();
+  });
+});

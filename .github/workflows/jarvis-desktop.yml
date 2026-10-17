@@ -181,6 +181,16 @@ jobs:
         run: npm test
       - name: 构建网页版
         run: npm run build
+      - name: 服务器模式端到端测试，打包服务器版
+        run: |
+          mkdir -p "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/server-mode.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node scripts/pack-server.mjs "${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('1.0.{0}', github.run_number) }}" release-server
+      - name: 上传服务器版
+        uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-server
+          path: jarvis/release-server/*.tar.gz
       - name: 构建并验证手机版界面
         run: |
           npm run build:mobile
@@ -247,6 +257,7 @@ jobs:
             ## 下载哪个文件
             - **Windows**：`Jarvis-Setup-*.exe`（安装版，推荐）或 `Jarvis-*-win-x64.zip`（免安装，解压后运行 Jarvis.exe）
             - **安卓手机**：`Jarvis-*-android.apk`（用手机浏览器下载后点开安装；提示“未知来源”时允许安装）
+            - **自己的云服务器**：`jarvis-server-*.tar.gz`（服务器模式：任务在服务器上做，关掉手机也不停；部署步骤见仓库 jarvis/deploy/服务器部署说明.md）
 
             ## 电脑和手机同步
             设置 → 多设备同步：填好自己的阿里云 OSS，在电脑上点“生成同步码”，手机 App 里“用同步码设置”即可。数据上传前用同步密码加密。

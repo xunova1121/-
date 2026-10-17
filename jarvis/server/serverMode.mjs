@@ -14,6 +14,7 @@
  *   POST   /api/tasks/<id>/stop            叫停
  *   GET    /api/sessions                   对话列表（不含消息内容）
  *   GET    /api/sessions/<id>              一段对话
+ *   PATCH  /api/sessions/<id>              { title?, pinned? } 改标题、钉住
  *   DELETE /api/sessions/<id>              删除对话
  *   GET    /api/files                      工作区文件列表
  *   GET    /api/files/raw?path=            下载文件
@@ -146,7 +147,19 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     }
     const s = pathname.match(/^\/api\/sessions\/([\w-]+)$/);
     if (s) {
-      if (req.method === 'GET') { const one = await sessions.get(s[1]); one ? json(res, 200, one) : json(res, 404, { error: '找不到这个对话' }); return true; }
+      if (req.method === 'GET') {
+        const one = await sessions.get(s[1]);
+        const busy = runner.list().find((x) => x.sessionId === s[1] && (x.status === 'running' || x.status === 'queued'));
+        one ? json(res, 200, { ...one, taskId: busy?.id ?? null }) : json(res, 404, { error: '找不到这个对话' });
+        return true;
+      }
+      if (req.method === 'PATCH') {
+        const { title, pinned } = await readJson(req);
+        if (title !== undefined) await sessions.rename(s[1], title);
+        if (pinned !== undefined) await sessions.setPinned(s[1], Boolean(pinned));
+        json(res, 200, { ok: true });
+        return true;
+      }
       if (req.method === 'DELETE') { await sessions.remove(s[1]); json(res, 200, { ok: true }); return true; }
     }
     if (pathname === '/api/files' && req.method === 'GET') { json(res, 200, await ws.list(url.searchParams.get('prefix') || '')); return true; }

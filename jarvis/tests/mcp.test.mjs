@@ -127,14 +127,14 @@ describe('MCP 配置文件损坏时恢复', () => {
 
 describe('MCP 意外断开后自动重连', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-mcp-flaky-'));
-  /** 一个会崩的服务：前 crashTimes 次启动后 300ms 自己退出 */
+  /** 一个会崩的服务：前 crashTimes 次启动后 1.5 秒自己退出（留足连上的时间：机器忙时启动 Node 进程要好几百毫秒） */
   function flaky(name, crashTimes) {
     const counter = path.join(d, `${name}.count`);
     const script = path.join(d, `${name}.mjs`);
     fs.writeFileSync(script, `import fs from 'node:fs';
 const n = (Number(fs.existsSync(${JSON.stringify(counter)}) ? fs.readFileSync(${JSON.stringify(counter)}, 'utf8') : 0) || 0) + 1;
 fs.writeFileSync(${JSON.stringify(counter)}, String(n));
-if (n <= ${crashTimes}) setTimeout(() => process.exit(1), 300);
+if (n <= ${crashTimes}) setTimeout(() => process.exit(1), 1500);
 await import(${JSON.stringify(pathToFileURL(FIXTURE).href)});
 `);
     return { name, type: 'stdio', command: process.execPath, args: [script], starts: () => Number(fs.readFileSync(counter, 'utf8')) };
@@ -157,7 +157,7 @@ await import(${JSON.stringify(pathToFileURL(FIXTURE).href)});
     await until(() => /已暂停/.test(m.list()[0].error || ''));
     const n = s.starts();
     expect(n).toBe(3); // 第一次 + 自动重连 2 次
-    await new Promise((r) => setTimeout(r, 800));
+    await new Promise((r) => setTimeout(r, 2000));
     expect(s.starts()).toBe(n); // 停下后不再启动
     await m.restart('always');
     expect(m.list()[0].status).toBe('ready');
@@ -173,7 +173,7 @@ await import(${JSON.stringify(pathToFileURL(FIXTURE).href)});
     await until(() => /秒后自动重连/.test(m.list()[0].error || ''));
     await m.remove('removed');
     const n = s.starts();
-    await new Promise((r) => setTimeout(r, 1000));
+    await new Promise((r) => setTimeout(r, 2500));
     expect(s.starts()).toBe(n);
     await m.closeAll();
   }, 20000);

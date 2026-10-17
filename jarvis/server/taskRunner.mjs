@@ -112,7 +112,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
           record(task, e);
         }
       });
-      return finish(task, session, { text: r.text, usedTools });
+      return finish(task, session, { text: r.text, usedTools, toolCalls: r.toolCalls ?? 0 });
     } catch (err) {
       const stopped = task.ctrl.signal.aborted && !task.idle;
       return finish(task, session, { error: stopped ? '' : task.idle ? '连续 10 分钟没有进展，已中断' : String(err?.message || err), stopped, shown, usedTools });
@@ -121,7 +121,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     }
   }
 
-  async function finish(task, session, { text = '', error = '', stopped = false, shown = '', usedTools = [] }) {
+  async function finish(task, session, { text = '', error = '', stopped = false, shown = '', usedTools = [], toolCalls = 0 }) {
     const extra = { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(task.files.size && { files: [...task.files].slice(-12) }) };
     const fresh = (await sessions.get(task.sessionId)) ?? session; // 期间用户可能改了标题等
     if (fresh) {
@@ -133,7 +133,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     task.status = stopped ? 'stopped' : error ? 'error' : 'done';
     task.endedAt = now();
     task.error = error;
-    record(task, { type: 'task_state', status: task.status, ...(error && { error }), files: [...task.files] });
+    record(task, { type: 'task_state', status: task.status, ...(error && { error }), ...(task.status === 'done' && { text, toolCalls }), files: [...task.files] });
     task.listeners.clear();
     running--;
     pump();
@@ -155,8 +155,9 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       text = String(text ?? '').trim();
       if (!text) throw Object.assign(new Error('任务内容是空的'), { status: 400 });
       if (text.length > 20000) throw Object.assign(new Error('任务内容太长'), { status: 400 });
+      if (sessionId !== null && !/^[\w-]{1,40}$/.test(String(sessionId))) throw Object.assign(new Error('对话编号不对'), { status: 400 });
+      // 手机 / 电脑上新建的对话第一次发任务时，服务器上还没有：用同一个编号新建
       let session = sessionId ? await sessions.get(sessionId) : null;
-      if (sessionId && !session) throw Object.assign(new Error('找不到这个对话'), { status: 404 });
       const busy = session && [...tasks.values()].find((t) => t.sessionId === session.id && (t.status === 'queued' || t.status === 'running'));
       if (busy) {
         // 正在干活时又发来一句：不打断，交给正在干的未央（下一步开始前看到）
@@ -166,7 +167,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         record(busy, { type: 'user_note', text });
         return { id: busy.id, sessionId: session.id, joined: true };
       }
-      session ??= sessions.create();
+      session ??= sessionId ? { ...sessions.create(), id: sessionId } : sessions.create();
       session.messages.push({ role: 'user', content: text, ts: now() });
       session.updatedAt = now();
       await sessions.save(session);
