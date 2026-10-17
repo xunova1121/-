@@ -37,7 +37,7 @@ const font = (key) => {
  * @param {Uint8Array|ArrayBuffer} [o.template]  用户的 .docx 模板：沿用其样式
  * @returns {Promise<{ blob: Blob, info: { toc: boolean, images: number, missingImages: string[], headings: number } }>}
  */
-export async function makeDocx({ title, content, theme, cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, template = null }) {
+export async function makeDocx({ title, content, theme, cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, template = null, issuer = '', docNo = '' }) {
   const d = await import('docx');
   const {
     Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle,
@@ -149,7 +149,7 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
       width: { size: widths[i], type: WidthType.DXA },
       verticalAlign: VerticalAlign.CENTER,
       margins: { top: 60, bottom: 60, left: 100, right: 100 },
-      shading: head ? { type: ShadingType.CLEAR, fill: official ? 'F2F2F2' : C.accent, color: 'auto' } : zebra ? { type: ShadingType.CLEAR, fill: C.soft, color: 'auto' } : undefined,
+      shading: head ? { type: ShadingType.CLEAR, fill: official ? 'F2F2F2' : C.primary, color: 'auto' } : zebra ? { type: ShadingType.CLEAR, fill: C.soft, color: 'auto' } : undefined,
       children: [new Paragraph({ alignment: head ? AlignmentType.CENTER : align(i), spacing: { before: 0, after: 0, line: 300, lineRule: LineRuleType.AUTO }, children: runs(ins ?? [], head ? { bold: true, color: official ? '000000' : 'FFFFFF' } : {}) })]
     });
     const pad = (r) => Array.from({ length: cols }, (_, i) => r[i] ?? []);
@@ -211,7 +211,31 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
   // ---------- 正文
   const children = [];
   const front = [];
-  if (cover) {
+  if (cover && !official) {
+    // 设计样式的封面：上半页一整块深色底（单格表格），标题白字，金色短线，底部单位和日期
+    const banner = new Table({
+      width: { size: 11906 - page.left - page.right, type: WidthType.DXA },
+      columnWidths: [11906 - page.left - page.right],
+      rows: [new TableRow({ height: { value: 6200, rule: 'atLeast' }, children: [new TableCell({
+        borders: { top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } },
+        shading: { type: ShadingType.CLEAR, fill: C.primary, color: 'auto' },
+        verticalAlign: VerticalAlign.BOTTOM,
+        margins: { top: 400, bottom: 500, left: 500, right: 500 },
+        children: [
+          new Paragraph({ spacing: { after: 240 }, children: [new TextRun({ text: docTitle, bold: true, size: PT(28), color: 'FFFFFF', font: font(theme.fonts.title ?? theme.fonts.heading) })] }),
+          new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 18, color: C.extra, space: 1 } }, indent: { right: 11906 - page.left - page.right - 1000 - 1400 }, spacing: { after: 240, line: 80, lineRule: LineRuleType.EXACT }, children: [] }),
+          ...(subtitle ? [new Paragraph({ children: [new TextRun({ text: subtitle, size: PT(14), color: C.soft, font: headFont })] })] : [])
+        ]
+      })] })]
+    });
+    front.push(
+      new Paragraph({ spacing: { before: 0, after: 0 }, children: [] }),
+      banner,
+      ...(author ? [new Paragraph({ spacing: { before: 3600, after: 120 }, children: [new TextRun({ text: author, size: PT(14), color: C.primary, bold: true, font: headFont })] })] : []),
+      new Paragraph({ spacing: { before: author ? 0 : 3600, after: 0 }, children: [new TextRun({ text: date || today(), size: PT(12), color: '7F7F7F', font: bodyFont })] }),
+      new Paragraph({ children: [new PageBreak()] })
+    );
+  } else if (cover) {
     front.push(
       // 用段前距留白，不用空段落：空段落会继承正文的 1.5 倍行距和段后距，封面会被挤到第二页
       new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 3400, after: 360 }, children: [new TextRun({ text: docTitle, bold: true, size: PT(official ? 22 : 28), font: font(theme.fonts.title ?? theme.fonts.heading), color: official ? '000000' : C.primary })] }),
@@ -223,7 +247,19 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
     );
   } else {
     // 没有封面：居中的大标题。有目录时放在目录页最上面（标题 → 目录 → 正文），没有目录时在正文开头
-    const titleBlock = [new Paragraph({ heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER, children: [new TextRun(docTitle)] })];
+    const titleBlock = [];
+    // 公文红头：红色的“××文件”、发文字号、红色分隔线。发文机关取参数，没有就用落款里的单位名；都没有不加（不编单位名）
+    const org = String(issuer || (official ? blocks.filter((b) => b.signature && !b.signFollow && blocks.at(-1) !== b).map((b) => plain(b.inlines).trim())[0] ?? '' : '')).trim();
+    if (official && org) {
+      titleBlock.push(
+        new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 0, after: docNo ? 360 : 120, line: PT(org.length > 10 ? 30 : 36) * 10 + 120, lineRule: LineRuleType.EXACT }, children: [new TextRun({ text: /文件$/.test(org) ? org : `${org}文件`, size: PT(org.length > 10 ? 30 : 36), color: 'C00000', font: font('xiaobiaosong'), characterSpacing: org.length <= 6 ? 60 : 0 })] }),
+        ...(docNo ? [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 120 }, children: [new TextRun({ text: docNo, size: PT(16), font: bodyFont })] })] : []),
+        new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 18, color: 'C00000', space: 1 } }, spacing: { after: 480 }, children: [] })
+      );
+    }
+    titleBlock.push(new Paragraph({ heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER, children: [new TextRun(docTitle)] }));
+    // 设计样式：标题下一条金色短线
+    if (!official) titleBlock.push(new Paragraph({ alignment: AlignmentType.CENTER, border: { bottom: { style: BorderStyle.SINGLE, size: 18, color: C.extra, space: 1 } }, indent: { left: 3800, right: 3800 }, spacing: { before: 0, after: 360, line: 80, lineRule: LineRuleType.EXACT }, children: [] }));
     if (subtitle) titleBlock.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 240 }, children: [new TextRun({ text: subtitle, color: official ? '000000' : C.accent, size: PT(bodySize + 1), font: headFont })] }));
     (wantToc ? front : children).push(...titleBlock);
   }
@@ -237,17 +273,20 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
   await render(blocks, children);
 
   // ---------- 样式
-  const heading = (id, name, sizePt, f, { color = official ? '000000' : C.primary, before = 240, after = 120, outline, bold = true, align } = {}) => ({
+  const heading = (id, name, sizePt, f, { color = official ? '000000' : C.primary, before = 240, after = 120, outline, bold = true, align, extra = {} } = {}) => ({
     id, name, basedOn: 'Normal', next: 'Normal', quickFormat: true,
     run: { font: f, size: PT(sizePt), bold, color },
-    paragraph: { spacing: { before, after, line: official ? 579 : 300, lineRule: official ? LineRuleType.EXACT : LineRuleType.AUTO }, keepNext: true, keepLines: true, outlineLevel: outline, ...(align && { alignment: align }) }
+    paragraph: { spacing: { before, after, line: official ? 579 : 300, lineRule: official ? LineRuleType.EXACT : LineRuleType.AUTO }, keepNext: true, keepLines: true, outlineLevel: outline, ...(align && { alignment: align }), ...extra }
   });
+  // 设计样式：一级标题是浅底色条 + 左边深色粗边；二级标题下面一条细线
+  const h1Look = official ? {} : { border: { left: { style: BorderStyle.SINGLE, size: 36, color: C.primary, space: 8 } }, shading: { type: ShadingType.CLEAR, fill: C.soft, color: 'auto' }, indent: { left: 160 } };
+  const h2Look = official ? {} : { border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: 'D5DCE6', space: 2 } } };
   const H2font = official ? font(theme.fonts.h2) : headFont;
   const H3font = official ? font(theme.fonts.h3) : headFont;
   const paragraphStyles = [
-    heading('Title', 'Title', official ? 22 : 22, font(theme.fonts.title ?? theme.fonts.heading), { before: 0, after: 360, align: AlignmentType.CENTER }),
-    heading('Heading1', 'heading 1', official ? 16 : 16, headFont, { outline: 0, before: 360, after: 180 }),
-    heading('Heading2', 'heading 2', official ? 16 : 14, H2font, { outline: 1, bold: !official }),
+    heading('Title', 'Title', official ? 22 : 22, font(theme.fonts.title ?? theme.fonts.heading), { before: 0, after: official ? 360 : 160, align: AlignmentType.CENTER }),
+    heading('Heading1', 'heading 1', official ? 16 : 16, headFont, { outline: 0, before: 360, after: 180, extra: h1Look }),
+    heading('Heading2', 'heading 2', official ? 16 : 14, H2font, { outline: 1, bold: !official, extra: h2Look }),
     heading('Heading3', 'heading 3', official ? 16 : 12, H3font, { outline: 2, color: official ? '000000' : C.accent }),
     heading('Heading4', 'heading 4', bodySize, headFont, { outline: 3, before: 120, after: 60 }),
     heading('Heading5', 'heading 5', bodySize, headFont, { outline: 4, before: 120, after: 60, bold: false }),

@@ -91,7 +91,7 @@ describe('Word 排版', () => {
     const { blob } = await generate('docx', { title: 'x', content: REPORT, theme: 'ocean-depths' });
     const x = await unzip(blob);
     expect(x.doc).toMatch(/<w:tblHeader\/>/);
-    expect(x.doc).toMatch(/w:fill="2D8B8B"/); // 主题强调色做表头
+    expect(x.doc).toMatch(/w:fill="1A2332"/); // 主题深色主色做表头
     expect(x.doc).toMatch(/<w:color w:val="FFFFFF"\/>/);
     expect(x.doc).toMatch(/<w:tcBorders>/);
     expect(x.doc).toMatch(/<w:jc w:val="right"\/>/);
