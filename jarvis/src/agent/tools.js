@@ -405,7 +405,7 @@ export function createTools(ctx) {
     },
     {
       name: 'edit_office_document',
-      description: '修改工作区里已有的 Word（.docx）或 PPT（.pptx），保留原来的排版和格式：替换文字（正文、表格、页眉页脚、每页幻灯片和备注都会找），Word 还可以在末尾追加段落（格式照抄最后一段）。适合“把文档里的 2025 改成 2026”“在合同里把甲方名称换掉”“在报告最后加一段说明”。要大改结构时用 create_document 重新生成。',
+      description: '修改工作区里已有的 Word（.docx）或 PPT（.pptx），保留原来的排版和格式：替换文字（正文、表格、页眉页脚、每页幻灯片和备注都会找），Word 还可以在末尾追加段落（格式照抄最后一段）。适合“把文档里的 2025 改成 2026”“在合同里把甲方名称换掉”“在报告最后加一段说明”。要大改结构、或用户说“重新做 / 重做 / 再做一版”时用 create_document 重新生成。',
       input_schema: S({
         path: str('文件路径（.docx / .pptx）'),
         replacements: { type: 'array', description: '要替换的文字', items: { type: 'object', properties: { find: str('原文（一字不差）'), replace: str('替换成') }, required: ['find', 'replace'], additionalProperties: false } },

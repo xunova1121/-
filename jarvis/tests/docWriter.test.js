@@ -289,6 +289,7 @@ describe('说明书', () => {
   it('聊天回答：结论先行、要点简练；写文档有单独要求', () => {
     expect(STABLE_PROMPT).toMatch(/聊天回答按下面“回答的样子”来写；写文档.*不受这条限制/);
     expect(STABLE_PROMPT).toContain('## 回答的样子');
+    expect(STABLE_PROMPT).toMatch(/重新做.*create_document 从头重新生成.*不要当成“初稿”接着改/); // 说“重新做”就整份重做
     expect(STABLE_PROMPT).toMatch(/结论放第一行/);
     expect(STABLE_PROMPT).toMatch(/2–5 条短要点/);
     expect(STABLE_PROMPT).toContain('## 写文档');
