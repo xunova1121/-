@@ -133,6 +133,8 @@ try{
   check('全息陪伴键盘出现后让出空间，输入和发送可见',await page.evaluate(()=>{const root=document.querySelector('.holo-dialog'),input=root.querySelector('input').getBoundingClientRect(),send=root.querySelector('.holo-form button').getBoundingClientRect();return root.querySelector('.holo-pet .wy-mascot').getBoundingClientRect().height<=80&&input.top>=0&&send.bottom<=444;}));
   await page.screenshot({path:path.join(OUT,'hologram-mobile-keyboard.png')});
   await page.locator('.holo-full').click();await page.evaluate(()=>window.__resizeKeyboard(844));
+  // 对话框的 close 事件是异步派发的：等它处理完再检查，避免 CI 机器忙时偶发失败
+  await page.waitForFunction(()=>!document.querySelector('.holo-dialog').open&&document.querySelector('.wy-hologram')?.classList.contains('holo-paused'),null,{timeout:5000}).catch(()=>{});
   check('打开完整对话正常返回，未央全息场景暂停动画',!await page.locator('.holo-dialog').evaluate(d=>d.open)&&await page.locator('.wy-hologram').evaluate(el=>el.classList.contains('holo-paused')));
   check('手机界面没有横向溢出和页面异常',await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)&&errors.length===0,errors.join(' | '));
   await ctx.close();
