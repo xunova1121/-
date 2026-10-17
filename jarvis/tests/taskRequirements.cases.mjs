@@ -106,6 +106,12 @@ export const cases = [
     const result = JSON.parse(await archive.tool.run({ result_id: id }));
     a.equal(result.isError, true); a.equal(result.name, 'calculate');
   }],
+  ['每轮工具原文缓冲互相隔离，不能读到另一轮的旧结果', async (a) => {
+    const first = createTurnArchive(), second = createTurnArchive();
+    first.remember({ content: '只属于上一轮的材料' });
+    await a.rejects(second.tool.run({ result_id: 't1' }), /不存在或已过期/);
+    a.equal(JSON.parse(await first.tool.run({ result_id: 't1' })).text, '只属于上一轮的材料');
+  }],
   ['未超预算不改文本；keep为0时仍能压缩并保留原文', async (a) => {
     const archive = createTurnArchive();
     const untouched = [{ role: 'tool', content: '原样' }];
