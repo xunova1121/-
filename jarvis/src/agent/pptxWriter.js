@@ -27,6 +27,8 @@ const END = /^(谢谢|感谢|谢谢观看|感谢聆听|thanks|thank you|q\s*&\s*
 const SECTION = /^(第[一二三四五六七八九十\d]+(部分|章|篇)|part\s*\d+)/i;
 /** “标签：说明”式的要点（如“预警研判智能体：多源证据汇聚……”） */
 const LABEL = /^(?:\*\*)?([^：:\n]{1,14}?)(?:\*\*)?\s*[：:]\s*(.{2,})$/;
+/** 总结类的标签：放进重点横条，不当卡片 */
+const SUMMARY = /^(总体判断|总体|结论|判断|小结|总结|定位|方案定位|核心观点|一句话|总的来看)$/;
 /** 一句话里的流程链：A→B→C */
 const ARROW = /\s*(?:→|->|⟶|➜|=>)\s*/;
 const isChain = (t) => String(t).split(ARROW).filter((x) => x.trim()).length >= 3;
@@ -117,7 +119,7 @@ export function layoutOf(slide, { first = false, last = false } = {}) {
   if (imgs.length) return lines.length ? 'imageText' : 'image';
   if (bs.filter((b) => b.type === 'heading' && b.level >= 3).length === 2) return 'compare';
   const items = bs.filter((b) => b.type === 'list').flatMap((b) => b.items.map((it) => plain(it.inlines)));
-  if (items.length >= 2 && items.length <= 4 && items.length === lines.length && items.every((t) => NUM_ITEM.test(t))) return 'stats';
+  if (items.length >= 2 && items.length <= 6 && items.length === lines.length && items.every((t) => NUM_ITEM.test(t))) return 'stats';
   if (lines.some(isChain)) return 'flow';
   // 3–6 条“标签：说明”（允许再带一句不带标签的总结，放到页脚）
   const labeled = items.filter((t) => LABEL.test(t)).length;
@@ -263,12 +265,12 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   };
   const labelOf = (it) => { const m = LABEL.exec(plain(it.inlines)); return m ? { label: m[1].trim(), text: m[2].trim() } : { label: '', text: plain(it.inlines) }; };
   /** 卡片网格：3 个一行；4 个两行两列；5、6 个两行三列。白底卡片 + 圆形图标 + 标题 + 说明 */
-  const cardGrid = (sl, items, { top = 1.55, bottom = 6.85 } = {}) => {
+  const cardGrid = (sl, items, { top = 1.55, bottom = 6.85, left = 0.6, width = W - 1.2 } = {}) => {
     const n = items.length;
     const cols = n === 4 ? 2 : Math.min(3, n);
     const rows = Math.ceil(n / cols);
     const gap = 0.3;
-    const w = (W - 1.2 - gap * (cols - 1)) / cols;
+    const w = (width - gap * (cols - 1)) / cols;
     let h = (bottom - top - gap * (rows - 1)) / rows;
     // 只有一行时卡片不拉满整页（下面会空一大块），收矮一些、上下居中
     if (rows === 1 && h > 3.6) { top += (h - 3.6) / 2; h = 3.6; }
@@ -284,7 +286,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
       return fitText(text, { w: w - 0.56, h: descH, fontSize: guess, lineSpacingMultiple: 1.3 }).o.fontSize;
     }));
     parsed.forEach(({ label, text }, k) => {
-      const x = 0.6 + (k % cols) * (w + gap);
+      const x = left + (k % cols) * (w + gap);
       const y = top + Math.floor(k / cols) * (h + gap);
       sl.addShape(pptx.ShapeType.roundRect, { x, y, w, h, ...card });
       iconCircle(sl, x + 0.28, y + 0.28, d, pick(`${label} ${text}`), circleColors[k % circleColors.length]);
@@ -293,6 +295,47 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
       if (label) sl.addText(text, { x: x + 0.28, y: y + descTop, w: w - 0.56, h: descH, fontSize: descSize, color: ink2, fontFace: FONT, valign: 'top', lineSpacingMultiple: 1.3, fit: 'shrink' });
     });
   };
+  /** 一排大圆：标签写在圆里，说明在下面（标签都很短时用，如“提质 / 提档 / 提效”） */
+  const circleRow = (sl, items) => {
+    const n = items.length;
+    const slot = (W - 1.2) / n;
+    const d = Math.min(1.7, slot - 0.5);
+    const descH = 6.85 - (1.75 + d + 0.35);
+    const descSize = Math.min(...items.map(({ text }) => fitText(text, { w: slot - 0.4, h: descH, fontSize: 17, lineSpacingMultiple: 1.3 }).o.fontSize));
+    items.forEach(({ label, text }, k) => {
+      const cx = 0.6 + k * slot + slot / 2;
+      const color = k % 2 ? C.accent : dark;
+      sl.addShape(pptx.ShapeType.ellipse, { x: cx - d / 2, y: 1.75, w: d, h: d, fill: { color }, line: { color: 'FFFFFF', width: 3 }, shadow: card.shadow });
+      sl.addText(label, { x: cx - d / 2, y: 1.75, w: d, h: d, fontSize: 22, bold: true, color: 'FFFFFF', align: 'center', valign: 'middle', fontFace: FONT, fit: 'shrink' });
+      sl.addText(text, { x: cx - slot / 2 + 0.2, y: 1.75 + d + 0.35, w: slot - 0.4, h: descH, fontSize: descSize, color: ink2, align: 'center', valign: 'top', lineSpacingMultiple: 1.3, fontFace: FONT, fit: 'shrink' });
+    });
+  };
+  /** 一行一条：白色长条卡片，左边图标，标签和说明排在一行（条目少时用） */
+  const iconRows = (sl, items, { top = 1.6, bottom = 6.85 } = {}) => {
+    const gap = 0.25;
+    const h = Math.min(1.25, (bottom - top - gap * (items.length - 1)) / items.length);
+    const pick = iconPicker();
+    items.forEach(({ label, text }, k) => {
+      const y = top + k * (h + gap);
+      sl.addShape(pptx.ShapeType.roundRect, { x: 0.6, y, w: W - 1.2, h, ...card });
+      iconCircle(sl, 0.9, y + h / 2 - 0.3, 0.6, pick(`${label} ${text}`), circleColors[k % circleColors.length]);
+      sl.addText(label, { x: 1.75, y, w: 2.4, h, fontSize: 19, bold: true, color: dark, fontFace: FONT, valign: 'middle', fit: 'shrink' });
+      sl.addShape(pptx.ShapeType.line, { x: 4.25, y: y + 0.25, w: 0, h: h - 0.5, line: { color: 'E3E8F0', width: 1 } });
+      sl.addText(text, { x: 4.45, y, w: W - 5.35, h, fontSize: 17, color: ink2, fontFace: FONT, valign: 'middle', lineSpacingMultiple: 1.2, fit: 'shrink' });
+    });
+  };
+  /** 左右分栏：左边深色块放第一条（最重要的一条），右边卡片放其余（条目多时用） */
+  const splitPanel = (sl, items, raw) => {
+    const [first, ...rest] = items;
+    const pw2 = 4.3;
+    sl.addShape(pptx.ShapeType.roundRect, { x: 0.6, y: 1.55, w: pw2, h: 5.3, fill: { color: dark }, line: { color: dark }, rectRadius: 0.06 });
+    iconCircle(sl, 0.95, 1.9, 0.62, iconPicker()(`${first.label} ${first.text}`), C.accent);
+    sl.addText(first.label, { x: 0.95, y: 2.75, w: pw2 - 0.7, h: 0.6, fontSize: 20, bold: true, color: gold, fontFace: FONT, valign: 'middle', fit: 'shrink' });
+    sl.addText(first.text, { x: 0.95, y: 3.45, w: pw2 - 0.7, h: 3.1, fontSize: 20, color: 'FFFFFF', fontFace: FONT, valign: 'top', lineSpacingMultiple: 1.35, fit: 'shrink' });
+    cardGrid(sl, raw.slice(1), { left: 0.6 + pw2 + 0.3, width: W - 1.2 - pw2 - 0.3 });
+    return rest;
+  };
+
   /** 一排箭头：流程链或步骤；步骤的说明放在箭头下面的卡片里 */
   const chevrons = (sl, nodes, { y = 1.75, h = 0.85, descs = null } = {}) => {
     const n = Math.min(nodes.length, 7);
@@ -347,8 +390,10 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   }
 
   // ---------- 各页
+  const cardVariants = []; // 连续卡片页各用了哪种版式；中间隔了别的版式就重新开始
   for (const [i, s] of slides.entries()) {
     const kind = kinds[i];
+    if (kind !== 'cards') cardVariants.length = 0;
     layouts.push(kind);
     const sl = addSlide(s.title);
     const n = records.length;
@@ -380,15 +425,22 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
       case 'stats': {
         titleBar(sl, s.title);
         const items = s.blocks.find((b) => b.type === 'list').items.map((it) => plain(it.inlines).match(NUM_ITEM));
+        // 4 个以内一行；5、6 个排两行（3 + 2 / 3 + 3）
         const gap = 0.3;
-        const cw = (W - 1.2 - gap * (items.length - 1)) / items.length;
+        const cols = items.length <= 4 ? items.length : 3;
+        const rows = Math.ceil(items.length / cols);
+        const cw = (W - 1.2 - gap * (cols - 1)) / cols;
+        const ch = rows === 1 ? 3.6 : 2.45;
+        const top = rows === 1 ? 1.9 : 1.55;
         const pick = iconPicker();
         items.forEach((m, k) => {
-          const x = 0.6 + k * (cw + gap);
-          sl.addShape(pptx.ShapeType.roundRect, { x, y: 1.9, w: cw, h: 3.6, ...card });
-          iconCircle(sl, x + cw / 2 - 0.33, 2.25, 0.66, pick(m[2]), circleColors[k % circleColors.length]);
-          sl.addText(m[1].trim(), { x, y: 3.05, w: cw, h: 1.0, fontSize: 40, bold: true, color: C.accent, align: 'center', valign: 'middle', fontFace: FONT, fit: 'shrink' });
-          sl.addText(m[2].trim(), { x: x + 0.25, y: 4.15, w: cw - 0.5, h: 1.1, fontSize: 16, color: ink2, align: 'center', valign: 'top', fontFace: FONT, fit: 'shrink' });
+          const x = 0.6 + (k % cols) * (cw + gap);
+          const y = top + Math.floor(k / cols) * (ch + gap);
+          const big = rows === 1;
+          sl.addShape(pptx.ShapeType.roundRect, { x, y, w: cw, h: ch, ...card });
+          iconCircle(sl, x + cw / 2 - (big ? 0.33 : 0.27), y + (big ? 0.35 : 0.22), big ? 0.66 : 0.54, pick(m[2]), circleColors[k % circleColors.length]);
+          sl.addText(m[1].trim(), { x, y: y + (big ? 1.15 : 0.82), w: cw, h: big ? 1.0 : 0.75, fontSize: big ? 40 : 32, bold: true, color: C.accent, align: 'center', valign: 'middle', fontFace: FONT, fit: 'shrink' });
+          sl.addText(m[2].trim(), { x: x + 0.25, y: y + (big ? 2.25 : 1.6), w: cw - 0.5, h: big ? 1.1 : 0.7, fontSize: big ? 16 : 14, color: ink2, align: 'center', valign: 'top', fontFace: FONT, fit: 'shrink' });
         });
         pageNo(sl, n);
         break;
@@ -491,10 +543,32 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
       case 'steps': {
         titleBar(sl, s.title);
         const all = s.blocks.filter((b) => b.type === 'list').flatMap((b) => b.items);
-        const main = all.filter((it) => LABEL.test(plain(it.inlines)));
+        // “总体判断 / 结论 / 定位”这类总结句不做成卡片，放进底部的深色重点横条
+        const isSummary = (it) => SUMMARY.test(labelOf(it).label);
+        const main = all.filter((it) => LABEL.test(plain(it.inlines)) && !(isSummary(it) && kind === 'cards'));
         const foot = all.filter((it) => !main.includes(it)).map((it) => plain(it.inlines));
-        if (kind === 'cards') cardGrid(sl, main, { bottom: foot.length ? 6.05 : 6.85 });
-        else { const its = main.map(labelOf); chevrons(sl, its.map((x) => x.label), { descs: its.map((x) => x.text) }); }
+        if (kind === 'cards') {
+          // 连续几页都是卡片：换着用不同的版式（参照用户给的样例：一排大圆、长条、左右分栏、卡片网格）
+          const its = main.map(labelOf);
+          const fits = {
+            grid: true,
+            circles: its.length >= 3 && its.length <= 5 && its.every((x) => [...x.label].length <= 4),
+            rows: its.length <= 4,
+            split: its.length >= 4 && its.length <= 5
+          };
+          const order = ['grid', 'circles', 'split', 'rows'];
+          const prevVariant = cardVariants.at(-1);
+          let variant = 'grid';
+          if (prevVariant) {
+            const start = order.indexOf(prevVariant) + 1;
+            variant = [...order.slice(start), ...order.slice(0, start)].find((v) => fits[v] && v !== prevVariant) ?? 'grid';
+          }
+          if (variant === 'circles') circleRow(sl, its);
+          else if (variant === 'rows') iconRows(sl, its, { bottom: foot.length ? 6.05 : 6.85 });
+          else if (variant === 'split') splitPanel(sl, its, main);
+          else cardGrid(sl, main, { bottom: foot.length ? 6.05 : 6.85 });
+          cardVariants.push(variant);
+        } else { const its = main.map(labelOf); chevrons(sl, its.map((x) => x.label), { descs: its.map((x) => x.text) }); }
         if (foot.length) highlight(sl, foot.join('；'), { y: 6.25 });
         pageNo(sl, n);
         break;

@@ -336,3 +336,42 @@ describe('PPT：套话提醒', () => {
     expect(lint('pptx', '## 计划\n- 重点跟进 42 家新签客户\n- 回款压到 60 天').some((x) => /套话/.test(x.text))).toBe(false);
   });
 });
+
+describe('PPT 版式要有变化；Word 落款单位靠右', async () => {
+  const { makePptx } = await import('../src/agent/pptxWriter.js');
+  const five = (t) => `## ${t}\n- 现状：华北 480 万元，增速低于整体\n- 测算：按 3% 反推去年约 466 万元\n- 差距：约 70 万元营收缺口\n- 原因：重点城市覆盖不足\n- 对策：增设 2 个办事处`;
+
+  it('连续几页都是“标签：说明”：换着用卡片网格、一排大圆、左右分栏，不全是同一个样子', async () => {
+    const deck = ['一', '二', '三'].map((x) => five(`第${x}页标题`)).join('\n\n');
+    const { info } = await makePptx({ title: '汇报', content: deck, theme: THEMES.business });
+    const p = (n) => info.preview[n - 1].items;
+    const bigCircles = (n) => p(n).filter((it) => it.kind === 'shape' && it.type === 'ellipse' && it.w >= 1.4).length;
+    const darkPanel = (n) => p(n).some((it) => it.kind === 'shape' && it.type === 'roundRect' && it.fill === THEMES.business.colors.primary && it.h > 5);
+    expect(bigCircles(2)).toBe(0); // 第一页卡片网格
+    expect(bigCircles(3)).toBe(5); // 第二页一排大圆
+    expect(darkPanel(4)).toBe(true); // 第三页左右分栏
+    expect(info.layoutIssues).toEqual([]);
+  });
+
+  it('“总体判断 / 结论”这类总结句放进深色重点横条，不当卡片；5、6 个数字也做成大数字卡片', async () => {
+    const deck = `## 总览\n- 营收：1,860 万元，同比增长 18%\n- 客户：新签 42 家\n- 回款：周期 75 天\n- 总体判断：增长靠华东与华南\n\n## 关键数字\n- 1,860 万元：三季度营收\n- 820 万元：华东营收\n- 42 家：新签客户\n- 91%：续约率\n- 2,200 万元：四季度目标`;
+    const { info } = await makePptx({ title: '汇报', content: deck, theme: THEMES.business });
+    expect(info.layouts).toEqual(['cover', 'cards', 'stats']);
+    const runs = info.preview[1].items.filter((it) => it.kind === 'text' && Array.isArray(it.text)).flatMap((it) => it.text.map((r) => r.text));
+    expect(runs).toEqual(expect.arrayContaining(['总体判断　', '增长靠华东与华南']));
+    const bigNumbers = info.preview[2].items.filter((it) => it.kind === 'text' && it.o.fontSize >= 28).map((it) => it.text);
+    expect(bigNumbers).toEqual(['1,860 万元', '820 万元', '42 家', '91%', '2,200 万元']);
+  });
+
+  it('Word 通知：日期上面一行的单位名（综合办公室）也靠右；标题像公文时即使填了默认主题也按公文排', async () => {
+    const { parseDoc, markSalutationAndSignature } = await import('../src/agent/docModel.js');
+    const doc = markSalutationAndSignature(parseDoc('各部门：\n\n请准时参加。\n\n联系人：王磊，电话 8866 1234。\n\n综合办公室\n\n2026 年 10 月 16 日'));
+    expect(doc.filter((b) => b.signature).map((b) => b.inlines.map((x) => x.text).join(''))).toEqual(['综合办公室', '2026 年 10 月 16 日']);
+    // “联系人：……”有冒号，不是单位名
+    const doc2 = markSalutationAndSignature(parseDoc('各部门：\n\n请准时参加。\n\n联系人：王磊。\n\n2026 年 10 月 16 日'));
+    expect(doc2.filter((b) => b.signature)).toHaveLength(1);
+    const { resolveTheme } = await import('../src/agent/themes.js');
+    expect(resolveTheme('business', '# 关于召开四季度工作部署会的通知\n\n各部门：').id).toBe('gongwen');
+    expect(resolveTheme('ocean-depths', '# 关于召开四季度工作部署会的通知').id).toBe('ocean-depths'); // 明确选了别的主题就照用
+  });
+});

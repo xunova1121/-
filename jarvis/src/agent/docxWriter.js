@@ -180,7 +180,7 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
         case 'paragraph':
           if (b.salutation) { out.push(body(b.inlines, { noIndent: true })); break; }
           if (b.signature) {
-            out.push(new Paragraph({ alignment: AlignmentType.RIGHT, indent: { right: official ? bodySize * 4 * 20 : 0 }, spacing: { before: official ? 579 : 360 }, children: runs(b.inlines) }));
+            out.push(new Paragraph({ alignment: AlignmentType.RIGHT, indent: { right: official ? bodySize * 4 * 20 : 0 }, spacing: { before: b.signFollow ? 0 : official ? 579 : 360 }, children: runs(b.inlines) }));
             break;
           }
           out.push(inQuote

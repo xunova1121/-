@@ -247,14 +247,16 @@ export class Transcript {
     // 小精灵旁的气泡只在回答过程中显示状态（想 / 查资料 / 搓手）；答完就收起，不在每条回答前留一句固定的话
     const greeting = role === 'agent' && !text ? Object.assign(document.createElement('span'), { className:'wy-reply-greeting', textContent:'我在想，稍等一下哦…' }) : null;
     if (greeting) head.append(greeting);
+    // 在做什么：回答末尾（电脑）和小精灵旁边（手机）都显示
+    const setStatus = (words) => { el.dataset.status = words; head.dataset.status = words; if (greeting && el.classList.contains('streaming')) greeting.textContent = words; };
     const present = (state, detail = '') => {
       if (!mascot) return;
       setMascotState(mascot, state);
       const words = detail || ({think:'我在想，稍等一下哦…',rub:'搓搓手，交给我吧。',run:'正在帮你找资料…',happy:'整理好啦，一起看看。',listen:'我在听，慢慢说。',wink:'我在呀，慢慢来。',sleep:'休息一下，有事叫我。',love:'送你一颗小小的心。'}[state] || '我在这里，陪着你。');
       if (greeting) greeting.textContent = words;
-      if (el.classList.contains('streaming') || !text) el.dataset.status = words; // 回答末尾的转圈旁边也显示在做什么
+      if (el.classList.contains('streaming') || !text) setStatus(words);
     };
-    if (role === 'agent' && !text) el.dataset.status = '我在想，稍等一下哦…';
+    if (role === 'agent' && !text) setStatus('我在想，稍等一下哦…');
     const sizeReply = value => el.classList.toggle('wy-long-reply', value.length > 480 || value.split('\n').length > 10);
     if (role === 'agent') sizeReply(text);
     let moodState = null;
@@ -416,7 +418,7 @@ export class Transcript {
       },
       /** 表情：在“未央 · 时间”旁边放一个小图标（不显示英文标签） */
       /** 回答末尾转圈旁的状态字（正在查资料、正在生成 PPT…） */
-      status(text) { el.dataset.status = text; if (greeting) greeting.textContent = text; },
+      status(text) { setStatus(text); if (greeting) greeting.textContent = text; },
       mood(v) {
         if (!mascot) return;
         moodState = poseForEmotion(v);
@@ -424,7 +426,7 @@ export class Transcript {
       },
       activity(state, detail = '') { present(poseForTask(state, detail), state==='error' ? '这次没有完成，我们再试一次。' : ''); },
       append(d) {
-        if (el.dataset.status !== '正在写回答…') el.dataset.status = '正在写回答…';
+        if (el.dataset.status !== '正在写回答…') setStatus('正在写回答…');
         raw += d;
         curRaw += d;
         // 每一帧最多刷新一次，只把新增的字接在后面：逐字重排整段回答在手机上很慢，回答越长越卡

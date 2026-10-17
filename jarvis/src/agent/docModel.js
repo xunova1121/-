@@ -141,7 +141,13 @@ export function markSalutationAndSignature(doc) {
   const first = doc.find((b) => b.type !== 'heading');
   if (first?.type === 'paragraph' && /[:：]$/.test(plain(first.inlines).trim()) && plain(first.inlines).length <= 40) first.salutation = true;
   const last = doc.at(-1);
-  if (last?.type === 'paragraph' && SIGN_DATE.test(plain(last.inlines).trim()) && plain(last.inlines).length <= 60) last.signature = true;
+  if (last?.type === 'paragraph' && SIGN_DATE.test(plain(last.inlines).trim()) && plain(last.inlines).length <= 60) {
+    last.signature = true;
+    // 日期上面一行是单位名（短、没有句子标点，如“综合办公室”）：也是落款，和日期一起靠右
+    const prev = doc.at(-2);
+    const t = prev?.type === 'paragraph' ? plain(prev.inlines).trim() : '';
+    if (t && t.length <= 24 && !/[。，；：:,;！？!?]/.test(t) && !prev.salutation) { prev.signature = true; last.signFollow = true; }
+  }
   return doc;
 }
 

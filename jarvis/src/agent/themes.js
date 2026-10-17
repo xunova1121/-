@@ -89,7 +89,13 @@ export function pickTheme(text) {
 }
 
 /** 指定了就用指定的（可以是 id 或中文名），否则按内容选 */
-export const resolveTheme = (name, text) => findTheme(name) ?? pickTheme(text);
+export const resolveTheme = (name, text) => {
+  const chosen = findTheme(name);
+  const auto = pickTheme(text);
+  // 标题明显是公文（“关于……的通知”）却选了默认的商务蓝：按公文排（模型常顺手填默认主题）
+  if (auto.official && (!chosen || chosen.id === 'business')) return auto;
+  return chosen ?? auto;
+};
 
 /** 给模型看的主题列表 */
 export const themeList = () => Object.values(THEMES).map((t) => `${t.id}（${t.name}：${t.use}）`).join('；');
