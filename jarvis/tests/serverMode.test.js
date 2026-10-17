@@ -93,3 +93,19 @@ describe('服务器模式：手机 App 跨域调用', () => {
     expect(other.headers.get('access-control-allow-origin')).toBeNull();
   });
 });
+
+describe('服务器模式：把本机的对话传上去', () => {
+  it('没有的存进去，已有的不覆盖；图片缩略图之类的多余字段不存', async () => {
+    const one = { id: 'clocal1', title: '以前的对话', titleSet: true, createdAt: 1, updatedAt: 2, messages: [{ role: 'user', content: '你好', ts: 1, thumbs: ['data:image/png;base64,xxx'] }, { role: 'assistant', content: '你好呀', ts: 2, tools: ['web_search'] }, { role: 'system', content: '不该存' }] };
+    const a = await (await api('/api/sessions/import', { method: 'POST', body: JSON.stringify(one) })).json();
+    expect(a).toMatchObject({ imported: true });
+    const b = await (await api('/api/sessions/import', { method: 'POST', body: JSON.stringify({ ...one, title: '改过' }) })).json();
+    expect(b).toMatchObject({ skipped: true });
+    const got = await (await api('/api/sessions/clocal1')).json();
+    expect(got.title).toBe('以前的对话');
+    expect(got.messages).toMatchObject([{ role: 'user', content: '你好', ts: 1 }, { role: 'assistant', content: '你好呀', ts: 2, tools: ['web_search'] }]);
+    expect(got.messages[0].thumbs).toBeUndefined();
+    expect(got.messages).toHaveLength(2); // system 那条没存
+    expect((await api('/api/sessions/import', { method: 'POST', body: JSON.stringify({ id: '../x', messages: [] }) })).status).toBe(400);
+  });
+});

@@ -13,6 +13,7 @@
  *   GET    /api/tasks/<id>/events?after=N  进度事件流（SSE）：先补发序号 > N 的，再实时推送，做完就结束
  *   POST   /api/tasks/<id>/stop            叫停
  *   GET    /api/sessions                   对话列表（不含消息内容）
+ *   POST   /api/sessions/import            传一段本机的对话上来（服务器上已有同一段的不覆盖）
  *   GET    /api/sessions/<id>              一段对话
  *   PATCH  /api/sessions/<id>              { title?, pinned? } 改标题、钉住
  *   DELETE /api/sessions/<id>              删除对话
@@ -31,6 +32,8 @@ import * as ws from '../src/agent/workspace.js';
 import { DEFAULT_CONFIG } from '../src/llm/config.js';
 
 const UPLOAD_LIMIT = 50 * 1024 * 1024;
+/** 上传一段本机对话的大小上限 */
+const IMPORT_LIMIT = 8 * 1024 * 1024;
 /** 登录令牌：由密码算出来（改密码后旧令牌自动失效），不在服务器上另存 */
 export const tokenFor = (password) => createHash('sha256').update(`jarvis-server:${password}`).digest('hex');
 
@@ -139,6 +142,18 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
       if (!t[2] && req.method === 'GET') { const info = runner.get(t[1]); info ? json(res, 200, info) : json(res, 404, { error: '找不到这个任务' }); return true; }
       if (t[2] === '/events' && req.method === 'GET') { streamEvents(req, res, t[1], Number(url.searchParams.get('after') || req.headers['last-event-id'] || 0)); return true; }
       if (t[2] === '/stop' && req.method === 'POST') { json(res, 200, { ok: runner.stop(t[1]) }); return true; }
+    }
+    if (pathname === '/api/sessions/import' && req.method === 'POST') {
+      // 手机 / 电脑本机的对话传上来：服务器上没有的才存（已有的不覆盖，免得冲掉服务器上新聊的内容）
+      const one = JSON.parse((await readBody(req, IMPORT_LIMIT)).toString('utf8') || '{}');
+      if (!/^[\w-]{1,40}$/.test(String(one.id)) || !Array.isArray(one.messages)) { json(res, 400, { error: '对话格式不对' }); return true; }
+      if (await sessions.get(one.id)) { json(res, 200, { ok: true, skipped: true }); return true; }
+      const messages = one.messages.filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+        .map(({ role, content, ts, tools, files }) => ({ role, content, ts: Number(ts) || Date.now(), ...(Array.isArray(tools) && { tools: tools.slice(0, 30) }), ...(Array.isArray(files) && { files: files.slice(0, 12) }) }));
+      if (!messages.length) { json(res, 200, { ok: true, skipped: true }); return true; }
+      await sessions.save({ id: one.id, title: String(one.title || '新对话').slice(0, 60), titleSet: Boolean(one.titleSet), createdAt: Number(one.createdAt) || Date.now(), updatedAt: Number(one.updatedAt) || Date.now(), pinned: Boolean(one.pinned), messages, ...(one.summary && { summary: one.summary }), ...(one.requirements && { requirements: one.requirements }) });
+      json(res, 200, { ok: true, imported: true });
+      return true;
     }
     if (pathname === '/api/sessions' && req.method === 'GET') {
       const busy = new Map(runner.list().filter((x) => x.status === 'running' || x.status === 'queued').map((x) => [x.sessionId, x.id]));

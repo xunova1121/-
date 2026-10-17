@@ -39,6 +39,8 @@ export async function save(session) {
 }
 
 export const get = (id) => (remote ? remote.get(id) : sessions.get(id));
+/** 本机保存的全部对话（服务器模式下也读本机的，用来上传到服务器） */
+export const listLocal = async () => (await sessions.all()).sort((a, b) => b.updatedAt - a.updatedAt);
 
 export async function list() {
   if (remote) return remote.list();

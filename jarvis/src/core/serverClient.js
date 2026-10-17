@@ -72,6 +72,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     getSession: (id) => req(`/api/sessions/${encodeURIComponent(id)}`).catch((e) => { if (e.status === 404) return null; throw e; }),
     patchSession: (id, patch) => req(`/api/sessions/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch }),
     deleteSession: (id) => req(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    importSession: (session) => req('/api/sessions/import', { method: 'POST', body: session }),
     listFiles: () => req('/api/files'),
     async download(path) {
       const res = await req(`/api/files/raw?path=${encodeURIComponent(path)}`, { raw: true });

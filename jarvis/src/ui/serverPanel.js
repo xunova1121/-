@@ -3,13 +3,14 @@
  * 开关切换后重新加载页面：对话列表要换成服务器上的（或换回本机的）。
  */
 import { loadServerSettings, saveServerSettings, createServerClient, normalizeUrl } from '../core/serverClient.js';
+import { listLocal } from '../agent/sessions.js';
 
 const $ = (s) => document.querySelector(s);
 
 /**
- * @param {{ getLlmConfig: () => object, toast: (t: string) => void, reload?: () => void }} o
+ * @param {{ getLlmConfig: () => object, toast: (t: string) => void, reload?: () => void, onConfigSaved?: () => void, onImported?: () => void }} o
  */
-export function initServerPanel({ getLlmConfig, toast, reload = () => location.reload() }) {
+export function initServerPanel({ getLlmConfig, toast, reload = () => location.reload(), onConfigSaved = () => {}, onImported = () => {} }) {
   const on = $('#server-on');
   if (!on) return;
   const status = $('#server-status');
@@ -54,7 +55,28 @@ export function initServerPanel({ getLlmConfig, toast, reload = () => location.r
       const { voice, stt, ...models } = getLlmConfig(); // 语音还在手机上，不用传
       await client().putConfig(models);
       say('已把模型设置传到服务器（密钥经 HTTPS 加密传输，只存在服务器上）');
+      onConfigSaved();
     } catch (e) { say(`上传失败：${e.message}`); }
+  });
+  // 把本机保存的对话一段段传上去（服务器上已有的跳过）；图片缩略图不传，省流量
+  $('#btn-server-import').addEventListener('click', async () => {
+    if (!loadServerSettings().token) { say('请先登录'); return; }
+    const btn = $('#btn-server-import');
+    btn.disabled = true;
+    try {
+      const all = (await listLocal()).filter((x) => x.messages?.length);
+      if (!all.length) { say('本机没有保存的对话'); return; }
+      let done = 0, skipped = 0, failed = 0;
+      for (const [i, one] of all.entries()) {
+        say(`正在上传第 ${i + 1} / ${all.length} 段对话…`);
+        try {
+          const r = await client().importSession({ ...one, messages: one.messages.map(({ thumbs, ...m }) => m) });
+          if (r.skipped) skipped++; else done++;
+        } catch { failed++; }
+      }
+      say(`传好了 ${done} 段${skipped ? `，${skipped} 段服务器上已经有了` : ''}${failed ? `，${failed} 段没传上去（可以再点一次）` : ''}`);
+      onImported();
+    } finally { btn.disabled = false; }
   });
   check();
 }

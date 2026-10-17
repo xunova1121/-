@@ -398,7 +398,7 @@ function updateModelLabels() {
   $('#mode-text').textContent = name;
   // 输入框里显示型号（或“自动”），点一下弹出模型列表
   $('#model-chip-text').textContent = COMPACT && isAuto(llmConfig) ? `自动 · ${modelOf(llmConfig) || '选择模型'}` : chipLabel(llmConfig);
-  if (globalThis.__jarvisServerMode) $('#model-chip-text').textContent = '服务器'; // 服务器模式：用服务器上的模型设置
+  if (globalThis.__jarvisServerMode) $('#model-chip-text').textContent = globalThis.__jarvisServerModel ? `服务器 · ${globalThis.__jarvisServerModel}` : '服务器'; // 服务器模式：用服务器上的模型设置
   if (isAuto(llmConfig)) $('#mode-text').textContent = `${name} · 自动选模型`;
   $('#mode-pill').title = `当前模型：${name}${gateway ? '（经本机网关）' : ''}。点击切换`;
   $('#hud-model').textContent = name.length > 22 ? `${name.slice(0, 21)}…` : name;
@@ -421,7 +421,11 @@ const storage = (() => { try { return localStorage; } catch { return null; } })(
 // 服务器模式（设置 → 服务器模式）：任务交给自己的云服务器做，对话也存在服务器上
 const serverCfg = loadServerSettings(storage);
 const server = serverCfg.enabled && serverCfg.url && serverCfg.token ? createServerClient({ base: serverCfg.url, token: serverCfg.token }) : null;
-if (server) { sessionsApi.useRemote(remoteSessions(server)); globalThis.__jarvisServerMode = true; updateModelLabels(); }
+if (server) { sessionsApi.useRemote(remoteSessions(server)); globalThis.__jarvisServerMode = true; updateModelLabels(); refreshServerModel(); }
+/** 服务器模式：输入框里显示服务器上设的模型 */
+function refreshServerModel() {
+  server?.getConfig().then((c) => { globalThis.__jarvisServerModel = modelOf(c) || ''; updateModelLabels(); }).catch(() => {});
+}
 // 页面就是从自己的服务器打开的：发给它的请求（模型转发、读网页等）都带上登录令牌
 if (serverCfg.token && typeof location !== 'undefined' && normalizeUrl(serverCfg.url) === location.origin) {
   const plain = globalThis.fetch.bind(globalThis);
@@ -2182,7 +2186,7 @@ const syncController = createSyncController({
   }
 });
 const syncPanel = initSyncPanel({ controller: syncController, toast: (t) => toast(t) });
-initServerPanel({ getLlmConfig: () => llmConfig, toast: (t) => toast(t) });
+initServerPanel({ getLlmConfig: () => llmConfig, toast: (t) => toast(t), onConfigSaved: () => refreshServerModel(), onImported: () => { sessionsPanel?.refresh(); drawer?.refresh?.(); } });
 syncController.start();
 
 // 手机：底部菜单改成左侧抽屉（新对话 · 功能 · 历史对话）；面板全屏打开，左上角“返回对话”

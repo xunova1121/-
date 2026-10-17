@@ -76,6 +76,7 @@ try {
   check('发完任务马上关掉页面，任务照样做完，再打开能看到结果', await page.evaluate(() => [...document.querySelectorAll('#transcript .msg.user')].some((m) => m.textContent.includes('再介绍一下你自己')) && document.querySelectorAll('#transcript .msg.agent').length >= 2));
   await page.screenshot({ path: path.join(OUT, 'server-mode.png') });
 
+  check('输入框里显示服务器上设的模型', /^服务器/.test(await page.locator('#model-chip-text').textContent()));
   // 关掉服务器模式：回到本机
   await page.evaluate(() => window.__jarvis.showPanel('settings'));
   await Promise.all([page.waitForEvent('load'), page.uncheck('#server-on')]);
