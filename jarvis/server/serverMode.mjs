@@ -27,6 +27,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { createFileStore } from './fileStore.mjs';
 import { createTaskRunner } from './taskRunner.mjs';
 import { useBackend } from '../src/agent/store.js';
+import { seedBuiltins } from '../src/agent/skillPacks.js';
 import * as sessions from '../src/agent/sessions.js';
 import * as ws from '../src/agent/workspace.js';
 import { DEFAULT_CONFIG } from '../src/llm/config.js';
@@ -57,6 +58,8 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
   if (!password || String(password).length < 8) throw new Error('服务器模式需要设置 JARVIS_PASSWORD（至少 8 位）');
   const store = createFileStore(path.join(dataDir, 'store'));
   useBackend(store);
+  // 内置技能（做 PPT、Word、Excel 的步骤和规范）：和手机 / 电脑一样装上，版本更新时跟着升级
+  seedBuiltins().catch((e) => console.warn('[服务器模式] 内置技能没装上：', e?.message || e));
   const configFile = path.join(dataDir, 'config.json');
   const loadConfig = () => {
     try { return { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(configFile, 'utf8')) }; } catch { return { ...DEFAULT_CONFIG }; }
@@ -86,8 +89,8 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     }
     return Buffer.concat(chunks);
   }
-  const readJson = async (req) => {
-    try { return JSON.parse((await readBody(req, 256 * 1024)).toString('utf8') || '{}'); } catch { throw Object.assign(new Error('JSON 格式错误'), { status: 400 }); }
+  const readJson = async (req, limit = 256 * 1024) => {
+    try { return JSON.parse((await readBody(req, limit)).toString('utf8') || '{}'); } catch { throw Object.assign(new Error('JSON 格式错误'), { status: 400 }); }
   };
 
   function login(req, res, body) {
@@ -133,8 +136,8 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
       if (req.method === 'PUT') { saveConfig(mergeConfig(loadConfig(), await readJson(req))); json(res, 200, { ok: true }); return true; }
     }
     if (pathname === '/api/tasks' && req.method === 'POST') {
-      const { sessionId = null, text } = await readJson(req);
-      json(res, 200, await runner.start({ sessionId, text })); return true;
+      const { sessionId = null, text, images } = await readJson(req, IMPORT_LIMIT); // 可能带图片，放宽大小
+      json(res, 200, await runner.start({ sessionId, text, images })); return true;
     }
     if (pathname === '/api/tasks' && req.method === 'GET') { json(res, 200, runner.list()); return true; }
     const t = pathname.match(/^\/api\/tasks\/([\w-]+)(\/events|\/stop)?$/);

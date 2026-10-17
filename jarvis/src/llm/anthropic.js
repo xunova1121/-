@@ -45,7 +45,7 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
   let level = 0; // 0 全部参数；1 去掉新参数；2 再去掉联网搜索（只在 compat 时降级）
   const maxLevel = !compat ? 0 : webSearch ? 2 : 1;
 
-  async function once({ model, system, messages, tools, signal, onText }, lvl, state) {
+  async function once({ model, system, messages, tools, signal, onText, effort }, lvl, state) {
     const search = webSearch && lvl < 2;
     const [stable, dynamic] = system;
     const params = {
@@ -60,7 +60,7 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
         ...tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema, ...(lvl === 0 && { eager_input_streaming: true }) })),
         ...(search ? [{ type: 'web_search_20260209', name: 'web_search', max_uses: 5 }] : [])
       ],
-      ...(lvl === 0 && { output_config: { effort: 'medium' } })
+      ...(lvl === 0 && { output_config: { effort: effort || 'medium' } })
     };
     if (lvl === 0 && FALLBACK_MODELS.test(model)) {
       params.betas = ['server-side-fallback-2026-07-01'];

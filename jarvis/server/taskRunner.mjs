@@ -10,16 +10,18 @@
  * 和界面上的做法一致：模型分工、备用模型、项目规则、任务清单、收尾核对都由 runAgent 负责；
  * 这里只负责排队、存对话、记进度。手机上才有的能力（控制电脑、运行代码、语音）在服务器上不提供。
  */
+import dns from 'node:dns/promises';
 import { runAgent } from '../src/agent/agent.js';
 import { createTools } from '../src/agent/tools.js';
 import * as sessions from '../src/agent/sessions.js';
-import { unsummarized } from '../src/agent/compress.js';
+import { unsummarized, dueForCompression, updateSummary } from '../src/agent/compress.js';
+import * as memory from '../src/agent/memory.js';
 import { collectRequirements } from '../src/agent/taskRequirements.js';
 import { createAdapter } from '../src/llm/config.js';
 import { generateImage } from '../src/llm/images.js';
 import { generateVideo } from '../src/llm/videos.js';
-import { providerById } from '../shared/providers.js';
-import { routeFor, fallbackRoutes, classifyTask } from '../src/llm/router.js';
+import { providerById, isPrivateHost } from '../shared/providers.js';
+import { routeFor, fallbackRoutes, classifyTask, effortFor } from '../src/llm/router.js';
 import { INTERRUPTED_MARK } from '../src/core/suggest.js';
 import { uid } from '../src/agent/store.js';
 
@@ -36,6 +38,28 @@ const MAX_EVENTS = 3000;
 export const DRAFT_MARK = '（还在做，做完会更新这里）';
 /** 半截回答多久存一次 */
 export const DRAFT_MS = { value: 10_000 };
+
+/** 随任务发来的图片：最多几张、每张多大（base64 字符数） */
+const MAX_IMAGES = 4;
+const MAX_IMAGE_CHARS = 4 * 1024 * 1024;
+
+/**
+ * 服务器上联网（搜索、读网页、查天气）：服务器没有浏览器的跨域限制，直接请求；
+ * 但只许访问公网地址，每一跳重定向都重新检查（不让模型借机访问服务器内网的面板、数据库）
+ */
+export async function publicFetch(url, init = {}, fetchImpl = globalThis.fetch, lookup = (h) => dns.lookup(h, { all: true })) {
+  let u = new URL(url);
+  for (let hop = 0; ; hop++) {
+    // 域名也要查一下解析到哪：指向 127.0.0.1 这类内网地址的域名同样不许访问
+    const addrs = /^https?:$/.test(u.protocol) && !isPrivateHost(u.hostname) ? await lookup(u.hostname.replace(/^\[|\]$/g, '')).catch(() => []) : null;
+    if (!addrs || addrs.some((a) => isPrivateHost(a.address))) throw new Error('只允许访问公网 http(s) 地址');
+    const res = await fetchImpl(u, { ...init, redirect: 'manual', signal: init.signal ?? AbortSignal.timeout(20000) });
+    const loc = res.headers.get('location');
+    if (!(res.status >= 300 && res.status < 400 && loc)) return res;
+    if (hop >= 5) throw new Error('重定向次数过多');
+    u = new URL(loc, u);
+  }
+}
 
 const clip = (s, n) => (typeof s === 'string' && s.length > n ? `${s.slice(0, n)}…（已截断）` : s);
 
@@ -103,13 +127,15 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     record(task, { type: 'task_state', status: 'running' });
     const session = await sessions.get(task.sessionId);
     const cfg = await getConfig();
-    const route = routeFor(cfg, classifyTask(task.text));
+    const kind = classifyTask(task.text, { images: task.images.length });
+    const route = routeFor(cfg, kind);
     const { adapter, model, problem } = makeAdapter(route.cfg);
     if (problem) return finish(task, session, { error: `服务器上的模型还没配置好：${problem}` });
     const fallbacks = fallbackRoutes(cfg, { provider: route.cfg.provider, model }).map((f) => ({ ...createAdapter(f.cfg), label: f.model })).filter((f) => !f.problem && f.adapter && f.model);
     const history = session.messages.slice(0, -1); // 最后一条是这次的用户原话，单独作为 userText
     const tools = makeTools({
       tavilyKey: cfg.tavilyKey, bochaKey: cfg.bochaKey, searchRegion: cfg.searchRegion || 'auto',
+      fetchViaGateway: (url, init) => publicFetch(url, init), // 不填搜索密钥也能联网搜索、读网页
       llm: helper(cfg, 'write'), reasonLlm: helper(cfg, 'reason'),
       onFileChanged: (p) => { if (!/^skills\//.test(p)) { task.files.add(p); record(task, { type: 'file', path: p }); } },
       // 画图、做视频：用服务器上的模型设置；生成的文件照常存进工作区，手机按文件下载后显示在对话里
@@ -144,7 +170,9 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       const r = await runAgent({
         adapter, model, fallbacks, maxSteps,
         history: unsummarized(history, session.summary).map(({ role, content }) => ({ role, content })),
-        userText: task.text, requirementText: task.text,
+        userText: task.text, requirementText: task.text, images: task.images,
+        // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省
+        effort: effortFor(kind, task.text, cfg),
         sessionId: session.id, summary: session.summary ?? null,
         requirements: collectRequirements(session.messages, session.requirements),
         inbox: task.inbox,
@@ -190,9 +218,27 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     task.error = error;
     record(task, { type: 'task_state', status: task.status, ...(error && { error }), ...(task.status === 'done' && { text, toolCalls }), files: [...task.files] });
     task.listeners.clear();
+    task.images = [];
     running--;
     pump();
+    if (task.status === 'done') afterTask(task, text).catch((e) => console.warn(`[任务] ${task.id} 整理记忆 / 压缩对话没做成：${e?.message || e}`));
     setTimeout(() => tasks.delete(task.id), KEEP_DONE_MS).unref?.();
+  }
+
+  /** 做完以后在后台：把这轮对话交给记忆整理（以后的对话能想起来），太长的对话把较早部分并进前情提要 */
+  async function afterTask(task, text) {
+    const cfg = await getConfig();
+    const llm = helper(cfg, 'write');
+    if (cfg.autoMemory !== false) {
+      memory.configureMemory({ llm });
+      const s = await sessions.get(task.sessionId);
+      await memory.reflect([{ role: 'user', content: task.text }, ...task.notes.map((t) => ({ role: 'user', content: t })), { role: 'assistant', content: text }], { session: s && { id: s.id, title: s.title } });
+    }
+    await editSession(task.sessionId, async (s) => {
+      if (!s || !dueForCompression(s.messages, s.summary).length) return;
+      const next = await updateSummary(s.messages, s.summary, { llm });
+      if (next && next !== s.summary) { s.summary = next; await sessions.save(s); }
+    });
   }
 
   function pump() {
@@ -206,11 +252,13 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
 
   return {
     /** @returns {Promise<{ id: string, sessionId: string }>} */
-    async start({ sessionId = null, text }) {
+    async start({ sessionId = null, text, images = [] }) {
       text = String(text ?? '').trim();
       if (!text) throw Object.assign(new Error('任务内容是空的'), { status: 400 });
       if (text.length > 20000) throw Object.assign(new Error('任务内容太长'), { status: 400 });
       if (sessionId !== null && !/^[\w-]{1,40}$/.test(String(sessionId))) throw Object.assign(new Error('对话编号不对'), { status: 400 });
+      // 随消息发来的图片（让模型看图）：只收图片格式，张数和大小有上限
+      images = (Array.isArray(images) ? images : []).filter((i) => /^image\/(png|jpe?g|webp|gif)$/.test(i?.mime) && typeof i.data === 'string' && i.data.length <= MAX_IMAGE_CHARS).slice(0, MAX_IMAGES).map(({ mime, data }) => ({ mime, data }));
       // 手机 / 电脑上新建的对话第一次发任务时，服务器上还没有：用同一个编号新建
       await recovered;
       const id = sessionId || sessions.create().id;
@@ -224,11 +272,12 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       if (busy) {
         // 正在干活时又发来一句：不打断，交给正在干的未央（下一步开始前看到）
         busy.inbox.push(text);
+        busy.notes.push(text);
         record(busy, { type: 'user_note', text });
         return { id: busy.id, sessionId: id, joined: true };
       }
       const session = { id };
-      const task = { id: uid('t'), sessionId: session.id, text, status: 'queued', seq: 0, events: [], listeners: new Set(), files: new Set(), inbox: [], ctrl: new AbortController(), createdAt: now() };
+      const task = { id: uid('t'), sessionId: session.id, text, status: 'queued', seq: 0, events: [], listeners: new Set(), files: new Set(), inbox: [], notes: [], images, ctrl: new AbortController(), createdAt: now() };
       tasks.set(task.id, task);
       record(task, { type: 'task_state', status: 'queued', position: waiting.length + running });
       waiting.push(task);

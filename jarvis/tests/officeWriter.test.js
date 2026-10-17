@@ -304,3 +304,36 @@ describe('Excel 报表排版', () => {
     expect(ws.getRow(2).height).toBeGreaterThan(60);
   });
 });
+
+describe('PPT 版式：段落写法、时间线、进度条、重点句、版式指令', () => {
+  const L = (md, o) => layoutOf(parseSlides('t', md)[0], o);
+  it('要点写成一段一段的话（不带“- ”）也能排成卡片；多出的一句总结不影响', () => {
+    expect(L('## 外部依赖\n专线打通：32/33，截止 10-24\n\n送电与 IP：太平港不通电\n\n智算资源：7 项挂起\n\n三项都卡在地方协调')).toBe('cards');
+  });
+  it('列表最后一项后面紧跟一段话（没空行）也拆开；“0/12”“10-19”这类数字做成大数字', () => {
+    expect(L('## 雷达\n- 0/12：雷达安装数\n- 10-19：支架到货\n- 10-20：启动安装\n卡点：支架定做')).toBe('stats');
+  });
+  it('日期开头的几条排成时间线；“名称：百分比”排成进度条；只有百分比列的表格也是进度条', () => {
+    expect(L('## 节点\n- 10-19 支架到货\n- 10-20 启动安装\n- 11月1日：初验')).toBe('timeline');
+    expect(L('## 进度\n- 软件开发：100%\n- 设备到货：98.7%\n- 雷达安装：0%')).toBe('progress');
+    expect(L('## 进度\n| 阶段 | 完成率 |\n|--|--|\n| 软件 | 100% |\n| 雷达 | 0% |')).toBe('progress');
+  });
+  it('大小差几十倍的数字不画进同一张柱状图，改用表格', () => {
+    expect(L('## 规模\n| 项目 | 数量 |\n|--|--|\n| 水域 | 3000 |\n| 雷达 | 12 |')).toBe('table');
+  });
+  it('一句话 + 一条“标签：说明”是重点句页；“标签：”单独一行和下一段并成一条', () => {
+    expect(L('## 建议一\n把雷达列为唯一红色项，按天盯。\n\n分批方案：\n\n先验软件与云台，雷达补验。')).toBe('statement');
+  });
+  it('页内写“版式：……”按指定的排；排不成时仍自动选', () => {
+    expect(L('## 四件事\n版式：卡片\n- 船载终端：提供船只信息\n- 流量卡：明确数量')).toBe('cards');
+    expect(L('## 普通\n版式：大数字\n- 第一条\n- 第二条\n- 第三条')).toBe('bullets');
+  });
+  it('封面后面重复写名称和日期的“副封面”去掉；连续 3 页普通列表提醒换版式；“汇报完毕”是结尾页', async () => {
+    const md = '# 周报\n\n## 综合管理平台\n2026 年 10 月 12—16 日\n\n## 甲\n- 一条普通的话\n- 两条普通的话\n- 三条普通的话\n\n## 乙\n- 一条普通的话\n- 两条普通的话\n- 三条普通的话\n\n## 丙\n- 一条普通的话\n- 两条普通的话\n- 三条普通的话\n\n## 汇报完毕，请指示';
+    const out = await makePptx({ title: '周报', content: md, theme: THEMES.business });
+    expect(out.info.layouts).toEqual(['cover', 'bullets', 'bullets', 'bullets', 'end']);
+    expect(out.info.layoutIssues.some((x) => /连续 3 页都是普通要点列表/.test(x.text))).toBe(true);
+    const cover = out.info.preview[0].items.filter((it) => it.kind === 'text').map((it) => String(it.text));
+    expect(cover.some((t) => t.includes('综合管理平台'))).toBe(true);
+  });
+});

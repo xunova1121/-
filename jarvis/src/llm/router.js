@@ -66,6 +66,11 @@ export function classifyTask(text, { images = 0 } = {}) {
   return 'chat';
 }
 
+/** 要查证、分析、算结果的话：日常对话里也不能少想 */
+export const NEEDS_THOUGHT = /查|搜|核实|验证|结果|赛果|比分|中没中|中奖|最新|价格|行情|新闻|分析|计算|算一下|对比|图片|截图|图里/;
+/** 日常闲聊让推理模型少想一点（首字更快）；其余用默认档位 */
+export const effortFor = (task, text, cfg = {}) => (task === 'chat' && cfg.fastChat !== false && !NEEDS_THOUGHT.test(String(text || '')) ? 'low' : undefined);
+
 /** 按模型名字推荐分工（名字里的常见标记；聚合平台上的模型名各不相同，推荐后请再看一眼） */
 const PREFER = {
   chat: [/flash(?!.*thinking)/i, /mini|nano|lite|haiku|turbo|instant|small|air\b/i, /deepseek-(chat|v3)/i, /\b(7|8|14)b\b/i],

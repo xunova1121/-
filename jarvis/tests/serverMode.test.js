@@ -122,3 +122,13 @@ describe('服务器模式：手机原生网络传文件', () => {
     expect(seen.at(-1).binary).toBe(true); // 下载时告诉原生网络按字节读
   });
 });
+
+describe('服务器模式：内置技能', () => {
+  it('启动时装上内置技能（做 PPT、Word 的步骤和规范），和手机 / 电脑上一样', async () => {
+    const packs = await import('../src/agent/skillPacks.js');
+    const t0 = Date.now();
+    while (!(await packs.get('briefing-deck')) && Date.now() - t0 < 5000) await new Promise((r) => setTimeout(r, 50));
+    expect(await packs.get('briefing-deck')).toMatchObject({ source: '内置' });
+    expect(fs.readdirSync(path.join(dir, 'store', 'packs')).length).toBeGreaterThan(5);
+  });
+});

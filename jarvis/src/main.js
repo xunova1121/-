@@ -102,7 +102,7 @@ import { generateImage } from './llm/images.js';
 import { generateVideo } from './llm/videos.js';
 import { createFormDirector } from './core/formDirector.js';
 import { composeGreeting, GREET_GAP_MS } from './core/greeting.js';
-import { classifyTask, routeFor, TASKS, seesImages, fallbackRoutes } from './llm/router.js';
+import { classifyTask, routeFor, TASKS, seesImages, fallbackRoutes, effortFor } from './llm/router.js';
 import { resolveTheme, toggled, THEMES } from './core/theme.js';
 import { FORMS } from './render/formations.js';
 import { resolveQuality } from './core/quality.js';
@@ -451,7 +451,6 @@ function persistSession(target = session) {
   return sessionsApi.save(target).then(() => sessionsPanel?.refresh()).catch(() => {});
 }
 let turns = 0;
-const NEEDS_THOUGHT = /查|搜|核实|验证|结果|赛果|比分|中没中|中奖|最新|价格|行情|新闻|分析|计算|算一下|对比|图片|截图|图里/;
 const recentImages = new Map(); // 消息时间 → 这条消息带的图片（只在内存里，不存盘）
 const taskKeeper = createTaskKeeper(globalThis.__jarvisBackgroundTask, e => toast(e.message));
 let active = null; // { ctrl, streamDone, bubble }
@@ -1074,7 +1073,7 @@ async function send(text, { echo = true } = {}) {
   const { adapter, model, problem } = createAdapter(route.cfg, { gateway });
   if (COMPACT && isAuto(llmConfig) && model) $('#model-chip-text').textContent = `自动 · ${model}`;
   // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省
-  const effort = task === 'chat' && llmConfig.fastChat !== false && !NEEDS_THOUGHT.test(text) ? 'low' : undefined;
+  const effort = effortFor(task, text, llmConfig);
   if (route.routed) hud.think(`◇ 模型分工：${TASKS[task].name} → ${route.model}`);
   if (problem && !server) { // 服务器模式：用服务器上的模型设置
     bubble.append(problem);
@@ -1110,7 +1109,7 @@ async function send(text, { echo = true } = {}) {
     // 服务器模式：服务器做，进度事件和本机一样显示（runRemote 的用法和 runAgent 一样）
     const serverRun = async (o) => {
       for (const f of files) await server.upload(f.path, await ws.readBlob(f.path)); // 发来的附件先传到服务器的工作区
-      return runRemote(server, { sessionId: o.sessionId, userText: o.userText, emit: o.emit, signal: o.signal, onFile: (p) => pullServerFile(p, turn) });
+      return runRemote(server, { sessionId: o.sessionId, userText: o.userText, images: o.images, emit: o.emit, signal: o.signal, onFile: (p) => pullServerFile(p, turn) });
     };
     const result = await (server ? serverRun : team ? runTeam : runAgent)({
       llm: team ? helperLlm('reason') : undefined,

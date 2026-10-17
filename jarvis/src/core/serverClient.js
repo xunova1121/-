@@ -154,11 +154,11 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
   /**
    * 和 runAgent 一样的用法：服务器做，进度事件原样交给 emit（文字、工具卡片、任务清单都和本机一样显示）
    * @param {object} client  createServerClient 的结果
-   * @param {{ sessionId: string, userText: string, emit: (e: object) => void, signal?: AbortSignal, onFile?: (path: string) => void, onStarted?: (task: { id: string }) => void, taskId?: string }} o
+   * @param {{ sessionId: string, userText: string, images?: Array<{ mime: string, data: string }>, emit: (e: object) => void, signal?: AbortSignal, onFile?: (path: string) => void, onStarted?: (task: { id: string }) => void, taskId?: string }} o
    * @returns {Promise<{ text: string, toolCalls: number, steps: number }>}
    */
-  export async function runRemote(client, { sessionId, userText, emit, signal, onFile, onStarted, taskId = null }) {
-    const task = taskId ? { id: taskId } : await client.startTask({ sessionId, text: userText });
+  export async function runRemote(client, { sessionId, userText, images = [], emit, signal, onFile, onStarted, taskId = null }) {
+    const task = taskId ? { id: taskId } : await client.startTask({ sessionId, text: userText, ...(images.length && { images }) });
     onStarted?.(task);
     const stop = () => client.stopTask(task.id).catch(() => {});
     signal?.addEventListener('abort', stop, { once: true });

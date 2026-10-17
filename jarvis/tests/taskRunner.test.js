@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createFileStore } from '../server/fileStore.mjs';
-import { createTaskRunner, SERVER_BLOCKED, DRAFT_MARK, DRAFT_MS } from '../server/taskRunner.mjs';
+import { createTaskRunner, SERVER_BLOCKED, DRAFT_MARK, DRAFT_MS, publicFetch } from '../server/taskRunner.mjs';
 import { INTERRUPTED_MARK } from '../src/core/suggest.js';
 import { useBackend } from '../src/agent/store.js';
 import * as sessions from '../src/agent/sessions.js';
@@ -120,6 +120,7 @@ describe('服务器中途重启：写了一半的回答不丢', () => {
     await sessions.save(s);
     const runner = createTaskRunner({ getConfig: mockCfg });
     await runner.start({ text: '你好' }).catch(() => {}); // start 会等恢复做完
+    await until(async () => !(await sessions.get('cdraft1')).messages.at(-1).draftOf); // 机器忙时多等一会儿
     const got = (await sessions.get('cdraft1')).messages.at(-1);
     expect(got.draftOf).toBeUndefined();
     expect(got.content).toContain(INTERRUPTED_MARK);
@@ -135,5 +136,63 @@ describe('服务器上画图', () => {
     await until(() => runner.get(id).status === 'done');
     expect(typeof ctxSeen.imageGen).toBe('function');
     expect(typeof ctxSeen.videoGen).toBe('function');
+  });
+});
+
+describe('服务器模式补齐：和手机 / 电脑上一样', () => {
+  /** 记下每次请求模型时带的参数 */
+  const recording = (seen) => ({ stream: async (req) => { seen.push(req); req.onText?.('好'); return { text: '好', toolCalls: [], stop: 'end_turn' }; } });
+
+  it('日常闲聊少想一点（首字更快）；要查证、分析的不省', async () => {
+    const seen = [];
+    const runner = createTaskRunner({ getConfig: mockCfg, makeAdapter: () => ({ adapter: recording(seen), model: 'm' }), makeTools: () => [] });
+    const a = await runner.start({ text: '你好呀' });
+    await until(() => runner.get(a.id).status === 'done');
+    const b = await runner.start({ text: '帮我查一下今天的新闻' });
+    await until(() => runner.get(b.id).status === 'done');
+    expect(seen[0].effort).toBe('low');
+    expect(seen.at(-1).effort).toBeUndefined();
+  });
+
+  it('随消息发来的图片交给模型看；不是图片的、太多的不收', async () => {
+    const seen = [];
+    const runner = createTaskRunner({ getConfig: mockCfg, makeAdapter: () => ({ adapter: recording(seen), model: 'm' }), makeTools: () => [] });
+    const img = { mime: 'image/png', data: 'iVBORw0KGgo=' };
+    const { id } = await runner.start({ text: '这张图里是什么', images: [img, { mime: 'text/html', data: 'x' }, img, img, img, img] });
+    await until(() => runner.get(id).status === 'done');
+    const user = seen[0].messages.find((m) => m.images);
+    expect(user.images).toHaveLength(4);
+    expect(user.images.every((i) => i.mime === 'image/png')).toBe(true);
+  });
+
+  it('做完以后整理记忆；对话太长时把较早部分并进前情提要', async () => {
+    const memory = await import('../src/agent/memory.js');
+    const id0 = 'long-chat';
+    const old = Array.from({ length: 34 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `第 ${i} 句`, ts: i + 1 }));
+    await sessions.save({ ...sessions.create(), id: id0, messages: old });
+    const runner = createTaskRunner({ getConfig: mockCfg, makeAdapter: () => ({ adapter: scripted([{ text: '记住了' }]), model: 'm' }), makeTools: () => [] });
+    const { id } = await runner.start({ sessionId: id0, text: '我住在杭州，以后天气默认查杭州' });
+    await until(() => runner.get(id).status === 'done');
+    await until(async () => (await sessions.get(id0)).summary);
+    await until(async () => (await memory.listAll()).episodes?.length > 0);
+    expect((await sessions.get(id0)).messages.at(-1)).toMatchObject({ role: 'assistant', content: '记住了' });
+  });
+
+  it('联网只许访问公网：内网地址、解析到内网的域名、跳到内网的重定向都拦下', async () => {
+    const ok = new Response('ok', { status: 200 });
+    const fetchImpl = async (u) => (String(u).includes('jump') ? new Response('', { status: 302, headers: { location: 'http://127.0.0.1:8888/' } }) : ok);
+    const lookup = async (h) => [{ address: h === 'evil.example' ? '127.0.0.1' : '93.184.216.34' }];
+    await expect(publicFetch('http://127.0.0.1:6379/', {}, fetchImpl, lookup)).rejects.toThrow('公网');
+    await expect(publicFetch('http://evil.example/', {}, fetchImpl, lookup)).rejects.toThrow('公网');
+    await expect(publicFetch('https://good.example/jump', {}, fetchImpl, lookup)).rejects.toThrow('公网');
+    expect(await (await publicFetch('https://good.example/', {}, fetchImpl, lookup)).text()).toBe('ok');
+  });
+
+  it('搜索、读网页的工具拿到了服务器上的联网方式（不填搜索密钥也能搜）', async () => {
+    let ctxSeen;
+    const runner = createTaskRunner({ getConfig: mockCfg, makeAdapter: () => ({ adapter: scripted([{ text: '好' }]), model: 'm' }), makeTools: (ctx) => { ctxSeen = ctx; return []; } });
+    const { id } = await runner.start({ text: '搜一下' });
+    await until(() => runner.get(id).status === 'done');
+    expect(typeof ctxSeen.fetchViaGateway).toBe('function');
   });
 });
