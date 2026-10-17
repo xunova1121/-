@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createFileStore } from '../server/fileStore.mjs';
-import { createTaskRunner, SERVER_BLOCKED } from '../server/taskRunner.mjs';
+import { createTaskRunner, SERVER_BLOCKED, DRAFT_MARK, DRAFT_MS } from '../server/taskRunner.mjs';
+import { INTERRUPTED_MARK } from '../src/core/suggest.js';
 import { useBackend } from '../src/agent/store.js';
 import * as sessions from '../src/agent/sessions.js';
 import { DEFAULT_CONFIG } from '../src/llm/config.js';
@@ -90,5 +91,38 @@ describe('服务器任务执行器', () => {
     expect(runner.get(id).error).toMatch(/没有进展/);
     expect(names).toContain('run_python');
     expect(SERVER_BLOCKED.has('run_python')).toBe(true);
+  });
+});
+
+describe('服务器中途重启：写了一半的回答不丢', () => {
+  it('做的过程中先存半截回答；做完换成完整的', async () => {
+    DRAFT_MS.value = 30;
+    try {
+      let release;
+      const gate = new Promise((r) => { release = r; });
+      let n = 0;
+      const adapter = { stream: async ({ onText }) => { if (n++ === 0) { onText('写了一半，'); await gate; return { text: '写了一半，', toolCalls: [], stop: 'end_turn' }; } return { text: '', toolCalls: [], stop: 'end_turn' }; } };
+      const runner = createTaskRunner({ getConfig: mockCfg, makeAdapter: () => ({ adapter, model: 'm' }) });
+      const { id, sessionId } = await runner.start({ text: '写个东西' });
+      await until(async () => (await sessions.get(sessionId)).messages.some((m) => m.draftOf === id));
+      const mid = (await sessions.get(sessionId)).messages.at(-1);
+      expect(mid.content).toContain('写了一半');
+      expect(mid.content).toContain(DRAFT_MARK);
+      release();
+      await until(() => runner.get(id).status === 'done');
+      const msgs = (await sessions.get(sessionId)).messages;
+      expect(msgs.filter((m) => m.role === 'assistant')).toHaveLength(1);
+      expect(msgs.some((m) => m.draftOf)).toBe(false);
+    } finally { DRAFT_MS.value = 10_000; }
+  });
+  it('重启后：上次没做完的半截回答标成“没完成”', async () => {
+    const s = { ...sessions.create(), id: 'cdraft1', messages: [{ role: 'user', content: '写个东西', ts: 1 }, { role: 'assistant', content: `写了一半\n\n${DRAFT_MARK}`, ts: 2, draftOf: 'tgone' }] };
+    await sessions.save(s);
+    const runner = createTaskRunner({ getConfig: mockCfg });
+    await runner.start({ text: '你好' }).catch(() => {}); // start 会等恢复做完
+    const got = (await sessions.get('cdraft1')).messages.at(-1);
+    expect(got.draftOf).toBeUndefined();
+    expect(got.content).toContain(INTERRUPTED_MARK);
+    expect(got.content).not.toContain(DRAFT_MARK);
   });
 });

@@ -30,6 +30,11 @@ const KEEP_DONE_MS = 2 * 3600_000;
 /** 一个任务最多记这么多条进度事件（文字是一小段一小段来的，超了就把旧的文字段合并） */
 const MAX_EVENTS = 3000;
 
+/** 做到一半时先存进对话的半截回答结尾的标记；做完会换成完整回答 */
+export const DRAFT_MARK = '（还在做，做完会更新这里）';
+/** 半截回答多久存一次 */
+export const DRAFT_MS = { value: 10_000 };
+
 const clip = (s, n) => (typeof s === 'string' && s.length > n ? `${s.slice(0, n)}…（已截断）` : s);
 
 /**
@@ -39,6 +44,26 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
   const tasks = new Map();
   const waiting = [];
   let running = 0;
+  const locks = new Map();
+
+  /** 同一段对话的“读出来 → 改 → 存回去”排队做：几处同时改时，后存的不会冲掉先存的 */
+  function editSession(id, fn) {
+    const next = (locks.get(id) ?? Promise.resolve()).catch(() => {}).then(async () => fn(await sessions.get(id)));
+    locks.set(id, next);
+    next.finally(() => { if (locks.get(id) === next) locks.delete(id); }).catch(() => {});
+    return next;
+  }
+
+  // 上次服务器重启时没做完的任务：存下的半截回答标成“没完成”，不会丢
+  const recovered = (async () => {
+    for (const one of await sessions.list().catch(() => [])) {
+      if (!one.messages?.some((m) => m.draftOf)) continue;
+      await editSession(one.id, async (s) => {
+        s.messages = s.messages.map(({ draftOf, ...m }) => (draftOf ? { ...m, content: `${String(m.content).replace(DRAFT_MARK, '').trim()}\n\n${INTERRUPTED_MARK}` } : m));
+        await sessions.save(s);
+      }).catch(() => {});
+    }
+  })();
 
   function record(task, e) {
     const ev = { ...e, seq: ++task.seq, at: now() };
@@ -92,6 +117,21 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     let shown = '';
     const usedTools = [];
     let idle;
+    // 每隔一会儿把写到一半的回答先存进对话：服务器中途重启也不会全丢
+    const saveDraft = () => {
+      if (task.draftTimer) return;
+      task.draftTimer = setTimeout(() => {
+        task.draftTimer = null;
+        if (task.status !== 'running' || (!shown.trim() && !usedTools.length)) return;
+        editSession(task.sessionId, async (s) => {
+          if (!s || task.status !== 'running') return;
+          const draft = { role: 'assistant', content: `${shown.trim()}\n\n${DRAFT_MARK}`, ts: now(), draftOf: task.id, ...(usedTools.length && { tools: [...new Set(usedTools)] }) };
+          const i = s.messages.findIndex((m) => m.draftOf === task.id);
+          if (i >= 0) s.messages[i] = draft; else s.messages.push(draft);
+          await sessions.save(s);
+        }).catch(() => {});
+      }, DRAFT_MS.value);
+    };
     const arm = () => { clearTimeout(idle); idle = setTimeout(() => { task.idle = true; task.ctrl.abort(); }, idleMs); };
     arm();
     try {
@@ -110,6 +150,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
           arm();
           if (e.type === 'text') { if (!task.firstTextAt) task.firstTextAt = now(); shown += e.delta; }
           if (e.type === 'tool_start' && e.name !== 'update_plan') usedTools.push(e.name);
+          if (e.type === 'text' || e.type === 'tool_end') saveDraft();
           record(task, e);
         }
       });
@@ -124,13 +165,17 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
 
   async function finish(task, session, { text = '', error = '', stopped = false, shown = '', usedTools = [], toolCalls = 0 }) {
     const extra = { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(task.files.size && { files: [...task.files].slice(-12) }) };
-    const fresh = (await sessions.get(task.sessionId)) ?? session; // 期间用户可能改了标题等
-    if (fresh) {
+    clearTimeout(task.draftTimer);
+    // 重新读出来再改（期间用户可能又说了话、改了标题）：去掉半截回答，换成完整的
+    await editSession(task.sessionId, async (fresh) => {
+      fresh ??= session;
+      if (!fresh) return;
+      fresh.messages = fresh.messages.filter((m) => m.draftOf !== task.id);
       if (!error && !stopped) fresh.messages.push({ role: 'assistant', content: text || '（完成）', ts: now(), ...extra });
       else if (shown.trim() || usedTools.length) fresh.messages.push({ role: 'assistant', content: `${shown.trim()}\n\n${stopped ? '（已打断）' : INTERRUPTED_MARK}`, ts: now(), ...extra });
       fresh.updatedAt = now();
-      await sessions.save(fresh).catch((e) => console.error(`[任务] ${task.id} 回答没存上：${e?.stack || e}`));
-    }
+      await sessions.save(fresh);
+    }).catch((e) => console.error(`[任务] ${task.id} 回答没存上：${e?.stack || e}`));
     task.status = stopped ? 'stopped' : error ? 'error' : 'done';
     task.endedAt = now();
     // 记一笔用时，方便查“为什么慢”：journalctl -u jarvis 能看到
@@ -161,20 +206,22 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       if (text.length > 20000) throw Object.assign(new Error('任务内容太长'), { status: 400 });
       if (sessionId !== null && !/^[\w-]{1,40}$/.test(String(sessionId))) throw Object.assign(new Error('对话编号不对'), { status: 400 });
       // 手机 / 电脑上新建的对话第一次发任务时，服务器上还没有：用同一个编号新建
-      let session = sessionId ? await sessions.get(sessionId) : null;
-      const busy = session && [...tasks.values()].find((t) => t.sessionId === session.id && (t.status === 'queued' || t.status === 'running'));
+      await recovered;
+      const id = sessionId || sessions.create().id;
+      const busy = [...tasks.values()].find((t) => t.sessionId === id && (t.status === 'queued' || t.status === 'running'));
+      await editSession(id, async (session) => {
+        session ??= { ...sessions.create(), id };
+        session.messages.push({ role: 'user', content: text, ts: now() });
+        session.updatedAt = now();
+        await sessions.save(session);
+      });
       if (busy) {
         // 正在干活时又发来一句：不打断，交给正在干的未央（下一步开始前看到）
         busy.inbox.push(text);
-        session.messages.push({ role: 'user', content: text, ts: now() });
-        await sessions.save(session);
         record(busy, { type: 'user_note', text });
-        return { id: busy.id, sessionId: session.id, joined: true };
+        return { id: busy.id, sessionId: id, joined: true };
       }
-      session ??= sessionId ? { ...sessions.create(), id: sessionId } : sessions.create();
-      session.messages.push({ role: 'user', content: text, ts: now() });
-      session.updatedAt = now();
-      await sessions.save(session);
+      const session = { id };
       const task = { id: uid('t'), sessionId: session.id, text, status: 'queued', seq: 0, events: [], listeners: new Set(), files: new Set(), inbox: [], ctrl: new AbortController(), createdAt: now() };
       tasks.set(task.id, task);
       record(task, { type: 'task_state', status: 'queued', position: waiting.length + running });

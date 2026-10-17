@@ -165,7 +165,8 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
       if (req.method === 'GET') {
         const one = await sessions.get(s[1]);
         const busy = runner.list().find((x) => x.sessionId === s[1] && (x.status === 'running' || x.status === 'queued'));
-        one ? json(res, 200, { ...one, taskId: busy?.id ?? null }) : json(res, 404, { error: '找不到这个对话' });
+        // 还在做的：半截回答不给（手机会接上实时进度，做完拿完整的）
+        one ? json(res, 200, { ...one, messages: busy ? one.messages.filter((m) => m.draftOf !== busy.id) : one.messages, taskId: busy?.id ?? null }) : json(res, 404, { error: '找不到这个对话' });
         return true;
       }
       if (req.method === 'PATCH') {
