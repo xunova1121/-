@@ -1322,6 +1322,8 @@ body.reduced-motion .welcome-hero * { animation: none !important; }
 .drawer-item time { flex: none; color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
 .drawer-item.current .drawer-item-icon { box-shadow: 0 0 0 2px hsl(255 80% 66% / .5); }
 .drawer-end { margin: 14px 0 6px; text-align: center; color: var(--dim); font-size: 12px; }
+.drawer-more { display: block; width: calc(100% - 12px); margin: 8px 6px 4px; padding: 9px; border: 0; border-radius: 12px; background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); font-size: 13px; }
+.drawer-more.inline { display: inline; width: auto; margin: 0; padding: 0 4px; background: none; font-size: 12px; }
 .drawer-foot { display: flex; align-items: center; gap: 8px; padding: 10px 4px 0; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
 .drawer-me { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; border: 0; background: none; color: var(--text); text-align: left; padding: 2px; }
 .drawer-me b { display: block; font-size: 15px; }

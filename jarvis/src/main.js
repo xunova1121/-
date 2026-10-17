@@ -2148,7 +2148,9 @@ setTimeout(schedulerTick, 4000);
     setSetting('persistMemory', false);
   }
   const [recent] = await sessionsApi.list().catch(() => []);
-  if (recent && Date.now() - recent.updatedAt < 6 * 3600_000 && !history.length) await switchTo(recent);
+  // 手机：只有刷新页面、或界面崩溃后自动重开时才接回刚才的对话；从后台关掉再打开就停在首页
+  const reopened = performance.getEntriesByType?.('navigation')?.[0]?.type === 'reload' || globalThis.__jarvisRecentCrash === true;
+  if ((!COMPACT || reopened) && recent && Date.now() - recent.updatedAt < 6 * 3600_000 && !history.length) await switchTo(recent);
   sessionsPanel.refresh();
 })();
 agentMemory.maintain().catch(() => {});

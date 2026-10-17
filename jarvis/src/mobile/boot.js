@@ -115,7 +115,9 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
     const crashLog = registerPlugin('CrashLog');
     globalThis.__jarvisRenderHealthPlugin = crashLog;
     const prevScreen = startScreenTrail(); // 上一次运行最后停在哪个界面；从现在起记这一次的
-    let { text, safeDisplay } = await crashLog.take();
+    let { text, safeDisplay, lastCrash } = await crashLog.take();
+    // 界面进程刚崩溃、自动重开的（3 分钟内）：接回刚才的对话；自己关掉再打开的回首页（main.js 用）
+    globalThis.__jarvisRecentCrash = lastCrash > 0 && Date.now() - lastCrash < 3 * 60_000;
     if (typeof safeDisplay === 'boolean') applyDisplayMode(safeDisplay);
     if (text) {
       // 崩溃前在做什么（main.js 在执行每一步时记下的；正常结束会清空）

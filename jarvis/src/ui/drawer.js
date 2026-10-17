@@ -7,6 +7,8 @@ const FEATURES = [
   ['workspace', '工作区', 210], ['knowledge', '知识库', 165], ['mind', '记忆进化', 280], ['skills', '技能', 38],
   ['models', '模型', 245], ['system', '定时任务', 15], ['settings', '设置', 225], ['sessions', '全部对话', 320]
 ];
+/** 抽屉里默认显示的历史对话条数 */
+export const SHOW_FIRST = 8;
 const GROUP_HUE = { 今天: 255, 昨天: 200, '近 7 天': 165, 更早: 220 };
 const pad = (n) => String(n).padStart(2, '0');
 /** 历史对话右侧的时间：今天显示几点，其他显示月/日 */
@@ -71,11 +73,14 @@ export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, curren
   drawer.setAttribute('aria-hidden', 'true');
   document.body.append(scrim, drawer);
 
+  let expanded = false;
   async function refresh() {
     const list = await listSessions().catch(() => []);
     const cur = currentId();
     if (!list.length) { history.replaceChildren(el('p', { className: 'drawer-empty', textContent: '还没有对话。说点什么开始吧～' })); return; }
-    const groups = groupSessions(list.slice(0, 60)).flatMap(([name, items]) => {
+    // 默认只列最近几条，其余点“展开更多”再显示
+    const shown = expanded ? list.slice(0, 60) : list.slice(0, SHOW_FIRST);
+    const groups = groupSessions(shown).flatMap(([name, items]) => {
       const g = el('div', { className: 'drawer-group', textContent: name });
       g.style.setProperty('--h', GROUP_HUE[name] ?? 250);
       return [g, ...items.map((s) => {
@@ -87,10 +92,21 @@ export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, curren
         return b;
       })];
     });
-    history.replaceChildren(...groups, el('p', { className: 'drawer-end', textContent: list.length > 60 ? '更早的对话在“全部对话”里' : '没有更多对话了～' }));
+    let tail;
+    if (!expanded && list.length > SHOW_FIRST) {
+      tail = el('button', { type: 'button', className: 'drawer-more', textContent: `展开更多（还有 ${Math.min(list.length, 60) - SHOW_FIRST} 条）` });
+      tail.addEventListener('click', () => { expanded = true; refresh(); });
+    } else if (expanded) {
+      tail = el('div', { className: 'drawer-end' },
+        list.length > 60 ? '更早的对话在“全部对话”里 · ' : '',
+        el('button', { type: 'button', className: 'drawer-more inline', textContent: '收起' }));
+      tail.querySelector('button').addEventListener('click', () => { expanded = false; refresh(); });
+    } else tail = el('p', { className: 'drawer-end', textContent: '没有更多对话了～' });
+    history.replaceChildren(...groups, tail);
   }
 
   function open() {
+    expanded = false;
     refresh();
     document.body.classList.add('drawer-open');
     drawer.setAttribute('aria-hidden', 'false');

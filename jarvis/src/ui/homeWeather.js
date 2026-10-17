@@ -37,10 +37,10 @@ export function createHomeWeather({client,onAdvice,locate=locateOnce}={}){
     $('.weather-updated').textContent=data?`${stale?'缓存数据 · ':''}资料时间 ${data.at.replace('T',' ')}${error?' · 暂未更新':''}`:error;
   });
   let autoCancelled=false;
-  // 首次首页定位，遵守系统授权；拒绝后不重复弹窗，仍可手动选择。
+  // 只在第一次打开首页时定位一次；之后用记住的城市，不再每次打开都弹定位确认。要更新位置点“使用当前位置”。
   let attempted=false;try{attempted=localStorage.getItem('jarvis.weather.locationAsked.v1')==='1';}catch{attempted=true;}
   const originalCity=client.state.city,originalKey=originalCity?cityKey(originalCity):'';
-  if((!originalCity&&!attempted)||originalCity?.source==='location'){try{localStorage.setItem('jarvis.weather.locationAsked.v1','1');}catch{}locate().then(city=>{const current=client.state.city;if(!autoCancelled&&((!originalCity&&!current)||(current?.source==='location'&&cityKey(current)===originalKey)))return client.select(city);}).catch(()=>{if(!autoCancelled&&!client.state.city)root.querySelector('.home-weather-summary').textContent='定位暂不可用，可以手动选城市';});}
+  if(!originalCity&&!attempted){try{localStorage.setItem('jarvis.weather.locationAsked.v1','1');}catch{}locate().then(city=>{const current=client.state.city;if(!autoCancelled&&((!originalCity&&!current)||(current?.source==='location'&&cityKey(current)===originalKey)))return client.select(city);}).catch(()=>{if(!autoCancelled&&!client.state.city)root.querySelector('.home-weather-summary').textContent='定位暂不可用，可以手动选城市';});}
   const foreground=()=>{if(!document.hidden&&root.isConnected)client.refresh();};document.addEventListener('visibilitychange',foreground);client.refresh();
   return{root,destroy(){autoCancelled=true;unsubscribe();searchId++;locationId++;searchCtrl?.abort();document.removeEventListener('visibilitychange',foreground);dialog.remove();}};
 }

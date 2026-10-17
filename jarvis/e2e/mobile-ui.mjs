@@ -167,6 +167,25 @@ try{
   await safePage.screenshot({path:path.join(OUT,'companion-mobile-safe-history.png')});
   check('兼容显示与历史翻页没有页面异常',safeErrors.length===0,safeErrors.join(' | '));
   await safeContext.close();
+  // 从后台关掉再打开：回首页、不再弹定位；历史对话默认只列 8 条
+  const relaunch=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+  await relaunch.addInitScript(()=>{if(window.top!==window)return;Object.defineProperty(navigator,'geolocation',{configurable:true,value:{getCurrentPosition:success=>{window.__weatherLocations=(window.__weatherLocations||0)+1;setTimeout(()=>success({coords:{latitude:31.234,longitude:121.474}}),30);}}});localStorage.setItem('jarvis.settings.v1',JSON.stringify({theme:'day',speechOutput:false}));});
+  await relaunch.route('https://api.open-meteo.com/**',route=>route.abort());
+  const again=await relaunch.newPage(),againErrors=[];again.on('pageerror',e=>againErrors.push(e.message));
+  await again.goto(BASE);await again.waitForFunction(()=>window.__jarvis&&window.__weatherLocations===1);
+  await again.evaluate(async()=>{
+    const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('jarvis');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+    const now=Date.now();await new Promise((resolve,reject)=>{const t=db.transaction('sessions','readwrite');for(let i=0;i<12;i++)t.objectStore('sessions').put({id:`relaunch-${i}`,title:`历史对话 ${i+1}`,titleSet:true,createdAt:now-i*60000,updatedAt:now-i*60000,pinned:false,messages:[{role:'user',content:`第 ${i+1} 段`,ts:now-i*60000}]});t.oncomplete=resolve;t.onerror=()=>reject(t.error);});db.close();
+  });
+  await again.goto(BASE);await again.waitForFunction(()=>window.__jarvis&&document.querySelector('.wy-home'));await again.waitForTimeout(800);
+  check('从后台关掉再打开停在首页，不自动打开上次的对话',await again.evaluate(()=>!document.querySelector('#transcript .msg')&&Boolean(document.querySelector('.wy-home'))));
+  check('再次打开用记住的城市，不再弹定位确认',await again.evaluate(()=>!window.__weatherLocations&&document.querySelector('.home-city b').textContent.includes('上海')));
+  await again.click('#btn-menu');await again.waitForSelector('.drawer-item');
+  check('历史对话默认只列 8 条，其余收在“展开更多”里',await again.locator('.drawer-item').count()===8&&(await again.locator('.drawer-more').textContent()).includes('还有 4 条'));
+  await again.click('.drawer-more');await again.waitForFunction(()=>document.querySelectorAll('.drawer-item').length===12);
+  await again.click('.drawer-more.inline');await again.waitForFunction(()=>document.querySelectorAll('.drawer-item').length===8);
+  check('展开后能看到全部、也能收起，没有页面异常',againErrors.length===0,againErrors.join(' | '));
+  await relaunch.close();
   for(const width of [320,412]){
     const narrow=await browser.newPage({viewport:{width,height:780}});await narrow.goto(BASE);await narrow.waitForSelector('body.companion-edition');
     await narrow.evaluate(()=>{document.documentElement.style.fontSize='18px';});
