@@ -4,7 +4,7 @@
  */
 import { collection, uid } from './store.js';
 import { buildIndex } from './search.js';
-import { collectRequirements } from './taskRequirements.js';
+import { archiveRequirements } from './taskRequirements.js';
 
 const sessions = collection('sessions');
 const TITLE_MAX = 24;
@@ -24,12 +24,13 @@ export function create({ title = '新对话', messages = [] } = {}) {
 export async function save(session) {
   if (!session.messages.length) return session; // 空对话不落盘
   // 必须先保全原话，再裁剪消息；随会话导入/备份/删除，不另建隐蔽的长期记忆库。
-  session.requirements = collectRequirements(session.messages, session.requirements);
+  const archived = archiveRequirements(session.messages, session.requirements);
+  session.requirements = archived.requirements;
   if (!session.titleSet) {
     const first = session.messages.find((m) => m.role === 'user');
     if (first) session.title = autoTitle(first.content);
   }
-  await sessions.put({ ...session, messages: session.messages.slice(-400) });
+  await sessions.put({ ...session, messages: archived.messages });
   return session;
 }
 

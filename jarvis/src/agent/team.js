@@ -68,10 +68,11 @@ export function ruleBasedPlan(task) {
  *   { type: 'team_step', index, status: 'running'|'done'|'fail'|'redo', note? }
  *   { type: 'team_review', pass, issues: string[], skipped? }
  */
-export async function runTeam({ adapter, model, history = [], userText, images = [], tools, emit, signal, approve, llm = null, run = runAgent, maxFix = 1, sessionId = null, pickModel = null, summary: earlier = null, requirements = null }) {
+export async function runTeam({ adapter, model, history = [], userText, images = [], tools, emit, signal, approve, llm = null, run = runAgent, maxFix = 1, sessionId = null, pickModel = null, summary: earlier = null, requirements = null, requirementText = userText }) {
   const task = stripTeamPrefix(userText);
   const record = requirements ?? collectRequirements([...history, { role: 'user', content: task }]);
   const requirementContext = requirementsBlock(record, task);
+  const planningContext = requirementsBlock(record, task, { history: history.slice(-4).map((m) => ({ ...m, content: clip(m.content, 200), requirementExcerptOf: m.content })), currentText: requirementText });
   const roleList = Object.entries(ROLES).map(([id, r]) => `${id}（${r.name}）：${r.duty}`).join('\n');
   emit({ type: 'state', value: 'processing' });
 
@@ -81,7 +82,7 @@ export async function runTeam({ adapter, model, history = [], userText, images =
     try {
       const j = parseJson(await llm({
         signal,
-        system: `你是团队的规划员，把用户的任务拆成按顺序执行的步骤，分配给合适的角色。保留相关原始要求及最新修正。只输出 JSON。\n\n${requirementContext}`,
+        system: `你是团队的规划员，把用户的任务拆成按顺序执行的步骤，分配给合适的角色。保留相关原始要求及最新修正。只输出 JSON。\n\n${planningContext}`,
         prompt: `可用角色：\n${roleList}\n\n最近的对话：\n${history.slice(-4).map((m) => `${m.role === 'user' ? '用户' : '未央'}：${clip(m.content, 200)}`).join('\n') || '（无）'}\n\n任务：${task}\n\n输出 JSON：{"steps":[{"role":"角色 id","title":"这一步做什么（不超过 16 字）","detail":"给执行者的具体要求：要产出什么、存到哪里、注意什么"}]}。2-6 步；能一步完成的不要硬拆；最后一步的产出就是用户要的成品。`
       }));
       if (Array.isArray(j?.steps) && j.steps.length) {
@@ -105,7 +106,7 @@ export async function runTeam({ adapter, model, history = [], userText, images =
     // 模型分工：工程师用编程模型、撰稿人用写作模型……（没配置时都用同一个模型）
     const m = pickModel?.(s.role) ?? { adapter, model };
     const r = await run({
-      adapter: m.adapter, model: m.model, history, signal, approve, sessionId, summary: earlier, requirements: record, // 原话不被团队生成的步骤覆盖
+      adapter: m.adapter, model: m.model, history, signal, approve, sessionId, summary: earlier, requirements: record, requirementText, // 原话不被团队生成的步骤覆盖
       images: index === 0 ? images : [],
       tools: toolsFor(s.role, tools),
       userText: `${s.detail}\n\n——\n【团队分工】你是团队里的「${s.roleName}」（职责：${ROLES[s.role].duty}），负责整个任务的第 ${index + 1}/${steps.length} 步。\n用户的原始需求：${task}\n${prior ? `前面步骤的成果：\n${prior}\n` : ''}${extra}只完成你这一步，完成后用几句话说明产出了什么（文件路径、关键数据、结论）。`,

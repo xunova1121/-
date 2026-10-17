@@ -416,7 +416,6 @@ let session = sessionsApi.create();
 let history = session.messages;
 function rememberTurn(role, content, extra = {}) {
   history.push({ role, content, ts: Date.now(), ...extra });
-  if (role === 'user') session.requirements = collectRequirements(history, session.requirements);
   session.updatedAt = Date.now();
   persistSession();
 }
@@ -983,7 +982,8 @@ async function send(text) {
       adapter, model, history: llmHistory, userText: team ? userText : await expandSlash(userText), signal: ctrl.signal,
       sessionId: session.id,
       summary: session.summary ?? null,
-      requirements: session.requirements ?? null,
+      requirements: collectRequirements(history, session.requirements),
+      requirementText: userText, // 保留斜杠命令展开前的原话，避免当成缺失历史重复注入
       maxSteps: DESKTOP ? 40 : 28, // 用鼠标键盘操作电脑、逐项联网核实时步数多
       images: imgs.map(({ mime, data }) => ({ mime, data })),
       tools: await buildTools(),
