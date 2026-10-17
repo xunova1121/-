@@ -149,7 +149,7 @@ describe('PPT 排版检查：估算字放不放得下、压没压住', async () 
     expect(info.layoutIssues).toEqual([]);
     expect(info.preview.map((s) => s.n)).toEqual([1, 2, 3, 4, 5]);
     expect(info.preview[0].background).toBeTruthy();
-    const cards = info.preview[2].items.filter((it) => it.kind === 'text' && it.h > 0.6 && it.o.lineSpacingMultiple === 1.25);
+    const cards = info.preview[2].items.filter((it) => it.kind === 'text' && it.o.lineSpacingMultiple === 1.3);
     expect(cards).toHaveLength(3);
     expect(new Set(cards.map((c) => c.o.fontSize)).size).toBe(1);
     // 图表数据记的是生成时的样子（库会改写传进去的数组）
@@ -212,5 +212,46 @@ describe('哪些模型能看图', async () => {
   it('按模型名判断', () => {
     for (const m of ['claude-haiku-5-5', 'gpt-6.1-sol', 'gpt-4o', 'qwen2.5-vl-72b', 'gemini-2.5-pro', 'glm-4v-plus']) expect(seesImages(m), m).toBe(true);
     for (const m of ['deepseek-chat', 'deepseek-reasoner', 'kimi-k2', '']) expect(seesImages(m), m).toBe(false);
+  });
+});
+
+describe('PPT 新样式：白底卡片、图标、提纲页、页脚', async () => {
+  const { makePptx, iconPicker } = await import('../src/agent/pptxWriter.js');
+  const { ICON_PNG } = await import('../src/agent/pptIcons.js');
+  const deck = `# 年度汇报\n\n## 第一部分 经营情况\n\n## 经营整体向好\n- 营收：全年营收增长 18%\n- 风险：回款周期拉长到 75 天\n- 客户：新签客户 42 家\n\n## 第二部分 下一步计划\n\n## 区域业绩\n| 区域 | 营收 | 占比 |\n|--|--|--|\n| 华东 | 820 | 44% |\n| 华南 | 560 | 30% |\n| 合计 | 1380 | 100% |\n\n## 谢谢`;
+
+  it('按文字意思配图标，同一页不重复；配不上的用备用图标；图标都在图标库里', () => {
+    const pick = iconPicker();
+    expect([pick('回款周期拉长'), pick('风险：回款变慢'), pick('新签客户 42 家'), pick('一些说不清的话')]).toEqual(['banknote', 'triangle-alert', 'users', 'sparkles']);
+    expect(iconPicker()('回款')).toBe('banknote'); // 换一页重新计
+    for (const name of ['banknote', 'triangle-alert', 'users', 'sparkles', 'layers', 'target', 'lightbulb', 'badge-check', 'rocket']) expect(ICON_PNG[name], name).toMatch(/^iVBORw0KGgo/);
+  });
+
+  it('两个以上“第 X 部分”时自动加汇报提纲页；章节后面的页右上角标着第几部分；每页底部有文档名和页码', async () => {
+    const { info } = await makePptx({ title: '年度汇报', content: deck, theme: THEMES.business });
+    expect(info.layouts).toEqual(['cover', 'agenda', 'section', 'cards', 'section', 'chart', 'end']);
+    const texts = (n) => info.preview[n - 1].items.filter((it) => it.kind === 'text').map((it) => String(Array.isArray(it.text) ? it.text.map((r) => r.text).join('') : it.text));
+    expect(texts(2)).toEqual(expect.arrayContaining(['汇报提纲', '01', '经营情况', '02', '下一步计划']));
+    expect(texts(4)).toEqual(expect.arrayContaining(['01 经营情况', '年度汇报', '4']));
+    expect(texts(6)).toContain('02 下一步计划');
+    // 卡片页：三张卡片各有一个圆形图标（PNG），没有贴着左边的整条竖线
+    const cardsPage = info.preview[3].items;
+    expect(cardsPage.filter((it) => it.kind === 'image')).toHaveLength(3);
+    expect(cardsPage.some((it) => it.kind === 'shape' && it.x === 0 && it.h >= 7)).toBe(false);
+    expect(info.layoutIssues).toEqual([]);
+  });
+
+  it('图表旁的说明不写“占比 100%”这种废话', async () => {
+    const { info } = await makePptx({ title: '年度汇报', content: deck, theme: THEMES.business });
+    const note = info.preview[5].items.filter((it) => it.kind === 'text' && Array.isArray(it.text)).flatMap((it) => it.text.map((r) => r.text)).join('');
+    expect(note).toMatch(/合计：营收 1380/);
+    expect(note).not.toMatch(/100%/);
+  });
+
+  it('封面：署名里已经带了日期就不再重复写日期', async () => {
+    const coverTexts = async (author) => (await makePptx({ title: 't', content: '## 一页\n- 要点', theme: THEMES.business, author })).info.preview[0].items.filter((it) => it.kind === 'text').map((it) => String(it.text));
+    const withDate = await coverTexts('经营分析 · 2026 年 10 月');
+    expect(withDate.filter((t) => /\d{4}\s*年/.test(t))).toEqual(['经营分析 · 2026 年 10 月']);
+    expect((await coverTexts('经营分析部')).some((t) => /^\d{4} 年 \d+ 月 \d+ 日$/.test(t))).toBe(true);
   });
 });

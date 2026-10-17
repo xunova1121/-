@@ -151,7 +151,7 @@ export function layoutIssues(slides, { max = 12 } = {}) {
         if (near(a.it.x, b.it.x) && near(a.it.y, b.it.y)) continue;
         if (overlap(a.rect, b.rect)) { add('error', s, `有两段文字压在一起：“${a.snippet}”和“${b.snippet}”。应精简文字，让每段都在自己的位置放得下`); }
       }
-      for (const img of s.items.filter((x) => x.kind === 'image' || x.kind === 'chart')) {
+      for (const img of s.items.filter((x) => (x.kind === 'image' && x.w * x.h > 0.6) || x.kind === 'chart')) { // 小图标（叠在圆上、挨着标题）不算
         if (overlap(placed[i].rect, img)) add('error', s, `的文字“${placed[i].snippet}”压到了${img.kind === 'image' ? '图片' : '图表'}上`);
       }
     }

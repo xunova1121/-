@@ -37,6 +37,43 @@ const TOTAL_ROW = /^(合计|总计|小计|总额|共计|total)/i;
 /** 单位：同一张图里单位不同的数据列不能放在一起比 */
 const UNIT = /(万元|亿元|千元|元|人天|人月|人|天|小时|%|个|台|套|次|项|家|km|公里|吨)/;
 
+/** 按文字意思配图标（图标见 pptIcons.js）；同一页尽量不重复 */
+const ICON_RULES = [
+  [/风险|问题|隐患|短板|卡点|挑战|不足|瓶颈/, 'triangle-alert'], [/回款|现金|支付|金融|贷款|账期/, 'banknote'],
+  [/营收|收入|资金|预算|投资|成本|费用|经费|利润/, 'wallet'], [/目标|定位|方向|聚焦|愿景/, 'target'],
+  [/政策|指示|精神|引领|党建|方针|领导/, 'flag'], [/规划|计划|方案|部署|清单|任务|安排/, 'clipboard-list'],
+  [/政府|省级|国家|机关|监管|治理|政务/, 'landmark'], [/占比|份额|构成|结构/, 'chart-pie'],
+  [/数据|指标|统计|分析|报表|业绩/, 'chart-column'], [/增长|增速|提升|上升|增量|发展|突破/, 'trending-up'],
+  [/客户|用户|人员|团队|人才|社员|会员|群众|农民|员工/, 'users'], [/组织|机构|企业|公司|办事处|基层|网点|编制|社/, 'building-2'],
+  [/考核|评估|验收|检查|督导|核查|审核/, 'clipboard-check'], [/安全|保障|保护|合规|风控/, 'shield-check'],
+  [/智能|AI|人工智能|算法|模型|芯片/i, 'cpu'], [/数字|信息化|系统|平台|数据库|云/, 'database'],
+  [/冷链|冷库|保鲜|冷藏/, 'snowflake'], [/物流|配送|运输|流通|快递|仓/, 'truck'],
+  [/农业|农产品|种植|农资|乡村|田|粮/, 'sprout'], [/绿色|环保|生态|低碳|减排|节能/, 'leaf'],
+  [/市场|销售|营销|门店|零售|商超|集市/, 'store'], [/品牌|荣誉|奖|标杆|示范/, 'award'],
+  [/宣传|推广|传播|媒体|舆论/, 'megaphone'], [/培训|教育|学习|培养|学院|课程/, 'graduation-cap'],
+  [/合作|协同|联动|共建|对接|伙伴|融合/, 'handshake'], [/时间|进度|周期|期限|节点|天|月/, 'clock'],
+  [/创新|改革|新模式|试点/, 'lightbulb'], [/服务|帮扶|民生|关怀|助/, 'heart-handshake'],
+  [/网络|体系|联网|网/, 'network'], [/文件|制度|规范|标准|章程/, 'file-text'],
+  [/会议|活动|日程/, 'calendar'], [/区域|地区|华东|华南|华北|华中|西南|城市|县|省/, 'map-pin'],
+  [/工程|建设|设施|改造|维修/, 'wrench'], [/资源|整合|层级|叠加/, 'layers'],
+  [/质量|品质|达标|认证/, 'badge-check'], [/效率|提速|提效|快速|高效/, 'zap'],
+  [/回收|循环|再生/, 'recycle'], [/消费|购物|采购|电商|订单/, 'shopping-cart'],
+  [/启动|上线|发布|起步|开局/, 'rocket'], [/国际|全球|海外|开放/, 'globe'],
+  [/法律|法规|公平|平衡|权益/, 'scale'], [/机制|管理|运营|流程|制度化/, 'settings'],
+  [/知识|研究|调研|阅读|理论/, 'book-open'], [/查找|识别|排查|监测|发现/, 'search']
+];
+const ICON_FALLBACK = ['sparkles', 'layers', 'target', 'lightbulb', 'badge-check', 'rocket'];
+export function iconPicker() {
+  const used = new Set();
+  return (text) => {
+    const t = String(text ?? '');
+    const hit = ICON_RULES.find(([re, name]) => re.test(t) && !used.has(name))?.[1]
+      ?? ICON_FALLBACK.find((name) => !used.has(name)) ?? 'sparkles';
+    used.add(hit);
+    return hit;
+  };
+}
+
 /** 按页拆开，每页保留原始块，供选版式 */
 export function parseSlides(title, md) {
   const blocks = parseDoc(md);
@@ -118,8 +155,8 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   pptx.author = '未央';
   const C = theme.colors;
   const dark = C.primary;
-  const light = theme.official ? 'FFFFFF' : C.bg;
-  const muted = '7F8C99';
+  const light = theme.official ? 'FFFFFF' : 'F7F9FC';
+  const muted = '8A94A6';
   const missingImages = [];
   const layouts = [];
   // 每页放了什么都记下来：生成后估算字放不放得下、画预览图给模型看（slidePreview.js）
@@ -169,104 +206,189 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     } catch { missingImages.push(src); return null; }
   };
 
+  // ---------- 版式零件（白底、左上标题、右上章节标签、底部页脚；白色卡片带淡阴影和圆形图标）
+  const { ICON_PNG } = await import('./pptIcons.js');
+  const gold = theme.official ? 'C00000' : C.extra; // 点缀色：重点关键词、封面短横线
+  const ink2 = '5B6577'; // 说明文字的灰
+  const card = { fill: { color: 'FFFFFF' }, line: { color: 'E3E8F0', width: 0.75 }, rectRadius: 0.06, shadow: { type: 'outer', color: '1F2D3D', opacity: 0.1, blur: 6, offset: 2, angle: 90 } };
+  const circleColors = theme.official ? [dark] : [C.accent, dark, C.extra];
+  const footTitle = String(title).slice(0, 40);
+  let sectionNo = 0;
+  let sectionTag = ''; // 右上角：当前在第几部分
+  const iconCircle = (sl, x, y, d, name, color) => {
+    sl.addShape(pptx.ShapeType.ellipse, { x, y, w: d, h: d, fill: { color }, line: { color } });
+    const png = ICON_PNG[name];
+    if (png) sl.addImage({ data: `image/png;base64,${png}`, x: x + d * 0.25, y: y + d * 0.25, w: d * 0.5, h: d * 0.5 });
+  };
   const titleBar = (sl, text) => {
     sl.background = { color: light };
-    sl.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.18, h: H, fill: { color: C.accent }, line: { color: C.accent } });
-    sl.addText(text, { x: 0.6, y: 0.35, w: W - 1.2, h: 0.9, fontSize: 28, bold: true, color: dark, fontFace: FONT, valign: 'middle', fit: 'shrink' });
-    sl.addShape(pptx.ShapeType.line, { x: 0.6, y: 1.3, w: W - 1.2, h: 0, line: { color: C.soft, width: 1.5 } });
+    sl.addText(text, { x: 0.6, y: 0.38, w: W - (sectionTag ? 3.9 : 1.2), h: 0.8, fontSize: 24, bold: true, color: dark, fontFace: FONT, valign: 'middle', fit: 'shrink' });
+    if (sectionTag) sl.addText(sectionTag, { x: W - 3.1, y: 0.55, w: 2.5, h: 0.45, fontSize: 10, color: C.accent, fontFace: FONT, align: 'right', valign: 'middle' });
   };
-  const pageNo = (sl, n) => sl.addText(String(n), { x: W - 1.1, y: H - 0.5, w: 0.6, h: 0.3, fontSize: 10, color: muted, align: 'right', fontFace: FONT });
+  const pageNo = (sl, n) => {
+    sl.addText(footTitle, { x: 0.6, y: H - 0.42, w: 8, h: 0.28, fontSize: 8, color: muted, fontFace: FONT, valign: 'middle' });
+    sl.addText(String(n), { x: W - 1.1, y: H - 0.42, w: 0.5, h: 0.28, fontSize: 9, color: muted, align: 'right', fontFace: FONT, valign: 'middle' });
+  };
+  /** 深色重点横条：“标签：内容”的标签用点缀色 */
+  const highlight = (sl, text, { x = 0.6, y, w = W - 1.2, h = 0.62 } = {}) => {
+    sl.addShape(pptx.ShapeType.roundRect, { x, y, w, h, fill: { color: dark }, line: { color: dark }, rectRadius: 0.05 });
+    const m = LABEL.exec(text);
+    const runs = m ? [{ text: `${m[1].trim()}　`, options: { bold: true, color: gold } }, { text: m[2].trim(), options: { color: 'FFFFFF' } }] : [{ text, options: { color: 'FFFFFF' } }];
+    sl.addText(runs, { x: x + 0.3, y, w: w - 0.6, h, fontSize: 15, fontFace: FONT, valign: 'middle', fit: 'shrink' });
+  };
+  /** 右侧装饰：几个半透明的圆（不放图片时代替主图） */
+  const ornament = (sl, x0, onDark = false) => {
+    const ring = (x, y, d, color, t) => sl.addShape(pptx.ShapeType.ellipse, { x, y, w: d, h: d, fill: { color, transparency: t }, line: { color, transparency: t } });
+    ring(x0 + 1.2, 0.9, 4.4, onDark ? 'FFFFFF' : C.accent, onDark ? 92 : 78);
+    ring(x0 + 3.0, 3.5, 3.2, onDark ? C.accent : gold, onDark ? 60 : 72);
+    ring(x0 + 0.5, 4.4, 2.0, onDark ? 'FFFFFF' : dark, onDark ? 94 : 85);
+  };
   const bulletRuns = (items, size) => items.flatMap((it, i) => {
     const run = (s) => ({ text: s.text, options: { bold: s.bold, italic: s.italic, color: s.link ? '0563C1' : undefined } });
     let head = it.inlines.map(run);
     // “标签：说明”的标签加粗，一眼能扫到重点
     const m = !it.inlines.some((x) => x.bold) && LABEL.exec(plain(it.inlines));
-    if (m) head = [{ text: `${m[1]}：`, options: { bold: true, color: C.primary } }, { text: m[2], options: {} }];
-    head[0] = { ...head[0], options: { ...head[0]?.options, bullet: { code: '25A0', indent: 26 }, paraSpaceBefore: i ? Math.round(size * 0.6) : 0 } };
+    if (m) head = [{ text: `${m[1]}：`, options: { bold: true, color: dark } }, { text: m[2], options: {} }];
+    head[0] = { ...head[0], options: { ...head[0]?.options, bullet: { code: '25CF', indent: 22 }, paraSpaceBefore: i ? Math.round(size * 0.6) : 0 } };
     head[head.length - 1].options.breakLine = true;
-    const subs = it.children.filter((c) => c.type === 'list').flatMap((c) => c.items.map((sub) => ({ text: plain(sub.inlines), options: { bullet: { indent: 26 }, indentLevel: 1, fontSize: size - 4, color: '595959', breakLine: true } })));
+    const subs = it.children.filter((c) => c.type === 'list').flatMap((c) => c.items.map((sub) => ({ text: plain(sub.inlines), options: { bullet: { indent: 22 }, indentLevel: 1, fontSize: size - 4, color: ink2, breakLine: true } })));
     return [...head, ...subs];
   });
   const textOf = (bs) => bs.flatMap((b) => (b.type === 'list' ? [b] : b.type === 'paragraph' ? [{ type: 'list', items: [{ inlines: b.inlines, children: [] }] }] : []));
   // 字号按文字量定：字少就大，把页面用起来，不要小字挤在左上角
   const fontFor = (n, chars) => {
     const c = chars + n * 12;
-    const size = c < 140 ? 26 : c < 220 ? 24 : c < 320 ? 22 : c < 440 ? 20 : c < 580 ? 18 : 16;
+    const size = c < 140 ? 24 : c < 220 ? 22 : c < 320 ? 20 : c < 440 ? 19 : c < 580 ? 17 : 16;
     return n > 6 ? Math.min(size, 18) : size;
   };
   const labelOf = (it) => { const m = LABEL.exec(plain(it.inlines)); return m ? { label: m[1].trim(), text: m[2].trim() } : { label: '', text: plain(it.inlines) }; };
-  /** 卡片网格：3 个一行；4 个两行两列；5、6 个两行三列 */
-  const cardGrid = (sl, items, { top = 1.65, bottom = 7.0 } = {}) => {
+  /** 卡片网格：3 个一行；4 个两行两列；5、6 个两行三列。白底卡片 + 圆形图标 + 标题 + 说明 */
+  const cardGrid = (sl, items, { top = 1.55, bottom = 6.85 } = {}) => {
     const n = items.length;
     const cols = n === 4 ? 2 : Math.min(3, n);
     const rows = Math.ceil(n / cols);
-    const gap = 0.25;
+    const gap = 0.3;
     const w = (W - 1.2 - gap * (cols - 1)) / cols;
-    const h = (bottom - top - gap * (rows - 1)) / rows;
-    // 说明文字按卡片大小和字数定字号，尽量把卡片填满；同一页的卡片用同一个字号（取放得下的最小值），不要一张大一张小
-    const room = (w - 0.5) * Math.max(0.6, h - 1.45);
-    const descSize = Math.min(...items.map((it) => {
-      const { text } = labelOf(it);
-      const guess = Math.max(13, Math.min(20, Math.floor(Math.sqrt((room * 5200) / Math.max(20, text.length * 1.3)))));
-      return fitText(text, { w: w - 0.5, h: Math.max(0.6, h - 1.45), fontSize: guess, lineSpacingMultiple: 1.25 }).o.fontSize;
+    let h = (bottom - top - gap * (rows - 1)) / rows;
+    // 只有一行时卡片不拉满整页（下面会空一大块），收矮一些、上下居中
+    if (rows === 1 && h > 3.6) { top += (h - 3.6) / 2; h = 3.6; }
+    const inline = h < 2.9; // 矮卡片：图标和标题放同一行，给说明留出地方
+    const d = inline ? 0.5 : 0.62;
+    const descTop = inline ? 0.95 : 1.62;
+    const descH = Math.max(0.5, h - descTop - 0.18);
+    const pick = iconPicker();
+    const parsed = items.map(labelOf);
+    // 同一页的卡片说明用同一个字号（取放得下的最小值），不要一张大一张小
+    const descSize = Math.min(...parsed.map(({ text }) => {
+      const guess = Math.max(13, Math.min(18, Math.floor(Math.sqrt(((w - 0.56) * descH * 5200) / Math.max(20, text.length * 1.3)))));
+      return fitText(text, { w: w - 0.56, h: descH, fontSize: guess, lineSpacingMultiple: 1.3 }).o.fontSize;
     }));
-    items.forEach((it, k) => {
+    parsed.forEach(({ label, text }, k) => {
       const x = 0.6 + (k % cols) * (w + gap);
       const y = top + Math.floor(k / cols) * (h + gap);
-      const { label, text } = labelOf(it);
-      sl.addShape(pptx.ShapeType.rect, { x, y, w, h, fill: { color: C.soft }, line: { color: C.soft } });
-      sl.addShape(pptx.ShapeType.rect, { x, y, w, h: 0.08, fill: { color: k % 2 ? C.extra : C.accent }, line: { color: k % 2 ? C.extra : C.accent } });
-      sl.addText(String(k + 1).padStart(2, '0'), { x: x + 0.25, y: y + 0.22, w: 0.8, h: 0.5, fontSize: 20, bold: true, color: C.accent, fontFace: FONT });
-      sl.addText(label || text, { x: x + 0.25, y: y + 0.7, w: w - 0.5, h: 0.6, fontSize: rows > 1 ? 20 : 22, bold: true, color: dark, fontFace: FONT, valign: 'top', fit: 'shrink' });
-      if (label) sl.addText(text, { x: x + 0.25, y: y + 1.3, w: w - 0.5, h: Math.max(0.6, h - 1.45), fontSize: descSize, color: C.ink, fontFace: FONT, valign: 'top', lineSpacingMultiple: 1.25, fit: 'shrink' });
+      sl.addShape(pptx.ShapeType.roundRect, { x, y, w, h, ...card });
+      iconCircle(sl, x + 0.28, y + 0.28, d, pick(`${label} ${text}`), circleColors[k % circleColors.length]);
+      if (inline) sl.addText(label || text, { x: x + 0.28 + d + 0.18, y: y + 0.28, w: w - d - 0.74, h: d, fontSize: 18, bold: true, color: dark, fontFace: FONT, valign: 'middle', fit: 'shrink' });
+      else sl.addText(label || text, { x: x + 0.28, y: y + 1.04, w: w - 0.56, h: 0.5, fontSize: 19, bold: true, color: dark, fontFace: FONT, valign: 'middle', fit: 'shrink' });
+      if (label) sl.addText(text, { x: x + 0.28, y: y + descTop, w: w - 0.56, h: descH, fontSize: descSize, color: ink2, fontFace: FONT, valign: 'top', lineSpacingMultiple: 1.3, fit: 'shrink' });
     });
   };
-  /** 一排箭头：流程链或步骤 */
-  const chevrons = (sl, nodes, { y = 1.85, h = 0.95, descs = null } = {}) => {
+  /** 一排箭头：流程链或步骤；步骤的说明放在箭头下面的卡片里 */
+  const chevrons = (sl, nodes, { y = 1.75, h = 0.85, descs = null } = {}) => {
     const n = Math.min(nodes.length, 7);
     const w = (W - 1.2) / n;
     nodes.slice(0, n).forEach((t, k) => {
       const x = 0.6 + k * w;
-      sl.addShape(k ? pptx.ShapeType.chevron : pptx.ShapeType.homePlate, { x, y, w: w + 0.12, h, fill: { color: k % 2 ? C.extra : C.accent }, line: { color: 'FFFFFF', width: 1 } });
+      const color = k % 2 ? dark : C.accent;
+      sl.addShape(k ? pptx.ShapeType.chevron : pptx.ShapeType.homePlate, { x, y, w: w + 0.12, h, fill: { color }, line: { color: 'FFFFFF', width: 1 } });
       sl.addText(t, { x: x + (k ? 0.3 : 0.1), y, w: w - 0.35, h, fontSize: n > 5 ? 13 : 15, bold: true, color: 'FFFFFF', align: 'center', valign: 'middle', fontFace: FONT, fit: 'shrink' });
-      if (descs?.[k]) sl.addText(descs[k], { x: x + 0.05, y: y + h + 0.25, w: w - 0.15, h: 6.2 - (y + h + 0.25), fontSize: n > 5 ? 15 : 17, color: C.ink, fontFace: FONT, valign: 'top', lineSpacingMultiple: 1.2, fit: 'shrink' });
+      if (descs?.[k]) {
+        const cy = y + h + 0.3;
+        sl.addShape(pptx.ShapeType.roundRect, { x: x + 0.05, y: cy, w: w - 0.1, h: 6.85 - cy, ...card });
+        sl.addText(descs[k], { x: x + 0.2, y: cy + 0.15, w: w - 0.4, h: 6.85 - cy - 0.3, fontSize: n > 5 ? 14 : 16, color: ink2, fontFace: FONT, valign: 'top', lineSpacingMultiple: 1.25, fit: 'shrink' });
+      }
     });
   };
 
-  // ---------- 封面
+  // ---------- 封面：左边深色块放文字，右边装饰
   const cover = addSlide(title);
-  cover.background = { color: dark };
-  cover.addShape(pptx.ShapeType.rect, { x: 0.8, y: 3.75, w: 1.4, h: 0.07, fill: { color: C.accent }, line: { color: C.accent } });
-  cover.addText(title, { x: 0.8, y: 2.0, w: W - 1.6, h: 1.6, fontSize: 40, bold: true, color: 'FFFFFF', fontFace: FONT, valign: 'bottom', fit: 'shrink' });
-  if (subtitle) cover.addText(subtitle, { x: 0.8, y: 4.0, w: W - 1.6, h: 0.6, fontSize: 20, color: C.soft, fontFace: FONT });
-  cover.addText([author, date || today()].filter(Boolean).join('　'), { x: 0.8, y: H - 1.2, w: W - 1.6, h: 0.5, fontSize: 14, color: C.soft, fontFace: FONT });
+  cover.background = { color: theme.official ? 'FFFFFF' : C.soft };
+  const pw = 7.4;
+  cover.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: pw, h: H, fill: { color: dark }, line: { color: dark } });
+  ornament(cover, pw);
+  // 单位 / 署名里已经带了日期就不再重复写日期
+  const coverDate = /\d{4}\s*年|\d{4}[-./]\d{1,2}/.test(author) ? '' : (date || today());
+  if (author) cover.addText(author, { x: 0.8, y: 0.9, w: pw - 1.4, h: 0.4, fontSize: 12, color: gold, fontFace: FONT });
+  cover.addText(title, { x: 0.8, y: 1.6, w: pw - 1.4, h: 2.1, fontSize: 36, bold: true, color: 'FFFFFF', fontFace: FONT, valign: 'bottom', fit: 'shrink' });
+  cover.addShape(pptx.ShapeType.rect, { x: 0.8, y: 3.9, w: 1.0, h: 0.06, fill: { color: gold }, line: { color: gold } });
+  if (subtitle) cover.addText(subtitle, { x: 0.8, y: 4.1, w: pw - 1.4, h: 1.0, fontSize: 16, color: C.soft, fontFace: FONT, valign: 'top', fit: 'shrink' });
+  if (coverDate) cover.addText(coverDate, { x: 0.8, y: H - 1.1, w: pw - 1.4, h: 0.4, fontSize: 12, color: C.soft, fontFace: FONT });
   layouts.push('cover');
+
+  // ---------- 汇报提纲：有两个以上“第 X 部分”时自动加
+  const kinds = slides.map((s, i) => layoutOf(s, { last: i === slides.length - 1 }));
+  const sections = slides.filter((s, i) => kinds[i] === 'section');
+  const shortTitle = (t) => String(t).replace(SECTION, '').replace(/^[\s:：、.，,]+/, '').trim() || String(t);
+  if (sections.length >= 2) {
+    const sl = addSlide('汇报提纲');
+    titleBar(sl, '汇报提纲');
+    const n = Math.min(sections.length, 6);
+    const gap = 0.25;
+    const h = Math.min(1.1, (5.3 - gap * (n - 1)) / n);
+    const top = 1.6 + (5.3 - (n * h + (n - 1) * gap)) / 2;
+    sections.slice(0, n).forEach((s, k) => {
+      const y = top + k * (h + gap);
+      sl.addShape(pptx.ShapeType.roundRect, { x: 0.6, y, w: W - 1.2, h, ...card });
+      sl.addText(String(k + 1).padStart(2, '0'), { x: 0.9, y, w: 1.0, h, fontSize: 28, bold: true, color: C.accent, fontFace: FONT, valign: 'middle' });
+      sl.addText(shortTitle(s.title), { x: 2.0, y, w: W - 3.0, h, fontSize: 20, bold: true, color: dark, fontFace: FONT, valign: 'middle', fit: 'shrink' });
+    });
+    pageNo(sl, records.length);
+    layouts.push('agenda');
+  }
 
   // ---------- 各页
   for (const [i, s] of slides.entries()) {
-    const kind = layoutOf(s, { last: i === slides.length - 1 });
+    const kind = kinds[i];
     layouts.push(kind);
     const sl = addSlide(s.title);
-    const n = i + 2;
+    const n = records.length;
     const lines = s.blocks.flatMap(blockLines).filter(Boolean);
     switch (kind) {
-      case 'section':
-      case 'end': {
+      case 'section': {
+        sectionNo++;
+        sectionTag = `${String(sectionNo).padStart(2, '0')} ${shortTitle(s.title)}`.slice(0, 24);
         sl.background = { color: dark };
-        sl.addShape(pptx.ShapeType.rect, { x: 0.8, y: 3.9, w: 1.2, h: 0.06, fill: { color: C.accent }, line: { color: C.accent } });
-        sl.addText(s.title || (kind === 'end' ? '谢谢' : ''), { x: 0.8, y: 2.3, w: W - 1.6, h: 1.5, fontSize: kind === 'end' ? 44 : 36, bold: true, color: 'FFFFFF', fontFace: FONT, valign: 'bottom', fit: 'shrink' });
-        if (lines.length) sl.addText(lines.join('　'), { x: 0.8, y: 4.15, w: W - 1.6, h: 0.8, fontSize: 18, color: C.soft, fontFace: FONT });
+        ornament(sl, pw, true);
+        sl.addText(String(sectionNo).padStart(2, '0'), { x: 0.8, y: 1.7, w: 3, h: 1.1, fontSize: 60, bold: true, color: gold, fontFace: FONT, valign: 'bottom' });
+        sl.addText(shortTitle(s.title), { x: 0.8, y: 2.9, w: pw, h: 1.3, fontSize: 36, bold: true, color: 'FFFFFF', fontFace: FONT, valign: 'top', fit: 'shrink' });
+        if (lines.length) sl.addText(lines.join('　'), { x: 0.8, y: 4.3, w: pw, h: 0.8, fontSize: 16, color: C.soft, fontFace: FONT, valign: 'top', fit: 'shrink' });
+        break;
+      }
+      case 'end': {
+        sl.background = { color: theme.official ? 'FFFFFF' : C.soft };
+        sl.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: pw, h: H, fill: { color: dark }, line: { color: dark } });
+        ornament(sl, pw);
+        if (lines.length) {
+          sl.addText(lines.join('\n'), { x: 0.8, y: 1.8, w: pw - 1.4, h: 2.0, fontSize: 28, bold: true, color: 'FFFFFF', fontFace: FONT, valign: 'bottom', fit: 'shrink' });
+          sl.addText(s.title || '谢谢', { x: 0.8, y: 4.3, w: pw - 1.4, h: 0.8, fontSize: 28, bold: true, color: gold, fontFace: FONT });
+        } else {
+          sl.addText(s.title || '谢谢', { x: 0.8, y: 2.3, w: pw - 1.4, h: 1.5, fontSize: 48, bold: true, color: 'FFFFFF', fontFace: FONT, valign: 'bottom', fit: 'shrink' });
+          sl.addShape(pptx.ShapeType.rect, { x: 0.8, y: 3.95, w: 1.0, h: 0.06, fill: { color: gold }, line: { color: gold } });
+        }
         break;
       }
       case 'stats': {
         titleBar(sl, s.title);
         const items = s.blocks.find((b) => b.type === 'list').items.map((it) => plain(it.inlines).match(NUM_ITEM));
-        const cw = (W - 1.2 - 0.3 * (items.length - 1)) / items.length;
+        const gap = 0.3;
+        const cw = (W - 1.2 - gap * (items.length - 1)) / items.length;
+        const pick = iconPicker();
         items.forEach((m, k) => {
-          const x = 0.6 + k * (cw + 0.3);
-          sl.addShape(pptx.ShapeType.roundRect, { x, y: 2.1, w: cw, h: 3.2, fill: { color: C.soft }, line: { color: C.soft }, rectRadius: 0.08 });
-          sl.addText(m[1].trim(), { x, y: 2.5, w: cw, h: 1.3, fontSize: 40, bold: true, color: C.accent, align: 'center', fontFace: FONT, fit: 'shrink' });
-          sl.addText(m[2].trim(), { x: x + 0.2, y: 3.9, w: cw - 0.4, h: 1.1, fontSize: 16, color: dark, align: 'center', valign: 'top', fontFace: FONT });
+          const x = 0.6 + k * (cw + gap);
+          sl.addShape(pptx.ShapeType.roundRect, { x, y: 1.9, w: cw, h: 3.6, ...card });
+          iconCircle(sl, x + cw / 2 - 0.33, 2.25, 0.66, pick(m[2]), circleColors[k % circleColors.length]);
+          sl.addText(m[1].trim(), { x, y: 3.05, w: cw, h: 1.0, fontSize: 40, bold: true, color: C.accent, align: 'center', valign: 'middle', fontFace: FONT, fit: 'shrink' });
+          sl.addText(m[2].trim(), { x: x + 0.25, y: 4.15, w: cw - 0.5, h: 1.1, fontSize: 16, color: ink2, align: 'center', valign: 'top', fontFace: FONT, fit: 'shrink' });
         });
         pageNo(sl, n);
         break;
@@ -278,16 +400,18 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
           if (b.type === 'heading') groups.push({ title: plain(b.inlines), blocks: [] });
           else if (groups.length) groups.at(-1).blocks.push(b);
         }
+        // 两边卡片一样高：按要点多的那边定
+        const rowsOf = (g) => textOf(g.blocks).flatMap((b) => b.items).reduce((a, it) => a + Math.ceil(plain(it.inlines).length / 22) + it.children.length, 0);
+        const bodyH = Math.min(4.4, Math.max(1.4, 0.5 + Math.max(...groups.slice(0, 2).map(rowsOf)) * 0.62));
         groups.slice(0, 2).forEach((g, k) => {
           const x = 0.6 + k * ((W - 1.2) / 2 + 0.15);
           const w = (W - 1.2) / 2 - 0.15;
-          const color = k ? C.extra : C.accent;
-          sl.addShape(pptx.ShapeType.rect, { x, y: 1.65, w, h: 0.6, fill: { color }, line: { color } });
-          sl.addText(g.title, { x, y: 1.65, w, h: 0.6, fontSize: 20, bold: true, color: 'FFFFFF', align: 'center', valign: 'middle', fontFace: FONT });
+          const color = k ? gold : C.accent;
           const items = textOf(g.blocks).flatMap((b) => b.items);
-          // 框的高度跟着内容走：要点少时不留一大片空底色
-          const rows = items.reduce((a, it) => a + Math.ceil(plain(it.inlines).length / 22) + it.children.length, 0);
-          if (items.length) sl.addText(bulletRuns(items, 20), { x, y: 2.4, w, h: Math.min(4.4, Math.max(1.6, 0.5 + rows * 0.62)), fontSize: 20, color: C.ink, fontFace: FONT, valign: 'top', fill: { color: C.soft }, margin: 14 });
+          sl.addShape(pptx.ShapeType.roundRect, { x, y: 1.6, w, h: bodyH + 0.75, ...card });
+          sl.addShape(pptx.ShapeType.rect, { x, y: 1.6, w, h: 0.62, fill: { color }, line: { color } });
+          sl.addText(g.title, { x, y: 1.6, w, h: 0.62, fontSize: 19, bold: true, color: 'FFFFFF', align: 'center', valign: 'middle', fontFace: FONT, fit: 'shrink' });
+          if (items.length) sl.addText(bulletRuns(items, 18), { x: x + 0.25, y: 2.35, w: w - 0.5, h: bodyH - 0.05, fontSize: 18, color: C.ink, fontFace: FONT, valign: 'top', lineSpacingMultiple: 1.15, fit: 'shrink' });
         });
         pageNo(sl, n);
         break;
@@ -300,22 +424,27 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
         const totals = t.rows.filter((r) => TOTAL_ROW.test(plain(r[0] ?? [])));
         const labels = rows.map((r) => plain(r[0] ?? []));
         const data = cols.map((c) => ({ name: plain(t.header[c]), labels, values: rows.map((r) => num(plain(r[c] ?? []))) }));
-        // 没画进图的列（单位不同）和合计，写在右边说明里
+        // 没画进图的列（单位不同）和合计，写在右边说明里；占比的合计（100%）不写
         const other = numericColumns(t).filter((c) => !cols.includes(c));
+        const isShare = (c) => /占比|比重|构成/.test(plain(t.header[c]));
         const note = [
-          ...totals.map((r) => `${plain(r[0])}：${t.header.map((h, c) => (c && plain(r[c] ?? []) ? `${plain(h)} ${plain(r[c])}` : '')).filter(Boolean).join('，')}`),
+          ...totals.map((r) => `${plain(r[0])}：${t.header.map((h, c) => (c && plain(r[c] ?? []) && !isShare(c) ? `${plain(h)} ${plain(r[c])}` : '')).filter(Boolean).join('，')}`),
           ...other.map((c) => `${plain(t.header[c])}：${rows.map((r) => `${plain(r[0])} ${plain(r[c] ?? [])}`).join('，')}`),
           ...s.blocks.filter((b) => b.type !== 'table').flatMap(blockLines).filter(Boolean)
-        ];
+        ].filter((x) => !/：$/.test(x));
         const chartW = note.length ? 8.2 : W - 1.2;
         sl.addChart(pptx.ChartType.bar, data, {
-          x: 0.6, y: 1.55, w: chartW, h: 5.3, barDir: 'col', barGapWidthPct: 60,
-          chartColors: (cols.length === 1 ? [C.accent] : [C.accent, C.extra, C.primary]).map((c) => c.toUpperCase()),
+          x: 0.6, y: 1.5, w: chartW, h: 5.3, barDir: 'col', barGapWidthPct: 60,
+          chartColors: (cols.length === 1 ? [C.accent] : [C.accent, gold, dark]).map((c) => c.toUpperCase()),
           showLegend: cols.length > 1, legendPos: 'b', legendFontFace: FONT, legendFontSize: 12,
           showValue: true, dataLabelFontSize: 11, dataLabelFontFace: FONT, dataLabelColor: '404040',
           catAxisLabelFontFace: FONT, catAxisLabelFontSize: 12, valAxisLabelFontSize: 11, valGridLine: { color: 'E5E8EC', size: 0.5 }
         });
-        if (note.length) sl.addText(note.map((x) => ({ text: x, options: { bullet: { code: '25A0', indent: 20 }, breakLine: true, paraSpaceAfter: 10 } })), { x: 9.1, y: 1.8, w: W - 9.7, h: 4.8, fontSize: 15, color: C.ink, fontFace: FONT, valign: 'top', fit: 'shrink' });
+        if (note.length) {
+          const noteH = Math.min(4.9, 0.5 + note.reduce((a, x) => a + Math.ceil(x.length / 14), 0) * 0.42);
+          sl.addShape(pptx.ShapeType.roundRect, { x: 9.0, y: 1.7, w: W - 9.6, h: noteH, ...card });
+          sl.addText(note.map((x) => ({ text: x, options: { bullet: { code: '25CF', indent: 18 }, breakLine: true, paraSpaceAfter: 10 } })), { x: 9.2, y: 1.85, w: W - 10.0, h: noteH - 0.3, fontSize: 15, color: C.ink, fontFace: FONT, valign: 'top', fit: 'shrink' });
+        }
         pageNo(sl, n);
         break;
       }
@@ -328,9 +457,9 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
         const lens = t.header.map((h, ci) => Math.max(plain(h).length, ...t.rows.map((r) => plain(r[ci] ?? []).length)));
         const sum = lens.reduce((a, b) => a + Math.min(Math.max(b, 4), 40), 0);
         const colW = lens.map((l) => ((W - 1.2) * Math.min(Math.max(l, 4), 40)) / sum);
-        const head = t.header.map((c) => ({ text: plain(c), options: { bold: true, color: 'FFFFFF', fill: { color: C.accent }, align: 'center' } }));
+        const head = t.header.map((c) => ({ text: plain(c), options: { bold: true, color: 'FFFFFF', fill: { color: dark }, align: 'center' } }));
         const body = t.rows.map((r, ri) => t.header.map((_, ci) => ({ text: plain(r[ci] ?? []), options: { fill: { color: ri % 2 ? C.soft : 'FFFFFF' }, align: t.align[ci] ?? (num(plain(r[ci] ?? [])) !== null ? 'right' : 'left') } })));
-        sl.addTable([head, ...body], { x: 0.6, y: 1.6, w: W - 1.2, fontSize: fs, fontFace: FONT, color: C.ink, border: { type: 'solid', pt: 0.75, color: 'BFC7D1' }, valign: 'middle', colW, ...(rowH && { rowH }), autoPage: true, autoPageRepeatHeader: true });
+        sl.addTable([head, ...body], { x: 0.6, y: 1.55, w: W - 1.2, fontSize: fs, fontFace: FONT, color: C.ink, border: { type: 'solid', pt: 0.75, color: 'D5DCE6' }, valign: 'middle', colW, ...(rowH && { rowH }), autoPage: true, autoPageRepeatHeader: true });
         pageNo(sl, n);
         break;
       }
@@ -339,21 +468,21 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
         titleBar(sl, s.title);
         const img = s.blocks.find((b) => b.type === 'image');
         const pic = await imageData(img.src);
-        const area = kind === 'image' ? { x: 0.6, y: 1.55, w: W - 1.2, h: 5.4 } : { x: 7.0, y: 1.6, w: 5.7, h: 5.2 };
+        const area = kind === 'image' ? { x: 0.6, y: 1.5, w: W - 1.2, h: 5.3 } : { x: 7.0, y: 1.55, w: 5.7, h: 5.2 };
         if (pic) {
           let w = area.w;
           let h = w / pic.ratio;
           if (h > area.h) { h = area.h; w = h * pic.ratio; }
           sl.addImage({ data: pic.data, x: area.x + (area.w - w) / 2, y: area.y + (area.h - h) / 2, w, h });
         } else {
-          sl.addShape(pptx.ShapeType.rect, { ...area, fill: { color: C.soft }, line: { color: C.soft } });
+          sl.addShape(pptx.ShapeType.roundRect, { ...area, fill: { color: C.soft }, line: { color: C.soft }, rectRadius: 0.06 });
           sl.addText(`［图片：${img.alt || img.src}］`, { ...area, fontSize: 16, color: muted, align: 'center', fontFace: FONT });
         }
         if (img.alt) sl.addText(img.alt, { x: area.x, y: area.y + area.h - 0.05, w: area.w, h: 0.4, fontSize: 12, color: muted, align: 'center', fontFace: FONT });
         if (kind === 'imageText') {
           const items = textOf(s.blocks.filter((b) => b.type !== 'image')).flatMap((b) => b.items);
           const size = fontFor(items.length, lines.join('').length) - 2;
-          sl.addText(bulletRuns(items, size), { x: 0.6, y: 1.6, w: 6.1, h: 5.2, fontSize: size, color: C.ink, fontFace: FONT, valign: 'top' });
+          sl.addText(bulletRuns(items, size), { x: 0.6, y: 1.6, w: 6.1, h: 5.2, fontSize: size, color: C.ink, fontFace: FONT, valign: 'top', fit: 'shrink' });
         }
         pageNo(sl, n);
         break;
@@ -364,12 +493,9 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
         const all = s.blocks.filter((b) => b.type === 'list').flatMap((b) => b.items);
         const main = all.filter((it) => LABEL.test(plain(it.inlines)));
         const foot = all.filter((it) => !main.includes(it)).map((it) => plain(it.inlines));
-        if (kind === 'cards') cardGrid(sl, main, { bottom: foot.length ? 6.3 : 7.0 });
+        if (kind === 'cards') cardGrid(sl, main, { bottom: foot.length ? 6.05 : 6.85 });
         else { const its = main.map(labelOf); chevrons(sl, its.map((x) => x.label), { descs: its.map((x) => x.text) }); }
-        if (foot.length) {
-          sl.addShape(pptx.ShapeType.rect, { x: 0.6, y: 6.45, w: 0.08, h: 0.45, fill: { color: C.accent }, line: { color: C.accent } });
-          sl.addText(foot.join('；'), { x: 0.8, y: 6.4, w: W - 1.6, h: 0.55, fontSize: 15, bold: true, color: dark, fontFace: FONT, valign: 'middle', fit: 'shrink' });
-        }
+        if (foot.length) highlight(sl, foot.join('；'), { y: 6.25 });
         pageNo(sl, n);
         break;
       }
@@ -379,13 +505,14 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
         const chainIt = all.find((it) => isChain(plain(it.inlines)));
         const { label, text } = labelOf(chainIt);
         const nodes = (label && isChain(text) ? text : plain(chainIt.inlines)).split(ARROW).map((x) => x.trim()).filter(Boolean);
-        if (label && isChain(text)) sl.addText(label, { x: 0.6, y: 1.45, w: W - 1.2, h: 0.4, fontSize: 16, bold: true, color: dark, fontFace: FONT });
-        chevrons(sl, nodes, { y: 1.95 });
+        if (label && isChain(text)) sl.addText(label, { x: 0.6, y: 1.35, w: W - 1.2, h: 0.4, fontSize: 16, bold: true, color: dark, fontFace: FONT });
+        chevrons(sl, nodes, { y: 1.85 });
         const rest = all.filter((it) => it !== chainIt);
-        if (rest.length >= 3 && rest.length <= 6 && rest.every((it) => LABEL.test(plain(it.inlines)))) cardGrid(sl, rest, { top: 3.3 });
+        if (rest.length >= 3 && rest.length <= 6 && rest.every((it) => LABEL.test(plain(it.inlines)))) cardGrid(sl, rest, { top: 3.1 });
         else if (rest.length) {
           const size = Math.min(22, fontFor(rest.length, rest.map((it) => plain(it.inlines)).join('').length));
-          sl.addText(bulletRuns(rest, size), { x: 0.8, y: 3.3, w: W - 1.6, h: 3.6, fontSize: size, color: C.ink, fontFace: FONT, valign: 'top', lineSpacingMultiple: 1.15, fit: 'shrink' });
+          sl.addShape(pptx.ShapeType.roundRect, { x: 0.6, y: 3.1, w: W - 1.2, h: 3.75, ...card });
+          sl.addText(bulletRuns(rest, size), { x: 0.9, y: 3.3, w: W - 1.8, h: 3.35, fontSize: size, color: C.ink, fontFace: FONT, valign: 'top', lineSpacingMultiple: 1.15, fit: 'shrink' });
         }
         pageNo(sl, n);
         break;
@@ -398,22 +525,24 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
         const short = items.length >= 2 && items.length <= 4 && items.every((it) => !it.children.some((c) => c.type === 'list') && plain(it.inlines).length <= 46);
         const total = items.map((it) => plain(it.inlines)).join('').length;
         if (items.length <= 2 && total <= 90 && !items.some((it) => it.children.length)) {
-          // 只有一两句话：大字居中，当作重点陈述页
-          sl.addShape(pptx.ShapeType.rect, { x: 1.2, y: 2.6, w: 0.1, h: 2.2, fill: { color: C.accent }, line: { color: C.accent } });
-          sl.addText(bulletRuns(items, 30).map((r) => ({ ...r, options: { ...r.options, bullet: false, paraSpaceBefore: 18 } })), { x: 1.6, y: 2.2, w: W - 3.2, h: 3.0, fontSize: 30, color: dark, fontFace: FONT, valign: 'middle', fit: 'shrink' });
+          // 只有一两句话：浅色底板上的大字，当作重点陈述页
+          sl.addShape(pptx.ShapeType.roundRect, { x: 1.2, y: 2.0, w: W - 2.4, h: 3.4, fill: { color: C.soft }, line: { color: C.soft }, rectRadius: 0.06 });
+          sl.addShape(pptx.ShapeType.rect, { x: 1.7, y: 2.45, w: 1.0, h: 0.07, fill: { color: gold }, line: { color: gold } });
+          sl.addText(bulletRuns(items, 30).map((r) => ({ ...r, options: { ...r.options, bullet: false, paraSpaceBefore: 18 } })), { x: 1.7, y: 2.7, w: W - 3.4, h: 2.4, fontSize: 30, color: dark, fontFace: FONT, valign: 'middle', fit: 'shrink' });
         } else if (short) {
-          // 要点少而短：做成一行一张卡片，带序号，铺满页面，不让三行字挤在左上角
-          const gap = 0.22, top = 1.75, h = Math.min(1.25, (5.1 - gap * (items.length - 1)) / items.length);
+          // 要点少而短：一行一张白卡片，左边配图标，铺满页面，不让几行字挤在左上角
+          const gap = 0.25, top = 1.6, h = Math.min(1.2, (5.2 - gap * (items.length - 1)) / items.length);
+          const pick = iconPicker();
           items.forEach((it, k) => {
             const y = top + k * (h + gap);
-            sl.addShape(pptx.ShapeType.roundRect, { x: 0.8, y, w: W - 1.6, h, fill: { color: C.soft }, line: { color: C.soft }, rectRadius: 0.06 });
-            sl.addShape(pptx.ShapeType.ellipse, { x: 1.05, y: y + h / 2 - 0.3, w: 0.6, h: 0.6, fill: { color: C.accent }, line: { color: C.accent } });
-            sl.addText(String(k + 1), { x: 1.05, y: y + h / 2 - 0.3, w: 0.6, h: 0.6, fontSize: 18, bold: true, color: 'FFFFFF', align: 'center', valign: 'middle', fontFace: FONT });
-            sl.addText(it.inlines.map((r) => ({ text: r.text, options: { bold: r.bold, italic: r.italic } })), { x: 1.95, y, w: W - 3.0, h, fontSize: 22, color: C.ink, fontFace: FONT, valign: 'middle', fit: 'shrink' });
+            sl.addShape(pptx.ShapeType.roundRect, { x: 0.6, y, w: W - 1.2, h, ...card });
+            iconCircle(sl, 0.9, y + h / 2 - 0.3, 0.6, pick(plain(it.inlines)), circleColors[k % circleColors.length]);
+            sl.addText(it.inlines.map((r) => ({ text: r.text, options: { bold: r.bold, italic: r.italic } })), { x: 1.75, y, w: W - 2.75, h, fontSize: 21, color: C.ink, fontFace: FONT, valign: 'middle', fit: 'shrink' });
           });
         } else if (items.length) {
           const size = fontFor(items.length, lines.join('').length);
-          sl.addText(bulletRuns(items, size), { x: 0.8, y: 1.6, w: W - 1.6, h: 5.3, fontSize: size, color: C.ink, fontFace: FONT, valign: 'top', lineSpacingMultiple: 1.15, fit: 'shrink' });
+          sl.addShape(pptx.ShapeType.roundRect, { x: 0.6, y: 1.5, w: W - 1.2, h: 5.35, ...card });
+          sl.addText(bulletRuns(items, size), { x: 0.95, y: 1.7, w: W - 1.9, h: 4.95, fontSize: size, color: C.ink, fontFace: FONT, valign: 'top', lineSpacingMultiple: 1.15, fit: 'shrink' });
         }
         pageNo(sl, n);
       }
