@@ -68,6 +68,7 @@ import * as sessionsApi from './agent/sessions.js';
 import { initSessionsPanel } from './ui/sessionsPanel.js';
 import { initCallouts } from './ui/callouts.js';
 import { openingSuggestions, followUpSuggestions, INTERRUPTED_MARK } from './core/suggest.js';
+import { savePending, clearPending, takePending, resumeText } from './core/pendingTask.js';
 import * as mcp from './agent/mcpClient.js';
 import { createDesktopTools } from './agent/desktopTools.js';
 import { initMcpPanel } from './ui/mcpPanel.js';
@@ -987,6 +988,9 @@ async function send(text, { echo = true } = {}) {
   const turn = { ctrl, streamDone: false, bubble, session, files: new Set(), inbox: [], t0: now(), steps: 0, status: '', background: false };
   active = turn;
   setTask('processing', '思考中');
+  // 手机：记下正在做的任务（App 被划掉时，下次打开接着做）
+  const doneSteps = [];
+  if (MOBILE) savePending(storage, session.id, { turnId: turn.t0, text, title: session.title || '', ts: Date.now(), steps: [], files: [] });
 
   // 模型分工：按这句话的类型换模型；日常对话让推理模型少想一点（首字更快）
   const task = shouldTeam(text, settings.teamMode === 'auto' && !helperLlm() ? 'off' : settings.teamMode) ? 'reason' : classifyTask(text, { images: imgs.length + withImages.size });
@@ -1104,6 +1108,7 @@ async function send(text, { echo = true } = {}) {
         } else if (e.type === 'tool_end') {
           cards.get(e.id)?.done(e.ok, e.output, e.ms);
           hud.toolEnd(e.id, e.ok);
+          if (MOBILE) { doneSteps.push(`${toolLabel(e.name)}${e.ok ? '' : '（失败）'}`); savePending(storage, turn.session.id, { ts: Date.now(), steps: doneSteps, files: [...turn.files] }); }
           if (!e.ok) hud.think(`✕ ${toolLabel(e.name)} 失败`, 'bad');
           if (/remember|forget|save_skill/.test(e.name)) panels.refreshMind();
         } else if (e.type === 'server_tool') {
@@ -1162,6 +1167,7 @@ async function send(text, { echo = true } = {}) {
     if (resumable) rememberTurn('assistant', `${shown.trim()}\n\n${INTERRUPTED_MARK}`, { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) }, turn.session);
     callouts?.set(followUpSuggestions({ error: true, resumable, userText: text, desktop: Boolean(DESKTOP) }));
   } finally {
+    if (MOBILE) clearPending(storage, turn.session.id, turn.t0);
     await persistSession(turn.session);
     releaseTask();
     endControl();
@@ -2148,6 +2154,16 @@ setTimeout(schedulerTick, 4000);
     setSetting('persistMemory', false);
   }
   const [recent] = await sessionsApi.list().catch(() => []);
+  // 手机：上次 App 被关掉时有任务做到一半：回到那个对话接着做
+  const left = MOBILE ? takePending(storage) : null;
+  const leftSession = left && await sessionsApi.get(left.sessionId).catch(() => null);
+  if (leftSession && !history.length) {
+    await switchTo(leftSession);
+    toast('上次退出时任务还没做完，正在接着做（说“停”可以停下）');
+    send(resumeText(left));
+    sessionsPanel.refresh();
+    return;
+  }
   // 手机：只有刷新页面、或界面崩溃后自动重开时才接回刚才的对话；从后台关掉再打开就停在首页
   const reopened = performance.getEntriesByType?.('navigation')?.[0]?.type === 'reload' || globalThis.__jarvisRecentCrash === true;
   if ((!COMPACT || reopened) && recent && Date.now() - recent.updatedAt < 6 * 3600_000 && !history.length) await switchTo(recent);

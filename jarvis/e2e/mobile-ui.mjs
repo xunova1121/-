@@ -184,6 +184,9 @@ try{
   check('历史对话默认只列 8 条，其余收在“展开更多”里',await again.locator('.drawer-item').count()===8&&(await again.locator('.drawer-more').textContent()).includes('还有 4 条'));
   await again.click('.drawer-more');await again.waitForFunction(()=>document.querySelectorAll('.drawer-item').length===12);
   await again.click('.drawer-more.inline');await again.waitForFunction(()=>document.querySelectorAll('.drawer-item').length===8);
+  await again.evaluate(()=>localStorage.setItem('jarvis.pendingTasks.v1',JSON.stringify({'relaunch-3':{turnId:1,text:'生成一页纸汇报 Word',title:'历史对话 4',ts:Date.now()-60000,steps:['读取文件'],files:[]}})));
+  await again.goto(BASE);await again.waitForFunction(()=>[...document.querySelectorAll('#transcript .msg.user')].some(m=>m.textContent.includes('上次 App 被关掉')),null,{timeout:15000});
+  check('App 被关掉时没做完的任务：再打开回到那个对话，带着做过的步骤接着做',await again.evaluate(()=>document.querySelector('#transcript').textContent.includes('第 4 段')&&[...document.querySelectorAll('#transcript .msg.user')].at(-1).textContent.includes('已经做过的步骤：读取文件')));
   check('展开后能看到全部、也能收起，没有页面异常',againErrors.length===0,againErrors.join(' | '));
   await relaunch.close();
   for(const width of [320,412]){

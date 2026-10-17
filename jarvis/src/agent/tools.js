@@ -591,7 +591,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
     },
     {
       name: 'run_python',
-      description: '运行 Python（浏览器内的 Pyodide，首次使用需联网加载）。工作目录 /workspace 就是工作区，读写的文件会同步回工作区。可用 numpy、pandas 等常见库（自动加载）；python-pptx / python-docx / openpyxl 等纯 Python 库在代码开头用 `import micropip; await micropip.install("python-pptx")` 安装。',
+      description: '运行 Python（浏览器内的 Pyodide，首次使用需联网下载几十 MB，手机上常要几分钟；读文件用 read_file、生成文档用 create_document，不要用它代替）。工作目录 /workspace 就是工作区，读写的文件会同步回工作区。可用 numpy、pandas 等常见库（自动加载）；python-pptx / python-docx / openpyxl 等纯 Python 库在代码开头用 `import micropip; await micropip.install("python-pptx")` 安装。',
       input_schema: S({ code: str('Python 代码') }, ['code']),
       run: async ({ code }) => {
         const listing = pickPythonFiles(await ws.list(), code);

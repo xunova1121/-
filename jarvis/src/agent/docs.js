@@ -89,13 +89,14 @@ let pdfjsPromise = null;
 function loadPdfjs() {
   pdfjsPromise ??= (async () => {
     if (typeof window === 'undefined') return import('pdfjs-dist/legacy/build/pdf.mjs');
-    const pdfjs = await import('pdfjs-dist');
+    // 用兼容版（legacy）：新版要求较新的浏览器内核，安卓 / 鸿蒙手机自带的 WebView 上会报“Promise.withResolvers is not a function”
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
     // 单文件版：file:// 下模块 Worker 起不来，把内联的 Worker 源码去掉 export 后当普通 Worker 运行；正常版：独立的 worker 文件
     if (typeof __STANDALONE__ !== 'undefined' && __STANDALONE__) {
-      const src = (await import('pdfjs-dist/build/pdf.worker.min.mjs?raw')).default.replace(/export\s*\{[^}]*\}\s*;?\s*$/, '');
+      const src = (await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?raw')).default.replace(/export\s*\{[^}]*\}\s*;?\s*$/, '');
       pdfjs.GlobalWorkerOptions.workerPort = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
     } else {
-      pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).href;
+      pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/legacy/build/pdf.worker.min.mjs', import.meta.url).href;
     }
     return pdfjs;
   })();
