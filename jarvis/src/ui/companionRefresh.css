@@ -24,6 +24,8 @@
 .companion-edition .wy-reply-greeting{display:none}
 .companion-edition.workbench .msg.agent{padding-left:0;display:grid;grid-template-columns:44px minmax(0,1fr);column-gap:12px}
 .companion-edition.workbench .msg.agent>*{grid-column:2;min-width:0;max-width:100%}
+/* 生成中的状态是伪元素，也必须占正文列，不能自动落入 44px 头像列。 */
+.companion-edition.workbench .msg.agent.streaming::after{grid-column:2;min-width:0;max-width:100%;box-sizing:border-box;white-space:normal;overflow-wrap:anywhere}
 .companion-edition.workbench .msg.agent>.who::before{content:none;display:none;animation:none}
 .companion-edition.workbench .msg.agent>.who .who-mood{position:relative;inset:auto;grid-column:1;grid-row:1;--mascot-size:52px;margin:0;justify-self:center}
 .companion-edition.workbench .msg.agent>.who{grid-column:1/-1;display:grid;grid-template-columns:44px auto minmax(0,1fr);min-height:56px;height:auto;gap:0 12px;margin-bottom:6px}

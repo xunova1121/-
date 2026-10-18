@@ -20,6 +20,10 @@ export class EmotionTagStripper {
     this.buf += delta;
     const trimmed = this.buf.replace(/^\s+/, '');
     if (!trimmed) return { text: '', hint: null };
+    // 兼容模型省略 emotion 外壳的七种已知情绪；只缓冲可能的前缀，不吞正文或 HTML。
+    const short = trimmed.match(/^<\s*(平静|专注|聆听|亲和|安抚|愉悦|警觉)\s*>\s*/);
+    if (short) return this.#release(short[1], trimmed.slice(short[0].length));
+    if (EMOTIONS.some(e => ('<' + e + '>').startsWith(trimmed))) return { text: '', hint: null };
     // 开头既不是 "<emotion>" 的前缀、也不以它开头 → 模型没写标签
     if (!'<emotion>'.startsWith(trimmed.slice(0, 9))) {
       return this.#release(null, this.buf);
@@ -49,7 +53,7 @@ export class EmotionTagStripper {
 
 /** 正文里残留的情绪标签（任何位置、各种写错的形式）一律去掉 */
 export function stripEmotionTags(s) {
-  return String(s ?? '').replace(/<\s*\/?\s*emotion\s*>\s*(?:[^<>\s]{0,8}\s*(?:<\s*\/\s*emotion\s*>|>))?/gi, '');
+  return String(s ?? '').replace(/^\s*<\s*(?:平静|专注|聆听|亲和|安抚|愉悦|警觉)\s*>\s*/, '').replace(/<\s*\/?\s*emotion\s*>\s*(?:[^<>\s]{0,8}\s*(?:<\s*\/\s*emotion\s*>|>))?/gi, '');
 }
 
 /** 表情对应的小图标（显示在“未央 · 时间”旁边） */

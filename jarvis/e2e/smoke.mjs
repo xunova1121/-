@@ -974,6 +974,23 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
     check(width + 'px：头像不遮昵称与正文，长链接/代码/表格不撑破对话', layout.avatar && layout.content, JSON.stringify(layout));
     check(width + 'px：输入区不遮消息，滚动条隐藏', layout.composer && layout.scroll);
   }
+  // 覆盖用户截图中的生成中状态：伪元素必须在正文列，工具卡不挤压状态文字。
+  await p.evaluate(() => {
+    const el = document.querySelector('#transcript .msg.agent:last-child');
+    el.classList.add('streaming'); el.dataset.status = '正在帮你找资料…';
+    const card = document.createElement('details'); card.className = 'tool-group'; card.open = true;
+    const summary = document.createElement('summary'); summary.textContent = '执行步骤 第 1 步 fact_check';
+    card.append(summary); el.append(card);
+  });
+  for (const width of [900, 1280, 1920]) {
+    await p.setViewportSize({ width, height: 860 });
+    const state = await p.evaluate(() => {
+      const el = document.querySelector('#transcript .msg.agent:last-child'), after = getComputedStyle(el, '::after');
+      const body = el.querySelector('.body').getBoundingClientRect(), card = el.querySelector('.tool-group').getBoundingClientRect();
+      return { column: after.gridColumnStart, width: parseFloat(after.width), height: parseFloat(after.height), bodyWidth: body.width, aligned: Math.abs(body.left - card.left) < 2 };
+    });
+    check(width + 'px：生成中状态横排，工具卡与正文对齐', state.column === '2' && state.width > 200 && state.height < 50 && state.aligned, JSON.stringify(state));
+  }
   const scrolls = await p.evaluate(() => {
     const t = document.querySelector('#transcript'), msg = t.querySelector('.msg.agent');
     for (let i = 0; i < 8; i++) t.append(msg.cloneNode(true));
