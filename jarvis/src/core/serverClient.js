@@ -50,16 +50,50 @@ const sleep = (ms, signal) => new Promise((resolve, reject) => {
 /**
  * @param {{ base: string, token?: string, fetchImpl?: typeof fetch }} o
  */
-export function createServerClient({ base, token = '', fetchImpl = (...a) => globalThis.fetch(...a) }) {
+export function createServerClient({ base, token = '', fetchImpl = (...a) => globalThis.fetch(...a), timeoutMs = 20000 }) {
   const root = normalizeUrl(base);
-  async function req(path, { method = 'GET', body, raw = false, signal, headers = {}, binary = false } = {}) {
-    const res = await fetchImpl(`${root}${path}`, {
-      method, signal,
-      // 手机 App 退到原生网络时：binary 让它按原始字节读（不然 Word、图片这类文件会被当成文字读坏）
-      ...(binary && { binary: true }),
-      headers: { ...(token && { Authorization: `Bearer ${token}` }), ...(body !== undefined && !(body instanceof Blob) && { 'Content-Type': 'application/json' }), ...headers },
-      ...(body !== undefined && { body: body instanceof Blob ? body : JSON.stringify(body) })
-    });
+  /** 最近几次请求花了多久、走的哪种网络（设置 → 服务器模式里显示，查“为什么慢”用） */
+  const timings = [];
+  const note = (path, t0, ok) => {
+    const via = globalThis.__jarvisNetVia?.(`${root}${path}`);
+    timings.unshift({ path: path.split('?')[0], ms: Date.now() - t0, ok, ...(via && { via }), at: Date.now() });
+    timings.length = Math.min(timings.length, 8);
+  };
+  async function send(path, { method, body, signal, headers, binary, timeout }) {
+    // 超时：网络卡住时不一直等，报错让上层重试或提示（事件流不设，它本来就一直开着）
+    const ctrl = new AbortController();
+    const stop = () => ctrl.abort();
+    signal?.addEventListener('abort', stop, { once: true });
+    const timer = timeout ? setTimeout(() => { ctrl.timedOut = true; ctrl.abort(); }, timeout) : 0;
+    const t0 = Date.now();
+    try {
+      const res = await fetchImpl(`${root}${path}`, {
+        method, signal: ctrl.signal,
+        // 手机 App 退到原生网络时：binary 让它按原始字节读（不然 Word、图片这类文件会被当成文字读坏）
+        ...(binary && { binary: true }),
+        headers: { ...(token && { Authorization: `Bearer ${token}` }), ...(body !== undefined && !(body instanceof Blob) && { 'Content-Type': 'application/json' }), ...headers },
+        ...(body !== undefined && { body: body instanceof Blob ? body : JSON.stringify(body) })
+      });
+      note(path, t0, res.ok);
+      return res;
+    } catch (e) {
+      note(path, t0, false);
+      if (ctrl.timedOut && !signal?.aborted) throw Object.assign(new Error(`连服务器超时（${Math.round(timeout / 1000)} 秒没有回应）`), { timeout: true });
+      throw e;
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', stop);
+    }
+  }
+  async function req(path, { method = 'GET', body, raw = false, signal, headers = {}, binary = false, timeout = raw ? 0 : timeoutMs } = {}) {
+    let res;
+    try {
+      res = await send(path, { method, body, signal, headers, binary, timeout });
+    } catch (e) {
+      // 读数据的请求网络一抖就失败：再试一次（写数据的不重试，免得做两遍）
+      if (method !== 'GET' || signal?.aborted || (e?.name === 'AbortError' && !e.timeout)) throw e;
+      res = await send(path, { method, body, signal, headers, binary, timeout });
+    }
     if (raw) return res;
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw Object.assign(new Error(res.status === 401 ? '服务器登录已失效，请到 设置 → 服务器模式 重新登录' : data.error || `服务器返回 ${res.status}`), { status: res.status });
@@ -67,6 +101,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
   }
   return {
     base: root,
+    timings,
     /** @returns {Promise<string>} 令牌 */
     async login(password) { return (await req('/api/server/login', { method: 'POST', body: { password } })).token; },
     health: () => req('/api/health'),
@@ -87,12 +122,12 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     importSession: (session) => req('/api/sessions/import', { method: 'POST', body: session }),
     listFiles: () => req('/api/files'),
     async download(path) {
-      const res = await req(`/api/files/raw?path=${encodeURIComponent(path)}`, { raw: true, binary: true });
+      const res = await req(`/api/files/raw?path=${encodeURIComponent(path)}`, { raw: true, binary: true, timeout: 120000 });
       if (!res.ok) throw new Error(`下载 ${path} 失败（${res.status}）`);
       return res.blob();
     },
     // 上传用 Base64 包在 JSON 里：手机 App 退到原生网络时，原始字节会被当成文字传坏
-    upload: async (path, blob) => req(`/api/files/raw?path=${encodeURIComponent(path)}&encoding=base64`, { method: 'PUT', body: { data: await toBase64(blob) } })
+    upload: async (path, blob) => req(`/api/files/raw?path=${encodeURIComponent(path)}&encoding=base64`, { method: 'PUT', body: { data: await toBase64(blob) }, timeout: 120000 })
   };
 }
 
@@ -181,19 +216,56 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
     }
   }
 
-  /** 对话的读写交给服务器：标题、钉住、删除改服务器上的；消息由服务器自己记，这里保存是空操作 */
-  export function remoteSessions(client) {
-    return {
-      list: () => client.listSessions().then((rows) => rows.map((s) => ({ ...s, messages: [] }))),
-      get: (id) => client.getSession(id),
-      save: async (s) => s,
-      rename: (id, title) => client.patchSession(id, { title }),
-      setPinned: (id, pinned) => client.patchSession(id, { pinned }),
-      remove: (id) => client.deleteSession(id),
-      async search(query) {
-        const q = String(query || '').trim().toLowerCase();
-        const all = await this.list();
-        return q ? all.filter((s) => String(s.title).toLowerCase().includes(q)) : all;
-      }
+/** 手机 / 电脑上留一份服务器对话的副本：打开 App、切换对话时先显示它，再从服务器取最新的 */
+const CACHE_KEY = 'jarvis.server.cache.v1';
+/** 副本里最多留几段对话、每段最多几条消息（太大存不下） */
+const CACHE_SESSIONS = 12;
+const CACHE_MESSAGES = 80;
+
+/** 对话的读写交给服务器：标题、钉住、删除改服务器上的；消息由服务器自己记，这里保存是空操作 */
+export function remoteSessions(client, { storage = globalThis.localStorage } = {}) {
+  let cache = { list: null, sessions: {} };
+  try { cache = { list: null, sessions: {}, ...JSON.parse(storage?.getItem(CACHE_KEY) || '{}') }; } catch { /* 坏了就从空的开始 */ }
+  const persist = () => {
+    // 存不下（手机存储满）就少存几段再试
+    for (let n = CACHE_SESSIONS; n >= 0; n -= 4) {
+      try {
+        const keep = Object.entries(cache.sessions).sort((a, b) => (b[1].cachedAt ?? 0) - (a[1].cachedAt ?? 0)).slice(0, n);
+        cache.sessions = Object.fromEntries(keep);
+        storage?.setItem(CACHE_KEY, JSON.stringify(cache));
+        return;
+      } catch { /* 再少存一点 */ }
+    }
+  };
+  const remember = (s) => {
+    if (!s?.id) return s;
+    const { taskId, ...rest } = s;
+    cache.sessions[s.id] = { ...rest, messages: (s.messages ?? []).slice(-CACHE_MESSAGES), cachedAt: Date.now() };
+    persist();
+    return s;
+  };
+  let listing = null; // 同时有好几处要列表（启动、抽屉、对话面板）：共用一次请求
+  return {
+    list() {
+      listing ??= client.listSessions().then((rows) => {
+        cache.list = rows.map(({ taskId, ...x }) => x);
+        persist();
+        return rows.map((x) => ({ ...x, messages: [] }));
+      }).finally(() => { setTimeout(() => { listing = null; }, 1500); });
+      return listing;
+    },
+    get: (id) => client.getSession(id).then((s) => (s ? remember(s) : (delete cache.sessions[id], persist(), s))),
+    /** 副本里的列表 / 某段对话（没有就是 null），马上能拿到 */
+    cachedList: () => cache.list?.map((x) => ({ ...x, messages: [] })) ?? null,
+    cachedGet: (id) => (cache.sessions[id] ? { ...cache.sessions[id], cached: true } : null),
+    save: async (s) => s,
+    rename: (id, title) => client.patchSession(id, { title }).then((r) => { if (cache.sessions[id]) cache.sessions[id].title = title; listing = null; return r; }),
+    setPinned: (id, pinned) => client.patchSession(id, { pinned }).then((r) => { listing = null; return r; }),
+    remove: (id) => client.deleteSession(id).then((r) => { delete cache.sessions[id]; cache.list = cache.list?.filter((x) => x.id !== id) ?? null; persist(); listing = null; return r; }),
+    async search(query) {
+      const q = String(query || '').trim().toLowerCase();
+      const all = await this.list();
+      return q ? all.filter((s) => String(s.title).toLowerCase().includes(q)) : all;
+    }
   };
 }

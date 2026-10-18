@@ -422,7 +422,11 @@ const storage = (() => { try { return localStorage; } catch { return null; } })(
 // 服务器模式（设置 → 服务器模式）：任务交给自己的云服务器做，对话也存在服务器上
 const serverCfg = loadServerSettings(storage);
 const server = serverCfg.enabled && serverCfg.url && serverCfg.token ? createServerClient({ base: serverCfg.url, token: serverCfg.token }) : null;
-if (server) { sessionsApi.useRemote(remoteSessions(server)); globalThis.__jarvisServerMode = true; updateModelLabels(); refreshServerModel(); }
+if (server) {
+  // 手机 App：连自己的服务器直接走系统原生网络（不先试 WebView、没有跨域预检，国内移动网络下快得多）
+  try { globalThis.__jarvisPreferNative?.(new URL(server.base).host); } catch { /* 网址不对就算了 */ }
+  sessionsApi.useRemote(remoteSessions(server)); globalThis.__jarvisServerMode = true; globalThis.__jarvisServerClient = server; updateModelLabels(); refreshServerModel();
+}
 /** 服务器模式：输入框里显示服务器上设的模型 */
 /** 服务器模式下换了模型（或改了密钥、分工）：自动传到服务器，任务马上用新设置。语音设置留在本机 */
 let pushTimer = 0;
@@ -742,11 +746,43 @@ function newSession() {
   $('#prompt').focus();
 }
 addEventListener('jarvis:open-session', (e) => { openSession(e.detail).then(() => showPanel('sessions')); });
+let opening = 0; // 连点了好几段对话：只认最后点的那段
 async function openSession(id) {
-  if (id === session.id) return;
-  const s = await sessionsApi.get(id);
-  if (s) switchTo(s);
+  // 点的就是当前对话：服务器模式下从服务器取一次最新进度（另一台设备可能接着聊过）
+  if (id === session.id) { if (server) refreshFromServer(); return; }
+  const mine = ++opening;
+  // 服务器模式：先用手机 / 电脑上留的副本马上切过去，再从服务器取最新的换上
+  const cached = server ? sessionsApi.cachedGet(id) : null;
+  if (cached) await switchTo(cached);
+  else if (server) setTask('processing', '正在打开对话');
+  const s = await sessionsApi.get(id).catch((e) => { if (!cached) toast(`打不开这段对话：${e.message}`); return null; });
+  if (mine !== opening) return;
+  if (!s) { if (!cached) setTask('idle'); return; }
+  if (!cached) await switchTo(s);
+  else if (session.id === id && !active && changed(session, s)) { session = s; history = s.messages; reflectFrom = history.length; replayTranscript(); }
+  if (server && session.id === id && s.taskId && !active) followServerTask(s); // 另一台设备正在做：接上进度
 }
+/** 服务器上的这段对话比手上的新吗（另一台设备接着聊过、或者做完了任务） */
+const changed = (a, b) => b.messages.length !== a.messages.length || (b.updatedAt ?? 0) > (a.updatedAt ?? 0) || b.messages.at(-1)?.content !== a.messages.at(-1)?.content;
+/** 服务器模式：从服务器取当前对话的最新进度，有变化就换上（App 切回前台、点当前对话时） */
+let refreshing = false;
+async function refreshFromServer() {
+  if (!server || refreshing || active || !session?.id) return;
+  refreshing = true;
+  try {
+    const id = session.id;
+    const s = await sessionsApi.get(id).catch(() => null);
+    if (!s || session.id !== id || active) return;
+    if (changed(session, s)) { session = s; history = s.messages; reflectFrom = history.length; replayTranscript(); }
+    if (s.taskId) followServerTask(s);
+    try { drawer?.refresh?.(); } catch { /* 抽屉还没建好 */ }
+  } finally { refreshing = false; }
+}
+// App 从后台切回来 / 电脑窗口重新获得焦点：拉一次最新进度（两台设备轮着用时不会对不上）
+let lastPull = 0;
+const pullSoon = () => { if (Date.now() - lastPull < 3000) return; lastPull = Date.now(); refreshFromServer(); };
+document.addEventListener('visibilitychange', () => { if (!document.hidden) pullSoon(); });
+addEventListener('focus', pullSoon);
 
 /** 光核旁的建议标注（启动末尾创建） */
 let callouts = null;
@@ -1760,6 +1796,7 @@ function showPanel(name, { toggle = false } = {}) {
   if (name === 'sessions') sessionsPanel?.refresh();
   if (name === 'system') schedulesPanel?.refresh();
   if (name === 'settings') renderHabits();
+  dispatchEvent(new CustomEvent('jarvis:panel', { detail: name })); // 面板打开时各自刷新（如服务器模式的网络耗时）
 }
 for (const b of document.querySelectorAll('.rail-btn')) b.addEventListener('click', () => showPanel(b.dataset.panel, { toggle: true }));
 for (const b of document.querySelectorAll('[data-open]')) b.addEventListener('click', () => showPanel(b.dataset.open));
@@ -2280,7 +2317,20 @@ if (COMPACT) {
     onOpenSession: (id) => { openSession(id); closeSide(); },
     onPanel: (name) => showPanel(name),
     listSessions: () => sessionsApi.list(),
-    currentId: () => session.id
+    cachedSessions: () => sessionsApi.cachedList(),
+    currentId: () => session.id,
+    onRename: async (id, title) => {
+      await sessionsApi.rename(id, title);
+      if (id === session.id) { session.title = title; session.titleSet = true; showChatTitle(); }
+      sessionsPanel?.refresh();
+    },
+    onPin: async (id, pinned) => { await sessionsApi.setPinned(id, pinned); if (id === session.id) session.pinned = pinned; sessionsPanel?.refresh(); },
+    onDelete: async (id) => {
+      await sessionsApi.remove(id);
+      if (id === session.id) switchTo(sessionsApi.create());
+      sessionsPanel?.refresh();
+      toast('已删除');
+    }
   });
   $('#btn-menu').hidden = false;
   $('#btn-menu').addEventListener('click', () => drawer.open());
@@ -2322,7 +2372,10 @@ setTimeout(schedulerTick, 4000);
   }
   // 手机：只有刷新页面、或界面崩溃后自动重开时才接回刚才的对话；从后台关掉再打开就停在首页
   const reopened = performance.getEntriesByType?.('navigation')?.[0]?.type === 'reload' || globalThis.__jarvisRecentCrash === true;
-  if ((!COMPACT || reopened) && recent && Date.now() - recent.updatedAt < 6 * 3600_000 && !history.length) await switchTo(server ? (await sessionsApi.get(recent.id).catch(() => null)) ?? recent : recent); // 服务器的列表不带消息，要单独取完整的
+  if ((!COMPACT || reopened) && recent && Date.now() - recent.updatedAt < 6 * 3600_000 && !history.length) {
+    if (server) await openSession(recent.id); // 服务器的列表不带消息：先显示副本，再取完整的
+    else await switchTo(recent);
+  }
   sessionsPanel.refresh();
 })();
 agentMemory.maintain().catch(() => {});

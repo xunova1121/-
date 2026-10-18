@@ -21,7 +21,19 @@ export function initServerPanel({ getLlmConfig, toast, reload = () => location.r
   const say = (t) => { status.textContent = t; };
   const client = () => createServerClient({ base: $('#server-url').value || cfg.url, token: loadServerSettings().token });
 
+  // 最近几次请求花了多久、走的哪种网络：还嫌慢时截图这一行，能看出卡在哪
+  const NAMES = { '/api/sessions': '对话列表', '/api/server/config': '模型设置', '/api/server/status': '状态', '/api/server/update': '版本', '/api/tasks': '发任务', '/api/files/raw': '传文件' };
+  const label = (p) => NAMES[p] ?? (p.startsWith('/api/sessions/') ? '打开对话' : p.startsWith('/api/tasks/') ? '任务进度' : p);
+  function showNet() {
+    const list = globalThis.__jarvisServerClient?.timings ?? [];
+    $('#server-net').textContent = list.length
+      ? `最近请求：${list.slice(0, 5).map((t) => `${label(t.path)} ${(t.ms / 1000).toFixed(1)} 秒${t.ok ? '' : '（失败）'}${t.via ? `·${t.via === 'native' ? '原生网络' : '网页网络'}` : ''}`).join('；')}`
+      : '';
+  }
+  if ($('#server-net')) addEventListener('jarvis:panel', (e) => { if (e.detail === 'settings') showNet(); });
+
   async function check() {
+    showNet();
     if (!cfg.enabled || !cfg.token) { say(cfg.token ? '已登录，未开启' : '还没登录'); return; }
     try {
       const s = await client().status();

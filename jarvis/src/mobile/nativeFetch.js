@@ -63,6 +63,8 @@ export function wrapFetch(webFetch, native, selfOrigin, g = globalThis) {
   const nativeHosts = new Set();
   // 诊断用：这个地址最近走的是哪条网络
   g.__jarvisNetVia = (url) => { try { return nativeHosts.has(new URL(url).host) ? 'native' : 'web'; } catch { return 'web'; } };
+  // 已知网页方式慢或连不上的地址（比如自己的服务器）：一开始就走原生网络，不先试
+  g.__jarvisPreferNative = (host) => { if (host) nativeHosts.add(host); };
   return async (input, init = {}) => {
     const url = new URL(typeof input === 'string' ? input : input.url, selfOrigin);
     if (url.origin === selfOrigin || !/^https?:$/.test(url.protocol)) return webFetch(input, init);

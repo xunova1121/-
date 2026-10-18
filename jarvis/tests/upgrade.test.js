@@ -105,3 +105,11 @@ describe('手机左边栏的历史对话', () => {
     expect(groupSessions([{ updatedAt: now }, { updatedAt: now - 30 * 864e5 }], now).map(([g]) => g)).toEqual(['今天', '更早']);
   });
 });
+
+describe('抽屉：置顶的对话单独一组排最前', () => {
+  it('置顶的不管多久以前都在“置顶”组', async () => {
+    const { groupSessions } = await import('../src/ui/drawer.js');
+    const now = Date.now();
+    expect(groupSessions([{ updatedAt: now }, { updatedAt: now - 30 * 864e5, pinned: true }], now).map(([g]) => g)).toEqual(['置顶', '今天']);
+  });
+});

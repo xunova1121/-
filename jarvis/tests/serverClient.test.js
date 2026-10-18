@@ -109,3 +109,52 @@ describe('服务器模式客户端', () => {
     expect(calls).toEqual([['patch', 'c1', { title: '新标题' }], ['del', 'c2']]);
   });
 });
+
+describe('服务器模式：打开快、不卡住', () => {
+  const memStorage = () => { const m = new Map(); return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) }; };
+  const jsonRes = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+
+  it('网络卡住时超时报错；读数据的请求自动再试一次，并记下每次花了多久', async () => {
+    let n = 0;
+    const fetchImpl = (url, init) => new Promise((resolve, reject) => {
+      n++;
+      if (n === 1) { init.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))); return; } // 第一次一直不回
+      resolve(jsonRes([{ id: 'a', title: '甲' }]));
+    });
+    const { createServerClient } = await import('../src/core/serverClient.js');
+    const c = createServerClient({ base: 'https://s.example', token: 't', fetchImpl, timeoutMs: 50 });
+    expect(await c.listSessions()).toEqual([{ id: 'a', title: '甲' }]);
+    expect(n).toBe(2);
+    expect(c.timings.map((t) => t.ok)).toEqual([true, false]);
+    // 一直卡住：两次都超时，报“超时”
+    const stuck = createServerClient({ base: 'https://s.example', fetchImpl: (u, init) => new Promise((_, rej) => init.signal.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' })))), timeoutMs: 30 });
+    await expect(stuck.listSessions()).rejects.toThrow('超时');
+    // 写数据的请求不重试（免得做两遍）
+    let posts = 0;
+    const once = createServerClient({ base: 'https://s.example', fetchImpl: (u, init) => { posts++; return new Promise((_, rej) => init.signal.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' })))); }, timeoutMs: 30 });
+    await expect(once.startTask({ text: 'x' })).rejects.toThrow('超时');
+    expect(posts).toBe(1);
+  });
+
+  it('留一份副本：重新打开时马上有列表和对话内容；几处同时要列表只请求一次；删除后副本里也没了', async () => {
+    const storage = memStorage();
+    let lists = 0;
+    const client = {
+      listSessions: async () => { lists++; return [{ id: 'a', title: '甲', updatedAt: 2, count: 3, taskId: null }]; },
+      getSession: async (id) => ({ id, title: '甲', updatedAt: 2, messages: [{ role: 'user', content: '你好' }] }),
+      deleteSession: async () => ({ ok: true }), patchSession: async () => ({ ok: true })
+    };
+    const r = remoteSessions(client, { storage });
+    expect(r.cachedList()).toBeNull();
+    await Promise.all([r.list(), r.list(), r.list()]);
+    expect(lists).toBe(1);
+    await r.get('a');
+    // 模拟 App 关掉再打开：新建一个，副本还在
+    const again = remoteSessions(client, { storage });
+    expect(again.cachedList().map((x) => x.title)).toEqual(['甲']);
+    expect(again.cachedGet('a')).toMatchObject({ id: 'a', cached: true, messages: [{ content: '你好' }] });
+    await again.remove('a');
+    expect(remoteSessions(client, { storage }).cachedGet('a')).toBeNull();
+    expect(remoteSessions(client, { storage }).cachedList()).toEqual([]);
+  });
+});

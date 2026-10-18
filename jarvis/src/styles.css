@@ -1362,3 +1362,14 @@ body.reduced-motion .welcome-hero * { animation: none !important; }
 .brand-text { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
 .chat-title { display: none; max-width: 52vw; padding: 0; border: 0; background: none; color: var(--dim); font: 400 12px/1.3 var(--font-ui); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .compact .chat-title:not([hidden]) { display: block; }
+
+/* 抽屉：搜索框、每条对话右边的“⋯”菜单（重命名 / 置顶 / 删除） */
+.drawer-search { display: block; width: calc(100% - 12px); margin: 0 6px 6px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text); font: inherit; font-size: 14px; box-sizing: border-box; }
+.drawer-row { position: relative; display: flex; align-items: center; }
+.drawer-row .drawer-item { flex: 1; min-width: 0; }
+.drawer-item-more { flex: none; width: 34px; height: 34px; border: 0; border-radius: 10px; background: none; color: var(--dim); font-size: 18px; line-height: 1; }
+.drawer-item-more:active { background: var(--accent-soft); }
+.drawer-menu { position: absolute; right: 6px; top: 100%; z-index: 5; display: grid; min-width: 120px; padding: 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface, #fff); box-shadow: 0 8px 24px rgba(20, 20, 50, .18); }
+.drawer-menu button { padding: 10px 12px; border: 0; border-radius: 8px; background: none; color: var(--text); font: inherit; font-size: 14px; text-align: left; }
+.drawer-menu button:active { background: var(--accent-soft); }
+.drawer-menu .danger { color: #d64545; }
