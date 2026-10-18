@@ -58,10 +58,14 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
   const requestId = () => globalThis.crypto?.randomUUID?.() || 'r_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2);
   async function taskWrite(path, body) {
     // 只有服务器明确支持请求去重时才重试写请求；旧服务器保持不自动重发。
-    taskProtocol ??= req('/api/server/status',{}).then(x=>Boolean(x.features?.taskRequestIds)).catch(()=>false);
-    const supported=await taskProtocol, payload={...body,requestId:body.requestId||requestId()};
+    const payload={...body,requestId:body.requestId||requestId()};
     try{return await req(path,{method:'POST',body:payload});}
-    catch(e){if(!supported||e.status||e.name==='AbortError'&&!e.timeout)throw e;return req(path,{method:'POST',body:payload});}
+    catch(e){
+      if(e.status||e.name==='AbortError'&&!e.timeout)throw e;
+      taskProtocol ??= req('/api/server/status',{}).then(x=>Boolean(x.features?.taskRequestIds)).catch(()=>false);
+      if(!await taskProtocol)throw e;
+      return req(path,{method:'POST',body:payload});
+    }
   }
   const note = (path, t0, ok) => {
     const via = globalThis.__jarvisNetVia?.(`${root}${path}`);

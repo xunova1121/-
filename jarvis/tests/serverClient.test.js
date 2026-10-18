@@ -131,7 +131,7 @@ describe('服务器模式：打开快、不卡住', () => {
     await expect(stuck.listSessions()).rejects.toThrow('超时');
     // 写数据的请求不重试（免得做两遍）
     let posts = 0;
-    const once = createServerClient({ base: 'https://s.example', fetchImpl: (u, init) => { posts++; return new Promise((_, rej) => init.signal.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' })))); }, timeoutMs: 30 });
+    const once = createServerClient({ base: 'https://s.example', fetchImpl: (u, init) => { if(init.method==='POST')posts++; return new Promise((_, rej) => init.signal.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' })))); }, timeoutMs: 30 });
     await expect(once.startTask({ text: 'x' })).rejects.toThrow('超时');
     expect(posts).toBe(1);
   });
