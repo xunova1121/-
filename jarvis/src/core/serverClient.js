@@ -212,11 +212,14 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
    * @returns {Promise<{ text: string, toolCalls: number, steps: number }>}
    */
   export async function runRemote(client, { sessionId, userText, images = [], voice = false, emit, signal, onFile, onStarted, taskId = null }) {
+    if(signal?.aborted)throw Object.assign(new Error('aborted'),{name:'AbortError'});
     const task = taskId ? { id: taskId } : await client.startTask({ sessionId, text: userText, ...(images.length && { images }), ...(voice && { voice: true }) });
-    await onStarted?.(task);
     const stop = () => client.stopTask(task.id).catch(() => {});
+    if(signal?.aborted){await stop();throw Object.assign(new Error('aborted'),{name:'AbortError'});}
     signal?.addEventListener('abort', stop, { once: true });
     try {
+      await onStarted?.(task);
+      if(signal?.aborted)throw Object.assign(new Error('aborted'),{name:'AbortError'});
       const end = await followTask(client, task.id, {
         signal,
         onEvent: (ev) => {

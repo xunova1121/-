@@ -172,3 +172,9 @@ it('服务器支持去重时写请求重试保持同一编号；旧服务器不�
   else{await expect(client.startTask({sessionId:'c',text:'运行'})).rejects.toThrow('network');expect(payloads).toHaveLength(1);}
  }
 });
+
+it('提交尚未返回任务编号时叫停，拿到编号后立即停止服务器任务，不开始跟随',async()=>{
+ let release;const events=[];const client={startTask:()=>new Promise(r=>{release=r}),stopTask:async id=>{events.push('stop:'+id)},events:async()=>{events.push('follow');}};
+ const ctrl=new AbortController(),pending=runRemote(client,{sessionId:'c',userText:'做任务',signal:ctrl.signal,emit:()=>{}});ctrl.abort();release({id:'late'});
+ await expect(pending).rejects.toMatchObject({name:'AbortError'});expect(events).toEqual(['stop:late']);
+});
