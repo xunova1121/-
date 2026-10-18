@@ -496,9 +496,11 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
     tick();
   });
   // 打字提问默认不念（只在语音对话、说话提问时念）
+  await page.waitForFunction(() => !window.__jarvis.speaker.speaking, null, { timeout: 15000 }).catch(() => {}); // 点声线效果时会试听一句
+  const heard = tts.seen.length;
   await ask(page, '你好');
   await page.waitForTimeout(800);
-  check('打字提问默认不朗读回答', !tts.seen.some((x) => x.url === '/v1/audio/speech'));
+  check('打字提问默认不朗读回答', tts.seen.length === heard, `多了 ${tts.seen.length - heard} 次语音请求`);
   // 打开“打字提问也朗读回答”后再测云端语音
   await page.evaluate(() => { const c = document.querySelector('#set-tts'); if (!c.checked) c.click(); });
   await ask(page, '你好');
