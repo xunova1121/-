@@ -71,6 +71,18 @@ export function createTools(ctx) {
   const readPage = createPageReader(ctx); // 直接打不开或没读到正文时，有 Tavily Key 就让 Tavily 代读
   const seenFiles = new Set(); // 这次读过或写过的工作区文件（覆盖没读过的文件前先拦一下）
   const overwriteWarned = new Set();
+  const previewOffice=async(out,target,progress,signal)=>{
+    const notes=[];
+    if(!['docx','pptx','xlsx'].includes(out.ext))return notes;
+    if(!ctx.officeRender)return ['本端未做Office真实渲染；现有PPT预览及排版检查属于生成器检查'];
+    try{
+      progress?.('生成Office真实预览…');const rendered=await ctx.officeRender(out.blob,out.ext,{signal});
+      if(rendered.available){const preview=await ws.write(target.replace(/\\.[^.]+$/,'')+'.预览.pdf',rendered.blob);ctx.onFileChanged?.(preview.path);notes.push('已用LibreOffice真实转换为PDF：'+preview.path+'；可打开核对实际分页，未宣称人工视觉验收通过');}
+      else notes.push(rendered.reason);
+    }catch(e){if(e.name==='AbortError')throw e;notes.push('Office真实预览未完成：'+e.message);}
+    return notes;
+  };
+
   /** Word 模板：指定了就用指定的；没指定就找工作区里最近改过的模板文件；"none" 不用 */
   const findTemplate = async (format, template) => {
     if (format !== 'docx' || template === 'none') return { tpl: null };
@@ -536,13 +548,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         const r = await ws.write(target, out.blob);
         ctx.onFileChanged?.(r.path);
         const notes = [`主题：${out.theme.name}`,validation.readback==='passed'?'已检查真实文件结构并读回有效内容':'已检查文件头或结构'];
-        if(ctx.officeRender&&['docx','pptx','xlsx'].includes(out.ext)){
-          try{
-            progress?.('生成Office真实预览…');const rendered=await ctx.officeRender(out.blob,out.ext,{signal});
-            if(rendered.available){const preview=await ws.write(target.replace(/\\.[^.]+$/,'')+'.预览.pdf',rendered.blob);ctx.onFileChanged?.(preview.path);notes.push('已用LibreOffice真实转换为PDF：'+preview.path+'；可打开核对实际分页，未宣称人工视觉验收通过');}
-            else notes.push(rendered.reason);
-          }catch(e){if(e.name==='AbortError')throw e;notes.push('Office真实预览未完成：'+e.message);}
-        }else if(['docx','pptx','xlsx'].includes(out.ext))notes.push('本端未做Office真实渲染；现有PPT预览及排版检查属于生成器检查');
+        notes.push(...await previewOffice(out,target,progress,signal));
         if (check.checked) notes.push(check.changed ? `生成前对照要求自查，修正了 ${check.changed} 处${check.problems.length ? `（${check.problems.slice(0, 4).join('；')}）` : ''}` : '生成前对照要求自查，没发现问题');
         const what = format === 'xlsx' ? '公式' : '排版';
         if (post?.fixed) notes.push(`生成后检查${what}，自动修正了 ${post.fixed} 处`);
@@ -600,10 +606,13 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
           toPdf: ctx.toPdf ?? null, template: tpl
         });
         const target = path.replace(/\.[a-z0-9]+$/i, '') + `.${out.ext}`;
+        await checkArtifact(out.blob,target);
         const w = await ws.write(target, out.blob);
         ctx.onFileChanged?.(w.path);
+        const previewNotes=await previewOffice(out,target,progress,signal);
         const chars = r.markdown.replace(/[\s#|*\-`>]/g, '').length;
         const lines = [`已生成 ${w.path}（${fmtSize(out.blob.size)}，${r.outline.length} 节，约 ${chars} 字，主题：${out.theme.name}）`];
+        lines.push('已检查真实文件结构并读回有效内容',...previewNotes);
         if (tpl) lines.push(`沿用了工作区里的模板 ${tplPath}`);
         const left = lint(format, r.markdown);
         if (left.length) lines.push(`自查还需要注意：${left.map((x) => x.text).join('；')}`);
