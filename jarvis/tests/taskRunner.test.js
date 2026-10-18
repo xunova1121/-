@@ -25,6 +25,15 @@ afterEach(async () => {
 const until = async (fn, ms = 8000) => { const t0 = Date.now(); while (!(await fn())) { if (Date.now() - t0 > ms) throw new Error('等待超时'); await new Promise((r) => setTimeout(r, 20)); } };
 const mockCfg = async () => ({ ...DEFAULT_CONFIG, provider: 'mock' });
 
+/** 并发测试保持任务运行直到叫停；已经取消的信号也立即结束，不靠定时等待。 */
+function heldAdapter() {
+  return { stream: ({ signal }) => new Promise((resolve, reject) => {
+    const stop = () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+    if (signal?.aborted) stop();
+    else signal?.addEventListener('abort', stop, { once: true });
+  }) };
+}
+
 /** 假模型：按脚本一步步回复（tool 调用或文字），可以设置每步之前等多久 */
 function scripted(steps, { delay = 0 } = {}) {
   let i = 0;
@@ -76,6 +85,50 @@ describe('服务器任务执行器', () => {
     await until(() => runner.get(a.id).status === 'stopped');
     const s = await sessions.get(a.sessionId);
     expect(s.messages.filter((m) => m.role === 'user').map((m) => m.content)).toEqual(['做个很长的任务', '顺便加一页总结']);
+  });
+
+
+  it('同一会话并发提交只创建一个任务，两个用户原话都保留', async () => {
+    const adapter = heldAdapter();
+    const runner = createTaskRunner({ getConfig: mockCfg, maxRunning: 2, makeAdapter: () => ({ adapter, model: 'm' }) });
+    const results = await Promise.all([
+      runner.start({ sessionId: 'concurrent-chat', text: '整理报告' }),
+      runner.start({ sessionId: 'concurrent-chat', text: '再加一页总结' })
+    ]);
+    expect(new Set(results.map((r) => r.id)).size).toBe(1);
+    expect(results.filter((r) => r.joined)).toHaveLength(1);
+    expect(runner.list()).toHaveLength(1);
+    const messages = (await sessions.get('concurrent-chat')).messages.filter((m) => m.role === 'user').map((m) => m.content);
+    expect(messages).toEqual(['整理报告', '再加一页总结']);
+    expect(runner.events(results[0].id).filter((e) => e.type === 'user_note').map((e) => e.text)).toEqual(['再加一页总结']);
+  });
+
+  it('排队中的同一会话并发补充不新增任务，不丢原话', async () => {
+    const adapter = heldAdapter();
+    const runner = createTaskRunner({ getConfig: mockCfg, maxRunning: 1, makeAdapter: () => ({ adapter, model: 'm' }) });
+    await runner.start({ sessionId: 'blocking-chat', text: '先处理另一份文件' });
+    const results = await Promise.all([
+      runner.start({ sessionId: 'waiting-chat', text: '整理项目材料' }),
+      runner.start({ sessionId: 'waiting-chat', text: '附上风险清单' })
+    ]);
+    expect(new Set(results.map((r) => r.id)).size).toBe(1);
+    expect(results.filter((r) => r.joined)).toHaveLength(1);
+    expect(runner.get(results[0].id).status).toBe('queued');
+    expect(runner.list()).toHaveLength(2);
+    expect((await sessions.get('waiting-chat')).messages.map((m) => m.content)).toEqual(['整理项目材料', '附上风险清单']);
+  });
+
+  it('不同会话仍按 maxRunning 并行，不被同会话锁串成一个任务', async () => {
+    const adapter = heldAdapter();
+    const runner = createTaskRunner({ getConfig: mockCfg, maxRunning: 2, makeAdapter: () => ({ adapter, model: 'm' }) });
+    const results = await Promise.all([
+      runner.start({ sessionId: 'parallel-a', text: '任务甲' }),
+      runner.start({ sessionId: 'parallel-b', text: '任务乙' })
+    ]);
+    expect(new Set(results.map((r) => r.id)).size).toBe(2);
+    expect(results.some((r) => r.joined)).toBe(false);
+    expect(runner.running).toBe(2);
+    expect(runner.list().every((t) => t.status === 'running')).toBe(true);
   });
 
   it('同时只做 maxRunning 个，其余排队；排队中的也能取消', async () => {

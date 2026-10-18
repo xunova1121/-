@@ -269,27 +269,30 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       // 手机 / 电脑上新建的对话第一次发任务时，服务器上还没有：用同一个编号新建
       await recovered;
       const id = sessionId || sessions.create().id;
-      const busy = [...tasks.values()].find((t) => t.sessionId === id && (t.status === 'queued' || t.status === 'running'));
-      await editSession(id, async (session) => {
+      // 存用户原话、检查已有任务、登记新任务必须在同一段对话的锁内完成。
+      // 否则两个请求都可能在第一次写盘前看到“没有任务”，从而重复开工。
+      const result = await editSession(id, async (session) => {
         session ??= { ...sessions.create(), id };
         session.messages.push({ role: 'user', content: text, ts: now() });
         session.updatedAt = now();
         await sessions.save(session);
+        const busy = [...tasks.values()].find((t) => t.sessionId === id && (t.status === 'queued' || t.status === 'running'));
+        if (busy) {
+          // 正在干活或排队时收到补充：保留原话，交给同一个任务。
+          busy.inbox.push(text);
+          busy.notes.push(text);
+          record(busy, { type: 'user_note', text });
+          return { id: busy.id, sessionId: id, joined: true };
+        }
+        const task = { id: uid('t'), sessionId: id, text, status: 'queued', seq: 0, events: [], listeners: new Set(), files: new Set(), inbox: [], notes: [], images, voice: Boolean(voice), ctrl: new AbortController(), createdAt: now() };
+        tasks.set(task.id, task);
+        record(task, { type: 'task_state', status: 'queued', position: waiting.length + running });
+        waiting.push(task);
+        return { id: task.id, sessionId: id };
       });
-      if (busy) {
-        // 正在干活时又发来一句：不打断，交给正在干的未央（下一步开始前看到）
-        busy.inbox.push(text);
-        busy.notes.push(text);
-        record(busy, { type: 'user_note', text });
-        return { id: busy.id, sessionId: id, joined: true };
-      }
-      const session = { id };
-      const task = { id: uid('t'), sessionId: session.id, text, status: 'queued', seq: 0, events: [], listeners: new Set(), files: new Set(), inbox: [], notes: [], images, voice: Boolean(voice), ctrl: new AbortController(), createdAt: now() };
-      tasks.set(task.id, task);
-      record(task, { type: 'task_state', status: 'queued', position: waiting.length + running });
-      waiting.push(task);
+      // 释放会话锁后启动执行，避免执行中的存盘和任务登记互相等待。
       pump();
-      return { id: task.id, sessionId: session.id };
+      return result;
     },
     get(id) {
       const t = tasks.get(id);
