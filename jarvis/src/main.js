@@ -1722,6 +1722,9 @@ $('#btn-call-end').addEventListener('click', () => setVoiceCall(false));
 const voiceCheckButton = Object.assign(document.createElement('button'),{type:'button',className:'voice-diagnose',textContent:'检测语音'});
 voiceCheckButton.onclick = async () => { await setVoiceCall(false); showPanel('settings'); await checkVoice(); };
 $('#voice-call-panel').append(voiceCheckButton);
+const takeFloor = Object.assign(document.createElement('button'), {type:'button',textContent:'我来说',id:'btn-call-listen'});
+takeFloor.onclick = () => { if (active) active.muteSpeech=true; speaker.cancel(); voice.setSuppressed(false); callStatus('正在听你说话…'); };
+$('#voice-call-panel').append(takeFloor);
 const voiceLifecycle = createVoiceLifecycle({
   getState: () => ({ hidden:document.hidden, nativeActive:globalThis.__jarvisForeground !== false, starting:callStarting, systemDialog:Boolean(globalThis.__jarvisSystemSpeechDialog) }),
   onAudio: foreground => speaker.setForeground(foreground),

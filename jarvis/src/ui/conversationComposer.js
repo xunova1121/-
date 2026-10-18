@@ -39,7 +39,7 @@ export function initConversationComposer() {
     form.classList.toggle('has-draft',state.hasDraft); form.classList.toggle('is-working',state.stop);
     send.hidden = !state.send; send.disabled = !state.send;
     // 无识别能力时原有 hidden 标志仍然生效，不伪造可用的麦克风。
-    mic.style.display = state.voice ? '' : 'none'; call.hidden = !state.voice;
+    mic.style.display = state.voice ? 'grid' : 'none'; call.hidden = !state.voice;
     stop.hidden = !state.stop;
   }
   prompt.addEventListener('input',refresh); form.addEventListener('submit',()=>queueMicrotask(refresh));
