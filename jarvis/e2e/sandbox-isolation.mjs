@@ -20,6 +20,7 @@ try{
  const results=await page.evaluate(async base=>{
   const {runJavaScript}=await import('/src/agent/sandbox.js');
   localStorage.setItem('sandbox-secret','private');
+  Object.defineProperty(crypto,'randomUUID',{configurable:true,value:undefined}); // 普通HTTP环境没有randomUUID，仍需可运行。
   const sum=await runJavaScript('console.log("计算");return 2+3');
   const storage=await runJavaScript('try{await indexedDB.databases();return "leaked"}catch(e){return e.name}');
   const net=await runJavaScript('try{await fetch('+JSON.stringify(base+'/sandbox-network-probe')+');return "leaked"}catch(e){return "blocked"}');

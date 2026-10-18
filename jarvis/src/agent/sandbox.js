@@ -29,7 +29,9 @@ export function runJavaScript(code, { timeout = JS_TIMEOUT, signal } = {}) {
   return new Promise(resolve => {
     if(typeof document==='undefined'){resolve({ok:false,logs:[],error:'当前环境没有浏览器隔离执行器'});return;}
     const frame=document.createElement('iframe');frame.hidden=true;frame.setAttribute('sandbox','allow-scripts');frame.setAttribute('aria-hidden','true');
-    const token=crypto.randomUUID();let finished=false;
+    const random=globalThis.crypto;
+    if(!random?.getRandomValues){resolve({ok:false,logs:[],error:'当前环境没有隔离运行所需的随机数能力'});return;}
+    const token=random.randomUUID?.()||Array.from(random.getRandomValues(new Uint32Array(4)),n=>n.toString(16).padStart(8,'0')).join('');let finished=false;
     const done=result=>{if(finished)return;finished=true;clearTimeout(timer);removeEventListener('message',receive);signal?.removeEventListener('abort',abort);try{frame.contentWindow?.postMessage({token,stop:true},'*');}catch{}frame.remove();resolve(result);};
     const receive=e=>{if(e.source===frame.contentWindow&&e.data?.token===token)done(e.data.result);};
     const abort=()=>done({ok:false,logs:[],error:'已停止运行'});
@@ -130,5 +132,3 @@ export function runPython(code, { files = [], timeout = 120000 } = {}) {
   pyBusy = job.catch(() => {});
   return job;
 }
-
-// 隔离验收使用本模块原文，不依赖Vite开发服务的关闭时序。
