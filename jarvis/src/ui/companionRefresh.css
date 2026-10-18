@@ -225,3 +225,20 @@ body.compact.companion-edition{--top-h:64px;--wy-reading-inset:20px;font-family:
  .companion-edition .msg.agent.streaming:not(:last-child)>.who::after,.companion-edition .msg.agent.streaming.wy-long-reply>.who::after,.companion-edition.wy-keyboard-open .msg.agent.streaming>.who::after,.companion-edition.wy-reading-history .msg.agent.streaming>.who::after{flex:1 1 140px;max-width:100%}
 }
 
+
+/* 手机工具栏固定在同一行；模型占剩余宽度，长名称省略，不把发送挤到下一行。 */
+.compact.companion-edition .composer-row{display:grid;grid-template-columns:34px 34px 34px minmax(0,1fr) 40px 42px;gap:6px 4px;align-items:center}
+.compact.companion-edition .composer-row>#prompt{grid-column:1/-1;grid-row:1;width:100%;order:0}
+.compact.companion-edition .composer-row>#btn-attach{grid-column:1;grid-row:2}
+.compact.companion-edition .composer-row>#btn-camera{grid-column:2;grid-row:2}
+.compact.companion-edition .composer-row>#btn-quick{grid-column:3;grid-row:2;width:34px;height:40px;padding:7px}
+.compact.companion-edition .composer-row>#model-chip{grid-column:4;grid-row:2;width:100%;min-width:0;max-width:none;margin:0;box-sizing:border-box}
+.compact.companion-edition .composer-row>#btn-call{grid-column:5;grid-row:2;margin:0}
+.compact.companion-edition .composer-row>#btn-send,.compact.companion-edition .composer-row>#btn-stop{grid-column:6;grid-row:2;margin:0;width:42px;height:42px;order:0}
+.compact.companion-edition .composer-row>#vad-meter{grid-column:1/-1;grid-row:3}
+@media(max-width:700px){
+ /* 完成后的短回复收回大舞台：头像、昵称、时间同一行，正文紧随其后。 */
+ .companion-edition .msg.agent:not(.streaming)>.who{display:flex!important;flex-wrap:wrap;min-height:48px;height:auto!important;gap:4px!important;margin-bottom:6px!important}
+ .companion-edition .msg.agent:not(.streaming)>.who .who-mood{--mascot-size:48px!important;margin:0 6px 0 0!important}
+ .companion-edition .msg.agent:not(.streaming)>.who .wy-reply-greeting{display:none}
+}
