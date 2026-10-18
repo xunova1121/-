@@ -207,6 +207,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/jarvis-e2e"
           node e2e/mobile-ui.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/server-mobile.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/conversation-flow.mjs
       - name: 验证 Electron 全息桌面互动
         run: |
           npm ci --prefix desktop --no-audit --no-fund
