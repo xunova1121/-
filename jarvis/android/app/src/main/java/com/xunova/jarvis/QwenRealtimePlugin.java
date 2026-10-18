@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @CapacitorPlugin(name = "QwenRealtime")
 public class QwenRealtimePlugin extends Plugin {
     private final ConcurrentHashMap<String, WebSocketClient> sockets = new ConcurrentHashMap<>();
+    private volatile boolean foreground = true;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private void event(String id, String phase, String data) {
         JSObject e = new JSObject(); e.put("id", id); e.put("phase", phase);
@@ -30,7 +31,7 @@ public class QwenRealtimePlugin extends Plugin {
         String model = call.getString("model", "");
         String region = call.getString("region", "beijing");
         String key = call.getString("key", "");
-        if (!id.matches("[a-zA-Z0-9-]{1,80}") || sockets.containsKey(id) || sockets.size() >= 4 ||
+        if (!foreground || !id.matches("[a-zA-Z0-9-]{1,80}") || sockets.containsKey(id) || sockets.size() >= 4 ||
             !(model.equals("qwen3-asr-flash-realtime") || model.equals("qwen3-tts-flash-realtime")) ||
             !(region.equals("beijing") || region.equals("singapore")) ||
             key.isEmpty() || key.length() > 2048 || key.contains("\r") || key.contains("\n")) {
@@ -83,6 +84,7 @@ public class QwenRealtimePlugin extends Plugin {
         call.resolve();
     }
     private void closeAll() { for(WebSocketClient client:sockets.values())client.close(); sockets.clear(); }
-    @Override protected void handleOnPause() { closeAll(); }
+    @Override protected void handleOnPause() { foreground = false; closeAll(); }
+    @Override protected void handleOnResume() { foreground = true; }
     @Override protected void handleOnDestroy() { closeAll(); }
 }

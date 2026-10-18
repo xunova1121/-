@@ -44,7 +44,7 @@ export function openQwenSession({model,voice,silenceMs,onEvent=()=>{},onError=()
       transport=t;if(closed){t.close();return;}
       send({type:'session.update',session:settings});
       for(const e of pending)receive(e);pending=[];
-    },fail);
+    }).catch(fail);
   });
 }
 /** 一句文字以PCM分片返回，收到即播放，不等待整句音频下载。 */

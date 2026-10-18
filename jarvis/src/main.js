@@ -1567,7 +1567,7 @@ const voiceHandlers = {
     if (callActive) callStatus(m === 'off' ? '语音已停止' : m === 'loading' ? '正在准备语音…' : m === 'ptt' ? '按住麦克风说话，松开后回复' : '直接说话，未央在听');
     $('#voice-status').textContent = {
       off: '',
-      loading: '正在加载本地语音活动检测模型…',
+      loading: sttEngine() === 'qwen-realtime' ? '正在连接百炼实时识别…' : '正在加载本地语音活动检测模型…',
       vad: '已开启：直接说话即可，停顿后自动提交。',
       ptt: '语音活动检测不可用，已降级为“按下说话”：按住麦克风说话，松开提交。'
     }[m];

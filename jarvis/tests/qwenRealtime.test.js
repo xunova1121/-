@@ -5,7 +5,7 @@ import { openQwenSession,streamQwenSpeech,Pcm16Encoder,bytesToBase64,pcmFromBase
 import { QwenVoice } from '../src/perception/qwenVoice.js';
 import { resolveStt } from '../src/perception/stt.js';
 import { selectVoiceEngine } from '../src/perception/voiceSelection.js';
-afterEach(()=>vi.unstubAllGlobals());
+afterEach(()=>{vi.unstubAllGlobals();vi.useRealTimers();});
 describe('百炼实时协议',()=>{
   it('仅连接两个指定模型与对应地域，不接受任意目标',()=>{
     expect(qwenUrl(QWEN_ASR)).toBe('wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model='+QWEN_ASR);
@@ -47,6 +47,11 @@ describe('百炼实时协议',()=>{
     await Promise.resolve();ctrl.abort();
     await expect(promise).rejects.toMatchObject({name:'AbortError'});expect(close).toHaveBeenCalledOnce();
   });
+  it('握手后发送配置失败立即报告，关闭连接而不悬挂到超时',async()=>{
+    const close=vi.fn();
+    await expect(openQwenSession({model:QWEN_ASR,connect:async()=>({close,send:()=>{throw new Error('连接已断开');}})})).rejects.toThrow('连接已断开');
+    expect(close).toHaveBeenCalledOnce();
+  });
   it('服务端鉴权失败不泄漏原错误中的密钥',async()=>{
     const close=vi.fn();
     const promise=openQwenSession({model:QWEN_TTS,connect:async o=>({close,send:()=>queueMicrotask(()=>o.onEvent({type:'error',error:{message:'secret-key-value'}}))})});
@@ -82,6 +87,22 @@ describe('实时转写与选择',()=>{
     voice.event(e);voice.event(e);
     expect(interim).toHaveBeenCalledWith('今天天气');expect(final).toHaveBeenCalledOnce();expect(final).toHaveBeenCalledWith('今天天气怎么样');expect(confirm).toHaveBeenCalledOnce();
     voice.disable();
+  });
+  it('等待麦克风授权时退出，迟到的音轨也立即释放',async()=>{
+    let grant;const stop=vi.fn(),sessionFactory=vi.fn();
+    vi.stubGlobal('navigator',{mediaDevices:{getUserMedia:()=>new Promise(r=>{grant=r;})}});
+    const voice=new QwenVoice({sessionFactory});
+    const enabling=voice.enable();voice.disable();grant({getTracks:()=>[{stop}]});
+    expect(await enabling).toBe('off');expect(stop).toHaveBeenCalledOnce();expect(sessionFactory).not.toHaveBeenCalled();
+  });
+  it('断线重连连续失败最多两次，结束后不再保留收音状态',async()=>{
+    vi.useFakeTimers();
+    const factory=vi.fn().mockRejectedValue(new Error('断网')),error=vi.fn();
+    const voice=new QwenVoice({getConfig:()=>({keys:{qwen:'k'}}),sessionFactory:factory,onError:error});
+    voice.mode='vad';voice.ctrl=new AbortController();
+    voice.reconnect(new Error('断网'),voice.gen);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(factory).toHaveBeenCalledTimes(2);expect(voice.mode).toBe('off');expect(error).toHaveBeenCalledOnce();
   });
   it('朗读抑制与退出后不再提交延迟到达的转写',()=>{
     const final=vi.fn(),voice=new QwenVoice({onFinal:final});voice.mode='vad';voice.setSuppressed(true);
