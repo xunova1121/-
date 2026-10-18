@@ -180,13 +180,13 @@ export async function runAgent({ adapter, model, history, userText, images = [],
   // 任务清单（update_plan）和子任务分身（delegate_task，只有主线能派）由循环自己提供
   const plan = createPlanTool((steps) => emit({ type: 'plan', steps }));
   // 简单闲聊（light）：不带工具，回得快
-  if (light) tools = [];
-  const own = light ? [] : [plan.tool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools })] : [])].filter((t) => !tools.some((x) => x.name === t.name));
+  const availableTools=tools;
+  const own = [plan.tool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools })] : [])].filter((t) => !tools.some((x) => x.name === t.name));
   // 工具按需加载：工具多时只带常用的完整说明，其余列名字、用 tool_search 加载（见 toolLoader.js）
-  const loader = createToolLoader([...tools, ...own]);
+  let loader = createToolLoader(light?[]:[...tools, ...own]);
   let checks = 0; // 收尾核对提醒过几次（最多两次，避免来回拉扯）
   let wroteCode = false, ranCode = false;
-  const toolHint = loader.hint();
+  let toolHint = loader.hint();
   let finalText = '';
   let toolCount = 0;
   let failCount = 0;
@@ -208,6 +208,8 @@ export async function runAgent({ adapter, model, history, userText, images = [],
   const takeInbox = () => {
     const said = inbox?.splice(0) ?? [];
     if (!said.length) return false;
+    // 等待闲聊回答时改成正式任务：切回完整提示和工具，不能一直留在无工具模式。
+    if(light){light=false;tools=availableTools;loader=createToolLoader([...availableTools,...own]);toolHint=loader.hint();}
     const note = interjection(said);
     emit({ type:'interjection_accepted', count:said.length });
     const last = convo.at(-1);

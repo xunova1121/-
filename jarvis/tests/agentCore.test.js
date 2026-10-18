@@ -180,3 +180,14 @@ it('执行器先等待检查点写入，再运行有副作用的工具',async()=
  await agent.runAgent({adapter,model:'m',history:[],userText:'执行',context:ctx,tools:[{name:'write_probe',description:'x',input_schema:{type:'object',properties:{}},run:async()=>{events.push('run');return 'ok';}}],emit:()=>{},checkpoint:async e=>{await Promise.resolve();events.push(e.type);}});
  expect(events).toEqual(['tool_start','run','tool_end']);
 });
+
+it('等待闲聊时补充正式任务，自动启用工具并执行，不丢新要求',async()=>{
+ const inbox=[],seen=[];let n=0,wrote=0;
+ const adapter={async stream(req){seen.push(req);n++;
+  if(n===1){expect(req.tools).toEqual([]);req.onText('你好呀。');inbox.push('请生成一份完整报告并保存文件');return {text:'你好呀。',toolCalls:[],stop:'end_turn'};}
+  if(n===2){expect(req.tools.some(t=>t.name==='write_file')).toBe(true);expect(req.messages.at(-1).content).toContain('完整报告');return {text:'',toolCalls:[call('w','write_file',{path:'报告.md',content:'# 完整报告'})],stop:'tool_use'};}
+  req.onText('报告已保存。');return {text:'报告已保存。',toolCalls:[],stop:'end_turn'};
+ }};
+ const r=await agent.runAgent({adapter,model:'m',history:[],userText:'你好',context:ctx,light:true,inbox,tools:[{name:'write_file',description:'写文件',input_schema:{type:'object',properties:{path:{type:'string'},content:{type:'string'}},required:['path','content']},run:async()=>{wrote++;return '已保存报告.md';}}],emit:()=>{}});
+ expect(wrote).toBe(1);expect(r.text).toContain('报告已保存');expect(seen[1].system[0]).toBe(agent.STABLE_PROMPT);
+});
