@@ -8,6 +8,7 @@
  */
 import { buildFx, levelOf, playCue } from './voiceFx.js';
 import { synthesize, ttsEngineById, rankBrowserVoices } from './tts.js';
+import { streamQwenSpeech } from './qwenRealtime.js';
 import { browserDelivery } from './voiceProfile.js';
 
 // 用时再取：安卓 App 启动时才补上 speechSynthesis（见 src/mobile/speechShim.js）
@@ -116,6 +117,10 @@ export class Speaker {
       if (vc.engine === 'browser') { await this.#browserSay(text); return { engine:'browser', voice:this.voice?.name || '系统默认' }; }
       const ctx = this.unlock(); if (!ctx) throw new Error('当前 WebView 没有可用的音频播放环境');
       this.ctrl = new AbortController();
+      if (vc.engine === 'qwen-realtime') {
+        await this.#playRealtime(text,gen);
+        return { engine:vc.engine, voice:vc.voices?.[vc.engine] || 'Bella' };
+      }
       const ab = await synthesize(vc,this.getKeys(),text,{gateway:this.getGateway(),config:this.getConfig(),signal:this.ctrl.signal});
       if (gen !== this.gen || !this.foreground) throw new DOMException('Aborted','AbortError');
       const buffer = await ctx.decodeAudioData(ab);
@@ -131,6 +136,8 @@ export class Speaker {
     this.ctrl?.abort();
     this.ctrl = null;
     this.queue = [];
+    for (const src of this.realtimeSources || []) { try { src.onended = null; src.stop(); src.disconnect(); } catch {} }
+    this.realtimeSources?.clear();this.realtimeDone?.();this.realtimeDone=null;
     if (this.source) { try { this.source.onended = null; this.source.stop(); } catch { /* 已停止 */ } }
     this.source = null;
     this.playbackDone?.(); this.playbackDone = null;
@@ -185,6 +192,7 @@ export class Speaker {
   }
 
   #prefetch() {
+    if (this.getVoiceConfig().engine === 'qwen-realtime') return;
     this.ctrl ??= new AbortController();
     const vc = this.getVoiceConfig();
     for (const item of this.queue.slice(0, PREFETCH)) {
@@ -208,6 +216,12 @@ export class Speaker {
     while (this.queue.length) {
       const item = this.queue[0];
       const gen = item.gen;
+      if (this.getVoiceConfig().engine === 'qwen-realtime') {
+        try { await this.#playRealtime(item.text, gen); }
+        catch (e) { if (gen === this.gen && e.name !== 'AbortError') this.onError?.(e); }
+        if (gen !== this.gen) return;
+        this.queue.shift();this.#finish();continue;
+      }
       let buffer = null;
       try {
         buffer = await item.p;
@@ -227,6 +241,39 @@ export class Speaker {
       this.#finish();
     }
     this.playing = false;
+  }
+
+
+  /** PCM分片按时间轴连续排队，取消时同时停止已排队的全部音源。 */
+  async #playRealtime(text,gen) {
+    const ctx=this.unlock();if(!ctx)throw new Error('当前系统没有音频播放能力');
+    const vc=this.getVoiceConfig(),fxId=vc.fx||'gentle';
+    if(!this.fx||this.fxId!==fxId){this.fx?.dispose();this.fx=buildFx(ctx,fxId);this.fxId=fxId;}
+    this.ctrl??=new AbortController();
+    const sources=new Set();this.realtimeSources=sources;
+    let next=ctx.currentTime,ended=false;
+    let resolvePlayback;const playback=new Promise(r=>{resolvePlayback=r;});
+    this.realtimeDone=resolvePlayback;
+    const check=()=>{if(ended&&!sources.size)resolvePlayback();};
+    try{
+      await streamQwenSpeech(text,{
+        key:this.getKeys().qwen||'',region:vc.qwenRegion||'beijing',voice:vc.voices?.['qwen-realtime']||'Bella',gateway:this.getGateway(),signal:this.ctrl.signal,
+        onAudio:(samples,rate)=>{
+          if(gen!==this.gen||!this.foreground)throw new DOMException('Aborted','AbortError');
+          if(next-ctx.currentTime>60)throw new Error('音频排队过长，请缩短单句朗读');
+          const buffer=ctx.createBuffer(1,samples.length,rate);buffer.getChannelData(0).set(samples);
+          const src=ctx.createBufferSource();src.buffer=buffer;src.detune.value=this.fx.detune;src.connect(this.fx.input);
+          src.onended=()=>{sources.delete(src);src.disconnect();if(this.source===src)this.source=null;check();};
+          sources.add(src);this.source=src;this.onEngine?.('qwen-realtime',false);
+          const at=Math.max(ctx.currentTime+0.02,next);next=at+buffer.duration;src.start(at);
+        }
+      });
+      ended=true;check();await playback;
+    }finally{
+      for(const src of sources){try{src.onended=null;src.stop();src.disconnect();}catch{}if(this.source===src)this.source=null;}
+      sources.clear();if(this.realtimeSources===sources)this.realtimeSources=null;
+      if(this.realtimeDone===resolvePlayback)this.realtimeDone=null;
+    }
   }
 
   #playBuffer(buffer, gen) {

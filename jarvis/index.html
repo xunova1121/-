@@ -340,6 +340,13 @@
         <label class="field" for="search-region"><span>免密钥搜索用哪里的网站</span><select id="search-region"><option value="auto">自动（按网络判断：国内用必应中国、百度、360；国外用必应、DuckDuckGo）</option><option value="cn">国内网站</option><option value="global">国外网站</option></select></label>
         <div class="row-actions"><button type="button" class="btn ghost sm" id="btn-search-test">测试联网搜索</button><span class="muted small" id="search-test-result"></span></div>
         <h3 class="sub">声音</h3>
+        <div class="setting" id="qwen-realtime-settings">
+          <button class="btn" type="button" id="btn-qwen-realtime">使用百炼实时对话</button>
+          <p class="muted small">识别 qwen3-asr-flash-realtime，朗读 qwen3-tts-flash-realtime。选择后在下方填写自己的百炼密钥，默认萌宝女声，可试听切换。</p>
+          <label class="field" for="qwen-realtime-region"><span>百炼语音地域</span><select id="qwen-realtime-region"><option value="beijing">北京（中国内地）</option><option value="singapore">新加坡（国际）</option></select></label>
+          <label class="field" for="qwen-realtime-key"><span>百炼语音 API Key（与千问模型共用）</span><input type="password" id="qwen-realtime-key" autocomplete="off" spellcheck="false" /></label>
+          <p class="muted small">密钥需与地域对应。安卓直连，PC/网页通过未央网关；没有目标音色服务时会报告错误。开启通话才上传麦克风音频，切到后台停止收音与播放。</p>
+        </div>
         <label class="field" for="tts-engine"><span>语音引擎</span><select id="tts-engine"></select></label>
         <p class="note" id="tts-note" hidden></p>
         <label class="field" id="row-tts-azure-region" hidden><span>Azure Speech 区域</span><input id="tts-azure-region" placeholder="例如 eastasia 或 chinaeast2" spellcheck="false" /></label>

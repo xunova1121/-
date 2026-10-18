@@ -11,6 +11,7 @@ import { secMsGec } from '../../shared/edgeGec.js';
  */
 
 import { customViaGateway, providerById } from '../../shared/providers.js';
+import { QWEN_VOICES } from '../../shared/qwenRealtime.js';
 import { EDGE_VOICES } from '../../shared/edgeVoices.js';
 
 /** 给 gpt-4o-mini-tts 的“表演指导”：要像电影里的 AI 管家，而不是导航播报 */
@@ -21,6 +22,7 @@ export const DIRECTION = [
 ].join(' ');
 
 export const TTS_ENGINES = [
+  { id:'qwen-realtime',name:'百炼 Qwen3 实时语音（推荐）',keyFrom:'qwen',model:'qwen3-tts-flash-realtime',browser:true,voices:QWEN_VOICES,note:'实时合成并播放，支持萌宝、乖小妹和温柔女声；音色风格请先试听，不保证等同真实女童。与百炼识别共用对应地域的密钥。' },
   { id:'azure', name:'Azure 女孩 / 女童声（晓伊、晓双，官方接口更稳）', keyFrom:'azure-speech', browser:true, voices:[['zh-CN-XiaoyiNeural','晓伊 · 活泼女孩（和免费在线女声同一个声音）'],['zh-CN-XiaoshuangNeural','晓双 · 普通话女童'],['zh-CN-XiaoyouNeural','晓悠 · 普通话女童']], note:'真实女童音色，需要自己的 Azure Speech 密钥和区域；不会把系统声称为女童声。' },
   { id:'provider', name:'当前模型服务商的女孩声', fromProvider:true, browser:true, voices:[['shimmer','Shimmer · 甜美明亮女声'],['nova','Nova · 温柔女声']], note:'复用模型服务商密钥，需服务商支持 /audio/speech。年轻女声不等于真实女童音色。' },
   { id: 'browser', name: '浏览器自带（免费）', fx: false },
@@ -75,6 +77,7 @@ export function rankBrowserVoices(voices) {
 export async function synthesize(vc, keys, text, { gateway = null, config = {}, signal, fetchImpl = globalThis.fetch } = {}) {
   const e = ttsEngineById(vc.engine);
   if (!e || e.id === 'browser') throw new Error('不是云端语音引擎');
+  if (e.id === 'qwen-realtime') throw new Error('百炼实时语音使用流式播放，请使用新版播放器');
   const voice = vc.voices?.[e.id] || e.voices[0]?.[0] || '';
   if (e.id === 'azure') {
     const region = String(vc.azureRegion || '').trim();

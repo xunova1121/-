@@ -259,5 +259,5 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     return false;
   }
 
-  return { authorized, handle, runner, store };
+  return { authorized, handle, runner, store, realtimeKey: () => loadConfig().keys?.qwen || '' };
 }

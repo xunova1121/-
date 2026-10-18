@@ -34,7 +34,7 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       // 开发时把 /api 转给网关（npm run server）
-      proxy: { '/api': { target: 'http://127.0.0.1:8787', changeOrigin: false } }
+      proxy: { '/api': { target: 'http://127.0.0.1:8787', changeOrigin: false, ws: true } }
     },
     worker: { format: 'es' },
     build: {

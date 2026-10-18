@@ -206,6 +206,53 @@ try{
   check('App 被关掉时没做完的任务：再打开回到那个对话，带着做过的步骤接着做',await again.evaluate(()=>document.querySelector('#transcript').textContent.includes('第 4 段')&&[...document.querySelectorAll('#transcript .msg.user')].at(-1).textContent.includes('已经做过的步骤：读取文件')));
   check('展开后能看到全部、也能收起，没有页面异常',againErrors.length===0,againErrors.join(' | '));
   await relaunch.close();
+
+  // 百炼实时语音：使用模拟的原生WSS服务，真实WebAudio采集/播放；不调用收费接口。
+  {
+    const qctx=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+    await qctx.addInitScript(()=>{
+      localStorage.setItem('jarvis.llm.v1',JSON.stringify({provider:'mock',keys:{qwen:'test-only-key'},voice:{engine:'qwen-realtime',voices:{'qwen-realtime':'Bella'},fx:'none',cues:false,qwenRegion:'beijing'},stt:{engine:'qwen-realtime'}}));
+      localStorage.setItem('jarvis.settings.v1',JSON.stringify({theme:'day',speechOutput:false}));
+      const listeners=new Set(),sessions=new Map();window.__qwenModels=[];window.__qwenClosed=[];window.__qwenFrames=0;
+      const emit=e=>{for(const fn of listeners)fn(e);};
+      window.__jarvisQwenSocket={
+        addListener:async(name,fn)=>{listeners.add(fn);return{remove:()=>listeners.delete(fn)};},
+        connect:async({id,model})=>{sessions.set(id,model);window.__qwenModels.push(model);},
+        send:async({id,data})=>{
+          const e=JSON.parse(data),model=sessions.get(id);
+          if(e.type==='session.update')queueMicrotask(()=>emit({id,phase:'message',data:JSON.stringify({type:'session.updated'})}));
+          if(model==='qwen3-asr-flash-realtime'&&e.type==='input_audio_buffer.append'){
+            window.__qwenFrames++;
+            if(!window.__qwenSubmitted){window.__qwenSubmitted=true;queueMicrotask(()=>{
+              for(const event of [{type:'input_audio_buffer.speech_started'},{type:'conversation.item.input_audio_transcription.text',text:'你好',stash:'未央'},{type:'conversation.item.input_audio_transcription.completed',item_id:'test-one',transcript:'你好，未央'}])emit({id,phase:'message',data:JSON.stringify(event)});
+            });}
+          }
+          if(model==='qwen3-tts-flash-realtime'&&e.type==='session.finish'){
+            queueMicrotask(()=>emit({id,phase:'message',data:JSON.stringify({type:'response.audio.delta',delta:btoa('\0'.repeat(4800))})}));
+            setTimeout(()=>emit({id,phase:'message',data:JSON.stringify({type:'session.finished'})}),2000);
+          }
+        },
+        close:async({id})=>{sessions.delete(id);window.__qwenClosed.push(id);}
+      };
+      navigator.mediaDevices.getUserMedia=async()=>{
+        const ctx=new AudioContext(),osc=ctx.createOscillator(),gain=ctx.createGain(),dest=ctx.createMediaStreamDestination();
+        gain.gain.value=0;osc.connect(gain);gain.connect(dest);osc.start();await ctx.resume();
+        window.__qwenMicTracks=dest.stream.getTracks();return dest.stream;
+      };
+    });
+    const qp=await qctx.newPage();
+    await qp.goto(BASE);await qp.waitForFunction(()=>window.__jarvis?.send);
+    await qp.click('#btn-call');
+    await qp.waitForFunction(()=>window.__qwenFrames>0&&document.querySelector('#transcript .msg.user')?.textContent.includes('你好，未央'),null,{timeout:15000});
+    check('百炼实时ASR收音后提交最终文字，使用指定实时模型',await qp.evaluate(()=>window.__qwenModels.includes('qwen3-asr-flash-realtime')&&document.querySelectorAll('#transcript .msg.user').length===1));
+    await qp.waitForFunction(()=>window.__qwenModels.includes('qwen3-tts-flash-realtime')&&window.__jarvis.speaker.source,null,{timeout:15000});
+    check('百炼实时TTS收到PCM即播放，不走audio/speech假接口',await qp.evaluate(()=>window.__jarvis.speaker.speaking&&Boolean(window.__jarvis.speaker.source)));
+    await qp.evaluate(()=>{window.__jarvisForeground=false;dispatchEvent(new CustomEvent('jarvis:foreground',{detail:{active:false}}));});
+    await qp.waitForFunction(()=>window.__jarvis.voice.mode==='off'&&!window.__jarvis.speaker.speaking);
+    check('切换其他App停止百炼录音、流式音频与实时连接',await qp.evaluate(()=>window.__qwenMicTracks.every(t=>t.readyState==='ended')&&!window.__jarvis.speaker.source&&window.__qwenClosed.length>=2));
+    await qctx.close();
+  }
+
   for(const width of [320,360,390,412]){
     const narrow=await browser.newPage({viewport:{width,height:780}});await narrow.goto(BASE);await narrow.waitForSelector('body.companion-edition');
     await narrow.waitForFunction(()=>window.__jarvis?.send);await narrow.evaluate(()=>{document.documentElement.style.fontSize='18px';document.getElementById('model-chip-text').textContent='服务器 · claude-sonnet-very-long-model-name';});

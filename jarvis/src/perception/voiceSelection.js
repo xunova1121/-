@@ -6,5 +6,5 @@ export function selectVoiceEngine(cfg, gateway = null) {
   const has = id => Boolean(cfg.keys?.[id]) || Boolean(gateway?.keys?.includes(id));
   const p = providerById(cfg.provider);
   const providerVoice = ['multi','openai'].includes(p?.kind) && has(p.id) && (!p.custom || cfg.baseURLs?.[p.id]);
-  return has('azure-speech') && voice.azureRegion ? 'azure' : has('elevenlabs') ? 'elevenlabs' : has('openai') ? 'openai' : gateway && has('siliconflow') ? 'siliconflow' : globalThis.__jarvisEdgeSpeech || gateway ? 'edge' : providerVoice ? 'provider' : 'browser';
+  return has('qwen') && (globalThis.__jarvisQwenSocket || gateway) ? 'qwen-realtime' : has('azure-speech') && voice.azureRegion ? 'azure' : has('elevenlabs') ? 'elevenlabs' : has('openai') ? 'openai' : gateway && has('siliconflow') ? 'siliconflow' : globalThis.__jarvisEdgeSpeech || gateway ? 'edge' : providerVoice ? 'provider' : 'browser';
 }

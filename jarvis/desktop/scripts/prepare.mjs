@@ -14,6 +14,7 @@ execSync('node scripts/ensure-build.mjs', { cwd: root, stdio: 'inherit' });
 fs.rmSync(app, { recursive: true, force: true });
 fs.mkdirSync(app, { recursive: true });
 fs.cpSync(path.join(root, 'dist'), path.join(app, 'dist'), { recursive: true });
+if (fs.existsSync(path.join(root, 'licenses'))) fs.cpSync(path.join(root, 'licenses'), path.join(app, 'licenses'), { recursive: true });
 // 网关打成单文件：把它用到的 Claude SDK、MCP SDK 等依赖一起打进去（原来 node_modules 有 6000 多个文件、41 MB）
 const { build } = await import(pathToFileURL(path.join(root, 'node_modules/esbuild/lib/main.js')).href);
 await build({

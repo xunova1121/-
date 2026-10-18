@@ -36,6 +36,7 @@ import { createMcpManager } from './mcp.mjs';
 import { createOllama } from './ollama.mjs';
 import { edgeSpeak } from './edgeTts.mjs';
 import { createWeatherProxy } from './weather.mjs';
+import { attachQwenGateway } from './qwenRealtime.mjs';
 
 const CORS_PATHS = /^\/api\/(health|local\/metrics|llm\/.+|tts\/edge)$/;
 /** 服务器模式里允许跨域调用的接口（手机 App、电脑版连自己的服务器） */
@@ -305,7 +306,7 @@ export function createServer({
     fs.createReadStream(file).pipe(res);
   }
 
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     const { pathname } = new URL(req.url, 'http://x');
     // 单文件版（file:// 打开，Origin 为 null）可以借用本机网关转发模型请求，只开放这几个接口。
     // 不返回 Access-Control-Allow-Private-Network：Chrome 会因此拦下公网网页对本机网关的请求。
@@ -369,6 +370,13 @@ export function createServer({
       else res.end();
     }
   });
+  attachQwenGateway(server, { serverMode, localAllowed: req => {
+    // 浏览器WebSocket不能自定义x-jarvis-client头，改用同源+回环地址校验。
+    const ip=req.socket.remoteAddress;
+    return ['127.0.0.1','::1','::ffff:127.0.0.1'].includes(ip) &&
+      sameOriginOnly({headers:{...req.headers,...(req.headers.origin==='null'?{origin:undefined}:{}),'x-jarvis-client':'1'}});
+  } });
+  return server;
 }
 
 const MIME = {

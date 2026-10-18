@@ -1,3 +1,5 @@
+import { openQwenSession, QWEN_ASR } from './perception/qwenRealtime.js';
+import { QwenVoice } from './perception/qwenVoice.js';
 import {createHome} from './ui/home.js';
 import {createWeatherClient} from './core/weather.js';
 /**
@@ -513,7 +515,7 @@ const speaker = new Speaker({
     if (active?.streamDone) finishTurn();
   },
   onBoundary: () => { live.boundaryAt = now(); },
-  onError: (e) => toast(`${e.message}（先用系统自带声音朗读，5 分钟后再试）`),
+  onError: (e) => toast(resolveVoice(llmConfig,gateway).engine === 'qwen-realtime' ? `${e.message}（所选百炼声音未播放，请检查声音设置）` : `${e.message}（先用系统自带声音朗读，5 分钟后再试）`),
   getVoiceConfig: () => resolveVoice(llmConfig, gateway),
   getKeys: () => llmConfig.keys,
   getConfig: () => llmConfig,
@@ -1611,6 +1613,12 @@ function endListening() {
 
 async function setDirectVoice(on) {
   const nativeAvailable = await nativeVoiceReady; // 手机上先确定用不用系统识别
+  if (on && sttEngine() === 'qwen-realtime') {
+    if (!(voice instanceof QwenVoice)) { voice.disable(); voice = new QwenVoice({ getConfig:()=>llmConfig, getGateway:()=>gateway, ...voiceHandlers }); }
+  } else if (on && voice instanceof QwenVoice) {
+    voice.disable();
+    voice = new (MOBILE ? RecordedVoice : VoiceInput)({ allowBrowserSR:browserSR, getTranscriber:()=>{const id=sttEngine();return id==='none'||id==='browser'?null:(wav,signal)=>transcribe(id,llmConfig,wav,{gateway,signal});}, ...voiceHandlers });
+  }
   if (MOBILE && on) {
     const useNative = nativeAvailable && (llmConfig.stt?.engine || 'auto') === 'auto';
     if (useNative && !(voice instanceof NativeVoice)) { voice.disable(); voice = new NativeVoice({ plugin: globalThis.__jarvisSpeech, ...voiceHandlers }); }
@@ -1687,7 +1695,7 @@ $('#voice-call-panel').append(voiceCheckButton);
 const voiceLifecycle = createVoiceLifecycle({
   getState: () => ({ hidden:document.hidden, nativeActive:globalThis.__jarvisForeground !== false, starting:callStarting, systemDialog:Boolean(globalThis.__jarvisSystemSpeechDialog) }),
   onAudio: foreground => speaker.setForeground(foreground),
-  onLeave: () => { if (!MOBILE) return; if (callActive) { companion?.close(); setVoiceCall(false); } else if (voice.mode !== 'off') setDirectVoice(false); }
+  onLeave: () => { if (!MOBILE && !(voice instanceof QwenVoice)) return; if (callActive) { companion?.close(); setVoiceCall(false); } else if (voice.mode !== 'off') setDirectVoice(false); }
 });
 document.addEventListener('visibilitychange', () => voiceLifecycle.update());
 addEventListener('jarvis:foreground', () => voiceLifecycle.update());
@@ -1724,6 +1732,16 @@ async function checkVoice() {
 
 /** 语音自检里的“识别”部分 */
 async function checkRecognition(line) {
+  if (sttEngine() === 'qwen-realtime') {
+    const li=line(null,'百炼实时识别：正在连接…');
+    let session;
+    try {
+      session=await openQwenSession({model:QWEN_ASR,key:llmConfig.keys?.qwen||'',region:llmConfig.voice?.qwenRegion||'beijing',gateway,signal:AbortSignal.timeout(20000)});
+      li.dataset.ok='1';li.textContent='百炼实时识别：会话配置成功；请实际说话验证，连接成功不代表已测识别准确率';
+    } catch(e) {li.dataset.ok='0';li.textContent='百炼实时识别：'+e.message;}
+    finally {session?.close();}
+    return;
+  }
   // 2. 识别方式
   if (voice instanceof NativeVoice) { line(true, '系统语音服务可发现；需实际说话验证，失败后尝试系统窗口或云端转写'); return; }
   if (MOBILE) line(false, '手机自带语音识别：这台手机没有可用的识别服务，改用云端转写');

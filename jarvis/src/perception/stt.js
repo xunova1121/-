@@ -5,6 +5,7 @@
 import { customViaGateway, providerById, upstreamFor } from '../../shared/providers.js';
 
 export const STT_ENGINES = [
+  {id:'qwen-realtime',name:'百炼 Qwen3 实时识别（推荐）',keyFrom:'qwen',model:'qwen3-asr-flash-realtime',browser:true},
   { id: 'browser', name: '浏览器自带（Chrome / Edge，需联网）' },
   { id: 'siliconflow', name: '硅基流动 SenseVoice（中文快且便宜）', keyFrom: 'siliconflow', model: 'FunAudioLLM/SenseVoiceSmall', base: 'https://api.siliconflow.cn/v1', browser: false },
   { id: 'openai', name: 'OpenAI 语音转写', keyFrom: 'openai', model: 'gpt-4o-mini-transcribe', base: 'https://api.openai.com/v1', browser: true },
@@ -26,6 +27,7 @@ export function resolveStt(cfg, { gateway = null, browserSupported }) {
   if (want !== 'auto') return want === 'browser' && !browserSupported ? 'none' : want;
   if (browserSupported) return 'browser';
   const has = (id) => Boolean(cfg.keys?.[id]) || Boolean(gateway?.keys?.includes(id));
+  if (has('qwen') && (globalThis.__jarvisQwenSocket || gateway)) return 'qwen-realtime';
   if (has('siliconflow') && gateway) return 'siliconflow';
   if (has('openai')) return 'openai';
   if (has('siliconflow')) return 'siliconflow';
@@ -63,6 +65,7 @@ export const cleanTranscript = (t) => String(t || '').replace(/<\|[^|]*\|>/g, ''
 export async function transcribe(engineId, cfg, audio, { gateway = null, signal, fetchImpl = globalThis.fetch } = {}) {
   const e = sttEngineById(engineId);
   if (!e || e.id === 'browser') throw new Error('不是云端识别引擎');
+  if (e.id === 'qwen-realtime') throw new Error('百炼实时识别需要实时收音器，请重新开启语音对话');
   if (e.fromProvider) return transcribeViaProvider(cfg, audio, { gateway, signal, fetchImpl });
   const key = cfg.keys?.[e.keyFrom] || '';
   const customURL = cfg.stt?.customURL || '';

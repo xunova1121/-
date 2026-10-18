@@ -13,7 +13,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const version = process.argv[2] || 'dev';
 const out = path.resolve(process.argv[3] || path.join(ROOT, 'release-server'));
 /** 服务器上用到的依赖（网关、智能体、生成 / 读取文档）；浏览器才用的语音、三维、人脸识别等不装 */
-export const SERVER_DEPS = ['@anthropic-ai/sdk', '@modelcontextprotocol/sdk', 'docx', 'exceljs', 'jszip', 'mammoth', 'marked', 'pdfjs-dist', 'pptxgenjs', 'xlsx'];
+export const SERVER_DEPS = ['@anthropic-ai/sdk', '@modelcontextprotocol/sdk', 'docx', 'exceljs', 'jszip', 'mammoth', 'marked', 'pdfjs-dist', 'pptxgenjs', 'xlsx', 'ws'];
 
 if (!fs.existsSync(path.join(ROOT, 'dist', 'index.html'))) { console.error('请先 npm run build'); process.exit(1); }
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
