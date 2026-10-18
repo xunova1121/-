@@ -495,6 +495,12 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
     const tick = () => { const l = window.__jarvis.speaker.level(); if (l) window.__peak = Math.max(window.__peak, l); requestAnimationFrame(tick); };
     tick();
   });
+  // 打字提问默认不念（只在语音对话、说话提问时念）
+  await ask(page, '你好');
+  await page.waitForTimeout(800);
+  check('打字提问默认不朗读回答', !tts.seen.some((x) => x.url === '/v1/audio/speech'));
+  // 打开“打字提问也朗读回答”后再测云端语音
+  await page.evaluate(() => { const c = document.querySelector('#set-tts'); if (!c.checked) c.click(); });
   await ask(page, '你好');
   await page.waitForFunction(() => window.__peak > 0.05, null, { timeout: 15000 }).catch(() => {});
   check('云端语音：请求 /audio/speech 并带上回答文字', tts.seen.some((x) => x.url === '/v1/audio/speech' && x.body.model === 'fake-tts' && x.body.input.length > 0), tts.seen.map((x) => x.body.input).join(' / ').slice(0, 80));
@@ -509,6 +515,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('语音服务出错时提示并退回浏览器声音', /语音合成失败：500 boom/.test(await page.evaluate(() => document.querySelector('#toast')?.textContent || '')));
   await page.evaluate(() => window.__jarvis.interrupt());
   bad.server.close();
+  await page.evaluate(() => { const c = document.querySelector('#set-tts'); if (c.checked) c.click(); });
   await page.selectOption('#tts-engine', 'auto');
 
   // —— 唤醒词：没叫名字的话被忽略；叫了名字后去掉名字再执行；窗口期内可以接着说
