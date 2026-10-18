@@ -7,6 +7,7 @@ export function initConversationComposer({ cancelDictation } = {}) {
   const prompt = form.querySelector('#prompt'), plus = form.querySelector('#btn-attach');
   const model = form.querySelector('#model-chip'), mic = form.querySelector('#btn-mic');
   const call = form.querySelector('#btn-call'), send = form.querySelector('#btn-send'), stop = form.querySelector('#btn-stop');
+  mic.title='语音转文字';mic.setAttribute('aria-label','语音转文字');
   const recording = document.createElement('div'); recording.className = 'composer-dictation'; recording.hidden = true;
   const recordingText = document.createElement('span'); recordingText.textContent = '正在转文字，说完后可编辑再发送'; recordingText.setAttribute('role','status');
   const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = '结束录音'; cancel.onclick = () => cancelDictation?.();

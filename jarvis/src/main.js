@@ -1659,6 +1659,7 @@ const nativeVoiceReady = MOBILE && globalThis.__jarvisSpeech
   : Promise.resolve(false);
 
 function endListening() {
+  transcript.clearInterim();
   if (!live.voiceListening) return;
   live.voiceListening = false;
   if (!active) director.setState('idle');
