@@ -1,3 +1,4 @@
+import { renderOffice } from './officeRender.mjs';
 import { createHash } from 'node:crypto';
 import { checkpointEvent, checkpointNeedsReview } from '../shared/taskCheckpoint.js';
 /**
@@ -150,6 +151,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       videoGen: (o) => generateVideo(cfg, o),
       // 显示工作区里已有的图片：让手机按文件取回来显示
       onImage: (src, path) => { if (path) record(task, { type: 'file', path }); },
+      officeRender:renderOffice,
       currentSessionId: () => session.id
     }).filter((t) => !SERVER_BLOCKED.has(t.name));
 

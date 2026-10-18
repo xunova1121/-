@@ -31,6 +31,7 @@ export function initConversationComposer({ cancelDictation } = {}) {
   camera.addEventListener('click', close); quick.addEventListener('click', close);
   plus.title = '添加到对话'; plus.setAttribute('aria-label','添加到对话'); plus.setAttribute('aria-expanded','false'); plus.setAttribute('aria-controls',menu.id);
   plus.querySelector('svg').replaceChildren();
+  send.querySelector('svg path')?.setAttribute('d','M12 19V5M6 11l6-6 6 6');
   const path = document.createElementNS('http://www.w3.org/2000/svg','path'); path.setAttribute('d','M12 5v14M5 12h14'); plus.querySelector('svg').append(path);
   plus.onclick = () => { menu.hidden = !menu.hidden; plus.setAttribute('aria-expanded',String(!menu.hidden)); };
   function close() { menu.hidden = true; plus.setAttribute('aria-expanded','false'); }

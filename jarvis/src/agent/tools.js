@@ -1,3 +1,5 @@
+import { DOCUMENT_TEMPLATES, documentTemplate } from './documentTemplates.js';
+import { checkArtifact } from './artifactCheck.js';
 import { skillCompatibility } from './skillCompatibility.js';
 import { MOBILE } from '../config.js';
 /**
@@ -429,8 +431,20 @@ export function createTools(ctx) {
       }
     },
     {
+      name:'get_document_template',
+      description:'查看未央内置的PPT、Word、Excel模板与制作检查清单。没有id时列出模板；有id时返回结构、版式和资料要求。先读用户材料，按实际用途填充，不能把模板当成已经完成的文件。',
+      input_schema:S({id:str('模板编号；不填则列出全部模板')}),
+      run:async({id})=>id?documentTemplate(id):JSON.stringify(DOCUMENT_TEMPLATES.map(({id,format,name,purpose})=>({id,format,name,purpose})),null,2)
+    },
+    {
+      name:'read_task_checkpoint',
+      description:'读取当前会话最近任务的持久检查点：完整要求、补充、成功/失败步骤、文件以及结果未知的操作。恢复任务时先核对，不自动重放有副作用的动作。',
+      input_schema:S({}),
+      run:async()=>{const id=ctx.currentSessionId?.();const s=id&&await sessions.get(id);return s?.taskCheckpoint?JSON.stringify(s.taskCheckpoint,null,2):'当前会话没有服务器持久检查点；可读取对话原文和工作区文件核对。';}
+    },
+    {
       name: 'create_document',
-      description: `生成 Office / 文档文件并保存到工作区，排版自动完成（A4、标题样式、编号列表、带表头底色的表格、页码；Word / PDF 的二级标题有 3 个以上时自动加目录）。
+      description: `生成 Office / 文档文件并保存到工作区；需要模板时先get_document_template。生成后自动检查文件结构、读回内容，可用时由本机LibreOffice生成真实PDF预览。结构/估算检查不等于Office视觉验收。排版自动完成（A4、标题样式、编号列表、带表头底色的表格、页码；Word / PDF 的二级标题有 3 个以上时自动加目录）。
 content 用 Markdown：
 - docx / pdf / html：开头一个“# 文档标题”，正文用 ## 一级标题、### 二级标题、#### 三级标题；支持多级列表（缩进两个空格）、| 表格 |（:--: 居中、--: 右对齐）、**粗体**、*斜体*、~~删除线~~、[链接](https://…)、> 引用、代码块、--- 分隔线、单独一行 [分页]、![图注](工作区里的图片路径)
 - pptx：每页用“## 页标题”，页标题写成一句观点（如“建设必要性：补齐告警到处置的人工断点”），版式按内容自动选：
@@ -510,9 +524,17 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
           } catch (e) { if (e.name === 'AbortError') throw e; }
         }
         const target = path.replace(/\.[a-z0-9]+$/i, '') + `.${out.ext}`;
+        const validation=await checkArtifact(out.blob,target);
         const r = await ws.write(target, out.blob);
         ctx.onFileChanged?.(r.path);
-        const notes = [`主题：${out.theme.name}`];
+        const notes = [`主题：${out.theme.name}`,validation.readback==='passed'?'已检查真实文件结构并读回有效内容':'已检查文件头或结构'];
+        if(ctx.officeRender&&['docx','pptx','xlsx'].includes(out.ext)){
+          try{
+            progress?.('生成Office真实预览…');const rendered=await ctx.officeRender(out.blob,out.ext,{signal});
+            if(rendered.available){const preview=await ws.write(target.replace(/\\.[^.]+$/,'')+'.预览.pdf',rendered.blob);ctx.onFileChanged?.(preview.path);notes.push('已用LibreOffice真实转换为PDF：'+preview.path+'；可打开核对实际分页，未宣称人工视觉验收通过');}
+            else notes.push(rendered.reason);
+          }catch(e){if(e.name==='AbortError')throw e;notes.push('Office真实预览未完成：'+e.message);}
+        }else if(['docx','pptx','xlsx'].includes(out.ext))notes.push('本端未做Office真实渲染；现有PPT预览及排版检查属于生成器检查');
         if (check.checked) notes.push(check.changed ? `生成前对照要求自查，修正了 ${check.changed} 处${check.problems.length ? `（${check.problems.slice(0, 4).join('；')}）` : ''}` : '生成前对照要求自查，没发现问题');
         const what = format === 'xlsx' ? '公式' : '排版';
         if (post?.fixed) notes.push(`生成后检查${what}，自动修正了 ${post.fixed} 处`);
@@ -589,9 +611,9 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
     },
     {
       name: 'run_javascript',
-      description: '在隔离的沙箱里运行 JavaScript（无 DOM，可用 fetch），用于计算、数据处理、验证代码。用 console.log 输出，return 返回值。超时 8 秒。',
+      description: '在不透明来源隔离环境运行 JavaScript：无DOM、不可访问应用存储、不可联网。用于计算、数据处理和验证代码；联网读取用fetch_url工具。用console.log输出，return返回值；超时8秒，可停止。',
       input_schema: S({ code: str('JavaScript 代码（作为 async 函数体执行）') }, ['code']),
-      run: async ({ code }) => formatRun(await runJavaScript(code))
+      run: async ({ code }, {signal} = {}) => {const r=await runJavaScript(code,{signal});if(!r.ok)throw new Error(formatRun(r));return formatRun(r);}
     },
     {
       name: 'run_python',
@@ -601,6 +623,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         const listing = pickPythonFiles(await ws.list(), code);
         const files = await Promise.all(listing.map(async (f) => ({ path: f.path, bytes: await (await ws.readBlob(f.path)).arrayBuffer() })));
         const r = await runPython(code, { files });
+        if(!r.ok)throw new Error(formatRun(r));
         const saved = [];
         for (const c of r.changed ?? []) {
           const w = await ws.write(c.path, new Blob([c.bytes]));
@@ -617,7 +640,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       run: async ({ path }) => {
         if (!(await ws.exists(path))) throw new Error(`找不到文件：${path}`);
         ctx.onPreview?.(ws.normalize(path));
-        return `已在预览区打开 ${path}`;
+        return `已在预览区打开 ${path}。这是预览入口，不代表已经运行或通过项目测试；有测试命令时仍需执行。`;
       }
     },
     {

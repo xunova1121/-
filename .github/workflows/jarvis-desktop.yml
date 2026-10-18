@@ -179,6 +179,14 @@ jobs:
           npx playwright install --with-deps chromium
       - name: 完整单元测试
         run: npm test
+      - name: 验证代码隔离与取消
+        run: node e2e/sandbox-isolation.mjs
+      - name: 安装Office真实渲染环境
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-impress libreoffice-calc fonts-noto-cjk
+      - name: 验证Word、PPT、Excel真实转PDF
+        run: node e2e/office-render.mjs
       - name: 构建网页版
         run: npm run build
       - name: 服务器模式端到端测试，打包服务器版

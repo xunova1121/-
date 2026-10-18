@@ -12,26 +12,44 @@ const jsWorkerSource = `
 self.onmessage = async ({ data }) => {
   const logs = [];
   const fmt = (v) => { try { return typeof v === 'string' ? v : JSON.stringify(v, null, 2); } catch { return String(v); } };
-  const push = (k) => (...a) => logs.push((k === 'log' ? '' : '[' + k + '] ') + a.map(fmt).join(' '));
+  let logged=0;
+  const push = (k) => (...a) => {if(logs.length>=200||logged>=128000)return;const line=((k==='log'?'':'['+k+'] ')+a.map(fmt).join(' ')).slice(0,4000);logged+=line.length;logs.push(line);};
   self.console = { log: push('log'), info: push('log'), warn: push('warn'), error: push('error'), table: push('log') };
   try {
     const fn = new (Object.getPrototypeOf(async function () {}).constructor)(data.code);
     const value = await fn();
-    self.postMessage({ ok: true, logs, value: value === undefined ? undefined : fmt(value) });
+    self.postMessage({ ok: true, logs, value: value === undefined ? undefined : fmt(value).slice(0,64000) });
   } catch (e) {
     self.postMessage({ ok: false, logs, error: String(e && e.stack || e) });
   }
 };`;
 
-export function runJavaScript(code, { timeout = JS_TIMEOUT } = {}) {
-  return new Promise((resolve) => {
-    const url = URL.createObjectURL(new Blob([jsWorkerSource], { type: 'text/javascript' }));
-    const w = new Worker(url);
-    const done = (r) => { clearTimeout(t); w.terminate(); URL.revokeObjectURL(url); resolve(r); };
-    const t = setTimeout(() => done({ ok: false, logs: [], error: `运行超过 ${timeout / 1000} 秒，已终止（可能有死循环）` }), timeout);
-    w.onmessage = ({ data }) => done(data);
-    w.onerror = (e) => done({ ok: false, logs: [], error: e.message });
-    w.postMessage({ code });
+/** 一次性不透明来源 iframe 内的 Worker；CSP 禁止联网，不能访问应用存储。 */
+export function runJavaScript(code, { timeout = JS_TIMEOUT, signal } = {}) {
+  return new Promise(resolve => {
+    if(typeof document==='undefined'){resolve({ok:false,logs:[],error:'当前环境没有浏览器隔离执行器'});return;}
+    const frame=document.createElement('iframe');frame.hidden=true;frame.setAttribute('sandbox','allow-scripts');frame.setAttribute('aria-hidden','true');
+    const token=crypto.randomUUID();let finished=false;
+    const done=result=>{if(finished)return;finished=true;clearTimeout(timer);removeEventListener('message',receive);signal?.removeEventListener('abort',abort);try{frame.contentWindow?.postMessage({token,stop:true},'*');}catch{}frame.remove();resolve(result);};
+    const receive=e=>{if(e.source===frame.contentWindow&&e.data?.token===token)done(e.data.result);};
+    const abort=()=>done({ok:false,logs:[],error:'已停止运行'});
+    const timer=setTimeout(()=>done({ok:false,logs:[],error:'运行超过 '+timeout/1000+' 秒，已终止（可能有死循环）'}),timeout);
+    addEventListener('message',receive);signal?.addEventListener('abort',abort,{once:true});
+    if(signal?.aborted){abort();return;}
+    const bootstrap=(workerSource,token)=>{
+      let worker=null;
+      addEventListener('message',e=>{
+        if(e.source!==parent||e.data?.token!==token)return;
+        if(e.data.stop){worker?.terminate();return;}
+        if(worker)return;
+        const url=URL.createObjectURL(new Blob([workerSource],{type:'text/javascript'}));worker=new Worker(url);URL.revokeObjectURL(url);
+        worker.onmessage=ev=>{parent.postMessage({token,result:ev.data},'*');worker.terminate();};
+        worker.onerror=ev=>{parent.postMessage({token,result:{ok:false,logs:[],error:ev.message}},'*');worker.terminate();};
+        worker.postMessage({code:e.data.code});
+      });
+    };
+    frame.srcdoc='<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\' \'unsafe-eval\' blob:; worker-src blob:; connect-src \'none\'"><script>('+bootstrap.toString()+')('+JSON.stringify(jsWorkerSource)+','+JSON.stringify(token)+')<'+ '/script>';
+    frame.onload=()=>{if(!finished)frame.contentWindow.postMessage({token,code:String(code)},'*');};document.body.append(frame);
   });
 }
 

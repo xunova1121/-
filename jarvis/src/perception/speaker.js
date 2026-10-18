@@ -24,11 +24,12 @@ export class Speaker {
    * @param {() => object} [o.getKeys] 密钥表
    * @param {() => object|null} [o.getGateway]
    */
-  constructor({ lang = 'zh-CN', rate = 0.95, pitch = 1.0, onStart, onIdle, onBoundary, onError, onEngine, getVoiceConfig, getKeys, getGateway, getConfig } = {}) {
+  constructor({ lang = 'zh-CN', rate = 0.95, pitch = 1.0, onStart, onIdle, onBoundary, onError, onEngine, onAudioScheduled, getVoiceConfig, getKeys, getGateway, getConfig } = {}) {
     Object.assign(this, { lang, rate, pitch, onStart, onIdle, onBoundary, onError });
     this.getVoiceConfig = getVoiceConfig ?? (() => ({ engine: 'browser' }));
     this.getConfig = getConfig || (() => ({}));
     this.onEngine = onEngine;
+    this.onAudioScheduled=onAudioScheduled;
     this.getKeys = getKeys ?? (() => ({}));
     this.getGateway = getGateway ?? (() => null);
     this.enabled = true;
@@ -184,6 +185,7 @@ export class Speaker {
       let done = false;
       const end = () => { if (!done) { done = true; if (this.browserDone === end) this.browserDone = null; resolve(); } };
       this.browserDone = end;
+      u.onstart=()=>this.onAudioScheduled?.({engine:'browser',delayMs:0});
       u.onboundary = () => this.onBoundary?.();
       u.onend = end;
       u.onerror = end;
@@ -251,7 +253,7 @@ export class Speaker {
     if(!this.fx||this.fxId!==fxId){this.fx?.dispose();this.fx=buildFx(ctx,fxId);this.fxId=fxId;}
     this.ctrl??=new AbortController();
     const sources=new Set();this.realtimeSources=sources;
-    let next=ctx.currentTime,ended=false;
+    let next=ctx.currentTime,ended=false,announced=false;
     let resolvePlayback;const playback=new Promise(r=>{resolvePlayback=r;});
     this.realtimeDone=resolvePlayback;
     const check=()=>{if(ended&&!sources.size)resolvePlayback();};
@@ -266,6 +268,7 @@ export class Speaker {
           src.onended=()=>{sources.delete(src);src.disconnect();if(this.source===src)this.source=null;check();};
           sources.add(src);this.source=src;this.onEngine?.('qwen-realtime',false);
           const at=Math.max(ctx.currentTime+0.02,next);next=at+buffer.duration;src.start(at);
+          if(!announced){announced=true;this.onAudioScheduled?.({engine:'qwen-realtime',delayMs:Math.max(0,(at-ctx.currentTime)*1000)});}
         }
       });
       ended=true;check();await playback;
@@ -298,7 +301,7 @@ export class Speaker {
       src.onended = finish; this.playbackDone = finish;
       if (gen !== this.gen) return resolve();
       this.source = src;
-      src.start();
+      src.start();this.onAudioScheduled?.({engine:this.getVoiceConfig().engine,delayMs:0});
     });
   }
 }

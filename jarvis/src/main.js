@@ -30,6 +30,7 @@ import { initConversationComposer } from './ui/conversationComposer.js';
 let mascots = null;
 let composer = null;
 let dictating = false, dictationTimer = null, dictationGeneration = 0;
+let callTiming = null;
 let callActive = false;
 let callStarting = false;
 let callGeneration = 0;
@@ -506,6 +507,9 @@ let active = null; // { ctrl, streamDone, bubble }
 const attachments = [];
 
 const speaker = new Speaker({
+  onAudioScheduled: ({engine,delayMs}) => {
+    if(callActive&&callTiming?.recognizedAt&&!callTiming.audioAt){callTiming.audioAt=now()+delayMs;recordVoiceEvent('通话分段耗时',JSON.stringify({engine,recognitionMs:callTiming.stoppedAt?Math.round(callTiming.recognizedAt-callTiming.stoppedAt):null,modelFirstTextMs:callTiming.firstTextAt?Math.round(callTiming.firstTextAt-callTiming.recognizedAt):null,audioScheduledMs:Math.round(callTiming.audioAt-callTiming.recognizedAt)}));}
+  },
   onStart: () => {
     if (callActive) callStatus('未央正在说话…');
     voice.setSuppressed(true);
@@ -1311,6 +1315,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
         }
         if (active !== turn) return;
         if (e.type === 'text') {
+          if(callActive&&callTiming?.recognizedAt&&!callTiming.firstTextAt)callTiming.firstTextAt=now();
           if (!firstToken) { firstToken = now(); hud.think('生成回答'); }
           if (!outMarked) { outMarked = true; markActivity(`正在输出回答${shown.length ? `（已 ${shown.length} 字）` : ''}`); }
           if (serverCard) { serverCard.done(true, '由模型服务端完成', Math.round(now() - serverCard.t0)); serverCard = null; }
@@ -1550,7 +1555,7 @@ function recordedVoice() {
   return new RecordedVoice({ getTranscriber: () => { const id = sttEngine(); return id === 'none' || id === 'browser' ? null : (wav, signal) => transcribe(id,llmConfig,wav,{gateway,signal}); }, ...voiceHandlers });
 }
 const voiceHandlers = {
-  onStatus: phase => { recordVoiceEvent('识别阶段',phase); if (callActive) callStatus({ ready:'麦克风已开启，请说话', speech:'正在听你说话…', processing:'正在识别这句话…', popup:'尝试手机系统的语音窗口…' }[phase] || phase); },
+  onStatus: phase => { if(callActive&&phase==='speech')callTiming={};if(callActive&&phase==='processing'){callTiming??={};callTiming.stoppedAt=now();} recordVoiceEvent('识别阶段',phase); if (callActive) callStatus({ ready:'麦克风已开启，请说话', speech:'正在听你说话…', processing:'正在识别这句话…', popup:'尝试手机系统的语音窗口…' }[phase] || phase); },
   onUnavailable: async message => {
     recordVoiceEvent('系统识别不可用',message);
     if (!MOBILE || !callActive || callCloudFallback || /权限|permission/i.test(message) || sttEngine() === 'none') return;
@@ -1585,7 +1590,7 @@ const voiceHandlers = {
       if (text) { prompt.value += (prompt.value.trim() ? ' ' : '') + text; autosize(); prompt.dispatchEvent(new Event('input',{bubbles:true})); prompt.focus(); }
       return;
     }
-    if (callActive) callStatus('未央正在思考…');
+    if (callActive) {callTiming??={};callTiming.recognizedAt=now();callStatus('未央正在思考…');}
     endListening();
     transcript.clearInterim();
     if (!settings.wakeWord) return send(t, { byVoice: true });
