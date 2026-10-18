@@ -22,10 +22,13 @@
 .companion-edition .wb-hero-mark.wy-brand{width:150px;height:160px;margin:0 auto 12px}
 .companion-edition .wb-hero-mark.wy-brand .wy-mascot{--mascot-size:190px}
 .companion-edition .wy-reply-greeting{display:none}
-.companion-edition.workbench .msg.agent{padding-left:56px}
+.companion-edition.workbench .msg.agent{padding-left:0;display:grid;grid-template-columns:44px minmax(0,1fr);column-gap:12px}
+.companion-edition.workbench .msg.agent>*{grid-column:2;min-width:0;max-width:100%}
 .companion-edition.workbench .msg.agent>.who::before{content:none;display:none;animation:none}
-.companion-edition.workbench .msg.agent>.who .who-mood{position:absolute;left:0;top:-9px;--mascot-size:56px;margin:0}
-.companion-edition.workbench .msg.agent>.who{height:32px;gap:4px}
+.companion-edition.workbench .msg.agent>.who .who-mood{position:relative;inset:auto;grid-column:1;grid-row:1;--mascot-size:52px;margin:0;justify-self:center}
+.companion-edition.workbench .msg.agent>.who{grid-column:1/-1;display:grid;grid-template-columns:44px auto minmax(0,1fr);min-height:56px;height:auto;gap:0 12px;margin-bottom:6px}
+.companion-edition.workbench .msg.agent>.who .who-name{grid-column:2;grid-row:1}
+.companion-edition.workbench .msg.agent>.who .who-time{grid-column:3;grid-row:1;white-space:nowrap}
 .companion-edition .pc-mascot{--mascot-size:56px;margin:-7px 0;align-self:center}
 .companion-edition .progress-card>summary{align-items:center;gap:7px;min-height:42px}
 .companion-edition .progress-card>summary strong{white-space:nowrap}
@@ -197,3 +200,28 @@ body.compact.companion-edition{--top-h:64px;--wy-reading-inset:20px;font-family:
 .compact.companion-edition.generating #btn-stop{order:5;margin-left:0}
 .compact.companion-edition .composer-row>*:not(#prompt){flex-shrink:0}
 .compact.companion-edition .composer-row>#model-chip{flex-shrink:1;min-width:0;max-width:min(34vw,150px)}
+
+/* 阅读区域可以缩小，消息本身不参与纵向压缩；宽表格与代码只在自身滚动。 */
+.companion-edition .transcript{min-width:0;overscroll-behavior-y:contain;scrollbar-width:none}
+.companion-edition .transcript::-webkit-scrollbar{display:none;width:0;height:0}
+.companion-edition .msg{min-width:0;flex-shrink:0;overflow-wrap:anywhere}
+.companion-edition .msg .body{min-width:0;max-width:100%;overflow-wrap:anywhere}
+.companion-edition .msg .body pre,.companion-edition .msg .body .code,.companion-edition .msg .body .table-wrap{min-width:0;max-width:100%}
+.companion-edition .msg .body .table-wrap{overflow-x:auto}
+.companion-edition .msg .body img,.companion-edition .msg .body video{max-width:100%;height:auto}
+.companion-edition .composer{min-width:0;max-width:100%}
+.companion-edition .composer-row{min-width:0}
+.companion-edition #prompt{min-width:0;box-sizing:border-box}
+.companion-edition .who-name,.companion-edition .who-time{flex-shrink:0}
+@media(min-width:701px){
+ .companion-edition.workbench .transcript{padding-left:max(12px,calc((100% - 920px)/2));padding-right:max(12px,calc((100% - 920px)/2))}
+}
+@media(max-width:700px){
+ /* 大角色和简洁标题都在正常流中，换行后的状态不挤压昵称与时间。 */
+ .companion-edition .msg.agent>.who{grid-template-columns:90px auto minmax(0,1fr)}
+ .companion-edition .msg.agent>.who .who-time{white-space:nowrap}
+ .companion-edition .msg.agent>.who .wy-reply-greeting{min-width:0;overflow-wrap:anywhere}
+ .companion-edition .msg.agent:not(:last-child)>.who,.companion-edition .msg.agent.wy-long-reply>.who,.companion-edition.wy-keyboard-open .msg.agent>.who,.companion-edition.wy-reading-history .msg.agent>.who{flex-wrap:wrap;height:auto!important}
+ .companion-edition .msg.agent.streaming:not(:last-child)>.who::after,.companion-edition .msg.agent.streaming.wy-long-reply>.who::after,.companion-edition.wy-keyboard-open .msg.agent.streaming>.who::after,.companion-edition.wy-reading-history .msg.agent.streaming>.who::after{flex:1 1 140px;max-width:100%}
+}
+

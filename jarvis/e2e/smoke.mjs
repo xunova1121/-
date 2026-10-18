@@ -935,6 +935,55 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await ctx.close();
 }
 
+
+// —— 对话布局边界：长内容不能撑歪消息，头像与正文正常占位，隐藏滚动条仍能滚动
+{
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, reducedMotion: 'reduce' });
+  const p = await ctx.newPage();
+  await p.goto(BASE);
+  await p.waitForFunction(() => window.__jarvis?.send);
+  await ask(p, '你好');
+  await p.evaluate(() => {
+    const body = document.querySelector('#transcript .msg.agent:last-child .body');
+    body.replaceChildren();
+    const paragraph = document.createElement('p');
+    paragraph.textContent = 'https://example.com/' + 'very-long-unbroken-content'.repeat(80);
+    const code = document.createElement('pre');
+    code.textContent = 'const value = "' + 'abcdef'.repeat(200) + '";';
+    const wrap = document.createElement('div'); wrap.className = 'table-wrap';
+    const table = document.createElement('table'), row = table.insertRow();
+    for (let i = 0; i < 15; i++) { const cell = row.insertCell(); cell.textContent = '宽表格字段' + i; cell.style.whiteSpace = 'nowrap'; }
+    wrap.append(table); body.append(paragraph, code, wrap);
+  });
+  for (const width of [900, 1280, 1920]) {
+    await p.setViewportSize({ width, height: 860 });
+    await p.waitForTimeout(350);
+    const layout = await p.evaluate(() => {
+      const el = document.querySelector('#transcript .msg.agent:last-child');
+      const r = x => x.getBoundingClientRect();
+      const msg = r(el), head = r(el.querySelector('.who')), mascot = r(el.querySelector('.who-mood')), name = r(el.querySelector('.who-name')), body = r(el.querySelector('.body'));
+      const transcript = document.querySelector('#transcript'), t = r(transcript), composer = r(document.querySelector('#inputbar'));
+      const contained = x => { const b = r(x); return b.left >= msg.left - 1 && b.right <= msg.right + 1; };
+      return {
+        avatar: mascot.right <= name.left + 1 && mascot.bottom <= body.top + 1 && head.bottom <= body.top + 1,
+        content: [...el.querySelectorAll('.body, pre, .table-wrap')].every(contained) && transcript.scrollWidth <= transcript.clientWidth + 1,
+        composer: composer.top >= t.bottom - 1 && composer.right <= innerWidth && composer.left >= 0,
+        scroll: getComputedStyle(transcript).scrollbarWidth === 'none' || getComputedStyle(transcript, '::-webkit-scrollbar').display === 'none'
+      };
+    });
+    check(width + 'px：头像不遮昵称与正文，长链接/代码/表格不撑破对话', layout.avatar && layout.content, JSON.stringify(layout));
+    check(width + 'px：输入区不遮消息，滚动条隐藏', layout.composer && layout.scroll);
+  }
+  const scrolls = await p.evaluate(() => {
+    const t = document.querySelector('#transcript'), msg = t.querySelector('.msg.agent');
+    for (let i = 0; i < 8; i++) t.append(msg.cloneNode(true));
+    t.scrollTop = 0; t.scrollTop = 160;
+    return t.scrollTop > 0;
+  });
+  check('隐藏滚动条后仍可上下滚动长对话', scrolls);
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok).length;
 console.log(`\n${results.length - failed}/${results.length} 通过`);
