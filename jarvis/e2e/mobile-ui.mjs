@@ -206,10 +206,13 @@ try{
   check('App 被关掉时没做完的任务：再打开回到那个对话，带着做过的步骤接着做',await again.evaluate(()=>document.querySelector('#transcript').textContent.includes('第 4 段')&&[...document.querySelectorAll('#transcript .msg.user')].at(-1).textContent.includes('已经做过的步骤：读取文件')));
   check('展开后能看到全部、也能收起，没有页面异常',againErrors.length===0,againErrors.join(' | '));
   await relaunch.close();
-  for(const width of [320,412]){
+  for(const width of [320,360,390,412]){
     const narrow=await browser.newPage({viewport:{width,height:780}});await narrow.goto(BASE);await narrow.waitForSelector('body.companion-edition');
-    await narrow.evaluate(()=>{document.documentElement.style.fontSize='18px';});
+    await narrow.waitForFunction(()=>window.__jarvis?.send);await narrow.evaluate(()=>{document.documentElement.style.fontSize='18px';document.getElementById('model-chip-text').textContent='服务器 · claude-sonnet-very-long-model-name';});
     check(`${width}px 手机宽度下头像、模型和输入操作不溢出`,await narrow.evaluate(()=>{const header=document.querySelector('.topbar').getBoundingClientRect(),logo=document.querySelector('.brand-mark .wy-mascot').getBoundingClientRect(),row=document.querySelector('.composer-row').getBoundingClientRect(),model=document.getElementById('model-chip').getBoundingClientRect(),camera=document.getElementById('btn-camera').getBoundingClientRect(),call=document.getElementById('btn-call').getBoundingClientRect();return document.documentElement.scrollWidth<=innerWidth&&logo.bottom<=header.bottom&&model.width>=50&&model.left>=camera.right&&model.right<=call.left&&call.bottom<=row.bottom&&Math.abs(document.getElementById('btn-send').getBoundingClientRect().top-call.top)<=3;}));
+    await narrow.evaluate(()=>document.body.classList.add('generating'));
+    check(`${width}px 长模型名、生成中停止按钮仍与语音同排`,await narrow.evaluate(()=>{const stop=document.getElementById('btn-stop').getBoundingClientRect(),call=document.getElementById('btn-call').getBoundingClientRect(),model=document.getElementById('model-chip').getBoundingClientRect();return stop.width>0&&Math.abs(stop.top-call.top)<=3&&model.right<=call.left&&stop.right<=innerWidth-12;}));
+    await narrow.evaluate(()=>document.body.classList.remove('generating'));
     await narrow.screenshot({path:path.join(OUT,`mobile-unified-${width}.png`)});await narrow.close();
   }
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
