@@ -162,7 +162,7 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
  * @param {{ text: string } | null} [o.summary]  本段对话较早内容的摘要（长对话压缩，见 compress.js）
  * @returns {Promise<{ text: string, steps: number, toolCalls: number }>}
  */
-export async function runAgent({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs = TIME_BUDGET_MS, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false }) {
+export async function runAgent({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs = TIME_BUDGET_MS, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null }) {
   const startedAt = now();
   let overtime = 0; // 超时后又给了几次收尾机会
   let webCalls = 0; // 这一轮查网页的次数（只有主要在查资料时才按用时收尾，写代码、写长文档不受影响）
@@ -303,6 +303,8 @@ export async function runAgent({ adapter, model, history, userText, images = [],
         // 有风险的操作（操作电脑、MCP 工具）先征得用户同意
         const ask = tool.approval?.(c.args);
         if (ask && approve && !(await approve(ask, tool))) throw new Error('用户拒绝了这个操作。请换一种方式，或询问用户的意见。');
+        await checkpoint?.({type:'tool_start',id:c.id,name:c.name,args:c.args});
+        if (signal?.aborted) throw Object.assign(new Error('aborted'),{name:'AbortError'});
         // 工具可以返回 { text, images }：图片会交给模型“看”（如截屏、工作区里的图片）
         const r = await tool.run(c.args, { signal, progress: (text) => emit({ type: 'tool_progress', id: c.id, name: c.name, text }) });
         if (r && typeof r === 'object' && 'text' in r) { output = String(r.text); outImages = r.images ?? []; } else output = String(r);
@@ -310,6 +312,7 @@ export async function runAgent({ adapter, model, history, userText, images = [],
         ok = false;
         output = `错误：${e.message || e}`;
       }
+      await checkpoint?.({type:'tool_end',id:c.id,name:c.name,ok,output});
       emit({ type: 'tool_end', id: c.id, name: c.name, ok, output, ms: Date.now() - t0 });
       return { c, ok, output, outImages };
     };

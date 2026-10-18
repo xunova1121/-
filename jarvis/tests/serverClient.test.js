@@ -160,3 +160,15 @@ describe('服务器模式：打开快、不卡住', () => {
     expect(remoteSessions(client, { storage }).cachedList()).toEqual([]);
   });
 });
+
+it('服务器支持去重时写请求重试保持同一编号；旧服务器不重试',async()=>{
+ const {createServerClient}=await import('../src/core/serverClient.js');
+ for(const supported of [true,false]){
+  const payloads=[];const client=createServerClient({base:'https://example.test',fetchImpl:async(url,init)=>{
+   if(url.endsWith('/api/server/status'))return new Response(JSON.stringify({features:{taskRequestIds:supported}}));
+   payloads.push(JSON.parse(init.body));if(payloads.length===1)throw new TypeError('network');return new Response(JSON.stringify({id:'t'}));
+  }});
+  if(supported){await client.startTask({sessionId:'c',text:'运行'});expect(payloads).toHaveLength(2);expect(payloads[0].requestId).toBe(payloads[1].requestId);}
+  else{await expect(client.startTask({sessionId:'c',text:'运行'})).rejects.toThrow('network');expect(payloads).toHaveLength(1);}
+ }
+});

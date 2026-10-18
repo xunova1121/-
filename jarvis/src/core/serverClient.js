@@ -54,6 +54,15 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
   const root = normalizeUrl(base);
   /** 最近几次请求花了多久、走的哪种网络（设置 → 服务器模式里显示，查“为什么慢”用） */
   const timings = [];
+  let taskProtocol = null;
+  const requestId = () => globalThis.crypto?.randomUUID?.() || 'r_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2);
+  async function taskWrite(path, body) {
+    // 只有服务器明确支持请求去重时才重试写请求；旧服务器保持不自动重发。
+    taskProtocol ??= req('/api/server/status',{}).then(x=>Boolean(x.features?.taskRequestIds)).catch(()=>false);
+    const supported=await taskProtocol, payload={...body,requestId:body.requestId||requestId()};
+    try{return await req(path,{method:'POST',body:payload});}
+    catch(e){if(!supported||e.status||e.name==='AbortError'&&!e.timeout)throw e;return req(path,{method:'POST',body:payload});}
+  }
   const note = (path, t0, ok) => {
     const via = globalThis.__jarvisNetVia?.(`${root}${path}`);
     timings.unshift({ path: path.split('?')[0], ms: Date.now() - t0, ok, ...(via && { via }), at: Date.now() });
@@ -110,7 +119,8 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     putConfig: (cfg) => req('/api/server/config', { method: 'PUT', body: cfg }),
     updateInfo: () => req('/api/server/update'),
     requestUpdate: () => req('/api/server/update', { method: 'POST' }),
-    startTask: (o) => req('/api/tasks', { method: 'POST', body: o }),
+    startTask: (o) => taskWrite('/api/tasks',o),
+    appendTaskNote: (id,text) => taskWrite(`/api/tasks/${encodeURIComponent(id)}/notes`,{text}),
     getTask: (id) => req(`/api/tasks/${id}`),
     stopTask: (id) => req(`/api/tasks/${id}/stop`, { method: 'POST' }),
     // 要求事件流：手机 App 退到原生网络时也边收边显示（见 mobile/nativeFetch.js 的 wantsStream）
@@ -199,7 +209,7 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
    */
   export async function runRemote(client, { sessionId, userText, images = [], voice = false, emit, signal, onFile, onStarted, taskId = null }) {
     const task = taskId ? { id: taskId } : await client.startTask({ sessionId, text: userText, ...(images.length && { images }), ...(voice && { voice: true }) });
-    onStarted?.(task);
+    await onStarted?.(task);
     const stop = () => client.stopTask(task.id).catch(() => {});
     signal?.addEventListener('abort', stop, { once: true });
     try {

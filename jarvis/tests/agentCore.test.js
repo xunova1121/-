@@ -174,3 +174,9 @@ describe('干活时插话不打断', () => {
     expect(r.text).toMatch(/PPT 做好了。[\s\S]*总结页也加上了。/);
   });
 });
+
+it('执行器先等待检查点写入，再运行有副作用的工具',async()=>{
+ const events=[];let n=0;const adapter={async stream(){return ++n===1?{text:'',toolCalls:[call('a','write_probe',{})],stop:'tool_use'}:{text:'完成',toolCalls:[],stop:'end_turn'};}};
+ await agent.runAgent({adapter,model:'m',history:[],userText:'执行',context:ctx,tools:[{name:'write_probe',description:'x',input_schema:{type:'object',properties:{}},run:async()=>{events.push('run');return 'ok';}}],emit:()=>{},checkpoint:async e=>{await Promise.resolve();events.push(e.type);}});
+ expect(events).toEqual(['tool_start','run','tool_end']);
+});

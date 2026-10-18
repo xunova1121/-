@@ -275,3 +275,33 @@ describe('服务器上：语音对话和寒暄', () => {
     expect(seen.at(-1).system[1]).not.toContain('语音对话');
   });
 });
+
+describe('服务器提交去重和检查点',()=>{
+ it('同一提交编号并发/重试只保存一次、只启动一个任务；编号不能换内容',async()=>{
+  const runner=createTaskRunner({getConfig:mockCfg,makeAdapter:()=>({adapter:heldAdapter(),model:'m'})});
+  const [a,b]=await Promise.all([runner.start({sessionId:'dedup',text:'原始要求',requestId:'r_one'}),runner.start({sessionId:'dedup',text:'原始要求',requestId:'r_one'})]);
+  expect(a.id).toBe(b.id);expect(runner.list()).toHaveLength(1);expect((await sessions.get('dedup')).messages.filter(x=>x.role==='user')).toHaveLength(1);
+  await expect(runner.start({sessionId:'dedup',text:'不同内容',requestId:'r_one'})).rejects.toMatchObject({status:409});
+ });
+ it('指定原任务补充；原任务结束后不暗中启动一个新任务',async()=>{
+  const runner=createTaskRunner({getConfig:mockCfg,makeAdapter:()=>({adapter:heldAdapter(),model:'m'})});
+  const a=await runner.start({sessionId:'notes',text:'原始任务'});
+  const b=await runner.start({sessionId:'notes',targetTaskId:a.id,text:'补充要求',requestId:'note_one'});expect(b.joined).toBe(true);
+  await runner.start({sessionId:'notes',targetTaskId:a.id,text:'补充要求',requestId:'note_one'});
+  expect((await sessions.get('notes')).messages.filter(x=>x.content==='补充要求')).toHaveLength(1);
+  runner.stop(a.id);await until(()=>runner.get(a.id).status==='stopped');
+  await expect(runner.start({sessionId:'notes',targetTaskId:a.id,text:'迟到的补充'})).rejects.toMatchObject({status:409});expect(runner.list()).toHaveLength(1);
+ });
+ it('工具真正执行前检查点已落盘，结束后才标成功',async()=>{
+  let atExecution;
+  const runner=createTaskRunner({getConfig:mockCfg,makeAdapter:()=>({adapter:scripted([{tools:[{id:'w',name:'write_probe',args:{}}]},{text:'完成'}]),model:'m'}),makeTools:()=>[{name:'write_probe',description:'t',input_schema:{type:'object',properties:{}},run:async()=>{atExecution=(await sessions.get('check')).taskCheckpoint;return '已执行';}}]});
+  const a=await runner.start({sessionId:'check',text:'运行一次'});await until(()=>runner.get(a.id).status==='done');
+  expect(atExecution.inFlight).toMatchObject([{id:'w',name:'write_probe'}]);
+  const final=(await sessions.get('check')).taskCheckpoint;expect(final.status).toBe('done');expect(final.inFlight).toEqual([]);expect(final.steps).toMatchObject([{name:'write_probe',ok:true}]);
+ });
+ it('重启只标记不确定的操作，不自动重新执行，也不接受同一提交重放',async()=>{
+  const s=sessions.create();s.id='restarted';s.messages=[{role:'user',content:'发消息',ts:1}];s.taskCheckpoint={text:'发消息',status:'running',inFlight:[{id:'u',name:'mcp_send_email'}]};
+  await sessions.save(s);const runner=createTaskRunner({getConfig:mockCfg});await runner.settled();
+  expect((await sessions.get(s.id)).taskCheckpoint.status).toBe('needs_review');expect(runner.list()).toHaveLength(0);
+ });
+});

@@ -68,7 +68,7 @@ export function ruleBasedPlan(task) {
  *   { type: 'team_step', index, status: 'running'|'done'|'fail'|'redo', note? }
  *   { type: 'team_review', pass, issues: string[], skipped? }
  */
-export async function runTeam({ adapter, model, history = [], userText, images = [], tools, emit, signal, approve, llm = null, run = runAgent, maxFix = 1, sessionId = null, pickModel = null, summary: earlier = null, requirements = null, requirementText = userText }) {
+export async function runTeam({ adapter, model, history = [], userText, images = [], tools, emit, signal, approve, llm = null, run = runAgent, maxFix = 1, sessionId = null, pickModel = null, summary: earlier = null, requirements = null, requirementText = userText, checkpoint = null, fallbacks = [] }) {
   const task = stripTeamPrefix(userText);
   const record = requirements ?? collectRequirements([...history, { role: 'user', content: task }]);
   const requirementContext = requirementsBlock(record, task, { currentText: requirementText });
@@ -106,7 +106,7 @@ export async function runTeam({ adapter, model, history = [], userText, images =
     // 模型分工：工程师用编程模型、撰稿人用写作模型……（没配置时都用同一个模型）
     const m = pickModel?.(s.role) ?? { adapter, model };
     const r = await run({
-      adapter: m.adapter, model: m.model, history, signal, approve, sessionId, summary: earlier, requirements: record, requirementText, // 原话不被团队生成的步骤覆盖
+      adapter: m.adapter, model: m.model, history, signal, approve, checkpoint, fallbacks:m.fallbacks || fallbacks, sessionId, summary: earlier, requirements: record, requirementText, // 原话不被团队生成的步骤覆盖
       images: index === 0 ? images : [],
       tools: toolsFor(s.role, tools),
       userText: `${s.detail}\n\n——\n【团队分工】你是团队里的「${s.roleName}」（职责：${ROLES[s.role].duty}），负责整个任务的第 ${index + 1}/${steps.length} 步。\n用户的原始需求：${task}\n${prior ? `前面步骤的成果：\n${prior}\n` : ''}${extra}只完成你这一步，完成后用几句话说明产出了什么（文件路径、关键数据、结论）。`,

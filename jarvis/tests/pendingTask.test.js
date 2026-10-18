@@ -4,13 +4,14 @@ import { savePending, clearPending, takePending, resumeText, PENDING_MAX_AGE } f
 const mem = () => { const m = new Map(); return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k), m }; };
 
 describe('手机：App 被关掉时接着做没做完的任务', () => {
-  it('记下、更新步骤，取出最新一条并清空', () => {
+  it('记下、更新步骤，取出最新一条，其他任务仍保留', () => {
     const s = mem();
     savePending(s, 'a', { turnId: 1, text: '做一页纸汇报', ts: 1000, steps: [], files: [] });
     savePending(s, 'a', { ts: 2000, steps: ['读取文件'], files: ['汇报.docx'] });
     savePending(s, 'b', { turnId: 2, text: '旧任务', ts: 500 });
     const r = takePending(s, 3000);
     expect(r).toMatchObject({ sessionId: 'a', text: '做一页纸汇报', steps: ['读取文件'], files: ['汇报.docx'] });
+    expect(takePending(s, 3000)?.text).toBe('旧任务');
     expect(takePending(s, 3000)).toBeNull();
   });
   it('正常结束清掉；新一轮开始后旧一轮的结束不清新记录', () => {
@@ -33,3 +34,5 @@ describe('手机：App 被关掉时接着做没做完的任务', () => {
     expect(t).toContain('a.docx');
   });
 });
+
+it('恢复完整原话和补充，不截成200字',()=>{ const text='完整原话'.repeat(300)+'末尾验收要求';expect(resumeText({text,notes:['保留附件']})).toContain(text);expect(resumeText({text,notes:['保留附件']})).toContain('保留附件'); });

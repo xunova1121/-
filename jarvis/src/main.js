@@ -1,3 +1,4 @@
+import { checkpointEvent, checkpointNeedsReview } from '../shared/taskCheckpoint.js';
 import { openQwenSession, QWEN_ASR } from './perception/qwenRealtime.js';
 import { QwenVoice } from './perception/qwenVoice.js';
 import {createHome} from './ui/home.js';
@@ -74,7 +75,7 @@ import * as sessionsApi from './agent/sessions.js';
 import { initSessionsPanel } from './ui/sessionsPanel.js';
 import { initCallouts } from './ui/callouts.js';
 import { openingSuggestions, followUpSuggestions, INTERRUPTED_MARK } from './core/suggest.js';
-import { savePending, clearPending, takePending, resumeText } from './core/pendingTask.js';
+import { savePending, clearPending, takePending, resumeText, listPending } from './core/pendingTask.js';
 import { loadServerSettings, createServerClient, runRemote, remoteSessions, normalizeUrl } from './core/serverClient.js';
 import { initServerPanel } from './ui/serverPanel.js';
 import { initQuickPrompts } from './ui/quickPrompts.js';
@@ -622,7 +623,7 @@ function modelForRole(role) {
   const r = routeFor(llmConfig, ROLE_TASK[role] ?? 'chat');
   if (!r.routed) return null;
   const a = createAdapter(r.cfg, { gateway });
-  return a.problem ? null : { adapter: a.adapter, model: a.model };
+  return a.problem ? null : { adapter:a.adapter, model:a.model, fallbacks:fallbackRoutes(llmConfig,{provider:r.cfg.provider,model:a.model}).map(f=>({...createAdapter(f.cfg,{gateway}),label:f.model})).filter(f=>!f.problem&&f.adapter&&f.model) };
 }
 function syncMemoryEngine() {
   const embedder = createEmbedder(llmConfig, { gateway });
@@ -931,14 +932,14 @@ async function followServerTask(s) {
   const ctrl = new AbortController();
   const bubble = transcript.add('agent');
   bubble.el.classList.add('streaming');
-  const turn = { ctrl, streamDone: false, bubble, session: s, files: new Set(), inbox: [], t0: now(), steps: 0, status: '', background: false };
+  const turn = { ctrl, streamDone: false, bubble, session: s, files: new Set(), inbox: [], t0: now(), steps: 0, status: '', background: false, remote:Boolean(server) };
   active = turn;
   liveBubble = bubble;
   setTask('processing', '服务器上正在做');
   const cards = new Map();
   try {
     await runRemote(server, {
-      taskId: s.taskId, signal: ctrl.signal, onFile: (p) => pullServerFile(p, turn),
+      taskId: s.taskId, onStarted:task=>{turn.remoteId=task.id;}, signal: ctrl.signal, onFile: (p) => pullServerFile(p, turn),
       emit: (e) => {
         if (active !== turn) return;
         if (e.type === 'text') bubble.append(e.delta);
@@ -1106,15 +1107,22 @@ async function expandSlash(text) {
 // —— 干活时插话、切换对话后台继续
 const backgroundTurns = new Set();
 /** 干活时又发来一句：问进度直接答；说停就停；其他的交给正在干的未央（下一步开始前看到），不打断 */
-function interject(text, { thumbs = [] } = {}) {
+async function interject(text, { thumbs = [] } = {}) {
   const turn = active;
   transcript.add('user', text, Date.now(), { thumbs });
   const reply = (words) => { const b = transcript.add('agent', words); b.done(); };
   if (STOP_ASK.test(text)) { interrupt(); reply('好的，已经停下。上面是停下前做到的地方，要接着做跟我说一声。'); return; }
   if (STATUS_ASK.test(text)) { reply(`${turnStatus(turn, now())}。做完会直接给你结果；想停的话点右下角的方块，或者说“停”。`); return; }
   rememberTurn('user', text, thumbs.length ? { thumbs } : {}, turn.session);
-  if (!server) turn.inbox.push(text);
-  if (server) server.startTask({ sessionId: turn.session.id, text }).catch((e) => { if (!prompt.value.trim()) { prompt.value = text; autosize(); } toast(`补充没有送达服务器，已保留在输入框：${e.message}`); }); // 服务器模式：交给服务器上正在干的那个任务
+  if (!turn.remote) {
+    turn.inbox.push(text);
+    if (MOBILE) { turn.checkpoint=checkpointEvent(turn.checkpoint,{type:'user_note',text}); savePending(storage,turn.session.id,{checkpoint:turn.checkpoint}); }
+  } else if (!turn.remoteId) {
+    turn.inbox.push(text); reply('收到补充，连接到原任务后会送达。'); return;
+  } else {
+    try { await server.appendTaskNote(turn.remoteId,text); }
+    catch(e) { if (!prompt.value.trim()) { prompt.value=text; autosize(); } reply('补充没有送达，已放回输入框。原任务不会重复执行；服务器较旧时请先更新服务器。'); return; }
+  }
   reply(`收到，做完手上这一步就看这句话（${turnStatus(turn, now())}）。`);
 }
 /** 切到别的对话：正在干的任务转到后台接着做 */
@@ -1199,7 +1207,8 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   setTask('processing', '思考中');
   // 手机：记下正在做的任务（App 被划掉时，下次打开接着做）
   const doneSteps = [];
-  if (MOBILE && !server) savePending(storage, session.id, { turnId: turn.t0, text, title: session.title || '', ts: Date.now(), steps: [], files: [] });
+  turn.checkpoint={text:userText,notes:[],inFlight:[],steps:[],files:[],status:'running'};
+  if (MOBILE && !server) savePending(storage,session.id,{turnId:turn.t0,text:userText,title:session.title||'',ts:Date.now(),steps:[],files:[],checkpoint:turn.checkpoint});
 
   // 模型分工：按这句话的类型换模型；日常对话让推理模型少想一点（首字更快）
   const task = shouldTeam(text, settings.teamMode === 'auto' && !helperLlm() ? 'off' : settings.teamMode) ? 'reason' : classifyTask(text, { images: imgs.length + withImages.size });
@@ -1211,6 +1220,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   if (route.routed) hud.think(`◇ 模型分工：${TASKS[task].name} → ${route.model}`);
   // 服务器模式下电脑版：要动这台电脑的事（桌面、文件夹、打开软件……）留在本机做，其余交给服务器
   const here = Boolean(server && DESKTOP && needsComputer(text));
+  turn.remote=Boolean(server&&!here);
   if (here) hud.think('◇ 这件事要操作这台电脑：在本机做');
   if (problem && (!server || here)) { // 服务器模式：用服务器上的模型设置
     bubble.append(problem);
@@ -1248,7 +1258,13 @@ async function send(text, { echo = true, byVoice = false } = {}) {
     // 服务器模式：服务器做，进度事件和本机一样显示（runRemote 的用法和 runAgent 一样）
     const serverRun = async (o) => {
       for (const f of files) await server.upload(f.path, await ws.readBlob(f.path)); // 发来的附件先传到服务器的工作区
-      return runRemote(server, { sessionId: o.sessionId, userText: o.userText, images: o.images, voice: o.voice, emit: o.emit, signal: o.signal, onFile: (p) => pullServerFile(p, turn) });
+      return runRemote(server, { sessionId: o.sessionId, userText: o.userText, images: o.images, voice: o.voice, emit: o.emit, signal: o.signal, onFile: (p) => pullServerFile(p, turn), onStarted:async remoteTask=>{
+        turn.remoteId=remoteTask.id;
+        for(const note of turn.inbox.splice(0)) {
+          try { await server.appendTaskNote(remoteTask.id,note); }
+          catch(e) { prompt.value += (prompt.value.trim()?'\n':'')+note; autosize(); toast('补充未送达原任务，已保留在输入框，请更新服务器或重新发送'); }
+        }
+      } });
     };
     const result = await (server && !here ? serverRun : team ? runTeam : runAgent)({
       llm: team ? helperLlm('reason') : undefined,
@@ -1259,8 +1275,12 @@ async function send(text, { echo = true, byVoice = false } = {}) {
       summary: session.summary ?? null,
       requirements: collectRequirements(history, session.requirements),
       requirementText: userText, // 保留斜杠命令展开前的原话，避免当成缺失历史重复注入
-      fallbacks: team ? [] : fallbacks,
+      fallbacks,
       inbox: team ? null : turn.inbox,
+      checkpoint: MOBILE&&!turn.remote ? async event=>{
+        turn.checkpoint=checkpointEvent(turn.checkpoint,event);
+        savePending(storage,turn.session.id,{checkpoint:turn.checkpoint,ts:Date.now(),files:[...turn.files]});
+      }:null,
       // 语音对话：让模型用口语短答；“你好 / 谢谢”这类寒暄不带工具，回得快
       voice: callActive || byVoice,
       light: !files.length && isSmallTalk(text),
@@ -1334,7 +1354,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
         } else if (e.type === 'tool_end') {
           cards.get(e.id)?.done(e.ok, e.output, e.ms);
           hud.toolEnd(e.id, e.ok);
-          if (MOBILE) { doneSteps.push(`${toolLabel(e.name)}${e.ok ? '' : '（失败）'}`); savePending(storage, turn.session.id, { ts: Date.now(), steps: doneSteps, files: [...turn.files] }); }
+          if (MOBILE&&!turn.remote) { if(e.ok) doneSteps.push(toolLabel(e.name)); savePending(storage, turn.session.id, { ts: Date.now(), steps: doneSteps, files: [...turn.files] }); }
           if (!e.ok) hud.think(`✕ ${toolLabel(e.name)} 失败`, 'bad');
           if (/remember|forget|save_skill/.test(e.name)) panels.refreshMind();
         } else if (e.type === 'server_tool') {
@@ -1403,7 +1423,8 @@ async function send(text, { echo = true, byVoice = false } = {}) {
     endControl();
     // 回答写完的一瞬间又收到的话（没来得及交给模型）：接着当一句新话处理
     const left = turn.inbox.splice(0);
-    if (left.length && !ctrl.signal.aborted && !turn.background && session === turn.session) setTimeout(() => send(left.join('\n'), { echo: false }), 0);
+    if(left.length&&turn.remote){prompt.value+=(prompt.value.trim()?'\n':'')+left.join('\n');autosize();toast('未送达的补充已放回输入框，没有另开任务');}
+    else if (left.length && !ctrl.signal.aborted && !turn.background && session === turn.session) setTimeout(() => send(left.join('\n'), { echo: false }), 0);
   }
 }
 
@@ -2525,10 +2546,19 @@ setTimeout(schedulerTick, 4000);
   // 手机：上次 App 被关掉时有任务做到一半：回到那个对话接着做
   const left = MOBILE ? takePending(storage) : null;
   const leftSession = left && await sessionsApi.get(left.sessionId).catch(() => null);
+  if(left&&(!leftSession||history.length))savePending(storage,left.sessionId,left);
   if (leftSession && !history.length) {
     await switchTo(leftSession);
-    toast('上次退出时任务还没做完，正在接着做（说“停”可以停下）');
-    send(resumeText(left));
+    if(checkpointNeedsReview(left.checkpoint)) {
+      savePending(storage,left.sessionId,left);
+      const card=document.createElement('section');card.className='task-recovery';card.setAttribute('role','status');
+      const note=document.createElement('p');note.textContent='上次退出时有操作的结果未确认，先核对再继续，避免重复执行。';
+      const resume=document.createElement('button');resume.type='button';resume.textContent='核对并继续';resume.onclick=()=>{card.remove();send(resumeText(left));};
+      const dismiss=document.createElement('button');dismiss.type='button';dismiss.textContent='不再继续';dismiss.onclick=()=>{clearPending(storage,left.sessionId,left.turnId);card.remove();};
+      card.append(note,resume,dismiss);$('#transcript').append(card);
+    } else {
+      toast('上次退出时任务还没做完，正在核对进度后继续');send(resumeText(left));
+    }
     sessionsPanel.refresh();
     return;
   }
@@ -2745,3 +2775,16 @@ initRenderHealthPanel({ mobile: MOBILE, toast, onChange: () => { if (!active) re
   }
 }
 
+
+// 本机其他未完成任务仍可查看，不因恢复最新一条而丢失。
+if(MOBILE){
+  const recovery=document.createElement('section');recovery.className='pending-recovery-list';
+  const toggle=document.createElement('button');toggle.type='button';toggle.className='btn';toggle.textContent='查看未完成任务';
+  const list=document.createElement('div');list.hidden=true;recovery.append(toggle,list);document.querySelector('[data-pane="settings"]').append(recovery);
+  const draw=()=>{list.replaceChildren();const rows=listPending(storage);if(!rows.length){list.textContent='没有保留的未完成任务。';return;}
+    for(const rec of rows){const card=document.createElement('div'),title=document.createElement('p');title.textContent=rec.title||String(rec.text||'未完成任务').slice(0,40);
+      const open=document.createElement('button');open.type='button';open.className='btn sm';open.textContent='查看并继续';open.onclick=async()=>{await openSession(rec.sessionId);prompt.value=resumeText(rec);autosize();showPanel('settings',{toggle:true});prompt.focus();};
+      const dismiss=document.createElement('button');dismiss.type='button';dismiss.className='btn ghost sm';dismiss.textContent='不再继续';dismiss.onclick=()=>{clearPending(storage,rec.sessionId,rec.turnId);draw();};card.append(title,open,dismiss);list.append(card);
+    }
+  };toggle.onclick=()=>{list.hidden=!list.hidden;if(!list.hidden)draw();};
+}

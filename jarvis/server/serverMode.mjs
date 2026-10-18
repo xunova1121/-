@@ -140,7 +140,7 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
   async function handle(req, res, pathname) {
     const url = new URL(req.url, 'http://x');
     if (pathname === '/api/server/login' && req.method === 'POST') { login(req, res, await readJson(req)); return true; }
-    if (pathname === '/api/server/status' && req.method === 'GET') { json(res, 200, { ok: true, running: runner.running, tasks: runner.list().filter((t) => t.status === 'running' || t.status === 'queued') }); return true; }
+    if (pathname === '/api/server/status' && req.method === 'GET') { json(res, 200, { ok: true, features:{taskRequestIds:true,taskNotes:true,taskCheckpoints:true}, running: runner.running, tasks: runner.list().filter((t) => t.status === 'running' || t.status === 'queued') }); return true; }
     if (pathname === '/api/server/config') {
       if (req.method === 'GET') { json(res, 200, maskConfig(loadConfig())); return true; }
       if (req.method === 'PUT') { saveConfig(mergeConfig(loadConfig(), await readJson(req))); json(res, 200, { ok: true }); return true; }
@@ -163,12 +163,17 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
       }
     }
     if (pathname === '/api/tasks' && req.method === 'POST') {
-      const { sessionId = null, text, images, voice } = await readJson(req, IMPORT_LIMIT); // 可能带图片，放宽大小
-      json(res, 200, await runner.start({ sessionId, text, images, voice: voice === true })); return true;
+      const { sessionId = null, text, images, voice, requestId } = await readJson(req, IMPORT_LIMIT); // 可能带图片，放宽大小
+      json(res, 200, await runner.start({ sessionId, text, images, voice: voice === true, requestId:requestId??null })); return true;
     }
     if (pathname === '/api/tasks' && req.method === 'GET') { json(res, 200, runner.list()); return true; }
-    const t = pathname.match(/^\/api\/tasks\/([\w-]+)(\/events|\/stop)?$/);
+    const t = pathname.match(/^\/api\/tasks\/([\w-]+)(\/events|\/stop|\/notes)?$/);
     if (t) {
+      if (t[2] === '/notes' && req.method === 'POST') {
+        const task=runner.get(t[1]);if(!task){json(res,404,{error:'原任务不存在'});return true;}
+        const {text,requestId}=await readJson(req,IMPORT_LIMIT);
+        json(res,200,await runner.start({sessionId:task.sessionId,text,requestId:requestId??null,targetTaskId:t[1]}));return true;
+      }
       if (!t[2] && req.method === 'GET') { const info = runner.get(t[1]); info ? json(res, 200, info) : json(res, 404, { error: '找不到这个任务' }); return true; }
       if (t[2] === '/events' && req.method === 'GET') { streamEvents(req, res, t[1], Number(url.searchParams.get('after') || req.headers['last-event-id'] || 0)); return true; }
       if (t[2] === '/stop' && req.method === 'POST') { json(res, 200, { ok: runner.stop(t[1]) }); return true; }
