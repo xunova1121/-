@@ -130,3 +130,5 @@ export function runPython(code, { files = [], timeout = 120000 } = {}) {
   pyBusy = job.catch(() => {});
   return job;
 }
+
+// 隔离验收使用本模块原文，不依赖Vite开发服务的关闭时序。

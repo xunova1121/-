@@ -1,8 +1,16 @@
 /** 在真实Chromium中验证来源隔离、禁网和终止，不以Worker模拟替代。 */
 import {chromium} from 'playwright';
-import {createServer} from 'vite';
-const server=await createServer({server:{host:'127.0.0.1',port:0},logLevel:'error'});await server.listen();
-const port=server.httpServer.address().port,browser=await chromium.launch();
+import http from 'node:http';
+import {readFile} from 'node:fs/promises';
+const source=await readFile(new URL('../src/agent/sandbox.js',import.meta.url),'utf8');
+const server=http.createServer((req,res)=>{
+ const url=new URL(req.url,'http://localhost');
+ if(url.pathname==='/src/agent/sandbox.js'){res.setHeader('Content-Type','application/javascript');res.end(source);}
+ else if(url.pathname==='/src/config.js'){res.setHeader('Content-Type','application/javascript');res.end('export const MOBILE=false;');}
+ else{res.setHeader('Content-Type','text/html');res.end('<!doctype html><body></body>');}
+});
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+const port=server.address().port,browser=await chromium.launch();
 let failures=0,network=0;
 const check=(name,ok)=>{console.log((ok?'✓':'✗')+' '+name);if(!ok)failures++;};
 try{
@@ -24,5 +32,5 @@ try{
  check('联网由CSP拦截，请求没有发出',results.net.value==='blocked'&&network===0);
  check('死循环超时被终止',!results.timeout.ok&&results.timeout.error.includes('已终止'));
  check('用户停止立即清理隔离环境',!results.canceled.ok&&results.canceled.error.includes('停止')&&results.frames===0);
-}finally{await browser.close();await server.close();}
+}finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
 if(failures)process.exitCode=1;
