@@ -218,28 +218,59 @@ export async function copyText(text) {
   } catch { return false; }
 }
 
-/** 每条消息下面的小按钮：复制 / 引用（放进输入框接着问）/ 朗读（只有未央的回答有） */
+/** 消息下面小按钮的图标（Lucide，ISC 许可，https://lucide.dev） */
+const ICONS = {
+  copy: '<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  quote: '<path d="M17 6H3"/><path d="M21 12H8"/><path d="M21 18H8"/><path d="M3 12v6"/>',
+  speak: '<path d="M11 4.7a.7.7 0 0 0-1.2-.5L6.4 7.6A1.4 1.4 0 0 1 5.4 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.4a1.4 1.4 0 0 1 1 .4l3.4 3.4a.7.7 0 0 0 1.2-.5z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.4 18.4a9 9 0 0 0 0-12.8"/>',
+  stop: '<rect width="12" height="12" x="6" y="6" rx="2"/>',
+  edit: '<path d="M21.2 6.8a1 1 0 0 0-4-4L3.8 16.2a2 2 0 0 0-.5.8l-1.3 4.4a.5.5 0 0 0 .6.6l4.4-1.3a2 2 0 0 0 .8-.5z"/><path d="m15 5 4 4"/>',
+  retry: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>'
+};
+/** 换按钮的图标（朗读中换成“停止”、复制后换成勾） */
+export function setActionIcon(btn, name) {
+  btn.querySelector('svg').innerHTML = ICONS[name] ?? '';
+}
+
+/** 每条消息下面的小图标按钮：复制 / 引用（放进输入框接着问）/ 编辑重发（你的）/ 朗读、重新生成（未央的） */
 function messageActions(role, getText, onAction) {
   const box = document.createElement('span');
   box.className = 'msg-actions';
-  const btn = (kind, label, title) => {
-    const b = Object.assign(document.createElement('button'), { type: 'button', className: `msg-act msg-${kind}`, textContent: label, title });
+  const btn = (kind, title) => {
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: `msg-act msg-${kind}`, title });
+    b.setAttribute('aria-label', title);
+    b.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[kind]}</svg>`;
     b.addEventListener('click', async () => {
       const text = getText();
       if (!text.trim()) return;
       if (kind === 'copy') {
         const ok = await copyText(toPlainText(text));
-        b.textContent = ok ? '已复制' : '复制失败';
-        setTimeout(() => { b.textContent = label; }, 1500);
+        setActionIcon(b, ok ? 'check' : 'copy');
+        b.title = ok ? '已复制' : '复制失败';
+        setTimeout(() => { setActionIcon(b, 'copy'); b.title = '复制'; }, 1500);
         return;
       }
       onAction?.(kind, text, b);
     });
     return b;
   };
-  box.append(btn('copy', '复制', '复制这条的文字'), btn('quote', '引用', '引用这条，接着问'));
-  if (role === 'agent') box.append(btn('speak', '朗读', '朗读这条回答'));
+  box.append(btn('copy', '复制'), btn('quote', '引用，接着问'));
+  if (role === 'user') box.append(btn('edit', '编辑后重新发送'));
+  else box.append(btn('speak', '朗读'), btn('retry', '重新生成这条回答'));
   return box;
+}
+
+/** 很长的回答先只显示开头（翻看旧消息时用）：少画很多内容，手机上更稳、更省电；点“展开全文”再画全部 */
+export const FOLD_CHARS = 900;
+export function foldPreview(text, max = FOLD_CHARS) {
+  if (text.length <= max * 1.4) return null;
+  // 在段落处切开；切在代码块中间时补上结尾，免得后面全变成代码
+  let cut = text.lastIndexOf('\n\n', max);
+  if (cut < max * 0.4) cut = max;
+  let head = text.slice(0, cut).trimEnd();
+  if ((head.match(/^```/gm) || []).length % 2) head += '\n```';
+  return head;
 }
 
 const hhmm = (ts) => new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -646,7 +677,7 @@ export class Transcript {
         box.append('参考：', ...[...new Set(names)].map((n) => Object.assign(document.createElement('span'), { textContent: n })));
         el.insertBefore(box, el.children[1]);
       },
-      done(meta, { onFeedback } = {}) {
+      done(meta, { onFeedback, fold = false } = {}) {
         if (mascot) {
           const paused = /已打断|中断/.test(meta || '');
           present(paused ? 'think' : moodState || 'happy');
@@ -657,7 +688,14 @@ export class Transcript {
         finishProgress();
         closeGroups();
         stopPaint();
-        if (role === 'agent' && curRaw) renderBlocks(cur, curRaw);
+        const preview = role === 'agent' && curRaw && fold ? foldPreview(stripEmotionTags(curRaw)) : null;
+        if (preview) {
+          renderBlocks(cur, preview);
+          const full = curRaw, target = cur;
+          const more = Object.assign(document.createElement('button'), { type: 'button', className: 'msg-unfold', textContent: `展开全文（共 ${stripEmotionTags(full).length} 字）` });
+          more.addEventListener('click', () => { renderBlocks(target, full); more.remove(); });
+          cur.after(more);
+        } else if (role === 'agent' && curRaw) renderBlocks(cur, curRaw);
         for (const b of el.querySelectorAll('.body')) if (!b.textContent.trim() && !b.children.length) b.remove();
         if (files) el.append(files); // 文件按钮放在回答最后
         const m = document.createElement('div');

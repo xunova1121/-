@@ -96,6 +96,32 @@ try {
   await rowOf('测试对话 3').locator('.drawer-item').click();
   await page.waitForFunction(() => [...document.querySelectorAll('#transcript .msg.user')].some((m) => m.textContent.includes('第 3 段的问题')), null, { timeout: 10000 });
   check('点一下就打开对话', true);
+
+  // 重新生成：去掉这条回答，把前面那句话重新发一次（服务器上的记录也跟着改）
+  await page.locator('#transcript .msg.agent').last().locator('.msg-retry').click();
+  await page.waitForFunction(() => document.querySelectorAll('#transcript .msg.agent').length >= 1 && !document.querySelector('#transcript .msg.agent.streaming') && !document.querySelector('#transcript .msg.agent .body')?.textContent.includes('第 3 段的回答'), null, { timeout: 20000 }).catch(() => {});
+  const regen = await (await api('/api/sessions/m3')).json();
+  check('重新生成：旧回答去掉，同一句话重新问，服务器上也是新的', regen.messages.length === 2 && regen.messages[0].content === '第 3 段的问题' && !regen.messages[1].content.includes('第 3 段的回答'), regen.messages.map((m) => m.content.slice(0, 12)).join(' / '));
+  // 编辑重发：把这句话放回输入框（服务器上去掉它和后面的）
+  await page.locator('#transcript .msg.user').last().locator('.msg-edit').click();
+  await page.waitForFunction(() => document.querySelector('#prompt').value === '第 3 段的问题', null, { timeout: 5000 }).catch(() => {});
+  check('编辑：这句话放回输入框，改好再发', await page.inputValue('#prompt') === '第 3 段的问题' && (await (await api('/api/sessions/m3')).json()).messages.length === 0);
+  await page.click('#btn-send');
+  await page.waitForFunction(() => document.querySelectorAll('#transcript .msg.agent').length >= 1 && !document.querySelector('#transcript .msg.agent.streaming'), null, { timeout: 20000 });
+
+  // 常用指令
+  await page.click('#btn-quick');
+  await page.locator('.quick-menu button', { hasText: '写周报' }).click();
+  check('常用指令：点一条，开头放进输入框', /^帮我写一份本周工作周报/.test(await page.inputValue('#prompt')));
+  await page.fill('#prompt', '');
+
+  // 按内容搜索：标题里没有、内容里有
+  await page.click('#btn-menu');
+  await page.fill('.drawer-search', '第 5 段的回答');
+  await page.waitForSelector('.drawer-hit', { timeout: 5000 }).catch(() => {});
+  check('按内容搜索对话，显示带上下文的摘录', /测试对话 5/.test(await page.locator('.drawer-hit').first().textContent().catch(() => '')) && /第 5 段的回答/.test(await page.locator('.drawer-hit').first().textContent().catch(() => '')));
+  await page.fill('.drawer-search', '');
+  await page.locator('.drawer-scrim').click().catch(() => {});
   const task = await (await api('/api/tasks', { method: 'POST', body: JSON.stringify({ sessionId: 'm3', text: '电脑上接着问的一句' }) })).json();
   for (let i = 0; i < 100; i++) { const t = await (await api(`/api/tasks/${task.id}`)).json(); if (t.status === 'done') break; await new Promise((r) => setTimeout(r, 200)); }
   await page.waitForTimeout(3200); // 两次刷新之间至少隔 3 秒

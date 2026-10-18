@@ -38,9 +38,15 @@ export function describeScreen({ doc = document, startedAt = 0, now = Date.now()
   const sec = Math.max(0, Math.round((now - startedAt) / 1000));
   const opened = sec >= 60 ? `${Math.floor(sec / 60)} 分 ${sec % 60} 秒` : `${sec} 秒`;
   const anims = typeof doc.getAnimations === 'function' ? doc.getAnimations().length : null;
+  // 最后一次操作（发消息、切换对话、语音、看图片……）：闪退后能对上是哪一步出的事
+  const act = globalThis.__jarvisLastAction;
+  const lastAct = act?.what ? `最后操作：${act.what}（${Math.max(0, Math.round((now - act.at) / 1000))} 秒前）` : '';
   return [where, `已打开 ${opened}`, `消息 ${view.messages} 条`, anims === null ? '' : `动画 ${anims} 个`, `元素 ${view.nodes} 个`,
-    view.safeDisplay ? '兼容显示开' : '兼容显示关', view.hidden ? '在后台' : ''].filter(Boolean).join(' · ');
+    view.safeDisplay ? '兼容显示开' : '兼容显示关', view.hidden ? '在后台' : '', lastAct].filter(Boolean).join(' · ');
 }
+
+/** 记下用户刚做了什么（只记动作名，不记内容），写进下一次的“崩溃前界面” */
+export const noteAction = (what) => { globalThis.__jarvisLastAction = { what, at: Date.now() }; };
 
 export const SCREEN_KEY = 'jarvis.lastScreen';
 export const SCREEN_STARTING = '刚打开（不到 5 秒，界面可能还没显示出来）';

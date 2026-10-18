@@ -44,6 +44,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 任务做完时发通知（安卓 13 起要用户允许） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 天气：仅首次首页或点击定位时申请，不在后台追踪。 -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- Permissions -->

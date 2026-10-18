@@ -89,6 +89,24 @@ export async function search(query) {
  * 跨对话检索：在其他对话的原话里找和问题相关的片段（一问一答为一个单位）
  * @returns {Promise<Array<{ sessionId, title, ts, user, reply, score }>>}
  */
+/** 按内容搜对话（标题或任何一条消息里有这个词，不分大小写），每段给一句带上下文的摘录。服务器模式下交给服务器搜 */
+export async function searchContent(query, { max = 30 } = {}) {
+  const q = String(query || '').trim().toLowerCase().slice(0, 50);
+  if (!q) return [];
+  if (remote) return remote.searchContent ? remote.searchContent(q) : [];
+  const hits = [];
+  for (const one of await list()) {
+    const m = one.messages.find((x) => String(x.content).toLowerCase().includes(q));
+    if (!m && !String(one.title).toLowerCase().includes(q)) continue;
+    const text = m ? String(m.content).replace(/\s+/g, ' ') : '';
+    const i = text.toLowerCase().indexOf(q);
+    const end = i + q.length + 36;
+    hits.push({ id: one.id, title: one.title, updatedAt: one.updatedAt, snippet: m ? `${i > 24 ? '…' : ''}${text.slice(Math.max(0, i - 24), end)}${end < text.length ? '…' : ''}` : '' });
+    if (hits.length >= max) break;
+  }
+  return hits;
+}
+
 export async function searchMessages(query, { exclude = null, k = 3, minScore = 2 } = {}) {
   const all = (await sessions.all()).filter((s) => s.id !== exclude);
   const units = [];

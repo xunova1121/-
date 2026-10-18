@@ -311,6 +311,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       return false;
     },
     get running() { return running; },
+    /** 改一段对话（和任务的读写排队，不互相冲掉）：截断、追加消息用 */
+    edit: (id, fn) => editSession(id, fn),
     /** 等手上的活（恢复、排队和正在做的任务、做完后的整理）都结束：测试收尾、服务停止前用 */
     async settled() {
       await recovered;

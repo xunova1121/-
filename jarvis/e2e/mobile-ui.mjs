@@ -90,6 +90,11 @@ try{
   await page.locator('.msg.agent').last().locator('.msg-quote').click();
   check('点“引用”把这条的开头放进输入框',await page.inputValue('#prompt').then(t=>/^> .+\n$/.test(t)));
   await page.fill('#prompt','');
+  const usersBefore=await page.locator('.msg.user').count();
+  await page.locator('.msg.agent').last().locator('.msg-retry').click();
+  await page.waitForFunction(n=>document.querySelectorAll('.msg.user').length===n&&document.querySelectorAll('.msg.agent').length>0&&!document.querySelector('.msg.agent.streaming'),usersBefore,{timeout:20000}).catch(()=>{});
+  check('重新生成：同一句话重新问一次，不多出消息',await page.locator('.msg.user').count()===usersBefore&&await page.locator('.msg.agent').count()===usersBefore);
+  check('消息按钮是图标（带文字说明）',await page.locator('.msg.agent').last().locator('.msg-copy svg').count()===1&&await page.locator('.msg.agent').last().locator('.msg-copy').getAttribute('aria-label')==='复制');
   check('顶栏显示当前对话的标题',await page.evaluate(()=>{const t=document.getElementById('chat-title');return !t.hidden&&t.textContent.includes('你好')&&t.getBoundingClientRect().height>0;}));
   check('对话正文两侧保留至少 20px 阅读留白',await page.locator('.msg.agent').last().evaluate(el=>{const r=el.getBoundingClientRect();return r.left>=20&&r.right<=innerWidth-20;}));
   check('手机短回复有较大的单个表情角色，答完不留固定的话',await page.locator('.msg.agent').last().evaluate(el=>{const who=el.querySelector('.who');return who.querySelectorAll('.wy-mascot').length===1&&who.querySelector('.wy-mascot').getBoundingClientRect().height>=100&&!who.querySelector('.wy-reply-greeting');}));

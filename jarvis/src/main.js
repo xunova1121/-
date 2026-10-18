@@ -72,6 +72,7 @@ import { openingSuggestions, followUpSuggestions, INTERRUPTED_MARK } from './cor
 import { savePending, clearPending, takePending, resumeText } from './core/pendingTask.js';
 import { loadServerSettings, createServerClient, runRemote, remoteSessions, normalizeUrl } from './core/serverClient.js';
 import { initServerPanel } from './ui/serverPanel.js';
+import { initQuickPrompts } from './ui/quickPrompts.js';
 import * as mcp from './agent/mcpClient.js';
 import { createDesktopTools } from './agent/desktopTools.js';
 import { initMcpPanel } from './ui/mcpPanel.js';
@@ -85,7 +86,9 @@ import { playCue } from './perception/voiceFx.js';
 import { MetricsPoller } from './api/metrics.js';
 import { subscribeAgentEvents } from './api/agentEvents.js';
 import { Dashboard } from './ui/dashboard.js';
-import { Transcript, toolLabel, summarizeArgs, searchBrand } from './ui/transcript.js';
+import { Transcript, toolLabel, summarizeArgs, searchBrand, setActionIcon, copyText } from './ui/transcript.js';
+import { stripEmotionTags } from '../shared/emotionTag.js';
+import { noteAction } from './mobile/renderDiagnostics.js';
 import { Speaker } from './perception/speaker.js';
 import { VoiceInput, speechRecognitionSupported } from './perception/voiceInput.js';
 import { resolveStt, transcribe, encodeWav, sttEngineById } from './perception/stt.js';
@@ -103,7 +106,7 @@ import { generateImage } from './llm/images.js';
 import { generateVideo } from './llm/videos.js';
 import { createFormDirector } from './core/formDirector.js';
 import { composeGreeting, GREET_GAP_MS } from './core/greeting.js';
-import { classifyTask, routeFor, TASKS, seesImages, fallbackRoutes, effortFor, isSmallTalk } from './llm/router.js';
+import { classifyTask, routeFor, TASKS, seesImages, fallbackRoutes, effortFor, isSmallTalk, needsComputer } from './llm/router.js';
 import { resolveTheme, toggled, THEMES } from './core/theme.js';
 import { FORMS } from './render/formations.js';
 import { resolveQuality } from './core/quality.js';
@@ -697,15 +700,18 @@ function replayTranscript(end = history.length) {
       }
       root.append(nav);
     }
-    for (const m of history.slice(range.start, range.end)) {
+    // 翻看旧消息：很长的回答（除了最后一条）先只显示开头，点“展开全文”再显示，手机上少画很多内容
+    const shown = history.slice(range.start, range.end);
+    const lastAgent = shown.findLastIndex((m) => m.role !== 'user');
+    shown.forEach((m, i) => {
       if (m.role === 'user') transcript.add('user', m.content, m.ts, { thumbs: m.thumbs });
       else {
         const b = transcript.add('agent', '', m.ts);
         b.append(m.content);
         for (const f of m.files || []) b.fileLink(f, openInWorkspace);
-        b.done(m.tools?.length ? `用了：${m.tools.map(toolLabel).join('、')}` : '');
+        b.done(m.tools?.length ? `用了：${m.tools.map(toolLabel).join('、')}` : '', { fold: i !== lastAgent });
       }
-    }
+    });
   });
 }
 /** 新对话的开场建议：之前没做完的事 > 上一段对话 */
@@ -746,8 +752,17 @@ function newSession() {
   $('#prompt').focus();
 }
 addEventListener('jarvis:open-session', (e) => { openSession(e.detail).then(() => showPanel('sessions')); });
+/** 手机：第一次交任务时问一次能不能发“做完了”的通知（之后不再问） */
+let askedNotify = false;
+function askNotifyOnce() {
+  if (!MOBILE || askedNotify) return;
+  askedNotify = true;
+  try { if (localStorage.getItem('jarvis.askedNotify')) return; localStorage.setItem('jarvis.askedNotify', '1'); } catch { /* 存不了也只问这一次 */ }
+  globalThis.__jarvisBackgroundTask?.askNotify?.().catch(() => {});
+}
 let opening = 0; // 连点了好几段对话：只认最后点的那段
 async function openSession(id) {
+  noteAction('切换对话');
   // 点的就是当前对话：服务器模式下从服务器取一次最新进度（另一台设备可能接着聊过）
   if (id === session.id) { if (server) refreshFromServer(); return; }
   const mine = ++opening;
@@ -768,6 +783,7 @@ const changed = (a, b) => b.messages.length !== a.messages.length || (b.updatedA
 let refreshing = false;
 async function refreshFromServer() {
   if (!server || refreshing || active || !session?.id) return;
+  noteAction('从服务器刷新对话');
   refreshing = true;
   try {
     const id = session.id;
@@ -837,6 +853,29 @@ async function loadMcpTools() {
 }
 
 /** 对话里点生成的文件：切到工作区并打开它 */
+/** 导出一段对话：复制全部内容，或存成 Word / Markdown 放进工作区“导出”文件夹（在工作区里能下载、分享） */
+async function exportSession(id, kind) {
+  const s = id === session.id ? session : await sessionsApi.get(id).catch(() => null) ?? sessionsApi.cachedGet(id);
+  if (!s?.messages?.length) { toast('这段对话还没有内容'); return; }
+  const title = s.title || '对话';
+  const said = (m) => stripEmotionTags(String(m.content)).replace(/\n*\[已上传到工作区：[^\]]+\]$/, '').trim();
+  const when = (ts) => (ts ? new Date(ts).toLocaleString('zh-CN', { hour12: false }) : '');
+  const md = `# ${title}\n\n${s.messages.map((m) => `### ${m.role === 'user' ? '我' : '未央'}${m.ts ? `　${when(m.ts)}` : ''}\n\n${said(m)}`).join('\n\n')}\n`;
+  if (kind === 'copy') { toast((await copyText(toPlainText(md))) ? '整段对话已复制' : '复制失败'); return; }
+  const name = title.replace(/[\\/:*?"<>|]/g, '').slice(0, 40) || '对话';
+  try {
+    let path;
+    if (kind === 'md') path = (await ws.write(`导出/${name}.md`, md)).path;
+    else {
+      const { generate } = await import('./agent/docs.js');
+      const out = await generate('docx', { title, content: md.replace(/^# .*\n/, '') });
+      path = (await ws.write(`导出/${name}.${out.ext}`, out.blob)).path;
+    }
+    panels.refreshFiles();
+    toast(`已导出到工作区：${path}`);
+    openInWorkspace(path);
+  } catch (e) { toast(`导出没成功：${e.message}`); }
+}
 function openInWorkspace(path) {
   showPanel('workspace');
   panels.openFile(path);
@@ -1003,6 +1042,7 @@ document.addEventListener('visibilitychange', () => {
 function notify(title, body) {
   toast(`${title}：${body.slice(0, 60)}`);
   if (DESKTOP) { DESKTOP.invoke('notify', { title, body }).catch(() => {}); return; }
+  if (MOBILE) { globalThis.__jarvisBackgroundTask?.notifyDone?.({ title, body: body.slice(0, 300) }).catch(() => {}); return; }
   try { if (Notification.permission === 'granted') new Notification(title, { body }); } catch { /* 不支持 */ }
 }
 let schedulerBusy = false;
@@ -1095,6 +1135,8 @@ function finishBackground(turn, { text = '', error = '', shown = '', usedTools =
 }
 
 async function send(text, { echo = true, byVoice = false } = {}) {
+  noteAction(byVoice ? '语音提问' : '发消息');
+  askNotifyOnce();
   text = String(text || '').trim();
   if (!text && !attachments.length) return;
   if (!attachments.length && companion?.perform(text)) return;
@@ -1150,7 +1192,10 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省
   const effort = effortFor(task, text, llmConfig);
   if (route.routed) hud.think(`◇ 模型分工：${TASKS[task].name} → ${route.model}`);
-  if (problem && !server) { // 服务器模式：用服务器上的模型设置
+  // 服务器模式下电脑版：要动这台电脑的事（桌面、文件夹、打开软件……）留在本机做，其余交给服务器
+  const here = Boolean(server && DESKTOP && needsComputer(text));
+  if (here) hud.think('◇ 这件事要操作这台电脑：在本机做');
+  if (problem && (!server || here)) { // 服务器模式：用服务器上的模型设置
     bubble.append(problem);
     bubble.done();
     callouts?.set(followUpSuggestions({ error: true, userText: text }));
@@ -1188,7 +1233,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
       for (const f of files) await server.upload(f.path, await ws.readBlob(f.path)); // 发来的附件先传到服务器的工作区
       return runRemote(server, { sessionId: o.sessionId, userText: o.userText, images: o.images, voice: o.voice, emit: o.emit, signal: o.signal, onFile: (p) => pullServerFile(p, turn) });
     };
-    const result = await (server ? serverRun : team ? runTeam : runAgent)({
+    const result = await (server && !here ? serverRun : team ? runTeam : runAgent)({
       llm: team ? helperLlm('reason') : undefined,
       pickModel: team ? modelForRole : undefined,
       effort,
@@ -1204,7 +1249,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
       light: !files.length && isSmallTalk(text),
       maxSteps: DESKTOP ? 40 : 28, // 用鼠标键盘操作电脑、逐项联网核实时步数多
       images: imgs.map(({ mime, data }) => ({ mime, data })),
-      tools: server ? [] : await buildTools({ turn }),
+      tools: server && !here ? [] : await buildTools({ turn }),
       approve: (req) => {
         if (preApproved(req, { sessionKeys: sessionApprovals })) return true; // 危险命令每次都问
         setTask('processing', '等待你确认');
@@ -1286,7 +1331,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
     if (active !== turn) return;
     speech.flush();
     const total = now() - t0;
-    const modelTag = server ? '服务器 · ' : providerById(llmConfig.provider)?.kind === 'mock' ? '' : usedModel !== model ? `${usedModel}（${model} 出错后换用） · ` : `${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
+    const modelTag = server && !here ? '服务器 · ' : here ? `本机 · ${model} · ` : providerById(llmConfig.provider)?.kind === 'mock' ? '' : usedModel !== model ? `${usedModel}（${model} 出错后换用） · ` : `${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
     bubble.done(`${modelTag}${team ? `团队 ${result.steps} 步 · ` : ''}${ctxMs !== null && ctxMs >= 300 ? `准备 ${(ctxMs / 1000).toFixed(1)}s · ` : ''}${firstToken ? `首字 ${((firstToken - t0) / 1000).toFixed(1)}s · ` : ''}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}${MOBILE && textChunks ? ` · 分 ${textChunks} 次收到${globalThis.__jarvisNetVia?.(llmConfig.baseURLs?.[llmConfig.provider] || '') === 'native' ? '（原生网络）' : ''}` : ''}`, {
       onFeedback: async (kind, comment) => {
         if (kind === 'up') await agentMemory.noteTask(`获得好评：${text.slice(0, 30)}`);
@@ -1302,6 +1347,10 @@ async function send(text, { echo = true, byVoice = false } = {}) {
     $('#hud-latency').textContent = firstToken ? `${Math.round(firstToken - t0)} ms` : '—';
     if (result.text) wp({ say: result.text.replace(/```[\s\S]*?```/g, '').replace(/[#*>`|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 4000) });
     rememberTurn('assistant', result.text || '（完成）', { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) }, turn.session);
+    // 做完时人不在（App 在后台 / 窗口没在看）：发通知，点开就能看结果
+    if (document.hidden) notify('未央做完了', `${(turn.session.title || text).slice(0, 30)}：${stripEmotionTags(result.text || '').replace(/\s+/g, ' ').slice(0, 120)}`);
+    // 在本机做的这一轮也记回服务器上的这段对话（手机上能看到）
+    if (here) server.appendSession(turn.session.id, turn.session.messages.slice(-2).map(({ role, content, ts, tools }) => ({ role, content, ts, ...(tools && { tools }) }))).catch((e) => toast(`这一轮没能记到服务器上：${e.message}`));
     $('#mode-pill').classList.remove('offline');
     turn.streamDone = true;
     callouts?.set(followUpSuggestions({ tools: usedTools, userText: text, desktop: Boolean(DESKTOP) }));
@@ -1365,6 +1414,17 @@ prompt.addEventListener('input', (e) => {
   autosize();
   if (e.target.value && speaker.speaking) speaker.cancel(); // 开始打字即打断朗读
   if (e.target.value && !active && machine.task !== 'listening') machine.beginUserTurn();
+});
+
+// —— 常用指令：把开头写好放进输入框，接着补充再发
+initQuickPrompts({
+  button: $('#btn-quick'),
+  onPick: (text) => {
+    prompt.value = prompt.value.trim() ? `${text}${prompt.value}` : text;
+    autosize();
+    prompt.focus();
+    prompt.setSelectionRange(prompt.value.length, prompt.value.length);
+  }
 });
 
 // —— 附件：上传 / 拖入的文件放进工作区“上传/”目录，并附在下一条消息里
@@ -1580,6 +1640,7 @@ async function setDirectVoice(on) {
 
 /** 语音通话临时开启朗读并关闭唤醒词，结束后恢复原来的偏好。 */
 async function setVoiceCall(on) {
+  noteAction(on ? '开始语音对话' : '结束语音对话');
   if (on && (callStarting || callActive)) return;
   const gen = ++callGeneration;
   if (!on) {
@@ -1775,6 +1836,7 @@ const PANES = ['sessions', 'workspace', 'knowledge', 'mind', 'skills', 'models',
 let currentPane = null;
 const narrow = matchMedia('(max-width: 860px)');
 function showPanel(name, { toggle = false } = {}) {
+  noteAction(`打开面板：${name}`);
   if (toggle && name === currentPane && (narrow.matches ? body.classList.contains('side-open') : !body.classList.contains('side-closed'))) {
     body.classList.add('side-closed');
     body.classList.remove('side-open');
@@ -2191,6 +2253,43 @@ function toast(text) {
 }
 globalThis.__jarvisToast = toast; // 手机原生保存文件时的进度提示
 
+// ---------------------------------------------------------------- 编辑重发 / 重新生成
+/**
+ * 回到某句话之前重新来：
+ *   edit  把你的这句话放回输入框，改好再发（这句话和它后面的都去掉）
+ *   retry 去掉这条回答（和它后面的），把它前面那句话重新发一次
+ */
+async function rewindAndResend(kind, text) {
+  if (active) { toast('等这一轮做完再改'); return; }
+  const said = (m) => String(m.content).replace(/\n*\[已上传到工作区：[^\]]+\]$/, '').trim();
+  let at = -1;
+  if (kind === 'edit') at = history.findLastIndex((m) => m.role === 'user' && said(m) === text.trim());
+  else {
+    const reply = history.findLastIndex((m) => m.role === 'assistant' && stripEmotionTags(m.content).trim() === text.trim());
+    if (reply > 0) for (let i = reply - 1; i >= 0; i--) if (history[i].role === 'user') { at = i; break; }
+  }
+  if (at < 0) { toast('找不到这条消息（可能已经翻页或改过）'); return; }
+  const later = history.length - at - 1;
+  let ok = true;
+  if (later > 1) { try { ok = globalThis.confirm(`这句话后面还有 ${later} 条消息，会一起去掉。继续吗？`); } catch { /* 不支持弹窗就直接继续 */ } }
+  if (!ok) return;
+  const question = said(history[at]);
+  if (server) {
+    try { await server.truncateSession(session.id, at); } catch (e) { toast(`没改成：${e.message}`); return; }
+  }
+  history.splice(at);
+  session.updatedAt = Date.now();
+  // 本机模式下截成空的：空对话不会存盘，旧记录会留着；先删掉，重新发的时候再存
+  if (!server && !history.length) sessionsApi.remove(session.id).catch(() => {}); else persistSession();
+  replayTranscript();
+  if (kind === 'edit') {
+    prompt.value = question;
+    autosize();
+    prompt.focus();
+    toast('改好后点发送');
+  } else send(question);
+}
+
 // ---------------------------------------------------------------- 每条消息下面的“引用 / 朗读”（复制在 transcript.js 里直接做）
 let readingBtn = null;
 transcript.onAction = (kind, text, btn) => {
@@ -2204,22 +2303,24 @@ transcript.onAction = (kind, text, btn) => {
     prompt.setSelectionRange(prompt.value.length, prompt.value.length);
     return;
   }
+  if (kind === 'edit' || kind === 'retry') { rewindAndResend(kind, text); return; }
   if (kind === 'speak') {
     // 朗读这一条：再点一下停；只念正文，代码和表格不念
     const again = readingBtn === btn && speaker.speaking;
     speaker.cancel();
-    if (readingBtn) { readingBtn.textContent = '朗读'; readingBtn.removeAttribute('aria-pressed'); readingBtn = null; }
+    if (readingBtn) { setActionIcon(readingBtn, 'speak'); readingBtn.removeAttribute('aria-pressed'); readingBtn = null; }
     if (again) return;
     speaker.unlock();
+    noteAction('朗读一条回答');
     const chunker = new SentenceChunker();
     for (const s of [...chunker.push(toSpeech(text)), ...chunker.flush()]) speaker.speak(s);
     readingBtn = btn;
-    btn.textContent = '停止';
+    setActionIcon(btn, 'stop');
     btn.setAttribute('aria-pressed', 'true');
     const watch = setInterval(() => {
       if (readingBtn !== btn || (!speaker.speaking && !speaker.pending)) {
         clearInterval(watch);
-        if (readingBtn === btn) { btn.textContent = '朗读'; btn.removeAttribute('aria-pressed'); readingBtn = null; }
+        if (readingBtn === btn) { setActionIcon(btn, 'speak'); btn.removeAttribute('aria-pressed'); readingBtn = null; }
       }
     }, 600);
   }
@@ -2325,6 +2426,8 @@ if (COMPACT) {
       sessionsPanel?.refresh();
     },
     onPin: async (id, pinned) => { await sessionsApi.setPinned(id, pinned); if (id === session.id) session.pinned = pinned; sessionsPanel?.refresh(); },
+    onExport: (id, kind) => exportSession(id, kind),
+    searchContent: (q) => sessionsApi.searchContent(q),
     onDelete: async (id) => {
       await sessionsApi.remove(id);
       if (id === session.id) switchTo(sessionsApi.create());

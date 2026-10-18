@@ -160,3 +160,17 @@ describe('服务器模式：立即更新', () => {
     }
   });
 });
+
+describe('服务器模式：编辑重发、本机那一轮记回来、按内容搜', () => {
+  it('截断到某条之前；追加消息（没有这段就新建）；内容搜索带摘录', async () => {
+    await api('/api/sessions/import', { method: 'POST', body: JSON.stringify({ id: 'cut1', title: '季度汇报', titleSet: true, messages: [{ role: 'user', content: '帮我写三季度汇报' }, { role: 'assistant', content: '好的，三季度营收增长了百分之十八。' }, { role: 'user', content: '再加一页风险' }, { role: 'assistant', content: '已加' }] }) });
+    expect((await api('/api/sessions/cut1/truncate', { method: 'POST', body: JSON.stringify({ keep: 2 }) })).status).toBe(200);
+    expect((await (await api('/api/sessions/cut1')).json()).messages).toHaveLength(2);
+    await api('/api/sessions/cut1/append', { method: 'POST', body: JSON.stringify({ messages: [{ role: 'user', content: '在桌面建个文件夹' }, { role: 'assistant', content: '建好了' }, { role: 'system', content: '不该收' }] }) });
+    expect((await (await api('/api/sessions/cut1')).json()).messages.map((m) => m.content).slice(-2)).toEqual(['在桌面建个文件夹', '建好了']);
+    expect((await api('/api/sessions/brandnew1/append', { method: 'POST', body: JSON.stringify({ messages: [{ role: 'user', content: '你好' }] }) })).status).toBe(200);
+    expect((await (await api('/api/sessions/brandnew1')).json()).messages).toHaveLength(1);
+    const hits = await (await api('/api/sessions/search?q=百分之十八')).json();
+    expect(hits).toEqual([expect.objectContaining({ id: 'cut1', title: '季度汇报', snippet: expect.stringContaining('百分之十八') })]);
+  });
+});

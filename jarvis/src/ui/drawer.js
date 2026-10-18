@@ -41,12 +41,33 @@ export function groupSessions(list, now = Date.now()) {
 /**
  * @param {{ onNew: () => void, onOpenSession: (id: string) => void, onPanel: (name: string) => void, listSessions: () => Promise<object[]>, cachedSessions?: () => object[] | null, currentId: () => string, icons: Record<string, string>, onRename?: (id: string, title: string) => Promise<void>, onPin?: (id: string, pinned: boolean) => Promise<void>, onDelete?: (id: string) => Promise<void> }} o
  */
-export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, cachedSessions = () => null, currentId, icons = {}, onRename, onPin, onDelete }) {
+export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, cachedSessions = () => null, currentId, icons = {}, onRename, onPin, onDelete, onExport, searchContent }) {
   const scrim = el('div', { className: 'drawer-scrim', hidden: true });
   const history = el('div', { className: 'drawer-history' });
   // 按标题搜对话：有关键词时列出所有匹配的（不受“只显示 8 条”限制）
   const search = el('input', { type: 'search', className: 'drawer-search', placeholder: '搜索对话', enterKeyHint: 'search' });
-  search.addEventListener('input', () => render(lastList));
+  // 标题马上筛；停手 0.4 秒后再按内容搜（服务器模式下由服务器搜）
+  let searchTimer = 0, searchSeq = 0;
+  search.addEventListener('input', () => {
+    render(lastList);
+    clearTimeout(searchTimer);
+    const q = search.value.trim();
+    if (!q || !searchContent) return;
+    searchTimer = setTimeout(async () => {
+      const mine = ++searchSeq;
+      const hits = await searchContent(q).catch(() => []);
+      if (mine !== searchSeq || search.value.trim() !== q) return;
+      const titles = new Set([...history.querySelectorAll('.drawer-row')].map((r) => r.dataset.id));
+      const more = hits.filter((h) => h.snippet && !titles.has(h.id));
+      if (!more.length) return;
+      history.querySelector('.drawer-empty')?.remove();
+      history.append(el('div', { className: 'drawer-group', textContent: '内容里提到' }), ...more.map((h) => {
+        const b = el('button', { type: 'button', className: 'drawer-hit' }, el('b', { textContent: h.title || '新对话' }), el('span', { textContent: h.snippet }));
+        b.addEventListener('click', () => { close(); onOpenSession(h.id); });
+        return b;
+      }));
+    }, 400);
+  });
   const grid = el('div', { className: 'drawer-grid' }, ...FEATURES.map(([id, label, hue]) => {
     const b = el('button', { type: 'button', className: 'drawer-feat' });
     b.style.setProperty('--h', hue);
@@ -133,6 +154,7 @@ export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, cached
     b.addEventListener('click', () => { close(); onOpenSession(x.id); });
     const more = el('button', { type: 'button', className: 'drawer-item-more', textContent: '⋯', title: '重命名 / 置顶 / 删除', ariaLabel: `管理「${x.title || '新对话'}」` });
     const wrap = el('div', { className: 'drawer-row' }, b, more);
+    wrap.dataset.id = x.id;
     more.addEventListener('click', () => {
       const open = wrap.querySelector('.drawer-menu');
       for (const m of history.querySelectorAll('.drawer-menu')) m.remove();
@@ -154,6 +176,7 @@ export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, cached
           if (t && t !== x.title) await onRename?.(x.id, t);
         }),
         act(x.pinned ? '取消置顶' : '置顶', () => onPin?.(x.id, !x.pinned)),
+        ...(onExport ? [act('复制全部内容', () => onExport(x.id, 'copy')), act('导出为 Word', () => onExport(x.id, 'docx')), act('导出为 Markdown', () => onExport(x.id, 'md'))] : []),
         act('删除', async () => {
           let ok = false;
           try { ok = globalThis.confirm(`删除「${x.title || '新对话'}」？删除后找不回来。`); } catch { /* 不支持弹窗 */ }

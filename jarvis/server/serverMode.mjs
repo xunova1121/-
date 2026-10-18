@@ -19,6 +19,9 @@
  *   GET    /api/sessions/<id>              一段对话
  *   PATCH  /api/sessions/<id>              { title?, pinned? } 改标题、钉住
  *   DELETE /api/sessions/<id>              删除对话
+ *   POST   /api/sessions/<id>/truncate     { keep } 只留前 keep 条消息（编辑重发、重新生成用）
+ *   POST   /api/sessions/<id>/append       { messages } 追加消息（电脑上在本机做的那一轮记回服务器）
+ *   GET    /api/sessions/search?q=         按内容搜所有对话
  *   GET    /api/files                      工作区文件列表
  *   GET    /api/files/raw?path=            下载文件
  *   PUT    /api/files/raw?path=            上传文件（请求体就是文件内容）
@@ -180,6 +183,35 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
       if (!messages.length) { json(res, 200, { ok: true, skipped: true }); return true; }
       await sessions.save({ id: one.id, title: String(one.title || '新对话').slice(0, 60), titleSet: Boolean(one.titleSet), createdAt: Number(one.createdAt) || Date.now(), updatedAt: Number(one.updatedAt) || Date.now(), pinned: Boolean(one.pinned), messages, ...(one.summary && { summary: one.summary }), ...(one.requirements && { requirements: one.requirements }) });
       json(res, 200, { ok: true, imported: true });
+      return true;
+    }
+    if (pathname === '/api/sessions/search' && req.method === 'GET') {
+      // 按内容搜：标题或任何一条消息里有这个词；每段对话给一句带上下文的摘录
+      const hits = await sessions.searchContent(url.searchParams.get('q') || '');
+      json(res, 200, hits);
+      return true;
+    }
+    const sub = pathname.match(/^\/api\/sessions\/([\w-]+)\/(truncate|append)$/);
+    if (sub && req.method === 'POST') {
+      const [, id, op] = sub;
+      if (runner.list().some((x) => x.sessionId === id && (x.status === 'running' || x.status === 'queued'))) { json(res, 409, { error: '这段对话正在做任务，等做完再改' }); return true; }
+      const body = await readJson(req, IMPORT_LIMIT);
+      const ok = await runner.edit(id, async (one) => {
+        // 电脑上新开的对话第一句就在本机做了：服务器上还没有这段，用同一个编号新建
+        if (!one && op === 'append') one = { ...sessions.create(), id };
+        if (!one) return false;
+        if (op === 'truncate') one.messages = one.messages.slice(0, Math.max(0, Number(body.keep) || 0));
+        else {
+          const add = (Array.isArray(body.messages) ? body.messages : []).filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string').slice(0, 20)
+            .map(({ role, content, ts, tools, files }) => ({ role, content: content.slice(0, 200000), ts: Number(ts) || Date.now(), ...(Array.isArray(tools) && { tools: tools.slice(0, 30) }), ...(Array.isArray(files) && { files: files.slice(0, 12) }) }));
+          one.messages.push(...add);
+        }
+        one.updatedAt = Date.now();
+        // 截成空的（从第一句话开始重来）：sessions.save 不存空对话，直接写进存储
+        if (one.messages.length) await sessions.save(one); else await store.put('sessions', one);
+        return true;
+      });
+      ok ? json(res, 200, { ok: true }) : json(res, 404, { error: '找不到这个对话' });
       return true;
     }
     if (pathname === '/api/sessions' && req.method === 'GET') {

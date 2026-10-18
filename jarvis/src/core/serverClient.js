@@ -120,6 +120,9 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     patchSession: (id, patch) => req(`/api/sessions/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch }),
     deleteSession: (id) => req(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     importSession: (session) => req('/api/sessions/import', { method: 'POST', body: session }),
+    truncateSession: (id, keep) => req(`/api/sessions/${encodeURIComponent(id)}/truncate`, { method: 'POST', body: { keep } }),
+    appendSession: (id, messages) => req(`/api/sessions/${encodeURIComponent(id)}/append`, { method: 'POST', body: { messages } }),
+    searchSessions: (q) => req(`/api/sessions/search?q=${encodeURIComponent(q)}`),
     listFiles: () => req('/api/files'),
     async download(path) {
       const res = await req(`/api/files/raw?path=${encodeURIComponent(path)}`, { raw: true, binary: true, timeout: 120000 });
@@ -226,7 +229,10 @@ const CACHE_MESSAGES = 80;
 export function remoteSessions(client, { storage = globalThis.localStorage } = {}) {
   let cache = { list: null, sessions: {} };
   try { cache = { list: null, sessions: {}, ...JSON.parse(storage?.getItem(CACHE_KEY) || '{}') }; } catch { /* 坏了就从空的开始 */ }
-  const persist = () => {
+  // 写副本合并成一次（切换对话、刷新时会连着改好几次）：少做大块的存储读写，手机上更稳
+  let saveTimer = 0;
+  const persist = () => { clearTimeout(saveTimer); saveTimer = setTimeout(writeNow, 800); };
+  const writeNow = () => {
     // 存不下（手机存储满）就少存几段再试
     for (let n = CACHE_SESSIONS; n >= 0; n -= 4) {
       try {
@@ -244,6 +250,9 @@ export function remoteSessions(client, { storage = globalThis.localStorage } = {
     persist();
     return s;
   };
+  // 切到后台（可能被系统杀掉）前把没写的副本写掉
+  globalThis.addEventListener?.('pagehide', () => { clearTimeout(saveTimer); writeNow(); });
+  globalThis.document?.addEventListener?.('visibilitychange', () => { if (globalThis.document.hidden) { clearTimeout(saveTimer); writeNow(); } });
   let listing = null; // 同时有好几处要列表（启动、抽屉、对话面板）：共用一次请求
   return {
     list() {
@@ -258,10 +267,13 @@ export function remoteSessions(client, { storage = globalThis.localStorage } = {
     /** 副本里的列表 / 某段对话（没有就是 null），马上能拿到 */
     cachedList: () => cache.list?.map((x) => ({ ...x, messages: [] })) ?? null,
     cachedGet: (id) => (cache.sessions[id] ? { ...cache.sessions[id], cached: true } : null),
+    /** 马上把副本写进存储（App 切到后台前用；平时攒一下再写） */
+    flush: () => { clearTimeout(saveTimer); writeNow(); },
     save: async (s) => s,
     rename: (id, title) => client.patchSession(id, { title }).then((r) => { if (cache.sessions[id]) cache.sessions[id].title = title; listing = null; return r; }),
     setPinned: (id, pinned) => client.patchSession(id, { pinned }).then((r) => { listing = null; return r; }),
     remove: (id) => client.deleteSession(id).then((r) => { delete cache.sessions[id]; cache.list = cache.list?.filter((x) => x.id !== id) ?? null; persist(); listing = null; return r; }),
+    searchContent: (q) => client.searchSessions(q),
     async search(query) {
       const q = String(query || '').trim().toLowerCase();
       const all = await this.list();

@@ -1,5 +1,6 @@
 /** 原图从工作区按需读取；预览关闭后立即释放 Blob URL。 */
 export function showImagePreview(src, { title = '图片预览', revoke = false } = {}) {
+  globalThis.__jarvisLastAction = { what: '看图片', at: Date.now() }; // 闪退记录里能看出是不是看大图时出的事
   const dialog = document.createElement('dialog'); dialog.className = 'image-preview';
   const head = document.createElement('header'), name = document.createElement('strong'), close = document.createElement('button');
   name.textContent = title; close.type = 'button'; close.textContent = '×'; close.setAttribute('aria-label', '关闭图片预览'); head.append(name,close);

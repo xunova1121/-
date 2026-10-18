@@ -149,11 +149,13 @@ describe('服务器模式：打开快、不卡住', () => {
     await Promise.all([r.list(), r.list(), r.list()]);
     expect(lists).toBe(1);
     await r.get('a');
+    r.flush();
     // 模拟 App 关掉再打开：新建一个，副本还在
     const again = remoteSessions(client, { storage });
     expect(again.cachedList().map((x) => x.title)).toEqual(['甲']);
     expect(again.cachedGet('a')).toMatchObject({ id: 'a', cached: true, messages: [{ content: '你好' }] });
     await again.remove('a');
+    again.flush();
     expect(remoteSessions(client, { storage }).cachedGet('a')).toBeNull();
     expect(remoteSessions(client, { storage }).cachedList()).toEqual([]);
   });
