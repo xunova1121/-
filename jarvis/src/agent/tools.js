@@ -77,7 +77,7 @@ export function createTools(ctx) {
     if(!ctx.officeRender)return ['本端未做Office真实渲染；现有PPT预览及排版检查属于生成器检查'];
     try{
       progress?.('生成Office真实预览…');const rendered=await ctx.officeRender(out.blob,out.ext,{signal});
-      if(rendered.available){const preview=await ws.write(target.replace(/\\.[^.]+$/,'')+'.预览.pdf',rendered.blob);ctx.onFileChanged?.(preview.path);notes.push('已用LibreOffice真实转换为PDF：'+preview.path+'；可打开核对实际分页，未宣称人工视觉验收通过');}
+      if(rendered.available){const preview=await ws.write(target.slice(0,target.lastIndexOf('.'))+'.预览.pdf',rendered.blob);ctx.onFileChanged?.(preview.path);notes.push('已用LibreOffice真实转换为PDF：'+preview.path+'；可打开核对实际分页，未宣称人工视觉验收通过');}
       else notes.push(rendered.reason);
     }catch(e){if(e.name==='AbortError')throw e;notes.push('Office真实预览未完成：'+e.message);}
     return notes;
