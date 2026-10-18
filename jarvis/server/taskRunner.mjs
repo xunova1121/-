@@ -1,6 +1,6 @@
 import { renderOffice } from './officeRender.mjs';
 import { createHash } from 'node:crypto';
-import { checkpointEvent, checkpointNeedsReview } from '../shared/taskCheckpoint.js';
+import { checkpointEvent, checkpointNeedsReview, checkpointRecoveryText } from '../shared/taskCheckpoint.js';
 /**
  * 服务器上的任务执行器：手机 / 电脑把任务交过来，服务器自己从头做到尾。
  * 发任务的那台设备关掉、断网都不影响；它再连上来时，按序号补发漏掉的进度，做完的结果存在对话里。
@@ -179,7 +179,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       const r = await runAgent({
         adapter, model, fallbacks, maxSteps,
         history: unsummarized(history, session.summary).map(({ role, content }) => ({ role, content })),
-        userText: task.text, requirementText: task.text, images: task.images,
+        userText: task.resumeFrom ? task.text+'\n\n'+checkpointRecoveryText(task.resumeFrom) : task.text, requirementText: task.text, images: task.images,
         // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省
         effort: effortFor(kind, task.text, cfg),
         // 语音对话：口语短答；“你好 / 谢谢”这类寒暄不带工具，回得快
@@ -294,8 +294,16 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         }
         const busy=[...tasks.values()].find(t=>t.sessionId===id&&['queued','running'].includes(t.status));
         if(targetTaskId&&busy?.id!==targetTaskId)throw Object.assign(new Error('原任务已结束或中断，补充未执行；请作为新任务发送'),{status:409});
+        const previous=session.taskCheckpoint;
+        const incomplete=previous&&['running','queued','interrupted','needs_review','error'].includes(previous.status);
+        if(!busy&&incomplete){
+          const key=previous.taskId||createHash('sha256').update(JSON.stringify([previous.text,previous.createdAt])).digest('hex');
+          const archive=session.recoveryCheckpoints||[];session.recoveryCheckpoints=[...archive.filter(x=>x.key!==key),{key,...previous}];
+        }
         session.messages.push({role:'user',content:text,ts:now()});session.updatedAt=now();
         const task=busy||{id:uid('t'),sessionId:id,text,status:'queued',seq:0,events:[],listeners:new Set(),files:new Set(),inbox:[],notes:[],images,voice:Boolean(voice),ctrl:new AbortController(),createdAt:now(),checkpoint:{text,notes:[],steps:[],inFlight:[],files:[],status:'queued',createdAt:now()}};
+        task.checkpoint.taskId=task.id;
+        if(!busy&&incomplete&&/^(继续|恢复|接着)/.test(text))task.resumeFrom=previous;
         const nextCheckpoint=busy?checkpointEvent(task.checkpoint,{type:'user_note',text},now()):task.checkpoint;
         session.taskCheckpoint=nextCheckpoint;
         const answer={id:task.id,sessionId:id,...(busy&&{joined:true})};

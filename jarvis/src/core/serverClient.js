@@ -259,7 +259,7 @@ export function remoteSessions(client, { storage = globalThis.localStorage } = {
   };
   const remember = (s) => {
     if (!s?.id) return s;
-    const { taskId, ...rest } = s;
+    const { taskId, taskReceipts, recoveryCheckpoints, ...rest } = s;
     cache.sessions[s.id] = { ...rest, messages: (s.messages ?? []).slice(-CACHE_MESSAGES), cachedAt: Date.now() };
     persist();
     return s;

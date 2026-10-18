@@ -221,7 +221,7 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     }
     if (pathname === '/api/sessions' && req.method === 'GET') {
       const busy = new Map(runner.list().filter((x) => x.status === 'running' || x.status === 'queued').map((x) => [x.sessionId, x.id]));
-      json(res, 200, (await sessions.list()).map(({ messages, requirements, ...s }) => ({ ...s, count: messages.length, taskId: busy.get(s.id) ?? null })));
+      json(res, 200, (await sessions.list()).map(({ messages, requirements, taskCheckpoint, taskReceipts, recoveryCheckpoints, ...s }) => ({ ...s, count: messages.length, taskId: busy.get(s.id) ?? null })));
       return true;
     }
     const s = pathname.match(/^\/api\/sessions\/([\w-]+)$/);

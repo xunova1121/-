@@ -305,3 +305,10 @@ describe('服务器提交去重和检查点',()=>{
   expect((await sessions.get(s.id)).taskCheckpoint.status).toBe('needs_review');expect(runner.list()).toHaveLength(0);
  });
 });
+
+it('开始新任务不会覆盖未完成检查点，明确继续时带回完整要求和未知操作',async()=>{
+ const s=sessions.create();s.id='resume-full';const original='完整要求'.repeat(300)+'末尾不能遗漏';s.messages=[{role:'user',content:original,ts:1}];s.taskCheckpoint={text:original,taskId:'old-task',status:'needs_review',inFlight:[{id:'m',name:'mcp_send_email'}]};await sessions.save(s);
+ let seen;const runner=createTaskRunner({getConfig:mockCfg,makeAdapter:()=>({model:'m',adapter:{async stream(req){seen=req.messages;return {text:'已核对',toolCalls:[],stop:'end_turn'};}}})});
+ const task=await runner.start({sessionId:s.id,text:'继续核对上次的任务'});await until(()=>runner.get(task.id).status==='done');
+ const saved=await sessions.get(s.id);expect(saved.recoveryCheckpoints[0].text).toBe(original);expect(JSON.stringify(seen)).toContain('末尾不能遗漏');expect(JSON.stringify(seen)).toContain('不得自动重放');
+});
