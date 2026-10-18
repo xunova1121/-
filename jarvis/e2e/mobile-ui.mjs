@@ -80,8 +80,17 @@ try{
   check('夜间顶栏和面板同步切换，不出现白色顶栏',await page.evaluate(()=>getComputedStyle(document.querySelector('.topbar')).backgroundColor==='rgb(25, 25, 35)'&&getComputedStyle(document.querySelector('.side')).backgroundColor==='rgb(25, 25, 35)'));
   await page.screenshot({path:path.join(OUT,'mobile-unified-dark-panel.png')});
   await page.click('#btn-theme');await page.waitForFunction(()=>document.documentElement.dataset.theme==='light');await page.click('#btn-side-back');
-  async function ask(text){const before=await page.locator('.msg.agent').count();await page.fill('#prompt',text);await page.press('#prompt','Enter');await page.waitForFunction(n=>document.querySelectorAll('.msg.agent').length>n&&!document.querySelector('.msg.agent.streaming'),before,{timeout:30000});await page.waitForTimeout(120);}
+  async function ask(text){const before=await page.locator('.msg.agent').count();await page.fill('#prompt',text);await page.click('#btn-send');await page.waitForFunction(n=>document.querySelectorAll('.msg.agent').length>n&&!document.querySelector('.msg.agent.streaming'),before,{timeout:30000});await page.waitForTimeout(120);}
+  // 手机键盘回车是换行，点发送按钮才发
+  await page.fill('#prompt','第一行');await page.press('#prompt','Enter');
+  check('手机上回车换行，不会直接发出去',await page.inputValue('#prompt').then(t=>t.includes('\n'))&&await page.locator('.msg.user').count()===0);
+  await page.fill('#prompt','');
   await ask('你好');
+  check('每条消息下面有复制、引用，未央的回答还有朗读',await page.locator('.msg.user').last().locator('.msg-copy, .msg-quote').count()===2&&await page.locator('.msg.agent').last().locator('.msg-copy, .msg-quote, .msg-speak').count()===3);
+  await page.locator('.msg.agent').last().locator('.msg-quote').click();
+  check('点“引用”把这条的开头放进输入框',await page.inputValue('#prompt').then(t=>/^> .+\n$/.test(t)));
+  await page.fill('#prompt','');
+  check('顶栏显示当前对话的标题',await page.evaluate(()=>{const t=document.getElementById('chat-title');return !t.hidden&&t.textContent.includes('你好')&&t.getBoundingClientRect().height>0;}));
   check('对话正文两侧保留至少 20px 阅读留白',await page.locator('.msg.agent').last().evaluate(el=>{const r=el.getBoundingClientRect();return r.left>=20&&r.right<=innerWidth-20;}));
   check('手机短回复有较大的单个表情角色，答完不留固定的话',await page.locator('.msg.agent').last().evaluate(el=>{const who=el.querySelector('.who');return who.querySelectorAll('.wy-mascot').length===1&&who.querySelector('.wy-mascot').getBoundingClientRect().height>=100&&!who.querySelector('.wy-reply-greeting');}));
   await page.focus('#prompt');await page.evaluate(()=>window.__resizeKeyboard(444));await page.waitForTimeout(80);
@@ -111,7 +120,7 @@ try{
   check('当前模型直接展开锚定列表，无页面跳转',await page.evaluate(()=>{const sheet=document.querySelector('.mp-sheet'),r=sheet.getBoundingClientRect(),chip=document.getElementById('model-chip').getBoundingClientRect();return !sheet.hidden&&sheet.classList.contains('mp-anchored')&&r.left>=15&&r.right<=innerWidth-15&&r.bottom<=chip.top&&!document.body.classList.contains('side-open');}));
   await page.locator('.mp-item').filter({has:page.getByText('ui-test-b',{exact:true})}).click();
   check('点选后直接换模型并更新输入框标签',await page.evaluate(()=>window.__jarvis.config.models.custom==='ui-test-b'&&document.getElementById('model-chip-text').textContent==='ui-test-b'&&document.querySelector('.mp-sheet').hidden&&!document.body.classList.contains('side-open')));
-  const before=await page.locator('.msg.agent').count();await page.fill('#prompt','请写一段较长的计划');await page.press('#prompt','Enter');
+  const before=await page.locator('.msg.agent').count();await page.fill('#prompt','请写一段较长的计划');await page.click('#btn-send');
   await page.waitForFunction(n=>document.querySelectorAll('.msg.agent').length>n&&document.querySelector('.msg.agent:last-child .body')?.textContent.length>200,before);
   await page.evaluate(()=>{const root=document.getElementById('transcript');root.scrollTop=0;root.dispatchEvent(new Event('scroll'));});
   await page.waitForFunction(()=>!document.querySelector('.msg.agent.streaming'),null,{timeout:30000});

@@ -8,6 +8,8 @@
  *   GET    /api/server/status              正在做 / 排队的任务
  *   GET    /api/server/config              模型设置（密钥只显示后 4 位）
  *   PUT    /api/server/config              保存模型设置（密钥留空 = 不改）
+ *   GET    /api/server/update              版本号、自动更新装没装、上次检查 / 更新的结果
+ *   POST   /api/server/update              马上检查并更新（留一个请求文件，由 root 的 jarvis-update 服务去做，见 deploy/update.sh）
  *   POST   /api/tasks                      { sessionId?, text } → { id, sessionId }
  *   GET    /api/tasks/<id>                 任务状态
  *   GET    /api/tasks/<id>/events?after=N  进度事件流（SSE）：先补发序号 > N 的，再实时推送，做完就结束
@@ -24,6 +26,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { createFileStore } from './fileStore.mjs';
 import { createTaskRunner } from './taskRunner.mjs';
 import { useBackend } from '../src/agent/store.js';
@@ -33,6 +36,10 @@ import * as ws from '../src/agent/workspace.js';
 import { DEFAULT_CONFIG } from '../src/llm/config.js';
 
 const UPLOAD_LIMIT = 50 * 1024 * 1024;
+/** 程序所在目录（安装包里的 VERSION 文件在这里） */
+const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+/** install.sh 装的“立即更新”触发器：有它才能从手机上更新 */
+const UPDATE_UNIT = '/etc/systemd/system/jarvis-update.path';
 /** 上传一段本机对话的大小上限 */
 const IMPORT_LIMIT = 8 * 1024 * 1024;
 /** 登录令牌：由密码算出来（改密码后旧令牌自动失效），不在服务器上另存 */
@@ -54,7 +61,7 @@ export function mergeConfig(old, next) {
 /**
  * @param {{ dataDir: string, password: string, maxRunning?: number, runner?: object }} o
  */
-export function createServerMode({ dataDir, password, maxRunning = 1, runner: injected = null }) {
+export function createServerMode({ dataDir, password, maxRunning = 1, runner: injected = null, appDir = APP_DIR, updateUnit = UPDATE_UNIT }) {
   if (!password || String(password).length < 8) throw new Error('服务器模式需要设置 JARVIS_PASSWORD（至少 8 位）');
   const store = createFileStore(path.join(dataDir, 'store'));
   useBackend(store);
@@ -135,9 +142,26 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
       if (req.method === 'GET') { json(res, 200, maskConfig(loadConfig())); return true; }
       if (req.method === 'PUT') { saveConfig(mergeConfig(loadConfig(), await readJson(req))); json(res, 200, { ok: true }); return true; }
     }
+    if (pathname === '/api/server/update') {
+      const auto = fs.existsSync(updateUnit);
+      if (req.method === 'GET') {
+        let last = null;
+        try { last = JSON.parse(fs.readFileSync(path.join(dataDir, 'update-status.json'), 'utf8')); } catch { /* 还没检查过 */ }
+        let version = '';
+        try { version = fs.readFileSync(path.join(appDir, 'VERSION'), 'utf8').trim(); } catch { /* 不是用安装包装的 */ }
+        json(res, 200, { version, auto, last, requested: fs.existsSync(path.join(dataDir, 'update-request')) });
+        return true;
+      }
+      if (req.method === 'POST') {
+        if (!auto) { json(res, 409, { error: '服务器上还没装自动更新：在服务器终端用新版安装包运行一次 install.sh 就有了' }); return true; }
+        fs.writeFileSync(path.join(dataDir, 'update-request'), `${new Date().toISOString()}\n`);
+        json(res, 200, { ok: true });
+        return true;
+      }
+    }
     if (pathname === '/api/tasks' && req.method === 'POST') {
-      const { sessionId = null, text, images } = await readJson(req, IMPORT_LIMIT); // 可能带图片，放宽大小
-      json(res, 200, await runner.start({ sessionId, text, images })); return true;
+      const { sessionId = null, text, images, voice } = await readJson(req, IMPORT_LIMIT); // 可能带图片，放宽大小
+      json(res, 200, await runner.start({ sessionId, text, images, voice: voice === true })); return true;
     }
     if (pathname === '/api/tasks' && req.method === 'GET') { json(res, 200, runner.list()); return true; }
     const t = pathname.match(/^\/api\/tasks\/([\w-]+)(\/events|\/stop)?$/);

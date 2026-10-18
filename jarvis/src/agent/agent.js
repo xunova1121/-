@@ -102,7 +102,14 @@ export const STABLE_PROMPT = `你是“未央”，运行在用户电脑上的�
 ## 表达标签
 回复的第一个字符必须是 <emotion>X</emotion>，X 只能是 平静、专注、聆听、亲和、安抚、愉悦、警觉 之一，表示界面此刻的表达风格（用户沮丧时“安抚”，出错或有风险时“警觉”，执行任务时“专注”）。这只是界面风格，不代表你有情绪；不要在正文里提到它。`;
 
-export async function buildContext(userText, { sessionId = null, turns = 0, summary = null } = {}) {
+/** 简单闲聊（你好、谢谢）用的短提示：不带工具说明，回得快 */
+export const LIGHT_PROMPT = `你是“未央”，用户的个人智能体。现在是日常闲聊：自然、亲切、简短地回答（一两句话），不列清单、不用标题。
+
+${STABLE_PROMPT.slice(STABLE_PROMPT.indexOf('## 表达标签'))}`;
+/** 语音对话：回答会被念出来 */
+export const VOICE_NOTE = '## 语音对话\n用户正在和你语音对话，你的回答会被念出来：用口语，简短（一般两三句话），不用列表、表格、标题、链接和符号；做了文件就说一句文件名和放在哪，细节让用户看屏幕。';
+
+export async function buildContext(userText, { sessionId = null, turns = 0, summary = null, light = false } = {}) {
   const fresh = turns <= 2; // 新对话（或刚开始）：带上最近的对话和没做完的事，方便“接着上次的”
   const [ctx, kbHits, installed, past, recentS, open, rules] = await Promise.all([
     memory.contextFor(userText), kb.search(userText, 4), packs.enabled().catch(() => []),
@@ -129,12 +136,12 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
   if (ctx.memories.length) parts.push(`## 相关记忆（标“自动记下”的是从以前的对话里整理出来的，用户没确认过：可以直接用；和用户现在说的冲突时以现在为准）\n${ctx.memories.map((m) => `- [${m.pending ? '自动记下; ' : ''}来源:${m.source || '未记录'}; 时间:${new Date(m.updatedAt || m.ts).toISOString()}; 版本:${(m.history?.length || 0)+1}] ${m.content}`).join('\n')}`);
   const day = (ts) => new Date(ts).toLocaleDateString('zh-CN');
   if (ctx.episodes?.length) parts.push(`## 相关的过往对话\n${ctx.episodes.map((e) => `- ${day(e.ts)}${e.sessionTitle ? `「${e.sessionTitle}」` : ''}：${e.summary}`).join('\n')}`);
-  if (past.length) parts.push(`## 过往对话里的相关原话（需要更多细节时用 read_conversation 读全文）\n${past.map((p) => `- ${day(p.ts)}「${p.title}」（id: ${p.sessionId}）\n  用户：${p.user.slice(0, 160)}${p.reply ? `\n  未央：${p.reply.replace(/\s+/g, ' ').slice(0, 240)}` : ''}`).join('\n')}`);
+  if (past.length && !light) parts.push(`## 过往对话里的相关原话（需要更多细节时用 read_conversation 读全文）\n${past.map((p) => `- ${day(p.ts)}「${p.title}」（id: ${p.sessionId}）\n  用户：${p.user.slice(0, 160)}${p.reply ? `\n  未央：${p.reply.replace(/\s+/g, ' ').slice(0, 240)}` : ''}`).join('\n')}`);
   if (recentS.length) parts.push(`## 最近的其他对话（用户说“接着上次 / 刚才那个”时参考）\n${recentS.map((s) => `- ${day(s.updatedAt)}「${s.title}」（id: ${s.id}，${s.messages.length} 条）最后：${String([...s.messages].reverse().find((m) => m.role === 'user')?.content ?? '').slice(0, 60)}`).join('\n')}`);
   if (open.length) parts.push(`## 之前对话里说好以后再做的事（合适时主动提一句，用户说不用了就不再提）\n${open.map((o) => `- ${o.text}${o.sessionTitle ? `（来自「${o.sessionTitle}」，${day(o.ts)}）` : ''}`).join('\n')}`);
   if (ctx.lessons.length) parts.push(`## 经验教训（来自用户反馈）\n${ctx.lessons.map((l) => `- ${l.content}`).join('\n')}`);
   if (ctx.skills.length) parts.push(`## 已掌握的技能\n${ctx.skills.map((s) => `### ${s.name}\n${s.description ? `${s.description}\n` : ''}${s.steps}`).join('\n')}`);
-  if (installed.length) parts.push(packs.catalog(installed));
+  if (installed.length && !light) parts.push(packs.catalog(installed)); // 闲聊用不到技能清单
   if (kbHits.length) parts.push(`## 知识库检索结果（回答时注明来源）\n${kbHits.map((h) => `【来源：${h.name}】\n${h.text}`).join('\n\n')}`);
   return { dynamic: parts.join('\n\n'), kbHits, ...ctx };
 }
@@ -155,13 +162,13 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
  * @param {{ text: string } | null} [o.summary]  本段对话较早内容的摘要（长对话压缩，见 compress.js）
  * @returns {Promise<{ text: string, steps: number, toolCalls: number }>}
  */
-export async function runAgent({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs = TIME_BUDGET_MS, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null }) {
+export async function runAgent({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs = TIME_BUDGET_MS, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false }) {
   const startedAt = now();
   let overtime = 0; // 超时后又给了几次收尾机会
   let webCalls = 0; // 这一轮查网页的次数（只有主要在查资料时才按用时收尾，写代码、写长文档不受影响）
   emit({ type: 'state', value: 'processing' });
   const tCtx = Date.now();
-  const ctx = context ?? (await buildContext(userText, { sessionId, turns: history.filter((m) => m.role === 'user').length, summary }));
+  const ctx = context ?? (await buildContext(userText, { sessionId, turns: history.filter((m) => m.role === 'user').length, summary, light }));
   // 界面传完整原文账本；非界面入口可从会话取回，最后才退回本轮可见消息。
   const saved = !requirements && sessionId && depth === 0 ? await sessions.get(sessionId).catch(() => null) : null;
   const record = requirements ?? (saved ? collectRequirements(saved.messages, saved.requirements) : collectRequirements([...history, { role: 'user', content: userText }]));
@@ -172,7 +179,9 @@ export async function runAgent({ adapter, model, history, userText, images = [],
   const convo = [...history.map((m) => ({ ...m })), { role: 'user', content: userText, ...(images.length && { images }) }];
   // 任务清单（update_plan）和子任务分身（delegate_task，只有主线能派）由循环自己提供
   const plan = createPlanTool((steps) => emit({ type: 'plan', steps }));
-  const own = [plan.tool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools })] : [])].filter((t) => !tools.some((x) => x.name === t.name));
+  // 简单闲聊（light）：不带工具，回得快
+  if (light) tools = [];
+  const own = light ? [] : [plan.tool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools })] : [])].filter((t) => !tools.some((x) => x.name === t.name));
   // 工具按需加载：工具多时只带常用的完整说明，其余列名字、用 tool_search 加载（见 toolLoader.js）
   const loader = createToolLoader([...tools, ...own]);
   let checks = 0; // 收尾核对提醒过几次（最多两次，避免来回拉扯）
@@ -218,7 +227,7 @@ export async function runAgent({ adapter, model, history, userText, images = [],
     r = await cur.adapter.stream({
       model: cur.model,
       effort,
-      system: [STABLE_PROMPT, [ctx.dynamic, requirementContext, toolHint].filter(Boolean).join('\n\n')],
+      system: light ? [LIGHT_PROMPT, [ctx.dynamic, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [STABLE_PROMPT, [ctx.dynamic, requirementContext, toolHint, voice && VOICE_NOTE].filter(Boolean).join('\n\n')],
       messages: convo,
       tools: loader.list(),
       signal,
@@ -263,7 +272,7 @@ export async function runAgent({ adapter, model, history, userText, images = [],
         if (finalText && !/\n$/.test(finalText)) { emit({ type: 'text', delta: '\n\n' }); finalText += '\n\n'; }
         continue;
       }
-      const note = checks < 2 ? finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }) : '';
+      const note = checks < 2 && !light ? finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }) : '';
       if (!note) break;
       checks++;
       convo.push({ role: 'user', content: note });

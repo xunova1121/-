@@ -6,6 +6,7 @@
 #   2. 第一次安装时：建一个专门运行未央的系统账号 jarvis，问你设访问密码，写进 /opt/jarvis/jarvis.env（只有 root 能读）
 #   3. 注册成系统服务 jarvis（开机自启、崩了自动重启、最多用 700MB 内存），只在本机 127.0.0.1:8787 上监听
 #   4. 切换到新版本并重启；旧版本保留最近 2 个，出问题可以切回去
+#   5. 装上自动更新：每天凌晨 4 点左右（北京时间）检查新版本；手机 / 电脑上点“立即更新服务器”也会马上更新（见 update.sh）
 # 你的对话、记忆、文件在 /opt/jarvis/data，更新不会动它。
 set -euo pipefail
 
@@ -50,6 +51,8 @@ if [[ ! -f "$ENVF" ]]; then
 fi
 chmod 600 "$ENVF"
 chown -R jarvis:jarvis "$BASE/data"
+# 记下 Node 所在目录：自动更新由系统定时运行，那时 PATH 里找不到 nvm 装的 Node 和 npm
+dirname "$NODE" > "$BASE/node-dir"
 # Node 装在 jarvis 账号进不去的地方（比如 /root/.nvm）：复制一份到 /usr/local/bin/node-jarvis 给未央用
 if ! su -s /bin/sh jarvis -c "\"$NODE\" -v" >/dev/null 2>&1; then
   install -m 755 "$NODE" /usr/local/bin/node-jarvis
@@ -83,8 +86,45 @@ PrivateTmp=true
 WantedBy=multi-user.target
 UNIT
 
+# 自动更新：定时检查一次；手机上点“立即更新”会在 data 目录里留一个 update-request 文件，看到就马上更新
+install -m 755 "$APP/deploy/update.sh" "$BASE/update.sh"
+cat > /etc/systemd/system/jarvis-update.service <<UNIT
+[Unit]
+Description=未央服务器版：检查并安装新版本
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash $BASE/update.sh
+UNIT
+cat > /etc/systemd/system/jarvis-update.timer <<UNIT
+[Unit]
+Description=未央服务器版：每天检查一次新版本
+
+[Timer]
+# 20:00 UTC = 北京时间凌晨 4 点，再随机错开最多 1 小时
+OnCalendar=*-*-* 20:00:00 UTC
+RandomizedDelaySec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+cat > /etc/systemd/system/jarvis-update.path <<UNIT
+[Unit]
+Description=未央服务器版：手机上点了“立即更新服务器”
+
+[Path]
+PathExists=$BASE/data/update-request
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
 systemctl daemon-reload
 systemctl enable jarvis >/dev/null 2>&1
+systemctl enable --now jarvis-update.timer jarvis-update.path >/dev/null 2>&1 || echo "== 自动更新没开起来（不影响使用）：systemctl status jarvis-update.timer"
 systemctl restart jarvis
 # 等它启动（最多 20 秒）
 for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8787/api/health 2>/dev/null | grep -q '"serverMode":true' && break; sleep 1; done

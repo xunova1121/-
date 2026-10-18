@@ -77,6 +77,17 @@ try {
   await page.screenshot({ path: path.join(OUT, 'server-mode.png') });
 
   check('输入框里显示服务器上设的模型', /^服务器/.test(await page.locator('#model-chip-text').textContent()));
+  // 服务器模式下换模型：自动同步到服务器，输入框显示服务器上的新模型
+  await page.evaluate(() => window.__jarvis.showPanel('models'));
+  await page.selectOption('#llm-provider', 'custom');
+  await page.fill('#llm-base', 'https://example.invalid/v1');
+  await page.fill('#llm-model', 'synced-model');
+  await page.fill('#llm-key', 'sk-test-1234');
+  await page.click('#btn-llm-save');
+  await page.waitForFunction(() => /synced-model/.test(document.querySelector('#model-chip-text').textContent), null, { timeout: 8000 }).catch(() => {});
+  const saved = JSON.parse(fs.readFileSync(path.join(dataDir, 'config.json'), 'utf8'));
+  check('服务器模式下换了模型，自动同步到服务器', saved.provider === 'custom' && saved.models?.custom === 'synced-model' && /synced-model/.test(await page.locator('#model-chip-text').textContent()));
+
   // 关掉服务器模式：回到本机
   await page.evaluate(() => window.__jarvis.showPanel('settings'));
   await Promise.all([page.waitForEvent('load'), page.uncheck('#server-on')]);

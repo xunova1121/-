@@ -4,7 +4,7 @@
  */
 import { imageButton, previewWorkspaceImage, showImagePreview } from './imagePreview.js';
 import './mobileImprovements.css';
-import { parseMarkdown, inline } from '../core/markdown.js';
+import { parseMarkdown, inline, toPlainText } from '../core/markdown.js';
 import { stripEmotionTags } from '../../shared/emotionTag.js';
 import { createMascot, setMascotState, poseForEmotion, poseForTask } from './mascot.js';
 
@@ -204,6 +204,44 @@ function feedbackButtons(meta, onFeedback) {
   return box;
 }
 
+/** 复制到剪贴板：先用系统剪贴板接口，不行（手机 App 里偶尔没有权限）就用隐藏输入框复制 */
+export async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch { /* 退回旧办法 */ }
+  try {
+    const t = Object.assign(document.createElement('textarea'), { value: text, readOnly: true });
+    t.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+    document.body.append(t);
+    t.select();
+    const ok = document.execCommand('copy');
+    t.remove();
+    return ok;
+  } catch { return false; }
+}
+
+/** 每条消息下面的小按钮：复制 / 引用（放进输入框接着问）/ 朗读（只有未央的回答有） */
+function messageActions(role, getText, onAction) {
+  const box = document.createElement('span');
+  box.className = 'msg-actions';
+  const btn = (kind, label, title) => {
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: `msg-act msg-${kind}`, textContent: label, title });
+    b.addEventListener('click', async () => {
+      const text = getText();
+      if (!text.trim()) return;
+      if (kind === 'copy') {
+        const ok = await copyText(toPlainText(text));
+        b.textContent = ok ? '已复制' : '复制失败';
+        setTimeout(() => { b.textContent = label; }, 1500);
+        return;
+      }
+      onAction?.(kind, text, b);
+    });
+    return b;
+  };
+  box.append(btn('copy', '复制', '复制这条的文字'), btn('quote', '引用', '引用这条，接着问'));
+  if (role === 'agent') box.append(btn('speak', '朗读', '朗读这条回答'));
+  return box;
+}
+
 const hhmm = (ts) => new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
 
 export class Transcript {
@@ -274,6 +312,12 @@ export class Transcript {
     if (upload) {
       const receipt = Object.assign(document.createElement('button'), { type:'button', className:'upload-receipt', textContent:'已上传工作区' });
       receipt.onclick = () => globalThis.dispatchEvent(new CustomEvent('jarvis:open-upload', { detail: { path: upload[1].split('、')[0] } })); el.append(receipt);
+    }
+    if (role === 'user' && text) {
+      const said = upload ? text.slice(0, upload.index).trim() : text;
+      const m = Object.assign(document.createElement('div'), { className: 'meta' });
+      m.append(messageActions('user', () => said, (...a) => this.onAction?.(...a)));
+      el.append(m);
     }
     this.root.append(el);
     this.#scroll();
@@ -619,8 +663,10 @@ export class Transcript {
         const m = document.createElement('div');
         m.className = 'meta';
         if (meta) m.append(meta);
+        const said = stripEmotionTags(raw);
+        if (role === 'agent' && said.trim()) m.append(messageActions('agent', () => said, (...a) => self.onAction?.(...a)));
         if (onFeedback) m.append(feedbackButtons(m, onFeedback));
-        if (meta || onFeedback) el.append(m);
+        if (m.childNodes.length) el.append(m);
         self.#scroll();
       }
     };

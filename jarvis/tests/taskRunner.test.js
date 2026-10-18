@@ -3,15 +3,24 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createFileStore } from '../server/fileStore.mjs';
-import { createTaskRunner, SERVER_BLOCKED, DRAFT_MARK, DRAFT_MS, publicFetch } from '../server/taskRunner.mjs';
+import { createTaskRunner as makeRunner, SERVER_BLOCKED, DRAFT_MARK, DRAFT_MS, publicFetch } from '../server/taskRunner.mjs';
 import { INTERRUPTED_MARK } from '../src/core/suggest.js';
 import { useBackend } from '../src/agent/store.js';
 import * as sessions from '../src/agent/sessions.js';
 import { DEFAULT_CONFIG } from '../src/llm/config.js';
 
 let dir;
+// 每个测试建的执行器：收尾前等它们的后台活（整理记忆、压缩对话）做完，不然会写进下一个测试的存储
+let runners = [];
+const createTaskRunner = (o) => { const r = makeRunner(o); runners.push(r); return r; };
 beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-task-')); useBackend(createFileStore(dir)); });
-afterEach(() => { useBackend(null); fs.rmSync(dir, { recursive: true, force: true }); });
+afterEach(async () => {
+  for (const r of runners) { for (const t of r.list()) r.stop(t.id); }
+  await Promise.all(runners.map((r) => r.settled()));
+  runners = [];
+  useBackend(null);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
 
 const until = async (fn, ms = 8000) => { const t0 = Date.now(); while (!(await fn())) { if (Date.now() - t0 > ms) throw new Error('等待超时'); await new Promise((r) => setTimeout(r, 20)); } };
 const mockCfg = async () => ({ ...DEFAULT_CONFIG, provider: 'mock' });
@@ -194,5 +203,22 @@ describe('服务器模式补齐：和手机 / 电脑上一样', () => {
     const { id } = await runner.start({ text: '搜一下' });
     await until(() => runner.get(id).status === 'done');
     expect(typeof ctxSeen.fetchViaGateway).toBe('function');
+  });
+});
+
+describe('服务器上：语音对话和寒暄', () => {
+  it('语音对话的任务让模型口语短答；“你好”不带工具', async () => {
+    const seen = [];
+    const adapter = { stream: async (req) => { seen.push(req); req.onText?.('好'); return { text: '好', toolCalls: [], stop: 'end_turn' }; } };
+    const tool = { name: 'tick', description: 't', input_schema: { type: 'object', properties: {} }, run: async () => 'ok' };
+    const runner = createTaskRunner({ getConfig: mockCfg, makeAdapter: () => ({ adapter, model: 'm' }), makeTools: () => [tool] });
+    const a = await runner.start({ text: '你好', voice: true });
+    await until(() => runner.get(a.id).status === 'done');
+    expect(seen[0].tools).toEqual([]);
+    expect(seen[0].system[1]).toContain('语音对话');
+    const b = await runner.start({ text: '写一份周报' });
+    await until(() => runner.get(b.id).status === 'done');
+    expect(seen.at(-1).tools.some((t) => t.name === 'tick')).toBe(true);
+    expect(seen.at(-1).system[1]).not.toContain('语音对话');
   });
 });

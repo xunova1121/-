@@ -73,6 +73,8 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     status: () => req('/api/server/status'),
     getConfig: () => req('/api/server/config'),
     putConfig: (cfg) => req('/api/server/config', { method: 'PUT', body: cfg }),
+    updateInfo: () => req('/api/server/update'),
+    requestUpdate: () => req('/api/server/update', { method: 'POST' }),
     startTask: (o) => req('/api/tasks', { method: 'POST', body: o }),
     getTask: (id) => req(`/api/tasks/${id}`),
     stopTask: (id) => req(`/api/tasks/${id}/stop`, { method: 'POST' }),
@@ -157,8 +159,8 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
    * @param {{ sessionId: string, userText: string, images?: Array<{ mime: string, data: string }>, emit: (e: object) => void, signal?: AbortSignal, onFile?: (path: string) => void, onStarted?: (task: { id: string }) => void, taskId?: string }} o
    * @returns {Promise<{ text: string, toolCalls: number, steps: number }>}
    */
-  export async function runRemote(client, { sessionId, userText, images = [], emit, signal, onFile, onStarted, taskId = null }) {
-    const task = taskId ? { id: taskId } : await client.startTask({ sessionId, text: userText, ...(images.length && { images }) });
+  export async function runRemote(client, { sessionId, userText, images = [], voice = false, emit, signal, onFile, onStarted, taskId = null }) {
+    const task = taskId ? { id: taskId } : await client.startTask({ sessionId, text: userText, ...(images.length && { images }), ...(voice && { voice: true }) });
     onStarted?.(task);
     const stop = () => client.stopTask(task.id).catch(() => {});
     signal?.addEventListener('abort', stop, { once: true });

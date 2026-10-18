@@ -33,4 +33,7 @@ fs.writeFileSync(path.join(dir, 'VERSION'), `${version}\n`);
 const file = path.join(out, `jarvis-server-${version}.tar.gz`);
 execFileSync('tar', ['-czf', file, '-C', stage, 'jarvis-server']);
 fs.rmSync(stage, { recursive: true, force: true });
+// 自动更新用（deploy/update.sh）：最新版本号和安装包的 sha256，随 Release 一起发布，文件名固定
+const sha256 = (await import('node:crypto')).createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+fs.writeFileSync(path.join(out, 'jarvis-server-latest.json'), `${JSON.stringify({ version, file: path.basename(file), sha256 })}\n`);
 console.log(`${file}（${(fs.statSync(file).size / 1048576).toFixed(1)} MB）`);

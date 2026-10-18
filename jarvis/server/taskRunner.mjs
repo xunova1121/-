@@ -21,7 +21,7 @@ import { createAdapter } from '../src/llm/config.js';
 import { generateImage } from '../src/llm/images.js';
 import { generateVideo } from '../src/llm/videos.js';
 import { providerById, isPrivateHost } from '../shared/providers.js';
-import { routeFor, fallbackRoutes, classifyTask, effortFor } from '../src/llm/router.js';
+import { routeFor, fallbackRoutes, classifyTask, effortFor, isSmallTalk } from '../src/llm/router.js';
 import { INTERRUPTED_MARK } from '../src/core/suggest.js';
 import { uid } from '../src/agent/store.js';
 
@@ -71,6 +71,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
   const waiting = [];
   let running = 0;
   const locks = new Map();
+  const background = new Set(); // 做完后在后台整理记忆、压缩对话的活（settled() 等它们做完）
 
   /** 同一段对话的“读出来 → 改 → 存回去”排队做：几处同时改时，后存的不会冲掉先存的 */
   function editSession(id, fn) {
@@ -173,6 +174,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         userText: task.text, requirementText: task.text, images: task.images,
         // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省
         effort: effortFor(kind, task.text, cfg),
+        // 语音对话：口语短答；“你好 / 谢谢”这类寒暄不带工具，回得快
+        voice: task.voice, light: !task.images.length && isSmallTalk(task.text),
         sessionId: session.id, summary: session.summary ?? null,
         requirements: collectRequirements(session.messages, session.requirements),
         inbox: task.inbox,
@@ -221,7 +224,11 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     task.images = [];
     running--;
     pump();
-    if (task.status === 'done') afterTask(task, text).catch((e) => console.warn(`[任务] ${task.id} 整理记忆 / 压缩对话没做成：${e?.message || e}`));
+    if (task.status === 'done') {
+      const job = afterTask(task, text).catch((e) => console.warn(`[任务] ${task.id} 整理记忆 / 压缩对话没做成：${e?.message || e}`));
+      background.add(job);
+      job.finally(() => background.delete(job));
+    }
     setTimeout(() => tasks.delete(task.id), KEEP_DONE_MS).unref?.();
   }
 
@@ -252,7 +259,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
 
   return {
     /** @returns {Promise<{ id: string, sessionId: string }>} */
-    async start({ sessionId = null, text, images = [] }) {
+    async start({ sessionId = null, text, images = [], voice = false }) {
       text = String(text ?? '').trim();
       if (!text) throw Object.assign(new Error('任务内容是空的'), { status: 400 });
       if (text.length > 20000) throw Object.assign(new Error('任务内容太长'), { status: 400 });
@@ -277,7 +284,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         return { id: busy.id, sessionId: id, joined: true };
       }
       const session = { id };
-      const task = { id: uid('t'), sessionId: session.id, text, status: 'queued', seq: 0, events: [], listeners: new Set(), files: new Set(), inbox: [], notes: [], images, ctrl: new AbortController(), createdAt: now() };
+      const task = { id: uid('t'), sessionId: session.id, text, status: 'queued', seq: 0, events: [], listeners: new Set(), files: new Set(), inbox: [], notes: [], images, voice: Boolean(voice), ctrl: new AbortController(), createdAt: now() };
       tasks.set(task.id, task);
       record(task, { type: 'task_state', status: 'queued', position: waiting.length + running });
       waiting.push(task);
@@ -303,6 +310,14 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       if (t.status === 'running') { t.ctrl.abort(); return true; }
       return false;
     },
-    get running() { return running; }
+    get running() { return running; },
+    /** 等手上的活（恢复、排队和正在做的任务、做完后的整理）都结束：测试收尾、服务停止前用 */
+    async settled() {
+      await recovered;
+      while (running || waiting.some((t) => t.status === 'queued') || background.size || locks.size) {
+        await Promise.allSettled([...background, ...locks.values()]);
+        await new Promise((r) => setTimeout(r, 20));
+      }
+    }
   };
 }

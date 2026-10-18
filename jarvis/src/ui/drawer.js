@@ -79,7 +79,10 @@ export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, curren
     const cur = currentId();
     if (!list.length) { history.replaceChildren(el('p', { className: 'drawer-empty', textContent: '还没有对话。说点什么开始吧～' })); return; }
     // 默认只列最近几条，其余点“展开更多”再显示
-    const shown = expanded ? list.slice(0, 60) : list.slice(0, SHOW_FIRST);
+    let shown = expanded ? list.slice(0, 60) : list.slice(0, SHOW_FIRST);
+    // 当前对话排在后面（被收起来了）：也显示出来，一眼能看到自己在哪个对话里
+    const curItem = list.find((s) => s.id === cur);
+    if (curItem && !shown.includes(curItem)) shown = [...shown, curItem];
     const groups = groupSessions(shown).flatMap(([name, items]) => {
       const g = el('div', { className: 'drawer-group', textContent: name });
       g.style.setProperty('--h', GROUP_HUE[name] ?? 250);
@@ -94,7 +97,7 @@ export function initDrawer({ onNew, onOpenSession, onPanel, listSessions, curren
     });
     let tail;
     if (!expanded && list.length > SHOW_FIRST) {
-      tail = el('button', { type: 'button', className: 'drawer-more', textContent: `展开更多（还有 ${Math.min(list.length, 60) - SHOW_FIRST} 条）` });
+      tail = el('button', { type: 'button', className: 'drawer-more', textContent: `展开更多（还有 ${Math.min(list.length, 60) - shown.length} 条）` });
       tail.addEventListener('click', () => { expanded = true; refresh(); });
     } else if (expanded) {
       tail = el('div', { className: 'drawer-end' },

@@ -27,6 +27,7 @@ export function initServerPanel({ getLlmConfig, toast, reload = () => location.r
       const s = await client().status();
       say(`已连接 ${normalizeUrl(cfg.url)} · ${s.tasks.length ? `正在做 ${s.tasks.length} 个任务` : '空闲'}`);
     } catch (e) { say(`连不上服务器：${e.message}`); }
+    showVersion();
   }
 
   $('#btn-server-login').addEventListener('click', async () => {
@@ -47,6 +48,39 @@ export function initServerPanel({ getLlmConfig, toast, reload = () => location.r
     saveServerSettings({ ...loadServerSettings(), enabled: on.checked });
     toast(on.checked ? '已开启服务器模式' : '已关闭服务器模式，任务回到本机做');
     reload();
+  });
+
+  // 服务器版本和自动更新：显示当前版本、上次检查的结果；“立即更新”让服务器马上检查并安装新版（服务会重启 1–3 分钟）
+  const verLine = (u) => {
+    const last = u.last ? `；${u.last.at} ${u.last.message}` : '';
+    return `服务器版本 ${u.version || '未知'} · ${u.auto ? '每天凌晨自动更新' : '还没装自动更新（在服务器上用新版安装包运行一次 install.sh）'}${last}`;
+  };
+  async function showVersion() {
+    if (!cfg.enabled || !cfg.token) return;
+    try { $('#server-version').textContent = verLine(await client().updateInfo()); } catch { /* 旧版服务器没有这个接口 */ }
+  }
+  $('#btn-server-update').addEventListener('click', async () => {
+    if (!loadServerSettings().token) { say('请先登录'); return; }
+    const btn = $('#btn-server-update');
+    btn.disabled = true;
+    try {
+      const before = await client().updateInfo().catch(() => ({}));
+      await client().requestUpdate();
+      say('已让服务器检查更新：有新版会自动安装，期间服务重启 1–3 分钟，做到一半的任务会标成“没完成”');
+      // 每 5 秒看一次，最多 6 分钟（重启那会儿连不上是正常的）
+      for (let i = 0; i < 72; i++) {
+        await new Promise((r) => setTimeout(r, 5000));
+        const u = await client().updateInfo().catch(() => null);
+        if (!u) { $('#server-version').textContent = '服务器正在重启…'; continue; }
+        $('#server-version').textContent = verLine(u);
+        const fresh = u.last && u.last.at !== before.last?.at;
+        if (!u.requested && fresh && ['latest', 'done', 'error'].includes(u.last.state)) {
+          say(u.last.state === 'error' ? `更新没成功：${u.last.message}` : u.last.message);
+          if (u.last.state === 'done') onConfigSaved();
+          break;
+        }
+      }
+    } catch (e) { say(`没能更新：${e.message}`); } finally { btn.disabled = false; }
   });
 
   $('#btn-server-config').addEventListener('click', async () => {

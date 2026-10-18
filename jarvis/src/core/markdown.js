@@ -89,3 +89,24 @@ export function cleanUrl(url) {
     return u.href.replace(/\?$/, '');
   } catch { return url; }
 }
+
+const spanText = (spans, { urls = false } = {}) => spans.map((s) => (urls && s.link && s.link !== s.text ? `${s.text}（${s.link}）` : s.text)).join('');
+
+/** 复制用的纯文字：去掉 **、#、` 这些格式符号，列表保留“- ”和序号，表格按行用制表符分隔，链接文字后面带网址 */
+export function toPlainText(md) {
+  return parseMarkdown(md).map((b) => {
+    if (b.type === 'code') return b.text;
+    if (b.type === 'table') return b.rows.map((r) => r.map((c) => spanText(inline(c))).join('\t')).join('\n');
+    if (b.type === 'list') return b.items.map((it, i) => `${b.ordered ? `${i + 1}. ` : '- '}${spanText(it, { urls: true })}`).join('\n');
+    return spanText(b.spans, { urls: true });
+  }).join('\n\n').trim();
+}
+
+/** 朗读用的文字：只念正文和标题、列表项；代码、表格不念，链接只念文字 */
+export function toSpeech(md) {
+  return parseMarkdown(md).flatMap((b) => {
+    if (b.type === 'code' || b.type === 'table') return [];
+    if (b.type === 'list') return b.items.map((it) => spanText(it).replace(/[。；;，,]?$/, '。'));
+    return [spanText(b.spans)];
+  }).join('\n').replace(/[*#>`|]/g, '').trim();
+}

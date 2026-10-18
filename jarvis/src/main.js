@@ -38,6 +38,7 @@ import { EMOTION_PARAMS, EYE_SHAPES } from './core/emotions.js';
 import { ParamTween } from './core/tween.js';
 import { followTarget, smoothToward } from './core/faceMath.js';
 import { SentenceChunker } from './core/sentenceChunker.js';
+import { toPlainText, toSpeech } from './core/markdown.js';
 import { SILENCE_BY_SENSITIVITY } from './core/vadGate.js';
 import { loadSettings, saveSettings, wantsReducedMotion } from './core/settings.js';
 import { browserMetrics } from './api/browserMetrics.js';
@@ -102,7 +103,7 @@ import { generateImage } from './llm/images.js';
 import { generateVideo } from './llm/videos.js';
 import { createFormDirector } from './core/formDirector.js';
 import { composeGreeting, GREET_GAP_MS } from './core/greeting.js';
-import { classifyTask, routeFor, TASKS, seesImages, fallbackRoutes, effortFor } from './llm/router.js';
+import { classifyTask, routeFor, TASKS, seesImages, fallbackRoutes, effortFor, isSmallTalk } from './llm/router.js';
 import { resolveTheme, toggled, THEMES } from './core/theme.js';
 import { FORMS } from './render/formations.js';
 import { resolveQuality } from './core/quality.js';
@@ -423,6 +424,20 @@ const serverCfg = loadServerSettings(storage);
 const server = serverCfg.enabled && serverCfg.url && serverCfg.token ? createServerClient({ base: serverCfg.url, token: serverCfg.token }) : null;
 if (server) { sessionsApi.useRemote(remoteSessions(server)); globalThis.__jarvisServerMode = true; updateModelLabels(); refreshServerModel(); }
 /** 服务器模式：输入框里显示服务器上设的模型 */
+/** 服务器模式下换了模型（或改了密钥、分工）：自动传到服务器，任务马上用新设置。语音设置留在本机 */
+let pushTimer = 0;
+function pushConfigToServer() {
+  if (!server) return;
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(async () => {
+    try {
+      const { voice, stt, ...models } = llmConfig;
+      await server.putConfig(models);
+      refreshServerModel();
+      toast(`已同步到服务器：${modelOf(models) || '模型设置'}`);
+    } catch (e) { toast(`模型设置没能同步到服务器：${e.message}`); }
+  }, 800);
+}
 function refreshServerModel() {
   server?.getConfig().then((c) => { globalThis.__jarvisServerModel = modelOf(c) || ''; updateModelLabels(); }).catch(() => {});
 }
@@ -448,8 +463,29 @@ function rememberTurn(role, content, extra = {}, target = session) {
 }
 function persistSession(target = session) {
   if (settings.saveSessions === false) return;
-  return sessionsApi.save(target).then(() => sessionsPanel?.refresh()).catch(() => {});
+  return sessionsApi.save(target).then(() => { sessionsPanel?.refresh(); if (target === session) showChatTitle(); }).catch(() => {});
 }
+/** 手机顶栏显示当前对话的标题（还没说话的新对话不显示） */
+function showChatTitle() {
+  const el = $('#chat-title');
+  const first = history.find((m) => m.role === 'user')?.content;
+  const title = session.title || (first ? sessionsApi.autoTitle(first) : '');
+  el.textContent = title;
+  el.hidden = !title;
+}
+$('#chat-title').addEventListener('click', async () => {
+  const now = $('#chat-title').textContent;
+  let next = null;
+  try { next = globalThis.prompt('给这段对话起个名字', now); } catch { /* 不支持弹窗 */ }
+  next = String(next ?? '').trim().slice(0, 60);
+  if (!next || next === now) return;
+  session.title = next;
+  session.titleSet = true;
+  await sessionsApi.rename(session.id, next).catch(() => {});
+  showChatTitle();
+  sessionsPanel?.refresh();
+  drawer?.refresh?.();
+});
 let turns = 0;
 const recentImages = new Map(); // 消息时间 → 这条消息带的图片（只在内存里，不存盘）
 const taskKeeper = createTaskKeeper(globalThis.__jarvisBackgroundTask, e => toast(e.message));
@@ -477,7 +513,8 @@ const speaker = new Speaker({
   onEngine: (engine,fallback) => { const el = document.querySelector("#tts-status"); if (el) el.textContent = fallback ? "当前已回退系统声音（不是目标女孩童声），请检测语音服务" : `实际播放引擎：${engine}`; if (fallback && callActive) callStatus("在线声音失败，当前为系统声；请检测声音服务"); },
   getGateway: () => gateway
 });
-speaker.enabled = settings.speechOutput;
+// 念不念由每一轮自己决定（见 makeSpeech）：语音对话、说话提问时念，打字提问默认不念
+speaker.enabled = true;
 
 /** 打断（barge-in）：停止朗读并中止正在执行的任务 */
 function interrupt() {
@@ -528,8 +565,9 @@ function finishTurn() {
   panels.refreshMind();
 }
 
-/** 朗读只读正文：代码块（``` 包围的部分，包括还没闭合的）不读 */
-function makeSpeech() {
+/** 朗读只读正文：代码块（``` 包围的部分，包括还没闭合的）不读。auto 为 false（打字提问）时不念 */
+function makeSpeech(auto = true) {
+  if (!auto) return { push() {}, flush() {} };
   let chunker = new SentenceChunker();
   let full = '';
   let fed = 0, speechGeneration = speaker.gen;
@@ -539,11 +577,11 @@ function makeSpeech() {
       const spoken = full.replace(/```[\s\S]*?```/g, '\n').replace(/```[\s\S]*$/, '');
       if (!speaker.foreground || speechGeneration !== speaker.gen) { chunker = new SentenceChunker(); speechGeneration = speaker.gen; if (!speaker.foreground) { fed = spoken.length; return; } }
       if (spoken.length > fed) {
-        for (const s of chunker.push(spoken.slice(fed))) speaker.speak(s);
+        for (const s of chunker.push(spoken.slice(fed))) speaker.speak(s.replace(/[*#`|>]/g, ''));
         fed = spoken.length;
       }
     },
-    flush() { if (!speaker.foreground || speechGeneration !== speaker.gen) return; for (const s of chunker.flush()) speaker.speak(s); }
+    flush() { if (!speaker.foreground || speechGeneration !== speaker.gen) return; for (const s of chunker.flush()) speaker.speak(s.replace(/[*#`|>]/g, '')); }
   };
 }
 
@@ -629,6 +667,7 @@ function visibleHistory(end = history.length) {
   return transcriptWindow(history.length, { mobile: MOBILE, safe: document.documentElement.classList.contains('safe-render'), end });
 }
 function replayTranscript(end = history.length) {
+  showChatTitle();
   const root = $('#transcript'), range = visibleHistory(end);
   historyViewEnd = range.newer ? range.end : null;
   root.replaceChildren();
@@ -879,8 +918,8 @@ async function greetOnReturn({ awayMs, reason = '', force = false }) {
   director.onEmotion('亲和');
   wp({ say: text, emotion: '亲和' });
   hud.think(`◆ 主动问候（离开 ${Math.round(awayMs / 60000)} 分钟）`);
-  if (settings.speechOutput) speaker.speak(text);
-  if (document.hidden && DESKTOP && !settings.speechOutput) DESKTOP.invoke('notify', { title: '未央', body: text }).catch(() => {});
+  if (settings.readTyped) speaker.speak(text);
+  if (document.hidden && DESKTOP && !settings.readTyped) DESKTOP.invoke('notify', { title: '未央', body: text }).catch(() => {});
   openingCallouts();
   return text;
 }
@@ -1019,7 +1058,7 @@ function finishBackground(turn, { text = '', error = '', shown = '', usedTools =
   sessionsPanel?.refresh();
 }
 
-async function send(text, { echo = true } = {}) {
+async function send(text, { echo = true, byVoice = false } = {}) {
   text = String(text || '').trim();
   if (!text && !attachments.length) return;
   if (!attachments.length && companion?.perform(text)) return;
@@ -1071,7 +1110,7 @@ async function send(text, { echo = true } = {}) {
   const task = shouldTeam(text, settings.teamMode === 'auto' && !helperLlm() ? 'off' : settings.teamMode) ? 'reason' : classifyTask(text, { images: imgs.length + withImages.size });
   const route = routeFor(llmConfig, task);
   const { adapter, model, problem } = createAdapter(route.cfg, { gateway });
-  if (COMPACT && isAuto(llmConfig) && model) $('#model-chip-text').textContent = `自动 · ${model}`;
+  if (COMPACT && isAuto(llmConfig) && model && !server) $('#model-chip-text').textContent = `自动 · ${model}`;
   // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省
   const effort = effortFor(task, text, llmConfig);
   if (route.routed) hud.think(`◇ 模型分工：${TASKS[task].name} → ${route.model}`);
@@ -1089,7 +1128,9 @@ async function send(text, { echo = true } = {}) {
   const fallbacks = fallbackRoutes(llmConfig, { provider: route.cfg.provider, model }).map((f) => ({ ...createAdapter(f.cfg, { gateway }), label: f.model })).filter((f) => !f.problem && f.adapter && f.model);
   let usedModel = model; // 换过备用模型时，回答下面写实际用的那个
 
-  const speech = makeSpeech();
+  // 语音对话中、或者是说话提问的：念回答；打字提问只显示（设置里打开“打字提问也朗读”除外）
+  const spoken = callActive || byVoice || settings.readTyped;
+  const speech = makeSpeech(spoken);
   const cards = new Map();
   let firstToken = 0;
   let outMarked = false; // 崩溃记录：这一段在输出文字
@@ -1109,7 +1150,7 @@ async function send(text, { echo = true } = {}) {
     // 服务器模式：服务器做，进度事件和本机一样显示（runRemote 的用法和 runAgent 一样）
     const serverRun = async (o) => {
       for (const f of files) await server.upload(f.path, await ws.readBlob(f.path)); // 发来的附件先传到服务器的工作区
-      return runRemote(server, { sessionId: o.sessionId, userText: o.userText, images: o.images, emit: o.emit, signal: o.signal, onFile: (p) => pullServerFile(p, turn) });
+      return runRemote(server, { sessionId: o.sessionId, userText: o.userText, images: o.images, voice: o.voice, emit: o.emit, signal: o.signal, onFile: (p) => pullServerFile(p, turn) });
     };
     const result = await (server ? serverRun : team ? runTeam : runAgent)({
       llm: team ? helperLlm('reason') : undefined,
@@ -1122,6 +1163,9 @@ async function send(text, { echo = true } = {}) {
       requirementText: userText, // 保留斜杠命令展开前的原话，避免当成缺失历史重复注入
       fallbacks: team ? [] : fallbacks,
       inbox: team ? null : turn.inbox,
+      // 语音对话：让模型用口语短答；“你好 / 谢谢”这类寒暄不带工具，回得快
+      voice: callActive || byVoice,
+      light: !files.length && isSmallTalk(text),
       maxSteps: DESKTOP ? 40 : 28, // 用鼠标键盘操作电脑、逐项联网核实时步数多
       images: imgs.map(({ mime, data }) => ({ mime, data })),
       tools: server ? [] : await buildTools({ turn }),
@@ -1273,8 +1317,10 @@ $('#inputbar').addEventListener('submit', (e) => {
   autosize();
   send(v);
 });
+// 手机（触屏）键盘没有 Shift：回车就是换行，点发送按钮才发送；电脑上回车发送、Shift+回车换行
+const enterSends = () => !MOBILE && !globalThis.matchMedia?.('(pointer: coarse)').matches;
 prompt.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && enterSends()) {
     e.preventDefault();
     $('#inputbar').requestSubmit();
   }
@@ -1395,7 +1441,7 @@ const voiceHandlers = {
     if (callActive) callStatus('未央正在思考…');
     endListening();
     transcript.clearInterim();
-    if (!settings.wakeWord) return send(t);
+    if (!settings.wakeWord) return send(t, { byVoice: true });
     const m = matchWake(t);
     if (!wake.awake && !m.woke) return; // 没叫名字：忽略
     const cmd = m.woke ? m.rest : t;
@@ -1412,7 +1458,7 @@ const voiceHandlers = {
       setTask('listening', '已唤醒');
       return;
     }
-    send(cmd);
+    send(cmd, { byVoice: true });
   },
   onEnergy: (e) => {
     live.voiceEnergy = e;
@@ -1509,8 +1555,6 @@ async function setVoiceCall(on) {
     if (callRestore) {
       settings.speechOutput = callRestore.speechOutput;
       settings.wakeWord = callRestore.wakeWord;
-      speaker.enabled = settings.speechOutput;
-      $('#set-tts').checked = settings.speechOutput;
       callRestore = null;
     }
     await setDirectVoice(false);
@@ -1522,9 +1566,7 @@ async function setVoiceCall(on) {
   callRestore = { speechOutput: settings.speechOutput, wakeWord: settings.wakeWord, directVoice: settings.directVoice };
   settings.speechOutput = true;
   settings.wakeWord = false;
-  speaker.enabled = true;
   speaker.unlock();
-  $('#set-tts').checked = true;
   $('#voice-call-panel').hidden = false;
   $('#btn-call').setAttribute('aria-pressed', 'true');
   $('#btn-call').setAttribute('aria-label', '结束语音对话');
@@ -1730,7 +1772,7 @@ const panels = initPanels({
   getGateway: () => gateway,
   searchFetch: () => fetchViaGateway(),
   getHistory: () => history,
-  onConfigChange: (cfg) => { llmConfig = cfg; updateModelLabels(); syncMemoryEngine(); updateOrbitStatus(); routingPanel?.render(); },
+  onConfigChange: (cfg) => { llmConfig = cfg; updateModelLabels(); syncMemoryEngine(); updateOrbitStatus(); routingPanel?.render(); pushConfigToServer(); },
   onReflect: () => reflectNow({ manual: true }),
   onAutoMemory: (on) => { setSetting('autoMemory', on); if (!on) clearTimeout(reflectTimer); },
 });
@@ -1923,7 +1965,7 @@ const palette = initPalette({
       ...QUICK.filter((q) => q.prompt || q.fill).map((q) => ({ id: `q-${q.title}`, group: '常用任务', title: q.title, hint: q.desc, run: () => { if (q.prompt) send(q.prompt); else { $('#prompt').value = q.fill; $('#prompt').focus(); } } })),
       ...skillsPanel.installed.filter((p) => p.enabled).map((p) => ({ id: `s-${p.name}`, group: '技能', title: `/${p.name}`, hint: p.description, run: () => { $('#prompt').value = `/${p.name} `; $('#prompt').focus(); } })),
       ...PANES.map((p, i) => ({ id: `p-${p}`, group: '面板', title: `打开${PANE_TITLE[p]}`, keys: `Alt ${i + 1}`, run: () => showPanel(p) })),
-      toggle('set-tts', '语音朗读'),
+      toggle('set-tts', '打字也朗读'),
       ...(!mic.hidden ? [toggle('set-voice', '直接对话'), toggle('set-wake', '唤醒词')] : []),
       toggle('set-face', '人脸跟随'),
       { id: 'focus', group: '开关', title: body.classList.contains('focus-view') ? '退出专注视图' : '进入专注视图', keys: 'Alt F', run: () => $('#btn-focus').click() },
@@ -1964,8 +2006,7 @@ $('#set-face').addEventListener('change', (e) => setFaceFollow(e.target.checked)
 $('#set-voice').addEventListener('change', (e) => callActive && !e.target.checked ? setVoiceCall(false) : setDirectVoice(e.target.checked));
 $('#set-wake').addEventListener('change', (e) => { setSetting('wakeWord', e.target.checked); wake.sleep(); });
 $('#set-tts').addEventListener('change', (e) => {
-  setSetting('speechOutput', e.target.checked);
-  speaker.enabled = e.target.checked;
+  setSetting('readTyped', e.target.checked);
   if (!e.target.checked) speaker.cancel();
 });
 // 自动更新：顶栏显示下载进度 / “重启更新”（电脑）/ “安装新版本”（手机）/ “去下载”
@@ -2113,8 +2154,42 @@ function toast(text) {
 }
 globalThis.__jarvisToast = toast; // 手机原生保存文件时的进度提示
 
+// ---------------------------------------------------------------- 每条消息下面的“引用 / 朗读”（复制在 transcript.js 里直接做）
+let readingBtn = null;
+transcript.onAction = (kind, text, btn) => {
+  if (kind === 'quote') {
+    // 引用：把这条的开头放进输入框（“> ……”），接着打字问
+    const plainText = toPlainText(text).replace(/\s+/g, ' ').trim();
+    const excerpt = plainText.length > 100 ? `${plainText.slice(0, 100)}…` : plainText;
+    prompt.value = `> ${excerpt}\n${prompt.value.replace(/^> .*\n/, '')}`;
+    autosize();
+    prompt.focus();
+    prompt.setSelectionRange(prompt.value.length, prompt.value.length);
+    return;
+  }
+  if (kind === 'speak') {
+    // 朗读这一条：再点一下停；只念正文，代码和表格不念
+    const again = readingBtn === btn && speaker.speaking;
+    speaker.cancel();
+    if (readingBtn) { readingBtn.textContent = '朗读'; readingBtn.removeAttribute('aria-pressed'); readingBtn = null; }
+    if (again) return;
+    speaker.unlock();
+    const chunker = new SentenceChunker();
+    for (const s of [...chunker.push(toSpeech(text)), ...chunker.flush()]) speaker.speak(s);
+    readingBtn = btn;
+    btn.textContent = '停止';
+    btn.setAttribute('aria-pressed', 'true');
+    const watch = setInterval(() => {
+      if (readingBtn !== btn || (!speaker.speaking && !speaker.pending)) {
+        clearInterval(watch);
+        if (readingBtn === btn) { btn.textContent = '朗读'; btn.removeAttribute('aria-pressed'); readingBtn = null; }
+      }
+    }, 600);
+  }
+};
+
 // ---------------------------------------------------------------- 恢复上次的设置
-$('#set-tts').checked = settings.speechOutput;
+$('#set-tts').checked = settings.readTyped;
 $('#set-wake').checked = settings.wakeWord;
 $('#set-quality').value = settings.quality;
 dashboard.setTurns(history.filter((m) => m.role === 'user').length);

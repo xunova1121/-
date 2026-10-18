@@ -190,7 +190,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: jarvis-server
-          path: jarvis/release-server/*.tar.gz
+          path: |
+            jarvis/release-server/*.tar.gz
+            jarvis/release-server/jarvis-server-latest.json
       - name: 构建并验证手机版界面
         run: |
           npm run build:mobile

@@ -6,6 +6,7 @@ export const DEFAULT_SETTINGS = {
   directVoice: false,
   wakeWord: false, // 直接对话时只在听到“未央”后响应
   speechOutput: true,
+  readTyped: false, // 打字提问也朗读回答（默认只在语音对话、说话提问时念）
   vadSensitivity: '中',
   emotionOverride: 'auto',
   focusView: false,

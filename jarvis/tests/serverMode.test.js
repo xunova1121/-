@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createServer } from '../server/server.mjs';
 import { createServerMode, tokenFor, maskConfig, mergeConfig } from '../server/serverMode.mjs';
 import { useBackend } from '../src/agent/store.js';
+import { createFileStore } from '../server/fileStore.mjs';
 
 let dir, server, base, mode;
 const PASS = 'test-password-123';
@@ -130,5 +131,32 @@ describe('服务器模式：内置技能', () => {
     while (!(await packs.get('briefing-deck')) && Date.now() - t0 < 5000) await new Promise((r) => setTimeout(r, 50));
     expect(await packs.get('briefing-deck')).toMatchObject({ source: '内置' });
     expect(fs.readdirSync(path.join(dir, 'store', 'packs')).length).toBeGreaterThan(5);
+  });
+});
+
+describe('服务器模式：立即更新', () => {
+  it('没装自动更新时说明怎么装；装了就留下更新请求，状态里能看到版本和上次结果', async () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-upd-'));
+    const app = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-app-'));
+    fs.writeFileSync(path.join(app, 'VERSION'), '1.0.140\n');
+    const unit = path.join(d, 'jarvis-update.path');
+    const m = createServerMode({ dataDir: d, password: PASS, appDir: app, updateUnit: unit });
+    const srv = createServer({ serverMode: m, ollama: null });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const at = (p, init = {}) => fetch(`http://127.0.0.1:${srv.address().port}${p}`, { ...init, headers: auth });
+    try {
+      expect((await at('/api/server/update', { method: 'POST' })).status).toBe(409);
+      expect(await (await at('/api/server/update')).json()).toMatchObject({ version: '1.0.140', auto: false, last: null });
+      fs.writeFileSync(unit, '');
+      fs.writeFileSync(path.join(d, 'update-status.json'), JSON.stringify({ state: 'latest', message: '已经是最新版 1.0.140', at: '2026-10-18 04:20:00' }));
+      expect((await at('/api/server/update', { method: 'POST' })).status).toBe(200);
+      expect(fs.existsSync(path.join(d, 'update-request'))).toBe(true);
+      expect(await (await at('/api/server/update')).json()).toMatchObject({ auto: true, requested: true, last: { state: 'latest' } });
+    } finally {
+      await new Promise((r) => srv.close(r));
+      useBackend(createFileStore(path.join(dir, 'store')));
+      fs.rmSync(d, { recursive: true, force: true });
+      fs.rmSync(app, { recursive: true, force: true });
+    }
   });
 });
