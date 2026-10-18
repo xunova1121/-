@@ -244,3 +244,5 @@ body.compact.companion-edition{--top-h:64px;--wy-reading-inset:20px;font-family:
 }
 
 /* 同时验证窄屏长模型名称和生成中的停止按钮。 */
+
+/* 原生手机界面随 APK 更新；服务器升级不替换本地样式。 */
