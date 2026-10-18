@@ -43,6 +43,7 @@ try{
  check('补充没有被当成停止',!(await page.locator('#transcript').innerText()).includes('已打断'));
  await page.fill('#prompt','需要停止的任务');await page.click('#btn-send');await page.waitForFunction(()=>document.querySelector('.msg.agent.streaming .body')?.textContent.includes('整理资料'));
  await page.click('#btn-stop');await page.waitForFunction(()=>!document.querySelector('.msg.agent.streaming'));
+ await page.waitForFunction(async()=>{const s=await window.__jarvis.sessionGet(window.__jarvis.sessionId);return s?.messages.some(m=>m.role==='assistant'&&m.content.includes('我先整理资料')&&m.content.includes('还没完成'));},null,{timeout:5000});
  check('点击独立停止保留已经生成的内容',await page.locator('#transcript').innerText().then(t=>t.includes('已打断')&&t.includes('我先整理资料')));
 }finally{await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r));}
 if(failed)process.exitCode=1;

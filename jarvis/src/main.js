@@ -538,6 +538,8 @@ function interrupt() {
   const had = speaker.speaking || active;
   if (active) callouts?.show();
   if (active) {
+    const turn=active;
+    if(!turn.streamDone&&(turn.shown?.trim()||turn.files?.size))rememberTurn('assistant',(turn.shown||'').trim()+'\n\n（已打断，还没完成；以上内容已保留）',{...(turn.usedTools?.length&&{tools:[...new Set(turn.usedTools)]}),...(turn.files?.size&&{files:[...turn.files]})},turn.session);
     active.ctrl.abort();
     active.bubble?.done('已打断');
     active = null;
@@ -1250,6 +1252,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   let serverCard = null;
   const t0 = now();
   const usedTools = [];
+  turn.usedTools=usedTools;
   const madeFiles = turn.files;
   let shown = ''; // 这一轮已经显示出来的回答（中断时保留，点“继续”接着写）
   let ctxMs = null;
@@ -1306,7 +1309,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
         else if (e.type === 'text') turn.status = '写回答';
         if (turn.background) {
           // 切到别的对话了：只把内容记在这一轮的气泡里（切回来时接上），不朗读、不改界面状态
-          if (e.type === 'text') { bubble.append(e.delta); shown += e.delta; }
+          if (e.type === 'text') { bubble.append(e.delta); shown += e.delta; turn.shown=shown; }
           else if (e.type === 'tool_start' && e.name !== 'update_plan') { cards.set(e.id, bubble.toolCard(e.name, e.args)); usedTools.push(e.name); }
           else if (e.type === 'tool_progress') cards.get(e.id)?.progress(e.text);
           else if (e.type === 'tool_end') cards.get(e.id)?.done(e.ok, e.output, e.ms);
