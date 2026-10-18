@@ -242,3 +242,5 @@ body.compact.companion-edition{--top-h:64px;--wy-reading-inset:20px;font-family:
  .companion-edition .msg.agent:not(.streaming)>.who .who-mood{--mascot-size:48px!important;margin:0 6px 0 0!important}
  .companion-edition .msg.agent:not(.streaming)>.who .wy-reply-greeting{display:none}
 }
+
+/* 同时验证窄屏长模型名称和生成中的停止按钮。 */
