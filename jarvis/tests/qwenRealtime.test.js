@@ -117,3 +117,16 @@ describe('实时转写与选择',()=>{
     expect(selectVoiceEngine({provider:'mock',keys:{},voice:{engine:'auto'}})).toBe('browser');
   });
 });
+
+describe('通话抢话保护',()=>{
+ it('只有已确认AEC、近端持续声音和服务端语音起点同时存在才停止朗读',()=>{
+  const confirm=vi.fn(),voice=new QwenVoice({onConfirm:confirm,allowBargeIn:()=>true});voice.mode='vad';voice.echoSafe=true;voice.setSuppressed(true);
+  voice.event({type:'input_audio_buffer.speech_started'});expect(confirm).not.toHaveBeenCalled();
+  voice.barge.feed(.1);voice.barge.started=performance.now()-200;voice.barge.feed(.1);
+  voice.event({type:'input_audio_buffer.speech_started'});expect(confirm).toHaveBeenCalledOnce();expect(voice.suppressed).toBe(false);voice.disable();
+ });
+ it('系统没有确认AEC时不允许自动抢话，即使有响声',()=>{
+  const confirm=vi.fn(),voice=new QwenVoice({onConfirm:confirm,allowBargeIn:()=>true});voice.mode='vad';voice.echoSafe=false;voice.setSuppressed(true);
+  voice.barge.last=performance.now();voice.event({type:'input_audio_buffer.speech_started'});expect(confirm).not.toHaveBeenCalled();expect(voice.suppressed).toBe(true);voice.disable();
+ });
+});

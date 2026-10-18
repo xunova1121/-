@@ -209,6 +209,7 @@ export async function runAgent({ adapter, model, history, userText, images = [],
     const said = inbox?.splice(0) ?? [];
     if (!said.length) return false;
     const note = interjection(said);
+    emit({ type:'interjection_accepted', count:said.length });
     const last = convo.at(-1);
     if (last?.role === 'tool' || last?.role === 'user') last.content = `${last.content}\n\n${note}`;
     else convo.push({ role: 'user', content: note });

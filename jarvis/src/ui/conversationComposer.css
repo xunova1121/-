@@ -1,0 +1,19 @@
+/* 状态切换不改变输入栏高度；生成中仍保留发送，停止独立占位。 */
+:root body .conversation-composer{position:relative;min-width:0}
+:root body .conversation-composer .composer-row{display:grid;grid-template-columns:40px minmax(0,1fr) 40px 42px;gap:6px 8px;align-items:center}
+:root body .conversation-composer .composer-row>#prompt{grid-column:1/-1;grid-row:1;width:100%;min-width:0;min-height:48px;max-height:160px;box-sizing:border-box;order:0}
+:root body .conversation-composer .composer-row>#btn-attach{grid-column:1;grid-row:2;width:40px;height:42px;margin:0;padding:9px}
+:root body .conversation-composer .composer-row>#model-chip{grid-column:2;grid-row:2;display:inline-flex!important;justify-self:start;align-items:center;gap:5px;width:auto;max-width:100%;min-width:0;min-height:38px;margin:0;padding:7px 10px;font-size:12px;order:0}
+:root body .conversation-composer #model-chip span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:root body .conversation-composer .composer-row>#btn-mic,:root body .conversation-composer .composer-row>#btn-stop{grid-column:3;grid-row:2;width:40px;min-width:0;height:42px;margin:0;padding:9px;order:0}
+:root body .conversation-composer .composer-row>#btn-call,:root body .conversation-composer .composer-row>#btn-send{grid-column:4;grid-row:2;width:42px;min-width:0;height:42px;margin:0;padding:9px;order:0}
+:root body .conversation-composer #btn-call span{display:none}
+:root body .conversation-composer.is-working #btn-stop{display:flex!important;align-items:center;justify-content:center}
+:root body .conversation-composer.has-draft #btn-send{display:flex!important;align-items:center;justify-content:center}
+:root body .conversation-composer .composer-row>[hidden],:root body .conversation-composer:not(.has-draft) #btn-send,:root body .conversation-composer:not(.is-working) #btn-stop{display:none!important}
+:root body .conversation-composer .composer-row>#vad-meter{grid-column:1/-1;grid-row:3}
+:root body .composer-more{position:absolute;left:8px;bottom:calc(100% + 10px);z-index:50;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:min(310px,calc(100vw - 48px));padding:12px;background:var(--surface);border:1px solid var(--line);border-radius:20px;box-shadow:0 8px 28px #29203b14}
+:root body .composer-more[hidden]{display:none}
+:root body .composer-more button{display:flex;align-items:center;justify-content:center;gap:8px;width:auto!important;height:48px!important;padding:9px!important;min-width:0;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--text);font:inherit;font-size:13px}
+:root body .composer-more button svg{width:20px;height:20px;flex:none}
+@media(max-width:360px){:root body .conversation-composer .composer-row{gap:6px 5px}:root body .conversation-composer #model-chip{padding:7px}}

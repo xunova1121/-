@@ -25,7 +25,10 @@ import { initCompanionAppearance } from './ui/companionAppearance.js';
 let companion = null;
 import { imageButton, previewWorkspaceImage } from './ui/imagePreview.js';
 import { initCamera } from './ui/composerMedia.js';
+import { initConversationComposer } from './ui/conversationComposer.js';
 let mascots = null;
+let composer = null;
+let dictating = false, dictationTimer = null, dictationGeneration = 0;
 let callActive = false;
 let callStarting = false;
 let callGeneration = 0;
@@ -576,21 +579,24 @@ function finishTurn() {
 
 /** 朗读只读正文：代码块（``` 包围的部分，包括还没闭合的）不读。auto 为 false（打字提问）时不念 */
 function makeSpeech(auto = true) {
-  if (!auto) return { push() {}, flush() {} };
-  let chunker = new SentenceChunker();
+  if (!auto) return { push() {}, flush() {}, resume() {} };
+  let chunker = new SentenceChunker({ maxLen:callActive ? 24 : 60 });
   let full = '';
   let fed = 0, speechGeneration = speaker.gen;
+  const speechTurn = active;
   return {
+    resume() { if (speechTurn) speechTurn.muteSpeech = false; full = ''; fed = 0; chunker = new SentenceChunker({maxLen:callActive ? 24 : 60}); speechGeneration = speaker.gen; },
     push(delta) {
+      if (speechTurn?.muteSpeech) return;
       full += delta;
       const spoken = full.replace(/```[\s\S]*?```/g, '\n').replace(/```[\s\S]*$/, '');
-      if (!speaker.foreground || speechGeneration !== speaker.gen) { chunker = new SentenceChunker(); speechGeneration = speaker.gen; if (!speaker.foreground) { fed = spoken.length; return; } }
+      if (!speaker.foreground || speechGeneration !== speaker.gen) { chunker = new SentenceChunker({ maxLen:callActive ? 24 : 60 }); speechGeneration = speaker.gen; if (!speaker.foreground) { fed = spoken.length; return; } }
       if (spoken.length > fed) {
         for (const s of chunker.push(spoken.slice(fed))) speaker.speak(s.replace(/[*#`|>]/g, ''));
         fed = spoken.length;
       }
     },
-    flush() { if (!speaker.foreground || speechGeneration !== speaker.gen) return; for (const s of chunker.flush()) speaker.speak(s.replace(/[*#`|>]/g, '')); }
+    flush() { if (speechTurn?.muteSpeech || !speaker.foreground || speechGeneration !== speaker.gen) return; for (const s of chunker.flush()) speaker.speak(s.replace(/[*#`|>]/g, '')); }
   };
 }
 
@@ -1100,15 +1106,15 @@ async function expandSlash(text) {
 // —— 干活时插话、切换对话后台继续
 const backgroundTurns = new Set();
 /** 干活时又发来一句：问进度直接答；说停就停；其他的交给正在干的未央（下一步开始前看到），不打断 */
-function interject(text) {
+function interject(text, { thumbs = [] } = {}) {
   const turn = active;
-  transcript.add('user', text, Date.now());
+  transcript.add('user', text, Date.now(), { thumbs });
   const reply = (words) => { const b = transcript.add('agent', words); b.done(); };
   if (STOP_ASK.test(text)) { interrupt(); reply('好的，已经停下。上面是停下前做到的地方，要接着做跟我说一声。'); return; }
   if (STATUS_ASK.test(text)) { reply(`${turnStatus(turn, now())}。做完会直接给你结果；想停的话点右下角的方块，或者说“停”。`); return; }
-  rememberTurn('user', text, {}, turn.session);
-  turn.inbox.push(text);
-  if (server) server.startTask({ sessionId: turn.session.id, text }).catch((e) => toast(e.message)); // 服务器模式：交给服务器上正在干的那个任务
+  rememberTurn('user', text, thumbs.length ? { thumbs } : {}, turn.session);
+  if (!server) turn.inbox.push(text);
+  if (server) server.startTask({ sessionId: turn.session.id, text }).catch((e) => { if (!prompt.value.trim()) { prompt.value = text; autosize(); } toast(`补充没有送达服务器，已保留在输入框：${e.message}`); }); // 服务器模式：交给服务器上正在干的那个任务
   reply(`收到，做完手上这一步就看这句话（${turnStatus(turn, now())}）。`);
 }
 /** 切到别的对话：正在干的任务转到后台接着做 */
@@ -1144,7 +1150,16 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   if (!attachments.length && companion?.perform(text)) return;
   if (!text && attachments.some((a) => a.image)) text = '请看看这张图片。';
   // 正在干活时又发了一句：不打断，问进度就直接答，别的话交给正在干的未央；说“停”才停
-  if (echo && active && !active.streamDone && !attachments.length) return interject(text);
+  if (echo && active && !active.streamDone) {
+    const extra = attachments.splice(0); renderAttachments();
+    if (server && extra.length) {
+      try { for (const f of extra) await server.upload(f.path, await ws.readBlob(f.path)); }
+      catch (e) { attachments.unshift(...extra); renderAttachments(); if (!prompt.value.trim()) { prompt.value=text; autosize(); } toast(`附件未送达，已保留：${e.message}`); return; }
+      if (!active || active.streamDone) { attachments.unshift(...extra); renderAttachments(); return send(text,{echo,byVoice}); }
+    }
+    const content = extra.length ? text + '\n\n[已上传到工作区：' + extra.map(f=>f.path).join('、') + ']' : text;
+    return interject(content, { thumbs:extra.filter(f=>f.image).map(f=>({src:f.image.thumb,path:f.path})) });
+  }
   if (active) { active.ctrl.abort(); active = null; }
   speaker.cancel();
   speaker.unlock(); // 发送多由点击 / 回车触发：顺便启动音频上下文，云端语音才能播放
@@ -1284,6 +1299,10 @@ async function send(text, { echo = true, byVoice = false } = {}) {
           textChunks++;
           machine.feedResponseText(e.delta);
           speech.push(e.delta);
+        } else if (e.type === 'interjection_accepted') {
+          speech.resume();
+          bubble.status?.('已收到补充，正在调整…');
+          if (callActive) callStatus('已收到，正在按补充要求处理…');
         } else if (e.type === 'fallback') {
           usedModel = e.to;
           const note = `${e.from} 出错（${e.reason}），已换成 ${e.to} 接着做`;
@@ -1396,7 +1415,7 @@ addEventListener('keydown', poke);
 
 // —— 输入框：Enter 发送，Shift+Enter 换行；随内容自动增高
 const prompt = $('#prompt');
-function autosize() { prompt.style.height = 'auto'; prompt.style.height = `${Math.min(prompt.scrollHeight, 200)}px`; }
+function autosize() { prompt.style.height = 'auto'; prompt.style.height = `${Math.min(prompt.scrollHeight, 160)}px`; composer?.refresh(); }
 $('#inputbar').addEventListener('submit', (e) => {
   e.preventDefault();
   const v = prompt.value;
@@ -1445,6 +1464,7 @@ async function addFiles(list) {
   prompt.focus();
 }
 function renderAttachments() {
+  queueMicrotask(() => composer?.refresh());
   const box = $('#attach-list');
   box.hidden = !attachments.length;
   box.replaceChildren(...attachments.map((a, i) => {
@@ -1460,7 +1480,7 @@ function renderAttachments() {
     return s;
   }));
 }
-$('#btn-attach').addEventListener('click', () => $('#file-input').click());
+// ＋菜单统一处理文件入口；原相机、文件上传处理器保留。
 initCamera({ button: $('#btn-camera'), input: $('#camera-input'), native: MOBILE || /Android|iPhone|iPad/i.test(navigator.userAgent), onFiles: addFiles, onError: e => toast(e.message) });
 addEventListener('jarvis:open-upload', e => { showPanel('workspace'); if (e.detail?.path) panels.openFile(e.detail.path); });
 // 粘贴截图 / 图片
@@ -1528,7 +1548,9 @@ const voiceHandlers = {
     if (asleep()) return;
     live.voiceListening = true;
     if (!active) director.setState('voice');
-    if (active) { active.ctrl.abort(); active = null; speaker.cancel(); }
+    // 开口只打断朗读，不取消正在执行的任务；最终文字走同一套补充要求逻辑。
+    if (active) active.muteSpeech = true;
+    speaker.cancel();
     machine.beginUserTurn();
     dashboard.setTask('listening', '正在听');
     $('#vad-meter').classList.add('on');
@@ -1536,6 +1558,12 @@ const voiceHandlers = {
   onCancel: () => endListening(),
   onInterim: (t) => { if (!asleep() || matchWake(t).woke) transcript.interim(t); },
   onFinal: (t) => {
+    if (dictating) {
+      const text = String(t || '').trim();
+      stopDictation();
+      if (text) { prompt.value += (prompt.value.trim() ? ' ' : '') + text; autosize(); prompt.dispatchEvent(new Event('input',{bubbles:true})); prompt.focus(); }
+      return;
+    }
     if (callActive) callStatus('未央正在思考…');
     endListening();
     transcript.clearInterim();
@@ -1574,10 +1602,11 @@ const voiceHandlers = {
     $('#btn-mic').setAttribute('aria-pressed', String(m !== 'off'));
     body.classList.toggle('voice-on', m !== 'off');
     body.classList.toggle('voice-ptt', m === 'ptt');
-    $('#btn-mic').title = m === 'ptt' ? '按住说话' : '直接对话';
-    $('#btn-mic').setAttribute('aria-label', m === 'ptt' ? '按住说话，松开提交' : '直接对话');
+    $('#btn-mic').title = dictating ? '停止语音转文字' : '语音转文字';
+    $('#btn-mic').setAttribute('aria-label', dictating ? '停止语音转文字' : '语音转文字');
   },
   onError: (code) => {
+    if (dictating) stopDictation();
     recordVoiceEvent('识别错误',code);
     if (callActive) callStatus(String(code));
     toast(code === 'not-allowed' ? '麦克风权限被拒绝' : /^语音识别/.test(code) ? code : `语音识别出错：${code}`);
@@ -1614,7 +1643,7 @@ function endListening() {
 async function setDirectVoice(on) {
   const nativeAvailable = await nativeVoiceReady; // 手机上先确定用不用系统识别
   if (on && sttEngine() === 'qwen-realtime') {
-    if (!(voice instanceof QwenVoice)) { voice.disable(); voice = new QwenVoice({ getConfig:()=>llmConfig, getGateway:()=>gateway, ...voiceHandlers }); }
+    if (!(voice instanceof QwenVoice)) { voice.disable(); voice = new QwenVoice({ getConfig:()=>llmConfig, getGateway:()=>gateway, allowBargeIn:()=>callActive, ...voiceHandlers }); }
   } else if (on && voice instanceof QwenVoice) {
     voice.disable();
     voice = new (MOBILE ? RecordedVoice : VoiceInput)({ allowBrowserSR:browserSR, getTranscriber:()=>{const id=sttEngine();return id==='none'||id==='browser'?null:(wav,signal)=>transcribe(id,llmConfig,wav,{gateway,signal});}, ...voiceHandlers });
@@ -1650,6 +1679,7 @@ async function setDirectVoice(on) {
 async function setVoiceCall(on) {
   noteAction(on ? '开始语音对话' : '结束语音对话');
   if (on && (callStarting || callActive)) return;
+  if (on && dictating) await stopDictation();
   const gen = ++callGeneration;
   if (!on) {
     callActive = false;
@@ -1695,7 +1725,7 @@ $('#voice-call-panel').append(voiceCheckButton);
 const voiceLifecycle = createVoiceLifecycle({
   getState: () => ({ hidden:document.hidden, nativeActive:globalThis.__jarvisForeground !== false, starting:callStarting, systemDialog:Boolean(globalThis.__jarvisSystemSpeechDialog) }),
   onAudio: foreground => speaker.setForeground(foreground),
-  onLeave: () => { if (!MOBILE && !(voice instanceof QwenVoice)) return; if (callActive) { companion?.close(); setVoiceCall(false); } else if (voice.mode !== 'off') setDirectVoice(false); }
+  onLeave: () => { if (dictating) { stopDictation(); return; } if (!MOBILE && !(voice instanceof QwenVoice)) return; if (callActive) { companion?.close(); setVoiceCall(false); } else if (voice.mode !== 'off') setDirectVoice(false); }
 });
 document.addEventListener('visibilitychange', () => voiceLifecycle.update());
 addEventListener('jarvis:foreground', () => voiceLifecycle.update());
@@ -1781,11 +1811,19 @@ if (!browserSR && !window.jarvisDesktop && !MOBILE && sttEngine() === 'none') {
   $('#row-voice').hidden = true;
   setSetting('directVoice', false);
 }
-mic.addEventListener('click', () => {
-  if (callActive) { setVoiceCall(false); return; }
-  if (voice.mode === 'ptt') return;
-  setDirectVoice(voice.mode === 'off');
-});
+async function stopDictation() {
+  dictationGeneration++; dictating = false; clearTimeout(dictationTimer); dictationTimer = null;
+  body.classList.remove('dictating'); await setDirectVoice(false); composer?.refresh();
+}
+async function toggleDictation() {
+  if (dictating) return stopDictation();
+  if (callActive) await setVoiceCall(false);
+  speaker.cancel(); dictating = true; const gen = ++dictationGeneration; body.classList.add('dictating');
+  dictationTimer = setTimeout(() => { if (dictating && gen === dictationGeneration) { stopDictation(); toast('本次转文字已结束，未发送消息'); } }, 45000);
+  try { const ok = await setDirectVoice(true); if (gen !== dictationGeneration) { voice.disable(); return; } if (!ok) await stopDictation(); }
+  catch (e) { if (gen === dictationGeneration) { await stopDictation(); toast(e.message); } }
+}
+mic.addEventListener('click', () => { if (voice.mode !== 'ptt') toggleDictation(); });
 mic.addEventListener('pointerdown', (e) => {
   if (voice.mode !== 'ptt') return;
   e.preventDefault();
@@ -2622,7 +2660,7 @@ document.addEventListener('keydown', (e) => {
     const n = /^Digit([1-8])$/.exec(k)?.[1];
     if (n) showPanel(PANES[n - 1]);
     else if (k === 'KeyF') setFocusView(!settings.focusView);
-    else if (k === 'KeyV' && !mic.hidden) setDirectVoice(voice.mode === 'off');
+    else if (k === 'KeyV' && !mic.hidden) toggleDictation();
     else return;
     e.preventDefault();
     return;
@@ -2691,6 +2729,7 @@ if(DESKTOP?.onWallpaperRequest)DESKTOP.onWallpaperRequest(async request=>{
   catch(error){wp({say:`这次没有完成：${error.message||error}`,requestId:request.id,error:true});}
 });
 if(MOBILE){import('@capacitor/core').then(({registerPlugin})=>{const plugin=registerPlugin('CompanionWallpaper');const check=async()=>{try{const r=await plugin.consumeOpen();if(r.open)hologram.open();}catch{}};check();document.addEventListener('visibilitychange',()=>{if(!document.hidden)check();});}).catch(()=>{});}
+composer = initConversationComposer();
 initCompanionAppearance();
 initRenderHealthPanel({ mobile: MOBILE, toast, onChange: () => { if (!active) replayTranscript(); } });
 

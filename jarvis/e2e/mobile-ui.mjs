@@ -70,7 +70,10 @@ try{
   await page.click('.home-start');check('创作卡片填写任务，继续复用原发送入口',await page.inputValue('#prompt').then(t=>t.includes('目标')));await page.fill('#prompt','');await page.locator('#prompt').blur();
   check('手机版实际产物启用陪伴感布局',await page.evaluate(()=>document.body.classList.contains('compact')&&!document.body.classList.contains('workbench')&&window.__jarvis.stage===null));
   check('手机近白底色，保留清楚的未央图标',await page.evaluate(()=>{const r=document.querySelector('.brand-mark').getBoundingClientRect();return r.width>=44&&r.height>=44&&getComputedStyle(document.body).backgroundColor==='rgb(252, 251, 255)';}));
-  check('手机输入区保留附件、拍照、语音、发送',await page.evaluate(()=>['btn-attach','btn-camera','btn-call','btn-send'].every(id=>{const r=document.getElementById(id).getBoundingClientRect();return r.width>=32&&r.height>=36;})));
+  check('手机空白输入栏显示＋、模型、转文字和电话，发送收起',await page.evaluate(()=>['btn-attach','model-chip','btn-mic','btn-call'].every(id=>{const r=document.getElementById(id).getBoundingClientRect();return r.width>=32&&r.height>=36;})&&document.getElementById('btn-send').hidden));
+  await page.click('#btn-attach');
+  check('拍照、相册、文件和常用指令收在＋菜单中',await page.isVisible('#composer-more')&&await page.isVisible('#btn-camera')&&await page.isVisible('#btn-composer-file'));
+  await page.click('#btn-attach');
   check('顶栏图标完整位于栏内，与文字保持间距',await page.evaluate(()=>{const header=document.querySelector('.topbar').getBoundingClientRect(),logo=document.querySelector('.brand-mark .wy-mascot').getBoundingClientRect(),name=document.querySelector('.brand-name').getBoundingClientRect();return logo.top>=header.top&&logo.bottom<=header.bottom&&logo.right+6<=name.left&&Math.abs((logo.top+logo.bottom)/2-(name.top+name.bottom)/2)<8;}));
   check('顶栏与页面使用同一底色',await page.evaluate(()=>getComputedStyle(document.querySelector('.topbar')).backgroundColor===getComputedStyle(document.body).backgroundColor));
   await page.evaluate(()=>window.__jarvis.showPanel('mind'));
@@ -99,10 +102,11 @@ try{
   check('对话正文两侧保留至少 20px 阅读留白',await page.locator('.msg.agent').last().evaluate(el=>{const r=el.getBoundingClientRect();return r.left>=20&&r.right<=innerWidth-20;}));
   check('手机完成后的短回复使用紧凑单头像，不留大块空白或固定的话',await page.locator('.msg.agent').last().evaluate(el=>{const who=el.querySelector('.who');return who.querySelectorAll('.wy-mascot').length===1&&who.querySelector('.wy-mascot').getBoundingClientRect().height>=40&&who.querySelector('.wy-mascot').getBoundingClientRect().height<=60&&!who.querySelector('.wy-reply-greeting');}));
   check('手机消息角色不遮昵称，正文在标题下方且没有横向溢出',await page.locator('.msg.agent').last().evaluate(el=>{const r=x=>x.getBoundingClientRect(),head=r(el.querySelector('.who')),avatar=r(el.querySelector('.who-mood')),name=r(el.querySelector('.who-name')),body=r(el.querySelector('.body'));return avatar.right<=name.left+1&&head.bottom<=body.top+1&&body.left>=20&&body.right<=innerWidth-20&&document.querySelector('#transcript').scrollWidth<=document.querySelector('#transcript').clientWidth+1;}));
-  await page.focus('#prompt');await page.evaluate(()=>window.__resizeKeyboard(444));await page.waitForTimeout(80);
+  await page.fill('#prompt','需要补充的要求');await page.focus('#prompt');await page.evaluate(()=>window.__resizeKeyboard(444));await page.waitForTimeout(80);
   check('键盘弹出时角色缩小且发送按钮保持可见',await page.evaluate(()=>{const r=document.querySelector('.msg.agent:last-child .who .wy-mascot').getBoundingClientRect(),send=document.getElementById('btn-send').getBoundingClientRect();return document.body.classList.contains('wy-keyboard-open')&&r.height<=60&&send.bottom<=445&&send.top>=0;}));
   await page.evaluate(()=>document.activeElement.blur());await page.waitForTimeout(50);
   check('输入失焦后键盘未收起时保持布局，避免发送按钮跳动',await page.evaluate(()=>document.body.classList.contains('wy-keyboard-open')));
+  await page.fill('#prompt','');
   await page.evaluate(()=>window.__resizeKeyboard(844));
   await ask('帮我写一个网页');
   check('手机任务进度带角色，完成后可折叠查看步骤',await page.locator('.msg.agent').last().evaluate(el=>{const p=el.querySelector('.progress-card');return p&&!p.open&&p.querySelector('.pc-mascot')?.dataset.state==='happy'&&p.querySelectorAll('.pc-steps li').length>=2;}));
@@ -242,6 +246,10 @@ try{
     });
     const qp=await qctx.newPage();
     await qp.goto(BASE);await qp.waitForFunction(()=>window.__jarvis?.send);
+    await qp.click('#btn-mic');
+    await qp.waitForFunction(()=>document.querySelector('#prompt').value.includes('你好，未央')&&window.__jarvis.voice.mode==='off',null,{timeout:15000});
+    check('麦克风只转文字到输入框，不自动发消息、不启动朗读',await qp.evaluate(()=>document.querySelectorAll('#transcript .msg.user').length===0&&!window.__qwenModels.includes('qwen3-tts-flash-realtime')));
+    await qp.fill('#prompt','');await qp.evaluate(()=>{window.__qwenSubmitted=false;});
     await qp.click('#btn-call');
     await qp.waitForFunction(()=>window.__qwenFrames>0&&document.querySelector('#transcript .msg.user')?.textContent.includes('你好，未央'),null,{timeout:15000});
     check('百炼实时ASR收音后提交最终文字，使用指定实时模型',await qp.evaluate(()=>window.__qwenModels.includes('qwen3-asr-flash-realtime')&&document.querySelectorAll('#transcript .msg.user').length===1));
@@ -256,10 +264,11 @@ try{
   for(const width of [320,360,390,412]){
     const narrow=await browser.newPage({viewport:{width,height:780}});await narrow.goto(BASE);await narrow.waitForSelector('body.companion-edition');
     await narrow.waitForFunction(()=>window.__jarvis?.send);await narrow.evaluate(()=>{document.documentElement.style.fontSize='18px';document.getElementById('model-chip-text').textContent='服务器 · claude-sonnet-very-long-model-name';});
-    check(`${width}px 手机宽度下头像、模型和输入操作不溢出`,await narrow.evaluate(()=>{const header=document.querySelector('.topbar').getBoundingClientRect(),logo=document.querySelector('.brand-mark .wy-mascot').getBoundingClientRect(),row=document.querySelector('.composer-row').getBoundingClientRect(),model=document.getElementById('model-chip').getBoundingClientRect(),camera=document.getElementById('btn-camera').getBoundingClientRect(),call=document.getElementById('btn-call').getBoundingClientRect();return document.documentElement.scrollWidth<=innerWidth&&logo.bottom<=header.bottom&&model.width>=50&&model.left>=camera.right&&model.right<=call.left&&call.bottom<=row.bottom&&Math.abs(document.getElementById('btn-send').getBoundingClientRect().top-call.top)<=3;}));
-    await narrow.evaluate(()=>document.body.classList.add('generating'));
-    check(`${width}px 长模型名、生成中停止按钮仍与语音同排`,await narrow.evaluate(()=>{const stop=document.getElementById('btn-stop').getBoundingClientRect(),call=document.getElementById('btn-call').getBoundingClientRect(),model=document.getElementById('model-chip').getBoundingClientRect();return stop.width>0&&Math.abs(stop.top-call.top)<=3&&model.right<=call.left&&stop.right<=innerWidth-12;}));
-    await narrow.evaluate(()=>document.body.classList.remove('generating'));
+    check(`${width}px 手机空白输入区保持同排、不溢出`,await narrow.evaluate(()=>{const r=id=>document.getElementById(id).getBoundingClientRect(),model=r('model-chip'),mic=r('btn-mic'),call=r('btn-call');return document.documentElement.scrollWidth<=innerWidth&&model.width>=50&&model.right<=mic.left&&mic.right<=call.left&&Math.abs(mic.top-call.top)<=3&&document.getElementById('btn-send').hidden;}));
+    await narrow.fill('#prompt','生成中继续补充要求');await narrow.evaluate(()=>document.body.classList.add('generating'));
+    await narrow.waitForFunction(()=>document.getElementById('inputbar').classList.contains('is-working'));
+    check(`${width}px 生成中发送和停止同时可用、不挤到下一行`,await narrow.evaluate(()=>{const r=id=>document.getElementById(id).getBoundingClientRect(),stop=r('btn-stop'),send=r('btn-send'),model=r('model-chip');return stop.width>=36&&send.width>=36&&Math.abs(stop.top-send.top)<=3&&model.right<=stop.left&&stop.right<=send.left&&send.right<=innerWidth-12&&!document.getElementById('btn-send').disabled;}));
+    await narrow.evaluate(()=>document.body.classList.remove('generating'));await narrow.fill('#prompt','');
     await narrow.screenshot({path:path.join(OUT,`mobile-unified-${width}.png`)});await narrow.close();
   }
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
