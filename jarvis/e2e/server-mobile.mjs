@@ -109,7 +109,8 @@ try {
   await page.click('#btn-send');
   await page.waitForFunction(() => document.querySelectorAll('#transcript .msg.agent').length >= 1 && !document.querySelector('#transcript .msg.agent.streaming'), null, { timeout: 20000 });
 
-  // 常用指令
+  // 常用指令收进＋菜单；功能仍可从这里使用。
+  await page.click('#btn-attach');
   await page.click('#btn-quick');
   await page.locator('.quick-menu button', { hasText: '写周报' }).click();
   check('常用指令：点一条，开头放进输入框', /^帮我写一份本周工作周报/.test(await page.inputValue('#prompt')));

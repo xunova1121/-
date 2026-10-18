@@ -2732,7 +2732,7 @@ if(DESKTOP?.onWallpaperRequest)DESKTOP.onWallpaperRequest(async request=>{
   catch(error){wp({say:`这次没有完成：${error.message||error}`,requestId:request.id,error:true});}
 });
 if(MOBILE){import('@capacitor/core').then(({registerPlugin})=>{const plugin=registerPlugin('CompanionWallpaper');const check=async()=>{try{const r=await plugin.consumeOpen();if(r.open)hologram.open();}catch{}};check();document.addEventListener('visibilitychange',()=>{if(!document.hidden)check();});}).catch(()=>{});}
-composer = initConversationComposer();
+composer = initConversationComposer({cancelDictation:()=>stopDictation()});
 initCompanionAppearance();
 initRenderHealthPanel({ mobile: MOBILE, toast, onChange: () => { if (!active) replayTranscript(); } });
 

@@ -2,11 +2,15 @@ import './conversationComposer.css';
 import { composerState } from './composerState.js';
 
 /** 三端共用的输入栏。相机、文件和常用指令移入＋菜单，保留原处理器。 */
-export function initConversationComposer() {
+export function initConversationComposer({ cancelDictation } = {}) {
   const form = document.querySelector('#inputbar'), row = form.querySelector('.composer-row');
   const prompt = form.querySelector('#prompt'), plus = form.querySelector('#btn-attach');
   const model = form.querySelector('#model-chip'), mic = form.querySelector('#btn-mic');
   const call = form.querySelector('#btn-call'), send = form.querySelector('#btn-send'), stop = form.querySelector('#btn-stop');
+  const recording = document.createElement('div'); recording.className = 'composer-dictation'; recording.hidden = true;
+  const recordingText = document.createElement('span'); recordingText.textContent = '正在转文字，说完后可编辑再发送'; recordingText.setAttribute('role','status');
+  const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = '结束录音'; cancel.onclick = () => cancelDictation?.();
+  recording.append(recordingText,cancel); form.prepend(recording);
   const menu = document.createElement('div'); menu.className = 'composer-more'; menu.hidden = true;
   menu.id = 'composer-more'; menu.setAttribute('role', 'group'); menu.setAttribute('aria-label', '添加到对话');
   const file = document.createElement('button'); file.type = 'button'; file.textContent = '上传文件'; file.id = 'btn-composer-file';
@@ -35,6 +39,7 @@ export function initConversationComposer() {
   row.append(plus, model, stop, mic, call, send); // DOM 顺序与键盘阅读顺序相同
   form.classList.add('conversation-composer');
   function refresh() {
+    recording.hidden = !document.body.classList.contains('dictating');
     const state = composerState({text:prompt.value,attachments:form.querySelector('#attach-list')?.children.length,generating:document.body.classList.contains('generating')});
     form.classList.toggle('has-draft',state.hasDraft); form.classList.toggle('is-working',state.stop);
     send.hidden = !state.send; send.disabled = !state.send;

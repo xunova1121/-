@@ -14,6 +14,12 @@
 :root body .conversation-composer .composer-row>#vad-meter{grid-column:1/-1;grid-row:3}
 :root body .composer-more{position:absolute;left:8px;bottom:calc(100% + 10px);z-index:50;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:min(310px,calc(100vw - 48px));padding:12px;background:var(--surface);border:1px solid var(--line);border-radius:20px;box-shadow:0 8px 28px #29203b14}
 :root body .composer-more[hidden]{display:none}
+:root body .composer-dictation{display:flex;align-items:center;gap:8px;padding:6px 4px;color:var(--accent);font-size:12px}
+:root body .composer-dictation[hidden]{display:none}
+:root body .composer-dictation span{min-width:0;flex:1}
+:root body .composer-dictation button{padding:6px 8px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--text);font:inherit;flex:none}
+:root body .voice-call-panel{flex-wrap:wrap}
+:root body #voice-call-status{flex:1 1 130px;min-width:0}
 :root body .composer-more button{display:flex;align-items:center;justify-content:center;gap:8px;width:auto!important;height:48px!important;padding:9px!important;min-width:0;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--text);font:inherit;font-size:13px}
 :root body .composer-more button svg{width:20px;height:20px;flex:none}
 @media(max-width:360px){:root body .conversation-composer .composer-row{gap:6px 5px}:root body .conversation-composer #model-chip{padding:7px}}
