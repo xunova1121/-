@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class QwenRealtimePlugin extends Plugin {
     private final ConcurrentHashMap<String, WebSocketClient> sockets = new ConcurrentHashMap<>();
     private volatile boolean foreground = true;
+    private final ConcurrentHashMap<String, Long> bufferedSince = new ConcurrentHashMap<>();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private void event(String id, String phase, String data) {
         JSObject e = new JSObject(); e.put("id", id); e.put("phase", phase);
@@ -55,7 +56,7 @@ public class QwenRealtimePlugin extends Plugin {
                     event(id,"message",message);
                 }
                 @Override public void onClose(int code, String reason, boolean remote) {
-                    handler.removeCallbacks(timeout[0]); sockets.remove(id,this);
+                    handler.removeCallbacks(timeout[0]); sockets.remove(id,this); bufferedSince.remove(id);
                     if(settled.compareAndSet(false,true))call.reject("百炼实时连接已关闭，请检查网络与配置");
                     event(id,"close",null);
                 }
@@ -73,17 +74,26 @@ public class QwenRealtimePlugin extends Plugin {
         }
     }
     @PluginMethod public void send(PluginCall call) {
-        WebSocketClient client = sockets.get(call.getString("id",""));
+        String id = call.getString("id","");
+        WebSocketClient client = sockets.get(id);
         String data = call.getString("data","");
         if(client == null || !client.isOpen() || data.length() > 256 * 1024) { call.reject("实时连接不可用或数据过大"); return; }
+        // 弱网时不能无限堆积PCM：持续三秒仍有待发送数据就断开，让界面重连。
+        if (client.hasBufferedData()) {
+            long now = android.os.SystemClock.elapsedRealtime();
+            Long since = bufferedSince.putIfAbsent(id, now);
+            if (since != null && now - since > 3000) { sockets.remove(id,client); bufferedSince.remove(id); client.close(); call.reject("实时语音网络过慢，请重连后重说"); return; }
+        } else bufferedSince.remove(id);
         try { client.send(data); call.resolve(); } catch(Exception error) { call.reject("实时语音发送失败"); }
     }
     @PluginMethod public void close(PluginCall call) {
-        WebSocketClient client = sockets.remove(call.getString("id",""));
+        String id = call.getString("id","");
+        bufferedSince.remove(id);
+        WebSocketClient client = sockets.remove(id);
         if(client != null)client.close();
         call.resolve();
     }
-    private void closeAll() { for(WebSocketClient client:sockets.values())client.close(); sockets.clear(); }
+    private void closeAll() { for(WebSocketClient client:sockets.values())client.close(); sockets.clear(); bufferedSince.clear(); }
     @Override protected void handleOnPause() { foreground = false; closeAll(); }
     @Override protected void handleOnResume() { foreground = true; }
     @Override protected void handleOnDestroy() { closeAll(); }
