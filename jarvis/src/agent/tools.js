@@ -355,6 +355,14 @@ export function createTools(ctx) {
       run: async ({ path }) => {
         const blob = await ws.readBlob(path);
         seenFiles.add(ws.normalize(path));
+        if(isImageName(path)&&typeof document==='undefined'){
+          if(blob.size>8e6)throw new Error('图片超过8MB，请先压缩后再补充，或作为新消息发送');
+          const bytes=new Uint8Array(await blob.arrayBuffer());
+          const head=String.fromCharCode(...bytes.slice(0,12));
+          const mime=bytes[0]===0x89&&head.slice(1,4)==='PNG'?'image/png':bytes[0]===0xff&&bytes[1]===0xd8&&bytes[2]===0xff?'image/jpeg':/^GIF8[79]a/.test(head)?'image/gif':head.startsWith('RIFF')&&head.slice(8,12)==='WEBP'?'image/webp':null;
+          if(!mime)throw new Error('图片文件头无效，无法交给模型查看');
+          return {text:'图片 '+path,images:[{mime,data:Buffer.from(bytes).toString('base64')}]};
+        }
         if (isImageName(path) && typeof document !== 'undefined') {
           const img = await prepareImage(blob);
           return { text: `图片 ${path}（${img.width}×${img.height}）`, images: [{ mime: img.mime, data: img.data }] };
