@@ -45,7 +45,6 @@ import { SentenceChunker } from './core/sentenceChunker.js';
 import { toPlainText, toSpeech } from './core/markdown.js';
 import { SILENCE_BY_SENSITIVITY } from './core/vadGate.js';
 import { loadSettings, saveSettings } from './core/settings.js';
-import { browserMetrics } from './api/browserMetrics.js';
 import { runTeam, shouldTeam } from './agent/team.js';
 import { runAgent } from './agent/agent.js';
 import { STATUS_ASK, STOP_ASK, turnStatus } from './core/interject.js';
@@ -53,8 +52,6 @@ import { collectRequirements } from './agent/taskRequirements.js';
 import { createTools } from './agent/tools.js';
 import * as ws from './agent/workspace.js';
 import * as agentMemory from './agent/memory.js';
-import * as kb from './agent/knowledge.js';
-import { createEmbedder } from './llm/embeddings.js';
 import { initPanels } from './ui/panels.js';
 import { loadConfig, saveConfig, createAdapter, displayName, providerById, resolveVoice, modelOf } from './llm/config.js';
 import { initVoicePanel } from './ui/voicePanel.js';
@@ -73,7 +70,7 @@ import * as sessionsApi from './agent/sessions.js';
 import { initSessionsPanel } from './ui/sessionsPanel.js';
 import { openingSuggestions, followUpSuggestions, interruptionMark } from './core/suggest.js';
 import { savePending, clearPending, takePending, resumeText, listPending } from './core/pendingTask.js';
-import { loadServerSettings, createServerClient, runRemote, remoteSessions, normalizeUrl } from './core/serverClient.js';
+import { runRemote } from './core/serverClient.js';
 import { createPCModelAdapter } from './core/pcModelClient.js';
 import { initServerPanel } from './ui/serverPanel.js';
 import { initQuickPrompts } from './ui/quickPrompts.js';
@@ -98,18 +95,18 @@ import { createVoiceLifecycle } from './mobile/voiceLifecycle.js';
 import { recordVoiceEvent, readVoiceEvents } from './mobile/voiceDiagnostics.js';
 import { createTaskKeeper } from './mobile/backgroundTasks.js';
 import { RecordedVoice } from './mobile/recordedVoice.js';
-import { nativeWebFetch } from './mobile/nativeFetch.js';
 import { initDrawer } from './ui/drawer.js';
-import { initModelPicker, chipLabel, isAuto, repairChatModel } from './ui/modelPicker.js';
+import { initModelPicker, isAuto, repairChatModel } from './ui/modelPicker.js';
 import { generateImage } from './llm/images.js';
 import { generateVideo } from './llm/videos.js';
 import { composeGreeting, GREET_GAP_MS } from './core/greeting.js';
-import { classifyTask, routeFor, TASKS, seesImages, fallbackRoutes, effortFor, isSmallTalk, computerTaskKind } from './llm/router.js';
+import { classifyTask, routeFor, TASKS, fallbackRoutes, effortFor, isSmallTalk, computerTaskKind } from './llm/router.js';
 import { resolveTheme, toggled, THEMES } from './core/theme.js';
 import { loadMemory, clearMemory } from './core/memoryStore.js';
 import { $, body, now, DESKTOP, COMPACT, storage, narrow, lowEnd, toast, wp, markActivity } from './app/env.js';
 import { createApp, mount } from './app/context.js';
 import { createStage } from './app/stage.js';
+import { createModels } from './app/models.js';
 
 
 // ---------------------------------------------------------------- 设置
@@ -125,121 +122,16 @@ function setSetting(key, value) {
 Object.assign(app, { setSetting, send, showPanel, openingCallouts });
 Object.defineProperties(app, { speaker: { get: () => speaker }, face: { get: () => face }, mascots: { get: () => mascots } });
 
+Object.defineProperties(app, {
+  panels: { get: () => panels }, voicePanel: { get: () => voicePanel }, mcpPanel: { get: () => mcpPanel }, localModels: { get: () => localModels }
+});
+
 mount(app, createStage(app));
+mount(app, createModels(app));
 
-
-// ---------------------------------------------------------------- 模型与网关
-app.llmConfig = loadConfig();
-
-/** 单文件版也会尝试连接本机网关（双击 启动.bat 后运行在 127.0.0.1:8787），连上后不受浏览器跨域限制 */
-const LOCAL_GATEWAY = 'http://127.0.0.1:8787';
-let probing = null;
-async function detectGateway() {
-  const local = STANDALONE || location.protocol === 'file:';
-  probing ??= (async () => {
-    try {
-      if (MOBILE) throw new Error('mobile'); // 手机上没有本机网关：直接连服务商（原生网络，不受跨域限制）
-      const url = local ? `${LOCAL_GATEWAY}/api/health` : '/api/health';
-      const h = await (await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout?.(5000) })).json(); // 启动时主线程忙（编译着色器），留足时间
-      if (!h?.ok) throw new Error('not a gateway');
-      // 这个网址是开了服务器模式的未央服务器，但还没登录：提示去登录（不登录用不了它的任何功能）
-      if (h.serverMode && !serverCfg.token) setTimeout(() => { showPanel('settings'); const u = $('#server-url'); if (u && !u.value) u.value = location.origin; toast('这是你的未央服务器：请先在“服务器模式”里输入访问密码登录'); }, 800);
-      const found = !app.gateway;
-      app.gateway = { origin: local ? LOCAL_GATEWAY : location.origin, keys: h.gatewayKeys ?? [], cors: Boolean(h.cors), mcp: Boolean(h.mcp), ollama: Boolean(h.ollama) };
-      if (local && found) toast('已连接本机网关：所有服务商和自定义接口都可以用了');
-    } catch {
-      app.gateway = null;
-      // 单文件版：启动时页面忙可能超时，过几秒再试两次
-      if (local && !MOBILE && (detectGateway.retries = (detectGateway.retries ?? 0) + 1) <= 2) setTimeout(() => detectGateway(), 3000);
-    }
-    panels.refreshModels();
-    voicePanel.render();
-    mcpPanel.refresh();
-    localModels.refresh();
-    syncMemoryEngine();
-    updateModelLabels();
-  })().finally(() => { probing = null; });
-  return probing;
-}
-// 单文件版：回到页面时再找一次网关（用户可能刚双击了 启动.bat）
-if ((STANDALONE && !MOBILE) || location.protocol === 'file:') {
-  let last = 0;
-  addEventListener('focus', () => { if (!app.gateway && Date.now() - last > 5000) { last = Date.now(); detectGateway(); } });
-}
-
-/** 常见的服务商错误翻译成人话（已经自动重试过仍失败才会走到这里） */
-function friendlyError(msg) {
-  const code = Number(msg.match(/模型接口返回 (\d{3})/)?.[1]);
-  if (code === 524 || code === 504 || code === 522) return `中转站等模型回复超时（${code}），已自动重试过。可以点“继续”从断开的地方接着写，或在输入框里换一个更快的模型`;
-  if (code === 429) return '请求太频繁或额度用完（429），已自动重试过。稍等一会儿再试，或检查中转站余额';
-  if (code === 401 || code === 403) return `API Key 不对或没有权限（${code}）：请在“模型”里检查密钥`;
-  if (code >= 500) return `服务商临时故障（${code}），已自动重试过。稍后再试，或换一个模型`;
-  if (/图片模型|image model|images\/generations/i.test(msg)) return '当前选的是画图模型，不能用来聊天：点输入框里的模型名换一个聊天模型。想画图直接说“画一张…”就行';
-  if (/connection reset|econnreset|socket hang up/i.test(msg)) return '网络连接被断开（已自动重试过）。可以点“继续”从断开的地方接着写；手机上可以试试切换 Wi‑Fi / 流量';
-  return msg;
-}
-
-function updateModelLabels() {
-  const name = displayName(app.llmConfig);
-  $('#mode-text').textContent = name;
-  // 输入框里显示型号（或“自动”），点一下弹出模型列表
-  $('#model-chip-text').textContent = COMPACT && isAuto(app.llmConfig) ? `自动 · ${modelOf(app.llmConfig) || '选择模型'}` : chipLabel(app.llmConfig);
-  if (globalThis.__jarvisServerMode) $('#model-chip-text').textContent = globalThis.__jarvisServerModel ? `服务器 · ${globalThis.__jarvisServerModel}` : '服务器'; // 服务器模式：用服务器上的模型设置
-  if (isAuto(app.llmConfig)) $('#mode-text').textContent = `${name} · 自动选模型`;
-  $('#mode-pill').title = `当前模型：${name}${app.gateway ? '（经本机网关）' : ''}。点击切换`;
-  $('#hud-model').textContent = name.length > 22 ? `${name.slice(0, 21)}…` : name;
-}
-
-const metrics = () => (app.gateway ? fetch(`${app.gateway.origin}/api/local/metrics`).then((r) => r.json()) : browserMetrics());
-// 网页读取只对完整版开放（单文件版跨域连网关时网关不提供 /api/fetch）
-// 安卓 App 没有本机网关，但系统原生网络没有跨域限制：直接用它搜索、读网页
-const fetchViaGateway = () => (app.gateway && !app.gateway.cors
-  ? (url, init) => (url.startsWith('https://api.tavily.com/')
-    ? fetch(`/api/llm/tavily/${url.slice('https://api.tavily.com/'.length)}`, init)
-    : url.startsWith('https://api.bochaai.com/')
-      ? fetch(`/api/llm/bocha/${url.slice('https://api.bochaai.com/'.length)}`, init)
-      : fetch(`/api/fetch?url=${encodeURIComponent(url)}`))
-  : globalThis.__jarvisNativeFetch ? nativeWebFetch(globalThis.__jarvisNativeFetch) : null);
 
 // ---------------------------------------------------------------- 对话
 const transcript = new Transcript($('#transcript'), { progress: COMPACT });
-// 服务器模式（设置 → 服务器模式）：任务交给自己的云服务器做，对话也存在服务器上
-const serverCfg = loadServerSettings(storage);
-const server = serverCfg.enabled && serverCfg.url && serverCfg.token ? createServerClient({ base: serverCfg.url, token: serverCfg.token }) : null;
-if (server) {
-  // 手机 App：连自己的服务器直接走系统原生网络（不先试 WebView、没有跨域预检，国内移动网络下快得多）
-  try { globalThis.__jarvisPreferNative?.(new URL(server.base).host); } catch { /* 网址不对就算了 */ }
-  sessionsApi.useRemote(remoteSessions(server)); globalThis.__jarvisServerMode = true; globalThis.__jarvisServerClient = server; updateModelLabels(); refreshServerModel();
-}
-/** 服务器模式：输入框里显示服务器上设的模型 */
-/** 服务器模式下换了模型（或改了密钥、分工）：自动传到服务器，任务马上用新设置。语音设置留在本机 */
-let pushTimer = 0;
-function pushConfigToServer() {
-  if (!server) return;
-  clearTimeout(pushTimer);
-  pushTimer = setTimeout(async () => {
-    try {
-      const { voice: _voice, stt: _stt, ...models } = app.llmConfig;
-      await server.putConfig(models);
-      refreshServerModel();
-      toast(`已同步到服务器：${modelOf(models) || '模型设置'}`);
-    } catch (e) { toast(`模型设置没能同步到服务器：${e.message}`); }
-  }, 800);
-}
-function refreshServerModel() {
-  server?.getConfig().then((c) => { globalThis.__jarvisServerModel = modelOf(c) || ''; updateModelLabels(); }).catch(() => {});
-}
-// 页面就是从自己的服务器打开的：发给它的请求（模型转发、读网页等）都带上登录令牌
-if (serverCfg.token && typeof location !== 'undefined' && normalizeUrl(serverCfg.url) === location.origin) {
-  const plain = globalThis.fetch.bind(globalThis);
-  globalThis.fetch = (input, init = {}) => {
-    const url = typeof input === 'string' ? input : input?.url ?? '';
-    if (!/^\/api\//.test(url) && !url.startsWith(`${location.origin}/api/`)) return plain(input, init);
-    const headers = new Headers(init.headers || (typeof input === 'object' ? input.headers : undefined));
-    if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${serverCfg.token}`);
-    return plain(input, { ...init, headers });
-  };
-}
 // 当前会话；app.history 就是它的消息列表（换对话只改 app.session）
 app.session = sessionsApi.create();
 /** 记一条消息：默认记进当前会话；后台任务记进它自己的会话（切到别的对话后仍然记对地方） */
@@ -358,43 +250,13 @@ function makeSpeech(auto = true) {
   };
 }
 
-// ---------------------------------------------------------------- 记忆引擎：整理用的大模型 + 语义向量，随配置变化
-/** 给记忆整理、深度调研等内部环节用的“单次问答”；内置演示或配置不全时返回 null。task 决定用哪个分工模型 */
-function helperLlm(task = 'chat') {
-  const { adapter, model, problem } = createAdapter(routeFor(app.llmConfig, task).cfg, { gateway: app.gateway });
-  if (problem || providerById(app.llmConfig.provider)?.kind === 'mock') return null;
-  return async ({ system, prompt, signal, images }) => {
-    let text = '';
-    const r = await adapter.stream({ model, system: [system], messages: [{ role: 'user', content: prompt, ...(images?.length && { images }) }], tools: [], signal, onText: (d) => { text += d; } });
-    return r?.text || text;
-  };
-}
-/** 能看图的辅助模型（PPT 生成后看预览图检查排版）：分工里设了“看图”模型就用它，否则默认模型能看图才用 */
-function visionHelperLlm() {
-  const r = routeFor(app.llmConfig, 'vision');
-  return r.routed || seesImages(r.model) ? helperLlm('vision') : null;
-}
-/** 团队模式：按角色挑分工模型 */
-const ROLE_TASK = { coder: 'code', writer: 'write', researcher: 'reason', analyst: 'reason', operator: 'chat', generalist: 'chat' };
-function modelForRole(role) {
-  const r = routeFor(app.llmConfig, ROLE_TASK[role] ?? 'chat');
-  if (!r.routed) return null;
-  const a = createAdapter(r.cfg, { gateway: app.gateway });
-  return a.problem ? null : { adapter:a.adapter, model:a.model, fallbacks:fallbackRoutes(app.llmConfig,{provider:r.cfg.provider,model:a.model}).map(f=>({...createAdapter(f.cfg,{gateway: app.gateway}),label:f.model})).filter(f=>!f.problem&&f.adapter&&f.model) };
-}
-function syncMemoryEngine() {
-  const embedder = createEmbedder(app.llmConfig, { gateway: app.gateway });
-  agentMemory.configureMemory({ llm: helperLlm(), embedder });
-  kb.configureKnowledge({ embedder });
-  panels?.refreshKb?.();
-}
 
 /** 自动整理记忆：对话停下来 30 秒后、切到别的对话或 App 退到后台时，把这段对话交给记忆整理（抽取事实、写摘要）。
  *  不能等太久：用户常常说完就开新对话，或者手机直接切走 */
 let reflectFrom = app.history.length;
 let reflectTimer = 0;
 function scheduleReflect() {
-  if (server) return; // 服务器模式：记忆在服务器上，本机不整理
+  if (app.server) return; // 服务器模式：记忆在服务器上，本机不整理
   clearTimeout(reflectTimer);
   if (!settings.autoMemory) return;
   reflectTimer = setTimeout(reflectNow, 30_000);
@@ -419,12 +281,12 @@ document.addEventListener('visibilitychange', () => { if (document.hidden && set
 /** 长对话压缩：回答完后在后台把较早的消息并进“前情提要”（见 compress.js），不影响当前对话 */
 let compressing = false;
 async function compressHistory() {
-  if (server) return;
+  if (app.server) return;
   const s = app.session;
   if (compressing || !compress.dueForCompression(s.messages, s.summary).length) return;
   compressing = true;
   try {
-    const next = await compress.updateSummary(s.messages, s.summary, { llm: helperLlm() });
+    const next = await compress.updateSummary(s.messages, s.summary, { llm: app.helperLlm() });
     if (next && next !== s.summary) {
       s.summary = next;
       if (settings.saveSessions !== false) sessionsApi.save(s).catch(() => {});
@@ -504,7 +366,7 @@ async function switchTo(next) {
   // 切回一个还在后台干活的对话：把正在写的那条回答接回来
   const bg = [...backgroundTurns].find((t) => t.session.id === app.session.id);
   if (bg) { backgroundTurns.delete(bg); bg.background = false; app.active = bg; app.liveBubble = bg.bubble; transcript.root.append(bg.bubble.el); app.setTask('processing', bg.status || '思考中'); }
-  else if (server && next.taskId) followServerTask(next); // 服务器上这个对话还在干活（比如 App 重新打开）：接上它的进度
+  else if (app.server && next.taskId) followServerTask(next); // 服务器上这个对话还在干活（比如 App 重新打开）：接上它的进度
   app.dashboard.setTurns(app.history.filter((m) => m.role === 'user').length);
   if (app.history.length) app.callouts?.set(followUpSuggestions({ tools: app.history.at(-1)?.tools ?? [], userText: [...app.history].reverse().find((m) => m.role === 'user')?.content ?? '', desktop: Boolean(DESKTOP) }));
   else openingCallouts();
@@ -529,25 +391,25 @@ let opening = 0; // 连点了好几段对话：只认最后点的那段
 async function openSession(id) {
   noteAction('切换对话');
   // 点的就是当前对话：服务器模式下从服务器取一次最新进度（另一台设备可能接着聊过）
-  if (id === app.session.id) { if (server) refreshFromServer(); return; }
+  if (id === app.session.id) { if (app.server) refreshFromServer(); return; }
   const mine = ++opening;
   // 服务器模式：先用手机 / 电脑上留的副本马上切过去，再从服务器取最新的换上
-  const cached = server ? sessionsApi.cachedGet(id) : null;
+  const cached = app.server ? sessionsApi.cachedGet(id) : null;
   if (cached) await switchTo(cached);
-  else if (server) app.setTask('processing', '正在打开对话');
+  else if (app.server) app.setTask('processing', '正在打开对话');
   const s = await sessionsApi.get(id).catch((e) => { if (!cached) toast(`打不开这段对话：${e.message}`); return null; });
   if (mine !== opening) return;
   if (!s) { if (!cached) app.setTask('idle'); return; }
   if (!cached) await switchTo(s);
   else if (app.session.id === id && !app.active && changed(app.session, s)) { app.session = s; reflectFrom = app.history.length; replayTranscript(); }
-  if (server && app.session.id === id && s.taskId && !app.active) followServerTask(s); // 另一台设备正在做：接上进度
+  if (app.server && app.session.id === id && s.taskId && !app.active) followServerTask(s); // 另一台设备正在做：接上进度
 }
 /** 服务器上的这段对话比手上的新吗（另一台设备接着聊过、或者做完了任务） */
 const changed = (a, b) => b.messages.length !== a.messages.length || (b.updatedAt ?? 0) > (a.updatedAt ?? 0) || b.messages.at(-1)?.content !== a.messages.at(-1)?.content;
 /** 服务器模式：从服务器取当前对话的最新进度，有变化就换上（App 切回前台、点当前对话时） */
 let refreshing = false;
 async function refreshFromServer() {
-  if (!server || refreshing || app.active || !app.session?.id) return;
+  if (!app.server || refreshing || app.active || !app.session?.id) return;
   noteAction('从服务器刷新对话');
   refreshing = true;
   try {
@@ -639,14 +501,14 @@ async function buildTools({ background = false, turn = null } = {}) {
   };
   return [
     ...createTools({
-      metrics,
+      metrics: app.metrics,
       tavilyKey: app.llmConfig.tavilyKey,
       bochaKey: app.llmConfig.bochaKey,
       searchRegion: app.llmConfig.searchRegion || 'auto',
-      fetchViaGateway: fetchViaGateway(),
-      llm: helperLlm('write'), // 深度调研：用写作模型
-      reasonLlm: helperLlm('reason'), // 逐项查证：用推理模型摘答案
-      visionLlm: visionHelperLlm(), // PPT 生成后看预览图检查排版
+      fetchViaGateway: app.fetchViaGateway(),
+      llm: app.helperLlm('write'), // 深度调研：用写作模型
+      reasonLlm: app.helperLlm('reason'), // 逐项查证：用推理模型摘答案
+      visionLlm: app.visionHelperLlm(), // PPT 生成后看预览图检查排版
       onPreview: background ? () => {} : COMPACT
         ? (path) => { panels.openFile(path); toast(`已生成 ${path}：左上角菜单 → 工作区查看`); } // 手机上不自动盖住对话
         : (path) => { showPanel('workspace'); panels.openFile(path); },
@@ -670,13 +532,13 @@ async function followServerTask(s) {
   const ctrl = new AbortController();
   const bubble = transcript.add('agent');
   bubble.el.classList.add('streaming');
-  const turn = { ctrl, streamDone: false, bubble, session: s, files: new Set(), inbox: [], t0: now(), steps: 0, status: '', background: false, remote:Boolean(server) };
+  const turn = { ctrl, streamDone: false, bubble, session: s, files: new Set(), inbox: [], t0: now(), steps: 0, status: '', background: false, remote:Boolean(app.server) };
   app.active = turn;
   app.liveBubble = bubble;
   app.setTask('processing', '服务器上正在做');
   const cards = new Map();
   try {
-    await runRemote(server, {
+    await runRemote(app.server, {
       taskId: s.taskId, onStarted:task=>{turn.remoteId=task.id;}, signal: ctrl.signal, onFile: (p) => pullServerFile(p, turn),
       emit: (e) => {
         if (app.active !== turn) return;
@@ -701,7 +563,7 @@ async function pullServerFile(path, turn) {
   if (turn?.files.has(path)) return; // 同一轮里同一个文件只取一次（画图会同时报“新文件”和“显示图片”）
   turn?.files.add(path);
   try {
-    const blob = await server.download(path);
+    const blob = await app.server.download(path);
     await ws.write(path, blob);
     panels.markFresh(path);
     panels.refreshFiles();
@@ -729,7 +591,7 @@ async function greetOnReturn({ awayMs, reason = '', force = false }) {
     agentMemory.openItems({ k: 2 }).catch(() => []),
     habitHints().catch(() => [])
   ]);
-  const { text } = await composeGreeting({ awayMs, coreHuman: core.human, schedules: schedules.filter((x) => x.enabled), openItems: open, habits: habitTips, llm: helperLlm() });
+  const { text } = await composeGreeting({ awayMs, coreHuman: core.human, schedules: schedules.filter((x) => x.enabled), openItems: open, habits: habitTips, llm: app.helperLlm() });
   // 很久没说话的旧对话：开一段新的，问候放在新对话里
   const lastTs = app.history.at(-1)?.ts ?? 0;
   if (app.history.length && Date.now() - lastTs > 3 * 3600_000) await switchTo(sessionsApi.create());
@@ -858,7 +720,7 @@ async function interject(text, { thumbs = [] } = {}) {
   } else if (!turn.remoteId) {
     turn.inbox.push(text); reply('收到补充，连接到原任务后会送达。'); return;
   } else {
-    try { await server.appendTaskNote(turn.remoteId,text); }
+    try { await app.server.appendTaskNote(turn.remoteId,text); }
     catch(e) { if (!prompt.value.trim()) { prompt.value=text; autosize(); } reply('补充没有送达，已放回输入框。原任务不会重复执行；服务器较旧时请先更新服务器。'); return; }
   }
   reply(`收到，做完手上这一步就看这句话（${turnStatus(turn, now())}）。`);
@@ -898,8 +760,8 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   // 正在干活时又发了一句：不打断，问进度就直接答，别的话交给正在干的未央；说“停”才停
   if (echo && app.active && !app.active.streamDone) {
     const extra = attachments.splice(0); renderAttachments();
-    if (server && extra.length) {
-      try { for (const f of extra) await server.upload(f.path, await ws.readBlob(f.path)); }
+    if (app.server && extra.length) {
+      try { for (const f of extra) await app.server.upload(f.path, await ws.readBlob(f.path)); }
       catch (e) { attachments.unshift(...extra); renderAttachments(); if (!prompt.value.trim()) { prompt.value=text; autosize(); } toast(`附件未送达，已保留：${e.message}`); return; }
       if (!app.active || app.active.streamDone) { attachments.unshift(...extra); renderAttachments(); return send(text,{echo,byVoice}); }
     }
@@ -946,27 +808,27 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   // 手机：记下正在做的任务（App 被划掉时，下次打开接着做）
   const doneSteps = [];
   turn.checkpoint={text:userText,notes:[],inFlight:[],steps:[],files:[],status:'running'};
-  if (MOBILE && !server) savePending(storage,app.session.id,{turnId:turn.t0,text:userText,title:app.session.title||'',ts:Date.now(),steps:[],files:[],checkpoint:turn.checkpoint});
+  if (MOBILE && !app.server) savePending(storage,app.session.id,{turnId:turn.t0,text:userText,title:app.session.title||'',ts:Date.now(),steps:[],files:[],checkpoint:turn.checkpoint});
 
   // 模型分工：按这句话的类型换模型；日常对话让推理模型少想一点（首字更快）
   const computerKind = DESKTOP ? computerTaskKind(text,{history: app.history}) : null;
-  const task = computerKind === 'gui' ? 'vision' : shouldTeam(text, settings.teamMode === 'auto' && !helperLlm() ? 'off' : settings.teamMode) ? 'reason' : classifyTask(text, { images: imgs.length + withImages.size });
+  const task = computerKind === 'gui' ? 'vision' : shouldTeam(text, settings.teamMode === 'auto' && !app.helperLlm() ? 'off' : settings.teamMode) ? 'reason' : classifyTask(text, { images: imgs.length + withImages.size });
   const route = routeFor(app.llmConfig, task);
-  const remotePC=Boolean(server&&computerKind);
+  const remotePC=Boolean(app.server&&computerKind);
   const local=createAdapter(route.cfg,{gateway: app.gateway});
   const model=remotePC?'服务器模型':local.model;
   let usedModel=model;
-  const adapter=remotePC?createPCModelAdapter(server,{task,onModel:m=>{usedModel=m;}}):local.adapter;
+  const adapter=remotePC?createPCModelAdapter(app.server,{task,onModel:m=>{usedModel=m;}}):local.adapter;
   const problem=remotePC?null:local.problem;
-  if (COMPACT && isAuto(app.llmConfig) && model && !server) $('#model-chip-text').textContent = `自动 · ${model}`;
+  if (COMPACT && isAuto(app.llmConfig) && model && !app.server) $('#model-chip-text').textContent = `自动 · ${model}`;
   // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省
   const effort = effortFor(task, text, app.llmConfig);
   if (route.routed&&!remotePC) app.hud.think(`◇ 模型分工：${TASKS[task].name} → ${route.model}`);
   // 服务器模式下电脑版：要动这台电脑的事（桌面、文件夹、打开软件……）留在本机做，其余交给服务器
-  const here = Boolean(server && DESKTOP && computerKind);
-  turn.remote=Boolean(server&&!here);
+  const here = Boolean(app.server && DESKTOP && computerKind);
+  turn.remote=Boolean(app.server&&!here);
   if (here) app.hud.think('◇ 服务器模型推理，电脑工具在本机执行');
-  if (problem && (!server || here)) { // 服务器模式：用服务器上的模型设置
+  if (problem && (!app.server || here)) { // 服务器模式：用服务器上的模型设置
     bubble.append(problem);
     bubble.done();
     app.callouts?.set(followUpSuggestions({ error: true, userText: text }));
@@ -995,24 +857,24 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   let ctxMs = null;
   app.callouts?.retract();
   // 内置演示模式下“自动”不触发（规则拆步效果有限），只认明确的“/团队 …”或“总是”
-  const team = !server && !computerKind && shouldTeam(text, settings.teamMode === 'auto' && !helperLlm() ? 'off' : settings.teamMode);
+  const team = !app.server && !computerKind && shouldTeam(text, settings.teamMode === 'auto' && !app.helperLlm() ? 'off' : settings.teamMode);
   let teamCard = null;
   const releaseTask = taskKeeper.begin();
   try {
     // 服务器模式：服务器做，进度事件和本机一样显示（runRemote 的用法和 runAgent 一样）
     const serverRun = async (o) => {
-      for (const f of files) await server.upload(f.path, await ws.readBlob(f.path)); // 发来的附件先传到服务器的工作区
-      return runRemote(server, { sessionId: o.sessionId, userText: o.userText, images: o.images, voice: o.voice, emit: o.emit, signal: o.signal, onFile: (p) => pullServerFile(p, turn), onStarted:async remoteTask=>{
+      for (const f of files) await app.server.upload(f.path, await ws.readBlob(f.path)); // 发来的附件先传到服务器的工作区
+      return runRemote(app.server, { sessionId: o.sessionId, userText: o.userText, images: o.images, voice: o.voice, emit: o.emit, signal: o.signal, onFile: (p) => pullServerFile(p, turn), onStarted:async remoteTask=>{
         turn.remoteId=remoteTask.id;
         for(const note of turn.inbox.splice(0)) {
-          try { await server.appendTaskNote(remoteTask.id,note); }
+          try { await app.server.appendTaskNote(remoteTask.id,note); }
           catch(e) { prompt.value += (prompt.value.trim()?'\n':'')+note; autosize(); toast('补充未送达原任务，已保留在输入框，请更新服务器或重新发送'); }
         }
       } });
     };
-    const result = await (server && !here ? serverRun : team ? runTeam : runAgent)({
-      llm: team ? helperLlm('reason') : undefined,
-      pickModel: team ? modelForRole : undefined,
+    const result = await (app.server && !here ? serverRun : team ? runTeam : runAgent)({
+      llm: team ? app.helperLlm('reason') : undefined,
+      pickModel: team ? app.modelForRole : undefined,
       effort,
       adapter, model, history: llmHistory, userText: team ? userText : await expandSlash(userText), signal: ctrl.signal, computerTask: computerKind,
       sessionId: app.session.id,
@@ -1030,7 +892,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
       light: !files.length && isSmallTalk(text),
       maxSteps: DESKTOP ? 40 : 28, // 用鼠标键盘操作电脑、逐项联网核实时步数多
       images: imgs.map(({ mime, data }) => ({ mime, data })),
-      tools: server && !here ? [] : await buildTools({ turn }),
+      tools: app.server && !here ? [] : await buildTools({ turn }),
       approve: async (req) => {
         if (preApproved(req, { sessionKeys: sessionApprovals })) return true; // 危险命令每次都问
         // 看屏幕后主窗口已隐藏，确认卡必须先恢复可见；保持紧急停止热键有效。
@@ -1121,7 +983,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
     if (app.active !== turn) return;
     speech.flush();
     const total = now() - t0;
-    const modelTag = server && !here ? '服务器 · ' : here ? `本机工具 · ${usedModel} · ` : providerById(app.llmConfig.provider)?.kind === 'mock' ? '' : usedModel !== model ? `${usedModel}（${model} 出错后换用） · ` : `${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
+    const modelTag = app.server && !here ? '服务器 · ' : here ? `本机工具 · ${usedModel} · ` : providerById(app.llmConfig.provider)?.kind === 'mock' ? '' : usedModel !== model ? `${usedModel}（${model} 出错后换用） · ` : `${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
     bubble.done(`${modelTag}${team ? `团队 ${result.steps} 步 · ` : ''}${ctxMs !== null && ctxMs >= 300 ? `准备 ${(ctxMs / 1000).toFixed(1)}s · ` : ''}${firstToken ? `首字 ${((firstToken - t0) / 1000).toFixed(1)}s · ` : ''}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}${MOBILE && textChunks ? ` · 分 ${textChunks} 次收到${globalThis.__jarvisNetVia?.(app.llmConfig.baseURLs?.[app.llmConfig.provider] || '') === 'native' ? '（原生网络）' : ''}` : ''}`, {
       onFeedback: async (kind, comment) => {
         if (kind === 'up') await agentMemory.noteTask(`获得好评：${text.slice(0, 30)}`);
@@ -1140,7 +1002,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
     // 做完时人不在（App 在后台 / 窗口没在看）：发通知，点开就能看结果
     if (document.hidden) notify('未央做完了', `${(turn.session.title || text).slice(0, 30)}：${stripEmotionTags(result.text || '').replace(/\s+/g, ' ').slice(0, 120)}`);
     // 在本机做的这一轮也记回服务器上的这段对话（手机上能看到）
-    if (here) server.appendSession(turn.session.id, turn.session.messages.slice(-2).map(({ role, content, ts, tools }) => ({ role, content, ts, ...(tools && { tools }) }))).catch((e) => toast(`这一轮没能记到服务器上：${e.message}`));
+    if (here) app.server.appendSession(turn.session.id, turn.session.messages.slice(-2).map(({ role, content, ts, tools }) => ({ role, content, ts, ...(tools && { tools }) }))).catch((e) => toast(`这一轮没能记到服务器上：${e.message}`));
     $('#mode-pill').classList.remove('offline');
     turn.streamDone = true;
     app.callouts?.set(followUpSuggestions({ tools: usedTools, userText: text, desktop: Boolean(DESKTOP) }));
@@ -1149,12 +1011,12 @@ async function send(text, { echo = true, byVoice = false } = {}) {
     if (!speaker.speaking) finishTurn();
   } catch (err) {
     if (err.name === 'AbortError') return;
-    if (turn.background) { finishBackground(turn, { error: friendlyError(String(err.message || err)), shown, usedTools, files: madeFiles }); return; }
+    if (turn.background) { finishBackground(turn, { error: app.friendlyError(String(err.message || err)), shown, usedTools, files: madeFiles }); return; }
     if (app.active !== turn) return;
-    const msg = friendlyError(String(err.message || err));
+    const msg = app.friendlyError(String(err.message || err));
     const cors = !MOBILE && /Failed to fetch|NetworkError|Load failed|CORS/i.test(msg);
     bubble.append(`\n（出错了：${msg}${cors ? '。多半是该服务商不允许网页直接调用：双击 jarvis 文件夹里的 启动.bat（或 start.sh）并保持窗口开着，本页面会自动连上本机网关，然后重试即可' : ''}）`);
-    if (cors && !app.gateway) detectGateway();
+    if (cors && !app.gateway) app.detectGateway();
     bubble.done();
     bubble.activity('error');
     $('#mode-pill').classList.add('offline');
@@ -1693,9 +1555,9 @@ const panels = initPanels({
   toast: (t) => toast(t),
   settings,
   getGateway: () => app.gateway,
-  searchFetch: () => fetchViaGateway(),
+  searchFetch: () => app.fetchViaGateway(),
   getHistory: () => app.history,
-  onConfigChange: (cfg) => { app.llmConfig = cfg; updateModelLabels(); syncMemoryEngine(); app.updateOrbitStatus(); routingPanel?.render(); pushConfigToServer(); },
+  onConfigChange: (cfg) => { app.llmConfig = cfg; app.updateModelLabels(); app.syncMemoryEngine(); app.updateOrbitStatus(); routingPanel?.render(); app.pushConfigToServer(); },
   onReflect: () => reflectNow({ manual: true }),
   onAutoMemory: (on) => { setSetting('autoMemory', on); if (!on) clearTimeout(reflectTimer); },
 });
@@ -2087,13 +1949,13 @@ async function rewindAndResend(kind, text) {
   if (later > 1) { try { ok = globalThis.confirm(`这句话后面还有 ${later} 条消息，会一起去掉。继续吗？`); } catch { /* 不支持弹窗就直接继续 */ } }
   if (!ok) return;
   const question = said(app.history[at]);
-  if (server) {
-    try { await server.truncateSession(app.session.id, at); } catch (e) { toast(`没改成：${e.message}`); return; }
+  if (app.server) {
+    try { await app.server.truncateSession(app.session.id, at); } catch (e) { toast(`没改成：${e.message}`); return; }
   }
   app.history.splice(at);
   app.session.updatedAt = Date.now();
   // 本机模式下截成空的：空对话不会存盘，旧记录会留着；先删掉，重新发的时候再存
-  if (!server && !app.history.length) sessionsApi.remove(app.session.id).catch(() => {}); else persistSession();
+  if (!app.server && !app.history.length) sessionsApi.remove(app.session.id).catch(() => {}); else persistSession();
   replayTranscript();
   if (kind === 'edit') {
     prompt.value = question;
@@ -2166,8 +2028,8 @@ if (!mic.hidden && !(MOBILE && document.documentElement.classList.contains('safe
 
 
 // ---------------------------------------------------------------- 启动
-updateModelLabels();
-detectGateway();
+app.updateModelLabels();
+app.detectGateway();
 panels.refreshMind();
 let startPane = 'workspace';
 try { startPane = localStorage.getItem('jarvis.pane') || startPane; } catch { /* ignore */ }
@@ -2176,7 +2038,7 @@ showPanel(PANES.includes(startPane) ? startPane : 'workspace');
 if (narrow.matches) body.classList.remove('side-open');
 app.setTask('idle');
 renderWelcome();
-syncMemoryEngine();
+app.syncMemoryEngine();
 sessionsPanel = initSessionsPanel({
   getCurrentId: () => app.session.id,
   onOpen: (id) => openSession(id),
@@ -2217,7 +2079,7 @@ const syncController = createSyncController({
   }
 });
 const syncPanel = initSyncPanel({ controller: syncController, toast: (t) => toast(t) });
-initServerPanel({ getLlmConfig: () => app.llmConfig, toast: (t) => toast(t), onConfigSaved: () => refreshServerModel(), onImported: () => { sessionsPanel?.refresh(); drawer?.refresh?.(); } });
+initServerPanel({ getLlmConfig: () => app.llmConfig, toast: (t) => toast(t), onConfigSaved: () => app.refreshServerModel(), onImported: () => { sessionsPanel?.refresh(); drawer?.refresh?.(); } });
 syncController.start();
 
 // 手机：底部菜单改成左侧抽屉（新对话 · 功能 · 历史对话）；面板全屏打开，左上角“返回对话”
@@ -2297,7 +2159,7 @@ setTimeout(schedulerTick, 4000);
   // 手机：只有刷新页面、或界面崩溃后自动重开时才接回刚才的对话；从后台关掉再打开就停在首页
   const reopened = performance.getEntriesByType?.('navigation')?.[0]?.type === 'reload' || globalThis.__jarvisRecentCrash === true;
   if ((!COMPACT || reopened) && recent && Date.now() - recent.updatedAt < 6 * 3600_000 && !app.history.length) {
-    if (server) await openSession(recent.id); // 服务器的列表不带消息：先显示副本，再取完整的
+    if (app.server) await openSession(recent.id); // 服务器的列表不带消息：先显示副本，再取完整的
     else await switchTo(recent);
   }
   sessionsPanel.refresh();
