@@ -43,3 +43,4 @@ export async function withWebDeadline(work, { signal, timeoutMs = 12_000 } = {})
   try { return await Promise.race([cancelled, Promise.resolve().then(() => { if (ctrl.signal.aborted) throw ctrl.signal.reason; return work(ctrl.signal); })]); }
   finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
 }
+

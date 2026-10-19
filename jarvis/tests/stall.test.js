@@ -17,6 +17,17 @@ describe('模型连接卡住：断开重试，不一直傻等', () => {
   beforeEach(() => { STALL_MS.first = 80; STALL_MS.between = 80; });
   afterEach(() => { Object.assign(STALL_MS, saved); });
 
+  it('OpenAI每次请求可覆盖等待上限并禁用内部重试，卡住后交给上层换模型',async()=>{
+    const orig=globalThis.fetch;let calls=0;
+    globalThis.fetch=(url,init)=>{calls++;return new Promise((resolve,reject)=>init.signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError'))));};
+    try{const a=createOpenAIAdapter({baseURL:'https://x/v1',apiKey:'k'});await expect(a.stream({...req,stallTimeouts:{first:10,between:10},maxTransientRetries:0})).rejects.toMatchObject({stalled:true});expect(calls).toBe(1);}finally{globalThis.fetch=orig;}
+  });
+
+  it('Claude每次请求禁用内部重试后只调用一次，不额外叠加120秒等待',async()=>{
+    let calls=0;const client={beta:{messages:{stream(){calls++;return{[Symbol.asyncIterator]:()=>({next:()=>new Promise(()=>{})}),finalMessage:()=>new Promise(()=>{})};}}}};
+    const a=createAnthropicAdapter({client});await expect(a.stream({...req,stallTimeouts:{first:10,between:10},maxTransientRetries:0})).rejects.toMatchObject({stalled:true});expect(calls).toBe(1);
+  });
+
   it('写了一半挂住：断开后带上已写部分续写', async () => {
     const replies = [hang('第一段，'), sse('第二段。')];
     const orig = globalThis.fetch;
@@ -79,3 +90,4 @@ describe('只说“马上开始做”就结束：提醒它真的去做', () => {
     expect(finishCheck({ lastText: '文件都做好了。需要的话我可以接下来做 PPT。' })).toBe('');
   });
 });
+

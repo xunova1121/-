@@ -172,7 +172,7 @@ export function createOpenAIAdapter({ baseURL, apiKey, headers = {}, retryDelays
           return partial ? { ...r, text: partial + r.text } : r;
         } catch (err) {
           partial += got;
-          if (signal?.aborted || !isTransient(err) || attempt >= retryDelays.length) throw Object.assign(err, { partialText: partial });
+          if (signal?.aborted || !isTransient(err) || attempt >= Math.min(opts.maxTransientRetries ?? retryDelays.length, retryDelays.length)) throw Object.assign(err, { partialText: partial });
           onRetry?.(attempt + 1, err);
           // 已经写了一部分：带上这部分让模型接着写，而不是从头再来
           if (partial.trim()) messages = [...opts.messages, { role: 'assistant', content: partial }, { role: 'user', content: CONTINUE_PROMPT }];
@@ -186,7 +186,7 @@ export function createOpenAIAdapter({ baseURL, apiKey, headers = {}, retryDelays
 function createOnce({ baseURL, apiKey, headers = {} }) {
   return {
     async stream({ signal: outer, ...req }) {
-      const guard = stallGuard(outer);
+      const guard = stallGuard(outer, req.stallTimeouts);
       try { return await streamOnce({ ...req, signal: guard.signal }, guard); } catch (e) { throw guard.error(e); } finally { guard.done(); }
     }
   };
@@ -245,3 +245,4 @@ function createOnce({ baseURL, apiKey, headers = {} }) {
     return { ...r, stop: r.toolCalls.length ? 'tool_use' : r.stop };
   }
 }
+

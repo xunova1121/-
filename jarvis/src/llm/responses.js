@@ -73,7 +73,7 @@ export function createResponsesAccumulator(onText) {
 export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearch = true, fetchImpl = (...a) => fetch(...a) }) {
   let level = 0;
   const maxLevel = webSearch ? 2 : 1;
-  async function once({ model, system, messages, tools, signal, onText, effort, allowWebSearch = true }, lvl, state) {
+  async function once({ model, system, messages, tools, signal, onText, effort, allowWebSearch = true, stallTimeouts }, lvl, state) {
     const search = webSearch && lvl < 2 && allowWebSearch;
     const body = {
       model,
@@ -88,7 +88,7 @@ export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearc
       ...(lvl === 0 && effort && { reasoning: { effort } })
     };
     if (!body.tools.length) delete body.tools;
-    const guard = stallGuard(signal);
+    const guard = stallGuard(signal, stallTimeouts);
     try {
       const res = await guard.race(fetchImpl(`${baseURL.replace(/\/$/, '')}/responses`, {
         method: 'POST',
@@ -134,11 +134,12 @@ export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearc
         } catch (e) {
           if (req.signal?.aborted || state.started) throw e;
           if ([400, 404, 422].includes(e?.status) && level < maxLevel) { level++; continue; }
-          if (isTransient(e) && transient++ < 2) { await new Promise((r) => setTimeout(r, 1500 * transient)); continue; }
+          if (isTransient(e) && transient++ < (req.maxTransientRetries ?? 2)) { await new Promise((r) => setTimeout(r, 1500 * transient)); continue; }
           throw e;
         }
       }
     }
   };
 }
+
 

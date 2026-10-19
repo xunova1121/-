@@ -45,7 +45,7 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
   let level = 0; // 0 全部参数；1 去掉新参数；2 再去掉联网搜索（只在 compat 时降级）
   const maxLevel = !compat ? 0 : webSearch ? 2 : 1;
 
-  async function once({ model, system, messages, tools, signal, onText, effort, allowWebSearch = true }, lvl, state) {
+  async function once({ model, system, messages, tools, signal, onText, effort, allowWebSearch = true, stallTimeouts }, lvl, state) {
     const search = webSearch && lvl < 2 && allowWebSearch;
     const [stable, dynamic] = system;
     const params = {
@@ -67,7 +67,7 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
       params.fallbacks = 'default';
     }
     // 卡住检测：中转站挂住不回时断开，交给上层换备用模型或重试
-    const guard = stallGuard(signal);
+    const guard = stallGuard(signal, stallTimeouts);
     try {
       const stream = client.beta.messages.stream(params, { signal: guard.signal });
       const events = stream[Symbol.asyncIterator]();
@@ -107,7 +107,7 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
         } catch (e) {
           if (req.signal?.aborted) throw e;
           // 连接卡住 / 连接出错，而且还没输出文字：等一下重试（最多两次），再不行交给上层换备用模型
-          if (!state.started && isTransient(e) && transient++ < 2) { await new Promise((r) => setTimeout(r, 1500 * transient)); continue; }
+          if (!state.started && isTransient(e) && transient++ < (req.maxTransientRetries ?? 2)) { await new Promise((r) => setTimeout(r, 1500 * transient)); continue; }
           const rejected = [400, 404, 422].includes(e?.status) && !state.started;
           if (!rejected || level >= maxLevel) throw e;
           level++;
@@ -116,4 +116,5 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
     }
   };
 }
+
 

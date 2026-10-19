@@ -15,6 +15,7 @@
  */
 import { EmotionTagStripper, stripEmotionTags } from '../../shared/emotionTag.js';
 import { validateArgs } from './tools.js';
+import { withLookupDeadline, isQuickLookup, COMPLEX } from './lookupDeadline.js';
 import { createRetrievalBudget, withWebDeadline } from './retrievalBudget.js';
 import * as sessions from './sessions.js';
 import * as memory from './memory.js';
@@ -91,7 +92,8 @@ export const STABLE_PROMPT = `你是“未央”，运行在用户电脑上的�
 - 之前对话里的图片如果已经看不到了，用户消息里有“[已上传到工作区：…]”的路径，用 read_file 读那个图片文件再看。
 
 ## 查最新信息（比分、赛果、新闻、价格、版本等）
-- 要查的对象有好几个（截图里的多场比赛、多只股票、清单），或者答案必须准确：先把每一项原样列出来，调用 fact_check 逐项查证；最终结论只用 fact_check 核实过的内容，“单一来源 / 未核实”的要标明。需要计算的（让球胜负、是否中奖、盈亏）逐项列出算法再给结论。
+- 普通单一问题（剧集更新、电影、新闻、娱乐等）先搜索并读最相关的一两条官方原始来源，证据够了立即回答，不默认启动逐项核验或深度研究。区分当前已上线、预告、会员/非会员和页面缓存时间；不能把有选集入口当作已经播出，不能把整剧梗概当作该集剧情。
+- 要查的对象有好几个（截图里的多场比赛、多只股票、清单），或用户明确要求逐项、交叉核验：先把每一项原样列出来，调用 fact_check 逐项查证；最终结论只用 fact_check 核实过的内容，“单一来源 / 未核实”的要标明。需要计算的（让球胜负、是否中奖、盈亏）逐项列出算法再给结论。
 - 你的知识有截止日期，“当前时间”之后或临近的事一律先用 web_search 查，不要凭记忆回答，也不要猜“还没发生”；搜不到就如实说搜不到。
 - 注意时差：用户在国内，说的和截图里的时间默认是北京时间。判断事情发生没有、拿日期去搜之前，先换算成事件当地的时间（欧洲比北京晚 6–7 小时，美洲晚 12–15 小时）。中国体彩“周一001”的“周一”是销售日，比赛可能在北京时间第二天凌晨。
 - 多个对象逐个查：例如 7 场比赛就分别查 7 次（web_search 的 queries 一次可以并行搜好几个）。
@@ -103,6 +105,10 @@ export const STABLE_PROMPT = `你是“未央”，运行在用户电脑上的�
 ## 表达标签
 回复的第一个字符必须是 <emotion>X</emotion>，X 只能是 平静、专注、聆听、亲和、安抚、愉悦、警觉 之一，表示界面此刻的表达风格（用户沮丧时“安抚”，出错或有风险时“警觉”，执行任务时“专注”）。这只是界面风格，不代表你有情绪；不要在正文里提到它。`;
 
+/** 普通知识/时效问答保留执行、安全与来源规则，按需任务才携带完整文档排版说明。 */
+export const INFO_PROMPT = STABLE_PROMPT.slice(0, STABLE_PROMPT.indexOf('## 写文档'))
+  + STABLE_PROMPT.slice(STABLE_PROMPT.indexOf('## 看图'));
+
 /** 简单闲聊（你好、谢谢）用的短提示：不带工具说明，回得快 */
 export const LIGHT_PROMPT = `你是“未央”，用户的个人智能体。现在是日常闲聊：自然、亲切、简短地回答（一两句话），不列清单、不用标题。
 
@@ -113,10 +119,10 @@ export const VOICE_NOTE = '## 语音对话\n用户正在和你语音对话，你
 export async function buildContext(userText, { sessionId = null, turns = 0, summary = null, light = false } = {}) {
   const fresh = turns <= 2; // 新对话（或刚开始）：带上最近的对话和没做完的事，方便“接着上次的”
   const [ctx, kbHits, installed, past, recentS, open, rules] = await Promise.all([
-    memory.contextFor(userText), kb.search(userText, 4), packs.enabled().catch(() => []),
-    sessions.searchMessages(userText, { exclude: sessionId, k: 2 }).catch(() => []),
-    fresh ? sessions.recent({ exclude: sessionId, k: 3 }).catch(() => []) : [],
-    fresh ? memory.openItems({ exclude: sessionId }).catch(() => []) : [],
+    memory.contextFor(userText), light ? [] : kb.search(userText, 4), light ? [] : packs.enabled().catch(() => []),
+    light ? [] : sessions.searchMessages(userText, { exclude: sessionId, k: 2 }).catch(() => []),
+    fresh && !light ? sessions.recent({ exclude: sessionId, k: 3 }).catch(() => []) : [],
+    fresh && !light ? memory.openItems({ exclude: sessionId }).catch(() => []) : [],
     loadRules().catch(() => null)
   ]);
   const parts = [`当前时间：${new Date().toLocaleString('zh-CN', { hour12: false })}（${Intl.DateTimeFormat().resolvedOptions().timeZone}）`];
@@ -163,7 +169,11 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
  * @param {{ text: string } | null} [o.summary]  本段对话较早内容的摘要（长对话压缩，见 compress.js）
  * @returns {Promise<{ text: string, steps: number, toolCalls: number }>}
  */
-export async function runAgent({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null }) {
+export async function runAgent(options) {
+  return withLookupDeadline(options, runAgentLoop);
+}
+
+async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false }) {
   const retrieval = createRetrievalBudget(images.length ? `逐项核验 ${requirementText}` : requirementText, { now, timeBudgetMs });
   let closingTurns = 0;
   let retrievalStopped = false;
@@ -181,13 +191,15 @@ export async function runAgent({ adapter, model, history, userText, images = [],
   // 任务清单（update_plan）和子任务分身（delegate_task，只有主线能派）由循环自己提供
   const plan = createPlanTool((steps) => emit({ type: 'plan', steps }));
   // 简单闲聊（light）：不带工具，回得快
+  const availableTools = tools;
   if (light) tools = [];
-  const own = light ? [] : [plan.tool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools })] : [])].filter((t) => !tools.some((x) => x.name === t.name));
+  const own = [plan.tool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools: availableTools })] : [])].filter((t) => !tools.some((x) => x.name === t.name));
   // 工具按需加载：工具多时只带常用的完整说明，其余列名字、用 tool_search 加载（见 toolLoader.js）
-  const loader = createToolLoader([...tools, ...own]);
+  let loader = createToolLoader(light ? [] : [...tools, ...own]);
   let checks = 0; // 收尾核对提醒过几次（最多两次，避免来回拉扯）
   let wroteCode = false, ranCode = false;
-  const toolHint = loader.hint();
+  let toolHint = loader.hint();
+  let infoPrompt = isQuickLookup(requirementText, images);
   let finalText = '';
   let toolCount = 0;
   let failCount = 0;
@@ -209,6 +221,9 @@ export async function runAgent({ adapter, model, history, userText, images = [],
   const takeInbox = () => {
     const said = inbox?.splice(0) ?? [];
     if (!said.length) return false;
+    onTaskUpdate?.(said.join("\n"));
+    if (COMPLEX.test(said.join("\n"))) { infoPrompt = false; lookupDeadline = false; }
+    if (light) { light=false; tools=availableTools; loader=createToolLoader([...tools,...own]); toolHint=loader.hint(); }
     retrieval.upgrade(said.join("\n"));
     const note = interjection(said);
     emit({ type:'interjection_accepted', count:said.length });
@@ -239,8 +254,10 @@ export async function runAgent({ adapter, model, history, userText, images = [],
     try {
     r = await cur.adapter.stream({
       model: cur.model,
-      effort,
-      system: light ? [LIGHT_PROMPT, [ctx.dynamic, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [STABLE_PROMPT, [ctx.dynamic, requirementContext, toolHint, voice && VOICE_NOTE].filter(Boolean).join('\n\n')],
+      effort: effort || (lookupDeadline ? 'low' : undefined),
+      stallTimeouts: lookupDeadline ? { first: 20_000, between: 25_000 } : { first: 45_000, between: 60_000 },
+      maxTransientRetries: lookupDeadline ? 0 : 1,
+      system: light ? [LIGHT_PROMPT, [ctx.dynamic, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, requirementContext, toolHint, voice && VOICE_NOTE].filter(Boolean).join('\n\n')],
       messages: convo,
       tools: closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list(),
       allowWebSearch: !closing,
@@ -287,6 +304,7 @@ export async function runAgent({ adapter, model, history, userText, images = [],
     } finally {
       clearTimeout(searchTimer); signal?.removeEventListener('abort', relayAbort);
     }
+    if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
     if (!r.toolCalls.length && r.stop !== 'pause_turn') {
       const rest = stripper.flush();
       if (rest.hint) emit({ type: 'emotion', value: rest.hint });
@@ -333,6 +351,7 @@ export async function runAgent({ adapter, model, history, userText, images = [],
         // 有风险的操作（操作电脑、MCP 工具）先征得用户同意
         const ask = tool.approval?.(c.args);
         if (ask && approve && !(await approve(ask, tool))) throw new Error('用户拒绝了这个操作。请换一种方式，或询问用户的意见。');
+        if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
         await checkpoint?.({type:'tool_start',id:c.id,name:c.name,args:c.args});
         if (signal?.aborted) throw Object.assign(new Error('aborted'),{name:'AbortError'});
         // 工具可以返回 { text, images }：图片会交给模型“看”（如截屏、工作区里的图片）
@@ -392,6 +411,7 @@ export async function runAgent({ adapter, model, history, userText, images = [],
     emit({ type: 'text', delta: note });
   }
   // 只有正常收尾、且最后一次工具调用成功，才记为“完成任务”（计入进化等级）；否则记为未完成，便于之后复盘
+  if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
   const hitLimit = step >= limit || retrievalStopped;
   if (quiet) { /* 分身做的子任务不单独计入任务记录 */ } else if (toolCount && !hitLimit && lastToolOk && failCount === 0) {
     await memory.noteTask(`完成任务：${userText.slice(0, 40)}（调用工具 ${toolCount} 次${failCount ? `，其中 ${failCount} 次失败后已改正` : ''}）`);
@@ -480,5 +500,6 @@ export function progressReminder({ userText, steps = [], toolCount }) {
 }
 
 const stripTag = (s) => stripEmotionTags(String(s || '').replace(/^\s*<emotion>[^<]*<\/emotion>\s*/, ''));
+
 
 

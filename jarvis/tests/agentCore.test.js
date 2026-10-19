@@ -8,6 +8,23 @@ const call = (id, name, args = {}) => ({ id, name, args });
 const ctx = { dynamic: '测试', kbHits: [] };
 const done = (text) => ({ async stream({ onText }) { onText(text); return { text, toolCalls: [], stop: 'end_turn' }; } });
 
+it('电视剧原话使用较短问答说明，并把快速卡住检测与零内部重试传给模型',async()=>{
+ const adapter={async stream(o){expect(o.stallTimeouts).toEqual({first:20_000,between:25_000});expect(o.maxTransientRetries).toBe(0);expect(o.system[0].length).toBeLessThan(agent.STABLE_PROMPT.length);o.onText('已核实的回答');return{text:'已核实的回答',toolCalls:[],stop:'end_turn'};}};
+ await agent.runAgent({adapter,model:'m',history:[],userText:'现在播放的电视剧伟大的长征播放哪一集了，内容是什么',tools:[],context:ctx,emit:()=>{},quiet:true});
+});
+
+it('闲聊中追加文档任务时恢复工具与完整任务规则，避免闲聊模式吞掉任务',async()=>{
+ const inbox=[];let n=0,writes=0;
+ const adapter={async stream(o){if(++n===1){expect(o.tools).toEqual([]);inbox.push('写一份完整报告并保存文件');o.onText('你好。');return{text:'你好。',toolCalls:[],stop:'end_turn'};}if(n===2){expect(o.tools.some(t=>t.name==='write_file')).toBe(true);expect(o.system[0]).toBe(agent.STABLE_PROMPT);return{text:'',toolCalls:[call('w','write_file')],stop:'tool_use'};}o.onText('已保存。');return{text:'已保存。',toolCalls:[],stop:'end_turn'};}};
+ await agent.runAgent({adapter,model:'m',history:[],userText:'你好',light:true,inbox,tools:[{name:'write_file',description:'x',input_schema:{type:'object',properties:{}},run:async()=>{writes++;return'ok';}}],context:ctx,emit:()=>{},quiet:true});expect(writes).toBe(1);
+});
+
+it('简单闲聊不扫描知识库、技能清单和跨会话历史，仍读取核心记忆与项目规则',async()=>{
+ const kb=await import('../src/agent/knowledge.js'),packs=await import('../src/agent/skillPacks.js'),sessions=await import('../src/agent/sessions.js');
+ const search=vi.spyOn(kb,'search'),skills=vi.spyOn(packs,'enabled'),past=vi.spyOn(sessions,'searchMessages');
+ try{await agent.buildContext('你好',{light:true});expect(search).not.toHaveBeenCalled();expect(skills).not.toHaveBeenCalled();expect(past).not.toHaveBeenCalled();}finally{search.mockRestore();skills.mockRestore();past.mockRestore();}
+});
+
 let agent;
 beforeEach(async () => {
   vi.resetModules();
@@ -241,4 +258,5 @@ describe('普通查询停止无效检索', () => {
     expect(writes).toBe(1);
   });
 });
+
 

@@ -322,3 +322,4 @@ it('开始新任务不会覆盖未完成检查点，明确继续时带回完整�
  const saved=await sessions.get(s.id);expect(saved.recoveryCheckpoints[0].text).toBe(original);expect(JSON.stringify(seen)).toContain('末尾不能遗漏');expect(JSON.stringify(seen)).toContain('不得自动重放');
 });
 
+
