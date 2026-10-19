@@ -9,6 +9,8 @@ import { retryRead, throwControl, httpError } from '../core/networkRequest.js';
 import { htmlToText } from './docs.js';
 
 const CACHE_MS = 15 * 60e3;
+const PAGE_LIMIT = 60000; // 每页上限配合60条缓存，避免长期保留整站巨大正文。
+const boundedPage = text => String(text).length > PAGE_LIMIT ? String(text).slice(0, PAGE_LIMIT) + '\n（正文超过60000字，已截断；不能当作全文已读。）' : String(text);
 const THIN = 300; // 正文少于这么多字（去掉空白）就当没读到
 
 /**
@@ -49,7 +51,7 @@ export function createPageReader({ tavilyKey, fetchViaGateway, fetchImpl = (...a
     const text = /html/.test(type) || (!type && /<html|<body/i.test(body)) ? htmlToText(body) : body;
     if (text.replace(/\s+/g, '').length < 1000 && /请完成.{0,8}验证|访问过于频繁|访问异常|安全验证|verify you are human|just a moment|enable javascript and cookies/i.test(text)) throw Object.assign(new Error('网站返回验证页，未取得正文'), { status: 403 });
     if (!text.trim()) throw new Error('网页没有可读取正文，可能需要登录或运行页面脚本');
-    return text;
+    return boundedPage(text);
   }
 
   async function extract(url, signal) {
@@ -59,7 +61,7 @@ export function createPageReader({ tavilyKey, fetchViaGateway, fetchImpl = (...a
     const j = await res.json();
     const text = String(j.results?.[0]?.raw_content || '').trim();
     if (!text) throw new Error(j.failed_results?.[0]?.error || 'Tavily 也没读到正文');
-    return text;
+    return boundedPage(text);
   }
 
   return async function read(url, { signal, progress, consume } = {}) {
@@ -99,7 +101,7 @@ export function createPageReader({ tavilyKey, fetchViaGateway, fetchImpl = (...a
     }
     cache.set(url, { at: now(), text });
     if (cache.size > 60) cache.delete(cache.keys().next().value);
-    return text;
+    return boundedPage(text);
   };
 }
 

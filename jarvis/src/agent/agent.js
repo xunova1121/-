@@ -404,6 +404,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       const sig = `${c.name}:${JSON.stringify(c.args ?? {})}`;
       const times = (seen.get(sig) ?? 0) + 1;
       seen.set(sig, times);
+      if (seen.size > 128) seen.delete(seen.keys().next().value);
       try {
         if (closing && (!retrieval.extensive || WEB_TOOLS.has(c.name))) throw new Error('联网检索已经结束，请直接整理已有资料回答，不要继续调用工具');
         if (!tool) throw new Error(`没有名为 ${c.name} 的工具`);

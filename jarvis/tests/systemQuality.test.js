@@ -14,6 +14,7 @@ import { qualityReport, compareReports } from '../evals/quality-report.mjs';
 import { runProject } from '../server/projectExecution.mjs';
 import { getWeather } from '../src/agent/weather.js';
 import { runPython } from '../src/agent/sandbox.js';
+import { createPageReader } from '../src/agent/pageReader.js';
 import { runAgent } from '../src/agent/agent.js';
 
 describe('网络与预算的真实分型', () => {
@@ -28,41 +29,24 @@ describe('网络与预算的真实分型', () => {
   });
   it('网络读取只重试一次，每次先扣预算', async () => {
     const order = [];
-    const result = await retryRead(
-      () => {
-        order.push('request');
-        if (order.length < 4) throw Object.assign(new Error('断网'), { name: 'NetworkError' });
-        return 'ok';
-      },
-      { delayMs: 1, beforeAttempt: () => order.push('budget') }
-    );
+    const result = await retryRead(() => { order.push('request'); if (order.length < 4) throw Object.assign(new Error('断网'), { name: 'NetworkError' }); return 'ok'; },
+      { delayMs: 1, beforeAttempt: () => order.push('budget') });
     expect(result).toBe('ok');
     expect(order).toEqual(['budget', 'request', 'budget', 'request']);
   });
   it('预算为零时一次请求都不能发出', async () => {
     const work = vi.fn();
-    await expect(
-      retryRead(work, {
-        beforeAttempt: () => {
-          throw Object.assign(new Error('预算'), { code: 'RETRIEVAL_BUDGET' });
-        }
-      })
-    ).rejects.toMatchObject({ code: 'RETRIEVAL_BUDGET' });
+    await expect(retryRead(work, { beforeAttempt: () => { throw Object.assign(new Error('预算'), { code: 'RETRIEVAL_BUDGET' }); } })).rejects.toMatchObject({ code: 'RETRIEVAL_BUDGET' });
     expect(work).not.toHaveBeenCalled();
   });
   it('429和权限错误不会按断网自动重试', async () => {
-    const work = vi.fn(() => {
-      throw Object.assign(new Error('限流'), { status: 429 });
-    });
+    const work = vi.fn(() => { throw Object.assign(new Error('限流'), { status: 429 }); });
     await expect(retryRead(work)).rejects.toMatchObject({ status: 429 });
     expect(work).toHaveBeenCalledTimes(1);
   });
   it('停止立即中断，不再重试', async () => {
     const controller = new AbortController();
-    const work = vi.fn(() => {
-      controller.abort();
-      throw Object.assign(new Error('网络'), { name: 'NetworkError' });
-    });
+    const work = vi.fn(() => { controller.abort(); throw Object.assign(new Error('网络'), { name: 'NetworkError' }); });
     await expect(retryRead(work, { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
     expect(work).toHaveBeenCalledTimes(1);
   });
@@ -77,6 +61,12 @@ describe('搜索实体和聚合线索', () => {
   it('保护原话中的姓名和代码，不用字形猜测替换', () => {
     expect(protectedTerms('请查“冉某某”和600000')).toEqual(['冉某某', '600000']);
     expect(guardQuery('剑某某资料', { original: '请查“冉某某”' }).query).toContain('冉某某');
+  });
+  it('网页缓存每条正文有大小上限，明确标注截断', async () => {
+    const read = createPageReader({ fetchImpl: async () => new Response('字'.repeat(100000), { headers: { 'content-type': 'text/plain' } }) });
+    const result = await read('https://large.example/a');
+    expect(result.length).toBeLessThan(60100);
+    expect(result).toContain('已截断');
   });
   it('原站失败后的聚合线索明确标明来源', async () => {
     const get = vi.fn(async () => new Response('<li class="res-list"><h3><a href="https://news.example.com/a">报道</a></h3><p class="res-desc">摘要</p></li>'));
@@ -93,25 +83,13 @@ describe('搜索实体和聚合线索', () => {
   });
   it('聚合预算和取消也不能吞掉', async () => {
     const get = vi.fn();
-    await expect(
-      searchAggregateHints('名字', {
-        get,
-        retrieval: {
-          consume() {
-            throw Object.assign(new Error('预算'), { code: 'RETRIEVAL_BUDGET' });
-          }
-        }
-      })
-    ).rejects.toMatchObject({ code: 'RETRIEVAL_BUDGET' });
+    await expect(searchAggregateHints('名字', { get, retrieval: { consume() { throw Object.assign(new Error('预算'), { code: 'RETRIEVAL_BUDGET' }); } } })).rejects.toMatchObject({ code: 'RETRIEVAL_BUDGET' });
     expect(get).not.toHaveBeenCalled();
   });
 });
 
 describe('结构化日K', () => {
-  const rows = [
-    ['2026-10-16', '10', '11', '12', '9', '100'],
-    ['2026-10-19', '11', '12', '13', '10', '150']
-  ];
+  const rows = [['2026-10-16', '10', '11', '12', '9', '100'], ['2026-10-19', '11', '12', '13', '10', '150']];
   it('证券市场明确，含非法代码就拒绝', () => {
     expect(stockSymbol('600000')).toBe('sh600000');
     expect(stockSymbol('sz000001')).toBe('sz000001');
@@ -138,18 +116,7 @@ describe('结构化日K', () => {
   });
   it('行情请求之前先消耗预算', async () => {
     const get = vi.fn();
-    await expect(
-      createStockKlineTool({ fetchImpl: get }).run(
-        { code: '600000' },
-        {
-          retrieval: {
-            consume() {
-              throw Object.assign(new Error('预算'), { code: 'RETRIEVAL_BUDGET' });
-            }
-          }
-        }
-      )
-    ).rejects.toMatchObject({ code: 'RETRIEVAL_BUDGET' });
+    await expect(createStockKlineTool({ fetchImpl: get }).run({ code: '600000' }, { retrieval: { consume() { throw Object.assign(new Error('预算'), { code: 'RETRIEVAL_BUDGET' }); } } })).rejects.toMatchObject({ code: 'RETRIEVAL_BUDGET' });
     expect(get).not.toHaveBeenCalled();
   });
 });
@@ -208,12 +175,7 @@ describe('确定性数字和交付回执', () => {
   });
   it('文档结构、读回、渲染严格区分，检查点仅留16条摘要', () => {
     let checkpoint = {};
-    for (let i = 0; i < 30; i++)
-      checkpoint = checkpointEvent(checkpoint, {
-        type: 'artifact_validation',
-        path: i + '.pptx',
-        validation: { readback: 'passed', render: 'not_checked', errors: 1, raw: '不要保存' }
-      });
+    for (let i = 0; i < 30; i++) checkpoint = checkpointEvent(checkpoint, { type: 'artifact_validation', path: i + '.pptx', validation: { readback: 'passed', render: 'not_checked', errors: 1, raw: '不要保存' } });
     expect(checkpoint.artifacts).toHaveLength(16);
     expect(JSON.stringify(checkpoint)).not.toContain('不要保存');
     const review = createExecutionReview();
@@ -225,15 +187,7 @@ describe('确定性数字和交付回执', () => {
 describe('跨层控制与评测', () => {
   it('调研中的预算和停止直接向上交给任务管理器', async () => {
     for (const error of [Object.assign(new Error('预算'), { code: 'RETRIEVAL_BUDGET' }), Object.assign(new Error('停止'), { name: 'AbortError' })]) {
-      await expect(
-        deepResearch({
-          question: '测试',
-          search: async () => {
-            throw error;
-          },
-          read: async () => ''
-        })
-      ).rejects.toBe(error);
+      await expect(deepResearch({ question: '测试', search: async () => { throw error; }, read: async () => '' })).rejects.toBe(error);
     }
   });
   it('调研中断前逐页保存证据，精确问题可复用且不再读页', async () => {
@@ -241,18 +195,11 @@ describe('跨层控制与评测', () => {
     const saved = [];
     let calls = 0;
     const budgetError = Object.assign(new Error('预算'), { code: 'RETRIEVAL_BUDGET' });
-    await expect(
-      deepResearch({
-        question: '测试资料',
-        search: async () => [source],
-        read: async () => '测试资料原文'.repeat(30),
-        llm: async () => {
-          if (calls++) throw budgetError;
-          return JSON.stringify({ queries: ['测试资料'] });
-        },
-        onEvidence: (item) => saved.push(item)
-      })
-    ).rejects.toBe(budgetError);
+    await expect(deepResearch({
+      question: '测试资料', search: async () => [source], read: async () => '测试资料原文'.repeat(30),
+      llm: async () => { if (calls++) throw budgetError; return JSON.stringify({ queries: ['测试资料'] }); },
+      onEvidence: item => saved.push(item)
+    })).rejects.toBe(budgetError);
     expect(saved).toHaveLength(1);
     expect(saved[0].key).toBe(researchEvidenceKey('测试资料'));
     const read = vi.fn();
@@ -270,9 +217,7 @@ describe('跨层控制与评测', () => {
   it('Python排队和运行中停止都及时返回，不启动已取消任务', async () => {
     const workers = [];
     class FakeWorker {
-      constructor() {
-        workers.push(this);
-      }
+      constructor() { workers.push(this); }
       postMessage() {}
       terminate = vi.fn();
     }
@@ -290,11 +235,7 @@ describe('跨层控制与评测', () => {
       firstController.abort();
       await expect(first).rejects.toMatchObject({ name: 'AbortError' });
       expect(workers[0].terminate).toHaveBeenCalled();
-    } finally {
-      firstController.abort();
-      secondController.abort();
-      vi.unstubAllGlobals();
-    }
+    } finally { firstController.abort(); secondController.abort(); vi.unstubAllGlobals(); }
   });
   it('未配置隔离器就不执行宿主机代码', async () => {
     const docker = vi.fn();
@@ -306,27 +247,14 @@ describe('跨层控制与评测', () => {
   });
   it('任务完成不能冒充准确率，未知token不是零', () => {
     expect(qualityReport({ results: [{ id: 'a', status: 'done', quality: 'not_reviewed' }] })).toMatchObject({ reviewedAccuracy: null, tokens: null });
-    const comparison = compareReports(
-      { results: [{ id: 'a', quality: 'passed', status: 'done' }] },
-      { results: [{ id: 'a', quality: 'failed', status: 'done' }] }
-    );
+    const comparison = compareReports({ results: [{ id: 'a', quality: 'passed', status: 'done' }] }, { results: [{ id: 'a', quality: 'failed', status: 'done' }] });
     expect(comparison.regressions).toEqual(['a']);
   });
   it('实际执行器在没有产物时不能无提示交付PPT', async () => {
     let calls = 0;
     const result = await runAgent({
-      adapter: {
-        stream: async () => {
-          calls++;
-          return { text: '已完成。', toolCalls: [], stop: 'end_turn' };
-        }
-      },
-      model: 'test',
-      history: [],
-      userText: '生成PPT',
-      context: { dynamic: '' },
-      tools: [],
-      emit() {}
+      adapter: { stream: async () => { calls++; return { text: '已完成。', toolCalls: [], stop: 'end_turn' }; } },
+      model: 'test', history: [], userText: '生成PPT', context: { dynamic: '' }, tools: [], emit() {}
     });
     expect(calls).toBe(1);
     expect(result.review.pendingFormats).toEqual(['pptx']);
@@ -335,24 +263,6 @@ describe('跨层控制与评测', () => {
   it('真实执行器不会吞掉用户停止的工具异常', async () => {
     const stopped = Object.assign(new Error('已停止'), { name: 'AbortError' });
     const adapter = { stream: async () => ({ text: '', toolCalls: [{ id: 'a', name: 'read_file', args: {} }], stop: 'tool_use' }) };
-    await expect(
-      runAgent({
-        adapter,
-        model: 'test',
-        history: [],
-        userText: '读文件',
-        context: { dynamic: '' },
-        tools: [
-          {
-            name: 'read_file',
-            input_schema: { type: 'object' },
-            run: async () => {
-              throw stopped;
-            }
-          }
-        ],
-        emit() {}
-      })
-    ).rejects.toBe(stopped);
+    await expect(runAgent({ adapter, model: 'test', history: [], userText: '读文件', context: { dynamic: '' }, tools: [{ name: 'read_file', input_schema: { type: 'object' }, run: async () => { throw stopped; } }], emit() {} })).rejects.toBe(stopped);
   });
 });

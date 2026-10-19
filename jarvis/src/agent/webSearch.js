@@ -273,7 +273,7 @@ function tavilySearch(tavilyKey, fetchViaGateway) {
       const res = await retryRead(s => fetchViaGateway ? fetchViaGateway(url, { ...init, signal: s }) : fetch(url, { ...init, signal: s }), { signal, beforeAttempt: attempt => { if (attempt) consume?.('search'); } }).catch(error => { throwControl(error, signal); throw Object.assign(new Error('连不上 Tavily（' + error.message + '）'), { kind: error.kind, code: error.code, name: error.name, cause: error }); });
       if (!res.ok) throw httpError(res.status, tavilyError(res.status, await res.text().catch(() => '')), 'Tavily');
       const j = await res.json();
-      return (j.results ?? []).map((r) => ({ title: r.title, url: r.url, snippet: String(r.content || '').slice(0, 400), ...(r.raw_content && { raw: String(r.raw_content) }) }));
+      return (j.results ?? []).map((r) => ({ title: r.title, url: r.url, snippet: String(r.content || '').slice(0, 400), ...(r.raw_content && { raw: String(r.raw_content).slice(0, 12000) }) }));
     }
   };
 }
