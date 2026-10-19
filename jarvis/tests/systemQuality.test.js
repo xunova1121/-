@@ -7,7 +7,7 @@ import { protectedTerms, guardQuery } from '../src/agent/queryGuard.js';
 import { createExecutionReview } from '../src/agent/executionReview.js';
 import { taskContract } from '../src/agent/taskContract.js';
 import { verifyNumbers } from '../src/agent/verifyNumbers.js';
-import { deepResearch } from '../src/agent/research.js';
+import { deepResearch, researchEvidenceKey } from '../src/agent/research.js';
 import { searchAggregateHints } from '../src/agent/searchFallback.js';
 import { checkpointEvent } from '../shared/taskCheckpoint.js';
 import { qualityReport, compareReports } from '../evals/quality-report.mjs';
@@ -166,6 +166,22 @@ describe('跨层控制与评测', () => {
     for (const error of [Object.assign(new Error('预算'), { code: 'RETRIEVAL_BUDGET' }), Object.assign(new Error('停止'), { name: 'AbortError' })]) {
       await expect(deepResearch({ question: '测试', search: async () => { throw error; }, read: async () => '' })).rejects.toBe(error);
     }
+  });
+  it('调研中断前逐页保存证据，精确问题可复用且不再读页', async () => {
+    const source = { title: '测试资料', url: 'https://evidence.example/a', snippet: '测试摘要' };
+    const saved = [];
+    let calls = 0;
+    const budgetError = Object.assign(new Error('预算'), { code: 'RETRIEVAL_BUDGET' });
+    await expect(deepResearch({
+      question: '测试资料', search: async () => [source], read: async () => '测试资料原文'.repeat(30),
+      llm: async () => { if (calls++) throw budgetError; return JSON.stringify({ queries: ['测试资料'] }); },
+      onEvidence: item => saved.push(item)
+    })).rejects.toBe(budgetError);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].key).toBe(researchEvidenceKey('测试资料'));
+    const read = vi.fn();
+    await deepResearch({ question: '测试资料', depth: 'quick', search: async () => [source], read, evidence: saved });
+    expect(read).not.toHaveBeenCalled();
   });
   it('未配置隔离器就不执行宿主机代码', async () => {
     const docker = vi.fn();

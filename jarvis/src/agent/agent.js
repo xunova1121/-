@@ -379,7 +379,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         if (finalText && !/\n$/.test(finalText)) { emit({ type: 'text', delta: '\n\n' }); finalText += '\n\n'; }
         continue;
       }
-      const note = (!closing || retrieval.extensive) && checks < 2 && !light ? [finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }), review.guidance()].filter(Boolean).join('\n') : '';
+      const note = (!closing || retrieval.extensive) && checks < 2 && !light && cur.adapter.kind !== 'mock' ? [finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }), review.guidance()].filter(Boolean).join('\n') : '';
       if (!note) break;
       checks++;
       convo.push({ role: 'user', content: note });

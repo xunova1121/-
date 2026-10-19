@@ -765,7 +765,10 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         let budgetHit = null;
         let lastSearchError = null;
         const outs = await Promise.all(list.map(one));
-        if (!successes) throw budgetHit ?? lastSearchError ?? Object.assign(new Error(outs.join('\n')), { code: 'NO_SEARCH_RESULTS' });
+        if (!successes) {
+          if (budgetHit) throw budgetHit;
+          throw Object.assign(new Error('搜索失败：' + outs.join('\n')), { cause: lastSearchError, kind: lastSearchError?.kind, code: lastSearchError?.code || 'NO_SEARCH_RESULTS', status: lastSearchError?.status, name: lastSearchError?.name || 'SearchError' });
+        }
         return list.length === 1 ? outs[0] : list.map((q, i) => `### ${q}\n${outs[i]}`).join('\n\n');
       }
     });
@@ -804,10 +807,12 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         question: str('调研问题，写完整（含范围、时间、关注点）'),
         depth: { type: 'string', enum: Object.keys(DEPTHS), description: 'quick 快速（约 4 个来源）/ standard 标准（约 8 个）/ deep 深入（约 14 个，多轮补查）' }
       }, ['question']),
-      run: async ({ question, depth = 'standard' }, { progress, signal, retrieval } = {}) => {
+      run: async ({ question, depth = 'standard' }, { progress, signal, retrieval, sessionId } = {}) => {
         const r = await deepResearch({
           question, depth, llm: ctx.llm ?? null, signal,
           consume: kind => retrieval?.consume(kind),
+          evidence: sessionId ? await evidenceStore.records(sessionId) : [],
+          onEvidence: item => sessionId ? evidenceStore.put(sessionId, item) : undefined,
           search: (q, n) => engine.search(q, n, { signal, consume: kind => retrieval?.consume(kind) }),
           read: (url) => readPage(url, { signal, progress, consume: kind => retrieval?.consume(kind) }),
           onProgress: ({ text }) => progress?.(text)

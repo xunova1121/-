@@ -52,7 +52,8 @@ export function extractive(question, text, n = 4) {
 }
 
 const host = (url) => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; } };
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' });
+export const researchEvidenceKey = question => 'research|' + today() + '|' + String(question).replace(/\\s+/g, ' ').trim().slice(0, 1000);
 
 /**
  * @param {object} o
@@ -65,7 +66,10 @@ const today = () => new Date().toISOString().slice(0, 10);
  * @param {AbortSignal} [o.signal]
  * @returns {Promise<{ title: string, markdown: string, sources: Array<{n,title,url}>, queries: string[], rounds: number }>}
  */
-export async function deepResearch({ question, depth = 'standard', llm = null, search, read, onProgress, signal, consume = () => {} }) {
+export async function deepResearch({ question, depth = 'standard', llm = null, search, read, onProgress, signal, consume = () => {}, evidence = [], onEvidence = null }) {
+  const evidenceKey = researchEvidenceKey(question);
+  const cached = new Map(evidence.filter(item => item.key === evidenceKey && Date.now() - item.savedAt >= 0 && Date.now() - item.savedAt < 600000)
+    .flatMap(item => item.sources ?? []).slice(-12).map(source => [source.url, String(source.text || '').slice(0, 6000)]));
   const cfg = DEPTHS[depth] ?? DEPTHS.standard;
   const say = (stage, text) => onProgress?.({ stage, text });
   const check = () => { if (signal?.aborted) throw Object.assign(new Error('已取消'), { name: 'AbortError' }); };
@@ -128,7 +132,14 @@ export async function deepResearch({ question, depth = 'standard', llm = null, s
         check();
         say('read', `阅读：${r.title || host(r.url)}`);
         let text = '';
-        try { consume('read'); text = String(await read(r.url)).slice(0, PAGE_CHARS); } catch (error) { throwControl(error, signal); }
+        try {
+          if (cached.has(r.url)) text = cached.get(r.url);
+          else {
+            consume('read');
+            text = String(await read(r.url)).slice(0, PAGE_CHARS);
+            if (text.trim()) await onEvidence?.({ key: evidenceKey, savedAt: Date.now(), sources: [{ url: r.url, title: r.title, text }] });
+          }
+        } catch (error) { throwControl(error, signal); }
         const body = text.trim().length > 80 ? text : `${r.title}\n${r.snippet}`;
         let points = [];
         if (llm) {

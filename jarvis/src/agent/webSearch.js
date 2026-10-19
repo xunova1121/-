@@ -270,7 +270,7 @@ function tavilySearch(tavilyKey, fetchViaGateway) {
       const url = 'https://api.tavily.com/search';
       // 密钥放请求头（Tavily 现在的写法），请求体里也带一份（兼容旧接口）
       const init = { method: 'POST', signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tavilyKey}` }, body: JSON.stringify({ api_key: tavilyKey, query, max_results: n, include_answer: false, ...(deep && { include_raw_content: true }), ...(FRESH_DAYS[freshness] && { time_range: freshness }) }) };
-      const res = await retryRead(s => fetchViaGateway ? fetchViaGateway(url, { ...init, signal: s }) : fetch(url, { ...init, signal: s }), { signal, beforeAttempt: attempt => { if (attempt) consume?.('search'); } });
+      const res = await retryRead(s => fetchViaGateway ? fetchViaGateway(url, { ...init, signal: s }) : fetch(url, { ...init, signal: s }), { signal, beforeAttempt: attempt => { if (attempt) consume?.('search'); } }).catch(error => { throwControl(error, signal); throw Object.assign(new Error('连不上 Tavily（' + error.message + '）'), { kind: error.kind, code: error.code, name: error.name, cause: error }); });
       if (!res.ok) throw httpError(res.status, tavilyError(res.status, await res.text().catch(() => '')), 'Tavily');
       const j = await res.json();
       return (j.results ?? []).map((r) => ({ title: r.title, url: r.url, snippet: String(r.content || '').slice(0, 400), ...(r.raw_content && { raw: String(r.raw_content) }) }));
@@ -310,7 +310,7 @@ function keylessSearch(fetchViaGateway, searchRegion) {
           body = await res.text();
           if (res.ok) for (const h of parse(body)) if (!hits.some((x) => x.url === h.url)) { hits.push(h); got++; }
           notes.push(describeSource(name, status, body, got));
-        } catch (e) { throwControl(e, signal); lastError = e; notes.push(name + '：连接失败（' + e.message + '）'); }
+        } catch (e) { throwControl(e, signal); lastError = e; notes.push(name + '：连不上（' + e.message + '）'); }
         if (hits.length >= Math.min(4, n)) break;
       }
       if (!hits.length) throw Object.assign(new Error('各搜索源都没拿到结果——' + notes.join('；') + '。可在设置中配置博查或Tavily'), { code: lastError?.code || 'NO_SEARCH_RESULTS', kind: lastError?.kind, name: lastError?.name || 'SearchError', cause: lastError });

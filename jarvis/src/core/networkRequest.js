@@ -9,7 +9,7 @@ export function throwControl(error, signal) {
 }
 
 export function httpError(httpStatus, detail = '', service = '网络服务') {
-  return Object.assign(new Error(service + '返回 ' + httpStatus + (detail ? '：' + String(detail).slice(0, 200) : '')), {
+  return Object.assign(new Error(service + ' 返回 ' + httpStatus + (detail ? '：' + String(detail).slice(0, 200) : '')), {
     name: 'ApiError',
     kind: 'api',
     status: httpStatus,

@@ -88,7 +88,7 @@ export function createPageReader({ tavilyKey, fetchViaGateway, fetchImpl = (...a
         err = null;
       } catch (e) {
         throwControl(e, signal);
-        if (err) err = Object.assign(new Error(err.message + '；代读也失败：' + e.message), { cause: err, kind: err.kind, status: err.status, code: err.code, name: err.name });
+        if (err) err = Object.assign(new Error(err.message + '；Tavily 代读也失败：' + e.message), { cause: err, kind: err.kind, status: err.status, code: err.code, name: err.name });
       }
     }
     if (err) {
