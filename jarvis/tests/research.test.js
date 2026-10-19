@@ -292,7 +292,7 @@ describe('Tavily', () => {
     const bad = searchEngines({ tavilyKey: 'tvly-x', fetchViaGateway: async () => new Response('{"detail":{"error":"Unauthorized: missing or invalid API key."}}', { status: 401 }) })[0];
     await expect(bad.search('x')).rejects.toThrow(/Tavily 返回 401：Key 无效或没生效.*（Unauthorized: missing or invalid API key.）/);
     const quota = searchEngines({ tavilyKey: 'tvly-x', fetchViaGateway: async () => new Response('{}', { status: 432 }) })[0];
-    await expect(quota.search('x')).rejects.toThrow(/额度用完/);
+    await expect(quota.search('x')).rejects.toThrow(/服务账户或套餐受限/);
     const down = searchEngines({ tavilyKey: 'tvly-x', fetchViaGateway: async () => { throw new TypeError('Failed to fetch'); } })[0];
     await expect(down.search('x')).rejects.toThrow(/连不上 Tavily/);
   });

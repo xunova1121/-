@@ -624,11 +624,11 @@ export function createTurn(app) {
     } catch (err) {
       if (err.name === 'AbortError') return;
       if (turn.background) {
-        finishBackground(turn, { error: app.friendlyError(String(err.message || err)), shown: st.shown, usedTools, files: madeFiles });
+        finishBackground(turn, { error: app.friendlyError(err), shown: st.shown, usedTools, files: madeFiles });
         return;
       }
       if (app.active !== turn) return;
-      const msg = app.friendlyError(String(err.message || err));
+      const msg = app.friendlyError(err);
       const cors = !MOBILE && /Failed to fetch|NetworkError|Load failed|CORS/i.test(msg);
       bubble.append(
         `\n（出错了：${msg}${cors ? '。多半是该服务商不允许网页直接调用：双击 jarvis 文件夹里的 启动.bat（或 start.sh）并保持窗口开着，本页面会自动连上本机网关，然后重试即可' : ''}）`

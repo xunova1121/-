@@ -30,7 +30,8 @@ describe('前端模块的 app 上下文', () => {
 describe('模型报错翻译成人话', () => {
   it('常见状态码给出能照着做的提示，其他原样返回', () => {
     expect(friendlyError('模型接口返回 524：timeout')).toContain('中转站等模型回复超时');
-    expect(friendlyError('模型接口返回 429')).toContain('额度');
+    expect(friendlyError('模型接口返回 429')).toContain('限流');
+    expect(friendlyError('模型接口返回 429')).not.toContain('额度用完');
     expect(friendlyError('模型接口返回 401')).toContain('API Key');
     expect(friendlyError('模型接口返回 502')).toContain('服务商临时故障');
     expect(friendlyError('read ECONNRESET')).toContain('网络连接被断开');

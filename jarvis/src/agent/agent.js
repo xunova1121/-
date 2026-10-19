@@ -1,3 +1,6 @@
+import { createExecutionReview } from './executionReview.js';
+import { throwControl } from '../core/networkRequest.js';
+import { errorKind } from '../core/suggest.js';
 import { summaryForTurn } from './summaryEvidence.js';
 import { OutputBoundary } from '../llm/outputBoundary.js';
 import { capabilityBlock, DIALOGUE_POLICY, needsActionTools } from './dialoguePolicy.js';
@@ -195,6 +198,9 @@ export function trimComputerScreenshots(messages,keep=2) {
 async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, computerTask = false }) {
   if (light && needsActionTools(userText, history)) light = false;
   const capabilities = capabilityBlock(tools);
+  // 环境完全没有产物/计算核验能力时，直接说明未验收，不空转两轮模型。
+  const canReview = tools.some(tool => /^(?:create_document|write_long_document|edit_office_document|read_file|write_file|run_javascript|run_python|computer_run|computer_read_file|verify_numbers)$/.test(tool.name));
+  const review = createExecutionReview(requirementText);
   const retrieval = createRetrievalBudget(lookupDeadline ? '普通查询' : images.length ? `逐项核验 ${requirementText}` : requirementText, { now, timeBudgetMs });
   let closingTurns = 0;
   let retrievalStopped = false;
@@ -215,7 +221,13 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   const availableTools = tools;
   let computerNote = tools.some(t => t.name === 'computer_search') && (computerTask || needsComputer(requirementText,{history})) ? COMPUTER_NOTE : '';
   if (light) tools = [];
-  const own = [plan.tool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools: availableTools })] : [])].filter((t) => !tools.some((x) => x.name === t.name));
+  const executionTool = {
+    name: 'execution_capabilities',
+    description: '核对本轮实际开放的编程、项目测试、文档和电脑操作工具，不把技能说明当已经安装的执行环境。',
+    input_schema: { type: 'object', properties: {}, additionalProperties: false },
+    run: async () => JSON.stringify({ tools: availableTools.map(tool => tool.name).slice(0, 100), projectTests: availableTools.some(tool => tool.name === 'run_project_tests'), note: '工具开放不等于本次执行成功，以真实回执为准；没有项目执行器不能声称已运行测试' })
+  };
+  const own = [plan.tool, review.tool, executionTool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools: availableTools })] : [])].filter((t) => !tools.some((x) => x.name === t.name));
   // 工具按需加载：工具多时只带常用的完整说明，其余列名字、用 tool_search 加载（见 toolLoader.js）
   let loader = createToolLoader(light ? [] : [...tools, ...own]);
   const loadGUI=()=>{if(availableTools.some(t=>t.name==='computer_look'))for(const name of ['computer_look','computer_click','computer_type','computer_key','computer_scroll','computer_drag'])loader.get(name);};
@@ -248,6 +260,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     if (!said.length) return false;
     seen.clear(); // 用户追加了新指令，同样参数可能是新的明确要求
     if (availableTools.some(t => t.name === 'computer_search') && said.some(needsComputer)) computerNote = COMPUTER_NOTE;
+    review.revise(said.join('\n'));
     onTaskUpdate?.(said.join("\n"));
     if (COMPLEX.test(said.join("\n")) || computerNote) { infoPrompt = false; lookupDeadline = false; }
     if (light) { light=false; tools=availableTools; loader=createToolLoader([...tools,...own]); toolHint=loader.hint(); }
@@ -300,7 +313,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       stallTimeouts: lookupDeadline ? { first: 20_000, between: 25_000 } : { first: 45_000, between: 60_000 },
       maxTransientRetries: lookupDeadline ? 0 : 1,
       maxPartialRetries: 1, // 已输出的回答允许一次续写，仍受本轮总时限约束
-      system: light ? [LIGHT_PROMPT, [ctx.dynamic, DIALOGUE_POLICY, capabilities, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, DIALOGUE_POLICY, capabilities, computerNote, requirementContext, toolHint, voice && VOICE_NOTE].filter(Boolean).join('\n\n')],
+      system: light ? [LIGHT_PROMPT, [ctx.dynamic, DIALOGUE_POLICY, capabilities, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, DIALOGUE_POLICY, capabilities, computerNote, requirementContext, toolHint, review.contractNote(), voice && VOICE_NOTE].filter(Boolean).join('\n\n')],
       messages: convo,
       tools: closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list(),
       // 模型自带的联网搜索在服务商那边执行、搜一次扣一次费：剩余次数在发请求前就定好，不等搜完再拦
@@ -368,7 +381,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         if (finalText && !/\n$/.test(finalText)) { emit({ type: 'text', delta: '\n\n' }); finalText += '\n\n'; }
         continue;
       }
-      const note = (!closing || retrieval.extensive) && checks < 2 && !light ? finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }) : '';
+      const note = (!closing || retrieval.extensive) && checks < 2 && !light && cur.adapter.kind !== 'mock' ? [finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }), canReview ? review.guidance() : ''].filter(Boolean).join('\n') : '';
       if (!note) break;
       checks++;
       convo.push({ role: 'user', content: note });
@@ -387,9 +400,11 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       let output;
       let outImages = [];
       let ok = true;
+      let failure = null;
       const sig = `${c.name}:${JSON.stringify(c.args ?? {})}`;
       const times = (seen.get(sig) ?? 0) + 1;
       seen.set(sig, times);
+      if (seen.size > 128) seen.delete(seen.keys().next().value);
       try {
         if (closing && (!retrieval.extensive || WEB_TOOLS.has(c.name))) throw new Error('联网检索已经结束，请直接整理已有资料回答，不要继续调用工具');
         if (!tool) throw new Error(`没有名为 ${c.name} 的工具`);
@@ -408,17 +423,21 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         const progress = (text) => emit({ type: 'tool_progress', id: c.id, name: c.name, text });
         const web = WEB_TOOLS.has(c.name);
         if (web && !retrieval.begin()) throw new Error(retrieval.note);
-        const run = (s) => tool.run(c.args, { signal: s, progress, retrieval, sessionId, checkpoint: event => checkpoint?.(event) });
+        const run = (s) => tool.run(c.args, { signal: s, progress, retrieval, sessionId, requestText: review.report().request, checkpoint: event => { if (event.type === 'artifact_validation') review.artifact(event); return checkpoint?.(event); } });
         const r = web && Number.isFinite(retrieval.remaining)
           ? await withWebDeadline(run, { signal, timeoutMs: retrieval.remaining }) : await run(signal);
         if (r && typeof r === 'object' && 'text' in r) { output = String(r.text); outImages = r.images ?? []; } else output = String(r);
         if(outImages.length&&/^computer_(look|click|type|key|scroll|drag|screenshot)$/.test(c.name))newScreenThisStep=true;
       } catch (e) {
         ok = false;
+        failure = e;
+        if (e.code === 'RETRIEVAL_BUDGET') retrieval.close(e.message);
         output = `错误：${e.message || e}`;
       }
       await checkpoint?.({type:'tool_end',id:c.id,name:c.name,ok,output});
-      emit({ type: 'tool_end', id: c.id, name: c.name, ok, output, ms: Date.now() - t0 });
+      emit({ type: 'tool_end', id: c.id, name: c.name, ok, output, ...(failure && { errorKind: errorKind(failure), code: failure.code }), ms: Date.now() - t0 });
+      if (failure?.code !== 'RETRIEVAL_BUDGET') throwControl(failure, signal);
+      review.record({ name: c.name, args: c.args, ok });
       return { c, ok, output, outImages };
     };
     // 互不影响的只读调用（搜索、读文件、读网页……）同时做；其余按顺序一个个做
@@ -433,7 +452,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       toolCount++;
       if (WEB_TOOLS.has(c.name)) retrieval.end(ok);
       if (ok && /^(write_file|edit_file)$/.test(c.name) && CODE_FILE.test(String(c.args?.path ?? ''))) wroteCode = true;
-      if (ok && /^(run_javascript|run_python|preview|computer_run)$/.test(c.name)) ranCode = true;
+      if (ok && /^(run_javascript|run_python|computer_run|run_project_tests)$/.test(c.name)) ranCode = true;
       if (!ok) failCount++;
       lastToolOk = ok;
       recent.push(ok);
@@ -461,24 +480,32 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     finalText += note;
     emit({ type: 'text', delta: note });
   }
+  const acceptance = review.report();
+  const unmet = review.guidance();
+  if (unmet && !light) {
+    const notice = '\n\n（自动验收仍有待核对项目：' + unmet + '）';
+    finalText += notice;
+    emit({ type: 'text', delta: notice });
+  }
+  emit({ type: 'task_review', review: { ...acceptance, request: undefined } });
   // 只有正常收尾、且最后一次工具调用成功，才记为“完成任务”（计入进化等级）；否则记为未完成，便于之后复盘
   if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
   const hitLimit = step >= limit || retrievalStopped;
-  if (quiet) { /* 分身做的子任务不单独计入任务记录 */ } else if (toolCount && !hitLimit && lastToolOk && failCount === 0) {
+  if (quiet) { /* 分身做的子任务不单独计入任务记录 */ } else if (toolCount && !hitLimit && lastToolOk && failCount === 0 && !unmet) {
     await memory.noteTask(`完成任务：${userText.slice(0, 40)}（调用工具 ${toolCount} 次${failCount ? `，其中 ${failCount} 次失败后已改正` : ''}）`);
   } else if (toolCount) {
     await memory.noteIssue(`未完成任务：${userText.slice(0, 40)}（${hitLimit ? '达到最大步数' : '存在失败步骤，需要核实结果'}；工具 ${toolCount} 次，失败 ${failCount} 次）`);
   }
   emit({ type: 'state', value: 'done' });
-  return { text: finalText.trim(), steps: step + 1, toolCalls: toolCount };
+  return { text: finalText.trim(), steps: step + 1, toolCalls: toolCount, review: acceptance };
 }
 
 /** 保留旧导出的深度研究预算；普通查询默认预算见 retrievalBudget.js。 */
 export const TIME_BUDGET_MS = 8 * 60e3;
-const WEB_TOOLS = new Set(['web_search', 'fetch_url', 'fact_check', 'deep_research']);
+const WEB_TOOLS = new Set(['get_weather', 'get_stock_kline', 'web_search', 'fetch_url', 'fact_check', 'deep_research']);
 
 /** 可以同时执行的只读工具（不改文件、不操作电脑、不需要用户确认） */
-export const PARALLEL_SAFE = new Set(['web_search', 'fetch_url', 'read_evidence', 'read_file', 'list_files', 'find_files', 'search_in_files', 'kb_search', 'recall', 'search_conversations', 'read_conversation', 'get_weather', 'get_current_time', 'verify_numbers', 'read_skill_file', 'computer_read_file', 'computer_list_dir']);
+export const PARALLEL_SAFE = new Set(['get_stock_kline', 'review_task', 'check_search_terms', 'web_search', 'fetch_url', 'read_evidence', 'read_file', 'list_files', 'find_files', 'search_in_files', 'kb_search', 'recall', 'search_conversations', 'read_conversation', 'get_weather', 'get_current_time', 'verify_numbers', 'read_skill_file', 'computer_read_file', 'computer_list_dir']);
 const CODE_FILE = /\.(m?js|ts|py|html?)$/i;
 /** 回答结尾是“我现在开始 / 接下来生成 / 马上做 / 稍等”这类预告（说了要做但还没做） */
 /** “需要的话我可以接着做 PPT”这类询问不算（那是在问用户） */

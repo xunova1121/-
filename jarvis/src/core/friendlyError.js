@@ -1,11 +1,17 @@
-/** 常见的服务商错误翻译成人话（已经自动重试过仍失败才会走到这里） */
-export function friendlyError(msg) {
-  const code = Number(msg.match(/模型接口返回 (\d{3})/)?.[1]);
-  if (code === 524 || code === 504 || code === 522) return `中转站等模型回复超时（${code}），已自动重试过。可以点“继续”从断开的地方接着写，或在输入框里换一个更快的模型`;
-  if (code === 429) return '请求太频繁或额度用完（429），已自动重试过。稍等一会儿再试，或检查中转站余额';
-  if (code === 401 || code === 403) return `API Key 不对或没有权限（${code}）：请在“模型”里检查密钥`;
-  if (code >= 500) return `服务商临时故障（${code}），已自动重试过。稍后再试，或换一个模型`;
-  if (/图片模型|image model|images\/generations/i.test(msg)) return '当前选的是画图模型，不能用来聊天：点输入框里的模型名换一个聊天模型。想画图直接说“画一张…”就行';
-  if (/connection reset|econnreset|socket hang up/i.test(msg)) return '网络连接被断开（已自动重试过）。可以点“继续”从断开的地方接着写；手机上可以试试切换 Wi‑Fi / 流量';
+import { errorKind } from './suggest.js';
+/** 不从429或网络中断推断欠费，也不虚构已经重试。 */
+export function friendlyError(error) {
+  const msg = String(error?.message ?? error ?? '');
+  const code = Number(error?.status ?? msg.match(/(?:模型接口返回|HTTP|返回) (\d{3})/)?.[1]);
+  const kind = errorKind(error);
+  if (kind === 'budget') return '本轮检索预算已用完，已保留取得的内容；这不代表服务账户余额用完';
+  if (['insufficient_quota', 'INSUFFICIENT_CREDIT', 'CREDIT_EXHAUSTED'].includes(error?.code)) return '服务商明确返回余额或账户额度不足，请检查该服务账户';
+  if ([524, 504, 522].includes(code)) return '中转站等模型回复超时（' + code + '），可以继续原任务或换模型';
+  if (kind === 'timeout' || [524, 504, 522, 408].includes(code)) return '请求等待超时，已保留已有内容。可以继续原任务或切换可用模型';
+  if (kind === 'network') return '网络连接被断开或异常，已保留已有内容。请检查网络后继续';
+  if (code === 429) return '请求过于频繁或服务商限流（429），稍后再试；仅凭429无法判断账户余额';
+  if (code === 401 || code === 403) return 'API Key密钥或权限校验失败（' + code + '），请检查模型设置';
+  if (code >= 500) return '服务商临时故障（' + code + '），可以稍后再试或换一个模型';
+  if (/图片模型|image model|images\/generations/i.test(msg)) return '当前选的是画图模型，不能用来聊天：请换一个聊天模型';
   return msg;
 }

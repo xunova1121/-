@@ -26,8 +26,8 @@ it('证据逐页持久化，再继续相同请求不重搜重读；过期或不�
 it('内部请求跨工具共享资源上限；预算耗尽不调用提取模型',async()=>{
  const b=createRetrievalBudget('查价格');for(let i=0;i<6;i++)b.consume('search');
  const search=vi.fn(async()=>hits),model=vi.fn(llm);
- const result=await factCheck({...args(),search,llm:model,consume:k=>b.consume(k)});
- expect(search).not.toHaveBeenCalled();expect(model).not.toHaveBeenCalled();expect(result.items[0].status).toBe('error');
+ await expect(factCheck({...args(),search,llm:model,consume:k=>b.consume(k)})).rejects.toMatchObject({code:'RETRIEVAL_BUDGET'});
+ expect(search).not.toHaveBeenCalled();expect(model).not.toHaveBeenCalled();
 });
 it('明确冲突不标成双来源已核实，编造引用仍无效',async()=>{
  const r=await factCheck({...args(),llm:async()=>JSON.stringify({answer:'不一致',conflict:'价格不同',evidence:[{source:1,quote:page},{source:2,quote:page}]})});expect(r.items[0].status).toBe('single');expect(r.items[0].conflict).toBe('价格不同');

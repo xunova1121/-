@@ -1,3 +1,4 @@
+import { throwControl } from '../core/networkRequest.js';
 /**
  * 逐项查证（fact_check）：把“截图里的 7 场比赛查赛果”“这 10 只股票今天收盘价”这类任务交给程序按固定流程做，
  * 而不是全靠模型自己决定搜什么、信什么。每一项：
@@ -124,7 +125,7 @@ export async function factCheck({ question, items, date = '', context = '', llm,
   const worker = async () => {
     for (let i = next++; i < list.length; i = next++) {
       if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
-      results[i] = await checkOne(list[i], i).catch((e) => ({ label: list[i].label, status: 'error', answer: null, error: e.message, sources: [] }));
+      results[i] = await checkOne(list[i], i).catch((e) => { throwControl(e, signal); return ({ label: list[i].label, status: 'error', answer: null, error: e.message, sources: [] }); });
       onProgress?.(`已查完 ${results.filter(Boolean).length}/${list.length}：${list[i].label}`);
     }
   };

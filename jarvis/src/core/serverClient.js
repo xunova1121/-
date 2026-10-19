@@ -93,7 +93,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
       return res;
     } catch (e) {
       note(path, t0, false);
-      if (ctrl.timedOut && !signal?.aborted) throw Object.assign(new Error(`连服务器超时（${Math.round(timeout / 1000)} 秒没有回应）`), { timeout: true });
+      if (ctrl.timedOut && !signal?.aborted) throw Object.assign(new Error(`连服务器超时（${Math.round(timeout / 1000)} 秒没有回应）`), { timeout: true, kind: 'timeout', name: 'TimeoutError' });
       throw e;
     } finally {
       clearTimeout(timer);
@@ -248,7 +248,7 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
           else if (ev.type !== 'user_note') emit(ev);
         }
       });
-      if (end.status === 'error') throw new Error(end.error || '服务器上的任务出错了');
+      if (end.status === 'error') throw Object.assign(new Error(end.error || '服务器上的任务出错了'), { kind: end.errorKind, code: end.code });
       if (end.status === 'stopped') throw Object.assign(new Error('aborted'), { name: 'AbortError' });
       return { text: end.text ?? '', toolCalls: end.toolCalls ?? 0, steps: 1 };
     } finally {

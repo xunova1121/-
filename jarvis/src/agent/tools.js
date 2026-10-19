@@ -1,3 +1,7 @@
+import { createStockKlineTool } from './stockKline.js';
+import { queryGuardTool, guardQuery } from './queryGuard.js';
+import { searchAggregateHints, safeFallbackQuery } from './searchFallback.js';
+import { throwControl } from '../core/networkRequest.js';
 import { createVerificationTool, currentTime } from './verifyNumbers.js';
 import { checkpointView } from '../../shared/taskCheckpoint.js';
 import { DOCUMENT_TEMPLATES, documentTemplate } from './documentTemplates.js';
@@ -83,7 +87,7 @@ export function createTools(ctx) {
       progress?.('生成Office真实预览…');const rendered=await ctx.officeRender(out.blob,out.ext,{signal});
       if(rendered.available){const preview=await ws.write(target.slice(0,target.lastIndexOf('.'))+'.预览.pdf',rendered.blob);ctx.onFileChanged?.(preview.path);notes.push('已用LibreOffice真实转换为PDF：'+preview.path+'；可打开核对实际分页，未宣称人工视觉验收通过');}
       else notes.push(rendered.reason);
-    }catch(e){if(e.name==='AbortError')throw e;notes.push('Office真实预览未完成：'+e.message);}
+    }catch(e){throwControl(e, signal);notes.push('Office真实预览未完成：'+e.message);}
     return notes;
   };
 
@@ -98,6 +102,8 @@ export function createTools(ctx) {
   };
   const tools = [
     createVerificationTool(),
+    createStockKlineTool(ctx),
+    queryGuardTool(),
     {
       name: 'remember',
       description: '把关于用户的长期信息存入记忆（偏好、身份、习惯、目标、重要事实）。用户说“记住……”或透露了以后用得上的个人信息时调用。和已有记忆重复会自动合并，同一件事的新说法会自动取代旧的（旧版本保留为历史）。不要记录密码、密钥等敏感信息。',
@@ -517,7 +523,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         template: str('Word 模板路径（工作区里的 .docx，可选）：沿用模板的字体、标题和正文样式。不填时，工作区“模板 / templates”文件夹里或文件名带“模板”的 .docx 会自动使用；传 "none" 不用模板'),
         requirements: str('用户对这份文档的原始要求（尽量用原话：主题、必须包含的内容、字数页数、格式）。填了会在生成前对照检查有没有漏项，并自动改一轮')
       }, ['format', 'path', 'content']),
-      run: async ({ format, path, title, content, theme, cover, subtitle, author, issuer, docNo, toc, template, requirements }, { progress, signal } = {}) => {
+      run: async ({ format, path, title, content, theme, cover, subtitle, author, issuer, docNo, toc, template, requirements }, { progress, signal, checkpoint } = {}) => {
         const loadImage = async (src) => {
           if (/^(https?:|data:)/i.test(src)) return null;
           try { return new Uint8Array(await (await ws.readBlob(src)).arrayBuffer()); } catch { return null; }
@@ -560,19 +566,24 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
                 if (errors(o) <= errors(out)) { out = o; looked.changed = v.changed; }
               }
             }
-          } catch (e) { if (e.name === 'AbortError') throw e; }
+          } catch (e) { throwControl(e, signal); }
         }
         const target = path.replace(/\.[a-z0-9]+$/i, '') + `.${out.ext}`;
         const validation=await checkArtifact(out.blob,target);
         const r = await ws.write(target, out.blob);
         ctx.onFileChanged?.(r.path);
         const notes = [`主题：${out.theme.name}`,validation.readback==='passed'?'已检查真实文件结构并读回有效内容':'已检查文件头或结构'];
-        notes.push(...await previewOffice(out,target,progress,signal));
+        const renderNotes = await previewOffice(out,target,progress,signal);
+        notes.push(...renderNotes);
         if (check.checked) notes.push(check.changed ? `生成前对照要求自查，修正了 ${check.changed} 处${check.problems.length ? `（${check.problems.slice(0, 4).join('；')}）` : ''}` : '生成前对照要求自查，没发现问题');
         const what = format === 'xlsx' ? '公式' : '排版';
         if (post?.fixed) notes.push(`生成后检查${what}，自动修正了 ${post.fixed} 处`);
         if (looked) notes.push(looked.changed ? `看图检查了 ${looked.pages} 页，修正了 ${looked.changed} 处${looked.problems.length ? `（${looked.problems.slice(0, 3).join('；')}）` : ''}` : `看图检查了 ${looked.pages} 页${looked.problems.length ? `，发现的问题没能自动改：${looked.problems.slice(0, 3).join('；')}` : '，没发现明显问题'}`);
         const left = [...check.issues, ...built(out)];
+        await checkpoint?.({ type: 'artifact_validation', path: r.path, validation: {
+          ...validation, errors: left.filter(issue => issue.level === 'error').length,
+          render: renderNotes.some(note => note.includes('已用LibreOffice')) ? 'converted_not_visual_reviewed' : 'not_checked'
+        } });
         if (left.length) notes.push(`还需要注意：${left.map((x) => x.text).join('；')}`);
         if (out.info?.toc) notes.push('已加目录（Word 打开时如提示更新域，点“是”即可填上页码；WPS 里右键目录 →“更新目录”）');
         if (out.info?.missingImages?.length) notes.push(`这些图片没找到，用占位文字代替了：${out.info.missingImages.join('、')}`);
@@ -649,16 +660,17 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       name: 'run_javascript',
       description: '在不透明来源隔离环境运行 JavaScript：无DOM、不可访问应用存储、不可联网。用于计算、数据处理和验证代码；联网读取用fetch_url工具。用console.log输出，return返回值；超时8秒，可停止。',
       input_schema: S({ code: str('JavaScript 代码（作为 async 函数体执行）') }, ['code']),
-      run: async ({ code }, {signal} = {}) => {const r=await runJavaScript(code,{signal});if(!r.ok)throw new Error(formatRun(r));return formatRun(r);}
+      run: async ({ code }, {signal} = {}) => {const r=await runJavaScript(code,{signal});throwControl(null, signal);if(!r.ok)throw new Error(formatRun(r));return formatRun(r);}
     },
     {
       name: 'run_python',
       description: '运行 Python（浏览器内的 Pyodide，首次使用需联网下载几十 MB，手机上常要几分钟；读文件用 read_file、生成文档用 create_document，不要用它代替）。工作目录 /workspace 就是工作区，读写的文件会同步回工作区。可用 numpy、pandas 等常见库（自动加载）；python-pptx / python-docx / openpyxl 等纯 Python 库在代码开头用 `import micropip; await micropip.install("python-pptx")` 安装。',
       input_schema: S({ code: str('Python 代码') }, ['code']),
-      run: async ({ code }) => {
+      run: async ({ code }, { signal } = {}) => {
         const listing = pickPythonFiles(await ws.list(), code);
         const files = await Promise.all(listing.map(async (f) => ({ path: f.path, bytes: await (await ws.readBlob(f.path)).arrayBuffer() })));
-        const r = await runPython(code, { files });
+        const r = await runPython(code, { files, signal });
+        throwControl(null, signal);
         if(!r.ok)throw new Error(formatRun(r));
         const saved = [];
         for (const c of r.changed ?? []) {
@@ -683,10 +695,20 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       name: 'fetch_url',
       description: '获取网页内容（转换为文字），用于读取用户给出的链接或最新资料。',
       input_schema: S({ url: str('http(s) 地址') }, ['url']),
-      run: async ({ url }, { signal, progress, retrieval, sessionId } = {}) => {
+      run: async ({ url }, { signal, progress, retrieval, sessionId, requestText } = {}) => {
         if (!/^https?:\/\//i.test(url)) throw new Error('只支持 http(s) 地址');
         retrieval?.consume('read');
-        const text = await readPage(url, { signal, progress });
+        let text;
+        try {
+          text = await readPage(url, { signal, progress, consume: kind => retrieval?.consume(kind) });
+        } catch (error) {
+          throwControl(error, signal);
+          if (error.code === 'PRIVATE_NETWORK_BLOCKED') throw error;
+          const hints = await searchAggregateHints(safeFallbackQuery(url, requestText), {
+            get: ctx.fetchViaGateway ?? ((...args) => fetch(...args)), signal, retrieval
+          });
+          return '原网页读取失败：' + error.message + '\n以下只是聚合搜索线索，未取得原站正文，不能声称已核实：\n' + JSON.stringify(hints);
+        }
         // 存一份原文片段：之后要细节用 read_evidence 取，不用重新联网
         const sid = sessionId ?? ctx.currentSessionId?.();
         const [id] = sid && text ? await evidenceStore.put(sid, { sources: [{ url, title: String(text).split('\n').find((l) => l.trim())?.trim().slice(0, 120), text }] }).catch(() => []) : [];
@@ -703,7 +725,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       name: 'get_weather',
       description: '查天气：某个城市的实况和未来几天预报（温度、天气、降水概率、风），数据来自国际气象模型。国内城市如果你能联网搜索，再搜一下“城市 日期 天气 中国天气网”核对一次，两者不一致时以中国气象局（中国天气网）为准。',
       input_schema: S({ place: str('城市或地区名，如“南京”“上海浦东”“Tokyo”'), days: { type: 'number', description: '要几天预报，默认 3，最多 7' } }, ['place']),
-      run: async ({ place, days }) => getWeather(place, { get: ctx.fetchViaGateway || ((u) => fetch(u)), days: Math.min(7, Math.max(1, Number(days) || 3)) })
+      run: async ({ place, days }, { signal, retrieval } = {}) => getWeather(place, { signal, retrieval, get: ctx.fetchViaGateway || ((u) => fetch(u)), days: Math.min(7, Math.max(1, Number(days) || 3)) })
     },
     {
       name: 'get_local_metrics',
@@ -723,26 +745,31 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         queries: { type: 'array', items: { type: 'string' }, description: '可选：多个搜索词，一次并行搜索（最多 8 个），例如每场比赛一个' },
         freshness: { type: 'string', enum: ['day', 'week', 'month', 'year'], description: '可选：只要最近一天 / 一周 / 一个月 / 一年内的结果（新闻、刚结束的比赛、最新价格时用）' }
       }, []),
-      run: async ({ query, queries, freshness }, { signal, retrieval } = {}) => {
-        const list = [...new Set([query, ...(Array.isArray(queries) ? queries : [])].map((q) => String(q || '').trim()).filter(Boolean))].slice(0, 8);
+      run: async ({ query, queries, freshness }, { signal, retrieval, requestText } = {}) => {
+        const list = [...new Set([query, ...(Array.isArray(queries) ? queries : [])].map((q) => String(q || '').trim()).filter(Boolean).map(q => guardQuery(q, { original: requestText }).query))].slice(0, 8);
         if (!list.length) throw new Error('请给出搜索词');
         let successes = 0;
         const one = async (q) => {
           try {
             retrieval?.consume('search');
-            const hits = await withWebDeadline((s) => engine.search(q, list.length > 1 ? 5 : 6, { freshness, signal: s }), { signal, timeoutMs: 12000 });
+            const hits = await withWebDeadline((s) => engine.search(q, list.length > 1 ? 5 : 6, { freshness, signal: s, consume: kind => retrieval?.consume(kind) }), { signal, timeoutMs: 12000 });
             if (hits.length) successes++;
             return hits.length ? hits.map((r) => `- ${r.title}\n  ${r.url}\n  ${String(r.snippet || '').slice(0, 300)}`).join('\n') : '（没有结果：换个说法、换成英文或原文再搜）';
           } catch (e) {
             if (signal?.aborted || e.name === 'AbortError') throw e;
             // 预算用完：别的词搜到了就照常返回；全没搜到才把预算错误交给主循环（它会让模型直接整理答案，而不是换词再搜）
             if (e.code === 'RETRIEVAL_BUDGET') { budgetHit = e; return `（没有搜：${e.message}）`; }
+            lastSearchError = e;
             return `（搜索失败：${e.message}）`;
           }
         };
         let budgetHit = null;
+        let lastSearchError = null;
         const outs = await Promise.all(list.map(one));
-        if (!successes) throw budgetHit ?? new Error(outs.join('\n'));
+        if (!successes) {
+          if (budgetHit) throw budgetHit;
+          throw Object.assign(new Error('搜索失败：' + outs.join('\n')), { cause: lastSearchError, kind: lastSearchError?.kind, code: lastSearchError?.code || 'NO_SEARCH_RESULTS', status: lastSearchError?.status, name: lastSearchError?.name || 'SearchError' });
+        }
         return list.length === 1 ? outs[0] : list.map((q, i) => `### ${q}\n${outs[i]}`).join('\n\n');
       }
     });
@@ -767,8 +794,8 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
           evidence: records,
           onEvidence: evidence => signal?.aborted || !sid ? undefined : evidenceStore.put(sid,evidence),
           llm: ctx.reasonLlm ?? ctx.llm ?? null,
-          search: (q, n, o) => engine.search(q, n, { ...o, signal }),
-          read: (url) => readPage(url, { signal, progress }),
+          search: (q, n, o) => engine.search(q, n, { ...o, signal, consume: kind => retrieval?.consume(kind) }),
+          read: (url) => readPage(url, { signal, progress, consume: kind => retrieval?.consume(kind) }),
           onProgress: (t) => progress?.(t)
         });
         return formatReport(r);
@@ -781,11 +808,14 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         question: str('调研问题，写完整（含范围、时间、关注点）'),
         depth: { type: 'string', enum: Object.keys(DEPTHS), description: 'quick 快速（约 4 个来源）/ standard 标准（约 8 个）/ deep 深入（约 14 个，多轮补查）' }
       }, ['question']),
-      run: async ({ question, depth = 'standard' }, { progress, signal } = {}) => {
+      run: async ({ question, depth = 'standard' }, { progress, signal, retrieval, sessionId } = {}) => {
         const r = await deepResearch({
           question, depth, llm: ctx.llm ?? null, signal,
-          search: (q, n) => engine.search(q, n, { signal }),
-          read: (url) => readPage(url, { signal, progress }),
+          consume: kind => retrieval?.consume(kind),
+          evidence: sessionId ? await evidenceStore.records(sessionId) : [],
+          onEvidence: item => sessionId ? evidenceStore.put(sessionId, item) : undefined,
+          search: (q, n) => engine.search(q, n, { signal, consume: kind => retrieval?.consume(kind) }),
+          read: (url) => readPage(url, { signal, progress, consume: kind => retrieval?.consume(kind) }),
           onProgress: ({ text }) => progress?.(text)
         });
         if (signal?.aborted) throw Object.assign(new Error('已停止调研'), { name: 'AbortError' });

@@ -15,9 +15,11 @@ const NET_CODES = /^(ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EPIPE|ENETUNREA
 export function errorKind(error) {
   if (!error) return '';
   if (typeof error === 'object') {
-    if (['timeout', 'api', 'network'].includes(error.kind)) return error.kind;
+    if (['timeout', 'api', 'network', 'budget'].includes(error.kind)) return error.kind;
     const code = String(error.code || error.cause?.code || '');
-    if (error.stalled || error.name === 'TimeoutError' || error.name === 'LookupTimeoutError' || code === 'LOOKUP_TIMEOUT' || code === 'RETRIEVAL_BUDGET' || code === 'ETIMEDOUT') return 'timeout';
+    if (code === 'RETRIEVAL_BUDGET') return 'budget';
+    if (error.name === 'NetworkError' || code === 'NETWORK_ERROR') return 'network';
+    if (error.stalled || error.name === 'TimeoutError' || error.name === 'LookupTimeoutError' || code === 'LOOKUP_TIMEOUT' || code === 'ETIMEDOUT') return 'timeout';
     if (Number.isInteger(error.status) && error.status >= 400) return 'api';
     if (NET_CODES.test(code) || error.name === 'TypeError' && /fetch|network|load failed/i.test(String(error.message))) return 'network';
   }
@@ -28,7 +30,7 @@ export function errorKind(error) {
   if (/network|网络|failed to fetch|fetch failed|load failed|连接|socket|econn/i.test(message)) return 'network';
   return '';
 }
-const KIND_TEXT = { timeout: '等待超时', api: '模型接口出错', network: '连接异常' };
+const KIND_TEXT = { timeout: '等待超时', api: '模型接口出错', network: '连接异常', budget: '本轮检索预算已用完' };
 export function interruptionMark(error) {
   return `（本轮回答未完成：${KIND_TEXT[errorKind(error)] || '执行出错'}。已保留可恢复的内容。）`;
 }

@@ -13,11 +13,36 @@ const dateValue = (value) => {
 };
 
 export function verifyNumbers(action, data = {}) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw invalid('输入需为对象');
   const note = '仅校验给定输入的运算和适用规则，不代表行情实时、输入属实或保证成交。';
+  if (action === 'date_difference') {
+    const start = dateValue(data.startDate);
+    const end = dateValue(data.endDate);
+    return { startDate: data.startDate, endDate: data.endDate, days: (end - start) / 86400000, note: '按自然日计算，不代表交易日或工作日' };
+  }
+  if (action === 'date_add') {
+    const start = dateValue(data.date);
+    if (!Number.isSafeInteger(data.days) || Math.abs(data.days) > 365000) throw invalid('天数需为合理范围的整数');
+    return { date: new Date(start + data.days * 86400000).toISOString().slice(0, 10), note: '自然日，不自动排除节假日' };
+  }
+  if (action === 'percentage') {
+    if (!Number.isFinite(data.part) || !Number.isFinite(data.total) || data.total === 0) throw invalid('分子分母需有限且分母非零');
+    return { percent: round(data.part / data.total * 100), note };
+  }
+  if (action === 'money_total') {
+    if (!Array.isArray(data.amounts) || !data.amounts.length || data.amounts.length > 200) throw invalid('金额需1至200项');
+    const cents = data.amounts.map(value => {
+      if (!Number.isFinite(value) || Math.abs(value) > 1e10 || Math.abs(value * 100 - Math.round(value * 100)) > 0.0001) throw invalid('金额最多两位小数且需在安全范围');
+      return Math.round(value * 100);
+    });
+    return { total: cents.reduce((sum, value) => sum + value, 0) / 100, note: '按分求和，币种必须相同' };
+  }
   if (action === 'pnl') {
     const cost = number(data.cost, '成本', 0.000001);
     const price = number(data.price, '价格');
-    return { cost, price, pnlPercent: round(((price - cost) / cost) * 100), note };
+    const shares = data.shares === undefined ? null : number(data.shares, '份额');
+    const fees = data.fees === undefined ? 0 : number(data.fees, '费用');
+    return { cost, price, pnlPercent: round(((price - cost) / cost) * 100), ...(shares !== null && { pnlAmount: round((price - cost) * shares - fees), shares, fees }), note };
   }
   if (action === 'gestational_age') {
     const weeks = number(data.weeks, '基准孕周');
@@ -56,15 +81,15 @@ export function verifyNumbers(action, data = {}) {
 export function createVerificationTool() {
   return {
     name: 'verify_numbers',
-    description: '校验盈亏、孕周日期、普通A股T+1可卖数量和委托价范围。先提供有来源的输入，不能用此工具把缓存价格变成已核实行情。',
+    description: '确定性计算自然日期差/加减、金额合计、百分比、盈亏、孕周日期、普通A股T+1可卖数量和委托价范围。先提供有来源的输入，不能用此工具把缓存价格变成已核实行情。',
     input_schema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['pnl', 'gestational_age', 'a_share_order'] },
+        action: { type: 'string', enum: ['pnl', 'gestational_age', 'a_share_order', 'date_difference', 'date_add', 'percentage', 'money_total'] },
         data: {
           type: 'object',
           description:
-            'pnl:cost,price；gestational_age:weeks,days,baseDate,targetDate；a_share_order:totalShares,todayBuyShares,sellShares,orderPrice,lowerLimit,upperLimit',
+            'date_difference:startDate,endDate；date_add:date,days；percentage:part,total；money_total:amounts；pnl:cost,price,shares可选,fees可选；gestational_age:weeks,days,baseDate,targetDate；a_share_order:totalShares,todayBuyShares,sellShares,orderPrice,lowerLimit,upperLimit',
           additionalProperties: true
         }
       },

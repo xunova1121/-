@@ -1,3 +1,5 @@
+import { retryRead, httpError, throwControl } from '../core/networkRequest.js';
+import { errorKind } from '../core/suggest.js';
 /**
  * 查天气：不走搜索引擎（天气在搜索结果页里是特殊卡片，抓网页抓不到），直接问免费的天气接口，不用密钥。
  *   1. Open-Meteo：先用地名查经纬度（支持中文地名），再取实况和未来几天预报
@@ -52,9 +54,10 @@ export function formatWttr(placeName, j, days = 3) {
  * @param {string} place 地名（中文或英文）
  * @param {{ get: (url: string) => Promise<Response>, days?: number }} o
  */
-export async function getWeather(place, { get, days = 3 }) {
+export async function getWeather(place, { get, days = 3, signal, retrieval }) {
+  if (!String(place || '').trim()) throw Object.assign(new Error('缺少地点，请提供城市或定位结果，不能默认猜测城市'), { code: 'WEATHER_LOCATION_REQUIRED', name: 'ValidationError' });
   const name = String(place || '').trim().replace(/(市|区|县)$/, '') || '北京';
-  const json = async (url) => { const r = await get(url); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); };
+  const json = url => retryRead(async requestSignal => { const response = await get(url, { signal: requestSignal }); if (!response.ok) throw httpError(response.status, '', '天气服务'); return response.json(); }, { signal, timeoutMs: 4000, beforeAttempt: () => retrieval?.consume('read') });
   let firstErr;
   try {
     const geo = await json(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=zh&format=json`);
@@ -64,10 +67,11 @@ export async function getWeather(place, { get, days = 3 }) {
       + '&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,precipitation'
       + `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=${Math.min(7, Math.max(1, days))}`);
     return formatOpenMeteo(p, fc, days);
-  } catch (e) { firstErr = e; }
+  } catch (e) { throwControl(e, signal); firstErr = e; }
   try {
     return formatWttr(name, await json(`https://wttr.in/${encodeURIComponent(name)}?format=j1&lang=zh`), days);
   } catch (e) {
-    throw new Error(`天气服务连不上（${firstErr?.message}；${e.message}），可以改用 web_search 搜“${name} 天气”`);
+    throwControl(e, signal);
+    throw Object.assign(new Error('天气服务访问失败（' + firstErr?.message + '；' + e.message + '），可以改用web_search查询'), { code: e.code || 'WEATHER_FAILED', kind: errorKind(e) || 'api', status: e.status, cause: e });
   }
 }

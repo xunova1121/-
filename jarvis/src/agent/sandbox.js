@@ -108,27 +108,43 @@ let pyBusy = Promise.resolve();
  * @param {string} code
  * @param {{ files?: Array<{path, bytes: ArrayBuffer}>, timeout?: number }} opts
  */
-export function runPython(code, { files = [], timeout = 120000 } = {}) {
-  const job = pyBusy.then(() => new Promise((resolve) => {
+export function runPython(code, { files = [], timeout = 120000, signal } = {}) {
+  const cancelled = () => signal?.reason ?? Object.assign(new Error('已停止Python运行'), { name: 'AbortError' });
+  if (signal?.aborted) return Promise.reject(cancelled());
+  const job = pyBusy.then(() => new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(cancelled()); return; }
     if (!pyWorker) {
       const url = URL.createObjectURL(new Blob([pyWorkerSource], { type: 'text/javascript' }));
-      pyWorker = new Worker(url); URL.revokeObjectURL(url);
+      pyWorker = new Worker(url);
+      URL.revokeObjectURL(url);
     }
-    const w = pyWorker;
-    const t = setTimeout(() => {
-      w.terminate();
-      pyWorker = null;
-      resolve({ ok: false, logs: [], error: `运行超过 ${timeout / 1000} 秒，已终止` });
-    }, timeout);
-    w.onmessage = ({ data }) => { clearTimeout(t); if (MOBILE) { w.terminate(); pyWorker = null; } resolve(data); };
-    w.onerror = (e) => {
-      clearTimeout(t);
-      w.terminate();
-      pyWorker = null;
-      resolve({ ok: false, logs: [], error: `Python 环境加载失败（需要联网下载 Pyodide）：${e.message || '网络错误'}` });
+    const worker = pyWorker;
+    let timer;
+    const finish = (data, error) => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      worker.onmessage = null;
+      worker.onerror = null;
+      if (error || MOBILE) {
+        worker.terminate();
+        if (pyWorker === worker) pyWorker = null;
+      }
+      if (error) reject(error);
+      else resolve(data);
     };
-    w.postMessage({ code, files });
+    const abort = () => finish(null, cancelled());
+    signal?.addEventListener('abort', abort, { once: true });
+    timer = setTimeout(() => finish(null, Object.assign(new Error('Python运行超时，已终止'), { name: 'TimeoutError', kind: 'timeout' })), timeout);
+    worker.onmessage = ({ data }) => finish(data);
+    worker.onerror = event => finish(null, Object.assign(new Error('Python环境执行失败：' + (event.message || '未知错误')), { code: 'PYTHON_WORKER_FAILED' }));
+    worker.postMessage({ code, files });
   }));
   pyBusy = job.catch(() => {});
-  return job;
+  // 排队时取消也立即返回；轮到该任务时会检查信号，不会启动新Worker。
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(cancelled());
+    signal?.addEventListener('abort', abort, { once: true });
+    job.then(resolve, reject).finally(() => signal?.removeEventListener('abort', abort));
+    if (signal?.aborted) abort();
+  });
 }
