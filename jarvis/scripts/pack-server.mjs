@@ -21,12 +21,12 @@ fs.mkdirSync(out, { recursive: true });
 const stage = fs.mkdtempSync(path.join(out, '.stage-'));
 const dir = path.join(stage, 'jarvis-server');
 fs.mkdirSync(dir);
-for (const p of ['dist', 'server', 'shared', 'src', 'deploy', 'package-lock.json']) fs.cpSync(path.join(ROOT, p), path.join(dir, p), { recursive: true });
+for (const p of ['dist', 'server', 'shared', 'src', 'deploy', 'evals', 'package-lock.json']) fs.cpSync(path.join(ROOT, p), path.join(dir, p), { recursive: true });
 const missing = SERVER_DEPS.filter((d) => !pkg.dependencies[d]);
 if (missing.length) { console.error(`package.json 里没有：${missing.join('、')}`); process.exit(1); }
 fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
   name: 'jarvis-server', version, private: true, type: pkg.type,
-  scripts: { start: 'node server/server.mjs' },
+  scripts: { start: 'node server/server.mjs', 'eval:agent': 'node evals/runner.mjs', 'eval:check': 'node --test evals/checks.mjs' },
   dependencies: Object.fromEntries(SERVER_DEPS.map((d) => [d, pkg.dependencies[d]]))
 }, null, 2));
 fs.writeFileSync(path.join(dir, 'VERSION'), `${version}\n`);
@@ -37,3 +37,4 @@ fs.rmSync(stage, { recursive: true, force: true });
 const sha256 = (await import('node:crypto')).createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 fs.writeFileSync(path.join(out, 'jarvis-server-latest.json'), `${JSON.stringify({ version, file: path.basename(file), sha256 })}\n`);
 console.log(`${file}（${(fs.statSync(file).size / 1048576).toFixed(1)} MB）`);
+

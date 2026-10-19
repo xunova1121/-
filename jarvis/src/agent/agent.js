@@ -251,6 +251,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     const relayAbort = () => requestCtrl.abort(signal.reason);
     signal?.addEventListener('abort', relayAbort, { once: true });
     const stopSearch = () => { searchTimedOut = true; retrieval.close('本轮联网检索已达到预算'); requestCtrl.abort(); };
+    emit({ type: 'diagnostic', phase: 'model_start' });
     try {
     r = await cur.adapter.stream({
       model: cur.model,
@@ -303,6 +304,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       }
       throw e;
     } finally {
+      emit({ type: 'diagnostic', phase: 'model_end' });
       clearTimeout(searchTimer); signal?.removeEventListener('abort', relayAbort);
     }
     if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
@@ -501,6 +503,7 @@ export function progressReminder({ userText, steps = [], toolCount }) {
 }
 
 const stripTag = (s) => stripEmotionTags(String(s || '').replace(/^\s*<emotion>[^<]*<\/emotion>\s*/, ''));
+
 
 
 

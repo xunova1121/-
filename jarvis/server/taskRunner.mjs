@@ -1,4 +1,5 @@
 import { renderOffice } from './officeRender.mjs';
+import { createTaskTiming } from '../shared/taskTiming.js';
 import { createHash } from 'node:crypto';
 import { checkpointEvent, checkpointNeedsReview, checkpointRecoveryText } from '../shared/taskCheckpoint.js';
 /**
@@ -105,6 +106,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
   })();
 
   function record(task, e) {
+    task.timing?.event(e);
     if (['file','plan','task_state'].includes(e.type)) task.checkpoint=checkpointEvent(task.checkpoint,e,now());
     const ev = { ...e, seq: ++task.seq, at: now() };
     if (ev.type === 'tool_end') ev.output = clip(ev.output, 4000);
@@ -137,6 +139,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
   async function execute(task) {
     task.status = 'running';
     task.startedAt = now();
+    task.timing.start();
     task.checkpoint=checkpointEvent(task.checkpoint,{type:'task_state',status:'running'},now());
     await editSession(task.sessionId,async s=>{s.taskCheckpoint=task.checkpoint;await sessions.save(s);});
     console.log(`[任务] ${task.id} 开始：${task.text.slice(0, 40).replace(/\s+/g, ' ')}`);
@@ -205,7 +208,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         approve: async () => false,
         emit: (e) => {
           arm();
-          if (e.type === 'text') { if (!task.firstTextAt) task.firstTextAt = now(); shown += e.delta; }
+          if (e.type === 'text') { if (task.firstTextAt == null && String(e.delta ?? '').trim()) task.firstTextAt = now(); shown += e.delta; }
           if (e.type === 'tool_start' && e.name !== 'update_plan') usedTools.push(e.name);
           if (e.type === 'text' || e.type === 'tool_end') saveDraft();
           record(task, e);
@@ -221,7 +224,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
   }
 
   async function finish(task, session, { text = '', error = '', stopped = false, shown = '', usedTools = [], toolCalls = 0 }) {
-    const extra = { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(task.files.size && { files: [...task.files].slice(-12) }) };
+    const timing = task.timing.finish();
+    const extra = { timing, ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(task.files.size && { files: [...task.files].slice(-12) }) };
     clearTimeout(task.draftTimer);
     // 重新读出来再改（期间用户可能又说了话、改了标题）：去掉半截回答，换成完整的
     await editSession(task.sessionId, async (fresh) => {
@@ -232,7 +236,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       else if (shown.trim() || usedTools.length) fresh.messages.push({ role: 'assistant', content: `${shown.trim()}\n\n${stopped ? '（已打断）' : INTERRUPTED_MARK}`, ts: now(), ...extra });
       fresh.updatedAt = now();
       task.checkpoint=checkpointEvent(task.checkpoint,{type:'task_state',status:stopped?'stopped':error?'error':'done'},now());
-      fresh.taskCheckpoint=task.checkpoint;
+      fresh.taskCheckpoint={...task.checkpoint,timing};
       await sessions.save(fresh);
     }).catch((e) => console.error(`[任务] ${task.id} 回答没存上：${e?.stack || e}`));
     task.status = stopped ? 'stopped' : error ? 'error' : 'done';
@@ -241,7 +245,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     const sec = (t) => (t && task.startedAt ? `${((t - task.startedAt) / 1000).toFixed(1)}s` : '—');
     console.log(`[任务] ${task.id} ${task.status}：排队 ${task.startedAt ? ((task.startedAt - task.createdAt) / 1000).toFixed(1) : '—'}s，首字 ${sec(task.firstTextAt)}，共 ${sec(task.endedAt)}，工具 ${usedTools.length} 次${error ? `，出错：${error.slice(0, 120)}` : ''}`);
     task.error = error;
-    record(task, { type: 'task_state', status: task.status, ...(error && { error }), ...(task.status === 'done' && { text, toolCalls }), files: [...task.files] });
+    record(task, { type: 'task_state', status: task.status, timing, ...(error && { error }), ...(task.status === 'done' && { text, toolCalls }), files: [...task.files] });
+    console.log(`[任务耗时] ${task.id} ${JSON.stringify(timing)}`);
     task.listeners.clear();
     task.images = [];
     running--;
@@ -318,14 +323,14 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         session.taskReceipts=[...receipts,...(requestId?[{requestId,hash,result:answer,at:now()}]:[])];
         await sessions.save(session);task.checkpoint=nextCheckpoint;
         if(busy){busy.inbox.push(text);busy.notes.push(text);record(busy,{type:'user_note',text});}
-        else{tasks.set(task.id,task);record(task,{type:'task_state',status:'queued',position:waiting.length+running});waiting.push(task);}
+        else{task.timing=createTaskTiming(task.createdAt,now);tasks.set(task.id,task);record(task,{type:'task_state',status:'queued',position:waiting.length+running});waiting.push(task);}
         return answer;
       });
       pump();return result;
     },
     get(id) {
       const t = tasks.get(id);
-      return t && { id: t.id, sessionId: t.sessionId, text: t.text, status: t.status, seq: t.seq, files: [...t.files], error: t.error || '', createdAt: t.createdAt, startedAt: t.startedAt ?? null, endedAt: t.endedAt ?? null };
+      return t && { id: t.id, sessionId: t.sessionId, text: t.text, status: t.status, seq: t.seq, files: [...t.files], error: t.error || '', timing: t.timing.snapshot(), createdAt: t.createdAt, startedAt: t.startedAt ?? null, endedAt: t.endedAt ?? null };
     },
     list() { return [...tasks.keys()].map((id) => this.get(id)); },
     events(id, after = 0) { return tasks.get(id)?.events.filter((e) => e.seq > after) ?? null; },
@@ -355,5 +360,6 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     }
   };
 }
+
 
 

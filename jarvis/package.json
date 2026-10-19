@@ -8,6 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "eval:check": "node --test evals/checks.mjs",
+    "eval:agent": "node evals/runner.mjs",
     "build-model": "node scripts/build-hologram.mjs",
     "server": "node server/server.mjs",
     "start": "vite build && node server/server.mjs",
@@ -51,3 +53,4 @@
     "ws": "8.22.0"
   }
 }
+

@@ -11,6 +11,7 @@ on:
       - 'jarvis/src/**'
       - 'jarvis/server/**'
       - 'jarvis/shared/**'
+      - 'jarvis/evals/**'
       - 'jarvis/desktop/**'
       - 'jarvis/android/**'
       - 'jarvis/capacitor.config.json'
@@ -179,6 +180,8 @@ jobs:
           npx playwright install --with-deps chromium
       - name: 完整单元测试
         run: npm test
+      - name: 验证评测入口与耗时统计
+        run: npm run eval:check
       - name: 验证代码隔离与取消
         run: node e2e/sandbox-isolation.mjs
       - name: 安装Office真实渲染环境
@@ -284,3 +287,4 @@ jobs:
             - 使用 MCP 本机工具需要电脑上装有 Node.js（npx）或 uv（uvx）。
 
             构建自 ${{ github.sha }}
+

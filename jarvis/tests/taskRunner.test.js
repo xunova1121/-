@@ -55,6 +55,37 @@ function scripted(steps, { delay = 0 } = {}) {
 }
 
 describe('服务器任务执行器', () => {
+  it('真实执行路径的耗时随任务、最终事件和回答持久化，首字不计空白', async () => {
+    let time = 100;
+    const adapter = { async stream({onText}) { time=150;onText(' ');time=200;onText('实际回答');time=250;return {text:'实际回答',toolCalls:[],stop:'end_turn'}; } };
+    const runner=createTaskRunner({getConfig:mockCfg,makeAdapter:()=>({adapter,model:'m'}),now:()=>time});
+    const {id,sessionId}=await runner.start({text:'你好'});
+    await until(()=>runner.get(id).status==='done');
+    const timing=runner.get(id).timing;
+    expect(timing).toMatchObject({version:1,queueMs:0,firstTextMs:100,totalMs:150,modelMs:150,modelCalls:1});
+    expect(runner.events(id).at(-1).timing).toEqual(timing);
+    const s=await sessions.get(sessionId);expect(s.messages.at(-1).timing).toEqual(timing);expect(s.taskCheckpoint.timing).toEqual(timing);
+  });
+
+  it('没有输出就失败的任务也保留诊断，不能丢在内存日志里', async () => {
+    let time=0;
+    const adapter={async stream(){time=100;throw new Error('controlled failure');}};
+    const runner=createTaskRunner({getConfig:mockCfg,makeAdapter:()=>({adapter,model:'m'}),now:()=>time});
+    const {id,sessionId}=await runner.start({text:'你好'});
+    await until(()=>runner.get(id).status==='error');
+    expect(runner.get(id).timing).toMatchObject({firstTextMs:null,modelMs:100,modelCalls:1});
+    expect((await sessions.get(sessionId)).taskCheckpoint.timing).toEqual(runner.get(id).timing);
+  });
+
+  it('排队时停止有排队耗时但没有虚构执行或模型耗时', async () => {
+    let time=0;const adapter=heldAdapter();
+    const runner=createTaskRunner({getConfig:mockCfg,makeAdapter:()=>({adapter,model:'m'}),now:()=>time});
+    const first=await runner.start({text:'先做报告'});await until(()=>runner.get(first.id).status==='running');
+    const queued=await runner.start({text:'再做一份报告'});time=250;runner.stop(queued.id);
+    await until(()=>runner.get(queued.id).status==='stopped');
+    expect(runner.get(queued.id).timing).toMatchObject({queueMs:250,executionMs:null,firstTextMs:null,modelCalls:0});
+  });
+
   it('发任务 → 服务器做完 → 回答存进对话；进度事件按序号可补发', async () => {
     const runner = createTaskRunner({ getConfig: mockCfg });
     const { id, sessionId } = await runner.start({ text: '你好，介绍一下你自己' });
@@ -321,5 +352,6 @@ it('开始新任务不会覆盖未完成检查点，明确继续时带回完整�
  const task=await runner.start({sessionId:s.id,text:'继续核对上次的任务'});await until(()=>runner.get(task.id).status==='done');
  const saved=await sessions.get(s.id);expect(saved.recoveryCheckpoints[0].text).toBe(original);expect(JSON.stringify(seen)).toContain('末尾不能遗漏');expect(JSON.stringify(seen)).toContain('不得自动重放');
 });
+
 
 
