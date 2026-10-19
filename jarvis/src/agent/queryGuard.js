@@ -1,3 +1,4 @@
+// 正式交付：保留独立子查询与用户精确实体，不向公开搜索补入凭据。
 /** 保护原话中的精确实体，不根据字形相似度擅自改人名。 */
 export function protectedTerms(text = '') {
   const value = String(text).slice(0, 8000);
@@ -14,7 +15,7 @@ export function guardQuery(query, { original = '', terms = [] } = {}) {
     .slice(0, 500);
   if (!value) throw Object.assign(new Error('搜索词为空'), { code: 'INVALID_SEARCH_QUERY' });
   const protectedList = [...new Set([...protectedTerms(original), ...terms].map((term) => String(term).trim().slice(0, 40)).filter(Boolean))].slice(0, 12);
-  const present = protectedList.some(term => value.toLowerCase().includes(String(term).toLowerCase()));
+  const present = protectedList.some((term) => value.toLowerCase().includes(String(term).toLowerCase()));
   const missing = protectedList.filter((term) => !value.toLowerCase().includes(String(term).toLowerCase()));
   return {
     query: protectedList.length === 1 && missing.length ? (missing.join(' ') + ' ' + value).slice(0, 800) : value,
