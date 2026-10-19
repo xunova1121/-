@@ -14,11 +14,13 @@ export function guardQuery(query, { original = '', terms = [] } = {}) {
     .slice(0, 500);
   if (!value) throw Object.assign(new Error('搜索词为空'), { code: 'INVALID_SEARCH_QUERY' });
   const protectedList = [...new Set([...protectedTerms(original), ...terms].map((term) => String(term).trim().slice(0, 40)).filter(Boolean))].slice(0, 12);
+  const present = protectedList.some(term => value.toLowerCase().includes(String(term).toLowerCase()));
   const missing = protectedList.filter((term) => !value.toLowerCase().includes(String(term).toLowerCase()));
   return {
-    query: missing.length ? (missing.join(' ') + ' ' + value).slice(0, 800) : value,
+    query: protectedList.length === 1 && missing.length ? (missing.join(' ') + ' ' + value).slice(0, 800) : value,
     protectedTerms: protectedList,
-    restored: missing
+    restored: protectedList.length === 1 ? missing : [],
+    needsReview: protectedList.length > 1 && !present
   };
 }
 
