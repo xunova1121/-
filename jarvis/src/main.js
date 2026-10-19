@@ -18,7 +18,6 @@ import logoUrl from './ui/logo.svg';
 import { initMascots } from './ui/mascot.js';
 import { initCompanion } from './ui/companion.js';
 import { initHologramCompanion } from './ui/hologramScene.js';
-import { transcriptWindow } from './mobile/transcriptWindow.js';
 import { initRenderHealthPanel } from './mobile/renderHealth.js';
 import { initCompanionAppearance } from './ui/companionAppearance.js';
 let companion = null;
@@ -68,7 +67,7 @@ import { createSyncController } from './sync/controller.js';
 import { initSyncPanel, describeResult } from './ui/syncPanel.js';
 import { matchWake, WakeWindow } from './core/wakeWord.js';
 import { playCue } from './perception/voiceFx.js';
-import { Transcript, toolLabel, summarizeArgs, searchBrand, setActionIcon, copyText } from './ui/transcript.js';
+import { toolLabel, summarizeArgs, searchBrand, setActionIcon } from './ui/transcript.js';
 import { stripEmotionTags } from '../shared/emotionTag.js';
 import { noteAction } from './mobile/renderDiagnostics.js';
 import { Speaker } from './perception/speaker.js';
@@ -93,6 +92,7 @@ import { createView } from './app/view.js';
 import { createBackground } from './app/background.js';
 import { createToolbox } from './app/toolbox.js';
 import { createRemoteTask } from './app/remoteTask.js';
+import { createConversations } from './app/conversations.js';
 
 
 // ---------------------------------------------------------------- 设置
@@ -105,13 +105,13 @@ function setSetting(key, value) {
   saveSettings(callRestore ? { ...settings, ...callRestore } : settings);
 }
 // main.js 里还没拆出去的函数：先挂到 app 上，拆出去的模块用 app.xxx 调用（函数声明会提升，这里就能挂）
-Object.assign(app, { setSetting, send, openingCallouts });
+Object.assign(app, { setSetting, send, toBackground, autosize });
 Object.defineProperties(app, { speaker: { get: () => speaker }, face: { get: () => face }, mascots: { get: () => mascots } });
 
 Object.defineProperties(app, {
-  sessionsPanel: { get: () => sessionsPanel }, transcript: { get: () => transcript }, taskKeeper: { get: () => taskKeeper }
+  taskKeeper: { get: () => taskKeeper }, backgroundTurns: { get: () => backgroundTurns }, prompt: { get: () => prompt }
 });
-Object.assign(app, { newSession, interrupt, switchTo, rememberTurn, openSession, openInWorkspace, replayTranscript });
+Object.assign(app, { interrupt });
 Object.defineProperty(app, 'mic', { get: () => mic });
 
 mount(app, createStage(app));
@@ -119,40 +119,7 @@ mount(app, createModels(app));
 
 
 // ---------------------------------------------------------------- 对话
-const transcript = new Transcript($('#transcript'), { progress: COMPACT });
-// 当前会话；app.history 就是它的消息列表（换对话只改 app.session）
-app.session = sessionsApi.create();
-/** 记一条消息：默认记进当前会话；后台任务记进它自己的会话（切到别的对话后仍然记对地方） */
-function rememberTurn(role, content, extra = {}, target = app.session) {
-  target.messages.push({ role, content, ts: Date.now(), ...extra });
-  target.updatedAt = Date.now();
-  persistSession(target);
-}
-function persistSession(target = app.session) {
-  if (settings.saveSessions === false) return;
-  return sessionsApi.save(target).then(() => { sessionsPanel?.refresh(); if (target === app.session) showChatTitle(); }).catch(() => {});
-}
-/** 手机顶栏显示当前对话的标题（还没说话的新对话不显示） */
-function showChatTitle() {
-  const el = $('#chat-title');
-  const first = app.history.find((m) => m.role === 'user')?.content;
-  const title = app.session.title || (first ? sessionsApi.autoTitle(first) : '');
-  el.textContent = title;
-  el.hidden = !title;
-}
-$('#chat-title').addEventListener('click', async () => {
-  const now = $('#chat-title').textContent;
-  let next = null;
-  try { next = globalThis.prompt('给这段对话起个名字', now); } catch { /* 不支持弹窗 */ }
-  next = String(next ?? '').trim().slice(0, 60);
-  if (!next || next === now) return;
-  app.session.title = next;
-  app.session.titleSet = true;
-  await sessionsApi.rename(app.session.id, next).catch(() => {});
-  showChatTitle();
-  sessionsPanel?.refresh();
-  drawer?.refresh?.();
-});
+mount(app, createConversations(app));
 let turns = 0;
 const recentImages = new Map(); // 消息时间 → 这条消息带的图片（只在内存里，不存盘）
 const taskKeeper = createTaskKeeper(globalThis.__jarvisBackgroundTask, e => toast(e.message));
@@ -191,7 +158,7 @@ function interrupt() {
   if (app.active) app.callouts?.show();
   if (app.active) {
     const turn=app.active;
-    if(!turn.streamDone&&(turn.shown?.trim()||turn.files?.size))rememberTurn('assistant',(turn.shown||'').trim()+'\n\n（已打断，还没完成；以上内容已保留）',{...(turn.usedTools?.length&&{tools:[...new Set(turn.usedTools)]}),...(turn.files?.size&&{files:[...turn.files]})},turn.session);
+    if(!turn.streamDone&&(turn.shown?.trim()||turn.files?.size))app.rememberTurn('assistant',(turn.shown||'').trim()+'\n\n（已打断，还没完成；以上内容已保留）',{...(turn.usedTools?.length&&{tools:[...new Set(turn.usedTools)]}),...(turn.files?.size&&{files:[...turn.files]})},turn.session);
     app.active.ctrl.abort();
     app.active.bubble?.done('已打断');
     app.active = null;
@@ -240,172 +207,11 @@ function makeSpeech(auto = true) {
 
 mount(app, createBackground(app));
 
-// ---------------------------------------------------------------- 多会话
-/** 把当前会话的消息重新画到对话区 */
-let historyViewEnd = null;
-function visibleHistory(end = app.history.length) {
-  return transcriptWindow(app.history.length, { mobile: MOBILE, safe: document.documentElement.classList.contains('safe-render'), end });
-}
-function replayTranscript(end = app.history.length) {
-  showChatTitle();
-  const root = $('#transcript'), range = visibleHistory(end);
-  historyViewEnd = range.newer ? range.end : null;
-  root.replaceChildren();
-  transcript.follow = true;
-  document.body.classList.remove('wy-reading-history');
-  if (!app.history.length) { app.renderWelcome(); return; }
-  transcript.batch(() => {
-    if (range.older || range.newer) {
-      const nav = Object.assign(document.createElement('nav'), { className: 'wy-history-pages' });
-      nav.setAttribute('aria-label', '对话翻页');
-      const pageButton = (label, target) => {
-        const button = Object.assign(document.createElement('button'), { type: 'button', textContent: label });
-        button.onclick = () => {
-          if (app.active) { toast('当前回复完成后，可以翻看更早的对话'); return; }
-          replayTranscript(target);
-        };
-        nav.append(button);
-      };
-      if (range.older) pageButton(`查看更早的对话（还有 ${range.older} 条）`, range.start);
-      if (range.newer) {
-        pageButton('下一页', Math.min(app.history.length, range.end + range.limit));
-        pageButton('回到最近对话', app.history.length);
-      }
-      root.append(nav);
-    }
-    // 翻看旧消息：很长的回答（除了最后一条）先只显示开头，点“展开全文”再显示，手机上少画很多内容
-    const shown = app.history.slice(range.start, range.end);
-    const lastAgent = shown.findLastIndex((m) => m.role !== 'user');
-    shown.forEach((m, i) => {
-      if (m.role === 'user') transcript.add('user', m.content, m.ts, { thumbs: m.thumbs });
-      else {
-        const b = transcript.add('agent', '', m.ts);
-        b.append(m.content);
-        for (const f of m.files || []) b.fileLink(f, openInWorkspace);
-        b.done(m.tools?.length ? `用了：${m.tools.map(toolLabel).join('、')}` : '', { fold: i !== lastAgent });
-      }
-    });
-  });
-}
-/** 新对话的开场建议：之前没做完的事 > 上一段对话 */
-async function resumeSuggestion() {
-  try {
-    const [open] = await agentMemory.openItems({ exclude: app.session.id, k: 1 });
-    if (open) return { title: `继续：${open.text.slice(0, 18)}`, prompt: `接着之前说的：${open.text}` };
-    const [last] = await sessionsApi.recent({ exclude: app.session.id, k: 1 });
-    if (last && Date.now() - last.updatedAt < 3 * 86400000) return { title: `接着上次：${last.title.slice(0, 16)}`, prompt: `接着上次「${last.title}」的对话继续` };
-  } catch { /* 没有历史 */ }
-  return null;
-}
-async function openingCallouts(hasSkills = true) {
-  app.callouts?.set(openingSuggestions({ desktop: Boolean(DESKTOP), hasSkills, resume: await resumeSuggestion() }));
-}
-
-async function switchTo(next) {
-  // 正在干活：不停下，转到后台接着做（做完记回原来的对话）；只是在朗读就停掉
-  if (app.active && !app.active.streamDone) toBackground(app.active); else interrupt();
-  if (settings.autoMemory) await app.reflectNow();
-  app.session = next;
-  app.reflectFrom = app.history.length;
-  replayTranscript();
-  // 切回一个还在后台干活的对话：把正在写的那条回答接回来
-  const bg = [...backgroundTurns].find((t) => t.session.id === app.session.id);
-  if (bg) { backgroundTurns.delete(bg); bg.background = false; app.active = bg; app.liveBubble = bg.bubble; transcript.root.append(bg.bubble.el); app.setTask('processing', bg.status || '思考中'); }
-  else if (app.server && next.taskId) app.followServerTask(next); // 服务器上这个对话还在干活（比如 App 重新打开）：接上它的进度
-  app.dashboard.setTurns(app.history.filter((m) => m.role === 'user').length);
-  if (app.history.length) app.callouts?.set(followUpSuggestions({ tools: app.history.at(-1)?.tools ?? [], userText: [...app.history].reverse().find((m) => m.role === 'user')?.content ?? '', desktop: Boolean(DESKTOP) }));
-  else openingCallouts();
-  sessionsPanel?.refresh();
-  app.setTask('idle');
-}
-function newSession() {
-  if (!app.history.length) { $('#prompt').focus(); return; }
-  switchTo(sessionsApi.create());
-  $('#prompt').focus();
-}
-addEventListener('jarvis:open-session', (e) => { openSession(e.detail).then(() => app.showPanel('sessions')); });
-/** 手机：第一次交任务时问一次能不能发“做完了”的通知（之后不再问） */
-let askedNotify = false;
-function askNotifyOnce() {
-  if (!MOBILE || askedNotify) return;
-  askedNotify = true;
-  try { if (localStorage.getItem('jarvis.askedNotify')) return; localStorage.setItem('jarvis.askedNotify', '1'); } catch { /* 存不了也只问这一次 */ }
-  globalThis.__jarvisBackgroundTask?.askNotify?.().catch(() => {});
-}
-let opening = 0; // 连点了好几段对话：只认最后点的那段
-async function openSession(id) {
-  noteAction('切换对话');
-  // 点的就是当前对话：服务器模式下从服务器取一次最新进度（另一台设备可能接着聊过）
-  if (id === app.session.id) { if (app.server) refreshFromServer(); return; }
-  const mine = ++opening;
-  // 服务器模式：先用手机 / 电脑上留的副本马上切过去，再从服务器取最新的换上
-  const cached = app.server ? sessionsApi.cachedGet(id) : null;
-  if (cached) await switchTo(cached);
-  else if (app.server) app.setTask('processing', '正在打开对话');
-  const s = await sessionsApi.get(id).catch((e) => { if (!cached) toast(`打不开这段对话：${e.message}`); return null; });
-  if (mine !== opening) return;
-  if (!s) { if (!cached) app.setTask('idle'); return; }
-  if (!cached) await switchTo(s);
-  else if (app.session.id === id && !app.active && changed(app.session, s)) { app.session = s; app.reflectFrom = app.history.length; replayTranscript(); }
-  if (app.server && app.session.id === id && s.taskId && !app.active) app.followServerTask(s); // 另一台设备正在做：接上进度
-}
-/** 服务器上的这段对话比手上的新吗（另一台设备接着聊过、或者做完了任务） */
-const changed = (a, b) => b.messages.length !== a.messages.length || (b.updatedAt ?? 0) > (a.updatedAt ?? 0) || b.messages.at(-1)?.content !== a.messages.at(-1)?.content;
-/** 服务器模式：从服务器取当前对话的最新进度，有变化就换上（App 切回前台、点当前对话时） */
-let refreshing = false;
-async function refreshFromServer() {
-  if (!app.server || refreshing || app.active || !app.session?.id) return;
-  noteAction('从服务器刷新对话');
-  refreshing = true;
-  try {
-    const id = app.session.id;
-    const s = await sessionsApi.get(id).catch(() => null);
-    if (!s || app.session.id !== id || app.active) return;
-    if (changed(app.session, s)) { app.session = s; app.reflectFrom = app.history.length; replayTranscript(); }
-    if (s.taskId) app.followServerTask(s);
-    try { drawer?.refresh?.(); } catch { /* 抽屉还没建好 */ }
-  } finally { refreshing = false; }
-}
-// App 从后台切回来 / 电脑窗口重新获得焦点：拉一次最新进度（两台设备轮着用时不会对不上）
-let lastPull = 0;
-const pullSoon = () => { if (Date.now() - lastPull < 3000) return; lastPull = Date.now(); refreshFromServer(); };
-document.addEventListener('visibilitychange', () => { if (!document.hidden) pullSoon(); });
-addEventListener('focus', pullSoon);
-
-let sessionsPanel = null;
 
 // ---------------------------------------------------------------- 桌面版与 MCP
 mount(app, createToolbox(app));
 mount(app, createRemoteTask(app));
 
-/** 对话里点生成的文件：切到工作区并打开它 */
-/** 导出一段对话：复制全部内容，或存成 Word / Markdown 放进工作区“导出”文件夹（在工作区里能下载、分享） */
-async function exportSession(id, kind) {
-  const s = id === app.session.id ? app.session : await sessionsApi.get(id).catch(() => null) ?? sessionsApi.cachedGet(id);
-  if (!s?.messages?.length) { toast('这段对话还没有内容'); return; }
-  const title = s.title || '对话';
-  const said = (m) => stripEmotionTags(String(m.content)).replace(/\n*\[已上传到工作区：[^\]]+\]$/, '').trim();
-  const when = (ts) => (ts ? new Date(ts).toLocaleString('zh-CN', { hour12: false }) : '');
-  const md = `# ${title}\n\n${s.messages.map((m) => `### ${m.role === 'user' ? '我' : '未央'}${m.ts ? `　${when(m.ts)}` : ''}\n\n${said(m)}`).join('\n\n')}\n`;
-  if (kind === 'copy') { toast((await copyText(toPlainText(md))) ? '整段对话已复制' : '复制失败'); return; }
-  const name = title.replace(/[\\/:*?"<>|]/g, '').slice(0, 40) || '对话';
-  try {
-    let path;
-    if (kind === 'md') path = (await ws.write(`导出/${name}.md`, md)).path;
-    else {
-      const { generate } = await import('./agent/docs.js');
-      const out = await generate('docx', { title, content: md.replace(/^# .*\n/, '') });
-      path = (await ws.write(`导出/${name}.${out.ext}`, out.blob)).path;
-    }
-    app.panels.refreshFiles();
-    toast(`已导出到工作区：${path}`);
-    openInWorkspace(path);
-  } catch (e) { toast(`导出没成功：${e.message}`); }
-}
-function openInWorkspace(path) {
-  app.showPanel('workspace');
-  app.panels.openFile(path);
-}
 
 
 
@@ -422,11 +228,11 @@ const backgroundTurns = new Set();
 /** 干活时又发来一句：问进度直接答；说停就停；其他的交给正在干的未央（下一步开始前看到），不打断 */
 async function interject(text, { thumbs = [] } = {}) {
   const turn = app.active;
-  transcript.add('user', text, Date.now(), { thumbs });
-  const reply = (words) => { const b = transcript.add('agent', words); b.done(); };
+  app.transcript.add('user', text, Date.now(), { thumbs });
+  const reply = (words) => { const b = app.transcript.add('agent', words); b.done(); };
   if (STOP_ASK.test(text)) { interrupt(); reply('好的，已经停下。上面是停下前做到的地方，要接着做跟我说一声。'); return; }
   if (STATUS_ASK.test(text)) { reply(`${turnStatus(turn, now())}。做完会直接给你结果；想停的话点右下角的方块，或者说“停”。`); return; }
-  rememberTurn('user', text, thumbs.length ? { thumbs } : {}, turn.session);
+  app.rememberTurn('user', text, thumbs.length ? { thumbs } : {}, turn.session);
   if (!turn.remote) {
     turn.inbox.push(text);
     if (MOBILE) { turn.checkpoint=checkpointEvent(turn.checkpoint,{type:'user_note',text}); savePending(storage,turn.session.id,{checkpoint:turn.checkpoint}); }
@@ -453,19 +259,19 @@ function finishBackground(turn, { text = '', error = '', shown = '', usedTools =
   const extra = { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(files.size && { files: [...files].slice(-12) }) };
   const title = turn.session.title || '另一个对话';
   if (error) {
-    if (shown.trim() || usedTools.length) rememberTurn('assistant', `${shown.trim()}\n\n${interruptionMark(error)}`, extra, turn.session);
+    if (shown.trim() || usedTools.length) app.rememberTurn('assistant', `${shown.trim()}\n\n${interruptionMark(error)}`, extra, turn.session);
     toast(`「${title}」里的任务没做完：${error.slice(0, 40)}`);
   } else {
-    rememberTurn('assistant', text || '（完成）', extra, turn.session);
+    app.rememberTurn('assistant', text || '（完成）', extra, turn.session);
     toast(`「${title}」里的任务做完了，切回去就能看到`);
   }
   turn.bubble.done();
-  sessionsPanel?.refresh();
+  app.sessionsPanel?.refresh();
 }
 
 async function send(text, { echo = true, byVoice = false } = {}) {
   noteAction(byVoice ? '语音提问' : '发消息');
-  askNotifyOnce();
+  app.askNotifyOnce();
   text = String(text || '').trim();
   if (!text && !attachments.length) return;
   if (!attachments.length && companion?.perform(text)) return;
@@ -486,13 +292,13 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   speaker.unlock(); // 发送多由点击 / 回车触发：顺便启动音频上下文，云端语音才能播放
 
   // 持续聊天也保持有界；先重画已完成的历史，再追加本轮，避免重复消息。
-  if (MOBILE && (historyViewEnd !== null || $('#transcript').querySelectorAll('.msg').length >= visibleHistory().limit)) replayTranscript();
+  if (MOBILE && (app.historyViewEnd !== null || $('#transcript').querySelectorAll('.msg').length >= app.visibleHistory().limit)) app.replayTranscript();
   const files = attachments.splice(0);
   renderAttachments();
   const userText = files.length ? `${text}\n\n[已上传到工作区：${files.map((f) => f.path).join('、')}]` : text;
   const imgs = files.filter((f) => f.image).map((f) => f.image);
   const thumbs = files.filter(f => f.image).map(f => ({ src:f.image.thumb, path:f.path }));
-  if (echo) transcript.add('user', userText, Date.now(), { thumbs }); // echo=false：这句话之前已经显示并记下了
+  if (echo) app.transcript.add('user', userText, Date.now(), { thumbs }); // echo=false：这句话之前已经显示并记下了
   app.director.onUserText(text);
   app.hud.newTurn();
   app.hud.think(`◂ 收到：${text.slice(0, 30)}`);
@@ -503,7 +309,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   const recent = compress.unsummarized(app.history, app.session.summary);
   const withImages = new Set(refersToImage ? recent.filter((m) => m.role === 'user' && recentImages.has(m.ts)).slice(-2).map((m) => m.ts) : []);
   const llmHistory = recent.map(({ role, content, ts }) => ({ role, content, ...(withImages.has(ts) && { images: recentImages.get(ts) }) }));
-  if (echo) rememberTurn('user', userText, thumbs.length ? { thumbs } : {});
+  if (echo) app.rememberTurn('user', userText, thumbs.length ? { thumbs } : {});
   if (imgs.length) {
     recentImages.set(app.history.at(-1).ts, imgs.map(({ mime, data }) => ({ mime, data })));
     while (recentImages.size > 2) recentImages.delete(recentImages.keys().next().value);
@@ -511,7 +317,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
 
   if (app.machine.task !== 'listening') app.machine.beginUserTurn();
   const ctrl = new AbortController();
-  const bubble = transcript.add('agent');
+  const bubble = app.transcript.add('agent');
   app.liveBubble = bubble;
   bubble.el.classList.add('streaming');
   // 这一轮属于哪个会话：切到别的对话后在后台接着做，结果、文件都记回这个会话
@@ -711,7 +517,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
     app.hud.think(`✓ 完成 · ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · ${result.toolCalls} 个工具` : ''}`, 'ok');
     $('#hud-latency').textContent = firstToken ? `${Math.round(firstToken - t0)} ms` : '—';
     if (result.text) wp({ say: result.text.replace(/```[\s\S]*?```/g, '').replace(/[#*>`|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 4000) });
-    rememberTurn('assistant', result.text || '（完成）', { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) }, turn.session);
+    app.rememberTurn('assistant', result.text || '（完成）', { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) }, turn.session);
     // 做完时人不在（App 在后台 / 窗口没在看）：发通知，点开就能看结果
     if (document.hidden) app.notify('未央做完了', `${(turn.session.title || text).slice(0, 30)}：${stripEmotionTags(result.text || '').replace(/\s+/g, ' ').slice(0, 120)}`);
     // 在本机做的这一轮也记回服务器上的这段对话（手机上能看到）
@@ -738,11 +544,11 @@ async function send(text, { echo = true, byVoice = false } = {}) {
     app.hud.think(`✕ ${msg.slice(0, 40)}`, 'bad');
     // 已经写了一部分或做了几步：记进对话，点“继续”从断开的地方接着做，而不是从头再来
     const resumable = Boolean(shown.trim() || usedTools.length);
-    if (resumable) rememberTurn('assistant', `${shown.trim()}\n\n${interruptionMark(err)}`, { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) }, turn.session);
+    if (resumable) app.rememberTurn('assistant', `${shown.trim()}\n\n${interruptionMark(err)}`, { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) }, turn.session);
     app.callouts?.set(followUpSuggestions({ error: true, resumable, userText: text, desktop: Boolean(DESKTOP) }));
   } finally {
     if (MOBILE) clearPending(storage, turn.session.id, turn.t0);
-    await persistSession(turn.session);
+    await app.persistSession(turn.session);
     releaseTask();
     app.endControl();
     // 回答写完的一瞬间又收到的话（没来得及交给模型）：接着当一句新话处理
@@ -896,7 +702,7 @@ const voiceHandlers = {
     $('#vad-meter').classList.add('on');
   },
   onCancel: () => endListening(),
-  onInterim: (t) => { if (!asleep() || matchWake(t).woke) transcript.interim(t); },
+  onInterim: (t) => { if (!asleep() || matchWake(t).woke) app.transcript.interim(t); },
   onFinal: (t) => {
     if (dictating) {
       const text = String(t || '').trim();
@@ -906,7 +712,7 @@ const voiceHandlers = {
     }
     if (callActive) {callTiming??={};callTiming.recognizedAt=now();callStatus('未央正在思考…');}
     endListening();
-    transcript.clearInterim();
+    app.transcript.clearInterim();
     if (!settings.wakeWord) return send(t, { byVoice: true });
     const m = matchWake(t);
     if (!wake.awake && !m.woke) return; // 没叫名字：忽略
@@ -970,12 +776,12 @@ const nativeVoiceReady = MOBILE && globalThis.__jarvisSpeech
   : Promise.resolve(false);
 
 function endListening() {
-  transcript.clearInterim();
+  app.transcript.clearInterim();
   if (!app.live.voiceListening) return;
   app.live.voiceListening = false;
   if (!app.active) app.director.setState('idle');
   app.live.voiceEnergy = 0;
-  transcript.clearInterim();
+  app.transcript.clearInterim();
   $('#vad-meter').classList.remove('on');
   // 识别被取消且没有发出请求：回到空闲；保持情绪不变以外的状态（no-speech 不触发警觉）
   if (!app.active && app.machine.task === 'listening') app.setTask('idle');
@@ -1250,46 +1056,10 @@ for (const b of document.querySelectorAll('#set-vad button')) {
 }
 globalThis.__jarvisToast = toast; // 手机原生保存文件时的进度提示
 
-// ---------------------------------------------------------------- 编辑重发 / 重新生成
-/**
- * 回到某句话之前重新来：
- *   edit  把你的这句话放回输入框，改好再发（这句话和它后面的都去掉）
- *   retry 去掉这条回答（和它后面的），把它前面那句话重新发一次
- */
-async function rewindAndResend(kind, text) {
-  if (app.active) { toast('等这一轮做完再改'); return; }
-  const said = (m) => String(m.content).replace(/\n*\[已上传到工作区：[^\]]+\]$/, '').trim();
-  let at = -1;
-  if (kind === 'edit') at = app.history.findLastIndex((m) => m.role === 'user' && said(m) === text.trim());
-  else {
-    const reply = app.history.findLastIndex((m) => m.role === 'assistant' && stripEmotionTags(m.content).trim() === text.trim());
-    if (reply > 0) for (let i = reply - 1; i >= 0; i--) if (app.history[i].role === 'user') { at = i; break; }
-  }
-  if (at < 0) { toast('找不到这条消息（可能已经翻页或改过）'); return; }
-  const later = app.history.length - at - 1;
-  let ok = true;
-  if (later > 1) { try { ok = globalThis.confirm(`这句话后面还有 ${later} 条消息，会一起去掉。继续吗？`); } catch { /* 不支持弹窗就直接继续 */ } }
-  if (!ok) return;
-  const question = said(app.history[at]);
-  if (app.server) {
-    try { await app.server.truncateSession(app.session.id, at); } catch (e) { toast(`没改成：${e.message}`); return; }
-  }
-  app.history.splice(at);
-  app.session.updatedAt = Date.now();
-  // 本机模式下截成空的：空对话不会存盘，旧记录会留着；先删掉，重新发的时候再存
-  if (!app.server && !app.history.length) sessionsApi.remove(app.session.id).catch(() => {}); else persistSession();
-  replayTranscript();
-  if (kind === 'edit') {
-    prompt.value = question;
-    autosize();
-    prompt.focus();
-    toast('改好后点发送');
-  } else send(question);
-}
 
-// ---------------------------------------------------------------- 每条消息下面的“引用 / 朗读”（复制在 transcript.js 里直接做）
+// ---------------------------------------------------------------- 每条消息下面的“引用 / 朗读”（复制在 app.transcript.js 里直接做）
 let readingBtn = null;
-transcript.onAction = (kind, text, btn) => {
+app.transcript.onAction = (kind, text, btn) => {
   if (kind === 'quote') {
     // 引用：把这条的开头放进输入框（“> ……”），接着打字问
     const plainText = toPlainText(text).replace(/\s+/g, ' ').trim();
@@ -1300,7 +1070,7 @@ transcript.onAction = (kind, text, btn) => {
     prompt.setSelectionRange(prompt.value.length, prompt.value.length);
     return;
   }
-  if (kind === 'edit' || kind === 'retry') { rewindAndResend(kind, text); return; }
+  if (kind === 'edit' || kind === 'retry') { app.rewindAndResend(kind, text); return; }
   if (kind === 'speak') {
     // 朗读这一条：再点一下停；只念正文，代码和表格不念
     const again = readingBtn === btn && speaker.speaking;
@@ -1361,15 +1131,15 @@ if (narrow.matches) body.classList.remove('side-open');
 app.setTask('idle');
 app.renderWelcome();
 app.syncMemoryEngine();
-sessionsPanel = initSessionsPanel({
+app.sessionsPanel = initSessionsPanel({
   getCurrentId: () => app.session.id,
-  onOpen: (id) => openSession(id),
-  onNew: () => newSession(),
-  onDeleted: (id) => { if (id === app.session.id) switchTo(sessionsApi.create()); },
+  onOpen: (id) => app.openSession(id),
+  onNew: () => app.newSession(),
+  onDeleted: (id) => { if (id === app.session.id) app.switchTo(sessionsApi.create()); },
   settings,
   onSaveChange: (on) => {
     setSetting('saveSessions', on);
-    if (on) persistSession();
+    if (on) app.persistSession();
     toast(on ? '对话会保存在本机，可在“对话”里找回' : '新的对话不再保存（已保存的不受影响）');
   }
 });
@@ -1384,13 +1154,13 @@ const syncController = createSyncController({
     if (r.memory?.changedLocal) { await habits.reload(); app.panels.refreshMind(); skillPacks.changed(); }
     if (r.config?.changedLocal) app.panels.reloadConfig();
     if (r.sessions?.changedLocal) {
-      sessionsPanel.refresh();
+      app.sessionsPanel.refresh();
       // 当前对话在另一台设备上接着聊过：没在回答时换成合并后的版本
       const fresh = !app.active && app.history.length ? await sessionsApi.get(app.session.id) : null;
       if (fresh && fresh.messages.length !== app.history.length) {
         app.session = fresh;
         app.reflectFrom = app.history.length;
-        replayTranscript();
+        app.replayTranscript();
       }
     }
   },
@@ -1401,38 +1171,37 @@ const syncController = createSyncController({
   }
 });
 const syncPanel = initSyncPanel({ controller: syncController, toast: (t) => toast(t) });
-initServerPanel({ getLlmConfig: () => app.llmConfig, toast: (t) => toast(t), onConfigSaved: () => app.refreshServerModel(), onImported: () => { sessionsPanel?.refresh(); drawer?.refresh?.(); } });
+initServerPanel({ getLlmConfig: () => app.llmConfig, toast: (t) => toast(t), onConfigSaved: () => app.refreshServerModel(), onImported: () => { app.sessionsPanel?.refresh(); app.drawer?.refresh?.(); } });
 syncController.start();
 
 // 手机：底部菜单改成左侧抽屉（新对话 · 功能 · 历史对话）；面板全屏打开，左上角“返回对话”
-let drawer = null;
 if (COMPACT) {
   const icons = Object.fromEntries([...document.querySelectorAll('.rail-btn')].map((b) => [b.dataset.panel, b.querySelector('svg').outerHTML]));
-  drawer = initDrawer({
+  app.drawer = initDrawer({
     icons,
-    onNew: () => { newSession(); app.closeSide(); },
-    onOpenSession: (id) => { openSession(id); app.closeSide(); },
+    onNew: () => { app.newSession(); app.closeSide(); },
+    onOpenSession: (id) => { app.openSession(id); app.closeSide(); },
     onPanel: (name) => app.showPanel(name),
     listSessions: () => sessionsApi.list(),
     cachedSessions: () => sessionsApi.cachedList(),
     currentId: () => app.session.id,
     onRename: async (id, title) => {
       await sessionsApi.rename(id, title);
-      if (id === app.session.id) { app.session.title = title; app.session.titleSet = true; showChatTitle(); }
-      sessionsPanel?.refresh();
+      if (id === app.session.id) { app.session.title = title; app.session.titleSet = true; app.showChatTitle(); }
+      app.sessionsPanel?.refresh();
     },
-    onPin: async (id, pinned) => { await sessionsApi.setPinned(id, pinned); if (id === app.session.id) app.session.pinned = pinned; sessionsPanel?.refresh(); },
-    onExport: (id, kind) => exportSession(id, kind),
+    onPin: async (id, pinned) => { await sessionsApi.setPinned(id, pinned); if (id === app.session.id) app.session.pinned = pinned; app.sessionsPanel?.refresh(); },
+    onExport: (id, kind) => app.exportSession(id, kind),
     searchContent: (q) => sessionsApi.searchContent(q),
     onDelete: async (id) => {
       await sessionsApi.remove(id);
-      if (id === app.session.id) switchTo(sessionsApi.create());
-      sessionsPanel?.refresh();
+      if (id === app.session.id) app.switchTo(sessionsApi.create());
+      app.sessionsPanel?.refresh();
       toast('已删除');
     }
   });
   $('#btn-menu').hidden = false;
-  $('#btn-menu').addEventListener('click', () => drawer.open());
+  $('#btn-menu').addEventListener('click', () => app.drawer.open());
   $('#btn-side-back').hidden = false;
   $('#btn-side-back').addEventListener('click', () => app.closeSide());
 }
@@ -1454,7 +1223,7 @@ app.initSchedules();
   const leftSession = left && await sessionsApi.get(left.sessionId).catch(() => null);
   if(left&&(!leftSession||app.history.length))savePending(storage,left.sessionId,left);
   if (leftSession && !app.history.length) {
-    await switchTo(leftSession);
+    await app.switchTo(leftSession);
     if(checkpointNeedsReview(left.checkpoint)) {
       savePending(storage,left.sessionId,left);
       const card=document.createElement('section');card.className='task-recovery';card.setAttribute('role','status');
@@ -1465,16 +1234,16 @@ app.initSchedules();
     } else {
       toast('上次退出时任务还没做完，正在核对进度后继续');send(resumeText(left));
     }
-    sessionsPanel.refresh();
+    app.sessionsPanel.refresh();
     return;
   }
   // 手机：只有刷新页面、或界面崩溃后自动重开时才接回刚才的对话；从后台关掉再打开就停在首页
   const reopened = performance.getEntriesByType?.('navigation')?.[0]?.type === 'reload' || globalThis.__jarvisRecentCrash === true;
   if ((!COMPACT || reopened) && recent && Date.now() - recent.updatedAt < 6 * 3600_000 && !app.history.length) {
-    if (app.server) await openSession(recent.id); // 服务器的列表不带消息：先显示副本，再取完整的
-    else await switchTo(recent);
+    if (app.server) await app.openSession(recent.id); // 服务器的列表不带消息：先显示副本，再取完整的
+    else await app.switchTo(recent);
   }
-  sessionsPanel.refresh();
+  app.sessionsPanel.refresh();
 })();
 agentMemory.maintain().catch(() => {});
 
@@ -1484,7 +1253,7 @@ app.bootSequence();
 app.initSuggestions();
 app.updateStageMode();
 app.callouts.set(openingSuggestions({ desktop: Boolean(DESKTOP), hasSkills: false }));
-if (!app.history.length) openingCallouts(false);
+if (!app.history.length) app.openingCallouts(false);
 
 // ---------------------------------------------------------------- 键盘快捷键
 //   Esc 打断   /  聚焦输入框   Alt+1..6 面板   Alt+F 专注视图   Alt+V 直接对话
@@ -1497,7 +1266,7 @@ document.addEventListener('keydown', (e) => {
   }
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.code === 'KeyO') {
     e.preventDefault();
-    newSession();
+    app.newSession();
     return;
   }
   if (e.altKey && !e.ctrlKey && !e.metaKey) {
@@ -1552,8 +1321,8 @@ window.__jarvis = {
   send,
   interrupt,
   showPanel: app.showPanel,
-  newSession,
-  openSession,
+  newSession: app.newSession,
+  openSession: app.openSession,
   get sessionId() { return app.session.id; },
   sessionGet: (id) => sessionsApi.get(id),
   get quality() { return app.quality; },
@@ -1561,7 +1330,7 @@ window.__jarvis = {
 };
 
 // 工作台界面只用在电脑上；手机 App 保留自己的界面（底部输入、左侧抽屉菜单、整页面板）
-if (!COMPACT) initWorkbench({showPanel: app.showPanel,newSession,openSession,getSession:()=>app.session,getRunning:()=>app.active && !app.active.streamDone ? app.session.id : null,openFile:openInWorkspace});
+if (!COMPACT) initWorkbench({showPanel: app.showPanel,newSession: app.newSession,openSession: app.openSession,getSession:()=>app.session,getRunning:()=>app.active && !app.active.streamDone ? app.session.id : null,openFile:app.openInWorkspace});
 mascots = initMascots();
 companion = initCompanion({ send, startVoice: async () => { await setVoiceCall(true); return callActive; }, stopVoice: () => setVoiceCall(false), speak: text => { speaker.unlock(); speaker.speak(text); } });
 const hologram = initHologramCompanion({send:async text=>{if(app.active)throw new Error('当前任务还在进行，请稍等完成后再发送。');await send(text);},onFull:()=>{body.classList.add('side-closed');body.classList.remove('side-open');document.querySelector('.wb-tabs button')?.click();},wallpaper:MOBILE?async()=>{const {registerPlugin}=await import('@capacitor/core');await registerPlugin('CompanionWallpaper').open();}:null});
@@ -1576,7 +1345,7 @@ if(DESKTOP?.onWallpaperRequest)DESKTOP.onWallpaperRequest(async request=>{
 if(MOBILE){import('@capacitor/core').then(({registerPlugin})=>{const plugin=registerPlugin('CompanionWallpaper');const check=async()=>{try{const r=await plugin.consumeOpen();if(r.open)hologram.open();}catch{}};check();document.addEventListener('visibilitychange',()=>{if(!document.hidden)check();});}).catch(()=>{});}
 composer = initConversationComposer({cancelDictation:()=>stopDictation()});
 initCompanionAppearance();
-initRenderHealthPanel({ mobile: MOBILE, toast, onChange: () => { if (!app.active) replayTranscript(); } });
+initRenderHealthPanel({ mobile: MOBILE, toast, onChange: () => { if (!app.active) app.replayTranscript(); } });
 
 // 手机启动页：界面准备好、并且至少显示了 2 秒后淡出（太快一闪而过不像 App）
 {
@@ -1595,7 +1364,7 @@ if(MOBILE){
   const list=document.createElement('div');list.hidden=true;recovery.append(toggle,list);document.querySelector('[data-pane="settings"]').append(recovery);
   const draw=()=>{list.replaceChildren();const rows=listPending(storage);if(!rows.length){list.textContent='没有保留的未完成任务。';return;}
     for(const rec of rows){const card=document.createElement('div'),title=document.createElement('p');title.textContent=rec.title||String(rec.text||'未完成任务').slice(0,40);
-      const open=document.createElement('button');open.type='button';open.className='btn sm';open.textContent='查看并继续';open.onclick=async()=>{await openSession(rec.sessionId);prompt.value=resumeText(rec);autosize();app.showPanel('settings',{toggle:true});prompt.focus();};
+      const open=document.createElement('button');open.type='button';open.className='btn sm';open.textContent='查看并继续';open.onclick=async()=>{await app.openSession(rec.sessionId);prompt.value=resumeText(rec);autosize();app.showPanel('settings',{toggle:true});prompt.focus();};
       const dismiss=document.createElement('button');dismiss.type='button';dismiss.className='btn ghost sm';dismiss.textContent='不再继续';dismiss.onclick=()=>{clearPending(storage,rec.sessionId,rec.turnId);draw();};card.append(title,open,dismiss);list.append(card);
     }
   };toggle.onclick=()=>{list.hidden=!list.hidden;if(!list.hidden)draw();};
