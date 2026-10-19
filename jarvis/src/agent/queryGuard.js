@@ -1,6 +1,8 @@
 /** 保护原话中的精确实体，不根据字形相似度擅自改人名。 */
 export function protectedTerms(text = '') {
   const value = String(text).slice(0, 8000);
+  // 凭据或验证码不得因六位数字保护被自动补进公共搜索词。
+  if (/验证码|密码|密钥|token|password|api.?key|authorization/i.test(value)) return [];
   const quoted = [...value.matchAll(/[“「『"]([^”」』"\n]{2,40})[”」』"]/g)].map((match) => match[1]);
   const codes = value.match(/\b(?:sh|sz|bj)?\d{6}\b/gi) ?? [];
   return [...new Set([...quoted, ...codes])].slice(0, 12);

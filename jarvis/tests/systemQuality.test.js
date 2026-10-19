@@ -77,6 +77,7 @@ describe('网络与预算的真实分型', () => {
 describe('搜索实体和聚合线索', () => {
   it('保护原话中的姓名和代码，不用字形猜测替换', () => {
     expect(protectedTerms('请查“冉某某”和600000')).toEqual(['冉某某', '600000']);
+    expect(protectedTerms('用验证码123456登录')).toEqual([]);
     expect(guardQuery('剑某某资料', { original: '请查“冉某某”' }).query).toContain('冉某某');
   });
   it('网页缓存每条正文有大小上限，明确标注截断', async () => {
