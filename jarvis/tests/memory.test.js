@@ -121,13 +121,15 @@ describe('自动整理', () => {
       }
     });
     const r = await memory.reflect([{ role: 'user', content: '我搬到北京了' }]);
-    // 自动记下的立刻参与回答（换个对话也记得），新住址取代旧住址；标着 pending，面板里可以确认
-    expect(r.memories[0]).toMatchObject({ action: 'UPDATE', content: '用户住在北京', pending: true });
+    // 自动提炼只新增候选，保留已确认旧值；用户确认后再替换。
+    expect(r.memories[0]).toMatchObject({ action: 'ADD', content: '用户住在北京', pending: true, conflictsWith: expect.any(String) });
     const ctx = (await memory.contextFor('住在哪里')).memories;
     expect(ctx.map(m=>m.content)).toContain('用户住在北京');
-    expect(ctx.map(m=>m.content)).not.toContain('用户住在上海');
-    expect((await memory.listAll()).archived.some(m=>m.content==='用户住在上海')).toBe(true);
+    expect(ctx.map(m=>m.content)).toContain('用户住在上海');
+    expect((await memory.listAll()).archived.some(m=>m.content==='用户住在上海')).toBe(false);
     await memory.confirmCandidate(r.memories[0].id);
+    expect((await memory.listAll()).archived.some(m=>m.content==='用户住在上海')).toBe(true);
+    expect((await memory.contextFor('住在哪里')).memories.map(m=>m.content)).not.toContain('用户住在上海');
     expect((await memory.contextFor('住在哪里')).memories.find(m=>m.content==='用户住在北京').pending).toBe(false);
     expect(r.episode).toMatchObject({ summary: '用户说搬家到北京，助手更新了地址', topics: ['搬家'] });
   });

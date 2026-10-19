@@ -137,10 +137,19 @@ export async function remember(content, category = 'fact', { importance = 3, sou
   const vec = await embedOne(content);
   const pending = source.includes('待核实');
   const duplicate = all.find(m=>!m.validTo && norm(m.content)===content);
-  // 自动提炼的也走正常合并：同一件事的新说法（如搬家后的住址）取代旧的，不会新旧两条同时存在
+  // 自动提炼有冲突时先保留为候选，不能直接覆盖用户已确认的记录。
   const { action, target } = duplicate ? { action: 'NOOP', target: duplicate } : await decide(content, category, all, vec);
   const t = now();
   if (action === 'NOOP') {
+    // 只有用户确认候选时才使旧值失效；自动重复提炼不确认冲突。
+    if (!pending && target.conflictsWith) {
+      const previous = await memories.get(target.conflictsWith);
+      if (previous && !previous.validTo) {
+        await memories.put({ ...previous, validTo: t, supersededBy: target.id });
+        target.history = [...(target.history || []), { content: previous.content, until: t }].slice(-10);
+      }
+      delete target.conflictsWith;
+    }
     Object.assign(target, { updatedAt: t, lastUsed: t, importance: Math.max(target.importance, importance) }, pending ? {} : { pending: false }); // 用户亲口要记的，自动记下的那条就算确认了
     await memories.put(target);
     return { ...target, action };

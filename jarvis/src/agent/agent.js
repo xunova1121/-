@@ -16,7 +16,7 @@ import { capabilityBlock, DIALOGUE_POLICY, needsActionTools } from './dialoguePo
  *   { type: 'server_tool', name }              服务端工具（如 Claude 联网搜索）
  *   { type: 'sources', items }                 本轮自动检索到的知识库来源
  */
-import { EmotionTagStripper, stripEmotionTags } from '../../shared/emotionTag.js';
+import { EmotionTagStripper } from '../../shared/emotionTag.js';
 import { validateArgs } from './tools.js';
 import { withLookupDeadline, isQuickLookup, COMPLEX } from './lookupDeadline.js';
 import { createRetrievalBudget, withWebDeadline } from './retrievalBudget.js';
@@ -550,7 +550,6 @@ export function progressReminder({ userText, steps = [], toolCount }) {
   return `（进度提醒：已经调用了 ${toolCount} 次工具。用户这次要的是：“${ask.length > 200 ? `${ask.slice(0, 200)}…` : ask}”。${progress}先确认方向没跑偏再接着做，不要做用户没要的事。）`;
 }
 
-const stripTag = (s) => stripEmotionTags(String(s || '').replace(/^\s*<emotion>[^<]*<\/emotion>\s*/, ''));
 
 
 
