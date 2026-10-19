@@ -40,7 +40,7 @@ export function createPageReader({ tavilyKey, fetchViaGateway, fetchImpl = (...a
     let res;
     try { res = await get(url, { signal }); } catch (e) {
       if (signal?.aborted) throw signal.reason;
-      throw Object.assign(new Error('网页连接失败：' + e.message), { name: e.name === 'TimeoutError' ? 'TimeoutError' : 'NetworkError', cause: e, kind: e.kind || 'network' });
+      throw Object.assign(new Error('网页连接失败：' + e.message), { name: e.name === 'TimeoutError' ? 'TimeoutError' : 'NetworkError', cause: e, status: e.status, code: e.code, kind: e.kind || 'network' });
     }
     if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}${[401,403,429].includes(res.status) ? '（网站要求登录、验证或限制程序访问）' : res.status === 404 ? '（网页不存在或链接已失效）' : ''}`), { status: res.status });
     const type = res.headers.get('content-type') || '';

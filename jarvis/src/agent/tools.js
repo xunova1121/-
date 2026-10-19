@@ -1,6 +1,6 @@
 import { createStockKlineTool } from './stockKline.js';
 import { queryGuardTool, guardQuery } from './queryGuard.js';
-import { searchAggregateHints } from './searchFallback.js';
+import { searchAggregateHints, safeFallbackQuery } from './searchFallback.js';
 import { throwControl } from '../core/networkRequest.js';
 import { createVerificationTool, currentTime } from './verifyNumbers.js';
 import { checkpointView } from '../../shared/taskCheckpoint.js';
@@ -703,7 +703,8 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
           text = await readPage(url, { signal, progress, consume: kind => retrieval?.consume(kind) });
         } catch (error) {
           throwControl(error, signal);
-          const hints = await searchAggregateHints(requestText || new URL(url).hostname + ' ' + new URL(url).pathname, {
+          if (error.code === 'PRIVATE_NETWORK_BLOCKED') throw error;
+          const hints = await searchAggregateHints(safeFallbackQuery(url, requestText), {
             get: ctx.fetchViaGateway ?? ((...args) => fetch(...args)), signal, retrieval
           });
           return '原网页读取失败：' + error.message + '\n以下只是聚合搜索线索，未取得原站正文，不能声称已核实：\n' + JSON.stringify(hints);

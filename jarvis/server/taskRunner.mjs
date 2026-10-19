@@ -67,7 +67,7 @@ export async function publicFetch(url, init = {}, fetchImpl = globalThis.fetch, 
     requestSignal.throwIfAborted();
     // 域名也要查一下解析到哪：指向 127.0.0.1 这类内网地址的域名同样不许访问
     const addrs = /^https?:$/.test(u.protocol) && !isPrivateHost(u.hostname) ? await lookup(u.hostname.replace(/^\[|\]$/g, '')).catch(() => []) : null;
-    if (!addrs || addrs.some((a) => isPrivateHost(a.address))) throw new Error('只允许访问公网 http(s) 地址');
+    if (!addrs || addrs.some((a) => isPrivateHost(a.address))) throw Object.assign(new Error('只允许访问公网 http(s) 地址'), { code: 'PRIVATE_NETWORK_BLOCKED', kind: 'api', status: 403 });
     const res = await fetchImpl(u, { ...init, headers, redirect: 'manual', signal: requestSignal });
     const loc = res.headers.get('location');
     if (!(res.status >= 300 && res.status < 400 && loc)) return res;
