@@ -33,6 +33,11 @@ it('桥只返回工具调用，不在服务器执行电脑命令；原生raw协�
   behavior=async()=>({text:'',toolCalls:[{id:'c',name:'computer_open',args:{target:'报告.xlsx'}}],stop:'tool_use',raw:{protocol:'original'}});
   const result=await createPCModelAdapter(client).stream(req());expect(result.toolCalls[0].name).toBe('computer_open');expect(result.raw).toEqual({protocol:'original'});expect(mode.runner.list()).toEqual([]);
 });
+it('文件任务中开始看屏时自动转看图分工，不黏在原文字模型',async()=>{
+  const models=[];const adapter=createPCModelAdapter(client,{task:'chat',onModel:m=>models.push(m)});
+  await adapter.stream(req());await adapter.stream({...req(),messages:[{role:'user',content:'下一步'},{role:'tool',toolCallId:'screen',name:'computer_look',content:'screen',images:[{mime:'image/png',data:'aW1hZ2U='}]}]});
+  expect(models).toEqual(['primary','vision-model']);
+});
 it('主模型失败可回退，已经输出半截则不切换；错误隐藏服务器密钥',async()=>{
   const models=[];behavior=async o=>{if(o.model==='primary')throw Object.assign(Error('temporary'),{status:503});o.onText('backup');return{text:'backup',toolCalls:[],stop:'end_turn'};};
   const reused=createPCModelAdapter(client,{onModel:m=>models.push(m)});

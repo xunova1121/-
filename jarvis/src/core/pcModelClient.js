@@ -29,7 +29,7 @@ export function createPCModelAdapter(client,{task='chat',onModel}={}) {
           buf+=dec.decode(value,{stream:true});if(buf.length>8*1024*1024)throw new Error('服务器模型响应过大');
           const parsed=parseSse(buf);buf=parsed.rest;
           for(const e of parsed.events){
-            if(e.type==='model'){if(e.model&&e.provider)preferredModel={model:e.model,provider:e.provider};onModel?.(e.model,e);arm(!gotText);}
+            if(e.type==='model'){if(e.model&&e.provider)preferredModel={model:e.model,provider:e.provider,task:e.task};onModel?.(e.model,e);arm(!gotText);}
             else if(e.type==='retry'){o.onRetry?.(e.attempt);arm(!gotText);}
             else if(e.type==='text'){if(e.delta||e.meta?.serverTool){if(e.delta)gotText=true;arm(false);o.onText?.(e.delta,e.meta);}}
             else if(e.type==='error')throw Object.assign(new Error(e.message||'服务器模型失败'),{status:e.status,stalled:e.stalled});

@@ -20,13 +20,13 @@ export function bridgeInput(body) {
 export async function streamPCModel(req,res,body,{cfg,makeAdapter=createAdapter}) {
   const input=bridgeInput(body);
   if(cfg.provider==='mock')throw Object.assign(new Error('服务器仍是演示模型，请先配置真实模型；不会用演示结果冒充电脑任务已完成'),{status:409});
-  const kind=['chat','code','write','reason','vision'].includes(body.task)?body.task:'chat';
+  const kind=body.messages.some(m=>m.images?.length)?'vision':['chat','code','write','reason','vision'].includes(body.task)?body.task:'chat';
   const route=routeFor(cfg,kind),first=makeAdapter(route.cfg);
   if(first.problem)throw Object.assign(new Error(`服务器模型配置不可用：${first.problem}`),{status:409});
   // 只使用服务器已配置的模型，客户端不能提交任意上游URL或密钥。
   const configured=[{...first,provider:route.cfg.provider},...fallbackRoutes(cfg,{provider:route.cfg.provider,model:first.model}).map(f=>({...makeAdapter(f.cfg),provider:f.provider})).filter(f=>!f.problem&&f.adapter&&f.model)];
   // 本轮已切到可用备用模型时，后续步骤不要再次等待故障主模型；只能选择服务器配置中的候选。
-  const preferred=configured.find(m=>m.model===body.preferredModel?.model&&m.provider===body.preferredModel?.provider);
+  const preferred=body.preferredModel?.task===kind&&configured.find(m=>m.model===body.preferredModel?.model&&m.provider===body.preferredModel?.provider);
   const models=preferred?[preferred,...configured.filter(m=>m!==preferred)]:configured;
   const ctrl=new AbortController(),abort=()=>ctrl.abort();
   req.on('aborted',abort);res.on('close',abort);
@@ -42,7 +42,7 @@ export async function streamPCModel(req,res,body,{cfg,makeAdapter=createAdapter}
     for(let i=0;i<models.length;i++){
       const cur=models[i];let text=false;
       if(ctrl.signal.aborted)break;
-      send({type:'model',model:cur.model,provider:cur.provider,fallback:cur.model!==first.model||cur.provider!==route.cfg.provider});
+      send({type:'model',task:kind,model:cur.model,provider:cur.provider,fallback:cur.model!==first.model||cur.provider!==route.cfg.provider});
       try{
         const result=await cur.adapter.stream({...input,model:cur.model,signal:ctrl.signal,
           onRetry:(attempt)=>send({type:'retry',attempt}),
