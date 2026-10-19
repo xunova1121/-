@@ -7,10 +7,30 @@
 
 /** 回答未完成时记在对话里的标记，以及“继续”按钮发出的话 */
 export const INTERRUPTED_MARK = '（本轮回答未完成；具体原因请看错误提示）';
+/**
+ * 出错的种类：timeout 等太久 / api 模型接口报错 / network 连不上 / 空字符串 = 说不清。
+ * 先看出错处打上的标记（状态码、错误名、错误码），只有纯文字的旧错误才按字面猜。
+ */
+const NET_CODES = /^(ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EPIPE|ENETUNREACH|EHOSTUNREACH|UND_ERR_SOCKET|UND_ERR_CONNECT_TIMEOUT)$/;
+export function errorKind(error) {
+  if (!error) return '';
+  if (typeof error === 'object') {
+    if (['timeout', 'api', 'network'].includes(error.kind)) return error.kind;
+    const code = String(error.code || error.cause?.code || '');
+    if (error.stalled || error.name === 'TimeoutError' || error.name === 'LookupTimeoutError' || code === 'LOOKUP_TIMEOUT' || code === 'RETRIEVAL_BUDGET' || code === 'ETIMEDOUT') return 'timeout';
+    if (Number.isInteger(error.status) && error.status >= 400) return 'api';
+    if (NET_CODES.test(code) || error.name === 'TypeError' && /fetch|network|load failed/i.test(String(error.message))) return 'network';
+  }
+  const message = String(error?.message || error || '');
+  // 顺序有讲究：“连接超时”算超时；带 api.xxx.com 网址的断线算连不上，不算接口报错
+  if (/LOOKUP_TIMEOUT|超时|时间预算|等待 \d+ 秒|没有任何输出|timed? ?out/i.test(message)) return 'timeout';
+  if (/模型接口|模型服务|返回 [45]\d\d|reasoning_content/.test(message)) return 'api';
+  if (/network|网络|failed to fetch|fetch failed|load failed|连接|socket|econn/i.test(message)) return 'network';
+  return '';
+}
+const KIND_TEXT = { timeout: '等待超时', api: '模型接口出错', network: '连接异常' };
 export function interruptionMark(error) {
-  const message=String(error?.message || error || '');
-  const reason=/LOOKUP_TIMEOUT|超时|时间预算|等待 \d+ 秒|没有任何输出/.test(message) ? '等待超时' : /模型接口|模型服务|API|返回 [45]\d\d|reasoning_content/i.test(message) ? '模型接口出错' : /network|网络|fetch|连接|socket/i.test(message) ? '连接异常' : '执行出错';
-  return `（本轮回答未完成：${reason}。已保留可恢复的内容。）`;
+  return `（本轮回答未完成：${KIND_TEXT[errorKind(error)] || '执行出错'}。已保留可恢复的内容。）`;
 }
 export const CONTINUE_TEXT = '继续：从刚才中断的地方接着做，已经写好、做好的部分不要重复';
 

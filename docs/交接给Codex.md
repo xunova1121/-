@@ -1,3 +1,21 @@
+## 检索证据架构审查修复：2026-10-19 21:07（北京时间，Claude；未发版）
+
+在 1.0.194 基础上，按架构审查改了 6 处：
+1. **证据单独存放**：新增 `src/agent/evidenceStore.js`，存在 kv 的 `evidence:<对话id>`，不再进对话记录（打开对话、手机同步都不带网页正文）。
+   每段对话最多 12 篇、每篇 6000 字，只留 24 小时内用过的 30 段对话，1 秒内的写入合并落盘，删对话时一起删。
+   `fact_check` 改用它（`onEvidence` 写入，“继续”时 `records()` 复用）；`fetch_url` 读到的原文也存一份并在结果末尾给出编号。
+   新工具 `read_evidence(id)`：按编号取回原文，不联网；`read_task_checkpoint` 会列出证据编号。检查点里的 `retrieval_evidence` 处理只为兼容旧数据保留。
+2. **检查点合并写盘**（`server/taskRunner.mjs` 的 `saveCheckpoint`）：每秒最多写一次；会改东西的工具开始前仍立即写（重启后要知道它可能做了一半）。
+   `recoveryCheckpoints` 最多留 5 次，归档时去掉旧版检查点里的网页正文。
+3. **工具用这轮任务所属的对话 id**（`tool.run` 第二个参数多了 `sessionId`），不再用界面上当前打开的对话，后台任务切对话不串。
+4. **预算**：`web_search` 不再吞掉预算错误（别的词搜到了照常返回）；某一类调用用完会让整轮检索收尾；
+   新增 `retrieval.left`，模型自带联网搜索在发请求前按剩余次数设 `max_uses`（`maxWebSearches`），不再搜完才扣。`fetch_url` 先校验网址再扣次数。
+5. **失败原因**：`src/core/suggest.js` 新增 `errorKind(err)`，先看状态码、错误名、错误码，纯文字才按字面猜；修了“带 api.xxx.com 的断网被判成接口出错”。服务器把类型传给 `interruptionMark`。
+6. **重试等待**：`retryWait` 在基准时间的 50%–100% 之间随机，服务商给了 Retry-After 就照它（最多 30 秒）；三个模型接口都用，等待中点停止立即生效。
+
+没做：主循环按 token 计预算（各接口的用量统计不统一，改动大，另议）。
+验证：`npx vitest run` 934 个全过（新增 `tests/evidenceStore.test.js`，`tests/taskRunner.test.js` 加 2 个），`npm run build`、`e2e/smoke.mjs` 178/178、`e2e/standalone.mjs` 14/14、`e2e/server-mobile.mjs` 15/15。真机没测。
+
 ## 检索智能体流程优化已发布1.0.194：2026-10-19 20:45（北京时间，Codex）
 
 - 正式源码4142d51f5046751237928f1eb589cb5cfa4a80e5，Actions https://github.com/xunova1121/-/actions/runs/39253034428 完整验证、安卓、Windows和发布全部success。非草稿Release https://github.com/xunova1121/-/releases/tag/desktop-v1.0.194 于20:45:43发布，已核对APK、Windows EXE/ZIP、服务器tar包及两类更新元数据齐全。192/193为独立验证序号。

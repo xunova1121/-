@@ -5,6 +5,7 @@
 import { collection, uid } from './store.js';
 import { buildIndex } from './search.js';
 import { archiveRequirements } from './taskRequirements.js';
+import { evidence } from './evidenceStore.js';
 
 const sessions = collection('sessions');
 const TITLE_MAX = 24;
@@ -65,7 +66,10 @@ export async function setPinned(id, pinned) {
   if (s) await sessions.put({ ...s, pinned });
 }
 
-export const remove = (id) => (remote ? remote.remove(id) : sessions.delete(id));
+export function remove(id) {
+  evidence.drop(id).catch(() => {}); // 这段对话读过的网页证据一起删
+  return remote ? remote.remove(id) : sessions.delete(id);
+}
 
 /** 按标题和内容搜索；返回带命中片段的会话 */
 export async function search(query) {

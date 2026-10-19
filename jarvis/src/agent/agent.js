@@ -285,7 +285,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       system: light ? [LIGHT_PROMPT, [ctx.dynamic, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, computerNote, requirementContext, toolHint, voice && VOICE_NOTE].filter(Boolean).join('\n\n')],
       messages: convo,
       tools: closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list(),
-      allowWebSearch: !closing,
+      // 模型自带的联网搜索在服务商那边执行、搜一次扣一次费：剩余次数在发请求前就定好，不等搜完再拦
+      allowWebSearch: !closing && retrieval.left > 0, maxWebSearches: retrieval.left,
       signal: requestCtrl.signal,
       onRetry: (attempt) => {
         stripper = new EmotionTagStripper(); // 续写的开头可能又带情绪标签
@@ -386,7 +387,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         const progress = (text) => emit({ type: 'tool_progress', id: c.id, name: c.name, text });
         const web = WEB_TOOLS.has(c.name);
         if (web && !retrieval.begin()) throw new Error(retrieval.note);
-        const run = (s) => tool.run(c.args, { signal: s, progress, retrieval, checkpoint: event => checkpoint?.(event) });
+        const run = (s) => tool.run(c.args, { signal: s, progress, retrieval, sessionId, checkpoint: event => checkpoint?.(event) });
         const r = web && Number.isFinite(retrieval.remaining)
           ? await withWebDeadline(run, { signal, timeoutMs: retrieval.remaining }) : await run(signal);
         if (r && typeof r === 'object' && 'text' in r) { output = String(r.text); outImages = r.images ?? []; } else output = String(r);
@@ -456,7 +457,7 @@ export const TIME_BUDGET_MS = 8 * 60e3;
 const WEB_TOOLS = new Set(['web_search', 'fetch_url', 'fact_check', 'deep_research']);
 
 /** 可以同时执行的只读工具（不改文件、不操作电脑、不需要用户确认） */
-export const PARALLEL_SAFE = new Set(['web_search', 'fetch_url', 'read_file', 'list_files', 'find_files', 'search_in_files', 'kb_search', 'recall', 'search_conversations', 'read_conversation', 'get_weather', 'get_current_time', 'read_skill_file', 'computer_read_file', 'computer_list_dir']);
+export const PARALLEL_SAFE = new Set(['web_search', 'fetch_url', 'read_evidence', 'read_file', 'list_files', 'find_files', 'search_in_files', 'kb_search', 'recall', 'search_conversations', 'read_conversation', 'get_weather', 'get_current_time', 'read_skill_file', 'computer_read_file', 'computer_list_dir']);
 const CODE_FILE = /\.(m?js|ts|py|html?)$/i;
 /** 回答结尾是“我现在开始 / 接下来生成 / 马上做 / 稍等”这类预告（说了要做但还没做） */
 /** “需要的话我可以接着做 PPT”这类询问不算（那是在问用户） */

@@ -5,7 +5,7 @@
  * 中转站可能不认联网搜索或推理参数：被拒（400 / 404 / 422）且还没输出文字时，按顺序降级重试并记住：
  *   0 全部（联网搜索 + 推理强度）→ 1 去掉推理强度 → 2 再去掉联网搜索
  */
-import { sseLines, isTransient, stallGuard } from './openai.js';
+import { sseLines, isTransient, stallGuard, retryWait, retryAfterMs, sleep } from './openai.js';
 
 const imagePart = (img) => ({ type: 'input_image', image_url: `data:${img.mime};base64,${img.data}` });
 
@@ -100,7 +100,7 @@ export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearc
       if (!res.ok || !res.body) {
         let detail = '';
         try { detail = (await res.text()).slice(0, 300); } catch { /* ignore */ }
-        throw Object.assign(new Error(`模型接口返回 ${res.status}${detail ? `：${detail}` : ''}`), { status: res.status });
+        throw Object.assign(new Error(`模型接口返回 ${res.status}${detail ? `：${detail}` : ''}`), { status: res.status, retryAfterMs: retryAfterMs(res.headers?.get?.('retry-after')) });
       }
       const acc = createResponsesAccumulator((d, extra) => { if (d) state.started = true; onText?.(d, extra); });
       const reader = res.body.getReader();
@@ -134,7 +134,7 @@ export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearc
         } catch (e) {
           if (req.signal?.aborted || state.started) throw e;
           if ([400, 404, 422].includes(e?.status) && level < maxLevel) { level++; continue; }
-          if (isTransient(e) && transient++ < (req.maxTransientRetries ?? 2)) { await new Promise((r) => setTimeout(r, 1500 * transient)); continue; }
+          if (isTransient(e) && transient++ < (req.maxTransientRetries ?? 2)) { await sleep(retryWait(1500 * transient, e), req.signal); continue; }
           throw e;
         }
       }

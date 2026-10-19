@@ -21,7 +21,8 @@ export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs } = {
     consume(kind) {
       if (reason || started !== null && duration()>0 && now()-started>=duration()) throw Object.assign(new Error(reason || '本轮联网检索已达到时间预算'), {code:'RETRIEVAL_BUDGET'});
       const limit = { search:6, read:4, model:3 }[kind];
-      if (!extensive && limit && resources[kind] >= limit) throw Object.assign(new Error(`普通查询的${kind}调用已达到预算`), { code:'RETRIEVAL_BUDGET' });
+      // 某一类用完：整轮检索就此收尾（主循环下一步会让模型直接用已有资料回答，而不是换个工具接着查）
+      if (!extensive && limit && resources[kind] >= limit) { reason ||= `普通查询的${kind}调用已达到预算`; throw Object.assign(new Error(reason), { code:'RETRIEVAL_BUDGET' }); }
       if (kind in resources) resources[kind]++;
     },
     get resources() { return {...resources}; },
@@ -30,6 +31,8 @@ export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs } = {
     close(why) { reason ||= why; },
     get extensive() { return extensive; },
     get reason() { return check(); },
+    /** 还能联网几次（发请求前用：模型自带的联网搜索按这个限次数，不等搜完再扣） */
+    get left() { return check() ? 0 : extensive ? Infinity : Math.max(0, 6 - calls); },
     get remaining() { return started === null || duration() <= 0 ? Infinity : Math.max(0, duration() - (now() - started)); },
     get note() { return `（系统提示：${check() || '联网检索已停止'}。${extensive ? '不要再调用联网工具；可以继续读写文件、生成文档和运行验证。' : '不要再调用工具，不要继续联网搜索。'}现在用已经取得的资料回答，区分已核实和未核实，列出已有来源；没有确切结果就如实说还没有确切结果，不要编造，也不要把检索失败说成问题没有答案。）`; }
   };

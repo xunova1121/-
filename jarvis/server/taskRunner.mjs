@@ -1,7 +1,8 @@
 import { renderOffice } from './officeRender.mjs';
 import { createTaskTiming } from '../shared/taskTiming.js';
 import { createHash } from 'node:crypto';
-import { checkpointEvent, checkpointNeedsReview, checkpointRecoveryText } from '../shared/taskCheckpoint.js';
+import { checkpointEvent, checkpointNeedsReview, checkpointRecoveryText, isReadOnlyTool } from '../shared/taskCheckpoint.js';
+import { evidence } from '../src/agent/evidenceStore.js';
 /**
  * 服务器上的任务执行器：手机 / 电脑把任务交过来，服务器自己从头做到尾。
  * 发任务的那台设备关掉、断网都不影响；它再连上来时，按序号补发漏掉的进度，做完的结果存在对话里。
@@ -26,7 +27,7 @@ import { generateImage } from '../src/llm/images.js';
 import { generateVideo } from '../src/llm/videos.js';
 import { providerById, isPrivateHost } from '../shared/providers.js';
 import { routeFor, fallbackRoutes, classifyTask, effortFor, isSmallTalk } from '../src/llm/router.js';
-import { INTERRUPTED_MARK, interruptionMark } from '../src/core/suggest.js';
+import { INTERRUPTED_MARK, interruptionMark, errorKind } from '../src/core/suggest.js';
 import { uid } from '../src/agent/store.js';
 
 /** 服务器上不提供的工具：浏览器里的代码沙箱、预览窗口、本机指标、定时任务（定时任务还在手机 / 电脑上跑） */
@@ -42,6 +43,7 @@ const MAX_EVENTS = 3000;
 export const DRAFT_MARK = '（还在做，做完会更新这里）';
 /** 半截回答多久存一次 */
 export const DRAFT_MS = { value: 10_000 };
+export const CHECKPOINT_MS = { value: 1000 }; // 检查点合并写盘的间隔（测试里可以调小）
 
 /** 随任务发来的图片：最多几张、每张多大（base64 字符数） */
 const MAX_IMAGES = 4;
@@ -125,6 +127,17 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     task.events.unshift(...merged);
   }
 
+  /**
+   * 检查点落盘：每个工具开始、结束都会记一笔，每次都把整段对话重写一遍太浪费。
+   * 合并成最多每秒写一次；只有“要动手改东西”的工具开始前立刻写（服务器这时重启，恢复时要知道它可能做了一半）。
+   */
+  function saveCheckpoint(task, now_ = false) {
+    clearTimeout(task.checkpointTimer); task.checkpointTimer = null;
+    if (!now_) { task.checkpointTimer = setTimeout(() => { task.checkpointTimer = null; saveCheckpoint(task, true).catch(() => {}); }, CHECKPOINT_MS.value); return Promise.resolve(); }
+    if (['done', 'error', 'stopped'].includes(task.status)) return Promise.resolve(); // 已经由 finish 写了最终状态
+    return editSession(task.sessionId, async (s) => { if (!s) return; s.taskCheckpoint = task.checkpoint; await sessions.save(s); });
+  }
+
   /** 给模型用的辅助调用（深度调研、逐项查证等工具用） */
   function helper(cfg, kind) {
     const { adapter, model, problem } = createAdapter(routeFor(cfg, kind).cfg);
@@ -200,7 +213,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         inbox: task.inbox,
         checkpoint: async event => {
           task.checkpoint=checkpointEvent(task.checkpoint,event,now());
-          await editSession(task.sessionId,async s=>{s.taskCheckpoint=task.checkpoint;await sessions.save(s);});
+          await saveCheckpoint(task, event.type==='tool_start'&&!isReadOnlyTool(event.name));
         },
         signal: task.ctrl.signal,
         tools,
@@ -217,23 +230,25 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       return finish(task, session, { text: r.text, usedTools, toolCalls: r.toolCalls ?? 0 });
     } catch (err) {
       const stopped = task.ctrl.signal.aborted && !task.idle;
-      return finish(task, session, { error: stopped ? '' : task.idle ? '连续 10 分钟没有进展，已中断' : String(err?.message || err), stopped, shown, usedTools });
+      return finish(task, session, { error: stopped ? '' : task.idle ? '连续 10 分钟没有进展，已中断' : String(err?.message || err), errorType: task.idle ? 'timeout' : errorKind(err), stopped, shown, usedTools });
     } finally {
       clearTimeout(idle);
     }
   }
 
-  async function finish(task, session, { text = '', error = '', stopped = false, shown = '', usedTools = [], toolCalls = 0 }) {
+  async function finish(task, session, { text = '', error = '', errorType = '', stopped = false, shown = '', usedTools = [], toolCalls = 0 }) {
     const timing = task.timing.finish();
     const extra = { timing, ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(task.files.size && { files: [...task.files].slice(-12) }) };
     clearTimeout(task.draftTimer);
+    clearTimeout(task.checkpointTimer); task.checkpointTimer = null; // 下面一起写最终的检查点
+    evidence.flush().catch(() => {});
     // 重新读出来再改（期间用户可能又说了话、改了标题）：去掉半截回答，换成完整的
     await editSession(task.sessionId, async (fresh) => {
       fresh ??= session;
       if (!fresh) return;
       fresh.messages = fresh.messages.filter((m) => m.draftOf !== task.id);
       if (!error && !stopped) fresh.messages.push({ role: 'assistant', content: text || '（完成）', ts: now(), ...extra });
-      else if (shown.trim() || usedTools.length) fresh.messages.push({ role: 'assistant', content: `${shown.trim()}\n\n${stopped ? '（已打断）' : interruptionMark(error)}`, ts: now(), ...extra });
+      else if (shown.trim() || usedTools.length) fresh.messages.push({ role: 'assistant', content: `${shown.trim()}\n\n${stopped ? '（已打断）' : interruptionMark({ message: error, kind: errorType })}`, ts: now(), ...extra });
       fresh.updatedAt = now();
       task.checkpoint=checkpointEvent(task.checkpoint,{type:'task_state',status:stopped?'stopped':error?'error':'done',error},now());
       fresh.taskCheckpoint={...task.checkpoint,timing};
@@ -311,7 +326,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         const incomplete=previous&&['running','queued','interrupted','needs_review','error'].includes(previous.status);
         if(!busy&&incomplete){
           const key=previous.taskId||createHash('sha256').update(JSON.stringify([previous.text,previous.createdAt])).digest('hex');
-          const archive=session.recoveryCheckpoints||[];session.recoveryCheckpoints=[...archive.filter(x=>x.key!==key).map(({evidence,...record})=>record),{key,...previous}];
+          const archive=session.recoveryCheckpoints||[];const {evidence:_,...kept}=previous; // 旧版检查点里带着网页正文：归档时去掉，只留最近 5 次
+          session.recoveryCheckpoints=[...archive.filter(x=>x.key!==key).map(({evidence,...record})=>record),{key,...kept}].slice(-5);
         }
         session.messages.push({role:'user',content:text,ts:now()});session.updatedAt=now();
         const task=busy||{id:uid('t'),sessionId:id,text,status:'queued',seq:0,events:[],listeners:new Set(),files:new Set(),inbox:[],notes:[],images,voice:Boolean(voice),ctrl:new AbortController(),createdAt:now(),checkpoint:{text,notes:[],steps:[],inFlight:[],files:[],status:'queued',createdAt:now()}};

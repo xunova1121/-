@@ -120,6 +120,23 @@ const noEffortModels = new Set();
 const TRANSIENT_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529]);
 export const isTransient = (err) => Boolean(err) && err.name !== 'AbortError' && (err.stalled || TRANSIENT_STATUS.has(err.status) || err.name === 'TypeError' || /connection reset|connection error|econnreset|socket hang up|network ?error|failed to fetch|load failed|premature close|terminated|etimedout|unexpected end/i.test(String(err.message)));
 const RETRY_DELAYS = [1500, 4000, 8000];
+/** 服务商回的 Retry-After（秒数或日期）→ 毫秒；没有或看不懂返回 0 */
+export function retryAfterMs(value, now = Date.now()) {
+  if (value == null || value === '') return 0;
+  const sec = Number(value);
+  if (Number.isFinite(sec)) return Math.max(0, sec * 1000);
+  const at = Date.parse(String(value));
+  return Number.isFinite(at) ? Math.max(0, at - now) : 0;
+}
+/**
+ * 重试前等多久：服务商说了等多久（限流时常见）就照它，最多 30 秒；
+ * 否则在基准时间的一半到全部之间随机——服务器上几个任务一起被限流时，不会在同一刻一起重试、又一起被拒
+ */
+export function retryWait(base, err, random = Math.random) {
+  const after = Number(err?.retryAfterMs) || 0;
+  if (after > 0) return Math.min(30_000, after);
+  return Math.round(base * (0.5 + random() * 0.5));
+}
 
 /** 连接卡住的判定：发出请求后这么久收不到第一段数据，或两段数据之间这么久没动静，就断开重试（中转站偶尔会挂住不回） */
 export const STALL_MS = { first: 45_000, between: 60_000 };
@@ -153,7 +170,7 @@ export function stallGuard(outer, { first = STALL_MS.first, between = STALL_MS.b
     done: () => { clearTimeout(timer); outer?.removeEventListener('abort', onAbort); }
   };
 }
-const sleep = (ms, signal) => new Promise((resolve, reject) => {
+export const sleep = (ms, signal) => new Promise((resolve, reject) => {
   const t = setTimeout(resolve, ms);
   signal?.addEventListener('abort', () => { clearTimeout(t); reject(Object.assign(new Error('aborted'), { name: 'AbortError' })); }, { once: true });
 });
@@ -181,7 +198,7 @@ export function createOpenAIAdapter({ baseURL, apiKey, headers = {}, retryDelays
           onRetry?.(attempt + 1, err);
           // 已经写了一部分：带上这部分让模型接着写，而不是从头再来
           if (partial.trim()) messages = [...opts.messages, { role: 'assistant', content: partial }, { role: 'user', content: CONTINUE_PROMPT }];
-          await sleep(retryDelays[attempt], signal);
+          await sleep(retryWait(retryDelays[attempt], err), signal);
         }
       }
     }
@@ -228,7 +245,7 @@ function createOnce({ baseURL, apiKey, headers = {} }) {
     if (!res.ok || !res.body) {
       let detail = '';
       try { detail = (await res.text()).slice(0, 300); } catch { /* ignore */ }
-      throw Object.assign(new Error(`模型接口返回 ${res.status}${detail ? `：${detail}` : ''}`), { status: res.status });
+      throw Object.assign(new Error(`模型接口返回 ${res.status}${detail ? `：${detail}` : ''}`), { status: res.status, retryAfterMs: retryAfterMs(res.headers?.get?.('retry-after')) });
     }
     const acc = createAccumulator(onText);
     const reader = res.body.getReader();

@@ -31,6 +31,7 @@ import { withWebDeadline } from './retrievalBudget.js';
 import { matchFiles, searchLines } from './fileSearch.js';
 import { deepResearch, DEPTHS } from './research.js';
 import { factCheck, formatReport } from './factCheck.js';
+import { evidence as evidenceStore } from './evidenceStore.js';
 
 const S = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const str = (description) => ({ type: 'string', description });
@@ -460,9 +461,20 @@ export function createTools(ctx) {
     },
     {
       name:'read_task_checkpoint',
-      description:'读取当前会话最近任务的持久检查点：完整要求、补充、成功/失败步骤、文件以及结果未知的操作。恢复任务时先核对，不自动重放有副作用的动作。',
+      description:'读取当前会话最近任务的持久检查点：完整要求、补充、成功/失败步骤、文件以及结果未知的操作，还有已经读过的网页证据编号（看原文用 read_evidence）。恢复任务时先核对，不自动重放有副作用的动作。',
       input_schema:S({}),
-      run:async()=>{const id=ctx.currentSessionId?.();const s=id&&await sessions.get(id);return s?.taskCheckpoint?JSON.stringify({current:checkpointView(s.taskCheckpoint),recoveries:(s.recoveryCheckpoints||[]).map(checkpointView)},null,2):'当前会话没有服务器持久检查点；可读取对话原文和工作区文件核对。';}
+      run:async(_,{sessionId}={})=>{const id=sessionId??ctx.currentSessionId?.();const s=id&&await sessions.get(id);const evidence=id?await evidenceStore.index(id):[];return s?.taskCheckpoint||evidence.length?JSON.stringify({current:checkpointView(s?.taskCheckpoint),recoveries:(s?.recoveryCheckpoints||[]).map(checkpointView),...(evidence.length&&{evidence:evidence.map(({id,url,title})=>({id,url,title}))})},null,2):'当前会话没有服务器持久检查点；可读取对话原文和工作区文件核对。';}
+    },
+    {
+      name:'read_evidence',
+      description:'按编号取回这段对话里已经读过的网页原文片段（fact_check、fetch_url 读过的，最多 6000 字），不用重新联网。不填编号时列出全部编号。编号见 read_task_checkpoint 的 evidence 或 fetch_url 结果末尾。',
+      input_schema:S({id:str('证据编号，如 e1a2b3c；不填则列出全部')}),
+      run:async({id},{sessionId}={})=>{
+        const sid=sessionId??ctx.currentSessionId?.();
+        if(!id){const list=await evidenceStore.index(sid);return list.length?list.map(x=>`${x.id}  ${x.title||'（无标题）'}  ${x.url}`).join('\n'):'这段对话还没有存下的网页证据（超过 24 小时会清掉）；需要时用 fetch_url 重新读取。';}
+        const e=await evidenceStore.get(sid,String(id).trim());
+        return e?`${e.title||'（无标题）'}\n${e.url}\n\n${e.text}`:`找不到证据 ${id}（可能已过期或不是这段对话的）；需要时用 fetch_url 重新读取。`;
+      }
     },
     {
       name: 'create_document',
@@ -666,10 +678,14 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       name: 'fetch_url',
       description: '获取网页内容（转换为文字），用于读取用户给出的链接或最新资料。',
       input_schema: S({ url: str('http(s) 地址') }, ['url']),
-      run: async ({ url }, { signal, progress, retrieval } = {}) => {
-        retrieval?.consume('read');
+      run: async ({ url }, { signal, progress, retrieval, sessionId } = {}) => {
         if (!/^https?:\/\//i.test(url)) throw new Error('只支持 http(s) 地址');
-        return clip(await readPage(url, { signal, progress }), 15000);
+        retrieval?.consume('read');
+        const text = await readPage(url, { signal, progress });
+        // 存一份原文片段：之后要细节用 read_evidence 取，不用重新联网
+        const sid = sessionId ?? ctx.currentSessionId?.();
+        const [id] = sid && text ? await evidenceStore.put(sid, { sources: [{ url, title: String(text).split('\n').find((l) => l.trim())?.trim().slice(0, 120), text }] }).catch(() => []) : [];
+        return clip(text, 15000) + (id ? `\n\n（已存为证据 ${id}，之后要看原文用 read_evidence）` : '');
       }
     },
     {
@@ -712,10 +728,16 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
             const hits = await withWebDeadline((s) => engine.search(q, list.length > 1 ? 5 : 6, { freshness, signal: s }), { signal, timeoutMs: 12000 });
             if (hits.length) successes++;
             return hits.length ? hits.map((r) => `- ${r.title}\n  ${r.url}\n  ${String(r.snippet || '').slice(0, 300)}`).join('\n') : '（没有结果：换个说法、换成英文或原文再搜）';
-          } catch (e) { if (signal?.aborted || e.name === 'AbortError') throw e; return `（搜索失败：${e.message}）`; }
+          } catch (e) {
+            if (signal?.aborted || e.name === 'AbortError') throw e;
+            // 预算用完：别的词搜到了就照常返回；全没搜到才把预算错误交给主循环（它会让模型直接整理答案，而不是换词再搜）
+            if (e.code === 'RETRIEVAL_BUDGET') { budgetHit = e; return `（没有搜：${e.message}）`; }
+            return `（搜索失败：${e.message}）`;
+          }
         };
+        let budgetHit = null;
         const outs = await Promise.all(list.map(one));
-        if (!successes) throw new Error(outs.join('\n'));
+        if (!successes) throw budgetHit ?? new Error(outs.join('\n'));
         return list.length === 1 ? outs[0] : list.map((q, i) => `### ${q}\n${outs[i]}`).join('\n\n');
       }
     });
@@ -728,17 +750,17 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         date: str('事件发生的日期或时间范围，如 2026-10-12（不知道就留空）'),
         context: str('背景，如“中国体育彩票竞彩足球，第 2610121 期”')
       }, ['question', 'items']),
-      run: async ({ question, items, date, context }, { progress, signal, retrieval, checkpoint } = {}) => {
-        const sid=ctx.currentSessionId?.();
+      run: async ({ question, items, date, context }, { progress, signal, retrieval, sessionId } = {}) => {
+        const sid=sessionId??ctx.currentSessionId?.(); // 用这轮任务所属的对话，不用界面上当前打开的
         const session=sid ? await sessions.get(sid).catch(()=>null) : null;
         const resuming=/^(?:继续|恢复|接着)(?:[：:，,。\s]|$)/.test([...session?.messages||[]].reverse().find(m=>m.role==='user')?.content||'');
-        const records=resuming ? [...(session?.recoveryCheckpoints||[]), session?.taskCheckpoint].filter(Boolean).flatMap(x=>x.evidence||[]) : [];
+        const records=resuming ? await evidenceStore.records(sid).catch(()=>[]) : [];
         const r = await factCheck({
           question, items, date, context, signal,
           mode: retrieval && !retrieval.extensive && items?.length===1 ? 'quick' : 'thorough',
           consume: kind => retrieval?.consume(kind),
           evidence: records,
-          onEvidence: evidence => signal?.aborted ? undefined : checkpoint?.({type:'retrieval_evidence',evidence}),
+          onEvidence: evidence => signal?.aborted || !sid ? undefined : evidenceStore.put(sid,evidence),
           llm: ctx.reasonLlm ?? ctx.llm ?? null,
           search: (q, n, o) => engine.search(q, n, { ...o, signal }),
           read: (url) => readPage(url, { signal, progress }),

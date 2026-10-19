@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createFileStore } from '../server/fileStore.mjs';
-import { createTaskRunner as makeRunner, SERVER_BLOCKED, DRAFT_MARK, DRAFT_MS, publicFetch } from '../server/taskRunner.mjs';
+import { createTaskRunner as makeRunner, SERVER_BLOCKED, DRAFT_MARK, DRAFT_MS, CHECKPOINT_MS, publicFetch } from '../server/taskRunner.mjs';
 import { INTERRUPTED_MARK } from '../src/core/suggest.js';
 import { useBackend } from '../src/agent/store.js';
 import * as sessions from '../src/agent/sessions.js';
@@ -355,3 +355,26 @@ it('开始新任务不会覆盖未完成检查点，明确继续时带回完整�
 
 
 
+
+it('只读工具的检查点合并写盘（不再每个工具都重写整段对话），最终状态照样完整',async()=>{
+ const store=createFileStore(dir);let puts=0;useBackend({...store,all:(...a)=>store.all(...a),get:(...a)=>store.get(...a),delete:(...a)=>store.delete(...a),clear:(...a)=>store.clear(...a),put:(name,obj)=>{if(name==='sessions')puts++;return store.put(name,obj);}});
+ const old=CHECKPOINT_MS.value;CHECKPOINT_MS.value=60_000;
+ try{
+  const probe={name:'read_file',description:'t',input_schema:{type:'object',properties:{}},run:async()=>'内容'};
+  const calls=[1,2,3,4].map(n=>({id:'r'+n,name:'read_file',args:{}}));
+  const runner=createTaskRunner({getConfig:mockCfg,makeAdapter:()=>({adapter:scripted([{tools:calls},{text:'读完了'}]),model:'m'}),makeTools:()=>[probe]});
+  const a=await runner.start({sessionId:'coalesce',text:'读四个文件'});await until(()=>runner.get(a.id).status==='done');await runner.settled();
+  expect(puts).toBeLessThanOrEqual(5); // 以前：开始 + 每个工具开始、结束各一次（8 次）+ 结束，至少 10 次
+  const final=(await sessions.get('coalesce')).taskCheckpoint;expect(final.status).toBe('done');expect(final.steps).toHaveLength(4);
+ }finally{CHECKPOINT_MS.value=old;}
+});
+
+it('恢复归档最多留 5 次，旧版检查点里的网页正文归档时去掉',async()=>{
+ const s=sessions.create();s.id='archive';s.messages=[{role:'user',content:'查',ts:1}];
+ s.recoveryCheckpoints=Array.from({length:7},(_,i)=>({key:'k'+i,text:'旧'+i,evidence:[{key:'q',sources:[{url:'https://a.example',text:'正文'}]}]}));
+ s.taskCheckpoint={text:'上次',taskId:'last',status:'error',evidence:[{key:'q',sources:[{url:'https://a.example',text:'大段网页正文'}]}]};await sessions.save(s);
+ const runner=createTaskRunner({getConfig:mockCfg,makeAdapter:()=>({adapter:scripted([{text:'好'}]),model:'m'})});
+ const t=await runner.start({sessionId:s.id,text:'新问题'});await until(()=>runner.get(t.id).status==='done');
+ const saved=await sessions.get(s.id);expect(saved.recoveryCheckpoints).toHaveLength(5);expect(saved.recoveryCheckpoints.at(-1).text).toBe('上次');
+ expect(JSON.stringify(saved.recoveryCheckpoints)).not.toContain('正文');
+});

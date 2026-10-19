@@ -6,7 +6,7 @@
  *   - 工具轮内原样回传本轮 content（含思考块），跨轮只保留文本。
  */
 import Anthropic from '@anthropic-ai/sdk';
-import { stallGuard, isTransient } from './openai.js';
+import { stallGuard, isTransient, retryWait, retryAfterMs, sleep } from './openai.js';
 
 const FALLBACK_MODELS = /^(claude-opus-5-5|claude-opus-5|claude-sonnet-5-5|claude-fable-5-1)$/;
 
@@ -45,8 +45,8 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
   let level = 0; // 0 全部参数；1 去掉新参数；2 再去掉联网搜索（只在 compat 时降级）
   const maxLevel = !compat ? 0 : webSearch ? 2 : 1;
 
-  async function once({ model, system, messages, tools, signal, onText, effort, allowWebSearch = true, stallTimeouts }, lvl, state) {
-    const search = webSearch && lvl < 2 && allowWebSearch;
+  async function once({ model, system, messages, tools, signal, onText, effort, allowWebSearch = true, maxWebSearches = 5, stallTimeouts }, lvl, state) {
+    const search = webSearch && lvl < 2 && allowWebSearch && maxWebSearches >= 1;
     const [stable, dynamic] = system;
     const params = {
       model,
@@ -58,7 +58,7 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
       messages: toAnthropicMessages(messages),
       tools: [
         ...tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema, ...(lvl === 0 && { eager_input_streaming: true }) })),
-        ...(search ? [{ type: 'web_search_20260209', name: 'web_search', max_uses: 5 }] : [])
+        ...(search ? [{ type: 'web_search_20260209', name: 'web_search', max_uses: Math.min(5, Math.floor(maxWebSearches)) }] : [])
       ],
       ...(lvl === 0 && { output_config: { effort: effort || 'medium' } })
     };
@@ -107,7 +107,7 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
         } catch (e) {
           if (req.signal?.aborted) throw e;
           // 连接卡住 / 连接出错，而且还没输出文字：等一下重试（最多两次），再不行交给上层换备用模型
-          if (!state.started && isTransient(e) && transient++ < (req.maxTransientRetries ?? 2)) { await new Promise((r) => setTimeout(r, 1500 * transient)); continue; }
+          if (!state.started && isTransient(e) && transient++ < (req.maxTransientRetries ?? 2)) { e.retryAfterMs ??= retryAfterMs(e.headers?.get?.('retry-after') ?? e.headers?.['retry-after']); await sleep(retryWait(1500 * transient, e), req.signal); continue; }
           const rejected = [400, 404, 422].includes(e?.status) && !state.started;
           if (!rejected || level >= maxLevel) throw e;
           level++;
