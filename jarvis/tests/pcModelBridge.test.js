@@ -35,7 +35,9 @@ it('桥只返回工具调用，不在服务器执行电脑命令；原生raw协�
 });
 it('主模型失败可回退，已经输出半截则不切换；错误隐藏服务器密钥',async()=>{
   const models=[];behavior=async o=>{if(o.model==='primary')throw Object.assign(Error('temporary'),{status:503});o.onText('backup');return{text:'backup',toolCalls:[],stop:'end_turn'};};
-  expect((await createPCModelAdapter(client,{onModel:m=>models.push(m)}).stream(req())).text).toBe('backup');expect(models).toEqual(['primary','backup']);
+  const reused=createPCModelAdapter(client,{onModel:m=>models.push(m)});
+  expect((await reused.stream(req())).text).toBe('backup');expect(models).toEqual(['primary','backup']);
+  seen=[];expect((await reused.stream(req())).text).toBe('backup');expect(seen.map(o=>o.model)).toEqual(['backup']);
   seen=[];behavior=async o=>{o.onText('half');throw Object.assign(Error(`failed ${secret}`),{status:503});};
   await expect(createPCModelAdapter(client).stream(req())).rejects.toThrow('[已隐藏]');expect(seen).toHaveLength(1);
 });
