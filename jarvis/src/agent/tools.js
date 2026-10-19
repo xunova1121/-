@@ -729,8 +729,8 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         const r = await factCheck({
           question, items, date, context, signal,
           llm: ctx.reasonLlm ?? ctx.llm ?? null,
-          search: (q, n, o) => engine.search(q, n, o),
-          read: readPage,
+          search: (q, n, o) => engine.search(q, n, { ...o, signal }),
+          read: (url) => readPage(url, { signal, progress }),
           onProgress: (t) => progress?.(t)
         });
         return formatReport(r);
@@ -746,10 +746,11 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       run: async ({ question, depth = 'standard' }, { progress, signal } = {}) => {
         const r = await deepResearch({
           question, depth, llm: ctx.llm ?? null, signal,
-          search: (q, n) => engine.search(q, n),
-          read: readPage,
+          search: (q, n) => engine.search(q, n, { signal }),
+          read: (url) => readPage(url, { signal, progress }),
           onProgress: ({ text }) => progress?.(text)
         });
+        if (signal?.aborted) throw Object.assign(new Error('已停止调研'), { name: 'AbortError' });
         const safe = r.title.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40) || '调研报告';
         const w = await ws.write(`调研/${safe}.md`, r.markdown);
         ctx.onFileChanged?.(w.path);
