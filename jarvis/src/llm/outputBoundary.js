@@ -12,7 +12,7 @@ export class OutputBoundary {
     if (!this.checked) {
       const start = this.pending.trimStart().toLowerCase();
       const prefixes = ['the user said', 'the user asked', 'the user is asking', 'let me think', 'let me reason', 'let me analyze', 'let me analyse'];
-      const candidate = !start || prefixes.some(prefix => prefix.startsWith(start) || start.startsWith(prefix));
+      const candidate = !start || prefixes.some((prefix) => prefix.startsWith(start) || start.startsWith(prefix));
       if (candidate && this.pending.length < 512) return '';
       this.checkDraft();
       this.checked = true;
@@ -23,7 +23,7 @@ export class OutputBoundary {
   checkDraft() {
     const internalStart = /^\s*(?:The user (?:said|asked|is asking)|Let me (?:think|reason|analy[sz]e))/i.test(this.pending);
     if (internalStart && /\b(?:I need to|I searched|let me reconsider|but wait|the summary says|from the search results)\b/i.test(this.pending)) {
-      throw Object.assign(new Error('模型返回了分析草稿，未作为正式回答显示'), {name:'ModelOutputError',code:'ANALYSIS_IN_OUTPUT',kind:'api'});
+      throw Object.assign(new Error('模型返回了分析草稿，未作为正式回答显示'), { name: 'ModelOutputError', code: 'ANALYSIS_IN_OUTPUT', kind: 'api' });
     }
   }
 
@@ -55,7 +55,8 @@ export class OutputBoundary {
   flush() {
     this.checkDraft();
     const result = this.drain(true);
-    if (this.hidden) throw Object.assign(new Error('模型只有未闭合的分析块，缺少正式回答'), {name:'ModelOutputError',code:'ANALYSIS_IN_OUTPUT',kind:'api'});
+    if (this.hidden)
+      throw Object.assign(new Error('模型只有未闭合的分析块，缺少正式回答'), { name: 'ModelOutputError', code: 'ANALYSIS_IN_OUTPUT', kind: 'api' });
     return result;
   }
 }

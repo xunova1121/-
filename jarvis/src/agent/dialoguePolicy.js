@@ -1,13 +1,13 @@
 /** 根据本轮实际工具建立能力边界，不让旧摘要或技能说明替工具回执作担保。 */
 export function needsActionTools(userText, messages = []) {
   const accepted = /^(可以|好|好的|行|嗯|确认|继续|就这样)[啊呀吧。！!\s]*$/.test(String(userText).trim());
-  const lastReply = [...messages].reverse().find(message => message.role === 'assistant');
+  const lastReply = [...messages].reverse().find((message) => message.role === 'assistant');
   return accepted && /提醒|定时|闹钟|写.{0,8}文件|保存|创建|打开|执行/.test(lastReply?.content || '');
 }
 
 export function capabilityBlock(tools = []) {
-  const names = new Set(tools.map(tool => tool.name));
-  const availability = toolName => names.has(toolName) ? '本轮可调用，执行成功以后凭回执确认' : '本轮未开放，不得承诺已执行或后台自动运行';
+  const names = new Set(tools.map((tool) => tool.name));
+  const availability = (toolName) => (names.has(toolName) ? '本轮可调用，执行成功以后凭回执确认' : '本轮未开放，不得承诺已执行或后台自动运行');
   return [
     '## 本轮实际能力（以此和工具回执为准，技能说明不是已开放能力）',
     `定时提醒：${availability('schedule_task')}`,
