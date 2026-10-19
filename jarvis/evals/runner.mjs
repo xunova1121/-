@@ -26,14 +26,15 @@ export async function runCase(api, item, { runId = randomUUID(), now = Date.now,
   const started = now(), requestId = `eval_${randomUUID()}`;
   const workspace = `evals/${runId}/${item.id}`;
   const prompt = item.prompt.replaceAll('{{workspace}}', workspace);
-  let accepted = null, info = null, noteSent = false, stopRequested = null;
+  let accepted = null, info = null, noteSent = false, stopRequested = null, owned = false;
   const result = { id: item.id, category: item.category, prompt, rubric: item.rubric, requestId,
     workspace, targetMs: item.targetMs, timeoutMs: item.timeoutMs,
     status: 'not_started', quality: 'not_reviewed', cost: null, costReason: '接口尚未提供完整计费数据' };
   try {
     if (signal?.aborted) { result.status='client_cancelled'; result.quality='execution_failed'; return result; }
     accepted = await api('/api/tasks', { text: prompt, requestId });
-    if (!accepted.id || !accepted.sessionId || accepted.joined) throw new Error('服务器未创建独立评测任务');
+    if (!/^[\w-]{1,80}$/.test(accepted?.id || '') || !/^[\w-]{1,80}$/.test(accepted?.sessionId || '') || accepted.joined) throw new Error('服务器未创建独立评测任务');
+    owned = true;
     result.taskId = accepted.id; result.sessionId = accepted.sessionId;
     for (;;) {
       if (signal?.aborted) { result.status='client_cancelled'; break; }
@@ -62,11 +63,11 @@ export async function runCase(api, item, { runId = randomUUID(), now = Date.now,
     if (result.status !== 'done') result.quality = 'execution_failed';
   } catch {
     // 可能携带响应正文、URL、令牌的异常不进入公开报告。
-    result.status = accepted ? 'transport_or_protocol_error' : 'submission_unknown';
+    result.status = owned ? 'transport_or_protocol_error' : 'submission_unknown';
     result.quality = 'execution_failed';
-    result.error = accepted ? '连接或任务协议失败，未自动重试' : '提交未确认，不能确定服务端是否接收；不要直接重发';
+    result.error = owned ? '连接或任务协议失败，未自动重试' : '独立任务提交未确认，请按请求编号检查服务端；不要直接重发';
   } finally {
-    if (accepted?.id && !terminal(info?.status)) {
+    if (owned && !terminal(info?.status)) {
       try { stopRequested = (await api(`/api/tasks/${accepted.id}/stop`, {})).ok === true; }
       catch { stopRequested = false; }
       result.stopRequested = stopRequested;

@@ -74,3 +74,9 @@ test('取消评测会停止已知任务，预取消不提交',async()=>{
   const r=await runCase(api,cases[0],{signal:active.signal,wait:async()=>active.abort()});
   assert.equal(r.status,'client_cancelled');assert.equal(stops,1);
 });
+test('不合法或合并到已有任务的响应必须中止评测，不能误停别人的任务',async()=>{
+  for(const response of [{},{id:'../wrong',sessionId:'s'},{id:'t',sessionId:'s',joined:true}]){
+    let calls=0;const r=await runCase(async()=>{calls++;return response;},cases[0]);
+    assert.equal(r.status,'submission_unknown');assert.equal(calls,1);
+  }
+});
