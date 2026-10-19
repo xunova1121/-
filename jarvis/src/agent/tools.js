@@ -1,3 +1,4 @@
+import { checkpointView } from '../../shared/taskCheckpoint.js';
 import { DOCUMENT_TEMPLATES, documentTemplate } from './documentTemplates.js';
 import { checkArtifact } from './artifactCheck.js';
 import { skillCompatibility } from './skillCompatibility.js';
@@ -461,7 +462,7 @@ export function createTools(ctx) {
       name:'read_task_checkpoint',
       description:'读取当前会话最近任务的持久检查点：完整要求、补充、成功/失败步骤、文件以及结果未知的操作。恢复任务时先核对，不自动重放有副作用的动作。',
       input_schema:S({}),
-      run:async()=>{const id=ctx.currentSessionId?.();const s=id&&await sessions.get(id);return s?.taskCheckpoint?JSON.stringify({current:s.taskCheckpoint,recoveries:s.recoveryCheckpoints||[]},null,2):'当前会话没有服务器持久检查点；可读取对话原文和工作区文件核对。';}
+      run:async()=>{const id=ctx.currentSessionId?.();const s=id&&await sessions.get(id);return s?.taskCheckpoint?JSON.stringify({current:checkpointView(s.taskCheckpoint),recoveries:(s.recoveryCheckpoints||[]).map(checkpointView)},null,2):'当前会话没有服务器持久检查点；可读取对话原文和工作区文件核对。';}
     },
     {
       name: 'create_document',

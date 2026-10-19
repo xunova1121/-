@@ -2,7 +2,7 @@ import {it,expect,vi} from 'vitest';
 import {factCheck} from '../src/agent/factCheck.js';
 import {createRetrievalBudget} from '../src/agent/retrievalBudget.js';
 import {lookupRequirement,withLookupDeadline} from '../src/agent/lookupDeadline.js';
-import {checkpointEvent} from '../shared/taskCheckpoint.js';
+import {checkpointEvent,checkpointView} from '../shared/taskCheckpoint.js';
 import {interruptionMark} from '../src/core/suggest.js';
 const hits=[1,2,3,4].map(n=>({title:'测试对象',url:`https://source${n}.example/a`,snippet:''}));
 const page='测试对象当天收盘价为13.4元。';
@@ -43,4 +43,9 @@ it('证据有界、状态不误称网络断开',()=>{
  let c={};for(let i=0;i<8;i++)c=checkpointEvent(c,{type:'retrieval_evidence',evidence:{key:String(i),sources:Array.from({length:8},()=>({url:'https://a.example',text:'字'.repeat(10000)}))}});
  expect(c.evidence).toHaveLength(3);expect(c.evidence[0].sources).toHaveLength(4);expect(c.evidence[0].sources[0].text).toHaveLength(6000);
  expect(interruptionMark('本轮对话已等待 60 秒')).toContain('等待超时');expect(interruptionMark('模型接口返回 400')).toContain('模型接口');expect(interruptionMark('普通执行错误')).not.toContain('网络');
+});
+
+it('查看检查点只给证据索引，不把网页全文反复送给模型',()=>{
+ const cp=checkpointEvent({text:'保留要求'},{type:'retrieval_evidence',evidence:{key:'q',sources:[{url:'https://example.test',title:'来源',text:'网页原文'}]}});
+ const view=checkpointView(cp);expect(view.text).toBe('保留要求');expect(view.evidence[0].sources[0]).toEqual({url:'https://example.test',title:'来源'});expect(cp.evidence[0].sources[0].text).toBe('网页原文');
 });

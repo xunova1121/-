@@ -40,3 +40,8 @@ export function checkpointRecoveryText(rec = {}) {
   ].filter(Boolean).join('\n\n');
 }
 
+
+/** 模型查看检查点只给证据索引，正文由核验内部复用，避免每次把网页全部塞进提示。 */
+export function checkpointView(rec) {
+  return rec && {...rec, ...(rec.evidence && {evidence:rec.evidence.map(e=>({key:e.key,savedAt:e.savedAt,sources:e.sources.map(({url,title})=>({url,title}))}))})};
+}

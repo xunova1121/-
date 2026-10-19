@@ -311,7 +311,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         const incomplete=previous&&['running','queued','interrupted','needs_review','error'].includes(previous.status);
         if(!busy&&incomplete){
           const key=previous.taskId||createHash('sha256').update(JSON.stringify([previous.text,previous.createdAt])).digest('hex');
-          const archive=session.recoveryCheckpoints||[];session.recoveryCheckpoints=[...archive.filter(x=>x.key!==key),{key,...previous}];
+          const archive=session.recoveryCheckpoints||[];session.recoveryCheckpoints=[...archive.filter(x=>x.key!==key).map(({evidence,...record})=>record),{key,...previous}];
         }
         session.messages.push({role:'user',content:text,ts:now()});session.updatedAt=now();
         const task=busy||{id:uid('t'),sessionId:id,text,status:'queued',seq:0,events:[],listeners:new Set(),files:new Set(),inbox:[],notes:[],images,voice:Boolean(voice),ctrl:new AbortController(),createdAt:now(),checkpoint:{text,notes:[],steps:[],inFlight:[],files:[],status:'queued',createdAt:now()}};
