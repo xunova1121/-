@@ -47,7 +47,6 @@ import { runTeam, shouldTeam } from './agent/team.js';
 import { runAgent } from './agent/agent.js';
 import { STATUS_ASK, STOP_ASK, turnStatus } from './core/interject.js';
 import { collectRequirements } from './agent/taskRequirements.js';
-import { createTools } from './agent/tools.js';
 import * as ws from './agent/workspace.js';
 import * as agentMemory from './agent/memory.js';
 import { loadConfig, saveConfig, createAdapter, providerById, resolveVoice } from './llm/config.js';
@@ -65,8 +64,6 @@ import { runRemote } from './core/serverClient.js';
 import { createPCModelAdapter } from './core/pcModelClient.js';
 import { initServerPanel } from './ui/serverPanel.js';
 import { initQuickPrompts } from './ui/quickPrompts.js';
-import * as mcp from './agent/mcpClient.js';
-import { createDesktopTools } from './agent/desktopTools.js';
 import { createSyncController } from './sync/controller.js';
 import { initSyncPanel, describeResult } from './ui/syncPanel.js';
 import { matchWake, WakeWindow } from './core/wakeWord.js';
@@ -85,8 +82,6 @@ import { createTaskKeeper } from './mobile/backgroundTasks.js';
 import { RecordedVoice } from './mobile/recordedVoice.js';
 import { initDrawer } from './ui/drawer.js';
 import { isAuto } from './ui/modelPicker.js';
-import { generateImage } from './llm/images.js';
-import { generateVideo } from './llm/videos.js';
 import { classifyTask, routeFor, TASKS, fallbackRoutes, effortFor, isSmallTalk, computerTaskKind } from './llm/router.js';
 import { loadMemory, clearMemory } from './core/memoryStore.js';
 import { $, body, now, DESKTOP, COMPACT, storage, narrow, toast, wp, markActivity } from './app/env.js';
@@ -96,6 +91,8 @@ import { createModels } from './app/models.js';
 import { createPanels, PANES } from './app/panels.js';
 import { createView } from './app/view.js';
 import { createBackground } from './app/background.js';
+import { createToolbox } from './app/toolbox.js';
+import { createRemoteTask } from './app/remoteTask.js';
 
 
 // ---------------------------------------------------------------- 设置
@@ -112,9 +109,9 @@ Object.assign(app, { setSetting, send, openingCallouts });
 Object.defineProperties(app, { speaker: { get: () => speaker }, face: { get: () => face }, mascots: { get: () => mascots } });
 
 Object.defineProperties(app, {
-  sessionsPanel: { get: () => sessionsPanel }, transcript: { get: () => transcript }, sessionApprovals: { get: () => sessionApprovals }, taskKeeper: { get: () => taskKeeper }
+  sessionsPanel: { get: () => sessionsPanel }, transcript: { get: () => transcript }, taskKeeper: { get: () => taskKeeper }
 });
-Object.assign(app, { newSession, interrupt, switchTo, rememberTurn, buildTools, openSession });
+Object.assign(app, { newSession, interrupt, switchTo, rememberTurn, openSession, openInWorkspace, replayTranscript });
 Object.defineProperty(app, 'mic', { get: () => mic });
 
 mount(app, createStage(app));
@@ -314,7 +311,7 @@ async function switchTo(next) {
   // 切回一个还在后台干活的对话：把正在写的那条回答接回来
   const bg = [...backgroundTurns].find((t) => t.session.id === app.session.id);
   if (bg) { backgroundTurns.delete(bg); bg.background = false; app.active = bg; app.liveBubble = bg.bubble; transcript.root.append(bg.bubble.el); app.setTask('processing', bg.status || '思考中'); }
-  else if (app.server && next.taskId) followServerTask(next); // 服务器上这个对话还在干活（比如 App 重新打开）：接上它的进度
+  else if (app.server && next.taskId) app.followServerTask(next); // 服务器上这个对话还在干活（比如 App 重新打开）：接上它的进度
   app.dashboard.setTurns(app.history.filter((m) => m.role === 'user').length);
   if (app.history.length) app.callouts?.set(followUpSuggestions({ tools: app.history.at(-1)?.tools ?? [], userText: [...app.history].reverse().find((m) => m.role === 'user')?.content ?? '', desktop: Boolean(DESKTOP) }));
   else openingCallouts();
@@ -350,7 +347,7 @@ async function openSession(id) {
   if (!s) { if (!cached) app.setTask('idle'); return; }
   if (!cached) await switchTo(s);
   else if (app.session.id === id && !app.active && changed(app.session, s)) { app.session = s; app.reflectFrom = app.history.length; replayTranscript(); }
-  if (app.server && app.session.id === id && s.taskId && !app.active) followServerTask(s); // 另一台设备正在做：接上进度
+  if (app.server && app.session.id === id && s.taskId && !app.active) app.followServerTask(s); // 另一台设备正在做：接上进度
 }
 /** 服务器上的这段对话比手上的新吗（另一台设备接着聊过、或者做完了任务） */
 const changed = (a, b) => b.messages.length !== a.messages.length || (b.updatedAt ?? 0) > (a.updatedAt ?? 0) || b.messages.at(-1)?.content !== a.messages.at(-1)?.content;
@@ -365,7 +362,7 @@ async function refreshFromServer() {
     const s = await sessionsApi.get(id).catch(() => null);
     if (!s || app.session.id !== id || app.active) return;
     if (changed(app.session, s)) { app.session = s; app.reflectFrom = app.history.length; replayTranscript(); }
-    if (s.taskId) followServerTask(s);
+    if (s.taskId) app.followServerTask(s);
     try { drawer?.refresh?.(); } catch { /* 抽屉还没建好 */ }
   } finally { refreshing = false; }
 }
@@ -378,35 +375,8 @@ addEventListener('focus', pullSoon);
 let sessionsPanel = null;
 
 // ---------------------------------------------------------------- 桌面版与 MCP
-/** 本次会话里用户选了“本次都允许”的操作类别 */
-const sessionApprovals = new Set();
-/** 电脑操作（鼠标键盘）进行中：一轮结束或被打断时把未央窗口放回来 */
-let controlActive = false;
-function endControl() {
-  if (!controlActive) return;
-  controlActive = false;
-  DESKTOP?.invoke('controlEnd').catch(() => {});
-}
-if (DESKTOP) {
-  body.classList.add('desktop', `os-${DESKTOP.platform}`);
-  // 全局快捷键呼出：聚焦输入框
-  DESKTOP.onSummon?.(() => { $('#prompt').focus(); });
-  // 离开电脑一段时间后回来：主动问好
-  DESKTOP.onPresence?.((info) => { app.greetOnReturn(info); });
-  // 紧急停止热键：打断当前任务
-  DESKTOP.onStop?.(() => { controlActive = false; interrupt(); toast('已紧急停止电脑操作'); });
-}
-let mcpState = { available: false, servers: [] };
-async function refreshMcp() {
-  if (!app.gateway?.mcp) { mcpState = { available: false, servers: [] }; return mcpState; }
-  try { mcpState = await mcp.listServers(app.gateway.origin); } catch { mcpState = { available: false, servers: [] }; }
-  return mcpState;
-}
-async function loadMcpTools() {
-  if (!app.gateway?.mcp) return [];
-  await refreshMcp();
-  return mcp.mcpTools(app.gateway.origin, mcpState.servers);
-}
+mount(app, createToolbox(app));
+mount(app, createRemoteTask(app));
 
 /** 对话里点生成的文件：切到工作区并打开它 */
 /** 导出一段对话：复制全部内容，或存成 Word / Markdown 放进工作区“导出”文件夹（在工作区里能下载、分享） */
@@ -437,90 +407,7 @@ function openInWorkspace(path) {
   app.panels.openFile(path);
 }
 
-/** 智能体可用的全部工具：基础工具 + 桌面版电脑操作 + MCP 工具 */
-async function buildTools({ background = false, turn = null } = {}) {
-  // 生成的文件、图片只挂到产生它的那一轮（turn）：中途切到别的对话，也不会跑到别的对话里
-  const out = () => turn?.bubble ?? app.liveBubble;
-  const onFileChanged = (path) => {
-    app.panels.markFresh(path);
-    app.panels.refreshFiles();
-    if (!background && !/^skills\//.test(path)) { out()?.fileLink?.(path, openInWorkspace); turn?.files.add(path); }
-  };
-  return [
-    ...createTools({
-      metrics: app.metrics,
-      tavilyKey: app.llmConfig.tavilyKey,
-      bochaKey: app.llmConfig.bochaKey,
-      searchRegion: app.llmConfig.searchRegion || 'auto',
-      fetchViaGateway: app.fetchViaGateway(),
-      llm: app.helperLlm('write'), // 深度调研：用写作模型
-      reasonLlm: app.helperLlm('reason'), // 逐项查证：用推理模型摘答案
-      visionLlm: app.visionHelperLlm(), // PPT 生成后看预览图检查排版
-      onPreview: background ? () => {} : COMPACT
-        ? (path) => { app.panels.openFile(path); toast(`已生成 ${path}：左上角菜单 → 工作区查看`); } // 手机上不自动盖住对话
-        : (path) => { app.showPanel('workspace'); app.panels.openFile(path); },
-      onFileChanged,
-      imageGen: (o) => generateImage(app.llmConfig, { ...o, gateway: app.gateway }),
-      onImage: (src) => out()?.image?.(src),
-      videoGen: (o) => generateVideo(app.llmConfig, { ...o, gateway: app.gateway }),
-      onVideo: (src) => out()?.video?.(src),
-      onSchedulesChanged: () => app.schedulesPanel?.refresh(),
-      currentSessionId: () => app.session?.id,
-      // 桌面版：写 PDF 时直接转成 PDF 文件（网页版和安卓生成可打印的网页）
-      toPdf: DESKTOP ? async (html) => Uint8Array.from(atob((await DESKTOP.invoke('printToPdf', { html })).base64), (c) => c.charCodeAt(0)) : null
-    }),
-    ...(DESKTOP ? createDesktopTools(DESKTOP, { onFileChanged, onControlStart: (r) => { controlActive = true; if (!background) toast(`正在操作电脑：鼠标甩到屏幕左上角或按 ${r?.stopHotkey ?? 'Ctrl+Alt+Q'} 可紧急停止`); } }) : []),
-    ...(await loadMcpTools())
-  ];
-}
 
-/** 服务器模式：打开一个服务器上还在干活的对话，从头补上它的进度，做完后换成服务器记下的完整对话 */
-async function followServerTask(s) {
-  const ctrl = new AbortController();
-  const bubble = transcript.add('agent');
-  bubble.el.classList.add('streaming');
-  const turn = { ctrl, streamDone: false, bubble, session: s, files: new Set(), inbox: [], t0: now(), steps: 0, status: '', background: false, remote:Boolean(app.server) };
-  app.active = turn;
-  app.liveBubble = bubble;
-  app.setTask('processing', '服务器上正在做');
-  const cards = new Map();
-  try {
-    await runRemote(app.server, {
-      taskId: s.taskId, onStarted:task=>{turn.remoteId=task.id;}, signal: ctrl.signal, onFile: (p) => pullServerFile(p, turn),
-      emit: (e) => {
-        if (app.active !== turn) return;
-        if (e.type === 'text') bubble.append(e.delta);
-        else if (e.type === 'plan') bubble.plan?.(e.steps);
-        else if (e.type === 'tool_start' && e.name !== 'update_plan') { cards.set(e.id, bubble.toolCard(e.name, e.args)); turn.steps++; app.setTask('processing', toolLabel(e.name)); }
-        else if (e.type === 'tool_progress') cards.get(e.id)?.progress(e.text);
-        else if (e.type === 'tool_end') cards.get(e.id)?.done(e.ok, e.output, e.ms);
-      }
-    });
-  } catch (e) {
-    if (e.name !== 'AbortError' && app.active === turn) toast(e.message);
-  }
-  if (app.active === turn) { app.active = null; app.setTask('idle'); }
-  // 换成服务器上记下的完整对话（回答、用到的工具、生成的文件）
-  const fresh = await sessionsApi.get(s.id).catch(() => null);
-  if (fresh && app.session.id === s.id && !app.active) { app.session = fresh; replayTranscript(); }
-}
-
-/** 服务器模式：服务器上生成了文件，下载到本机工作区，照常预览、保存 */
-async function pullServerFile(path, turn) {
-  if (turn?.files.has(path)) return; // 同一轮里同一个文件只取一次（画图会同时报“新文件”和“显示图片”）
-  turn?.files.add(path);
-  try {
-    const blob = await app.server.download(path);
-    await ws.write(path, blob);
-    app.panels.markFresh(path);
-    app.panels.refreshFiles();
-    const out = turn?.bubble ?? app.liveBubble;
-    // 服务器画的图、做的视频：和本机一样直接显示在回答里
-    if (/^images\/.+\.(png|jpe?g|webp|gif)$/i.test(path)) out?.image?.(URL.createObjectURL(blob));
-    else if (/^videos\/.+\.(mp4|webm|mov)$/i.test(path)) out?.video?.(URL.createObjectURL(blob));
-    if (!/^skills\//.test(path)) { out?.fileLink?.(path, openInWorkspace); turn?.files.add(path); }
-  } catch (e) { toast(e.message); }
-}
 
 /** “/技能名 内容” → 明确要求模型使用该技能（界面上仍显示用户原话） */
 async function expandSlash(text) {
@@ -690,7 +577,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
     // 服务器模式：服务器做，进度事件和本机一样显示（runRemote 的用法和 runAgent 一样）
     const serverRun = async (o) => {
       for (const f of files) await app.server.upload(f.path, await ws.readBlob(f.path)); // 发来的附件先传到服务器的工作区
-      return runRemote(app.server, { sessionId: o.sessionId, userText: o.userText, images: o.images, voice: o.voice, emit: o.emit, signal: o.signal, onFile: (p) => pullServerFile(p, turn), onStarted:async remoteTask=>{
+      return runRemote(app.server, { sessionId: o.sessionId, userText: o.userText, images: o.images, voice: o.voice, emit: o.emit, signal: o.signal, onFile: (p) => app.pullServerFile(p, turn), onStarted:async remoteTask=>{
         turn.remoteId=remoteTask.id;
         for(const note of turn.inbox.splice(0)) {
           try { await app.server.appendTaskNote(remoteTask.id,note); }
@@ -718,17 +605,17 @@ async function send(text, { echo = true, byVoice = false } = {}) {
       light: !files.length && isSmallTalk(text),
       maxSteps: DESKTOP ? 40 : 28, // 用鼠标键盘操作电脑、逐项联网核实时步数多
       images: imgs.map(({ mime, data }) => ({ mime, data })),
-      tools: app.server && !here ? [] : await buildTools({ turn }),
+      tools: app.server && !here ? [] : await app.buildTools({ turn }),
       approve: async (req) => {
-        if (preApproved(req, { sessionKeys: sessionApprovals })) return true; // 危险命令每次都问
+        if (preApproved(req, { sessionKeys: app.sessionApprovals })) return true; // 危险命令每次都问
         // 看屏幕后主窗口已隐藏，确认卡必须先恢复可见；保持紧急停止热键有效。
-        if(controlActive&&DESKTOP)await DESKTOP.invoke('controlPause');
+        if(app.controlActive&&DESKTOP)await DESKTOP.invoke('controlPause');
         if(ctrl.signal.aborted)return false;
         app.setTask('processing', '等待你确认');
         let cancel;
         const aborted = new Promise((r) => {cancel=()=>r('deny');ctrl.signal.addEventListener('abort',cancel,{once:true});});
         try { const v=await Promise.race([bubble.confirm(req), aborted]);
-          if (v === 'session' && req.key) sessionApprovals.add(req.key);
+          if (v === 'session' && req.key) app.sessionApprovals.add(req.key);
           return v !== 'deny';
         } finally {ctrl.signal.removeEventListener('abort',cancel);}
       },
@@ -857,7 +744,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
     if (MOBILE) clearPending(storage, turn.session.id, turn.t0);
     await persistSession(turn.session);
     releaseTask();
-    endControl();
+    app.endControl();
     // 回答写完的一瞬间又收到的话（没来得及交给模型）：接着当一句新话处理
     const left = turn.inbox.splice(0);
     if(left.length&&turn.remote){prompt.value+=(prompt.value.trim()?'\n':'')+left.join('\n');autosize();toast('未送达的补充已放回输入框，没有另开任务');}
