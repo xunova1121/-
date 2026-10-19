@@ -14,7 +14,7 @@ export const MCP_CORE = 12;
 
 /** 常驻工具：系统提示里点名的、几乎每天都用的 */
 export const CORE = new Set([
-  'get_current_time', 'get_weather', 'remember', 'recall', 'core_memory_update', 'save_skill', 'use_skill',
+  'verify_numbers', 'get_current_time', 'get_weather', 'remember', 'recall', 'core_memory_update', 'save_skill', 'use_skill',
   'web_search', 'fetch_url', 'fact_check', 'deep_research', 'kb_search', 'search_conversations', 'read_conversation',
   'generate_image', 'schedule_task',
   'update_plan', 'delegate_task', 'find_files', 'search_in_files', 'read_task_requirements', 'read_tool_result',
@@ -71,7 +71,7 @@ export function createToolLoader(tools, { limit = LIMIT } = {}) {
       const picked = [];
       for (const n of Array.isArray(names) ? names : []) if (all.has(n) && !picked.includes(n)) picked.push(n);
       if (query) {
-        for (const t of deferred().map((t) => [t, score(t, query)]).filter(([, s]) => s > 0).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([t]) => t)) {
+        for (const t of tools.map((t) => [t, score(t, query)]).filter(([, s]) => s > 0).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([t]) => t)) {
           if (!picked.includes(t.name)) picked.push(t.name);
         }
       }
@@ -102,5 +102,6 @@ export function createToolLoader(tools, { limit = LIMIT } = {}) {
     isActive: (name) => active.has(name)
   };
 }
+
 
 

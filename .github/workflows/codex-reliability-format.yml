@@ -1,0 +1,34 @@
+name: Codex可靠性格式验证
+on:
+  push:
+    branches: ['codex/conversation-reliability-20261020']
+permissions:
+  contents: write
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: jarvis/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run format
+      - run: npx prettier --write src/llm/outputBoundary.js src/agent/dialoguePolicy.js src/agent/summaryEvidence.js src/agent/verifyNumbers.js tests/conversationReliability.test.js evals/reliability-cases.mjs
+      - run: npm run lint
+      - run: npx vitest run
+      - name: 只在本独立分支保存格式结果
+        run: |
+          git diff --quiet && exit 0
+          git config user.name "Codex"
+          git config user.email "codex@users.noreply.github.com"
+          git add src/main.js src/app src/llm/outputBoundary.js src/agent/dialoguePolicy.js src/agent/summaryEvidence.js src/agent/verifyNumbers.js tests/conversationReliability.test.js evals/reliability-cases.mjs
+          git diff --cached --quiet && exit 0
+          git commit -m "style: format conversation reliability modules"
+          git push origin "HEAD:${{ github.ref_name }}"
+

@@ -251,19 +251,34 @@ function createOnce({ baseURL, apiKey, headers = {} }) {
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     let buf = '';
-    for (;;) {
-      const { value, done } = await guard.race(reader.read());
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      const { events, rest } = sseLines(buf);
-      buf = rest;
-      for (const e of events) {
-        if (e === '[DONE]') continue;
-        try { const data=JSON.parse(e); if (data.choices?.length) guard.touch(); acc.push(data); } catch { /* 心跳不延长模型等待时间 */ }
+    let finished = false;
+    try {
+      while (!finished) {
+        const { value, done } = await guard.race(reader.read());
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const { events, rest } = sseLines(buf);
+        buf = rest;
+        for (const frame of events) {
+          if (frame === '[DONE]') {
+            finished = true;
+            break;
+          }
+          let data;
+          try { data = JSON.parse(frame); } catch { continue; }
+          if (data.error) throw Object.assign(new Error(data.error.message || '模型流返回错误'), {kind:'api', code:data.error.code || 'MODEL_STREAM_ERROR'});
+          if (data.choices?.length) guard.touch();
+          acc.push(data);
+          if (data.choices?.[0]?.finish_reason) finished = true;
+        }
       }
+    } finally {
+      reader.cancel().catch(() => {});
+      reader.releaseLock();
     }
     const r = acc.result();
     return { ...r, stop: r.toolCalls.length ? 'tool_use' : r.stop };
   }
 }
+
 

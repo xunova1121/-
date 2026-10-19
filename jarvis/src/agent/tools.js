@@ -1,3 +1,4 @@
+import { createVerificationTool, currentTime } from './verifyNumbers.js';
 import { checkpointView } from '../../shared/taskCheckpoint.js';
 import { DOCUMENT_TEMPLATES, documentTemplate } from './documentTemplates.js';
 import { checkArtifact } from './artifactCheck.js';
@@ -96,6 +97,7 @@ export function createTools(ctx) {
     try { return { tpl: new Uint8Array(await (await ws.readBlob(tplPath)).arrayBuffer()), tplPath, auto }; } catch { throw new Error(`找不到模板文件：${tplPath}`); }
   };
   const tools = [
+    createVerificationTool(),
     {
       name: 'remember',
       description: '把关于用户的长期信息存入记忆（偏好、身份、习惯、目标、重要事实）。用户说“记住……”或透露了以后用得上的个人信息时调用。和已有记忆重复会自动合并，同一件事的新说法会自动取代旧的（旧版本保留为历史）。不要记录密码、密钥等敏感信息。',
@@ -104,11 +106,14 @@ export function createTools(ctx) {
         category: { type: 'string', enum: ['profile', 'preference', 'fact', 'goal', 'other'], description: 'profile 身份 / preference 偏好 / fact 事实 / goal 目标' },
         importance: { type: 'integer', minimum: 1, maximum: 5, description: '重要度 1–5，身份信息和明确的长期偏好给 4–5' }
       }, ['content']),
-      run: async ({ content, category, importance }) => {
-        const m = await memory.remember(content, category, { importance });
+      run: async ({ content, category, importance }, { sessionId } = {}) => {
+        const currentSession = sessionId ? await sessions.get(sessionId) : null;
+        const said = [...(currentSession?.messages || [])].reverse().find(message=>message.role==='user')?.content || '';
+        const explicit = /记住|记下|我叫|我的名字|我住在/.test(said);
+        const m = await memory.remember(content, category, {importance,source:explicit?'用户明确指令经工具记录':'模型工具记录，待核实',evidence:String(said).slice(0,500)});
         return m.action === 'NOOP' ? `这条已经记得（${m.content}），已刷新。`
           : m.action === 'UPDATE' ? `已更新记忆：「${m.previous}」→「${m.content}」（旧的保留为历史）。`
-            : `已记住（${m.content}）。`;
+            : `已记录（${m.content}）${m.pending?'，待结合用户原话核实':''}。`;
       }
     },
     {
@@ -692,7 +697,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       name: 'get_current_time',
       description: '读取当前日期和时间（含时区）。',
       input_schema: S({}),
-      run: async () => JSON.stringify({ local: new Date().toLocaleString('zh-CN', { hour12: false }), iso: new Date().toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone })
+      run: async () => JSON.stringify(currentTime())
     },
     {
       name: 'get_weather',
@@ -846,6 +851,7 @@ function formatRun(r) {
 export function fmtSize(n) {
   return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 }
+
 
 
 

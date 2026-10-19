@@ -145,7 +145,7 @@ export async function remember(content, category = 'fact', { importance = 3, sou
     await memories.put(target);
     return { ...target, action };
   }
-  if (action === 'UPDATE') {
+  if (action === 'UPDATE' && !(pending && !target.pending)) {
     // 旧版本保留为历史：标记失效时间，新版本记录它取代了谁
     const next = {
       ...target,
@@ -169,11 +169,12 @@ export async function remember(content, category = 'fact', { importance = 3, sou
   const m = {
     id: uid('m'), content, category, importance, ts: t, updatedAt: t, lastUsed: t, validFrom: t, validTo: null,
     uses: 0, history: [], source, evidence, pending, pinned: false,
+    ...(action === 'UPDATE' && pending && !target.pending ? {conflictsWith:target.id} : {}),
     ...(vec ? { embedding: vec, embModel: embedder.model } : {})
   };
   await memories.put(m);
   await log('memory', `记住：${content}`);
-  return { ...m, action };
+  return { ...m, action: 'ADD' };
 }
 
 /** 忘记：归档（失效），不物理删除；面板里的“删除”才会真正删掉 */
@@ -548,3 +549,4 @@ export function levelOf({ memories: m = 0, lessons: l = 0, skills: s = 0, docs =
   const next = 5 * level ** 2;
   return { xp, level, progress: (xp - cur) / (next - cur), next };
 }
+

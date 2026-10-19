@@ -1,3 +1,6 @@
+import { summaryForTurn } from './summaryEvidence.js';
+import { OutputBoundary } from '../llm/outputBoundary.js';
+import { capabilityBlock, DIALOGUE_POLICY, needsActionTools } from './dialoguePolicy.js';
 /**
  * 智能体主循环（与具体模型无关）：
  *
@@ -126,7 +129,7 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
     fresh && !light ? memory.openItems({ exclude: sessionId }).catch(() => []) : [],
     loadRules().catch(() => null)
   ]);
-  const parts = [`当前时间：${new Date().toLocaleString('zh-CN', { hour12: false })}（${Intl.DateTimeFormat().resolvedOptions().timeZone}）`];
+  const parts = [`当前时间：${new Date().toLocaleString('zh-CN', { hour12: false, timeZone:'Asia/Shanghai' })}（${'Asia/Shanghai'}）`];
   const desktop = typeof window !== 'undefined' ? window.jarvisDesktop : null;
   if (desktop) {
     const os = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' }[desktop.platform] ?? desktop.platform;
@@ -141,12 +144,12 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
   parts.push(ws.mode() === 'folder' ? `工作区：已连接本地文件夹「${ws.folderName()}」` : '工作区：浏览器内的虚拟工作区（用户可下载文件，或连接本地文件夹）');
   if (rules) parts.push(rulesBlock(rules));
   if (ctx.core?.human || ctx.core?.persona) parts.push(`## 核心记忆\n${ctx.core.human ? `【关于用户】${ctx.core.human}\n` : ''}${ctx.core.persona ? `【我的设定】${ctx.core.persona}` : ''}`.trim());
-  if (ctx.memories.length) parts.push(`## 相关记忆（标“自动记下”的是从以前的对话里整理出来的，用户没确认过：可以直接用；和用户现在说的冲突时以现在为准）\n${ctx.memories.map((m) => `- [${m.pending ? '自动记下; ' : ''}来源:${m.source || '未记录'}; 时间:${new Date(m.updatedAt || m.ts).toISOString()}; 版本:${(m.history?.length || 0)+1}] ${m.content}`).join('\n')}`);
+  if (ctx.memories.length) parts.push(`## 相关记忆（标“自动记下”的是从以前的对话里整理出来的，用户没确认过：只能作待核实线索，不能当用户确认的事实；和当前原话或证据冲突时先回读原文）\n${ctx.memories.map((m) => `- [${m.pending ? '自动记下; ' : ''}来源:${m.source || '未记录'}; 时间:${new Date(m.updatedAt || m.ts).toISOString()}; 版本:${(m.history?.length || 0)+1}] ${m.content}`).join('\n')}`);
   const day = (ts) => new Date(ts).toLocaleDateString('zh-CN');
   if (ctx.episodes?.length) parts.push(`## 相关的过往对话\n${ctx.episodes.map((e) => `- ${day(e.ts)}${e.sessionTitle ? `「${e.sessionTitle}」` : ''}：${e.summary}`).join('\n')}`);
   if (past.length && !light) parts.push(`## 过往对话里的相关原话（需要更多细节时用 read_conversation 读全文）\n${past.map((p) => `- ${day(p.ts)}「${p.title}」（id: ${p.sessionId}）\n  用户：${p.user.slice(0, 160)}${p.reply ? `\n  未央：${p.reply.replace(/\s+/g, ' ').slice(0, 240)}` : ''}`).join('\n')}`);
   if (recentS.length) parts.push(`## 最近的其他对话（用户说“接着上次 / 刚才那个”时参考）\n${recentS.map((s) => `- ${day(s.updatedAt)}「${s.title}」（id: ${s.id}，${s.messages.length} 条）最后：${String([...s.messages].reverse().find((m) => m.role === 'user')?.content ?? '').slice(0, 60)}`).join('\n')}`);
-  if (open.length) parts.push(`## 之前对话里说好以后再做的事（合适时主动提一句，用户说不用了就不再提）\n${open.map((o) => `- ${o.text}${o.sessionTitle ? `（来自「${o.sessionTitle}」，${day(o.ts)}）` : ''}`).join('\n')}`);
+  if (open.length) parts.push(`## 之前对话里说好以后再做的事（只在当前请求相关时参考；用户没要求就不要转回旧任务；用户说不用了就不再提）\n${open.map((o) => `- ${o.text}${o.sessionTitle ? `（来自「${o.sessionTitle}」，${day(o.ts)}）` : ''}`).join('\n')}`);
   if (ctx.lessons.length) parts.push(`## 经验教训（来自用户反馈）\n${ctx.lessons.map((l) => `- ${l.content}`).join('\n')}`);
   if (ctx.skills.length) parts.push(`## 已掌握的技能\n${ctx.skills.map((s) => `### ${s.name}\n${s.description ? `${s.description}\n` : ''}${s.steps}`).join('\n')}`);
   if (installed.length && !light) parts.push(packs.catalog(installed)); // 闲聊用不到技能清单
@@ -190,12 +193,14 @@ export function trimComputerScreenshots(messages,keep=2) {
 }
 
 async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, computerTask = false }) {
+  if (light && needsActionTools(userText, history)) light = false;
+  const capabilities = capabilityBlock(tools);
   const retrieval = createRetrievalBudget(lookupDeadline ? '普通查询' : images.length ? `逐项核验 ${requirementText}` : requirementText, { now, timeBudgetMs });
   let closingTurns = 0;
   let retrievalStopped = false;
   emit({ type: 'state', value: 'processing' });
   const tCtx = Date.now();
-  const ctx = context ?? (await buildContext(userText, { sessionId, turns: history.filter((m) => m.role === 'user').length, summary, light }));
+  const ctx = context ?? (await buildContext(userText, { sessionId, turns: history.filter((m) => m.role === 'user').length, summary:summaryForTurn(summary, history), light }));
   // 界面传完整原文账本；非界面入口可从会话取回，最后才退回本轮可见消息。
   const saved = !requirements && sessionId && depth === 0 ? await sessions.get(sessionId).catch(() => null) : null;
   const record = requirements ?? (saved ? collectRequirements(saved.messages, saved.requirements) : collectRequirements([...history, { role: 'user', content: userText }]));
@@ -215,6 +220,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   let loader = createToolLoader(light ? [] : [...tools, ...own]);
   const loadGUI=()=>{if(availableTools.some(t=>t.name==='computer_look'))for(const name of ['computer_look','computer_click','computer_type','computer_key','computer_scroll','computer_drag'])loader.get(name);};
   if(!light&&(computerTask==='gui'||computerTaskKind(requirementText,{history})==='gui'))loadGUI();
+  let outputRepairs = 0;
   let checks = 0; // 收尾核对提醒过几次（最多两次，避免来回拉扯）
   let wroteCode = false, ranCode = false;
   let toolHint = loader.hint();
@@ -268,6 +274,18 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     let stepText = '';
     // 每一步模型输出都可能以 <emotion> 标签开头，每步用新的剥离器
     let stripper = new EmotionTagStripper();
+    const boundary = new OutputBoundary();
+    let streamed = false;
+    const acceptVisible = fragment => {
+      const { text, hint } = stripper.push(fragment);
+      if (hint) emit({type:'emotion',value:hint});
+      if (text) {
+        clearTimeout(searchTimer);
+        stepText += text;
+        emit({type:'state',value:'listening'});
+        emit({type:'text',delta:text});
+      }
+    };
     let r;
     let searchTimer, searchTimedOut = false;
     const requestCtrl = new AbortController();
@@ -282,7 +300,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       stallTimeouts: lookupDeadline ? { first: 20_000, between: 25_000 } : { first: 45_000, between: 60_000 },
       maxTransientRetries: lookupDeadline ? 0 : 1,
       maxPartialRetries: 1, // 已输出的回答允许一次续写，仍受本轮总时限约束
-      system: light ? [LIGHT_PROMPT, [ctx.dynamic, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, computerNote, requirementContext, toolHint, voice && VOICE_NOTE].filter(Boolean).join('\n\n')],
+      system: light ? [LIGHT_PROMPT, [ctx.dynamic, DIALOGUE_POLICY, capabilities, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, DIALOGUE_POLICY, capabilities, computerNote, requirementContext, toolHint, voice && VOICE_NOTE].filter(Boolean).join('\n\n')],
       messages: convo,
       tools: closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list(),
       // 模型自带的联网搜索在服务商那边执行、搜一次扣一次费：剩余次数在发请求前就定好，不等搜完再拦
@@ -303,17 +321,20 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
           }
           return;
         }
-        const { text, hint } = stripper.push(delta);
-        if (hint) emit({ type: 'emotion', value: hint });
-        if (text) {
-          clearTimeout(searchTimer); // 已开始回答时不截断正文；后续再搜索仍需检查预算
-          stepText += text;
-          emit({ type: 'state', value: 'listening' });
-          emit({ type: 'text', delta: text });
-        }
+        streamed = true;
+        acceptVisible(boundary.push(delta));
       }
     });
+    if (!streamed && r.text) acceptVisible(boundary.push(r.text));
+    acceptVisible(boundary.flush());
+    if (r.stop === 'max_tokens' || r.stop === 'length') throw Object.assign(new Error('模型输出达到长度上限，回答尚未完成'), {code:'MODEL_OUTPUT_LIMIT',kind:'api'});
     } catch (e) {
+      if (e.code === 'ANALYSIS_IN_OUTPUT' && !stepText.trim() && outputRepairs < 1 && !signal?.aborted) {
+        outputRepairs++;
+        convo.push({role:'user',content:'上一段返回了分析草稿，未展示。请直接用简体中文给出正式答复，不展示内部分析；不要虚构缺失的数据或工具结果。'});
+        step--;
+        continue;
+      }
       if (searchTimedOut && !signal?.aborted) {
         if (stepText.trim()) { finalText += stepText + '\n\n'; emit({ type: 'text', delta: '\n\n' }); }
         continue; // 本次不完整的原生搜索协议不再续传；下一轮关闭搜索、仅整理已有资料
@@ -338,7 +359,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       if (rest.text) { stepText += rest.text; emit({ type: 'text', delta: rest.text }); }
     }
     finalText += stepText;
-    convo.push({ role: 'assistant', content: stripTag(r.text), toolCalls: r.toolCalls, raw: r.raw });
+    convo.push({ role: 'assistant', content: stepText, toolCalls: r.toolCalls, raw: r.raw });
     if (r.stop === 'pause_turn') continue; // 服务端工具（联网搜索）还没跑完，原样继续
     if (!r.toolCalls.length) {
       // 收尾核对：清单没勾完、写了代码没运行过，提醒一次（最多两次）再结束；用户看到的回答会接着往下写
@@ -457,7 +478,7 @@ export const TIME_BUDGET_MS = 8 * 60e3;
 const WEB_TOOLS = new Set(['web_search', 'fetch_url', 'fact_check', 'deep_research']);
 
 /** 可以同时执行的只读工具（不改文件、不操作电脑、不需要用户确认） */
-export const PARALLEL_SAFE = new Set(['web_search', 'fetch_url', 'read_evidence', 'read_file', 'list_files', 'find_files', 'search_in_files', 'kb_search', 'recall', 'search_conversations', 'read_conversation', 'get_weather', 'get_current_time', 'read_skill_file', 'computer_read_file', 'computer_list_dir']);
+export const PARALLEL_SAFE = new Set(['web_search', 'fetch_url', 'read_evidence', 'read_file', 'list_files', 'find_files', 'search_in_files', 'kb_search', 'recall', 'search_conversations', 'read_conversation', 'get_weather', 'get_current_time', 'verify_numbers', 'read_skill_file', 'computer_read_file', 'computer_list_dir']);
 const CODE_FILE = /\.(m?js|ts|py|html?)$/i;
 /** 回答结尾是“我现在开始 / 接下来生成 / 马上做 / 稍等”这类预告（说了要做但还没做） */
 /** “需要的话我可以接着做 PPT”这类询问不算（那是在问用户） */
@@ -497,7 +518,7 @@ function delegateTool({ adapter, model, effort, signal, tools }) {
       const sub = await runAgent({
         adapter, model, effort, signal, depth: 1, quiet: true, maxSteps: 10, history: [],
         tools: tools.filter((t) => DELEGATE_TOOLS.has(t.name)),
-        context: { dynamic: `当前时间：${new Date().toLocaleString('zh-CN', { hour12: false })}\n\n你是未央派出去完成一个子任务的分身。只做交代的这件事；用户看不到你，不要寒暄、不要提问；做完直接给结论：要点、关键数据和出处，600 字以内。${context ? `\n\n背景：${context}` : ''}`, kbHits: [] },
+        context: { dynamic: `当前时间：${new Date().toLocaleString('zh-CN', { hour12: false, timeZone:'Asia/Shanghai' })}\n\n你是未央派出去完成一个子任务的分身。只做交代的这件事；用户看不到你，不要寒暄、不要提问；做完直接给结论：要点、关键数据和出处，600 字以内。${context ? `\n\n背景：${context}` : ''}`, kbHits: [] },
         userText: task,
         emit: (e) => { if (e.type === 'tool_start') progress?.(`分身：${e.name}${e.args?.query ? ` ${String(e.args.query).slice(0, 30)}` : ''}`); }
       });
@@ -530,6 +551,7 @@ export function progressReminder({ userText, steps = [], toolCount }) {
 }
 
 const stripTag = (s) => stripEmotionTags(String(s || '').replace(/^\s*<emotion>[^<]*<\/emotion>\s*/, ''));
+
 
 
 

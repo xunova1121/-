@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- 手机是深色模式时启动用的底色（和夜间界面顶部一致；启动后由界面按实际明暗再设置） -->
-    <color name="jarvis_bg">#232839</color>
-    <!-- 启动页底色：和网页里的动画启动页一样是白色，接得上 -->
-    <color name="splash_bg">#FFFFFF</color>
-</resources>
