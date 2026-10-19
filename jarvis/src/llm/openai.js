@@ -24,6 +24,8 @@ export function toOpenAIMessages(system, messages) {
     if (m.role === 'user') out.push({ role: 'user', content: m.images?.length ? [{ type: 'text', text: m.content }, ...m.images.map(imagePart)] : m.content });
     else if (m.role === 'assistant') {
       const msg = { role: 'assistant', content: m.content || '' };
+      // 推理模型的工具续调必须原样回传本轮隐藏推理，不混入可见正文。
+      if (m.raw?.kind === 'openai' && typeof m.raw.reasoning_content === 'string') msg.reasoning_content = m.raw.reasoning_content;
       if (m.toolCalls?.length) {
         msg.tool_calls = m.toolCalls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args ?? {}) } }));
         if (!m.content) msg.content = null;
@@ -60,11 +62,14 @@ export function createAccumulator(onText) {
   const calls = [];
   let text = '';
   let finish = null;
+  let reasoning = '', hasReasoning = false;
   return {
     push(chunk) {
       const choice = chunk.choices?.[0];
       if (!choice) return;
       const d = choice.delta ?? {};
+      if (typeof d.reasoning_content === 'string') { hasReasoning = true; reasoning += d.reasoning_content; }
+      else if (typeof choice.message?.reasoning_content === 'string') { hasReasoning = true; reasoning = choice.message.reasoning_content; }
       if (typeof d.content === 'string' && d.content) { text += d.content; onText?.(d.content); }
       // 中转站的工具调用格式五花八门，这里尽量都接住：
       //   不带 index：有 id / 名字的是新调用，只有参数的接到上一个调用后面
@@ -101,7 +106,7 @@ export function createAccumulator(onText) {
         try { args = c.argText ? JSON.parse(c.argText) : {}; } catch (e) { parseError = `参数不是合法 JSON：${e.message}`; }
         return { id: c.id || `call_${i}_${Date.now().toString(36)}`, name: c.name, args, parseError };
       });
-      return { text, toolCalls, stop: finish };
+      return { text, toolCalls, stop: finish, ...(hasReasoning && { raw: { kind: 'openai', reasoning_content: reasoning } }) };
     }
   };
 }

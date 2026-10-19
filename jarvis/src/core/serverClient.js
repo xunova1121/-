@@ -43,8 +43,10 @@ export async function toBase64(blob) {
 }
 
 const sleep = (ms, signal) => new Promise((resolve, reject) => {
-  const t = setTimeout(resolve, ms);
-  signal?.addEventListener('abort', () => { clearTimeout(t); reject(Object.assign(new Error('aborted'), { name: 'AbortError' })); }, { once: true });
+  const finish = () => { signal?.removeEventListener('abort', abort); resolve(); };
+  const t = setTimeout(finish, ms);
+  const abort = () => { clearTimeout(t); signal?.removeEventListener('abort', abort); reject(Object.assign(new Error('aborted'), { name: 'AbortError' })); };
+  if (signal?.aborted) abort(); else signal?.addEventListener('abort', abort, { once: true });
 });
 
 /**
@@ -76,7 +78,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     // 超时：网络卡住时不一直等，报错让上层重试或提示（事件流不设，它本来就一直开着）
     const ctrl = new AbortController();
     const stop = () => ctrl.abort();
-    signal?.addEventListener('abort', stop, { once: true });
+    if (signal?.aborted) stop(); else signal?.addEventListener('abort', stop, { once: true });
     const timer = timeout ? setTimeout(() => { ctrl.timedOut = true; ctrl.abort(); }, timeout) : 0;
     const t0 = Date.now();
     try {
@@ -129,7 +131,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     getTask: (id) => req(`/api/tasks/${id}`),
     stopTask: (id) => req(`/api/tasks/${id}/stop`, { method: 'POST' }),
     // 要求事件流：手机 App 退到原生网络时也边收边显示（见 mobile/nativeFetch.js 的 wantsStream）
-    events: (id, after, signal) => req(`/api/tasks/${id}/events?after=${after}`, { raw: true, signal, headers: { Accept: 'text/event-stream' } }),
+    events: (id, after, signal) => req(`/api/tasks/${id}/events?after=${after}`, { raw: true, signal, timeout: timeoutMs, headers: { Accept: 'text/event-stream' } }),
     listSessions: () => req('/api/sessions'),
     getSession: (id) => req(`/api/sessions/${encodeURIComponent(id)}`).catch((e) => { if (e.status === 404) return null; throw e; }),
     patchSession: (id, patch) => req(`/api/sessions/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch }),
@@ -153,39 +155,48 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
  * 收一个任务的进度：断线自动重连（从收到的最后一个序号接着收），直到任务结束
  * @returns {Promise<object>} 结束时的 task_state 事件
  */
-export async function followTask(client, id, { onEvent, signal, after = 0, retryMs = [1000, 2000, 4000, 8000], checkMs = 10000 } = {}) {
-  let last = after;
-  let failures = 0;
-  let reader = null;
-  // 保底：每隔一会儿问一下服务器任务做完没有。做完了却还没收到“完成”（中间的网络把最后一段卡住了）
-  // 就断开重连，服务器会把漏掉的进度连同“完成”一起补发
+export async function followTask(client, id, { onEvent, signal, after = 0, retryMs = [1000, 2000, 4000, 8000], checkMs = 10000, idleMs = 45000 } = {}) {
+  let last = after, failures = 0, reader = null, attempt = null;
+  let touched = Date.now(), checking = false;
+  const aborted = () => Object.assign(new Error('aborted'), { name: 'AbortError' });
+  // 仅重开同一任务的观察连接，不停止或重新提交服务器任务。
+  const reconnect = () => { attempt?.abort(); reader?.cancel().catch(() => {}); };
+  const stop = () => reconnect();
+  if (signal?.aborted) throw aborted();
+  signal?.addEventListener('abort', stop, { once: true });
   const watch = setInterval(async () => {
+    if (Date.now() - touched >= idleMs) reconnect();
+    if (checking) return;
+    checking = true;
+    const current = attempt;
     try {
       const t = await client.getTask(id);
-      if (['done', 'error', 'stopped'].includes(t?.status) && t.seq > last) reader?.cancel().catch(() => {});
-    } catch { /* 问不到就下次再问 */ }
+      if (current === attempt && ['done', 'error', 'stopped'].includes(t?.status) && t.seq > last) reconnect();
+    } catch { /* 临时网络故障不终止任务 */ }
+    finally { checking = false; }
   }, checkMs);
   try {
-    return await follow();
-  } finally {
-    clearInterval(watch);
-  }
-  async function follow() {
     for (;;) {
+      if (signal?.aborted) throw aborted();
+      attempt = new AbortController();
+      touched = Date.now();
       try {
-        const res = await client.events(id, last, signal);
-        if (res.status === 404) throw Object.assign(new Error('服务器上找不到这个任务了（可能服务器重启过），结果请看对话记录'), { final: true });
+        const res = await client.events(id, last, attempt.signal);
+        if (signal?.aborted) throw aborted();
+        if ([401,403,404].includes(res.status)) throw Object.assign(new Error(
+          res.status === 404 ? '服务器上找不到这个任务了（可能服务器重启过），结果请看对话记录' :
+          res.status === 401 ? '服务器登录已失效，请到 设置 → 服务器模式 重新登录' : '服务器拒绝访问，请检查服务器访问权限'
+        ), { final: true, status: res.status });
         if (!res.ok || !res.body) throw new Error(`服务器返回 ${res.status}`);
         reader = res.body.getReader();
-        // 叫停时立刻结束等待（服务器那边一直没新数据时，读取会一直挂着）
-        const cancel = () => reader.cancel().catch(() => {});
-        signal?.addEventListener('abort', cancel, { once: true });
+        if (signal?.aborted || attempt.signal.aborted) { await reader.cancel(); if (signal?.aborted) throw aborted(); continue; }
         const dec = new TextDecoder();
         let buf = '';
         for (;;) {
-          const { value, done } = await reader.read().finally(() => { if (signal?.aborted) signal.removeEventListener('abort', cancel); });
-          if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+          const { value, done } = await reader.read();
+          if (signal?.aborted) throw aborted();
           if (done) break;
+          touched = Date.now(); // 服务器心跳只维持观察连接，不冒充模型进展。
           failures = 0;
           const { events, rest } = parseSse(buf + dec.decode(value, { stream: true }));
           buf = rest;
@@ -197,12 +208,20 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
           }
         }
       } catch (e) {
-        if (signal?.aborted || e?.name === 'AbortError') throw Object.assign(new Error('aborted'), { name: 'AbortError' });
-        if (e.final || e.status === 401) throw e;
+        if (signal?.aborted) throw aborted();
+        if (e.final) throw e;
+        // 观察连接自行中断（含失活检测）时继续按序号重连。
+      } finally {
+        reader?.cancel().catch(() => {});
+        reader = null;
+        attempt?.abort();
       }
-      // 连接断了（手机切网络、锁屏）：等一下再连，从断开的地方接着收；任务本身在服务器上照常做
       await sleep(retryMs[Math.min(failures++, retryMs.length - 1)], signal);
     }
+  } finally {
+    clearInterval(watch);
+    signal?.removeEventListener('abort', stop);
+    reconnect();
   }
 }
 
