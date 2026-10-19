@@ -263,6 +263,7 @@ export async function runAgent({ adapter, model, history, userText, images = [],
         const { text, hint } = stripper.push(delta);
         if (hint) emit({ type: 'emotion', value: hint });
         if (text) {
+          clearTimeout(searchTimer); // 已开始回答时不截断正文；后续再搜索仍需检查预算
           stepText += text;
           emit({ type: 'state', value: 'listening' });
           emit({ type: 'text', delta: text });

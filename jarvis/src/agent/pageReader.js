@@ -78,7 +78,7 @@ export function createPageReader({ tavilyKey, fetchViaGateway, fetchImpl = (...a
     } catch (e) {
       if (signal?.aborted || e.name === 'AbortError') throw e;
       err = e;
-      if ([401,403,429].includes(e.status)) blocked.set(host, { count: (state?.count || 0) + 1, at: now() });
+      if ([401,403,429].includes(e.status)) blocked.set(host, { count: (state && now() - state.at < 10 * 60_000 ? state.count : 0) + 1, at: now() });
     }
     if (tavilyKey && (err || text.replace(/\s+/g, '').length < THIN)) {
       try {

@@ -35,6 +35,14 @@ describe('多协议中转：按模型用原生格式', () => {
 });
 
 describe('Responses 格式（GPT）', () => {
+  it('预算收尾请求禁用原生搜索，下一次正常请求仍可搜索', async () => {
+    const bodies=[];
+    const a=createResponsesAdapter({baseURL:'https://r/v1',apiKey:'test',fetchImpl:async(url,init)=>{bodies.push(JSON.parse(init.body));return sse([{type:'response.output_text.delta',delta:'答'},{type:'response.completed',response:{output:[]}}]);}});
+    await a.stream({...req,allowWebSearch:false});await a.stream(req);
+    expect(bodies[0].tools.some(t=>t.type==='web_search')).toBe(false);
+    expect(bodies[1].tools.some(t=>t.type==='web_search')).toBe(true);
+    expect(a.webSearchOn).toBe(true);
+  });
   it('历史转换：函数调用和结果是单独的条目', () => {
     const input = toResponsesInput([
       { role: 'user', content: '读文件' },
@@ -103,3 +111,4 @@ describe('模型分工下拉框', () => {
     expect(refs.slice(1).every((r) => r.startsWith('deepseek::'))).toBe(true);
   });
 });
+
