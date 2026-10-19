@@ -34,6 +34,21 @@ describe('模型连接卡住：断开重试，不一直傻等', () => {
     await expect(a.stream({...req,stallTimeouts:{first:10,between:10},maxTransientRetries:0})).rejects.toMatchObject({stalled:true});expect(calls).toBe(1);
   });
 
+  it('OpenAI与Responses只发SSE心跳不延长等待，不会靠心跳挂几分钟',async()=>{
+    for(const kind of ['chat','responses']){
+      let interval;const ctrl=new AbortController();const escape=setTimeout(()=>ctrl.abort(),200);
+      const fetchImpl=async()=>new Response(new ReadableStream({start(c){interval=setInterval(()=>c.enqueue(new TextEncoder().encode(': ping\n\n')),2);}}));
+      const original=globalThis.fetch;if(kind==='chat')globalThis.fetch=fetchImpl;
+      try{const a=kind==='chat'?createOpenAIAdapter({baseURL:'https://x/v1',apiKey:'test'}):createResponsesAdapter({baseURL:'https://x/v1',apiKey:'test',fetchImpl});await expect(a.stream({...req,signal:ctrl.signal,stallTimeouts:{first:15,between:15},maxTransientRetries:0})).rejects.toMatchObject({stalled:true});}finally{clearInterval(interval);clearTimeout(escape);globalThis.fetch=original;}
+    }
+  });
+
+  it('Claude持续ping不算真正进展，仍会触发卡住检测',async()=>{
+    const ctrl=new AbortController();const escape=setTimeout(()=>ctrl.abort(),200);
+    const client={beta:{messages:{stream(params,{signal}){return{async *[Symbol.asyncIterator](){while(!signal.aborted){await new Promise(r=>setTimeout(r,2));yield{type:'ping'};}},finalMessage:async()=>({content:[],stop_reason:'end_turn'})};}}}};
+    try{const a=createAnthropicAdapter({client});await expect(a.stream({...req,signal:ctrl.signal,stallTimeouts:{first:15,between:15},maxTransientRetries:0})).rejects.toMatchObject({stalled:true});}finally{clearTimeout(escape);}
+  });
+
   it('写了一半挂住：断开后带上已写部分续写', async () => {
     const replies = [hang('第一段，'), sse('第二段。')];
     const orig = globalThis.fetch;

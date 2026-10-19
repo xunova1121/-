@@ -75,7 +75,7 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
       for (;;) {
         const { value: ev, done } = await guard.race(events.next());
         if (done) break;
-        guard.touch();
+        if (ev.type !== 'ping') guard.touch();
         if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') {
           text += ev.delta.text;
           state.started = true;

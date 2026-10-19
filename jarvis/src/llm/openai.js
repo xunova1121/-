@@ -232,13 +232,12 @@ function createOnce({ baseURL, apiKey, headers = {} }) {
     for (;;) {
       const { value, done } = await guard.race(reader.read());
       if (done) break;
-      guard.touch();
       buf += dec.decode(value, { stream: true });
       const { events, rest } = sseLines(buf);
       buf = rest;
       for (const e of events) {
         if (e === '[DONE]') continue;
-        try { acc.push(JSON.parse(e)); } catch { /* 忽略心跳等非 JSON 行 */ }
+        try { const data=JSON.parse(e); if (data.choices?.length) guard.touch(); acc.push(data); } catch { /* 心跳不延长模型等待时间 */ }
       }
     }
     const r = acc.result();

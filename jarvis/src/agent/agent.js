@@ -92,7 +92,7 @@ export const STABLE_PROMPT = `你是“未央”，运行在用户电脑上的�
 - 之前对话里的图片如果已经看不到了，用户消息里有“[已上传到工作区：…]”的路径，用 read_file 读那个图片文件再看。
 
 ## 查最新信息（比分、赛果、新闻、价格、版本等）
-- 普通单一问题（剧集更新、电影、新闻、娱乐等）先搜索并读最相关的一两条官方原始来源，证据够了立即回答，不默认启动逐项核验或深度研究。区分当前已上线、预告、会员/非会员和页面缓存时间；不能把有选集入口当作已经播出，不能把整剧梗概当作该集剧情。
+- 普通单一问题（剧集更新、电影、新闻、娱乐等）先搜索并读最相关的一两条官方原始来源，证据够了立即回答，不默认启动逐项核验或深度研究。影视优先官方合集/追剧日历，再读对应分集简介；新闻优先原始报道，娱乐区分官宣和传闻。区分当前已上线、预告、会员/非会员和页面缓存时间；不能把有选集入口当作已经播出，不能把整剧梗概当作该集剧情。
 - 要查的对象有好几个（截图里的多场比赛、多只股票、清单），或用户明确要求逐项、交叉核验：先把每一项原样列出来，调用 fact_check 逐项查证；最终结论只用 fact_check 核实过的内容，“单一来源 / 未核实”的要标明。需要计算的（让球胜负、是否中奖、盈亏）逐项列出算法再给结论。
 - 你的知识有截止日期，“当前时间”之后或临近的事一律先用 web_search 查，不要凭记忆回答，也不要猜“还没发生”；搜不到就如实说搜不到。
 - 注意时差：用户在国内，说的和截图里的时间默认是北京时间。判断事情发生没有、拿日期去搜之前，先换算成事件当地的时间（欧洲比北京晚 6–7 小时，美洲晚 12–15 小时）。中国体彩“周一001”的“周一”是销售日，比赛可能在北京时间第二天凌晨。
@@ -174,7 +174,7 @@ export async function runAgent(options) {
 }
 
 async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false }) {
-  const retrieval = createRetrievalBudget(images.length ? `逐项核验 ${requirementText}` : requirementText, { now, timeBudgetMs });
+  const retrieval = createRetrievalBudget(lookupDeadline ? '普通查询' : images.length ? `逐项核验 ${requirementText}` : requirementText, { now, timeBudgetMs });
   let closingTurns = 0;
   let retrievalStopped = false;
   emit({ type: 'state', value: 'processing' });

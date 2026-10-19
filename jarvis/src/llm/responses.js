@@ -109,7 +109,6 @@ export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearc
       for (;;) {
         const { value, done } = await guard.race(reader.read());
         if (done) break;
-        guard.touch();
         buf += dec.decode(value, { stream: true });
         const { events, rest } = sseLines(buf);
         buf = rest;
@@ -117,6 +116,7 @@ export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearc
           if (e === '[DONE]') continue;
           let ev;
           try { ev = JSON.parse(e); } catch { continue; } // 心跳等非 JSON 行
+          if (/^response\.(output_|function_call|reasoning|completed|failed|incomplete)/.test(ev.type || '')) guard.touch();
           acc.push(ev);
         }
       }
