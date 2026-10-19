@@ -70,7 +70,7 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
   const store = createFileStore(path.join(dataDir, 'store'));
   useBackend(store);
   // 内置技能（做 PPT、Word、Excel 的步骤和规范）：和手机 / 电脑一样装上，版本更新时跟着升级
-  seedBuiltins().catch((e) => console.warn('[服务器模式] 内置技能没装上：', e?.message || e));
+  const ready=seedBuiltins().catch((e) => console.warn('[服务器模式] 内置技能没装上：', e?.message || e));
   const configFile = path.join(dataDir, 'config.json');
   const loadConfig = () => {
     try { return { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(configFile, 'utf8')) }; } catch { return { ...DEFAULT_CONFIG }; }
@@ -274,6 +274,6 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     return false;
   }
 
-  return { authorized, handle, runner, store, realtimeKey: () => loadConfig().keys?.qwen || '' };
+  return { authorized, handle, runner, store, ready, realtimeKey: () => loadConfig().keys?.qwen || '' };
 }
 

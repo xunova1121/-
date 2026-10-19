@@ -33,6 +33,7 @@ const mode=createServerMode({dataDir,password:pass,makeModelAdapter:cfg=>({model
   if(!value.includes('PC测试文字'))throw Error('原生键盘未在测试窗口输入');
   o.onText('已输入并核对测试窗口。');return{text:'已输入并核对测试窗口。',toolCalls:[],stop:'end_turn'};
 }}})});
+await mode.ready;
 const http=createServer({serverMode:mode,ollama:null});await new Promise(r=>http.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${http.address().port}`;
 try{
   app=await electron.launch({executablePath:path.join(root,'desktop/node_modules/electron/dist/electron'),args:[path.join(root,'desktop'),'--no-sandbox','--use-angle=swiftshader','--enable-unsafe-swiftshader','--ignore-gpu-blocklist'],env:{...process.env,HOME:home,JARVIS_HOME:path.join(home,'.jarvis'),JARVIS_DESKTOP_TEST:'1',ELECTRON_DISABLE_SECURITY_WARNINGS:'1'}});

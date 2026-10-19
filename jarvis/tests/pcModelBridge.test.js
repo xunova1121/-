@@ -16,6 +16,7 @@ const req=()=>({model:'ignored',system:['test'],messages:[{role:'user',content:'
 beforeAll(async()=>{
   dir=fs.mkdtempSync(path.join(os.tmpdir(),'jarvis-pc-model-'));
   mode=createServerMode({dataDir:dir,password:pass,makeModelAdapter:c=>({model:c.models[c.provider],adapter:{stream:async o=>{seen.push(o);return behavior(o);}}})});
+  await mode.ready;
   http=createServer({serverMode:mode,ollama:null});await new Promise(r=>http.listen(0,'127.0.0.1',r));base=`http://127.0.0.1:${http.address().port}`;
   client=createServerClient({base,token:tokenFor(pass)});
 });

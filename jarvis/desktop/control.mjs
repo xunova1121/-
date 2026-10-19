@@ -53,7 +53,8 @@ export function createControl(d) {
     const p = d.screen.getCursorScreenPoint();
     const b = d.screen.getPrimaryDisplay().bounds;
     const corner = (q) => q && q.x <= b.x + 2 && q.y <= b.y + 2;
-    if (lastActionAt && corner(p) && !corner(lastPoint)) {
+    if (lastPoint===null)lastPoint=p;
+    if (corner(p) && !corner(lastPoint)) {
       stopped = true;
       throw new Error('用户把鼠标移到了屏幕左上角：已紧急停止电脑操作');
     }
@@ -70,7 +71,7 @@ export function createControl(d) {
 
   return {
     /** 开始一次操作（每轮对话第一次截屏时）：清除上次的停止状态 */
-    begin() { stopped = false; lastActionAt = 0; lastPoint = null; },
+    begin() { stopped = false; lastActionAt = 0; lastPoint = d.screen.getCursorScreenPoint(); },
 
     async look() {
       checkPermission();

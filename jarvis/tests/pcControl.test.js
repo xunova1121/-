@@ -74,9 +74,9 @@ it('GUI开始失败后能重试，未看屏不能盲输，动作失败后旧截�
 });
 
 function controlFixture(inputRun=async()=>{}) {
-  let text='original',visible=false;
-  const control=createControl({platform:'win32',input:{run:inputRun,close(){}},screen:{getCursorScreenPoint:()=>({x:30,y:40}),getPrimaryDisplay:()=>({id:2,bounds:{x:0,y:0,width:100,height:100},size:{width:100,height:100},scaleFactor:1})},clipboard:{readText:()=>text,writeText:t=>{text=t;}},getWin:()=>({isVisible:()=>visible,isMinimized:()=>false,hide:()=>{visible=false;},show:()=>{visible=true;},focus(){}}),desktopCapturer:{getSources:async()=>[{display_id:'1',thumbnail:{toPNG:()=>Buffer.from('wrong'),getSize:()=>({width:100,height:100})}},{display_id:'2',thumbnail:{toPNG:()=>Buffer.from('correct'),getSize:()=>({width:100,height:100})}}]}});
-  return{control,text:()=>text,setText:t=>{text=t;},show:()=>{visible=true;}};
+  let text='original',visible=false,cursor={x:30,y:40};
+  const control=createControl({platform:'win32',input:{run:inputRun,close(){}},screen:{getCursorScreenPoint:()=>cursor,getPrimaryDisplay:()=>({id:2,bounds:{x:0,y:0,width:100,height:100},size:{width:100,height:100},scaleFactor:1})},clipboard:{readText:()=>text,writeText:t=>{text=t;}},getWin:()=>({isVisible:()=>visible,isMinimized:()=>false,hide:()=>{visible=false;},show:()=>{visible=true;},focus(){}}),desktopCapturer:{getSources:async()=>[{display_id:'1',thumbnail:{toPNG:()=>Buffer.from('wrong'),getSize:()=>({width:100,height:100})}},{display_id:'2',thumbnail:{toPNG:()=>Buffer.from('correct'),getSize:()=>({width:100,height:100})}}]}});
+  return{control,text:()=>text,setText:t=>{text=t;},setCursor:p=>{cursor=p;},show:()=>{visible=true;}};
 }
 it('多屏按主屏ID取截图，不把另一块屏幕用于坐标定位',async()=>{
   const f=controlFixture();expect(Buffer.from((await f.control.look()).base64,'base64').toString()).toBe('correct');
@@ -91,4 +91,8 @@ it('粘贴失败恢复剪贴板；用户同时复制的新内容不被覆盖',as
 it('隐藏窗口等待期间停止，不再发出键盘动作',async()=>{
   vi.useFakeTimers();let calls=0;const f=controlFixture(async()=>{calls++;});f.show();
   const p=expect(f.control.act({type:'key',keys:'enter'})).rejects.toThrow('紧急停止');f.control.stop();await vi.advanceTimersByTimeAsync(1000);await p;expect(calls).toBe(0);
+});
+it('第一次动作前鼠标移到左上角也能停止',async()=>{
+  let calls=0;const f=controlFixture(async()=>{calls++;});f.control.begin();f.setCursor({x:0,y:0});
+  await expect(f.control.act({type:'key',keys:'enter'})).rejects.toThrow('紧急停止');expect(calls).toBe(0);
 });
