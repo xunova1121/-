@@ -13,6 +13,16 @@ it('电视剧原话使用较短问答说明，并把快速卡住检测与零内�
  await agent.runAgent({adapter,model:'m',history:[],userText:'现在播放的电视剧伟大的长征播放哪一集了，内容是什么',tools:[],context:ctx,emit:()=>{},quiet:true});
 });
 
+it('真正经过Claude适配器的主模型卡住20秒后，执行器直接换备用模型，不等待三次120秒',async()=>{
+ const {createAnthropicAdapter}=await import('../src/llm/anthropic.js');let calls=0;
+ const primary=createAnthropicAdapter({client:{beta:{messages:{stream(){calls++;return{[Symbol.asyncIterator]:()=>({next:()=>new Promise(()=>{})}),finalMessage:()=>new Promise(()=>{})};}}}}});
+ vi.useFakeTimers();
+ try{
+   const result=agent.runAgent({adapter:primary,model:'primary',fallbacks:[{adapter:done('备用模型的回答'),model:'backup'}],history:[],userText:'现在播放的电视剧伟大的长征播放哪一集了，内容是什么',tools:[],context:ctx,emit:()=>{},quiet:true});
+   await vi.advanceTimersByTimeAsync(20_001);expect((await result).text).toBe('备用模型的回答');expect(calls).toBe(1);
+ }finally{vi.useRealTimers();}
+});
+
 it('闲聊中追加文档任务时恢复工具与完整任务规则，避免闲聊模式吞掉任务',async()=>{
  const inbox=[];let n=0,writes=0;
  const adapter={async stream(o){if(++n===1){expect(o.tools).toEqual([]);inbox.push('写一份完整报告并保存文件');o.onText('你好。');return{text:'你好。',toolCalls:[],stop:'end_turn'};}if(n===2){expect(o.tools.some(t=>t.name==='write_file')).toBe(true);expect(o.system[0]).toBe(agent.STABLE_PROMPT);return{text:'',toolCalls:[call('w','write_file')],stop:'tool_use'};}o.onText('已保存。');return{text:'已保存。',toolCalls:[],stop:'end_turn'};}};

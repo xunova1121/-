@@ -117,7 +117,7 @@ export const isTransient = (err) => Boolean(err) && err.name !== 'AbortError' &&
 const RETRY_DELAYS = [1500, 4000, 8000];
 
 /** 连接卡住的判定：发出请求后这么久收不到第一段数据，或两段数据之间这么久没动静，就断开重试（中转站偶尔会挂住不回） */
-export const STALL_MS = { first: 120_000, between: 90_000 };
+export const STALL_MS = { first: 45_000, between: 60_000 };
 /**
  * 给一次流式请求加“卡住检测”：用 guard.signal 发请求，每收到数据调 touch()，读数据用 race() 包一下（卡住时立刻结束等待）
  * 卡住时抛出带 stalled 的错误，按临时故障自动重试；用户自己点停止时照常是 AbortError

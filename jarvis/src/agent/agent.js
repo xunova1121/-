@@ -254,7 +254,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     try {
     r = await cur.adapter.stream({
       model: cur.model,
-      effort: effort || (lookupDeadline ? 'low' : undefined),
+      effort,
       stallTimeouts: lookupDeadline ? { first: 20_000, between: 25_000 } : { first: 45_000, between: 60_000 },
       maxTransientRetries: lookupDeadline ? 0 : 1,
       system: light ? [LIGHT_PROMPT, [ctx.dynamic, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, requirementContext, toolHint, voice && VOICE_NOTE].filter(Boolean).join('\n\n')],

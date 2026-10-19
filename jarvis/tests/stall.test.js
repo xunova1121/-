@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createOpenAIAdapter, STALL_MS, isTransient } from '../src/llm/openai.js';
 import { createAnthropicAdapter } from '../src/llm/anthropic.js';
+import { createResponsesAdapter } from '../src/llm/responses.js';
 import { canFallback } from '../src/llm/router.js';
 import { finishCheck } from '../src/agent/agent.js';
 
@@ -26,6 +27,11 @@ describe('模型连接卡住：断开重试，不一直傻等', () => {
   it('Claude每次请求禁用内部重试后只调用一次，不额外叠加120秒等待',async()=>{
     let calls=0;const client={beta:{messages:{stream(){calls++;return{[Symbol.asyncIterator]:()=>({next:()=>new Promise(()=>{})}),finalMessage:()=>new Promise(()=>{})};}}}};
     const a=createAnthropicAdapter({client});await expect(a.stream({...req,stallTimeouts:{first:10,between:10},maxTransientRetries:0})).rejects.toMatchObject({stalled:true});expect(calls).toBe(1);
+  });
+
+  it('Responses同样使用请求级等待上限和重试次数',async()=>{
+    let calls=0;const a=createResponsesAdapter({baseURL:'https://x/v1',apiKey:'test',fetchImpl:async(url,init)=>{calls++;return new Promise((resolve,reject)=>init.signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError'))));}});
+    await expect(a.stream({...req,stallTimeouts:{first:10,between:10},maxTransientRetries:0})).rejects.toMatchObject({stalled:true});expect(calls).toBe(1);
   });
 
   it('写了一半挂住：断开后带上已写部分续写', async () => {
