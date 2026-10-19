@@ -19,7 +19,7 @@ jobs:
           cache-dependency-path: jarvis/package-lock.json
       - run: npm ci --no-audit --no-fund
       - run: npm run format
-      - run: npx prettier --write src/llm/outputBoundary.js src/agent/dialoguePolicy.js src/agent/summaryEvidence.js src/agent/verifyNumbers.js tests/conversationReliability.test.js evals/reliability-cases.mjs
+      - run: npx prettier --ignore-path /dev/null --write src/llm/outputBoundary.js src/agent/dialoguePolicy.js src/agent/summaryEvidence.js src/agent/verifyNumbers.js tests/conversationReliability.test.js evals/reliability-cases.mjs
       - run: npm run lint
       - run: npx vitest run
       - name: 只在本独立分支保存格式结果
