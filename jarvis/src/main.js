@@ -114,28 +114,25 @@ import { generateImage } from './llm/images.js';
 import { generateVideo } from './llm/videos.js';
 import { createFormDirector } from './core/formDirector.js';
 import { composeGreeting, GREET_GAP_MS } from './core/greeting.js';
-import { classifyTask, routeFor, TASKS, seesImages, fallbackRoutes, effortFor, isSmallTalk, needsComputer, computerTaskKind } from './llm/router.js';
+import { classifyTask, routeFor, TASKS, seesImages, fallbackRoutes, effortFor, isSmallTalk, computerTaskKind } from './llm/router.js';
 import { resolveTheme, toggled, THEMES } from './core/theme.js';
 import { FORMS } from './render/formations.js';
 import { resolveQuality } from './core/quality.js';
 import { loadMemory, clearMemory } from './core/memoryStore.js';
+import { $, body, now, DESKTOP, COMPACT, storage, narrow, lowEnd, isMobile, reducedMql, toast, wp, markActivity } from './app/env.js';
+import { createApp } from './app/context.js';
 
-const $ = (s) => document.querySelector(s);
-const body = document.body;
-const now = () => performance.now();
 
 // ---------------------------------------------------------------- 设置
 const settings = loadSettings();
+/** 各模块共用的状态和函数（见 app/context.js） */
+const app = createApp({ settings });
 function setSetting(key, value) {
   settings[key] = value;
   // 通话临时启用的朗读 / 唤醒词不覆盖用户保存的偏好。
   saveSettings(callRestore ? { ...settings, ...callRestore } : settings);
 }
 
-// ---------------------------------------------------------------- 设备分级
-const lowEnd = (navigator.hardwareConcurrency || 8) <= 2 || (navigator.deviceMemory ?? 8) < 4;
-const isMobile = matchMedia('(pointer: coarse)').matches;
-const reducedMql = matchMedia('(prefers-reduced-motion: reduce)');
 
 // ---------------------------------------------------------------- 情绪
 const tween = new ParamTween({ ...EMOTION_PARAMS.平静, ...EYE_SHAPES.平静 }, { duration: 400 });
@@ -168,8 +165,6 @@ const live = {
 };
 
 // ---------------------------------------------------------------- 渲染策略
-/** 手机 App：不放大舞台（不跑 WebGL 和舞台动画，省电、不卡），粒子缩成顶栏小球，工作进展进对话 */
-const COMPACT = MOBILE;
 document.body.classList.toggle('compact', COMPACT);
 /** 舞台底色（与 styles.css 里 .stage 的中心颜色一致，画布边缘渐隐时才接得上） */
 const STAGE_BG = 0x2b2f58;
@@ -354,8 +349,7 @@ function applyEmotionOverride(v) {
 
 
 // ---------------------------------------------------------------- 模型与网关
-let gateway = null; // 完整版：{ origin, keys }；单文件版为 null
-let llmConfig = loadConfig();
+app.llmConfig = loadConfig();
 
 /** 单文件版也会尝试连接本机网关（双击 启动.bat 后运行在 127.0.0.1:8787），连上后不受浏览器跨域限制 */
 const LOCAL_GATEWAY = 'http://127.0.0.1:8787';
@@ -370,11 +364,11 @@ async function detectGateway() {
       if (!h?.ok) throw new Error('not a gateway');
       // 这个网址是开了服务器模式的未央服务器，但还没登录：提示去登录（不登录用不了它的任何功能）
       if (h.serverMode && !serverCfg.token) setTimeout(() => { showPanel('settings'); const u = $('#server-url'); if (u && !u.value) u.value = location.origin; toast('这是你的未央服务器：请先在“服务器模式”里输入访问密码登录'); }, 800);
-      const found = !gateway;
-      gateway = { origin: local ? LOCAL_GATEWAY : location.origin, keys: h.gatewayKeys ?? [], cors: Boolean(h.cors), mcp: Boolean(h.mcp), ollama: Boolean(h.ollama) };
+      const found = !app.gateway;
+      app.gateway = { origin: local ? LOCAL_GATEWAY : location.origin, keys: h.gatewayKeys ?? [], cors: Boolean(h.cors), mcp: Boolean(h.mcp), ollama: Boolean(h.ollama) };
       if (local && found) toast('已连接本机网关：所有服务商和自定义接口都可以用了');
     } catch {
-      gateway = null;
+      app.gateway = null;
       // 单文件版：启动时页面忙可能超时，过几秒再试两次
       if (local && !MOBILE && (detectGateway.retries = (detectGateway.retries ?? 0) + 1) <= 2) setTimeout(() => detectGateway(), 3000);
     }
@@ -390,7 +384,7 @@ async function detectGateway() {
 // 单文件版：回到页面时再找一次网关（用户可能刚双击了 启动.bat）
 if ((STANDALONE && !MOBILE) || location.protocol === 'file:') {
   let last = 0;
-  addEventListener('focus', () => { if (!gateway && Date.now() - last > 5000) { last = Date.now(); detectGateway(); } });
+  addEventListener('focus', () => { if (!app.gateway && Date.now() - last > 5000) { last = Date.now(); detectGateway(); } });
 }
 
 /** 常见的服务商错误翻译成人话（已经自动重试过仍失败才会走到这里） */
@@ -406,20 +400,20 @@ function friendlyError(msg) {
 }
 
 function updateModelLabels() {
-  const name = displayName(llmConfig);
+  const name = displayName(app.llmConfig);
   $('#mode-text').textContent = name;
   // 输入框里显示型号（或“自动”），点一下弹出模型列表
-  $('#model-chip-text').textContent = COMPACT && isAuto(llmConfig) ? `自动 · ${modelOf(llmConfig) || '选择模型'}` : chipLabel(llmConfig);
+  $('#model-chip-text').textContent = COMPACT && isAuto(app.llmConfig) ? `自动 · ${modelOf(app.llmConfig) || '选择模型'}` : chipLabel(app.llmConfig);
   if (globalThis.__jarvisServerMode) $('#model-chip-text').textContent = globalThis.__jarvisServerModel ? `服务器 · ${globalThis.__jarvisServerModel}` : '服务器'; // 服务器模式：用服务器上的模型设置
-  if (isAuto(llmConfig)) $('#mode-text').textContent = `${name} · 自动选模型`;
-  $('#mode-pill').title = `当前模型：${name}${gateway ? '（经本机网关）' : ''}。点击切换`;
+  if (isAuto(app.llmConfig)) $('#mode-text').textContent = `${name} · 自动选模型`;
+  $('#mode-pill').title = `当前模型：${name}${app.gateway ? '（经本机网关）' : ''}。点击切换`;
   $('#hud-model').textContent = name.length > 22 ? `${name.slice(0, 21)}…` : name;
 }
 
-const metrics = () => (gateway ? fetch(`${gateway.origin}/api/local/metrics`).then((r) => r.json()) : browserMetrics());
+const metrics = () => (app.gateway ? fetch(`${app.gateway.origin}/api/local/metrics`).then((r) => r.json()) : browserMetrics());
 // 网页读取只对完整版开放（单文件版跨域连网关时网关不提供 /api/fetch）
 // 安卓 App 没有本机网关，但系统原生网络没有跨域限制：直接用它搜索、读网页
-const fetchViaGateway = () => (gateway && !gateway.cors
+const fetchViaGateway = () => (app.gateway && !app.gateway.cors
   ? (url, init) => (url.startsWith('https://api.tavily.com/')
     ? fetch(`/api/llm/tavily/${url.slice('https://api.tavily.com/'.length)}`, init)
     : url.startsWith('https://api.bochaai.com/')
@@ -429,7 +423,6 @@ const fetchViaGateway = () => (gateway && !gateway.cors
 
 // ---------------------------------------------------------------- 对话
 const transcript = new Transcript($('#transcript'), { progress: COMPACT });
-const storage = (() => { try { return localStorage; } catch { return null; } })();
 // 服务器模式（设置 → 服务器模式）：任务交给自己的云服务器做，对话也存在服务器上
 const serverCfg = loadServerSettings(storage);
 const server = serverCfg.enabled && serverCfg.url && serverCfg.token ? createServerClient({ base: serverCfg.url, token: serverCfg.token }) : null;
@@ -446,7 +439,7 @@ function pushConfigToServer() {
   clearTimeout(pushTimer);
   pushTimer = setTimeout(async () => {
     try {
-      const { voice, stt, ...models } = llmConfig;
+      const { voice: _voice, stt: _stt, ...models } = app.llmConfig;
       await server.putConfig(models);
       refreshServerModel();
       toast(`已同步到服务器：${modelOf(models) || '模型设置'}`);
@@ -467,24 +460,23 @@ if (serverCfg.token && typeof location !== 'undefined' && normalizeUrl(serverCfg
     return plain(input, { ...init, headers });
   };
 }
-// 当前会话；history 指向它的消息列表（切换会话时一起换掉）
-let session = sessionsApi.create();
-let history = session.messages;
+// 当前会话；app.history 就是它的消息列表（换对话只改 app.session）
+app.session = sessionsApi.create();
 /** 记一条消息：默认记进当前会话；后台任务记进它自己的会话（切到别的对话后仍然记对地方） */
-function rememberTurn(role, content, extra = {}, target = session) {
+function rememberTurn(role, content, extra = {}, target = app.session) {
   target.messages.push({ role, content, ts: Date.now(), ...extra });
   target.updatedAt = Date.now();
   persistSession(target);
 }
-function persistSession(target = session) {
+function persistSession(target = app.session) {
   if (settings.saveSessions === false) return;
-  return sessionsApi.save(target).then(() => { sessionsPanel?.refresh(); if (target === session) showChatTitle(); }).catch(() => {});
+  return sessionsApi.save(target).then(() => { sessionsPanel?.refresh(); if (target === app.session) showChatTitle(); }).catch(() => {});
 }
 /** 手机顶栏显示当前对话的标题（还没说话的新对话不显示） */
 function showChatTitle() {
   const el = $('#chat-title');
-  const first = history.find((m) => m.role === 'user')?.content;
-  const title = session.title || (first ? sessionsApi.autoTitle(first) : '');
+  const first = app.history.find((m) => m.role === 'user')?.content;
+  const title = app.session.title || (first ? sessionsApi.autoTitle(first) : '');
   el.textContent = title;
   el.hidden = !title;
 }
@@ -494,9 +486,9 @@ $('#chat-title').addEventListener('click', async () => {
   try { next = globalThis.prompt('给这段对话起个名字', now); } catch { /* 不支持弹窗 */ }
   next = String(next ?? '').trim().slice(0, 60);
   if (!next || next === now) return;
-  session.title = next;
-  session.titleSet = true;
-  await sessionsApi.rename(session.id, next).catch(() => {});
+  app.session.title = next;
+  app.session.titleSet = true;
+  await sessionsApi.rename(app.session.id, next).catch(() => {});
   showChatTitle();
   sessionsPanel?.refresh();
   drawer?.refresh?.();
@@ -504,7 +496,6 @@ $('#chat-title').addEventListener('click', async () => {
 let turns = 0;
 const recentImages = new Map(); // 消息时间 → 这条消息带的图片（只在内存里，不存盘）
 const taskKeeper = createTaskKeeper(globalThis.__jarvisBackgroundTask, e => toast(e.message));
-let active = null; // { ctrl, streamDone, bubble }
 const attachments = [];
 
 const speaker = new Speaker({
@@ -521,29 +512,29 @@ const speaker = new Speaker({
     if (wake.awake) wake.wake(); // 回答说完后重新计时，方便接着问
     voice.setSuppressed(false);
     body.classList.remove('speaking');
-    if (active?.streamDone) finishTurn();
+    if (app.active?.streamDone) finishTurn();
   },
   onBoundary: () => { live.boundaryAt = now(); },
-  onError: (e) => toast(resolveVoice(llmConfig,gateway).engine === 'qwen-realtime' ? `${e.message}（所选百炼声音未播放，请检查声音设置）` : `${e.message}（先用系统自带声音朗读，5 分钟后再试）`),
-  getVoiceConfig: () => resolveVoice(llmConfig, gateway),
-  getKeys: () => llmConfig.keys,
-  getConfig: () => llmConfig,
+  onError: (e) => toast(resolveVoice(app.llmConfig,app.gateway).engine === 'qwen-realtime' ? `${e.message}（所选百炼声音未播放，请检查声音设置）` : `${e.message}（先用系统自带声音朗读，5 分钟后再试）`),
+  getVoiceConfig: () => resolveVoice(app.llmConfig, app.gateway),
+  getKeys: () => app.llmConfig.keys,
+  getConfig: () => app.llmConfig,
   onEngine: (engine,fallback) => { const el = document.querySelector("#tts-status"); if (el) el.textContent = fallback ? "当前已回退系统声音（不是目标女孩童声），请检测语音服务" : `实际播放引擎：${engine}`; if (fallback && callActive) callStatus("在线声音失败，当前为系统声；请检测声音服务"); },
-  getGateway: () => gateway
+  getGateway: () => app.gateway
 });
 // 念不念由每一轮自己决定（见 makeSpeech）：语音对话、说话提问时念，打字提问默认不念
 speaker.enabled = true;
 
 /** 打断（barge-in）：停止朗读并中止正在执行的任务 */
 function interrupt() {
-  const had = speaker.speaking || active;
-  if (active) callouts?.show();
-  if (active) {
-    const turn=active;
+  const had = speaker.speaking || app.active;
+  if (app.active) callouts?.show();
+  if (app.active) {
+    const turn=app.active;
     if(!turn.streamDone&&(turn.shown?.trim()||turn.files?.size))rememberTurn('assistant',(turn.shown||'').trim()+'\n\n（已打断，还没完成；以上内容已保留）',{...(turn.usedTools?.length&&{tools:[...new Set(turn.usedTools)]}),...(turn.files?.size&&{files:[...turn.files]})},turn.session);
-    active.ctrl.abort();
-    active.bubble?.done('已打断');
-    active = null;
+    app.active.ctrl.abort();
+    app.active.bubble?.done('已打断');
+    app.active = null;
     setTask('idle');
   }
   speaker.cancel();
@@ -556,7 +547,7 @@ const DIRECTOR_STATE = { processing: 'processing', listening: 'speaking', done: 
 const ENERGY = { processing: 0.85, listening: 0.25 };
 function setTask(state, sub = '') {
   mascots?.task(state, sub);
-  active?.bubble?.activity(state, sub);
+  app.active?.bubble?.activity(state, sub);
   machine.setTaskState(state === 'listening' && !live.voiceListening ? 'listening' : state);
   if (DIRECTOR_STATE[state]) director.setState(DIRECTOR_STATE[state]);
   stage?.setActivity({ energy: ENERGY[state] ?? 0 });
@@ -564,24 +555,19 @@ function setTask(state, sub = '') {
   const label = sub || TASK_LABEL[state] || state;
   $('#hud-task').textContent = label;
   $('#task-text').textContent = label;
-  body.classList.toggle('generating', Boolean(active) && state !== 'done' && state !== 'error' && state !== 'idle');
-  $('#mode-pill').classList.toggle('busy', Boolean(active) && state !== 'done');
+  body.classList.toggle('generating', Boolean(app.active) && state !== 'done' && state !== 'error' && state !== 'idle');
+  $('#mode-pill').classList.toggle('busy', Boolean(app.active) && state !== 'done');
 }
 
-/** 手机：记下“正在做什么”（界面崩溃时下次打开能看到崩溃前在做什么） */
-function markActivity(what) {
-  if (!MOBILE) return;
-  try { localStorage.setItem('jarvis.lastActivity', what ? `${new Date().toLocaleTimeString('zh-CN', { hour12: false })} ${what}` : ''); } catch { /* 存不了就算了 */ }
-}
 
 function finishTurn() {
   markActivity('');
-  if (!active) return;
-  active = null;
+  if (!app.active) return;
+  app.active = null;
   turns++;
   dashboard.setTurns(turns);
   setTask('done');
-  setTimeout(() => { if (!active) setTask('idle'); }, 3000);
+  setTimeout(() => { if (!app.active) setTask('idle'); }, 3000);
   panels.refreshMind();
 }
 
@@ -591,7 +577,7 @@ function makeSpeech(auto = true) {
   let chunker = new SentenceChunker({ maxLen:callActive ? 24 : 60 });
   let full = '';
   let fed = 0, speechGeneration = speaker.gen;
-  const speechTurn = active;
+  const speechTurn = app.active;
   return {
     resume() { if (speechTurn) speechTurn.muteSpeech = false; full = ''; fed = 0; chunker = new SentenceChunker({maxLen:callActive ? 24 : 60}); speechGeneration = speaker.gen; },
     push(delta) {
@@ -611,8 +597,8 @@ function makeSpeech(auto = true) {
 // ---------------------------------------------------------------- 记忆引擎：整理用的大模型 + 语义向量，随配置变化
 /** 给记忆整理、深度调研等内部环节用的“单次问答”；内置演示或配置不全时返回 null。task 决定用哪个分工模型 */
 function helperLlm(task = 'chat') {
-  const { adapter, model, problem } = createAdapter(routeFor(llmConfig, task).cfg, { gateway });
-  if (problem || providerById(llmConfig.provider)?.kind === 'mock') return null;
+  const { adapter, model, problem } = createAdapter(routeFor(app.llmConfig, task).cfg, { gateway: app.gateway });
+  if (problem || providerById(app.llmConfig.provider)?.kind === 'mock') return null;
   return async ({ system, prompt, signal, images }) => {
     let text = '';
     const r = await adapter.stream({ model, system: [system], messages: [{ role: 'user', content: prompt, ...(images?.length && { images }) }], tools: [], signal, onText: (d) => { text += d; } });
@@ -621,19 +607,19 @@ function helperLlm(task = 'chat') {
 }
 /** 能看图的辅助模型（PPT 生成后看预览图检查排版）：分工里设了“看图”模型就用它，否则默认模型能看图才用 */
 function visionHelperLlm() {
-  const r = routeFor(llmConfig, 'vision');
+  const r = routeFor(app.llmConfig, 'vision');
   return r.routed || seesImages(r.model) ? helperLlm('vision') : null;
 }
 /** 团队模式：按角色挑分工模型 */
 const ROLE_TASK = { coder: 'code', writer: 'write', researcher: 'reason', analyst: 'reason', operator: 'chat', generalist: 'chat' };
 function modelForRole(role) {
-  const r = routeFor(llmConfig, ROLE_TASK[role] ?? 'chat');
+  const r = routeFor(app.llmConfig, ROLE_TASK[role] ?? 'chat');
   if (!r.routed) return null;
-  const a = createAdapter(r.cfg, { gateway });
-  return a.problem ? null : { adapter:a.adapter, model:a.model, fallbacks:fallbackRoutes(llmConfig,{provider:r.cfg.provider,model:a.model}).map(f=>({...createAdapter(f.cfg,{gateway}),label:f.model})).filter(f=>!f.problem&&f.adapter&&f.model) };
+  const a = createAdapter(r.cfg, { gateway: app.gateway });
+  return a.problem ? null : { adapter:a.adapter, model:a.model, fallbacks:fallbackRoutes(app.llmConfig,{provider:r.cfg.provider,model:a.model}).map(f=>({...createAdapter(f.cfg,{gateway: app.gateway}),label:f.model})).filter(f=>!f.problem&&f.adapter&&f.model) };
 }
 function syncMemoryEngine() {
-  const embedder = createEmbedder(llmConfig, { gateway });
+  const embedder = createEmbedder(app.llmConfig, { gateway: app.gateway });
   agentMemory.configureMemory({ llm: helperLlm(), embedder });
   kb.configureKnowledge({ embedder });
   panels?.refreshKb?.();
@@ -641,7 +627,7 @@ function syncMemoryEngine() {
 
 /** 自动整理记忆：对话停下来 30 秒后、切到别的对话或 App 退到后台时，把这段对话交给记忆整理（抽取事实、写摘要）。
  *  不能等太久：用户常常说完就开新对话，或者手机直接切走 */
-let reflectFrom = history.length;
+let reflectFrom = app.history.length;
 let reflectTimer = 0;
 function scheduleReflect() {
   if (server) return; // 服务器模式：记忆在服务器上，本机不整理
@@ -651,12 +637,12 @@ function scheduleReflect() {
 }
 async function reflectNow({ manual = false } = {}) {
   clearTimeout(reflectTimer);
-  const turns = history.slice(reflectFrom);
+  const turns = app.history.slice(reflectFrom);
   if (!turns.some((t) => t.role === 'user')) { if (manual) toast('没有新的对话需要整理'); return; }
-  reflectFrom = history.length;
+  reflectFrom = app.history.length;
   try {
-    const title = session.titleSet ? session.title : sessionsApi.autoTitle(history.find((m) => m.role === 'user')?.content);
-    const r = await agentMemory.reflect(turns, { session: { id: session.id, title } });
+    const title = app.session.titleSet ? app.session.title : sessionsApi.autoTitle(app.history.find((m) => m.role === 'user')?.content);
+    const r = await agentMemory.reflect(turns, { session: { id: app.session.id, title } });
     const n = r.memories.filter((m) => m.action !== 'NOOP').length;
     if (n || manual) toast(`记忆已整理：新增或更新 ${n} 条${r.episode ? '，并记下这段对话的摘要' : ''}`);
     panels.refreshMind();
@@ -664,13 +650,13 @@ async function reflectNow({ manual = false } = {}) {
 }
 addEventListener('pagehide', () => { if (settings.autoMemory) reflectNow(); });
 // 手机切到后台时不一定有 pagehide（之后可能被系统直接杀掉）：页面一隐藏就整理
-document.addEventListener('visibilitychange', () => { if (document.hidden && settings.autoMemory && !active) reflectNow(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && settings.autoMemory && !app.active) reflectNow(); });
 
 /** 长对话压缩：回答完后在后台把较早的消息并进“前情提要”（见 compress.js），不影响当前对话 */
 let compressing = false;
 async function compressHistory() {
   if (server) return;
-  const s = session;
+  const s = app.session;
   if (compressing || !compress.dueForCompression(s.messages, s.summary).length) return;
   compressing = true;
   try {
@@ -686,17 +672,17 @@ async function compressHistory() {
 // ---------------------------------------------------------------- 多会话
 /** 把当前会话的消息重新画到对话区 */
 let historyViewEnd = null;
-function visibleHistory(end = history.length) {
-  return transcriptWindow(history.length, { mobile: MOBILE, safe: document.documentElement.classList.contains('safe-render'), end });
+function visibleHistory(end = app.history.length) {
+  return transcriptWindow(app.history.length, { mobile: MOBILE, safe: document.documentElement.classList.contains('safe-render'), end });
 }
-function replayTranscript(end = history.length) {
+function replayTranscript(end = app.history.length) {
   showChatTitle();
   const root = $('#transcript'), range = visibleHistory(end);
   historyViewEnd = range.newer ? range.end : null;
   root.replaceChildren();
   transcript.follow = true;
   document.body.classList.remove('wy-reading-history');
-  if (!history.length) { renderWelcome(); return; }
+  if (!app.history.length) { renderWelcome(); return; }
   transcript.batch(() => {
     if (range.older || range.newer) {
       const nav = Object.assign(document.createElement('nav'), { className: 'wy-history-pages' });
@@ -704,20 +690,20 @@ function replayTranscript(end = history.length) {
       const pageButton = (label, target) => {
         const button = Object.assign(document.createElement('button'), { type: 'button', textContent: label });
         button.onclick = () => {
-          if (active) { toast('当前回复完成后，可以翻看更早的对话'); return; }
+          if (app.active) { toast('当前回复完成后，可以翻看更早的对话'); return; }
           replayTranscript(target);
         };
         nav.append(button);
       };
       if (range.older) pageButton(`查看更早的对话（还有 ${range.older} 条）`, range.start);
       if (range.newer) {
-        pageButton('下一页', Math.min(history.length, range.end + range.limit));
-        pageButton('回到最近对话', history.length);
+        pageButton('下一页', Math.min(app.history.length, range.end + range.limit));
+        pageButton('回到最近对话', app.history.length);
       }
       root.append(nav);
     }
     // 翻看旧消息：很长的回答（除了最后一条）先只显示开头，点“展开全文”再显示，手机上少画很多内容
-    const shown = history.slice(range.start, range.end);
+    const shown = app.history.slice(range.start, range.end);
     const lastAgent = shown.findLastIndex((m) => m.role !== 'user');
     shown.forEach((m, i) => {
       if (m.role === 'user') transcript.add('user', m.content, m.ts, { thumbs: m.thumbs });
@@ -733,9 +719,9 @@ function replayTranscript(end = history.length) {
 /** 新对话的开场建议：之前没做完的事 > 上一段对话 */
 async function resumeSuggestion() {
   try {
-    const [open] = await agentMemory.openItems({ exclude: session.id, k: 1 });
+    const [open] = await agentMemory.openItems({ exclude: app.session.id, k: 1 });
     if (open) return { title: `继续：${open.text.slice(0, 18)}`, prompt: `接着之前说的：${open.text}` };
-    const [last] = await sessionsApi.recent({ exclude: session.id, k: 1 });
+    const [last] = await sessionsApi.recent({ exclude: app.session.id, k: 1 });
     if (last && Date.now() - last.updatedAt < 3 * 86400000) return { title: `接着上次：${last.title.slice(0, 16)}`, prompt: `接着上次「${last.title}」的对话继续` };
   } catch { /* 没有历史 */ }
   return null;
@@ -746,24 +732,23 @@ async function openingCallouts(hasSkills = true) {
 
 async function switchTo(next) {
   // 正在干活：不停下，转到后台接着做（做完记回原来的对话）；只是在朗读就停掉
-  if (active && !active.streamDone) toBackground(active); else interrupt();
+  if (app.active && !app.active.streamDone) toBackground(app.active); else interrupt();
   if (settings.autoMemory) await reflectNow();
-  session = next;
-  history = session.messages;
-  reflectFrom = history.length;
+  app.session = next;
+  reflectFrom = app.history.length;
   replayTranscript();
   // 切回一个还在后台干活的对话：把正在写的那条回答接回来
-  const bg = [...backgroundTurns].find((t) => t.session.id === session.id);
-  if (bg) { backgroundTurns.delete(bg); bg.background = false; active = bg; liveBubble = bg.bubble; transcript.root.append(bg.bubble.el); setTask('processing', bg.status || '思考中'); }
+  const bg = [...backgroundTurns].find((t) => t.session.id === app.session.id);
+  if (bg) { backgroundTurns.delete(bg); bg.background = false; app.active = bg; app.liveBubble = bg.bubble; transcript.root.append(bg.bubble.el); setTask('processing', bg.status || '思考中'); }
   else if (server && next.taskId) followServerTask(next); // 服务器上这个对话还在干活（比如 App 重新打开）：接上它的进度
-  dashboard.setTurns(history.filter((m) => m.role === 'user').length);
-  if (history.length) callouts?.set(followUpSuggestions({ tools: history.at(-1)?.tools ?? [], userText: [...history].reverse().find((m) => m.role === 'user')?.content ?? '', desktop: Boolean(DESKTOP) }));
+  dashboard.setTurns(app.history.filter((m) => m.role === 'user').length);
+  if (app.history.length) callouts?.set(followUpSuggestions({ tools: app.history.at(-1)?.tools ?? [], userText: [...app.history].reverse().find((m) => m.role === 'user')?.content ?? '', desktop: Boolean(DESKTOP) }));
   else openingCallouts();
   sessionsPanel?.refresh();
   setTask('idle');
 }
 function newSession() {
-  if (!history.length) { $('#prompt').focus(); return; }
+  if (!app.history.length) { $('#prompt').focus(); return; }
   switchTo(sessionsApi.create());
   $('#prompt').focus();
 }
@@ -780,7 +765,7 @@ let opening = 0; // 连点了好几段对话：只认最后点的那段
 async function openSession(id) {
   noteAction('切换对话');
   // 点的就是当前对话：服务器模式下从服务器取一次最新进度（另一台设备可能接着聊过）
-  if (id === session.id) { if (server) refreshFromServer(); return; }
+  if (id === app.session.id) { if (server) refreshFromServer(); return; }
   const mine = ++opening;
   // 服务器模式：先用手机 / 电脑上留的副本马上切过去，再从服务器取最新的换上
   const cached = server ? sessionsApi.cachedGet(id) : null;
@@ -790,22 +775,22 @@ async function openSession(id) {
   if (mine !== opening) return;
   if (!s) { if (!cached) setTask('idle'); return; }
   if (!cached) await switchTo(s);
-  else if (session.id === id && !active && changed(session, s)) { session = s; history = s.messages; reflectFrom = history.length; replayTranscript(); }
-  if (server && session.id === id && s.taskId && !active) followServerTask(s); // 另一台设备正在做：接上进度
+  else if (app.session.id === id && !app.active && changed(app.session, s)) { app.session = s; reflectFrom = app.history.length; replayTranscript(); }
+  if (server && app.session.id === id && s.taskId && !app.active) followServerTask(s); // 另一台设备正在做：接上进度
 }
 /** 服务器上的这段对话比手上的新吗（另一台设备接着聊过、或者做完了任务） */
 const changed = (a, b) => b.messages.length !== a.messages.length || (b.updatedAt ?? 0) > (a.updatedAt ?? 0) || b.messages.at(-1)?.content !== a.messages.at(-1)?.content;
 /** 服务器模式：从服务器取当前对话的最新进度，有变化就换上（App 切回前台、点当前对话时） */
 let refreshing = false;
 async function refreshFromServer() {
-  if (!server || refreshing || active || !session?.id) return;
+  if (!server || refreshing || app.active || !app.session?.id) return;
   noteAction('从服务器刷新对话');
   refreshing = true;
   try {
-    const id = session.id;
+    const id = app.session.id;
     const s = await sessionsApi.get(id).catch(() => null);
-    if (!s || session.id !== id || active) return;
-    if (changed(session, s)) { session = s; history = s.messages; reflectFrom = history.length; replayTranscript(); }
+    if (!s || app.session.id !== id || app.active) return;
+    if (changed(app.session, s)) { app.session = s; reflectFrom = app.history.length; replayTranscript(); }
     if (s.taskId) followServerTask(s);
     try { drawer?.refresh?.(); } catch { /* 抽屉还没建好 */ }
   } finally { refreshing = false; }
@@ -819,10 +804,6 @@ addEventListener('focus', pullSoon);
 /** 光核旁的建议标注（启动末尾创建） */
 let callouts = null;
 let stageMiniWas = false; // 舞台上一次是不是迷你状态（updateStageMode 用）
-/** 正在回答的气泡（画图工具把图片放进去） */
-let liveBubble = null;
-/** 桌面背景同步：主窗口在做什么，桌面上的粒子体就跟着做（桌面版开了背景模式时） */
-function wp(payload) { if (window.jarvisDesktop) window.jarvisDesktop.invoke('wallpaperEvent', payload).catch(() => {}); }
 const hud = {
   think(text, kind) { orbit?.think(text, kind); wp({ think: text }); },
   toolStart(id, label) { orbit?.toolStart(id, label); wp({ tool: { id, label } }); },
@@ -830,14 +811,12 @@ const hud = {
   newTurn() { orbit?.newTurn(); wp({ newTurn: true }); }
 };
 function updateOrbitStatus() {
-  orbit?.setStatus(`${(FORMS[director.form]?.id ?? director.form).toUpperCase()} · LINK ${window.jarvisDesktop ? 'DESKTOP' : gateway ? 'GATEWAY' : 'LOCAL'}`);
+  orbit?.setStatus(`${(FORMS[director.form]?.id ?? director.form).toUpperCase()} · LINK ${window.jarvisDesktop ? 'DESKTOP' : app.gateway ? 'GATEWAY' : 'LOCAL'}`);
 }
 let sessionsPanel = null;
 let schedulesPanel = null;
 
 // ---------------------------------------------------------------- 桌面版与 MCP
-/** 桌面版（Electron）由 preload 注入；网页版为 undefined */
-const DESKTOP = window.jarvisDesktop;
 /** 本次会话里用户选了“本次都允许”的操作类别 */
 const sessionApprovals = new Set();
 /** 电脑操作（鼠标键盘）进行中：一轮结束或被打断时把未央窗口放回来 */
@@ -858,20 +837,20 @@ if (DESKTOP) {
 }
 let mcpState = { available: false, servers: [] };
 async function refreshMcp() {
-  if (!gateway?.mcp) { mcpState = { available: false, servers: [] }; return mcpState; }
-  try { mcpState = await mcp.listServers(gateway.origin); } catch { mcpState = { available: false, servers: [] }; }
+  if (!app.gateway?.mcp) { mcpState = { available: false, servers: [] }; return mcpState; }
+  try { mcpState = await mcp.listServers(app.gateway.origin); } catch { mcpState = { available: false, servers: [] }; }
   return mcpState;
 }
 async function loadMcpTools() {
-  if (!gateway?.mcp) return [];
+  if (!app.gateway?.mcp) return [];
   await refreshMcp();
-  return mcp.mcpTools(gateway.origin, mcpState.servers);
+  return mcp.mcpTools(app.gateway.origin, mcpState.servers);
 }
 
 /** 对话里点生成的文件：切到工作区并打开它 */
 /** 导出一段对话：复制全部内容，或存成 Word / Markdown 放进工作区“导出”文件夹（在工作区里能下载、分享） */
 async function exportSession(id, kind) {
-  const s = id === session.id ? session : await sessionsApi.get(id).catch(() => null) ?? sessionsApi.cachedGet(id);
+  const s = id === app.session.id ? app.session : await sessionsApi.get(id).catch(() => null) ?? sessionsApi.cachedGet(id);
   if (!s?.messages?.length) { toast('这段对话还没有内容'); return; }
   const title = s.title || '对话';
   const said = (m) => stripEmotionTags(String(m.content)).replace(/\n*\[已上传到工作区：[^\]]+\]$/, '').trim();
@@ -900,7 +879,7 @@ function openInWorkspace(path) {
 /** 智能体可用的全部工具：基础工具 + 桌面版电脑操作 + MCP 工具 */
 async function buildTools({ background = false, turn = null } = {}) {
   // 生成的文件、图片只挂到产生它的那一轮（turn）：中途切到别的对话，也不会跑到别的对话里
-  const out = () => turn?.bubble ?? liveBubble;
+  const out = () => turn?.bubble ?? app.liveBubble;
   const onFileChanged = (path) => {
     panels.markFresh(path);
     panels.refreshFiles();
@@ -909,9 +888,9 @@ async function buildTools({ background = false, turn = null } = {}) {
   return [
     ...createTools({
       metrics,
-      tavilyKey: llmConfig.tavilyKey,
-      bochaKey: llmConfig.bochaKey,
-      searchRegion: llmConfig.searchRegion || 'auto',
+      tavilyKey: app.llmConfig.tavilyKey,
+      bochaKey: app.llmConfig.bochaKey,
+      searchRegion: app.llmConfig.searchRegion || 'auto',
       fetchViaGateway: fetchViaGateway(),
       llm: helperLlm('write'), // 深度调研：用写作模型
       reasonLlm: helperLlm('reason'), // 逐项查证：用推理模型摘答案
@@ -920,12 +899,12 @@ async function buildTools({ background = false, turn = null } = {}) {
         ? (path) => { panels.openFile(path); toast(`已生成 ${path}：左上角菜单 → 工作区查看`); } // 手机上不自动盖住对话
         : (path) => { showPanel('workspace'); panels.openFile(path); },
       onFileChanged,
-      imageGen: (o) => generateImage(llmConfig, { ...o, gateway }),
+      imageGen: (o) => generateImage(app.llmConfig, { ...o, gateway: app.gateway }),
       onImage: (src) => out()?.image?.(src),
-      videoGen: (o) => generateVideo(llmConfig, { ...o, gateway }),
+      videoGen: (o) => generateVideo(app.llmConfig, { ...o, gateway: app.gateway }),
       onVideo: (src) => out()?.video?.(src),
       onSchedulesChanged: () => schedulesPanel?.refresh(),
-      currentSessionId: () => session?.id,
+      currentSessionId: () => app.session?.id,
       // 桌面版：写 PDF 时直接转成 PDF 文件（网页版和安卓生成可打印的网页）
       toPdf: DESKTOP ? async (html) => Uint8Array.from(atob((await DESKTOP.invoke('printToPdf', { html })).base64), (c) => c.charCodeAt(0)) : null
     }),
@@ -940,15 +919,15 @@ async function followServerTask(s) {
   const bubble = transcript.add('agent');
   bubble.el.classList.add('streaming');
   const turn = { ctrl, streamDone: false, bubble, session: s, files: new Set(), inbox: [], t0: now(), steps: 0, status: '', background: false, remote:Boolean(server) };
-  active = turn;
-  liveBubble = bubble;
+  app.active = turn;
+  app.liveBubble = bubble;
   setTask('processing', '服务器上正在做');
   const cards = new Map();
   try {
     await runRemote(server, {
       taskId: s.taskId, onStarted:task=>{turn.remoteId=task.id;}, signal: ctrl.signal, onFile: (p) => pullServerFile(p, turn),
       emit: (e) => {
-        if (active !== turn) return;
+        if (app.active !== turn) return;
         if (e.type === 'text') bubble.append(e.delta);
         else if (e.type === 'plan') bubble.plan?.(e.steps);
         else if (e.type === 'tool_start' && e.name !== 'update_plan') { cards.set(e.id, bubble.toolCard(e.name, e.args)); turn.steps++; setTask('processing', toolLabel(e.name)); }
@@ -957,12 +936,12 @@ async function followServerTask(s) {
       }
     });
   } catch (e) {
-    if (e.name !== 'AbortError' && active === turn) toast(e.message);
+    if (e.name !== 'AbortError' && app.active === turn) toast(e.message);
   }
-  if (active === turn) { active = null; setTask('idle'); }
+  if (app.active === turn) { app.active = null; setTask('idle'); }
   // 换成服务器上记下的完整对话（回答、用到的工具、生成的文件）
   const fresh = await sessionsApi.get(s.id).catch(() => null);
-  if (fresh && session.id === s.id && !active) { session = fresh; history = fresh.messages; replayTranscript(); }
+  if (fresh && app.session.id === s.id && !app.active) { app.session = fresh; replayTranscript(); }
 }
 
 /** 服务器模式：服务器上生成了文件，下载到本机工作区，照常预览、保存 */
@@ -974,7 +953,7 @@ async function pullServerFile(path, turn) {
     await ws.write(path, blob);
     panels.markFresh(path);
     panels.refreshFiles();
-    const out = turn?.bubble ?? liveBubble;
+    const out = turn?.bubble ?? app.liveBubble;
     // 服务器画的图、做的视频：和本机一样直接显示在回答里
     if (/^images\/.+\.(png|jpe?g|webp|gif)$/i.test(path)) out?.image?.(URL.createObjectURL(blob));
     else if (/^videos\/.+\.(mp4|webm|mov)$/i.test(path)) out?.video?.(URL.createObjectURL(blob));
@@ -989,7 +968,7 @@ let lastGreetAt = (() => { try { return Number(localStorage.getItem('jarvis.last
  * @returns {Promise<string|null>} 说了什么（没说返回 null）
  */
 async function greetOnReturn({ awayMs, reason = '', force = false }) {
-  if (!force && (!settings.greetOnReturn || active || Date.now() - lastGreetAt < GREET_GAP_MS || awayMs < 10 * 60_000)) return null;
+  if (!force && (!settings.greetOnReturn || app.active || Date.now() - lastGreetAt < GREET_GAP_MS || awayMs < 10 * 60_000)) return null;
   lastGreetAt = Date.now();
   try { localStorage.setItem('jarvis.lastGreet', String(lastGreetAt)); } catch { /* 隐私模式 */ }
   const [core, schedules, open, habitTips] = await Promise.all([
@@ -1000,8 +979,8 @@ async function greetOnReturn({ awayMs, reason = '', force = false }) {
   ]);
   const { text } = await composeGreeting({ awayMs, coreHuman: core.human, schedules: schedules.filter((x) => x.enabled), openItems: open, habits: habitTips, llm: helperLlm() });
   // 很久没说话的旧对话：开一段新的，问候放在新对话里
-  const lastTs = history.at(-1)?.ts ?? 0;
-  if (history.length && Date.now() - lastTs > 3 * 3600_000) await switchTo(sessionsApi.create());
+  const lastTs = app.history.at(-1)?.ts ?? 0;
+  if (app.history.length && Date.now() - lastTs > 3 * 3600_000) await switchTo(sessionsApi.create());
   const b = transcript.add('agent', text);
   b.el.classList.add('proactive');
   b.done(`主动问候 · ${reason === 'face' ? '看到你回来了' : '你回到电脑前'}`);
@@ -1071,7 +1050,7 @@ async function runScheduled(s) {
   sess.titleSet = true;
   sess.messages.push({ role: 'user', content: s.prompt, ts: Date.now() });
   const usedTools = [];
-  const { adapter, model, problem } = createAdapter(llmConfig, { gateway });
+  const { adapter, model, problem } = createAdapter(app.llmConfig, { gateway: app.gateway });
   // 卡住保护、空回复、【无需通知】见 scheduledRun.js
   const res = problem ? { ok: false, quiet: false, text: '', note: problem } : await executeScheduled(async ({ signal, emit }) => runAgent({
     adapter, model, history: [], sessionId: sess.id, signal, emit,
@@ -1093,7 +1072,7 @@ async function runScheduled(s) {
   } finally { releaseTask(); }
 }
 async function schedulerTick() {
-  if (schedulerBusy || active) return; // 正在对话时先等一等，不抢资源
+  if (schedulerBusy || app.active) return; // 正在对话时先等一等，不抢资源
   schedulerBusy = true;
   try {
     for (const s of await scheduler.due()) {
@@ -1115,7 +1094,7 @@ async function expandSlash(text) {
 const backgroundTurns = new Set();
 /** 干活时又发来一句：问进度直接答；说停就停；其他的交给正在干的未央（下一步开始前看到），不打断 */
 async function interject(text, { thumbs = [] } = {}) {
-  const turn = active;
+  const turn = app.active;
   transcript.add('user', text, Date.now(), { thumbs });
   const reply = (words) => { const b = transcript.add('agent', words); b.done(); };
   if (STOP_ASK.test(text)) { interrupt(); reply('好的，已经停下。上面是停下前做到的地方，要接着做跟我说一声。'); return; }
@@ -1136,7 +1115,7 @@ async function interject(text, { thumbs = [] } = {}) {
 function toBackground(turn) {
   turn.background = true;
   backgroundTurns.add(turn);
-  active = null;
+  app.active = null;
   speaker.cancel();
   setTask('idle');
   toast('刚才的任务在后台接着做，做完会提醒你');
@@ -1165,17 +1144,17 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   if (!attachments.length && companion?.perform(text)) return;
   if (!text && attachments.some((a) => a.image)) text = '请看看这张图片。';
   // 正在干活时又发了一句：不打断，问进度就直接答，别的话交给正在干的未央；说“停”才停
-  if (echo && active && !active.streamDone) {
+  if (echo && app.active && !app.active.streamDone) {
     const extra = attachments.splice(0); renderAttachments();
     if (server && extra.length) {
       try { for (const f of extra) await server.upload(f.path, await ws.readBlob(f.path)); }
       catch (e) { attachments.unshift(...extra); renderAttachments(); if (!prompt.value.trim()) { prompt.value=text; autosize(); } toast(`附件未送达，已保留：${e.message}`); return; }
-      if (!active || active.streamDone) { attachments.unshift(...extra); renderAttachments(); return send(text,{echo,byVoice}); }
+      if (!app.active || app.active.streamDone) { attachments.unshift(...extra); renderAttachments(); return send(text,{echo,byVoice}); }
     }
     const content = extra.length ? text + '\n\n[已上传到工作区：' + extra.map(f=>f.path).join('、') + ']' : text;
     return interject(content, { thumbs:extra.filter(f=>f.image).map(f=>({src:f.image.thumb,path:f.path})) });
   }
-  if (active) { active.ctrl.abort(); active = null; }
+  if (app.active) { app.active.ctrl.abort(); app.active = null; }
   speaker.cancel();
   speaker.unlock(); // 发送多由点击 / 回车触发：顺便启动音频上下文，云端语音才能播放
 
@@ -1194,42 +1173,42 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   // 只在这句话提到图片时才带（不然后面每句闲聊都会被当成看图任务、多花流量）
   const refersToImage = !imgs.length && /图|截图|照片|相片|图片|表格|这张|那张|第.张|上面|刚才发的|picture|image|screenshot/i.test(text);
   // 长对话：已压缩进摘要的消息不再原样发送，其余（至少最近 20 条）原样发送，见 compress.js
-  const recent = compress.unsummarized(history, session.summary);
+  const recent = compress.unsummarized(app.history, app.session.summary);
   const withImages = new Set(refersToImage ? recent.filter((m) => m.role === 'user' && recentImages.has(m.ts)).slice(-2).map((m) => m.ts) : []);
   const llmHistory = recent.map(({ role, content, ts }) => ({ role, content, ...(withImages.has(ts) && { images: recentImages.get(ts) }) }));
   if (echo) rememberTurn('user', userText, thumbs.length ? { thumbs } : {});
   if (imgs.length) {
-    recentImages.set(history.at(-1).ts, imgs.map(({ mime, data }) => ({ mime, data })));
+    recentImages.set(app.history.at(-1).ts, imgs.map(({ mime, data }) => ({ mime, data })));
     while (recentImages.size > 2) recentImages.delete(recentImages.keys().next().value);
   }
 
   if (machine.task !== 'listening') machine.beginUserTurn();
   const ctrl = new AbortController();
   const bubble = transcript.add('agent');
-  liveBubble = bubble;
+  app.liveBubble = bubble;
   bubble.el.classList.add('streaming');
   // 这一轮属于哪个会话：切到别的对话后在后台接着做，结果、文件都记回这个会话
-  const turn = { ctrl, streamDone: false, bubble, session, files: new Set(), inbox: [], t0: now(), steps: 0, status: '', background: false };
-  active = turn;
+  const turn = { ctrl, streamDone: false, bubble, session: app.session, files: new Set(), inbox: [], t0: now(), steps: 0, status: '', background: false };
+  app.active = turn;
   setTask('processing', '思考中');
   // 手机：记下正在做的任务（App 被划掉时，下次打开接着做）
   const doneSteps = [];
   turn.checkpoint={text:userText,notes:[],inFlight:[],steps:[],files:[],status:'running'};
-  if (MOBILE && !server) savePending(storage,session.id,{turnId:turn.t0,text:userText,title:session.title||'',ts:Date.now(),steps:[],files:[],checkpoint:turn.checkpoint});
+  if (MOBILE && !server) savePending(storage,app.session.id,{turnId:turn.t0,text:userText,title:app.session.title||'',ts:Date.now(),steps:[],files:[],checkpoint:turn.checkpoint});
 
   // 模型分工：按这句话的类型换模型；日常对话让推理模型少想一点（首字更快）
-  const computerKind = DESKTOP ? computerTaskKind(text,{history}) : null;
+  const computerKind = DESKTOP ? computerTaskKind(text,{history: app.history}) : null;
   const task = computerKind === 'gui' ? 'vision' : shouldTeam(text, settings.teamMode === 'auto' && !helperLlm() ? 'off' : settings.teamMode) ? 'reason' : classifyTask(text, { images: imgs.length + withImages.size });
-  const route = routeFor(llmConfig, task);
+  const route = routeFor(app.llmConfig, task);
   const remotePC=Boolean(server&&computerKind);
-  const local=createAdapter(route.cfg,{gateway});
+  const local=createAdapter(route.cfg,{gateway: app.gateway});
   const model=remotePC?'服务器模型':local.model;
   let usedModel=model;
   const adapter=remotePC?createPCModelAdapter(server,{task,onModel:m=>{usedModel=m;}}):local.adapter;
   const problem=remotePC?null:local.problem;
-  if (COMPACT && isAuto(llmConfig) && model && !server) $('#model-chip-text').textContent = `自动 · ${model}`;
+  if (COMPACT && isAuto(app.llmConfig) && model && !server) $('#model-chip-text').textContent = `自动 · ${model}`;
   // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省
-  const effort = effortFor(task, text, llmConfig);
+  const effort = effortFor(task, text, app.llmConfig);
   if (route.routed&&!remotePC) hud.think(`◇ 模型分工：${TASKS[task].name} → ${route.model}`);
   // 服务器模式下电脑版：要动这台电脑的事（桌面、文件夹、打开软件……）留在本机做，其余交给服务器
   const here = Boolean(server && DESKTOP && computerKind);
@@ -1239,14 +1218,14 @@ async function send(text, { echo = true, byVoice = false } = {}) {
     bubble.append(problem);
     bubble.done();
     callouts?.set(followUpSuggestions({ error: true, userText: text }));
-    active = null;
+    app.active = null;
     setTask('error', '需要配置模型');
     showPanel('models');
     return;
   }
 
   // 备用模型：当前模型出错（重试后还不行）时自动换着用
-  const fallbacks = remotePC ? [] : fallbackRoutes(llmConfig, { provider: route.cfg.provider, model }).map((f) => ({ ...createAdapter(f.cfg, { gateway }), label: f.model })).filter((f) => !f.problem && f.adapter && f.model);
+  const fallbacks = remotePC ? [] : fallbackRoutes(app.llmConfig, { provider: route.cfg.provider, model }).map((f) => ({ ...createAdapter(f.cfg, { gateway: app.gateway }), label: f.model })).filter((f) => !f.problem && f.adapter && f.model);
 
   // 语音对话中、或者是说话提问的：念回答；打字提问只显示（设置里打开“打字提问也朗读”除外）
   const spoken = callActive || byVoice || settings.readTyped;
@@ -1284,9 +1263,9 @@ async function send(text, { echo = true, byVoice = false } = {}) {
       pickModel: team ? modelForRole : undefined,
       effort,
       adapter, model, history: llmHistory, userText: team ? userText : await expandSlash(userText), signal: ctrl.signal, computerTask: computerKind,
-      sessionId: session.id,
-      summary: session.summary ?? null,
-      requirements: collectRequirements(history, session.requirements),
+      sessionId: app.session.id,
+      summary: app.session.summary ?? null,
+      requirements: collectRequirements(app.history, app.session.requirements),
       requirementText: userText, // 保留斜杠命令展开前的原话，避免当成缺失历史重复注入
       fallbacks,
       inbox: team ? null : turn.inbox,
@@ -1326,7 +1305,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
           else if (e.type === 'plan') bubble.plan?.(e.steps);
           return;
         }
-        if (active !== turn) return;
+        if (app.active !== turn) return;
         if (e.type === 'text') {
           if(callActive&&callTiming?.recognizedAt&&!callTiming.firstTextAt)callTiming.firstTextAt=now();
           if (!firstToken) { firstToken = now(); hud.think('生成回答'); }
@@ -1387,11 +1366,11 @@ async function send(text, { echo = true, byVoice = false } = {}) {
       }
     });
     if (turn.background) { finishBackground(turn, { text: result.text, shown, usedTools, files: madeFiles }); return; }
-    if (active !== turn) return;
+    if (app.active !== turn) return;
     speech.flush();
     const total = now() - t0;
-    const modelTag = server && !here ? '服务器 · ' : here ? `本机工具 · ${usedModel} · ` : providerById(llmConfig.provider)?.kind === 'mock' ? '' : usedModel !== model ? `${usedModel}（${model} 出错后换用） · ` : `${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
-    bubble.done(`${modelTag}${team ? `团队 ${result.steps} 步 · ` : ''}${ctxMs !== null && ctxMs >= 300 ? `准备 ${(ctxMs / 1000).toFixed(1)}s · ` : ''}${firstToken ? `首字 ${((firstToken - t0) / 1000).toFixed(1)}s · ` : ''}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}${MOBILE && textChunks ? ` · 分 ${textChunks} 次收到${globalThis.__jarvisNetVia?.(llmConfig.baseURLs?.[llmConfig.provider] || '') === 'native' ? '（原生网络）' : ''}` : ''}`, {
+    const modelTag = server && !here ? '服务器 · ' : here ? `本机工具 · ${usedModel} · ` : providerById(app.llmConfig.provider)?.kind === 'mock' ? '' : usedModel !== model ? `${usedModel}（${model} 出错后换用） · ` : `${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
+    bubble.done(`${modelTag}${team ? `团队 ${result.steps} 步 · ` : ''}${ctxMs !== null && ctxMs >= 300 ? `准备 ${(ctxMs / 1000).toFixed(1)}s · ` : ''}${firstToken ? `首字 ${((firstToken - t0) / 1000).toFixed(1)}s · ` : ''}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}${MOBILE && textChunks ? ` · 分 ${textChunks} 次收到${globalThis.__jarvisNetVia?.(app.llmConfig.baseURLs?.[app.llmConfig.provider] || '') === 'native' ? '（原生网络）' : ''}` : ''}`, {
       onFeedback: async (kind, comment) => {
         if (kind === 'up') await agentMemory.noteTask(`获得好评：${text.slice(0, 30)}`);
         else {
@@ -1419,15 +1398,15 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   } catch (err) {
     if (err.name === 'AbortError') return;
     if (turn.background) { finishBackground(turn, { error: friendlyError(String(err.message || err)), shown, usedTools, files: madeFiles }); return; }
-    if (active !== turn) return;
+    if (app.active !== turn) return;
     const msg = friendlyError(String(err.message || err));
     const cors = !MOBILE && /Failed to fetch|NetworkError|Load failed|CORS/i.test(msg);
     bubble.append(`\n（出错了：${msg}${cors ? '。多半是该服务商不允许网页直接调用：双击 jarvis 文件夹里的 启动.bat（或 start.sh）并保持窗口开着，本页面会自动连上本机网关，然后重试即可' : ''}）`);
-    if (cors && !gateway) detectGateway();
+    if (cors && !app.gateway) detectGateway();
     bubble.done();
     bubble.activity('error');
     $('#mode-pill').classList.add('offline');
-    active = null;
+    app.active = null;
     setTask('error', '请求失败');
     hud.think(`✕ ${msg.slice(0, 40)}`, 'bad');
     // 已经写了一部分或做了几步：记进对话，点“继续”从断开的地方接着做，而不是从头再来
@@ -1442,7 +1421,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
     // 回答写完的一瞬间又收到的话（没来得及交给模型）：接着当一句新话处理
     const left = turn.inbox.splice(0);
     if(left.length&&turn.remote){prompt.value+=(prompt.value.trim()?'\n':'')+left.join('\n');autosize();toast('未送达的补充已放回输入框，没有另开任务');}
-    else if (left.length && !ctrl.signal.aborted && !turn.background && session === turn.session) setTimeout(() => send(left.join('\n'), { echo: false }), 0);
+    else if (left.length && !ctrl.signal.aborted && !turn.background && app.session === turn.session) setTimeout(() => send(left.join('\n'), { echo: false }), 0);
   }
 }
 
@@ -1473,7 +1452,7 @@ prompt.addEventListener('keydown', (e) => {
 prompt.addEventListener('input', (e) => {
   autosize();
   if (e.target.value && speaker.speaking) speaker.cancel(); // 开始打字即打断朗读
-  if (e.target.value && !active && machine.task !== 'listening') machine.beginUserTurn();
+  if (e.target.value && !app.active && machine.task !== 'listening') machine.beginUserTurn();
 });
 
 // —— 常用指令：把开头写好放进输入框，接着补充再发
@@ -1563,9 +1542,9 @@ function onWake() {
 // 语音识别：网页版优先用浏览器自带识别；桌面版（Electron 没有浏览器识别）或用户指定时走云端转写
 const browserSR = speechRecognitionSupported && !window.jarvisDesktop && !MOBILE; // 桌面版、手机 App 里的浏览器识别都用不了
 const callStatus = text => { $('#voice-call-status').textContent = text; };
-const sttEngine = () => resolveStt(llmConfig, { gateway, browserSupported: browserSR });
+const sttEngine = () => resolveStt(app.llmConfig, { gateway: app.gateway, browserSupported: browserSR });
 function recordedVoice() {
-  return new RecordedVoice({ getTranscriber: () => { const id = sttEngine(); return id === 'none' || id === 'browser' ? null : (wav, signal) => transcribe(id,llmConfig,wav,{gateway,signal}); }, ...voiceHandlers });
+  return new RecordedVoice({ getTranscriber: () => { const id = sttEngine(); return id === 'none' || id === 'browser' ? null : (wav, signal) => transcribe(id,app.llmConfig,wav,{gateway: app.gateway,signal}); }, ...voiceHandlers });
 }
 const voiceHandlers = {
   onStatus: phase => { if(callActive&&phase==='speech')callTiming={};if(callActive&&phase==='processing'){callTiming??={};callTiming.stoppedAt=now();} recordVoiceEvent('识别阶段',phase); if (callActive) callStatus({ ready:'麦克风已开启，请说话', speech:'正在听你说话…', processing:'正在识别这句话…', popup:'尝试手机系统的语音窗口…' }[phase] || phase); },
@@ -1586,9 +1565,9 @@ const voiceHandlers = {
     if (callActive) callStatus('正在听你说话…');
     if (asleep()) return;
     live.voiceListening = true;
-    if (!active) director.setState('voice');
+    if (!app.active) director.setState('voice');
     // 开口只打断朗读，不取消正在执行的任务；最终文字走同一套补充要求逻辑。
-    if (active) active.muteSpeech = true;
+    if (app.active) app.active.muteSpeech = true;
     speaker.cancel();
     machine.beginUserTurn();
     dashboard.setTask('listening', '正在听');
@@ -1617,7 +1596,7 @@ const voiceHandlers = {
     }
     onWake();
     if (!cmd) {
-      if (active) { active.ctrl.abort(); active = null; }
+      if (app.active) { app.active.ctrl.abort(); app.active = null; }
       speaker.cancel();
       speaker.speak('我在。');
       setTask('listening', '已唤醒');
@@ -1655,7 +1634,7 @@ let voice = new (MOBILE ? RecordedVoice : VoiceInput)({
   allowBrowserSR: browserSR,
   getTranscriber: () => {
     const id = sttEngine();
-    return id === 'browser' || id === 'none' ? null : (wav, signal) => transcribe(id, llmConfig, wav, { gateway, signal });
+    return id === 'browser' || id === 'none' ? null : (wav, signal) => transcribe(id, app.llmConfig, wav, { gateway: app.gateway, signal });
   },
   ...voiceHandlers
 });
@@ -1672,28 +1651,28 @@ function endListening() {
   transcript.clearInterim();
   if (!live.voiceListening) return;
   live.voiceListening = false;
-  if (!active) director.setState('idle');
+  if (!app.active) director.setState('idle');
   live.voiceEnergy = 0;
   transcript.clearInterim();
   $('#vad-meter').classList.remove('on');
   // 识别被取消且没有发出请求：回到空闲；保持情绪不变以外的状态（no-speech 不触发警觉）
-  if (!active && machine.task === 'listening') setTask('idle');
+  if (!app.active && machine.task === 'listening') setTask('idle');
 }
 
 async function setDirectVoice(on) {
   const nativeAvailable = await nativeVoiceReady; // 手机上先确定用不用系统识别
   if (on && sttEngine() === 'qwen-realtime') {
-    if (!(voice instanceof QwenVoice)) { voice.disable(); voice = new QwenVoice({ getConfig:()=>llmConfig, getGateway:()=>gateway, allowBargeIn:()=>callActive, ...voiceHandlers }); }
+    if (!(voice instanceof QwenVoice)) { voice.disable(); voice = new QwenVoice({ getConfig:()=>app.llmConfig, getGateway:()=>app.gateway, allowBargeIn:()=>callActive, ...voiceHandlers }); }
   } else if (on && voice instanceof QwenVoice) {
     voice.disable();
-    voice = new (MOBILE ? RecordedVoice : VoiceInput)({ allowBrowserSR:browserSR, getTranscriber:()=>{const id=sttEngine();return id==='none'||id==='browser'?null:(wav,signal)=>transcribe(id,llmConfig,wav,{gateway,signal});}, ...voiceHandlers });
+    voice = new (MOBILE ? RecordedVoice : VoiceInput)({ allowBrowserSR:browserSR, getTranscriber:()=>{const id=sttEngine();return id==='none'||id==='browser'?null:(wav,signal)=>transcribe(id,app.llmConfig,wav,{gateway: app.gateway,signal});}, ...voiceHandlers });
   }
   if (MOBILE && on) {
-    const useNative = nativeAvailable && (llmConfig.stt?.engine || 'auto') === 'auto';
+    const useNative = nativeAvailable && (app.llmConfig.stt?.engine || 'auto') === 'auto';
     if (useNative && !(voice instanceof NativeVoice)) { voice.disable(); voice = new NativeVoice({ plugin: globalThis.__jarvisSpeech, ...voiceHandlers }); }
     if (!useNative && voice instanceof NativeVoice) {
       voice.disable();
-      voice = new RecordedVoice({ getTranscriber: () => { const id = sttEngine(); return id === 'none' || id === 'browser' ? null : (wav, signal) => transcribe(id, llmConfig, wav, { gateway, signal }); }, ...voiceHandlers });
+      voice = new RecordedVoice({ getTranscriber: () => { const id = sttEngine(); return id === 'none' || id === 'browser' ? null : (wav, signal) => transcribe(id, app.llmConfig, wav, { gateway: app.gateway, signal }); }, ...voiceHandlers });
     }
   }
   setSetting('directVoice', on);
@@ -1763,7 +1742,7 @@ const voiceCheckButton = Object.assign(document.createElement('button'),{type:'b
 voiceCheckButton.onclick = async () => { await setVoiceCall(false); showPanel('settings'); await checkVoice(); };
 $('#voice-call-panel').append(voiceCheckButton);
 const takeFloor = Object.assign(document.createElement('button'), {type:'button',textContent:'我来说',id:'btn-call-listen'});
-takeFloor.onclick = () => { if (active) active.muteSpeech=true; speaker.cancel(); voice.setSuppressed(false); callStatus('正在听你说话…'); };
+takeFloor.onclick = () => { if (app.active) app.active.muteSpeech=true; speaker.cancel(); voice.setSuppressed(false); callStatus('正在听你说话…'); };
 $('#voice-call-panel').append(takeFloor);
 const voiceLifecycle = createVoiceLifecycle({
   getState: () => ({ hidden:document.hidden, nativeActive:globalThis.__jarvisForeground !== false, starting:callStarting, systemDialog:Boolean(globalThis.__jarvisSystemSpeechDialog) }),
@@ -1809,7 +1788,7 @@ async function checkRecognition(line) {
     const li=line(null,'百炼实时识别：正在连接…');
     let session;
     try {
-      session=await openQwenSession({model:QWEN_ASR,key:llmConfig.keys?.qwen||'',region:llmConfig.voice?.qwenRegion||'beijing',gateway,signal:AbortSignal.timeout(20000)});
+      session=await openQwenSession({model:QWEN_ASR,key:app.llmConfig.keys?.qwen||'',region:app.llmConfig.voice?.qwenRegion||'beijing',gateway: app.gateway,signal:AbortSignal.timeout(20000)});
       li.dataset.ok='1';li.textContent='百炼实时识别：会话配置成功；请实际说话验证，连接成功不代表已测识别准确率';
     } catch(e) {li.dataset.ok='0';li.textContent='百炼实时识别：'+e.message;}
     finally {session?.close();}
@@ -1824,7 +1803,7 @@ async function checkRecognition(line) {
   // 3. 云端转写：发 1 秒静音试一下
   const li = line(null, `云端转写（${sttEngineById(id)?.name ?? id}）：检测中…`);
   try {
-    await transcribe(id, llmConfig, encodeWav(new Float32Array(16000)), { gateway, signal: AbortSignal.timeout?.(20000) });
+    await transcribe(id, app.llmConfig, encodeWav(new Float32Array(16000)), { gateway: app.gateway, signal: AbortSignal.timeout?.(20000) });
     li.dataset.ok = '1';
     li.textContent = `云端转写（${sttEngineById(id)?.name ?? id}）：接口连通（静音检测不代表实际识别准确）`;
   } catch (e) {
@@ -1933,7 +1912,6 @@ async function setFaceFollow(on) {
 // ---------------------------------------------------------------- 右侧面板
 const PANES = ['sessions', 'workspace', 'knowledge', 'mind', 'skills', 'models', 'system', 'settings'];
 let currentPane = null;
-const narrow = matchMedia('(max-width: 860px)');
 function showPanel(name, { toggle = false } = {}) {
   noteAction(`打开面板：${name}`);
   if (toggle && name === currentPane && (narrow.matches ? body.classList.contains('side-open') : !body.classList.contains('side-closed'))) {
@@ -1967,24 +1945,24 @@ let routingPanel = null;
 const panels = initPanels({
   toast: (t) => toast(t),
   settings,
-  getGateway: () => gateway,
+  getGateway: () => app.gateway,
   searchFetch: () => fetchViaGateway(),
-  getHistory: () => history,
-  onConfigChange: (cfg) => { llmConfig = cfg; updateModelLabels(); syncMemoryEngine(); updateOrbitStatus(); routingPanel?.render(); pushConfigToServer(); },
+  getHistory: () => app.history,
+  onConfigChange: (cfg) => { app.llmConfig = cfg; updateModelLabels(); syncMemoryEngine(); updateOrbitStatus(); routingPanel?.render(); pushConfigToServer(); },
   onReflect: () => reflectNow({ manual: true }),
   onAutoMemory: (on) => { setSetting('autoMemory', on); if (!on) clearTimeout(reflectTimer); },
 });
-const voicePanel = initVoicePanel({ panels, speaker, getGateway: () => gateway });
+const voicePanel = initVoicePanel({ panels, speaker, getGateway: () => app.gateway });
 routingPanel = initRoutingPanel({
   getConfig: () => panels.config,
   patchConfig: (fn) => panels.patchConfig(fn),
-  getGateway: () => gateway,
+  getGateway: () => app.gateway,
   toast: (t) => toast(t)
 });
 const modelPicker = initModelPicker({
   getConfig: () => panels.config,
   patchConfig: (fn) => panels.patchConfig(fn),
-  getGateway: () => gateway,
+  getGateway: () => app.gateway,
   toast: (t) => toast(t),
   openSettings: () => showPanel('models')
 });
@@ -1996,14 +1974,14 @@ $('#model-chip').addEventListener('click', () => modelPicker.open());
   if (fixed) { panels.patchConfig(() => fixed); toast(`“${was}”不能用来聊天${fixed.imageModel === was ? '，已改为画图用' : fixed.videoModel === was ? '，已改为视频用' : ''}；聊天用 ${fixed.models[fixed.provider] || '默认模型'}`); }
 }
 const localModels = initLocalModelsPanel({
-  getGateway: () => gateway,
+  getGateway: () => app.gateway,
   getConfig: () => panels.config,
   useModel: (p, m) => panels.useModel(p, m),
   patchConfig: (fn) => panels.patchConfig(fn),
   toast: (t) => toast(t)
 });
 const mcpPanel = initMcpPanel({
-  getGateway: () => gateway,
+  getGateway: () => app.gateway,
   toast: (t) => toast(t),
   onChange: (servers) => {
     const ready = servers.filter((x) => x.status === 'ready');
@@ -2269,9 +2247,6 @@ function syncTitleBar() {
   if (!DESKTOP?.setTitleBar) return;
   requestAnimationFrame(() => {
     if (document.body.classList.contains('workbench')) { dispatchEvent(new Event('jarvis:sync-titlebar')); return; }
-    const css = getComputedStyle(document.body);
-    const color = css.getPropertyValue('--titlebar').trim();
-    const symbolColor = css.getPropertyValue('--titlebar-symbol').trim();
     const height = 32;
     DESKTOP.setTitleBar({ color: '#ffffff', symbolColor: '#72727d', height }).catch(() => {});
   });
@@ -2342,14 +2317,6 @@ $('#set-motion').addEventListener('change', (e) => {
   applyMotionMode();
 });
 
-let toastTimer = 0;
-function toast(text) {
-  const el = $('#toast');
-  el.textContent = text;
-  el.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, Math.max(2600, String(text).length * 110));
-}
 globalThis.__jarvisToast = toast; // 手机原生保存文件时的进度提示
 
 // ---------------------------------------------------------------- 编辑重发 / 重新生成
@@ -2359,27 +2326,27 @@ globalThis.__jarvisToast = toast; // 手机原生保存文件时的进度提示
  *   retry 去掉这条回答（和它后面的），把它前面那句话重新发一次
  */
 async function rewindAndResend(kind, text) {
-  if (active) { toast('等这一轮做完再改'); return; }
+  if (app.active) { toast('等这一轮做完再改'); return; }
   const said = (m) => String(m.content).replace(/\n*\[已上传到工作区：[^\]]+\]$/, '').trim();
   let at = -1;
-  if (kind === 'edit') at = history.findLastIndex((m) => m.role === 'user' && said(m) === text.trim());
+  if (kind === 'edit') at = app.history.findLastIndex((m) => m.role === 'user' && said(m) === text.trim());
   else {
-    const reply = history.findLastIndex((m) => m.role === 'assistant' && stripEmotionTags(m.content).trim() === text.trim());
-    if (reply > 0) for (let i = reply - 1; i >= 0; i--) if (history[i].role === 'user') { at = i; break; }
+    const reply = app.history.findLastIndex((m) => m.role === 'assistant' && stripEmotionTags(m.content).trim() === text.trim());
+    if (reply > 0) for (let i = reply - 1; i >= 0; i--) if (app.history[i].role === 'user') { at = i; break; }
   }
   if (at < 0) { toast('找不到这条消息（可能已经翻页或改过）'); return; }
-  const later = history.length - at - 1;
+  const later = app.history.length - at - 1;
   let ok = true;
   if (later > 1) { try { ok = globalThis.confirm(`这句话后面还有 ${later} 条消息，会一起去掉。继续吗？`); } catch { /* 不支持弹窗就直接继续 */ } }
   if (!ok) return;
-  const question = said(history[at]);
+  const question = said(app.history[at]);
   if (server) {
-    try { await server.truncateSession(session.id, at); } catch (e) { toast(`没改成：${e.message}`); return; }
+    try { await server.truncateSession(app.session.id, at); } catch (e) { toast(`没改成：${e.message}`); return; }
   }
-  history.splice(at);
-  session.updatedAt = Date.now();
+  app.history.splice(at);
+  app.session.updatedAt = Date.now();
   // 本机模式下截成空的：空对话不会存盘，旧记录会留着；先删掉，重新发的时候再存
-  if (!server && !history.length) sessionsApi.remove(session.id).catch(() => {}); else persistSession();
+  if (!server && !app.history.length) sessionsApi.remove(app.session.id).catch(() => {}); else persistSession();
   replayTranscript();
   if (kind === 'edit') {
     prompt.value = question;
@@ -2429,7 +2396,7 @@ transcript.onAction = (kind, text, btn) => {
 $('#set-tts').checked = settings.readTyped;
 $('#set-wake').checked = settings.wakeWord;
 $('#set-quality').value = settings.quality;
-dashboard.setTurns(history.filter((m) => m.role === 'user').length);
+dashboard.setTurns(app.history.filter((m) => m.role === 'user').length);
 $('#set-motion').value = settings.reducedMotion;
 for (const x of document.querySelectorAll('#set-vad button')) x.setAttribute('aria-checked', String(x.dataset.v === settings.vadSensitivity));
 setFocusView(settings.focusView);
@@ -2464,10 +2431,10 @@ setTask('idle');
 renderWelcome();
 syncMemoryEngine();
 sessionsPanel = initSessionsPanel({
-  getCurrentId: () => session.id,
+  getCurrentId: () => app.session.id,
   onOpen: (id) => openSession(id),
   onNew: () => newSession(),
-  onDeleted: (id) => { if (id === session.id) switchTo(sessionsApi.create()); },
+  onDeleted: (id) => { if (id === app.session.id) switchTo(sessionsApi.create()); },
   settings,
   onSaveChange: (on) => {
     setSetting('saveSessions', on);
@@ -2478,7 +2445,7 @@ sessionsPanel = initSessionsPanel({
 // ---------------------------------------------------------------- 多设备同步（阿里云 OSS，端到端加密）
 const syncController = createSyncController({
   storage,
-  getGateway: () => gateway,
+  getGateway: () => app.gateway,
   loadConfig,
   saveConfig,
   beforeSync: () => habits.flush(),
@@ -2488,11 +2455,10 @@ const syncController = createSyncController({
     if (r.sessions?.changedLocal) {
       sessionsPanel.refresh();
       // 当前对话在另一台设备上接着聊过：没在回答时换成合并后的版本
-      const fresh = !active && history.length ? await sessionsApi.get(session.id) : null;
-      if (fresh && fresh.messages.length !== history.length) {
-        session = fresh;
-        history = session.messages;
-        reflectFrom = history.length;
+      const fresh = !app.active && app.history.length ? await sessionsApi.get(app.session.id) : null;
+      if (fresh && fresh.messages.length !== app.history.length) {
+        app.session = fresh;
+        reflectFrom = app.history.length;
         replayTranscript();
       }
     }
@@ -2504,7 +2470,7 @@ const syncController = createSyncController({
   }
 });
 const syncPanel = initSyncPanel({ controller: syncController, toast: (t) => toast(t) });
-initServerPanel({ getLlmConfig: () => llmConfig, toast: (t) => toast(t), onConfigSaved: () => refreshServerModel(), onImported: () => { sessionsPanel?.refresh(); drawer?.refresh?.(); } });
+initServerPanel({ getLlmConfig: () => app.llmConfig, toast: (t) => toast(t), onConfigSaved: () => refreshServerModel(), onImported: () => { sessionsPanel?.refresh(); drawer?.refresh?.(); } });
 syncController.start();
 
 // 手机：底部菜单改成左侧抽屉（新对话 · 功能 · 历史对话）；面板全屏打开，左上角“返回对话”
@@ -2518,18 +2484,18 @@ if (COMPACT) {
     onPanel: (name) => showPanel(name),
     listSessions: () => sessionsApi.list(),
     cachedSessions: () => sessionsApi.cachedList(),
-    currentId: () => session.id,
+    currentId: () => app.session.id,
     onRename: async (id, title) => {
       await sessionsApi.rename(id, title);
-      if (id === session.id) { session.title = title; session.titleSet = true; showChatTitle(); }
+      if (id === app.session.id) { app.session.title = title; app.session.titleSet = true; showChatTitle(); }
       sessionsPanel?.refresh();
     },
-    onPin: async (id, pinned) => { await sessionsApi.setPinned(id, pinned); if (id === session.id) session.pinned = pinned; sessionsPanel?.refresh(); },
+    onPin: async (id, pinned) => { await sessionsApi.setPinned(id, pinned); if (id === app.session.id) app.session.pinned = pinned; sessionsPanel?.refresh(); },
     onExport: (id, kind) => exportSession(id, kind),
     searchContent: (q) => sessionsApi.searchContent(q),
     onDelete: async (id) => {
       await sessionsApi.remove(id);
-      if (id === session.id) switchTo(sessionsApi.create());
+      if (id === app.session.id) switchTo(sessionsApi.create());
       sessionsPanel?.refresh();
       toast('已删除');
     }
@@ -2565,8 +2531,8 @@ setTimeout(schedulerTick, 4000);
   // 手机：上次 App 被关掉时有任务做到一半：回到那个对话接着做
   const left = MOBILE ? takePending(storage) : null;
   const leftSession = left && await sessionsApi.get(left.sessionId).catch(() => null);
-  if(left&&(!leftSession||history.length))savePending(storage,left.sessionId,left);
-  if (leftSession && !history.length) {
+  if(left&&(!leftSession||app.history.length))savePending(storage,left.sessionId,left);
+  if (leftSession && !app.history.length) {
     await switchTo(leftSession);
     if(checkpointNeedsReview(left.checkpoint)) {
       savePending(storage,left.sessionId,left);
@@ -2583,7 +2549,7 @@ setTimeout(schedulerTick, 4000);
   }
   // 手机：只有刷新页面、或界面崩溃后自动重开时才接回刚才的对话；从后台关掉再打开就停在首页
   const reopened = performance.getEntriesByType?.('navigation')?.[0]?.type === 'reload' || globalThis.__jarvisRecentCrash === true;
-  if ((!COMPACT || reopened) && recent && Date.now() - recent.updatedAt < 6 * 3600_000 && !history.length) {
+  if ((!COMPACT || reopened) && recent && Date.now() - recent.updatedAt < 6 * 3600_000 && !app.history.length) {
     if (server) await openSession(recent.id); // 服务器的列表不带消息：先显示副本，再取完整的
     else await switchTo(recent);
   }
@@ -2604,7 +2570,7 @@ agentMemory.maintain().catch(() => {});
     ['长期记忆', all ? `${all.memories.length} 条` : '在线'],
     ['习得技能 / 教训', all ? `${all.skills.length} / ${all.lessons.length}` : '在线'],
     ['对话历史', `${(await sessionsApi.list().catch(() => [])).length} 段`],
-    ['模型链路', displayName(llmConfig)],
+    ['模型链路', displayName(app.llmConfig)],
     ['系统', '全部就绪']
   ];
   $('#boot-lines').replaceChildren(...lines.map(([k, v], i) => {
@@ -2691,7 +2657,7 @@ const suggestionOpts = {
 callouts = COMPACT ? initChips(suggestionOpts) : dualSuggestions(initCallouts(suggestionOpts), initChips(suggestionOpts), () => body.classList.contains('stage-mini'));
 updateStageMode();
 callouts.set(openingSuggestions({ desktop: Boolean(DESKTOP), hasSkills: false }));
-if (!history.length) openingCallouts(false);
+if (!app.history.length) openingCallouts(false);
 
 // ---------------------------------------------------------------- 键盘快捷键
 //   Esc 打断   /  聚焦输入框   Alt+1..6 面板   Alt+F 专注视图   Alt+V 直接对话
@@ -2753,37 +2719,37 @@ window.__jarvis = {
   settings,
   live,
   get stage() { return stage; },
-  get config() { return llmConfig; },
-  get gateway() { return gateway; },
+  get config() { return app.llmConfig; },
+  get gateway() { return app.gateway; },
   panels,
   send,
   interrupt,
   showPanel,
   newSession,
   openSession,
-  get sessionId() { return session.id; },
+  get sessionId() { return app.session.id; },
   sessionGet: (id) => sessionsApi.get(id),
   get quality() { return quality; },
   workspace: ws
 };
 
 // 工作台界面只用在电脑上；手机 App 保留自己的界面（底部输入、左侧抽屉菜单、整页面板）
-if (!COMPACT) initWorkbench({showPanel,newSession,openSession,getSession:()=>session,getRunning:()=>active && !active.streamDone ? session.id : null,openFile:openInWorkspace});
+if (!COMPACT) initWorkbench({showPanel,newSession,openSession,getSession:()=>app.session,getRunning:()=>app.active && !app.active.streamDone ? app.session.id : null,openFile:openInWorkspace});
 mascots = initMascots();
 companion = initCompanion({ send, startVoice: async () => { await setVoiceCall(true); return callActive; }, stopVoice: () => setVoiceCall(false), speak: text => { speaker.unlock(); speaker.speak(text); } });
-const hologram = initHologramCompanion({send:async text=>{if(active)throw new Error('当前任务还在进行，请稍等完成后再发送。');await send(text);},onFull:()=>{body.classList.add('side-closed');body.classList.remove('side-open');document.querySelector('.wb-tabs button')?.click();},wallpaper:MOBILE?async()=>{const {registerPlugin}=await import('@capacitor/core');await registerPlugin('CompanionWallpaper').open();}:null});
+const hologram = initHologramCompanion({send:async text=>{if(app.active)throw new Error('当前任务还在进行，请稍等完成后再发送。');await send(text);},onFull:()=>{body.classList.add('side-closed');body.classList.remove('side-open');document.querySelector('.wb-tabs button')?.click();},wallpaper:MOBILE?async()=>{const {registerPlugin}=await import('@capacitor/core');await registerPlugin('CompanionWallpaper').open();}:null});
 const holoEntry=Object.assign(document.createElement('button'),{type:'button',className:'wy-hologram-entry',textContent:'✧ 全息陪伴'});
 holoEntry.onclick=()=>{companion.close();hologram.open();};document.querySelector('.wy-companion-head span').after(holoEntry);
 if(DESKTOP?.onWallpaperRequest)DESKTOP.onWallpaperRequest(async request=>{
   if(request.open){hologram.open();return;}
   if(!request.text)return;
-  try{if(active)throw new Error('当前任务还在进行，请稍等完成后再发送。');await send(request.text);const reply=[...document.querySelectorAll('#transcript .msg.agent')].at(-1);const text=[...(reply?.querySelectorAll('.body')||[])].map(el=>el.textContent).join('\n');wp({say:text||'本轮已结束，可以打开完整对话查看结果。',requestId:request.id});}
+  try{if(app.active)throw new Error('当前任务还在进行，请稍等完成后再发送。');await send(request.text);const reply=[...document.querySelectorAll('#transcript .msg.agent')].at(-1);const text=[...(reply?.querySelectorAll('.body')||[])].map(el=>el.textContent).join('\n');wp({say:text||'本轮已结束，可以打开完整对话查看结果。',requestId:request.id});}
   catch(error){wp({say:`这次没有完成：${error.message||error}`,requestId:request.id,error:true});}
 });
 if(MOBILE){import('@capacitor/core').then(({registerPlugin})=>{const plugin=registerPlugin('CompanionWallpaper');const check=async()=>{try{const r=await plugin.consumeOpen();if(r.open)hologram.open();}catch{}};check();document.addEventListener('visibilitychange',()=>{if(!document.hidden)check();});}).catch(()=>{});}
 composer = initConversationComposer({cancelDictation:()=>stopDictation()});
 initCompanionAppearance();
-initRenderHealthPanel({ mobile: MOBILE, toast, onChange: () => { if (!active) replayTranscript(); } });
+initRenderHealthPanel({ mobile: MOBILE, toast, onChange: () => { if (!app.active) replayTranscript(); } });
 
 // 手机启动页：界面准备好、并且至少显示了 2 秒后淡出（太快一闪而过不像 App）
 {
