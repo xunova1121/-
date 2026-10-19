@@ -1,0 +1,46 @@
+name: Codex系统能力验证
+on:
+  push:
+    branches: ['codex/system-quality-20261020']
+    paths: ['jarvis/**', '.github/workflows/codex-system-quality.yml']
+permissions:
+  contents: write
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: jarvis/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run format
+      - run: npx prettier --ignore-path /dev/null --write src/core/networkRequest.js src/agent/queryGuard.js src/agent/searchFallback.js src/agent/stockKline.js src/agent/taskContract.js src/agent/executionReview.js server/projectExecution.mjs tests/systemQuality.test.js evals/quality-report.mjs e2e/project-execution.mjs
+      - run: npm run lint
+      - run: npx vitest run
+      - run: npm run eval:check
+      - name: 保存本独立分支格式结果
+        run: |
+          git diff --quiet && exit 0
+          git config user.name "Codex"
+          git config user.email "codex@users.noreply.github.com"
+          git add src/main.js src/app src/core/networkRequest.js src/agent/queryGuard.js src/agent/searchFallback.js src/agent/stockKline.js src/agent/taskContract.js src/agent/executionReview.js server/projectExecution.mjs tests/systemQuality.test.js evals/quality-report.mjs e2e/project-execution.mjs
+          git diff --cached --quiet && exit 0
+          git commit -m "style: format system quality modules"
+          git push origin "HEAD:$GITHUB_REF_NAME"
+      - name: 记录公开行情接口可达性（不是准确率验收）
+        run: |
+          node --input-type=module - <<'JS'
+          import {createStockKlineTool} from './src/agent/stockKline.js';
+          try {
+            const result=JSON.parse(await createStockKlineTool().run({code:'600000',start:'2025-01-02',end:'2025-01-10',limit:10}));
+            console.log(JSON.stringify({available:true,source:result.source,range:result.range,count:result.count,highest:result.highest,lowest:result.lowest}));
+          } catch(error) {
+            console.log(JSON.stringify({available:false,code:error.code,kind:error.kind,message:String(error.message).slice(0,300)}));
+          }
+          JS

@@ -1,3 +1,4 @@
+import { throwControl } from '../core/networkRequest.js';
 /**
  * 生成后自查：
  *   1. 规则检查（不花钱，每次都做）：空章节、标题跳级、表格列数对不上、单元格太长撑破版面、[分页] 造成空白页、
@@ -188,7 +189,7 @@ export async function selfCheck({ format, content, requirements = '', llm = null
     const after = r.changed ? lint(format, r.content) : issues;
     return { content: r.content, issues: after, problems: r.problems, changed: r.changed, checked: true };
   } catch (e) {
-    if (e.name === 'AbortError') throw e;
+    throwControl(e, signal);
     return { content, issues, problems: [], changed: 0, checked: false };
   }
 }
@@ -213,7 +214,7 @@ export async function fixAfterBuild({ format, content, issues, layout = '', requ
     if (after > before) return { content, fixed: 0, left: issues, result: null, problems: r.problems };
     return { content: r.content, fixed: before - after, left: result.issues, result, problems: r.problems };
   } catch (e) {
-    if (e.name === 'AbortError') throw e;
+    throwControl(e, signal);
     return { content, fixed: 0, left: issues, result: null, problems: [] };
   }
 }

@@ -1,3 +1,4 @@
+import { retryRead, throwControl, httpError } from '../core/networkRequest.js';
 /**
  * 联网搜索：
  *   - 填了博查 Key：用博查（国内的 AI 搜索接口，中文结果好、稳定）
@@ -220,14 +221,17 @@ export function createSearch({ bochaKey, tavilyKey, fetchViaGateway, searchRegio
       const order = (domestic ? [bocha, keyless, tavily] : [tavily, bocha, keyless]).filter(Boolean);
       const hits = [];
       const errors = [];
+      let firstEngine = true;
       for (const e of order) {
         if (opts.signal?.aborted) throw opts.signal.reason;
         try {
+          if (!firstEngine) opts.consume?.('search');
+          firstEngine = false;
           for (const h of await e.search(query, n, opts)) if (!hits.some((x) => x.url === h.url)) hits.push(h);
-        } catch (err) { if (opts.signal?.aborted) throw opts.signal.reason; errors.push(`${e.name}：${err.message}`); }
+        } catch (err) { throwControl(err, opts.signal); errors.push(err); }
         if (hits.length >= Math.min(3, n)) break;
       }
-      if (!hits.length && errors.length) throw new Error(errors.join('；'));
+      if (!hits.length && errors.length) throw Object.assign(new Error(errors.map(error => error.message).join('；')), { cause: errors.at(-1), kind: errors.at(-1)?.kind, status: errors.at(-1)?.status, code: errors.at(-1)?.code, name: errors.at(-1)?.name });
       return hits.slice(0, n);
     }
   };
@@ -238,12 +242,12 @@ const BOCHA_FRESH = { day: 'oneDay', week: 'oneWeek', month: 'oneMonth', year: '
 function bochaSearch(key, fetchViaGateway) {
   return {
     name: '博查',
-    async search(query, n = 6, { freshness = '', signal } = {}) {
+    async search(query, n = 6, { freshness = '', signal, consume } = {}) {
       const url = 'https://api.bochaai.com/v1/web-search';
       const init = { method: 'POST', signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body: JSON.stringify({ query, count: Math.min(10, Math.max(n, 5)), summary: true, freshness: BOCHA_FRESH[freshness] ?? 'noLimit' }) };
-      const res = fetchViaGateway ? await fetchViaGateway(url, init) : await fetch(url, init);
+      const res = await retryRead(s => fetchViaGateway ? fetchViaGateway(url, { ...init, signal: s }) : fetch(url, { ...init, signal: s }), { signal, beforeAttempt: attempt => { if (attempt) consume?.('search'); } });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok || (j.code && j.code !== 200)) throw new Error(`博查返回 ${j.code || res.status}${j.msg ? `：${j.msg}` : ''}`);
+      if (!res.ok || (j.code && j.code !== 200)) throw httpError(j.code || res.status, j.msg || '', '博查');
       return (j.data?.webPages?.value ?? []).map((r) => ({ title: r.name, url: r.url, snippet: String(r.summary || r.snippet || '').slice(0, 400) })).slice(0, n);
     }
   };
@@ -253,7 +257,7 @@ function bochaSearch(key, fetchViaGateway) {
 export function tavilyError(status, body = '') {
   const detail = String(body).match(/"(?:detail|error|message)"\s*:\s*(?:\{[^}]*"error"\s*:\s*)?"([^"]{1,120})"/)?.[1] ?? '';
   const why = status === 401 || status === 403 ? 'Key 无效或没生效（检查是否完整复制了 tvly- 开头的 Key）'
-    : status === 432 || status === 433 || status === 429 ? '额度用完或请求太频繁（免费版每月有次数限制）'
+    : status === 429 ? '请求过于频繁或限流，不能据此判断余额' : status === 432 || status === 433 ? '服务账户或套餐受限，请核对服务商状态'
       : status >= 500 ? 'Tavily 服务暂时出错' : '';
   return `Tavily 返回 ${status}${why ? `：${why}` : ''}${detail ? `（${detail}）` : ''}`;
 }
@@ -262,12 +266,12 @@ function tavilySearch(tavilyKey, fetchViaGateway) {
   return {
     name: 'Tavily',
     // deep：顺带要回网页正文（查证时不用再逐篇打开，手机上也不受跨域限制；仍是基础档，每次 1 个额度）
-    async search(query, n = 6, { deep = false, freshness = '', signal } = {}) {
+    async search(query, n = 6, { deep = false, freshness = '', signal, consume } = {}) {
       const url = 'https://api.tavily.com/search';
       // 密钥放请求头（Tavily 现在的写法），请求体里也带一份（兼容旧接口）
       const init = { method: 'POST', signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tavilyKey}` }, body: JSON.stringify({ api_key: tavilyKey, query, max_results: n, include_answer: false, ...(deep && { include_raw_content: true }), ...(FRESH_DAYS[freshness] && { time_range: freshness }) }) };
-      const res = await (fetchViaGateway ? fetchViaGateway(url, init) : fetch(url, init)).catch((e) => { throw new Error(`连不上 Tavily（${e.message}；国内网络可能访问不了 api.tavily.com）`); });
-      if (!res.ok) throw new Error(tavilyError(res.status, await res.text().catch(() => '')));
+      const res = await retryRead(s => fetchViaGateway ? fetchViaGateway(url, { ...init, signal: s }) : fetch(url, { ...init, signal: s }), { signal, beforeAttempt: attempt => { if (attempt) consume?.('search'); } });
+      if (!res.ok) throw httpError(res.status, tavilyError(res.status, await res.text().catch(() => '')), 'Tavily');
       const j = await res.json();
       return (j.results ?? []).map((r) => ({ title: r.title, url: r.url, snippet: String(r.content || '').slice(0, 400), ...(r.raw_content && { raw: String(r.raw_content) }) }));
     }
@@ -287,25 +291,29 @@ function keylessSearch(fetchViaGateway, searchRegion) {
   return {
     get name() { return region === 'cn' ? '必应中国、百度、360（国内）' : region === 'global' ? '必应、DuckDuckGo' : '按网络自动选择（国内：必应中国、百度、360；国外：必应、DuckDuckGo）'; },
     regionNow,
-    async search(query, n = 6, { freshness = '', signal } = {}) {
+    async search(query, n = 6, { freshness = '', signal, consume } = {}) {
       const region = await regionNow();
       const plan = [['必应 RSS', bingRssUrl(query, region, freshness), parseBingRss], ...searchPlan(query, region, freshness)];
       // 一个来源结果太少（被拦、只有广告）时再查下一个，合并去重
       const notes = [];
+      let lastError;
       const hits = [];
+      let firstPage = true;
       for (const [name, url, parse] of plan) {
         if (signal?.aborted) throw signal.reason;
         let status = 0, body = '', got = 0;
         try {
-          const res = await fetchViaGateway(url, { headers: DESKTOP_HEADERS, signal });
+          if (!firstPage) consume?.('search');
+          firstPage = false;
+          const res = await retryRead(s => fetchViaGateway(url, { headers: DESKTOP_HEADERS, signal: s }), { signal, timeoutMs: 4000, beforeAttempt: attempt => { if (attempt) consume?.('search'); } });
           status = res.status;
           body = await res.text();
           if (res.ok) for (const h of parse(body)) if (!hits.some((x) => x.url === h.url)) { hits.push(h); got++; }
           notes.push(describeSource(name, status, body, got));
-        } catch (e) { if (signal?.aborted) throw signal.reason; notes.push(`${name}：连不上（${e.message}）`); }
+        } catch (e) { throwControl(e, signal); lastError = e; notes.push(name + '：连接失败（' + e.message + '）'); }
         if (hits.length >= Math.min(4, n)) break;
       }
-      if (!hits.length) throw new Error(`各搜索源都没拿到结果——${notes.join('；')}。可在设置 → 模型里填博查或 Tavily 搜索 Key，搜索更稳定`);
+      if (!hits.length) throw Object.assign(new Error('各搜索源都没拿到结果——' + notes.join('；') + '。可在设置中配置博查或Tavily'), { code: lastError?.code || 'NO_SEARCH_RESULTS', kind: lastError?.kind, name: lastError?.name || 'SearchError', cause: lastError });
       return hits.slice(0, n);
     }
   };

@@ -1,3 +1,4 @@
+import { throwControl } from '../core/networkRequest.js';
 /**
  * 深度调研：像研究员一样多轮“规划 → 搜索 → 阅读 → 找缺口 → 补查”，最后写出带引用的报告。
  * 思路参考 GPT Researcher / open_deep_research / node-DeepResearch：
@@ -64,11 +65,11 @@ const today = () => new Date().toISOString().slice(0, 10);
  * @param {AbortSignal} [o.signal]
  * @returns {Promise<{ title: string, markdown: string, sources: Array<{n,title,url}>, queries: string[], rounds: number }>}
  */
-export async function deepResearch({ question, depth = 'standard', llm = null, search, read, onProgress, signal }) {
+export async function deepResearch({ question, depth = 'standard', llm = null, search, read, onProgress, signal, consume = () => {} }) {
   const cfg = DEPTHS[depth] ?? DEPTHS.standard;
   const say = (stage, text) => onProgress?.({ stage, text });
   const check = () => { if (signal?.aborted) throw Object.assign(new Error('已取消'), { name: 'AbortError' }); };
-  const ask = async (system, prompt) => { check(); return llm({ system, prompt, signal }); };
+  const ask = async (system, prompt) => { check(); consume('model'); return llm({ system, prompt, signal }); };
 
   // ---------- 1. 规划
   say('plan', '拆解问题');
@@ -100,7 +101,7 @@ export async function deepResearch({ question, depth = 'standard', llm = null, s
     const found = [];
     for (const q of fresh) {
       say('search', `搜索：${q}`);
-      try { found.push(...(await search(q, 6)).map((r, rank) => ({ ...r, rank, q }))); } catch (e) { say('search', `搜索失败：${e.message}`); }
+      try { consume('search'); found.push(...(await search(q, 6)).map((r, rank) => ({ ...r, rank, q }))); } catch (e) { throwControl(e, signal); say('search', `搜索失败：${e.message}`); }
       check();
     }
     // 按名次轮流取（每个搜索词的第 1 名、再第 2 名…），同一网站最多 PER_SITE 篇
@@ -127,7 +128,7 @@ export async function deepResearch({ question, depth = 'standard', llm = null, s
         check();
         say('read', `阅读：${r.title || host(r.url)}`);
         let text = '';
-        try { text = String(await read(r.url)).slice(0, PAGE_CHARS); } catch { /* 读不了：只用搜索摘要 */ }
+        try { consume('read'); text = String(await read(r.url)).slice(0, PAGE_CHARS); } catch (error) { throwControl(error, signal); }
         const body = text.trim().length > 80 ? text : `${r.title}\n${r.snippet}`;
         let points = [];
         if (llm) {
@@ -139,7 +140,7 @@ export async function deepResearch({ question, depth = 'standard', llm = null, s
             if (j?.relevant !== false) points = (j?.points ?? []).map(String).filter(Boolean).slice(0, 8);
             if (j?.date && points.length) points[0] = `（${j.date}）${points[0]}`;
           } catch (e) {
-            if (e.name === 'AbortError') throw e;
+            throwControl(e, signal);
             points = extractive(question, body);
           }
         } else {

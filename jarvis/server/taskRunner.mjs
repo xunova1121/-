@@ -1,3 +1,4 @@
+import { projectExecutionTool } from './projectExecution.mjs';
 import { renderOffice } from './officeRender.mjs';
 import { createTaskTiming } from '../shared/taskTiming.js';
 import { createHash } from 'node:crypto';
@@ -178,6 +179,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       officeRender:renderOffice,
       currentSessionId: () => session.id
     }).filter((t) => !SERVER_BLOCKED.has(t.name));
+    const projectTool = projectExecutionTool({ image: process.env.JARVIS_CODE_SANDBOX_IMAGE });
+    if (projectTool) tools.push(projectTool);
 
     let shown = '';
     const usedTools = [];
@@ -221,6 +224,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         approve: async () => false,
         emit: (e) => {
           arm();
+          if (e.type === 'task_review') task.review = e.review;
           if (e.type === 'text') { if (task.firstTextAt == null && String(e.delta ?? '').trim()) task.firstTextAt = now(); shown += e.delta; }
           if (e.type === 'tool_start' && e.name !== 'update_plan') usedTools.push(e.name);
           if (e.type === 'text' || e.type === 'tool_end') saveDraft();
@@ -260,7 +264,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     const sec = (t) => (t && task.startedAt ? `${((t - task.startedAt) / 1000).toFixed(1)}s` : '—');
     console.log(`[任务] ${task.id} ${task.status}：排队 ${task.startedAt ? ((task.startedAt - task.createdAt) / 1000).toFixed(1) : '—'}s，首字 ${sec(task.firstTextAt)}，共 ${sec(task.endedAt)}，工具 ${usedTools.length} 次${error ? `，出错：${error.slice(0, 120)}` : ''}`);
     task.error = error;
-    record(task, { type: 'task_state', status: task.status, timing, ...(error && { error }), ...(task.status === 'done' && { text, toolCalls }), files: [...task.files] });
+    task.errorType = errorType;
+    record(task, { type: 'task_state', status: task.status, timing, ...(error && { error, errorKind: errorType }), ...(task.status === 'done' && { text, toolCalls }), files: [...task.files] });
     console.log(`[任务耗时] ${task.id} ${JSON.stringify(timing)}`);
     task.listeners.clear();
     task.images = [];
@@ -346,7 +351,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     },
     get(id) {
       const t = tasks.get(id);
-      return t && { id: t.id, sessionId: t.sessionId, text: t.text, status: t.status, seq: t.seq, files: [...t.files], error: t.error || '', timing: t.timing.snapshot(), createdAt: t.createdAt, startedAt: t.startedAt ?? null, endedAt: t.endedAt ?? null };
+      return t && { id: t.id, sessionId: t.sessionId, text: t.text, status: t.status, seq: t.seq, files: [...t.files], error: t.error || '', errorKind: t.errorType || '', review: t.review ?? null, timing: t.timing.snapshot(), createdAt: t.createdAt, startedAt: t.startedAt ?? null, endedAt: t.endedAt ?? null };
     },
     list() { return [...tasks.keys()].map((id) => this.get(id)); },
     events(id, after = 0) { return tasks.get(id)?.events.filter((e) => e.seq > after) ?? null; },

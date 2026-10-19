@@ -1,3 +1,4 @@
+import { retryRead, throwControl, httpError } from '../core/networkRequest.js';
 /**
  * 读网页正文：
  *   1. 先直接打开（桌面版经本机网关、手机 App 用系统网络、浏览器直连）
@@ -6,7 +7,6 @@
  * 同一个地址 15 分钟内再读直接用缓存（查证时几项常落到同一篇文章）。
  */
 import { htmlToText } from './docs.js';
-import { withWebDeadline } from './retrievalBudget.js';
 
 const CACHE_MS = 15 * 60e3;
 const THIN = 300; // 正文少于这么多字（去掉空白）就当没读到
@@ -40,7 +40,7 @@ export function createPageReader({ tavilyKey, fetchViaGateway, fetchImpl = (...a
     let res;
     try { res = await get(url, { signal }); } catch (e) {
       if (signal?.aborted) throw signal.reason;
-      throw new Error(fetchViaGateway ? `打不开（${e.message}）` : '浏览器无法直接读取该网站（跨域限制）');
+      throw Object.assign(new Error('网页连接失败：' + e.message), { name: e.name === 'TimeoutError' ? 'TimeoutError' : 'NetworkError', cause: e, kind: e.kind || 'network' });
     }
     if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}${[401,403,429].includes(res.status) ? '（网站要求登录、验证或限制程序访问）' : res.status === 404 ? '（网页不存在或链接已失效）' : ''}`), { status: res.status });
     const type = res.headers.get('content-type') || '';
@@ -55,44 +55,44 @@ export function createPageReader({ tavilyKey, fetchViaGateway, fetchImpl = (...a
   async function extract(url, signal) {
     const init = { method: 'POST', signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tavilyKey}` }, body: JSON.stringify({ api_key: tavilyKey, urls: [url], extract_depth: 'basic', include_images: false }) };
     const res = await get('https://api.tavily.com/extract', init);
-    if (!res.ok) throw new Error(`Tavily 返回 ${res.status}`);
+    if (!res.ok) throw httpError(res.status, '', 'Tavily');
     const j = await res.json();
     const text = String(j.results?.[0]?.raw_content || '').trim();
     if (!text) throw new Error(j.failed_results?.[0]?.error || 'Tavily 也没读到正文');
     return text;
   }
 
-  return async function read(url, { signal, progress } = {}) {
+  return async function read(url, { signal, progress, consume } = {}) {
     if (signal?.aborted) throw Object.assign(new Error('已停止读取网页'), { name: 'AbortError' });
     const hit = cache.get(url);
     if (hit && now() - hit.at < CACHE_MS) return hit.text;
     const failure = failures.get(url);
-    if (failure && now() - failure.at < 60_000) throw new Error(`该链接刚刚读取失败，暂不重复访问：${failure.message}`);
+    if (failure && now() - failure.at < 60_000) throw Object.assign(new Error('该链接刚刚读取失败，暂不重复访问：' + failure.message), failure.type);
     let text = '';
     let err = null;
     const host = new URL(url).hostname;
     const state = blocked.get(host);
     try {
       if (state?.count >= 2 && now() - state.at < 10 * 60_000) throw new Error('该网站连续拒绝访问，暂时跳过直接读取，请换其他来源');
-      text = await withWebDeadline((s) => direct(url, s), { signal, timeoutMs: 8000 });
+      text = await retryRead((s) => direct(url, s), { signal, timeoutMs: 4000, beforeAttempt: attempt => { if (attempt) consume?.('read'); } });
     } catch (e) {
-      if (signal?.aborted || e.name === 'AbortError') throw e;
+      throwControl(e, signal);
       err = e;
       if ([401,403,429].includes(e.status)) blocked.set(host, { count: (state && now() - state.at < 10 * 60_000 ? state.count : 0) + 1, at: now() });
     }
     if (tavilyKey && (err || text.replace(/\s+/g, '').length < THIN)) {
       try {
         progress?.('直接读取未取得正文，尝试已配置的 Tavily 代读');
-        const t = await withWebDeadline((s) => extract(url, s), { signal, timeoutMs: 6000 });
+        const t = await retryRead((s) => extract(url, s), { signal, timeoutMs: 3000, beforeAttempt: () => consume?.('read') });
         if (t.length > text.length) text = t;
         err = null;
       } catch (e) {
-        if (signal?.aborted || e.name === 'AbortError') throw e;
-        if (err) err = new Error(`${err.message}；Tavily 代读也失败：${e.message}`);
+        throwControl(e, signal);
+        if (err) err = Object.assign(new Error(err.message + '；代读也失败：' + e.message), { cause: err, kind: err.kind, status: err.status, code: err.code, name: err.name });
       }
     }
     if (err) {
-      failures.set(url, { at: now(), message: err.message });
+      failures.set(url, { at: now(), message: err.message, type: { kind: err.kind, code: err.code, status: err.status, name: err.name } });
       if (failures.size > 60) failures.delete(failures.keys().next().value);
       if (blocked.size > 60) blocked.delete(blocked.keys().next().value);
       throw err;

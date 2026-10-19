@@ -184,6 +184,10 @@ jobs:
         run: npm run lint
       - name: 验证评测入口与耗时统计
         run: npm run eval:check
+      - name: 验证多文件项目隔离执行与取消
+        run: |
+          docker pull node:22-bookworm-slim
+          JARVIS_CODE_SANDBOX_IMAGE=node:22-bookworm-slim node e2e/project-execution.mjs
       - name: 验证代码隔离与取消
         run: node e2e/sandbox-isolation.mjs
       - name: 安装Office真实渲染环境
