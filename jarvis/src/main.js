@@ -52,13 +52,10 @@ import * as ws from './agent/workspace.js';
 import * as agentMemory from './agent/memory.js';
 import { loadConfig, saveConfig, createAdapter, providerById, resolveVoice } from './llm/config.js';
 import * as skillPacks from './agent/skillPacks.js';
-import * as scheduler from './agent/scheduler.js';
-import { executeScheduled, scheduledPrompt, notificationFor } from './agent/scheduledRun.js';
 import { preApproved } from './agent/commandSafety.js';
 import * as compress from './agent/compress.js';
 import { storageProblem } from './agent/store.js';
 import * as habits from './agent/habits.js';
-import { initSchedulesPanel } from './ui/schedulesPanel.js';
 import { prepareImage, isImageName } from './agent/images.js';
 import * as sessionsApi from './agent/sessions.js';
 import { initSessionsPanel } from './ui/sessionsPanel.js';
@@ -90,7 +87,6 @@ import { initDrawer } from './ui/drawer.js';
 import { isAuto } from './ui/modelPicker.js';
 import { generateImage } from './llm/images.js';
 import { generateVideo } from './llm/videos.js';
-import { composeGreeting, GREET_GAP_MS } from './core/greeting.js';
 import { classifyTask, routeFor, TASKS, fallbackRoutes, effortFor, isSmallTalk, computerTaskKind } from './llm/router.js';
 import { loadMemory, clearMemory } from './core/memoryStore.js';
 import { $, body, now, DESKTOP, COMPACT, storage, narrow, toast, wp, markActivity } from './app/env.js';
@@ -99,6 +95,7 @@ import { createStage } from './app/stage.js';
 import { createModels } from './app/models.js';
 import { createPanels, PANES } from './app/panels.js';
 import { createView } from './app/view.js';
+import { createBackground } from './app/background.js';
 
 
 // ---------------------------------------------------------------- 设置
@@ -115,9 +112,9 @@ Object.assign(app, { setSetting, send, openingCallouts });
 Object.defineProperties(app, { speaker: { get: () => speaker }, face: { get: () => face }, mascots: { get: () => mascots } });
 
 Object.defineProperties(app, {
-  reflectTimer: { get: () => reflectTimer }, sessionsPanel: { get: () => sessionsPanel }, schedulesPanel: { get: () => schedulesPanel }
+  sessionsPanel: { get: () => sessionsPanel }, transcript: { get: () => transcript }, sessionApprovals: { get: () => sessionApprovals }, taskKeeper: { get: () => taskKeeper }
 });
-Object.assign(app, { reflectNow, renderHabits, memorizeHabits, newSession, interrupt });
+Object.assign(app, { newSession, interrupt, switchTo, rememberTurn, buildTools, openSession });
 Object.defineProperty(app, 'mic', { get: () => mic });
 
 mount(app, createStage(app));
@@ -244,50 +241,7 @@ function makeSpeech(auto = true) {
   };
 }
 
-
-/** 自动整理记忆：对话停下来 30 秒后、切到别的对话或 App 退到后台时，把这段对话交给记忆整理（抽取事实、写摘要）。
- *  不能等太久：用户常常说完就开新对话，或者手机直接切走 */
-let reflectFrom = app.history.length;
-let reflectTimer = 0;
-function scheduleReflect() {
-  if (app.server) return; // 服务器模式：记忆在服务器上，本机不整理
-  clearTimeout(reflectTimer);
-  if (!settings.autoMemory) return;
-  reflectTimer = setTimeout(reflectNow, 30_000);
-}
-async function reflectNow({ manual = false } = {}) {
-  clearTimeout(reflectTimer);
-  const turns = app.history.slice(reflectFrom);
-  if (!turns.some((t) => t.role === 'user')) { if (manual) toast('没有新的对话需要整理'); return; }
-  reflectFrom = app.history.length;
-  try {
-    const title = app.session.titleSet ? app.session.title : sessionsApi.autoTitle(app.history.find((m) => m.role === 'user')?.content);
-    const r = await agentMemory.reflect(turns, { session: { id: app.session.id, title } });
-    const n = r.memories.filter((m) => m.action !== 'NOOP').length;
-    if (n || manual) toast(`记忆已整理：新增或更新 ${n} 条${r.episode ? '，并记下这段对话的摘要' : ''}`);
-    app.panels.refreshMind();
-  } catch (e) { console.warn('[memory] 整理失败', e); }
-}
-addEventListener('pagehide', () => { if (settings.autoMemory) reflectNow(); });
-// 手机切到后台时不一定有 pagehide（之后可能被系统直接杀掉）：页面一隐藏就整理
-document.addEventListener('visibilitychange', () => { if (document.hidden && settings.autoMemory && !app.active) reflectNow(); });
-
-/** 长对话压缩：回答完后在后台把较早的消息并进“前情提要”（见 compress.js），不影响当前对话 */
-let compressing = false;
-async function compressHistory() {
-  if (app.server) return;
-  const s = app.session;
-  if (compressing || !compress.dueForCompression(s.messages, s.summary).length) return;
-  compressing = true;
-  try {
-    const next = await compress.updateSummary(s.messages, s.summary, { llm: app.helperLlm() });
-    if (next && next !== s.summary) {
-      s.summary = next;
-      if (settings.saveSessions !== false) sessionsApi.save(s).catch(() => {});
-      app.hud.think(`◆ 较早的对话已压缩成摘要${next.by === 'rule' ? '（本地规则）' : ''}`);
-    }
-  } catch (e) { console.warn('[compress]', e); } finally { compressing = false; }
-}
+mount(app, createBackground(app));
 
 // ---------------------------------------------------------------- 多会话
 /** 把当前会话的消息重新画到对话区 */
@@ -353,9 +307,9 @@ async function openingCallouts(hasSkills = true) {
 async function switchTo(next) {
   // 正在干活：不停下，转到后台接着做（做完记回原来的对话）；只是在朗读就停掉
   if (app.active && !app.active.streamDone) toBackground(app.active); else interrupt();
-  if (settings.autoMemory) await reflectNow();
+  if (settings.autoMemory) await app.reflectNow();
   app.session = next;
-  reflectFrom = app.history.length;
+  app.reflectFrom = app.history.length;
   replayTranscript();
   // 切回一个还在后台干活的对话：把正在写的那条回答接回来
   const bg = [...backgroundTurns].find((t) => t.session.id === app.session.id);
@@ -395,7 +349,7 @@ async function openSession(id) {
   if (mine !== opening) return;
   if (!s) { if (!cached) app.setTask('idle'); return; }
   if (!cached) await switchTo(s);
-  else if (app.session.id === id && !app.active && changed(app.session, s)) { app.session = s; reflectFrom = app.history.length; replayTranscript(); }
+  else if (app.session.id === id && !app.active && changed(app.session, s)) { app.session = s; app.reflectFrom = app.history.length; replayTranscript(); }
   if (app.server && app.session.id === id && s.taskId && !app.active) followServerTask(s); // 另一台设备正在做：接上进度
 }
 /** 服务器上的这段对话比手上的新吗（另一台设备接着聊过、或者做完了任务） */
@@ -410,7 +364,7 @@ async function refreshFromServer() {
     const id = app.session.id;
     const s = await sessionsApi.get(id).catch(() => null);
     if (!s || app.session.id !== id || app.active) return;
-    if (changed(app.session, s)) { app.session = s; reflectFrom = app.history.length; replayTranscript(); }
+    if (changed(app.session, s)) { app.session = s; app.reflectFrom = app.history.length; replayTranscript(); }
     if (s.taskId) followServerTask(s);
     try { drawer?.refresh?.(); } catch { /* 抽屉还没建好 */ }
   } finally { refreshing = false; }
@@ -422,7 +376,6 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) pull
 addEventListener('focus', pullSoon);
 
 let sessionsPanel = null;
-let schedulesPanel = null;
 
 // ---------------------------------------------------------------- 桌面版与 MCP
 /** 本次会话里用户选了“本次都允许”的操作类别 */
@@ -439,7 +392,7 @@ if (DESKTOP) {
   // 全局快捷键呼出：聚焦输入框
   DESKTOP.onSummon?.(() => { $('#prompt').focus(); });
   // 离开电脑一段时间后回来：主动问好
-  DESKTOP.onPresence?.((info) => { greetOnReturn(info); });
+  DESKTOP.onPresence?.((info) => { app.greetOnReturn(info); });
   // 紧急停止热键：打断当前任务
   DESKTOP.onStop?.(() => { controlActive = false; interrupt(); toast('已紧急停止电脑操作'); });
 }
@@ -511,7 +464,7 @@ async function buildTools({ background = false, turn = null } = {}) {
       onImage: (src) => out()?.image?.(src),
       videoGen: (o) => generateVideo(app.llmConfig, { ...o, gateway: app.gateway }),
       onVideo: (src) => out()?.video?.(src),
-      onSchedulesChanged: () => schedulesPanel?.refresh(),
+      onSchedulesChanged: () => app.schedulesPanel?.refresh(),
       currentSessionId: () => app.session?.id,
       // 桌面版：写 PDF 时直接转成 PDF 文件（网页版和安卓生成可打印的网页）
       toPdf: DESKTOP ? async (html) => Uint8Array.from(atob((await DESKTOP.invoke('printToPdf', { html })).base64), (c) => c.charCodeAt(0)) : null
@@ -567,127 +520,6 @@ async function pullServerFile(path, turn) {
     else if (/^videos\/.+\.(mp4|webm|mov)$/i.test(path)) out?.video?.(URL.createObjectURL(blob));
     if (!/^skills\//.test(path)) { out?.fileLink?.(path, openInWorkspace); turn?.files.add(path); }
   } catch (e) { toast(e.message); }
-}
-
-// ---------------------------------------------------------------- 主动问好：你回到电脑前时
-let lastGreetAt = (() => { try { return Number(localStorage.getItem('jarvis.lastGreet')) || 0; } catch { return 0; } })();
-/**
- * @param {{ awayMs: number, reason?: string, force?: boolean }} info
- * @returns {Promise<string|null>} 说了什么（没说返回 null）
- */
-async function greetOnReturn({ awayMs, reason = '', force = false }) {
-  if (!force && (!settings.greetOnReturn || app.active || Date.now() - lastGreetAt < GREET_GAP_MS || awayMs < 10 * 60_000)) return null;
-  lastGreetAt = Date.now();
-  try { localStorage.setItem('jarvis.lastGreet', String(lastGreetAt)); } catch { /* 隐私模式 */ }
-  const [core, schedules, open, habitTips] = await Promise.all([
-    agentMemory.getCore().then(agentMemory.cleanCore).catch(() => ({})), // 去掉像注入指令的行
-    scheduler.list().catch(() => []),
-    agentMemory.openItems({ k: 2 }).catch(() => []),
-    habitHints().catch(() => [])
-  ]);
-  const { text } = await composeGreeting({ awayMs, coreHuman: core.human, schedules: schedules.filter((x) => x.enabled), openItems: open, habits: habitTips, llm: app.helperLlm() });
-  // 很久没说话的旧对话：开一段新的，问候放在新对话里
-  const lastTs = app.history.at(-1)?.ts ?? 0;
-  if (app.history.length && Date.now() - lastTs > 3 * 3600_000) await switchTo(sessionsApi.create());
-  const b = transcript.add('agent', text);
-  b.el.classList.add('proactive');
-  b.done(`主动问候 · ${reason === 'face' ? '看到你回来了' : '你回到电脑前'}`);
-  rememberTurn('assistant', text, { proactive: true });
-  app.director.onEmotion('亲和');
-  wp({ say: text, emotion: '亲和' });
-  app.hud.think(`◆ 主动问候（离开 ${Math.round(awayMs / 60000)} 分钟）`);
-  if (settings.readTyped) speaker.speak(text);
-  if (document.hidden && DESKTOP && !settings.readTyped) DESKTOP.invoke('notify', { title: '未央', body: text }).catch(() => {});
-  openingCallouts();
-  return text;
-}
-/** 习惯提示（操作习惯学习开启后才有，见 habits.js） */
-const habitHints = async () => habits.hintFor(await habits.load());
-
-// ---------------------------------------------------------------- 操作习惯学习（桌面版，默认关闭）
-/** 把习惯结论写进记忆（每天最多一次，或手动） */
-async function memorizeHabits({ manual = false } = {}) {
-  const r = habits.insightsFrom(await habits.load());
-  if (!r.ready) { if (manual) toast(`再观察几天：已有 ${r.days} 天的记录，至少要 3 天才总结习惯`); return 0; }
-  const today = new Date().toDateString();
-  let last = '';
-  try { last = localStorage.getItem('jarvis.habitsMemorized') || ''; } catch { /* 隐私模式 */ }
-  if (!manual && last === today) return 0;
-  for (const text of r.insights) await agentMemory.remember(`用户${text}`, 'habit', { importance: 2, source: 'habits' });
-  try { localStorage.setItem('jarvis.habitsMemorized', today); } catch { /* 隐私模式 */ }
-  app.panels.refreshMind();
-  renderHabits();
-  if (manual) toast(`已把 ${r.insights.length} 条习惯写进记忆`);
-  return r.insights.length;
-}
-async function renderHabits() {
-  const box = $('#habit-insights');
-  if (!box) return;
-  const r = habits.insightsFrom(await habits.load());
-  const lines = r.ready ? r.insights : [`已记录 ${r.days} 天、约 ${r.hours} 小时。至少观察 3 天后开始总结。`];
-  box.replaceChildren(...lines.map((t) => Object.assign(document.createElement('li'), { textContent: t })));
-}
-if (DESKTOP) {
-  DESKTOP.onActivity?.((sample) => { habits.record(sample); });
-  setInterval(() => { habits.flush().then(() => memorizeHabits()).catch(() => {}); }, 60_000);
-}
-
-// 网页版：标签页隐藏 30 分钟以上再回来，也算“回来了”
-let hiddenAt = 0;
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { hiddenAt = Date.now(); return; }
-  if (!DESKTOP && hiddenAt && Date.now() - hiddenAt >= 30 * 60_000) greetOnReturn({ awayMs: Date.now() - hiddenAt, reason: 'tab' });
-  hiddenAt = 0;
-});
-
-// ---------------------------------------------------------------- 定时任务
-/** 系统通知：桌面版用系统通知；网页版用浏览器通知（需要授权），并总是弹一条提示 */
-function notify(title, body) {
-  toast(`${title}：${body.slice(0, 60)}`);
-  if (DESKTOP) { DESKTOP.invoke('notify', { title, body }).catch(() => {}); return; }
-  if (MOBILE) { globalThis.__jarvisBackgroundTask?.notifyDone?.({ title, body: body.slice(0, 300) }).catch(() => {}); return; }
-  try { if (Notification.permission === 'granted') new Notification(title, { body }); } catch { /* 不支持 */ }
-}
-let schedulerBusy = false;
-/** 在后台执行一个定时任务：结果存成一段对话（不打断当前对话），并通知 */
-async function runScheduled(s) {
-  const releaseTask = taskKeeper.begin();
-  try {
-  const sess = sessionsApi.create();
-  sess.title = `⏰ ${s.title}`;
-  sess.titleSet = true;
-  sess.messages.push({ role: 'user', content: s.prompt, ts: Date.now() });
-  const usedTools = [];
-  const { adapter, model, problem } = createAdapter(app.llmConfig, { gateway: app.gateway });
-  // 卡住保护、空回复、【无需通知】见 scheduledRun.js
-  const res = problem ? { ok: false, quiet: false, text: '', note: problem } : await executeScheduled(async ({ signal, emit }) => runAgent({
-    adapter, model, history: [], sessionId: sess.id, signal, emit,
-    userText: scheduledPrompt(s, scheduler.describe(s)),
-    tools: await buildTools({ background: true }),
-    // 无人值守：需要确认的操作默认拒绝，除非这个任务设为“允许无人值守操作”或本次会话已允许；危险命令一律拒绝
-    approve: async (req) => preApproved(req, { sessionKeys: sessionApprovals, unattended: s.unattended })
-  }), { onEvent: (e) => { if (e.type === 'tool_start') usedTools.push(e.name); } });
-  const content = res.ok ? res.text || '（已检查，无需通知）' : `执行失败：${res.note}`;
-  sess.messages.push({ role: 'assistant', content, ts: Date.now(), ...(usedTools.length && { tools: [...new Set(usedTools)] }) });
-  sess.updatedAt = Date.now();
-  await sessionsApi.save(sess).catch(() => {});
-  const rec = await scheduler.recordRun(s.id, { ok: res.ok, quiet: res.quiet, session: sess.id, note: res.note });
-  const n = notificationFor(s, res, rec); // 【无需通知】时为 null
-  if (n) notify(n.title, n.body);
-  sessionsPanel?.refresh();
-  schedulesPanel?.refresh();
-  return sess;
-  } finally { releaseTask(); }
-}
-async function schedulerTick() {
-  if (schedulerBusy || app.active) return; // 正在对话时先等一等，不抢资源
-  schedulerBusy = true;
-  try {
-    for (const s of await scheduler.due()) {
-      await scheduler.claim(s.id); // 先排好下一次再执行：中途崩溃重启后不会重复执行
-      await runScheduled(s);
-    }
-  } catch (e) { console.warn('[scheduler]', e); } finally { schedulerBusy = false; }
 }
 
 /** “/技能名 内容” → 明确要求模型使用该技能（界面上仍显示用户原话） */
@@ -994,14 +826,14 @@ async function send(text, { echo = true, byVoice = false } = {}) {
     if (result.text) wp({ say: result.text.replace(/```[\s\S]*?```/g, '').replace(/[#*>`|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 4000) });
     rememberTurn('assistant', result.text || '（完成）', { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) }, turn.session);
     // 做完时人不在（App 在后台 / 窗口没在看）：发通知，点开就能看结果
-    if (document.hidden) notify('未央做完了', `${(turn.session.title || text).slice(0, 30)}：${stripEmotionTags(result.text || '').replace(/\s+/g, ' ').slice(0, 120)}`);
+    if (document.hidden) app.notify('未央做完了', `${(turn.session.title || text).slice(0, 30)}：${stripEmotionTags(result.text || '').replace(/\s+/g, ' ').slice(0, 120)}`);
     // 在本机做的这一轮也记回服务器上的这段对话（手机上能看到）
     if (here) app.server.appendSession(turn.session.id, turn.session.messages.slice(-2).map(({ role, content, ts, tools }) => ({ role, content, ts, ...(tools && { tools }) }))).catch((e) => toast(`这一轮没能记到服务器上：${e.message}`));
     $('#mode-pill').classList.remove('offline');
     turn.streamDone = true;
     app.callouts?.set(followUpSuggestions({ tools: usedTools, userText: text, desktop: Boolean(DESKTOP) }));
-    scheduleReflect();
-    compressHistory();
+    app.scheduleReflect();
+    app.compressHistory();
     if (!speaker.speaking) finishTurn();
   } catch (err) {
     if (err.name === 'AbortError') return;
@@ -1486,7 +1318,7 @@ async function setFaceFollow(on) {
         app.live.face = t.inRange ? t : null;
         // 摄像头看到你回来了（之前 10 分钟以上没看到人）
         if (app.live.face) {
-          if (!had && app.live.faceGoneAt && Date.now() - app.live.faceGoneAt >= 10 * 60_000) greetOnReturn({ awayMs: Date.now() - app.live.faceGoneAt, reason: 'face' });
+          if (!had && app.live.faceGoneAt && Date.now() - app.live.faceGoneAt >= 10 * 60_000) app.greetOnReturn({ awayMs: Date.now() - app.live.faceGoneAt, reason: 'face' });
           app.live.faceGoneAt = 0;
         } else if (had) app.live.faceGoneAt = Date.now();
       },
@@ -1670,7 +1502,7 @@ const syncController = createSyncController({
       const fresh = !app.active && app.history.length ? await sessionsApi.get(app.session.id) : null;
       if (fresh && fresh.messages.length !== app.history.length) {
         app.session = fresh;
-        reflectFrom = app.history.length;
+        app.reflectFrom = app.history.length;
         replayTranscript();
       }
     }
@@ -1718,13 +1550,7 @@ if (COMPACT) {
   $('#btn-side-back').addEventListener('click', () => app.closeSide());
 }
 
-schedulesPanel = initSchedulesPanel({
-  toast: (t) => toast(t),
-  runNow: async (s) => { if (schedulerBusy) { toast('有任务正在运行，稍后再试'); return; } schedulerBusy = true; try { const sess = await runScheduled(s); await openSession(sess.id); } finally { schedulerBusy = false; } },
-  openSession: (id) => openSession(id)
-});
-setInterval(schedulerTick, 30_000);
-setTimeout(schedulerTick, 4000);
+app.initSchedules();
 // 旧版的单条对话流迁移成会话；最近 6 小时内的对话自动接着聊
 (async () => {
   // 本地数据库打不开（比如另一个标签页还开着旧版、挡住了升级）：告诉用户，并且不做迁移，免得旧数据迁到临时存储里丢掉
@@ -1823,13 +1649,13 @@ window.__jarvis = {
   get palette() { return app.palette; },
   get mcp() { return app.mcpPanel; },
   get localModels() { return app.localModels; },
-  greetOnReturn,
+  greetOnReturn: app.greetOnReturn,
   habits,
-  memorizeHabits,
+  memorizeHabits: app.memorizeHabits,
   director: app.director,
   get callouts() { return app.callouts; },
-  schedulerTick,
-  reflectNow,
+  schedulerTick: app.schedulerTick,
+  reflectNow: app.reflectNow,
   settings,
   live: app.live,
   get stage() { return app.stage; },
