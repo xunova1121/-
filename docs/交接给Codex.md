@@ -1,3 +1,24 @@
+## 拆分 main.js、统一代码规范：2026-10-19 23:51（北京时间，Claude）
+
+- **`src/main.js` 从 2811 行拆到约 300 行，只做组装。** 功能按职责放进 `src/app/` 的 17 个模块，各模块管什么见 `docs/代码规范.md` 第 1 节。
+  - 只搬家，没改行为。`send()` 拆成了 4 步：`takeInput`、`chooseModel`、`turnEvents`、收尾。
+  - 模块间通过 `app` 上下文调用（`app/context.js`）。共享状态是 `app.session`、`app.active`、`app.gateway`、`app.llmConfig`；`app.history` 只读。
+- **以后改前端：**
+  - 改对应模块，不要往 `main.js` 里加；新模块用 `createXxx(app)` 写，再 `mount(app, …)`。
+  - **`mount` 的顺序不要乱调。**
+- **新增代码检查 `npm run lint`（CI 也跑，不过就不发版）：**
+  - ESLint 查没定义的变量、浏览器同名全局（`history`、`prompt`……）、未使用的导入；
+  - Prettier 只管 `src/app` 和 `main.js` 的格式，改完跑 `npm run format`。
+  - 新开发依赖：`eslint` 10.12.0、`globals` 17.12.0、`prettier` 3.9.9。
+- **报错翻译**（`friendlyError`）移到 `src/core/friendlyError.js`。
+- **规范与审查：** `docs/代码规范.md`。以后 Claude 和 GPT 改完都按第 7 节的“互相审查清单”自查，并在这里写结果。
+- **验证：**
+  - lint、单元测试 938 个全过；
+  - smoke 178/178、standalone 14/14、server-mobile 15/15、mobile-ui 78/78、conversation-flow、server-mode 13/13、sandbox-isolation、office-render 全过；
+  - 桌面版 hologram-desktop 11/11、pc-control 5/5 全过。
+  - `e2e/desktop.mjs` 34/35：“鼠标甩到左上角 = 紧急停止”在这台测试机的虚拟屏幕上失败，拆分前的代码同样失败，和这次改动无关。CI 不跑这一项。
+  - 真机没测。
+
 ## 检索证据架构审查修复：2026-10-19 21:07（北京时间，Claude；已发版，版本号见 GitHub Releases）
 
 详细交接（改动原因、各文件接口、注意事项、没做的）：`docs/交接给GPT-检索证据架构-20261019.md`。

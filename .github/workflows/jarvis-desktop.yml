@@ -180,6 +180,8 @@ jobs:
           npx playwright install --with-deps chromium
       - name: 完整单元测试
         run: npm test
+      - name: 代码检查（没定义的变量、浏览器同名全局、格式）
+        run: npm run lint
       - name: 验证评测入口与耗时统计
         run: npm run eval:check
       - name: 验证代码隔离与取消

@@ -15,12 +15,14 @@
 - 不要为了“和别人一样”推翻现有架构（必须同时支持网页、桌面、安卓三端；不引入 Python 运行时）。
 
 ## 改代码
+- 先读 `docs/代码规范.md`（结构、写法、互相审查清单；Claude 和 GPT 共用）。前端功能在 `src/app/` 各模块里，`main.js` 只做组装，不要往里加功能。
 - 跟周围代码保持一致：中文注释、命名和写法照旧。
 - 新依赖的版本要发布满两周以上。
 - 不要提交签名密钥（keystore 等），仓库是公开的。
 - 只打包 Windows 和安卓。
 
 ## 测试（在 `jarvis/` 下）
+- 代码检查：`npm run lint`，必须通过（查没定义的变量、浏览器同名全局、格式）。
 - 单元测试：`npx vitest run`，必须全部通过；新功能要加测试。
 - 构建：`npm run build`。
 - 端到端：`node e2e/smoke.mjs`（需要先启动 `node server/server.mjs`）、`npm run build:standalone && node e2e/standalone.mjs`。
