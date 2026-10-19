@@ -19,8 +19,6 @@ import { initHologramCompanion } from './ui/hologramScene.js';
 import { initRenderHealthPanel } from './mobile/renderHealth.js';
 import { initCompanionAppearance } from './ui/companionAppearance.js';
 let companion = null;
-import { imageButton, previewWorkspaceImage } from './ui/imagePreview.js';
-import { initCamera } from './ui/composerMedia.js';
 import { initConversationComposer } from './ui/conversationComposer.js';
 let mascots = null;
 let composer = null;
@@ -29,7 +27,6 @@ let composer = null;
 document.head.append(Object.assign(document.createElement('link'), { rel: 'icon', type: 'image/svg+xml', href: logoUrl }));
 import './mobile/boot.js'; // 安卓 App：先装好原生网络 / 朗读（其他版本里是空的）
 import { SentenceChunker } from './core/sentenceChunker.js';
-import { toPlainText, toSpeech } from './core/markdown.js';
 import { loadSettings, saveSettings } from './core/settings.js';
 import { runTeam, shouldTeam } from './agent/team.js';
 import { runAgent } from './agent/agent.js';
@@ -43,7 +40,6 @@ import { preApproved } from './agent/commandSafety.js';
 import * as compress from './agent/compress.js';
 import { storageProblem } from './agent/store.js';
 import * as habits from './agent/habits.js';
-import { prepareImage, isImageName } from './agent/images.js';
 import * as sessionsApi from './agent/sessions.js';
 import { initSessionsPanel } from './ui/sessionsPanel.js';
 import { openingSuggestions, followUpSuggestions, interruptionMark } from './core/suggest.js';
@@ -51,10 +47,9 @@ import { savePending, clearPending, takePending, resumeText, listPending } from 
 import { runRemote } from './core/serverClient.js';
 import { createPCModelAdapter } from './core/pcModelClient.js';
 import { initServerPanel } from './ui/serverPanel.js';
-import { initQuickPrompts } from './ui/quickPrompts.js';
 import { createSyncController } from './sync/controller.js';
 import { initSyncPanel, describeResult } from './ui/syncPanel.js';
-import { toolLabel, summarizeArgs, searchBrand, setActionIcon } from './ui/transcript.js';
+import { toolLabel, summarizeArgs, searchBrand } from './ui/transcript.js';
 import { stripEmotionTags } from '../shared/emotionTag.js';
 import { noteAction } from './mobile/renderDiagnostics.js';
 import { MOBILE } from './config.js';
@@ -74,6 +69,7 @@ import { createToolbox } from './app/toolbox.js';
 import { createRemoteTask } from './app/remoteTask.js';
 import { createConversations } from './app/conversations.js';
 import { createVoice } from './app/voice.js';
+import { createComposer } from './app/composer.js';
 
 
 // ---------------------------------------------------------------- 设置
@@ -86,11 +82,11 @@ function setSetting(key, value) {
   saveSettings(app.callRestore ? { ...settings, ...app.callRestore } : settings);
 }
 // main.js 里还没拆出去的函数：先挂到 app 上，拆出去的模块用 app.xxx 调用（函数声明会提升，这里就能挂）
-Object.assign(app, { setSetting, send, toBackground, autosize, finishTurn });
+Object.assign(app, { setSetting, send, toBackground, finishTurn });
 Object.defineProperties(app, { mascots: { get: () => mascots }, composer: { get: () => composer }, companion: { get: () => companion } });
 
 Object.defineProperties(app, {
-  taskKeeper: { get: () => taskKeeper }, backgroundTurns: { get: () => backgroundTurns }, prompt: { get: () => prompt }
+  taskKeeper: { get: () => taskKeeper }, backgroundTurns: { get: () => backgroundTurns }
 });
 Object.assign(app, { interrupt });
 
@@ -104,7 +100,6 @@ mount(app, createVoice(app));
 let turns = 0;
 const recentImages = new Map(); // 消息时间 → 这条消息带的图片（只在内存里，不存盘）
 const taskKeeper = createTaskKeeper(globalThis.__jarvisBackgroundTask, e => toast(e.message));
-const attachments = [];
 
 
 /** 打断（barge-in）：停止朗读并中止正在执行的任务 */
@@ -195,7 +190,7 @@ async function interject(text, { thumbs = [] } = {}) {
     turn.inbox.push(text); reply('收到补充，连接到原任务后会送达。'); return;
   } else {
     try { await app.server.appendTaskNote(turn.remoteId,text); }
-    catch(e) { if (!prompt.value.trim()) { prompt.value=text; autosize(); } reply('补充没有送达，已放回输入框。原任务不会重复执行；服务器较旧时请先更新服务器。'); return; }
+    catch(e) { if (!app.prompt.value.trim()) { app.prompt.value=text; app.autosize(); } reply('补充没有送达，已放回输入框。原任务不会重复执行；服务器较旧时请先更新服务器。'); return; }
   }
   reply(`收到，做完手上这一步就看这句话（${turnStatus(turn, now())}）。`);
 }
@@ -228,16 +223,16 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   noteAction(byVoice ? '语音提问' : '发消息');
   app.askNotifyOnce();
   text = String(text || '').trim();
-  if (!text && !attachments.length) return;
-  if (!attachments.length && companion?.perform(text)) return;
-  if (!text && attachments.some((a) => a.image)) text = '请看看这张图片。';
+  if (!text && !app.attachments.length) return;
+  if (!app.attachments.length && companion?.perform(text)) return;
+  if (!text && app.attachments.some((a) => a.image)) text = '请看看这张图片。';
   // 正在干活时又发了一句：不打断，问进度就直接答，别的话交给正在干的未央；说“停”才停
   if (echo && app.active && !app.active.streamDone) {
-    const extra = attachments.splice(0); renderAttachments();
+    const extra = app.attachments.splice(0); app.renderAttachments();
     if (app.server && extra.length) {
       try { for (const f of extra) await app.server.upload(f.path, await ws.readBlob(f.path)); }
-      catch (e) { attachments.unshift(...extra); renderAttachments(); if (!prompt.value.trim()) { prompt.value=text; autosize(); } toast(`附件未送达，已保留：${e.message}`); return; }
-      if (!app.active || app.active.streamDone) { attachments.unshift(...extra); renderAttachments(); return send(text,{echo,byVoice}); }
+      catch (e) { app.attachments.unshift(...extra); app.renderAttachments(); if (!app.prompt.value.trim()) { app.prompt.value=text; app.autosize(); } toast(`附件未送达，已保留：${e.message}`); return; }
+      if (!app.active || app.active.streamDone) { app.attachments.unshift(...extra); app.renderAttachments(); return send(text,{echo,byVoice}); }
     }
     const content = extra.length ? text + '\n\n[已上传到工作区：' + extra.map(f=>f.path).join('、') + ']' : text;
     return interject(content, { thumbs:extra.filter(f=>f.image).map(f=>({src:f.image.thumb,path:f.path})) });
@@ -248,8 +243,8 @@ async function send(text, { echo = true, byVoice = false } = {}) {
 
   // 持续聊天也保持有界；先重画已完成的历史，再追加本轮，避免重复消息。
   if (MOBILE && (app.historyViewEnd !== null || $('#transcript').querySelectorAll('.msg').length >= app.visibleHistory().limit)) app.replayTranscript();
-  const files = attachments.splice(0);
-  renderAttachments();
+  const files = app.attachments.splice(0);
+  app.renderAttachments();
   const userText = files.length ? `${text}\n\n[已上传到工作区：${files.map((f) => f.path).join('、')}]` : text;
   const imgs = files.filter((f) => f.image).map((f) => f.image);
   const thumbs = files.filter(f => f.image).map(f => ({ src:f.image.thumb, path:f.path }));
@@ -342,7 +337,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
         turn.remoteId=remoteTask.id;
         for(const note of turn.inbox.splice(0)) {
           try { await app.server.appendTaskNote(remoteTask.id,note); }
-          catch(e) { prompt.value += (prompt.value.trim()?'\n':'')+note; autosize(); toast('补充未送达原任务，已保留在输入框，请更新服务器或重新发送'); }
+          catch(e) { app.prompt.value += (app.prompt.value.trim()?'\n':'')+note; app.autosize(); toast('补充未送达原任务，已保留在输入框，请更新服务器或重新发送'); }
         }
       } });
     };
@@ -508,109 +503,13 @@ async function send(text, { echo = true, byVoice = false } = {}) {
     app.endControl();
     // 回答写完的一瞬间又收到的话（没来得及交给模型）：接着当一句新话处理
     const left = turn.inbox.splice(0);
-    if(left.length&&turn.remote){prompt.value+=(prompt.value.trim()?'\n':'')+left.join('\n');autosize();toast('未送达的补充已放回输入框，没有另开任务');}
+    if(left.length&&turn.remote){app.prompt.value+=(app.prompt.value.trim()?'\n':'')+left.join('\n');app.autosize();toast('未送达的补充已放回输入框，没有另开任务');}
     else if (left.length && !ctrl.signal.aborted && !turn.background && app.session === turn.session) setTimeout(() => send(left.join('\n'), { echo: false }), 0);
   }
 }
 
 
-// —— 输入框：Enter 发送，Shift+Enter 换行；随内容自动增高
-const prompt = $('#prompt');
-function autosize() { prompt.style.height = 'auto'; prompt.style.height = `${Math.min(prompt.scrollHeight, 160)}px`; composer?.refresh(); }
-$('#inputbar').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const v = prompt.value;
-  prompt.value = '';
-  autosize();
-  send(v);
-});
-// 手机（触屏）键盘没有 Shift：回车就是换行，点发送按钮才发送；电脑上回车发送、Shift+回车换行
-const enterSends = () => !MOBILE && !globalThis.matchMedia?.('(pointer: coarse)').matches;
-prompt.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && enterSends()) {
-    e.preventDefault();
-    $('#inputbar').requestSubmit();
-  }
-});
-prompt.addEventListener('input', (e) => {
-  autosize();
-  if (e.target.value && app.speaker.speaking) app.speaker.cancel(); // 开始打字即打断朗读
-  if (e.target.value && !app.active && app.machine.task !== 'listening') app.machine.beginUserTurn();
-});
-
-// —— 常用指令：把开头写好放进输入框，接着补充再发
-initQuickPrompts({
-  button: $('#btn-quick'),
-  onPick: (text) => {
-    prompt.value = prompt.value.trim() ? `${text}${prompt.value}` : text;
-    autosize();
-    prompt.focus();
-    prompt.setSelectionRange(prompt.value.length, prompt.value.length);
-  }
-});
-
-// —— 附件：上传 / 拖入的文件放进工作区“上传/”目录，并附在下一条消息里
-async function addFiles(list) {
-  for (const f of list) {
-    try {
-      const r = await ws.write(`上传/${f.name}`, f);
-      // 图片同时作为“看图”输入发给模型
-      const image = isImageName(f.name) ? await prepareImage(f).catch(() => null) : null;
-      attachments.push({ path: r.path, image });
-      app.panels.markFresh(r.path);
-    } catch (e) { toast(`${f.name}：${e.message}`); }
-  }
-  renderAttachments();
-  app.panels.refreshFiles();
-  prompt.focus();
-}
-function renderAttachments() {
-  queueMicrotask(() => composer?.refresh());
-  const box = $('#attach-list');
-  box.hidden = !attachments.length;
-  box.replaceChildren(...attachments.map((a, i) => {
-    const x = Object.assign(document.createElement('button'), { type: 'button', textContent: '✕', title: '移除' });
-    x.addEventListener('click', () => { attachments.splice(i, 1); renderAttachments(); });
-    const s = document.createElement('span');
-    if (a.image) {
-      s.className = 'has-thumb';
-      s.append(imageButton(a.image.thumb, () => previewWorkspaceImage(a.path,a.image.thumb).catch(e => toast(e.message))));
-    }
-    const label = Object.assign(document.createElement('span'), { className:'attach-name', textContent:a.image ? '图片 · 已上传工作区' : a.path.split('/').pop(), title:a.path });
-    s.append(label, x);
-    return s;
-  }));
-}
-// ＋菜单统一处理文件入口；原相机、文件上传处理器保留。
-initCamera({ button: $('#btn-camera'), input: $('#camera-input'), native: MOBILE || /Android|iPhone|iPad/i.test(navigator.userAgent), onFiles: addFiles, onError: e => toast(e.message) });
-addEventListener('jarvis:open-upload', e => { app.showPanel('workspace'); if (e.detail?.path) app.panels.openFile(e.detail.path); });
-// 粘贴截图 / 图片
-$('#prompt').addEventListener('paste', (e) => {
-  const imgs = [...(e.clipboardData?.items ?? [])].filter((it) => it.kind === 'file' && it.type.startsWith('image/')).map((it) => it.getAsFile()).filter(Boolean);
-  if (!imgs.length) return;
-  e.preventDefault();
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  addFiles(imgs.map((f, i) => new File([f], `粘贴-${stamp}${i ? `-${i}` : ''}.${(f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`, { type: f.type })));
-});
-$('#file-input').addEventListener('change', (e) => { addFiles([...e.target.files]); e.target.value = ''; });
-let dragDepth = 0;
-window.addEventListener('dragenter', (e) => { if (e.dataTransfer?.types?.includes('Files')) { dragDepth++; $('#drop-overlay').hidden = false; } });
-window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; $('#drop-overlay').hidden = true; } });
-window.addEventListener('dragover', (e) => e.preventDefault());
-window.addEventListener('drop', (e) => {
-  e.preventDefault();
-  dragDepth = 0;
-  $('#drop-overlay').hidden = true;
-  if (e.dataTransfer?.files?.length) addFiles([...e.dataTransfer.files]);
-});
-
-
-
-// 窄屏用短提示语，避免输入框被撑成好几行
-const narrowPrompt = matchMedia('(max-width: 860px)');
-const setPlaceholder = () => { $('#prompt').placeholder = narrowPrompt.matches ? '交给我一个任务……' : '交给我一个任务：写代码、做 PPT、分析文件、查资料……（Enter 发送，Shift+Enter 换行）'; };
-narrowPrompt.addEventListener?.('change', setPlaceholder);
-setPlaceholder();
+mount(app, createComposer(app));
 
 mount(app, createPanels(app));
 
@@ -618,41 +517,6 @@ mount(app, createView(app));
 globalThis.__jarvisToast = toast; // 手机原生保存文件时的进度提示
 
 
-// ---------------------------------------------------------------- 每条消息下面的“引用 / 朗读”（复制在 transcript.js 里直接做）
-let readingBtn = null;
-app.transcript.onAction = (kind, text, btn) => {
-  if (kind === 'quote') {
-    // 引用：把这条的开头放进输入框（“> ……”），接着打字问
-    const plainText = toPlainText(text).replace(/\s+/g, ' ').trim();
-    const excerpt = plainText.length > 100 ? `${plainText.slice(0, 100)}…` : plainText;
-    prompt.value = `> ${excerpt}\n${prompt.value.replace(/^> .*\n/, '')}`;
-    autosize();
-    prompt.focus();
-    prompt.setSelectionRange(prompt.value.length, prompt.value.length);
-    return;
-  }
-  if (kind === 'edit' || kind === 'retry') { app.rewindAndResend(kind, text); return; }
-  if (kind === 'speak') {
-    // 朗读这一条：再点一下停；只念正文，代码和表格不念
-    const again = readingBtn === btn && app.speaker.speaking;
-    app.speaker.cancel();
-    if (readingBtn) { setActionIcon(readingBtn, 'speak'); readingBtn.removeAttribute('aria-pressed'); readingBtn = null; }
-    if (again) return;
-    app.speaker.unlock();
-    noteAction('朗读一条回答');
-    const chunker = new SentenceChunker();
-    for (const s of [...chunker.push(toSpeech(text)), ...chunker.flush()]) app.speaker.speak(s);
-    readingBtn = btn;
-    setActionIcon(btn, 'stop');
-    btn.setAttribute('aria-pressed', 'true');
-    const watch = setInterval(() => {
-      if (readingBtn !== btn || (!app.speaker.speaking && !app.speaker.pending)) {
-        clearInterval(watch);
-        if (readingBtn === btn) { setActionIcon(btn, 'speak'); btn.removeAttribute('aria-pressed'); readingBtn = null; }
-      }
-    }, 600);
-  }
-};
 
 // ---------------------------------------------------------------- 恢复上次的设置
 $('#set-tts').checked = settings.readTyped;
@@ -834,7 +698,7 @@ document.addEventListener('keydown', (e) => {
   if (typing(document.activeElement)) return;
   if (e.key === '/') {
     e.preventDefault();
-    prompt.focus();
+    app.prompt.focus();
   } else if (e.code === 'Space' && app.voice.mode === 'ptt' && !e.repeat) {
     e.preventDefault();
     app.mic.classList.add('ptt-active');
@@ -916,7 +780,7 @@ if(MOBILE){
   const list=document.createElement('div');list.hidden=true;recovery.append(toggle,list);document.querySelector('[data-pane="settings"]').append(recovery);
   const draw=()=>{list.replaceChildren();const rows=listPending(storage);if(!rows.length){list.textContent='没有保留的未完成任务。';return;}
     for(const rec of rows){const card=document.createElement('div'),title=document.createElement('p');title.textContent=rec.title||String(rec.text||'未完成任务').slice(0,40);
-      const open=document.createElement('button');open.type='button';open.className='btn sm';open.textContent='查看并继续';open.onclick=async()=>{await app.openSession(rec.sessionId);prompt.value=resumeText(rec);autosize();app.showPanel('settings',{toggle:true});prompt.focus();};
+      const open=document.createElement('button');open.type='button';open.className='btn sm';open.textContent='查看并继续';open.onclick=async()=>{await app.openSession(rec.sessionId);app.prompt.value=resumeText(rec);app.autosize();app.showPanel('settings',{toggle:true});app.prompt.focus();};
       const dismiss=document.createElement('button');dismiss.type='button';dismiss.className='btn ghost sm';dismiss.textContent='不再继续';dismiss.onclick=()=>{clearPending(storage,rec.sessionId,rec.turnId);draw();};card.append(title,open,dismiss);list.append(card);
     }
   };toggle.onclick=()=>{list.hidden=!list.hidden;if(!list.hidden)draw();};
