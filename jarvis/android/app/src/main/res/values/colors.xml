@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App 背景（淡紫，和网页里的白天配色一致） -->
+    <color name="jarvis_bg">#DDE1FB</color>
+    <!-- 启动页底色：和网页里的动画启动页一样是白色，接得上 -->
+    <color name="splash_bg">#FFFFFF</color>
+</resources>
