@@ -22,7 +22,7 @@ export function serverAPI(base, token, fetchImpl = fetch) {
 export const terminal = s => ['done', 'error', 'stopped'].includes(s);
 
 /** 不自动重发POST。每题独立会话；超时或协议失败时停止已知任务。 */
-export async function runCase(api, item, { runId = randomUUID(), now = Date.now, wait = ms => new Promise(r => setTimeout(r, ms)) } = {}) {
+export async function runCase(api, item, { runId = randomUUID(), now = Date.now, wait = ms => new Promise(r => setTimeout(r, ms)), signal } = {}) {
   const started = now(), requestId = `eval_${randomUUID()}`;
   const workspace = `evals/${runId}/${item.id}`;
   const prompt = item.prompt.replaceAll('{{workspace}}', workspace);
@@ -31,10 +31,12 @@ export async function runCase(api, item, { runId = randomUUID(), now = Date.now,
     workspace, targetMs: item.targetMs, timeoutMs: item.timeoutMs,
     status: 'not_started', quality: 'not_reviewed', cost: null, costReason: '接口尚未提供完整计费数据' };
   try {
+    if (signal?.aborted) { result.status='client_cancelled'; result.quality='execution_failed'; return result; }
     accepted = await api('/api/tasks', { text: prompt, requestId });
     if (!accepted.id || !accepted.sessionId || accepted.joined) throw new Error('服务器未创建独立评测任务');
     result.taskId = accepted.id; result.sessionId = accepted.sessionId;
     for (;;) {
+      if (signal?.aborted) { result.status='client_cancelled'; break; }
       if (now() - started >= item.timeoutMs) { result.status = 'client_timeout'; break; }
       info = await api(`/api/tasks/${accepted.id}`);
       if (now() - started >= item.timeoutMs) { result.status = 'client_timeout'; break; }
@@ -115,12 +117,14 @@ export async function main(args = process.argv.slice(2), env = process.env) {
     ] };
   // 提交前写可读报告，输出目录不可写时不消耗模型额度。
   await fs.writeFile(out, JSON.stringify(report,null,2), { mode:0o600, flag:'wx' });
-  for (const item of selected) {
-    const r = await runCase(api,item,{runId}); report.results.push(r); report.summary=summarize(report.results);
+  const ctrl=new AbortController();const stop=()=>ctrl.abort();
+  process.once('SIGINT',stop);process.once('SIGTERM',stop);
+  try { for (const item of selected) {
+    const r = await runCase(api,item,{runId,signal:ctrl.signal}); report.results.push(r); report.summary=summarize(report.results);
     await fs.writeFile(out,JSON.stringify(report,null,2),{mode:0o600});
     console.log(`${item.id}: ${r.status}，${r.clientTotalMs}ms，质量待按验收标准复核`);
-    if (r.status==='submission_unknown' || r.cleanupWarning) break;
-  }
+    if (ctrl.signal.aborted || r.status==='submission_unknown' || r.cleanupWarning) break;
+  } } finally { process.removeListener('SIGINT',stop);process.removeListener('SIGTERM',stop); }
   report.finishedAt=new Date().toISOString(); await fs.writeFile(out,JSON.stringify(report,null,2),{mode:0o600});
   console.log(`报告已保存：${out}`);
 }

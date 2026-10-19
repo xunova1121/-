@@ -65,3 +65,12 @@ test('追加前已结束必须注明未覆盖补充场景，不能算通过',asy
   const api=async(route)=>route==='/api/tasks'?{id:'t',sessionId:'s'}:route==='/api/tasks/t'?{status:'done',files:[]}:{messages:[]};
   const r=await runCase(api,cases.at(-1));assert.equal(r.note.sent,false);assert.ok(r.protocolIssue);r.quality='passed';assert.equal(summarize([r]).verifiedPassed,0);
 });
+test('取消评测会停止已知任务，预取消不提交',async()=>{
+  const ctrl=new AbortController();ctrl.abort();let calls=0;
+  const early=await runCase(async()=>{calls++;},cases[0],{signal:ctrl.signal});
+  assert.equal(early.status,'client_cancelled');assert.equal(calls,0);
+  const active=new AbortController();let stops=0;
+  const api=async route=>{if(route==='/api/tasks')return{id:'t',sessionId:'s'};if(route.endsWith('/stop')){stops++;return{ok:true};}return{status:'running'};};
+  const r=await runCase(api,cases[0],{signal:active.signal,wait:async()=>active.abort()});
+  assert.equal(r.status,'client_cancelled');assert.equal(stops,1);
+});
