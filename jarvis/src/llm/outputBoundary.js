@@ -1,4 +1,5 @@
 /** 只隔离显式推理标签和已知的内部草稿开头，不按语言过滤正常英文、代码。 */
+// 按模型步骤创建实例，不能在不同会话之间共享未完成片段。
 export class OutputBoundary {
   constructor() {
     this.pending = '';
