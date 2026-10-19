@@ -55,6 +55,7 @@ export function formatWttr(placeName, j, days = 3) {
  * @param {{ get: (url: string) => Promise<Response>, days?: number }} o
  */
 export async function getWeather(place, { get, days = 3, signal, retrieval }) {
+  if (!String(place || '').trim()) throw Object.assign(new Error('缺少地点，请提供城市或定位结果，不能默认猜测城市'), { code: 'WEATHER_LOCATION_REQUIRED', name: 'ValidationError' });
   const name = String(place || '').trim().replace(/(市|区|县)$/, '') || '北京';
   const json = url => retryRead(async requestSignal => { const response = await get(url, { signal: requestSignal }); if (!response.ok) throw httpError(response.status, '', '天气服务'); return response.json(); }, { signal, timeoutMs: 4000, beforeAttempt: () => retrieval?.consume('read') });
   let firstErr;
