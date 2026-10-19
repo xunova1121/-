@@ -45,6 +45,12 @@ export function createDesktopTools(desktop, ctx = {}) {
   const PATH_HINT = '可以用绝对路径，或以 ~、桌面、文档、下载 开头（如“桌面/报告.docx”）';
   return [
     {
+      name: 'computer_capabilities',
+      description: '查看当前PC本机的真实工具能力、系统与常用文件夹路径；不代表所有软件都已安装。',
+      input_schema: S({}),
+      run: async () => `当前为PC本机执行（${desktop.platform}）。支持文件搜索/读取/写入/备份、打开程序、运行命令、截屏及鼠标键盘。看屏操作需要支持图片的模型和系统权限。\n常用路径：${JSON.stringify(desktop.paths || await call('paths'))}\n工具存在不等于任务已经完成；应检查返回值或操作后的屏幕。`
+    },
+    {
       name: 'computer_list_dir',
       description: `列出电脑上某个文件夹的内容（文件名、大小、修改时间）。${PATH_HINT}。`,
       input_schema: S({ path: str('文件夹路径') }, ['path']),
@@ -56,11 +62,20 @@ export function createDesktopTools(desktop, ctx = {}) {
     },
     {
       name: 'computer_search',
-      description: '在电脑的某个文件夹（含子文件夹）里按文件名搜索。',
-      input_schema: S({ dir: str(`从哪个文件夹开始搜索。${PATH_HINT}`), keyword: str('文件名里包含的关键词') }, ['dir', 'keyword']),
+      description: '按文件名搜索本机电脑。dir不填时同时查桌面、文档、下载；已知位置可指定文件夹。不等于搜索虚拟工作区，也不代表搜遍全盘。',
+      input_schema: S({ dir: str(`可选，从哪个文件夹开始搜索；不填查桌面、文档、下载。${PATH_HINT}`), keyword: str('文件名里包含的关键词；完整名称找不到时改用关键名称') }, ['keyword']),
       run: async ({ dir, keyword }) => {
-        const r = await call('search', { dir, keyword });
-        return r.hits.length ? `找到 ${r.hits.length} 个${r.truncated ? '（只显示前 50 个）' : ''}：\n${r.hits.join('\n')}` : `在 ${r.dir} 里没有找到文件名包含「${keyword}」的文件。`;
+        if (!String(keyword ?? '').trim()) throw new Error('请输入文件名关键词');
+        const roots = dir ? [dir] : ['桌面', '文档', '下载'];
+        const results = await Promise.allSettled(roots.map(root => call('search', { dir: root, keyword: String(keyword).trim() })));
+        const hits = new Set(), notes = [];
+        results.forEach((result,i) => {
+          if (result.status === 'rejected') { notes.push(`${roots[i]}：搜索失败或不可访问`); return; }
+          const r=result.value;for(const p of r.hits)hits.add(p);
+          notes.push(`${r.dir}：${r.hits.length}个匹配${r.truncated?'，搜索达到范围/数量限制':''}${r.skipped?'，部分目录不可访问':''}`);
+        });
+        if(results.every(r=>r.status==='rejected'))throw new Error(`本机搜索失败：${notes.join('；')}`);
+        return `${hits.size ? `找到 ${hits.size} 个匹配：\n${[...hits].join('\n')}` : `在以下已查位置未找到文件名包含「${keyword}」的文件，不代表整台电脑不存在。`}\n搜索范围：\n${notes.join('\n')}`;
       }
     },
     {
@@ -240,8 +255,8 @@ function guiTools(call, ctx) {
   let started = false;
   const begin = async () => {
     if (started) return;
-    started = true;
     const r = await call('controlBegin');
+    started = true;
     ctx.onControlStart?.(r);
   };
   const look = async (note = '') => {
@@ -254,10 +269,11 @@ function guiTools(call, ctx) {
   };
   const act = async (a, note) => {
     await begin();
-    if (!shot && a.type !== 'key' && a.type !== 'type') throw new Error('还没看过屏幕：先调用 computer_look 截图，再按截图上的位置操作');
+    if (!shot) throw new Error('还没看过屏幕：先调用 computer_look 确认当前窗口和焦点，再操作');
     const n = (v) => (v === undefined ? undefined : Number(v));
-    await call('controlAct', { ...a, x: n(a.x), y: n(a.y), toX: n(a.toX), toY: n(a.toY), imgW: shot?.w, imgH: shot?.h });
-    return look(`${note}。`);
+    const before=shot;shot=null; // 失败或返回截图失败时，不能继续使用旧坐标
+    await call('controlAct', { ...a, x: n(a.x), y: n(a.y), toX: n(a.toX), toY: n(a.toY), imgW: before.w, imgH: before.h });
+    return look(`${note}；请核对新截图确认效果。`);
   };
   const where = (a) => `(${Math.round(a.x)}, ${Math.round(a.y)})`;
   const approve = (title, detail) => ({ key: 'gui-control', title, detail: `${detail}\n\n操作期间未央窗口会暂时隐藏。随时可以把鼠标甩到屏幕左上角，或按 Ctrl+Alt+Q（Mac：Cmd+Option+Q）紧急停止。` });
@@ -306,3 +322,4 @@ function guiTools(call, ctx) {
     }
   ];
 }
+

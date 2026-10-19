@@ -59,7 +59,7 @@ async function exists(p) {
  * @param {ReturnType<import('./backups.mjs').createBackups>} [deps.backups]  改文件前自动备份（见 backups.mjs）；不传就不备份
  */
 export function createOps(deps = {}) {
-  const paths = userPaths();
+  const paths = { ...userPaths(), ...deps.paths };
   const platform = deps.platform ?? process.platform;
   const R = (p) => resolvePath(p, paths);
   const bk = deps.backups ?? null;
@@ -85,25 +85,30 @@ export function createOps(deps = {}) {
 
     async search({ dir, keyword, limit = 50 }) {
       const root = R(dir);
-      const kw = String(keyword).toLowerCase();
+      const kw = String(keyword??'').trim().toLowerCase();
+      if(!kw)throw new Error('文件名关键词不能为空');
+      limit = Number.isFinite(limit) ? Math.min(100,Math.max(1,Math.floor(limit))) : 50;
       const hits = [];
       const skip = /^(node_modules|\.git|\.cache|AppData|Library|\$Recycle\.Bin|System Volume Information)$/i;
       const queue = [[root, 0]];
-      let visited = 0;
-      while (queue.length && hits.length < limit && visited < 20000) {
+      const now=deps.now??Date.now,t0=now();
+      let visited = 0, skipped=0, depthLimited=false, reason='';
+      while (queue.length && hits.length < limit && visited < 20000 && now()-t0<5000) {
         const [d, depth] = queue.shift();
         let items;
-        try { items = await fs.readdir(d, { withFileTypes: true }); } catch { continue; }
+        try { items = await fs.readdir(d, { withFileTypes: true }); } catch { skipped++; continue; }
         for (const it of items) {
+          if(visited>=20000||now()-t0>=5000)break;
           visited++;
           if (it.name.startsWith('.')) continue;
           const full = path.join(d, it.name);
           if (it.name.toLowerCase().includes(kw)) hits.push(it.isDirectory() ? `${full}${path.sep}` : full);
           if (hits.length >= limit) break;
-          if (it.isDirectory() && depth < 6 && !skip.test(it.name)) queue.push([full, depth + 1]);
+          if (it.isDirectory() && !skip.test(it.name)) { if(depth<6)queue.push([full,depth+1]);else depthLimited=true; }
         }
       }
-      return { dir: root, hits, truncated: hits.length >= limit };
+      if(hits.length>=limit)reason='匹配数量上限';else if(visited>=20000)reason='扫描数量上限';else if(now()-t0>=5000)reason='搜索时间预算';else if(depthLimited)reason='目录深度上限';
+      return { dir: root, hits, truncated: Boolean(reason), reason, scanned:visited, skipped };
     },
 
     async stat({ path: p }) {
@@ -183,14 +188,15 @@ export function createOps(deps = {}) {
 
     async open({ target }) {
       const t = String(target).trim();
-      if (/^(https?|mailto):/i.test(t)) { await deps.shell.openExternal(t); return { message: `已在浏览器打开 ${t}` }; }
+      if (/^(https?|mailto):/i.test(t)) { await deps.shell.openExternal(t); return { message: `已向浏览器提交打开请求：${t}；页面加载结果尚未核验` }; }
       let f = null;
       try { f = R(t); } catch { /* 不是路径 */ }
       if (f && fss.existsSync(f)) {
         const err = await deps.shell.openPath(f);
         if (err) throw new Error(err);
-        return { message: `已打开 ${f}` };
+        return { message: `已向系统提交打开请求：${f}；应用显示结果尚未核验` };
       }
+      if(path.isAbsolute(t)||/^[a-z]:[\\/]|[\\/]|\.(docx?|xlsx?|pptx?|pdf|txt|csv|md)$/i.test(t))throw new Error(`本机路径不存在：${t}；请先搜索确认真实路径，不会把它当程序执行`);
       // 不是文件：当作程序名启动
       const r = await launchApp(t, platform);
       return { message: r };
@@ -259,3 +265,4 @@ export async function launchApp(name, platform = process.platform) {
   if (r.code !== 0) throw new Error(`没能打开「${name}」：${(r.stderr || r.stdout).split('\n')[0] || '找不到这个程序'}`);
   return `已打开 ${name}`;
 }
+

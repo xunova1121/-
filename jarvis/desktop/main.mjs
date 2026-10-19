@@ -9,7 +9,7 @@ import { app, BrowserWindow, ipcMain, shell, clipboard, Notification, desktopCap
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createOps, userPaths } from './ops.mjs';
+import { createOps } from './ops.mjs';
 import { createBackups } from './backups.mjs';
 import { createControl, STOP_HOTKEY } from './control.mjs';
 import { createWallpaper } from './wallpaper.mjs';
@@ -76,7 +76,10 @@ const pathToUrl = (p) => pathToFileURL(p).href;
 // 改文件前自动备份：存在数据文件夹的 backups 里，30 天 / 500 MB 以内（见 backups.mjs）
 const backups = createBackups({ dir: path.join(process.env.JARVIS_HOME, 'backups'), trash: (p) => shell.trashItem(p) });
 backups.prune().catch(() => {});
+// 采用系统实际位置，支持OneDrive重定向、移到D盘的桌面/文档等。
+const computerPaths = Object.fromEntries(['home', 'desktop', 'documents', 'downloads', 'pictures'].map(k => [k, app.getPath(k)]));
 const ops = createOps({
+  paths: computerPaths,
   backups,
   shell,
   clipboard,
@@ -105,6 +108,7 @@ Object.assign(ops, {
   },
   controlLook: () => control.look(),
   controlAct: (a) => control.act(a),
+  async controlPause() { control.end(); return {ok:true}; },
   async controlEnd() {
     control.end();
     if (globalShortcut.isRegistered(STOP_HOTKEY)) globalShortcut.unregister(STOP_HOTKEY);
@@ -193,7 +197,7 @@ ipcMain.handle('jarvis:desktop', async (e, op, args) => {
   try { return { ok: true, value: await fn(args ?? {}) }; } catch (err) { return { ok: false, error: err.message || String(err) }; }
 });
 ipcMain.on('jarvis:info', (e) => {
-  e.returnValue = { platform: process.platform, version: app.getVersion(), paths: userPaths(app.getPath('home')) };
+  e.returnValue = { platform: process.platform, version: app.getVersion(), paths: computerPaths };
 });
 ipcMain.handle('jarvis:window', (e, action, value) => {
   if (!fromOurPage(e) || !win) return false;
@@ -351,5 +355,6 @@ app.on('window-all-closed', () => {
   // 关闭窗口只是隐藏到托盘；测试模式直接退出
   if (TEST) app.quit();
 });
+
 
 

@@ -78,6 +78,7 @@ import { initCallouts } from './ui/callouts.js';
 import { openingSuggestions, followUpSuggestions, INTERRUPTED_MARK } from './core/suggest.js';
 import { savePending, clearPending, takePending, resumeText, listPending } from './core/pendingTask.js';
 import { loadServerSettings, createServerClient, runRemote, remoteSessions, normalizeUrl } from './core/serverClient.js';
+import { createPCModelAdapter } from './core/pcModelClient.js';
 import { initServerPanel } from './ui/serverPanel.js';
 import { initQuickPrompts } from './ui/quickPrompts.js';
 import * as mcp from './agent/mcpClient.js';
@@ -113,7 +114,7 @@ import { generateImage } from './llm/images.js';
 import { generateVideo } from './llm/videos.js';
 import { createFormDirector } from './core/formDirector.js';
 import { composeGreeting, GREET_GAP_MS } from './core/greeting.js';
-import { classifyTask, routeFor, TASKS, seesImages, fallbackRoutes, effortFor, isSmallTalk, needsComputer } from './llm/router.js';
+import { classifyTask, routeFor, TASKS, seesImages, fallbackRoutes, effortFor, isSmallTalk, needsComputer, computerTaskKind } from './llm/router.js';
 import { resolveTheme, toggled, THEMES } from './core/theme.js';
 import { FORMS } from './render/formations.js';
 import { resolveQuality } from './core/quality.js';
@@ -1217,17 +1218,23 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   if (MOBILE && !server) savePending(storage,session.id,{turnId:turn.t0,text:userText,title:session.title||'',ts:Date.now(),steps:[],files:[],checkpoint:turn.checkpoint});
 
   // 模型分工：按这句话的类型换模型；日常对话让推理模型少想一点（首字更快）
-  const task = shouldTeam(text, settings.teamMode === 'auto' && !helperLlm() ? 'off' : settings.teamMode) ? 'reason' : classifyTask(text, { images: imgs.length + withImages.size });
+  const computerKind = DESKTOP ? computerTaskKind(text,{history}) : null;
+  const task = computerKind === 'gui' ? 'vision' : shouldTeam(text, settings.teamMode === 'auto' && !helperLlm() ? 'off' : settings.teamMode) ? 'reason' : classifyTask(text, { images: imgs.length + withImages.size });
   const route = routeFor(llmConfig, task);
-  const { adapter, model, problem } = createAdapter(route.cfg, { gateway });
+  const remotePC=Boolean(server&&computerKind);
+  const local=createAdapter(route.cfg,{gateway});
+  const model=remotePC?'服务器模型':local.model;
+  let usedModel=model;
+  const adapter=remotePC?createPCModelAdapter(server,{task,onModel:m=>{usedModel=m;}}):local.adapter;
+  const problem=remotePC?null:local.problem;
   if (COMPACT && isAuto(llmConfig) && model && !server) $('#model-chip-text').textContent = `自动 · ${model}`;
   // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省
   const effort = effortFor(task, text, llmConfig);
-  if (route.routed) hud.think(`◇ 模型分工：${TASKS[task].name} → ${route.model}`);
+  if (route.routed&&!remotePC) hud.think(`◇ 模型分工：${TASKS[task].name} → ${route.model}`);
   // 服务器模式下电脑版：要动这台电脑的事（桌面、文件夹、打开软件……）留在本机做，其余交给服务器
-  const here = Boolean(server && DESKTOP && needsComputer(text));
+  const here = Boolean(server && DESKTOP && computerKind);
   turn.remote=Boolean(server&&!here);
-  if (here) hud.think('◇ 这件事要操作这台电脑：在本机做');
+  if (here) hud.think('◇ 服务器模型推理，电脑工具在本机执行');
   if (problem && (!server || here)) { // 服务器模式：用服务器上的模型设置
     bubble.append(problem);
     bubble.done();
@@ -1239,8 +1246,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   }
 
   // 备用模型：当前模型出错（重试后还不行）时自动换着用
-  const fallbacks = fallbackRoutes(llmConfig, { provider: route.cfg.provider, model }).map((f) => ({ ...createAdapter(f.cfg, { gateway }), label: f.model })).filter((f) => !f.problem && f.adapter && f.model);
-  let usedModel = model; // 换过备用模型时，回答下面写实际用的那个
+  const fallbacks = remotePC ? [] : fallbackRoutes(llmConfig, { provider: route.cfg.provider, model }).map((f) => ({ ...createAdapter(f.cfg, { gateway }), label: f.model })).filter((f) => !f.problem && f.adapter && f.model);
 
   // 语音对话中、或者是说话提问的：念回答；打字提问只显示（设置里打开“打字提问也朗读”除外）
   const spoken = callActive || byVoice || settings.readTyped;
@@ -1258,7 +1264,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   let ctxMs = null;
   callouts?.retract();
   // 内置演示模式下“自动”不触发（规则拆步效果有限），只认明确的“/团队 …”或“总是”
-  const team = !server && shouldTeam(text, settings.teamMode === 'auto' && !helperLlm() ? 'off' : settings.teamMode);
+  const team = !server && !computerKind && shouldTeam(text, settings.teamMode === 'auto' && !helperLlm() ? 'off' : settings.teamMode);
   let teamCard = null;
   const releaseTask = taskKeeper.begin();
   try {
@@ -1277,7 +1283,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
       llm: team ? helperLlm('reason') : undefined,
       pickModel: team ? modelForRole : undefined,
       effort,
-      adapter, model, history: llmHistory, userText: team ? userText : await expandSlash(userText), signal: ctrl.signal,
+      adapter, model, history: llmHistory, userText: team ? userText : await expandSlash(userText), signal: ctrl.signal, computerTask: computerKind,
       sessionId: session.id,
       summary: session.summary ?? null,
       requirements: collectRequirements(history, session.requirements),
@@ -1294,14 +1300,18 @@ async function send(text, { echo = true, byVoice = false } = {}) {
       maxSteps: DESKTOP ? 40 : 28, // 用鼠标键盘操作电脑、逐项联网核实时步数多
       images: imgs.map(({ mime, data }) => ({ mime, data })),
       tools: server && !here ? [] : await buildTools({ turn }),
-      approve: (req) => {
+      approve: async (req) => {
         if (preApproved(req, { sessionKeys: sessionApprovals })) return true; // 危险命令每次都问
+        // 看屏幕后主窗口已隐藏，确认卡必须先恢复可见；保持紧急停止热键有效。
+        if(controlActive&&DESKTOP)await DESKTOP.invoke('controlPause');
+        if(ctrl.signal.aborted)return false;
         setTask('processing', '等待你确认');
-        const aborted = new Promise((r) => ctrl.signal.addEventListener('abort', () => r('deny'), { once: true }));
-        return Promise.race([bubble.confirm(req), aborted]).then((v) => {
+        let cancel;
+        const aborted = new Promise((r) => {cancel=()=>r('deny');ctrl.signal.addEventListener('abort',cancel,{once:true});});
+        try { const v=await Promise.race([bubble.confirm(req), aborted]);
           if (v === 'session' && req.key) sessionApprovals.add(req.key);
           return v !== 'deny';
-        });
+        } finally {ctrl.signal.removeEventListener('abort',cancel);}
       },
       emit: (e) => {
         if (e.type === 'tool_start' && e.name !== 'update_plan') { turn.steps++; turn.status = toolLabel(e.name); }
@@ -1380,7 +1390,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
     if (active !== turn) return;
     speech.flush();
     const total = now() - t0;
-    const modelTag = server && !here ? '服务器 · ' : here ? `本机 · ${model} · ` : providerById(llmConfig.provider)?.kind === 'mock' ? '' : usedModel !== model ? `${usedModel}（${model} 出错后换用） · ` : `${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
+    const modelTag = server && !here ? '服务器 · ' : here ? `本机工具 · ${usedModel} · ` : providerById(llmConfig.provider)?.kind === 'mock' ? '' : usedModel !== model ? `${usedModel}（${model} 出错后换用） · ` : `${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
     bubble.done(`${modelTag}${team ? `团队 ${result.steps} 步 · ` : ''}${ctxMs !== null && ctxMs >= 300 ? `准备 ${(ctxMs / 1000).toFixed(1)}s · ` : ''}${firstToken ? `首字 ${((firstToken - t0) / 1000).toFixed(1)}s · ` : ''}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}${MOBILE && textChunks ? ` · 分 ${textChunks} 次收到${globalThis.__jarvisNetVia?.(llmConfig.baseURLs?.[llmConfig.provider] || '') === 'native' ? '（原生网络）' : ''}` : ''}`, {
       onFeedback: async (kind, comment) => {
         if (kind === 'up') await agentMemory.noteTask(`获得好评：${text.slice(0, 30)}`);
@@ -2797,3 +2807,4 @@ if(MOBILE){
     }
   };toggle.onclick=()=>{list.hidden=!list.hidden;if(!list.hidden)draw();};
 }
+

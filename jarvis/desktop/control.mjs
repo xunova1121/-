@@ -63,7 +63,7 @@ export function createControl(d) {
     const w = d.getWin();
     if (w && w.isVisible() && !w.isMinimized()) {
       hidden = true;
-      if (platform === 'darwin') w.hide(); else w.minimize();
+      w.hide(); // 隐藏比依赖系统最小化动画更可靠，截屏不包含未央自身
       await sleep(350); // 等窗口动画结束
     }
   }
@@ -76,11 +76,14 @@ export function createControl(d) {
       checkPermission();
       if (stopped) throw new Error('用户已紧急停止电脑操作');
       await hideSelf();
+      if (stopped) throw new Error('用户已紧急停止电脑操作');
       const disp = d.screen.getPrimaryDisplay();
       const w = Math.min(MAX_W, disp.size.width);
       const size = { width: w, height: Math.round(w * disp.size.height / disp.size.width) };
-      const [src] = await d.desktopCapturer.getSources({ types: ['screen'], thumbnailSize: size });
+      const sources = await d.desktopCapturer.getSources({ types: ['screen'], thumbnailSize: size });
+      const src = sources.find(s=>String(s.display_id)===String(disp.id)) || (sources.length===1?sources[0]:null);
       if (!src) throw new Error('无法截屏（macOS 需要在“系统设置 → 隐私与安全性 → 屏幕录制”里允许未央）');
+      if (stopped) throw new Error('用户已紧急停止电脑操作');
       const img = src.thumbnail;
       const cur = d.screen.getCursorScreenPoint();
       const sz = img.getSize();
@@ -97,6 +100,7 @@ export function createControl(d) {
       checkPermission();
       checkFailsafe();
       await hideSelf();
+      checkFailsafe(); // 隐藏窗口的等待期间也可能收到停止
       const disp = d.screen.getPrimaryDisplay();
       const map = (x, y) => toScreen({ x, y, imgW: a.imgW, imgH: a.imgH }, disp, platform, platform === 'win32' ? d.screen.dipToScreenPoint?.bind(d.screen) : null);
       if (a.type === 'type') {
@@ -104,19 +108,23 @@ export function createControl(d) {
         if (!text) throw new Error('没有要输入的文字');
         const old = d.clipboard.readText();
         d.clipboard.writeText(text);
-        await sleep(60);
-        await input.run({ type: 'key', keys: pasteCombo(platform) });
-        await sleep(250);
-        d.clipboard.writeText(old);
-        if (a.enter) await input.run({ type: 'key', keys: 'enter' });
+        try {
+          await sleep(60);checkFailsafe();
+          await input.run({ type: 'key', keys: pasteCombo(platform) });
+          await sleep(250);
+        } finally {
+          // 输入失败也恢复；用户同时复制了新内容时不覆盖用户的新剪贴板。
+          if(d.clipboard.readText()===text)d.clipboard.writeText(old);
+        }
+        if (a.enter) { checkFailsafe(); await input.run({ type: 'key', keys: 'enter' }); }
       } else if (a.type === 'key') {
         await input.run({ type: 'key', keys: a.keys });
       } else {
         const p = map(a.x, a.y);
         const to = a.type === 'drag' ? map(a.toX, a.toY) : {};
         await input.run({ ...a, x: p.x, y: p.y, toX: to.x, toY: to.y });
-        lastPoint = d.screen.getCursorScreenPoint();
       }
+      lastPoint = d.screen.getCursorScreenPoint();
       lastActionAt = Date.now();
       await sleep(a.type === 'type' || a.type === 'key' ? 300 : 450); // 等界面反应过来再截下一张
       return { ok: true };
@@ -134,3 +142,4 @@ export function createControl(d) {
     close() { input.close(); }
   };
 }
+

@@ -20,7 +20,7 @@ export const CORE = new Set([
   'update_plan', 'delegate_task', 'find_files', 'search_in_files', 'read_task_requirements', 'read_tool_result',
   'list_files', 'read_file', 'write_file', 'edit_file', 'create_document', 'write_long_document', 'edit_office_document',
   'run_javascript', 'run_python', 'preview',
-  'computer_list_dir', 'computer_read_file', 'computer_write_file', 'computer_edit_file', 'computer_edit_office_document', 'computer_run', 'computer_open'
+  'computer_capabilities', 'computer_list_dir', 'computer_search', 'computer_read_file', 'computer_write_file', 'computer_edit_file', 'computer_edit_office_document', 'computer_run', 'computer_open'
 ]);
 
 const firstSentence = (d) => String(d ?? '').split(/[。\n]/)[0].slice(0, 40);
@@ -102,4 +102,5 @@ export function createToolLoader(tools, { limit = LIMIT } = {}) {
     isActive: (name) => active.has(name)
   };
 }
+
 

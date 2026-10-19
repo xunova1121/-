@@ -118,11 +118,12 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     /** @returns {Promise<string>} 令牌 */
     async login(password) { return (await req('/api/server/login', { method: 'POST', body: { password } })).token; },
     health: () => req('/api/health'),
-    status: () => req('/api/server/status'),
+    status: (signal) => req('/api/server/status',{signal}),
     getConfig: () => req('/api/server/config'),
     putConfig: (cfg) => req('/api/server/config', { method: 'PUT', body: cfg }),
     updateInfo: () => req('/api/server/update'),
     requestUpdate: () => req('/api/server/update', { method: 'POST' }),
+    modelEvents: (body,signal) => req('/api/server/pc-model',{method:'POST',body,raw:true,signal,headers:{Accept:'text/event-stream'}}),
     startTask: (o) => taskWrite('/api/tasks',o),
     appendTaskNote: (id,text) => taskWrite(`/api/tasks/${encodeURIComponent(id)}/notes`,{text}),
     getTask: (id) => req(`/api/tasks/${id}`),
@@ -298,3 +299,4 @@ export function remoteSessions(client, { storage = globalThis.localStorage } = {
     }
   };
 }
+

@@ -37,6 +37,7 @@ import { seedBuiltins } from '../src/agent/skillPacks.js';
 import * as sessions from '../src/agent/sessions.js';
 import * as ws from '../src/agent/workspace.js';
 import { DEFAULT_CONFIG } from '../src/llm/config.js';
+import { streamPCModel } from './pcModelBridge.mjs';
 
 const UPLOAD_LIMIT = 50 * 1024 * 1024;
 /** 程序所在目录（安装包里的 VERSION 文件在这里） */
@@ -64,7 +65,7 @@ export function mergeConfig(old, next) {
 /**
  * @param {{ dataDir: string, password: string, maxRunning?: number, runner?: object }} o
  */
-export function createServerMode({ dataDir, password, maxRunning = 1, runner: injected = null, appDir = APP_DIR, updateUnit = UPDATE_UNIT }) {
+export function createServerMode({ dataDir, password, maxRunning = 1, runner: injected = null, appDir = APP_DIR, updateUnit = UPDATE_UNIT, makeModelAdapter } = {}) {
   if (!password || String(password).length < 8) throw new Error('服务器模式需要设置 JARVIS_PASSWORD（至少 8 位）');
   const store = createFileStore(path.join(dataDir, 'store'));
   useBackend(store);
@@ -78,6 +79,7 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
   const runner = injected ?? createTaskRunner({ getConfig: async () => loadConfig(), maxRunning });
   const want = Buffer.from(tokenFor(password));
   const failures = new Map(); // IP → 最近登录失败的时间（防止暴力猜密码）
+  let activePCModels=0;
 
   function authorized(req) {
     const url = new URL(req.url, 'http://x');
@@ -100,7 +102,7 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     return Buffer.concat(chunks);
   }
   const readJson = async (req, limit = 256 * 1024) => {
-    try { return JSON.parse((await readBody(req, limit)).toString('utf8') || '{}'); } catch { throw Object.assign(new Error('JSON 格式错误'), { status: 400 }); }
+    try { return JSON.parse((await readBody(req, limit)).toString('utf8') || '{}'); } catch(e) { if(e.status===413)throw e;throw Object.assign(new Error('JSON 格式错误'), { status: 400 }); }
   };
 
   function login(req, res, body) {
@@ -140,7 +142,15 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
   async function handle(req, res, pathname) {
     const url = new URL(req.url, 'http://x');
     if (pathname === '/api/server/login' && req.method === 'POST') { login(req, res, await readJson(req)); return true; }
-    if (pathname === '/api/server/status' && req.method === 'GET') { json(res, 200, { ok: true, features:{taskRequestIds:true,taskNotes:true,taskCheckpoints:true}, running: runner.running, tasks: runner.list().filter((t) => t.status === 'running' || t.status === 'queued') }); return true; }
+    if (pathname === '/api/server/status' && req.method === 'GET') { json(res, 200, { ok: true, features:{taskRequestIds:true,taskNotes:true,taskCheckpoints:true,pcModelBridge:true}, running: runner.running, tasks: runner.list().filter((t) => t.status === 'running' || t.status === 'queued') }); return true; }
+    if(pathname==='/api/server/pc-model'&&req.method==='POST'){
+      if(!authorized(req)){json(res,401,{error:'服务器登录已失效'});return true;}
+      if(activePCModels>=2){json(res,429,{error:'PC模型请求繁忙，请稍后重试'});return true;}
+      activePCModels++;
+      try{const body=await readJson(req,UPLOAD_LIMIT);await streamPCModel(req,res,body,{cfg:loadConfig(),makeAdapter:makeModelAdapter});}
+      finally{activePCModels--;}
+      return true;
+    }
     if (pathname === '/api/server/config') {
       if (req.method === 'GET') { json(res, 200, maskConfig(loadConfig())); return true; }
       if (req.method === 'PUT') { saveConfig(mergeConfig(loadConfig(), await readJson(req))); json(res, 200, { ok: true }); return true; }
@@ -266,3 +276,4 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
 
   return { authorized, handle, runner, store, realtimeKey: () => loadConfig().keys?.qwen || '' };
 }
+

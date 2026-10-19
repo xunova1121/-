@@ -187,7 +187,7 @@ jobs:
       - name: 安装Office真实渲染环境
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-impress libreoffice-calc fonts-noto-cjk
+          sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-impress libreoffice-calc fonts-noto-cjk xdotool
       - name: 验证Word、PPT、Excel真实转PDF
         run: node e2e/office-render.mjs
       - name: 构建网页版
@@ -217,6 +217,7 @@ jobs:
           node desktop/node_modules/electron/install.js
           npm --prefix desktop run prepare-app
           xvfb-run -a node e2e/hologram-desktop.mjs "$RUNNER_TEMP/jarvis-e2e"
+          xvfb-run -a node e2e/pc-control.mjs "$RUNNER_TEMP/jarvis-e2e"
       - name: 网页版和单文件版端到端测试
         shell: bash
         run: |
@@ -287,4 +288,5 @@ jobs:
             - 使用 MCP 本机工具需要电脑上装有 Node.js（npx）或 uv（uvx）。
 
             构建自 ${{ github.sha }}
+
 

@@ -1,3 +1,4 @@
+import { needsComputer } from '../llm/router.js';
 /** 普通信息查询的总时限：包含上下文、模型等待/重试、检索和收尾；不是只计网页耗时。 */
 export const LOOKUP_TOTAL_MS = 60_000;
 export const COMPLEX = /深度|深入|全面|详细|长篇|长文|\d+\s*[千万元]?\s*字|调研|研究报告|生成|制作|创作|画|设计|样式|效果图|界面|网页|网站|PPT|Word|Excel|文档|报告|方案|论文|逐项|逐一|交叉核[验对]|多来源核[验对]|(?:写|生成|制作|编制|导出|保存为|整理成).{0,16}(?:报告|文档|论文|PPT|Word|Excel|文件)|代码|编程|开发|安装|部署/i;
@@ -9,11 +10,14 @@ const abortError = () => Object.assign(new Error('aborted'), { name: 'AbortError
 
 export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_MS } = {}) {
   const text = options.requirementText ?? options.userText;
+  const hasComputer=options.tools?.some(t=>t.name==='computer_look'||t.name==='computer_search');
+  if(options.computerTask||hasComputer&&needsComputer(text,{history:options.history||[]}))return run(options.computerTask?options:{...options,computerTask:true});
   if (!isQuickLookup(text, options.images)) return run(options);
   const ctrl = new AbortController();
   let timer, closed = false, partial = '', finishWait;
   const waiting = new Promise((_, reject) => { finishWait = reject; });
-  const disable = (note) => { if (COMPLEX.test(String(note))) { clearTimeout(timer); timer = null; } };
+  const isTask=note=>COMPLEX.test(String(note))||hasComputer&&needsComputer(note,{history:options.history||[]});
+  const disable = (note) => { if (isTask(note)) { clearTimeout(timer); timer = null; } };
   const userAbort = () => { ctrl.abort(); finishWait(abortError()); };
   const forwarded = {
     ...options, signal: ctrl.signal,
@@ -29,7 +33,7 @@ export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_
   options.signal?.addEventListener('abort', userAbort, { once: true });
   timer = setTimeout(() => {
     // 生成中用户已追加文档/开发任务：保留任务，不把尚未读入的补充误当普通查询截断。
-    if (options.inbox?.some((note) => COMPLEX.test(String(note)))) { disable('调研'); return; }
+    if (options.inbox?.some(isTask)) { disable('调研'); return; }
     const error = Object.assign(new Error(`本轮对话已等待 ${Math.round(totalMs / 1000)} 秒，尚未取得完整可靠结果，已停止继续搜索和重试。已显示的内容可能不完整，未核实信息不能当作结论。`), {
       name: 'LookupTimeoutError', code: 'LOOKUP_TIMEOUT', partialText: partial
     });
@@ -44,3 +48,4 @@ export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_
     closed = true; clearTimeout(timer); options.signal?.removeEventListener('abort', userAbort);
   }
 }
+

@@ -70,7 +70,26 @@ export function classifyTask(text, { images = 0 } = {}) {
 export const isSmallTalk = (text) => /^(你好|您好|嗨|哈喽|hello|hi|hey|在吗|在不在|在么|早|早安|早上好|中午好|下午好|晚上好|晚安|谢谢|谢谢你|多谢|感谢|好的|好|好吧|嗯|嗯嗯|ok|okay|收到|明白|知道了|了解|辛苦了|辛苦|再见|拜拜|哈+|呵呵|你是谁|你叫什么)[呀啊吖呢哦哈啦嘛！!。.~～，,\s]*$/i.test(String(text || '').trim());
 /** 要动这台电脑的事（桌面、文件夹、打开软件、某个盘……）：服务器模式下电脑版留在本机做，服务器碰不到你的电脑 */
 export const NEEDS_COMPUTER = /桌面|文件夹|我的电脑|这台电脑|本机|电脑上|[c-hC-H]\s*盘|打开.{0,10}(软件|程序|应用|浏览器|微信|QQ|钉钉|记事本|文件|网页|网站)|截屏|截个图|屏幕上|鼠标|键盘|运行命令|命令行|终端|关机|重启电脑|回收站|下载(文件夹|目录)|安装.{0,6}软件/i;
-export const needsComputer = (text) => NEEDS_COMPUTER.test(String(text || ''));
+// 已上传/刚生成的文件优先沿用工作区；显式的本机目的地仍在PC执行。
+const LOCAL_PLACE = /桌面|文件夹|我的电脑|这台电脑|本机|电脑上|本地(?:磁盘|硬盘|文件|文档)|[a-z]\s*盘|[a-z]:[\\/]|回收站|下载(?:文件夹|目录)/i;
+const WORKSPACE_FILE = /工作区|附件|已上传|上传(?:的|给你)|发给你|(?:刚才?|你)(?:生成|制作|做|写)(?:的|好)|对话(?:里|中)|(?:这张|那张)(?:截图|图片|照片)|截图(?:里|中)|图片(?:里|中)/;
+// 文件名可能很长，不能只检查“打开”后十个字，也不要求用户写扩展名。
+const OPEN_DOCUMENT = /(?:打开|找一下|找找|找到|寻找|查找|搜索).{0,200}(?:文件|文档|表格|工作簿|考核表|任务表|报告|方案|合同|清单|台账|计划表|\.docx?\b|\.xlsx?\b|\.pptx?\b|\.pdf\b)|(?:打开|找一下|查找|搜索).{0,200}(?:这个|那个)(?:表|文档)/i;
+const GUI_ACTION = /点击|双击|右键|拖动|拖拽|滚动|鼠标|键盘|快捷键|截屏|截图|屏幕|当前窗口|这个窗口|切换窗口|最小化|最大化|(?:关闭|切换到).{0,40}(?:窗口|软件|程序|微信|QQ|钉钉|记事本|浏览器|WPS|Excel|Word)|(?:在|把|给).{0,20}(?:微信|钉钉|记事本|浏览器|WPS|Excel|Word).{0,80}(?:输入|填写|粘贴|发送|操作|点击|编辑)/i;
+const APP_ACTION = /(?:打开|启动|关闭|切换到|最小化|最大化|退出|操作).{0,60}(?:软件|程序|应用|浏览器|微信|QQ|钉钉|记事本|计算器|WPS|Excel|Word|PowerPoint|Chrome|Edge)|(?:整理|移动|复制|重命名|删除).{0,120}(?:文件|文档|表格|照片|图片|文件夹)/i;
+const lastComputerTools = history => [...history].reverse().find(m=>m.role==='assistant')?.tools?.filter(t=>typeof t==='string'&&t.startsWith('computer_')) || [];
+export function needsComputer(text, { history = [] } = {}) {
+  const t = String(text || '').trim();
+  if (LOCAL_PLACE.test(t)) return true;
+  if (WORKSPACE_FILE.test(t) || /^(?:请问[，,\s]*)?(?:怎么|如何|怎样|为什么)/.test(t)) return false;
+  return NEEDS_COMPUTER.test(t) || OPEN_DOCUMENT.test(t) || GUI_ACTION.test(t) || APP_ACTION.test(t) || /^(?:请|帮我|麻烦你|给我|替我)?打开\s*[^?？]{1,200}$/.test(t) ||
+    (t.length<=80 && /^(继续|接着|下一步|然后|往下|往上|点开|点那个|点右边|点左边|把它|保存它|打开它|就这个)/.test(t) && !/新闻|天气|搜索|联网|电视剧/.test(t) && lastComputerTools(history).length>0);
+}
+/** GUI任务优先走看图模型，文件和命令操作无需无故切模型；只在PC本机路由使用。 */
+export function computerTaskKind(text, { history = [] } = {}) {
+  if (!needsComputer(text,{history})) return null;
+  return GUI_ACTION.test(String(text)) || /^(继续|接着|下一步|然后|点)/.test(String(text)) && lastComputerTools(history).some(t=>/^computer_(look|click|type|key|scroll|drag)$/.test(t)) ? 'gui' : 'files';
+}
 /** 要查证、分析、算结果的话：日常对话里也不能少想 */
 export const NEEDS_THOUGHT = /查|搜|核实|验证|结果|赛果|比分|中没中|中奖|最新|价格|行情|新闻|分析|计算|算一下|对比|图片|截图|图里/;
 /** 日常闲聊让推理模型少想一点（首字更快）；其余用默认档位 */
@@ -168,3 +187,4 @@ export function canFallback(err) {
   if ([402, 403, 404, 408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529].includes(err.status)) return true;
   return err.name === 'TypeError' || Boolean(err.stalled) || /connection reset|connection error|econnreset|socket hang up|network ?error|failed to fetch|load failed|timeout|超时|overloaded|余额|额度|quota|insufficient|无可用渠道|no available channel|model.{0,20}(not.{0,10}(found|exist|available|supported))|模型.{0,6}(不存在|不可用|下线)/i.test(String(err.message));
 }
+
