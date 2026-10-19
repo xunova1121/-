@@ -62,6 +62,12 @@ describe('模型连接卡住：断开重试，不一直傻等', () => {
     } finally { globalThis.fetch = orig; }
   });
 
+  it('快聊模式未出字不内部重试，已出字仍允许一次续写，保留断线恢复能力',async()=>{
+    const original=globalThis.fetch;let calls=0;const replies=[hang('前半段，'),sse('后半段。')];
+    globalThis.fetch=async()=>{calls++;return replies.shift();};
+    try{const a=createOpenAIAdapter({baseURL:'https://x/v1',apiKey:'test',retryDelays:[1]});const r=await a.stream({...req,stallTimeouts:{first:10,between:10},maxTransientRetries:0,maxPartialRetries:1});expect(r.text).toBe('前半段，后半段。');expect(calls).toBe(2);}finally{globalThis.fetch=original;}
+  });
+
   it('一直连不上（请求发出去没回应）：重试几次后报“卡住了”，可以换备用模型', async () => {
     const orig = globalThis.fetch;
     globalThis.fetch = (url, init) => new Promise((_, rej) => init.signal.addEventListener('abort', () => rej(new DOMException('Aborted', 'AbortError'))));

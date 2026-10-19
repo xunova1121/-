@@ -257,6 +257,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       effort,
       stallTimeouts: lookupDeadline ? { first: 20_000, between: 25_000 } : { first: 45_000, between: 60_000 },
       maxTransientRetries: lookupDeadline ? 0 : 1,
+      maxPartialRetries: 1, // 已输出的回答允许一次续写，仍受本轮总时限约束
       system: light ? [LIGHT_PROMPT, [ctx.dynamic, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, requirementContext, toolHint, voice && VOICE_NOTE].filter(Boolean).join('\n\n')],
       messages: convo,
       tools: closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list(),
