@@ -140,28 +140,20 @@ export function createTurn(app) {
     app.sessionsPanel?.refresh();
   }
 
-  async function send(text, { echo = true, byVoice = false } = {}) {
-    noteAction(byVoice ? '语音提问' : '发消息');
-    app.askNotifyOnce();
-    text = String(text || '').trim();
-    if (!text && !app.attachments.length) return;
-    if (!app.attachments.length && app.companion?.perform(text)) return;
-    if (!text && app.attachments.some((a) => a.image)) text = '请看看这张图片。';
-    // 正在干活时又发了一句：不打断，问进度就直接答，别的话交给正在干的未央；说“停”才停
-    if (echo && app.active && !app.active.streamDone) {
-      const extra = app.attachments.splice(0); app.renderAttachments();
-      if (app.server && extra.length) {
-        try { for (const f of extra) await app.server.upload(f.path, await ws.readBlob(f.path)); }
-        catch (e) { app.attachments.unshift(...extra); app.renderAttachments(); if (!app.prompt.value.trim()) { app.prompt.value=text; app.autosize(); } toast(`附件未送达，已保留：${e.message}`); return; }
-        if (!app.active || app.active.streamDone) { app.attachments.unshift(...extra); app.renderAttachments(); return send(text,{echo,byVoice}); }
-      }
-      const content = extra.length ? text + '\n\n[已上传到工作区：' + extra.map(f=>f.path).join('、') + ']' : text;
-      return interject(content, { thumbs:extra.filter(f=>f.image).map(f=>({src:f.image.thumb,path:f.path})) });
+  /** 正在干活时又发来一句（可能带附件）：附件先传到服务器，再按插话处理 */
+  async function addToRunningTurn(text, { echo, byVoice }) {
+    const extra = app.attachments.splice(0); app.renderAttachments();
+    if (app.server && extra.length) {
+      try { for (const f of extra) await app.server.upload(f.path, await ws.readBlob(f.path)); }
+      catch (e) { app.attachments.unshift(...extra); app.renderAttachments(); if (!app.prompt.value.trim()) { app.prompt.value=text; app.autosize(); } toast(`附件未送达，已保留：${e.message}`); return; }
+      if (!app.active || app.active.streamDone) { app.attachments.unshift(...extra); app.renderAttachments(); return send(text,{echo,byVoice}); }
     }
-    if (app.active) { app.active.ctrl.abort(); app.active = null; }
-    app.speaker.cancel();
-    app.speaker.unlock(); // 发送多由点击 / 回车触发：顺便启动音频上下文，云端语音才能播放
+    const content = extra.length ? text + '\n\n[已上传到工作区：' + extra.map(f=>f.path).join('、') + ']' : text;
+    return interject(content, { thumbs:extra.filter(f=>f.image).map(f=>({src:f.image.thumb,path:f.path})) });
+  }
 
+  /** 整理这一轮的输入：取走附件、显示并记下这句话、挑出要带给模型的历史和图片 */
+  function takeInput(text, echo) {
     // 持续聊天也保持有界；先重画已完成的历史，再追加本轮，避免重复消息。
     if (MOBILE && (app.historyViewEnd !== null || $('#transcript').querySelectorAll('.msg').length >= app.visibleHistory().limit)) app.replayTranscript();
     const files = app.attachments.splice(0);
@@ -185,6 +177,122 @@ export function createTurn(app) {
       recentImages.set(app.history.at(-1).ts, imgs.map(({ mime, data }) => ({ mime, data })));
       while (recentImages.size > 2) recentImages.delete(recentImages.keys().next().value);
     }
+    return { files, userText, imgs, withImages, llmHistory };
+  }
+
+  /** 这一轮用哪个模型：按这句话的类型分工；服务器模式下动这台电脑的事留在本机做 */
+  function chooseModel(text, turn, st, { imgs, withImages }) {
+    // 模型分工：按这句话的类型换模型；日常对话让推理模型少想一点（首字更快）
+    const computerKind = DESKTOP ? computerTaskKind(text,{history: app.history}) : null;
+    const task = computerKind === 'gui' ? 'vision' : shouldTeam(text, app.settings.teamMode === 'auto' && !app.helperLlm() ? 'off' : app.settings.teamMode) ? 'reason' : classifyTask(text, { images: imgs.length + withImages.size });
+    const route = routeFor(app.llmConfig, task);
+    const remotePC=Boolean(app.server&&computerKind);
+    const local=createAdapter(route.cfg,{gateway: app.gateway});
+    const model=remotePC?'服务器模型':local.model;
+    st.usedModel=model;
+    const adapter=remotePC?createPCModelAdapter(app.server,{task,onModel:m=>{st.usedModel=m;}}):local.adapter;
+    const problem=remotePC?null:local.problem;
+    if (COMPACT && isAuto(app.llmConfig) && model && !app.server) $('#model-chip-text').textContent = `自动 · ${model}`;
+    // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省
+    const effort = effortFor(task, text, app.llmConfig);
+    if (route.routed&&!remotePC) app.hud.think(`◇ 模型分工：${TASKS[task].name} → ${route.model}`);
+    // 服务器模式下电脑版：要动这台电脑的事（桌面、文件夹、打开软件……）留在本机做，其余交给服务器
+    const here = Boolean(app.server && DESKTOP && computerKind);
+    turn.remote=Boolean(app.server&&!here);
+    if (here) app.hud.think('◇ 服务器模型推理，电脑工具在本机执行');
+    return { computerKind, task, route, remotePC, model, adapter, problem, effort, here };
+  }
+
+  /** 这一轮的进度事件 → 界面：文字、工具卡片、模型切换、团队分工……（切到别的对话后只记进这一轮的气泡） */
+  function turnEvents(turn, st, { bubble, speech, cards, doneSteps, model }) {
+    return (e) => {
+      if (e.type === 'tool_start' && e.name !== 'update_plan') { turn.steps++; turn.status = toolLabel(e.name); }
+      else if (e.type === 'tool_progress') turn.status = e.text;
+      else if (e.type === 'text') turn.status = '写回答';
+      if (turn.background) {
+        // 切到别的对话了：只把内容记在这一轮的气泡里（切回来时接上），不朗读、不改界面状态
+        if (e.type === 'text') { bubble.append(e.delta); st.shown += e.delta; turn.shown=st.shown; }
+        else if (e.type === 'tool_start' && e.name !== 'update_plan') { cards.set(e.id, bubble.toolCard(e.name, e.args)); st.usedTools.push(e.name); }
+        else if (e.type === 'tool_progress') cards.get(e.id)?.progress(e.text);
+        else if (e.type === 'tool_end') cards.get(e.id)?.done(e.ok, e.output, e.ms);
+        else if (e.type === 'plan') bubble.plan?.(e.steps);
+        return;
+      }
+      if (app.active !== turn) return;
+      if (e.type === 'text') {
+        if(app.callActive&&app.callTiming?.recognizedAt&&!app.callTiming.firstTextAt)app.callTiming.firstTextAt=now();
+        if (!st.firstToken) { st.firstToken = now(); app.hud.think('生成回答'); }
+        if (!st.outMarked) { st.outMarked = true; markActivity(`正在输出回答${st.shown.length ? `（已 ${st.shown.length} 字）` : ''}`); }
+        if (st.serverCard) { st.serverCard.done(true, '由模型服务端完成', Math.round(now() - st.serverCard.t0)); st.serverCard = null; }
+        bubble.append(e.delta);
+        st.shown += e.delta;
+        st.textChunks++;
+        app.machine.feedResponseText(e.delta);
+        speech.push(e.delta);
+      } else if (e.type === 'interjection_accepted') {
+        speech.resume();
+        bubble.status?.('已收到补充，正在调整…');
+        if (app.callActive) app.callStatus('已收到，正在按补充要求处理…');
+      } else if (e.type === 'fallback') {
+        st.usedModel = e.to;
+        const note = `${e.from} 出错（${e.reason}），已换成 ${e.to} 接着做`;
+        app.hud.think(`⇄ ${note}`, 'sub');
+        toast(note);
+        app.setTask('processing', `已换成 ${e.to}`.slice(0, 30));
+      } else if (e.type === 'retry') {
+        const note = e.resume ? `网络中断，第 ${e.attempt} 次重连，接着刚才的地方写` : `连接出错，第 ${e.attempt} 次自动重试`;
+        app.hud.think(`↻ ${note}`, 'sub');
+        app.setTask('processing', note.slice(0, 30));
+      } else if (e.type === 'emotion') { app.machine.setStreamHint(e.value); app.director.onEmotion(e.value); bubble.mood?.(e.value); }
+      else if (e.type === 'state' && e.value !== 'done') app.setTask(e.value, e.value === 'listening' ? '生成回答' : '');
+      else if (e.type === 'plan') bubble.plan?.(e.steps); // 任务清单：卡片里实时打勾
+      else if ((e.type === 'tool_start' || e.type === 'tool_end') && e.name === 'update_plan') { /* 更新清单本身不单独占一张工具卡片 */ }
+      else if (e.type === 'tool_start') {
+        app.director.onToolStart(e.name);
+        app.hud.toolStart(e.id, toolLabel(e.name));
+        app.hud.think(`▸ ${toolLabel(e.name)}  ${summarizeArgs(e.name, e.args)}`);
+        cards.set(e.id, bubble.toolCard(e.name, e.args));
+        st.usedTools.push(e.name);
+        bubble.status?.(`正在${toolLabel(e.name)}…`);
+        app.setTask('processing', toolLabel(e.name));
+        markActivity(`${toolLabel(e.name)} ${summarizeArgs(e.name, e.args)}`.slice(0, 80));
+        st.outMarked = false;
+      } else if (e.type === 'tool_progress') {
+        cards.get(e.id)?.progress(e.text);
+        app.hud.think(`  ${e.text}`, 'sub');
+        app.setTask('processing', e.text.slice(0, 30));
+      } else if (e.type === 'tool_end') {
+        cards.get(e.id)?.done(e.ok, e.output, e.ms);
+        app.hud.toolEnd(e.id, e.ok);
+        if (MOBILE&&!turn.remote) { if(e.ok) doneSteps.push(toolLabel(e.name)); savePending(storage, turn.session.id, { ts: Date.now(), steps: doneSteps, files: [...turn.files] }); }
+        if (!e.ok) app.hud.think(`✕ ${toolLabel(e.name)} 失败`, 'bad');
+        if (/remember|forget|save_skill/.test(e.name)) app.panels.refreshMind();
+      } else if (e.type === 'server_tool') {
+        st.serverCard = Object.assign(bubble.toolCard('web_search', { query: `${searchBrand(model)}自带联网搜索` }), { t0: now() });
+      } else if (e.type === 'sources') bubble.sources(e.items);
+      else if (e.type === 'timing') st.ctxMs = e.contextMs;
+      else if (e.type === 'team_plan') { app.hud.think(`团队分工 · ${e.steps.map((x) => x.roleName).join(' → ')}`); st.teamCard = bubble.teamCard(e.steps); app.setTask('processing', `团队分工 · ${e.steps.length} 步`); }
+      else if (e.type === 'team_step') {
+        st.teamCard?.step(e.index, e.status, e.note);
+        if (e.status === 'running' || e.status === 'redo') app.setTask('processing', `第 ${e.index + 1} 步${e.status === 'redo' ? ' · 返工' : ''}`);
+      } else if (e.type === 'team_review') { st.teamCard?.review(e); app.setTask('processing', e.pass ? '审核通过，汇总中' : '审核发现问题'); }
+    };
+  }
+
+  async function send(text, { echo = true, byVoice = false } = {}) {
+    noteAction(byVoice ? '语音提问' : '发消息');
+    app.askNotifyOnce();
+    text = String(text || '').trim();
+    if (!text && !app.attachments.length) return;
+    if (!app.attachments.length && app.companion?.perform(text)) return;
+    if (!text && app.attachments.some((a) => a.image)) text = '请看看这张图片。';
+    // 正在干活时又发了一句：不打断，问进度就直接答，别的话交给正在干的未央；说“停”才停
+    if (echo && app.active && !app.active.streamDone) return addToRunningTurn(text, { echo, byVoice });
+    if (app.active) { app.active.ctrl.abort(); app.active = null; }
+    app.speaker.cancel();
+    app.speaker.unlock(); // 发送多由点击 / 回车触发：顺便启动音频上下文，云端语音才能播放
+
+    const { files, userText, imgs, withImages, llmHistory } = takeInput(text, echo);
 
     if (app.machine.task !== 'listening') app.machine.beginUserTurn();
     const ctrl = new AbortController();
@@ -195,29 +303,24 @@ export function createTurn(app) {
     const turn = { ctrl, streamDone: false, bubble, session: app.session, files: new Set(), inbox: [], t0: now(), steps: 0, status: '', background: false };
     app.active = turn;
     app.setTask('processing', '思考中');
+    // 这一轮的进度记录：事件处理（turnEvents）边收边改，做完 / 出错时用来显示和记进对话
+    const st = {
+      shown: '', // 这一轮已经显示出来的回答（中断时保留，点“继续”接着写）
+      firstToken: 0,
+      outMarked: false, // 崩溃记录：这一段在输出文字
+      textChunks: 0, // 回答分几次收到：1 次说明是整段一次性到的（中转站或网络没有边生成边给）
+      serverCard: null,
+      ctxMs: null,
+      teamCard: null,
+      usedModel: '',
+      usedTools: []
+    };
     // 手机：记下正在做的任务（App 被划掉时，下次打开接着做）
     const doneSteps = [];
     turn.checkpoint={text:userText,notes:[],inFlight:[],steps:[],files:[],status:'running'};
     if (MOBILE && !app.server) savePending(storage,app.session.id,{turnId:turn.t0,text:userText,title:app.session.title||'',ts:Date.now(),steps:[],files:[],checkpoint:turn.checkpoint});
 
-    // 模型分工：按这句话的类型换模型；日常对话让推理模型少想一点（首字更快）
-    const computerKind = DESKTOP ? computerTaskKind(text,{history: app.history}) : null;
-    const task = computerKind === 'gui' ? 'vision' : shouldTeam(text, app.settings.teamMode === 'auto' && !app.helperLlm() ? 'off' : app.settings.teamMode) ? 'reason' : classifyTask(text, { images: imgs.length + withImages.size });
-    const route = routeFor(app.llmConfig, task);
-    const remotePC=Boolean(app.server&&computerKind);
-    const local=createAdapter(route.cfg,{gateway: app.gateway});
-    const model=remotePC?'服务器模型':local.model;
-    let usedModel=model;
-    const adapter=remotePC?createPCModelAdapter(app.server,{task,onModel:m=>{usedModel=m;}}):local.adapter;
-    const problem=remotePC?null:local.problem;
-    if (COMPACT && isAuto(app.llmConfig) && model && !app.server) $('#model-chip-text').textContent = `自动 · ${model}`;
-    // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省
-    const effort = effortFor(task, text, app.llmConfig);
-    if (route.routed&&!remotePC) app.hud.think(`◇ 模型分工：${TASKS[task].name} → ${route.model}`);
-    // 服务器模式下电脑版：要动这台电脑的事（桌面、文件夹、打开软件……）留在本机做，其余交给服务器
-    const here = Boolean(app.server && DESKTOP && computerKind);
-    turn.remote=Boolean(app.server&&!here);
-    if (here) app.hud.think('◇ 服务器模型推理，电脑工具在本机执行');
+    const { computerKind, task, route, remotePC, model, adapter, problem, effort, here } = chooseModel(text, turn, st, { imgs, withImages });
     if (problem && (!app.server || here)) { // 服务器模式：用服务器上的模型设置
       bubble.append(problem);
       bubble.done();
@@ -235,20 +338,13 @@ export function createTurn(app) {
     const spoken = app.callActive || byVoice || app.settings.readTyped;
     const speech = makeSpeech(spoken);
     const cards = new Map();
-    let firstToken = 0;
-    let outMarked = false; // 崩溃记录：这一段在输出文字
-    let textChunks = 0; // 回答分几次收到：1 次说明是整段一次性到的（中转站或网络没有边生成边给）
-    let serverCard = null;
     const t0 = now();
-    const usedTools = [];
+    const usedTools = st.usedTools;
     turn.usedTools=usedTools;
     const madeFiles = turn.files;
-    let shown = ''; // 这一轮已经显示出来的回答（中断时保留，点“继续”接着写）
-    let ctxMs = null;
     app.callouts?.retract();
     // 内置演示模式下“自动”不触发（规则拆步效果有限），只认明确的“/团队 …”或“总是”
     const team = !app.server && !computerKind && shouldTeam(text, app.settings.teamMode === 'auto' && !app.helperLlm() ? 'off' : app.settings.teamMode);
-    let teamCard = null;
     const releaseTask = taskKeeper.begin();
     try {
       // 服务器模式：服务器做，进度事件和本机一样显示（runRemote 的用法和 runAgent 一样）
@@ -296,85 +392,14 @@ export function createTurn(app) {
             return v !== 'deny';
           } finally {ctrl.signal.removeEventListener('abort',cancel);}
         },
-        emit: (e) => {
-          if (e.type === 'tool_start' && e.name !== 'update_plan') { turn.steps++; turn.status = toolLabel(e.name); }
-          else if (e.type === 'tool_progress') turn.status = e.text;
-          else if (e.type === 'text') turn.status = '写回答';
-          if (turn.background) {
-            // 切到别的对话了：只把内容记在这一轮的气泡里（切回来时接上），不朗读、不改界面状态
-            if (e.type === 'text') { bubble.append(e.delta); shown += e.delta; turn.shown=shown; }
-            else if (e.type === 'tool_start' && e.name !== 'update_plan') { cards.set(e.id, bubble.toolCard(e.name, e.args)); usedTools.push(e.name); }
-            else if (e.type === 'tool_progress') cards.get(e.id)?.progress(e.text);
-            else if (e.type === 'tool_end') cards.get(e.id)?.done(e.ok, e.output, e.ms);
-            else if (e.type === 'plan') bubble.plan?.(e.steps);
-            return;
-          }
-          if (app.active !== turn) return;
-          if (e.type === 'text') {
-            if(app.callActive&&app.callTiming?.recognizedAt&&!app.callTiming.firstTextAt)app.callTiming.firstTextAt=now();
-            if (!firstToken) { firstToken = now(); app.hud.think('生成回答'); }
-            if (!outMarked) { outMarked = true; markActivity(`正在输出回答${shown.length ? `（已 ${shown.length} 字）` : ''}`); }
-            if (serverCard) { serverCard.done(true, '由模型服务端完成', Math.round(now() - serverCard.t0)); serverCard = null; }
-            bubble.append(e.delta);
-            shown += e.delta;
-            textChunks++;
-            app.machine.feedResponseText(e.delta);
-            speech.push(e.delta);
-          } else if (e.type === 'interjection_accepted') {
-            speech.resume();
-            bubble.status?.('已收到补充，正在调整…');
-            if (app.callActive) app.callStatus('已收到，正在按补充要求处理…');
-          } else if (e.type === 'fallback') {
-            usedModel = e.to;
-            const note = `${e.from} 出错（${e.reason}），已换成 ${e.to} 接着做`;
-            app.hud.think(`⇄ ${note}`, 'sub');
-            toast(note);
-            app.setTask('processing', `已换成 ${e.to}`.slice(0, 30));
-          } else if (e.type === 'retry') {
-            const note = e.resume ? `网络中断，第 ${e.attempt} 次重连，接着刚才的地方写` : `连接出错，第 ${e.attempt} 次自动重试`;
-            app.hud.think(`↻ ${note}`, 'sub');
-            app.setTask('processing', note.slice(0, 30));
-          } else if (e.type === 'emotion') { app.machine.setStreamHint(e.value); app.director.onEmotion(e.value); bubble.mood?.(e.value); }
-          else if (e.type === 'state' && e.value !== 'done') app.setTask(e.value, e.value === 'listening' ? '生成回答' : '');
-          else if (e.type === 'plan') bubble.plan?.(e.steps); // 任务清单：卡片里实时打勾
-          else if ((e.type === 'tool_start' || e.type === 'tool_end') && e.name === 'update_plan') { /* 更新清单本身不单独占一张工具卡片 */ }
-          else if (e.type === 'tool_start') {
-            app.director.onToolStart(e.name);
-            app.hud.toolStart(e.id, toolLabel(e.name));
-            app.hud.think(`▸ ${toolLabel(e.name)}  ${summarizeArgs(e.name, e.args)}`);
-            cards.set(e.id, bubble.toolCard(e.name, e.args));
-            usedTools.push(e.name);
-            bubble.status?.(`正在${toolLabel(e.name)}…`);
-            app.setTask('processing', toolLabel(e.name));
-            markActivity(`${toolLabel(e.name)} ${summarizeArgs(e.name, e.args)}`.slice(0, 80));
-            outMarked = false;
-          } else if (e.type === 'tool_progress') {
-            cards.get(e.id)?.progress(e.text);
-            app.hud.think(`  ${e.text}`, 'sub');
-            app.setTask('processing', e.text.slice(0, 30));
-          } else if (e.type === 'tool_end') {
-            cards.get(e.id)?.done(e.ok, e.output, e.ms);
-            app.hud.toolEnd(e.id, e.ok);
-            if (MOBILE&&!turn.remote) { if(e.ok) doneSteps.push(toolLabel(e.name)); savePending(storage, turn.session.id, { ts: Date.now(), steps: doneSteps, files: [...turn.files] }); }
-            if (!e.ok) app.hud.think(`✕ ${toolLabel(e.name)} 失败`, 'bad');
-            if (/remember|forget|save_skill/.test(e.name)) app.panels.refreshMind();
-          } else if (e.type === 'server_tool') {
-            serverCard = Object.assign(bubble.toolCard('web_search', { query: `${searchBrand(model)}自带联网搜索` }), { t0: now() });
-          } else if (e.type === 'sources') bubble.sources(e.items);
-          else if (e.type === 'timing') ctxMs = e.contextMs;
-          else if (e.type === 'team_plan') { app.hud.think(`团队分工 · ${e.steps.map((x) => x.roleName).join(' → ')}`); teamCard = bubble.teamCard(e.steps); app.setTask('processing', `团队分工 · ${e.steps.length} 步`); }
-          else if (e.type === 'team_step') {
-            teamCard?.step(e.index, e.status, e.note);
-            if (e.status === 'running' || e.status === 'redo') app.setTask('processing', `第 ${e.index + 1} 步${e.status === 'redo' ? ' · 返工' : ''}`);
-          } else if (e.type === 'team_review') { teamCard?.review(e); app.setTask('processing', e.pass ? '审核通过，汇总中' : '审核发现问题'); }
-        }
+        emit: turnEvents(turn, st, { bubble, speech, cards, doneSteps, model })
       });
-      if (turn.background) { finishBackground(turn, { text: result.text, shown, usedTools, files: madeFiles }); return; }
+      if (turn.background) { finishBackground(turn, { text: result.text, shown: st.shown, usedTools, files: madeFiles }); return; }
       if (app.active !== turn) return;
       speech.flush();
       const total = now() - t0;
-      const modelTag = app.server && !here ? '服务器 · ' : here ? `本机工具 · ${usedModel} · ` : providerById(app.llmConfig.provider)?.kind === 'mock' ? '' : usedModel !== model ? `${usedModel}（${model} 出错后换用） · ` : `${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
-      bubble.done(`${modelTag}${team ? `团队 ${result.steps} 步 · ` : ''}${ctxMs !== null && ctxMs >= 300 ? `准备 ${(ctxMs / 1000).toFixed(1)}s · ` : ''}${firstToken ? `首字 ${((firstToken - t0) / 1000).toFixed(1)}s · ` : ''}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}${MOBILE && textChunks ? ` · 分 ${textChunks} 次收到${globalThis.__jarvisNetVia?.(app.llmConfig.baseURLs?.[app.llmConfig.provider] || '') === 'native' ? '（原生网络）' : ''}` : ''}`, {
+      const modelTag = app.server && !here ? '服务器 · ' : here ? `本机工具 · ${st.usedModel} · ` : providerById(app.llmConfig.provider)?.kind === 'mock' ? '' : st.usedModel !== model ? `${st.usedModel}（${model} 出错后换用） · ` : `${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
+      bubble.done(`${modelTag}${team ? `团队 ${result.steps} 步 · ` : ''}${st.ctxMs !== null && st.ctxMs >= 300 ? `准备 ${(st.ctxMs / 1000).toFixed(1)}s · ` : ''}${st.firstToken ? `首字 ${((st.firstToken - t0) / 1000).toFixed(1)}s · ` : ''}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}${MOBILE && st.textChunks ? ` · 分 ${st.textChunks} 次收到${globalThis.__jarvisNetVia?.(app.llmConfig.baseURLs?.[app.llmConfig.provider] || '') === 'native' ? '（原生网络）' : ''}` : ''}`, {
         onFeedback: async (kind, comment) => {
           if (kind === 'up') await agentMemory.noteTask(`获得好评：${text.slice(0, 30)}`);
           else {
@@ -384,9 +409,9 @@ export function createTurn(app) {
           app.panels.refreshMind();
         }
       });
-      app.dashboard.setLatency(firstToken ? firstToken - t0 : null, total);
+      app.dashboard.setLatency(st.firstToken ? st.firstToken - t0 : null, total);
       app.hud.think(`✓ 完成 · ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · ${result.toolCalls} 个工具` : ''}`, 'ok');
-      $('#hud-latency').textContent = firstToken ? `${Math.round(firstToken - t0)} ms` : '—';
+      $('#hud-latency').textContent = st.firstToken ? `${Math.round(st.firstToken - t0)} ms` : '—';
       if (result.text) wp({ say: result.text.replace(/```[\s\S]*?```/g, '').replace(/[#*>`|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 4000) });
       app.rememberTurn('assistant', result.text || '（完成）', { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) }, turn.session);
       // 做完时人不在（App 在后台 / 窗口没在看）：发通知，点开就能看结果
@@ -401,7 +426,7 @@ export function createTurn(app) {
       if (!app.speaker.speaking) finishTurn();
     } catch (err) {
       if (err.name === 'AbortError') return;
-      if (turn.background) { finishBackground(turn, { error: app.friendlyError(String(err.message || err)), shown, usedTools, files: madeFiles }); return; }
+      if (turn.background) { finishBackground(turn, { error: app.friendlyError(String(err.message || err)), shown: st.shown, usedTools, files: madeFiles }); return; }
       if (app.active !== turn) return;
       const msg = app.friendlyError(String(err.message || err));
       const cors = !MOBILE && /Failed to fetch|NetworkError|Load failed|CORS/i.test(msg);
@@ -414,8 +439,8 @@ export function createTurn(app) {
       app.setTask('error', '请求失败');
       app.hud.think(`✕ ${msg.slice(0, 40)}`, 'bad');
       // 已经写了一部分或做了几步：记进对话，点“继续”从断开的地方接着做，而不是从头再来
-      const resumable = Boolean(shown.trim() || usedTools.length);
-      if (resumable) app.rememberTurn('assistant', `${shown.trim()}\n\n${interruptionMark(err)}`, { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) }, turn.session);
+      const resumable = Boolean(st.shown.trim() || usedTools.length);
+      if (resumable) app.rememberTurn('assistant', `${st.shown.trim()}\n\n${interruptionMark(err)}`, { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) }, turn.session);
       app.callouts?.set(followUpSuggestions({ error: true, resumable, userText: text, desktop: Boolean(DESKTOP) }));
     } finally {
       if (MOBILE) clearPending(storage, turn.session.id, turn.t0);
