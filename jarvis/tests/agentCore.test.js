@@ -180,3 +180,65 @@ it('执行器先等待检查点写入，再运行有副作用的工具',async()=
  await agent.runAgent({adapter,model:'m',history:[],userText:'执行',context:ctx,tools:[{name:'write_probe',description:'x',input_schema:{type:'object',properties:{}},run:async()=>{events.push('run');return 'ok';}}],emit:()=>{},checkpoint:async e=>{await Promise.resolve();events.push(e.type);}});
  expect(events).toEqual(['tool_start','run','tool_end']);
 });
+
+describe('普通查询停止无效检索', () => {
+  it('搜索接口失败真实上报错误；批量搜索部分成功仍保留有效来源', async () => {
+    const {createTools}=await import('../src/agent/tools.js');
+    const fetchViaGateway=async(url,init)=>{
+      if(!url.includes('bochaai')) throw new Error('ECONNRESET');
+      const q=JSON.parse(init.body).query;
+      if(q==='失败') return new Response('{}',{status:503});
+      return new Response(JSON.stringify({code:200,data:{webPages:{value:Array.from({length:6},(_,i)=>({name:'来源',url:`https://source.example/${i}`,snippet:'正文'}))}}}));
+    };
+    const search=createTools({bochaKey:'test',searchRegion:'cn',fetchViaGateway}).find(t=>t.name==='web_search');
+    await expect(search.run({query:'失败'})).rejects.toThrow('搜索失败');
+    const partial=await search.run({queries:['成功','失败']});
+    expect(partial).toContain('https://source.example/');expect(partial).toContain('搜索失败');
+  });
+  it('连续换不同链接仍在三次失败后收尾，并关闭原生搜索与工具', async () => {
+    let n=0, reads=0; const events=[];
+    const adapter={async stream({tools,allowWebSearch,onText,messages}) {
+      if (!allowWebSearch) {
+        expect(tools).toEqual([]); expect(messages.at(-1).content).toContain('连续 3 次');
+        onText('这些网页未能读取，尚未核实结局。'); return {text:'这些网页未能读取，尚未核实结局。',toolCalls:[],stop:'end_turn'};
+      }
+      return {text:'',toolCalls:[call(String(++n),'fetch_url',{url:`https://site${n}.example/a`})],stop:'tool_use'};
+    }};
+    const tool={name:'fetch_url',description:'x',input_schema:{type:'object',properties:{url:{type:'string'}}},run:async()=>{reads++;throw new Error('HTTP 403');}};
+    const r=await agent.runAgent({adapter,model:'m',history:[],userText:'仙逆中姚冰云的结局',tools:[tool],context:ctx,emit:e=>events.push(e)});
+    expect(reads).toBe(3); expect(r.text).toContain('尚未核实'); expect(events.filter(e=>e.type==='tool_end'&&!e.ok)).toHaveLength(3);
+  });
+  it('Claude原生搜索 pause_turn 也计入45秒预算，不会绕过收尾', async () => {
+    let t=0,n=0;
+    const adapter={async stream({onText,allowWebSearch,tools}) {
+      n++;
+      if (n===1) {onText('',{serverTool:'web_search'});t=46_000;return {text:'',toolCalls:[],raw:[],stop:'pause_turn'};}
+      expect(allowWebSearch).toBe(false);expect(tools).toEqual([]);
+      onText('现有来源不足，无法确认。');return {text:'现有来源不足，无法确认。',toolCalls:[],stop:'end_turn'};
+    }};
+    const r=await agent.runAgent({adapter,model:'m',history:[],userText:'查一下结局',tools:[],context:ctx,emit:()=>{},now:()=>t});
+    expect(n).toBe(2);expect(r.text).toContain('无法确认');
+  });
+  it('原生搜索同一请求卡住时取消检索，再以禁用搜索的请求收尾', async () => {
+    let n=0;
+    const adapter={async stream({onText,allowWebSearch,signal}) {
+      if (++n===1) {onText('',{serverTool:'web_search'});return new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(new Error('aborted')),{once:true}));}
+      expect(allowWebSearch).toBe(false);onText('检索超时，未获得足够依据。');return {text:'检索超时，未获得足够依据。',toolCalls:[],stop:'end_turn'};
+    }};
+    const r=await agent.runAgent({adapter,model:'m',history:[],userText:'查结局',tools:[],context:ctx,emit:()=>{},timeBudgetMs:15});
+    expect(n).toBe(2);expect(r.text).toContain('检索超时');
+  });
+  it('深度报告联网超时后，仍能生成文件，不被普通查询预算拦掉', async () => {
+    let n=0,t=0,writes=0;
+    const tools=[{name:'fetch_url',description:'x',input_schema:{type:'object',properties:{}},run:async()=>{t=500_000;return '来源正文';}},
+      {name:'write_file',description:'x',input_schema:{type:'object',properties:{}},run:async()=>{writes++;return '保存完成';}}];
+    const adapter={async stream({allowWebSearch,tools,onText}) {
+      n++;if(n===1)return {text:'',toolCalls:[call('r','fetch_url')],stop:'tool_use'};
+      if(n===2){expect(allowWebSearch).toBe(false);expect(tools.some(t=>t.name==='write_file')).toBe(true);return {text:'',toolCalls:[call('w','write_file')],stop:'tool_use'};}
+      onText('报告已保存，资料限制已注明。');return {text:'报告已保存，资料限制已注明。',toolCalls:[],stop:'end_turn'};
+    }};
+    await agent.runAgent({adapter,model:'m',history:[],userText:'写一份调研报告',tools,context:ctx,emit:()=>{},now:()=>t});
+    expect(writes).toBe(1);
+  });
+});
+

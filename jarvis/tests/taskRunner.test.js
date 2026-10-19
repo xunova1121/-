@@ -12,6 +12,15 @@ import { DEFAULT_CONFIG } from '../src/llm/config.js';
 let dir;
 // 每个测试建的执行器：收尾前等它们的后台活（整理记忆、压缩对话）做完，不然会写进下一个测试的存储
 let runners = [];
+
+it('服务器抓取带浏览器头，保留API头、停止信号与同一重定向总期限', async () => {
+  const requests=[];const ctrl=new AbortController();
+  const fetchImpl=async(url,init)=>{requests.push({url:String(url),init});return requests.length===1?new Response('',{status:302,headers:{location:'https://good.example/next'}}):new Response('ok');};
+  const lookup=async()=>[{address:'93.184.216.34'}];
+  await publicFetch('https://good.example/a',{signal:ctrl.signal,headers:{'Content-Type':'application/json','Authorization':'Bearer test-only'}},fetchImpl,lookup);
+  expect(requests).toHaveLength(2);
+  for(const r of requests){expect(r.init.headers.get('user-agent')).toContain('Mozilla/5.0');expect(r.init.headers.get('accept-language')).toContain('zh-CN');expect(r.init.headers.get('content-type')).toBe('application/json');expect(r.init.signal).toBe(ctrl.signal);}
+});
 const createTaskRunner = (o) => { const r = makeRunner(o); runners.push(r); return r; };
 beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-task-')); useBackend(createFileStore(dir)); });
 afterEach(async () => {
@@ -312,3 +321,4 @@ it('开始新任务不会覆盖未完成检查点，明确继续时带回完整�
  const task=await runner.start({sessionId:s.id,text:'继续核对上次的任务'});await until(()=>runner.get(task.id).status==='done');
  const saved=await sessions.get(s.id);expect(saved.recoveryCheckpoints[0].text).toBe(original);expect(JSON.stringify(seen)).toContain('末尾不能遗漏');expect(JSON.stringify(seen)).toContain('不得自动重放');
 });
+

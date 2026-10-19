@@ -52,11 +52,19 @@ const MAX_IMAGE_CHARS = 4 * 1024 * 1024;
  */
 export async function publicFetch(url, init = {}, fetchImpl = globalThis.fetch, lookup = (h) => dns.lookup(h, { all: true })) {
   let u = new URL(url);
+  const headers = new Headers({
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+  });
+  new Headers(init.headers).forEach((v, k) => headers.set(k, v));
+  const requestSignal = init.signal ?? AbortSignal.timeout(20000);
   for (let hop = 0; ; hop++) {
+    requestSignal.throwIfAborted();
     // 域名也要查一下解析到哪：指向 127.0.0.1 这类内网地址的域名同样不许访问
     const addrs = /^https?:$/.test(u.protocol) && !isPrivateHost(u.hostname) ? await lookup(u.hostname.replace(/^\[|\]$/g, '')).catch(() => []) : null;
     if (!addrs || addrs.some((a) => isPrivateHost(a.address))) throw new Error('只允许访问公网 http(s) 地址');
-    const res = await fetchImpl(u, { ...init, redirect: 'manual', signal: init.signal ?? AbortSignal.timeout(20000) });
+    const res = await fetchImpl(u, { ...init, headers, redirect: 'manual', signal: requestSignal });
     const loc = res.headers.get('location');
     if (!(res.status >= 300 && res.status < 400 && loc)) return res;
     if (hop >= 5) throw new Error('重定向次数过多');
@@ -347,3 +355,4 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     }
   };
 }
+

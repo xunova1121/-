@@ -26,6 +26,7 @@ import * as sessions from './sessions.js';
 import { createSearch } from './webSearch.js';
 import { getWeather } from './weather.js';
 import { createPageReader } from './pageReader.js';
+import { withWebDeadline } from './retrievalBudget.js';
 import { matchFiles, searchLines } from './fileSearch.js';
 import { deepResearch, DEPTHS } from './research.js';
 import { factCheck, formatReport } from './factCheck.js';
@@ -664,9 +665,9 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       name: 'fetch_url',
       description: '获取网页内容（转换为文字），用于读取用户给出的链接或最新资料。',
       input_schema: S({ url: str('http(s) 地址') }, ['url']),
-      run: async ({ url }) => {
+      run: async ({ url }, { signal, progress } = {}) => {
         if (!/^https?:\/\//i.test(url)) throw new Error('只支持 http(s) 地址');
-        return clip(await readPage(url), 15000);
+        return clip(await readPage(url, { signal, progress }), 15000);
       }
     },
     {
@@ -699,16 +700,19 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         queries: { type: 'array', items: { type: 'string' }, description: '可选：多个搜索词，一次并行搜索（最多 8 个），例如每场比赛一个' },
         freshness: { type: 'string', enum: ['day', 'week', 'month', 'year'], description: '可选：只要最近一天 / 一周 / 一个月 / 一年内的结果（新闻、刚结束的比赛、最新价格时用）' }
       }, []),
-      run: async ({ query, queries, freshness }) => {
+      run: async ({ query, queries, freshness }, { signal } = {}) => {
         const list = [...new Set([query, ...(Array.isArray(queries) ? queries : [])].map((q) => String(q || '').trim()).filter(Boolean))].slice(0, 8);
         if (!list.length) throw new Error('请给出搜索词');
+        let successes = 0;
         const one = async (q) => {
           try {
-            const hits = await engine.search(q, list.length > 1 ? 5 : 6, { freshness });
+            const hits = await withWebDeadline((s) => engine.search(q, list.length > 1 ? 5 : 6, { freshness, signal: s }), { signal, timeoutMs: 12000 });
+            if (hits.length) successes++;
             return hits.length ? hits.map((r) => `- ${r.title}\n  ${r.url}\n  ${String(r.snippet || '').slice(0, 300)}`).join('\n') : '（没有结果：换个说法、换成英文或原文再搜）';
-          } catch (e) { return `（搜索失败：${e.message}）`; }
+          } catch (e) { if (signal?.aborted || e.name === 'AbortError') throw e; return `（搜索失败：${e.message}）`; }
         };
         const outs = await Promise.all(list.map(one));
+        if (!successes) throw new Error(outs.join('\n'));
         return list.length === 1 ? outs[0] : list.map((q, i) => `### ${q}\n${outs[i]}`).join('\n\n');
       }
     });
@@ -808,3 +812,4 @@ function formatRun(r) {
 export function fmtSize(n) {
   return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 }
+

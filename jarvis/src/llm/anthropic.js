@@ -45,8 +45,8 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
   let level = 0; // 0 全部参数；1 去掉新参数；2 再去掉联网搜索（只在 compat 时降级）
   const maxLevel = !compat ? 0 : webSearch ? 2 : 1;
 
-  async function once({ model, system, messages, tools, signal, onText, effort }, lvl, state) {
-    const search = webSearch && lvl < 2;
+  async function once({ model, system, messages, tools, signal, onText, effort, allowWebSearch = true }, lvl, state) {
+    const search = webSearch && lvl < 2 && allowWebSearch;
     const [stable, dynamic] = system;
     const params = {
       model,
@@ -116,3 +116,4 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
     }
   };
 }
+

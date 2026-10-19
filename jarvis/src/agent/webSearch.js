@@ -214,15 +214,17 @@ export function createSearch({ bochaKey, tavilyKey, fetchViaGateway, searchRegio
     get name() { return all.map((e) => e.name).join(' + '); },
     regionNow: keyless?.regionNow,
     async search(query, n = 6, opts = {}) {
+      if (opts.signal?.aborted) throw opts.signal.reason;
       const zh = /[\u4e00-\u9fff]/.test(query);
       const domestic = zh && (!keyless || (await keyless.regionNow()) === 'cn');
       const order = (domestic ? [bocha, keyless, tavily] : [tavily, bocha, keyless]).filter(Boolean);
       const hits = [];
       const errors = [];
       for (const e of order) {
+        if (opts.signal?.aborted) throw opts.signal.reason;
         try {
           for (const h of await e.search(query, n, opts)) if (!hits.some((x) => x.url === h.url)) hits.push(h);
-        } catch (err) { errors.push(`${e.name}：${err.message}`); }
+        } catch (err) { if (opts.signal?.aborted) throw opts.signal.reason; errors.push(`${e.name}：${err.message}`); }
         if (hits.length >= Math.min(3, n)) break;
       }
       if (!hits.length && errors.length) throw new Error(errors.join('；'));
@@ -236,9 +238,9 @@ const BOCHA_FRESH = { day: 'oneDay', week: 'oneWeek', month: 'oneMonth', year: '
 function bochaSearch(key, fetchViaGateway) {
   return {
     name: '博查',
-    async search(query, n = 6, { freshness = '' } = {}) {
+    async search(query, n = 6, { freshness = '', signal } = {}) {
       const url = 'https://api.bochaai.com/v1/web-search';
-      const init = { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body: JSON.stringify({ query, count: Math.min(10, Math.max(n, 5)), summary: true, freshness: BOCHA_FRESH[freshness] ?? 'noLimit' }) };
+      const init = { method: 'POST', signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body: JSON.stringify({ query, count: Math.min(10, Math.max(n, 5)), summary: true, freshness: BOCHA_FRESH[freshness] ?? 'noLimit' }) };
       const res = fetchViaGateway ? await fetchViaGateway(url, init) : await fetch(url, init);
       const j = await res.json().catch(() => ({}));
       if (!res.ok || (j.code && j.code !== 200)) throw new Error(`博查返回 ${j.code || res.status}${j.msg ? `：${j.msg}` : ''}`);
@@ -260,10 +262,10 @@ function tavilySearch(tavilyKey, fetchViaGateway) {
   return {
     name: 'Tavily',
     // deep：顺带要回网页正文（查证时不用再逐篇打开，手机上也不受跨域限制；仍是基础档，每次 1 个额度）
-    async search(query, n = 6, { deep = false, freshness = '' } = {}) {
+    async search(query, n = 6, { deep = false, freshness = '', signal } = {}) {
       const url = 'https://api.tavily.com/search';
       // 密钥放请求头（Tavily 现在的写法），请求体里也带一份（兼容旧接口）
-      const init = { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tavilyKey}` }, body: JSON.stringify({ api_key: tavilyKey, query, max_results: n, include_answer: false, ...(deep && { include_raw_content: true }), ...(FRESH_DAYS[freshness] && { time_range: freshness }) }) };
+      const init = { method: 'POST', signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tavilyKey}` }, body: JSON.stringify({ api_key: tavilyKey, query, max_results: n, include_answer: false, ...(deep && { include_raw_content: true }), ...(FRESH_DAYS[freshness] && { time_range: freshness }) }) };
       const res = await (fetchViaGateway ? fetchViaGateway(url, init) : fetch(url, init)).catch((e) => { throw new Error(`连不上 Tavily（${e.message}；国内网络可能访问不了 api.tavily.com）`); });
       if (!res.ok) throw new Error(tavilyError(res.status, await res.text().catch(() => '')));
       const j = await res.json();
@@ -285,21 +287,22 @@ function keylessSearch(fetchViaGateway, searchRegion) {
   return {
     get name() { return region === 'cn' ? '必应中国、百度、360（国内）' : region === 'global' ? '必应、DuckDuckGo' : '按网络自动选择（国内：必应中国、百度、360；国外：必应、DuckDuckGo）'; },
     regionNow,
-    async search(query, n = 6, { freshness = '' } = {}) {
+    async search(query, n = 6, { freshness = '', signal } = {}) {
       const region = await regionNow();
       const plan = [['必应 RSS', bingRssUrl(query, region, freshness), parseBingRss], ...searchPlan(query, region, freshness)];
       // 一个来源结果太少（被拦、只有广告）时再查下一个，合并去重
       const notes = [];
       const hits = [];
       for (const [name, url, parse] of plan) {
+        if (signal?.aborted) throw signal.reason;
         let status = 0, body = '', got = 0;
         try {
-          const res = await fetchViaGateway(url, { headers: DESKTOP_HEADERS });
+          const res = await fetchViaGateway(url, { headers: DESKTOP_HEADERS, signal });
           status = res.status;
           body = await res.text();
           if (res.ok) for (const h of parse(body)) if (!hits.some((x) => x.url === h.url)) { hits.push(h); got++; }
           notes.push(describeSource(name, status, body, got));
-        } catch (e) { notes.push(`${name}：连不上（${e.message}）`); }
+        } catch (e) { if (signal?.aborted) throw signal.reason; notes.push(`${name}：连不上（${e.message}）`); }
         if (hits.length >= Math.min(4, n)) break;
       }
       if (!hits.length) throw new Error(`各搜索源都没拿到结果——${notes.join('；')}。可在设置 → 模型里填博查或 Tavily 搜索 Key，搜索更稳定`);
@@ -307,3 +310,4 @@ function keylessSearch(fetchViaGateway, searchRegion) {
     }
   };
 }
+

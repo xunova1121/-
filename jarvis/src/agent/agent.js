@@ -15,6 +15,7 @@
  */
 import { EmotionTagStripper, stripEmotionTags } from '../../shared/emotionTag.js';
 import { validateArgs } from './tools.js';
+import { createRetrievalBudget, withWebDeadline } from './retrievalBudget.js';
 import * as sessions from './sessions.js';
 import * as memory from './memory.js';
 import * as kb from './knowledge.js';
@@ -157,15 +158,15 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
  * @param {(e: object) => void} o.emit
  * @param {AbortSignal} [o.signal]
  * @param {number} [o.maxSteps]
- * @param {number} [o.timeBudgetMs]  查资料的用时上限：主要在查网页且超过这个时间，就让模型用已有结果收尾（默认 8 分钟）
+ * @param {number} [o.timeBudgetMs]  联网检索预算；默认普通查询45秒、明确的研究或文档任务8分钟，从首次联网开始
  * @param {(req: { title: string, detail?: string, key?: string, danger?: boolean }, tool: object) => Promise<boolean>} [o.approve]  需要确认的工具调用
  * @param {{ text: string } | null} [o.summary]  本段对话较早内容的摘要（长对话压缩，见 compress.js）
  * @returns {Promise<{ text: string, steps: number, toolCalls: number }>}
  */
-export async function runAgent({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs = TIME_BUDGET_MS, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null }) {
-  const startedAt = now();
-  let overtime = 0; // 超时后又给了几次收尾机会
-  let webCalls = 0; // 这一轮查网页的次数（只有主要在查资料时才按用时收尾，写代码、写长文档不受影响）
+export async function runAgent({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null }) {
+  const retrieval = createRetrievalBudget(images.length ? `逐项核验 ${requirementText}` : requirementText, { now, timeBudgetMs });
+  let closingTurns = 0;
+  let retrievalStopped = false;
   emit({ type: 'state', value: 'processing' });
   const tCtx = Date.now();
   const ctx = context ?? (await buildContext(userText, { sessionId, turns: history.filter((m) => m.role === 'user').length, summary, light }));
@@ -208,6 +209,7 @@ export async function runAgent({ adapter, model, history, userText, images = [],
   const takeInbox = () => {
     const said = inbox?.splice(0) ?? [];
     if (!said.length) return false;
+    retrieval.upgrade(said.join("\n"));
     const note = interjection(said);
     emit({ type:'interjection_accepted', count:said.length });
     const last = convo.at(-1);
@@ -219,25 +221,45 @@ export async function runAgent({ adapter, model, history, userText, images = [],
   for (; step < limit; step++) {
     if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
     takeInbox();
+    const closing = Boolean(retrieval.reason);
+    if (closing) {
+      if (!retrieval.extensive && ++closingTurns > 2) { retrievalStopped = true; break; }
+      convo.push({ role: 'user', content: retrieval.note });
+    }
     compactToolResults(convo, { archive }); // 先保存有界原文，再缩短工作副本
     let stepText = '';
     // 每一步模型输出都可能以 <emotion> 标签开头，每步用新的剥离器
     let stripper = new EmotionTagStripper();
     let r;
+    let searchTimer, searchTimedOut = false;
+    const requestCtrl = new AbortController();
+    const relayAbort = () => requestCtrl.abort(signal.reason);
+    signal?.addEventListener('abort', relayAbort, { once: true });
+    const stopSearch = () => { searchTimedOut = true; retrieval.close('本轮联网检索已达到预算'); requestCtrl.abort(); };
     try {
     r = await cur.adapter.stream({
       model: cur.model,
       effort,
       system: light ? [LIGHT_PROMPT, [ctx.dynamic, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [STABLE_PROMPT, [ctx.dynamic, requirementContext, toolHint, voice && VOICE_NOTE].filter(Boolean).join('\n\n')],
       messages: convo,
-      tools: loader.list(),
-      signal,
+      tools: closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list(),
+      allowWebSearch: !closing,
+      signal: requestCtrl.signal,
       onRetry: (attempt) => {
         stripper = new EmotionTagStripper(); // 续写的开头可能又带情绪标签
         emit({ type: 'retry', attempt, resume: Boolean(stepText.trim()) });
       },
       onText: (delta, meta) => {
-        if (meta?.serverTool) { emit({ type: 'server_tool', name: meta.serverTool }); return; }
+        if (meta?.serverTool) {
+          emit({ type: 'server_tool', name: meta.serverTool });
+          if (/search/.test(meta.serverTool)) {
+            if (!retrieval.begin()) stopSearch();
+            else if (Number.isFinite(retrieval.remaining)) {
+              clearTimeout(searchTimer); searchTimer = setTimeout(stopSearch, Math.max(1, retrieval.remaining));
+            }
+          }
+          return;
+        }
         const { text, hint } = stripper.push(delta);
         if (hint) emit({ type: 'emotion', value: hint });
         if (text) {
@@ -248,6 +270,10 @@ export async function runAgent({ adapter, model, history, userText, images = [],
       }
     });
     } catch (e) {
+      if (searchTimedOut && !signal?.aborted) {
+        if (stepText.trim()) { finalText += stepText + '\n\n'; emit({ type: 'text', delta: '\n\n' }); }
+        continue; // 本次不完整的原生搜索协议不再续传；下一轮关闭搜索、仅整理已有资料
+      }
       // 自动重试也没救回来：这一步还没输出文字的话换备用模型接着做（已经输出了一半就不换，免得前后两截）
       if (backups.length && !stepText.trim() && canFallback(e)) {
         const next = backups.shift();
@@ -257,6 +283,8 @@ export async function runAgent({ adapter, model, history, userText, images = [],
         continue;
       }
       throw e;
+    } finally {
+      clearTimeout(searchTimer); signal?.removeEventListener('abort', relayAbort);
     }
     if (!r.toolCalls.length && r.stop !== 'pause_turn') {
       const rest = stripper.flush();
@@ -273,7 +301,7 @@ export async function runAgent({ adapter, model, history, userText, images = [],
         if (finalText && !/\n$/.test(finalText)) { emit({ type: 'text', delta: '\n\n' }); finalText += '\n\n'; }
         continue;
       }
-      const note = checks < 2 && !light ? finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }) : '';
+      const note = (!closing || retrieval.extensive) && checks < 2 && !light ? finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }) : '';
       if (!note) break;
       checks++;
       convo.push({ role: 'user', content: note });
@@ -295,6 +323,7 @@ export async function runAgent({ adapter, model, history, userText, images = [],
       const times = (seen.get(sig) ?? 0) + 1;
       seen.set(sig, times);
       try {
+        if (closing && (!retrieval.extensive || WEB_TOOLS.has(c.name))) throw new Error('联网检索已经结束，请直接整理已有资料回答，不要继续调用工具');
         if (!tool) throw new Error(`没有名为 ${c.name} 的工具`);
         // 一模一样的调用已经做过两次：结果不会变，不再执行，让模型换思路
         if (times >= 3) throw new Error(`这个操作（同样的参数）已经做过 ${times - 1} 次了，结果不会变。请换一种方法，或者直接根据已有结果继续。`);
@@ -306,7 +335,12 @@ export async function runAgent({ adapter, model, history, userText, images = [],
         await checkpoint?.({type:'tool_start',id:c.id,name:c.name,args:c.args});
         if (signal?.aborted) throw Object.assign(new Error('aborted'),{name:'AbortError'});
         // 工具可以返回 { text, images }：图片会交给模型“看”（如截屏、工作区里的图片）
-        const r = await tool.run(c.args, { signal, progress: (text) => emit({ type: 'tool_progress', id: c.id, name: c.name, text }) });
+        const progress = (text) => emit({ type: 'tool_progress', id: c.id, name: c.name, text });
+        const web = WEB_TOOLS.has(c.name);
+        if (web && !retrieval.begin()) throw new Error(retrieval.note);
+        const run = (s) => tool.run(c.args, { signal: s, progress });
+        const r = web && Number.isFinite(retrieval.remaining)
+          ? await withWebDeadline(run, { signal, timeoutMs: retrieval.remaining }) : await run(signal);
         if (r && typeof r === 'object' && 'text' in r) { output = String(r.text); outImages = r.images ?? []; } else output = String(r);
       } catch (e) {
         ok = false;
@@ -326,7 +360,7 @@ export async function runAgent({ adapter, model, history, userText, images = [],
     }
     for (const { c, ok, output, outImages } of results) {
       toolCount++;
-      if (WEB_TOOLS.has(c.name)) webCalls++;
+      if (WEB_TOOLS.has(c.name)) retrieval.end(ok);
       if (ok && /^(write_file|edit_file)$/.test(c.name) && CODE_FILE.test(String(c.args?.path ?? ''))) wroteCode = true;
       if (ok && /^(run_javascript|run_python|preview|computer_run)$/.test(c.name)) ranCode = true;
       if (!ok) failCount++;
@@ -335,15 +369,8 @@ export async function runAgent({ adapter, model, history, userText, images = [],
       if (recent.length > 12) recent.shift();
       convo.push({ role: 'tool', toolCallId: c.id, name: c.name, content: output, isError: !ok, ...(outImages.length && { images: outImages }) });
     }
-    // 用时到了：不再接着查，让模型用已拿到的信息直接给结论（给两次机会，还要调用工具就停下）
-    if (timeBudgetMs && webCalls >= 3 && webCalls * 2 >= toolCount && now() - startedAt > timeBudgetMs) {
-      if (++overtime > 2) { limit = step; break; }
-      // 附在最后一条工具结果后面（各家接口都接受，不会出现连续两条用户消息）
-      const last = convo.at(-1);
-      last.content = `${last.content}\n\n（系统提示：查资料已经用了 ${Math.round((now() - startedAt) / 60e3)} 分钟。请不要再调用工具，直接用已经拿到的信息给出结论；没查到的部分如实说明，并告诉用户可以去哪里看。）`;
-    }
     // 长任务中途提醒：每调用 REMIND_EVERY 次工具，把用户这次的要求和计划进度附在最后一条工具结果后面，免得做着做着跑偏
-    else if (toolCount - reminded >= REMIND_EVERY) {
+    if (toolCount - reminded >= REMIND_EVERY) {
       reminded = toolCount;
       const last = convo.at(-1);
       last.content = `${last.content}\n\n${progressReminder({ userText: requirementText, steps: plan.steps, toolCount })}`;
@@ -354,9 +381,9 @@ export async function runAgent({ adapter, model, history, userText, images = [],
       if (!stuck && limit < hardCap) limit = Math.min(hardCap, limit + maxSteps);
     }
   }
-  if (step >= limit) {
-    const note = overtime > 2
-      ? `\n\n（查了 ${Math.round((now() - startedAt) / 60e3)} 分钟还没有确切结果，先停在这里，上面是目前的进展。可以换个问法，或换一个带联网搜索的模型再试。）`
+  if (step >= limit || retrievalStopped) {
+    const note = retrieval.reason
+      ? `\n\n（本轮检索已停止：${retrieval.reason}。目前还没有确切结果；已取得的信息见上文，未核实的部分不能当作结论。）`
       : stuck
       ? `\n\n（最近的步骤大多失败，看起来卡住了，先停在这里。上面是目前的进展；换个说法或给我更多信息，我再接着做。）`
       : `\n\n（这个任务已经连续做了 ${step} 步，先停在这里，上面是目前的进展。）`;
@@ -364,7 +391,7 @@ export async function runAgent({ adapter, model, history, userText, images = [],
     emit({ type: 'text', delta: note });
   }
   // 只有正常收尾、且最后一次工具调用成功，才记为“完成任务”（计入进化等级）；否则记为未完成，便于之后复盘
-  const hitLimit = step >= limit;
+  const hitLimit = step >= limit || retrievalStopped;
   if (quiet) { /* 分身做的子任务不单独计入任务记录 */ } else if (toolCount && !hitLimit && lastToolOk && failCount === 0) {
     await memory.noteTask(`完成任务：${userText.slice(0, 40)}（调用工具 ${toolCount} 次${failCount ? `，其中 ${failCount} 次失败后已改正` : ''}）`);
   } else if (toolCount) {
@@ -374,7 +401,7 @@ export async function runAgent({ adapter, model, history, userText, images = [],
   return { text: finalText.trim(), steps: step + 1, toolCalls: toolCount };
 }
 
-/** 一轮任务的默认用时上限（毫秒）：查资料超过这个时间还没结果，就先用已有信息收尾 */
+/** 保留旧导出的深度研究预算；普通查询默认预算见 retrievalBudget.js。 */
 export const TIME_BUDGET_MS = 8 * 60e3;
 const WEB_TOOLS = new Set(['web_search', 'fetch_url', 'fact_check', 'deep_research']);
 
@@ -452,4 +479,5 @@ export function progressReminder({ userText, steps = [], toolCount }) {
 }
 
 const stripTag = (s) => stripEmotionTags(String(s || '').replace(/^\s*<emotion>[^<]*<\/emotion>\s*/, ''));
+
 

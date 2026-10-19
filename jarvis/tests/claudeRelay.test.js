@@ -22,6 +22,15 @@ function fakeClient(rejectIf) {
 const req = { model: 'claude-sonnet-5-5', system: ['s', ''], messages: [{ role: 'user', content: 'hi' }], tools: [{ name: 't', description: 'd', input_schema: { type: 'object', properties: {} } }] };
 
 describe('Claude 中转（Anthropic 原生格式）', () => {
+  it('单轮预算收尾关闭原生搜索，不修改用户后续请求的搜索设置', async () => {
+    const c=fakeClient(()=>false);
+    const a=createAnthropicAdapter({client:c,webSearch:true});
+    await a.stream({...req,allowWebSearch:false});
+    expect(c.seen[0].tools.some(t=>t.type==='web_search_20260209')).toBe(false);
+    await a.stream(req);
+    expect(c.seen[1].tools.some(t=>t.type==='web_search_20260209')).toBe(true);
+    expect(a.webSearchOn).toBe(true);
+  });
   it('中转站不认新参数：去掉后重试，联网搜索保留', async () => {
     const c = fakeClient((p) => Boolean(p.output_config));
     const a = createAnthropicAdapter({ client: c, webSearch: true, compat: true });
@@ -55,3 +64,4 @@ describe('Claude 中转（Anthropic 原生格式）', () => {
     expect(keyedProviders({ ...cfg, provider: 'custom', baseURLs: { ...cfg.baseURLs, 'claude-relay': 'https://api.teamorouter.com' } })).toContain('claude-relay');
   });
 });
+

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createPageReader, decodeBody } from '../src/agent/pageReader.js';
 import { searchPlan } from '../src/agent/webSearch.js';
 
@@ -46,7 +46,7 @@ describe('读网页：直接读不到时用 Tavily 代读', () => {
   it('没有 Tavily Key：照旧报错；两边都失败时说清楚', async () => {
     const g = gateway([[/blocked/, () => new Response('', { status: 403 })], [/extract/, () => new Response('{}', { status: 432 })]]);
     await expect(createPageReader({ fetchViaGateway: g.f })('https://blocked.com/')).rejects.toThrow('HTTP 403');
-    await expect(createPageReader({ tavilyKey: 'k', fetchViaGateway: g.f })('https://blocked.com/')).rejects.toThrow(/HTTP 403；Tavily 代读也失败：Tavily 返回 432/);
+    await expect(createPageReader({ tavilyKey: 'k', fetchViaGateway: g.f })('https://blocked.com/')).rejects.toThrow(/HTTP 403.*；Tavily 代读也失败：Tavily 返回 432/);
   });
 
   it('同一网页 15 分钟内只读一次', async () => {
@@ -97,3 +97,31 @@ describe('读网页：GBK 编码的中文站不再乱码', () => {
     expect(await read('https://cp.example.cn/a')).toContain('主队胜');
   });
 });
+
+describe('网页失败可诊断且不反复访问', () => {
+  it('HTTP200验证页不算成功，同一站两次拒绝后跳过其他页面', async () => {
+    let calls=0;
+    const read=createPageReader({fetchViaGateway:async()=>{calls++;return html('安全验证，请完成验证码');}});
+    await expect(read('https://blocked.example/a')).rejects.toThrow('验证页');
+    await expect(read('https://blocked.example/a')).rejects.toThrow('刚刚读取失败');
+    await expect(read('https://blocked.example/b')).rejects.toThrow('验证页');
+    await expect(read('https://blocked.example/c')).rejects.toThrow('连续拒绝');
+    expect(calls).toBe(2);
+  });
+  it('超时包括响应正文；没有代读密钥时明确失败，不假装已经读到', async () => {
+    vi.useFakeTimers();
+    try {
+      let seen;
+      const read=createPageReader({fetchViaGateway:async(url,{signal})=>{seen=signal;return {ok:true,headers:new Headers({'content-type':'text/html'}),arrayBuffer:()=>new Promise(()=>{})};}});
+      const assertion=expect(read('https://slow.example/a')).rejects.toThrow('超时');
+      await vi.advanceTimersByTimeAsync(8001);await assertion;expect(seen.aborted).toBe(true);
+    } finally {vi.useRealTimers();}
+  });
+  it('停止读取不会继续调用付费代读服务', async () => {
+    const ctrl=new AbortController();let calls=0;
+    const read=createPageReader({tavilyKey:'test',fetchViaGateway:async()=>{calls++;ctrl.abort();throw new Error('cancelled');}});
+    await expect(read('https://slow.example/a',{signal:ctrl.signal})).rejects.toMatchObject({name:'AbortError'});
+    expect(calls).toBe(1);
+  });
+});
+
