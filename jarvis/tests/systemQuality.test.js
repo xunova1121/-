@@ -144,6 +144,12 @@ describe('确定性数字和交付回执', () => {
     review.record({ name: 'read_file', args: { path: 'a' }, ok: true });
     expect(review.report().failures).toEqual([]);
   });
+  it('要求的文件没有真实产物回执时，不能靠模型自述完成', () => {
+    const review = createExecutionReview('生成PPT和Word');
+    expect(review.report().pendingFormats).toEqual(['pptx', 'docx']);
+    review.artifact({ path: 'a.pptx', validation: { format: 'pptx', readback: 'passed', errors: 0 } });
+    expect(review.report().pendingFormats).toEqual(['docx']);
+  });
   it('回执有上限，不存原始大块输出', () => {
     const review = createExecutionReview();
     for (let i = 0; i < 100; i++) review.record({ name: 'read_file', args: { path: String(i) }, ok: false, output: '大'.repeat(10000) });
@@ -195,6 +201,16 @@ describe('跨层控制与评测', () => {
     expect(qualityReport({ results: [{ id: 'a', status: 'done', quality: 'not_reviewed' }] })).toMatchObject({ reviewedAccuracy: null, tokens: null });
     const comparison = compareReports({ results: [{ id: 'a', quality: 'passed', status: 'done' }] }, { results: [{ id: 'a', quality: 'failed', status: 'done' }] });
     expect(comparison.regressions).toEqual(['a']);
+  });
+  it('实际执行器在没有产物时不能无提示交付PPT', async () => {
+    let calls = 0;
+    const result = await runAgent({
+      adapter: { stream: async () => { calls++; return { text: '已完成。', toolCalls: [], stop: 'end_turn' }; } },
+      model: 'test', history: [], userText: '生成PPT', context: { dynamic: '' }, tools: [], emit() {}
+    });
+    expect(calls).toBe(3);
+    expect(result.review.pendingFormats).toEqual(['pptx']);
+    expect(result.text).toContain('自动验收仍有待核对');
   });
   it('真实执行器不会吞掉用户停止的工具异常', async () => {
     const stopped = Object.assign(new Error('已停止'), { name: 'AbortError' });

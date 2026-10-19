@@ -27,6 +27,9 @@ export function createExecutionReview(goal = '') {
       if (files.size > 32) files.delete(files.keys().next().value);
     }
     if (ok && /^(?:read_file|computer_read_file)$/.test(toolName) && files.has(path)) files.get(path).verified = true;
+    if (ok && /^(?:read_file|computer_read_file)$/.test(toolName) && files.has(path) && /\.(?:pptx|docx|xlsx)$/i.test(path)) {
+      artifact({ path, validation: { format: path.split('.').pop().toLowerCase(), readback: 'passed', structure: 'not_checked', render: 'not_checked' } });
+    }
     if (validation) return validation;
   };
   const artifact = event => {
@@ -46,6 +49,7 @@ export function createExecutionReview(goal = '') {
     const ran = receipts.some(receipt => receipt.sequence > lastWrite && receipt.ok && /^(?:run_javascript|run_python|computer_run|run_project_tests)$/.test(receipt.tool));
     const pending = codeFiles.filter(file => !file.verified).map(file => file.path);
     return {
+      pendingFormats: taskContract(request).formats.filter(format => ![...artifacts.values()].some(item => item.format === format && item.readback === 'passed' && !item.errors)),
       request, version, calls: sequence, calculation: receipts.some(receipt => receipt.version === version && receipt.ok && /^(?:verify_numbers|run_javascript|run_python)$/.test(receipt.tool)) ? 'tool_checked' : 'not_checked', contract: taskContract(request), artifacts: [...artifacts.values()],
       failures: [...latest.values()].filter(receipt => !receipt.ok).map(receipt => receipt.tool),
       pendingReadback: pending, codeExecution: !codeFiles.length ? 'not_required' : ran ? 'executed_scope_needs_review' : 'not_run',
@@ -55,6 +59,7 @@ export function createExecutionReview(goal = '') {
   const guidance = () => {
     const result = report();
     const issues = [];
+    if (result.pendingFormats.length) issues.push('这些要求的文件还没有有效产物读回回执：' + result.pendingFormats.join('、') + '；先实际生成并核对，不能只说已完成');
     if (result.contract.calculation && result.calculation === 'not_checked') issues.push('涉及确定性数值计算，但还没有verify_numbers或代码计算回执；先计算核对，不能自行心算冒充已验证');
     if (result.pendingReadback.length) issues.push('这些修改尚未读回核对：' + result.pendingReadback.join('、'));
     if (result.codeExecution === 'not_run') issues.push('已修改代码但没有实际运行记录；先运行适用测试，无法执行就明确未验证');
