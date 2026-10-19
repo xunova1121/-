@@ -1,3 +1,4 @@
+import { reliabilityCases } from './reliability-cases.mjs';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import fs from 'node:fs/promises';
@@ -50,6 +51,8 @@ export async function runCase(api, item, { runId = randomUUID(), now = Date.now,
       await wait(500);
     }
     result.timing = info?.timing ?? null;
+    result.usage = info?.usage ?? null;
+    result.usageReason = result.usage ? null : '接口未提供完整Token用量，不能记成零';
     result.clientTotalMs = now() - started;
     result.withinTarget = result.status === 'done' && result.clientTotalMs <= item.targetMs;
     result.note = item.note ? { text: item.note, sent: noteSent } : null;
@@ -92,11 +95,12 @@ export function summarize(results) {
 }
 
 export async function main(args = process.argv.slice(2), env = process.env) {
+  const catalog=args.includes('--suite=reliability') ? reliabilityCases : cases;
   const ids = args.find(a=>a.startsWith('--ids='))?.slice(6).split(',');
-  const selected = ids ? ids.map(id=>{ const c=cases.find(x=>x.id===id); if(!c) throw new Error(`未知题号：${id}`); return c; }) : cases.slice(0,3);
+  const selected = ids ? ids.map(id=>{ const c=catalog.find(x=>x.id===id); if(!c) throw new Error(`未知题号：${id}`); return c; }) : args.includes('--all') ? catalog : catalog.slice(0,3);
   if (new Set(selected.map(c=>c.id)).size !== selected.length) throw new Error('题号不可重复');
   if (!args.includes('--live')) {
-    console.log(JSON.stringify({ mode:'plan_only', totalCases:cases.length, selected,
+    console.log(JSON.stringify({ mode:'plan_only', totalCases:catalog.length, selected,
       instructions:'仅预览，不调用模型。显式加--live执行；默认只选3题，用--ids=指定题号。令牌通过JARVIS_EVAL_TOKEN设置。' }, null, 2));
     return;
   }
@@ -132,3 +136,4 @@ export async function main(args = process.argv.slice(2), env = process.env) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch(()=>{console.error('评测未完成：请检查参数、配置、连接和报告；未输出凭据或响应正文。');process.exitCode=1;});
 }
+

@@ -106,19 +106,26 @@ export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearc
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       let buf = '';
-      for (;;) {
+      let finished = false;
+      try {
+      while (!finished) {
         const { value, done } = await guard.race(reader.read());
         if (done) break;
         buf += dec.decode(value, { stream: true });
         const { events, rest } = sseLines(buf);
         buf = rest;
         for (const e of events) {
-          if (e === '[DONE]') continue;
+          if (e === '[DONE]') { finished = true; break; }
           let ev;
           try { ev = JSON.parse(e); } catch { continue; } // 心跳等非 JSON 行
           if (/^response\.(output_|function_call|reasoning|completed|failed|incomplete)/.test(ev.type || '')) guard.touch();
           acc.push(ev);
+          if (ev.type === 'response.completed' || ev.type === 'response.incomplete') finished = true;
         }
+      }
+      } finally {
+        reader.cancel().catch(() => {});
+        reader.releaseLock();
       }
       return acc.result();
     } catch (e) { throw guard.error(e); } finally { guard.done(); }
@@ -141,5 +148,6 @@ export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearc
     }
   };
 }
+
 
 

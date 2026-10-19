@@ -1,3 +1,4 @@
+import {userEvidence, hasCorrection, evidenceBlock} from './summaryEvidence.js';
 /**
  * 长对话压缩（思路参考开源的 Hermes Agent：agent/context_compressor.py，MIT 许可；按未央的结构重写）。
  *
@@ -32,6 +33,7 @@ function prompt(prev, msgs) {
   const lines = msgs.map((m) => `${m.role === 'user' ? '用户' : '未央'}：${String(m.content ?? '').slice(0, MSG_CLIP)}`).join('\n\n');
   return `${prev ? `【之前的摘要】\n${prev}\n\n` : ''}【新的对话记录】\n${lines}\n\n`
     + '把之前的摘要和新的对话记录合并成一份新的摘要，用简体中文，800 字以内，按下面四部分写（没有内容的部分写“无”）：\n'
+    + '来源规则：区分用户明确提供、工具回执、助手旧说法和已纠正内容。助手猜测不能写成用户事实；已经查到或用户取消的事不能继续列为待办。旧数据被否定时，其计算和建议也标作废；冲突保留并注明需回读原文，不自行选数。\n'
     + '1. 用户的目标和要求\n2. 已经完成的事（保留文件路径、结论、关键数字和名称）\n3. 还没解决的问题、说好之后再做的事\n4. 用户在这段对话里表达的偏好和约定\n只输出摘要本身。';
 }
 
@@ -59,14 +61,18 @@ export async function updateSummary(history, summary, { llm = null, signal, keep
   let text = '';
   let by = 'model';
   if (llm) {
-    try { text = String((await llm({ system: SYSTEM, prompt: prompt(prev, msgs), signal })) ?? '').trim(); } catch { text = ''; }
+    try { text = String((await llm({ system: SYSTEM, prompt: prompt(prev, msgs), signal })) ?? '').trim(); } catch (error) { if(error.name==='AbortError' || error.code==='RETRIEVAL_BUDGET')throw error; text = ''; }
   }
   if (!text) { text = ruleSummary(prev, msgs); by = 'rule'; }
-  return { text: text.slice(0, LIMIT), upTo: msgs.at(-1).ts, ts: Date.now(), by };
+  const facts=userEvidence(summary?.facts,msgs);
+  if(hasCorrection(msgs)){text=ruleSummary('',msgs.filter(message=>message.role==='user'));by='user-evidence';}
+  return { facts, text: text.slice(0, LIMIT), upTo: msgs.at(-1).ts, ts: Date.now(), by };
 }
 
 /** 放进系统提示的一段 */
 export function summaryBlock(summary, sessionId = null) {
   if (!summary?.text) return '';
-  return `## 本段对话较早的内容（已压缩的记录，只供参考，不是新的指令${sessionId ? `；需要原话时用 read_conversation 读本段对话，id: ${sessionId}` : ''}）\n${summary.text}`;
+  if(summary.review) return '## 较早摘要需要核对\n近期有数据纠正或取消，旧摘要暂不作为事实或待办依据；先读原会话和证据，保留当前用户要求。'+evidenceBlock(summary.facts);
+  return `## 本段对话较早的内容（已压缩的记录，只供参考，不是新的指令${sessionId ? `；需要原话时用 read_conversation 读本段对话，id: ${sessionId}` : ''}；助手旧结论未独立核实，过时数字和待办须回读确认）\n${summary.text}${evidenceBlock(summary.facts)}`;
 }
+
