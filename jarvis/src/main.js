@@ -52,11 +52,8 @@ import { collectRequirements } from './agent/taskRequirements.js';
 import { createTools } from './agent/tools.js';
 import * as ws from './agent/workspace.js';
 import * as agentMemory from './agent/memory.js';
-import { initPanels } from './ui/panels.js';
-import { loadConfig, saveConfig, createAdapter, displayName, providerById, resolveVoice, modelOf } from './llm/config.js';
-import { initVoicePanel } from './ui/voicePanel.js';
+import { loadConfig, saveConfig, createAdapter, displayName, providerById, resolveVoice } from './llm/config.js';
 import * as skillPacks from './agent/skillPacks.js';
-import { initSkillsPanel } from './ui/skillsPanel.js';
 import { initPalette } from './ui/palette.js';
 import * as scheduler from './agent/scheduler.js';
 import { executeScheduled, scheduledPrompt, notificationFor } from './agent/scheduledRun.js';
@@ -76,9 +73,6 @@ import { initServerPanel } from './ui/serverPanel.js';
 import { initQuickPrompts } from './ui/quickPrompts.js';
 import * as mcp from './agent/mcpClient.js';
 import { createDesktopTools } from './agent/desktopTools.js';
-import { initMcpPanel } from './ui/mcpPanel.js';
-import { initLocalModelsPanel } from './ui/localModelsPanel.js';
-import { initRoutingPanel } from './ui/routingPanel.js';
 import { createSyncController } from './sync/controller.js';
 import { initSyncPanel, describeResult } from './ui/syncPanel.js';
 import { matchWake, WakeWindow } from './core/wakeWord.js';
@@ -96,7 +90,7 @@ import { recordVoiceEvent, readVoiceEvents } from './mobile/voiceDiagnostics.js'
 import { createTaskKeeper } from './mobile/backgroundTasks.js';
 import { RecordedVoice } from './mobile/recordedVoice.js';
 import { initDrawer } from './ui/drawer.js';
-import { initModelPicker, isAuto, repairChatModel } from './ui/modelPicker.js';
+import { isAuto } from './ui/modelPicker.js';
 import { generateImage } from './llm/images.js';
 import { generateVideo } from './llm/videos.js';
 import { composeGreeting, GREET_GAP_MS } from './core/greeting.js';
@@ -107,6 +101,7 @@ import { $, body, now, DESKTOP, COMPACT, storage, narrow, lowEnd, toast, wp, mar
 import { createApp, mount } from './app/context.js';
 import { createStage } from './app/stage.js';
 import { createModels } from './app/models.js';
+import { createPanels, PANES } from './app/panels.js';
 
 
 // ---------------------------------------------------------------- 设置
@@ -119,12 +114,13 @@ function setSetting(key, value) {
   saveSettings(callRestore ? { ...settings, ...callRestore } : settings);
 }
 // main.js 里还没拆出去的函数：先挂到 app 上，拆出去的模块用 app.xxx 调用（函数声明会提升，这里就能挂）
-Object.assign(app, { setSetting, send, showPanel, openingCallouts });
+Object.assign(app, { setSetting, send, openingCallouts });
 Object.defineProperties(app, { speaker: { get: () => speaker }, face: { get: () => face }, mascots: { get: () => mascots } });
 
 Object.defineProperties(app, {
-  panels: { get: () => panels }, voicePanel: { get: () => voicePanel }, mcpPanel: { get: () => mcpPanel }, localModels: { get: () => localModels }
+  reflectTimer: { get: () => reflectTimer }, sessionsPanel: { get: () => sessionsPanel }, schedulesPanel: { get: () => schedulesPanel }
 });
+Object.assign(app, { reflectNow, renderHabits });
 
 mount(app, createStage(app));
 mount(app, createModels(app));
@@ -224,7 +220,7 @@ function finishTurn() {
   app.dashboard.setTurns(turns);
   app.setTask('done');
   setTimeout(() => { if (!app.active) app.setTask('idle'); }, 3000);
-  panels.refreshMind();
+  app.panels.refreshMind();
 }
 
 /** 朗读只读正文：代码块（``` 包围的部分，包括还没闭合的）不读。auto 为 false（打字提问）时不念 */
@@ -271,7 +267,7 @@ async function reflectNow({ manual = false } = {}) {
     const r = await agentMemory.reflect(turns, { session: { id: app.session.id, title } });
     const n = r.memories.filter((m) => m.action !== 'NOOP').length;
     if (n || manual) toast(`记忆已整理：新增或更新 ${n} 条${r.episode ? '，并记下这段对话的摘要' : ''}`);
-    panels.refreshMind();
+    app.panels.refreshMind();
   } catch (e) { console.warn('[memory] 整理失败', e); }
 }
 addEventListener('pagehide', () => { if (settings.autoMemory) reflectNow(); });
@@ -378,7 +374,7 @@ function newSession() {
   switchTo(sessionsApi.create());
   $('#prompt').focus();
 }
-addEventListener('jarvis:open-session', (e) => { openSession(e.detail).then(() => showPanel('sessions')); });
+addEventListener('jarvis:open-session', (e) => { openSession(e.detail).then(() => app.showPanel('sessions')); });
 /** 手机：第一次交任务时问一次能不能发“做完了”的通知（之后不再问） */
 let askedNotify = false;
 function askNotifyOnce() {
@@ -480,14 +476,14 @@ async function exportSession(id, kind) {
       const out = await generate('docx', { title, content: md.replace(/^# .*\n/, '') });
       path = (await ws.write(`导出/${name}.${out.ext}`, out.blob)).path;
     }
-    panels.refreshFiles();
+    app.panels.refreshFiles();
     toast(`已导出到工作区：${path}`);
     openInWorkspace(path);
   } catch (e) { toast(`导出没成功：${e.message}`); }
 }
 function openInWorkspace(path) {
-  showPanel('workspace');
-  panels.openFile(path);
+  app.showPanel('workspace');
+  app.panels.openFile(path);
 }
 
 /** 智能体可用的全部工具：基础工具 + 桌面版电脑操作 + MCP 工具 */
@@ -495,8 +491,8 @@ async function buildTools({ background = false, turn = null } = {}) {
   // 生成的文件、图片只挂到产生它的那一轮（turn）：中途切到别的对话，也不会跑到别的对话里
   const out = () => turn?.bubble ?? app.liveBubble;
   const onFileChanged = (path) => {
-    panels.markFresh(path);
-    panels.refreshFiles();
+    app.panels.markFresh(path);
+    app.panels.refreshFiles();
     if (!background && !/^skills\//.test(path)) { out()?.fileLink?.(path, openInWorkspace); turn?.files.add(path); }
   };
   return [
@@ -510,8 +506,8 @@ async function buildTools({ background = false, turn = null } = {}) {
       reasonLlm: app.helperLlm('reason'), // 逐项查证：用推理模型摘答案
       visionLlm: app.visionHelperLlm(), // PPT 生成后看预览图检查排版
       onPreview: background ? () => {} : COMPACT
-        ? (path) => { panels.openFile(path); toast(`已生成 ${path}：左上角菜单 → 工作区查看`); } // 手机上不自动盖住对话
-        : (path) => { showPanel('workspace'); panels.openFile(path); },
+        ? (path) => { app.panels.openFile(path); toast(`已生成 ${path}：左上角菜单 → 工作区查看`); } // 手机上不自动盖住对话
+        : (path) => { app.showPanel('workspace'); app.panels.openFile(path); },
       onFileChanged,
       imageGen: (o) => generateImage(app.llmConfig, { ...o, gateway: app.gateway }),
       onImage: (src) => out()?.image?.(src),
@@ -565,8 +561,8 @@ async function pullServerFile(path, turn) {
   try {
     const blob = await app.server.download(path);
     await ws.write(path, blob);
-    panels.markFresh(path);
-    panels.refreshFiles();
+    app.panels.markFresh(path);
+    app.panels.refreshFiles();
     const out = turn?.bubble ?? app.liveBubble;
     // 服务器画的图、做的视频：和本机一样直接显示在回答里
     if (/^images\/.+\.(png|jpe?g|webp|gif)$/i.test(path)) out?.image?.(URL.createObjectURL(blob));
@@ -621,7 +617,7 @@ async function memorizeHabits({ manual = false } = {}) {
   if (!manual && last === today) return 0;
   for (const text of r.insights) await agentMemory.remember(`用户${text}`, 'habit', { importance: 2, source: 'habits' });
   try { localStorage.setItem('jarvis.habitsMemorized', today); } catch { /* 隐私模式 */ }
-  panels.refreshMind();
+  app.panels.refreshMind();
   renderHabits();
   if (manual) toast(`已把 ${r.insights.length} 条习惯写进记忆`);
   return r.insights.length;
@@ -834,7 +830,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
     app.callouts?.set(followUpSuggestions({ error: true, userText: text }));
     app.active = null;
     app.setTask('error', '需要配置模型');
-    showPanel('models');
+    app.showPanel('models');
     return;
   }
 
@@ -967,7 +963,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
           app.hud.toolEnd(e.id, e.ok);
           if (MOBILE&&!turn.remote) { if(e.ok) doneSteps.push(toolLabel(e.name)); savePending(storage, turn.session.id, { ts: Date.now(), steps: doneSteps, files: [...turn.files] }); }
           if (!e.ok) app.hud.think(`✕ ${toolLabel(e.name)} 失败`, 'bad');
-          if (/remember|forget|save_skill/.test(e.name)) panels.refreshMind();
+          if (/remember|forget|save_skill/.test(e.name)) app.panels.refreshMind();
         } else if (e.type === 'server_tool') {
           serverCard = Object.assign(bubble.toolCard('web_search', { query: `${searchBrand(model)}自带联网搜索` }), { t0: now() });
         } else if (e.type === 'sources') bubble.sources(e.items);
@@ -991,7 +987,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
           await agentMemory.addLesson(`关于「${text.slice(0, 40)}」的回答，用户不满意：${comment || '未说明原因，下次先确认需求再回答'}`, text);
           toast('已记下这条教训，之后遇到类似问题会注意');
         }
-        panels.refreshMind();
+        app.panels.refreshMind();
       }
     });
     app.dashboard.setLatency(firstToken ? firstToken - t0 : null, total);
@@ -1083,11 +1079,11 @@ async function addFiles(list) {
       // 图片同时作为“看图”输入发给模型
       const image = isImageName(f.name) ? await prepareImage(f).catch(() => null) : null;
       attachments.push({ path: r.path, image });
-      panels.markFresh(r.path);
+      app.panels.markFresh(r.path);
     } catch (e) { toast(`${f.name}：${e.message}`); }
   }
   renderAttachments();
-  panels.refreshFiles();
+  app.panels.refreshFiles();
   prompt.focus();
 }
 function renderAttachments() {
@@ -1109,7 +1105,7 @@ function renderAttachments() {
 }
 // ＋菜单统一处理文件入口；原相机、文件上传处理器保留。
 initCamera({ button: $('#btn-camera'), input: $('#camera-input'), native: MOBILE || /Android|iPhone|iPad/i.test(navigator.userAgent), onFiles: addFiles, onError: e => toast(e.message) });
-addEventListener('jarvis:open-upload', e => { showPanel('workspace'); if (e.detail?.path) panels.openFile(e.detail.path); });
+addEventListener('jarvis:open-upload', e => { app.showPanel('workspace'); if (e.detail?.path) app.panels.openFile(e.detail.path); });
 // 粘贴截图 / 图片
 $('#prompt').addEventListener('paste', (e) => {
   const imgs = [...(e.clipboardData?.items ?? [])].filter((it) => it.kind === 'file' && it.type.startsWith('image/')).map((it) => it.getAsFile()).filter(Boolean);
@@ -1291,7 +1287,7 @@ async function setDirectVoice(on) {
       await voice.enable({ silenceMs: SILENCE_BY_SENSITIVITY[settings.vadSensitivity] });
     } catch (err) {
       recordVoiceEvent('启动失败',err.message); toast(err.message);
-      if (/云端语音识别/.test(err.message)) showPanel('models');
+      if (/云端语音识别/.test(err.message)) app.showPanel('models');
       setSetting('directVoice', false);
       $('#set-voice').checked = false;
       return false;
@@ -1348,7 +1344,7 @@ async function setVoiceCall(on) {
 $('#btn-call').addEventListener('click', () => setVoiceCall(!callActive));
 $('#btn-call-end').addEventListener('click', () => setVoiceCall(false));
 const voiceCheckButton = Object.assign(document.createElement('button'),{type:'button',className:'voice-diagnose',textContent:'检测语音'});
-voiceCheckButton.onclick = async () => { await setVoiceCall(false); showPanel('settings'); await checkVoice(); };
+voiceCheckButton.onclick = async () => { await setVoiceCall(false); app.showPanel('settings'); await checkVoice(); };
 $('#voice-call-panel').append(voiceCheckButton);
 const takeFloor = Object.assign(document.createElement('button'), {type:'button',textContent:'我来说',id:'btn-call-listen'});
 takeFloor.onclick = () => { if (app.active) app.active.muteSpeech=true; speaker.cancel(); voice.setSuppressed(false); callStatus('正在听你说话…'); };
@@ -1518,98 +1514,7 @@ async function setFaceFollow(on) {
 }
 
 
-// ---------------------------------------------------------------- 右侧面板
-const PANES = ['sessions', 'workspace', 'knowledge', 'mind', 'skills', 'models', 'system', 'settings'];
-let currentPane = null;
-function showPanel(name, { toggle = false } = {}) {
-  noteAction(`打开面板：${name}`);
-  if (toggle && name === currentPane && (narrow.matches ? body.classList.contains('side-open') : !body.classList.contains('side-closed'))) {
-    body.classList.add('side-closed');
-    body.classList.remove('side-open');
-    currentPane = null;
-    return;
-  }
-  currentPane = name;
-  body.classList.remove('wb-connections');
-  body.classList.remove('side-closed');
-  body.classList.add('side-open');
-  for (const p of document.querySelectorAll('[data-pane]')) p.hidden = p.dataset.pane !== name;
-  for (const b of document.querySelectorAll('.rail-btn')) b.classList.toggle('active', b.dataset.panel === name);
-  try { localStorage.setItem('jarvis.pane', name); } catch { /* ignore */ }
-  if (name === 'workspace') panels.refreshFiles();
-  if (name === 'knowledge') panels.refreshKb();
-  if (name === 'mind') panels.refreshMind();
-  if (name === 'models') { panels.refreshModels(); voicePanel.render(); localModels.refresh(); routingPanel.render(); }
-  if (name === 'skills') { skillsPanel.refresh(); mcpPanel.refresh(); }
-  if (name === 'sessions') sessionsPanel?.refresh();
-  if (name === 'system') schedulesPanel?.refresh();
-  if (name === 'settings') renderHabits();
-  dispatchEvent(new CustomEvent('jarvis:panel', { detail: name })); // 面板打开时各自刷新（如服务器模式的网络耗时）
-}
-for (const b of document.querySelectorAll('.rail-btn')) b.addEventListener('click', () => showPanel(b.dataset.panel, { toggle: true }));
-for (const b of document.querySelectorAll('[data-open]')) b.addEventListener('click', () => showPanel(b.dataset.open));
-
-/** 模型分工面板（下面创建；配置变化时刷新） */
-let routingPanel = null;
-const panels = initPanels({
-  toast: (t) => toast(t),
-  settings,
-  getGateway: () => app.gateway,
-  searchFetch: () => app.fetchViaGateway(),
-  getHistory: () => app.history,
-  onConfigChange: (cfg) => { app.llmConfig = cfg; app.updateModelLabels(); app.syncMemoryEngine(); app.updateOrbitStatus(); routingPanel?.render(); app.pushConfigToServer(); },
-  onReflect: () => reflectNow({ manual: true }),
-  onAutoMemory: (on) => { setSetting('autoMemory', on); if (!on) clearTimeout(reflectTimer); },
-});
-const voicePanel = initVoicePanel({ panels, speaker, getGateway: () => app.gateway });
-routingPanel = initRoutingPanel({
-  getConfig: () => panels.config,
-  patchConfig: (fn) => panels.patchConfig(fn),
-  getGateway: () => app.gateway,
-  toast: (t) => toast(t)
-});
-const modelPicker = initModelPicker({
-  getConfig: () => panels.config,
-  patchConfig: (fn) => panels.patchConfig(fn),
-  getGateway: () => app.gateway,
-  toast: (t) => toast(t),
-  openSettings: () => showPanel('models')
-});
-$('#model-chip').addEventListener('click', () => modelPicker.open());
-// 聊天模型误选成了画图模型（如 gpt-image-2）：自动挪到“画图用”，聊天换回能对话的模型
-{
-  const was = modelOf(panels.config);
-  const fixed = repairChatModel(panels.config);
-  if (fixed) { panels.patchConfig(() => fixed); toast(`“${was}”不能用来聊天${fixed.imageModel === was ? '，已改为画图用' : fixed.videoModel === was ? '，已改为视频用' : ''}；聊天用 ${fixed.models[fixed.provider] || '默认模型'}`); }
-}
-const localModels = initLocalModelsPanel({
-  getGateway: () => app.gateway,
-  getConfig: () => panels.config,
-  useModel: (p, m) => panels.useModel(p, m),
-  patchConfig: (fn) => panels.patchConfig(fn),
-  toast: (t) => toast(t)
-});
-const mcpPanel = initMcpPanel({
-  getGateway: () => app.gateway,
-  toast: (t) => toast(t),
-  onChange: (servers) => {
-    const ready = servers.filter((x) => x.status === 'ready');
-    $('#hud-mcp').textContent = ready.length ? `${ready.length} 个 · ${ready.reduce((n, x) => n + x.tools.length, 0)} 工具` : '未连接';
-  }
-});
-const skillsPanel = initSkillsPanel({
-  toast: (t) => toast(t),
-  onUse: (name) => {
-    $('#prompt').value = `/${name} `;
-    if (body.classList.contains('workbench')) body.classList.add('side-closed');
-    if (narrow.matches) body.classList.remove('side-open');
-    $('#prompt').focus();
-  },
-  onChange: (list) => {
-    panels.refreshMind();
-    $('#hud-skills').textContent = `${list.filter((p) => p.enabled).length} 个启用`;
-  }
-});
+mount(app, createPanels(app));
 
 // ---------------------------------------------------------------- 欢迎页、HUD 时钟、命令面板
 const QUICK = [
@@ -1631,7 +1536,7 @@ function renderWelcome() {
   if (document.querySelector('#transcript .msg')) return;
   if(COMPACT){
     homeView?.destroy();document.querySelector('#transcript .wy-home')?.remove();
-    homeView=createHome({weather:homeWeather,send,fill:text=>{$('#prompt').value=text;$('#prompt').focus();},openPanel:showPanel});
+    homeView=createHome({weather:homeWeather,send,fill:text=>{$('#prompt').value=text;$('#prompt').focus();},openPanel:app.showPanel});
     $('#transcript').prepend(homeView.root);$('#transcript').scrollTop=0;return;
   }
   const cards = QUICK.map((q) => {
@@ -1645,7 +1550,7 @@ function renderWelcome() {
     b.addEventListener('click', () => {
       if (q.prompt) send(q.prompt);
       else if (q.fill) { $('#prompt').value = q.fill; $('#prompt').focus(); }
-      else if (q.panel) showPanel(q.panel);
+      else if (q.panel) app.showPanel(q.panel);
       else if (q.upload) $('#btn-attach')?.click();
     });
     return b;
@@ -1717,7 +1622,7 @@ function picksCard() {
       b.addEventListener('click', () => {
         if (q.prompt) send(q.prompt);
         else if (q.fill) { $('#prompt').value = q.fill; $('#prompt').focus(); }
-        else if (q.panel) showPanel(q.panel);
+        else if (q.panel) app.showPanel(q.panel);
         else if (q.upload) $('#btn-attach')?.click();
       });
       return b;
@@ -1748,8 +1653,8 @@ const palette = initPalette({
     const toggle = (id, title) => ({ id: `t-${id}`, group: '开关', title: `${$(`#${id}`).checked ? '关闭' : '开启'}${title}`, run: () => $(`#${id}`).click() });
     return [
       ...QUICK.filter((q) => q.prompt || q.fill).map((q) => ({ id: `q-${q.title}`, group: '常用任务', title: q.title, hint: q.desc, run: () => { if (q.prompt) send(q.prompt); else { $('#prompt').value = q.fill; $('#prompt').focus(); } } })),
-      ...skillsPanel.installed.filter((p) => p.enabled).map((p) => ({ id: `s-${p.name}`, group: '技能', title: `/${p.name}`, hint: p.description, run: () => { $('#prompt').value = `/${p.name} `; $('#prompt').focus(); } })),
-      ...PANES.map((p, i) => ({ id: `p-${p}`, group: '面板', title: `打开${PANE_TITLE[p]}`, keys: `Alt ${i + 1}`, run: () => showPanel(p) })),
+      ...app.skillsPanel.installed.filter((p) => p.enabled).map((p) => ({ id: `s-${p.name}`, group: '技能', title: `/${p.name}`, hint: p.description, run: () => { $('#prompt').value = `/${p.name} `; $('#prompt').focus(); } })),
+      ...PANES.map((p, i) => ({ id: `p-${p}`, group: '面板', title: `打开${PANE_TITLE[p]}`, keys: `Alt ${i + 1}`, run: () => app.showPanel(p) })),
       toggle('set-tts', '打字也朗读'),
       ...(!mic.hidden ? [toggle('set-voice', '直接对话'), toggle('set-wake', '唤醒词')] : []),
       toggle('set-face', '人脸跟随'),
@@ -1757,7 +1662,7 @@ const palette = initPalette({
       { id: 'theme', group: '开关', title: document.documentElement.dataset.theme === 'light' ? '切换为夜间界面' : '切换为白天界面', run: () => $('#btn-theme').click() },
       { id: 'team', group: '操作', title: '交给团队完成…', hint: '规划员拆步骤，多个角色分工执行，审核员把关', run: () => { $('#prompt').value = '/团队 '; $('#prompt').focus(); } },
       { id: 'new', group: '操作', title: '新对话', hint: '开始一段新对话（之前的对话保存在“对话”面板里）', keys: 'Ctrl Shift O', run: () => newSession() },
-      { id: 'sessions', group: '操作', title: '历史对话', hint: '查看、搜索之前的对话', run: () => showPanel('sessions') },
+      { id: 'sessions', group: '操作', title: '历史对话', hint: '查看、搜索之前的对话', run: () => app.showPanel('sessions') },
       { id: 'stop', group: '操作', title: '打断 / 停止当前任务', keys: 'Esc', run: () => interrupt() },
       { id: 'preview-voice', group: '操作', title: '试听当前声音', run: () => speaker.preview() },
       { id: 'fullscreen', group: '操作', title: '全屏', run: () => $('#btn-fullscreen').click() }
@@ -2030,11 +1935,11 @@ if (!mic.hidden && !(MOBILE && document.documentElement.classList.contains('safe
 // ---------------------------------------------------------------- 启动
 app.updateModelLabels();
 app.detectGateway();
-panels.refreshMind();
+app.panels.refreshMind();
 let startPane = 'workspace';
 try { startPane = localStorage.getItem('jarvis.pane') || startPane; } catch { /* ignore */ }
 if (narrow.matches) body.classList.add('side-closed');
-showPanel(PANES.includes(startPane) ? startPane : 'workspace');
+app.showPanel(PANES.includes(startPane) ? startPane : 'workspace');
 if (narrow.matches) body.classList.remove('side-open');
 app.setTask('idle');
 renderWelcome();
@@ -2059,8 +1964,8 @@ const syncController = createSyncController({
   saveConfig,
   beforeSync: () => habits.flush(),
   afterSync: async (r) => {
-    if (r.memory?.changedLocal) { await habits.reload(); panels.refreshMind(); skillPacks.changed(); }
-    if (r.config?.changedLocal) panels.reloadConfig();
+    if (r.memory?.changedLocal) { await habits.reload(); app.panels.refreshMind(); skillPacks.changed(); }
+    if (r.config?.changedLocal) app.panels.reloadConfig();
     if (r.sessions?.changedLocal) {
       sessionsPanel.refresh();
       // 当前对话在另一台设备上接着聊过：没在回答时换成合并后的版本
@@ -2088,9 +1993,9 @@ if (COMPACT) {
   const icons = Object.fromEntries([...document.querySelectorAll('.rail-btn')].map((b) => [b.dataset.panel, b.querySelector('svg').outerHTML]));
   drawer = initDrawer({
     icons,
-    onNew: () => { newSession(); closeSide(); },
-    onOpenSession: (id) => { openSession(id); closeSide(); },
-    onPanel: (name) => showPanel(name),
+    onNew: () => { newSession(); app.closeSide(); },
+    onOpenSession: (id) => { openSession(id); app.closeSide(); },
+    onPanel: (name) => app.showPanel(name),
     listSessions: () => sessionsApi.list(),
     cachedSessions: () => sessionsApi.cachedList(),
     currentId: () => app.session.id,
@@ -2112,11 +2017,7 @@ if (COMPACT) {
   $('#btn-menu').hidden = false;
   $('#btn-menu').addEventListener('click', () => drawer.open());
   $('#btn-side-back').hidden = false;
-  $('#btn-side-back').addEventListener('click', () => closeSide());
-}
-function closeSide() {
-  body.classList.remove('side-open');
-  currentPane = null;
+  $('#btn-side-back').addEventListener('click', () => app.closeSide());
 }
 
 schedulesPanel = initSchedulesPanel({
@@ -2217,7 +2118,7 @@ document.addEventListener('keydown', (e) => {
   if (e.altKey && !e.ctrlKey && !e.metaKey) {
     const k = e.code;
     const n = /^Digit([1-8])$/.exec(k)?.[1];
-    if (n) showPanel(PANES[n - 1]);
+    if (n) app.showPanel(PANES[n - 1]);
     else if (k === 'KeyF') setFocusView(!settings.focusView);
     else if (k === 'KeyV' && !mic.hidden) toggleDictation();
     else return;
@@ -2246,10 +2147,10 @@ window.__jarvis = {
   machine: app.machine,
   speaker,
   get voice() { return voice; },
-  get skills() { return skillsPanel; },
+  get skills() { return app.skillsPanel; },
   get palette() { return palette; },
-  get mcp() { return mcpPanel; },
-  get localModels() { return localModels; },
+  get mcp() { return app.mcpPanel; },
+  get localModels() { return app.localModels; },
   greetOnReturn,
   habits,
   memorizeHabits,
@@ -2262,10 +2163,10 @@ window.__jarvis = {
   get stage() { return app.stage; },
   get config() { return app.llmConfig; },
   get gateway() { return app.gateway; },
-  panels,
+  panels: app.panels,
   send,
   interrupt,
-  showPanel,
+  showPanel: app.showPanel,
   newSession,
   openSession,
   get sessionId() { return app.session.id; },
@@ -2275,7 +2176,7 @@ window.__jarvis = {
 };
 
 // 工作台界面只用在电脑上；手机 App 保留自己的界面（底部输入、左侧抽屉菜单、整页面板）
-if (!COMPACT) initWorkbench({showPanel,newSession,openSession,getSession:()=>app.session,getRunning:()=>app.active && !app.active.streamDone ? app.session.id : null,openFile:openInWorkspace});
+if (!COMPACT) initWorkbench({showPanel: app.showPanel,newSession,openSession,getSession:()=>app.session,getRunning:()=>app.active && !app.active.streamDone ? app.session.id : null,openFile:openInWorkspace});
 mascots = initMascots();
 companion = initCompanion({ send, startVoice: async () => { await setVoiceCall(true); return callActive; }, stopVoice: () => setVoiceCall(false), speak: text => { speaker.unlock(); speaker.speak(text); } });
 const hologram = initHologramCompanion({send:async text=>{if(app.active)throw new Error('当前任务还在进行，请稍等完成后再发送。');await send(text);},onFull:()=>{body.classList.add('side-closed');body.classList.remove('side-open');document.querySelector('.wb-tabs button')?.click();},wallpaper:MOBILE?async()=>{const {registerPlugin}=await import('@capacitor/core');await registerPlugin('CompanionWallpaper').open();}:null});
@@ -2309,7 +2210,7 @@ if(MOBILE){
   const list=document.createElement('div');list.hidden=true;recovery.append(toggle,list);document.querySelector('[data-pane="settings"]').append(recovery);
   const draw=()=>{list.replaceChildren();const rows=listPending(storage);if(!rows.length){list.textContent='没有保留的未完成任务。';return;}
     for(const rec of rows){const card=document.createElement('div'),title=document.createElement('p');title.textContent=rec.title||String(rec.text||'未完成任务').slice(0,40);
-      const open=document.createElement('button');open.type='button';open.className='btn sm';open.textContent='查看并继续';open.onclick=async()=>{await openSession(rec.sessionId);prompt.value=resumeText(rec);autosize();showPanel('settings',{toggle:true});prompt.focus();};
+      const open=document.createElement('button');open.type='button';open.className='btn sm';open.textContent='查看并继续';open.onclick=async()=>{await openSession(rec.sessionId);prompt.value=resumeText(rec);autosize();app.showPanel('settings',{toggle:true});prompt.focus();};
       const dismiss=document.createElement('button');dismiss.type='button';dismiss.className='btn ghost sm';dismiss.textContent='不再继续';dismiss.onclick=()=>{clearPending(storage,rec.sessionId,rec.turnId);draw();};card.append(title,open,dismiss);list.append(card);
     }
   };toggle.onclick=()=>{list.hidden=!list.hidden;if(!list.hidden)draw();};
