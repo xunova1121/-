@@ -1,62 +1,66 @@
-import { checkpointNeedsReview } from '../shared/taskCheckpoint.js';
 /**
- * 未央前端入口：状态管理层 + 渲染策略控制器。
+ * 未央前端入口：只负责“组装”——按顺序创建各模块、恢复上次的设置、启动。具体功能都在 app/ 下：
  *
- *   感知（人脸 / VAD / 识别） ─┐
- *   智能体事件（agent.js）     ─┼─▶ EmotionMachine ─▶ ParamTween(400ms) ─┐
- *   注入事件（SSE）           ─┘                                        ├─▶ stage.frame()
- *   人脸角度 / 麦克风包络 / 播报包络 ─────────────────────────────────┘
+ *   app/context.js        app 上下文：各模块共用的状态（当前对话、正在回答的一轮……）和彼此的函数
+ *   app/env.js            运行环境和小工具（取元素、手机 / 桌面版、提示条……）
+ *   app/stage.js          主视觉：光核舞台、情绪、仪表盘、轨道 HUD、建议标注、顶栏状态
+ *   app/models.js         模型与网关、服务器模式连接、辅助模型
+ *   app/conversations.js  对话管理：切换、打开、刷新、导出、编辑重发
+ *   app/voice.js          朗读、语音识别、语音对话、听写、人脸跟随
+ *   app/turn.js           一轮对话：发消息、事件显示、插话、打断、后台继续
+ *   app/background.js     记忆整理、压缩、主动问好、习惯学习、定时任务
+ *   app/toolbox.js        智能体工具组装（含电脑操作、MCP）
+ *   app/remoteTask.js     服务器模式：接上服务器上的任务、取回文件
+ *   app/composer.js       输入框、附件、引用 / 朗读
+ *   app/panels.js         右侧面板
+ *   app/view.js           欢迎页、命令面板、主题、更新提示、设置开关、开机动画
  *
- * 主视觉默认是“光核”（发光能量球 + 会变形状的眼睛），可切换为全息胸像 / 线框胸像。
- * 情绪通过颜色、眼睛形状、轮廓光强度、光环转速与扫描速度表达。
- * 减少动画：在初始化 WebGL 之前判断，命中则根本不 import three.js、不下载网格。
+ * 模块的创建顺序就是原来 main.js 里各段代码的先后顺序，不要随意调换（后面的模块创建时会用到前面的）。
+ * 新功能放进对应模块，不要往这里加。写法规范见 docs/代码规范.md。
  */
-import { initWorkbench } from './ui/workbench.js';
+import './mobile/boot.js'; // 安卓 App：先装好原生网络 / 朗读（其他版本里是空的）
 import logoUrl from './ui/logo.svg';
+import { MOBILE } from './config.js';
+import { checkpointNeedsReview } from '../shared/taskCheckpoint.js';
+import { loadSettings, saveSettings } from './core/settings.js';
+import { openingSuggestions } from './core/suggest.js';
+import { savePending, clearPending, takePending, resumeText, listPending } from './core/pendingTask.js';
+import { loadMemory, clearMemory } from './core/memoryStore.js';
+import { loadConfig, saveConfig } from './llm/config.js';
+import * as ws from './agent/workspace.js';
+import * as agentMemory from './agent/memory.js';
+import * as skillPacks from './agent/skillPacks.js';
+import * as habits from './agent/habits.js';
+import * as sessionsApi from './agent/sessions.js';
+import { storageProblem } from './agent/store.js';
+import { createSyncController } from './sync/controller.js';
+import { initWorkbench } from './ui/workbench.js';
 import { initMascots } from './ui/mascot.js';
 import { initCompanion } from './ui/companion.js';
 import { initHologramCompanion } from './ui/hologramScene.js';
-import { initRenderHealthPanel } from './mobile/renderHealth.js';
 import { initCompanionAppearance } from './ui/companionAppearance.js';
-let companion = null;
 import { initConversationComposer } from './ui/conversationComposer.js';
-let mascots = null;
-let composer = null;
-
-// 浏览器标签页图标：未央 logo（小图直接内联，单文件版也能显示）
-document.head.append(Object.assign(document.createElement('link'), { rel: 'icon', type: 'image/svg+xml', href: logoUrl }));
-import './mobile/boot.js'; // 安卓 App：先装好原生网络 / 朗读（其他版本里是空的）
-import { loadSettings, saveSettings } from './core/settings.js';
-import * as ws from './agent/workspace.js';
-import * as agentMemory from './agent/memory.js';
-import { loadConfig, saveConfig } from './llm/config.js';
-import * as skillPacks from './agent/skillPacks.js';
-import { storageProblem } from './agent/store.js';
-import * as habits from './agent/habits.js';
-import * as sessionsApi from './agent/sessions.js';
 import { initSessionsPanel } from './ui/sessionsPanel.js';
-import { openingSuggestions } from './core/suggest.js';
-import { savePending, clearPending, takePending, resumeText, listPending } from './core/pendingTask.js';
 import { initServerPanel } from './ui/serverPanel.js';
-import { createSyncController } from './sync/controller.js';
 import { initSyncPanel, describeResult } from './ui/syncPanel.js';
-import { MOBILE } from './config.js';
 import { initDrawer } from './ui/drawer.js';
-import { loadMemory, clearMemory } from './core/memoryStore.js';
+import { initRenderHealthPanel } from './mobile/renderHealth.js';
 import { $, body, DESKTOP, COMPACT, storage, narrow, toast, wp } from './app/env.js';
 import { createApp, mount } from './app/context.js';
 import { createStage } from './app/stage.js';
 import { createModels } from './app/models.js';
-import { createPanels, PANES } from './app/panels.js';
-import { createView } from './app/view.js';
+import { createConversations } from './app/conversations.js';
+import { createVoice } from './app/voice.js';
+import { createTurn } from './app/turn.js';
 import { createBackground } from './app/background.js';
 import { createToolbox } from './app/toolbox.js';
 import { createRemoteTask } from './app/remoteTask.js';
-import { createConversations } from './app/conversations.js';
-import { createVoice } from './app/voice.js';
 import { createComposer } from './app/composer.js';
-import { createTurn } from './app/turn.js';
+import { createPanels, PANES } from './app/panels.js';
+import { createView } from './app/view.js';
 
+// 浏览器标签页图标：未央 logo（小图直接内联，单文件版也能显示）
+document.head.append(Object.assign(document.createElement('link'), { rel: 'icon', type: 'image/svg+xml', href: logoUrl }));
 
 // ---------------------------------------------------------------- 设置
 const settings = loadSettings();
@@ -67,40 +71,26 @@ function setSetting(key, value) {
   // 通话临时启用的朗读 / 唤醒词不覆盖用户保存的偏好。
   saveSettings(app.callRestore ? { ...settings, ...app.callRestore } : settings);
 }
-// main.js 里还没拆出去的函数：先挂到 app 上，拆出去的模块用 app.xxx 调用（函数声明会提升，这里就能挂）
-Object.assign(app, { setSetting });
+app.setSetting = setSetting;
+// 启动末尾才创建的几个界面部件（形象、全息陪伴、输入框外观）
+let mascots = null;
+let companion = null;
+let composer = null;
 Object.defineProperties(app, { mascots: { get: () => mascots }, composer: { get: () => composer }, companion: { get: () => companion } });
 
-
+// ---------------------------------------------------------------- 各模块（按这个顺序创建）
 mount(app, createStage(app));
 mount(app, createModels(app));
-
-
-// ---------------------------------------------------------------- 对话
 mount(app, createConversations(app));
 mount(app, createVoice(app));
 mount(app, createTurn(app));
-
 mount(app, createBackground(app));
-
-
-// ---------------------------------------------------------------- 桌面版与 MCP
 mount(app, createToolbox(app));
 mount(app, createRemoteTask(app));
-
-
-
-
-
-
 mount(app, createComposer(app));
-
 mount(app, createPanels(app));
-
 mount(app, createView(app));
 globalThis.__jarvisToast = toast; // 手机原生保存文件时的进度提示
-
-
 
 // ---------------------------------------------------------------- 恢复上次的设置
 $('#set-tts').checked = settings.readTyped;
@@ -116,15 +106,19 @@ app.applyMotionMode();
 // 否则复位为关闭，等用户再次主动开启
 app.restoreDevice('camera', 'faceFollow', app.setFaceFollow);
 // 兼容显示（上次界面崩过）时不自动开麦克风：先让界面稳稳打开，需要时再手动开
-if (!app.mic.hidden && !(MOBILE && document.documentElement.classList.contains('safe-render'))) app.restoreDevice('microphone', 'directVoice', app.setDirectVoice);
-
+if (!app.mic.hidden && !(MOBILE && document.documentElement.classList.contains('safe-render')))
+  app.restoreDevice('microphone', 'directVoice', app.setDirectVoice);
 
 // ---------------------------------------------------------------- 启动
 app.updateModelLabels();
 app.detectGateway();
 app.panels.refreshMind();
 let startPane = 'workspace';
-try { startPane = localStorage.getItem('jarvis.pane') || startPane; } catch { /* ignore */ }
+try {
+  startPane = localStorage.getItem('jarvis.pane') || startPane;
+} catch {
+  /* ignore */
+}
 if (narrow.matches) body.classList.add('side-closed');
 app.showPanel(PANES.includes(startPane) ? startPane : 'workspace');
 if (narrow.matches) body.classList.remove('side-open');
@@ -135,7 +129,9 @@ app.sessionsPanel = initSessionsPanel({
   getCurrentId: () => app.session.id,
   onOpen: (id) => app.openSession(id),
   onNew: () => app.newSession(),
-  onDeleted: (id) => { if (id === app.session.id) app.switchTo(sessionsApi.create()); },
+  onDeleted: (id) => {
+    if (id === app.session.id) app.switchTo(sessionsApi.create());
+  },
   settings,
   onSaveChange: (on) => {
     setSetting('saveSessions', on);
@@ -151,7 +147,11 @@ const syncController = createSyncController({
   saveConfig,
   beforeSync: () => habits.flush(),
   afterSync: async (r) => {
-    if (r.memory?.changedLocal) { await habits.reload(); app.panels.refreshMind(); skillPacks.changed(); }
+    if (r.memory?.changedLocal) {
+      await habits.reload();
+      app.panels.refreshMind();
+      skillPacks.changed();
+    }
     if (r.config?.changedLocal) app.panels.reloadConfig();
     if (r.sessions?.changedLocal) {
       app.sessionsPanel.refresh();
@@ -171,7 +171,15 @@ const syncController = createSyncController({
   }
 });
 const syncPanel = initSyncPanel({ controller: syncController, toast: (t) => toast(t) });
-initServerPanel({ getLlmConfig: () => app.llmConfig, toast: (t) => toast(t), onConfigSaved: () => app.refreshServerModel(), onImported: () => { app.sessionsPanel?.refresh(); app.drawer?.refresh?.(); } });
+initServerPanel({
+  getLlmConfig: () => app.llmConfig,
+  toast: (t) => toast(t),
+  onConfigSaved: () => app.refreshServerModel(),
+  onImported: () => {
+    app.sessionsPanel?.refresh();
+    app.drawer?.refresh?.();
+  }
+});
 syncController.start();
 
 // 手机：底部菜单改成左侧抽屉（新对话 · 功能 · 历史对话）；面板全屏打开，左上角“返回对话”
@@ -179,18 +187,32 @@ if (COMPACT) {
   const icons = Object.fromEntries([...document.querySelectorAll('.rail-btn')].map((b) => [b.dataset.panel, b.querySelector('svg').outerHTML]));
   app.drawer = initDrawer({
     icons,
-    onNew: () => { app.newSession(); app.closeSide(); },
-    onOpenSession: (id) => { app.openSession(id); app.closeSide(); },
+    onNew: () => {
+      app.newSession();
+      app.closeSide();
+    },
+    onOpenSession: (id) => {
+      app.openSession(id);
+      app.closeSide();
+    },
     onPanel: (name) => app.showPanel(name),
     listSessions: () => sessionsApi.list(),
     cachedSessions: () => sessionsApi.cachedList(),
     currentId: () => app.session.id,
     onRename: async (id, title) => {
       await sessionsApi.rename(id, title);
-      if (id === app.session.id) { app.session.title = title; app.session.titleSet = true; app.showChatTitle(); }
+      if (id === app.session.id) {
+        app.session.title = title;
+        app.session.titleSet = true;
+        app.showChatTitle();
+      }
       app.sessionsPanel?.refresh();
     },
-    onPin: async (id, pinned) => { await sessionsApi.setPinned(id, pinned); if (id === app.session.id) app.session.pinned = pinned; app.sessionsPanel?.refresh(); },
+    onPin: async (id, pinned) => {
+      await sessionsApi.setPinned(id, pinned);
+      if (id === app.session.id) app.session.pinned = pinned;
+      app.sessionsPanel?.refresh();
+    },
     onExport: (id, kind) => app.exportSession(id, kind),
     searchContent: (q) => sessionsApi.searchContent(q),
     onDelete: async (id) => {
@@ -211,7 +233,10 @@ app.initSchedules();
 (async () => {
   // 本地数据库打不开（比如另一个标签页还开着旧版、挡住了升级）：告诉用户，并且不做迁移，免得旧数据迁到临时存储里丢掉
   const problem = await storageProblem().catch(() => '');
-  if (problem) { toast(problem); return; }
+  if (problem) {
+    toast(problem);
+    return;
+  }
   if (settings.persistMemory) {
     await sessionsApi.migrateLegacy(loadMemory(storage)).catch(() => null);
     clearMemory(storage);
@@ -220,19 +245,36 @@ app.initSchedules();
   const [recent] = await sessionsApi.list().catch(() => []);
   // 手机：上次 App 被关掉时有任务做到一半：回到那个对话接着做
   const left = MOBILE ? takePending(storage) : null;
-  const leftSession = left && await sessionsApi.get(left.sessionId).catch(() => null);
-  if(left&&(!leftSession||app.history.length))savePending(storage,left.sessionId,left);
+  const leftSession = left && (await sessionsApi.get(left.sessionId).catch(() => null));
+  if (left && (!leftSession || app.history.length)) savePending(storage, left.sessionId, left);
   if (leftSession && !app.history.length) {
     await app.switchTo(leftSession);
-    if(checkpointNeedsReview(left.checkpoint)) {
-      savePending(storage,left.sessionId,left);
-      const card=document.createElement('section');card.className='task-recovery';card.setAttribute('role','status');
-      const note=document.createElement('p');note.textContent='上次退出时有操作的结果未确认，先核对再继续，避免重复执行。';
-      const resume=document.createElement('button');resume.type='button';resume.textContent='核对并继续';resume.onclick=()=>{card.remove();app.send(resumeText(left));};
-      const dismiss=document.createElement('button');dismiss.type='button';dismiss.textContent='不再继续';dismiss.onclick=()=>{clearPending(storage,left.sessionId,left.turnId);card.remove();};
-      card.append(note,resume,dismiss);$('#transcript').append(card);
+    if (checkpointNeedsReview(left.checkpoint)) {
+      savePending(storage, left.sessionId, left);
+      const card = document.createElement('section');
+      card.className = 'task-recovery';
+      card.setAttribute('role', 'status');
+      const note = document.createElement('p');
+      note.textContent = '上次退出时有操作的结果未确认，先核对再继续，避免重复执行。';
+      const resume = document.createElement('button');
+      resume.type = 'button';
+      resume.textContent = '核对并继续';
+      resume.onclick = () => {
+        card.remove();
+        app.send(resumeText(left));
+      };
+      const dismiss = document.createElement('button');
+      dismiss.type = 'button';
+      dismiss.textContent = '不再继续';
+      dismiss.onclick = () => {
+        clearPending(storage, left.sessionId, left.turnId);
+        card.remove();
+      };
+      card.append(note, resume, dismiss);
+      $('#transcript').append(card);
     } else {
-      toast('上次退出时任务还没做完，正在核对进度后继续');app.send(resumeText(left));
+      toast('上次退出时任务还没做完，正在核对进度后继续');
+      app.send(resumeText(left));
     }
     app.sessionsPanel.refresh();
     return;
@@ -240,7 +282,8 @@ app.initSchedules();
   // 手机：只有刷新页面、或界面崩溃后自动重开时才接回刚才的对话；从后台关掉再打开就停在首页
   const reopened = performance.getEntriesByType?.('navigation')?.[0]?.type === 'reload' || globalThis.__jarvisRecentCrash === true;
   if ((!COMPACT || reopened) && recent && Date.now() - recent.updatedAt < 6 * 3600_000 && !app.history.length) {
-    if (app.server) await app.openSession(recent.id); // 服务器的列表不带消息：先显示副本，再取完整的
+    if (app.server)
+      await app.openSession(recent.id); // 服务器的列表不带消息：先显示副本，再取完整的
     else await app.switchTo(recent);
   }
   app.sessionsPanel.refresh();
@@ -261,7 +304,10 @@ if (!app.history.length) app.openingCallouts(false);
 const typing = (el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (app.interrupt()) { e.preventDefault(); toast('已打断'); }
+    if (app.interrupt()) {
+      e.preventDefault();
+      toast('已打断');
+    }
     return;
   }
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.code === 'KeyO') {
@@ -300,74 +346,200 @@ document.addEventListener('keyup', (e) => {
 window.__jarvis = {
   machine: app.machine,
   speaker: app.speaker,
-  get voice() { return app.voice; },
-  get skills() { return app.skillsPanel; },
-  get palette() { return app.palette; },
-  get mcp() { return app.mcpPanel; },
-  get localModels() { return app.localModels; },
+  get voice() {
+    return app.voice;
+  },
+  get skills() {
+    return app.skillsPanel;
+  },
+  get palette() {
+    return app.palette;
+  },
+  get mcp() {
+    return app.mcpPanel;
+  },
+  get localModels() {
+    return app.localModels;
+  },
   greetOnReturn: app.greetOnReturn,
   habits,
   memorizeHabits: app.memorizeHabits,
   director: app.director,
-  get callouts() { return app.callouts; },
+  get callouts() {
+    return app.callouts;
+  },
   schedulerTick: app.schedulerTick,
   reflectNow: app.reflectNow,
   settings,
   live: app.live,
-  get stage() { return app.stage; },
-  get config() { return app.llmConfig; },
-  get gateway() { return app.gateway; },
+  get stage() {
+    return app.stage;
+  },
+  get config() {
+    return app.llmConfig;
+  },
+  get gateway() {
+    return app.gateway;
+  },
   panels: app.panels,
   send: app.send,
   interrupt: app.interrupt,
   showPanel: app.showPanel,
   newSession: app.newSession,
   openSession: app.openSession,
-  get sessionId() { return app.session.id; },
+  get sessionId() {
+    return app.session.id;
+  },
   sessionGet: (id) => sessionsApi.get(id),
-  get quality() { return app.quality; },
+  get quality() {
+    return app.quality;
+  },
   workspace: ws
 };
 
 // 工作台界面只用在电脑上；手机 App 保留自己的界面（底部输入、左侧抽屉菜单、整页面板）
-if (!COMPACT) initWorkbench({showPanel: app.showPanel,newSession: app.newSession,openSession: app.openSession,getSession:()=>app.session,getRunning:()=>app.active && !app.active.streamDone ? app.session.id : null,openFile:app.openInWorkspace});
+// prettier-ignore
+if (!COMPACT) initWorkbench({ showPanel: app.showPanel, newSession: app.newSession, openSession: app.openSession, getSession: () => app.session, getRunning: () => (app.active && !app.active.streamDone ? app.session.id : null), openFile: app.openInWorkspace });
 mascots = initMascots();
-companion = initCompanion({ send: app.send, startVoice: async () => { await app.setVoiceCall(true); return app.callActive; }, stopVoice: () => app.setVoiceCall(false), speak: text => { app.speaker.unlock(); app.speaker.speak(text); } });
-const hologram = initHologramCompanion({send:async text=>{if(app.active)throw new Error('当前任务还在进行，请稍等完成后再发送。');await app.send(text);},onFull:()=>{body.classList.add('side-closed');body.classList.remove('side-open');document.querySelector('.wb-tabs button')?.click();},wallpaper:MOBILE?async()=>{const {registerPlugin}=await import('@capacitor/core');await registerPlugin('CompanionWallpaper').open();}:null});
-const holoEntry=Object.assign(document.createElement('button'),{type:'button',className:'wy-hologram-entry',textContent:'✧ 全息陪伴'});
-holoEntry.onclick=()=>{companion.close();hologram.open();};document.querySelector('.wy-companion-head span').after(holoEntry);
-if(DESKTOP?.onWallpaperRequest)DESKTOP.onWallpaperRequest(async request=>{
-  if(request.open){hologram.open();return;}
-  if(!request.text)return;
-  try{if(app.active)throw new Error('当前任务还在进行，请稍等完成后再发送。');await app.send(request.text);const reply=[...document.querySelectorAll('#transcript .msg.agent')].at(-1);const text=[...(reply?.querySelectorAll('.body')||[])].map(el=>el.textContent).join('\n');wp({say:text||'本轮已结束，可以打开完整对话查看结果。',requestId:request.id});}
-  catch(error){wp({say:`这次没有完成：${error.message||error}`,requestId:request.id,error:true});}
+companion = initCompanion({
+  send: app.send,
+  startVoice: async () => {
+    await app.setVoiceCall(true);
+    return app.callActive;
+  },
+  stopVoice: () => app.setVoiceCall(false),
+  speak: (text) => {
+    app.speaker.unlock();
+    app.speaker.speak(text);
+  }
 });
-if(MOBILE){import('@capacitor/core').then(({registerPlugin})=>{const plugin=registerPlugin('CompanionWallpaper');const check=async()=>{try{const r=await plugin.consumeOpen();if(r.open)hologram.open();}catch{}};check();document.addEventListener('visibilitychange',()=>{if(!document.hidden)check();});}).catch(()=>{});}
-composer = initConversationComposer({cancelDictation:()=>app.stopDictation()});
+const hologram = initHologramCompanion({
+  send: async (text) => {
+    if (app.active) throw new Error('当前任务还在进行，请稍等完成后再发送。');
+    await app.send(text);
+  },
+  onFull: () => {
+    body.classList.add('side-closed');
+    body.classList.remove('side-open');
+    document.querySelector('.wb-tabs button')?.click();
+  },
+  wallpaper: MOBILE
+    ? async () => {
+        const { registerPlugin } = await import('@capacitor/core');
+        await registerPlugin('CompanionWallpaper').open();
+      }
+    : null
+});
+const holoEntry = Object.assign(document.createElement('button'), { type: 'button', className: 'wy-hologram-entry', textContent: '✧ 全息陪伴' });
+holoEntry.onclick = () => {
+  companion.close();
+  hologram.open();
+};
+document.querySelector('.wy-companion-head span').after(holoEntry);
+if (DESKTOP?.onWallpaperRequest)
+  DESKTOP.onWallpaperRequest(async (request) => {
+    if (request.open) {
+      hologram.open();
+      return;
+    }
+    if (!request.text) return;
+    try {
+      if (app.active) throw new Error('当前任务还在进行，请稍等完成后再发送。');
+      await app.send(request.text);
+      const reply = [...document.querySelectorAll('#transcript .msg.agent')].at(-1);
+      const text = [...(reply?.querySelectorAll('.body') || [])].map((el) => el.textContent).join('\n');
+      wp({ say: text || '本轮已结束，可以打开完整对话查看结果。', requestId: request.id });
+    } catch (error) {
+      wp({ say: `这次没有完成：${error.message || error}`, requestId: request.id, error: true });
+    }
+  });
+if (MOBILE) {
+  import('@capacitor/core')
+    .then(({ registerPlugin }) => {
+      const plugin = registerPlugin('CompanionWallpaper');
+      const check = async () => {
+        try {
+          const r = await plugin.consumeOpen();
+          if (r.open) hologram.open();
+        } catch {}
+      };
+      check();
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) check();
+      });
+    })
+    .catch(() => {});
+}
+composer = initConversationComposer({ cancelDictation: () => app.stopDictation() });
 initCompanionAppearance();
-initRenderHealthPanel({ mobile: MOBILE, toast, onChange: () => { if (!app.active) app.replayTranscript(); } });
+initRenderHealthPanel({
+  mobile: MOBILE,
+  toast,
+  onChange: () => {
+    if (!app.active) app.replayTranscript();
+  }
+});
 
 // 手机启动页：界面准备好、并且至少显示了 2 秒后淡出（太快一闪而过不像 App）
 {
   const splash = document.getElementById('app-splash');
   if (splash) {
     const wait = MOBILE ? Math.max(0, 2000 - performance.now()) : 0;
-    setTimeout(() => { splash.classList.add('out'); setTimeout(() => splash.remove(), 420); }, wait);
+    setTimeout(() => {
+      splash.classList.add('out');
+      setTimeout(() => splash.remove(), 420);
+    }, wait);
   }
 }
 
-
 // 本机其他未完成任务仍可查看，不因恢复最新一条而丢失。
-if(MOBILE){
-  const recovery=document.createElement('section');recovery.className='pending-recovery-list';
-  const toggle=document.createElement('button');toggle.type='button';toggle.className='btn';toggle.textContent='查看未完成任务';
-  const list=document.createElement('div');list.hidden=true;recovery.append(toggle,list);document.querySelector('[data-pane="settings"]').append(recovery);
-  const draw=()=>{list.replaceChildren();const rows=listPending(storage);if(!rows.length){list.textContent='没有保留的未完成任务。';return;}
-    for(const rec of rows){const card=document.createElement('div'),title=document.createElement('p');title.textContent=rec.title||String(rec.text||'未完成任务').slice(0,40);
-      const open=document.createElement('button');open.type='button';open.className='btn sm';open.textContent='查看并继续';open.onclick=async()=>{await app.openSession(rec.sessionId);app.prompt.value=resumeText(rec);app.autosize();app.showPanel('settings',{toggle:true});app.prompt.focus();};
-      const dismiss=document.createElement('button');dismiss.type='button';dismiss.className='btn ghost sm';dismiss.textContent='不再继续';dismiss.onclick=()=>{clearPending(storage,rec.sessionId,rec.turnId);draw();};card.append(title,open,dismiss);list.append(card);
+if (MOBILE) {
+  const recovery = document.createElement('section');
+  recovery.className = 'pending-recovery-list';
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'btn';
+  toggle.textContent = '查看未完成任务';
+  const list = document.createElement('div');
+  list.hidden = true;
+  recovery.append(toggle, list);
+  document.querySelector('[data-pane="settings"]').append(recovery);
+  const draw = () => {
+    list.replaceChildren();
+    const rows = listPending(storage);
+    if (!rows.length) {
+      list.textContent = '没有保留的未完成任务。';
+      return;
     }
-  };toggle.onclick=()=>{list.hidden=!list.hidden;if(!list.hidden)draw();};
+    for (const rec of rows) {
+      const card = document.createElement('div'),
+        title = document.createElement('p');
+      title.textContent = rec.title || String(rec.text || '未完成任务').slice(0, 40);
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'btn sm';
+      open.textContent = '查看并继续';
+      open.onclick = async () => {
+        await app.openSession(rec.sessionId);
+        app.prompt.value = resumeText(rec);
+        app.autosize();
+        app.showPanel('settings', { toggle: true });
+        app.prompt.focus();
+      };
+      const dismiss = document.createElement('button');
+      dismiss.type = 'button';
+      dismiss.className = 'btn ghost sm';
+      dismiss.textContent = '不再继续';
+      dismiss.onclick = () => {
+        clearPending(storage, rec.sessionId, rec.turnId);
+        draw();
+      };
+      card.append(title, open, dismiss);
+      list.append(card);
+    }
+  };
+  toggle.onclick = () => {
+    list.hidden = !list.hidden;
+    if (!list.hidden) draw();
+  };
 }
-
-

@@ -20,7 +20,11 @@ export function createComposer(app) {
 
   // —— 输入框：Enter 发送，Shift+Enter 换行；随内容自动增高
   const prompt = $('#prompt');
-  function autosize() { prompt.style.height = 'auto'; prompt.style.height = `${Math.min(prompt.scrollHeight, 160)}px`; app.composer?.refresh(); }
+  function autosize() {
+    prompt.style.height = 'auto';
+    prompt.style.height = `${Math.min(prompt.scrollHeight, 160)}px`;
+    app.composer?.refresh();
+  }
   $('#inputbar').addEventListener('submit', (e) => {
     e.preventDefault();
     const v = prompt.value;
@@ -62,7 +66,9 @@ export function createComposer(app) {
         const image = isImageName(f.name) ? await prepareImage(f).catch(() => null) : null;
         attachments.push({ path: r.path, image });
         app.panels.markFresh(r.path);
-      } catch (e) { toast(`${f.name}：${e.message}`); }
+      } catch (e) {
+        toast(`${f.name}：${e.message}`);
+      }
     }
     renderAttachments();
     app.panels.refreshFiles();
@@ -72,34 +78,68 @@ export function createComposer(app) {
     queueMicrotask(() => app.composer?.refresh());
     const box = $('#attach-list');
     box.hidden = !attachments.length;
-    box.replaceChildren(...attachments.map((a, i) => {
-      const x = Object.assign(document.createElement('button'), { type: 'button', textContent: '✕', title: '移除' });
-      x.addEventListener('click', () => { attachments.splice(i, 1); renderAttachments(); });
-      const s = document.createElement('span');
-      if (a.image) {
-        s.className = 'has-thumb';
-        s.append(imageButton(a.image.thumb, () => previewWorkspaceImage(a.path,a.image.thumb).catch(e => toast(e.message))));
-      }
-      const label = Object.assign(document.createElement('span'), { className:'attach-name', textContent:a.image ? '图片 · 已上传工作区' : a.path.split('/').pop(), title:a.path });
-      s.append(label, x);
-      return s;
-    }));
+    box.replaceChildren(
+      ...attachments.map((a, i) => {
+        const x = Object.assign(document.createElement('button'), { type: 'button', textContent: '✕', title: '移除' });
+        x.addEventListener('click', () => {
+          attachments.splice(i, 1);
+          renderAttachments();
+        });
+        const s = document.createElement('span');
+        if (a.image) {
+          s.className = 'has-thumb';
+          s.append(imageButton(a.image.thumb, () => previewWorkspaceImage(a.path, a.image.thumb).catch((e) => toast(e.message))));
+        }
+        const label = Object.assign(document.createElement('span'), {
+          className: 'attach-name',
+          textContent: a.image ? '图片 · 已上传工作区' : a.path.split('/').pop(),
+          title: a.path
+        });
+        s.append(label, x);
+        return s;
+      })
+    );
   }
   // ＋菜单统一处理文件入口；原相机、文件上传处理器保留。
-  initCamera({ button: $('#btn-camera'), input: $('#camera-input'), native: MOBILE || /Android|iPhone|iPad/i.test(navigator.userAgent), onFiles: addFiles, onError: e => toast(e.message) });
-  addEventListener('jarvis:open-upload', e => { app.showPanel('workspace'); if (e.detail?.path) app.panels.openFile(e.detail.path); });
+  initCamera({
+    button: $('#btn-camera'),
+    input: $('#camera-input'),
+    native: MOBILE || /Android|iPhone|iPad/i.test(navigator.userAgent),
+    onFiles: addFiles,
+    onError: (e) => toast(e.message)
+  });
+  addEventListener('jarvis:open-upload', (e) => {
+    app.showPanel('workspace');
+    if (e.detail?.path) app.panels.openFile(e.detail.path);
+  });
   // 粘贴截图 / 图片
   $('#prompt').addEventListener('paste', (e) => {
-    const imgs = [...(e.clipboardData?.items ?? [])].filter((it) => it.kind === 'file' && it.type.startsWith('image/')).map((it) => it.getAsFile()).filter(Boolean);
+    const imgs = [...(e.clipboardData?.items ?? [])]
+      .filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
+      .map((it) => it.getAsFile())
+      .filter(Boolean);
     if (!imgs.length) return;
     e.preventDefault();
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     addFiles(imgs.map((f, i) => new File([f], `粘贴-${stamp}${i ? `-${i}` : ''}.${(f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`, { type: f.type })));
   });
-  $('#file-input').addEventListener('change', (e) => { addFiles([...e.target.files]); e.target.value = ''; });
+  $('#file-input').addEventListener('change', (e) => {
+    addFiles([...e.target.files]);
+    e.target.value = '';
+  });
   let dragDepth = 0;
-  window.addEventListener('dragenter', (e) => { if (e.dataTransfer?.types?.includes('Files')) { dragDepth++; $('#drop-overlay').hidden = false; } });
-  window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; $('#drop-overlay').hidden = true; } });
+  window.addEventListener('dragenter', (e) => {
+    if (e.dataTransfer?.types?.includes('Files')) {
+      dragDepth++;
+      $('#drop-overlay').hidden = false;
+    }
+  });
+  window.addEventListener('dragleave', () => {
+    if (--dragDepth <= 0) {
+      dragDepth = 0;
+      $('#drop-overlay').hidden = true;
+    }
+  });
   window.addEventListener('dragover', (e) => e.preventDefault());
   window.addEventListener('drop', (e) => {
     e.preventDefault();
@@ -108,11 +148,11 @@ export function createComposer(app) {
     if (e.dataTransfer?.files?.length) addFiles([...e.dataTransfer.files]);
   });
 
-
-
   // 窄屏用短提示语，避免输入框被撑成好几行
   const narrowPrompt = matchMedia('(max-width: 860px)');
-  const setPlaceholder = () => { $('#prompt').placeholder = narrowPrompt.matches ? '交给我一个任务……' : '交给我一个任务：写代码、做 PPT、分析文件、查资料……（Enter 发送，Shift+Enter 换行）'; };
+  const setPlaceholder = () => {
+    $('#prompt').placeholder = narrowPrompt.matches ? '交给我一个任务……' : '交给我一个任务：写代码、做 PPT、分析文件、查资料……（Enter 发送，Shift+Enter 换行）';
+  };
   narrowPrompt.addEventListener?.('change', setPlaceholder);
   setPlaceholder();
 
@@ -129,12 +169,19 @@ export function createComposer(app) {
       prompt.setSelectionRange(prompt.value.length, prompt.value.length);
       return;
     }
-    if (kind === 'edit' || kind === 'retry') { app.rewindAndResend(kind, text); return; }
+    if (kind === 'edit' || kind === 'retry') {
+      app.rewindAndResend(kind, text);
+      return;
+    }
     if (kind === 'speak') {
       // 朗读这一条：再点一下停；只念正文，代码和表格不念
       const again = readingBtn === btn && app.speaker.speaking;
       app.speaker.cancel();
-      if (readingBtn) { setActionIcon(readingBtn, 'speak'); readingBtn.removeAttribute('aria-pressed'); readingBtn = null; }
+      if (readingBtn) {
+        setActionIcon(readingBtn, 'speak');
+        readingBtn.removeAttribute('aria-pressed');
+        readingBtn = null;
+      }
       if (again) return;
       app.speaker.unlock();
       noteAction('朗读一条回答');
@@ -146,7 +193,11 @@ export function createComposer(app) {
       const watch = setInterval(() => {
         if (readingBtn !== btn || (!app.speaker.speaking && !app.speaker.pending)) {
           clearInterval(watch);
-          if (readingBtn === btn) { setActionIcon(btn, 'speak'); btn.removeAttribute('aria-pressed'); readingBtn = null; }
+          if (readingBtn === btn) {
+            setActionIcon(btn, 'speak');
+            btn.removeAttribute('aria-pressed');
+            readingBtn = null;
+          }
         }
       }, 600);
     }

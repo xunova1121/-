@@ -31,12 +31,24 @@ export function createPanels(app) {
     body.classList.add('side-open');
     for (const p of document.querySelectorAll('[data-pane]')) p.hidden = p.dataset.pane !== name;
     for (const b of document.querySelectorAll('.rail-btn')) b.classList.toggle('active', b.dataset.panel === name);
-    try { localStorage.setItem('jarvis.pane', name); } catch { /* ignore */ }
+    try {
+      localStorage.setItem('jarvis.pane', name);
+    } catch {
+      /* ignore */
+    }
     if (name === 'workspace') panels.refreshFiles();
     if (name === 'knowledge') panels.refreshKb();
     if (name === 'mind') panels.refreshMind();
-    if (name === 'models') { panels.refreshModels(); voicePanel.render(); localModels.refresh(); routingPanel.render(); }
-    if (name === 'skills') { skillsPanel.refresh(); mcpPanel.refresh(); }
+    if (name === 'models') {
+      panels.refreshModels();
+      voicePanel.render();
+      localModels.refresh();
+      routingPanel.render();
+    }
+    if (name === 'skills') {
+      skillsPanel.refresh();
+      mcpPanel.refresh();
+    }
     if (name === 'sessions') app.sessionsPanel?.refresh();
     if (name === 'system') app.schedulesPanel?.refresh();
     if (name === 'settings') app.renderHabits();
@@ -53,9 +65,19 @@ export function createPanels(app) {
     getGateway: () => app.gateway,
     searchFetch: () => app.fetchViaGateway(),
     getHistory: () => app.history,
-    onConfigChange: (cfg) => { app.llmConfig = cfg; app.updateModelLabels(); app.syncMemoryEngine(); app.updateOrbitStatus(); routingPanel?.render(); app.pushConfigToServer(); },
+    onConfigChange: (cfg) => {
+      app.llmConfig = cfg;
+      app.updateModelLabels();
+      app.syncMemoryEngine();
+      app.updateOrbitStatus();
+      routingPanel?.render();
+      app.pushConfigToServer();
+    },
     onReflect: () => app.reflectNow({ manual: true }),
-    onAutoMemory: (on) => { app.setSetting('autoMemory', on); if (!on) clearTimeout(app.reflectTimer); },
+    onAutoMemory: (on) => {
+      app.setSetting('autoMemory', on);
+      if (!on) clearTimeout(app.reflectTimer);
+    }
   });
   const voicePanel = initVoicePanel({ panels, speaker: app.speaker, getGateway: () => app.gateway });
   routingPanel = initRoutingPanel({
@@ -76,7 +98,12 @@ export function createPanels(app) {
   {
     const was = modelOf(panels.config);
     const fixed = repairChatModel(panels.config);
-    if (fixed) { panels.patchConfig(() => fixed); toast(`“${was}”不能用来聊天${fixed.imageModel === was ? '，已改为画图用' : fixed.videoModel === was ? '，已改为视频用' : ''}；聊天用 ${fixed.models[fixed.provider] || '默认模型'}`); }
+    if (fixed) {
+      panels.patchConfig(() => fixed);
+      toast(
+        `“${was}”不能用来聊天${fixed.imageModel === was ? '，已改为画图用' : fixed.videoModel === was ? '，已改为视频用' : ''}；聊天用 ${fixed.models[fixed.provider] || '默认模型'}`
+      );
+    }
   }
   const localModels = initLocalModelsPanel({
     getGateway: () => app.gateway,

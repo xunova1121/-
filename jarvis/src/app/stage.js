@@ -68,7 +68,12 @@ export function createStage(app) {
   const director = createFormDirector({
     setForm: (name) => {
       const el = document.querySelector('#hud-form');
-      if (el) { el.textContent = FORMS[name]?.name ?? name; el.parentElement.classList.remove('flash'); void el.offsetWidth; el.parentElement.classList.add('flash'); }
+      if (el) {
+        el.textContent = FORMS[name]?.name ?? name;
+        el.parentElement.classList.remove('flash');
+        void el.offsetWidth;
+        el.parentElement.classList.add('flash');
+      }
       queueMicrotask(updateOrbitStatus);
       wp({ form: name, energy: ENERGY[machine.task] ?? 0, task: $('#hud-task')?.textContent });
       return stage ? stage.setForm(name) !== false || stage.form === name : true;
@@ -83,7 +88,10 @@ export function createStage(app) {
 
   function frame(dt, t) {
     const p = tween.update(t);
-    if (t - directorTick > 200) { directorTick = t; director.tick(); }
+    if (t - directorTick > 200) {
+      directorTick = t;
+      director.tick();
+    }
     stage?.setActivity({ audio: live.voiceListening ? Math.min(1, live.voiceEnergy * 1.5) : 0 });
 
     // 光环转速 / 扫描速度：情绪表的角速度；用户说话时放慢到 0.12（需求 6.3）
@@ -113,9 +121,7 @@ export function createStage(app) {
       speakTarget = 0.3 + 0.7 * audioLevel;
     } else if (app.speaker.speaking) {
       const since = t - live.boundaryAt;
-      speakTarget = since < 600
-        ? 0.45 + 0.55 * Math.exp(-since / 140)
-        : 0.4 + 0.25 * (0.5 + 0.5 * Math.sin(t / 95)) * (0.5 + 0.5 * Math.sin(t / 333));
+      speakTarget = since < 600 ? 0.45 + 0.55 * Math.exp(-since / 140) : 0.4 + 0.25 * (0.5 + 0.5 * Math.sin(t / 95)) * (0.5 + 0.5 * Math.sin(t / 333));
     }
     speakTarget = Math.max(speakTarget, live.pulse);
     live.pulse *= 0.9;
@@ -192,7 +198,12 @@ export function createStage(app) {
 
   let quality = resolveQuality(app.settings.quality, { lowEnd, isMobile, focusView: app.settings.focusView });
   function applyFpsCap() {
-    quality = resolveQuality(app.settings.quality, { lowEnd, isMobile, focusView: app.settings.focusView, softwareRenderer: Boolean(stage?.stats.softwareRenderer) });
+    quality = resolveQuality(app.settings.quality, {
+      lowEnd,
+      isMobile,
+      focusView: app.settings.focusView,
+      softwareRenderer: Boolean(stage?.stats.softwareRenderer)
+    });
     stage?.setFpsCap(quality.fps);
     stage?.setQuality({ bloom: quality.bloom, stars: quality.stars });
     body.classList.toggle('eco', quality.tier === 'eco');
@@ -204,7 +215,8 @@ export function createStage(app) {
     dashboard.setMotion(!reduced);
     if (reduced) disposeStage();
     else ensureStage();
-    $('#motion-status').textContent = `系统偏好：${reducedMql.matches ? '减少动态效果' : '未开启'}；当前：${reduced ? '已停用持续动画，仅以颜色表达情绪' : '完整动画'}`;
+    $('#motion-status').textContent =
+      `系统偏好：${reducedMql.matches ? '减少动态效果' : '未开启'}；当前：${reduced ? '已停用持续动画，仅以颜色表达情绪' : '完整动画'}`;
   }
   reducedMql.addEventListener?.('change', applyMotionMode);
 
@@ -228,7 +240,10 @@ export function createStage(app) {
     onEmotionPick: (v) => applyEmotionOverride(v)
   });
   const poller = new MetricsPoller({
-    onData: (m) => { dashboard.setMetrics(m); orbit?.setMetrics({ cpu: (m.cpu?.percent ?? 0) / 100, mem: (m.memory?.percent ?? 0) / 100 }); },
+    onData: (m) => {
+      dashboard.setMetrics(m);
+      orbit?.setMetrics({ cpu: (m.cpu?.percent ?? 0) / 100, mem: (m.memory?.percent ?? 0) / 100 });
+    },
     onError: () => dashboard.setDisconnected()
   });
   if (!document.hidden && !COMPACT) poller.start(); // 手机上没有仪表盘
@@ -243,13 +258,27 @@ export function createStage(app) {
   }
 
   const hud = {
-    think(text, kind) { orbit?.think(text, kind); wp({ think: text }); },
-    toolStart(id, label) { orbit?.toolStart(id, label); wp({ tool: { id, label } }); },
-    toolEnd(id, ok) { orbit?.toolEnd(id, ok); wp({ toolDone: { id, ok } }); },
-    newTurn() { orbit?.newTurn(); wp({ newTurn: true }); }
+    think(text, kind) {
+      orbit?.think(text, kind);
+      wp({ think: text });
+    },
+    toolStart(id, label) {
+      orbit?.toolStart(id, label);
+      wp({ tool: { id, label } });
+    },
+    toolEnd(id, ok) {
+      orbit?.toolEnd(id, ok);
+      wp({ toolDone: { id, ok } });
+    },
+    newTurn() {
+      orbit?.newTurn();
+      wp({ newTurn: true });
+    }
   };
   function updateOrbitStatus() {
-    orbit?.setStatus(`${(FORMS[director.form]?.id ?? director.form).toUpperCase()} · LINK ${window.jarvisDesktop ? 'DESKTOP' : app.gateway ? 'GATEWAY' : 'LOCAL'}`);
+    orbit?.setStatus(
+      `${(FORMS[director.form]?.id ?? director.form).toUpperCase()} · LINK ${window.jarvisDesktop ? 'DESKTOP' : app.gateway ? 'GATEWAY' : 'LOCAL'}`
+    );
   }
 
   const TASK_LABEL = { idle: '待命', listening: '生成中', processing: '执行中', error: '出错', done: '完成' };
@@ -271,14 +300,25 @@ export function createStage(app) {
 
   // 用户有动静：空闲漫游中的粒子体回到光核看着他
   let lastPoke = 0;
-  const poke = () => { const t = performance.now(); if (t - lastPoke > 1000) { lastPoke = t; director.poke(); } };
+  const poke = () => {
+    const t = performance.now();
+    if (t - lastPoke > 1000) {
+      lastPoke = t;
+      director.poke();
+    }
+  };
   addEventListener('pointermove', poke, { passive: true });
   addEventListener('keydown', poke);
 
   // 有对话时舞台收成迷你状态条（桌面版），给对话留空间；点一下展开 / 收起
   function updateStageMode() {
     // 工作台的“工作室”视图要大舞台；“对话”视图里舞台隐藏，迷你模式只为把建议放到输入框上方
-    const mini = !COMPACT && body.classList.contains('has-convo') && !app.settings.stageOpen && !body.classList.contains('focus-view') && !body.classList.contains('wb-studio');
+    const mini =
+      !COMPACT &&
+      body.classList.contains('has-convo') &&
+      !app.settings.stageOpen &&
+      !body.classList.contains('focus-view') &&
+      !body.classList.contains('wb-studio');
     const label = $('#btn-stage-toggle span');
     if (label) label.textContent = app.settings.stageOpen ? '收起' : '展开';
     body.classList.toggle('stage-mini', mini); // 工作台切到“工作室”时会自己去掉这个类，所以用变量记上一次的状态
@@ -286,18 +326,28 @@ export function createStage(app) {
     stageMiniWas = mini;
     callouts?.relocate?.();
   }
-  function setStageOpen(open) { app.setSetting('stageOpen', open); updateStageMode(); }
+  function setStageOpen(open) {
+    app.setSetting('stageOpen', open);
+    updateStageMode();
+  }
   addEventListener('resize', () => updateStageMode()); // 工作台切换“对话 / 工作室”时会发 resize
   new MutationObserver(() => {
     body.classList.toggle('has-convo', Boolean(document.querySelector('#transcript .msg')));
     updateStageMode();
   }).observe($('#transcript'), { childList: true });
-  $('#btn-stage-toggle').addEventListener('click', (e) => { e.stopPropagation(); setStageOpen(!app.settings.stageOpen); });
-  $('#stage-wrap').addEventListener('click', (e) => { if (body.classList.contains('stage-mini') && !e.target.closest('button, a, .callout')) setStageOpen(true); });
+  $('#btn-stage-toggle').addEventListener('click', (e) => {
+    e.stopPropagation();
+    setStageOpen(!app.settings.stageOpen);
+  });
+  $('#stage-wrap').addEventListener('click', (e) => {
+    if (body.classList.contains('stage-mini') && !e.target.closest('button, a, .callout')) setStageOpen(true);
+  });
 
   /** 启动末尾：建轨道 HUD 和光核旁的建议标注（要等对话区、工作台都建好） */
   function initSuggestions() {
-    orbit = COMPACT ? null : initOrbitHud({ root: $('#stage-wrap'), getAnchor: () => stage?.anchor?.() ?? null, reducedMotion: () => body.classList.contains('reduced-motion') });
+    orbit = COMPACT
+      ? null
+      : initOrbitHud({ root: $('#stage-wrap'), getAnchor: () => stage?.anchor?.() ?? null, reducedMotion: () => body.classList.contains('reduced-motion') });
     updateOrbitStatus();
     orbit?.think('系统就绪 · 粒子核心在线');
     /** 桌面版：大舞台时建议在光核旁边，迷你状态条时改到输入框上方；两边接口一样，这里按当前模式转发 */
@@ -305,11 +355,22 @@ export function createStage(app) {
       let items = [];
       const cur = () => (useChips() ? chips : full);
       return {
-        set(next) { items = next || []; (useChips() ? full : chips).retract(); cur().set(items); },
+        set(next) {
+          items = next || [];
+          (useChips() ? full : chips).retract();
+          cur().set(items);
+        },
         show: () => cur().show(),
-        retract() { full.retract(); chips.retract(); },
-        get items() { return cur().items; },
-        get visible() { return cur().visible; },
+        retract() {
+          full.retract();
+          chips.retract();
+        },
+        get items() {
+          return cur().items;
+        },
+        get visible() {
+          return cur().visible;
+        },
         pick: (i) => cur().pick(i),
         relocate() {
           const wasVisible = full.visible || chips.visible;
@@ -341,19 +402,42 @@ export function createStage(app) {
         live.pulse = 1;
         live.glance = { yaw: 0, pitch: 0 };
         live.nextGlance = now() + 1500;
-        if (item.panel) { app.showPanel(item.panel); callouts?.show(); return; }
+        if (item.panel) {
+          app.showPanel(item.panel);
+          callouts?.show();
+          return;
+        }
         setTimeout(() => app.send(item.prompt), 160);
       }
     };
-    callouts = COMPACT ? initChips(suggestionOpts) : dualSuggestions(initCallouts(suggestionOpts), initChips(suggestionOpts), () => body.classList.contains('stage-mini'));
+    callouts = COMPACT
+      ? initChips(suggestionOpts)
+      : dualSuggestions(initCallouts(suggestionOpts), initChips(suggestionOpts), () => body.classList.contains('stage-mini'));
   }
 
   return {
-    live, machine, director, dashboard, hud,
-    get stage() { return stage; },
-    get quality() { return quality; },
-    get callouts() { return callouts; },
-    ensureStage, applyFpsCap, applyMotionMode, applyEmotionOverride,
-    setTask, updateOrbitStatus, updateStageMode, setStageOpen, initSuggestions
+    live,
+    machine,
+    director,
+    dashboard,
+    hud,
+    get stage() {
+      return stage;
+    },
+    get quality() {
+      return quality;
+    },
+    get callouts() {
+      return callouts;
+    },
+    ensureStage,
+    applyFpsCap,
+    applyMotionMode,
+    applyEmotionOverride,
+    setTask,
+    updateOrbitStatus,
+    updateStageMode,
+    setStageOpen,
+    initSuggestions
   };
 }

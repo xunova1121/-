@@ -12,19 +12,8 @@ import { loadServerSettings, createServerClient, remoteSessions, normalizeUrl } 
 import * as sessionsApi from '../agent/sessions.js';
 import * as agentMemory from '../agent/memory.js';
 import * as kb from '../agent/knowledge.js';
+import { friendlyError } from '../core/friendlyError.js';
 import { $, COMPACT, storage, toast } from './env.js';
-
-/** 常见的服务商错误翻译成人话（已经自动重试过仍失败才会走到这里） */
-export function friendlyError(msg) {
-  const code = Number(msg.match(/模型接口返回 (\d{3})/)?.[1]);
-  if (code === 524 || code === 504 || code === 522) return `中转站等模型回复超时（${code}），已自动重试过。可以点“继续”从断开的地方接着写，或在输入框里换一个更快的模型`;
-  if (code === 429) return '请求太频繁或额度用完（429），已自动重试过。稍等一会儿再试，或检查中转站余额';
-  if (code === 401 || code === 403) return `API Key 不对或没有权限（${code}）：请在“模型”里检查密钥`;
-  if (code >= 500) return `服务商临时故障（${code}），已自动重试过。稍后再试，或换一个模型`;
-  if (/图片模型|image model|images\/generations/i.test(msg)) return '当前选的是画图模型，不能用来聊天：点输入框里的模型名换一个聊天模型。想画图直接说“画一张…”就行';
-  if (/connection reset|econnreset|socket hang up/i.test(msg)) return '网络连接被断开（已自动重试过）。可以点“继续”从断开的地方接着写；手机上可以试试切换 Wi‑Fi / 流量';
-  return msg;
-}
 
 export function createModels(app) {
   app.llmConfig = loadConfig();
@@ -41,9 +30,21 @@ export function createModels(app) {
         const h = await (await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout?.(5000) })).json(); // 启动时主线程忙（编译着色器），留足时间
         if (!h?.ok) throw new Error('not a gateway');
         // 这个网址是开了服务器模式的未央服务器，但还没登录：提示去登录（不登录用不了它的任何功能）
-        if (h.serverMode && !serverCfg.token) setTimeout(() => { app.showPanel('settings'); const u = $('#server-url'); if (u && !u.value) u.value = location.origin; toast('这是你的未央服务器：请先在“服务器模式”里输入访问密码登录'); }, 800);
+        if (h.serverMode && !serverCfg.token)
+          setTimeout(() => {
+            app.showPanel('settings');
+            const u = $('#server-url');
+            if (u && !u.value) u.value = location.origin;
+            toast('这是你的未央服务器：请先在“服务器模式”里输入访问密码登录');
+          }, 800);
         const found = !app.gateway;
-        app.gateway = { origin: local ? LOCAL_GATEWAY : location.origin, keys: h.gatewayKeys ?? [], cors: Boolean(h.cors), mcp: Boolean(h.mcp), ollama: Boolean(h.ollama) };
+        app.gateway = {
+          origin: local ? LOCAL_GATEWAY : location.origin,
+          keys: h.gatewayKeys ?? [],
+          cors: Boolean(h.cors),
+          mcp: Boolean(h.mcp),
+          ollama: Boolean(h.ollama)
+        };
         if (local && found) toast('已连接本机网关：所有服务商和自定义接口都可以用了');
       } catch {
         app.gateway = null;
@@ -56,22 +57,29 @@ export function createModels(app) {
       app.localModels.refresh();
       syncMemoryEngine();
       updateModelLabels();
-    })().finally(() => { probing = null; });
+    })().finally(() => {
+      probing = null;
+    });
     return probing;
   }
   // 单文件版：回到页面时再找一次网关（用户可能刚双击了 启动.bat）
   if ((STANDALONE && !MOBILE) || location.protocol === 'file:') {
     let last = 0;
-    addEventListener('focus', () => { if (!app.gateway && Date.now() - last > 5000) { last = Date.now(); detectGateway(); } });
+    addEventListener('focus', () => {
+      if (!app.gateway && Date.now() - last > 5000) {
+        last = Date.now();
+        detectGateway();
+      }
+    });
   }
-
 
   function updateModelLabels() {
     const name = displayName(app.llmConfig);
     $('#mode-text').textContent = name;
     // 输入框里显示型号（或“自动”），点一下弹出模型列表
     $('#model-chip-text').textContent = COMPACT && isAuto(app.llmConfig) ? `自动 · ${modelOf(app.llmConfig) || '选择模型'}` : chipLabel(app.llmConfig);
-    if (globalThis.__jarvisServerMode) $('#model-chip-text').textContent = globalThis.__jarvisServerModel ? `服务器 · ${globalThis.__jarvisServerModel}` : '服务器'; // 服务器模式：用服务器上的模型设置
+    if (globalThis.__jarvisServerMode)
+      $('#model-chip-text').textContent = globalThis.__jarvisServerModel ? `服务器 · ${globalThis.__jarvisServerModel}` : '服务器'; // 服务器模式：用服务器上的模型设置
     if (isAuto(app.llmConfig)) $('#mode-text').textContent = `${name} · 自动选模型`;
     $('#mode-pill').title = `当前模型：${name}${app.gateway ? '（经本机网关）' : ''}。点击切换`;
     $('#hud-model').textContent = name.length > 22 ? `${name.slice(0, 21)}…` : name;
@@ -80,21 +88,33 @@ export function createModels(app) {
   const metrics = () => (app.gateway ? fetch(`${app.gateway.origin}/api/local/metrics`).then((r) => r.json()) : browserMetrics());
   // 网页读取只对完整版开放（单文件版跨域连网关时网关不提供 /api/fetch）
   // 安卓 App 没有本机网关，但系统原生网络没有跨域限制：直接用它搜索、读网页
-  const fetchViaGateway = () => (app.gateway && !app.gateway.cors
-    ? (url, init) => (url.startsWith('https://api.tavily.com/')
-      ? fetch(`/api/llm/tavily/${url.slice('https://api.tavily.com/'.length)}`, init)
-      : url.startsWith('https://api.bochaai.com/')
-        ? fetch(`/api/llm/bocha/${url.slice('https://api.bochaai.com/'.length)}`, init)
-        : fetch(`/api/fetch?url=${encodeURIComponent(url)}`))
-    : globalThis.__jarvisNativeFetch ? nativeWebFetch(globalThis.__jarvisNativeFetch) : null);
+  const fetchViaGateway = () =>
+    app.gateway && !app.gateway.cors
+      ? (url, init) =>
+          url.startsWith('https://api.tavily.com/')
+            ? fetch(`/api/llm/tavily/${url.slice('https://api.tavily.com/'.length)}`, init)
+            : url.startsWith('https://api.bochaai.com/')
+              ? fetch(`/api/llm/bocha/${url.slice('https://api.bochaai.com/'.length)}`, init)
+              : fetch(`/api/fetch?url=${encodeURIComponent(url)}`)
+      : globalThis.__jarvisNativeFetch
+        ? nativeWebFetch(globalThis.__jarvisNativeFetch)
+        : null;
 
   // 服务器模式（设置 → 服务器模式）：任务交给自己的云服务器做，对话也存在服务器上
   const serverCfg = loadServerSettings(storage);
   const server = serverCfg.enabled && serverCfg.url && serverCfg.token ? createServerClient({ base: serverCfg.url, token: serverCfg.token }) : null;
   if (server) {
     // 手机 App：连自己的服务器直接走系统原生网络（不先试 WebView、没有跨域预检，国内移动网络下快得多）
-    try { globalThis.__jarvisPreferNative?.(new URL(server.base).host); } catch { /* 网址不对就算了 */ }
-    sessionsApi.useRemote(remoteSessions(server)); globalThis.__jarvisServerMode = true; globalThis.__jarvisServerClient = server; updateModelLabels(); refreshServerModel();
+    try {
+      globalThis.__jarvisPreferNative?.(new URL(server.base).host);
+    } catch {
+      /* 网址不对就算了 */
+    }
+    sessionsApi.useRemote(remoteSessions(server));
+    globalThis.__jarvisServerMode = true;
+    globalThis.__jarvisServerClient = server;
+    updateModelLabels();
+    refreshServerModel();
   }
   /** 服务器模式：输入框里显示服务器上设的模型 */
   /** 服务器模式下换了模型（或改了密钥、分工）：自动传到服务器，任务马上用新设置。语音设置留在本机 */
@@ -108,17 +128,25 @@ export function createModels(app) {
         await server.putConfig(models);
         refreshServerModel();
         toast(`已同步到服务器：${modelOf(models) || '模型设置'}`);
-      } catch (e) { toast(`模型设置没能同步到服务器：${e.message}`); }
+      } catch (e) {
+        toast(`模型设置没能同步到服务器：${e.message}`);
+      }
     }, 800);
   }
   function refreshServerModel() {
-    server?.getConfig().then((c) => { globalThis.__jarvisServerModel = modelOf(c) || ''; updateModelLabels(); }).catch(() => {});
+    server
+      ?.getConfig()
+      .then((c) => {
+        globalThis.__jarvisServerModel = modelOf(c) || '';
+        updateModelLabels();
+      })
+      .catch(() => {});
   }
   // 页面就是从自己的服务器打开的：发给它的请求（模型转发、读网页等）都带上登录令牌
   if (serverCfg.token && typeof location !== 'undefined' && normalizeUrl(serverCfg.url) === location.origin) {
     const plain = globalThis.fetch.bind(globalThis);
     globalThis.fetch = (input, init = {}) => {
-      const url = typeof input === 'string' ? input : input?.url ?? '';
+      const url = typeof input === 'string' ? input : (input?.url ?? '');
       if (!/^\/api\//.test(url) && !url.startsWith(`${location.origin}/api/`)) return plain(input, init);
       const headers = new Headers(init.headers || (typeof input === 'object' ? input.headers : undefined));
       if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${serverCfg.token}`);
@@ -133,7 +161,16 @@ export function createModels(app) {
     if (problem || providerById(app.llmConfig.provider)?.kind === 'mock') return null;
     return async ({ system, prompt, signal, images }) => {
       let text = '';
-      const r = await adapter.stream({ model, system: [system], messages: [{ role: 'user', content: prompt, ...(images?.length && { images }) }], tools: [], signal, onText: (d) => { text += d; } });
+      const r = await adapter.stream({
+        model,
+        system: [system],
+        messages: [{ role: 'user', content: prompt, ...(images?.length && { images }) }],
+        tools: [],
+        signal,
+        onText: (d) => {
+          text += d;
+        }
+      });
       return r?.text || text;
     };
   }
@@ -148,7 +185,15 @@ export function createModels(app) {
     const r = routeFor(app.llmConfig, ROLE_TASK[role] ?? 'chat');
     if (!r.routed) return null;
     const a = createAdapter(r.cfg, { gateway: app.gateway });
-    return a.problem ? null : { adapter:a.adapter, model:a.model, fallbacks:fallbackRoutes(app.llmConfig,{provider:r.cfg.provider,model:a.model}).map(f=>({...createAdapter(f.cfg,{gateway: app.gateway}),label:f.model})).filter(f=>!f.problem&&f.adapter&&f.model) };
+    return a.problem
+      ? null
+      : {
+          adapter: a.adapter,
+          model: a.model,
+          fallbacks: fallbackRoutes(app.llmConfig, { provider: r.cfg.provider, model: a.model })
+            .map((f) => ({ ...createAdapter(f.cfg, { gateway: app.gateway }), label: f.model }))
+            .filter((f) => !f.problem && f.adapter && f.model)
+        };
   }
   function syncMemoryEngine() {
     const embedder = createEmbedder(app.llmConfig, { gateway: app.gateway });
@@ -158,7 +203,18 @@ export function createModels(app) {
   }
 
   return {
-    serverCfg, server, detectGateway, friendlyError, updateModelLabels, metrics, fetchViaGateway,
-    pushConfigToServer, refreshServerModel, helperLlm, visionHelperLlm, modelForRole, syncMemoryEngine
+    serverCfg,
+    server,
+    detectGateway,
+    friendlyError,
+    updateModelLabels,
+    metrics,
+    fetchViaGateway,
+    pushConfigToServer,
+    refreshServerModel,
+    helperLlm,
+    visionHelperLlm,
+    modelForRole,
+    syncMemoryEngine
   };
 }

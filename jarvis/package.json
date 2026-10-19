@@ -8,6 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "lint": "eslint src/main.js src/app && prettier --check src/main.js src/app",
+    "format": "prettier --write src/main.js src/app",
     "eval:check": "node --test evals/checks.mjs",
     "eval:agent": "node evals/runner.mjs",
     "build-model": "node scripts/build-hologram.mjs",

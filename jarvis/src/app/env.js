@@ -11,7 +11,13 @@ export const now = () => performance.now();
 export const DESKTOP = window.jarvisDesktop;
 /** 手机 App：不放大舞台（不跑 WebGL 和舞台动画，省电、不卡），粒子缩成顶栏小球，工作进展进对话 */
 export const COMPACT = MOBILE;
-export const storage = (() => { try { return localStorage; } catch { return null; } })();
+export const storage = (() => {
+  try {
+    return localStorage;
+  } catch {
+    return null;
+  }
+})();
 /** 窄屏（手机、窄窗口） */
 export const narrow = matchMedia('(max-width: 860px)');
 
@@ -27,14 +33,25 @@ export function toast(text) {
   el.textContent = text;
   el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, Math.max(2600, String(text).length * 110));
+  toastTimer = setTimeout(
+    () => {
+      el.hidden = true;
+    },
+    Math.max(2600, String(text).length * 110)
+  );
 }
 
 /** 桌面背景同步：主窗口在做什么，桌面上的粒子体就跟着做（桌面版开了背景模式时） */
-export function wp(payload) { if (window.jarvisDesktop) window.jarvisDesktop.invoke('wallpaperEvent', payload).catch(() => {}); }
+export function wp(payload) {
+  if (window.jarvisDesktop) window.jarvisDesktop.invoke('wallpaperEvent', payload).catch(() => {});
+}
 
 /** 手机：记下“正在做什么”（界面崩溃时下次打开能看到崩溃前在做什么） */
 export function markActivity(what) {
   if (!MOBILE) return;
-  try { localStorage.setItem('jarvis.lastActivity', what ? `${new Date().toLocaleTimeString('zh-CN', { hour12: false })} ${what}` : ''); } catch { /* 存不了就算了 */ }
+  try {
+    localStorage.setItem('jarvis.lastActivity', what ? `${new Date().toLocaleTimeString('zh-CN', { hour12: false })} ${what}` : '');
+  } catch {
+    /* 存不了就算了 */
+  }
 }
