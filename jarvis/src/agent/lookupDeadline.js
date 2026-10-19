@@ -6,10 +6,17 @@ export function isQuickLookup(text = '', images = []) {
   const value = String(text);
   return !images.length && value.length <= 500 && !COMPLEX.test(value) && !/(?:生成|制作|写|修改|重构|运行|执行|整理|翻译|总结|分析|评审|帮我做|接着做|继续|恢复|发送|删除|移动|重命名|创建|启动|打开|下载|上传|记住|记下|保存|安排|提醒|定时|设计|调整|新增|修复)/.test(value);
 }
+/** “继续”继承原问题的查询类别，不因按钮文案绕过普通查询期限。 */
+export function lookupRequirement(text, history = []) {
+  const continuation = value => /^(?:继续|恢复|接着)(?:[：:，,。\s]|$)/.test(String(value || '').trim());
+  if (!continuation(text) || COMPLEX.test(String(text))) return text;
+  return [...history].reverse().find(m => m.role === 'user' && !continuation(m.content))?.content || text;
+}
 const abortError = () => Object.assign(new Error('aborted'), { name: 'AbortError' });
 
 export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_MS } = {}) {
-  const text = options.requirementText ?? options.userText;
+  const text = lookupRequirement(options.requirementText ?? options.userText, options.history);
+  if(text !== (options.requirementText ?? options.userText)) options = { ...options, requirementText: text };
   const hasComputer=options.tools?.some(t=>t.name==='computer_look'||t.name==='computer_search');
   if(options.computerTask||hasComputer&&needsComputer(text,{history:options.history||[]}))return run(options.computerTask?options:{...options,computerTask:true});
   if (!isQuickLookup(text, options.images)) return run(options);
@@ -48,4 +55,5 @@ export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_
     closed = true; clearTimeout(timer); options.signal?.removeEventListener('abort', userAbort);
   }
 }
+
 

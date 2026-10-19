@@ -5,8 +5,13 @@
  * @typedef {{ title: string, prompt?: string, panel?: string }} Suggestion
  */
 
-/** 回答被网络中断时记在对话里的标记，以及“继续”按钮发出的话 */
-export const INTERRUPTED_MARK = '（回答因网络中断停在这里，还没完成）';
+/** 回答未完成时记在对话里的标记，以及“继续”按钮发出的话 */
+export const INTERRUPTED_MARK = '（本轮回答未完成；具体原因请看错误提示）';
+export function interruptionMark(error) {
+  const message=String(error?.message || error || '');
+  const reason=/LOOKUP_TIMEOUT|超时|时间预算|等待 \d+ 秒|没有任何输出/.test(message) ? '等待超时' : /模型接口|模型服务|API|返回 [45]\d\d|reasoning_content/i.test(message) ? '模型接口出错' : /network|网络|fetch|连接|socket/i.test(message) ? '连接异常' : '执行出错';
+  return `（本轮回答未完成：${reason}。已保留可恢复的内容。）`;
+}
 export const CONTINUE_TEXT = '继续：从刚才中断的地方接着做，已经写好、做好的部分不要重复';
 
 /** 开场（还没对话）时的建议 */
@@ -167,3 +172,4 @@ export function calloutLayout({ width, height, orb, boxW = 210, boxH = 46 }) {
   const x0 = (width - total) / 2;
   return { mode: 'row', boxes: [0, 1, 2].map((i) => ({ x: x0 + i * (w + 8), y, w, side: 'top' })) };
 }
+

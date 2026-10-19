@@ -5,6 +5,7 @@ export function extensiveRetrieval(text = '') {
   return /深度|深入|全面|调研|研究报告|逐项|逐一|多来源|交叉核[验对]|报告|方案|文档|论文|PPT|Word|Excel|代码|编程|开发|文件|保存|对比|比较|这几|这些|每场|多场|清单|research|report|document|code/i.test(String(text));
 }
 export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs } = {}) {
+  const resources = { search: 0, read: 0, model: 0 };
   let extensive = extensiveRetrieval(text), started = null, calls = 0, failed = 0, reason = '';
   const duration = () => timeBudgetMs ?? (extensive ? DEEP_RETRIEVAL_MS : QUICK_RETRIEVAL_MS);
   const check = () => {
@@ -17,6 +18,13 @@ export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs } = {
   };
   return {
     begin() { if (check()) return false; if (started === null) started = now(); calls++; return true; },
+    consume(kind) {
+      if (reason || started !== null && duration()>0 && now()-started>=duration()) throw Object.assign(new Error(reason || '本轮联网检索已达到时间预算'), {code:'RETRIEVAL_BUDGET'});
+      const limit = { search:6, read:4, model:3 }[kind];
+      if (!extensive && limit && resources[kind] >= limit) throw Object.assign(new Error(`普通查询的${kind}调用已达到预算`), { code:'RETRIEVAL_BUDGET' });
+      if (kind in resources) resources[kind]++;
+    },
+    get resources() { return {...resources}; },
     end(ok) { failed = ok ? 0 : failed + 1; },
     upgrade(text) { if (extensiveRetrieval(text)) extensive = true; },
     close(why) { reason ||= why; },
@@ -43,4 +51,5 @@ export async function withWebDeadline(work, { signal, timeoutMs = 12_000 } = {})
   try { return await Promise.race([cancelled, Promise.resolve().then(() => { if (ctrl.signal.aborted) throw ctrl.signal.reason; return work(ctrl.signal); })]); }
   finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
 }
+
 

@@ -106,13 +106,17 @@ const EXTRACT_SYS = `你是查证助手的“摘答案”步骤。只输出 JSON
  * @param {(q: string, n: number, opts?: object) => Promise<Array<{ title, url, snippet, raw? }>>} o.search
  * @param {(url: string) => Promise<string>} o.read
  */
-export async function factCheck({ question, items, date = '', context = '', llm, search, read, onProgress, signal, rounds = 2, concurrency = 3, today = new Date().toISOString().slice(0, 10) }) {
+export async function factCheck({ question, items, date = '', context = '', llm, search, read, onProgress, signal, rounds = 2, concurrency = 3, mode = 'thorough', consume = () => {}, evidence = [], onEvidence, today = new Date().toISOString().slice(0, 10) }) {
   const list = (items || []).filter((x) => x && String(x.label || '').trim()).slice(0, 20);
   if (!list.length) throw new Error('请把要查证的对象逐项列在 items 里');
+  const quick = mode === 'quick';
+  if (quick) rounds = 1;
+  const guard = kind => { if(signal?.aborted) throw Object.assign(new Error('已停止核验'),{name:'AbortError'}); consume(kind); };
+  const ask = async args => { guard('model'); return llm(args); };
   const pageCache = new Map();
   const getPage = async (hit) => {
     if (hit.raw) return hit.raw;
-    if (!pageCache.has(hit.url)) pageCache.set(hit.url, read(hit.url).catch(() => ''));
+    if (!pageCache.has(hit.url)) pageCache.set(hit.url, (async()=>{guard('read');return read(hit.url);})().catch(e => {if(signal?.aborted || e.code==='RETRIEVAL_BUDGET')throw e;return '';}));
     return pageCache.get(hit.url);
   };
   const results = new Array(list.length);
@@ -129,28 +133,45 @@ export async function factCheck({ question, items, date = '', context = '', llm,
     const tag = `第 ${idx + 1} 项「${item.label}」`;
     // 1. 定名与搜索规划
     let plan = null;
-    if (llm) {
-      plan = parseJson(await llm({ system: PLAN_SYS, prompt: `今天：${today}\n背景：${context || '无'}\n事件日期：${date || '未说明'}\n要查的信息：${question}\n对象：${item.label}${item.details ? `\n对象详情：${item.details}` : ''}`, signal }).catch(() => ''));
+    if (llm && !quick) {
+      plan = parseJson(await ask({ system: PLAN_SYS, prompt: `今天：${today}\n背景：${context || '无'}\n事件日期：${date || '未说明'}\n要查的信息：${question}\n对象：${item.label}${item.details ? `\n对象详情：${item.details}` : ''}`, signal }).catch(e => {if(signal?.aborted || e.code==='RETRIEVAL_BUDGET')throw e;return '';}));
     }
+    if (quick) plan = { queries:[`${item.label} ${date} ${question}`.trim(), `${item.label} ${date} 官方`.trim()] };
     const names = [...new Set([...(plan?.names || []), ...String(item.label).split(/\s+(?:vs\.?|VS|v)\s+|\s*(?:对阵|对|－|—)\s*/)].map((s) => String(s).trim()).filter((s) => s.length >= 2))].slice(0, 8);
     const dateHints = [...new Set([...(plan?.dateHints || []), date].filter(Boolean))];
     const preferSites = plan?.preferSites || [];
     let queries = [...new Set([...(plan?.queries || []), `${item.label} ${date}`.trim()])].slice(0, 5);
 
     const seen = new Set();
-    const sources = []; // { n, url, title, text }
+    const key = JSON.stringify([question,item.label,item.details||'',date,context,today]);
+    const cached = [...evidence].reverse().find(x=>x.key===key && Date.now()-x.savedAt>=0 && Date.now()-x.savedAt<10*60_000);
+    const sources = (cached?.sources || []).slice(0,4).map((s,i)=>({...s,n:i+1,excerpt:passages(s.text,names)}));
+    for(const s of sources) seen.add(s.url);
+    const publish = async () => { if(signal?.aborted)return; await onEvidence?.({key,savedAt:cached?.savedAt||Date.now(),sources:sources.slice(-4).map(s=>({...s,text:passages(s.text,names,6000)}))}); };
     let best = null;
     for (let round = 1; round <= rounds; round++) {
       onProgress?.(`${tag}：第 ${round} 轮搜索（${queries.length} 个搜索词）`);
       // 2. 搜索
-      const found = (await Promise.all(queries.map((q) => search(q, 6, { deep: true }).catch(() => [])))).flat();
+      const found = sources.length>=2 && round===1 ? [] : (await Promise.all(queries.slice(0,quick?2:5).map(async q => {
+        guard('search');
+        return search(q, quick?4:6, {deep:!quick}).catch(e=>{if(signal?.aborted || e.code==='RETRIEVAL_BUDGET')throw e;return [];});
+      }))).flat();
       const fresh = rankHits(found.filter((h) => h?.url && !seen.has(h.url) && (seen.add(h.url), true)), { names, dateHints, preferSites });
       // 3. 阅读前几篇（摘要也算证据：有的结果摘要里就有比分）
-      for (const h of fresh.slice(0, 4)) {
-        const page = await getPage(h);
-        const text = `${h.title}\n${h.snippet || ''}\n${page || ''}`;
-        sources.push({ n: sources.length + 1, url: h.url, title: h.title, text, excerpt: passages(text, names) });
-      }
+      // 同项最多两篇并行，先完成的证据先落检查点；所有请求共用预算和停止信号。
+      const selected=fresh.slice(0,quick?2:4), pages=new Array(selected.length);
+      let pageIndex=0;
+      await Promise.all(Array.from({length:Math.min(2,selected.length)},async()=>{
+        for(let i=pageIndex++;i<selected.length;i=pageIndex++){
+          const h=selected[i], page=await getPage(h);
+          if(signal?.aborted)throw Object.assign(new Error('已停止核验'),{name:'AbortError'});
+          pages[i]={url:h.url,title:h.title,text:`${h.title}\n${h.snippet||''}\n${page||''}`};
+          const ready=[...sources,...pages.filter(Boolean)].slice(-4);
+          await onEvidence?.({key,sources:ready.map(s=>({...s,text:passages(s.text,names,6000)}))});
+        }
+      }));
+      for(const page of pages.filter(Boolean))sources.push({...page,n:sources.length+1,excerpt:passages(page.text,names)});
+      await publish();
       for (const h of fresh.slice(4, 8)) sources.push({ n: sources.length + 1, url: h.url, title: h.title, text: `${h.title}\n${h.snippet || ''}`, excerpt: `${h.title}\n${h.snippet || ''}`.slice(0, 500) });
       if (!sources.length) continue;
 
@@ -158,7 +179,7 @@ export async function factCheck({ question, items, date = '', context = '', llm,
       let out = null;
       if (llm) {
         const prompt = `今天：${today}\n背景：${context || '无'}\n事件日期：${date || '未说明'}\n要找的信息：${question}\n对象：${item.label}${item.details ? `（${item.details}）` : ''}\n可能的名字：${names.join(' / ')}\n\n${sources.map((s) => `[${s.n}] ${s.title}（${host(s.url)}）\n${s.excerpt}`).join('\n\n')}`;
-        out = parseJson(await llm({ system: EXTRACT_SYS, prompt, signal }).catch(() => ''));
+        out = parseJson(await ask({ system: EXTRACT_SYS, prompt, signal }).catch(e => {if(signal?.aborted || e.code==='RETRIEVAL_BUDGET')throw e;return '';}));
       } else {
         const lines = sources.flatMap((s) => extractive(`${item.label} ${question}`, s.text, 2).map((q) => ({ source: s.n, quote: q })));
         out = { answer: lines[0]?.quote ?? null, evidence: lines.slice(0, 3), confidence: 'low' };
@@ -169,7 +190,7 @@ export async function factCheck({ question, items, date = '', context = '', llm,
         return s && quoteInText(e.quote, s.text) ? { url: s.url, title: s.title, quote: String(e.quote).trim() } : null;
       }).filter(Boolean);
       const hosts = new Set(evidence.map((e) => host(e.url)));
-      const status = !out?.answer || !evidence.length ? 'unverified' : hosts.size >= 2 ? 'confirmed' : 'single';
+      const status = !out?.answer || !evidence.length ? 'unverified' : out?.conflict ? 'single' : hosts.size >= 2 ? 'confirmed' : 'single';
       const dropped = (out?.evidence || []).length - evidence.length;
       const cur = { label: item.label, answer: out?.answer ?? null, fields: out?.fields || {}, status, sources: evidence, conflict: out?.conflict || null, dropped, names, round };
       if (!best || rank(cur) > rank(best)) best = cur;
@@ -203,3 +224,4 @@ export function formatReport(r) {
   });
   return lines.join('\n');
 }
+

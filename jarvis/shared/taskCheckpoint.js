@@ -3,7 +3,13 @@ const READ_ONLY = new Set(['read_file','list_files','search_files','search_file_
 export const isReadOnlyTool = name => READ_ONLY.has(name);
 export function checkpointEvent(previous = {}, event, at = Date.now()) {
   const next = { ...previous, updatedAt:at, inFlight:[...(previous.inFlight || [])], steps:[...(previous.steps || [])], files:[...(previous.files || [])] };
-  if (event.type === 'tool_start') {
+  if (event.type === 'retrieval_evidence') {
+    const evidence = event.evidence;
+    if (evidence && typeof evidence.key === 'string' && evidence.key.length <= 2000 && Array.isArray(evidence.sources)) {
+      const clean = {key:evidence.key, savedAt:Math.min(at,Number(evidence.savedAt)||at), sources:evidence.sources.slice(0,4).filter(s=>s && typeof s.url==='string' && /^https?:\/\//.test(s.url)).map(s=>({url:s.url.slice(0,2000),title:String(s.title||'').slice(0,300),text:String(s.text||'').slice(0,6000)}))};
+      next.evidence = [...(previous.evidence || []).filter(x=>x.key!==clean.key),clean].slice(-3);
+    }
+  } else if (event.type === 'tool_start') {
     next.inFlight = next.inFlight.filter(x=>x.id!==event.id);
     next.inFlight.push({id:event.id,name:event.name,...(typeof event.args?.path==='string'&&{path:event.args.path}),at});
   } else if (event.type === 'tool_end') {
@@ -12,7 +18,7 @@ export function checkpointEvent(previous = {}, event, at = Date.now()) {
   } else if (event.type === 'file' && !next.files.includes(event.path)) next.files.push(event.path);
   else if (event.type === 'plan') next.plan = event.steps;
   else if (event.type === 'user_note') next.notes = [...(previous.notes || []),String(event.text)];
-  else if (event.type === 'task_state') next.status = event.status;
+  else if (event.type === 'task_state') { next.status = event.status; if(event.error) next.error=String(event.error).slice(0,500); }
   return next;
 }
 export function checkpointNeedsReview(rec = {}) {
@@ -33,3 +39,4 @@ export function checkpointRecoveryText(rec = {}) {
     rec.files?.length ? '已经生成的文件：'+rec.files.join('、')+'；先检查是否存在且内容正确。' : ''
   ].filter(Boolean).join('\n\n');
 }
+

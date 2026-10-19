@@ -58,6 +58,7 @@ export const STABLE_PROMPT = `你是“未央”，运行在用户电脑上的�
 - 如实汇报：没验证过的不说“已完成”“已修复”“没问题”；失败就直说失败；推测要标明是推测。
 - 有风险先确认：删除、覆盖、发送、付款、对外发布这类撤销不了的操作，先跟用户确认。其余的不用反复征求同意：用户交代的事一直做到完成，中途不要停下来问“要不要继续”。
 - 大块的子任务（调研一个主题、通读一大堆资料、比较多个方案）可以交给 delegate_task：分身在独立的上下文里做完，只把结论带回来，主线不被大量中间资料塞满。
+- 普通事实查询先搜一两个可靠来源；日期、对象和字段匹配且证据足够就回答，不因自己说了“核验”就升级为多轮研究。只有用户明确要求或实际存在未解决的矛盾时才用逐项核验，优先复用已有证据；来源不足如实标注，不能反复搜索冒充更可靠。
 - 查资料只用 web_search / fetch_url / fact_check（或模型自带的联网搜索）；不要写代码（run_javascript / run_python）去抓网页，代码运行环境不能联网。网页读出来是乱码或打不开，就换一个网站，不要在同一个网站上反复想办法。
 - 查资料有时间限制：查了几轮还没有确切结果，就用已拿到的信息先给结论，说清哪些没查到、建议去哪里看，不要一直查下去。
 - 在电脑上找文件、找程序时先缩小范围（具体目录、常见安装位置），不要在整个用户目录或整块磁盘上递归搜索（一次要几十秒）。
@@ -385,7 +386,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         const progress = (text) => emit({ type: 'tool_progress', id: c.id, name: c.name, text });
         const web = WEB_TOOLS.has(c.name);
         if (web && !retrieval.begin()) throw new Error(retrieval.note);
-        const run = (s) => tool.run(c.args, { signal: s, progress });
+        const run = (s) => tool.run(c.args, { signal: s, progress, retrieval, checkpoint: event => checkpoint?.(event) });
         const r = web && Number.isFinite(retrieval.remaining)
           ? await withWebDeadline(run, { signal, timeoutMs: retrieval.remaining }) : await run(signal);
         if (r && typeof r === 'object' && 'text' in r) { output = String(r.text); outImages = r.images ?? []; } else output = String(r);
@@ -528,6 +529,7 @@ export function progressReminder({ userText, steps = [], toolCount }) {
 }
 
 const stripTag = (s) => stripEmotionTags(String(s || '').replace(/^\s*<emotion>[^<]*<\/emotion>\s*/, ''));
+
 
 
 

@@ -665,7 +665,8 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       name: 'fetch_url',
       description: '获取网页内容（转换为文字），用于读取用户给出的链接或最新资料。',
       input_schema: S({ url: str('http(s) 地址') }, ['url']),
-      run: async ({ url }, { signal, progress } = {}) => {
+      run: async ({ url }, { signal, progress, retrieval } = {}) => {
+        retrieval?.consume('read');
         if (!/^https?:\/\//i.test(url)) throw new Error('只支持 http(s) 地址');
         return clip(await readPage(url, { signal, progress }), 15000);
       }
@@ -700,12 +701,13 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         queries: { type: 'array', items: { type: 'string' }, description: '可选：多个搜索词，一次并行搜索（最多 8 个），例如每场比赛一个' },
         freshness: { type: 'string', enum: ['day', 'week', 'month', 'year'], description: '可选：只要最近一天 / 一周 / 一个月 / 一年内的结果（新闻、刚结束的比赛、最新价格时用）' }
       }, []),
-      run: async ({ query, queries, freshness }, { signal } = {}) => {
+      run: async ({ query, queries, freshness }, { signal, retrieval } = {}) => {
         const list = [...new Set([query, ...(Array.isArray(queries) ? queries : [])].map((q) => String(q || '').trim()).filter(Boolean))].slice(0, 8);
         if (!list.length) throw new Error('请给出搜索词');
         let successes = 0;
         const one = async (q) => {
           try {
+            retrieval?.consume('search');
             const hits = await withWebDeadline((s) => engine.search(q, list.length > 1 ? 5 : 6, { freshness, signal: s }), { signal, timeoutMs: 12000 });
             if (hits.length) successes++;
             return hits.length ? hits.map((r) => `- ${r.title}\n  ${r.url}\n  ${String(r.snippet || '').slice(0, 300)}`).join('\n') : '（没有结果：换个说法、换成英文或原文再搜）';
@@ -725,9 +727,17 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         date: str('事件发生的日期或时间范围，如 2026-10-12（不知道就留空）'),
         context: str('背景，如“中国体育彩票竞彩足球，第 2610121 期”')
       }, ['question', 'items']),
-      run: async ({ question, items, date, context }, { progress, signal } = {}) => {
+      run: async ({ question, items, date, context }, { progress, signal, retrieval, checkpoint } = {}) => {
+        const sid=ctx.currentSessionId?.();
+        const session=sid ? await sessions.get(sid).catch(()=>null) : null;
+        const resuming=/^(?:继续|恢复|接着)(?:[：:，,。\s]|$)/.test([...session?.messages||[]].reverse().find(m=>m.role==='user')?.content||'');
+        const records=resuming ? [...(session?.recoveryCheckpoints||[]), session?.taskCheckpoint].filter(Boolean).flatMap(x=>x.evidence||[]) : [];
         const r = await factCheck({
           question, items, date, context, signal,
+          mode: retrieval && !retrieval.extensive && items?.length===1 ? 'quick' : 'thorough',
+          consume: kind => retrieval?.consume(kind),
+          evidence: records,
+          onEvidence: evidence => signal?.aborted ? undefined : checkpoint?.({type:'retrieval_evidence',evidence}),
           llm: ctx.reasonLlm ?? ctx.llm ?? null,
           search: (q, n, o) => engine.search(q, n, { ...o, signal }),
           read: (url) => readPage(url, { signal, progress }),
@@ -813,5 +823,6 @@ function formatRun(r) {
 export function fmtSize(n) {
   return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 }
+
 
 

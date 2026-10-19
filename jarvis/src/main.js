@@ -75,7 +75,7 @@ import { prepareImage, isImageName } from './agent/images.js';
 import * as sessionsApi from './agent/sessions.js';
 import { initSessionsPanel } from './ui/sessionsPanel.js';
 import { initCallouts } from './ui/callouts.js';
-import { openingSuggestions, followUpSuggestions, INTERRUPTED_MARK } from './core/suggest.js';
+import { openingSuggestions, followUpSuggestions, interruptionMark } from './core/suggest.js';
 import { savePending, clearPending, takePending, resumeText, listPending } from './core/pendingTask.js';
 import { loadServerSettings, createServerClient, runRemote, remoteSessions, normalizeUrl } from './core/serverClient.js';
 import { createPCModelAdapter } from './core/pcModelClient.js';
@@ -1147,7 +1147,7 @@ function finishBackground(turn, { text = '', error = '', shown = '', usedTools =
   const extra = { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(files.size && { files: [...files].slice(-12) }) };
   const title = turn.session.title || '另一个对话';
   if (error) {
-    if (shown.trim() || usedTools.length) rememberTurn('assistant', `${shown.trim()}\n\n${INTERRUPTED_MARK}`, extra, turn.session);
+    if (shown.trim() || usedTools.length) rememberTurn('assistant', `${shown.trim()}\n\n${interruptionMark(error)}`, extra, turn.session);
     toast(`「${title}」里的任务没做完：${error.slice(0, 40)}`);
   } else {
     rememberTurn('assistant', text || '（完成）', extra, turn.session);
@@ -1432,7 +1432,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
     hud.think(`✕ ${msg.slice(0, 40)}`, 'bad');
     // 已经写了一部分或做了几步：记进对话，点“继续”从断开的地方接着做，而不是从头再来
     const resumable = Boolean(shown.trim() || usedTools.length);
-    if (resumable) rememberTurn('assistant', `${shown.trim()}\n\n${INTERRUPTED_MARK}`, { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) }, turn.session);
+    if (resumable) rememberTurn('assistant', `${shown.trim()}\n\n${interruptionMark(err)}`, { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) }, turn.session);
     callouts?.set(followUpSuggestions({ error: true, resumable, userText: text, desktop: Boolean(DESKTOP) }));
   } finally {
     if (MOBILE) clearPending(storage, turn.session.id, turn.t0);
@@ -2807,4 +2807,5 @@ if(MOBILE){
     }
   };toggle.onclick=()=>{list.hidden=!list.hidden;if(!list.hidden)draw();};
 }
+
 

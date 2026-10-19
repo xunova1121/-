@@ -26,7 +26,7 @@ import { generateImage } from '../src/llm/images.js';
 import { generateVideo } from '../src/llm/videos.js';
 import { providerById, isPrivateHost } from '../shared/providers.js';
 import { routeFor, fallbackRoutes, classifyTask, effortFor, isSmallTalk } from '../src/llm/router.js';
-import { INTERRUPTED_MARK } from '../src/core/suggest.js';
+import { INTERRUPTED_MARK, interruptionMark } from '../src/core/suggest.js';
 import { uid } from '../src/agent/store.js';
 
 /** 服务器上不提供的工具：浏览器里的代码沙箱、预览窗口、本机指标、定时任务（定时任务还在手机 / 电脑上跑） */
@@ -233,9 +233,9 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       if (!fresh) return;
       fresh.messages = fresh.messages.filter((m) => m.draftOf !== task.id);
       if (!error && !stopped) fresh.messages.push({ role: 'assistant', content: text || '（完成）', ts: now(), ...extra });
-      else if (shown.trim() || usedTools.length) fresh.messages.push({ role: 'assistant', content: `${shown.trim()}\n\n${stopped ? '（已打断）' : INTERRUPTED_MARK}`, ts: now(), ...extra });
+      else if (shown.trim() || usedTools.length) fresh.messages.push({ role: 'assistant', content: `${shown.trim()}\n\n${stopped ? '（已打断）' : interruptionMark(error)}`, ts: now(), ...extra });
       fresh.updatedAt = now();
-      task.checkpoint=checkpointEvent(task.checkpoint,{type:'task_state',status:stopped?'stopped':error?'error':'done'},now());
+      task.checkpoint=checkpointEvent(task.checkpoint,{type:'task_state',status:stopped?'stopped':error?'error':'done',error},now());
       fresh.taskCheckpoint={...task.checkpoint,timing};
       await sessions.save(fresh);
     }).catch((e) => console.error(`[任务] ${task.id} 回答没存上：${e?.stack || e}`));
@@ -360,6 +360,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     }
   };
 }
+
 
 
 
