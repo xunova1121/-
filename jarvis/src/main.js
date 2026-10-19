@@ -8,7 +8,7 @@ import {createWeatherClient} from './core/weather.js';
  *
  *   感知（人脸 / VAD / 识别） ─┐
  *   智能体事件（agent.js）     ─┼─▶ EmotionMachine ─▶ ParamTween(400ms) ─┐
- *   注入事件（SSE）           ─┘                                        ├─▶ stage.frame()
+ *   注入事件（SSE）           ─┘                                        ├─▶ app.stage.frame()
  *   人脸角度 / 麦克风包络 / 播报包络 ─────────────────────────────────┘
  *
  * 主视觉默认是“光核”（发光能量球 + 会变形状的眼睛），可切换为全息胸像 / 线框胸像。
@@ -40,14 +40,11 @@ let voiceSwitching = false, callCloudFallback = false;
 // 浏览器标签页图标：未央 logo（小图直接内联，单文件版也能显示）
 document.head.append(Object.assign(document.createElement('link'), { rel: 'icon', type: 'image/svg+xml', href: logoUrl }));
 import './mobile/boot.js'; // 安卓 App：先装好原生网络 / 朗读（其他版本里是空的）
-import { EmotionMachine } from './core/emotionMachine.js';
-import { EMOTION_PARAMS, EYE_SHAPES } from './core/emotions.js';
-import { ParamTween } from './core/tween.js';
-import { followTarget, smoothToward } from './core/faceMath.js';
+import { followTarget } from './core/faceMath.js';
 import { SentenceChunker } from './core/sentenceChunker.js';
 import { toPlainText, toSpeech } from './core/markdown.js';
 import { SILENCE_BY_SENSITIVITY } from './core/vadGate.js';
-import { loadSettings, saveSettings, wantsReducedMotion } from './core/settings.js';
+import { loadSettings, saveSettings } from './core/settings.js';
 import { browserMetrics } from './api/browserMetrics.js';
 import { runTeam, shouldTeam } from './agent/team.js';
 import { runAgent } from './agent/agent.js';
@@ -74,7 +71,6 @@ import { initSchedulesPanel } from './ui/schedulesPanel.js';
 import { prepareImage, isImageName } from './agent/images.js';
 import * as sessionsApi from './agent/sessions.js';
 import { initSessionsPanel } from './ui/sessionsPanel.js';
-import { initCallouts } from './ui/callouts.js';
 import { openingSuggestions, followUpSuggestions, interruptionMark } from './core/suggest.js';
 import { savePending, clearPending, takePending, resumeText, listPending } from './core/pendingTask.js';
 import { loadServerSettings, createServerClient, runRemote, remoteSessions, normalizeUrl } from './core/serverClient.js';
@@ -85,15 +81,11 @@ import * as mcp from './agent/mcpClient.js';
 import { createDesktopTools } from './agent/desktopTools.js';
 import { initMcpPanel } from './ui/mcpPanel.js';
 import { initLocalModelsPanel } from './ui/localModelsPanel.js';
-import { initOrbitHud } from './ui/orbitHud.js';
 import { initRoutingPanel } from './ui/routingPanel.js';
 import { createSyncController } from './sync/controller.js';
 import { initSyncPanel, describeResult } from './ui/syncPanel.js';
 import { matchWake, WakeWindow } from './core/wakeWord.js';
 import { playCue } from './perception/voiceFx.js';
-import { MetricsPoller } from './api/metrics.js';
-import { subscribeAgentEvents } from './api/agentEvents.js';
-import { Dashboard } from './ui/dashboard.js';
 import { Transcript, toolLabel, summarizeArgs, searchBrand, setActionIcon, copyText } from './ui/transcript.js';
 import { stripEmotionTags } from '../shared/emotionTag.js';
 import { noteAction } from './mobile/renderDiagnostics.js';
@@ -107,20 +99,17 @@ import { recordVoiceEvent, readVoiceEvents } from './mobile/voiceDiagnostics.js'
 import { createTaskKeeper } from './mobile/backgroundTasks.js';
 import { RecordedVoice } from './mobile/recordedVoice.js';
 import { nativeWebFetch } from './mobile/nativeFetch.js';
-import { initChips } from './ui/chips.js';
 import { initDrawer } from './ui/drawer.js';
 import { initModelPicker, chipLabel, isAuto, repairChatModel } from './ui/modelPicker.js';
 import { generateImage } from './llm/images.js';
 import { generateVideo } from './llm/videos.js';
-import { createFormDirector } from './core/formDirector.js';
 import { composeGreeting, GREET_GAP_MS } from './core/greeting.js';
 import { classifyTask, routeFor, TASKS, seesImages, fallbackRoutes, effortFor, isSmallTalk, computerTaskKind } from './llm/router.js';
 import { resolveTheme, toggled, THEMES } from './core/theme.js';
-import { FORMS } from './render/formations.js';
-import { resolveQuality } from './core/quality.js';
 import { loadMemory, clearMemory } from './core/memoryStore.js';
-import { $, body, now, DESKTOP, COMPACT, storage, narrow, lowEnd, isMobile, reducedMql, toast, wp, markActivity } from './app/env.js';
-import { createApp } from './app/context.js';
+import { $, body, now, DESKTOP, COMPACT, storage, narrow, lowEnd, toast, wp, markActivity } from './app/env.js';
+import { createApp, mount } from './app/context.js';
+import { createStage } from './app/stage.js';
 
 
 // ---------------------------------------------------------------- 设置
@@ -132,220 +121,11 @@ function setSetting(key, value) {
   // 通话临时启用的朗读 / 唤醒词不覆盖用户保存的偏好。
   saveSettings(callRestore ? { ...settings, ...callRestore } : settings);
 }
+// main.js 里还没拆出去的函数：先挂到 app 上，拆出去的模块用 app.xxx 调用（函数声明会提升，这里就能挂）
+Object.assign(app, { setSetting, send, showPanel, openingCallouts });
+Object.defineProperties(app, { speaker: { get: () => speaker }, face: { get: () => face }, mascots: { get: () => mascots } });
 
-
-// ---------------------------------------------------------------- 情绪
-const tween = new ParamTween({ ...EMOTION_PARAMS.平静, ...EYE_SHAPES.平静 }, { duration: 400 });
-const machine = new EmotionMachine({
-  onChange: (emotion) => {
-    tween.set({ ...EMOTION_PARAMS[emotion], ...EYE_SHAPES[emotion] }, now());
-    document.documentElement.style.setProperty('--hue', String(EMOTION_PARAMS[emotion].hue));
-    dashboard.setEmotion(emotion, EMOTION_PARAMS[emotion].hue);
-    $('#hud-emotion').textContent = emotion;
-    wp({ emotion });
-  }
-});
-setInterval(() => machine.tick(), 100);
-
-// ---------------------------------------------------------------- 实时量
-const live = {
-  pulse: 0, // 点击建议时光核闪一下（0..1，逐帧衰减）
-  voiceListening: false, // VAD 确认用户在说话
-  voiceEnergy: 0,
-  face: null, // 跟随目标 { yaw, pitch }（度）
-  yaw: 0,
-  pitch: 0,
-  breath: 0,
-  speak: 0, // 语音输出包络（0..1）
-  boundaryAt: 0, // 最近一次词边界事件时间
-  glitch: 0,
-  nextBlink: 2500, // 下一次眨眼的时间
-  glance: { yaw: 0, pitch: 0 }, // 待机时随机张望的目标（度）
-  nextGlance: 4000
-};
-
-// ---------------------------------------------------------------- 渲染策略
-document.body.classList.toggle('compact', COMPACT);
-/** 舞台底色（与 styles.css 里 .stage 的中心颜色一致，画布边缘渐隐时才接得上） */
-const STAGE_BG = 0x2b2f58;
-let stage = null;
-let stageLoading = null;
-const DEG = Math.PI / 180;
-
-/** 造型导演：粒子体按工作状态和语义自己变形（没有手动切换） */
-const director = createFormDirector({
-  setForm: (name) => {
-    const el = document.querySelector('#hud-form');
-    if (el) { el.textContent = FORMS[name]?.name ?? name; el.parentElement.classList.remove('flash'); void el.offsetWidth; el.parentElement.classList.add('flash'); }
-    queueMicrotask(updateOrbitStatus);
-    wp({ form: name, energy: ENERGY[machine.task] ?? 0, task: $('#hud-task')?.textContent });
-    return stage ? stage.setForm(name) !== false || stage.form === name : true;
-  }
-});
-let directorTick = 0;
-/** 粒子体周围的轨道 HUD 与思考流（启动末尾创建） */
-let orbit = null;
-
-function frame(dt, t) {
-  const p = tween.update(t);
-  if (t - directorTick > 200) { directorTick = t; director.tick(); }
-  stage?.setActivity({ audio: live.voiceListening ? Math.min(1, live.voiceEnergy * 1.5) : 0 });
-
-  // 光环转速 / 扫描速度：情绪表的角速度；用户说话时放慢到 0.12（需求 6.3）
-  const omega = live.voiceListening ? 0.12 : p.spin;
-
-  // 人脸跟随：光核的眼睛在球面上滑向你；胸像只转头、肩膀不动（着色器按高度混合）。
-  // 没有跟随目标时，每隔几秒随机看一眼别处，再回到正前方 —— 显得是“活的”
-  if (t > live.nextGlance) {
-    const look = Math.random() < 0.55;
-    live.glance = look ? { yaw: (Math.random() - 0.5) * 24, pitch: (Math.random() - 0.5) * 12 } : { yaw: 0, pitch: 0 };
-    live.nextGlance = t + (look ? 900 + Math.random() * 900 : 3000 + Math.random() * 4000);
-  }
-  const tgt = settings.faceFollow && live.face ? live.face : live.glance;
-  live.yaw = smoothToward(live.yaw, tgt.yaw, 0.12, dt || 16.7);
-  live.pitch = smoothToward(live.pitch, tgt.pitch, 0.12, dt || 16.7);
-
-  // 输入：用户说话时胸像表面随麦克风包络起伏
-  const breathTarget = live.voiceListening ? live.voiceEnergy * 1.6 : 0;
-  live.breath += (breathTarget - live.breath) * 0.2;
-
-  // 输出：播报时由词边界事件“敲”一下再衰减；语音包不发边界事件时用合成起伏兜底。
-  // 输入驱动表面起伏，输出驱动轮廓光、眼睛与底座 —— 两者分开，一眼能看出是谁在说话
-  let speakTarget = 0;
-  const audioLevel = speaker.speaking ? speaker.level() : null;
-  if (audioLevel !== null) {
-    // 云端语音：由真实音量驱动
-    speakTarget = 0.3 + 0.7 * audioLevel;
-  } else if (speaker.speaking) {
-    const since = t - live.boundaryAt;
-    speakTarget = since < 600
-      ? 0.45 + 0.55 * Math.exp(-since / 140)
-      : 0.4 + 0.25 * (0.5 + 0.5 * Math.sin(t / 95)) * (0.5 + 0.5 * Math.sin(t / 333));
-  }
-  speakTarget = Math.max(speakTarget, live.pulse);
-  live.pulse *= 0.9;
-  live.speak += (speakTarget - live.speak) * (speakTarget > live.speak ? 0.5 : 0.12);
-
-  // 故障切片只在“警觉”时出现，平时画面保持稳定、柔和
-  live.glitch += ((machine.state === '警觉' ? 0.3 : 0) - live.glitch) * 0.08;
-
-  // 眨眼：每 3–6 秒一次，闭合约 150ms；偶尔连眨两下
-  let blink = 1;
-  const sinceBlink = t - live.nextBlink;
-  if (sinceBlink > 0) {
-    blink = Math.abs(sinceBlink - 75) / 75;
-    if (sinceBlink > 150) {
-      blink = 1;
-      live.nextBlink = t + (Math.random() < 0.15 ? 220 : 3000 + Math.random() * 3000);
-    }
-  }
-
-  return {
-    hue: p.hue,
-    glow: p.glow,
-    spin: omega,
-    scanSpeed: 0.05 + omega * 0.3,
-    glitch: live.glitch,
-    blink,
-    eyeW: p.eyeW,
-    eyeH: p.eyeH,
-    eyeY: p.eyeY,
-    happy: p.happy,
-    calm: p.calm,
-    yaw: live.yaw * DEG,
-    pitch: live.pitch * DEG,
-    breath: live.breath,
-    speak: live.speak,
-    motion: 1
-  };
-}
-
-async function ensureStage() {
-  if (COMPACT) return null;
-  if (stage || stageLoading) return stageLoading;
-  stageLoading = (async () => {
-    try {
-      const { createStage } = await import('./render/stage.js');
-      if (wantsReducedMotion(settings, reducedMql)) return null; // 加载期间切换成了减少动画
-      stage = createStage($('#stage'), {
-        lowEnd,
-        onContextChange: (s, ms) => console.info(`[stage] WebGL 上下文${s === 'lost' ? '丢失' : `已恢复（${Math.round(ms)}ms）`}`)
-      });
-      stage.setBackground(STAGE_BG); // 靛蓝显示屏：和界面的暮色同色系，粒子在上面最亮
-      stage.onFrame(frame);
-      stage.setForm(director.form);
-      applyFpsCap();
-      stage.setPaused('hidden', document.hidden);
-      stage.setPaused('offscreen', !canvasVisible);
-      body.classList.remove('no-webgl');
-      return stage;
-    } catch (err) {
-      console.warn('[stage] WebGL 不可用，使用 CSS 背景：', err);
-      body.classList.add('no-webgl');
-      return null;
-    } finally {
-      stageLoading = null;
-    }
-  })();
-  return stageLoading;
-}
-
-function disposeStage() {
-  stage?.dispose();
-  stage = null;
-}
-
-let quality = resolveQuality(settings.quality, { lowEnd, isMobile, focusView: settings.focusView });
-function applyFpsCap() {
-  quality = resolveQuality(settings.quality, { lowEnd, isMobile, focusView: settings.focusView, softwareRenderer: Boolean(stage?.stats.softwareRenderer) });
-  stage?.setFpsCap(quality.fps);
-  stage?.setQuality({ bloom: quality.bloom, stars: quality.stars });
-  body.classList.toggle('eco', quality.tier === 'eco');
-}
-
-function applyMotionMode() {
-  const reduced = wantsReducedMotion(settings, reducedMql);
-  body.classList.toggle('reduced-motion', reduced);
-  dashboard.setMotion(!reduced);
-  if (reduced) disposeStage();
-  else ensureStage();
-  $('#motion-status').textContent = `系统偏好：${reducedMql.matches ? '减少动态效果' : '未开启'}；当前：${reduced ? '已停用持续动画，仅以颜色表达情绪' : '完整动画'}`;
-}
-reducedMql.addEventListener?.('change', applyMotionMode);
-
-// 后台 / 视口外暂停（需求 9.2）
-let canvasVisible = true;
-new IntersectionObserver(([e]) => {
-  canvasVisible = e.isIntersecting;
-  stage?.setPaused('offscreen', !canvasVisible);
-}).observe($('#stage-wrap'));
-
-document.addEventListener('visibilitychange', () => {
-  const hidden = document.hidden;
-  stage?.setPaused('hidden', hidden);
-  if (hidden) poller.stop();
-  else if (!COMPACT) poller.start();
-  face?.setPaused(hidden);
-});
-
-// ---------------------------------------------------------------- 仪表
-const dashboard = new Dashboard($('#dashboard'), {
-  onEmotionPick: (v) => applyEmotionOverride(v)
-});
-const poller = new MetricsPoller({
-  onData: (m) => { dashboard.setMetrics(m); orbit?.setMetrics({ cpu: (m.cpu?.percent ?? 0) / 100, mem: (m.memory?.percent ?? 0) / 100 }); },
-  onError: () => dashboard.setDisconnected()
-});
-if (!document.hidden && !COMPACT) poller.start(); // 手机上没有仪表盘
-
-subscribeAgentEvents({ onEmotion: (state, ttl) => machine.inject(state, ttl ?? 5000) });
-
-function applyEmotionOverride(v) {
-  setSetting('emotionOverride', v);
-  machine.setManual(v === 'auto' ? null : v);
-  dashboard.setManualEmotion(v);
-  $('#set-emotion').value = v;
-}
+mount(app, createStage(app));
 
 
 // ---------------------------------------------------------------- 模型与网关
@@ -514,7 +294,7 @@ const speaker = new Speaker({
     body.classList.remove('speaking');
     if (app.active?.streamDone) finishTurn();
   },
-  onBoundary: () => { live.boundaryAt = now(); },
+  onBoundary: () => { app.live.boundaryAt = now(); },
   onError: (e) => toast(resolveVoice(app.llmConfig,app.gateway).engine === 'qwen-realtime' ? `${e.message}（所选百炼声音未播放，请检查声音设置）` : `${e.message}（先用系统自带声音朗读，5 分钟后再试）`),
   getVoiceConfig: () => resolveVoice(app.llmConfig, app.gateway),
   getKeys: () => app.llmConfig.keys,
@@ -528,36 +308,20 @@ speaker.enabled = true;
 /** 打断（barge-in）：停止朗读并中止正在执行的任务 */
 function interrupt() {
   const had = speaker.speaking || app.active;
-  if (app.active) callouts?.show();
+  if (app.active) app.callouts?.show();
   if (app.active) {
     const turn=app.active;
     if(!turn.streamDone&&(turn.shown?.trim()||turn.files?.size))rememberTurn('assistant',(turn.shown||'').trim()+'\n\n（已打断，还没完成；以上内容已保留）',{...(turn.usedTools?.length&&{tools:[...new Set(turn.usedTools)]}),...(turn.files?.size&&{files:[...turn.files]})},turn.session);
     app.active.ctrl.abort();
     app.active.bubble?.done('已打断');
     app.active = null;
-    setTask('idle');
+    app.setTask('idle');
   }
   speaker.cancel();
   return Boolean(had);
 }
 $('#btn-stop').addEventListener('click', () => interrupt());
 
-const TASK_LABEL = { idle: '待命', listening: '生成中', processing: '执行中', error: '出错', done: '完成' };
-const DIRECTOR_STATE = { processing: 'processing', listening: 'speaking', done: 'speaking', idle: 'idle', error: 'error' };
-const ENERGY = { processing: 0.85, listening: 0.25 };
-function setTask(state, sub = '') {
-  mascots?.task(state, sub);
-  app.active?.bubble?.activity(state, sub);
-  machine.setTaskState(state === 'listening' && !live.voiceListening ? 'listening' : state);
-  if (DIRECTOR_STATE[state]) director.setState(DIRECTOR_STATE[state]);
-  stage?.setActivity({ energy: ENERGY[state] ?? 0 });
-  dashboard.setTask(state, sub);
-  const label = sub || TASK_LABEL[state] || state;
-  $('#hud-task').textContent = label;
-  $('#task-text').textContent = label;
-  body.classList.toggle('generating', Boolean(app.active) && state !== 'done' && state !== 'error' && state !== 'idle');
-  $('#mode-pill').classList.toggle('busy', Boolean(app.active) && state !== 'done');
-}
 
 
 function finishTurn() {
@@ -565,9 +329,9 @@ function finishTurn() {
   if (!app.active) return;
   app.active = null;
   turns++;
-  dashboard.setTurns(turns);
-  setTask('done');
-  setTimeout(() => { if (!app.active) setTask('idle'); }, 3000);
+  app.dashboard.setTurns(turns);
+  app.setTask('done');
+  setTimeout(() => { if (!app.active) app.setTask('idle'); }, 3000);
   panels.refreshMind();
 }
 
@@ -664,7 +428,7 @@ async function compressHistory() {
     if (next && next !== s.summary) {
       s.summary = next;
       if (settings.saveSessions !== false) sessionsApi.save(s).catch(() => {});
-      hud.think(`◆ 较早的对话已压缩成摘要${next.by === 'rule' ? '（本地规则）' : ''}`);
+      app.hud.think(`◆ 较早的对话已压缩成摘要${next.by === 'rule' ? '（本地规则）' : ''}`);
     }
   } catch (e) { console.warn('[compress]', e); } finally { compressing = false; }
 }
@@ -727,7 +491,7 @@ async function resumeSuggestion() {
   return null;
 }
 async function openingCallouts(hasSkills = true) {
-  callouts?.set(openingSuggestions({ desktop: Boolean(DESKTOP), hasSkills, resume: await resumeSuggestion() }));
+  app.callouts?.set(openingSuggestions({ desktop: Boolean(DESKTOP), hasSkills, resume: await resumeSuggestion() }));
 }
 
 async function switchTo(next) {
@@ -739,13 +503,13 @@ async function switchTo(next) {
   replayTranscript();
   // 切回一个还在后台干活的对话：把正在写的那条回答接回来
   const bg = [...backgroundTurns].find((t) => t.session.id === app.session.id);
-  if (bg) { backgroundTurns.delete(bg); bg.background = false; app.active = bg; app.liveBubble = bg.bubble; transcript.root.append(bg.bubble.el); setTask('processing', bg.status || '思考中'); }
+  if (bg) { backgroundTurns.delete(bg); bg.background = false; app.active = bg; app.liveBubble = bg.bubble; transcript.root.append(bg.bubble.el); app.setTask('processing', bg.status || '思考中'); }
   else if (server && next.taskId) followServerTask(next); // 服务器上这个对话还在干活（比如 App 重新打开）：接上它的进度
-  dashboard.setTurns(app.history.filter((m) => m.role === 'user').length);
-  if (app.history.length) callouts?.set(followUpSuggestions({ tools: app.history.at(-1)?.tools ?? [], userText: [...app.history].reverse().find((m) => m.role === 'user')?.content ?? '', desktop: Boolean(DESKTOP) }));
+  app.dashboard.setTurns(app.history.filter((m) => m.role === 'user').length);
+  if (app.history.length) app.callouts?.set(followUpSuggestions({ tools: app.history.at(-1)?.tools ?? [], userText: [...app.history].reverse().find((m) => m.role === 'user')?.content ?? '', desktop: Boolean(DESKTOP) }));
   else openingCallouts();
   sessionsPanel?.refresh();
-  setTask('idle');
+  app.setTask('idle');
 }
 function newSession() {
   if (!app.history.length) { $('#prompt').focus(); return; }
@@ -770,10 +534,10 @@ async function openSession(id) {
   // 服务器模式：先用手机 / 电脑上留的副本马上切过去，再从服务器取最新的换上
   const cached = server ? sessionsApi.cachedGet(id) : null;
   if (cached) await switchTo(cached);
-  else if (server) setTask('processing', '正在打开对话');
+  else if (server) app.setTask('processing', '正在打开对话');
   const s = await sessionsApi.get(id).catch((e) => { if (!cached) toast(`打不开这段对话：${e.message}`); return null; });
   if (mine !== opening) return;
-  if (!s) { if (!cached) setTask('idle'); return; }
+  if (!s) { if (!cached) app.setTask('idle'); return; }
   if (!cached) await switchTo(s);
   else if (app.session.id === id && !app.active && changed(app.session, s)) { app.session = s; reflectFrom = app.history.length; replayTranscript(); }
   if (server && app.session.id === id && s.taskId && !app.active) followServerTask(s); // 另一台设备正在做：接上进度
@@ -801,18 +565,6 @@ const pullSoon = () => { if (Date.now() - lastPull < 3000) return; lastPull = Da
 document.addEventListener('visibilitychange', () => { if (!document.hidden) pullSoon(); });
 addEventListener('focus', pullSoon);
 
-/** 光核旁的建议标注（启动末尾创建） */
-let callouts = null;
-let stageMiniWas = false; // 舞台上一次是不是迷你状态（updateStageMode 用）
-const hud = {
-  think(text, kind) { orbit?.think(text, kind); wp({ think: text }); },
-  toolStart(id, label) { orbit?.toolStart(id, label); wp({ tool: { id, label } }); },
-  toolEnd(id, ok) { orbit?.toolEnd(id, ok); wp({ toolDone: { id, ok } }); },
-  newTurn() { orbit?.newTurn(); wp({ newTurn: true }); }
-};
-function updateOrbitStatus() {
-  orbit?.setStatus(`${(FORMS[director.form]?.id ?? director.form).toUpperCase()} · LINK ${window.jarvisDesktop ? 'DESKTOP' : app.gateway ? 'GATEWAY' : 'LOCAL'}`);
-}
 let sessionsPanel = null;
 let schedulesPanel = null;
 
@@ -921,7 +673,7 @@ async function followServerTask(s) {
   const turn = { ctrl, streamDone: false, bubble, session: s, files: new Set(), inbox: [], t0: now(), steps: 0, status: '', background: false, remote:Boolean(server) };
   app.active = turn;
   app.liveBubble = bubble;
-  setTask('processing', '服务器上正在做');
+  app.setTask('processing', '服务器上正在做');
   const cards = new Map();
   try {
     await runRemote(server, {
@@ -930,7 +682,7 @@ async function followServerTask(s) {
         if (app.active !== turn) return;
         if (e.type === 'text') bubble.append(e.delta);
         else if (e.type === 'plan') bubble.plan?.(e.steps);
-        else if (e.type === 'tool_start' && e.name !== 'update_plan') { cards.set(e.id, bubble.toolCard(e.name, e.args)); turn.steps++; setTask('processing', toolLabel(e.name)); }
+        else if (e.type === 'tool_start' && e.name !== 'update_plan') { cards.set(e.id, bubble.toolCard(e.name, e.args)); turn.steps++; app.setTask('processing', toolLabel(e.name)); }
         else if (e.type === 'tool_progress') cards.get(e.id)?.progress(e.text);
         else if (e.type === 'tool_end') cards.get(e.id)?.done(e.ok, e.output, e.ms);
       }
@@ -938,7 +690,7 @@ async function followServerTask(s) {
   } catch (e) {
     if (e.name !== 'AbortError' && app.active === turn) toast(e.message);
   }
-  if (app.active === turn) { app.active = null; setTask('idle'); }
+  if (app.active === turn) { app.active = null; app.setTask('idle'); }
   // 换成服务器上记下的完整对话（回答、用到的工具、生成的文件）
   const fresh = await sessionsApi.get(s.id).catch(() => null);
   if (fresh && app.session.id === s.id && !app.active) { app.session = fresh; replayTranscript(); }
@@ -985,9 +737,9 @@ async function greetOnReturn({ awayMs, reason = '', force = false }) {
   b.el.classList.add('proactive');
   b.done(`主动问候 · ${reason === 'face' ? '看到你回来了' : '你回到电脑前'}`);
   rememberTurn('assistant', text, { proactive: true });
-  director.onEmotion('亲和');
+  app.director.onEmotion('亲和');
   wp({ say: text, emotion: '亲和' });
-  hud.think(`◆ 主动问候（离开 ${Math.round(awayMs / 60000)} 分钟）`);
+  app.hud.think(`◆ 主动问候（离开 ${Math.round(awayMs / 60000)} 分钟）`);
   if (settings.readTyped) speaker.speak(text);
   if (document.hidden && DESKTOP && !settings.readTyped) DESKTOP.invoke('notify', { title: '未央', body: text }).catch(() => {});
   openingCallouts();
@@ -1117,7 +869,7 @@ function toBackground(turn) {
   backgroundTurns.add(turn);
   app.active = null;
   speaker.cancel();
-  setTask('idle');
+  app.setTask('idle');
   toast('刚才的任务在后台接着做，做完会提醒你');
 }
 /** 后台任务做完（或出错）：记回原来的对话，提醒用户 */
@@ -1166,9 +918,9 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   const imgs = files.filter((f) => f.image).map((f) => f.image);
   const thumbs = files.filter(f => f.image).map(f => ({ src:f.image.thumb, path:f.path }));
   if (echo) transcript.add('user', userText, Date.now(), { thumbs }); // echo=false：这句话之前已经显示并记下了
-  director.onUserText(text);
-  hud.newTurn();
-  hud.think(`◂ 收到：${text.slice(0, 30)}`);
+  app.director.onUserText(text);
+  app.hud.newTurn();
+  app.hud.think(`◂ 收到：${text.slice(0, 30)}`);
   // 之前发过的图片（最近两条带图的消息）继续带给模型：追问“第二张图里……”时模型还看得到
   // 只在这句话提到图片时才带（不然后面每句闲聊都会被当成看图任务、多花流量）
   const refersToImage = !imgs.length && /图|截图|照片|相片|图片|表格|这张|那张|第.张|上面|刚才发的|picture|image|screenshot/i.test(text);
@@ -1182,7 +934,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
     while (recentImages.size > 2) recentImages.delete(recentImages.keys().next().value);
   }
 
-  if (machine.task !== 'listening') machine.beginUserTurn();
+  if (app.machine.task !== 'listening') app.machine.beginUserTurn();
   const ctrl = new AbortController();
   const bubble = transcript.add('agent');
   app.liveBubble = bubble;
@@ -1190,7 +942,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   // 这一轮属于哪个会话：切到别的对话后在后台接着做，结果、文件都记回这个会话
   const turn = { ctrl, streamDone: false, bubble, session: app.session, files: new Set(), inbox: [], t0: now(), steps: 0, status: '', background: false };
   app.active = turn;
-  setTask('processing', '思考中');
+  app.setTask('processing', '思考中');
   // 手机：记下正在做的任务（App 被划掉时，下次打开接着做）
   const doneSteps = [];
   turn.checkpoint={text:userText,notes:[],inFlight:[],steps:[],files:[],status:'running'};
@@ -1209,17 +961,17 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   if (COMPACT && isAuto(app.llmConfig) && model && !server) $('#model-chip-text').textContent = `自动 · ${model}`;
   // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省
   const effort = effortFor(task, text, app.llmConfig);
-  if (route.routed&&!remotePC) hud.think(`◇ 模型分工：${TASKS[task].name} → ${route.model}`);
+  if (route.routed&&!remotePC) app.hud.think(`◇ 模型分工：${TASKS[task].name} → ${route.model}`);
   // 服务器模式下电脑版：要动这台电脑的事（桌面、文件夹、打开软件……）留在本机做，其余交给服务器
   const here = Boolean(server && DESKTOP && computerKind);
   turn.remote=Boolean(server&&!here);
-  if (here) hud.think('◇ 服务器模型推理，电脑工具在本机执行');
+  if (here) app.hud.think('◇ 服务器模型推理，电脑工具在本机执行');
   if (problem && (!server || here)) { // 服务器模式：用服务器上的模型设置
     bubble.append(problem);
     bubble.done();
-    callouts?.set(followUpSuggestions({ error: true, userText: text }));
+    app.callouts?.set(followUpSuggestions({ error: true, userText: text }));
     app.active = null;
-    setTask('error', '需要配置模型');
+    app.setTask('error', '需要配置模型');
     showPanel('models');
     return;
   }
@@ -1241,7 +993,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   const madeFiles = turn.files;
   let shown = ''; // 这一轮已经显示出来的回答（中断时保留，点“继续”接着写）
   let ctxMs = null;
-  callouts?.retract();
+  app.callouts?.retract();
   // 内置演示模式下“自动”不触发（规则拆步效果有限），只认明确的“/团队 …”或“总是”
   const team = !server && !computerKind && shouldTeam(text, settings.teamMode === 'auto' && !helperLlm() ? 'off' : settings.teamMode);
   let teamCard = null;
@@ -1284,7 +1036,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
         // 看屏幕后主窗口已隐藏，确认卡必须先恢复可见；保持紧急停止热键有效。
         if(controlActive&&DESKTOP)await DESKTOP.invoke('controlPause');
         if(ctrl.signal.aborted)return false;
-        setTask('processing', '等待你确认');
+        app.setTask('processing', '等待你确认');
         let cancel;
         const aborted = new Promise((r) => {cancel=()=>r('deny');ctrl.signal.addEventListener('abort',cancel,{once:true});});
         try { const v=await Promise.race([bubble.confirm(req), aborted]);
@@ -1308,13 +1060,13 @@ async function send(text, { echo = true, byVoice = false } = {}) {
         if (app.active !== turn) return;
         if (e.type === 'text') {
           if(callActive&&callTiming?.recognizedAt&&!callTiming.firstTextAt)callTiming.firstTextAt=now();
-          if (!firstToken) { firstToken = now(); hud.think('生成回答'); }
+          if (!firstToken) { firstToken = now(); app.hud.think('生成回答'); }
           if (!outMarked) { outMarked = true; markActivity(`正在输出回答${shown.length ? `（已 ${shown.length} 字）` : ''}`); }
           if (serverCard) { serverCard.done(true, '由模型服务端完成', Math.round(now() - serverCard.t0)); serverCard = null; }
           bubble.append(e.delta);
           shown += e.delta;
           textChunks++;
-          machine.feedResponseText(e.delta);
+          app.machine.feedResponseText(e.delta);
           speech.push(e.delta);
         } else if (e.type === 'interjection_accepted') {
           speech.resume();
@@ -1323,46 +1075,46 @@ async function send(text, { echo = true, byVoice = false } = {}) {
         } else if (e.type === 'fallback') {
           usedModel = e.to;
           const note = `${e.from} 出错（${e.reason}），已换成 ${e.to} 接着做`;
-          hud.think(`⇄ ${note}`, 'sub');
+          app.hud.think(`⇄ ${note}`, 'sub');
           toast(note);
-          setTask('processing', `已换成 ${e.to}`.slice(0, 30));
+          app.setTask('processing', `已换成 ${e.to}`.slice(0, 30));
         } else if (e.type === 'retry') {
           const note = e.resume ? `网络中断，第 ${e.attempt} 次重连，接着刚才的地方写` : `连接出错，第 ${e.attempt} 次自动重试`;
-          hud.think(`↻ ${note}`, 'sub');
-          setTask('processing', note.slice(0, 30));
-        } else if (e.type === 'emotion') { machine.setStreamHint(e.value); director.onEmotion(e.value); bubble.mood?.(e.value); }
-        else if (e.type === 'state' && e.value !== 'done') setTask(e.value, e.value === 'listening' ? '生成回答' : '');
+          app.hud.think(`↻ ${note}`, 'sub');
+          app.setTask('processing', note.slice(0, 30));
+        } else if (e.type === 'emotion') { app.machine.setStreamHint(e.value); app.director.onEmotion(e.value); bubble.mood?.(e.value); }
+        else if (e.type === 'state' && e.value !== 'done') app.setTask(e.value, e.value === 'listening' ? '生成回答' : '');
         else if (e.type === 'plan') bubble.plan?.(e.steps); // 任务清单：卡片里实时打勾
         else if ((e.type === 'tool_start' || e.type === 'tool_end') && e.name === 'update_plan') { /* 更新清单本身不单独占一张工具卡片 */ }
         else if (e.type === 'tool_start') {
-          director.onToolStart(e.name);
-          hud.toolStart(e.id, toolLabel(e.name));
-          hud.think(`▸ ${toolLabel(e.name)}  ${summarizeArgs(e.name, e.args)}`);
+          app.director.onToolStart(e.name);
+          app.hud.toolStart(e.id, toolLabel(e.name));
+          app.hud.think(`▸ ${toolLabel(e.name)}  ${summarizeArgs(e.name, e.args)}`);
           cards.set(e.id, bubble.toolCard(e.name, e.args));
           usedTools.push(e.name);
           bubble.status?.(`正在${toolLabel(e.name)}…`);
-          setTask('processing', toolLabel(e.name));
+          app.setTask('processing', toolLabel(e.name));
           markActivity(`${toolLabel(e.name)} ${summarizeArgs(e.name, e.args)}`.slice(0, 80));
           outMarked = false;
         } else if (e.type === 'tool_progress') {
           cards.get(e.id)?.progress(e.text);
-          hud.think(`  ${e.text}`, 'sub');
-          setTask('processing', e.text.slice(0, 30));
+          app.hud.think(`  ${e.text}`, 'sub');
+          app.setTask('processing', e.text.slice(0, 30));
         } else if (e.type === 'tool_end') {
           cards.get(e.id)?.done(e.ok, e.output, e.ms);
-          hud.toolEnd(e.id, e.ok);
+          app.hud.toolEnd(e.id, e.ok);
           if (MOBILE&&!turn.remote) { if(e.ok) doneSteps.push(toolLabel(e.name)); savePending(storage, turn.session.id, { ts: Date.now(), steps: doneSteps, files: [...turn.files] }); }
-          if (!e.ok) hud.think(`✕ ${toolLabel(e.name)} 失败`, 'bad');
+          if (!e.ok) app.hud.think(`✕ ${toolLabel(e.name)} 失败`, 'bad');
           if (/remember|forget|save_skill/.test(e.name)) panels.refreshMind();
         } else if (e.type === 'server_tool') {
           serverCard = Object.assign(bubble.toolCard('web_search', { query: `${searchBrand(model)}自带联网搜索` }), { t0: now() });
         } else if (e.type === 'sources') bubble.sources(e.items);
         else if (e.type === 'timing') ctxMs = e.contextMs;
-        else if (e.type === 'team_plan') { hud.think(`团队分工 · ${e.steps.map((x) => x.roleName).join(' → ')}`); teamCard = bubble.teamCard(e.steps); setTask('processing', `团队分工 · ${e.steps.length} 步`); }
+        else if (e.type === 'team_plan') { app.hud.think(`团队分工 · ${e.steps.map((x) => x.roleName).join(' → ')}`); teamCard = bubble.teamCard(e.steps); app.setTask('processing', `团队分工 · ${e.steps.length} 步`); }
         else if (e.type === 'team_step') {
           teamCard?.step(e.index, e.status, e.note);
-          if (e.status === 'running' || e.status === 'redo') setTask('processing', `第 ${e.index + 1} 步${e.status === 'redo' ? ' · 返工' : ''}`);
-        } else if (e.type === 'team_review') { teamCard?.review(e); setTask('processing', e.pass ? '审核通过，汇总中' : '审核发现问题'); }
+          if (e.status === 'running' || e.status === 'redo') app.setTask('processing', `第 ${e.index + 1} 步${e.status === 'redo' ? ' · 返工' : ''}`);
+        } else if (e.type === 'team_review') { teamCard?.review(e); app.setTask('processing', e.pass ? '审核通过，汇总中' : '审核发现问题'); }
       }
     });
     if (turn.background) { finishBackground(turn, { text: result.text, shown, usedTools, files: madeFiles }); return; }
@@ -1380,8 +1132,8 @@ async function send(text, { echo = true, byVoice = false } = {}) {
         panels.refreshMind();
       }
     });
-    dashboard.setLatency(firstToken ? firstToken - t0 : null, total);
-    hud.think(`✓ 完成 · ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · ${result.toolCalls} 个工具` : ''}`, 'ok');
+    app.dashboard.setLatency(firstToken ? firstToken - t0 : null, total);
+    app.hud.think(`✓ 完成 · ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · ${result.toolCalls} 个工具` : ''}`, 'ok');
     $('#hud-latency').textContent = firstToken ? `${Math.round(firstToken - t0)} ms` : '—';
     if (result.text) wp({ say: result.text.replace(/```[\s\S]*?```/g, '').replace(/[#*>`|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 4000) });
     rememberTurn('assistant', result.text || '（完成）', { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) }, turn.session);
@@ -1391,7 +1143,7 @@ async function send(text, { echo = true, byVoice = false } = {}) {
     if (here) server.appendSession(turn.session.id, turn.session.messages.slice(-2).map(({ role, content, ts, tools }) => ({ role, content, ts, ...(tools && { tools }) }))).catch((e) => toast(`这一轮没能记到服务器上：${e.message}`));
     $('#mode-pill').classList.remove('offline');
     turn.streamDone = true;
-    callouts?.set(followUpSuggestions({ tools: usedTools, userText: text, desktop: Boolean(DESKTOP) }));
+    app.callouts?.set(followUpSuggestions({ tools: usedTools, userText: text, desktop: Boolean(DESKTOP) }));
     scheduleReflect();
     compressHistory();
     if (!speaker.speaking) finishTurn();
@@ -1407,12 +1159,12 @@ async function send(text, { echo = true, byVoice = false } = {}) {
     bubble.activity('error');
     $('#mode-pill').classList.add('offline');
     app.active = null;
-    setTask('error', '请求失败');
-    hud.think(`✕ ${msg.slice(0, 40)}`, 'bad');
+    app.setTask('error', '请求失败');
+    app.hud.think(`✕ ${msg.slice(0, 40)}`, 'bad');
     // 已经写了一部分或做了几步：记进对话，点“继续”从断开的地方接着做，而不是从头再来
     const resumable = Boolean(shown.trim() || usedTools.length);
     if (resumable) rememberTurn('assistant', `${shown.trim()}\n\n${interruptionMark(err)}`, { ...(usedTools.length && { tools: [...new Set(usedTools)] }), ...(madeFiles.size && { files: [...madeFiles].slice(-12) }) }, turn.session);
-    callouts?.set(followUpSuggestions({ error: true, resumable, userText: text, desktop: Boolean(DESKTOP) }));
+    app.callouts?.set(followUpSuggestions({ error: true, resumable, userText: text, desktop: Boolean(DESKTOP) }));
   } finally {
     if (MOBILE) clearPending(storage, turn.session.id, turn.t0);
     await persistSession(turn.session);
@@ -1425,11 +1177,6 @@ async function send(text, { echo = true, byVoice = false } = {}) {
   }
 }
 
-// 用户有动静：空闲漫游中的粒子体回到光核看着他
-let lastPoke = 0;
-const poke = () => { const t = performance.now(); if (t - lastPoke > 1000) { lastPoke = t; director.poke(); } };
-addEventListener('pointermove', poke, { passive: true });
-addEventListener('keydown', poke);
 
 // —— 输入框：Enter 发送，Shift+Enter 换行；随内容自动增高
 const prompt = $('#prompt');
@@ -1452,7 +1199,7 @@ prompt.addEventListener('keydown', (e) => {
 prompt.addEventListener('input', (e) => {
   autosize();
   if (e.target.value && speaker.speaking) speaker.cancel(); // 开始打字即打断朗读
-  if (e.target.value && !app.active && machine.task !== 'listening') machine.beginUserTurn();
+  if (e.target.value && !app.active && app.machine.task !== 'listening') app.machine.beginUserTurn();
 });
 
 // —— 常用指令：把开头写好放进输入框，接着补充再发
@@ -1536,7 +1283,7 @@ function onWake() {
   wake.wake();
   const ctx = speaker.unlock();
   if (ctx?.state === 'running') playCue(ctx, 'start', 0.08);
-  machine.beginUserTurn();
+  app.machine.beginUserTurn();
 }
 
 // 语音识别：网页版优先用浏览器自带识别；桌面版（Electron 没有浏览器识别）或用户指定时走云端转写
@@ -1564,13 +1311,13 @@ const voiceHandlers = {
   onConfirm: () => {
     if (callActive) callStatus('正在听你说话…');
     if (asleep()) return;
-    live.voiceListening = true;
-    if (!app.active) director.setState('voice');
+    app.live.voiceListening = true;
+    if (!app.active) app.director.setState('voice');
     // 开口只打断朗读，不取消正在执行的任务；最终文字走同一套补充要求逻辑。
     if (app.active) app.active.muteSpeech = true;
     speaker.cancel();
-    machine.beginUserTurn();
-    dashboard.setTask('listening', '正在听');
+    app.machine.beginUserTurn();
+    app.dashboard.setTask('listening', '正在听');
     $('#vad-meter').classList.add('on');
   },
   onCancel: () => endListening(),
@@ -1599,13 +1346,13 @@ const voiceHandlers = {
       if (app.active) { app.active.ctrl.abort(); app.active = null; }
       speaker.cancel();
       speaker.speak('我在。');
-      setTask('listening', '已唤醒');
+      app.setTask('listening', '已唤醒');
       return;
     }
     send(cmd, { byVoice: true });
   },
   onEnergy: (e) => {
-    live.voiceEnergy = e;
+    app.live.voiceEnergy = e;
     $('#inputbar').style.setProperty('--e', e.toFixed(2));
   },
   onMode: (m) => {
@@ -1649,14 +1396,14 @@ const nativeVoiceReady = MOBILE && globalThis.__jarvisSpeech
 
 function endListening() {
   transcript.clearInterim();
-  if (!live.voiceListening) return;
-  live.voiceListening = false;
-  if (!app.active) director.setState('idle');
-  live.voiceEnergy = 0;
+  if (!app.live.voiceListening) return;
+  app.live.voiceListening = false;
+  if (!app.active) app.director.setState('idle');
+  app.live.voiceEnergy = 0;
   transcript.clearInterim();
   $('#vad-meter').classList.remove('on');
   // 识别被取消且没有发出请求：回到空闲；保持情绪不变以外的状态（no-speech 不触发警觉）
-  if (!app.active && machine.task === 'listening') setTask('idle');
+  if (!app.active && app.machine.task === 'listening') app.setTask('idle');
 }
 
 async function setDirectVoice(on) {
@@ -1869,7 +1616,7 @@ async function setFaceFollow(on) {
   const status = $('#face-status');
   if (!on) {
     face?.stop();
-    live.face = null;
+    app.live.face = null;
     status.textContent = '';
     return;
   }
@@ -1879,13 +1626,13 @@ async function setFaceFollow(on) {
       onAngles: (a) => {
         if (!a) return;
         const t = followTarget(a);
-        const had = live.face;
-        live.face = t.inRange ? t : null;
+        const had = app.live.face;
+        app.live.face = t.inRange ? t : null;
         // 摄像头看到你回来了（之前 10 分钟以上没看到人）
-        if (live.face) {
-          if (!had && live.faceGoneAt && Date.now() - live.faceGoneAt >= 10 * 60_000) greetOnReturn({ awayMs: Date.now() - live.faceGoneAt, reason: 'face' });
-          live.faceGoneAt = 0;
-        } else if (had) live.faceGoneAt = Date.now();
+        if (app.live.face) {
+          if (!had && app.live.faceGoneAt && Date.now() - app.live.faceGoneAt >= 10 * 60_000) greetOnReturn({ awayMs: Date.now() - app.live.faceGoneAt, reason: 'face' });
+          app.live.faceGoneAt = 0;
+        } else if (had) app.live.faceGoneAt = Date.now();
       },
       onStatus: (s) => {
         status.textContent = {
@@ -1895,7 +1642,7 @@ async function setFaceFollow(on) {
           lost: '未检测到人脸',
           off: ''
         }[s] ?? '';
-        if (s === 'lost') { live.face = null; toast('未检测到人脸'); }
+        if (s === 'lost') { app.live.face = null; toast('未检测到人脸'); }
       }
     });
     await face.start();
@@ -1948,7 +1695,7 @@ const panels = initPanels({
   getGateway: () => app.gateway,
   searchFetch: () => fetchViaGateway(),
   getHistory: () => app.history,
-  onConfigChange: (cfg) => { app.llmConfig = cfg; updateModelLabels(); syncMemoryEngine(); updateOrbitStatus(); routingPanel?.render(); pushConfigToServer(); },
+  onConfigChange: (cfg) => { app.llmConfig = cfg; updateModelLabels(); syncMemoryEngine(); app.updateOrbitStatus(); routingPanel?.render(); pushConfigToServer(); },
   onReflect: () => reflectNow({ manual: true }),
   onAutoMemory: (on) => { setSetting('autoMemory', on); if (!on) clearTimeout(reflectTimer); },
 });
@@ -2160,7 +1907,7 @@ $('#btn-palette').addEventListener('click', () => palette.open());
 if (/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) $('#palette-kbd').textContent = '⌘K';
 $('#set-quality').addEventListener('change', (e) => {
   setSetting('quality', e.target.value);
-  applyFpsCap();
+  app.applyFpsCap();
 });
 
 function setFocusView(on) {
@@ -2168,8 +1915,8 @@ function setFocusView(on) {
   body.classList.toggle('focus-view', on);
   $('#set-focus').checked = on;
   $('#btn-focus').setAttribute('aria-pressed', String(on));
-  applyFpsCap();
-  updateStageMode();
+  app.applyFpsCap();
+  app.updateStageMode();
 }
 $('#btn-focus').addEventListener('click', () => setFocusView(!settings.focusView));
 $('#btn-fullscreen').addEventListener('click', () => {
@@ -2310,11 +2057,11 @@ for (const b of document.querySelectorAll('#set-vad button')) {
     for (const x of document.querySelectorAll('#set-vad button')) x.setAttribute('aria-checked', String(x === b));
   });
 }
-$('#set-emotion').addEventListener('change', (e) => applyEmotionOverride(e.target.value));
+$('#set-emotion').addEventListener('change', (e) => app.applyEmotionOverride(e.target.value));
 $('#set-focus').addEventListener('change', (e) => setFocusView(e.target.checked));
 $('#set-motion').addEventListener('change', (e) => {
   setSetting('reducedMotion', e.target.value);
-  applyMotionMode();
+  app.applyMotionMode();
 });
 
 globalThis.__jarvisToast = toast; // 手机原生保存文件时的进度提示
@@ -2396,12 +2143,12 @@ transcript.onAction = (kind, text, btn) => {
 $('#set-tts').checked = settings.readTyped;
 $('#set-wake').checked = settings.wakeWord;
 $('#set-quality').value = settings.quality;
-dashboard.setTurns(app.history.filter((m) => m.role === 'user').length);
+app.dashboard.setTurns(app.history.filter((m) => m.role === 'user').length);
 $('#set-motion').value = settings.reducedMotion;
 for (const x of document.querySelectorAll('#set-vad button')) x.setAttribute('aria-checked', String(x.dataset.v === settings.vadSensitivity));
 setFocusView(settings.focusView);
-applyEmotionOverride(settings.emotionOverride);
-applyMotionMode();
+app.applyEmotionOverride(settings.emotionOverride);
+app.applyMotionMode();
 // 摄像头 / 麦克风不随页面加载申请权限：上次开着的开关，只有在浏览器已授予权限（不会弹窗）时才自动恢复，
 // 否则复位为关闭，等用户再次主动开启
 async function restoreDevice(permission, key, enable) {
@@ -2427,7 +2174,7 @@ try { startPane = localStorage.getItem('jarvis.pane') || startPane; } catch { /*
 if (narrow.matches) body.classList.add('side-closed');
 showPanel(PANES.includes(startPane) ? startPane : 'workspace');
 if (narrow.matches) body.classList.remove('side-open');
-setTask('idle');
+app.setTask('idle');
 renderWelcome();
 syncMemoryEngine();
 sessionsPanel = initSessionsPanel({
@@ -2586,77 +2333,9 @@ agentMemory.maintain().catch(() => {});
   setTimeout(() => boot.remove(), 2500);
 })();
 
-// 有对话时舞台收成迷你状态条（桌面版），给对话留空间；点一下展开 / 收起
-function updateStageMode() {
-  // 工作台的“工作室”视图要大舞台；“对话”视图里舞台隐藏，迷你模式只为把建议放到输入框上方
-  const mini = !COMPACT && body.classList.contains('has-convo') && !settings.stageOpen && !body.classList.contains('focus-view') && !body.classList.contains('wb-studio');
-  const label = $('#btn-stage-toggle span');
-  if (label) label.textContent = settings.stageOpen ? '收起' : '展开';
-  body.classList.toggle('stage-mini', mini); // 工作台切到“工作室”时会自己去掉这个类，所以用变量记上一次的状态
-  if (mini === stageMiniWas) return;
-  stageMiniWas = mini;
-  callouts?.relocate?.();
-}
-function setStageOpen(open) { setSetting('stageOpen', open); updateStageMode(); }
-addEventListener('resize', () => updateStageMode()); // 工作台切换“对话 / 工作室”时会发 resize
-new MutationObserver(() => {
-  body.classList.toggle('has-convo', Boolean(document.querySelector('#transcript .msg')));
-  updateStageMode();
-}).observe($('#transcript'), { childList: true });
-$('#btn-stage-toggle').addEventListener('click', (e) => { e.stopPropagation(); setStageOpen(!settings.stageOpen); });
-$('#stage-wrap').addEventListener('click', (e) => { if (body.classList.contains('stage-mini') && !e.target.closest('button, a, .callout')) setStageOpen(true); });
-
-orbit = COMPACT ? null : initOrbitHud({ root: $('#stage-wrap'), getAnchor: () => stage?.anchor?.() ?? null, reducedMotion: () => body.classList.contains('reduced-motion') });
-updateOrbitStatus();
-orbit?.think('系统就绪 · 粒子核心在线');
-/** 桌面版：大舞台时建议在光核旁边，迷你状态条时改到输入框上方；两边接口一样，这里按当前模式转发 */
-function dualSuggestions(full, chips, useChips) {
-  let items = [];
-  const cur = () => (useChips() ? chips : full);
-  return {
-    set(next) { items = next || []; (useChips() ? full : chips).retract(); cur().set(items); },
-    show: () => cur().show(),
-    retract() { full.retract(); chips.retract(); },
-    get items() { return cur().items; },
-    get visible() { return cur().visible; },
-    pick: (i) => cur().pick(i),
-    relocate() {
-      const wasVisible = full.visible || chips.visible;
-      full.retract();
-      chips.retract();
-      if (!items.length) return;
-      cur().set(items);
-      if (!wasVisible) cur().retract();
-    }
-  };
-}
-const suggestionOpts = {
-  root: $('#stage-wrap'),
-  getAnchor: () => stage?.anchor?.() ?? null,
-  reducedMotion: () => body.classList.contains('reduced-motion'),
-  // 鼠标移到建议上：光核的眼睛看向它
-  onHover: (point, orb) => {
-    if (point && orb) {
-      const clamp = (v, m) => Math.max(-m, Math.min(m, v));
-      live.glance = { yaw: clamp(((point.x - orb.x) / Math.max(orb.r, 1)) * 7, 26), pitch: clamp(((orb.y - point.y) / Math.max(orb.r, 1)) * 5, 14) };
-      live.nextGlance = Infinity;
-    } else {
-      live.glance = { yaw: 0, pitch: 0 };
-      live.nextGlance = now() + 1500;
-    }
-  },
-  // 点击：光点飞进光核后，光核闪一下，再执行
-  onPick: (item) => {
-    live.pulse = 1;
-    live.glance = { yaw: 0, pitch: 0 };
-    live.nextGlance = now() + 1500;
-    if (item.panel) { showPanel(item.panel); callouts?.show(); return; }
-    setTimeout(() => send(item.prompt), 160);
-  }
-};
-callouts = COMPACT ? initChips(suggestionOpts) : dualSuggestions(initCallouts(suggestionOpts), initChips(suggestionOpts), () => body.classList.contains('stage-mini'));
-updateStageMode();
-callouts.set(openingSuggestions({ desktop: Boolean(DESKTOP), hasSkills: false }));
+app.initSuggestions();
+app.updateStageMode();
+app.callouts.set(openingSuggestions({ desktop: Boolean(DESKTOP), hasSkills: false }));
 if (!app.history.length) openingCallouts(false);
 
 // ---------------------------------------------------------------- 键盘快捷键
@@ -2702,7 +2381,7 @@ document.addEventListener('keyup', (e) => {
 
 // 调试 / 自动化测试入口
 window.__jarvis = {
-  machine,
+  machine: app.machine,
   speaker,
   get voice() { return voice; },
   get skills() { return skillsPanel; },
@@ -2712,13 +2391,13 @@ window.__jarvis = {
   greetOnReturn,
   habits,
   memorizeHabits,
-  director,
-  get callouts() { return callouts; },
+  director: app.director,
+  get callouts() { return app.callouts; },
   schedulerTick,
   reflectNow,
   settings,
-  live,
-  get stage() { return stage; },
+  live: app.live,
+  get stage() { return app.stage; },
   get config() { return app.llmConfig; },
   get gateway() { return app.gateway; },
   panels,
@@ -2729,7 +2408,7 @@ window.__jarvis = {
   openSession,
   get sessionId() { return app.session.id; },
   sessionGet: (id) => sessionsApi.get(id),
-  get quality() { return quality; },
+  get quality() { return app.quality; },
   workspace: ws
 };
 
