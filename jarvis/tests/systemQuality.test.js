@@ -208,7 +208,7 @@ describe('跨层控制与评测', () => {
       adapter: { stream: async () => { calls++; return { text: '已完成。', toolCalls: [], stop: 'end_turn' }; } },
       model: 'test', history: [], userText: '生成PPT', context: { dynamic: '' }, tools: [], emit() {}
     });
-    expect(calls).toBe(3);
+    expect(calls).toBe(1);
     expect(result.review.pendingFormats).toEqual(['pptx']);
     expect(result.text).toContain('自动验收仍有待核对');
   });

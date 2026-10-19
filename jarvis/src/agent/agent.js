@@ -198,6 +198,8 @@ export function trimComputerScreenshots(messages,keep=2) {
 async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, computerTask = false }) {
   if (light && needsActionTools(userText, history)) light = false;
   const capabilities = capabilityBlock(tools);
+  // 环境完全没有产物/计算核验能力时，直接说明未验收，不空转两轮模型。
+  const canReview = tools.some(tool => /^(?:create_document|write_long_document|edit_office_document|read_file|write_file|run_javascript|run_python|computer_run|computer_read_file|verify_numbers)$/.test(tool.name));
   const review = createExecutionReview(requirementText);
   const retrieval = createRetrievalBudget(lookupDeadline ? '普通查询' : images.length ? `逐项核验 ${requirementText}` : requirementText, { now, timeBudgetMs });
   let closingTurns = 0;
@@ -379,7 +381,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         if (finalText && !/\n$/.test(finalText)) { emit({ type: 'text', delta: '\n\n' }); finalText += '\n\n'; }
         continue;
       }
-      const note = (!closing || retrieval.extensive) && checks < 2 && !light && cur.adapter.kind !== 'mock' ? [finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }), review.guidance()].filter(Boolean).join('\n') : '';
+      const note = (!closing || retrieval.extensive) && checks < 2 && !light && cur.adapter.kind !== 'mock' ? [finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }), canReview ? review.guidance() : ''].filter(Boolean).join('\n') : '';
       if (!note) break;
       checks++;
       convo.push({ role: 'user', content: note });
@@ -499,7 +501,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
 
 /** 保留旧导出的深度研究预算；普通查询默认预算见 retrievalBudget.js。 */
 export const TIME_BUDGET_MS = 8 * 60e3;
-const WEB_TOOLS = new Set(['get_stock_kline', 'web_search', 'fetch_url', 'fact_check', 'deep_research']);
+const WEB_TOOLS = new Set(['get_weather', 'get_stock_kline', 'web_search', 'fetch_url', 'fact_check', 'deep_research']);
 
 /** 可以同时执行的只读工具（不改文件、不操作电脑、不需要用户确认） */
 export const PARALLEL_SAFE = new Set(['get_stock_kline', 'review_task', 'check_search_terms', 'web_search', 'fetch_url', 'read_evidence', 'read_file', 'list_files', 'find_files', 'search_in_files', 'kb_search', 'recall', 'search_conversations', 'read_conversation', 'get_weather', 'get_current_time', 'verify_numbers', 'read_skill_file', 'computer_read_file', 'computer_list_dir']);
