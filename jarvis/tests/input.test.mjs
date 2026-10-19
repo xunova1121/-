@@ -97,8 +97,9 @@ describe('电脑操作控制器', () => {
     const c = createControl(f.deps);
     const shot = await c.look();
     expect(shot).toMatchObject({ width: 1000, height: 800, cursor: { x: 500, y: 500 } });
-    expect(f.st.minimized).toBe(true);
+    expect(f.st.visible).toBe(false);
     c.end();
+    expect(f.st.visible).toBe(true);
     expect(f.st.minimized).toBe(false);
   });
 
@@ -130,3 +131,4 @@ describe('电脑操作控制器', () => {
     await expect(c.act({ type: 'key', keys: 'cmd+s' })).rejects.toThrow(/辅助功能/);
   });
 });
+

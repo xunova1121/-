@@ -71,7 +71,7 @@ export const isSmallTalk = (text) => /^(你好|您好|嗨|哈喽|hello|hi|hey|�
 /** 要动这台电脑的事（桌面、文件夹、打开软件、某个盘……）：服务器模式下电脑版留在本机做，服务器碰不到你的电脑 */
 export const NEEDS_COMPUTER = /桌面|文件夹|我的电脑|这台电脑|本机|电脑上|[c-hC-H]\s*盘|打开.{0,10}(软件|程序|应用|浏览器|微信|QQ|钉钉|记事本|文件|网页|网站)|截屏|截个图|屏幕上|鼠标|键盘|运行命令|命令行|终端|关机|重启电脑|回收站|下载(文件夹|目录)|安装.{0,6}软件/i;
 // 已上传/刚生成的文件优先沿用工作区；显式的本机目的地仍在PC执行。
-const LOCAL_PLACE = /桌面|文件夹|我的电脑|这台电脑|本机|电脑上|本地(?:磁盘|硬盘|文件|文档)|[a-z]\s*盘|[a-z]:[\\/]|回收站|下载(?:文件夹|目录)/i;
+const LOCAL_PLACE = /桌面|文件夹|我的电脑|这台电脑|本机|电脑上|本地(?:磁盘|硬盘|文件|文档)|当前(?:程序|软件|应用|窗口|桌面|屏幕)|[a-z]\s*盘|[a-z]:[\\/]|回收站|下载(?:文件夹|目录)/i;
 const WORKSPACE_FILE = /工作区|附件|已上传|上传(?:的|给你)|发给你|(?:刚才?|你)(?:生成|制作|做|写)(?:的|好)|对话(?:里|中)|(?:这张|那张)(?:截图|图片|照片)|截图(?:里|中)|图片(?:里|中)/;
 // 文件名可能很长，不能只检查“打开”后十个字，也不要求用户写扩展名。
 const OPEN_DOCUMENT = /(?:打开|找一下|找找|找到|寻找|查找|搜索).{0,200}(?:文件|文档|表格|工作簿|考核表|任务表|报告|方案|合同|清单|台账|计划表|\.docx?\b|\.xlsx?\b|\.pptx?\b|\.pdf\b)|(?:打开|找一下|查找|搜索).{0,200}(?:这个|那个)(?:表|文档)/i;
@@ -83,7 +83,8 @@ export function needsComputer(text, { history = [] } = {}) {
   if (LOCAL_PLACE.test(t)) return true;
   if (WORKSPACE_FILE.test(t) || /^(?:请问[，,\s]*)?(?:怎么|如何|怎样|为什么)/.test(t)) return false;
   return NEEDS_COMPUTER.test(t) || OPEN_DOCUMENT.test(t) || GUI_ACTION.test(t) || APP_ACTION.test(t) || /^(?:请|帮我|麻烦你|给我|替我)?打开\s*[^?？]{1,200}$/.test(t) ||
-    (t.length<=80 && /^(继续|接着|下一步|然后|往下|往上|点开|点那个|点右边|点左边|把它|保存它|打开它|就这个)/.test(t) && !/新闻|天气|搜索|联网|电视剧/.test(t) && lastComputerTools(history).length>0);
+    (t.length<=80 && /^(继续|接着|下一步|然后|往下|往上|点开|点那个|点右边|点左边|把它|保存它|打开它|就这个|撤销|恢复|还原)/.test(t) && !/新闻|天气|搜索|联网|电视剧/.test(t) && lastComputerTools(history).length>0) ||
+    (lastComputerTools(history).length>0&&/(这个|这份|刚才的|它|里面)/.test(t)&&/(修改|编辑|填写|计算|求和|保存)/.test(t));
 }
 /** GUI任务优先走看图模型，文件和命令操作无需无故切模型；只在PC本机路由使用。 */
 export function computerTaskKind(text, { history = [] } = {}) {

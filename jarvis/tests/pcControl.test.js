@@ -21,6 +21,8 @@ it('用户原话和多种PC任务在本机执行，附件与普通搜索不被�
   expect(computerTaskKind('点击右上角关闭按钮')).toBe('gui');expect(computerTaskKind('打开年度报告.docx')).toBe('files');
   const history=[{role:'assistant',content:'完成了点击',tools:['computer_click']}];
   expect(computerTaskKind('继续',{history})).toBe('gui');
+  expect(needsComputer('撤销刚才那一步',{history})).toBe(true);
+  expect(needsComputer('帮我把这个表格的B列求和',{history})).toBe(true);
   expect(needsComputer('继续搜索新闻',{history})).toBe(false);
   expect(needsComputer('继续',{history:[...history,{role:'assistant',content:'新闻回答'}]})).toBe(false);
 });

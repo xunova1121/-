@@ -3,7 +3,7 @@ import { createAdapter } from '../src/llm/config.js';
 import { routeFor, fallbackRoutes, canFallback } from '../src/llm/router.js';
 
 export function bridgeInput(body) {
-  if(!body||!Array.isArray(body.messages)||body.messages.length>400||!Array.isArray(body.system)||body.system.length>16||!body.system.every(s=>typeof s==='string')||!Array.isArray(body.tools)||body.tools.length>256)throw Object.assign(new Error('PC模型请求格式不正确'),{status:400});
+  if(!body||!Array.isArray(body.messages)||body.messages.length>2000||!Array.isArray(body.system)||body.system.length>16||!body.system.every(s=>typeof s==='string')||!Array.isArray(body.tools)||body.tools.length>256)throw Object.assign(new Error('PC模型请求格式不正确'),{status:400});
   if(!body.messages.every(m=>m&&['user','assistant','tool'].includes(m.role)))throw Object.assign(new Error('PC模型消息格式不正确'),{status:400});
   const tools=body.tools.map(t=>{
     if(!t||!/^[-\w]{1,128}$/.test(t.name)||typeof t.description!=='string'||!t.input_schema||typeof t.input_schema!=='object')throw Object.assign(new Error('PC工具说明格式不正确'),{status:400});
