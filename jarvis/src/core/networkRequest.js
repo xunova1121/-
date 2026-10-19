@@ -9,12 +9,15 @@ export function throwControl(error, signal) {
 }
 
 export function httpError(httpStatus, detail = '', service = '网络服务') {
-  return Object.assign(new Error(service + (/[A-Za-z]$/.test(service) ? ' 返回 ' : '返回 ') + httpStatus + (detail ? '：' + String(detail).slice(0, 200) : '')), {
-    name: 'ApiError',
-    kind: 'api',
-    status: httpStatus,
-    code: httpStatus === 429 ? 'RATE_LIMITED' : 'HTTP_ERROR'
-  });
+  return Object.assign(
+    new Error(service + (/[A-Za-z]$/.test(service) ? ' 返回 ' : '返回 ') + httpStatus + (detail ? '：' + String(detail).slice(0, 200) : '')),
+    {
+      name: 'ApiError',
+      kind: 'api',
+      status: httpStatus,
+      code: httpStatus === 429 ? 'RATE_LIMITED' : 'HTTP_ERROR'
+    }
+  );
 }
 
 function wait(ms, signal) {
@@ -29,7 +32,10 @@ function wait(ms, signal) {
       reject(signal.reason ?? Object.assign(new Error('已停止'), { name: 'AbortError' }));
     };
     if (signal?.aborted) return abort();
-    timer = setTimeout(() => { finish(); resolve(); }, ms);
+    timer = setTimeout(() => {
+      finish();
+      resolve();
+    }, ms);
     signal?.addEventListener('abort', abort, { once: true });
   });
 }

@@ -11,11 +11,14 @@ export async function searchAggregateHints(query, { get, signal, retrieval } = {
   const failures = [];
   for (const provider of providers) {
     try {
-      const hits = await retryRead(async requestSignal => {
-        const response = await get(provider.url, { signal: requestSignal, headers: DESKTOP_HEADERS });
-        if (!response.ok) throw httpError(response.status, '', provider.source);
-        return provider.parse(await response.text()).slice(0, 5);
-      }, { signal, timeoutMs: 4000, beforeAttempt: () => retrieval?.consume('search') });
+      const hits = await retryRead(
+        async (requestSignal) => {
+          const response = await get(provider.url, { signal: requestSignal, headers: DESKTOP_HEADERS });
+          if (!response.ok) throw httpError(response.status, '', provider.source);
+          return provider.parse(await response.text()).slice(0, 5);
+        },
+        { signal, timeoutMs: 4000, beforeAttempt: () => retrieval?.consume('search') }
+      );
       if (hits.length) return { source: provider.source, searchUrl: provider.url, kind: 'search_snippets', hits };
       failures.push(provider.source + '未取得可解析结果');
     } catch (error) {
