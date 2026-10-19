@@ -200,7 +200,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   let retrievalStopped = false;
   emit({ type: 'state', value: 'processing' });
   const tCtx = Date.now();
-  const ctx = context ?? (await buildContext(userText, { sessionId, turns: history.filter((m) => m.role === 'user').length, summary:summaryForTurn(summary, history), light }));
+  const ctx = context ?? (await buildContext(userText, { sessionId, turns: history.filter((m) => m.role === 'user').length, summary:summaryForTurn(summary, [...history, { role: 'user', content: userText }]), light }));
   // 界面传完整原文账本；非界面入口可从会话取回，最后才退回本轮可见消息。
   const saved = !requirements && sessionId && depth === 0 ? await sessions.get(sessionId).catch(() => null) : null;
   const record = requirements ?? (saved ? collectRequirements(saved.messages, saved.requirements) : collectRequirements([...history, { role: 'user', content: userText }]));

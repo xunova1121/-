@@ -35,6 +35,24 @@ const run = (options) =>
   });
 
 describe('真实对话故障回归（均为虚构数据）', () => {
+  it('当前这句纠错立即使旧摘要待核对，不延迟到下一轮', async () => {
+    let sentSystem = '';
+    await run({
+      context: undefined,
+      summary: { text: '用户成本99元，等待用户重新提供', upTo: 1 },
+      userText: '价格不对，你不是查到了吗',
+      adapter: {
+        stream: async ({ system, onText }) => {
+          sentSystem = system.join('\n');
+          onText('我先核对原记录。');
+          return { text: '我先核对原记录。', toolCalls: [], stop: 'end_turn' };
+        }
+      }
+    });
+    expect(sentSystem).toContain('较早摘要需要核对');
+    expect(sentSystem).not.toContain('用户成本99元');
+  });
+
   it.each(['think', 'thinking', 'analysis', 'reasoning'])('分片隔离%s标签', (tag) => expect(visible(`<${tag}>内部分析</${tag}>正式答案`)).toBe('正式答案'));
   it('正常英文和代码里的示例标签不误删', () => {
     expect(visible('The meeting is on Friday.')).toBe('The meeting is on Friday.');
