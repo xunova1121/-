@@ -27,7 +27,7 @@ export function readJson(value) {
 
 export function textList(value, label, max = 12) {
   if (!Array.isArray(value) || value.length > max) throw workflowError(`${label}格式或数量无效`, 'DOCUMENT_RESPONSE');
-  return value.map(item => boundedText(item, 1600, label, true));
+  return value.map((item) => boundedText(item, 1600, label, true));
 }
 
 export function normalizeBrief(value, source) {
@@ -35,7 +35,7 @@ export function normalizeBrief(value, source) {
   const scenarios = value.scenarios;
   if (!brief || !scenarios) throw workflowError('缺少任务底稿或业务推演', 'DOCUMENT_RESPONSE');
   const requirements = textList(brief.requirements, '需求原话', LIMITS.requirements);
-  if (!requirements.length || requirements.some(quote => !source.includes(quote))) {
+  if (!requirements.length || requirements.some((quote) => !source.includes(quote))) {
     throw workflowError('需求必须摘录输入原话，不能虚构或改写为新要求', 'DOCUMENT_REQUIREMENTS');
   }
   for (const key of ['normal', 'exceptions', 'settlement', 'acceptance', 'structure']) {

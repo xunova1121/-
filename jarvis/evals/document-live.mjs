@@ -8,9 +8,11 @@ import { errorKind } from '../src/core/suggest.js';
 
 // 真实模型验收独立运行，不使用测试替身，不修改服务配置、对话或生产工作区。
 export async function main(args = process.argv.slice(2), env = process.env) {
-  const option = key => args.find(value => value.startsWith(`--${key}=`))?.slice(key.length + 3);
+  const option = (key) => args.find((value) => value.startsWith(`--${key}=`))?.slice(key.length + 3);
   if (!args.includes('--live')) {
-    console.log('预览：--live --data-dir=<服务器数据目录> --task-file=<原始需求文本> [--material-file=<材料文本>] [--out-dir=<新目录>] 才调用真实配置模型。默认expert，通常3次，修订最多5次；不搜索、不自动换服务商，Token未知。');
+    console.log(
+      '预览：--live --data-dir=<服务器数据目录> --task-file=<原始需求文本> [--material-file=<材料文本>] [--out-dir=<新目录>] 才调用真实配置模型。默认expert，通常3次，修订最多5次；不搜索、不自动换服务商，Token未知。'
+    );
     return;
   }
   const dataDir = option('data-dir') || env.JARVIS_DATA;
@@ -35,7 +37,9 @@ export async function main(args = process.argv.slice(2), env = process.env) {
       await fs.writeFile(target, text, { mode: 0o600, flag: 'wx' });
       return { path: filePath };
     },
-    async readBlob(filePath) { return new Blob([await fs.readFile(path.join(output, workspace.normalize(filePath)))]); }
+    async readBlob(filePath) {
+      return new Blob([await fs.readFile(path.join(output, workspace.normalize(filePath)))]);
+    }
   };
   const controller = new AbortController();
   const cancel = () => controller.abort(Object.assign(new Error('已停止'), { name: 'AbortError' }));
@@ -43,22 +47,51 @@ export async function main(args = process.argv.slice(2), env = process.env) {
   process.once('SIGTERM', cancel);
   let firstTextMs = null;
   const started = Date.now();
-  const workflow = createDocumentWorkflow({ documentWorkspace: workspace, llm: async ({ system, prompt: inputText, signal }) => {
-    let text = '';
-    const result = await selected.adapter.stream({
-      model: selected.model, system: [system], messages: [{ role: 'user', content: inputText }], tools: [], signal,
-      allowWebSearch: false, maxWebSearches: 0, maxTransientRetries: 0, maxPartialRetries: 0,
-      onText(delta) { firstTextMs ??= Date.now() - started; text += delta; }
-    });
-    return result?.text || text;
-  } });
+  const workflow = createDocumentWorkflow({
+    documentWorkspace: workspace,
+    llm: async ({ system, prompt: inputText, signal }) => {
+      let text = '';
+      const result = await selected.adapter.stream({
+        model: selected.model,
+        system: [system],
+        messages: [{ role: 'user', content: inputText }],
+        tools: [],
+        signal,
+        allowWebSearch: false,
+        maxWebSearches: 0,
+        maxTransientRetries: 0,
+        maxPartialRetries: 0,
+        onText(delta) {
+          firstTextMs ??= Date.now() - started;
+          text += delta;
+        }
+      });
+      return result?.text || text;
+    }
+  });
   const report = { version: 1, provider: cfg.provider, model: selected.model, usage: null, live: true, visual: 'not_checked', facts: 'not_verified' };
   try {
-    const result = await workflow.run({ task, material, format: 'md', depth: 'expert' }, { sessionId: 'document-live', signal: controller.signal, progress: text => console.log(text) });
+    const result = await workflow.run(
+      { task, material, format: 'md', depth: 'expert' },
+      { sessionId: 'document-live', signal: controller.signal, progress: (text) => console.log(text) }
+    );
     await fs.writeFile(path.join(output, '终稿.md'), result.draft, { flag: 'wx', mode: 0o600 });
-    Object.assign(report, { business: result.business, calls: result.calls, unresolved: result.unresolved, stateFile: result.stateFile, firstTextMs, totalMs: Date.now() - started });
+    Object.assign(report, {
+      business: result.business,
+      calls: result.calls,
+      unresolved: result.unresolved,
+      stateFile: result.stateFile,
+      firstTextMs,
+      totalMs: Date.now() - started
+    });
   } catch (error) {
-    Object.assign(report, { status: 'error', errorKind: errorKind(error), code: error.code || null, stateFile: error.stateFile || null, totalMs: Date.now() - started });
+    Object.assign(report, {
+      status: 'error',
+      errorKind: errorKind(error),
+      code: error.code || null,
+      stateFile: error.stateFile || null,
+      totalMs: Date.now() - started
+    });
     process.exitCode = 1;
   } finally {
     process.removeListener('SIGINT', cancel);
@@ -68,7 +101,8 @@ export async function main(args = process.argv.slice(2), env = process.env) {
   console.log(`验收文件：${output}。报告不输出凭据或响应正文；模型审查结果仍需人工核对。`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main().catch(() => {
-  console.error('未完成：请检查本机配置、输入文件和输出目录；未输出凭据。');
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
+  main().catch(() => {
+    console.error('未完成：请检查本机配置、输入文件和输出目录；未输出凭据。');
+    process.exitCode = 1;
+  });

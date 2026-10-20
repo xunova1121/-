@@ -14,7 +14,13 @@ export function createWorkflowStore(app, execution) {
     await execution.checkpoint?.({ type: 'tool_start', id: checkpointId, name: 'document_workflow_save', args: { path: proposed } });
     const result = await app.documentWorkspace.write(proposed, JSON.stringify(state, null, 2));
     state.stateFile = result.path;
-    await execution.checkpoint?.({ type: 'tool_end', id: checkpointId, name: 'document_workflow_save', ok: true, output: `阶段：${state.phase}；恢复文件：${result.path}` });
+    await execution.checkpoint?.({
+      type: 'tool_end',
+      id: checkpointId,
+      name: 'document_workflow_save',
+      ok: true,
+      output: `阶段：${state.phase}；恢复文件：${result.path}`
+    });
     return result.path;
   };
   const load = async (filePath) => {
@@ -23,11 +29,20 @@ export function createWorkflowStore(app, execution) {
     const blob = await app.documentWorkspace.readBlob(normalized);
     if (blob.size > 800000) throw workflowError('恢复文件过大', 'DOCUMENT_INPUT');
     let state;
-    try { state = JSON.parse(await blob.text()); } catch { throw workflowError('恢复文件损坏', 'DOCUMENT_INPUT'); }
+    try {
+      state = JSON.parse(await blob.text());
+    } catch {
+      throw workflowError('恢复文件损坏', 'DOCUMENT_INPUT');
+    }
     if (state.version !== 3 || state.sessionId !== (execution.sessionId ?? null) || state.folder !== normalized.slice(0, normalized.lastIndexOf('/'))) {
       throw workflowError('恢复文件与本轮会话不匹配', 'DOCUMENT_SESSION');
     }
-    if (!['new', 'planned', 'drafted', 'reviewed', 'revised', 'completed'].includes(state.phase) || !Number.isInteger(state.calls) || state.calls < 0 || state.calls > LIMITS.calls) {
+    if (
+      !['new', 'planned', 'drafted', 'reviewed', 'revised', 'completed'].includes(state.phase) ||
+      !Number.isInteger(state.calls) ||
+      state.calls < 0 ||
+      state.calls > LIMITS.calls
+    ) {
       throw workflowError('恢复状态或调用计数无效', 'DOCUMENT_INPUT');
     }
     boundedText(state.input?.task, LIMITS.task, '原始要求', true);

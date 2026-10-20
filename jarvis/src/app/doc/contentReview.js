@@ -5,9 +5,9 @@ export function validateReview(value, plan, draft) {
   if (!Array.isArray(value.issues) || value.issues.length > LIMITS.issues || !Array.isArray(value.coverage)) {
     throw workflowError('内容审查格式无效', 'DOCUMENT_RESPONSE');
   }
-  const known = new Set(plan.brief.requirements.map(item => item.id));
+  const known = new Set(plan.brief.requirements.map((item) => item.id));
   const seen = new Set();
-  const coverage = value.coverage.map(item => {
+  const coverage = value.coverage.map((item) => {
     if (!known.has(item.id) || seen.has(item.id) || !['supported', 'partial', 'missing'].includes(item.result)) {
       throw workflowError('审查需求编号缺失、重复或无效', 'DOCUMENT_RESPONSE');
     }
@@ -16,7 +16,7 @@ export function validateReview(value, plan, draft) {
     return { id: item.id, result: item.result === 'supported' && (!quote.trim() || !draft.includes(quote)) ? 'missing' : item.result, quote };
   });
   if (seen.size !== known.size) throw workflowError('审查没有覆盖全部需求', 'DOCUMENT_RESPONSE');
-  if (value.issues.some(item => !['must_fix', 'warning'].includes(item.severity))) throw workflowError('审查问题严重程度无效', 'DOCUMENT_RESPONSE');
+  if (value.issues.some((item) => !['must_fix', 'warning'].includes(item.severity))) throw workflowError('审查问题严重程度无效', 'DOCUMENT_RESPONSE');
   const issues = value.issues.map((item, index) => ({
     id: `ISSUE-${index + 1}`,
     severity: item.severity === 'must_fix' ? 'must_fix' : 'warning',
@@ -24,10 +24,16 @@ export function validateReview(value, plan, draft) {
     problem: boundedText(item.problem, 1600, '问题说明', true),
     fix: boundedText(item.fix, 1600, '修复要求', true)
   }));
-  for (const item of coverage.filter(item => item.result !== 'supported')) {
-    issues.push({ id: `COVERAGE-${item.id}`, severity: 'must_fix', location: item.id, problem: '明确需求未充分落实，不能靠关键词声称通过', fix: '恢复该要求，写明推荐方案及实施条件' });
+  for (const item of coverage.filter((item) => item.result !== 'supported')) {
+    issues.push({
+      id: `COVERAGE-${item.id}`,
+      severity: 'must_fix',
+      location: item.id,
+      problem: '明确需求未充分落实，不能靠关键词声称通过',
+      fix: '恢复该要求，写明推荐方案及实施条件'
+    });
   }
-  return { coverage, issues, outcome: issues.some(item => item.severity === 'must_fix') ? 'needs_revision' : 'model_reviewed' };
+  return { coverage, issues, outcome: issues.some((item) => item.severity === 'must_fix') ? 'needs_revision' : 'model_reviewed' };
 }
 
 export async function reviewDocument(input, plan, draft, ask, stage = 'reviewing') {
