@@ -1,3 +1,4 @@
+# 同时检查随服务器包发布的直连探测入口。
 name: Lookup recovery checks
 on:
   push:
