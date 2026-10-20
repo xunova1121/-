@@ -2,10 +2,11 @@
  * 长文档写作流程（报告、方案、总结、标书……）：一次写完的长文常常前后脱节、后半截草草收尾，所以分步写。
  *
  *   1. 大纲    模型按要求和材料列出各节标题、要点和字数；用户说“先看大纲”时到这里就停，把大纲给用户确认
- *   2. 逐节写  每节都带上完整大纲和前面各节的摘要，只写这一节；写完附一句摘要给后面的节用
+ *   2. 分节写  第一节先写，其余 3 节一起写；每节带完整大纲和已写完各节的摘要，只写这一节
+ *   （返工也是几节一起改：一节一节排队，十几节的文档要半小时以上）
  *   3. 统一润色 通读全文，只给出具体的替换（术语统一、重复删减、衔接补充），程序按原文片段替换，不整篇重写
  *   4. 读者测试 另一个不带对话上下文的模型只拿到成品，以目标读者身份通读，找出看不懂、缺依据、前后矛盾的地方
- *   5. 返工一轮 有问题的节带着读者意见重写，只改一轮
+ *   5. 返工一轮 有问题的节带着读者意见重写，只改一轮（几节同时改）
  *
  * 写作“先结构后分节、写完找读者试读”是通用的写作方法，这里按未央的工具自己实现。
  */
@@ -16,6 +17,20 @@ const SUMMARY_MARK = '<<<本节摘要>>>';
 import { METHOD, CHECKLIST, detectGenre, genreHint } from './writingGuide.js';
 
 const MAX_SECTIONS = 12;
+/** 同时写几节（太多容易被服务商限流） */
+export const SECTION_CONCURRENCY = 3;
+
+/** 按顺序取任务，最多 limit 个同时做；有一个出错就整体报错（已经发出的照常结束） */
+export async function mapLimit(items, limit, fn) {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
 const MAT_LIMIT = 24000; // 材料超过这么长时不整篇塞进提示
 
 /** 材料里像标题的行（一、（一）、1. 、# 开头的短行），列大纲时让模型看到材料的完整结构 */
@@ -86,16 +101,21 @@ export async function writeLongDocument({ task, title = '', material = '', words
 
   const outlineText = plan.sections.map((s, i) => `${i + 1}. ${s.heading}${s.points.length ? `：${s.points.join('；')}` : ''}${s.words ? `（约 ${s.words} 字）` : ''}`).join('\n');
 
-  // ---------- 2. 逐节写
-  const parts = [];
+  // ---------- 2. 分节写：第一节先写（定下术语和口径），其余各节 3 节一起写——一节一节排队写，十几节要半小时以上。
+  // 每节都带完整大纲，以及开写时已经写完的各节摘要
+  const parts = new Array(plan.sections.length);
   const summaries = [];
-  for (const [i, s] of plan.sections.entries()) {
+  const writeOne = async (i) => {
     if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+    const s = plan.sections[i];
     say(`写第 ${i + 1}/${plan.sections.length} 节：${s.heading}`);
     const secMat = material ? `\n\n用户提供的材料（和这一节相关的部分，必须用上，不要编造材料以外的数据）：\n${relevantMaterial(material, `${s.heading} ${s.points.join(' ')}`)}` : '';
-    parts.push(await writeSection({ i, s, plan, outlineText, summaries, task, mat: secMat, llm, signal }));
-    summaries.push(parts[i].summary);
-  }
+    const done = summaries.map((x, k) => (x ? { k, x } : null)).filter(Boolean);
+    parts[i] = await writeSection({ i, s, plan, outlineText, done, task, mat: secMat, llm, signal });
+    summaries[i] = parts[i].summary;
+  };
+  await writeOne(0);
+  await mapLimit(plan.sections.slice(1).map((_, k) => k + 1), SECTION_CONCURRENCY, writeOne);
   let body = parts.map((p) => p.text).join('\n\n');
 
   // ---------- 3. 统一润色（只做具体替换）
@@ -132,12 +152,13 @@ ${clip(body, 30000)}`
         const k = idx >= 0 ? idx : bySection.findIndex((sec) => issue.section && sec.heading.includes(issue.section));
         if (k >= 0) (bySection[k].issues ??= []).push(issue);
       }
-      for (const [k, sec] of bySection.entries()) {
-        if (!sec.issues?.length || touched.size >= 6) continue;
+      // 最多改 6 节，各节互不相干，同时改
+      const todo = bySection.map((sec, k) => ({ sec, k })).filter(({ sec }) => sec.issues?.length).slice(0, 6);
+      await mapLimit(todo, SECTION_CONCURRENCY, async ({ sec, k }) => {
         say(`按读者意见修改：${sec.heading}`);
         const fixed = await reviseSection({ sec, plan, outlineText, task, mat, llm, signal });
         if (fixed) { bySection[k].text = fixed; touched.add(sec.heading); }
-      }
+      });
       body = bySection.map((x) => x.text).join('\n\n');
       rev.revised = [...touched];
     }
@@ -145,8 +166,8 @@ ${clip(body, 30000)}`
   return { title: plan.title, outline: plan.sections, markdown: `# ${plan.title}\n\n${body}\n`, edits, review: rev };
 }
 
-async function writeSection({ i, s, plan, outlineText, summaries, task, mat, llm, signal }) {
-  const prev = summaries.length ? summaries.map((x, k) => `${k + 1}. ${plan.sections[k].heading}：${x}`).join('\n') : '（这是第一节）';
+async function writeSection({ i, s, plan, outlineText, done, task, mat, llm, signal }) {
+  const prev = done.length ? `${done.map(({ k, x }) => `${k + 1}. ${plan.sections[k].heading}：${x}`).join('\n')}\n（其余各节由同事按大纲同时在写）` : i === 0 ? '（这是第一节）' : '（其余各节由同事按大纲同时在写）';
   const raw = String(await llm({
     signal,
     system: '你是资深的中文文字工作者。直接输出这一节的 Markdown 正文，不要寒暄、不要解释。',

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createDocumentWorkflow } from '../../src/app/doc/documentWorkflow.js';
-import { normalizeBrief } from '../../src/app/doc/workflowSchema.js';
+import { normalizeBrief, LIMITS } from '../../src/app/doc/workflowSchema.js';
 import { documentDepth, preserveUserRequest } from '../../src/app/doc/workflowPolicy.js';
 import { validateReview } from '../../src/app/doc/contentReview.js';
 import { applyRevisions } from '../../src/app/doc/targetedRevision.js';
@@ -80,15 +80,23 @@ export function documentWorkflowCases(test) {
     assert.ok(!JSON.stringify(h.events).includes(draft));
     assert.ok(h.events.every((item, index) => (index % 2 ? item.type === 'tool_end' : item.type === 'tool_start')));
   });
-  test('底稿不能把模型建议冒充用户明确要求', () => {
+  test('底稿不能把模型建议冒充用户明确要求：编造的那条丢掉，原话照留，不整篇失败', () => {
     const value = fixture();
     value.brief.requirements.push('必须投入500万元');
-    assert.throws(() => normalizeBrief(value, task), { code: 'DOCUMENT_REQUIREMENTS' });
+    const plan = normalizeBrief(value, task);
+    assert.deepEqual(plan.brief.requirements.map((x) => x.quote), ['电子秤自动称重', '对接银行结算']);
+    // 一条原话都对不上：按用户原话分句当需求，仍然只认原话
+    const none = fixture();
+    none.brief.requirements = ['改写过的要求'];
+    const fallback = normalizeBrief(none, task).brief.requirements.map((x) => x.quote);
+    assert.ok(fallback.length && fallback.every((quote) => task.includes(quote)));
   });
-  test('推演没有异常流则拒绝继续', () => {
+  test('推演缺了异常流：标出缺口交给起草和审查补，不整篇失败', () => {
     const value = fixture();
     value.scenarios.exceptions = [];
-    assert.throws(() => normalizeBrief(value, task), { code: 'DOCUMENT_RESPONSE' });
+    const plan = normalizeBrief(value, task);
+    assert.deepEqual(plan.gaps, ['exceptions']);
+    assert.match(plan.scenarios.exceptions[0], /推演没有给出/);
   });
   test('审查声称覆盖但正文没有原文证据，不算通过', () => {
     const value = review();
@@ -97,19 +105,56 @@ export function documentWorkflowCases(test) {
     assert.equal(result.outcome, 'needs_revision');
     assert.equal(result.coverage[0].result, 'missing');
   });
-  test('漏审、重复审需求不能默认为通过', () => {
+  test('漏审、重复审需求不能默认为通过：没审到的一律按缺失', () => {
     const plan = normalizeBrief(fixture(), task);
-    assert.throws(() => validateReview({ coverage: [], issues: [] }, plan, draft));
+    const empty = validateReview({ coverage: [], issues: [] }, plan, draft);
+    assert.equal(empty.outcome, 'needs_revision');
+    assert.ok(empty.coverage.every((item) => item.result === 'missing'));
     const value = review();
-    value.coverage[1].id = 'REQ-1';
-    assert.throws(() => validateReview(value, plan, draft));
+    value.coverage[1].id = 'REQ-1'; // 重复审了 REQ-1，REQ-2 没审
+    const dup = validateReview(value, plan, draft);
+    assert.equal(dup.outcome, 'needs_revision');
+    assert.equal(dup.coverage.find((item) => item.id === 'REQ-2').result, 'missing');
   });
-  test('修订片段不唯一或不存在时整批拒绝，原稿不被污染', () => {
-    assert.throws(() => applyRevisions('同样的内容反复出现同样的内容反复出现', { edits: [{ find: '同样的内容反复出现', replace: '改掉' }] }), {
-      code: 'DOCUMENT_REVISION_CONFLICT'
-    });
-    assert.throws(() => applyRevisions(draft, { edits: [{ find: '不存在的唯一片段', replace: '修改' }] }));
+  test('修订片段不唯一或不存在：跳过那一条、记下条数，不猜位置，原稿不被污染', () => {
+    const repeated = '同样的内容反复出现同样的内容反复出现';
+    const report = {};
+    assert.equal(applyRevisions(repeated, { edits: [{ find: '同样的内容反复出现', replace: '改掉' }] }, report), repeated);
+    assert.equal(report.skipped, 1);
+    assert.equal(applyRevisions(draft, { edits: [{ find: '不存在的唯一片段', replace: '修改' }] }), draft);
     assert.equal(applyRevisions(draft, { edits: [] }), draft);
+    // 对得上的照改，对不上的跳过
+    const mixed = applyRevisions(draft, { edits: [{ find: '现场确认净重，再对接银行结算', replace: '扣除皮重后确认净重，再对接银行结算' }, { find: '不存在的唯一片段', replace: 'x' }] }, report);
+    assert.ok(mixed.includes('扣除皮重后确认净重'));
+    assert.equal(report.skipped, 1);
+  });
+  test('长方案按推演章节分节起草：同时写 3 节，每节单独计数和限时，顺序不乱', async () => {
+    const plan = fixture();
+    plan.scenarios.structure = ['一、建设背景：现状痛点', '二、业务流程：称重和结算', '三、系统建设：设备与平台', '四、实施计划：阶段与验收', '五、风险与对策：异常处理'];
+    let active = 0;
+    let peak = 0;
+    const responses = [plan];
+    const h = harness([]);
+    const llm = async (request) => {
+      h.prompts.push(request);
+      if (responses.length) return JSON.stringify(responses.shift());
+      const m = request.prompt.match(/现在只写第 (\d+) 节「(.+?)」/);
+      if (m) {
+        active++;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 15));
+        active--;
+        return `## ${m[2]}\n\n电子秤自动称重，对接银行结算。第${m[1]}节正文。\n<<<本节摘要>>>第${m[1]}节`;
+      }
+      if (request.prompt.includes('需要统一修改的地方')) return JSON.stringify({ edits: [] });
+      return JSON.stringify(review());
+    };
+    const workflow = createDocumentWorkflow({ llm, documentWorkspace: h.workspace });
+    const result = await workflow.run({ task, format: 'docx' }, h.execution);
+    assert.equal(peak, 3);
+    assert.equal(result.calls, 1 + 5 + 1 + 1); // 底稿 + 5 节 + 统一润色 + 审查
+    assert.ok(result.draft.indexOf('## 一、建设背景') < result.draft.indexOf('## 五、风险与对策'));
+    assert.ok(h.prompts.filter((item) => item.prompt.includes('现在只写第')).every((item) => item.prompt.includes('复称留痕'))); // 每节都带业务推演
   });
   test('最多修订一次，再审仍失败必须保留问题和原稿', async () => {
     const h = harness([
@@ -233,7 +278,7 @@ export function documentWorkflowCases(test) {
     const h = harness();
     const prepared = await h.workflow.prepare({ task }, h.execution);
     const saved = JSON.parse(h.files.get(prepared.stateFile));
-    saved.calls = 8;
+    saved.calls = LIMITS.calls;
     h.files.set(prepared.stateFile, JSON.stringify(saved));
     await assert.rejects(h.workflow.run({ state_file: prepared.stateFile }, h.execution), { code: 'DOCUMENT_CALL_LIMIT' });
     assert.equal(h.prompts.length, 1);

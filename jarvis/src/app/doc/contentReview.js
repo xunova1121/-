@@ -1,29 +1,31 @@
-import { boundedText, LIMITS, readJson, workflowError } from './workflowSchema.js';
+import { LIMITS, readJson, workflowError } from './workflowSchema.js';
 import { WRITING_RULES } from './workflowPolicy.js';
 
 export function validateReview(value, plan, draft) {
-  if (!Array.isArray(value.issues) || value.issues.length > LIMITS.issues || !Array.isArray(value.coverage)) {
-    throw workflowError('内容审查格式无效', 'DOCUMENT_RESPONSE');
+  if (!value || (!Array.isArray(value.issues) && !Array.isArray(value.coverage))) throw workflowError('内容审查格式无效', 'DOCUMENT_RESPONSE');
+  // 审查结果格式不完美时不整篇失败：编号不认识、重复的忽略；没审到的需求一律按“缺失”，绝不默认通过
+  const byId = new Map();
+  for (const item of Array.isArray(value.coverage) ? value.coverage : []) {
+    if (!item || byId.has(item.id)) continue;
+    byId.set(item.id, item);
   }
-  const known = new Set(plan.brief.requirements.map((item) => item.id));
-  const seen = new Set();
-  const coverage = value.coverage.map((item) => {
-    if (!known.has(item.id) || seen.has(item.id) || !['supported', 'partial', 'missing'].includes(item.result)) {
-      throw workflowError('审查需求编号缺失、重复或无效', 'DOCUMENT_RESPONSE');
-    }
-    seen.add(item.id);
-    const quote = boundedText(item.quote, 1600, '正文证据');
-    return { id: item.id, result: item.result === 'supported' && (!quote.trim() || !draft.includes(quote)) ? 'missing' : item.result, quote };
+  const coverage = plan.brief.requirements.map(({ id }) => {
+    const item = byId.get(id);
+    if (!item) return { id, result: 'missing', quote: '' };
+    const quote = String(item.quote ?? '').slice(0, 1600);
+    const result = ['supported', 'partial', 'missing'].includes(item.result) ? item.result : 'partial';
+    return { id, result: result === 'supported' && (!quote.trim() || !draft.includes(quote)) ? 'missing' : result, quote };
   });
-  if (seen.size !== known.size) throw workflowError('审查没有覆盖全部需求', 'DOCUMENT_RESPONSE');
-  if (value.issues.some((item) => !['must_fix', 'warning'].includes(item.severity))) throw workflowError('审查问题严重程度无效', 'DOCUMENT_RESPONSE');
-  const issues = value.issues.map((item, index) => ({
-    id: `ISSUE-${index + 1}`,
-    severity: item.severity === 'must_fix' ? 'must_fix' : 'warning',
-    location: boundedText(item.location, 300, '问题位置', true),
-    problem: boundedText(item.problem, 1600, '问题说明', true),
-    fix: boundedText(item.fix, 1600, '修复要求', true)
-  }));
+  const issues = (Array.isArray(value.issues) ? value.issues : [])
+    .filter((item) => item && String(item.problem ?? '').trim())
+    .slice(0, LIMITS.issues)
+    .map((item, index) => ({
+      id: `ISSUE-${index + 1}`,
+      severity: item.severity === 'must_fix' ? 'must_fix' : 'warning',
+      location: String(item.location || '（未注明位置）').slice(0, 300),
+      problem: String(item.problem).slice(0, 1600),
+      fix: String(item.fix || '按问题说明修改').slice(0, 1600)
+    }));
   for (const item of coverage.filter((item) => item.result !== 'supported')) {
     issues.push({
       id: `COVERAGE-${item.id}`,

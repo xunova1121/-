@@ -1,6 +1,6 @@
 import { boundedText, LIMITS, workflowError } from './workflowSchema.js';
 
-// 每次任务最多8次模型调用；每次状态另存，文件夹模式不依赖覆盖写。
+// 每次任务的模型调用有上限（LIMITS.calls，分节起草每节算一次）；每次状态另存，文件夹模式不依赖覆盖写。
 // 正文和完整底稿只进工作区，检查点只含引用；不存在跨任务全局缓存。
 export function createWorkflowStore(app, execution) {
   const save = async (state) => {

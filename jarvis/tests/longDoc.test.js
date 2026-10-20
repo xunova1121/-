@@ -27,7 +27,7 @@ function fakeLlm({ readerIssues = null, reviseReply = null } = {}) {
 }
 
 describe('长文档分步写作', () => {
-  it('先大纲，再逐节写：每节都带完整大纲和前面各节的摘要，只写这一节', async () => {
+  it('先大纲，再分节写：第一节先写定调，其余各节同时写；每节带完整大纲和已写完各节的摘要，只写这一节', async () => {
     const { llm, calls } = fakeLlm({ readerIssues: [] });
     const r = await writeLongDocument({ task: '写一份智慧园区建设方案，给公司领导审批', words: 2600, llm });
     expect(r.outline.map((s) => s.heading)).toEqual(['一、背景与目标', '二、建设内容', '三、实施计划']);
@@ -35,10 +35,31 @@ describe('长文档分步写作', () => {
     expect(sec).toHaveLength(3);
     for (const c of sec) expect(c.prompt).toContain('3. 三、实施计划'); // 每节都带完整大纲
     expect(sec[0].prompt).toContain('（这是第一节）');
-    expect(sec[2].prompt).toContain('摘要1：写了一、背景与目标');
-    expect(sec[2].prompt).toContain('摘要2：写了二、建设内容');
+    // 第二、三节同时写：都能看到第一节的摘要，看不到彼此的
+    for (const c of sec.slice(1)) {
+      expect(c.prompt).toContain('摘要1：写了一、背景与目标');
+      expect(c.prompt).toContain('同时在写');
+    }
+    expect(sec[2].prompt).not.toContain('摘要2：');
     expect(r.markdown).toMatch(/^# 智慧园区建设方案\n\n## 一、背景与目标/);
     expect(r.markdown).not.toContain('<<<本节摘要>>>'); // 摘要不进文档
+  });
+
+  it('除第一节外最多 3 节同时写，不再一节一节排队（8 节只排 4 轮）', async () => {
+    let active = 0, peak = 0, rounds = 0;
+    const llm = async ({ prompt }) => {
+      if (prompt.includes('列出文档大纲')) return JSON.stringify({ title: '方案', sections: Array.from({ length: 8 }, (_, i) => ({ heading: `第${i + 1}节`, points: ['要点'] })) });
+      const m = prompt.match(/现在只写第 (\d+) 节「(.+?)」/);
+      if (!m) return '{}';
+      active++; peak = Math.max(peak, active); if (active === 1) rounds++;
+      await new Promise((r) => setTimeout(r, 20));
+      active--;
+      return `## ${m[2]}\n\n正文\n<<<本节摘要>>>摘要${m[1]}`;
+    };
+    const r = await writeLongDocument({ task: '写方案', llm, review: false });
+    expect(r.outline).toHaveLength(8);
+    expect(peak).toBe(3);
+    expect(r.markdown.indexOf('## 第1节')).toBeLessThan(r.markdown.indexOf('## 第8节')); // 并行写，顺序不乱
   });
 
   it('统一润色：只按原文片段替换，找不到的片段忽略', async () => {
