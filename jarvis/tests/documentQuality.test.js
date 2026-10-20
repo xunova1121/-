@@ -60,6 +60,13 @@ describe('制作方案与模板', () => {
     expect(await regularZip.file('word/document.xml').async('string')).not.toBe(await briefZip.file('word/document.xml').async('string'));
     expect(await regularZip.file('word/styles.xml').async('string')).not.toBe(await briefZip.file('word/styles.xml').async('string'));
   });
+  it('多份上传模板不擅自选择最近一份', async () => {
+    const original = await generate('docx',{content:'# 企业模板\n\n保留企业字体样式。'});
+    await ws.write('模板/甲公司.docx',original.blob);
+    await ws.write('模板/乙公司.docx',original.blob);
+    await expect(tool('create_document').run({format:'docx',path:'结果',content:'# 正文\n\n不能误用另一家公司模板。'})).rejects.toMatchObject({code:'DOCUMENT_TEMPLATE_AMBIGUOUS'});
+    expect(await ws.exists('结果.docx')).toBe(false);
+  });
   it('显式配方真实应用主题；用户显式主题仍优先', async () => {
     const result = await tool('create_document').run({format:'pptx',path:'技术',title:'技术方案',content:deck,template_id:'ppt-product'});
     expect(result).toContain('科技创新');
@@ -159,6 +166,14 @@ describe('Excel精确修改', () => {
     const after = await openOfficePackage(edited.blob);
     expect(await after.file('xl/styles.xml').async('string')).toBe(await before.file('xl/styles.xml').async('string'));
     expect(await after.file('xl/workbook.xml').async('string')).toContain('fullCalcOnLoad="1"');
+  });
+  it('显式权重求和公式保留百分比显示，不把100%显示成1', async () => {
+    const out = await generate('xlsx',{content:'## 权重\n| 任务 | 权重 |\n|--|--|\n| 甲 | 60% |\n| 乙 | 40% |\n| 合计 | =SUM(B2:B3) |'});
+    const ExcelJS = (await import('exceljs')).default;
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load(await out.blob.arrayBuffer());
+    expect(book.getWorksheet('权重').getCell('B4').numFmt).toBe('0%');
+    expect(book.getWorksheet('权重').getCell('B4').alignment.indent).toBe(1);
   });
   it('旧值冲突整批失败，原Blob没有变化', async () => {
     const out = await generate('xlsx',{content:table});

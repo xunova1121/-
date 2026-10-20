@@ -57,11 +57,12 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         const plan = ['docx','pptx','xlsx','pdf','html','md'].includes(format) ? planDocument({format,task:requirements || title || content.slice(0,2000),template_id:templateId}) : null;
         const taskRules = requirements && plan ? requirements+'\n制作约束：'+plan.rules.join('；') : requirements;
         const chosenTheme = theme || (templateId && templateId !== 'auto' ? plan?.theme : undefined);
+        const chosenToc = toc || (templateId && content.length < 1500 ? 'no' : plan?.options.toc);
         // 生成前自查：规则检查；有原始要求或硬伤时请模型对照检查并改一轮
         const check = await selfCheck({ format, content, requirements:taskRules, llm: ctx.reasonLlm ?? ctx.llm ?? null, signal, onProgress: (t) => progress?.(t) });
         const build = (text) => generate(format, {
           title: title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, ''), content: text, theme:chosenTheme, layout:plan?.options.layout, cover: cover ?? plan?.options.cover ?? false, subtitle, author, issuer, docNo,
-          toc: (toc || plan?.options.toc) === 'yes' ? true : (toc || plan?.options.toc) === 'no' ? false : 'auto', loadImage, toPdf: ctx.toPdf ?? null, template: tpl
+          toc: chosenToc === 'yes' ? true : chosenToc === 'no' ? false : 'auto', loadImage, toPdf: ctx.toPdf ?? null, template: tpl
         });
         let finalContent = check.content;
         let out = await build(finalContent);
