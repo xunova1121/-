@@ -1,3 +1,11 @@
+## 1.0.216 已正式发布：2026-10-21 05:04:55（北京时间，Codex）
+
+- 正式源码f4ad1f0f8b9d69ebbe3302286c80961bb4b00a4a；先以ed685bc53cbb7b171d3121ad9ee68237ec0ca5d5的[skip ci]提交保存，再按用户明确授权启动正式流水线。Actions https://github.com/xunova1121/-/actions/runs/39496142344 的完整验证、Android、Windows及发布全部success。Release https://github.com/xunova1121/-/releases/tag/desktop-v1.0.216 非草稿、非预发布，target精确指向正式源码。
+- 已核对7项资产uploaded且非空：APK12680329字节、Windows ZIP171517248、EXE136142926、服务器tar17937874、服务器更新JSON136、latest.yml347、blockmap144778。Android实际日志确认固定签名；不是只根据脚本中的条件分支推断。Windows完成ZIP、NSIS及blockmap构建。
+- 正式CI最终101文件1061单测全通过，lint通过；三类构建通过；真实Office三格式PDF、场景样例5/2/2页真实PDF逐页检查、PPT定点修改其他页保持、Excel输入修改后Office实际重算通过。服务器15/15、手机界面78/78、手机服务器15/15、模型工作台20/20、Electron11/11、PC控制5/5、网页178/178、单文件14/14及对话补充流程全部通过；原Docker执行隔离/取消、Claude协议/实际SDK收尾保留。未删除或跳过失败测试。
+- 相对a27358ff共34文件、无删除；main.js和mount顺序不变，临时验证工作流和截图没有合入。实现与使用边界、自查、后续建议见下节及链接文档。正式版包括12套自有场景配方、制作方案与主题/排版接入、真实产物统一验收、分目录短报告、PPT按实际页序修改、Excel定点与旧值冲突保护；并修复副封面误移正文、权重百分比显示和数值贴边。
+- App/PC与服务器均需更新，建议先服务器再客户端。未登录或代升级用户d.leing.top，未在鸿蒙/Windows真机或真实付费模型线路验收；不能把合成样例和1061项工程测试当成模型智力或真实文档质量评分。没有Claude独立人工审查，只做本AI逐项自查与自动验证。完整企业PPT母版套版、Word任意章节重排和真实PDF图像视觉修订仍是后续能力，不宣称本批全部完成。真实PDF转换依赖运行端LibreOffice；不可用会明确报告。
+
 ## 文档制作与验收升级：2026-10-21 04:54（北京时间，Codex；候选验证通过，准备正式发布）
 
 - 用户明确授权按工业级建议开发、默认确认并自行发布；基线a27358ff／1.0.215。独立候选最终055b400052badd48ef3fc02d8793cf46eae432ba，验证 https://github.com/xunova1121/-/actions/runs/39494287599 的verify全部success。没有把候选提交或测试包当正式版。
