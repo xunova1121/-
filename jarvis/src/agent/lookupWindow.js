@@ -1,3 +1,4 @@
+// 正式发布：普通查询预留收尾，预算不足时不再发起新请求。
 /** 总时限不变，提前结束检索，给最后整理保留15秒；所有阶段共用同一时钟。 */
 export const SUMMARY_RESERVE_MS = 15_000;
 export const QUICK_MODEL_ATTEMPTS = 3;
