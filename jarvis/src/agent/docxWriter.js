@@ -12,6 +12,7 @@
  */
 import { parseDoc, plain, headings, markSalutationAndSignature } from './docModel.js';
 import { FONTS } from './themes.js';
+import { openOfficePackage } from './officePackage.js';
 import { imageInfo } from './imageInfo.js';
 
 const PT = (n) => Math.round(n * 2); // 字号：磅 → 半磅
@@ -37,7 +38,7 @@ const font = (key) => {
  * @param {Uint8Array|ArrayBuffer} [o.template]  用户的 .docx 模板：沿用其样式
  * @returns {Promise<{ blob: Blob, info: { toc: boolean, images: number, missingImages: string[], headings: number } }>}
  */
-export async function makeDocx({ title, content, theme, cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, template = null, issuer = '', docNo = '' }) {
+export async function makeDocx({ title, content, theme, cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, template = null, layout = 'report', issuer = '', docNo = '' }) {
   const d = await import('docx');
   const {
     Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle,
@@ -45,14 +46,15 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
     LineRuleType, VerticalAlign, LevelSuffix
   } = d;
   const official = Boolean(theme.official);
+  const brief = layout === 'brief' && !official;
   const C = theme.colors;
   const bodyFont = font(theme.fonts.body);
   const headFont = font(theme.fonts.heading);
-  const bodySize = official ? 16 : 12;
-  const lineSpacing = official ? { line: 579, lineRule: LineRuleType.EXACT } : { line: 360, lineRule: LineRuleType.AUTO };
+  const bodySize = official ? 16 : brief ? 11 : 12;
+  const lineSpacing = official ? { line: 579, lineRule: LineRuleType.EXACT } : { line: brief ? 300 : 360, lineRule: LineRuleType.AUTO };
   const page = official
     ? { top: MM(37), bottom: MM(35), left: MM(28), right: MM(26) }
-    : { top: MM(25.4), bottom: MM(25.4), left: MM(31.8), right: MM(31.8) };
+    : { top: MM(brief ? 22 : 25.4), bottom: MM(brief ? 22 : 25.4), left: MM(brief ? 24 : 31.8), right: MM(brief ? 24 : 31.8) };
   const textWidthPx = Math.floor(((11906 - page.left - page.right) / 1440) * 96); // 版心宽度（像素，96dpi）
 
   // ---------- 结构：开头唯一的一级标题 = 文档大标题
@@ -67,7 +69,7 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
   const level = (l) => Math.max(1, l - shift);
   const hs = headings(blocks).map((h) => ({ ...h, level: level(h.level) }));
   // 公文不加目录（除非明确要求）
-  const wantToc = toc === true || (toc === 'auto' && !official && hs.filter((h) => h.level === 1).length >= 3);
+  const wantToc = toc === true || (toc === 'auto' && !brief && !official && hs.filter((h) => h.level === 1).length >= 3);
   markSalutationAndSignature(blocks);
 
   // ---------- 行内
@@ -105,7 +107,7 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
     children: runs(ins),
     alignment: official ? AlignmentType.JUSTIFIED : AlignmentType.JUSTIFIED,
     // 首行缩进 2 字：同时写字符数和绝对值，不认 firstLineChars 的软件也能缩进
-    indent: opts.noIndent ? undefined : { firstLineChars: 200, firstLine: bodySize * 2 * 20 },
+    indent: opts.noIndent || brief ? undefined : { firstLineChars: 200, firstLine: bodySize * 2 * 20 },
     ...opts.paragraph
   });
 
@@ -279,7 +281,7 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
     paragraph: { spacing: { before, after, line: official ? 579 : 300, lineRule: official ? LineRuleType.EXACT : LineRuleType.AUTO }, keepNext: true, keepLines: true, outlineLevel: outline, ...(align && { alignment: align }), ...extra }
   });
   // 设计样式：一级标题是浅底色条 + 左边深色粗边；二级标题下面一条细线
-  const h1Look = official ? {} : { border: { left: { style: BorderStyle.SINGLE, size: 36, color: C.primary, space: 8 } }, shading: { type: ShadingType.CLEAR, fill: C.soft, color: 'auto' }, indent: { left: 160 } };
+  const h1Look = official ? {} : brief ? { border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: C.primary, space: 5 } } } : { border: { left: { style: BorderStyle.SINGLE, size: 36, color: C.primary, space: 8 } }, shading: { type: ShadingType.CLEAR, fill: C.soft, color: 'auto' }, indent: { left: 160 } };
   const h2Look = official ? {} : { border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: 'D5DCE6', space: 2 } } };
   const H2font = official ? font(theme.fonts.h2) : headFont;
   const H3font = official ? font(theme.fonts.h3) : headFont;
@@ -366,7 +368,7 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
 export async function applyTemplate(blob, template) {
   const JSZip = (await import('jszip')).default;
   let tpl;
-  try { tpl = await JSZip.loadAsync(template); } catch { throw new Error('模板打不开，不是有效的 Word 文件（.docx）'); }
+  try { tpl = await openOfficePackage(template); } catch { throw new Error('模板打不开，不是有效的 Word 文件（.docx）'); }
   const tplStyles = await tpl.file('word/styles.xml')?.async('string');
   if (!tplStyles) throw new Error('模板里没有样式定义（word/styles.xml），不是有效的 Word 文件');
   const zip = await JSZip.loadAsync(await blob.arrayBuffer());

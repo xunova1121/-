@@ -294,7 +294,9 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     const squash = (t) => String(t).replace(/[\s·|｜,，、:：（）()—-]/g, '');
     const known = squash(`${title}${subtitle}${author}${date}`);
     const dup = (t) => squash(t).length >= 4 && known.includes(squash(t));
-    if (ls.length <= 1 && (dup(c0.title) || (ls.length && dup(ls[0])) || (!subtitle && `${c0.title}${ls[0] ?? ''}`.length <= 60 && /\d{4}\s*年|\d{1,2}\s*月|汇报|报告/.test(ls[0] ?? '')))) {
+    // 只有整行是日期或已知封面原文，才允许合并；正文提到月份不代表它是副封面。
+    const metadataOnly = ls.every(text => dup(text) || /^[（(]?\s*\d{4}[\d\s年月日—至\-./]+[）)]?\s*$/.test(text));
+    if (metadataOnly && ls.length <= 1 && (dup(c0.title) || (ls.length && dup(ls[0])) || (!subtitle && `${c0.title}${ls[0] ?? ''}`.length <= 60 && /\d{4}\s*年|\d{1,2}\s*月|汇报|报告/.test(ls[0] ?? '')))) {
       if (!subtitle) subtitle = [c0.title, ...ls].filter((t) => t && !dup(t)).join(' · ');
       slides = slides.slice(1);
     }
@@ -814,3 +816,4 @@ function today() {
   const d = new Date(Date.now() + 8 * 3600_000);
   return `${d.getUTCFullYear()} 年 ${d.getUTCMonth() + 1} 月 ${d.getUTCDate()} 日`;
 }
+

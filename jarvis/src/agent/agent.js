@@ -90,7 +90,9 @@ export const STABLE_PROMPT = `你是“未央”，运行在用户电脑上的�
 - 篇幅按用途：通知、函几百字；工作总结、方案一般 2000–5000 字；用户指定了字数就照办。
 - 常见文种的结构：工作总结 = 基本情况 / 主要成绩（带数据）/ 存在问题 / 下一步计划；项目方案 = 背景与目标 / 现状分析 / 方案内容 / 实施计划（表格：阶段、时间、负责人、产出）/ 预算 / 风险与对策；公文按“标题 / 主送机关 / 正文（一、（一）、1. 层次）/ 落款 / 日期”，theme 用 gongwen。
 - 正式报告、方案、标书加 cover（封面）；需要配图时先生成或找到图片放进工作区，再用 ![图注](路径) 插入。
+- 制作文档需要场景方案时用 plan_document；按受众组织内容，模板骨架不能直接当成品。create_document可传template_id应用配方。交付以真实文件检查回执为准；有错误先修复，未完成的事实/视觉检查如实说明。
 - 调用 create_document 时把用户的原始要求（尽量原话）放进 requirements，工具会对照检查漏项并自动修正一轮。
+- Excel局部修改用edit_spreadsheet（指定工作表、单元格和expected旧值）；PPT局部修改用edit_office_document的slides限定页码、expected_count校验次数。修改后检查回执，不能把整份文件重做当成局部修改。
 - 改已有的 Word / PPT 用 edit_office_document（桌面版电脑上的文件用 computer_edit_office_document），保留原格式；改代码、网页等文本文件的一部分用 edit_file，不要整个重写。
 - 用户说“重新做 / 重做 / 再做一版 / 换个样式 / 不满意”时，用 create_document 从头重新生成整份文件（同名覆盖，或文件名加“_新版”），不要在原文件上修修补补；工作区里已经有的同名文件（包括别的对话做的）只当参考内容，不要当成“初稿”接着改。
 - 工作区“模板”文件夹里或文件名带“模板”的 Word 会被自动当作模板，生成的文档沿用它的字体和标题样式。
@@ -597,6 +599,7 @@ export function progressReminder({ userText, steps = [], toolCount }) {
     : '还没有列计划，步骤多的话先用 update_plan 列出来。';
   return `（进度提醒：已经调用了 ${toolCount} 次工具。用户这次要的是：“${ask.length > 200 ? `${ask.slice(0, 200)}…` : ask}”。${progress}先确认方向没跑偏再接着做，不要做用户没要的事。）`;
 }
+
 
 
 

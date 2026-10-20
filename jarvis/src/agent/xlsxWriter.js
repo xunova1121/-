@@ -237,10 +237,15 @@ export async function makeXlsx(content, { theme }) {
           if (c.formula) cell.value = { formula: c.formula, ...(c.result !== undefined && { result: c.result }) };
           else cell.value = c.value ?? null;
           cells.set(`${colName(ci)}${r}`, c.formula ? { formula: c.formula, result: c.result, xl: cell } : { value: c.value ?? null });
+          // 显式公式也沿用同列已知百分比格式，避免权重合计100%显示为1。
+          if (c.formula && !c.numFmt) {
+            const above = t.grid.slice(header ? 1 : 0, ri).map(previous => previous[ci]).filter(previous => typeof previous?.value === 'number');
+            if (above.length && above.every(previous => previous.numFmt?.includes('%'))) c.numFmt = above[0].numFmt;
+          }
           if (c.numFmt) cell.numFmt = c.numFmt;
           cell.border = borders;
           cell.font = { name: FONT, size: 10.5 };
-          cell.alignment = { vertical: 'middle', wrapText: true, horizontal: seqCol(ci) ? 'center' : typeof c.value === 'number' || c.formula ? 'right' : undefined };
+          cell.alignment = { vertical: 'middle', wrapText: true, horizontal: seqCol(ci) ? 'center' : typeof c.value === 'number' || c.formula ? 'right' : undefined, indent: !seqCol(ci) && (typeof c.value === 'number' || c.formula) ? 1 : 0 };
           if (labelCol(ci)) {
             cell.font = { name: FONT, size: 10.5, bold: true, color: { argb: official ? 'FF000000' : `FF${C.primary}` } };
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: official ? 'FFF2F2F2' : `FF${C.soft}` } };
@@ -296,3 +301,4 @@ export function makeCsv(content) {
 }
 
 export const withBom = (s) => (String(s).startsWith('﻿') ? String(s) : `﻿${s}`);
+
