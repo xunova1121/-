@@ -6,6 +6,7 @@
  *   - 工具轮内原样回传本轮 content（含思考块），跨轮只保留文本。
  */
 import Anthropic from '@anthropic-ai/sdk';
+import { readAnthropicStream } from './anthropicStream.js';
 import { stallGuard, isTransient, retryWait, retryAfterMs, sleep } from './openai.js';
 
 const FALLBACK_MODELS = /^(claude-opus-5-5|claude-opus-5|claude-sonnet-5-5|claude-fable-5-1)$/;
@@ -70,21 +71,15 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
     const guard = stallGuard(signal, stallTimeouts);
     try {
       const stream = client.beta.messages.stream(params, { signal: guard.signal });
-      const events = stream[Symbol.asyncIterator]();
-      let text = '';
-      for (;;) {
-        const { value: ev, done } = await guard.race(events.next());
-        if (done) break;
-        if (ev.type !== 'ping') guard.touch();
-        if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') {
-          text += ev.delta.text;
+      const { text, message: msg } = await readAnthropicStream(stream, {
+        guard,
+        signal,
+        onText: (delta) => {
           state.started = true;
-          onText?.(ev.delta.text);
-        } else if (ev.type === 'content_block_start' && ev.content_block.type === 'server_tool_use') {
-          onText?.('', { serverTool: ev.content_block.name });
-        }
-      }
-      const msg = await guard.race(stream.finalMessage());
+          onText?.(delta);
+        },
+        onServerTool: (name) => onText?.('', { serverTool: name })
+      });
       if (msg.stop_reason === 'refusal') {
         const note = '抱歉，这个请求我没办法协助。';
         onText?.(note);
@@ -92,7 +87,14 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
       }
       const toolCalls = msg.content.filter((b) => b.type === 'tool_use').map((b) => ({ id: b.id, name: b.name, args: b.input ?? {} }));
       return { text, toolCalls, raw: msg.content, stop: msg.stop_reason };
-    } catch (e) { throw guard.error(e); } finally { guard.done(); }
+    } catch (e) {
+      const error = guard.error(e);
+      // 卡住检测会重建错误，已展示的半成品仍要交给上层保留。
+      if (e.partialText !== undefined) error.partialText = e.partialText;
+      throw error;
+    } finally {
+      guard.done();
+    }
   }
 
   return {

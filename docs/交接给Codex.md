@@ -1,3 +1,25 @@
+## Claude 原生流收尾修复：2026-10-20（Codex，第一批；完整验证中）
+
+- 用户同意按Claude规范分批开发。本批仅修Claude/Anthropic流式收尾，基线55bf70ddb9e62bf3d1124c977cd1469bb726013b/1.0.211；不改模型配置、超时阈值、搜索策略、UI及main.js/mount顺序。
+- 用户在自有服务器完成9次真实评测：两次简单对话已出字后约25秒仍超时；新闻存在固定60秒终止和无关搜索结果。本批不把上述现象全部归因于同一个问题，也不把执行done当新闻验收成功。未上传私有对话和报告正文。
+- 精确基线代码复现：原适配器收到message_stop后仍等SDK异步迭代器EOF/finalMessage；底层连接不关闭时会继续触发卡住超时。此前OpenAI/Responses完成标记已处理，避免重复修补。
+- 新增anthropicStream.js独立读取器：按message_stop及SDK message事件的完整消息收尾，取消当前SDK读取，不取消外层任务；保留SDK原始内容、工具参数、思考块和签名。缺结束信号、提前EOF、无停止原因不假装成功；抛带code/kind的错误并保留partialText。SDK取消归一为AbortError，预算控制信号保留。
+- 已有测试替身仍可用EOF+finalMessage明确返回的消息；生产SDK使用message事件验证，不能依赖文字长度或标点猜完成。没有新增网络调用、自动续写、重试或第三方依赖。
+- 本地11项独立协议回归通过，覆盖消息完成但HTTP保持打开、工具/思考原样保留、部分文字超时、提前EOF、取消、预算、长度截断、搜索事件。新增5项真实Anthropic SDK配模拟HTTP响应的Vitest测试，不访问付费模型。完整CI、构建和E2E结果待补。
+
+规范第7节逐项自查：
+1. 不新增正文持久化；完整消息仍按既有本轮协议原样回传，未增加对话/检查点/localStorage数据。
+2. 仅持有当前请求的消息与文字，无跨轮缓存或增长数组；完成/失败时取消请求并移除自有监听器。
+3. 不改写盘与副作用前检查点。
+4. 不读取UI当前会话，沿用外层任务sessionId。
+5. AbortError/RETRIEVAL_BUDGET不吞；断流携带partialText交给原任务恢复链路。
+6. 不新增重试；保留现有重试次数与随机退避，已出字不自动重放。
+7. 不新增请求，不绕过预算扣除。
+8. 新断流错误为IncompleteMessageError/code=MODEL_STREAM_INCOMPLETE/kind=api；超时仍由既有stallGuard分类，不按字面猜完成。
+9. 逻辑放src/llm独立模块，旧适配器只接入；不改main.js和mount。
+10. 本地format/lint因缺Prettier/ESLint失败，离线Vitest缺缓存，均不算通过；已触发独立CI完整验证，结果待补。未删除/跳过测试。
+11. 尚无用户生产线路修复后复测、真机或Claude独立人工审查。本批先[skip ci]保存，验证后交接审查，不直接宣称生产已修好。
+
 ## 1.0.211 已正式发布：2026-10-20（北京时间，Codex）
 
 - 源码提交：4cd1cb785ab7906b07d64ed578ae3e50f07c0f46；Actions 39343458570。正式分支35个文件改动，无删除；main.js及mount顺序未改，临时验证工作流未合入。

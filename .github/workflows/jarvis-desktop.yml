@@ -188,6 +188,8 @@ jobs:
         run: |
           docker pull node:22-bookworm-slim
           JARVIS_CODE_SANDBOX_IMAGE=node:22-bookworm-slim node e2e/project-execution.mjs
+      - name: 验证Claude协议完成与断流取消
+        run: node e2e/anthropic-stream.mjs
       - name: 验证代码隔离与取消
         run: node e2e/sandbox-isolation.mjs
       - name: 安装Office真实渲染环境
