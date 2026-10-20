@@ -1,3 +1,4 @@
+import { createHelperLlm } from '../llm/helper.js';
 /**
  * 模型与网关：连本机网关、模型名显示、服务器模式的连接和模型同步、给内部环节用的辅助模型、记忆引擎配置。
  */
@@ -158,20 +159,7 @@ export function createModels(app) {
   function helperLlm(task = 'chat') {
     const { adapter, model, problem } = createAdapter(routeFor(app.llmConfig, task).cfg, { gateway: app.gateway });
     if (problem || providerById(app.llmConfig.provider)?.kind === 'mock') return null;
-    return async ({ system, prompt, signal, images }) => {
-      let text = '';
-      const r = await adapter.stream({
-        model,
-        system: [system],
-        messages: [{ role: 'user', content: prompt, ...(images?.length && { images }) }],
-        tools: [],
-        signal,
-        onText: (d) => {
-          text += d;
-        }
-      });
-      return r?.text || text;
-    };
+    return createHelperLlm(adapter, model);
   }
   /** 能看图的辅助模型（PPT 生成后看预览图检查排版）：分工里设了“看图”模型就用它，否则默认模型能看图才用 */
   function visionHelperLlm() {
@@ -217,3 +205,4 @@ export function createModels(app) {
     syncMemoryEngine
   };
 }
+

@@ -31,10 +31,10 @@ jobs:
       - name: 格式化本批新增模块并保存到候选分支
         run: |
           npm run format
-          npx prettier --ignore-path /dev/null --write src/app/doc/*.js src/agent/professionalDocumentTools.js tests/documentWorkflow.test.js tests/professionalDocument.test.js tests/helpers/documentWorkflowCases.js e2e/document-workflow-mechanisms.mjs evals/document-live.mjs
+          npx prettier --ignore-path /dev/null --write src/app/doc/*.js src/agent/professionalDocumentTools.js tests/documentWorkflow.test.js tests/professionalDocument.test.js tests/helpers/documentWorkflowCases.js e2e/document-workflow-mechanisms.mjs evals/document-live.mjs src/llm/helper.js tests/helperLlm.test.js
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/app/doc src/agent/professionalDocumentTools.js tests/documentWorkflow.test.js tests/professionalDocument.test.js tests/helpers/documentWorkflowCases.js e2e/document-workflow-mechanisms.mjs evals/document-live.mjs
+          git add src/app/doc src/agent/professionalDocumentTools.js tests/documentWorkflow.test.js tests/professionalDocument.test.js tests/helpers/documentWorkflowCases.js e2e/document-workflow-mechanisms.mjs evals/document-live.mjs src/llm/helper.js tests/helperLlm.test.js
           if ! git diff --cached --quiet; then git commit -m "[skip ci] 格式化文档专家工作流新增模块"; git push origin HEAD:${{ github.ref_name }}; fi
       - name: 无凭据文档工作流机制验收
         run: node e2e/document-workflow-mechanisms.mjs
