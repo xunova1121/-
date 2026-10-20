@@ -223,3 +223,12 @@ describe('直连测速不输出内容且不自动重试', () => {
     expect((await result).status).toBe('stopped');
   });
 });
+
+it('阶段已过期时，不先发模型请求再取消', async () => {
+  const controller = new AbortController();
+  const frame = modelWindow({ remaining: () => 0, retrievalRemaining: () => 0 }, true, controller);
+  const request = vi.fn(async () => '不应发出');
+  await expect(frame.race(request)).rejects.toMatchObject({ code: 'LOOKUP_SUMMARY_TIMEOUT' });
+  expect(request).not.toHaveBeenCalled();
+  frame.dispose();
+});

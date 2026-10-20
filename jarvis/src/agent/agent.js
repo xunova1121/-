@@ -316,7 +316,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     emit({ type: 'diagnostic', phase: 'model_start', model: cur.model, protocol: cur.adapter.kind, closing, inputChars: convo.reduce((sum, item) => sum + String(item.content || '').length, 0) });
     try {
     modelAttempts++;
-    r = await requestWindow.race(cur.adapter.stream({
+    r = await requestWindow.race(() => cur.adapter.stream({
       model: cur.model,
       effort,
       stallTimeouts: lookupDeadline ? { first: 20_000, between: 25_000 } : { first: 45_000, between: 60_000 },

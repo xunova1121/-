@@ -22,22 +22,26 @@ export function modelWindow(control, closing, controller) {
     if (controller.signal.aborted) onAbort();
     const delay = closing ? control?.remaining() - 1000 : control?.retrievalRemaining();
     if (!Number.isFinite(delay)) return;
-    timer = setTimeout(
-      () => {
-        if (!Number.isFinite(control.remaining())) return;
-        const error = Object.assign(new Error(closing ? '答案整理时间已用完' : '已预留时间整理现有资料'), {
-          name: 'LookupPhaseError',
-          kind: 'timeout',
-          code: closing ? 'LOOKUP_SUMMARY_TIMEOUT' : 'LOOKUP_RETRIEVAL_END'
-        });
-        controller.abort(error);
-        reject(error);
-      },
-      Math.max(1, delay)
-    );
+    const expire = () => {
+      if (!Number.isFinite(control.remaining())) return;
+      const error = Object.assign(new Error(closing ? '答案整理时间已用完' : '已预留时间整理现有资料'), {
+        name: 'LookupPhaseError', kind: 'timeout', code: closing ? 'LOOKUP_SUMMARY_TIMEOUT' : 'LOOKUP_RETRIEVAL_END'
+      });
+      controller.abort(error);
+      reject(error);
+    };
+    if (delay <= 0) expire();
+    else timer = setTimeout(expire, delay);
   });
+  // 允许请求前已过期；即使调用方尚未进入race也不产生未处理拒绝。
+  expired.catch(() => {});
   return {
-    race: (work) => Promise.race([work, expired]),
+    race: (work) => controller.signal.aborted
+      ? Promise.reject(controller.signal.reason)
+      : Promise.race([typeof work === 'function' ? Promise.resolve().then(() => {
+        if (controller.signal.aborted) throw controller.signal.reason;
+        return work();
+      }) : work, expired]),
     dispose: () => {
       clearTimeout(timer);
       controller.signal.removeEventListener('abort', onAbort);
