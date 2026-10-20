@@ -29,7 +29,8 @@ jobs:
           npm run format
           git config user.name "weiyang-ci"
           git config user.email "weiyang-ci@users.noreply.github.com"
-          git add src/main.js src/app
+          npx prettier --ignore-path /dev/null --write src/llm/modelLibrary.js src/llm/modelCatalog.js src/llm/modelScopes.js src/ui/modelLibrary.js src/ui/libraryPicker.js src/ui/modelLibrary.css server/modelCatalog.mjs tests/modelLibrary.test.js e2e/model-library.mjs
+          git add src/main.js src/app src/llm/modelLibrary.js src/llm/modelCatalog.js src/llm/modelScopes.js src/ui/modelLibrary.js src/ui/libraryPicker.js src/ui/modelLibrary.css server/modelCatalog.mjs tests/modelLibrary.test.js e2e/model-library.mjs
           if ! git diff --cached --quiet; then
             git commit -m "style: format model workspace [skip ci]"
             git push origin HEAD:codex/model-workspace-20261020
@@ -128,3 +129,5 @@ jobs:
         with:
           name: model-workspace-preview
           path: ${{ runner.temp }}/jarvis-e2e
+
+# 第二轮：补齐新增服务商网关和旧快照隔离。
