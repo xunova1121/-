@@ -141,4 +141,3 @@ export function createPanels(app) {
 
   return { showPanel, closeSide, panels, voicePanel, routingPanel, modelPicker, localModels, mcpPanel, skillsPanel };
 }
-
