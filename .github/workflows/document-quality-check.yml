@@ -30,10 +30,10 @@ jobs:
       - name: 格式化并保存独立分支
         run: |
           npm run format
-          ./node_modules/.bin/prettier --write src/agent/document*.js src/agent/officePackage.js src/agent/officeEdit.js src/agent/spreadsheetEdit.js src/agent/pdfQuality.js tests/documentQuality.test.js e2e/document-quality.mjs
+          ./node_modules/.bin/prettier --write src/agent/document*.js src/agent/longDocumentTool.js src/agent/officePackage.js src/agent/officeEdit.js src/agent/spreadsheetEdit.js src/agent/pdfQuality.js tests/documentQuality.test.js e2e/document-quality.mjs
           git config user.name "Codex verification"
           git config user.email "codex-verification@users.noreply.github.com"
-          git add src/main.js src/app src/agent/document*.js src/agent/officePackage.js src/agent/officeEdit.js src/agent/spreadsheetEdit.js src/agent/pdfQuality.js tests/documentQuality.test.js e2e/document-quality.mjs
+          git add src/main.js src/app src/agent/document*.js src/agent/longDocumentTool.js src/agent/officePackage.js src/agent/officeEdit.js src/agent/spreadsheetEdit.js src/agent/pdfQuality.js tests/documentQuality.test.js e2e/document-quality.mjs
           if ! git diff --cached --quiet; then
             git commit -m "[skip ci] 格式化文档独立模块"
             git push origin HEAD:codex/document-quality-20261020

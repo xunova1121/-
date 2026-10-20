@@ -1,0 +1,120 @@
+import * as ws from './workspace.js';
+import { generate } from './docs.js';
+import { THEME_IDS, themeList } from './themes.js';
+import { planDocument } from './documentPlan.js';
+import { deliverDocument } from './documentDelivery.js';
+import { selfCheck, lint, fixAfterBuild, reviewSlidesByImage } from './selfCheck.js';
+import { pickSheets, sheetSvg, rasterize } from './slidePreview.js';
+import { throwControl } from '../core/networkRequest.js';
+import { S, str, fmtSize, findTemplate } from './documentSchema.js';
+
+/** 保留原有一轮自修复与PPT看图检查，不额外叠加无界模型审稿。 */
+export function createDocumentGenerateTool(ctx) {
+  return (
+    {
+      name: 'create_document',
+      description: `生成 Office / 文档文件并保存到工作区；需要模板时先get_document_template。生成后自动检查文件结构、读回内容，可用时由本机LibreOffice生成真实PDF预览。结构/估算检查不等于Office视觉验收。排版自动完成（A4、标题样式、编号列表、带表头底色的表格、页码；Word / PDF 的二级标题有 3 个以上时自动加目录）。
+content 用 Markdown：
+- docx / pdf / html：开头一个“# 文档标题”，正文用 ## 一级标题、### 二级标题、#### 三级标题；支持多级列表（缩进两个空格）、| 表格 |（:--: 居中、--: 右对齐）、**粗体**、*斜体*、~~删除线~~、[链接](https://…)、> 引用、代码块、--- 分隔线、单独一行 [分页]、![图注](工作区里的图片路径)
+- pptx：每页用“## 页标题”，页标题写成一句观点（如“建设必要性：补齐告警到处置的人工断点”），版式按内容自动选：
+  · 3–8 条“标签：说明”的要点 → 卡片（如“预警研判：多源证据汇聚……”）；页标题含流程 / 场景 / 步骤 / 闭环时 → 一排步骤箭头
+  · 2–6 条以数字开头的要点（“67 万元：总投资”“0/12：雷达安装数”）→ 大数字卡片
+  · 3–7 条以日期开头（“10-19 支架到货”“11月1日：初验”）→ 时间线
+  · 3–8 条“名称：百分比”，或只有百分比列的表格（完成率、占比）→ 进度条
+  · 一句“A→B→C→D”的链路 → 流程箭头图
+  · 带数字列的表格 → 柱状图（合计行和单位不同的列写在旁边；大小差几十倍时改成表格）；其他表格 → 表格
+  · 两个 ### 小标题 → 左右对比；一两句话，或一句话 + 一两条“标签：说明” → 大字重点页；标题是“第一部分……” → 章节页；“谢谢” → 结尾页
+  · 每页多出一两句不带标签的话（总结、提醒）放进底部深色横条
+  · 页内单独一行“版式：卡片”（大数字 / 卡片 / 步骤 / 时间线 / 流程 / 对比 / 图表 / 进度 / 表格 / 重点句 / 章节 / 要点）可以指定版式
+  每条一句完整的话，不要整页长段落；同一种版式不要连续超过 2 页，普通要点列表全篇不超过 3 页；封面信息（单位、日期）用 author 和副标题，不要再做一页“副封面”
+- xlsx：CSV 或 Markdown 表格，“## 名称”分出多个工作表；“合计”行和“增长率 / 同比 / 完成率 / 占比”列会自动写成 Excel 公式（占比列留空即可），也可以直接写“=SUM(B2:B5)”；1,200、18%、¥300、2026-10-14 会自动设成对应的数字格式。
+  一个工作表里可以排成报表：“## 名称”下面第一行普通文字是副标题；“### 小节”是小节标题；可以放多张表（空行隔开）；表格之间的普通文字是说明 / 备注（整行显示）；不写“|---|”分隔行的表格是信息表（“| 项目名称 | xxx | 编号 | xxx |”，左边是名目）。只放一张表、没有文字时就是普通数据表（表头在第一行、带筛选）。
+  把文档 / 材料整理成 Excel 时：第一个工作表做“总览”（基本信息用信息表，关键数字、投资结构、核心结论）；后面按主题分表，材料里的清单、明细逐项全部收进来，不要只摘一部分；每个小节、每个模块有小计；材料前后不一致或要核对的地方，写在说明里。新建表格用这个格式，不要自己写 openpyxl 代码排版
+- csv：单个表格，自动加 BOM（Excel 打开中文不乱码）
+theme 可选：${themeList()}。不填按内容自动选；公文（通知、请示、报告、函等）用 gongwen。`,
+      input_schema: S({
+        format: { type: 'string', enum: ['docx', 'pptx', 'xlsx', 'pdf', 'html', 'md', 'txt', 'csv'] },
+        path: str('保存路径（扩展名会自动修正）'),
+        title: str('文档标题'),
+        content: str('Markdown 内容'),
+        theme: { type: 'string', enum: THEME_IDS, description: '配色主题，不填自动选' },
+        cover: { type: 'boolean', description: 'Word / PDF 加封面（正式报告、方案、标书类建议加）' },
+        subtitle: str('副标题（可选）'),
+        author: str('署名，如单位或部门（可选，用在封面）'),
+        issuer: str('公文发文单位（可选，如“××县人民政府办公室”）：正式公文（通知、请示、函）填了会加红头“××文件”；不填时从文末落款单位取'),
+        docNo: str('公文文号（可选，如“×政办发〔2026〕12号”），显示在红头下面'),
+        toc: { type: 'string', enum: ['auto', 'yes', 'no'], description: '目录：auto（默认，二级标题 3 个以上时加）/ yes / no' },
+        template_id: str('场景配方编号（get_document_template或plan_document查看），不填按要求选择；不替代用户上传的template文件'),
+        template: str('Word 模板路径（工作区里的 .docx，可选）：沿用模板的字体、标题和正文样式。不填且工作区只有一份Word模板时沿用；多份时先选定路径；传 "none" 不用模板'),
+        requirements: str('用户对这份文档的原始要求（尽量用原话：主题、必须包含的内容、字数页数、格式）。填了会在生成前对照检查有没有漏项，并自动改一轮')
+      }, ['format', 'path', 'content']),
+      run: async ({ format, path, title, content, theme, cover, subtitle, author, issuer, docNo, toc, template, template_id: templateId, requirements }, { progress, signal, checkpoint } = {}) => {
+        const loadImage = async (src) => {
+          if (/^(https?:|data:)/i.test(src)) return null;
+          try { return new Uint8Array(await (await ws.readBlob(src)).arrayBuffer()); } catch { return null; }
+        };
+        const { tpl, tplPath, auto } = await findTemplate(format, template);
+        const plan = ['docx','pptx','xlsx','pdf','html','md'].includes(format) ? planDocument({format,task:requirements || title || content.slice(0,2000),template_id:templateId}) : null;
+        const taskRules = requirements && plan ? requirements+'\n制作约束：'+plan.rules.join('；') : requirements;
+        const chosenTheme = theme || (templateId && templateId !== 'auto' ? plan?.theme : undefined);
+        // 生成前自查：规则检查；有原始要求或硬伤时请模型对照检查并改一轮
+        const check = await selfCheck({ format, content, requirements:taskRules, llm: ctx.reasonLlm ?? ctx.llm ?? null, signal, onProgress: (t) => progress?.(t) });
+        const build = (text) => generate(format, {
+          title: title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, ''), content: text, theme:chosenTheme, layout:plan?.options.layout, cover: cover ?? plan?.options.cover ?? false, subtitle, author, issuer, docNo,
+          toc: (toc || plan?.options.toc) === 'yes' ? true : (toc || plan?.options.toc) === 'no' ? false : 'auto', loadImage, toPdf: ctx.toPdf ?? null, template: tpl
+        });
+        let finalContent = check.content;
+        let out = await build(finalContent);
+        // 生成后才查得出的问题：Excel 公式错、PPT 字放不下 / 互相压住；有硬伤请模型改一轮再生成
+        const built = (o) => [...(o.info?.formulaIssues ?? []), ...(o.info?.layoutIssues ?? [])];
+        let post = null;
+        if (built(out).length) {
+          post = await fixAfterBuild({
+            format, content: check.content, issues: built(out), layout: out.info?.layout, requirements, llm: ctx.reasonLlm ?? ctx.llm ?? null, signal,
+            rebuild: async (text) => { const o = await build(text); return { out: o, issues: built(o) }; },
+            onProgress: (t) => progress?.(t), label: format === 'xlsx' ? '检查公式…' : '检查排版…'
+          });
+          if (post.result) {
+            out = post.result.out;
+            finalContent = post.content;
+          }
+        }
+        // PPT：画出每页的样子，交给能看图的模型检查一轮（没配能看图的模型、或者画不出图时跳过）
+        let looked = null;
+        if (format === 'pptx' && ctx.visionLlm && out.info?.preview?.length) {
+          try {
+            const errors = (o) => built(o).filter((x) => x.level === 'error').length;
+            const sheets = pickSheets(out.info.preview, built(out));
+            const images = [];
+            for (const g of sheets) { const img = await (ctx.rasterize ?? rasterize)(sheetSvg(g)); if (img) images.push(img); }
+            if (images.length) {
+              progress?.('看图检查排版…');
+              const pages = sheets.flat().map((x) => x.n);
+              const current = post?.result ? post.content : check.content;
+              const v = await reviewSlidesByImage({ images, pages, content: current, requirements, llm: ctx.visionLlm, signal });
+              looked = { pages: pages.length, problems: v.problems, changed: 0 };
+              if (v.changed) {
+                const o = await build(v.content);
+                if (errors(o) <= errors(out)) { out = o; finalContent = v.content; looked.changed = v.changed; }
+              }
+            }
+          } catch (e) { throwControl(e, signal); }
+        }
+        const target = path.replace(/\.[a-z0-9]+$/i, '') + `.${out.ext}`;
+        const r = await deliverDocument(ctx,out,target,{progress,signal,checkpoint,plan,issues:lint(format,finalContent),generatorReview:looked});
+        const notes = [`主题：${out.theme.name}`, r.validation.readback === 'passed' ? '已检查真实文件并读回有效内容' : '已检查文件头或结构', ...(plan ? ['制作方案：'+plan.templateName] : []), ...r.notes];
+        if (check.checked) notes.push(check.changed ? `生成前对照要求自查，修正了 ${check.changed} 处${check.problems.length ? `（${check.problems.slice(0, 4).join('；')}）` : ''}` : '生成前对照要求自查，没发现问题');
+        const what = format === 'xlsx' ? '公式' : '排版';
+        if (post?.fixed) notes.push(`生成后检查${what}，自动修正了 ${post.fixed} 处`);
+        if (looked) notes.push(looked.changed ? `看图检查了 ${looked.pages} 页，修正了 ${looked.changed} 处${looked.problems.length ? `（${looked.problems.slice(0, 3).join('；')}）` : ''}` : `看图检查了 ${looked.pages} 页${looked.problems.length ? `，发现的问题没能自动改：${looked.problems.slice(0, 3).join('；')}` : '，没发现明显问题'}`);
+        const left = [...lint(format,finalContent), ...built(out)];
+        if (left.length) notes.push(`还需要注意：${left.map((x) => x.text).join('；')}`);
+        if (out.info?.toc) notes.push('已加目录（Word 打开时如提示更新域，点“是”即可填上页码；WPS 里右键目录 →“更新目录”）');
+        if (out.info?.missingImages?.length) notes.push(`这些图片没找到，用占位文字代替了：${out.info.missingImages.join('、')}`);
+        if (tpl) notes.push(`${auto ? '自动' : ''}沿用了模板 ${tplPath} 的样式${auto ? '（不想用模板就传 template: "none"）' : ''}`);
+        if (out.note) notes.push(out.note);
+        return `${r.path}（${fmtSize(out.blob.size)}）。${notes.join('；')}`;
+      }
+    }
+  );
+}

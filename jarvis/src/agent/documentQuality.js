@@ -9,8 +9,14 @@ export async function inspectWorkbook(blob) {
   const book = XLSX.read(new Uint8Array(await blob.arrayBuffer()), { type: 'array', cellFormula: true, sheetStubs: true });
   if (book.SheetNames.length > 50) throw documentError('工作簿超过50个工作表检查上限', 'DOCUMENT_SIZE');
   let cellCount = 0;
+  let areaCount = 0;
   const sheets = book.SheetNames.map(sheetName => {
     const sheet = book.Sheets[sheetName];
+    if (sheet['!ref']) {
+      const range = XLSX.utils.decode_range(sheet['!ref']);
+      areaCount += (range.e.r - range.s.r + 1) * (range.e.c - range.s.c + 1);
+      if (areaCount > 200000) throw documentError('工作簿使用范围过大，不能展开为无界文本', 'DOCUMENT_SIZE');
+    }
     const cells = new Map();
     let rows = 0;
     let cols = 0;
@@ -39,11 +45,12 @@ export async function inspectDocument(blob, filePath, { info = {}, requiredText 
   const format = String(filePath).split('.').pop().toLowerCase();
   const office = ['docx', 'pptx', 'xlsx'].includes(format);
   const zip = office ? await openOfficePackage(blob) : null;
+  const workbook = format === 'xlsx' ? await inspectWorkbook(blob) : null;
   const validation = await checkArtifact(blob, filePath);
   const issues = [...(info.formulaIssues || []), ...(info.layoutIssues || [])];
   if (info.missingImages?.length) issues.push({ level: 'error', text: `有${info.missingImages.length}张图片未读到，文件含占位内容` });
   if (format === 'xlsx') {
-    const checked = await inspectWorkbook(blob);
+    const checked = workbook;
     issues.push(...checked.issues);
     validation.sheets = checked.sheets.length;
     validation.formulaCheck = 'static_checked_not_recalculated';
@@ -67,7 +74,7 @@ export async function inspectDocument(blob, filePath, { info = {}, requiredText 
   }
   signal?.throwIfAborted();
   const unique = [...new Map(issues.map(item => [`${item.level}:${item.text}`, { level: item.level, text: String(item.text).slice(0, 240) }])).values()];
-  return { ...validation, issues: unique.slice(0, 40), errors: unique.filter(item => item.level === 'error').length, issueCount: unique.length, facts: 'not_verified', visual: 'not_checked', render: 'not_checked' };
+  return { ...validation, issues: unique.slice(0, 40), errors: unique.filter(item => item.level === 'error').length, issueCount: unique.length, facts: 'not_verified', visual: 'not_checked', render: 'not_checked', pdfCheck: 'not_checked' };
 }
 
 export function qualitySummary(report) {

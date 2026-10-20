@@ -5,8 +5,12 @@ import { inspectRenderedPdf } from './pdfQuality.js';
 import { documentError } from './documentPlan.js';
 
 /** 把短检查报告与真实产物放一起；正文只在工作区文件中，不进会话/检查点。 */
-export async function deliverDocument(ctx, out, target, { progress, signal, checkpoint, issues = [], plan, requiredText = [] } = {}) {
+export async function deliverDocument(ctx, out, target, { progress, signal, checkpoint, issues = [], plan, generatorReview, requiredText = [] } = {}) {
   const validation = await inspectDocument(out.blob, target, { info: out.info, requiredText, signal });
+  validation.generatorVisual = generatorReview ? 'generator_preview_reviewed' : 'not_checked';
+  if (generatorReview?.problems?.length && !generatorReview.changed) {
+    issues = [...issues, ...generatorReview.problems.slice(0, 10).map(text => ({level:'warn',text:'生成器看图发现：'+String(text).slice(0,160)}))];
+  }
   const extra = issues.map(item => ({ level: item.level, text: String(item.text).slice(0, 240) }));
   validation.issues = [...validation.issues, ...extra].slice(0, 40);
   validation.errors += extra.filter(item => item.level === 'error').length;

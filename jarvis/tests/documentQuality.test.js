@@ -117,6 +117,12 @@ describe('真实产物检查与半成品', () => {
 });
 
 describe('PPT按实际页码修改', () => {
+  it('有日期的实质内容不被副封面优化吞掉', async () => {
+    const out = await generate('pptx',{title:'冷链经营汇报',content:'## 本期收入完成率为90%\n统计期间：2026年9月。本期收入来自合成测试资料。\n\n## 后续行动\n按差异证据落实改进安排。'});
+    const parsed = await parseFile(out.blob,'经营.pptx');
+    expect(parsed.text).toContain('本期收入完成率为90%');
+    expect((await inspectDocument(out.blob,'经营.pptx')).slides).toBe(3);
+  });
   it('重新排序后只修改指定的真实页，其他部件逐字保留', async () => {
     const out = await generate('pptx',{title:'测试',content:deck});
     const zip = await openOfficePackage(out.blob);

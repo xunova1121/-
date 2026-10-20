@@ -12,6 +12,7 @@
  */
 import { parseDoc, plain, headings, markSalutationAndSignature } from './docModel.js';
 import { FONTS } from './themes.js';
+import { openOfficePackage } from './officePackage.js';
 import { imageInfo } from './imageInfo.js';
 
 const PT = (n) => Math.round(n * 2); // 字号：磅 → 半磅
@@ -367,7 +368,7 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
 export async function applyTemplate(blob, template) {
   const JSZip = (await import('jszip')).default;
   let tpl;
-  try { tpl = await JSZip.loadAsync(template); } catch { throw new Error('模板打不开，不是有效的 Word 文件（.docx）'); }
+  try { tpl = await openOfficePackage(template); } catch { throw new Error('模板打不开，不是有效的 Word 文件（.docx）'); }
   const tplStyles = await tpl.file('word/styles.xml')?.async('string');
   if (!tplStyles) throw new Error('模板里没有样式定义（word/styles.xml），不是有效的 Word 文件');
   const zip = await JSZip.loadAsync(await blob.arrayBuffer());
