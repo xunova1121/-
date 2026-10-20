@@ -1,4 +1,4 @@
-/** Claude 的消息完成与 HTTP 断开不是一回事，不能把 EOF 当作成功条件。 */
+/** Claude 原生协议：消息完成与 HTTP 断开不是一回事，不能把 EOF 当作成功条件。 */
 export class IncompleteMessageError extends Error {
   constructor() {
     super('模型流未提供完整的消息结束信号，已保留收到的文字');
