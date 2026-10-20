@@ -5,14 +5,29 @@ import { once } from 'node:events';
 import { createAnthropicAdapter } from '../src/llm/anthropic.js';
 
 const request = {
-  model: 'claude-fixture', system: ['测试', ''],
-  messages: [{ role: 'user', content: '你好' }], tools: [],
-  stallTimeouts: { first: 1000, between: 100 }, maxTransientRetries: 0
+  model: 'claude-fixture',
+  system: ['测试', ''],
+  messages: [{ role: 'user', content: '你好' }],
+  tools: [],
+  stallTimeouts: { first: 1000, between: 100 },
+  maxTransientRetries: 0
 };
 
 function sdkFixture({ complete = true, stop = 'end_turn', text = '完成', close = false } = {}) {
   const events = [
-    { type: 'message_start', message: { id: 'msg_fixture', type: 'message', role: 'assistant', model: 'claude-fixture', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 0 } } },
+    {
+      type: 'message_start',
+      message: {
+        id: 'msg_fixture',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-fixture',
+        content: [],
+        stop_reason: null,
+        stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 0 }
+      }
+    },
     { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
     { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } },
     { type: 'content_block_stop', index: 0 },
@@ -20,13 +35,26 @@ function sdkFixture({ complete = true, stop = 'end_turn', text = '完成', close
     ...(complete ? [{ type: 'message_stop' }] : [])
   ];
   const cancel = vi.fn();
-  const fetchMock = vi.fn(async () => new Response(new ReadableStream({
-    start(controller) {
-      for (const event of events) controller.enqueue(new TextEncoder().encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`));
-      if (close) controller.close();
-    }, cancel
-  }), { headers: { 'content-type': 'text/event-stream' } }));
-  const client = new Anthropic({ apiKey: 'fixture-not-a-secret', baseURL: 'https://fixture.invalid', fetch: fetchMock, maxRetries: 0, dangerouslyAllowBrowser: true });
+  const fetchMock = vi.fn(
+    async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            for (const event of events) controller.enqueue(new TextEncoder().encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`));
+            if (close) controller.close();
+          },
+          cancel
+        }),
+        { headers: { 'content-type': 'text/event-stream' } }
+      )
+  );
+  const client = new Anthropic({
+    apiKey: 'fixture-not-a-secret',
+    baseURL: 'https://fixture.invalid',
+    fetch: fetchMock,
+    maxRetries: 0,
+    dangerouslyAllowBrowser: true
+  });
   return { adapter: createAnthropicAdapter({ client }), cancel, fetchMock };
 }
 
@@ -46,7 +74,19 @@ describe('真实 Anthropic SDK 的协议完成收尾（不访问外网）', () =
       req.resume();
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       const events = [
-        { type: 'message_start', message: { id: 'msg_local', type: 'message', role: 'assistant', model: 'claude-fixture', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 0 } } },
+        {
+          type: 'message_start',
+          message: {
+            id: 'msg_local',
+            type: 'message',
+            role: 'assistant',
+            model: 'claude-fixture',
+            content: [],
+            stop_reason: null,
+            stop_sequence: null,
+            usage: { input_tokens: 1, output_tokens: 0 }
+          }
+        },
         { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
         { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '完成' } },
         { type: 'content_block_stop', index: 0 },
@@ -54,7 +94,9 @@ describe('真实 Anthropic SDK 的协议完成收尾（不访问外网）', () =
         { type: 'message_stop' }
       ];
       for (const event of events) res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
-      res.on('close', () => { disconnected = true; });
+      res.on('close', () => {
+        disconnected = true;
+      });
       // 故意不调用res.end，验证SDK真实传输取消，而非测试替身的cancel钩子。
     });
     server.listen(0, '127.0.0.1');
@@ -91,6 +133,9 @@ describe('真实 Anthropic SDK 的协议完成收尾（不访问外网）', () =
   it('用户取消不会因收尾逻辑变成成功', async () => {
     const { adapter } = sdkFixture({ complete: false });
     const controller = new AbortController();
-    await expect(adapter.stream({ ...request, signal: controller.signal, onText: () => controller.abort() })).rejects.toMatchObject({ name: 'AbortError', partialText: '完成' });
+    await expect(adapter.stream({ ...request, signal: controller.signal, onText: () => controller.abort() })).rejects.toMatchObject({
+      name: 'AbortError',
+      partialText: '完成'
+    });
   });
 });

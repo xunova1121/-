@@ -12,12 +12,25 @@ function fixture(events, { final = message(), close = false } = {}) {
   let aborted = false;
   let finalCalls = 0;
   return {
-    on(type, callback) { if (type === 'message') listeners.add(callback); },
-    off(type, callback) { if (type === 'message') listeners.delete(callback); },
-    abort() { aborted = true; },
-    get cleaned() { return aborted && listeners.size === 0; },
-    get finalCalls() { return finalCalls; },
-    finalMessage() { finalCalls++; return new Promise(() => {}); },
+    on(type, callback) {
+      if (type === 'message') listeners.add(callback);
+    },
+    off(type, callback) {
+      if (type === 'message') listeners.delete(callback);
+    },
+    abort() {
+      aborted = true;
+    },
+    get cleaned() {
+      return aborted && listeners.size === 0;
+    },
+    get finalCalls() {
+      return finalCalls;
+    },
+    finalMessage() {
+      finalCalls++;
+      return new Promise(() => {});
+    },
     [Symbol.asyncIterator]() {
       return {
         async next() {
@@ -33,8 +46,11 @@ function fixture(events, { final = message(), close = false } = {}) {
 
 async function read(stream, options = {}) {
   const guard = stallGuard(options.signal, { first: 40, between: 40 });
-  try { return await readAnthropicStream(stream, { guard, ...options }); }
-  finally { guard.done(); }
+  try {
+    return await readAnthropicStream(stream, { guard, ...options });
+  } finally {
+    guard.done();
+  }
 }
 
 const textDelta = { type: 'content_block_delta', delta: { type: 'text_delta', text: '完成' } };
@@ -52,10 +68,13 @@ test('完成消息后连接不关闭，也立即返回并清理，不等待 fina
 });
 
 test('SDK 完整工具参数、思考块和签名按原对象保留', async () => {
-  const final = { content: [
-    { type: 'thinking', thinking: 'fixture', signature: 'signature-fixture' },
-    { type: 'tool_use', id: 't1', name: 'read_file', input: { path: 'test.txt' } }
-  ], stop_reason: 'tool_use' };
+  const final = {
+    content: [
+      { type: 'thinking', thinking: 'fixture', signature: 'signature-fixture' },
+      { type: 'tool_use', id: 't1', name: 'read_file', input: { path: 'test.txt' } }
+    ],
+    stop_reason: 'tool_use'
+  };
   const stream = fixture([stopped], { final });
   assert.equal((await read(stream)).message, final);
 });
@@ -83,10 +102,13 @@ test('message_stop 缺少有效停止原因不能成功', async () => {
 test('用户运行中停止保留 AbortError 与部分文字，并清理请求', async () => {
   const controller = new AbortController();
   const stream = fixture([textDelta]);
-  await assert.rejects(read(stream, {
-    signal: controller.signal,
-    onText: () => controller.abort()
-  }), { name: 'AbortError', partialText: '完成' });
+  await assert.rejects(
+    read(stream, {
+      signal: controller.signal,
+      onText: () => controller.abort()
+    }),
+    { name: 'AbortError', partialText: '完成' }
+  );
   assert.equal(stream.cleaned, true);
 });
 
@@ -104,10 +126,7 @@ test('max_tokens 不被改成正常 end_turn，由调度层报告长度中断', 
 
 test('原生搜索事件保留，不能误当最终答复', async () => {
   const names = [];
-  const stream = fixture([
-    { type: 'content_block_start', content_block: { type: 'server_tool_use', name: 'web_search' } },
-    textDelta, stopped
-  ]);
+  const stream = fixture([{ type: 'content_block_start', content_block: { type: 'server_tool_use', name: 'web_search' } }, textDelta, stopped]);
   await read(stream, { onServerTool: (name) => names.push(name) });
   assert.deepEqual(names, ['web_search']);
 });
@@ -117,9 +136,12 @@ test('预算控制信号不吞掉或改写', async () => {
   const controller = new AbortController();
   const budgetError = Object.assign(new Error('预算用完'), { code: 'RETRIEVAL_BUDGET' });
   const stream = fixture([textDelta]);
-  await assert.rejects(read(stream, {
-    signal: controller.signal,
-    onText: () => controller.abort(budgetError)
-  }), { code: 'RETRIEVAL_BUDGET', partialText: '完成' });
+  await assert.rejects(
+    read(stream, {
+      signal: controller.signal,
+      onText: () => controller.abort(budgetError)
+    }),
+    { code: 'RETRIEVAL_BUDGET', partialText: '完成' }
+  );
   assert.equal(stream.cleaned, true);
 });
