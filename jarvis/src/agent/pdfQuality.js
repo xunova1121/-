@@ -11,12 +11,12 @@ export async function inspectRenderedPdf(blob, { signal } = {}) {
   signal?.addEventListener('abort', abort, { once: true });
   try {
     signal?.throwIfAborted();
-    const document = await loading.promise;
-    if (document.numPages > 120) throw documentError('PDF超过120页检查上限', 'DOCUMENT_SIZE');
+    const pdfDocument = await loading.promise;
+    if (pdfDocument.numPages > 120) throw documentError('PDF超过120页检查上限', 'DOCUMENT_SIZE');
     const issues = [];
-    for (let index = 1; index <= document.numPages; index++) {
+    for (let index = 1; index <= pdfDocument.numPages; index++) {
       signal?.throwIfAborted();
-      const page = await document.getPage(index);
+      const page = await pdfDocument.getPage(index);
       const content = await page.getTextContent();
       if (content.items.length > 10000) throw documentError('PDF单页内容过多', 'DOCUMENT_SIZE');
       const text = content.items.filter(item => typeof item.str === 'string' && item.str.trim());
@@ -30,7 +30,7 @@ export async function inspectRenderedPdf(blob, { signal } = {}) {
       if (outside && issues.length < 20) issues.push({ level: 'warn', text: `真实PDF第${index}页有文字接近或越过页面边界，需打开预览核对` });
       page.cleanup();
     }
-    return { state: 'pdf_pages_checked_not_visual_reviewed', pages: document.numPages, issues };
+    return { state: 'pdf_pages_checked_not_visual_reviewed', pages: pdfDocument.numPages, issues };
   } finally {
     signal?.removeEventListener('abort', abort);
     await loading.destroy();

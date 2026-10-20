@@ -51,6 +51,15 @@ describe('制作方案与模板', () => {
     expect(plan.sources).toHaveLength(12);
     expect(plan.sources[0]).toHaveLength(300);
   });
+  it('研究简报有独立紧凑排版，企业模板仍可覆盖样式', async () => {
+    const content = '# 研究简报\n\n## 结论\n这是一段有来源边界的研究内容。';
+    const regular = await generate('docx',{content,layout:'report'});
+    const brief = await generate('docx',{content,layout:'brief'});
+    const regularZip = await openOfficePackage(regular.blob);
+    const briefZip = await openOfficePackage(brief.blob);
+    expect(await regularZip.file('word/document.xml').async('string')).not.toBe(await briefZip.file('word/document.xml').async('string'));
+    expect(await regularZip.file('word/styles.xml').async('string')).not.toBe(await briefZip.file('word/styles.xml').async('string'));
+  });
   it('显式配方真实应用主题；用户显式主题仍优先', async () => {
     const result = await tool('create_document').run({format:'pptx',path:'技术',title:'技术方案',content:deck,template_id:'ppt-product'});
     expect(result).toContain('科技创新');

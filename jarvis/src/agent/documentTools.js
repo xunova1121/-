@@ -142,8 +142,8 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         // 生成前自查：规则检查；有原始要求或硬伤时请模型对照检查并改一轮
         const check = await selfCheck({ format, content, requirements:taskRules, llm: ctx.reasonLlm ?? ctx.llm ?? null, signal, onProgress: (t) => progress?.(t) });
         const build = (text) => generate(format, {
-          title: title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, ''), content: text, theme:chosenTheme, cover: Boolean(cover), subtitle, author, issuer, docNo,
-          toc: toc === 'yes' ? true : toc === 'no' ? false : 'auto', loadImage, toPdf: ctx.toPdf ?? null, template: tpl
+          title: title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, ''), content: text, theme:chosenTheme, layout:plan?.options.layout, cover: cover ?? plan?.options.cover ?? false, subtitle, author, issuer, docNo,
+          toc: (toc || plan?.options.toc) === 'yes' ? true : (toc || plan?.options.toc) === 'no' ? false : 'auto', loadImage, toPdf: ctx.toPdf ?? null, template: tpl
         });
         let out = await build(check.content);
         // 生成后才查得出的问题：Excel 公式错、PPT 字放不下 / 互相压住；有硬伤请模型改一轮再生成
@@ -256,5 +256,16 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         return lines.join('\n');
       }
     },
-  ];
+  ].map(tool => ({ ...tool, run: async (...args) => {
+    try {
+      return await tool.run(...args);
+    } catch (error) {
+      throwControl(error, args[1]?.signal);
+      if (!error.code && !error.status && !error.kind) {
+        error.code = 'DOCUMENT_OPERATION';
+        error.kind = 'document';
+      }
+      throw error;
+    }
+  } }));
 }

@@ -30,7 +30,7 @@ jobs:
       - name: 格式化并保存独立分支
         run: |
           npm run format
-          npx prettier --write src/agent/document*.js src/agent/officePackage.js src/agent/officeEdit.js src/agent/spreadsheetEdit.js src/agent/pdfQuality.js tests/documentQuality.test.js e2e/document-quality.mjs
+          ./node_modules/.bin/prettier --write src/agent/document*.js src/agent/officePackage.js src/agent/officeEdit.js src/agent/spreadsheetEdit.js src/agent/pdfQuality.js tests/documentQuality.test.js e2e/document-quality.mjs
           git config user.name "Codex verification"
           git config user.email "codex-verification@users.noreply.github.com"
           git add src/main.js src/app src/agent/document*.js src/agent/officePackage.js src/agent/officeEdit.js src/agent/spreadsheetEdit.js src/agent/pdfQuality.js tests/documentQuality.test.js e2e/document-quality.mjs
@@ -55,11 +55,23 @@ jobs:
       - name: 安装Office真实渲染环境
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-impress libreoffice-calc fonts-noto-cjk xdotool
+          sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-impress libreoffice-calc fonts-noto-cjk xdotool poppler-utils
       - name: 验证Word、PPT、Excel真实转PDF
         run: node e2e/office-render.mjs
       - name: 验证文档场景模板、精确修改及真实PDF逐页检查
         run: node e2e/document-quality.mjs "$RUNNER_TEMP/jarvis-e2e/documents"
+      - name: 保存实际PDF页面供复查（仅候选分支）
+        run: |
+          mkdir -p ../.document-preview
+          pdftoppm -f 2 -l 2 -singlefile -scale-to 1200 -png "$RUNNER_TEMP/jarvis-e2e/documents/样例/cold-chain-review.预览.pdf" /tmp/ppt-sample
+          pdftoppm -f 2 -l 2 -singlefile -scale-to 1200 -png "$RUNNER_TEMP/jarvis-e2e/documents/样例/project-proposal.预览.pdf" /tmp/word-sample
+          pdftoppm -f 1 -l 1 -singlefile -scale-to 1200 -png "$RUNNER_TEMP/jarvis-e2e/documents/样例/task-assessment.预览.pdf" /tmp/excel-sample
+          for kind in ppt word excel; do
+            base64 -w 0 "/tmp/$kind-sample.png" > "../.document-preview/$kind.png.b64"
+          done
+          git add ../.document-preview
+          git commit -m "[skip ci] 保存合成样例实际PDF页面" || test -z "$(git status --porcelain ../.document-preview)"
+          git push origin HEAD:codex/document-quality-20261020
       - name: 构建网页版
         run: npm run build
       - name: 服务器模式端到端测试，打包服务器版

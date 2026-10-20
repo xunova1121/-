@@ -181,9 +181,9 @@ function toBase64(bytes) {
  * @param {Uint8Array|ArrayBuffer} [o.template]  Word 模板（沿用它的样式）
  * @returns {Promise<{blob: Blob, ext: string, note?: string, theme: object, info?: object}>}
  */
-export async function generate(format, { title = '未命名', content = '', theme: themeName = '', cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, toPdf = null, template = null, issuer = '', docNo = '' } = {}) {
+export async function generate(format, { title = '未命名', content = '', theme: themeName = '', cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, toPdf = null, template = null, layout = 'report', issuer = '', docNo = '' } = {}) {
   const theme = resolveTheme(themeName, `${title}\n${content}`);
-  const page = { theme, cover, subtitle, author, date, toc };
+  const page = { theme, cover, subtitle, author, date, toc, layout };
   switch (format) {
     case 'md': case 'txt':
       return { blob: new Blob([content], { type: 'text/plain' }), ext: format, theme };
