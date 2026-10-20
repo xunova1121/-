@@ -39,6 +39,7 @@ import * as ws from '../src/agent/workspace.js';
 import { DEFAULT_CONFIG } from '../src/llm/config.js';
 import { streamPCModel } from './pcModelBridge.mjs';
 import { serverModelCatalog } from './modelCatalog.mjs';
+import { boundedCatalogs } from '../src/llm/modelLibrary.js';
 
 const UPLOAD_LIMIT = 50 * 1024 * 1024;
 /** 程序所在目录（安装包里的 VERSION 文件在这里） */
@@ -61,7 +62,10 @@ export function mergeConfig(old, next) {
   const keys = { ...(old.keys ?? {}) };
   for (const [k, v] of Object.entries(next.keys ?? {})) keys[k] = keep(v, old.keys?.[k]);
   const maps = Object.fromEntries(['models', 'baseURLs', 'providerNames', 'modelLists'].map((field) => [field, { ...old[field], ...next[field] }]));
-  return { ...old, ...next, ...maps, keys, tavilyKey: keep(next.tavilyKey, old.tavilyKey), bochaKey: keep(next.bochaKey, old.bochaKey) };
+  const merged = { ...old, ...next, ...maps, keys, tavilyKey: keep(next.tavilyKey, old.tavilyKey), bochaKey: keep(next.bochaKey, old.bochaKey) };
+  // 字典合并不能把前端淘汰的旧地址缓存重新带回来；服务器也必须执行同一上限。
+  if (next.modelLists || next.baseURLs) merged.modelLists = boundedCatalogs(merged);
+  return merged;
 }
 
 /**
