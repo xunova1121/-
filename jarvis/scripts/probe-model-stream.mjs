@@ -5,7 +5,7 @@ import { createAdapter, DEFAULT_CONFIG } from '../src/llm/config.js';
 import { classifyTask, routeFor, effortFor } from '../src/llm/router.js';
 import { errorKind } from '../src/core/suggest.js';
 
-/** 直连基线：不搜索、不回退、不重试；不记录密钥、地址、回答或内部提示。 */
+/** 直连基线：不搜索、不换备用模型、不做瞬时重试；不记录密钥、地址、回答或内部提示。 */
 export async function probeDirectModel({ adapter, model, question, signal, effort, now = Date.now, timeoutMs = 45000 }) {
   const started = now();
   const controller = new AbortController();
@@ -14,6 +14,7 @@ export async function probeDirectModel({ adapter, model, question, signal, effor
   if (signal?.aborted) abort();
   let firstTextMs = null;
   let responseChars = 0;
+  let lastTextMs = null;
   let timer;
   const expired = new Promise((resolve, reject) => {
     controller.signal.addEventListener('abort', () => reject(signal?.aborted ? Object.assign(new Error('已取消'), { name: 'AbortError' }) : controller.signal.reason), { once: true });
@@ -34,13 +35,14 @@ export async function probeDirectModel({ adapter, model, question, signal, effor
         if (!delta || controller.signal.aborted) return;
         firstTextMs ??= now() - started;
         responseChars += delta.length;
+        lastTextMs = now() - started;
       }
     })]);
-    return { status: 'done', firstTextMs, totalMs: now() - started, responseChars };
+    return { status: 'done', firstTextMs, lastTextMs, totalMs: now() - started, responseChars };
   } catch (error) {
     const failure = controller.signal.reason?.code === 'DIRECT_PROBE_TIMEOUT' ? controller.signal.reason : error;
     return {
-      status: signal?.aborted ? 'stopped' : 'error', firstTextMs, totalMs: now() - started, responseChars,
+      status: signal?.aborted ? 'stopped' : 'error', firstTextMs, lastTextMs, totalMs: now() - started, responseChars,
       errorKind: errorKind(failure), code: failure.code || null, httpStatus: failure.status || null
     };
   } finally {
@@ -65,7 +67,7 @@ export async function main(args = process.argv.slice(2), env = process.env) {
   const out = args.find((arg) => arg.startsWith('--out='))?.slice(6) || `weiyang-direct-${Date.now()}.json`;
   const report = {
     schemaVersion: 1, startedAt: new Date().toISOString(), results: [],
-    limitations: ['使用短固定提示，不等同于未央完整上下文；差值不能全部算作调度开销。', '禁用工具、搜索、自动回退和自动重试；同型号可能仍被中转商路由到不同上游。', '未知Token和费用不当作零；此脚本不修改服务配置或历史会话。']
+    limitations: ['使用短固定提示，不等同于未央完整上下文；差值不能全部算作调度开销。', '禁用工具、搜索、备用模型回退和瞬时错误重试；协议参数兼容降级仍可能产生额外请求，同型号也可能被中转到不同上游。', '未知Token和费用不当作零；此脚本不修改服务配置或历史会话。']
   };
   await fs.writeFile(out, JSON.stringify(report, null, 2), { flag: 'wx', mode: 0o600 });
   const controller = new AbortController();

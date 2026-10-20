@@ -281,7 +281,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   for (; step < limit; step++) {
     if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
     takeInbox();
-    if (lookupDeadline && lookupControl && (lookupControl.retrievalRemaining() <= 0 || retrieval.active && modelAttempts >= QUICK_MODEL_ATTEMPTS)) {
+    if (!retrieval.reason && lookupDeadline && lookupControl && (lookupControl.retrievalRemaining() <= 0 || retrieval.active && modelAttempts >= QUICK_MODEL_ATTEMPTS)) {
       retrieval.close('已停止新增检索，正在整理已有资料');
     }
     const closing = Boolean(retrieval.reason);
