@@ -62,3 +62,5 @@ jobs:
         with:
           name: model-workspace-final-preview
           path: ${{ runner.temp }}/jarvis-e2e
+
+# 复核生成型号写盘与读回，保持原验收断言。
