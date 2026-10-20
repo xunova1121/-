@@ -6,8 +6,15 @@ export function createHelperLlm(adapter, model) {
       model,
       system: [system],
       messages: [{ role: 'user', content: inputText, ...(images?.length && { images }) }],
-      tools: [], signal, allowWebSearch, maxWebSearches, maxTransientRetries, maxPartialRetries,
-      onText: delta => { text += delta; }
+      tools: [],
+      signal,
+      allowWebSearch,
+      maxWebSearches,
+      maxTransientRetries,
+      maxPartialRetries,
+      onText: (delta) => {
+        text += delta;
+      }
     });
     return result?.text || text;
   };
