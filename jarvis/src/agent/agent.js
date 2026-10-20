@@ -1,3 +1,5 @@
+import { reviewOutcome } from './reviewOutcome.js';
+import { modelWindow, QUICK_MODEL_ATTEMPTS } from './lookupWindow.js';
 import { createExecutionReview } from './executionReview.js';
 import { throwControl } from '../core/networkRequest.js';
 import { errorKind } from '../core/suggest.js';
@@ -195,13 +197,15 @@ export function trimComputerScreenshots(messages,keep=2) {
   for(const m of shots.slice(0,Math.max(0,shots.length-keep))){delete m.images;m.content=`${m.content}\n（旧界面截图已从模型输入移除；请以最新截图为准。）`;}
 }
 
-async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, computerTask = false }) {
+async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, lookupControl = null, computerTask = false }) {
   if (light && needsActionTools(userText, history)) light = false;
   const capabilities = capabilityBlock(tools);
   // 环境完全没有产物/计算核验能力时，直接说明未验收，不空转两轮模型。
   const canReview = tools.some(tool => /^(?:create_document|write_long_document|edit_office_document|read_file|write_file|run_javascript|run_python|computer_run|computer_read_file|verify_numbers)$/.test(tool.name));
   const review = createExecutionReview(requirementText);
   const retrieval = createRetrievalBudget(lookupDeadline ? '普通查询' : images.length ? `逐项核验 ${requirementText}` : requirementText, { now, timeBudgetMs });
+  let modelAttempts = 0;
+  let nativeSearchCalls = 0;
   let closingTurns = 0;
   let retrievalStopped = false;
   emit({ type: 'state', value: 'processing' });
@@ -277,9 +281,12 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   for (; step < limit; step++) {
     if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
     takeInbox();
+    if (!retrieval.reason && lookupDeadline && lookupControl && (lookupControl.retrievalRemaining() <= 0 || retrieval.active && modelAttempts >= QUICK_MODEL_ATTEMPTS)) {
+      retrieval.close('已停止新增检索，正在整理已有资料');
+    }
     const closing = Boolean(retrieval.reason);
     if (closing) {
-      if (!retrieval.extensive && ++closingTurns > 2) { retrievalStopped = true; break; }
+      if (!retrieval.extensive && ++closingTurns > (lookupControl ? 1 : 2)) { retrievalStopped = true; break; }
       convo.push({ role: 'user', content: retrieval.note });
     }
     trimComputerScreenshots(convo);
@@ -305,31 +312,35 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     const relayAbort = () => requestCtrl.abort(signal.reason);
     signal?.addEventListener('abort', relayAbort, { once: true });
     const stopSearch = () => { searchTimedOut = true; retrieval.close('本轮联网检索已达到预算'); requestCtrl.abort(); };
-    emit({ type: 'diagnostic', phase: 'model_start' });
+    const requestWindow = modelWindow(lookupDeadline ? lookupControl : null, closing, requestCtrl);
+    emit({ type: 'diagnostic', phase: 'model_start', model: cur.model, protocol: cur.adapter.kind, closing, inputChars: convo.reduce((sum, item) => sum + String(item.content || '').length, 0) });
     try {
-    r = await cur.adapter.stream({
+    modelAttempts++;
+    r = await requestWindow.race(() => cur.adapter.stream({
       model: cur.model,
       effort,
       stallTimeouts: lookupDeadline ? { first: 20_000, between: 25_000 } : { first: 45_000, between: 60_000 },
-      maxTransientRetries: lookupDeadline ? 0 : 1,
-      maxPartialRetries: 1, // 已输出的回答允许一次续写，仍受本轮总时限约束
+      maxTransientRetries: lookupDeadline || closing ? 0 : 1,
+      maxPartialRetries: closing ? 0 : 1, // 已输出的回答允许一次续写，仍受本轮总时限约束
       system: light ? [LIGHT_PROMPT, [ctx.dynamic, DIALOGUE_POLICY, capabilities, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, DIALOGUE_POLICY, capabilities, computerNote, requirementContext, toolHint, review.contractNote(), voice && VOICE_NOTE].filter(Boolean).join('\n\n')],
       messages: convo,
       tools: closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list(),
       // 模型自带的联网搜索在服务商那边执行、搜一次扣一次费：剩余次数在发请求前就定好，不等搜完再拦
-      allowWebSearch: !closing && retrieval.left > 0, maxWebSearches: retrieval.left,
+      allowWebSearch: !closing && retrieval.left > 0, maxWebSearches: lookupDeadline ? Math.min(2, retrieval.left) : retrieval.left,
       signal: requestCtrl.signal,
       onRetry: (attempt) => {
         stripper = new EmotionTagStripper(); // 续写的开头可能又带情绪标签
         emit({ type: 'retry', attempt, resume: Boolean(stepText.trim()) });
       },
       onText: (delta, meta) => {
+        if (requestCtrl.signal.aborted) return;
         if (meta?.serverTool) {
           emit({ type: 'server_tool', name: meta.serverTool });
           if (/search/.test(meta.serverTool)) {
+            nativeSearchCalls++;
             if (!retrieval.begin()) stopSearch();
             else if (Number.isFinite(retrieval.remaining)) {
-              clearTimeout(searchTimer); searchTimer = setTimeout(stopSearch, Math.max(1, retrieval.remaining));
+              clearTimeout(searchTimer); searchTimer = setTimeout(stopSearch, Math.max(1, Math.min(retrieval.remaining, lookupDeadline && lookupControl ? lookupControl.retrievalRemaining() : Infinity)));
             }
           }
           return;
@@ -337,11 +348,21 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         streamed = true;
         acceptVisible(boundary.push(delta));
       }
-    });
+    }));
     if (!streamed && r.text) acceptVisible(boundary.push(r.text));
     acceptVisible(boundary.flush());
     if (r.stop === 'max_tokens' || r.stop === 'length') throw Object.assign(new Error('模型输出达到长度上限，回答尚未完成'), {code:'MODEL_OUTPUT_LIMIT',kind:'api'});
     } catch (e) {
+      if (e.code === 'LOOKUP_RETRIEVAL_END' && !signal?.aborted) {
+        retrieval.close('已预留时间整理现有资料');
+        if (stepText.trim()) { finalText += stepText + '\n\n'; emit({ type: 'text', delta: '\n\n' }); }
+        continue;
+      }
+      if (lookupControl && closing && !signal?.aborted && (e.code === 'LOOKUP_SUMMARY_TIMEOUT' || errorKind(e) === 'timeout' || errorKind(e) === 'network')) {
+        if (stepText.trim()) finalText += stepText;
+        retrievalStopped = true;
+        break;
+      }
       if (e.code === 'ANALYSIS_IN_OUTPUT' && !stepText.trim() && outputRepairs < 1 && !signal?.aborted) {
         outputRepairs++;
         convo.push({role:'user',content:'上一段返回了分析草稿，未展示。请直接用简体中文给出正式答复，不展示内部分析；不要虚构缺失的数据或工具结果。'});
@@ -362,6 +383,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       }
       throw e;
     } finally {
+      requestWindow.dispose();
       emit({ type: 'diagnostic', phase: 'model_end' });
       clearTimeout(searchTimer); signal?.removeEventListener('abort', relayAbort);
     }
@@ -381,7 +403,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         if (finalText && !/\n$/.test(finalText)) { emit({ type: 'text', delta: '\n\n' }); finalText += '\n\n'; }
         continue;
       }
-      const note = (!closing || retrieval.extensive) && checks < 2 && !light && cur.adapter.kind !== 'mock' ? [finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }), canReview ? review.guidance() : ''].filter(Boolean).join('\n') : '';
+      const note = (!closing || retrieval.extensive) && checks < 2 && !light && cur.adapter.kind !== 'mock' ? [finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }), canReview && !lookupDeadline ? review.guidance() : ''].filter(Boolean).join('\n') : '';
       if (!note) break;
       checks++;
       convo.push({ role: 'user', content: note });
@@ -425,7 +447,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         if (web && !retrieval.begin()) throw new Error(retrieval.note);
         const run = (s) => tool.run(c.args, { signal: s, progress, retrieval, sessionId, requestText: review.report().request, checkpoint: event => { if (event.type === 'artifact_validation') review.artifact(event); return checkpoint?.(event); } });
         const r = web && Number.isFinite(retrieval.remaining)
-          ? await withWebDeadline(run, { signal, timeoutMs: retrieval.remaining }) : await run(signal);
+          ? await withWebDeadline(run, { signal, timeoutMs: Math.min(retrieval.remaining, lookupDeadline && lookupControl ? lookupControl.retrievalRemaining() : Infinity) }) : await run(signal);
         if (r && typeof r === 'object' && 'text' in r) { output = String(r.text); outImages = r.images ?? []; } else output = String(r);
         if(outImages.length&&/^computer_(look|click|type|key|scroll|drag|screenshot)$/.test(c.name))newScreenThisStep=true;
       } catch (e) {
@@ -480,12 +502,11 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     finalText += note;
     emit({ type: 'text', delta: note });
   }
-  const acceptance = review.report();
+  const acceptance = { ...review.report(), ...reviewOutcome(review.report(), { interrupted: retrievalStopped, nativeSearchCalls }) };
   const unmet = review.guidance();
-  if (unmet && !light) {
-    const notice = '\n\n（自动验收仍有待核对项目：' + unmet + '）';
-    finalText += notice;
-    emit({ type: 'text', delta: notice });
+  if (acceptance.notice && !light) {
+    finalText += acceptance.notice;
+    emit({ type: 'text', delta: acceptance.notice });
   }
   emit({ type: 'task_review', review: { ...acceptance, request: undefined } });
   // 只有正常收尾、且最后一次工具调用成功，才记为“完成任务”（计入进化等级）；否则记为未完成，便于之后复盘

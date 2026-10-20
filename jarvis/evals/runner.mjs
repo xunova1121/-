@@ -53,6 +53,7 @@ export async function runCase(api, item, { runId = randomUUID(), now = Date.now,
     result.timing = info?.timing ?? null;
     result.usage = info?.usage ?? null;
     result.review = info?.review ?? null;
+    result.outcome = info?.review?.outcome ?? 'not_checked';
     result.usageReason = result.usage ? null : '接口未提供完整Token用量，不能记成零';
     result.clientTotalMs = now() - started;
     result.withinTarget = result.status === 'done' && result.clientTotalMs <= item.targetMs;

@@ -1,3 +1,4 @@
+import { createQueryLedger } from './retrievalQuality.js';
 /** 普通问题快查；报告、多项核验和明确的深度研究保留较长预算。预算从首次联网开始。 */
 export const QUICK_RETRIEVAL_MS = 45_000;
 export const DEEP_RETRIEVAL_MS = 8 * 60_000;
@@ -17,6 +18,7 @@ export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs } = {
     return reason;
   };
   return {
+    registerQuery: createQueryLedger(),
     begin() { if (check()) return false; if (started === null) started = now(); calls++; return true; },
     consume(kind) {
       if (reason || started !== null && duration()>0 && now()-started>=duration()) throw Object.assign(new Error(reason || '本轮联网检索已达到时间预算'), {code:'RETRIEVAL_BUDGET'});
@@ -25,6 +27,7 @@ export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs } = {
       if (!extensive && limit && resources[kind] >= limit) { reason ||= `普通查询的${kind}调用已达到预算`; throw Object.assign(new Error(reason), { code:'RETRIEVAL_BUDGET' }); }
       if (kind in resources) resources[kind]++;
     },
+    get active() { return started !== null; },
     get resources() { return {...resources}; },
     end(ok) { failed = ok ? 0 : failed + 1; },
     upgrade(text) { if (extensiveRetrieval(text)) extensive = true; },

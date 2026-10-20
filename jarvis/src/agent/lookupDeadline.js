@@ -1,3 +1,4 @@
+import { createLookupWindow } from './lookupWindow.js';
 import { needsComputer } from '../llm/router.js';
 /** 普通信息查询的总时限：包含上下文、模型等待/重试、检索和收尾；不是只计网页耗时。 */
 export const LOOKUP_TOTAL_MS = 60_000;
@@ -22,12 +23,14 @@ export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_
   if (!isQuickLookup(text, options.images)) return run(options);
   const ctrl = new AbortController();
   let timer, closed = false, partial = '', finishWait;
+  let deadlineDisabled = false;
   const waiting = new Promise((_, reject) => { finishWait = reject; });
   const isTask=note=>COMPLEX.test(String(note))||hasComputer&&needsComputer(note,{history:options.history||[]});
-  const disable = (note) => { if (isTask(note)) { clearTimeout(timer); timer = null; } };
+  const disable = (note) => { if (isTask(note)) { clearTimeout(timer); timer = null; deadlineDisabled = true; } };
   const userAbort = () => { ctrl.abort(); finishWait(abortError()); };
   const forwarded = {
     ...options, signal: ctrl.signal,
+    lookupControl: createLookupWindow({ totalMs, disabled: () => deadlineDisabled || options.inbox?.some(isTask) }),
     onTaskUpdate: (note) => { disable(note); options.onTaskUpdate?.(note); },
     lookupDeadline: true,
     emit: (event) => {

@@ -341,7 +341,9 @@ describe('跨层控制与评测', () => {
     });
     expect(calls).toBe(1);
     expect(result.review.pendingFormats).toEqual(['pptx']);
-    expect(result.text).toContain('自动验收仍有待核对');
+    expect(result.text).toContain('部分完成');
+    expect(result.text).not.toContain('交付回执核对');
+    expect(result.review.outcome).toBe('partial');
   });
   it('真实执行器不会吞掉用户停止的工具异常', async () => {
     const stopped = Object.assign(new Error('已停止'), { name: 'AbortError' });
