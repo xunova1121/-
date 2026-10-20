@@ -20,7 +20,8 @@ jobs:
           cache-dependency-path: jarvis/package-lock.json
       - run: npm ci --no-audit --no-fund
       - run: npm run format
-      - run: npx prettier --write --ignore-path /dev/null src/agent/lookupWindow.js src/agent/retrievalQuality.js src/agent/reviewOutcome.js scripts/probe-model-stream.mjs tests/lookupRecovery.test.js
+      - run: npx prettier --write --ignore-path /dev/null src/agent/lookupWindow.js src/agent/retrievalQuality.js src/agent/reviewOutcome.js evals/direct-model.mjs tests/lookupRecovery.test.js
+      - run: node evals/direct-model.mjs
       - run: npm run lint
       - run: npm run eval:check
       - run: npx vitest run
@@ -28,7 +29,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/main.js src/app src/agent/lookupWindow.js src/agent/retrievalQuality.js src/agent/reviewOutcome.js scripts/probe-model-stream.mjs tests/lookupRecovery.test.js
+          git add src/main.js src/app src/agent/lookupWindow.js src/agent/retrievalQuality.js src/agent/reviewOutcome.js evals/direct-model.mjs tests/lookupRecovery.test.js
           if ! git diff --cached --quiet; then
             git commit -m '[skip ci] 统一检索收尾模块及测速测试格式'
             git push origin HEAD:$GITHUB_REF_NAME
