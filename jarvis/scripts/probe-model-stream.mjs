@@ -17,7 +17,11 @@ export async function probeDirectModel({ adapter, model, question, signal, effor
   let lastTextMs = null;
   let timer;
   const expired = new Promise((resolve, reject) => {
-    controller.signal.addEventListener('abort', () => reject(signal?.aborted ? Object.assign(new Error('已取消'), { name: 'AbortError' }) : controller.signal.reason), { once: true });
+    controller.signal.addEventListener(
+      'abort',
+      () => reject(signal?.aborted ? Object.assign(new Error('已取消'), { name: 'AbortError' }) : controller.signal.reason),
+      { once: true }
+    );
     timer = setTimeout(() => {
       const error = Object.assign(new Error('直连测量超时'), { code: 'DIRECT_PROBE_TIMEOUT', kind: 'timeout' });
       controller.abort(error);
@@ -26,24 +30,40 @@ export async function probeDirectModel({ adapter, model, question, signal, effor
   });
   try {
     if (controller.signal.aborted) throw Object.assign(new Error('已取消'), { name: 'AbortError' });
-    await Promise.race([expired, adapter.stream({
-      model, effort, system: ['请用简短中文回答。', ''],
-      messages: [{ role: 'user', content: question }], tools: [],
-      allowWebSearch: false, maxWebSearches: 0, maxTransientRetries: 0, maxPartialRetries: 0,
-      stallTimeouts: { first: 20000, between: 25000 }, signal: controller.signal,
-      onText: (delta) => {
-        if (!delta || controller.signal.aborted) return;
-        firstTextMs ??= now() - started;
-        responseChars += delta.length;
-        lastTextMs = now() - started;
-      }
-    })]);
+    await Promise.race([
+      expired,
+      adapter.stream({
+        model,
+        effort,
+        system: ['请用简短中文回答。', ''],
+        messages: [{ role: 'user', content: question }],
+        tools: [],
+        allowWebSearch: false,
+        maxWebSearches: 0,
+        maxTransientRetries: 0,
+        maxPartialRetries: 0,
+        stallTimeouts: { first: 20000, between: 25000 },
+        signal: controller.signal,
+        onText: (delta) => {
+          if (!delta || controller.signal.aborted) return;
+          firstTextMs ??= now() - started;
+          responseChars += delta.length;
+          lastTextMs = now() - started;
+        }
+      })
+    ]);
     return { status: 'done', firstTextMs, lastTextMs, totalMs: now() - started, responseChars };
   } catch (error) {
     const failure = controller.signal.reason?.code === 'DIRECT_PROBE_TIMEOUT' ? controller.signal.reason : error;
     return {
-      status: signal?.aborted ? 'stopped' : 'error', firstTextMs, lastTextMs, totalMs: now() - started, responseChars,
-      errorKind: errorKind(failure), code: failure.code || null, httpStatus: failure.status || null
+      status: signal?.aborted ? 'stopped' : 'error',
+      firstTextMs,
+      lastTextMs,
+      totalMs: now() - started,
+      responseChars,
+      errorKind: errorKind(failure),
+      code: failure.code || null,
+      httpStatus: failure.status || null
     };
   } finally {
     clearTimeout(timer);
@@ -66,8 +86,14 @@ export async function main(args = process.argv.slice(2), env = process.env) {
   if (!cfg.provider || cfg.provider === 'mock') throw new Error('需要真实模型配置');
   const out = args.find((arg) => arg.startsWith('--out='))?.slice(6) || `weiyang-direct-${Date.now()}.json`;
   const report = {
-    schemaVersion: 1, startedAt: new Date().toISOString(), results: [],
-    limitations: ['使用短固定提示，不等同于未央完整上下文；差值不能全部算作调度开销。', '禁用工具、搜索、备用模型回退和瞬时错误重试；协议参数兼容降级仍可能产生额外请求，同型号也可能被中转到不同上游。', '未知Token和费用不当作零；此脚本不修改服务配置或历史会话。']
+    schemaVersion: 1,
+    startedAt: new Date().toISOString(),
+    results: [],
+    limitations: [
+      '使用短固定提示，不等同于未央完整上下文；差值不能全部算作调度开销。',
+      '禁用工具、搜索、备用模型回退和瞬时错误重试；协议参数兼容降级仍可能产生额外请求，同型号也可能被中转到不同上游。',
+      '未知Token和费用不当作零；此脚本不修改服务配置或历史会话。'
+    ]
   };
   await fs.writeFile(out, JSON.stringify(report, null, 2), { flag: 'wx', mode: 0o600 });
   const controller = new AbortController();
@@ -76,7 +102,10 @@ export async function main(args = process.argv.slice(2), env = process.env) {
   process.once('SIGTERM', stop);
   try {
     for (let round = 1; round <= rounds && !controller.signal.aborted; round++) {
-      for (const [id, question] of [['dialogue-01', '你好'], ['dialogue-02', '用两句话解释什么是智能体，给不懂技术的人听。']]) {
+      for (const [id, question] of [
+        ['dialogue-01', '你好'],
+        ['dialogue-02', '用两句话解释什么是智能体，给不懂技术的人听。']
+      ]) {
         if (controller.signal.aborted) break;
         const kind = classifyTask(question);
         const route = routeFor(cfg, kind);

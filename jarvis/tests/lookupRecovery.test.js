@@ -36,7 +36,9 @@ describe('普通查询预留整理窗口', () => {
       await check;
       expect(controller.signal.aborted).toBe(true);
       frame.dispose();
-    } finally { vi.useRealTimers(); }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('真实调度：45秒终止无结果检索，仍可用剩余时间给正式说明', async () => {
@@ -44,15 +46,17 @@ describe('普通查询预留整理窗口', () => {
     try {
       let calls = 0;
       const messages = [];
-      const adapter = { stream: async (options) => {
-        calls++;
-        messages.push(options);
-        if (calls === 1) return new Promise(() => {});
-        expect(options.allowWebSearch).toBe(false);
-        expect(options.tools).toEqual([]);
-        options.onText('暂未取得可核查来源。');
-        return finalAnswer('暂未取得可核查来源。');
-      } };
+      const adapter = {
+        stream: async (options) => {
+          calls++;
+          messages.push(options);
+          if (calls === 1) return new Promise(() => {});
+          expect(options.allowWebSearch).toBe(false);
+          expect(options.tools).toEqual([]);
+          options.onText('暂未取得可核查来源。');
+          return finalAnswer('暂未取得可核查来源。');
+        }
+      };
       const resultPromise = runAgent({ ...input, adapter });
       await vi.advanceTimersByTimeAsync(45001);
       const result = await resultPromise;
@@ -61,7 +65,9 @@ describe('普通查询预留整理窗口', () => {
       expect(result.review.outcome).toBe('partial');
       expect(messages[0].signal.aborted).toBe(true);
       expect(result.text).not.toContain('交付回执核对');
-    } finally { vi.useRealTimers(); }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('最后整理也卡住时59秒留存半成品，不等60秒全局错误', async () => {
@@ -70,13 +76,21 @@ describe('普通查询预留整理窗口', () => {
       let calls = 0;
       let late;
       const emitted = [];
-      const adapter = { stream: (options) => {
-        if (++calls === 1) return new Promise(() => {});
-        options.onText('已整理的部分。');
-        late = options.onText;
-        return new Promise(() => {});
-      } };
-      const resultPromise = runAgent({ ...input, adapter, emit: (event) => { if (event.type === 'text') emitted.push(event.delta); } });
+      const adapter = {
+        stream: (options) => {
+          if (++calls === 1) return new Promise(() => {});
+          options.onText('已整理的部分。');
+          late = options.onText;
+          return new Promise(() => {});
+        }
+      };
+      const resultPromise = runAgent({
+        ...input,
+        adapter,
+        emit: (event) => {
+          if (event.type === 'text') emitted.push(event.delta);
+        }
+      });
       await vi.advanceTimersByTimeAsync(59001);
       const result = await resultPromise;
       expect(result.review.outcome).toBe('partial');
@@ -84,7 +98,9 @@ describe('普通查询预留整理窗口', () => {
       const before = emitted.join('');
       late('迟到文字');
       expect(emitted.join('')).toBe(before);
-    } finally { vi.useRealTimers(); }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('用户停止仍为AbortError，不被改成部分完成', async () => {
@@ -119,11 +135,13 @@ describe('搜索相关性与每轮去重', () => {
   });
   it('已开始检索的普通任务最多三次主请求后收尾，不再空转七轮', async () => {
     let calls = 0;
-    const adapter = { stream: async (options) => {
-      calls++;
-      if (!options.allowWebSearch) return finalAnswer('已有资料仍不足，不能编造。');
-      return { text: '', toolCalls: [{ id: `s${calls}`, name: 'web_search', args: { query: `词${calls}` } }], stop: 'tool_use' };
-    } };
+    const adapter = {
+      stream: async (options) => {
+        calls++;
+        if (!options.allowWebSearch) return finalAnswer('已有资料仍不足，不能编造。');
+        return { text: '', toolCalls: [{ id: `s${calls}`, name: 'web_search', args: { query: `词${calls}` } }], stop: 'tool_use' };
+      }
+    };
     const tools = [{ name: 'web_search', input_schema: { type: 'object' }, run: async () => '搜索线索，尚待核实' }];
     const result = await runAgent({ ...input, adapter, tools });
     expect(calls).toBe(4);
@@ -161,17 +179,31 @@ describe('交付状态不冒充语义通过', () => {
 describe('直连测速不输出内容且不自动重试', () => {
   it('只记录首字和总耗时，禁用搜索重试', async () => {
     let clock = 0;
-    const adapter = { stream: vi.fn(async (options) => {
-      expect(options).toMatchObject({ allowWebSearch: false, maxTransientRetries: 0, maxPartialRetries: 0, tools: [] });
-      clock = 25;
-      options.onText('仅测试内容');
-      clock = 40;
-    }) };
-    expect(await probeDirectModel({ adapter, model: 'fixture', question: '你好', now: () => clock })).toMatchObject({ status: 'done', firstTextMs: 25, totalMs: 40 });
+    const adapter = {
+      stream: vi.fn(async (options) => {
+        expect(options).toMatchObject({ allowWebSearch: false, maxTransientRetries: 0, maxPartialRetries: 0, tools: [] });
+        clock = 25;
+        options.onText('仅测试内容');
+        clock = 40;
+      })
+    };
+    expect(await probeDirectModel({ adapter, model: 'fixture', question: '你好', now: () => clock })).toMatchObject({
+      status: 'done',
+      firstTextMs: 25,
+      totalMs: 40
+    });
     expect(adapter.stream).toHaveBeenCalledTimes(1);
   });
   it('响应报错不泄露上游消息或密钥', async () => {
-    const result = await probeDirectModel({ adapter: { stream: async () => { throw Object.assign(new Error('secret-fixture'), { status: 429 }); } }, model: 'fixture', question: '你好' });
+    const result = await probeDirectModel({
+      adapter: {
+        stream: async () => {
+          throw Object.assign(new Error('secret-fixture'), { status: 429 });
+        }
+      },
+      model: 'fixture',
+      question: '你好'
+    });
     expect(result.httpStatus).toBe(429);
     expect(JSON.stringify(result)).not.toContain('secret-fixture');
   });

@@ -5,7 +5,7 @@ export const QUICK_MODEL_ATTEMPTS = 3;
 export function createLookupWindow({ totalMs, now = Date.now, disabled = () => false }) {
   const started = now();
   const reserve = Math.min(SUMMARY_RESERVE_MS, Math.max(1, totalMs / 4));
-  const remaining = () => disabled() ? Infinity : Math.max(0, totalMs - (now() - started));
+  const remaining = () => (disabled() ? Infinity : Math.max(0, totalMs - (now() - started)));
   return {
     remaining,
     retrievalRemaining: () => Math.max(0, remaining() - reserve)
@@ -18,14 +18,19 @@ export function modelWindow(control, closing, controller) {
   const expired = new Promise((resolve, reject) => {
     const delay = closing ? control?.remaining() - 1000 : control?.retrievalRemaining();
     if (!Number.isFinite(delay)) return;
-    timer = setTimeout(() => {
-      if (!Number.isFinite(control.remaining())) return;
-      const error = Object.assign(new Error(closing ? '答案整理时间已用完' : '已预留时间整理现有资料'), {
-        name: 'LookupPhaseError', kind: 'timeout', code: closing ? 'LOOKUP_SUMMARY_TIMEOUT' : 'LOOKUP_RETRIEVAL_END'
-      });
-      controller.abort(error);
-      reject(error);
-    }, Math.max(1, delay));
+    timer = setTimeout(
+      () => {
+        if (!Number.isFinite(control.remaining())) return;
+        const error = Object.assign(new Error(closing ? '答案整理时间已用完' : '已预留时间整理现有资料'), {
+          name: 'LookupPhaseError',
+          kind: 'timeout',
+          code: closing ? 'LOOKUP_SUMMARY_TIMEOUT' : 'LOOKUP_RETRIEVAL_END'
+        });
+        controller.abort(error);
+        reject(error);
+      },
+      Math.max(1, delay)
+    );
   });
   return {
     race: (work) => Promise.race([work, expired]),

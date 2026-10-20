@@ -32,7 +32,10 @@ export function screenSearchHits(hits, requestText = '') {
 export function createQueryLedger() {
   const seen = new Set();
   return (query) => {
-    const key = String(query).toLowerCase().replace(/[\s\p{P}]+/gu, '').slice(0, 800);
+    const key = String(query)
+      .toLowerCase()
+      .replace(/[\s\p{P}]+/gu, '')
+      .slice(0, 800);
     if (seen.has(key)) throw Object.assign(new Error('相同搜索词本轮已查询，请使用已有结果或换有实质差异的检索词'), { code: 'REPEATED_SEARCH', kind: 'api' });
     if (seen.size >= 32) throw Object.assign(new Error('本轮搜索词已达到上限'), { code: 'RETRIEVAL_BUDGET', kind: 'budget' });
     seen.add(key);
