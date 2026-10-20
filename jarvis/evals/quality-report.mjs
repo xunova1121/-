@@ -22,6 +22,7 @@ export function qualityReport(report) {
     correct: passed.length,
     reviewedAccuracy: reviewed.length ? passed.length / reviewed.length : null,
     reviewCoverage: results.length ? reviewed.length / results.length : null,
+    knownIncomplete: results.filter((item) => item.outcome === 'partial' || item.review?.outcome === 'partial').length,
     executionComplete: results.filter((item) => item.status === 'done' && !item.protocolIssue).length,
     totalP50Ms: percentile(totals, 0.5),
     totalP95Ms: percentile(totals, 0.95),

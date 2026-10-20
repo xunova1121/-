@@ -1,3 +1,4 @@
+import { searchRequest, screenSearchHits } from './retrievalQuality.js';
 import { createStockKlineTool } from './stockKline.js';
 import { queryGuardTool, guardQuery } from './queryGuard.js';
 import { searchAggregateHints, safeFallbackQuery } from './searchFallback.js';
@@ -751,8 +752,13 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         let successes = 0;
         const one = async (q) => {
           try {
+            const selected = searchRequest(q, requestText, freshness);
+            retrieval?.registerQuery?.(selected.query);
             retrieval?.consume('search');
-            const hits = await withWebDeadline((s) => engine.search(q, list.length > 1 ? 5 : 6, { freshness, signal: s, consume: kind => retrieval?.consume(kind) }), { signal, timeoutMs: 12000 });
+            const rawHits = await withWebDeadline((s) => engine.search(selected.query, list.length > 1 ? 5 : 6, { freshness: selected.freshness, signal: s, consume: kind => retrieval?.consume(kind) }), { signal, timeoutMs: 12000 });
+            const screened = screenSearchHits(rawHits, requestText);
+            const hits = screened.hits;
+            if (!hits.length && screened.rejected) throw Object.assign(new Error('检索结果与今日新闻不对应，请换原始报道来源，不用年度日历代替新闻'), { code: 'IRRELEVANT_SEARCH_RESULTS', kind: 'api' });
             if (hits.length) successes++;
             return hits.length ? hits.map((r) => `- ${r.title}\n  ${r.url}\n  ${String(r.snippet || '').slice(0, 300)}`).join('\n') : '（没有结果：换个说法、换成英文或原文再搜）';
           } catch (e) {
