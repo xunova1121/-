@@ -35,3 +35,4 @@ jobs:
             git commit -m '[skip ci] 统一检索收尾模块及测速测试格式'
             git push origin HEAD:$GITHUB_REF_NAME
           fi
+# 覆盖长任务和短任务的取消，不增加付费调用。
