@@ -12,17 +12,32 @@ function newState(input, execution) {
   const format = input.format || 'docx';
   if (!['docx', 'pdf', 'html', 'md', 'pptx', 'xlsx'].includes(format)) throw workflowError('不支持的文档格式', 'DOCUMENT_INPUT');
   const id = globalThis.crypto.randomUUID();
-  return { version: 3, id, folder: `文档流程/${id}`, sessionId: execution.sessionId ?? null,
-    phase: 'new', calls: 0, revisionAttempts: 0, timings: [], input: { task, material, format, referenceTime: new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }) },
-    depth: documentDepth({ task, format, depth: input.depth }), business: 'not_checked', tokens: null };
+  return {
+    version: 3,
+    id,
+    folder: `文档流程/${id}`,
+    sessionId: execution.sessionId ?? null,
+    phase: 'new',
+    calls: 0,
+    revisionAttempts: 0,
+    timings: [],
+    input: { task, material, format, referenceTime: new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }) },
+    depth: documentDepth({ task, format, depth: input.depth }),
+    business: 'not_checked',
+    tokens: null
+  };
 }
 
 function resultSummary(state) {
   return {
-    stateFile: state.stateFile, phase: state.phase, depth: state.depth, calls: state.calls,
-    business: state.business, tokens: null,
-    unresolved: state.review?.issues?.filter(item => item.severity === 'must_fix').length ?? 0,
-    warningCount: state.review?.issues?.filter(item => item.severity === 'warning').length ?? 0,
+    stateFile: state.stateFile,
+    phase: state.phase,
+    depth: state.depth,
+    calls: state.calls,
+    business: state.business,
+    tokens: null,
+    unresolved: state.review?.issues?.filter((item) => item.severity === 'must_fix').length ?? 0,
+    warningCount: state.review?.issues?.filter((item) => item.severity === 'warning').length ?? 0,
     reviewMode: state.reviewMode || 'not_checked'
   };
 }
@@ -72,7 +87,7 @@ function createAsk(app, state, execution, save) {
     if (state.calls >= LIMITS.calls) throw workflowError('文档调用次数已达上限，保留已完成内容', 'DOCUMENT_CALL_LIMIT');
     // 默认同一写作模型；只有显式提供documentReviewer才使用独立审查配置。
     const isReview = ['reviewing', 'verifying'].includes(stage);
-    const llm = isReview ? app.documentReviewer ?? app.llm : app.llm;
+    const llm = isReview ? (app.documentReviewer ?? app.llm) : app.llm;
     if (!llm) throw workflowError('专业文档工作流需要配置真实模型', 'DOCUMENT_MODEL_REQUIRED');
     execution.retrieval?.consume('model');
     state.calls++;
@@ -81,7 +96,19 @@ function createAsk(app, state, execution, save) {
     await save();
     const started = Date.now();
     try {
-      const text = await withWebDeadline(signal => llm({ ...request, system: request.system + `\n任务建立时的北京时间：${state.input.referenceTime || '未记录，不猜当前日期'}`, signal, allowWebSearch: false, maxWebSearches: 0, maxTransientRetries: 0, maxPartialRetries: 0 }), { signal: execution.signal, timeoutMs: 120000 });
+      const text = await withWebDeadline(
+        (signal) =>
+          llm({
+            ...request,
+            system: request.system + `\n任务建立时的北京时间：${state.input.referenceTime || '未记录，不猜当前日期'}`,
+            signal,
+            allowWebSearch: false,
+            maxWebSearches: 0,
+            maxTransientRetries: 0,
+            maxPartialRetries: 0
+          }),
+        { signal: execution.signal, timeoutMs: 120000 }
+      );
       return boundedText(text, LIMITS.response, '模型响应', true);
     } finally {
       state.timings = [...state.timings, { stage, elapsedMs: Date.now() - started }].slice(-LIMITS.calls);
