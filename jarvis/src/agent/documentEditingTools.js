@@ -10,24 +10,49 @@ export function createDocumentEditingTools(ctx) {
   return [
     {
       name: 'edit_office_document',
-      description: '修改工作区里已有的 Word（.docx）或 PPT（.pptx），保留原来的排版和格式：替换文字（正文、表格、页眉页脚、每页幻灯片和备注都会找），Word 还可以在末尾追加段落（格式照抄最后一段）。适合“把文档里的 2025 改成 2026”“在合同里把甲方名称换掉”“在报告最后加一段说明”。要大改结构、或用户说“重新做 / 重做 / 再做一版”时用 create_document 重新生成。',
-      input_schema: S({
-        path: str('文件路径（.docx / .pptx）'),
-        slides: { type: 'array', maxItems: 100, items: {type: 'integer', minimum: 1}, description: 'PPT指定实际页码（含封面，从1开始），只改这些页可见文字，不改备注；不填则沿用全文件替换' },
-        expected_count: {type: 'integer', minimum: 0, description: '预期替换总次数，不符则整批不保存，防止误改同名文字'},
-        replacements: { type: 'array', description: '要替换的文字', items: { type: 'object', properties: { find: str('原文（一字不差）'), replace: str('替换成') }, required: ['find', 'replace'], additionalProperties: false } },
-        append: { type: 'array', items: { type: 'string' }, description: '追加到 Word 末尾的段落（每项一段，可选）' },
-        save_as: str('另存为（可选，不填就改原文件；原文件会自动备份）')
-      }, ['path']),
+      description:
+        '修改工作区里已有的 Word（.docx）或 PPT（.pptx），保留原来的排版和格式：替换文字（正文、表格、页眉页脚、每页幻灯片和备注都会找），Word 还可以在末尾追加段落（格式照抄最后一段）。适合“把文档里的 2025 改成 2026”“在合同里把甲方名称换掉”“在报告最后加一段说明”。要大改结构、或用户说“重新做 / 重做 / 再做一版”时用 create_document 重新生成。',
+      input_schema: S(
+        {
+          path: str('文件路径（.docx / .pptx）'),
+          slides: {
+            type: 'array',
+            maxItems: 100,
+            items: { type: 'integer', minimum: 1 },
+            description: 'PPT指定实际页码（含封面，从1开始），只改这些页可见文字，不改备注；不填则沿用全文件替换'
+          },
+          expected_count: { type: 'integer', minimum: 0, description: '预期替换总次数，不符则整批不保存，防止误改同名文字' },
+          replacements: {
+            type: 'array',
+            description: '要替换的文字',
+            items: {
+              type: 'object',
+              properties: { find: str('原文（一字不差）'), replace: str('替换成') },
+              required: ['find', 'replace'],
+              additionalProperties: false
+            }
+          },
+          append: { type: 'array', items: { type: 'string' }, description: '追加到 Word 末尾的段落（每项一段，可选）' },
+          save_as: str('另存为（可选，不填就改原文件；原文件会自动备份）')
+        },
+        ['path']
+      ),
       run: async ({ path, replacements = [], append = [], slides = [], expected_count: expectedCount, save_as: saveAs }, options = {}) => {
         const kind = ws.ext(path);
         if (!['docx', 'pptx'].includes(kind)) throw new Error('只能修改 .docx 或 .pptx 文件；文本文件用 edit_file');
-        const r = await editOffice(await ws.readBlob(path), kind, { replacements: Array.isArray(replacements) ? replacements : [], append: Array.isArray(append) ? append : [], slides, expectedCount, signal: options.signal });
+        const r = await editOffice(await ws.readBlob(path), kind, {
+          replacements: Array.isArray(replacements) ? replacements : [],
+          append: Array.isArray(append) ? append : [],
+          slides,
+          expectedCount,
+          signal: options.signal
+        });
         const hit = r.replaced.filter((x) => x.count);
         const miss = r.replaced.filter((x) => !x.count);
-        if (!hit.length && !r.appended) throw new Error(`文件里没有找到要替换的文字：${miss.map((x) => `“${x.find}”`).join('、') || '（没有给出修改）'}。先用 read_file 看准原文`);
+        if (!hit.length && !r.appended)
+          throw new Error(`文件里没有找到要替换的文字：${miss.map((x) => `“${x.find}”`).join('、') || '（没有给出修改）'}。先用 read_file 看准原文`);
         const target = saveAs ? saveAs.replace(/\.[a-z0-9]+$/i, '') + `.${kind}` : path;
-        const w = await deliverDocument(ctx, {blob:r.blob,ext:kind}, target, options);
+        const w = await deliverDocument(ctx, { blob: r.blob, ext: kind }, target, options);
         const parts = hit.map((x) => `“${x.find}”替换了 ${x.count} 处`);
         if (r.appended) parts.push(`追加了 ${r.appended} 段`);
         if (miss.length) parts.push(`没找到：${miss.map((x) => `“${x.find}”`).join('、')}`);
@@ -36,15 +61,37 @@ export function createDocumentEditingTools(ctx) {
     },
     {
       name: 'edit_spreadsheet',
-      description: '精确修改已有Excel的指定格，保留其他部件；可带expected核对旧值，任何冲突整批不保存。修改公式缓存会失效，打开Office时重算，不伪造结果。新增行列或大改结构用create_document。',
-      input_schema: S({path:str('工作区xlsx路径'),save_as:str('另存路径，可选'),edits:{type:'array',minItems:1,maxItems:100,items:S({sheet:str('实际工作表名'),cell:str('A1式地址'),value:{type:['string','number','boolean','null']},formula:str('公式，与value二选一'),expected:{type:['string','number','boolean','null']}},['sheet','cell'])}},['path','edits']),
-      run: async ({path,edits,save_as:saveAs},options = {}) => {
+      description:
+        '精确修改已有Excel的指定格，保留其他部件；可带expected核对旧值，任何冲突整批不保存。修改公式缓存会失效，打开Office时重算，不伪造结果。新增行列或大改结构用create_document。',
+      input_schema: S(
+        {
+          path: str('工作区xlsx路径'),
+          save_as: str('另存路径，可选'),
+          edits: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 100,
+            items: S(
+              {
+                sheet: str('实际工作表名'),
+                cell: str('A1式地址'),
+                value: { type: ['string', 'number', 'boolean', 'null'] },
+                formula: str('公式，与value二选一'),
+                expected: { type: ['string', 'number', 'boolean', 'null'] }
+              },
+              ['sheet', 'cell']
+            )
+          }
+        },
+        ['path', 'edits']
+      ),
+      run: async ({ path, edits, save_as: saveAs }, options = {}) => {
         if (ws.ext(path) !== 'xlsx') throw documentError('只支持xlsx工作簿');
-        const edited = await editSpreadsheet(await ws.readBlob(path),edits,{signal:options.signal});
-        const target = saveAs ? saveAs.replace(/\.[a-z0-9]+$/i,'')+'.xlsx' : path;
-        const saved = await deliverDocument(ctx,{blob:edited.blob,ext:'xlsx'},target,options);
+        const edited = await editSpreadsheet(await ws.readBlob(path), edits, { signal: options.signal });
+        const target = saveAs ? saveAs.replace(/\.[a-z0-9]+$/i, '') + '.xlsx' : path;
+        const saved = await deliverDocument(ctx, { blob: edited.blob, ext: 'xlsx' }, target, options);
         return `已修改${edited.changed}个单元格，保存${saved.path}；${saved.notes.join('；')}`;
       }
-    },
+    }
   ];
 }

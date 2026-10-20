@@ -17,8 +17,9 @@ export async function openOfficePackage(input) {
   return zip;
 }
 
-export const xmlEscape = text => String(text).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[char]);
-export const xmlUnescape = text => String(text).replace(/&(?:amp|lt|gt|quot|apos);/g, entity => ({ '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'" })[entity]);
+export const xmlEscape = (text) => String(text).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[char]);
+export const xmlUnescape = (text) =>
+  String(text).replace(/&(?:amp|lt|gt|quot|apos);/g, (entity) => ({ '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'" })[entity]);
 
 /** 幻灯片按presentation关系的真实顺序，不能拿slide文件编号当页码。 */
 export async function orderedSlidePaths(zip) {
@@ -27,14 +28,14 @@ export async function orderedSlidePaths(zip) {
   if (!presentation || !rels) throw documentError('PPT缺少页面关系', 'DOCUMENT_PACKAGE');
   const relationships = new Map();
   for (const match of rels.matchAll(/<Relationship\b[^>]*\/?\s*>/g)) {
-    const attr = key => match[0].match(new RegExp(`\\b${key}="([^"]*)"`))?.[1];
+    const attr = (key) => match[0].match(new RegExp(`\\b${key}="([^"]*)"`))?.[1];
     if (attr('TargetMode') === 'External' || !/\/slide$/.test(attr('Type') || '')) continue;
     const target = attr('Target') || '';
     const resolved = target.startsWith('/') ? target.slice(1) : `ppt/${target.replace(/^\.\//, '')}`;
     if (resolved.split('/').includes('..') || !/^ppt\/slides\/[^/]+\.xml$/.test(resolved)) continue;
     relationships.set(attr('Id'), resolved);
   }
-  const slides = [...presentation.matchAll(/<p:sldId\b[^>]*\br:id="([^"]+)"[^>]*\/?\s*>/g)].map(match => relationships.get(match[1]));
-  if (!slides.length || slides.some(item => !item || !zip.file(item))) throw documentError('PPT页码关系不完整', 'DOCUMENT_PACKAGE');
+  const slides = [...presentation.matchAll(/<p:sldId\b[^>]*\br:id="([^"]+)"[^>]*\/?\s*>/g)].map((match) => relationships.get(match[1]));
+  if (!slides.length || slides.some((item) => !item || !zip.file(item))) throw documentError('PPT页码关系不完整', 'DOCUMENT_PACKAGE');
   return slides;
 }

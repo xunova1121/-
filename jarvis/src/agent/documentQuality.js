@@ -10,7 +10,7 @@ export async function inspectWorkbook(blob) {
   if (book.SheetNames.length > 50) throw documentError('工作簿超过50个工作表检查上限', 'DOCUMENT_SIZE');
   let cellCount = 0;
   let areaCount = 0;
-  const sheets = book.SheetNames.map(sheetName => {
+  const sheets = book.SheetNames.map((sheetName) => {
     const sheet = book.Sheets[sheetName];
     if (sheet['!ref']) {
       const range = XLSX.utils.decode_range(sheet['!ref']);
@@ -60,7 +60,7 @@ export async function inspectDocument(blob, filePath, { info = {}, requiredText 
     validation.slides = paths.length;
     for (const [index, slidePath] of paths.entries()) {
       const xml = await zip.file(slidePath).async('string');
-      const text = [...xml.matchAll(/<a:t\b[^>]*>([^<]*)<\/a:t>/g)].map(match => xmlUnescape(match[1])).join('');
+      const text = [...xml.matchAll(/<a:t\b[^>]*>([^<]*)<\/a:t>/g)].map((match) => xmlUnescape(match[1])).join('');
       if (text.length > 600) issues.push({ level: 'warn', text: `第${index + 1}页文字密度较高，请打开真实预览核对` });
     }
   }
@@ -73,11 +73,24 @@ export async function inspectDocument(blob, filePath, { info = {}, requiredText 
     }
   }
   signal?.throwIfAborted();
-  const unique = [...new Map(issues.map(item => [`${item.level}:${item.text}`, { level: item.level, text: String(item.text).slice(0, 240) }])).values()];
-  return { ...validation, issues: unique.slice(0, 40), errors: unique.filter(item => item.level === 'error').length, issueCount: unique.length, facts: 'not_verified', visual: 'not_checked', render: 'not_checked', pdfCheck: 'not_checked' };
+  const unique = [...new Map(issues.map((item) => [`${item.level}:${item.text}`, { level: item.level, text: String(item.text).slice(0, 240) }])).values()];
+  return {
+    ...validation,
+    issues: unique.slice(0, 40),
+    errors: unique.filter((item) => item.level === 'error').length,
+    issueCount: unique.length,
+    facts: 'not_verified',
+    visual: 'not_checked',
+    render: 'not_checked',
+    pdfCheck: 'not_checked'
+  };
 }
 
 export function qualitySummary(report) {
-  const result = report.errors ? `发现${report.errors}项错误，需修改后交付` : report.issueCount ? `有${report.issueCount}项待核查` : '已执行的静态检查未发现问题';
+  const result = report.errors
+    ? `发现${report.errors}项错误，需修改后交付`
+    : report.issueCount
+      ? `有${report.issueCount}项待核查`
+      : '已执行的静态检查未发现问题';
   return `${result}；事实真实性未由结构检查证明；视觉检查：${report.visual}；真实转换：${report.render}`;
 }

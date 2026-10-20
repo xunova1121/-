@@ -13,7 +13,7 @@ export async function editSpreadsheet(blob, edits, { signal } = {}) {
   if (!workbookXml || !relXml) throw documentError('工作簿关系不完整', 'DOCUMENT_PACKAGE');
   const rels = new Map();
   for (const match of relXml.matchAll(/<Relationship\b[^>]*\/?\s*>/g)) {
-    const attr = key => match[0].match(new RegExp(`\\b${key}="([^"]*)"`))?.[1];
+    const attr = (key) => match[0].match(new RegExp(`\\b${key}="([^"]*)"`))?.[1];
     if (attr('TargetMode') === 'External') continue;
     const target = attr('Target') || '';
     const resolved = target.startsWith('/') ? target.slice(1) : `xl/${target.replace(/^\.\//, '')}`;
@@ -37,10 +37,10 @@ export async function editSpreadsheet(blob, edits, { signal } = {}) {
     touched.add(key);
     const original = before.book.Sheets[edit.sheet]?.[address];
     if (Object.hasOwn(edit, 'expected')) {
-      const actual = original?.f ? '=' + original.f : original?.v ?? null;
+      const actual = original?.f ? '=' + original.f : (original?.v ?? null);
       if (actual !== edit.expected) throw documentError(`${key}内容已变化，未保存本批修改`, 'DOCUMENT_CONFLICT');
     }
-    let xml = updated.get(sheetPath) ?? await zip.file(sheetPath)?.async('string');
+    let xml = updated.get(sheetPath) ?? (await zip.file(sheetPath)?.async('string'));
     if (!xml) throw documentError('找不到工作表内容', 'DOCUMENT_PACKAGE');
     const pattern = new RegExp(`<c\\b(?=[^>]*\\br="${address}")[^>]*(?:\\/>|>[\\s\\S]*?<\\/c>)`);
     const matched = xml.match(pattern);
@@ -55,28 +55,50 @@ export async function editSpreadsheet(blob, edits, { signal } = {}) {
   // 修改输入会使其他公式缓存过期，清缓存并让Office打开时重算；不伪造计算结果。
   for (const item of zip.file(/^xl\/worksheets\/[^/]+\.xml$/)) {
     const xml = await item.async('string');
-    zip.file(item.name, xml.replace(/<c\b[^>]*>[\s\S]*?<\/c>/g, cell => /<f\b/.test(cell) ? cell.replace(/<v\b[^>]*>[\s\S]*?<\/v>/g, '') : cell));
+    zip.file(
+      item.name,
+      xml.replace(/<c\b[^>]*>[\s\S]*?<\/c>/g, (cell) => (/<f\b/.test(cell) ? cell.replace(/<v\b[^>]*>[\s\S]*?<\/v>/g, '') : cell))
+    );
   }
   const calc = '<calcPr calcId="0" fullCalcOnLoad="1" forceFullCalc="1"/>';
-  zip.file('xl/workbook.xml', /<calcPr\b/.test(workbookXml) ? workbookXml.replace(/<calcPr\b[^>]*(?:\/>|>[\s\S]*?<\/calcPr>)/, calc) : workbookXml.replace('</workbook>', calc + '</workbook>'));
+  zip.file(
+    'xl/workbook.xml',
+    /<calcPr\b/.test(workbookXml)
+      ? workbookXml.replace(/<calcPr\b[^>]*(?:\/>|>[\s\S]*?<\/calcPr>)/, calc)
+      : workbookXml.replace('</workbook>', calc + '</workbook>')
+  );
   // 改了公式后旧依赖链不再可靠，移除链部件及其声明，让Office重新建立。
   zip.remove('xl/calcChain.xml');
-  zip.file('xl/_rels/workbook.xml.rels', relXml.replace(/<Relationship\b[^>]*\/?\s*>/g, item => /\/calcChain"/.test(item) ? '' : item));
+  zip.file(
+    'xl/_rels/workbook.xml.rels',
+    relXml.replace(/<Relationship\b[^>]*\/?\s*>/g, (item) => (/\/calcChain"/.test(item) ? '' : item))
+  );
   const types = await zip.file('[Content_Types].xml')?.async('string');
   if (types) zip.file('[Content_Types].xml', types.replace(/<Override\b[^>]*PartName="\/xl\/calcChain.xml"[^>]*\/?\s*>/g, ''));
   signal?.throwIfAborted();
-  const result = new Blob([await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' })], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const result = new Blob([await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' })], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  });
   const after = await inspectWorkbook(result);
-  const oldErrors = new Set(before.issues.filter(item => item.level === 'error').map(item => item.text));
-  const newErrors = after.issues.filter(item => item.level === 'error' && !oldErrors.has(item.text));
-  if (newErrors.length) throw documentError('修改会引入公式错误：' + newErrors.slice(0, 3).map(item => item.text).join('；'), 'DOCUMENT_FORMULA');
+  const oldErrors = new Set(before.issues.filter((item) => item.level === 'error').map((item) => item.text));
+  const newErrors = after.issues.filter((item) => item.level === 'error' && !oldErrors.has(item.text));
+  if (newErrors.length)
+    throw documentError(
+      '修改会引入公式错误：' +
+        newErrors
+          .slice(0, 3)
+          .map((item) => item.text)
+          .join('；'),
+      'DOCUMENT_FORMULA'
+    );
   return { blob: result, changed: touched.size };
 }
 
 function encodeCell(edit, attrs) {
   if (edit.formula !== undefined) {
     const formula = String(edit.formula).replace(/^=/, '');
-    if (!formula || formula.length > 2000 || /\[|\]|\||WEBSERVICE\s*\(|HYPERLINK\s*\(/i.test(formula)) throw documentError('公式为空、过长或包含外部访问', 'DOCUMENT_FORMULA');
+    if (!formula || formula.length > 2000 || /\[|\]|\||WEBSERVICE\s*\(|HYPERLINK\s*\(/i.test(formula))
+      throw documentError('公式为空、过长或包含外部访问', 'DOCUMENT_FORMULA');
     if (Object.hasOwn(edit, 'value')) throw documentError('value与formula只能提供一个');
     return `<c${attrs}><f>${xmlEscape(formula)}</f></c>`;
   }
