@@ -445,7 +445,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     $('#llm-model').value = cfg.models[p.id] || p.models[0] || '';
     $('#llm-models').replaceChildren(...p.models.filter(Boolean).map((m) => el('option', { value: m })));
     $('#row-base').hidden = !p.custom;
-    $('#llm-base').value = cfg.baseURLs[cfg.provider] || '';
+    $('#llm-base').value = cfg.baseURLs[p.id] || '';
     $('#row-key').hidden = p.kind === 'mock';
     $('#llm-key').value = cfg.keys[p.id] || '';
     const gwKey = gw?.keys?.includes(p.id);
@@ -540,6 +540,15 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     importToKb,
     refreshModels: fillModels,
     get config() { return cfg; },
+    /** 新模型库保存本机配置后，同步旧高级表单，不触碰服务器。 */
+    setModelConfig(next) {
+      cfg = next;
+      saveConfig(cfg);
+      sel.value = cfg.provider;
+      fillModels();
+      onConfigChange(cfg);
+      return cfg;
+    },
     /** 配置被同步改了：重新读取并刷新界面 */
     reloadConfig() {
       cfg = loadConfig();
@@ -563,3 +572,4 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     }
   };
 }
+

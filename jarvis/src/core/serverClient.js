@@ -123,6 +123,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     status: (signal) => req('/api/server/status',{signal}),
     getConfig: () => req('/api/server/config'),
     putConfig: (cfg) => req('/api/server/config', { method: 'PUT', body: cfg }),
+    listModels: (provider, signal) => req('/api/server/models', { method: 'POST', body: { provider }, signal }),
     updateInfo: () => req('/api/server/update'),
     requestUpdate: () => req('/api/server/update', { method: 'POST' }),
     modelEvents: (body,signal) => req('/api/server/pc-model',{method:'POST',body,raw:true,signal,headers:{Accept:'text/event-stream'}}),
@@ -318,4 +319,5 @@ export function remoteSessions(client, { storage = globalThis.localStorage } = {
     }
   };
 }
+
 

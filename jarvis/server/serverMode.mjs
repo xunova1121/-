@@ -38,6 +38,7 @@ import * as sessions from '../src/agent/sessions.js';
 import * as ws from '../src/agent/workspace.js';
 import { DEFAULT_CONFIG } from '../src/llm/config.js';
 import { streamPCModel } from './pcModelBridge.mjs';
+import { serverModelCatalog } from './modelCatalog.mjs';
 
 const UPLOAD_LIMIT = 50 * 1024 * 1024;
 /** 程序所在目录（安装包里的 VERSION 文件在这里） */
@@ -59,7 +60,8 @@ export function mergeConfig(old, next) {
   const keep = (n, o) => (!n || String(n).startsWith('••••') ? o ?? '' : n);
   const keys = { ...(old.keys ?? {}) };
   for (const [k, v] of Object.entries(next.keys ?? {})) keys[k] = keep(v, old.keys?.[k]);
-  return { ...old, ...next, keys, tavilyKey: keep(next.tavilyKey, old.tavilyKey), bochaKey: keep(next.bochaKey, old.bochaKey) };
+  const maps = Object.fromEntries(['models', 'baseURLs', 'providerNames', 'modelLists'].map((field) => [field, { ...old[field], ...next[field] }]));
+  return { ...old, ...next, ...maps, keys, tavilyKey: keep(next.tavilyKey, old.tavilyKey), bochaKey: keep(next.bochaKey, old.bochaKey) };
 }
 
 /**
@@ -80,6 +82,7 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
   const want = Buffer.from(tokenFor(password));
   const failures = new Map(); // IP → 最近登录失败的时间（防止暴力猜密码）
   let activePCModels=0;
+  let activeCatalogs=0;
 
   function authorized(req) {
     const url = new URL(req.url, 'http://x');
@@ -154,6 +157,18 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     if (pathname === '/api/server/config') {
       if (req.method === 'GET') { json(res, 200, maskConfig(loadConfig())); return true; }
       if (req.method === 'PUT') { saveConfig(mergeConfig(loadConfig(), await readJson(req))); json(res, 200, { ok: true }); return true; }
+    }
+    if (pathname === '/api/server/models' && req.method === 'POST') {
+      if (!authorized(req)) { json(res, 401, { error: '服务器登录已失效' }); return true; }
+      if (activeCatalogs >= 2) { json(res, 429, { error: '正在拉取模型，请稍后重试' }); return true; }
+      const { provider } = await readJson(req);
+      const controller = new AbortController();
+      const cancel = () => controller.abort();
+      res.once('close', cancel);
+      activeCatalogs++;
+      try { json(res, 200, await serverModelCatalog(loadConfig(), provider, controller.signal)); }
+      finally { activeCatalogs--; res.off('close', cancel); }
+      return true;
     }
     if (pathname === '/api/server/update') {
       const auto = fs.existsSync(updateUnit);

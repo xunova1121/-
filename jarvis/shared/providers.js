@@ -26,7 +26,9 @@ export const PROVIDERS = [
   { id: 'relay-multi', name: '多协议中转（按模型用原生格式，如 TeamoRouter）', kind: 'multi', baseURL: '', models: ['gpt-6.1-sol', 'claude-fable-5-1', 'gemini-3.5-flash'], browser: true, custom: true, webSearch: true },
   // 中转站的 Anthropic 原生接口（/v1/messages）：能用 Claude 和它的内置联网搜索（要看中转站是否支持）
   { id: 'claude-relay', name: 'Claude 中转（Anthropic 原生格式）', kind: 'anthropic', baseURL: '', models: ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'], browser: true, custom: true, webSearch: true },
-  { id: 'custom', name: '自定义（OpenAI 兼容）', kind: 'openai', baseURL: '', models: [''], browser: true, custom: true }
+  { id: 'custom', name: '自定义（OpenAI 兼容）', kind: 'openai', baseURL: '', models: [''], browser: true, custom: true },
+  // 有界的独立中转线路：同名模型也能分开保存地址、密钥和备用顺序。
+  ...Array.from({ length: 7 }, (_, index) => ({ id: `relay-${index + 2}`, name: `自定义服务商 ${index + 2}（多协议）`, kind: 'multi', baseURL: '', models: [''], browser: true, custom: true, webSearch: true }))
 ];
 
 export const providerById = (id) => PROVIDERS.find((p) => p.id === id);
@@ -58,3 +60,4 @@ export function customViaGateway(gateway, url) {
   if (!gateway.cors) return true;
   try { return !isPrivateHost(new URL(url).hostname); } catch { return false; }
 }
+

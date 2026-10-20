@@ -28,6 +28,7 @@ import { generateImage } from '../src/llm/images.js';
 import { generateVideo } from '../src/llm/videos.js';
 import { providerById, isPrivateHost } from '../shared/providers.js';
 import { routeFor, fallbackRoutes, classifyTask, effortFor, isSmallTalk } from '../src/llm/router.js';
+import { providerLabel } from '../src/llm/modelLibrary.js';
 import { INTERRUPTED_MARK, interruptionMark, errorKind } from '../src/core/suggest.js';
 import { uid } from '../src/agent/store.js';
 
@@ -164,7 +165,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     const route = routeFor(cfg, kind);
     const { adapter, model, problem } = makeAdapter(route.cfg);
     if (problem) return finish(task, session, { error: `服务器上的模型还没配置好：${problem}` });
-    const fallbacks = fallbackRoutes(cfg, { provider: route.cfg.provider, model }).map((f) => ({ ...createAdapter(f.cfg), label: f.model })).filter((f) => !f.problem && f.adapter && f.model);
+    const fallbacks = fallbackRoutes(cfg, { provider: route.cfg.provider, model }).map((f) => ({ ...createAdapter(f.cfg), label: `${providerLabel(f.cfg, f.provider)} · ${f.model}` })).filter((f) => !f.problem && f.adapter && f.model);
     const history = session.messages.slice(0, -1); // 最后一条是这次的用户原话，单独作为 userText
     const tools = makeTools({
       tavilyKey: cfg.tavilyKey, bochaKey: cfg.bochaKey, searchRegion: cfg.searchRegion || 'auto',
@@ -381,6 +382,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     }
   };
 }
+
 
 
 

@@ -7,6 +7,7 @@ import { TASKS, suggestRoutes, keyedProviders, routeRef, parseRoute, routeLabel 
 import { listModels, modelOf, providerById } from '../llm/config.js';
 import { modelKind, imageModelOf } from '../llm/images.js';
 import { videoModelOf } from '../llm/videos.js';
+import { initLibraryPicker } from './libraryPicker.js';
 
 const DAY = 864e5;
 const SHORT = { chat: '对话', code: '编程', write: '写作', reason: '思考', vision: '看图' };
@@ -98,7 +99,8 @@ export function repairChatModel(cfg) {
 /**
  * @param {{ getConfig: () => object, patchConfig: (fn: Function) => object, getGateway: () => object|null, toast: Function, openSettings: () => void }} d
  */
-export function initModelPicker({ getConfig, patchConfig, getGateway, toast, openSettings }) {
+export function initModelPicker({ getConfig, patchConfig, getGateway, toast, openSettings, getWorkspace }) {
+  if (getWorkspace) return initLibraryPicker({ getWorkspace, openSettings, toast });
   const scrim = el('div', { className: 'mp-scrim', hidden: true });
   const list = el('div', { className: 'mp-list' });
   const search = el('input', { type: 'search', className: 'mp-search', placeholder: '搜索模型…', spellcheck: false });
@@ -238,3 +240,4 @@ export function initModelPicker({ getConfig, patchConfig, getGateway, toast, ope
 
   return { open, close, get isOpen() { return !sheet.hidden; } };
 }
+

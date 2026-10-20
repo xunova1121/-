@@ -411,6 +411,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
 
   // —— 缺少密钥时引导到模型面板
   await openPanel(page, 'models');
+  await page.locator('#model-advanced').evaluate(element => element.open = true);
   await page.selectOption('#llm-provider', 'deepseek');
   await page.fill('#llm-key', '');
   await page.click('#btn-llm-save');
@@ -472,6 +473,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('关闭模型分工后用默认模型', fake.seen[rIdx]?.model === 'fake-model', fake.seen[rIdx]?.model);
   fake.server.close();
   await openPanel(page, 'models');
+  await page.locator('#model-advanced').evaluate(element => element.open = true);
   await page.selectOption('#llm-provider', 'mock');
   await page.click('#btn-llm-save');
 

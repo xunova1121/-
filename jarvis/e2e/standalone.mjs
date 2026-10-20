@@ -70,6 +70,7 @@ check('记住信息', /我在上海工作/.test(await page.textContent('#mind-li
 await page.screenshot({ path: `${OUT}/standalone.png` });
 
 await page.evaluate((n) => window.__jarvis.showPanel(n), 'models');
+await page.locator('#model-advanced').evaluate(element => element.open = true);
 await page.selectOption('#llm-provider', 'qwen');
 check('不允许浏览器直连的服务商有提示', /启动\.bat/.test(await page.textContent('#llm-note')));
 
@@ -104,6 +105,7 @@ check('无页面错误', errors.length === 0, errors.join(' | '));
   await p2.evaluate(() => window.__jarvis.showPanel('models'));
   await p2.waitForFunction(() => /已连网关/.test(document.querySelector('#gw-badge').textContent), null, { timeout: 20000 }).catch(() => {});
   check('自动连上本机网关', /已连网关/.test(await p2.textContent('#gw-badge')));
+  await p2.locator('#model-advanced').evaluate(element => element.open = true);
   await p2.selectOption('#llm-provider', 'custom');
   await p2.fill('#llm-base', `http://relay-${relay.address().port}.test:${relay.address().port}/v1`);
   await p2.fill('#llm-model', 'gpt-x');

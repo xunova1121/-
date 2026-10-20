@@ -49,6 +49,7 @@ export function createSync(app) {
       getLlmConfig: () => app.llmConfig,
       toast: (t) => toast(t),
       onConfigSaved: () => app.refreshServerModel(),
+      onOpenModels: () => app.modelWorkspace.show('server'),
       onImported: () => {
         app.sessionsPanel?.refresh();
         app.drawer?.refresh?.();
