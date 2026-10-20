@@ -6,6 +6,7 @@ import { createServer } from '../server/server.mjs';
 import { createServerMode, tokenFor, maskConfig, mergeConfig } from '../server/serverMode.mjs';
 import { useBackend } from '../src/agent/store.js';
 import { createFileStore } from '../server/fileStore.mjs';
+import { createServer as httpServer } from 'node:http';
 
 let dir, server, base, mode;
 const PASS = 'test-password-123';
@@ -28,6 +29,33 @@ async function readSse(res) {
 }
 
 describe('服务器模式接口', () => {
+  it('服务器自行拉取模型：使用服务器密钥，不接受手机传入的地址和密钥', async () => {
+    const configFile=path.join(dir,'config.json');
+    const previous=fs.existsSync(configFile)?fs.readFileSync(configFile):null;
+    let seenKey='';
+    const upstream=httpServer((req,res)=>{seenKey=req.headers.authorization;res.setHeader('Content-Type','application/json');if(seenKey==='Bearer bad-key'){res.writeHead(401);res.end('{}');return;}res.end(JSON.stringify({data:[{id:'same-model'},{id:'model-2'}]}));});
+    await new Promise(resolve=>upstream.listen(0,'127.0.0.1',resolve));
+    try {
+      await api('/api/server/config',{method:'PUT',body:JSON.stringify({provider:'custom',keys:{custom:'server-private-key'},baseURLs:{custom:`http://127.0.0.1:${upstream.address().port}/v1`}})});
+      const result=await api('/api/server/models',{method:'POST',body:JSON.stringify({provider:'custom',key:'phone-key',baseURL:'https://must-not-use.invalid'})});
+      const payload=await result.json();
+      expect(payload.ids).toEqual(['same-model','model-2']);
+      expect(seenKey).toBe('Bearer server-private-key');
+      expect(JSON.stringify(payload)).not.toContain('server-private-key');
+      const proxy=await api('/api/llm/relay-2/v1/models',{headers:{'x-jarvis-upstream':`http://127.0.0.1:${upstream.address().port}`,Authorization:auth.Authorization,'x-api-key':'relay-key'}});
+      expect(proxy.status).toBe(200);
+      expect((await proxy.json()).data[0].id).toBe('same-model');
+      expect((await fetch(base+'/api/server/models',{method:'POST',body:'{"provider":"custom"}'})).status).toBe(401);
+      expect((await api('/api/server/models',{method:'POST',body:'{"provider":"unknown"}'})).status).toBe(400);
+      await api('/api/server/config',{method:'PUT',body:'{"keys":{"custom":"bad-key"}}'});
+      const invalidKey=await api('/api/server/models',{method:'POST',body:'{"provider":"custom"}'});
+      expect(invalidKey.status).toBe(502);
+      expect(await invalidKey.json()).toMatchObject({code:'CATALOG_API',kind:'api',upstreamStatus:401});
+    } finally {
+      await new Promise(resolve=>upstream.close(resolve));
+      if(previous)fs.writeFileSync(configFile,previous);else fs.rmSync(configFile,{force:true});
+    }
+  });
   it('没登录一律拒绝；密码错了不给令牌，对了给', async () => {
     expect((await fetch(`${base}/api/sessions`)).status).toBe(401);
     expect((await fetch(`${base}/api/llm/openai/models`)).status).toBe(401); // 模型转发也要登录
@@ -174,3 +202,4 @@ describe('服务器模式：编辑重发、本机那一轮记回来、按内容�
     expect(hits).toEqual([expect.objectContaining({ id: 'cut1', title: '季度汇报', snippet: expect.stringContaining('百分之十八') })]);
   });
 });
+

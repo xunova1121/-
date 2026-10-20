@@ -25,6 +25,7 @@ import { toolLabel, summarizeArgs, searchBrand } from '../ui/transcript.js';
 import { createTaskKeeper } from '../mobile/backgroundTasks.js';
 import { noteAction } from '../mobile/renderDiagnostics.js';
 import { isAuto } from '../ui/modelPicker.js';
+import { providerLabel } from '../llm/modelLibrary.js';
 import { $, DESKTOP, COMPACT, now, storage, toast, wp, markActivity } from './env.js';
 
 export function createTurn(app) {
@@ -460,7 +461,7 @@ export function createTurn(app) {
     const fallbacks = remotePC
       ? []
       : fallbackRoutes(app.llmConfig, { provider: route.cfg.provider, model })
-          .map((f) => ({ ...createAdapter(f.cfg, { gateway: app.gateway }), label: f.model }))
+          .map((f) => ({ ...createAdapter(f.cfg, { gateway: app.gateway }), label: `${providerLabel(f.cfg, f.provider)} · ${f.model}` }))
           .filter((f) => !f.problem && f.adapter && f.model);
 
     // 语音对话中、或者是说话提问的：念回答；打字提问只显示（设置里打开“打字提问也朗读”除外）

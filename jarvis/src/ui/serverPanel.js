@@ -10,7 +10,7 @@ const $ = (s) => document.querySelector(s);
 /**
  * @param {{ getLlmConfig: () => object, toast: (t: string) => void, reload?: () => void, onConfigSaved?: () => void, onImported?: () => void }} o
  */
-export function initServerPanel({ getLlmConfig, toast, reload = () => location.reload(), onConfigSaved = () => {}, onImported = () => {} }) {
+export function initServerPanel({ getLlmConfig, toast, reload = () => location.reload(), onConfigSaved = () => {}, onImported = () => {}, onOpenModels }) {
   const on = $('#server-on');
   if (!on) return;
   const status = $('#server-status');
@@ -96,6 +96,7 @@ export function initServerPanel({ getLlmConfig, toast, reload = () => location.r
   });
 
   $('#btn-server-config').addEventListener('click', async () => {
+    if (onOpenModels) { onOpenModels(); return; }
     if (!loadServerSettings().token) { say('请先登录'); return; }
     try {
       const { voice, stt, ...models } = getLlmConfig(); // 语音还在手机上，不用传
@@ -126,3 +127,4 @@ export function initServerPanel({ getLlmConfig, toast, reload = () => location.r
   });
   check();
 }
+

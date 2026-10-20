@@ -76,17 +76,30 @@ try {
   check('发完任务马上关掉页面，任务照样做完，再打开能看到结果', await page.evaluate(() => [...document.querySelectorAll('#transcript .msg.user')].some((m) => m.textContent.includes('再介绍一下你自己')) && document.querySelectorAll('#transcript .msg.agent').length >= 2));
   await page.screenshot({ path: path.join(OUT, 'server-mode.png') });
 
-  check('输入框里显示服务器上设的模型', /^服务器/.test(await page.locator('#model-chip-text').textContent()));
-  // 服务器模式下换模型：自动同步到服务器，输入框显示服务器上的新模型
+  check('输入框里显示服务器上设的模型', /^云端/.test(await page.locator('#model-chip-text').textContent()));
+  // 本机设置不自动覆盖服务器；新界面明确编辑服务器模型。
   await page.evaluate(() => window.__jarvis.showPanel('models'));
+  await page.locator('#model-advanced').evaluate(element => element.open = true);
   await page.selectOption('#llm-provider', 'custom');
   await page.fill('#llm-base', 'https://example.invalid/v1');
-  await page.fill('#llm-model', 'synced-model');
-  await page.fill('#llm-key', 'sk-test-1234');
+  await page.fill('#llm-model', 'local-only-model');
+  await page.fill('#llm-key', 'sk-local-only');
   await page.click('#btn-llm-save');
-  await page.waitForFunction(() => /synced-model/.test(document.querySelector('#model-chip-text').textContent), null, { timeout: 8000 }).catch(() => {});
+  await page.waitForTimeout(1000);
+  check('本机修改不会覆盖服务器模型或密钥', !fs.existsSync(path.join(dataDir, 'config.json')) || !fs.readFileSync(path.join(dataDir, 'config.json'), 'utf8').includes('sk-local-only'));
+  await page.locator('#model-workspace .ml-add-select').selectOption('custom');
+  await page.locator('.ml-provider').filter({hasText:'自定义（OpenAI 兼容）'}).getByRole('button', {name:'配置 ›',exact:true}).click();
+  const editor=page.locator('.ml-editor');
+  await editor.getByLabel('接口地址',{exact:true}).fill('https://example.invalid/v1');
+  await editor.getByLabel('API Key',{exact:true}).fill('sk-server-only');
+  await editor.getByLabel('手动模型 ID',{exact:true}).fill('synced-model');
+  await editor.getByRole('button',{name:'保存服务商',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('[data-model="synced-model"]'));
+  await page.locator('[data-model="synced-model"]').getByRole('button',{name:'设默认',exact:true}).click();
+  await page.waitForFunction(() => /synced-model/.test(document.querySelector('#model-chip-text').textContent));
   const saved = JSON.parse(fs.readFileSync(path.join(dataDir, 'config.json'), 'utf8'));
-  check('服务器模式下换了模型，自动同步到服务器', saved.provider === 'custom' && saved.models?.custom === 'synced-model' && /synced-model/.test(await page.locator('#model-chip-text').textContent()));
+  check('明确编辑服务器默认模型并更新云端标签', saved.provider==='custom'&&saved.models.custom==='synced-model'&&saved.keys.custom==='sk-server-only');
+  check('服务器配置不会写入本机模型或密钥',await page.evaluate(()=>{const cfg=JSON.parse(localStorage.getItem('jarvis.llm.v1'));return cfg.models.custom==='local-only-model'&&cfg.keys.custom==='sk-local-only'&&!JSON.stringify(cfg).includes('sk-server-only');}));
 
   // 关掉服务器模式：回到本机
   await page.evaluate(() => window.__jarvis.showPanel('settings'));

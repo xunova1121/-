@@ -51,7 +51,7 @@ export const modelOf = (cfg, id = cfg.provider) => cfg.models[id] || providerByI
 
 export function displayName(cfg) {
   const p = providerById(cfg.provider);
-  return p.kind === 'mock' ? '内置演示' : `${p.name.replace(/（.*?）/g, '')} · ${modelOf(cfg)}`;
+  return p.kind === 'mock' ? '内置演示' : `${cfg.providerNames?.[p.id] || p.name.replace(/（.*?）/g, '')} · ${modelOf(cfg)}`;
 }
 
 /**
@@ -152,3 +152,4 @@ export async function listModels(cfg, { gateway = null } = {}) {
     return fallback;
   }
 }
+

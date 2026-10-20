@@ -125,11 +125,11 @@ try{
   check('陪伴面板文字动作指令正常执行',await page.locator('.wy-companion-stage .wy-mascot').getAttribute('data-state')==='wink',await page.locator('.wy-companion-stage .wy-mascot').getAttribute('data-state'));
   await page.getByRole('button',{name:'关闭未央',exact:true}).click();await page.evaluate(()=>window.__resizeKeyboard(844));
   check('移除底部声音跳转入口，显示当前模型',await page.isVisible('#model-chip')&&await page.locator('.wy-composer-options').count()===0);
-  await page.evaluate(base=>window.__jarvis.panels.patchConfig(c=>({...c,provider:'custom',models:{...c.models,custom:'ui-test-a'},keys:{...c.keys,custom:'sk-test'},baseURLs:{...c.baseURLs,custom:base+'/v1'},modelLists:{...c.modelLists,['custom|'+base+'/v1']:{ids:['ui-test-a','ui-test-b'],at:Date.now()}},routing:{...c.routing,enabled:false}})),BASE);
+  await page.evaluate(base=>window.__jarvis.panels.patchConfig(c=>({...c,provider:'custom',models:{...c.models,custom:'ui-test-a'},keys:{...c.keys,custom:'sk-test'},baseURLs:{...c.baseURLs,custom:base+'/v1'},modelLists:{...c.modelLists,['custom|'+base+'/v1']:{ids:['ui-test-a','ui-test-b'],at:Date.now()}},favoriteModels:[{provider:'custom',model:'ui-test-b'}],routing:{...c.routing,enabled:false}})),BASE);
   await page.click('#model-chip');
-  check('当前模型直接展开锚定列表，无页面跳转',await page.evaluate(()=>{const sheet=document.querySelector('.mp-sheet'),r=sheet.getBoundingClientRect(),chip=document.getElementById('model-chip').getBoundingClientRect();return !sheet.hidden&&sheet.classList.contains('mp-anchored')&&r.left>=15&&r.right<=innerWidth-15&&r.bottom<=chip.top&&!document.body.classList.contains('side-open');}));
-  await page.locator('.mp-item').filter({has:page.getByText('ui-test-b',{exact:true})}).click();
-  check('点选后直接换模型并更新输入框标签',await page.evaluate(()=>window.__jarvis.config.models.custom==='ui-test-b'&&document.getElementById('model-chip-text').textContent==='ui-test-b'&&document.querySelector('.mp-sheet').hidden&&!document.body.classList.contains('side-open')));
+  check('当前模型直接展开常用模型底部面板，无页面跳转',await page.evaluate(()=>{const sheet=document.querySelector('.ml-picker'),r=sheet.getBoundingClientRect();return !sheet.hidden&&r.left>=0&&r.right<=innerWidth&&r.bottom<=innerHeight+1&&!document.body.classList.contains('side-open')&&sheet.textContent.includes('自定义');}));
+  await page.locator('.ml-picker-item').filter({has:page.getByText('ui-test-b',{exact:true})}).click();
+  check('点选后直接换模型并更新输入框标签',await page.evaluate(()=>window.__jarvis.config.models.custom==='ui-test-b'&&document.getElementById('model-chip-text').textContent==='本机 · ui-test-b'&&document.querySelector('.ml-picker').hidden&&!document.body.classList.contains('side-open')));
   const before=await page.locator('.msg.agent').count();await page.fill('#prompt','请写一段较长的计划');await page.click('#btn-send');
   await page.waitForFunction(n=>document.querySelectorAll('.msg.agent').length>n&&document.querySelector('.msg.agent:last-child .body')?.textContent.length>200,before);
   await page.evaluate(()=>{const root=document.getElementById('transcript');root.scrollTop=0;root.dispatchEvent(new Event('scroll'));});

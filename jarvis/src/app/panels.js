@@ -71,7 +71,6 @@ export function createPanels(app) {
       app.syncMemoryEngine();
       app.updateOrbitStatus();
       routingPanel?.render();
-      app.pushConfigToServer();
     },
     onReflect: () => app.reflectNow({ manual: true }),
     onAutoMemory: (on) => {
@@ -87,6 +86,7 @@ export function createPanels(app) {
     toast: (t) => toast(t)
   });
   const modelPicker = initModelPicker({
+    getWorkspace: () => app.modelWorkspace,
     getConfig: () => panels.config,
     patchConfig: (fn) => panels.patchConfig(fn),
     getGateway: () => app.gateway,
