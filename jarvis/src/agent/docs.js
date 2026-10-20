@@ -86,7 +86,7 @@ async function parsePdf(data) {
 }
 
 let pdfjsPromise = null;
-function loadPdfjs() {
+export function loadPdfjs() {
   pdfjsPromise ??= (async () => {
     if (typeof window === 'undefined') return import('pdfjs-dist/legacy/build/pdf.mjs');
     // 用兼容版（legacy）：新版要求较新的浏览器内核，安卓 / 鸿蒙手机自带的 WebView 上会报“Promise.withResolvers is not a function”

@@ -1,5 +1,5 @@
 /** 检查点只记录证据，不把“可能执行过”当成可重放的命令。 */
-const READ_ONLY = new Set(['read_file','list_files','search_files','search_file_content','web_search','fetch_url','kb_search','recall','get_current_time','verify_numbers','get_stock_kline','check_search_terms','review_task','execution_capabilities','run_project_tests','get_weather','read_task_requirements','read_tool_result','read_skill_file','list_skills','get_document_template','read_task_checkpoint','read_evidence','update_plan']);
+const READ_ONLY = new Set(['read_file','list_files','search_files','search_file_content','web_search','fetch_url','kb_search','recall','get_current_time','verify_numbers','get_stock_kline','check_search_terms','review_task','execution_capabilities','run_project_tests','get_weather','read_task_requirements','read_tool_result','read_skill_file','list_skills','get_document_template','plan_document','check_document','read_task_checkpoint','read_evidence','update_plan']);
 export const isReadOnlyTool = name => READ_ONLY.has(name);
 export function checkpointEvent(previous = {}, event, at = Date.now()) {
   const next = { ...previous, updatedAt:at, inFlight:[...(previous.inFlight || [])], steps:[...(previous.steps || [])], files:[...(previous.files || [])] };
@@ -52,3 +52,4 @@ export function checkpointRecoveryText(rec = {}) {
 export function checkpointView(rec) {
   return rec && {...rec, ...(rec.evidence && {evidence:rec.evidence.map(e=>({key:e.key,savedAt:e.savedAt,sources:e.sources.map(({url,title})=>({url,title}))}))})};
 }
+

@@ -1,3 +1,5 @@
+import { openOfficePackage, orderedSlidePaths } from './officePackage.js';
+import { documentError } from './documentPlan.js';
 /**
  * 改已有的 Word / PPT，保留原来的格式：用 JSZip（MIT）解开文件，只改文字节点，其他（样式、图片、表格、版式）原样保留。
  *
@@ -92,13 +94,23 @@ function appendParagraphs(doc, paragraphs) {
  * @param {{ replacements?: Array<{ find: string, replace: string }>, append?: string[] }} o
  * @returns {Promise<{ blob: Blob, replaced: Array<{ find: string, count: number }>, appended: number }>}
  */
-export async function editOffice(input, kind, { replacements = [], append = [] }) {
-  const JSZip = (await import('jszip')).default;
-  const zip = await JSZip.loadAsync(input instanceof Blob ? await input.arrayBuffer() : input);
-  const files = Object.keys(zip.files).filter((f) => (kind === 'docx'
+export async function editOffice(input, kind, { replacements = [], append = [], slides = [], expectedCount, signal } = {}) {
+  signal?.throwIfAborted();
+  if (replacements.length > 100 || append.length > 100) throw documentError('一次最多修改100处或追加100段');
+  if (slides.length && kind !== 'pptx') throw documentError('指定页码目前只支持PPT');
+  const zip = await openOfficePackage(input);
+  let files = Object.keys(zip.files).filter((f) => (kind === 'docx'
     ? /^word\/(document|header\d*|footer\d*|footnotes|endnotes)\.xml$/.test(f)
     : /^ppt\/(slides\/slide|notesSlides\/notesSlide)\d+\.xml$/.test(f)));
-  if (!files.length) throw new Error(kind === 'docx' ? '这不是有效的 Word 文档' : '这不是有效的 PPT 文件');
+  if (slides.length) {
+    const ordered = await orderedSlidePaths(zip);
+    if (slides.length > 100 || slides.some(page => !Number.isInteger(page) || page < 1 || page > ordered.length)) {
+      throw documentError('PPT页码超出范围', 'DOCUMENT_SCOPE');
+    }
+    // 指定页只改该页可见文字；其他页面和所有备注原样保留。
+    files = [...new Set(slides)].map(page => ordered[page - 1]);
+  }
+  if (!files.length) throw documentError(kind === 'docx' ? '这不是有效的 Word 文档' : '这不是有效的 PPT 文件');
   const [pTag, tTag] = kind === 'docx' ? ['w:p', 'w:t'] : ['a:p', 'a:t'];
   const xmls = Object.fromEntries(await Promise.all(files.map(async (f) => [f, await zip.file(f).async('string')])));
   const replaced = [];
@@ -112,6 +124,11 @@ export async function editOffice(input, kind, { replacements = [], append = [] }
     }
     replaced.push({ find, count });
   }
+  const total = replaced.reduce((sum, item) => sum + item.count, 0);
+  if (expectedCount !== undefined && (!Number.isInteger(expectedCount) || expectedCount < 0 || total !== expectedCount)) {
+    throw documentError(`实际匹配${total}处，与预期${expectedCount}处不符，未保存修改`, 'DOCUMENT_CONFLICT');
+  }
+  signal?.throwIfAborted();
   let appended = 0;
   if (append.length) {
     if (kind !== 'docx') throw new Error('追加段落目前只支持 Word；PPT 请用替换文字，或重新生成');
@@ -123,3 +140,4 @@ export async function editOffice(input, kind, { replacements = [], append = [] }
   const blob = new Blob([await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' })], { type });
   return { blob, replaced, appended };
 }
+

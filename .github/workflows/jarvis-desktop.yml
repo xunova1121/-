@@ -4,7 +4,7 @@ name: 未央安装包
 
 on:
   push:
-    branches: ['**']
+    branches: ['claude/jolly-darwin-tijh97']
     # 打正式版：推送 desktop-v* 标签（GitHub 不对标签推送检查 paths）
     tags: ['desktop-v*']
     paths:
@@ -198,6 +198,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-impress libreoffice-calc fonts-noto-cjk xdotool
       - name: 验证Word、PPT、Excel真实转PDF
         run: node e2e/office-render.mjs
+      - name: 验证文档场景模板、精确修改及真实PDF逐页检查
+        run: node e2e/document-quality.mjs "$RUNNER_TEMP/jarvis-e2e/documents"
       - name: 构建网页版
         run: npm run build
       - name: 服务器模式端到端测试，打包服务器版
@@ -297,6 +299,7 @@ jobs:
             - 使用 MCP 本机工具需要电脑上装有 Node.js（npx）或 uv（uvx）。
 
             构建自 ${{ github.sha }}
+
 
 
 

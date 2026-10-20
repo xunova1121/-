@@ -1,3 +1,4 @@
+import { EXTRA_RECIPES } from './documentRecipes.js';
 /** 未央自有模板：提供结构和版式约束，事实与数值必须由用户资料填充。 */
 export const DOCUMENT_TEMPLATES = [
  {id:'ppt-proposal',format:'pptx',name:'项目方案与决策汇报',theme:'business',purpose:'项目立项、建设方案、管理层决策',outline:['一句话结论与待决策事项','现状和证据','关键问题','目标与衡量标准','整体方案','业务场景','实施路径','预算与收益口径','风险及应对','本次需要的决定'],rules:['每页一个结论，标题直接表达观点','数据页注明来源、日期、单位；不编造收益','卡片、流程、对比、图表交替使用；连续相同版式不超过两页','先确定受众和汇报目的，再选页数；不为凑页数重复内容']},
@@ -7,7 +8,18 @@ export const DOCUMENT_TEMPLATES = [
  {id:'excel-budget',format:'xlsx',name:'预算与投资测算',theme:'business',purpose:'费用预算、项目投资、成本测算',outline:['总览','预算明细','假设与口径','核对事项'],rules:['明细列：类别、项目、数量、单价、金额、依据','金额用数量乘单价公式，汇总引用明细；不能用手填值假装公式','注明币种、含税口径和计量单位','实际值、假设值和待确认值分清；不自动补造数字']},
  {id:'excel-tracker',format:'xlsx',name:'任务与项目跟踪表',theme:'business',purpose:'工作安排、交付清单、项目台账',outline:['总览','任务明细','风险问题','变更记录'],rules:['明细列：编号、任务、负责人、开始、截止、状态、交付物、验收标准','完成率来自明细实际状态或数量','缺失负责人和日期应标待确认，不能凭空安排','状态和日期格式统一，保留筛选与冻结表头']}
 ];
+DOCUMENT_TEMPLATES.push(...EXTRA_RECIPES);
+const WORDS = {
+ 'ppt-proposal': ['项目', '立项', '决策', '方案'], 'ppt-review': ['周报', '月报', '季报', '复盘', '进度'],
+ 'word-report': ['报告', '分析'], 'word-notice': ['通知', '公文', '请示', '函'],
+ 'excel-budget': ['预算', '投资', '测算', '成本'], 'excel-tracker': ['任务', '台账', '跟踪', '计划']
+};
+for (const item of DOCUMENT_TEMPLATES) {
+ item.keywords ??= WORDS[item.id] || [];
+ item.starter ??= item.outline.map(title => `## ${title}\n${item.format === 'xlsx' ? '| 事项 | 说明 |\n|--|--|\n' : '依据用户资料填写，不把骨架作为成品交付。\n'}`).join('\n');
+}
 export function documentTemplate(id) {
- const found=DOCUMENT_TEMPLATES.find(x=>x.id===id);if(!found)throw new Error('没有这个模板，请先查看模板列表');
+ const found=DOCUMENT_TEMPLATES.find(x=>x.id===id);if(!found)throw Object.assign(new Error('没有这个模板，请先查看模板列表'), {code:'DOCUMENT_TEMPLATE',kind:'validation'});
  return JSON.stringify({...found,instructions:'先读取用户材料和完整要求，再按用途调整结构；这是工作方法，不是已经填写好的成品。生成后必须检查真实文件及预览，不能把结构检查说成Office视觉验收。'},null,2);
 }
+
