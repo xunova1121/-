@@ -16,7 +16,9 @@ export function createModelScopes({ getLocal, saveLocal, getClient, onServerSave
   let revision = 0;
   const missing = () => Object.assign(new Error('请先在设置中登录云服务器'), { kind: 'api', code: 'SERVER_NOT_CONNECTED' });
   return {
-    get(scope) { return scope === 'server' ? serverConfig : getLocal(); },
+    get(scope) {
+      return scope === 'server' ? serverConfig : getLocal();
+    },
     async refresh(scope) {
       if (scope !== 'server') return getLocal();
       const client = getClient();
@@ -43,7 +45,10 @@ export function createModelScopes({ getLocal, saveLocal, getClient, onServerSave
         return serverConfig;
       };
       const result = writeQueue.then(run, run);
-      writeQueue = result.then(() => {}, () => {});
+      writeQueue = result.then(
+        () => {},
+        () => {}
+      );
       return result;
     }
   };

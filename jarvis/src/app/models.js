@@ -75,14 +75,20 @@ export function createModels(app) {
   }
 
   function updateModelLabels() {
-    const name = globalThis.__jarvisServerMode ? `云服务器 · ${globalThis.__jarvisServerProvider || ''} · ${globalThis.__jarvisServerModel || '读取配置中'}` : displayName(app.llmConfig);
+    const name = globalThis.__jarvisServerMode
+      ? `云服务器 · ${globalThis.__jarvisServerProvider || ''} · ${globalThis.__jarvisServerModel || '读取配置中'}`
+      : displayName(app.llmConfig);
     $('#mode-text').textContent = name;
     // 输入框里显示型号（或“自动”），点一下弹出模型列表
     $('#model-chip-text').textContent = COMPACT && isAuto(app.llmConfig) ? `自动 · ${modelOf(app.llmConfig) || '选择模型'}` : chipLabel(app.llmConfig);
     if (globalThis.__jarvisServerMode)
-      $('#model-chip-text').textContent = globalThis.__jarvisServerModel ? `云端 · ${globalThis.__jarvisServerAuto ? '自动分工' : globalThis.__jarvisServerModel}` : '云端 · 读取配置中'; // 服务器模式：用服务器上的模型设置
+      $('#model-chip-text').textContent = globalThis.__jarvisServerModel
+        ? `云端 · ${globalThis.__jarvisServerAuto ? '自动分工' : globalThis.__jarvisServerModel}`
+        : '云端 · 读取配置中'; // 服务器模式：用服务器上的模型设置
     else $('#model-chip-text').textContent = `本机 · ${$('#model-chip-text').textContent}`;
-    $('#model-chip').title = globalThis.__jarvisServerMode ? `云服务器 · ${globalThis.__jarvisServerProvider || ''} · ${globalThis.__jarvisServerModel || '读取配置中'}` : `本机 · ${name}`;
+    $('#model-chip').title = globalThis.__jarvisServerMode
+      ? `云服务器 · ${globalThis.__jarvisServerProvider || ''} · ${globalThis.__jarvisServerModel || '读取配置中'}`
+      : `本机 · ${name}`;
     if (isAuto(app.llmConfig)) $('#mode-text').textContent = `${name} · 自动选模型`;
     $('#mode-pill').title = `当前模型：${name}${app.gateway ? '（经本机网关）' : ''}。点击切换`;
     $('#hud-model').textContent = name.length > 22 ? `${name.slice(0, 21)}…` : name;
@@ -121,7 +127,9 @@ export function createModels(app) {
   }
   /** 服务器模式：输入框里显示服务器上设的模型 */
   /** 保留旧模块调用名；只刷新，不再把本机配置自动覆盖到服务器。 */
-  function pushConfigToServer() { refreshServerModel(); }
+  function pushConfigToServer() {
+    refreshServerModel();
+  }
   function refreshServerModel() {
     server
       ?.getConfig()
@@ -209,4 +217,3 @@ export function createModels(app) {
     syncMemoryEngine
   };
 }
-
