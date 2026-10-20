@@ -36,3 +36,4 @@ jobs:
             git push origin HEAD:$GITHUB_REF_NAME
           fi
 # 覆盖长任务和短任务的取消，不增加付费调用。
+# 最终冻结：检索预算耗尽前拦截请求。
