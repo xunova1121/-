@@ -1,3 +1,11 @@
+## 1.0.211 已正式发布：2026-10-20（北京时间，Codex）
+
+- 源码提交：4cd1cb785ab7906b07d64ed578ae3e50f07c0f46；Actions 39343458570。正式分支35个文件改动，无删除；main.js及mount顺序未改，临时验证工作流未合入。
+- 正式CI：lint通过；97文件999项单元测试全通过；评测入口11项通过；真实Docker多文件运行、只读/网络隔离及取消清理通过；代码隔离、Word/PPT/Excel真实转PDF通过。服务器13/13、手机界面78/78、手机连服务器15/15、桌面互动11/11、PC控制5/5、网页178/178、单文件14/14通过；对话补充流程通过。
+- Windows、Android及服务器包构建成功。Releases desktop-v1.0.211非草稿，7个文件均uploaded：APK、EXE、Windows ZIP、服务器tar.gz、服务器更新JSON、latest.yml及blockmap；Android日志确认使用固定签名密钥。
+- 下载：https://github.com/xunova1121/-/releases/tag/desktop-v1.0.211 。App与服务器均需更新。未远程更新用户生产服务器，未做鸿蒙/Windows真机与真实付费模型质量评测；多文件项目测试仍需管理员配置JARVIS_CODE_SANDBOX_IMAGE，细节见下一节及能力清单。
+- 用户明确授权遵守规范并直接发布；没有再次索取确认。没有Claude独立人工审查，已有逐项自查和完整自动验证。本次不是所有能力达到某个模型水平的证明。
+
 ## 统一执行与验收机制：2026-10-20（北京时间，Codex；候选完整验证通过，合入正式分支）
 
 - 用户授权整体能力审查、实施、自动处理确认并直接发版。基线34468a2cd8acb3d504b964ac9db2dffae7cf293b/1.0.201；独立分支codex/system-quality-20261020先用[skip ci]保存。没有复制私有系统提示、模型权重或未授权模板。
