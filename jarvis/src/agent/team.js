@@ -16,7 +16,7 @@ import { collectRequirements, requirementsBlock } from './taskRequirements.js';
 export const ROLES = {
   researcher: { name: '研究员', duty: '查资料：联网搜索、深度调研、读网页和知识库，给出有出处的事实与数据，不负责写最终成品', tools: /^(web_search|deep_research|fetch_url|kb_search|recall|read_file|list_files|mcp_)/ },
   coder: { name: '工程师', duty: '写代码、做网页和小工具，写完必须运行或打开预览验证', tools: /^(write_file|read_file|list_files|run_javascript|run_python|preview|use_skill|read_skill_file|computer_|mcp_)/ },
-  writer: { name: '撰稿人', duty: '写文档、报告、PPT、邮件：结论先行、结构清晰，用前面步骤给出的事实，不编造', tools: /^(create_document|plan_document|check_document|edit_spreadsheet|get_document_template|read_task_checkpoint|write_file|read_file|list_files|kb_search|recall|preview|use_skill|read_skill_file)/ },
+  writer: { name: '撰稿人', duty: '写文档、报告、PPT、邮件：结论先行、结构清晰，用前面步骤给出的事实，不编造', tools: /^(write_professional_document|generate_task_brief|create_document|plan_document|check_document|edit_spreadsheet|get_document_template|read_task_checkpoint|write_file|read_file|list_files|kb_search|recall|preview|use_skill|read_skill_file)/ },
   analyst: { name: '分析师', duty: '数据分析：读表格、计算、统计、出图表，所有数字都要来自实际计算', tools: /^(run_python|run_javascript|read_file|list_files|write_file|create_document|plan_document|check_document|edit_spreadsheet|preview)/ },
   operator: { name: '操作员', duty: '操作电脑：整理文件、运行命令、打开应用、截屏', tools: /^(computer_|clipboard_|mcp_|read_file|write_file|list_files)/ },
   generalist: { name: '助理', duty: '处理不属于其他角色的事情', tools: /./ }
@@ -186,4 +186,5 @@ export async function runTeam({ adapter, model, history = [], userText, images =
   emit({ type: 'state', value: 'done' });
   return { text, toolCalls, steps: steps.length, team: results };
 }
+
 

@@ -4,3 +4,6 @@
 !src/app/
 !src/app/*.js
 !src/main.js
+
+!src/app/doc/
+!src/app/doc/*.js

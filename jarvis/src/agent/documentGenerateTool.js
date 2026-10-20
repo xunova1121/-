@@ -76,7 +76,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         format,
         content,
         requirements: taskRules,
-        llm: ctx.reasonLlm ?? ctx.llm ?? null,
+        llm: ctx.documentContentReview ? null : ctx.reasonLlm ?? ctx.llm ?? null,
         signal,
         onProgress: (t) => progress?.(t)
       });
@@ -153,6 +153,9 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         }
       }
       const target = path.replace(/\.[a-z0-9]+$/i, '') + `.${out.ext}`;
+      if (ctx.documentContentReview && finalContent !== content) {
+        ctx.documentContentReview.business = 'needs_recheck';
+      }
       const r = await deliverDocument(ctx, out, target, { progress, signal, checkpoint, plan, issues: lint(format, finalContent), generatorReview: looked });
       const notes = [
         `主题：${out.theme.name}`,
@@ -184,3 +187,4 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
     }
   };
 }
+

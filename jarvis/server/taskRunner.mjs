@@ -1,3 +1,4 @@
+import { createHelperLlm } from '../src/llm/helper.js';
 import { projectExecutionTool } from './projectExecution.mjs';
 import { renderOffice } from './officeRender.mjs';
 import { createTaskTiming } from '../shared/taskTiming.js';
@@ -144,11 +145,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
   function helper(cfg, kind) {
     const { adapter, model, problem } = createAdapter(routeFor(cfg, kind).cfg);
     if (problem || providerById(cfg.provider)?.kind === 'mock') return null;
-    return async ({ system, prompt, signal, images }) => {
-      let text = '';
-      const r = await adapter.stream({ model, system: [system], messages: [{ role: 'user', content: prompt, ...(images?.length && { images }) }], tools: [], signal, onText: (d) => { text += d; } });
-      return r?.text || text;
-    };
+    return createHelperLlm(adapter, model);
   }
 
   async function execute(task) {
@@ -382,6 +379,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     }
   };
 }
+
 
 
 

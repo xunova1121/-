@@ -3,10 +3,11 @@ import { createLongDocumentTool } from './longDocumentTool.js';
 import { createDocumentEditingTools } from './documentEditingTools.js';
 import { createDocumentInspectionTools } from './documentInspectionTools.js';
 import { throwControl } from '../core/networkRequest.js';
+import { createProfessionalDocumentTools } from './professionalDocumentTools.js';
 
 /** 文档工具入口只组装，具体制作、修改、计划和验收各自独立。 */
 export function createDocumentTools(ctx) {
-  const tools = [...createDocumentEditingTools(ctx), ...createDocumentInspectionTools(), createDocumentGenerateTool(ctx), createLongDocumentTool(ctx)];
+  const tools = [...createProfessionalDocumentTools(ctx), ...createDocumentEditingTools(ctx), ...createDocumentInspectionTools(), createDocumentGenerateTool(ctx), createLongDocumentTool(ctx)];
   return tools.map((tool) => ({
     ...tool,
     run: async (...args) => {
@@ -23,3 +24,4 @@ export function createDocumentTools(ctx) {
     }
   }));
 }
+

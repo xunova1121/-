@@ -5,6 +5,8 @@ import { writeLongDocument, outlineMarkdown } from './longDoc.js';
 import { lint } from './selfCheck.js';
 import { deliverDocument } from './documentDelivery.js';
 import { S, str, fmtSize, findTemplate } from './documentSchema.js';
+import { createProfessionalDocumentTools } from './professionalDocumentTools.js';
+import { documentDepth } from '../app/doc/workflowPolicy.js';
 
 /** 长文保留原有分节写作与试读；交付统一走实际文件验收。 */
 export function createLongDocumentTool(ctx) {
@@ -61,8 +63,9 @@ export function createLongDocumentTool(ctx) {
         subtitle,
         author
       },
-      { progress, signal, checkpoint } = {}
+      execution = {}
     ) => {
+      const { progress, signal, checkpoint } = execution;
       // 参考文件由程序读全文，不经模型转述（模型转述时会压缩，长材料还会被截断）
       const files = [];
       for (const f of Array.isArray(materialFiles) ? materialFiles.slice(0, 8) : []) {
@@ -74,6 +77,10 @@ export function createLongDocumentTool(ctx) {
         }
       }
       if (files.length) material = [material, ...files].filter(Boolean).join('\n\n');
+      if (!outlineOnly && !outline?.length && ctx.llm && documentDepth({task, format}) === 'expert') {
+        const professional = createProfessionalDocumentTools(ctx).find(item => item.name === 'write_professional_document');
+        return professional.run({task: words ? `${task}\n目标字数：${words}` : task, material, format, path, title, depth:'expert'}, execution);
+      }
       const r = await writeLongDocument({
         task,
         title,
@@ -128,3 +135,4 @@ export function createLongDocumentTool(ctx) {
     }
   };
 }
+
