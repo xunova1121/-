@@ -144,7 +144,7 @@ ${String(content).slice(0, 24000)}
 ${sheet ? `检查：程序查出的每个公式问题都要改掉——对照上面的单元格位置改成正确的引用（如 =SUM(B2:B9) 改成 =SUM(B4:B11)），函数名拼错的改对，除数可能是 0 或空的用 IFERROR(…,"") 包住；在原文里找到那个公式原样替换。也看看有没有漏掉用户要求的内容。` : `检查：有没有漏掉用户要求的内容、字数或页数明显不符、空页空节、表格错乱、${format === 'pptx' ? '某页字太多溢出、' : ''}占位文字没填、前后矛盾${format === 'pptx' ? '' : '、只有一句话没有展开的要点（用 append_after 补上依据和分析）'}。`}
 ${format === 'pptx' || sheet ? '' : CHECKLIST}
 输出 JSON：{"problems":["问题，没有就空数组"],"edits":[{"find":"原文里一字不差的片段（10-80 字）","replace":"改成"}],"append_after":[{"heading":"已有的标题原文（不带 #）","markdown":"要补在这一节末尾的 Markdown"}]}
-修改只针对上面的问题；数据材料里没有的写“待确认”，不要编造。没有问题就都给空数组。`
+修改只针对上面的问题；材料没有的事实数字不得编造；业务建议可以提出但写明假设。真正需要决策的未知事项集中列出并说明影响，不要满篇待确认，也不能擅自延后用户明确要求。没有问题就都给空数组。`
   }));
   return applyEdits(content, j);
 }
@@ -243,3 +243,4 @@ ${String(content).slice(0, 16000)}
   const r = applyEdits(content, j);
   return { problems: (Array.isArray(j?.problems) ? j.problems : []).map(String).filter(Boolean), content: r.content, changed: r.changed };
 }
+

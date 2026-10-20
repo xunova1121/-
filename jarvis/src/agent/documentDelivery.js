@@ -7,6 +7,7 @@ import { documentError } from './documentPlan.js';
 /** 把短检查报告与真实产物放一起；正文只在工作区文件中，不进会话/检查点。 */
 export async function deliverDocument(ctx, out, target, { progress, signal, checkpoint, issues = [], plan, generatorReview, requiredText = [] } = {}) {
   const validation = await inspectDocument(out.blob, target, { info: out.info, requiredText, signal });
+  validation.contentReview = ctx.documentContentReview || { business: 'not_checked' };
   validation.generatorVisual = generatorReview ? 'generator_preview_reviewed' : 'not_checked';
   if (generatorReview?.problems?.length && !generatorReview.changed) {
     issues = [...issues, ...generatorReview.problems.slice(0, 10).map((text) => ({ level: 'warn', text: '生成器看图发现：' + String(text).slice(0, 160) }))];
@@ -96,3 +97,4 @@ async function renderDocument(ctx, out, filePath, { progress, signal }) {
     return { state: 'failed', notes: ['Office真实预览未完成：' + String(error.message || '转换失败').slice(0, 240)] };
   }
 }
+
