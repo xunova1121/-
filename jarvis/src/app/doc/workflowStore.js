@@ -8,19 +8,14 @@ export function createWorkflowStore(app, execution) {
     execution.signal?.throwIfAborted();
     if ((state.saves || 0) >= 40) throw workflowError('本任务阶段文件已达40份上限，请查看已保存文件', 'DOCUMENT_STORAGE_LIMIT');
     state.saves = (state.saves || 0) + 1;
-    const proposed = `${state.folder}/state-${Date.now()}-${++sequence}.json`;
+    const proposed = `${state.folder}/state-${state.saves}-${globalThis.crypto.randomUUID()}.json`;
+    sequence++;
     const checkpointId = `${state.id}-${sequence}`;
     // 复用已有tool_start强制落盘协议，在每次写状态前留下待核对的路径。
     await execution.checkpoint?.({ type: 'tool_start', id: checkpointId, name: 'document_workflow_save', args: { path: proposed } });
     const result = await app.documentWorkspace.write(proposed, JSON.stringify(state, null, 2));
     state.stateFile = result.path;
-    await execution.checkpoint?.({
-      type: 'tool_end',
-      id: checkpointId,
-      name: 'document_workflow_save',
-      ok: true,
-      output: `阶段：${state.phase}；恢复文件：${result.path}`
-    });
+    await execution.checkpoint?.({ type: 'tool_end', id: checkpointId, name: 'document_workflow_save', ok: true, output: `阶段：${state.phase}；恢复文件：${result.path}` });
     return result.path;
   };
   const load = async (filePath) => {
@@ -29,20 +24,15 @@ export function createWorkflowStore(app, execution) {
     const blob = await app.documentWorkspace.readBlob(normalized);
     if (blob.size > 800000) throw workflowError('恢复文件过大', 'DOCUMENT_INPUT');
     let state;
-    try {
-      state = JSON.parse(await blob.text());
-    } catch {
-      throw workflowError('恢复文件损坏', 'DOCUMENT_INPUT');
-    }
+    try { state = JSON.parse(await blob.text()); } catch { throw workflowError('恢复文件损坏', 'DOCUMENT_INPUT'); }
     if (state.version !== 3 || state.sessionId !== (execution.sessionId ?? null) || state.folder !== normalized.slice(0, normalized.lastIndexOf('/'))) {
       throw workflowError('恢复文件与本轮会话不匹配', 'DOCUMENT_SESSION');
     }
-    if (
-      !['new', 'planned', 'drafted', 'reviewed', 'revised', 'completed'].includes(state.phase) ||
-      !Number.isInteger(state.calls) ||
-      state.calls < 0 ||
-      state.calls > LIMITS.calls
-    ) {
+    const siblings = await app.documentWorkspace.list?.(state.folder) || [];
+    if (siblings.some(item => Number(item.path.slice(item.path.lastIndexOf('/') + 1).match(/^state-(\d+)-/)?.[1]) > state.saves)) {
+      throw workflowError('存在更新的阶段文件，请先核对最新记录，不能从旧检查点重复执行', 'DOCUMENT_STALE_STATE');
+    }
+    if (!['new', 'planned', 'drafted', 'reviewed', 'revised', 'completed'].includes(state.phase) || !Number.isInteger(state.calls) || state.calls < 0 || state.calls > LIMITS.calls) {
       throw workflowError('恢复状态或调用计数无效', 'DOCUMENT_INPUT');
     }
     boundedText(state.input?.task, LIMITS.task, '原始要求', true);

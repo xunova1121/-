@@ -8,25 +8,8 @@ import { applyRevisions } from '../../src/app/doc/targetedRevision.js';
 // 这里只验证机制，模型响应是明确的测试替身，绝不冒充真实方案质量验收。
 export const task = '建设方案必须电子秤自动称重，并对接银行结算。';
 export const draft = '# 测试方案\n\n电子秤自动称重，现场确认净重，再对接银行结算。';
-export const fixture = () => ({
-  brief: {
-    purpose: '业主初次讨论',
-    requirements: ['电子秤自动称重', '对接银行结算'],
-    relationships: ['买卖双方'],
-    facts: [],
-    assumptions: ['银行具备约定接口时直连'],
-    unknowns: ['银行接口影响联调'],
-    direction: '先验证设备和银行，再上线交易'
-  },
-  scenarios: { normal: ['称重交付'], exceptions: ['复称留痕'], settlement: ['核对货款'], acceptance: ['重复回调不重复记账'], structure: ['业务流程与交付'] }
-});
-export const review = (issues = []) => ({
-  coverage: [
-    { id: 'REQ-1', result: 'supported', quote: '电子秤自动称重' },
-    { id: 'REQ-2', result: 'supported', quote: '对接银行结算' }
-  ],
-  issues
-});
+export const fixture = () => ({ brief: { purpose: '业主初次讨论', requirements: ['电子秤自动称重', '对接银行结算'], relationships: ['买卖双方'], facts: [], assumptions: ['银行具备约定接口时直连'], unknowns: ['银行接口影响联调'], direction: '先验证设备和银行，再上线交易' }, scenarios: { normal: ['称重交付'], exceptions: ['复称留痕'], settlement: ['核对货款'], acceptance: ['重复回调不重复记账'], structure: ['业务流程与交付'] } });
+export const review = (issues = []) => ({ coverage: [{ id: 'REQ-1', result: 'supported', quote: '电子秤自动称重' }, { id: 'REQ-2', result: 'supported', quote: '对接银行结算' }], issues });
 const issue = { severity: 'must_fix', location: '正文第一段', problem: '缺少重量口径', fix: '明确毛重扣除皮重得到净重' };
 
 function harness(responses = [fixture(), draft, review()]) {
@@ -34,27 +17,19 @@ function harness(responses = [fixture(), draft, review()]) {
   const events = [];
   const prompts = [];
   const workspace = {
-    normalize: (value) => {
-      if (String(value).includes('..')) throw new Error('路径无效');
-      return value;
-    },
-    write: async (filePath, text) => {
-      files.set(filePath, String(text));
-      return { path: filePath };
-    },
-    readBlob: async (filePath) => {
-      if (!files.has(filePath)) throw new Error('找不到文件');
-      return new Blob([files.get(filePath)]);
-    }
+    normalize: value => { if (String(value).includes('..')) throw new Error('路径无效'); return value; },
+    list: async prefix => [...files.keys()].filter(filePath => filePath.startsWith(prefix + '/')).map(filePath => ({ path: filePath })),
+    write: async (filePath, text) => { files.set(filePath, String(text)); return { path: filePath }; },
+    readBlob: async filePath => { if (!files.has(filePath)) throw new Error('找不到文件'); return new Blob([files.get(filePath)]); }
   };
-  const llm = async (request) => {
+  const llm = async request => {
     prompts.push(request);
     const value = responses.shift();
     if (value instanceof Error) throw value;
     if (typeof value === 'function') return value(request);
     return typeof value === 'string' ? value : JSON.stringify(value);
   };
-  const execution = { sessionId: 'task-session', checkpoint: async (value) => events.push(value) };
+  const execution = { sessionId: 'task-session', checkpoint: async value => events.push(value) };
   const workflow = createDocumentWorkflow({ llm, documentWorkspace: workspace });
   const latest = () => [...files].at(-1)?.[0];
   return { files, events, prompts, execution, workflow, latest, workspace, llm };
@@ -77,7 +52,7 @@ export function documentWorkflowCases(test) {
     assert.ok(h.prompts[1].prompt.includes('复称留痕'));
     assert.ok(h.prompts[2].prompt.includes(task));
     assert.ok(!JSON.stringify(h.events).includes(draft));
-    assert.ok(h.events.every((item, index) => (index % 2 ? item.type === 'tool_end' : item.type === 'tool_start')));
+    assert.ok(h.events.every((item, index) => index % 2 ? item.type === 'tool_end' : item.type === 'tool_start'));
   });
   test('底稿不能把模型建议冒充用户明确要求', () => {
     const value = fixture();
@@ -104,20 +79,12 @@ export function documentWorkflowCases(test) {
     assert.throws(() => validateReview(value, plan, draft));
   });
   test('修订片段不唯一或不存在时整批拒绝，原稿不被污染', () => {
-    assert.throws(() => applyRevisions('同样的内容反复出现同样的内容反复出现', { edits: [{ find: '同样的内容反复出现', replace: '改掉' }] }), {
-      code: 'DOCUMENT_REVISION_CONFLICT'
-    });
+    assert.throws(() => applyRevisions('同样的内容反复出现同样的内容反复出现', { edits: [{ find: '同样的内容反复出现', replace: '改掉' }] }), { code: 'DOCUMENT_REVISION_CONFLICT' });
     assert.throws(() => applyRevisions(draft, { edits: [{ find: '不存在的唯一片段', replace: '修改' }] }));
     assert.equal(applyRevisions(draft, { edits: [] }), draft);
   });
   test('最多修订一次，再审仍失败必须保留问题和原稿', async () => {
-    const h = harness([
-      fixture(),
-      draft,
-      review([issue]),
-      { edits: [{ find: '现场确认净重，再对接银行结算', replace: '毛重扣除筐重和水重后确认净重，再对接银行结算' }] },
-      review([issue])
-    ]);
+    const h = harness([fixture(), draft, review([issue]), { edits: [{ find: '现场确认净重，再对接银行结算', replace: '毛重扣除筐重和水重后确认净重，再对接银行结算' }] }, review([issue])]);
     const result = await h.workflow.run({ task }, h.execution);
     assert.equal(result.calls, 5);
     assert.equal(result.business, 'needs_revision');
@@ -135,7 +102,7 @@ export function documentWorkflowCases(test) {
     assert.equal(saved.phase, 'drafted');
     const result = await h.workflow.run({ state_file: h.latest() }, h.execution);
     assert.equal(result.business, 'model_reviewed');
-    assert.equal(h.prompts.filter((item) => item.system.includes('撰稿人')).length, 1);
+    assert.equal(h.prompts.filter(item => item.system.includes('撰稿人')).length, 1);
   });
   test('后台任务恢复严格使用本轮sessionId', async () => {
     const h = harness();
@@ -145,27 +112,14 @@ export function documentWorkflowCases(test) {
   test('预算在模型请求前扣除，耗尽不发请求且不吞控制信号', async () => {
     const h = harness();
     const budgetError = Object.assign(new Error('测试预算'), { code: 'RETRIEVAL_BUDGET' });
-    await assert.rejects(
-      h.workflow.run(
-        { task },
-        {
-          ...h.execution,
-          retrieval: {
-            consume: () => {
-              throw budgetError;
-            }
-          }
-        }
-      ),
-      (error) => error === budgetError
-    );
+    await assert.rejects(h.workflow.run({ task }, { ...h.execution, retrieval: { consume: () => { throw budgetError; } } }), error => error === budgetError);
     assert.equal(h.prompts.length, 0);
   });
   test('忽略signal的模型也能被立即停止，不产生后续审查', async () => {
     const control = new AbortController();
     const h = harness([() => new Promise(() => {})]);
     const work = h.workflow.run({ task }, { ...h.execution, signal: control.signal });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await new Promise(resolve => setTimeout(resolve, 10));
     control.abort(Object.assign(new Error('测试停止'), { name: 'AbortError' }));
     await assert.rejects(work, { name: 'AbortError' });
     assert.equal(h.prompts.length, 1);
@@ -190,5 +144,39 @@ export function documentWorkflowCases(test) {
     assert.equal(prepared.calls, 1);
     const result = await h.workflow.run({ state_file: prepared.stateFile }, h.execution);
     assert.equal(result.calls, 3);
+  });
+  test('默认不调用另一个推理线路，显式审查函数才可独立审核', async () => {
+    const h = harness([fixture(), draft]);
+    let reviews = 0;
+    const workflow = createDocumentWorkflow({ documentWorkspace: h.workspace, llm: h.llm, reasonLlm: () => { throw new Error('不应调用'); }, documentReviewer: async () => { reviews++; return JSON.stringify(review()); } });
+    const result = await workflow.run({ task }, h.execution);
+    assert.equal(result.reviewMode, 'configured_reviewer');
+    assert.equal(h.prompts.length, 2);
+    assert.equal(reviews, 1);
+  });
+  test('已完成内容恢复不再次调用模型或新增状态文件', async () => {
+    const h = harness();
+    const result = await h.workflow.run({ task }, h.execution);
+    const count = h.files.size;
+    const resumed = await h.workflow.run({ state_file: result.stateFile }, h.execution);
+    assert.equal(resumed.draft, draft);
+    assert.equal(h.files.size, count);
+    assert.equal(h.prompts.length, 3);
+  });
+  test('旧阶段文件不能重复消耗模型或覆盖新进度', async () => {
+    const h = harness();
+    const prepared = await h.workflow.prepare({ task }, h.execution);
+    await h.workflow.run({ state_file: prepared.stateFile }, h.execution);
+    await assert.rejects(h.workflow.run({ state_file: prepared.stateFile }, h.execution), { code: 'DOCUMENT_STALE_STATE' });
+    assert.equal(h.prompts.length, 3);
+  });
+  test('调用计数与状态文件有硬上限，不能无限恢复', async () => {
+    const h = harness();
+    const prepared = await h.workflow.prepare({ task }, h.execution);
+    const saved = JSON.parse(h.files.get(prepared.stateFile));
+    saved.calls = 8;
+    h.files.set(prepared.stateFile, JSON.stringify(saved));
+    await assert.rejects(h.workflow.run({ state_file: prepared.stateFile }, h.execution), { code: 'DOCUMENT_CALL_LIMIT' });
+    assert.equal(h.prompts.length, 1);
   });
 }
