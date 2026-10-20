@@ -1,0 +1,35 @@
+name: Claude stream completion checks
+on:
+  push:
+    branches: ['codex/claude-stream-completion-20261020']
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: jarvis/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run format
+      - run: npx prettier --write --ignore-path /dev/null src/llm/anthropicStream.js tests/anthropicCompletion.test.js e2e/anthropic-stream.mjs
+      - run: npm run lint
+      - run: node e2e/anthropic-stream.mjs
+      - run: npx vitest run
+      - name: 保存统一格式结果
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/main.js src/app src/llm/anthropicStream.js tests/anthropicCompletion.test.js e2e/anthropic-stream.mjs
+          if ! git diff --cached --quiet; then
+            git commit -m '[skip ci] 统一Claude收尾模块和回归测试格式'
+            git push origin HEAD:$GITHUB_REF_NAME
+          fi
