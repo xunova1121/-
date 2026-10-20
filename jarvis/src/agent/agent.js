@@ -447,7 +447,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         const progress = (text) => emit({ type: 'tool_progress', id: c.id, name: c.name, text });
         const web = WEB_TOOLS.has(c.name);
         if (web && !retrieval.begin()) throw new Error(retrieval.note);
-        const run = (s) => tool.run(c.args, { signal: s, progress, retrieval, sessionId, requestText: review.report().request, checkpoint: event => { if (event.type === 'artifact_validation') review.artifact(event); return checkpoint?.(event); } });
+        const run = (s) => tool.run(c.args, { signal: s, progress, retrieval, sessionId, rawRequestText: requirementText, requestText: review.report().request, checkpoint: event => { if (event.type === 'artifact_validation') review.artifact(event); return checkpoint?.(event); } });
         const r = web && Number.isFinite(retrieval.remaining)
           ? await withWebDeadline(run, { signal, timeoutMs: Math.min(retrieval.remaining, lookupDeadline && lookupControl ? lookupControl.retrievalRemaining() : Infinity) }) : await run(signal);
         if (r && typeof r === 'object' && 'text' in r) { output = String(r.text); outImages = r.images ?? []; } else output = String(r);
