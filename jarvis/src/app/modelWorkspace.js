@@ -1,6 +1,6 @@
 /** 模型工作台：分位置读写配置，界面细节放在ui，不改任务执行中的运行位置。 */
 import { createModelScopes } from '../llm/modelScopes.js';
-import { copyModelSettings, chooseLine, currentLine } from '../llm/modelLibrary.js';
+import { copyModelSettings, chooseLine, currentLine, hasRouting } from '../llm/modelLibrary.js';
 import { loadServerSettings, saveServerSettings, createServerClient } from '../core/serverClient.js';
 import { fetchModelCatalog } from '../llm/modelCatalog.js';
 import { initModelLibrary } from '../ui/modelLibrary.js';
@@ -18,24 +18,19 @@ export function createModelWorkspace(app) {
     getClient,
     onServerSaved: (cfg) => {
       globalThis.__jarvisServerModel = currentLine(cfg).model;
+      globalThis.__jarvisServerAuto = hasRouting(cfg);
       globalThis.__jarvisServerProvider = cfg.providerNames?.[cfg.provider] || cfg.provider;
       app.updateModelLabels();
     }
   });
   const workspace = {
-    get scope() {
-      return scope;
-    },
-    get runtime() {
-      return app.server ? 'server' : 'local';
-    },
-    get serverSettings() {
-      return loadServerSettings();
-    },
+    get scope() { return scope; },
+    get runtime() { return app.server ? 'server' : 'local'; },
+    get serverSettings() { return loadServerSettings(); },
     config: (target = scope) => scopes.get(target),
     refresh: (target = scope) => scopes.refresh(target),
     patch: (update, target = scope) => scopes.patch(target, update),
-    gateway: (target = scope) => (target === 'local' ? app.gateway : null),
+    gateway: (target = scope) => target === 'local' ? app.gateway : null,
     async selectScope(target) {
       scope = target;
       return scopes.refresh(target);

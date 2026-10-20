@@ -1,6 +1,6 @@
 /** 对话中的轻量选择器只展示常用线路；运行位置切换沿用安全的会话重载流程。 */
 import { node } from './modelLibrary.js';
-import { favoriteLines, currentLine, sameLine, providerLabel } from '../llm/modelLibrary.js';
+import { favoriteLines, currentLine, sameLine, providerLabel, hasRouting } from '../llm/modelLibrary.js';
 import { modelKind } from '../llm/images.js';
 
 export function initLibraryPicker({ getWorkspace, openSettings, toast }) {
@@ -67,7 +67,7 @@ export function initLibraryPicker({ getWorkspace, openSettings, toast }) {
       if (!lines.length) results.append(node('p', { className: 'ml-muted', textContent: '没有常用模型，请在管理页收藏型号。' }));
     };
     search.addEventListener('input', () => { query = search.value; paint(); });
-    sheet.replaceChildren(head, node('p', { className: 'ml-muted', textContent: `当前使用${runtime === 'server' ? '服务器' : '本机'}配置 · 切换位置会重新载入对应对话` }), tabs, search, node('p', { className: 'ml-notice', role: 'status', textContent: notice }), results, makeButton('管理模型与服务商 ›', () => { dismiss(); openSettings(); }, 'ml-manage'));
+    sheet.replaceChildren(head, node('p', { className: 'ml-muted', textContent: `当前使用${runtime === 'server' ? '服务器' : '本机'}配置 · 切换位置会重新载入对应对话${cfg && hasRouting(cfg) ? ' · 已开启高级分工，选定默认后关闭分工' : ''}` }), tabs, search, node('p', { className: 'ml-notice', role: 'status', textContent: notice }), results, makeButton('管理模型与服务商 ›', () => { dismiss(); openSettings(); }, 'ml-manage'));
     paint();
     if (pending) sheet.querySelectorAll('button').forEach((element) => { if (!element.classList.contains('ml-dismiss')) element.disabled = true; });
   }

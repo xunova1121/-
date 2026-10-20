@@ -234,7 +234,7 @@ export function createServer({
 
   async function handleLlmProxy(req, res, id, rest, search, cross = false) {
     let base = id === 'ollama' ? `${ollama.host}/v1` : (upstreamFor(id) ?? EXTRA_UPSTREAMS[id]);
-    if (id === 'custom' || id === 'claude-relay' || id === 'relay-multi') {
+    if (providerById(id)?.custom) {
       // 自定义（OpenAI 兼容）接口：地址由前端在请求头里给出；允许内网地址（本机 / 局域网自建模型很常见）
       try {
         const u = new URL(String(req.headers['x-jarvis-upstream'] || ''));
@@ -406,3 +406,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     console.log(process.env.ANTHROPIC_API_KEY ? `对话后端: Claude (${process.env.JARVIS_MODEL || 'claude-opus-5-5'})` : '对话后端: 本地演示智能体（设置 ANTHROPIC_API_KEY 以接入 Claude）');
   });
 }
+

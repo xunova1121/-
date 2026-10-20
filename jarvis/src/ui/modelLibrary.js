@@ -1,7 +1,7 @@
 /** 模型库主界面：服务商卡片与常用型号，完整目录按搜索和分页显示。 */
 import './modelLibrary.css';
 import { PROVIDERS, providerById } from '../../shared/providers.js';
-import { boundedIds, configuredProviders, providerLabel, catalogKey, favoriteLines, currentLine, sameLine, toggleFavorite, toggleBackup, saveCatalog } from '../llm/modelLibrary.js';
+import { boundedIds, configuredProviders, providerLabel, catalogKey, favoriteLines, currentLine, sameLine, toggleFavorite, toggleBackup, saveCatalog, hasRouting } from '../llm/modelLibrary.js';
 import { modelKind } from '../llm/images.js';
 
 export const node = (tag, props = {}, ...children) => {
@@ -149,6 +149,7 @@ export function initModelLibrary({ root, workspace, toast }) {
     root.append(message);
     if (pullController) root.append(button('停止拉取', () => pullController.abort(), 'ml-link'));
     if (!cfg) return;
+    if (hasRouting(cfg)) root.append(node('p', {className:'ml-notice',textContent:'高级分工已开启，实际模型可能按任务变化。'}),button('统一使用默认模型',()=>patch(value=>({...value,routing:{...value.routing,enabled:false}})),'ml-link'));
     root.append(...configuredProviders(cfg, workspace.gateway()?.keys).map((meta) => providerCard(cfg, meta)));
     const add = node('select', { ariaLabel: '添加服务商', className: 'ml-add-select' }, node('option', { value: '', textContent: '＋ 添加服务商…' }), ...PROVIDERS.filter((meta) => meta.kind !== 'mock' && !configuredProviders(cfg).some((item) => item.id === meta.id)).map((meta) => node('option', { value: meta.id, textContent: meta.name })));
     add.addEventListener('change', () => { if (add.value) patch((value) => ({ ...value, providerNames: { ...value.providerNames, [add.value]: providerById(add.value).name } })); });

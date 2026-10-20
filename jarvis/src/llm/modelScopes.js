@@ -13,6 +13,7 @@ export function configDelta(before, after) {
 export function createModelScopes({ getLocal, saveLocal, getClient, onServerSaved = () => {} }) {
   let serverConfig = null;
   let writeQueue = Promise.resolve();
+  let revision = 0;
   const missing = () => Object.assign(new Error('请先在设置中登录云服务器'), { kind: 'api', code: 'SERVER_NOT_CONNECTED' });
   return {
     get(scope) { return scope === 'server' ? serverConfig : getLocal(); },
@@ -21,12 +22,15 @@ export function createModelScopes({ getLocal, saveLocal, getClient, onServerSave
       const client = getClient();
       if (!client) throw missing();
       await writeQueue.catch(() => {});
-      serverConfig = await client.getConfig();
+      const current = revision;
+      const loaded = await client.getConfig();
+      if (current === revision) serverConfig = loaded;
       return serverConfig;
     },
     patch(scope, update) {
       if (scope !== 'server') return Promise.resolve(saveLocal(update(getLocal())));
       const run = async () => {
+        revision++;
         const client = getClient();
         if (!client) throw missing();
         // 每次写前读当前配置，防止另一台设备刚换的型号被旧快照覆盖。

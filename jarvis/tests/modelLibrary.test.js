@@ -45,6 +45,8 @@ describe('模型库：线路身份和有界配置', () => {
     expect(copy.keys).toEqual({'relay-2':'real-key'});
     expect(copy.voice).toBeUndefined();
     expect(copy.tavilyKey).toBeUndefined();
+    expect(copy.routing.enabled).toBe(false);
+    expect(copy.fallbackPolicy).toBe('legacy');
   });
 });
 function current(cfg){return {provider:cfg.provider,model:cfg.models[cfg.provider]};}
@@ -81,6 +83,20 @@ describe('配置位置：不自动交叉覆盖', () => {
     expect(configDelta(base,{...base,models:{...base.models,custom:'new'}})).toEqual({models:{custom:'new'}});
     expect(mergeConfig(base,{models:{custom:'new'},keys:{custom:'••••1234'},baseURLs:{custom:'https://new.invalid/v1'}})).toMatchObject({models:{custom:'new','relay-2':'same-model'},keys:base.keys,baseURLs:{'relay-2':'https://two.invalid/v1'}});
   });
+  it('迟到的旧读取不能覆盖已经保存的新服务器快照', async () => {
+    let remote=structuredClone(base);
+    let reads=0;
+    let resolveOld;
+    const scopes=createModelScopes({getLocal:()=>base,saveLocal:vi.fn(),getClient:()=>({getConfig:async()=>{reads++;if(reads===2)return new Promise(resolve=>{resolveOld=resolve;});return structuredClone(remote);},putConfig:async delta=>{remote=mergeConfig(remote,delta);}})});
+    await scopes.refresh('server');
+    const oldRead=scopes.refresh('server');
+    await Promise.resolve();
+    await Promise.resolve();
+    await scopes.patch('server',cfg=>chooseLine(cfg,{provider:'custom',model:'new-model'}));
+    resolveOld(structuredClone(base));
+    await oldRead;
+    expect(scopes.get('server').models.custom).toBe('new-model');
+  });
 });
 
 describe('拉取模型：真实结果、类型和取消', () => {
@@ -115,5 +131,16 @@ describe('拉取模型：真实结果、类型和取消', () => {
     const stream=new ReadableStream({start(controller){controller.enqueue(new Uint8Array(2*1024*1024+1));},cancel});
     await expect(fetchModelCatalog(base,{fetchImpl:async()=>new Response(stream)})).rejects.toMatchObject({code:'CATALOG_SIZE'});
     expect(cancel).toHaveBeenCalled();
+  });
+  it('10秒拉取超时有明确类型，预算控制信号不被改写', async () => {
+    const budget=Object.assign(new Error('budget'),{code:'RETRIEVAL_BUDGET'});
+    await expect(fetchModelCatalog(base,{fetchImpl:async()=>{throw budget;}})).rejects.toBe(budget);
+    vi.useFakeTimers();
+    try {
+      const pending=fetchModelCatalog(base,{fetchImpl:async(_url,{signal})=>new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(Object.assign(new Error('abort'),{name:'AbortError'})),{once:true}))});
+      const checked=expect(pending).rejects.toMatchObject({name:'TimeoutError',kind:'timeout',code:'CATALOG_TIMEOUT'});
+      await vi.advanceTimersByTimeAsync(10000);
+      await checked;
+    } finally {vi.useRealTimers();}
   });
 });

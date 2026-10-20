@@ -42,6 +42,9 @@ describe('服务器模式接口', () => {
       expect(payload.ids).toEqual(['same-model','model-2']);
       expect(seenKey).toBe('Bearer server-private-key');
       expect(JSON.stringify(payload)).not.toContain('server-private-key');
+      const proxy=await api('/api/llm/relay-2/v1/models',{headers:{'x-jarvis-upstream':`http://127.0.0.1:${upstream.address().port}`,Authorization:auth.Authorization,'x-api-key':'relay-key'}});
+      expect(proxy.status).toBe(200);
+      expect((await proxy.json()).data[0].id).toBe('same-model');
       expect((await fetch(base+'/api/server/models',{method:'POST',body:'{"provider":"custom"}'})).status).toBe(401);
       expect((await api('/api/server/models',{method:'POST',body:'{"provider":"unknown"}'})).status).toBe(400);
     } finally {

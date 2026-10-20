@@ -8,6 +8,7 @@ export const catalogKey = (cfg, provider = cfg.provider) => `${provider}|${provi
 export const providerLabel = (cfg, provider) => cfg.providerNames?.[provider] || providerById(provider)?.name || provider;
 export const sameLine = (a, b) => a?.provider === b?.provider && a?.model === b?.model;
 export const currentLine = (cfg) => ({ provider: cfg.provider, model: cfg.models?.[cfg.provider] || providerById(cfg.provider)?.models[0] || '' });
+export const hasRouting = (cfg) => Boolean(cfg.routing?.enabled && (cfg.routing.provider === cfg.provider || cfg.routing.multi));
 export const lineValid = (line) => Boolean(providerById(line?.provider) && typeof line?.model === 'string' && line.model.trim() && line.model.length <= 200);
 
 export function boundedIds(ids) {
@@ -64,5 +65,5 @@ export function saveCatalog(cfg, provider, ids) {
 export function copyModelSettings(cfg) {
   // 不复制本机声音、搜索密钥等无关设置，也不把服务端掩码当作可用密钥。
   const keys = Object.fromEntries(Object.entries(cfg.keys || {}).filter(([, value]) => value && !String(value).startsWith('••••')));
-  return { provider: cfg.provider, models: { ...cfg.models }, keys, baseURLs: { ...cfg.baseURLs }, providerNames: { ...cfg.providerNames }, favoriteModels: favoriteLines(cfg), fallbackModels: uniqueLines(cfg.fallbackModels || []).slice(0, MAX_BACKUPS), fallbackPolicy: cfg.fallbackPolicy, routing: cfg.routing ? { ...cfg.routing, routes: { ...cfg.routing.routes } } : undefined };
+  return { provider: cfg.provider, models: { ...cfg.models }, keys, baseURLs: { ...cfg.baseURLs }, providerNames: { ...cfg.providerNames }, favoriteModels: favoriteLines(cfg), fallbackModels: uniqueLines(cfg.fallbackModels || []).slice(0, MAX_BACKUPS), fallbackPolicy: cfg.fallbackPolicy || 'legacy', routing: { ...cfg.routing, enabled: Boolean(cfg.routing?.enabled), routes: { ...cfg.routing?.routes } } };
 }
