@@ -15,7 +15,11 @@ export function createLookupWindow({ totalMs, now = Date.now, disabled = () => f
 /** 即使上游忽略取消也按阶段返回；取消只作用于当前模型请求。 */
 export function modelWindow(control, closing, controller) {
   let timer;
+  let onAbort;
   const expired = new Promise((resolve, reject) => {
+    onAbort = () => reject(controller.signal.reason || Object.assign(new Error('已停止'), { name: 'AbortError' }));
+    controller.signal.addEventListener('abort', onAbort, { once: true });
+    if (controller.signal.aborted) onAbort();
     const delay = closing ? control?.remaining() - 1000 : control?.retrievalRemaining();
     if (!Number.isFinite(delay)) return;
     timer = setTimeout(
@@ -34,6 +38,9 @@ export function modelWindow(control, closing, controller) {
   });
   return {
     race: (work) => Promise.race([work, expired]),
-    dispose: () => clearTimeout(timer)
+    dispose: () => {
+      clearTimeout(timer);
+      controller.signal.removeEventListener('abort', onAbort);
+    }
   };
 }

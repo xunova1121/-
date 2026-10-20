@@ -111,6 +111,15 @@ describe('普通查询预留整理窗口', () => {
   });
 });
 
+it('长任务没有短时限时，忽略signal的模型也立即响应用户停止', async () => {
+  const controller = new AbortController();
+  const frame = modelWindow(null, false, controller);
+  const check = expect(frame.race(new Promise(() => {}))).rejects.toMatchObject({ name: 'AbortError' });
+  controller.abort();
+  await check;
+  frame.dispose();
+});
+
 describe('搜索相关性与每轮去重', () => {
   it('今日新闻补齐日期和检索类型，使用北京时间，用户显式freshness保留', () => {
     const now = Date.parse('2026-10-19T16:30:00Z');
