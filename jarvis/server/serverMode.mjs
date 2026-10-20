@@ -167,6 +167,12 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
       res.once('close', cancel);
       activeCatalogs++;
       try { json(res, 200, await serverModelCatalog(loadConfig(), provider, controller.signal)); }
+      catch (error) {
+        if (error.name === 'AbortError' || error.code === 'RETRIEVAL_BUDGET') throw error;
+        // 服务商的401不是未央登录失效，避免手机把访问令牌误判为过期。
+        const httpStatus = error.code === 'INVALID_PROVIDER' ? 400 : error.kind === 'timeout' ? 504 : 502;
+        json(res, httpStatus, { error: error.message, code: error.code, kind: error.kind, upstreamStatus: error.status });
+      }
       finally { activeCatalogs--; res.off('close', cancel); }
       return true;
     }

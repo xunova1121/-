@@ -33,7 +33,7 @@ describe('服务器模式接口', () => {
     const configFile=path.join(dir,'config.json');
     const previous=fs.existsSync(configFile)?fs.readFileSync(configFile):null;
     let seenKey='';
-    const upstream=httpServer((req,res)=>{seenKey=req.headers.authorization;res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data:[{id:'same-model'},{id:'model-2'}]}));});
+    const upstream=httpServer((req,res)=>{seenKey=req.headers.authorization;res.setHeader('Content-Type','application/json');if(seenKey==='Bearer bad-key'){res.writeHead(401);res.end('{}');return;}res.end(JSON.stringify({data:[{id:'same-model'},{id:'model-2'}]}));});
     await new Promise(resolve=>upstream.listen(0,'127.0.0.1',resolve));
     try {
       await api('/api/server/config',{method:'PUT',body:JSON.stringify({provider:'custom',keys:{custom:'server-private-key'},baseURLs:{custom:`http://127.0.0.1:${upstream.address().port}/v1`}})});
@@ -47,6 +47,10 @@ describe('服务器模式接口', () => {
       expect((await proxy.json()).data[0].id).toBe('same-model');
       expect((await fetch(base+'/api/server/models',{method:'POST',body:'{"provider":"custom"}'})).status).toBe(401);
       expect((await api('/api/server/models',{method:'POST',body:'{"provider":"unknown"}'})).status).toBe(400);
+      await api('/api/server/config',{method:'PUT',body:'{"keys":{"custom":"bad-key"}}'});
+      const invalidKey=await api('/api/server/models',{method:'POST',body:'{"provider":"custom"}'});
+      expect(invalidKey.status).toBe(502);
+      expect(await invalidKey.json()).toMatchObject({code:'CATALOG_API',kind:'api',upstreamStatus:401});
     } finally {
       await new Promise(resolve=>upstream.close(resolve));
       if(previous)fs.writeFileSync(configFile,previous);else fs.rmSync(configFile,{force:true});
