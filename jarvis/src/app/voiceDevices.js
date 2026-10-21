@@ -124,7 +124,7 @@ export function createVoiceDevices(app) {
   async function setFaceFollow(on) {
     app.setSetting('faceFollow', on);
     $('#set-face').checked = on;
-    const faceStatus = $('#face-faceStatus');
+    const faceStatus = $('#face-status');
     if (!on) {
       face?.stop();
       app.live.face = null;
