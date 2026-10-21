@@ -1,3 +1,4 @@
+import { formatPageResult } from './pageLinks.js';
 import { createDocumentTools } from './documentTools.js';
 import { searchRequest, screenSearchHits } from './retrievalQuality.js';
 import { createStockKlineTool } from './stockKline.js';
@@ -467,7 +468,7 @@ export function createTools(ctx) {
     },
     {
       name: 'fetch_url',
-      description: '获取网页内容（转换为文字），用于读取用户给出的链接或最新资料。',
+      description: '读取网页或PDF正文，附页面栏目和附件链接；链接指向的内容需继续读取。',
       input_schema: S({ url: str('http(s) 地址') }, ['url']),
       run: async ({ url }, { signal, progress, retrieval, sessionId, requestText } = {}) => {
         if (!/^https?:\/\//i.test(url)) throw new Error('只支持 http(s) 地址');
@@ -486,7 +487,7 @@ export function createTools(ctx) {
         // 存一份原文片段：之后要细节用 read_evidence 取，不用重新联网
         const sid = sessionId ?? ctx.currentSessionId?.();
         const [id] = sid && text ? await evidenceStore.put(sid, { sources: [{ url, title: String(text).split('\n').find((l) => l.trim())?.trim().slice(0, 120), text }] }).catch(() => []) : [];
-        return clip(text, 15000) + (id ? `\n\n（已存为证据 ${id}，之后要看原文用 read_evidence）` : '');
+        return formatPageResult(text) + (id ? `\n\n（已存为证据 ${id}，之后要看原文用 read_evidence）` : '');
       }
     },
     {
@@ -528,7 +529,7 @@ export function createTools(ctx) {
             const selected = searchRequest(q, requestText, freshness);
             retrieval?.registerQuery?.(selected.query);
             retrieval?.consume('search');
-            const rawHits = await withWebDeadline((s) => engine.search(selected.query, list.length > 1 ? 5 : 6, { freshness: selected.freshness, signal: s, consume: kind => retrieval?.consume(kind) }), { signal, timeoutMs: 12000 });
+            const rawHits = await withWebDeadline((s) => engine.search(selected.query, list.length > 1 ? 5 : 6, { freshness: selected.freshness, signal: s, consume: kind => retrieval?.consume(kind) }), { signal, timeoutMs: 40000 });
             const screened = screenSearchHits(rawHits, requestText);
             const hits = screened.hits;
             if (!hits.length && screened.rejected) throw Object.assign(new Error('检索结果与今日新闻不对应，请换原始报道来源，不用年度日历代替新闻'), { code: 'IRRELEVANT_SEARCH_RESULTS', kind: 'api' });
@@ -554,7 +555,7 @@ export function createTools(ctx) {
     });
     tools.push({
       name: 'fact_check',
-      description: '逐项联网查证：要查的对象有好几个（截图里的多场比赛、多只股票、多个产品的价格、清单里的多个事件），或用户明确要求逐项、交叉核验时使用。普通单一问题先用 web_search 搜索、必要时读一两条官方原文，证据足够就回答。程序会对每一项：还原原文名、多语言搜索、读原文、让模型摘答案并给原文引用、核对引用确实在原文里、两个网站一致才算已核实，不够就换搜索词再查。比自己用 web_search 拼凑准确得多。调用前先把图片 / 文字里的每一项原样列进 items（编号、名称、时间、相关选项都写进 label / details），不要漏项、不要改名。',
+      description: '逐项联网查证：要查的对象有好几个（截图里的多场比赛、多只股票、多个产品的价格、清单里的多个事件），或用户明确要求逐项、交叉核验时使用。普通单一问题先用 web_search 搜索、必要时读一两条官方原文，证据足够就回答。程序会对每一项：还原原文名、多语言搜索、读原文、让模型摘答案并给原文引用、核对引用确实在原文里、实际读到的官方原文可单源核实，其他来源要求两个网站一致，不够就换搜索词再查。比自己用 web_search 拼凑准确得多。调用前先把图片 / 文字里的每一项原样列进 items（编号、名称、时间、相关选项都写进 label / details），不要漏项、不要改名。',
       input_schema: S({
         question: str('每一项要查什么，写具体，如“这场比赛的全场比分（和半场比分）”“今天收盘价和涨跌幅”'),
         items: { type: 'array', description: '要查证的对象，逐项列出（最多 20 项）', items: { type: 'object', properties: { label: str('对象名称，原样照抄，如“迪拜连接 VS 吉达国民”'), details: str('补充信息：编号、联赛、开赛时间、日期等，如“周一001，开赛 10-12 23:00”') }, required: ['label'], additionalProperties: false } },

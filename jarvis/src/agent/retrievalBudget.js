@@ -2,13 +2,16 @@ import { createQueryLedger } from './retrievalQuality.js';
 /** 普通问题快查；报告、多项核验和明确的深度研究保留较长预算。预算从首次联网开始。 */
 export const QUICK_RETRIEVAL_MS = 45_000;
 export const DEEP_RETRIEVAL_MS = 8 * 60_000;
+export const VERIFICATION_MS = 3 * 60_000;
+export const strictVerification = text => /逐[项一条].{0,12}(?:核[实验对]|查证|查原文)|(?:核[实验对]|查证).{0,12}逐[项一条]|查原文|核实原文|核对原文/.test(String(text));
 export function extensiveRetrieval(text = '') {
-  return /深度|深入|全面|调研|研究报告|逐项|逐一|多来源|交叉核[验对]|报告|方案|文档|论文|PPT|Word|Excel|代码|编程|开发|文件|保存|对比|比较|这几|这些|每场|多场|清单|research|report|document|code/i.test(String(text));
+  return strictVerification(text) || /深度|深入|全面|调研|研究报告|逐项|逐一|多来源|交叉核[验对]|报告|方案|文档|论文|PPT|Word|Excel|代码|编程|开发|文件|保存|对比|比较|这几|这些|每场|多场|清单|research|report|document|code/i.test(String(text));
 }
 export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs } = {}) {
   const resources = { search: 0, read: 0, model: 0 };
+  let strict = strictVerification(text);
   let extensive = extensiveRetrieval(text), started = null, calls = 0, failed = 0, reason = '';
-  const duration = () => timeBudgetMs ?? (extensive ? DEEP_RETRIEVAL_MS : QUICK_RETRIEVAL_MS);
+  const duration = () => timeBudgetMs ?? (strict ? VERIFICATION_MS : extensive ? DEEP_RETRIEVAL_MS : QUICK_RETRIEVAL_MS);
   const check = () => {
     if (!reason && started !== null) {
       if (duration() > 0 && now() - started >= duration()) reason = '本轮联网检索已达到时间预算';
@@ -22,15 +25,15 @@ export function createRetrievalBudget(text, { now = Date.now, timeBudgetMs } = {
     begin() { if (check()) return false; if (started === null) started = now(); calls++; return true; },
     consume(kind) {
       if (reason || started !== null && duration()>0 && now()-started>=duration()) throw Object.assign(new Error(reason || '本轮联网检索已达到时间预算'), {code:'RETRIEVAL_BUDGET'});
-      const limit = { search:6, read:4, model:3 }[kind];
+      const limit = (strict ? { search:20, read:16 } : !extensive ? { search:6, read:4, model:3 } : {})[kind];
       // 某一类用完：整轮检索就此收尾（主循环下一步会让模型直接用已有资料回答，而不是换个工具接着查）
-      if (!extensive && limit && resources[kind] >= limit) { reason ||= `普通查询的${kind}调用已达到预算`; throw Object.assign(new Error(reason), { code:'RETRIEVAL_BUDGET' }); }
+      if (limit && resources[kind] >= limit) { reason ||= `${strict ? '逐项核验' : '普通查询'}的${kind}调用已达到预算`; throw Object.assign(new Error(reason), { code:'RETRIEVAL_BUDGET' }); }
       if (kind in resources) resources[kind]++;
     },
     get active() { return started !== null; },
     get resources() { return {...resources}; },
     end(ok) { failed = ok ? 0 : failed + 1; },
-    upgrade(text) { if (extensiveRetrieval(text)) extensive = true; },
+    upgrade(text) { if (extensiveRetrieval(text)) extensive = true; if (strictVerification(text)) strict = true; },
     close(why) { reason ||= why; },
     get extensive() { return extensive; },
     get reason() { return check(); },

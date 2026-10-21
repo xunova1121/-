@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { createRetrievalBudget, withWebDeadline, extensiveRetrieval } from '../src/agent/retrievalBudget.js';
 
 describe('查询预算', () => {
-  it('普通查询从首次联网开始计时，45秒后停止；研究、文档和多项核验保留8分钟', () => {
+  it('普通查询从首次联网开始计时，45秒后停止；研究和文档保留8分钟，逐项核验至少保留3分钟', () => {
     let t = 0;
     const b = createRetrievalBudget('仙逆中姚冰云的结局', { now: () => t });
     t = 100_000; expect(b.reason).toBe(''); expect(b.begin()).toBe(true);

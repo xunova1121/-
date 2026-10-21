@@ -6,7 +6,10 @@ import { retryRead, throwControl, httpError } from '../core/networkRequest.js';
  *      且填了 Tavily Key：改用 Tavily /extract 代读（基础档，每 5 个网页 1 个额度）
  * 同一个地址 15 分钟内再读直接用缓存（查证时几项常落到同一篇文章）。
  */
-import { htmlToText } from './docs.js';
+import { htmlToText, parseFile } from './docs.js';
+import { pageLinks, appendPageLinks, LINK_MARKER } from './pageLinks.js';
+import { webBody } from './webBody.js';
+import { withWebDeadline } from './retrievalBudget.js';
 
 const CACHE_MS = 15 * 60e3;
 const PAGE_LIMIT = 60000; // 每页上限配合60条缓存，避免长期保留整站巨大正文。
@@ -46,12 +49,19 @@ export function createPageReader({ tavilyKey, fetchViaGateway, fetchImpl = (...a
     }
     if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}${[401,403,429].includes(res.status) ? '（网站要求登录、验证或限制程序访问）' : res.status === 404 ? '（网页不存在或链接已失效）' : ''}`), { status: res.status });
     const type = res.headers.get('content-type') || '';
-    if (type && !/html|text|json|xml/.test(type)) throw new Error('不是网页');
-    const body = decodeBody(new Uint8Array(await res.arrayBuffer()), type);
-    const text = /html/.test(type) || (!type && /<html|<body/i.test(body)) ? htmlToText(body) : body;
+    const bytes = await webBody(res, 8 * 1024 * 1024, signal);
+    if (/pdf/i.test(type) || new TextDecoder('latin1').decode(bytes.subarray(0, 5)) === '%PDF-') {
+      const parsed = await parseFile(new Blob([bytes], { type: 'application/pdf' }), 'linked.pdf', { signal, maxPages: 80, maxChars: PAGE_LIMIT });
+      if (!parsed.text.trim()) throw Object.assign(new Error('PDF没有可提取正文，可能是扫描件；未执行OCR'), { code: 'PDF_NO_TEXT', kind: 'api' });
+      return boundedPage(parsed.text);
+    }
+    if (type && !/html|text|json|xml/.test(type)) throw Object.assign(new Error('不是可读取网页或PDF'), { code: 'UNSUPPORTED_WEB_TYPE', kind: 'api' });
+    const body = decodeBody(bytes, type);
+    const isHtml = /html/.test(type) || (!type && /<html|<body/i.test(body));
+    const text = isHtml ? htmlToText(body) : body;
     if (text.replace(/\s+/g, '').length < 1000 && /请完成.{0,8}验证|访问过于频繁|访问异常|安全验证|verify you are human|just a moment|enable javascript and cookies/i.test(text)) throw Object.assign(new Error('网站返回验证页，未取得正文'), { status: 403 });
     if (!text.trim()) throw new Error('网页没有可读取正文，可能需要登录或运行页面脚本');
-    return boundedPage(text);
+    return appendPageLinks(boundedPage(text), isHtml ? pageLinks(body, res.url || url) : []);
   }
 
   async function extract(url, signal) {
@@ -76,13 +86,13 @@ export function createPageReader({ tavilyKey, fetchViaGateway, fetchImpl = (...a
     const state = blocked.get(host);
     try {
       if (state?.count >= 2 && now() - state.at < 10 * 60_000) throw new Error('该网站连续拒绝访问，暂时跳过直接读取，请换其他来源');
-      text = await retryRead((s) => direct(url, s), { signal, timeoutMs: 4000, beforeAttempt: attempt => { if (attempt) consume?.('read'); } });
+      text = await withWebDeadline((readSignal) => retryRead((activeSignal) => direct(url, activeSignal), { signal: readSignal, timeoutMs: 20000, beforeAttempt: attempt => { if (attempt) consume?.('read'); } }), { signal, timeoutMs: 20000 });
     } catch (e) {
       throwControl(e, signal);
       err = e;
       if ([401,403,429].includes(e.status)) blocked.set(host, { count: (state && now() - state.at < 10 * 60_000 ? state.count : 0) + 1, at: now() });
     }
-    if (tavilyKey && (err || text.replace(/\s+/g, '').length < THIN)) {
+    if (tavilyKey && (err || text.split(LINK_MARKER)[0].replace(/\s+/g, '').length < THIN)) {
       try {
         progress?.('直接读取未取得正文，尝试已配置的 Tavily 代读');
         const t = await retryRead((s) => extract(url, s), { signal, timeoutMs: 3000, beforeAttempt: () => consume?.('read') });
@@ -101,7 +111,7 @@ export function createPageReader({ tavilyKey, fetchViaGateway, fetchImpl = (...a
     }
     cache.set(url, { at: now(), text });
     if (cache.size > 60) cache.delete(cache.keys().next().value);
-    return boundedPage(text);
+    return text;
   };
 }
 

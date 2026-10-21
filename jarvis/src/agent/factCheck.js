@@ -8,11 +8,13 @@ import { throwControl } from '../core/networkRequest.js';
  *   3. 阅读：读排在前面的几篇原文（Tavily 直接给正文），只截取提到这些名字的段落
  *   4. 摘答案：模型从段落里找答案，并给出“原文引用”
  *   5. 核对引用：程序检查每条引用是不是真的出现在那篇原文里——编出来的引用直接作废
- *   6. 判定：两个不同网站的引用都支持 → 已核实；只有一个 → 单一来源；没有 → 未核实，换搜索词再查一轮
+ *   6. 判定：两个不同网站的引用都支持，或官方原文引用支持 → 已核实；其他只有一个 → 单一来源；没有 → 未核实，换搜索词再查一轮
  *
  * 结果给主模型时明确标出每项的状态和出处；主模型只能用这里核实过的内容下结论。
  */
 import { parseJson, extractive } from './research.js';
+import { isOfficialSource } from './officialSources.js';
+import { LINK_MARKER } from './pageLinks.js';
 
 const PAGE_CHARS = 60000; // 一篇原文最多看这么长
 const WINDOW = 450; // 名字前后各取多少字
@@ -117,7 +119,7 @@ export async function factCheck({ question, items, date = '', context = '', llm,
   const pageCache = new Map();
   const getPage = async (hit) => {
     if (hit.raw) return hit.raw;
-    if (!pageCache.has(hit.url)) pageCache.set(hit.url, (async()=>{guard('read');return read(hit.url);})().catch(e => {if(signal?.aborted || e.code==='RETRIEVAL_BUDGET')throw e;return '';}));
+    if (!pageCache.has(hit.url)) pageCache.set(hit.url, (async()=>{guard('read');return read(hit.url);})().catch(e => {throwControl(e, signal);return '';}));
     return pageCache.get(hit.url);
   };
   const results = new Array(list.length);
@@ -135,13 +137,13 @@ export async function factCheck({ question, items, date = '', context = '', llm,
     // 1. 定名与搜索规划
     let plan = null;
     if (llm && !quick) {
-      plan = parseJson(await ask({ system: PLAN_SYS, prompt: `今天：${today}\n背景：${context || '无'}\n事件日期：${date || '未说明'}\n要查的信息：${question}\n对象：${item.label}${item.details ? `\n对象详情：${item.details}` : ''}`, signal }).catch(e => {if(signal?.aborted || e.code==='RETRIEVAL_BUDGET')throw e;return '';}));
+      plan = parseJson(await ask({ system: PLAN_SYS, prompt: `今天：${today}\n背景：${context || '无'}\n事件日期：${date || '未说明'}\n要查的信息：${question}\n对象：${item.label}${item.details ? `\n对象详情：${item.details}` : ''}`, signal }).catch(e => {throwControl(e, signal);return '';}));
     }
     if (quick) plan = { queries:[`${item.label} ${date} ${question}`.trim(), `${item.label} ${date} 官方`.trim()] };
     const names = [...new Set([...(plan?.names || []), ...String(item.label).split(/\s+(?:vs\.?|VS|v)\s+|\s*(?:对阵|对|－|—)\s*/)].map((s) => String(s).trim()).filter((s) => s.length >= 2))].slice(0, 8);
     const dateHints = [...new Set([...(plan?.dateHints || []), date].filter(Boolean))];
     const preferSites = plan?.preferSites || [];
-    let queries = [...new Set([...(plan?.queries || []), `${item.label} ${date}`.trim()])].slice(0, 5);
+    let queries = [...new Set([...(plan?.queries || []), `${item.label} ${date}`.trim(), `${item.label} ${date} ${question}`.trim(), `${item.label} ${date} 原文`.trim()])].slice(0, quick ? 2 : 5);
 
     const seen = new Set();
     const key = JSON.stringify([question,item.label,item.details||'',date,context,today]);
@@ -155,10 +157,10 @@ export async function factCheck({ question, items, date = '', context = '', llm,
       // 2. 搜索
       const found = sources.length>=2 && round===1 ? [] : (await Promise.all(queries.slice(0,quick?2:5).map(async q => {
         guard('search');
-        return search(q, quick?4:6, {deep:!quick}).catch(e=>{if(signal?.aborted || e.code==='RETRIEVAL_BUDGET')throw e;return [];});
+        return search(q, quick?4:6, {deep:!quick}).catch(e=>{throwControl(e, signal);return [];});
       }))).flat();
       const fresh = rankHits(found.filter((h) => h?.url && !seen.has(h.url) && (seen.add(h.url), true)), { names, dateHints, preferSites });
-      // 3. 阅读前几篇（摘要也算证据：有的结果摘要里就有比分）
+      // 3. 优先读正文；读取失败仍保留摘要线索，但不能把摘要标成官方原文。
       // 同项最多两篇并行，先完成的证据先落检查点；所有请求共用预算和停止信号。
       const selected=fresh.slice(0,quick?2:4), pages=new Array(selected.length);
       let pageIndex=0;
@@ -166,7 +168,9 @@ export async function factCheck({ question, items, date = '', context = '', llm,
         for(let i=pageIndex++;i<selected.length;i=pageIndex++){
           const h=selected[i], page=await getPage(h);
           if(signal?.aborted)throw Object.assign(new Error('已停止核验'),{name:'AbortError'});
-          pages[i]={url:h.url,title:h.title,text:`${h.title}\n${h.snippet||''}\n${page||''}`};
+          // 链接列表和搜索摘要不能冒充官方正文；只核对实际读到的文本。
+          const body = String(page || '').split(LINK_MARKER)[0].trim();
+          pages[i]={url:h.url,title:h.title,original:Boolean(body),text:body || `${h.title}\n${h.snippet||''}`};
           const ready=[...sources,...pages.filter(Boolean)].slice(-4);
           await onEvidence?.({key,sources:ready.map(s=>({...s,text:passages(s.text,names,6000)}))});
         }
@@ -180,7 +184,7 @@ export async function factCheck({ question, items, date = '', context = '', llm,
       let out = null;
       if (llm) {
         const prompt = `今天：${today}\n背景：${context || '无'}\n事件日期：${date || '未说明'}\n要找的信息：${question}\n对象：${item.label}${item.details ? `（${item.details}）` : ''}\n可能的名字：${names.join(' / ')}\n\n${sources.map((s) => `[${s.n}] ${s.title}（${host(s.url)}）\n${s.excerpt}`).join('\n\n')}`;
-        out = parseJson(await ask({ system: EXTRACT_SYS, prompt, signal }).catch(e => {if(signal?.aborted || e.code==='RETRIEVAL_BUDGET')throw e;return '';}));
+        out = parseJson(await ask({ system: EXTRACT_SYS, prompt, signal }).catch(e => {throwControl(e, signal);return '';}));
       } else {
         const lines = sources.flatMap((s) => extractive(`${item.label} ${question}`, s.text, 2).map((q) => ({ source: s.n, quote: q })));
         out = { answer: lines[0]?.quote ?? null, evidence: lines.slice(0, 3), confidence: 'low' };
@@ -188,15 +192,15 @@ export async function factCheck({ question, items, date = '', context = '', llm,
       // 5. 核对引用：必须真的在那篇原文里
       const evidence = (out?.evidence || []).map((e) => {
         const s = sources.find((x) => x.n === Number(e.source));
-        return s && quoteInText(e.quote, s.text) ? { url: s.url, title: s.title, quote: String(e.quote).trim() } : null;
+        return s && quoteInText(e.quote, s.text) ? { url: s.url, title: s.title, quote: String(e.quote).trim(), original: s.original === true } : null;
       }).filter(Boolean);
       const hosts = new Set(evidence.map((e) => host(e.url)));
-      const status = !out?.answer || !evidence.length ? 'unverified' : out?.conflict ? 'single' : hosts.size >= 2 ? 'confirmed' : 'single';
+      const status = !out?.answer || !evidence.length ? 'unverified' : out?.conflict ? 'single' : hosts.size >= 2 ? 'confirmed' : evidence.some(e => e.original && isOfficialSource(e.url)) ? 'official_original' : 'single';
       const dropped = (out?.evidence || []).length - evidence.length;
       const cur = { label: item.label, answer: out?.answer ?? null, fields: out?.fields || {}, status, sources: evidence, conflict: out?.conflict || null, dropped, names, round };
       if (!best || rank(cur) > rank(best)) best = cur;
-      // 6. 两个网站都支持就结束；否则换搜索词再查一轮
-      if (status === 'confirmed' && !out?.conflict) break;
+      // 6. 两个网站都支持或读到官方原文就结束；否则换搜索词再查一轮
+      if (['confirmed', 'official_original'].includes(status) && !out?.conflict) break;
       const more = (out?.nextQueries || []).filter((q) => q && !queries.includes(q));
       queries = more.length ? more.slice(0, 4) : [`${names[0] || item.label} ${question} ${date}`.trim(), `${names.slice(0, 2).join(' ')} ${dateHints[1] || date}`.trim()].filter((q) => !queries.includes(q));
       if (!queries.length) break;
@@ -208,9 +212,9 @@ export async function factCheck({ question, items, date = '', context = '', llm,
   return { question, date, items: results };
 }
 
-const rank = (r) => ({ confirmed: 3, single: 2, unverified: 1, error: 0 }[r.status] ?? 0) * 10 + r.sources.length;
+const rank = (r) => ({ confirmed: 3, official_original: 3, single: 2, unverified: 1, error: 0 }[r.status] ?? 0) * 10 + r.sources.length;
 
-const STATUS = { confirmed: '✅ 已核实（两个以上网站一致）', single: '⚠️ 单一来源', unverified: '❓ 未核实', error: '✕ 查询出错' };
+const STATUS = { official_original: '✅ 已核实（官方原文）', confirmed: '✅ 已核实（两个以上网站一致）', single: '⚠️ 单一来源', unverified: '❓ 未核实', error: '✕ 查询出错' };
 
 /** 给主模型看的结果：每项的结论、状态、原文引用和链接 */
 export function formatReport(r) {

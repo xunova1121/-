@@ -28,15 +28,16 @@ describe('免密钥搜索结果解析', () => {
   it('DuckDuckGo：解开 uddg、跳过广告', () => {
     expect(parseDuckDuckGo(DDG)).toEqual([{ title: 'ollama/ollama: Get up and running', url: 'https://github.com/ollama/ollama', snippet: 'Get up and running with Llama 3.3, Qwen3…' }]);
   });
-  it('选择搜索源：Tavily > 网关（必应 → DuckDuckGo）> 无', async () => {
+  it('选择搜索源：Tavily或网关；中文先RSS加百度，再补其他来源', async () => {
     expect(createSearch({})).toBeNull();
     expect(createSearch({ tavilyKey: 'k' }).name).toBe('Tavily');
     const asked = [];
     const s = createSearch({ searchRegion: 'global', fetchViaGateway: async (url) => { asked.push(url); return new Response(/bing/.test(url) ? '<html>验证</html>' : DDG); } });
     const hits = await s.search('ollama 本机模型');
     expect(asked[0]).toMatch(/^https:\/\/cn\.bing\.com\/search\?format=rss&q=ollama/); // 先用必应 RSS
-    expect(asked[1]).toMatch(/^https:\/\/cn\.bing\.com\/search\?q=ollama/);
-    expect(asked[2]).toMatch(/duckduckgo/);
+    expect(asked[1]).toMatch(/^https:\/\/www\.baidu\.com\/s\?wd=ollama/);
+    expect(asked[2]).toMatch(/^https:\/\/cn\.bing\.com\/search\?q=ollama/);
+    expect(asked[3]).toMatch(/duckduckgo/);
     expect(hits[0].url).toBe('https://github.com/ollama/ollama');
   });
 });
@@ -193,7 +194,7 @@ describe('国内搜索源', () => {
     const asked = [];
     const s = createSearch({ searchRegion: 'cn', fetchViaGateway: async (url) => { asked.push(new URL(url).host); return new Response(/baidu/.test(url) ? BAIDU : /so\.com/.test(url) ? SO : '<html>验证</html>'); } });
     const hits = await s.search('竞彩 赛果 周一', 6);
-    expect(asked).toEqual(['cn.bing.com', 'cn.bing.com', 'www.baidu.com', 'www.so.com']); // 必应 RSS、必应网页、百度、360
+    expect(asked).toEqual(['cn.bing.com', 'www.baidu.com', 'cn.bing.com', 'www.so.com']); // RSS与百度并发，不足再补必应网页和360
     expect(hits.map((h) => new URL(h.url).host)).toEqual(['sports.sina.com.cn', 'www.baidu.com', 'www.dongqiudi.com']);
     expect(s.name).toMatch(/百度/);
   });
@@ -228,11 +229,12 @@ describe('必应 RSS 和搜不到时的原因', () => {
     expect(parseBingRss(RSS)).toEqual([{ title: '南京市 - 百科', url: 'https://baike.example.com/nanjing', snippet: '南京，简称“宁”，江苏省省会。' }]);
     expect(bingRssUrl('南京', 'cn')).toBe('https://cn.bing.com/search?format=rss&q=%E5%8D%97%E4%BA%AC&count=10&setlang=zh-Hans');
   });
-  it('RSS 有结果就不用再读网页', async () => {
+  it('中文RSS已有4条仍并行查百度', async () => {
     const asked = [];
     const s = createSearch({ searchRegion: 'cn', fetchViaGateway: async (url) => { asked.push(url); return new Response(RSS.replace('</channel>', RSS.match(/<item>[\s\S]*?<\/item>/)[0].replace(/nanjing/g, 'a') + RSS.match(/<item>[\s\S]*?<\/item>/)[0].replace(/nanjing/g, 'b') + RSS.match(/<item>[\s\S]*?<\/item>/)[0].replace(/nanjing/g, 'c') + '</channel>')); } });
     const hits = await s.search('南京');
-    expect(asked).toHaveLength(1);
+    expect(asked).toHaveLength(2);
+    expect(asked.some(url => new URL(url).hostname === 'www.baidu.com')).toBe(true);
     expect(hits).toHaveLength(4);
   });
   it('都没结果时逐个说明原因（被拦 / 出错 / 连不上）', async () => {
@@ -247,7 +249,7 @@ describe('必应 RSS 和搜不到时的原因', () => {
     expect(err).toMatch(/必应中国：0 条（HTTP 200，1KB，页面标题“必应”）/);
     expect(err).toMatch(/百度：被拦截（出现验证页“百度安全验证”）/);
     expect(err).toMatch(/360：连不上（timeout）/);
-    expect(err).toMatch(/博查/);
+    expect(err).toMatch(/免密钥搜索/);
   });
 });
 

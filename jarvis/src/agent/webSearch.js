@@ -1,3 +1,5 @@
+import { collectSearchSources, sourceQueue } from './searchSources.js';
+import { mergeSearchHits, officialQueries } from './officialSources.js';
 import { retryRead, throwControl, httpError } from '../core/networkRequest.js';
 /**
  * 联网搜索：
@@ -221,12 +223,10 @@ export function createSearch({ bochaKey, tavilyKey, fetchViaGateway, searchRegio
       const order = (domestic ? [bocha, keyless, tavily] : [tavily, bocha, keyless]).filter(Boolean);
       const hits = [];
       const errors = [];
-      let firstEngine = true;
       for (const e of order) {
         if (opts.signal?.aborted) throw opts.signal.reason;
         try {
-          if (!firstEngine) opts.consume?.('search');
-          firstEngine = false;
+          // 同词换源不重复扣逻辑搜索预算。
           for (const h of await e.search(query, n, opts)) if (!hits.some((x) => x.url === h.url)) hits.push(h);
         } catch (err) { throwControl(err, opts.signal); errors.push(err); }
         if (hits.length >= Math.min(3, n)) break;
@@ -280,6 +280,7 @@ function tavilySearch(tavilyKey, fetchViaGateway) {
 
 function keylessSearch(fetchViaGateway, searchRegion) {
   if (!fetchViaGateway) return null;
+  const schedule = sourceQueue();
   // 地区：用户指定的，或自动判断（结果记 30 分钟：开关代理后会重新判断）
   let region = searchRegion === 'cn' || searchRegion === 'global' ? searchRegion : null;
   let checkedAt = 0;
@@ -294,26 +295,29 @@ function keylessSearch(fetchViaGateway, searchRegion) {
     async search(query, n = 6, { freshness = '', signal, consume } = {}) {
       const region = await regionNow();
       const plan = [['必应 RSS', bingRssUrl(query, region, freshness), parseBingRss], ...searchPlan(query, region, freshness)];
-      // 一个来源结果太少（被拦、只有广告）时再查下一个，合并去重
-      const notes = [];
-      let lastError;
-      const hits = [];
-      let firstPage = true;
-      for (const [name, url, parse] of plan) {
-        if (signal?.aborted) throw signal.reason;
-        let status = 0, body = '', got = 0;
-        try {
-          if (!firstPage) consume?.('search');
-          firstPage = false;
-          const res = await retryRead(s => fetchViaGateway(url, { headers: DESKTOP_HEADERS, signal: s }), { signal, timeoutMs: 4000, beforeAttempt: attempt => { if (attempt) consume?.('search'); } });
-          status = res.status;
-          body = await res.text();
-          if (res.ok) for (const h of parse(body)) if (!hits.some((x) => x.url === h.url)) { hits.push(h); got++; }
-          notes.push(describeSource(name, status, body, got));
-        } catch (e) { throwControl(e, signal); lastError = e; notes.push(name + '：连不上（' + e.message + '）'); }
-        if (hits.length >= Math.min(4, n)) break;
+      const run = (selected) => collectSearchSources(selected, { get: fetchViaGateway, headers: DESKTOP_HEADERS, signal, describe: describeSource, schedule });
+      const chinese = /[\u4e00-\u9fff]/.test(query);
+      // 中文至少同时查RSS和百度，不能因RSS已有4条就停；其他来源只在不足时补充。
+      const primary = chinese ? [plan[0], ['百度', `https://www.baidu.com/s?wd=${encodeURIComponent(query)}&rn=10${freshParams(freshness, Date.now()).baidu}`, parseBaidu]] : [plan[0]];
+      const first = await run(primary);
+      let hits = first.hits;
+      const notes = first.notes;
+      let lastError = first.error;
+      if (hits.length < Math.min(4, n)) {
+        const fallback = await run(plan.slice(1).filter(([sourceName]) => !chinese || sourceName !== '百度'));
+        hits = mergeSearchHits([...hits, ...fallback.hits]);
+        notes.push(...fallback.notes);
+        lastError = fallback.error || lastError;
       }
-      if (!hits.length) throw Object.assign(new Error('各搜索源都没拿到结果——' + notes.join('；') + '。可在设置中配置博查或Tavily'), { code: lastError?.code || 'NO_SEARCH_RESULTS', kind: lastError?.kind, name: lastError?.name || 'SearchError', cause: lastError });
+      for (const restricted of officialQueries(query, hits)) {
+        if (signal?.aborted) throw signal.reason;
+        consume?.('search');
+        const extra = await run([['必应 RSS', bingRssUrl(restricted, region, freshness), parseBingRss], ['百度', `https://www.baidu.com/s?wd=${encodeURIComponent(restricted)}&rn=10`, parseBaidu]]);
+        hits = mergeSearchHits([...hits, ...extra.hits]);
+        notes.push(...extra.notes);
+        lastError = extra.error || lastError;
+      }
+      if (!hits.length) throw Object.assign(new Error('各搜索源都没拿到结果——' + notes.join('；') + '。请换搜法或来源；免密钥搜索不需要购买第三方API'), { code: lastError?.code || 'NO_SEARCH_RESULTS', kind: lastError?.kind, name: lastError?.name || 'SearchError', cause: lastError });
       return hits.slice(0, n);
     }
   };
