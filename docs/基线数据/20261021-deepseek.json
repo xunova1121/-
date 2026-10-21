@@ -1,0 +1,1251 @@
+{
+  "schemaVersion": 1,
+  "suiteVersion": "baseline-30-v1",
+  "assessmentVersion": "original-v1",
+  "executionProfile": "legacy_personalized",
+  "sourceSha256": "126a3872a4abde4000d0a9217dbf63a14766bf02db2da82d4ba41be54e1a33d0",
+  "provider": "deepseek",
+  "model": "deepseek-v4-pro",
+  "startedAt": "2026-10-21T05:14:35.654Z",
+  "finishedAt": "2026-10-21T05:57:32.904Z",
+  "serverRevision": null,
+  "accuracy": null,
+  "results": [
+    {
+      "id": "baseline-01",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 2472,
+        "turnFirstTextMs": [
+          2472
+        ],
+        "totalMs": 3202,
+        "mainModelCalls": 1,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 10,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 2716,
+          "totalMs": 2717,
+          "firstTextMs": 2472,
+          "contextMs": 143,
+          "modelMs": 2571,
+          "toolMs": 0,
+          "modelCalls": 1,
+          "toolCalls": 0,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-02",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 2169,
+        "turnFirstTextMs": [
+          2169
+        ],
+        "totalMs": 3141,
+        "mainModelCalls": 1,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 20,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 2723,
+          "totalMs": 2724,
+          "firstTextMs": 2169,
+          "contextMs": 89,
+          "modelMs": 2633,
+          "toolMs": 0,
+          "modelCalls": 1,
+          "toolCalls": 0,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-03",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 1537,
+        "turnFirstTextMs": [
+          1537
+        ],
+        "totalMs": 1608,
+        "mainModelCalls": 1,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 15,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 1540,
+          "totalMs": 1541,
+          "firstTextMs": 1537,
+          "contextMs": 78,
+          "modelMs": 1461,
+          "toolMs": 0,
+          "modelCalls": 1,
+          "toolCalls": 0,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-04",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 2913,
+        "turnFirstTextMs": [
+          2913
+        ],
+        "totalMs": 4137,
+        "mainModelCalls": 1,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 19,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 0,
+          "executionMs": 3662,
+          "totalMs": 3662,
+          "firstTextMs": 2913,
+          "contextMs": 78,
+          "modelMs": 3582,
+          "toolMs": 0,
+          "modelCalls": 1,
+          "toolCalls": 0,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-05",
+      "status": "done",
+      "originalMechanical": "failed",
+      "metrics": {
+        "firstTextMs": 19323,
+        "turnFirstTextMs": [
+          19323
+        ],
+        "totalMs": 22346,
+        "mainModelCalls": 3,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 31,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 22208,
+          "totalMs": 22209,
+          "firstTextMs": 19323,
+          "contextMs": 82,
+          "modelMs": 10498,
+          "toolMs": 11625,
+          "modelCalls": 3,
+          "toolCalls": 3,
+          "failedTools": 1,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-06",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 26727,
+        "turnFirstTextMs": [
+          26727
+        ],
+        "totalMs": 30432,
+        "mainModelCalls": 3,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 29,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 0,
+          "executionMs": 30271,
+          "totalMs": 30271,
+          "firstTextMs": 26727,
+          "contextMs": 103,
+          "modelMs": 23929,
+          "toolMs": 6234,
+          "modelCalls": 3,
+          "toolCalls": 6,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-07",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 18431,
+        "turnFirstTextMs": [
+          18431
+        ],
+        "totalMs": 21331,
+        "mainModelCalls": 3,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 41,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 21142,
+          "totalMs": 21143,
+          "firstTextMs": 18431,
+          "contextMs": 98,
+          "modelMs": 11974,
+          "toolMs": 9067,
+          "modelCalls": 3,
+          "toolCalls": 2,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-08",
+      "status": "done",
+      "originalMechanical": "failed",
+      "metrics": {
+        "firstTextMs": 11168,
+        "turnFirstTextMs": [
+          11168
+        ],
+        "totalMs": 12761,
+        "mainModelCalls": 2,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 39,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 12440,
+          "totalMs": 12441,
+          "firstTextMs": 11168,
+          "contextMs": 119,
+          "modelMs": 5970,
+          "toolMs": 6349,
+          "modelCalls": 2,
+          "toolCalls": 1,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-09",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 22991,
+        "turnFirstTextMs": [
+          22991
+        ],
+        "totalMs": 27392,
+        "mainModelCalls": 3,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 34,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 26952,
+          "totalMs": 26953,
+          "firstTextMs": 22991,
+          "contextMs": 102,
+          "modelMs": 12747,
+          "toolMs": 14100,
+          "modelCalls": 3,
+          "toolCalls": 3,
+          "failedTools": 2,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-10",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 1907,
+        "turnFirstTextMs": [
+          1907
+        ],
+        "totalMs": 40537,
+        "mainModelCalls": 4,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 40,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 40276,
+          "totalMs": 40277,
+          "firstTextMs": 1907,
+          "contextMs": 103,
+          "modelMs": 24054,
+          "toolMs": 16115,
+          "modelCalls": 4,
+          "toolCalls": 6,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-11",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 4241,
+        "turnFirstTextMs": [
+          4241
+        ],
+        "totalMs": 5165,
+        "mainModelCalls": 1,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 47,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 0,
+          "executionMs": 4889,
+          "totalMs": 4889,
+          "firstTextMs": 4241,
+          "contextMs": 102,
+          "modelMs": 4786,
+          "toolMs": 0,
+          "modelCalls": 1,
+          "toolCalls": 0,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-12",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 4220,
+        "turnFirstTextMs": [
+          4220
+        ],
+        "totalMs": 5164,
+        "mainModelCalls": 2,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 37,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 4831,
+          "totalMs": 4832,
+          "firstTextMs": 4220,
+          "contextMs": 90,
+          "modelMs": 4737,
+          "toolMs": 1,
+          "modelCalls": 2,
+          "toolCalls": 1,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-13",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 3859,
+        "turnFirstTextMs": [
+          3859
+        ],
+        "totalMs": 4651,
+        "mainModelCalls": 2,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 49,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 4499,
+          "totalMs": 4500,
+          "firstTextMs": 3859,
+          "contextMs": 81,
+          "modelMs": 4415,
+          "toolMs": 0,
+          "modelCalls": 2,
+          "toolCalls": 1,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-14",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 913,
+        "turnFirstTextMs": [
+          913
+        ],
+        "totalMs": 1615,
+        "mainModelCalls": 1,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 41,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 1584,
+          "totalMs": 1585,
+          "firstTextMs": 913,
+          "contextMs": 82,
+          "modelMs": 1500,
+          "toolMs": 0,
+          "modelCalls": 1,
+          "toolCalls": 0,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-15",
+      "status": "done",
+      "originalMechanical": "failed",
+      "metrics": {
+        "firstTextMs": 1803,
+        "turnFirstTextMs": [
+          1803
+        ],
+        "totalMs": 4153,
+        "mainModelCalls": 1,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 48,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 3909,
+          "totalMs": 3910,
+          "firstTextMs": 1803,
+          "contextMs": 86,
+          "modelMs": 3822,
+          "toolMs": 0,
+          "modelCalls": 1,
+          "toolCalls": 0,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-16",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 1190,
+        "turnFirstTextMs": [
+          1190
+        ],
+        "totalMs": 1620,
+        "mainModelCalls": 1,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 40,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 2,
+          "executionMs": 1411,
+          "totalMs": 1413,
+          "firstTextMs": 1190,
+          "contextMs": 83,
+          "modelMs": 1323,
+          "toolMs": 0,
+          "modelCalls": 1,
+          "toolCalls": 0,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-17",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 2917,
+        "turnFirstTextMs": [
+          2917
+        ],
+        "totalMs": 3657,
+        "mainModelCalls": 1,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 57,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 3536,
+          "totalMs": 3537,
+          "firstTextMs": 2917,
+          "contextMs": 86,
+          "modelMs": 3448,
+          "toolMs": 0,
+          "modelCalls": 1,
+          "toolCalls": 0,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-18",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 64076,
+        "turnFirstTextMs": [
+          64076
+        ],
+        "totalMs": 65345,
+        "mainModelCalls": 2,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 113,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 65134,
+          "totalMs": 65135,
+          "firstTextMs": 64076,
+          "contextMs": 84,
+          "modelMs": 8388,
+          "toolMs": 56660,
+          "modelCalls": 2,
+          "toolCalls": 1,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-19",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 5699,
+        "turnFirstTextMs": [
+          5699
+        ],
+        "totalMs": 6685,
+        "mainModelCalls": 2,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 112,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 6196,
+          "totalMs": 6197,
+          "firstTextMs": 5699,
+          "contextMs": 108,
+          "modelMs": 6079,
+          "toolMs": 5,
+          "modelCalls": 2,
+          "toolCalls": 1,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-20",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 144609,
+        "turnFirstTextMs": [
+          144609
+        ],
+        "totalMs": 148226,
+        "mainModelCalls": 3,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 188,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 147948,
+          "totalMs": 147949,
+          "firstTextMs": 144609,
+          "contextMs": 101,
+          "modelMs": 43646,
+          "toolMs": 104198,
+          "modelCalls": 3,
+          "toolCalls": 2,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-21",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 101927,
+        "turnFirstTextMs": [
+          101927
+        ],
+        "totalMs": 104753,
+        "mainModelCalls": 2,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 161,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 104651,
+          "totalMs": 104652,
+          "firstTextMs": 101927,
+          "contextMs": 95,
+          "modelMs": 33539,
+          "toolMs": 71015,
+          "modelCalls": 2,
+          "toolCalls": 1,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-22",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 59484,
+        "turnFirstTextMs": [
+          59484
+        ],
+        "totalMs": 73687,
+        "mainModelCalls": 4,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 100,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 0,
+          "executionMs": 73290,
+          "totalMs": 73290,
+          "firstTextMs": 59484,
+          "contextMs": 88,
+          "modelMs": 20799,
+          "toolMs": 52400,
+          "modelCalls": 4,
+          "toolCalls": 2,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-23",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 9594,
+        "turnFirstTextMs": [
+          9594
+        ],
+        "totalMs": 21376,
+        "mainModelCalls": 4,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 116,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 21270,
+          "totalMs": 21271,
+          "firstTextMs": 9594,
+          "contextMs": 128,
+          "modelMs": 21086,
+          "toolMs": 50,
+          "modelCalls": 4,
+          "toolCalls": 3,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-24",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 631474,
+        "turnFirstTextMs": [
+          631474
+        ],
+        "totalMs": 681375,
+        "mainModelCalls": 13,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 117,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 680950,
+          "totalMs": 680951,
+          "firstTextMs": 631474,
+          "contextMs": 118,
+          "modelMs": 250376,
+          "toolMs": 430452,
+          "modelCalls": 13,
+          "toolCalls": 10,
+          "failedTools": 1,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-25",
+      "status": "transport_or_protocol_error",
+      "originalMechanical": "failed",
+      "metrics": {
+        "firstTextMs": null,
+        "turnFirstTextMs": [
+          null
+        ],
+        "totalMs": 1208934,
+        "mainModelCalls": null,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 109,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        null
+      ]
+    },
+    {
+      "id": "baseline-26",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 23046,
+        "turnFirstTextMs": [
+          23046,
+          8161
+        ],
+        "totalMs": 40759,
+        "mainModelCalls": 4,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 54,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 23380,
+          "totalMs": 23381,
+          "firstTextMs": 23046,
+          "contextMs": 123,
+          "modelMs": 23239,
+          "toolMs": 16,
+          "modelCalls": 2,
+          "toolCalls": 1,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        },
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 16957,
+          "totalMs": 16958,
+          "firstTextMs": 8161,
+          "contextMs": 126,
+          "modelMs": 16816,
+          "toolMs": 12,
+          "modelCalls": 2,
+          "toolCalls": 1,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-27",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 5030,
+        "turnFirstTextMs": [
+          5030,
+          1976
+        ],
+        "totalMs": 11829,
+        "mainModelCalls": 4,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 56,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 6116,
+          "totalMs": 6117,
+          "firstTextMs": 5030,
+          "contextMs": 106,
+          "modelMs": 5996,
+          "toolMs": 13,
+          "modelCalls": 2,
+          "toolCalls": 1,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        },
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 5189,
+          "totalMs": 5190,
+          "firstTextMs": 1976,
+          "contextMs": 85,
+          "modelMs": 5087,
+          "toolMs": 14,
+          "modelCalls": 2,
+          "toolCalls": 1,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-28",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 1826,
+        "turnFirstTextMs": [
+          1826,
+          3076
+        ],
+        "totalMs": 7271,
+        "mainModelCalls": 2,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 45,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 3048,
+          "totalMs": 3049,
+          "firstTextMs": 1826,
+          "contextMs": 90,
+          "modelMs": 2956,
+          "toolMs": 0,
+          "modelCalls": 1,
+          "toolCalls": 0,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        },
+        {
+          "version": 1,
+          "queueMs": 1,
+          "executionMs": 3651,
+          "totalMs": 3652,
+          "firstTextMs": 3076,
+          "contextMs": 86,
+          "modelMs": 3564,
+          "toolMs": 0,
+          "modelCalls": 1,
+          "toolCalls": 0,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-29",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 4317,
+        "turnFirstTextMs": [
+          4317
+        ],
+        "totalMs": 8708,
+        "mainModelCalls": 1,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 86,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 0,
+          "executionMs": 8400,
+          "totalMs": 8400,
+          "firstTextMs": 4317,
+          "contextMs": 99,
+          "modelMs": 8299,
+          "toolMs": 0,
+          "modelCalls": 1,
+          "toolCalls": 0,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    },
+    {
+      "id": "baseline-30",
+      "status": "done",
+      "originalMechanical": "passed",
+      "metrics": {
+        "firstTextMs": 3872,
+        "turnFirstTextMs": [
+          3872
+        ],
+        "totalMs": 5159,
+        "mainModelCalls": 1,
+        "mainInputChars": null,
+        "inputTextChars": null,
+        "systemChars": null,
+        "toolSchemaChars": null,
+        "userInputChars": 92,
+        "allModelCalls": null,
+        "helperModelCalls": null,
+        "helperInputChars": null,
+        "note": "mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。"
+      },
+      "taskTimings": [
+        {
+          "version": 1,
+          "queueMs": 0,
+          "executionMs": 4949,
+          "totalMs": 4949,
+          "firstTextMs": 3872,
+          "contextMs": 97,
+          "modelMs": 4849,
+          "toolMs": 0,
+          "modelCalls": 1,
+          "toolCalls": 0,
+          "failedTools": 0,
+          "retries": 0,
+          "fallbacks": 0,
+          "nativeSearchCalls": 0
+        }
+      ]
+    }
+  ]
+}

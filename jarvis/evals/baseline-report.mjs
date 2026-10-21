@@ -1,8 +1,11 @@
+export const assessmentVersion = 'baseline-rules-v2';
+
 /** 机械检查只能发现明显失败；语义、实时事实及实际Office产物必须复核。 */
 export function checkResult(item, result) {
   const answer = String(result.answer || '');
   const comparableText = answer.replace(/(\d)[,，](?=\d{3}(?:\D|$))/g, '$1');
   const failures = [];
+  const warnings = [];
   if (result.status !== 'done' || result.protocolIssue) failures.push('执行未完整成功');
   if (!answer.trim()) failures.push('无回答正文');
   for (const text of item.checks.contains || []) {
@@ -11,13 +14,13 @@ export function checkResult(item, result) {
   for (const text of item.checks.excludes || []) {
     if (answer.includes(text)) failures.push(`残留错误文本：${text}`);
   }
-  if (item.checks.maxChars && answer.length > item.checks.maxChars) failures.push('超过简短回答长度');
+  if (item.checks.maxChars && answer.length > item.checks.maxChars) warnings.push('回答偏长：超过评测建议长度；题面未明示时不作为内容失败');
   if (item.checks.links && !/https?:\/\/[^\s)）]+/.test(answer)) failures.push('缺少来源网址');
   // 文件名只证明服务器报告有产物；不可冒充可打开、公式或视觉验收通过。
   if (item.checks.artifact && !(result.files || []).some((file) => String(file).toLowerCase().endsWith(item.checks.artifact))) {
     failures.push(`未报告${item.checks.artifact}产物`);
   }
-  return { mechanical: failures.length ? 'failed' : 'passed', failures, semantic: 'pending', quality: failures.length ? 'failed' : 'not_reviewed' };
+  return { version: assessmentVersion, mechanical: failures.length ? 'failed' : 'passed', failures, warnings, semantic: 'pending', quality: failures.length ? 'failed' : 'not_reviewed' };
 }
 
 export function metricsFor(item, turns) {
@@ -33,10 +36,10 @@ export function metricsFor(item, turns) {
     systemChars: sum('systemChars'),
     toolSchemaChars: sum('toolSchemaChars'),
     userInputChars: turns.every((turn) => typeof turn.prompt === 'string') ? turns.reduce((total, turn) => total + turn.prompt.length, 0) : null,
-    allModelCalls: turns.every((turn) => turn.timing?.measurementVersion >= 2 && Number.isFinite(turn.timing?.helperModelCalls)) ? sum('modelCalls') + sum('helperModelCalls') : null,
+    allModelCalls: turns.every((turn) => turn.timing?.measurementVersion >= 2 && !turn.timing?.delegateTasks && Number.isFinite(turn.timing?.helperModelCalls)) ? sum('modelCalls') + sum('helperModelCalls') : null,
     helperModelCalls: sum('helperModelCalls'),
     helperInputChars: sum('helperInputChars'),
-    note: 'mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器为null。首字包含过程说明；多轮耗时为各轮之和。',
+    note: 'mainInputChars是主循环消息正文字符累计，不含系统提示、工具schema、图片和辅助模型；allModelCalls统计主循环及工具内辅助逻辑调用，不含后台记忆、协议内部HTTP重试；旧服务器或存在未计数分身调用时为null。首字包含过程说明；多轮耗时为各轮之和。',
   };
 }
 
@@ -51,7 +54,8 @@ export function baselineSummary(results) {
     passed: passed.length,
     failed: results.filter((item) => item.quality === 'failed').length,
     pending: results.filter((item) => item.quality === 'not_reviewed').length,
-    verifiedPassRate: results.length ? passed.length / results.length : null,
+    verifiedPassRate: results.length && results.every((item) => ['passed', 'failed'].includes(item.quality)) ? passed.length / results.length : null,
+    confirmedPassFraction: results.length ? passed.length / results.length : null,
     firstTextMs: mean('firstTextMs'),
     totalMs: mean('totalMs'),
     mainModelCalls: mean('mainModelCalls'),
@@ -63,7 +67,7 @@ export function baselineSummary(results) {
 
 export function compareBaseline(before, after) {
   const ids = (report) => report.results.map((item) => item.id).sort().join(',');
-  const comparable = !before.mixedModel && !after.mixedModel && before.suiteVersion === after.suiteVersion && before.model === after.model && before.provider === after.provider && ids(before) === ids(after) && before.location === after.location;
+  const comparable = !before.mixedModel && !after.mixedModel && before.executionProfile === after.executionProfile && before.assessmentVersion === after.assessmentVersion && before.suiteVersion === after.suiteVersion && before.model === after.model && before.provider === after.provider && ids(before) === ids(after) && before.location === after.location;
   const oldItems = new Map(before.results.map((item) => [item.id, item]));
   const regressions = after.results.filter((item) => oldItems.get(item.id)?.quality === 'passed' && (item.quality !== 'passed' || item.status !== 'done')).map((item) => item.id);
   const reviewed = [before, after].every((report) => report.results.length === 30 && report.results.every((item) => ['passed', 'failed'].includes(item.quality)));
