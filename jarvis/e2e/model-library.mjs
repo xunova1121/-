@@ -22,6 +22,12 @@ const check = (title, ok) => {
 const requests = [];
 const upstream = createServer((req, res) => {
   requests.push({ path: req.url, key: req.headers.authorization });
+  if (req.method === 'POST') {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.end('data: '+JSON.stringify({choices:[{delta:{content:'已收到。'}}]})+'\n\ndata: '+JSON.stringify({choices:[{delta:{},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n');
+    return;
+  }
+
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify({ data: [{ id: 'shared-model' }, ...Array.from({ length: 300 }, (_, i) => ({ id: `chat-model-${i}` })), { id: 'gpt-image-2' }] }));
 });
@@ -36,6 +42,12 @@ const serverConfig = {
   favoriteModels: [{ provider: 'relay-2', model: 'shared-model' }]
 };
 fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify(serverConfig));
+const styleFolder = path.join(data, 'store', 'memories');
+fs.mkdirSync(styleFolder, { recursive: true });
+for (const id of ['docstyle_docx_font', 'docstyle_pptx_color']) {
+  const filename = createHash('sha1').update(id).digest('hex') + '.json';
+  fs.writeFileSync(path.join(styleFolder, filename), JSON.stringify({ id, category: 'doc_style', content: id.endsWith('font') ? 'docx · 用宋体' : 'pptx · 用深蓝', updatedAt: Date.now() }));
+}
 const gateway = spawn(process.execPath, ['server/server.mjs'], {
   env: { ...process.env, PORT: String(port), JARVIS_DATA: data, JARVIS_PASSWORD: password },
   stdio: 'pipe'
@@ -72,8 +84,40 @@ try {
     );
     await page.goto(base);
     await page.waitForFunction(() => window.__jarvis?.showPanel);
+    await page.evaluate(() => window.__jarvis.send('以后Word用黑体'));
+    await page.waitForFunction(() => !document.querySelector('.msg.agent.streaming'));
+    const reflectionIsolated = await page.evaluate(async () => {
+      await window.__jarvis.reflectNow();
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open('jarvis');
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const database = request.result;
+          const read = database.transaction('memories', 'readonly').objectStore('memories').getAll();
+          read.onsuccess = () => { database.close(); resolve(!read.result.some(item => item.category === 'doc_style')); };
+          read.onerror = () => { database.close(); reject(read.error); };
+        };
+      });
+    });
+    check(`${width} 服务器对话后台整理不写本机偏好`, reflectionIsolated);
+    await page.waitForFunction(async () => {
+      const settings = JSON.parse(localStorage.getItem('jarvis.server.v1'));
+      const response = await fetch(settings.url + '/api/server/document-styles', { headers: { Authorization: 'Bearer ' + settings.token } });
+      return (await response.json()).some(item => item.content.includes('黑体'));
+    });
     await page.evaluate(() => window.__jarvis.showPanel('models'));
     await page.waitForSelector('.ml-provider');
+    const stylesPanel = page.locator('details').filter({ has: page.getByText('写作偏好 · 云服务器', { exact: true }) });
+    await stylesPanel.locator('summary').click();
+    await stylesPanel.getByRole('button', { name: '查看写作偏好', exact: true }).click();
+    await stylesPanel.locator('li').first().waitFor();
+    const styleBefore = await stylesPanel.locator('li').count();
+    const styleDeleted = page.waitForResponse(response => response.url().includes('/api/server/document-styles/') && response.request().method() === 'DELETE');
+    await stylesPanel.getByRole('button', { name: '删除偏好', exact: true }).first().click();
+    await styleDeleted;
+    await page.waitForFunction(expected => document.querySelectorAll('.ml-style-list li').length === expected, styleBefore - 1);
+    check(`${width} 云端写作偏好可查看删除且不读写本机`, (await stylesPanel.locator('li').count()) === styleBefore - 1);
+    await stylesPanel.locator('summary').click();
     check(
       `${width} 配置位置默认云服务器，按服务商显示`,
       (await page.locator('#model-workspace .ml-scope-note').textContent()) === '正在修改服务器配置，不影响本机' &&

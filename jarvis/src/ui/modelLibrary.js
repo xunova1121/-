@@ -15,6 +15,7 @@ import {
   hasRouting
 } from '../llm/modelLibrary.js';
 import { modelKind } from '../llm/images.js';
+import { documentStylesPanel } from './documentStylesPanel.js';
 
 export const node = (tag, props = {}, ...children) => {
   const element = Object.assign(document.createElement(tag), props);
@@ -323,6 +324,7 @@ export function initModelLibrary({ root, workspace, toast }) {
     if (pullController) root.append(button('停止拉取', () => pullController.abort(), 'ml-link'));
     if (!cfg) return;
     renderDocumentReviewer(cfg);
+    root.append(documentStylesPanel({ workspace, node }));
     if (hasRouting(cfg))
       root.append(
         node('p', { className: 'ml-notice', textContent: '高级分工已开启，实际模型可能按任务变化。' }),

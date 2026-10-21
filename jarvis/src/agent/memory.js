@@ -19,8 +19,13 @@
  */
 import { collection, uid } from './store.js';
 import { buildIndex, tokenize } from './search.js';
+import { createDocumentStyles } from './documentStyles.js';
 
 const memories = collection('memories');
+const documentStyles = createDocumentStyles({ store: memories, unsafe: text => Boolean(injectionReason(text)) });
+export const listDocumentStyles = () => documentStyles.list();
+export const deleteDocumentStyle = id => documentStyles.remove(id);
+export const documentStyleContext = signal => documentStyles.context(signal);
 const lessons = collection('lessons');
 const skills = collection('skills');
 const events = collection('events');
@@ -28,7 +33,7 @@ const episodes = collection('episodes');
 const kv = collection('kv');
 
 const DAY = 86400000;
-export const CATEGORIES = { profile: '身份', preference: '偏好', habit: '习惯', fact: '事实', goal: '目标', other: '其他' };
+export const CATEGORIES = { profile: '身份', preference: '偏好', habit: '习惯', fact: '事实', goal: '目标', doc_style: '写作偏好', other: '其他' };
 const CORE_LIMIT = 1200;
 
 // ---------------------------------------------------------------- 可选的大模型与向量服务（由界面按当前配置注入）
@@ -129,6 +134,11 @@ export async function decide(content, category, existing, vec = null) {
  * @returns {Promise<object>} 记忆，带 action 字段说明发生了什么
  */
 export async function remember(content, category = 'fact', { importance = 3, source = 'tool', evidence = '' } = {}) {
+  if (category === 'doc_style') {
+    const recorded = await documentStyles.learn([evidence]);
+    if (!recorded.length) throw Object.assign(new Error('写作偏好需要用户明确的长期文档要求原话'), { kind: 'input', code: 'DOC_STYLE_SOURCE' });
+    return recorded[0];
+  }
   content = norm(content);
   if (!content) throw new Error('记忆内容为空');
   if (!CATEGORIES[category]) category = 'other';
@@ -292,9 +302,11 @@ export async function addEpisode({ summary, topics = [], turns = 0, session = nu
  * 有大模型时让模型做（更准）；离线时用规则兜底。
  * @param {Array<{role: string, content: string}>} turns 这段对话（user / assistant）
  */
-export async function reflect(turns, { episode = true, session = null } = {}) {
+export async function reflect(turns, { episode = true, session = null, evaluationId = null } = {}) {
+  if (evaluationId || session?.evaluationId) return { memories: [], episode: null };
   const userLines = turns.filter((t) => t.role === 'user').map((t) => t.content);
   if (!userLines.length) return { memories: [], episode: null };
+  const styles = await documentStyles.learn(userLines, { sessionId: session?.id });
   const pending = await openItems({ exclude: session?.id, days: 30, k: 12 });
   if (llm) {
     try {
@@ -310,14 +322,14 @@ export async function reflect(turns, { episode = true, session = null } = {}) {
       const topics = Array.isArray(j.topics) ? j.topics.slice(0, 5).map(String) : [];
       const open = Array.isArray(j.open) ? j.open.map(String) : [];
       if (Array.isArray(j.done)) await resolveOpen(pending.filter((o) => j.done.some((d) => lexicalSim(String(d), o.text) >= 0.6)));
-      return { memories: await saveFacts(facts, userLines, session), episode: episode && summary ? await addEpisode({ summary, topics, turns: turns.length, session, open }) : null };
+      return { memories: [...styles, ...await saveFacts(facts, userLines, session)], episode: episode && summary ? await addEpisode({ summary, topics, turns: turns.length, session, open }) : null };
     } catch { /* 模型输出不合格：退回规则 */ }
   }
   const facts = ruleFacts(userLines.join('\n'));
   const summary = `用户：${userLines.slice(-3).map((l) => l.slice(0, 40)).join('；')}`;
   const text = userLines.join('\n');
   await resolveOpen(pending.filter((o) => lexicalSim(text, o.text) >= 0.5 || userLines.some((l) => lexicalSim(l, o.text) >= 0.5)));
-  return { memories: await saveFacts(facts, userLines, session), episode: episode ? await addEpisode({ summary, turns: turns.length, session, open: ruleOpen(userLines) }) : null };
+  return { memories: [...styles, ...await saveFacts(facts, userLines, session)], episode: episode ? await addEpisode({ summary, turns: turns.length, session, open: ruleOpen(userLines) }) : null };
 }
 
 /** 离线规则：用户说“下次 / 明天 / 回头再……”的事记为未完成 */
@@ -455,7 +467,7 @@ export async function contextFor(query) {
   const [ms, ls, ss, eps, core] = await Promise.all([memories.all(), lessons.all(), skills.all(), episodes.all(), getCore()]);
   const vec = await embedOne(query);
   // 像注入指令的条目不交给模型（原文保留在库里，面板上标“可疑，未使用”）
-  const cur = ms.map(upgrade).filter(current).filter(safe((m) => m.content));
+  const cur = ms.map(upgrade).filter(current).filter(m => m.category !== 'doc_style').filter(safe((m) => m.content));
   const relevant = score(cur, query, (m) => m.content, { k: 6, vec });
   // 身份与重要偏好：即使和问题不相关也带上几条，保证“认识用户”
   const profile = cur.filter((m) => m.pinned || ((m.category === 'profile' || m.category === 'preference') && m.importance >= 3))
@@ -542,6 +554,7 @@ export async function importAll(data) {
   if (data?.format !== 'jarvis-memory') throw new Error('不是未央的记忆备份文件');
   const put = async (c, list) => { for (const x of list || []) if (x?.id) await c.put(x); };
   await put(memories, data.memories);
+  await documentStyles.learn([]);
   await put(lessons, data.lessons);
   await put(skills, data.skills);
   await put(episodes, data.episodes);
@@ -558,4 +571,3 @@ export function levelOf({ memories: m = 0, lessons: l = 0, skills: s = 0, docs =
   const next = 5 * level ** 2;
   return { xp, level, progress: (xp - cur) / (next - cur), next };
 }
-
