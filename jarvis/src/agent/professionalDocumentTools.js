@@ -62,6 +62,7 @@ export function createProfessionalDocumentTools(ctx) {
     const contentCheck = {
       business: result.business,
       reviewMode: result.reviewMode,
+      reviewNote: result.reviewNote,
       unresolved: result.unresolved,
       warningCount: result.warningCount,
       workflowFile: result.stateFile
@@ -113,7 +114,7 @@ export function createProfessionalDocumentTools(ctx) {
           : result.business === 'needs_revision'
             ? '仍有必须修复项，作为待完善稿交付'
             : '简单任务，未做完整业务审查';
-    return `${generated}\n内容工作流：${label}；未解决项${result.unresolved}，提醒${result.warningCount}；写作前调研${result.researchStatus || '未执行'}；内容阶段调用${result.calls}次，本次生成器公式/版面辅助调用${generatorCalls}次，Token用量未知。初稿、审查意见及恢复文件：${result.stateFile}`;
+    return `${generated}\n内容工作流：${label}；${result.reviewNote}；未解决项${result.unresolved}，提醒${result.warningCount}；写作前调研${result.researchStatus || '未执行'}；内容阶段调用${result.calls}次，本次生成器公式/版面辅助调用${generatorCalls}次，Token用量未知。初稿、审查意见及恢复文件：${result.stateFile}`;
   };
   return [
     {

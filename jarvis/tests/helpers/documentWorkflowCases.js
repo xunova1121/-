@@ -74,6 +74,7 @@ export function documentWorkflowCases(test) {
     const result = await h.workflow.run({ task, format: 'md' }, h.execution);
     assert.equal(result.calls, 3);
     assert.equal(result.business, 'model_reviewed');
+    assert.equal(result.reviewNote, '审查与写作为同一模型');
     assert.match(h.prompts[0].prompt, /正常流/);
     assert.ok(h.prompts[1].prompt.includes('复称留痕'));
     assert.ok(h.prompts[2].prompt.includes(task));
@@ -255,6 +256,7 @@ export function documentWorkflowCases(test) {
     });
     const result = await workflow.run({ task }, h.execution);
     assert.equal(result.reviewMode, 'configured_reviewer');
+    assert.match(result.reviewNote, /已配置的文档审查线路/);
     assert.equal(h.prompts.length, 2);
     assert.equal(reviews, 1);
   });

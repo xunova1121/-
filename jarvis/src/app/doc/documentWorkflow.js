@@ -41,6 +41,12 @@ function resultSummary(state) {
     unresolved: state.review?.issues?.filter((item) => item.severity === 'must_fix').length ?? 0,
     warningCount: state.review?.issues?.filter((item) => item.severity === 'warning').length ?? 0,
     reviewMode: state.reviewMode || 'not_checked',
+    reviewNote:
+      state.reviewMode === 'same_model'
+        ? '审查与写作为同一模型'
+        : state.reviewMode === 'configured_reviewer'
+          ? '使用已配置的文档审查线路（是否为不同模型取决于所选型号）'
+          : '尚未进行内容审查',
     researchStatus: state.research?.status || 'not_run'
   };
 }

@@ -7,6 +7,9 @@ import { createDesktopTools } from '../agent/desktopTools.js';
 import * as mcp from '../agent/mcpClient.js';
 import { generateImage } from '../llm/images.js';
 import { generateVideo } from '../llm/videos.js';
+import { createDocumentReviewer } from '../llm/documentReviewer.js';
+import { createAdapter } from '../llm/config.js';
+import { createHelperLlm } from '../llm/helper.js';
 import { $, body, DESKTOP, COMPACT, toast } from './env.js';
 
 export function createToolbox(app) {
@@ -76,6 +79,10 @@ export function createToolbox(app) {
         fetchViaGateway: app.fetchViaGateway(),
         llm: app.helperLlm('write'), // 深度调研：用写作模型
         reasonLlm: app.helperLlm('reason'), // 逐项查证：用推理模型摘答案
+        documentReviewer: createDocumentReviewer(app.llmConfig, (cfg) => {
+          const selected = createAdapter(cfg, { gateway: app.gateway });
+          return selected.problem ? null : createHelperLlm(selected.adapter, selected.model);
+        }),
         visionLlm: app.visionHelperLlm(), // PPT 生成后看预览图检查排版
         onPreview: background
           ? () => {}
