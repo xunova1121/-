@@ -13,6 +13,7 @@ function newState(input, execution) {
   const format = input.format || 'docx';
   if (!['docx', 'pdf', 'html', 'md', 'pptx', 'xlsx'].includes(format)) throw workflowError('不支持的文档格式', 'DOCUMENT_INPUT');
   const id = globalThis.crypto.randomUUID();
+  const referenceTime = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' });
   return {
     version: 3,
     id,
@@ -22,7 +23,7 @@ function newState(input, execution) {
     calls: 0,
     revisionAttempts: 0,
     timings: [],
-    input: { task, material, format, allowResearch: input.research !== false, referenceTime: new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }) },
+    input: { task, material, format, allowResearch: input.research !== false, referenceTime },
     depth: documentDepth({ task, format, depth: input.depth }),
     business: 'not_checked',
     tokens: null
