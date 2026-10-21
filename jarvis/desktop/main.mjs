@@ -5,7 +5,7 @@
  *   - 通过 preload 给页面提供“操作电脑”的能力（文件、打开程序、运行命令、截屏、剪贴板、通知）
  *   - 托盘常驻、全局快捷键 Ctrl/⌘+Shift+J 随时呼出、开机自启
  */
-import { app, BrowserWindow, ipcMain, shell, clipboard, Notification, desktopCapturer, screen, Tray, Menu, nativeImage, globalShortcut, session, systemPreferences, powerMonitor } from 'electron';
+import { app, BrowserWindow, BaseWindow, WebContentsView, ipcMain, shell, clipboard, Notification, desktopCapturer, screen, Tray, Menu, nativeImage, globalShortcut, session, systemPreferences, powerMonitor } from 'electron';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -16,6 +16,7 @@ import { createWallpaper } from './wallpaper.mjs';
 import { createPresence } from './presence.mjs';
 import { createActivity } from './activity.mjs';
 import { createUpdater, RELEASES_URL } from './updater.mjs';
+import { createBrowser } from './browser.mjs';
 import fs from 'node:fs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -47,6 +48,7 @@ let origin = '';
 let quitting = false;
 let mcp = null;
 let server = null;
+let browser = null; // 内置浏览器（第一次点链接时创建窗口）
 
 async function startGateway() {
   const extraPath = loginShellPath();
@@ -241,14 +243,19 @@ function createWindow() {
   win.loadURL(`${origin}/`);
   win.once('ready-to-show', () => { if (!process.argv.includes('--hidden')) win.show(); });
 
-  // 页面里的外部链接用系统浏览器打开；同源 / blob（工作区预览）在新窗口打开
+  // 页面里的外部链接在内置浏览器里看（右上角可转到系统浏览器）；同源 / blob（工作区预览）在新窗口打开
+  browser ??= createBrowser({ BaseWindow, WebContentsView, ipcMain, shell, session, here, icon: ICON });
+  const openLink = (url) => {
+    if (browser.open(url)) return;
+    if (/^(mailto|tel):/i.test(url)) shell.openExternal(url);
+  };
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith(`${origin}/`) || url.startsWith('blob:') || url === 'about:blank') return { action: 'allow' };
-    if (/^https?:/i.test(url)) shell.openExternal(url);
+    openLink(url);
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (e, url) => {
-    if (!url.startsWith(`${origin}/`)) { e.preventDefault(); if (/^https?:/i.test(url)) shell.openExternal(url); }
+    if (!url.startsWith(`${origin}/`)) { e.preventDefault(); openLink(url); }
   });
 
   let hintShown = false;

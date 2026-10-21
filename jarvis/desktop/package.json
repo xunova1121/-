@@ -39,6 +39,9 @@
       "presence.mjs",
       "activity.mjs",
       "updater.mjs",
+      "browser.mjs",
+      "browserPreload.cjs",
+      "browserBar.html",
       "package.json",
       "build/icon.png",
       "bundle/**/*"

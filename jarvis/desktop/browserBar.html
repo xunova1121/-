@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>未央浏览器</title>
+<style>
+  /* 和未央主界面同一套深色配色 */
+  :root { --bg: #03070d; --panel: #0b1420; --line: #1c2a3a; --fg: #d7e3ee; --dim: #7f93a6; --accent: #5cc8ff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 13px "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; overflow: hidden; }
+  .bar { display: flex; align-items: center; gap: 6px; height: 44px; padding: 0 8px; border-bottom: 1px solid var(--line); }
+  button { flex: none; height: 30px; min-width: 30px; padding: 0 8px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--fg); font: inherit; font-size: 15px; cursor: pointer; }
+  button:hover:not(:disabled) { background: var(--panel); border-color: var(--line); }
+  button:disabled { color: #3b4b5c; cursor: default; }
+  #external { font-size: 13px; color: var(--accent); }
+  form { flex: 1; min-width: 0; }
+  input { width: 100%; height: 30px; padding: 0 10px; border: 1px solid var(--line); border-radius: 15px; background: var(--panel); color: var(--fg); font: inherit; outline: none; }
+  input:focus { border-color: var(--accent); }
+  .loading input { background-image: linear-gradient(90deg, transparent, rgba(92, 200, 255, 0.18), transparent); background-size: 200% 100%; animation: sweep 1.2s linear infinite; }
+  @keyframes sweep { to { background-position: -200% 0; } }
+</style>
+</head>
+<body>
+<div class="bar">
+  <button id="back" title="后退" disabled>←</button>
+  <button id="forward" title="前进" disabled>→</button>
+  <button id="reload" title="刷新">↻</button>
+  <form id="form"><input id="address" spellcheck="false" autocomplete="off" placeholder="输入网址或要搜索的内容"></form>
+  <button id="external" title="用系统默认浏览器打开这个页面">在浏览器中打开 ↗</button>
+</div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const api = window.jarvisBrowser;
+  for (const id of ['back', 'forward', 'reload', 'external']) $(id).addEventListener('click', () => api.do(id));
+  $('form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    api.do('go', $('address').value);
+    $('address').blur();
+  });
+  api.onState((s) => {
+    $('back').disabled = !s.back;
+    $('forward').disabled = !s.forward;
+    $('reload').textContent = s.loading ? '✕' : '↻';
+    $('reload').title = s.loading ? '停止' : '刷新';
+    document.body.classList.toggle('loading', s.loading);
+    // 正在输入时不覆盖地址栏
+    if (document.activeElement !== $('address')) $('address').value = s.url || '';
+    document.title = s.title || '未央浏览器';
+  });
+</script>
+</body>
+</html>

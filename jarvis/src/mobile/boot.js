@@ -4,6 +4,7 @@
  *   朗读：WebView 没有 speechSynthesis，用系统 TTS 补上
  *   听写：直接对话用系统语音识别
  *   同步：阿里云 OSS 请求走原生网络（可以设置 Date 头、没有跨域限制）
+ *   链接：对话里的外部链接在 App 里打开（linkBrowser.js）
  */
 import { MOBILE } from '../config.js';
 import { wrapFetch, nativeFetcher, nativeStreamFetcher, nativeRouter } from './nativeFetch.js';
@@ -27,6 +28,11 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
     globalThis.__jarvisBackgroundTask = registerPlugin('BackgroundTask');
     globalThis.__jarvisSpeech.addListener('dialog', ({ active }) => { globalThis.__jarvisSystemSpeechDialog = active; }); // 直接对话用系统语音识别（见 nativeVoice.js）
   } catch { /* 没有识别插件：走云端转写 */ }
+  try {
+    // 对话里的链接在 App 里看，右上角菜单可转到其他浏览器
+    const [{ Browser }, { installLinkBrowser }] = await Promise.all([import('@capacitor/browser'), import('./linkBrowser.js')]);
+    installLinkBrowser(Browser);
+  } catch { /* 没有浏览器插件：照旧交给系统浏览器 */ }
   try {
     const { TextToSpeech } = await import('@capacitor-community/text-to-speech');
     installSpeechShim(TextToSpeech);
