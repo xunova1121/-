@@ -1,3 +1,24 @@
+## 第5项前端拆分：2026-10-21（北京时间，Codex；验证通过，[skip ci]保存，未另发版）
+
+- 用户要求1.0.226发布后继续高质量完成剩余计划；开工已读AGENTS/CLAUDE/规范及交接顶两节，基线3f3b6f4ea92c9871e1b927d047e02b6aa1ae3f4a。本批只做第5项前端搬移，智能体循环下一批；正式版本仍1.0.226。
+- turn.js 685→491行，输入/历史/两图缓存、模型选择/斜杠展开移至createTurnInputs；原事件显示移至createTurnEvents。voice.js 683→499行，自检/人脸/权限恢复移至createVoiceDevices；检查通过app读取实时识别实例及原nativeVoiceReady Promise。新模块均createXxx(app)，main只加import/mount，原有模块相对顺序不变，按钮原顺序和公共接口保留。
+- 不增加模型调用、缓存/存储、预算或重试；工作区/后台sessionId及手机检查点代码不改；动态人脸导入仍按app目录相对路径。原recentImages上限两条、后台任务收尾、错误/停止路径照旧。
+- 首轮6936c417d7fb15a942d43dcff1444cbb5a96b854的1150单测/lint通过，但smoke人脸启动在原30秒标准失败。根因为本AI重命名局部status时误替换选择器字符串；改回face-status，并核对人脸全部字面量和代码仅标识符不同。未删除/跳过/修改任何测试断言、未放宽超时；重跑最终源码。
+- 候选ffe8282dd5b9a8e2923f8c6de337ea6f14bf1a7f，完整流水线39597813813成功（https://github.com/xunova1121/-/actions/runs/39597813813）：112文件1150单测、28评测脚本、format后源码无差异及lint、三类构建、全部规范E2E；server15、mobile78、server-mobile15、model-library28、Electron11、PC5、smoke178、standalone14、conversation-flow及Docker/Claude协议/Office真实检查均通过。人脸启动、无人脸提示、VAD加载和无外发断言原标准通过。临时工作流不合入，保存源码与候选逐项核对。原EMOTION_ICON已查1.0.226服务器包252个源码文件，无该标识符，不伪造删除。
+- 本地已用现有lock的Prettier3.9.9（SHA512完整性匹配）成功运行npm run format，未改依赖声明；eslint/Vitest缺依赖，本地未成功，CI完整补齐。没有真实Windows/鸿蒙设备。另只读访问d.leing.top公开health得到ok=true/serverMode=true，不含version，不能据此认定服务器已升级或跑了真实模型30题；仍无生产登录会话。
+
+规范第7节自查：
+1. 只移动代码，不改正文/会话/检查点/localStorage布局。
+2. recentImages仍最多两条，事件与工具缓存仍原轮次生命周期；无新缓存。
+3. 原写盘合并和操作前检查点顺序不变，不逐事件新增写盘。
+4. 事件仍只改传入turn的气泡/会话，切会话后台分支原样保留。
+5. 未新增catch或改变停止/预算路径；自检里的原错误显示行为不变。
+6. 无新重试或网络调用，原可取消流程保持。
+7. 没有新增请求，原consume位置不变；只搬UI层。
+8. 未改错误分类；局部变量改名不匹配错误文本。
+9. 主入口只加三对import/mount，原顺序核对一致；新函数按需取app状态；规范表补新模块，添加“重命名不改协议/DOM字符串”真实教训。
+10. 最终完整门禁通过，原失败测试也重跑通过；真实模型/用户服务器/鸿蒙/Windows真机未测及无Claude人工复查明示。
+
 ## 正式发布：2026-10-21 17:46（北京时间，Codex；1.0.226）
 
 - 用户明确要求“做完这先发一版，然后继续”，已正式发布desktop-v1.0.226，源码2bf5ac8d2f83d78ec1cf69102cf3a6b5f5a72014，发布时间17:46:07。正式流水线39577634012（https://github.com/xunova1121/-/actions/runs/39577634012）Windows、Android、完整验证及Release全部success。后续继续第5项结构整理，开发保存仍[skip ci]，不自动再发下一版。
