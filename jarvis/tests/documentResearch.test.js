@@ -125,3 +125,16 @@ it('证据缓存读取也计入调研总时限，迟来的读取不能继续发�
     expect(search).not.toHaveBeenCalled();
   } finally {vi.useRealTimers();}
 });
+
+it('用户限定仅用材料或不要联网时，不访问缓存和网络', async () => {
+  const search = vi.fn();
+  const read = vi.fn();
+  const records = vi.fn();
+  const collector = createResearchCollector({store:{records},search,read});
+  for (const task of ['建设水产方案，不要联网','仅根据附件材料编制方案','offline only project plan']) {
+    expect(await collector.research({...input,task},execution)).toHaveProperty('reason','USER_SOURCE_LIMIT');
+  }
+  expect(records).not.toHaveBeenCalled();
+  expect(search).not.toHaveBeenCalled();
+  expect(read).not.toHaveBeenCalled();
+});
