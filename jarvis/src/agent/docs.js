@@ -19,7 +19,7 @@ import { makePptx } from './pptxWriter.js';
 const MAX_CHARS = 60000;
 
 // ---------------------------------------------------------------- 读取
-export async function parseFile(blob, name) {
+export async function parseFile(blob, name, options = {}) {
   const e = ext(name);
   const buf = () => blob.arrayBuffer();
   let text;
@@ -30,7 +30,7 @@ export async function parseFile(blob, name) {
     const input = typeof window === 'undefined' && typeof Buffer !== 'undefined' ? { buffer: Buffer.from(ab) } : { arrayBuffer: ab };
     text = (await (mammoth.default ?? mammoth).extractRawText(input)).value;
   } else if (e === 'pdf') {
-    text = await parsePdf(await buf());
+    text = await parsePdf(await buf(), options);
   } else if (e === 'pptx') {
     text = await parsePptx(await buf());
   } else if (['xlsx', 'xls', 'ods'].includes(e)) {
@@ -64,11 +64,19 @@ function sheetText(XLSX, sheet, name) {
   return `## 工作表：${name}\n${XLSX.utils.sheet_to_csv(sheet)}${list}`;
 }
 
-async function parsePdf(data) {
+async function parsePdf(data, { signal, maxPages = Infinity, maxChars = Infinity } = {}) {
   const pdfjs = await loadPdfjs();
-  const doc = await pdfjs.getDocument({ data: new Uint8Array(data), isEvalSupported: false }).promise;
+  const task = pdfjs.getDocument({ data: new Uint8Array(data), isEvalSupported: false });
+  const abort = () => { void task.destroy().catch(() => {}); };
+  signal?.addEventListener('abort', abort, { once: true });
+  try {
+  if (signal?.aborted) throw signal.reason;
+  const doc = await task.promise;
+  let chars = 0;
+  let hasText = false;
   const pages = [];
-  for (let i = 1; i <= doc.numPages; i++) {
+  for (let i = 1; i <= Math.min(doc.numPages, maxPages); i++) {
+    if (signal?.aborted) throw signal.reason;
     const tc = await (await doc.getPage(i)).getTextContent();
     let line = '';
     let lastY = null;
@@ -80,9 +88,19 @@ async function parsePdf(data) {
       lastY = y;
     }
     out.push(line);
-    pages.push(`--- 第 ${i} 页 ---\n${out.join('\n').trim()}`);
+    hasText ||= Boolean(out.join('').trim());
+    const pageText = `--- 第 ${i} 页 ---\n${out.join('\n').trim()}`;
+    pages.push(pageText);
+    chars += pageText.length;
+    if (chars >= maxChars) break;
   }
-  return pages.join('\n\n');
+  if (Number.isFinite(maxPages) && !hasText) throw Object.assign(new Error('PDF没有可提取正文，可能是扫描件；未执行OCR'), { code: 'PDF_NO_TEXT', kind: 'api' });
+  const suffix = pages.length < doc.numPages ? `\n（PDF已截断：仅读取前${pages.length}/${doc.numPages}页，不能视为全文已读。）` : '';
+  return pages.join('\n\n') + suffix;
+  } finally {
+    signal?.removeEventListener('abort', abort);
+    await task.destroy().catch(() => {});
+  }
 }
 
 let pdfjsPromise = null;

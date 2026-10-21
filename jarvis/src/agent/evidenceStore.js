@@ -76,7 +76,7 @@ export function createEvidenceStore({ store = collection('kv'), now = Date.now, 
         const id = evidenceId(s.url);
         const old = rec.items.find((x) => x.id === id);
         rec.items = rec.items.filter((x) => x.id !== id);
-        rec.items.push({ id, key: String(key).slice(0, 2000), url: s.url.slice(0, 2000), title: String(s.title || '').slice(0, 300), text: String(s.text || '').slice(0, limits.chars), savedAt: Math.min(now(), Number(savedAt) || (old?.key === key && old.savedAt) || now()), at: now() });
+        rec.items.push({ id, key: String(key).slice(0, 2000), url: s.url.slice(0, 2000), title: String(s.title || '').slice(0, 300), text: String(s.text || '').slice(0, limits.chars), original: s.original === true, savedAt: Math.min(now(), Number(savedAt) || (old?.key === key && old.savedAt) || now()), at: now() });
         ids.push(id);
       }
       rec.items = alive(rec.items).slice(-limits.perSession);
@@ -102,7 +102,7 @@ export function createEvidenceStore({ store = collection('kv'), now = Date.now, 
         if (!x.key) continue;
         const g = groups.get(x.key) ?? { key: x.key, savedAt: x.savedAt, sources: [] };
         g.savedAt = Math.min(g.savedAt, x.savedAt);
-        g.sources.push({ url: x.url, title: x.title, text: x.text });
+        g.sources.push({ url: x.url, title: x.title, text: x.text, original: x.original === true });
         groups.set(x.key, g);
       }
       return [...groups.values()];

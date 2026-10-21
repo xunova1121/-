@@ -228,11 +228,12 @@ describe('必应 RSS 和搜不到时的原因', () => {
     expect(parseBingRss(RSS)).toEqual([{ title: '南京市 - 百科', url: 'https://baike.example.com/nanjing', snippet: '南京，简称“宁”，江苏省省会。' }]);
     expect(bingRssUrl('南京', 'cn')).toBe('https://cn.bing.com/search?format=rss&q=%E5%8D%97%E4%BA%AC&count=10&setlang=zh-Hans');
   });
-  it('RSS 有结果就不用再读网页', async () => {
+  it('中文RSS已有4条仍并行查百度', async () => {
     const asked = [];
     const s = createSearch({ searchRegion: 'cn', fetchViaGateway: async (url) => { asked.push(url); return new Response(RSS.replace('</channel>', RSS.match(/<item>[\s\S]*?<\/item>/)[0].replace(/nanjing/g, 'a') + RSS.match(/<item>[\s\S]*?<\/item>/)[0].replace(/nanjing/g, 'b') + RSS.match(/<item>[\s\S]*?<\/item>/)[0].replace(/nanjing/g, 'c') + '</channel>')); } });
     const hits = await s.search('南京');
-    expect(asked).toHaveLength(1);
+    expect(asked).toHaveLength(2);
+    expect(asked.some(url => new URL(url).hostname === 'www.baidu.com')).toBe(true);
     expect(hits).toHaveLength(4);
   });
   it('都没结果时逐个说明原因（被拦 / 出错 / 连不上）', async () => {
@@ -247,7 +248,7 @@ describe('必应 RSS 和搜不到时的原因', () => {
     expect(err).toMatch(/必应中国：0 条（HTTP 200，1KB，页面标题“必应”）/);
     expect(err).toMatch(/百度：被拦截（出现验证页“百度安全验证”）/);
     expect(err).toMatch(/360：连不上（timeout）/);
-    expect(err).toMatch(/博查/);
+    expect(err).toMatch(/免密钥搜索/);
   });
 });
 

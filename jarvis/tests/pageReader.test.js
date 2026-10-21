@@ -114,7 +114,7 @@ describe('网页失败可诊断且不反复访问', () => {
       let seen;
       const read=createPageReader({fetchViaGateway:async(url,{signal})=>{seen=signal;return {ok:true,headers:new Headers({'content-type':'text/html'}),arrayBuffer:()=>new Promise(()=>{})};}});
       const assertion=expect(read('https://slow.example/a')).rejects.toThrow('超时');
-      await vi.advanceTimersByTimeAsync(8500);await assertion;expect(seen.aborted).toBe(true);
+      await vi.advanceTimersByTimeAsync(20500);await assertion;expect(seen.aborted).toBe(true);
     } finally {vi.useRealTimers();}
   });
   it('停止读取不会继续调用付费代读服务', async () => {
