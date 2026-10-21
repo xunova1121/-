@@ -95,10 +95,12 @@ it('专业工作流在底稿前调研，资料可供底稿/写作/审查，但�
     expect(prompt).toContain('外部证据编号e1');
     return JSON.stringify({brief:{purpose:'审批',requirements:['建设水产交易平台'],facts:[],assumptions:[],unknowns:[]},scenarios:{normal:['流程'],exceptions:['断网'],settlement:['结算'],acceptance:['测试'],structure:['概述']}});
   }};
-  const result = await createDocumentWorkflow(app).prepare({task:'建设水产交易平台',format:'docx'},execution);
+  const checkpoints = [];
+  const result = await createDocumentWorkflow(app).prepare({task:'建设水产交易平台',format:'docx'},{...execution,checkpoint:async event=>checkpoints.push(event)});
   expect(order).toEqual(['research','model']);
   expect(result.researchStatus).toBe('ready');
   const state = JSON.parse(values.get(result.stateFile));
   expect(state.research.sources[0].id).toBe('e1');
   expect(JSON.stringify(state)).not.toContain('外部证据编号e1');
+  expect(JSON.stringify(checkpoints)).not.toContain('外部证据编号e1');
 });

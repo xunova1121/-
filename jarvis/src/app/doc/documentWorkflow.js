@@ -59,7 +59,7 @@ export function createDocumentWorkflow(app) {
         state.pendingStage = 'researching';
         await save();
         state.research = await app.documentResearch({ id: state.id, ...state.input }, execution);
-        state.timings = [...state.timings, { stage: 'researching', elapsedMs: state.research.elapsedMs || 0 }].slice(-LIMITS.calls);
+        state.timings = [...state.timings, { stage: 'researching', elapsedMs: state.research.elapsedMs || 0 }].slice(-(LIMITS.calls + 1));
         await save();
       }
       if (state.phase === 'new' && state.depth === 'expert') {
@@ -123,7 +123,7 @@ function createAsk(app, state, execution, save) {
       );
       return boundedText(text, LIMITS.response, '模型响应', true);
     } finally {
-      state.timings = [...state.timings, { stage, elapsedMs: Date.now() - started }].slice(-LIMITS.calls);
+      state.timings = [...state.timings, { stage, elapsedMs: Date.now() - started }].slice(-(LIMITS.calls + 1));
     }
   };
 }
@@ -198,4 +198,3 @@ async function inspectAndRevise(state, ask, save, execution) {
     await save();
   }
 }
-
