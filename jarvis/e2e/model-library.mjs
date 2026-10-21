@@ -22,6 +22,12 @@ const check = (title, ok) => {
 const requests = [];
 const upstream = createServer((req, res) => {
   requests.push({ path: req.url, key: req.headers.authorization });
+  if (req.method === 'POST') {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.end('data: '+JSON.stringify({choices:[{delta:{content:'已收到。'}}]})+'\n\ndata: '+JSON.stringify({choices:[{delta:{},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n');
+    return;
+  }
+
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify({ data: [{ id: 'shared-model' }, ...Array.from({ length: 300 }, (_, i) => ({ id: `chat-model-${i}` })), { id: 'gpt-image-2' }] }));
 });
@@ -78,33 +84,27 @@ try {
     );
     await page.goto(base);
     await page.waitForFunction(() => window.__jarvis?.showPanel);
+    await page.evaluate(() => window.__jarvis.send('以后Word用黑体'));
+    await page.waitForFunction(() => !document.querySelector('.msg.agent.streaming'));
     const reflectionIsolated = await page.evaluate(async () => {
-      const app = window.__jarvis;
-      const original = { server: app.server, session: app.session, from: app.reflectFrom };
-      try {
-        app.session = { id: 'isolated-style-test', messages: [{ role: 'user', content: '以后Word用黑体' }] };
-        app.reflectFrom = 0;
-        await app.reflectNow();
-        app.server = null;
-        app.session.evaluationId = 'evaluation-style-test';
-        await app.reflectNow();
-        return await new Promise((resolve, reject) => {
-          const request = indexedDB.open('jarvis');
-          request.onerror = () => reject(request.error);
-          request.onsuccess = () => {
-            const database = request.result;
-            const read = database.transaction('memories', 'readonly').objectStore('memories').getAll();
-            read.onsuccess = () => { database.close(); resolve(!read.result.some(item => item.category === 'doc_style')); };
-            read.onerror = () => { database.close(); reject(read.error); };
-          };
-        });
-      } finally {
-        app.server = original.server;
-        app.session = original.session;
-        app.reflectFrom = original.from;
-      }
+      await window.__jarvis.reflectNow();
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open('jarvis');
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const database = request.result;
+          const read = database.transaction('memories', 'readonly').objectStore('memories').getAll();
+          read.onsuccess = () => { database.close(); resolve(!read.result.some(item => item.category === 'doc_style')); };
+          read.onerror = () => { database.close(); reject(read.error); };
+        };
+      });
     });
-    check(`${width} 服务器与评测后台整理不写本机偏好`, reflectionIsolated);
+    check(`${width} 服务器对话后台整理不写本机偏好`, reflectionIsolated);
+    await page.waitForFunction(async () => {
+      const settings = JSON.parse(localStorage.getItem('jarvis.server.v1'));
+      const response = await fetch(settings.url + '/api/server/document-styles', { headers: { Authorization: 'Bearer ' + settings.token } });
+      return (await response.json()).some(item => item.content.includes('黑体'));
+    });
     await page.evaluate(() => window.__jarvis.showPanel('models'));
     await page.waitForSelector('.ml-provider');
     const stylesPanel = page.locator('details').filter({ has: page.getByText('写作偏好 · 云服务器', { exact: true }) });
