@@ -28,6 +28,8 @@ export function createBackground(app) {
   }
   async function reflectNow({ manual = false } = {}) {
     clearTimeout(reflectTimer);
+    // 服务器自己整理；pagehide不能绕过scheduleReflect的运行位置与评测隔离。
+    if (app.server || app.session?.evaluationId) return;
     const turns = app.history.slice(app.reflectFrom);
     if (!turns.some((t) => t.role === 'user')) {
       if (manual) toast('没有新的对话需要整理');
