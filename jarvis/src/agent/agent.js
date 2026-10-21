@@ -1,12 +1,12 @@
+import { prepareAgentContext } from './agentPreparation.js';
+import { createModelRequest } from './agentModelRequest.js';
+import { executeToolCalls } from './agentToolExecution.js';
+import { finishAgentRun } from './agentCompletion.js';
 import { measureModelInput } from '../../shared/modelMetrics.js';
-import { reviewOutcome } from './reviewOutcome.js';
-import { modelWindow, QUICK_MODEL_ATTEMPTS } from './lookupWindow.js';
+import { QUICK_MODEL_ATTEMPTS } from './lookupWindow.js';
 import { createExecutionReview } from './executionReview.js';
 import { conciseTool } from './toolDescriptions.js';
-import { throwControl } from '../core/networkRequest.js';
 import { errorKind } from '../core/suggest.js';
-import { summaryForTurn } from './summaryEvidence.js';
-import { OutputBoundary } from '../llm/outputBoundary.js';
 import { capabilityBlock, dialoguePolicy, needsActionTools } from './dialoguePolicy.js';
 /**
  * 智能体主循环（与具体模型无关）：
@@ -24,9 +24,8 @@ import { capabilityBlock, dialoguePolicy, needsActionTools } from './dialoguePol
  *   { type: 'sources', items }                 本轮自动检索到的知识库来源
  */
 import { EmotionTagStripper } from '../../shared/emotionTag.js';
-import { validateArgs } from './tools.js';
 import { withLookupDeadline, isQuickLookup, COMPLEX } from './lookupDeadline.js';
-import { createRetrievalBudget, withWebDeadline } from './retrievalBudget.js';
+import { createRetrievalBudget } from './retrievalBudget.js';
 import * as sessions from './sessions.js';
 import * as memory from './memory.js';
 import * as kb from './knowledge.js';
@@ -38,8 +37,8 @@ import { createToolLoader } from './toolLoader.js';
 import { createPlanTool, unfinished } from './plan.js';
 import { loadRules, rulesBlock } from './projectRules.js';
 import { canFallback, needsComputer, computerTaskKind } from '../llm/router.js';
-import { compactToolResults, createTurnArchive } from './turnContext.js';
-import { collectRequirements, requirementsBlock, requirementsTool } from './taskRequirements.js';
+import { compactToolResults } from './turnContext.js';
+import { requirementsTool } from './taskRequirements.js';
 
 export const STABLE_PROMPT = `你是“未央”，用户的个人智能体。实际运行位置与能力以下方环境和本轮工具为准。
 
@@ -176,15 +175,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   let closingTurns = 0;
   let retrievalStopped = false;
   emit({ type: 'state', value: 'processing' });
-  const tCtx = Date.now();
-  const ctx = context ?? (await buildContext(userText, { sessionId, turns: history.filter((m) => m.role === 'user').length, summary:summaryForTurn(summary, [...history, { role: 'user', content: userText }]), light }));
-  // 界面传完整原文账本；非界面入口可从会话取回，最后才退回本轮可见消息。
-  const saved = !requirements && sessionId && depth === 0 ? await sessions.get(sessionId).catch(() => null) : null;
-  const record = requirements ?? (saved ? collectRequirements(saved.messages, saved.requirements) : collectRequirements([...history, { role: 'user', content: userText }]));
-  const requirementContext = requirementsBlock(record, userText, { history, currentText: requirementText });
-  const archive = createTurnArchive(); // 有内存上限、只保留本轮文本，不复制截图
-  emit({ type: 'timing', contextMs: Date.now() - tCtx });
-  if (ctx.kbHits?.length) emit({ type: 'sources', items: ctx.kbHits.map((h) => h.name) });
+  const { ctx, record, requirementContext, archive } = await prepareAgentContext({ userText, priorMessages: history, context, sessionId, summary, light, requirements, depth, requirementText, emit, buildContext });
   const convo = [...history.map((m) => ({ ...m })), { role: 'user', content: userText, ...(images.length && { images }) }];
   // 任务清单（update_plan）和子任务分身（delegate_task，只有主线能派）由循环自己提供
   const plan = createPlanTool((steps) => emit({ type: 'plan', steps }));
@@ -261,25 +252,21 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     let stepText = '';
     // 每一步模型输出都可能以 <emotion> 标签开头，每步用新的剥离器
     let stripper = new EmotionTagStripper();
-    const boundary = new OutputBoundary();
-    let streamed = false;
     const acceptVisible = fragment => {
       const { text, hint } = stripper.push(fragment);
       if (hint) emit({type:'emotion',value:hint});
       if (text) {
-        clearTimeout(searchTimer);
+        request.clearSearchTimer();
         stepText += text;
         emit({type:'state',value:'listening'});
         emit({type:'text',delta:text});
       }
     };
     let r;
-    let searchTimer, searchTimedOut = false;
-    const requestCtrl = new AbortController();
-    const relayAbort = () => requestCtrl.abort(signal.reason);
-    signal?.addEventListener('abort', relayAbort, { once: true });
-    const stopSearch = () => { searchTimedOut = true; retrieval.close('本轮联网检索已达到预算'); requestCtrl.abort(); };
-    const requestWindow = modelWindow(lookupDeadline ? lookupControl : null, closing, requestCtrl);
+    const request = createModelRequest({ current: cur, effort, signal, lookupDeadline, lookupControl, closing, retrieval, emit, onNativeSearch: () => { nativeSearchCalls++; }, onText: acceptVisible, onRetry: (attempt) => {
+      stripper = new EmotionTagStripper();
+      emit({ type: 'retry', attempt, resume: Boolean(stepText.trim()) });
+    } });
     // 测量实际发送的提示与工具说明，动态规则和短说明均计入字符数。
     const measuredSystem = light ? [LIGHT_PROMPT, [ctx.dynamic, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, dialoguePolicy(review.report().request), capabilities, computerNote, requirementContext, toolHint, review.contractNote(), voice && VOICE_NOTE].filter(Boolean).join('\n\n')];
     const measuredTools = closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list();
@@ -287,42 +274,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     emit({ type: 'diagnostic', phase: 'model_start', model: cur.model, protocol: cur.adapter.kind, closing, ...measureModelInput({ system: measuredSystem, messages: convo, tools: requestTools }), inputChars: convo.reduce((sum, item) => sum + String(item.content || '').length, 0) });
     try {
     modelAttempts++;
-    r = await requestWindow.race(() => cur.adapter.stream({
-      model: cur.model,
-      effort,
-      stallTimeouts: lookupDeadline ? { first: 20_000, between: 25_000 } : { first: 45_000, between: 60_000 },
-      maxTransientRetries: lookupDeadline || closing ? 0 : 1,
-      maxPartialRetries: closing ? 0 : 1, // 已输出的回答允许一次续写，仍受本轮总时限约束
-      system: measuredSystem,
-      messages: convo,
-      tools: requestTools,
-      // 模型自带的联网搜索在服务商那边执行、搜一次扣一次费：剩余次数在发请求前就定好，不等搜完再拦
-      allowWebSearch: !closing && retrieval.left > 0, maxWebSearches: lookupDeadline ? Math.min(2, retrieval.left) : retrieval.left,
-      signal: requestCtrl.signal,
-      onRetry: (attempt) => {
-        stripper = new EmotionTagStripper(); // 续写的开头可能又带情绪标签
-        emit({ type: 'retry', attempt, resume: Boolean(stepText.trim()) });
-      },
-      onText: (delta, meta) => {
-        if (requestCtrl.signal.aborted) return;
-        if (meta?.serverTool) {
-          emit({ type: 'server_tool', name: meta.serverTool });
-          if (/search/.test(meta.serverTool)) {
-            nativeSearchCalls++;
-            if (!retrieval.begin()) stopSearch();
-            else if (Number.isFinite(retrieval.remaining)) {
-              clearTimeout(searchTimer); searchTimer = setTimeout(stopSearch, Math.max(1, Math.min(retrieval.remaining, lookupDeadline && lookupControl ? lookupControl.retrievalRemaining() : Infinity)));
-            }
-          }
-          return;
-        }
-        streamed = true;
-        acceptVisible(boundary.push(delta));
-      }
-    }));
-    if (!streamed && r.text) acceptVisible(boundary.push(r.text));
-    acceptVisible(boundary.flush());
-    if (r.stop === 'max_tokens' || r.stop === 'length') throw Object.assign(new Error('模型输出达到长度上限，回答尚未完成'), {code:'MODEL_OUTPUT_LIMIT',kind:'api'});
+    r = await request.run({ system: measuredSystem, messages: convo, tools: requestTools });
     } catch (e) {
       if (e.code === 'LOOKUP_RETRIEVAL_END' && !signal?.aborted) {
         retrieval.close('已预留时间整理现有资料');
@@ -340,7 +292,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         step--;
         continue;
       }
-      if (searchTimedOut && !signal?.aborted) {
+      if (request.searchTimedOut && !signal?.aborted) {
         if (stepText.trim()) { finalText += stepText + '\n\n'; emit({ type: 'text', delta: '\n\n' }); }
         continue; // 本次不完整的原生搜索协议不再续传；下一轮关闭搜索、仅整理已有资料
       }
@@ -354,9 +306,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       }
       throw e;
     } finally {
-      requestWindow.dispose();
-      emit({ type: 'diagnostic', phase: 'model_end' });
-      clearTimeout(searchTimer); signal?.removeEventListener('abort', relayAbort);
+      request.dispose();
     }
     if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
     if (!r.toolCalls.length && r.stop !== 'pause_turn') {
@@ -384,63 +334,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
 
     if (stepText && !/\n$/.test(stepText)) { emit({ type: 'text', delta: '\n\n' }); finalText += '\n\n'; }
     // 执行一次工具调用：开始 / 结束事件照常发出，返回结果，按调用顺序写回对话
-    let newScreenThisStep=false;
-    const exec = async (c) => {
-      const tool = loader.get(c.name);
-      const t0 = Date.now();
-      emit({ type: 'state', value: 'processing' });
-      emit({ type: 'tool_start', id: c.id, name: c.name, args: c.args });
-      let output;
-      let outImages = [];
-      let ok = true;
-      let failure = null;
-      const sig = `${c.name}:${JSON.stringify(c.args ?? {})}`;
-      const times = (seen.get(sig) ?? 0) + 1;
-      seen.set(sig, times);
-      if (seen.size > 128) seen.delete(seen.keys().next().value);
-      try {
-        if (closing && (!retrieval.extensive || WEB_TOOLS.has(c.name))) throw new Error('联网检索已经结束，请直接整理已有资料回答，不要继续调用工具');
-        if (!tool) throw new Error(`没有名为 ${c.name} 的工具`);
-        // 一模一样的调用已经做过两次：结果不会变，不再执行，让模型换思路
-        if (times >= 3 && !/^computer_(look|click|type|key|scroll|drag|screenshot)$/.test(c.name)) throw new Error(`这个操作（同样的参数）已经做过 ${times - 1} 次了，结果不会变。请换一种方法，或者直接根据已有结果继续。`);
-        const bad = c.parseError || validateArgs(tool, c.args);
-        if (bad) throw new Error(`${bad}。请检查参数后重新调用。`);
-        // 有风险的操作（操作电脑、MCP 工具）先征得用户同意
-        if(newScreenThisStep&&/^computer_(click|type|key|scroll|drag)$/.test(c.name))throw new Error('本步已有新的屏幕截图，请先查看返回的截图，再在下一步决定操作，不能连续盲点或盲输');
-        const ask = tool.approval?.(c.args);
-        if (ask && approve && !(await approve(ask, tool))) throw new Error('用户拒绝了这个操作。请换一种方式，或询问用户的意见。');
-        if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
-        await checkpoint?.({type:'tool_start',id:c.id,name:c.name,args:c.args});
-        if (signal?.aborted) throw Object.assign(new Error('aborted'),{name:'AbortError'});
-        // 工具可以返回 { text, images }：图片会交给模型“看”（如截屏、工作区里的图片）
-        const progress = (text) => emit({ type: 'tool_progress', id: c.id, name: c.name, text });
-        const web = WEB_TOOLS.has(c.name);
-        if (web && !retrieval.begin()) throw new Error(retrieval.note);
-        const run = (s) => tool.run(c.args, { signal: s, progress, retrieval, sessionId, rawRequestText: requirementText, requestText: review.report().request, checkpoint: event => { if (event.type === 'artifact_validation') review.artifact(event); return checkpoint?.(event); } });
-        const r = web && Number.isFinite(retrieval.remaining)
-          ? await withWebDeadline(run, { signal, timeoutMs: Math.min(retrieval.remaining, lookupDeadline && lookupControl ? lookupControl.retrievalRemaining() : Infinity) }) : await run(signal);
-        if (r && typeof r === 'object' && 'text' in r) { output = String(r.text); outImages = r.images ?? []; } else output = String(r);
-        if(outImages.length&&/^computer_(look|click|type|key|scroll|drag|screenshot)$/.test(c.name))newScreenThisStep=true;
-      } catch (e) {
-        ok = false;
-        failure = e;
-        if (e.code === 'RETRIEVAL_BUDGET') retrieval.close(e.message);
-        output = `错误：${e.message || e}`;
-      }
-      await checkpoint?.({type:'tool_end',id:c.id,name:c.name,ok,output});
-      emit({ type: 'tool_end', id: c.id, name: c.name, ok, output, ...(failure && { errorKind: errorKind(failure), code: failure.code }), ms: Date.now() - t0 });
-      if (failure?.code !== 'RETRIEVAL_BUDGET') throwControl(failure, signal);
-      review.record({ name: c.name, args: c.args, ok });
-      return { c, ok, output, outImages };
-    };
-    // 互不影响的只读调用（搜索、读文件、读网页……）同时做；其余按顺序一个个做
-    const results = [];
-    for (let i = 0; i < r.toolCalls.length;) {
-      let j = i;
-      while (j < r.toolCalls.length && PARALLEL_SAFE.has(r.toolCalls[j].name)) j++;
-      if (j - i > 1) { results.push(...(await Promise.all(r.toolCalls.slice(i, j).map(exec)))); i = j; }
-      else { results.push(await exec(r.toolCalls[i])); i++; }
-    }
+    const results = await executeToolCalls(r.toolCalls, { loader, emit, seen, closing, retrieval, approve, signal, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE });
     for (const { c, ok, output, outImages } of results) {
       toolCount++;
       if (WEB_TOOLS.has(c.name)) retrieval.end(ok);
@@ -464,32 +358,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       if (!stuck && limit < hardCap) limit = Math.min(hardCap, limit + maxSteps);
     }
   }
-  if (step >= limit || retrievalStopped) {
-    const note = retrieval.reason
-      ? `\n\n（本轮检索已停止：${retrieval.reason}。目前还没有确切结果；已取得的信息见上文，未核实的部分不能当作结论。）`
-      : stuck
-      ? `\n\n（最近的步骤大多失败，看起来卡住了，先停在这里。上面是目前的进展；换个说法或给我更多信息，我再接着做。）`
-      : `\n\n（这个任务已经连续做了 ${step} 步，先停在这里，上面是目前的进展。）`;
-    finalText += note;
-    emit({ type: 'text', delta: note });
-  }
-  const acceptance = { ...review.report(), ...reviewOutcome(review.report(), { interrupted: retrievalStopped, nativeSearchCalls }) };
-  const unmet = review.guidance();
-  if (acceptance.notice && !light) {
-    finalText += acceptance.notice;
-    emit({ type: 'text', delta: acceptance.notice });
-  }
-  emit({ type: 'task_review', review: { ...acceptance, request: undefined } });
-  // 只有正常收尾、且最后一次工具调用成功，才记为“完成任务”（计入进化等级）；否则记为未完成，便于之后复盘
-  if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
-  const hitLimit = step >= limit || retrievalStopped;
-  if (quiet) { /* 分身做的子任务不单独计入任务记录 */ } else if (toolCount && !hitLimit && lastToolOk && failCount === 0 && !unmet) {
-    await memory.noteTask(`完成任务：${userText.slice(0, 40)}（调用工具 ${toolCount} 次${failCount ? `，其中 ${failCount} 次失败后已改正` : ''}）`);
-  } else if (toolCount) {
-    await memory.noteIssue(`未完成任务：${userText.slice(0, 40)}（${hitLimit ? '达到最大步数' : '存在失败步骤，需要核实结果'}；工具 ${toolCount} 次，失败 ${failCount} 次）`);
-  }
-  emit({ type: 'state', value: 'done' });
-  return { text: finalText.trim(), steps: step + 1, toolCalls: toolCount, review: acceptance };
+  return finishAgentRun({ step, limit, retrievalStopped, retrieval, stuck, review, nativeSearchCalls, light, signal, quiet, toolCount, lastToolOk, failCount, userText, finalText, emit });
 }
 
 /** 保留旧导出的深度研究预算；普通查询默认预算见 retrievalBudget.js。 */
@@ -568,4 +437,3 @@ export function progressReminder({ userText, steps = [], toolCount }) {
     : '还没有列计划，步骤多的话先用 update_plan 列出来。';
   return `（进度提醒：已经调用了 ${toolCount} 次工具。用户这次要的是：“${ask.length > 200 ? `${ask.slice(0, 200)}…` : ask}”。${progress}先确认方向没跑偏再接着做，不要做用户没要的事。）`;
 }
-
