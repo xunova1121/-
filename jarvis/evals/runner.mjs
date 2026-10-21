@@ -23,7 +23,7 @@ export function serverAPI(base, token, fetchImpl = fetch) {
 export const terminal = s => ['done', 'error', 'stopped'].includes(s);
 
 /** 不自动重发POST。每题独立会话；超时或协议失败时停止已知任务。 */
-export async function runCase(api, item, { runId = randomUUID(), now = Date.now, wait = ms => new Promise(r => setTimeout(r, ms)), signal } = {}) {
+export async function runCase(api, item, { runId = randomUUID(), now = Date.now, wait = ms => new Promise(r => setTimeout(r, ms)), signal, sessionId = null } = {}) {
   const started = now(), requestId = `eval_${randomUUID()}`;
   const workspace = `evals/${runId}/${item.id}`;
   const prompt = item.prompt.replaceAll('{{workspace}}', workspace);
@@ -33,8 +33,8 @@ export async function runCase(api, item, { runId = randomUUID(), now = Date.now,
     status: 'not_started', quality: 'not_reviewed', cost: null, costReason: '接口尚未提供完整计费数据' };
   try {
     if (signal?.aborted) { result.status='client_cancelled'; result.quality='execution_failed'; return result; }
-    accepted = await api('/api/tasks', { text: prompt, requestId });
-    if (!/^[\w-]{1,80}$/.test(accepted?.id || '') || !/^[\w-]{1,80}$/.test(accepted?.sessionId || '') || accepted.joined) throw new Error('服务器未创建独立评测任务');
+    accepted = await api('/api/tasks', { text: prompt, requestId, ...(sessionId && { sessionId }) });
+    if (!/^[\w-]{1,80}$/.test(accepted?.id || '') || !/^[\w-]{1,80}$/.test(accepted?.sessionId || '') || accepted.joined || (sessionId && accepted.sessionId !== sessionId)) throw new Error('服务器未创建独立评测任务');
     owned = true;
     result.taskId = accepted.id; result.sessionId = accepted.sessionId;
     for (;;) {
@@ -138,4 +138,3 @@ export async function main(args = process.argv.slice(2), env = process.env) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch(()=>{console.error('评测未完成：请检查参数、配置、连接和报告；未输出凭据或响应正文。');process.exitCode=1;});
 }
-
