@@ -1,3 +1,4 @@
+import { measureModelInput } from '../shared/modelMetrics.js';
 import { createHelperLlm } from '../src/llm/helper.js';
 import { projectExecutionTool } from './projectExecution.mjs';
 import { renderOffice } from './officeRender.mjs';
@@ -142,10 +143,18 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
   }
 
   /** 给模型用的辅助调用（深度调研、逐项查证等工具用） */
-  function helper(cfg, kind) {
+  function helper(cfg, kind, task = null) {
     const { adapter, model, problem } = createAdapter(routeFor(cfg, kind).cfg);
     if (problem || providerById(cfg.provider)?.kind === 'mock') return null;
-    return createHelperLlm(adapter, model);
+    // 只采集数字，不保存提示、回答或密钥；后台记忆调用不属于当前任务。
+    const measured = task ? {
+      ...adapter,
+      stream(options) {
+        task.timing.event({ type: 'diagnostic', phase: 'helper_start', ...measureModelInput(options), inputChars: (options.messages || []).reduce((total, message) => total + String(message.content || '').length, 0) });
+        return adapter.stream(options);
+      }
+    } : adapter;
+    return createHelperLlm(measured, model);
   }
 
   async function execute(task) {
@@ -167,7 +176,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     const tools = makeTools({
       tavilyKey: cfg.tavilyKey, bochaKey: cfg.bochaKey, searchRegion: cfg.searchRegion || 'auto',
       fetchViaGateway: (url, init) => publicFetch(url, init), // 不填搜索密钥也能联网搜索、读网页
-      llm: helper(cfg, 'write'), reasonLlm: helper(cfg, 'reason'),
+      llm: helper(cfg, 'write', task), reasonLlm: helper(cfg, 'reason', task),
       onFileChanged: (p) => { if (!/^skills\//.test(p)) { task.files.add(p); record(task, { type: 'file', path: p }); } },
       // 画图、做视频：用服务器上的模型设置；生成的文件照常存进工作区，手机按文件下载后显示在对话里
       imageGen: (o) => generateImage(cfg, o),
@@ -379,9 +388,3 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     }
   };
 }
-
-
-
-
-
-
