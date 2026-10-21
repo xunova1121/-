@@ -89,3 +89,8 @@ test('审查须逐检查点给依据，不能把机械失败或缺项盖章通�
   assert.throws(() => applyReviews(report, [review, review]));
   assert.throws(() => applyReviews({ results: [{ ...result, status: 'error' }] }, [review]));
 });
+
+test('数字千分位不应把正确金额误判为缺失', () => {
+  const item = baselineCases[10];
+  assert.equal(checkResult(item, { status: 'done', answer: '净重821.4公斤，货款15,195.90元' }).mechanical, 'passed');
+});

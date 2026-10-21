@@ -1,11 +1,12 @@
 /** 机械检查只能发现明显失败；语义、实时事实及实际Office产物必须复核。 */
 export function checkResult(item, result) {
   const answer = String(result.answer || '');
+  const comparableText = answer.replace(/(\d)[,，](?=\d{3}(?:\D|$))/g, '$1');
   const failures = [];
   if (result.status !== 'done' || result.protocolIssue) failures.push('执行未完整成功');
   if (!answer.trim()) failures.push('无回答正文');
   for (const text of item.checks.contains || []) {
-    if (!answer.includes(text)) failures.push(`缺少检查文本：${text}`);
+    if (!comparableText.includes(text)) failures.push(`缺少检查文本：${text}`);
   }
   for (const text of item.checks.excludes || []) {
     if (answer.includes(text)) failures.push(`残留错误文本：${text}`);
