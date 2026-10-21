@@ -41,9 +41,9 @@ export async function main(args = process.argv.slice(2), env = process.env) {
   const api = serverAPI(env.JARVIS_EVAL_URL, env.JARVIS_EVAL_TOKEN);
   const cfg = await api('/api/server/config');
   const selected = validateBaselineConfig(cfg);
-  const status = await api('/api/server/status');
-  if (status.running || status.tasks?.length) throw Object.assign(new Error('服务器有其他任务，请单独评测'), { code: 'EVAL_CONFIG', kind: 'api' });
-  if (!status.features?.taskRequestIds) throw Object.assign(new Error('服务器不支持独立评测任务'), { code: 'EVAL_CONFIG', kind: 'api' });
+  const serverStatus = await api('/api/server/status');
+  if (serverStatus.running || serverStatus.tasks?.length) throw Object.assign(new Error('服务器有其他任务，请单独评测'), { code: 'EVAL_CONFIG', kind: 'api' });
+  if (!serverStatus.features?.taskRequestIds) throw Object.assign(new Error('服务器不支持独立评测任务'), { code: 'EVAL_CONFIG', kind: 'api' });
   const directory = args.find((arg) => arg.startsWith('--out-dir='))?.slice(10);
   if (!directory) throw Object.assign(new Error('请指定全新的--out-dir私有报告目录'), { code: 'EVAL_CONFIG', kind: 'api' });
   await fs.mkdir(directory, { mode: 0o700 });
