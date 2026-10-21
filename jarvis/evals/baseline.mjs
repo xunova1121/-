@@ -8,10 +8,10 @@ import { baselineSummary, checkResult, metricsFor } from './baseline-report.mjs'
 
 /** 不改生产配置。混合分工或第三方线路不得冒充DeepSeek官方单模型基线。 */
 export function validateBaselineConfig(cfg) {
-  if (cfg.provider !== 'deepseek') throw new Error('基线需选DeepSeek官方服务商');
-  if (cfg.routing?.enabled) throw new Error('基线需关闭分工，避免各题用不同模型');
-  if (!cfg.models?.deepseek) throw new Error('请明确选择DeepSeek型号');
-  if (cfg.tavilyKey || cfg.bochaKey) throw new Error('本轮不使用第三方搜索API，请先在设置中关闭');
+  if (cfg.provider !== 'deepseek') throw Object.assign(new Error('基线需选DeepSeek官方服务商'), { code: 'EVAL_CONFIG', kind: 'api' });
+  if (cfg.routing?.enabled) throw Object.assign(new Error('基线需关闭分工，避免各题用不同模型'), { code: 'EVAL_CONFIG', kind: 'api' });
+  if (!cfg.models?.deepseek) throw Object.assign(new Error('请明确选择DeepSeek型号'), { code: 'EVAL_CONFIG', kind: 'api' });
+  if (cfg.tavilyKey || cfg.bochaKey) throw Object.assign(new Error('本轮不使用第三方搜索API，请先在设置中关闭'), { code: 'EVAL_CONFIG', kind: 'api' });
   return { provider: 'deepseek', model: cfg.models.deepseek };
 }
 
@@ -37,15 +37,15 @@ export async function main(args = process.argv.slice(2), env = process.env) {
     console.log(JSON.stringify({ mode: 'plan_only', suiteVersion, cases: baselineCases }, null, 2));
     return;
   }
-  if (!env.JARVIS_EVAL_URL || !env.JARVIS_EVAL_TOKEN) throw new Error('缺少服务器地址或登录令牌');
+  if (!env.JARVIS_EVAL_URL || !env.JARVIS_EVAL_TOKEN) throw Object.assign(new Error('缺少服务器地址或登录令牌'), { code: 'EVAL_CONFIG', kind: 'api' });
   const api = serverAPI(env.JARVIS_EVAL_URL, env.JARVIS_EVAL_TOKEN);
   const cfg = await api('/api/server/config');
   const selected = validateBaselineConfig(cfg);
   const status = await api('/api/server/status');
-  if (status.running || status.tasks?.length) throw new Error('服务器有其他任务，请单独评测');
-  if (!status.features?.taskRequestIds) throw new Error('服务器不支持独立评测任务');
+  if (status.running || status.tasks?.length) throw Object.assign(new Error('服务器有其他任务，请单独评测'), { code: 'EVAL_CONFIG', kind: 'api' });
+  if (!status.features?.taskRequestIds) throw Object.assign(new Error('服务器不支持独立评测任务'), { code: 'EVAL_CONFIG', kind: 'api' });
   const directory = args.find((arg) => arg.startsWith('--out-dir='))?.slice(10);
-  if (!directory) throw new Error('请指定全新的--out-dir私有报告目录');
+  if (!directory) throw Object.assign(new Error('请指定全新的--out-dir私有报告目录'), { code: 'EVAL_CONFIG', kind: 'api' });
   await fs.mkdir(directory, { mode: 0o700 });
   const report = { schemaVersion: 1, suiteVersion, ...selected, location: new URL(env.JARVIS_EVAL_URL).origin, startedAt: new Date().toISOString(), runId: randomUUID(), results: [], limitations: ['未做语义复核不能计为通过；Office文件必须下载打开与校验。', '统计主循环及工具辅助逻辑调用，正文字符不含系统提示和工具schema；不是全部HTTP请求或Token。', '配置验证不证明每一请求的上游；回退发生时必须标记混合模型，不能作为单模型对照。'] };
   const destination = path.join(directory, 'report.json');
@@ -76,8 +76,8 @@ export async function main(args = process.argv.slice(2), env = process.env) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch(() => {
-    console.error('基线未完成；请检查服务器登录、DeepSeek配置和私有报告。不输出凭据或响应正文。');
+  main().catch((error) => {
+    console.error(error.code === 'EVAL_CONFIG' ? error.message : '基线未完成；请检查服务器登录、连接和私有报告，未输出凭据或响应正文。');
     process.exitCode = 1;
   });
 }

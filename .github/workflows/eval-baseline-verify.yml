@@ -28,7 +28,10 @@ jobs:
       - name: 代码检查（没定义的变量、浏览器同名全局、格式）
         run: npm run lint
       - name: 验证评测入口与耗时统计
-        run: npm run eval:check
+        run: |
+          npm run eval:check
+          bash -n evals/run-baseline.sh
+          node evals/baseline.mjs > "$RUNNER_TEMP/baseline-plan.json"
       - name: 验证多文件项目隔离执行与取消
         run: |
           docker pull node:22-bookworm-slim
