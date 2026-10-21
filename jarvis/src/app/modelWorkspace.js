@@ -1,3 +1,4 @@
+import { testDeepseekSearch } from '../agent/deepseekSearch.js';
 /** 模型工作台：分位置读写配置，界面细节放在ui，不改任务执行中的运行位置。 */
 import { createModelScopes } from '../llm/modelScopes.js';
 import { copyModelSettings, chooseLine, currentLine, hasRouting } from '../llm/modelLibrary.js';
@@ -56,6 +57,14 @@ export function createModelWorkspace(app) {
     },
     async choose(line, target = scope) {
       return scopes.patch(target, (cfg) => chooseLine(cfg, line));
+    },
+    async testDeepseekSearch(kind, target = scope, signal) {
+      if (target === 'server') {
+        const client = getClient();
+        if (!client) throw Object.assign(new Error('请先登录云服务器'), { kind: 'api', code: 'SERVER_NOT_CONNECTED' });
+        return client.testDeepseekSearch(kind, signal);
+      }
+      return testDeepseekSearch(app.panels.config, kind, { signal, fetchViaGateway: app.fetchViaGateway() });
     },
     async catalog(provider, signal, target = scope) {
       if (target === 'server') {

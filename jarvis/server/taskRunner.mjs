@@ -1,3 +1,4 @@
+import { deepseekSearchOptions } from '../src/agent/deepseekSearch.js';
 import { evaluationTools, bindEvaluation } from './evaluation.mjs';
 import { measureModelInput } from '../shared/modelMetrics.js';
 import { createHelperLlm } from '../src/llm/helper.js';
@@ -76,6 +77,7 @@ export async function publicFetch(url, init = {}, fetchImpl = globalThis.fetch, 
     const res = await fetchImpl(u, { ...init, headers, redirect: 'manual', signal: requestSignal });
     const loc = res.headers.get('location');
     if (!(res.status >= 300 && res.status < 400 && loc)) return res;
+    if (init.redirect === 'error') throw Object.assign(new Error('此请求不允许重定向'), { code: 'REDIRECT_BLOCKED', kind: 'api' });
     if (hop >= 5) throw new Error('重定向次数过多');
     u = new URL(loc, u);
   }
@@ -176,6 +178,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     const fallbacks = fallbackRoutes(cfg, { provider: route.cfg.provider, model }).map((f) => ({ ...createAdapter(f.cfg), label: `${providerLabel(f.cfg, f.provider)} · ${f.model}` })).filter((f) => !f.problem && f.adapter && f.model);
     const history = session.messages.slice(0, -1); // 最后一条是这次的用户原话，单独作为 userText
     const tools = evaluationTools(makeTools({
+      ...deepseekSearchOptions(cfg),
       tavilyKey: cfg.tavilyKey, bochaKey: cfg.bochaKey, searchRegion: cfg.searchRegion || 'auto',
       fetchViaGateway: (url, init) => publicFetch(url, init), // 不填搜索密钥也能联网搜索、读网页
       llm: helper(cfg, 'write', task), reasonLlm: helper(cfg, 'reason', task),

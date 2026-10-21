@@ -125,6 +125,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     listDocumentStyles: () => req('/api/server/document-styles'),
     deleteDocumentStyle: id => req(`/api/server/document-styles/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     putConfig: (cfg) => req('/api/server/config', { method: 'PUT', body: cfg }),
+    testDeepseekSearch: (kind, signal) => req('/api/server/search-test', { method: 'POST', body: { kind }, signal, timeout: 30000 }),
     listModels: (provider, signal) => req('/api/server/models', { method: 'POST', body: { provider }, signal }),
     updateInfo: () => req('/api/server/update'),
     requestUpdate: () => req('/api/server/update', { method: 'POST' }),

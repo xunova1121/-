@@ -123,6 +123,60 @@ try {
       (await page.locator('#model-workspace .ml-scope-note').textContent()) === '正在修改服务器配置，不影响本机' &&
         (await page.locator('.ml-provider').count()) === 2
     );
+    const searchPanel = page.locator('details').filter({ has: page.getByText('联网搜索 · DeepSeek Search/Fetch · 云服务器', { exact: true }) });
+    await searchPanel.locator('summary').click();
+    await searchPanel.getByLabel('DeepSeek搜索Key', { exact: true }).fill('fake-search-key-secret');
+    await searchPanel.getByLabel('启用DeepSeek搜索', { exact: true }).check();
+    let searchSaved = page.waitForResponse(response => response.url() === base + '/api/server/config' && response.request().method() === 'PUT' && response.request().postDataJSON()?.deepseekSearchEnabled === true);
+    await searchPanel.getByRole('button', { name: '保存搜索设置', exact: true }).click();
+    await searchSaved;
+    await searchPanel.getByText('已保存到云服务器，不改变聊天模型', { exact: true }).waitFor();
+    const searchReadback = await page.evaluate(async () => {
+      const settings = JSON.parse(localStorage.getItem('jarvis.server.v1'));
+      const cfg = await (await fetch(settings.url + '/api/server/config', { headers: { Authorization: 'Bearer ' + settings.token } })).json();
+      return { cfg, local: JSON.parse(localStorage.getItem('jarvis.llm.v1')) };
+    });
+    check(`${width} DeepSeek搜索云端独立保存、掩码且不改变默认模型`,
+      searchReadback.cfg.deepseekSearchEnabled === true && searchReadback.cfg.deepseekSearchKey === '••••cret'
+      && searchReadback.cfg.provider === 'custom' && !JSON.stringify(searchReadback.local).includes('fake-search-key-secret'));
+    await searchPanel.getByLabel('启用DeepSeek搜索', { exact: true }).uncheck();
+    searchSaved = page.waitForResponse(response => response.url() === base + '/api/server/config' && response.request().method() === 'PUT' && response.request().postDataJSON()?.deepseekSearchEnabled === false);
+    await searchPanel.getByRole('button', { name: '保存搜索设置', exact: true }).click();
+    await searchSaved;
+    const disabledTest = page.waitForResponse(response => response.url() === base + '/api/server/search-test');
+    await searchPanel.getByRole('button', { name: '测试Search', exact: true }).click();
+    const testResponse = await disabledTest;
+    check(`${width} 关闭搜索后主动测试明确拒绝，不调用真实付费接口`,
+      testResponse.status() === 400 && (await testResponse.json()).code === 'DEEPSEEK_SEARCH_DISABLED');
+    const unauthorizedTest = await fetch(base + '/api/server/search-test', { method: 'POST', body: '{"kind":"search"}' });
+    check(`${width} 搜索测试接口要求登录`, unauthorizedTest.status === 401);
+    await searchPanel.locator('summary').click();
+
+    await page.locator('#model-workspace .ml-tabs').getByRole('button', { name: '本机', exact: true }).click();
+    const localSearch = page.locator('details').filter({ has: page.getByText('联网搜索 · DeepSeek Search/Fetch · 本机', { exact: true }) });
+    await localSearch.locator('summary').click();
+    await localSearch.getByLabel('DeepSeek搜索Key', { exact: true }).fill('fake-local-search-key');
+    await localSearch.getByLabel('启用DeepSeek搜索', { exact: true }).check();
+    await localSearch.getByRole('button', { name: '保存搜索设置', exact: true }).click();
+    await localSearch.getByText('已保存到本机，不改变聊天模型', { exact: true }).waitFor();
+    let searchHeaders;
+    await page.route('**/api/llm/deepseek/tools/search', async route => {
+      searchHeaders = route.request().headers();
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ results: [{ title: '假数据官网', url: 'https://www.gov.cn/test', summary: '测试摘要' }] }) });
+    });
+    await localSearch.getByRole('button', { name: '测试Search', exact: true }).click();
+    await localSearch.getByText(/search：.*返回1条结果/).waitFor();
+    check(`${width} 本机Search测试经过网关，登录令牌与上游Key分开`,
+      searchHeaders?.authorization === 'Bearer ' + token && searchHeaders?.['x-jarvis-search-key'] === 'fake-local-search-key');
+    await page.unroute('**/api/llm/deepseek/tools/search');
+    await localSearch.getByLabel('启用DeepSeek搜索', { exact: true }).uncheck();
+    await localSearch.getByRole('button', { name: '保存搜索设置', exact: true }).click();
+    await localSearch.getByText('已保存到本机，不改变聊天模型', { exact: true }).waitFor();
+    check(`${width} 本机搜索设置不覆盖云端独立密钥`,
+      JSON.parse(fs.readFileSync(path.join(data, 'config.json'), 'utf8')).deepseekSearchKey === 'fake-search-key-secret'
+      && await page.evaluate(() => JSON.parse(localStorage.getItem('jarvis.llm.v1')).deepseekSearchKey === 'fake-local-search-key'));
+    await page.locator('#model-workspace .ml-tabs').getByRole('button', { name: '云服务器', exact: true }).click();
+    await page.waitForSelector('.ml-provider');
     const reviewSaved = page.waitForResponse(response => response.url() === base + '/api/server/config' && response.request().method() === 'PUT' && response.request().postDataJSON()?.documentReviewer?.provider === 'relay-2');
     await page.getByLabel('文档审查模型', { exact: true }).selectOption({ label: '供应商 B · shared-model' });
     await reviewSaved;

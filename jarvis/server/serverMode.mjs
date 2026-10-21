@@ -1,3 +1,4 @@
+import { createSearchTest } from './searchTest.mjs';
 /**
  * 服务器模式（部署在自己的云服务器上）：任务交给服务器做，手机 / 电脑只负责发任务、看进度、取结果。
  *
@@ -55,7 +56,7 @@ export const tokenFor = (password) => createHash('sha256').update(`jarvis-server
 /** 模型设置里的密钥只给看后 4 位 */
 export function maskConfig(cfg) {
   const mask = (v) => (v ? `••••${String(v).slice(-4)}` : '');
-  return { ...cfg, keys: Object.fromEntries(Object.entries(cfg.keys ?? {}).map(([k, v]) => [k, mask(v)])), tavilyKey: mask(cfg.tavilyKey), bochaKey: mask(cfg.bochaKey) };
+  return { ...cfg, keys: Object.fromEntries(Object.entries(cfg.keys ?? {}).map(([k, v]) => [k, mask(v)])), tavilyKey: mask(cfg.tavilyKey), bochaKey: mask(cfg.bochaKey), deepseekSearchKey: mask(cfg.deepseekSearchKey) };
 }
 /** 保存时：密钥没改（还是 •••• 或留空）就沿用原来的 */
 export function mergeConfig(old, next) {
@@ -63,7 +64,7 @@ export function mergeConfig(old, next) {
   const keys = { ...(old.keys ?? {}) };
   for (const [k, v] of Object.entries(next.keys ?? {})) keys[k] = keep(v, old.keys?.[k]);
   const maps = Object.fromEntries(['models', 'baseURLs', 'providerNames', 'modelLists'].map((field) => [field, { ...old[field], ...next[field] }]));
-  const merged = { ...old, ...next, ...maps, keys, tavilyKey: keep(next.tavilyKey, old.tavilyKey), bochaKey: keep(next.bochaKey, old.bochaKey) };
+  const merged = { ...old, ...next, ...maps, keys, tavilyKey: keep(next.tavilyKey, old.tavilyKey), bochaKey: keep(next.bochaKey, old.bochaKey), deepseekSearchKey: keep(next.deepseekSearchKey, old.deepseekSearchKey) };
   // 字典合并不能把前端淘汰的旧地址缓存重新带回来；服务器也必须执行同一上限。
   if (next.modelLists || next.baseURLs) merged.modelLists = boundedCatalogs(merged);
   return merged;
@@ -113,6 +114,8 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     try { return JSON.parse((await readBody(req, limit)).toString('utf8') || '{}'); } catch(e) { if(e.status===413)throw e;throw Object.assign(new Error('JSON 格式错误'), { status: 400 }); }
   };
 
+  const searchTest = createSearchTest({ getConfig: loadConfig, readJson, json });
+
   function login(req, res, body) {
     const ip = String(req.headers['x-real-ip'] || req.socket.remoteAddress || '');
     const recent = (failures.get(ip) ?? []).filter((t) => Date.now() - t < 10 * 60_000);
@@ -157,6 +160,10 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
       activePCModels++;
       try{const body=await readJson(req,UPLOAD_LIMIT);await streamPCModel(req,res,body,{cfg:loadConfig(),makeAdapter:makeModelAdapter});}
       finally{activePCModels--;}
+      return true;
+    }
+    if (pathname === '/api/server/search-test' && req.method === 'POST') {
+      await searchTest(req, res);
       return true;
     }
     if (pathname === '/api/server/config') {

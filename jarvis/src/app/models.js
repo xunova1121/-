@@ -44,6 +44,7 @@ export function createModels(app) {
           origin: local ? LOCAL_GATEWAY : location.origin,
           keys: h.gatewayKeys ?? [],
           cors: Boolean(h.cors),
+          serverMode: Boolean(h.serverMode),
           mcp: Boolean(h.mcp),
           ollama: Boolean(h.ollama)
         };
@@ -96,16 +97,27 @@ export function createModels(app) {
   }
 
   const metrics = () => (app.gateway ? fetch(`${app.gateway.origin}/api/local/metrics`).then((r) => r.json()) : browserMetrics());
+  function fetchDeepseek(url, init = {}) {
+    const headers = new Headers(init.headers);
+    if (app.gateway?.serverMode && serverCfg.token && normalizeUrl(serverCfg.url) === app.gateway?.origin) {
+      // 同源服务器的登录凭据不能冒充DeepSeek密钥，也不能被转发给上游。
+      headers.set('x-jarvis-search-key', String(headers.get('Authorization') || '').replace(/^Bearer\s+/i, ''));
+      headers.set('Authorization', 'Bearer ' + serverCfg.token);
+    }
+    return fetch(`/api/llm/deepseek/${url.slice('https://api.deepseek.com/v1/'.length)}`, { ...init, headers });
+  }
   // 网页读取只对完整版开放（单文件版跨域连网关时网关不提供 /api/fetch）
   // 安卓 App 没有本机网关，但系统原生网络没有跨域限制：直接用它搜索、读网页
   const fetchViaGateway = () =>
     app.gateway && !app.gateway.cors
       ? (url, init) =>
-          url.startsWith('https://api.tavily.com/')
-            ? fetch(`/api/llm/tavily/${url.slice('https://api.tavily.com/'.length)}`, init)
-            : url.startsWith('https://api.bochaai.com/')
-              ? fetch(`/api/llm/bocha/${url.slice('https://api.bochaai.com/'.length)}`, init)
-              : fetch(`/api/fetch?url=${encodeURIComponent(url)}`)
+          url.startsWith('https://api.deepseek.com/v1/tools/')
+            ? fetchDeepseek(url, init)
+            : url.startsWith('https://api.tavily.com/')
+              ? fetch(`/api/llm/tavily/${url.slice('https://api.tavily.com/'.length)}`, init)
+              : url.startsWith('https://api.bochaai.com/')
+                ? fetch(`/api/llm/bocha/${url.slice('https://api.bochaai.com/'.length)}`, init)
+                : fetch(`/api/fetch?url=${encodeURIComponent(url)}`)
       : globalThis.__jarvisNativeFetch
         ? nativeWebFetch(globalThis.__jarvisNativeFetch)
         : null;
