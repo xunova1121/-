@@ -334,7 +334,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       const note = (!closing || retrieval.extensive) && checks < maxChecks && (review.required() || unfinished(plan.steps).length > 0) && !light && cur.adapter.kind !== 'mock' ? [finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }), review.required() && canReview && !lookupDeadline ? review.guidance() : ''].filter(Boolean).join('\n') : '';
       if (!note) break;
       checks++;
-      convo.push({ role: 'user', content: note });
+      // 以用户身份发给模型，但必须说清是系统核对：以前模型会回“你说得对，我来逐项核实”，再写一大段复盘
+      convo.push({ role: 'user', content: `（以下是系统自动核对，不是用户说的话：不要回应它、不要道歉或复盘；需要补做的直接补，没有就简短收尾。）\n${note}` });
       if (finalText && !/\n$/.test(finalText)) { emit({ type: 'text', delta: '\n\n' }); finalText += '\n\n'; }
       continue;
     }

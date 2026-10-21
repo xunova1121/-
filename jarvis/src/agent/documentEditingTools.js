@@ -62,7 +62,7 @@ export function createDocumentEditingTools(ctx) {
     {
       name: 'edit_spreadsheet',
       description:
-        '精确修改已有Excel的指定格，保留其他部件；可带expected核对旧值，任何冲突整批不保存。修改公式缓存会失效，打开Office时重算，不伪造结果。新增行列或大改结构用create_document。',
+        '精确修改已有Excel的指定格，保留其他部件；可带expected核对旧值，任何冲突整批不保存。修改公式缓存会失效，打开Office时重算，不伪造结果。不能插入或删除行：新内容比原来行数少时，把多出来的行设为value:null清空，改完不能留下重复行。新增行列或大改结构用create_document。',
       input_schema: S(
         {
           path: str('工作区xlsx路径'),

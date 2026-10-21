@@ -140,52 +140,67 @@ function buildTable(rows, r0, header = true) {
 /** 估算一格文字要几行（Excel 不会替我们按换行算行高） */
 const linesFor = (text, colWidth) => String(text ?? '').split('\n').reduce((n, part) => n + Math.max(1, Math.ceil(width(part) / Math.max(4, colWidth - 1.5))), 0);
 
-/**
- * @param {string} content  CSV / Markdown 表格。“## 名称”分工作表；工作表里还可以有“### 小节”、多张表格和普通文字（说明 / 备注）
- * @param {{ theme: object }} o
- * @returns {Promise<{ blob: Blob, info: { sheets: number, formulas: number, formulaIssues: object[], layout: string, duplicatesRemoved: number, duplicatesKept: number } }>}
- */
 const SEQ_HEAD = /^(序号|编号|No\.?|#)$/i;
 const cellKey = (v) => String(v ?? '').trim().replace(/\s+/g, ' ');
 
 /**
- * 去掉重复的数据行（重新生成表格时，模型常把边界那一行写两遍，如最后两行都是“18:00-19:30 晚餐”）：
- *   - 除序号列外每格都一样：只留第一行
- *   - 一行填了的格子另一行都有、且内容一样（如同一时间段，一行备注空着）：只留填得更全的那行
- * 只比较整行，不按单独某一列（时间、日期）去重：同一天多笔流水、同一时段两项活动都是正常数据。
- * 表里有公式时不删行（删了后面的单元格引用会错位），只返回重复了几行，交给检查提示。
- * @returns {{ rows: any[][], removed: number }}
+ * 找出重复的数据行（重新生成或局部改表时，模型常把边界那一行写两遍，如最后两行都是“18:00-19:30 晚餐”）：
+ *   - 除序号列外每格都一样
+ *   - 一行填了的格子另一行都有、且内容一样（如同一时间段，一行备注空着）：算填得少的那行多余
+ * 只比较整行，不按单独某一列（时间、日期）判断：同一天多笔流水、同一时段两项活动都是正常数据。
+ * 空行、只填了一格的行（小计、说明）不参与比较。
+ * @returns {Array<{ keep: number, drop: number }>} 行下标（从 0 数）
  */
-export function dedupeRows(rows, header = true) {
+export function duplicateRows(rows, header = true) {
   const start = header ? 1 : 0;
   const seq = header ? (rows[0] ?? []).map((h) => SEQ_HEAD.test(cellKey(h))) : [];
-  const keys = rows.map((r, ri) => (ri < start ? null : r.map((c, ci) => (seq[ci] ? '' : cellKey(c)))));
+  const keys = rows.map((r, ri) => (ri < start ? null : (r ?? []).map((c, ci) => (seq[ci] ? '' : cellKey(c)))));
   const filled = (k) => k.filter(Boolean).length;
   // a 填了的格子 b 都有且一样
   const covers = (b, a) => a.every((v, ci) => !v || v === b[ci]);
-  const drop = new Set();
+  const pairs = [];
+  const dropped = new Set();
   for (let i = start; i < rows.length; i++) {
-    if (drop.has(i) || filled(keys[i]) < 2) continue; // 空行、只有一格的小计行不动
+    if (dropped.has(i) || filled(keys[i]) < 2) continue;
     for (let j = i + 1; j < rows.length; j++) {
-      if (drop.has(j) || filled(keys[j]) < 2) continue;
-      if (covers(keys[i], keys[j])) drop.add(j);
-      else if (covers(keys[j], keys[i])) {
-        drop.add(i);
+      if (dropped.has(j) || filled(keys[j]) < 2) continue;
+      if (covers(keys[i], keys[j])) {
+        pairs.push({ keep: i, drop: j });
+        dropped.add(j);
+      } else if (covers(keys[j], keys[i])) {
+        pairs.push({ keep: j, drop: i });
+        dropped.add(i);
         break;
       }
     }
   }
+  return pairs;
+}
+
+/**
+ * 生成表格前去掉重复行（见 duplicateRows）；序号原来连着的重新编号。
+ * 表里有公式时不删行（删了后面的单元格引用会错位），只返回重复了几行，交给检查提示。
+ * @returns {{ rows: any[][], removed: number, duplicates?: number }}
+ */
+export function dedupeRows(rows, header = true) {
+  const drop = new Set(duplicateRows(rows, header).map((x) => x.drop));
   if (!drop.size) return { rows, removed: 0 };
   if (rows.some((r) => r.some((c) => typeof c === 'string' && /^=./.test(c.trim())))) return { rows, removed: 0, duplicates: drop.size };
+  const start = header ? 1 : 0;
   const kept = rows.filter((_, ri) => !drop.has(ri));
-  // 序号原来是 1、2、3…连着的：删行后重新编号，免得跳号
-  for (const ci of seq.map((x, i) => (x ? i : -1)).filter((i) => i >= 0)) {
+  for (let ci = 0; header && ci < (rows[0] ?? []).length; ci++) {
+    if (!SEQ_HEAD.test(cellKey(rows[0][ci]))) continue;
     const nums = rows.slice(start).map((r) => cellKey(r[ci]));
     if (nums.every((v, i) => v === String(i + 1))) kept.slice(start).forEach((r, i) => { r[ci] = String(i + 1); });
   }
   return { rows: kept, removed: drop.size };
 }
 
+/**
+ * @param {string} content  CSV / Markdown 表格。“## 名称”分工作表；工作表里还可以有“### 小节”、多张表格和普通文字（说明 / 备注）
+ * @param {{ theme: object }} o
+ * @returns {Promise<{ blob: Blob, info: { sheets: number, formulas: number, formulaIssues: object[], layout: string, duplicatesRemoved: number, duplicatesKept: number } }>}
+ */
 export async function makeXlsx(content, { theme }) {
   const mod = await import('exceljs');
   const ExcelJS = mod.default ?? mod;

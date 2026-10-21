@@ -1,6 +1,7 @@
 import { openOfficePackage, xmlEscape, xmlUnescape } from './officePackage.js';
 import { inspectWorkbook } from './documentQuality.js';
 import { documentError } from './documentPlan.js';
+import { duplicateRows } from './xlsxWriter.js';
 
 /** 只改指定格XML，其他样式、图表和部件保持；不经ExcelJS全量重写用户模板。 */
 export async function editSpreadsheet(blob, edits, { signal } = {}) {
@@ -91,7 +92,40 @@ export async function editSpreadsheet(blob, edits, { signal } = {}) {
           .join('；'),
       'DOCUMENT_FORMULA'
     );
+  rejectDuplicates(after.book, touched);
   return { blob: result, changed: touched.size };
+}
+
+/**
+ * 只能改已有格子、不能删行：新安排比原来行数少时，旧的尾行会留下，或者被模型写成和上一行一样（两行“18:00-19:30 晚餐”）。
+ * 本批改到的行和别的行重复：整批不保存，告诉模型把多出来的行清空（value: null）再交。
+ */
+function rejectDuplicates(book, touched) {
+  const bySheet = new Map();
+  for (const key of touched) {
+    const [sheet, address] = [key.slice(0, key.lastIndexOf('!')), key.slice(key.lastIndexOf('!') + 1)];
+    if (!bySheet.has(sheet)) bySheet.set(sheet, new Set());
+    bySheet.get(sheet).add(Number(address.match(/\d+$/)[0]));
+  }
+  for (const [sheet, rowsTouched] of bySheet) {
+    const cells = book.Sheets[sheet] ?? {};
+    const grid = [];
+    for (const [address, cell] of Object.entries(cells)) {
+      const m = address.match(/^([A-Z]+)(\d+)$/);
+      if (!m) continue;
+      const col = [...m[1]].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) - 1;
+      (grid[Number(m[2]) - 1] ??= [])[col] = cell.w ?? cell.v;
+    }
+    const rows = Array.from(grid, (r) => Array.from(r ?? [], (v) => v ?? ''));
+    const hit = duplicateRows(rows, false).find(({ keep, drop }) => rowsTouched.has(keep + 1) || rowsTouched.has(drop + 1));
+    if (!hit) continue;
+    const [a, b] = [hit.keep + 1, hit.drop + 1].sort((x, y) => x - y);
+    const text = rows[hit.keep].filter((v) => String(v).trim()).join(' | ').slice(0, 80);
+    throw documentError(
+      `改完后「${sheet}」第${a}行和第${b}行重复（${text}），本批未保存。新安排比原来行数少时，把多出来的行各格设为 value: null 清空，再整批重新提交`,
+      'DOCUMENT_DUPLICATE'
+    );
+  }
 }
 
 function encodeCell(edit, attrs) {

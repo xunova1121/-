@@ -5,6 +5,10 @@ import { lint } from '../src/agent/selfCheck.js';
 import { createExecutionReview } from '../src/agent/executionReview.js';
 import { executeToolCalls } from '../src/agent/agentToolExecution.js';
 import { THEMES } from '../src/agent/themes.js';
+import { generate } from '../src/agent/docs.js';
+import { editSpreadsheet } from '../src/agent/spreadsheetEdit.js';
+import { inspectWorkbook } from '../src/agent/documentQuality.js';
+import { taskContract } from '../src/agent/taskContract.js';
 
 beforeAll(() => import('exceljs'), 60_000);
 
@@ -139,5 +143,44 @@ describe('执行验收不过度核实', () => {
     expect(first.output).toBe('内容');
     expect(second.ok).toBe(true);
     expect(second.output).toContain('已经核实过');
+  });
+});
+
+describe('局部改表（edit_spreadsheet）不留重复行', () => {
+  // 真实情况：原周六行程 4 行，Plan B 只有 3 段，模型把最后一段写了两遍
+  const SAT = '## 周六行程\n\n| 时间 | 安排 | 地点 |\n|--|--|--|\n| 09:30-12:00 | 虫子谷 | 江宁 |\n| 12:00-13:00 | 午餐 | 园区 |\n| 14:00-17:00 | 松鼠咔咔 | 汤山 |\n| 18:00-19:30 | 晚餐 | 市区 |';
+  const planB = [
+    { sheet: '周六行程', cell: 'A2', value: '10:30-15:00' },
+    { sheet: '周六行程', cell: 'B2', value: '松鼠咔咔' },
+    { sheet: '周六行程', cell: 'C2', value: '汤山' },
+    { sheet: '周六行程', cell: 'A3', value: '15:00-17:30' },
+    { sheet: '周六行程', cell: 'B3', value: '南京博物院（避雨）' },
+    { sheet: '周六行程', cell: 'C3', value: '中山东路' },
+    { sheet: '周六行程', cell: 'A4', value: '18:00-19:30' },
+    { sheet: '周六行程', cell: 'B4', value: '晚餐' },
+    { sheet: '周六行程', cell: 'C4', value: '市区' }
+  ];
+  it('改完和别的行重复：整批不保存，告诉模型把多出来的行清空', async () => {
+    const out = await generate('xlsx', { content: SAT });
+    await expect(editSpreadsheet(out.blob, planB)).rejects.toMatchObject({ code: 'DOCUMENT_DUPLICATE', message: expect.stringContaining('第4行和第5行重复') });
+  });
+  it('把多出来的行清空后照常保存，表里只剩一行晚餐', async () => {
+    const out = await generate('xlsx', { content: SAT });
+    const clear = ['A5', 'B5', 'C5'].map((cell) => ({ sheet: '周六行程', cell, value: null }));
+    const edited = await editSpreadsheet(out.blob, [...planB, ...clear]);
+    const sheet = (await inspectWorkbook(edited.blob)).book.Sheets['周六行程'];
+    const dinners = Object.values(sheet).filter((c) => c?.v === '晚餐');
+    expect(dinners).toHaveLength(1);
+  });
+});
+
+describe('“更新到 Excel 里”也要交文件', () => {
+  it('认得出要改文件，没有真实文件回执就不能说已更新', () => {
+    expect(taskContract('帮我重新排一个周六下午的 Plan B，并把调整后的结果更新到那个 Excel 文件里').formats).toEqual(['xlsx']);
+    const review = createExecutionReview('把调整后的结果更新到那个 Excel 文件里');
+    expect(review.guidance()).toContain('xlsx');
+    review.artifact({ path: '行程.xlsx', validation: { format: 'xlsx', readback: 'passed', errors: 0 } });
+    review.record({ name: 'edit_spreadsheet', args: { path: '行程.xlsx' }, ok: true });
+    expect(review.guidance()).toBe('');
   });
 });
