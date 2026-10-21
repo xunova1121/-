@@ -294,7 +294,7 @@ export function createTools(ctx) {
       run: async ({ query }, { sessionId } = {}) => {
         // 优先用任务绑定的会话，避免后台执行时跟随界面切到另一段。
         const currentId = sessionId ?? ctx.currentSessionId?.();
-        const hits = await sessions.searchMessages(query, { k: 6, minScore: 0.5 });
+        const hits = await sessions.searchMessages(query, { current: currentId, k: 6, minScore: 0.5 });
         if (!hits.length) return '之前的对话里没有找到相关内容。';
         return hits.map((h) => `- id: ${h.sessionId}${h.sessionId === currentId ? '（就是本段对话）' : ''}「${h.title}」${new Date(h.ts).toLocaleString('zh-CN', { hour12: false })}\n  用户：${h.user.slice(0, 200)}${h.reply ? `\n  未央：${h.reply.replace(/\s+/g, ' ').slice(0, 300)}` : ''}`).join('\n');
       }

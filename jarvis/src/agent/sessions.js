@@ -112,13 +112,15 @@ export async function searchContent(query, { max = 30 } = {}) {
   return hits;
 }
 
-export async function searchMessages(query, { exclude = null, k = 3, minScore = 2 } = {}) {
+export async function searchMessages(query, { exclude = null, current = null, k = 3, minScore = 2 } = {}) {
   const all = (await sessions.all()).filter((s) => !s.evaluationId && s.id !== exclude);
   const units = [];
   for (const s of all) {
     s.messages.forEach((m, i) => {
       if (m.role !== 'user') return;
       const reply = s.messages[i + 1]?.role === 'assistant' ? s.messages[i + 1].content : '';
+      // 本段对话里正在回答的这句问话不算结果：每段对话只取一处，它会把前面真正有用的原话挤掉
+      if (s.id === current && !reply && i >= s.messages.length - 2) return;
       units.push({ id: `${s.id}#${i}`, sessionId: s.id, title: s.title, ts: m.ts ?? s.updatedAt, user: m.content, reply });
     });
   }

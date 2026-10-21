@@ -54,6 +54,17 @@ describe('本段对话的任务与文件召回', () => {
     expect(result).toContain('已保存');
   });
 
+  it('正在回答的这句问话不占本段对话的名额，前面的原话照样找得到', async () => {
+    const session = await savedConversation();
+    session.messages.push({ role: 'user', content: '冷链任务考核', ts: 9999 });
+    await sessions.save(session);
+    const tool = createTools({ currentSessionId: () => session.id }).find((item) => item.name === 'search_conversations');
+    const result = await tool.run({ query: '冷链任务考核' }, { sessionId: session.id });
+    expect(result).toContain('（就是本段对话）');
+    expect(result).toContain('用户：做一份冷链任务考核 Excel');
+    expect(result).not.toMatch(/用户：冷链任务考核(\n|$)/);
+  });
+
   it('任务绑定的会话优先于界面当前会话，其他会话仍可检索且不误标', async () => {
     const original = await savedConversation();
     const other = sessions.create({
