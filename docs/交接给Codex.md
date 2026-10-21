@@ -1,3 +1,23 @@
+## 第5项智能体循环拆分：2026-10-21（北京时间，Codex；本步完成后暂停，不另发版）
+
+- 用户明确要求“继续开始第一步”，并要求完成后暂停；本批仅做准备、模型请求、工具执行、收尾四阶段职责整理。基线35b914c564dc7a5ac524d4f5a5fb7ac33e8210aa；已读AGENTS、CLAUDE、代码规范及交接顶两节。原先前端拆分已完成，不重复施工；不推进真实评测或新功能。
+- agent.js约572→439行，新agentPreparation39行、agentModelRequest77行、agentToolExecution112行、agentCompletion53行。主循环保留插话、路由回退、步骤控制和模型/工具结果装配；buildContext由回调注入，无循环导入。模型原始raw/toolCalls等回传不变，提示词、电脑操作说明、公开辅助函数比对一致。
+- 原工具审批/检查点顺序、sessionId、连续只读并行与截图防盲操作保留；原生搜索定时、重试参数、预算、停止及finally清理照旧。无新模型调用/依赖/缓存/存储，无main.js或mount修改。不是速度优化，不据此声称真实提速或智力提高。
+- 最终候选d4899a73605208c4657e1e7869a34642cd0eb5cd；完整流水线[39600590830](https://github.com/xunova1121/-/actions/runs/39600590830)全部success：112文件1150单测、28评测脚本、format后前端源码无差异及lint、三类构建、server15、mobile78、server-mobile15、model-library28、Electron11、PC5、smoke178、standalone14及conversation-flow全部通过；Docker真实隔离/取消、Claude协议及Office真实PDF/精确修改/重算通过。未修改或跳过测试。最初候选只补新模块格式后取消，以本最终源码完整复验为准。
+- 本地format和五文件语法通过，lint/Vitest缺依赖未成功；CI补齐，不能把本地失败写成通过。没有真实模型30题、d.leing.top升级、Windows/鸿蒙真机结果，也没有Claude人工独立复查。临时验证工作流不合入，正式保存[skip ci]，现有正式版本仍1.0.226。用户要求本步完成即暂停，后续任务不启动。
+
+规范第7节逐条自查：
+1. 四个阶段只搬移既有逻辑，没有新增正文入会话、检查点或localStorage。
+2. 原本轮archive、seen最多128项、recent最多12项保持；新请求对象每步清理，无新跨轮缓存。
+3. 检查点仍在tool.run前await写完；没有新增逐事件写盘。
+4. 执行上下文使用原runAgent传入sessionId；不读取当前UI会话。
+5. 原错误分类、停止传播及RETRIEVAL_BUDGET检索收尾分支保留；没有新增catch吞错误，不宣称本批重写了异常策略。
+6. 模型瞬时/部分重试上限、备用模型队列与取消逻辑不变；finally仍清除搜索计时、窗口及停止监听。
+7. 原生搜索发请求前maxWebSearches及工具begin位置保留，没有新增请求或预算消费。
+8. 沿用errorKind与已有code；原有工具参数/拒绝等错误未借搬移改变分类或文案。
+9. 新代码在src/agent，入口仅调度；prepare通过回调注入buildContext，避免循环导入。新模块格式展开，无新依赖。agent.js439行，main.js/mount未改。三组提示与辅助导出内容比对相同（忽略文件末尾空白）。
+10. 本地format和五份源码语法通过；本地ESLint/Vitest缺依赖未成功，完整门禁结果见上。未改断言、未删除/跳过测试。真机、用户服务器和真实模型未测，无Claude独立人工复查。
+
 ## 第5项前端拆分：2026-10-21（北京时间，Codex；验证通过，[skip ci]保存，未另发版）
 
 - 用户要求1.0.226发布后继续高质量完成剩余计划；开工已读AGENTS/CLAUDE/规范及交接顶两节，基线3f3b6f4ea92c9871e1b927d047e02b6aa1ae3f4a。本批只做第5项前端搬移，智能体循环下一批；正式版本仍1.0.226。
