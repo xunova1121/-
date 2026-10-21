@@ -52,7 +52,12 @@ export function createExecutionReview(goal = '') {
     });
     if (artifacts.size > 16) artifacts.delete(artifacts.keys().next().value);
   };
+  const required = () => {
+    const contract = taskContract(request);
+    return contract.formats.length > 0 || contract.coding || files.size > 0 || artifacts.size > 0 || receipts.some(receipt => receipt.ok && /^(?:create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet|write_file|edit_file|run_javascript|run_python|computer_run|run_project_tests)$/.test(receipt.tool));
+  };
   const contractNote = () => {
+    if (!required()) return '';
     const contract = taskContract(request);
     return contract.criteria.length
       ? '本轮交付验收：' + contract.criteria.join('；') + '。用review_task核对真实回执；缺少验证时如实报告，不能靠计划标完成。'
@@ -104,5 +109,6 @@ export function createExecutionReview(goal = '') {
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
     run: async () => JSON.stringify(report())
   };
-  return { record, revise, report, guidance, tool, artifact, contractNote };
+  return { record, revise, report, guidance, tool, artifact, contractNote, required };
 }
+

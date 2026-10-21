@@ -18,8 +18,8 @@ function fakeLlm({ readerIssues = null, reviseReply = null } = {}) {
     }
     const m = prompt.match(/现在只写第 (\d+) 节「(.+?)」/);
     if (m) return `## ${m[2]}\n\n第 ${m[1]} 节正文。园区平台简称“平台”。本节写了要点。\n<<<本节摘要>>>摘要${m[1]}：写了${m[2]}`;
+    if (system.includes('目标读者')) return JSON.stringify({ edits: [{ find: '园区平台简称“平台”', replace: '园区运营平台（以下简称“平台”）', why: '统一叫法' }, { find: '原文里没有的句子', replace: 'x' }], issues: readerIssues ?? [{ type: '缺依据', section: '二、建设内容', quote: '第 2 节正文', problem: '没有说明设备数量的依据', suggestion: '补充清单' }] });
     if (prompt.includes('需要统一修改的地方')) return JSON.stringify({ edits: [{ find: '园区平台简称“平台”', replace: '园区运营平台（以下简称“平台”）', why: '统一叫法' }, { find: '原文里没有的句子', replace: 'x' }] });
-    if (system.includes('目标读者')) return JSON.stringify({ issues: readerIssues ?? [{ type: '缺依据', section: '二、建设内容', quote: '第 2 节正文', problem: '没有说明设备数量的依据', suggestion: '补充清单' }] });
     if (prompt.includes('读者试读后')) return reviseReply ?? '## 二、建设内容\n\n第 2 节正文（已补充：改造电表 260 块，依据为 2026 年设备台账）。园区运营平台（以下简称“平台”）。';
     return '{}';
   };
@@ -189,3 +189,4 @@ describe('写作规范', async () => {
     expect(calls.find((c) => c.system.includes('目标读者')).prompt).toContain(CHECKLIST.slice(0, 10));
   });
 });
+
