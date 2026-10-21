@@ -301,6 +301,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       memory.configureMemory({ llm });
       const s = await sessions.get(task.sessionId);
       await memory.reflect([{ role: 'user', content: task.text }, ...task.notes.map((t) => ({ role: 'user', content: t })), { role: 'assistant', content: text }], { session: s && { id: s.id, title: s.title } });
+      memory.maintain().catch(() => {}); // 每天最多整理一次记忆
     }
     await editSession(task.sessionId, async (s) => {
       if (!s || !dueForCompression(s.messages, s.summary).length) return;

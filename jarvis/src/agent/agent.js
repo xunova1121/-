@@ -120,7 +120,7 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
   parts.push(ws.mode() === 'folder' ? `工作区：已连接本地文件夹「${ws.folderName()}」` : '工作区：浏览器内的虚拟工作区（用户可下载文件，或连接本地文件夹）');
   if (rules) parts.push(rulesBlock(rules));
   if (ctx.core?.human || ctx.core?.persona) parts.push(`## 核心记忆\n${ctx.core.human ? `【关于用户】${ctx.core.human}\n` : ''}${ctx.core.persona ? `【我的设定】${ctx.core.persona}` : ''}`.trim());
-  if (ctx.memories.length) parts.push(`## 相关记忆（标“自动记下”的是从以前的对话里整理出来的，用户没确认过：只能作待核实线索，不能当用户确认的事实；和当前原话或证据冲突时先回读原文）\n${ctx.memories.map((m) => `- [${m.pending ? '自动记下; ' : ''}来源:${m.source || '未记录'}; 时间:${new Date(m.updatedAt || m.ts).toISOString()}; 版本:${(m.history?.length || 0)+1}] ${m.content}`).join('\n')}`);
+  if (ctx.memories.length) parts.push(`## 相关记忆（标“线索”的是以前对话里推测出来的、没找到用户原话依据：不能当事实说；其余是用户亲口说过或多次提到的；和当前原话或证据冲突时以当前为准）\n${ctx.memories.map((m) => `- [${m.pending ? '线索; ' : ''}来源:${m.source || '未记录'}; 时间:${new Date(m.updatedAt || m.ts).toISOString()}; 版本:${(m.history?.length || 0)+1}] ${m.content}`).join('\n')}`);
   const day = (ts) => new Date(ts).toLocaleDateString('zh-CN');
   if (ctx.episodes?.length) parts.push(`## 相关的过往对话\n${ctx.episodes.map((e) => `- ${day(e.ts)}${e.sessionTitle ? `「${e.sessionTitle}」` : ''}：${e.summary}`).join('\n')}`);
   if (past.length && !light) parts.push(`## 过往对话里的相关原话（需要更多细节时用 read_conversation 读全文）\n${past.map((p) => `- ${day(p.ts)}「${p.title}」（id: ${p.sessionId}）\n  用户：${p.user.slice(0, 160)}${p.reply ? `\n  未央：${p.reply.replace(/\s+/g, ' ').slice(0, 240)}` : ''}`).join('\n')}`);

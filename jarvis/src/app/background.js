@@ -39,6 +39,8 @@ export function createBackground(app) {
     try {
       const title = app.session.titleSet ? app.session.title : sessionsApi.autoTitle(app.history.find((m) => m.role === 'user')?.content);
       const r = await agentMemory.reflect(turns, { session: { id: app.session.id, title } });
+      // 顺带整理记忆（每天最多一次）：合并重复、替换过时说法、归档没被证实的线索
+      agentMemory.maintain().catch(() => {});
       const n = r.memories.filter((m) => m.action !== 'NOOP').length;
       if (n || manual) toast(`记忆已整理：新增或更新 ${n} 条${r.episode ? '，并记下这段对话的摘要' : ''}`);
       app.panels.refreshMind();

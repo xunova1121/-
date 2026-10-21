@@ -50,7 +50,7 @@ async function log(kind, text) {
 }
 
 const now = () => Date.now();
-// 还有效的记忆。自动提炼的（pending：用户没确认过）也算，参与回答时会标明“自动记下”，面板里可以确认或删除
+// 还有效的记忆。没找到原话依据的（pending：线索）也算，参与回答时会标明“线索”；别的对话再提到会自动转正，30 天没再出现自动归档
 const current = (m) => !m.validTo;
 const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().replace(/[。.!！]+$/, '');
 
@@ -133,7 +133,7 @@ export async function decide(content, category, existing, vec = null) {
  * @param {{ importance?: number, source?: string }} [o]
  * @returns {Promise<object>} 记忆，带 action 字段说明发生了什么
  */
-export async function remember(content, category = 'fact', { importance = 3, source = 'tool', evidence = '' } = {}) {
+export async function remember(content, category = 'fact', { importance = 3, source = 'tool', evidence = '', sessionId = null } = {}) {
   if (category === 'doc_style') {
     const recorded = await documentStyles.learn([evidence]);
     if (!recorded.length) throw Object.assign(new Error('写作偏好需要用户明确的长期文档要求原话'), { kind: 'input', code: 'DOC_STYLE_SOURCE' });
@@ -145,22 +145,30 @@ export async function remember(content, category = 'fact', { importance = 3, sou
   importance = Math.max(1, Math.min(5, Math.round(Number(importance) || 3)));
   const all = (await memories.all()).map(upgrade);
   const vec = await embedOne(content);
-  const pending = source.includes('待核实');
+  let pending = source.includes('待核实');
   const duplicate = all.find(m=>!m.validTo && norm(m.content)===content);
   // 自动提炼有冲突时先保留为候选，不能直接覆盖用户已确认的记录。
   const { action, target } = duplicate ? { action: 'NOOP', target: duplicate } : await decide(content, category, all, vec);
   const t = now();
   if (action === 'NOOP') {
-    // 只有用户确认候选时才使旧值失效；自动重复提炼不确认冲突。
+    // 另一段对话里又总结出同一件事：算她自己核实过了，转正（同一段对话里重复提炼不算）
+    const repeated = pending && target.pending && sessionId && target.sessionId && sessionId !== target.sessionId;
+    if (repeated) {
+      pending = false;
+      source = target.source.replace('待核实', '两段对话都提到，已自动核实');
+    }
+    // 只有确认过（用户亲口要记、原话已核对或两段对话都提到）才使冲突的旧值失效
     if (!pending && target.conflictsWith) {
       const previous = await memories.get(target.conflictsWith);
       if (previous && !previous.validTo) {
         await memories.put({ ...previous, validTo: t, supersededBy: target.id });
         target.history = [...(target.history || []), { content: previous.content, until: t }].slice(-10);
       }
+      target.supersedes = target.conflictsWith;
       delete target.conflictsWith;
     }
-    Object.assign(target, { updatedAt: t, lastUsed: t, importance: Math.max(target.importance, importance) }, pending ? {} : { pending: false }); // 用户亲口要记的，自动记下的那条就算确认了
+    // 用户亲口要记的、原话核对过的、两段对话都提到的：自动记下的那条就算确认了
+    Object.assign(target, { updatedAt: t, lastUsed: t, importance: Math.max(target.importance, importance) }, pending ? {} : { pending: false, source: repeated ? source : target.source });
     await memories.put(target);
     return { ...target, action };
   }
@@ -178,7 +186,9 @@ export async function remember(content, category = 'fact', { importance = 3, sou
       history: [...(target.history || []), { content: target.content, until: t }].slice(-10),
       embedding: vec ?? undefined,
       embModel: vec ? embedder.model : undefined,
-      source, evidence, pending
+      source, evidence, pending,
+      supersedes: target.id, // 撤回时恢复它
+      ...(sessionId && { sessionId })
     };
     await memories.put({ ...target, validTo: t, supersededBy: next.id });
     await memories.put(next);
@@ -188,6 +198,7 @@ export async function remember(content, category = 'fact', { importance = 3, sou
   const m = {
     id: uid('m'), content, category, importance, ts: t, updatedAt: t, lastUsed: t, validFrom: t, validTo: null,
     uses: 0, history: [], source, evidence, pending, pinned: false,
+    ...(sessionId && { sessionId }),
     ...(action === 'UPDATE' && pending && !target.pending ? {conflictsWith:target.id} : {}),
     ...(vec ? { embedding: vec, embModel: embedder.model } : {})
   };
@@ -312,7 +323,7 @@ export async function reflect(turns, { episode = true, session = null, evaluatio
     try {
       const text = await llm({
         system: '你是记忆整理器。只输出 JSON，不要解释。',
-        prompt: `下面是一段用户与助手的对话。\n1. 抽取值得长期记住的“关于用户”的信息（身份、偏好、习惯、目标、重要事实），每条一句第三人称陈述（如“用户住在上海”）；临时性的问题、助手说的话、密码密钥等敏感信息不要记。\n2. 用一两句话概括这段对话做了什么。\n3. 列出这段对话里说好以后再做、还没做完的事（open），没有就空。\n4. 下面是之前对话里没做完的事，这段对话里已经完成或用户说不用做了的，原样列在 done 里。\n之前没做完的事：\n${pending.map((o) => `- ${o.text}`).join('\n') || '（无）'}\n\n输出格式：{"memories":[{"content":"…","category":"profile|preference|fact|goal","importance":1-5}],"summary":"…","topics":["…"],"open":["…"],"done":["…"]}\n\n对话：\n${turns.map((t) => `${t.role === 'user' ? '用户' : '助手'}：${String(t.content).slice(0, 600)}`).join('\n').slice(-6000)}`
+        prompt: `下面是一段用户与助手的对话。\n1. 抽取值得长期记住的“关于用户”的信息（身份、偏好、习惯、目标、重要事实），每条一句第三人称陈述（如“用户住在上海”），quote 填用户说过的、能证明这条的原话（从对话里一字不差地摘，找不到就留空，不要自己编）；临时性的问题、助手说的话、密码密钥等敏感信息不要记。\n2. 用一两句话概括这段对话做了什么。\n3. 列出这段对话里说好以后再做、还没做完的事（open），没有就空。\n4. 下面是之前对话里没做完的事，这段对话里已经完成或用户说不用做了的，原样列在 done 里。\n之前没做完的事：\n${pending.map((o) => `- ${o.text}`).join('\n') || '（无）'}\n\n输出格式：{"memories":[{"content":"…","quote":"用户原话","category":"profile|preference|fact|goal","importance":1-5}],"summary":"…","topics":["…"],"open":["…"],"done":["…"]}\n\n对话：\n${turns.map((t) => `${t.role === 'user' ? '用户' : '助手'}：${String(t.content).slice(0, 600)}`).join('\n').slice(-6000)}`
       });
       const raw = String(text).match(/\{[\s\S]*\}/)?.[0];
       if (!raw) throw new Error('模型没有返回 JSON');
@@ -369,22 +380,34 @@ export async function resolveOpen(items) {
 
 async function saveFacts(facts, userLines=[], session=null) {
   const out = [];
+  const said = squash(userLines.join('\n'));
   for (const f of facts.slice(0, 8)) {
-    try { out.push(await remember(f.content, f.category || 'fact', { importance: f.importance ?? 3, source: '会话 '+(session?.id || '未记录')+' · 自动提炼，待核实', evidence: userLines.join('\n').slice(-4000) })); } catch { /* 跳过 */ }
+    // 能在用户原话里一字不差找到依据的，直接生效；找不到原话（模型推测的）只当线索，等别的对话再证实
+    const quote = String(f.quote ?? '').trim();
+    const backed = quote.length >= 2 && said.includes(squash(quote));
+    const where = '会话 ' + (session?.id || '未记录');
+    const source = backed ? where + ' · 自动提炼，原话已核对' : where + ' · 自动提炼，待核实';
+    const evidence = backed ? quote.slice(0, 500) : userLines.join('\n').slice(-4000);
+    try { out.push(await remember(f.content, f.category || 'fact', { importance: f.importance ?? 3, source, evidence, sessionId: session?.id ?? null })); } catch { /* 跳过 */ }
   }
   return out;
 }
+/** 核对原话时不管空白和标点 */
+const squash = (text) => String(text).replace(/[\s，,。.！!？?、；;：:“”"'‘’（）()]/g, '');
 
 /** 离线规则：从用户原话里抽取明显的自我介绍与偏好 */
 export function ruleFacts(text) {
   const out = [];
-  const add = (content, category, importance = 3) => out.push({ content, category, importance });
+  let s = '';
+  // 规则是直接从用户原话里抠出来的，原话就是依据
+  // “我是……”容易误抓（“我是想问”），只当线索，不带原话
+  const add = (content, category, importance = 3, sure = true) => out.push({ content, category, importance, ...(sure && { quote: s }) });
   for (const line of String(text).split(/[\n。！!？?；;]/)) {
-    const s = line.trim();
+    s = line.trim();
     let m;
     if ((m = s.match(/我(?:叫|的名字是)\s*([一-龥A-Za-z]{1,12})/))) add(`用户叫${m[1]}`, 'profile', 5);
     if ((m = s.match(/我(?:住在|在)\s*([一-龥]{2,8}?)(?:工作|上班|生活|住)/))) add(`用户在${m[1]}${s.includes('住') || s.includes('生活') ? '生活' : '工作'}`, 'profile', 4);
-    if ((m = s.match(/我(?:是|是一名|是个)\s*([一-龥A-Za-z]{2,12}?)(?:[，,]|$)/)) && !/谁|什么/.test(m[1])) add(`用户是${m[1]}`, 'profile', 4);
+    if ((m = s.match(/我(?:是|是一名|是个)\s*([一-龥A-Za-z]{2,12}?)(?:[，,]|$)/)) && !/谁|什么/.test(m[1])) add(`用户是${m[1]}`, 'profile', 4, false);
     if ((m = s.match(/我(?:很|比较|最|特别)?(喜欢|讨厌|不喜欢|习惯)\s*([^，,]{2,24})/))) add(`用户${m[1]}${m[2]}`, 'preference', 3);
   }
   return out;
@@ -494,7 +517,10 @@ export async function recall(query, { includeArchived = false } = {}) {
   return { memories: hits, episodes: eps.filter((e) => e.relevance >= 0.2), lessons: ls };
 }
 
-/** 维护：长期不用、重要度低、没钉住的记忆归档（不删除）；补算缺失的向量 */
+/**
+ * 维护：长期不用、重要度低、没钉住的记忆归档（不删除）；线索 30 天没再被证实也归档；补算缺失的向量；
+ * 有大模型时每天最多整理一次（合并重复、去掉和更新的记忆矛盾的旧条目）。
+ */
 export async function maintain({ at = now() } = {}) {
   const all = (await memories.all()).map(upgrade);
   let archived = 0;
@@ -504,13 +530,102 @@ export async function maintain({ at = now() } = {}) {
     if (!m.pinned && m.importance <= 2 && (m.uses ?? 0) === 0 && at - (m.lastUsed ?? m.ts) > 120 * DAY) {
       await memories.put({ ...m, validTo: at, archivedReason: '长期未使用' });
       archived++;
+    } else if (m.pending && !m.pinned && at - (m.updatedAt ?? m.ts) > CLUE_DAYS * DAY) {
+      await memories.put({ ...m, validTo: at, archivedReason: `${CLUE_DAYS} 天没再被证实的线索` });
+      archived++;
     } else if (embedder && m.embModel !== embedder.model && embedded < 50) {
       const vec = await embedOne(m.content);
       if (vec) { await memories.put({ ...m, embedding: vec, embModel: embedder.model }); embedded++; }
     }
   }
-  if (archived) await log('forget', `归档了 ${archived} 条长期未用的记忆`);
-  return { archived, embedded };
+  if (archived) await log('forget', `归档了 ${archived} 条长期未用或没被证实的记忆`);
+  const tidied = await consolidate({ at }).catch(() => null);
+  return { archived, embedded, ...(tidied && { merged: tidied.merged, dropped: tidied.dropped }) };
+}
+
+const CLUE_DAYS = 30;
+/** 整理一次最多动几条：模型可能合错，改动小、留历史、能撤回 */
+const TIDY = { every: DAY, pool: 60, merges: 5, drops: 5 };
+
+/**
+ * 整理记忆（每天最多一次，要有大模型）：把说同一件事的几条合成一条、把和更新记忆矛盾的旧条目归档。
+ * 钉住的、写作偏好不动；被合并 / 归档的旧条目留在归档里，新条目记着它们，面板上能撤回。
+ * @returns {Promise<{ merged: number, dropped: number } | null>} 没整理时返回 null
+ */
+export async function consolidate({ at = now(), force = false } = {}) {
+  if (!llm) return null;
+  const last = await kv.get('memory:tidiedAt');
+  if (!force && last?.at && at - last.at < TIDY.every) return null;
+  await kv.put({ id: 'memory:tidiedAt', at });
+  const pool = (await memories.all()).map(upgrade).filter(current)
+    .filter((m) => !m.pinned && m.category !== 'doc_style').filter(safe((m) => m.content))
+    .sort((a, b) => b.updatedAt - a.updatedAt).slice(0, TIDY.pool);
+  if (pool.length < 2) return { merged: 0, dropped: 0 };
+  const byId = new Map(pool.map((m) => [m.id, m]));
+  const text = await llm({
+    system: '你是记忆整理器。只输出 JSON，不要解释。',
+    prompt: `下面是关于用户的记忆，每行：id | 记下的时间 | 内容。请整理：
+1. merge：几条说的是同一件事（重复、换了说法、一条包含另一条），合成一句更准确简洁的第三人称陈述。不同的事不要合并。
+2. drop：一条和另一条更新的记忆直接矛盾（如住址、职位变了），列出旧的那条 id 和取代它的新 id。只是不同、不算矛盾的不要列。
+拿不准就不要动。最多 merge ${TIDY.merges} 组、drop ${TIDY.drops} 条。
+输出：{"merge":[{"ids":["…","…"],"content":"…"}],"drop":[{"id":"旧的","by":"新的"}]}
+
+${pool.map((m) => `${m.id} | ${new Date(m.updatedAt).toISOString().slice(0, 10)} | ${m.content}`).join('\n')}`
+  });
+  const j = JSON.parse(String(text).match(/\{[\s\S]*\}/)?.[0] ?? '{}');
+  const touched = new Set();
+  let merged = 0;
+  let dropped = 0;
+  for (const g of (Array.isArray(j.merge) ? j.merge : []).slice(0, TIDY.merges)) {
+    const ids = [...new Set(Array.isArray(g?.ids) ? g.ids.map(String) : [])].filter((id) => byId.has(id) && !touched.has(id));
+    const content = norm(g?.content).slice(0, 200);
+    if (ids.length < 2 || !content || injectionReason(content)) continue;
+    const olds = ids.map((id) => byId.get(id));
+    const vec = await embedOne(content);
+    const m = {
+      id: uid('m'), content, category: olds[0].category, importance: Math.max(...olds.map((x) => x.importance)),
+      ts: Math.min(...olds.map((x) => x.ts)), updatedAt: at, lastUsed: at, validFrom: at, validTo: null,
+      uses: olds.reduce((n, x) => n + (x.uses ?? 0), 0),
+      history: olds.map((x) => ({ content: x.content, until: at })).slice(-10),
+      // 有一条确认过，合并后就算确认过
+      pending: olds.every((x) => x.pending), pinned: false,
+      source: '整理时合并了 ' + olds.length + ' 条', evidence: olds.map((x) => x.evidence).filter(Boolean).join('\n').slice(0, 1000),
+      mergedFrom: ids,
+      ...(vec ? { embedding: vec, embModel: embedder.model } : {})
+    };
+    for (const x of olds) await memories.put({ ...x, validTo: at, supersededBy: m.id, archivedReason: '整理时合并' });
+    await memories.put(m);
+    ids.forEach((id) => touched.add(id));
+    merged++;
+  }
+  for (const d of (Array.isArray(j.drop) ? j.drop : []).slice(0, TIDY.drops)) {
+    const old = byId.get(String(d?.id));
+    const by = byId.get(String(d?.by));
+    // 只按“更新的那条”取代旧的：新的必须真比旧的晚，而且没被这次合并动过
+    if (!old || !by || old === by || touched.has(old.id) || touched.has(by.id) || by.updatedAt <= old.updatedAt) continue;
+    await memories.put({ ...old, validTo: at, supersededBy: by.id, archivedReason: '和更新的记忆矛盾' });
+    await memories.put({ ...by, supersedes: old.id, history: [...(by.history || []), { content: old.content, until: at }].slice(-10) });
+    touched.add(old.id);
+    dropped++;
+  }
+  if (merged || dropped) await log('memory', `整理记忆：合并 ${merged} 组，替换 ${dropped} 条旧说法`);
+  return { merged, dropped };
+}
+
+/** 撤回自动做的替换 / 合并：恢复被取代的旧条目，这一条归档 */
+export async function revert(id) {
+  const m = await memories.get(id);
+  const previous = [...(m?.mergedFrom ?? []), ...(m?.supersedes ? [m.supersedes] : [])];
+  if (!m || !previous.length) throw new Error('这条记忆没有可以撤回的旧版本');
+  const t = now();
+  for (const pid of previous) {
+    const old = await memories.get(pid);
+    if (!old) continue;
+    const { validTo, supersededBy, archivedReason, ...rest } = upgrade(old);
+    await memories.put({ ...rest, validTo: null, updatedAt: t });
+  }
+  await memories.put({ ...upgrade(m), validTo: t, archivedReason: '用户撤回' });
+  await log('memory', `撤回：${m.content}`);
 }
 
 // ---------------------------------------------------------------- 面板

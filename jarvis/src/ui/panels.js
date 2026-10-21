@@ -359,15 +359,16 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') refreshMind(); });
       input.addEventListener('blur', save);
     });
-    const meta = [m.suspicious?`可疑，未使用（${m.suspicious}）`:m.pending?'自动记下 · 已参与回答，可确认或删除':'已生效',m.source||'来源未记录',new Date(m.updatedAt||m.ts).toLocaleString('zh-CN'),`版本 ${(m.history?.length||0)+1}`].join(' · ');
-    const confirm = el('button',{type:'button',className:'btn sm',textContent:'核实并启用'});
-    confirm.onclick=async()=>{await memory.confirmCandidate(m.id);refreshMind();};
+    // 不用用户确认：有原话依据或两段对话都提到的自动生效；线索 30 天没再出现自动归档。面板只用来看、改、删、撤回
+    const meta = [m.suspicious?`可疑，未使用（${m.suspicious}）`:m.pending?'线索 · 没找到原话依据，再提到会自动生效，30 天没再出现会自动归档':'已生效',m.source||'来源未记录',new Date(m.updatedAt||m.ts).toLocaleString('zh-CN'),`版本 ${(m.history?.length||0)+1}`].join(' · ');
+    const undo = m.supersedes || m.mergedFrom?.length ? el('button', { type: 'button', className: 'x-btn', title: m.mergedFrom?.length ? `撤回合并，恢复原来的 ${m.mergedFrom.length} 条` : '撤回这次替换，恢复旧的说法', textContent: '↶' }) : null;
+    undo?.addEventListener('click', async () => { await memory.revert(m.id); refreshMind(); });
     const x = el('button', { type: 'button', className: 'x-btn', title: '删除', textContent: '✕' });
     x.addEventListener('click', async () => { await memory.deleteItem('memories', m.id); refreshMind(); });
     return el('li', { className: `mem${m.pinned ? ' pinned' : ''}${m.suspicious ? ' suspicious' : ''}` },
       el('span', { className: 'tag', textContent: memory.CATEGORIES[m.category] ?? '其他' }),
       el('div', { className: 'mem-main' }, text, el('div', { className: 'mem-meta' }, stars, meta ? el('span', { textContent: meta }) : null),m.evidence?el('details',{},el('summary',{textContent:'查看来源原话'}),el('p',{textContent:m.evidence})):null),
-      m.pending?confirm:pin, edit, x);
+      pin, undo, edit, x);
   }
 
   $('#btn-core-save').addEventListener('click', async () => {
