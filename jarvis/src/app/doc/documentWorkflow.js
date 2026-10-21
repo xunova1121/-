@@ -13,6 +13,7 @@ function newState(input, execution) {
   const format = input.format || 'docx';
   if (!['docx', 'pdf', 'html', 'md', 'pptx', 'xlsx'].includes(format)) throw workflowError('不支持的文档格式', 'DOCUMENT_INPUT');
   const id = globalThis.crypto.randomUUID();
+  const referenceTime = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' });
   return {
     version: 3,
     id,
@@ -22,7 +23,7 @@ function newState(input, execution) {
     calls: 0,
     revisionAttempts: 0,
     timings: [],
-    input: { task, material, format, referenceTime: new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }) },
+    input: { task, material, format, allowResearch: input.research !== false, referenceTime },
     depth: documentDepth({ task, format, depth: input.depth }),
     business: 'not_checked',
     tokens: null
@@ -39,7 +40,8 @@ function resultSummary(state) {
     tokens: null,
     unresolved: state.review?.issues?.filter((item) => item.severity === 'must_fix').length ?? 0,
     warningCount: state.review?.issues?.filter((item) => item.severity === 'warning').length ?? 0,
-    reviewMode: state.reviewMode || 'not_checked'
+    reviewMode: state.reviewMode || 'not_checked',
+    researchStatus: state.research?.status || 'not_run'
   };
 }
 
@@ -54,6 +56,17 @@ export function createDocumentWorkflow(app) {
     if (state.depth === 'expert') execution.retrieval?.upgrade?.(state.input.task);
     await save();
     try {
+      if (state.phase === 'new' && state.depth === 'expert' && !state.research && app.documentResearch) {
+        state.pendingStage = 'researching';
+        await save();
+        if (state.input.allowResearch === false) {
+          state.research = { status: 'not_requested', reason: 'USER_SOURCE_LIMIT', sources: [] };
+        } else {
+          state.research = await app.documentResearch({ id: state.id, ...state.input }, execution);
+        }
+        state.timings = [...state.timings, { stage: 'researching', elapsedMs: state.research.elapsedMs || 0 }].slice(-(LIMITS.calls + 1));
+        await save();
+      }
       if (state.phase === 'new' && state.depth === 'expert') {
         execution.progress?.('分析任务要求与业务场景…');
         state.plan = await generateTaskBrief(state.input, ask);
@@ -90,6 +103,8 @@ function createAsk(app, state, execution, save) {
     const isReview = ['reviewing', 'verifying'].includes(stage);
     const llm = isReview ? (app.documentReviewer ?? app.llm) : app.llm;
     if (!llm) throw workflowError('专业文档工作流需要配置真实模型', 'DOCUMENT_MODEL_REQUIRED');
+    const research = await app.documentResearchContext?.(state.research, execution);
+    execution.signal?.throwIfAborted();
     execution.retrieval?.consume('model');
     state.calls++;
     state.pendingStage = stage;
@@ -101,6 +116,7 @@ function createAsk(app, state, execution, save) {
         (signal) =>
           llm({
             ...request,
+            prompt: request.prompt + (research ? `\n${research}` : ''),
             system: request.system + `\n任务建立时的北京时间：${state.input.referenceTime || '未记录，不猜当前日期'}`,
             signal,
             allowWebSearch: false,
@@ -112,7 +128,7 @@ function createAsk(app, state, execution, save) {
       );
       return boundedText(text, LIMITS.response, '模型响应', true);
     } finally {
-      state.timings = [...state.timings, { stage, elapsedMs: Date.now() - started }].slice(-LIMITS.calls);
+      state.timings = [...state.timings, { stage, elapsedMs: Date.now() - started }].slice(-(LIMITS.calls + 1));
     }
   };
 }

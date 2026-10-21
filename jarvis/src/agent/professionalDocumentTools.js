@@ -4,6 +4,7 @@ import { S, str } from './documentSchema.js';
 import { createDocumentGenerateTool } from './documentGenerateTool.js';
 import { createDocumentWorkflow } from '../app/doc/documentWorkflow.js';
 import { boundedText, LIMITS, workflowError } from '../app/doc/workflowSchema.js';
+import { createDocumentResearch } from './documentResearch.js';
 import { preserveUserRequest } from '../app/doc/workflowPolicy.js';
 
 async function readMaterials(args, execution) {
@@ -36,11 +37,18 @@ const properties = {
   material: str('用户原始材料，不把模型建议冒充用户事实'),
   material_files: { type: 'array', items: { type: 'string' }, maxItems: 8 },
   depth: { type: 'string', enum: ['auto', 'simple', 'expert'] },
+  research: { type: 'boolean', description: '允许写作前联网调研，默认true；用户禁止联网或仅按所给材料时必须false' },
   state_file: str('文档流程目录内的恢复文件；恢复原任务，不用新要求覆盖旧底稿')
 };
 
 export function createProfessionalDocumentTools(ctx) {
-  const workflow = createDocumentWorkflow({ ...ctx, documentWorkspace: ws });
+  const research = createDocumentResearch(ctx);
+  const workflow = createDocumentWorkflow({
+    ...ctx,
+    documentWorkspace: ws,
+    documentResearch: research?.research,
+    documentResearchContext: research?.context
+  });
   const execute = async (args, execution, prepareOnly) => {
     const taskText = preserveUserRequest(preserveUserRequest(args.task, execution.rawRequestText), execution.requestText);
     const input = args.state_file ? { state_file: args.state_file } : { ...args, task: taskText, material: await readMaterials(args, execution) };
@@ -105,7 +113,7 @@ export function createProfessionalDocumentTools(ctx) {
           : result.business === 'needs_revision'
             ? '仍有必须修复项，作为待完善稿交付'
             : '简单任务，未做完整业务审查';
-    return `${generated}\n内容工作流：${label}；未解决项${result.unresolved}，提醒${result.warningCount}；内容阶段调用${result.calls}次，本次生成器公式/版面辅助调用${generatorCalls}次，Token用量未知。初稿、审查意见及恢复文件：${result.stateFile}`;
+    return `${generated}\n内容工作流：${label}；未解决项${result.unresolved}，提醒${result.warningCount}；写作前调研${result.researchStatus || '未执行'}；内容阶段调用${result.calls}次，本次生成器公式/版面辅助调用${generatorCalls}次，Token用量未知。初稿、审查意见及恢复文件：${result.stateFile}`;
   };
   return [
     {
@@ -123,3 +131,4 @@ export function createProfessionalDocumentTools(ctx) {
     }
   ];
 }
+
