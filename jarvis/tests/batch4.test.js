@@ -151,7 +151,9 @@ describe('生成后自查', () => {
     expect(r.checked).toBe(true);
     expect(r.changed).toBe(2);
     expect(r.content).toMatch(/分三期。\n\n### 预算\n\n总预算约 50 万元（待确认）。\n\n\n## 三、风险/);
-    expect(r.issues).toEqual([]);
+    // 改成“待确认”是如实标注，只留一条提醒，不算错误
+    expect(r.issues.filter((x) => x.level === 'error')).toEqual([]);
+    expect(r.issues.map((x) => x.text).join()).toContain('待确认');
   });
 
   it('没有要求、也没有硬伤：不调用模型；模型出错：照常生成', async () => {

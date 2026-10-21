@@ -143,8 +143,49 @@ const linesFor = (text, colWidth) => String(text ?? '').split('\n').reduce((n, p
 /**
  * @param {string} content  CSV / Markdown 表格。“## 名称”分工作表；工作表里还可以有“### 小节”、多张表格和普通文字（说明 / 备注）
  * @param {{ theme: object }} o
- * @returns {Promise<{ blob: Blob, info: { sheets: number, formulas: number, formulaIssues: object[], layout: string } }>}
+ * @returns {Promise<{ blob: Blob, info: { sheets: number, formulas: number, formulaIssues: object[], layout: string, duplicatesRemoved: number, duplicatesKept: number } }>}
  */
+const SEQ_HEAD = /^(序号|编号|No\.?|#)$/i;
+const cellKey = (v) => String(v ?? '').trim().replace(/\s+/g, ' ');
+
+/**
+ * 去掉重复的数据行（重新生成表格时，模型常把边界那一行写两遍，如最后两行都是“18:00-19:30 晚餐”）：
+ *   - 除序号列外每格都一样：只留第一行
+ *   - 一行填了的格子另一行都有、且内容一样（如同一时间段，一行备注空着）：只留填得更全的那行
+ * 只比较整行，不按单独某一列（时间、日期）去重：同一天多笔流水、同一时段两项活动都是正常数据。
+ * 表里有公式时不删行（删了后面的单元格引用会错位），只返回重复了几行，交给检查提示。
+ * @returns {{ rows: any[][], removed: number }}
+ */
+export function dedupeRows(rows, header = true) {
+  const start = header ? 1 : 0;
+  const seq = header ? (rows[0] ?? []).map((h) => SEQ_HEAD.test(cellKey(h))) : [];
+  const keys = rows.map((r, ri) => (ri < start ? null : r.map((c, ci) => (seq[ci] ? '' : cellKey(c)))));
+  const filled = (k) => k.filter(Boolean).length;
+  // a 填了的格子 b 都有且一样
+  const covers = (b, a) => a.every((v, ci) => !v || v === b[ci]);
+  const drop = new Set();
+  for (let i = start; i < rows.length; i++) {
+    if (drop.has(i) || filled(keys[i]) < 2) continue; // 空行、只有一格的小计行不动
+    for (let j = i + 1; j < rows.length; j++) {
+      if (drop.has(j) || filled(keys[j]) < 2) continue;
+      if (covers(keys[i], keys[j])) drop.add(j);
+      else if (covers(keys[j], keys[i])) {
+        drop.add(i);
+        break;
+      }
+    }
+  }
+  if (!drop.size) return { rows, removed: 0 };
+  if (rows.some((r) => r.some((c) => typeof c === 'string' && /^=./.test(c.trim())))) return { rows, removed: 0, duplicates: drop.size };
+  const kept = rows.filter((_, ri) => !drop.has(ri));
+  // 序号原来是 1、2、3…连着的：删行后重新编号，免得跳号
+  for (const ci of seq.map((x, i) => (x ? i : -1)).filter((i) => i >= 0)) {
+    const nums = rows.slice(start).map((r) => cellKey(r[ci]));
+    if (nums.every((v, i) => v === String(i + 1))) kept.slice(start).forEach((r, i) => { r[ci] = String(i + 1); });
+  }
+  return { rows: kept, removed: drop.size };
+}
+
 export async function makeXlsx(content, { theme }) {
   const mod = await import('exceljs');
   const ExcelJS = mod.default ?? mod;
@@ -163,6 +204,8 @@ export async function makeXlsx(content, { theme }) {
   const borders = { top: border, left: border, bottom: border, right: border };
   const FONT = '微软雅黑';
   let formulas = 0;
+  let duplicatesRemoved = 0;
+  let duplicatesKept = 0;
   const checked = []; // 每个工作表每格写了什么（公式检查用，行号是 Excel 里真实的行号）
 
   const sheets = parseBlocks(content);
@@ -172,6 +215,13 @@ export async function makeXlsx(content, { theme }) {
     let name = s.name.replace(/[\\/?*[\]:]/g, ' ').slice(0, 31) || 'Sheet';
     for (let k = 2; used.has(name); k++) name = `${s.name.slice(0, 28)}(${k})`;
     used.add(name);
+    for (const b of s.blocks) {
+      if (b.kind !== 'table' || !b.rows.length) continue;
+      const d = dedupeRows(b.rows, b.header !== false || looksLikeHeader(b.rows));
+      b.rows = d.rows;
+      duplicatesRemoved += d.removed;
+      duplicatesKept += d.duplicates ?? 0;
+    }
     const tables = s.blocks.filter((b) => b.kind === 'table' && b.rows.length);
     // 只有一张表、没有说明和小节：数据表，表头就在第一行（方便筛选、透视）；否则按报表排：大标题、小节、说明
     const report = s.blocks.some((b) => b.kind !== 'table') || tables.length > 1;
@@ -227,7 +277,7 @@ export async function makeXlsx(content, { theme }) {
       if (!firstHeader && header) firstHeader = r;
       // 信息表（没有表头）：名目列是第 1 列；四列的是“名目 | 值 | 名目 | 值”
       const labelCol = (ci) => !header && (ci === 0 || (t.cols >= 4 && t.cols % 2 === 0 && ci % 2 === 0));
-      const seqCol = (ci) => header && /^(序号|编号|No\.?|#)$/i.test(String(b.rows[0][ci] ?? '').trim());
+      const seqCol = (ci) => header && SEQ_HEAD.test(String(b.rows[0][ci] ?? '').trim());
       t.grid.forEach((row, ri) => {
         const xr = ws.getRow(r);
         const total = (ri > 0 || !header) && isTotalRow(row);
@@ -288,13 +338,13 @@ export async function makeXlsx(content, { theme }) {
     }
   }
   const buf = await wb.xlsx.writeBuffer();
-  return { blob: new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), info: { sheets: sheets.length, formulas, formulaIssues: checkFormulas(checked), layout: sheetLayout(checked) } };
+  return { blob: new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), info: { sheets: sheets.length, formulas, formulaIssues: checkFormulas(checked), layout: sheetLayout(checked), duplicatesRemoved, duplicatesKept } };
 }
 
 /** CSV：带 UTF-8 BOM，Excel 双击打开中文不乱码 */
 export function makeCsv(content) {
   const sheets = parseSheets(content, { raw: true });
-  const rows = sheets[0]?.rows ?? [];
+  const rows = dedupeRows(sheets[0]?.rows ?? []).rows;
   const q = (v) => { const s = String(v ?? ''); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const text = rows.map((r) => r.map(q).join(',')).join('\r\n');
   return new Blob([`﻿${text}\r\n`], { type: 'text/csv;charset=utf-8' });

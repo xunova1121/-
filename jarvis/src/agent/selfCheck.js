@@ -2,7 +2,7 @@ import { throwControl } from '../core/networkRequest.js';
 /**
  * 生成后自查：
  *   1. 规则检查（不花钱，每次都做）：空章节、标题跳级、表格列数对不上、单元格太长撑破版面、[分页] 造成空白页、
- *      占位文字（XXX、待补充、TODO）、PPT 某页字太多会溢出、表格行数太多挤不下
+ *      占位文字（XXX、TODO；“待查 / 待补充”只算提醒）、PPT 某页字太多会溢出、表格行数太多挤不下
  *   2. 模型检查（有用户原始要求或规则查出硬伤时做）：把文档“排出来的样子”（标题层级、每节字数、表格行列、图片、分页）
  *      和正文交给模型，对照原始要求找漏项、溢出、错乱；模型只给具体修改（按原文片段替换 / 在某个标题后补内容），
  *      程序改好后重新生成一次。只改一轮。
@@ -13,7 +13,9 @@ import { parseSlides } from './pptxWriter.js';
 import { parseSheets } from './sheetParse.js';
 import { parseJson } from './research.js';
 
-const PLACEHOLDER = /X{3,}|×{3,}|待补充|待完善|此处填写|【此处|\[此处|TODO|TBD|lorem ipsum|某某某/i;
+const PLACEHOLDER = /X{3,}|×{3,}|此处填写|【此处|\[此处|TODO|lorem ipsum|某某某/i;
+/** 如实标出“没查到 / 还没定”的格子（门票待查、价格待确认）：是允许交付的提醒，不当成错误去反复返工 */
+const PENDING_MARK = /待补充|待完善|待查|待确认|待定|TBD/gi;
 /** 汇报里的空话套话：查出来提醒换成具体的动作和数字 */
 const CLICHE = /赋能|抓手|闭环|全方位|深度融合|高度重视|积极推进|持续发力/g;
 const DOC_FORMATS = ['docx', 'pdf', 'html', 'md'];
@@ -30,6 +32,8 @@ export function lint(format, content) {
   if (md.replace(/\s/g, '').length < 10) { add('error', '内容几乎是空的'); return issues; }
   const ph = md.match(PLACEHOLDER);
   if (ph) add('error', `还有占位文字没填：“${ph[0]}”`);
+  const pending = md.match(PENDING_MARK);
+  if (pending) add('warn', `有 ${pending.length} 处标着“${[...new Set(pending)].slice(0, 3).join('、')}”，交付时告诉用户哪些还没查到，不用为此返工`);
 
   if (format === 'xlsx' || format === 'csv') {
     for (const s of parseSheets(md, { raw: true })) {

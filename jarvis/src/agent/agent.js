@@ -329,7 +329,9 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         if (finalText && !/\n$/.test(finalText)) { emit({ type: 'text', delta: '\n\n' }); finalText += '\n\n'; }
         continue;
       }
-      const note = (!closing || retrieval.extensive) && checks < 2 && (review.required() || unfinished(plan.steps).length > 0) && !light && cur.adapter.kind !== 'mock' ? [finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }), review.required() && canReview && !lookupDeadline ? review.guidance() : ''].filter(Boolean).join('\n') : '';
+      // 收尾核对：写代码的任务最多提醒两次；文档等其他任务只提醒一次，文件验过能用就交付，不反复核实
+      const maxChecks = wroteCode || review.report().contract.coding ? 2 : 1;
+      const note = (!closing || retrieval.extensive) && checks < maxChecks && (review.required() || unfinished(plan.steps).length > 0) && !light && cur.adapter.kind !== 'mock' ? [finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }), review.required() && canReview && !lookupDeadline ? review.guidance() : ''].filter(Boolean).join('\n') : '';
       if (!note) break;
       checks++;
       convo.push({ role: 'user', content: note });

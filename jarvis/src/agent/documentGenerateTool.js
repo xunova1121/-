@@ -180,6 +180,8 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       const left = [...lint(format, finalContent), ...built(out)];
       if (left.length) notes.push(`还需要注意：${left.map((x) => x.text).join('；')}`);
       if (out.info?.toc) notes.push('已加目录（Word 打开时如提示更新域，点“是”即可填上页码；WPS 里右键目录 →“更新目录”）');
+      if (out.info?.duplicatesRemoved) notes.push(`表格里有 ${out.info.duplicatesRemoved} 行和别的行重复，已自动去掉`);
+      if (out.info?.duplicatesKept) notes.push(`表格里有 ${out.info.duplicatesKept} 行和别的行重复，但表里有公式没有自动删，请从原文里删掉重复行后重新生成`);
       if (out.info?.missingImages?.length) notes.push(`这些图片没找到，用占位文字代替了：${out.info.missingImages.join('、')}`);
       if (tpl) notes.push(`${auto ? '自动' : ''}沿用了模板 ${tplPath} 的样式${auto ? '（不想用模板就传 template: "none"）' : ''}`);
       if (out.note) notes.push(out.note);

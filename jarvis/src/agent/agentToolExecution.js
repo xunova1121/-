@@ -46,6 +46,13 @@ export async function executeToolCalls(
         throw new Error(`这个操作（同样的参数）已经做过 ${times - 1} 次了，结果不会变。请换一种方法，或者直接根据已有结果继续。`);
       const bad = c.parseError || validateArgs(tool, c.args);
       if (bad) throw new Error(`${bad}。请检查参数后重新调用。`);
+      // 文件已验过可用（能读回、没报错、之后没改过）且已经核实过一次：不再读，免得“读取 → 核实 → 再核实”绕圈
+      if (review.rereadBlocked?.(c.name, c.args)) {
+        output = `${c.args.path} 本轮已经核实过：能正常读回，没有报错，之后也没改过。不需要再读，直接把结果交给用户；没查到的内容（如“待查”）在回答里说明即可。`;
+        emit({ type: 'tool_end', id: c.id, name: c.name, ok, output, ms: Date.now() - t0 });
+        review.record({ name: c.name, args: c.args, ok });
+        return { c, ok, output, outImages };
+      }
       // 有风险的操作（操作电脑、MCP 工具）先征得用户同意
       if (newScreenThisStep && /^computer_(click|type|key|scroll|drag)$/.test(c.name))
         throw new Error('本步已有新的屏幕截图，请先查看返回的截图，再在下一步决定操作，不能连续盲点或盲输');

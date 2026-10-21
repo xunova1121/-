@@ -1,10 +1,15 @@
 import { taskContract } from './taskContract.js';
+import { isReadOnlyTool } from '../../shared/taskCheckpoint.js';
+
+/** 核实文件内容的工具：同一文件验过可用后只再放行一次 */
+export const VERIFY_TOOLS = /^(?:read_file|computer_read_file|check_document)$/;
 /** 每轮仅存最多64条回执摘要，不保存正文、代码或网页。不同任务不共享。 */
 export function createExecutionReview(goal = '') {
   let request = String(goal).slice(0, 4000);
   const receipts = [];
   const files = new Map();
   const artifacts = new Map();
+  const reads = new Map(); // 文件路径 → 验过可用之后又读了几次（最多 32 个文件）
   let version = 0;
   let sequence = 0;
   const revise = (text) => {
@@ -28,6 +33,16 @@ export function createExecutionReview(goal = '') {
       key: toolName + ':' + path + ':' + String(args.query ?? args.url ?? '').slice(0, 200)
     });
     if (receipts.length > 64) receipts.shift();
+    // 文件被改了：之前的“已验过”作废；生成工具自己在这次调用里发来的验收结果（at 是这次调用的序号）保留
+    if (ok && path && !isReadOnlyTool(toolName) && !VERIFY_TOOLS.test(toolName)) {
+      const item = artifacts.get(path);
+      if (item && item.at !== sequence) item.stale = true;
+      reads.delete(path);
+    }
+    if (ok && path && VERIFY_TOOLS.test(toolName) && verified(path)) {
+      reads.set(path, (reads.get(path) ?? 0) + 1);
+      if (reads.size > 32) reads.delete(reads.keys().next().value);
+    }
     if (ok && /^(?:write_file|edit_file|computer_write_file|computer_edit_file)$/.test(toolName) && path) {
       // 每次写入都会使旧测试失效；预览和“已运行某段代码”不能证明这个文件通过测试。
       files.set(path, { path, written: sequence, verified: false });
@@ -35,11 +50,12 @@ export function createExecutionReview(goal = '') {
     }
     if (ok && /^(?:read_file|computer_read_file)$/.test(toolName) && files.has(path)) files.get(path).verified = true;
     if (ok && /^(?:read_file|computer_read_file)$/.test(toolName) && files.has(path) && /\.(?:pptx|docx|xlsx)$/i.test(path)) {
-      artifact({ path, validation: { format: path.split('.').pop().toLowerCase(), readback: 'passed', structure: 'not_checked', render: 'not_checked' } });
+      artifact({ path, validation: { format: path.split('.').pop().toLowerCase(), readback: 'passed', structure: 'not_checked', render: 'not_checked' } }, sequence);
     }
     if (validation) return validation;
   };
-  const artifact = (event) => {
+  // 验收结果通常在工具运行中发来，那次调用记回执时序号才加一，所以默认记成 sequence + 1
+  const artifact = (event, at = sequence + 1) => {
     if (!event || typeof event.path !== 'string') return;
     const data = event.validation ?? {};
     artifacts.set(event.path.slice(0, 400), {
@@ -48,10 +64,18 @@ export function createExecutionReview(goal = '') {
       readback: data.readback,
       structure: data.structure,
       render: data.render,
-      errors: Math.max(0, Number(data.errors) || 0)
+      errors: Math.max(0, Number(data.errors) || 0),
+      at
     });
     if (artifacts.size > 16) artifacts.delete(artifacts.keys().next().value);
   };
+  /** 文件已经验过：能读回、生成器没报错，之后也没被改过 */
+  function verified(path) {
+    const item = artifacts.get(String(path ?? '').slice(0, 400));
+    return Boolean(item && !item.stale && item.readback === 'passed' && !item.errors);
+  }
+  /** 同一文件验过可用后，再核实最多放行一次；之后直接告诉模型不用再读 */
+  const rereadBlocked = (name, args = {}) => VERIFY_TOOLS.test(name) && verified(args.path) && (reads.get(String(args.path).slice(0, 400)) ?? 0) >= 1;
   const required = () => {
     const contract = taskContract(request);
     return contract.formats.length > 0 || contract.coding || files.size > 0 || artifacts.size > 0 || receipts.some(receipt => receipt.ok && /^(?:create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet|write_file|edit_file|run_javascript|run_python|computer_run|run_project_tests)$/.test(receipt.tool));
@@ -66,7 +90,14 @@ export function createExecutionReview(goal = '') {
   const report = () => {
     const codeFiles = [...files.values()].filter((file) => /\.(?:[cm]?js|jsx|tsx?|py|html|css|json)$/i.test(file.path));
     const lastWrite = Math.max(0, ...codeFiles.map((file) => file.written));
-    const latest = new Map(receipts.filter((receipt) => receipt.version === version).map((receipt) => [receipt.key, receipt]));
+    const current = receipts.filter((receipt) => receipt.version === version);
+    const latest = new Map(current.map((receipt) => [receipt.key, receipt]));
+    // 算“失败回执”的只有改东西、跑测试的操作：查资料没查到（门票没搜到）是信息缺口，在交付里标明即可；
+    // 后来同一个工具又成功了（换了文件名重新生成）也算已解决
+    const unresolved = (receipt) =>
+      !receipt.ok &&
+      (!isReadOnlyTool(receipt.tool) || receipt.tool === 'run_project_tests') &&
+      !current.some((later) => later.sequence > receipt.sequence && later.ok && later.tool === receipt.tool);
     const ran = receipts.some(
       (receipt) => receipt.sequence > lastWrite && receipt.ok && /^(?:run_javascript|run_python|computer_run|run_project_tests)$/.test(receipt.tool)
     );
@@ -84,7 +115,7 @@ export function createExecutionReview(goal = '') {
         : 'not_checked',
       contract: taskContract(request),
       artifacts: [...artifacts.values()],
-      failures: [...latest.values()].filter((receipt) => !receipt.ok).map((receipt) => receipt.tool),
+      failures: [...latest.values()].filter(unresolved).map((receipt) => receipt.tool),
       pendingReadback: pending,
       codeExecution: !codeFiles.length ? 'not_required' : ran ? 'executed_scope_needs_review' : 'not_run',
       note: '回执不是完整需求验收；运行任意代码、打开预览不等于所有交付文件测试通过。'
@@ -109,6 +140,6 @@ export function createExecutionReview(goal = '') {
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
     run: async () => JSON.stringify(report())
   };
-  return { record, revise, report, guidance, tool, artifact, contractNote, required };
+  return { record, revise, report, guidance, tool, artifact, contractNote, required, verified, rereadBlocked };
 }
 

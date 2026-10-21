@@ -55,7 +55,7 @@ describe('收尾核对', () => {
     delete globalThis.indexedDB;
   });
 
-  it('提醒最多两次，模型坚持不改就正常结束', async () => {
+  it('非代码任务只提醒一次，模型坚持不改就正常结束（不反复核实）', async () => {
     vi.resetModules();
     globalThis.indexedDB = new IDBFactory();
     const { runAgent } = await import('../src/agent/agent.js');
@@ -66,6 +66,21 @@ describe('收尾核对', () => {
       return { text: '做不了', toolCalls: [], stop: 'end_turn' };
     } };
     await runAgent({ adapter, model: 'x', history: [], userText: 'x', tools: [], context: ctx, emit: () => {} });
+    expect(n).toBe(3); // 第一次结束 + 一次提醒
+    delete globalThis.indexedDB;
+  });
+
+  it('写了代码的任务最多提醒两次', async () => {
+    vi.resetModules();
+    globalThis.indexedDB = new IDBFactory();
+    const { runAgent } = await import('../src/agent/agent.js');
+    let n = 0;
+    const adapter = { async stream() {
+      n++;
+      if (n === 1) return { text: '', toolCalls: [call('1', 'update_plan', { steps: [{ text: '写结论', status: 'todo' }] })], stop: 'tool_use' };
+      return { text: '做不了', toolCalls: [], stop: 'end_turn' };
+    } };
+    await runAgent({ adapter, model: 'x', history: [], userText: '写一个 Python 脚本', tools: [], context: ctx, emit: () => {} });
     expect(n).toBe(4); // 第一次结束 + 两次提醒
     delete globalThis.indexedDB;
   });
