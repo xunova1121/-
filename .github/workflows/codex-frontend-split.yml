@@ -1,0 +1,110 @@
+name: 前端职责拆分完整验证
+on:
+  push:
+    branches: ['codex/frontend-split-20261021']
+permissions:
+  contents: read
+concurrency:
+  group: codex-frontend-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    name: 发布前完整验证
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: jarvis/package-lock.json
+      - name: 安装依赖和测试浏览器
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: 完整单元测试
+        run: npm test
+      - name: 代码检查（没定义的变量、浏览器同名全局、格式）
+        run: |
+          npm run format
+          git diff --exit-code -- src/main.js src/app
+          npm run lint
+      - name: 验证评测入口与耗时统计
+        run: npm run eval:check
+      - name: 验证多文件项目隔离执行与取消
+        run: |
+          docker pull node:22-bookworm-slim
+          JARVIS_CODE_SANDBOX_IMAGE=node:22-bookworm-slim node e2e/project-execution.mjs
+      - name: 验证Claude协议完成与断流取消
+        run: node e2e/anthropic-stream.mjs
+      - name: 验证代码隔离与取消
+        run: node e2e/sandbox-isolation.mjs
+      - name: 安装Office真实渲染环境
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-impress libreoffice-calc fonts-noto-cjk xdotool
+      - name: 验证Word、PPT、Excel真实转PDF
+        run: node e2e/office-render.mjs
+      - name: 验证文档场景模板、精确修改及真实PDF逐页检查
+        run: node e2e/document-quality.mjs "$RUNNER_TEMP/jarvis-e2e/documents"
+      - name: 构建网页版
+        run: npm run build
+      - name: 服务器模式端到端测试，打包服务器版
+        run: |
+          mkdir -p "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/server-mode.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node scripts/pack-server.mjs "${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('1.0.{0}', github.run_number) }}" release-server
+      - name: 上传服务器版
+        uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-server
+          path: |
+            jarvis/release-server/*.tar.gz
+            jarvis/release-server/jarvis-server-latest.json
+      - name: 构建并验证手机版界面
+        run: |
+          npm run build:mobile
+          mkdir -p "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/mobile-ui.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/server-mobile.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/conversation-flow.mjs
+          node e2e/model-library.mjs "$RUNNER_TEMP/jarvis-e2e"
+      - name: 验证 Electron 全息桌面互动
+        run: |
+          npm ci --prefix desktop --no-audit --no-fund
+          node desktop/node_modules/electron/install.js
+          npm --prefix desktop run prepare-app
+          xvfb-run -a node e2e/hologram-desktop.mjs "$RUNNER_TEMP/jarvis-e2e"
+          xvfb-run -a node e2e/pc-control.mjs "$RUNNER_TEMP/jarvis-e2e"
+      - name: 网页版和单文件版端到端测试
+        shell: bash
+        run: |
+          node server/server.mjs > "$RUNNER_TEMP/jarvis-server.log" 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:8787/ > /dev/null; then break; fi
+            sleep 1
+          done
+          mkdir -p "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/smoke.mjs "$RUNNER_TEMP/jarvis-e2e"
+          # 单文件测试先验证“没有网关”，随后会自己启动测试网关；不能复用网页版的服务。
+          kill "$SERVER_PID"
+          wait "$SERVER_PID" 2>/dev/null || true
+          trap - EXIT
+          npm run build:standalone
+          node e2e/standalone.mjs "$RUNNER_TEMP/jarvis-e2e"
+      - name: 保存验证截图和日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-jarvis
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/jarvis-e2e
+            ${{ runner.temp }}/jarvis-server.log
+
