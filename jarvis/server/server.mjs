@@ -1,3 +1,4 @@
+import { proxyDeepseekTool } from './deepseekProxy.mjs';
 /**
  * 未央 API 网关 + 静态资源服务（Node 18+，除 Anthropic SDK 外零依赖）。
  *
@@ -233,6 +234,8 @@ export function createServer({
   }
 
   async function handleLlmProxy(req, res, id, rest, search, cross = false) {
+    if (id === 'deepseek' && /^tools\/(search|fetch)$/.test(rest))
+      return proxyDeepseekTool(req, res, rest.slice(6), { serverMode: Boolean(serverMode), json });
     let base = id === 'ollama' ? `${ollama.host}/v1` : (upstreamFor(id) ?? EXTRA_UPSTREAMS[id]);
     if (providerById(id)?.custom) {
       // 自定义（OpenAI 兼容）接口：地址由前端在请求头里给出；允许内网地址（本机 / 局域网自建模型很常见）
@@ -406,4 +409,3 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     console.log(process.env.ANTHROPIC_API_KEY ? `对话后端: Claude (${process.env.JARVIS_MODEL || 'claude-opus-5-5'})` : '对话后端: 本地演示智能体（设置 ANTHROPIC_API_KEY 以接入 Claude）');
   });
 }
-

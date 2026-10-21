@@ -1,3 +1,4 @@
+import { createDeepseekSearch } from './deepseekSearch.js';
 import { collectSearchSources, sourceQueue } from './searchSources.js';
 import { mergeSearchHits, officialQueries } from './officialSources.js';
 import { retryRead, throwControl, httpError } from '../core/networkRequest.js';
@@ -201,15 +202,18 @@ export function searchPlan(query, region, freshness = '', now = Date.now()) {
  * @returns {{ name: string, search: (query: string, n?: number) => Promise<Array<{title,url,snippet}>> } | null}
  */
 /** 各个搜索源（设置里“测试联网搜索”逐个测） */
-export function searchEngines({ bochaKey, tavilyKey, fetchViaGateway, searchRegion = 'auto' } = {}) {
-  return [bochaKey && bochaSearch(bochaKey, fetchViaGateway), tavilyKey && tavilySearch(tavilyKey, fetchViaGateway), keylessSearch(fetchViaGateway, searchRegion)].filter(Boolean);
+export function searchEngines(options = {}) {
+  const { bochaKey, tavilyKey, fetchViaGateway, searchRegion = 'auto' } = options;
+  return [createDeepseekSearch(options), bochaKey && bochaSearch(bochaKey, fetchViaGateway), tavilyKey && tavilySearch(tavilyKey, fetchViaGateway), keylessSearch(fetchViaGateway, searchRegion)].filter(Boolean);
 }
 
-export function createSearch({ bochaKey, tavilyKey, fetchViaGateway, searchRegion = 'auto' } = {}) {
+export function createSearch(options = {}) {
+  const { bochaKey, tavilyKey, fetchViaGateway, searchRegion = 'auto' } = options;
+  const deepseek = createDeepseekSearch(options);
   const keyless = keylessSearch(fetchViaGateway, searchRegion);
   const bocha = bochaKey ? bochaSearch(bochaKey, fetchViaGateway) : null;
   const tavily = tavilyKey ? tavilySearch(tavilyKey, fetchViaGateway) : null;
-  const all = [bocha, tavily, keyless].filter(Boolean);
+  const all = [deepseek, bocha, tavily, keyless].filter(Boolean);
   if (all.length <= 1) return all[0] ?? null;
   // 中文搜索词（国内用户）：博查 → 国内网站 → Tavily（Tavily 的中文结果多是港台和海外网站）；
   // 其他：Tavily → 博查 → 免密钥。前一个结果不够或出错时用后一个补上
@@ -219,8 +223,8 @@ export function createSearch({ bochaKey, tavilyKey, fetchViaGateway, searchRegio
     async search(query, n = 6, opts = {}) {
       if (opts.signal?.aborted) throw opts.signal.reason;
       const zh = /[\u4e00-\u9fff]/.test(query);
-      const domestic = zh && (!keyless || (await keyless.regionNow()) === 'cn');
-      const order = (domestic ? [bocha, keyless, tavily] : [tavily, bocha, keyless]).filter(Boolean);
+      const domestic = zh && (deepseek || !keyless || (await keyless.regionNow()) === 'cn');
+      const order = [deepseek, ...(domestic ? [bocha, keyless, tavily] : [tavily, bocha, keyless])].filter(Boolean);
       const hits = [];
       const errors = [];
       for (const e of order) {
@@ -228,8 +232,8 @@ export function createSearch({ bochaKey, tavilyKey, fetchViaGateway, searchRegio
         try {
           // 同词换源不重复扣逻辑搜索预算。
           for (const h of await e.search(query, n, opts)) if (!hits.some((x) => x.url === h.url)) hits.push(h);
-        } catch (err) { throwControl(err, opts.signal); errors.push(err); }
-        if (hits.length >= Math.min(3, n)) break;
+        } catch (err) { throwControl(err, opts.signal); errors.push(err); if (e === deepseek) opts.progress?.('DeepSeek搜索未取得结果，尝试原搜索线路：' + err.message); }
+        if (e === deepseek && hits.length || hits.length >= Math.min(3, n)) break;
       }
       if (!hits.length && errors.length) throw Object.assign(new Error(errors.map(error => error.message).join('；')), { cause: errors.at(-1), kind: errors.at(-1)?.kind, status: errors.at(-1)?.status, code: errors.at(-1)?.code, name: errors.at(-1)?.name });
       return hits.slice(0, n);
@@ -322,4 +326,3 @@ function keylessSearch(fetchViaGateway, searchRegion) {
     }
   };
 }
-

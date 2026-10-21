@@ -1,3 +1,4 @@
+import { createDeepseekSearch } from './deepseekSearch.js';
 import { retryRead, throwControl, httpError } from '../core/networkRequest.js';
 /**
  * 读网页正文：
@@ -35,7 +36,9 @@ export function decodeBody(bytes, contentType = '') {
  * @param {{ tavilyKey?: string, fetchViaGateway?: (url: string, init?: object) => Promise<Response>, fetchImpl?: typeof fetch, now?: () => number }} o
  * @returns {(url: string) => Promise<string>}
  */
-export function createPageReader({ tavilyKey, fetchViaGateway, fetchImpl = (...a) => globalThis.fetch(...a), now = Date.now } = {}) {
+export function createPageReader(options = {}) {
+  const { tavilyKey, fetchViaGateway, fetchImpl = (...a) => globalThis.fetch(...a), now = Date.now } = options;
+  const deepseek = createDeepseekSearch(options);
   const get = (url, init) => (fetchViaGateway ? fetchViaGateway(url, init) : fetchImpl(url, init));
   const cache = new Map();
   const failures = new Map();
@@ -86,9 +89,23 @@ export function createPageReader({ tavilyKey, fetchViaGateway, fetchImpl = (...a
     const state = blocked.get(host);
     try {
       if (state?.count >= 2 && now() - state.at < 10 * 60_000) throw new Error('该网站连续拒绝访问，暂时跳过直接读取，请换其他来源');
-      text = await withWebDeadline((readSignal) => retryRead((activeSignal) => direct(url, activeSignal), { signal: readSignal, timeoutMs: 20000, beforeAttempt: attempt => { if (attempt) consume?.('read'); } }), { signal, timeoutMs: 20000 });
+      if (deepseek) {
+        try {
+          progress?.('正在使用DeepSeek Fetch读取原文');
+          text = await deepseek.read(url, { signal, consume });
+        } catch (error) {
+          throwControl(error, signal);
+          if (error.code === 'PRIVATE_NETWORK_BLOCKED') throw error;
+          progress?.('DeepSeek Fetch不可用，尝试原直接读取：' + error.message);
+        }
+      }
+      if (!text) {
+        if (deepseek) consume?.('read');
+        text = await withWebDeadline((readSignal) => retryRead((activeSignal) => direct(url, activeSignal), { signal: readSignal, timeoutMs: 20000, beforeAttempt: attempt => { if (attempt) consume?.('read'); } }), { signal, timeoutMs: 20000 });
+      }
     } catch (e) {
       throwControl(e, signal);
+      if (e.code === 'PRIVATE_NETWORK_BLOCKED') throw e;
       err = e;
       if ([401,403,429].includes(e.status)) blocked.set(host, { count: (state && now() - state.at < 10 * 60_000 ? state.count : 0) + 1, at: now() });
     }
@@ -114,4 +131,3 @@ export function createPageReader({ tavilyKey, fetchViaGateway, fetchImpl = (...a
     return text;
   };
 }
-

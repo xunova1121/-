@@ -15,6 +15,7 @@ import {
   hasRouting
 } from '../llm/modelLibrary.js';
 import { modelKind } from '../llm/images.js';
+import { deepseekSearchPanel } from './deepseekSearchPanel.js';
 import { documentStylesPanel } from './documentStylesPanel.js';
 
 export const node = (tag, props = {}, ...children) => {
@@ -325,6 +326,7 @@ export function initModelLibrary({ root, workspace, toast }) {
     if (!cfg) return;
     renderDocumentReviewer(cfg);
     root.append(documentStylesPanel({ workspace, node }));
+    root.append(deepseekSearchPanel({ cfg, workspace, node, toast }));
     if (hasRouting(cfg))
       root.append(
         node('p', { className: 'ml-notice', textContent: '高级分工已开启，实际模型可能按任务变化。' }),

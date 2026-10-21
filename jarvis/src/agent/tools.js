@@ -522,7 +522,7 @@ export function createTools(ctx) {
         queries: { type: 'array', items: { type: 'string' }, description: '可选：多个搜索词，一次并行搜索（最多 8 个），例如每场比赛一个' },
         freshness: { type: 'string', enum: ['day', 'week', 'month', 'year'], description: '可选：只要最近一天 / 一周 / 一个月 / 一年内的结果（新闻、刚结束的比赛、最新价格时用）' }
       }, []),
-      run: async ({ query, queries, freshness }, { signal, retrieval, requestText } = {}) => {
+      run: async ({ query, queries, freshness }, { signal, retrieval, requestText, progress } = {}) => {
         const list = [...new Set([query, ...(Array.isArray(queries) ? queries : [])].map((q) => String(q || '').trim()).filter(Boolean).map(q => guardQuery(q, { original: requestText }).query))].slice(0, 8);
         if (!list.length) throw new Error('请给出搜索词');
         let successes = 0;
@@ -531,12 +531,12 @@ export function createTools(ctx) {
             const selected = searchRequest(q, requestText, freshness);
             retrieval?.registerQuery?.(selected.query);
             retrieval?.consume('search');
-            const rawHits = await withWebDeadline((s) => engine.search(selected.query, list.length > 1 ? 5 : 6, { freshness: selected.freshness, signal: s, consume: kind => retrieval?.consume(kind) }), { signal, timeoutMs: 40000 });
+            const rawHits = await withWebDeadline((s) => engine.search(selected.query, list.length > 1 ? 5 : 6, { freshness: selected.freshness, signal: s, progress, consume: kind => retrieval?.consume(kind) }), { signal, timeoutMs: 40000 });
             const screened = screenSearchHits(rawHits, requestText);
             const hits = screened.hits;
             if (!hits.length && screened.rejected) throw Object.assign(new Error('检索结果与今日新闻不对应，请换原始报道来源，不用年度日历代替新闻'), { code: 'IRRELEVANT_SEARCH_RESULTS', kind: 'api' });
             if (hits.length) successes++;
-            return hits.length ? hits.map((r) => `- ${r.title}\n  ${r.url}\n  ${String(r.snippet || '').slice(0, 300)}`).join('\n') : '（没有结果：换个说法、换成英文或原文再搜）';
+            return hits.length ? hits.map((r) => `- ${r.title}\n  ${r.url}\n  ${String(r.snippet || '').slice(0, r.source === 'deepseek' ? 800 : 300)}${r.source === 'deepseek' ? '\n  （DeepSeek检索摘要，未读原文）' + (r.publishedAt ? ' 发布时间：' + r.publishedAt : '') : ''}`).join('\n') : '（没有结果：换个说法、换成英文或原文再搜）';
           } catch (e) {
             if (signal?.aborted || e.name === 'AbortError') throw e;
             // 预算用完：别的词搜到了就照常返回；全没搜到才把预算错误交给主循环（它会让模型直接整理答案，而不是换词再搜）
