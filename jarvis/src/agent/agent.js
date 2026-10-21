@@ -61,7 +61,7 @@ export const STABLE_PROMPT = `你是“未央”，用户的个人智能体。�
 
 ## 回答的样子
 - 结论放第一行。简单问题2–5 条短要点或几句话，复杂任务按需要展开；不例行加免责声明或追问继续。
-- 找到匹配日期、对象的原文就给结论附链接；找不到才说明查了哪里、还缺什么，不用反复说“待确认”。助手旧回答和摘要不是独立证据。
+- 核对日期、对象，找到匹配原文就给结论附链接；找不到才说明查了哪里、还缺什么，不用反复说“待确认”。助手旧回答和摘要不是独立证据。
 - 聊天回答按下面“回答的样子”来写；写文档的内容不受这条限制。
 
 ## 写文档
@@ -280,7 +280,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     signal?.addEventListener('abort', relayAbort, { once: true });
     const stopSearch = () => { searchTimedOut = true; retrieval.close('本轮联网检索已达到预算'); requestCtrl.abort(); };
     const requestWindow = modelWindow(lookupDeadline ? lookupControl : null, closing, requestCtrl);
-    // 保留原请求内容，只增加数字测量，不改提示或工具选择。
+    // 测量实际发送的提示与工具说明，动态规则和短说明均计入字符数。
     const measuredSystem = light ? [LIGHT_PROMPT, [ctx.dynamic, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, dialoguePolicy(review.report().request), capabilities, computerNote, requirementContext, toolHint, review.contractNote(), voice && VOICE_NOTE].filter(Boolean).join('\n\n')];
     const measuredTools = closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list();
     const requestTools = measuredTools.map(conciseTool);
@@ -374,7 +374,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         if (finalText && !/\n$/.test(finalText)) { emit({ type: 'text', delta: '\n\n' }); finalText += '\n\n'; }
         continue;
       }
-      const note = (!closing || retrieval.extensive) && checks < 2 && review.required() && !light && cur.adapter.kind !== 'mock' ? [finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }), canReview && !lookupDeadline ? review.guidance() : ''].filter(Boolean).join('\n') : '';
+      const note = (!closing || retrieval.extensive) && checks < 2 && (review.required() || unfinished(plan.steps).length > 0) && !light && cur.adapter.kind !== 'mock' ? [finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }), review.required() && canReview && !lookupDeadline ? review.guidance() : ''].filter(Boolean).join('\n') : '';
       if (!note) break;
       checks++;
       convo.push({ role: 'user', content: note });
