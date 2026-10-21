@@ -1,3 +1,4 @@
+import { measureModelInput } from '../../shared/modelMetrics.js';
 import { reviewOutcome } from './reviewOutcome.js';
 import { modelWindow, QUICK_MODEL_ATTEMPTS } from './lookupWindow.js';
 import { createExecutionReview } from './executionReview.js';
@@ -315,7 +316,10 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     signal?.addEventListener('abort', relayAbort, { once: true });
     const stopSearch = () => { searchTimedOut = true; retrieval.close('本轮联网检索已达到预算'); requestCtrl.abort(); };
     const requestWindow = modelWindow(lookupDeadline ? lookupControl : null, closing, requestCtrl);
-    emit({ type: 'diagnostic', phase: 'model_start', model: cur.model, protocol: cur.adapter.kind, closing, inputChars: convo.reduce((sum, item) => sum + String(item.content || '').length, 0) });
+    // 保留原请求内容，只增加数字测量，不改提示或工具选择。
+    const measuredSystem = light ? [LIGHT_PROMPT, [ctx.dynamic, DIALOGUE_POLICY, capabilities, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, DIALOGUE_POLICY, capabilities, computerNote, requirementContext, toolHint, review.contractNote(), voice && VOICE_NOTE].filter(Boolean).join('\n\n')];
+    const measuredTools = closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list();
+    emit({ type: 'diagnostic', phase: 'model_start', model: cur.model, protocol: cur.adapter.kind, closing, ...measureModelInput({ system: measuredSystem, messages: convo, tools: measuredTools }), inputChars: convo.reduce((sum, item) => sum + String(item.content || '').length, 0) });
     try {
     modelAttempts++;
     r = await requestWindow.race(() => cur.adapter.stream({
@@ -324,9 +328,9 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       stallTimeouts: lookupDeadline ? { first: 20_000, between: 25_000 } : { first: 45_000, between: 60_000 },
       maxTransientRetries: lookupDeadline || closing ? 0 : 1,
       maxPartialRetries: closing ? 0 : 1, // 已输出的回答允许一次续写，仍受本轮总时限约束
-      system: light ? [LIGHT_PROMPT, [ctx.dynamic, DIALOGUE_POLICY, capabilities, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, DIALOGUE_POLICY, capabilities, computerNote, requirementContext, toolHint, review.contractNote(), voice && VOICE_NOTE].filter(Boolean).join('\n\n')],
+      system: measuredSystem,
       messages: convo,
-      tools: closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list(),
+      tools: measuredTools,
       // 模型自带的联网搜索在服务商那边执行、搜一次扣一次费：剩余次数在发请求前就定好，不等搜完再拦
       allowWebSearch: !closing && retrieval.left > 0, maxWebSearches: lookupDeadline ? Math.min(2, retrieval.left) : retrieval.left,
       signal: requestCtrl.signal,
@@ -599,13 +603,3 @@ export function progressReminder({ userText, steps = [], toolCount }) {
     : '还没有列计划，步骤多的话先用 update_plan 列出来。';
   return `（进度提醒：已经调用了 ${toolCount} 次工具。用户这次要的是：“${ask.length > 200 ? `${ask.slice(0, 200)}…` : ask}”。${progress}先确认方向没跑偏再接着做，不要做用户没要的事。）`;
 }
-
-
-
-
-
-
-
-
-
-

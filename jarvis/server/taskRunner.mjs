@@ -1,3 +1,4 @@
+import { measureModelInput } from '../shared/modelMetrics.js';
 import { createHelperLlm } from '../src/llm/helper.js';
 import { projectExecutionTool } from './projectExecution.mjs';
 import { renderOffice } from './officeRender.mjs';
@@ -149,7 +150,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     const measured = task ? {
       ...adapter,
       stream(options) {
-        task.timing.event({ type: 'diagnostic', phase: 'helper_start', inputChars: (options.messages || []).reduce((total, message) => total + String(message.content || '').length, 0) });
+        task.timing.event({ type: 'diagnostic', phase: 'helper_start', ...measureModelInput(options), inputChars: (options.messages || []).reduce((total, message) => total + String(message.content || '').length, 0) });
         return adapter.stream(options);
       }
     } : adapter;

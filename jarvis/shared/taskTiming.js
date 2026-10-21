@@ -4,6 +4,7 @@ export function createTaskTiming(createdAt, now = Date.now) {
   let modelMs = 0, toolMs = 0, modelOpen = null, toolOpen = null;
   let modelCalls = 0, toolCalls = 0, failedTools = 0, retries = 0, fallbacks = 0, nativeSearchCalls = 0;
   let inputChars = 0, inputCharSamples = 0, helperModelCalls = 0, helperInputChars = 0;
+  let inputTextChars = 0, inputTextSamples = 0, systemChars = 0, toolSchemaChars = 0;
   const activeTools = new Set();
   const elapsed = (a, b) => a == null || b == null ? null : Math.max(0, b - a);
   return {
@@ -11,6 +12,9 @@ export function createTaskTiming(createdAt, now = Date.now) {
     event(e) {
       if (endedAt != null) return;
       const t = now();
+      if (e.type === 'diagnostic' && ['model_start', 'helper_start'].includes(e.phase) && Number.isFinite(e.inputTextChars)) {
+        inputTextChars += e.inputTextChars; inputTextSamples++; systemChars += e.systemChars || 0; toolSchemaChars += e.toolSchemaChars || 0;
+      }
       if (e.type === 'diagnostic' && e.phase === 'helper_start') { helperModelCalls++; helperInputChars += Math.max(0, e.inputChars || 0); }
       if (e.type === 'text' && String(e.delta ?? '').trim() && firstTextAt == null) firstTextAt = t;
       if (e.type === 'timing' && Number.isFinite(e.contextMs)) contextMs += Math.max(0, e.contextMs);
@@ -39,6 +43,8 @@ export function createTaskTiming(createdAt, now = Date.now) {
         modelMs: modelMs + (modelOpen == null ? 0 : elapsed(modelOpen, t)),
         toolMs: toolMs + (toolOpen == null ? 0 : elapsed(toolOpen, t)),
         inputChars: inputCharSamples === modelCalls && modelCalls > 0 ? inputChars : null,
+        inputTextChars: inputTextSamples === modelCalls + helperModelCalls && inputTextSamples > 0 ? inputTextChars : null,
+        inputTextSamples, systemChars, toolSchemaChars,
         helperModelCalls, helperInputChars,
         inputCharSamples, modelCalls, toolCalls, failedTools, retries, fallbacks, nativeSearchCalls
       };

@@ -28,6 +28,9 @@ export function metricsFor(item, turns) {
     totalMs: turns.reduce((total, turn) => total + (turn.clientTotalMs || 0), 0),
     mainModelCalls: sum('modelCalls'),
     mainInputChars: sum('inputChars'),
+    inputTextChars: sum('inputTextChars'),
+    systemChars: sum('systemChars'),
+    toolSchemaChars: sum('toolSchemaChars'),
     userInputChars: turns.every((turn) => typeof turn.prompt === 'string') ? turns.reduce((total, turn) => total + turn.prompt.length, 0) : null,
     allModelCalls: turns.every((turn) => turn.timing?.measurementVersion >= 2 && Number.isFinite(turn.timing?.helperModelCalls)) ? sum('modelCalls') + sum('helperModelCalls') : null,
     helperModelCalls: sum('helperModelCalls'),
@@ -52,6 +55,7 @@ export function baselineSummary(results) {
     totalMs: mean('totalMs'),
     mainModelCalls: mean('mainModelCalls'),
     mainInputChars: mean('mainInputChars'),
+    inputTextChars: mean('inputTextChars'),
     allModelCalls: mean('allModelCalls'),
   };
 }
