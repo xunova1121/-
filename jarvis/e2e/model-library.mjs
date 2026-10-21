@@ -79,6 +79,17 @@ try {
       (await page.locator('#model-workspace .ml-scope-note').textContent()) === '正在修改服务器配置，不影响本机' &&
         (await page.locator('.ml-provider').count()) === 2
     );
+    const reviewSaved = page.waitForResponse(response => response.url() === base + '/api/server/config' && response.request().method() === 'PUT' && response.request().postDataJSON()?.documentReviewer?.provider === 'relay-2');
+    await page.getByLabel('文档审查模型', { exact: true }).selectOption({ label: '供应商 B · shared-model' });
+    await reviewSaved;
+    await page.waitForFunction(() => !document.querySelector('[aria-label="文档审查模型"]').disabled);
+    const reviewConfig = JSON.parse(fs.readFileSync(path.join(data, 'config.json'), 'utf8'));
+    check(`${width} 审查分工独立保存，不改聊天或泄露服务器配置到本机`, reviewConfig.documentReviewer?.provider === 'relay-2' && reviewConfig.models.custom === 'shared-model' && await page.evaluate(() => !JSON.parse(localStorage.getItem('jarvis.llm.v1')).documentReviewer));
+    const reviewCleared = page.waitForResponse(response => response.url() === base + '/api/server/config' && response.request().method() === 'PUT' && response.request().postDataJSON()?.documentReviewer === null);
+    await page.getByLabel('文档审查模型', { exact: true }).selectOption('');
+    await reviewCleared;
+    await page.waitForFunction(() => !document.querySelector('[aria-label="文档审查模型"]').disabled);
+    check(`${width} 可清空审查分工回到同模型自查`, JSON.parse(fs.readFileSync(path.join(data, 'config.json'), 'utf8')).documentReviewer === null);
     const card = () => page.locator('.ml-provider').filter({ has: page.getByText('供应商 A', { exact: true }) });
     await card().getByRole('button', { name: '拉取模型', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('.ml-notice')?.textContent.includes('已拉取 302'));

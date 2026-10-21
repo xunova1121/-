@@ -258,6 +258,33 @@ export function initModelLibrary({ root, workspace, toast }) {
     paint();
   }
 
+  function renderDocumentReviewer(cfg) {
+    const lines = favoriteLines(cfg);
+    const selected = cfg.documentReviewer;
+    if (selected && !lines.some((line) => sameLine(line, selected))) lines.push(selected);
+    const select = node(
+      'select',
+      { ariaLabel: '文档审查模型' },
+      node('option', { value: '', textContent: '沿用写作模型（同模型自查）' }),
+      ...lines.map((line, index) =>
+        node('option', { value: String(index), textContent: `${providerLabel(cfg, line.provider)} · ${line.model}` })
+      )
+    );
+    select.value = selected ? String(lines.findIndex((line) => sameLine(line, selected))) : '';
+    select.addEventListener('change', () => {
+      const line = select.value === '' ? null : lines[Number(select.value)];
+      patch((value) => ({ ...value, documentReviewer: line ? { provider: line.provider, model: line.model } : null }));
+    });
+    root.append(
+      node('h3', { textContent: '模型分工 · 文档审查' }),
+      node('p', {
+        className: 'ml-muted',
+        textContent: '只用于专业文档内容审查，不改变聊天模型。先将审查型号加入常用；可跨服务商，按所选服务商计费。选择与写作不同的型号才是不同模型审查。'
+      }),
+      select
+    );
+  }
+
   function render() {
     if (!root) return;
     const cfg = workspace.config();
@@ -295,6 +322,7 @@ export function initModelLibrary({ root, workspace, toast }) {
     root.append(message);
     if (pullController) root.append(button('停止拉取', () => pullController.abort(), 'ml-link'));
     if (!cfg) return;
+    renderDocumentReviewer(cfg);
     if (hasRouting(cfg))
       root.append(
         node('p', { className: 'ml-notice', textContent: '高级分工已开启，实际模型可能按任务变化。' }),
@@ -329,7 +357,7 @@ export function initModelLibrary({ root, workspace, toast }) {
         'details',
         { className: 'ml-copy' },
         node('summary', { textContent: '从本机复制模型配置' }),
-        node('p', { className: 'ml-muted', textContent: '将覆盖服务器的默认模型、服务商同名配置、常用和备用；包含本机已填写的模型密钥，不复制声音设置。' }),
+        node('p', { className: 'ml-muted', textContent: '将覆盖服务器的默认模型、文档审查、服务商同名配置、常用和备用；包含本机已填写的模型密钥，不复制声音设置。' }),
         node('p', {
           className: 'ml-muted',
           textContent: `本机默认：${providerLabel(workspace.config('local'), workspace.config('local').provider)} · ${currentLine(workspace.config('local')).model}`
