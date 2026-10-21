@@ -52,6 +52,10 @@ it('缓存恢复不重复读取已有原文，不能把搜索摘要当证据', a
   const context = await collector.context(first,execution);
   expect(context).toContain('真实正文');
   expect(context).not.toContain('只在摘要里的事实');
+  await store.put(execution.sessionId,{key:'another-task',sources:[{url:'https://a.gov.cn/a',text:'其他工具覆盖的摘要',original:false}]});
+  const changed = await collector.context(first,execution);
+  expect(changed).not.toContain('其他工具覆盖的摘要');
+  expect(changed).not.toContain('真实正文');
   await store.flush();
 });
 
