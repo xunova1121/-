@@ -9,6 +9,7 @@ import * as sessions from '../src/agent/sessions.js';
 import { measureModelInput } from '../shared/modelMetrics.js';
 import { createTaskTiming } from '../shared/taskTiming.js';
 import { metricsFor } from '../evals/baseline-report.mjs';
+import { DEFAULT_CONFIG } from '../src/llm/config.js';
 import { baselineCases } from '../evals/baseline-cases.mjs';
 
 it('正式input_schema参数参与字符测量，不计入工具实现', () => {
@@ -37,7 +38,7 @@ it('评测真实任务不写正式记忆/任务日志，也不进入其他对话
     onText?.('当前评测会话内保留。');
     return { text: '当前评测会话内保留。', toolCalls: [], stop: 'end_turn' };
   } };
-  const runner = createTaskRunner({ getConfig: async () => ({ provider: 'mock', autoMemory: true }), makeAdapter: () => ({ adapter, model: 'test' }), makeTools: () => [{ name: 'remember', description: '测试记忆工具', input_schema: { type: 'object', properties: { content: { type: 'string' } } }, run: async () => { writes++; return '已写入'; } }] });
+  const runner = createTaskRunner({ getConfig: async () => ({ ...DEFAULT_CONFIG, provider: 'mock', autoMemory: true }), makeAdapter: () => ({ adapter, model: 'test' }), makeTools: () => [{ name: 'remember', description: '测试记忆工具', input_schema: { type: 'object', properties: { content: { type: 'string' } } }, run: async () => { writes++; return '已写入'; } }] });
   try {
     const task = await runner.start({ text: '记住虚构试验订单', evaluationId: 'isolated-run', requestId: 'eval-request' });
     const deadline = Date.now() + 5000;
