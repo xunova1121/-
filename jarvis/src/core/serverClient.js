@@ -122,6 +122,8 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     health: () => req('/api/health'),
     status: (signal) => req('/api/server/status',{signal}),
     getConfig: () => req('/api/server/config'),
+    listDocumentStyles: () => req('/api/server/document-styles'),
+    deleteDocumentStyle: id => req(`/api/server/document-styles/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     putConfig: (cfg) => req('/api/server/config', { method: 'PUT', body: cfg }),
     listModels: (provider, signal) => req('/api/server/models', { method: 'POST', body: { provider }, signal }),
     updateInfo: () => req('/api/server/update'),
@@ -319,5 +321,3 @@ export function remoteSessions(client, { storage = globalThis.localStorage } = {
     }
   };
 }
-
-

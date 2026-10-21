@@ -4,6 +4,7 @@ import { copyModelSettings, chooseLine, currentLine, hasRouting } from '../llm/m
 import { loadServerSettings, saveServerSettings, createServerClient } from '../core/serverClient.js';
 import { fetchModelCatalog } from '../llm/modelCatalog.js';
 import { initModelLibrary } from '../ui/modelLibrary.js';
+import { listDocumentStyles, deleteDocumentStyle } from '../agent/memory.js';
 import { $, toast } from './env.js';
 
 export function createModelWorkspace(app) {
@@ -36,6 +37,18 @@ export function createModelWorkspace(app) {
     config: (target = scope) => scopes.get(target),
     refresh: (target = scope) => scopes.refresh(target),
     patch: (update, target = scope) => scopes.patch(target, update),
+    async documentStyles(target = scope) {
+      if (target === 'local') return listDocumentStyles();
+      const client = getClient();
+      if (!client) throw Object.assign(new Error('请先登录云服务器'), { kind: 'api', code: 'SERVER_NOT_CONNECTED' });
+      return client.listDocumentStyles();
+    },
+    async deleteDocumentStyle(id, target = scope) {
+      if (target === 'local') return deleteDocumentStyle(id);
+      const client = getClient();
+      if (!client) throw Object.assign(new Error('请先登录云服务器'), { kind: 'api', code: 'SERVER_NOT_CONNECTED' });
+      return client.deleteDocumentStyle(id);
+    },
     gateway: (target = scope) => (target === 'local' ? app.gateway : null),
     async selectScope(target) {
       scope = target;

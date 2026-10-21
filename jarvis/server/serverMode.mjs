@@ -39,6 +39,7 @@ import * as ws from '../src/agent/workspace.js';
 import { DEFAULT_CONFIG } from '../src/llm/config.js';
 import { streamPCModel } from './pcModelBridge.mjs';
 import { serverModelCatalog } from './modelCatalog.mjs';
+import { listDocumentStyles, deleteDocumentStyle } from '../src/agent/memory.js';
 import { boundedCatalogs } from '../src/llm/modelLibrary.js';
 
 const UPLOAD_LIMIT = 50 * 1024 * 1024;
@@ -161,6 +162,16 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     if (pathname === '/api/server/config') {
       if (req.method === 'GET') { json(res, 200, maskConfig(loadConfig())); return true; }
       if (req.method === 'PUT') { saveConfig(mergeConfig(loadConfig(), await readJson(req))); json(res, 200, { ok: true }); return true; }
+    }
+    if (pathname === '/api/server/document-styles' && req.method === 'GET') {
+      json(res, 200, await listDocumentStyles());
+      return true;
+    }
+    const stylePath = pathname.match(/^\/api\/server\/document-styles\/([\w-]{1,80})$/);
+    if (stylePath && req.method === 'DELETE') {
+      await deleteDocumentStyle(stylePath[1]);
+      json(res, 200, { ok: true });
+      return true;
     }
     if (pathname === '/api/server/models' && req.method === 'POST') {
       if (!authorized(req)) { json(res, 401, { error: '服务器登录已失效' }); return true; }
@@ -301,4 +312,3 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
 
   return { authorized, handle, runner, store, ready, realtimeKey: () => loadConfig().keys?.qwen || '' };
 }
-

@@ -36,6 +36,12 @@ const serverConfig = {
   favoriteModels: [{ provider: 'relay-2', model: 'shared-model' }]
 };
 fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify(serverConfig));
+const styleFolder = path.join(data, 'store', 'memories');
+fs.mkdirSync(styleFolder, { recursive: true });
+for (const id of ['docstyle_docx_font', 'docstyle_pptx_color']) {
+  const filename = createHash('sha1').update(id).digest('hex') + '.json';
+  fs.writeFileSync(path.join(styleFolder, filename), JSON.stringify({ id, category: 'doc_style', content: id.endsWith('font') ? 'docx · 用宋体' : 'pptx · 用深蓝', updatedAt: Date.now() }));
+}
 const gateway = spawn(process.execPath, ['server/server.mjs'], {
   env: { ...process.env, PORT: String(port), JARVIS_DATA: data, JARVIS_PASSWORD: password },
   stdio: 'pipe'
@@ -74,6 +80,17 @@ try {
     await page.waitForFunction(() => window.__jarvis?.showPanel);
     await page.evaluate(() => window.__jarvis.showPanel('models'));
     await page.waitForSelector('.ml-provider');
+    const stylesPanel = page.locator('details').filter({ has: page.getByText('写作偏好 · 云服务器', { exact: true }) });
+    await stylesPanel.locator('summary').click();
+    await stylesPanel.getByRole('button', { name: '查看写作偏好', exact: true }).click();
+    await stylesPanel.locator('li').first().waitFor();
+    const styleBefore = await stylesPanel.locator('li').count();
+    const styleDeleted = page.waitForResponse(response => response.url().includes('/api/server/document-styles/') && response.request().method() === 'DELETE');
+    await stylesPanel.getByRole('button', { name: '删除偏好', exact: true }).first().click();
+    await styleDeleted;
+    await page.waitForFunction(expected => document.querySelectorAll('.ml-style-list li').length === expected, styleBefore - 1);
+    check(`${width} 云端写作偏好可查看删除且不读写本机`, (await stylesPanel.locator('li').count()) === styleBefore - 1);
+    await stylesPanel.locator('summary').click();
     check(
       `${width} 配置位置默认云服务器，按服务商显示`,
       (await page.locator('#model-workspace .ml-scope-note').textContent()) === '正在修改服务器配置，不影响本机' &&
