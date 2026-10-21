@@ -74,7 +74,8 @@ export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearc
   let level = 0;
   const maxLevel = webSearch ? 2 : 1;
   async function once({ model, system, messages, tools, signal, onText, effort, allowWebSearch = true, stallTimeouts }, lvl, state) {
-    const search = webSearch && lvl < 2 && allowWebSearch;
+    // 与Claude保持一致：已有应用搜索时只走这一条，避免绕过用户配置。
+    const search = webSearch && lvl < 2 && allowWebSearch && !(tools ?? []).some((tool) => tool.name === 'web_search');
     const body = {
       model,
       stream: true,

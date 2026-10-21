@@ -47,7 +47,8 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
   const maxLevel = !compat ? 0 : webSearch ? 2 : 1;
 
   async function once({ model, system, messages, tools, signal, onText, effort, allowWebSearch = true, maxWebSearches = 5, stallTimeouts }, lvl, state) {
-    const search = webSearch && lvl < 2 && allowWebSearch && maxWebSearches >= 1;
+    // 应用的web_search已包含用户选择的搜索源；不能再发送同名原生工具。
+    const search = webSearch && lvl < 2 && allowWebSearch && maxWebSearches >= 1 && !tools.some((tool) => tool.name === 'web_search');
     const [stable, dynamic] = system;
     const params = {
       model,

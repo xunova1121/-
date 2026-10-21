@@ -230,8 +230,10 @@ export function createSearch(options = {}) {
       for (const e of order) {
         if (opts.signal?.aborted) throw opts.signal.reason;
         try {
+          if (e === deepseek) opts.progress?.('正在调用DeepSeek搜索');
           // 同词换源不重复扣逻辑搜索预算。
           for (const h of await e.search(query, n, opts)) if (!hits.some((x) => x.url === h.url)) hits.push(h);
+          if (e === deepseek) opts.progress?.(hits.length ? `DeepSeek搜索返回${hits.length}条结果` : 'DeepSeek搜索无结果，尝试原搜索线路');
         } catch (err) { throwControl(err, opts.signal); errors.push(err); if (e === deepseek) opts.progress?.('DeepSeek搜索未取得结果，尝试原搜索线路：' + err.message); }
         if (e === deepseek && hits.length || hits.length >= Math.min(3, n)) break;
       }
