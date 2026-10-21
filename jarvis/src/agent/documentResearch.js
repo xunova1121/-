@@ -37,8 +37,8 @@ export function createDocumentResearch(ctx = {}) {
 /** 可注入依赖以验证预算、超时、隔离与恢复；不引入测试专用生产分支。 */
 export function createResearchCollector({ search, read, store, now = Date.now, timeoutMs = LIMITS.timeMs }) {
   const context = async (manifest, execution = {}) => {
-    if (!manifest) return '';
     throwControl(null, execution.signal);
+    if (!manifest) return '';
     const passages = [];
     for (const source of (manifest.sources || []).slice(0, LIMITS.sources)) {
       const record = await store.get(execution.sessionId, source.id);
@@ -50,16 +50,14 @@ export function createResearchCollector({ search, read, store, now = Date.now, t
   };
 
   const research = async (input, execution = {}) => {
+    throwControl(null, execution.signal);
     const started = now();
     const sid = execution.sessionId;
     if (!sid) return { status: 'unavailable', reason: 'NO_SESSION', sources: [] };
     const key = `document-research:${input.id}`;
-    const records = await store.records(sid);
-    throwControl(null, execution.signal);
-    const cached = records.find(record => record.key === key);
-    const sources = (cached?.sources || []).filter(source => source.original === true).slice(0, LIMITS.sources)
-      .map(source => ({ id: evidenceId(source.url), url: source.url, title: source.title, official: isOfficialSource(source.url) }));
-    const seen = new Set(sources.map(source => source.url));
+    const sources = [];
+    const seen = new Set();
+    let collectedAt = started;
     const counts = { search: 0, read: 0 };
     let closed = false;
     let reason = '';
@@ -84,6 +82,14 @@ export function createResearchCollector({ search, read, store, now = Date.now, t
         else deadlineSignal.addEventListener('abort', relay, { once: true });
         detach = () => deadlineSignal.removeEventListener('abort', relay);
         const signal = workerController.signal;
+        const records = await store.records(sid);
+        guard(signal);
+        const cached = records.find(record => record.key === key);
+        collectedAt = Math.min(started, cached?.savedAt || started);
+        for (const source of (cached?.sources || []).filter(item => item.original === true).slice(0, LIMITS.sources)) {
+          sources.push({ id: evidenceId(source.url), url: source.url, title: source.title, official: isOfficialSource(source.url) });
+          seen.add(source.url);
+        }
         for (const queries of documentResearchQueries(input.task)) {
           guard(signal);
           if (sources.length >= LIMITS.sources) break;
@@ -104,7 +110,7 @@ export function createResearchCollector({ search, read, store, now = Date.now, t
       workerController?.abort(stopped());
       detach();
     }
-    return { status: sources.length ? reason ? 'partial' : 'ready' : 'empty', reason, collectedAt: new Date(cached?.savedAt || started).toISOString(), rounds, counts, elapsedMs: now() - started, sources: sources.slice(0, LIMITS.sources) };
+    return { status: sources.length ? reason ? 'partial' : 'ready' : 'empty', reason, collectedAt: new Date(collectedAt).toISOString(), rounds, counts, elapsedMs: now() - started, sources: sources.slice(0, LIMITS.sources) };
   };
   return { research, context };
 }

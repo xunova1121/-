@@ -104,3 +104,20 @@ it('专业工作流在底稿前调研，资料可供底稿/写作/审查，但�
   expect(JSON.stringify(state)).not.toContain('外部证据编号e1');
   expect(JSON.stringify(checkpoints)).not.toContain('外部证据编号e1');
 });
+
+it('证据缓存读取也计入调研总时限，迟来的读取不能继续发网络请求', async () => {
+  vi.useFakeTimers();
+  try {
+    let resolveCache;
+    const search = vi.fn();
+    const collector = createResearchCollector({timeoutMs:100,store:{records:()=>new Promise(resolve=>{resolveCache=resolve;})},search,read:async()=>''});
+    const pending = collector.research(input,execution);
+    await vi.advanceTimersByTimeAsync(101);
+    const result = await pending;
+    expect(result.reason).toBe('timeout');
+    expect(result.sources).toEqual([]);
+    resolveCache([]);
+    await Promise.resolve();
+    expect(search).not.toHaveBeenCalled();
+  } finally {vi.useRealTimers();}
+});
