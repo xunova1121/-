@@ -1,3 +1,4 @@
+import { sessionWorkBlock } from './sessionWork.js';
 import { prepareAgentContext } from './agentPreparation.js';
 import { createModelRequest } from './agentModelRequest.js';
 import { executeToolCalls } from './agentToolExecution.js';
@@ -93,12 +94,13 @@ export const VOICE_NOTE = '## 语音对话\n用户正在和你语音对话，你
 
 export async function buildContext(userText, { sessionId = null, turns = 0, summary = null, light = false } = {}) {
   const fresh = turns <= 2; // 新对话（或刚开始）：带上最近的对话和没做完的事，方便“接着上次的”
-  const [ctx, kbHits, installed, past, recentS, open, rules] = await Promise.all([
+  const [ctx, kbHits, installed, past, recentS, open, rules, currentSession] = await Promise.all([
     memory.contextFor(userText), light ? [] : kb.search(userText, 4), light ? [] : packs.enabled().catch(() => []),
     light ? [] : sessions.searchMessages(userText, { exclude: sessionId, k: 2 }).catch(() => []),
     fresh && !light ? sessions.recent({ exclude: sessionId, k: 3 }).catch(() => []) : [],
     fresh && !light ? memory.openItems({ exclude: sessionId }).catch(() => []) : [],
-    loadRules().catch(() => null)
+    loadRules().catch(() => null),
+    sessionId ? sessions.get(sessionId) : null
   ]);
   const parts = [`当前时间：${new Date().toLocaleString('zh-CN', { hour12: false, timeZone:'Asia/Shanghai' })}（${'Asia/Shanghai'}）`];
   const desktop = typeof window !== 'undefined' ? window.jarvisDesktop : null;
@@ -112,6 +114,9 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
   // 长对话：较早的消息已压缩成摘要（见 compress.js）
   const earlier = summaryBlock(summary, sessionId);
   if (earlier) parts.push(earlier);
+  // 即使闲聊或摘要漏掉文件，仍从整段保存记录提取有界索引。
+  const work = sessionWorkBlock(currentSession);
+  if (work) parts.push(work);
   parts.push(ws.mode() === 'folder' ? `工作区：已连接本地文件夹「${ws.folderName()}」` : '工作区：浏览器内的虚拟工作区（用户可下载文件，或连接本地文件夹）');
   if (rules) parts.push(rulesBlock(rules));
   if (ctx.core?.human || ctx.core?.persona) parts.push(`## 核心记忆\n${ctx.core.human ? `【关于用户】${ctx.core.human}\n` : ''}${ctx.core.persona ? `【我的设定】${ctx.core.persona}` : ''}`.trim());
