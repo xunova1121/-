@@ -18,6 +18,7 @@
  *   app/sync.js           多设备同步、服务器模式设置面板
  *   app/recovery.js       启动时接回上次的对话 / 没做完的任务
  *   app/shortcuts.js      键盘快捷键
+ *   app/screenAwake.js    屏幕常亮：说话时不灭、久不碰调暗
  *
  * 模块的创建顺序就是原来 main.js 里各段代码的先后顺序，不要随意调换（后面的模块创建时会用到前面的）。
  * 新功能放进对应模块，不要往这里加。写法规范见 docs/代码规范.md。
@@ -59,6 +60,7 @@ import { createSessionLists } from './app/sessionLists.js';
 import { createSync } from './app/sync.js';
 import { createRecovery } from './app/recovery.js';
 import { createShortcuts } from './app/shortcuts.js';
+import { createScreenAwake } from './app/screenAwake.js';
 
 // 浏览器标签页图标：未央 logo（小图直接内联，单文件版也能显示）
 document.head.append(Object.assign(document.createElement('link'), { rel: 'icon', type: 'image/svg+xml', href: logoUrl }));
@@ -99,6 +101,7 @@ mount(app, createSessionLists(app));
 mount(app, createSync(app));
 mount(app, createRecovery(app));
 mount(app, createShortcuts(app));
+mount(app, createScreenAwake(app));
 globalThis.__jarvisToast = toast; // 手机原生保存文件时的进度提示
 
 // ---------------------------------------------------------------- 恢复上次的设置

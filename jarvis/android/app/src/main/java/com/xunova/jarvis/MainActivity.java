@@ -38,7 +38,7 @@ public class MainActivity extends BridgeActivity {
         CrashLog.install(this);
         registerPlugin(WeatherLocationPlugin.class);registerPlugin(CompanionWallpaperPlugin.class);registerPlugin(WindowColorPlugin.class);registerPlugin(AppUpdatePlugin.class);registerPlugin(CrashLogPlugin.class);
         registerPlugin(NativeStreamPlugin.class);registerPlugin(MobileSpeechPlugin.class);registerPlugin(EdgeSpeechPlugin.class);
-        registerPlugin(QwenRealtimePlugin.class);registerPlugin(BackgroundTaskPlugin.class);
+        registerPlugin(QwenRealtimePlugin.class);registerPlugin(BackgroundTaskPlugin.class);registerPlugin(KeepAwakePlugin.class);
         super.onCreate(state);
         WebView web=getBridge().getWebView();
         if(Build.VERSION.SDK_INT>=26)web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT,true);

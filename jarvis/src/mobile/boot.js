@@ -26,6 +26,7 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
     globalThis.__jarvisEdgeSpeech = registerPlugin('EdgeSpeech');
     globalThis.__jarvisQwenSocket = registerPlugin('QwenRealtime');
     globalThis.__jarvisBackgroundTask = registerPlugin('BackgroundTask');
+    globalThis.__jarvisKeepAwake = registerPlugin('KeepAwake'); // 屏幕常亮（app/screenAwake.js）
     globalThis.__jarvisSpeech.addListener('dialog', ({ active }) => { globalThis.__jarvisSystemSpeechDialog = active; }); // 直接对话用系统语音识别（见 nativeVoice.js）
   } catch { /* 没有识别插件：走云端转写 */ }
   try {

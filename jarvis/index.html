@@ -521,6 +521,11 @@
           </select>
         </div>
         <div class="setting">
+          <label for="set-screen" class="label">屏幕常亮</label>
+          <select id="set-screen"><option value="smart">智能（说话时不灭，30 秒没碰就调暗）</option><option value="always">一直常亮</option><option value="system">跟随系统</option></select>
+          <p class="muted">干长任务时屏幕可以灭，任务在后台继续，做完会通知你。</p>
+        </div>
+        <div class="setting">
           <label for="set-motion" class="label">减少动画</label>
           <select id="set-motion"><option value="system">跟随系统</option><option value="on">开启</option><option value="off">关闭</option></select>
           <p class="muted" id="motion-status"></p>

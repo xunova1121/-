@@ -12,6 +12,7 @@ export const DEFAULT_SETTINGS = {
   focusView: false,
   stageOpen: false, // 桌面版：有对话时也保持大舞台（默认收成迷你状态条）
   reducedMotion: 'system', // system | on | off
+  screenAwake: 'smart', // 屏幕常亮：smart 说话时不灭、久不碰调暗 | always 一直常亮 | system 跟随系统
   look: 'orb', // orb 光核 | holo 全息胸像 | wire 线框胸像
   quality: 'auto', // auto | high | standard | eco
   persistMemory: false, // 旧版：单条对话流存 localStorage（启动时迁移成会话）

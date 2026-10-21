@@ -1387,3 +1387,7 @@ body.reduced-motion .welcome-hero * { animation: none !important; }
 .quick-menu { position: absolute; left: 8px; bottom: calc(100% + 8px); z-index: 30; display: flex; flex-wrap: wrap; gap: 6px; max-width: min(360px, calc(100vw - 32px)); padding: 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface, #fff); box-shadow: 0 10px 28px rgba(20, 20, 50, .18); }
 .quick-menu button { padding: 7px 12px; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--text); font: inherit; font-size: 13px; }
 .quick-menu button:active { background: var(--accent-soft); }
+
+/* 屏幕常亮的“调暗”：盖一层黑幕（OLED 屏黑色几乎不耗电），点一下恢复 */
+.screen-veil { position: fixed; inset: 0; z-index: 9999; display: flex; align-items: flex-end; justify-content: center; padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px)); background: rgba(0, 0, 0, 0.88); color: rgba(255, 255, 255, 0.45); font-size: 14px; letter-spacing: 0.08em; }
+.screen-veil[hidden] { display: none; }

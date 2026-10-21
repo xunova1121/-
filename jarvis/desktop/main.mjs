@@ -5,7 +5,7 @@
  *   - 通过 preload 给页面提供“操作电脑”的能力（文件、打开程序、运行命令、截屏、剪贴板、通知）
  *   - 托盘常驻、全局快捷键 Ctrl/⌘+Shift+J 随时呼出、开机自启
  */
-import { app, BrowserWindow, BaseWindow, WebContentsView, ipcMain, shell, clipboard, Notification, desktopCapturer, screen, Tray, Menu, nativeImage, globalShortcut, session, systemPreferences, powerMonitor } from 'electron';
+import { app, BrowserWindow, BaseWindow, WebContentsView, ipcMain, shell, clipboard, powerSaveBlocker, Notification, desktopCapturer, screen, Tray, Menu, nativeImage, globalShortcut, session, systemPreferences, powerMonitor } from 'electron';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -49,6 +49,7 @@ let quitting = false;
 let mcp = null;
 let server = null;
 let browser = null; // 内置浏览器（第一次点链接时创建窗口）
+let displayBlock = null; // 阻止显示器休眠的编号（没有时为 null）
 
 async function startGateway() {
   const extraPath = loginShellPath();
@@ -161,6 +162,12 @@ Object.assign(ops, {
   updateInstall: () => ({ ok: updater.install() }),
   openReleases: () => { shell.openExternal(RELEASES_URL); return { ok: true }; },
   setHabitTracking: ({ on }) => setHabits(Boolean(on)),
+  /** 未央在说话时不让显示器休眠（屏幕常亮的“智能”档）；说完就放开 */
+  keepScreenOn({ on }) {
+    if (on && displayBlock === null) displayBlock = powerSaveBlocker.start('prevent-display-sleep');
+    if (!on && displayBlock !== null) { powerSaveBlocker.stop(displayBlock); displayBlock = null; }
+    return { on: displayBlock !== null };
+  },
   habitTrackingState: () => ({ on: activity.on }),
   setWallpaper: ({ on }) => setWallpaper(Boolean(on)),
   wallpaperState: () => ({ on: Boolean(wallpaper?.open), mode: wallpaper?.mode ?? '' }),
