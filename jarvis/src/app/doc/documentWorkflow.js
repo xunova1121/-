@@ -22,7 +22,7 @@ function newState(input, execution) {
     calls: 0,
     revisionAttempts: 0,
     timings: [],
-    input: { task, material, format, referenceTime: new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }) },
+    input: { task, material, format, allowResearch: input.research !== false, referenceTime: new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }) },
     depth: documentDepth({ task, format, depth: input.depth }),
     business: 'not_checked',
     tokens: null
@@ -58,7 +58,11 @@ export function createDocumentWorkflow(app) {
       if (state.phase === 'new' && state.depth === 'expert' && !state.research && app.documentResearch) {
         state.pendingStage = 'researching';
         await save();
-        state.research = await app.documentResearch({ id: state.id, ...state.input }, execution);
+        if (state.input.allowResearch === false) {
+          state.research = { status: 'not_requested', reason: 'USER_SOURCE_LIMIT', sources: [] };
+        } else {
+          state.research = await app.documentResearch({ id: state.id, ...state.input }, execution);
+        }
         state.timings = [...state.timings, { stage: 'researching', elapsedMs: state.research.elapsedMs || 0 }].slice(-(LIMITS.calls + 1));
         await save();
       }

@@ -55,7 +55,7 @@ export function createResearchCollector({ search, read, store, now = Date.now, t
     const sid = execution.sessionId;
     if (!sid) return { status: 'unavailable', reason: 'NO_SESSION', sources: [] };
     // 自动调研服从用户的来源限制，不能为了补证据越过明确的离线要求。
-    if (/(?:不要|禁止|不得|不许|不|无需|不用|不需要)(?:再|进行)?(?:联网|上网|外部检索)|仅(?:根据|依据|基于)(?:附件|用户提供的|提供的|所给)?(?:资料|材料)|offline only|no web|do not browse/i.test(input.task)) {
+    if (input.allowResearch === false || /(?:不要|禁止|严禁|不得|不许|不可|不允许|别|不|无需|不用|不需要)(?:再|进行|再次)?(?:联网|上网|外部检索|网络检索|网络搜索)|仅(?:根据|依据|基于)(?:附件|用户提供的|提供的|所给)?(?:资料|材料)|offline only|no web|do not browse/i.test(input.task)) {
       return { status: 'not_requested', reason: 'USER_SOURCE_LIMIT', sources: [] };
     }
     const key = `document-research:${input.id}`;

@@ -134,7 +134,19 @@ it('用户限定仅用材料或不要联网时，不访问缓存和网络', asyn
   for (const task of ['建设水产方案，不要联网','仅根据附件材料编制方案','offline only project plan']) {
     expect(await collector.research({...input,task},execution)).toHaveProperty('reason','USER_SOURCE_LIMIT');
   }
+  expect(await collector.research({...input,allowResearch:false},execution)).toHaveProperty('reason','USER_SOURCE_LIMIT');
   expect(records).not.toHaveBeenCalled();
   expect(search).not.toHaveBeenCalled();
   expect(read).not.toHaveBeenCalled();
+});
+
+it('显式research=false不调用工作流网络适配器，仍可制作底稿', async () => {
+  const research = vi.fn();
+  const stateFiles = new Map();
+  const app = {documentWorkspace:{write:async(path,text)=>{stateFiles.set(path,text);return{path};}},documentResearch:research,llm:async()=>JSON.stringify({brief:{requirements:['建设水产平台']},scenarios:{normal:['交易'],exceptions:['断网'],settlement:['结算'],acceptance:['核对'],structure:['概述']}})};
+  const result = await createDocumentWorkflow(app).prepare({task:'建设水产平台',research:false},execution);
+  expect(research).not.toHaveBeenCalled();
+  expect(result.phase).toBe('planned');
+  expect(result.researchStatus).toBe('not_requested');
+  expect(JSON.parse(stateFiles.get(result.stateFile)).input.allowResearch).toBe(false);
 });

@@ -37,6 +37,7 @@ const properties = {
   material: str('用户原始材料，不把模型建议冒充用户事实'),
   material_files: { type: 'array', items: { type: 'string' }, maxItems: 8 },
   depth: { type: 'string', enum: ['auto', 'simple', 'expert'] },
+  research: { type: 'boolean', description: '允许写作前联网调研，默认true；用户禁止联网或仅按所给材料时必须false' },
   state_file: str('文档流程目录内的恢复文件；恢复原任务，不用新要求覆盖旧底稿')
 };
 
