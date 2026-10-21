@@ -100,6 +100,7 @@ export async function searchContent(query, { max = 30 } = {}) {
   if (remote) return remote.searchContent ? remote.searchContent(q) : [];
   const hits = [];
   for (const one of await list()) {
+    if (one.evaluationId) continue;
     const m = one.messages.find((x) => String(x.content).toLowerCase().includes(q));
     if (!m && !String(one.title).toLowerCase().includes(q)) continue;
     const text = m ? String(m.content).replace(/\s+/g, ' ') : '';
@@ -112,7 +113,7 @@ export async function searchContent(query, { max = 30 } = {}) {
 }
 
 export async function searchMessages(query, { exclude = null, k = 3, minScore = 2 } = {}) {
-  const all = (await sessions.all()).filter((s) => s.id !== exclude);
+  const all = (await sessions.all()).filter((s) => !s.evaluationId && s.id !== exclude);
   const units = [];
   for (const s of all) {
     s.messages.forEach((m, i) => {
@@ -139,7 +140,7 @@ export async function searchMessages(query, { exclude = null, k = 3, minScore = 
 
 /** 最近的几段其他对话 */
 export async function recent({ exclude = null, k = 3 } = {}) {
-  return (await sessions.all()).filter((s) => s.id !== exclude && s.messages.length)
+  return (await sessions.all()).filter((s) => !s.evaluationId && s.id !== exclude && s.messages.length)
     .sort((a, b) => b.updatedAt - a.updatedAt).slice(0, k);
 }
 

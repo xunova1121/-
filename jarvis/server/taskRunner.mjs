@@ -1,3 +1,4 @@
+import { evaluationTools, bindEvaluation } from './evaluation.mjs';
 import { measureModelInput } from '../shared/modelMetrics.js';
 import { createHelperLlm } from '../src/llm/helper.js';
 import { projectExecutionTool } from './projectExecution.mjs';
@@ -173,7 +174,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     if (problem) return finish(task, session, { error: `服务器上的模型还没配置好：${problem}` });
     const fallbacks = fallbackRoutes(cfg, { provider: route.cfg.provider, model }).map((f) => ({ ...createAdapter(f.cfg), label: `${providerLabel(f.cfg, f.provider)} · ${f.model}` })).filter((f) => !f.problem && f.adapter && f.model);
     const history = session.messages.slice(0, -1); // 最后一条是这次的用户原话，单独作为 userText
-    const tools = makeTools({
+    const tools = evaluationTools(makeTools({
       tavilyKey: cfg.tavilyKey, bochaKey: cfg.bochaKey, searchRegion: cfg.searchRegion || 'auto',
       fetchViaGateway: (url, init) => publicFetch(url, init), // 不填搜索密钥也能联网搜索、读网页
       llm: helper(cfg, 'write', task), reasonLlm: helper(cfg, 'reason', task),
@@ -185,7 +186,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       onImage: (src, path) => { if (path) record(task, { type: 'file', path }); },
       officeRender:renderOffice,
       currentSessionId: () => session.id
-    }).filter((t) => !SERVER_BLOCKED.has(t.name));
+    }).filter((t) => !SERVER_BLOCKED.has(t.name)), task.evaluationId);
     const projectTool = projectExecutionTool({ image: process.env.JARVIS_CODE_SANDBOX_IMAGE });
     if (projectTool) tools.push(projectTool);
 
@@ -217,6 +218,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
         // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省
         effort: effortFor(kind, task.text, cfg),
         // 语音对话：口语短答；“你好 / 谢谢”这类寒暄不带工具，回得快
+        quiet: Boolean(task.evaluationId),
         voice: task.voice, light: !task.images.length && isSmallTalk(task.text),
         sessionId: session.id, summary: session.summary ?? null,
         requirements: collectRequirements(session.messages, session.requirements),
@@ -290,7 +292,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
   async function afterTask(task, text) {
     const cfg = await getConfig();
     const llm = helper(cfg, 'write');
-    if (cfg.autoMemory !== false) {
+    if (!task.evaluationId && cfg.autoMemory !== false) {
       memory.configureMemory({ llm });
       const s = await sessions.get(task.sessionId);
       await memory.reflect([{ role: 'user', content: task.text }, ...task.notes.map((t) => ({ role: 'user', content: t })), { role: 'assistant', content: text }], { session: s && { id: s.id, title: s.title } });
@@ -313,7 +315,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
 
   return {
     /** @returns {Promise<{ id: string, sessionId: string }>} */
-    async start({ sessionId = null, text, images = [], voice = false, requestId = null, targetTaskId = null }) {
+    async start({ sessionId = null, text, images = [], voice = false, requestId = null, targetTaskId = null, evaluationId = null }) {
       text = String(text ?? '').trim();
       if (!text) throw Object.assign(new Error('任务内容是空的'),{status:400});
       if (text.length>20000) throw Object.assign(new Error('任务内容太长'),{status:400});
@@ -321,10 +323,11 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       if (requestId!==null&&!/^[\w-]{1,80}$/.test(String(requestId))) throw Object.assign(new Error('请求编号不对'),{status:400});
       images=(Array.isArray(images)?images:[]).filter(i=>/^image\/(png|jpe?g|webp|gif)$/.test(i?.mime)&&typeof i.data==='string'&&i.data.length<=MAX_IMAGE_CHARS).slice(0,MAX_IMAGES).map(({mime,data})=>({mime,data}));
       await recovered;
-      const hash=createHash('sha256').update(JSON.stringify([text,images,Boolean(voice),targetTaskId])).digest('hex');
+      const hash=createHash('sha256').update(JSON.stringify([text,images,Boolean(voice),targetTaskId,evaluationId])).digest('hex');
       const id=sessionId||(requestId?'c_'+createHash('sha256').update(requestId).digest('hex').slice(0,30):sessions.create().id);
       const result=await editSession(id,async session=>{
         session??={...sessions.create(),id};
+        const evaluationScope = bindEvaluation(session, evaluationId);
         const receipts=(session.taskReceipts||[]).filter(x=>now()-x.at<KEEP_DONE_MS);
         const prior=requestId&&receipts.find(x=>x.requestId===requestId);
         if(prior){
@@ -342,7 +345,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
           session.recoveryCheckpoints=[...archive.filter(x=>x.key!==key).map(({evidence,...record})=>record),{key,...kept}].slice(-5);
         }
         session.messages.push({role:'user',content:text,ts:now()});session.updatedAt=now();
-        const task=busy||{id:uid('t'),sessionId:id,text,status:'queued',seq:0,events:[],listeners:new Set(),files:new Set(),inbox:[],notes:[],images,voice:Boolean(voice),ctrl:new AbortController(),createdAt:now(),checkpoint:{text,notes:[],steps:[],inFlight:[],files:[],status:'queued',createdAt:now()}};
+        const task=busy||{id:uid('t'),sessionId:id,evaluationId:evaluationScope,text,status:'queued',seq:0,events:[],listeners:new Set(),files:new Set(),inbox:[],notes:[],images,voice:Boolean(voice),ctrl:new AbortController(),createdAt:now(),checkpoint:{text,notes:[],steps:[],inFlight:[],files:[],status:'queued',createdAt:now()}};
         task.checkpoint.taskId=task.id;
         if(!busy&&incomplete&&/^(继续|恢复|接着)/.test(text))task.resumeFrom=previous;
         const nextCheckpoint=busy?checkpointEvent(task.checkpoint,{type:'user_note',text},now()):task.checkpoint;
@@ -358,7 +361,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     },
     get(id) {
       const t = tasks.get(id);
-      return t && { id: t.id, sessionId: t.sessionId, text: t.text, status: t.status, seq: t.seq, files: [...t.files], error: t.error || '', errorKind: t.errorType || '', review: t.review ?? null, timing: t.timing.snapshot(), createdAt: t.createdAt, startedAt: t.startedAt ?? null, endedAt: t.endedAt ?? null };
+      return t && { id: t.id, sessionId: t.sessionId, evaluationId: t.evaluationId || null, text: t.text, status: t.status, seq: t.seq, files: [...t.files], error: t.error || '', errorKind: t.errorType || '', review: t.review ?? null, timing: t.timing.snapshot(), createdAt: t.createdAt, startedAt: t.startedAt ?? null, endedAt: t.endedAt ?? null };
     },
     list() { return [...tasks.keys()].map((id) => this.get(id)); },
     events(id, after = 0) { return tasks.get(id)?.events.filter((e) => e.seq > after) ?? null; },

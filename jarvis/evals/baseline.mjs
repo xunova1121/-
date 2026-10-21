@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { baselineCases, suiteVersion } from './baseline-cases.mjs';
 import { runCase, serverAPI } from './runner.mjs';
-import { baselineSummary, checkResult, metricsFor } from './baseline-report.mjs';
+import { baselineSummary, checkResult, metricsFor, assessmentVersion } from './baseline-report.mjs';
 
 /** 不改生产配置。混合分工或第三方线路不得冒充DeepSeek官方单模型基线。 */
 export function validateBaselineConfig(cfg) {
@@ -43,11 +43,12 @@ export async function main(args = process.argv.slice(2), env = process.env) {
   const selected = validateBaselineConfig(cfg);
   const serverStatus = await api('/api/server/status');
   if (serverStatus.running || serverStatus.tasks?.length) throw Object.assign(new Error('服务器有其他任务，请单独评测'), { code: 'EVAL_CONFIG', kind: 'api' });
+  if (!serverStatus.features?.evaluationMemoryIsolation) throw Object.assign(new Error('服务器缺少评测记忆隔离，请更新服务器后再测；不向旧服务器提交测试任务'), { code: 'EVAL_CONFIG', kind: 'api' });
   if (!serverStatus.features?.taskRequestIds) throw Object.assign(new Error('服务器不支持独立评测任务'), { code: 'EVAL_CONFIG', kind: 'api' });
   const directory = args.find((arg) => arg.startsWith('--out-dir='))?.slice(10);
   if (!directory) throw Object.assign(new Error('请指定全新的--out-dir私有报告目录'), { code: 'EVAL_CONFIG', kind: 'api' });
   await fs.mkdir(directory, { mode: 0o700 });
-  const report = { schemaVersion: 1, suiteVersion, ...selected, location: new URL(env.JARVIS_EVAL_URL).origin, startedAt: new Date().toISOString(), runId: randomUUID(), results: [], limitations: ['未做语义复核不能计为通过；Office文件必须下载打开与校验。', '统计主循环及工具辅助逻辑调用，正文字符不含系统提示和工具schema；不是全部HTTP请求或Token。', '配置验证不证明每一请求的上游；回退发生时必须标记混合模型，不能作为单模型对照。'] };
+  const report = { schemaVersion: 1, suiteVersion, assessmentVersion, executionProfile: 'server_memory_write_isolated_v1', ...selected, location: new URL(env.JARVIS_EVAL_URL).origin, startedAt: new Date().toISOString(), runId: randomUUID(), results: [], limitations: ['未做语义复核不能计为通过；Office文件必须下载打开与校验。', '统计主循环及工具辅助逻辑调用，正文字符不含系统提示和工具schema；不是全部HTTP请求或Token。', '配置验证不证明每一请求的上游；回退发生时必须标记混合模型，不能作为单模型对照。'] };
   const destination = path.join(directory, 'report.json');
   const save = () => fs.writeFile(destination, JSON.stringify(report, null, 2), { mode: 0o600 });
   await save();
@@ -58,7 +59,7 @@ export async function main(args = process.argv.slice(2), env = process.env) {
   try {
     for (const item of baselineCases) {
       if (controller.signal.aborted) break;
-      const result = await runBaselineCase(api, item, { runId: report.runId, signal: controller.signal });
+      const result = await runBaselineCase(api, item, { runId: report.runId, evaluationId: report.runId, signal: controller.signal });
       report.results.push(result);
       report.summary = baselineSummary(report.results);
       report.mixedModel = report.results.some((entry) => entry.turns.some((turn) => turn.timing?.fallbacks > 0));

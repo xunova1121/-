@@ -1,3 +1,4 @@
+import './reliability-checks.mjs';
 import './baseline-checks.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';

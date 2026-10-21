@@ -149,7 +149,7 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
   async function handle(req, res, pathname) {
     const url = new URL(req.url, 'http://x');
     if (pathname === '/api/server/login' && req.method === 'POST') { login(req, res, await readJson(req)); return true; }
-    if (pathname === '/api/server/status' && req.method === 'GET') { json(res, 200, { ok: true, features:{taskRequestIds:true,taskNotes:true,taskCheckpoints:true,pcModelBridge:true}, running: runner.running, tasks: runner.list().filter((t) => t.status === 'running' || t.status === 'queued') }); return true; }
+    if (pathname === '/api/server/status' && req.method === 'GET') { json(res, 200, { ok: true, features:{evaluationMemoryIsolation:true,taskRequestIds:true,taskNotes:true,taskCheckpoints:true,pcModelBridge:true}, running: runner.running, tasks: runner.list().filter((t) => t.status === 'running' || t.status === 'queued') }); return true; }
     if(pathname==='/api/server/pc-model'&&req.method==='POST'){
       if(!authorized(req)){json(res,401,{error:'服务器登录已失效'});return true;}
       if(activePCModels>=2){json(res,429,{error:'PC模型请求繁忙，请稍后重试'});return true;}
@@ -198,8 +198,8 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
       }
     }
     if (pathname === '/api/tasks' && req.method === 'POST') {
-      const { sessionId = null, text, images, voice, requestId } = await readJson(req, IMPORT_LIMIT); // 可能带图片，放宽大小
-      json(res, 200, await runner.start({ sessionId, text, images, voice: voice === true, requestId:requestId??null })); return true;
+      const { sessionId = null, text, images, voice, requestId, evaluationId } = await readJson(req, IMPORT_LIMIT); // 可能带图片，放宽大小
+      json(res, 200, await runner.start({ sessionId, text, images, voice: voice === true, requestId:requestId??null, evaluationId:evaluationId??null })); return true;
     }
     if (pathname === '/api/tasks' && req.method === 'GET') { json(res, 200, runner.list()); return true; }
     const t = pathname.match(/^\/api\/tasks\/([\w-]+)(\/events|\/stop|\/notes)?$/);

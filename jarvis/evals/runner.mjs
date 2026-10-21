@@ -1,3 +1,4 @@
+import { evalError, safeFailure, retainSnapshot, pollWait } from './task-diagnostics.mjs';
 import { reliabilityCases } from './reliability-cases.mjs';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
@@ -7,48 +8,66 @@ import { cases } from './cases.mjs';
 /** 真实服务器接口；密钥只通过环境变量传入，不写报告、不跟随重定向。 */
 export function serverAPI(base, token, fetchImpl = fetch) {
   const url = new URL(base);
-  if (url.username || url.password || url.search || url.hash || !['http:', 'https:'].includes(url.protocol)) throw new Error('服务器地址格式不正确');
-  if (url.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) throw new Error('远端评测必须使用HTTPS，避免明文发送登录令牌');
-  return async (route, body) => {
-    const r = await fetchImpl(new URL(url.pathname.replace(/\/$/, '') + route, url.origin), {
-      method: body === undefined ? 'GET' : 'POST', redirect: 'error', signal: AbortSignal.timeout(10_000),
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      ...(body !== undefined && { body: JSON.stringify(body) })
-    });
-    if (!r.ok) throw new Error(`服务器接口HTTP ${r.status}`); // 不输出上游正文，防止泄露配置
-    return r.json();
+  if (url.username || url.password || url.search || url.hash || !['http:', 'https:'].includes(url.protocol)) throw evalError('服务器地址格式不正确', 'EVAL_PROTOCOL');
+  if (url.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) throw evalError('远端评测必须使用HTTPS，避免明文发送登录令牌', 'EVAL_PROTOCOL');
+  return async (route, body, { signal } = {}) => {
+    const timeout = AbortSignal.timeout(10_000);
+    try {
+      const response = await fetchImpl(new URL(url.pathname.replace(/\/$/, '') + route, url.origin), {
+        method: body === undefined ? 'GET' : 'POST',
+        redirect: 'error',
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        ...(body !== undefined && { body: JSON.stringify(body) })
+      });
+      if (!response.ok) throw evalError(`服务器接口HTTP ${response.status}`, 'EVAL_HTTP', 'api', response.status);
+      try { return await response.json(); }
+      catch (error) {
+        if (signal?.aborted || timeout.aborted) throw error;
+        throw evalError('服务器响应不是JSON', 'EVAL_INVALID_JSON');
+      }
+    } catch (error) {
+      if (signal?.aborted) throw Object.assign(new Error('评测已停止'), { name: 'AbortError' });
+      if (timeout.aborted) throw evalError('评测接口等待超时', 'EVAL_REQUEST_TIMEOUT', 'timeout');
+      throw error;
+    }
   };
 }
 
 export const terminal = s => ['done', 'error', 'stopped'].includes(s);
 
 /** 不自动重发POST。每题独立会话；超时或协议失败时停止已知任务。 */
-export async function runCase(api, item, { runId = randomUUID(), now = Date.now, wait = ms => new Promise(r => setTimeout(r, ms)), signal, sessionId = null } = {}) {
+export async function runCase(api, item, { runId = randomUUID(), now = Date.now, wait = pollWait, signal, sessionId = null, evaluationId = null } = {}) {
   const started = now(), requestId = `eval_${randomUUID()}`;
   const workspace = `evals/${runId}/${item.id}`;
   const prompt = item.prompt.replaceAll('{{workspace}}', workspace);
+  let phase = 'submit';
   let accepted = null, info = null, noteSent = false, stopRequested = null, owned = false;
   const result = { id: item.id, category: item.category, prompt, rubric: item.rubric, requestId,
     workspace, targetMs: item.targetMs, timeoutMs: item.timeoutMs,
     status: 'not_started', quality: 'not_reviewed', cost: null, costReason: '接口尚未提供完整计费数据' };
   try {
     if (signal?.aborted) { result.status='client_cancelled'; result.quality='execution_failed'; return result; }
-    accepted = await api('/api/tasks', { text: prompt, requestId, ...(sessionId && { sessionId }) });
-    if (!/^[\w-]{1,80}$/.test(accepted?.id || '') || !/^[\w-]{1,80}$/.test(accepted?.sessionId || '') || accepted.joined || (sessionId && accepted.sessionId !== sessionId)) throw new Error('服务器未创建独立评测任务');
+    accepted = await api('/api/tasks', { text: prompt, requestId, ...(sessionId && { sessionId }), ...(evaluationId && { evaluationId }) }, { signal });
+    if (!/^[\w-]{1,80}$/.test(accepted?.id || '') || !/^[\w-]{1,80}$/.test(accepted?.sessionId || '') || accepted.joined || (sessionId && accepted.sessionId !== sessionId)) throw evalError('服务器未创建独立评测任务', 'EVAL_PROTOCOL');
     owned = true;
     result.taskId = accepted.id; result.sessionId = accepted.sessionId;
     for (;;) {
       if (signal?.aborted) { result.status='client_cancelled'; break; }
       if (now() - started >= item.timeoutMs) { result.status = 'client_timeout'; break; }
-      info = await api(`/api/tasks/${accepted.id}`);
+      phase = 'poll';
+      const observed = await api(`/api/tasks/${accepted.id}`, undefined, { signal });
+      if (!observed || !['queued', 'running', 'done', 'error', 'stopped'].includes(observed.status)) throw evalError('任务状态协议不完整', 'EVAL_PROTOCOL');
+      info = observed;
+      retainSnapshot(result, info);
       if (now() - started >= item.timeoutMs) { result.status = 'client_timeout'; break; }
       if (terminal(info.status)) { result.status = info.status; break; }
       if (item.note && !noteSent && info.status === 'running') {
         const added = await api(`/api/tasks/${accepted.id}/notes`, { text: item.note, requestId: `eval_note_${randomUUID()}` });
-        if (added.id !== accepted.id || !added.joined) throw new Error('补充要求未绑定原任务');
+        if (added.id !== accepted.id || !added.joined) throw evalError('补充要求未绑定原任务', 'EVAL_PROTOCOL');
         noteSent = true;
       }
-      await wait(500);
+      await wait(500, signal);
     }
     result.timing = info?.timing ?? null;
     result.usage = info?.usage ?? null;
@@ -60,26 +79,32 @@ export async function runCase(api, item, { runId = randomUUID(), now = Date.now,
     result.note = item.note ? { text: item.note, sent: noteSent } : null;
     if (item.note && !noteSent) result.protocolIssue = '任务在追加前结束，本次未覆盖中途补充，不能算该场景验收通过';
     if (terminal(info?.status)) {
-      const session = await api(`/api/sessions/${accepted.sessionId}`);
+      phase = 'read_session';
+      const session = await api(`/api/sessions/${accepted.sessionId}`, undefined, { signal });
       result.answer = [...(session.messages || [])].reverse().find(m => m.role === 'assistant')?.content || '';
       result.files = info.files || [];
       result.artifactReview = result.files.length ? 'not_checked' : 'no_artifacts';
     }
     if (result.status !== 'done') result.quality = 'execution_failed';
-  } catch {
-    // 可能携带响应正文、URL、令牌的异常不进入公开报告。
-    result.status = owned ? 'transport_or_protocol_error' : 'submission_unknown';
+  } catch (error) {
+    result.failure = safeFailure(error, phase);
+    retainSnapshot(result, info);
+    if (signal?.aborted) result.status = 'client_cancelled';
+    else if (owned && now() - started >= item.timeoutMs && !terminal(info?.status)) result.status = 'client_timeout';
+    else result.status = owned ? 'transport_or_protocol_error' : 'submission_unknown';
     result.quality = 'execution_failed';
+    result.executionStatus = terminal(info?.status) ? info.status : null;
     result.error = owned ? '连接或任务协议失败，未自动重试' : '独立任务提交未确认，请按请求编号检查服务端；不要直接重发';
   } finally {
+    retainSnapshot(result, info);
     if (owned && !terminal(info?.status)) {
       try { stopRequested = (await api(`/api/tasks/${accepted.id}/stop`, {})).ok === true; }
-      catch { stopRequested = false; }
+      catch (error) { stopRequested = false; result.cleanupFailure = safeFailure(error, 'stop'); }
       result.stopRequested = stopRequested;
       if (!stopRequested) result.cleanupWarning = '停止未确认，请按任务编号到服务器检查';
     }
   }
-  result.clientTotalMs ??= now() - started;
+  result.clientTotalMs = now() - started;
   return result;
 }
 
