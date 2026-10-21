@@ -39,5 +39,5 @@ export function formatPageResult(text) {
     selected.push(line);
     length += line.length + 1;
   }
-  return body.slice(0, 7500) + (body.length > 7500 ? '\n（正文已截断，可按证据编号取回）' : '') + LINK_MARKER + '\n' + selected.join('\n');
+  return body.slice(0, 7500) + (body.length > 7500 ? '\n（正文已截断；证据缓存同样有长度上限）' : '') + LINK_MARKER + '\n' + selected.join('\n');
 }

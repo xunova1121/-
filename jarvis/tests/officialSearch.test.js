@@ -95,7 +95,7 @@ describe('免费搜索与官方证据', () => {
     expect(isQuickLookup('查原文江苏供销概况')).toBe(false);
     tick = 0;
     const normal = createRetrievalBudget('你好', {now: () => tick}); normal.begin();
-    const long = createRetrievalBudget('写研究报告', {now: () => tick}); long.begin();
+    const long = createRetrievalBudget('逐项列出建设方案', {now: () => tick}); long.begin();
     tick = 45000;
     expect(normal.reason).toContain('时间预算');
     tick = 479999;

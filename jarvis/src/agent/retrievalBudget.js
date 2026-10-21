@@ -3,7 +3,7 @@ import { createQueryLedger } from './retrievalQuality.js';
 export const QUICK_RETRIEVAL_MS = 45_000;
 export const DEEP_RETRIEVAL_MS = 8 * 60_000;
 export const VERIFICATION_MS = 3 * 60_000;
-export const strictVerification = text => /逐项|逐一|查原文|核实原文|核对原文|逐条核[实验对]/.test(String(text));
+export const strictVerification = text => /逐[项一条].{0,12}(?:核[实验对]|查证|查原文)|(?:核[实验对]|查证).{0,12}逐[项一条]|查原文|核实原文|核对原文/.test(String(text));
 export function extensiveRetrieval(text = '') {
   return strictVerification(text) || /深度|深入|全面|调研|研究报告|逐项|逐一|多来源|交叉核[验对]|报告|方案|文档|论文|PPT|Word|Excel|代码|编程|开发|文件|保存|对比|比较|这几|这些|每场|多场|清单|research|report|document|code/i.test(String(text));
 }
