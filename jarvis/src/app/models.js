@@ -113,11 +113,13 @@ export function createModels(app) {
       ? (url, init) =>
           url.startsWith('https://api.deepseek.com/v1/tools/')
             ? fetchDeepseek(url, init)
-            : url.startsWith('https://api.tavily.com/')
-              ? fetch(`/api/llm/tavily/${url.slice('https://api.tavily.com/'.length)}`, init)
-              : url.startsWith('https://api.bochaai.com/')
-                ? fetch(`/api/llm/bocha/${url.slice('https://api.bochaai.com/'.length)}`, init)
-                : fetch(`/api/fetch?url=${encodeURIComponent(url)}`)
+            : url.startsWith('https://queue.fal.run/')
+              ? fetch(`/api/llm/fal/${url.slice('https://queue.fal.run/'.length)}`, init)
+              : url.startsWith('https://api.tavily.com/')
+                ? fetch(`/api/llm/tavily/${url.slice('https://api.tavily.com/'.length)}`, init)
+                : url.startsWith('https://api.bochaai.com/')
+                  ? fetch(`/api/llm/bocha/${url.slice('https://api.bochaai.com/'.length)}`, init)
+                  : fetch(`/api/fetch?url=${encodeURIComponent(url)}`)
       : globalThis.__jarvisNativeFetch
         ? nativeWebFetch(globalThis.__jarvisNativeFetch)
         : null;

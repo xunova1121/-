@@ -671,6 +671,12 @@ export class Transcript {
         el.insertBefore(v, cur);
         self.#scroll();
       },
+      /** 唱好的歌：对话里直接播放 */
+      audio(src) {
+        const a = Object.assign(document.createElement('audio'), { src, controls: true, preload: 'metadata', className: 'gen-audio' });
+        el.insertBefore(a, cur);
+        self.#scroll();
+      },
       sources(names) {
         const box = document.createElement('div');
         box.className = 'sources';

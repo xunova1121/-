@@ -56,7 +56,7 @@ export const tokenFor = (password) => createHash('sha256').update(`jarvis-server
 /** 模型设置里的密钥只给看后 4 位 */
 export function maskConfig(cfg) {
   const mask = (v) => (v ? `••••${String(v).slice(-4)}` : '');
-  return { ...cfg, keys: Object.fromEntries(Object.entries(cfg.keys ?? {}).map(([k, v]) => [k, mask(v)])), tavilyKey: mask(cfg.tavilyKey), bochaKey: mask(cfg.bochaKey), deepseekSearchKey: mask(cfg.deepseekSearchKey) };
+  return { ...cfg, keys: Object.fromEntries(Object.entries(cfg.keys ?? {}).map(([k, v]) => [k, mask(v)])), tavilyKey: mask(cfg.tavilyKey), bochaKey: mask(cfg.bochaKey), deepseekSearchKey: mask(cfg.deepseekSearchKey), falKey: mask(cfg.falKey) };
 }
 /** 保存时：密钥没改（还是 •••• 或留空）就沿用原来的 */
 export function mergeConfig(old, next) {
@@ -64,7 +64,7 @@ export function mergeConfig(old, next) {
   const keys = { ...(old.keys ?? {}) };
   for (const [k, v] of Object.entries(next.keys ?? {})) keys[k] = keep(v, old.keys?.[k]);
   const maps = Object.fromEntries(['models', 'baseURLs', 'providerNames', 'modelLists'].map((field) => [field, { ...old[field], ...next[field] }]));
-  const merged = { ...old, ...next, ...maps, keys, tavilyKey: keep(next.tavilyKey, old.tavilyKey), bochaKey: keep(next.bochaKey, old.bochaKey), deepseekSearchKey: keep(next.deepseekSearchKey, old.deepseekSearchKey) };
+  const merged = { ...old, ...next, ...maps, keys, tavilyKey: keep(next.tavilyKey, old.tavilyKey), bochaKey: keep(next.bochaKey, old.bochaKey), deepseekSearchKey: keep(next.deepseekSearchKey, old.deepseekSearchKey), falKey: keep(next.falKey, old.falKey) };
   // 字典合并不能把前端淘汰的旧地址缓存重新带回来；服务器也必须执行同一上限。
   if (next.modelLists || next.baseURLs) merged.modelLists = boundedCatalogs(merged);
   return merged;

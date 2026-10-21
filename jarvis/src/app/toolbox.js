@@ -76,6 +76,7 @@ export function createToolbox(app) {
         metrics: app.metrics,
         ...deepseekSearchOptions(app.llmConfig),
         tavilyKey: app.llmConfig.tavilyKey,
+        falKey: app.llmConfig.falKey,
         bochaKey: app.llmConfig.bochaKey,
         searchRegion: app.llmConfig.searchRegion || 'auto',
         fetchViaGateway: app.fetchViaGateway(),
@@ -102,6 +103,7 @@ export function createToolbox(app) {
         onImage: (src) => out()?.image?.(src),
         videoGen: (o) => generateVideo(app.llmConfig, { ...o, gateway: app.gateway }),
         onVideo: (src) => out()?.video?.(src),
+        onAudio: (src) => out()?.audio?.(src),
         onSchedulesChanged: () => app.schedulesPanel?.refresh(),
         currentSessionId: () => app.session?.id,
         // 桌面版：写 PDF 时直接转成 PDF 文件（网页版和安卓生成可打印的网页）

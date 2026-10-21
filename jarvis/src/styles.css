@@ -1166,6 +1166,8 @@ body.reduced-motion .drawer { transition: none; }
 .voice-check li[data-ok="0"]::before { content: "✕ "; color: var(--bad); }
 .voice-check li[data-ok="0"] { color: var(--bad); }
 .gen-video { width: 100%; background: #000; }
+.gen-audio { display: block; width: 100%; max-width: 520px; margin: 8px 0; }
+.viewer-media { display: block; width: 100%; max-width: 720px; margin: 16px auto; }
 .gen-image { display: block; max-width: min(100%, 420px); border-radius: 14px; margin: 8px 0; box-shadow: 0 6px 18px var(--shadow); }
 .mp-section { margin: 8px 4px 2px; font-size: 12px; color: var(--dim); }
 

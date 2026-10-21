@@ -42,7 +42,7 @@ import { attachQwenGateway } from './qwenRealtime.mjs';
 const CORS_PATHS = /^\/api\/(health|local\/metrics|llm\/.+|tts\/edge)$/;
 /** 服务器模式里允许跨域调用的接口（手机 App、电脑版连自己的服务器） */
 const SERVER_CORS = /^\/api\/(health|server\/.+|tasks(\/.*)?|sessions(\/.*)?|files(\/raw)?)$/;
-export const EXTRA_UPSTREAMS = { tavily: 'https://api.tavily.com', bocha: 'https://api.bochaai.com', elevenlabs: 'https://api.elevenlabs.io' };
+export const EXTRA_UPSTREAMS = { tavily: 'https://api.tavily.com', bocha: 'https://api.bochaai.com', elevenlabs: 'https://api.elevenlabs.io', fal: 'https://queue.fal.run' };
 // 读取网页时用常见浏览器的请求头：不少网站（包括搜索引擎）会拒绝或降级陌生的客户端
 const FETCH_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
@@ -291,8 +291,10 @@ export function createServer({
       url = new URL(loc, url);
     }
     const buf = Buffer.from(await upstream.arrayBuffer());
-    res.writeHead(upstream.status, { 'Content-Type': upstream.headers.get('content-type') || 'text/plain', 'Cache-Control': 'no-store' });
-    res.end(buf.subarray(0, 5 * 1024 * 1024));
+    const type = upstream.headers.get('content-type') || 'text/plain';
+    res.writeHead(upstream.status, { 'Content-Type': type, 'Cache-Control': 'no-store' });
+    // 网页最多 5MB；音频（唱好的歌）最多 30MB，不截断成坏文件
+    res.end(buf.subarray(0, (/^audio\//i.test(type) ? 30 : 5) * 1024 * 1024));
   }
 
   function serveStatic(req, res) {

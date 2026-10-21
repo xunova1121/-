@@ -343,6 +343,9 @@
         <p class="note">两个都不填也能搜（读必应、百度的结果），但不稳定，新闻、比分这类最新内容常常搜不到。免费申请：打开 <a href="https://app.tavily.com" target="_blank" rel="noopener">app.tavily.com</a> 注册（可用谷歌账号或邮箱），登录后首页就有以 tvly- 开头的 Key，复制粘贴到上面。免费版每月有一定次数，个人使用一般够用。</p>
         <label class="field" for="search-region"><span>免密钥搜索用哪里的网站</span><select id="search-region"><option value="auto">自动（按网络判断：国内用必应中国、百度、360；国外用必应、DuckDuckGo）</option><option value="cn">国内网站</option><option value="global">国外网站</option></select></label>
         <div class="row-actions"><button type="button" class="btn ghost sm" id="btn-search-test">测试联网搜索</button><span class="muted small" id="search-test-result"></span></div>
+        <h3 class="sub">唱歌（fal.ai）</h3>
+        <label class="field" for="fal-key"><span>fal.ai Key（让未央把写好的歌唱出来：有人声、有伴奏）</span><input type="password" id="fal-key" placeholder="fal 的 API Key" autocomplete="off" /></label>
+        <p class="note">用 fal.ai 上的 MiniMax Music 2.0 作曲演唱，按次收费（约 0.03 美元一首，以 fal 官网为准），一首要一两分钟。fal 是海外服务，国内网络可能不稳定。申请：打开 <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener">fal.ai/dashboard/keys</a> 登录后创建 Key，复制粘贴到上面。不填就不能唱，只写歌词。用云服务器时，填好后在“服务器模式”里点“把模型设置传到服务器”。</p>
         <h3 class="sub">声音</h3>
         <div class="setting" id="qwen-realtime-settings">
           <button class="btn" type="button" id="btn-qwen-realtime">使用百炼实时对话</button>

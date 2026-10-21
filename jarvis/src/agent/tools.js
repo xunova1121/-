@@ -32,6 +32,7 @@ import { matchFiles, searchLines } from './fileSearch.js';
 import { deepResearch, DEPTHS } from './research.js';
 import { factCheck, formatReport } from './factCheck.js';
 import { evidence as evidenceStore } from './evidenceStore.js';
+import { createSongTool } from './music.js';
 
 const S = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const str = (description) => ({ type: 'string', description });
@@ -76,6 +77,7 @@ export function createTools(ctx) {
   const overwriteWarned = new Set();
   const tools = [
     createVerificationTool(),
+    createSongTool(ctx),
     createStockKlineTool(ctx),
     queryGuardTool(),
     {

@@ -165,6 +165,11 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
         const u = URL.createObjectURL(blob);
         objectUrls.push(u);
         body.replaceChildren(el('img', { src: u, alt: path }));
+      } else if (['mp3', 'wav', 'm4a', 'ogg', 'flac', 'mp4', 'webm'].includes(e)) {
+        // 唱好的歌、生成的视频：直接播放
+        const u = URL.createObjectURL(blob);
+        objectUrls.push(u);
+        body.replaceChildren(el(['mp4', 'webm'].includes(e) ? 'video' : 'audio', { src: u, controls: true, className: 'viewer-media' }));
       } else if (e === 'docx') {
         // Word：按真实样式排版预览；解析失败（文件损坏等）退回纯文字
         const host = el('div', { className: 'docx-view' });
@@ -506,6 +511,8 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   $('#set-websearch').checked = cfg.claudeWebSearch;
   $('#set-websearch').addEventListener('change', (e) => { cfg = { ...cfg, claudeWebSearch: e.target.checked }; saveConfig(cfg); onConfigChange(cfg); });
   $('#tavily-key').value = cfg.tavilyKey || '';
+  $('#fal-key').value = cfg.falKey || '';
+  $('#fal-key').addEventListener('change', (e) => { cfg = { ...cfg, falKey: e.target.value.trim() }; saveConfig(cfg); onConfigChange(cfg); });
   $('#bocha-key').value = cfg.bochaKey || '';
   $('#bocha-key').addEventListener('change', (e) => { cfg = { ...cfg, bochaKey: e.target.value.trim() }; saveConfig(cfg); onConfigChange(cfg); });
   $('#search-region').value = cfg.searchRegion || 'auto';
@@ -557,6 +564,7 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
       fillModels();
       $('#set-websearch').checked = cfg.claudeWebSearch;
       $('#tavily-key').value = cfg.tavilyKey || '';
+      $('#fal-key').value = cfg.falKey || '';
       $('#bocha-key').value = cfg.bochaKey || '';
       onConfigChange(cfg);
       return cfg;
