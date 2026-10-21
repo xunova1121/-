@@ -289,17 +289,19 @@ export function createTools(ctx) {
     },
     {
       name: 'search_conversations',
-      description: '搜索用户和你之前的所有对话（跨对话）。用户提到“上次 / 之前说过 / 那天聊的”、或需要以前对话里的细节（方案、数据、结论、文件名）时使用。返回对话 id、标题、日期和命中的原话。',
+      description: '搜索用户和你的所有对话（包括本段对话）。用户提到“上次 / 之前说过 / 那天聊的”、或需要以前对话里的细节（方案、数据、结论、文件名）时使用。返回对话 id、标题、日期和命中的原话。',
       input_schema: S({ query: str('要找的内容，关键词或一句话') }, ['query']),
-      run: async ({ query }) => {
-        const hits = await sessions.searchMessages(query, { exclude: ctx.currentSessionId?.(), k: 6, minScore: 0.5 });
+      run: async ({ query }, { sessionId } = {}) => {
+        // 优先用任务绑定的会话，避免后台执行时跟随界面切到另一段。
+        const currentId = sessionId ?? ctx.currentSessionId?.();
+        const hits = await sessions.searchMessages(query, { k: 6, minScore: 0.5 });
         if (!hits.length) return '之前的对话里没有找到相关内容。';
-        return hits.map((h) => `- id: ${h.sessionId}「${h.title}」${new Date(h.ts).toLocaleString('zh-CN', { hour12: false })}\n  用户：${h.user.slice(0, 200)}${h.reply ? `\n  未央：${h.reply.replace(/\s+/g, ' ').slice(0, 300)}` : ''}`).join('\n');
+        return hits.map((h) => `- id: ${h.sessionId}${h.sessionId === currentId ? '（就是本段对话）' : ''}「${h.title}」${new Date(h.ts).toLocaleString('zh-CN', { hour12: false })}\n  用户：${h.user.slice(0, 200)}${h.reply ? `\n  未央：${h.reply.replace(/\s+/g, ' ').slice(0, 300)}` : ''}`).join('\n');
       }
     },
     {
       name: 'read_conversation',
-      description: '读取之前某段对话的全文（id 来自 search_conversations 或上下文里的“最近的其他对话”）。内容很长时可以给 query，只读相关的部分。',
+      description: '读取本段或其他对话的全文（id 来自 search_conversations 或上下文里的对话记录）。内容很长时可以给 query，只读相关的部分。',
       input_schema: S({ id: str('对话 id'), query: str('可选：只看和这个相关的部分') }, ['id']),
       run: async ({ id, query }) => {
         const s = await sessions.get(id);
@@ -661,8 +663,3 @@ function formatRun(r) {
 export function fmtSize(n) {
   return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 }
-
-
-
-
-
