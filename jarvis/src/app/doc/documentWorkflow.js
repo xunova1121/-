@@ -39,7 +39,8 @@ function resultSummary(state) {
     tokens: null,
     unresolved: state.review?.issues?.filter((item) => item.severity === 'must_fix').length ?? 0,
     warningCount: state.review?.issues?.filter((item) => item.severity === 'warning').length ?? 0,
-    reviewMode: state.reviewMode || 'not_checked'
+    reviewMode: state.reviewMode || 'not_checked',
+    researchStatus: state.research?.status || 'not_run'
   };
 }
 
@@ -54,6 +55,13 @@ export function createDocumentWorkflow(app) {
     if (state.depth === 'expert') execution.retrieval?.upgrade?.(state.input.task);
     await save();
     try {
+      if (state.phase === 'new' && state.depth === 'expert' && !state.research && app.documentResearch) {
+        state.pendingStage = 'researching';
+        await save();
+        state.research = await app.documentResearch({ id: state.id, ...state.input }, execution);
+        state.timings = [...state.timings, { stage: 'researching', elapsedMs: state.research.elapsedMs || 0 }].slice(-LIMITS.calls);
+        await save();
+      }
       if (state.phase === 'new' && state.depth === 'expert') {
         execution.progress?.('分析任务要求与业务场景…');
         state.plan = await generateTaskBrief(state.input, ask);
@@ -90,6 +98,8 @@ function createAsk(app, state, execution, save) {
     const isReview = ['reviewing', 'verifying'].includes(stage);
     const llm = isReview ? (app.documentReviewer ?? app.llm) : app.llm;
     if (!llm) throw workflowError('专业文档工作流需要配置真实模型', 'DOCUMENT_MODEL_REQUIRED');
+    const research = await app.documentResearchContext?.(state.research, execution);
+    execution.signal?.throwIfAborted();
     execution.retrieval?.consume('model');
     state.calls++;
     state.pendingStage = stage;
@@ -101,6 +111,7 @@ function createAsk(app, state, execution, save) {
         (signal) =>
           llm({
             ...request,
+            prompt: request.prompt + (research ? `\n${research}` : ''),
             system: request.system + `\n任务建立时的北京时间：${state.input.referenceTime || '未记录，不猜当前日期'}`,
             signal,
             allowWebSearch: false,
@@ -187,3 +198,4 @@ async function inspectAndRevise(state, ask, save, execution) {
     await save();
   }
 }
+
