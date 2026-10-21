@@ -4,13 +4,14 @@
  *   1. 大纲    模型按要求和材料列出各节标题、要点和字数；用户说“先看大纲”时到这里就停，把大纲给用户确认
  *   2. 分节写  第一节先写，其余 3 节一起写；每节带完整大纲和已写完各节的摘要，只写这一节
  *   （返工也是几节一起改：一节一节排队，十几节的文档要半小时以上）
- *   3. 统一润色 通读全文，只给出具体的替换（术语统一、重复删减、衔接补充），程序按原文片段替换，不整篇重写
- *   4. 读者测试 另一个不带对话上下文的模型只拿到成品，以目标读者身份通读，找出看不懂、缺依据、前后矛盾的地方
+ *   3. 合并通读 不带写作过程，以目标读者/编辑身份一次找出术语替换与内容问题
+ *   4. 定点修正 只替换能匹配的原文，保留未修改部分
  *   5. 返工一轮 有问题的节带着读者意见重写，只改一轮（几节同时改）
  *
  * 写作“先结构后分节、写完找读者试读”是通用的写作方法，这里按未央的工具自己实现。
  */
 import { parseJson } from './research.js';
+import { throwControl } from '../core/networkRequest.js';
 
 const clip = (s, n) => (String(s).length > n ? `${String(s).slice(0, n)}…` : String(s));
 const SUMMARY_MARK = '<<<本节摘要>>>';
@@ -118,32 +119,39 @@ export async function writeLongDocument({ task, title = '', material = '', words
   await mapLimit(plan.sections.slice(1).map((_, k) => k + 1), SECTION_CONCURRENCY, writeOne);
   let body = parts.map((p) => p.text).join('\n\n');
 
-  // ---------- 3. 统一润色（只做具体替换）
-  say('通读全文，统一术语和衔接…');
+  // ---------- 3. 一次通读同时完成编辑与读者审查；关闭读者测试时只做编辑。
   let edits = 0;
-  try {
-    const j = parseJson(await llm({
-      signal,
-      system: '你是严谨的编辑。只输出 JSON。',
-      prompt: `下面是一篇分节写成的文档《${plan.title}》。请通读，找出需要统一修改的地方：同一事物前后叫法不一致、数字前后矛盾、相邻两节内容重复、节与节之间缺少衔接。
-只给出具体的替换，每条的 find 必须是原文里一字不差的片段（10-80 字），replace 是改后的文字。没有要改的就返回空数组。最多 12 条。
-输出 JSON：{"edits":[{"find":"原文片段","replace":"改成","why":"原因"}]}
-
-${clip(body, 30000)}`
-    }));
-    for (const e of Array.isArray(j?.edits) ? j.edits.slice(0, 12) : []) {
-      const find = String(e?.find ?? '');
-      if (find.length >= 4 && body.includes(find) && typeof e.replace === 'string') { body = body.replace(find, e.replace); edits++; }
-    }
-  } catch (e) {
-    if (e.name === 'AbortError') throw e;
-  }
-
-  // ---------- 4. 读者测试 + 5. 返工一轮
   let rev = null;
   if (review) {
     say('请一位“读者”通读挑问题…');
     rev = await readerTest({ title: plan.title, body, task, llm: readerLlm ?? llm, signal });
+  } else {
+    say('通读全文，统一术语和衔接…');
+  }
+  let changes = rev?.edits || [];
+  if (!review) {
+    try {
+      const result = parseJson(await llm({
+        signal,
+        system: '你是严谨的编辑。只输出 JSON。',
+        prompt: `请通读《${plan.title}》，找出需要统一修改的地方：术语、数字矛盾、重复和衔接。只给出原文片段的替换，最多12条，不补造事实。输出JSON：{"edits":[{"find":"原文片段","replace":"改成","why":"原因"}]}\n${clip(body, 30000)}`
+      }));
+      changes = Array.isArray(result?.edits) ? result.edits.slice(0, 12) : [];
+    } catch (error) {
+      throwControl(error, signal);
+    }
+  }
+  for (const change of changes) {
+    const find = String(change?.find || '');
+    if (find.length < 4 || !body.includes(find) || typeof change.replace !== 'string') continue;
+    const fixed = body.replace(find, change.replace);
+    if (fixed.length < body.length * 0.5) continue;
+    body = fixed;
+    edits++;
+  }
+
+  // ---------- 4. 按同一次通读的读者意见，最多返工一轮。
+  if (review) {
     if (rev.issues.length) {
       const bySection = splitSections(body);
       const touched = new Set();
@@ -215,14 +223,15 @@ ${clip(body, 30000)}
 - 缺内容：读者最关心的问题没回答（比如方案没写预算、计划没写负责人）
 - 太单薄：只有一句话的要点、只有观点没有依据和分析的段落
 ${CHECKLIST}
-输出 JSON：{"issues":[{"type":"看不懂|缺依据|前后矛盾|缺内容|太单薄","section":"所在的一级标题","quote":"原文里一字不差的片段（10-60 字，没有就留空）","problem":"问题是什么","suggestion":"怎么改"}]}`
+同时找出需要统一修改的地方：术语叫法、数字矛盾、重复和衔接，按原文片段给最多12条edits，find必须原样，replace不得编造事实。\n输出 JSON：{"edits":[{"find":"原文片段","replace":"改后文字","why":"原因"}],"issues":[{"type":"看不懂|缺依据|前后矛盾|缺内容|太单薄","section":"所在的一级标题","quote":"原文里一字不差的片段（10-60 字，没有就留空）","problem":"问题是什么","suggestion":"怎么改"}]}`
     }));
     const issues = (Array.isArray(j?.issues) ? j.issues : []).slice(0, 8).map((x) => ({
       type: String(x?.type ?? ''), section: String(x?.section ?? ''), quote: String(x?.quote ?? ''), problem: String(x?.problem ?? ''), suggestion: String(x?.suggestion ?? '')
     })).filter((x) => x.problem);
-    return { issues, revised: [] };
+    if (!Array.isArray(j?.issues)) return { issues: [], edits: [], revised: [], failed: true };
+    return { issues, edits: Array.isArray(j.edits) ? j.edits.slice(0, 12) : [], revised: [] };
   } catch (e) {
-    if (e.name === 'AbortError') throw e;
+    throwControl(e, signal);
     return { issues: [], revised: [], failed: true };
   }
 }
@@ -249,7 +258,7 @@ ${sec.text}
     })).trim().replace(/^```(?:markdown)?\s*|\s*```$/g, '');
     return /^##\s/.test(raw) && raw.length > sec.text.length * 0.5 ? raw : null; // 改坏了（太短、丢了标题）就保留原文
   } catch (e) {
-    if (e.name === 'AbortError') throw e;
+    throwControl(e, signal);
     return null;
   }
 }
@@ -266,4 +275,5 @@ export function splitSections(body) {
 
 /** 大纲 → 给用户看的文字 */
 export const outlineMarkdown = (title, sections) => `# ${title}\n\n${sections.map((s) => `## ${s.heading}${s.words ? `（约 ${s.words} 字）` : ''}\n${s.points.map((p) => `- ${p}`).join('\n')}`).join('\n\n')}`;
+
 
