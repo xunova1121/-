@@ -490,7 +490,8 @@ export async function recall(query, { includeArchived = false } = {}) {
   const vec = await embedOne(query);
   const hits = score(pool, query, (m) => m.content, { k: 8, vec });
   const eps = score((await episodes.all()).filter(safe((e) => e.summary)), query, (e) => e.summary, { k: 3, vec, weights: false });
-  return { memories: hits, episodes: eps.filter((e) => e.relevance >= 0.2) };
+  const ls = score((await lessons.all()).filter(safe((l) => l.content)), query, (l) => `${l.content} ${l.context ?? ''}`, { k: 3, weights: false });
+  return { memories: hits, episodes: eps.filter((e) => e.relevance >= 0.2), lessons: ls };
 }
 
 /** 维护：长期不用、重要度低、没钉住的记忆归档（不删除）；补算缺失的向量 */

@@ -80,16 +80,21 @@ export function createTools(ctx) {
     queryGuardTool(),
     {
       name: 'remember',
-      description: '把关于用户的长期信息存入记忆（偏好、身份、习惯、目标、重要事实）。用户说“记住……”或透露了以后用得上的个人信息时调用。和已有记忆重复会自动合并，同一件事的新说法会自动取代旧的（旧版本保留为历史）。不要记录密码、密钥等敏感信息。',
+      description: '把关于用户的长期信息存入记忆（偏好、身份、习惯、目标、重要事实）。用户说“记住……”或透露了以后用得上的个人信息时调用。用户纠正你的做事方式、说“记住这个教训”时用 category: lesson，记成经验教训。只有调用成功才算记住，不能只在回答里说“记住了”。和已有记忆重复会自动合并，同一件事的新说法会自动取代旧的（旧版本保留为历史）。不要记录密码、密钥等敏感信息。',
       input_schema: S({
         content: str('要记住的一句话，用第三人称陈述，如“用户喜欢简洁的回答”'),
-        category: { type: 'string', enum: ['profile', 'preference', 'fact', 'goal', 'other'], description: 'profile 身份 / preference 偏好 / fact 事实 / goal 目标' },
+        category: { type: 'string', enum: ['profile', 'preference', 'fact', 'goal', 'lesson', 'other'], description: 'profile 身份 / preference 偏好 / fact 事实 / goal 目标 / lesson 用户纠正过的做事方式（经验教训）' },
         importance: { type: 'integer', minimum: 1, maximum: 5, description: '重要度 1–5，身份信息和明确的长期偏好给 4–5' }
       }, ['content']),
       run: async ({ content, category, importance }, { sessionId } = {}) => {
         const currentSession = sessionId ? await sessions.get(sessionId) : null;
         const said = [...(currentSession?.messages || [])].reverse().find(message=>message.role==='user')?.content || '';
         const explicit = /记住|记下|我叫|我的名字|我住在/.test(said);
+        // 做事方式的教训放进“经验教训”（每轮上下文里有一节），不混在关于用户的记忆里
+        if (category === 'lesson') {
+          const l = await memory.addLesson(content, said);
+          return `已记为经验教训（${l.content}），以后的对话会带上。`;
+        }
         const m = await memory.remember(content, category, {importance,source:explicit?'用户明确指令经工具记录':'模型工具记录，待核实',evidence:String(said).slice(0,500)});
         return m.action === 'NOOP' ? `这条已经记得（${m.content}），已刷新。`
           : m.action === 'UPDATE' ? `已更新记忆：「${m.previous}」→「${m.content}」（旧的保留为历史）。`
@@ -98,11 +103,12 @@ export function createTools(ctx) {
     },
     {
       name: 'recall',
-      description: '在长期记忆和过往对话摘要中检索与问题相关的内容。',
+      description: '在长期记忆、经验教训和过往对话摘要中检索与问题相关的内容。用户问“你记住了吗 / 有没有放进记忆”时先用它查，查到才说记住了。',
       input_schema: S({ query: str('检索关键词或问题') }, ['query']),
       run: async ({ query }) => {
         const r = await memory.recall(query);
         const lines = [
+          ...(r.lessons ?? []).map((l) => `- [经验教训] ${l.content}`),
           ...r.memories.map((m) => `- [${m.id}] ${m.content}（${memory.CATEGORIES[m.category] ?? '其他'}，重要度 ${m.importance}${m.history?.length ? `，更新过 ${m.history.length} 次` : ''}）`),
           ...r.episodes.map((e) => `- [对话 ${new Date(e.ts).toLocaleDateString('zh-CN')}] ${e.summary}`)
         ];

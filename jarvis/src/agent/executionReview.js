@@ -78,7 +78,7 @@ export function createExecutionReview(goal = '') {
   const rereadBlocked = (name, args = {}) => VERIFY_TOOLS.test(name) && verified(args.path) && (reads.get(String(args.path).slice(0, 400)) ?? 0) >= 1;
   const required = () => {
     const contract = taskContract(request);
-    return contract.formats.length > 0 || contract.coding || files.size > 0 || artifacts.size > 0 || receipts.some(receipt => receipt.ok && /^(?:create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet|write_file|edit_file|run_javascript|run_python|computer_run|run_project_tests)$/.test(receipt.tool));
+    return contract.formats.length > 0 || contract.coding || contract.remembering || contract.askingMemory || files.size > 0 || artifacts.size > 0 || receipts.some(receipt => receipt.ok && /^(?:create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet|write_file|edit_file|run_javascript|run_python|computer_run|run_project_tests)$/.test(receipt.tool));
   };
   const contractNote = () => {
     if (!required()) return '';
@@ -110,6 +110,13 @@ export function createExecutionReview(goal = '') {
       retrievalReceipts: receipts.filter((receipt) => receipt.version === version && receipt.ok && /^(?:web_search|fetch_url|fact_check|deep_research|get_weather|get_stock_kline|read_evidence)$/.test(receipt.tool)).length,
       version,
       calls: sequence,
+      // 说“记住了 / 记进去了”必须有真实的记忆工具回执
+      memory: !taskContract(request).remembering
+        ? 'not_required'
+        : current.some((receipt) => receipt.ok && /^(?:remember|core_memory_update|save_skill)$/.test(receipt.tool))
+          ? 'saved'
+          : 'not_saved',
+      memoryChecked: !taskContract(request).askingMemory || current.some((receipt) => receipt.ok && receipt.tool === 'recall'),
       calculation: receipts.some((receipt) => receipt.version === version && receipt.ok && /^(?:verify_numbers|run_javascript|run_python)$/.test(receipt.tool))
         ? 'tool_checked'
         : 'not_checked',
@@ -128,6 +135,9 @@ export function createExecutionReview(goal = '') {
       issues.push('这些要求的文件还没有有效产物读回回执：' + result.pendingFormats.join('、') + '；先实际生成并核对，不能只说已完成');
     if (result.contract.calculation && result.calculation === 'not_checked')
       issues.push('涉及确定性数值计算，但还没有verify_numbers或代码计算回执；先计算核对，不能自行心算冒充已验证');
+    if (result.memory === 'not_saved')
+      issues.push('用户要你记住，但本轮没有调用 remember 保存（做事方式的教训用 category: lesson）；现在调用，保存成功前不能说“记住了”');
+    if (!result.memoryChecked) issues.push('用户问有没有记住：先用 recall 查，查到了再回答，查不到就如实说没记，并问要不要现在记');
     if (result.pendingReadback.length) issues.push('这些修改尚未读回核对：' + result.pendingReadback.join('、'));
     if (result.codeExecution === 'not_run') issues.push('已修改代码但没有实际运行记录；先运行适用测试，无法执行就明确未验证');
     if (result.artifacts.some((item) => item.errors > 0)) issues.push('文档仍有生成器报告的问题，不能宣称排版或公式全部通过');

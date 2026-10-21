@@ -21,8 +21,14 @@ export function taskContract(text = '') {
         .map(([, format]) => format)
     : [];
   const calculation = /\d/.test(value) && /盈亏|收益率|孕周|多少天|相差|日期差|百分比|合计|加起来/.test(value);
+  // 用户要她记住（不是在问“记住了吗”）：必须真的调用记忆工具；问有没有记住：必须先查
+  const asking =
+    /(?:记住|记下|记进去|放进记忆|记到记忆|记得)(?:了)?(?:吗|么|没有|没)[？?]?\s*$/m.test(value) || /有没有(?:记|放进)|你有(?:记|放进)[^。！!]*[吗么]/.test(value);
+  const remembering = !asking && /记住|记下来|记下这|记到记忆|放进记忆|别忘了|长点记性/.test(value);
   return {
     formats,
+    remembering,
+    askingMemory: asking,
     coding: creating && /代码|程序|脚本|JavaScript|TypeScript|Python|应用|网页|网站|接口/i.test(value),
     calculation,
     researching: /查|搜索|核实|调研|研究|最新|今天|行情/.test(value),

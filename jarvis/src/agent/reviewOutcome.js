@@ -16,6 +16,10 @@ export function reviewOutcome(report, { interrupted = false, nativeSearchCalls =
     warnings.push(`有 ${report.pendingReadback.length} 个修改后的文件尚未读回检查。`);
     partial = true;
   }
+  if (report.memory === 'not_saved') {
+    warnings.push('用户要求记住的内容没有真正存进记忆。');
+    partial = true;
+  }
   if (report.codeExecution === 'not_run') warnings.push('代码尚未实际运行测试。');
   if (report.artifacts?.some((item) => item.errors > 0)) {
     warnings.push('文档仍有未解决的生成或排版检查问题。');
