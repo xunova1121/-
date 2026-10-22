@@ -19,6 +19,13 @@ export function createModelRequest({ current, effort, signal, lookupDeadline, lo
   let requestWindow;
   const boundary = new OutputBoundary();
   let streamed = false;
+  let outputObserved = false;
+  let resultKind = 'error';
+  const observeOutput = () => {
+    if (outputObserved || requestCtrl.signal.aborted) return;
+    outputObserved = true;
+    emit({ type: 'diagnostic', phase: 'model_first_output' });
+  };
   return {
     get searchTimedOut() {
       return searchTimedOut;
@@ -51,6 +58,7 @@ export function createModelRequest({ current, effort, signal, lookupDeadline, lo
           onRetry,
           onText: (delta, meta) => {
             if (requestCtrl.signal.aborted) return;
+            if (delta || meta?.serverTool) observeOutput();
             if (meta?.serverTool) {
               emit({ type: 'server_tool', name: meta.serverTool });
               if (/search/.test(meta.serverTool)) {
@@ -71,15 +79,21 @@ export function createModelRequest({ current, effort, signal, lookupDeadline, lo
           }
         })
       );
+      // 工具参数可能只在结束时可见；这是应用观察点，不冒充网络首包时间。
+      observeOutput();
       if (!streamed && result.text) onText(boundary.push(result.text));
       onText(boundary.flush());
       if (result.stop === 'max_tokens' || result.stop === 'length')
-        throw Object.assign(new Error('模型输出达到长度上限，回答尚未完成'), { code: 'MODEL_OUTPUT_LIMIT', kind: 'api' });
+        {
+          resultKind = 'error';
+          throw Object.assign(new Error('模型输出达到长度上限，回答尚未完成'), { code: 'MODEL_OUTPUT_LIMIT', kind: 'api' });
+        }
+      resultKind = result.toolCalls?.length ? 'tools' : 'answer';
       return result;
     },
     dispose() {
       requestWindow?.dispose();
-      emit({ type: 'diagnostic', phase: 'model_end' });
+      emit({ type: 'diagnostic', phase: 'model_end', resultKind });
       clearTimeout(searchTimer);
       signal?.removeEventListener('abort', relayAbort);
     }
