@@ -91,8 +91,11 @@ export function createAdapter(cfg, { gateway = null } = {}) {
   const baseURL = viaGw ? `${gateway.origin}/api/llm/${p.id}` : (p.custom ? cfg.baseURLs[p.id] : p.baseURL);
   const headers = p.id === 'openrouter' ? { 'HTTP-Referer': 'https://jarvis.local', 'X-Title': 'Jarvis' } : {};
   if (viaGw && p.custom) headers['x-jarvis-upstream'] = cfg.baseURLs[p.id].trim();
-  return { model, adapter: createOpenAIAdapter({ baseURL, apiKey: key || (viaGw ? 'use-gateway-key' : ''), headers }) };
+  return { model, adapter: createOpenAIAdapter({ baseURL, apiKey: key || (viaGw ? 'use-gateway-key' : ''), headers, serviceTier: serviceTierOf(cfg, p.id) }) };
 }
+
+/** 服务档位（服务商“配置”里填的，如 fast）：每次请求带上 service_tier */
+export const serviceTierOf = (cfg, id) => String(cfg.serviceTiers?.[id] ?? '').trim().slice(0, 40);
 
 /** 中转地址的根（去掉结尾的 / 和 /v1） */
 const rootOf = (url) => String(url || '').trim().replace(/\/+$/, '').replace(/\/v1$/, '');
@@ -110,10 +113,12 @@ function multiAdapter(p, cfg, model, key, gateway) {
   const base = viaGw ? `${gateway.origin}/api/llm/${p.id}` : root;
   const up = viaGw ? { 'x-jarvis-upstream': root } : {};
   const search = cfg.claudeWebSearch !== false;
-  const proto = protocolFor(model);
+  const tier = serviceTierOf(cfg, p.id);
+  // 填了服务档位：GPT 也走 Chat Completions（中转站说明里快速档是这样调的），不走 Responses
+  const proto = tier && protocolFor(model) === 'responses' ? 'chat' : protocolFor(model);
   if (proto === 'anthropic') return createAnthropicAdapter({ apiKey: key, baseURL: base, headers: { ...up, ...(key && { Authorization: `Bearer ${key}` }) }, webSearch: search, compat: true });
   if (proto === 'responses') return createResponsesAdapter({ baseURL: `${base}/v1`, apiKey: key, headers: up, webSearch: search });
-  return createOpenAIAdapter({ baseURL: `${base}/v1`, apiKey: key, headers: up });
+  return createOpenAIAdapter({ baseURL: `${base}/v1`, apiKey: key, headers: up, serviceTier: tier });
 }
 
 /** 实际使用的语音引擎（解析 auto） */

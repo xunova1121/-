@@ -108,6 +108,8 @@ export function initModelLibrary({ root, workspace, toast }) {
       ariaLabel: 'API Key'
     });
     const model = node('input', { placeholder: '手动添加完整模型 ID（可选）', maxLength: 200, ariaLabel: '手动模型 ID' });
+    // 服务档位：有的服务商用 service_tier 选快速档（如 TeamoRouter 填 fast），不填就是普通档
+    const tier = node('input', { value: cfg.serviceTiers?.[provider] || '', placeholder: '可选，如 fast（按服务商说明填）', maxLength: 40, ariaLabel: '服务档位' });
     const save = button('保存服务商', () =>
       run(async () => {
         if (meta.custom) {
@@ -125,7 +127,8 @@ export function initModelLibrary({ root, workspace, toast }) {
             ...value,
             providerNames: { ...value.providerNames, [provider]: alias.value.trim().slice(0, 40) || meta.name },
             ...(meta.custom && { baseURLs: { ...value.baseURLs, [provider]: address.value.trim() } }),
-            ...(secret.value.trim() && { keys: { ...value.keys, [provider]: secret.value.trim() } })
+            ...(secret.value.trim() && { keys: { ...value.keys, [provider]: secret.value.trim() } }),
+            serviceTiers: { ...value.serviceTiers, [provider]: tier.value.trim() }
           };
           const id = model.value.trim();
           if (id) {
@@ -146,6 +149,7 @@ export function initModelLibrary({ root, workspace, toast }) {
         node('label', {}, '接口地址', address),
         node('label', {}, '密钥', secret),
         node('label', {}, '手动型号', model),
+        node('label', {}, '服务档位', tier),
         save
       )
     );

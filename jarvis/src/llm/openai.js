@@ -178,8 +178,11 @@ export const sleep = (ms, signal) => new Promise((resolve, reject) => {
 /** 续写时发给模型的话：接着刚才断开的地方写，不要重复 */
 export const CONTINUE_PROMPT = '（网络中断了，你上一条回答只发出了上面这一部分。）请从中断的地方直接接着往下写，不要重复已经写过的内容，也不要提到中断。';
 
-export function createOpenAIAdapter({ baseURL, apiKey, headers = {}, retryDelays = RETRY_DELAYS }) {
-  const once = createOnce({ baseURL, apiKey, headers });
+/**
+ * serviceTier：服务档位（如中转站的 "fast" 快速档），每次请求带上 service_tier；服务商不认就自动去掉重试
+ */
+export function createOpenAIAdapter({ baseURL, apiKey, headers = {}, retryDelays = RETRY_DELAYS, serviceTier = '' }) {
+  const once = createOnce({ baseURL, apiKey, headers, serviceTier });
   return {
     kind: 'openai',
     async stream(opts) {
@@ -205,7 +208,8 @@ export function createOpenAIAdapter({ baseURL, apiKey, headers = {}, retryDelays
   };
 }
 
-function createOnce({ baseURL, apiKey, headers = {} }) {
+const noTierModels = new Set(); // 不认 service_tier 的型号：去掉后不再带
+function createOnce({ baseURL, apiKey, headers = {}, serviceTier = '' }) {
   return {
     async stream({ signal: outer, ...req }) {
       const guard = stallGuard(outer, req.stallTimeouts);
@@ -213,7 +217,7 @@ function createOnce({ baseURL, apiKey, headers = {} }) {
     }
   };
   async function streamOnce({ model, system, messages, tools, signal, onText, effort }, guard) {
-    const send = (withTools, withEffort) => fetch(`${baseURL.replace(/\/$/, '')}/chat/completions`, {
+    const send = (withTools, withEffort, withTier = useTier) => fetch(`${baseURL.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(apiKey && { Authorization: `Bearer ${apiKey}` }), ...headers },
       body: JSON.stringify({
@@ -222,16 +226,21 @@ function createOnce({ baseURL, apiKey, headers = {} }) {
         messages: toOpenAIMessages(system, messages),
         ...(withTools && tools?.length && { tools: toOpenAITools(tools) }),
         // 思考强度：日常对话让推理模型少想一点，首字快很多（不支持的模型会报错，自动去掉重试）
-        ...(withEffort && { reasoning_effort: effort })
+        ...(withEffort && { reasoning_effort: effort }),
+        ...(withTier && { service_tier: serviceTier })
       }),
       signal
     });
+    let useTier = Boolean(serviceTier) && !noTierModels.has(model);
     let useTools = !noToolModels.has(model);
     let useEffort = Boolean(effort) && !noEffortModels.has(model);
     let res = await guard.race(send(useTools, useEffort));
     for (let retry = 0; retry < 2 && res.status === 400; retry++) {
       const detail = await res.clone().text().catch(() => '');
-      if (useEffort && /reasoning_effort|reasoning effort|unsupported parameter|unknown parameter|unrecognized/i.test(detail)) {
+      if (useTier && /service_tier|service tier/i.test(detail)) {
+        noTierModels.add(model);
+        useTier = false;
+      } else if (useEffort && /reasoning_effort|reasoning effort|unsupported parameter|unknown parameter|unrecognized/i.test(detail)) {
         noEffortModels.add(model);
         useEffort = false;
       } else if (useTools && tools?.length && /does not support tools|tools? (is|are) not supported/i.test(detail)) {
