@@ -24,7 +24,7 @@ export async function streamPCModel(req,res,body,{cfg,makeAdapter=createAdapter}
   const route=routeFor(cfg,kind),first=makeAdapter(route.cfg);
   if(first.problem)throw Object.assign(new Error(`服务器模型配置不可用：${first.problem}`),{status:409});
   // 只使用服务器已配置的模型，客户端不能提交任意上游URL或密钥。
-  const configured=[{...first,provider:route.cfg.provider},...fallbackRoutes(cfg,{provider:route.cfg.provider,model:first.model}).map(f=>({...makeAdapter(f.cfg),provider:f.provider})).filter(f=>!f.problem&&f.adapter&&f.model)];
+  const configured=[{...first,provider:route.cfg.provider},...fallbackRoutes(cfg,{provider:route.cfg.provider,model:first.model,task:kind}).map(f=>({...makeAdapter(f.cfg),provider:f.provider})).filter(f=>!f.problem&&f.adapter&&f.model)];
   // 本轮已切到可用备用模型时，后续步骤不要再次等待故障主模型；只能选择服务器配置中的候选。
   const preferred=body.preferredModel?.task===kind&&configured.find(m=>m.model===body.preferredModel?.model&&m.provider===body.preferredModel?.provider);
   const models=preferred?[preferred,...configured.filter(m=>m!==preferred)]:configured;

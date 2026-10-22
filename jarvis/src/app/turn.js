@@ -268,7 +268,7 @@ export function createTurn(app) {
     // 备用模型：当前模型出错（重试后还不行）时自动换着用
     const fallbacks = remotePC
       ? []
-      : fallbackRoutes(app.llmConfig, { provider: route.cfg.provider, model })
+      : fallbackRoutes(app.llmConfig, { provider: route.cfg.provider, model, task })
           .map((f) => ({ ...createAdapter(f.cfg, { gateway: app.gateway }), label: `${providerLabel(f.cfg, f.provider)} · ${f.model}` }))
           .filter((f) => !f.problem && f.adapter && f.model);
 

@@ -12,6 +12,7 @@
  * 只写模型名的，用当前服务商。那个服务商没填密钥时，退回默认模型。
  */
 import { providerById } from '../../shared/providers.js';
+import { abilityLines, cfgForLine, TASK_ABILITY } from './abilities.js';
 
 /** 跨服务商的模型写法：“服务商::模型” */
 export const SEP = '::';
@@ -107,24 +108,19 @@ const PREFER = {
 /** 这个模型能不能看图（按模型名判断，聚合平台上的名字五花八门，判断不了的当不能看） */
 export function seesImages(model) {
   const m = String(model || '');
-  return PREFER.vision.some((re) => re.test(m)) || /qwen.*vl|glm-4v|doubao.*vision|llava|gemma-?3/i.test(m);
+  return PREFER.vision.some((re) => re.test(m)) || /qwen.*vl|glm-4v|glm-[\d.]+v\b|doubao.*vision|llava|gemma-?3/i.test(m);
 }
-/** 主模型看不了图时，自动找的看图模型：百炼 qwen-vl（老牌、稳定）优先，其次 DeepSeek 官方的看图模型（实验版） */
-export const AUTO_VISION = [
-  { provider: 'qwen', model: 'qwen-vl-max' },
-  { provider: 'deepseek', model: 'deepseek-v4-flash-vision-exp' }
-];
 /**
- * 看图用哪条线路：分工里设了“看图”就用它；当前模型自己能看就用当前的；否则从填了 Key 的服务商里挑 AUTO_VISION。
+ * 看图用哪条线路：分工里设了“看图”就用它；当前模型自己能看就用当前的；否则按能力表（abilities.js）挑。
  * @returns {{ cfg: object, provider: string, model: string, auto: boolean } | null}  一个都没有时返回 null
  */
 export function visionRoute(cfg) {
   const r = routeFor(cfg, 'vision');
   if (r.routed || seesImages(r.model)) return { cfg: r.cfg, provider: r.provider, model: r.model, auto: false };
-  const keyed = keyedProviders(cfg);
-  const pick = AUTO_VISION.find((v) => keyed.includes(v.provider));
-  if (!pick) return null;
-  return { cfg: { ...cfg, provider: pick.provider, models: { ...cfg.models, [pick.provider]: pick.model }, routing: { enabled: false } }, ...pick, auto: true };
+  // 能力表里设的看图模型，或按能力表自动挑（见 abilities.js）
+  const line = abilityLines(cfg, 'vision').main;
+  if (!line) return null;
+  return { cfg: cfgForLine(cfg, line), ...line, auto: !cfg.abilities?.vision?.main };
 }
 const NOT_CHAT = /embed|tts|whisper|audio|image|dall|moderation|rerank|transcribe|realtime|search-preview|flux|midjourney|stable-?diffusion|sdxl|seedream|imagen|cogview|kolors|sora|veo|kling|video/i;
 
@@ -163,6 +159,13 @@ function versionOf(id) {
  * @returns {{ cfg: object, task: string, model: string, routed: boolean }}
  */
 export function routeFor(cfg, task) {
+  // 能力表里亲手设过这项的常用模型：用它（见 abilities.js）
+  const ability = TASK_ABILITY[task];
+  const own = ability && cfg.abilities?.[ability]?.main ? abilityLines(cfg, ability) : null;
+  if (own?.set) {
+    const routed = !(own.main.provider === cfg.provider && own.main.model === (cfg.models?.[cfg.provider] ?? ''));
+    return { cfg: routed ? cfgForLine(cfg, own.main) : cfg, task, model: own.main.model, provider: own.main.provider, routed };
+  }
   const r = cfg.routing;
   const on = r?.enabled && (r.provider === cfg.provider || r.multi);
   let { provider, model } = on ? parseRoute(r.routes?.[task]) : { provider: '', model: '' };
@@ -187,6 +190,11 @@ export function fallbackRoutes(cfg, current = {}, max = 2) {
     if (out.some((x) => x.provider === provider && x.model === model)) return;
     out.push({ cfg: { ...cfg, provider, models: { ...cfg.models, [provider]: model } }, provider, model });
   };
+  // 能力表里这项能力的备用排第一（current.task：这一轮的任务类型）
+  if (cfg.abilities && current.task) {
+    const own = abilityLines(cfg, TASK_ABILITY[current.task] || 'chat').backup;
+    if (own) add(own.provider, own.model);
+  }
   const r = cfg.routing;
   // 新模型库明确配置的备用线路只按顺序使用，不混入分工或其他服务商。
   if (cfg.fallbackPolicy === 'explicit') {

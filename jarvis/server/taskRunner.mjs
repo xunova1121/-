@@ -2,6 +2,7 @@ import { deepseekSearchOptions } from '../src/agent/deepseekSearch.js';
 import { evaluationTools, bindEvaluation } from './evaluation.mjs';
 import { measureModelInput } from '../shared/modelMetrics.js';
 import { createHelperLlm } from '../src/llm/helper.js';
+import { createEmbedder } from '../src/llm/embeddings.js';
 import { projectExecutionTool } from './projectExecution.mjs';
 import { renderOffice } from './officeRender.mjs';
 import { createTaskTiming } from '../shared/taskTiming.js';
@@ -179,11 +180,13 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     record(task, { type: 'task_state', status: 'running' });
     const session = await sessions.get(task.sessionId);
     const cfg = await getConfig();
+    // 记忆按意思找：用能力表“记忆向量”那一项（服务器没有跨域限制）；没有就只按关键字
+    memory.configureMemory({ llm: helper(cfg, 'write'), embedder: createEmbedder(cfg, { direct: true }) });
     const kind = classifyTask(task.text, { images: task.images.length });
     const route = routeFor(cfg, kind);
     const { adapter, model, problem } = makeAdapter(route.cfg);
     if (problem) return finish(task, session, { error: `服务器上的模型还没配置好：${problem}` });
-    const fallbacks = fallbackRoutes(cfg, { provider: route.cfg.provider, model }).map((f) => ({ ...createAdapter(f.cfg), label: `${providerLabel(f.cfg, f.provider)} · ${f.model}` })).filter((f) => !f.problem && f.adapter && f.model);
+    const fallbacks = fallbackRoutes(cfg, { provider: route.cfg.provider, model, task: kind }).map((f) => ({ ...createAdapter(f.cfg), label: `${providerLabel(f.cfg, f.provider)} · ${f.model}` })).filter((f) => !f.problem && f.adapter && f.model);
     const history = session.messages.slice(0, -1); // 最后一条是这次的用户原话，单独作为 userText
     const tools = evaluationTools(makeTools({
       ...deepseekSearchOptions(cfg),
@@ -306,7 +309,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     const cfg = await getConfig();
     const llm = helper(cfg, 'write');
     if (!task.evaluationId && cfg.autoMemory !== false) {
-      memory.configureMemory({ llm });
+      memory.configureMemory({ llm, embedder: createEmbedder(cfg, { direct: true }) });
       const s = await sessions.get(task.sessionId);
       await memory.reflect([{ role: 'user', content: task.text }, ...task.notes.map((t) => ({ role: 'user', content: t })), { role: 'assistant', content: text }], { session: s && { id: s.id, title: s.title } });
       memory.maintain().catch(() => {}); // 每天最多整理一次记忆

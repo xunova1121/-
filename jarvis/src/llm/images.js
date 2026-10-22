@@ -3,6 +3,7 @@
  * 画图模型和聊天模型分开：gpt-image-2 这类只能画图，不能用来对话。
  */
 import { providerById, upstreamFor, customViaGateway } from '../../shared/providers.js';
+import { abilityLines, cfgForLine } from './abilities.js';
 
 /** 按名字判断模型用途：chat 对话 / image 画图 / video 视频 / audio 语音 / embed 向量、重排 */
 export function modelKind(id) {
@@ -39,11 +40,27 @@ export function imageModelOf(cfg) {
 }
 
 /**
+ * 画图用谁：能力表里“画图”的常用 → 备用（见 abilities.js）；常用出错（断网、额度、模型不在）换备用再画一次。
+ * 能力表里一个能画图的都没有时，照旧用当前服务商 + imageModelOf（老配置）。
  * @returns {Promise<{ blob: Blob, model: string, revised?: string }>}
  */
-export async function generateImage(cfg, { prompt, size = '1024x1024', gateway = null, fetchImpl = globalThis.fetch, signal } = {}) {
+export async function generateImage(cfg, options = {}) {
+  const { main, backup } = abilityLines(cfg, 'image');
+  const lines = main ? [main, backup].filter(Boolean) : [{ provider: cfg.provider, model: imageModelOf(cfg) }];
+  let failure;
+  for (const line of lines) {
+    try {
+      return await drawWith(cfgForLine(cfg, line), line.model, options);
+    } catch (e) {
+      if (options.signal?.aborted || e.name === 'AbortError') throw e;
+      failure = failure ?? e;
+    }
+  }
+  throw failure;
+}
+
+async function drawWith(cfg, model, { prompt, size = '1024x1024', gateway = null, fetchImpl = globalThis.fetch, signal } = {}) {
   const { base, headers } = providerEndpoint(cfg, gateway);
-  const model = imageModelOf(cfg);
   const res = await fetchImpl(`${base}/images/generations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...headers },

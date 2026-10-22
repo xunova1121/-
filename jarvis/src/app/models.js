@@ -198,13 +198,13 @@ export function createModels(app) {
       : {
           adapter: a.adapter,
           model: a.model,
-          fallbacks: fallbackRoutes(app.llmConfig, { provider: r.cfg.provider, model: a.model })
+          fallbacks: fallbackRoutes(app.llmConfig, { provider: r.cfg.provider, model: a.model, task: ROLE_TASK[role] ?? 'chat' })
             .map((f) => ({ ...createAdapter(f.cfg, { gateway: app.gateway }), label: `${providerLabel(f.cfg, f.provider)} · ${f.model}` }))
             .filter((f) => !f.problem && f.adapter && f.model)
         };
   }
   function syncMemoryEngine() {
-    const embedder = createEmbedder(app.llmConfig, { gateway: app.gateway });
+    const embedder = createEmbedder(app.llmConfig, { gateway: app.gateway, direct: MOBILE });
     agentMemory.configureMemory({ llm: helperLlm(), embedder });
     kb.configureKnowledge({ embedder });
     app.panels?.refreshKb?.();
