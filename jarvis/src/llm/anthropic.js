@@ -6,6 +6,7 @@
  *   - 工具轮内原样回传本轮 content（含思考块），跨轮只保留文本。
  */
 import Anthropic from '@anthropic-ai/sdk';
+import { nativeSearchAllowed } from './nativeSearch.js';
 import { readAnthropicStream } from './anthropicStream.js';
 import { stallGuard, isTransient, retryWait, retryAfterMs, sleep } from './openai.js';
 
@@ -45,9 +46,10 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
   const client = injected ?? new Anthropic({ maxRetries: 0, apiKey: apiKey || 'use-gateway-key', ...(baseURL && { baseURL }), ...(headers && { defaultHeaders: headers }), dangerouslyAllowBrowser: browser });
   let level = 0; // 0 全部参数；1 去掉新参数；2 再去掉联网搜索（只在 compat 时降级）
   const maxLevel = !compat ? 0 : webSearch ? 2 : 1;
+  const usesNativeSearch = (options, lvl = level) => nativeSearchAllowed({ ...options, enabled: webSearch && lvl < 2 });
 
   async function once({ model, system, messages, tools, signal, onText, effort, allowWebSearch = true, maxWebSearches = 5, stallTimeouts }, lvl, state) {
-    const search = webSearch && lvl < 2 && allowWebSearch && maxWebSearches >= 1;
+    const search = usesNativeSearch({ tools, allowWebSearch, maxWebSearches }, lvl);
     const [stable, dynamic] = system;
     const params = {
       model,
@@ -99,6 +101,7 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
 
   return {
     kind: 'anthropic',
+    usesNativeSearch,
     /** 联网搜索现在是否还开着（中转站不支持时会被降级关掉） */
     get webSearchOn() { return webSearch && level < 2; },
     async stream(req) {
@@ -118,5 +121,6 @@ export function createAnthropicAdapter({ apiKey, baseURL, headers, browser = tru
     }
   };
 }
+
 
 

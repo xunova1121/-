@@ -28,7 +28,7 @@ export function guardQuery(query, { original = '', terms = [] } = {}) {
 export function queryGuardTool() {
   return {
     name: 'check_search_terms',
-    description: '搜索前核对原话和搜索词；保护引号实体、六位证券代码以及明确提供的人名。不猜测正确写法。',
+    description: '需要单独检查搜索词时使用；web_search已自动保护原话中的引号实体和证券代码，普通搜索直接调用web_search，不必先调用本工具。不猜测人名正确写法。',
     input_schema: {
       type: 'object',
       properties: {
@@ -42,3 +42,4 @@ export function queryGuardTool() {
     run: async ({ query, original, terms }) => JSON.stringify(guardQuery(query, { original, terms }))
   };
 }
+
