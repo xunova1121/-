@@ -18,6 +18,9 @@ import { deepseekSearchPanel } from './deepseekSearchPanel.js';
 import { serverKeysPanel } from './serverKeysPanel.js';
 import { documentStylesPanel } from './documentStylesPanel.js';
 import { abilityTable } from './abilityTable.js';
+import { mobileAbilityTable } from './mobileAbilityTable.js';
+import './mobileModelCenter.css';
+import { mobileModelNavigation } from './mobileModelNavigation.js';
 import { setAbility } from '../llm/abilities.js';
 
 export const node = (tag, props = {}, ...children) => {
@@ -52,6 +55,9 @@ export function initModelLibrary({ root, workspace, toast }) {
       render();
     }
   };
+  let mobilePage = 'abilities';
+  const compact = matchMedia('(max-width: 720px)');
+  compact.addEventListener('change', () => render());
   let reviewOpen = false; // “文档审查与写作偏好”是否展开（重画时保持）
   const patch = (update) => run(() => workspace.patch(update));
 
@@ -164,6 +170,7 @@ export function initModelLibrary({ root, workspace, toast }) {
       const result = await workspace.catalog(provider, pullController.signal, target);
       await workspace.patch((cfg) => saveCatalog(cfg, provider, result.ids), target);
       catalogProvider = provider;
+      if (compact.matches) mobilePage = 'catalog';
       query = '';
       page = 1;
       notice = `已拉取 ${result.ids.length} 个型号；默认模型未改变`;
@@ -210,7 +217,8 @@ export function initModelLibrary({ root, workspace, toast }) {
       button(
         `管理全部模型${total ? ` · ${total}` : ''} ›`,
         () => {
-          catalogProvider = catalogProvider === meta.id ? '' : meta.id;
+          catalogProvider = compact.matches ? meta.id : catalogProvider === meta.id ? '' : meta.id;
+          if (compact.matches) mobilePage = 'catalog';
           page = 1;
           query = '';
           render();
@@ -218,7 +226,7 @@ export function initModelLibrary({ root, workspace, toast }) {
         'ml-manage'
       )
     );
-    if (catalogProvider === meta.id) renderCatalog(cfg, meta.id, card);
+    if (!compact.matches && catalogProvider === meta.id) renderCatalog(cfg, meta.id, card);
     return card;
   }
 
@@ -278,9 +286,7 @@ export function initModelLibrary({ root, workspace, toast }) {
       'select',
       { ariaLabel: '文档审查模型', className: 'ml-reviewer-select' },
       node('option', { value: '', textContent: '沿用写作模型（同模型自查）' }),
-      ...lines.map((line, index) =>
-        node('option', { value: String(index), textContent: `${providerLabel(cfg, line.provider)} · ${line.model}` })
-      )
+      ...lines.map((line, index) => node('option', { value: String(index), textContent: `${providerLabel(cfg, line.provider)} · ${line.model}` }))
     );
     select.value = selected ? String(lines.findIndex((line) => sameLine(line, selected))) : '';
     select.addEventListener('change', () => {
@@ -290,7 +296,8 @@ export function initModelLibrary({ root, workspace, toast }) {
     return [
       node('p', {
         className: 'ml-muted',
-        textContent: '审查模型只用于专业文档内容审查，不改变聊天模型。先将审查型号加入常用；可跨服务商，按所选服务商计费。选择与写作不同的型号才是不同模型审查。'
+        textContent:
+          '审查模型只用于专业文档内容审查，不改变聊天模型。先将审查型号加入常用；可跨服务商，按所选服务商计费。选择与写作不同的型号才是不同模型审查。'
       }),
       select
     ];
@@ -298,7 +305,10 @@ export function initModelLibrary({ root, workspace, toast }) {
 
   function render() {
     if (!root) return;
+    root.querySelectorAll('dialog[open]').forEach((dialog) => dialog.close());
     const cfg = workspace.config();
+    const mobile = compact.matches;
+    root.classList.toggle('mc-mobile', mobile);
     const tabs = node(
       'div',
       { className: 'ml-tabs', role: 'group', ariaLabel: '正在修改的配置位置' },
@@ -334,7 +344,7 @@ export function initModelLibrary({ root, workspace, toast }) {
           ? '注意：任务在云服务器上做，这里改的是本机配置，不影响现在的回答；要改请切到“云服务器”'
           : '正在修改本机配置，不影响服务器';
     root.replaceChildren(
-      node('p', { className: 'ml-muted', textContent: '配置按运行位置独立保存' }),
+      node(mobile ? 'h2' : 'p', { className: mobile ? 'mc-title' : 'ml-muted', textContent: mobile ? '模型中心' : '配置按运行位置独立保存' }),
       tabs,
       node('p', { className: 'ml-scope-note', textContent: caption })
     );
@@ -345,13 +355,44 @@ export function initModelLibrary({ root, workspace, toast }) {
     root.append(message);
     if (pullController) root.append(button('停止拉取', () => pullController.abort(), 'ml-link'));
     if (!cfg) return;
+    const providers = configuredProviders(cfg, workspace.gateway()?.keys);
+    if (mobile && !providers.some((meta) => meta.id === catalogProvider)) catalogProvider = providers[0]?.id || '';
+    const pages = mobile
+      ? mobileModelNavigation({
+          cfg,
+          workspace,
+          node,
+          button,
+          run,
+          root,
+          providers,
+          mobilePage,
+          catalogProvider,
+          showPage: (id) => {
+            mobilePage = id;
+            render();
+          },
+          chooseProvider: (id) => {
+            catalogProvider = id;
+            query = '';
+            page = 1;
+            render();
+          },
+          pullModels: () => run(() => pull(catalogProvider)),
+          catalog: (host) => renderCatalog(cfg, catalogProvider, host)
+        })
+      : null;
+    const providersHost = pages?.providers || root;
+    const abilityHost = pages?.abilities || root;
     if (hasRouting(cfg))
       root.append(
         node('p', { className: 'ml-notice', textContent: '高级分工已开启，实际模型可能按任务变化。' }),
         button('统一使用默认模型', () => patch((value) => ({ ...value, routing: { ...value.routing, enabled: false } })), 'ml-link')
       );
-    root.append(node('h3', { className: 'ml-heading', textContent: '服务商与 Key' }));
-    root.append(node('div', { className: 'ml-provider-grid' }, ...configuredProviders(cfg, workspace.gateway()?.keys).map((meta) => providerCard(cfg, meta))));
+    providersHost.append(node('h3', { className: 'ml-heading', textContent: '服务商与 Key' }));
+    providersHost.append(
+      node('div', { className: 'ml-provider-grid' }, ...configuredProviders(cfg, workspace.gateway()?.keys).map((meta) => providerCard(cfg, meta)))
+    );
     const add = node(
       'select',
       { ariaLabel: '添加服务商', className: 'ml-add-select' },
@@ -363,17 +404,20 @@ export function initModelLibrary({ root, workspace, toast }) {
     add.addEventListener('change', () => {
       if (add.value) patch((value) => ({ ...value, providerNames: { ...value.providerNames, [add.value]: providerById(add.value).name } }));
     });
-    root.append(add);
+    providersHost.append(add);
     // 搜索、唱歌这些不是大模型的服务：Key 也收在“服务商与 Key”这一块
-    root.append(serverKeysPanel({ cfg, workspace, node }));
+    providersHost.append(serverKeysPanel({ cfg, workspace, node }));
     // 每项能力的常用、备用（取代以前的“设备用 / 关闭自动切换”）
-    root.append(abilityTable({ cfg, workspace, node, run }));
+    abilityHost.append(mobile ? mobileAbilityTable({ cfg, workspace, node, run }) : abilityTable({ cfg, workspace, node, run }));
     if (workspace.scope === 'server') {
       const preview = node(
         'details',
         { className: 'ml-copy' },
         node('summary', { textContent: '从本机复制模型配置' }),
-        node('p', { className: 'ml-muted', textContent: '将覆盖服务器的默认模型、文档审查、服务商同名配置、常用和备用；包含本机已填写的模型密钥，不复制声音设置。' }),
+        node('p', {
+          className: 'ml-muted',
+          textContent: '将覆盖服务器的默认模型、文档审查、服务商同名配置、常用和备用；包含本机已填写的模型密钥，不复制声音设置。'
+        }),
         node('p', {
           className: 'ml-muted',
           textContent: `本机默认：${providerLabel(workspace.config('local'), workspace.config('local').provider)} · ${currentLine(workspace.config('local')).model}`
@@ -385,10 +429,10 @@ export function initModelLibrary({ root, workspace, toast }) {
           })
         )
       );
-      root.append(preview);
+      providersHost.append(preview);
     }
     // 联网搜索、文档审查与写作偏好放在服务商后面：先选模型，再管搜索，审查和偏好不常改，收起来
-    root.append(deepseekSearchPanel({ cfg, workspace, node, toast }));
+    providersHost.append(deepseekSearchPanel({ cfg, workspace, node, toast }));
     const review = node(
       'details',
       { className: 'ml-copy ml-review', open: reviewOpen },
@@ -396,7 +440,19 @@ export function initModelLibrary({ root, workspace, toast }) {
       ...renderDocumentReviewer(cfg),
       documentStylesPanel({ workspace, node })
     );
-    root.append(review);
+    abilityHost.append(review);
+    if (mobile) {
+      const addProvider = button(
+        '＋ 添加服务商',
+        () => {
+          mobilePage = 'providers';
+          render();
+          root.querySelector('.ml-add-select')?.focus();
+        },
+        'mc-primary'
+      );
+      root.append(node('footer', { className: 'mc-footer' }, addProvider, node('small', { textContent: '配置按位置独立保存' })));
+    }
     root.querySelectorAll('button,input,select').forEach((control) => {
       if (busy && control.textContent !== '停止拉取') control.disabled = true;
     });
