@@ -287,10 +287,12 @@ export function createTurn(app) {
       // 服务器模式：服务器做，进度事件和本机一样显示（runRemote 的用法和 runAgent 一样）
       const serverRun = async (o) => {
         for (const f of files) await app.server.upload(f.path, await ws.readBlob(f.path)); // 发来的附件先传到服务器的工作区
+        // 追问前面发过的图（“这个图……”）：本机模式靠历史里带图，服务器那边没有这些图，一起发过去（最多 4 张）
+        const earlier = llmHistory.flatMap((m) => m.images || []);
         return runRemote(app.server, {
           sessionId: o.sessionId,
           userText: o.userText,
-          images: o.images,
+          images: [...o.images, ...earlier].slice(0, 4),
           voice: o.voice,
           emit: o.emit,
           signal: o.signal,

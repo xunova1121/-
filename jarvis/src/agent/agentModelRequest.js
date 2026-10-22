@@ -13,7 +13,12 @@ export function createModelRequest({ current, effort, signal, lookupDeadline, lo
     retrieval.close('本轮联网检索已达到预算');
     requestCtrl.abort();
   };
-  const requestWindow = modelWindow(lookupDeadline ? lookupControl : null, closing, requestCtrl);
+  // “查资料时间到了”什么时候打断模型：
+  //   - 已经在查资料、正在收尾，或模型会自己联网（Claude、GPT Responses：卡在搜索里看不到进度）：照旧到点打断
+  //   - 不会自己联网的接口（DeepSeek 官方等 Chat Completions）还没查资料：它只是在思考，只受整轮总时限约束，
+  //     否则会思考的模型想得久一点就被打断，最后什么都没写出来
+  const selfSearching = !['openai', 'mock'].includes(current.adapter?.kind);
+  const requestWindow = modelWindow(lookupDeadline && (closing || retrieval.active || selfSearching) ? lookupControl : null, closing, requestCtrl);
   const boundary = new OutputBoundary();
   let streamed = false;
   return {
