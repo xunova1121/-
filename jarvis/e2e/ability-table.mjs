@@ -71,6 +71,21 @@ await page.getByLabel('博查搜索 Key', { exact: true }).fill('sk-bocha-local-
 await page.locator('.ml-service-keys').getByRole('button', { name: '保存到本机' }).click();
 await page.waitForFunction(() => JSON.parse(localStorage.getItem('jarvis.llm.v1')).bochaKey === 'sk-bocha-local-9876');
 check('其他服务的 Key 在模型页就能填（本机）', true);
+// 删掉手动添加的型号：模型列表里点“删除”→“确定删除”
+await page.evaluate(() => window.__jarvis.showPanel('models'));
+await page.waitForTimeout(500);
+const zhipu = page.locator('.ml-provider').filter({ hasText: '智谱' });
+await zhipu.getByRole('button', { name: '配置 ›' }).click();
+await zhipu.getByLabel('手动模型 ID', { exact: true }).fill('my-typo-model');
+await zhipu.getByRole('button', { name: '保存服务商' }).click();
+await page.waitForFunction(() => JSON.parse(localStorage.getItem('jarvis.llm.v1')).favoriteModels.some((l) => l.model === 'my-typo-model'));
+await page.locator('.ml-provider').filter({ hasText: '智谱' }).getByRole('button', { name: /管理全部模型/ }).click();
+const removeBtn = page.getByRole('button', { name: '删除 my-typo-model', exact: true });
+await removeBtn.click();
+await removeBtn.click();
+await page.waitForFunction(() => !JSON.parse(localStorage.getItem('jarvis.llm.v1')).favoriteModels.some((l) => l.model === 'my-typo-model'));
+const gone = await page.evaluate(() => { const c = JSON.parse(localStorage.getItem('jarvis.llm.v1')); return !Object.values(c.modelLists || {}).some((l) => l.ids?.includes('my-typo-model')); });
+check('手动添加的型号能删掉（点两下确认），常用和模型列表里都没了', gone);
 check('宽屏不左右滑、没有页面错误', (await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)) && errs.length === 0, errs.join('；'));
 await browser.close(); server.close();
 console.log(`${results.filter(Boolean).length}/${results.length} 能力表通过`);

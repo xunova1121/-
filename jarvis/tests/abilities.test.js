@@ -158,3 +158,20 @@ describe('对话框：智能 / 固定一个模型', async () => {
     expect(copyModelSettings({ ...USER, pinModel: true }).pinModel).toBe(true);
   });
 });
+
+describe('删掉手动添加的型号', async () => {
+  const { removeModel, saveCatalog, toggleFavorite, catalogKey: key } = await import('../src/llm/modelLibrary.js');
+  it('从模型列表、常用、备用里去掉；能力表里用到它的改回自动；默认型号不能删', () => {
+    let cfg = saveCatalog(USER, 'zhipu', ['glm-4.5v', 'my-typo-model']);
+    cfg = toggleFavorite(cfg, { provider: 'zhipu', model: 'my-typo-model' });
+    cfg = { ...cfg, fallbackModels: [{ provider: 'zhipu', model: 'my-typo-model' }] };
+    cfg = setAbility(cfg, 'vision', 'main', { provider: 'zhipu', model: 'my-typo-model' });
+    const next = removeModel(cfg, { provider: 'zhipu', model: 'my-typo-model' });
+    expect(next.modelLists[key(next, 'zhipu')].ids).toEqual(['glm-4.5v']);
+    expect(next.favoriteModels.some((l) => l.model === 'my-typo-model')).toBe(false);
+    expect(next.fallbackModels).toEqual([]);
+    expect(next.abilities.vision).toEqual({});
+    expect(abilityLines(next, 'vision').main).toEqual({ provider: 'zhipu', model: 'glm-4.5v' });
+    expect(() => removeModel(USER, { provider: 'deepseek', model: 'deepseek-v4-pro' })).toThrow('正在用的默认型号');
+  });
+});

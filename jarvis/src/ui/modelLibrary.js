@@ -10,6 +10,7 @@ import {
   currentLine,
   sameLine,
   toggleFavorite,
+  removeModel,
   saveCatalog,
   hasRouting
 } from '../llm/modelLibrary.js';
@@ -95,6 +96,20 @@ export function initModelLibrary({ root, workspace, toast }) {
       media.title = !media.disabled ? '不改变对话模型' : '请先选用该服务商的对话模型，再配置其生成型号';
       row.append(media);
     } else if (catalog) row.append(node('small', { textContent: '请在对应功能中配置' }));
+    // 删除：点一下变成“确定删除”，再点才删（手机上误触多）；正在用的默认型号不能删
+    if (catalog && !active) {
+      const remove = button('删除', () => {
+        if (remove.dataset.armed) return patch((value) => removeModel(value, line));
+        remove.dataset.armed = '1';
+        remove.textContent = '确定删除';
+        setTimeout(() => {
+          delete remove.dataset.armed;
+          remove.textContent = '删除';
+        }, 4000);
+      }, 'ml-small ml-remove');
+      remove.setAttribute('aria-label', `删除 ${model}`);
+      row.append(remove);
+    }
     return row;
   }
 

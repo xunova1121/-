@@ -53,6 +53,30 @@ export function toggleBackup(cfg, line) {
   return { ...cfg, favoriteModels: uniqueLines([...favoriteLines(cfg), line]).slice(0, MAX_FAVORITES), fallbackModels: uniqueLines(next).slice(0, MAX_BACKUPS), fallbackPolicy: 'explicit' };
 }
 
+/**
+ * 删掉一个型号：从模型列表、常用、备用里去掉；能力表里用到它的那一格改回“自动”。正在用的默认型号不能删
+ * （拉取来的型号下次“拉取模型”还会回来；手动添加的删了就没了）
+ */
+export function removeModel(cfg, line) {
+  if (!lineValid(line)) return cfg;
+  if (sameLine(currentLine(cfg), line)) throw Object.assign(new Error('这是正在用的默认型号，先换一个默认再删'), { code: 'MODEL_IN_USE', kind: 'api' });
+  const key = catalogKey(cfg, line.provider);
+  const list = cfg.modelLists?.[key];
+  const abilities = Object.fromEntries(
+    Object.entries(cfg.abilities || {}).map(([ability, slots]) => [
+      ability,
+      Object.fromEntries(Object.entries(slots || {}).filter(([, value]) => !sameLine(value, line)))
+    ])
+  );
+  return {
+    ...cfg,
+    ...(list && { modelLists: { ...cfg.modelLists, [key]: { ...list, ids: (list.ids || []).filter((id) => id !== line.model) } } }),
+    favoriteModels: (cfg.favoriteModels || []).filter((item) => !sameLine(item, line)),
+    fallbackModels: (cfg.fallbackModels || []).filter((item) => !sameLine(item, line)),
+    abilities
+  };
+}
+
 export function boundedCatalogs(cfg) {
   // 只保留当前各服务商地址的缓存；换地址不无限累积旧列表。
   const allowed = new Set(PROVIDERS.map((p) => catalogKey(cfg, p.id)));
