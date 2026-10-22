@@ -20,6 +20,7 @@ import { documentStylesPanel } from './documentStylesPanel.js';
 import { abilityTable } from './abilityTable.js';
 import { mobileAbilityTable } from './mobileAbilityTable.js';
 import './mobileModelCenter.css';
+import { mobileModelNavigation } from './mobileModelNavigation.js';
 import { setAbility } from '../llm/abilities.js';
 
 export const node = (tag, props = {}, ...children) => {
@@ -351,7 +352,15 @@ export function initModelLibrary({ root, workspace, toast }) {
     root.append(message);
     if (pullController) root.append(button('停止拉取', () => pullController.abort(), 'ml-link'));
     if (!cfg) return;
-    const pages = mobile ? mobileNavigation(cfg) : null;
+    const providers = configuredProviders(cfg, workspace.gateway()?.keys);
+    if (mobile && !providers.some((meta) => meta.id === catalogProvider)) catalogProvider = providers[0]?.id || '';
+    const pages = mobile ? mobileModelNavigation({
+      cfg, workspace, node, button, run, root, providers, mobilePage, catalogProvider,
+      showPage: (id) => { mobilePage = id; render(); },
+      chooseProvider: (id) => { catalogProvider = id; query = ''; page = 1; render(); },
+      pullModels: () => run(() => pull(catalogProvider)),
+      catalog: (host) => renderCatalog(cfg, catalogProvider, host)
+    }) : null;
     const providersHost = pages?.providers || root;
     const abilityHost = pages?.abilities || root;
     if (hasRouting(cfg))
@@ -415,43 +424,6 @@ export function initModelLibrary({ root, workspace, toast }) {
     });
   }
 
-
-  /** 手机将三类任务分开；切页不保存配置，也不改变任务运行位置。 */
-  function mobileNavigation(cfg) {
-    const nav = node('nav', { className: 'mc-nav', ariaLabel: '模型中心分类' });
-    const pages = {};
-    for (const [id, label] of [['abilities', '能力'], ['providers', '服务商'], ['catalog', '模型库']]) {
-      const tab = button(label, () => { mobilePage = id; render(); }, 'mc-nav-tab');
-      tab.setAttribute('aria-pressed', String(mobilePage === id));
-      nav.append(tab);
-      pages[id] = node('section', { className: 'mc-page', hidden: mobilePage !== id });
-      pages[id].dataset.modelPage = id;
-    }
-    root.append(nav, pages.abilities, pages.providers, pages.catalog);
-    const pinned = Boolean(cfg.pinModel);
-    const smart = node('div', { className: 'mc-smart' },
-      node('span', { className: 'mc-smart-icon', textContent: '✧', ariaHidden: 'true' }),
-      node('div', {}, node('strong', { textContent: pinned ? '固定模型' : '智能选择' }),
-        node('p', { textContent: pinned ? '对话已固定型号，能力配置保留' : '按已配置的能力分工选择模型' })),
-      node('span', { className: 'mc-smart-state', textContent: pinned ? '已固定' : '已启用' }));
-    if (pinned) smart.append(button('恢复智能', () => run(() => workspace.patch((value) => ({ ...value, pinModel: false, routing: { ...value.routing, enabled: false } }))), 'ml-link'));
-    pages.abilities.append(smart);
-    const providers = configuredProviders(cfg, workspace.gateway()?.keys);
-    if (!catalogProvider || !providers.some((meta) => meta.id === catalogProvider)) catalogProvider = providers[0]?.id || '';
-    pages.catalog.append(node('h3', { className: 'mc-section-title', textContent: '模型库' }), node('p', { className: 'ml-muted', textContent: '先选择服务商，再搜索型号；同名型号按服务商分别保存。' }));
-    const chips = node('div', { className: 'mc-provider-chips', role: 'group', ariaLabel: '模型库服务商' });
-    for (const meta of providers) {
-      const chip = button(providerLabel(cfg, meta.id), () => { catalogProvider = meta.id; query = ''; page = 1; render(); }, 'mc-provider-chip');
-      chip.setAttribute('aria-pressed', String(catalogProvider === meta.id));
-      chips.append(chip);
-    }
-    pages.catalog.append(chips);
-    if (catalogProvider) {
-      pages.catalog.append(button('拉取模型', () => run(() => pull(catalogProvider)), 'ml-pull'));
-      renderCatalog(cfg, catalogProvider, pages.catalog);
-    }
-    return pages;
-  }
 
   async function refresh() {
     const ticket = ++generation;

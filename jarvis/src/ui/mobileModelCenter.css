@@ -6,6 +6,7 @@
     min-width: 0;
     padding-bottom: 8px;
   }
+  [data-pane='models']:has(.mc-mobile) > .pane-head { display: none; }
   .mc-title { margin: 4px 0 20px; font-size: 23px; letter-spacing: -0.5px; }
   .mc-mobile .ml-tabs { margin: 0; border-radius: 12px; }
   .mc-mobile .ml-tabs button { font-size: 14px; min-height: 44px; }

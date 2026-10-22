@@ -26,9 +26,9 @@ jobs:
       - name: 格式化本次 UI 文件
         run: |
           npm run format
-          npx prettier --write src/ui/modelLibrary.js src/ui/mobileAbilityTable.js src/ui/mobileModelCenter.css tests/mobileModelCenter.test.js
+          npx prettier --ignore-path /dev/null --write src/ui/modelLibrary.js src/ui/mobileAbilityTable.js src/ui/mobileModelNavigation.js src/ui/mobileModelCenter.css tests/mobileModelCenter.test.js
           mkdir -p "$RUNNER_TEMP/formatted-ui"
-          cp --parents src/ui/modelLibrary.js src/ui/mobileAbilityTable.js src/ui/mobileModelCenter.css tests/mobileModelCenter.test.js "$RUNNER_TEMP/formatted-ui"
+          cp --parents src/ui/modelLibrary.js src/ui/mobileAbilityTable.js src/ui/mobileModelNavigation.js src/ui/mobileModelCenter.css tests/mobileModelCenter.test.js "$RUNNER_TEMP/formatted-ui"
       - uses: actions/upload-artifact@v4
         with:
           name: formatted-ui
