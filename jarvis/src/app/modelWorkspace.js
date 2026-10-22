@@ -21,6 +21,7 @@ export function createModelWorkspace(app) {
     onServerSaved: (cfg) => {
       globalThis.__jarvisServerModel = currentLine(cfg).model;
       globalThis.__jarvisServerAuto = hasRouting(cfg);
+      globalThis.__jarvisServerPinned = Boolean(cfg.pinModel);
       globalThis.__jarvisServerProvider = cfg.providerNames?.[cfg.provider] || cfg.provider;
       app.updateModelLabels();
     }

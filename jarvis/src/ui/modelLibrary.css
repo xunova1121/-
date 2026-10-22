@@ -365,7 +365,8 @@
   margin: 20px 0 8px;
   font-weight: 500;
 }
-.ml-picker-item {
+.ml-picker-item,
+.ml-picker-smart {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -380,7 +381,20 @@
   font: inherit;
   cursor: pointer;
 }
-.ml-picker-item.selected {
+.ml-picker-smart {
+  border: 1px solid var(--ml-line);
+  margin-top: 10px;
+}
+.ml-picker-smart .ml-picker-model {
+  display: grid;
+  gap: 2px;
+}
+.ml-picker-smart small {
+  color: var(--ml-muted);
+  font-size: 12px;
+}
+.ml-picker-item.selected,
+.ml-picker-smart.selected {
   background: color-mix(in srgb, var(--ml-accent) 10%, var(--ml-surface));
 }
 .ml-check {

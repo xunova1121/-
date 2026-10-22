@@ -137,3 +137,24 @@ describe('下拉框里能选的型号', async () => {
     expect(abilityCandidates(cfg, 'embed').map((l) => l.model)).toEqual(['embedding-3', 'text-embedding-3-small']);
   });
 });
+
+describe('对话框：智能 / 固定一个模型', async () => {
+  const { chipLabel } = await import('../src/ui/modelPicker.js');
+  it('智能（默认）：写代码按能力表换模型；固定后每句话都用默认模型', () => {
+    const cfg = setAbility(USER, 'code', 'main', { provider: 'zhipu', model: 'glm-4.6' });
+    expect(routeFor(cfg, 'code')).toMatchObject({ routed: true, model: 'glm-4.6' });
+    const pinned = { ...cfg, pinModel: true };
+    expect(routeFor(pinned, 'code')).toMatchObject({ routed: false, model: 'deepseek-v4-pro' });
+    expect(routeFor({ ...pinned, routing: { enabled: true, provider: 'deepseek', routes: { code: 'deepseek-v4-flash' } } }, 'code').routed).toBe(false);
+  });
+  it('固定了看不了图的模型：看图照旧转交看图模型', () => {
+    expect(visionRoute({ ...USER, pinModel: true })).toMatchObject({ provider: 'zhipu', model: 'glm-4.5v' });
+  });
+  it('输入框标签：智能时带“智能”，固定时只显示型号', () => {
+    expect(chipLabel(USER)).toBe('智能 · deepseek-v4-pro');
+    expect(chipLabel({ ...USER, pinModel: true })).toBe('deepseek-v4-pro');
+  });
+  it('复制到服务器时带上固定设置', () => {
+    expect(copyModelSettings({ ...USER, pinModel: true }).pinModel).toBe(true);
+  });
+});

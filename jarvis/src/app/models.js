@@ -85,7 +85,7 @@ export function createModels(app) {
     $('#model-chip-text').textContent = COMPACT && isAuto(app.llmConfig) ? `自动 · ${modelOf(app.llmConfig) || '选择模型'}` : chipLabel(app.llmConfig);
     if (globalThis.__jarvisServerMode)
       $('#model-chip-text').textContent = globalThis.__jarvisServerModel
-        ? `云端 · ${globalThis.__jarvisServerAuto ? '自动分工' : globalThis.__jarvisServerModel}`
+        ? `云端 · ${globalThis.__jarvisServerAuto ? '自动分工' : globalThis.__jarvisServerPinned ? globalThis.__jarvisServerModel : `智能 · ${globalThis.__jarvisServerModel}`}`
         : '云端 · 读取配置中'; // 服务器模式：用服务器上的模型设置
     else $('#model-chip-text').textContent = `本机 · ${$('#model-chip-text').textContent}`;
     $('#model-chip').title = globalThis.__jarvisServerMode
@@ -151,6 +151,7 @@ export function createModels(app) {
       .then((c) => {
         globalThis.__jarvisServerModel = modelOf(c) || '';
         globalThis.__jarvisServerAuto = isAuto(c);
+        globalThis.__jarvisServerPinned = Boolean(c.pinModel);
         globalThis.__jarvisServerProvider = c.providerNames?.[c.provider] || providerById(c.provider)?.name || c.provider;
         updateModelLabels();
       })

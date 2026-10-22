@@ -186,6 +186,8 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     const route = routeFor(cfg, kind);
     const { adapter, model, problem } = makeAdapter(route.cfg);
     if (problem) return finish(task, session, { error: `服务器上的模型还没配置好：${problem}` });
+    // 告诉手机这句话交给了谁（回答底下显示）
+    record(task, { type: 'route', model, task: kind, routed: route.routed });
     const fallbacks = fallbackRoutes(cfg, { provider: route.cfg.provider, model, task: kind }).map((f) => ({ ...createAdapter(f.cfg), label: `${providerLabel(f.cfg, f.provider)} · ${f.model}` })).filter((f) => !f.problem && f.adapter && f.model);
     const history = session.messages.slice(0, -1); // 最后一条是这次的用户原话，单独作为 userText
     const tools = evaluationTools(makeTools({

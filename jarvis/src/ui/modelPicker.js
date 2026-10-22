@@ -61,10 +61,12 @@ export async function gatherModelRefs(cfg, { gateway = null, patchConfig = null,
   return { refs, notes };
 }
 
-/** 输入框里显示的名字 */
+/** 输入框里显示的名字：智能（按能力表）时带“智能”，固定了一个模型时只显示它 */
 export function chipLabel(cfg) {
   if (providerById(cfg.provider)?.kind === 'mock') return '内置演示';
-  return isAuto(cfg) ? '自动 · 按任务选模型' : modelOf(cfg) || '选择模型';
+  if (isAuto(cfg)) return '自动 · 按任务选模型';
+  const model = modelOf(cfg) || '选择模型';
+  return cfg.pinModel ? model : `智能 · ${model}`;
 }
 
 /** 切到“自动”：按模型名推荐每类任务的模型；默认模型保持不变（没被分配到的任务用它） */

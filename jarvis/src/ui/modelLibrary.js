@@ -360,6 +360,8 @@ export function initModelLibrary({ root, workspace, toast }) {
       if (add.value) patch((value) => ({ ...value, providerNames: { ...value.providerNames, [add.value]: providerById(add.value).name } }));
     });
     root.append(add);
+    // 搜索、唱歌这些不是大模型的服务：Key 也收在“服务商与 Key”这一块
+    root.append(serverKeysPanel({ cfg, workspace, node }));
     // 每项能力的常用、备用（取代以前的“设备用 / 关闭自动切换”）
     root.append(abilityTable({ cfg, workspace, node, run }));
     if (workspace.scope === 'server') {
@@ -383,7 +385,6 @@ export function initModelLibrary({ root, workspace, toast }) {
     }
     // 联网搜索、文档审查与写作偏好放在服务商后面：先选模型，再管搜索，审查和偏好不常改，收起来
     root.append(deepseekSearchPanel({ cfg, workspace, node, toast }));
-    if (workspace.scope === 'server') root.append(serverKeysPanel({ cfg, workspace, node }));
     const review = node(
       'details',
       { className: 'ml-copy ml-review', open: reviewOpen },

@@ -8,7 +8,9 @@ const ids = ['gpt-6.1-sol', 'gpt-6.1-mini', 'claude-sonnet-5-5', 'deepseek-r2', 
 describe('选模型', () => {
   it('显示名字：内置演示 / 具体型号 / 自动', () => {
     expect(chipLabel({ provider: 'mock', models: {} })).toBe('内置演示');
-    expect(chipLabel(base)).toBe('gpt-6.1-sol');
+    // 默认是“智能”（按能力表选）；固定了一个模型时只显示型号
+    expect(chipLabel(base)).toBe('智能 · gpt-6.1-sol');
+    expect(chipLabel({ ...base, pinModel: true })).toBe('gpt-6.1-sol');
     expect(chipLabel(autoRouting(base, ids))).toBe('自动 · 按任务选模型');
   });
 

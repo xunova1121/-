@@ -53,6 +53,7 @@ export function createTurnEvents(app) {
         if (app.callActive) app.callStatus('已收到，正在按补充要求处理…');
       } else if (e.type === 'fallback') {
         st.usedModel = e.to;
+        st.fellFrom = st.fellFrom || e.from;
         const note = `${e.from} 出错（${e.reason}），已换成 ${e.to} 接着做`;
         app.hud.think(`⇄ ${note}`, 'sub');
         toast(note);
@@ -61,7 +62,11 @@ export function createTurnEvents(app) {
         const note = e.resume ? `网络中断，第 ${e.attempt} 次重连，接着刚才的地方写` : `连接出错，第 ${e.attempt} 次自动重试`;
         app.hud.think(`↻ ${note}`, 'sub');
         app.setTask('processing', note.slice(0, 30));
+      } else if (e.type === 'route') {
+        // 服务器模式：服务器告诉我们这句话交给了谁
+        st.serverRoute = { model: e.model, task: e.task, routed: e.routed };
       } else if (e.type === 'seeing') {
+        st.seenBy = e.model;
         bubble.status?.(e.text);
         app.setTask('processing', '正在看图');
       } else if (e.type === 'emotion') {

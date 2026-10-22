@@ -33,7 +33,7 @@ export function createImageSight({ model, describe = null, label = '看图模型
       return;
     }
     const images = message.images;
-    emit({ type: 'seeing', text: `正在看图（${label}）…` });
+    emit({ type: 'seeing', text: `正在看图（${label}）…`, model: label });
     let text = '';
     try {
       text = String(await describe({ system: SYSTEM, prompt: `${images.length > 1 ? `一共 ${images.length} 张图。` : ''}用户这次说的是：${String(hint).slice(0, 500) || '（没说，按图片本身描述）'}\n请描述图片。`, images, signal })).trim();

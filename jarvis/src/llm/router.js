@@ -159,6 +159,8 @@ function versionOf(id) {
  * @returns {{ cfg: object, task: string, model: string, routed: boolean }}
  */
 export function routeFor(cfg, task) {
+  // 对话框里固定了一个模型：每句话都用它，不按能力表换（看图模型、画图、向量照旧）
+  if (cfg.pinModel) return { cfg, task, model: cfg.models?.[cfg.provider] ?? '', provider: cfg.provider, routed: false };
   // 能力表里亲手设过这项的常用模型：用它（见 abilities.js）
   const ability = TASK_ABILITY[task];
   const own = ability && cfg.abilities?.[ability]?.main ? abilityLines(cfg, ability) : null;

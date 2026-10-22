@@ -47,6 +47,28 @@ await page.waitForTimeout(600);
 const manualSaved = JSON.parse(await page.evaluate(() => localStorage.getItem('jarvis.llm.v1'))).abilities.image;
 const imageRow = row(await dump(), '画图');
 check('手动填写的型号存下来，并显示在下拉框里', manualSaved.backup?.model === 'cogview-4-250304' && manualSaved.backup.provider === 'zhipu' && imageRow.backup === '智谱 GLM · cogview-4-250304' && imageRow.now.endsWith('出错换 智谱 GLM · cogview-4-250304'), JSON.stringify(manualSaved) + ' ' + imageRow.now);
+// 对话框里的模型按钮：最上面“智能”，点一个模型就固定用它，点“智能”切回来
+await page.evaluate(() => window.__jarvis.showPanel?.('chat'));
+await page.evaluate(() => document.getElementById('model-chip').click());
+await page.waitForSelector('.ml-picker-smart');
+check('对话框模型按钮：最上面是“智能”，默认选中', await page.locator('.ml-picker-smart').evaluate((b) => b.classList.contains('selected') && b.textContent.includes('智能 · 按能力表选')));
+await page.locator('.ml-picker-item').filter({ hasText: 'deepseek-v4-flash' }).click();
+await page.waitForFunction(() => JSON.parse(localStorage.getItem('jarvis.llm.v1')).pinModel === true);
+const pinnedChip = await page.evaluate(() => document.getElementById('model-chip-text').textContent);
+check('点一个模型：固定用它，输入框只显示型号', pinnedChip.includes('deepseek-v4-flash') && !pinnedChip.includes('智能'), pinnedChip);
+await page.evaluate(() => document.getElementById('model-chip').click());
+await page.locator('.ml-picker-smart').click();
+await page.waitForFunction(() => JSON.parse(localStorage.getItem('jarvis.llm.v1')).pinModel === false);
+const smartChip = await page.evaluate(() => document.getElementById('model-chip-text').textContent);
+check('点“智能”切回按能力表，输入框显示“智能”', smartChip.includes('智能 · deepseek-v4-flash'), smartChip);
+// 其他服务的 Key：本机也能在模型页填
+await page.evaluate(() => window.__jarvis.showPanel('models'));
+await page.waitForTimeout(600);
+await page.locator('.ml-service-keys summary').click();
+await page.getByLabel('博查搜索 Key', { exact: true }).fill('sk-bocha-local-9876');
+await page.locator('.ml-service-keys').getByRole('button', { name: '保存到本机' }).click();
+await page.waitForFunction(() => JSON.parse(localStorage.getItem('jarvis.llm.v1')).bochaKey === 'sk-bocha-local-9876');
+check('其他服务的 Key 在模型页就能填（本机）', true);
 check('412px 不左右滑、没有页面错误', (await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)) && errs.length === 0, errs.join('；'));
 await browser.close(); server.close();
 console.log(`${results.filter(Boolean).length}/${results.length} 能力表通过`);

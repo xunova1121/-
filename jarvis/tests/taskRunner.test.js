@@ -392,5 +392,9 @@ describe('服务器上看图：主模型是 DeepSeek 文字模型', () => {
     expect(visionSaw[0].images).toHaveLength(1);
     expect(mainSaw.some((m) => m.images?.length)).toBe(false);
     expect(mainSaw.at(-1).content).toContain('亮着路灯');
+    // 告诉手机：这句话交给了谁、看图用了谁（回答底下显示）
+    const events = runner.events(id);
+    expect(events.find((e) => e.type === 'route')).toMatchObject({ model: 'deepseek-v4-pro', task: 'vision' });
+    expect(events.find((e) => e.type === 'seeing')).toMatchObject({ model: 'deepseek-v4-flash-vision-exp' });
   });
 });
