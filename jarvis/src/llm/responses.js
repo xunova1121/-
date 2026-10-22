@@ -6,6 +6,7 @@
  *   0 全部（联网搜索 + 推理强度）→ 1 去掉推理强度 → 2 再去掉联网搜索
  */
 import { sseLines, isTransient, stallGuard, retryWait, retryAfterMs, sleep } from './openai.js';
+import { nativeSearchAllowed } from './nativeSearch.js';
 
 const imagePart = (img) => ({ type: 'input_image', image_url: `data:${img.mime};base64,${img.data}` });
 
@@ -73,8 +74,9 @@ export function createResponsesAccumulator(onText) {
 export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearch = true, fetchImpl = (...a) => fetch(...a) }) {
   let level = 0;
   const maxLevel = webSearch ? 2 : 1;
-  async function once({ model, system, messages, tools, signal, onText, effort, allowWebSearch = true, stallTimeouts }, lvl, state) {
-    const search = webSearch && lvl < 2 && allowWebSearch;
+  const usesNativeSearch = (options, lvl = level) => nativeSearchAllowed({ ...options, enabled: webSearch && lvl < 2 });
+  async function once({ model, system, messages, tools, signal, onText, effort, allowWebSearch = true, maxWebSearches = 5, stallTimeouts }, lvl, state) {
+    const search = usesNativeSearch({ tools, allowWebSearch, maxWebSearches }, lvl);
     const body = {
       model,
       stream: true,
@@ -132,6 +134,7 @@ export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearc
   }
   return {
     kind: 'openai-responses',
+    usesNativeSearch,
     get webSearchOn() { return webSearch && level < 2; },
     async stream(req) {
       const state = { started: false };
@@ -148,6 +151,7 @@ export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearc
     }
   };
 }
+
 
 
 
