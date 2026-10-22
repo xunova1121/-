@@ -1,4 +1,4 @@
-/** 服务档位：TeamoRouter 的快速档是 model: gpt-5.6-luna + service_tier: "fast"（不是 gpt-5.6-luna-fast 这个型号名） */
+/** 服务档位：TeamoRouter 的快速档是 model: gpt-5.6-luna + service_tier: "fast"（不是 gpt-5.6-luna-fast 这个型号名），Responses 和 Chat Completions 都支持 */
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { createAdapter, serviceTierOf, protocolFor } from '../src/llm/config.js';
 import { copyModelSettings } from '../src/llm/modelLibrary.js';
@@ -8,19 +8,38 @@ const cfg = (extra = {}) => ({ provider: 'relay-multi', models: { 'relay-multi':
 afterEach(() => vi.unstubAllGlobals());
 
 describe('服务档位', () => {
-  it('填了 fast：GPT 走 Chat Completions，请求里带 service_tier: "fast"', async () => {
+  // TeamoRouter 说明里 /v1/responses 和 /v1/chat/completions 都支持 service_tier: "fast"：GPT 照旧走 Responses（保留自带联网搜索）
+  const responsesSse = (text, tier) => new Response([
+    { type: 'response.created', response: { service_tier: tier } },
+    { type: 'response.output_text.delta', delta: text },
+    { type: 'response.completed', response: { service_tier: tier, output: [] } }
+  ].map((e) => `data: ${JSON.stringify(e)}\n\n`).join(''), { headers: { 'content-type': 'text/event-stream' } });
+  it('填了 fast：GPT 走 Responses，请求里带 service_tier: "fast"，读回实际档位', async () => {
     const seen = [];
-    vi.stubGlobal('fetch', async (url, init) => { seen.push({ url: String(url), body: JSON.parse(init.body) }); return sse('你好'); });
+    vi.stubGlobal('fetch', async (url, init) => { seen.push({ url: String(url), body: JSON.parse(init.body) }); return responsesSse('你好', 'fast'); });
     const { adapter, model } = createAdapter(cfg({ serviceTiers: { 'relay-multi': 'fast' } }));
     const r = await adapter.stream({ model, system: ['s'], messages: [{ role: 'user', content: 'Hello' }], tools: [], onText: () => {} });
     expect(r.text).toBe('你好');
-    expect(seen[0].url).toBe('https://api.teamorouter.com/v1/chat/completions');
+    expect(seen[0].url).toBe('https://api.teamorouter.com/v1/responses');
     expect(seen[0].body).toMatchObject({ model: 'gpt-5.6-luna', service_tier: 'fast' });
+    expect(r.tier).toEqual({ asked: 'fast', sent: true, served: 'fast' });
+  });
+  it('Responses 不认 service_tier：去掉再发一次，标成没发出去', async () => {
+    const bodies = [];
+    vi.stubGlobal('fetch', async (url, init) => {
+      const body = JSON.parse(init.body);
+      bodies.push(body);
+      return body.service_tier ? new Response('{"error":{"message":"Unsupported parameter: service_tier"}}', { status: 400 }) : responsesSse('好', 'default');
+    });
+    const { adapter, model } = createAdapter(cfg({ serviceTiers: { 'relay-multi': 'fast' } }));
+    const r = await adapter.stream({ model, system: ['s'], messages: [{ role: 'user', content: 'hi' }], tools: [], onText: () => {} });
+    expect(bodies.map((b) => b.service_tier)).toEqual(['fast', undefined]);
+    expect(r.tier).toMatchObject({ asked: 'fast', sent: false });
   });
   it('没填：和以前一样（GPT 走 Responses，不带 service_tier）', () => {
     expect(serviceTierOf(cfg(), 'relay-multi')).toBe('');
     expect(protocolFor('gpt-5.6-luna')).toBe('responses');
-    expect(createAdapter(cfg()).adapter.kind).not.toBe('openai');
+    expect(createAdapter(cfg()).adapter.kind).toBe('openai-responses');
   });
   it('服务商不认 service_tier：自动去掉再发一次', async () => {
     const bodies = [];

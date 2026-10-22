@@ -114,10 +114,10 @@ function multiAdapter(p, cfg, model, key, gateway) {
   const up = viaGw ? { 'x-jarvis-upstream': root } : {};
   const search = cfg.claudeWebSearch !== false;
   const tier = serviceTierOf(cfg, p.id);
-  // 填了服务档位：GPT 也走 Chat Completions（中转站说明里快速档是这样调的），不走 Responses
-  const proto = tier && protocolFor(model) === 'responses' ? 'chat' : protocolFor(model);
+  const proto = protocolFor(model);
   if (proto === 'anthropic') return createAnthropicAdapter({ apiKey: key, baseURL: base, headers: { ...up, ...(key && { Authorization: `Bearer ${key}` }) }, webSearch: search, compat: true });
-  if (proto === 'responses') return createResponsesAdapter({ baseURL: `${base}/v1`, apiKey: key, headers: up, webSearch: search });
+  // 服务档位：Responses 和 Chat Completions 都带（TeamoRouter 说明里两种接口都支持 service_tier: "fast"）
+  if (proto === 'responses') return createResponsesAdapter({ baseURL: `${base}/v1`, apiKey: key, headers: up, webSearch: search, serviceTier: tier });
   return createOpenAIAdapter({ baseURL: `${base}/v1`, apiKey: key, headers: up, serviceTier: tier });
 }
 

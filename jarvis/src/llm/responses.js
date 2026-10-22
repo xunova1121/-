@@ -71,8 +71,10 @@ export function createResponsesAccumulator(onText) {
   };
 }
 
-export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearch = true, fetchImpl = (...a) => fetch(...a) }) {
+/** serviceTier：服务档位（如 TeamoRouter 的 "fast" 快速档），请求里带 service_tier；服务商不认就去掉重试 */
+export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearch = true, fetchImpl = (...a) => fetch(...a), serviceTier = '' }) {
   let level = 0;
+  let useTier = Boolean(serviceTier);
   const maxLevel = webSearch ? 2 : 1;
   const usesNativeSearch = (options, lvl = level) => nativeSearchAllowed({ ...options, enabled: webSearch && lvl < 2 });
   async function once({ model, system, messages, tools, signal, onText, effort, allowWebSearch = true, maxWebSearches = 5, stallTimeouts }, lvl, state) {
@@ -87,7 +89,8 @@ export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearc
         ...(tools ?? []).map((t) => ({ type: 'function', name: t.name, description: t.description, parameters: t.input_schema })),
         ...(search ? [{ type: 'web_search' }] : [])
       ],
-      ...(lvl === 0 && effort && { reasoning: { effort } })
+      ...(lvl === 0 && effort && { reasoning: { effort } }),
+      ...(useTier && { service_tier: serviceTier })
     };
     if (!body.tools.length) delete body.tools;
     const guard = stallGuard(signal, stallTimeouts);
@@ -109,6 +112,7 @@ export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearc
       const dec = new TextDecoder();
       let buf = '';
       let finished = false;
+      let servedTier = null; // 服务商回报的实际档位（response.service_tier）
       try {
       while (!finished) {
         const { value, done } = await guard.race(reader.read());
@@ -121,6 +125,7 @@ export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearc
           let ev;
           try { ev = JSON.parse(e); } catch { continue; } // 心跳等非 JSON 行
           if (/^response\.(output_|function_call|reasoning|completed|failed|incomplete)/.test(ev.type || '')) guard.touch();
+          if (typeof ev.response?.service_tier === 'string') servedTier = ev.response.service_tier;
           acc.push(ev);
           if (ev.type === 'response.completed' || ev.type === 'response.incomplete') finished = true;
         }
@@ -129,7 +134,8 @@ export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearc
         reader.cancel().catch(() => {});
         reader.releaseLock();
       }
-      return acc.result();
+      const r = acc.result();
+      return serviceTier ? { ...r, tier: { asked: serviceTier, sent: useTier, served: servedTier } } : r;
     } catch (e) { throw guard.error(e); } finally { guard.done(); }
   }
   return {
@@ -143,6 +149,8 @@ export function createResponsesAdapter({ baseURL, apiKey, headers = {}, webSearc
           return await once(req, level, state);
         } catch (e) {
           if (req.signal?.aborted || state.started) throw e;
+          // 服务商不认 service_tier：去掉再发（不降级联网搜索）
+          if (useTier && [400, 422].includes(e?.status) && /service_tier|service tier/i.test(e.message)) { useTier = false; continue; }
           if ([400, 404, 422].includes(e?.status) && level < maxLevel) { level++; continue; }
           if (isTransient(e) && transient++ < (req.maxTransientRetries ?? 2)) { await sleep(retryWait(1500 * transient, e), req.signal); continue; }
           throw e;
