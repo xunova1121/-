@@ -2,11 +2,20 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { followsImage, remoteTurnImages, creativeWithoutLookup } from '../src/core/imageFollowup.js';
 import { runAgent } from '../src/agent/agent.js';
+import { createExecutionReview } from '../src/agent/executionReview.js';
 
 beforeEach(() => { globalThis.indexedDB = new IDBFactory(); });
 afterEach(() => { delete globalThis.indexedDB; });
 
 describe('图片连续追问和轻量创作', () => {
+  it('明确改成新任务时更换验收目标，普通补充不抹掉原要求', () => {
+    const replacement = createExecutionReview('查询今天新闻');
+    replacement.revise('改成描述场景并发散创意');
+    expect(replacement.report().request).not.toContain('查询今天新闻');
+    const addition = createExecutionReview('查询今天新闻');
+    addition.revise('补充一段场景描述');
+    expect(addition.report().request).toContain('查询今天新闻');
+  });
   it('描述、发散、文案连续追问保留旧图，换话题后不再自动带图', () => {
     const cached = new Map([[1, [{ mime: 'image/png', data: 'old' }]]]);
     const messages = [{ role: 'user', ts: 1, content: '看这张图' }];
