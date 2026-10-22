@@ -6,6 +6,9 @@
  *                                        网络断了自动重连，从断开的地方接着收；用户叫停时让服务器也停下
  *   remoteSessions(client)               对话的读写交给服务器（sessions.useRemote 用）
  */
+import { errorKind } from './suggest.js';
+import { retryWait } from '../llm/openai.js';
+import { abortableFetch } from './abortableFetch.js';
 const KEY = 'jarvis.server.v1';
 
 /** 设置：{ url, token, enabled }（令牌由密码算出，不存密码本身） */
@@ -69,32 +72,35 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
       return req(path,{method:'POST',body:payload});
     }
   }
-  const note = (path, t0, ok) => {
+  const note = (path, t0, ok, extra = {}) => {
     const via = globalThis.__jarvisNetVia?.(`${root}${path}`);
-    timings.unshift({ path: path.split('?')[0], ms: Date.now() - t0, ok, ...(via && { via }), at: Date.now() });
+    timings.unshift({ path: path.split('?')[0], ms: Date.now() - t0, ok, ...(via && { via }), at: Date.now(), ...extra });
     timings.length = Math.min(timings.length, 8);
+    return timings[0];
   };
-  async function send(path, { method, body, signal, headers, binary, timeout }) {
+  async function send(path, { method, body, signal, headers, binary, timeout, attempt = 1 }) {
     // 超时：网络卡住时不一直等，报错让上层重试或提示（事件流不设，它本来就一直开着）
     const ctrl = new AbortController();
-    const stop = () => ctrl.abort();
+    const stop = () => ctrl.abort(signal?.reason);
     if (signal?.aborted) stop(); else signal?.addEventListener('abort', stop, { once: true });
     const timer = timeout ? setTimeout(() => { ctrl.timedOut = true; ctrl.abort(); }, timeout) : 0;
     const t0 = Date.now();
     try {
-      const res = await fetchImpl(`${root}${path}`, {
+      const res = await abortableFetch(fetchImpl, `${root}${path}`, {
         method, signal: ctrl.signal,
         // 手机 App 退到原生网络时：binary 让它按原始字节读（不然 Word、图片这类文件会被当成文字读坏）
         ...(binary && { binary: true }),
         headers: { ...(token && { Authorization: `Bearer ${token}` }), ...(body !== undefined && !(body instanceof Blob) && { 'Content-Type': 'application/json' }), ...headers },
         ...(body !== undefined && { body: body instanceof Blob ? body : JSON.stringify(body) })
       });
-      note(path, t0, res.ok);
+      note(path, t0, res.ok, { method, status: res.status, kind: res.ok ? 'response' : 'api', attempt });
       return res;
     } catch (e) {
-      note(path, t0, false);
-      if (ctrl.timedOut && !signal?.aborted) throw Object.assign(new Error(`连服务器超时（${Math.round(timeout / 1000)} 秒没有回应）`), { timeout: true, kind: 'timeout', name: 'TimeoutError' });
-      throw e;
+      const failure = signal?.aborted ? signal.reason ?? e : ctrl.timedOut
+        ? Object.assign(new Error(`连服务器超时（${Math.round(timeout / 1000)} 秒没有回应）`), { timeout: true, kind: 'timeout', name: 'TimeoutError' }) : e;
+      const receipt = note(path, t0, false, { method, status: Number.isFinite(failure?.status) ? failure.status : 0, kind: errorKind(failure), attempt });
+      if (failure && typeof failure === 'object' && Object.isExtensible(failure)) failure.requestTiming = receipt;
+      throw failure;
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener('abort', stop);
@@ -106,11 +112,16 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
       res = await send(path, { method, body, signal, headers, binary, timeout });
     } catch (e) {
       // 读数据的请求网络一抖就失败：再试一次（写数据的不重试，免得做两遍）
-      if (method !== 'GET' || signal?.aborted || (e?.name === 'AbortError' && !e.timeout)) throw e;
-      res = await send(path, { method, body, signal, headers, binary, timeout });
+      if (method !== 'GET' || signal?.aborted || e?.code === 'RETRIEVAL_BUDGET' || !['network', 'timeout'].includes(errorKind(e))) throw e;
+      await sleep(retryWait(250, e), signal);
+      res = await send(path, { method, body, signal, headers, binary, timeout, attempt: 2 });
     }
     if (raw) return res;
-    const data = await res.json().catch(() => ({}));
+    const data = await res.json().catch((error) => {
+      if (signal?.aborted || error?.name === 'AbortError' || error?.code === 'RETRIEVAL_BUDGET') throw signal?.reason ?? error;
+      return {};
+    });
+    if (signal?.aborted) throw signal.reason ?? Object.assign(new Error('已停止'), { name: 'AbortError' });
     if (!res.ok) throw Object.assign(new Error(res.status === 401 ? '服务器登录已失效，请到 设置 → 服务器模式 重新登录' : data.error || `服务器返回 ${res.status}`), { status: res.status, ...(data.code && { code: data.code }), ...(data.kind && { kind: data.kind }), ...(data.upstreamStatus && { upstreamStatus: data.upstreamStatus }) });
     return data;
   }

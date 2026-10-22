@@ -221,6 +221,8 @@ jobs:
           node e2e/mobile-ui.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/server-mobile.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/conversation-flow.mjs
+          node e2e/image-followup.mjs
+          node e2e/settings-layout.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/model-library.mjs "$RUNNER_TEMP/jarvis-e2e"
       - name: 验证 Electron 全息桌面互动
         run: |

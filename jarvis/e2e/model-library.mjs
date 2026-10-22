@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { waitForDocumentStyle } from './wait-document-style.mjs';
 
 const output = process.argv[2] || path.join(os.tmpdir(), 'jarvis-model-library');
 fs.mkdirSync(output, { recursive: true });
@@ -71,6 +72,20 @@ try {
     const context = await browser.newContext({ viewport: { width, height: 900 } });
     const errors = [];
     const page = await context.newPage();
+    const connectionTrace = [];
+    const rememberConnection = (entry) => {
+      connectionTrace.push(entry);
+      if (connectionTrace.length > 12) connectionTrace.shift();
+      fs.writeFileSync(path.join(output, `document-styles-network-${width}.json`), JSON.stringify({ serverExit: gateway.exitCode, entries: connectionTrace }, null, 2));
+    };
+    page.on('requestfailed', (request) => {
+      if (new URL(request.url()).pathname === '/api/server/document-styles')
+        rememberConnection({ method: request.method(), phase: 'transport_failed', code: request.failure()?.errorText?.slice(0, 80) });
+    });
+    page.on('response', (response) => {
+      if (new URL(response.url()).pathname === '/api/server/document-styles')
+        rememberConnection({ method: response.request().method(), phase: 'headers', httpStatus: response.status() });
+    });
     page.on('pageerror', (error) => errors.push(error.message));
     await page.addInitScript(
       ({ base, token, address }) => {
@@ -100,20 +115,29 @@ try {
       });
     });
     check(`${width} 服务器对话后台整理不写本机偏好`, reflectionIsolated);
-    await page.waitForFunction(async () => {
-      const settings = JSON.parse(localStorage.getItem('jarvis.server.v1'));
-      const response = await fetch(settings.url + '/api/server/document-styles', { headers: { Authorization: 'Bearer ' + settings.token } });
-      return (await response.json()).some(item => item.content.includes('黑体'));
-    });
+    await waitForDocumentStyle(page);
     await page.evaluate(() => window.__jarvis.showPanel('models'));
     await page.waitForSelector('.ml-provider');
     // 写作偏好收在“文档审查与写作偏好”里：先展开外层，再找里层
     await page.locator('details.ml-review').evaluate((d) => { d.open = true; });
     const stylesPanel = page.locator('details:has(> summary:text-is("写作偏好 · 云服务器"))');
     await stylesPanel.locator('> summary').click();
+    // 两次失败覆盖GET的一次自动重试；随后用户再次点击应能恢复，不能登出或显示额度耗尽。
+    let abortedReads = 0;
+    await page.route('**/api/server/document-styles', async (route) => {
+      if (route.request().method() === 'GET') { abortedReads++; await route.abort('failed'); }
+      else await route.continue();
+    });
+    await stylesPanel.getByRole('button', { name: '查看写作偏好', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('.ml-style-list')?.parentElement.querySelector('[role="status"]')?.dataset.failureKind === 'network');
+    check(`${width} 写作偏好断网最多重试一次，显示连接问题且保留登录`,
+      abortedReads === 2 && await stylesPanel.locator('[role="status"]').getAttribute('data-attempt') === '2'
+      && await page.evaluate((expected) => JSON.parse(localStorage.getItem('jarvis.server.v1')).token === expected, token));
+    await page.unroute('**/api/server/document-styles');
     await stylesPanel.getByRole('button', { name: '查看写作偏好', exact: true }).click();
     await stylesPanel.locator('li').first().waitFor();
     const styleBefore = await stylesPanel.locator('li').count();
+    check(`${width} 再次查看恢复真实服务器偏好列表并清除失败状态`, styleBefore > 0 && !(await stylesPanel.locator('[role="status"]').getAttribute('data-failure-kind')));
     const styleDeleted = page.waitForResponse(response => response.url().includes('/api/server/document-styles/') && response.request().method() === 'DELETE');
     await stylesPanel.getByRole('button', { name: '删除偏好', exact: true }).first().click();
     await styleDeleted;

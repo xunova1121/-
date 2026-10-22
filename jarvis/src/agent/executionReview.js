@@ -1,5 +1,6 @@
 import { taskContract } from './taskContract.js';
 import { isReadOnlyTool } from '../../shared/taskCheckpoint.js';
+import { creativeWithoutLookup } from '../core/imageFollowup.js';
 
 /** 核实文件内容的工具：同一文件验过可用后只再放行一次 */
 export const VERIFY_TOOLS = /^(?:read_file|computer_read_file|check_document)$/;
@@ -13,10 +14,14 @@ export function createExecutionReview(goal = '') {
   let version = 0;
   let sequence = 0;
   const revise = (text) => {
+    const previous = taskContract(request);
+    const replaceLookup = previous.researching && !previous.formats.length && !previous.coding && !previous.remembering && !previous.askingMemory
+      && !files.size && !artifacts.size && !/文档|报告|方案|表格|代码|程序/.test(request)
+      && /^(?:改成|改为|换成|换为)/.test(String(text).trim()) && creativeWithoutLookup(text);
     request = (request + '\n补充：' + String(text)).slice(-4000);
     version++;
-    // 明确替换任务时按新目标验收；普通补充仍保留原要求，原话仍在会话账本。
-    if (/^(?:取消|不用|别做|停止|改成|改为|换成|换为)/.test(String(text).trim())) {
+    // 仅简单查询明确转创作时替换目标；文档“改成两页”等仍须保留原交付要求。
+    if (/^(?:取消|不用|别做|停止)/.test(String(text).trim()) || replaceLookup) {
       request = '用户最新修正：' + String(text).slice(0, 3900);
       files.clear();
       artifacts.clear();

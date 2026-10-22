@@ -1,3 +1,4 @@
+import { errorKind } from '../core/suggest.js';
 /** 与模型工作台同一配置位置；异步操作固定原位置，切换页签不删除另一端偏好。 */
 export function documentStylesPanel({ workspace, node }) {
   const target = workspace.scope;
@@ -21,13 +22,20 @@ export function documentStylesPanel({ workspace, node }) {
       return node('li', {}, node('span', { textContent: String(item.content).slice(0, 180) }), remove);
     }));
     message.textContent = items.length ? `${items.length} 条，最多30条；本次要求优先于历史偏好。` : '还没有写作偏好。可说“以后文档要简洁一些”或“以后Word使用宋体”。';
+    delete message.dataset.failureKind;
+    delete message.dataset.attempt;
   };
   load.addEventListener('click', async () => {
     load.disabled = true;
     try {
       await paint();
     } catch (error) {
-      message.textContent = error.message;
+      const kind = errorKind(error);
+      message.dataset.failureKind = kind;
+      message.dataset.attempt = String(error.requestTiming?.attempt ?? 1);
+      message.textContent = ['network', 'timeout'].includes(kind)
+        ? `连接${kind === 'timeout' ? '超时' : '中断'}，${error.requestTiming?.attempt === 2 ? '自动重试后仍未成功，' : ''}可再次点击“查看写作偏好”。`
+        : error.message;
     } finally {
       load.disabled = false;
     }
