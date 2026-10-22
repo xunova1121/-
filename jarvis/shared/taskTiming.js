@@ -1,5 +1,7 @@
+import { createTaskPhases } from './taskPhases.js';
 /** 只累计数字，不保存问题、网址、密钥、模型正文。工具并行时间取区间并集。 */
 export function createTaskTiming(createdAt, now = Date.now) {
+  const phases = createTaskPhases();
   let startedAt = null, endedAt = null, firstTextAt = null, contextMs = 0;
   let modelMs = 0, toolMs = 0, modelOpen = null, toolOpen = null;
   let modelCalls = 0, toolCalls = 0, failedTools = 0, retries = 0, fallbacks = 0, nativeSearchCalls = 0;
@@ -13,6 +15,7 @@ export function createTaskTiming(createdAt, now = Date.now) {
     event(e) {
       if (endedAt != null) return;
       const t = now();
+      phases.event(e, t);
       if (e.type === 'diagnostic' && ['model_start', 'helper_start'].includes(e.phase) && Number.isFinite(e.inputTextChars)) {
         inputTextChars += e.inputTextChars;
         inputTextSamples++;
@@ -50,6 +53,7 @@ export function createTaskTiming(createdAt, now = Date.now) {
       const t = endedAt ?? now();
       return {
         version: 1,
+        ...phases.snapshot(t),
         measurementVersion: 2,
         queueMs: elapsed(createdAt, startedAt ?? t),
         executionMs: elapsed(startedAt, t), totalMs: elapsed(createdAt, t),
@@ -65,3 +69,4 @@ export function createTaskTiming(createdAt, now = Date.now) {
     }
   };
 }
+
