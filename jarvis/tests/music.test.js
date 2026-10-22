@@ -86,6 +86,27 @@ describe('唱歌', () => {
     await expect(createSongTool({ falKey: 'k', fetchImpl: submitDown }).run({ lyrics: LYRICS, style: '流行歌曲测试一下' })).rejects.toThrow('连不上 fal.ai');
     expect(submits).toBe(1);
   });
+  it('被拦时请求一直挂着不回：到等待上限就停，说清是连不上 fal；查状态挂住一次会重试', async () => {
+    const saved = { ...MUSIC_LIMITS.timeouts };
+    Object.assign(MUSIC_LIMITS.timeouts, { submit: 30, poll: 30, download: 30 });
+    // 一直不回、收到停止信号才结束的请求
+    const hang = (init) => new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true }));
+    try {
+      const t0 = Date.now();
+      await expect(createSongTool({ falKey: 'k', fetchImpl: (url, init) => hang(init) }).run({ lyrics: LYRICS, style: '流行歌曲测试一下' })).rejects.toMatchObject({ kind: 'timeout', message: expect.stringContaining('没有回应') });
+      expect(Date.now() - t0).toBeLessThan(2000);
+      const fal = fakeFal();
+      let hung = 0;
+      const once = (url, init) => (url.endsWith('/status') && !hung++ ? hang(init) : fal.fetchImpl(url, init));
+      expect(await createSongTool({ falKey: 'k', fetchImpl: once }).run({ lyrics: LYRICS, style: '流行歌曲测试一下' })).toContain('已经唱好了');
+      // 歌曲下载到一半卡住也算超时
+      const ok = fakeFal();
+      const slowBody = (url, init) => (url.includes('fal.media') ? Promise.resolve({ ok: true, blob: () => hang(init) }) : ok.fetchImpl(url, init));
+      await expect(createSongTool({ falKey: 'k', fetchImpl: slowBody }).run({ lyrics: LYRICS, style: '流行歌曲测试一下' })).rejects.toMatchObject({ kind: 'timeout' });
+    } finally {
+      Object.assign(MUSIC_LIMITS.timeouts, saved);
+    }
+  });
   it('fal 说哪里不对（422）：把原因带出来，方便查', async () => {
     const bad = async () => json({ detail: [{ loc: ['body', 'lyrics_prompt'], msg: 'field required' }] }, 422);
     await expect(createSongTool({ falKey: 'k', fetchImpl: bad }).run({ lyrics: LYRICS, style: '流行歌曲测试一下' })).rejects.toThrow('歌词或曲风不符合接口要求（422）：field required');
