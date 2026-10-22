@@ -22,6 +22,7 @@ const row = (rows, name) => rows.find((r) => r.name === name);
 check('日常对话、思考、写代码都是 DeepSeek', ['日常对话', '深度思考 / 写作', '写代码'].every((n) => row(first, n).now.includes('deepseek-v4-pro')) && row(first, '日常对话').main.includes('deepseek-v4-pro'));
 check('看图自动排智谱，出错换 OpenAI', row(first, '看图').now === '现在：智谱 GLM · glm-4.5v；出错换 OpenAI · gpt-4.1-mini', row(first, '看图').now);
 check('画图自动排 GPT，出错换智谱', row(first, '画图').now === '现在：OpenAI · gpt-image-1；出错换 智谱 GLM · cogview-4', row(first, '画图').now);
+check('文字识别自动用智谱 GLM-OCR', row(first, '文字识别')?.now.startsWith('现在：智谱 GLM · glm-ocr'), row(first, '文字识别')?.now);
 check('记忆向量自动排智谱', row(first, '记忆向量').now.startsWith('现在：智谱 GLM · embedding-3'), row(first, '记忆向量').now);
 // 看图改成 OpenAI、日常对话不用备用、向量关掉
 const vision = page.getByLabel('看图 常用', { exact: true });

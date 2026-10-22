@@ -8,6 +8,7 @@ import { routeFor, fallbackRoutes, visionRoute } from '../llm/router.js';
 import { chipLabel, isAuto } from '../ui/modelPicker.js';
 import { providerLabel } from '../llm/modelLibrary.js';
 import { createEmbedder } from '../llm/embeddings.js';
+import { ocrLine, recognizeText } from '../llm/ocr.js';
 import { browserMetrics } from '../api/browserMetrics.js';
 import { nativeWebFetch } from '../mobile/nativeFetch.js';
 import { loadServerSettings, createServerClient, remoteSessions, normalizeUrl } from '../core/serverClient.js';
@@ -187,6 +188,10 @@ export function createModels(app) {
     const { adapter, model, problem } = createAdapter(r.cfg, { gateway: app.gateway });
     return problem ? null : { describe: createHelperLlm(adapter, model), label: model };
   }
+  /** 文字识别（能力表“文字识别”，智谱 GLM-OCR）：没有就 null */
+  function imageTextReader() {
+    return ocrLine(app.llmConfig) ? (file, o) => recognizeText(app.llmConfig, file, { ...o, gateway: app.gateway }) : null;
+  }
   /** 团队模式：按角色挑分工模型 */
   const ROLE_TASK = { coder: 'code', writer: 'write', researcher: 'reason', analyst: 'reason', operator: 'chat', generalist: 'chat' };
   function modelForRole(role) {
@@ -223,6 +228,7 @@ export function createModels(app) {
     helperLlm,
     visionHelperLlm,
     imageDescriber,
+    imageTextReader,
     modelForRole,
     syncMemoryEngine
   };

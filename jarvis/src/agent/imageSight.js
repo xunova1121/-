@@ -4,6 +4,7 @@
  *   - 以前图片硬塞给文字模型：接口把图换成一句 “Unsupported Image”，模型就以为图片格式坏了，让用户换 PNG 重发
  *   - 用户发的图、历史里的图、工具读出来的图（read_file、截屏）都按这个处理
  *   - 没有看图模型时图片照旧发过去；已知只认文字的模型（DeepSeek 等）附一句：看不到就如实说、教用户去设看图模型
+ *   - 要的是图里的字（提取、识别、整理成表格……）且有文字识别（GLM-OCR）：先把字原样抄出来附上，比看图模型读字准
  */
 import { seesImages } from '../llm/router.js';
 
@@ -13,6 +14,9 @@ export const NO_SIGHT_NOTE =
 /** 已知只认文字的模型系列：没有看图模型时才提醒它如实说（认不出的名字可能其实能看，不打扰） */
 const TEXT_ONLY = /deepseek|kimi|moonshot|glm-4(?!v|\.\dv)|glm-[5-9](?!v)|qwen-(max|plus|turbo|long)|qwen3-(max|coder|\d+b)|minimax|abab|ernie/i;
 
+/** 这句话要的是图里的字 */
+export const WANTS_TEXT = /识别|提取|抄下|抄录|摘录|文字|文本|表格|整理成|转成|转为|做成.{0,6}(表|Excel|Word|文档)|OCR|录入|写了什么|上面写|里面写/i;
+
 const SYSTEM = `你是看图助手，替一个看不到图片的模型看图。把图片内容如实、具体地写成文字，让它不看图也能回答用户：
 - 先一句话说整体：这是什么图（照片 / 截图 / 表格 / 图表 / 插画……）、什么场景
 - 再写主体和细节：人物（动作、表情、穿着）、物体、位置关系、颜色、光线、氛围
@@ -20,14 +24,31 @@ const SYSTEM = `你是看图助手，替一个看不到图片的模型看图。�
 - 只写图里有的，不加评论，不替用户回答问题；有多张图时分别标“图1”“图2”`;
 
 /**
- * @param {{ model: string, describe?: ((o: { system: string, prompt: string, images: object[], signal?: AbortSignal }) => Promise<string>) | null, label?: string, emit?: Function }} o
+ * @param {{ model: string, describe?: ((o: { system: string, prompt: string, images: object[], signal?: AbortSignal }) => Promise<string>) | null, label?: string, emit?: Function, readText?: Function | null }} o
  *   describe：看图模型的单次问答（createHelperLlm 的结果）；label：显示用的看图模型名
- * @returns {(message: object, o?: { hint?: string, signal?: AbortSignal }) => Promise<void>}  就地把消息里的图片换成文字
+ *   readText：文字识别（ocr.recognizeText），(image, { signal }) → { text, model }
+ * @returns {(message: object, o?: { hint?: string, signal?: AbortSignal, ocr?: boolean }) => Promise<void>}  就地把消息里的图片换成文字
+ *   ocr：这条消息要不要做文字识别（只给这次发的图和工具读到的图做，历史里的不重复做）
  */
-export function createImageSight({ model, describe = null, label = '看图模型', emit = () => {} }) {
+export function createImageSight({ model, describe = null, label = '看图模型', emit = () => {}, readText = null }) {
   const blind = !seesImages(model);
-  return async function see(message, { hint = '', signal } = {}) {
-    if (!blind || !message?.images?.length) return;
+  return async function see(message, { hint = '', signal, ocr = false } = {}) {
+    if (!message?.images?.length) return;
+    if (ocr && readText && WANTS_TEXT.test(hint) && !message.textRead) {
+      message.textRead = true;
+      const parts = [];
+      for (const [i, image] of message.images.slice(0, 4).entries()) {
+        emit({ type: 'seeing', text: '正在识别图里的文字…', model: 'GLM-OCR' });
+        try {
+          const r = await readText(image, { signal });
+          parts.push(`${message.images.length > 1 ? `图${i + 1}：` : ''}${r.text}`);
+        } catch (e) {
+          if (signal?.aborted) throw e;
+        }
+      }
+      if (parts.length) message.content = `${message.content ?? ''}\n\n【图片里的文字（文字识别原样抄录，比看图读字准；按它整理，不要改字）】\n${parts.join('\n\n')}`;
+    }
+    if (!blind) return;
     if (!describe) {
       if (TEXT_ONLY.test(String(model)) && !String(message.content ?? '').includes(NO_SIGHT_NOTE)) message.content = `${message.content ?? ''}\n\n${NO_SIGHT_NOTE}`;
       return;

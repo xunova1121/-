@@ -12,6 +12,7 @@ import { createDocumentReviewer } from '../llm/documentReviewer.js';
 import { createAdapter } from '../llm/config.js';
 import { createHelperLlm } from '../llm/helper.js';
 import { $, body, DESKTOP, COMPACT, toast } from './env.js';
+import { ocrLine, recognizeText } from '../llm/ocr.js';
 
 export function createToolbox(app) {
   /** 本次会话里用户选了“本次都允许”的操作类别 */
@@ -87,6 +88,8 @@ export function createToolbox(app) {
           return selected.problem ? null : createHelperLlm(selected.adapter, selected.model);
         }),
         visionLlm: app.visionHelperLlm(), // PPT 生成后看预览图检查排版
+        // 文字识别（能力表“文字识别”，智谱 GLM-OCR）；没有就不提供
+        ocr: ocrLine(app.llmConfig) ? (file, o) => recognizeText(app.llmConfig, file, { ...o, gateway: app.gateway }) : null,
         onPreview: background
           ? () => {}
           : COMPACT

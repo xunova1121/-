@@ -3,6 +3,7 @@ import { evaluationTools, bindEvaluation } from './evaluation.mjs';
 import { measureModelInput } from '../shared/modelMetrics.js';
 import { createHelperLlm } from '../src/llm/helper.js';
 import { createEmbedder } from '../src/llm/embeddings.js';
+import { ocrLine, recognizeText } from '../src/llm/ocr.js';
 import { projectExecutionTool } from './projectExecution.mjs';
 import { renderOffice } from './officeRender.mjs';
 import { createTaskTiming } from '../shared/taskTiming.js';
@@ -165,9 +166,11 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
   /** 当前模型看不了图时替它看图的模型（见 router.visionRoute、agent/imageSight.js） */
   function sight(cfg) {
     const r = visionRoute(cfg);
-    if (!r || providerById(cfg.provider)?.kind === 'mock') return {};
+    if (providerById(cfg.provider)?.kind === 'mock') return {};
+    if (!r) return { readImageText: ocrLine(cfg) ? (file, o) => recognizeText(cfg, file, o) : null };
     const { adapter, model, problem } = makeAdapter(r.cfg);
-    return problem || !adapter ? {} : { describeImages: createHelperLlm(adapter, model), visionLabel: model };
+    const readImageText = ocrLine(cfg) ? (file, o) => recognizeText(cfg, file, o) : null; // 文字识别（GLM-OCR）
+    return problem || !adapter ? { readImageText } : { describeImages: createHelperLlm(adapter, model), visionLabel: model, readImageText };
   }
 
   async function execute(task) {
@@ -199,6 +202,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       onFileChanged: (p) => { if (!/^skills\//.test(p)) { task.files.add(p); record(task, { type: 'file', path: p }); } },
       // 画图、做视频：用服务器上的模型设置；生成的文件照常存进工作区，手机按文件下载后显示在对话里
       imageGen: (o) => generateImage(cfg, o),
+      ocr: ocrLine(cfg) ? (file, o) => recognizeText(cfg, file, o) : null, // 文字识别（智谱 GLM-OCR）
       videoGen: (o) => generateVideo(cfg, o),
       // 显示工作区里已有的图片：让手机按文件取回来显示
       onImage: (src, path) => { if (path) record(task, { type: 'file', path }); },

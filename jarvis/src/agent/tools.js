@@ -33,6 +33,7 @@ import { deepResearch, DEPTHS } from './research.js';
 import { factCheck, formatReport } from './factCheck.js';
 import { evidence as evidenceStore } from './evidenceStore.js';
 import { createSongTool } from './music.js';
+import { createOcrTool } from './ocrTool.js';
 
 const S = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const str = (description) => ({ type: 'string', description });
@@ -78,6 +79,7 @@ export function createTools(ctx) {
   const tools = [
     createVerificationTool(),
     createSongTool(ctx),
+    createOcrTool(ctx),
     createStockKlineTool(ctx),
     queryGuardTool(),
     {

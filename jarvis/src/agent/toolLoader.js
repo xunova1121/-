@@ -17,7 +17,7 @@ export const CORE = new Set([
   'write_professional_document', 'generate_task_brief',
   'verify_numbers', 'get_stock_kline', 'check_search_terms', 'review_task', 'execution_capabilities', 'run_project_tests', 'get_current_time', 'get_weather', 'remember', 'recall', 'core_memory_update', 'save_skill', 'use_skill',
   'web_search', 'fetch_url', 'fact_check', 'deep_research', 'kb_search', 'search_conversations', 'read_conversation',
-  'generate_image', 'sing_song', 'schedule_task',
+  'generate_image', 'sing_song', 'read_image_text', 'schedule_task',
   'update_plan', 'delegate_task', 'find_files', 'search_in_files', 'read_task_requirements', 'read_tool_result',
   'list_files', 'read_file', 'write_file', 'edit_file', 'edit_spreadsheet', 'create_document', 'write_long_document', 'edit_office_document',
   'run_javascript', 'run_python', 'preview',

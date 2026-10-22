@@ -16,6 +16,7 @@ export const ABILITIES = {
   reason: { name: '深度思考 / 写作', hint: '分析、写文档、长文' },
   code: { name: '写代码', hint: '编程、改 bug、做网页' },
   vision: { name: '看图', hint: '发了图片、截图分析' },
+  ocr: { name: '文字识别', hint: '截图、扫描件、表格照片里的字' },
   image: { name: '画图', hint: '“画一张…”' },
   embed: { name: '记忆向量', hint: '记忆按意思找，不填只按关键字' }
 };
@@ -45,6 +46,8 @@ export const CAPABILITIES = {
     { provider: 'doubao', pick: /seedream/i, model: 'doubao-seedream-4-0-250828' },
     { provider: 'siliconflow', pick: /kolors|flux/i, model: 'Kwai-Kolors/Kolors' }
   ],
+  // 文字识别：目前只接了智谱的文档解析接口（见 ocr.js）
+  ocr: [{ provider: 'zhipu', pick: /ocr/i, model: 'glm-ocr' }],
   embed: [
     { provider: 'zhipu', pick: /^embedding-\d/i, model: 'embedding-3' },
     { provider: 'qwen', pick: /text-embedding/i, model: 'text-embedding-v4' },
@@ -60,7 +63,7 @@ const lineOf = (provider, model) => (provider && model ? { provider, model } : n
 const current = (cfg) => lineOf(cfg.provider, cfg.models?.[cfg.provider] || providerById(cfg.provider)?.models?.[0] || '');
 
 /** 模型列表里这项能力该是哪类模型（看图模型也是对话模型） */
-const KIND = { vision: 'chat', image: 'image', embed: 'embed' };
+const KIND = { vision: 'chat', ocr: 'chat', image: 'image', embed: 'embed' };
 
 /** 在拉取过的模型列表里按能力表认型号；没拉取过就用推荐型号（中转站没有推荐型号，必须拉取过） */
 function pickModel(cfg, row, ability) {

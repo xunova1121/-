@@ -329,6 +329,7 @@ export function createTurn(app) {
         fallbacks,
         describeImages: sight?.describe,
         visionLabel: sight?.label,
+        readImageText: app.imageTextReader?.(),
         inbox: team ? null : turn.inbox,
         checkpoint:
           MOBILE && !turn.remote

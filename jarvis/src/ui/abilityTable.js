@@ -23,12 +23,12 @@ export function abilityCandidates(cfg, ability, extra = []) {
     if (model && !out.some((item) => sameLine(item, line))) out.push(line);
   };
   // 对话类先放当前默认模型
-  if (kind === 'chat' && ability !== 'vision') add(currentLine(cfg).provider, currentLine(cfg).model);
+  if (kind === 'chat' && !['vision', 'ocr'].includes(ability)) add(currentLine(cfg).provider, currentLine(cfg).model);
   for (const provider of keyedProviders(cfg)) {
     const start = out.length;
     const ids = cfg.modelLists?.[catalogKey(cfg, provider)]?.ids || [];
-    const fits = (id) => modelKind(id) === kind && (ability !== 'vision' || seesImages(id));
-    for (const line of favoriteLines(cfg)) if (line.provider === provider && (kind === 'chat' ? modelKind(line.model) === 'chat' : fits(line.model))) add(provider, line.model);
+    const fits = (id) => (ability === 'ocr' ? /ocr/i.test(id) : modelKind(id) === kind && (ability !== 'vision' || seesImages(id)));
+    for (const line of favoriteLines(cfg)) if (line.provider === provider && (kind === 'chat' && ability !== 'ocr' ? modelKind(line.model) === 'chat' : fits(line.model))) add(provider, line.model);
     const row = CAPABILITIES[ability]?.find((item) => item.provider === provider);
     if (row?.model) add(provider, row.model);
     for (const id of ids) if (fits(id) && out.length - start < PER_PROVIDER) add(provider, id);
@@ -43,6 +43,7 @@ const label = (cfg, line) => (line ? `${providerLabel(cfg, line.provider)} · ${
 function describe(cfg, ability) {
   if (ability === 'embed' && cfg.embedding?.engine === 'off') return '现在：不用向量，记忆只按关键字找';
   const { main, backup } = abilityLines(cfg, ability);
+  if (!main && ability === 'ocr') return '现在：没有能做文字识别的服务商（填上智谱的 Key 就自动用 GLM-OCR）；图片里的字先交给看图模型读';
   if (!main) return ability === 'embed' ? '现在：没有能做向量的服务商，记忆只按关键字找（填智谱、百炼或硅基流动的 Key 就能用）' : '现在：还没有能做这件事的服务商——先在上面填一家的 Key（如智谱、百炼、OpenAI）';
   return `现在：${label(cfg, main)}${backup ? `；出错换 ${label(cfg, backup)}` : '；没有备用'}`;
 }
