@@ -374,6 +374,14 @@ export function createTurn(app) {
       const total = now() - t0;
       // 回答底下写明用了谁：看图模型（主模型看不了图时）→ 回答的模型（按能力表换了的写上是哪一项）
       const seen = st.seenBy ? `看图 ${st.seenBy} → ` : '';
+      // 服务档位：生效了写“快速档”，没生效写清原因（服务商不认这个参数，或回报按别的档位处理）
+      const tierTag = !st.tier
+        ? ''
+        : !st.tier.sent
+          ? `${st.tier.asked} 档未生效（服务商不认，已用普通档） · `
+          : st.tier.served && st.tier.served !== st.tier.asked
+            ? `${st.tier.asked} 档未生效（服务商按 ${st.tier.served} 处理） · `
+            : `${st.tier.asked} 档${st.tier.served ? '' : '（已请求）'} · `;
       const remote = st.serverRoute;
       const modelTag =
         app.server && !here
@@ -386,7 +394,7 @@ export function createTurn(app) {
                 ? `${seen}${st.usedModel}（${model} 出错后换用） · `
                 : `${seen}${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
       bubble.done(
-        `${modelTag}${team ? `团队 ${result.steps} 步 · ` : ''}${st.ctxMs !== null && st.ctxMs >= 300 ? `准备 ${(st.ctxMs / 1000).toFixed(1)}s · ` : ''}${st.firstToken ? `首字 ${((st.firstToken - t0) / 1000).toFixed(1)}s · ` : ''}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}${MOBILE && st.textChunks ? ` · 分 ${st.textChunks} 次收到${globalThis.__jarvisNetVia?.(app.llmConfig.baseURLs?.[app.llmConfig.provider] || '') === 'native' ? '（原生网络）' : ''}` : ''}`,
+        `${modelTag}${tierTag}${team ? `团队 ${result.steps} 步 · ` : ''}${st.ctxMs !== null && st.ctxMs >= 300 ? `准备 ${(st.ctxMs / 1000).toFixed(1)}s · ` : ''}${st.firstToken ? `首字 ${((st.firstToken - t0) / 1000).toFixed(1)}s · ` : ''}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}${MOBILE && st.textChunks ? ` · 分 ${st.textChunks} 次收到${globalThis.__jarvisNetVia?.(app.llmConfig.baseURLs?.[app.llmConfig.provider] || '') === 'native' ? '（原生网络）' : ''}` : ''}`,
         {
           onFeedback: async (kind, comment) => {
             if (kind === 'up') await agentMemory.noteTask(`获得好评：${text.slice(0, 30)}`);

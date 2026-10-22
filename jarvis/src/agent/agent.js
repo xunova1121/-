@@ -295,6 +295,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     try {
     modelAttempts++;
     r = await request.run({ system: measuredSystem, messages: convo, tools: requestTools });
+    // 服务档位（快速档）实际有没有生效：告诉界面，回答底下显示
+    if (r?.tier) emit({ type: 'tier', ...r.tier });
     } catch (e) {
       if (e.code === 'LOOKUP_RETRIEVAL_END' && !signal?.aborted) {
         retrieval.close('已预留时间整理现有资料');

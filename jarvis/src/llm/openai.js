@@ -261,6 +261,7 @@ function createOnce({ baseURL, apiKey, headers = {}, serviceTier = '' }) {
     const dec = new TextDecoder();
     let buf = '';
     let finished = false;
+    let servedTier = null; // 服务商回报的实际档位（流里每段都带 service_tier）
     try {
       while (!finished) {
         const { value, done } = await guard.race(reader.read());
@@ -277,6 +278,7 @@ function createOnce({ baseURL, apiKey, headers = {}, serviceTier = '' }) {
           try { data = JSON.parse(frame); } catch { continue; }
           if (data.error) throw Object.assign(new Error(data.error.message || '模型流返回错误'), {kind:'api', code:data.error.code || 'MODEL_STREAM_ERROR'});
           if (data.choices?.length) guard.touch();
+          if (typeof data.service_tier === 'string') servedTier = data.service_tier;
           acc.push(data);
           if (data.choices?.[0]?.finish_reason) finished = true;
         }
@@ -286,7 +288,8 @@ function createOnce({ baseURL, apiKey, headers = {}, serviceTier = '' }) {
       reader.releaseLock();
     }
     const r = acc.result();
-    return { ...r, stop: r.toolCalls.length ? 'tool_use' : r.stop };
+    // 填了服务档位：记下要的、实际发出去的、服务商回报的，回答底下显示快速档有没有生效
+    return { ...r, stop: r.toolCalls.length ? 'tool_use' : r.stop, ...(serviceTier && { tier: { asked: serviceTier, sent: useTier, served: servedTier } }) };
   }
 }
 
