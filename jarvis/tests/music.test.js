@@ -58,6 +58,38 @@ describe('唱歌', () => {
     await expect(createSongTool({ falKey: 'k', fetchImpl: fakeFal({ submitStatus: 402 }).fetchImpl }).run({ lyrics: LYRICS, style: '流行歌曲测试' })).rejects.toMatchObject({ status: 402, message: expect.stringContaining('余额不足') });
     await expect(createSongTool({ falKey: 'k', fetchImpl: fakeFal({ states: ['FAILED'] }).fetchImpl }).run({ lyrics: LYRICS, style: '流行歌曲测试' })).rejects.toThrow('生成失败');
   });
+  it('查状态、取结果、下载时断网或 fal 临时出错：隔几秒重试，不让整首作废', async () => {
+    const fal = fakeFal();
+    let drops = 0;
+    const flaky = async (url, init) => {
+      // 第一次查状态断网、第二次 503；取结果断网一次；下载 502 一次
+      if ((url.endsWith('/status') && drops < 2) || (url.endsWith('/requests/r1') && drops === 2) || (url.includes('fal.media') && drops === 3)) {
+        drops++;
+        if (drops === 1 || drops === 3) throw new TypeError('fetch failed');
+        return new Response('busy', { status: drops === 2 ? 503 : 502 });
+      }
+      return fal.fetchImpl(url, init);
+    };
+    const out = await createSongTool({ falKey: 'k', fetchImpl: flaky }).run({ lyrics: LYRICS, style: '流行歌曲测试一下' });
+    expect(out).toContain('已经唱好了');
+    expect(drops).toBe(4);
+    expect(fal.calls.filter((c) => c.method === 'POST')).toHaveLength(1); // 提交只有一次，不重复扣费
+  });
+  it('一直连不上就如实说；提交时断网不重试（可能已经扣费）', async () => {
+    const down = fakeFal();
+    let status = 0;
+    const offline = async (url, init) => (url.endsWith('/status') ? (status++, Promise.reject(new TypeError('fetch failed'))) : down.fetchImpl(url, init));
+    await expect(createSongTool({ falKey: 'k', fetchImpl: offline }).run({ lyrics: LYRICS, style: '流行歌曲测试一下' })).rejects.toMatchObject({ kind: 'network' });
+    expect(status).toBe(MUSIC_LIMITS.retries + 1);
+    let submits = 0;
+    const submitDown = async () => { submits++; throw new TypeError('fetch failed'); };
+    await expect(createSongTool({ falKey: 'k', fetchImpl: submitDown }).run({ lyrics: LYRICS, style: '流行歌曲测试一下' })).rejects.toThrow('连不上 fal.ai');
+    expect(submits).toBe(1);
+  });
+  it('fal 说哪里不对（422）：把原因带出来，方便查', async () => {
+    const bad = async () => json({ detail: [{ loc: ['body', 'lyrics_prompt'], msg: 'field required' }] }, 422);
+    await expect(createSongTool({ falKey: 'k', fetchImpl: bad }).run({ lyrics: LYRICS, style: '流行歌曲测试一下' })).rejects.toThrow('歌词或曲风不符合接口要求（422）：field required');
+  });
   it('等太久会停；用户点停止立即结束', async () => {
     let t = 0;
     const slow = fakeFal({ states: ['IN_PROGRESS'] });

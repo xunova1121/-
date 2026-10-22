@@ -311,6 +311,7 @@ export function createTurn(app) {
           }
         });
       };
+      const sight = app.imageDescriber?.(); // 当前模型看不了图时替它看图
       const result = await (app.server && !here ? serverRun : team ? runTeam : runAgent)({
         llm: team ? app.helperLlm('reason') : undefined,
         pickModel: team ? app.modelForRole : undefined,
@@ -326,6 +327,8 @@ export function createTurn(app) {
         requirements: collectRequirements(app.history, app.session.requirements),
         requirementText: userText, // 保留斜杠命令展开前的原话，避免当成缺失历史重复注入
         fallbacks,
+        describeImages: sight?.describe,
+        visionLabel: sight?.label,
         inbox: team ? null : turn.inbox,
         checkpoint:
           MOBILE && !turn.remote

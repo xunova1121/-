@@ -32,7 +32,7 @@ import { createAdapter } from '../src/llm/config.js';
 import { generateImage } from '../src/llm/images.js';
 import { generateVideo } from '../src/llm/videos.js';
 import { providerById, isPrivateHost } from '../shared/providers.js';
-import { routeFor, fallbackRoutes, classifyTask, effortFor, isSmallTalk } from '../src/llm/router.js';
+import { routeFor, fallbackRoutes, classifyTask, effortFor, isSmallTalk, visionRoute } from '../src/llm/router.js';
 import { providerLabel } from '../src/llm/modelLibrary.js';
 import { INTERRUPTED_MARK, interruptionMark, errorKind } from '../src/core/suggest.js';
 import { uid } from '../src/agent/store.js';
@@ -161,6 +161,14 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     return createHelperLlm(measured, model);
   }
 
+  /** 当前模型看不了图时替它看图的模型（见 router.visionRoute、agent/imageSight.js） */
+  function sight(cfg) {
+    const r = visionRoute(cfg);
+    if (!r || providerById(cfg.provider)?.kind === 'mock') return {};
+    const { adapter, model, problem } = makeAdapter(r.cfg);
+    return problem || !adapter ? {} : { describeImages: createHelperLlm(adapter, model), visionLabel: model };
+  }
+
   async function execute(task) {
     task.status = 'running';
     task.startedAt = now();
@@ -217,7 +225,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     arm();
     try {
       const r = await runAgent({
-        adapter, model, fallbacks, maxSteps,
+        adapter, model, fallbacks, maxSteps, ...sight(cfg),
         history: unsummarized(history, session.summary).map(({ role, content }) => ({ role, content })),
         userText: task.resumeFrom ? task.text+'\n\n'+checkpointRecoveryText(task.resumeFrom) : task.text, requirementText: task.text, images: task.images,
         // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省

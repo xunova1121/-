@@ -109,6 +109,23 @@ export function seesImages(model) {
   const m = String(model || '');
   return PREFER.vision.some((re) => re.test(m)) || /qwen.*vl|glm-4v|doubao.*vision|llava|gemma-?3/i.test(m);
 }
+/** 主模型看不了图时，自动找的看图模型：百炼 qwen-vl（老牌、稳定）优先，其次 DeepSeek 官方的看图模型（实验版） */
+export const AUTO_VISION = [
+  { provider: 'qwen', model: 'qwen-vl-max' },
+  { provider: 'deepseek', model: 'deepseek-v4-flash-vision-exp' }
+];
+/**
+ * 看图用哪条线路：分工里设了“看图”就用它；当前模型自己能看就用当前的；否则从填了 Key 的服务商里挑 AUTO_VISION。
+ * @returns {{ cfg: object, provider: string, model: string, auto: boolean } | null}  一个都没有时返回 null
+ */
+export function visionRoute(cfg) {
+  const r = routeFor(cfg, 'vision');
+  if (r.routed || seesImages(r.model)) return { cfg: r.cfg, provider: r.provider, model: r.model, auto: false };
+  const keyed = keyedProviders(cfg);
+  const pick = AUTO_VISION.find((v) => keyed.includes(v.provider));
+  if (!pick) return null;
+  return { cfg: { ...cfg, provider: pick.provider, models: { ...cfg.models, [pick.provider]: pick.model }, routing: { enabled: false } }, ...pick, auto: true };
+}
 const NOT_CHAT = /embed|tts|whisper|audio|image|dall|moderation|rerank|transcribe|realtime|search-preview|flux|midjourney|stable-?diffusion|sdxl|seedream|imagen|cogview|kolors|sora|veo|kling|video/i;
 
 /**

@@ -41,6 +41,7 @@ import { loadRules, rulesBlock } from './projectRules.js';
 import { canFallback, needsComputer, computerTaskKind } from '../llm/router.js';
 import { compactToolResults } from './turnContext.js';
 import { requirementsTool } from './taskRequirements.js';
+import { createImageSight } from './imageSight.js';
 
 export const STABLE_PROMPT = `你是“未央”，用户的个人智能体。实际运行位置与能力以下方环境和本轮工具为准。
 
@@ -149,6 +150,7 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
  * @param {number} [o.timeBudgetMs]  联网检索预算；默认普通查询45秒、明确的研究或文档任务8分钟，从首次联网开始
  * @param {(req: { title: string, detail?: string, key?: string, danger?: boolean }, tool: object) => Promise<boolean>} [o.approve]  需要确认的工具调用
  * @param {{ text: string } | null} [o.summary]  本段对话较早内容的摘要（长对话压缩，见 compress.js）
+ * @param {Function | null} [o.describeImages]  当前模型看不了图时用的看图模型（createHelperLlm 的结果，见 imageSight.js）；visionLabel 是它的显示名
  * @returns {Promise<{ text: string, steps: number, toolCalls: number }>}
  */
 export async function runAgent(options) {
@@ -170,7 +172,7 @@ export function trimComputerScreenshots(messages,keep=2) {
   for(const m of shots.slice(0,Math.max(0,shots.length-keep))){delete m.images;m.content=`${m.content}\n（旧界面截图已从模型输入移除；请以最新截图为准。）`;}
 }
 
-async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, lookupControl = null, computerTask = false }) {
+async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, lookupControl = null, computerTask = false, describeImages = null, visionLabel = '看图模型' }) {
   if (light && needsActionTools(userText, history)) light = false;
   const capabilities = capabilityBlock(tools);
   // 环境完全没有产物/计算核验能力时，直接说明未验收，不空转两轮模型。
@@ -184,6 +186,9 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   emit({ type: 'state', value: 'processing' });
   const { ctx, record, requirementContext, archive } = await prepareAgentContext({ userText, priorMessages: history, context, sessionId, summary, light, requirements, depth, requirementText, emit, buildContext });
   const convo = [...history.map((m) => ({ ...m })), { role: 'user', content: userText, ...(images.length && { images }) }];
+  // 当前模型看不了图：图片先交给看图模型写成文字（见 imageSight.js）
+  const see = createImageSight({ model, describe: describeImages, label: visionLabel, emit });
+  for (const m of convo) await see(m, { hint: requirementText, signal });
   // 任务清单（update_plan）和子任务分身（delegate_task，只有主线能派）由循环自己提供
   const plan = createPlanTool((steps) => emit({ type: 'plan', steps }));
   // 简单闲聊（light）：不带工具，回得快
@@ -358,6 +363,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       recent.push(ok);
       if (recent.length > 12) recent.shift();
       convo.push({ role: 'tool', toolCallId: c.id, name: c.name, content: output, isError: !ok, ...(outImages.length && { images: outImages }) });
+      await see(convo.at(-1), { hint: requirementText, signal });
     }
     // 长任务中途提醒：每调用 REMIND_EVERY 次工具，把用户这次的要求和计划进度附在最后一条工具结果后面，免得做着做着跑偏
     if (toolCount - reminded >= REMIND_EVERY) {

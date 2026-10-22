@@ -61,6 +61,9 @@ export function createTurnEvents(app) {
         const note = e.resume ? `网络中断，第 ${e.attempt} 次重连，接着刚才的地方写` : `连接出错，第 ${e.attempt} 次自动重试`;
         app.hud.think(`↻ ${note}`, 'sub');
         app.setTask('processing', note.slice(0, 30));
+      } else if (e.type === 'seeing') {
+        bubble.status?.(e.text);
+        app.setTask('processing', '正在看图');
       } else if (e.type === 'emotion') {
         app.machine.setStreamHint(e.value);
         app.director.onEmotion(e.value);

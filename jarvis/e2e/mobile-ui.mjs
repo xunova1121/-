@@ -170,7 +170,12 @@ try{
   check('兼容模式启动即减少动画，只绘制最近 12 条历史',await safePage.evaluate(()=>document.documentElement.classList.contains('safe-render')&&getComputedStyle(document.querySelector('.msg .wy-mascot')).animationName==='none'&&document.querySelector('.msg.user .body').textContent.includes('历史消息 49')));
   await safePage.getByRole('button',{name:'查看更早的对话（还有 48 条）',exact:true}).click();
   check('向前翻页仍限制消息数量，可以读取较早内容',await safePage.evaluate(()=>document.querySelectorAll('.msg').length===12&&document.querySelector('.msg.user .body').textContent.includes('历史消息 37')));
-  await safePage.getByRole('button',{name:'回到最近对话',exact:true}).click();
+  // 翻到旧的一页后停在这页底部：底部要有接着往后看的按钮（以前只在顶上，往下滑就像卡住）
+  check('旧的一页滑到底能接着往后看',await safePage.evaluate(()=>{const r=document.getElementById('transcript'),b=[...r.querySelectorAll('.wy-history-pages button')].find(x=>x.textContent.startsWith('继续往后看'));if(!b)return false;const br=b.getBoundingClientRect(),rr=r.getBoundingClientRect();return br.top<rr.bottom&&br.bottom>rr.top&&b.textContent.includes('还有 12 条');}));
+  await safePage.getByRole('button',{name:/继续往后看/}).click();
+  check('接着往后看从下一页开头读起',await safePage.evaluate(()=>{const r=document.getElementById('transcript');return r.scrollTop<40&&document.querySelectorAll('.msg').length===12&&document.querySelector('.msg.user .body').textContent.includes('历史消息 49');}));
+  await safePage.getByRole('button',{name:'查看更早的对话（还有 48 条）',exact:true}).click();
+  await safePage.getByRole('button',{name:'回到最近对话',exact:true}).first().click();
   await safePage.evaluate(()=>window.__jarvis.showPanel('settings'));
   check('手机可复制包含运行规模的异常诊断',await safePage.isVisible('#btn-copy-render-diagnostics'));
   check('兼容模式关掉图片遮罩（启动页扫光、首页插画淡出）',await safePage.evaluate(()=>{const el=document.createElement('i');el.className='home-task-icon';document.body.append(el);const m=getComputedStyle(el);const off=(m.maskImage||m.webkitMaskImage||'none')==='none';el.remove();return off;}));

@@ -6,13 +6,15 @@
  *   - 音频地址只认 https；下载时不带密钥
  *   - 按次收费（Music 2.0 约 0.03 美元一首，以 fal 页面为准）；填了 fal Key 就算同意，服务器模式不能弹确认框
  *   - 最多等 6 分钟；用户点停止立即结束
+ *   - 国内服务器连 fal 不稳：查状态、取结果、下载时偶尔断一下就隔几秒重试（已经付了钱，不能因为一次断网整首作废）；
+ *     提交不重试（可能已经提交成功，重试会重复扣费）
  */
 import * as ws from './workspace.js';
 import { sleep } from '../llm/openai.js';
 
 export const MUSIC_MODEL = 'fal-ai/minimax-music/v2';
 const QUEUE = 'https://queue.fal.run/';
-export const MUSIC_LIMITS = { style: [10, 300], lyrics: [10, 3000], waitMs: 6 * 60_000, pollMs: 3000, maxBytes: 30 * 1024 * 1024 };
+export const MUSIC_LIMITS = { style: [10, 300], lyrics: [10, 3000], waitMs: 6 * 60_000, pollMs: 3000, maxBytes: 30 * 1024 * 1024, retries: 5 };
 
 const failure = (message, extra = {}) => Object.assign(new Error(message), { kind: 'api', ...extra });
 
@@ -53,19 +55,46 @@ export function createSongTool(ctx = {}) {
   const get = (url, init) => (ctx.fetchViaGateway ?? ctx.fetchImpl ?? globalThis.fetch)(url, init);
   const now = ctx.now ?? Date.now;
 
-  async function call(url, init, signal) {
-    let res;
+  /** fal 报错时带上它给的原因（如 422 说哪个字段不对），截短，不含密钥 */
+  async function detailOf(res) {
     try {
-      res = await get(url, { ...init, signal });
-    } catch (e) {
-      if (signal?.aborted || e.name === 'AbortError') throw e;
-      throw failure('连不上 fal.ai（海外服务，国内网络可能不稳定）', { kind: 'network', cause: e });
+      const text = await res.text();
+      let d;
+      try {
+        d = JSON.parse(text)?.detail;
+      } catch {
+        d = text;
+      }
+      d = Array.isArray(d) ? d.map((x) => x?.msg ?? x).join('；') : typeof d === 'string' ? d : d ? JSON.stringify(d) : '';
+      return d.replace(/\s+/g, ' ').trim().slice(0, 160);
+    } catch {
+      return '';
     }
-    if (!res.ok) {
-      await res.body?.cancel?.();
-      throw failure(`fal.ai：${reasonOf(res.status)}（${res.status}）`, { status: res.status });
+  }
+
+  /** retries：断网、fal 临时出错（5xx、429）时隔几秒再试几次 */
+  async function call(url, init, signal, { retries = 0 } = {}) {
+    for (let attempt = 0; ; attempt++) {
+      let res;
+      try {
+        res = await get(url, { ...init, signal });
+      } catch (e) {
+        if (signal?.aborted || e.name === 'AbortError') throw e;
+        if (attempt < retries) {
+          await sleep(MUSIC_LIMITS.pollMs * (attempt + 1), signal);
+          continue;
+        }
+        throw failure('连不上 fal.ai（海外服务，国内网络可能不稳定）', { kind: 'network', cause: e });
+      }
+      if (res.ok) return res;
+      if (attempt < retries && (res.status >= 500 || res.status === 429)) {
+        await res.body?.cancel?.();
+        await sleep(MUSIC_LIMITS.pollMs * (attempt + 1), signal);
+        continue;
+      }
+      const detail = await detailOf(res);
+      throw failure(`fal.ai：${reasonOf(res.status)}（${res.status}）${detail ? `：${detail}` : ''}`, { status: res.status });
     }
-    return res;
   }
 
   return {
@@ -99,19 +128,19 @@ export function createSongTool(ctx = {}) {
       // 排队、生成：隔几秒查一次
       const started = now();
       for (;;) {
-        const s = await (await call(statusUrl, { headers: { Authorization: auth.Authorization } }, signal)).json();
+        const s = await (await call(statusUrl, { headers: { Authorization: auth.Authorization } }, signal, { retries: MUSIC_LIMITS.retries })).json();
         if (s?.status === 'COMPLETED') break;
         if (s?.status && !['IN_QUEUE', 'IN_PROGRESS'].includes(s.status)) throw failure(`fal.ai 生成失败（${s.status}）`);
         if (now() - started > MUSIC_LIMITS.waitMs) throw failure('作曲超过 6 分钟还没好，先停下；可以稍后再试', { kind: 'timeout' });
         progress?.(s?.status === 'IN_QUEUE' ? `排队中${Number.isFinite(s.queue_position) ? `（前面还有 ${s.queue_position} 个）` : ''}…` : '正在作曲、演唱…');
         await sleep(MUSIC_LIMITS.pollMs, signal);
       }
-      const data = await (await call(resultUrl, { headers: { Authorization: auth.Authorization } }, signal)).json();
+      const data = await (await call(resultUrl, { headers: { Authorization: auth.Authorization } }, signal, { retries: MUSIC_LIMITS.retries })).json();
       const audioUrl = audioUrlOf(data);
       if (!audioUrl) throw failure('fal.ai 的结果里没有音频地址');
 
       progress?.('正在下载歌曲…');
-      const res = await call(audioUrl, {}, signal);
+      const res = await call(audioUrl, {}, signal, { retries: MUSIC_LIMITS.retries });
       const blob = await res.blob();
       if (!blob.size) throw failure('下载到的歌曲是空的');
       if (blob.size > MUSIC_LIMITS.maxBytes) throw failure('歌曲文件太大，没有保存');

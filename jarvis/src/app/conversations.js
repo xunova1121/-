@@ -68,7 +68,7 @@ export function createConversations(app) {
   function visibleHistory(end = app.history.length) {
     return transcriptWindow(app.history.length, { mobile: MOBILE, safe: document.documentElement.classList.contains('safe-render'), end });
   }
-  function replayTranscript(end = app.history.length) {
+  function replayTranscript(end = app.history.length, { fromTop = false } = {}) {
     showChatTitle();
     const root = $('#transcript'),
       range = visibleHistory(end);
@@ -80,27 +80,29 @@ export function createConversations(app) {
       app.renderWelcome();
       return;
     }
+    const pageNav = (buttons) => {
+      const nav = Object.assign(document.createElement('nav'), { className: 'wy-history-pages' });
+      nav.setAttribute('aria-label', '对话翻页');
+      for (const [label, target, top] of buttons) {
+        const button = Object.assign(document.createElement('button'), { type: 'button', textContent: label });
+        button.onclick = () => {
+          if (app.active) {
+            toast('当前回复完成后，可以翻看更早的对话');
+            return;
+          }
+          replayTranscript(target, { fromTop: top });
+        };
+        nav.append(button);
+      }
+      return nav;
+    };
+    const latest = ['回到最近对话', app.history.length, false];
     transcript.batch(() => {
       if (range.older || range.newer) {
-        const nav = Object.assign(document.createElement('nav'), { className: 'wy-history-pages' });
-        nav.setAttribute('aria-label', '对话翻页');
-        const pageButton = (label, target) => {
-          const button = Object.assign(document.createElement('button'), { type: 'button', textContent: label });
-          button.onclick = () => {
-            if (app.active) {
-              toast('当前回复完成后，可以翻看更早的对话');
-              return;
-            }
-            replayTranscript(target);
-          };
-          nav.append(button);
-        };
-        if (range.older) pageButton(`查看更早的对话（还有 ${range.older} 条）`, range.start);
-        if (range.newer) {
-          pageButton('下一页', Math.min(app.history.length, range.end + range.limit));
-          pageButton('回到最近对话', app.history.length);
-        }
-        root.append(nav);
+        const buttons = [];
+        if (range.older) buttons.push([`查看更早的对话（还有 ${range.older} 条）`, range.start, false]);
+        if (range.newer) buttons.push(['下一页', Math.min(app.history.length, range.end + range.limit), true], latest);
+        root.append(pageNav(buttons));
       }
       // 翻看旧消息：很长的回答（除了最后一条）先只显示开头，点“展开全文”再显示，手机上少画很多内容
       const shown = app.history.slice(range.start, range.end);
@@ -114,7 +116,11 @@ export function createConversations(app) {
           b.done(m.tools?.length ? `用了：${m.tools.map(toolLabel).join('、')}` : '', { fold: i !== lastAgent });
         }
       });
+      // 翻到旧的一页时，底部也要能接着往后看：以前按钮只在顶上，滑到底就“卡住”了
+      if (range.newer) root.append(pageNav([[`继续往后看（还有 ${range.newer} 条）`, Math.min(app.history.length, range.end + range.limit), true], latest]));
     });
+    // 往后翻：从这一页开头接着读
+    if (fromTop) root.scrollTop = 0;
   }
   /** 新对话的开场建议：之前没做完的事 > 上一段对话 */
   async function resumeSuggestion() {

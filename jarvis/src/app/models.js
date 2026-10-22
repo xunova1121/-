@@ -4,7 +4,7 @@ import { createHelperLlm } from '../llm/helper.js';
  */
 import { STANDALONE, MOBILE } from '../config.js';
 import { loadConfig, createAdapter, displayName, providerById, modelOf } from '../llm/config.js';
-import { routeFor, seesImages, fallbackRoutes } from '../llm/router.js';
+import { routeFor, seesImages, fallbackRoutes, visionRoute } from '../llm/router.js';
 import { chipLabel, isAuto } from '../ui/modelPicker.js';
 import { providerLabel } from '../llm/modelLibrary.js';
 import { createEmbedder } from '../llm/embeddings.js';
@@ -180,6 +180,13 @@ export function createModels(app) {
     const r = routeFor(app.llmConfig, 'vision');
     return r.routed || seesImages(r.model) ? helperLlm('vision') : null;
   }
+  /** 当前模型看不了图时，替它看图的模型：{ describe, label }；一个都没有时 null（见 router.visionRoute） */
+  function imageDescriber() {
+    const r = visionRoute(app.llmConfig);
+    if (!r || providerById(app.llmConfig.provider)?.kind === 'mock') return null;
+    const { adapter, model, problem } = createAdapter(r.cfg, { gateway: app.gateway });
+    return problem ? null : { describe: createHelperLlm(adapter, model), label: model };
+  }
   /** 团队模式：按角色挑分工模型 */
   const ROLE_TASK = { coder: 'code', writer: 'write', researcher: 'reason', analyst: 'reason', operator: 'chat', generalist: 'chat' };
   function modelForRole(role) {
@@ -215,6 +222,7 @@ export function createModels(app) {
     refreshServerModel,
     helperLlm,
     visionHelperLlm,
+    imageDescriber,
     modelForRole,
     syncMemoryEngine
   };

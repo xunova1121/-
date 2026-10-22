@@ -378,3 +378,19 @@ it('恢复归档最多留 5 次，旧版检查点里的网页正文归档时去�
  const saved=await sessions.get(s.id);expect(saved.recoveryCheckpoints).toHaveLength(5);expect(saved.recoveryCheckpoints.at(-1).text).toBe('上次');
  expect(JSON.stringify(saved.recoveryCheckpoints)).not.toContain('正文');
 });
+
+describe('服务器上看图：主模型是 DeepSeek 文字模型', () => {
+  it('发来的图片先交给 DeepSeek 看图模型描述，主模型只收到文字', async () => {
+    const mainSaw = [];
+    const visionSaw = [];
+    const main = { async stream({ messages, onText }) { mainSaw.push(...messages); onText('图里是湖边夜景。'); return { text: '图里是湖边夜景。', toolCalls: [], stop: 'end_turn' }; } };
+    const vision = { async stream({ messages, onText }) { visionSaw.push(...messages); onText('湖边夜景，亮着路灯。'); return { text: '湖边夜景，亮着路灯。', toolCalls: [], stop: 'end_turn' }; } };
+    const cfg = async () => ({ ...DEFAULT_CONFIG, provider: 'deepseek', models: { deepseek: 'deepseek-v4-pro' }, keys: { deepseek: 'sk-test' }, autoMemory: false }); // 不在后台整理记忆（那会真的连 DeepSeek）
+    const runner = createTaskRunner({ getConfig: cfg, makeAdapter: (c) => { const model = c.models[c.provider]; return { adapter: /vision/.test(model) ? vision : main, model }; } });
+    const { id } = await runner.start({ text: '请看看这张图片', images: [{ mime: 'image/jpeg', data: '/9j/AAAA' }] });
+    await until(() => runner.get(id).status === 'done');
+    expect(visionSaw[0].images).toHaveLength(1);
+    expect(mainSaw.some((m) => m.images?.length)).toBe(false);
+    expect(mainSaw.at(-1).content).toContain('亮着路灯');
+  });
+});
