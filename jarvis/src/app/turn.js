@@ -375,11 +375,13 @@ export function createTurn(app) {
       // 回答底下写明用了谁：看图模型（主模型看不了图时）→ 回答的模型（按能力表换了的写上是哪一项）
       const seen = st.seenBy ? `看图 ${st.seenBy} → ` : '';
       // 服务档位：生效了写“快速档”，没生效写清原因（服务商不认这个参数，或回报按别的档位处理）
+      // fast 和 priority 是同一个意思（OpenAI 新旧两种写法），回报哪个都算生效
+      const sameTier = (a, b) => a === b || [a, b].every((x) => ['fast', 'priority'].includes(x));
       const tierTag = !st.tier
         ? ''
         : !st.tier.sent
           ? `${st.tier.asked} 档未生效（服务商不认，已用普通档） · `
-          : st.tier.served && st.tier.served !== st.tier.asked
+          : st.tier.served && !sameTier(st.tier.served, st.tier.asked)
             ? `${st.tier.asked} 档未生效（服务商按 ${st.tier.served} 处理） · `
             : `${st.tier.asked} 档${st.tier.served ? '' : '（已请求）'} · `;
       const remote = st.serverRoute;
