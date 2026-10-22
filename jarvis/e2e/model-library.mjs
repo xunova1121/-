@@ -117,7 +117,28 @@ try {
     check(`${width} 服务器对话后台整理不写本机偏好`, reflectionIsolated);
     await waitForDocumentStyle(page);
     await page.evaluate(() => window.__jarvis.showPanel('models'));
-    await page.waitForSelector('.ml-provider');
+    await page.waitForSelector('.ml-provider', { state: 'attached' });
+    const mobileTab = async (label) => { if (width < 721) await page.getByRole('navigation', { name: '模型中心分类' }).getByRole('button', { name: label, exact: true }).click(); };
+    if (width < 721) {
+      check('手机默认能力页，隐藏服务商配置且没有常用/备用原生下拉框', await page.locator('[data-model-page=abilities]').isVisible() && !(await page.locator('[data-model-page=providers]').isVisible()) && await page.locator('.mc-abilities select:visible').count() === 0);
+      await page.getByRole('button', { name: '配置编程', exact: true }).click();
+      await page.getByRole('searchbox', { name: '搜索能力模型' }).fill('shared-model');
+      check('手机能力选择器保留同名型号的两家服务商', await page.locator('.mc-choice').count() === 2 && (await page.locator('.mc-choice small').allTextContents()).includes('供应商 B'));
+      const chosen = page.waitForResponse(r => r.url() === base + '/api/server/config' && r.request().method() === 'PUT' && r.request().postDataJSON()?.abilities?.code?.main?.provider === 'relay-2');
+      await page.locator('.mc-choice').filter({ hasText: '供应商 B' }).click();
+      await chosen;
+      await page.waitForFunction(() => !document.querySelector('dialog.mc-sheet'));
+      check('手机能力选择写入云端，不覆盖日常默认或本机密钥', JSON.parse(fs.readFileSync(path.join(data, 'config.json'), 'utf8')).abilities.code.main.provider === 'relay-2' && JSON.parse(fs.readFileSync(path.join(data, 'config.json'), 'utf8')).models.custom === 'shared-model' && await page.evaluate(() => JSON.parse(localStorage.getItem('jarvis.llm.v1')).keys.custom === 'local-key-secret'));
+      await page.getByRole('button', { name: '配置编程', exact: true }).click();
+      await page.locator('.mc-choice').filter({ hasText: '跟随日常对话' }).click();
+      await page.waitForFunction(() => !document.querySelector('dialog.mc-sheet'));
+      const focusAnchor = page.getByRole('button', { name: '配置看图', exact: true });
+      await focusAnchor.click();
+      await page.keyboard.press('Escape');
+      await page.locator('dialog.mc-sheet').waitFor({ state: 'detached' });
+      check('手机选择器 Esc 关闭并返回能力入口', await page.locator('dialog.mc-sheet').count() === 0 && await focusAnchor.evaluate(el => el === document.activeElement));
+      await page.screenshot({ path: path.join(output, 'app-model-center-390.png') });
+    }
     // 写作偏好收在“文档审查与写作偏好”里：先展开外层，再找里层
     await page.locator('details.ml-review').evaluate((d) => { d.open = true; });
     const stylesPanel = page.locator('details:has(> summary:text-is("写作偏好 · 云服务器"))');
@@ -149,6 +170,7 @@ try {
       (await page.locator('#model-workspace .ml-scope-note').textContent()) === '任务在云服务器上做：这里改的就是实际在用的配置' &&
         (await page.locator('.ml-provider').count()) === 2
     );
+    await mobileTab('服务商');
     const searchPanel = page.locator('details').filter({ has: page.getByText('联网搜索 · DeepSeek Search/Fetch · 云服务器', { exact: true }) });
     await searchPanel.locator('summary').click();
     await searchPanel.getByLabel('DeepSeek搜索Key', { exact: true }).fill('fake-search-key-secret');
@@ -202,7 +224,8 @@ try {
       JSON.parse(fs.readFileSync(path.join(data, 'config.json'), 'utf8')).deepseekSearchKey === 'fake-search-key-secret'
       && await page.evaluate(() => JSON.parse(localStorage.getItem('jarvis.llm.v1')).deepseekSearchKey === 'fake-local-search-key'));
     await page.locator('#model-workspace .ml-tabs').getByRole('button', { name: '云服务器', exact: true }).click();
-    await page.waitForSelector('.ml-provider');
+    await page.waitForSelector('.ml-provider', { state: 'attached' });
+    await mobileTab('能力');
     // 审查模型收在“文档审查与写作偏好”里（展开状态会保留，没展开才展开）
     await page.locator('details.ml-review').evaluate((d) => { d.open = true; });
     const reviewSaved = page.waitForResponse(response => response.url() === base + '/api/server/config' && response.request().method() === 'PUT' && response.request().postDataJSON()?.documentReviewer?.provider === 'relay-2');
@@ -216,6 +239,7 @@ try {
     await reviewCleared;
     await page.waitForFunction(() => !document.querySelector('[aria-label="文档审查模型"]').disabled);
     check(`${width} 可清空审查分工回到同模型自查`, JSON.parse(fs.readFileSync(path.join(data, 'config.json'), 'utf8')).documentReviewer === null);
+    await mobileTab('服务商');
     const card = () => page.locator('.ml-provider').filter({ has: page.getByText('供应商 A', { exact: true }) });
     await card().getByRole('button', { name: '拉取模型', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('.ml-notice')?.textContent.includes('已拉取 302'));
@@ -228,7 +252,7 @@ try {
     await page.getByRole('searchbox', { name: '搜索全部模型', exact: true }).fill('chat-model-299');
     await page.locator('[data-model="chat-model-299"]').getByRole('button', { name: '加入常用 chat-model-299', exact: true }).click();
     await page.waitForFunction(() => document.querySelectorAll('.ml-model[data-model="chat-model-299"]').length === 2);
-    await page.locator('.ml-model[data-model="chat-model-299"]').first().getByRole('button', { name: '设默认', exact: true }).click();
+    await page.locator('.ml-model[data-model="chat-model-299"]:visible').first().getByRole('button', { name: '设默认', exact: true }).click();
     await page.waitForFunction(() => document.getElementById('model-chip-text').textContent.includes('chat-model-299'));
     check(
       `${width} 服务器默认切换不覆盖本机`,
@@ -262,7 +286,8 @@ try {
         mediaReadback.imageModel === 'gpt-image-2' &&
         mediaReadback.model === 'chat-model-299'
     );
-    await card().getByRole('button', { name: '管理全部模型 · 302 ›', exact: true }).click();
+    if (width < 721) await mobileTab('服务商');
+    else await card().getByRole('button', { name: '管理全部模型 · 302 ›', exact: true }).click();
     await page.locator('#toast').waitFor({ state: 'hidden' });
     await page.locator('#panel').evaluate((element) => (element.scrollTop = 0));
     check(
