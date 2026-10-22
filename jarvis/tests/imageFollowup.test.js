@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { followsImage, remoteTurnImages, creativeWithoutLookup } from '../src/core/imageFollowup.js';
 import { runAgent } from '../src/agent/agent.js';
@@ -79,5 +79,31 @@ describe('图片连续追问和轻量创作', () => {
       context: { dynamic: '', kbHits: [] }, quiet: true, emit() {}
     });
     expect(searches).toBe(1);
+  });
+
+  it('普通查询中改成图片创作后，解除旧60秒限制且不输出旧检索停止警告', async () => {
+    vi.useFakeTimers();
+    try {
+      const inbox = [];
+      let step = 0;
+      const work = runAgent({
+        adapter: { kind: 'openai', async stream(options) {
+          if (++step === 1) {
+            inbox.push('改成描述场景，发散三个创意，不用搜索');
+            options.onText('收到原问题。');
+            return { text: '收到原问题。', toolCalls: [], stop: 'end_turn' };
+          }
+          expect(options.allowWebSearch).toBe(false);
+          await new Promise((resolve) => setTimeout(resolve, 70000));
+          options.onText('完成图片创作。');
+          return { text: '完成图片创作。', toolCalls: [], stop: 'end_turn' };
+        } }, model: 'fixture', history: [], userText: '今天有哪些新闻', inbox, tools: [],
+        context: { dynamic: '', kbHits: [] }, quiet: true, emit() {}
+      });
+      await vi.advanceTimersByTimeAsync(70001);
+      const result = await work;
+      expect(result.text).toContain('完成图片创作');
+      expect(result.text).not.toMatch(/检索已停止|部分完成/);
+    } finally { vi.useRealTimers(); }
   });
 });

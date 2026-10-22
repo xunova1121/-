@@ -1,5 +1,6 @@
 import { createLookupWindow } from './lookupWindow.js';
 import { needsComputer } from '../llm/router.js';
+import { creativeWithoutLookup } from '../core/imageFollowup.js';
 /** 普通信息查询的总时限：包含上下文、模型等待/重试、检索和收尾；不是只计网页耗时。 */
 export const LOOKUP_TOTAL_MS = 60_000;
 export const COMPLEX = /深度|深入|全面|详细|长篇|长文|\d+\s*[千万元]?\s*字|调研|研究报告|生成|制作|创作|画|设计|样式|效果图|界面|网页|网站|PPT|Word|Excel|文档|报告|方案|论文|查原文|核实原文|核对原文|逐条核[实验对]|逐项|逐一|交叉核[验对]|多来源核[验对]|(?:写|生成|制作|编制|导出|保存为|整理成).{0,16}(?:报告|文档|论文|PPT|Word|Excel|文件)|代码|编程|开发|安装|部署/i;
@@ -27,7 +28,7 @@ export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_
   let timer, closed = false, partial = '', finishWait;
   let deadlineDisabled = false;
   const waiting = new Promise((_, reject) => { finishWait = reject; });
-  const isTask=note=>COMPLEX.test(String(note))||hasComputer&&needsComputer(note,{history:options.history||[]});
+  const isTask=note=>COMPLEX.test(String(note))||creativeWithoutLookup(note)||hasComputer&&needsComputer(note,{history:options.history||[]});
   const disable = (note) => { if (isTask(note)) { clearTimeout(timer); timer = null; deadlineDisabled = true; } };
   const userAbort = () => { ctrl.abort(); finishWait(abortError()); };
   const forwarded = {
@@ -60,5 +61,3 @@ export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_
     closed = true; clearTimeout(timer); options.signal?.removeEventListener('abort', userAbort);
   }
 }
-
-

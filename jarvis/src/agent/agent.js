@@ -233,7 +233,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     if (availableTools.some(t => t.name === 'computer_search') && said.some(needsComputer)) computerNote = COMPUTER_NOTE;
     review.revise(said.join('\n'));
     onTaskUpdate?.(said.join("\n"));
-    if (COMPLEX.test(said.join("\n")) || computerNote) { infoPrompt = false; lookupDeadline = false; }
+    if (COMPLEX.test(said.join("\n")) || creativeWithoutLookup(currentRequest) || computerNote) { infoPrompt = false; lookupDeadline = false; }
     if (light) { light=false; tools=availableTools; loader=createToolLoader([...tools,...own]); toolHint=loader.hint(); }
     if(said.some(s=>computerTaskKind(s)==='gui')){loadGUI();toolHint=loader.hint();}
     retrieval.upgrade(said.join("\n"));
@@ -252,7 +252,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     if (!retrieval.reason && lookupDeadline && lookupControl && (lookupControl.retrievalRemaining() <= 0 || retrieval.active && modelAttempts >= QUICK_MODEL_ATTEMPTS)) {
       retrieval.close('已停止新增检索，正在整理已有资料');
     }
-    const closing = Boolean(retrieval.reason);
+    const closing = allowWebSearch && Boolean(retrieval.reason);
     if (closing) {
       if (!retrieval.extensive && ++closingTurns > (lookupControl ? 1 : 2)) { retrievalStopped = true; break; }
       convo.push({ role: 'user', content: retrieval.note });
