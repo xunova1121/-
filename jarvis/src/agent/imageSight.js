@@ -8,7 +8,7 @@
 import { seesImages } from '../llm/router.js';
 
 export const NO_SIGHT_NOTE =
-  '（如果你看不到这张图片的内容，或者图片显示成 Unsupported Image：说明当前模型不能看图，不是图片格式的问题。直接告诉用户“当前模型看不了图，请到 模型 → 模型分工 → 看图 设一个能看图的模型，或填上百炼 / DeepSeek 的 Key”，不要让用户换格式重发。）';
+  '（如果你看不到这张图片的内容，或者图片显示成 Unsupported Image：说明当前模型不能看图，不是图片格式的问题。直接告诉用户“当前模型看不了图：请在 模型 页给正在用的那一端（本机或云服务器）添加百炼（通义千问）或 DeepSeek 的 Key，未央会自动用它们的看图模型；也可以在模型分工里指定看图模型”，不要让用户换格式重发。）';
 
 /** 已知只认文字的模型系列：没有看图模型时才提醒它如实说（认不出的名字可能其实能看，不打扰） */
 const TEXT_ONLY = /deepseek|kimi|moonshot|glm-4(?!v|\.\dv)|glm-[5-9](?!v)|qwen-(max|plus|turbo|long)|qwen3-(max|coder|\d+b)|minimax|abab|ernie/i;
