@@ -8,7 +8,7 @@ import http from 'node:http'; import path from 'node:path'; import { readFile } 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dist-mobile');
 const server = http.createServer(async (req, res) => { const p = new URL(req.url, 'http://x').pathname; try { const f = path.resolve(ROOT, p === '/' ? 'index.html' : decodeURIComponent(p.slice(1))); res.writeHead(200, { 'Content-Type': { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript', '.css': 'text/css' }[path.extname(f)] || 'application/octet-stream' }); res.end(await readFile(f)); } catch { res.writeHead(404); res.end(); } });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
-const CONFIG = { provider: 'deepseek', models: { deepseek: 'deepseek-v4-pro' }, keys: { deepseek: 'sk-test', zhipu: 'zp-test', openai: 'sk-o' }, baseURLs: {}, favoriteModels: [{ provider: 'deepseek', model: 'deepseek-v4-pro' }, { provider: 'deepseek', model: 'deepseek-v4-flash' }] };
+const CONFIG = { provider: 'deepseek', models: { deepseek: 'deepseek-v4-pro' }, keys: { deepseek: 'sk-test', zhipu: 'zp-test', openai: 'sk-o' }, baseURLs: {}, favoriteModels: [{ provider: 'deepseek', model: 'deepseek-v4-pro' }, { provider: 'deepseek', model: 'deepseek-v4-flash' }, { provider: 'zhipu', model: 'glm-ocr' }] };
 const results = [];
 const check = (label, ok, detail = '') => { results.push(ok); console.log(`${ok ? '✓' : '✗'} ${label}${detail ? ` — ${detail}` : ''}`); };
 const browser = await chromium.launch(); const ctx = await browser.newContext({ viewport: { width: 412, height: 860 }, isMobile: true });
@@ -35,6 +35,18 @@ const saved = JSON.parse(await page.evaluate(() => localStorage.getItem('jarvis.
 check('看图改成 OpenAI：备用自动换成智谱，并存下来', row(after, '看图').now === '现在：OpenAI · gpt-4.1-mini；出错换 智谱 GLM · glm-4.5v' && saved.abilities.vision.main.provider === 'openai', row(after, '看图').now);
 check('日常对话选“不用备用”：存成 null', saved.abilities.chat.backup === null && row(after, '日常对话').now.endsWith('没有备用'));
 check('记忆向量选“不用”：关掉向量', saved.embedding.engine === 'off' && row(after, '记忆向量').now.includes('只按关键字'));
+// 收藏的型号不按名字猜：glm-ocr 名字不像看图模型，收藏了也能在看图里选
+const visionOptions = await page.getByLabel('看图 常用', { exact: true }).evaluate((s) => [...s.options].map((o) => o.textContent));
+check('收藏的型号不按名字筛：看图下拉里有 glm-ocr', visionOptions.includes('智谱 GLM · glm-ocr'), visionOptions.join('、'));
+// 手动填写型号：选“手动填写型号…”→ 选服务商、填型号 → 确定
+await page.getByLabel('画图 备用', { exact: true }).selectOption('manual');
+await page.getByLabel('画图 手动填写的服务商', { exact: true }).selectOption('zhipu');
+await page.getByLabel('画图 手动填写的型号', { exact: true }).fill('cogview-4-250304');
+await page.locator('.ml-ability-manual:not([hidden])').getByRole('button', { name: '确定' }).click();
+await page.waitForTimeout(600);
+const manualSaved = JSON.parse(await page.evaluate(() => localStorage.getItem('jarvis.llm.v1'))).abilities.image;
+const imageRow = row(await dump(), '画图');
+check('手动填写的型号存下来，并显示在下拉框里', manualSaved.backup?.model === 'cogview-4-250304' && manualSaved.backup.provider === 'zhipu' && imageRow.backup === '智谱 GLM · cogview-4-250304' && imageRow.now.endsWith('出错换 智谱 GLM · cogview-4-250304'), JSON.stringify(manualSaved) + ' ' + imageRow.now);
 check('412px 不左右滑、没有页面错误', (await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)) && errs.length === 0, errs.join('；'));
 await browser.close(); server.close();
 console.log(`${results.filter(Boolean).length}/${results.length} 能力表通过`);

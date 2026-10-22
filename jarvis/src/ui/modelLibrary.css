@@ -515,3 +515,20 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+/* 手动填写型号：服务商、型号、确定、取消一行，手机上自动换行 */
+.ml-ability-manual {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.ml-ability-manual[hidden] {
+  display: none;
+}
+.ml-ability-manual select,
+.ml-ability-manual input {
+  min-width: 0;
+  flex: 1 1 140px;
+  max-width: 100%;
+}

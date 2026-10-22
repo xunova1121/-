@@ -123,3 +123,17 @@ describe('记忆向量', () => {
     expect(resolveEmbedding({ ...USER, keys: { ...USER.keys, siliconflow: 's' }, embedding: { engine: 'siliconflow' } }, { keys: [] })).toMatchObject({ id: 'siliconflow' });
   });
 });
+
+describe('下拉框里能选的型号', async () => {
+  const { abilityCandidates } = await import('../src/ui/abilityTable.js');
+  it('收藏的不按名字猜能不能看图；设过的（含手动填写的）一定在列表里；拉取到的按名字认', () => {
+    const cfg = { ...USER, favoriteModels: [{ provider: 'zhipu', model: 'glm-ocr' }], modelLists: { 'zhipu|': { ids: ['glm-4.6v', 'glm-4.5', 'embedding-3'] } } };
+    const vision = abilityCandidates(cfg, 'vision', [{ provider: 'openai', model: 'my-own-vision' }]).map((l) => l.model);
+    expect(vision).toContain('glm-ocr');
+    expect(vision).toContain('glm-4.6v');
+    expect(vision).toContain('my-own-vision');
+    expect(vision).not.toContain('glm-4.5'); // 拉取到的文字模型不进看图
+    expect(vision).not.toContain('embedding-3');
+    expect(abilityCandidates(cfg, 'embed').map((l) => l.model)).toEqual(['embedding-3', 'text-embedding-3-small']);
+  });
+});

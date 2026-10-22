@@ -11,8 +11,11 @@ import { providerLabel, favoriteLines, catalogKey, sameLine, currentLine } from 
 const KIND = { image: 'image', embed: 'embed' };
 const PER_PROVIDER = 30;
 
-/** 这项能力能选的型号 */
-export function abilityCandidates(cfg, ability) {
+/**
+ * 这项能力能选的型号
+ *   收藏的型号不按名字猜（你确认过的，以你为准）；拉取到的型号按名字认类别；extra：已经设过的（含手动填写的）
+ */
+export function abilityCandidates(cfg, ability, extra = []) {
   const kind = KIND[ability] || 'chat';
   const out = [];
   const add = (provider, model) => {
@@ -25,11 +28,12 @@ export function abilityCandidates(cfg, ability) {
     const start = out.length;
     const ids = cfg.modelLists?.[catalogKey(cfg, provider)]?.ids || [];
     const fits = (id) => modelKind(id) === kind && (ability !== 'vision' || seesImages(id));
-    for (const line of favoriteLines(cfg)) if (line.provider === provider && fits(line.model)) add(provider, line.model);
+    for (const line of favoriteLines(cfg)) if (line.provider === provider && (kind === 'chat' ? modelKind(line.model) === 'chat' : fits(line.model))) add(provider, line.model);
     const row = CAPABILITIES[ability]?.find((item) => item.provider === provider);
     if (row?.model) add(provider, row.model);
     for (const id of ids) if (fits(id) && out.length - start < PER_PROVIDER) add(provider, id);
   }
+  for (const line of extra) if (line?.provider && line?.model) add(line.provider, line.model);
   return out;
 }
 
@@ -48,15 +52,41 @@ function describe(cfg, ability) {
  */
 export function abilityTable({ cfg, workspace, node, run }) {
   const rows = Object.entries(ABILITIES).map(([ability, meta]) => {
-    const list = abilityCandidates(cfg, ability);
     const own = cfg.abilities?.[ability] || {};
+    const list = abilityCandidates(cfg, ability, [own.main, own.backup]);
     const auto = abilityLines({ ...cfg, abilities: { ...cfg.abilities, [ability]: {} } }, ability);
     // “自动”备用是按选定的常用来找的
     const autoBackup = abilityLines({ ...cfg, abilities: { ...cfg.abilities, [ability]: own.main ? { main: own.main } : {} } }, ability).backup;
     const option = (value, textContent) => node('option', { value, textContent });
     // 每个下拉框要自己的一套选项（同一个元素放进第二个下拉框会从第一个里移走）
-    const lineOptions = () => list.map((line, i) => option(String(i), label(cfg, line)));
+    const lineOptions = () => [...list.map((line, i) => option(String(i), label(cfg, line))), option('manual', '手动填写型号…')];
     const indexOf = (line) => (line ? list.findIndex((item) => sameLine(item, line)) : -1);
+
+    /** 存一项：line 是具体型号，或 'auto' / 'none'（不用备用）/ 'off'（不用向量） */
+    const apply = (slot, choice) => {
+      if (slot === 'main' && ability === 'chat') return choice?.provider && run(() => workspace.choose(choice));
+      run(() =>
+        workspace.patch((value) => {
+          if (slot === 'backup' && choice === 'auto') {
+            const { backup: _drop, ...rest } = value.abilities?.[ability] || {};
+            return { ...value, abilities: { ...value.abilities, [ability]: rest } };
+          }
+          let next = setAbility(value, ability, slot, choice?.provider ? choice : null);
+          // 向量：选了具体型号或“自动”都按能力表走；“不用”就关掉
+          if (slot === 'main' && ability === 'embed') next = { ...next, embedding: { ...next.embedding, engine: choice === 'off' ? 'off' : 'auto' } };
+          return next;
+        })
+      );
+    };
+
+    // 手动填写：选哪家服务商 + 型号名
+    const manual = node('div', { className: 'ml-ability-manual', hidden: true });
+    let manualSlot = 'main';
+    const providerSelect = node('select', { ariaLabel: `${meta.name} 手动填写的服务商` }, ...keyedProviders(cfg).map((id) => option(id, providerLabel(cfg, id))));
+    const modelInput = node('input', { placeholder: '完整型号名，如 glm-4.6v', maxLength: 200, ariaLabel: `${meta.name} 手动填写的型号` });
+    const ok = node('button', { type: 'button', className: 'ml-small', textContent: '确定' });
+    const cancel = node('button', { type: 'button', className: 'ml-small', textContent: '取消' });
+    manual.append(providerSelect, modelInput, ok, cancel);
 
     // 常用：日常对话就是默认模型（改它等于换默认）；其余可以“自动”或“跟日常对话一样”
     const main = node('select', { className: 'ml-ability-select', ariaLabel: `${meta.name} 常用` });
@@ -66,40 +96,44 @@ export function abilityTable({ cfg, workspace, node, run }) {
       main.append(option('auto', autoText), ...(ability === 'embed' ? [option('off', '不用（只按关键字）')] : []), ...lineOptions());
     }
     const current = abilityLines(cfg, ability).main;
-    main.value = ability === 'chat' ? String(indexOf(current)) : ability === 'embed' && cfg.embedding?.engine === 'off' ? 'off' : own.main && indexOf(own.main) >= 0 ? String(indexOf(own.main)) : 'auto';
-    main.addEventListener('change', () => {
-      const line = list[Number(main.value)];
-      if (ability === 'chat') return line && run(() => workspace.choose(line));
-      run(() =>
-        workspace.patch((value) => {
-          let next = setAbility(value, ability, 'main', line || null);
-          // 向量：选了具体型号或“自动”都按能力表走；“不用”就关掉
-          if (ability === 'embed') next = { ...next, embedding: { ...next.embedding, engine: main.value === 'off' ? 'off' : 'auto' } };
-          return next;
-        })
-      );
-    });
+    const mainValue = ability === 'chat' ? String(indexOf(current)) : ability === 'embed' && cfg.embedding?.engine === 'off' ? 'off' : own.main && indexOf(own.main) >= 0 ? String(indexOf(own.main)) : 'auto';
+    main.value = mainValue;
 
     // 备用：自动 / 不用备用 / 指定
     const backup = node('select', { className: 'ml-ability-select', ariaLabel: `${meta.name} 备用` }, option('auto', `自动（${autoBackup ? label(cfg, autoBackup) : '暂无'}）`), option('none', '不用备用'), ...lineOptions());
-    backup.value = own.backup === null ? 'none' : own.backup && indexOf(own.backup) >= 0 ? String(indexOf(own.backup)) : 'auto';
-    backup.addEventListener('change', () =>
-      run(() =>
-        workspace.patch((value) => {
-          if (backup.value === 'auto') {
-            const { backup: _drop, ...rest } = value.abilities?.[ability] || {};
-            return { ...value, abilities: { ...value.abilities, [ability]: rest } };
-          }
-          return setAbility(value, ability, 'backup', backup.value === 'none' ? null : list[Number(backup.value)]);
-        })
-      )
-    );
+    const backupValue = own.backup === null ? 'none' : own.backup && indexOf(own.backup) >= 0 ? String(indexOf(own.backup)) : 'auto';
+    backup.value = backupValue;
+
+    const onPick = (slot, select) => () => {
+      const v = select.value;
+      if (v === 'manual') {
+        manualSlot = slot;
+        manual.hidden = false;
+        modelInput.focus();
+        return;
+      }
+      manual.hidden = true;
+      apply(slot, /^\d+$/.test(v) ? list[Number(v)] : v);
+    };
+    main.addEventListener('change', onPick('main', main));
+    backup.addEventListener('change', onPick('backup', backup));
+    ok.addEventListener('click', () => {
+      const model = modelInput.value.trim();
+      if (!model) return modelInput.focus();
+      apply(manualSlot, { provider: providerSelect.value, model });
+    });
+    cancel.addEventListener('click', () => {
+      manual.hidden = true;
+      main.value = mainValue;
+      backup.value = backupValue;
+    });
     return node(
       'div',
       { className: 'ml-ability' },
       node('div', { className: 'ml-ability-name' }, node('strong', { textContent: meta.name }), node('small', { textContent: meta.hint })),
       node('label', { className: 'ml-ability-slot' }, node('span', { textContent: '常用' }), main),
       node('label', { className: 'ml-ability-slot' }, node('span', { textContent: '备用' }), backup),
+      manual,
       node('small', { className: 'ml-ability-now', textContent: describe(cfg, ability) })
     );
   });
@@ -107,7 +141,7 @@ export function abilityTable({ cfg, workspace, node, run }) {
     'section',
     { className: 'ml-abilities', ariaLabel: '每项能力用哪个模型' },
     node('h3', { className: 'ml-heading', textContent: '每项能力用哪个模型' }),
-    node('p', { className: 'ml-muted', textContent: '下拉框只列上面填了 Key 的服务商。“自动”按各家擅长的挑；常用出错时自动换备用。' }),
+    node('p', { className: 'ml-muted', textContent: '下拉框只列上面填了 Key 的服务商；没有想要的型号就选“手动填写型号…”。“自动”按各家擅长的挑；常用出错时自动换备用。' }),
     ...rows
   );
 }
