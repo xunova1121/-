@@ -3,6 +3,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { followsImage, remoteTurnImages, creativeWithoutLookup } from '../src/core/imageFollowup.js';
 import { runAgent } from '../src/agent/agent.js';
 import { createExecutionReview } from '../src/agent/executionReview.js';
+import { requiresSources } from '../src/agent/retrievalQuality.js';
 
 beforeEach(() => { globalThis.indexedDB = new IDBFactory(); });
 afterEach(() => { delete globalThis.indexedDB; });
@@ -41,6 +42,8 @@ describe('图片连续追问和轻量创作', () => {
     for (const text of ['这个图的场景描述下先发散思维', '发散三个创意', '写一段文案', '编个故事', '描述场景，不用搜索来源']) expect(creativeWithoutLookup(text), text).toBe(true);
     for (const text of ['描述图片并查一下设备型号', '发散创意，搜索最新案例', '查一下今天股价', '根据图做Word文档']) expect(creativeWithoutLookup(text), text).toBe(false);
     expect(creativeWithoutLookup('描述场景\n\n[已上传到工作区：查资料图.png]')).toBe(true);
+    expect(requiresSources('描述场景，不用搜索来源')).toBe(false);
+    expect(requiresSources('描述并查最新新闻来源')).toBe(true);
   });
 
   it('实际调度不提供搜索/委派工具，原生搜索也关闭；误调用不会真的联网', async () => {
