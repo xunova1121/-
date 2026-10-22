@@ -101,10 +101,12 @@ function openAbilitySheet({ cfg, workspace, node, run, ability, slot, anchor, wh
     list.replaceChildren();
     manual.hidden = true;
     const current = abilityLines(cfg, ability)[activeSlot];
+    const specific = activeSlot === 'main' ? ability === 'chat' || Boolean(own.main) : Boolean(own.backup);
+    const automatic = activeSlot === 'main' ? !own.main && !(ability === 'embed' && cfg.embedding?.engine === 'off') : own.backup === undefined;
     if (!search.value.trim()) {
       if (activeSlot === 'backup' || ability !== 'chat') {
         const label = activeSlot === 'main' && ['reason', 'code'].includes(ability) ? '跟随日常对话' : '自动选择';
-        addChoice(label, '沿用现有能力选择规则', () => apply('auto'), !own[activeSlot] && own[activeSlot] !== null);
+        addChoice(label, '沿用现有能力选择规则', () => apply('auto'), automatic);
       }
       if (activeSlot === 'backup') addChoice('不用备用', '此能力不指定备用模型', () => apply('none'), own.backup === null);
       if (ability === 'embed' && activeSlot === 'main') addChoice('按关键词检索', '不使用记忆向量', () => apply('off'), cfg.embedding?.engine === 'off');
@@ -112,7 +114,7 @@ function openAbilitySheet({ cfg, workspace, node, run, ability, slot, anchor, wh
     const query = search.value.trim().toLowerCase();
     const matches = candidates.filter((line) => `${line.model} ${providerLabel(cfg, line.provider)}`.toLowerCase().includes(query));
     for (const line of matches.slice(0, shown)) {
-      addChoice(line.model, providerLabel(cfg, line.provider), () => apply(line), sameLine(current, line));
+      addChoice(line.model, providerLabel(cfg, line.provider), () => apply(line), specific && sameLine(current, line));
     }
     if (!matches.length) list.append(node('p', { className: 'ml-muted', textContent: '没有匹配型号，可手动填写，或先到服务商页添加密钥。' }));
     if (matches.length > shown) addChoice('显示更多', `共 ${matches.length} 个匹配`, () => { shown += 40; paint(); });

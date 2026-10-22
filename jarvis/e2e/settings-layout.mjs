@@ -71,6 +71,7 @@ try {
         }
         await page.getByRole('navigation', { name: '模型中心分类' }).getByRole('button', { name: '能力', exact: true }).click();
         await page.getByRole('button', { name: '配置深度思考与写作', exact: true }).click();
+        check(`${width}px 自动选择与实际型号只标一项选中`, await page.locator('.mc-choice[aria-pressed=true]').count() === 1);
         const bounds = await page.locator('.mc-sheet').evaluate(el => {
           const r = el.getBoundingClientRect();
           return r.left >= 0 && r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1 && getComputedStyle(el.querySelector('.mc-sheet-results')).scrollbarWidth === 'none';
