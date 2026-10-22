@@ -1,5 +1,5 @@
 /**
- * 手机版模型页“每项能力用哪个模型”（真正的 build:mobile 产物）：
+ * 模型页“每项能力用哪个模型”（宽屏版；真正的 build:mobile 产物）：
  *   填了 DeepSeek、智谱、OpenAI 的 Key → 看图、向量自动排智谱，画图排 GPT；改常用、关备用、关向量能存下来
  * 用法：npm run build:mobile && node e2e/ability-table.mjs
  */
@@ -11,7 +11,8 @@ await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const CONFIG = { provider: 'deepseek', models: { deepseek: 'deepseek-v4-pro' }, keys: { deepseek: 'sk-test', zhipu: 'zp-test', openai: 'sk-o' }, baseURLs: {}, favoriteModels: [{ provider: 'deepseek', model: 'deepseek-v4-pro' }, { provider: 'deepseek', model: 'deepseek-v4-flash' }, { provider: 'zhipu', model: 'glm-ocr' }] };
 const results = [];
 const check = (label, ok, detail = '') => { results.push(ok); console.log(`${ok ? '✓' : '✗'} ${label}${detail ? ` — ${detail}` : ''}`); };
-const browser = await chromium.launch(); const ctx = await browser.newContext({ viewport: { width: 412, height: 860 }, isMobile: true });
+const browser = await chromium.launch(); // 宽屏（电脑、平板）用这张能力表；手机窄屏是另一套卡片界面（mobileAbilityTable，见 model-library.mjs）
+const ctx = await browser.newContext({ viewport: { width: 1024, height: 900 } });
 await ctx.addInitScript((c) => { if (window.top !== window) return; localStorage.setItem('jarvis.llm.v1', c); localStorage.setItem('jarvis.settings.v1', JSON.stringify({ theme: 'day', speechOutput: false })); }, JSON.stringify(CONFIG));
 const page = await ctx.newPage(); const errs = []; page.on('pageerror', (e) => errs.push(e.message));
 await page.goto(`http://127.0.0.1:${server.address().port}/`); await page.waitForFunction(() => window.__jarvis); await page.waitForTimeout(1200);
@@ -70,7 +71,7 @@ await page.getByLabel('博查搜索 Key', { exact: true }).fill('sk-bocha-local-
 await page.locator('.ml-service-keys').getByRole('button', { name: '保存到本机' }).click();
 await page.waitForFunction(() => JSON.parse(localStorage.getItem('jarvis.llm.v1')).bochaKey === 'sk-bocha-local-9876');
 check('其他服务的 Key 在模型页就能填（本机）', true);
-check('412px 不左右滑、没有页面错误', (await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)) && errs.length === 0, errs.join('；'));
+check('宽屏不左右滑、没有页面错误', (await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)) && errs.length === 0, errs.join('；'));
 await browser.close(); server.close();
 console.log(`${results.filter(Boolean).length}/${results.length} 能力表通过`);
 process.exit(results.every(Boolean) ? 0 : 1);
