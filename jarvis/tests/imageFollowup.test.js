@@ -20,9 +20,10 @@ describe('图片连续追问和轻量创作', () => {
     expect(followsImage('谢谢', messages, cached)).toBe(false);
   });
 
-  it('云端图片最多4张、当前优先并去重；历史没有选择图片时不凭缩略图补入', () => {
+  it('云端图片最多4张、当前优先；保持原图片顺序与重复项，不凭缩略图补入', () => {
     const image = (data) => ({ mime: 'image/png', data });
-    expect(remoteTurnImages([image('new')], [{ images: [image('old'), image('new')] }, { images: [image('last')] }]).map((item) => item.data)).toEqual(['new', 'last', 'old']);
+    expect(remoteTurnImages([image('new')], [{ images: [image('old'), image('new')] }, { images: [image('last')] }]).map((item) => item.data)).toEqual(['new', 'old', 'new', 'last']);
+    expect(remoteTurnImages([], [{ images: [image('first')] }, { content: '追问' }, { images: [image('second')] }]).map((item) => item.data)).toEqual(['first', 'second']);
     expect(remoteTurnImages(Array.from({ length: 10 }, (_, i) => image(String(i))))).toHaveLength(4);
     expect(remoteTurnImages([], [{ thumbs: [{ src: '缩略图' }], content: '文字' }])).toEqual([]);
   });

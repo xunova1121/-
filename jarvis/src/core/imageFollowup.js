@@ -13,16 +13,17 @@ export function followsImage(text, messages = [], cached = new Map()) {
   return false;
 }
 
-/** 只传当前图片或调用方已选中的追问图片，最多4张，当前上传优先，不重复。 */
+/** 最多4张，当前上传优先；历史保持原顺序和重复项，避免“第几张”指代错乱。 */
 export function remoteTurnImages(current = [], messages = []) {
   const selected = [];
   const add = (image) => {
     if (!image?.data || selected.length >= 4) return;
-    if (!selected.some((item) => item.mime === image.mime && item.data === image.data)) selected.push(image);
+    selected.push(image);
   };
   current.forEach(add);
-  for (let index = messages.length - 1; index >= 0 && selected.length < 4; index--) {
-    for (const image of messages[index].images || []) add(image);
+  for (const message of messages) {
+    for (const image of message.images || []) add(image);
+    if (selected.length >= 4) break;
   }
   return selected;
 }
