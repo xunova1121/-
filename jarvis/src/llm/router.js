@@ -192,7 +192,10 @@ export function fallbackRoutes(cfg, current = {}, max = 2) {
   };
   // 能力表里这项能力的备用排第一（current.task：这一轮的任务类型）
   if (cfg.abilities && current.task) {
-    const own = abilityLines(cfg, TASK_ABILITY[current.task] || 'chat').backup;
+    const ability = TASK_ABILITY[current.task] || 'chat';
+    // 能力表里选了“不用备用”：出错就报错，不换
+    if (cfg.abilities[ability]?.backup === null) return out;
+    const own = abilityLines(cfg, ability).backup;
     if (own) add(own.provider, own.model);
   }
   const r = cfg.routing;

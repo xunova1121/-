@@ -460,3 +460,58 @@
   background: var(--ml-surface);
   color: var(--ml-ink);
 }
+/* 分块标题：① 服务商与 Key ② 每项能力用哪个模型 */
+.ml-heading {
+  font-size: 15px;
+  margin: 22px 0 4px;
+}
+/* 每项能力：名字一行，常用、备用两个下拉框，下面一行小字说现在用谁；手机上下拉框各占一行 */
+.ml-abilities {
+  display: grid;
+  gap: 10px;
+}
+.ml-ability {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px 10px;
+  border: 1px solid var(--ml-line);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: var(--ml-surface);
+  min-width: 0;
+}
+.ml-ability-name {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.ml-ability-name small,
+.ml-ability-now {
+  color: var(--ml-muted);
+  font-size: 12px;
+}
+.ml-ability-slot {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--ml-muted);
+}
+.ml-ability-select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  text-overflow: ellipsis;
+}
+.ml-ability-now {
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+@media (max-width: 520px) {
+  .ml-ability {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

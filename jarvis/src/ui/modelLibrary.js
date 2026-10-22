@@ -10,7 +10,6 @@ import {
   currentLine,
   sameLine,
   toggleFavorite,
-  toggleBackup,
   saveCatalog,
   hasRouting
 } from '../llm/modelLibrary.js';
@@ -18,6 +17,8 @@ import { modelKind } from '../llm/images.js';
 import { deepseekSearchPanel } from './deepseekSearchPanel.js';
 import { serverKeysPanel } from './serverKeysPanel.js';
 import { documentStylesPanel } from './documentStylesPanel.js';
+import { abilityTable } from './abilityTable.js';
+import { setAbility } from '../llm/abilities.js';
 
 export const node = (tag, props = {}, ...children) => {
   const element = Object.assign(document.createElement(tag), props);
@@ -58,12 +59,10 @@ export function initModelLibrary({ root, workspace, toast }) {
     const line = { provider, model };
     const active = sameLine(currentLine(cfg), line);
     const favorite = favoriteLines(cfg).some((item) => sameLine(item, line));
-    const backup = (cfg.fallbackModels || []).findIndex((item) => sameLine(item, line));
     const row = node('div', { className: 'ml-model' });
     row.dataset.model = model;
     row.append(node('span', { className: 'ml-model-title', textContent: model, title: model }));
     if (active) row.append(node('span', { className: 'ml-badge', textContent: '默认' }));
-    if (backup >= 0) row.append(node('span', { className: 'ml-badge secondary', textContent: `备用 ${backup + 1}` }));
     const star = button(favorite ? '★' : '☆', () => patch((value) => toggleFavorite(value, line)), 'ml-star');
     star.title = favorite ? '取消常用' : '加入常用';
     star.setAttribute('aria-label', `${star.title} ${model}`);
@@ -73,16 +72,21 @@ export function initModelLibrary({ root, workspace, toast }) {
       const use = button(active ? '使用中' : '设默认', () => run(() => workspace.choose(line)), 'ml-small');
       use.disabled = active;
       row.append(use);
-      if (!active) row.append(button(backup >= 0 ? '移除备用' : '设备用', () => patch((value) => toggleBackup(value, line)), 'ml-small'));
     } else if (catalog && ['image', 'video'].includes(modelKind(model))) {
       const kind = modelKind(model);
+      // 画图：设成能力表里“画图”的常用（哪家都行）；同一家时也记成画图模型（兼容老版本）
       const media = button(
         kind === 'image' ? '用于画图' : '用于视频',
-        () => patch((value) => ({ ...value, [kind === 'image' ? 'imageModel' : 'videoModel']: model })),
+        () =>
+          patch((value) =>
+            kind === 'image'
+              ? { ...setAbility(value, 'image', 'main', line), ...(provider === value.provider && { imageModel: model }) }
+              : { ...value, videoModel: model }
+          ),
         'ml-small'
       );
-      media.disabled = provider !== cfg.provider;
-      media.title = provider === cfg.provider ? '不改变对话模型' : '请先选用该服务商的对话模型，再配置其生成型号';
+      media.disabled = kind === 'video' && provider !== cfg.provider;
+      media.title = !media.disabled ? '不改变对话模型' : '请先选用该服务商的对话模型，再配置其生成型号';
       row.append(media);
     } else if (catalog) row.append(node('small', { textContent: '请在对应功能中配置' }));
     return row;
@@ -342,6 +346,7 @@ export function initModelLibrary({ root, workspace, toast }) {
         node('p', { className: 'ml-notice', textContent: '高级分工已开启，实际模型可能按任务变化。' }),
         button('统一使用默认模型', () => patch((value) => ({ ...value, routing: { ...value.routing, enabled: false } })), 'ml-link')
       );
+    root.append(node('h3', { className: 'ml-heading', textContent: '服务商与 Key' }));
     root.append(node('div', { className: 'ml-provider-grid' }, ...configuredProviders(cfg, workspace.gateway()?.keys).map((meta) => providerCard(cfg, meta))));
     const add = node(
       'select',
@@ -355,17 +360,8 @@ export function initModelLibrary({ root, workspace, toast }) {
       if (add.value) patch((value) => ({ ...value, providerNames: { ...value.providerNames, [add.value]: providerById(add.value).name } }));
     });
     root.append(add);
-    const backups = cfg.fallbackModels || [];
-    root.append(
-      node('p', {
-        className: 'ml-muted',
-        textContent:
-          cfg.fallbackPolicy === 'explicit'
-            ? `故障回退：${backups.length ? backups.map((line) => `${providerLabel(cfg, line.provider)} · ${line.model}`).join(' → ') : '已关闭自动切换'}。不会轮询。`
-            : '沿用旧版备用规则。可设置明确备用，或关闭自动切换。'
-      })
-    );
-    root.append(button('关闭自动切换', () => patch((value) => ({ ...value, fallbackPolicy: 'explicit', fallbackModels: [] })), 'ml-link'));
+    // 每项能力的常用、备用（取代以前的“设备用 / 关闭自动切换”）
+    root.append(abilityTable({ cfg, workspace, node, run }));
     if (workspace.scope === 'server') {
       const preview = node(
         'details',

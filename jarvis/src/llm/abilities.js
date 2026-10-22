@@ -114,7 +114,9 @@ export function abilityLines(cfg, ability) {
   if (same(backup, main)) backup = null;
   if (!backup && own.backup === undefined) {
     // 没设过备用：对话类沿用旧的备用线路，看图、画图、向量自动找另一家
-    if (['chat', 'reason', 'code'].includes(ability)) backup = usable((cfg.fallbackModels || []).find((l) => !same(l, main))) || null;
+    if (ability === 'chat') backup = usable((cfg.fallbackModels || []).find((l) => !same(l, main))) || null;
+    // 思考、写代码：没设就用日常对话的备用
+    else if (ability === 'reason' || ability === 'code') backup = [abilityLines(cfg, 'chat').backup, ...(cfg.fallbackModels || [])].map(usable).find((l) => l && !same(l, main)) || null;
     else if (main) backup = autoLine(cfg, ability, main);
   }
   return { main, backup, set: Boolean(setMain) };
