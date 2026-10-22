@@ -3,7 +3,7 @@ import { OutputBoundary } from '../llm/outputBoundary.js';
 import { requestUsesNativeSearch } from '../llm/nativeSearch.js';
 
 /** 管理单次请求的搜索计时与输出边界；重试和切换决策仍由主循环负责。 */
-export function createModelRequest({ current, effort, signal, lookupDeadline, lookupControl, closing, retrieval, emit, onNativeSearch, onText, onRetry }) {
+export function createModelRequest({ current, effort, signal, lookupDeadline, lookupControl, closing, retrieval, emit, onNativeSearch, onText, onRetry, allowWebSearch = true }) {
   let searchTimer,
     searchTimedOut = false;
   const requestCtrl = new AbortController();
@@ -36,7 +36,7 @@ export function createModelRequest({ current, effort, signal, lookupDeadline, lo
     async run(input) {
       const searchOptions = {
         tools: input.tools,
-        allowWebSearch: !closing && retrieval.left > 0,
+        allowWebSearch: allowWebSearch && !closing && retrieval.left > 0,
         maxWebSearches: lookupDeadline ? Math.min(2, retrieval.left) : retrieval.left
       };
       const selfSearching = requestUsesNativeSearch(current.adapter, searchOptions);

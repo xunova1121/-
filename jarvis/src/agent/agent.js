@@ -1,6 +1,7 @@
 import { sessionWorkBlock } from './sessionWork.js';
 import { prepareAgentContext } from './agentPreparation.js';
 import { createModelRequest } from './agentModelRequest.js';
+import { creativeWithoutLookup, CREATIVE_NOTE } from '../core/imageFollowup.js';
 import { executeToolCalls } from './agentToolExecution.js';
 import { finishAgentRun } from './agentCompletion.js';
 import { measureModelInput } from '../../shared/modelMetrics.js';
@@ -221,10 +222,12 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   let cur = { adapter, model };
   const backups = [...fallbacks];
   let reminded = 0; // 上次中途提醒时调用了几次工具
+  let currentRequest = userText;
 
   // 用户在干活时插的话（inbox，界面往里放）：每一步开始前取出来交给模型，不打断手上的事
   const takeInbox = () => {
     const said = inbox?.splice(0) ?? [];
+    if (said.length) currentRequest = said.join('\n');
     if (!said.length) return false;
     seen.clear(); // 用户追加了新指令，同样参数可能是新的明确要求
     if (availableTools.some(t => t.name === 'computer_search') && said.some(needsComputer)) computerNote = COMPUTER_NOTE;
@@ -245,6 +248,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   for (; step < limit; step++) {
     if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
     takeInbox();
+    const allowWebSearch = !creativeWithoutLookup(currentRequest);
     if (!retrieval.reason && lookupDeadline && lookupControl && (lookupControl.retrievalRemaining() <= 0 || retrieval.active && modelAttempts >= QUICK_MODEL_ATTEMPTS)) {
       retrieval.close('已停止新增检索，正在整理已有资料');
     }
@@ -269,14 +273,14 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       }
     };
     let r;
-    const request = createModelRequest({ current: cur, effort, signal, lookupDeadline, lookupControl, closing, retrieval, emit, onNativeSearch: () => { nativeSearchCalls++; }, onText: acceptVisible, onRetry: (attempt) => {
+    const request = createModelRequest({ current: cur, effort, signal, lookupDeadline, lookupControl, closing, retrieval, emit, allowWebSearch, onNativeSearch: () => { nativeSearchCalls++; }, onText: acceptVisible, onRetry: (attempt) => {
       stripper = new EmotionTagStripper();
       emit({ type: 'retry', attempt, resume: Boolean(stepText.trim()) });
     } });
     // 测量实际发送的提示与工具说明，动态规则和短说明均计入字符数。
-    const measuredSystem = light ? [LIGHT_PROMPT, [ctx.dynamic, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, dialoguePolicy(review.report().request), capabilities, computerNote, requirementContext, toolHint, review.contractNote(), voice && VOICE_NOTE].filter(Boolean).join('\n\n')];
+    const measuredSystem = light ? [LIGHT_PROMPT, [ctx.dynamic, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, dialoguePolicy(review.report().request), capabilities, computerNote, requirementContext, toolHint, review.contractNote(), !allowWebSearch && CREATIVE_NOTE, voice && VOICE_NOTE].filter(Boolean).join('\n\n')];
     const measuredTools = closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list();
-    const requestTools = measuredTools.map(conciseTool);
+    const requestTools = measuredTools.filter((tool) => allowWebSearch || !WEB_TOOLS.has(tool.name) && tool.name !== 'delegate_task').map(conciseTool);
     emit({ type: 'diagnostic', phase: 'model_start', model: cur.model, protocol: cur.adapter.kind, closing, ...measureModelInput({ system: measuredSystem, messages: convo, tools: requestTools }), inputChars: convo.reduce((sum, item) => sum + String(item.content || '').length, 0) });
     try {
     modelAttempts++;
@@ -343,7 +347,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
 
     if (stepText && !/\n$/.test(stepText)) { emit({ type: 'text', delta: '\n\n' }); finalText += '\n\n'; }
     // 执行一次工具调用：开始 / 结束事件照常发出，返回结果，按调用顺序写回对话
-    const results = await executeToolCalls(r.toolCalls, { loader, emit, seen, closing, retrieval, approve, signal, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE });
+    const results = await executeToolCalls(r.toolCalls, { loader, emit, seen, closing, retrieval, approve, signal, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE, allowWebSearch });
     for (const { c, ok, output, outImages } of results) {
       toolCount++;
       if (WEB_TOOLS.has(c.name)) retrieval.end(ok);
@@ -446,3 +450,4 @@ export function progressReminder({ userText, steps = [], toolCount }) {
     : '还没有列计划，步骤多的话先用 update_plan 列出来。';
   return `（进度提醒：已经调用了 ${toolCount} 次工具。用户这次要的是：“${ask.length > 200 ? `${ask.slice(0, 200)}…` : ask}”。${progress}先确认方向没跑偏再接着做，不要做用户没要的事。）`;
 }
+

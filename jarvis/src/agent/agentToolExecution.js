@@ -21,7 +21,8 @@ export async function executeToolCalls(
     lookupDeadline,
     lookupControl,
     webTools,
-    parallelSafe
+    parallelSafe,
+    allowWebSearch = true
   }
 ) {
   let newScreenThisStep = false;
@@ -41,6 +42,8 @@ export async function executeToolCalls(
     try {
       if (closing && (!retrieval.extensive || webTools.has(c.name))) throw new Error('联网检索已经结束，请直接整理已有资料回答，不要继续调用工具');
       if (!tool) throw new Error(`没有名为 ${c.name} 的工具`);
+      if (!allowWebSearch && (webTools.has(c.name) || c.name === 'delegate_task'))
+        throw Object.assign(new Error('当前描述/创作无需检索，请直接依据图片和材料回答；用户明确要求外部核实后再联网'), { code: 'SEARCH_NOT_REQUESTED', kind: 'api' });
       // 一模一样的调用已经做过两次：结果不会变，不再执行，让模型换思路
       if (times >= 3 && !/^computer_(look|click|type|key|scroll|drag|screenshot)$/.test(c.name))
         throw new Error(`这个操作（同样的参数）已经做过 ${times - 1} 次了，结果不会变。请换一种方法，或者直接根据已有结果继续。`);
@@ -117,3 +120,4 @@ export async function executeToolCalls(
   }
   return results;
 }
+

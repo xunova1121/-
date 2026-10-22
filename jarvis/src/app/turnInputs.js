@@ -1,5 +1,6 @@
 /** 一轮输入整理及模型线路选择；图片缓存仍只保留最近两条消息，不落盘。 */
 import { MOBILE } from '../config.js';
+import { followsImage } from '../core/imageFollowup.js';
 import { createAdapter } from '../llm/config.js';
 import { classifyTask, routeFor, TASKS, effortFor, computerTaskKind } from '../llm/router.js';
 import { shouldTeam } from '../agent/team.js';
@@ -26,7 +27,7 @@ export function createTurnInputs(app) {
     app.hud.think(`◂ 收到：${text.slice(0, 30)}`);
     // 之前发过的图片（最近两条带图的消息）继续带给模型：追问“第二张图里……”时模型还看得到
     // 只在这句话提到图片时才带（不然后面每句闲聊都会被当成看图任务、多花流量）
-    const refersToImage = !imgs.length && /图|截图|照片|相片|图片|表格|这张|那张|第.张|上面|刚才发的|picture|image|screenshot/i.test(text);
+    const refersToImage = !imgs.length && followsImage(text, app.history, recentImages);
     // 长对话：已压缩进摘要的消息不再原样发送，其余（至少最近 20 条）原样发送，见 compress.js
     const recent = compress.unsummarized(app.history, app.session.summary);
     const withImages = new Set(
@@ -94,3 +95,4 @@ export function createTurnInputs(app) {
 
   return { recentImages, takeTurnInput: takeInput, chooseTurnModel: chooseModel, expandSlash };
 }
+
