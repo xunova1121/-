@@ -50,4 +50,16 @@ describe('普通对话总时限',()=>{
     const result=await withLookupDeadline({userText:'你好'},async()=>({text:'你好'}));expect(result.text).toBe('你好');
     const options={userText:'写一份报告'};await withLookupDeadline(options,async o=>expect(o).toBe(options));
   });
+  it('重现“加图片炫酷一点”两次等待超时：话像闲聊，但模型调用了画图，就解除60秒时限',async()=>{
+    vi.useFakeTimers();
+    try{
+      expect(isQuickLookup('加图片炫酷一点')).toBe(true);
+      const p=withLookupDeadline({userText:'加图片炫酷一点',emit:()=>{}},async o=>{await delay(10_000);o.emit({type:'tool_start',name:'generate_image'});await delay(150_000);return {text:'图片已生成'};});
+      await vi.advanceTimersByTimeAsync(160_000);expect(await p).toEqual({text:'图片已生成'});
+      // 查资料类工具照旧受时限
+      const q=withLookupDeadline({userText:question,emit:()=>{}},async o=>{o.emit({type:'tool_start',name:'web_search'});await delay(100_000);return {text:'迟到'};});
+      const assertion=expect(q).rejects.toMatchObject({code:'LOOKUP_TIMEOUT'});
+      await vi.advanceTimersByTimeAsync(60_000);await assertion;
+    }finally{vi.useRealTimers();}
+  });
 });

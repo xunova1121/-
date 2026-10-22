@@ -16,6 +16,8 @@ export function lookupRequirement(text, history = []) {
   if (!continuation(text) || COMPLEX.test(String(text))) return text;
   return [...history].reverse().find(m => m.role === 'user' && !continuation(m.content))?.content || text;
 }
+/** 这些工具是在“做东西”（画图、唱歌、写文件）：一旦调用，说明不是普通查询，解除 60 秒时限 */
+const MAKING_TOOLS = new Set(['generate_image', 'sing_song', 'create_document', 'write_file']);
 const abortError = () => Object.assign(new Error('aborted'), { name: 'AbortError' });
 
 export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_MS } = {}) {
@@ -29,7 +31,8 @@ export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_
   let deadlineDisabled = false;
   const waiting = new Promise((_, reject) => { finishWait = reject; });
   const isTask=note=>COMPLEX.test(String(note))||creativeWithoutLookup(note)||hasComputer&&needsComputer(note,{history:options.history||[]});
-  const disable = (note) => { if (isTask(note)) { clearTimeout(timer); timer = null; deadlineDisabled = true; } };
+  const release = () => { clearTimeout(timer); timer = null; deadlineDisabled = true; };
+  const disable = (note) => { if (isTask(note)) release(); };
   const userAbort = () => { ctrl.abort(); finishWait(abortError()); };
   const forwarded = {
     ...options, signal: ctrl.signal,
@@ -39,6 +42,8 @@ export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_
     emit: (event) => {
       if (closed || ctrl.signal.aborted) return;
       if (event.type === 'text') partial += String(event.delta || '');
+      // “加图片炫酷一点”这类话看着像闲聊，模型却去画图了：画图、唱歌要几分钟，不能按普通查询截断
+      if (event.type === 'tool_start' && MAKING_TOOLS.has(event.name)) release();
       options.emit?.(event);
     }
   };
