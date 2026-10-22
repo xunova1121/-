@@ -130,6 +130,8 @@ function openAbilitySheet({ cfg, workspace, node, run, ability, slot, anchor, wh
   search.addEventListener('input', () => { shown = 40; paint(); });
   dialog.append(node('header', { className: 'mc-sheet-head' }, node('div', {}, node('h3', { textContent: title }), node('small', { textContent: `配置位置：${scope}` })), dismiss), tabs, search, list, manual);
   dialog.addEventListener('click', (event) => { if (event.target === dialog && event.clientY < dialog.getBoundingClientRect().top) close(); });
+  // 选择器内的 Esc 只关闭选择器，不触发底层面板/对话的全局快捷键。
+  dialog.addEventListener('keydown', (event) => { if (event.key === 'Escape') event.stopPropagation(); });
   dialog.addEventListener('close', () => { dialog.remove(); if (anchor.isConnected) anchor.focus(); }, { once: true });
   document.querySelector('#model-workspace').append(dialog);
   paint();
