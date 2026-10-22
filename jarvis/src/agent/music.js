@@ -15,7 +15,7 @@ import { sleep } from '../llm/openai.js';
 
 export const MUSIC_MODEL = 'fal-ai/minimax-music/v2';
 const QUEUE = 'https://queue.fal.run/';
-export const MUSIC_LIMITS = { style: [10, 300], lyrics: [10, 3000], waitMs: 6 * 60_000, pollMs: 3000, maxBytes: 30 * 1024 * 1024, retries: 5, timeouts: { submit: 30_000, poll: 20_000, download: 90_000 } };
+export const MUSIC_LIMITS = { style: [10, 300], lyrics: [10, 3000], waitMs: 6 * 60_000, pollMs: 3000, maxBytes: 30 * 1024 * 1024, retries: 5, downloadRetries: 2, timeouts: { submit: 30_000, poll: 20_000, download: 90_000 } };
 
 const failure = (message, extra = {}) => Object.assign(new Error(message), { kind: 'api', ...extra });
 
@@ -86,8 +86,9 @@ export function createSongTool(ctx = {}) {
   /**
    * retries：断网、超时、fal 临时出错（5xx、429）时隔几秒再试几次
    * wait：这次请求（连同读完内容）最多等多久；read：怎么读内容（json / blob）
+   * onRetry：重试前告诉界面（也让服务器知道任务还在动，不会当成“10 分钟没有进展”）
    */
-  async function call(url, init, signal, { retries = 0, wait = MUSIC_LIMITS.timeouts.poll, read = (res) => res.json() } = {}) {
+  async function call(url, init, signal, { retries = 0, wait = MUSIC_LIMITS.timeouts.poll, read = (res) => res.json(), onRetry } = {}) {
     for (let attempt = 0; ; attempt++) {
       let res;
       const limit = limited(signal, wait);
@@ -97,6 +98,7 @@ export function createSongTool(ctx = {}) {
       } catch (e) {
         if (signal?.aborted) throw e;
         if (attempt < retries) {
+          onRetry?.(attempt + 1);
           await sleep(MUSIC_LIMITS.pollMs * (attempt + 1), signal);
           continue;
         }
@@ -112,6 +114,7 @@ export function createSongTool(ctx = {}) {
       }
       if (attempt < retries && (res.status >= 500 || res.status === 429)) {
         await res.body?.cancel?.();
+        onRetry?.(attempt + 1);
         await sleep(MUSIC_LIMITS.pollMs * (attempt + 1), signal);
         continue;
       }
@@ -135,6 +138,7 @@ export function createSongTool(ctx = {}) {
       additionalProperties: false
     },
     run: async ({ title, lyrics, style }, { signal, progress } = {}) => {
+      const onRetry = (n) => progress?.(`网络不稳，第 ${n} 次重试…`);
       const key = String(ctx.falKey ?? '').trim();
       if (!key) throw failure('还没填 fal.ai 的 Key：设置 → 模型 → 唱歌（fal.ai）里填上后再试', { code: 'FAL_KEY_MISSING' });
       const words = String(lyrics ?? '').trim();
@@ -151,19 +155,19 @@ export function createSongTool(ctx = {}) {
       // 排队、生成：隔几秒查一次
       const started = now();
       for (;;) {
-        const s = await call(statusUrl, { headers: { Authorization: auth.Authorization } }, signal, { retries: MUSIC_LIMITS.retries });
+        const s = await call(statusUrl, { headers: { Authorization: auth.Authorization } }, signal, { retries: MUSIC_LIMITS.retries, onRetry });
         if (s?.status === 'COMPLETED') break;
         if (s?.status && !['IN_QUEUE', 'IN_PROGRESS'].includes(s.status)) throw failure(`fal.ai 生成失败（${s.status}）`);
         if (now() - started > MUSIC_LIMITS.waitMs) throw failure('作曲超过 6 分钟还没好，先停下；可以稍后再试', { kind: 'timeout' });
         progress?.(s?.status === 'IN_QUEUE' ? `排队中${Number.isFinite(s.queue_position) ? `（前面还有 ${s.queue_position} 个）` : ''}…` : '正在作曲、演唱…');
         await sleep(MUSIC_LIMITS.pollMs, signal);
       }
-      const data = await call(resultUrl, { headers: { Authorization: auth.Authorization } }, signal, { retries: MUSIC_LIMITS.retries });
+      const data = await call(resultUrl, { headers: { Authorization: auth.Authorization } }, signal, { retries: MUSIC_LIMITS.retries, onRetry });
       const audioUrl = audioUrlOf(data);
       if (!audioUrl) throw failure('fal.ai 的结果里没有音频地址');
 
       progress?.('正在下载歌曲…');
-      const blob = await call(audioUrl, {}, signal, { retries: MUSIC_LIMITS.retries, wait: MUSIC_LIMITS.timeouts.download, read: (res) => res.blob() });
+      const blob = await call(audioUrl, {}, signal, { retries: MUSIC_LIMITS.downloadRetries, wait: MUSIC_LIMITS.timeouts.download, read: (res) => res.blob(), onRetry });
       if (!blob.size) throw failure('下载到的歌曲是空的');
       if (blob.size > MUSIC_LIMITS.maxBytes) throw failure('歌曲文件太大，没有保存');
       const ext = /wav/.test(blob.type) ? 'wav' : /flac/.test(blob.type) ? 'flac' : 'mp3';

@@ -101,8 +101,13 @@ describe('唱歌', () => {
       expect(await createSongTool({ falKey: 'k', fetchImpl: once }).run({ lyrics: LYRICS, style: '流行歌曲测试一下' })).toContain('已经唱好了');
       // 歌曲下载到一半卡住也算超时
       const ok = fakeFal();
-      const slowBody = (url, init) => (url.includes('fal.media') ? Promise.resolve({ ok: true, blob: () => hang(init) }) : ok.fetchImpl(url, init));
-      await expect(createSongTool({ falKey: 'k', fetchImpl: slowBody }).run({ lyrics: LYRICS, style: '流行歌曲测试一下' })).rejects.toMatchObject({ kind: 'timeout' });
+      let downloads = 0;
+      const slowBody = (url, init) => (url.includes('fal.media') ? (downloads++, Promise.resolve({ ok: true, blob: () => hang(init) })) : ok.fetchImpl(url, init));
+      const steps = [];
+      await expect(createSongTool({ falKey: 'k', fetchImpl: slowBody }).run({ lyrics: LYRICS, style: '流行歌曲测试一下' }, { progress: (t) => steps.push(t) })).rejects.toMatchObject({ kind: 'timeout' });
+      // 下载最多试 3 次（重试 2 次），不会拖到服务器的“10 分钟没有进展”；每次重试界面上都看得到
+      expect(downloads).toBe(MUSIC_LIMITS.downloadRetries + 1);
+      expect(steps.filter((t) => t.startsWith('网络不稳'))).toEqual(['网络不稳，第 1 次重试…', '网络不稳，第 2 次重试…']);
     } finally {
       Object.assign(MUSIC_LIMITS.timeouts, saved);
     }
