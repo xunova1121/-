@@ -162,18 +162,21 @@ export function initModelLibrary({ root, workspace, toast }) {
         notice = '已保存；当前默认模型不变';
       })
     );
-    host.append(
-      node(
-        'div',
-        { className: 'ml-editor' },
-        node('label', {}, '服务商名称', alias),
-        node('label', {}, '接口地址', address),
-        node('label', {}, '密钥', secret),
-        node('label', {}, '手动型号', model),
-        node('label', {}, '服务档位', tier),
-        save
-      )
+    const editor = node(
+      'div',
+      { className: 'ml-editor' },
+      node('label', {}, '服务商名称', alias),
+      node('label', {}, '接口地址', address),
+      node('label', {}, '密钥', secret),
+      node('label', {}, '手动型号', model),
+      node('label', {}, '服务档位', tier),
+      save
     );
+    // 紧跟在卡片标题下面打开，并滚到能看见的地方：以前加在卡片最底下，最后一张卡片点了“配置”像没反应
+    const head = host.querySelector('.ml-provider-head');
+    if (head) head.after(editor);
+    else host.append(editor);
+    editor.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
   }
 
   async function pull(provider) {
