@@ -71,31 +71,20 @@ export const cases = [
     for(let i=0;i<15;i++)recordVoiceEvent('错误',`Bearer token${i} sk-secret-value`,store);
     const entries=readVoiceEvents(store);assert.equal(entries.length,12);assert.ok(entries.every(e=>!e.detail.includes('sk-secret')&&!e.detail.includes('token')));
   }],
-  ['Azure 使用真实女童音色、对应区域与二进制响应', async () => {
-    const calls=[];await synthesize({engine:'azure',azureRegion:'chinaeast2'},{'azure-speech':'key'},'<你好>',{fetchImpl:async(url,init)=>{calls.push({url,init});return{ok:true,arrayBuffer:async()=>new ArrayBuffer(1)}}});
-    assert.equal(calls[0].url,'https://chinaeast2.tts.speech.azure.cn/cognitiveservices/v1');assert.equal(calls[0].init.binary,true);assert.ok(calls[0].init.body.includes('zh-CN-XiaoyiNeural')); // 默认晓伊：和原来免费在线女声同一个声音assert.ok(calls[0].init.body.includes('&lt;你好&gt;'));
-  }],
-  ['女童声音缺少配置时明确报错，不把默认系统声音当作成功', async () => {
-    await assert.rejects(synthesize({engine:'azure'},{},'你好'),/区域/);
-    await assert.rejects(synthesize({engine:'azure',azureRegion:'eastasia'},{},'你好'),/密钥/);
+  ['去掉的声音引擎（Azure、服务商声音、自定义接口）明确报错，不把系统声音当作成功', async () => {
+    for(const engine of ['azure','provider','custom','openai','elevenlabs'])await assert.rejects(synthesize({engine},{'azure-speech':'key'},'你好'),/不是云端语音引擎/);
   }],
   ['安卓原生网络返回的音频保持原始字节，不经 UTF-8 转换', async () => {
     const bytes=Uint8Array.from([255,251,0,128,199]);let requested;
     const native=nativeFetcher({request:async r=>{requested=r;return{status:200,data:btoa(String.fromCharCode(...bytes)),headers:{'content-type':'audio/mpeg'}}}});
-    const ab=await synthesize({engine:'custom',customURL:'https://tts.invalid/v1'},{},'你好',{fetchImpl:native});
+    const ab=await synthesize({engine:'edge'},{},'你好',{fetchImpl:native,gateway:{origin:'https://gateway.invalid'}});
     assert.equal(requested.responseType,'arraybuffer');assert.deepEqual([...new Uint8Array(ab)],[...bytes]);
   }],
-  ['自动音色优先已有正式服务，不强行覆盖为非官方免费接口', async () => {
+  ['自动音色：只在百炼、免费在线声音、系统自带三种里选；别家密钥不再自动用', async () => {
     await globals({__jarvisEdgeSpeech:{}},()=>{
-      assert.equal(resolveVoice({keys:{openai:'key'},voice:DEFAULT_VOICE}).engine,'openai');
-      assert.equal(resolveVoice({keys:{'azure-speech':'key'},voice:{...DEFAULT_VOICE,azureRegion:'eastasia'}}).engine,'azure');
+      assert.equal(resolveVoice({keys:{openai:'key'},voice:DEFAULT_VOICE}).engine,'edge');
+      assert.equal(resolveVoice({keys:{'azure-speech':'key'},voice:{...DEFAULT_VOICE,azureRegion:'eastasia'}}).engine,'edge');
       assert.equal(resolveVoice({provider:'relay-multi',keys:{'relay-multi':'key'},baseURLs:{'relay-multi':'https://relay.invalid/v1'},voice:DEFAULT_VOICE}).engine,'edge');
     });
-  }],
-  ['模型服务商语音请求使用女孩声并明确区别接口未支持', async () => {
-    const config={provider:'relay-multi',keys:{'relay-multi':'key'},baseURLs:{'relay-multi':'https://relay.invalid/v1'}};
-    let request;await synthesize({engine:'provider'},{},'你好',{config,fetchImpl:async(url,init)=>{request={url,init};return{ok:true,arrayBuffer:async()=>new ArrayBuffer(1)}}});
-    assert.equal(JSON.parse(request.init.body).voice,'shimmer');assert.equal(request.init.binary,true);
-    await assert.rejects(synthesize({engine:'provider'},{},'你好',{config,fetchImpl:async()=>({ok:false,status:404})}),/聊天密钥不代表/);
   }]
 ];

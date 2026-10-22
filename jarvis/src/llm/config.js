@@ -14,7 +14,7 @@ const KEY = 'jarvis.llm.v1';
 const store = (() => { try { return globalThis.localStorage ?? null; } catch { return null; } })();
 
 /** 语音：engine 为 auto 时按已有密钥自动挑最自然的云端声音，都没有就用浏览器自带 */
-export const DEFAULT_VOICE = { engine: 'auto', voices: GENTLE_VOICES, profile: 'gentle-child', fx: 'gentle', cues: true, browserVoice: '', customURL: '', customModel: '', customVoice: '', azureRegion: '', qwenRegion: 'beijing', providerModel: 'gpt-4o-mini-tts' };
+export const DEFAULT_VOICE = { engine: 'auto', voices: GENTLE_VOICES, profile: 'gentle-child', fx: 'gentle', cues: true, browserVoice: '', qwenRegion: 'beijing' };
 export const DEFAULT_STT = { engine: 'auto', customURL: '', customModel: '' };
 export const DEFAULT_CONFIG = { provider: 'mock', models: {}, keys: {}, baseURLs: {}, claudeWebSearch: true, tavilyKey: '', bochaKey: '', deepseekSearchEnabled: false, deepseekSearchKey: '', falKey: '', voice: DEFAULT_VOICE, stt: DEFAULT_STT };
 

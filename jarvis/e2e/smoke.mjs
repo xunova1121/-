@@ -42,7 +42,8 @@ async function ask(page, q, timeout = 40000) {
 }
 
 /** 本地假语音服务（OpenAI 兼容 /audio/speech）：返回一段 0.8 秒的 WAV；fail=true 时返回 500 */
-function fakeTTS({ fail = false } = {}) {
+/** 假的“免费在线声音”：拦下本机网关的 /api/tts/edge，回一段 0.8 秒的正弦波（不真的连微软） */
+async function fakeTTS(page, { fail = false } = {}) {
   const seen = [];
   const rate = 24000;
   const n = Math.floor(rate * 0.8);
@@ -51,18 +52,13 @@ function fakeTTS({ fail = false } = {}) {
   wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(rate, 24); wav.writeUInt32LE(rate * 2, 28);
   wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(n * 2, 40);
   for (let i = 0; i < n; i++) wav.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 220 * i) / rate) * 0.5 * 32767 * (0.6 + 0.4 * Math.sin(i / 900))), 44 + i * 2);
-  const server = http.createServer((req, res) => {
-    const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
-    if (req.method === 'OPTIONS') return res.writeHead(204, cors).end();
-    let body = '';
-    req.on('data', (c) => (body += c));
-    req.on('end', () => {
-      seen.push({ url: req.url, body: JSON.parse(body) });
-      if (fail) return res.writeHead(500, { ...cors, 'Content-Type': 'application/json' }).end('{"error":{"message":"boom"}}');
-      res.writeHead(200, { ...cors, 'Content-Type': 'audio/wav' }).end(wav);
-    });
+  await page.unroute('**/api/tts/edge').catch(() => {});
+  await page.route('**/api/tts/edge', (route) => {
+    seen.push({ url: new URL(route.request().url()).pathname, body: JSON.parse(route.request().postData() || '{}') });
+    if (fail) return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' });
+    return route.fulfill({ status: 200, contentType: 'audio/wav', body: wav });
   });
-  return new Promise((r) => server.listen(0, '127.0.0.1', () => r({ server, seen, url: `http://127.0.0.1:${server.address().port}/v1` })));
+  return { seen, close: () => page.unroute('**/api/tts/edge') };
 }
 
 /** 本地假 OpenAI 兼容服务端：第一次请求返回流式工具调用，第二次返回文本 */
@@ -102,7 +98,8 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   // 故意返回 500 的假语音服务会产生一条资源加载错误，不计入
-  page.on('console', (m) => { if (m.type() === 'error' && !/fonts\.(googleapis|gstatic)/.test(m.text()) && !(/status of 500/.test(m.text()) && /audio\/speech/.test(m.location().url)) && !(/status of 502/.test(m.text()) && /\/api\/tts\/edge/.test(m.location().url))) errors.push(m.text()); });
+  // 故意让语音服务出错的那一步会有 500（见“语音服务出错时提示”）；真连不上微软时网关回 502
+  page.on('console', (m) => { if (m.type() === 'error' && !/fonts\.(googleapis|gstatic)/.test(m.text()) && !(/status of (500|502)/.test(m.text()) && /\/api\/tts\/edge/.test(m.location().url))) errors.push(m.text()); });
   await page.goto(BASE);
   // 电脑版的更新按钮（重启以更新 / 下载进度）在工作台顶栏里要能显示出来
   check('工作台：顶栏的更新按钮能显示', await page.evaluate(() => { const p = document.querySelector('#update-pill'); p.hidden = false; p.dataset.state = 'ready'; p.textContent = '重启以更新到 1.0.99'; const r = p.getBoundingClientRect(); const ok = getComputedStyle(p).display !== 'none' && r.width > 40 && r.top < 80; p.hidden = true; return ok; }));
@@ -478,18 +475,14 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.click('#btn-llm-save');
 
   // —— 科幻声线：云端语音（假服务）→ 效果链 → 真实音量驱动光核
-  check('有本机网关、没有付费语音密钥时，自动选免费的 Edge 朗读', /当前使用：Edge 朗读/.test(await page.textContent('#tts-note')) && (await page.locator('#tts-voice option').count()) >= 8, await page.textContent('#tts-note'));
+  check('有本机网关、没有百炼密钥时，自动选免费在线声音', /当前使用：免费在线声音/.test(await page.textContent('#tts-note')) && (await page.locator('#tts-voice option').count()) >= 8, await page.textContent('#tts-note'));
   await page.selectOption('#tts-engine', 'browser');
   check('默认声线：温柔童声；浏览器声音时效果不可用', await page.evaluate(() => {
     const on = document.querySelector('#tts-fx [aria-checked="true"]');
     return on?.value === 'gentle' && on.disabled;
   }));
-  const tts = await fakeTTS();
-  await page.selectOption('#tts-engine', 'custom');
-  await page.fill('#tts-url', tts.url);
-  await page.press('#tts-url', 'Tab');
-  await page.fill('#tts-model', 'fake-tts');
-  await page.press('#tts-model', 'Tab');
+  const tts = await fakeTTS(page);
+  await page.selectOption('#tts-engine', 'edge');
   check('云端语音可选声线效果', await page.isEnabled('#tts-fx button[value="holo"]'));
   await page.click('#tts-fx button[value="holo"]');
   await page.evaluate(() => {
@@ -507,18 +500,16 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.evaluate(() => { const c = document.querySelector('#set-tts'); if (!c.checked) c.click(); });
   await ask(page, '你好');
   await page.waitForFunction(() => window.__peak > 0.05, null, { timeout: 15000 }).catch(() => {});
-  check('云端语音：请求 /audio/speech 并带上回答文字', tts.seen.some((x) => x.url === '/v1/audio/speech' && x.body.model === 'fake-tts' && x.body.input.length > 0), tts.seen.map((x) => x.body.input).join(' / ').slice(0, 80));
+  check('云端语音：请求免费在线声音并带上回答文字', tts.seen.some((x) => x.url === '/api/tts/edge' && x.body.text?.length > 0 && x.body.voice), tts.seen.map((x) => x.body.text).join(' / ').slice(0, 80));
   check('云端语音经效果链播放，光核由真实音量驱动', await page.evaluate(() => window.__peak > 0.05), `峰值 ${(await page.evaluate(() => window.__peak)).toFixed(2)}`);
   await page.waitForFunction(() => !window.__jarvis.speaker.speaking, null, { timeout: 30000 }).catch(() => {});
-  tts.server.close();
-  const bad = await fakeTTS({ fail: true });
-  await page.fill('#tts-url', bad.url);
-  await page.press('#tts-url', 'Tab');
+  await tts.close();
+  const bad = await fakeTTS(page, { fail: true });
   await ask(page, '你好');
-  await page.waitForFunction(() => /语音合成失败：500 boom/.test(document.querySelector('#toast')?.textContent || ''), null, { timeout: 10000 }).catch(() => {});
-  check('语音服务出错时提示并退回浏览器声音', /语音合成失败：500 boom/.test(await page.evaluate(() => document.querySelector('#toast')?.textContent || '')));
+  await page.waitForFunction(() => /语音合成失败：boom/.test(document.querySelector('#toast')?.textContent || ''), null, { timeout: 10000 }).catch(() => {});
+  check('语音服务出错时提示并退回浏览器声音', /语音合成失败：boom/.test(await page.evaluate(() => document.querySelector('#toast')?.textContent || '')));
   await page.evaluate(() => window.__jarvis.interrupt());
-  bad.server.close();
+  await bad.close();
   await page.evaluate(() => { const c = document.querySelector('#set-tts'); if (c.checked) c.click(); });
   await page.selectOption('#tts-engine', 'auto');
 
@@ -555,6 +546,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   await page.keyboard.press('Alt+Digit3');
   check('Alt+3 打开知识库', await page.isVisible('[data-pane="knowledge"]'));
   await page.keyboard.press('Alt+Digit8');
+  await page.evaluate(() => { document.getElementById('settings-advanced').open = true; }); // 画质在“高级”里，默认收起
   await page.selectOption('#set-quality', 'eco');
   await page.waitForTimeout(400);
   const eco = await page.evaluate(() => ({ bloom: window.__jarvis.stage.stats.bloom, fps: window.__jarvis.quality.fps }));
@@ -839,69 +831,6 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
   check('无语音识别时隐藏麦克风', await page.isHidden('#btn-mic'));
   check('文本对话仍可用', /离线演示模式/.test(await ask(page, '你好')));
   await ctx.close();
-}
-
-// ---------- 7. 多设备同步（两台“设备”= 两个独立的浏览器环境；阿里云 OSS 用内存模拟，经网关的 /api/oss 拦截） ----------
-{
-  const bucket = new Map();
-  const fakeOss = async (route) => {
-    const req = JSON.parse(route.request().postData());
-    const key = new URL(req.url).pathname;
-    const ok = /^OSS AKID:/.test(req.headers.authorization) && req.headers['x-oss-date'];
-    if (!ok) return route.fulfill({ status: 200, headers: { 'x-oss-status': '403' }, body: '' });
-    if (req.method === 'PUT') { bucket.set(key, req.body); return route.fulfill({ status: 200, headers: { 'x-oss-status': '200', 'x-oss-etag': '"e"' }, body: '' }); }
-    if (!bucket.has(key)) return route.fulfill({ status: 200, headers: { 'x-oss-status': '404' }, body: '<Code>NoSuchKey</Code>' });
-    return route.fulfill({ status: 200, headers: { 'x-oss-status': '200' }, body: bucket.get(key) });
-  };
-  const device = async () => {
-    const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
-    await ctx.route('**/api/oss', fakeOss);
-    const page = await ctx.newPage();
-    await page.goto(BASE);
-    await page.waitForFunction(() => window.__jarvis?.showPanel && window.__jarvis.gateway);
-    await page.evaluate(() => window.__jarvis.showPanel('settings'));
-    return { ctx, page };
-  };
-  const pc = await device();
-  await pc.page.check('#sync-on');
-  await pc.page.click('#btn-sync-now');
-  check('同步：没填完整时提示', /地域/.test(await pc.page.textContent('#sync-status')));
-  await pc.page.fill('#sync-endpoint', 'oss-cn-hangzhou');
-  await pc.page.fill('#sync-bucket', 'my-jarvis');
-  await pc.page.fill('#sync-ak', 'AKID');
-  await pc.page.fill('#sync-sk', 'secret-value');
-  await pc.page.fill('#sync-pass', 'pass123456');
-  await ask(pc.page, '记住我喜欢喝美式咖啡');
-  await pc.page.click('#btn-sync-now');
-  await pc.page.waitForFunction(() => /同步完成|同步失败/.test(document.querySelector('#sync-status').textContent), null, { timeout: 30000 });
-  const st = await pc.page.textContent('#sync-status');
-  check('同步：电脑上传成功', /同步完成/.test(st) && bucket.has('/jarvis-sync/memory.enc') && bucket.has('/jarvis-sync/sessions.enc'), st);
-  check('同步：云端是密文', ![...bucket.values()].some((v) => /美式|secret-value/.test(v) || /美式/.test(Buffer.from(v, 'base64').toString())));
-  await pc.page.click('#btn-sync-code');
-  await pc.page.waitForFunction(() => document.querySelector('#sync-code').value.startsWith('JARVIS-SYNC:'));
-  const code = await pc.page.inputValue('#sync-code');
-
-  const phone = await device();
-  await phone.page.check('#sync-on');
-  await phone.page.click('#btn-sync-paste');
-  await phone.page.fill('#sync-code', code);
-  await phone.page.fill('#sync-pass', 'wrong-pass');
-  await phone.page.click('#btn-sync-code-go');
-  await phone.page.waitForFunction(() => /同步密码不对/.test(document.querySelector('#sync-code-hint').textContent), null, { timeout: 15000 });
-  check('同步码：密码不对时提示', true);
-  await phone.page.fill('#sync-pass', 'pass123456');
-  await phone.page.click('#btn-sync-code-go');
-  await phone.page.waitForFunction(() => /同步完成|同步失败/.test(document.querySelector('#sync-status').textContent), null, { timeout: 30000 });
-  const st2 = await phone.page.textContent('#sync-status');
-  check('同步码：另一台设备自动填好并同步', /同步完成/.test(st2) && /收到/.test(st2) && (await phone.page.inputValue('#sync-bucket')) === 'my-jarvis', st2);
-  await phone.page.evaluate(() => window.__jarvis.showPanel('mind'));
-  await phone.page.waitForTimeout(500);
-  check('同步：另一台设备有了这条记忆', /美式/.test(await phone.page.textContent('[data-pane="mind"]')));
-  await phone.page.evaluate(() => window.__jarvis.showPanel('sessions'));
-  await phone.page.waitForTimeout(300);
-  check('同步：另一台设备有了这段对话', /美式/.test(await phone.page.textContent('[data-pane="sessions"]')));
-  await pc.ctx.close();
-  await phone.ctx.close();
 }
 
 // —— 干活时插话不打断、切换对话后任务在后台做完、回答中显示转圈和在做什么

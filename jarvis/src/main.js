@@ -15,7 +15,7 @@
  *   app/panels.js         右侧面板
  *   app/view.js           欢迎页、命令面板、主题、更新提示、设置开关、开机动画
  *   app/sessionLists.js   “对话”面板、手机左侧抽屉
- *   app/sync.js           多设备同步、服务器模式设置面板
+ *   app/sync.js           服务器模式设置面板
  *   app/recovery.js       启动时接回上次的对话 / 没做完的任务
  *   app/shortcuts.js      键盘快捷键
  *   app/screenAwake.js    屏幕常亮：说话时不灭、久不碰调暗
@@ -112,7 +112,7 @@ app.dashboard.setTurns(app.history.filter((m) => m.role === 'user').length);
 $('#set-motion').value = settings.reducedMotion;
 for (const x of document.querySelectorAll('#set-vad button')) x.setAttribute('aria-checked', String(x.dataset.v === settings.vadSensitivity));
 app.setFocusView(settings.focusView);
-app.applyEmotionOverride(settings.emotionOverride);
+app.applyEmotionOverride('auto'); // 设置里的“表情手动锁定”已去掉：每次启动都按对话自动变化
 app.applyMotionMode();
 // 摄像头 / 麦克风不随页面加载申请权限：上次开着的开关，只有在浏览器已授予权限（不会弹窗）时才自动恢复，
 // 否则复位为关闭，等用户再次主动开启

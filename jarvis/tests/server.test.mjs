@@ -235,35 +235,16 @@ describe('大模型代理与网页读取', () => {
   });
 });
 
-describe('同步转发 /api/oss', () => {
+describe('阿里云 OSS 同步已去掉', () => {
   let server, base;
-  const seen = [];
   beforeAll(async () => {
-    const ossFetch = async (u, init) => { seen.push({ url: String(u), ...init }); return new Response(init.method === 'GET' ? 'QUJD' : '', { status: 200, headers: { etag: '"abc"' } }); };
-    server = createServer({ agent: new MockAgent({ charDelayMs: 0 }), staticDir: '/nonexistent', ossFetch });
+    server = createServer({ agent: new MockAgent({ charDelayMs: 0 }), staticDir: '/nonexistent' });
     await new Promise((r) => server.listen(0, '127.0.0.1', r));
     base = `http://127.0.0.1:${server.address().port}`;
   });
   afterAll(() => server.close());
-  const post = (body, headers = { 'x-jarvis-client': '1' }) => fetch(`${base}/api/oss`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
-
-  it('只转发签好名的 OSS 请求头，回传状态和 ETag', async () => {
-    const r = await post({ method: 'PUT', url: 'https://my-jarvis.oss-cn-hangzhou.aliyuncs.com/jarvis-sync/x.enc', headers: { date: 'D', 'x-oss-date': 'D', authorization: 'OSS a:b', 'content-type': 'text/plain', cookie: 'no', host: 'evil' }, body: 'QUJD' });
-    expect(r.headers.get('x-oss-status')).toBe('200');
-    expect(r.headers.get('x-oss-etag')).toBe('"abc"');
-    expect(seen[0]).toMatchObject({ method: 'PUT', body: 'QUJD', headers: { date: 'D', 'x-oss-date': 'D', authorization: 'OSS a:b', 'content-type': 'text/plain' } });
-    expect(seen[0].headers.cookie).toBeUndefined();
-    expect(seen[0].headers.host).toBeUndefined();
-    const g = await post({ method: 'GET', url: 'https://my-jarvis.oss-cn-hangzhou.aliyuncs.com/jarvis-sync/x.enc', headers: {} });
-    expect(await g.text()).toBe('QUJD');
-  });
-
-  it('拒绝：非阿里云地址、http、其他方法、跨站页面', async () => {
-    for (const url of ['https://evil.com/x', 'http://my-bkt.oss-cn-hangzhou.aliyuncs.com/x', 'https://my-bkt.oss-cn-hangzhou.aliyuncs.com.evil.com/x', 'https://127.0.0.1/x']) {
-      expect((await post({ method: 'GET', url, headers: {} })).status).toBe(403);
-    }
-    expect((await post({ method: 'DELETE', url: 'https://my-bkt.oss-cn-hangzhou.aliyuncs.com/x', headers: {} })).status).toBe(400);
-    expect((await post({ method: 'GET', url: 'https://my-bkt.oss-cn-hangzhou.aliyuncs.com/x', headers: {} }, {})).status).toBe(403);
-    expect((await post({ method: 'GET', url: 'https://my-bkt.oss-cn-hangzhou.aliyuncs.com/x', headers: {} }, { 'x-jarvis-client': '1', Origin: 'https://evil.example' })).status).toBe(403);
+  it('网关不再转发 /api/oss', async () => {
+    const r = await fetch(`${base}/api/oss`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-jarvis-client': '1' }, body: JSON.stringify({ method: 'GET', url: 'https://my-jarvis.oss-cn-hangzhou.aliyuncs.com/x', headers: {} }) });
+    expect(r.headers.get('x-oss-status')).toBeNull();
   });
 });

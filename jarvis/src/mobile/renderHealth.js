@@ -13,6 +13,8 @@ export function initRenderHealthPanel({ mobile = false, toast = () => {}, onChan
   row.hidden = false;
   const input = row.querySelector('input');
   input.checked = document.documentElement.classList.contains('safe-render');
+  // 设置页“高级”默认收起；正处在兼容显示时展开，出过问题的人一眼能找到这个开关和诊断
+  if (input.checked) row.closest('details')?.setAttribute('open', '');
   addEventListener('error',event=>recordRenderError(event));
   addEventListener('unhandledrejection',event=>recordRenderError(event));
   addEventListener('jarvis:memory-pressure',()=>{applyDisplayMode(true);input.checked=true;onChange();});

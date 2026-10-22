@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { poseForEmotion, poseForTask, createMascot, setMascotState } from '../src/ui/mascot.js';
 import { initCamera } from '../src/ui/composerMedia.js';
 import { installSpeechShim } from '../src/mobile/speechShim.js';
-import { rankBrowserVoices, synthesize, DIRECTION } from '../src/perception/tts.js';
+import { rankBrowserVoices, synthesize } from '../src/perception/tts.js';
 import { browserDelivery } from '../src/perception/voiceProfile.js';
 
 class Element {
@@ -79,7 +79,6 @@ export const cases = [
   ['真实童声只轻微调音，显式非童声风格保留原音调', () => {
     assert.ok(browserDelivery({ name: 'Yunxia' }).pitch < browserDelivery({ name: 'system' }).pitch);
     assert.equal(browserDelivery(null, { profile: 'original', pitch: .9 }).pitch, .9);
-    assert.match(DIRECTION, /gentle/);
   }],
   ['Edge 默认请求使用轻柔女孩音色，显式选择仍然有效', async () => {
     const calls = [];

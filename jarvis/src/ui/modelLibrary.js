@@ -16,6 +16,7 @@ import {
 } from '../llm/modelLibrary.js';
 import { modelKind } from '../llm/images.js';
 import { deepseekSearchPanel } from './deepseekSearchPanel.js';
+import { serverKeysPanel } from './serverKeysPanel.js';
 import { documentStylesPanel } from './documentStylesPanel.js';
 
 export const node = (tag, props = {}, ...children) => {
@@ -50,6 +51,7 @@ export function initModelLibrary({ root, workspace, toast }) {
       render();
     }
   };
+  let reviewOpen = false; // “文档审查与写作偏好”是否展开（重画时保持）
   const patch = (update) => run(() => workspace.patch(update));
 
   function modelRow(cfg, provider, model, { catalog = false } = {}) {
@@ -266,7 +268,7 @@ export function initModelLibrary({ root, workspace, toast }) {
     if (selected && !lines.some((line) => sameLine(line, selected))) lines.push(selected);
     const select = node(
       'select',
-      { ariaLabel: '文档审查模型' },
+      { ariaLabel: '文档审查模型', className: 'ml-reviewer-select' },
       node('option', { value: '', textContent: '沿用写作模型（同模型自查）' }),
       ...lines.map((line, index) =>
         node('option', { value: String(index), textContent: `${providerLabel(cfg, line.provider)} · ${line.model}` })
@@ -277,14 +279,13 @@ export function initModelLibrary({ root, workspace, toast }) {
       const line = select.value === '' ? null : lines[Number(select.value)];
       patch((value) => ({ ...value, documentReviewer: line ? { provider: line.provider, model: line.model } : null }));
     });
-    root.append(
-      node('h3', { textContent: '模型分工 · 文档审查' }),
+    return [
       node('p', {
         className: 'ml-muted',
-        textContent: '只用于专业文档内容审查，不改变聊天模型。先将审查型号加入常用；可跨服务商，按所选服务商计费。选择与写作不同的型号才是不同模型审查。'
+        textContent: '审查模型只用于专业文档内容审查，不改变聊天模型。先将审查型号加入常用；可跨服务商，按所选服务商计费。选择与写作不同的型号才是不同模型审查。'
       }),
       select
-    );
+    ];
   }
 
   function render() {
@@ -311,7 +312,19 @@ export function initModelLibrary({ root, workspace, toast }) {
         return tab;
       })
     );
-    const caption = workspace.scope === 'server' ? '正在修改服务器配置，不影响本机' : '正在修改本机配置，不影响服务器';
+    // 说清改的是不是“实际在用的”：开着服务器模式时任务在服务器上做，改本机不影响回答
+    const runsOnServer = workspace.runtime === 'server';
+    // 改完配置会整块重画：重画前记下“文档审查与写作偏好”是否展开，免得刚选完就自己收起来
+    // （不能靠 toggle 事件：它晚一拍才到，刚展开就选的话会漏记）
+    reviewOpen = root.querySelector('.ml-review')?.open ?? reviewOpen;
+    const caption =
+      workspace.scope === 'server'
+        ? runsOnServer
+          ? '任务在云服务器上做：这里改的就是实际在用的配置'
+          : '正在修改服务器配置，不影响本机'
+        : runsOnServer
+          ? '注意：任务在云服务器上做，这里改的是本机配置，不影响现在的回答；要改请切到“云服务器”'
+          : '正在修改本机配置，不影响服务器';
     root.replaceChildren(
       node('p', { className: 'ml-muted', textContent: '配置按运行位置独立保存' }),
       tabs,
@@ -324,9 +337,6 @@ export function initModelLibrary({ root, workspace, toast }) {
     root.append(message);
     if (pullController) root.append(button('停止拉取', () => pullController.abort(), 'ml-link'));
     if (!cfg) return;
-    renderDocumentReviewer(cfg);
-    root.append(documentStylesPanel({ workspace, node }));
-    root.append(deepseekSearchPanel({ cfg, workspace, node, toast }));
     if (hasRouting(cfg))
       root.append(
         node('p', { className: 'ml-notice', textContent: '高级分工已开启，实际模型可能按任务变化。' }),
@@ -375,6 +385,17 @@ export function initModelLibrary({ root, workspace, toast }) {
       );
       root.append(preview);
     }
+    // 联网搜索、文档审查与写作偏好放在服务商后面：先选模型，再管搜索，审查和偏好不常改，收起来
+    root.append(deepseekSearchPanel({ cfg, workspace, node, toast }));
+    if (workspace.scope === 'server') root.append(serverKeysPanel({ cfg, workspace, node }));
+    const review = node(
+      'details',
+      { className: 'ml-copy ml-review', open: reviewOpen },
+      node('summary', { textContent: `文档审查与写作偏好 · ${workspace.scope === 'server' ? '云服务器' : '本机'}` }),
+      ...renderDocumentReviewer(cfg),
+      documentStylesPanel({ workspace, node })
+    );
+    root.append(review);
     root.querySelectorAll('button,input,select').forEach((control) => {
       if (busy && control.textContent !== '停止拉取') control.disabled = true;
     });

@@ -223,6 +223,7 @@
 .ml-search-row input,
 .ml-search-row select,
 .ml-add-select,
+.ml-reviewer-select,
 .ml-picker-search {
   font: inherit;
   font-size: 13px;
@@ -235,8 +236,18 @@
   min-width: 0;
   min-height: 44px;
 }
-.ml-editor input {
+.ml-editor input,
+.ml-reviewer-select {
   width: 100%;
+}
+/* 下拉框默认按最长的选项撑宽：型号名一长就撑出屏幕，整页能左右滑（手机“模型”页错位）。一律不超过容器 */
+#model-workspace select,
+#model-workspace input,
+[data-pane='models'] select,
+[data-pane='models'] input,
+[data-pane='settings'] select {
+  max-width: 100%;
+  min-width: 0;
 }
 .ml-button {
   border: 1px solid var(--ml-line);
@@ -432,3 +443,20 @@
 }
 
 /* 本机与服务器模型工作台：已完成候选回归，正式发布由完整门禁验证。 */
+.ml-field {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+  font-size: 13px;
+}
+.ml-field input {
+  font: inherit;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 11px;
+  border: 1px solid var(--ml-line);
+  border-radius: 10px;
+  background: var(--ml-surface);
+  color: var(--ml-ink);
+}

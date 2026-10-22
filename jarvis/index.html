@@ -301,7 +301,48 @@
       <section class="pane" data-pane="models" hidden>
         <header class="pane-head"><h2>模型与服务商</h2><span class="badge" id="gw-badge">单文件版</span></header>
         <div id="model-workspace"></div>
-        <details id="model-advanced" class="ml-advanced"><summary>高级本机设置：分工、连接测试、本地模型</summary>
+        <div class="set-card" id="card-search">
+        <h3 class="sub">联网搜索 · 本机备用</h3>
+        <p class="muted small">首选的 DeepSeek 搜索在上面“联网搜索 · DeepSeek”里开。这里是本机的备用：DeepSeek 没开或失败时才用；都不填也能搜（读必应、百度的结果），但不稳定，新闻、比分这类最新内容常常搜不到。云服务器用的备用 Key 在上面切到“云服务器”后填写。</p>
+        <label class="field" for="bocha-key"><span>博查搜索 Key（国内推荐：中文结果好、手机和电脑都稳定）</span><input type="password" id="bocha-key" placeholder="sk-…" autocomplete="off" /></label>
+        <p class="note">博查是国内的 AI 搜索接口，按次计费（价格以官网为准）。申请：打开 <a href="https://open.bochaai.com" target="_blank" rel="noopener">open.bochaai.com</a> 注册、充值后在“API KEY 管理”里创建，复制粘贴到上面。填了以后中文搜索先走博查。</p>
+        <div class="row-actions"><button type="button" class="btn ghost sm" id="btn-search-test">测试联网搜索</button><span class="muted small" id="search-test-result"></span></div>
+        <details class="set-more"><summary>更多：Tavily、免密钥搜索范围、模型自带搜索</summary>
+        <label class="field" for="tavily-key"><span>Tavily 搜索 Key（国外搜索好，英文资料多时推荐）</span><input type="password" id="tavily-key" placeholder="tvly-…" autocomplete="off" /></label>
+        <p class="note">国外资料多时用。免费申请：打开 <a href="https://app.tavily.com" target="_blank" rel="noopener">app.tavily.com</a> 注册（可用谷歌账号或邮箱），登录后首页就有以 tvly- 开头的 Key，复制粘贴到上面。免费版每月有一定次数，个人使用一般够用。</p>
+        <label class="field" for="search-region"><span>免密钥搜索用哪里的网站</span><select id="search-region"><option value="auto">自动（按网络判断：国内用必应中国、百度、360；国外用必应、DuckDuckGo）</option><option value="cn">国内网站</option><option value="global">国外网站</option></select></label>
+        <label class="inline-check" id="row-websearch"><input type="checkbox" id="set-websearch" /> 模型自带的联网搜索（Claude，以及“多协议中转”里的 GPT 生效；中转站不支持时自动关掉）</label>
+        </details>
+        </div>
+        <div class="set-card" id="card-voice">
+        <h3 class="sub">声音</h3>
+        <div class="setting" id="qwen-realtime-settings">
+          <button class="btn" type="button" id="btn-qwen-realtime">使用百炼实时对话</button>
+          <p class="muted small">识别 qwen3-asr-flash-realtime，朗读 qwen3-tts-flash-realtime。选择后在下方填写自己的百炼密钥，默认萌宝女声，可试听切换。</p>
+          <label class="field" for="qwen-realtime-region"><span>百炼语音地域</span><select id="qwen-realtime-region"><option value="beijing">北京（中国内地）</option><option value="singapore">新加坡（国际）</option></select></label>
+          <label class="field" for="qwen-realtime-key"><span>百炼语音 API Key（与千问模型共用）</span><input type="password" id="qwen-realtime-key" autocomplete="off" spellcheck="false" /></label>
+          <p class="muted small">密钥需与地域对应。安卓直连，PC/网页通过未央网关；没有目标音色服务时会报告错误。开启通话才上传麦克风音频，切到后台停止收音与播放。</p>
+        </div>
+        <label class="field" for="tts-engine"><span>语音引擎</span><select id="tts-engine"></select></label>
+        <p class="note" id="tts-note" hidden></p>
+        <label class="field" for="tts-voice" id="row-tts-voice"><span>声音</span><select id="tts-voice"></select></label>
+        <div class="field"><span>声线效果</span><div class="seg" role="radiogroup" aria-label="声线效果" id="tts-fx"></div></div>
+        <p class="muted small" id="tts-fx-desc"></p>
+        <label class="inline-check"><input type="checkbox" id="tts-cues" /> 开口 / 说完时的科幻提示音</label>
+        <div class="pane-actions"><button class="btn" type="button" id="btn-tts-preview">试听</button></div>
+        <h3 class="sub">语音识别</h3>
+        <label class="field" for="stt-engine"><span>识别引擎（直接对话、唤醒词用）</span><select id="stt-engine"></select></label>
+        <p class="note" id="stt-note" hidden></p>
+        <label class="field" for="stt-url" id="row-stt-url" hidden><span>接口地址（…/v1）</span><input id="stt-url" spellcheck="false" placeholder="http://127.0.0.1:9000/v1" /></label>
+        <label class="field" for="stt-model" id="row-stt-model" hidden><span>识别模型</span><input id="stt-model" spellcheck="false" placeholder="whisper-1" /></label>
+        <p class="muted small" id="tts-status" role="status"></p>
+        </div>
+        <div class="set-card" id="card-paid">
+        <h3 class="sub">按次收费的能力 · 本机</h3>
+        <label class="field" for="fal-key"><span>fal.ai Key（让未央把写好的歌唱出来：有人声、有伴奏）</span><input type="password" id="fal-key" placeholder="fal 的 API Key" autocomplete="off" /></label>
+        <p class="note">用 fal.ai 上的 MiniMax Music 2.0 作曲演唱，按次收费（约 0.03 美元一首，以 fal 官网为准），一首要一两分钟。fal 是海外服务，国内网络可能不稳定。申请：打开 <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener">fal.ai/dashboard/keys</a> 登录后创建 Key，复制粘贴到上面。不填就不能唱，只写歌词。云服务器用的 Key 在上面切到“云服务器”后填写。</p>
+        </div>
+        <details id="model-advanced" class="ml-advanced"><summary>高级 · 本机：连接测试、自动分工、本机模型、直接填写服务商</summary>
         <p class="note">以下只修改本机，不会自动同步到云服务器。服务器配置请在上方选择“云服务器”。</p>
         <label class="field" for="llm-provider"><span>服务商</span><select id="llm-provider"></select></label>
         <p class="note" id="llm-note" hidden></p>
@@ -335,44 +376,6 @@
           <button class="btn ghost sm" type="submit">下载</button>
         </form>
         </details>
-        <h3 class="sub">本机联网与声音设置</h3>
-        <label class="inline-check"><input type="checkbox" id="set-websearch" /> 模型自带的联网搜索（Claude，以及“多协议中转”里的 GPT 生效；中转站不支持时自动关掉）</label>
-        <label class="field" for="bocha-key"><span>博查搜索 Key（国内推荐：中文结果好、手机和电脑都稳定）</span><input type="password" id="bocha-key" placeholder="sk-…" autocomplete="off" /></label>
-        <p class="note">博查是国内的 AI 搜索接口，按次计费（价格以官网为准）。申请：打开 <a href="https://open.bochaai.com" target="_blank" rel="noopener">open.bochaai.com</a> 注册、充值后在“API KEY 管理”里创建，复制粘贴到上面。填了以后中文搜索先走博查。</p>
-        <label class="field" for="tavily-key"><span>Tavily 搜索 Key（国外搜索好，英文资料多时推荐）</span><input type="password" id="tavily-key" placeholder="tvly-…" autocomplete="off" /></label>
-        <p class="note">两个都不填也能搜（读必应、百度的结果），但不稳定，新闻、比分这类最新内容常常搜不到。免费申请：打开 <a href="https://app.tavily.com" target="_blank" rel="noopener">app.tavily.com</a> 注册（可用谷歌账号或邮箱），登录后首页就有以 tvly- 开头的 Key，复制粘贴到上面。免费版每月有一定次数，个人使用一般够用。</p>
-        <label class="field" for="search-region"><span>免密钥搜索用哪里的网站</span><select id="search-region"><option value="auto">自动（按网络判断：国内用必应中国、百度、360；国外用必应、DuckDuckGo）</option><option value="cn">国内网站</option><option value="global">国外网站</option></select></label>
-        <div class="row-actions"><button type="button" class="btn ghost sm" id="btn-search-test">测试联网搜索</button><span class="muted small" id="search-test-result"></span></div>
-        <h3 class="sub">唱歌（fal.ai）</h3>
-        <label class="field" for="fal-key"><span>fal.ai Key（让未央把写好的歌唱出来：有人声、有伴奏）</span><input type="password" id="fal-key" placeholder="fal 的 API Key" autocomplete="off" /></label>
-        <p class="note">用 fal.ai 上的 MiniMax Music 2.0 作曲演唱，按次收费（约 0.03 美元一首，以 fal 官网为准），一首要一两分钟。fal 是海外服务，国内网络可能不稳定。申请：打开 <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener">fal.ai/dashboard/keys</a> 登录后创建 Key，复制粘贴到上面。不填就不能唱，只写歌词。用云服务器时，填好后在“服务器模式”里点“把模型设置传到服务器”。</p>
-        <h3 class="sub">声音</h3>
-        <div class="setting" id="qwen-realtime-settings">
-          <button class="btn" type="button" id="btn-qwen-realtime">使用百炼实时对话</button>
-          <p class="muted small">识别 qwen3-asr-flash-realtime，朗读 qwen3-tts-flash-realtime。选择后在下方填写自己的百炼密钥，默认萌宝女声，可试听切换。</p>
-          <label class="field" for="qwen-realtime-region"><span>百炼语音地域</span><select id="qwen-realtime-region"><option value="beijing">北京（中国内地）</option><option value="singapore">新加坡（国际）</option></select></label>
-          <label class="field" for="qwen-realtime-key"><span>百炼语音 API Key（与千问模型共用）</span><input type="password" id="qwen-realtime-key" autocomplete="off" spellcheck="false" /></label>
-          <p class="muted small">密钥需与地域对应。安卓直连，PC/网页通过未央网关；没有目标音色服务时会报告错误。开启通话才上传麦克风音频，切到后台停止收音与播放。</p>
-        </div>
-        <label class="field" for="tts-engine"><span>语音引擎</span><select id="tts-engine"></select></label>
-        <p class="note" id="tts-note" hidden></p>
-        <label class="field" id="row-tts-azure-region" hidden><span>Azure Speech 区域</span><input id="tts-azure-region" placeholder="例如 eastasia 或 chinaeast2" spellcheck="false" /></label>
-        <label class="field" for="tts-voice" id="row-tts-voice"><span>声音</span><select id="tts-voice"></select></label>
-        <label class="field" for="tts-voice-id" id="row-tts-voice-id" hidden><span>声音 ID</span><input id="tts-voice-id" spellcheck="false" placeholder="ElevenLabs 声音 ID" /></label>
-        <label class="field" for="tts-url" id="row-tts-url" hidden><span>接口地址（…/v1）</span><input id="tts-url" spellcheck="false" placeholder="http://127.0.0.1:9880/v1" /></label>
-        <label class="field" for="tts-model" id="row-tts-model" hidden><span>语音模型</span><input id="tts-model" spellcheck="false" placeholder="tts-1" /></label>
-        <label class="field" for="tts-key" id="row-tts-key"><span>API Key</span><input type="password" id="tts-key" autocomplete="off" spellcheck="false" /></label>
-        <p class="muted small" id="tts-key-hint"></p>
-        <div class="field"><span>声线效果</span><div class="seg" role="radiogroup" aria-label="声线效果" id="tts-fx"></div></div>
-        <p class="muted small" id="tts-fx-desc"></p>
-        <label class="inline-check"><input type="checkbox" id="tts-cues" /> 开口 / 说完时的科幻提示音</label>
-        <div class="pane-actions"><button class="btn" type="button" id="btn-tts-preview">试听</button></div>
-        <h3 class="sub">语音识别</h3>
-        <label class="field" for="stt-engine"><span>识别引擎（直接对话、唤醒词用）</span><select id="stt-engine"></select></label>
-        <p class="note" id="stt-note" hidden></p>
-        <label class="field" for="stt-url" id="row-stt-url" hidden><span>接口地址（…/v1）</span><input id="stt-url" spellcheck="false" placeholder="http://127.0.0.1:9000/v1" /></label>
-        <label class="field" for="stt-model" id="row-stt-model" hidden><span>识别模型</span><input id="stt-model" spellcheck="false" placeholder="whisper-1" /></label>
-        <p class="muted small" id="tts-status" role="status"></p>
         <p class="muted small">密钥只保存在这台电脑的浏览器里，请求直接发往服务商（或经由你本机的网关）。不要在公用电脑上保存密钥。</p>
       </section>
 
@@ -404,10 +407,13 @@
       <!-- 设置 -->
       <section class="pane" data-pane="settings" hidden>
         <header class="pane-head"><h2>设置</h2></header>
+        <h3 class="set-group">常用</h3>
         <div class="setting">
-          <label><input type="checkbox" id="set-face" /> 人脸跟随</label>
-          <p class="muted">人脸检测在本机完成，摄像头画面不会上传至服务器。开启后粒子体的眼睛会看向你。</p>
-          <p class="muted" id="face-status" role="status"></p>
+          <span class="label">界面明暗</span>
+          <div class="seg" role="radiogroup" aria-label="界面明暗" id="set-theme">
+            <button type="button" role="radio" data-v="time">按时间</button><button type="button" role="radio" data-v="system">跟随系统</button><button type="button" role="radio" data-v="day">白天</button><button type="button" role="radio" data-v="night">夜间</button>
+          </div>
+          <p class="muted">“按时间”：7:00–19:00 用白天的浅色界面，其他时间用夜间深色。中间的粒子舞台始终是深色显示屏。顶栏的 ☀/☾ 按钮可以随时切换。</p>
         </div>
         <div class="setting" id="row-voice">
           <label><input type="checkbox" id="set-voice" /> 直接对话</label>
@@ -422,25 +428,18 @@
         </div>
         <div class="setting"><label><input type="checkbox" id="set-tts" /> 打字提问也朗读回答（语音对话时总是朗读）</label></div>
         <div class="setting">
-          <span class="label">界面明暗</span>
-          <div class="seg" role="radiogroup" aria-label="界面明暗" id="set-theme">
-            <button type="button" role="radio" data-v="time">按时间</button><button type="button" role="radio" data-v="system">跟随系统</button><button type="button" role="radio" data-v="day">白天</button><button type="button" role="radio" data-v="night">夜间</button>
+          <span class="label">VAD 灵敏度</span>
+          <div class="seg" role="radiogroup" aria-label="VAD 灵敏度" id="set-vad">
+            <button type="button" role="radio" data-v="低">低</button><button type="button" role="radio" data-v="中">中</button><button type="button" role="radio" data-v="高">高</button>
           </div>
-          <p class="muted">“按时间”：7:00–19:00 用白天的浅色界面，其他时间用夜间深色。中间的粒子舞台始终是深色显示屏。顶栏的 ☀/☾ 按钮可以随时切换。</p>
+          <p class="muted">低 = 停顿 1.2 秒提交，中 = 0.8 秒，高 = 0.5 秒。</p>
         </div>
         <div class="setting">
-          <label><input type="checkbox" id="set-greet" /> 回到电脑前时主动问好</label>
-          <p class="muted">离开 10 分钟以上再回来（桌面版看键盘鼠标；开了人脸跟随时也看摄像头；网页版看标签页），未央会结合时间、今天的定时任务、上次没做完的事打个招呼。40 分钟内最多一次。</p>
+          <label for="set-screen" class="label">屏幕常亮</label>
+          <select id="set-screen"><option value="smart">智能（说话时不灭，30 秒没碰就调暗）</option><option value="always">一直常亮</option><option value="system">跟随系统</option></select>
+          <p class="muted">干长任务时屏幕可以灭，任务在后台继续，做完会通知你。</p>
         </div>
-        <div class="setting" id="row-version" hidden>
-          <span class="label">版本</span>
-          <div class="pane-actions"><span id="app-version" class="muted"></span><button class="btn ghost sm" type="button" id="btn-update-check">检查更新</button></div>
-          <p class="muted" id="update-note"></p>
-        </div>
-        <div class="setting" id="row-render-health" hidden>
-          <label><input type="checkbox" id="set-safe-render" /> 兼容显示（减少动效，优先稳定）</label>
-          <p class="muted">减少动画和光效，每页显示最近 12 条消息；更早的对话可翻页查看。不会删除记录或中断正在执行的任务。</p>
-        </div>
+        <h3 class="set-group">服务器</h3>
         <div class="setting" id="row-server">
           <label><input type="checkbox" id="server-on" disabled /> 服务器模式（任务交给自己的云服务器做）</label>
           <p class="muted">开启后，任务在你的服务器上从头做到尾，手机锁屏、关掉 App 都不影响，打开时能看到进度和结果。对话和生成的文件存在服务器上。服务器上不能控制电脑、运行代码。</p>
@@ -458,29 +457,47 @@
           <p class="muted small" id="server-version"></p>
           <p class="muted small" id="server-net"></p>
         </div>
-        <div class="setting" id="row-sync">
-          <label><input type="checkbox" id="sync-on" /> 多设备同步（电脑 ↔ 手机）</label>
-          <p class="muted">把记忆、对话、模型设置放到你自己的阿里云 OSS 存储空间里，电脑和手机自动合并。上传前在本机用“同步密码”加密，阿里云和任何人都看不到内容。建议在阿里云 RAM 里单独建一个只能读写这个 Bucket 的子账号，用它的 AccessKey。</p>
-          <div class="sync-form" id="sync-form">
-            <label class="field" for="sync-endpoint"><span>地域</span><input id="sync-endpoint" placeholder="oss-cn-hangzhou" spellcheck="false" autocomplete="off" /></label>
-            <label class="field" for="sync-bucket"><span>Bucket 名称</span><input id="sync-bucket" placeholder="my-jarvis" spellcheck="false" autocomplete="off" /></label>
-            <label class="field" for="sync-ak"><span>AccessKey ID</span><input id="sync-ak" spellcheck="false" autocomplete="off" /></label>
-            <label class="field" for="sync-sk"><span>AccessKey Secret</span><input type="password" id="sync-sk" autocomplete="off" spellcheck="false" /></label>
-            <label class="field" for="sync-pass"><span>同步密码（所有设备填一样的，至少 6 位；忘了就解不开云端数据）</span><input type="password" id="sync-pass" autocomplete="new-password" spellcheck="false" /></label>
-            <div class="sync-groups" id="sync-groups"></div>
-            <label class="inline-check"><input type="checkbox" id="sync-auto" /> 自动同步（打开时、每 5 分钟、切到后台时）</label>
-            <div class="pane-actions">
-              <button class="btn" type="button" id="btn-sync-now">保存并同步</button>
-              <button class="btn ghost sm" type="button" id="btn-sync-code">生成同步码</button>
-              <button class="btn ghost sm" type="button" id="btn-sync-paste">用同步码设置</button>
-            </div>
-            <div class="sync-code" id="sync-code-box" hidden>
-              <textarea id="sync-code" rows="3" spellcheck="false" aria-label="同步码"></textarea>
-              <p class="muted small" id="sync-code-hint"></p>
-              <div class="pane-actions"><button class="btn ghost sm" type="button" id="btn-sync-code-go">确定</button></div>
-            </div>
+        <details class="set-more" id="settings-advanced"><summary>高级</summary>
+        <p class="set-sub">显示</p>
+        <div class="setting">
+          <label for="set-quality" class="label">画质</label>
+          <select id="set-quality">
+            <option value="auto">自动</option><option value="high">高（泛光）</option><option value="standard">标准</option><option value="eco">省电（24fps，无泛光与星尘）</option>
+          </select>
+        </div>
+        <div class="setting">
+          <label for="set-motion" class="label">减少动画</label>
+          <select id="set-motion"><option value="system">跟随系统</option><option value="on">开启</option><option value="off">关闭</option></select>
+          <p class="muted" id="motion-status"></p>
+        </div>
+        <div class="setting" id="row-render-health" hidden>
+          <label><input type="checkbox" id="set-safe-render" /> 兼容显示（减少动效，优先稳定）</label>
+          <p class="muted">减少动画和光效，每页显示最近 12 条消息；更早的对话可翻页查看。不会删除记录或中断正在执行的任务。</p>
+        </div>
+        <div class="setting"><label><input type="checkbox" id="set-focus" /> 专注视图（收起光核，对话全屏）</label></div>
+        <p class="set-sub">其他</p>
+        <div class="setting">
+          <span class="label">多助手分工</span>
+          <div class="seg" role="radiogroup" aria-label="多助手分工" id="set-team">
+            <button type="button" role="radio" data-v="auto">自动</button><button type="button" role="radio" data-v="on">总是</button><button type="button" role="radio" data-v="off">关闭</button>
           </div>
-          <p class="muted small" id="sync-status" role="status"></p>
+          <p class="muted">复杂任务交给小团队：规划员拆步骤，研究员 / 工程师 / 撰稿人 / 分析师各干各的，审核员检查不合格就返工。“自动”在一句话里有多个先后步骤时启用；随时可以用“/团队 任务”强制分工。会多花一些调用次数。</p>
+        </div>
+        <div class="setting" id="row-version" hidden>
+          <span class="label">版本</span>
+          <div class="pane-actions"><span id="app-version" class="muted"></span><button class="btn ghost sm" type="button" id="btn-update-check">检查更新</button></div>
+          <p class="muted" id="update-note"></p>
+        </div>
+        </details>
+        <details class="set-more desktop-only" id="settings-desktop" open><summary>电脑版专属</summary>
+        <div class="setting">
+          <label><input type="checkbox" id="set-face" /> 人脸跟随</label>
+          <p class="muted">人脸检测在本机完成，摄像头画面不会上传至服务器。开启后粒子体的眼睛会看向你。</p>
+          <p class="muted" id="face-status" role="status"></p>
+        </div>
+        <div class="setting">
+          <label><input type="checkbox" id="set-greet" /> 回到电脑前时主动问好</label>
+          <p class="muted">离开 10 分钟以上再回来（桌面版看键盘鼠标；开了人脸跟随时也看摄像头；网页版看标签页），未央会结合时间、今天的定时任务、上次没做完的事打个招呼。40 分钟内最多一次。</p>
         </div>
         <div class="setting" id="row-habits" hidden>
           <label><input type="checkbox" id="set-habits" /> 学习我的操作习惯</label>
@@ -493,44 +510,6 @@
           <p class="muted">最新未央角色、轻触回应和文字聊天。拖动陪伴窗口顶部调整位置，设置里可调角色大小。角色不会强制置顶，空白处可照常操作桌面。</p>
         </div>
         <div class="setting">
-          <span class="label">多助手分工</span>
-          <div class="seg" role="radiogroup" aria-label="多助手分工" id="set-team">
-            <button type="button" role="radio" data-v="auto">自动</button><button type="button" role="radio" data-v="on">总是</button><button type="button" role="radio" data-v="off">关闭</button>
-          </div>
-          <p class="muted">复杂任务交给小团队：规划员拆步骤，研究员 / 工程师 / 撰稿人 / 分析师各干各的，审核员检查不合格就返工。“自动”在一句话里有多个先后步骤时启用；随时可以用“/团队 任务”强制分工。会多花一些调用次数。</p>
-        </div>
-        <div class="setting">
-          <span class="label">VAD 灵敏度</span>
-          <div class="seg" role="radiogroup" aria-label="VAD 灵敏度" id="set-vad">
-            <button type="button" role="radio" data-v="低">低</button><button type="button" role="radio" data-v="中">中</button><button type="button" role="radio" data-v="高">高</button>
-          </div>
-          <p class="muted">低 = 停顿 1.2 秒提交，中 = 0.8 秒，高 = 0.5 秒。</p>
-        </div>
-        <div class="setting">
-          <label for="set-emotion" class="label">表情手动锁定</label>
-          <select id="set-emotion">
-            <option value="auto">自动</option>
-            <option>平静</option><option>专注</option><option>聆听</option><option>亲和</option><option>安抚</option><option>愉悦</option><option>警觉</option>
-          </select>
-        </div>
-        <div class="setting"><label><input type="checkbox" id="set-focus" /> 专注视图（收起光核，对话全屏）</label></div>
-        <div class="setting">
-          <label for="set-quality" class="label">画质</label>
-          <select id="set-quality">
-            <option value="auto">自动</option><option value="high">高（泛光）</option><option value="standard">标准</option><option value="eco">省电（24fps，无泛光与星尘）</option>
-          </select>
-        </div>
-        <div class="setting">
-          <label for="set-screen" class="label">屏幕常亮</label>
-          <select id="set-screen"><option value="smart">智能（说话时不灭，30 秒没碰就调暗）</option><option value="always">一直常亮</option><option value="system">跟随系统</option></select>
-          <p class="muted">干长任务时屏幕可以灭，任务在后台继续，做完会通知你。</p>
-        </div>
-        <div class="setting">
-          <label for="set-motion" class="label">减少动画</label>
-          <select id="set-motion"><option value="system">跟随系统</option><option value="on">开启</option><option value="off">关闭</option></select>
-          <p class="muted" id="motion-status"></p>
-        </div>
-        <div class="setting">
           <span class="label">键盘快捷键</span>
           <dl class="shortcuts">
             <dt><kbd>Enter</kbd></dt><dd>发送（<kbd>Shift</kbd>+<kbd>Enter</kbd> 换行）</dd>
@@ -541,6 +520,7 @@
             <dt><kbd>Alt</kbd>+<kbd>V</kbd></dt><dd>直接对话开关</dd>
           </dl>
         </div>
+        </details>
         <p class="muted small">界面中的“表情”是表达风格，由回复内容、模型指令和任务状态决定，不代表模型拥有真实情绪，也不会推断你的情绪。</p>
         <p class="muted small attribution">Head scan by Lee Perry-Smith (<a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noopener">CC BY 3.0</a>, Infinite-Realities / triplegangers.com)</p>
       </section>

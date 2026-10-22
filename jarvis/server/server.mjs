@@ -63,7 +63,6 @@ export function createServer({
   mcp = null, // createMcpManager() 的结果；为 null 时不提供 MCP 接口
   ollama = createOllama(),
   edgeTts = edgeSpeak, // Edge 在线朗读（测试可替换）
-  ossFetch = (...a) => fetch(...a), // 转发到阿里云 OSS（测试可替换）
   serverMode = null // createServerMode() 的结果：部署在云服务器上、任务交给服务器做（见 serverMode.mjs）
 } = {}) {
   const subscribers = new Set();
@@ -143,25 +142,6 @@ export function createServer({
     } catch (e) {
       json(res, 502, { error: e.message });
     }
-  }
-
-  /**
-   * 数据同步：把签好名的 OSS 请求转发到阿里云（浏览器不能设置 Date 头，OSS 默认也不允许跨域）。
-   * 只转发到 <bucket>.oss-<地域>.aliyuncs.com；签名在页面里算好，网关看不到 AccessKey Secret。
-   */
-  async function handleOss(req, res) {
-    if (!sameOriginOnly(req)) return json(res, 403, { error: '只允许本机未央页面调用' });
-    const { method, url, headers = {}, body } = await readJson(req, 64 * 1024 * 1024);
-    let u;
-    try { u = new URL(String(url)); } catch { return json(res, 400, { error: '地址无效' }); }
-    if (u.protocol !== 'https:' || !/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.oss-[a-z0-9-]+(\.internal)?\.aliyuncs\.com$/.test(u.hostname)) return json(res, 403, { error: '只转发到阿里云 OSS' });
-    if (!['GET', 'PUT', 'HEAD'].includes(method)) return json(res, 400, { error: '不支持的请求方法' });
-    const fwd = {};
-    for (const [k, v] of Object.entries(headers)) if (/^(date|authorization|content-type|content-md5|x-oss-[a-z0-9-]+)$/i.test(k)) fwd[k] = String(v);
-    const upstream = await ossFetch(u, { method, headers: fwd, body: body == null ? undefined : String(body), signal: AbortSignal.timeout(60000) });
-    const buf = Buffer.from(await upstream.arrayBuffer());
-    res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store', 'x-oss-status': String(upstream.status), 'x-oss-etag': upstream.headers.get('etag') || '' });
-    res.end(buf);
   }
 
   async function readJson(req, limit = 256 * 1024) {
@@ -362,7 +342,6 @@ export function createServer({
       const llm = pathname.match(/^\/api\/llm\/([a-z0-9-]+)\/(.*)$/);
       if (llm) return await handleLlmProxy(req, res, llm[1], llm[2], new URL(req.url, 'http://x').search, cross);
       if (pathname === '/api/mcp' || pathname.startsWith('/api/mcp/')) return await handleMcp(req, res, pathname);
-      if (pathname === '/api/oss' && req.method === 'POST') return await handleOss(req, res);
       if (pathname === '/api/tts/edge' && req.method === 'POST') return await handleEdgeTts(req, res, cross);
       if (pathname.startsWith('/api/ollama/')) return await handleOllama(req, res, pathname);
       if (pathname === '/api/fetch' && req.method === 'GET') return await handleFetch(req, res, new URL(req.url, 'http://x').searchParams.get('url'));

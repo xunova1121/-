@@ -107,8 +107,10 @@ try {
     });
     await page.evaluate(() => window.__jarvis.showPanel('models'));
     await page.waitForSelector('.ml-provider');
-    const stylesPanel = page.locator('details').filter({ has: page.getByText('写作偏好 · 云服务器', { exact: true }) });
-    await stylesPanel.locator('summary').click();
+    // 写作偏好收在“文档审查与写作偏好”里：先展开外层，再找里层
+    await page.locator('details.ml-review').evaluate((d) => { d.open = true; });
+    const stylesPanel = page.locator('details:has(> summary:text-is("写作偏好 · 云服务器"))');
+    await stylesPanel.locator('> summary').click();
     await stylesPanel.getByRole('button', { name: '查看写作偏好', exact: true }).click();
     await stylesPanel.locator('li').first().waitFor();
     const styleBefore = await stylesPanel.locator('li').count();
@@ -117,10 +119,10 @@ try {
     await styleDeleted;
     await page.waitForFunction(expected => document.querySelectorAll('.ml-style-list li').length === expected, styleBefore - 1);
     check(`${width} 云端写作偏好可查看删除且不读写本机`, (await stylesPanel.locator('li').count()) === styleBefore - 1);
-    await stylesPanel.locator('summary').click();
+    await stylesPanel.locator('> summary').click();
     check(
-      `${width} 配置位置默认云服务器，按服务商显示`,
-      (await page.locator('#model-workspace .ml-scope-note').textContent()) === '正在修改服务器配置，不影响本机' &&
+      `${width} 配置位置默认云服务器，按服务商显示，说明这就是实际在用的配置`,
+      (await page.locator('#model-workspace .ml-scope-note').textContent()) === '任务在云服务器上做：这里改的就是实际在用的配置' &&
         (await page.locator('.ml-provider').count()) === 2
     );
     const searchPanel = page.locator('details').filter({ has: page.getByText('联网搜索 · DeepSeek Search/Fetch · 云服务器', { exact: true }) });
@@ -177,6 +179,8 @@ try {
       && await page.evaluate(() => JSON.parse(localStorage.getItem('jarvis.llm.v1')).deepseekSearchKey === 'fake-local-search-key'));
     await page.locator('#model-workspace .ml-tabs').getByRole('button', { name: '云服务器', exact: true }).click();
     await page.waitForSelector('.ml-provider');
+    // 审查模型收在“文档审查与写作偏好”里（展开状态会保留，没展开才展开）
+    await page.locator('details.ml-review').evaluate((d) => { d.open = true; });
     const reviewSaved = page.waitForResponse(response => response.url() === base + '/api/server/config' && response.request().method() === 'PUT' && response.request().postDataJSON()?.documentReviewer?.provider === 'relay-2');
     await page.getByLabel('文档审查模型', { exact: true }).selectOption({ label: '供应商 B · shared-model' });
     await reviewSaved;

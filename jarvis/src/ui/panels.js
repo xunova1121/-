@@ -448,6 +448,9 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
     const gw = getGateway();
     $('#gw-badge').textContent = MOBILE ? '手机 App' : window.jarvisDesktop ? '桌面版' : gw ? (gw.cors ? '单文件版 · 已连网关' : '本机网关') : '单文件版';
     $('#gw-badge').classList.toggle('on', Boolean(gw));
+    // “模型自带的联网搜索”只对 Claude 和多协议中转里的 GPT 生效：用 DeepSeek 等时不显示，免得误会
+    const nativeSearch = ['anthropic', 'multi'].includes(providerById(cfg.provider)?.kind);
+    $('#row-websearch').hidden = !nativeSearch;
     $('#llm-model').value = cfg.models[p.id] || p.models[0] || '';
     $('#llm-models').replaceChildren(...p.models.filter(Boolean).map((m) => el('option', { value: m })));
     $('#row-base').hidden = !p.custom;

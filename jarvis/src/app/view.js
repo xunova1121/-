@@ -459,7 +459,6 @@ export function createView(app) {
       for (const x of document.querySelectorAll('#set-team button')) x.setAttribute('aria-checked', String(x === b));
     });
   }
-  $('#set-emotion').addEventListener('change', (e) => app.applyEmotionOverride(e.target.value));
   $('#set-focus').addEventListener('change', (e) => setFocusView(e.target.checked));
   $('#set-motion').addEventListener('change', (e) => {
     app.setSetting('reducedMotion', e.target.value);

@@ -87,3 +87,15 @@ describe('小工具', () => {
     expect(audioUrlOf({})).toBeNull();
   });
 });
+
+describe('服务器上的 fal.ai Key', () => {
+  it('能存进服务器配置，只回显掩码；留空或掩码保存时保留原值', async () => {
+    const { maskConfig, mergeConfig } = await import('../server/serverMode.mjs');
+    const saved = mergeConfig({ keys: {} }, { falKey: 'fal-real-secret-1234', bochaKey: 'sk-bocha-5678' });
+    expect(saved.falKey).toBe('fal-real-secret-1234');
+    expect(maskConfig(saved).falKey).toBe('••••1234');
+    expect(JSON.stringify(maskConfig(saved))).not.toContain('fal-real-secret');
+    expect(mergeConfig(saved, { falKey: '••••1234' }).falKey).toBe('fal-real-secret-1234');
+    expect(mergeConfig(saved, { falKey: '' }).falKey).toBe('fal-real-secret-1234');
+  });
+});

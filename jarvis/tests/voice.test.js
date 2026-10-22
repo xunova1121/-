@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { synthesize, rankBrowserVoices, TTS_ENGINES, DIRECTION } from '../src/perception/tts.js';
+import { synthesize, rankBrowserVoices, TTS_ENGINES } from '../src/perception/tts.js';
 import { FX_PRESETS } from '../src/perception/voiceFx.js';
 import { resolveVoice, DEFAULT_VOICE } from '../src/llm/config.js';
 
@@ -13,75 +13,38 @@ function fakeFetch() {
   return f;
 }
 
-describe('云端语音请求', () => {
-  it('OpenAI：gpt-4o-mini-tts + 表演指导，避免播报腔', async () => {
+describe('云端语音请求（只留百炼实时、免费在线、系统自带三种）', () => {
+  it('只有三种引擎，免费在线声音有默认声音', () => {
+    expect(TTS_ENGINES.map((e) => e.id)).toEqual(['qwen-realtime', 'edge', 'browser']);
+    expect(TTS_ENGINES.find((e) => e.id === 'edge').voices.length).toBeGreaterThan(0);
+  });
+  it('免费在线声音：经本机网关 /api/tts/edge，带上文字和声音', async () => {
     const f = fakeFetch();
-    await synthesize({ engine: 'openai', voices: { openai: 'ash' } }, { openai: 'sk-x' }, '你好', { fetchImpl: f });
+    await synthesize({ engine: 'edge', voices: { edge: 'zh-CN-XiaoyiNeural' } }, {}, '你好', { fetchImpl: f, gateway: { origin: 'http://127.0.0.1:8787', keys: [] } });
     const c = f.calls[0];
-    expect(c.url).toBe('https://api.openai.com/v1/audio/speech');
-    expect(c.init.headers.authorization).toBe('Bearer sk-x');
-    expect(c.body).toMatchObject({ model: 'gpt-4o-mini-tts', input: '你好', voice: 'ash', response_format: 'mp3' });
-    expect(c.body.instructions).toBe(DIRECTION);
-    expect(DIRECTION).toMatch(/never robotic/);
+    expect(c.url).toBe('http://127.0.0.1:8787/api/tts/edge');
+    expect(c.init.headers['x-jarvis-client']).toBe('1');
+    expect(c.body).toMatchObject({ text: '你好', voice: 'zh-CN-XiaoyiNeural' });
   });
-
-  it('ElevenLabs：声音 ID 在路径里，密钥用 xi-api-key', async () => {
-    const f = fakeFetch();
-    await synthesize({ engine: 'elevenlabs', voices: {} }, { elevenlabs: 'el-key' }, '收到', { fetchImpl: f });
-    const c = f.calls[0];
-    expect(c.url).toMatch(/^https:\/\/api\.elevenlabs\.io\/v1\/text-to-speech\/onwK4e9ZLuTAKqWW03F9\?output_format=mp3/);
-    expect(c.init.headers['xi-api-key']).toBe('el-key');
-    expect(c.body).toMatchObject({ text: '收到', model_id: 'eleven_multilingual_v2' });
-  });
-
-  it('硅基流动：声音名带模型前缀；有网关时走网关并使用网关密钥', async () => {
-    const f = fakeFetch();
-    await synthesize({ engine: 'siliconflow', voices: { siliconflow: 'charles' } }, {}, '好的', { fetchImpl: f, gateway: { origin: 'http://127.0.0.1:8787', keys: ['siliconflow'] } });
-    const c = f.calls[0];
-    expect(c.url).toBe('http://127.0.0.1:8787/api/llm/siliconflow/audio/speech');
-    expect(c.body.voice).toBe('FunAudioLLM/CosyVoice2-0.5B:charles');
-    expect(c.init.headers.authorization).toBe('Bearer use-gateway-key');
-  });
-
-  it('自定义接口：可以不带密钥', async () => {
-    const f = fakeFetch();
-    await synthesize({ engine: 'custom', voices: {}, customURL: 'http://127.0.0.1:9880/v1/', customModel: 'cosyvoice', customVoice: 'jarvis' }, {}, 'hi', { fetchImpl: f });
-    const c = f.calls[0];
-    expect(c.url).toBe('http://127.0.0.1:9880/v1/audio/speech');
-    expect(c.init.headers.authorization).toBeUndefined();
-    expect(c.body).toMatchObject({ model: 'cosyvoice', voice: 'jarvis' });
-  });
-
-  it('自定义接口：完整版经网关转发（目标放请求头）；单文件版连网关时内网地址直连', async () => {
-    const vc = { engine: 'custom', voices: {}, customURL: 'https://tts.example.com/v1', customModel: 'm' };
-    let f = fakeFetch();
-    await synthesize(vc, {}, 'hi', { fetchImpl: f, gateway: { origin: 'http://127.0.0.1:8787', keys: [] } });
-    expect(f.calls[0].url).toBe('http://127.0.0.1:8787/api/llm/custom/audio/speech');
-    expect(f.calls[0].init.headers['x-jarvis-upstream']).toBe('https://tts.example.com/v1');
-    f = fakeFetch();
-    await synthesize({ ...vc, customURL: 'http://127.0.0.1:9880/v1' }, {}, 'hi', { fetchImpl: f, gateway: { origin: 'http://127.0.0.1:8787', keys: [], cors: true } });
-    expect(f.calls[0].url).toBe('http://127.0.0.1:9880/v1/audio/speech');
-  });
-
-  it('缺密钥、接口报错时给出可读的错误', async () => {
-    await expect(synthesize({ engine: 'openai', voices: {} }, {}, 'x', { fetchImpl: fakeFetch() })).rejects.toThrow(/API Key/);
-    const bad = async () => ({ ok: false, status: 401, json: async () => ({ error: { message: 'Invalid key' } }) });
-    await expect(synthesize({ engine: 'openai', voices: {} }, { openai: 'k' }, 'x', { fetchImpl: bad })).rejects.toThrow(/401 Invalid key/);
-  });
-
-  it('每个云端引擎都有默认声音', () => {
-    for (const e of TTS_ENGINES.filter((x) => x.id !== 'browser' && !x.custom)) expect(e.voices.length).toBeGreaterThan(0);
+  it('没有网关也没有安卓插件、接口报错、去掉的引擎：给出可读的错误', async () => {
+    await expect(synthesize({ engine: 'edge', voices: {} }, {}, 'x', { fetchImpl: fakeFetch() })).rejects.toThrow(/本机网关/);
+    const bad = async () => ({ ok: false, status: 500, json: async () => ({ error: 'boom' }) });
+    await expect(synthesize({ engine: 'edge', voices: {} }, {}, 'x', { fetchImpl: bad, gateway: { origin: 'http://g' } })).rejects.toThrow(/语音合成失败：boom/);
+    await expect(synthesize({ engine: 'azure', voices: {} }, {}, 'x', { fetchImpl: fakeFetch() })).rejects.toThrow(/不是云端语音引擎/);
   });
 });
 
 describe('语音引擎选择', () => {
   const cfg = (keys, engine = 'auto') => ({ keys, voice: { ...DEFAULT_VOICE, engine } });
-  it('auto：按已有密钥挑最自然的云端声音', () => {
+  it('auto：有百炼密钥且能连上用百炼，否则有网关用免费在线声音，都没有用系统自带', () => {
     expect(resolveVoice(cfg({})).engine).toBe('browser');
-    expect(resolveVoice(cfg({ openai: 'k' })).engine).toBe('openai');
-    expect(resolveVoice(cfg({ openai: 'k', elevenlabs: 'e' })).engine).toBe('elevenlabs');
-    expect(resolveVoice(cfg({ siliconflow: 'k' })).engine).toBe('browser'); // 单文件版不能直连
-    expect(resolveVoice(cfg({ siliconflow: 'k' }), { keys: [] }).engine).toBe('siliconflow');
+    expect(resolveVoice(cfg({}), { keys: [] }).engine).toBe('edge');
+    expect(resolveVoice(cfg({ qwen: 'k' }), { keys: [] }).engine).toBe('qwen-realtime');
+    expect(resolveVoice(cfg({ openai: 'k', elevenlabs: 'e' }), { keys: [] }).engine).toBe('edge'); // 去掉的引擎不再自动选
+  });
+  it('以前手动选过、现在去掉的引擎：按自动处理', () => {
+    expect(resolveVoice(cfg({}, 'azure'), { keys: [] }).engine).toBe('edge');
+    expect(resolveVoice(cfg({}, 'elevenlabs')).engine).toBe('browser');
   });
   it('手动选择优先', () => {
     expect(resolveVoice(cfg({ openai: 'k' }, 'browser')).engine).toBe('browser');

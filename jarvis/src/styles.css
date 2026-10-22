@@ -818,9 +818,6 @@ body.wallpaper .thought-log { right: 6vw; bottom: calc(10vh + 70px); width: 320p
 .sync-form { display: grid; gap: 10px; margin-top: 8px; }
 .setting .sync-form label.field { display: grid; grid-template-columns: 1fr; gap: 6px; align-items: stretch; }
 .sync-form .field input { width: 100%; min-width: 0; }
-.sync-groups { display: flex; flex-wrap: wrap; gap: 6px 16px; }
-.sync-code { display: grid; gap: 6px; }
-.sync-code textarea { width: 100%; font: 12px/1.4 ui-monospace, Consolas, monospace; color: var(--text); background: var(--panel-2, rgba(127, 127, 127, .08)); border: 1px solid var(--line); border-radius: 8px; padding: 8px; resize: vertical; word-break: break-all; }
 
 /* 安卓 App：避开状态栏 / 手势条 */
 /* Capacitor 8 铺满全屏（状态栏、手势条下面也是 App），并把它们的高度注入成 --safe-area-inset-*（有的 WebView 的 env() 是 0） */
@@ -1391,3 +1388,13 @@ body.reduced-motion .welcome-hero * { animation: none !important; }
 /* 屏幕常亮的“调暗”：盖一层黑幕（OLED 屏黑色几乎不耗电），点一下恢复 */
 .screen-veil { position: fixed; inset: 0; z-index: 9999; display: flex; align-items: flex-end; justify-content: center; padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px)); background: rgba(0, 0, 0, 0.88); color: rgba(255, 255, 255, 0.45); font-size: 14px; letter-spacing: 0.08em; }
 .screen-veil[hidden] { display: none; }
+
+/* 设置页、模型页分组（2026-10 整理）：组标题 + 可收起的“高级”“电脑版专属”，和模型库卡片同一种圆角框 */
+.set-group { margin: 22px 0 2px; font: 600 var(--fs-md, 15px)/1.4 var(--font-ui, inherit); color: var(--text); }
+.set-group:first-of-type { margin-top: 8px; }
+.set-sub { margin: 14px 0 0; font-size: var(--fs-sm, 13px); color: var(--muted); }
+.set-more { margin-top: 18px; padding: 4px 14px; border: 1px solid var(--line); border-radius: 14px; }
+.set-more > summary { padding: 10px 0; cursor: pointer; font-weight: 600; color: var(--text); }
+.set-more .setting:last-child { border-bottom: 0; }
+.set-card { margin-top: 18px; padding: 4px 14px 12px; border: 1px solid var(--line); border-radius: 14px; }
+.set-card > h3.sub:first-child { margin-top: 12px; }

@@ -254,7 +254,6 @@ export function createStage(app) {
     app.setSetting('emotionOverride', v);
     machine.setManual(v === 'auto' ? null : v);
     dashboard.setManualEmotion(v);
-    $('#set-emotion').value = v;
   }
 
   const hud = {
