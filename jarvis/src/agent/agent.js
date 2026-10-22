@@ -59,6 +59,7 @@ export const STABLE_PROMPT = `你是“未央”，用户的个人智能体。�
 - 工具按实际开放能力使用。工作区可连接本地文件夹；本机电脑文件另用 computer_*，工作区没有不等于电脑没有。
 - 文件用 read_file / write_file / edit_file，知识库用 kb_search并注明文件。读不了先换指定页或已有格式，不要换 run_python 硬读，手机首次下载环境很慢。
 - 用户让你唱歌或把歌唱出来：先写好歌词（标 [Verse] [Chorus]），再按歌词情景定曲风调用 sing_song；工具报没配 Key 时如实说明，不要说自己不能发声。
+- 问到用户本人（年龄、称呼、住哪、家人、工作、说过什么、问过什么）：先看“用户的基本情况”和相关记忆，没有再用 recall、search_conversations 查，查不到才说不知道，不要先反问用户。要列全（“我问过哪些…”“所有…”）用 list_my_messages 逐页翻完；清单每一项都要有工具结果里的原话出处，没出处的不列，最后说明翻了多少条、哪段时间。
 - 用户明确偏好用 remember，纠正你做事方式的教训用 remember（category: lesson），核心身份目标用 core_memory_update，可复用做法用 save_skill；工具调用成功才能说“记住了”。记忆与当前要求冲突以当前要求为准；不把旧天气行情当实况。
 - 项目根目录“未央规则.md”自动提供；“记进项目规则”用 edit_file追加或write_file新建。相关技能先 use_skill，mcp_工具按任务使用。
 
@@ -123,7 +124,11 @@ export async function buildContext(userText, { sessionId = null, turns = 0, summ
   parts.push(ws.mode() === 'folder' ? `工作区：已连接本地文件夹「${ws.folderName()}」` : '工作区：浏览器内的虚拟工作区（用户可下载文件，或连接本地文件夹）');
   if (rules) parts.push(rulesBlock(rules));
   if (ctx.core?.human || ctx.core?.persona) parts.push(`## 核心记忆\n${ctx.core.human ? `【关于用户】${ctx.core.human}\n` : ''}${ctx.core.persona ? `【我的设定】${ctx.core.persona}` : ''}`.trim());
-  if (ctx.memories.length) parts.push(`## 相关记忆（标“线索”的是以前对话里推测出来的、没找到用户原话依据：不能当事实说；其余是用户亲口说过或多次提到的；和当前原话或证据冲突时以当前为准）\n${ctx.memories.map((m) => `- [${m.pending ? '线索; ' : ''}来源:${m.source || '未记录'}; 时间:${new Date(m.updatedAt || m.ts).toISOString()}; 版本:${(m.history?.length || 0)+1}] ${m.content}`).join('\n')}`);
+  const memLine = (m) => `- [${m.pending ? '线索; ' : ''}来源:${m.source || '未记录'}; 时间:${new Date(m.updatedAt || m.ts).toISOString()}; 版本:${(m.history?.length || 0)+1}] ${m.content}`;
+  // 用户的基本情况：每轮都带上（问“我多大了 / 我住哪”时不用再去猜）
+  if (ctx.basics?.length) parts.push(`## 用户的基本情况（用户说过的；标“线索”的没找到原话依据，不能当事实说；和当前原话冲突时以当前为准）\n${ctx.basics.map(memLine).join('\n')}`);
+  const related = ctx.memories.filter((m) => !ctx.basics?.includes(m));
+  if (related.length) parts.push(`## 相关记忆（标“线索”的是以前对话里推测出来的、没找到用户原话依据：不能当事实说；其余是用户亲口说过或多次提到的；和当前原话或证据冲突时以当前为准）\n${related.map(memLine).join('\n')}`);
   const day = (ts) => new Date(ts).toLocaleDateString('zh-CN');
   if (ctx.episodes?.length) parts.push(`## 相关的过往对话\n${ctx.episodes.map((e) => `- ${day(e.ts)}${e.sessionTitle ? `「${e.sessionTitle}」` : ''}：${e.summary}`).join('\n')}`);
   if (past.length && !light) parts.push(`## 过往对话里的相关原话（需要更多细节时用 read_conversation 读全文）\n${past.map((p) => `- ${day(p.ts)}「${p.title}」（id: ${p.sessionId}）\n  用户：${p.user.slice(0, 160)}${p.reply ? `\n  未央：${p.reply.replace(/\s+/g, ' ').slice(0, 240)}` : ''}`).join('\n')}`);
@@ -385,7 +390,7 @@ export const TIME_BUDGET_MS = 8 * 60e3;
 const WEB_TOOLS = new Set(['get_weather', 'get_stock_kline', 'web_search', 'fetch_url', 'fact_check', 'deep_research']);
 
 /** 可以同时执行的只读工具（不改文件、不操作电脑、不需要用户确认） */
-export const PARALLEL_SAFE = new Set(['get_stock_kline', 'review_task', 'check_search_terms', 'web_search', 'fetch_url', 'read_evidence', 'read_file', 'list_files', 'find_files', 'search_in_files', 'kb_search', 'recall', 'search_conversations', 'read_conversation', 'get_weather', 'get_current_time', 'verify_numbers', 'read_skill_file', 'computer_read_file', 'computer_list_dir']);
+export const PARALLEL_SAFE = new Set(['get_stock_kline', 'review_task', 'check_search_terms', 'web_search', 'fetch_url', 'read_evidence', 'read_file', 'list_files', 'find_files', 'search_in_files', 'kb_search', 'recall', 'search_conversations', 'list_my_messages', 'read_conversation', 'get_weather', 'get_current_time', 'verify_numbers', 'read_skill_file', 'computer_read_file', 'computer_list_dir']);
 const CODE_FILE = /\.(m?js|ts|py|html?)$/i;
 /** 回答结尾是“我现在开始 / 接下来生成 / 马上做 / 稍等”这类预告（说了要做但还没做） */
 /** “需要的话我可以接着做 PPT”这类询问不算（那是在问用户） */

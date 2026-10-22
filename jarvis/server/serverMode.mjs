@@ -40,7 +40,8 @@ import * as ws from '../src/agent/workspace.js';
 import { DEFAULT_CONFIG } from '../src/llm/config.js';
 import { streamPCModel } from './pcModelBridge.mjs';
 import { serverModelCatalog } from './modelCatalog.mjs';
-import { listDocumentStyles, deleteDocumentStyle } from '../src/agent/memory.js';
+import { listDocumentStyles, deleteDocumentStyle, setEmbedder, vectorStatus, backfillVectors } from '../src/agent/memory.js';
+import { createEmbedder } from '../src/llm/embeddings.js';
 import { boundedCatalogs } from '../src/llm/modelLibrary.js';
 
 const UPLOAD_LIMIT = 50 * 1024 * 1024;
@@ -169,6 +170,15 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     if (pathname === '/api/server/config') {
       if (req.method === 'GET') { json(res, 200, maskConfig(loadConfig())); return true; }
       if (req.method === 'PUT') { saveConfig(mergeConfig(loadConfig(), await readJson(req))); json(res, 200, { ok: true }); return true; }
+    }
+    // 记忆向量现在的情况（模型页“记忆向量”那一行显示）；还有没算向量的记忆就在后台补
+    if (pathname === '/api/server/memory-status' && req.method === 'GET') {
+      const embedder = createEmbedder(loadConfig(), { direct: true });
+      if (embedder) setEmbedder(embedder);
+      const status = embedder ? await vectorStatus() : { model: null, total: 0, embedded: 0, lastError: null };
+      if (embedder && status.embedded < status.total) backfillVectors().catch(() => {});
+      json(res, 200, status);
+      return true;
     }
     if (pathname === '/api/server/document-styles' && req.method === 'GET') {
       json(res, 200, await listDocumentStyles());

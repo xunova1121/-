@@ -5,7 +5,7 @@ import { copyModelSettings, chooseLine, currentLine, hasRouting } from '../llm/m
 import { loadServerSettings, saveServerSettings, createServerClient } from '../core/serverClient.js';
 import { fetchModelCatalog } from '../llm/modelCatalog.js';
 import { initModelLibrary } from '../ui/modelLibrary.js';
-import { listDocumentStyles, deleteDocumentStyle } from '../agent/memory.js';
+import { listDocumentStyles, deleteDocumentStyle, vectorStatus } from '../agent/memory.js';
 import { $, toast } from './env.js';
 
 export function createModelWorkspace(app) {
@@ -52,6 +52,13 @@ export function createModelWorkspace(app) {
       return client.deleteDocumentStyle(id);
     },
     gateway: (target = scope) => (target === 'local' ? app.gateway : null),
+    /** 记忆向量的情况：多少条算好了、上次出错（服务器上的问服务器） */
+    async memoryStatus(target = scope) {
+      if (target === 'local') return vectorStatus();
+      const client = getClient();
+      if (!client) throw Object.assign(new Error('请先登录云服务器'), { kind: 'api', code: 'SERVER_NOT_CONNECTED' });
+      return client.memoryStatus();
+    },
     async selectScope(target) {
       scope = target;
       return scopes.refresh(target);

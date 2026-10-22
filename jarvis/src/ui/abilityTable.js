@@ -128,6 +128,16 @@ export function abilityTable({ cfg, workspace, node, run }) {
       main.value = mainValue;
       backup.value = backupValue;
     });
+    const now = node('small', { className: 'ml-ability-now', textContent: describe(cfg, ability) });
+    // 记忆向量：再问一下实际算好了多少条、有没有出错（服务器上的问服务器）
+    if (ability === 'embed' && cfg.embedding?.engine !== 'off' && abilityLines(cfg, 'embed').main)
+      workspace
+        .memoryStatus?.()
+        .then((s) => {
+          if (!s?.model) return;
+          now.textContent += `。已算好 ${s.embedded}/${s.total} 条记忆的向量${s.embedded < s.total ? '（正在补）' : ''}${s.lastError ? `；上次出错：${s.lastError.message}` : ''}`;
+        })
+        .catch(() => {});
     return node(
       'div',
       { className: 'ml-ability' },
@@ -135,7 +145,7 @@ export function abilityTable({ cfg, workspace, node, run }) {
       node('label', { className: 'ml-ability-slot' }, node('span', { textContent: '常用' }), main),
       node('label', { className: 'ml-ability-slot' }, node('span', { textContent: '备用' }), backup),
       manual,
-      node('small', { className: 'ml-ability-now', textContent: describe(cfg, ability) })
+      now
     );
   });
   return node(

@@ -43,6 +43,10 @@ export function configureMemory({ llm: l = null, embedder: e = null } = {}) {
   llm = l;
   embedder = e;
 }
+/** 只换向量服务，不动整理用的大模型（服务器查向量状态时用） */
+export function setEmbedder(e = null) {
+  embedder = e;
+}
 export const memoryEngine = () => ({ llm: Boolean(llm), embeddings: embedder?.model ?? null });
 
 async function log(kind, text) {
@@ -442,9 +446,44 @@ export async function noteIssue(text) {
 }
 
 // ---------------------------------------------------------------- 检索
+/** 向量服务上次出错（模型页显示，免得出错了谁也不知道） */
+let lastEmbedError = null;
 async function embedOne(text) {
   if (!embedder) return null;
-  try { return (await embedder.embed([text]))[0] ?? null; } catch { return null; }
+  try { return (await embedder.embed([text]))[0] ?? null; } catch (e) { lastEmbedError = { message: String(e?.message || e).slice(0, 160), at: Date.now() }; return null; }
+}
+
+/**
+ * 给还没有当前向量的记忆补算（换了向量服务、刚填 Key 时）：一批 16 条，一次最多 limit 条
+ * @returns {Promise<number>} 补了几条
+ */
+export async function backfillVectors({ limit = 400 } = {}) {
+  if (!embedder) return 0;
+  const model = embedder.model;
+  const missing = (await memories.all()).map(upgrade).filter(current).filter((m) => m.embModel !== model && m.content).slice(0, limit);
+  let done = 0;
+  for (let i = 0; i < missing.length; i += 16) {
+    const batch = missing.slice(i, i + 16);
+    let vecs;
+    try {
+      vecs = await embedder.embed(batch.map((m) => m.content));
+    } catch (e) {
+      lastEmbedError = { message: String(e?.message || e).slice(0, 160), at: Date.now() };
+      break;
+    }
+    for (const [j, m] of batch.entries()) {
+      if (!vecs?.[j]) continue;
+      await memories.put({ ...m, embedding: vecs[j], embModel: model });
+      done++;
+    }
+  }
+  return done;
+}
+
+/** 向量现在的情况：用哪个模型、多少条记忆算好了、上次出错 */
+export async function vectorStatus() {
+  const all = (await memories.all()).map(upgrade).filter(current);
+  return { model: embedder?.model ?? null, total: all.length, embedded: embedder ? all.filter((m) => m.embModel === embedder.model).length : 0, lastError: lastEmbedError };
 }
 
 /**
@@ -454,10 +493,29 @@ async function embedOne(text) {
  * @param {(x) => string} text
  * @param {{ k?: number, vec?: number[]|null, weights?: boolean }} o
  */
+/**
+ * 本地同义词：问法和记下的说法用字不一样时（“我多大了”↔“用户今年35岁”），按关键词也能找到。
+ * 不靠任何接口，向量服务不可用时照样有效
+ */
+const ALIASES = [
+  [/多大|几岁|年龄|岁数|年纪|出生|生日|属相|属什么/, '岁 年龄 出生 生日'],
+  [/住哪|住在|住址|家在|哪里人|哪儿人|老家|家乡|哪个城市|在哪/, '住 住在 住址 城市 老家 家乡'],
+  [/老婆|妻子|爱人|媳妇|老公|丈夫|孩子|儿子|女儿|宝宝|怀孕|预产期|产检|家人|家里/, '妻子 老婆 爱人 丈夫 孩子 女儿 儿子 怀孕 预产期 家人'],
+  [/工作|职业|做什么的|干什么的|公司|单位|上班|岗位|行业|职位/, '工作 职业 公司 单位 岗位 行业'],
+  [/叫什么|名字|称呼|怎么叫/, '叫 名字 称呼'],
+  [/股票|持仓|炒股|A股|仓位/, '股票 持仓 股'],
+  [/喜欢|爱好|偏好|习惯/, '喜欢 爱好 偏好 习惯']
+];
+export function expandQuery(query) {
+  const q = String(query ?? '');
+  const extra = ALIASES.filter(([re]) => re.test(q)).map(([, words]) => words);
+  return extra.length ? `${q} ${extra.join(' ')}` : q;
+}
+
 export function score(items, query, text, { k = 8, vec = null, weights = true, at = now() } = {}) {
   if (!items.length) return [];
   const search = buildIndex(items.map((x) => ({ id: x.id, text: text(x) })));
-  const bm = new Map(search(query, items.length).map((h) => [h.id, h.score]));
+  const bm = new Map(search(expandQuery(query), items.length).map((h) => [h.id, h.score]));
   const maxBm = Math.max(1e-9, ...bm.values());
   const out = [];
   for (const x of items) {
@@ -492,20 +550,40 @@ export async function contextFor(query) {
   // 像注入指令的条目不交给模型（原文保留在库里，面板上标“可疑，未使用”）
   const cur = ms.map(upgrade).filter(current).filter(m => m.category !== 'doc_style').filter(safe((m) => m.content));
   const relevant = score(cur, query, (m) => m.content, { k: 6, vec });
-  // 身份与重要偏好：即使和问题不相关也带上几条，保证“认识用户”
-  const profile = cur.filter((m) => m.pinned || ((m.category === 'profile' || m.category === 'preference') && m.importance >= 3))
+  // 基本情况（年龄、称呼、住址、家人、工作……）：每轮都带上，不和偏好抢名额，也不靠和问题像不像
+  const basics = basicFacts(cur);
+  // 重要偏好：即使和问题不相关也带上几条
+  const prefs = cur.filter((m) => !basics.includes(m) && (m.pinned || (m.category === 'preference' && m.importance >= 3)))
     .sort((a, b) => (b.pinned - a.pinned) || (b.importance - a.importance) || (b.updatedAt - a.updatedAt)).slice(0, 5);
-  const mem = [...new Map([...profile, ...relevant].map((m) => [m.id, m])).values()].slice(0, 9);
+  const mem = [...new Map([...prefs, ...relevant].filter((m) => !basics.includes(m)).map((m) => [m.id, m])).values()].slice(0, 9);
   reinforce(relevant).catch(() => {});
   return {
     core: cleanCore(core),
-    memories: mem,
+    basics,
+    memories: [...basics, ...mem], // 含基本情况（旧调用方照旧拿得到）；拼提示时基本情况单独一节，这里的不重复列
     episodes: score(eps.filter(safe((e) => e.summary)), query, (e) => `${e.summary} ${(e.topics || []).join(' ')}`, { k: 2, vec, weights: false }).filter((e) => e.relevance >= 0.2),
     lessons: score(ls.filter(safe((l) => `${l.content}\n${l.context ?? ''}`)), query, (l) => `${l.content} ${l.context}`, { k: 3, weights: false }),
     skills: score(ss.filter(safe(skillText)), query, (s) => `${s.name} ${s.description}`, { k: 3, weights: false })
   };
 }
 const skillText = (s) => `${s.name}\n${s.description ?? ''}\n${s.steps ?? ''}`;
+
+/** 像“用户的基本情况”的记忆：身份类，或者事实里说的是年龄、称呼、住址、家人、工作 */
+const BASIC = /岁|年龄|出生|生日|名字|叫(?:他|她|用户)?|称呼|住在|住址|老家|家乡|籍贯|城市|妻子|丈夫|老婆|老公|爱人|孩子|女儿|儿子|父亲|母亲|爸爸|妈妈|怀孕|预产期|职业|工作|公司|单位|岗位|行业|学校|专业/;
+export const BASICS_LIMIT = { items: 14, chars: 700 };
+export function basicFacts(list) {
+  const picked = list
+    .filter((m) => m.category === 'profile' || (m.category === 'fact' && BASIC.test(m.content)) || (m.pinned && BASIC.test(m.content)))
+    .sort((a, b) => Number(a.pending) - Number(b.pending) || (b.pinned - a.pinned) || (b.importance - a.importance) || (b.updatedAt - a.updatedAt));
+  const out = [];
+  let size = 0;
+  for (const m of picked) {
+    if (out.length >= BASICS_LIMIT.items || size + m.content.length > BASICS_LIMIT.chars) break;
+    out.push(m);
+    size += m.content.length;
+  }
+  return out;
+}
 
 export async function recall(query, { includeArchived = false } = {}) {
   const all = (await memories.all()).map(upgrade).filter(safe((m) => m.content));
@@ -533,11 +611,10 @@ export async function maintain({ at = now() } = {}) {
     } else if (m.pending && !m.pinned && at - (m.updatedAt ?? m.ts) > CLUE_DAYS * DAY) {
       await memories.put({ ...m, validTo: at, archivedReason: `${CLUE_DAYS} 天没再被证实的线索` });
       archived++;
-    } else if (embedder && m.embModel !== embedder.model && embedded < 50) {
-      const vec = await embedOne(m.content);
-      if (vec) { await memories.put({ ...m, embedding: vec, embModel: embedder.model }); embedded++; }
     }
   }
+  // 没有当前向量的一次补完（以前每次只补 50 条，刚填 Key 时要好几轮才补齐）
+  embedded = await backfillVectors();
   if (archived) await log('forget', `归档了 ${archived} 条长期未用或没被证实的记忆`);
   const tidied = await consolidate({ at }).catch(() => null);
   return { archived, embedded, ...(tidied && { merged: tidied.merged, dropped: tidied.dropped }) };

@@ -299,7 +299,7 @@ export function createTools(ctx) {
     },
     {
       name: 'search_conversations',
-      description: '搜索用户和你的所有对话（包括本段对话）。用户提到“上次 / 之前说过 / 那天聊的”、或需要以前对话里的细节（方案、数据、结论、文件名）时使用。返回对话 id、标题、日期和命中的原话。',
+      description: '搜索用户和你的所有对话（包括本段对话），只返回最相关的几处（每段对话一处），列不全：要列全“我问过哪些…”时改用 list_my_messages。用户提到“上次 / 之前说过 / 那天聊的”、或需要以前对话里的细节（方案、数据、结论、文件名）时使用。返回对话 id、标题、日期和命中的原话。',
       input_schema: S({ query: str('要找的内容，关键词或一句话') }, ['query']),
       run: async ({ query }, { sessionId } = {}) => {
         // 优先用任务绑定的会话，避免后台执行时跟随界面切到另一段。
@@ -307,6 +307,28 @@ export function createTools(ctx) {
         const hits = await sessions.searchMessages(query, { current: currentId, k: 6, minScore: 0.5 });
         if (!hits.length) return '之前的对话里没有找到相关内容。';
         return hits.map((h) => `- id: ${h.sessionId}${h.sessionId === currentId ? '（就是本段对话）' : ''}「${h.title}」${new Date(h.ts).toLocaleString('zh-CN', { hour12: false })}\n  用户：${h.user.slice(0, 200)}${h.reply ? `\n  未央：${h.reply.replace(/\s+/g, ' ').slice(0, 300)}` : ''}`).join('\n');
+      }
+    },
+    {
+      name: 'list_my_messages',
+      description:
+        '按时间逐条翻看用户在所有对话里说过的话（一页 40 条，一条不漏）。要列全时用：“我问过 / 搜过哪些…”“我所有的…”“我说过几次…”。可以给关键词（空格隔开，含任意一个就算）或日期范围缩小；没给关键词时要把每一页都翻完再回答。回答时只列这里出现过的，并说明一共翻了多少条、从哪天到哪天。',
+      input_schema: S(
+        {
+          query: str('可选：关键词，空格隔开（如“公司 企业 股份 集团”）'),
+          from: str('可选：开始日期，如 2026-09-01'),
+          to: str('可选：结束日期，如 2026-10-22'),
+          page: { type: 'integer', minimum: 1, description: '第几页，从 1 开始' }
+        },
+        []
+      ),
+      run: async ({ query, from, to, page = 1 }, { sessionId } = {}) => {
+        const day = (s, end) => (s ? new Date(`${s}T${end ? '23:59:59' : '00:00:00'}+08:00`).getTime() : NaN);
+        const r = await sessions.listUserMessages({ query, from: day(from) || 0, to: day(to, true) || Infinity, page, current: sessionId ?? ctx.currentSessionId?.() });
+        if (!r.total) return query ? `所有对话里没有含“${query}”的话。` : '还没有聊天记录。';
+        const date = (ts) => new Date(ts).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' });
+        const head = `共 ${r.total} 条（${date(r.span[0])} 到 ${date(r.span[1])}），第 ${r.page}/${r.pages} 页${r.page < r.pages ? `；还有下一页，用 page: ${r.page + 1} 接着翻` : '；已经是最后一页'}`;
+        return `${head}\n${r.items.map((m) => `- ${date(m.ts)}「${m.title}」（id: ${m.sessionId}）：${m.text.replace(/\s+/g, ' ').slice(0, 160)}`).join('\n')}`;
       }
     },
     {

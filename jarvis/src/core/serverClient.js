@@ -134,6 +134,7 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     status: (signal) => req('/api/server/status',{signal}),
     getConfig: () => req('/api/server/config'),
     listDocumentStyles: () => req('/api/server/document-styles'),
+    memoryStatus: () => req('/api/server/memory-status'),
     deleteDocumentStyle: id => req(`/api/server/document-styles/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     putConfig: (cfg) => req('/api/server/config', { method: 'PUT', body: cfg }),
     testDeepseekSearch: (kind, signal) => req('/api/server/search-test', { method: 'POST', body: { kind }, signal, timeout: 30000 }),

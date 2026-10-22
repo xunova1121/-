@@ -112,6 +112,35 @@ export async function searchContent(query, { max = 30 } = {}) {
   return hits;
 }
 
+/**
+ * 按时间翻看用户说过的所有话（跨全部对话），用来回答“我问过哪些… / 所有…”这类要列全的问题。
+ * searchMessages 只取最像的几条、每段对话一条，列不全；这里一条不漏、分页。
+ * @param {{ query?: string, from?: number, to?: number, page?: number, pageSize?: number, current?: string, exclude?: string }} o
+ *   query：空格隔开的几个词，含任意一个就算（不区分大小写）；from / to：时间范围（毫秒）
+ * @returns {Promise<{ total: number, page: number, pages: number, items: Array<{ sessionId, title, ts, text }>, span: [number, number] | null }>}
+ */
+export async function listUserMessages({ query = '', from = 0, to = Infinity, page = 1, pageSize = 40, current = null, exclude = null } = {}) {
+  const words = String(query).toLowerCase().split(/[\s,，、]+/).filter(Boolean);
+  const all = [];
+  for (const s of await sessions.all()) {
+    if (s.evaluationId || s.id === exclude) continue;
+    s.messages.forEach((m, i) => {
+      if (m.role !== 'user') return;
+      // 本段对话里正在问的这一句不算
+      if (s.id === current && i >= s.messages.length - 1) return;
+      const ts = m.ts ?? s.updatedAt;
+      const text = String(m.content ?? '');
+      if (ts < from || ts > to) return;
+      if (words.length && !words.some((w) => text.toLowerCase().includes(w))) return;
+      all.push({ sessionId: s.id, title: s.title, ts, text });
+    });
+  }
+  all.sort((a, b) => a.ts - b.ts);
+  const pages = Math.max(1, Math.ceil(all.length / pageSize));
+  const p = Math.min(Math.max(1, Math.floor(page)), pages);
+  return { total: all.length, page: p, pages, items: all.slice((p - 1) * pageSize, p * pageSize), span: all.length ? [all[0].ts, all.at(-1).ts] : null };
+}
+
 export async function searchMessages(query, { exclude = null, current = null, k = 3, minScore = 2 } = {}) {
   const all = (await sessions.all()).filter((s) => !s.evaluationId && s.id !== exclude);
   const units = [];
