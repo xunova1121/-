@@ -63,6 +63,23 @@ try {
         return { vw, doc: document.documentElement.scrollWidth, panel: panel.scrollWidth, wide: wide.slice(0, 5) };
       });
       check(`${width}px「${pane === 'models' ? '模型' : '设置'}」页不左右滑`, m.doc <= m.vw && m.panel <= m.vw, m.wide.length ? `超出：${m.wide.join('、')}` : `${m.panel}/${m.vw}`);
+      if (pane === 'models') {
+        for (const label of ['能力', '服务商', '模型库']) {
+          await page.getByRole('navigation', { name: '模型中心分类' }).getByRole('button', { name: label, exact: true }).click();
+          const fits = await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.querySelector('#panel').scrollWidth <= innerWidth);
+          check(`${width}px App 模型中心「${label}」长型号不撑宽`, fits);
+        }
+        await page.getByRole('navigation', { name: '模型中心分类' }).getByRole('button', { name: '能力', exact: true }).click();
+        await page.getByRole('button', { name: '配置深度思考与写作', exact: true }).click();
+        const bounds = await page.locator('.mc-sheet').evaluate(el => {
+          const r = el.getBoundingClientRect();
+          return r.left >= 0 && r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1 && getComputedStyle(el.querySelector('.mc-sheet-results')).scrollbarWidth === 'none';
+        });
+        check(`${width}px App 能力选择器不越界、可滚动且不显示滚动条`, bounds);
+        if (OUT) await page.screenshot({ path: path.join(OUT, `app-ability-picker-${width}.png`) });
+        await page.keyboard.press('Escape');
+        if (OUT) await page.screenshot({ path: path.join(OUT, `app-model-center-${width}.png`) });
+      }
       if (pane === 'models' && width === 390) {
         await page.evaluate(() => document.querySelector('.ml-scope-tabs, .ml-tabs')?.querySelectorAll('button')[1]?.click());
       }
