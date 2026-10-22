@@ -16,6 +16,11 @@ describe('图片连续追问和轻量创作', () => {
     const addition = createExecutionReview('查询今天新闻');
     addition.revise('补充一段场景描述');
     expect(addition.report().request).toContain('查询今天新闻');
+    const documentReview = createExecutionReview('生成一份Word文档');
+    documentReview.revise('改成两页');
+    expect(documentReview.report().request).toContain('Word文档');
+    documentReview.revise('改成活泼文案');
+    expect(documentReview.report().request).toContain('Word文档');
   });
   it('描述、发散、文案连续追问保留旧图，换话题后不再自动带图', () => {
     const cached = new Map([[1, [{ mime: 'image/png', data: 'old' }]]]);
