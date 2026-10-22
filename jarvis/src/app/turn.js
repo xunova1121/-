@@ -3,6 +3,7 @@
  * 干活时插话、打断、切到别的对话后转到后台接着做。
  */
 import { MOBILE } from '../config.js';
+import { remoteTurnImages } from '../core/imageFollowup.js';
 import { checkpointEvent } from '../../shared/taskCheckpoint.js';
 import { stripEmotionTags } from '../../shared/emotionTag.js';
 import { createAdapter, providerById } from '../llm/config.js';
@@ -288,11 +289,10 @@ export function createTurn(app) {
       const serverRun = async (o) => {
         for (const f of files) await app.server.upload(f.path, await ws.readBlob(f.path)); // 发来的附件先传到服务器的工作区
         // 追问前面发过的图（“这个图……”）：本机模式靠历史里带图，服务器那边没有这些图，一起发过去（最多 4 张）
-        const earlier = llmHistory.flatMap((m) => m.images || []);
         return runRemote(app.server, {
           sessionId: o.sessionId,
           userText: o.userText,
-          images: [...o.images, ...earlier].slice(0, 4),
+          images: remoteTurnImages(o.images, llmHistory),
           voice: o.voice,
           emit: o.emit,
           signal: o.signal,

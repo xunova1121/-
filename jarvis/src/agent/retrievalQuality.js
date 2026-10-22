@@ -1,5 +1,7 @@
+import { creativeWithoutLookup } from '../core/imageFollowup.js';
 /** 机械筛查只排除明显错题，不把摘要当作已经核实的事实。 */
 export function requiresSources(text = '') {
+  if (creativeWithoutLookup(text)) return false;
   return /(?:今天|今日|最新).{0,30}(?:新闻|资讯|行情|价格|汇率|天气|比分)|(?:查|搜索|核实).{0,25}(?:新闻|行情|价格|比分|资料|来源)/.test(String(text));
 }
 

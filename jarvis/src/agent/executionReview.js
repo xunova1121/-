@@ -15,7 +15,8 @@ export function createExecutionReview(goal = '') {
   const revise = (text) => {
     request = (request + '\n补充：' + String(text)).slice(-4000);
     version++;
-    if (/^(?:取消|不用|别做|停止)/.test(String(text).trim())) {
+    // 明确替换任务时按新目标验收；普通补充仍保留原要求，原话仍在会话账本。
+    if (/^(?:取消|不用|别做|停止|改成|改为|换成|换为)/.test(String(text).trim())) {
       request = '用户最新修正：' + String(text).slice(0, 3900);
       files.clear();
       artifacts.clear();
@@ -153,4 +154,3 @@ export function createExecutionReview(goal = '') {
   };
   return { record, revise, report, guidance, tool, artifact, contractNote, required, verified, rereadBlocked };
 }
-
