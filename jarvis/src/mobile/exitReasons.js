@@ -9,6 +9,8 @@ const SYSTEM = /iAware|SystemManager|powergenie|hwPfw|freeze/i;
 export function classifyExit({ reason, description = '' } = {}) {
   const why = String(description || '');
   if (/installPackage|replaced|update/i.test(why)) return { kind: 'update', text: '安装新版本（正常）' };
+  // 华为：别的应用要用麦克风（打电话、发语音等）时，会关掉在后台、有录音权限的应用
+  if (/AudioRecord/i.test(why)) return { kind: 'system', text: '别的应用要用麦克风，手机系统关掉了在后台的未央（不是闪退）' };
   if (SYSTEM.test(why)) return { kind: 'system', text: '手机系统的后台管理把未央关了（不是闪退）' };
   if (reason === 3) return { kind: 'memory', text: '手机内存不够，系统回收了未央（不是闪退）' };
   if (reason === 4 || reason === 5) return { kind: 'crash', text: '程序崩溃' };

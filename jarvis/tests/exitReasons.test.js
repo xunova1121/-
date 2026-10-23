@@ -16,6 +16,8 @@ describe('系统记下的退出原因', () => {
     expect(classifyExit({ reason: 10, description: '' }).kind).toBe('user');
     expect(classifyExit({ reason: 3 }).kind).toBe('memory');
     expect(classifyExit({ reason: 5 }).kind).toBe('crash');
+    // 10-23 13:10 用户手机的真实记录
+    expect(classifyExit({ reason: 13, description: 'killBackgroundUserProcessesWithAudioRecordPermission' })).toMatchObject({ kind: 'system', text: expect.stringContaining('麦克风') });
   });
   it('最近一次是被系统关掉的：接回对话；按北京时间列出，不列更新和正常关闭', () => {
     const r = summarizeExits(huawei, t('08:13:00'));
