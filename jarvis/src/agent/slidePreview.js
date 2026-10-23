@@ -124,7 +124,8 @@ export function layoutIssues(slides, { max = 12 } = {}) {
   const issues = [];
   const add = (level, s, text) => { if (issues.length < max) issues.push({ level, text: `第 ${s.n} 页「${s.title || '无标题'}」${text}`, slide: s.n }); };
   for (const s of slides) {
-    const texts = s.items.filter((it) => it.kind === 'text' && textOf(it.text).trim());
+    // 装饰用的大字（叙事风格背景里的章节号）不算正文，不查压字
+    const texts = s.items.filter((it) => it.kind === 'text' && !it.o?.deco && textOf(it.text).trim());
     for (const it of s.items) {
       if (it.kind === 'text' || it.kind === 'image' || it.kind === 'chart') {
         if (it.x + it.w > SLIDE_W + 0.05 || it.y + it.h > SLIDE_H + 0.05 || it.x < -0.05 || it.y < -0.05) add('error', s, `有内容超出了页面边界（${it.kind === 'text' ? `“${textOf(it.text).slice(0, 12)}…”` : it.kind === 'image' ? '图片' : '图表'}）`);
