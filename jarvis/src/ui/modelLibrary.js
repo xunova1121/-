@@ -11,6 +11,7 @@ import {
   sameLine,
   toggleFavorite,
   removeModel,
+  removeProvider,
   saveCatalog,
   hasRouting
 } from '../llm/modelLibrary.js';
@@ -234,6 +235,20 @@ export function initModelLibrary({ root, workspace, toast }) {
     const lines = favoriteLines(cfg).filter((item) => item.provider === meta.id);
     card.append(...lines.map((line) => modelRow(cfg, line.provider, line.model)));
     if (!lines.length) card.append(node('p', { className: 'ml-muted', textContent: '拉取后收藏常用型号，或在配置中手动添加。' }));
+    // 删除服务商：和删型号一样点两下；正在用的默认服务商不能删（先换默认模型）
+    if (meta.id !== cfg.provider) {
+      const remove = button('删除服务商', () => {
+        if (remove.dataset.armed) return patch((value) => removeProvider(value, meta.id));
+        remove.dataset.armed = '1';
+        remove.textContent = `确定删除 ${label}（Key 和型号一起删）`;
+        setTimeout(() => {
+          delete remove.dataset.armed;
+          remove.textContent = '删除服务商';
+        }, 4000);
+      }, 'ml-link ml-remove-provider');
+      remove.setAttribute('aria-label', `删除服务商 ${label}`);
+      card.append(remove);
+    } else card.append(node('small', { className: 'ml-muted', textContent: '正在用的默认服务商，换了默认模型才能删' }));
     const total = cfg.modelLists?.[catalogKey(cfg, meta.id)]?.ids?.length || 0;
     card.append(
       button(
@@ -425,7 +440,13 @@ export function initModelLibrary({ root, workspace, toast }) {
       )
     );
     add.addEventListener('change', () => {
-      if (add.value) patch((value) => ({ ...value, providerNames: { ...value.providerNames, [add.value]: providerById(add.value).name } }));
+      // 删过又加回来：去掉删除标记
+      if (add.value)
+        patch((value) => ({
+          ...value,
+          providerNames: { ...value.providerNames, [add.value]: providerById(add.value).name },
+          removedProviders: (value.removedProviders || []).filter((id) => id !== add.value)
+        }));
     });
     providersHost.append(add);
     // 搜索、唱歌这些不是大模型的服务：Key 也收在“服务商与 Key”这一块

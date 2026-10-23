@@ -86,6 +86,17 @@ await removeBtn.click();
 await page.waitForFunction(() => !JSON.parse(localStorage.getItem('jarvis.llm.v1')).favoriteModels.some((l) => l.model === 'my-typo-model'));
 const gone = await page.evaluate(() => { const c = JSON.parse(localStorage.getItem('jarvis.llm.v1')); return !Object.values(c.modelLists || {}).some((l) => l.ids?.includes('my-typo-model')); });
 check('手动添加的型号能删掉（点两下确认），常用和模型列表里都没了', gone);
+// 删除服务商：智谱不是默认服务商，点两下删掉，Key 一起没了；默认服务商没有删除按钮
+await page.evaluate(() => window.__jarvis.showPanel('models'));
+await page.waitForTimeout(500);
+const delProvider = page.locator('.ml-provider').filter({ hasText: '智谱' }).getByRole('button', { name: /删除服务商/ });
+await delProvider.click();
+await page.locator('.ml-provider').filter({ hasText: '智谱' }).getByRole('button', { name: /删除服务商/ }).click();
+await page.waitForFunction(() => !JSON.parse(localStorage.getItem('jarvis.llm.v1')).keys?.zhipu);
+await page.waitForTimeout(400);
+const leftCards = await page.locator('.ml-provider strong').allTextContents();
+check('服务商能删掉（点两下确认），卡片和 Key 都没了', !leftCards.some((t) => t.includes('智谱')), leftCards.join('、'));
+check('正在用的默认服务商没有删除按钮', (await page.locator('.ml-provider').filter({ hasText: 'DeepSeek' }).getByRole('button', { name: /删除服务商/ }).count()) === 0);
 check('宽屏不左右滑、没有页面错误', (await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)) && errs.length === 0, errs.join('；'));
 await browser.close(); server.close();
 console.log(`${results.filter(Boolean).length}/${results.length} 能力表通过`);

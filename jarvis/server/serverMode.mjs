@@ -42,7 +42,7 @@ import { streamPCModel } from './pcModelBridge.mjs';
 import { serverModelCatalog } from './modelCatalog.mjs';
 import { listDocumentStyles, deleteDocumentStyle, setEmbedder, vectorStatus, backfillVectors } from '../src/agent/memory.js';
 import { createEmbedder } from '../src/llm/embeddings.js';
-import { boundedCatalogs } from '../src/llm/modelLibrary.js';
+import { boundedCatalogs, applyRemovedProviders } from '../src/llm/modelLibrary.js';
 
 const UPLOAD_LIMIT = 50 * 1024 * 1024;
 /** 程序所在目录（安装包里的 VERSION 文件在这里） */
@@ -68,7 +68,8 @@ export function mergeConfig(old, next) {
   const merged = { ...old, ...next, ...maps, keys, tavilyKey: keep(next.tavilyKey, old.tavilyKey), bochaKey: keep(next.bochaKey, old.bochaKey), deepseekSearchKey: keep(next.deepseekSearchKey, old.deepseekSearchKey), falKey: keep(next.falKey, old.falKey) };
   // 字典合并不能把前端淘汰的旧地址缓存重新带回来；服务器也必须执行同一上限。
   if (next.modelLists || next.baseURLs) merged.modelLists = boundedCatalogs(merged);
-  return merged;
+  // 前端删掉的服务商：字典合并不会自己少掉，照着标记删
+  return applyRemovedProviders(merged, next.removedProviders, next);
 }
 
 /**

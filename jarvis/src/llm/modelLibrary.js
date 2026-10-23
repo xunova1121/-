@@ -77,6 +77,47 @@ export function removeModel(cfg, line) {
   };
 }
 
+/** 每家服务商单独存的字段（删服务商时一起清掉） */
+const PROVIDER_MAPS = ['keys', 'models', 'baseURLs', 'providerNames', 'serviceTiers'];
+
+/**
+ * 删掉一家服务商：Key、地址、名字、型号列表，以及常用、备用、能力表、审查里用到它的。
+ * 正在用的默认服务商不能删。removedProviders 交给服务器合并配置时照着删（服务器按字典合并，不会自己少掉）
+ */
+export function removeProvider(cfg, provider) {
+  if (provider === cfg.provider) throw Object.assign(new Error('这是正在用的默认服务商，先把默认模型换成别家再删'), { code: 'PROVIDER_IN_USE', kind: 'api' });
+  const drop = (map) => Object.fromEntries(Object.entries(map || {}).filter(([id]) => id !== provider));
+  const mine = (line) => line?.provider === provider;
+  const abilities = Object.fromEntries(
+    Object.entries(cfg.abilities || {}).map(([ability, slots]) => [ability, Object.fromEntries(Object.entries(slots || {}).filter(([, value]) => !mine(value)))])
+  );
+  return {
+    ...cfg,
+    ...Object.fromEntries(PROVIDER_MAPS.map((field) => [field, drop(cfg[field])])),
+    modelLists: Object.fromEntries(Object.entries(cfg.modelLists || {}).filter(([key]) => !key.startsWith(`${provider}|`))),
+    favoriteModels: (cfg.favoriteModels || []).filter((line) => !mine(line)),
+    fallbackModels: (cfg.fallbackModels || []).filter((line) => !mine(line)),
+    abilities,
+    ...(mine(cfg.documentReviewer) && { documentReviewer: null }),
+    removedProviders: [...new Set([...(cfg.removedProviders || []), provider])]
+  };
+}
+
+/** 服务器合并配置时：把前端删掉的服务商真正删掉，再去掉标记 */
+export function applyRemovedProviders(merged, removed = [], next = {}) {
+  // 这次又填了 Key / 名字 / 地址的，是删了又加回来的：不删
+  const readded = (id) => ['keys', 'providerNames', 'baseURLs'].some((field) => next[field]?.[id]);
+  const ids = (Array.isArray(removed) ? removed : []).filter((id) => typeof id === 'string' && id !== merged.provider && !readded(id));
+  if (!ids.length) {
+    delete merged.removedProviders;
+    return merged;
+  }
+  for (const field of PROVIDER_MAPS) if (merged[field]) merged[field] = Object.fromEntries(Object.entries(merged[field]).filter(([id]) => !ids.includes(id)));
+  merged.modelLists = Object.fromEntries(Object.entries(merged.modelLists || {}).filter(([key]) => !ids.some((id) => key.startsWith(`${id}|`))));
+  delete merged.removedProviders;
+  return merged;
+}
+
 export function boundedCatalogs(cfg) {
   // 只保留当前各服务商地址的缓存；换地址不无限累积旧列表。
   const allowed = new Set(PROVIDERS.map((p) => catalogKey(cfg, p.id)));
