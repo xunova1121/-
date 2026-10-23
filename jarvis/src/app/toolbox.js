@@ -1,3 +1,4 @@
+import { qweatherConfig } from '../core/qweather.js';
 import { deepseekSearchOptions } from '../agent/deepseekSearch.js';
 /**
  * 智能体能用的工具：基础工具（文件、联网、文档……）+ 桌面版的电脑操作（鼠标键盘）+ MCP 连接的外部工具。
@@ -77,6 +78,7 @@ export function createToolbox(app) {
         metrics: app.metrics,
         ...deepseekSearchOptions(app.llmConfig),
         tavilyKey: app.llmConfig.tavilyKey,
+        qweather: qweatherConfig(app.llmConfig),
         falKey: app.llmConfig.falKey,
         bochaKey: app.llmConfig.bochaKey,
         searchRegion: app.llmConfig.searchRegion || 'auto',

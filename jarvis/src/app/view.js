@@ -3,7 +3,8 @@
  * 自动更新提示、明暗主题、设置里的开关（问好、桌面背景、习惯学习、团队模式、情绪、动画）、开机自检动画。
  */
 import { STANDALONE, MOBILE } from '../config.js';
-import { displayName } from '../llm/config.js';
+import { displayName, loadConfig } from '../llm/config.js';
+import { qweatherConfig } from '../core/qweather.js';
 import { resolveTheme, toggled, THEMES } from '../core/theme.js';
 import { createWeatherClient } from '../core/weather.js';
 import { createHome } from '../ui/home.js';
@@ -30,7 +31,8 @@ export function createView(app) {
     return h < 5 ? '夜深了' : h < 11 ? '早上好' : h < 13 ? '中午好' : h < 18 ? '下午好' : '晚上好';
   }
   let homeView;
-  const homeWeather = createWeatherClient({ direct: MOBILE || STANDALONE });
+  // 填了和风天气 Key 就用和风（设置 → 其他服务的 Key）
+  const homeWeather = createWeatherClient({ direct: MOBILE || STANDALONE, qweather: () => qweatherConfig(loadConfig()) });
   function renderWelcome() {
     if (document.querySelector('#transcript .msg')) return;
     if (COMPACT) {

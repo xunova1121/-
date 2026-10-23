@@ -1,5 +1,6 @@
 import { retryRead, httpError, throwControl } from '../core/networkRequest.js';
 import { errorKind } from '../core/suggest.js';
+import { fetchQWeather, parseQWeather, lookupQWeatherCity, formatQWeather } from '../core/qweather.js';
 /**
  * 查天气：不走搜索引擎（天气在搜索结果页里是特殊卡片，抓网页抓不到），直接问免费的天气接口，不用密钥。
  *   1. Open-Meteo：先用地名查经纬度（支持中文地名），再取实况和未来几天预报
@@ -54,11 +55,22 @@ export function formatWttr(placeName, j, days = 3) {
  * @param {string} place 地名（中文或英文）
  * @param {{ get: (url: string) => Promise<Response>, days?: number }} o
  */
-export async function getWeather(place, { get, days = 3, signal, retrieval }) {
+export async function getWeather(place, { get, days = 3, signal, retrieval, qweather = null }) {
   if (!String(place || '').trim()) throw Object.assign(new Error('缺少地点，请提供城市或定位结果，不能默认猜测城市'), { code: 'WEATHER_LOCATION_REQUIRED', name: 'ValidationError' });
   const name = String(place || '').trim().replace(/(市|区|县)$/, '') || '北京';
   const json = url => retryRead(async requestSignal => { const response = await get(url, { signal: requestSignal }); if (!response.ok) throw httpError(response.status, '', '天气服务'); return response.json(); }, { signal, timeoutMs: 4000, beforeAttempt: () => retrieval?.consume('read') });
   let firstErr;
+  // 和风天气（填了 Key 时）：国内快、维度多；失败了再走 Open-Meteo。Key 同时放在请求头和 key 参数里：经网关转发网页时请求头会丢
+  if (qweather) {
+    try {
+      retrieval?.consume('read');
+      const fetchImpl = (url, init) => get(`${url}${url.includes('?') ? '&' : '?'}key=${encodeURIComponent(qweather.key)}`, init);
+      const city = (await lookupQWeatherCity({ ...qweather, query: name, fetchImpl, signal }))[0];
+      if (!city) throw new Error(`没找到地点“${name}”`);
+      const data = parseQWeather(await fetchQWeather({ ...qweather, latitude: city.latitude, longitude: city.longitude, fetchImpl, signal }));
+      return formatQWeather([city.name, city.region].filter(Boolean).join('，'), data, days);
+    } catch (e) { throwControl(e, signal); firstErr = e; }
+  }
   try {
     const geo = await json(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=zh&format=json`);
     const p = geo.results?.[0];

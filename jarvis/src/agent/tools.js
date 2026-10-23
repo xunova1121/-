@@ -541,9 +541,11 @@ export function createTools(ctx) {
     },
     {
       name: 'get_weather',
-      description: '查天气：某个城市的实况和未来几天预报（温度、天气、降水概率、风），数据来自国际气象模型。国内城市如果你能联网搜索，再搜一下“城市 日期 天气 中国天气网”核对一次，两者不一致时以中国气象局（中国天气网）为准。',
+      description: ctx.qweather
+        ? '查天气：某个城市的实况（体感、湿度、风向风力、气压、能见度）、未来两小时降水、逐小时、未来几天预报（日出日落、紫外线）、空气质量、生活指数和天气预警，数据来自和风天气（国内气象数据）。'
+        : '查天气：某个城市的实况和未来几天预报（温度、天气、降水概率、风），数据来自国际气象模型。国内城市如果你能联网搜索，再搜一下“城市 日期 天气 中国天气网”核对一次，两者不一致时以中国气象局（中国天气网）为准。',
       input_schema: S({ place: str('城市或地区名，如“南京”“上海浦东”“Tokyo”'), days: { type: 'number', description: '要几天预报，默认 3，最多 7' } }, ['place']),
-      run: async ({ place, days }, { signal, retrieval } = {}) => getWeather(place, { signal, retrieval, get: ctx.fetchViaGateway || ((u) => fetch(u)), days: Math.min(7, Math.max(1, Number(days) || 3)) })
+      run: async ({ place, days }, { signal, retrieval } = {}) => getWeather(place, { signal, retrieval, qweather: ctx.qweather, get: ctx.fetchViaGateway || ((u, o) => fetch(u, o)), days: Math.min(7, Math.max(1, Number(days) || 3)) })
     },
     {
       name: 'get_local_metrics',

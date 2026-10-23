@@ -42,6 +42,7 @@ import { streamPCModel } from './pcModelBridge.mjs';
 import { serverModelCatalog } from './modelCatalog.mjs';
 import { listDocumentStyles, deleteDocumentStyle, setEmbedder, vectorStatus, backfillVectors } from '../src/agent/memory.js';
 import { createEmbedder } from '../src/llm/embeddings.js';
+import { qweatherConfig } from '../src/core/qweather.js';
 import { boundedCatalogs, applyRemovedProviders } from '../src/llm/modelLibrary.js';
 
 const UPLOAD_LIMIT = 50 * 1024 * 1024;
@@ -57,7 +58,7 @@ export const tokenFor = (password) => createHash('sha256').update(`jarvis-server
 /** 模型设置里的密钥只给看后 4 位 */
 export function maskConfig(cfg) {
   const mask = (v) => (v ? `••••${String(v).slice(-4)}` : '');
-  return { ...cfg, keys: Object.fromEntries(Object.entries(cfg.keys ?? {}).map(([k, v]) => [k, mask(v)])), tavilyKey: mask(cfg.tavilyKey), bochaKey: mask(cfg.bochaKey), deepseekSearchKey: mask(cfg.deepseekSearchKey), falKey: mask(cfg.falKey) };
+  return { ...cfg, keys: Object.fromEntries(Object.entries(cfg.keys ?? {}).map(([k, v]) => [k, mask(v)])), tavilyKey: mask(cfg.tavilyKey), bochaKey: mask(cfg.bochaKey), deepseekSearchKey: mask(cfg.deepseekSearchKey), falKey: mask(cfg.falKey), qweatherKey: mask(cfg.qweatherKey) };
 }
 /** 保存时：密钥没改（还是 •••• 或留空）就沿用原来的 */
 export function mergeConfig(old, next) {
@@ -65,7 +66,7 @@ export function mergeConfig(old, next) {
   const keys = { ...(old.keys ?? {}) };
   for (const [k, v] of Object.entries(next.keys ?? {})) keys[k] = keep(v, old.keys?.[k]);
   const maps = Object.fromEntries(['models', 'baseURLs', 'providerNames', 'modelLists', 'serviceTiers'].map((field) => [field, { ...old[field], ...next[field] }]));
-  const merged = { ...old, ...next, ...maps, keys, tavilyKey: keep(next.tavilyKey, old.tavilyKey), bochaKey: keep(next.bochaKey, old.bochaKey), deepseekSearchKey: keep(next.deepseekSearchKey, old.deepseekSearchKey), falKey: keep(next.falKey, old.falKey) };
+  const merged = { ...old, ...next, ...maps, keys, tavilyKey: keep(next.tavilyKey, old.tavilyKey), bochaKey: keep(next.bochaKey, old.bochaKey), deepseekSearchKey: keep(next.deepseekSearchKey, old.deepseekSearchKey), falKey: keep(next.falKey, old.falKey), qweatherKey: keep(next.qweatherKey, old.qweatherKey) };
   // 字典合并不能把前端淘汰的旧地址缓存重新带回来；服务器也必须执行同一上限。
   if (next.modelLists || next.baseURLs) merged.modelLists = boundedCatalogs(merged);
   // 前端删掉的服务商：字典合并不会自己少掉，照着标记删
@@ -328,5 +329,5 @@ export function createServerMode({ dataDir, password, maxRunning = 1, runner: in
     return false;
   }
 
-  return { authorized, handle, runner, store, ready, realtimeKey: () => loadConfig().keys?.qwen || '' };
+  return { authorized, handle, runner, store, ready, realtimeKey: () => loadConfig().keys?.qwen || '', qweather: () => qweatherConfig(loadConfig()) };
 }
