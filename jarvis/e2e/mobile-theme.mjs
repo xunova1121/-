@@ -65,6 +65,41 @@ try {
     await page.goto(base);
     await page.waitForFunction(() => window.__jarvis?.showPanel && document.querySelector('.home-reference'));
     await page.waitForFunction(() => document.querySelector('#app-splash')?.hidden !== false);
+    if (width === 390) {
+      // 真实构建的启动样式：夜间设置下也保持浅底，素材可读取，角色不旋转。
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      const startup = await page.evaluate(async () => {
+        const root = document.documentElement;
+        const previous = root.dataset.theme;
+        root.dataset.theme = 'dark';
+        const preview = document.createElement('div');
+        preview.id = 'app-splash';
+        preview.innerHTML = '<div class="as-inner"><div class="as-logo"></div><div class="as-name">未央</div><div class="as-sub">我在，和你一起开始。</div></div>';
+        document.body.append(preview);
+        const logo = preview.querySelector('.as-logo');
+        const style = getComputedStyle(logo);
+        const source = style.backgroundImage.match(/url\(["']?(.*?)["']?\)/)?.[1];
+        const image = new Image();
+        const loaded = await new Promise((resolve) => {
+          image.onload = () => resolve(true);
+          image.onerror = () => resolve(false);
+          image.src = source || '';
+        });
+        const result = {
+          background: getComputedStyle(preview).backgroundImage,
+          animation: style.animationName,
+          transform: style.transform,
+          loaded,
+          bootHidden: !document.querySelector('#boot') || getComputedStyle(document.querySelector('#boot')).display === 'none'
+        };
+        root.dataset.theme = previous;
+        return result;
+      });
+      check('启动页浅底、眨眼挥手、不旋转，屏蔽旧黑色自检', startup.background.includes('238, 240, 255') && startup.animation === 'startup-wave-blink' && startup.transform === 'none' && startup.loaded && startup.bootHidden, JSON.stringify(startup));
+      await page.screenshot({ path: path.join(output, 'theme-startup-390.png') });
+      await page.evaluate(() => document.querySelector('#app-splash')?.remove());
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+    }
     const metrics = await page.evaluate(() => {
       const home = document.querySelector('.home-reference');
       const model = document.querySelector('#model-chip').getBoundingClientRect();
