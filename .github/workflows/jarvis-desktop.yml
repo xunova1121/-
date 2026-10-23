@@ -181,13 +181,14 @@ jobs:
       - name: 格式化本轮手机界面源码
         run: |
           npm run format
-          npx prettier --write --ignore-path /dev/null src/ui/home.js src/ui/companionAppearance.js src/ui/mobileTheme.css src/ui/mobileHome.css src/ui/mobilePages.css src/ui/mobileCompanion.css src/ui/mobileComposer.css e2e/mobile-theme.mjs
+          npx prettier --write --ignore-path /dev/null src/ui/home.js src/ui/homeWeather.js src/ui/companionAppearance.js src/ui/mobileTheme.css src/ui/mobileHome.css src/ui/mobilePages.css src/ui/mobileCompanion.css src/ui/mobileComposer.css e2e/mobile-theme.mjs
       - name: 导出本轮格式化源码
         uses: actions/upload-artifact@v4
         with:
           name: formatted-mobile-ui
           path: |
             jarvis/src/ui/home.js
+            jarvis/src/ui/homeWeather.js
             jarvis/src/ui/companionAppearance.js
             jarvis/src/ui/mobile*.css
             jarvis/e2e/mobile-theme.mjs

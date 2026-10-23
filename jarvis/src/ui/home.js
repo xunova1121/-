@@ -80,12 +80,7 @@ export function createHome({ weather, fill, openPanel }) {
     }, 2400);
   };
 
-  const weatherUI = createHomeWeather({
-    client: weather,
-    onAdvice: (text) => {
-      care.textContent = text;
-    }
-  });
+  const weatherUI = createHomeWeather({ client: weather });
   root.append(weatherUI.root, hero);
   const head = element('div', undefined, 'home-suggestions-head');
   head.append(element('span', '未央为你准备了'));

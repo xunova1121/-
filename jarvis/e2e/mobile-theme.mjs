@@ -82,6 +82,13 @@ try {
     check(`${width} 首页参考配色与字号`, metrics.background === '#eef0ff' && metrics.titleSize >= 16 && metrics.titleSize <= 22 && metrics.count === 3);
     check(`${width} 输入区与模型标签可见且无横向溢出`, metrics.width <= width && metrics.composerFits && metrics.modelFits, JSON.stringify(metrics));
     check(`${width} 使用批准的新未央形象`, metrics.image.includes('mascot-approved'));
+    check(`${width} 天气集中右侧且图标与位置开关不重叠`, await page.evaluate(() => {
+      const icon = document.querySelector('.home-weather-details').getBoundingClientRect();
+      const position = document.querySelector('.home-weather-location').getBoundingClientRect();
+      const date = document.querySelector('.home-date').getBoundingClientRect();
+      const summary = document.querySelector('.home-weather-summary').getBoundingClientRect();
+      return icon.left >= innerWidth / 2 - 12 && icon.right <= position.left && position.right <= innerWidth - 16 && summary.right <= position.right + 4 && date.right <= icon.left + 2;
+    }));
     await page.screenshot({ path: path.join(output, `theme-home-${width}.png`) });
     for (const pane of ['sessions', 'workspace', 'knowledge', 'mind', 'skills', 'models', 'system', 'settings']) {
       await page.evaluate((value) => window.__jarvis.showPanel(value), pane);

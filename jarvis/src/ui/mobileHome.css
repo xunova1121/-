@@ -231,3 +231,55 @@
     min-height: 48px;
   }
 }
+/* 天气归拢右上角：图标查看详情，独立倒三角切换位置，互不冒泡触发。 */
+:root body.compact.companion-edition .home-reference .home-weather {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+  align-items: center;
+  gap: 0 8px;
+}
+:root body.compact.companion-edition .home-reference .home-weather-top { display: contents; }
+:root body.compact.companion-edition .home-reference .home-date { grid-column: 1; grid-row: 1; white-space: normal; }
+:root body.compact.companion-edition .home-reference .home-city {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  grid-column: 2;
+  grid-row: 1;
+  width: auto;
+  max-width: min(54vw, 240px);
+  gap: 2px;
+  padding: 0;
+}
+:root body.compact.companion-edition .home-reference .home-city b { min-width: 0; font-size: .8125rem; }
+:root body.compact.companion-edition .home-reference .home-weather-details,
+:root body.compact.companion-edition .home-reference .home-weather-location {
+  display: grid;
+  place-items: center;
+  min-width: 36px;
+  min-height: 40px;
+  margin: 0;
+  padding: 6px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 12px;
+}
+:root body.compact.companion-edition .home-reference .home-weather-details .home-weather-icon svg { width: 26px; height: 26px; }
+:root body.compact.companion-edition .home-reference .home-weather-location svg { width: 18px; height: 18px; }
+:root body.compact.companion-edition .home-reference .home-weather-bottom {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex;
+  justify-content: flex-end;
+  min-height: 22px;
+  min-width: 0;
+}
+:root body.compact.companion-edition .home-reference .home-weather-summary {
+  max-width: 100%;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: .6875rem;
+}

@@ -59,8 +59,11 @@ try{
   check('未央用可朗读状态气泡招呼，角色保留轻浮动',await page.evaluate(()=>{const b=document.querySelector('.home-pet-hint'),m=document.querySelector('.home-pet .wy-mascot');return b.getAttribute('role')==='status'&&b.textContent.includes('我的头')&&getComputedStyle(m).animationName.includes('wy-float');}));
   await page.click('.home-pet');check('摸头切换角色表情',await page.locator('.home-pet .wy-mascot').getAttribute('data-state')==='pet');
   check('摸头后气泡变成未央本人的回应',await page.locator('.home-pet-hint').textContent().then(t=>t.includes('温柔')));
+  await page.click('.home-weather-location');await page.waitForSelector('.weather-dialog[open]');
+  check('右上角倒三角只打开位置选择，不混入天气详情',await page.isVisible('.weather-city-view')&&!(await page.isVisible('.weather-detail-view')));
+  await page.click('.weather-close');
   await page.click('.home-weather-details');await page.waitForSelector('.weather-dialog[open]');
-  check('天气详情提供三日预报与降雨概率',await page.locator('.weather-day').count()===3&&(await page.locator('.weather-days').textContent()).includes('80%'));
+  check('点击天气图标打开详情，提供三日预报与降雨概率',await page.locator('.weather-day').count()===3&&(await page.locator('.weather-days').textContent()).includes('80%'));
   await page.screenshot({path:path.join(OUT,'mobile-weather-detail.png')});
   weatherOffline=true;await page.click('.weather-refresh');await page.waitForFunction(()=>document.querySelector('.home-weather-summary').textContent.includes('缓存'));
   check('断网保留天气并明确标记缓存',await page.locator('.weather-updated').textContent().then(t=>t.includes('缓存')));weatherOffline=false;
