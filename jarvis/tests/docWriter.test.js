@@ -199,8 +199,9 @@ describe('排版细节（看过渲染效果后补的）', () => {
 });
 
 describe('主题', () => {
-  it('10 套 theme-factory 主题 + 商务蓝 + 公文；按 id 或中文名找', () => {
-    expect(THEME_IDS).toHaveLength(12);
+  it('10 套 theme-factory 主题 + 商务蓝 + 墨玉 + 公文；按 id 或中文名找', () => {
+    expect(THEME_IDS).toHaveLength(13);
+    expect(pickTheme('# 仙逆动漫剧情梳理\n王林修仙').id).toBe('ink-jade');
     expect(findTheme('深海').id).toBe('ocean-depths');
     expect(findTheme('tech-innovation').name).toBe('科技创新');
     expect(findTheme('不存在')).toBeNull();

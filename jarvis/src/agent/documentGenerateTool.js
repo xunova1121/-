@@ -2,6 +2,8 @@ import * as ws from './workspace.js';
 import { generate } from './docs.js';
 import { THEME_IDS, themeList } from './themes.js';
 import { planDocument } from './documentPlan.js';
+import { chooseDesign, DOC_KINDS, SHEET_KINDS } from './documentDesign.js';
+import { STYLE_IDS } from './pptStyles.js';
 import { deliverDocument } from './documentDelivery.js';
 import { selfCheck, lint, fixAfterBuild, reviewSlidesByImage } from './selfCheck.js';
 import { pickSheets, sheetSvg, rasterize } from './slidePreview.js';
@@ -15,7 +17,7 @@ export function createDocumentGenerateTool(ctx) {
     description: `生成 Office / 文档文件并保存到工作区；需要模板时先get_document_template。生成后自动检查文件结构、读回内容，可用时由本机LibreOffice生成真实PDF预览。结构/估算检查不等于Office视觉验收。排版自动完成（A4、标题样式、编号列表、带表头底色的表格、页码；Word / PDF 的二级标题有 3 个以上时自动加目录）。
 content 用 Markdown：
 - docx / pdf / html：开头一个“# 文档标题”，正文用 ## 一级标题、### 二级标题、#### 三级标题；支持多级列表（缩进两个空格）、| 表格 |（:--: 居中、--: 右对齐）、**粗体**、*斜体*、~~删除线~~、[链接](https://…)、> 引用、代码块、--- 分隔线、单独一行 [分页]、![图注](工作区里的图片路径)
-- pptx：每页用“## 页标题”，页标题写成一句观点（如“建设必要性：补齐告警到处置的人工断点”），版式按内容自动选：
+- pptx：每页用“## 页标题”。汇报、方案类的页标题写成一句观点（如“建设必要性：补齐告警到处置的人工断点”）；剧情、介绍、攻略类用简洁准确的标题，不硬写观点句。用户自己给了分段的，一段一页、顺序不变。设计风格用 style（不填自动选）。版式按内容自动选：
   · 3–8 条“标签：说明”的要点 → 卡片（如“预警研判：多源证据汇聚……”）；页标题含流程 / 场景 / 步骤 / 闭环时 → 一排步骤箭头
   · 2–6 条以数字开头的要点（“67 万元：总投资”“0/12：雷达安装数”）→ 大数字卡片
   · 3–7 条以日期开头（“10-19 支架到货”“11月1日：初验”）→ 时间线
@@ -24,7 +26,8 @@ content 用 Markdown：
   · 带数字列的表格 → 柱状图（合计行和单位不同的列写在旁边；大小差几十倍时改成表格）；其他表格 → 表格
   · 两个 ### 小标题 → 左右对比；一两句话，或一句话 + 一两条“标签：说明” → 大字重点页；标题是“第一部分……” → 章节页；“谢谢” → 结尾页
   · 每页多出一两句不带标签的话（总结、提醒）放进底部深色横条
-  · 页内单独一行“版式：卡片”（大数字 / 卡片 / 步骤 / 时间线 / 流程 / 对比 / 图表 / 进度 / 表格 / 重点句 / 章节 / 要点）可以指定版式
+  · 标题有“关系 / 人物 / 构成 / 架构”且写成 3–6 条“名称：说明”→ 关系图（一句不带标签的话当中心）；占比加起来 100% 的表格 → 环形图；行名是月份 / 季度 / 年份的数字表 → 折线图
+  · 页内单独一行“版式：卡片”（大数字 / 卡片 / 步骤 / 时间线 / 流程 / 对比 / 图表 / 柱状图 / 饼图 / 折线图 / 关系图 / 进度 / 表格 / 重点句 / 章节 / 要点）可以指定版式，前后各空一行；排不成时生成结果里会说明
   每条一句完整的话，不要整页长段落；同一种版式不要连续超过 2 页，普通要点列表全篇不超过 3 页；封面信息（单位、日期）用 author 和副标题，不要再做一页“副封面”
 - xlsx：CSV 或 Markdown 表格，“## 名称”分出多个工作表；“合计”行和“增长率 / 同比 / 完成率 / 占比”列会自动写成 Excel 公式（占比列留空即可），也可以直接写“=SUM(B2:B5)”；1,200、18%、¥300、2026-10-14 会自动设成对应的数字格式。
   一个工作表里可以排成报表：“## 名称”下面第一行普通文字是副标题；“### 小节”是小节标题；可以放多张表（空行隔开）；表格之间的普通文字是说明 / 备注（整行显示）；不写“|---|”分隔行的表格是信息表（“| 项目名称 | xxx | 编号 | xxx |”，左边是名目）。只放一张表、没有文字时就是普通数据表（表头在第一行、带筛选）。
@@ -38,6 +41,8 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         title: str('文档标题'),
         content: str('Markdown 内容'),
         theme: { type: 'string', enum: THEME_IDS, description: '配色主题，不填自动选' },
+        style: { type: 'string', enum: STYLE_IDS, description: 'PPT 设计风格（构图不同，不只是颜色）：business 稳重商务（汇报、方案）/ minimal 简洁留白（产品、设计、品牌）/ story 叙事氛围（剧情、人物、历史、文化、旅行）/ data 数据报告（经营、财务、统计）。不填按用户要求和内容自动选' },
+        kind: { type: 'string', enum: [...Object.keys(DOC_KINDS), ...Object.keys(SHEET_KINDS)], description: `文种 / 用途，决定结构和排法。Word：${Object.entries(DOC_KINDS).map(([k, v]) => `${k} ${v}`).join('、')}；Excel：${Object.entries(SHEET_KINDS).map(([k, v]) => `${k} ${v}`).join('、')}。不填按标题和要求自动判断` },
         cover: { type: 'boolean', description: 'Word / PDF 加封面（正式报告、方案、标书类建议加）' },
         subtitle: str('副标题（可选）'),
         author: str('署名，如单位或部门（可选，用在封面）'),
@@ -53,7 +58,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       ['format', 'path', 'content']
     ),
     run: async (
-      { format, path, title, content, theme, cover, subtitle, author, issuer, docNo, toc, template, template_id: templateId, requirements },
+      { format, path, title, content, theme, style, kind, cover, subtitle, author, issuer, docNo, toc, template, template_id: templateId, requirements },
       { progress, signal, checkpoint } = {}
     ) => {
       const loadImage = async (src) => {
@@ -70,6 +75,8 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
         : null;
       const taskRules = requirements && plan ? requirements + '\n制作约束：' + plan.rules.join('；') : requirements;
       const chosenTheme = theme || (templateId && templateId !== 'auto' ? plan?.theme : undefined);
+      // 任务决定设计：用户原话 > 内容；画法交给各个生成器
+      const design = chooseDesign({ format, title, content, requirements, style, kind });
       const chosenToc = toc || (templateId && content.length < 1500 ? 'no' : plan?.options.toc);
       // 生成前自查：规则检查；有原始要求或硬伤时请模型对照检查并改一轮
       const check = await selfCheck({
@@ -86,6 +93,8 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
           title: (title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, '')).replace(/[_\s-]*\d+\s*页$/, ''),
           content: text,
           theme: chosenTheme,
+          style: design.style,
+          kind: design.kind,
           layout: plan?.options.layout,
           cover: cover ?? plan?.options.cover ?? false,
           subtitle,
@@ -160,6 +169,7 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       const r = await deliverDocument(ctx, out, target, { progress, signal, checkpoint, plan, issues: lint(format, finalContent), generatorReview: looked });
       const notes = [
         `主题：${out.theme.name}`,
+        ...(design.label ? [`设计：${design.label}（${design.reason}）`] : []),
         r.validation.readback === 'passed' ? '已检查真实文件并读回有效内容' : '已检查文件头或结构',
         ...(plan ? ['制作方案：' + plan.templateName] : []),
         ...r.notes
