@@ -49,17 +49,21 @@ try{
   await page.waitForFunction(()=>window.__jarvis&&document.querySelector('#app-splash')?.hidden!==false);await page.waitForTimeout(400);
   await page.waitForFunction(()=>document.querySelector('.home-city b')?.textContent.includes('23°'));
   check('首页自动定位城市、真实数据渲染，不需要手动选择',await page.evaluate(()=>window.__weatherLocations===1&&document.querySelector('.home-city b').textContent.includes('上海')));
-  check('首页问候与未央不重叠，卡片不横向溢出',await page.evaluate(()=>{const h=document.querySelector('.home-hero-copy').getBoundingClientRect(),p=document.querySelector('.home-pet').getBoundingClientRect();return h.right<=p.left+1&&document.documentElement.scrollWidth<=innerWidth;}));
+  check('首页问候与未央不重叠，卡片不横向溢出',await page.evaluate(()=>{const h=document.querySelector('.home-hero-copy').getBoundingClientRect(),p=document.querySelector('.home-pet').getBoundingClientRect();return p.bottom<=h.top+1&&document.documentElement.scrollWidth<=innerWidth;}));
   check('首次首页从日期天气开始，顶部不会被自动滚动裁掉',await page.evaluate(()=>{const weather=document.querySelector('.home-weather').getBoundingClientRect(),header=document.querySelector('.topbar').getBoundingClientRect();return weather.top>=header.bottom-1&&document.querySelector('#transcript').scrollTop===0;}));
-  check('确认稿主视觉比例、渐变按钮和陪伴页脚完整呈现',await page.evaluate(()=>{const mascot=document.querySelector('.home-pet .wy-mascot').getBoundingClientRect(),greeting=document.querySelector('.home-hero h1 span');return mascot.width>=170&&mascot.height>=220&&parseFloat(getComputedStyle(greeting).fontSize)>=32&&getComputedStyle(document.querySelector('.home-start')).backgroundImage.includes('gradient')&&document.querySelector('.home-footer')?.textContent.includes('更从容');}));
+  // 新确认稿改为居中角色与参考字号，旧32px大标题和创作大卡片不再是验收目标。
+  check('新确认稿居中角色、参考字号和三行建议完整呈现',await page.evaluate(()=>{const m=document.querySelector('.home-pet .wy-mascot').getBoundingClientRect(),h=document.querySelector('.home-hero h1');return m.width>=150&&m.width<=220&&Math.abs((m.left+m.right)/2-innerWidth/2)<6&&parseFloat(getComputedStyle(h).fontSize)<=22&&document.querySelectorAll('.home-suggestion').length===3&&document.querySelector('.home-footer')?.textContent.includes('内容由 AI 生成');}));
   check('390屏幕首屏显示文件空间，角色不贴屏幕右边',await page.evaluate(()=>{const files=document.querySelector('.home-files').getBoundingClientRect(),composer=document.querySelector('#inputbar').getBoundingClientRect(),mascot=document.querySelector('.home-pet .wy-mascot').getBoundingClientRect();return files.bottom<=composer.top-2&&mascot.right<=innerWidth-8;}));
   await page.locator('.toast').evaluateAll(nodes=>nodes.forEach(n=>{n.hidden=true;}));
   await page.screenshot({path:path.join(OUT,'mobile-weather-home.png')});
-  check('未央用对白气泡主动招呼，角色自带轻浮动与眨眼',await page.evaluate(()=>{const b=document.querySelector('.home-pet-hint'),m=document.querySelector('.home-pet .wy-mascot');return b.getAttribute('role')==='status'&&b.textContent.includes('我的头')&&getComputedStyle(b,'::before').content!=='none'&&getComputedStyle(m).animationName.includes('home-float')&&getComputedStyle(m).animationName.includes('home-wink');}));
+  check('未央用可朗读状态气泡招呼，角色保留轻浮动',await page.evaluate(()=>{const b=document.querySelector('.home-pet-hint'),m=document.querySelector('.home-pet .wy-mascot');return b.getAttribute('role')==='status'&&b.textContent.includes('我的头')&&getComputedStyle(m).animationName.includes('wy-float');}));
   await page.click('.home-pet');check('摸头切换角色表情',await page.locator('.home-pet .wy-mascot').getAttribute('data-state')==='pet');
   check('摸头后气泡变成未央本人的回应',await page.locator('.home-pet-hint').textContent().then(t=>t.includes('温柔')));
+  await page.click('.home-weather-location');await page.waitForSelector('.weather-dialog[open]');
+  check('右上角倒三角只打开位置选择，不混入天气详情',await page.isVisible('.weather-city-view')&&!(await page.isVisible('.weather-detail-view')));
+  await page.click('.weather-close');
   await page.click('.home-weather-details');await page.waitForSelector('.weather-dialog[open]');
-  check('天气详情提供三日预报与降雨概率',await page.locator('.weather-day').count()===3&&(await page.locator('.weather-days').textContent()).includes('80%'));
+  check('点击天气图标打开详情，提供三日预报与降雨概率',await page.locator('.weather-day').count()===3&&(await page.locator('.weather-days').textContent()).includes('80%'));
   await page.screenshot({path:path.join(OUT,'mobile-weather-detail.png')});
   weatherOffline=true;await page.click('.weather-refresh');await page.waitForFunction(()=>document.querySelector('.home-weather-summary').textContent.includes('缓存'));
   check('断网保留天气并明确标记缓存',await page.locator('.weather-updated').textContent().then(t=>t.includes('缓存')));weatherOffline=false;
@@ -69,18 +73,18 @@ try{
   await page.click('.home-suggestions-head button');check('推荐可轮换而不重复天气入口',await page.locator('.home-suggestions').textContent().then(t=>t.includes('创作灵感')));
   await page.click('.home-start');check('创作卡片填写任务，继续复用原发送入口',await page.inputValue('#prompt').then(t=>t.includes('目标')));await page.fill('#prompt','');await page.locator('#prompt').blur();
   check('手机版实际产物启用陪伴感布局',await page.evaluate(()=>document.body.classList.contains('compact')&&!document.body.classList.contains('workbench')&&window.__jarvis.stage===null));
-  check('手机近白底色，保留清楚的未央图标',await page.evaluate(()=>{const r=document.querySelector('.brand-mark').getBoundingClientRect();return r.width>=44&&r.height>=44&&getComputedStyle(document.body).backgroundColor==='rgb(252, 251, 255)';}));
+  check('手机浅蓝紫底色，保留清楚的未央图标',await page.evaluate(()=>{const r=document.querySelector('.brand-mark').getBoundingClientRect();return r.width>=44&&r.height>=44&&getComputedStyle(document.body).getPropertyValue('--bg').trim()==='#eef0ff';}));
   check('手机空白输入栏显示＋、模型、转文字和电话，发送收起',await page.evaluate(()=>['btn-attach','model-chip','btn-mic','btn-call'].every(id=>{const r=document.getElementById(id).getBoundingClientRect();return r.width>=32&&r.height>=36;})&&document.getElementById('btn-send').hidden));
   await page.click('#btn-attach');
   check('拍照、相册、文件和常用指令收在＋菜单中',await page.isVisible('#composer-more')&&await page.isVisible('#btn-camera')&&await page.isVisible('#btn-composer-file'));
   await page.click('#btn-attach');
   check('顶栏图标完整位于栏内，与文字保持间距',await page.evaluate(()=>{const header=document.querySelector('.topbar').getBoundingClientRect(),logo=document.querySelector('.brand-mark .wy-mascot').getBoundingClientRect(),name=document.querySelector('.brand-name').getBoundingClientRect();return logo.top>=header.top&&logo.bottom<=header.bottom&&logo.right+6<=name.left&&Math.abs((logo.top+logo.bottom)/2-(name.top+name.bottom)/2)<8;}));
-  check('顶栏与页面使用同一底色',await page.evaluate(()=>getComputedStyle(document.querySelector('.topbar')).backgroundColor===getComputedStyle(document.body).backgroundColor));
+  check('顶栏与页面使用同一底色',await page.evaluate(()=>getComputedStyle(document.querySelector('.topbar')).backgroundColor==='rgba(0, 0, 0, 0)'&&getComputedStyle(document.body).backgroundImage.includes('gradient')));
   await page.evaluate(()=>window.__jarvis.showPanel('mind'));
-  check('记忆面板不残留旧紫色背景',await page.evaluate(()=>getComputedStyle(document.querySelector('.side')).backgroundColor===getComputedStyle(document.body).backgroundColor&&getComputedStyle(document.querySelector('.side-back')).backgroundColor===getComputedStyle(document.body).backgroundColor));
+  check('记忆面板和返回栏使用同一套新主题',await page.evaluate(()=>getComputedStyle(document.querySelector('.side')).backgroundImage.includes('gradient')&&getComputedStyle(document.querySelector('.side-back')).backgroundColor==='rgb(238, 240, 255)'));
   await page.click('#btn-theme');
   await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
-  check('夜间顶栏和面板同步切换，不出现白色顶栏',await page.evaluate(()=>getComputedStyle(document.querySelector('.topbar')).backgroundColor==='rgb(25, 25, 35)'&&getComputedStyle(document.querySelector('.side')).backgroundColor==='rgb(25, 25, 35)'));
+  check('夜间顶栏和面板同步切换，不出现白色顶栏',await page.evaluate(()=>getComputedStyle(document.body).getPropertyValue('--bg').trim()==='#191b2b'&&getComputedStyle(document.querySelector('.side')).backgroundImage.includes('gradient')&&getComputedStyle(document.querySelector('.topbar')).backgroundColor==='rgba(0, 0, 0, 0)'));
   await page.screenshot({path:path.join(OUT,'mobile-unified-dark-panel.png')});
   await page.click('#btn-theme');await page.waitForFunction(()=>document.documentElement.dataset.theme==='light');await page.click('#btn-side-back');
   async function ask(text){const before=await page.locator('.msg.agent').count();await page.fill('#prompt',text);await page.click('#btn-send');await page.waitForFunction(n=>document.querySelectorAll('.msg.agent').length>n&&!document.querySelector('.msg.agent.streaming'),before,{timeout:30000});await page.waitForTimeout(120);}
@@ -113,8 +117,8 @@ try{
   await page.screenshot({path:path.join(OUT,'companion-mobile-chat.png')});
   await page.locator('.brand-mark').click();
   await page.getByRole('button',{name:'比个心',exact:true}).click();
-  check('陪伴面板使用比心表情并放大角色',await page.locator('.wy-companion-stage .wy-mascot').evaluate(el=>el.dataset.state==='love'&&el.getBoundingClientRect().height>=170&&el.getBoundingClientRect().bottom<=document.querySelector('.wy-companion-title').getBoundingClientRect().top-8));
-  check('陪伴角色不遮挡标题文字',await page.locator('.wy-companion-stage .wy-mascot').evaluate(el=>{const r=el.getBoundingClientRect(),title=document.querySelector('.wy-companion-title').getBoundingClientRect(),stage=el.parentElement.getBoundingClientRect();return r.bottom<=title.top-8&&r.top>=stage.top-4&&r.height<=stage.height;}));
+  check('陪伴面板使用比心表情并放大角色',await page.locator('.wy-companion-stage .wy-mascot').evaluate(el=>el.dataset.state==='love'&&el.getBoundingClientRect().height>=170&&el.getBoundingClientRect().top>=document.querySelector('.wy-companion-title').getBoundingClientRect().bottom+4));
+  check('陪伴角色不遮挡标题文字',await page.locator('.wy-companion-stage .wy-mascot').evaluate(el=>{const r=el.getBoundingClientRect(),title=document.querySelector('.wy-companion-title').getBoundingClientRect(),stage=el.parentElement.getBoundingClientRect();return title.bottom+4<=r.top&&r.top>=stage.top-4&&r.height<=stage.height;}));
   await page.getByRole('button',{name:'摸摸头',exact:true}).click();
   check('点击摸头会回应，保持可爱的表情',await page.locator('.wy-companion-stage .wy-mascot').getAttribute('data-state')==='pet'&&/温柔/.test(await page.textContent('.wy-companion-say')));
   await page.screenshot({path:path.join(OUT,'companion-mobile-panel.png')});
@@ -143,7 +147,7 @@ try{
   await page.locator('.holo-pet').click();
   check('全息角色摸头有表情和光圈回应',await page.locator('.holo-pet .wy-mascot').getAttribute('data-state')==='pet'&&/开心/.test(await page.locator('.holo-bubble').textContent()));
   await page.locator('[data-pose=love]').click();
-  check('全息角色比心使用最新角色素材',await page.locator('.holo-pet .wy-mascot').evaluate(el=>el.dataset.state==='love'&&getComputedStyle(el).backgroundImage.includes('mascot-companion')));
+  check('全息角色比心使用最新角色素材',await page.locator('.holo-pet .wy-mascot').evaluate(el=>el.dataset.state==='love'&&getComputedStyle(el).backgroundImage.includes('mascot-approved')));
   await page.screenshot({path:path.join(OUT,'hologram-mobile.png')});
   await page.locator('.holo-form input').fill('请帮我整理今天的计划');await page.locator('.holo-form button').click();
   await page.waitForFunction(()=>document.querySelector('.holo-message.assistant')?.textContent.includes('第 1 项')&&!document.querySelector('.holo-form button').disabled);
@@ -269,10 +273,10 @@ try{
   for(const width of [320,360,390,412]){
     const narrow=await browser.newPage({viewport:{width,height:780}});await narrow.goto(BASE);await narrow.waitForSelector('body.companion-edition');
     await narrow.waitForFunction(()=>window.__jarvis?.send);await narrow.evaluate(()=>{document.documentElement.style.fontSize='18px';document.getElementById('model-chip-text').textContent='服务器 · claude-sonnet-very-long-model-name';});
-    check(`${width}px 手机空白输入区保持同排、不溢出`,await narrow.evaluate(()=>{const r=id=>document.getElementById(id).getBoundingClientRect(),model=r('model-chip'),mic=r('btn-mic'),call=r('btn-call');return document.documentElement.scrollWidth<=innerWidth&&model.width>=50&&model.right<=mic.left&&mic.right<=call.left&&Math.abs(mic.top-call.top)<=3&&document.getElementById('btn-send').hidden;}));
+    check(`${width}px 手机空白输入区保持同排、不溢出`,await narrow.evaluate(()=>{const r=id=>document.getElementById(id).getBoundingClientRect(),model=r('model-chip'),mic=r('btn-mic'),call=r('btn-call');return document.documentElement.scrollWidth<=innerWidth&&model.width>=50&&model.right<=innerWidth-12&&model.bottom<=mic.top+1&&mic.right<=call.left&&Math.abs(mic.top-call.top)<=3&&document.getElementById('btn-send').hidden;}));
     await narrow.fill('#prompt','生成中继续补充要求');await narrow.evaluate(()=>document.body.classList.add('generating'));
     await narrow.waitForFunction(()=>document.getElementById('inputbar').classList.contains('is-working'));
-    check(`${width}px 生成中发送和停止同时可用、不挤到下一行`,await narrow.evaluate(()=>{const r=id=>document.getElementById(id).getBoundingClientRect(),stop=r('btn-stop'),send=r('btn-send'),model=r('model-chip');return stop.width>=36&&send.width>=36&&Math.abs(stop.top-send.top)<=3&&model.right<=stop.left&&stop.right<=send.left&&send.right<=innerWidth-12&&!document.getElementById('btn-send').disabled;}));
+    check(`${width}px 生成中发送和停止同时可用、不挤到下一行`,await narrow.evaluate(()=>{const r=id=>document.getElementById(id).getBoundingClientRect(),stop=r('btn-stop'),send=r('btn-send'),model=r('model-chip');return stop.width>=36&&send.width>=36&&Math.abs(stop.top-send.top)<=3&&model.bottom<=stop.top+1&&model.right<=innerWidth-12&&stop.right<=send.left&&send.right<=innerWidth-12&&!document.getElementById('btn-send').disabled;}));
     await narrow.evaluate(()=>document.body.classList.remove('generating'));await narrow.fill('#prompt','');
     await narrow.screenshot({path:path.join(OUT,`mobile-unified-${width}.png`)});await narrow.close();
   }

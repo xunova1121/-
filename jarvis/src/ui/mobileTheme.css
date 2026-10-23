@@ -1,0 +1,165 @@
+@import './mobileStartup.css';
+@import './mobileHome.css';
+@import './mobilePages.css';
+@import './mobileCompanion.css';
+@import './mobileComposer.css';
+
+/* 浅蓝紫设计令牌覆盖手机整套界面，不改变桌面工作台或用户选择的夜间模式。 */
+:root body.compact.companion-edition {
+  --font-ui: 'HarmonyOS Sans SC', 'HONOR Sans CN', 'MiSans', 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-display: var(--font-ui);
+  --wy-radius: 20px;
+  --wy-body-size: 1rem;
+  --wy-small-size: 0.8125rem;
+  font-family: var(--font-ui);
+  font-size: var(--wy-body-size);
+  line-height: 1.65;
+  letter-spacing: 0;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+:root[data-theme='light'] body.compact.companion-edition {
+  --bg: #eef0ff;
+  --bg-2: #ecebfc;
+  --surface: rgba(255, 255, 255, 0.72);
+  --surface-2: #f7f7ff;
+  --side-bg: linear-gradient(165deg, #eef0ff, #eeecfc 55%, #e8edfc);
+  --text: #252730;
+  --muted: #676b82;
+  --dim: #797d95;
+  --accent: #7550e6;
+  --accent-soft: #e6e0fd;
+  --line: rgba(126, 119, 181, 0.18);
+  --line-strong: #c9bfef;
+  --code-bg: #e9eafa;
+  --tool-bg: #f6f5ff;
+  --chip-bg: rgba(255, 255, 255, 0.75);
+  --ok: #3c8061;
+  --warn: #986b23;
+  --bad: #b34c63;
+  --overlay: rgba(43, 40, 76, 0.38);
+  background: linear-gradient(165deg, #eef0ff, #eeecfc 55%, #e8edfc) !important;
+}
+:root:not([data-theme='light']) body.compact.companion-edition {
+  --bg: #191b2b;
+  --bg-2: #202039;
+  --surface: #27283f;
+  --surface-2: #303149;
+  --side-bg: linear-gradient(165deg, #191b2b, #25223a);
+  --text: #f0effa;
+  --muted: #bcbcd3;
+  --dim: #a6a7c2;
+  --accent: #c1adff;
+  --accent-soft: #393050;
+  --line: #42405c;
+  --line-strong: #756390;
+  --chip-bg: #343149;
+  --code-bg: #202136;
+  --tool-bg: #27283f;
+  --overlay: rgba(8, 9, 20, 0.65);
+  background: var(--side-bg) !important;
+}
+:root body.compact.companion-edition .app,
+:root body.compact.companion-edition .main,
+:root body.compact.companion-edition .main:has(.wy-home),
+:root body.compact.companion-edition .transcript {
+  background: transparent;
+}
+:root body.compact.companion-edition .topbar {
+  min-height: 60px;
+  background: transparent;
+  border: 0;
+  padding-inline: 16px;
+  gap: 8px;
+}
+:root body.compact.companion-edition .brand-name {
+  font: 550 1.0625rem/1.35 var(--font-ui);
+  letter-spacing: 0;
+}
+:root body.compact.companion-edition .brand-mark.wy-brand {
+  width: 44px !important;
+  height: 44px !important;
+}
+:root body.compact.companion-edition .brand-mark .wy-mascot {
+  --mascot-size: 44px;
+}
+:root body.compact.companion-edition .wy-brand::after {
+  display: none !important;
+}
+:root body.compact.companion-edition button,
+:root body.compact.companion-edition input,
+:root body.compact.companion-edition textarea,
+:root body.compact.companion-edition select {
+  font-family: var(--font-ui);
+  letter-spacing: 0;
+}
+:root body.compact.companion-edition button:focus-visible,
+:root body.compact.companion-edition input:focus-visible,
+:root body.compact.companion-edition textarea:focus-visible,
+:root body.compact.companion-edition select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+/* 统一形象仅在手机使用；十二格素材原样发布，不进入会话或本地缓存。 */
+:root body.compact.companion-edition .wy-mascot {
+  width: var(--mascot-size, 40px);
+  height: var(--mascot-size, 40px);
+  background-image: url('./mascot-approved.webp');
+  background-size: 400% 300%;
+  background-position: 0 0;
+}
+:root body.compact.companion-edition .wy-mascot[data-state='idle'] {
+  animation: wy-float 3.6s ease-in-out infinite;
+}
+:root body.compact.companion-edition .wy-mascot[data-state='happy'] {
+  background-position: 33.333333% 0;
+}
+:root body.compact.companion-edition .wy-mascot[data-state='shy'] {
+  background-position: 66.666667% 0;
+}
+:root body.compact.companion-edition .wy-mascot[data-state='think'] {
+  background-position: 100% 0;
+}
+:root body.compact.companion-edition .wy-mascot[data-state='listen'] {
+  background-position: 0 50%;
+}
+:root body.compact.companion-edition .wy-mascot[data-state='rub'] {
+  background-position: 33.333333% 50%;
+}
+:root body.compact.companion-edition .wy-mascot[data-state='wave'] {
+  background-position: 66.666667% 50%;
+}
+:root body.compact.companion-edition .wy-mascot[data-state='pet'],
+:root body.compact.companion-edition .wy-mascot[data-state='love'],
+:root body.compact.companion-edition .wy-mascot[data-state='wink'] {
+  background-position: 100% 50%;
+}
+:root body.compact.companion-edition .wy-mascot[data-state='spin'],
+:root body.compact.companion-edition .wy-mascot[data-state='dance'] {
+  background-position: 0 100%;
+}
+:root body.compact.companion-edition .wy-mascot[data-state='sleep'] {
+  background-position: 33.333333% 100%;
+}
+:root body.compact.companion-edition .wy-mascot[data-state='run'] {
+  background-position: 100% 0;
+}
+:root body.compact.companion-edition :is(.transcript, .side, .pane, .drawer, .mp-list, dialog, .ml-catalog-list) {
+  scrollbar-width: none;
+}
+:root body.compact.companion-edition :is(.transcript, .side, .pane, .drawer, .mp-list, dialog, .ml-catalog-list)::-webkit-scrollbar {
+  display: none;
+}
+/* 系统减少动态效果、兼容显示和应用进入后台时，原可访问性开关继续有效。 */
+@media (prefers-reduced-motion: reduce) {
+  :root body.compact.companion-edition .wy-mascot {
+    animation: none !important;
+  }
+}
+:root body.compact.companion-edition.reduced-motion .wy-mascot,
+:root.safe-render body.compact.companion-edition .wy-mascot {
+  animation: none !important;
+}
+:root body.compact.companion-edition.wy-paused .wy-mascot {
+  animation-play-state: paused !important;
+}
