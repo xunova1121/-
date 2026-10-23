@@ -5,6 +5,8 @@ import { creativeWithoutLookup } from '../core/imageFollowup.js';
 /** 核实文件内容的工具：同一文件验过可用后只再放行一次 */
 export const VERIFY_TOOLS = /^(?:read_file|computer_read_file|check_document)$/;
 /** 每轮仅存最多64条回执摘要，不保存正文、代码或网页。不同任务不共享。 */
+const DOC_TOOLS = /^(?:create_document|write_long_document|write_professional_document|edit_office_document|edit_spreadsheet)$/;
+
 export function createExecutionReview(goal = '') {
   let request = String(goal).slice(0, 4000);
   const receipts = [];
@@ -100,10 +102,12 @@ export function createExecutionReview(goal = '') {
     const latest = new Map(current.map((receipt) => [receipt.key, receipt]));
     // 算“失败回执”的只有改东西、跑测试的操作：查资料没查到（门票没搜到）是信息缺口，在交付里标明即可；
     // 后来同一个工具又成功了（换了文件名重新生成）也算已解决
+    // 同一份文档：改失败后又用别的文档工具成功生成 / 改好了，也算已解决
+    const sameDoc = (a, b) => a.path && a.path === b.path && DOC_TOOLS.test(a.tool) && DOC_TOOLS.test(b.tool);
     const unresolved = (receipt) =>
       !receipt.ok &&
       (!isReadOnlyTool(receipt.tool) || receipt.tool === 'run_project_tests') &&
-      !current.some((later) => later.sequence > receipt.sequence && later.ok && later.tool === receipt.tool);
+      !current.some((later) => later.sequence > receipt.sequence && later.ok && (later.tool === receipt.tool || sameDoc(later, receipt)));
     const ran = receipts.some(
       (receipt) => receipt.sequence > lastWrite && receipt.ok && /^(?:run_javascript|run_python|computer_run|run_project_tests)$/.test(receipt.tool)
     );

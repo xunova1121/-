@@ -46,7 +46,7 @@ import { createImageSight } from './imageSight.js';
 export const STABLE_PROMPT = `你是“未央”，用户的个人智能体。实际运行位置与能力以下方环境和本轮工具为准。
 
 ## 工作方式
-- 先弄清要什么：明确结果、交付和限制；能合理推断就动手，只有缺少关键输入才问最重要的一项。复杂任务用 update_plan 列3–8步；简单问答不列计划。
+- 先弄清要什么：明确结果、交付和限制；能合理推断就动手，只有缺少关键输入才问最重要的一项。复杂任务用 update_plan 列3–8步；简单问答、只做一个文件的任务（一份周报、一张表）不列计划，直接做（每列一次、改一次都要多等一轮）。
 - 动手前先 read_file；路径未知先 find_files / search_in_files。在电脑上找文件先搜常用位置，不全盘递归。
 - 能一起做的一起做：独立查询、读取并行。边做边验证：改文件读回、改代码运行适用测试；预览不代表测试通过。
 - 做完先对照原始要求与最新修正；已授权任务持续做到完成。有风险先确认：不可撤销的删除、覆盖、发送、付款、发布遵守用户授权，不重复索要已有批准。
@@ -57,7 +57,7 @@ export const STABLE_PROMPT = `你是“未央”，用户的个人智能体。�
 
 ## 工具与记忆
 - 工具按实际开放能力使用。工作区可连接本地文件夹；本机电脑文件另用 computer_*，工作区没有不等于电脑没有。
-- 文件用 read_file / write_file / edit_file，知识库用 kb_search并注明文件。读不了先换指定页或已有格式，不要换 run_python 硬读，手机首次下载环境很慢。
+- 文件用 read_file / write_file / edit_file，知识库用 kb_search并注明文件。给用户的工作区文件链接直接写相对路径，如 [周报.docx](文件夹/周报.docx)，不要加 sandbox: 之类的前缀。读不了先换指定页或已有格式，不要换 run_python 硬读，手机首次下载环境很慢。
 - 用户让你唱歌或把歌唱出来：先写好歌词（标 [Verse] [Chorus]），再按歌词情景定曲风调用 sing_song；工具报没配 Key 时如实说明，不要说自己不能发声。
 - 问到用户本人（年龄、称呼、住哪、家人、工作、说过什么、问过什么），或者做事要用到用户的信息（出发地/家在哪、年龄、家人、单位、持仓、车）：先看“用户的基本情况”和相关记忆，没有再用 recall、search_conversations 查，查到就直接用，查不到才问或说不知道，不要先反问用户。从旧对话查到的这类个人信息，用 remember（category: profile，重要度 4）记下来，下次不用再查。要列全（“我问过哪些…”“所有…”）用 list_my_messages 逐页翻完；清单每一项都要有工具结果里的原话出处，没出处的不列，最后说明翻了多少条、哪段时间。
 - 用户明确偏好用 remember，纠正你做事方式的教训用 remember（category: lesson），核心身份目标用 core_memory_update，可复用做法用 save_skill；工具调用成功才能说“记住了”。记忆与当前要求冲突以当前要求为准；不把旧天气行情当实况。
@@ -229,6 +229,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   let toolHint = loader.hint();
   let infoPrompt = isQuickLookup(requirementText, images);
   let finalText = '';
+  let checkedText = ''; // 收尾核对前已经显示给用户的回答（核对之后的步骤整段写完再显示，重复的不再显示）
   let toolCount = 0;
   let failCount = 0;
   let lastToolOk = true;
@@ -286,15 +287,26 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     let stepText = '';
     // 每一步模型输出都可能以 <emotion> 标签开头，每步用新的剥离器
     let stripper = new EmotionTagStripper();
+    // 收尾核对之后的步骤：整段写完再显示——模型把刚才的答案又写一遍、或只回一句“收到”的，不显示（评测里出现过答案重复两遍）
+    let held = '';
+    const holding = Boolean(checkedText);
+    const showText = (text) => {
+      request.clearSearchTimer();
+      stepText += text;
+      emit({type:'state',value:'listening'});
+      emit({type:'text',delta:text});
+    };
+    const releaseHeld = () => {
+      if (!holding || !held) return;
+      if (!ACK_ONLY.test(held.trim()) && !repeats(checkedText, held)) showText(held);
+      held = '';
+    };
     const acceptVisible = fragment => {
       const { text, hint } = stripper.push(fragment);
       if (hint) emit({type:'emotion',value:hint});
-      if (text) {
-        request.clearSearchTimer();
-        stepText += text;
-        emit({type:'state',value:'listening'});
-        emit({type:'text',delta:text});
-      }
+      if (!text) return;
+      if (holding) { request.clearSearchTimer(); held += text; return; }
+      showText(text);
     };
     let r;
     const request = createModelRequest({ current: cur, effort, signal, lookupDeadline, lookupControl, closing, retrieval, emit, allowWebSearch, onNativeSearch: () => { nativeSearchCalls++; }, onText: acceptVisible, onRetry: (attempt) => {
@@ -350,8 +362,9 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     if (!r.toolCalls.length && r.stop !== 'pause_turn') {
       const rest = stripper.flush();
       if (rest.hint) emit({ type: 'emotion', value: rest.hint });
-      if (rest.text) { stepText += rest.text; emit({ type: 'text', delta: rest.text }); }
+      if (rest.text) { if (holding) held += rest.text; else { stepText += rest.text; emit({ type: 'text', delta: rest.text }); } }
     }
+    releaseHeld();
     finalText += stepText;
     convo.push({ role: 'assistant', content: stepText, toolCalls: r.toolCalls, raw: r.raw });
     if (r.stop === 'pause_turn') continue; // 服务端工具（联网搜索）还没跑完，原样继续
@@ -370,7 +383,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       if (!note) break;
       checks++;
       // 以用户身份发给模型，但必须说清是系统核对：以前模型会回“你说得对，我来逐项核实”，再写一大段复盘
-      convo.push({ role: 'user', content: `（以下是系统自动核对，不是用户说的话：不要回应它、不要道歉或复盘；需要补做的直接补，没有就简短收尾。）\n${note}` });
+      convo.push({ role: 'user', content: `（以下是系统自动核对，不是用户说的话：不要回应它、不要道歉或复盘，也不要把已经给用户的回答再写一遍；需要补做的直接补，补完只写有变化的地方；没有要补的就直接结束，不要再写任何字。）\n${note}` });
+      checkedText = finalText;
       if (finalText && !/\n$/.test(finalText)) { emit({ type: 'text', delta: '\n\n' }); finalText += '\n\n'; }
       continue;
     }
@@ -410,6 +424,19 @@ export const TIME_BUDGET_MS = 8 * 60e3;
 const WEB_TOOLS = new Set(['get_weather', 'get_stock_kline', 'web_search', 'fetch_url', 'fact_check', 'deep_research']);
 
 /** 可以同时执行的只读工具（不改文件、不操作电脑、不需要用户确认） */
+/** 比较两段回答是不是同一段：去掉空白和 Markdown 符号 */
+const squash = (text) => String(text).replace(/[\s*#`>|_~]/g, '');
+/** 后写的这段是不是把前面那段又写了一遍（大半内容一样） */
+function repeats(before, after) {
+  const a = squash(before), b = squash(after);
+  if (!b) return true;
+  let same = 0;
+  while (same < a.length && same < b.length && a[same] === b[same]) same++;
+  return a.includes(b) || same >= Math.min(b.length, 60) || same / b.length >= 0.6;
+}
+/** 只回了一句“收到 / 好的” */
+const ACK_ONLY = /^(?:收到|好的|好|明白|了解|OK|ok|嗯)[。！!.]?$/;
+
 export const PARALLEL_SAFE = new Set(['get_stock_kline', 'review_task', 'check_search_terms', 'web_search', 'fetch_url', 'read_evidence', 'read_file', 'list_files', 'find_files', 'search_in_files', 'kb_search', 'recall', 'search_conversations', 'list_my_messages', 'read_conversation', 'get_weather', 'get_current_time', 'verify_numbers', 'read_skill_file', 'computer_read_file', 'computer_list_dir']);
 const CODE_FILE = /\.(m?js|ts|py|html?)$/i;
 /** 回答结尾是“我现在开始 / 接下来生成 / 马上做 / 稍等”这类预告（说了要做但还没做） */

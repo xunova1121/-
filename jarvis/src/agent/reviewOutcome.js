@@ -1,5 +1,8 @@
 import { requiresSources } from './retrievalQuality.js';
 
+/** 失败提示里说人话 */
+const TOOL_NAMES = { create_document: '生成文档', write_long_document: '写长文档', write_professional_document: '写正式文档', edit_office_document: '修改文档', edit_spreadsheet: '修改表格', write_file: '写文件', edit_file: '改文件', run_javascript: '运行代码', run_python: '运行代码', generate_image: '画图', sing_song: '生成歌曲', schedule_task: '定时任务', remember: '记忆', computer_run: '电脑上运行命令', run_project_tests: '运行测试' };
+
 /** 执行结束不等于任务验收通过；这里只报告可确定的缺口，不自动评判语义正确率。 */
 export function reviewOutcome(report, { interrupted = false, nativeSearchCalls = 0 } = {}) {
   const warnings = [];
@@ -25,7 +28,7 @@ export function reviewOutcome(report, { interrupted = false, nativeSearchCalls =
     warnings.push('文档仍有未解决的生成或排版检查问题。');
     partial = true;
   }
-  if (report.failures?.length) warnings.push('部分操作未成功，相关结果仍需核对。');
+  if (report.failures?.length) warnings.push(`这些操作没成功：${[...new Set(report.failures)].map((tool) => TOOL_NAMES[tool] || tool).join('、')}，相关结果仍需核对。`);
   if (requiresSources(report.request) && !report.retrievalReceipts && !nativeSearchCalls) {
     warnings.push('尚未取得可核查的联网资料，不能当作查询成功。');
     partial = true;

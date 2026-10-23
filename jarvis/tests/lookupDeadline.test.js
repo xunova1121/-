@@ -185,3 +185,27 @@ describe('评测 baseline-07：一分钟内一个字都没答出来', () => {
     expect(events.some(e=>e.type==='tool_progress'&&/再多查一会儿/.test(e.text))).toBe(true);
   });
 });
+
+describe('评测 cozDJE：核对之后答案写两遍、多冒一句“收到”', () => {
+  const VERIFY={name:'verify_numbers',description:'算数',input_schema:{type:'object',properties:{expr:{type:'string'}}},run:async()=>'765'};
+  const ask='股票买入1000股，每股13.4元；卖出每股14.2元，手续费合计35元。净盈利多少？列算式。';
+  it('核对后把同一个答案又写一遍：第二遍不显示', async () => {
+    let n=0;
+    const adapter={async stream(){n++;
+      if(n===1)return {text:'**净盈利 765 元。**\n\n算式：1000 × 14.2 − 1000 × 13.4 − 35 = **765 元**',toolCalls:[],stop:'end_turn'};
+      if(n===2)return {text:'',toolCalls:[{id:'v',name:'verify_numbers',args:{expr:'1000*14.2-1000*13.4-35'}}],stop:'tool_use'};
+      return {text:'**净盈利 765 元。**\n\n算式：1000 × 14.2 − 1000 × 13.4 − 35\n= 14,200 − 13,400 − 35 = **765 元**',toolCalls:[],stop:'end_turn'};}};
+    const r=await runAgent({adapter,model:'x',history:[],userText:ask,context:{dynamic:''},tools:[VERIFY],emit:()=>{}});
+    expect(r.text.match(/净盈利 765 元/g)).toHaveLength(1);
+  });
+  it('核对后只回“收到。”：不显示；真有更正的照常显示', async () => {
+    let n=0;
+    const ack={async stream(){n++;return n===1?{text:'净盈利 765 元。',toolCalls:[],stop:'end_turn'}:{text:'收到。',toolCalls:[],stop:'end_turn'};}};
+    const a=await runAgent({adapter:ack,model:'x',history:[],userText:ask,context:{dynamic:''},tools:[VERIFY],emit:()=>{}});
+    expect(a.text).not.toMatch(/收到/);
+    let m=0;
+    const fix={async stream(){m++;return m===1?{text:'净盈利 800 元。',toolCalls:[],stop:'end_turn'}:{text:'更正：核对后净盈利是 765 元。',toolCalls:[],stop:'end_turn'};}};
+    const b=await runAgent({adapter:fix,model:'x',history:[],userText:ask,context:{dynamic:''},tools:[VERIFY],emit:()=>{}});
+    expect(b.text).toMatch(/更正：核对后净盈利是 765 元/);
+  });
+});

@@ -371,6 +371,8 @@ const MIME = {
 
 // 直接运行（node server/server.mjs）时启动；用 pathToFileURL 比较，Windows 路径（C:\\…）也能匹配
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  // 某个任务里漏接的异步错误不能让整个服务退出（退出会让手机和评测都断线，正在做的任务一起丢掉）：记日志，接着跑
+  process.on('unhandledRejection', (error) => console.error('[未接住的异步错误，已忽略，服务继续运行]', error?.stack || error));
   const port = Number(process.env.PORT || 8787);
   const host = process.env.HOST || '127.0.0.1';
   // 服务器模式：设置了数据目录就开启（必须同时设置访问密码）；云服务器上不启动 MCP（会运行本机程序）
