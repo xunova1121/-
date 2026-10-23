@@ -92,7 +92,14 @@ try {
         if (loaded) drawing.drawImage(image, 0, 0, 128, 64);
         const pixels = drawing.getImageData(0, 0, 128, 64).data;
         const visiblePixels = pixels.some((value, index) => index % 4 === 3 && value > 128);
+        const motion = logo.getAnimations()[0];
+        motion.pause();
+        motion.currentTime = 0;
+        const firstFrame = getComputedStyle(logo).backgroundPosition;
+        motion.currentTime = 650;
+        const blinkFrame = getComputedStyle(logo).backgroundPosition;
         const result = {
+          framesMove: firstFrame !== blinkFrame,
           visiblePixels,
           background: getComputedStyle(preview).backgroundImage,
           animation: style.animationName,
@@ -103,7 +110,7 @@ try {
         root.dataset.theme = previous;
         return result;
       });
-      check('启动页浅底、眨眼挥手、不旋转，屏蔽旧黑色自检', startup.background.includes('238, 240, 255') && startup.animation === 'startup-wave-blink' && startup.transform === 'none' && startup.loaded && startup.visiblePixels && startup.bootHidden, JSON.stringify(startup));
+      check('启动页浅底、眨眼挥手、不旋转，屏蔽旧黑色自检', startup.background.includes('238, 240, 255') && startup.animation === 'startup-wave-blink' && startup.transform === 'none' && startup.loaded && startup.visiblePixels && startup.framesMove && startup.bootHidden, JSON.stringify(startup));
       await page.screenshot({ path: path.join(output, 'theme-startup-390.png') });
       await page.evaluate(() => document.querySelector('#app-splash')?.remove());
       await page.emulateMedia({ reducedMotion: 'reduce' });

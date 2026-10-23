@@ -18,7 +18,11 @@ html[data-mode='mobile'] #app-splash .as-logo.wy-brand {
   margin: 0 auto 8px;
   border: 0 !important;
   border-radius: 0;
-  background: url('./mascot-startup.webp') 0 0 / 400% 200% no-repeat !important;
+  background-image: url('./mascot-startup.webp') !important;
+  background-size: 400% 200% !important;
+  background-repeat: no-repeat !important;
+  /* 位置不能加!important，否则会压住关键帧，角色始终停在第一格。 */
+  background-position: 0 0;
   box-shadow: none !important;
   filter: none;
   transform: none;
