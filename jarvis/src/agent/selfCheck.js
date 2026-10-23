@@ -95,6 +95,55 @@ export function lint(format, content) {
   return issues;
 }
 
+/**
+ * 用户自己给了分段（“1. 深渊脱困，天运子追杀（131—132集）：……”）：每段要有对应的一页 / 一节，顺序不变。
+ * 以前审稿模型按套来的模板规则把几段内容挪来挪去，第 3 段整段塞进别的页、第 5 段拆成两页还重复。
+ */
+export function userSections(requirements) {
+  const out = [];
+  for (const line of String(requirements ?? '').split('\n')) {
+    const m = /^\s*(?:第?([一二三四五六七八九十\d]{1,2})[.、．）)]|[（(]([一二三四五六七八九十\d]{1,2})[）)])\s*(.{2,40}?)(?:[（(][^）)]*[）)])?\s*[:：]/.exec(line);
+    if (m) out.push(m[3].replace(/[*#]/g, '').trim());
+  }
+  return out.length >= 3 ? out : [];
+}
+const grams = (t) => { const s = String(t).replace(/[\s\p{P}\d]/gu, ''); const g = new Set(); for (let i = 0; i < s.length - 1; i++) g.add(s.slice(i, i + 2)); return g; };
+const overlap = (a, b) => { const A = grams(a); if (!A.size) return 0; const B = grams(b); let n = 0; for (const x of A) if (B.has(x)) n++; return n / A.size; };
+export function coverageIssues(format, requirements, content) {
+  const secs = userSections(requirements);
+  if (!secs.length || !['pptx', ...DOC_FORMATS].includes(format)) return [];
+  // 每页 / 每节：标题 + 正文（模型常把标题改写成别的说法，只比标题会误报）
+  const parts = format === 'pptx'
+    ? parseSlides('', content).map((sl) => `${sl.title} ${sl.title} ${sl.blocks.map(blockText).join('')}`)
+    : sectionTexts(content);
+  const unit = format === 'pptx' ? '页' : '节';
+  const issues = [];
+  const at = secs.map((sec) => {
+    const scores = parts.map((t) => overlap(sec, t));
+    const best = Math.max(0, ...scores);
+    return best < 0.15 ? -1 : scores.indexOf(best);
+  });
+  at.forEach((i, k) => {
+    if (i < 0) issues.push({ level: 'error', text: `用户给的第 ${k + 1} 段「${secs[k]}」找不到对应的一${unit}，按用户的分段一段一${unit}、顺序不变` });
+  });
+  const found = at.filter((i) => i >= 0);
+  if (found.some((i, k) => k && i < found[k - 1])) issues.push({ level: 'error', text: `各${unit}顺序和用户给的分段顺序不一致，按用户给的顺序排` });
+  for (let k = 1; k < at.length; k++) {
+    if (at[k] >= 0 && at[k] === at[k - 1]) issues.push({ level: 'error', text: `用户给的第 ${k} 段和第 ${k + 1} 段挤在了同一${unit}，应各占一${unit}` });
+  }
+  return issues;
+}
+
+/** Word：按 ## 分节，每节的标题 + 正文 */
+function sectionTexts(content) {
+  const out = [];
+  for (const b of parseDoc(content)) {
+    if (b.type === 'heading' && b.level === 2) out.push('');
+    if (out.length) out[out.length - 1] += ' ' + blockText(b);
+  }
+  return out;
+}
+
 function blockText(b) {
   if (b.type === 'paragraph' || b.type === 'heading') return plain(b.inlines);
   if (b.type === 'list') return b.items.map((it) => plain(it.inlines) + it.children.map(blockText).join('')).join('');
@@ -145,10 +194,10 @@ ${issues.map((x) => `- ${x.text}`).join('\n') || '（无）'}
 文档原文（Markdown）：
 ${String(content).slice(0, 24000)}
 
-${sheet ? `检查：程序查出的每个公式问题都要改掉——对照上面的单元格位置改成正确的引用（如 =SUM(B2:B9) 改成 =SUM(B4:B11)），函数名拼错的改对，除数可能是 0 或空的用 IFERROR(…,"") 包住；在原文里找到那个公式原样替换。也看看有没有漏掉用户要求的内容。` : `检查：有没有漏掉用户要求的内容、字数或页数明显不符、空页空节、表格错乱、${format === 'pptx' ? '某页字太多溢出、' : ''}占位文字没填、前后矛盾${format === 'pptx' ? '' : '、只有一句话没有展开的要点（用 append_after 补上依据和分析）'}。`}
+${sheet ? `检查：程序查出的每个公式问题都要改掉——对照上面的单元格位置改成正确的引用（如 =SUM(B2:B9) 改成 =SUM(B4:B11)），函数名拼错的改对，除数可能是 0 或空的用 IFERROR(…,"") 包住；在原文里找到那个公式原样替换。也看看有没有漏掉用户要求的内容。` : `检查：有没有漏掉用户要求的内容、字数或页数明显不符、空页空节、表格错乱、${format === 'pptx' ? '某页字太多溢出、一页里混进了别的段落的内容、' : ''}占位文字没填、前后矛盾${format === 'pptx' ? '' : '、只有一句话没有展开的要点（用 append_after 补上依据和分析）'}。`}
 ${format === 'pptx' || sheet ? '' : CHECKLIST}
 输出 JSON：{"problems":["问题，没有就空数组"],"edits":[{"find":"原文里一字不差的片段（10-80 字）","replace":"改成"}],"append_after":[{"heading":"已有的标题原文（不带 #）","markdown":"要补在这一节末尾的 Markdown"}]}
-修改只针对上面的问题；材料没有的事实数字不得编造；业务建议可以提出但写明假设。真正需要决策的未知事项集中列出并说明影响，不要满篇待确认，也不能擅自延后用户明确要求。没有问题就都给空数组。`
+修改只针对上面的问题；用户自己给了分段和顺序的，保持一段一${format === 'pptx' ? '页' : '节'}、顺序不变，不把一段的内容挪到别处；材料没有的事实数字不得编造；业务建议可以提出但写明假设。真正需要决策的未知事项集中列出并说明影响，不要满篇待确认，也不能擅自延后用户明确要求。没有问题就都给空数组。`
   }));
   return applyEdits(content, j);
 }
@@ -211,13 +260,13 @@ export function capped(llm, signal, ms = REVIEW_CAP_MS) {
  * @returns {Promise<{ content: string, issues: object[], problems: string[], changed: number, checked: boolean }>}
  */
 export async function selfCheck({ format, content, requirements = '', llm = null, signal, onProgress }) {
-  const issues = lint(format, content);
+  const issues = [...lint(format, content), ...coverageIssues(format, requirements, content)];
   const needModel = llm && DOC_FORMATS.concat('pptx').includes(format) && (requirements || issues.some((x) => x.level === 'error'));
   if (!needModel) return { content, issues, problems: [], changed: 0, checked: false };
   onProgress?.('对照要求自查…');
   try {
     const r = await reviewWithModel({ format, content, requirements, issues, llm: capped(llm, signal), signal });
-    const after = r.changed ? lint(format, r.content) : issues;
+    const after = r.changed ? [...lint(format, r.content), ...coverageIssues(format, requirements, r.content)] : issues;
     return { content: r.content, issues: after, problems: r.problems, changed: r.changed, checked: true };
   } catch (e) {
     throwControl(e, signal);

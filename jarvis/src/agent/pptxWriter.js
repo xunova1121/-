@@ -216,6 +216,27 @@ function fitsLayout(slide, want) {
   }
 }
 
+const LAYOUT_LABEL = Object.fromEntries(Object.entries(LAYOUT_NAMES).reverse().map(([k, v]) => [v, k]));
+/** 指定的版式排不成时，告诉模型差在哪（以前悄悄换回自动选的，模型以为照办了） */
+const LAYOUT_NEEDS = {
+  stats: '2–6 条以数字开头的要点（如“67 万元：总投资”）',
+  cards: '2–8 条“标签：说明”',
+  steps: '3–7 条“标签：说明”',
+  timeline: '3–7 条以日期开头的要点（如“11月1日：初验”）',
+  flow: '一句“A→B→C”的链路',
+  compare: '两个 ### 小标题',
+  chart: '带数字列的表格',
+  progress: '“名称：百分比”或只有百分比列的表格',
+  table: '一张表格',
+  statement: '一到三句、共 200 字以内的话',
+  section: '只有标题或标题加一句话'
+};
+export function ignoredLayout(slide, kind) {
+  const want = slide.layout;
+  if (!want || want === kind || !LAYOUT_NEEDS[want]) return '';
+  return `「${slide.title || '无标题'}」写了“版式：${LAYOUT_LABEL[want]}”，但${LAYOUT_LABEL[want]}要 ${LAYOUT_NEEDS[want]}，这页内容对不上，已按${LAYOUT_LABEL[kind] ?? '要点'}排；要用${LAYOUT_LABEL[want]}就把内容改成这种写法`;
+}
+
 function autoLayout(slide, { first = false, last = false } = {}) {
   const bs = slide.blocks;
   const has = (t) => bs.some((b) => b.type === t);
@@ -536,6 +557,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
 
   // ---------- 各页
   const pages = []; // 每页的页码和版式：查“连续好几页都是普通列表”
+  const ignored = []; // 指定了版式但内容排不成的页
   const cardVariants = []; // 连续卡片页各用了哪种版式；中间隔了别的版式就重新开始
   for (const [i, s] of slides.entries()) {
     const kind = kinds[i];
@@ -544,6 +566,8 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
     const sl = addSlide(s.title);
     const n = records.length;
     pages.push({ n, kind });
+    const why = ignoredLayout(s, kind);
+    if (why) ignored.push({ level: 'warn', slide: n, text: `第 ${n} 页${why}` });
     const lines = s.blocks.flatMap(blockLines).filter(Boolean);
     switch (kind) {
       case 'section': {
@@ -826,7 +850,7 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   }
   const blob = await pptx.write({ outputType: 'blob' });
   const preview = records.map(({ n, title: t, items, slide }) => ({ n, title: t, items, background: slide.background?.color }));
-  return { blob, info: { slides: slides.length + 1, layouts, missingImages, preview, layoutIssues: [...layoutIssues(preview), ...monotony(pages)] } };
+  return { blob, info: { slides: slides.length + 1, layouts, missingImages, preview, layoutIssues: [...layoutIssues(preview), ...monotony(pages), ...ignored] } };
 }
 
 /** 连续 3 页以上都是普通要点列表：看着单调，提醒换版式（交给模型改一轮） */
