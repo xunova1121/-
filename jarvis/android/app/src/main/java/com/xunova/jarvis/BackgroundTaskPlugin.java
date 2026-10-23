@@ -42,6 +42,17 @@ public class BackgroundTaskPlugin extends Plugin {
             call.resolve();
         } catch (Exception e) { call.reject("通知发不出去：" + e.getMessage()); }
     }
+    /** 后台待命（常驻通知）开关：on 不传就只读当前状态 */
+    @PluginMethod public void standby(PluginCall call) {
+        Boolean on = call.getBoolean("on");
+        if (on != null) {
+            if (on && !canNotify() && getActivity() != null) ActivityCompat.requestPermissions(getActivity(), new String[]{ Manifest.permission.POST_NOTIFICATIONS }, 7072);
+            StandbyService.apply(getContext(), on);
+        }
+        com.getcapacitor.JSObject r = new com.getcapacitor.JSObject();
+        r.put("on", StandbyService.enabled(getContext()));
+        call.resolve(r);
+    }
     @PluginMethod public void set(PluginCall call) {
         getActivity().runOnUiThread(() -> {
             try {

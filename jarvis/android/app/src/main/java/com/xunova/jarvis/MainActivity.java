@@ -40,6 +40,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(NativeStreamPlugin.class);registerPlugin(MobileSpeechPlugin.class);registerPlugin(EdgeSpeechPlugin.class);
         registerPlugin(QwenRealtimePlugin.class);registerPlugin(BackgroundTaskPlugin.class);registerPlugin(KeepAwakePlugin.class);
         super.onCreate(state);
+        // 开着“后台待命”的：每次打开都挂上通知（被系统关掉、划掉后再打开时恢复）
+        if(StandbyService.enabled(this))StandbyService.apply(this,true);
         WebView web=getBridge().getWebView();
         if(Build.VERSION.SDK_INT>=26)web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT,true);
         // 保持平台默认绘图路径；不再因为一次异常强制软件绘制 24 小时。

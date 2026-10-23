@@ -39,6 +39,7 @@ import { initHologramCompanion } from './ui/hologramScene.js';
 import { initCompanionAppearance } from './ui/companionAppearance.js';
 import { initConversationComposer } from './ui/conversationComposer.js';
 import { initRenderHealthPanel } from './mobile/renderHealth.js';
+import { initStandbyToggle } from './mobile/standby.js';
 import { $, body, DESKTOP, COMPACT, narrow, toast, wp } from './app/env.js';
 import { createApp, mount } from './app/context.js';
 import { createStage } from './app/stage.js';
@@ -286,6 +287,7 @@ if (MOBILE) {
 }
 composer = initConversationComposer({ cancelDictation: () => app.stopDictation() });
 initCompanionAppearance();
+initStandbyToggle({ toast });
 initRenderHealthPanel({
   mobile: MOBILE,
   toast,
