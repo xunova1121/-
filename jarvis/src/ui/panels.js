@@ -12,7 +12,7 @@ import { renderBlocks } from './transcript.js';
 import { PROVIDERS, providerById, loadConfig, saveConfig, modelOf, createAdapter } from '../llm/config.js';
 import { probeEndpoint } from '../llm/probe.js';
 import { createSearch, searchEngines } from '../agent/webSearch.js';
-import { saveFile } from './saveFile.js';
+import { saveFile, shareFile, canShareFile } from './saveFile.js';
 import { renderDocx } from './docxView.js';
 import { MOBILE } from '../config.js';
 import { initChangesPanel } from './changesPanel.js';
@@ -198,6 +198,11 @@ export function initPanels({ toast, getGateway, onConfigChange, getHistory, sett
   }
 
   $('#btn-v-download').addEventListener('click', () => current && download(current).catch((e) => toast(e.message)));
+  // 安卓 App：“分享”才弹系统分享面板（下载只保存，不再自动跳去别的应用）
+  if (canShareFile()) {
+    $('#btn-v-share').hidden = false;
+    $('#btn-v-share').addEventListener('click', () => current && ws.readBlob(current).then((blob) => shareFile(blob, current.split('/').pop())).then(toast, (e) => toast(e.message)));
+  }
   $('#btn-v-open').addEventListener('click', async () => {
     if (!current) return;
     let blob = await ws.readBlob(current);

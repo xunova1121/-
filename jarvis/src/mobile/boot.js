@@ -9,7 +9,7 @@
 import { MOBILE } from '../config.js';
 import { wrapFetch, nativeFetcher, nativeStreamFetcher, nativeRouter } from './nativeFetch.js';
 import { installSpeechShim } from './speechShim.js';
-import { createNativeSaver } from './saveNative.js';
+import { createNativeSaver, createNativeSharer } from './saveNative.js';
 import { applyDisplayMode } from './renderHealth.js';
 import { startScreenTrail } from './renderDiagnostics.js';
 import { summarizeExits, dropMemoryNotes, KILLED_TIP } from './exitReasons.js';
@@ -93,11 +93,13 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
     addEventListener('load',apply);
     document.addEventListener('visibilitychange',()=>{if(!document.hidden){last='';apply();}});
   } catch { /* 旧版 Capacitor 没有 SystemBars */ }
-  // 下载：WebView 里网页下载不起作用。存到“文档/Jarvis”，再弹出系统分享（用 WPS、微信等打开或发送）
-  globalThis.__jarvisSaveFile = async (blob, name) => {
+  // 下载：WebView 里网页下载不起作用。只存到“文档/Jarvis”，不自动跳去别的应用；点“分享”才弹系统分享面板
+  const nativeFiles = async () => {
     const [{ Filesystem, Directory }, { Share }] = await Promise.all([import('@capacitor/filesystem'), import('@capacitor/share')]);
-    return createNativeSaver({ Filesystem, Directory, Share, toast: (t) => globalThis.__jarvisToast?.(t) })(blob, name);
+    return { Filesystem, Directory, Share, toast: (t) => globalThis.__jarvisToast?.(t) };
   };
+  globalThis.__jarvisSaveFile = async (blob, name) => createNativeSaver(await nativeFiles())(blob, name);
+  globalThis.__jarvisShareFile = async (blob, name) => createNativeSharer(await nativeFiles())(blob, name);
 
   // 自动更新：后台下载新版安装包，顶栏点“安装新版本”（见 appUpdate.js；界面在 main.js 里和电脑版共用）
   try {
