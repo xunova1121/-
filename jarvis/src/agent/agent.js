@@ -35,6 +35,7 @@ import * as ws from './workspace.js';
 import * as packs from './skillPacks.js';
 import { summaryBlock } from './compress.js';
 import { DOCUMENT_TOOLS, createToolLoader } from './toolLoader.js';
+import { taskContract } from './taskContract.js';
 
 import { createPlanTool, unfinished } from './plan.js';
 import { loadRules, rulesBlock } from './projectRules.js';
@@ -217,7 +218,9 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       return '已解除一分钟时限：按任务需要多查、多做，做完照常回答。';
     }
   };
-  const own = [plan.tool, review.tool, executionTool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools: availableTools })] : []), ...(lookupDeadline && lookupControl?.release ? [moreTimeTool] : [])].filter((t) => !tools.some((x) => x.name === t.name));
+  // 只做一个文件、要求也不长（一份周报、一张表、几页汇报）：不给任务清单工具——评测里模型照样列计划、改计划四五次，每次多等一轮
+  const oneFile = taskContract(requirementText).formats.length === 1 && String(requirementText).length <= 150 && !/方案|调研|研究|论文|多份|分别/.test(requirementText);
+  const own = [...(oneFile ? [] : [plan.tool]), review.tool, executionTool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools: availableTools })] : []), ...(lookupDeadline && lookupControl?.release ? [moreTimeTool] : [])].filter((t) => !tools.some((x) => x.name === t.name));
   // 工具按需加载：工具多时只带常用的完整说明，其余列名字、用 tool_search 加载（见 toolLoader.js）
   // 普通问答、查资料：做文档的工具先只列名字（用到时按名字调用或 tool_search 加载）
   let loader = createToolLoader(light ? [] : [...tools, ...own], { defer: isQuickLookup(requirementText, images) ? DOCUMENT_TOOLS : null });

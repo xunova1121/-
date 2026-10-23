@@ -81,3 +81,18 @@ describe('普通问答少带做文档的工具说明', () => {
     expect(full.list().map((t) => t.name)).toContain('write_professional_document');
   });
 });
+
+describe('只做一个文件的短任务不给任务清单工具（评测里 Excel、PPT 列计划改计划四五次）', () => {
+  it('一张表、几页 PPT：不带 update_plan；长方案照常带', async () => {
+    const { runAgent } = await import('../src/agent/agent.js');
+    const seen = async (userText) => {
+      let names = [];
+      const adapter = { async stream({ tools }) { names = tools.map((t) => t.name); return { text: '好', toolCalls: [], stop: 'end_turn' }; } };
+      await runAgent({ adapter, model: 'x', history: [], userText, context: { dynamic: '' }, tools: [], emit: () => {} });
+      return names;
+    };
+    expect(await seen('生成Excel结算表：毛重100、筐重5、单价12，净重和金额用公式')).not.toContain('update_plan');
+    expect(await seen('生成5页项目试点汇报PPT：背景、目标、流程、风险、待决策')).not.toContain('update_plan');
+    expect(await seen('写一份1500至2500字的水产交易试点建设方案Word，覆盖正常交易、退货、断网补传、损耗、货权、结算对账和验收')).toContain('update_plan');
+  });
+});
