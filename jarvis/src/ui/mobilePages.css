@@ -11,7 +11,7 @@
   background: var(--bg);
   border-bottom-color: var(--line);
   min-height: 48px;
-  font-size: .875rem;
+  font-size: 0.875rem;
 }
 :root body.compact.companion-edition .pane {
   padding-inline: 20px;
@@ -42,19 +42,24 @@
   border-radius: 16px;
   min-width: 0;
 }
-:root body.compact.companion-edition :is(.setting, .set-more) { padding: 14px; }
+:root body.compact.companion-edition :is(.setting, .set-more) {
+  padding: 14px;
+}
 :root body.compact.companion-edition :is(.setting label, .setting .label, .setting > span, .set-more summary, .drawer-item-t, .skill-name) {
-  font-size: .9375rem;
+  font-size: 0.9375rem;
   line-height: 1.6;
   color: var(--text);
 }
 :root body.compact.companion-edition :is(.muted, .setting small, .setting p, .ml-scope-note, .ml-connection, .mc-ability-meta, .skill-desc, .empty) {
   color: var(--muted);
-  font-size: .8125rem;
+  font-size: 0.8125rem;
   line-height: 1.65;
   overflow-wrap: anywhere;
 }
-:root body.compact.companion-edition :is(.setting, .pane, .mc-picker, .mp-sheet) :is(input:not([type='checkbox']):not([type='radio']):not([type='range']), select, textarea) {
+:root
+  body.compact.companion-edition
+  :is(.setting, .pane, .mc-picker, .mp-sheet)
+  :is(input:not([type='checkbox']):not([type='radio']):not([type='range']), select, textarea) {
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
@@ -62,14 +67,16 @@
   background: var(--surface);
   border: 1px solid var(--line-strong);
   border-radius: 12px;
-  font-size: .9375rem;
+  font-size: 0.9375rem;
   line-height: 1.5;
   min-height: 44px;
 }
-:root body.compact.companion-edition :is(input[type='checkbox'], input[type='radio'], input[type='range']) { accent-color: var(--accent); }
+:root body.compact.companion-edition :is(input[type='checkbox'], input[type='radio'], input[type='range']) {
+  accent-color: var(--accent);
+}
 :root body.compact.companion-edition :is(.btn, .pane-actions button, .seg button, .mp-item, .mc-nav-tab, .ml-tabs button) {
   min-height: 44px;
-  font-size: .875rem;
+  font-size: 0.875rem;
   border-color: var(--line);
   box-shadow: none;
 }
@@ -77,7 +84,9 @@
   color: var(--text);
   background: var(--accent-soft);
 }
-:root body.compact.companion-edition :is(.file-list, .skill-list, .mem-list, .sessions-list) { padding-inline: 0; }
+:root body.compact.companion-edition :is(.file-list, .skill-list, .mem-list, .sessions-list) {
+  padding-inline: 0;
+}
 :root body.compact.companion-edition :is(.file-list li, .skill-list li, .mem, .session-item, .drawer-row) {
   min-width: 0;
   border-color: var(--line);
@@ -89,16 +98,24 @@
 :root body.compact.companion-edition :is(.file-list .fn, .viewer-name, .skill-name, .drawer-item-t, .ml-model-name, .mc-ability-model) {
   min-width: 0;
   overflow-wrap: anywhere;
-  font-size: .9375rem;
+  font-size: 0.9375rem;
 }
-:root body.compact.companion-edition :is(.file-list .fs, .file-time, .badge, .tag) { font-size: .75rem; }
+:root body.compact.companion-edition :is(.file-list .fs, .file-time, .badge, .tag) {
+  font-size: 0.75rem;
+}
 :root body.compact.companion-edition :is(.fx, .tag, .badge, .ws-category.active) {
   color: var(--accent);
   background: var(--accent-soft);
   border-color: var(--line);
 }
-:root body.compact.companion-edition .drawer { border-right-color: var(--line); }
-:root body.compact.companion-edition .drawer-new { color: var(--accent); background: var(--accent-soft); border-color: var(--line); }
+:root body.compact.companion-edition .drawer {
+  border-right-color: var(--line);
+}
+:root body.compact.companion-edition .drawer-new {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--line);
+}
 :root body.compact.companion-edition :is(.drawer-search, .ws-controls input, .ws-categories button) {
   color: var(--text);
   background: var(--surface);
@@ -110,7 +127,9 @@
   background: var(--surface-2);
   border-color: var(--line);
 }
-:root body.compact.companion-edition .viewer-body :is(pre, code) { background: var(--code-bg); }
+:root body.compact.companion-edition .viewer-body :is(pre, code) {
+  background: var(--code-bg);
+}
 :root body.compact.companion-edition #model-workspace {
   --ml-bg: var(--bg);
   --ml-surface: var(--surface);
@@ -121,12 +140,23 @@
   --mc-wash: var(--accent-soft);
   color: var(--text);
 }
-:root body.compact.companion-edition :is(.ml-tabs, .mc-nav, .mc-picker-tabs) { background: var(--surface); border-color: var(--line); }
-:root body.compact.companion-edition :is(.mc-picker, .mp-sheet, .weather-dialog) { border-radius: 24px; }
-:root body.compact.companion-edition :is(dialog::backdrop, .drawer-scrim, .mp-scrim, .weiyang-menu-shade) { background: var(--overlay); }
+:root body.compact.companion-edition :is(.ml-tabs, .mc-nav, .mc-picker-tabs) {
+  background: var(--surface);
+  border-color: var(--line);
+}
+:root body.compact.companion-edition :is(.mc-picker, .mp-sheet, .weather-dialog) {
+  border-radius: 24px;
+}
+:root body.compact.companion-edition :is(dialog::backdrop, .drawer-scrim, .mp-scrim, .weiyang-menu-shade) {
+  background: var(--overlay);
+}
 /* 正文不再占据大角色头部；每条回答保留小头像和统一的阅读面板。 */
-:root body.compact.companion-edition .transcript { padding-inline: 20px; }
-:root body.compact.companion-edition .transcript:has(> .home-reference) { padding-inline: 0; }
+:root body.compact.companion-edition .transcript {
+  padding-inline: 20px;
+}
+:root body.compact.companion-edition .transcript:has(> .home-reference) {
+  padding-inline: 0;
+}
 :root body.compact.companion-edition .msg.agent {
   padding: 14px;
   border: 1px solid var(--line);
@@ -146,7 +176,7 @@
   min-height: 44px;
   height: auto !important;
   margin: 0 0 10px !important;
-  font-size: .8125rem;
+  font-size: 0.8125rem;
 }
 :root body.compact.companion-edition .msg.agent > .who .who-mood,
 :root body.compact.companion-edition .msg.agent:not(:last-child) > .who .who-mood {
@@ -156,9 +186,20 @@
   height: 44px;
   margin: 0 !important;
 }
-:root body.compact.companion-edition .msg.agent > .who .wy-reply-greeting { display: none; }
-:root body.compact.companion-edition .msg.agent .body { font-size: 1rem; line-height: 1.65; overflow-wrap: anywhere; }
-:root body.compact.companion-edition .msg.agent .body :is(h1, h2, h3) { font-size: 1.0625rem; line-height: 1.5; font-weight: 600; letter-spacing: 0; }
+:root body.compact.companion-edition .msg.agent > .who .wy-reply-greeting {
+  display: none;
+}
+:root body.compact.companion-edition .msg.agent .body {
+  font-size: 1rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+:root body.compact.companion-edition .msg.agent .body :is(h1, h2, h3) {
+  font-size: 1.0625rem;
+  line-height: 1.5;
+  font-weight: 600;
+  letter-spacing: 0;
+}
 :root body.compact.companion-edition .msg.user {
   max-width: 86%;
   padding: 12px 14px;
@@ -168,15 +209,31 @@
   font-size: 1rem;
   line-height: 1.55;
 }
-:root[data-theme='light'] body.compact.companion-edition .msg.user { background: linear-gradient(120deg, #9a90fb, #8355f1); color: #fff; }
-:root[data-theme='light'] body.compact.companion-edition .msg.user :is(.who, .who-time, button) { color: rgba(255, 255, 255, .94); }
-:root body.compact.companion-edition .msg-actions { border-top: 1px solid var(--line); padding-top: 10px; }
-:root body.compact.companion-edition .msg-actions button { color: var(--accent); min-width: 36px; min-height: 36px; }
-:root body.compact.companion-edition .progress-card { background: var(--surface-2); border-color: var(--line); border-radius: 16px; }
+:root[data-theme='light'] body.compact.companion-edition .msg.user {
+  background: linear-gradient(120deg, #9a90fb, #8355f1);
+  color: #fff;
+}
+:root[data-theme='light'] body.compact.companion-edition .msg.user :is(.who, .who-time, button) {
+  color: rgba(255, 255, 255, 0.94);
+}
+:root body.compact.companion-edition .msg-actions {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+:root body.compact.companion-edition .msg-actions button {
+  color: var(--accent);
+  min-width: 36px;
+  min-height: 36px;
+}
+:root body.compact.companion-edition .progress-card {
+  background: var(--surface-2);
+  border-color: var(--line);
+  border-radius: 16px;
+}
 :root body.compact.companion-edition .msg.agent.streaming > .who::after {
   content: attr(data-status);
   color: var(--muted);
-  font-size: .75rem;
+  font-size: 0.75rem;
   white-space: normal;
   min-width: 0;
   flex: 1;
@@ -194,4 +251,8 @@
   border-color: var(--line);
   font-family: var(--font-ui);
 }
-:root body.compact.companion-edition :is(.holo-message, .holo-form, .holo-controls button) { background: var(--surface); border-color: var(--line); color: var(--text); }
+:root body.compact.companion-edition :is(.holo-message, .holo-form, .holo-controls button) {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--text);
+}

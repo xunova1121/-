@@ -4,7 +4,7 @@
   position: relative;
   flex-shrink: 0;
   width: calc(100% - 32px);
-  margin: 38px 16px 8px;
+  margin: 42px 16px 8px;
   padding: 7px 8px;
   border: 1px solid var(--line);
   border-radius: 28px;
@@ -29,14 +29,16 @@
   max-height: 116px;
   min-width: 0;
   width: 100%;
-  font-size: .9375rem;
+  font-size: 0.9375rem;
   line-height: 1.5;
   color: var(--text);
   border-radius: 0;
   background: transparent;
   resize: none;
 }
-:root body.compact.companion-edition .conversation-composer #prompt::placeholder { color: var(--dim); }
+:root body.compact.companion-edition .conversation-composer #prompt::placeholder {
+  color: var(--dim);
+}
 :root body.compact.companion-edition .conversation-composer .composer-row > #btn-attach {
   grid-column: 1;
   grid-row: 1;
@@ -48,17 +50,17 @@
 }
 :root body.compact.companion-edition .conversation-composer .composer-row > #model-chip {
   position: absolute;
-  top: -35px;
+  top: -39px;
   left: 0;
   width: auto;
   max-width: calc(100% - 8px);
   min-width: 70px;
-  min-height: 32px;
+  min-height: 36px;
   margin: 0;
   padding: 5px 12px;
   border: 1px solid var(--line);
   border-radius: 18px;
-  font-size: .75rem;
+  font-size: 0.75rem;
   color: var(--muted);
   background: var(--surface);
 }
@@ -89,18 +91,39 @@
   color: #fff;
   box-shadow: none;
 }
-:root body.compact.companion-edition .conversation-composer.has-draft:not(.is-working) #prompt { grid-column: 2 / 4; }
-:root body.compact.companion-edition .conversation-composer .composer-row > #vad-meter { grid-row: 2; }
+:root body.compact.companion-edition .conversation-composer.has-draft:not(.is-working) #prompt {
+  grid-column: 2 / 4;
+}
+:root body.compact.companion-edition .conversation-composer .composer-row > #vad-meter {
+  grid-row: 2;
+}
 :root body.compact.companion-edition .composer-more {
   background: var(--surface-2);
   border-color: var(--line);
   border-radius: 20px;
-  box-shadow: 0 8px 24px rgba(46, 35, 90, .1);
+  box-shadow: 0 8px 24px rgba(46, 35, 90, 0.1);
 }
-:root body.compact.companion-edition .composer-more button { font-size: .875rem; background: var(--surface); border-color: var(--line); }
-:root body.compact.companion-edition .voice-call-panel { font-size: .8125rem; background: var(--accent-soft); color: var(--text); }
-:root body.compact.companion-edition .attach-list { max-width: 100%; min-width: 0; }
+:root body.compact.companion-edition .composer-more button {
+  font-size: 0.875rem;
+  background: var(--surface);
+  border-color: var(--line);
+}
+:root body.compact.companion-edition .voice-call-panel {
+  font-size: 0.8125rem;
+  background: var(--accent-soft);
+  color: var(--text);
+}
+:root body.compact.companion-edition .attach-list {
+  max-width: 100%;
+  min-width: 0;
+}
 @media (max-width: 350px) {
-  :root body.compact.companion-edition .conversation-composer { width: calc(100% - 24px); margin-inline: 12px; }
-  :root body.compact.companion-edition .conversation-composer .composer-row { grid-template-columns: 36px minmax(0, 1fr) 36px 40px; gap: 2px; }
+  :root body.compact.companion-edition .conversation-composer {
+    width: calc(100% - 24px);
+    margin-inline: 12px;
+  }
+  :root body.compact.companion-edition .conversation-composer .composer-row {
+    grid-template-columns: 36px minmax(0, 1fr) 36px 40px;
+    gap: 2px;
+  }
 }

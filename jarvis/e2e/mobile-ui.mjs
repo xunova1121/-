@@ -144,7 +144,7 @@ try{
   await page.locator('.holo-pet').click();
   check('全息角色摸头有表情和光圈回应',await page.locator('.holo-pet .wy-mascot').getAttribute('data-state')==='pet'&&/开心/.test(await page.locator('.holo-bubble').textContent()));
   await page.locator('[data-pose=love]').click();
-  check('全息角色比心使用最新角色素材',await page.locator('.holo-pet .wy-mascot').evaluate(el=>el.dataset.state==='love'&&getComputedStyle(el).backgroundImage.includes('mascot-companion')));
+  check('全息角色比心使用最新角色素材',await page.locator('.holo-pet .wy-mascot').evaluate(el=>el.dataset.state==='love'&&getComputedStyle(el).backgroundImage.includes('mascot-approved')));
   await page.screenshot({path:path.join(OUT,'hologram-mobile.png')});
   await page.locator('.holo-form input').fill('请帮我整理今天的计划');await page.locator('.holo-form button').click();
   await page.waitForFunction(()=>document.querySelector('.holo-message.assistant')?.textContent.includes('第 1 项')&&!document.querySelector('.holo-form button').disabled);
@@ -270,10 +270,10 @@ try{
   for(const width of [320,360,390,412]){
     const narrow=await browser.newPage({viewport:{width,height:780}});await narrow.goto(BASE);await narrow.waitForSelector('body.companion-edition');
     await narrow.waitForFunction(()=>window.__jarvis?.send);await narrow.evaluate(()=>{document.documentElement.style.fontSize='18px';document.getElementById('model-chip-text').textContent='服务器 · claude-sonnet-very-long-model-name';});
-    check(`${width}px 手机空白输入区保持同排、不溢出`,await narrow.evaluate(()=>{const r=id=>document.getElementById(id).getBoundingClientRect(),model=r('model-chip'),mic=r('btn-mic'),call=r('btn-call');return document.documentElement.scrollWidth<=innerWidth&&model.width>=50&&model.right<=mic.left&&mic.right<=call.left&&Math.abs(mic.top-call.top)<=3&&document.getElementById('btn-send').hidden;}));
+    check(`${width}px 手机空白输入区保持同排、不溢出`,await narrow.evaluate(()=>{const r=id=>document.getElementById(id).getBoundingClientRect(),model=r('model-chip'),mic=r('btn-mic'),call=r('btn-call');return document.documentElement.scrollWidth<=innerWidth&&model.width>=50&&model.right<=innerWidth-12&&model.bottom<=mic.top+1&&mic.right<=call.left&&Math.abs(mic.top-call.top)<=3&&document.getElementById('btn-send').hidden;}));
     await narrow.fill('#prompt','生成中继续补充要求');await narrow.evaluate(()=>document.body.classList.add('generating'));
     await narrow.waitForFunction(()=>document.getElementById('inputbar').classList.contains('is-working'));
-    check(`${width}px 生成中发送和停止同时可用、不挤到下一行`,await narrow.evaluate(()=>{const r=id=>document.getElementById(id).getBoundingClientRect(),stop=r('btn-stop'),send=r('btn-send'),model=r('model-chip');return stop.width>=36&&send.width>=36&&Math.abs(stop.top-send.top)<=3&&model.right<=stop.left&&stop.right<=send.left&&send.right<=innerWidth-12&&!document.getElementById('btn-send').disabled;}));
+    check(`${width}px 生成中发送和停止同时可用、不挤到下一行`,await narrow.evaluate(()=>{const r=id=>document.getElementById(id).getBoundingClientRect(),stop=r('btn-stop'),send=r('btn-send'),model=r('model-chip');return stop.width>=36&&send.width>=36&&Math.abs(stop.top-send.top)<=3&&model.bottom<=stop.top+1&&model.right<=innerWidth-12&&stop.right<=send.left&&send.right<=innerWidth-12&&!document.getElementById('btn-send').disabled;}));
     await narrow.evaluate(()=>document.body.classList.remove('generating'));await narrow.fill('#prompt','');
     await narrow.screenshot({path:path.join(OUT,`mobile-unified-${width}.png`)});await narrow.close();
   }

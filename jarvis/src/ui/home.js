@@ -15,7 +15,7 @@ const choices = [
   ['chat', '先陪我聊一会儿', '先陪我聊一会儿。'],
   ['spark', '寻找创作灵感', '帮我寻找创作灵感，先一起梳理目标：'],
   ['search', '研究一个话题', '帮我研究一个话题，并注明来源：'],
-  ['calendar', '安排明天行程', '帮我安排明天的行程，我需要完成：'],
+  ['calendar', '安排明天行程', '帮我安排明天的行程，我需要完成：']
 ];
 
 function icon(kind) {
@@ -25,7 +25,7 @@ function icon(kind) {
     chat: 'M21 11a8 8 0 0 1-8 8H8l-5 3v-6a8 8 0 1 1 18-5M8 10h8M8 14h5',
     spark: 'M12 2l3 7 7 3-7 3-3 7-3-7-7-3 7-3z',
     search: 'M20 20l-5-5M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0',
-    calendar: 'M4 5h16v16H4zM8 2v6M16 2v6M4 10h16M8 14h3M13 17h3',
+    calendar: 'M4 5h16v16H4zM8 2v6M16 2v6M4 10h16M8 14h3M13 17h3'
   };
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
@@ -41,9 +41,13 @@ export function createHome({ weather, fill, openPanel }) {
   const root = element('div', undefined, 'welcome wy-home home-reference');
   const hero = element('section', undefined, 'home-hero');
   const copy = element('div', undefined, 'home-hero-copy');
-  const hour = Number(new Intl.DateTimeFormat('en-GB', {
-    hour: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Shanghai',
-  }).format(new Date()));
+  const hour = Number(
+    new Intl.DateTimeFormat('en-GB', {
+      hour: '2-digit',
+      hourCycle: 'h23',
+      timeZone: 'Asia/Shanghai'
+    }).format(new Date())
+  );
   const greeting = hour < 5 ? '夜深了' : hour < 11 ? '早上好' : hour < 13 ? '中午好' : hour < 18 ? '下午好' : '晚上好';
   const title = element('h1', `${greeting}，我在呢。`);
   const care = element('p', '今天想做什么，都可以和我说。', 'home-care');
@@ -76,7 +80,12 @@ export function createHome({ weather, fill, openPanel }) {
     }, 2400);
   };
 
-  const weatherUI = createHomeWeather({ client: weather, onAdvice: text => { care.textContent = text; } });
+  const weatherUI = createHomeWeather({
+    client: weather,
+    onAdvice: (text) => {
+      care.textContent = text;
+    }
+  });
   root.append(weatherUI.root, hero);
   const head = element('div', undefined, 'home-suggestions-head');
   head.append(element('span', '未央为你准备了'));
@@ -86,20 +95,22 @@ export function createHome({ weather, fill, openPanel }) {
   const suggestions = element('div', undefined, 'home-suggestions');
   let offset = 0;
   function renderSuggestions() {
-    suggestions.replaceChildren(...[0, 1, 2].map(index => {
-      const [kind, caption, draft] = choices[(offset + index) % choices.length];
-      const button = element('button', undefined, 'home-suggestion');
-      button.type = 'button';
-      const mark = element('span', undefined, 'home-task-icon');
-      mark.append(icon(kind));
-      const arrow = element('span', '›', 'home-task-arrow');
-      arrow.setAttribute('aria-hidden', 'true');
-      button.append(mark, element('span', caption, 'home-task-label'), arrow);
-      // 建议只填入输入框；用户明确发送前不自动产生模型费用。
-      button.onclick = () => fill(draft);
-      if (kind === 'spark') button.classList.add('home-start');
-      return button;
-    }));
+    suggestions.replaceChildren(
+      ...[0, 1, 2].map((index) => {
+        const [kind, caption, draft] = choices[(offset + index) % choices.length];
+        const button = element('button', undefined, 'home-suggestion');
+        button.type = 'button';
+        const mark = element('span', undefined, 'home-task-icon');
+        mark.append(icon(kind));
+        const arrow = element('span', '›', 'home-task-arrow');
+        arrow.setAttribute('aria-hidden', 'true');
+        button.append(mark, element('span', caption, 'home-task-label'), arrow);
+        // 建议只填入输入框；用户明确发送前不自动产生模型费用。
+        button.onclick = () => fill(draft);
+        if (kind === 'spark') button.classList.add('home-start');
+        return button;
+      })
+    );
   }
   refresh.onclick = () => {
     offset = (offset + 3) % choices.length;
