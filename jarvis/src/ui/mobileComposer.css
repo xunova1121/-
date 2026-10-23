@@ -127,3 +127,11 @@
     gap: 2px;
   }
 }
+/* 极窄屏列宽缩小时同步缩小按钮，避免相邻点击区域出现两像素重叠。 */
+@media (max-width: 350px) {
+  :root body.compact.companion-edition .conversation-composer .composer-row > #btn-attach,
+  :root body.compact.companion-edition .conversation-composer .composer-row > #btn-mic,
+  :root body.compact.companion-edition .conversation-composer .composer-row > #btn-stop { width: 36px; }
+  :root body.compact.companion-edition .conversation-composer .composer-row > #btn-call,
+  :root body.compact.companion-edition .conversation-composer .composer-row > #btn-send { width: 40px; }
+}
