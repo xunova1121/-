@@ -1,11 +1,13 @@
 import './companionRefresh.css';
 import './mobileTheme.css';
+import { initMobileStartup } from './mobileStartup.js';
 
 /** 只管理布局：键盘出现时让角色退让，阅读旧消息时保留阅读位置。 */
 export function initCompanionAppearance() {
   const body = document.body,
     viewport = window.visualViewport;
   body.classList.add('companion-edition');
+  initMobileStartup();
   dispatchEvent(new Event('jarvis:chrome-ready'));
   let fullHeight = viewport?.height || innerHeight;
   let keyboardOpen = false;

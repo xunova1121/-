@@ -23,9 +23,9 @@
   </script>
 </head>
 <body>
-  <!-- 手机 App 的启动页：logo 动效，至少显示一会儿再进界面（main.js 加载完后淡出；万一脚本出错 8 秒后也会消失） -->
+  <!-- 手机 App 的启动页：轻量眨眼挥手动效，界面就绪后立即淡出；脚本出错仍有8秒清理兜底 -->
   <div id="app-splash" aria-hidden="true">
-    <div class="as-inner"><div class="as-glow"></div><div class="as-logo"><i class="as-lid l"></i><i class="as-lid r"></i><i class="as-spark"></i><i class="as-star a"></i><i class="as-star b"></i><i class="as-shine"></i></div><div class="as-name"><span>未</span><span>央</span></div><div class="as-sub">WEIYANG AI</div><div class="as-dots"><i></i><i></i><i></i></div></div>
+    <div class="as-inner"><div class="as-glow"></div><div class="as-logo"><i class="as-lid l"></i><i class="as-lid r"></i><i class="as-spark"></i><i class="as-star a"></i><i class="as-star b"></i><i class="as-shine"></i></div><div class="as-name"><span>未</span><span>央</span></div><div class="as-sub">我在，和你一起开始。</div><div class="as-dots"><i></i><i></i><i></i></div></div>
   </div>
   <script>setTimeout(function () { var s = document.getElementById('app-splash'); if (s) s.remove(); }, 8000);</script>
   <div class="boot" id="boot" aria-hidden="true">

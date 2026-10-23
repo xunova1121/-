@@ -42,7 +42,7 @@ export function initMascots() {
   for (const mark of marks()) {
     mark.classList.add('wy-brand');
     if (mark.matches('.brand-mark, .welcome-hero .cloud, .wb-mark, .wb-hero-mark')) { mark.removeAttribute('aria-hidden'); mark.setAttribute('role', 'button'); mark.tabIndex = 0; mark.setAttribute('aria-label', '打开未央，和我说话'); mark.closest('.welcome-hero')?.removeAttribute('aria-hidden'); }
-    mark.replaceChildren(createMascot(mark.matches('.as-logo') ? 'spin' : 'idle'));
+    mark.replaceChildren(createMascot(mark.matches('.as-logo') ? 'wave' : 'idle'));
   }
   let task = 'idle';
   let sleeping = false;

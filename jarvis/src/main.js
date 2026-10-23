@@ -296,16 +296,5 @@ initRenderHealthPanel({
   }
 });
 
-// 手机启动页：界面准备好、并且至少显示了 2 秒后淡出（太快一闪而过不像 App）
-{
-  const splash = document.getElementById('app-splash');
-  if (splash) {
-    const wait = MOBILE ? Math.max(0, 2000 - performance.now()) : 0;
-    setTimeout(() => {
-      splash.classList.add('out');
-      setTimeout(() => splash.remove(), 420);
-    }, wait);
-  }
-}
 
 app.initPendingList();
