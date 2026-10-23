@@ -263,3 +263,6 @@
 :root body.compact.companion-edition .msg.user .who { font-size: .625rem; margin-bottom: 4px; }
 :root body.compact.companion-edition .msg.agent .body p { margin-block: .4em; }
 :root body.compact.companion-edition .msg.agent .body li { margin-block: .2em; }
+/* 用户正文原先单独指定了字号，不能只改气泡父级。 */
+:root body.compact.companion-edition .msg.user .body { font-size: .875rem; line-height: 1.55; }
+:root body.compact.companion-edition .msg.user .meta { margin-top: 4px; }
