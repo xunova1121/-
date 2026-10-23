@@ -14,6 +14,7 @@ export function mobileModelNavigation({
   showPage,
   chooseProvider,
   pullModels,
+  pullStatus = () => '',
   catalog
 }) {
   const nav = node('nav', { className: 'mc-nav', ariaLabel: '模型中心分类' });
@@ -61,7 +62,7 @@ export function mobileModelNavigation({
   }
   pages.catalog.append(chips);
   if (catalogProvider) {
-    pages.catalog.append(button('拉取模型', pullModels, 'ml-pull'));
+    pages.catalog.append(button('拉取模型', pullModels, 'ml-pull'), pullStatus(catalogProvider));
     catalog(pages.catalog);
   }
   return pages;

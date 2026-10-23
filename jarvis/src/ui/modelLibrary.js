@@ -44,6 +44,9 @@ export function initModelLibrary({ root, workspace, toast }) {
   let generation = 0;
   let busy = false;
   let pullController = null;
+  let pullTarget = ''; // 刚才点了哪家的“拉取模型”：结果写在那个按钮旁边（顶部的提示在手机上翻不到，像没反应）
+  const pullStatus = (provider) =>
+    pullTarget === provider && notice ? node('p', { className: 'ml-notice ml-pull-status', role: 'status', textContent: notice }) : '';
   const run = async (action) => {
     if (busy) return;
     busy = true;
@@ -181,6 +184,7 @@ export function initModelLibrary({ root, workspace, toast }) {
 
   async function pull(provider) {
     const target = workspace.scope;
+    pullTarget = provider;
     pullController = new AbortController();
     notice = '正在拉取模型…';
     render();
@@ -225,7 +229,7 @@ export function initModelLibrary({ root, workspace, toast }) {
       )
     );
     card.append(head);
-    card.append(button('拉取模型', () => run(() => pull(meta.id)), 'ml-pull'));
+    card.append(button('拉取模型', () => run(() => pull(meta.id)), 'ml-pull'), pullStatus(meta.id));
     card.append(node('small', { className: 'ml-section-label', textContent: '常用模型' }));
     const lines = favoriteLines(cfg).filter((item) => item.provider === meta.id);
     card.append(...lines.map((line) => modelRow(cfg, line.provider, line.model)));
@@ -397,6 +401,7 @@ export function initModelLibrary({ root, workspace, toast }) {
             render();
           },
           pullModels: () => run(() => pull(catalogProvider)),
+          pullStatus,
           catalog: (host) => renderCatalog(cfg, catalogProvider, host)
         })
       : null;

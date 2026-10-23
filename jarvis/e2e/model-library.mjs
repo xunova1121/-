@@ -243,6 +243,8 @@ try {
     const card = () => page.locator('.ml-provider').filter({ has: page.getByText('供应商 A', { exact: true }) });
     await card().getByRole('button', { name: '拉取模型', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('.ml-notice')?.textContent.includes('已拉取 302'));
+    // 结果要写在“拉取模型”按钮旁边，不只在页面最上面（手机上翻不到，像没反应）
+    check(`${width} 拉取结果显示在按钮旁边`, await page.locator('.ml-pull-status:visible').filter({ hasText: '已拉取 302' }).count() === 1);
     check(`${width} 几百个模型分批展示，不全铺开`, (await page.locator('.ml-catalog-results [data-model]').count()) === 12);
     check(
       `${width} 拉取使用服务器密钥，默认不变`,
