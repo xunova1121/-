@@ -90,6 +90,22 @@ export function iconPicker() {
   };
 }
 
+/** 一段话或一条里夹着“版式：卡片”这一行（后面紧跟正文、没空行）：把这一行摘出来，其余照旧 */
+function takeDirective(inlines) {
+  const lines = [[]];
+  for (const s of inlines) {
+    String(s.text).split('\n').forEach((t, k) => { if (k) lines.push([]); if (t) lines.at(-1).push({ ...s, text: t }); });
+  }
+  let layout = '';
+  const rest = lines.filter((ln) => {
+    const hit = LAYOUT_NAMES[DIRECTIVE.exec(plain(ln).trim())?.[1]];
+    if (hit && !layout) layout = hit;
+    return !hit;
+  });
+  if (!layout) return null;
+  return { layout, inlines: rest.flatMap((ln, k) => (k ? [{ text: '\n' }, ...ln] : ln)) };
+}
+
 /** 按页拆开，每页保留原始块，供选版式 */
 export function parseSlides(title, md) {
   const blocks = parseDoc(md);
@@ -101,13 +117,24 @@ export function parseSlides(title, md) {
     if (b.type === 'hr') { cur = null; continue; }
     if (!cur) start(slides.length ? '' : title);
     if (b.type === 'paragraph' && /^备注[:：]/.test(plain(b.inlines))) { cur.notes.push(plain(b.inlines).replace(/^备注[:：]\s*/, '')); continue; }
-    // “版式：卡片”：记下来，不上屏（写成列表的一条也认）
-    const want = (t) => LAYOUT_NAMES[DIRECTIVE.exec(t.trim())?.[1]];
-    if (b.type === 'paragraph' && want(plain(b.inlines))) { cur.layout = want(plain(b.inlines)); continue; }
-    if (b.type === 'list' && b.items.some((it) => want(plain(it.inlines)))) {
-      cur.layout = want(plain(b.items.find((it) => want(plain(it.inlines))).inlines));
-      b = { ...b, items: b.items.filter((it) => !want(plain(it.inlines))) };
-      if (!b.items.length) continue;
+    // “版式：卡片”：记下来，不上屏（写成列表的一条、或和正文挤在一段里也认）
+    if (b.type === 'paragraph') {
+      const d = takeDirective(b.inlines);
+      if (d) { cur.layout = cur.layout || d.layout; if (!plain(d.inlines).trim()) continue; b = { ...b, inlines: d.inlines }; }
+    }
+    if (b.type === 'list') {
+      let found = false;
+      const items = b.items.map((it) => {
+        const d = takeDirective(it.inlines);
+        if (!d) return it;
+        found = true;
+        cur.layout = cur.layout || d.layout;
+        return plain(d.inlines).trim() ? { ...it, inlines: d.inlines } : null;
+      });
+      if (found) {
+        b = { ...b, items: items.filter(Boolean) };
+        if (!b.items.length) continue;
+      }
     }
     // 只有标签的一行（“分批方案：”）后面跟一段话：并成一条“标签：说明”
     const prev = cur.blocks.at(-1);

@@ -329,6 +329,15 @@ describe('PPT 版式：段落写法、时间线、进度条、重点句、版式
     expect(L('## 普通\n版式：大数字\n- 第一条\n- 第二条\n- 第三条')).toBe('bullets');
     expect(L('## 四件事\n- 版式：卡片\n- 船载终端：提供船只信息\n- 流量卡：明确数量')).toBe('cards'); // 写成列表的一条也认
   });
+  it('“版式：……”和正文挤在一段里（没空行）也摘掉，不印到页上', () => {
+    const s = parseSlides('t', '## 化名许木\n版式：卡片\n化名：改名“许木”，暂避追杀\n故友：重逢孙泰\n冲突：卷入家族争斗')[0];
+    expect(layoutOf(s)).toBe('cards');
+    expect(JSON.stringify(s.blocks)).not.toContain('版式');
+    const t = parseSlides('t', '## 柳眉现身\n- 版式：步骤\n  识破幻境：反击柳眉\n- 攻入祖地：追查幕后')[0];
+    expect(t.layout).toBe('steps');
+    expect(JSON.stringify(t.blocks)).not.toContain('版式');
+    expect(JSON.stringify(parseSlides('t', '## 脱困\n版式：重点句\n王林炼化太古雷龙本源后脱身')[0].blocks)).not.toContain('版式');
+  });
   it('封面后面重复写名称和日期的“副封面”去掉；连续 3 页普通列表提醒换版式；“汇报完毕”是结尾页', async () => {
     const md = '# 周报\n\n## 综合管理平台\n2026 年 10 月 12—16 日\n\n## 甲\n- 一条普通的话\n- 两条普通的话\n- 三条普通的话\n\n## 乙\n- 一条普通的话\n- 两条普通的话\n- 三条普通的话\n\n## 丙\n- 一条普通的话\n- 两条普通的话\n- 三条普通的话\n\n## 汇报完毕，请指示';
     const out = await makePptx({ title: '周报', content: md, theme: THEMES.business });

@@ -82,7 +82,8 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       });
       const build = (text) =>
         generate(format, {
-          title: title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, ''),
+          // 文件名常带“_5页”：封面标题不要这个尾巴
+          title: (title || path.replace(/^.*\//, '').replace(/\.[^.]+$/, '')).replace(/[_\s-]*\d+\s*页$/, ''),
           content: text,
           theme: chosenTheme,
           layout: plan?.options.layout,

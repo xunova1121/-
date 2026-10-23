@@ -13,3 +13,10 @@ it('结构验收后保存Office文件与同名PDF预览，明确视觉验收边�
  expect(result).toContain('读回有效内容');expect(result).toContain('未宣称人工视觉验收通过');
 });
 
+it('没给标题时用文件名当封面标题，去掉“_5页”这种尾巴',async()=>{
+ const tool=createTools({}).find(t=>t.name==='create_document');
+ await tool.run({format:'pptx',path:'文件/仙逆剧情梳理_5页.pptx',content:'## 脱困\n- 王林炼化雷龙本源\n- 得到斩罗诀'});
+ const {default:JSZip}=await import('jszip');const zip=await JSZip.loadAsync(await (await ws.readBlob('文件/仙逆剧情梳理_5页.pptx')).arrayBuffer());
+ const cover=await zip.file('ppt/slides/slide1.xml').async('string');
+ expect(cover).toContain('仙逆剧情梳理');expect(cover).not.toContain('5页');
+});
