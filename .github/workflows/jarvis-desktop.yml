@@ -12,6 +12,8 @@ on:
       - 'jarvis/server/**'
       - 'jarvis/shared/**'
       - 'jarvis/evals/**'
+      - 'jarvis/e2e/**'
+      - 'jarvis/tests/**'
       - 'jarvis/desktop/**'
       - 'jarvis/android/**'
       - 'jarvis/capacitor.config.json'
