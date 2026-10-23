@@ -45,7 +45,9 @@ export async function parseFile(blob, name, options = {}) {
     throw new Error(`暂不支持读取 .${e || '未知'} 格式`);
   }
   text = text.replace(/\u0000/g, '').trim();
-  return { text: text.length > MAX_CHARS ? `${text.slice(0, MAX_CHARS)}\n…（内容过长，已截断，共 ${text.length} 字）` : text, chars: text.length };
+  // limit：最多给多少字（read_file 分段读时要全文，传 Infinity）
+  const limit = options.limit ?? MAX_CHARS;
+  return { text: text.length > limit ? `${text.slice(0, limit)}\n…（内容过长，已截断，共 ${text.length} 字）` : text, chars: text.length };
 }
 
 /**

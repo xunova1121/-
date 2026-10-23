@@ -206,7 +206,18 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
     run: async () => JSON.stringify({ tools: availableTools.map(tool => tool.name).slice(0, 100), projectTests: availableTools.some(tool => tool.name === 'run_project_tests'), note: '工具开放不等于本次执行成功，以真实回执为准；没有项目执行器不能声称已运行测试' })
   };
-  const own = [plan.tool, review.tool, executionTool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools: availableTools })] : [])].filter((t) => !tools.some((x) => x.name === t.name));
+  // 普通问题有一分钟时限：让模型自己判断这件事是不是一问一答，不是就先解除时限（关键词判断难免看错）
+  const moreTimeTool = {
+    name: 'need_more_time',
+    description: '普通问题默认一分钟内答完。这件事其实不是一问一答（要动手做东西、多步分析、对比很多来源、写长内容）时，先调用它解除一分钟时限，再接着做。简单问答、闲聊、查一个数不要调用。',
+    input_schema: { type: 'object', properties: { reason: { type: 'string', description: '为什么需要更多时间，一句话' } }, required: ['reason'], additionalProperties: false },
+    run: async () => {
+      lookupControl?.release?.();
+      retrieval.upgrade('全面');
+      return '已解除一分钟时限：按任务需要多查、多做，做完照常回答。';
+    }
+  };
+  const own = [plan.tool, review.tool, executionTool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools: availableTools })] : []), ...(lookupDeadline && lookupControl?.release ? [moreTimeTool] : [])].filter((t) => !tools.some((x) => x.name === t.name));
   // 工具按需加载：工具多时只带常用的完整说明，其余列名字、用 tool_search 加载（见 toolLoader.js）
   let loader = createToolLoader(light ? [] : [...tools, ...own]);
   const loadGUI=()=>{if(availableTools.some(t=>t.name==='computer_look'))for(const name of ['computer_look','computer_click','computer_type','computer_key','computer_scroll','computer_drag'])loader.get(name);};
@@ -257,6 +268,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
 
   for (; step < limit; step++) {
     if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+    // 一分钟时限已解除（模型判断要更多时间，或开始画图、写文件）：之后按普通任务做
+    if (lookupDeadline && lookupControl?.released?.()) { lookupDeadline = false; infoPrompt = false; }
     takeInbox();
     const allowWebSearch = !creativeWithoutLookup(currentRequest);
     if (!retrieval.reason && lookupDeadline && lookupControl && (lookupControl.retrievalRemaining() <= 0 || retrieval.active && modelAttempts >= QUICK_MODEL_ATTEMPTS)) {
@@ -384,7 +397,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       if (!stuck && limit < hardCap) limit = Math.min(hardCap, limit + maxSteps);
     }
   }
-  return finishAgentRun({ step, limit, retrievalStopped, retrieval, stuck, review, nativeSearchCalls, light, signal, quiet, toolCount, lastToolOk, failCount, userText, finalText, emit });
+  return finishAgentRun({ step, limit, retrievalStopped, retrieval, stuck, review, nativeSearchCalls, light, signal, quiet, toolCount, lastToolOk, failCount, userText, finalText, emit, lookupDeadline });
 }
 
 /** 保留旧导出的深度研究预算；普通查询默认预算见 retrievalBudget.js。 */

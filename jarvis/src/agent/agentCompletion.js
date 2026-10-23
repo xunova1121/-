@@ -1,5 +1,6 @@
 import { reviewOutcome } from './reviewOutcome.js';
 import * as memory from './memory.js';
+import { MORE_TIME_ASK } from './lookupDeadline.js';
 
 /** 保留已有验收、任务留存与最终事件顺序；不额外调用模型。 */
 export async function finishAgentRun({
@@ -18,10 +19,16 @@ export async function finishAgentRun({
   failCount,
   userText,
   finalText,
-  emit
+  emit,
+  lookupDeadline = false
 }) {
-  if (step >= limit || retrievalStopped) {
-    const note = retrieval.reason
+  // 普通问题查到时限或次数上限：不说“检索已停止”，先给已有的，再问要不要再查
+  //   模型已用现有资料答完（检索因时限、次数收住了）也问一句，方便接着查
+  const quickStop = lookupDeadline && (retrievalStopped || Boolean(retrieval.reason));
+  if (step >= limit || retrievalStopped || quickStop) {
+    const note = quickStop
+      ? `\n\n（普通问题我先回答到这里，上面是已经查到的；还没有确切结果、没核实的部分别当结论。${MORE_TIME_ASK}。）`
+      : retrieval.reason
       ? `\n\n（本轮检索已停止：${retrieval.reason}。目前还没有确切结果；已取得的信息见上文，未核实的部分不能当作结论。）`
       : stuck
         ? `\n\n（最近的步骤大多失败，看起来卡住了，先停在这里。上面是目前的进展；换个说法或给我更多信息，我再接着做。）`
@@ -29,7 +36,7 @@ export async function finishAgentRun({
     finalText += note;
     emit({ type: 'text', delta: note });
   }
-  const acceptance = { ...review.report(), ...reviewOutcome(review.report(), { interrupted: retrievalStopped, nativeSearchCalls }) };
+  const acceptance = { ...review.report(), ...reviewOutcome(review.report(), { interrupted: retrievalStopped && !quickStop, nativeSearchCalls }) };
   const unmet = review.guidance();
   if (acceptance.notice && !light) {
     finalText += acceptance.notice;

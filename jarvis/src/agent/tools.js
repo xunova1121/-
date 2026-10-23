@@ -61,6 +61,15 @@ export function pickPythonFiles(list, code, { maxFiles = 300, maxBytes = 150e6 }
   return out;
 }
 const clip = (s, n = 20000) => (s.length > n ? `${s.slice(0, n)}\n…（已截断，共 ${s.length} 字）` : s);
+/** read_file 一次给多少字；长文件（如十几页的 PDF）分段读，结尾告诉模型从哪接着读 */
+export const READ_PAGE_CHARS = 20000;
+export function fileSegment(text, offset = 0, n = READ_PAGE_CHARS) {
+  const start = Math.max(0, Math.min(Math.floor(Number(offset) || 0), text.length));
+  if (!start && text.length <= n) return text;
+  const end = Math.min(text.length, start + n);
+  const tail = end < text.length ? `还没读完：接着读请再调用 read_file，offset 填 ${end}。没读完不能说已经看过全文。` : '已读到结尾。';
+  return `${text.slice(start, end)}\n…（这是第 ${start + 1}–${end} 字，共 ${text.length} 字；${tail}）`;
+}
 
 /**
  * @param {object} ctx
@@ -384,9 +393,9 @@ export function createTools(ctx) {
     },
     {
       name: 'read_file',
-      description: '读取工作区里的文件。Word、PDF、PPT、Excel 会自动转换成文字；代码和文本原样返回；图片（png / jpg / webp）会直接给你看。',
-      input_schema: S({ path: str('文件路径') }, ['path']),
-      run: async ({ path }) => {
+      description: '读取工作区里的文件。Word、PDF、PPT、Excel 会自动转换成文字；代码和文本原样返回；图片（png / jpg / webp）会直接给你看。长文件一次给 2 万字，结尾会写 offset，按它接着读，直到读完再下结论。',
+      input_schema: S({ path: str('文件路径'), offset: { type: 'integer', minimum: 0, description: '从第几个字开始读（长文件接着读时填上次结尾给的数，第一次不填）' } }, ['path']),
+      run: async ({ path, offset = 0 }) => {
         const blob = await ws.readBlob(path);
         seenFiles.add(ws.normalize(path));
         if(isImageName(path)&&typeof document==='undefined'){
@@ -401,8 +410,8 @@ export function createTools(ctx) {
           const img = await prepareImage(blob);
           return { text: `图片 ${path}（${img.width}×${img.height}）`, images: [{ mime: img.mime, data: img.data }] };
         }
-        if (ws.isText(path)) return clip(await blob.text());
-        return clip((await parseFile(blob, path)).text);
+        if (ws.isText(path)) return fileSegment(await blob.text(), offset);
+        return fileSegment((await parseFile(blob, path, { limit: Infinity })).text, offset);
       }
     },
     {

@@ -18,9 +18,32 @@ export function lookupRequirement(text, history = []) {
 }
 /** 这些工具是在“做东西”（画图、唱歌、写文件）：一旦调用，说明不是普通查询，解除 60 秒时限 */
 const MAKING_TOOLS = new Set(['generate_image', 'sing_song', 'create_document', 'write_file']);
+/** 普通问题一分钟没查完时，回答结尾的提示；用户回“再查”就放宽重查 */
+export const MORE_TIME_ASK = '要我再查一会儿，回“再查”就行';
+export const MORE_TIME_MS = 3 * 60_000;
+const MORE = /^(?:再查|再查查|再查一?下|再查一会儿?|继续查|接着查|多查|查全|再找找|再搜搜?)/;
+const YES = /^(?:要|好|好的|可以|行|嗯|查吧|查)[。！!，, ]*$/;
+/**
+ * 用户是不是在说“再查一会儿”：返回要重查的原问题，不是就返回 null
+ * 明说“再查”的都算；只回“要 / 好的”的，上一条回答得是带了再查提示的才算
+ */
+export function moreTimeRequest(text, history = []) {
+  const value = String(text || '').trim();
+  const lastReply = [...history].reverse().find((m) => m.role === 'assistant');
+  if (!MORE.test(value) && !(YES.test(value) && String(lastReply?.content || '').includes(MORE_TIME_ASK))) return null;
+  const i = history.lastIndexOf(lastReply);
+  const asked = history.slice(0, i < 0 ? history.length : i).reverse().find((m) => m.role === 'user' && !MORE.test(String(m.content).trim()) && !YES.test(String(m.content).trim()));
+  return asked ? String(asked.content) : null;
+}
 const abortError = () => Object.assign(new Error('aborted'), { name: 'AbortError' });
 
 export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_MS } = {}) {
+  // “再查”：按原问题重查，不再套一分钟时限（联网最多 3 分钟）
+  const again = moreTimeRequest(options.userText, options.history);
+  if (again) {
+    const task = `${again}（上次一分钟内没查完，用户要求再查一会儿：全面一些，多看几个来源、读原文核实；上次已经查到的不用重复，直接补充和更正）`;
+    return run({ ...options, userText: `${options.userText}\n\n${task}`, requirementText: task, timeBudgetMs: options.timeBudgetMs ?? MORE_TIME_MS });
+  }
   const text = lookupRequirement(options.requirementText ?? options.userText, options.history);
   if(text !== (options.requirementText ?? options.userText)) options = { ...options, requirementText: text };
   const hasComputer=options.tools?.some(t=>t.name==='computer_look'||t.name==='computer_search');
@@ -34,14 +57,18 @@ export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_
   const release = () => { clearTimeout(timer); timer = null; deadlineDisabled = true; };
   const disable = (note) => { if (isTask(note)) release(); };
   const userAbort = () => { ctrl.abort(); finishWait(abortError()); };
+  const control = createLookupWindow({ totalMs, disabled: () => deadlineDisabled || options.inbox?.some(isTask) });
+  // 模型自己判断这不是一问一答（need_more_time），或调用了画图等工具：解除时限
+  control.release = release;
+  control.released = () => deadlineDisabled;
   const forwarded = {
     ...options, signal: ctrl.signal,
-    lookupControl: createLookupWindow({ totalMs, disabled: () => deadlineDisabled || options.inbox?.some(isTask) }),
+    lookupControl: control,
     onTaskUpdate: (note) => { disable(note); options.onTaskUpdate?.(note); },
     lookupDeadline: true,
     emit: (event) => {
       if (closed || ctrl.signal.aborted) return;
-      if (event.type === 'text') partial += String(event.delta || '');
+      if (event.type === 'text') { partial += String(event.delta || ''); if (String(event.delta || '').trim()) control.wrote(); }
       // “加图片炫酷一点”这类话看着像闲聊，模型却去画图了：画图、唱歌要几分钟，不能按普通查询截断
       if (event.type === 'tool_start' && MAKING_TOOLS.has(event.name)) release();
       options.emit?.(event);
@@ -49,14 +76,17 @@ export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_
   };
   if (options.signal?.aborted) throw abortError();
   options.signal?.addEventListener('abort', userAbort, { once: true });
-  timer = setTimeout(() => {
+  const expire = () => {
     // 生成中用户已追加文档/开发任务：保留任务，不把尚未读入的补充误当普通查询截断。
     if (options.inbox?.some(isTask)) { disable('调研'); return; }
+    // 正在写答案：让它写完（宽限有上限；比内层多等 3 秒，内层能先正常收尾）
+    if (control.writing(3_000)) { timer = setTimeout(expire, 1_000); return; }
     const error = Object.assign(new Error(`本轮对话已等待 ${Math.round(totalMs / 1000)} 秒，尚未取得完整可靠结果，已停止继续搜索和重试。已显示的内容可能不完整，未核实信息不能当作结论。`), {
       name: 'LookupTimeoutError', code: 'LOOKUP_TIMEOUT', partialText: partial
     });
     ctrl.abort(error); finishWait(error);
-  }, totalMs);
+  };
+  timer = setTimeout(expire, totalMs);
   try {
     return await Promise.race([waiting, Promise.resolve().then(() => {
       if (ctrl.signal.aborted) throw abortError();

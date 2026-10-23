@@ -262,3 +262,26 @@ describe('情绪标签写错了也不漏到正文里', () => {
   });
 });
 
+
+describe('长文件分段读（征信报告 14 页只读了一部分）', () => {
+  it('一次给 2 万字，结尾告诉从哪接着读；读到结尾说明已读完', async () => {
+    const { fileSegment: readPage, READ_PAGE_CHARS } = await import('../src/agent/tools.js');
+    const text = 'a'.repeat(READ_PAGE_CHARS) + 'b'.repeat(5000);
+    expect(readPage('短文')).toBe('短文');
+    const first = readPage(text);
+    expect(first).toMatch(new RegExp(`offset 填 ${READ_PAGE_CHARS}`));
+    expect(first).not.toMatch(/b/);
+    const second = readPage(text, READ_PAGE_CHARS);
+    expect(second.startsWith('b'.repeat(5000))).toBe(true);
+    expect(second).toMatch(/已读到结尾/);
+    expect(readPage(text, 999999)).toMatch(/已读到结尾/);
+  });
+  it('read_file 接受 offset，PDF 等文档不再先截到 6 万字', async () => {
+    const read = createTools(ctx).find((t) => t.name === 'read_file');
+    expect(read.input_schema.properties.offset.type).toBe('integer');
+    const { parseFile } = await import('../src/agent/docs.js');
+    const long = new Blob(['字'.repeat(70000)]);
+    expect((await parseFile(long, 'a.txt')).text).toMatch(/已截断/);
+    expect((await parseFile(long, 'a.txt', { limit: Infinity })).text.length).toBe(70000);
+  });
+});
