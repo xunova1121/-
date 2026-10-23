@@ -89,9 +89,17 @@
   :root body.compact.companion-edition .home-reference .home-pet { height: 146px; }
   :root body.compact.companion-edition .home-reference .home-pet .wy-mascot { --mascot-size: 112px; }
 }
-@media (max-height: 670px) {
-  :root body.compact.companion-edition .home-reference .home-pet { height: 124px; }
-  :root body.compact.companion-edition .home-reference .home-pet .wy-mascot { --mascot-size: 90px; }
+@media (max-height: 700px) {
+  :root body.compact.companion-edition .home-reference .home-pet { height: 134px; }
+  :root body.compact.companion-edition .home-reference .home-pet .wy-mascot { --mascot-size: 100px; }
   :root body.compact.companion-edition .home-reference .home-care { display: none; }
   :root body.compact.companion-edition .home-reference .home-suggestion { min-height: 42px; }
+}
+
+/* 极矮窗口保留操作入口；天气次要说明可在详情查看，不挤压第三条建议。 */
+@media (max-height: 640px) {
+  :root body.compact.companion-edition .home-reference .home-pet { height: 124px; }
+  :root body.compact.companion-edition .home-reference .home-pet .wy-mascot { --mascot-size: 90px; }
+  :root body.compact.companion-edition .home-reference .home-weather { min-height: 34px; }
+  :root body.compact.companion-edition .home-reference .home-weather-bottom { display: none; }
 }

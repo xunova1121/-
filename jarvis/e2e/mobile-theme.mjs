@@ -71,7 +71,7 @@ try {
   ));
   await startupContext.close();
   for (const width of [320, 390, 412]) {
-    const context = await browser.newContext({ viewport: { width, height: width === 320 ? 680 : 740 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
+    const context = await browser.newContext({ viewport: { width, height: width === 320 ? 640 : 740 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
     await context.addInitScript(() => {
       if (window.top !== window) return;
       localStorage.setItem('jarvis.settings.v1', JSON.stringify({ theme: 'day', speechOutput: false }));
