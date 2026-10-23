@@ -59,7 +59,7 @@ export const STABLE_PROMPT = `你是“未央”，用户的个人智能体。�
 - 工具按实际开放能力使用。工作区可连接本地文件夹；本机电脑文件另用 computer_*，工作区没有不等于电脑没有。
 - 文件用 read_file / write_file / edit_file，知识库用 kb_search并注明文件。读不了先换指定页或已有格式，不要换 run_python 硬读，手机首次下载环境很慢。
 - 用户让你唱歌或把歌唱出来：先写好歌词（标 [Verse] [Chorus]），再按歌词情景定曲风调用 sing_song；工具报没配 Key 时如实说明，不要说自己不能发声。
-- 问到用户本人（年龄、称呼、住哪、家人、工作、说过什么、问过什么）：先看“用户的基本情况”和相关记忆，没有再用 recall、search_conversations 查，查不到才说不知道，不要先反问用户。要列全（“我问过哪些…”“所有…”）用 list_my_messages 逐页翻完；清单每一项都要有工具结果里的原话出处，没出处的不列，最后说明翻了多少条、哪段时间。
+- 问到用户本人（年龄、称呼、住哪、家人、工作、说过什么、问过什么），或者做事要用到用户的信息（出发地/家在哪、年龄、家人、单位、持仓、车）：先看“用户的基本情况”和相关记忆，没有再用 recall、search_conversations 查，查到就直接用，查不到才问或说不知道，不要先反问用户。从旧对话查到的这类个人信息，用 remember（category: profile，重要度 4）记下来，下次不用再查。要列全（“我问过哪些…”“所有…”）用 list_my_messages 逐页翻完；清单每一项都要有工具结果里的原话出处，没出处的不列，最后说明翻了多少条、哪段时间。
 - 用户明确偏好用 remember，纠正你做事方式的教训用 remember（category: lesson），核心身份目标用 core_memory_update，可复用做法用 save_skill；工具调用成功才能说“记住了”。记忆与当前要求冲突以当前要求为准；不把旧天气行情当实况。
 - 项目根目录“未央规则.md”自动提供；“记进项目规则”用 edit_file追加或write_file新建。相关技能先 use_skill，mcp_工具按任务使用。
 
@@ -177,7 +177,7 @@ export function trimComputerScreenshots(messages,keep=2) {
   for(const m of shots.slice(0,Math.max(0,shots.length-keep))){delete m.images;m.content=`${m.content}\n（旧界面截图已从模型输入移除；请以最新截图为准。）`;}
 }
 
-async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, lookupControl = null, computerTask = false, describeImages = null, visionLabel = '看图模型', readImageText = null }) {
+async function runAgentLoop({ adapter, model, history, userText, images = [], tools, emit, signal, maxSteps = 16, context, approve, sessionId = null, effort, summary = null, requirements = null, requirementText = userText, timeBudgetMs, now = Date.now, depth = 0, quiet = false, fallbacks = [], inbox = null, voice = false, light = false, checkpoint = null, onTaskUpdate = null, lookupDeadline = false, lookupControl = null, computerTask = false, describeImages = null, visionLabel = '看图模型', readImageText = null, modelNote = '' }) {
   if (light && needsActionTools(userText, history)) light = false;
   const capabilities = capabilityBlock(tools);
   // 环境完全没有产物/计算核验能力时，直接说明未验收，不空转两轮模型。
@@ -301,7 +301,9 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       emit({ type: 'retry', attempt, resume: Boolean(stepText.trim()) });
     } });
     // 测量实际发送的提示与工具说明，动态规则和短说明均计入字符数。
-    const measuredSystem = light ? [LIGHT_PROMPT, [ctx.dynamic, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, dialoguePolicy(review.report().request), capabilities, computerNote, requirementContext, toolHint, review.contractNote(), !allowWebSearch && CREATIVE_NOTE, voice && VOICE_NOTE].filter(Boolean).join('\n\n')];
+    // 用的哪个模型：中途换了备用的，也照实写
+    const usingNote = modelNote && (cur.model !== model ? `${modelNote}\n（原定的 ${model} 出错了，这一轮实际换成了 ${cur.model}。）` : modelNote);
+    const measuredSystem = light ? [LIGHT_PROMPT, [ctx.dynamic, usingNote, voice && VOICE_NOTE].filter(Boolean).join('\n\n')] : [infoPrompt ? INFO_PROMPT : STABLE_PROMPT, [ctx.dynamic, usingNote, dialoguePolicy(review.report().request), capabilities, computerNote, requirementContext, toolHint, review.contractNote(), !allowWebSearch && CREATIVE_NOTE, voice && VOICE_NOTE].filter(Boolean).join('\n\n')];
     const measuredTools = closing ? (retrieval.extensive ? loader.list().filter((t) => !WEB_TOOLS.has(t.name)) : []) : loader.list();
     const requestTools = measuredTools.filter((tool) => allowWebSearch || !WEB_TOOLS.has(tool.name) && tool.name !== 'delegate_task').map(conciseTool);
     emit({ type: 'diagnostic', phase: 'model_start', model: cur.model, protocol: cur.adapter.kind, closing, ...measureModelInput({ system: measuredSystem, messages: convo, tools: requestTools }), inputChars: convo.reduce((sum, item) => sum + String(item.content || '').length, 0) });

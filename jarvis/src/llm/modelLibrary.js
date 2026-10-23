@@ -77,6 +77,17 @@ export function removeModel(cfg, line) {
   };
 }
 
+/**
+ * 告诉模型“你现在用的是哪个模型、模型库里还有哪些”（每轮放进系统提示）：
+ * 用户问“你用的什么模型”能直接答，也不会拿网上查不到去否认用户配置里的型号
+ */
+export function modelNote(cfg, line) {
+  if (!lineValid(line)) return '';
+  const name = (l) => `${providerLabel(cfg, l.provider)} · ${l.model}`;
+  const others = favoriteLines(cfg).filter((l) => !sameLine(l, line)).slice(0, 10).map(name);
+  return `## 你在用的模型\n这一轮由「${name(line)}」回答${others.length ? `；模型库里还配了：${others.join('、')}` : ''}。用户问你用的什么模型就照实说。这些是配置里的服务商和型号名：底层是谁家的模型、参数多少，不知道就说不知道；不要拿网上查不到来否认配置里有的型号。`;
+}
+
 /** 每家服务商单独存的字段（删服务商时一起清掉） */
 const PROVIDER_MAPS = ['keys', 'models', 'baseURLs', 'providerNames', 'serviceTiers'];
 

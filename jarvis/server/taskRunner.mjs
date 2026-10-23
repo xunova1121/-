@@ -35,7 +35,7 @@ import { generateImage } from '../src/llm/images.js';
 import { generateVideo } from '../src/llm/videos.js';
 import { providerById, isPrivateHost } from '../shared/providers.js';
 import { routeFor, fallbackRoutes, classifyTask, effortFor, isSmallTalk, visionRoute } from '../src/llm/router.js';
-import { providerLabel } from '../src/llm/modelLibrary.js';
+import { providerLabel, modelNote } from '../src/llm/modelLibrary.js';
 import { INTERRUPTED_MARK, interruptionMark, errorKind } from '../src/core/suggest.js';
 import { uid } from '../src/agent/store.js';
 
@@ -234,7 +234,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     arm();
     try {
       const r = await runAgent({
-        adapter, model, fallbacks, maxSteps, ...sight(cfg),
+        adapter, model, fallbacks, maxSteps, ...sight(cfg), modelNote: modelNote(cfg, { provider: route.cfg.provider, model }),
         history: unsummarized(history, session.summary).map(({ role, content }) => ({ role, content })),
         userText: task.resumeFrom ? task.text+'\n\n'+checkpointRecoveryText(task.resumeFrom) : task.text, requirementText: task.text, images: task.images,
         // 日常闲聊少想一点（首字更快）；要查证、分析、算结果的不省

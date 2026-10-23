@@ -21,7 +21,7 @@ import { savePending, clearPending } from '../core/pendingTask.js';
 import { runRemote } from '../core/serverClient.js';
 import { createTaskKeeper } from '../mobile/backgroundTasks.js';
 import { noteAction } from '../mobile/renderDiagnostics.js';
-import { providerLabel } from '../llm/modelLibrary.js';
+import { providerLabel, modelNote } from '../llm/modelLibrary.js';
 import { $, DESKTOP, now, storage, toast, wp, markActivity } from './env.js';
 
 export function createTurn(app) {
@@ -327,6 +327,7 @@ export function createTurn(app) {
         requirements: collectRequirements(app.history, app.session.requirements),
         requirementText: userText, // 保留斜杠命令展开前的原话，避免当成缺失历史重复注入
         fallbacks,
+        modelNote: modelNote(app.llmConfig, { provider: route.cfg.provider, model }),
         describeImages: sight?.describe,
         visionLabel: sight?.label,
         readImageText: app.imageTextReader?.(),
