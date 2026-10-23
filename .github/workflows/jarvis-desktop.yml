@@ -193,9 +193,14 @@ jobs:
       - name: 验证代码隔离与取消
         run: node e2e/sandbox-isolation.mjs
       - name: 安装Office真实渲染环境
+        # apt 源偶尔卡住不动（#248、#253 都卡在这一步十几分钟）：每次最多等 6 分钟，卡住就重来，最多三次
+        timeout-minutes: 20
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-impress libreoffice-calc fonts-noto-cjk xdotool
+          for i in 1 2 3; do
+            if timeout 360 sh -c 'sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-impress libreoffice-calc fonts-noto-cjk xdotool'; then exit 0; fi
+            echo "第 $i 次安装没完成，重试"
+          done
+          exit 1
       - name: 验证Word、PPT、Excel真实转PDF
         run: node e2e/office-render.mjs
       - name: 验证文档场景模板、精确修改及真实PDF逐页检查
