@@ -223,7 +223,7 @@ export async function generate(format, { title = '未命名', content = '', them
       };
     }
     case 'docx': {
-      const r = await makeDocx({ title, content, ...page, loadImage, template, issuer, docNo });
+      const r = await makeDocx({ title, content, ...page, loadImage, template, issuer, docNo, kind });
       return { blob: r.blob, ext: 'docx', theme, info: r.info };
     }
     case 'pptx': {

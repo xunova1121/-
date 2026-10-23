@@ -17,6 +17,10 @@ import { imageInfo } from './imageInfo.js';
 
 const PT = (n) => Math.round(n * 2); // 字号：磅 → 半磅
 const MM = (n) => Math.round((n * 1440) / 25.4); // 毫米 → twip
+/** 制度的条：“第一条　……” */
+const ARTICLE = /^(第[一二三四五六七八九十百零〇\d]+条)[\s　:：]*/;
+/** 纪要开头的会议信息 */
+const MEETING_INFO = /^\**(会议时间|时间|会议地点|地点|主持人|主持|参会人员|参会人|参会|出席人员|出席|列席人员|列席|缺席人员|缺席|记录人|记录|会议主题|主题|议题)\**\s*[:：]\s*(.+)$/;
 
 /** 字体风格 → docx 的 font 对象 */
 const font = (key) => {
@@ -38,7 +42,7 @@ const font = (key) => {
  * @param {Uint8Array|ArrayBuffer} [o.template]  用户的 .docx 模板：沿用其样式
  * @returns {Promise<{ blob: Blob, info: { toc: boolean, images: number, missingImages: string[], headings: number } }>}
  */
-export async function makeDocx({ title, content, theme, cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, template = null, layout = 'report', issuer = '', docNo = '' }) {
+export async function makeDocx({ title, content, theme, cover = false, subtitle = '', author = '', date = '', toc = 'auto', loadImage = null, template = null, layout = 'report', issuer = '', docNo = '', kind = '' }) {
   const d = await import('docx');
   const {
     Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle,
@@ -46,7 +50,14 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
     LineRuleType, VerticalAlign, LevelSuffix
   } = d;
   const official = Boolean(theme.official);
-  const brief = layout === 'brief' && !official;
+  // 文种（documentDesign.js 判断）：决定结构和排法。不传是旧的调用方式，按原来的规则排
+  const K = kind || '';
+  const chars = String(content).replace(/\s/g, '').length;
+  const short = Boolean(K) && chars < 1500; // 一两页的短文件：不加封面、目录、页眉
+  const brief = (layout === 'brief' || (short && K !== 'proposal')) && !official;
+  // 封面：短通知、纪要、制度不加；长方案（3000 字以上）自动加
+  const noCover = K === 'minutes' || K === 'notice' || (short && K !== 'proposal');
+  cover = (Boolean(cover) && !noCover) || (K === 'proposal' && chars >= 3000 && !official);
   const C = theme.colors;
   const bodyFont = font(theme.fonts.body);
   const headFont = font(theme.fonts.heading);
@@ -69,8 +80,21 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
   const level = (l) => Math.max(1, l - shift);
   const hs = headings(blocks).map((h) => ({ ...h, level: level(h.level) }));
   // 公文不加目录（除非明确要求）
-  const wantToc = toc === true || (toc === 'auto' && !brief && !official && hs.filter((h) => h.level === 1).length >= 3);
+  const h1n = hs.filter((h) => h.level === 1).length;
+  const wantToc = toc === true || (toc === 'auto' && !brief && !official && !short && !['minutes', 'notice'].includes(K) && h1n >= (K === 'policy' ? 5 : 3));
   markSalutationAndSignature(blocks);
+  // 纪要：开头的“时间：… 地点：… 主持：… 参会：…”排成会议信息表
+  if (K === 'minutes') {
+    const rows = [];
+    let n = 0;
+    for (const b of blocks) {
+      const lines = b.type === 'paragraph' ? plain(b.inlines).split('\n') : b.type === 'list' ? b.items.map((it) => plain(it.inlines)) : null;
+      if (!lines || !lines.every((l) => MEETING_INFO.test(l.trim()))) break;
+      for (const l of lines) { const m = MEETING_INFO.exec(l.trim()); rows.push([m[1], m[2].trim()]); }
+      n++;
+    }
+    if (rows.length >= 2) blocks.splice(0, n, { type: 'infotable', rows });
+  }
 
   // ---------- 行内
   let numberingInstance = 0;
@@ -171,6 +195,29 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
     });
   }
 
+  /** 纪要的会议信息表：左边名目（浅底加粗），右边内容；名目短的两两并排成四列 */
+  function infoTable(rows) {
+    const textW = 11906 - page.left - page.right;
+    const border = { style: BorderStyle.SINGLE, size: 4, color: official ? '000000' : 'BFC7D1' };
+    const borders = { top: border, bottom: border, left: border, right: border };
+    const pairs = rows.every(([, v]) => [...v].length <= 16) && rows.length >= 4;
+    const per = pairs ? 2 : 1;
+    const labelW = 1400;
+    const valueW = Math.round((textW - labelW * per) / per);
+    const cellOf = (text, label) => new TableCell({
+      borders, width: { size: label ? labelW : valueW, type: WidthType.DXA }, verticalAlign: VerticalAlign.CENTER, margins: { top: 60, bottom: 60, left: 100, right: 100 },
+      shading: label ? { type: ShadingType.CLEAR, fill: official ? 'F2F2F2' : C.soft, color: 'auto' } : undefined,
+      children: [new Paragraph({ alignment: label ? AlignmentType.CENTER : AlignmentType.LEFT, spacing: { before: 0, after: 0 }, children: [new TextRun({ text, bold: label, color: label && !official ? C.primary : undefined })] })]
+    });
+    const out = [];
+    for (let i = 0; i < rows.length; i += per) {
+      const cells = rows.slice(i, i + per).flatMap(([k, v]) => [cellOf(k, true), cellOf(v, false)]);
+      while (cells.length < per * 2) cells.push(cellOf('', cells.length % 2 === 0));
+      out.push(new TableRow({ cantSplit: true, children: cells }));
+    }
+    return new Table({ width: { size: textW, type: WidthType.DXA }, columnWidths: Array.from({ length: per }, () => [labelW, valueW]).flat(), rows: out });
+  }
+
   async function render(bs, out, { inQuote = false } = {}) {
     for (const b of bs) {
       switch (b.type) {
@@ -179,8 +226,18 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
           out.push(new Paragraph({ heading: HL[Math.min(l, 6) - 1], children: runs(b.inlines) }));
           break;
         }
+        case 'infotable': out.push(infoTable(b.rows), new Paragraph({ spacing: { after: 120 }, children: [] })); break;
         case 'paragraph':
           if (b.salutation) { out.push(body(b.inlines, { noIndent: true })); break; }
+          // 制度：“第一条 ……”的条号加粗，后面空一格
+          if (K === 'policy' && ARTICLE.test(plain(b.inlines)) && !inQuote) {
+            const t = plain(b.inlines);
+            const m = ARTICLE.exec(t);
+            const rest = b.inlines.map((x) => ({ ...x })); let cut = m[0].length;
+            while (cut > 0 && rest.length) { const x = rest[0]; if (x.text.length <= cut) { cut -= x.text.length; rest.shift(); } else { x.text = x.text.slice(cut); cut = 0; } }
+            out.push(new Paragraph({ alignment: AlignmentType.JUSTIFIED, indent: { firstLineChars: 200, firstLine: bodySize * 2 * 20 }, children: [new TextRun({ text: `${m[1]}　`, bold: true, font: headFont, color: official ? '000000' : C.primary }), ...runs(rest.map((x, k) => (k ? x : { ...x, text: x.text.replace(/^[\s　:：]+/, '') })))] }));
+            break;
+          }
           if (b.signature) {
             out.push(new Paragraph({ alignment: AlignmentType.RIGHT, indent: { right: official ? bodySize * 4 * 20 : 0 }, spacing: { before: b.signFollow ? 0 : official ? 579 : 360 }, children: runs(b.inlines) }));
             break;
@@ -281,7 +338,9 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
     paragraph: { spacing: { before, after, line: official ? 579 : 300, lineRule: official ? LineRuleType.EXACT : LineRuleType.AUTO }, keepNext: true, keepLines: true, outlineLevel: outline, ...(align && { alignment: align }), ...extra }
   });
   // 设计样式：一级标题是浅底色条 + 左边深色粗边；二级标题下面一条细线
-  const h1Look = official ? {} : brief ? { border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: C.primary, space: 5 } } } : { border: { left: { style: BorderStyle.SINGLE, size: 36, color: C.primary, space: 8 } }, shading: { type: ShadingType.CLEAR, fill: C.soft, color: 'auto' }, indent: { left: 160 } };
+  // 文种不同，标题的样子不同：方案是浅底色条；报告、纪要是一道底线；制度的“第一章”居中
+  const ruled = { border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: C.primary, space: 5 } } };
+  const h1Look = official ? {} : K === 'policy' ? { alignment: AlignmentType.CENTER } : brief || K === 'report' || K === 'minutes' ? ruled : { border: { left: { style: BorderStyle.SINGLE, size: 36, color: C.primary, space: 8 } }, shading: { type: ShadingType.CLEAR, fill: C.soft, color: 'auto' }, indent: { left: 160 } };
   const h2Look = official ? {} : { border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: 'D5DCE6', space: 2 } } };
   const H2font = official ? font(theme.fonts.h2) : headFont;
   const H3font = official ? font(theme.fonts.h3) : headFont;
@@ -322,7 +381,7 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
         : [new TextRun({ children: ['第 ', PageNumber.CURRENT, ' 页 / 共 ', PageNumber.TOTAL_PAGES, ' 页'], size: PT(9), color: muted, font: bodyFont })]
     })]
   });
-  const header = official ? null : new Header({
+  const header = official || short ? null : new Header({
     children: [new Paragraph({ alignment: AlignmentType.RIGHT, border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: C.soft, space: 4 } }, children: [new TextRun({ text: docTitle, size: PT(9), color: muted, font: bodyFont })] })]
   });
   const empty = () => new Footer({ children: [new Paragraph({ children: [] })] });

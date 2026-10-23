@@ -269,7 +269,7 @@ describe('create_document 工具', () => {
 
   it('主题、封面、目录说明、工作区图片、缺失图片提示都写进结果', async () => {
     await ws.write('images/chart.png', new Blob([PNG_1x1]));
-    const r = await run({ format: 'docx', path: '报告/季度总结', content: `${REPORT}\n\n![销售趋势](images/chart.png)\n\n![没有](images/x.png)`, theme: 'ocean-depths', cover: true });
+    const r = await run({ format: 'docx', path: '报告/季度总结', content: `${REPORT}\n\n![销售趋势](images/chart.png)\n\n![没有](images/x.png)`, theme: 'ocean-depths', cover: true, toc: 'yes' }); // 这份只有几百字：自动不加目录（短文件不加），这里测的是加了目录时的说明
     expect(r).toMatch(/^报告\/季度总结\.docx/);
     expect(r).toContain('主题：深海');
     expect(r).toContain('已加目录');
