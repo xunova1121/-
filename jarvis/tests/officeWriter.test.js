@@ -338,3 +338,17 @@ describe('PPT 版式：段落写法、时间线、进度条、重点句、版式
     expect(cover.some((t) => t.includes('综合管理平台'))).toBe(true);
   });
 });
+
+describe('PPT 卡片阴影（评测里做 PPT 时服务器被系统杀掉）', () => {
+  it('每张卡片的阴影都是正常大小：不会一张乘一次变成上万倍（LibreOffice 转 PDF 吃到 2GB 内存）', async () => {
+    const content = ['## 背景：20户参与', '- 参与：20户养殖户', '- 现状：人工记录', '- 问题：对账易出错', '## 风险：接口未确认', '- 接口：银行能力未知', '- 网络：断网补传', '- 人员：培训不足', '## 待决策', '- 决策一：是否启动', '- 决策二：人工兜底', '- 决策三：负责人'].join('\n');
+    const { blob } = await makePptx({ title: '试点汇报', content, theme: THEMES.business });
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+    const blur = [];
+    for (const name of Object.keys(zip.files).filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n))) {
+      for (const m of (await zip.file(name).async('string')).matchAll(/blurRad="(\d+)"/g)) blur.push(Number(m[1]));
+    }
+    expect(blur.length).toBeGreaterThan(3);
+    expect(Math.max(...blur)).toBeLessThanOrEqual(76200);
+  });
+});

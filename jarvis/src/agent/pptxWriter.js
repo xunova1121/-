@@ -327,7 +327,9 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   const { ICON_PNG } = await import('./pptIcons.js');
   const gold = theme.official ? 'C00000' : C.extra; // 点缀色：重点关键词、封面短横线
   const ink2 = '5B6577'; // 说明文字的灰
-  const card = { fill: { color: 'FFFFFF' }, line: { color: 'E3E8F0', width: 0.75 }, rectRadius: 0.06, shadow: { type: 'outer', color: '1F2D3D', opacity: 0.1, blur: 6, offset: 2, angle: 90 } };
+  // 阴影每次给一个新对象：pptxgenjs 会把传进去的阴影就地换算成 EMU，同一个对象复用会一张卡片乘一次，
+  // 到后面模糊半径大了上万倍（PowerPoint 里阴影发糊，LibreOffice 转 PDF 时吃到 2GB 内存，服务器被系统杀掉）
+  const card = { fill: { color: 'FFFFFF' }, line: { color: 'E3E8F0', width: 0.75 }, rectRadius: 0.06, get shadow() { return { type: 'outer', color: '1F2D3D', opacity: 0.1, blur: 6, offset: 2, angle: 90 }; } };
   const circleColors = theme.official ? [dark] : [C.accent, dark, C.extra];
   const footTitle = String(title).slice(0, 40);
   let sectionNo = 0;
