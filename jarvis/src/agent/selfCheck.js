@@ -179,6 +179,33 @@ export function applyEdits(content, j) {
   return { problems: (Array.isArray(j?.problems) ? j.problems : []).map(String).filter(Boolean), content: text, changed };
 }
 
+/** 模型自查一次最多等这么久：它是锦上添花的一步，模型迟迟不回就跳过，文档照常生成（以前会一直“对照要求自查…”） */
+export const REVIEW_CAP_MS = 60_000;
+export function capped(llm, signal, ms = REVIEW_CAP_MS) {
+  return (request) =>
+    new Promise((resolve, reject) => {
+      const ctrl = new AbortController();
+      // 用户点停止：马上停，不等模型那边响应
+      const stop = () => {
+        ctrl.abort(signal.reason);
+        reject(signal.reason ?? Object.assign(new Error('aborted'), { name: 'AbortError' }));
+      };
+      if (signal?.aborted) stop();
+      else signal?.addEventListener('abort', stop, { once: true });
+      const timer = setTimeout(() => {
+        ctrl.abort();
+        reject(Object.assign(new Error('自查等待太久，先跳过'), { code: 'REVIEW_TIMEOUT' }));
+      }, ms);
+      Promise.resolve()
+        .then(() => llm({ ...request, signal: ctrl.signal, maxTransientRetries: 0 }))
+        .then(resolve, reject)
+        .finally(() => {
+          clearTimeout(timer);
+          signal?.removeEventListener('abort', stop);
+        });
+    });
+}
+
 /**
  * 生成前后的自查流程（create_document 用）
  * @returns {Promise<{ content: string, issues: object[], problems: string[], changed: number, checked: boolean }>}
@@ -189,11 +216,12 @@ export async function selfCheck({ format, content, requirements = '', llm = null
   if (!needModel) return { content, issues, problems: [], changed: 0, checked: false };
   onProgress?.('对照要求自查…');
   try {
-    const r = await reviewWithModel({ format, content, requirements, issues, llm, signal });
+    const r = await reviewWithModel({ format, content, requirements, issues, llm: capped(llm, signal), signal });
     const after = r.changed ? lint(format, r.content) : issues;
     return { content: r.content, issues: after, problems: r.problems, changed: r.changed, checked: true };
   } catch (e) {
     throwControl(e, signal);
+    if (e?.code === 'REVIEW_TIMEOUT') onProgress?.('自查等待太久，先跳过，直接生成…');
     return { content, issues, problems: [], changed: 0, checked: false };
   }
 }
@@ -209,7 +237,7 @@ export async function fixAfterBuild({ format, content, issues, layout = '', requ
   if (!llm || !hard.length) return { content, fixed: 0, left: issues, result: null, problems: [] };
   onProgress?.(label);
   try {
-    const r = await reviewWithModel({ format, content, requirements, issues: hard, llm, signal, layout });
+    const r = await reviewWithModel({ format, content, requirements, issues: hard, llm: capped(llm, signal), signal, layout });
     if (!r.changed) return { content, fixed: 0, left: issues, result: null, problems: r.problems };
     const result = await rebuild(r.content);
     const before = hard.length;
@@ -229,7 +257,8 @@ export async function fixAfterBuild({ format, content, issues, layout = '', requ
  * @param {{ images: Array<{ mime: string, data: string }>, pages: number[], content: string, requirements?: string, llm: Function, signal?: AbortSignal }} o
  * @returns {Promise<{ problems: string[], content: string, changed: number }>}
  */
-export async function reviewSlidesByImage({ images, pages, content, requirements = '', llm, signal }) {
+export async function reviewSlidesByImage({ images, pages, content, requirements = '', llm: rawLlm, signal }) {
+  const llm = capped(rawLlm, signal);
   const j = parseJson(await llm({
     signal,
     images,
