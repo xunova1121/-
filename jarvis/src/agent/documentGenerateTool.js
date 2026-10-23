@@ -11,7 +11,13 @@ import { throwControl } from '../core/networkRequest.js';
 import { S, str, fmtSize, findTemplate } from './documentSchema.js';
 
 /** 保留原有一轮自修复与PPT看图检查，不额外叠加无界模型审稿。 */
+/** 同一轮里同一个文件：内容一样就直接用上次的结果；已经请模型自查过的文件，重新生成时不再自查（评测里一份 PPT 生成了四遍，每遍都等自查） */
+const sameRun = new WeakMap();
+const keyOf = (args) => JSON.stringify(args);
+
 export function createDocumentGenerateTool(ctx) {
+  const memo = sameRun.get(ctx) ?? { results: new Map(), reviewed: new Map() };
+  sameRun.set(ctx, memo);
   return {
     name: 'create_document',
     description: `生成 Office / 文档文件并保存到工作区；需要模板时先get_document_template。生成后自动检查文件结构、读回内容，可用时由本机LibreOffice生成真实PDF预览。结构/估算检查不等于Office视觉验收。排版自动完成（A4、标题样式、编号列表、带表头底色的表格、页码；Word / PDF 的二级标题有 3 个以上时自动加目录）。
@@ -61,6 +67,11 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       { format, path, title, content, theme, style, kind, cover, subtitle, author, issuer, docNo, toc, template, template_id: templateId, requirements },
       { progress, signal, checkpoint } = {}
     ) => {
+      const callKey = keyOf({ format, path, title, content, theme, style, kind, cover, subtitle, author, issuer, docNo, toc, template, templateId });
+      // 记住的结果只管 10 分钟（同一个任务里重复调用）；隔得久了照常重新生成
+      const fresh = (m, key, ms) => m.has(key) && Date.now() - m.get(key).at < ms;
+      if (fresh(memo.results, callKey, 600_000) && (await ws.exists(memo.results.get(callKey).path).catch(() => false))) return `${memo.results.get(callKey).text}；这次的内容和上次完全一样，没有重新生成，文件就是上面这份`;
+      const pathKey = String(path).replace(/\.[a-z0-9]+$/i, '');
       const loadImage = async (src) => {
         if (/^(https?:|data:)/i.test(src)) return null;
         try {
@@ -79,10 +90,14 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       const design = chooseDesign({ format, title, content, requirements, style, kind });
       const chosenToc = toc || (templateId && content.length < 1500 ? 'no' : plan?.options.toc);
       // 生成前自查：规则检查；有原始要求或硬伤时请模型对照检查并改一轮
+      // 请模型对照要求自查（十几秒）：同一个文件第一次生成、内容不算短，或规则检查查出了硬伤时才做；
+      // 重新生成同一个文件（模型按检查结果改过一遍）不再自查。规则检查、排版检查、转 PDF 逐页检查照常每次都做
+      const quick = fresh(memo.reviewed, pathKey, 1_800_000) || String(content).replace(/\s/g, '').length < 1200;
       const check = await selfCheck({
         format,
         content,
         requirements: taskRules,
+        quick,
         llm: ctx.documentContentReview ? null : ctx.reasonLlm ?? ctx.llm ?? null,
         signal,
         onProgress: (t) => progress?.(t)
@@ -134,7 +149,9 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       }
       // PPT：画出每页的样子，交给能看图的模型检查一轮（没配能看图的模型、或者画不出图时跳过）
       let looked = null;
-      if (format === 'pptx' && ctx.visionLlm && out.info?.preview?.length) {
+      // 看图检查（十几秒）：第一次生成照样看；同一个文件重新生成、估算也没排版问题的不再看
+      const wantLook = built(out).length > 0 || !fresh(memo.reviewed, pathKey, 1_800_000);
+      if (format === 'pptx' && ctx.visionLlm && out.info?.preview?.length && wantLook) {
         try {
           const errors = (o) => built(o).filter((x) => x.level === 'error').length;
           const sheets = pickSheets(out.info.preview, built(out));
@@ -196,7 +213,12 @@ theme 可选：${themeList()}。不填按内容自动选；公文（通知、请
       if (out.info?.missingImages?.length) notes.push(`这些图片没找到，用占位文字代替了：${out.info.missingImages.join('、')}`);
       if (tpl) notes.push(`${auto ? '自动' : ''}沿用了模板 ${tplPath} 的样式${auto ? '（不想用模板就传 template: "none"）' : ''}`);
       if (out.note) notes.push(out.note);
-      return `${r.path}（${fmtSize(out.blob.size)}）。${notes.join('；')}`;
+      memo.reviewed.set(pathKey, { at: Date.now() });
+      // 没有硬伤：明说已经读回检查过——模型以前会再 read_file 好几遍、或者把同一份文件重新生成一遍
+      if (!left.some((x) => x.level === 'error') && r.validation.readback === 'passed') notes.push('文件已经生成并读回检查过，不需要再 read_file 核对或重新生成；直接告诉用户文件在哪、做了什么');
+      const result = `${r.path}（${fmtSize(out.blob.size)}）。${notes.join('；')}`;
+      memo.results.set(callKey, { text: result, path: r.path, at: Date.now() });
+      return result;
     }
   };
 }

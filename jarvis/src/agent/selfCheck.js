@@ -259,9 +259,11 @@ export function capped(llm, signal, ms = REVIEW_CAP_MS) {
  * 生成前后的自查流程（create_document 用）
  * @returns {Promise<{ content: string, issues: object[], problems: string[], changed: number, checked: boolean }>}
  */
-export async function selfCheck({ format, content, requirements = '', llm = null, signal, onProgress }) {
+export async function selfCheck({ format, content, requirements = '', llm = null, signal, onProgress, quick = false }) {
   const issues = [...lint(format, content), ...coverageIssues(format, requirements, content)];
-  const needModel = llm && DOC_FORMATS.concat('pptx').includes(format) && (requirements || issues.some((x) => x.level === 'error'));
+  const hard = issues.some((x) => x.level === 'error');
+  // quick：短文件、或同一个文件已经自查过一遍——规则检查没查出硬伤就不再请模型（省十几秒）
+  const needModel = llm && DOC_FORMATS.concat('pptx').includes(format) && (hard || (requirements && !quick));
   if (!needModel) return { content, issues, problems: [], changed: 0, checked: false };
   onProgress?.('对照要求自查…');
   try {

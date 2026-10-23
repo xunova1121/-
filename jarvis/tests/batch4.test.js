@@ -258,7 +258,9 @@ describe('工具接入工作区', () => {
   });
 
   it('create_document 带原始要求：生成前自查并改一轮，结果里写明', async () => {
-    const r = await run('create_document', { format: 'docx', path: '通知', content: '# 通知\n\n## 一\n\n旧标题内容', requirements: '写一份通知' });
+    // 内容要够长：一千多字以内、规则检查没问题的短文件不再请模型自查（省十几秒）
+    const filler = '\n\n' + '各单位按要求落实检查、整改和复核，逐项登记责任人和完成时间。'.repeat(45);
+    const r = await run('create_document', { format: 'docx', path: '通知', content: `# 通知\n\n## 一\n\n旧标题内容${filler}`, requirements: '写一份通知' });
     expect(r).toContain('生成前对照要求自查，修正了 1 处（标题不对）');
     expect((await parseFile(await ws.readBlob('通知.docx'), 'a.docx')).text).toContain('新标题内容');
   });
