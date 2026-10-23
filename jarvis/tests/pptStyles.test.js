@@ -49,4 +49,11 @@ describe('PPT 设计风格：构图真的不一样，不只是换颜色', () => 
     const md = '## 播放量\n版式：柱状图\n| 季度 | 播放量 |\n|--|--|\n| 2025年Q1 | 1200 |\n| 2025年Q2 | 1500 |\n| 2025年Q3 | 1650 |\n| 2025年Q4 | 2100 |';
     expect((await makePptx({ title: 't', content: md, theme: THEMES.business })).info.layouts[1]).toBe('chart');
   });
+
+  it('叙事风格：剧情一件件往下讲，连着 5 页要点不提醒“单调”（构图在轮换）；商务风格照样提醒', async () => {
+    const md = Array.from({ length: 5 }, (_, k) => `## 第${k + 1}段\n- 王林做了第一件事\n- 接着发生第二件事\n- 最后引出第三件事`).join('\n');
+    const warn = async (style) => (await makePptx({ title: 't', content: md, theme: THEMES.business, style })).info.layoutIssues.some((x) => /单调/.test(x.text));
+    expect(await warn('story')).toBe(false);
+    expect(await warn('business')).toBe(true);
+  });
 });

@@ -1103,16 +1103,20 @@ export async function makePptx({ title, content, theme, subtitle = '', author = 
   }
   const blob = await pptx.write({ outputType: 'blob' });
   const preview = records.map(({ n, title: t, items, slide }) => ({ n, title: t, items, background: slide.background?.color }));
-  return { blob, info: { slides: slides.length + 1, layouts, missingImages, preview, layoutIssues: [...layoutIssues(preview), ...monotony(pages), ...ignored] } };
+  return { blob, info: { slides: slides.length + 1, layouts, missingImages, preview, layoutIssues: [...layoutIssues(preview), ...monotony(pages, MONOTONY_RUN[T.id] ?? 3), ...ignored], style: T.id } };
 }
 
-/** 连续 3 页以上都是普通要点列表：看着单调，提醒换版式（交给模型改一轮） */
-export function monotony(pages) {
+/**
+ * 连续 3 页以上都是普通要点列表：看着单调，提醒换版式（交给模型改一轮）。
+ * 其他风格的要点页会轮换构图（见 listPage），连着 4 页才提醒；叙事风格的情节本来就是一件件往下讲，连着 6 页才提醒
+ */
+const MONOTONY_RUN = { business: 3, minimal: 4, data: 4, story: 6 };
+export function monotony(pages, run = 3) {
   const out = [];
   for (let i = 0; i < pages.length;) {
     let j = i;
     while (j < pages.length && pages[j].kind === 'bullets') j++;
-    if (j - i >= 3) out.push({ level: 'warn', slide: pages[i].n, text: `第 ${pages[i].n}–${pages[j - 1].n} 页连续 ${j - i} 页都是普通要点列表，看着单调。把其中能对上的页改写：并列的几件事写成“标签：说明”（卡片），带数字的写成数字开头（大数字），有先后的写成日期开头或“A→B→C”，一两句的重点单独成页；也可以在页内加一行“版式：卡片 / 大数字 / 时间线 / 重点句”` });
+    if (j - i >= run) out.push({ level: 'warn', slide: pages[i].n, text: `第 ${pages[i].n}–${pages[j - 1].n} 页连续 ${j - i} 页都是普通要点列表，看着单调。把其中能对上的页改写：并列的几件事写成“标签：说明”（卡片），带数字的写成数字开头（大数字），有先后的写成日期开头或“A→B→C”，一两句的重点单独成页；也可以在页内加一行“版式：卡片 / 大数字 / 时间线 / 重点句”` });
     i = Math.max(j, i + 1);
   }
   return out;

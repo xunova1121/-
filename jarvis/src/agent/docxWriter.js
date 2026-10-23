@@ -270,7 +270,8 @@ export async function makeDocx({ title, content, theme, cover = false, subtitle 
   // ---------- 正文
   const children = [];
   const front = [];
-  if (cover && !official) {
+  // 方案、一般文档：深色色块封面；报告、制度：传统的居中标题封面（和公文一样的构图，用主题色）
+  if (cover && !official && K !== 'report' && K !== 'policy') {
     // 设计样式的封面：上半页一整块深色底（单格表格），标题白字，金色短线，底部单位和日期
     const banner = new Table({
       width: { size: 11906 - page.left - page.right, type: WidthType.DXA },
