@@ -126,6 +126,11 @@ export function createModels(app) {
         : null;
 
   // 服务器模式（设置 → 服务器模式）：任务交给自己的云服务器做，对话也存在服务器上
+  const SERVER_LABEL_KEY = 'jarvis.serverModelLabel';
+  const labelGlobals = (l) =>
+    l?.model
+      ? { __jarvisServerModel: l.model, __jarvisServerAuto: Boolean(l.auto), __jarvisServerPinned: Boolean(l.pinned), __jarvisServerProvider: l.provider || '' }
+      : {};
   const serverCfg = loadServerSettings(storage);
   const server = serverCfg.enabled && serverCfg.url && serverCfg.token ? createServerClient({ base: serverCfg.url, token: serverCfg.token }) : null;
   if (server) {
@@ -138,6 +143,12 @@ export function createModels(app) {
     sessionsApi.useRemote(remoteSessions(server));
     globalThis.__jarvisServerMode = true;
     globalThis.__jarvisServerClient = server;
+    // 先显示上次记下的服务器模型，不用等连上服务器才不显示“读取配置中”；连上后再按服务器的刷新
+    try {
+      Object.assign(globalThis, labelGlobals(JSON.parse(storage.getItem(SERVER_LABEL_KEY) || 'null')));
+    } catch {
+      /* 没记过就等服务器 */
+    }
     updateModelLabels();
     refreshServerModel();
   }
@@ -150,10 +161,18 @@ export function createModels(app) {
     server
       ?.getConfig()
       .then((c) => {
-        globalThis.__jarvisServerModel = modelOf(c) || '';
-        globalThis.__jarvisServerAuto = isAuto(c);
-        globalThis.__jarvisServerPinned = Boolean(c.pinModel);
-        globalThis.__jarvisServerProvider = c.providerNames?.[c.provider] || providerById(c.provider)?.name || c.provider;
+        const label = {
+          model: modelOf(c) || '',
+          auto: isAuto(c),
+          pinned: Boolean(c.pinModel),
+          provider: c.providerNames?.[c.provider] || providerById(c.provider)?.name || c.provider
+        };
+        Object.assign(globalThis, labelGlobals(label));
+        try {
+          storage.setItem(SERVER_LABEL_KEY, JSON.stringify(label));
+        } catch {
+          /* 存不了下次就多等一下 */
+        }
         updateModelLabels();
       })
       .catch(() => {});
