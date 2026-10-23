@@ -151,13 +151,13 @@ describe('模型自己判断要不要更多时间',()=>{
 });
 
 describe('评测 baseline-07/13 暴露的问题', () => {
-  it('普通问题一个字没答出来就停了：给一句完整的话，不只剩“先回答到这里”', async () => {
+  it('普通问题一个字没答出来：先自动多查，还没有就给一句完整的话，不留白', async () => {
     const WEB={name:'web_search',description:'测试用',input_schema:{type:'object',properties:{q:{type:'string'}}},run:async({q})=>`结果 ${q}`};
     let n=0;
     const adapter={async stream({tools}){n++;if(!tools.some(t=>t.name==='web_search'))return {text:'',toolCalls:[],stop:'end_turn'};return {text:'',toolCalls:[{id:String(n),name:'web_search',args:{q:`第${n}次`}}],stop:'tool_use'};}};
     const r=await runAgent({adapter,model:'x',history:[],userText:'最近一场中国男足比赛比分',context:{dynamic:''},tools:[WEB],emit:()=>{},maxSteps:40});
-    expect(r.text).toMatch(/还没有确切结果（查到的资料都没能核实）/);
-    expect(r.text).toContain(MORE_TIME_ASK);
+    // 先自动多查一会儿；还是没有就如实说没查到，不留白
+    expect(r.text).toMatch(/没查到能核实的确切结果/);
   });
   it('普通问题里算数没用计算工具：收尾时提醒核对，而不是直接挂“数值计算尚未核对”', async () => {
     const seen=[];let n=0;
@@ -169,5 +169,19 @@ describe('评测 baseline-07/13 暴露的问题', () => {
     const r=await runAgent({adapter,model:'x',history:[],userText:'股票买入1000股，每股13.4元；卖出每股14.2元，手续费合计35元。净盈利多少？列算式。',context:{dynamic:''},tools:[VERIFY],emit:()=>{}});
     expect(seen.some(c=>/verify_numbers/.test(c))).toBe(true);
     expect(r.text).not.toMatch(/数值计算尚未通过计算工具核对/);
+  });
+});
+
+describe('评测 baseline-07：一分钟内一个字都没答出来', () => {
+  it('不交白卷：自动按原问题多查一会儿（不套一分钟、联网放到3分钟），不用用户回“再查”', async () => {
+    const calls=[];
+    const run=async(o)=>{calls.push(o);return calls.length===1?{text:'',needsMoreTime:true}:{text:'查到了：0比1'};};
+    const events=[];
+    const r=await withLookupDeadline({userText:question,emit:e=>events.push(e)},run);
+    expect(r.text).toBe('查到了：0比1');
+    expect(calls[1].lookupDeadline).toBeUndefined();
+    expect(calls[1].timeBudgetMs).toBe(MORE_TIME_MS);
+    expect(calls[1].requirementText).toMatch(/自动再查一会儿/);
+    expect(events.some(e=>e.type==='tool_progress'&&/再多查一会儿/.test(e.text))).toBe(true);
   });
 });

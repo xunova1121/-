@@ -34,7 +34,7 @@ import * as kb from './knowledge.js';
 import * as ws from './workspace.js';
 import * as packs from './skillPacks.js';
 import { summaryBlock } from './compress.js';
-import { createToolLoader } from './toolLoader.js';
+import { DOCUMENT_TOOLS, createToolLoader } from './toolLoader.js';
 
 import { createPlanTool, unfinished } from './plan.js';
 import { loadRules, rulesBlock } from './projectRules.js';
@@ -219,7 +219,8 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
   };
   const own = [plan.tool, review.tool, executionTool, requirementsTool(record), archive.tool, ...(depth === 0 ? [delegateTool({ adapter, model, effort, signal, tools: availableTools })] : []), ...(lookupDeadline && lookupControl?.release ? [moreTimeTool] : [])].filter((t) => !tools.some((x) => x.name === t.name));
   // 工具按需加载：工具多时只带常用的完整说明，其余列名字、用 tool_search 加载（见 toolLoader.js）
-  let loader = createToolLoader(light ? [] : [...tools, ...own]);
+  // 普通问答、查资料：做文档的工具先只列名字（用到时按名字调用或 tool_search 加载）
+  let loader = createToolLoader(light ? [] : [...tools, ...own], { defer: isQuickLookup(requirementText, images) ? DOCUMENT_TOOLS : null });
   const loadGUI=()=>{if(availableTools.some(t=>t.name==='computer_look'))for(const name of ['computer_look','computer_click','computer_type','computer_key','computer_scroll','computer_drag'])loader.get(name);};
   if(!light&&(computerTask==='gui'||computerTaskKind(requirementText,{history})==='gui'))loadGUI();
   let outputRepairs = 0;
@@ -401,7 +402,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       if (!stuck && limit < hardCap) limit = Math.min(hardCap, limit + maxSteps);
     }
   }
-  return finishAgentRun({ step, limit, retrievalStopped, retrieval, stuck, review, nativeSearchCalls, light, signal, quiet, toolCount, lastToolOk, failCount, userText, finalText, emit, lookupDeadline });
+  return finishAgentRun({ step, limit, retrievalStopped, retrieval, stuck, review, nativeSearchCalls, light, signal, quiet, toolCount, lastToolOk, failCount, userText, finalText, emit, lookupDeadline, autoExtend: Boolean(lookupControl?.release) && depth === 0 });
 }
 
 /** 保留旧导出的深度研究预算；普通查询默认预算见 retrievalBudget.js。 */

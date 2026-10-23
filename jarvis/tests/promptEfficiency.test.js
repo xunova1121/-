@@ -1,4 +1,4 @@
-import { it, expect } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { dialoguePolicy } from '../src/agent/dialoguePolicy.js';
 import { conciseTool } from '../src/agent/toolDescriptions.js';
 import { createExecutionReview } from '../src/agent/executionReview.js';
@@ -64,4 +64,20 @@ it('无效审查不标通过；停止和预算不能被合并通读吞掉', asyn
   for (const error of [Object.assign(new Error('budget'),{code:'RETRIEVAL_BUDGET'}),Object.assign(new Error('stop'),{name:'AbortError'})]) {
     await expect(readerTest({title:'a',task:'b',body:'正文',llm:async()=>{throw error;}})).rejects.toBe(error);
   }
+});
+
+describe('普通问答少带做文档的工具说明', () => {
+  it('普通问题时做文档工具只列名字；要做文档时照常带完整说明；按名字直接调用照样能用', async () => {
+    const { createToolLoader, DOCUMENT_TOOLS } = await import('../src/agent/toolLoader.js');
+    const { createTools } = await import('../src/agent/tools.js');
+    const tools = createTools({ metrics: async () => ({}) });
+    const quick = createToolLoader(tools, { defer: DOCUMENT_TOOLS });
+    const names = quick.list().map((t) => t.name);
+    expect(names).not.toContain('create_document');
+    expect(quick.hint()).toContain('create_document');
+    expect(quick.get('create_document')?.name).toBe('create_document');
+    expect(quick.list().map((t) => t.name)).toContain('create_document');
+    const full = createToolLoader(tools);
+    expect(full.list().map((t) => t.name)).toContain('write_professional_document');
+  });
 });

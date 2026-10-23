@@ -4,7 +4,8 @@
 # 做的事：
 #   1. 解压到 /opt/jarvis/app-<版本>，用国内镜像安装依赖（不运行任何安装脚本）
 #   2. 第一次安装时：建一个专门运行未央的系统账号 jarvis，问你设访问密码，写进 /opt/jarvis/jarvis.env（只有 root 能读）
-#   3. 注册成系统服务 jarvis（开机自启、崩了自动重启、最多用 700MB 内存），只在本机 127.0.0.1:8787 上监听
+#   3. 注册成系统服务 jarvis（开机自启、崩了自动重启、最多用 1.2GB 内存），只在本机 127.0.0.1:8787 上监听
+#   另外：没装 LibreOffice 的话装上（生成的文档转 PDF 逐页检查用；装不上不影响使用）
 #   4. 切换到新版本并重启；旧版本保留最近 2 个，出问题可以切回去
 #   5. 装上自动更新：每天凌晨 4 点左右（北京时间）检查新版本；手机 / 电脑上点“立即更新服务器”也会马上更新（见 update.sh）
 # 你的对话、记忆、文件在 /opt/jarvis/data，更新不会动它。
@@ -30,6 +31,23 @@ tar -xzf "$PKG" -C "$APP.tmp" --strip-components=1
 echo "== 安装依赖（国内镜像，几分钟）"
 (cd "$APP.tmp" && "$NPM" install --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund --registry=https://registry.npmmirror.com)
 rm -rf "$APP" && mv "$APP.tmp" "$APP"
+
+# Office 真实渲染（生成的 Word / PPT / Excel 转成 PDF 逐页检查）：没装 LibreOffice 就装上，带中文字体。
+# 只装一次（几百 MB，几分钟）；装不上不影响使用，只是文档少一步检查。不想装：JARVIS_NO_OFFICE=1 bash install.sh …
+if [[ "${JARVIS_NO_OFFICE:-}" != 1 ]] && ! command -v soffice >/dev/null 2>&1; then
+  echo "== 安装 Office 渲染（LibreOffice + 中文字体，只装一次，几分钟）"
+  if command -v apt-get >/dev/null 2>&1; then
+    (export DEBIAN_FRONTEND=noninteractive; timeout 1200 apt-get update -qq && timeout 1800 apt-get install -y -qq --no-install-recommends libreoffice-writer libreoffice-impress libreoffice-calc fonts-noto-cjk) \
+      || echo "== Office 渲染没装上（不影响使用，文档少一步检查）"
+  elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
+    PM="$(command -v dnf || command -v yum)"
+    timeout 1800 "$PM" install -y -q libreoffice-writer libreoffice-impress libreoffice-calc google-noto-sans-cjk-ttc-fonts \
+      || timeout 1800 "$PM" install -y -q libreoffice-writer libreoffice-impress libreoffice-calc \
+      || echo "== Office 渲染没装上（不影响使用，文档少一步检查）"
+  else
+    echo "== 没找到 apt / dnf，跳过 Office 渲染（不影响使用）"
+  fi
+fi
 
 if ! id jarvis >/dev/null 2>&1; then
   echo "== 新建系统账号 jarvis（不能登录，只用来运行未央）"
@@ -76,7 +94,8 @@ EnvironmentFile=$ENVF
 ExecStart=$NODE server/server.mjs
 Restart=always
 RestartSec=3
-MemoryMax=700M
+# 转 PDF 时 LibreOffice 也算在这个服务里，留够余量
+MemoryMax=1200M
 NoNewPrivileges=true
 ProtectSystem=strict
 ReadWritePaths=$BASE/data

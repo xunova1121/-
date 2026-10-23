@@ -9,6 +9,9 @@ export function createTaskTiming(createdAt, now = Date.now) {
   let inputTextChars = 0, inputTextSamples = 0, systemChars = 0, toolSchemaChars = 0;
   let delegateTasks = 0;
   const activeTools = new Set();
+  // 每种工具各用了几次、多久、失败几次（只记工具名和数字）：评测报告里看慢在哪一步
+  const byTool = {};
+  const toolStarted = new Map();
   const elapsed = (a, b) => a == null || b == null ? null : Math.max(0, b - a);
   return {
     start() { if (startedAt == null && endedAt == null) startedAt = now(); },
@@ -39,9 +42,17 @@ export function createTaskTiming(createdAt, now = Date.now) {
       if (e.type === 'diagnostic' && e.phase === 'model_end' && modelOpen != null) { modelMs += elapsed(modelOpen, t); modelOpen = null; }
       if (e.type === 'tool_start' && !activeTools.has(e.id)) {
         if (e.name === 'delegate_task') delegateTasks++;
-        toolCalls++; activeTools.add(e.id); if (toolOpen == null) toolOpen = t; }
+        toolCalls++; activeTools.add(e.id); if (toolOpen == null) toolOpen = t;
+        if (e.name && Object.keys(byTool).length < 60) toolStarted.set(e.id, { name: String(e.name).slice(0, 60), at: t });
+      }
       if (e.type === 'tool_end' && activeTools.delete(e.id)) {
         if (e.ok === false) failedTools++;
+        const began = toolStarted.get(e.id);
+        if (began) {
+          toolStarted.delete(e.id);
+          const row = (byTool[began.name] ??= { calls: 0, ms: 0, failed: 0 });
+          row.calls++; row.ms += elapsed(began.at, t); if (e.ok === false) row.failed++;
+        }
         if (!activeTools.size) { toolMs += elapsed(toolOpen, t); toolOpen = null; }
       }
       if (e.type === 'retry') retries++;
@@ -64,7 +75,8 @@ export function createTaskTiming(createdAt, now = Date.now) {
         inputTextChars: inputTextSamples === modelCalls + helperModelCalls && inputTextSamples > 0 ? inputTextChars : null,
         inputTextSamples, systemChars, toolSchemaChars,
         helperModelCalls, helperInputChars, delegateTasks,
-        inputCharSamples, modelCalls, toolCalls, failedTools, retries, fallbacks, nativeSearchCalls
+        inputCharSamples, modelCalls, toolCalls, failedTools, retries, fallbacks, nativeSearchCalls,
+        tools: structuredClone(byTool)
       };
     }
   };

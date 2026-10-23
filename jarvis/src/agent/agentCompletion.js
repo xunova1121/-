@@ -20,8 +20,11 @@ export async function finishAgentRun({
   userText,
   finalText,
   emit,
-  lookupDeadline = false
+  lookupDeadline = false,
+  autoExtend = false
 }) {
+  // 普通问题一分钟内一个字都没答出来：不交白卷，交回去自动多查一会儿（见 lookupDeadline.js）
+  if (autoExtend && lookupDeadline && (retrievalStopped || retrieval.reason) && !finalText.trim() && !signal?.aborted) return { text: '', steps: step + 1, toolCalls: toolCount, needsMoreTime: true };
   // 普通问题查到时限或次数上限：不说“检索已停止”，先给已有的，再问要不要再查
   //   模型已用现有资料答完（检索因时限、次数收住了）也问一句，方便接着查
   const quickStop = lookupDeadline && (retrievalStopped || Boolean(retrieval.reason));
@@ -38,6 +41,14 @@ export async function finishAgentRun({
         : `\n\n（这个任务已经连续做了 ${step} 步，先停在这里，上面是目前的进展。）`;
     finalText += note;
     emit({ type: 'text', delta: note });
+  }
+  // 什么都没写出来（模型交了空白）：不留白，说清楚
+  if (!finalText.trim()) {
+    const blank = retrieval.reason
+      ? '这次没查到能核实的确切结果（查到的资料都没能核实），先不乱说。可以换个问法，或者告诉我从哪儿查。'
+      : '（这一轮模型没有写出回答，可以点“重新生成”再试一次。）';
+    finalText = blank;
+    emit({ type: 'text', delta: blank });
   }
   const acceptance = { ...review.report(), ...reviewOutcome(review.report(), { interrupted: retrievalStopped && !quickStop, nativeSearchCalls }) };
   const unmet = review.guidance();

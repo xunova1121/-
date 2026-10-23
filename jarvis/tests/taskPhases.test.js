@@ -82,3 +82,18 @@ describe('任务分段计时，不把并行时间相加', () => {
     }
   });
 });
+
+describe('每种工具各用了多久（评测里 PPT 做了 10 分钟，要看慢在哪一步）', () => {
+  it('按工具名记次数、耗时、失败数，只记名字和数字', async () => {
+    const { createTaskTiming } = await import('../shared/taskTiming.js');
+    let t = 0;
+    const timing = createTaskTiming(0, () => t);
+    timing.start();
+    timing.event({ type: 'tool_start', id: 'a', name: 'write_professional_document' }); t = 5000;
+    timing.event({ type: 'tool_end', id: 'a', ok: true }); t = 6000;
+    timing.event({ type: 'tool_start', id: 'b', name: 'check_document' }); t = 7000;
+    timing.event({ type: 'tool_end', id: 'b', ok: false });
+    const snap = timing.finish();
+    expect(snap.tools).toEqual({ write_professional_document: { calls: 1, ms: 5000, failed: 0 }, check_document: { calls: 1, ms: 1000, failed: 1 } });
+  });
+});

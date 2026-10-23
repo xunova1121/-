@@ -87,11 +87,21 @@ export async function withLookupDeadline(options, run, { totalMs = LOOKUP_TOTAL_
     ctrl.abort(error); finishWait(error);
   };
   timer = setTimeout(expire, totalMs);
+  // 一分钟内一个字都没答出来（资料都没核实到）：不交白卷，自动多查一会儿（联网最多 3 分钟），不用用户回“再查”
+  // 模型压根没响应（到点硬停）的不算：那是连接问题，再等也没用
+  const extend = () => {
+    closed = true; release();
+    options.emit?.({ type: 'tool_progress', text: '一分钟内没查到能核实的结果，再多查一会儿…' });
+    const task = `${text}（一分钟内没查到能核实的结果，自动再查一会儿：多看几个来源、读原文核实；查不到就如实说没查到）`;
+    return run({ ...options, userText: `${options.userText}\n\n${task}`, requirementText: task, timeBudgetMs: options.timeBudgetMs ?? MORE_TIME_MS });
+  };
   try {
-    return await Promise.race([waiting, Promise.resolve().then(() => {
+    const result = await Promise.race([waiting, Promise.resolve().then(() => {
       if (ctrl.signal.aborted) throw abortError();
       return run(forwarded);
     })]);
+    if (result?.needsMoreTime && !options.signal?.aborted) return await extend();
+    return result;
   } finally {
     closed = true; clearTimeout(timer); options.signal?.removeEventListener('abort', userAbort);
   }

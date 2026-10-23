@@ -12,6 +12,9 @@ export const LIMIT = 24;
 /** MCP 工具总数不超过这么多时全部常驻 */
 export const MCP_CORE = 12;
 
+/** 做文档的工具：说明长（合计约 7 千字），普通问答、查资料时先不带完整说明 */
+export const DOCUMENT_TOOLS = new Set(['write_long_document', 'create_document', 'write_professional_document', 'generate_task_brief', 'edit_office_document', 'edit_spreadsheet']);
+
 /** 常驻工具：系统提示里点名的、几乎每天都用的 */
 export const CORE = new Set([
   'write_professional_document', 'generate_task_brief',
@@ -48,12 +51,13 @@ function score(tool, query) {
  * @param {Array<{ name: string, description: string }>} tools
  * @param {{ limit?: number }} [o]
  */
-export function createToolLoader(tools, { limit = LIMIT } = {}) {
+export function createToolLoader(tools, { limit = LIMIT, defer = null } = {}) {
   const all = new Map(tools.map((t) => [t.name, t]));
   const deferredMode = tools.length > limit;
   // 用户自己连的 MCP 服务是特意要用的：工具不多（≤ MCP_CORE 个）时也常驻
   const mcp = tools.filter((t) => t.name.startsWith('mcp_'));
-  const keep = (t) => CORE.has(t.name) || (mcp.length <= MCP_CORE && t.name.startsWith('mcp_'));
+  // defer：这一轮多半用不上的常驻工具也先只列名字（普通问答不带做文档的长说明，每步少发几千字）；直接按名字调用照样能用
+  const keep = (t) => (CORE.has(t.name) && !defer?.has(t.name)) || (mcp.length <= MCP_CORE && t.name.startsWith('mcp_'));
   const active = new Set(deferredMode ? tools.filter(keep).map((t) => t.name) : tools.map((t) => t.name));
   const deferred = () => tools.filter((t) => !active.has(t.name));
 
