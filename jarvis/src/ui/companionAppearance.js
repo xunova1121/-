@@ -1,4 +1,5 @@
 import './companionRefresh.css';
+import './mobileTheme.css';
 
 /** 只管理布局：键盘出现时让角色退让，阅读旧消息时保留阅读位置。 */
 export function initCompanionAppearance() {

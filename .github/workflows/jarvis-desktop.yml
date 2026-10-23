@@ -178,6 +178,19 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium
+      - name: 格式化本轮手机界面源码
+        run: |
+          npm run format
+          npx prettier --write --ignore-path /dev/null src/ui/home.js src/ui/companionAppearance.js src/ui/mobileTheme.css src/ui/mobileHome.css src/ui/mobilePages.css src/ui/mobileCompanion.css src/ui/mobileComposer.css e2e/mobile-theme.mjs
+      - name: 导出本轮格式化源码
+        uses: actions/upload-artifact@v4
+        with:
+          name: formatted-mobile-ui
+          path: |
+            jarvis/src/ui/home.js
+            jarvis/src/ui/companionAppearance.js
+            jarvis/src/ui/mobile*.css
+            jarvis/e2e/mobile-theme.mjs
       - name: 完整单元测试
         run: npm test
       - name: 代码检查（没定义的变量、浏览器同名全局、格式）
@@ -229,6 +242,7 @@ jobs:
           node e2e/conversation-flow.mjs
           node e2e/image-followup.mjs
           node e2e/settings-layout.mjs "$RUNNER_TEMP/jarvis-e2e"
+          node e2e/mobile-theme.mjs "$RUNNER_TEMP/jarvis-e2e"
           node e2e/model-library.mjs "$RUNNER_TEMP/jarvis-e2e"
       - name: 验证 Electron 全息桌面互动
         run: |
