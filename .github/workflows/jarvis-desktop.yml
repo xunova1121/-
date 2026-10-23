@@ -180,6 +180,20 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium
+      - name: 格式化本轮手机密度与首帧修复
+        run: |
+          npm run format
+          npx prettier --write --ignore-path /dev/null src/ui/mobileHome.css src/ui/mobileComposer.css src/ui/mobileTheme.css src/ui/mobilePages.css src/ui/mobileStartup.css src/ui/mobileStartup.js src/ui/homeWeather.js tests/mobileStartup.test.js e2e/mobile-theme.mjs
+      - name: 导出本轮格式化源码
+        uses: actions/upload-artifact@v4
+        with:
+          name: formatted-mobile-refinement
+          path: |
+            jarvis/src/ui/mobile*.css
+            jarvis/src/ui/mobileStartup.js
+            jarvis/src/ui/homeWeather.js
+            jarvis/tests/mobileStartup.test.js
+            jarvis/e2e/mobile-theme.mjs
       - name: 完整单元测试
         run: npm test
       - name: 代码检查（没定义的变量、浏览器同名全局、格式）

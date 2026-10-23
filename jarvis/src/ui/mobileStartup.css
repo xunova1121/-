@@ -59,3 +59,21 @@ html[data-mode='mobile'] #app-splash .as-dots { display: none; }
   html[data-mode='mobile'] #app-splash .as-logo { animation: none !important; }
 }
 html.safe-render[data-mode='mobile'] #app-splash { display: none !important; }
+
+/* 资源超时仍有可见标志，不用空白头像代替加载失败。 */
+html[data-mode='mobile'] body.mascot-unavailable .wy-mascot,
+html[data-mode='mobile'] body.mascot-unavailable #app-splash .as-logo {
+  background-image: url('./logo.svg') !important;
+  background-size: contain !important;
+  background-position: center !important;
+  animation: none !important;
+}
+html[data-mode='mobile'] #app-splash .as-retry {
+  margin-top: 10px;
+  padding: 7px 18px;
+  border: 1px solid #d7d0ef;
+  border-radius: 18px;
+  color: #7550e6;
+  background: #ffffffaa;
+  font: 400 13px/1.5 system-ui, sans-serif;
+}

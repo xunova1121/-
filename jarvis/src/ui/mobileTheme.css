@@ -9,7 +9,7 @@
   --font-ui: 'HarmonyOS Sans SC', 'HONOR Sans CN', 'MiSans', 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', system-ui, sans-serif;
   --font-display: var(--font-ui);
   --wy-radius: 20px;
-  --wy-body-size: 1rem;
+  --wy-body-size: .875rem;
   --wy-small-size: 0.8125rem;
   font-family: var(--font-ui);
   font-size: var(--wy-body-size);
@@ -66,14 +66,14 @@
   background: transparent;
 }
 :root body.compact.companion-edition .topbar {
-  min-height: 60px;
+  min-height: 52px;
   background: transparent;
   border: 0;
   padding-inline: 16px;
   gap: 8px;
 }
 :root body.compact.companion-edition .brand-name {
-  font: 550 1.0625rem/1.35 var(--font-ui);
+  font: 550 1rem/1.35 var(--font-ui);
   letter-spacing: 0;
 }
 :root body.compact.companion-edition .brand-mark.wy-brand {
