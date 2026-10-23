@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { initMobileStartup } from '../src/ui/mobileStartup.js';
 
 // 使用假 DOM 验证启动退出时机，不调用网络或真实模型。
@@ -22,6 +23,12 @@ function setup({ mobile = true, reduced = false, safe = false } = {}) {
 }
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe('手机启动页', () => {
+  it.each(['mascot-startup.webp', 'mascot-approved.webp'])('角色素材完整，没有在传输中被截断 %s', (file) => {
+    const bytes = readFileSync(new URL('../src/ui/' + file, import.meta.url));
+    expect(bytes.toString('ascii', 0, 4)).toBe('RIFF');
+    expect(bytes.toString('ascii', 8, 12)).toBe('WEBP');
+    expect(bytes.readUInt32LE(4) + 8).toBe(bytes.length);
+  });
   it('加载完成后直接淡出，240毫秒内清理，不强制播放两秒', () => {
     vi.useFakeTimers();
     const { splash } = setup();
