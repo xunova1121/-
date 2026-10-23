@@ -362,8 +362,10 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
         continue;
       }
       // 收尾核对：写代码的任务最多提醒两次；文档等其他任务只提醒一次，文件验过能用就交付，不反复核实
+      // 普通问题也算数时照样提醒用计算工具核对（核一下几秒；不然回答末尾挂“数值计算尚未核对”）
       const maxChecks = wroteCode || review.report().contract.coding ? 2 : 1;
-      const note = (!closing || retrieval.extensive) && checks < maxChecks && (review.required() || unfinished(plan.steps).length > 0) && !light && cur.adapter.kind !== 'mock' ? [finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }), review.required() && canReview && !lookupDeadline ? review.guidance() : ''].filter(Boolean).join('\n') : '';
+      const calcPending = canReview && review.report().contract?.calculation && review.report().calculation === 'not_checked';
+      const note = (!closing || retrieval.extensive) && checks < maxChecks && (review.required() || calcPending || unfinished(plan.steps).length > 0) && !light && cur.adapter.kind !== 'mock' ? [finishCheck({ steps: plan.steps, wroteCode, ranCode, lastText: stepText }), (review.required() && canReview && !lookupDeadline) || calcPending ? review.guidance() : ''].filter(Boolean).join('\n') : '';
       if (!note) break;
       checks++;
       // 以用户身份发给模型，但必须说清是系统核对：以前模型会回“你说得对，我来逐项核实”，再写一大段复盘

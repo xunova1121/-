@@ -149,3 +149,25 @@ describe('模型自己判断要不要更多时间',()=>{
     expect(names).not.toContain('need_more_time');
   });
 });
+
+describe('评测 baseline-07/13 暴露的问题', () => {
+  it('普通问题一个字没答出来就停了：给一句完整的话，不只剩“先回答到这里”', async () => {
+    const WEB={name:'web_search',description:'测试用',input_schema:{type:'object',properties:{q:{type:'string'}}},run:async({q})=>`结果 ${q}`};
+    let n=0;
+    const adapter={async stream({tools}){n++;if(!tools.some(t=>t.name==='web_search'))return {text:'',toolCalls:[],stop:'end_turn'};return {text:'',toolCalls:[{id:String(n),name:'web_search',args:{q:`第${n}次`}}],stop:'tool_use'};}};
+    const r=await runAgent({adapter,model:'x',history:[],userText:'最近一场中国男足比赛比分',context:{dynamic:''},tools:[WEB],emit:()=>{},maxSteps:40});
+    expect(r.text).toMatch(/还没有确切结果（查到的资料都没能核实）/);
+    expect(r.text).toContain(MORE_TIME_ASK);
+  });
+  it('普通问题里算数没用计算工具：收尾时提醒核对，而不是直接挂“数值计算尚未核对”', async () => {
+    const seen=[];let n=0;
+    const VERIFY={name:'verify_numbers',description:'算数',input_schema:{type:'object',properties:{expr:{type:'string'}}},run:async()=>'765'};
+    const adapter={async stream({messages}){seen.push(String(messages.at(-1).content));n++;
+      if(n===1)return {text:'净盈利 765 元。',toolCalls:[],stop:'end_turn'};
+      if(n===2)return {text:'',toolCalls:[{id:'v',name:'verify_numbers',args:{expr:'1000*14.2-1000*13.4-35'}}],stop:'tool_use'};
+      return {text:'',toolCalls:[],stop:'end_turn'};}};
+    const r=await runAgent({adapter,model:'x',history:[],userText:'股票买入1000股，每股13.4元；卖出每股14.2元，手续费合计35元。净盈利多少？列算式。',context:{dynamic:''},tools:[VERIFY],emit:()=>{}});
+    expect(seen.some(c=>/verify_numbers/.test(c))).toBe(true);
+    expect(r.text).not.toMatch(/数值计算尚未通过计算工具核对/);
+  });
+});

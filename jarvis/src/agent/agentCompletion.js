@@ -26,7 +26,10 @@ export async function finishAgentRun({
   //   模型已用现有资料答完（检索因时限、次数收住了）也问一句，方便接着查
   const quickStop = lookupDeadline && (retrievalStopped || Boolean(retrieval.reason));
   if (step >= limit || retrievalStopped || quickStop) {
-    const note = quickStop
+    // 一个字都没写出来（比如资料都没核实到）：别只剩一句“回答到这里”
+    const note = quickStop && !finalText.trim()
+      ? `这次一分钟内还没有确切结果（查到的资料都没能核实），先不乱说。${MORE_TIME_ASK}。`
+      : quickStop
       ? `\n\n（普通问题我先回答到这里，上面是已经查到的；还没有确切结果、没核实的部分别当结论。${MORE_TIME_ASK}。）`
       : retrieval.reason
       ? `\n\n（本轮检索已停止：${retrieval.reason}。目前还没有确切结果；已取得的信息见上文，未核实的部分不能当作结论。）`

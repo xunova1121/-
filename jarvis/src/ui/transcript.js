@@ -93,6 +93,8 @@ function span(s) {
  * 其它文字链接加下划线和 ↗。点一下用系统浏览器打开（电脑用默认浏览器，手机交给系统）
  */
 export function linkEl(text, href) {
+  // 模型偶尔写成 sandbox:/工作区路径（别的产品的写法），点了打不开：当普通文字，文件卡片里能打开
+  if (/^sandbox:/i.test(href)) return document.createTextNode(text);
   let host = '';
   try { host = new URL(href).hostname.replace(/^www\./, ''); } catch { return document.createTextNode(text); }
   const a = document.createElement('a');
