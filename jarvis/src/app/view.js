@@ -13,6 +13,7 @@ import * as agentMemory from '../agent/memory.js';
 import * as sessionsApi from '../agent/sessions.js';
 import { PANES } from './panels.js';
 import { $, body, DESKTOP, COMPACT, narrow, lowEnd, toast } from './env.js';
+import { dropMemoryNotes } from '../mobile/exitReasons.js';
 
 export function createView(app) {
   const QUICK = [
@@ -323,10 +324,12 @@ export function createView(app) {
       // 上次闪退的记录（mobile/boot.js 存的）：显示在版本这一栏，方便截图
       let crash = '';
       try {
-        crash = localStorage.getItem('jarvis.lastCrash') || '';
+        crash = dropMemoryNotes(localStorage.getItem('jarvis.lastCrash') || '');
       } catch {
         /* 读不到就不显示 */
       }
+      // 只剩“崩溃前界面”这类附注、没有真正的退出记录：不显示（旧版把内存提醒也当成了异常退出）
+      if (crash.split('\n').every((line) => line.startsWith('崩溃前'))) crash = '';
       if (crash) {
         const p = Object.assign(document.createElement('p'), { className: 'muted small', textContent: `最近一次异常退出：\n${crash.slice(-800)}` });
         p.style.whiteSpace = 'pre-line';

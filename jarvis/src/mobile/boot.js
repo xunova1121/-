@@ -12,6 +12,7 @@ import { installSpeechShim } from './speechShim.js';
 import { createNativeSaver } from './saveNative.js';
 import { applyDisplayMode } from './renderHealth.js';
 import { startScreenTrail } from './renderDiagnostics.js';
+import { summarizeExits, dropMemoryNotes, KILLED_TIP } from './exitReasons.js';
 import { topColor } from './topColor.js';
 
 if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
@@ -123,9 +124,12 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
     const crashLog = registerPlugin('CrashLog');
     globalThis.__jarvisRenderHealthPlugin = crashLog;
     const prevScreen = startScreenTrail(); // 上一次运行最后停在哪个界面；从现在起记这一次的
-    let { text, safeDisplay, lastCrash } = await crashLog.take();
-    // 界面进程刚崩溃、自动重开的（3 分钟内）：接回刚才的对话；自己关掉再打开的回首页（main.js 用）
-    globalThis.__jarvisRecentCrash = lastCrash > 0 && Date.now() - lastCrash < 3 * 60_000;
+    let { text, safeDisplay, lastCrash, exits } = await crashLog.take();
+    // 系统记下的退出原因：被手机后台管理关掉的不算闪退，接回刚才的对话（见 exitReasons.js）
+    const { lines, killed } = summarizeExits(exits || []);
+    text = [dropMemoryNotes(text), ...lines.map((line) => `系统记录：${line}`)].filter(Boolean).join('\n');
+    // 界面进程刚崩溃、自动重开的（3 分钟内），或被系统关掉的：接回刚才的对话；自己关掉再打开的回首页（recovery.js 用）
+    globalThis.__jarvisRecentCrash = (lastCrash > 0 && Date.now() - lastCrash < 3 * 60_000) || killed;
     if (typeof safeDisplay === 'boolean') applyDisplayMode(safeDisplay);
     if (text) {
       // 崩溃前在做什么（main.js 在执行每一步时记下的；正常结束会清空）
@@ -135,8 +139,10 @@ if (MOBILE && globalThis.Capacitor?.isNativePlatform?.()) {
       if (prevScreen) text = `${text.trim()}\n崩溃前界面：${prevScreen}`;
       try { localStorage.setItem('jarvis.lastCrash', text.trim()); } catch { /* 存不了就只提示 */ }
       const last = text.trim().split('\n').filter((l) => !l.startsWith('崩溃前')).at(-1) ?? '';
-      setTimeout(() => globalThis.__jarvisToast?.(`上次异常退出：${last.slice(15, 60)}（设置 → 模型 → 版本那一栏可以看详情）`), 4000);
+      const brief = last.startsWith('系统记录：') ? last.slice(5, 50) : last.slice(15, 60);
+      if (!killed) setTimeout(() => globalThis.__jarvisToast?.(`上次异常退出：${brief}（设置 → 模型 → 版本那一栏可以看详情）`), 4000);
     }
+    if (killed) setTimeout(() => globalThis.__jarvisToast?.(KILLED_TIP), 4000);
   } catch { /* 旧版 App 没有这个插件 */ }
 
   document.documentElement.classList.add('mobile-app');

@@ -72,8 +72,8 @@ public class MainActivity extends BridgeActivity {
     @Override public void onTrimMemory(int level){
         super.onTrimMemory(level);
         if(!RenderRecovery.shouldReduceDisplay(level))return;
-        CrashLog.write(this,"系统内存压力 level="+level);
-        health().edit().putBoolean("safeDisplay",true).apply();
+        // 只是系统提醒内存紧张（多半在后台），不是闪退：不写进异常记录，记下时间供诊断
+        health().edit().putBoolean("safeDisplay",true).putLong("lastTrim",System.currentTimeMillis()).putInt("lastTrimLevel",level).apply();
         if(!rendererGone && !isFinishing() && !isDestroyed() && getBridge()!=null){
             getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('jarvis:memory-pressure'));",null);
         }

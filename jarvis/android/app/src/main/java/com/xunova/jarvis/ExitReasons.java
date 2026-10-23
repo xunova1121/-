@@ -57,6 +57,28 @@ final class ExitReasons {
         return out;
     }
 
+    /**
+     * since 之后、未央主进程的退出记录（给网页分类显示：被系统后台管理关掉 / 安装更新 / 崩溃……）
+     * 网页渲染的沙盒进程每次都跟着主进程退出（“isolated not needed”），不算
+     */
+    static org.json.JSONArray mainSince(Context ctx, long since) {
+        org.json.JSONArray out = new org.json.JSONArray();
+        if (Build.VERSION.SDK_INT < 30) return out;
+        try {
+            ActivityManager am = (ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE);
+            for (ApplicationExitInfo e : am.getHistoricalProcessExitReasons(ctx.getPackageName(), 0, 8)) {
+                if (e.getTimestamp() <= since || !ctx.getPackageName().equals(e.getProcessName())) continue;
+                org.json.JSONObject row = new org.json.JSONObject();
+                row.put("time", e.getTimestamp());
+                row.put("reason", e.getReason());
+                row.put("pssMB", e.getPss() / 1024);
+                row.put("description", e.getDescription() == null ? "" : e.getDescription());
+                out.put(row);
+            }
+        } catch (Exception ignored) { /* 读不到就当没有 */ }
+        return out;
+    }
+
     /** since 之后的退出记录，每条一行；没有或系统不支持时返回空字符串 */
     static String since(Context ctx, long since) {
         if (Build.VERSION.SDK_INT < 30) return "";

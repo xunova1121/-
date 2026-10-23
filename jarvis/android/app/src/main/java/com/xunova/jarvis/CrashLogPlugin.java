@@ -16,6 +16,14 @@ public class CrashLogPlugin extends Plugin {
         r.put("safeDisplay",MainActivity.safeDisplay(getContext()));
         r.put("consecutive",getContext().getSharedPreferences("render-health",android.content.Context.MODE_PRIVATE).getInt("consecutive",0));
         r.put("lastCrash",getContext().getSharedPreferences("render-health",android.content.Context.MODE_PRIVATE).getLong("lastCrash",0));
+        // 上次打开以来系统记下的退出原因（每条只给一次）
+        android.content.SharedPreferences prefs=getContext().getSharedPreferences("render-health",android.content.Context.MODE_PRIVATE);
+        long seen=prefs.getLong("lastExitSeen",0);
+        org.json.JSONArray exits=ExitReasons.mainSince(getContext(),seen);
+        long newest=seen;
+        for(int i=0;i<exits.length();i++)newest=Math.max(newest,exits.optJSONObject(i).optLong("time",0));
+        prefs.edit().putLong("lastExitSeen",newest).apply();
+        r.put("exits",exits);
         call.resolve(r);
     }
     @PluginMethod public void setDisplayMode(PluginCall call) {
