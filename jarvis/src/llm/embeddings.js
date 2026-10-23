@@ -42,9 +42,10 @@ export function createEmbedder(cfg, { gateway = null, fetchImpl = globalThis.fet
   const ep = e.line ? providerEndpoint(cfgForLine(cfg, e.line), gateway) : null;
   const key = e.local ? 'ollama' : cfg.keys?.[e.keyFrom] || '';
   const base = ep ? ep.base : gateway ? `${gateway.origin}/api/llm/${e.id}` : e.base;
-  // 检索时（一次只算一句话）：同一句话 5 分钟内复用结果；向量服务 2.5 秒没回就先不等它（这一轮只用关键词检索）
+  // 检索时（一次只算一句话）：同一句话 5 分钟内复用结果；向量服务 1.2 秒没回就先不等它（这一轮只用关键词检索）。
+  // 以前等 2.5 秒，评测里很多轮都正好等满，每次对话先白等两三秒
   const cache = new Map();
-  const QUERY_TIMEOUT = 2500;
+  const QUERY_TIMEOUT = 1200;
   const raw = async (texts) => {
     const res = await fetchImpl(`${base}/embeddings`, {
       method: 'POST',

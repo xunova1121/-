@@ -544,9 +544,9 @@ async function reinforce(list) {
 }
 
 /** 为当前问题取出：核心记忆、相关记忆、相关的过往对话、教训、技能 */
-export async function contextFor(query) {
-  const [ms, ls, ss, eps, core] = await Promise.all([memories.all(), lessons.all(), skills.all(), episodes.all(), getCore()]);
-  const vec = await embedOne(query);
+export async function contextFor(query, { vector = true } = {}) {
+  // 向量和读库同时进行；闲聊（你好、在吗）不按意思检索，只用关键词，不等向量服务
+  const [ms, ls, ss, eps, core, vec] = await Promise.all([memories.all(), lessons.all(), skills.all(), episodes.all(), getCore(), vector ? embedOne(query) : null]);
   // 像注入指令的条目不交给模型（原文保留在库里，面板上标“可疑，未使用”）
   const cur = ms.map(upgrade).filter(current).filter(m => m.category !== 'doc_style').filter(safe((m) => m.content));
   const relevant = score(cur, query, (m) => m.content, { k: 6, vec });

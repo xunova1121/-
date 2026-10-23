@@ -100,7 +100,7 @@ export const VOICE_NOTE = '## 语音对话\n用户正在和你语音对话，你
 export async function buildContext(userText, { sessionId = null, turns = 0, summary = null, light = false } = {}) {
   const fresh = turns <= 2; // 新对话（或刚开始）：带上最近的对话和没做完的事，方便“接着上次的”
   const [ctx, kbHits, installed, past, recentS, open, rules, currentSession] = await Promise.all([
-    memory.contextFor(userText), light ? [] : kb.search(userText, 4), light ? [] : packs.enabled().catch(() => []),
+    memory.contextFor(userText, { vector: !light }), light ? [] : kb.search(userText, 4), light ? [] : packs.enabled().catch(() => []),
     light ? [] : sessions.searchMessages(userText, { exclude: sessionId, k: 2 }).catch(() => []),
     fresh && !light ? sessions.recent({ exclude: sessionId, k: 3 }).catch(() => []) : [],
     fresh && !light ? memory.openItems({ exclude: sessionId }).catch(() => []) : [],
@@ -312,7 +312,7 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
       showText(text);
     };
     let r;
-    const request = createModelRequest({ current: cur, effort, signal, lookupDeadline, lookupControl, closing, retrieval, emit, allowWebSearch, onNativeSearch: () => { nativeSearchCalls++; }, onText: acceptVisible, onRetry: (attempt) => {
+    const request = createModelRequest({ current: cur, effort, signal, lookupDeadline, lookupControl, light, closing, retrieval, emit, allowWebSearch, onNativeSearch: () => { nativeSearchCalls++; }, onText: acceptVisible, onRetry: (attempt) => {
       stripper = new EmotionTagStripper();
       emit({ type: 'retry', attempt, resume: Boolean(stepText.trim()) });
     } });
