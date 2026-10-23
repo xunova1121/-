@@ -35,7 +35,7 @@ export function typed(raw) {
 
 const TOTAL = /^(合计|总计|小计|总和|共计|total)$/i;
 const GROWTH = /增长率|增幅|同比|环比|增速|变化率/;
-const DONE = /完成率|达成率|完成比例/;
+const DONE = /完成率|达成率|完成比例|执行率|使用率|兑现率/;
 const CUR = /本期|本年|今年|本月|当期|实际|完成|本季/;
 const PREV = /上期|上年|去年|上月|同期|基期|上季/;
 const PLAN = /目标|计划|预算|任务/;
@@ -63,6 +63,45 @@ const looksLikeHeader = (rows) => rows.length > 2 && rows[0].length >= 2 && rows
 const MONEY = /金额|投资|费用|预算|万元|元|成本|收入|销售额/;
 const isTotalRow = (row) => [0, 1].some((ci) => TOTAL.test(String(row[ci]?.value ?? '').trim()));
 
+/** 结算、预算表里能算出来的列：净重 = 毛重 − 皮重；金额 = 数量（净重）× 单价 */
+const GROSS = /毛重/;
+const TARE = /皮重|筐重|扣重|扣秤|包装重/;
+const NET = /净重/;
+const QTY = /数量|斤数|件数|吨数|重量|工时|天数|人数/;
+const PRICE = /单价|价格|费率/;
+const AMOUNT = /金额|货款|应付|应收|结算款|小计/;
+const isNum = (c) => typeof c?.value === 'number' || typeof c?.result === 'number';
+const valOf = (c) => (typeof c?.value === 'number' ? c.value : typeof c?.result === 'number' ? c.result : null);
+/**
+ * 模型常把金额、净重手算好填进去（算错了也看不出来）：表头认得出来、两边都是数时改成公式，
+ * Excel 里改了数量或单价，金额跟着变。
+ * @returns {number} 改成公式的格子数
+ */
+function deriveColumns(headers, dataRows) {
+  const find = (re, not) => headers.findIndex((h) => re.test(h) && !(not && not.test(h)));
+  let n = 0;
+  const gross = find(GROSS);
+  const tare = find(TARE);
+  const net = find(NET);
+  const set = (row, ci, formula, result, numFmt) => { row[ci] = { formula, result: Math.round(result * 1e6) / 1e6, numFmt: row[ci]?.numFmt ?? numFmt }; n++; };
+  if (gross >= 0 && tare >= 0 && net >= 0) {
+    for (const { row, r } of dataRows) {
+      if (row[net]?.formula || !isNum(row[gross])) continue;
+      set(row, net, `${colName(gross)}${r}-${colName(tare)}${r}`, valOf(row[gross]) - (valOf(row[tare]) ?? 0), row[gross].numFmt ?? '#,##0.00');
+    }
+  }
+  const qty = net >= 0 ? net : find(QTY, /单价|金额|毛重|皮重/);
+  const price = find(PRICE);
+  const amount = find(AMOUNT, /单价|率|占比/);
+  if (qty >= 0 && price >= 0 && amount >= 0 && amount !== qty && amount !== price) {
+    for (const { row, r } of dataRows) {
+      if (row[amount]?.formula || !isNum(row[qty]) || !isNum(row[price])) continue;
+      set(row, amount, `ROUND(${colName(qty)}${r}*${colName(price)}${r},2)`, Math.round(valOf(row[qty]) * valOf(row[price]) * 100) / 100, row[price].numFmt?.includes('¥') ? row[price].numFmt : '#,##0.00');
+    }
+  }
+  return n;
+}
+
 /**
  * 一张表：文字 → 带类型的单元格，补上合计、增长率 / 完成率、占比公式
  * @param {string[][]} rows 第一行是表头
@@ -74,7 +113,10 @@ function buildTable(rows, r0, header = true) {
   const grid = rows.map((r, ri) => Array.from({ length: cols }, (_, ci) => (header && ri === 0 ? { value: r[ci] ?? '' } : typed(r[ci]))));
   const bodyRows = grid.slice(header ? 1 : 0).map((row, k) => ({ row, r: r0 + (header ? 1 : 0) + k }));
   const dataRows = bodyRows.filter(({ row }) => !isTotalRow(row));
-  const numericCols = [...Array(cols).keys()].filter((ci) => dataRows.some(({ row }) => typeof row[ci]?.value === 'number'));
+  const derived = header ? deriveColumns(headers, dataRows) : 0;
+  const numericCols = [...Array(cols).keys()].filter((ci) => dataRows.some(({ row }) => typeof row[ci]?.value === 'number' || typeof row[ci]?.result === 'number'));
+  // 每行都是模型写的公式（如“差异 = 实际 − 预算”）的列：合计行也要加起来
+  const formulaCols = [...Array(cols).keys()].filter((ci) => !numericCols.includes(ci) && dataRows.length > 1 && dataRows.every(({ row }) => row[ci]?.formula || typeof row[ci]?.value === 'number') && dataRows.some(({ row }) => row[ci]?.formula));
   const shareCols = new Set([...Array(cols).keys()].filter((ci) => SHARE.test(headers[ci] ?? '')));
   const growthCols = new Set([...Array(cols).keys()].filter((ci) => !shareCols.has(ci) && (GROWTH.test(headers[ci] ?? '') || DONE.test(headers[ci] ?? ''))));
   let formulas = 0;
@@ -83,13 +125,15 @@ function buildTable(rows, r0, header = true) {
     if (!isTotalRow(row)) continue;
     const above = dataRows.filter((d) => d.r < r);
     if (!above.length) continue;
-    for (const ci of numericCols) {
-      if (ci === 0 || growthCols.has(ci) || shareCols.has(ci) || row[ci]?.formula) continue;
+    for (const ci of [...numericCols, ...formulaCols]) {
+      // 单价、费率、序号加起来没有意义
+      if (ci === 0 || growthCols.has(ci) || shareCols.has(ci) || row[ci]?.formula || PRICE.test(headers[ci] ?? '') || SEQ_HEAD.test(String(headers[ci] ?? '').trim())) continue;
       const from = above[0].r; const to = above.at(-1).r;
-      const sum = above.reduce((n, d) => n + (typeof d.row[ci]?.value === 'number' ? d.row[ci].value : 0), 0);
+      const sum = above.reduce((n, d) => n + (typeof d.row[ci]?.value === 'number' ? d.row[ci].value : typeof d.row[ci]?.result === 'number' ? d.row[ci].result : 0), 0);
       const fmt = above.find((d) => d.row[ci]?.numFmt)?.row[ci].numFmt ?? '#,##0';
       if (fmt.includes('%')) continue; // 百分比列加总没有意义
-      row[ci] = { formula: `SUM(${colName(ci)}${from}:${colName(ci)}${to})`, result: Math.round(sum * 1e6) / 1e6, numFmt: fmt };
+      // 上面是模型写的公式（还没算出结果）：结果留给后面统一计算，不填一个错的 0
+      row[ci] = { formula: `SUM(${colName(ci)}${from}:${colName(ci)}${to})`, ...(!formulaCols.includes(ci) && { result: Math.round(sum * 1e6) / 1e6 }), numFmt: fmt };
     }
   }
   const numOf = (c) => (typeof c?.value === 'number' ? c.value : typeof c?.result === 'number' ? c.result : null);
@@ -134,7 +178,7 @@ function buildTable(rows, r0, header = true) {
   // 带表头的“项目 | 数值”表：这一行的名目是比率，这一行的公式也设成百分比
   else for (const { row } of bodyRows) if (pctLabel(row[0]?.value)) row.forEach((c, ci) => { if (ci > 0 && c.formula && !c.numFmt) c.numFmt = '0.0%'; });
   for (const row of grid) for (const c of row) if (c.formula) formulas++;
-  return { grid, cols, formulas };
+  return { grid, cols, formulas, derived };
 }
 
 /** 估算一格文字要几行（Excel 不会替我们按换行算行高） */
@@ -196,12 +240,86 @@ export function dedupeRows(rows, header = true) {
   return { rows: kept, removed: drop.size };
 }
 
+const INPUT_FONT = 'FF1F4E9A';
+const CALC_FILL = 'FFF1F3F6';
+const LEGEND = '说明：蓝色数字是录入的，灰底格子是公式算的；改录入的数，结果会跟着变';
+/** 这张表会不会自动补出公式（金额 = 数量 × 单价、净重 = 毛重 − 皮重） */
+function wouldDerive(rows) {
+  const h = (rows[0] ?? []).map((x) => String(x ?? ''));
+  const has = (re, not) => h.some((x) => re.test(x) && !(not && not.test(x)));
+  return (has(GROSS) && has(TARE) && has(NET)) || ((has(QTY, /单价|金额/) || has(NET)) && has(PRICE) && has(AMOUNT, /单价|率|占比/)) || h.some((x) => TOTAL.test(x)) || rows.some((r) => isTotalRow(r.map((v) => ({ value: v }))));
+}
+
+const STATUS = /状态|进度$|是否|结清|付款情况/;
+const DUE = /截止|到期|计划完成|交付日期|完成时限|应完成/;
+const BAD = ['逾期', '超期', '延期', '未完成', '未付', '欠款', '异常'];
+const GOOD = ['已完成', '已结清', '已付', '已交付', '正常'];
+const DEFAULT_STATUS = {
+  ledger: ['未开始', '进行中', '已完成', '已逾期'],
+  settlement: ['未付', '部分付', '已付'],
+  budget: ['待审批', '已批准', '已执行']
+};
+const fillStyle = (argb) => ({ fill: { type: 'pattern', pattern: 'solid', bgColor: { argb } } });
+/**
+ * 按表头加条件格式和下拉选项（结算、台账、预算、分析表的常用规矩）：
+ *   负数标红；增长率负红正绿；完成率不到 100% 标橙；实际超过预算标红；状态列“逾期 / 未付”红底、“已完成 / 已付”绿底；
+ *   截止日期已过、状态还没完成的标橙；状态列、是否列给下拉选项。
+ */
+function tableRules(ws, { headers, first, last, grid, kind }) {
+  const ref = (ci) => `${colName(ci)}${first}:${colName(ci)}${last}`;
+  const add = (ci, rules) => ws.addConditionalFormatting({ ref: ref(ci), rules });
+  const red = { font: { color: { argb: 'FFC00000' } } };
+  const green = { font: { color: { argb: 'FF2E7D32' } } };
+  const body = grid.slice(1);
+  const numeric = (ci) => body.some((row) => typeof row[ci]?.value === 'number' || row[ci]?.formula);
+  headers.forEach((h, ci) => {
+    if (!numeric(ci) || SEQ_HEAD.test(h.trim())) return;
+    if (GROWTH.test(h)) add(ci, [{ type: 'cellIs', operator: 'lessThan', formulae: [0], style: red, priority: 1 }, { type: 'cellIs', operator: 'greaterThan', formulae: [0], style: green, priority: 2 }]);
+    else if (DONE.test(h)) {
+      add(ci, [{ type: 'cellIs', operator: 'lessThan', formulae: [1], style: { font: { color: { argb: 'FFD9822B' } } }, priority: 1 }]);
+      if (kind === 'analysis') add(ci, [{ type: 'dataBar', cfvo: [{ type: 'num', value: 0 }, { type: 'num', value: 1 }], color: { argb: 'FF8DB4E2' }, priority: 3 }]);
+    } else if (/金额|差异|利润|增减|结余|余额|差额|盈亏/.test(h) || kind === 'settlement' || kind === 'budget') {
+      add(ci, [{ type: 'cellIs', operator: 'lessThan', formulae: [0], style: red, priority: 1 }]);
+    }
+    if (kind === 'analysis' && SHARE.test(h)) add(ci, [{ type: 'dataBar', cfvo: [{ type: 'min' }, { type: 'max' }], color: { argb: 'FF8DB4E2' }, priority: 3 }]);
+  });
+  // 实际超过预算 / 计划：标红
+  const plan = headers.findIndex((h) => /预算|计划/.test(h) && !/率|差/.test(h));
+  const actual = headers.findIndex((h) => /实际|已用|执行数/.test(h) && !/率|差/.test(h));
+  if (plan >= 0 && actual >= 0 && numeric(plan) && numeric(actual)) {
+    add(actual, [{ type: 'expression', formulae: [`AND(ISNUMBER(${colName(actual)}${first}),${colName(actual)}${first}>${colName(plan)}${first})`], style: { ...fillStyle('FFFDE2E1'), ...red }, priority: 1 }]);
+  }
+  const status = headers.findIndex((h) => STATUS.test(h));
+  if (status >= 0) {
+    // 用公式规则（SEARCH）而不是“文本包含”规则：后者 ExcelJS 写出来缺属性，WPS / LibreOffice 不认
+    const has = (words) => `OR(${words.map((w) => `ISNUMBER(SEARCH("${w}",${colName(status)}${first}))`).join(',')})`;
+    add(status, [
+      { type: 'expression', formulae: [has(BAD)], style: { ...fillStyle('FFFDE2E1'), ...red }, priority: 1 },
+      { type: 'expression', formulae: [has(GOOD)], style: { ...fillStyle('FFE6F4EA'), ...green }, priority: 2 }
+    ]);
+    // 下拉选项：表里已有的状态 + 这类表常用的状态（状态种类太多的不加，免得卡死录入）
+    const seen = [...new Set(body.map((row) => String(row[status]?.value ?? '').trim()).filter(Boolean))];
+    const yesNo = /是否/.test(headers[status]);
+    const options = yesNo ? ['是', '否'] : [...new Set([...(DEFAULT_STATUS[kind] ?? []), ...seen])];
+    if (options.length >= 2 && options.length <= 8 && options.join(',').length < 200 && (yesNo || seen.length <= 6)) {
+      for (let r = first; r <= last; r++) ws.getCell(`${colName(status)}${r}`).dataValidation = { type: 'list', allowBlank: true, showErrorMessage: false, formulae: [`"${options.join(',')}"`] };
+    }
+  }
+  // 截止日期过了、状态还不是完成：整格标橙
+  const due = headers.findIndex((h) => DUE.test(h));
+  if (due >= 0 && body.some((row) => row[due]?.value instanceof Date)) {
+    const D = `${colName(due)}${first}`;
+    const done = status >= 0 ? `,ISERROR(SEARCH("完成",${colName(status)}${first}))` : '';
+    add(due, [{ type: 'expression', formulae: [`AND(ISNUMBER(${D}),${D}<TODAY()${done})`], style: { ...fillStyle('FFFFE8CC'), font: { color: { argb: 'FFB45309' } } }, priority: 1 }]);
+  }
+}
+
 /**
  * @param {string} content  CSV / Markdown 表格。“## 名称”分工作表；工作表里还可以有“### 小节”、多张表格和普通文字（说明 / 备注）
- * @param {{ theme: object }} o
+ * @param {{ theme: object, kind?: string }} o  kind：settlement 结算 / ledger 台账 / budget 预算 / analysis 分析 / general（documentDesign.js 判断）
  * @returns {Promise<{ blob: Blob, info: { sheets: number, formulas: number, formulaIssues: object[], layout: string, duplicatesRemoved: number, duplicatesKept: number } }>}
  */
-export async function makeXlsx(content, { theme }) {
+export async function makeXlsx(content, { theme, kind = 'general' }) {
   const mod = await import('exceljs');
   const ExcelJS = mod.default ?? mod;
   const wb = new ExcelJS.Workbook();
@@ -272,6 +390,8 @@ export async function makeXlsx(content, { theme }) {
       band(name, { font: { size: 15, bold: true, color: { argb: titleFont } }, fill: titleFill, height: 32, align: 'center' });
       // 紧跟在工作表名下面、第一张表 / 小节之前的文字是副标题
       while (s.blocks[0]?.kind === 'text') band(s.blocks.shift().text, { font: { size: 10, italic: true, color: { argb: 'FF595959' } }, height: 20, align: 'center' });
+      // 有公式的报表：标题格加批注说明怎么看（不插行：模型写的公式按固定行号引用，插一行就全错位）
+      if (s.blocks.some((b) => b.kind === 'table' && (b.rows.some((row) => row.some((c) => /^=./.test(String(c ?? '').trim()))) || wouldDerive(b.rows)))) ws.getRow(1).getCell(1).note = LEGEND;
       r++; // 空一行
     }
     s.blocks.forEach((b, bi) => {
@@ -324,11 +444,22 @@ export async function makeXlsx(content, { theme }) {
           } else if (header && ri % 2 === 0) {
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: zebra } };
           }
+          // 录入的数和公式算的数分开：录入是蓝字，公式是灰底（表里有公式时才分，免得满屏颜色）
+          if (t.formulas && header && ri > 0 && !total && !labelCol(ci) && !seqCol(ci)) {
+            if (c.formula) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: CALC_FILL } };
+            else if (typeof c.value === 'number') cell.font = { name: FONT, size: 10.5, color: { argb: INPUT_FONT } };
+          }
           if (typeof c.value === 'string') lines = Math.max(lines, linesFor(c.value, colW[ci] ?? 10));
         });
         xr.height = Math.max(header && ri === 0 ? 24 : 20, lines * 15 + 6);
         r++;
       });
+      if (header) {
+        const top = r - t.grid.length;
+        const rows = t.grid.slice(1).map((row, k) => ({ row, r: top + 1 + k })).filter(({ row }) => !isTotalRow(row));
+        if (rows.length) tableRules(ws, { headers: b.rows[0].map((h) => String(h ?? '')), first: rows[0].r, last: rows.at(-1).r, grid: t.grid, kind });
+        if (t.formulas && !report) ws.getRow(top).getCell(1).note = LEGEND;
+      }
       r++; // 表格之后空一行
     });
     // 冻结到第一张表的表头；只有一张表时加筛选
@@ -339,6 +470,16 @@ export async function makeXlsx(content, { theme }) {
     // 打印：宽表横向；所有列缩到一页宽
     ws.pageSetup = { orientation: fullW > 110 ? 'landscape' : 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 } };
     if (firstHeader) ws.pageSetup.printTitlesRow = `${firstHeader}:${firstHeader}`;
+    // 打印区域就是写了东西的范围；页脚写页码
+    const lastRow = Math.max(1, ...[...cells.keys()].map((a) => Number(a.match(/\d+$/)[0])));
+    ws.pageSetup.printArea = `A1:${colName(W - 1)}${lastRow}`;
+    const calc = [...cells.values()].some((c) => c.formula);
+    ws.headerFooter = { oddHeader: `&L&9${name}${calc ? '&R&9蓝字为录入，灰底为公式' : ''}`, oddFooter: '&C&9第 &P 页 / 共 &N 页' };
+    // 宽表（结算、台账常见）：左边的名称列也冻结，横着拉时还看得到是谁
+    if (firstHeader && W > 6) {
+      const nameCol = tables[0].rows[0].findIndex((h) => /姓名|名称|户名|客户|项目|品名|事项|任务/.test(String(h ?? '')));
+      if (nameCol >= 0 && nameCol <= 2) ws.views = [{ state: 'frozen', ySplit: firstHeader, xSplit: nameCol + 1, showGridLines: !report }];
+    }
     checked.at(-1).rows = Math.max(0, ...[...cells.keys()].map((a) => Number(a.match(/\d+$/)[0])));
   }
   // 模型自己写的公式：先算一遍把结果存进去（Excel 打开时照样重算），未央读回、工作区预览时也能看到数

@@ -231,7 +231,7 @@ export async function generate(format, { title = '未命名', content = '', them
       return { blob: r.blob, ext: 'pptx', theme, info: r.info };
     }
     case 'xlsx': {
-      const r = await makeXlsx(content, { theme });
+      const r = await makeXlsx(content, { theme, kind });
       return { blob: r.blob, ext: 'xlsx', theme, info: r.info };
     }
     case 'csv': return { blob: makeCsv(content), ext: 'csv', theme };
