@@ -104,6 +104,31 @@ try{
   check('消息按钮是图标（带文字说明）',await page.locator('.msg.agent').last().locator('.msg-copy svg').count()===1&&await page.locator('.msg.agent').last().locator('.msg-copy').getAttribute('aria-label')==='复制');
   check('顶栏显示当前对话的标题',await page.evaluate(()=>{const t=document.getElementById('chat-title');return !t.hidden&&t.textContent.includes('你好')&&t.getBoundingClientRect().height>0;}));
   check('双方正文默认14px，单句用户气泡不留过高空白',await page.evaluate(()=>{const user=document.querySelector('.msg.user:last-of-type')||[...document.querySelectorAll('.msg.user')].at(-1),agent=[...document.querySelectorAll('.msg.agent')].at(-1);return [user,agent].every(el=>Math.abs(parseFloat(getComputedStyle(el.querySelector('.body')).fontSize)-14)<.1)&&user.getBoundingClientRect().height<=112;}));
+  // 用真实发送得到的节点复现用户短句，检查按钮栏不会把气泡撑成大卡片。
+  for (const width of [320, 390, 412]) {
+    await page.setViewportSize({width,height:844});
+    const bubbleMetrics=await page.locator('.msg.user').last().evaluate(el=>{
+      const box=el.getBoundingClientRect();
+      const actions=el.querySelector('.msg-actions');
+      const bar=actions.getBoundingClientRect();
+      const buttons=[...actions.querySelectorAll('button')].filter(button=>!button.hidden);
+      return {width:box.width,height:box.height,bar:bar.width,inBounds:bar.left>=box.left&&bar.right<=box.right,buttonsFit:buttons.every(button=>{const r=button.getBoundingClientRect();return r.width>=32&&r.height>=32&&r.left>=box.left&&r.right<=box.right;}),border:getComputedStyle(actions).borderTopWidth};
+    });
+    check(`${width} 短气泡随内容收缩，操作可点击且没有多余分隔留白`,bubbleMetrics.width<=150&&bubbleMetrics.height<=90&&bubbleMetrics.bar<=100&&bubbleMetrics.inBounds&&bubbleMetrics.buttonsFit&&bubbleMetrics.border==='0px',JSON.stringify(bubbleMetrics));
+    const longFits=await page.locator('.msg.user').last().evaluate(el=>{
+      const body=el.querySelector('.body');
+      const original=body.innerHTML;
+      // 只修改隔离测试页面的可见节点，不改会话或真实数据。
+      body.textContent='非常长的文件名_'.repeat(40)+'\n第二行补充说明。';
+      const box=el.getBoundingClientRect();
+      const textFits=box.left>=20&&box.right<=innerWidth-20&&body.scrollWidth<=body.clientWidth+1;
+      body.innerHTML=original;
+      return textFits;
+    });
+    check(`${width} 长文件名和多行内容自动换行，不被窄气泡裁切`,longFits);
+
+  }
+  await page.setViewportSize({width:390,height:844});
   check('对话正文两侧保留至少 20px 阅读留白',await page.locator('.msg.agent').last().evaluate(el=>{const r=el.getBoundingClientRect();return r.left>=20&&r.right<=innerWidth-20;}));
   check('手机完成后的短回复使用紧凑单头像，不留大块空白或固定的话',await page.locator('.msg.agent').last().evaluate(el=>{const who=el.querySelector('.who');return who.querySelectorAll('.wy-mascot').length===1&&who.querySelector('.wy-mascot').getBoundingClientRect().height>=30&&who.querySelector('.wy-mascot').getBoundingClientRect().height<=36&&!who.querySelector('.wy-reply-greeting');}));
   check('手机消息角色不遮昵称，正文在标题下方且没有横向溢出',await page.locator('.msg.agent').last().evaluate(el=>{const r=x=>x.getBoundingClientRect(),head=r(el.querySelector('.who')),avatar=r(el.querySelector('.who-mood')),name=r(el.querySelector('.who-name')),body=r(el.querySelector('.body'));return avatar.right<=name.left+1&&head.bottom<=body.top+1&&body.left>=20&&body.right<=innerWidth-20&&document.querySelector('#transcript').scrollWidth<=document.querySelector('#transcript').clientWidth+1;}));

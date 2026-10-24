@@ -248,6 +248,18 @@ try {
         JSON.stringify(panelMetrics)
       );
       await page.screenshot({ path: path.join(output, `theme-${pane}-${width}.png`) });
+      if (width === 390) {
+        // 不只看首屏：滚到面板底部检查长表单和页尾入口。
+        const bottomMetrics=await page.evaluate((value)=>{
+          const content=document.querySelector(`[data-pane="${value}"]`);
+          const panel=document.querySelector('#panel');
+          for(const el of [panel,content]) el.scrollTop=el.scrollHeight;
+          return {width:panel.scrollWidth,doc:document.documentElement.scrollWidth,title:parseFloat(getComputedStyle(content.querySelector('h2')||content).fontSize)};
+        },pane);
+        check(`${pane} 页尾保持统一字号且无横向溢出`,bottomMetrics.width<=width&&bottomMetrics.doc<=width&&bottomMetrics.title<=18,JSON.stringify(bottomMetrics));
+        await page.screenshot({path:path.join(output,`theme-${pane}-bottom-${width}.png`)});
+      }
+
     }
     await page.click('#btn-theme');
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
