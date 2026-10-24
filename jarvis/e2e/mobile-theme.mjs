@@ -2,7 +2,7 @@
 import { chromium } from 'playwright';
 import http from 'node:http';
 import path from 'node:path';
-import { readFile, mkdir } from 'node:fs/promises';
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dist-mobile');
@@ -44,7 +44,9 @@ try {
   });
   await startupContext.route('https://**/*', (route) => route.abort());
   let releaseEntry;
-  const entryGate = new Promise((resolve) => { releaseEntry = resolve; });
+  const entryGate = new Promise((resolve) => {
+    releaseEntry = resolve;
+  });
   await startupContext.route('**/*.js', async (route) => {
     await entryGate;
     await route.continue();
@@ -53,25 +55,45 @@ try {
   await startupPage.goto(base, { waitUntil: 'commit' });
   await startupPage.waitForSelector('#app-splash', { state: 'attached' });
   await startupPage.waitForFunction(() => getComputedStyle(document.querySelector('#app-splash .as-logo')).backgroundImage.includes('mascot-startup'));
-  check('模拟原生桥延迟时首帧是浅色眨眼页，旧骨架始终隐藏', await startupPage.evaluate(() => {
-    const splash = document.querySelector('#app-splash');
-    return getComputedStyle(document.querySelector('.app')).visibility === 'hidden' &&
-      getComputedStyle(splash).backgroundImage.includes('238, 240, 255') &&
-      getComputedStyle(document.querySelector('#boot')).display === 'none' &&
-      !document.body.classList.contains('compact');
-  }));
-  await startupPage.screenshot({ path: path.join(output, 'theme-real-first-paint.png') });
+  check(
+    '模拟原生桥延迟时首帧是浅色眨眼页，旧骨架始终隐藏',
+    await startupPage.evaluate(() => {
+      const splash = document.querySelector('#app-splash');
+      return (
+        getComputedStyle(document.querySelector('.app')).visibility === 'hidden' &&
+        getComputedStyle(splash).backgroundImage.includes('238, 240, 255') &&
+        getComputedStyle(document.querySelector('#boot')).display === 'none' &&
+        !document.body.classList.contains('compact')
+      );
+    })
+  );
+  // 首帧阶段主脚本刻意挂起，普通screenshot会等document.fonts.ready而互锁。
+  // CDP直接记录当前画面，不等待加载完成，也不提前放开主脚本。
+  const capture = await startupContext.newCDPSession(startupPage);
+  const firstFrame = await capture.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+  await writeFile(path.join(output, 'theme-real-first-paint.png'), Buffer.from(firstFrame.data, 'base64'));
+  await capture.detach();
   releaseEntry();
   await startupPage.waitForFunction(() => document.documentElement.classList.contains('mobile-ui-ready'));
   await startupPage.waitForFunction(() => !document.querySelector('#app-splash'));
-  check('原生桥恢复后才揭开已初始化首页，角色不透明缺失', await startupPage.evaluate(() =>
-    document.body.classList.contains('compact') &&
-    getComputedStyle(document.querySelector('.app')).visibility === 'visible' &&
-    !document.body.classList.contains('mascot-unavailable') && Boolean(document.querySelector('.home-reference'))
-  ));
+  check(
+    '原生桥恢复后才揭开已初始化首页，角色不透明缺失',
+    await startupPage.evaluate(
+      () =>
+        document.body.classList.contains('compact') &&
+        getComputedStyle(document.querySelector('.app')).visibility === 'visible' &&
+        !document.body.classList.contains('mascot-unavailable') &&
+        Boolean(document.querySelector('.home-reference'))
+    )
+  );
   await startupContext.close();
   for (const width of [320, 390, 412]) {
-    const context = await browser.newContext({ viewport: { width, height: width === 320 ? 640 : 740 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
+    const context = await browser.newContext({
+      viewport: { width, height: width === 320 ? 640 : 740 },
+      isMobile: true,
+      hasTouch: true,
+      reducedMotion: 'reduce'
+    });
     await context.addInitScript(() => {
       if (window.top !== window) return;
       localStorage.setItem('jarvis.settings.v1', JSON.stringify({ theme: 'day', speechOutput: false }));
@@ -175,13 +197,16 @@ try {
     check(`${width} 首页参考配色与字号`, metrics.background === '#eef0ff' && metrics.titleSize >= 15 && metrics.titleSize <= 17 && metrics.count === 3);
     check(`${width} 输入区与模型标签可见且无横向溢出`, metrics.width <= width && metrics.composerFits && metrics.modelFits, JSON.stringify(metrics));
     check(`${width} 使用批准的新未央形象`, metrics.image.includes('mascot-approved'));
-    check(`${width} 原生可用高度下首页一屏完整、无内容被输入区遮挡`, await page.evaluate(() => {
-      const transcript = document.querySelector('#transcript');
-      const files = document.querySelector('.home-files').getBoundingClientRect();
-      const suggestions = document.querySelector('.home-suggestions').getBoundingClientRect();
-      const input = document.querySelector('#inputbar').getBoundingClientRect();
-      return transcript.scrollHeight <= transcript.clientHeight + 2 && files.bottom <= input.top && suggestions.bottom <= files.top + 2;
-    }));
+    check(
+      `${width} 原生可用高度下首页一屏完整、无内容被输入区遮挡`,
+      await page.evaluate(() => {
+        const transcript = document.querySelector('#transcript');
+        const files = document.querySelector('.home-files').getBoundingClientRect();
+        const suggestions = document.querySelector('.home-suggestions').getBoundingClientRect();
+        const input = document.querySelector('#inputbar').getBoundingClientRect();
+        return transcript.scrollHeight <= transcript.clientHeight + 2 && files.bottom <= input.top && suggestions.bottom <= files.top + 2;
+      })
+    );
     check(
       `${width} 天气集中右侧且图标与位置开关不重叠`,
       await page.evaluate(() => {
