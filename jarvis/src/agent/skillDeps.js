@@ -3,8 +3,8 @@
  * “pip install …”“npm install …”读出来。服务器的技能运行器（server/skillRunner.mjs）照这个装依赖。
  * 只认包名和版本号这种简单写法；带网址、本地路径、奇怪参数的一律不装（不把说明里的任意命令当安装命令执行）。
  */
-const PY_SPEC = /^[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[A-Za-z0-9,._-]+\])?(?:(?:===?|!=|~=|<=?|>=?)[A-Za-z0-9.*+!_-]+(?:,(?:===?|!=|~=|<=?|>=?)[A-Za-z0-9.*+!_-]+)*)?$/;
-const NPM_SPEC = /^(?:@[a-z0-9._-]+\/)?[a-z0-9][a-z0-9._-]*(?:@[A-Za-z0-9.^~<>=*_-]+)?$/i;
+export const PY_SPEC = /^[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[A-Za-z0-9,._-]+\])?(?:(?:===?|!=|~=|<=?|>=?)[A-Za-z0-9.*+!_-]+(?:,(?:===?|!=|~=|<=?|>=?)[A-Za-z0-9.*+!_-]+)*)?$/;
+export const NPM_SPEC = /^(?:@[a-z0-9._-]+\/)?[a-z0-9][a-z0-9._-]*(?:@[A-Za-z0-9.^~<>=*_-]+)?$/i;
 const PY_INSTALL = /^(?:\$\s*)?(?:sudo\s+)?(?:pip3?|python3?\s+-m\s+pip|uv\s+pip|pipx)\s+install\s+(.+)$/;
 const NPM_INSTALL = /^(?:\$\s*)?(?:npm\s+(?:install|i|add)|pnpm\s+add|yarn\s+add)\s+(.+)$/;
 /** 说明里的命令行以这些开头：要在命令行里跑东西 */

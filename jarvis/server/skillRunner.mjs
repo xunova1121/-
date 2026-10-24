@@ -15,7 +15,7 @@ import { promisify } from 'node:util';
 import { randomUUID, createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
-import { skillDeps, hasDeps, depsKey } from '../src/agent/skillDeps.js';
+import { skillDeps, hasDeps, depsKey, PY_SPEC, NPM_SPEC } from '../src/agent/skillDeps.js';
 import { isBinaryFile, isRemoteFile } from '../src/agent/skillPacks.js';
 
 const execute = promisify(execFile);
@@ -92,8 +92,13 @@ export function createSkillRunner({ image = SKILL_RUNNER_IMAGE, baseDir, runDock
   }
 
   /** 装依赖（每个技能一份，依赖没变不重装；同一个技能同时只装一次） */
-  async function ensureDeps(pack, dir, src, { signal, onProgress } = {}) {
-    const deps = skillDeps(pack);
+  async function ensureDeps(pack, dir, src, { signal, onProgress, extra = {} } = {}) {
+    // 模型另外指定过的包记下来：下次不指定也照样在（不然每次都要重装）
+    const extraFile = path.join(dir, 'extra.json');
+    const saved = JSON.parse(await fs.readFile(extraFile, 'utf8').catch(() => '{}'));
+    const merged = { python: [...(saved.python ?? []), ...(extra.python ?? [])], node: [...(saved.node ?? []), ...(extra.node ?? [])] };
+    const deps = withExtra(skillDeps(pack), merged);
+    await fs.writeFile(extraFile, JSON.stringify({ python: deps.python, node: deps.node }));
     const depsDir = path.join(dir, 'deps');
     await fs.mkdir(depsDir, { recursive: true });
     await fs.chmod(depsDir, 0o777);
@@ -110,7 +115,7 @@ export function createSkillRunner({ image = SKILL_RUNNER_IMAGE, baseDir, runDock
         deps.nodePackage && `cp /skill/package.json /deps/node/ && cd /deps/node && npm install --omit=dev --no-audit --no-fund --registry=${quote(npmRegistry)}`,
         deps.node.length && `cd /deps/node && npm install --no-audit --no-fund --registry=${quote(npmRegistry)} ${deps.node.map(quote).join(' ')}`
       ].filter(Boolean);
-      const script = `set -e; mkdir -p /deps/py /deps/node; ${steps.join('; ')}`;
+      const script = `set -e; umask 0000; mkdir -p /deps/py /deps/node; ${steps.join('; ')}`;
       try {
         await dockerRun(['run', '--rm', ...LIMITS, '--name', `jarvis-skill-install-${randomUUID()}`, '--memory=1g', '--tmpfs=/tmp:rw,nosuid,size=512m',
           '--mount', `type=bind,src=${src},dst=/skill,readonly`, '--mount', `type=bind,src=${depsDir},dst=/deps`,
@@ -130,12 +135,12 @@ export function createSkillRunner({ image = SKILL_RUNNER_IMAGE, baseDir, runDock
    * 运行一条命令
    * @returns {Promise<{ exitCode: number, stdout: string, stderr: string, timedOut: boolean, files: Array<{ path: string, data: Buffer }> }>}
    */
-  async function run(pack, command, { timeoutSec = 60, signal, onProgress } = {}) {
+  async function run(pack, command, { timeoutSec = 60, signal, onProgress, extra = {} } = {}) {
     const cmd = String(command ?? '').trim();
     if (!cmd || cmd.length > 4000 || cmd.includes('\0')) throw Object.assign(new Error('命令为空或太长'), { code: 'INVALID_SKILL_COMMAND' });
     if (!(await available())) throw Object.assign(new Error(UNAVAILABLE), { code: 'SKILL_RUNNER_UNAVAILABLE', kind: 'api' });
     const { dir, src } = await prepareSource(pack);
-    const depsDir = await ensureDeps(pack, dir, src, { signal, onProgress });
+    const depsDir = await ensureDeps(pack, dir, src, { signal, onProgress, extra });
     const work = path.join(dir, 'runs', randomUUID());
     await fs.mkdir(work, { recursive: true });
     await fs.chmod(work, 0o777);
@@ -147,7 +152,8 @@ export function createSkillRunner({ image = SKILL_RUNNER_IMAGE, baseDir, runDock
     try {
       onProgress?.(`在服务器的隔离环境里运行：${cmd.slice(0, 80)}`);
       // 技能文件复制到可写的工作目录再运行（不少脚本会在当前目录写结果）
-      const script = 'cp -a /skill/. /work/ 2>/dev/null; cd /work && eval "$JARVIS_CMD"';
+      // umask 0：容器里（nobody 账号）做出的文件，运行未央的账号事后也能读、能删
+      const script = 'umask 0000; cp -r /skill/. /work/ 2>/dev/null; cd /work && eval "$JARVIS_CMD"';
       out = await dockerRun(['run', '--rm', ...LIMITS, '--name', container, '--memory=512m', '--tmpfs=/tmp:rw,nosuid,size=128m',
         '--mount', `type=bind,src=${src},dst=/skill,readonly`, '--mount', `type=bind,src=${depsDir},dst=/deps,readonly`, '--mount', `type=bind,src=${work},dst=/work`,
         '-e', 'HOME=/tmp', '-e', 'PYTHONPATH=/deps/py', '-e', 'NODE_PATH=/deps/node/node_modules', '-e', 'PYTHONUNBUFFERED=1',
@@ -163,11 +169,28 @@ export function createSkillRunner({ image = SKILL_RUNNER_IMAGE, baseDir, runDock
       if (e.killed) await dockerRun(['rm', '-f', container], { timeout: 5000 }).catch(() => {});
     }
     const files = await producedFiles(work, src).catch(() => []);
-    await fs.rm(work, { recursive: true, force: true });
+    await removeWork(work);
     return { exitCode, timedOut, stdout: String(out.stdout || '').slice(-OUT_MAX), stderr: String(out.stderr || '').slice(-ERR_MAX), files };
   }
 
+  /** 删掉这次运行的临时目录；有删不掉的（容器里别的账号建的）就再起一个容器删 */
+  async function removeWork(work) {
+    try {
+      await fs.rm(work, { recursive: true, force: true });
+    } catch {
+      await dockerRun(['run', '--rm', ...LIMITS, '--mount', `type=bind,src=${work},dst=/work`, image, 'sh', '-c', 'rm -rf /work/* /work/.[!.]* 2>/dev/null; true'], { timeout: 30000 }).catch(() => {});
+      await fs.rm(work, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+
   return { available, run, image };
+}
+
+/** 模型另外指定要装的包（技能说明里没写、写在仓库首页的那种）：只收包名和版本号 */
+function withExtra(deps, { python = [], node = [] } = {}) {
+  const py = [...new Set([...deps.python, ...(Array.isArray(python) ? python : []).map(String).filter((p) => PY_SPEC.test(p))])].slice(0, 40);
+  const js = [...new Set([...deps.node, ...(Array.isArray(node) ? node : []).map(String).filter((p) => NPM_SPEC.test(p))])].slice(0, 40);
+  return { ...deps, python: py, node: js };
 }
 
 const quote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
@@ -205,22 +228,24 @@ export const UNAVAILABLE = '服务器还没装技能运行器（Docker 里的 Py
 export function skillRunnerTool({ runner, getPack, saveFile }) {
   return {
     name: 'run_skill_command',
-    description: '在服务器的隔离环境（Docker，带 Python 3 和 Node，可以联网）里运行已安装技能说明中的命令，比如“python scripts/report.py --team 山东泰山”“sports-skills football get_scoreboard”。先用 use_skill 读技能说明，照说明里的命令写；工作目录就是技能文件夹，依赖第一次用时自动装（可能要几分钟）。命令做出的新文件会存进工作区 skills-output/<技能名>/。每次最长 2 分钟，读不到你的对话、记忆和密钥。命令失败会返回错误信息，看懂再改，别原样重试。',
+    description: '在服务器的隔离环境（Docker，带 Python 3 和 Node，可以联网）里运行已安装技能说明中的命令，比如“python scripts/report.py --team 山东泰山”“sports-skills football get_scoreboard”。先用 use_skill 读技能说明，照说明里的命令写；工作目录就是技能文件夹，依赖第一次用时自动装（可能要几分钟）。命令做出的新文件会存进工作区 skills-output/<技能名>/。每次最长 2 分钟，读不到你的对话、记忆和密钥。命令失败会返回错误信息，看懂再改，别原样重试；报“找不到命令 / No module named”多半是没装包：照技能或它所在仓库首页写的 pip install / npm install，把包名填进 python_packages / npm_packages 再运行。',
     input_schema: {
       type: 'object',
       properties: {
         skill: { type: 'string', description: '技能名（use_skill 里的名字）' },
         command: { type: 'string', description: '要运行的命令，照技能说明写' },
-        timeout_seconds: { type: 'number', description: '最长运行秒数，默认 60，最多 120' }
+        timeout_seconds: { type: 'number', description: '最长运行秒数，默认 60，最多 120' },
+        python_packages: { type: 'array', items: { type: 'string' }, description: '可选：技能说明里没写、但运行要先 pip install 的包（如技能仓库首页写的 sports-skills），只写包名或“包名==版本”，装一次以后缓存' },
+        npm_packages: { type: 'array', items: { type: 'string' }, description: '可选：要先 npm install 的包，只写包名或“包名@版本”' }
       },
       required: ['skill', 'command'],
       additionalProperties: false
     },
-    run: async ({ skill, command, timeout_seconds }, { signal, progress } = {}) => {
+    run: async ({ skill, command, timeout_seconds, python_packages, npm_packages }, { signal, progress } = {}) => {
       const pack = await getPack(skill);
       if (!pack) throw Object.assign(new Error(`服务器上没有技能「${skill}」：先在“技能”里安装，并同步到服务器`), { code: 'SKILL_NOT_FOUND', kind: 'api' });
       if (pack.enabled === false) throw Object.assign(new Error(`技能「${pack.name}」已停用`), { code: 'SKILL_DISABLED', kind: 'api' });
-      const r = await runner.run(pack, command, { timeoutSec: timeout_seconds, signal, onProgress: progress });
+      const r = await runner.run(pack, command, { timeoutSec: timeout_seconds, signal, onProgress: progress, extra: { python: python_packages, node: npm_packages } });
       const saved = [];
       for (const f of r.files) {
         const p = `skills-output/${safeName(pack.name)}/${f.path}`;

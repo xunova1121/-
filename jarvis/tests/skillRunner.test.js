@@ -87,6 +87,19 @@ describe('技能运行器', () => {
     expect(out).toContain('ok');
   });
 
+  it('技能说明里没写的包（写在仓库首页的）：模型可以指定要装，记下来以后不重装；乱写的包名不装', async () => {
+    const d = fakeDocker();
+    const runner = createSkillRunner({ image: 'img', baseDir: tmp(), runDocker: d.fn });
+    const pack = { name: 'football-data', body: '用 `sports-skills football get_daily_schedule`', files: {} };
+    const tool = skillRunnerTool({ runner, getPack: async () => pack, saveFile: async () => {} });
+    await tool.run({ skill: 'football-data', command: 'sports-skills football get_daily_schedule', python_packages: ['sports-skills', 'git+https://evil.example/x'] });
+    await tool.run({ skill: 'football-data', command: 'sports-skills football get_daily_schedule' });
+    const installs = d.calls.filter((a) => a[0] === 'run' && a.join(' ').includes('pip install'));
+    expect(installs).toHaveLength(1);
+    expect(installs[0].join(' ')).toContain("'sports-skills'");
+    expect(installs[0].join(' ')).not.toContain('evil');
+  });
+
   it('命令失败也把错误信息交回模型（退出码、错误输出）', async () => {
     const d = fakeDocker({ run: () => { throw Object.assign(new Error('Command failed'), { code: 2, stdout: '', stderr: 'No module named foo' }); } });
     const runner = createSkillRunner({ image: 'img', baseDir: tmp(), runDocker: d.fn });
