@@ -303,6 +303,23 @@ try {
         () => document.documentElement.scrollWidth <= innerWidth && document.querySelector('#inputbar').getBoundingClientRect().bottom <= innerHeight
       )
     );
+    const probeWaiting = () => page.evaluate(() => {
+      const msg = document.createElement('div');
+      msg.className = 'msg agent streaming';
+      msg.innerHTML = '<span class="who" data-status="正在想"><span class="wy-mascot who-mood" data-state="rub"></span><span class="who-name">未央</span></span><div class="body"></div>';
+      document.querySelector('#transcript').append(msg);
+      const mood = getComputedStyle(msg.querySelector('.who-mood'));
+      const status = getComputedStyle(msg.querySelector('.who'), '::after');
+      const result = { size: msg.querySelector('.who-mood').getBoundingClientRect().height, name: mood.animationName, count: mood.animationIterationCount, spinner: status.backgroundImage.includes('animateTransform') };
+      msg.remove();
+      return result;
+    });
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    const waiting = await probeWaiting();
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const still = await probeWaiting();
+    check(`${width} 正在回答时角色放大并一直动、状态前有转圈`, waiting.size >= 56 && waiting.name !== 'none' && waiting.count === 'infinite' && waiting.spinner, JSON.stringify(waiting));
+    check(`${width} 系统减少动态效果时正在回答的角色不动`, still.name === 'none', JSON.stringify(still));
     check(`${width} 无页面脚本异常`, errors.length === 0, errors.join(';'));
     await context.close();
   }
