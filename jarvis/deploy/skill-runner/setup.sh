@@ -26,12 +26,19 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 systemctl enable --now docker >/dev/null 2>&1 || true
 
-# 腾讯云：用内网镜像加速（只在腾讯云服务器上能连上；已有 daemon.json 的不改）
-if [[ ! -s /etc/docker/daemon.json ]] && curl -s -m 5 -o /dev/null https://mirror.ccs.tencentyun.com/v2/; then
-  echo "== 配置腾讯云 Docker 镜像加速"
-  mkdir -p /etc/docker
-  printf '{\n  "registry-mirrors": ["https://mirror.ccs.tencentyun.com"]\n}\n' > /etc/docker/daemon.json
-  systemctl restart docker
+# 腾讯云：用内网镜像加速（只在腾讯云服务器上能连上）。已有加速配置但拉不动（比如早已停用的中科大镜像），换成腾讯云的，原配置备份成 daemon.json.bak
+if curl -s -m 5 -o /dev/null https://mirror.ccs.tencentyun.com/v2/; then
+  if [[ ! -s /etc/docker/daemon.json ]]; then
+    echo "== 配置腾讯云 Docker 镜像加速"
+    mkdir -p /etc/docker
+    printf '{\n  "registry-mirrors": ["https://mirror.ccs.tencentyun.com"]\n}\n' > /etc/docker/daemon.json
+    systemctl restart docker
+  elif ! timeout 120 docker pull -q python:3.12-slim-bookworm >/dev/null 2>&1; then
+    echo "== 现有的 Docker 镜像加速拉不动，换成腾讯云的（原配置备份为 /etc/docker/daemon.json.bak）"
+    cp /etc/docker/daemon.json /etc/docker/daemon.json.bak
+    python3 -c "import json;p='/etc/docker/daemon.json';d=json.load(open(p));d['registry-mirrors']=['https://mirror.ccs.tencentyun.com'];json.dump(d,open(p,'w'),indent=2)"
+    systemctl restart docker
+  fi
 fi
 
 echo "== 构建镜像 $IMAGE（第一次几分钟）"
