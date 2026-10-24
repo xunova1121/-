@@ -143,7 +143,7 @@ const TOOL_LABEL = {
   list_files: '列出文件', read_file: '读取文件', write_file: '写入文件', create_document: '生成文档',
   run_javascript: '运行 JS', run_python: '运行 Python', preview: '打开预览', fetch_url: '读取网页',
   update_plan: '更新清单', delegate_task: '交给分身', find_files: '找文件', search_in_files: '搜内容',
-  web_search: '联网搜索', deep_research: '深度调研', get_current_time: '读取时间', get_weather: '查天气', get_local_metrics: '读取系统状态',
+  web_search: '联网搜索', deep_research: '深度调研', get_current_time: '读取时间', get_weather: '查天气', get_sports_scores: '查赛程比分', get_local_metrics: '读取系统状态',
   generate_image: '画图', generate_video: '生成视频', copy_skill_file: '复制技能文件', show_image: '显示图片',
   use_skill: '使用技能', read_skill_file: '读取技能文件', schedule_task: '创建定时任务', list_schedules: '查看定时任务', cancel_schedule: '删除定时任务', core_memory_update: '更新核心记忆',
   computer_list_dir: '查看文件夹', computer_read_file: '读取电脑文件', computer_write_file: '写入电脑文件', computer_save_from_workspace: '保存到电脑',

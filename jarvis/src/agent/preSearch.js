@@ -10,6 +10,8 @@ const WEATHER = /天气|气温|下雨|下雪|带伞|温度|雾霾|空气质量/;
 const MAKING = /写|生成|做一?[份个张页]|制作|整理成|翻译|改写|总结|画|唱|记住|提醒|定时|文件|文档|表格|PPT|Word|Excel/i;
 
 export const PRE_SEARCH_MS = 6000;
+/** 先查赛程比分（get_sports_scores）：要读几十个赛事，比搜一次慢，多给些时间 */
+export const PRE_SPORTS_MS = 15000;
 
 /** 这个问题值不值得先搜一次 */
 export function wantsPreSearch(text) {
@@ -27,19 +29,20 @@ export function preSearchQuery(text) {
 }
 
 /**
- * 跑一次搜索（走 web_search 工具本身：预算、进度、去重和平时一样），超时或失败返回 null
- * @param {{ run: (calls: object[], signal: AbortSignal) => Promise<Array<{ ok: boolean, output: string }>>, text: string, signal?: AbortSignal, timeoutMs?: number }} o
+ * 跑一次搜索（走 web_search 工具本身：预算、进度、去重和平时一样），超时或失败返回 null。
+ * 给了 call 就改跑这个工具（如问赛程时先查 get_sports_scores）。
+ * @param {{ run: (calls: object[], signal: AbortSignal) => Promise<Array<{ ok: boolean, output: string }>>, text: string, signal?: AbortSignal, timeoutMs?: number, call?: { name: string, args: object } }} o
  */
-export async function preSearch({ run, text, signal, timeoutMs = PRE_SEARCH_MS }) {
+export async function preSearch({ run, text, signal, timeoutMs = PRE_SEARCH_MS, call = null }) {
   const ctrl = new AbortController();
   const stop = () => ctrl.abort(signal?.reason);
   signal?.addEventListener('abort', stop, { once: true });
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const query = preSearchQuery(text);
-    const [result] = await run([{ id: 'pre-search', name: 'web_search', args: { query } }], ctrl.signal);
+    const query = call ? '' : preSearchQuery(text);
+    const [result] = await run([{ id: 'pre-search', name: call?.name ?? 'web_search', args: call?.args ?? { query } }], ctrl.signal);
     if (!result?.ok || !String(result.output || '').trim()) return null;
-    return { query, output: String(result.output) };
+    return { query, output: String(result.output), tool: call?.name ?? 'web_search', args: call?.args ?? { query } };
   } catch (e) {
     if (signal?.aborted) throw e;
     return null;
@@ -50,13 +53,16 @@ export async function preSearch({ run, text, signal, timeoutMs = PRE_SEARCH_MS }
 }
 
 /** 搜到的结果附在用户这句话后面（写明是系统先搜的，不是用户说的） */
-export function preSearchNote({ query, output }) {
+export function preSearchNote({ query, output, tool }) {
+  if (tool === 'get_sports_scores') return `（系统已先查了赛程和比分（get_sports_scores），结果如下。按它回答：按赛事列出时间和比分，写明哪些赛事没查到、哪些项目不在查询范围；不在范围的用户又问到了再用 web_search 补。）\n${output}`;
   return `（系统已先按这句话联网搜索了一次，搜索词“${query}”，结果如下。够用就直接回答，注明来源链接和日期；不够或对不上再用 web_search / fetch_url 补查。）\n${output}`;
 }
 
 const norm = (q) => String(q ?? '').toLowerCase().replace(/[\s，。！？、；：,.!?;:]+/gu, '');
 /** 模型这次的 web_search 调用是不是和先搜的一模一样（同一个搜索词、没有别的词） */
 export function reusesPreSearch(call, found) {
+  // 赛程比分：参数和先查的一样就直接用先查的结果
+  if (found?.tool === 'get_sports_scores') return call?.name === 'get_sports_scores' && JSON.stringify(call.args ?? {}) === JSON.stringify(found.args ?? {});
   if (!found || call?.name !== 'web_search') return false;
   const extra = Array.isArray(call.args?.queries) ? call.args.queries.filter((q) => norm(q) && norm(q) !== norm(found.query)) : [];
   return !extra.length && norm(call.args?.query || call.args?.queries?.[0]) === norm(found.query);

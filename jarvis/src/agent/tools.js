@@ -2,6 +2,7 @@ import { formatPageResult } from './pageLinks.js';
 import { createDocumentTools } from './documentTools.js';
 import { searchRequest, screenSearchHits } from './retrievalQuality.js';
 import { createStockKlineTool } from './stockKline.js';
+import { createSportsScoresTool } from './sportsScores.js';
 import { queryGuardTool, guardQuery } from './queryGuard.js';
 import { searchAggregateHints, safeFallbackQuery } from './searchFallback.js';
 import { throwControl } from '../core/networkRequest.js';
@@ -90,6 +91,7 @@ export function createTools(ctx) {
     createSongTool(ctx),
     createOcrTool(ctx),
     createStockKlineTool(ctx),
+    createSportsScoresTool(ctx),
     queryGuardTool(),
     {
       name: 'remember',

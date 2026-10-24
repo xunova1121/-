@@ -117,7 +117,7 @@ export function createExecutionReview(goal = '') {
         (format) => ![...artifacts.values()].some((item) => item.format === format && item.readback === 'passed' && !item.errors)
       ),
       request,
-      retrievalReceipts: receipts.filter((receipt) => receipt.version === version && receipt.ok && /^(?:web_search|fetch_url|fact_check|deep_research|get_weather|get_stock_kline|read_evidence)$/.test(receipt.tool)).length,
+      retrievalReceipts: receipts.filter((receipt) => receipt.version === version && receipt.ok && /^(?:web_search|fetch_url|fact_check|deep_research|get_weather|get_stock_kline|get_sports_scores|read_evidence)$/.test(receipt.tool)).length,
       version,
       calls: sequence,
       // 说“记住了 / 记进去了”必须有真实的记忆工具回执
