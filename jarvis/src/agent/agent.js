@@ -3,6 +3,7 @@ import { prepareAgentContext } from './agentPreparation.js';
 import { createModelRequest } from './agentModelRequest.js';
 import { creativeWithoutLookup, CREATIVE_NOTE } from '../core/imageFollowup.js';
 import { executeToolCalls } from './agentToolExecution.js';
+import { wantsPreSearch, preSearch, preSearchNote, reusesPreSearch } from './preSearch.js';
 import { finishAgentRun } from './agentCompletion.js';
 import { measureModelInput } from '../../shared/modelMetrics.js';
 import { QUICK_MODEL_ATTEMPTS } from './lookupWindow.js';
@@ -271,6 +272,22 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
     return true;
   };
 
+  let preFound = null;
+  // 明显要查实时信息的短问题：先按原话搜一次，结果随问题交给模型，一轮答完（见 preSearch.js）
+  if (depth === 0 && !light && !images.length && wantsPreSearch(requirementText) && !creativeWithoutLookup(requirementText) && loader.get('web_search')) {
+    const found = await preSearch({
+      text: requirementText,
+      signal,
+      run: async (calls, s) => {
+        const results = await executeToolCalls(calls, { loader, emit, seen, closing: false, retrieval, approve, signal: s, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE, allowWebSearch: true });
+        for (const r of results) retrieval.end(r.ok);
+        return results;
+      }
+    });
+    if (found) { preFound = found; convo.at(-1).content = `${convo.at(-1).content}\n\n${preSearchNote(found)}`; }
+    toolHint = loader.hint();
+  }
+
   for (; step < limit; step++) {
     if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
     // 一分钟时限已解除（模型判断要更多时间，或开始画图、写文件）：之后按普通任务做
@@ -394,7 +411,10 @@ async function runAgentLoop({ adapter, model, history, userText, images = [], to
 
     if (stepText && !/\n$/.test(stepText)) { emit({ type: 'text', delta: '\n\n' }); finalText += '\n\n'; }
     // 执行一次工具调用：开始 / 结束事件照常发出，返回结果，按调用顺序写回对话
-    const results = await executeToolCalls(r.toolCalls, { loader, emit, seen, closing, retrieval, approve, signal, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE, allowWebSearch });
+    // 模型又用先搜过的词搜一次：直接给上次的结果，不再白搜（也不会被“相同搜索词”拦下报错）
+    const reused = new Map(r.toolCalls.filter((c) => reusesPreSearch(c, preFound)).map((c) => [c, { c, ok: true, output: preFound.output, outImages: [] }]));
+    const ran = await executeToolCalls(r.toolCalls.filter((c) => !reused.has(c)), { loader, emit, seen, closing, retrieval, approve, signal, checkpoint, review, sessionId, requirementText, lookupDeadline, lookupControl, webTools: WEB_TOOLS, parallelSafe: PARALLEL_SAFE, allowWebSearch });
+    const results = r.toolCalls.map((c) => reused.get(c) ?? ran.find((x) => x.c === c)).filter(Boolean);
     for (const { c, ok, output, outImages } of results) {
       toolCount++;
       if (WEB_TOOLS.has(c.name)) retrieval.end(ok);

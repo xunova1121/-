@@ -225,22 +225,66 @@ export function createSearch(options = {}) {
       const zh = /[\u4e00-\u9fff]/.test(query);
       const domestic = zh && (deepseek || !keyless || (await keyless.regionNow()) === 'cn');
       const order = [deepseek, ...(domestic ? [bocha, keyless, tavily] : [tavily, bocha, keyless])].filter(Boolean);
-      const hits = [];
-      const errors = [];
-      for (const e of order) {
-        if (opts.signal?.aborted) throw opts.signal.reason;
-        try {
-          if (e === deepseek) opts.progress?.('正在调用DeepSeek搜索');
-          // 同词换源不重复扣逻辑搜索预算。
-          for (const h of await e.search(query, n, opts)) if (!hits.some((x) => x.url === h.url)) hits.push(h);
-          if (e === deepseek) opts.progress?.(hits.length ? `DeepSeek搜索返回${hits.length}条结果` : 'DeepSeek搜索无结果，尝试原搜索线路');
-        } catch (err) { throwControl(err, opts.signal); errors.push(err); if (e === deepseek) opts.progress?.('DeepSeek搜索未取得结果，尝试原搜索线路：' + err.message); }
-        if (e === deepseek && hits.length || hits.length >= Math.min(3, n)) break;
-      }
-      if (!hits.length && errors.length) throw Object.assign(new Error(errors.map(error => error.message).join('；')), { cause: errors.at(-1), kind: errors.at(-1)?.kind, status: errors.at(-1)?.status, code: errors.at(-1)?.code, name: errors.at(-1)?.name });
-      return hits.slice(0, n);
+      return staggeredSearch(order, query, n, opts, deepseek);
     }
   };
+}
+
+/** 前一个搜索源 STAGGER_MS 还没回来就同时问下一个，谁先给够结果用谁（以前一个接一个等，前面的慢或出错要白等十几秒） */
+export const STAGGER_MS = 2500;
+export function staggeredSearch(order, query, n, opts = {}, preferred = null, staggerMs = STAGGER_MS) {
+  const ctrl = new AbortController();
+  const outer = opts.signal;
+  const stop = () => ctrl.abort(outer.reason);
+  outer?.addEventListener('abort', stop, { once: true });
+  const hits = [];
+  const errors = [];
+  let started = 0, settled = 0, done = false, timer = null, preferredHit = false;
+  return new Promise((resolve, reject) => {
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      outer?.removeEventListener('abort', stop);
+      ctrl.abort();
+      if (outer?.aborted) reject(outer.reason ?? Object.assign(new Error('aborted'), { name: 'AbortError' }));
+      else if (hits.length) resolve(hits.slice(0, n));
+      else if (errors.length) reject(Object.assign(new Error(errors.map((e) => e.message).join('；')), { cause: errors.at(-1), kind: errors.at(-1)?.kind, status: errors.at(-1)?.status, code: errors.at(-1)?.code, name: errors.at(-1)?.name }));
+      else resolve([]);
+    };
+    if (outer?.aborted) return finish();
+    outer?.addEventListener('abort', finish, { once: true });
+    const launch = () => {
+      if (done || started >= order.length) return;
+      const e = order[started++];
+      if (e === preferred) opts.progress?.('正在调用DeepSeek搜索');
+      // 同词换源不重复扣逻辑搜索预算。
+      Promise.resolve()
+        .then(() => e.search(query, n, { ...opts, signal: ctrl.signal }))
+        .then((list) => {
+          for (const h of list ?? []) if (!hits.some((x) => x.url === h.url)) hits.push(h);
+          if (e === preferred) { preferredHit = Boolean(list?.length); opts.progress?.(list?.length ? `DeepSeek搜索返回${list.length}条结果` : 'DeepSeek搜索无结果，尝试原搜索线路'); }
+        })
+        .catch((err) => {
+          if (done) return;
+          errors.push(err);
+          if (e === preferred) opts.progress?.('DeepSeek搜索未取得结果，尝试原搜索线路：' + err.message);
+        })
+        .finally(() => {
+          settled++;
+          if (done) return;
+          if (preferredHit || hits.length >= Math.min(3, n)) return finish();
+          if (settled === started) {
+            // 已开始的都回来了还不够：马上问下一个，没有下一个就收尾
+            if (started < order.length) launch();
+            else finish();
+          }
+        });
+      clearTimeout(timer);
+      if (started < order.length) timer = setTimeout(launch, staggerMs);
+    };
+    launch();
+  });
 }
 
 /** 博查（bochaai.com）：国内的网页搜索接口，按次计费，需要 Key */
