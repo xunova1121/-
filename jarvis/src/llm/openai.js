@@ -279,7 +279,12 @@ function createOnce({ baseURL, apiKey, headers = {}, serviceTier = '' }) {
           let data;
           try { data = JSON.parse(frame); } catch { continue; }
           if (data.error) throw Object.assign(new Error(data.error.message || '模型流返回错误'), {kind:'api', code:data.error.code || 'MODEL_STREAM_ERROR'});
-          if (data.choices?.length) guard.alive();
+          if (data.choices?.length) {
+            // 很多中转站一开始就发一个空包（只有 role，没有内容）：只重置卡住计时，不算“模型有反应”
+            const c = data.choices[0], d = c?.delta ?? c?.message ?? {};
+            if (d.content || d.reasoning_content || d.reasoning || d.tool_calls?.length || c?.finish_reason) guard.alive();
+            else guard.touch();
+          }
           if (typeof data.service_tier === 'string') servedTier = data.service_tier;
           acc.push(data);
           if (data.choices?.[0]?.finish_reason) finished = true;

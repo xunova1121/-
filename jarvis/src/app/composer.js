@@ -112,6 +112,13 @@ export function createComposer(app) {
     app.showPanel('workspace');
     if (e.detail?.path) app.panels.openFile(e.detail.path);
   });
+  // 服务器模式：准备打字时先唤醒连接，免得发消息时撞上已经断掉的旧连接白等
+  const warm = () => app.server?.warm?.();
+  $('#prompt').addEventListener('focus', warm);
+  $('#prompt').addEventListener('input', warm);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) warm();
+  });
   // 粘贴截图 / 图片
   $('#prompt').addEventListener('paste', (e) => {
     const imgs = [...(e.clipboardData?.items ?? [])]

@@ -178,3 +178,41 @@ it('提交尚未返回任务编号时叫停，拿到编号后立即停止服务�
  const ctrl=new AbortController(),pending=runRemote(client,{sessionId:'c',userText:'做任务',signal:ctrl.signal,emit:()=>{}});ctrl.abort();release({id:'late'});
  await expect(pending).rejects.toMatchObject({name:'AbortError'});expect(events).toEqual(['stop:late']);
 });
+
+describe('手机放久了再发：旧连接断了不白等', () => {
+  it('发任务第一次几秒没回应就换新连接重发（服务器按请求编号去重），不等满 20 秒', async () => {
+    const { createServerClient, FIRST_WRITE_MS } = await import('../src/core/serverClient.js');
+    expect(FIRST_WRITE_MS).toBeLessThanOrEqual(8000);
+    const ids = [];
+    let posts = 0;
+    const fetchImpl = (url, init) => new Promise((resolve, reject) => {
+      if (String(url).endsWith('/api/server/status')) return resolve(new Response(JSON.stringify({ features: { taskRequestIds: true } })));
+      posts++;
+      ids.push(JSON.parse(init.body).requestId);
+      if (posts === 1) { init.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))); return; }
+      resolve(new Response(JSON.stringify({ id: 't1', sessionId: 's1' })));
+    });
+    // 默认超时设得比“第一次等待”长，确认第一次用的是短的那个
+    const c = createServerClient({ base: 'https://s.example', token: 't', fetchImpl, timeoutMs: 60_000 });
+    const t0 = Date.now();
+    const real = setTimeout;
+    globalThis.setTimeout = (fn, ms, ...a) => real(fn, ms === FIRST_WRITE_MS ? 30 : ms, ...a);
+    try {
+      expect(await c.startTask({ text: '你好' })).toEqual({ id: 't1', sessionId: 's1' });
+    } finally {
+      globalThis.setTimeout = real;
+    }
+    expect(posts).toBe(2);
+    expect(ids[0]).toBe(ids[1]);
+    expect(Date.now() - t0).toBeLessThan(3000);
+  });
+
+  it('唤醒连接 30 秒内只问一次', async () => {
+    const { createServerClient } = await import('../src/core/serverClient.js');
+    let health = 0;
+    const c = createServerClient({ base: 'https://s.example', fetchImpl: async (url) => { if (String(url).endsWith('/api/health')) health++; return new Response('{}'); } });
+    c.warm(); c.warm(); c.warm();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(health).toBe(1);
+  });
+});

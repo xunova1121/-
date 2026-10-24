@@ -55,6 +55,11 @@ const sleep = (ms, signal) => new Promise((resolve, reject) => {
 /**
  * @param {{ base: string, token?: string, fetchImpl?: typeof fetch }} o
  */
+/** 发任务第一次最多等多久（之后换新连接重发） */
+export const FIRST_WRITE_MS = 6000;
+/** 唤醒连接的最短间隔 */
+const WARM_GAP_MS = 30_000;
+
 export function createServerClient({ base, token = '', fetchImpl = (...a) => globalThis.fetch(...a), timeoutMs = 20000 }) {
   const root = normalizeUrl(base);
   /** 最近几次请求花了多久、走的哪种网络（设置 → 服务器模式里显示，查“为什么慢”用） */
@@ -64,7 +69,10 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
   async function taskWrite(path, body) {
     // 只有服务器明确支持请求去重时才重试写请求；旧服务器保持不自动重发。
     const payload={...body,requestId:body.requestId||requestId()};
-    try{return await req(path,{method:'POST',body:payload});}
+    // 手机放一会儿再发，旧连接常常已经悄悄断了，请求会一直挂着等超时：第一次只等几秒就换新连接重发
+    // （服务器按请求编号去重，重发不会做两遍）；带图片的数据大，照旧多等
+    const firstTimeout = body.images?.length ? timeoutMs : Math.min(FIRST_WRITE_MS, timeoutMs);
+    try{return await req(path,{method:'POST',body:payload,timeout:firstTimeout});}
     catch(e){
       if(e.status||e.name==='AbortError'&&!e.timeout)throw e;
       taskProtocol ??= req('/api/server/status',{}).then(x=>Boolean(x.features?.taskRequestIds)).catch(()=>false);
@@ -125,9 +133,16 @@ export function createServerClient({ base, token = '', fetchImpl = (...a) => glo
     if (!res.ok) throw Object.assign(new Error(res.status === 401 ? '服务器登录已失效，请到 设置 → 服务器模式 重新登录' : data.error || `服务器返回 ${res.status}`), { status: res.status, ...(data.code && { code: data.code }), ...(data.kind && { kind: data.kind }), ...(data.upstreamStatus && { upstreamStatus: data.upstreamStatus }) });
     return data;
   }
+  let warmedAt = 0;
   return {
     base: root,
     timings,
+    /** 唤醒连接：点输入框、回到 App 时先轻轻问一下服务器，断掉的旧连接在发消息前就换掉（30 秒内只问一次） */
+    warm() {
+      if (Date.now() - warmedAt < WARM_GAP_MS) return;
+      warmedAt = Date.now();
+      req('/api/health', { timeout: 5000 }).catch(() => {});
+    },
     /** @returns {Promise<string>} 令牌 */
     async login(password) { return (await req('/api/server/login', { method: 'POST', body: { password } })).token; },
     health: () => req('/api/health'),

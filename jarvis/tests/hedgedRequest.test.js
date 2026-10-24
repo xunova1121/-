@@ -137,3 +137,33 @@ describe('思考内容也算有反应', () => {
     }
   });
 });
+
+describe('中转站的空包不算有反应', () => {
+  it('只有 role 的空包只重置卡住计时，等到真内容才报“有反应”', async () => {
+    const { createOpenAIAdapter } = await import('../src/llm/openai.js');
+    const original = globalThis.fetch;
+    const enc = new TextEncoder();
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    globalThis.fetch = async () => new Response(new ReadableStream({
+      async start(c) {
+        c.enqueue(enc.encode('data: {"choices":[{"delta":{"role":"assistant","content":""}}]}\n\n'));
+        await gate;
+        c.enqueue(enc.encode('data: {"choices":[{"delta":{"content":"你好"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'));
+        c.close();
+      }
+    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    try {
+      const marks = [];
+      const a = createOpenAIAdapter({ baseURL: 'https://x/v1', apiKey: 'k' });
+      const p = a.stream({ model: 'm', system: ['s'], messages: [{ role: 'user', content: 'hi' }], stallTimeouts: { first: 5000, between: 5000, onActivity: () => marks.push('alive') }, onText: () => {} });
+      await wait(40);
+      expect(marks).toHaveLength(0);
+      release();
+      await p;
+      expect(marks.length).toBeGreaterThan(0);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});
