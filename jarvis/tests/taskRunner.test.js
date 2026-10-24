@@ -272,12 +272,25 @@ describe('服务器模式补齐：和手机 / 电脑上一样', () => {
     const id0 = 'long-chat';
     const old = Array.from({ length: 34 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `第 ${i} 句`, ts: i + 1 }));
     await sessions.save({ ...sessions.create(), id: id0, messages: old });
-    const runner = createTaskRunner({ getConfig: mockCfg, makeAdapter: () => ({ adapter: scripted([{ text: '记住了' }]), model: 'm' }), makeTools: () => [] });
+    const runner = createTaskRunner({ getConfig: mockCfg, afterIdleMs: 50, makeAdapter: () => ({ adapter: scripted([{ text: '记住了' }]), model: 'm' }), makeTools: () => [] });
     const { id } = await runner.start({ sessionId: id0, text: '我住在杭州，以后天气默认查杭州' });
     await until(() => runner.get(id).status === 'done');
     await until(async () => (await sessions.get(id0)).summary);
     await until(async () => (await memory.listAll()).episodes?.length > 0);
     expect((await sessions.get(id0)).messages.at(-1)).toMatchObject({ role: 'assistant', content: '记住了' });
+  });
+
+  it('整理记忆、压缩对话等服务器空下来再做，不和下一句话抢模型；settled() 时马上做完', async () => {
+    const id0 = 'idle-chat';
+    const old = Array.from({ length: 34 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `第 ${i} 句`, ts: i + 1 }));
+    await sessions.save({ ...sessions.create(), id: id0, messages: old });
+    const runner = createTaskRunner({ getConfig: mockCfg, afterIdleMs: 60_000, makeAdapter: () => ({ adapter: scripted([{ text: '好的' }]), model: 'm' }), makeTools: () => [] });
+    const { id } = await runner.start({ sessionId: id0, text: '在吗' });
+    await until(() => runner.get(id).status === 'done');
+    await new Promise((r) => setTimeout(r, 200));
+    expect((await sessions.get(id0)).summary).toBeFalsy();
+    await runner.settled();
+    expect((await sessions.get(id0)).summary).toBeTruthy();
   });
 
   it('联网只许访问公网：内网地址、解析到内网的域名、跳到内网的重定向都拦下', async () => {

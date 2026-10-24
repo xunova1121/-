@@ -44,6 +44,9 @@ import { uid } from '../src/agent/store.js';
 export const SERVER_BLOCKED = new Set(['run_javascript', 'run_python', 'preview', 'get_local_metrics', 'schedule_task', 'list_schedules', 'cancel_schedule']);
 /** 连续这么久没有任何进展（模型输出、工具事件）就中断，记为失败 */
 export const IDLE_MS = 10 * 60_000;
+/** 回答完以后，等服务器安静这么久再整理记忆、压缩对话（不和下一句抢模型）；一直忙也最多等这么久 */
+export const AFTER_IDLE_MS = 20_000;
+const AFTER_IDLE_MAX_MS = 3 * 60_000;
 /** 做完的任务在内存里留多久（之后只在对话记录里） */
 const KEEP_DONE_MS = 2 * 3600_000;
 /** 一个任务最多记这么多条进度事件（文字是一小段一小段来的，超了就把旧的文字段合并） */
@@ -91,12 +94,36 @@ const clip = (s, n) => (typeof s === 'string' && s.length > n ? `${s.slice(0, n)
 /**
  * @param {{ getConfig: () => Promise<object>, maxRunning?: number, maxSteps?: number, idleMs?: number, makeTools?: (ctx: object) => object[], makeAdapter?: typeof createAdapter, now?: () => number }} o
  */
-export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idleMs = IDLE_MS, makeTools = createTools, makeAdapter = createAdapter, now = Date.now }) {
+export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idleMs = IDLE_MS, afterIdleMs = AFTER_IDLE_MS, makeTools = createTools, makeAdapter = createAdapter, now = Date.now }) {
   const tasks = new Map();
   const waiting = [];
   let running = 0;
   const locks = new Map();
   const background = new Set(); // 做完后在后台整理记忆、压缩对话的活（settled() 等它们做完）
+  let lastActive = Date.now(); // 最近一次有任务开始或结束的时间
+  const wakers = new Set(); // settled() 用：叫醒还在等空闲的整理活，马上做
+  let flushing = 0; // settled() 进行中：整理活不再等空闲
+
+  /** 等服务器空下来再做后台整理：没有任务在做、排队，且安静了 afterIdleMs。
+   *  不等的话，整理记忆、压缩对话会和用户紧接着说的下一句话同时调模型（中转站常常排队），下一句回答就慢。
+   *  最多等 AFTER_IDLE_MAX_MS，一直有人在说话也不至于永远不整理 */
+  async function whenIdle() {
+    const since = Date.now();
+    for (;;) {
+      if (flushing) return;
+      const busy = running || waiting.some((t) => t.status === 'queued');
+      const quiet = Date.now() - lastActive;
+      if ((!busy && quiet >= afterIdleMs) || Date.now() - since >= AFTER_IDLE_MAX_MS) return;
+      const wait = busy ? Math.min(afterIdleMs, 2000) : afterIdleMs - quiet;
+      const woken = await new Promise((resolve) => {
+        const timer = setTimeout(() => { wakers.delete(wake); resolve(false); }, Math.max(20, wait));
+        timer.unref?.();
+        const wake = () => { clearTimeout(timer); resolve(true); };
+        wakers.add(wake);
+      });
+      if (woken) return;
+    }
+  }
 
   /** 同一段对话的“读出来 → 改 → 存回去”排队做：几处同时改时，后存的不会冲掉先存的 */
   function editSession(id, fn) {
@@ -302,9 +329,10 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     task.listeners.clear();
     task.images = [];
     running--;
+    lastActive = Date.now();
     pump();
     if (task.status === 'done') {
-      const job = afterTask(task, text).catch((e) => console.warn(`[任务] ${task.id} 整理记忆 / 压缩对话没做成：${e?.message || e}`));
+      const job = whenIdle().then(() => afterTask(task, text)).catch((e) => console.warn(`[任务] ${task.id} 整理记忆 / 压缩对话没做成：${e?.message || e}`));
       background.add(job);
       job.finally(() => background.delete(job));
     }
@@ -333,6 +361,7 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
       const task = waiting.shift();
       if (task.status !== 'queued') continue;
       running++;
+      lastActive = Date.now();
       execute(task).catch((err) => finish(task, null, { error: String(err?.message || err) }));
     }
   }
@@ -408,9 +437,16 @@ export function createTaskRunner({ getConfig, maxRunning = 1, maxSteps = 28, idl
     /** 等手上的活（恢复、排队和正在做的任务、做完后的整理）都结束：测试收尾、服务停止前用 */
     async settled() {
       await recovered;
-      while (running || waiting.some((t) => t.status === 'queued') || background.size || locks.size) {
-        await Promise.allSettled([...background, ...locks.values()]);
-        await new Promise((r) => setTimeout(r, 20));
+      flushing++;
+      try {
+        for (const wake of [...wakers]) wake();
+        wakers.clear();
+        while (running || waiting.some((t) => t.status === 'queued') || background.size || locks.size) {
+          await Promise.allSettled([...background, ...locks.values()]);
+          await new Promise((r) => setTimeout(r, 20));
+        }
+      } finally {
+        flushing--;
       }
     }
   };

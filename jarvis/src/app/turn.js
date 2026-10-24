@@ -24,6 +24,15 @@ import { noteAction } from '../mobile/renderDiagnostics.js';
 import { providerLabel, modelNote } from '../llm/modelLibrary.js';
 import { $, DESKTOP, now, storage, toast, wp, markActivity } from './env.js';
 
+/** 服务器模式回答慢时说明慢在哪：排队、模型重试（服务器记下的用时） */
+function serverSlowTag(t) {
+  if (!t) return '';
+  const parts = [];
+  if (t.queueMs >= 1000) parts.push(`排队 ${(t.queueMs / 1000).toFixed(1)}s`);
+  if (t.retries) parts.push(`重试 ${t.retries} 次`);
+  return parts.length ? `${parts.join(' · ')} · ` : '';
+}
+
 export function createTurn(app) {
   let turns = 0;
   const taskKeeper = createTaskKeeper(globalThis.__jarvisBackgroundTask, (e) => toast(e.message));
@@ -397,7 +406,7 @@ export function createTurn(app) {
                 ? `${seen}${st.usedModel}（${model} 出错后换用） · `
                 : `${seen}${model}${route.routed ? `（${TASKS[task].name}）` : ''} · `;
       bubble.done(
-        `${modelTag}${tierTag}${team ? `团队 ${result.steps} 步 · ` : ''}${st.ctxMs !== null && st.ctxMs >= 300 ? `准备 ${(st.ctxMs / 1000).toFixed(1)}s · ` : ''}${st.firstToken ? `首字 ${((st.firstToken - t0) / 1000).toFixed(1)}s · ` : ''}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}${MOBILE && st.textChunks ? ` · 分 ${st.textChunks} 次收到${globalThis.__jarvisNetVia?.(app.llmConfig.baseURLs?.[app.llmConfig.provider] || '') === 'native' ? '（原生网络）' : ''}` : ''}`,
+        `${modelTag}${tierTag}${team ? `团队 ${result.steps} 步 · ` : ''}${st.ctxMs !== null && st.ctxMs >= 300 ? `准备 ${(st.ctxMs / 1000).toFixed(1)}s · ` : ''}${st.firstToken ? `首字 ${((st.firstToken - t0) / 1000).toFixed(1)}s · ` : ''}${serverSlowTag(result.timing)}耗时 ${(total / 1000).toFixed(1)}s${result.toolCalls ? ` · 工具 ${result.toolCalls} 次` : ''}${MOBILE && st.textChunks ? ` · 分 ${st.textChunks} 次收到${globalThis.__jarvisNetVia?.(app.llmConfig.baseURLs?.[app.llmConfig.provider] || '') === 'native' ? '（原生网络）' : ''}` : ''}`,
         {
           onFeedback: async (kind, comment) => {
             if (kind === 'up') await agentMemory.noteTask(`获得好评：${text.slice(0, 30)}`);

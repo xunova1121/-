@@ -266,7 +266,7 @@ export async function followTask(client, id, { onEvent, signal, after = 0, retry
       });
       if (end.status === 'error') throw Object.assign(new Error(end.error || '服务器上的任务出错了'), { kind: end.errorKind, code: end.code });
       if (end.status === 'stopped') throw Object.assign(new Error('aborted'), { name: 'AbortError' });
-      return { text: end.text ?? '', toolCalls: end.toolCalls ?? 0, steps: 1 };
+      return { text: end.text ?? '', toolCalls: end.toolCalls ?? 0, steps: 1, ...(end.timing && { timing: end.timing }) };
     } finally {
       signal?.removeEventListener('abort', stop);
     }
