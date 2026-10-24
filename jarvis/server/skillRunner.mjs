@@ -106,7 +106,7 @@ export function createSkillRunner({ image = SKILL_RUNNER_IMAGE, baseDir, runDock
       onProgress?.('第一次用这个技能：正在装依赖（几分钟，装好以后不用再装）');
       const py = [...(deps.pythonRequirements ? ['-r', '/skill/requirements.txt'] : []), ...(deps.pythonProject ? ['/skill'] : []), ...deps.python];
       const steps = [
-        py.length && `pip install --no-cache-dir --disable-pip-version-check --target /deps/py -i ${quote(pipIndex)} ${py.map(quote).join(' ')}`,
+        py.length && `python3 -m pip install --no-cache-dir --disable-pip-version-check --target /deps/py -i ${quote(pipIndex)} ${py.map(quote).join(' ')}`,
         deps.nodePackage && `cp /skill/package.json /deps/node/ && cd /deps/node && npm install --omit=dev --no-audit --no-fund --registry=${quote(npmRegistry)}`,
         deps.node.length && `cd /deps/node && npm install --no-audit --no-fund --registry=${quote(npmRegistry)} ${deps.node.map(quote).join(' ')}`
       ].filter(Boolean);

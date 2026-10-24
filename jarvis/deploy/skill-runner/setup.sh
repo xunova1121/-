@@ -42,7 +42,11 @@ if curl -s -m 5 -o /dev/null https://mirror.ccs.tencentyun.com/v2/; then
 fi
 
 echo "== 构建镜像 $IMAGE（第一次几分钟）"
-docker build -t "$IMAGE" "$DIR"
+if ! docker build -t "$IMAGE" "$DIR"; then
+  # 国内常拉不到 Docker Hub 的基础镜像（加速地址失效、内网镜像解析不了）：改用本机系统软件源拼一个
+  echo "== 拉不到基础镜像，改用本机系统软件源构建"
+  bash "$DIR/build-rootfs.sh" "$IMAGE"
+fi
 docker run --rm --user 65534:65534 "$IMAGE" sh -c 'python3 --version && node --version'
 
 echo "== 让 jarvis 账号能用 Docker"
